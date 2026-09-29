@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>철강 제조 AI 협업 ERP 기획안</title>
+<style>
+  :root {
+    --bg: #e7eaec;
+    --paper: #f6f7f8;
+    --graphite: #1e272e;
+    --slate: #56636d;
+    --rule: #c3cad0;
+    --steel: #34617f;
+    --heat: #e8741c;
+    --heat-soft: #fbe3cf;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--graphite);
+    font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.75;
+    word-break: keep-all;
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible { outline: 3px solid var(--steel); outline-offset: 3px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+  .prose { max-width: 680px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(231, 234, 236, 0.94);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--rule);
+  }
+  nav .wrap { display: flex; gap: 22px; overflow-x: auto; padding-top: 12px; padding-bottom: 12px; }
+  nav a { text-decoration: none; font-size: 14px; color: var(--slate); white-space: nowrap; }
+  nav a:hover { color: var(--graphite); }
+
+  header { padding: 72px 0 56px; }
+  header h1 {
+    font-size: clamp(32px, 5.4vw, 56px);
+    line-height: 1.2;
+    letter-spacing: -0.045em;
+    font-weight: 800;
+    margin: 0 0 20px;
+    max-width: 14em;
+  }
+  header .sub { color: var(--slate); font-size: 18px; margin: 0; max-width: 34em; }
+
+  .layers { display: grid; grid-template-columns: 1fr; margin-top: 44px; max-width: 760px; }
+  .layer { padding: 18px 22px; display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: baseline; }
+  .layer b { font-size: 17px; }
+  .layer span { font-size: 15px; }
+  .layer.ai { background: var(--heat-soft); border: 1px solid #f1b98c; border-bottom: 0; }
+  .layer.erp { background: var(--graphite); color: #e9edf0; }
+  .layer.erp span { color: #b7c1c8; }
+
+  section { padding: 64px 0; border-top: 1px solid var(--rule); }
+  .part { padding: 72px 0 8px; border-top: 3px solid var(--graphite); }
+  .part .num { font-size: 15px; color: var(--slate); font-weight: 700; }
+  .part h2 { font-size: clamp(30px, 4.4vw, 44px); margin: 4px 0 12px; }
+  .part.ai-part { border-top-color: var(--heat); }
+  h2 {
+    font-size: clamp(24px, 3.2vw, 32px);
+    letter-spacing: -0.035em;
+    line-height: 1.3;
+    margin: 0 0 12px;
+    font-weight: 800;
+  }
+  .lede { color: var(--slate); margin: 0 0 32px; max-width: 40em; }
+  h3 { font-size: 18px; margin: 0 0 6px; letter-spacing: -0.02em; }
+
+  .problems { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+  .problems div { border-top: 3px solid var(--graphite); padding-top: 16px; }
+  .problems p { margin: 0; color: var(--slate); font-size: 15px; }
+
+  .process { display: grid; grid-template-columns: repeat(6, 1fr); border: 1px solid var(--graphite); background: var(--paper); }
+  .process button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    text-align: left; padding: 16px 14px; border-right: 1px solid var(--rule);
+    font: inherit; color: var(--graphite);
+  }
+  .process button:last-child { border-right: 0; }
+  .process button .st { font-weight: 800; font-size: 16px; display: block; }
+  .process button .lot { font-size: 13px; color: var(--slate); }
+  .process button[aria-selected="true"] { background: #dfe7ed; box-shadow: inset 0 -4px 0 var(--steel); }
+  .detail { background: var(--paper); border: 1px solid var(--rule); border-top: 0; padding: 22px 24px; min-height: 150px; }
+  .detail dl { display: grid; grid-template-columns: 110px 1fr; gap: 8px 18px; margin: 0; }
+  .detail dt { color: var(--slate); font-size: 14px; }
+  .detail dd { margin: 0; font-size: 15px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 12px 14px 12px 0; border-bottom: 1px solid var(--rule); }
+  thead th { font-size: 14px; color: var(--slate); font-weight: 700; border-bottom: 2px solid var(--graphite); }
+  tbody th { width: 130px; font-weight: 700; }
+  td { color: var(--slate); }
+  .tw { overflow-x: auto; }
+  .tw table { min-width: 620px; }
+
+  .trace { background: var(--graphite); color: #e9edf0; padding: 28px 28px 24px; }
+  .trace p.cap { margin: 0 0 18px; font-size: 14px; color: #a9b4bc; }
+  .chain { display: flex; overflow-x: auto; padding-bottom: 6px; }
+  .node { flex: 1 0 150px; padding-right: 18px; }
+  .node .kind { font-size: 13px; color: #a9b4bc; }
+  .node .code { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .node .code small { display: block; font-weight: 500; color: #a9b4bc; font-size: 13px; }
+  .node .bar { height: 4px; background: #3a4751; margin: 12px 0 10px; position: relative; overflow: hidden; }
+  .node .bar::after { content: ""; position: absolute; inset: 0; background: var(--steel); background: #7fa6c2; }
+  .node .rel { font-size: 12px; color: #a9b4bc; }
+  .log { margin-top: 20px; }
+  .log div { display: grid; grid-template-columns: 70px 90px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .log time { color: var(--steel); font-weight: 700; }
+  .log .who { color: var(--slate); font-size: 14px; }
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .spec { background: var(--paper); border: 1px solid var(--rule); padding: 14px 18px; font-size: 15px; flex: 1 1 420px; }
+  .spec b { font-weight: 700; }
+  .ai-toggle {
+    appearance: none; font: inherit; cursor: pointer;
+    border: 2px solid var(--heat); background: #fff; color: var(--graphite);
+    padding: 10px 18px; font-weight: 700; font-size: 15px;
+  }
+  .ai-toggle[aria-pressed="true"] { background: var(--heat); color: #fff; }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  ol.steps > li {
+    counter-increment: s;
+    display: grid; grid-template-columns: 44px 1fr; gap: 14px;
+    padding: 14px 0; border-bottom: 1px solid var(--rule);
+  }
+  ol.steps > li::before { content: counter(s); font-weight: 800; font-size: 20px; color: var(--steel); line-height: 1.3; }
+  ol.steps strong { display: block; }
+  ol.steps .erp { color: var(--slate); font-size: 15px; }
+  .assist {
+    display: none;
+    margin-top: 10px; padding: 10px 14px;
+    background: var(--heat-soft); border-left: 4px solid var(--heat);
+    font-size: 15px;
+  }
+  .assist b { display: block; font-size: 14px; }
+  .assist q { display: inline-block; margin-top: 6px; background: var(--graphite); color: #fff; padding: 5px 12px; font-size: 14px; border-radius: 12px 12px 12px 2px; quotes: none; }
+  .show-ai .assist { display: block; }
+
+  .assistant { display: grid; grid-template-columns: 1fr 360px; gap: 40px; align-items: start; }
+  .panel { background: #fff; border: 1px solid var(--graphite); font-size: 14px; }
+  .panel .ph { background: var(--graphite); color: #fff; padding: 10px 14px; font-weight: 700; }
+  .panel .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  .panel .chips span { border: 1px solid var(--heat); padding: 3px 10px; font-size: 13px; }
+  .msgs { padding: 12px 14px; display: grid; gap: 10px; }
+  .msg { max-width: 92%; padding: 8px 12px; line-height: 1.6; }
+  .msg.me { justify-self: end; background: var(--graphite); color: #fff; border-radius: 12px 12px 2px 12px; }
+  .msg.bot { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px 12px 12px 2px; }
+  .msg .src { display: block; margin-top: 6px; font-size: 12px; color: var(--slate); }
+  .msg table { font-size: 13px; margin-top: 6px; }
+  .msg th, .msg td { padding: 4px 8px 4px 0; }
+  .msg .btns { display: flex; gap: 6px; margin-top: 8px; }
+  .msg .btns span { border: 1px solid var(--graphite); padding: 3px 10px; font-size: 13px; font-weight: 700; background: #fff; }
+  .msg .btns span.go { background: var(--heat); border-color: var(--heat); color: #fff; }
+  .tools { margin: 0; padding: 0; list-style: none; }
+  .tools li { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+  .tools b { display: block; }
+  .tools span { color: var(--slate); font-size: 15px; }
+  @media (max-width: 820px) { .assistant { grid-template-columns: 1fr; } }
+  .rules { margin: 0; padding: 0; list-style: none; }
+  .rules li { padding: 14px 0 14px 22px; border-bottom: 1px solid var(--rule); position: relative; }
+  .rules li::before { content: ""; position: absolute; left: 0; top: 25px; width: 10px; height: 3px; background: var(--heat); }
+
+  .effects { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .effects h3 { padding-bottom: 8px; border-bottom: 3px solid var(--graphite); margin-bottom: 14px; }
+  .effects .ai h3 { border-bottom-color: var(--heat); }
+  .effects dl { margin: 0; }
+  .effects dt { font-weight: 700; }
+  .effects dd { margin: 0 0 14px; color: var(--slate); font-size: 15px; }
+
+  .excluded { display: flex; flex-wrap: wrap; gap: 8px; }
+  .excluded span { border: 1px dashed var(--slate); padding: 5px 12px; font-size: 14px; color: var(--slate); }
+
+  .team { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 40px; }
+  .team .fig { font-size: 40px; font-weight: 800; letter-spacing: -0.04em; line-height: 1.1; }
+  .team p { margin: 4px 0 0; color: var(--slate); font-size: 15px; }
+
+  footer { padding: 40px 0 60px; color: var(--slate); font-size: 14px; border-top: 1px solid var(--rule); }
+
+  @media (max-width: 820px) {
+    .problems, .effects, .team { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 1fr; gap: 2px; }
+    .process { grid-template-columns: repeat(3, 1fr); }
+    .process button:nth-child(3) { border-right: 0; }
+    .process button:nth-child(-n+3) { border-bottom: 1px solid var(--rule); }
+    .detail dl { grid-template-columns: 1fr; gap: 2px; }
+    .detail dd { margin-bottom: 10px; }
+    .log div { grid-template-columns: 60px 1fr; }
+    .log .who { grid-column: 2; }
+  }
+  @media (max-width: 480px) {
+    .wrap { padding: 0 18px; }
+    header { padding: 48px 0 40px; }
+    .process { grid-template-columns: repeat(2, 1fr); }
+    .process button { border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+    .process button:nth-child(even) { border-right: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<nav aria-label="기획안 목차">
+  <div class="wrap">
+    <a href="#problem">문제</a>
+    <a href="#erp">1. ERP 시스템</a>
+    <a href="#ai">2. AI Agent</a>
+    <a href="#effect">기대 효과</a>
+    <a href="#team">범위와 일정</a>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <h1>철강 공정을 끝까지 관리하는 ERP, 그 업무를 덜어주는 AI Agent</h1>
+    <p class="sub">먼저 원료 입고부터 출하까지 모든 업무가 돌아가는 ERP를 완성하고, 그 위에서 AI Agent가 입력, 감지, 조회를 도와 담당자의 일을 줄입니다.</p>
+    <div class="layers" aria-label="시스템 구성">
+      <div class="layer ai"><b>AI Agent</b><span>업무 가르쳐 주기, 데이터 찾아 주기, 업무 초안 만들기, 위험 먼저 알리기</span></div>
+      <div class="layer erp"><b>ERP 시스템</b><span>조직, 기준정보, 수주, 생산·MRP, 재고, 구매, 품질, 출하, LOT 추적, 작업 로그</span></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="problem">
+    <div class="wrap">
+      <h2>해결하려는 문제</h2>
+      <p class="lede">철강은 공정이 길고, 업무 판단은 ERP 밖에서 먼저 일어납니다.</p>
+      <div class="problems">
+        <div>
+          <h3>공정 사이의 연결이 끊깁니다</h3>
+          <p>원료, 용선, 히트, 슬래브, 코일로 이어지는 다섯 단계 중 하나라도 연결이 빠지면, 품질 문제가 생겼을 때 원인과 영향 범위를 찾기 어렵습니다.</p>
+        </div>
+        <div>
+          <h3>판단의 근거가 남지 않습니다</h3>
+          <p>어떤 재고를 어느 수주에 배정했는지, 왜 재생산했는지 결과만 남고 과정은 사라집니다.</p>
+        </div>
+        <div>
+          <h3>같은 내용을 두 번 입력합니다</h3>
+          <p>원료가 부족하다는 이야기는 메신저와 회의에서 먼저 나오지만, 구매요청은 담당자가 ERP에 다시 입력해야 합니다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PART 1 -->
+  <div class="part" id="erp">
+    <div class="wrap">
+      <div class="num">1부</div>
+      <h2>ERP 시스템: 우리 ERP에서 할 수 있는 일</h2>
+      <p class="lede">AI 없이도 철강 공정 전체의 업무가 처음부터 끝까지 돌아가는 것이 출발점입니다.</p>
+    </div>
+  </div>
+
+  <section id="process">
+    <div class="wrap">
+      <h2>대상 공정: 일관제철 여섯 단계</h2>
+      <p class="lede">단계를 선택하면 각 단계에서 관리하는 단위와 검사, 연결 관계를 볼 수 있습니다.</p>
+      <div class="process" role="tablist" aria-label="공정 단계">
+        <button role="tab" aria-selected="true" aria-controls="detail"><span class="st">원료 입고</span><span class="lot">원료 LOT</span></button>
+        <button role="tab" aria-selected="false" aria-controls="detail"><span class="st">제선</span><span class="lot">용선 LOT</span></button>
+        <button role="tab" aria-selected="false" aria-controls="detail"><span class="st">제강</span><span class="lot">히트</span></button>
+        <button role="tab" aria-selected="false" aria-controls="detail"><span class="st">연주</span><span class="lot">슬래브</span></button>
+        <button role="tab" aria-selected="false" aria-controls="detail"><span class="st">열연</span><span class="lot">코일</span></button>
+        <button role="tab" aria-selected="false" aria-controls="detail"><span class="st">출하</span><span class="lot">밀시트</span></button>
+      </div>
+      <div class="detail" id="detail" role="tabpanel" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="modules">
+    <div class="wrap">
+      <h2>ERP 기능</h2>
+      <p class="lede">담당자가 매일 쓰는 업무 기능입니다.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>영역</th><th>할 수 있는 일</th></tr></thead>
+          <tbody>
+            <tr><th>조직관리</th><td>부서를 계층으로 관리하고 부서장을 지정해 조직도로 봅니다. 구매요청 승인권자, 부서 알림 대상, 메신저 멤버 선택에 그대로 쓰입니다.</td></tr>
+            <tr><th>기준정보</th><td>강종 × 두께 × 폭 × 길이로 규격을 고정하고 1매 이론중량을 관리합니다. 공정 순서와 수율, 원료 배합, 거래처와 공급업체, 야드를 관리합니다.</td></tr>
+            <tr><th>영업·수주</th><td>코일과 슬래브를 한 수주에 함께 받습니다. 규격 배수로만 수주를 받고, 검사에 합격한 재고를 먼저 예약한 뒤 부족분만 생산으로 넘깁니다.</td></tr>
+            <tr><th>생산·MRP</th><td>부족 매수로 히트를 편성하고, 수율을 역산해 필요한 용선과 원료, 합금철 양을 계산합니다. 공정별 실적을 등록하고 부족하면 재생산합니다.</td></tr>
+            <tr><th>재고·배정</th><td>제품은 매수, 원료는 톤으로 관리합니다. 출하나 열연 투입 때 오래된 재고부터 배정을 추천하고, 남는 슬래브는 여재로 다음 수주에 씁니다.</td></tr>
+            <tr><th>구매</th><td>구매요청을 올리면 팀장이 승인하고, 공급업체별로 발주를 묶습니다. 부분 입고를 받고, 입고를 확정하면 원료 LOT이 생깁니다.</td></tr>
+            <tr><th>품질</th><td>히트 성분, 슬래브 표면·치수, 코일 치수와 기계적 성질을 입력하면 시스템이 판정합니다. 불합격 LOT은 예약과 출고가 막히고, 불합격 건은 과거 사례로 등록합니다.</td></tr>
+            <tr><th>출하</th><td>여러 수주 품목을 묶어 출하하고, 출고를 확정하면 밀시트가 자동으로 만들어집니다. 화면에서 보고 PDF로 출력합니다.</td></tr>
+            <tr><th>메신저·알림</th><td>1:1, 그룹, 수주에 연결된 업무방에서 이야기하고, 업무 담당자와 마감일, 알림을 관리합니다.</td></tr>
+            <tr><th>대시보드</th><td>공정 흐름, 수주 충족 현황, 재고, 공정별 수율을 한 화면에서 봅니다.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="trace">
+    <div class="wrap">
+      <h2>추적과 이력</h2>
+      <p class="lede">모든 LOT을 연결하고, 사람과 시스템이 내린 결정을 기록합니다.</p>
+      <div class="trace">
+        <p class="cap">출하된 코일 하나를 조회하면 원료 입고 건까지 거슬러 올라갑니다.</p>
+        <div class="chain">
+          <div class="node"><div class="kind">코일</div><div class="code">C2-260929-015-03</div><div class="bar"></div><div class="rel">슬래브 1매에서 압연</div></div>
+          <div class="node"><div class="kind">슬래브</div><div class="code">HT-2-260929-015-03</div><div class="bar"></div><div class="rel">히트 1개에서 여러 매</div></div>
+          <div class="node"><div class="kind">히트</div><div class="code">HT-2-260929-015</div><div class="bar"></div><div class="rel">여러 출선 용선이 투입</div></div>
+          <div class="node"><div class="kind">용선</div><div class="code">HM-1-260929-03</div><div class="bar"></div><div class="rel">투입 기간의 원료와 연결</div></div>
+          <div class="node"><div class="kind">원료</div><div class="code">RM-IO-260929-001<small>RM-LS-260928-004 외</small></div><div class="bar"></div><div class="rel">입고 확정 시 생성</div></div>
+        </div>
+      </div>
+      <div class="log" aria-label="작업 로그 예시">
+        <div><time>09:12</time><span class="who">시스템</span><span>수주 SO-0142에 합격 슬래브 6매 예약, 부족 4매 생산계획 생성</span></div>
+        <div><time>09:40</time><span class="who">생산 담당</span><span>히트 HT-2-260929-015 편성 확정 (250톤)</span></div>
+        <div><time>14:05</time><span class="who">품질 담당</span><span>슬래브 1매 표면 불합격, 합격 3매 자동 예약</span></div>
+        <div><time>14:20</time><span class="who">생산 담당</span><span>부족 1매 재생산 계획 등록</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PART 2 -->
+  <div class="part ai-part" id="ai">
+    <div class="wrap">
+      <div class="num">2부</div>
+      <h2>AI Agent: ERP 업무를 돕는 방법</h2>
+      <p class="lede">AI는 ERP를 대신하지 않습니다. 담당자가 하던 입력, 감시, 조회를 덜어주고, 실행은 언제나 ERP의 승인 절차를 거칩니다.</p>
+    </div>
+  </div>
+
+  <section id="assistant">
+    <div class="wrap">
+      <h2>AI 어시스턴트: 신입사원의 업무 도우미</h2>
+      <p class="lede">모든 화면 오른쪽에서 여는 1:1 AI입니다. 사내 채팅의 @AI도 같은 AI입니다. 모르는 용어와 절차를 설명하고, 데이터를 찾아 주고, 처리할 일은 실행 카드로 만들어 줍니다.</p>
+      <div class="assistant">
+        <div>
+          <ul class="tools">
+            <li><b>업무 지식</b><span>용어 사전과 역할별 업무 매뉴얼에서 답을 찾아 출처와 함께 설명합니다.</span></li>
+            <li><b>데이터 조회</b><span>재고, 수주 진행, LOT 추적, 검사 결과를 로그인한 사람의 권한 안에서 조회합니다. 숫자는 항상 DB 조회 결과로 답합니다.</span></li>
+            <li><b>업무 초안</b><span>배정 추천, 히트 편성안, 수주 등록 초안을 실행 카드로 보여줍니다. AI는 데이터를 직접 바꾸지 않고, 사용자가 확정하면 사용자 권한으로 ERP가 실행합니다.</span></li>
+            <li><b>과거 사례 검색</b><span>불합격 처리 후 등록된 과거 사례에서 비슷한 현상과 조치를 찾아 요약합니다. 품질 화면의 [비슷한 사례 찾기]로도 부릅니다.</span></li>
+          </ul>
+          <p class="lede" style="margin-top:20px">사용자는 도구를 고르지 않습니다. 질문하면 AI가 맞는 도구를 골라 답하고, 처음 쓰는 사람에게는 역할별 추천 질문을 먼저 보여줍니다.</p>
+        </div>
+        <div class="panel" aria-label="AI 어시스턴트 패널 예시">
+          <div class="ph">AI 어시스턴트</div>
+          <div class="chips"><span>배정 대기 알려줘</span><span>히트 편성이 뭐예요?</span><span>CC-2 과거 사례</span></div>
+          <div class="msgs">
+            <div class="msg me">배정 대기가 뭐예요?</div>
+            <div class="msg bot">출하요청은 들어왔는데 아직 슬래브 LOT이 정해지지 않은 상태예요. 오래된 합격 재고부터 추천받아 확정하면 배정이 끝납니다.<span class="src">출처: 용어 사전, 업무 매뉴얼 &gt; 재고 배정</span></div>
+            <div class="msg me">지금 배정 대기인 거 뭐 있어요?</div>
+            <div class="msg bot">2건 있어요.
+              <table><tr><th>SO-0142</th><td>SS400 슬래브 10매</td></tr><tr><th>SO-0145</th><td>SM490 슬래브 4매</td></tr></table>
+              <span class="src">근거: 출하요청 조회 결과</span></div>
+            <div class="msg me">SO-0142 슬래브 추천해줘</div>
+            <div class="msg bot">규격이 맞는 합격 슬래브 10매(235.5t)를 오래된 순으로 추천해요.
+              <div class="btns"><span class="go">배정 확정</span><span>취소</span></div>
+              <span class="src">근거: 재고 조회 결과</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="assist">
+    <div class="wrap">
+      <h2>같은 업무 흐름에서 AI가 돕는 지점</h2>
+      <p class="lede">아래는 슬래브 수주 한 건이 ERP 안에서 처리되는 순서입니다. 버튼을 누르면 각 단계에서 AI가 무엇을 돕는지 표시됩니다.</p>
+      <div class="toggle-row">
+        <div class="spec">수주 품목 <b>SS400 슬래브 250 × 1,200 × 10,000mm</b>, 1매 <b>23.55톤</b>, 수주량 <b>235.5톤(10매)</b></div>
+        <button class="ai-toggle" id="aiToggle" aria-pressed="false" aria-controls="steps">AI 도움 표시</button>
+      </div>
+      <ol class="steps" id="steps">
+        <li><div><strong>수주 등록과 재고 우선 예약</strong><span class="erp">합격한 미배정 슬래브 6매를 예약하고, 부족한 4매만 생산계획으로 넘깁니다.</span>
+          <div class="assist"><b>AI 어시스턴트 데이터 조회</b>영업 담당이 사내 채팅에서 바로 가용 재고를 물어봅니다.<br><q>@AI SS400 250×1200 슬래브 가용 몇 매야?</q></div></div></li>
+        <li><div><strong>히트 편성</strong><span class="erp">부족분 4매(94.2톤)를 누적 수율로 역산해 히트 1개(250톤)를 편성합니다. 남는 슬래브는 여재가 됩니다.</span>
+          <div class="assist"><b>AI 어시스턴트 업무 지식</b>처음 편성을 맡은 신입이 패널에서 묻고, 용어 사전과 매뉴얼을 근거로 설명을 듣습니다.<br><q>히트 편성이 뭐예요?</q></div></div></li>
+        <li><div><strong>MRP로 원료 소요량 계산</strong><span class="erp">필요한 용선량에서 철광석, 석탄, 석회석, 합금철 소요량을 계산하고 잔량과 입고예정을 뺍니다.</span>
+          <div class="assist"><b>Agent 원료 부족 감지</b>주기적으로 소요량과 잔량을 비교해, 석회석이 모자라면 구매요청 초안을 만들고 이유를 설명합니다.</div></div></li>
+        <li><div><strong>구매요청 등록</strong><span class="erp">구매 담당이 품목, 수량, 희망 입고일을 입력해 구매요청을 올립니다.</span>
+          <div class="assist"><b>대화에서 구매요청 초안</b>업무방 메시지를 읽어 초안을 채웁니다. 담당자는 확인만 하면 됩니다.<br><q>석회석 300톤 다음 주 수요일까지 필요합니다</q></div></div></li>
+        <li><div><strong>팀장 승인과 발주</strong><span class="erp">팀장이 승인하면 공급업체별로 발주가 묶여 나갑니다.</span></div></li>
+        <li><div><strong>입고와 원료 LOT 생성</strong><span class="erp">부분 입고를 받고, 입고를 확정하면 원료 LOT이 만들어집니다.</span></div></li>
+        <li><div><strong>제선, 제강, 연주 실적</strong><span class="erp">용선, 히트, 슬래브 LOT이 차례로 생기고 서로 연결됩니다.</span>
+          <div class="assist"><b>Agent 납기 위험 알림</b>납기 대비 생산이 늦어지면 담당자에게 먼저 알립니다.</div></div></li>
+        <li><div><strong>검사와 재생산</strong><span class="erp">검사값을 입력하면 시스템이 판정하고, 합격 슬래브는 원래 수주에 자동 예약됩니다. 모자라면 담당자가 재생산을 등록합니다.</span>
+          <div class="assist"><b>Agent 합격 매수 부족 감지</b>검사 결과가 들어오는 즉시 부족 매수를 계산해 재생산 계획 초안을 만듭니다.</div>
+          <div class="assist"><b>과거 사례 검색</b>품질 담당이 [비슷한 사례 찾기]를 누르면 과거 표면 불합격 사례와 당시 조치를 요약해 보여줍니다. 처리 후에는 AI가 쓴 초안으로 새 사례를 등록합니다.</div></div></li>
+        <li><div><strong>출하와 밀시트</strong><span class="erp">오래된 재고부터 배정을 추천받아 확정하고, 출고를 확정하면 밀시트가 만들어집니다.</span>
+          <div class="assist"><b>AI 어시스턴트 업무 초안</b>담당자가 요청하면 배정 추천을 실행 카드로 보여주고, [배정 확정]을 누르면 담당자 권한으로 저장됩니다.<br><q>SO-0142 슬래브 추천해줘</q></div>
+          <div class="assist"><b>Agent 여재 장기 보유 감지</b>오래 남아 있는 여재 슬래브를 대기 중인 수주에 배정하도록 추천합니다.</div></div></li>
+        <li><div><strong>역추적과 이력 확인</strong><span class="erp">슬래브 번호로 원료까지 거슬러 올라가고, 이 수주의 판단 과정을 시간순으로 확인합니다.</span>
+          <div class="assist"><b>AI 어시스턴트 데이터 조회</b>패널에서 LOT 번호로 물어보면 역추적 결과와 화면 링크를 줍니다.</div></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="ai-functions">
+    <div class="wrap">
+      <h2>AI 기능과 돕는 ERP 업무</h2>
+      <div class="tw">
+        <table>
+          <thead><tr><th>AI 기능</th><th>돕는 ERP 업무</th><th>하는 일</th></tr></thead>
+          <tbody>
+            <tr><th>대화 → ERP</th><td>구매 (이후 출하·생산으로 확장)</td><td>업무방 메시지에서 품목, 수량, 날짜를 뽑아 업무 초안을 만듭니다.</td></tr>
+            <tr><th>Factory Agent</th><td>구매, 생산, 재고, 품질</td><td>원료 부족, 납기 위험, 합격 매수 부족, 여재 장기 보유, 불합격률 상승을 감지해 대응 초안과 알림을 만듭니다.</td></tr>
+            <tr><th>회의 → 업무</th><td>업무·알림, 구매</td><td>회의 음성을 기록하고 요약, 결정사항, 담당자와 마감일이 있는 할 일을 뽑습니다.</td></tr>
+            <tr><th>AI 어시스턴트</th><td>전 영역</td><td>오른쪽 패널과 사내 채팅 @AI로 부르는 신입 도우미입니다. 용어·절차 설명, 데이터 조회, 업무 초안(실행 카드), 과거 사례 검색을 합니다.</td></tr>
+            <tr><th>과거 사례 DB</th><td>품질</td><td>불합격 처리 후 현상, 원인, 조치를 사례로 등록하고, 비슷한 사례를 찾아 요약합니다.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="principle">
+    <div class="wrap">
+      <h2>AI 사용 원칙</h2>
+      <ul class="rules prose">
+        <li>AI가 만든 결과는 모두 초안입니다. 담당자가 확인하고, 필요한 경우 ERP의 승인 절차를 거쳐야 실행됩니다.</li>
+        <li>AI는 조회와 초안 작성만 합니다. 업무 데이터는 직접 바꾸지 않고, 실행 카드의 확정은 사용자 권한으로 ERP가 실행합니다.</li>
+        <li>숫자는 DB 조회 결과로만 답하고, 답변마다 출처를 붙입니다. 자료에 없는 내용은 확인할 수 없다고 답합니다.</li>
+        <li>AI가 만든 초안과 승인, 실행은 모두 작업 로그에 남습니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="effect">
+    <div class="wrap">
+      <h2>기대 효과</h2>
+      <div class="effects">
+        <div class="erp-e">
+          <h3>ERP 시스템</h3>
+          <dl>
+            <dt>빠른 품질 대응</dt><dd>문제가 생긴 원료나 히트에서 영향받은 코일과 출하를 바로 찾습니다.</dd>
+            <dt>남는 재고의 재사용</dt><dd>히트 단위 생산에서 생기는 여재를 다음 수주에 먼저 씁니다.</dd>
+            <dt>설명 가능한 결정</dt><dd>배정, 재생산, 승인의 근거가 기록으로 남습니다.</dd>
+          </dl>
+        </div>
+        <div class="ai">
+          <h3>AI Agent</h3>
+          <dl>
+            <dt>입력 부담 감소</dt><dd>대화와 회의에서 나온 요청이 그대로 업무 초안이 됩니다.</dd>
+            <dt>먼저 알아채는 위험</dt><dd>원료 부족이나 납기 지연을 담당자가 찾기 전에 알려줍니다.</dd>
+            <dt>빠른 적응</dt><dd>신입도 용어와 절차를 물어보고, 데이터를 찾고, 업무 초안을 받아 바로 처리합니다.</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="team">
+    <div class="wrap">
+      <h2>범위와 일정</h2>
+      <p class="lede">한 달 안에 핵심 흐름을 완성하기 위해 아래 항목은 다루지 않습니다.</p>
+      <div class="excluded">
+        <span>고철 구매</span><span>슬래그 출하</span><span>실중량 계량</span><span>야드 내 위치 관리</span>
+        <span>설비·생산능력 관리</span><span>톤 단위 자유 수주</span><span>허용오차·고객 승인</span><span>예약 만료</span>
+        <span>원료 입고 검사</span><span>원자재 안전재고</span><span>운송 정보</span><span>재고생산</span><span>인사·휴가·급여</span>
+      </div>
+      <div class="team">
+        <div><div class="fig">5명</div><p>인증·기준정보, 영업·구매, 생산·재고·품질, 협업, AI·통합 영역으로 나누어 진행합니다. 세부 담당은 확정 후 공유합니다.</p></div>
+        <div><div class="fig">1개월</div><p>ERP를 먼저 완성하고, 그 위에 AI Agent를 붙인 뒤 통합과 시연으로 마무리합니다. 세부 일정은 WBS에서 관리합니다.</p></div>
+        <div><div class="fig">6단계</div><p>원료 입고, 제선, 제강, 연주, 열연, 출하까지 하나의 흐름으로 시연합니다.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">철강 제조 AI 협업 ERP 팀 프로젝트 기획안</div></footer>
+
+<script>
+(function () {
+  var data = [
+    { lot: "원료 LOT (RM-원료코드-YYMMDD-NNN)", rec: "철광석, 석탄, 석회석, 합금철 입고 건. 톤 단위로 잔량을 관리합니다.", check: "없음", link: "투입 기간을 기준으로 용선과 연결" },
+    { lot: "용선 LOT (HM-고로-YYMMDD-NN)", rec: "고로 출선 건. 용선 1톤당 원료 투입 기준으로 원료 소요량을 계산합니다.", check: "없음", link: "여러 출선의 용선이 여러 히트에 투입(N:M)" },
+    { lot: "히트 (HT-전로-YYMMDD-NNN)", rec: "전로 1회 조업, 히트당 250톤. 강종별 합금철을 투입합니다.", check: "성분 분석", link: "히트 1개에서 슬래브 여러 매(1:N)" },
+    { lot: "슬래브 (히트번호-SS)", rec: "규격이 고정된 반제품이자 판매 제품. 남는 슬래브는 여재로 관리합니다.", check: "표면·치수", link: "판매 출하 또는 열연 투입으로 배정" },
+    { lot: "코일 (C + 슬래브번호)", rec: "슬래브 1매를 압연한 규격 코일.", check: "치수, 기계적 성질", link: "슬래브 1매 = 코일 1개(1:1)" },
+    { lot: "출하·밀시트", rec: "여러 수주 품목을 묶어 출하. 출고 확정 시 밀시트를 만들고 발행 시점 값을 보존합니다.", check: "미합격 LOT 출고 차단", link: "출하 LOT에서 원료까지 역추적" }
+  ];
+  var tabs = document.querySelectorAll(".process button");
+  var panel = document.getElementById("detail");
+  function show(i) {
+    var d = data[i];
+    panel.innerHTML =
+      "<dl><dt>관리 단위</dt><dd>" + d.lot + "</dd>" +
+      "<dt>기록 내용</dt><dd>" + d.rec + "</dd>" +
+      "<dt>검사</dt><dd>" + d.check + "</dd>" +
+      "<dt>연결</dt><dd>" + d.link + "</dd></dl>";
+    tabs.forEach(function (t, k) { t.setAttribute("aria-selected", k === i ? "true" : "false"); t.tabIndex = k === i ? 0 : -1; });
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () { show(i); });
+    t.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        var n = (i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+        show(n); tabs[n].focus();
+      }
+    });
+  });
+  show(0);
+
+  var btn = document.getElementById("aiToggle");
+  var steps = document.getElementById("steps");
+  btn.addEventListener("click", function () {
+    var on = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.textContent = on ? "AI 도움 숨기기" : "AI 도움 표시";
+    steps.classList.toggle("show-ai", on);
+  });
+})();
+</script>
+</body>
+</html>
