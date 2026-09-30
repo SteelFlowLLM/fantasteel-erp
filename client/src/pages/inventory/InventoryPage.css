@@ -1,0 +1,5 @@
+/* 재고 화면. 화면 접두사 .inv-page */
+.inv-page .inv-page__filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+.inv-page .hl-table td,.inv-page .hl-table th{white-space:nowrap}
+.inv-page .inv-page__zero td{color:var(--ink-3)}
+.inv-page .inv-page__cap{display:flex;gap:6px;align-items:flex-start;line-height:16px;white-space:normal}

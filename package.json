@@ -1,0 +1,43 @@
+{
+  "name": "fantasteel-erp",
+  "private": true,
+  "version": "0.2.0",
+  "description": "철강 제조 AI 협업 ERP — v2 (B안, P1)",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "db": "node scripts/local-db.mjs",
+    "dev": "concurrently -k -n db,shared,server,client -c gray,yellow,blue,magenta \"npm:db\" \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:shared": "npm run dev -w shared",
+    "dev:server": "wait-on tcp:54322 shared/dist/index.js && npm run dev -w server",
+    "dev:client": "wait-on shared/dist/index.mjs && npm run dev -w client",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+    "migrate": "npm run migrate -w server",
+    "seed": "npm run seed -w server",
+    "db:reset": "cd server && node scripts/reset-db.mjs fantasteel",
+    "demo": "cd server && node scripts/demo-data.mjs",
+    "e2e": "cd server && node scripts/e2e-scenario.mjs",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
+    "test": "npm run test -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "wait-on": "^8.0.3"
+  },
+  "allowScripts": {
+    "@embedded-postgres/darwin-arm64@18.4.0-beta.17": true,
+    "prisma@7.10.0": true,
+    "@prisma/engines@7.10.0": true,
+    "esbuild@0.27.7": true,
+    "esbuild@0.28.2": true,
+    "unrs-resolver@1.12.2": true,
+    "@parcel/watcher@2.6.0": true
+  }
+}

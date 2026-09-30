@@ -1,0 +1,27 @@
+/* 메신저 화면 전용 (접두사 msgr-). 나머지 모양은 B안 디자인 CSS(hl-*)를 그대로 쓴다. */
+.msgr-main { background: #FFFFFF; overflow: hidden; }
+.msgr-head { min-height: 56px; flex: none; padding: 0 16px 0 20px; border-bottom: 1px solid #DDE2E7; gap: 10px; }
+.msgr-feed-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+/* overflow-anchor: 이전 메시지를 위에 붙일 때 보던 자리는 화면 코드가 직접 맞춘다 */
+.msgr-feed { flex: 1; min-width: 0; overflow-y: auto; overflow-anchor: none; padding: 12px 20px; display: flex; flex-direction: column; gap: 12px; }
+.msgr-newpill { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); box-shadow: 0 4px 12px rgba(18, 24, 32, .18); border-radius: 14px; }
+
+.msgr-msg { position: relative; margin: -4px -10px; padding: 4px 10px; border-radius: 6px; }
+.msgr-msg:hover, .msgr-msg:focus-within { background: #F7F8FA; }
+.msgr-msg.is-mentioned { background: #F5F9FF; }
+.msgr-msg__bar { position: absolute; top: -14px; right: 10px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 3px; background: #FFFFFF;
+  border: 1px solid #DDE2E7; border-radius: 6px; box-shadow: 0 4px 12px rgba(18, 24, 32, .12); opacity: 0; pointer-events: none; }
+.msgr-msg:hover .msgr-msg__bar, .msgr-msg:focus-within .msgr-msg__bar { opacity: 1; pointer-events: auto; }
+.msgr-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.msgr-composer { position: relative; flex: none; padding: 0 20px 14px; }
+.msgr-mention-pop { position: absolute; left: 20px; bottom: calc(100% + 4px); z-index: 5; width: 320px; max-height: 300px; overflow: auto; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); }
+.msgr-mention-pop__item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; font: inherit; font-size: 13px; color: inherit; }
+.msgr-mention-pop__item.is-active { background: var(--brand-tint); }
+.msgr-mention-pop__item.is-disabled { color: var(--ink-3); cursor: not-allowed; background: var(--surface-2); }
+
+.msgr-aside { width: 300px; flex: none; display: flex; flex-direction: column; background: #F7F8FA; border-left: 1px solid #DDE2E7; overflow-y: auto; }
+.msgr-aside__block { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #DDE2E7; }
+.msgr-aside .hl-file { max-width: 100%; }
+@media (max-width: 1180px) { .msgr-aside { display: none; } }

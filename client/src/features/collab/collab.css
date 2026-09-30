@@ -1,0 +1,9 @@
+/* 협업 화면(메신저·업무)이 같이 쓰는 부품 — 조직도에서 사람 고르기 */
+.collab-pick { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.collab-pick__list { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.collab-pick__dept { display: flex; align-items: center; gap: 6px; height: 32px; padding-right: 12px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.collab-pick__dept b { font-weight: 600; }
+.collab-pick__row { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 12px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.collab-pick__row:hover { background: var(--surface-2); }
+.collab-pick__row.is-on { background: var(--brand-tint); }
+.collab-pick__row input:disabled { cursor: not-allowed; }

@@ -1,0 +1,80 @@
+/* B안 디자인 CSS(bundle.css) 위에 얹는 v2 보정. 실제 앱이므로 고정 크기(1440×900) 대신 창 전체를 쓴다. */
+html, body { margin: 0; height: 100%; background: var(--bg); }
+body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+#root { height: 100%; }
+.hl *, .hl *::before, .hl *::after { box-sizing: border-box; }
+.hl-app { width: 100vw; height: 100vh; }
+.hl-main { overflow: auto; }
+.hl-master__list { overflow: auto; }
+.hl-ai__body { overflow: auto; }
+.hl button { cursor: pointer; }
+.hl button:disabled { cursor: not-allowed; opacity: .55; }
+.hl-rail { overflow-y: auto; scrollbar-width: none; }
+.hl-rail::-webkit-scrollbar { display: none; }
+@keyframes hl-spin { to { transform: rotate(360deg); } }
+.hl-spinner { animation: hl-spin .8s linear infinite; }
+.hl-code-badge--danger { background: var(--danger-bg); color: var(--danger); border-color: #F2C3BE; }
+.hl-input.is-error { border-color: var(--danger); }
+
+/* 토스트 */
+.app-toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.app-toast { padding: 10px 16px; border-radius: 6px; font-size: 13px; line-height: 18px; box-shadow: var(--shadow-pop); background: #16202B; color: #fff; max-width: 640px; }
+.app-toast--ok { background: var(--ok); }
+.app-toast--error { background: var(--danger); }
+
+/* 상단 팝업(알림·메신저 드롭다운) — SPEC 5-1 */
+.app-pop-anchor { position: relative; }
+.app-pop { position: absolute; top: 44px; right: 0; width: 380px; max-height: 520px; z-index: 40; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); overflow: hidden; }
+.app-pop__head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.app-pop__head b { font-size: 14px; font-weight: 600; }
+.app-pop__list { overflow: auto; display: flex; flex-direction: column; }
+.app-pop__item { display: flex; gap: 10px; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; width: 100%; font: inherit; color: inherit; }
+.app-pop__item:hover { background: var(--surface-2); }
+.app-pop__item.is-unread { background: #F5F9FF; }
+.app-pop__item b { font-weight: 600; font-size: 13px; }
+.app-pop__foot { padding: 8px 14px; border-top: 1px solid var(--line); background: var(--surface-2); display: flex; justify-content: center; }
+.app-pop__body-text { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; display: block; }
+
+/* 달력 팝업 — SPEC 5-2 */
+.app-date { position: relative; display: inline-flex; align-items: center; }
+.app-date .hl-input { padding-right: 32px; font-variant-numeric: tabular-nums; }
+.app-date__btn { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
+.app-cal { position: absolute; top: calc(100% + 4px); left: 0; z-index: 45; width: 268px; padding: 10px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); }
+.app-cal__head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.app-cal__head b { flex: 1; text-align: center; font-size: 13px; font-weight: 600; }
+.app-cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.app-cal__dow { text-align: center; font-size: 11px; color: var(--ink-3); padding: 4px 0; }
+.app-cal__day { height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; font: inherit; font-variant-numeric: tabular-nums; color: var(--ink); }
+.app-cal__day:hover { background: var(--surface-3); }
+.app-cal__day.is-out { color: var(--ink-disabled); }
+.app-cal__day.is-today { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.app-cal__day.is-selected { background: var(--brand); color: #fff; }
+.app-cal__foot { display: flex; justify-content: space-between; margin-top: 8px; }
+
+/* AI 어시스턴트 패널 — SPEC 5-4(더 넓게)·5-5(버튼은 상단 바). 기능은 P2라 디자인만. */
+.hl-ai--over { width: min(620px, 46vw); }
+.app-ai-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 6px; margin-right: 4px; border: 1px solid var(--ai-line);
+  border-radius: 16px; background: var(--ai-bg); color: var(--ai-strong); font: inherit; font-size: 12px; font-weight: 600; }
+.app-ai-btn:hover { background: #E9E3FB; }
+.app-soon { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 3px; background: var(--surface-3); color: var(--ink-3); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.app-soon-banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--ink-2); font-size: 13px; }
+.app-soon-area { position: relative; }
+.app-soon-area > .app-soon-area__body { opacity: .62; pointer-events: none; user-select: none; filter: grayscale(.25); }
+.hl-rail-item .app-soon-dot { position: absolute; top: 3px; right: 9px; font-size: 8.5px; line-height: 11px; padding: 0 3px; border-radius: 3px; background: #2E3D4E; color: #A9B6C4; font-weight: 600; }
+
+/* 모달은 화면 전체를 덮는다 */
+.hl-scrim { position: fixed; z-index: 60; }
+.hl-modal { max-height: calc(100vh - 80px); }
+.hl-modal__body { overflow: auto; }
+/* 모달 안 달력은 잘리지 않게 화면 기준으로 띄운다 */
+.hl-modal .app-cal { position: fixed; top: auto; left: auto; }
+
+/* 대시보드 위젯 격자 — SPEC 5-3 */
+.app-grid { position: relative; }
+.app-grid .react-grid-item > .hl-card { width: 100%; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.app-grid .react-grid-item > .hl-card > .hl-card__body { flex: 1; min-height: 0; overflow: auto; }
+.app-grid .react-grid-placeholder { background: var(--brand-tint) !important; border: 1px dashed var(--brand); border-radius: var(--radius-md); opacity: .6 !important; }
+.app-grid.is-editing .react-grid-item > .hl-card { box-shadow: 0 0 0 1px var(--run), var(--shadow-1); }
+.app-grid.is-editing .hl-card__head { cursor: grab; }

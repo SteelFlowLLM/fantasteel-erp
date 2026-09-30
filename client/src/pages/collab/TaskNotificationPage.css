@@ -1,0 +1,13 @@
+/* 업무·알림 화면 전용 (접두사 tn-). 나머지 모양은 B안 디자인 CSS(hl-*)를 그대로 쓴다. */
+.tn-board { grid-template-columns: repeat(3, minmax(240px, 1fr)); overflow-x: auto; }
+.tn-board .hl-lane { min-height: 200px; }
+.tn-lane__list { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.tn-task__desc { margin: 0; font-size: 12px; line-height: 17px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.tn-noti-card { flex: 1; min-height: 240px; }
+.tn-noti { padding: 10px 16px; gap: 4px; }
+.tn-noti.is-unread { background: #F5F9FF; }
+.tn-noti.is-focus { box-shadow: inset 3px 0 0 var(--run), inset 0 0 0 1px #BCD0F3; background: var(--run-bg); }
+.tn-noti__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
+.tn-noti__body { font-size: 12px; line-height: 17px; overflow-wrap: anywhere; }

@@ -1,0 +1,1074 @@
+// 테이블·컬럼 이름은 용어 사전 DB명 → 업무 프로세스 정의서 11장 제안 순으로 쓴다.
+// 둘 다 없는 이름은 docs/NAMES-TO-CONFIRM.md에 모아 둔다.
+// 상태값은 String 컬럼 + @fantasteel/shared 상수 (Prisma enum 미사용, 코드 컨벤션 4장).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── 권한·조직 (AUTH, ORG) ─────────────────────────────
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  roleCode  String   @unique @map("role_code") // ROLE_CODE (shared)
+  roleName  String   @map("role_name")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  employees       Employee[]
+  rolePermissions RolePermission[]
+
+  @@map("role")
+}
+
+model RolePermission {
+  id              Int      @id @default(autoincrement())
+  roleId          Int      @map("role_id")
+  permissionCode  String   @map("permission_code") // PERMISSION (shared)
+  permissionLevel String   @map("permission_level") // PERMISSION_LEVEL: USE | VIEW
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([roleId, permissionCode])
+  @@map("role_permission")
+}
+
+model Department {
+  id             Int      @id @default(autoincrement())
+  departmentCode String   @unique @map("department_code")
+  departmentName String   @map("department_name")
+  parentId       Int?     @map("parent_id")
+  headEmployeeId Int?     @map("head_employee_id")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  parent       Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
+  children     Department[] @relation("DepartmentTree")
+  headEmployee Employee?    @relation("DepartmentHead", fields: [headEmployeeId], references: [id])
+  employees    Employee[]   @relation("DepartmentMember")
+
+  purchaseRequisitions PurchaseRequisition[]
+  notifications        Notification[]
+
+  @@map("department")
+}
+
+model Employee {
+  id               Int       @id @default(autoincrement())
+  employeeNo       String    @unique @map("employee_no") // 사원번호 (로그인 ID)
+  employeeName     String    @map("employee_name")
+  passwordHash     String    @map("password_hash")
+  email            String?
+  departmentId     Int       @map("department_id")
+  roleId           Int       @map("role_id")
+  jobGrade         String    @map("job_grade")
+  employeeStatus   String    @default("ACTIVE") @map("employee_status") // EMPLOYEE_STATUS
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lastLoginAt      DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  department      Department   @relation("DepartmentMember", fields: [departmentId], references: [id])
+  role            Role         @relation(fields: [roleId], references: [id])
+  headDepartments Department[] @relation("DepartmentHead")
+
+  salesOrders           SalesOrder[]
+  requestedRequisitions PurchaseRequisition[]  @relation("RequisitionRequester")
+  approvedRequisitions  PurchaseRequisition[]  @relation("RequisitionApprover")
+  assignedTasks         Task[]                 @relation("TaskAssignee")
+  createdTasks          Task[]                 @relation("TaskCreator")
+  notifications         Notification[]
+  chatRoomMembers       ChatRoomMember[]
+  messages              Message[]
+  actionDrafts          ActionDraft[]
+  businessEvents        BusinessEvent[]
+  dashboardWidgetLayout DashboardWidgetLayout?
+
+  @@index([departmentId])
+  @@map("employee")
+}
+
+// ───────────────────────────── 기준정보 (MST) ─────────────────────────────
+
+model Item {
+  id                Int      @id @default(autoincrement())
+  itemCode          String   @unique @map("item_code")
+  itemName          String   @map("item_name")
+  itemType          String   @map("item_type") // ITEM_TYPE: RAW_MATERIAL | SLAB | COIL
+  unitType          String   @map("unit_type") // UNIT_TYPE: QTY | TON
+  defaultSupplierId Int?     @map("default_supplier_id")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  defaultSupplier Supplier?     @relation(fields: [defaultSupplierId], references: [id])
+  rawMaterial     RawMaterial?
+  productSpecs    ProductSpec[]
+
+  @@map("item")
+}
+
+/// 원료 품목의 상세 (철광석·석탄·석회석·합금철). item과 1:1.
+model RawMaterial {
+  id              Int      @id @default(autoincrement())
+  itemId          Int      @unique @map("item_id")
+  materialCode    String   @unique @map("material_code") // LOT 채번의 원료코드 (RM-원료코드-…)
+  rawMaterialType String   @map("raw_material_type") // RAW_MATERIAL_TYPE: IRON_ORE | COAL | LIMESTONE | FERROALLOY
+  yardId          Int?     @map("yard_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  item Item  @relation(fields: [itemId], references: [id])
+  yard Yard? @relation(fields: [yardId], references: [id])
+
+  specificConsumptions     SpecificConsumption[]
+  inventories              Inventory[]
+  lots                     Lot[]
+  purchaseRequisitionItems PurchaseRequisitionItem[]
+  purchaseOrderItems       PurchaseOrderItem[]
+  mrpRequirements          MrpRequirement[]
+
+  @@map("raw_material")
+}
+
+model SteelGrade {
+  id             Int      @id @default(autoincrement())
+  steelGradeCode String   @unique @map("steel_grade_code") // SS275, SM355, SPHC
+  steelGradeName String   @map("steel_grade_name")
+  standardNo     String?  @map("standard_no") // KS D 3503 등
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  compositionSpecs     CompositionSpec[]
+  productSpecs         ProductSpec[]
+  specificConsumptions SpecificConsumption[]
+  inspectionItems      InspectionItem[]
+  lots                 Lot[]
+  productionPlans      ProductionPlan[]
+
+  @@map("steel_grade")
+}
+
+model CompositionSpec {
+  id           Int      @id @default(autoincrement())
+  steelGradeId Int      @map("steel_grade_id")
+  elementCode  String   @map("element_code") // C, Si, Mn, P, S
+  minValue     Decimal? @map("min_value") @db.Decimal(8, 4)
+  maxValue     Decimal? @map("max_value") @db.Decimal(8, 4)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  steelGrade SteelGrade @relation(fields: [steelGradeId], references: [id])
+
+  @@unique([steelGradeId, elementCode])
+  @@map("composition_spec")
+}
+
+model ProductSpec {
+  id                   Int      @id @default(autoincrement())
+  specCode             String   @unique @map("spec_code") // 화면 표시·검색용 (예: SL-SS275-250x1200x10000)
+  itemId               Int      @map("item_id") // 슬래브 또는 코일 품목
+  steelGradeId         Int      @map("steel_grade_id")
+  thicknessMm          Decimal  @map("thickness_mm") @db.Decimal(8, 2)
+  widthMm              Decimal  @map("width_mm") @db.Decimal(8, 2)
+  lengthMm             Decimal  @map("length_mm") @db.Decimal(12, 2)
+  theoreticalWeightTon Decimal  @map("theoretical_weight_ton") @db.Decimal(12, 3)
+  yardId               Int?     @map("yard_id")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  item       Item       @relation(fields: [itemId], references: [id])
+  steelGrade SteelGrade @relation(fields: [steelGradeId], references: [id])
+  yard       Yard?      @relation(fields: [yardId], references: [id])
+
+  slabMapping     SpecMapping?     @relation("MappingSlabSpec")
+  coilMapping     SpecMapping?     @relation("MappingCoilSpec")
+  salesOrderItems SalesOrderItem[]
+  inventories     Inventory[]
+  reservations    Reservation[]
+  lots            Lot[]
+  productionPlans ProductionPlan[]
+
+  @@unique([steelGradeId, thicknessMm, widthMm, lengthMm])
+  @@map("product_spec")
+}
+
+/// 슬래브 규격 1개 ↔ 코일 규격 1개. 열연 계획 수율은 저장하지 않고 두 규격의 이론중량으로 계산한다.
+model SpecMapping {
+  id         Int      @id @default(autoincrement())
+  slabSpecId Int      @unique @map("slab_spec_id")
+  coilSpecId Int      @unique @map("coil_spec_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  slabSpec ProductSpec @relation("MappingSlabSpec", fields: [slabSpecId], references: [id])
+  coilSpec ProductSpec @relation("MappingCoilSpec", fields: [coilSpecId], references: [id])
+
+  @@map("spec_mapping")
+}
+
+/// 품목 유형(SLAB/COIL)별 공정 순서와 계획 수율. 열연(HOT_ROLLING)의 planned_yield_rate는 null(규격 매핑에서 계산).
+model Routing {
+  id               Int      @id @default(autoincrement())
+  itemType         String   @map("item_type") // SLAB | COIL
+  processCode      String   @map("process_code") // PROCESS_CODE
+  processSeq       Int      @map("process_seq")
+  plannedYieldRate Decimal? @map("planned_yield_rate") @db.Decimal(6, 4)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([itemType, processSeq])
+  @@unique([itemType, processCode])
+  @@map("routing")
+}
+
+/// 배합 원단위. 철광석·석탄·석회석: 용선 1t당 t (steel_grade_id = null, 공통). 합금철: 용강 1t당 kg (강종별).
+model SpecificConsumption {
+  id              Int      @id @default(autoincrement())
+  rawMaterialId   Int      @map("raw_material_id")
+  steelGradeId    Int?     @map("steel_grade_id")
+  consumptionRate Decimal  @map("consumption_rate") @db.Decimal(12, 4)
+  consumptionUnit String   @map("consumption_unit") // CONSUMPTION_UNIT: TON_PER_TON | KG_PER_TON
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
+  steelGrade  SteelGrade? @relation(fields: [steelGradeId], references: [id])
+
+  @@unique([rawMaterialId, steelGradeId])
+  @@map("specific_consumption")
+}
+
+model Customer {
+  id           Int      @id @default(autoincrement())
+  customerCode String   @unique @map("customer_code")
+  customerName String   @map("customer_name")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  salesOrders      SalesOrder[]
+  shipmentRequests ShipmentRequest[]
+  millSheets       MillSheet[]
+
+  @@map("customer")
+}
+
+model Supplier {
+  id           Int      @id @default(autoincrement())
+  supplierCode String   @unique @map("supplier_code")
+  supplierName String   @map("supplier_name")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  items          Item[]
+  purchaseOrders PurchaseOrder[]
+  lots           Lot[]
+
+  @@map("supplier")
+}
+
+model Yard {
+  id        Int      @id @default(autoincrement())
+  yardCode  String   @unique @map("yard_code")
+  yardName  String   @map("yard_name")
+  yardType  String   @map("yard_type") // YARD_TYPE: RAW_MATERIAL | SLAB | COIL
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  rawMaterials  RawMaterial[]
+  productSpecs  ProductSpec[]
+  lots          Lot[]
+  goodsReceipts GoodsReceipt[]
+
+  @@map("yard")
+}
+
+/// 생산 설정값 (행 1개, id = 1).
+model ProductionSetting {
+  id               Int      @id @default(1)
+  heatCapacityTon  Decimal  @map("heat_capacity_ton") @db.Decimal(12, 3)
+  deliveryRiskDays Int      @map("delivery_risk_days")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("production_setting")
+}
+
+/// 공정별 검사 항목과 min/max. 성분(히트) 항목은 composition_spec을 쓴다.
+model InspectionItem {
+  id                 Int      @id @default(autoincrement())
+  processCode        String   @map("process_code") // CASTING | HOT_ROLLING
+  steelGradeId       Int?     @map("steel_grade_id") // null = 모든 강종
+  inspectionItemCode String   @map("inspection_item_code") // TENSILE_STRENGTH 등
+  inspectionItemName String   @map("inspection_item_name")
+  unit               String?
+  minValue           Decimal? @map("min_value") @db.Decimal(12, 4)
+  maxValue           Decimal? @map("max_value") @db.Decimal(12, 4)
+  isRequired         Boolean  @default(true) @map("is_required")
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  steelGrade SteelGrade? @relation(fields: [steelGradeId], references: [id])
+
+  @@unique([processCode, steelGradeId, inspectionItemCode])
+  @@map("inspection_item")
+}
+
+// ───────────────────────────── 영업·수주 (SO) ─────────────────────────────
+
+model SalesOrder {
+  id              Int       @id @default(autoincrement())
+  salesOrderNo    String    @unique @map("sales_order_no")
+  customerId      Int       @map("customer_id")
+  dueDate         DateTime  @map("due_date") @db.Date
+  ownerEmployeeId Int       @map("owner_employee_id")
+  note            String?
+  isCancelled     Boolean   @default(false) @map("is_cancelled")
+  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz
+  cancelReason    String?   @map("cancel_reason")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  ownerEmployee  Employee         @relation(fields: [ownerEmployeeId], references: [id])
+  items          SalesOrderItem[]
+  chatRooms      ChatRoom[]
+  millSheets     MillSheet[]
+  businessEvents BusinessEvent[]
+
+  @@index([customerId])
+  @@map("sales_order")
+}
+
+model SalesOrderItem {
+  id                   Int      @id @default(autoincrement())
+  salesOrderId         Int      @map("sales_order_id")
+  lineNo               Int      @map("line_no")
+  productSpecId        Int      @map("product_spec_id")
+  orderedQty           Int      @map("ordered_qty")
+  shippedQty           Int      @default(0) @map("shipped_qty") // 누적 출고 확정 매수
+  salesOrderItemStatus String   @default("REGISTERED") @map("sales_order_item_status") // SALES_ORDER_ITEM_STATUS
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  salesOrder  SalesOrder  @relation(fields: [salesOrderId], references: [id])
+  productSpec ProductSpec @relation(fields: [productSpecId], references: [id])
+
+  reservations         Reservation[]
+  productionPlans      ProductionPlan[]
+  allocations          Allocation[]
+  shipmentRequestItems ShipmentRequestItem[]
+  lots                 Lot[]
+
+  @@unique([salesOrderId, lineNo])
+  @@index([productSpecId])
+  @@map("sales_order_item")
+}
+
+// ───────────────────────────── 재고·예약·배정 (INV) ─────────────────────────────
+
+/// 제품: product_spec_id + on_hand_qty(합격·미소진 매수) + reserved_qty(ACTIVE 예약 합계).
+/// 원료: raw_material_id + on_hand_ton(원료 LOT 잔량 합계).
+model Inventory {
+  id            Int      @id @default(autoincrement())
+  productSpecId Int?     @unique @map("product_spec_id")
+  rawMaterialId Int?     @unique @map("raw_material_id")
+  onHandQty     Int      @default(0) @map("on_hand_qty")
+  reservedQty   Int      @default(0) @map("reserved_qty")
+  onHandTon     Decimal  @default(0) @map("on_hand_ton") @db.Decimal(12, 3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  productSpec ProductSpec? @relation(fields: [productSpecId], references: [id])
+  rawMaterial RawMaterial? @relation(fields: [rawMaterialId], references: [id])
+
+  @@map("inventory")
+}
+
+model Reservation {
+  id               Int      @id @default(autoincrement())
+  salesOrderItemId Int      @map("sales_order_item_id")
+  productSpecId    Int      @map("product_spec_id")
+  reservedQty      Int      @map("reserved_qty")
+  status           String   @default("ACTIVE") // RESERVATION_STATUS
+  isAutoReserved   Boolean  @default(false) @map("is_auto_reserved")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id])
+  productSpec    ProductSpec    @relation(fields: [productSpecId], references: [id])
+
+  @@index([salesOrderItemId])
+  @@index([productSpecId, status])
+  @@map("reservation")
+}
+
+/// 확정 시 생성. LOT당 CONFIRMED 1건 (마이그레이션에 부분 유니크 인덱스).
+model Allocation {
+  id                    Int       @id @default(autoincrement())
+  lotId                 Int       @map("lot_id")
+  purpose               String // ALLOCATION_PURPOSE: SHIPMENT | ROLLING
+  salesOrderItemId      Int?      @map("sales_order_item_id")
+  productionPlanId      Int?      @map("production_plan_id")
+  shipmentRequestItemId Int?      @map("shipment_request_item_id")
+  status                String    @default("CONFIRMED") // ALLOCATION_STATUS
+  confirmedEmployeeId   Int?      @map("confirmed_employee_id")
+  confirmedAt           DateTime  @default(now()) @map("confirmed_at") @db.Timestamptz
+  consumedAt            DateTime? @map("consumed_at") @db.Timestamptz
+  releasedAt            DateTime? @map("released_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  lot                 Lot                  @relation(fields: [lotId], references: [id])
+  salesOrderItem      SalesOrderItem?      @relation(fields: [salesOrderItemId], references: [id])
+  productionPlan      ProductionPlan?      @relation(fields: [productionPlanId], references: [id])
+  shipmentRequestItem ShipmentRequestItem? @relation(fields: [shipmentRequestItemId], references: [id])
+
+  @@index([lotId, status])
+  @@index([shipmentRequestItemId])
+  @@index([productionPlanId])
+  @@map("allocation")
+}
+
+// ───────────────────────────── 생산·MRP (PRD) ─────────────────────────────
+
+/// 수주 품목의 부족 매수를 생산하기 위한 계획. 수주 취소 시 sales_order_item_id를 null로 바꿔 "완료 후 여재"로 남긴다.
+model ProductionPlan {
+  id                   Int       @id @default(autoincrement())
+  productionPlanNo     String    @unique @map("production_plan_no")
+  salesOrderItemId     Int?      @map("sales_order_item_id")
+  productSpecId        Int       @map("product_spec_id") // 목표 제품 규격 (슬래브 또는 코일)
+  steelGradeId         Int       @map("steel_grade_id")
+  shortageQty          Int       @map("shortage_qty") // 목표 매수
+  surplusUseQty        Int       @default(0) @map("surplus_use_qty") // 새로 만들지 않고 여재 슬래브로 채우는 매수
+  plannedSlabQty       Int       @default(0) @map("planned_slab_qty") // 히트 수 × 히트당 슬래브 계획 매수
+  heatCount            Int       @default(0) @map("heat_count")
+  requiredInputTon     Decimal   @default(0) @map("required_input_ton") @db.Decimal(12, 3)
+  cumulativeYieldRate  Decimal?  @map("cumulative_yield_rate") @db.Decimal(6, 4)
+  productionPlanStatus String    @default("PLANNED") @map("production_plan_status") // PRODUCTION_PLAN_STATUS
+  isReproduction       Boolean   @default(false) @map("is_reproduction")
+  confirmedAt          DateTime? @map("confirmed_at") @db.Timestamptz
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz
+  cancelledAt          DateTime? @map("cancelled_at") @db.Timestamptz
+  createdEmployeeId    Int?      @map("created_employee_id")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  salesOrderItem SalesOrderItem? @relation(fields: [salesOrderItemId], references: [id])
+  productSpec    ProductSpec     @relation(fields: [productSpecId], references: [id])
+  steelGrade     SteelGrade      @relation(fields: [steelGradeId], references: [id])
+
+  productionResults ProductionResult[]
+  lots              Lot[]
+  allocations       Allocation[]
+
+  @@index([salesOrderItemId])
+  @@index([productionPlanStatus])
+  @@map("production_plan")
+}
+
+/// 공정별 작업 시작·완료와 산출 기록. 제선=용선, 제강=히트, 연주=슬래브, 열연=코일.
+model ProductionResult {
+  id                     Int       @id @default(autoincrement())
+  productionPlanId       Int?      @map("production_plan_id")
+  processCode            String    @map("process_code") // PROCESS_CODE
+  heatSeq                Int?      @map("heat_seq") // 계획 안에서 몇 번째 히트인지 (제강·연주·열연)
+  productionResultStatus String    @default("READY") @map("production_result_status") // PRODUCTION_RESULT_STATUS
+  startedAt              DateTime? @map("started_at") @db.Timestamptz
+  completedAt            DateTime? @map("completed_at") @db.Timestamptz
+  blastFurnaceNo         String?   @map("blast_furnace_no")
+  converterNo            String?   @map("converter_no")
+  inputTon               Decimal?  @map("input_ton") @db.Decimal(12, 3)
+  outputTon              Decimal?  @map("output_ton") @db.Decimal(12, 3)
+  plannedQty             Int?      @map("planned_qty")
+  outputQty              Int?      @map("output_qty")
+  lossQty                Int?      @map("loss_qty")
+  sampledLossRate        Decimal?  @map("sampled_loss_rate") @db.Decimal(6, 4)
+  isSimulated            Boolean   @default(false) @map("is_simulated")
+  operatorEmployeeId     Int?      @map("operator_employee_id")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  productionPlan ProductionPlan? @relation(fields: [productionPlanId], references: [id])
+  lots           Lot[]
+
+  @@index([productionPlanId, processCode])
+  @@map("production_result")
+}
+
+model MrpRun {
+  id            Int      @id @default(autoincrement())
+  mrpRunNo      String   @unique @map("mrp_run_no")
+  runEmployeeId Int?     @map("run_employee_id")
+  hotMetalTon   Decimal  @default(0) @map("hot_metal_ton") @db.Decimal(12, 3)
+  heatTon       Decimal  @default(0) @map("heat_ton") @db.Decimal(12, 3)
+  heatCount     Int      @default(0) @map("heat_count")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  requirements MrpRequirement[]
+
+  @@map("mrp_run")
+}
+
+model MrpRequirement {
+  id                  Int       @id @default(autoincrement())
+  mrpRunId            Int       @map("mrp_run_id")
+  rawMaterialId       Int       @map("raw_material_id")
+  requiredTon         Decimal   @map("required_ton") @db.Decimal(12, 3) // 총소요
+  remainingTon        Decimal   @map("remaining_ton") @db.Decimal(12, 3) // 원료 LOT 잔량 합계
+  scheduledReceiptTon Decimal   @map("scheduled_receipt_ton") @db.Decimal(12, 3)
+  netRequiredTon      Decimal   @map("net_required_ton") @db.Decimal(12, 3) // 순소요 = max(0, 총소요 − 잔량 − 입고예정)
+  requiredDate        DateTime? @map("required_date") @db.Date
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  mrpRun      MrpRun      @relation(fields: [mrpRunId], references: [id])
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@index([mrpRunId])
+  @@map("mrp_requirement")
+}
+
+// ───────────────────────────── 구매 (PUR) ─────────────────────────────
+
+model PurchaseRequisition {
+  id                        Int       @id @default(autoincrement())
+  purchaseRequisitionNo     String    @unique @map("purchase_requisition_no")
+  requesterId               Int       @map("requester_id")
+  departmentId              Int       @map("department_id") // 요청자 소속 부서 (승인권자 = 이 부서의 부서장)
+  approverId                Int?      @map("approver_id")
+  purchaseRequisitionStatus String    @default("DRAFT") @map("purchase_requisition_status") // PURCHASE_REQUISITION_STATUS
+  desiredReceiptDate        DateTime? @map("desired_receipt_date") @db.Date
+  requestReason             String?   @map("request_reason")
+  rejectReason              String?   @map("reject_reason")
+  sourceType                String    @default("DIRECT") @map("source_type") // REQUISITION_SOURCE_TYPE: DIRECT | MRP | MESSAGE
+  sourceDraftId             Int?      @unique @map("source_draft_id")
+  submittedAt               DateTime? @map("submitted_at") @db.Timestamptz
+  approvedAt                DateTime? @map("approved_at") @db.Timestamptz
+  rejectedAt                DateTime? @map("rejected_at") @db.Timestamptz
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  requester   Employee                  @relation("RequisitionRequester", fields: [requesterId], references: [id])
+  approver    Employee?                 @relation("RequisitionApprover", fields: [approverId], references: [id])
+  department  Department                @relation(fields: [departmentId], references: [id])
+  sourceDraft ActionDraft?              @relation(fields: [sourceDraftId], references: [id])
+  items       PurchaseRequisitionItem[]
+
+  @@index([purchaseRequisitionStatus])
+  @@map("purchase_requisition")
+}
+
+model PurchaseRequisitionItem {
+  id                    Int      @id @default(autoincrement())
+  purchaseRequisitionId Int      @map("purchase_requisition_id")
+  lineNo                Int      @map("line_no")
+  rawMaterialId         Int      @map("raw_material_id")
+  requiredTon           Decimal  @map("required_ton") @db.Decimal(12, 3)
+  orderedTon            Decimal  @default(0) @map("ordered_ton") @db.Decimal(12, 3) // 발주로 넘어간 누계
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  purchaseRequisition PurchaseRequisition @relation(fields: [purchaseRequisitionId], references: [id])
+  rawMaterial         RawMaterial         @relation(fields: [rawMaterialId], references: [id])
+  purchaseOrderItems  PurchaseOrderItem[]
+
+  @@unique([purchaseRequisitionId, lineNo])
+  @@map("purchase_requisition_item")
+}
+
+/// 공급업체 1곳당 1건, 여러 품목.
+model PurchaseOrder {
+  id                  Int       @id @default(autoincrement())
+  purchaseOrderNo     String    @unique @map("purchase_order_no")
+  supplierId          Int       @map("supplier_id")
+  purchaseOrderStatus String    @default("CONFIRMED") @map("purchase_order_status") // PURCHASE_ORDER_STATUS
+  dueDate             DateTime? @map("due_date") @db.Date
+  orderedEmployeeId   Int?      @map("ordered_employee_id")
+  confirmedAt         DateTime? @map("confirmed_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  supplier Supplier            @relation(fields: [supplierId], references: [id])
+  items    PurchaseOrderItem[]
+
+  @@index([supplierId])
+  @@map("purchase_order")
+}
+
+model PurchaseOrderItem {
+  id                        Int      @id @default(autoincrement())
+  purchaseOrderId           Int      @map("purchase_order_id")
+  lineNo                    Int      @map("line_no")
+  rawMaterialId             Int      @map("raw_material_id")
+  purchaseRequisitionItemId Int?     @map("purchase_requisition_item_id")
+  orderedTon                Decimal  @map("ordered_ton") @db.Decimal(12, 3)
+  receivedTon               Decimal  @default(0) @map("received_ton") @db.Decimal(12, 3)
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  purchaseOrder           PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
+  rawMaterial             RawMaterial              @relation(fields: [rawMaterialId], references: [id])
+  purchaseRequisitionItem PurchaseRequisitionItem? @relation(fields: [purchaseRequisitionItemId], references: [id])
+  goodsReceipts           GoodsReceipt[]
+
+  @@unique([purchaseOrderId, lineNo])
+  @@map("purchase_order_item")
+}
+
+model GoodsReceipt {
+  id                  Int       @id @default(autoincrement())
+  goodsReceiptNo      String    @unique @map("goods_receipt_no")
+  purchaseOrderItemId Int       @map("purchase_order_item_id")
+  receivedTon         Decimal   @map("received_ton") @db.Decimal(12, 3)
+  receiptDate         DateTime  @map("receipt_date") @db.Date
+  yardId              Int?      @map("yard_id")
+  goodsReceiptStatus  String    @default("DRAFT") @map("goods_receipt_status") // GOODS_RECEIPT_STATUS
+  note                String?
+  confirmedEmployeeId Int?      @map("confirmed_employee_id")
+  confirmedAt         DateTime? @map("confirmed_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+  yard              Yard?             @relation(fields: [yardId], references: [id])
+  lot               Lot?
+
+  @@index([purchaseOrderItemId])
+  @@map("goods_receipt")
+}
+
+// ───────────────────────────── LOT 추적 (LOT) ─────────────────────────────
+
+/// 단일 LOT 테이블. lot_type: RAW_MATERIAL | HOT_METAL | HEAT | SLAB | COIL.
+/// lot_no는 유형에 따라 원료 LOT번호 / hot_metal_no / heat_no / slab_no / coil_no 값이다.
+model Lot {
+  id                 Int       @id @default(autoincrement())
+  lotNo              String    @unique @map("lot_no")
+  lotType            String    @map("lot_type") // LOT_TYPE
+  rawMaterialId      Int?      @map("raw_material_id") // RAW_MATERIAL
+  productSpecId      Int?      @map("product_spec_id") // SLAB · COIL
+  steelGradeId       Int?      @map("steel_grade_id") // HEAT · SLAB · COIL
+  heatLotId          Int?      @map("heat_lot_id") // SLAB · COIL → 상위 히트 (적격 판정용)
+  initialTon         Decimal?  @map("initial_ton") @db.Decimal(12, 3) // RAW_MATERIAL · HOT_METAL · HEAT
+  remainingTon       Decimal?  @map("remaining_ton") @db.Decimal(12, 3) // RAW_MATERIAL · HOT_METAL
+  blastFurnaceNo     String?   @map("blast_furnace_no") // HOT_METAL
+  converterNo        String?   @map("converter_no") // HEAT
+  yardId             Int?      @map("yard_id")
+  supplierId         Int?      @map("supplier_id") // RAW_MATERIAL
+  goodsReceiptId     Int?      @unique @map("goods_receipt_id") // RAW_MATERIAL
+  productionPlanId   Int?      @map("production_plan_id")
+  productionResultId Int?      @map("production_result_id")
+  salesOrderItemId   Int?      @map("sales_order_item_id") // 이 LOT을 생산한 원래 수주 품목 (자동 예약 대상)
+  isPassed           Boolean?  @map("is_passed") // null = 검사 전. HEAT=성분, SLAB·COIL=제품 검사
+  dispositionStatus  String?   @map("disposition_status") // DISPOSITION_STATUS (불합격 LOT만)
+  dispositionReason  String?   @map("disposition_reason")
+  dispositionAt      DateTime? @map("disposition_at") @db.Timestamptz
+  lotStatus          String    @default("IN_STOCK") @map("lot_status") // LOT_STATUS
+  producedAt         DateTime  @default(now()) @map("produced_at") @db.Timestamptz // 생산완료일·입고일 (FIFO 기준)
+  consumedAt         DateTime? @map("consumed_at") @db.Timestamptz
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  rawMaterial      RawMaterial?      @relation(fields: [rawMaterialId], references: [id])
+  productSpec      ProductSpec?      @relation(fields: [productSpecId], references: [id])
+  steelGrade       SteelGrade?       @relation(fields: [steelGradeId], references: [id])
+  heatLot          Lot?              @relation("HeatChildren", fields: [heatLotId], references: [id])
+  heatChildren     Lot[]             @relation("HeatChildren")
+  yard             Yard?             @relation(fields: [yardId], references: [id])
+  supplier         Supplier?         @relation(fields: [supplierId], references: [id])
+  goodsReceipt     GoodsReceipt?     @relation(fields: [goodsReceiptId], references: [id])
+  productionPlan   ProductionPlan?   @relation(fields: [productionPlanId], references: [id])
+  productionResult ProductionResult? @relation(fields: [productionResultId], references: [id])
+  salesOrderItem   SalesOrderItem?   @relation(fields: [salesOrderItemId], references: [id])
+
+  parentRelations    LotRelation[]       @relation("RelationChild")
+  childRelations     LotRelation[]       @relation("RelationParent")
+  allocations        Allocation[]
+  qualityInspections QualityInspection[]
+  goodsIssueItems    GoodsIssueItem[]
+
+  @@index([lotType, lotStatus])
+  @@index([productSpecId, lotStatus])
+  @@index([heatLotId])
+  @@index([productionPlanId])
+  @@map("lot")
+}
+
+model LotRelation {
+  id           Int       @id @default(autoincrement())
+  parentLotId  Int       @map("parent_lot_id")
+  childLotId   Int       @map("child_lot_id")
+  relationType String    @map("relation_type") // LOT_RELATION_TYPE
+  evidenceType String    @map("evidence_type") // LOT_EVIDENCE_TYPE: PERIOD | DIRECT
+  inputTon     Decimal?  @map("input_ton") @db.Decimal(12, 3)
+  periodStart  DateTime? @map("period_start") @db.Timestamptz
+  periodEnd    DateTime? @map("period_end") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  parentLot Lot @relation("RelationParent", fields: [parentLotId], references: [id])
+  childLot  Lot @relation("RelationChild", fields: [childLotId], references: [id])
+
+  @@unique([parentLotId, childLotId])
+  @@index([childLotId])
+  @@map("lot_relation")
+}
+
+// ───────────────────────────── 품질 (QC) ─────────────────────────────
+
+model QualityInspection {
+  id                  Int       @id @default(autoincrement())
+  qualityInspectionNo String    @unique @map("quality_inspection_no")
+  lotId               Int       @map("lot_id")
+  processCode         String    @map("process_code") // STEELMAKING(히트 성분) | CASTING(슬래브) | HOT_ROLLING(코일)
+  inspectionResult    String    @default("PENDING") @map("inspection_result") // INSPECTION_RESULT: PENDING | PASS | FAIL
+  inspectorEmployeeId Int?      @map("inspector_employee_id")
+  inspectedAt         DateTime? @map("inspected_at") @db.Timestamptz
+  memo                String?
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  lot    Lot                      @relation(fields: [lotId], references: [id])
+  values QualityInspectionValue[]
+
+  @@index([lotId])
+  @@map("quality_inspection")
+}
+
+/// 검사 1건의 항목별 측정값. 판정 시점의 기준(min/max)을 함께 저장한다.
+model QualityInspectionValue {
+  id                  Int      @id @default(autoincrement())
+  qualityInspectionId Int      @map("quality_inspection_id")
+  inspectionItemCode  String   @map("inspection_item_code") // 성분은 element_code (C, Si …)
+  inspectionItemName  String   @map("inspection_item_name")
+  unit                String?
+  minValue            Decimal? @map("min_value") @db.Decimal(12, 4)
+  maxValue            Decimal? @map("max_value") @db.Decimal(12, 4)
+  measuredValue       Decimal? @map("measured_value") @db.Decimal(12, 4)
+  isPassed            Boolean? @map("is_passed")
+  sortOrder           Int      @default(0) @map("sort_order")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  qualityInspection QualityInspection @relation(fields: [qualityInspectionId], references: [id])
+
+  @@unique([qualityInspectionId, inspectionItemCode])
+  @@map("quality_inspection_value")
+}
+
+// ───────────────────────────── 출하 (SHP) ─────────────────────────────
+
+model ShipmentRequest {
+  id                    Int       @id @default(autoincrement())
+  shipmentRequestNo     String    @unique @map("shipment_request_no")
+  customerId            Int       @map("customer_id")
+  requestedShipDate     DateTime  @map("requested_ship_date") @db.Date
+  shipmentRequestStatus String    @default("REQUESTED") @map("shipment_request_status") // SHIPMENT_REQUEST_STATUS
+  requesterId           Int       @map("requester_id")
+  memo                  String?
+  cancelledAt           DateTime? @map("cancelled_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  customer    Customer              @relation(fields: [customerId], references: [id])
+  items       ShipmentRequestItem[]
+  goodsIssues GoodsIssue[]
+
+  @@index([shipmentRequestStatus])
+  @@map("shipment_request")
+}
+
+model ShipmentRequestItem {
+  id                        Int      @id @default(autoincrement())
+  shipmentRequestId         Int      @map("shipment_request_id")
+  lineNo                    Int      @map("line_no")
+  salesOrderItemId          Int      @map("sales_order_item_id")
+  requestQty                Int      @map("request_qty")
+  shipmentRequestItemStatus String   @default("WAITING_ALLOCATION") @map("shipment_request_item_status") // SHIPMENT_REQUEST_ITEM_STATUS
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  shipmentRequest ShipmentRequest  @relation(fields: [shipmentRequestId], references: [id])
+  salesOrderItem  SalesOrderItem   @relation(fields: [salesOrderItemId], references: [id])
+  allocations     Allocation[]
+  goodsIssueItems GoodsIssueItem[]
+
+  @@unique([shipmentRequestId, lineNo])
+  @@index([salesOrderItemId])
+  @@map("shipment_request_item")
+}
+
+model GoodsIssue {
+  id                  Int       @id @default(autoincrement())
+  goodsIssueNo        String    @unique @map("goods_issue_no")
+  shipmentRequestId   Int       @map("shipment_request_id")
+  goodsIssueStatus    String    @default("CONFIRMED") @map("goods_issue_status") // GOODS_ISSUE_STATUS
+  confirmedEmployeeId Int?      @map("confirmed_employee_id")
+  confirmedAt         DateTime? @map("confirmed_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  shipmentRequest ShipmentRequest  @relation(fields: [shipmentRequestId], references: [id])
+  items           GoodsIssueItem[]
+  millSheets      MillSheet[]
+
+  @@index([shipmentRequestId])
+  @@map("goods_issue")
+}
+
+/// 출고한 LOT 1개 = 1행.
+model GoodsIssueItem {
+  id                    Int      @id @default(autoincrement())
+  goodsIssueId          Int      @map("goods_issue_id")
+  shipmentRequestItemId Int      @map("shipment_request_item_id")
+  lotId                 Int      @unique @map("lot_id")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  goodsIssue          GoodsIssue          @relation(fields: [goodsIssueId], references: [id])
+  shipmentRequestItem ShipmentRequestItem @relation(fields: [shipmentRequestItemId], references: [id])
+  lot                 Lot                 @relation(fields: [lotId], references: [id])
+
+  @@index([goodsIssueId])
+  @@map("goods_issue_item")
+}
+
+/// 출고 확정 시 발행 시점 값을 snapshot(JSON)으로 고정 저장한다.
+model MillSheet {
+  id           Int      @id @default(autoincrement())
+  millSheetNo  String   @unique @map("mill_sheet_no")
+  goodsIssueId Int      @map("goods_issue_id")
+  salesOrderId Int      @map("sales_order_id")
+  customerId   Int      @map("customer_id")
+  snapshot     Json
+  issuedAt     DateTime @default(now()) @map("issued_at") @db.Timestamptz
+  pdfStatus    String   @default("PENDING") @map("pdf_status") // PDF_STATUS: PENDING | READY | FAILED
+  pdfPath      String?  @map("pdf_path")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  goodsIssue GoodsIssue @relation(fields: [goodsIssueId], references: [id])
+  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id])
+  customer   Customer   @relation(fields: [customerId], references: [id])
+
+  @@index([goodsIssueId])
+  @@map("mill_sheet")
+}
+
+// ───────────────────────────── 작업 로그 (LOG) ─────────────────────────────
+
+model BusinessEvent {
+  id              Int      @id @default(autoincrement())
+  actorType       String   @map("actor_type") // ACTOR_TYPE: USER | SYSTEM
+  actorEmployeeId Int?     @map("actor_employee_id")
+  eventType       String   @map("event_type") // BUSINESS_EVENT_TYPE
+  targetType      String   @map("target_type") // EVENT_TARGET_TYPE
+  targetId        Int?     @map("target_id")
+  targetNo        String?  @map("target_no") // 수주번호·LOT번호 등 화면 표시용
+  salesOrderId    Int?     @map("sales_order_id") // 수주 타임라인
+  lotIds          Int[]    @map("lot_ids") // LOT 타임라인
+  summary         String // 사람이 읽는 한 줄
+  beforeData      Json?    @map("before_data")
+  afterData       Json?    @map("after_data")
+  reasonCode      String?  @map("reason_code") // EVENT_REASON_CODE
+  reason          String?
+  isAiAssisted    Boolean  @default(false) @map("is_ai_assisted")
+  messageId       Int?     @map("message_id") // 원본 메시지
+  actionDraftId   Int?     @map("action_draft_id")
+  occurredAt      DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  actorEmployee Employee?   @relation(fields: [actorEmployeeId], references: [id])
+  salesOrder    SalesOrder? @relation(fields: [salesOrderId], references: [id])
+
+  @@index([salesOrderId, occurredAt])
+  @@index([targetType, targetId])
+  @@index([occurredAt])
+  @@index([lotIds], type: Gin)
+  @@map("business_event")
+}
+
+// ───────────────────────────── 업무·알림 (NTF) ─────────────────────────────
+
+model Task {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  assigneeId  Int       @map("assignee_id")
+  creatorId   Int       @map("creator_id")
+  dueDate     DateTime? @map("due_date") @db.Date
+  taskStatus  String    @default("TODO") @map("task_status") // TASK_STATUS
+  linkPath    String?   @map("link_path") // 관련 ERP 화면 경로
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  assignee Employee @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creator  Employee @relation("TaskCreator", fields: [creatorId], references: [id])
+
+  @@index([assigneeId, taskStatus])
+  @@map("task")
+}
+
+/// 수신자 1명 = 1행. 부서 알림은 발송 시점의 부서원에게 펼쳐 저장하고 department_id를 남긴다.
+model Notification {
+  id               Int       @id @default(autoincrement())
+  recipientId      Int       @map("recipient_id")
+  departmentId     Int?      @map("department_id")
+  notificationType String    @map("notification_type") // NOTIFICATION_TYPE
+  title            String
+  body             String?
+  linkPath         String?   @map("link_path")
+  isRead           Boolean   @default(false) @map("is_read")
+  readAt           DateTime? @map("read_at") @db.Timestamptz
+  dedupeKey        String?   @map("dedupe_key") // 같은 이벤트·수신자 중복 방지
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  recipient  Employee    @relation(fields: [recipientId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  @@unique([recipientId, dedupeKey])
+  @@index([recipientId, isRead, createdAt])
+  @@map("notification")
+}
+
+// ───────────────────────────── 업무형 메신저 (MSG) ─────────────────────────────
+
+model ChatRoom {
+  id                Int      @id @default(autoincrement())
+  chatRoomType      String   @map("chat_room_type") // CHAT_ROOM_TYPE: DIRECT | GROUP | WORK
+  chatRoomName      String?  @map("chat_room_name")
+  salesOrderId      Int?     @map("sales_order_id") // 업무방
+  createdEmployeeId Int?     @map("created_employee_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  salesOrder SalesOrder?      @relation(fields: [salesOrderId], references: [id])
+  members    ChatRoomMember[]
+  messages   Message[]
+
+  @@index([salesOrderId])
+  @@map("chat_room")
+}
+
+model ChatRoomMember {
+  id                Int      @id @default(autoincrement())
+  chatRoomId        Int      @map("chat_room_id")
+  employeeId        Int      @map("employee_id")
+  lastReadMessageId Int?     @map("last_read_message_id") // 읽음 위치
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([chatRoomId, employeeId])
+  @@index([employeeId])
+  @@map("chat_room_member")
+}
+
+model Message {
+  id                 Int      @id @default(autoincrement())
+  chatRoomId         Int      @map("chat_room_id")
+  senderId           Int?     @map("sender_id") // null = 시스템 메시지
+  messageType        String   @default("TEXT") @map("message_type") // MESSAGE_TYPE: TEXT | FILE | SYSTEM
+  content            String
+  mentionEmployeeIds Int[]    @map("mention_employee_ids")
+  fileName           String?  @map("file_name")
+  filePath           String?  @map("file_path")
+  fileSize           Int?     @map("file_size")
+  mimeType           String?  @map("mime_type")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  chatRoom     ChatRoom      @relation(fields: [chatRoomId], references: [id])
+  sender       Employee?     @relation(fields: [senderId], references: [id])
+  actionDrafts ActionDraft[]
+
+  @@index([chatRoomId, id])
+  @@map("message")
+}
+
+// ───────────────────────────── Message → ERP (ACT) ─────────────────────────────
+
+model ActionDraft {
+  id              Int       @id @default(autoincrement())
+  actionType      String    @map("action_type") // ACTION_TYPE: PURCHASE_REQUISITION_CREATE
+  payload         Json // 유형별 추출 스키마 값
+  draftStatus     String    @default("AI_GENERATED") @map("draft_status") // DRAFT_STATUS
+  requesterId     Int       @map("requester_id") // 확정 주체 (구매요청 초안: 원본 메시지 작성자)
+  messageId       Int?      @map("message_id") // 원본 메시지
+  executionResult Json?     @map("execution_result") // 실행 결과 (생성된 문서 번호, 실패 시 에러 코드·시도 횟수)
+  rejectReason    String?   @map("reject_reason")
+  confirmedAt     DateTime? @map("confirmed_at") @db.Timestamptz
+  executedAt      DateTime? @map("executed_at") @db.Timestamptz
+  rejectedAt      DateTime? @map("rejected_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  requester           Employee             @relation(fields: [requesterId], references: [id])
+  message             Message?             @relation(fields: [messageId], references: [id])
+  purchaseRequisition PurchaseRequisition?
+
+  @@index([messageId, actionType])
+  @@index([requesterId, draftStatus])
+  @@map("action_draft")
+}
+
+// ───────────────────────────── 대시보드 (DSH, P3) ─────────────────────────────
+
+/// 사원별 위젯 배치. layout = [{ widgetCode, x, y, w, h }].
+model DashboardWidgetLayout {
+  id         Int      @id @default(autoincrement())
+  employeeId Int      @unique @map("employee_id")
+  layout     Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("dashboard_widget_layout")
+}
+
+/// 업무번호·LOT 채번용 카운터 (종류·기준 키별).
+model NumberSequence {
+  id          Int      @id @default(autoincrement())
+  sequenceKey String   @unique @map("sequence_key") // 예: SO-20260930, HT-2-260930
+  lastValue   Int      @default(0) @map("last_value")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("number_sequence")
+}
+
+/// 변경 API의 요청 고유키 (재시도 시 같은 결과 반환).
+model IdempotencyKey {
+  id         Int      @id @default(autoincrement())
+  requestKey String   @unique @map("request_key")
+  employeeId Int?     @map("employee_id")
+  response   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("idempotency_key")
+}

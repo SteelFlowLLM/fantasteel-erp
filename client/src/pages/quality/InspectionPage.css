@@ -1,0 +1,5 @@
+/* 검사 입력 화면 전용 (접두사 qi-). 공용 부품 스타일은 features/quality/quality.css (qc-). */
+.qi-seg { display: grid; grid-template-columns: repeat(5, 1fr); }
+.qi-seg button { padding: 0 2px; white-space: nowrap; }
+.qi-bar { position: sticky; bottom: 0; z-index: 5; gap: 14px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow-1); }
+.qi-empty { padding: 28px 16px; text-align: center; }
