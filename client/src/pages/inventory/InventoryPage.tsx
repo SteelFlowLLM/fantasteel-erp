@@ -231,25 +231,30 @@ function SurplusTab({ steelGrade, gradeSelect }: { steelGrade: string; gradeSele
             <section className="hl-card" style={{ flex: 'none', minWidth: 0, overflowX: 'auto' }}>
               <header className="hl-card__head"><h3>규격별 여재</h3><span className="hl-card__meta">{data.specs.length}개 규격 · {sumOf(data.specs, (s) => s.surplusQty)}매</span></header>
               <table className="hl-table hl-table--compact">
-                <thead><tr><th>규격</th><th>강종</th><th className="num">여재</th><th className="num">여재 톤 (계산값)</th><th className="num" title="같은 규격 재고 풀의 예약 (ACTIVE)">예약</th><th className="num">가용</th></tr></thead>
+                <thead><tr><th>규격</th><th>강종</th><th className="num">여재</th><th className="num">여재 톤 (계산값)</th><th className="num" title="여재 가운데 이미 수주에 예약돼 있다고 보는 매수 (= 여재 − 가용, 0 밑이면 0)">여재 중 예약</th><th className="num" title="여재 가운데 새 수주가 예약할 수 있는 매수 (= 여재와 규격 가용재고 중 작은 값)">여재 중 가용</th></tr></thead>
                 <tbody>
-                  {data.specs.map((s) => (
-                    <tr key={s.productSpecId}>
-                      <td className="mono">{s.specCode}</td>
-                      <td className="mono">{s.steelGradeCode}</td>
-                      <td className="num">{q(s.surplusQty, '매')}</td>
-                      <td className="num">{fmtTon(s.surplusTon)}</td>
-                      <td className="num">{q(s.reservedQty, '매')}</td>
-                      <td className="num">{q(s.availableQty, '매', 'hl-ok-text')}</td>
-                    </tr>
-                  ))}
+                  {data.specs.map((s) => {
+                    // 예약은 규격 풀 단위라 LOT을 못 집는다 → 풀의 가용으로 여재를 나눠 본다. 예약 + 가용 = 여재
+                    const avail = Math.min(s.surplusQty, s.availableQty);
+                    const reserved = Math.max(0, s.surplusQty - s.availableQty);
+                    return (
+                      <tr key={s.productSpecId}>
+                        <td className="mono">{s.specCode}</td>
+                        <td className="mono">{s.steelGradeCode}</td>
+                        <td className="num">{q(s.surplusQty, '매')}</td>
+                        <td className="num">{fmtTon(s.surplusTon)}</td>
+                        <td className="num">{q(reserved, '매')}</td>
+                        <td className="num">{q(avail, '매', 'hl-ok-text')}</td>
+                      </tr>
+                    );
+                  })}
                   {!data.specs.length ? <tr><td colSpan={6} style={{ borderBottom: 0 }}><EmptyNote>여재가 없어요</EmptyNote></td></tr> : null}
                 </tbody>
               </table>
               <div className="hl-card__foot">
                 <span className="hl-cap inv-page__cap">
                   <Icon name="info" size="sm" />
-                  <span>예약은 LOT을 정하지 않아요. 여재 수량이 가용보다 많으면 그 차이만큼은 이미 어떤 수주에 예약돼 있다는 뜻이에요.</span>
+                  <span>예약은 LOT을 정하지 않고 같은 규격 재고 전체에 걸려 있어요. 그래서 여재 중 가용 = 여재와 규격 가용재고 중 작은 값, 여재 중 예약 = 나머지예요 (둘을 더하면 여재예요). 규격 전체 예약·가용은 제품 탭에서 봐요.</span>
                 </span>
               </div>
             </section>

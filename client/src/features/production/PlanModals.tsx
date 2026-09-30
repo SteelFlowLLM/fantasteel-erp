@@ -19,7 +19,7 @@ function stepSummary(s: SimulateStep): string {
   if (s.kind === 'INSPECTION') return s.outputQty !== null ? `검사 ${s.outputQty}건` : '-';
   if (s.kind === 'ALLOCATION') return `필요 ${s.plannedQty ?? '-'}매 · 배정 ${s.outputQty ?? '-'}매`;
   if (s.processCode === 'CASTING') return `계획 ${s.plannedQty ?? '-'}매 → 산출 ${s.outputQty ?? '-'}매${s.lossQty ? ` (손실 ${s.lossQty}매)` : ''}`;
-  if (s.processCode === 'HOT_ROLLING') return `계획 ${s.plannedQty ?? '-'}매 → 코일 ${s.outputQty ?? '-'}개`;
+  if (s.processCode === 'HOT_ROLLING') return `계획 ${s.plannedQty ?? '-'}개 → 코일 ${s.outputQty ?? '-'}개`;
   return s.lotNos.length ? `LOT ${s.lotNos.length}개` : '-';
 }
 

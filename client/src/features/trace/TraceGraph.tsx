@@ -1,5 +1,5 @@
 // LOT 계보 그래프: 열(공정 순서) + 노드 카드 + 연결선(SVG). 배치는 traceLayout.ts.
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import type { LotTraceResponse } from '@/api/lots';
 import { Icon } from '@/components/ui';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
@@ -37,8 +37,21 @@ function edgeTitle(e: GEdge): string {
 
 export function TraceGraph({ trace, selected, onSelect }: { trace: LotTraceResponse; selected: TraceSelection; onSelect: (key: string) => void }) {
   const L = useMemo(() => layoutTrace(trace), [trace]);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  // 고른 LOT(시작 노드)이 화면 밖이면 가운데로 가로 스크롤 (역추적은 시작 노드가 맨 오른쪽). LOT·방향이 바뀔 때만
+  useLayoutEffect(() => {
+    const box = canvasRef.current?.parentElement;
+    const start = canvasRef.current?.querySelector<HTMLElement>('.is-focus');
+    if (!box || !start) return;
+    const b = box.getBoundingClientRect();
+    const r = start.getBoundingClientRect();
+    const left = b.left + box.clientLeft;
+    const right = left + box.clientWidth;
+    if (r.left >= left && r.right <= right) return;
+    box.scrollLeft += (r.left + r.right) / 2 - (left + right) / 2;
+  }, [trace.rootId, trace.direction]);
   return (
-    <div className="lt-canvas" style={{ width: L.width, height: L.height }}>
+    <div ref={canvasRef} className="lt-canvas" style={{ width: L.width, height: L.height }}>
       {L.heads.map((h) => (
         <div key={h.col} className="lt-colhead" style={{ left: h.x, width: NODE_W, height: HEAD_H - 8 }}>
           <b>{h.title}</b>

@@ -80,7 +80,7 @@ export function CompleteResultModal({ result, plan, onClose }: { result: ResultV
   } else {
     if (!confirmedAllocs.length) fieldError = '배정 확정된 슬래브가 없어요';
     else if (!picked.length) fieldError = '압연할 슬래브를 1매 이상 골라 주세요';
-    else if (result.plannedQty !== null && picked.length > result.plannedQty) fieldError = `남은 압연 매수(${result.plannedQty}매)보다 많이 골랐어요`;
+    else if (result.plannedQty !== null && picked.length > result.plannedQty) fieldError = `남은 압연 ${result.plannedQty}개보다 슬래브를 많이 골랐어요 (선택 ${picked.length}매)`;
     // 전부 고르면 비워 보낸다 (= 이 계획의 확정 배정 전부)
     else if (picked.length !== confirmedAllocs.length) body.allocationIds = picked;
   }
@@ -156,7 +156,7 @@ export function CompleteResultModal({ result, plan, onClose }: { result: ResultV
           <>
             <div className="hl-row">
               <b className="hl-label">압연할 슬래브 (배정 확정분)</b>
-              <span className="hl-cap">선택 {picked.length} / 확정 {confirmedAllocs.length}매{result.plannedQty !== null ? ` · 남은 압연 ${result.plannedQty}매` : ''}</span>
+              <span className="hl-cap">선택 {picked.length} / 확정 {confirmedAllocs.length}매{result.plannedQty !== null ? ` · 남은 압연 ${result.plannedQty}개` : ''}</span>
               <button type="button" className="hl-btn hl-btn--sm hl-btn--ghost" style={{ marginLeft: 'auto' }} disabled={!confirmedAllocs.length} onClick={() => setPicked(picked.length === confirmedAllocs.length ? [] : confirmedAllocs.map((a) => a.id))}>
                 {picked.length === confirmedAllocs.length ? '전체 해제' : '전체 선택'}
               </button>
@@ -184,7 +184,7 @@ export function CompleteResultModal({ result, plan, onClose }: { result: ResultV
               </div>
             )}
             {shownError && confirmedAllocs.length ? <span className="hl-field__hint hl-danger-text">{shownError}</span> : null}
-            <span className="hl-cap">슬래브 1매당 코일 LOT 1개(C + 슬래브번호)를 만들어요 (검사 대기). 목표에 못 미치면 남은 매수의 열연 행이 이어서 생겨요.</span>
+            <span className="hl-cap">슬래브 1매당 코일 LOT 1개(C + 슬래브번호)를 만들어요 (검사 대기). 목표에 못 미치면 남은 압연분의 열연 행이 이어서 생겨요.</span>
           </>
         ) : null}
       </div>

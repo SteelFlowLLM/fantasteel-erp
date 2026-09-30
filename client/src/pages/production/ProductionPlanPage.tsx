@@ -272,7 +272,7 @@ function resultLine(r: ResultView): string {
   if (r.processCode === 'IRONMAKING') return r.outputTon ? `용선 ${fmtTon(r.outputTon)}${r.blastFurnaceNo ? ` · 고로 ${r.blastFurnaceNo}` : ''}` : r.defaultHotMetalTon ? `필요 용선 ${fmtTon(r.defaultHotMetalTon)}` : '용선';
   if (r.processCode === 'STEELMAKING') return r.outputTon ? `히트 ${fmtTon(r.outputTon)}${r.converterNo ? ` · 전로 ${r.converterNo}` : ''}` : '히트';
   if (r.processCode === 'CASTING') return r.outputQty !== null ? `슬래브 ${r.outputQty}/${r.plannedQty ?? '-'}매${r.lossQty ? ` · 손실 ${r.lossQty}` : ''}` : `슬래브 계획 ${r.plannedQty ?? '-'}매`;
-  return r.outputQty !== null ? `코일 ${r.outputQty}개` : `압연 남은 ${r.plannedQty ?? '-'}매`;
+  return r.outputQty !== null ? `코일 ${r.outputQty}개` : `남은 압연 ${r.plannedQty ?? '-'}개`;
 }
 
 /** 공정별 진행: 제선 → 제강 → 연주 → [열연] 레인에 실적 카드 */

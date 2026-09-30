@@ -89,7 +89,7 @@ export function MrpPage() {
         <div style={{ padding: '14px 16px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <b style={{ fontSize: 12.5 }}>계산 방법</b>
           <span className="hl-cap" style={{ lineHeight: '17px' }}>
-            진행 중인 생산계획 전체의 남은 히트로 계산해요.<br />
+            진행 중인 생산계획 전체의 남은 히트로 계산해요. 편성 전 계획은 예상 히트로 넣어요.<br />
             총소요 − 원료 LOT 잔량 − 입고예정 = 순소요<br />
             합금철 = 히트 톤 × kg/t ÷ 1,000
           </span>
@@ -128,6 +128,9 @@ function RunView({ run, isLatest, runButton, onLatest }: { run: MrpRunDetail; is
 
   const short = run.requirements.filter((r) => isPositive(r.netRequiredTon));
   const uncovered = short.filter((r) => !r.coverage.isCovered);
+  // 계획(PLANNED)은 히트 편성 전이라 서버가 히트 수를 예상으로 계산한다
+  const isEstimated = (status: string) => status === 'PLANNED';
+  const estimatedCount = run.plans.filter((p) => isEstimated(p.productionPlanStatus)).length;
   const shown = onlyShort ? short : run.requirements;
   const sel = run.requirements.find((r) => r.id === selMat) ?? short[0] ?? run.requirements[0];
 
@@ -174,7 +177,7 @@ function RunView({ run, isLatest, runButton, onLatest }: { run: MrpRunDetail; is
         <div className="hl-kpi" style={{ padding: '12px 16px' }}>
           <span className="hl-kpi__label">남은 히트</span>
           <span className="hl-figure"><b>{fmtInt(run.heatCount)}<small>히트</small></b></span>
-          <span className="hl-kpi__sub">생산계획 {run.plans.length}건</span>
+          <span className="hl-kpi__sub">생산계획 {run.plans.length}건{estimatedCount ? ` · 편성 전 ${estimatedCount}건 예상 포함` : ''}</span>
         </div>
         <div className="hl-row" style={{ flex: 'none', padding: '0 2px', color: 'var(--ink-3)' }}><Icon name="chevron-right" /></div>
         <div className="hl-kpi" style={{ padding: '12px 16px' }}>
@@ -319,7 +322,10 @@ function RunView({ run, isLatest, runButton, onLatest }: { run: MrpRunDetail; is
                     <td><span className="mono">{p.steelGradeCode}</span> <span className="hl-cap">{p.specCode}</span></td>
                     <td>{p.salesOrderId && p.salesOrderNo ? <Link className="hl-link-id" to={`/sales-orders/${p.salesOrderId}`}>{p.salesOrderNo}</Link> : <span className="hl-muted">연결 없음</span>}</td>
                     <td className="tnum">{md(p.dueDate)}</td>
-                    <td className="num">{fmtInt(p.heatCount)}</td>
+                    <td className="num">
+                      {isEstimated(p.productionPlanStatus) ? <><span className="hl-cap" title="히트 편성 전이라 부족 수량으로 계산한 예상 히트예요">편성 전 · 예상</span>{' '}</> : null}
+                      {fmtInt(p.heatCount)}
+                    </td>
                     <td className="num">{fmtTon(p.heatTon)}</td>
                     <td className="num">{fmtTon(p.hotMetalTon)}</td>
                   </tr>

@@ -109,7 +109,7 @@ function ioText(r: ResultView): { input: string; output: string } {
       };
     default:
       return {
-        input: r.inputTon ? `슬래브 ${fmtTon(r.inputTon)}` : `남은 압연 ${r.plannedQty ?? dash}매`,
+        input: r.inputTon ? `슬래브 ${fmtTon(r.inputTon)}` : `남은 압연 ${r.plannedQty ?? dash}개`,
         output: r.outputQty !== null ? `코일 ${r.outputQty}개${r.outputTon ? ` · ${fmtTon(r.outputTon)}` : ''}` : dash,
       };
   }
