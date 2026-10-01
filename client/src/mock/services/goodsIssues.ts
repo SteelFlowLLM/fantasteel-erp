@@ -1,6 +1,6 @@
 // 출고 확정 (REQ-SHP-002·003, REQ-INV-005, REQ-SO-005, BP-SHP-01, 13.3 confirmGoodsIssue).
 // - 별도 출고 테이블·번호 없음: shipment_request.issued_at / issued_employee_id, 상태 ISSUED.
-// - 다시 확인: 배정 대기 남음 → INV-001, 소진·출고된 LOT → INV-004, 미검사·불합격(제품·상위 히트) → SHP-002, 예약·수주 잔량 초과 → SHP-002.
+// - 다시 확인: 배정 대기 남음 → INV-001, 소진·출고된 LOT → INV-004, 미검사·불합격(제품·상위 히트) → INV-002, 예약·수주 잔량 초과 → SHP-002.
 // - 처리: 배정 CONSUMED, LOT SHIPPED, 예약 ACTIVE → CONVERTED(부분이면 행 분할), shipped_qty·품목 상태, 재고, 밀시트(출하요청 × 수주).
 // - 작업 로그: GOODS_ISSUE_CONFIRMED(수주마다, LOT 전부 business_event_lot) → RESERVATION_CONVERTED → MILL_SHEET_ISSUED.
 import { itemStatusOf } from '@/lib/salesOrderStatus';
@@ -37,7 +37,7 @@ export function goodsIssueCheck(tables: Tables, shipmentRequestId: number): { re
     for (const allocation of allocations) {
       const lot = mustGet(tables, 'lot', allocation.lotId, 'LOT');
       if (lot.lotStatus !== 'AVAILABLE') problems.push({ code: 'INV-004', message: '이미 투입·출고된 LOT', lotNo: lot.lotNo });
-      else if (lotEligibility(tables, lot) !== 'ELIGIBLE') problems.push({ code: 'SHP-002', message: '미검사·불합격 LOT은 출고할 수 없어요', lotNo: lot.lotNo });
+      else if (lotEligibility(tables, lot) !== 'ELIGIBLE') problems.push({ code: 'INV-002', message: '미검사·불합격 LOT은 출고할 수 없어요', lotNo: lot.lotNo });
     }
   }
   return { ready: problems.length === 0, problems };

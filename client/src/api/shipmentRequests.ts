@@ -45,6 +45,8 @@ export interface ShipmentListRow extends ShipmentRequestSummary {
   itemCodes: string[];
   itemTypes: ProductItemType[];
   salesOrderIds: number[];
+  /** 수주 링크용 (id·번호 짝, 줄 순서) */
+  salesOrders: { salesOrderId: number; salesOrderNo: string }[];
   millSheets: { id: number; millSheetNo: string }[];
 }
 
@@ -99,6 +101,7 @@ function listRows(tables: Tables): ShipmentListRow[] {
       itemCodes: [...new Set(detail.lines.map((l) => l.itemCode))],
       itemTypes: [...new Set(detail.lines.map((l) => l.itemType))],
       salesOrderIds: [...new Set(detail.lines.map((l) => l.salesOrderId))],
+      salesOrders: [...new Map(detail.lines.map((l) => [l.salesOrderId, l.salesOrderNo])).entries()].map(([salesOrderId, salesOrderNo]) => ({ salesOrderId, salesOrderNo })),
       millSheets: detail.millSheets.map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
     };
   });

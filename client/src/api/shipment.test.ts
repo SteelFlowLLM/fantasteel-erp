@@ -228,8 +228,8 @@ describe('배정 확정·변경·해제 (INV-001~004)', () => {
   });
 });
 
-describe('출고 확정 재검증·취소 (SHP-002·SHP-003·INV-001·COM-001)', () => {
-  it('배정 대기면 INV-001, 미검사 LOT SHP-002(아무것도 출고 안 됨), 두 번째 확정은 COM-001', async () => {
+describe('출고 확정 재검증·취소 (INV-002·SHP-002·SHP-003·INV-001·COM-001)', () => {
+  it('배정 대기면 INV-001, 미검사 LOT INV-002·잔량 초과 SHP-002(아무것도 출고 안 됨), 두 번째 확정은 COM-001', async () => {
     const dr2 = requestIdOf('DR-2609-0002');
     const millSheetCount = read((t) => t.millSheet.length);
     actAs(SEED_EMPLOYEE_NO.logistics);
@@ -243,11 +243,21 @@ describe('출고 확정 재검증·취소 (SHP-002·SHP-003·INV-001·COM-001)',
     setLot(line.allocations[0].lotId, { isPassed: null });
     actAs(SEED_EMPLOYEE_NO.logistics);
     const blocked = await goodsIssueApi.detail(dr2);
-    expect(blocked.problems).toEqual([expect.objectContaining({ code: 'SHP-002', lotNo: line.allocations[0].lotNo })]);
-    await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'SHP-002' });
+    // 9.3: 미검사·불합격(제품·상위 히트)은 INV-002 '제품 또는 상위 히트가 미합격', SHP-002는 출하 가능 매수 초과에만 쓴다
+    expect(blocked.problems).toEqual([expect.objectContaining({ code: 'INV-002', lotNo: line.allocations[0].lotNo })]);
+    await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'INV-002' });
     expect(read((t) => t.shipmentRequest.find((r) => r.id === dr2)?.shipmentRequestStatus)).toBe('ALLOCATED');
     expect(read((t) => t.millSheet.length)).toBe(millSheetCount);
     setLot(line.allocations[0].lotId, { isPassed: true });
+    // 배정 뒤 수주 잔량이 줄어든 상황을 흉내 낸다 → 요청 매수가 출하 가능 매수를 넘으면 SHP-002
+    const soItem = read((t) => t.salesOrderItem.find((i) => i.id === line.salesOrderItemId));
+    if (!soItem) throw new Error('수주 품목 없음');
+    getMockDb().transact((tx) => updateRow(tx, 'salesOrderItem', soItem.id, { shippedQty: soItem.orderedQty - line.requestQty + 1 }));
+    const overRemaining = await goodsIssueApi.detail(dr2);
+    expect(overRemaining.problems).toEqual([expect.objectContaining({ code: 'SHP-002', lotNo: null })]);
+    await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'SHP-002' });
+    expect(read((t) => t.millSheet.length)).toBe(millSheetCount);
+    getMockDb().transact((tx) => updateRow(tx, 'salesOrderItem', soItem.id, { shippedQty: soItem.shippedQty }));
     await goodsIssueApi.confirm({ shipmentRequestId: dr2 });
     await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'COM-001' });
     const queue = await goodsIssueApi.queue();

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_MESSAGE } from '@/codes';
-import { isSameAsRecommendation, lineWeightTon, qtyUnitOf, requestQtyError, toggleLot, totalWeightTon, validQtyOf } from '@/features/shipment/lib/shipmentForm';
+import {
+  allocationLineSyncKey,
+  isSameAsRecommendation,
+  lineWeightTon,
+  panelAfterRefresh,
+  qtyUnitOf,
+  requestQtyError,
+  toggleLot,
+  totalWeightTon,
+  validQtyOf,
+  type AllocationLineState,
+} from '@/features/shipment/lib/shipmentForm';
 
 describe('출하 매수 입력 (SO-002·SHP-002)', () => {
   it('소수·0·음수·글자·빈칸은 SO-002 문구로 거부하고 값을 바꾸지 않는다', () => {
@@ -43,5 +54,38 @@ describe('단위·추천 비교·선택', () => {
     expect(toggleLot([1, 2], 3, 3)).toEqual([1, 2, 3]);
     expect(toggleLot([1, 2, 3], 4, 3)).toEqual([1, 2, 3]);
     expect(toggleLot([1, 2, 3], 2, 3)).toEqual([1, 3]);
+  });
+});
+
+describe('배정 카드 패널 — 다시 불러온 뒤 상태 맞추기 (REQ-INV-006)', () => {
+  const waitingLine: AllocationLineState = { editable: true, waitingAllocationQty: 2, allocations: [], recommendedLotIds: [11, 12] };
+  const allocatedLine: AllocationLineState = {
+    editable: true,
+    waitingAllocationQty: 0,
+    allocations: [
+      { allocationId: 1, allocationStatus: 'CONFIRMED' },
+      { allocationId: 2, allocationStatus: 'CONFIRMED' },
+    ],
+    recommendedLotIds: [],
+  };
+
+  it('[추천대로 모두 확정] 뒤 배정 대기가 0이면 펼친 추천을 닫는다', () => {
+    expect(allocationLineSyncKey(waitingLine)).not.toBe(allocationLineSyncKey(allocatedLine));
+    expect(panelAfterRefresh({ kind: 'recommend' }, allocatedLine)).toEqual({ kind: 'closed' });
+    expect(panelAfterRefresh({ kind: 'recommend' }, { ...waitingLine, waitingAllocationQty: 1 })).toEqual({ kind: 'recommend' });
+    expect(panelAfterRefresh({ kind: 'recommend' }, { ...waitingLine, editable: false })).toEqual({ kind: 'closed' });
+  });
+
+  it('바꾸려던 배정이 해제·소진되면 변경 패널을 닫고, 그대로면 둔다', () => {
+    const change = { kind: 'change', allocationId: 2, lotNo: 'L-2' } as const;
+    expect(panelAfterRefresh(change, allocatedLine)).toBe(change);
+    expect(panelAfterRefresh(change, { ...allocatedLine, allocations: [{ allocationId: 1, allocationStatus: 'CONFIRMED' }] })).toEqual({ kind: 'closed' });
+    expect(panelAfterRefresh(change, { ...allocatedLine, editable: false, allocations: [{ allocationId: 2, allocationStatus: 'CONSUMED' }] })).toEqual({ kind: 'closed' });
+    expect(panelAfterRefresh({ kind: 'closed' }, waitingLine)).toEqual({ kind: 'closed' });
+  });
+
+  it('추천 LOT이 바뀌면 비교 키가 달라진다 (고른 LOT을 새 추천으로 되돌림)', () => {
+    expect(allocationLineSyncKey({ ...waitingLine, recommendedLotIds: [12, 13] })).not.toBe(allocationLineSyncKey(waitingLine));
+    expect(allocationLineSyncKey({ ...waitingLine })).toBe(allocationLineSyncKey(waitingLine));
   });
 });

@@ -2,6 +2,7 @@
 // 출하요청 품목 하나의 배정 카드 (REQ-INV-006, BP-INV-02, 보고서 1 A-7 AllocationItemCard).
 // - 배정 대기가 있으면 FIFO 추천을 바로 펼친다(SHP-001). 추천대로 또는 직접 골라 확정 → CONFIRMED.
 // - 변경 = 기존 해제 + 새 배정 한 번에, 사유 필수(ALLOCATION_CHANGE). 해제는 사유 선택.
+// - 다시 불러온 데이터가 바뀌면(일괄 확정·다른 탭) 펼친 패널·고른 LOT을 새 상태에 맞춘다(panelAfterRefresh).
 // - 생산완료일은 날짜로 보인다(C-5-12). 추천은 저장하지 않고, 확정할 때 작업 로그(ALLOCATION_RECOMMENDED)에 남는다.
 import { useState } from 'react';
 import { PERMISSION, PRODUCT_QTY_UNIT } from '@/codes';
@@ -17,14 +18,12 @@ import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
 import { AllocationStatusBadge, ItemTypeTag, SalesOrderItemStatusBadge, SalesOrderLink, TraceLink } from '@/features/shipment/components/ShipmentBadges';
-import { isSameAsRecommendation, toggleLot } from '@/features/shipment/lib/shipmentForm';
+import { allocationLineSyncKey, isSameAsRecommendation, panelAfterRefresh, toggleLot, type AllocationPanel } from '@/features/shipment/lib/shipmentForm';
 import { useChangeShipmentAllocation, useConfirmShipmentAllocations, useReleaseShipmentAllocation } from '@/hooks/useShipmentRequests';
 import { fmtMDHM, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const REASON_MAX = 500;
-
-type Mode = { kind: 'closed' } | { kind: 'recommend' } | { kind: 'change'; allocationId: number; lotNo: string };
 
 export interface AllocationLineCardProps {
   shipmentRequestId: number;
@@ -37,7 +36,7 @@ export interface AllocationLineCardProps {
 export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit }: AllocationLineCardProps) {
   const unit = PRODUCT_QTY_UNIT[line.itemType];
   const waiting = line.waitingAllocationQty;
-  const [mode, setMode] = useState<Mode>(editable && waiting > 0 ? { kind: 'recommend' } : { kind: 'closed' });
+  const [mode, setMode] = useState<AllocationPanel>(editable && waiting > 0 ? { kind: 'recommend' } : { kind: 'closed' });
   const [selected, setSelected] = useState<number[]>(() => line.recommendedLots.map((l) => l.lotId));
   const [changeLotId, setChangeLotId] = useState<number | null>(null);
   const [reason, setReason] = useState('');
@@ -45,6 +44,23 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
   const [releaseReason, setReleaseReason] = useState('');
 
   const recommendedIds = line.recommendedLots.map((l) => l.lotId);
+  // 다시 불러온 데이터가 바뀌면([추천대로 모두 확정]·다른 탭의 배정 등) 고른 LOT은 새 추천으로 되돌리고, 펼친 패널은 새 상태에 맞춘다.
+  // (렌더 중 이전 값과 비교해 상태를 맞추는 React 방식 — effect 없이 한 번에 반영)
+  const lineState = { editable, waitingAllocationQty: waiting, allocations: line.allocations, recommendedLotIds: recommendedIds };
+  const syncKey = allocationLineSyncKey(lineState);
+  const [syncedKey, setSyncedKey] = useState(syncKey);
+  if (syncedKey !== syncKey) {
+    setSyncedKey(syncKey);
+    setSelected(recommendedIds);
+    const next = panelAfterRefresh(mode, lineState);
+    if (next !== mode) {
+      setMode(next);
+      setChangeLotId(null);
+      setReason('');
+    } else if (changeLotId !== null && !line.candidateLots.some((l) => l.lotId === changeLotId)) {
+      setChangeLotId(null);
+    }
+  }
   const closePanel = () => {
     setMode({ kind: 'closed' });
     setChangeLotId(null);

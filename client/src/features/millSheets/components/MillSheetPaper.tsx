@@ -1,10 +1,10 @@
 // 밀시트 종이 (옛 MillSheetPaper · v1 B안 hl-paper 모양). 저장된 스냅샷만으로 그린다 — 마스터·검사 데이터를 다시 읽지 않는다(REQ-SHP-003).
 // C 반영: '검사증명서'·출고번호·검사번호·종합 판정·'FantaSteel 제철소' 없음. 1장 = 출하요청 × 수주라 품목이 여러 줄일 수 있다.
-// 히트가 여럿이면 히트마다 성분 행을 따로 보인다(14.1-9).
-import type { ReactNode } from 'react';
+// 히트가 여럿이면 히트마다 성분 행을 따로 보인다(14.1-9). 기준은 강종·두께 구간마다 다르므로 기준이 같은 행끼리 묶어 묶음마다 '기준' 행을 둔다.
+import { Fragment, type ReactNode } from 'react';
 import { INSPECTION_RESULT_LABEL, ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, PRODUCT_QTY_UNIT, type InspectionResult, type ProcessType, type ProductItemType } from '@/codes';
 import type { MillSheetInspectionSnapshot, MillSheetSnapshot } from '@/api/millSheets';
-import { inspectionColumns, lotRowsOf, productInspectionGroups, rangeText, standardText } from '@/features/millSheets/lib/millSheetView';
+import { inspectionColumns, inspectionRangeGroups, lotRowsOf, productInspectionGroups, standardText } from '@/features/millSheets/lib/millSheetView';
 import { cn } from '@/lib/cn';
 import { fmtDate, fmtDateTime, fmtDims, fmtTon } from '@/lib/format';
 
@@ -32,9 +32,10 @@ interface MatrixRow {
   inspection: MillSheetInspectionSnapshot | null;
 }
 
-/** 검사 항목(열) × 대상(행). 첫 행은 기준(경계 포함). */
+/** 검사 항목(열) × 대상(행). 기준이 같은 행끼리 묶고, 묶음마다 첫 행에 그 묶음의 기준(경계 포함)을 둔다. */
 function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; rows: MatrixRow[]; emptyText: string }) {
   const columns = inspectionColumns(rows.map((r) => r.inspection));
+  const groups = inspectionRangeGroups(rows);
   return (
     <table className={TABLE}>
       <thead>
@@ -51,32 +52,36 @@ function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; r
         </tr>
       </thead>
       <tbody>
-        {columns.length > 0 ? (
-          <tr>
-            <td className="text-ink-3">기준</td>
-            {columns.map((c) => (
-              <td key={c.inspectionItemCode} className="text-right text-ink-3">
-                {rangeText(c.minValue, c.maxValue)}
-              </td>
+        {groups.map((group) => (
+          <Fragment key={group.key}>
+            {Object.keys(group.ranges).length > 0 ? (
+              <tr>
+                <td className="text-ink-3">기준</td>
+                {columns.map((c) => (
+                  <td key={c.inspectionItemCode} className="text-right text-ink-3">
+                    {group.ranges[c.inspectionItemCode] ?? '—'}
+                  </td>
+                ))}
+                <td />
+                <td className="font-mono text-ink-3">{group.standard}</td>
+              </tr>
+            ) : null}
+            {group.rows.map((row) => (
+              <tr key={row.key}>
+                <td>{row.head}</td>
+                {columns.map((c) => {
+                  const v = row.inspection?.values.find((x) => x.inspectionItemCode === c.inspectionItemCode);
+                  return (
+                    <td key={c.inspectionItemCode} className={cn('text-right font-semibold', v?.isPassed === false && 'text-danger')}>
+                      {v?.measuredValue ?? '—'}
+                    </td>
+                  );
+                })}
+                <td className={resultClass(row.inspection?.inspectionResult)}>{row.inspection ? resultLabel(row.inspection.inspectionResult) : '—'}</td>
+                <td className="font-mono text-ink-3">{standardText(row.inspection)}</td>
+              </tr>
             ))}
-            <td />
-            <td />
-          </tr>
-        ) : null}
-        {rows.map((row) => (
-          <tr key={row.key}>
-            <td>{row.head}</td>
-            {columns.map((c) => {
-              const v = row.inspection?.values.find((x) => x.inspectionItemCode === c.inspectionItemCode);
-              return (
-                <td key={c.inspectionItemCode} className={cn('text-right font-semibold', v?.isPassed === false && 'text-danger')}>
-                  {v?.measuredValue ?? '—'}
-                </td>
-              );
-            })}
-            <td className={resultClass(row.inspection?.inspectionResult)}>{row.inspection ? resultLabel(row.inspection.inspectionResult) : '—'}</td>
-            <td className="font-mono text-ink-3">{standardText(row.inspection)}</td>
-          </tr>
+          </Fragment>
         ))}
         {rows.length === 0 ? (
           <tr>
