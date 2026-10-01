@@ -1,4 +1,4 @@
-// LOT 목록 탭 (REQ-INV-001·003·007, LOT-001): LOT 번호 · 유형 · 규격 · 생산완료일(날짜) · 품질 결과 · 배정 여부 · 야드 · 상태
+// LOT 목록 탭 (REQ-INV-001·003·006·007·008, LOT-001): LOT 번호 · 유형 · 규격 · 생산완료일(날짜) · 품질 결과(검사 결과) · 배정 여부(배정 확정·소진) · 야드 · 상태
 import { useMemo, useState } from 'react';
 import { LOT_STATUS, LOT_STATUS_LABEL, LOT_TYPE, LOT_TYPE_LABEL, type LotStatus, type LotType } from '@/codes';
 import type { LotListView } from '@/api/inventories';
@@ -100,8 +100,8 @@ export function LotListTab({ lotType, lotStatus, onLotTypeChange, onLotStatusCha
               </div>
               <CardFoot>
                 <TableCaption>
-                  품질 결과: 슬래브·코일은 자기 검사와 상위 히트 성분 판정을 함께 봐요 · 히트는 성분 판정 · 원료·용선은 검사 대상이 아니에요 · 생산완료일은 원료면 입고일이에요 ·
-                  배정 여부는 확정된 배정의 목적이에요
+                  품질 결과: 슬래브·코일은 자기 검사와 상위 히트 성분 판정을 함께 봐요(투입 소진·출고된 LOT도) · 히트는 성분 판정 · 원료·용선은 검사 대상이 아니에요 ·
+                  생산완료일은 원료면 입고일이에요 · 배정 여부는 해제되지 않은 마지막 배정의 목적과 상태(배정 확정·소진)예요 · 여재 꼬리표는 여재 탭과 같은 기준이에요
                 </TableCaption>
               </CardFoot>
             </Card>
@@ -113,7 +113,7 @@ export function LotListTab({ lotType, lotStatus, onLotTypeChange, onLotStatusCha
 }
 
 function LotRow({ row }: { row: LotListView }) {
-  const quality = qualityDisplayOf(row.quality);
+  const quality = qualityDisplayOf(row.inspectionResult);
   const disposition = dispositionLabelOf(row.dispositionStatus);
   const isProduct = row.lotType === 'SLAB' || row.lotType === 'COIL';
   return (
@@ -139,21 +139,19 @@ function LotRow({ row }: { row: LotListView }) {
         )}
       </Td>
       <Td>
-        {isProduct ? (
-          row.allocationPurpose ? (
-            <Badge tone="run" plain>
-              {allocationLabelOf(row.allocationPurpose)}
-            </Badge>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-ink-2">
-              {allocationLabelOf(null)}
-              {row.surplusAt && row.lotStatus === 'AVAILABLE' ? (
-                <Badge tone="neutral" plain title={`여재 전환 ${fmtDate(row.surplusAt)}`}>
-                  여재
-                </Badge>
-              ) : null}
-            </span>
-          )
+        {isProduct && row.allocationPurpose ? (
+          <Badge tone={row.allocationStatus === 'CONFIRMED' ? 'run' : 'neutral'} plain>
+            {allocationLabelOf(row.allocationPurpose, row.allocationStatus)}
+          </Badge>
+        ) : isProduct && row.lotStatus === 'AVAILABLE' ? (
+          <span className="inline-flex items-center gap-1 text-ink-2">
+            {allocationLabelOf(null)}
+            {row.isSurplus ? (
+              <Badge tone="neutral" plain title={row.surplusAt ? `여재 전환 ${fmtDate(row.surplusAt)}` : undefined}>
+                여재
+              </Badge>
+            ) : null}
+          </span>
         ) : (
           <span className="text-ink-3">—</span>
         )}

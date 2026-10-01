@@ -10,30 +10,30 @@ import {
 } from '@/features/inventory/lib/inventoryDisplay';
 
 describe('품질 결과 표시 (공통 코드 INSPECTION_RESULT 표시명)', () => {
-  it('제품 적격·히트 합격 = 합격, 판정 대기, 불합격, 히트 불합격 = 불합격(히트)', () => {
-    expect(qualityDisplayOf('ELIGIBLE')).toMatchObject({ label: '합격', tone: 'ok' });
+  it('합격, 판정 대기, 불합격, 히트 불합격 = 불합격(히트)', () => {
     expect(qualityDisplayOf('PASS')).toMatchObject({ label: '합격', tone: 'ok' });
     expect(qualityDisplayOf('PENDING')).toMatchObject({ label: '판정 대기', tone: 'wait' });
-    expect(qualityDisplayOf('FAILED')).toMatchObject({ label: '불합격', tone: 'danger' });
     expect(qualityDisplayOf('FAIL')).toMatchObject({ label: '불합격', tone: 'danger' });
     expect(qualityDisplayOf('HEAT_FAILED')).toMatchObject({ label: '불합격(히트)', tone: 'danger' });
   });
 
-  it('원료·용선(null)과 투입·출고된 제품은 표시하지 않는다', () => {
+  it('원료·용선(null)은 표시하지 않는다', () => {
     expect(qualityDisplayOf(null)).toBeNull();
-    expect(qualityDisplayOf('NOT_AVAILABLE')).toBeNull();
   });
 
   it("'검사 대기'·'귀속' 같은 옛 문구를 쓰지 않는다", () => {
-    const labels = (['ELIGIBLE', 'PENDING', 'FAILED', 'HEAT_FAILED', 'PASS', 'FAIL'] as const).map((q) => qualityDisplayOf(q)?.label ?? '');
+    const labels = (['PENDING', 'HEAT_FAILED', 'PASS', 'FAIL'] as const).map((q) => qualityDisplayOf(q)?.label ?? '');
     expect(labels.join(' ')).not.toMatch(/검사 대기|귀속/);
   });
 });
 
 describe('배정·처리 상태·LOT 상태', () => {
-  it('배정 여부는 ALLOCATION_PURPOSE 표시명 + 배정, 없으면 미배정', () => {
+  it('배정 여부는 ALLOCATION_PURPOSE 표시명 + 배정 (+ ALLOCATION_STATUS 표시명), 없으면 미배정', () => {
     expect(allocationLabelOf('SHIPMENT')).toBe('출하 배정');
     expect(allocationLabelOf('HOT_ROLLING')).toBe('열연 투입 배정');
+    expect(allocationLabelOf('SHIPMENT', 'CONSUMED')).toBe('출하 배정 · 소진');
+    expect(allocationLabelOf('HOT_ROLLING', 'CONSUMED')).toBe('열연 투입 배정 · 소진');
+    expect(allocationLabelOf('SHIPMENT', 'CONFIRMED')).toBe('출하 배정 · 배정 확정');
     expect(allocationLabelOf(null)).toBe('미배정');
   });
 

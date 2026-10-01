@@ -121,7 +121,7 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
                 </Table>
                 <CardFoot>
                   <TableCaption>
-                    가용재고 = 합격 − 예약(유효) − 예약 밖 열연 배정(확정) · 여재(미배정 합격 슬래브)는 가용재고에 들어 있어요 · 판정 대기·불합격은 합격에 들어가지 않아요 ·
+                    가용재고 = 합격 − 예약(유효) − 예약 밖 열연 배정(확정) · 여재(수주에 쓰이지 않고 남은 미배정 합격 슬래브)는 가용재고에 들어 있어요 · 판정 대기·불합격은 합격에 들어가지 않아요 ·
                     톤 = 매수 × 1매 이론중량 계산값 · 단위: 슬래브 매, 코일 개
                   </TableCaption>
                 </CardFoot>
@@ -147,7 +147,7 @@ function ProductRow({ row }: { row: ProductInventoryView }) {
       </Td>
       <Td className="font-mono text-mono">{row.steelGradeCode ?? '—'}</Td>
       <Td>{row.thicknessMm && row.widthMm && row.lengthMm ? fmtDims(row.thicknessMm, row.widthMm, row.lengthMm) : '—'}</Td>
-      <Td align="right">{fmtTon(row.unitWeightTon)}</Td>
+      <Td align="right">{fmtTon(row.theoreticalWeightTon)}</Td>
       <Td align="right">
         <Qty value={row.onHandQty} unit={unit} />
       </Td>
