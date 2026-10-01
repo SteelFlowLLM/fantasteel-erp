@@ -4,6 +4,8 @@
 // - 시드 안에서 날짜를 바꿀 때는 seedTxAt(tx, '2026-09-15T09:00:00+09:00')처럼 같은 테이블을 쓰는 다른 시각의 tx를 만든다.
 // - 시드는 매번 같은 결과가 나와야 한다(고정 날짜·고정 난수 시드).
 import type { MockTx } from '@/mock/store';
+import { seedCore } from '@/mock/seeds/core';
+import { seedInspectionStandards } from '@/mock/seeds/inspectionStandards';
 
 export type AreaSeeder = (tx: MockTx) => void;
 
@@ -20,7 +22,10 @@ export function seedTxAt(tx: MockTx, isoDateTime: string): MockTx {
 
 export const AREA_SEEDERS: readonly AreaSeederEntry[] = [
   // ── 거래 시드 (core-domain이 등록) ──
-  // ── 영역 시드 (병합 단계에서 등록) ──
+  // 검사 기준(품질 기준정보)은 거래 시드가 검사 판정에 쓰므로 먼저 넣는다.
+  { key: 'inspectionStandards', run: seedInspectionStandards },
+  { key: 'core', run: seedCore },
+  // ── 영역 시드 (병합 단계에서 이 아래에 등록: seedAdmin, seedMaster, seedCollab …) ──
 ];
 
 export function runAreaSeeders(tx: MockTx): void {

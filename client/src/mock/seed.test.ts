@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { formatSpecCode, PERMISSIONS, RAW_MATERIAL_CODE_PATTERN, ROLE, ROLE_LABEL } from '@/codes';
 import { calcTheoreticalWeightTon, compareDecimal } from '@/lib/weight';
 import { createSeedTables, SEED_ROLE_PERMISSIONS } from '@/mock/seed';
+import { checkInvariants } from '@/mock/services/invariants';
 
 const tables = createSeedTables();
 const byId = <T extends { id: number }>(rows: readonly T[], id: number | null) => rows.find((r) => r.id === id);
@@ -149,9 +150,9 @@ describe('기준정보 시드', () => {
     expect(tables.productionSetting).toEqual([expect.objectContaining({ heatCapacityTon: '250.000', deliveryRiskDays: 3 })]);
   });
 
-  it('거래 데이터는 아직 없다', () => {
-    expect(tables.salesOrder).toHaveLength(0);
-    expect(tables.lot).toHaveLength(0);
-    expect(tables.businessEvent).toHaveLength(0);
+  it('거래 시드(core)는 불변조건을 지키고 모든 거래에 작업 로그가 있다', () => {
+    expect(checkInvariants(tables)).toEqual([]);
+    expect(tables.salesOrder.length).toBeGreaterThan(0);
+    for (const so of tables.salesOrder) expect(tables.businessEvent.some((e) => e.businessEventType === 'SALES_ORDER_CREATED' && e.targetId === so.id)).toBe(true);
   });
 });
