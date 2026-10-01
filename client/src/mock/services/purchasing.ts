@@ -285,13 +285,13 @@ const orderedLineOf = (tables: Tables, prItemId: number): PurchaseOrderItemRow |
 
 /**
  * 발주 (REQ-PUR-003): 승인된 요청 품목을 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건.
- * 발주량 = 요청 톤. 납기(입고 예정일) = 입력값, 없으면 묶인 요청의 가장 이른 희망 입고일.
+ * 발주량 = 요청 톤. 납기(입고예정일) = 입력값, 없으면 묶인 요청의 가장 이른 희망 입고일.
  */
 export function createPurchaseOrders(tx: MockTx, actor: PersonActor, input: { purchaseRequisitionItemIds: readonly number[]; dueDate?: string | null }): PurchaseOrderRow[] {
   const ids = [...new Set(input.purchaseRequisitionItemIds)];
   if (ids.length === 0) inputError('purchaseRequisitionItemIds', '발주할 요청 품목을 골라 주세요');
   const errors = new FieldErrors();
-  const dueDate = checkDate(errors, 'dueDate', input.dueDate, '입고 예정일', false);
+  const dueDate = checkDate(errors, 'dueDate', input.dueDate, '입고예정일', false);
   errors.throwIfAny();
   const lines = ids.map((id) => {
     const prItem = mustGet(tx.tables, 'purchaseRequisitionItem', id, '구매요청 품목');

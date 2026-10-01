@@ -220,7 +220,7 @@ export type PurchaseOrderCandidateItem = ReturnType<typeof orderableRequisitionI
 
 export interface PurchaseOrderCreateInput {
   purchaseRequisitionItemIds: readonly number[];
-  /** 입고 예정일(납기). '' = 고른 요청의 가장 이른 희망 입고일 */
+  /** 입고예정일(납기). '' = 고른 요청의 가장 이른 희망 입고일 */
   dueDate: string;
 }
 

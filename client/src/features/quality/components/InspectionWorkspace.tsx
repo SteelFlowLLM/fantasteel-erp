@@ -18,7 +18,7 @@ import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
-import { ERROR_MESSAGE, INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
+import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
@@ -289,7 +289,8 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       {data.standard === null ? (
         <Banner tone="danger" actions={<ButtonLink href="/quality/standards" size="sm">검사 기준</ButtonLink>}>
-          <b>{ERROR_MESSAGE['MST-001']} (MST-001)</b> · {PROCESS_TYPE_LABEL[lot.processType as ProcessType] ?? ''} {lot.steelGradeCode ?? ''} 검사 기준이 없어 판정할 수 없어요. 품질 담당이 검사 기준을 등록해야 해요.
+          {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다 (기준정보 준비 상태 띠와 같음, docs/rework/areas/master.md 4번) */}
+          <b>{PROCESS_TYPE_LABEL[lot.processType as ProcessType] ?? ''} {lot.steelGradeCode ?? ''} 검사 기준이 없어 판정할 수 없어요</b> <span className="font-mono text-cap">MST-001</span> · 품질 담당이 검사 기준을 등록해야 해요.
         </Banner>
       ) : null}
       {data.locked ? (

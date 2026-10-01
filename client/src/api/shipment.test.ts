@@ -47,8 +47,8 @@ describe('출하요청 → FIFO 배정 → 출고 확정 → 밀시트 (14.1 7~9
     const [line] = before.lines;
     expect(line.waitingAllocationQty).toBe(6);
     expect(line.recommendedLots).toHaveLength(6);
-    const order = line.recommendedLots.map((l) => `${l.producedDate}|${l.lotNo}`);
-    expect([...order].sort()).toEqual(order);
+    const fifoKeys = line.recommendedLots.map((l) => `${l.producedDate}|${l.lotNo}`);
+    expect([...fifoKeys].sort()).toEqual(fifoKeys);
     expect(line.recommendedLots.every((l) => l.yardName)).toBe(true);
 
     // 2) 추천대로 확정 → ALLOCATED, 추천은 작업 로그(FIFO_RECOMMENDATION)로만 남는다

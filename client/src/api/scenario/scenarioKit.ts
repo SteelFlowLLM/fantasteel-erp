@@ -80,8 +80,8 @@ export async function stockRawMaterialsViaApi(receiptDate: string, tons: Partial
   as('purchaseHead');
   await approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: (await purchaseRequisitionApi.detail(pr.id)).updatedAt });
   as('purchase');
-  const orders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: pr.items.map((i) => i.id), dueDate: '' });
-  for (const line of orders.flatMap((po) => po.items)) {
+  const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: pr.items.map((i) => i.id), dueDate: '' });
+  for (const line of purchaseOrders.flatMap((po) => po.items)) {
     await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
   }
 }

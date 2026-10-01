@@ -47,7 +47,7 @@ export const planSnapshot = (p: ProductionPlanRow) => ({
   isSurplusOnCompletion: p.isSurplusOnCompletion,
 });
 
-/** 기준정보로 히트를 편성한다. 수율·배합·규격 매핑이 없으면 MST-001 (BP-PRD-01 "확정하지 않는다"). */
+/** 기준정보로 히트를 편성한다. 수율·배합 원단위·규격 매핑이 없으면 MST-001 (BP-PRD-01 "확정하지 않는다"). */
 export function planHeatsFor(tables: Tables, item: ItemRow, shortageQty: number): HeatPlan {
   const productType: ProductItemType = productItemTypeOf(item);
   routingYieldOf(tables, productType, 'STEELMAKING');

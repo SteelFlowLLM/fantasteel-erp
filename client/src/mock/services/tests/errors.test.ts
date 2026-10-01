@@ -124,10 +124,10 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
     const { items } = createPurchaseRequisition(k.at(at), k.actor('purchase'), { items: [{ itemId: k.itemId('ORE01'), requiredTon: '10' }, { itemId: k.itemId('COL01'), requiredTon: '5' }] });
     approvePurchaseRequisition(k.at(at), k.actor('purchaseHead'), { purchaseRequisitionId: items[0].purchaseRequisitionId });
     const approvedItems = k.tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === approved?.id);
-    const orders = createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionItemIds: [...approvedItems, ...items].map((i) => i.id) });
+    const purchaseOrders = createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionItemIds: [...approvedItems, ...items].map((i) => i.id) });
     // 철광석 2줄(두 요청)은 가온광업 발주 1건, 석탄은 누리에너지 1건
-    expect(orders).toHaveLength(2);
-    expect(orders.map((o) => k.tables.purchaseOrderItem.filter((l) => l.purchaseOrderId === o.id).length).sort()).toEqual([1, 2]);
+    expect(purchaseOrders).toHaveLength(2);
+    expect(purchaseOrders.map((o) => k.tables.purchaseOrderItem.filter((l) => l.purchaseOrderId === o.id).length).sort()).toEqual([1, 2]);
   });
 });
 

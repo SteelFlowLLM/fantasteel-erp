@@ -199,7 +199,7 @@ export const salesOrderApi = {
 | `cancelShipmentRequest(tx, actor, {shipmentRequestId, expectedUpdatedAt?})` | ISSUED면 SHP-003. CONFIRMED 배정 해제, 예약은 ACTIVE 유지 | ALLOCATION_RELEASED (출하요청 취소 이벤트 유형은 29개에 없다) |
 | `listShipmentRequests` / `shipmentRequestDetail` | 요약(수주 번호들, 요청·배정·배정 대기, 톤) / 줄·배정 LOT·밀시트 | — |
 | `goodsIssueCheck(tables, requestId)` | 출고 전 재검증 결과(`ready`, `problems[{code, message, lotNo}]`) | — |
-| `confirmGoodsIssue(tx, actor, {shipmentRequestId, expectedUpdatedAt?})` | 이미 출고 COM-001(중복 없음), 배정 대기 INV-001, 소진 INV-004, **미검사·불합격 SHP-002**, 잔량 초과 SHP-002 → 배정 CONSUMED, LOT SHIPPED, 예약 CONVERTED(분할), shipped_qty·품목 상태, 재고, `issued_at`·`issued_employee_id`, ISSUED, **밀시트(출하요청 × 수주)** | GOODS_ISSUE_CONFIRMED(수주마다, LOT 전부) · RESERVATION_CONVERTED · MILL_SHEET_ISSUED(SYSTEM) |
+| `confirmGoodsIssue(tx, actor, {shipmentRequestId, expectedUpdatedAt?})` | 이미 출고 COM-001(중복 없음), 배정 대기 INV-001, 소진 INV-004, **미검사·불합격 INV-002**, 잔량 초과 SHP-002 → 배정 CONSUMED, LOT SHIPPED, 예약 CONVERTED(분할), shipped_qty·품목 상태, 재고, `issued_at`·`issued_employee_id`, ISSUED, **밀시트(출하요청 × 수주)** | GOODS_ISSUE_CONFIRMED(수주마다, LOT 전부) · RESERVATION_CONVERTED · MILL_SHEET_ISSUED(SYSTEM) |
 | `goodsIssueQueue(tables)` | 배정 확정 → 배정 대기 → 출고 완료 순, 출고 가능 여부 | — |
 | `listMillSheets` / `millSheetDetail(tables, id)` | `{row, snapshot}` — `MillSheetSnapshot`(고객사·수주·출하요청·품목(규격·적용 규격 번호·치수·이론중량·매수·톤)·LOT(생산완료일·히트·코일이면 슬래브 번호·제품 검사값과 기준 버전)·히트(성분 검사값과 기준 버전)·발행일·`lotIds`) | — |
 | `markMillSheetPdfGenerated(tx, actor, {millSheetId})` | 'PDF 생성'(인쇄) 뒤 `pdf_path = mill-sheets/<번호>.pdf`. 이미 있으면 그대로. 렌더 실패는 화면이 SHP-001로 알리고 부르지 않는다 | (해당 이벤트 유형 없음) |

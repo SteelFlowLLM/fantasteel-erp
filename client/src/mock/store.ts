@@ -3,7 +3,7 @@
 import { TABLE_NAMES, type MockTables, type NewRowValues, type RowOf, type TableName } from '@/mock/schema';
 
 /** 시드나 테이블 모양이 바뀌면 올린다. 저장 키가 바뀌어 옛 데이터는 지우고 시드로 다시 만든다. */
-export const MOCK_DB_VERSION = 3;
+export const MOCK_DB_VERSION = 4;
 const MOCK_DB_KEY_PREFIX = 'fantasteel.mock-db';
 /** localStorage 키 = BroadcastChannel 이름 (버전 포함, 예: fantasteel.mock-db.v1) */
 export const MOCK_DB_STORAGE_KEY = `${MOCK_DB_KEY_PREFIX}.v${MOCK_DB_VERSION}`;

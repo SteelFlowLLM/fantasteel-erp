@@ -27,7 +27,7 @@ export interface MrpRequirement {
 export interface MrpSupply {
   kind: 'ON_HAND' | 'SCHEDULED';
   materialId: number;
-  /** 입고예정이면 발주 납기(입고 예정일). 날짜가 없으면 필요일까지 도착한다고 보지 않는다. 잔량은 null(지금 있음). */
+  /** 입고예정이면 발주 납기(입고예정일). 날짜가 없으면 필요일까지 도착한다고 보지 않는다. 잔량은 null(지금 있음). */
   availableDate: string | null;
   ton: string;
   /** 이 공급을 먼저 쓸 계획 (구매요청 품목의 production_plan_id). 없으면 누구나 쓴다. */

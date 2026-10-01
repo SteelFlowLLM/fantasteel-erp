@@ -92,7 +92,7 @@ describe('lotTraceApi.trace', () => {
         createdEmployeeId: sales,
         cancelledAt: null,
       });
-      // 히트의 재고 슬래브 한 매를 그 코일 계획의 열연에 배정 (아직 압연 전)
+      // 히트의 재고 슬래브 한 매를 그 코일 계획의 열연에 배정 (아직 열연 전)
       const slab = insertRow(tx, 'lot', {
         lotNo: issueSlabLotNo(tx, heat.lotNo),
         lotType: 'SLAB',

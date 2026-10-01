@@ -115,7 +115,7 @@ export const dispositionApi = {
 
   /**
    * 재생산 계획 만들기 (REQ-PRD-006, 14.1-6). 같은 규격 여재로 먼저 예약하고, 그래도 부족할 때만 is_reproduction 계획.
-   * 오류: COM-002(생산계획·히트 편성 사용 권한), COM-003, MST-001(수율·배합·매핑 누락), 입력 오류(재생산할 매수 없음)
+   * 오류: COM-002(생산계획·히트 편성 사용 권한), COM-003, MST-001(수율·배합 원단위·매핑 누락), 입력 오류(재생산할 매수 없음)
    */
   createReproductionPlan: (input: { salesOrderItemId: number }): Promise<ReproductionOutcome> =>
     mockMutation((tx) => {

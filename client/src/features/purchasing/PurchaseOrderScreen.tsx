@@ -287,7 +287,7 @@ function PurchaseOrderForm({
       <Card>
         <CardHead title="발주 확정" meta={`${chosen.length} / ${allItems.length}개 품목 선택`} />
         <CardBody className="flex-row flex-wrap items-start gap-6">
-          <Field label="납기 (입고 예정일)" htmlFor="po-due-date" hint="비우면 발주마다 그 공급업체 품목의 가장 이른 희망 입고일이 납기가 돼요">
+          <Field label="납기 (입고예정일)" htmlFor="po-due-date" hint="비우면 발주마다 그 공급업체 품목의 가장 이른 희망 입고일이 납기가 돼요">
             <DateInput id="po-due-date" value={dueDate} onChange={setDueDate} />
           </Field>
           <div className="flex flex-col gap-1 text-sm">

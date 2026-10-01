@@ -126,7 +126,7 @@ export interface CreateSalesOrderResult {
 export function createSalesOrder(tx: MockTx, actor: PersonActor, input: CreateSalesOrderInput): CreateSalesOrderResult {
   const customer = mustGet(tx.tables, 'customer', input.customerId, '고객사');
   const lines = validateLines(tx.tables, input.items);
-  // 편성할 수 없는(수율·배합·매핑 누락) 규격이면 저장 전에 MST-001
+  // 편성할 수 없는(수율·배합 원단위·매핑 누락) 규격이면 저장 전에 MST-001
   previewSalesOrder(tx.tables, input.items);
 
   const salesOrder = insertRow(tx, 'salesOrder', {

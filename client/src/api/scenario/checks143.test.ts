@@ -54,12 +54,12 @@ describe('14.3 요구사항별 필수 검증 (P1, 화면 api)', () => {
     expect((await masterDataApi.listSpecMappings()).some((m) => m.slab.id === slabId)).toBe(false);
   });
 
-  it('INV-009: 같은 규격을 동시에 주문해도 ACTIVE 예약 합계 ≤ 가용 재고', async () => {
+  it('INV-009: 같은 규격을 동시에 수주해도 ACTIVE 예약 합계 ≤ 가용재고', async () => {
     at('2026-10-01T09:00:00+09:00');
     as('sales');
     const itemId = itemIdOf(SLAB_A);
-    const order = () => salesOrderApi.create({ customerId: customerIdOf('CUS-02'), items: [{ itemId, orderedQty: 5, dueDate: '2026-10-25' }] });
-    const results = await Promise.all([order(), order(), order()]);
+    const createSalesOrder = () => salesOrderApi.create({ customerId: customerIdOf('CUS-02'), items: [{ itemId, orderedQty: 5, dueDate: '2026-10-25' }] });
+    const results = await Promise.all([createSalesOrder(), createSalesOrder(), createSalesOrder()]);
     expect(results.reduce((sum, r) => sum + r.reservedQty, 0)).toBe(6);
     expect(results.reduce((sum, r) => sum + r.shortageQty, 0)).toBe(15 - 6);
     expect((await inventoryApi.listProducts()).find((r) => r.itemCode === SLAB_A)).toMatchObject({ reservedQty: 6, availableQty: 0 });

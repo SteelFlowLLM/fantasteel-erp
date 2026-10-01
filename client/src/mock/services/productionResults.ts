@@ -215,9 +215,9 @@ export function registerIronmaking(tx: MockTx, actor: PersonActor, input: Ironma
   for (const consumption of tx.tables.specificConsumption.filter((c) => c.steelGradeId === null)) {
     const material = mustGet(tx.tables, 'item', consumption.itemId, '원료');
     if (material.rawMaterialType === 'FERROALLOY') continue;
-    const needTon = rawMaterialTonFor(hotMetalTon, consumption.consumptionRate);
+    const requiredTon = rawMaterialTonFor(hotMetalTon, consumption.consumptionRate);
     const lots = stockLotsUntil(tx, (l) => l.lotType === 'RAW_MATERIAL' && l.itemId === material.id, completedDate);
-    plans.push({ itemName: material.itemName, ...planFifoDeduction(lots, needTon) });
+    plans.push({ itemName: material.itemName, ...planFifoDeduction(lots, requiredTon) });
   }
   const short = plans.filter((p) => decCmp(p.shortageTon, 0) > 0);
   if (short.length > 0) {
@@ -323,8 +323,8 @@ export function registerSteelmaking(
   for (const consumption of tx.tables.specificConsumption.filter((c) => c.steelGradeId !== null && c.steelGradeId === item.steelGradeId)) {
     const material = mustGet(tx.tables, 'item', consumption.itemId, '원료');
     if (material.rawMaterialType !== 'FERROALLOY') continue;
-    const needTon = ferroalloyTonFor(heatTon, consumption.consumptionRate);
-    alloyPlans.push({ itemName: material.itemName, ...planFifoDeduction(stockLotsUntil(tx, (l) => l.lotType === 'RAW_MATERIAL' && l.itemId === material.id, completedDate), needTon) });
+    const requiredTon = ferroalloyTonFor(heatTon, consumption.consumptionRate);
+    alloyPlans.push({ itemName: material.itemName, ...planFifoDeduction(stockLotsUntil(tx, (l) => l.lotType === 'RAW_MATERIAL' && l.itemId === material.id, completedDate), requiredTon) });
   }
   const shortages = [
     ...(decCmp(hotMetalPlan.shortageTon, 0) > 0 ? [`용선 ${hotMetalPlan.shortageTon}t`] : []),

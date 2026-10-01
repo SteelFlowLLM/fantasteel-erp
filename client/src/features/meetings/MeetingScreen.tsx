@@ -2,7 +2,7 @@
 
 // Voice2ERP 회의록 (P2 준비 중). 옛 B안 화면 3개(목록·새 회의·정리 결과)를 탭으로 보여 준다. 탭 전환만 화면 상태이고 기능·저장은 없다.
 // 고친 점 (reports/6 C-2·C-5, PLAN 7장): 원본 전사와 AI 요약을 나누고, AI_GENERATED 배지를 회의 정리 전체에 붙이지 않는다
-// (초안 상태는 구매요청 초안으로 보낸 뒤에만, 공통 코드 표시명으로). 회의록 항목은 ERD만, '대화방' 공유·안건·수주 연결은 뺐다.
+// (초안 상태는 구매요청 초안으로 보낸 뒤에만, 공통 코드 표시명으로). 회의록 항목은 ERD만, 채팅방 공유·안건·수주 연결은 뺐다.
 import { useState } from 'react';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';

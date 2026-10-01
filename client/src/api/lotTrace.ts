@@ -1,6 +1,6 @@
 // LOT 추적 조회 (REQ-LOT-005, BP-LOT-01, 업무 프로세스 12.2 GET /lots/:id/trace?direction=). 조회 전용이라 변경 함수가 없다.
 // - 시작점: LOT 번호 또는 출하요청 번호 (PLAN 6장: '출하번호' → '출하요청 번호').
-// - 계보는 lot_relation의 부모·자식 id로만 따라간다(LOT 번호를 해석하지 않음). 출하는 배정(SHIPMENT, CONFIRMED·CONSUMED)으로 잇는다.
+// - LOT 관계는 lot_relation의 부모·자식 id로만 따라간다(LOT 번호를 해석하지 않음). 출하는 배정(SHIPMENT, CONFIRMED·CONSUMED)으로 잇는다.
 // - LOT 추적은 모든 사원이 여는 화면이라(screens.ts) 로그인한 사용 중 사원인지만 확인한다.
 import type {
   AllocationPurpose,

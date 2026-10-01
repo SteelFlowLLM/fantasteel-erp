@@ -317,8 +317,8 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     expect(draftEvents.map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED', 'DRAFT_CONFIRMED', 'PURCHASE_REQUISITION_CREATED', 'DRAFT_EXECUTED', 'PURCHASE_REQUISITION_APPROVED']);
     expect(draftEvents.find((e) => e.businessEventType === 'DRAFT_CONFIRMED')?.reasonCode).toBe('DRAFT_CONFIRMED');
     expect(draftEvents.filter((e) => e.businessEventType !== 'PURCHASE_REQUISITION_APPROVED').every((e) => e.messageId === message.id)).toBe(true);
-    const workRoomOrder = t.salesOrder.find((s) => s.salesOrderNo === 'SO-2609-003');
-    expect(draftEvents[0].salesOrderId).toBe(workRoomOrder?.id);
+    const workRoomSalesOrder = t.salesOrder.find((s) => s.salesOrderNo === 'SO-2609-003');
+    expect(draftEvents[0].salesOrderId).toBe(workRoomSalesOrder?.id);
     expect(t.message.some((m) => m.chatRoomId === message.chatRoomId && m.senderId === 0 && m.content?.includes(pr?.purchaseRequisitionNo ?? '?'))).toBe(true);
     k.expectClean();
   });

@@ -65,7 +65,7 @@ describe('MRP 기간 · 시점별 차감', () => {
     expect(decCmp(pNetBefore, 0)).toBeGreaterThan(0);
     expect(octBefore.plans.some((p) => p.productionPlanId === planQ)).toBe(false);
 
-    // Q 몫 철광석 구매요청(production_plan_id = Q) → 승인 → 발주(입고 예정 10-10, P의 필요일보다 앞섬)
+    // Q 몫 철광석 구매요청(production_plan_id = Q) → 승인 → 발주(입고예정 10-10, P의 필요일보다 앞섬)
     const purchase = kit.actor('purchase');
     const { purchaseRequisition, items } = createPurchaseRequisition(kit.at(AT), purchase, {
       desiredReceiptDate: '2026-10-10',
