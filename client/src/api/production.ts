@@ -21,6 +21,7 @@ import {
   userActor,
   type ProductionPlanSummary,
   type ProductionPlanView,
+  type ProductionResultView,
 } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
@@ -242,4 +243,4 @@ export const productionPlanApi = {
     }),
 };
 
-export type { ProductionPlanSummary };
+export type { ProductionPlanSummary, ProductionResultView };
