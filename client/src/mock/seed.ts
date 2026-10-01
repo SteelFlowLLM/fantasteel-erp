@@ -19,6 +19,7 @@ import {
 import { calcTheoreticalWeightTon } from '@/lib/weight';
 import { createEmptyTables, type MockTables } from '@/mock/schema';
 import { findRow, insertRow, updateRow, type MockTx } from '@/mock/store';
+import { runAreaSeeders } from '@/mock/seeds';
 
 /** 시드 행의 생성·수정 시각: 2026-09-01 09:00 (Asia/Seoul) */
 export const SEED_AT = '2026-09-01T00:00:00.000Z';
@@ -330,5 +331,8 @@ export function createSeedTables(): MockTables {
   for (const d of tx.tables.department) {
     if (!findRow(tx.tables, 'employee', d.headEmployeeId)) throw new Error(`부서장이 없는 부서: ${d.departmentName}`);
   }
+
+  // 거래·협업 시드 (mock/seeds/index.ts에 등록된 순서대로)
+  runAreaSeeders(tx);
   return tx.tables;
 }

@@ -82,3 +82,14 @@ create: (input: CustomerInput) =>
 ## 8. 확인
 
 - `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 77개 통과(새 테스트: 권한 확인 7, 입력 확인 4, 조사 2, 첨부 저장소 1, 레일·화면 잠금 갱신), `npm run build -w @fantasteel/client` 성공.
+
+## 9. 병렬 작업용 뼈대 (메인 세션이 추가)
+
+- **오류 클래스 위치:** `ApiError`·`InputError`·`FieldErrors`는 `client/src/api/errors.ts`에 있다. `@/api/client`에서도 그대로 다시 내보낸다. 가짜 서버 서비스(`client/src/mock/services/**`)는 순환 참조를 피하려고 반드시 `@/api/errors`에서 가져온다.
+- **알림 만들기:** `client/src/mock/services/notifications.ts`의 `createNotifications(tx, { notificationType, title, body?, linkPath?, recipientEmployeeIds?, departmentId?, businessEventId?, excludeEmployeeIds? })` 하나만 쓴다.
+  - 개인 발송과 부서 발송을 모두 받는다. 부서 발송은 그 부서의 사용 중 사원 수만큼 행을 만든다.
+  - 같은 작업 로그·받는 사람 조합은 한 번만 만든다.
+- **거래·협업 시드 등록부:** `client/src/mock/seeds/index.ts`의 `AREA_SEEDERS`에 영역별 `seed<영역>(tx)`를 순서대로 등록한다.
+  - 날짜를 바꿀 때는 `seedTxAt(tx, iso)`를 쓴다.
+  - `createSeedTables()`가 기준정보 시드를 만든 뒤 `runAreaSeeders(tx)`로 실행한다.
+- **조회 무효화:** `useAction`은 변경이 성공하면 모든 조회를 무효화한다. 한 번의 변경이 수주·재고·LOT·알림 배지 같은 여러 화면에 걸치기 때문이다. `invalidate` 옵션은 먼저 다시 불러올 키로만 쓰인다.
