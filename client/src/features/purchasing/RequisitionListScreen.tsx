@@ -26,16 +26,16 @@ import { permissionNeedText } from '@/lib/permissions';
 
 const STATUS_FILTERS: readonly PurchaseRequisitionStatus[] = ['WAITING_APPROVAL', 'APPROVED', 'REJECTED', 'ORDERED'];
 
-function statusLine(pr: RequisitionView): string {
-  switch (pr.purchaseRequisitionStatus) {
+function statusLine(purchaseRequisition: RequisitionView): string {
+  switch (purchaseRequisition.purchaseRequisitionStatus) {
     case 'WAITING_APPROVAL':
-      return `${pr.departmentName ?? ''} 부서장 승인 대기`;
+      return `${purchaseRequisition.departmentName ?? ''} 부서장 승인 대기`;
     case 'APPROVED':
-      return `승인 ${pr.approverName ?? ''} ${fmtMD(pr.approvedAt)} · 발주 대기`;
+      return `승인 ${purchaseRequisition.approverName ?? ''} ${fmtMD(purchaseRequisition.approvedAt)} · 발주 대기`;
     case 'REJECTED':
-      return `반려 · ${pr.approverName ?? ''} · 고쳐 다시 요청 필요`;
+      return `반려 · ${purchaseRequisition.approverName ?? ''} · 고쳐 다시 요청 필요`;
     case 'ORDERED':
-      return `승인 ${pr.approverName ?? ''} · 발주 완료`;
+      return `승인 ${purchaseRequisition.approverName ?? ''} · 발주 완료`;
   }
 }
 
@@ -56,18 +56,18 @@ export function RequisitionListScreen() {
   const filtered = useMemo(() => {
     const word = keyword.trim().toLowerCase();
     return rows.filter(
-      (pr) =>
-        (status === null || pr.purchaseRequisitionStatus === status) &&
-        (source === null || pr.source === source) &&
-        (!mineOnly || pr.requesterId === me.employeeId) &&
+      (purchaseRequisition) =>
+        (status === null || purchaseRequisition.purchaseRequisitionStatus === status) &&
+        (source === null || purchaseRequisition.source === source) &&
+        (!mineOnly || purchaseRequisition.requesterId === me.employeeId) &&
         (word === '' ||
-          pr.purchaseRequisitionNo.toLowerCase().includes(word) ||
-          (pr.requesterName ?? '').includes(word) ||
-          pr.items.some((i) => i.itemName.includes(word) || i.itemCode.toLowerCase().includes(word))),
+          purchaseRequisition.purchaseRequisitionNo.toLowerCase().includes(word) ||
+          (purchaseRequisition.requesterName ?? '').includes(word) ||
+          purchaseRequisition.items.some((i) => i.itemName.includes(word) || i.itemCode.toLowerCase().includes(word))),
     );
   }, [rows, status, source, mineOnly, keyword, me.employeeId]);
   const activeId = selectedId ?? filtered[0]?.id ?? null;
-  const countOf = (value: PurchaseRequisitionStatus) => rows.filter((pr) => pr.purchaseRequisitionStatus === value).length;
+  const countOf = (value: PurchaseRequisitionStatus) => rows.filter((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === value).length;
 
   return (
     <>
@@ -106,7 +106,7 @@ export function RequisitionListScreen() {
               <span className="text-cap text-ink-3">출처</span>
               {REQUISITION_SOURCES.map((value) => (
                 <Chip key={value} on={source === value} onClick={() => setSource(source === value ? null : value)}>
-                  {REQUISITION_SOURCE_LABEL[value]} <b>{rows.filter((pr) => pr.source === value).length}</b>
+                  {REQUISITION_SOURCE_LABEL[value]} <b>{rows.filter((purchaseRequisition) => purchaseRequisition.source === value).length}</b>
                 </Chip>
               ))}
             </div>
@@ -123,27 +123,27 @@ export function RequisitionListScreen() {
               <EmptyNote>{rows.length === 0 ? '등록된 구매요청이 없어요' : mineOnly ? '내가 등록한 구매요청이 없어요' : '조건에 맞는 구매요청이 없어요'}</EmptyNote>
             ) : (
               <>
-                {filtered.map((pr) => (
+                {filtered.map((purchaseRequisition) => (
                   <MasterItem
-                    key={pr.id}
-                    selected={pr.id === activeId}
-                    onClick={() => url.set({ pr: pr.id })}
-                    onDoubleClick={() => router.push(`/purchase-requisitions/${pr.id}`)}
+                    key={purchaseRequisition.id}
+                    selected={purchaseRequisition.id === activeId}
+                    onClick={() => url.set({ pr: purchaseRequisition.id })}
+                    onDoubleClick={() => router.push(`/purchase-requisitions/${purchaseRequisition.id}`)}
                     title="두 번 누르면 상세 화면이 열려요"
                   >
                     <span className="flex items-center gap-2">
-                      <b className="font-mono text-sm font-semibold">{pr.purchaseRequisitionNo}</b>
-                      <RequisitionStatusBadge status={pr.purchaseRequisitionStatus} />
-                      <span className="ml-auto text-cap text-ink-3">{pr.desiredReceiptDate ? `희망 ${fmtMD(pr.desiredReceiptDate)}` : ''}</span>
+                      <b className="font-mono text-sm font-semibold">{purchaseRequisition.purchaseRequisitionNo}</b>
+                      <RequisitionStatusBadge status={purchaseRequisition.purchaseRequisitionStatus} />
+                      <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-sm text-ink">
-                      {summarizeItemNames(pr.items)}
-                      <span className="text-ink-3">· {fmtTon(pr.totalTon)}</span>
+                      {summarizeItemNames(purchaseRequisition.items)}
+                      <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                      {pr.requesterName ?? '-'}
-                      <RequisitionSourceTag source={pr.source} />
-                      <span className="truncate">{statusLine(pr)}</span>
+                      {purchaseRequisition.requesterName ?? '-'}
+                      <RequisitionSourceTag source={purchaseRequisition.source} />
+                      <span className="truncate">{statusLine(purchaseRequisition)}</span>
                     </span>
                   </MasterItem>
                 ))}

@@ -92,7 +92,7 @@ export function MrpScreen() {
             기본 기간
           </Button>
           <span className="mb-1.5 ml-auto max-w-[460px] text-cap leading-4 text-ink-3">
-            필요일(연결 수주 품목 납기, 수주 연결이 없으면 계획 등록일)이 기간 안에 있는 계획·진행중 생산계획의 남은 히트로 계산해요. 결과는 저장하지 않고, 원료 LOT 잔량·입고예정은 지금 값이에요.
+            필요일(연결 수주 품목 납기, 수주 연결이 없으면 계획 등록일)이 기간 안에 있는 계획·진행중 생산계획의 남은 히트로 계산해요. 원료 LOT 잔량·입고예정은 필요일이 앞선 계획부터 쓰므로, 시작일 전에 필요한 밀린 계획도 &apos;기간 전&apos;으로 함께 보여요. 결과는 저장하지 않고, 잔량·입고예정은 지금 값이에요.
           </span>
           {canCreate ? null : <ReadOnlyHint permissions={[PERMISSION.PURCHASE_REQUISITION_CREATE]} className="w-full" />}
         </CardBody>
@@ -265,7 +265,10 @@ function MrpResult({
                     <Td align="right" className="font-semibold">
                       {fmtTon(line.netTon)}
                     </Td>
-                    <Td>{fmtDate(line.needDate)}</Td>
+                    <Td>
+                      {fmtDate(line.needDate)}
+                      {line.needDate < mrp.from ? <BeforePeriodBadge /> : null}
+                    </Td>
                     <Td align="right">
                       {line.existingPurchaseRequisitionNo ? (
                         <span className="text-cap text-ink-3">이미 요청했어요 · {line.existingPurchaseRequisitionNo}</span>
@@ -332,7 +335,10 @@ function MrpResult({
                         {plan.steelGradeCode ?? '-'} · {plan.itemName}
                       </Td>
                       <Td className="font-mono">{plan.salesOrderNo ?? <span className="font-sans text-ink-3">연결 없음</span>}</Td>
-                      <Td>{fmtDate(plan.needDate)}</Td>
+                      <Td>
+                        {fmtDate(plan.needDate)}
+                        {plan.beforePeriod ? <BeforePeriodBadge /> : null}
+                      </Td>
                       <Td align="right">{fmtInt(plan.remainingHeatCount)}</Td>
                       <Td align="right">{fmtTon(plan.heatTon)}</Td>
                       <Td align="right">{fmtTon(plan.requiredHotMetalTon)}</Td>
@@ -363,5 +369,14 @@ function MrpResult({
         </CardBody>
       </Card>
     </>
+  );
+}
+
+/** 필요일이 기간 시작 전인 미생산 계획(밀린 소요): 기간 안 계획보다 먼저 잔량·입고예정을 쓴다 */
+function BeforePeriodBadge() {
+  return (
+    <Badge tone="wait" className="ml-1.5" title="필요일이 기간 시작 전인데 아직 남은 히트가 있는 계획이에요. 기간 안 계획보다 먼저 원료 LOT 잔량·입고예정을 써요">
+      기간 전
+    </Badge>
   );
 }

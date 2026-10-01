@@ -26,7 +26,7 @@ export function ApprovalScreen() {
   const canOpenDetail = useCanView(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const rows = inbox.data ?? [];
   const activeId = selectedId ?? rows[0]?.id ?? null;
-  const activeIndex = rows.findIndex((pr) => pr.id === activeId);
+  const activeIndex = rows.findIndex((purchaseRequisition) => purchaseRequisition.id === activeId);
   const next = activeIndex >= 0 ? rows[activeIndex + 1] : undefined;
 
   // 승인·반려한 요청은 목록에서 빠지므로 다음 요청으로 넘어간다 (주소에 없으면 첫 요청)
@@ -49,19 +49,19 @@ export function ApprovalScreen() {
               <EmptyNote>승인 대기 구매요청이 없어요</EmptyNote>
             ) : (
               <>
-                {data.map((pr) => (
-                  <MasterItem key={pr.id} selected={pr.id === activeId} onClick={() => url.set({ pr: pr.id })}>
+                {data.map((purchaseRequisition) => (
+                  <MasterItem key={purchaseRequisition.id} selected={purchaseRequisition.id === activeId} onClick={() => url.set({ pr: purchaseRequisition.id })}>
                     <span className="flex items-center gap-2">
-                      <b className="font-mono text-sm font-semibold">{pr.purchaseRequisitionNo}</b>
-                      <RequisitionStatusBadge status={pr.purchaseRequisitionStatus} />
-                      <span className="ml-auto text-cap text-ink-3">{pr.desiredReceiptDate ? `희망 ${fmtMD(pr.desiredReceiptDate)}` : ''}</span>
+                      <b className="font-mono text-sm font-semibold">{purchaseRequisition.purchaseRequisitionNo}</b>
+                      <RequisitionStatusBadge status={purchaseRequisition.purchaseRequisitionStatus} />
+                      <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
                     </span>
                     <span className="text-sm text-ink">
-                      {summarizeItemNames(pr.items)} <span className="text-ink-3">· {fmtTon(pr.totalTon)}</span>
+                      {summarizeItemNames(purchaseRequisition.items)} <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                      {pr.requesterName ?? '-'} · {pr.departmentName ?? '-'} · 등록 {fmtMDHM(pr.createdAt)}
-                      <RequisitionSourceTag source={pr.source} />
+                      {purchaseRequisition.requesterName ?? '-'} · {purchaseRequisition.departmentName ?? '-'} · 등록 {fmtMDHM(purchaseRequisition.createdAt)}
+                      <RequisitionSourceTag source={purchaseRequisition.source} />
                     </span>
                   </MasterItem>
                 ))}

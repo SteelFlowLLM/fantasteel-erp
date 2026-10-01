@@ -21,7 +21,7 @@ const REQUISITION_TONE: Record<PurchaseRequisitionStatus, BadgeTone> = {
   ORDERED: 'ok',
 };
 
-const ORDER_TONE: Record<PurchaseOrderStatus, BadgeTone> = {
+const PURCHASE_ORDER_TONE: Record<PurchaseOrderStatus, BadgeTone> = {
   CONFIRMED: 'run',
   PARTIALLY_RECEIVED: 'wait',
   RECEIVED: 'ok',
@@ -39,7 +39,7 @@ export function RequisitionStatusBadge({ status }: { status: PurchaseRequisition
 }
 
 export function PurchaseOrderStatusBadge({ status }: { status: PurchaseOrderStatus }) {
-  return <Badge tone={ORDER_TONE[status]}>{PURCHASE_ORDER_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={PURCHASE_ORDER_TONE[status]}>{PURCHASE_ORDER_STATUS_LABEL[status]}</Badge>;
 }
 
 export function PlanStatusBadge({ status }: { status: ProductionPlanStatus }) {

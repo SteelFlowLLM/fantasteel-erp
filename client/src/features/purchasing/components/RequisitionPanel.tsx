@@ -61,14 +61,16 @@ function stageText(detail: RequisitionDetail): string {
     case 'REJECTED':
       return `${detail.approverName ?? '부서장'} 반려 ${fmtDateTime(detail.rejectedAt)} · 요청자가 고쳐 다시 요청할 수 있어요`;
     case 'ORDERED':
-      return `발주 완료 · ${[...new Set(detail.orderLines.map((l) => l.purchaseOrderNo))].join(', ')}`;
+      return `발주 완료 · ${[...new Set(detail.purchaseOrderLines.map((l) => l.purchaseOrderNo))].join(', ')}`;
   }
 }
 
 function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: RequisitionPanelProps & { detail: RequisitionDetail }) {
   const canCreate = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
-  const canOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
+  const canConfirmPurchaseOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
   const canSeeOrders = useCanView(PERMISSION.PURCHASE_ORDER_CONFIRM, PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_REQUISITION_CREATE);
+  // 발주 화면(/purchase-orders)은 발주 확정 조회 이상만 열린다(shell screens.ts). 그 밖에는 발주번호를 글자로만 보인다.
+  const canOpenPurchaseOrders = useCanView(PERMISSION.PURCHASE_ORDER_CONFIRM);
   const canSeeMrp = useCanView(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -90,8 +92,8 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
 
   const status = detail.purchaseRequisitionStatus;
   const hasUnordered = detail.items.some((i) => i.purchaseOrderNo === null);
-  const orderedTotal = decSum(detail.orderLines.map((l) => l.orderedTon));
-  const receivedTotal = decSum(detail.orderLines.map((l) => l.receivedTon));
+  const orderedTotal = decSum(detail.purchaseOrderLines.map((l) => l.orderedTon));
+  const receivedTotal = decSum(detail.purchaseOrderLines.map((l) => l.receivedTon));
   const planNos = [...new Set(detail.items.map((i) => i.productionPlanNo).filter((no): no is string => no !== null))];
 
   const submitReject = () => {
@@ -122,7 +124,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
               </ButtonLink>
             ) : null}
             {status === 'APPROVED' && hasUnordered ? (
-              canOrder ? (
+              canConfirmPurchaseOrder ? (
                 <ButtonLink href={`/purchase-orders?pr=${detail.id}`} variant="primary" icon="building" size="sm">
                   발주 만들기
                 </ButtonLink>
@@ -254,9 +256,9 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
 
       {canSeeOrders ? (
         <Card>
-          <CardHead title="연결 발주" meta={detail.orderLines.length > 0 ? `입고 ${fmtTon(receivedTotal)} / 발주 ${fmtTon(orderedTotal)}` : undefined} />
+          <CardHead title="연결 발주" meta={detail.purchaseOrderLines.length > 0 ? `입고 ${fmtTon(receivedTotal)} / 발주 ${fmtTon(orderedTotal)}` : undefined} />
           <CardBody flush>
-            {detail.orderLines.length === 0 ? (
+            {detail.purchaseOrderLines.length === 0 ? (
               <EmptyNote>{status === 'APPROVED' ? '아직 발주하지 않았어요. 구매 담당이 발주 화면에서 발주해요' : '승인된 뒤에 발주할 수 있어요'}</EmptyNote>
             ) : (
               <Table>
@@ -273,12 +275,16 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                   </tr>
                 </thead>
                 <tbody>
-                  {detail.orderLines.map((line) => (
+                  {detail.purchaseOrderLines.map((line) => (
                     <tr key={`${line.purchaseOrderId}-${line.purchaseRequisitionLineNo}`}>
                       <Td>
-                        <Link className="font-mono text-run hover:underline" href={`/purchase-orders?po=${line.purchaseOrderId}`}>
-                          {line.purchaseOrderNo}
-                        </Link>
+                        {canOpenPurchaseOrders ? (
+                          <Link className="font-mono text-run hover:underline" href={`/purchase-orders?po=${line.purchaseOrderId}`}>
+                            {line.purchaseOrderNo}
+                          </Link>
+                        ) : (
+                          <span className="font-mono">{line.purchaseOrderNo}</span>
+                        )}
                       </Td>
                       <Td>{line.itemName}</Td>
                       <Td>{line.supplierName}</Td>

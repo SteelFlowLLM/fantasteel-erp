@@ -49,7 +49,7 @@ export const purchaseRequisitionKeys = {
 export const purchaseOrderKeys = {
   all: ['purchase-orders'] as const,
   list: () => ['purchase-orders', 'list'] as const,
-  orderableItems: () => ['purchase-orders', 'orderable-items'] as const,
+  candidateItems: () => ['purchase-orders', 'candidate-items'] as const,
 };
 
 
@@ -70,7 +70,7 @@ export interface RequisitionResubmitInput extends RequisitionInput {
 }
 
 /** 구매요청에 묶인 발주 줄 */
-export interface RequisitionOrderLine {
+export interface RequisitionPurchaseOrderLine {
   purchaseOrderId: number;
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
@@ -91,7 +91,7 @@ export interface RequisitionDetail extends RequisitionView {
   isRequester: boolean;
   /** 보는 사원이 승인·반려할 수 있는지 (요청 부서 부서장 + 승인 대기) */
   canApprove: boolean;
-  orderLines: RequisitionOrderLine[];
+  purchaseOrderLines: RequisitionPurchaseOrderLine[];
   /** Message → ERP에서 온 요청이면 초안·원본 메시지 */
   sourceDraft: {
     id: number;
@@ -109,11 +109,11 @@ export interface RequisitionFormContext {
   headName: string | null;
 }
 
-function requisitionOrderLines(tables: Tables, pr: PurchaseRequisitionRow): RequisitionOrderLine[] {
-  const prItems = tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === pr.id);
-  return prItems.flatMap((prItem) =>
+function requisitionPurchaseOrderLines(tables: Tables, purchaseRequisition: PurchaseRequisitionRow): RequisitionPurchaseOrderLine[] {
+  const purchaseRequisitionItems = tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === purchaseRequisition.id);
+  return purchaseRequisitionItems.flatMap((purchaseRequisitionItem) =>
     tables.purchaseOrderItem
-      .filter((line) => line.purchaseRequisitionItemId === prItem.id)
+      .filter((line) => line.purchaseRequisitionItemId === purchaseRequisitionItem.id)
       .flatMap((line) => {
         const po = findById(tables, 'purchaseOrder', line.purchaseOrderId);
         if (!po) return [];
@@ -124,7 +124,7 @@ function requisitionOrderLines(tables: Tables, pr: PurchaseRequisitionRow): Requ
             purchaseOrderStatus: po.purchaseOrderStatus,
             supplierName: findById(tables, 'supplier', po.supplierId)?.supplierName ?? '',
             dueDate: po.dueDate,
-            purchaseRequisitionLineNo: prItem.lineNo,
+            purchaseRequisitionLineNo: purchaseRequisitionItem.lineNo,
             itemName: findById(tables, 'item', line.itemId)?.itemName ?? '',
             orderedTon: line.orderedTon,
             receivedTon: line.receivedTon,
@@ -141,16 +141,16 @@ function activeHeadNameOf(tables: Tables, departmentId: number): string | null {
   return head && head.isActive ? head.employeeName : null;
 }
 
-function requisitionDetailOf(tables: Tables, pr: PurchaseRequisitionRow, viewerId: number): RequisitionDetail {
-  const requester = findById(tables, 'employee', pr.requesterId);
-  const draft = pr.actionDraftId !== null && findById(tables, 'actionDraft', pr.actionDraftId) ? actionDraftView(tables, pr.actionDraftId) : null;
+function requisitionDetailOf(tables: Tables, purchaseRequisition: PurchaseRequisitionRow, viewerId: number): RequisitionDetail {
+  const requester = findById(tables, 'employee', purchaseRequisition.requesterId);
+  const draft = purchaseRequisition.actionDraftId !== null && findById(tables, 'actionDraft', purchaseRequisition.actionDraftId) ? actionDraftView(tables, purchaseRequisition.actionDraftId) : null;
   return {
-    ...requisitionView(tables, pr),
+    ...requisitionView(tables, purchaseRequisition),
     requesterJobGradeName: requester ? employeeBasicsOf(tables, requester).jobGradeName : null,
-    departmentHeadName: activeHeadNameOf(tables, pr.departmentId),
-    isRequester: pr.requesterId === viewerId,
-    canApprove: canApproveRequisition(tables, viewerId, pr),
-    orderLines: requisitionOrderLines(tables, pr),
+    departmentHeadName: activeHeadNameOf(tables, purchaseRequisition.departmentId),
+    isRequester: purchaseRequisition.requesterId === viewerId,
+    canApprove: canApproveRequisition(tables, viewerId, purchaseRequisition),
+    purchaseOrderLines: requisitionPurchaseOrderLines(tables, purchaseRequisition),
     sourceDraft: draft ? { id: draft.id, draftStatus: draft.draftStatus, confirmedAt: draft.confirmedAt, message: draft.message } : null,
   };
 }
@@ -167,13 +167,13 @@ export const purchaseRequisitionApi = {
   detail: (id: number): Promise<RequisitionDetail> =>
     mockQuery((tables) => {
       const actor = requireActor(tables);
-      const pr = findById(tables, 'purchaseRequisition', id);
-      if (!pr) throw new ApiError('COM-003', `구매요청 ${id}`);
-      const isApprover = findById(tables, 'department', pr.departmentId)?.headEmployeeId === actor.employee.id;
-      if (!canView(actor, ...REQUISITION_VIEW_PERMISSIONS) && pr.requesterId !== actor.employee.id && !isApprover) {
+      const purchaseRequisition = findById(tables, 'purchaseRequisition', id);
+      if (!purchaseRequisition) throw new ApiError('COM-003', `구매요청 ${id}`);
+      const isApprover = findById(tables, 'department', purchaseRequisition.departmentId)?.headEmployeeId === actor.employee.id;
+      if (!canView(actor, ...REQUISITION_VIEW_PERMISSIONS) && purchaseRequisition.requesterId !== actor.employee.id && !isApprover) {
         throw new ApiError('COM-002', '구매요청 조회 권한이 필요해요');
       }
-      return requisitionDetailOf(tables, pr, actor.employee.id);
+      return requisitionDetailOf(tables, purchaseRequisition, actor.employee.id);
     }),
 
   /** 등록 창: 요청자·소속 부서·승인권자 */
@@ -216,7 +216,7 @@ export const purchaseRequisitionApi = {
 
 // ── 발주 ─────────────────────────────────────────────
 
-export type OrderableRequisitionItem = ReturnType<typeof orderableRequisitionItems>[number];
+export type PurchaseOrderCandidateItem = ReturnType<typeof orderableRequisitionItems>[number];
 
 export interface PurchaseOrderCreateInput {
   purchaseRequisitionItemIds: readonly number[];
@@ -233,7 +233,7 @@ export const purchaseOrderApi = {
     }),
 
   /** 발주할 수 있는 요청 품목: 승인됨·미발주, 품목의 기본 공급업체 포함 */
-  orderableItems: (): Promise<OrderableRequisitionItem[]> =>
+  candidateItems: (): Promise<PurchaseOrderCandidateItem[]> =>
     mockQuery((tables) => {
       requireActor(tables, { view: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
       return orderableRequisitionItems(tables);
@@ -243,10 +243,10 @@ export const purchaseOrderApi = {
   create: (input: PurchaseOrderCreateInput): Promise<PurchaseOrderView[]> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
-      const orders = createPurchaseOrders(tx, userActor(actor.employee.id), {
+      const purchaseOrders = createPurchaseOrders(tx, userActor(actor.employee.id), {
         purchaseRequisitionItemIds: input.purchaseRequisitionItemIds,
         dueDate: input.dueDate || null,
       });
-      return orders.map((po) => purchaseOrderView(tx.tables, po));
+      return purchaseOrders.map((po) => purchaseOrderView(tx.tables, po));
     }),
 };

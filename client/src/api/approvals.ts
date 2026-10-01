@@ -24,7 +24,7 @@ export const approvalApi = {
   countWaiting: (employeeId: number): Promise<number> =>
     mockQuery((tables) => {
       const headOf = new Set(tables.department.filter((d) => d.headEmployeeId === employeeId).map((d) => d.id));
-      return tables.purchaseRequisition.filter((pr) => pr.purchaseRequisitionStatus === 'WAITING_APPROVAL' && headOf.has(pr.departmentId)).length;
+      return tables.purchaseRequisition.filter((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL' && headOf.has(purchaseRequisition.departmentId)).length;
     }),
 
   /** 승인함: 내가 부서장인 부서의 승인 대기 구매요청 (먼저 온 것부터). 부서장이 아니면 COM-002. */

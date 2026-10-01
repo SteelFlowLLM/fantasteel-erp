@@ -170,7 +170,7 @@ export function resubmitPurchaseRequisition(
   assertNotChanged(pr.updatedAt, input.expectedUpdatedAt, '구매요청');
   if (pr.requesterId !== actor.employeeId) throw new ApiError('COM-002', '요청자만 고칠 수 있어요');
   if (pr.purchaseRequisitionStatus !== 'REJECTED') inputError('purchaseRequisitionId', '반려된 구매요청만 고쳐 다시 요청할 수 있어요');
-  const { headEmployeeId } = headOfRequesterDepartment(tx.tables, actor.employeeId);
+  const { departmentId, headEmployeeId } = headOfRequesterDepartment(tx.tables, actor.employeeId);
   const lines = validateRequisitionLines(tx.tables, input.items, pr.id);
   const errors = new FieldErrors();
   const desiredReceiptDate = checkDate(errors, 'desiredReceiptDate', input.desiredReceiptDate, '희망 입고일', false);
@@ -184,6 +184,7 @@ export function resubmitPurchaseRequisition(
   const updated =
     updateRow(tx, 'purchaseRequisition', pr.id, {
       purchaseRequisitionStatus: 'WAITING_APPROVAL',
+      departmentId, // 다시 요청한 시점의 요청자 소속 부서 = 승인 부서 (알림 받는 부서장과 승인권자를 맞춘다, REQ-AUTH-004)
       desiredReceiptDate,
       requestReason,
       rejectReason: null,
