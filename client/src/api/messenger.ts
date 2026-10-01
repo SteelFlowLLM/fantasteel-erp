@@ -4,7 +4,7 @@
 // - 업무방 상단 수주 요약은 수주 화면을 열 수 있는 사원에게만 보인다("ERP 대상 조회 권한").
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { CHAT_ROOM_TYPE, type ChatRoomType, type ItemType, type SalesOrderItemStatus } from '@/codes';
+import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
 import { MESSAGE_CONTENT_MAX, memberIdsOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
@@ -70,7 +70,8 @@ export interface WorkRoomSalesOrderItemView {
   id: number;
   lineNo: number;
   itemCode: string;
-  itemType: ItemType;
+  /** 수주 품목은 제품(슬래브·코일)만 */
+  itemType: ProductItemType;
   steelGradeCode: string | null;
   orderedQty: number;
   shippedQty: number;
@@ -241,7 +242,7 @@ function salesOrderSummaryOf(tables: Readonly<MockTables>, salesOrderId: number)
         id: line.id,
         lineNo: line.lineNo,
         itemCode: item?.itemCode ?? '-',
-        itemType: item?.itemType ?? 'SLAB',
+        itemType: item?.itemType === 'COIL' ? 'COIL' : 'SLAB',
         steelGradeCode,
         orderedQty: line.orderedQty,
         shippedQty: line.shippedQty,
@@ -315,7 +316,7 @@ function requireActiveEmployees(tables: Readonly<MockTables>, ids: readonly numb
   }
 }
 
-const fileExtensionOk = (name: string) => name.trim().length > 0 && name.length <= 255;
+const isValidFileName = (name: string) => name.trim().length > 0 && name.length <= 255;
 
 // ── API ────────────────────────────────────────────────
 
@@ -500,7 +501,7 @@ export const messengerApi = {
       if (content.length > MESSAGE_CONTENT_MAX) errors.add('content', `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요`);
       if (!content && !file) errors.add('content', '보낼 메시지나 파일을 넣어 주세요');
       if (file) {
-        if (!fileExtensionOk(file.name)) errors.add('file', '파일 이름은 255자까지예요');
+        if (!isValidFileName(file.name)) errors.add('file', '파일 이름은 255자까지예요');
         if (file.size > MOCK_FILE_MAX_BYTES) errors.add('file', `파일은 ${Math.round(MOCK_FILE_MAX_BYTES / 1024)}KB까지 보낼 수 있어요`);
         if (!file.dataUrl.startsWith('data:')) errors.add('file', '파일을 읽지 못했어요. 다시 골라 주세요');
       }

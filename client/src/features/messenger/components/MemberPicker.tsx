@@ -22,8 +22,8 @@ export interface MemberPickerProps {
 }
 
 /** 이 부서와 하위 부서의 부서원 */
-function memberIdsUnder(node: OrgChartNode): number[] {
-  return [...node.members.map((m) => m.id), ...node.children.flatMap(memberIdsUnder)];
+function collectMemberIds(node: OrgChartNode): number[] {
+  return [...node.members.map((m) => m.id), ...node.children.flatMap(collectMemberIds)];
 }
 
 function Check({ checked, indeterminate, single, disabled, label, onChange }: { checked: boolean; indeterminate?: boolean; single?: boolean; disabled?: boolean; label: string; onChange: () => void }) {
@@ -62,7 +62,7 @@ export function MemberPicker({ selected, onChange, single, excludeIds = [], lock
   };
 
   const toggleDepartment = (node: OrgChartNode) => {
-    const ids = memberIdsUnder(node).filter((id) => !excluded.has(id) && !locked.has(id));
+    const ids = collectMemberIds(node).filter((id) => !excluded.has(id) && !locked.has(id));
     const allOn = ids.length > 0 && ids.every((id) => chosen.has(id));
     onChange(allOn ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])]);
   };
@@ -75,7 +75,7 @@ export function MemberPicker({ selected, onChange, single, excludeIds = [], lock
     : [];
 
   const renderNode = (node: OrgChartNode, depth: number) => {
-    const ids = memberIdsUnder(node).filter((id) => !excluded.has(id));
+    const ids = collectMemberIds(node).filter((id) => !excluded.has(id));
     const eligible = ids.filter((id) => !locked.has(id));
     const pickedCount = ids.filter((id) => chosen.has(id) || locked.has(id)).length;
     const isCollapsed = collapsed.has(node.id);

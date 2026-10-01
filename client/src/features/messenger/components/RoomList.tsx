@@ -11,7 +11,7 @@ import { EmptyNote } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
 import { Tag } from '@/components/Tag';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
-import { shortTimeOf } from '@/features/messenger/lib/dayLabel';
+import { formatShortTime } from '@/features/messenger/lib/dayLabel';
 import { cn } from '@/lib/cn';
 import { fmtMD } from '@/lib/format';
 
@@ -118,7 +118,7 @@ function RoomRow({ room, active, showType, onSelect }: { room: ChatRoomListItem;
               {CHAT_ROOM_TYPE_LABEL[room.chatRoomType]}
             </Tag>
           ) : null}
-          <time className="ml-auto flex-none text-cap text-ink-3">{shortTimeOf(last?.createdAt ?? room.createdAt)}</time>
+          <time className="ml-auto flex-none text-cap text-ink-3">{formatShortTime(last?.createdAt ?? room.createdAt)}</time>
         </span>
         <span className="flex items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{lastLine}</span>

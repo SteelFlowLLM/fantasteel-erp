@@ -1,18 +1,12 @@
 // 업무방 상단 수주 정보 (REQ-MSG-001 "업무방은 수주에 연결하고 상단에 수주 정보를 표시", REQ-MSG-006 수주 화면 이동)
 import Link from 'next/link';
-import { ITEM_TYPE_LABEL, SALES_ORDER_ITEM_STATUS_LABEL, type SalesOrderItemStatus } from '@/codes';
-import type { ChatRoomDetailView, WorkRoomSalesOrderView } from '@/api/messenger';
-import { Badge, type BadgeTone } from '@/components/Badge';
+import { ITEM_TYPE_LABEL } from '@/codes';
+import type { ChatRoomDetailView, WorkRoomSalesOrderItemView } from '@/api/messenger';
 import { ButtonLink } from '@/components/Button';
 import { Icon } from '@/components/Icon';
-import { dLabel, fmtInt, fmtTon } from '@/lib/format';
-
-export const SALES_ORDER_ITEM_STATUS_TONE: Record<SalesOrderItemStatus, BadgeTone> = {
-  OPEN: 'run',
-  PARTIALLY_SHIPPED: 'wait',
-  SHIPPED: 'ok',
-  CANCELLED: 'neutral',
-};
+import { formatItemQty } from '@/features/messenger/lib/salesOrderQty';
+import { SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
+import { dLabel, fmtTon } from '@/lib/format';
 
 /** 수주 요약을 못 보일 때의 안내 */
 export function salesOrderStateNote(room: ChatRoomDetailView): string | null {
@@ -50,7 +44,7 @@ export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
             납기 {salesOrder.dueDate} ({dLabel(salesOrder.dueDate)})
           </span>
         ) : null}
-        {salesOrder.cancelledAt ? <Badge tone="neutral">취소</Badge> : null}
+        {salesOrder.cancelledAt ? <SalesOrderStatusBadge status="CANCELLED" /> : null}
         <ButtonLink href={salesOrder.linkPath} size="sm" className="ml-auto">
           수주 상세
         </ButtonLink>
@@ -62,16 +56,17 @@ export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
   );
 }
 
-function SalesOrderItemLine({ item }: { item: WorkRoomSalesOrderView['items'][number] }) {
+function SalesOrderItemLine({ item }: { item: WorkRoomSalesOrderItemView }) {
+  const qty = formatItemQty(item);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs text-ink-2">
       <span className="font-mono text-ink-3">{item.lineNo}</span>
       <span>{ITEM_TYPE_LABEL[item.itemType]}</span>
       <span className="font-mono">{item.itemCode}</span>
       <span>
-        · {fmtInt(item.orderedQty)}매{item.orderedTon ? ` (${fmtTon(item.orderedTon)})` : ''} · 출고 {fmtInt(item.shippedQty)}매
+        · {qty.ordered}{item.orderedTon ? ` (${fmtTon(item.orderedTon)})` : ''} · 출고 {qty.shipped}
       </span>
-      <Badge tone={SALES_ORDER_ITEM_STATUS_TONE[item.salesOrderItemStatus]}>{SALES_ORDER_ITEM_STATUS_LABEL[item.salesOrderItemStatus]}</Badge>
+      <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
     </div>
   );
 }
@@ -99,22 +94,25 @@ export function WorkRoomSummary({ room }: { room: ChatRoomDetailView }) {
         <dd>{salesOrder.items.length}품목</dd>
       </dl>
       <ul className="flex flex-col gap-2">
-        {salesOrder.items.map((item) => (
+        {salesOrder.items.map((item) => {
+          const qty = formatItemQty(item);
+          return (
           <li key={item.id} className="flex flex-col gap-0.5 rounded-sm border border-line bg-surface-2 px-2.5 py-2 text-xs">
             <span className="flex items-center gap-1.5">
               <span className="font-mono text-ink-3">{item.lineNo}</span>
               <b className="font-semibold">{ITEM_TYPE_LABEL[item.itemType]}</b>
               {item.steelGradeCode ? <span className="text-ink-2">{item.steelGradeCode}</span> : null}
-              <Badge tone={SALES_ORDER_ITEM_STATUS_TONE[item.salesOrderItemStatus]} className="ml-auto">
-                {SALES_ORDER_ITEM_STATUS_LABEL[item.salesOrderItemStatus]}
-              </Badge>
+              <span className="ml-auto">
+                <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
+              </span>
             </span>
             <span className="font-mono text-ink-2">{item.itemCode}</span>
             <span className="text-ink-3">
-              수주 {fmtInt(item.orderedQty)}매{item.orderedTon ? ` · ${fmtTon(item.orderedTon)}` : ''} · 출고 {fmtInt(item.shippedQty)}매 · 납기 {item.dueDate}
+              수주 {qty.ordered}{item.orderedTon ? ` · ${fmtTon(item.orderedTon)}` : ''} · 출고 {qty.shipped} · 납기 {item.dueDate}
             </span>
           </li>
-        ))}
+          );
+        })}
       </ul>
       <ButtonLink href={salesOrder.linkPath} size="sm">
         수주 상세

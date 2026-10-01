@@ -15,13 +15,13 @@ import { usePopover } from '@/hooks/usePopover';
 import { cn } from '@/lib/cn';
 import { fmtBytes, fmtHM } from '@/lib/format';
 
-const linkLabelOf = (link: ErpLink): string => {
+const getLinkLabel = (link: ErpLink): string => {
   if (link.href.startsWith('/sales-orders/')) return `수주 상세 ${link.text}`;
   if (link.href.startsWith('/purchase-requisitions/')) return `구매요청 보기 ${link.text}`;
   return `출하요청 보기 ${link.text}`;
 };
 
-const extensionOf = (name: string) => (name.includes('.') ? name.split('.').pop()?.toUpperCase() ?? '' : '');
+const getFileExtension = (name: string) => (name.includes('.') ? name.split('.').pop()?.toUpperCase() ?? '' : '');
 
 export function MessageBubble({ message, room, mentionNames, myNames }: { message: MessageView; room: ChatRoomDetailView; mentionNames: readonly string[]; myNames: readonly string[] }) {
   const me = useMe();
@@ -87,7 +87,7 @@ export function MessageBubble({ message, room, mentionNames, myNames }: { messag
               .slice(0, 3)
               .map((link) => (
                 <Link key={link.href} href={link.href} className="text-xs font-medium text-brand hover:underline">
-                  {linkLabelOf(link)} →
+                  {getLinkLabel(link)} →
                 </Link>
               ))}
           </div>
@@ -107,7 +107,7 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
         <b className="truncate text-sm font-medium">{name}</b>
         <span className="text-cap text-ink-3">
           {fmtBytes(size)}
-          {extensionOf(name) ? ` · ${extensionOf(name)}` : ''}
+          {getFileExtension(name) ? ` · ${getFileExtension(name)}` : ''}
         </span>
       </span>
       <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate(messageId)} />

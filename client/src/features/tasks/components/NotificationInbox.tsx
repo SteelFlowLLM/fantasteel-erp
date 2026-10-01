@@ -13,7 +13,7 @@ import { PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
-import { dayLabelOf } from '@/features/messenger/lib/dayLabel';
+import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { NOTIFICATION_TYPE_TONE } from '@/features/tasks/lib/notificationTone';
 import { useAction } from '@/hooks/useAction';
 import { useNotificationList } from '@/hooks/useNotifications';
@@ -92,7 +92,7 @@ export function NotificationInbox({ focusId }: { focusId: number | null }) {
                     return (
                       <div key={notification.id}>
                         {showDay ? (
-                          <div className="sticky top-0 z-[1] border-b border-line bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">{dayLabelOf(notification.createdAt)}</div>
+                          <div className="sticky top-0 z-[1] border-b border-line bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">{formatDayLabel(notification.createdAt)}</div>
                         ) : null}
                         <NotificationRow notification={notification} focused={notification.id === focusId} onOpen={() => openNotification(notification)} />
                       </div>
