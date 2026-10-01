@@ -1,5 +1,6 @@
-// 로그인 (B안 디자인). 사원번호·비밀번호 → 서버 발급 JWT (REQ-AUTH-001).
-import { useState, type FormEvent } from 'react';
+// 로그인 (B안 디자인). 시연용: 입력 폼 없이 테스트 계정을 골라 들어간다. 서버 JWT 발급은 그대로 (REQ-AUTH-001).
+// 로그인 기능은 전면 재작업 예정 — 그때 사원번호·비밀번호 폼을 다시 만든다.
+import { useState } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '@/api/client';
 import { authApi } from '@/api/auth';
@@ -24,34 +25,23 @@ export function LoginPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [employeeNo, setEmployeeNo] = useState('');
-  const [password, setPassword] = useState('');
-  const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const next = params.get('next') || '/dashboard';
 
   if (session) return <Navigate to={next.startsWith('/login') ? '/dashboard' : next} replace />;
 
-  const login = async (no: string, pw: string) => {
-    if (!no.trim() || !pw) {
-      setError('사원번호와 비밀번호를 입력해 주세요');
-      return;
-    }
+  const login = async (no: string) => {
     setPending(true);
     setError(null);
     try {
-      setSession(await authApi.login(no.trim(), pw));
+      setSession(await authApi.login(no, DEMO_PASSWORD));
       navigate(next.startsWith('/login') ? '/dashboard' : next, { replace: true });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '로그인하지 못했어요');
     } finally {
       setPending(false);
     }
-  };
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    void login(employeeNo, password);
   };
 
   return (
@@ -103,46 +93,26 @@ export function LoginPage() {
       </section>
       <section aria-label="로그인" style={{ flex: 1, minWidth: 0, background: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: '56px 24px 24px' }}>
-          <form style={{ width: 400, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={submit}>
+          <div style={{ width: 400, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="hl-col" style={{ gap: 4 }}>
-              <h2 style={{ fontSize: 24, lineHeight: '32px', fontWeight: 600, margin: 0 }}>로그인</h2>
-              <p className="hl-muted" style={{ fontSize: 13, margin: 0 }}>사원번호와 비밀번호를 입력하세요.</p>
+              <h2 style={{ fontSize: 24, lineHeight: '32px', fontWeight: 600, margin: 0 }}>계정 선택</h2>
+              <p className="hl-muted" style={{ fontSize: 13, margin: 0 }}>시연용이에요. 계정을 누르면 그 역할로 바로 들어가요.</p>
             </div>
-            <div className="hl-field">
-              <label htmlFor="login-no">사원번호</label>
-              <span className="hl-inputwrap">
-                <i className="ic ic-user" style={{ top: 12 }} />
-                <input id="login-no" className="hl-input" type="text" inputMode="numeric" style={{ height: 40 }} placeholder="예: 2104012" value={employeeNo} onChange={(e) => setEmployeeNo(e.target.value)} autoComplete="username" autoFocus />
-              </span>
-            </div>
-            <div className="hl-field">
-              <label htmlFor="login-pw">비밀번호</label>
-              <span className="hl-inputwrap">
-                <i className="ic ic-key" style={{ top: 12 }} />
-                <input id="login-pw" className={`hl-input${error ? ' is-error' : ''}`} type={show ? 'text' : 'password'} style={{ height: 40, paddingRight: 40 }} placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-invalid={!!error} aria-describedby={error ? 'login-err' : undefined} />
-                <button className="hl-iconbtn hl-iconbtn--sm" style={{ position: 'absolute', right: 6, top: 6 }} aria-label={show ? '비밀번호 숨기기' : '비밀번호 보기'} type="button" onClick={() => setShow(!show)}>
-                  <i className="ic ic-eye" style={{ position: 'static' }} />
-                </button>
-              </span>
-              {error ? <span id="login-err" role="alert" className="hl-row" style={{ gap: 5, fontSize: 12, lineHeight: '16px', color: '#C0322B' }}><Icon name="alert" size="sm" />{error}</span> : null}
-            </div>
-            <button type="submit" className="hl-btn hl-btn--primary hl-btn--lg" style={{ width: '100%' }} disabled={pending}>{pending ? '로그인 중…' : '로그인'}</button>
-            <div className="hl-col" style={{ gap: 6, paddingTop: 14, borderTop: '1px solid #DDE2E7' }}>
-              <div className="hl-row"><b style={{ fontSize: 13 }}>테스트 계정</b><span className="hl-cap">누르면 바로 로그인해요 (로컬 시연용)</span></div>
-              <ul className="hl-col" style={{ gap: 0, border: '1px solid #DDE2E7', borderRadius: 6, listStyle: 'none', padding: 0, margin: 0 }}>
-                {DEMO.map((d, i) => (
-                  <li key={d.no}>
-                    <button type="button" className="hl-row" disabled={pending} onClick={() => void login(d.no, DEMO_PASSWORD)} style={{ width: '100%', gap: 10, height: 32, padding: '0 10px', border: 0, borderBottom: i < DEMO.length - 1 ? '1px solid #DDE2E7' : 0, background: 'transparent', color: '#121820', fontSize: 12.5, textAlign: 'left' }}>
-                      <span className="hl-role" style={{ width: 50, justifyContent: 'center', whiteSpace: 'nowrap' }}>{d.role}</span>
-                      <b style={{ fontWeight: 600, width: 48 }}>{d.name}</b>
-                      <span className="hl-cap">{d.note}</span>
-                      <Icon name="chevron-right" size="sm" style={{ marginLeft: 'auto', color: '#5E6977' }} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </form>
+            <ul className="hl-col" style={{ gap: 0, border: '1px solid #DDE2E7', borderRadius: 6, listStyle: 'none', padding: 0, margin: 0 }}>
+              {DEMO.map((d, i) => (
+                <li key={d.no}>
+                  <button type="button" className="hl-row" disabled={pending} onClick={() => void login(d.no)} style={{ width: '100%', gap: 10, height: 44, padding: '0 12px', border: 0, borderBottom: i < DEMO.length - 1 ? '1px solid #DDE2E7' : 0, background: 'transparent', color: '#121820', fontSize: 13, textAlign: 'left' }}>
+                    <span className="hl-role" style={{ width: 50, justifyContent: 'center', whiteSpace: 'nowrap' }}>{d.role}</span>
+                    <b style={{ fontWeight: 600, width: 48 }}>{d.name}</b>
+                    <span className="hl-cap">{d.note}</span>
+                    <Icon name="chevron-right" size="sm" style={{ marginLeft: 'auto', color: '#5E6977' }} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {pending ? <span className="hl-cap">들어가는 중…</span> : null}
+            {error ? <span role="alert" className="hl-row" style={{ gap: 5, fontSize: 12, lineHeight: '16px', color: '#C0322B' }}><Icon name="alert" size="sm" />{error}</span> : null}
+          </div>
         </div>
         <footer className="hl-row" style={{ height: 48, flex: 'none', padding: '0 40px', gap: 8, fontSize: 11, color: '#5E6977', borderTop: '1px solid #DDE2E7' }}>
           <Icon name="shield" size="sm" />

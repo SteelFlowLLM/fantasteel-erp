@@ -9,20 +9,21 @@
 
 ## 실행
 
-필요: Node.js 22.18 이상. 처음 한 번만 설치합니다.
+필요: Node.js 22.18 이상. 클론한 뒤 이 두 줄이면 됩니다 (`.env` 없어도 됩니다).
 
 ```bash
 npm install
-```
-
-```bash
 npm run dev
 ```
 
-브라우저에서 http://localhost:5173 을 엽니다. 로그인 화면의 **테스트 계정**을 누르면 바로 들어갑니다 (직접 입력 시 비밀번호 `heatline`).
+브라우저에서 http://localhost:5173 을 엽니다. 지금은 시연용이라 로그인 입력 없이 **계정 선택** 화면에서 역할 계정을 누르면 바로 들어갑니다 (로그인은 재작업 예정).
 
-`npm run dev`는 네 가지를 함께 띄웁니다: 로컬 PostgreSQL(포트 54322) · shared 빌드 · API 서버(8787) · 화면(5173).
-이 PC에는 PostgreSQL·Docker가 없어서 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 DB를 띄웁니다.
+- `npm install` — 설치 뒤 shared 빌드와 Prisma Client 생성(`prisma generate`)까지 자동으로 합니다.
+- `npm run dev` — 로컬 PostgreSQL(포트 54322) · shared 빌드 · API 서버(8787) · 화면(5173)을 함께 띄웁니다. 서버를 띄우기 전에 마이그레이션을 적용하고, DB가 비어 있으면 시드를 넣습니다(`server/scripts/prepare-db.mjs`).
+- PostgreSQL·Docker 설치 없이 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 DB를 띄웁니다.
+- `server/.env`는 다른 DB(예: Supabase)를 쓸 때만 만듭니다. 없으면 로컬 DB 주소와 기본값을 씁니다.
+
+같은 네트워크의 팀원은 `http://<실행한 PC의 IP>:5173` 으로 접속할 수 있습니다 (Windows 방화벽에서 5173 허용 필요).
 
 ### 데이터
 

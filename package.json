@@ -12,10 +12,11 @@
     "node": ">=22.18"
   },
   "scripts": {
+    "postinstall": "npm run build -w shared && npm run generate -w server",
     "db": "node scripts/local-db.mjs",
     "dev": "concurrently -k -n db,shared,server,client -c gray,yellow,blue,magenta \"npm:db\" \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:client\"",
     "dev:shared": "npm run dev -w shared",
-    "dev:server": "wait-on tcp:54322 shared/dist/index.js && npm run dev -w server",
+    "dev:server": "wait-on tcp:54322 shared/dist/index.js && npm run db:prepare -w server && npm run dev -w server",
     "dev:client": "wait-on shared/dist/index.mjs && npm run dev -w client",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "migrate": "npm run migrate -w server",

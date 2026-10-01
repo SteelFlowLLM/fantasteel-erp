@@ -11,6 +11,7 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
+    "db:prepare": "node scripts/prepare-db.mjs",
     "test": "node scripts/test.mjs"
   },
   "dependencies": {

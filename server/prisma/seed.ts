@@ -7,7 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import { calcTheoreticalWeightTon, DEFAULT_ROLE_PERMISSIONS, ROLE_CODE_LABEL, ROLE_CODES } from '@fantasteel/shared';
 import { PrismaClient } from '../src/generated/prisma/client';
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54322/fantasteel' }) });
 
 /** 테스트 계정 공통 비밀번호 (로컬 시연용). */
 export const SEED_PASSWORD = 'heatline';
