@@ -156,6 +156,22 @@ export function measuredValueChanges(beforeData: JsonValue | null, afterData: Js
     .filter((change) => (change.before === null || change.after === null ? change.before !== change.after : decCmp(change.before, change.after) !== 0));
 }
 
+/** 검사 항목 이름이 없을 때 화면에 쓰는 말. 영문 항목 코드는 화면에 내보내지 않는다 (common.md Names) */
+export const UNKNOWN_ITEM_NAME = '검사 항목';
+
+/** 작업 로그에서 INSPECTION_REGISTERED 전후 값에 나온 검사 항목 코드 (이력 카드의 이름표를 만들 때 쓴다) */
+export function inspectionItemCodesOfHistory(
+  events: readonly { businessEventType: string; beforeData: JsonValue | null; afterData: JsonValue | null }[],
+): string[] {
+  const codes = new Set<string>();
+  for (const event of events) {
+    if (event.businessEventType !== 'INSPECTION_REGISTERED') continue;
+    for (const code of valuesOfSnapshot(event.beforeData).keys()) codes.add(code);
+    for (const code of valuesOfSnapshot(event.afterData).keys()) codes.add(code);
+  }
+  return [...codes];
+}
+
 /** 작업 로그 스냅샷의 판정 결과 (없으면 null) */
 export function inspectionResultOfSnapshot(snapshot: JsonValue | null): 'PENDING' | 'PASS' | 'FAIL' | null {
   const result = asRecord(snapshot)?.inspectionResult;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fillTypicalValues,
   gaugeGeometry,
+  inspectionItemCodesOfHistory,
   inspectionResultOfSnapshot,
   limitText,
   measuredValueChanges,
@@ -101,5 +102,17 @@ describe('작업 로그 전후 비교 (REQ-QC-003)', () => {
     expect(measuredValueChanges(null, after)).toHaveLength(3);
     expect(inspectionResultOfSnapshot(before)).toBe('FAIL');
     expect(inspectionResultOfSnapshot(null)).toBeNull();
+  });
+});
+
+describe('작업 로그의 검사 항목 코드', () => {
+  it('검사 등록의 전후 값에 나온 코드만 모으고, 다른 종류의 작업 로그는 건너뛴다', () => {
+    const values = (codes: string[]) => ({ inspectionResult: 'PASS', values: codes.map((c) => ({ inspectionItemCode: c, measuredValue: '1' })) });
+    const codes = inspectionItemCodesOfHistory([
+      { businessEventType: 'INSPECTION_REGISTERED', beforeData: null, afterData: values(['THICKNESS_DEV', 'WIDTH_DEV']) },
+      { businessEventType: 'INSPECTION_REGISTERED', beforeData: values(['WIDTH_DEV']), afterData: values(['SURFACE_DEFECT_DEPTH']) },
+      { businessEventType: 'DISPOSITION_SET', beforeData: values(['C']), afterData: null },
+    ]);
+    expect(codes.sort()).toEqual(['SURFACE_DEFECT_DEPTH', 'THICKNESS_DEV', 'WIDTH_DEV']);
   });
 });

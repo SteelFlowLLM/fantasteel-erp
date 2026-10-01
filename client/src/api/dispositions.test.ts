@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, InputError } from '@/api/client';
 import { dispositionApi } from '@/api/dispositions';
+import { inspectionItemCodesOfHistory } from '@/features/quality/lib/qualityDisplay';
 import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
 import { checkInvariants } from '@/mock/services';
@@ -52,6 +53,11 @@ describe('불합격 LOT 목록·상세', () => {
     expect(detail?.evidence?.items.find((i) => i.inspectionItemCode === 'P')?.isPassed).toBe(false);
     expect(detail?.plans.map((p) => p.productionPlanNo)).toEqual(['PP-2609-0005']);
     expect(detail?.history.length).toBeGreaterThan(0);
+    // 이력 카드의 항목명은 근거(히트 성분 C·MN·P·S)가 아니라 이 슬래브 자신의 검사 등록에 나온 항목까지 덮는다
+    const historyCodes = inspectionItemCodesOfHistory(detail?.history ?? []);
+    expect(historyCodes).toContain('THICKNESS_DEV');
+    for (const code of historyCodes) expect(detail?.inspectionItemNames[code]).toBeTruthy();
+    expect(detail?.inspectionItemNames.THICKNESS_DEV).not.toBe('THICKNESS_DEV');
     // 불합격이 아닌 LOT은 목록에 없다
     expect(await dispositionApi.detail(lotIdOf('HT-BOF1-260905-001-05'))).toBeNull();
   });

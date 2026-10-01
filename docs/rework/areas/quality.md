@@ -87,7 +87,7 @@
 | 조회 API 권한 | 검사 입력 화면 = INSPECTION_REGISTER 조회, 불합격 관리 = DISPOSITION_SET 조회 | 화면 여는 조건(screens.ts)과 같게 |
 | 측정값 형식 | 정수 8자리·소수 4자리, 음수 허용 | 가짜 서버 checkDecimal과 같게(ERD decimal 자리수) |
 | 미리보기 | 입력 중 항목별 미리보기 + 저장하면 판정될 결과 예고 | 옛 화면 유지(C-4: 제안 단계가 아니므로 TRM-076과 충돌 없음) |
-| 다른 영역 링크 | LOT 추적 `/lots/trace?lot=<LOT 번호>&direction=forward`, 생산계획 `/production/plans?plan=<id>`, 수주 `/sales-orders/<id>`, 작업 로그 `/business-events`(필터 없음), 검사 기준 `/quality/standards` | 옛 화면 주소 형식. 해당 영역이 같은 쿼리를 읽는지 병합 때 확인 |
+| 다른 영역 링크 | LOT 추적 `/lots/trace?lot=<LOT 번호>&direction=forward`, 생산계획 `/production/plans?plan=<id>`, 수주 `/sales-orders/<id>`, 작업 로그 `/business-events?lotId=<id>`(이 LOT의 이력 재현, 검토 반영으로 연결), 검사 기준 `/quality/standards` | 옛 화면 주소 형식. 해당 영역이 같은 쿼리를 읽는지 병합 때 확인 |
 
 ## 7. 공유 파일 변경
 
@@ -104,3 +104,14 @@
 3. 작업 로그 버튼은 필터 없이 연다. 작업 로그 영역이 LOT 필터 쿼리를 정하면 연결한다. 대신 각 화면의 '이력' 카드가 이 LOT의 로그를 보여 준다.
 4. 화면 렌더 테스트는 없다(테스트 환경이 node, DOM 없음). 병렬 규칙상 dev 서버·next build를 돌리지 않았다 → 병합 단계에서 두 주소를 클릭으로 점검해야 한다.
 5. 검사 대상 목록에 판정된 LOT이 모두 나온다(옛 '최근 300건' 제한 없음). 시드 크기에서는 문제없다.
+
+## 검토 반영
+
+| 지적 | 근거 | 고친 내용 |
+|---|---|---|
+| 이력 카드의 '작업 로그' 링크가 필터 없이 `/business-events`로 가서 이 LOT의 이력 재현이 안 됨 | 02 REQ-LOG-003, 04 BP-LOG-01, 이 문서 §9-3 | `LotHistoryCard`에 `lotId`를 받아 `/business-events?lotId=<id>`로 연결. 검사 입력은 `lot.lotId`, 불합격 관리는 `row.lotId`를 넘긴다 (작업 로그 화면이 `?lotId=`를 읽어 이력 재현으로 바뀜) |
+| 불합격 관리에서 '불합격 히트의 하위 LOT' 행의 이력 카드가 `THICKNESS_DEV — → 0`처럼 영문 항목 코드를 그대로 보임 | common.md Names(06 표시명·03 한글명), 02 REQ-QC-003, ERD `inspection_standard_item.inspection_item_name` | 항목명을 근거 검사 폼(상위 히트의 C·MN·P·S)에서 만들지 않고, 작업 로그의 INSPECTION_REGISTERED 전후 값에 실제로 나온 코드로 `inspection_standard_item`에서 찾는다(현재 기준 먼저). `inspectionApi.detail`·`dispositionApi.detail`이 `inspectionItemNames: Record<string,string>`을 돌려주고, 둘 다 `historyWithItemNames(tables, lotId)`(api/inspections.ts)를 쓴다. 이름을 못 찾으면 코드 대신 '검사 항목'(`UNKNOWN_ITEM_NAME`)을 보인다 |
+
+- 순수 함수 추가: `inspectionItemCodesOfHistory(events)` (`features/quality/lib/qualityDisplay.ts`, 테스트 있음).
+- 테스트: `qualityDisplay.test.ts` 1개 추가, `dispositions.test.ts`(하위 LOT 상세의 항목명이 THICKNESS_DEV 등 이 LOT 자신의 코드까지 덮는지)·`inspections.test.ts`(불합격 슬래브 상세의 항목명) 검사 보강 → 전체 543개 통과, 타입 검사 0 오류.
+- 공유 파일 변경 없음.

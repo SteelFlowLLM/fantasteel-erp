@@ -1,11 +1,12 @@
 // 이 LOT의 작업 로그 (business_event_lot 기준, 최근 것부터). 검사 등록·판정은 바뀐 측정값의 전·후를 함께 보인다 (REQ-QC-003).
+// '작업 로그' 링크는 이 LOT의 이력 재현(/business-events?lotId=)으로 간다 (REQ-LOG-003).
 import Link from 'next/link';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { Timeline, type TimelineTone } from '@/components/Timeline';
 import { INSPECTION_RESULT_LABEL } from '@/codes';
-import { inspectionResultOfSnapshot, measuredValueChanges, trimNum } from '@/features/quality/lib/qualityDisplay';
+import { inspectionResultOfSnapshot, measuredValueChanges, trimNum, UNKNOWN_ITEM_NAME } from '@/features/quality/lib/qualityDisplay';
 import { fmtMDHM } from '@/lib/format';
 import type { TimelineEvent } from '@/mock/services';
 
@@ -27,7 +28,7 @@ const toneOf = (event: TimelineEvent): TimelineTone => {
   }
 };
 
-function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemNames: ReadonlyMap<string, string> }) {
+function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemNames: Readonly<Record<string, string>> }) {
   const before = inspectionResultOfSnapshot(event.beforeData);
   const after = inspectionResultOfSnapshot(event.afterData);
   const changes = measuredValueChanges(event.beforeData, event.afterData);
@@ -41,7 +42,7 @@ function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemName
       ) : null}
       {changes.slice(0, 6).map((c) => (
         <span key={c.inspectionItemCode} className="tabular-nums">
-          {itemNames.get(c.inspectionItemCode) ?? c.inspectionItemCode} {c.before === null ? '—' : trimNum(c.before)} → {c.after === null ? '—' : trimNum(c.after)}
+          {itemNames[c.inspectionItemCode] ?? UNKNOWN_ITEM_NAME} {c.before === null ? '—' : trimNum(c.before)} → {c.after === null ? '—' : trimNum(c.after)}
         </span>
       ))}
       {changes.length > 6 ? <span>그 밖에 {changes.length - 6}개 항목</span> : null}
@@ -49,7 +50,18 @@ function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemName
   );
 }
 
-export function LotHistoryCard({ events, itemNames = new Map(), limit = 8 }: { events: readonly TimelineEvent[]; itemNames?: ReadonlyMap<string, string>; limit?: number }) {
+export function LotHistoryCard({
+  lotId,
+  events,
+  itemNames,
+  limit = 8,
+}: {
+  lotId: number;
+  events: readonly TimelineEvent[];
+  /** 검사 항목 코드 → 검사 항목명 (api가 작업 로그에서 모은 것) */
+  itemNames: Readonly<Record<string, string>>;
+  limit?: number;
+}) {
   const recent = [...events].reverse().slice(0, limit);
   return (
     <Card className="flex-none">
@@ -57,7 +69,7 @@ export function LotHistoryCard({ events, itemNames = new Map(), limit = 8 }: { e
         title="이력"
         meta={`이 LOT의 작업 로그 ${events.length}건`}
         actions={
-          <Link href="/business-events" className="text-cap text-run hover:underline">
+          <Link href={`/business-events?lotId=${lotId}`} className="text-cap text-run hover:underline">
             작업 로그
           </Link>
         }

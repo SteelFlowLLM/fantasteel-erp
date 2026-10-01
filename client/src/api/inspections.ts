@@ -3,6 +3,7 @@
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { PERMISSION, type InspectionResult, type SalesOrderItemStatus } from '@/codes';
+import { inspectionItemCodesOfHistory } from '@/features/quality/lib/qualityDisplay';
 import type { MockTables } from '@/mock/schema';
 import {
   findById,
@@ -47,6 +48,8 @@ export interface InspectionDetail extends InspectionFormView {
   salesOrderItem: LinkedSalesOrderItem | null;
   /** 이 LOT의 작업 로그 (시간순) */
   history: TimelineEvent[];
+  /** 작업 로그의 검사 등록에 나온 항목 코드 → 검사 항목명 (inspection_standard_item.inspection_item_name) */
+  inspectionItemNames: Record<string, string>;
 }
 
 export interface RegisterInspectionOutcome {
@@ -104,7 +107,7 @@ export const inspectionApi = {
         productionPlanId: lot?.productionPlanId ?? null,
         heatLotId: form.lot.heatLotId,
         salesOrderItem: linkedSalesOrderItemOf(tables, lot?.productionPlanId ?? null),
-        history: lotTimeline(tables, lotId),
+        ...historyWithItemNames(tables, lotId),
       };
     }),
 
@@ -128,3 +131,19 @@ export const inspectionApi = {
       };
     }),
 };
+
+/**
+ * LOT의 작업 로그와, 그 로그의 검사 등록 전후 값에 나온 항목 코드의 검사 항목명.
+ * 히트 불합격 하위 LOT처럼 화면의 검사 폼과 로그의 항목이 다를 수 있어서 로그에서 코드를 모은다. 현재 기준의 이름을 먼저 쓴다.
+ */
+export function historyWithItemNames(tables: Tables, lotId: number): { history: TimelineEvent[]; inspectionItemNames: Record<string, string> } {
+  const history = lotTimeline(tables, lotId);
+  const currentStandardIds = new Set(tables.inspectionStandard.filter((s) => s.isCurrent).map((s) => s.id));
+  const inspectionItemNames: Record<string, string> = {};
+  for (const code of inspectionItemCodesOfHistory(history)) {
+    const items = tables.inspectionStandardItem.filter((i) => i.inspectionItemCode === code);
+    const item = items.find((i) => currentStandardIds.has(i.inspectionStandardId)) ?? items[0];
+    if (item) inspectionItemNames[code] = item.inspectionItemName;
+  }
+  return { history, inspectionItemNames };
+}

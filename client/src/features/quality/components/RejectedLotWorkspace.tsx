@@ -198,7 +198,6 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
   const soItem = row.salesOrderItem;
   const typeName = LOT_TYPE_LABEL[row.lotType];
   const failedCount = evidence?.items.filter((i) => i.isPassed === false).length ?? row.failedItems.length;
-  const itemNames = new Map((evidence?.items ?? []).map((i) => [i.inspectionItemCode, i.inspectionItemName]));
 
   return (
     <>
@@ -331,7 +330,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <ImpactCard detail={detail} />
-          <LotHistoryCard events={detail.history} itemNames={itemNames} />
+          <LotHistoryCard lotId={row.lotId} events={detail.history} itemNames={detail.inspectionItemNames} />
         </div>
       </div>
     </>
