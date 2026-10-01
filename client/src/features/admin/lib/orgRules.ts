@@ -48,6 +48,11 @@ export function blockedParentIdsOf(departments: readonly TreeNode[], departmentI
   return blocked;
 }
 
+/** 선택 목록에서 부서 계층을 들여쓰기로 보인다 (예: '└ 제강파트') */
+export function departmentOptionLabel(departmentName: string, depth: number): string {
+  return depth > 0 ? `${'　'.repeat(depth - 1)}└ ${departmentName}` : departmentName;
+}
+
 /** 이 부서와 모든 하위 부서의 인원 합계 */
 export function totalMemberCountOf(departments: readonly (TreeNode & { memberCount: number })[], departmentId: number): number {
   const ids = descendantIdsOf(departments, departmentId);
