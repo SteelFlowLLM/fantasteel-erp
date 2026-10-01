@@ -81,10 +81,11 @@ export function SalesOrderLink({ salesOrderId, salesOrderNo, lineNo }: { salesOr
   );
 }
 
-/** LOT 추적 화면으로 (LOT 번호·출하요청 번호로 찾는다, REQ-LOT-005) */
+/** LOT 추적 화면으로 (LOT 번호·출하요청 번호로 찾는다, REQ-LOT-005). 출하요청 번호(DR-)는 ?shipmentRequestNo=, 그 밖은 ?lot= */
 export function TraceLink({ no }: { no: string }) {
+  const href = no.startsWith('DR-') ? `/lots/trace?shipmentRequestNo=${encodeURIComponent(no)}` : `/lots/trace?lot=${encodeURIComponent(no)}`;
   return (
-    <Link href={`/lots/trace?q=${encodeURIComponent(no)}`} className={LINK} onClick={(e) => e.stopPropagation()}>
+    <Link href={href} className={LINK} onClick={(e) => e.stopPropagation()}>
       {no}
     </Link>
   );

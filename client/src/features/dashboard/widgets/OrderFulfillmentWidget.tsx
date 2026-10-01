@@ -1,5 +1,6 @@
 // 수주 충족 현황 (REQ-DSH-001, TRM-042, REQ-SO-004): 진행 중 수주 품목의 생산중·검사합격·예약·출하 매수와 진행률.
 // 단계는 서로 다른 단계라 더해서 "충족 매수"로 보이지 않는다(4.5). 막대는 출하 | 예약(검사합격 중 미출하) | 생산중을 수주 매수 대비 길이로만 나란히 둔다.
+import Link from 'next/link';
 import type { FulfillmentItemRow, OrderFulfillmentData } from '@/api/dashboard';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
@@ -61,7 +62,9 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
                   {index === 0 ? (
                     <>
                       <Td rowSpan={so.items.length} className="align-top font-mono text-xs font-medium">
-                        {so.salesOrderNo}
+                        <Link href={`/sales-orders/${so.salesOrderId}`} className="text-run hover:underline">
+                          {so.salesOrderNo}
+                        </Link>
                       </Td>
                       <Td rowSpan={so.items.length} className="max-w-24 truncate align-top" title={so.customerName}>
                         {so.customerName}

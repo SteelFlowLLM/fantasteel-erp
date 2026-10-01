@@ -132,8 +132,8 @@ describe('출하요청 → FIFO 배정 → 출고 확정 → 밀시트 (14.1 7~9
 
   it('밀시트 PDF 생성 = pdf_path 기록 (이미 있으면 그대로), 조회만 하는 사원은 COM-002', async () => {
     actAs(SEED_EMPLOYEE_NO.quality);
-    const [sheet] = await millSheetApi.list();
-    expect(sheet.millSheetNo).toBe('MS-2609-0001-1');
+    const sheet = (await millSheetApi.list()).find((m) => m.millSheetNo === 'MS-2609-0001-1');
+    if (!sheet) throw new Error('시드 밀시트 MS-2609-0001-1이 없어요');
     await expect(millSheetApi.markPdfGenerated({ millSheetId: sheet.id })).rejects.toMatchObject({ code: 'COM-002' });
     actAs(SEED_EMPLOYEE_NO.logistics);
     const first = await millSheetApi.markPdfGenerated({ millSheetId: sheet.id });
@@ -147,6 +147,7 @@ describe('출하요청 → FIFO 배정 → 출고 확정 → 밀시트 (14.1 7~9
 describe('출하요청 등록 오류 (SO-002·SHP-002·입력 오류·COM-002)', () => {
   it('정수가 아닌 매수는 SO-002, 출하 가능 잔량 초과는 SHP-002, 다른 고객사·출하 요청일 누락은 입력 오류', async () => {
     actAs(SEED_EMPLOYEE_NO.sales);
+    const requestCount = read((t) => t.shipmentRequest.length);
     const so2Item = salesOrderItemOf('SO-2609-002');
     const base = { customerId: customerIdOf('CUS-02'), requestedShipDate: '2026-10-08' };
     for (const qty of ['2.5', '0', '-1', '', '3매']) {
@@ -158,14 +159,14 @@ describe('출하요청 등록 오류 (SO-002·SHP-002·입력 오류·COM-002)',
     const noDate = shipmentRequestApi.create({ ...base, requestedShipDate: '', items: [{ salesOrderItemId: so2Item.id, requestQty: '1' }] });
     await expect(noDate).rejects.toBeInstanceOf(InputError);
     await expect(noDate).rejects.toMatchObject({ fieldErrors: { requestedShipDate: expect.any(String) } });
-    expect(read((t) => t.shipmentRequest.length)).toBe(2);
+    expect(read((t) => t.shipmentRequest.length)).toBe(requestCount);
   });
 
   it('권한: 등록·배정·취소는 영업 USE, 출고 확정은 물류 USE, 조회 권한이 없으면 목록도 COM-002', async () => {
     const so2Item = salesOrderItemOf('SO-2609-002');
     const dr2 = requestIdOf('DR-2609-0002');
     actAs(SEED_EMPLOYEE_NO.logistics);
-    expect((await shipmentRequestApi.list()).length).toBe(2);
+    expect((await shipmentRequestApi.list()).length).toBe(read((t) => t.shipmentRequest.length));
     await expect(shipmentRequestApi.create({ customerId: customerIdOf('CUS-02'), requestedShipDate: '2026-10-08', items: [{ salesOrderItemId: so2Item.id, requestQty: '1' }] })).rejects.toMatchObject({ code: 'COM-002' });
     await expect(allocateByRecommendation(dr2)).rejects.toMatchObject({ code: 'COM-002' });
     await expect(shipmentRequestApi.cancel({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'COM-002' });
@@ -230,6 +231,7 @@ describe('배정 확정·변경·해제 (INV-001~004)', () => {
 describe('출고 확정 재검증·취소 (SHP-002·SHP-003·INV-001·COM-001)', () => {
   it('배정 대기면 INV-001, 미검사 LOT SHP-002(아무것도 출고 안 됨), 두 번째 확정은 COM-001', async () => {
     const dr2 = requestIdOf('DR-2609-0002');
+    const millSheetCount = read((t) => t.millSheet.length);
     actAs(SEED_EMPLOYEE_NO.logistics);
     const waiting = await goodsIssueApi.detail(dr2);
     expect(waiting.ready).toBe(false);
@@ -244,7 +246,7 @@ describe('출고 확정 재검증·취소 (SHP-002·SHP-003·INV-001·COM-001)',
     expect(blocked.problems).toEqual([expect.objectContaining({ code: 'SHP-002', lotNo: line.allocations[0].lotNo })]);
     await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'SHP-002' });
     expect(read((t) => t.shipmentRequest.find((r) => r.id === dr2)?.shipmentRequestStatus)).toBe('ALLOCATED');
-    expect(read((t) => t.millSheet.length)).toBe(1);
+    expect(read((t) => t.millSheet.length)).toBe(millSheetCount);
     setLot(line.allocations[0].lotId, { isPassed: true });
     await goodsIssueApi.confirm({ shipmentRequestId: dr2 });
     await expect(goodsIssueApi.confirm({ shipmentRequestId: dr2 })).rejects.toMatchObject({ code: 'COM-001' });

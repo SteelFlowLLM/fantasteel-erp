@@ -5,7 +5,7 @@
 // - 발주: 승인된 요청 품목만(아니면 PUR-002). 품목의 기본 공급업체별로 발주 1건에 여러 줄. 요청의 모든 품목을 발주하면 ORDERED.
 // - 입고: 등록 = 확정(상태·수정 없음). 미입고량 초과 PUR-003. 원료 LOT RM-원료코드-YYMMDD-NNN(잔량 = 입고량), 품목 기본 야드. 발주 입고 누계·입고예정·상태 갱신.
 import type { PurchaseRequisitionStatus } from '@/codes';
-import { decAdd, decCmp, decSub, decSum } from '@/lib/decimal';
+import { decAdd, decCmp, decRound, decSub, decSum, TON_DIGITS } from '@/lib/decimal';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import type { GoodsReceiptRow, LotRow, MockTables, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseRequisitionItemRow, PurchaseRequisitionRow } from '@/mock/schema';
 import { issueBusinessNo, issueRawMaterialLotNo } from '@/mock/sequence';
@@ -75,7 +75,9 @@ function validateRequisitionLines(tables: Tables, lines: readonly RequisitionLin
     if (item.itemType !== 'RAW_MATERIAL') errors.add(`items.${index}.itemId`, '원료 품목만 구매요청할 수 있어요');
     if (seen.has(item.id)) errors.add(`items.${index}.itemId`, '같은 원료를 두 줄에 넣었어요');
     seen.add(item.id);
-    const requiredTon = checkDecimal(errors, `items.${index}.requiredTon`, line.requiredTon, { label: '수량(톤)', scale: 3, integerDigits: 9, positive: true, required: true });
+    // 톤은 소수 3자리 문자열로 저장한다('100' → '100.000', core 0장)
+    const requiredTonText = checkDecimal(errors, `items.${index}.requiredTon`, line.requiredTon, { label: '수량(톤)', scale: 3, integerDigits: 9, positive: true, required: true });
+    const requiredTon = requiredTonText === null ? null : decRound(requiredTonText, TON_DIGITS);
     const productionPlanId = line.productionPlanId ?? null;
     if (productionPlanId !== null) {
       mustGet(tables, 'productionPlan', productionPlanId, '생산계획');
@@ -347,7 +349,8 @@ export function receiveGoods(
   const po = mustGet(tx.tables, 'purchaseOrder', poItem.purchaseOrderId, '발주');
   const item = mustGet(tx.tables, 'item', poItem.itemId, '원료');
   const errors = new FieldErrors();
-  const receivedTon = checkDecimal(errors, 'receivedTon', input.receivedTon, { label: '입고 톤', scale: 3, integerDigits: 9, positive: true, required: true });
+  const receivedTonText = checkDecimal(errors, 'receivedTon', input.receivedTon, { label: '입고 톤', scale: 3, integerDigits: 9, positive: true, required: true });
+  const receivedTon = receivedTonText === null ? null : decRound(receivedTonText, TON_DIGITS);
   const receiptDate = checkDate(errors, 'receiptDate', input.receiptDate, '입고일', true);
   errors.throwIfAny();
   if (decCmp(receivedTon ?? '0', poItem.scheduledReceiptTon) > 0) throw new ApiError('PUR-003', `미입고 ${poItem.scheduledReceiptTon}t`);

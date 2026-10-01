@@ -1,21 +1,11 @@
 // 대시보드 시계열 시드: 끝난 거래만 더하고 core 시드(14.1 시작 재고·원료 잔량·MRP·알림)는 그대로인지 확인한다.
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createSeedTables } from '@/mock/seed';
 import type { MockTables } from '@/mock/schema';
 import { SEED_DASHBOARD, seedDashboard } from '@/mock/seeds/dashboard';
 import { checkInvariants, computeMrp, listSalesOrders, productInventory, rawMaterialInventory, surplusSlabs } from '@/mock/services';
 import type { MockTx } from '@/mock/store';
 
-// 등록부에 이 시드가 들어가 있어도(병합 후) 'dashboard' 없이 만든 시드와 비교한다
-vi.mock('@/mock/seeds', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/mock/seeds')>();
-  return {
-    ...actual,
-    runAreaSeeders: (tx: MockTx) => {
-      for (const seeder of actual.AREA_SEEDERS) if (seeder.key !== 'dashboard') seeder.run(tx);
-    },
-  };
-});
 
 const at = (tables: MockTables, iso: string) => {
   const now = new Date(iso);
@@ -33,7 +23,8 @@ function snapshot(tables: MockTables) {
 }
 
 describe('대시보드 시계열 시드', () => {
-  const tables = createSeedTables();
+  // 등록부에 이 시드가 들어가 있으므로 'dashboard'만 빼고 만든 시드에 직접 돌려 비교한다
+  const tables = createSeedTables({ areaSeeders: (key) => key !== 'dashboard' });
   const before = snapshot(tables);
   const eventCount = tables.businessEvent.length;
   seedDashboard(at(tables, '2026-08-24T09:00:00+09:00'));

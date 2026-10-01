@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { InputError } from '@/api/client';
 import { messengerApi } from '@/api/messenger';
@@ -6,6 +6,7 @@ import { getMockDb } from '@/mock/db';
 import { MOCK_FILE_MAX_BYTES } from '@/mock/fileStorage';
 import { insertRow } from '@/mock/store';
 import { actAs, departmentIdOf, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { resetToMasterSeed } from '@/test/masterSeed';
 
 const notificationsOf = (employeeId: number) => getMockDb().read((tables) => tables.notification.filter((n) => n.recipientId === employeeId));
 
@@ -37,6 +38,9 @@ function createWorkRoom(memberNos: string[]): { roomId: number; salesOrderId: nu
     return { roomId: room.id, salesOrderId: salesOrder.id };
   });
 }
+
+// 이 시험은 협업 시드가 없는 상태(조직·기준정보만)를 전제로 쓰였다
+beforeEach(resetToMasterSeed);
 
 describe('채팅방 만들기 (REQ-MSG-001)', () => {
   it('1:1은 같은 상대와의 방이 있으면 그 방을 돌려준다', async () => {

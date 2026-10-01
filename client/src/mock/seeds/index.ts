@@ -4,7 +4,9 @@
 // - 시드 안에서 날짜를 바꿀 때는 seedTxAt(tx, '2026-09-15T09:00:00+09:00')처럼 같은 테이블을 쓰는 다른 시각의 tx를 만든다.
 // - 시드는 매번 같은 결과가 나와야 한다(고정 날짜·고정 난수 시드).
 import type { MockTx } from '@/mock/store';
+import { seedCollab } from '@/mock/seeds/collab';
 import { seedCore } from '@/mock/seeds/core';
+import { seedDashboard } from '@/mock/seeds/dashboard';
 import { seedInspectionStandards } from '@/mock/seeds/inspectionStandards';
 
 export type AreaSeeder = (tx: MockTx) => void;
@@ -25,9 +27,12 @@ export const AREA_SEEDERS: readonly AreaSeederEntry[] = [
   // 검사 기준(품질 기준정보)은 거래 시드가 검사 판정에 쓰므로 먼저 넣는다.
   { key: 'inspectionStandards', run: seedInspectionStandards },
   { key: 'core', run: seedCore },
-  // ── 영역 시드 (병합 단계에서 이 아래에 등록: seedAdmin, seedMaster, seedCollab …) ──
+  // ── 영역 시드 (core가 만든 수주·업무방·LOT을 참조하므로 그 뒤에 실행) ──
+  { key: 'collab', run: seedCollab },
+  { key: 'dashboard', run: seedDashboard },
 ];
 
-export function runAreaSeeders(tx: MockTx): void {
-  for (const seeder of AREA_SEEDERS) seeder.run(tx);
+/** include로 일부 영역 시드만 돌릴 수 있다(테스트: 조직·기준정보만 있는 상태, 특정 시드를 뺀 상태) */
+export function runAreaSeeders(tx: MockTx, include: (key: string) => boolean = () => true): void {
+  for (const seeder of AREA_SEEDERS) if (include(seeder.key)) seeder.run(tx);
 }

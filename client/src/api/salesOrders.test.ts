@@ -34,10 +34,11 @@ async function create141() {
 }
 
 describe('수주 조회 (REQ-SO-004·005)', () => {
-  it('목록: 영업은 시드 수주 5건을 품목 요약과 함께 본다. 헤더 상태·납기 위험·재생산 필요는 계산값', async () => {
+  it('목록: 영업은 시드 수주(거래 5건 + 대시보드 시계열 4건)를 품목 요약과 함께 본다. 헤더 상태·납기 위험·재생산 필요는 계산값', async () => {
     actAs(SEED_EMPLOYEE_NO.sales);
     const rows = await salesOrderApi.list();
-    expect(rows.map((r) => r.salesOrderNo)).toEqual(['SO-2609-005', 'SO-2609-004', 'SO-2609-003', 'SO-2609-002', 'SO-2609-001']);
+    expect(rows.map((r) => r.salesOrderNo).filter((no) => no.startsWith('SO-2609-'))).toEqual(['SO-2609-005', 'SO-2609-004', 'SO-2609-003', 'SO-2609-002', 'SO-2609-001']);
+    expect(rows.filter((r) => r.salesOrderNo.startsWith('SO-2608-')).every((r) => r.status === 'SHIPPED')).toBe(true);
     const mixed = rows.find((r) => r.salesOrderNo === 'SO-2609-003');
     expect(mixed?.itemLines.map((l) => l.itemType)).toEqual(['COIL', 'SLAB']);
     expect(mixed?.workRoomId).not.toBeNull();
@@ -47,7 +48,7 @@ describe('수주 조회 (REQ-SO-004·005)', () => {
 
   it('목록·상세는 수주 조회 권한(수주 등록·취소 VIEW 이상)이 있어야 한다: 생산은 보고, 구매·물류는 COM-002', async () => {
     actAs(SEED_EMPLOYEE_NO.productionHead);
-    expect(await salesOrderApi.list()).toHaveLength(5);
+    expect(await salesOrderApi.list()).toHaveLength(read((t) => t.salesOrder.length));
     actAs(SEED_EMPLOYEE_NO.purchase);
     expect(await codeOf(salesOrderApi.list())).toBe('COM-002');
     actAs(SEED_EMPLOYEE_NO.logistics);
@@ -263,13 +264,5 @@ describe('업무방 열기 (REQ-MSG-001)', () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     expect(await codeOf(salesOrderApi.openWorkRoom({ salesOrderId: soId, memberEmployeeIds: [] }))).toBe('COM-002');
     expect(countOf('chatRoom')).toBe(rooms + 1);
-  });
-
-  it('업무방 요약: 수주 조회 권한이 없어도 그 업무방 멤버면 본다(구매 정다은 → SO-2609-003), 멤버가 아니면 COM-002', async () => {
-    actAs(SEED_EMPLOYEE_NO.purchase);
-    const summary = await salesOrderApi.roomSummary(salesOrderIdOf('SO-2609-003'));
-    expect(summary).toMatchObject({ salesOrderNo: 'SO-2609-003', itemCount: 2 });
-    expect(summary.items).toHaveLength(2);
-    expect(await codeOf(salesOrderApi.roomSummary(salesOrderIdOf('SO-2609-001')))).toBe('COM-002');
   });
 });

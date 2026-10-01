@@ -36,12 +36,13 @@ describe('수주 SO-001·002·003·004, COM-001·003, MST-001', () => {
 
   it('SO-002 10.5매·0매·음수·누락·글자는 거부 (글자를 지우지 않는다)', () => {
     const k = createKit();
+    const salesOrderCount = k.tables.salesOrder.length;
     for (const qty of ['10.5', 0, -1, '', '3매', ' ', '1e3']) {
       expectCode(() => createSalesOrder(k.at(at), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [{ itemId: k.itemId('SL-SS275-250x1200x10000'), orderedQty: qty, dueDate: '2026-10-20' }] }), 'SO-002');
     }
     expectInputError(() => createSalesOrder(k.at(at), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [{ itemId: k.itemId('SL-SS275-250x1200x10000'), orderedQty: 1, dueDate: '2026-13-01' }] }), 'items.0.dueDate');
     expectInputError(() => createSalesOrder(k.at(at), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [] }), 'items');
-    expect(k.tables.salesOrder).toHaveLength(5);
+    expect(k.tables.salesOrder).toHaveLength(salesOrderCount);
   });
 
   it('SO-003 출고된 수주 취소 불가, SO-004 진행 중 출하요청 먼저 취소, COM-001 버전 충돌', () => {
@@ -60,10 +61,11 @@ describe('수주 SO-001·002·003·004, COM-001·003, MST-001', () => {
 
   it('MST-001: 라우팅 수율이 없으면 부족분 계획을 만들지 않는다 (수주 저장도 안 됨)', () => {
     const k = createKit();
+    const salesOrderCount = k.tables.salesOrder.length;
     const routing = k.tables.routing.find((r) => r.itemType === 'SLAB' && r.processType === 'CONTINUOUS_CASTING');
     updateRow(k.at(at), 'routing', routing?.id ?? 0, { plannedYieldRate: null });
     expectCode(() => createSalesOrder(k.at(at), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [{ itemId: k.itemId('SL-SM355A-250x1200x10000'), orderedQty: 1, dueDate: '2026-10-20' }] }), 'MST-001');
-    expect(k.tables.salesOrder).toHaveLength(5);
+    expect(k.tables.salesOrder).toHaveLength(salesOrderCount);
   });
 
   it('MST-001: 검사 기준이 없으면 검사 입력 불가', () => {
@@ -106,7 +108,7 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
       items: [{ itemId: k.itemId('LIM01'), requiredTon: '50' }],
     });
     expect(resubmitted).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', rejectReason: null });
-    expect(k.tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === waiting.id).map((i) => i.requiredTon)).toEqual(['50']);
+    expect(k.tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === waiting.id).map((i) => i.requiredTon)).toEqual(['50.000']);
     expectInputError(() => resubmitPurchaseRequisition(k.at(at), k.actor('purchase'), { purchaseRequisitionId: waiting.id, items: [{ itemId: k.itemId('LIM01'), requiredTon: '50' }] }));
     approvePurchaseRequisition(k.at('2026-10-01T11:00:00+09:00'), k.actor('purchaseHead'), { purchaseRequisitionId: waiting.id });
     const newItems = k.tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === waiting.id);

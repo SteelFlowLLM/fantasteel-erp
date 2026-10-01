@@ -41,14 +41,6 @@ export function useSalesOrderPreview(lines: readonly SalesOrderPreviewInputLine[
   });
 }
 
-export function useSalesOrderRoomSummary(salesOrderId: number | null) {
-  return useQuery({
-    queryKey: salesOrderKeys.roomSummary(salesOrderId ?? 0),
-    queryFn: () => salesOrderApi.roomSummary(salesOrderId ?? 0),
-    enabled: salesOrderId !== null,
-  });
-}
-
 export function useSalesOrderWorkRoom(salesOrderId: number | null) {
   return useQuery({
     queryKey: salesOrderKeys.workRoom(salesOrderId ?? 0),

@@ -4,7 +4,6 @@
 import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
-import { toTonText } from '@/api/purchasing';
 import { decCmp } from '@/lib/decimal';
 import { findById, listGoodsReceipts, listPurchaseOrders, receiveGoods, userActor } from '@/mock/services';
 
@@ -118,7 +117,7 @@ export const goodsReceiptApi = {
       const actor = requireActor(tx.tables, { use: [PERMISSION.GOODS_RECEIPT_CONFIRM] });
       const { goodsReceipt, lot, purchaseOrder } = receiveGoods(tx, userActor(actor.employee.id), {
         purchaseOrderItemId: input.purchaseOrderItemId,
-        receivedTon: toTonText(input.receivedTon),
+        receivedTon: input.receivedTon,
         receiptDate: input.receiptDate,
       });
       const line = findById(tx.tables, 'purchaseOrderItem', input.purchaseOrderItemId);

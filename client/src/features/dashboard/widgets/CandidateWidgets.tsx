@@ -1,5 +1,6 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
 // 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
+import Link from 'next/link';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -151,7 +152,10 @@ function DeliveryRiskBody({ data }: { data: DeliveryRiskData }) {
         {data.items.map((item) => (
           <tr key={item.salesOrderItemId} data-risk={item.isOverdue || undefined}>
             <Td className="font-mono text-xs font-medium">
-              {item.salesOrderNo} <span className="text-cap text-ink-3">#{item.lineNo}</span>
+              <Link href={`/sales-orders/${item.salesOrderId}`} className="text-run hover:underline">
+                {item.salesOrderNo}
+              </Link>{' '}
+              <span className="text-cap text-ink-3">#{item.lineNo}</span>
             </Td>
             <Td className="max-w-28 truncate" title={item.customerName}>
               {item.customerName}
@@ -236,7 +240,9 @@ function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
           </div>
           {open.purchaseOrders.map((po) => (
             <div key={po.purchaseOrderId} className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs">
-              <span className="flex-none font-mono font-medium">{po.purchaseOrderNo}</span>
+              <Link href={`/purchase-orders?po=${po.purchaseOrderId}`} className="flex-none font-mono font-medium text-run hover:underline">
+                {po.purchaseOrderNo}
+              </Link>
               <span className="min-w-0 truncate text-ink-2" title={`${po.supplierName} · ${po.lineCount}개 품목`}>
                 {po.supplierName}
               </span>

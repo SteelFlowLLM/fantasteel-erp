@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/client';
 import { notificationApi } from '@/api/notifications';
 import { getMockDb } from '@/mock/db';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import { actAs, departmentIdOf, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { resetToMasterSeed } from '@/test/masterSeed';
 
 const rowsOf = (employeeId: number) => getMockDb().read((tables) => tables.notification.filter((n) => n.recipientId === employeeId));
+
+// 이 시험은 협업 시드가 없는 상태(조직·기준정보만)를 전제로 쓰였다
+beforeEach(resetToMasterSeed);
 
 describe('알림 (REQ-NTF-002)', () => {
   it('개인 알림을 보내고, 받은 사람이 목록에서 보고 읽음 처리한다', async () => {

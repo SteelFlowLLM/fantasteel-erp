@@ -185,7 +185,7 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
               <ButtonLink href={`/business-events?salesOrderId=${detail.salesOrderId}`} variant="ghost" icon="history">
                 작업 로그
               </ButtonLink>
-              <ButtonLink href={`/lots/trace?q=${encodeURIComponent(s.shipmentRequest.shipmentRequestNo)}`} variant="ghost" icon="trace">
+              <ButtonLink href={`/lots/trace?shipmentRequestNo=${encodeURIComponent(s.shipmentRequest.shipmentRequestNo)}`} variant="ghost" icon="trace">
                 LOT 추적
               </ButtonLink>
               <Button variant="primary" icon="print" disabled={!canPrint || mark.isPending} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>

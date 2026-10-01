@@ -14,6 +14,7 @@ import {
   issueSlabLotNo,
 } from '@/mock/sequence';
 import { insertRow, type MockTx } from '@/mock/store';
+import { resetToMasterSeed } from '@/test/masterSeed';
 
 export interface TraceFixture {
   salesOrderId: number;
@@ -45,6 +46,8 @@ function need<T>(value: T | undefined, what: string): T {
 const byNo = (tables: MockTables, employeeNo: string) => need(tables.employee.find((e) => e.employeeNo === employeeNo), employeeNo).id;
 
 export function buildTraceFixture(): TraceFixture {
+  // 거래 시드가 없는 상태에서 만든 고정 데이터라, 조직·기준정보만 남기고 시작한다
+  resetToMasterSeed();
   return getMockDb().transact((root) => {
     const t = root.tables;
     const at = (iso: string): MockTx => seedTxAt(root, iso);

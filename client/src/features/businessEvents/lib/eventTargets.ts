@@ -62,6 +62,10 @@ export interface TargetRef {
   salesOrderId: number | null;
   /** 품질검사 대상일 때 검사한 LOT id */
   lotId?: number | null;
+  /** 작업 실적 대상일 때 그 생산계획 id (작업 실적 화면은 ?plan=으로 연다) */
+  productionPlanId?: number | null;
+  /** 입고 대상일 때 그 발주 id (입고 화면은 ?po=로 연다) */
+  purchaseOrderId?: number | null;
 }
 
 /** 대상 번호를 눌렀을 때 갈 화면 (없으면 null). 화면 주소의 쿼리 이름은 각 화면의 약속을 따른다. */
@@ -80,15 +84,15 @@ export function targetHref(target: TargetRef): string | null {
     case 'production_plan':
       return `/production/plans?plan=${targetId}`;
     case 'production_result':
-      return `/production/results?result=${targetId}`;
+      return target.productionPlanId ? `/production/results?plan=${target.productionPlanId}` : '/production/results';
     case 'quality_inspection':
       return target.lotId ? `/quality/inspections?lot=${target.lotId}` : '/quality/inspections';
     case 'purchase_requisition':
       return `/purchase-requisitions/${targetId}`;
     case 'purchase_order':
-      return `/purchase-orders?id=${targetId}`;
+      return `/purchase-orders?po=${targetId}`;
     case 'goods_receipt':
-      return `/goods-receipts?id=${targetId}`;
+      return target.purchaseOrderId ? `/goods-receipts?po=${target.purchaseOrderId}` : '/goods-receipts';
     case 'shipment_request':
       return `/shipment-requests/${targetId}`;
     case 'mill_sheet':

@@ -57,7 +57,7 @@ describe('검사 기준 만들기 (REQ-QC-002)', () => {
     await inspectionStandardApi.create({ processType: 'STEELMAKING', steelGradeId: gradeId, items: [item({ inspectionItemCode: 'C', inspectionItemName: '탄소', unit: '%', minValue: '', maxValue: '0.18', maxThicknessMm: '' })] });
     const again = await errorOf(inspectionStandardApi.create({ processType: 'STEELMAKING', steelGradeId: gradeId, items: [item()] }));
     expect(again).toBeInstanceOf(InputError);
-    expect((again as InputError).fieldErrors.processType).toContain('QS-TEST355-SM');
+    expect((again as InputError).fieldErrors.processType).toContain('QS-TEST355-ST');
   });
 
   it('검사 기준 관리 사용 권한이 없으면 COM-002 (관리자는 조회만), 없는 강종은 COM-003, 제선은 거부', async () => {

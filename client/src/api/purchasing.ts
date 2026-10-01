@@ -6,7 +6,6 @@ import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { employeeBasicsOf } from '@/api/orgViews';
-import { decRound, TON_DIGITS } from '@/lib/decimal';
 import { canView } from '@/lib/permissions';
 import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
 import {
@@ -53,16 +52,7 @@ export const purchaseOrderKeys = {
   orderableItems: () => ['purchase-orders', 'orderable-items'] as const,
 };
 
-/**
- * 잘 쓴 톤 입력(숫자, 소수 3자리 이하)은 ERD decimal(12,3) 모양('1.5' → '1.500')으로 맞춰 넘긴다.
- * 형식이 틀린 값은 그대로 넘겨 서비스가 입력 오류로 알리게 한다(검증 규칙은 서비스에 있다).
- */
-export function toTonText(value: string): string {
-  const text = value.trim().replace(/,/g, '');
-  return /^\d+(\.\d{1,3})?$/.test(text) ? decRound(text, TON_DIGITS) : value;
-}
 
-const tonLines = (items: readonly RequisitionLineInput[]): RequisitionLineInput[] => items.map((line) => ({ ...line, requiredTon: toTonText(line.requiredTon) }));
 
 // ── 구매요청 ─────────────────────────────────────────
 
@@ -204,7 +194,7 @@ export const purchaseRequisitionApi = {
       const { purchaseRequisition } = createPurchaseRequisition(tx, userActor(actor.employee.id), {
         desiredReceiptDate: input.desiredReceiptDate || null,
         requestReason: input.requestReason.trim() || null,
-        items: tonLines(input.items),
+        items: input.items,
       });
       return requisitionView(tx.tables, purchaseRequisition);
     }),
@@ -217,7 +207,7 @@ export const purchaseRequisitionApi = {
         purchaseRequisitionId: input.purchaseRequisitionId,
         desiredReceiptDate: input.desiredReceiptDate || null,
         requestReason: input.requestReason.trim() || null,
-        items: tonLines(input.items),
+        items: input.items,
         expectedUpdatedAt: input.expectedUpdatedAt,
       });
       return requisitionView(tx.tables, updated);

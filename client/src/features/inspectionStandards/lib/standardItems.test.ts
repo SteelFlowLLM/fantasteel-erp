@@ -17,7 +17,7 @@ const band = (minThicknessMm: string | null, maxThicknessMm: string | null) => (
 describe('검사 기준 코드 (TRM-110 예: QS-SM355A-HR)', () => {
   it('강종·공정으로 만든다. 공통 기준은 COMMON', () => {
     expect(formatInspectionStandardCode('SM355A', 'HOT_ROLLING')).toBe('QS-SM355A-HR');
-    expect(formatInspectionStandardCode('SS275', 'STEELMAKING')).toBe('QS-SS275-SM');
+    expect(formatInspectionStandardCode('SS275', 'STEELMAKING')).toBe('QS-SS275-ST');
     expect(formatInspectionStandardCode(null, 'CONTINUOUS_CASTING')).toBe('QS-COMMON-CC');
   });
 });

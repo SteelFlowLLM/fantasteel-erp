@@ -1,6 +1,6 @@
 // 수주 api (REQ-SO-001~006, REQ-INV-002~005, BP-SO-01·02, REQ-PRD-006 재생산, REQ-MSG-001 업무방).
 // 이 층은 권한 확인(requireActor)만 하고 업무 규칙·작업 로그·불변조건은 core 서비스(@/mock/services)가 맡는다.
-import { requireActor, type Actor } from '@/api/actor';
+import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { PERMISSION, type Permission, type ProductItemType } from '@/codes';
 import { todayStr } from '@/lib/format';
@@ -69,11 +69,6 @@ export interface SalesOrderListRow extends SalesOrderSummary {
   itemLines: { lineNo: number; itemType: ProductItemType; itemName: string; orderedQty: number }[];
 }
 
-/** 업무방(메신저)의 수주 요약 */
-export interface SalesOrderRoomSummary extends SalesOrderSummary {
-  items: SalesOrderDetail['items'];
-}
-
 const SALES_ORDER_VIEW_RULE = { view: [...SALES_ORDER_VIEW_PERMISSIONS] };
 
 /** 미리보기는 납기를 쓰지 않는다. 서비스의 입력 확인을 지나도록 오늘 날짜를 넣는다(저장하지 않음). */
@@ -92,18 +87,6 @@ function linkedPlanIdsOf(tables: Tables, salesOrderId: number): number[] {
 }
 
 /** 수주 조회 권한이 없어도 그 수주 업무방 멤버면 요약을 볼 수 있다 (업무방은 조직도에서 고른 사람이 함께 쓴다) */
-function requireRoomViewer(tables: Tables, salesOrderId: number): Actor {
-  const actor = requireActor(tables);
-  try {
-    return requireActor(tables, SALES_ORDER_VIEW_RULE);
-  } catch (error) {
-    const room = workRoomOfSalesOrder(tables, salesOrderId);
-    const isMember = room ? tables.chatRoomMember.some((m) => m.chatRoomId === room.id && m.employeeId === actor.employee.id) : false;
-    if (isMember) return actor;
-    throw error;
-  }
-}
-
 export const salesOrderKeys = {
   all: ['sales-orders'] as const,
   list: () => ['sales-orders', 'list'] as const,
@@ -111,7 +94,6 @@ export const salesOrderKeys = {
   production: (salesOrderId: number) => ['sales-orders', 'production', salesOrderId] as const,
   timeline: (salesOrderId: number) => ['sales-orders', 'timeline', salesOrderId] as const,
   preview: (lines: readonly SalesOrderPreviewInputLine[]) => ['sales-orders', 'preview', lines] as const,
-  roomSummary: (salesOrderId: number) => ['sales-orders', 'room-summary', salesOrderId] as const,
   workRoom: (salesOrderId: number) => ['sales-orders', 'work-room', salesOrderId] as const,
 };
 
@@ -230,13 +212,5 @@ export const salesOrderApi = {
         productionPlanNo: plan?.productionPlanNo ?? null,
         shortageQty: plan?.shortageQty ?? 0,
       };
-    }),
-
-  /** 업무방(메신저 영역)에 보일 수주 요약. 수주 조회 권한이 없어도 그 업무방 멤버면 볼 수 있다. */
-  roomSummary: (salesOrderId: number): Promise<SalesOrderRoomSummary> =>
-    mockQuery((tables) => {
-      requireRoomViewer(tables, salesOrderId);
-      const { reservations: _r, shipmentRequests: _s, millSheets: _m, cancelBlock: _c, ...summary } = salesOrderDetail(tables, salesOrderId);
-      return summary;
     }),
 };

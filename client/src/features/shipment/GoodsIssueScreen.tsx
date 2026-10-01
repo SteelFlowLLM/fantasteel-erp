@@ -208,7 +208,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
             <ButtonLink href={`/shipment-requests/${view.id}`} variant="ghost" icon="clipboard">
               출하요청·배정
             </ButtonLink>
-            <ButtonLink href={`/lots/trace?q=${encodeURIComponent(view.shipmentRequestNo)}`} variant="ghost" icon="trace">
+            <ButtonLink href={`/lots/trace?shipmentRequestNo=${encodeURIComponent(view.shipmentRequestNo)}`} variant="ghost" icon="trace">
               LOT 추적
             </ButtonLink>
           </>

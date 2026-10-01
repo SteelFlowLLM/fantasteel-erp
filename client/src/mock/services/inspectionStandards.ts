@@ -7,13 +7,13 @@
 import { ApiError, InputError } from '@/api/errors';
 import { PROCESS_TYPE_LABEL } from '@/codes';
 import {
-  findCurrentStandard,
   formatInspectionStandardCode,
   isInspectedProcess,
   type InspectedProcessType,
 } from '@/features/inspectionStandards/lib/standardItems';
 import { withIGa } from '@/lib/josa';
 import type { InspectionStandardRow } from '@/mock/schema';
+import { currentStandardOf } from '@/mock/services/context';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 
 /** 확인을 마친 검사 항목 (decimal은 문자열) */
@@ -97,5 +97,5 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
 
 /** 공정·강종에 쓰는 지금 버전 (강종 전용 → 없으면 공통). 검사 입력이 판정 기준을 고를 때 쓴다. */
 export function currentInspectionStandardOf(tx: Pick<MockTx, 'tables'>, processType: InspectedProcessType, steelGradeId: number): InspectionStandardRow | undefined {
-  return findCurrentStandard(tx.tables.inspectionStandard, processType, steelGradeId);
+  return currentStandardOf(tx.tables, processType, steelGradeId);
 }

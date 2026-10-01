@@ -3,6 +3,7 @@
 // - 적용 두께 구간: "초과 ~ 이하" (REQ-QC-002). 하한·상한이 비면 그쪽은 제한이 없다.
 // - 값의 근거: 연주(슬래브 표면·치수)는 KS에 없어 사내 가정값, 제강·열연은 KS 값 (docs/rework/ks-values.md, PLAN 8-1)
 import type { ProcessType } from '@/codes';
+import { appliesToThickness, pickCurrentStandard } from '@/lib/inspectionJudgment';
 import { compareDecimal } from '@/lib/weight';
 
 /** 검사를 하는 공정 (REQ-QC-001: 제강 히트 성분 / 연주 슬래브 표면·치수 / 열연 코일 치수·기계적 성질). 제선은 검사하지 않는다. */
@@ -12,9 +13,9 @@ export type InspectedProcessType = (typeof INSPECTED_PROCESS_TYPES)[number];
 export const isInspectedProcess = (processType: ProcessType): processType is InspectedProcessType =>
   (INSPECTED_PROCESS_TYPES as readonly ProcessType[]).includes(processType);
 
-/** 검사 기준 코드의 공정 부분. 열연 HR은 용어 사전 예(QS-SM355A-HR), 제강 SM·연주 CC는 같은 방식의 영문 약어(가정값). */
+/** 검사 기준 코드의 공정 부분. 열연 HR은 용어 사전 예(QS-SM355A-HR), 제강 ST·연주 CC는 같은 방식의 영문 약어(가정값, 검사 기준 시드와 같은 값). */
 export const STANDARD_CODE_PROCESS_SUFFIX: Record<InspectedProcessType, string> = {
-  STEELMAKING: 'SM',
+  STEELMAKING: 'ST',
   CONTINUOUS_CASTING: 'CC',
   HOT_ROLLING: 'HR',
 };
@@ -48,9 +49,8 @@ export function thicknessBandText(band: ThicknessBand): string {
 
 /** 두께가 구간 안인지 (초과 ~ 이하) */
 export function isInThicknessBand(band: ThicknessBand, thicknessMm: string): boolean {
-  if (band.minThicknessMm !== null && compareDecimal(thicknessMm, band.minThicknessMm) <= 0) return false;
-  if (band.maxThicknessMm !== null && compareDecimal(thicknessMm, band.maxThicknessMm) > 0) return false;
-  return true;
+  // 자동 판정과 같은 규칙(lib/inspectionJudgment)
+  return appliesToThickness(band, thicknessMm);
 }
 
 /** 두 구간 (a, b]가 겹치는지. 비어 있는 쪽은 끝이 없다. */
@@ -139,6 +139,6 @@ export interface StandardHeadLike {
 
 /** 공정·강종에 쓰는 지금 버전: 강종 전용 기준이 먼저, 없으면 공통 기준(강종 없음) */
 export function findCurrentStandard<T extends StandardHeadLike>(standards: readonly T[], processType: ProcessType, steelGradeId: number): T | undefined {
-  const current = standards.filter((s) => s.isCurrent && s.processType === processType);
-  return current.find((s) => s.steelGradeId === steelGradeId) ?? current.find((s) => s.steelGradeId === null);
+  // 자동 판정(core currentStandardOf)과 같은 함수
+  return pickCurrentStandard(standards, processType, steelGradeId);
 }

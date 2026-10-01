@@ -6,6 +6,7 @@ import { PERMISSION, type ProcessType, type RawMaterialType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
 import { decSum } from '@/lib/decimal';
+import { sortFifo } from '@/lib/fifo';
 import { hotMetalTonFor } from '@/lib/mrp';
 import type { MockTables } from '@/mock/schema';
 import {
@@ -103,9 +104,8 @@ function workContextOf(tables: Tables, planId: number): WorkContext {
   const steelmakingYieldRate = routingYieldOf(tables, productType, 'STEELMAKING');
   const castingYieldRate = routingYieldOf(tables, productType, 'CONTINUOUS_CASTING');
   const { heatCapacityTon } = productionSettingOf(tables);
-  const hotMetalLots = tables.lot
-    .filter((l) => l.lotType === 'HOT_METAL' && l.lotStatus === 'AVAILABLE')
-    .sort((a, b) => a.producedDate.localeCompare(b.producedDate) || a.lotNo.localeCompare(b.lotNo))
+  // 투입 용선 순서 = 제강 실적이 쓰는 FIFO(생산완료일 → LOT 번호, lib/fifo)
+  const hotMetalLots = sortFifo(tables.lot.filter((l) => l.lotType === 'HOT_METAL' && l.lotStatus === 'AVAILABLE'))
     .map((l) => ({ lotNo: l.lotNo, producedDate: l.producedDate, remainingTon: l.remainingTon ?? '0.000' }));
   const stockOf = (consumption: MockTables['specificConsumption'][number]): RawMaterialStock | null => {
     const material = findById(tables, 'item', consumption.itemId);

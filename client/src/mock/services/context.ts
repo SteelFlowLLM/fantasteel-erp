@@ -3,6 +3,7 @@
 import type { ProcessType, ProductItemType } from '@/codes';
 import { ApiError, FieldErrors, InputError } from '@/api/errors';
 import { decCmp, isDecimalText } from '@/lib/decimal';
+import { pickCurrentStandard } from '@/lib/inspectionJudgment';
 import { withEulReul, withEunNeun, withIGa } from '@/lib/josa';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import { calcHotRollingYieldRate } from '@/lib/weight';
@@ -247,8 +248,7 @@ export function inspectionProcessOf(lotType: LotRow['lotType']): ProcessType | n
 
 /** 공정·강종의 현재 검사 기준 (강종 기준이 없으면 공통 기준) */
 export function currentStandardOf(tables: Tables, processType: ProcessType, steelGradeId: number | null) {
-  const current = tables.inspectionStandard.filter((s) => s.isCurrent && s.processType === processType);
-  return current.find((s) => s.steelGradeId === steelGradeId) ?? current.find((s) => s.steelGradeId === null);
+  return pickCurrentStandard(tables.inspectionStandard, processType, steelGradeId);
 }
 
 /** 정렬된 고유 숫자 */

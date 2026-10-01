@@ -283,7 +283,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <span className="text-ink-3">밀시트</span>
                 {detail.millSheets.map((sheet) => (
-                  <Link key={sheet.id} href={`/mill-sheets?millSheet=${sheet.id}`} className="font-mono font-medium text-run hover:underline">
+                  <Link key={sheet.id} href={`/mill-sheets?id=${sheet.id}`} className="font-mono font-medium text-run hover:underline">
                     {sheet.millSheetNo}
                   </Link>
                 ))}

@@ -216,7 +216,12 @@ function required<T>(value: T | undefined, what: string): T {
   return value;
 }
 
-export function createSeedTables(): MockTables {
+export interface SeedOptions {
+  /** 돌릴 영역 시드 (기본 = 모두). 테스트에서 조직·기준정보만 있는 상태를 만들 때 () => false */
+  areaSeeders?: (key: string) => boolean;
+}
+
+export function createSeedTables(options: SeedOptions = {}): MockTables {
   const tx: MockTx = { tables: createEmptyTables(), now: new Date(SEED_AT), nowIso: SEED_AT };
 
   const jobGradeId = new Map(SEED_JOB_GRADES.map((g) => [g.jobGradeCode, insertRow(tx, 'jobGrade', { ...g }).id]));
@@ -333,6 +338,6 @@ export function createSeedTables(): MockTables {
   }
 
   // 거래·협업 시드 (mock/seeds/index.ts에 등록된 순서대로)
-  runAreaSeeders(tx);
+  runAreaSeeders(tx, options.areaSeeders);
   return tx.tables;
 }

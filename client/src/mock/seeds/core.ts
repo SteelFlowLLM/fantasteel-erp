@@ -272,4 +272,12 @@ export function seedCore(tx: MockTx): void {
   markRead(productionHead.employeeId, m2.id);
   markRead(purchase.employeeId, m3.id);
   markRead(sales.employeeId, m1.id);
+
+  // 이미 승인한 구매요청의 승인 요청 알림은 부서장이 처리한 것이라 읽음으로 둔다(승인 대기 PR-2609-0004만 안 읽음)
+  for (const notification of t.notification.filter((n) => n.notificationType === 'APPROVAL_REQUESTED' && !n.isRead)) {
+    const prId = Number(/[?&]pr=(\d+)/.exec(notification.linkPath ?? '')?.[1]);
+    const pr = t.purchaseRequisition.find((r) => r.id === prId);
+    if (!pr || pr.purchaseRequisitionStatus === 'WAITING_APPROVAL' || !pr.approvedAt) continue;
+    updateRow(txAt(tx, pr.approvedAt), 'notification', notification.id, { isRead: true, readAt: pr.approvedAt });
+  }
 }

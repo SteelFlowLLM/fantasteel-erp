@@ -133,6 +133,9 @@ export interface ShipmentRecommendationLine {
 /** 출하요청의 FIFO 추천 (저장 안 함, SHP-001) */
 export function shipmentRecommendation(tables: Tables, shipmentRequestId: number): ShipmentRecommendationLine[] {
   mustGet(tables, 'shipmentRequest', shipmentRequestId, '출하요청');
+  // 같은 규격 품목이 한 요청에 여러 줄이면 줄 순서대로 나눠 추천한다(앞 줄이 고른 LOT은 뒤 줄 추천에서 뺀다).
+  // FIFO 순서는 그대로라 [추천대로 모두 확정]이 INV-003에 걸리지 않고, 확정 함수가 남기는 추천(줄마다 앞 줄 배정을 뺀 FIFO)과 같다.
+  const taken = new Set<number>();
   return tables.shipmentRequestItem
     .filter((l) => l.shipmentRequestId === shipmentRequestId)
     .sort((a, b) => a.lineNo - b.lineNo)
@@ -140,6 +143,9 @@ export function shipmentRecommendation(tables: Tables, shipmentRequestId: number
       const soItem = mustGet(tables, 'salesOrderItem', line.salesOrderItemId, '수주 품목');
       const allocatedQty = tables.allocation.filter((a) => a.shipmentRequestItemId === line.id && a.allocationStatus === 'CONFIRMED').length;
       const unallocatedQty = Math.max(0, line.requestQty - allocatedQty);
+      const candidates = recommendFifoLots(tables, soItem.itemId, Number.MAX_SAFE_INTEGER);
+      const recommended = candidates.filter((l) => !taken.has(l.id)).slice(0, unallocatedQty);
+      for (const lot of recommended) taken.add(lot.id);
       return {
         shipmentRequestItemId: line.id,
         salesOrderItemId: soItem.id,
@@ -147,8 +153,8 @@ export function shipmentRecommendation(tables: Tables, shipmentRequestId: number
         requestQty: line.requestQty,
         allocatedQty,
         unallocatedQty,
-        recommendedLots: recommendFifoLots(tables, soItem.itemId, unallocatedQty).map((l) => lotViewOf(tables, l)),
-        candidateLots: recommendFifoLots(tables, soItem.itemId, Number.MAX_SAFE_INTEGER).map((l) => lotViewOf(tables, l)),
+        recommendedLots: recommended.map((l) => lotViewOf(tables, l)),
+        candidateLots: candidates.map((l) => lotViewOf(tables, l)),
       };
     });
 }

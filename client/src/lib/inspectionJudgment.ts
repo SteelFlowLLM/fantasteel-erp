@@ -3,7 +3,7 @@
 // - 적용 두께 구간은 "초과~이하"로 판정한다 (min_thickness_mm 초과, max_thickness_mm 이하). 구간이 없으면 모든 두께에 적용.
 // - 필수 항목 측정값이 비었거나 검사 기준이 없으면 합격으로 처리하지 않고 PENDING(판정 대기).
 // - 측정한 항목 하나라도 기준을 벗어나면 FAIL (필수 항목이 비어 있어도 불합격은 불합격이다 — 가정값).
-import type { InspectionResult } from '@/codes';
+import type { InspectionResult, ProcessType } from '@/codes';
 import { decAdd, decCmp, decDiv, decMul } from '@/lib/decimal';
 
 export interface JudgmentStandardItem {
@@ -90,4 +90,17 @@ export function typicalPassValue(item: Pick<JudgmentStandardItem, 'minValue' | '
   if (item.maxValue !== null) return decMul(item.maxValue, '0.8', 3);
   if (item.minValue !== null) return decMul(item.minValue, '1.1', 3);
   return null;
+}
+
+/**
+ * 공정·강종에 쓰는 지금 버전의 검사 기준: 강종 전용 지금 버전 → 없으면 공통 기준(강종 없음).
+ * 검사 자동 판정(core)과 검사 기준 화면·기준정보 준비 상태가 모두 이 함수 하나를 쓴다.
+ */
+export function pickCurrentStandard<T extends { processType: ProcessType; steelGradeId: number | null; isCurrent: boolean }>(
+  standards: readonly T[],
+  processType: ProcessType,
+  steelGradeId: number | null,
+): T | undefined {
+  const current = standards.filter((s) => s.isCurrent && s.processType === processType);
+  return current.find((s) => s.steelGradeId === steelGradeId) ?? current.find((s) => s.steelGradeId === null);
 }

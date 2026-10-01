@@ -5,7 +5,7 @@ import { approvalApi } from '@/api/approvals';
 import { InputError } from '@/api/client';
 import { goodsReceiptApi } from '@/api/goodsReceipts';
 import { mrpApi } from '@/api/mrp';
-import { purchaseOrderApi, purchaseRequisitionApi, toTonText } from '@/api/purchasing';
+import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
 import { defaultMrpPeriod } from '@/features/purchasing/lib/purchasingView';
 import { todayStr } from '@/lib/format';
 import { getMockDb } from '@/mock/db';
@@ -80,11 +80,13 @@ describe('MRP api', () => {
 });
 
 describe('구매요청 api', () => {
-  it('톤 입력은 decimal(12,3) 모양으로 맞추고, 형식이 틀리면 그대로 넘긴다', () => {
-    expect(toTonText(' 1.5 ')).toBe('1.500');
-    expect(toTonText('1,200')).toBe('1200.000');
-    expect(toTonText('1.2345')).toBe('1.2345');
-    expect(toTonText('3매')).toBe('3매');
+  it('톤 입력은 decimal(12,3) 모양(소수 3자리)으로 저장하고(core), 형식이 틀리면 입력 오류', async () => {
+    actAs(SEED_EMPLOYEE_NO.purchase);
+    const view = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-20', requestReason: '', items: [{ itemId: itemIdOf('COL01'), requiredTon: ' 1,200 ' }] });
+    expect(read((t) => t.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === view.id).map((i) => i.requiredTon))).toEqual(['1200.000']);
+    for (const requiredTon of ['1.2345', '3매']) {
+      await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-20', requestReason: '', items: [{ itemId: itemIdOf('COL01'), requiredTon }] })).rejects.toBeInstanceOf(InputError);
+    }
   });
 
   it('등록 = 바로 승인 대기, 출처 직접, 부서장에게 승인 요청 알림·작업 로그', async () => {
