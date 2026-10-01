@@ -446,7 +446,7 @@ export const masterDataApi = {
         .sort(
           (a, b) =>
             PRODUCT_ITEM_TYPES.indexOf(a.itemType) - PRODUCT_ITEM_TYPES.indexOf(b.itemType) ||
-            a.steelGradeCode.localeCompare(b.steelGradeCode) ||
+            a.steelGradeId - b.steelGradeId ||
             compareDecimal(b.thicknessMm, a.thicknessMm) ||
             compareDecimal(a.widthMm, b.widthMm) ||
             compareDecimal(a.lengthMm, b.lengthMm),
@@ -553,7 +553,7 @@ export const masterDataApi = {
             },
           ];
         })
-        .sort((a, b) => a.steelGradeCode.localeCompare(b.steelGradeCode) || a.slab.itemCode.localeCompare(b.slab.itemCode)),
+        .sort((a, b) => a.steelGradeId - b.steelGradeId || a.slab.id - b.slab.id),
     ),
 
   createSpecMapping: (input: SpecMappingInput): Promise<number> =>
