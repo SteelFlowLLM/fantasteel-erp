@@ -72,3 +72,14 @@
 - 브라우저 확인(next dev·build)은 병렬 규칙상 하지 않았다. typecheck·Vitest만 돌렸다. 합치는 단계에서 화면을 눌러 확인이 필요하다.
 - 사원 목록의 선택은 주소에 남기지 않는다(새로 고치면 첫 사원). 다른 화면에서 특정 사원으로 바로 여는 링크는 없다.
 - 부서 삭제 거부 사유 중 구매요청·부서 알림 참조는 저장할 때 API에서만 알 수 있다(화면 버튼은 소속 사원·하위 부서만 보고 막는다).
+
+## 9. 검토 반영
+| 지적 | 근거 | 고친 내용 |
+|---|---|---|
+| 사원 수정 창이 COM-001을 못 냄 (다른 탭 저장 뒤 옛 값으로 덮어씀) | 04 9.3 COM-001 · cross-cutting.md "수정 폼은 연 시점의 updatedAt" · 3장 `employeeAdminApi.update` | `features/admin/lib/employeeForm.ts` `openEmployeeForm`으로 창을 연 시점의 값·updatedAt을 `useState` 초기값으로 한 번만 잡는다. 저장은 그 updatedAt을 보내고, 바뀐 칸 비교(`isEmployeeFormDirty`)와 '내 역할' 띠도 연 시점 값과 비교한다. 목록이 새로 불러와져도 바뀌지 않아 다른 탭 저장 뒤에는 COM-001이 난다 |
+| 역할 칸을 `<label>`(Field)로 감싸 label·도움말 클릭이 첫 역할(영업) 버튼을 누름 | 03 TRM-037 · common.md 접근성 | 역할 묶음을 `<fieldset>` + `<legend>역할 *</legend>`로 바꿨다. 도움말·오류는 `aria-describedby`로 묶고, radiogroup에 `aria-required`·`aria-invalid`. 공유 `components/Field.tsx`는 바꾸지 않았다 |
+| 권한 수준 표시명(사용·조회)을 화면에서 다시 정의 | 05 4장 [강제] · 보고서 5 C-3 PERMISSION_LEVEL · C-6 #6 | `permissionMatrix.ts`에 `levelLabelOf`(사용·조회 = `PERMISSION_LEVEL_LABEL`, 행 없음 = `NO_PERMISSION_LEVEL_LABEL` '없음')와 `levelCountText`('사용 N · 조회 M')를 두고, 권한 행렬 칸·제목 줄·범례·저장 전 title, 역할 요약(`RolePermissionSummary`) 줄 이름, 사원 창 역할 카드 개수 줄이 모두 이것을 쓴다. 화면에는 칸 색만 남겼다. 'USE'/'VIEW' 글자 비교도 `PERMISSION_LEVEL` 상수로 바꿨다 |
+
+- 테스트: `features/admin/lib/employeeForm.test.ts`(연 시점 값 고정·바뀐 칸 비교·표시명), `api/adminEmployees.test.ts`에 "창을 연 뒤 다른 탭이 저장 → 연 시점 값으로 저장하면 COM-001, 다른 탭 값 유지" 추가.
+- 같은 모양을 다른 관리 화면에서도 확인했다: 직급 수정 창은 누른 시점의 행을 상태로 들고 있어 문제없고, 부서 상세는 `key`에 updatedAt이 있어 새 값으로 다시 열린다(덮어쓰기 없음).
+- 공유 파일 변경 없음.

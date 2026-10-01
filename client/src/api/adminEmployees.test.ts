@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { employeeAdminApi, type EmployeeCreateInput } from '@/api/adminEmployees';
 import { ApiError, InputError } from '@/api/client';
 import { directoryApi } from '@/api/directory';
@@ -94,6 +94,39 @@ describe('사원 수정', () => {
     const id = employeeIdOf(SEED_EMPLOYEE_NO.sales);
     const input = { id, employeeName: '박서영', departmentId: departmentIdOf('SAL'), jobGradeId: gradeIdOf('STAFF'), roleId: roleIdOf('SALES') };
     await expect(employeeAdminApi.update({ ...input, expectedUpdatedAt: '2000-01-01T00:00:00.000Z' })).rejects.toMatchObject({ code: 'COM-001' });
+  });
+
+  it('수정 창을 연 뒤 다른 탭이 저장했으면, 연 시점 값으로 덮어쓰지 않고 COM-001', async () => {
+    actAs(SEED_EMPLOYEE_NO.admin);
+    const id = employeeIdOf(SEED_EMPLOYEE_NO.sales);
+    const opened = employeeRow(id);
+    if (!opened) throw new Error('seed employee missing');
+    // 다른 탭: 직급을 바꿔 저장 (연 시점보다 나중 시각)
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date(Date.parse(opened.updatedAt) + 60_000) });
+    try {
+      await employeeAdminApi.update({
+        id,
+        employeeName: opened.employeeName,
+        departmentId: opened.departmentId,
+        jobGradeId: gradeIdOf('MANAGER'),
+        roleId: opened.roleId,
+        expectedUpdatedAt: opened.updatedAt,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    // 이 탭: 이름만 고쳐 연 시점의 값과 updatedAt으로 저장
+    await expect(
+      employeeAdminApi.update({
+        id,
+        employeeName: '박서윤',
+        departmentId: opened.departmentId,
+        jobGradeId: opened.jobGradeId,
+        roleId: opened.roleId,
+        expectedUpdatedAt: opened.updatedAt,
+      }),
+    ).rejects.toMatchObject({ code: 'COM-001' });
+    expect(employeeRow(id)).toMatchObject({ employeeName: opened.employeeName, jobGradeId: gradeIdOf('MANAGER') });
   });
 
   it('없는 사원이면 COM-003', async () => {

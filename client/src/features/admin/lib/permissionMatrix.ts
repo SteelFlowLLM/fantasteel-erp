@@ -1,5 +1,14 @@
 // 역할 × 권한 행렬의 화면 계산. 칸 값: USE 사용 / VIEW 조회 / null 없음(행 없음, PERMISSION_LEVEL).
-import { PERMISSION_AREAS, PERMISSION_AREA, PERMISSIONS, type Permission, type PermissionArea, type PermissionLevel } from '@/codes';
+import {
+  PERMISSION_AREAS,
+  PERMISSION_AREA,
+  PERMISSION_LEVEL,
+  PERMISSION_LEVEL_LABEL,
+  PERMISSIONS,
+  type Permission,
+  type PermissionArea,
+  type PermissionLevel,
+} from '@/codes';
 
 export type MatrixLevel = PermissionLevel | null;
 /** 역할 하나의 권한 표 */
@@ -49,6 +58,19 @@ export function countLevels(levels: RoleLevels): { use: number; view: number } {
     else if (levels[permission] === 'VIEW') view += 1;
   }
   return { use, view };
+}
+
+/** 권한 없음(행 없음)의 화면 글자. 행이 없다는 뜻이라 PERMISSION_LEVEL 코드 값이 아니다. */
+export const NO_PERMISSION_LEVEL_LABEL = '없음';
+
+/** 칸 글자: 사용·조회는 PERMISSION_LEVEL_LABEL, 행이 없으면 '없음' */
+export function levelLabelOf(level: MatrixLevel): string {
+  return level ? PERMISSION_LEVEL_LABEL[level] : NO_PERMISSION_LEVEL_LABEL;
+}
+
+/** '사용 N · 조회 M' (표시명은 PERMISSION_LEVEL_LABEL) */
+export function levelCountText(counts: { use: number; view: number }): string {
+  return `${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} ${counts.use} · ${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} ${counts.view}`;
 }
 
 /** 행렬의 행: 영역별로 묶은 권한 (공통 코드 정의서 PERMISSION 표 순서) */
