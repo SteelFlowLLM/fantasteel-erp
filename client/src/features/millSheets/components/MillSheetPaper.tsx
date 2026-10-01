@@ -101,7 +101,6 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
 
   return (
     <article
-      id="mill-sheet-paper"
       aria-label={`밀시트 ${s.millSheetNo}`}
       className="mx-auto flex w-full max-w-[1000px] flex-none flex-col gap-4 rounded-sm border border-line bg-white p-8 text-ink shadow-1 print:max-w-none print:border-0 print:p-0 print:shadow-none"
     >

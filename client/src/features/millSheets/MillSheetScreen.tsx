@@ -17,7 +17,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { MillSheetPaper } from '@/features/millSheets/components/MillSheetPaper';
-import { MillSheetPrintStyle } from '@/features/millSheets/components/MillSheetPrintStyle';
+import { MillSheetPrintPortal } from '@/features/millSheets/components/MillSheetPrintPortal';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { PdfBadge, SalesOrderLink, ShipmentRequestLink } from '@/features/shipment/components/ShipmentBadges';
 import { useMarkMillSheetPdf, useMillSheetDetail, useMillSheetList } from '@/hooks/useMillSheets';
@@ -37,7 +37,7 @@ export function MillSheetScreen() {
   return (
     <>
       <ListPane query={list} selectedId={selectedId} />
-      <PageMain className="print:overflow-visible print:p-0">
+      <PageMain>
         {list.data !== undefined && selectedId === null ? (
           <>
             <PageHead crumb="출하 › 밀시트" title="밀시트" />
@@ -64,7 +64,6 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
   const groups = [...new Set(visible.map((r) => r.shipmentRequestId))].map((id) => visible.filter((r) => r.shipmentRequestId === id));
   return (
     <MasterPane
-      className="print:hidden"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -171,8 +170,7 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
 
   return (
     <>
-      <MillSheetPrintStyle />
-      <div className="flex flex-col gap-4 print:hidden">
+      <div className="flex flex-col gap-4">
         <PageHead
           crumb="출하 › 밀시트"
           title={
@@ -223,6 +221,9 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
         </Banner>
       </div>
       <MillSheetPaper snapshot={s} />
+      <MillSheetPrintPortal>
+        <MillSheetPaper snapshot={s} />
+      </MillSheetPrintPortal>
     </>
   );
 }
