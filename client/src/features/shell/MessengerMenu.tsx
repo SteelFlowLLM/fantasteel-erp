@@ -1,10 +1,14 @@
 'use client';
 
-// 상단 메신저 버튼 (SPEC 4장 1번): 누르면 최근 대화 드롭다운. 항목·메신저 열기는 왼쪽 메뉴 '메신저' 화면으로 간다.
+// 상단 메신저 버튼 (SPEC 4장 1번): 누르면 최근 채팅방 드롭다운. 항목·메신저 열기는 왼쪽 메뉴 '메신저' 화면으로 간다.
+// 숫자는 가짜 DB 변경(이 탭·다른 탭)마다 다시 읽어 실시간으로 바뀐다 (REQ-MSG-002·004).
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/Button';
+import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import { CountBadge } from '@/components/Badge';
+import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
+import { Tag } from '@/components/Tag';
+import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { PopFoot, PopHead, PopItem, PopList, PopNote, PopPanel } from '@/features/shell/PopPanel';
 import { usePopover } from '@/hooks/usePopover';
 import { useRecentChatRooms, useUnreadChatCount } from '@/hooks/useShellCounts';
@@ -34,14 +38,23 @@ export function MessengerMenu({ employeeId }: { employeeId: number }) {
         <CountBadge count={unread} />
       </IconButton>
       {popover.open ? (
-        <PopPanel label="최근 대화">
+        <PopPanel label="최근 채팅방">
           <PopHead title="메신저" meta={`안 읽음 ${unread}건`} />
           <PopList>
             {recent.isPending ? <PopNote>불러오는 중…</PopNote> : null}
+            {recent.error ? <PopNote>채팅방을 불러오지 못했어요</PopNote> : null}
             {recent.data?.map((room) => (
               <PopItem key={room.id} unread={room.unreadCount > 0} onClick={() => go(`/messenger?room=${room.id}`)}>
+                <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <b className="truncate text-sm font-semibold">{room.displayName}</b>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <b className="truncate text-sm font-semibold">{room.displayName}</b>
+                    {room.chatRoomType === 'WORK' ? (
+                      <Tag size="sm" tone="brand" className="flex-none">
+                        {CHAT_ROOM_TYPE_LABEL.WORK}
+                      </Tag>
+                    ) : null}
+                  </span>
                   <span className="truncate text-xs text-ink-3">{room.lastMessagePreview ?? '아직 대화가 없어요'}</span>
                 </span>
                 <span className="flex flex-none flex-col items-end gap-1">
@@ -50,7 +63,7 @@ export function MessengerMenu({ employeeId }: { employeeId: number }) {
                 </span>
               </PopItem>
             ))}
-            {recent.data && recent.data.length === 0 ? <PopNote>참여 중인 대화가 없어요</PopNote> : null}
+            {recent.data && recent.data.length === 0 ? <PopNote>참여 중인 채팅방이 없어요</PopNote> : null}
           </PopList>
           <PopFoot>
             <Button variant="ghost" size="sm" onClick={() => go('/messenger')}>
