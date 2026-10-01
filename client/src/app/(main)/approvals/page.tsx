@@ -1,9 +1,15 @@
 import type { Metadata } from 'next';
-import { StagePlaceholder } from '@/components/StagePlaceholder';
+import { Suspense } from 'react';
+import { StateView } from '@/components/StateView';
+import { ApprovalScreen } from '@/features/purchasing/ApprovalScreen';
 import { pageTitle } from '@/features/shell/routeTitles';
 
 export const metadata: Metadata = { title: pageTitle('/approvals') };
 
 export default function ApprovalPage() {
-  return <StagePlaceholder stage={3} />;
+  return (
+    <Suspense fallback={<StateView kind="loading" />}>
+      <ApprovalScreen />
+    </Suspense>
+  );
 }
