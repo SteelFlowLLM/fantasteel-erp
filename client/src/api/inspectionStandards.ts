@@ -6,7 +6,7 @@ import { PERMISSION, type ProcessType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
 import { decimalText, optionalText, requiredText } from '@/api/validation';
-import { findOverlappingItems, isInspectedProcess, type InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
+import { canHaveCommonStandard, findOverlappingItems, isInspectedProcess, type InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
 import { withEunNeun } from '@/lib/josa';
 import { compareDecimal, formatDecimal } from '@/lib/weight';
 import type { InspectionStandardItemRow, InspectionStandardRow, MockTables } from '@/mock/schema';
@@ -91,10 +91,13 @@ export interface InspectionStandardVersionInput {
   items: InspectionStandardItemInput[];
 }
 
+/** 공통 기준(모든 강종)을 고른 값. 강종을 고르지 않은 것(null)과 구분한다 */
+export const COMMON_STANDARD_GRADE = 'COMMON';
+
 export interface InspectionStandardCreateInput {
   processType: ProcessType | null;
-  /** null = 공통 기준(모든 강종) */
-  steelGradeId: number | null;
+  /** 강종 id · COMMON_STANDARD_GRADE = 공통 기준(연주·열연만) · null = 아직 고르지 않음(거부) */
+  steelGradeId: number | typeof COMMON_STANDARD_GRADE | null;
   items: InspectionStandardItemInput[];
 }
 
@@ -108,20 +111,20 @@ export function readStandardItems(items: readonly InspectionStandardItemInput[])
   if (items.length === 0) throw new InputError('검사 항목을 1개 이상 넣어 주세요');
   const errors = new FieldErrors();
   const values = items.map((item, index): InspectionStandardItemValues | null => {
-    const key = (field: string) => `items.${index}.${field}`;
-    const code = requiredText(errors, key('inspectionItemCode'), item.inspectionItemCode, '항목 코드', 50);
-    if (code && !ITEM_CODE_PATTERN.test(code)) errors.add(key('inspectionItemCode'), '영문으로 시작하고 영문·숫자·밑줄만 써요 (예: C, TENSILE_STRENGTH)');
-    const name = requiredText(errors, key('inspectionItemName'), item.inspectionItemName, '항목명', 50);
-    const unit = optionalText(errors, key('unit'), item.unit, '단위', 20);
-    const minValue = decimalText(errors, key('minValue'), item.minValue, { label: '최소', ...VALUE_RULE });
-    const maxValue = decimalText(errors, key('maxValue'), item.maxValue, { label: '최대', ...VALUE_RULE });
-    if (minValue === null && maxValue === null) errors.add(key('minValue'), '최소·최대 중 하나는 입력해 주세요');
-    if (minValue && maxValue && compareDecimal(minValue, maxValue) > 0) errors.add(key('maxValue'), '최소값이 최대값보다 클 수 없어요');
-    const minThickness = decimalText(errors, key('minThicknessMm'), item.minThicknessMm, { label: '두께 하한', ...THICKNESS_RULE });
-    const maxThickness = decimalText(errors, key('maxThicknessMm'), item.maxThicknessMm, { label: '두께 상한', ...THICKNESS_RULE });
-    if (maxThickness !== undefined && maxThickness !== null && compareDecimal(maxThickness, '0') <= 0) errors.add(key('maxThicknessMm'), `${withEunNeun('두께 상한')} 0보다 커야 해요`);
+    const buildKey = (field: string) => `items.${index}.${field}`;
+    const code = requiredText(errors, buildKey('inspectionItemCode'), item.inspectionItemCode, '항목 코드', 50);
+    if (code && !ITEM_CODE_PATTERN.test(code)) errors.add(buildKey('inspectionItemCode'), '영문으로 시작하고 영문·숫자·밑줄만 써요 (예: C, TENSILE_STRENGTH)');
+    const name = requiredText(errors, buildKey('inspectionItemName'), item.inspectionItemName, '항목명', 50);
+    const unit = optionalText(errors, buildKey('unit'), item.unit, '단위', 20);
+    const minValue = decimalText(errors, buildKey('minValue'), item.minValue, { label: '최소', ...VALUE_RULE });
+    const maxValue = decimalText(errors, buildKey('maxValue'), item.maxValue, { label: '최대', ...VALUE_RULE });
+    if (minValue === null && maxValue === null) errors.add(buildKey('minValue'), '최소·최대 중 하나는 입력해 주세요');
+    if (minValue && maxValue && compareDecimal(minValue, maxValue) > 0) errors.add(buildKey('maxValue'), '최소값이 최대값보다 클 수 없어요');
+    const minThickness = decimalText(errors, buildKey('minThicknessMm'), item.minThicknessMm, { label: '두께 하한', ...THICKNESS_RULE });
+    const maxThickness = decimalText(errors, buildKey('maxThicknessMm'), item.maxThicknessMm, { label: '두께 상한', ...THICKNESS_RULE });
+    if (maxThickness !== undefined && maxThickness !== null && compareDecimal(maxThickness, '0') <= 0) errors.add(buildKey('maxThicknessMm'), `${withEunNeun('두께 상한')} 0보다 커야 해요`);
     if (minThickness && maxThickness && compareDecimal(minThickness, maxThickness) >= 0) {
-      errors.add(key('maxThicknessMm'), '두께 상한(이하)은 하한(초과)보다 커야 해요');
+      errors.add(buildKey('maxThicknessMm'), '두께 상한(이하)은 하한(초과)보다 커야 해요');
     }
     if (!code || !name || minValue === undefined || maxValue === undefined || minThickness === undefined || maxThickness === undefined) return null;
     return {
@@ -146,7 +149,7 @@ export function readStandardItems(items: readonly InspectionStandardItemInput[])
   return valid;
 }
 
-const toItemView = (row: InspectionStandardItemRow): InspectionStandardItemView => ({
+const buildItemView = (row: InspectionStandardItemRow): InspectionStandardItemView => ({
   id: row.id,
   inspectionItemCode: row.inspectionItemCode,
   inspectionItemName: row.inspectionItemName,
@@ -159,15 +162,15 @@ const toItemView = (row: InspectionStandardItemRow): InspectionStandardItemView 
   sortOrder: row.sortOrder,
 });
 
-const itemsOf = (tables: Readonly<MockTables>, standardId: number) =>
+const listStandardItems = (tables: Readonly<MockTables>, standardId: number) =>
   tables.inspectionStandardItem
     .filter((i) => i.inspectionStandardId === standardId)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
-    .map(toItemView);
+    .map(buildItemView);
 
 const PROCESS_ORDER: readonly ProcessType[] = ['STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING'];
 
-function toSummary(tables: Readonly<MockTables>, row: InspectionStandardRow): InspectionStandardSummaryView {
+function buildSummaryView(tables: Readonly<MockTables>, row: InspectionStandardRow): InspectionStandardSummaryView {
   return {
     id: row.id,
     inspectionStandardCode: row.inspectionStandardCode,
@@ -188,8 +191,8 @@ export const inspectionStandardApi = {
       tables.inspectionStandard
         .filter((s) => s.isCurrent)
         .filter((s) => !query.processType || s.processType === query.processType)
-        .filter((s) => query.steelGradeId === undefined || s.steelGradeId === query.steelGradeId || s.steelGradeId === null)
-        .map((s) => toSummary(tables, s))
+        .filter((s) => query.steelGradeId === undefined || s.steelGradeId === query.steelGradeId || (s.steelGradeId === null && canHaveCommonStandard(s.processType)))
+        .map((s) => buildSummaryView(tables, s))
         .sort(
           (a, b) =>
             PROCESS_ORDER.indexOf(a.processType) - PROCESS_ORDER.indexOf(b.processType) ||
@@ -205,23 +208,23 @@ export const inspectionStandardApi = {
       const siblings = tables.inspectionStandard.filter((s) => s.inspectionStandardCode === row.inspectionStandardCode).sort((a, b) => b.version - a.version);
       const previous = siblings.find((s) => s.version < row.version) ?? null;
       const current = siblings.find((s) => s.isCurrent) ?? siblings[0];
-      const inspectionCountOf = (standardId: number) => tables.qualityInspection.filter((q) => q.inspectionStandardId === standardId).length;
+      const countInspections = (standardId: number) => tables.qualityInspection.filter((q) => q.inspectionStandardId === standardId).length;
       return {
-        ...toSummary(tables, row),
+        ...buildSummaryView(tables, row),
         isCurrent: row.isCurrent,
         standardNo: tables.steelGrade.find((g) => g.id === row.steelGradeId)?.standardNo ?? null,
-        items: itemsOf(tables, row.id),
-        previousItems: previous ? itemsOf(tables, previous.id) : null,
+        items: listStandardItems(tables, row.id),
+        previousItems: previous ? listStandardItems(tables, previous.id) : null,
         versions: siblings.map((s) => ({
           id: s.id,
           version: s.version,
           isCurrent: s.isCurrent,
           createdAt: s.createdAt,
           itemCount: tables.inspectionStandardItem.filter((i) => i.inspectionStandardId === s.id).length,
-          inspectionCount: inspectionCountOf(s.id),
+          inspectionCount: countInspections(s.id),
         })),
         currentId: current?.id ?? row.id,
-        inspectionCount: inspectionCountOf(row.id),
+        inspectionCount: countInspections(row.id),
       };
     }),
 
@@ -237,9 +240,17 @@ export const inspectionStandardApi = {
   create: (input: InspectionStandardCreateInput): Promise<number> =>
     mockMutation((tx) => {
       requireActor(tx.tables, { use: [PERMISSION.INSPECTION_STANDARD_MANAGE] });
-      const processType = input.processType;
-      if (!processType || !isInspectedProcess(processType)) throw new InputError('공정을 확인해 주세요', { processType: '제강·연주·열연 중에서 골라 주세요' });
+      const errors = new FieldErrors();
+      const processType = input.processType && isInspectedProcess(input.processType) ? input.processType : null;
+      if (!processType) errors.add('processType', '제강·연주·열연 중에서 골라 주세요');
+      if (input.steelGradeId === null) errors.add('steelGradeId', '강종을 선택해 주세요');
+      else if (input.steelGradeId === COMMON_STANDARD_GRADE && processType && !canHaveCommonStandard(processType)) {
+        errors.add('steelGradeId', '제강 검사 기준은 강종별로 만들어요. 강종을 선택해 주세요');
+      }
+      errors.throwIfAny('공정·강종을 확인해 주세요');
+      if (!processType || input.steelGradeId === null) throw new InputError('공정·강종을 확인해 주세요');
       const items = readStandardItems(input.items);
-      return createInspectionStandardVersion(tx, { baseStandardId: null, processType, steelGradeId: input.steelGradeId, items }).id;
+      const steelGradeId = input.steelGradeId === COMMON_STANDARD_GRADE ? null : input.steelGradeId;
+      return createInspectionStandardVersion(tx, { baseStandardId: null, processType, steelGradeId, items }).id;
     }),
 };

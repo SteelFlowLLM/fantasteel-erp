@@ -13,7 +13,7 @@ import { Input, Select } from '@/components/Input';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, TableFoot, yieldPercentText, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, TableFoot, formatYieldPercent, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterRoutings } from '@/hooks/useMasterData';
@@ -39,18 +39,18 @@ interface DraftStep {
   plannedYieldRate: string;
 }
 
-const toDraft = (routing: MasterRoutingView): DraftStep[] => routing.steps.map((s) => ({ processType: s.processType, plannedYieldRate: s.plannedYieldRate ?? '' }));
-const sameDraft = (a: DraftStep[], b: DraftStep[]) => a.length === b.length && a.every((s, i) => s.processType === b[i].processType && s.plannedYieldRate.trim() === b[i].plannedYieldRate.trim());
+const buildDraft = (routing: MasterRoutingView): DraftStep[] => routing.steps.map((s) => ({ processType: s.processType, plannedYieldRate: s.plannedYieldRate ?? '' }));
+const isSameDraft = (a: DraftStep[], b: DraftStep[]) => a.length === b.length && a.every((s, i) => s.processType === b[i].processType && s.plannedYieldRate.trim() === b[i].plannedYieldRate.trim());
 const RATE = /^\d+(\.\d+)?$/;
 
 function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView; canEdit: boolean; onGoTab: (tab: MasterTabKey) => void }) {
-  const initial = toDraft(routing);
+  const initial = buildDraft(routing);
   const [steps, setSteps] = useState<DraftStep[]>(initial);
   const [adding, setAdding] = useState('');
   const fieldErrors = useMasterDataFieldErrors();
   const title = `${ITEM_TYPE_LABEL[routing.itemType]} 라우팅`;
   const save = useAction(masterDataApi.saveRouting, { success: `${title}을 저장했어요`, onError: fieldErrors.takeFrom });
-  const dirty = !sameDraft(steps, initial);
+  const dirty = !isSameDraft(steps, initial);
 
   const available = Object.values(PROCESS_TYPE).filter((p) => !steps.some((s) => s.processType === p) && !(routing.itemType === 'SLAB' && p === 'HOT_ROLLING'));
   const move = (index: number, delta: number) => {
@@ -77,7 +77,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
           {steps.map((step, index) => {
             const rateError = fieldErrors.errorOf(`steps.${index}.plannedYieldRate`);
             const processError = fieldErrors.errorOf(`steps.${index}.processType`);
-            const preview = RATE.test(step.plannedYieldRate.trim()) ? yieldPercentText(step.plannedYieldRate.trim()) : null;
+            const preview = RATE.test(step.plannedYieldRate.trim()) ? formatYieldPercent(step.plannedYieldRate.trim()) : null;
             return (
               <tr key={step.processType}>
                 <Td className="tabular-nums">{index + 1}</Td>

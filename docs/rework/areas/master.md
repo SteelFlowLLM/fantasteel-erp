@@ -35,7 +35,7 @@
 - `client/src/mock/services/inspectionStandards.ts` (새 파일, 이 영역 소유) — `createInspectionStandardVersion(tx, input)`
   - 새 버전: 바탕 버전이 지금 버전이 아니면 COM-001, 없으면 COM-003. 같은 코드로 버전 = 최대 + 1, 이전 지금 버전은 `is_current = false`. 항목은 새로 넣고 이전 버전 항목은 그대로 둔다(판정한 검사가 계속 참조).
   - 새 기준: 제강·연주·열연만, 같은 (공정, 강종)의 지금 버전이 있으면 거부(새 버전으로 안내), 코드 `QS-강종-공정`, 버전 1.
-  - `currentInspectionStandardOf(tx, processType, steelGradeId)` — 강종 전용 지금 버전 → 없으면 공통 기준. 검사 입력이 판정 기준을 고를 때 같은 규칙을 쓰면 된다.
+  - `findCurrentInspectionStandard(tx, processType, steelGradeId)` — 강종 전용 지금 버전 → 없으면 공통 기준(연주·열연만). 제강은 강종 전용만. 검사 입력이 판정 기준을 고를 때 같은 규칙을 쓰면 된다.
 - 순수 함수(+ Vitest)
   - `features/masterData/lib/readiness.ts` `computeMasterReadiness(tables)` — 생산계획·MRP가 MST-001을 낼 때도 그대로 쓸 수 있다.
   - `features/masterData/lib/references.ts` — 쓰임(`isSpecUsed`)·참조 세기
@@ -68,7 +68,7 @@
 | 검사 항목 입력 규칙 | 최소·최대 중 하나는 필수, 항목 코드 = 영문으로 시작하는 영문·숫자·밑줄 50자 | 옛 화면 규칙. 판정할 수 없는 항목을 막음 |
 | 규격 '사용됨' | 수주 품목·재고(매수 > 0)·LOT·생산계획·예약 중 하나라도 있음 | REQ-MST-003 "수주·재고", 업무 프로세스 4.1 "수주·재고·LOT" |
 | 준비 상태: 배합 원단위 | 철광석·석탄·석회석 유형마다 공통 원단위 1개 이상, 규격이 있는 강종마다 합금철 원단위 1개 이상 | REQ-MST-006, 4.4 |
-| 준비 상태: 검사 기준 | 규격이 있는 강종 × 그 품목 유형 라우팅의 검사 공정(제강·연주·열연)마다 지금 버전(항목 1개 이상), 공통 기준도 인정 | REQ-QC-001·002, BP-QC-01 "기준 누락은 합격 아님" |
+| 준비 상태: 검사 기준 | 규격이 있는 강종 × 그 품목 유형 라우팅의 검사 공정(제강·연주·열연)마다 지금 버전(항목 1개 이상), 연주·열연은 공통 기준도 인정(제강은 강종 전용만) | REQ-QC-001·002, BP-QC-01 "기준 누락은 합격 아님" |
 | 준비 상태: 규격 매핑 | 슬래브마다 대응 코일, 코일마다 대응 슬래브, 대응 코일 중복 표시 | REQ-MST-004, BP-MST-01 |
 | 코드 형식 | 고객사·공급업체·야드 코드: 영문 대문자·숫자로 시작, 대문자·숫자·밑줄·하이픈(≤30). 강종 코드: 대문자·숫자·하이픈(≤20) | 문서에 형식 없음. 길이는 ERD |
 | 수치 자리수 | ERD decimal 자리수만 확인(치수 (8,2)/(10,2), 이론중량 (12,3), 수율 (6,4), 원단위 (12,3), 히트 용량 (12,3), 검사 값 (12,4)) | 옛 화면의 2,000·5,000·5,000,000mm·0~100% 제한은 문서에 없어 뺐다(보고서 5 C-4 #15) |
@@ -77,7 +77,7 @@
 ## 5. 사용자 확인이 필요한 결정
 
 1. **제선 계획 수율**(stage2 0번): 4.4는 원료 → 용선을 용선 1t당 원단위로 계산하고 제선 수율을 쓰지 않는다. 라우팅에서 제선은 "— 계산에 쓰지 않음"으로 보이고 입력·저장하지 않으며, 준비 상태에서 누락으로 보지 않는다. 필수 수율은 제강·연주(열연 = 매핑 계산값).
-2. 옛 '검사 항목' 탭의 '공통 (모든 강종)' 개념은 ERD(steel_grade_id NULL)대로 검사 기준 단위로 옮겼다. 강종 전용 기준이 있으면 그것을, 없으면 공통 기준을 쓴다.
+2. 옛 '검사 항목' 탭의 '공통 (모든 강종)' 개념은 ERD(steel_grade_id NULL)대로 검사 기준 단위로 옮겼다. 강종 전용 기준이 있으면 그것을, 없으면 공통 기준을 쓴다. **제강은 예외**(검토 반영 1): 성분 규격은 강종별이라 공통 제강 기준을 만들 수 없고 대신 쓰지도 않는다.
 3. 기준정보·검사 기준 변경은 작업 로그를 남기지 않는다(맞는 BUSINESS_EVENT_TYPE 없음).
 
 ## 6. 공유 파일 변경
@@ -100,3 +100,35 @@
 
 - 목록에서 이전 버전을 고르면 왼쪽 목록에는 강조가 없다(상세 오른쪽 버전 목록에서 강조).
 - 강종을 지우면 그 강종의 검사 기준도 참조로 보아 삭제가 막힌다(검사 기준은 지우지 않으므로, 기준이 생긴 강종은 지울 수 없다).
+
+## 10. 검토 반영 (2026-10-02)
+
+근거 문서와 함께 적는다. 저장소 PLAN.md·SPEC.md는 6개 문서 밖의 결정 파일이다.
+
+1. **제강 검사 기준은 강종별로만** (02 REQ-MST-002 '강종별 성분 min/max는 제강 검사 기준으로 관리', '히트 성분 판정은 등급별 기준', 03 TRM-020 성분 규격 = 강종별 화학 성분의 허용 범위)
+   - `standardItems.ts` `canHaveCommonStandard(processType)` — 제강이면 false. 공통 기준(steel_grade_id NULL)은 연주·열연만.
+   - `mock/services/inspectionStandards.ts` `createInspectionStandardVersion`: 제강 + 강종 없음이면 `InputError`(steelGradeId '제강 검사 기준은 강종별로 만들어요…').
+   - `findCurrentStandard`(준비 상태 띠 `readiness.ts`, 기준정보 강종 탭 `listSteelGrades`)는 제강을 강종 id로만 찾는다. 강종 전용 제강 기준이 없으면 띠에 'SM355C 제강 검사 기준이 없어요'로 누락이 뜨고, 강종 탭은 '제강 검사 기준 없음'이다. 강종 탭의 '공통 기준' 태그와 `steelmakingStandard.isCommon`은 없앴다.
+   - 검사 기준 목록의 강종 거르기도 공통 제강 기준은 함께 보이지 않는다.
+   - 화면 '기준 추가': 공정 = 제강이면 '공통 (모든 강종)'을 감추고, 공통을 골라 둔 뒤 제강으로 바꾸면 강종을 다시 고르게 비운다. 도움말도 공정에 맞게 바뀐다.
+2. **'강종 안 고름'과 '공통'을 구분** (02 REQ-QC-002, 03 TRM-110, ERD inspection_standard.steel_grade_id '공통 기준이면 NULL')
+   - `InspectionStandardCreateInput.steelGradeId: number | 'COMMON' | null` — `COMMON_STANDARD_GRADE`('COMMON') = 공통을 고름, null = 아직 고르지 않음. null이면 `InputError`(steelGradeId '강종을 선택해 주세요'), 공정과 강종을 함께 안내한다. 예전처럼 비워 둔 채 저장해 QS-COMMON-… 이 생기는 일이 없다.
+   - 강종 입력칸에 `error`·`invalid`를 달아 안내가 칸 아래에 보인다.
+3. **고객사·공급업체·야드 입력 이름 = ERD** (05 코드 컨벤션 §2 [강제], ERD customer·supplier·yard)
+   - `PartyInput`·`PartyUpdateInput` → `CustomerInput{customerCode, customerName}`·`CustomerUpdateInput{id, customerName}`, `SupplierInput`·`SupplierUpdateInput`, `YardInput{yardCode, yardName, yardType}`·`YardUpdateInput{id, yardName}`. 입력칸 오류 키도 같은 이름.
+   - 화면 파일 `PartyYardTab.tsx` → `CustomerSupplierYardTab.tsx`(용어 사전에 없는 'Party'를 뺌). 화면 안 행 모양은 `CodeNameRow`, 목록 고르기는 `ListKind`. 탭 주소 `?tab=parties` → `?tab=customer-supplier-yard`(`&sub=customers|suppliers|yards` 그대로).
+4. **준비 상태 띠의 MST-001 문구** (03 TRM-027 '배합'은 금지어, 04 9.3 MST-001 문구 '수율·배합·규격 매핑·검사 기준 누락')
+   - 띠는 9.3 문구를 싣지 않고 코드 `MST-001`만 보인다(무엇이 빠졌는지는 칩과 줄이 말한다). 문구를 고쳐 쓰지 않은 이유: 오류 문구는 `codes/errors.ts` 값만 쓴다.
+   - **사용자 확인 필요**: 04 9.3 문구와 03 금지어가 부딪친다. PLAN §6에 없는 충돌이다. '배합 원단위'로 바꾸기로 하면 `codes/errors.ts`(공유, codes 담당)를 고친다.
+5. **제품 규격 창 '품목 유형'** (보고서 5 A-5, components/Field.tsx)
+   - `Field`(라벨이 입력칸을 감쌈) 대신 `MasterParts.tsx` `ButtonGroupField`(div)로 감쌌다. 라벨·도움말을 눌러도 '슬래브' 버튼이 눌리지 않아, 코일과 기본 야드를 고른 뒤 값이 몰래 바뀌지 않는다. 같은 유형을 다시 눌러도 기본 야드를 지우지 않는다.
+6. **함수 이름은 동사로 시작** (05 코드 컨벤션 §2, 보고서 5 C-6 #8)
+   - 이 영역 파일의 이름을 바꿨다: `buildCellKey`, `formatYieldPercent`, `buildDraft`·`isSameDraft`, `buildSteelmakingHref`, `buildStandardHref`, `formatThicknessBand`, `doThicknessBandsOverlap`, `getStandardValueSource`, `buildStandardItemKey`, `findChangedItemKeys`, `countRemovedItems`, `formatReferenceText`, `countSpecUsage`, `count…References`, `listStandardItems`, `buildSummaryView`, `buildItemView`, `countInspections`, `findGradeCode`, `findYardName`, `buildSpecItemName`, `readCode`, `buildSpecBrief`, `findNextVersion`, `findCurrentInspectionStandard`, `formatValue`, `matchesGrade`, `buildEmptyItem`, 화면 안 `renderCell`·`renderDimension`, 시험 도우미(`findGradeId`·`catchError`·`buildItem` …).
+   - 화면 데이터 칸 `referenceText`(값)는 이름 그대로다.
+
+### 공유 파일 변경 (검토 반영)
+- `client/src/lib/inspectionJudgment.ts` `pickCurrentStandard` **한 줄**: 제강은 공통 기준으로 대신하지 않는다(자동 판정 core `currentStandardOf`가 같은 함수를 씀). 시드에는 공통 제강 기준이 없어 시드 판정 결과는 같다. 이 영역의 `findCurrentStandard`는 이 줄과 상관없이 같은 규칙을 직접 지킨다.
+
+### 확인
+- `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 74개 파일 549개 통과(새 시험: 강종 미선택·제강 공통 거부·연주 공통 생성·서비스 거부, 제강 강종 전용 찾기, 준비 상태 제강 공통 미인정, 강종 탭 성분 규격, 고객사·공급업체·야드 입력칸 키).
+

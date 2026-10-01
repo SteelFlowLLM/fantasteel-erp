@@ -12,7 +12,7 @@ import { withEulReul } from '@/lib/josa';
 import { fmtPct } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-export const MASTER_TAB_KEYS = ['specs', 'mapping', 'grades', 'routing', 'consumption', 'items', 'parties', 'settings'] as const;
+export const MASTER_TAB_KEYS = ['specs', 'mapping', 'grades', 'routing', 'consumption', 'items', 'customer-supplier-yard', 'settings'] as const;
 export type MasterTabKey = (typeof MASTER_TAB_KEYS)[number];
 export const isMasterTabKey = (value: string | null): value is MasterTabKey => value !== null && (MASTER_TAB_KEYS as readonly string[]).includes(value);
 
@@ -23,7 +23,7 @@ export const MASTER_LOCK_TEXT = permissionNeedText([PERMISSION.MASTER_MANAGE]);
 export const CODE_LINK = 'font-mono text-mono text-run hover:underline';
 
 /** 열연 계획 수율 0.9798 → 97.98% */
-export const yieldPercentText = (rate: string | null): string => (rate === null ? '-' : fmtPct(Number(rate), 2));
+export const formatYieldPercent = (rate: string | null): string => (rate === null ? '-' : fmtPct(Number(rate), 2));
 
 export function TableFoot({ className, children }: { className?: string; children: ReactNode }) {
   return <p className={cn('border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-4 text-ink-3', className)}>{children}</p>;
@@ -88,5 +88,26 @@ export function ModalFooter({ pending, disabled, submitLabel, onCancel, onSubmit
         {pending ? '저장 중…' : submitLabel}
       </Button>
     </>
+  );
+}
+
+/**
+ * 버튼 묶음(Segmented 등)을 담는 입력 항목. 모양은 components/Field와 같지만 <label>로 감싸지 않는다.
+ * <label> 안에 버튼을 두면 라벨·도움말을 누를 때 첫 버튼이 눌려 고른 값이 바뀐다(검토 반영). 버튼 묶음의 이름은 묶음 쪽(Segmented ariaLabel)이 갖는다.
+ */
+export function ButtonGroupField({ label, required, hint, children }: { label: string; required?: boolean; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-xs font-medium text-ink-2">
+        {label}
+        {required ? (
+          <span className="ml-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </span>
+      {children}
+      {hint ? <span className="text-cap text-ink-3">{hint}</span> : null}
+    </div>
   );
 }

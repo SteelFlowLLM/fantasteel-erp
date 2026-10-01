@@ -21,16 +21,17 @@ import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterCustomers, useMasterSuppliers, useMasterYards } from '@/hooks/useMasterData';
 
-type PartyKind = 'customers' | 'suppliers' | 'yards';
-const KINDS: readonly { key: PartyKind; label: string }[] = [
+// 화면 안에서 세 목록을 고르는 값 (주소 &sub=)
+type ListKind = 'customers' | 'suppliers' | 'yards';
+const KINDS: readonly { key: ListKind; label: string }[] = [
   { key: 'customers', label: '고객사' },
   { key: 'suppliers', label: '공급업체' },
   { key: 'yards', label: '야드' },
 ];
-const isPartyKind = (value: string | null): value is PartyKind => KINDS.some((k) => k.key === value);
+const isListKind = (value: string | null): value is ListKind => KINDS.some((k) => k.key === value);
 
-/** 세 대상을 같은 표로 그리기 위한 행 */
-interface PartyRow {
+/** 세 대상을 같은 표로 그리기 위한 화면 행 (저장할 때는 ERD 이름의 입력으로 바꾼다) */
+interface CodeNameRow {
   id: number;
   code: string;
   name: string;
@@ -39,11 +40,43 @@ interface PartyRow {
   updatedAt: string;
 }
 
-const KIND_TEXT: Record<PartyKind, { what: string; codeLabel: string; nameLabel: string; nameMax: number; codeExample: string; foot: string }> = {
-  customers: { what: '고객사', codeLabel: '고객사 코드', nameLabel: '고객사명', nameMax: 100, codeExample: 'CUS-05', foot: '수주·출하요청이 쓰는 고객사는 지울 수 없어요' },
-  suppliers: { what: '공급업체', codeLabel: '공급업체 코드', nameLabel: '공급업체명', nameMax: 100, codeExample: 'SUP-05', foot: '원료 기본 공급업체·발주가 쓰는 공급업체는 지울 수 없어요' },
+interface KindText {
+  what: string;
+  /** 입력칸 오류 키 = api 입력 이름 (ERD customer_code·supplier_code·yard_code …) */
+  codeField: 'customerCode' | 'supplierCode' | 'yardCode';
+  nameField: 'customerName' | 'supplierName' | 'yardName';
+  codeLabel: string;
+  nameLabel: string;
+  nameMax: number;
+  codeExample: string;
+  foot: string;
+}
+
+const KIND_TEXT: Record<ListKind, KindText> = {
+  customers: {
+    what: '고객사',
+    codeField: 'customerCode',
+    nameField: 'customerName',
+    codeLabel: '고객사 코드',
+    nameLabel: '고객사명',
+    nameMax: 100,
+    codeExample: 'CUS-05',
+    foot: '수주·출하요청이 쓰는 고객사는 지울 수 없어요',
+  },
+  suppliers: {
+    what: '공급업체',
+    codeField: 'supplierCode',
+    nameField: 'supplierName',
+    codeLabel: '공급업체 코드',
+    nameLabel: '공급업체명',
+    nameMax: 100,
+    codeExample: 'SUP-05',
+    foot: '원료 기본 공급업체·발주가 쓰는 공급업체는 지울 수 없어요',
+  },
   yards: {
     what: '야드',
+    codeField: 'yardCode',
+    nameField: 'yardName',
     codeLabel: '야드 코드',
     nameLabel: '야드명',
     nameMax: 50,
@@ -52,13 +85,13 @@ const KIND_TEXT: Record<PartyKind, { what: string; codeLabel: string; nameLabel:
   },
 };
 
-export function PartyYardTab({ canEdit }: { canEdit: boolean }) {
+export function CustomerSupplierYardTab({ canEdit }: { canEdit: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
   const subParam = params.get('sub');
-  const kind: PartyKind = isPartyKind(subParam) ? subParam : 'customers';
-  const setKind = (next: PartyKind) => router.replace(`${pathname}?tab=parties&sub=${next}`, { scroll: false });
+  const kind: ListKind = isListKind(subParam) ? subParam : 'customers';
+  const setKind = (next: ListKind) => router.replace(`${pathname}?tab=customer-supplier-yard&sub=${next}`, { scroll: false });
   return (
     <>
       <Segmented ariaLabel="대상" items={KINDS} active={kind} onChange={setKind} className="self-start" />
@@ -71,33 +104,33 @@ export function PartyYardTab({ canEdit }: { canEdit: boolean }) {
 
 function CustomerList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterCustomers();
-  const rows = query.data?.map((c): PartyRow => ({ id: c.id, code: c.customerCode, name: c.customerName, yardType: null, referenceText: c.referenceText, updatedAt: c.updatedAt }));
-  return <PartyTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteCustomer} />;
+  const rows = query.data?.map((c): CodeNameRow => ({ id: c.id, code: c.customerCode, name: c.customerName, yardType: null, referenceText: c.referenceText, updatedAt: c.updatedAt }));
+  return <CodeNameTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteCustomer} />;
 }
 
 function SupplierList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterSuppliers();
-  const rows = query.data?.map((s): PartyRow => ({ id: s.id, code: s.supplierCode, name: s.supplierName, yardType: null, referenceText: s.referenceText, updatedAt: s.updatedAt }));
-  return <PartyTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteSupplier} />;
+  const rows = query.data?.map((s): CodeNameRow => ({ id: s.id, code: s.supplierCode, name: s.supplierName, yardType: null, referenceText: s.referenceText, updatedAt: s.updatedAt }));
+  return <CodeNameTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteSupplier} />;
 }
 
 function YardList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterYards();
-  const rows = query.data?.map((y): PartyRow => ({ id: y.id, code: y.yardCode, name: y.yardName, yardType: y.yardType, referenceText: y.referenceText, updatedAt: y.updatedAt }));
-  return <PartyTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteYard} />;
+  const rows = query.data?.map((y): CodeNameRow => ({ id: y.id, code: y.yardCode, name: y.yardName, yardType: y.yardType, referenceText: y.referenceText, updatedAt: y.updatedAt }));
+  return <CodeNameTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteYard} />;
 }
 
-interface PartyTableProps {
-  kind: PartyKind;
+interface CodeNameTableProps {
+  kind: ListKind;
   canEdit: boolean;
-  query: { data: PartyRow[] | undefined; isPending: boolean; error: unknown; refetch: () => unknown };
+  query: { data: CodeNameRow[] | undefined; isPending: boolean; error: unknown; refetch: () => unknown };
   remove: (id: number) => Promise<number>;
 }
 
-function PartyTable({ kind, canEdit, query, remove }: PartyTableProps) {
+function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
   const text = KIND_TEXT[kind];
   const [keyword, setKeyword] = useState('');
-  const [editing, setEditing] = useState<PartyRow | 'new' | null>(null);
+  const [editing, setEditing] = useState<CodeNameRow | 'new' | null>(null);
   return (
     <Card>
       <CardHead
@@ -150,12 +183,12 @@ function PartyTable({ kind, canEdit, query, remove }: PartyTableProps) {
           );
         }}
       </QueryBoundary>
-      {editing ? <PartyModal kind={kind} row={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? <CodeNameModal kind={kind} row={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
     </Card>
   );
 }
 
-function PartyModal({ kind, row, onClose }: { kind: PartyKind; row: PartyRow | null; onClose: () => void }) {
+function CodeNameModal({ kind, row, onClose }: { kind: ListKind; row: CodeNameRow | null; onClose: () => void }) {
   const text = KIND_TEXT[kind];
   const fieldErrors = useMasterDataFieldErrors();
   const [code, setCode] = useState(row?.code ?? '');
@@ -174,15 +207,15 @@ function PartyModal({ kind, row, onClose }: { kind: PartyKind; row: PartyRow | n
 
   const submit = () => {
     if (row) {
-      const input = { id: row.id, name, expectedUpdatedAt: row.updatedAt };
-      if (kind === 'customers') updateCustomer.mutate(input);
-      else if (kind === 'suppliers') updateSupplier.mutate(input);
-      else updateYard.mutate(input);
+      const expectedUpdatedAt = row.updatedAt;
+      if (kind === 'customers') updateCustomer.mutate({ id: row.id, customerName: name, expectedUpdatedAt });
+      else if (kind === 'suppliers') updateSupplier.mutate({ id: row.id, supplierName: name, expectedUpdatedAt });
+      else updateYard.mutate({ id: row.id, yardName: name, expectedUpdatedAt });
       return;
     }
-    if (kind === 'customers') createCustomer.mutate({ code, name });
-    else if (kind === 'suppliers') createSupplier.mutate({ code, name });
-    else createYard.mutate({ code, name, yardType: yardType || null });
+    if (kind === 'customers') createCustomer.mutate({ customerCode: code, customerName: name });
+    else if (kind === 'suppliers') createSupplier.mutate({ supplierCode: code, supplierName: name });
+    else createYard.mutate({ yardCode: code, yardName: name, yardType: yardType || null });
   };
 
   return (
@@ -192,28 +225,28 @@ function PartyModal({ kind, row, onClose }: { kind: PartyKind; row: PartyRow | n
       width={440}
       footer={<ModalFooter pending={pending} submitLabel={row ? '저장' : '추가'} onCancel={onClose} onSubmit={submit} />}
     >
-      <Field label={text.codeLabel} required hint={row ? '코드는 바꿀 수 없어요' : `영문 대문자·숫자·밑줄·하이픈 (예: ${text.codeExample})`} error={fieldErrors.errorOf('code')}>
+      <Field label={text.codeLabel} required hint={row ? '코드는 바꿀 수 없어요' : `영문 대문자·숫자·밑줄·하이픈 (예: ${text.codeExample})`} error={fieldErrors.errorOf(text.codeField)}>
         <Input
           value={code}
           readOnly={row !== null}
           maxLength={30}
           placeholder={text.codeExample}
           className="font-mono"
-          invalid={fieldErrors.errorOf('code') !== null}
+          invalid={fieldErrors.errorOf(text.codeField) !== null}
           onChange={(e) => {
             setCode(e.target.value.toUpperCase());
-            fieldErrors.clear('code');
+            fieldErrors.clear(text.codeField);
           }}
         />
       </Field>
-      <Field label={text.nameLabel} required error={fieldErrors.errorOf('name')}>
+      <Field label={text.nameLabel} required error={fieldErrors.errorOf(text.nameField)}>
         <Input
           value={name}
           maxLength={text.nameMax}
-          invalid={fieldErrors.errorOf('name') !== null}
+          invalid={fieldErrors.errorOf(text.nameField) !== null}
           onChange={(e) => {
             setName(e.target.value);
-            fieldErrors.clear('name');
+            fieldErrors.clear(text.nameField);
           }}
         />
       </Field>

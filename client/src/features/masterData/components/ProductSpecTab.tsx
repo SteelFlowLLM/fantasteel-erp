@@ -16,7 +16,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
-import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, yieldPercentText, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { ButtonGroupField, CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSteelGrades, useMasterYards } from '@/hooks/useMasterData';
@@ -98,7 +98,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                             <span className="text-cap font-semibold text-danger">매핑 없음</span>
                           )}
                         </Td>
-                        <Td align="right">{yieldPercentText(spec.hotRollingPlannedYieldRate)}</Td>
+                        <Td align="right">{formatYieldPercent(spec.hotRollingPlannedYieldRate)}</Td>
                         <Td>
                           {spec.isUsed ? (
                             <Badge tone="run" title={`${spec.usageText ?? ''}에 쓰였어요`}>
@@ -194,7 +194,7 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
     else create.mutate({ ...values, itemType });
   };
 
-  const dimension = (field: 'thicknessMm' | 'widthMm' | 'lengthMm', label: string, value: string, set: (v: string) => void, placeholder: string) => (
+  const renderDimension = (field: 'thicknessMm' | 'widthMm' | 'lengthMm', label: string, value: string, set: (v: string) => void, placeholder: string) => (
     <Field label={`${label} (mm)`} required error={fieldErrors.errorOf(field) ?? (field === 'thicknessMm' && duplicate ? `같은 강종·두께·폭·길이의 규격이 이미 있어요 (${duplicate.itemCode})` : null)}>
       <Input
         numeric
@@ -224,7 +224,7 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
           야드만 바꿀 수 있어요.
         </Banner>
       ) : null}
-      <Field label="품목 유형" required hint={spec ? '품목 유형은 바꿀 수 없어요' : `단위 유형은 매수(${PRODUCT_QTY_UNIT[itemType]})예요`}>
+      <ButtonGroupField label="품목 유형" required hint={spec ? '품목 유형은 바꿀 수 없어요' : `단위 유형은 매수(${PRODUCT_QTY_UNIT[itemType]})예요`}>
         <Segmented
           ariaLabel="품목 유형"
           items={[
@@ -233,12 +233,13 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
           ]}
           active={itemType}
           onChange={(next) => {
-            if (spec) return;
+            // 같은 유형을 다시 눌러도 고른 기본 야드는 지우지 않는다
+            if (spec || next === itemType) return;
             setItemType(next);
             setYardId('');
           }}
         />
-      </Field>
+      </ButtonGroupField>
       <Field label="강종" required error={fieldErrors.errorOf('steelGradeId')}>
         <Select
           value={steelGradeId}
@@ -259,9 +260,9 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-3">
-        {dimension('thicknessMm', '두께', thicknessMm, setThicknessMm, itemType === 'SLAB' ? '250' : '2.3')}
-        {dimension('widthMm', '폭', widthMm, setWidthMm, '1200')}
-        {dimension('lengthMm', '길이', lengthMm, setLengthMm, itemType === 'SLAB' ? '10000' : '1065000')}
+        {renderDimension('thicknessMm', '두께', thicknessMm, setThicknessMm, itemType === 'SLAB' ? '250' : '2.3')}
+        {renderDimension('widthMm', '폭', widthMm, setWidthMm, '1200')}
+        {renderDimension('lengthMm', '길이', lengthMm, setLengthMm, itemType === 'SLAB' ? '10000' : '1065000')}
       </div>
       <div className="grid grid-cols-2 gap-3 rounded-md border border-line bg-surface-2 px-3.5 py-2.5 text-sm">
         <span className="flex flex-col gap-0.5">

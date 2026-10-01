@@ -38,7 +38,7 @@ export interface ThicknessBand {
 const trimZeros = (value: string) => (value.includes('.') ? value.replace(/\.?0+$/, '') : value);
 
 /** 적용 두께 구간 표시: '전체' · '6 초과' · '16 이하' · '16 초과 40 이하' (mm) */
-export function thicknessBandText(band: ThicknessBand): string {
+export function formatThicknessBand(band: ThicknessBand): string {
   const min = band.minThicknessMm ? trimZeros(band.minThicknessMm) : null;
   const max = band.maxThicknessMm ? trimZeros(band.maxThicknessMm) : null;
   if (min && max) return `${min} 초과 ${max} 이하`;
@@ -54,7 +54,7 @@ export function isInThicknessBand(band: ThicknessBand, thicknessMm: string): boo
 }
 
 /** 두 구간 (a, b]가 겹치는지. 비어 있는 쪽은 끝이 없다. */
-export function thicknessBandsOverlap(a: ThicknessBand, b: ThicknessBand): boolean {
+export function doThicknessBandsOverlap(a: ThicknessBand, b: ThicknessBand): boolean {
   // 겹침 = max(하한) < min(상한). 하한이 없으면 −∞, 상한이 없으면 +∞
   const lower = a.minThicknessMm === null ? b.minThicknessMm : b.minThicknessMm === null ? a.minThicknessMm : compareDecimal(a.minThicknessMm, b.minThicknessMm) >= 0 ? a.minThicknessMm : b.minThicknessMm;
   const upper = a.maxThicknessMm === null ? b.maxThicknessMm : b.maxThicknessMm === null ? a.maxThicknessMm : compareDecimal(a.maxThicknessMm, b.maxThicknessMm) <= 0 ? a.maxThicknessMm : b.maxThicknessMm;
@@ -73,7 +73,7 @@ export function findOverlappingItems(items: readonly StandardItemLike[]): [numbe
     items.forEach((b, j) => {
       if (j <= i) return;
       if (a.inspectionItemCode.toUpperCase() !== b.inspectionItemCode.toUpperCase()) return;
-      if (thicknessBandsOverlap(a, b)) pairs.push([i, j]);
+      if (doThicknessBandsOverlap(a, b)) pairs.push([i, j]);
     });
   });
   return pairs;
@@ -83,7 +83,7 @@ export function findOverlappingItems(items: readonly StandardItemLike[]): [numbe
 export type StandardValueSource = 'KS' | 'ASSUMED';
 
 /** 연주(슬래브 표면·치수)는 KS 전용 규격이 없어 사내 가정값이다 (ks-values.md 5-1, PLAN 8-1 #1). 제강 성분·열연 기계적 성질·치수는 KS 값. */
-export function standardValueSourceOf(processType: ProcessType): StandardValueSource {
+export function getStandardValueSource(processType: ProcessType): StandardValueSource {
   return processType === 'CONTINUOUS_CASTING' ? 'ASSUMED' : 'KS';
 }
 
@@ -96,26 +96,26 @@ export interface ComparableItem extends StandardItemLike {
 }
 
 /** 항목을 구분하는 키: 항목 코드 + 두께 구간 */
-export function standardItemKey(item: StandardItemLike): string {
-  const part = (value: string | null) => (value === null ? '' : trimZeros(value));
-  return `${item.inspectionItemCode.toUpperCase()}|${part(item.minThicknessMm)}|${part(item.maxThicknessMm)}`;
+export function buildStandardItemKey(item: StandardItemLike): string {
+  const formatPart = (value: string | null) => (value === null ? '' : trimZeros(value));
+  return `${item.inspectionItemCode.toUpperCase()}|${formatPart(item.minThicknessMm)}|${formatPart(item.maxThicknessMm)}`;
 }
 
-const sameDecimal = (a: string | null, b: string | null) => (a === null || b === null ? a === b : compareDecimal(a, b) === 0);
+const isSameDecimal = (a: string | null, b: string | null) => (a === null || b === null ? a === b : compareDecimal(a, b) === 0);
 
 /** 이전 버전과 견주어 새로 생기거나 값이 바뀐 항목의 키 */
-export function changedItemKeys(current: readonly ComparableItem[], previous: readonly ComparableItem[]): Set<string> {
-  const before = new Map(previous.map((item) => [standardItemKey(item), item]));
+export function findChangedItemKeys(current: readonly ComparableItem[], previous: readonly ComparableItem[]): Set<string> {
+  const before = new Map(previous.map((item) => [buildStandardItemKey(item), item]));
   const changed = new Set<string>();
   for (const item of current) {
-    const key = standardItemKey(item);
+    const key = buildStandardItemKey(item);
     const old = before.get(key);
     if (
       !old ||
       old.inspectionItemName !== item.inspectionItemName ||
       (old.unit ?? '') !== (item.unit ?? '') ||
-      !sameDecimal(old.minValue, item.minValue) ||
-      !sameDecimal(old.maxValue, item.maxValue) ||
+      !isSameDecimal(old.minValue, item.minValue) ||
+      !isSameDecimal(old.maxValue, item.maxValue) ||
       old.isRequired !== item.isRequired
     ) {
       changed.add(key);
@@ -125,9 +125,9 @@ export function changedItemKeys(current: readonly ComparableItem[], previous: re
 }
 
 /** 이전 버전에는 있었는데 새 버전에서 빠진 항목 수 */
-export function removedItemCount(current: readonly StandardItemLike[], previous: readonly StandardItemLike[]): number {
-  const now = new Set(current.map(standardItemKey));
-  return previous.filter((item) => !now.has(standardItemKey(item))).length;
+export function countRemovedItems(current: readonly StandardItemLike[], previous: readonly StandardItemLike[]): number {
+  const now = new Set(current.map(buildStandardItemKey));
+  return previous.filter((item) => !now.has(buildStandardItemKey(item))).length;
 }
 
 export interface StandardHeadLike {
@@ -137,8 +137,18 @@ export interface StandardHeadLike {
   isCurrent: boolean;
 }
 
-/** 공정·강종에 쓰는 지금 버전: 강종 전용 기준이 먼저, 없으면 공통 기준(강종 없음) */
+/**
+ * 공통 기준(강종 없음)을 둘 수 있는 공정인지.
+ * 제강 검사 기준 = 강종별 성분 규격이라 공통 기준을 두지 않는다 (REQ-MST-002 '강종별 성분 min/max는 제강 검사 기준으로 관리',
+ * '히트 성분 판정은 등급별 기준', TRM-020 성분 규격 = 강종별 화학 성분의 허용 범위). 연주·열연은 ERD대로 공통 기준(steel_grade_id NULL)을 둘 수 있다.
+ */
+export function canHaveCommonStandard(processType: ProcessType): boolean {
+  return processType !== 'STEELMAKING';
+}
+
+/** 공정·강종에 쓰는 지금 버전: 강종 전용 기준이 먼저, 없으면 공통 기준(강종 없음). 제강은 강종 전용 기준만 본다. */
 export function findCurrentStandard<T extends StandardHeadLike>(standards: readonly T[], processType: ProcessType, steelGradeId: number): T | undefined {
+  if (!canHaveCommonStandard(processType)) return standards.find((s) => s.isCurrent && s.processType === processType && s.steelGradeId === steelGradeId);
   // 자동 판정(core currentStandardOf)과 같은 함수
   return pickCurrentStandard(standards, processType, steelGradeId);
 }

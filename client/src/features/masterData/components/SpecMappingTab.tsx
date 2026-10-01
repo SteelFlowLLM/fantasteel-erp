@@ -14,7 +14,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, yieldPercentText } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSpecMappings, useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -74,7 +74,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                       </Td>
                       <Td align="right">{fmtTon(m.coil.theoreticalWeightTon)}</Td>
                       <Td align="right" className="font-semibold">
-                        {yieldPercentText(m.hotRollingPlannedYieldRate)}
+                        {formatYieldPercent(m.hotRollingPlannedYieldRate)}
                       </Td>
                       <Td>{m.isUsed ? <Badge tone="run">사용됨</Badge> : <Badge>미사용</Badge>}</Td>
                       <Td align="right">
@@ -116,10 +116,10 @@ function SpecMappingModal({ onClose }: { onClose: () => void }) {
   const create = useAction(masterDataApi.createSpecMapping, { success: '규격을 매핑했어요', onSuccess: onClose, onError: fieldErrors.takeFrom });
 
   const all = specs.data ?? [];
-  const byGrade = (s: MasterProductSpecView) => !gradeId || s.steelGradeId === Number(gradeId);
-  const slabs = all.filter((s) => s.itemType === 'SLAB' && s.mappingId === null && byGrade(s));
+  const matchesGrade = (s: MasterProductSpecView) => !gradeId || s.steelGradeId === Number(gradeId);
+  const slabs = all.filter((s) => s.itemType === 'SLAB' && s.mappingId === null && matchesGrade(s));
   const slab = all.find((s) => s.id === Number(slabId));
-  const coils = all.filter((s) => s.itemType === 'COIL' && s.mappingId === null && byGrade(s) && (!slab || s.steelGradeId === slab.steelGradeId));
+  const coils = all.filter((s) => s.itemType === 'COIL' && s.mappingId === null && matchesGrade(s) && (!slab || s.steelGradeId === slab.steelGradeId));
   const coil = all.find((s) => s.id === Number(coilId));
   const tooHeavy = slab && coil ? compareDecimal(coil.theoreticalWeightTon, slab.theoreticalWeightTon) > 0 : false;
   const otherGrade = slab && coil ? slab.steelGradeId !== coil.steelGradeId : false;
@@ -208,7 +208,7 @@ function SpecMappingModal({ onClose }: { onClose: () => void }) {
         </span>
         <span className="flex flex-col gap-0.5">
           <span className="text-cap text-ink-3">열연 계획 수율</span>
-          <b className="font-semibold tabular-nums">{rate ? `${rate} (${yieldPercentText(rate)})` : '-'}</b>
+          <b className="font-semibold tabular-nums">{rate ? `${rate} (${formatYieldPercent(rate)})` : '-'}</b>
         </span>
       </div>
     </Modal>

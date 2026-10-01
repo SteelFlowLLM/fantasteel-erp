@@ -102,5 +102,5 @@ export function pickCurrentStandard<T extends { processType: ProcessType; steelG
   steelGradeId: number | null,
 ): T | undefined {
   const current = standards.filter((s) => s.isCurrent && s.processType === processType);
-  return current.find((s) => s.steelGradeId === steelGradeId) ?? current.find((s) => s.steelGradeId === null);
+  return current.find((s) => s.steelGradeId === steelGradeId) ?? (processType === 'STEELMAKING' ? undefined : current.find((s) => s.steelGradeId === null)); // 제강(성분 규격)은 강종별 기준만 (REQ-MST-002, TRM-020)
 }

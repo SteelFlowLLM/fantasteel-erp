@@ -3,7 +3,6 @@
 // 기준정보 준비 상태 띠 (BP-MST-01 "누락 표시", 9.3 MST-001). 누르면 해당 탭(검사 기준은 품질의 검사 기준 화면)으로 간다.
 import Link from 'next/link';
 import { useState } from 'react';
-import { ERROR_MESSAGE } from '@/codes';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import type { MasterTabKey } from '@/features/masterData/components/MasterParts';
@@ -24,7 +23,7 @@ const AREA: Record<ReadinessArea, { label: string; tab: MasterTabKey | null }> =
 const FOLD = 4;
 const CHIP = 'inline-flex h-5 flex-none items-center rounded-xs bg-surface px-1.5 text-cap font-semibold text-danger shadow-[inset_0_0_0_1px_#f2c3be] hover:bg-[#fff3f2]';
 
-function standardHref(problem: ReadinessProblem): string {
+function buildStandardHref(problem: ReadinessProblem): string {
   const params = new URLSearchParams();
   if (problem.processType) params.set('process', problem.processType);
   if (problem.steelGradeId !== undefined) params.set('grade', String(problem.steelGradeId));
@@ -82,7 +81,8 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
         <div>
           <b>기준정보 준비가 덜 됐어요 ({readiness.problems.length}건)</b>{' '}
           <span className="opacity-80">
-            · {ERROR_MESSAGE['MST-001']} <span className="font-mono text-cap">MST-001</span> · 아래를 채워야 생산·MRP 계산이 돼요
+            {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다(무엇이 빠졌는지는 아래 칩이 말한다). docs/rework/areas/master.md 검토 반영 */}
+            · 아래를 채워야 생산·MRP 계산이 돼요 <span className="font-mono text-cap">MST-001</span>
           </span>
         </div>
         <ul className="flex flex-col gap-1">
@@ -95,7 +95,7 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
                     {area.label}
                   </button>
                 ) : (
-                  <Link href={standardHref(problem)} className={CHIP} title="품질의 검사 기준 화면으로 이동">
+                  <Link href={buildStandardHref(problem)} className={CHIP} title="품질의 검사 기준 화면으로 이동">
                     {area.label}
                   </Link>
                 )}
