@@ -3,6 +3,8 @@
 // MRP (REQ-PRD-005, BP-PRD-01, 업무 프로세스 4.4): 기간을 정하면 지금 데이터로 바로 계산한다(실행 이력 저장 없음, PLAN 7장).
 // 계획별 남은 히트 → 히트 톤 → 필요 용선(÷ 제강 수율) → 철광석·석탄·석회석(× t/t), 합금철(히트 톤 × kg/t ÷ 1,000)
 // → 총소요 − 원료 LOT 잔량 − 입고예정(필요일까지 도착하는 확정 발주) = 순소요. 예상 슬래브 여재도 보인다(여재는 가용재고에 포함).
+// 원료 줄의 입고예정 칸은 이 계획들이 실제로 받아 쓰는 몫만 보이고, 뺀 몫(다른 계획 몫·필요일 뒤 도착 등)은 칸 아래 작은 글씨로 보여
+// 한 줄의 숫자끼리 산수가 맞는다(core mrpMaterialRows).
 // "구매요청 만들기"는 순소요 줄(계획·원료)로 미리 채우고 production_plan_id를 연결한다. 같은 계획·원료는 한 번만 만든다.
 // 구매요청 자동 초안(REQ-PUR-005)은 P2라 준비 중이다.
 import Link from 'next/link';
@@ -24,7 +26,7 @@ import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { PlanStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionFormModal, type RequisitionFormValues } from '@/features/purchasing/components/RequisitionFormModal';
-import { defaultMrpPeriod, mrpRequestReason, trimTonText } from '@/features/purchasing/lib/purchasingView';
+import { defaultMrpPeriod, mrpOnHandNotes, mrpRequestReason, mrpScheduledReceiptNotes, trimTonText } from '@/features/purchasing/lib/purchasingView';
 import { useMrpRequirements } from '@/hooks/useMrp';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { decCmp, decSum } from '@/lib/decimal';
@@ -104,7 +106,8 @@ export function MrpScreen() {
 
       <p className="text-cap leading-4 text-ink-3">
         계산 방법 · 필요 용선 = 히트 톤 ÷ 제강 수율 · 철광석·석탄·석회석 = 필요 용선 × 원단위(t/t) · 합금철 = 히트 톤 × 원단위(kg/t) ÷ 1,000 · 순소요 = 총소요 − 원료 LOT 잔량 − 입고예정 (0보다 작으면 0). 잔량·입고예정은
-        필요일이 이른 계획부터 한 번만 빼고, 계획에 연결된 발주의 입고예정은 그 계획이 먼저 써요. MRP는 구매요청을 저절로 만들지 않아요. 구매 담당이 등록하고 부서장이 승인해요.
+        필요일이 이른 계획부터 한 번만 빼고, 계획에 연결된 발주의 입고예정은 그 계획이 먼저 써요. 입고예정은 필요일까지 도착하는 몫만 쓰고 수주에 연결된 다른 계획 몫은 쓰지 않으므로, 표의 입고예정 칸은 이
+        계획들이 실제로 쓰는 몫이고 뺀 몫은 이유와 함께 칸 아래에 보여요. MRP는 구매요청을 저절로 만들지 않아요. 구매 담당이 등록하고 부서장이 승인해요.
       </p>
 
       {draft ? (
@@ -188,8 +191,12 @@ function MrpResult({
                   <Th>원료명</Th>
                   <Th>원료 유형</Th>
                   <Th align="right">총소요</Th>
-                  <Th align="right">원료 LOT 잔량</Th>
-                  <Th align="right">입고예정</Th>
+                  <Th align="right" title="지금 원료 LOT 잔량 합계. 필요일이 이른 계획부터 써요">
+                    원료 LOT 잔량
+                  </Th>
+                  <Th align="right" title="확정 발주의 미입고량 중 이 계획들이 필요일까지 받아 쓰는 몫. 다른 계획 몫·필요일 뒤 도착분은 아래 작은 글씨로 따로 보여요">
+                    입고예정
+                  </Th>
                   <Th align="right">순소요</Th>
                   <Th>필요일</Th>
                   <Th>구매요청</Th>
@@ -208,11 +215,13 @@ function MrpResult({
                         {m.rawMaterialType ? RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType] : '-'} <span className="text-cap text-ink-3">({m.consumptionUnit})</span>
                       </Td>
                       <Td align="right">{fmtTon(m.grossTon)}</Td>
-                      <Td align="right" title={`소요에 쓴 잔량 ${fmtTon(m.coveredOnHandTon)}`}>
-                        {fmtTon(m.onHandTon)}
+                      <Td align="right" title={`원료 LOT 잔량 합계 ${fmtTon(m.onHandTon)} · 소요에 쓴 잔량 ${fmtTon(m.coveredOnHandTon)}`}>
+                        {fmtTon(m.usableOnHandTon)}
+                        <SupplyNotes notes={mrpOnHandNotes(m)} />
                       </Td>
-                      <Td align="right" title={`필요일까지 도착해 소요에 쓴 입고예정 ${fmtTon(m.coveredScheduledTon)}`}>
-                        {fmtTon(m.scheduledReceiptTon)}
+                      <Td align="right" title={`입고예정 합계 ${fmtTon(m.scheduledReceiptTon)} 중 이 계획들이 필요일까지 받아 쓰는 몫 ${fmtTon(m.coveredScheduledTon)}`}>
+                        {fmtTon(m.coveredScheduledTon)}
+                        <SupplyNotes notes={mrpScheduledReceiptNotes(m)} />
                       </Td>
                       <Td align="right" className={cn(isShort ? 'font-semibold text-danger' : 'text-ink-3')}>
                         {fmtTon(m.netTon)}
@@ -235,7 +244,10 @@ function MrpResult({
           )}
         </CardBody>
         <CardFoot>
-          <span className="text-cap text-ink-3">입고예정 = 확정 발주의 미입고량(발주 − 입고 누계) · 용선 재고는 빼지 않아요 · 아직 요청하지 않은 순소요 {openLines.length}줄</span>
+          <span className="text-cap text-ink-3">
+            입고예정 칸 = 확정 발주의 미입고량(발주 − 입고 누계) 중 이 계획들이 필요일까지 받아 쓰는 몫 (다른 계획 몫·필요일 뒤 도착분은 칸 아래에 따로) · 용선 재고는 빼지 않아요 · 아직 요청하지 않은 순소요{' '}
+            {openLines.length}줄
+          </span>
         </CardFoot>
       </Card>
 
@@ -368,6 +380,20 @@ function MrpResult({
           )}
         </CardBody>
       </Card>
+    </>
+  );
+}
+
+/** 칸의 숫자에 넣지 않은 몫 (이유별 작은 글씨, 없으면 그리지 않음) */
+function SupplyNotes({ notes }: { notes: readonly string[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <>
+      {notes.map((note) => (
+        <span key={note} className="block text-cap leading-4 text-ink-3">
+          {note}
+        </span>
+      ))}
     </>
   );
 }

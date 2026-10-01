@@ -191,7 +191,7 @@ describe('원료 탭 (REQ-INV-001: 원료는 톤)', () => {
       for (const l of r.lots) expect(l.lotNo.startsWith('RM-')).toBe(true);
     }
     const ore = rows.find((r) => r.rawMaterialType === 'IRON_ORE');
-    expect(ore?.remainingTon).toBe('633.330');
+    expect(ore?.remainingTon).toBe('2333.330'); // 시드 입고 5,000t − 시드 히트 6개 2,666.670t
     expect(ore?.defaultYardName).toBeTruthy();
   });
 });

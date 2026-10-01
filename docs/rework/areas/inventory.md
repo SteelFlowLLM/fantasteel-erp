@@ -50,7 +50,7 @@
 
 ## 테스트 (Vitest, 37개)
 
-- `client/src/api/inventories.test.ts` (28): 권한(계정 없음·없는 사원 COM-002, 12개 시드 역할 모두 조회 가능), 제품(14.1 시작 재고 6매 = 141.300t, 모든 규격에서 4.2 식·재고 = 합격 + 판정 대기 + 불합격·톤 3자리, 히트 불합격 제외, 새 수주의 재고 우선 예약 → 예약 4·가용재고 2 즉시 반영 + 불변조건), LOT 목록(전체·날짜 형식·정렬·필터, 출고/여재 LOT, HEAT_FAILED, 확정 배정 목적), 원료(잔량 합계·입고예정 1.000 + 3.500, 입고일 순, 철광석 633.330t), 여재(SS275 6매·FIFO·surplus_at, 여재 = 제품 가용재고, 예약 후 여재는 그대로·가용재고 0, 슬래브만).
+- `client/src/api/inventories.test.ts` (28): 권한(계정 없음·없는 사원 COM-002, 12개 시드 역할 모두 조회 가능), 제품(14.1 시작 재고 6매 = 141.300t, 모든 규격에서 4.2 식·재고 = 합격 + 판정 대기 + 불합격·톤 3자리, 히트 불합격 제외, 새 수주의 재고 우선 예약 → 예약 4·가용재고 2 즉시 반영 + 불변조건), LOT 목록(전체·날짜 형식·정렬·필터, 출고/여재 LOT, HEAT_FAILED, 확정 배정 목적), 원료(잔량 합계·입고예정 1.000 + 3.500, 입고일 순, 철광석 2,333.330t), 여재(SS275 6매·FIFO·surplus_at, 여재 = 제품 가용재고, 예약 후 여재는 그대로·가용재고 0, 슬래브만).
 - `client/src/features/inventory/lib/inventoryDisplay.test.ts` (9): 표시명·색, 옛 문구('검사 대기'·'귀속') 없음, 합계, 빈 줄, 검색.
 - 9.3 코드 중 이 영역이 낼 수 있는 것은 COM-002뿐이다(조회 전용).
 
@@ -83,7 +83,7 @@
    - 전에는 여재 탭이 규격의 미배정 합격 슬래브 전부(core `surplusSlabs`)를 여재로 셌다(시드 '3개 규격 · 24매'). 그래서 SM355A 250×1500은 여재 15·가용재고 0으로 보였다. LOT 목록 꼬리표는 surplus_at 기준이라 9매였다.
    - 이제 여재 LOT = 적격(ELIGIBLE) + CONFIRMED 배정 없음 + 여재 전환(surplus_at)이다. 규격별 여재 매수 = min(그 LOT 수, 가용재고)로, 여재로 수주를 예약하면 그만큼 빠진다. 그래서 늘 여재 ≤ 가용재고다.
    - 예약은 매수 단위라 어느 LOT이 예약 몫인지 정해지지 않는다. 배정은 선입선출로 오래된 LOT부터 쓰이므로, 여재로 남는 LOT은 여재 전환 LOT 중 최근 것부터 여재 매수만큼으로 본다(가정값).
-   - 규칙은 순수 함수 `features/inventory/lib/inventoryRules.ts`의 `pickSurplusLots`에 있다. api `readSurplusSlabs`가 core `surplusSlabs`(미배정 합격·예약·예약 가용) 위에서 부르고, `readLotList`의 `isSurplus`도 같은 결과를 쓴다. 여재 탭 머리말·'여재' 열·여재 슬래브 목록·LOT 목록 꼬리표가 같은 값이다.
+   - 규칙은 순수 함수 `pickSurplusLots`에 있다(2026-10-02에 `features/inventory/lib/inventoryRules.ts` → `lib/surplus.ts`로 옮기고 core `surplusSlabs`가 부른다 — 아래 '브라우저 점검 반영'). api `readSurplusSlabs`는 core 값을 그대로 쓰고, `readLotList`의 `isSurplus`도 같은 결과를 쓴다. 여재 탭 머리말·'여재' 열·여재 슬래브 목록·LOT 목록 꼬리표가 같은 값이다.
    - 여재 탭 표: 규격 · 강종 · **미배정 합격**(예약 몫·열연 대기 포함, 별도 표시) · 예약 · 가용재고 · 가용재고 톤 · **여재** · 여재 톤. 여재 0인 규격은 흐리게 보인다. 머리말은 여재가 있는 규격 수 · 여재 매수다.
    - 시드 결과: SS275 250×1200 여재 6(14.1), SM355A 250×1500 미배정 합격 15 · 예약 15 · 가용재고 0 · 여재 0, SM355B 250×1500 미배정 합격 3 · 가용재고 3 · 여재 0(코일 계획 열연 대기). 여재 합계는 6매다.
    - 꼬리표가 적격 여부를 보지 않던 문제도 함께 고쳤다. 재판정으로 불합격이 된 LOT은 후보(ELIGIBLE)에서 빠진다.
@@ -95,4 +95,10 @@
    - `SurplusSpecView`의 가용재고는 `availableQty`·`availableTon`이다(TRM-055). 이제 `surplusQty`·`surplusTon`은 여재 매수·여재 톤만 뜻한다. core 작업 로그 afterData의 `surplusQty`와 같은 뜻이다.
    - 1매 이론중량은 `theoreticalWeightTon`이다(TRM-022). `SurplusSpecView`와 `ProductInventoryView`(core 행의 `unitWeightTon`을 빼고 다시 이름 붙임) 둘 다 바꿨다.
 4. 테스트: `inventoryRules.test.ts`(8개)를 새로 넣었다. `inventories.test.ts`는 여재 정의, SM355A·SM355B, 여재 합계 = 꼬리표 수, 부분 예약 → 여재 2(-09·-10), 소진 배정·검사 결과 기대값을 고쳤다. `inventoryDisplay.test.ts`는 품질·배정 표시를 맞췄다. 전체 552개가 통과한다.
-5. 공유 파일 변경 없음. 확인 필요: core `surplusSlabs`의 `surplusQty`는 여전히 '예약 가용'을 뜻하고, `ProductInventoryRow.unitWeightTon`도 남아 있다(이 영역은 api에서 이름을 바꿔 쓴다). 병합 단계에서 core 이름을 맞출지 정해야 한다. 대시보드의 여재 보유일(seed-assumptions 448)은 '예약 가용 > 0인 규격' 기준이라 이 정의와 다를 수 있다.
+5. 공유 파일 변경 없음. 확인 필요: core `surplusSlabs`의 `surplusQty`는 여전히 '예약 가용'을 뜻하고, `ProductInventoryRow.unitWeightTon`도 남아 있다(이 영역은 api에서 이름을 바꿔 쓴다). 병합 단계에서 core 이름을 맞출지 정해야 한다. 대시보드의 여재 보유일(seed-assumptions 448)은 '예약 가용 > 0인 규격' 기준이라 이 정의와 다를 수 있다. → 2026-10-02에 풀었다(아래).
+
+## 브라우저 점검 반영 (2026-10-02)
+
+- **대시보드와 재고 화면의 여재 숫자를 하나로** (03 TRM-048, 04 4.3): 대시보드 여재 위젯이 core `surplusSlabs.surplusQty`(예약 가용)를 여재로 세어 재고 화면과 숫자가 달랐다(시드: 대시보드 9매 = SS275 6 + 코일 계획 열연 대기 SM355B 3, 재고 화면 6매). 여재 고르기 `pickSurplusLots`를 `features/inventory/lib/inventoryRules.ts`에서 `lib/surplus.ts`로 옮기고(시험도 `lib/surplus.test.ts`로), core `surplusSlabs`가 `availableQty`(가용재고)·`surplusQty`(여재 = min(여재 전환 LOT 수, 가용재고))·`lots`(여재 슬래브)를 바로 낸다. api `readSurplusSlabs`(재고 화면 여재 탭·LOT 목록 꼬리표)와 대시보드 `SURPLUS_AGE`가 모두 이 값을 그대로 쓴다. 화면 모양·값은 그대로다(재고 화면 여재 합계 6매).
+- 시험: `api/dashboard.test.ts` '여재 숫자: 대시보드 여재 위젯 = 재고 화면 여재 탭'(새 시드 · 14.1처럼 수주 → 합금철 구매·입고 → 시뮬레이션 → 검사 뒤 규격별 매수·톤·합계가 같다).
+- 원료 탭: 시드 원료 입고량을 늘려(core-domain 16-2 '원료 입고량', 가정값) 철광석 잔량이 2,333.330t로 보인다(`inventories.test.ts`).

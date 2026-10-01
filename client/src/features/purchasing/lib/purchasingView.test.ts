@@ -4,7 +4,9 @@ import {
   earliestDate,
   groupBySupplier,
   isOverdue,
+  mrpOnHandNotes,
   mrpRequestReason,
+  mrpScheduledReceiptNotes,
   plannedPurchaseOrders,
   ratioPercent,
   rawMaterialLotNoPattern,
@@ -76,5 +78,18 @@ describe('구매 화면 표시값', () => {
     expect(plannedPurchaseOrders(chosen, '2026-10-30').map((p) => p.dueDate)).toEqual(['2026-10-30', '2026-10-30']);
     // 희망 입고일이 하나도 없으면 납기 없음
     expect(plannedPurchaseOrders([{ supplierId: 1, supplierName: '가온광업', desiredReceiptDate: null, requiredTon: '1' }], '')[0]?.dueDate).toBeNull();
+  });
+
+  it('MRP 원료 줄: 입고예정·잔량 칸에 넣지 않은 몫을 이유별 작은 글씨로 (0인 이유는 빼고 천 단위 쉼표)', () => {
+    const none = { onHandEarlierPlansTon: '0.000', scheduledOtherPlansTon: '0.000', scheduledAfterNeedDateTon: '0.000', scheduledEarlierPlansTon: '0.000', scheduledSpareTon: '0.000' };
+    expect(mrpScheduledReceiptNotes(none)).toEqual([]);
+    expect(mrpOnHandNotes(none)).toEqual([]);
+    expect(mrpScheduledReceiptNotes({ ...none, scheduledAfterNeedDateTon: '3.500' })).toEqual(['필요일 뒤 도착 3.500 t 제외']);
+    expect(mrpScheduledReceiptNotes({ ...none, scheduledOtherPlansTon: '3.500', scheduledEarlierPlansTon: '1.000', scheduledSpareTon: '1200.000' })).toEqual([
+      '다른 계획 몫 3.500 t 제외',
+      '앞선 계획 몫 1.000 t 제외',
+      '남는 몫 1,200.000 t',
+    ]);
+    expect(mrpOnHandNotes({ onHandEarlierPlansTon: '444.445' })).toEqual(['앞선 계획 몫 444.445 t 제외']);
   });
 });

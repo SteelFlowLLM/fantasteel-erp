@@ -187,8 +187,9 @@ describe('작업 실적·시뮬레이션·업무방', () => {
     const k = createKit();
     const plan = k.tables.productionPlan.find((p) => p.productionPlanNo === 'PP-2609-0004');
     const before = JSON.stringify(k.tables.lot);
+    // 용선 2,000t = 철광석 3,200t 필요 > 시드 잔량 2,333.330t
     expectInputError(() =>
-      registerIronmaking(k.at(at), k.actor('ironmakingHead'), { productionPlanId: plan?.id ?? 0, blastFurnaceCode: 'BF2', startedAt: '2026-10-01T05:00:00+09:00', completedAt: '2026-10-01T08:00:00+09:00', outputTon: '1000' }),
+      registerIronmaking(k.at(at), k.actor('ironmakingHead'), { productionPlanId: plan?.id ?? 0, blastFurnaceCode: 'BF2', startedAt: '2026-10-01T05:00:00+09:00', completedAt: '2026-10-01T08:00:00+09:00', outputTon: '2000' }),
     );
     expect(JSON.stringify(k.tables.lot)).toBe(before);
     expectInputError(() => registerIronmaking(k.at(at), k.actor('ironmakingHead'), { productionPlanId: plan?.id ?? 0, blastFurnaceCode: 'bf', startedAt: 'x', completedAt: '2026-10-01T08:00:00+09:00', outputTon: '-1' }));

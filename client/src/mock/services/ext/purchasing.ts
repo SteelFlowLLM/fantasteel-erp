@@ -7,11 +7,9 @@
 //   (3) 같은 데이터인데 고른 기간에 따라 결과가 달라진다.
 // 여기서는 계획·진행중이고 남은 히트가 있는 계획 "전부"를 필요일 순으로 차감한 뒤(앞선 소요가 먼저 쓴다, 열린 계획 몫 입고예정은 그 계획 전용),
 // 필요일이 기간 끝(to) 이하인 것만 보인다. 기간 시작(from) 전 계획은 밀린 소요로 함께 보이고 beforePeriod로 표시한다.
-import { decCmp, decSum } from '@/lib/decimal';
-import { netRequirements, type MrpRequirement, type MrpSupply } from '@/lib/mrp';
+import { netRequirements, type MrpRequirement } from '@/lib/mrp';
 import type { MockTables } from '@/mock/schema';
-import { findById } from '@/mock/services/context';
-import { computeMrp, type MrpMaterialRow, type MrpPlanRow, type MrpView } from '@/mock/services/mrp';
+import { computeMrp, mrpMaterialRows, mrpSuppliesOf, type MrpPlanRow, type MrpView } from '@/mock/services/mrp';
 
 type Tables = Readonly<MockTables>;
 
@@ -27,23 +25,6 @@ export interface MrpPeriodView extends Omit<MrpView, 'plans'> {
   plans: MrpPeriodPlanRow[];
 }
 
-/** 원료 LOT 잔량 + 확정 발주 미입고량 (core computeMrp와 같은 공급) */
-function mrpSuppliesOf(tables: Tables): MrpSupply[] {
-  return [
-    ...tables.lot
-      .filter((l) => l.lotType === 'RAW_MATERIAL' && l.lotStatus === 'AVAILABLE' && l.itemId !== null && l.remainingTon !== null && decCmp(l.remainingTon, 0) > 0)
-      .map((l): MrpSupply => ({ kind: 'ON_HAND', materialId: l.itemId ?? 0, availableDate: null, ton: l.remainingTon ?? '0', reservedForPlanId: null, sourceId: l.id })),
-    ...tables.purchaseOrderItem
-      .filter((line) => decCmp(line.scheduledReceiptTon, 0) > 0)
-      .flatMap((line): MrpSupply[] => {
-        const purchaseOrder = findById(tables, 'purchaseOrder', line.purchaseOrderId);
-        if (!purchaseOrder || purchaseOrder.purchaseOrderStatus === 'RECEIVED') return [];
-        const planId = findById(tables, 'purchaseRequisitionItem', line.purchaseRequisitionItemId)?.productionPlanId ?? null;
-        return [{ kind: 'SCHEDULED', materialId: line.itemId, availableDate: purchaseOrder.dueDate, ton: line.scheduledReceiptTon, reservedForPlanId: planId, sourceId: line.id }];
-      }),
-  ];
-}
-
 /** 기간 MRP: 열린 계획 전부로 시점별 차감 → 필요일 ≤ to 만 보인다 (from 전 = 밀린 소요, beforePeriod) */
 export function computeMrpForPeriod(tables: Tables, period: { from: string; to: string }): MrpPeriodView {
   // 계획 행·계획별 순소요·구매요청 줄은 열린 계획 전부를 넣은 core 계산 그대로 쓴다 (차감 순서 = 필요일 → 계획 id → 원료 id)
@@ -51,24 +32,13 @@ export function computeMrpForPeriod(tables: Tables, period: { from: string; to: 
   const visible = (needDate: string): boolean => needDate <= period.to;
   const plans: MrpPeriodPlanRow[] = all.plans.filter((p) => visible(p.needDate)).map((p) => ({ ...p, beforePeriod: p.needDate < period.from }));
 
-  // 원료별 "잔량·입고예정으로 채운 톤"은 줄 단위 차감 결과가 필요해 같은 소요·공급으로 다시 차감한다(순서가 같아 결과도 core와 같다).
+  // 원료별 행(총소요·채운 톤·순소요·잔량·입고예정 내역)은 줄 단위 차감 결과가 필요해 같은 소요·공급으로 다시 차감한다
+  // (순서가 같아 결과도 core와 같다). 보이는 소요 = 필요일 ≤ to.
   const requirements: MrpRequirement[] = all.plans.flatMap((p) =>
     p.materials.map((m) => ({ planId: p.productionPlanId, materialId: m.itemId, needDate: p.needDate, grossTon: m.grossTon })),
   );
-  const shownLines = netRequirements(requirements, mrpSuppliesOf(tables)).lines.filter((l) => visible(l.needDate));
-
-  const materials: MrpMaterialRow[] = all.materials.map((row) => {
-    const mine = shownLines.filter((l) => l.materialId === row.itemId);
-    const shortageDates = mine.filter((l) => decCmp(l.netTon, 0) > 0).map((l) => l.needDate).sort();
-    return {
-      ...row,
-      grossTon: decSum(mine.map((l) => l.grossTon)),
-      coveredOnHandTon: decSum(mine.map((l) => l.coveredOnHandTon)),
-      coveredScheduledTon: decSum(mine.map((l) => l.coveredScheduledTon)),
-      netTon: decSum(mine.map((l) => l.netTon)),
-      firstShortageDate: shortageDates[0] ?? null,
-    };
-  });
+  const supplies = mrpSuppliesOf(tables);
+  const materials = mrpMaterialRows(tables, netRequirements(requirements, supplies).lines, supplies, (l) => visible(l.needDate));
 
   return {
     from: period.from,

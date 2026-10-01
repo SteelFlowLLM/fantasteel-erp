@@ -52,8 +52,12 @@ function RawMaterialBody({ data }: { data: RawMaterialBalanceData }) {
                   <b className="font-semibold">{m.itemName}</b> <span className="font-mono text-cap text-ink-3">{m.itemCode}</span>
                 </Td>
                 <Td align="right">{fmtTon(m.onHandTon)}</Td>
-                <Td align="right" className={decCmp(m.scheduledReceiptTon, 0) > 0 ? undefined : 'text-ink-3'}>
-                  {fmtTon(m.scheduledReceiptTon)}
+                <Td
+                  align="right"
+                  className={decCmp(m.coveredScheduledTon, 0) > 0 ? undefined : 'text-ink-3'}
+                  title={`입고예정 합계 ${fmtTon(m.scheduledReceiptTon)} 중 이 계획들이 필요일까지 받아 쓰는 몫 ${fmtTon(m.coveredScheduledTon)}`}
+                >
+                  {fmtTon(m.coveredScheduledTon)}
                 </Td>
                 <Td align="right">{fmtTon(m.grossTon)}</Td>
                 <Td align="right" title={m.firstShortageDate ? `처음 부족한 필요일 ${m.firstShortageDate}` : undefined}>
@@ -73,7 +77,9 @@ function RawMaterialBody({ data }: { data: RawMaterialBalanceData }) {
           })}
         </tbody>
       </Table>
-      <span className="px-4 py-2 text-cap text-ink-3">MRP: 필요일이 {fmtMD(data.to)}까지인 계획(지난 필요일 포함)의 남은 히트 소요 · 순소요 = 총소요 − 잔량 − 입고예정</span>
+      <span className="px-4 py-2 text-cap text-ink-3">
+        MRP: 필요일이 {fmtMD(data.to)}까지인 계획(지난 필요일 포함)의 남은 히트 소요 · 순소요 = 총소요 − 잔량 − 입고예정 · 입고예정 = 이 계획들이 필요일까지 받아 쓰는 몫
+      </span>
     </>
   );
 }
@@ -328,7 +334,7 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
         ))}
         {data.items.length === 0 ? <WidgetEmpty>여재 슬래브가 없어요</WidgetEmpty> : null}
       </div>
-      <span className="text-cap text-ink-3">여재 = 규격별 예약 가용 슬래브 · 보유 일수 = 여재로 표시된 날부터</span>
+      <span className="text-cap text-ink-3">여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (재고 화면 여재와 같은 값) · 보유 일수 = 여재로 바뀐 날부터</span>
     </div>
   );
 }

@@ -163,7 +163,8 @@ describe('MRP: 기간은 보여 줄 때만 거른다 (BP-PRD-01 시점별 가용
   it('기간 앞의 아직 못 만든 계획도 먼저 잔량을 쓰므로 기간을 바꿔도 같은 계획의 순소요가 같다', () => {
     const k = createKit();
     const slab = k.itemId('SL-SS275-250x1200x10000');
-    const a = createSalesOrder(k.at('2026-10-01T09:00:00+09:00'), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [{ itemId: slab, orderedQty: 10, dueDate: '2026-10-10' }] });
+    // 앞 계획 a: 재고 6 + 부족 50 → 5히트, 뒤 계획 b: 10매 → 1히트
+    const a = createSalesOrder(k.at('2026-10-01T09:00:00+09:00'), k.actor('sales'), { customerId: k.customerId('CUS-01'), items: [{ itemId: slab, orderedQty: 56, dueDate: '2026-10-10' }] });
     const b = createSalesOrder(k.at('2026-10-01T09:10:00+09:00'), k.actor('sales'), { customerId: k.customerId('CUS-02'), items: [{ itemId: slab, orderedQty: 10, dueDate: '2026-10-25' }] });
     const planA = a.productionPlans[0];
     const planB = b.productionPlans[0];
@@ -173,11 +174,20 @@ describe('MRP: 기간은 보여 줄 때만 거른다 (BP-PRD-01 시점별 가용
     expect(narrow.plans.map((p) => p.productionPlanId)).toEqual([planB.id]);
     const materialsOf = (view: ReturnType<typeof computeMrp>) => view.plans.find((p) => p.productionPlanId === planB.id)?.materials;
     expect(materialsOf(narrow)).toEqual(materialsOf(wide));
-    // 철광석 633.330t 중 444.445t를 앞 계획이 쓴다 → 뒤 계획 순소요 255.560t
+    // 철광석 2,333.330t 중 2,222.222t(5히트)를 앞 계획이 쓴다 → 뒤 계획 순소요 444.445 − 111.108 = 333.337t
     const ore = k.itemId('ORE01');
-    expect(materialsOf(narrow)?.find((m) => m.itemId === ore)).toMatchObject({ grossTon: '444.445', netTon: '255.560' });
+    expect(materialsOf(narrow)?.find((m) => m.itemId === ore)).toMatchObject({ grossTon: '444.445', netTon: '333.337' });
     expect(narrow.requisitionLines.filter((l) => l.productionPlanId === planA.id)).toEqual([]);
-    expect(narrow.requisitionLines.some((l) => l.productionPlanId === planB.id && l.itemId === ore && l.netTon === '255.560')).toBe(true);
+    expect(narrow.requisitionLines.some((l) => l.productionPlanId === planB.id && l.itemId === ore && l.netTon === '333.337')).toBe(true);
+    // 좁은 기간 표 한 줄: 앞 계획(기간 밖)이 먼저 쓴 잔량은 잔량 칸에서 빠져 444.445 − 111.108 − 0 = 333.337
+    expect(narrow.materials.find((m) => m.itemId === ore)).toMatchObject({
+      grossTon: '444.445',
+      onHandTon: '2333.330',
+      onHandEarlierPlansTon: '2222.222',
+      usableOnHandTon: '111.108',
+      coveredScheduledTon: '0.000',
+      netTon: '333.337',
+    });
   });
 });
 
