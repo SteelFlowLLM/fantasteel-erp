@@ -39,7 +39,7 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
               <Th>고객사</Th>
               <Th>품목</Th>
               <Th align="right">수주</Th>
-              <Th align="right" title="진행중 생산계획의 잔여 목표 (분모: 수주 매수)">
+              <Th align="right" title="진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)">
                 생산중
               </Th>
               <Th align="right" title="ACTIVE 예약 + 출하 (분모: 수주 매수)">
