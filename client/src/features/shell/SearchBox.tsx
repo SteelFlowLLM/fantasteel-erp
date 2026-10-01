@@ -1,6 +1,6 @@
 'use client';
 
-// 통합 검색: 수주번호·LOT번호를 입력하면 결과를 보이고, 누르거나 Enter로 그 화면에 간다.
+// 통합 검색: 수주번호·LOT 번호·출하요청 번호를 입력하면 결과를 보이고, 누르거나 Enter로 그 화면에 간다.
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Icon } from '@/components/Icon';
@@ -28,7 +28,7 @@ export function SearchBox() {
         <input
           type="search"
           value={keyword}
-          placeholder="수주번호·LOT번호 검색"
+          placeholder="수주번호·LOT 번호·출하요청 번호 검색"
           aria-label="통합 검색"
           className="min-w-0 flex-1 border-0 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
           onChange={(event) => {
