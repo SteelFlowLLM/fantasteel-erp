@@ -12,7 +12,8 @@ import { Field } from '@/components/Field';
 import { Input, Select } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { RolePermissionSummary } from '@/features/admin/components/RolePermissionSummary';
-import { countLevels, levelsOf } from '@/features/admin/lib/permissionMatrix';
+import { isEmployeeFormDirty, openEmployeeForm, type EmployeeFormValues } from '@/features/admin/lib/employeeForm';
+import { countLevels, levelCountText, levelsOf } from '@/features/admin/lib/permissionMatrix';
 import { departmentOptionLabel } from '@/features/admin/lib/orgRules';
 import { useAction } from '@/hooks/useAction';
 import { cn } from '@/lib/cn';
@@ -28,26 +29,14 @@ export interface EmployeeFormModalProps {
   onSaved: (employeeId: number) => void;
 }
 
-interface FormState {
-  employeeNo: string;
-  employeeName: string;
-  departmentId: number | null;
-  jobGradeId: number | null;
-  roleId: number | null;
-}
-
 export function EmployeeFormModal({ target, meId, departments, jobGrades, roles, onClose, onSaved }: EmployeeFormModalProps) {
   const isEdit = target !== undefined;
-  const initial: FormState = {
-    employeeNo: target?.employeeNo ?? '',
-    employeeName: target?.employeeName ?? '',
-    departmentId: target?.departmentId ?? null,
-    jobGradeId: target?.jobGradeId ?? null,
-    roleId: target?.roleId ?? null,
-  };
-  const [form, setForm] = useState<FormState>(initial);
+  // 연 시점의 값·updatedAt은 한 번만 잡는다. 다른 탭 저장으로 target이 새로 불러와져도 바뀌지 않아 COM-001이 걸린다.
+  const [opened] = useState(() => openEmployeeForm(target));
+  const initial = opened.values;
+  const [form, setForm] = useState<EmployeeFormValues>(initial);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+  const set = <K extends keyof EmployeeFormValues>(key: K, value: EmployeeFormValues[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
     setErrors((current) => {
       if (!(key in current)) return current;
@@ -62,7 +51,7 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
   const update = useAction(employeeAdminApi.update, { success: '사원 정보를 저장했어요', onSuccess: (saved) => onSaved(saved.id), onError });
   const pending = create.isPending || update.isPending;
 
-  const dirty = (Object.keys(initial) as (keyof FormState)[]).some((key) => (key === 'employeeName' ? form[key].trim() !== initial[key] : form[key] !== initial[key]));
+  const dirty = isEmployeeFormDirty(form, initial);
   const role = roles.find((r) => r.id === form.roleId);
   const isMe = target?.id === meId;
   const isHead = (target?.headDepartmentIds.length ?? 0) > 0;
@@ -76,7 +65,7 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
         departmentId: form.departmentId,
         jobGradeId: form.jobGradeId,
         roleId: form.roleId,
-        expectedUpdatedAt: target.updatedAt,
+        expectedUpdatedAt: opened.expectedUpdatedAt,
       });
     } else {
       create.mutate({ employeeNo: form.employeeNo, employeeName: form.employeeName, departmentId: form.departmentId, jobGradeId: form.jobGradeId, roleId: form.roleId });
@@ -162,8 +151,15 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
         </Field>
       </div>
 
-      <Field label="역할" required error={errors.roleId} hint="사원 한 명에 역할 하나예요">
-        <div role="radiogroup" aria-label="역할" className="grid grid-cols-3 gap-2">
+      {/* 버튼 묶음이라 <label>로 감싸지 않는다: label 안의 첫 버튼이 label 클릭을 받아 역할이 바뀐다. */}
+      <fieldset className="flex min-w-0 flex-col gap-1.5" aria-describedby="employee-role-note">
+        <legend className="mb-1.5 text-xs font-medium text-ink-2">
+          역할
+          <span className="ml-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
+        </legend>
+        <div role="radiogroup" aria-label="역할" aria-required="true" aria-invalid={Boolean(errors.roleId) || undefined} className="grid grid-cols-3 gap-2">
           {roles.map((r) => {
             const counts = countLevels(levelsOf(r.permissions));
             const on = r.id === form.roleId;
@@ -180,14 +176,21 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
                 )}
               >
                 <b className={cn('text-sm font-semibold', on ? 'text-brand' : 'text-ink')}>{ROLE_LABEL[r.roleCode]}</b>
-                <span className="text-cap text-ink-3">
-                  사용 {counts.use} · 조회 {counts.view}
-                </span>
+                <span className="text-cap text-ink-3">{levelCountText(counts)}</span>
               </button>
             );
           })}
         </div>
-      </Field>
+        {errors.roleId ? (
+          <span id="employee-role-note" role="alert" className="text-cap text-danger">
+            {errors.roleId}
+          </span>
+        ) : (
+          <span id="employee-role-note" className="text-cap text-ink-3">
+            사원 한 명에 역할 하나예요
+          </span>
+        )}
+      </fieldset>
 
       <div className="flex flex-col gap-2 rounded-sm border border-line bg-surface-2 px-3.5 py-3">
         <span className="text-xs font-medium text-ink-2">권한 미리보기</span>

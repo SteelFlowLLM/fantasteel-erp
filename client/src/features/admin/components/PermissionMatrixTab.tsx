@@ -3,7 +3,7 @@
 // 권한 탭 (REQ-AUTH-003): 역할 6개 × 권한 17개 행렬. 칸 = 사용(USE) / 조회(VIEW) / 없음(행 없음).
 // 역할마다 따로 저장하고, 저장하면 그 역할 사원의 메뉴·버튼이 바로 바뀐다 (이 탭은 조회 무효화, 다른 탭은 BroadcastChannel).
 import { Fragment } from 'react';
-import { PERMISSION, PERMISSION_LABEL, ROLE_LABEL, type Permission, type RoleCode } from '@/codes';
+import { PERMISSION, PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL, ROLE_LABEL, type Permission, type PermissionLevel, type RoleCode } from '@/codes';
 import { roleAdminApi } from '@/api/adminOrganization';
 import type { RoleView } from '@/api/directory';
 import { Banner } from '@/components/Banner';
@@ -16,6 +16,8 @@ import {
   changedCellsOf,
   countLevels,
   effectiveLevelOf,
+  levelCountText,
+  levelLabelOf,
   levelsOf,
   nextLevelOf,
   permissionRowsByArea,
@@ -31,11 +33,12 @@ import { permissionNeedText } from '@/lib/permissions';
 
 const ROWS = permissionRowsByArea();
 
-const LEVEL_VIEW: Record<'USE' | 'VIEW' | 'NONE', { label: string; className: string }> = {
-  USE: { label: '사용', className: 'text-ok' },
-  VIEW: { label: '조회', className: 'text-run' },
-  NONE: { label: '없음', className: 'text-ink-disabled' },
+// 칸 색만 화면에 둔다. 글자는 levelLabelOf (사용·조회 = PERMISSION_LEVEL_LABEL, 행 없음 = '없음').
+const LEVEL_CLASS: Record<PermissionLevel, string> = {
+  USE: 'text-ok',
+  VIEW: 'text-run',
 };
+const NO_LEVEL_CLASS = 'text-ink-disabled';
 
 export interface PermissionMatrixTabProps {
   canEdit: boolean;
@@ -74,7 +77,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
         const losesOwnManage =
           myRole !== undefined &&
           changedCellsOf(levelsOf(myRole.permissions), draft[myRole.id]).length > 0 &&
-          effectiveLevelOf(levelsOf(myRole.permissions), draft[myRole.id], PERMISSION.ORG_MANAGE) !== 'USE';
+          effectiveLevelOf(levelsOf(myRole.permissions), draft[myRole.id], PERMISSION.ORG_MANAGE) !== PERMISSION_LEVEL.USE;
         return (
           <>
             {canEdit ? null : (
@@ -100,11 +103,11 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                   <span className="flex items-center gap-3 text-cap text-ink-3">
                     <span className="inline-flex items-center gap-1 text-ok">
                       <Icon name="check" size="sm" />
-                      <span className="text-ink-3">사용 = 입력·변경·확정</span>
+                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} = 입력·변경·확정</span>
                     </span>
                     <span className="inline-flex items-center gap-1 text-run">
                       <Icon name="eye" size="sm" />
-                      <span className="text-ink-3">조회 = 보기만</span>
+                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} = 보기만</span>
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <span className="size-3 rounded-xs bg-wait-bg shadow-[inset_0_0_0_1px_var(--color-wait)]" />
@@ -125,9 +128,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                           <Th key={role.id} align="center" className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
                             <span className="flex flex-col items-center py-1 leading-4">
                               <b className="text-xs font-semibold text-ink">{ROLE_LABEL[role.roleCode]}</b>
-                              <span className="text-2xs text-ink-3">
-                                사용 {counts.use} · 조회 {counts.view}
-                              </span>
+                              <span className="text-2xs text-ink-3">{levelCountText(counts)}</span>
                             </span>
                           </Th>
                         );
@@ -149,23 +150,23 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                               const saved = levelsOf(role.permissions);
                               const level = effectiveLevelOf(saved, draft[role.id], permission);
                               const changed = level !== (saved[permission] ?? null);
-                              const view = LEVEL_VIEW[level ?? 'NONE'];
+                              const label = levelLabelOf(level);
                               return (
                                 <Td key={role.id} align="center" className={cn('px-1', role.roleCode === highlightRole && 'bg-brand-tint/40')}>
                                   <button
                                     type="button"
                                     disabled={!canEdit || savingRoleId === role.id}
-                                    title={changed ? `저장된 값은 ${LEVEL_VIEW[saved[permission] ?? 'NONE'].label}이에요` : undefined}
-                                    aria-label={`${ROLE_LABEL[role.roleCode]} · ${PERMISSION_LABEL[permission]}: ${view.label}`}
+                                    title={changed ? `저장된 값은 ${levelLabelOf(saved[permission] ?? null)}이에요` : undefined}
+                                    aria-label={`${ROLE_LABEL[role.roleCode]} · ${PERMISSION_LABEL[permission]}: ${label}`}
                                     onClick={() => toggle(role, permission)}
                                     className={cn(
                                       'inline-flex h-6 min-w-14 items-center justify-center gap-1 rounded-xs px-1.5 text-xs font-medium enabled:hover:bg-surface-3 disabled:cursor-default',
-                                      view.className,
+                                      level ? LEVEL_CLASS[level] : NO_LEVEL_CLASS,
                                       changed && 'bg-wait-bg shadow-[inset_0_0_0_1px_var(--color-wait)] enabled:hover:bg-wait-bg',
                                     )}
                                   >
-                                    {level === 'USE' ? <Icon name="check" size="sm" /> : level === 'VIEW' ? <Icon name="eye" size="sm" /> : null}
-                                    {level ? view.label : '–'}
+                                    {level === PERMISSION_LEVEL.USE ? <Icon name="check" size="sm" /> : level === PERMISSION_LEVEL.VIEW ? <Icon name="eye" size="sm" /> : null}
+                                    {level ? label : '–'}
                                   </button>
                                 </Td>
                               );
