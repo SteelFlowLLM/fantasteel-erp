@@ -13,5 +13,7 @@ server/src/generated
 server/storage
 *.log
 .vite
+.next
+client/next-env.d.ts
 .run
 *.tsbuildinfo

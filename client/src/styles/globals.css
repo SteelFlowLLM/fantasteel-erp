@@ -1,0 +1,134 @@
+/* B안 디자인 토큰을 Tailwind v4 theme으로 옮겼다 (옛 client/src/styles/hl-vars.css).
+   화면은 Tailwind 유틸리티로만 만든다. 이 파일에는 토큰과 Tailwind로 표현할 수 없는 기본값만 둔다. */
+@import 'tailwindcss';
+@import './icons.css';
+
+@theme {
+  /* 색: B안 토큰만 쓰도록 기본 팔레트를 비운다 */
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-bg: #f2f4f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f8fa;
+  --color-surface-3: #eef1f4;
+  --color-line: #dde2e7;
+  --color-line-strong: #c3cbd4;
+  --color-ink: #121820;
+  --color-ink-2: #3f4a57;
+  --color-ink-3: #5e6977;
+  --color-ink-disabled: #8a94a0;
+  --color-brand: #173a5e;
+  --color-brand-hover: #0f2b47;
+  --color-brand-tint: #e7eef5;
+  --color-on-brand: #ffffff;
+  --color-nav-dark: #16202b;
+  --color-nav-dark-2: #223040;
+  --color-nav-ink: #c9d2dc;
+  --color-ok: #17794a;
+  --color-ok-bg: #e4f3ea;
+  --color-danger: #c0322b;
+  --color-danger-bg: #fceae8;
+  --color-wait: #9e4f00;
+  --color-wait-bg: #fdf0df;
+  --color-run: #1f5fcc;
+  --color-run-bg: #e6eefc;
+  --color-ai: #5b3fc4;
+  --color-ai-strong: #452fa0;
+  --color-ai-bg: #f3f0fd;
+  --color-ai-line: #cfc5f5;
+  --color-chart-1: #23507f;
+  --color-chart-2: #5b86b5;
+  --color-chart-3: #9db6d1;
+  --color-chart-4: #d2dce7;
+
+  /* 모서리 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* 그림자 */
+  --shadow-1: 0 1px 2px rgba(18, 24, 32, 0.06);
+  --shadow-pop: 0 12px 32px rgba(18, 24, 32, 0.18);
+
+  /* 글자 크기 (B안 기본 13px/18px) */
+  --text-*: initial;
+  --text-2xs: 10.5px;
+  --text-2xs--line-height: 13px;
+  --text-cap: 11px;
+  --text-cap--line-height: 14px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-mono: 12.5px;
+  --text-mono--line-height: 18px;
+  --text-mono--letter-spacing: -0.01em;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 17px;
+  --text-xl--line-height: 24px;
+  --text-2xl: 20px;
+  --text-2xl--line-height: 28px;
+  --text-3xl: 24px;
+  --text-3xl--line-height: 32px;
+  --text-4xl: 28px;
+  --text-4xl--line-height: 32px;
+  --text-5xl: 30px;
+  --text-5xl--line-height: 42px;
+}
+
+/* 글꼴: next/font가 <html>에 --font-plex-sans / --font-plex-mono 변수를 단다 */
+@theme inline {
+  --font-sans: var(--font-plex-sans), 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', 'D2Coding', ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-run);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-ink-3);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--color-brand);
+    vertical-align: -3px;
+  }
+}

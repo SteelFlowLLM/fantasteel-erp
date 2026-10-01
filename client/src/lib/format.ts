@@ -1,79 +1,134 @@
-// 표시용 포맷. 시간은 Asia/Seoul 기준으로 보여준다 (코드 컨벤션 5장).
-const TZ = 'Asia/Seoul';
-const parts = (d: Date, opts: Intl.DateTimeFormatOptions) =>
-  Object.fromEntries(new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, hour12: false, ...opts }).formatToParts(d).map((p) => [p.type, p.value]));
-const toDate = (v: string | Date | null | undefined) => (v ? (v instanceof Date ? v : new Date(v)) : null);
+// 화면 표시용 포맷. 시각은 Asia/Seoul 기준으로 보여 준다 (코드 컨벤션 5장).
+// 옛 client/src/lib/format.ts를 옮겼다. 톤은 숫자로 바꾸지 않고 문자열 그대로 자리수만 맞춘다.
+import { SEOUL_TIME_ZONE, toSeoulDateString } from '@/lib/seoulDate';
+import { formatDecimal } from '@/lib/weight';
 
-/** 2026-09-30 */
-export function fmtDate(v: string | Date | null | undefined): string {
-  const d = toDate(v);
-  if (!d || Number.isNaN(d.getTime())) return '-';
-  const p = parts(d, { year: 'numeric', month: '2-digit', day: '2-digit' });
-  return `${p.year}-${p.month}-${p.day}`;
+type DateInputValue = string | Date | null | undefined;
+
+const toDate = (value: DateInputValue): Date | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: SEOUL_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const weekdayFormatter = new Intl.DateTimeFormat('ko-KR', { timeZone: SEOUL_TIME_ZONE, weekday: 'short' });
+
+/** 2026-09-30. 날짜만 있는 값(YYYY-MM-DD)은 그대로 쓴다. */
+export function fmtDate(value: DateInputValue): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = toDate(value);
+  return date ? toSeoulDateString(date) : '-';
 }
+
 /** 09-30 */
-export function fmtMD(v: string | Date | null | undefined): string {
-  const s = fmtDate(v);
-  return s === '-' ? s : s.slice(5);
+export function fmtMD(value: DateInputValue): string {
+  const text = fmtDate(value);
+  return text === '-' ? text : text.slice(5);
 }
+
 /** 14:05 */
-export function fmtHM(v: string | Date | null | undefined): string {
-  const d = toDate(v);
-  if (!d || Number.isNaN(d.getTime())) return '-';
-  const p = parts(d, { hour: '2-digit', minute: '2-digit' });
-  return `${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+export function fmtHM(value: DateInputValue): string {
+  const date = toDate(value);
+  if (!date) return '-';
+  const parts = new Map(timeFormatter.formatToParts(date).map((p) => [p.type, p.value]));
+  const hour = parts.get('hour') ?? '00';
+  return `${hour === '24' ? '00' : hour}:${parts.get('minute') ?? '00'}`;
 }
+
 /** 09-30 14:05 */
-export const fmtMDHM = (v: string | Date | null | undefined) => (toDate(v) ? `${fmtMD(v)} ${fmtHM(v)}` : '-');
+export const fmtMDHM = (value: DateInputValue): string => (toDate(value) ? `${fmtMD(value)} ${fmtHM(value)}` : '-');
+
 /** 2026-09-30 14:05 */
-export const fmtDateTime = (v: string | Date | null | undefined) => (toDate(v) ? `${fmtDate(v)} ${fmtHM(v)}` : '-');
+export const fmtDateTime = (value: DateInputValue): string => (toDate(value) ? `${fmtDate(value)} ${fmtHM(value)}` : '-');
+
 /** 09-30 (수) */
-export function fmtMDdow(v: string | Date | null | undefined): string {
-  const d = toDate(v);
-  if (!d) return '-';
-  return `${fmtMD(d)} (${new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, weekday: 'short' }).format(d)})`;
+export function fmtMDdow(value: DateInputValue): string {
+  const date = toDate(value);
+  if (!date) return '-';
+  return `${fmtMD(date)} (${weekdayFormatter.format(date)})`;
 }
+
 /** 방금 · 5분 전 · 3시간 전 · 2일 전 · 그 이상은 날짜 */
-export function relTime(v: string | Date | null | undefined, now = new Date()): string {
-  const d = toDate(v);
-  if (!d) return '-';
-  const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
+export function relTime(value: DateInputValue, now: Date = new Date()): string {
+  const date = toDate(value);
+  if (!date) return '-';
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
   if (diff < 60) return '방금';
   if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
   if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}일 전`;
-  return fmtMD(d);
+  return fmtMD(date);
 }
-/** 납기까지 남은 일수 라벨: D-3 / D-day / D+2 */
-export function dLabel(due: string | Date | null | undefined, now = new Date()): string {
-  const s = fmtDate(due);
-  if (s === '-') return '';
-  const days = Math.round((Date.parse(`${s}T00:00:00+09:00`) - Date.parse(`${fmtDate(now)}T00:00:00+09:00`)) / 86_400_000);
-  return days === 0 ? 'D-day' : days > 0 ? `D-${days}` : `D+${-days}`;
-}
-/** 오늘 날짜 YYYY-MM-DD (KST) */
-export const todayStr = () => fmtDate(new Date());
 
-/** 톤 표시: "235.500 t" (서버가 준 문자열 그대로, 자리수만 맞춤) */
-export function fmtTon(v: string | number | null | undefined, digits = 3): string {
-  if (v === null || v === undefined || v === '') return '-';
-  const n = Number(v);
-  if (Number.isNaN(n)) return '-';
-  return `${n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })} t`;
+/** 오늘 날짜 YYYY-MM-DD (Asia/Seoul) */
+export const todayStr = (): string => toSeoulDateString(new Date());
+
+/** 납기까지 남은 일수 라벨: D-3 / D-day / D+2 */
+export function dLabel(due: DateInputValue, now: Date = new Date()): string {
+  const dueText = fmtDate(due);
+  if (dueText === '-') return '';
+  const days = Math.round((Date.parse(`${dueText}T00:00:00+09:00`) - Date.parse(`${toSeoulDateString(now)}T00:00:00+09:00`)) / 86_400_000);
+  if (days === 0) return 'D-day';
+  return days > 0 ? `D-${days}` : `D+${-days}`;
 }
-export const fmtInt = (n: number | null | undefined) => (n === null || n === undefined ? '-' : Math.round(n).toLocaleString('en-US'));
-export const fmtNum = (v: string | number | null | undefined, digits = 1) =>
-  v === null || v === undefined || v === '' ? '-' : Number(v).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-export const fmtPct = (ratio: number | null | undefined, digits = 0) => (ratio === null || ratio === undefined ? '-' : `${(ratio * 100).toFixed(digits)}%`);
-/** 규격 치수: 250 × 1,200 × 10,000 */
-export function fmtDims(t: string | number, w: string | number, l: string | number): string {
-  const f = (x: string | number) => Number(x).toLocaleString('en-US', { maximumFractionDigits: 2 });
-  return `${f(t)} × ${f(w)} × ${f(l)}`;
+
+/** 정수 부분에 천 단위 쉼표를 넣는다 ("1234567.500" → "1,234,567.500") */
+function groupThousands(text: string): string {
+  const [integerPart, fractionPart] = text.split('.');
+  const negative = integerPart.startsWith('-');
+  const digits = negative ? integerPart.slice(1) : integerPart;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${negative ? '-' : ''}${grouped}${fractionPart !== undefined ? `.${fractionPart}` : ''}`;
 }
+
+/** 톤 표시: "235.500 t" */
+export function fmtTon(value: string | number | null | undefined, digits = 3): string {
+  if (value === null || value === undefined || value === '') return '-';
+  try {
+    return `${groupThousands(formatDecimal(value, digits))} t`;
+  } catch {
+    return '-';
+  }
+}
+
+/** 소수 표시 (자리수 맞춤, 천 단위 쉼표) */
+export function fmtNum(value: string | number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined || value === '') return '-';
+  try {
+    return groupThousands(formatDecimal(value, digits));
+  } catch {
+    return '-';
+  }
+}
+
+/** 정수 표시: 1,234 */
+export const fmtInt = (value: number | null | undefined): string =>
+  value === null || value === undefined ? '-' : Math.round(value).toLocaleString('en-US');
+
+/** 비율 표시: 0.98 → 98% */
+export const fmtPct = (ratio: number | null | undefined, digits = 0): string =>
+  ratio === null || ratio === undefined ? '-' : `${(ratio * 100).toFixed(digits)}%`;
+
+/** 규격 치수: 250 × 1,200 × 10,000 (소수 끝의 0은 지운다) */
+export function fmtDims(thickness: string | number, width: string | number, length: string | number): string {
+  const one = (value: string | number) => {
+    const text = typeof value === 'number' ? String(value) : value;
+    const trimmed = text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+    return groupThousands(trimmed);
+  };
+  return `${one(thickness)} × ${one(width)} × ${one(length)}`;
+}
+
 /** 파일 크기 */
-export function fmtBytes(n: number | null | undefined): string {
-  if (!n && n !== 0) return '-';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+export function fmtBytes(size: number | null | undefined): string {
+  if (size === null || size === undefined) return '-';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }

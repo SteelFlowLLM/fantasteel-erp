@@ -1,8 +1,0 @@
-/* Voice2ERP 회의록 (준비 중 · P2) — 화면 안에 목록|상세 두 칸을 그린다. */
-.meet-split { display: flex; flex: 1; min-height: 640px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; }
-.meet-split > .hl-master { flex: none; }
-.meet-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; background: var(--bg); }
-.meet-tabs { flex: none; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; }
-.meet-new { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; flex: 1; min-height: 520px; }
-.meet-two { display: grid; grid-template-columns: 1.45fr 1fr; gap: 14px; flex: 1; min-height: 0; }
-.meet-two--tasks { grid-template-columns: 1.35fr 1fr; }

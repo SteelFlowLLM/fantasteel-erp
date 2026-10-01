@@ -1,35 +1,29 @@
-// 알림 API — docs/api/notification.md 의 모양 그대로.
-import type { NotificationType } from '@fantasteel/shared';
-import { api } from './client';
+// 알림 조회 (상단 알림 드롭다운, SPEC 4장 1번). 업무·알림 화면은 2단계에서 만든다.
+import type { NotificationType } from '@/codes';
+import { mockQuery } from '@/api/client';
 
-export interface NotificationItem {
+export interface NotificationPreview {
   id: number;
   notificationType: NotificationType;
   title: string;
   body: string | null;
-  /** 눌렀을 때 이동할 프론트 경로 */
   linkPath: string | null;
-  departmentId: number | null;
   isRead: boolean;
-  readAt: string | null;
   createdAt: string;
 }
 
-export interface NotificationPage {
-  /** 최신순 */
-  items: NotificationItem[];
-  /** 다음 페이지의 cursor. 마지막이면 null */
-  nextCursor: number | null;
-}
-
-export interface ListNotificationsQuery { unreadOnly?: boolean; limit?: number; cursor?: number }
-
-/** 소켓 `notification` 이벤트 */
-export interface NotificationEvent { notificationType: NotificationType; title: string; body: string | null; linkPath: string | null }
+export const RECENT_NOTIFICATION_LIMIT = 8;
 
 export const notificationApi = {
-  list: (q: ListNotificationsQuery = {}) => api.get<NotificationPage>('/notifications', { unreadOnly: q.unreadOnly || undefined, limit: q.limit, cursor: q.cursor }),
-  unreadCount: () => api.get<{ count: number }>('/notifications/unread-count'),
-  read: (id: number) => api.post<NotificationItem>(`/notifications/${id}/read`),
-  readAll: () => api.post<{ updated: number }>('/notifications/read-all'),
+  countUnread: (recipientId: number): Promise<number> =>
+    mockQuery((tables) => tables.notification.filter((n) => n.recipientId === recipientId && !n.isRead).length),
+
+  listRecent: (recipientId: number, limit: number = RECENT_NOTIFICATION_LIMIT): Promise<NotificationPreview[]> =>
+    mockQuery((tables) =>
+      tables.notification
+        .filter((n) => n.recipientId === recipientId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)
+        .slice(0, limit)
+        .map(({ id, notificationType, title, body, linkPath, isRead, createdAt }) => ({ id, notificationType, title, body, linkPath, isRead, createdAt })),
+    ),
 };
