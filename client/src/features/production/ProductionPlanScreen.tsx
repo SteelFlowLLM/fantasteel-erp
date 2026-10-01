@@ -4,8 +4,8 @@
 // REQ-PRD-001·002·006, BP-PRD-01, 10장. 계획은 수주 등록 때 만들어진다(편성까지 계산). CONFIRMED 상태와 '조치 필요' 필터는 없다(PLAN 6-3·7).
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { INSPECTION_RESULT_LABEL, PERMISSION, PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS, PRODUCTION_PLAN_STATUS_LABEL, SALES_ORDER_ITEM_STATUS_LABEL, type ProductItemType, type ProductionPlanStatus } from '@/codes';
-import type { ProductionPlanDetail, ProductionPlanSummary } from '@/api/production';
+import { INSPECTION_RESULT_LABEL, ITEM_TYPE_LABEL, PERMISSION, PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS, PRODUCTION_PLAN_STATUS_LABEL, SALES_ORDER_ITEM_STATUS_LABEL, type ProductItemType, type ProductionPlanStatus } from '@/codes';
+import type { ProductionPlanDetail, ProductionPlanListRow } from '@/api/production';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -35,7 +35,7 @@ import { permissionNeedText } from '@/lib/permissions';
 
 type TypeFilter = 'ALL' | ProductItemType;
 
-function PlanListRow({ plan, active, onPick }: { plan: ProductionPlanSummary; active: boolean; onPick: () => void }) {
+function PlanListRow({ plan, active, onPick }: { plan: ProductionPlanListRow; active: boolean; onPick: () => void }) {
   const unit = PRODUCT_QTY_UNIT[plan.itemType];
   const d = plan.dueDate ? dLabel(plan.dueDate) : '';
   const open = plan.productionPlanStatus === 'PLANNED' || plan.productionPlanStatus === 'IN_PROGRESS';
@@ -50,7 +50,14 @@ function PlanListRow({ plan, active, onPick }: { plan: ProductionPlanSummary; ac
         </span>
       </Row>
       <Row className="text-xs">
-        {plan.salesOrderNo ? <span className="font-mono">{plan.salesOrderNo}</span> : <span className="text-ink-3">수주 연결 없음</span>}
+        {plan.salesOrderNo ? (
+          <span className="min-w-0 truncate">
+            <span className="font-mono">{plan.salesOrderNo}</span>
+            {plan.customerName ? <span className="text-ink-2"> · {plan.customerName}</span> : null}
+          </span>
+        ) : (
+          <span className="text-ink-3">수주 연결 없음</span>
+        )}
         <b className="ml-auto whitespace-nowrap tabular-nums">
           부족 {plan.shortageQty}
           {unit}
@@ -75,7 +82,7 @@ function PlanListRow({ plan, active, onPick }: { plan: ProductionPlanSummary; ac
   );
 }
 
-function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPlanSummary[]; selectedId: number | null; onPick: (id: number) => void }) {
+function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPlanListRow[]; selectedId: number | null; onPick: (id: number) => void }) {
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState<ProductionPlanStatus | ''>('');
   const [type, setType] = useState<TypeFilter>('ALL');
@@ -85,7 +92,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
       (p) =>
         (!status || p.productionPlanStatus === status) &&
         (type === 'ALL' || p.itemType === type) &&
-        (!k || [p.productionPlanNo, p.salesOrderNo ?? '', p.itemCode].some((text) => text.toLowerCase().includes(k))),
+        (!k || [p.productionPlanNo, p.salesOrderNo ?? '', p.customerName ?? '', p.itemCode].some((text) => text.toLowerCase().includes(k))),
     );
   }, [plans, keyword, status, type]);
   return (
@@ -96,7 +103,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
             <h2 className="text-lg font-semibold">생산계획</h2>
             <span className="text-xs text-ink-3">{filtered.length}건</span>
           </div>
-          <Input leadingIcon="search" placeholder="계획·수주번호·규격 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="생산계획 검색" />
+          <Input leadingIcon="search" placeholder="계획·수주번호·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="생산계획 검색" />
           <div className="flex items-center gap-1.5">
             <Select value={status} onChange={(e) => setStatus(e.target.value as ProductionPlanStatus | '')} aria-label="상태" className="w-28">
               <option value="">상태 전체</option>
@@ -108,7 +115,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
             </Select>
             {(['ALL', 'SLAB', 'COIL'] as const).map((t) => (
               <Chip key={t} on={type === t} onClick={() => setType(t)}>
-                {t === 'ALL' ? '전체' : t === 'SLAB' ? '슬래브' : '코일'}
+                {t === 'ALL' ? '전체' : ITEM_TYPE_LABEL[t]}
               </Chip>
             ))}
           </div>

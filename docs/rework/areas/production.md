@@ -101,3 +101,45 @@
 3. 히트 미판정 상태의 연주 허용 여부(16장 TBD)는 core 기본값(허용)을 따랐다.
 4. 생산계획 목록의 납기 표시는 D-라벨(옛 화면)이고, 공통 코드 비고의 '납기 위험'(delivery_risk_days) 배지는 수주 화면에서 계산한다. 생산 화면에도 같은 배지를 쓸지 결정 필요.
 5. 브라우저로 직접 확인하지 못했다(병렬 규칙). 병합 뒤 빌드·브라우저 확인 필요: 창(Modal)은 서버 렌더 테스트에 들어가지 않는다.
+
+## 10. 검토 반영 (2026-10-02)
+
+검토에서 확인된 17건. 이 영역 파일은 모두 고쳤고, core 서비스의 업무 로직 변경이 필요한 것은 병렬 규칙("공유 파일은 한 줄 변경만")에 따라 아래 "core 담당에게 넘김"에 적었다.
+
+### 고친 것
+| # | 근거 | 무엇을 | 어디 |
+|---|---|---|---|
+| 1 | BP-PRD-02, 검사 대기 큐 | 판정 대기 LOT의 '검사 입력으로 가기'가 LOT 번호를 넘겨 검사 화면이 첫 대기 LOT을 열던 것 → 숫자 LOT id(`/quality/inspections?lot=<id>`). 자기는 합격이고 히트만 판정 대기면 히트의 검사로 간다 | `PlanLotsCard.inspectionHrefOf`, `PlanLotRow.heatLotId` |
+| 2 | 10장(작업 상태 = 시작·완료 시각), REQ-PRD-003 | 같은 공정에 작업 시작만 한 실적이 있으면 '실적 등록'·'작업 시작'을 막고 '작업 완료'로만 진행. 시뮬레이션도 막는다. api도 같은 확인을 하고, 실적 등록으로 계획이 완료될 때 다른 공정의 시작만 한 실적이 남아 있으면 거부(트랜잭션 취소) | 화면 `ProductionResultScreen`, api `productionResults.ts`·`rolling.ts`, 확인 함수 `mock/services/ext/production.ts` |
+| 5 | 4.5, 14.1-6 | 재생산 창의 '먼저 예약하는 여재'를 core가 실제로 예약하는 수 = min(현재 미확보, 예약 가용)으로 맞췄다(`ReproductionCheck.surplusReserveQty`). 진행 계획 잔여로 덮인 몫까지 재고로 잡는다는 안내를 함께 보인다 | `api/production.ts`, `PlanModals.tsx` |
+| 6 (화면 몫) | REQ-INV-008 | LOT 상태 글자의 '여재'는 품질이 합격일 때만 | `PlanBadges.lotStateText` |
+| 8 | BP-PRD-02, REQ-LOG | 연주 '작업 완료' 창은 작업 시작 때 기록한 히트(PRODUCTION_STARTED.afterData.heatLotId)로 고정. api도 다른 히트면 거부 | `WorkContext.openWork`, `ResultFormModal`, `ext/production.assertStartedHeat` |
+| 9 | 04 4.1 | 생산계획·재생산 계획 작업 로그 사유의 단위를 품목 유형으로(슬래브 매, 코일 개) | core `productionPlans.ts` 한 줄씩 3곳(아래 공유 파일) |
+| 10 | 05 2장 | 테스트의 `order` 변수 → `fifoKeys` | `rolling.test.ts` |
+| 11 | 05 4장 | api 타입을 공통 코드 타입으로: `AllocationPurpose`, `InspectionResult`(값은 `INSPECTION_RESULT`), `LotStatus`. `as LotStatus` 제거 | `api/production.ts`·`productionResults.ts`·`rolling.ts`, `RollingScreen` |
+| 13 | common.md, 05 4장 | 코드 표시명을 `@/codes`에서: 슬래브/코일 칩(ITEM_TYPE_LABEL), 목록 묶음 제목(PRODUCTION_PLAN_STATUS_LABEL), '불합격'(INSPECTION_RESULT_LABEL), '예약 (예약중)'(RESERVATION_STATUS_LABEL) | 생산계획·작업 실적·열연 화면, `ResultFormModal`, `PlanModals` |
+| 14 | 4.5 | KPI 이름을 값 순서에 맞춰 '열연 완료 / 부족 매수' | `RollingScreen` |
+| 15 | BP-PRD-02 | '출선량 · 잔량' → '용선량 · 잔량'(주석도) | `PlanLotsCard`, `api/production.ts` |
+| 16 | reports/3 A-1 | 생산계획·작업 실적 목록에 고객사를 보이고 검색에 넣음. 자리표시 '계획·수주번호·고객사 검색' (`ProductionPlanListRow`, `withCustomerNames`) | `api/production.ts`·`productionResults.ts`, 두 목록 |
+| 17 | reports/3 A-3 | 열연 투입 배정 상세의 수주번호를 수주 상세 링크로, 머리에 '수주 상세' 버튼(`RollingDetail.salesOrderId`) | `api/rolling.ts`, `RollingScreen` |
+
+### core 담당에게 넘김 (공유 파일 로직 변경, 이번에 고치지 않음)
+- **3 (C5-13)** `itemShortageOf`·`createReproductionPlan`: 코일 품목의 예약 가용·재생산 필요에 매핑 슬래브 규격의 여재(미배정 합격 슬래브)를 넣고, 재생산 계획을 만들 때 그 몫을 빼고 편성. 화면(`reproductionCheckOf`·재생산 창)은 core 값이 바뀌면 그대로 따라간다. '슬래브 여재 N매 열연으로 채울 수 있어요' 문구는 core가 슬래브 여재 몫을 따로 돌려주면 넣는다.
+- **4** `planProgressOf`: 코일 계획 잔여 목표의 `ownRollableSlabQty` 적격 몫을 슬래브 규격 예약 가용으로 제한(판정 대기 몫은 그대로). `rollingPlanView` 안내도 같은 값.
+- **5 (선택)** `reserveUpToShortage`에 상한 인자를 두어 재생산 전 예약을 min(추가 계획 필요, 예약 가용)으로 줄일지 결정. 지금은 화면을 core 동작(min(현재 미확보, 예약 가용))에 맞췄다.
+- **6** `registerCasting`(productionResults.ts 459·494~507): 완료 후 여재 계획의 슬래브에 연주 때 `surplusAt`을 넣고 SURPLUS_CONVERTED를 남기는 것을 빼고 검사 합격 처리(inspections.ts)에 맡긴다. 재고 화면 `LotListTab`의 여재 표시도 합격일 때만.
+- **2 (core 몫)** `refreshPlanStatus`는 시작만 한 실적이 남아 있으면 COMPLETED로 바꾸지 않고, `simulatePlan`은 시작만 한 실적을 먼저 완료하거나 거부. 지금은 api 층 확인(`ext/production.ts`)이 같은 일을 한다. 병합 때 core로 옮기면 이 파일은 지운다.
+- **7** `simulatePlan` 시작 시각: 거꾸로 배치한 슬롯이 전날로 밀려 오늘 입고한 원료가 안 보이는 문제. 시작 시각을 max(지금 − 총 소요, 필요 LOT 최신 생산일 0시)로.
+- **8 (core 몫)** `registerCasting`도 productionResultId가 있으면 시작 히트와 같은지 확인(지금은 api 층).
+- **9 (나머지)** `salesOrders.ts:182` 수주 등록 때 생산계획 사유 글자도 '매' 고정 → 품목 유형 단위.
+- **12** 이론중량 이름: core 뷰 타입 `unitWeightTon`을 용어 사전 TRM-022 `theoreticalWeightTon`으로(productionPlans.ts 381·383·494·496, rolling.ts 57·58·107·108 외 수주·출하·재고 뷰 전체). 병렬 규칙상 공유 파일 이름 바꾸기를 하지 않아 생산 화면(FormationCard·RollingScreen·RollingModals)은 아직 `unitWeightTon`을 읽는다. core에서 바꾸면 이 세 곳만 따라 바꾸면 된다.
+
+### 공유 파일 변경
+- `client/src/mock/services/productionPlans.ts` 3줄: `PRODUCT_QTY_UNIT` 가져오기, 생산계획 기본 사유 `부족 N{단위} 생산`, 재생산 사유 `…부족한 N{단위} 재생산`.
+- 새 파일 `client/src/mock/services/ext/production.ts`: 진행 중 작업 확인(`openResultsOf`, `startedHeatLotIdOf`, `assertNoOpenWorkOfProcess`, `assertStartedHeat`, `assertNoOpenWorkOnCompletion`, `assertNoOpenWorkForSimulation`). 병합 때 core로 옮길 것.
+
+### 테스트 (이 영역 34개)
+- `productionResults.test.ts` +2: 연주 시작만 한 뒤 새 실적·새 시작·시뮬레이션 거부, 다른 히트로 완료 거부, 같은 행 완료 → 계획 완료 / 제선 시작만 남긴 채 연주로 계획 완료 시도 → 거부·롤백.
+- `production.test.ts`: 목록 고객사, `surplusReserveQty`와 core 실제 예약 수 일치, 재생산 사유 단위.
+- `rolling.test.ts`: `salesOrderId`, `fifoKeys`.
+- `productionScreens.test.ts` +3: 검사 입력 링크(숫자 id·히트), 여재 글자는 합격만, 진행 중 작업 안내. 열연 KPI 이름·수주 상세 버튼.

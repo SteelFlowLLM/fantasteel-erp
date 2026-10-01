@@ -61,11 +61,11 @@ export function LotQualityBadge({ quality }: { quality: LotQuality }) {
   }
 }
 
-/** LOT 상태 글자: 처리 상태 → 투입 소진·출고 → 배정 확정(목적) → 여재 → 재고 */
-export function lotStateText(lot: Pick<PlanLotRow, 'dispositionStatus' | 'lotStatus' | 'allocationPurpose' | 'surplusAt' | 'lotType'>): string {
+/** LOT 상태 글자: 처리 상태 → 투입 소진·출고 → 배정 확정(목적) → 여재(미배정 '합격' 슬래브, REQ-INV-008) → 재고 */
+export function lotStateText(lot: Pick<PlanLotRow, 'dispositionStatus' | 'lotStatus' | 'allocationPurpose' | 'surplusAt' | 'lotType' | 'quality'>): string {
   if (lot.dispositionStatus) return DISPOSITION_STATUS_LABEL[lot.dispositionStatus];
   if (lot.lotStatus !== 'AVAILABLE') return LOT_STATUS_LABEL[lot.lotStatus];
   if (lot.allocationPurpose) return `${ALLOCATION_STATUS_LABEL.CONFIRMED} · ${ALLOCATION_PURPOSE_LABEL[lot.allocationPurpose]}`;
-  if (lot.lotType === 'SLAB' && lot.surplusAt) return '여재';
+  if (lot.lotType === 'SLAB' && lot.surplusAt && lot.quality === 'PASS') return '여재';
   return LOT_STATUS_LABEL.AVAILABLE;
 }

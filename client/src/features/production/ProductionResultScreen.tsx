@@ -5,8 +5,8 @@
 // 열연 실적은 열연 투입 배정 화면 한 곳에서 등록한다.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { PERMISSION, PROCESS_TYPE_LABEL, PRODUCT_QTY_UNIT, type ProcessType } from '@/codes';
-import type { ProductionPlanSummary, ProductionResultView } from '@/api/production';
+import { PERMISSION, PROCESS_TYPE_LABEL, PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS_LABEL, type ProcessType } from '@/codes';
+import type { ProductionPlanListRow, ProductionResultView } from '@/api/production';
 import type { WorkContext } from '@/api/productionResults';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -40,7 +40,11 @@ const PROCESS_NOTE: Record<ProcessType, string> = {
   HOT_ROLLING: '배정 확정 슬래브 1매 → 코일 1개 (C + 슬래브번호, HT- 제외)',
 };
 
-function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanSummary; active: boolean; onPick: () => void }) {
+/** 같은 공정에 작업 시작만 한 실적이 있으면 '실적 등록'·'작업 시작'을 막고 '작업 완료'로만 진행한다 (10장: 작업 상태 = 시작·완료 시각) */
+const OPEN_WORK_TEXT = "진행 중인 작업이 있어요. 아래 표의 '작업 완료'로 마쳐야 다음 실적을 등록할 수 있어요";
+const SIMULATION_OPEN_WORK_TEXT = "작업 시작만 한 실적을 '작업 완료'로 마친 뒤 시뮬레이션해요";
+
+function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanListRow; active: boolean; onPick: () => void }) {
   return (
     <MasterListItem active={active} onPick={onPick}>
       <Row>
@@ -52,7 +56,14 @@ function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanSummary; ac
         </span>
       </Row>
       <Row className="text-xs">
-        {plan.salesOrderNo ? <span className="font-mono">{plan.salesOrderNo}</span> : <span className="text-ink-3">수주 연결 없음</span>}
+        {plan.salesOrderNo ? (
+          <span className="min-w-0 truncate">
+            <span className="font-mono">{plan.salesOrderNo}</span>
+            {plan.customerName ? <span className="text-ink-2"> · {plan.customerName}</span> : null}
+          </span>
+        ) : (
+          <span className="text-ink-3">수주 연결 없음</span>
+        )}
         <span className="ml-auto whitespace-nowrap tabular-nums text-ink-2">
           제강 {plan.heatsMadeQty}/{plan.heatCount} · 연주 {plan.heatsCastQty}/{plan.heatCount}
         </span>
@@ -64,17 +75,17 @@ function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanSummary; ac
   );
 }
 
-function WorkPlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPlanSummary[]; selectedId: number | null; onPick: (id: number) => void }) {
+function WorkPlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPlanListRow[]; selectedId: number | null; onPick: (id: number) => void }) {
   const [keyword, setKeyword] = useState('');
   const [showDone, setShowDone] = useState(false);
   const filtered = useMemo(() => {
     const k = keyword.trim().toLowerCase();
-    return plans.filter((p) => !k || [p.productionPlanNo, p.salesOrderNo ?? '', p.itemCode].some((t) => t.toLowerCase().includes(k)));
+    return plans.filter((p) => !k || [p.productionPlanNo, p.salesOrderNo ?? '', p.customerName ?? '', p.itemCode].some((t) => t.toLowerCase().includes(k)));
   }, [plans, keyword]);
   const groups = [
-    { title: '진행중', rows: filtered.filter((p) => p.productionPlanStatus === 'IN_PROGRESS'), empty: '진행 중인 계획이 없어요' },
-    { title: '계획 · 시작 전', rows: filtered.filter((p) => p.productionPlanStatus === 'PLANNED'), empty: '시작 전 계획이 없어요' },
-    ...(showDone ? [{ title: '완료', rows: filtered.filter((p) => p.productionPlanStatus === 'COMPLETED'), empty: '완료된 계획이 없어요' }] : []),
+    { title: PRODUCTION_PLAN_STATUS_LABEL.IN_PROGRESS, rows: filtered.filter((p) => p.productionPlanStatus === 'IN_PROGRESS'), empty: '진행 중인 계획이 없어요' },
+    { title: `${PRODUCTION_PLAN_STATUS_LABEL.PLANNED} · 시작 전`, rows: filtered.filter((p) => p.productionPlanStatus === 'PLANNED'), empty: '시작 전 계획이 없어요' },
+    ...(showDone ? [{ title: PRODUCTION_PLAN_STATUS_LABEL.COMPLETED, rows: filtered.filter((p) => p.productionPlanStatus === 'COMPLETED'), empty: '완료된 계획이 없어요' }] : []),
   ];
   const openCount = plans.filter((p) => p.productionPlanStatus !== 'COMPLETED').length;
   return (
@@ -85,7 +96,7 @@ function WorkPlanList({ plans, selectedId, onPick }: { plans: readonly Productio
             <h2 className="text-lg font-semibold">생산계획</h2>
             <span className="text-xs text-ink-3">실적 입력 {openCount}건</span>
           </div>
-          <Input leadingIcon="search" placeholder="계획·수주번호·규격 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="계획 검색" />
+          <Input leadingIcon="search" placeholder="계획·수주번호·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="계획 검색" />
           <div className="flex gap-1.5">
             <Chip on={!showDone} onClick={() => setShowDone(false)}>
               입력할 계획 <b>{openCount}</b>
@@ -170,8 +181,8 @@ function ProcessSection({
                 size="sm"
                 variant="primary"
                 icon="plus"
-                disabled={!canWork || blockedReason !== null}
-                title={!canWork ? needText : (blockedReason ?? undefined)}
+                disabled={!canWork || blockedReason !== null || open !== null}
+                title={!canWork ? needText : (blockedReason ?? (open ? OPEN_WORK_TEXT : undefined))}
                 onClick={() => onOpen({ process: workProcess, mode: 'register', openResult: null })}
               >
                 실적 등록
@@ -183,6 +194,7 @@ function ProcessSection({
       <div className="border-b border-line bg-surface-2 px-4 py-1.5 text-cap text-ink-3">
         {PROCESS_NOTE[process]}
         {blockedReason && ctx.isOpen && !isRolling ? ` · ${blockedReason}` : ''}
+        {open && ctx.isOpen && !isRolling ? <span className="font-semibold text-wait">{` · ${OPEN_WORK_TEXT}`}</span> : null}
       </div>
       <CardBody flush>
         <ResultsTable
@@ -212,6 +224,7 @@ export function WorkBody({ ctx }: { ctx: WorkContext }) {
   const unit = PRODUCT_QTY_UNIT[plan.item.itemType];
   const so = plan.salesOrder;
   const needText = permissionNeedText([PERMISSION.PRODUCTION_RESULT_CONFIRM]);
+  const hasOpenWork = ctx.openWork.length > 0;
   const steps = processStepItems({
     itemType: plan.item.itemType,
     productionPlanStatus: plan.productionPlanStatus,
@@ -254,7 +267,13 @@ export function WorkBody({ ctx }: { ctx: WorkContext }) {
             <ButtonLink href="/business-events" icon="history">
               작업 로그
             </ButtonLink>
-            <Button variant="primary" icon="flow" disabled={!canWork || !ctx.isOpen} title={!canWork ? needText : ctx.isOpen ? undefined : '계획·진행중인 계획만 시뮬레이션해요'} onClick={() => setSimulating(true)}>
+            <Button
+              variant="primary"
+              icon="flow"
+              disabled={!canWork || !ctx.isOpen || hasOpenWork}
+              title={!canWork ? needText : !ctx.isOpen ? '계획·진행중인 계획만 시뮬레이션해요' : hasOpenWork ? SIMULATION_OPEN_WORK_TEXT : undefined}
+              onClick={() => setSimulating(true)}
+            >
               실적 시뮬레이션
             </Button>
           </div>
