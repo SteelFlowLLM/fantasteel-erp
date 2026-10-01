@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
-import { StagePlaceholder } from '@/components/StagePlaceholder';
+import { PageMain } from '@/components/Page';
+import { MeetingScreen } from '@/features/meetings/MeetingScreen';
 import { pageTitle } from '@/features/shell/routeTitles';
 
 export const metadata: Metadata = { title: pageTitle('/meetings') };
 
 export default function MeetingPage() {
-  return <StagePlaceholder stage={6} soon={{ grade: 'P2', title: 'Voice2ERP 회의록' }} />;
+  return (
+    <PageMain>
+      <MeetingScreen />
+    </PageMain>
+  );
 }
