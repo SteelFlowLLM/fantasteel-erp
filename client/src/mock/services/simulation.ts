@@ -6,6 +6,7 @@
 // - 갓 연주한 슬래브는 판정 대기라 열연 배정을 할 수 없다 → 열연은 적격 슬래브가 있을 때만 (없으면 skippedRolling에 이유).
 import { decCmp, decSum } from '@/lib/decimal';
 import { hotMetalTonFor } from '@/lib/mrp';
+import { toSeoulDateString } from '@/lib/seoulDate';
 import { createSeededRandom, drawSampleLossRate, lossQtyOf } from '@/lib/simulationLoss';
 import type { MockTx } from '@/mock/store';
 import { inputError, mustGet, productionSettingOf, productItemTypeOf, routingYieldOf, type PersonActor } from '@/mock/services/context';
@@ -59,12 +60,17 @@ export function simulatePlan(tx: MockTx, actor: PersonActor, input: SimulationIn
   const heatsToMake = Math.max(0, plan.heatCount - heats().length);
   const willRoll = productType === 'COIL' && plan.salesOrderItemId !== null;
 
-  // 시각: 모두 지금(tx 시각)에 끝나도록 거꾸로 배치한다
+  // 시각: 모두 지금(tx 시각)에 끝나도록 거꾸로 배치한다.
+  // 시작이 오늘(Asia/Seoul) 0시보다 앞서면 오늘 0시~지금 안에 들어가도록 시간을 같은 비율로 줄인다.
+  // 원료는 입고일까지 들어온 LOT만 투입하므로, 새벽에 실행할 때 제선이 어제 날짜로 넘어가면 오늘 입고한 원료를 쓰지 못하기 때문이다.
   const totalMs = heatsToMake * (DURATION.IRONMAKING + DURATION.STEELMAKING + DURATION.CONTINUOUS_CASTING) + uncastHeats().length * DURATION.CONTINUOUS_CASTING + (willRoll ? DURATION.HOT_ROLLING : 0);
-  let cursor = tx.now.getTime() - totalMs;
+  const nowMs = tx.now.getTime();
+  const todayStartMs = Date.parse(`${toSeoulDateString(tx.now)}T00:00:00+09:00`);
+  const scale = totalMs > 0 && nowMs - totalMs < todayStartMs ? Math.max(0, nowMs - todayStartMs) / totalMs : 1;
+  let cursor = nowMs - Math.floor(totalMs * scale);
   const nextSlot = (ms: number) => {
     const startedAt = new Date(cursor).toISOString();
-    cursor += ms;
+    cursor = Math.min(nowMs, cursor + Math.floor(ms * scale));
     return { startedAt, completedAt: new Date(cursor).toISOString() };
   };
 

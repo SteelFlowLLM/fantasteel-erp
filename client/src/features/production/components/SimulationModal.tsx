@@ -108,8 +108,8 @@ export function SimulationModal({ planId, planNo, onClose }: { planId: number; p
         <Input value={seedText} onChange={(e) => setSeedText(e.target.value)} placeholder="예: 20261001" inputMode="numeric" invalid={!!error} />
       </Field>
       <span className="text-cap text-ink-3">
-        고로 {SIMULATION_DEFAULT_CODES.blastFurnaceCode} · 전로 {SIMULATION_DEFAULT_CODES.converterCode} · 작업 시각은 지금 끝나도록 거꾸로 배치해요 (제선 4시간 · 제강 1시간 · 연주 2시간 · 열연 2시간). 원료가
-        모자라면 실행되지 않아요.
+        고로 {SIMULATION_DEFAULT_CODES.blastFurnaceCode} · 전로 {SIMULATION_DEFAULT_CODES.converterCode} · 작업 시각은 지금 끝나도록 거꾸로 배치해요 (제선 4시간 · 제강 1시간 · 연주 2시간 · 열연 2시간). 오늘 0시보다
+        앞서게 되면 오늘 안에 들어가도록 시간을 줄여요. 원료가 모자라면 실행되지 않아요.
       </span>
     </Modal>
   );
