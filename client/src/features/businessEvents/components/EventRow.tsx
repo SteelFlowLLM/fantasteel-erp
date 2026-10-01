@@ -34,9 +34,9 @@ export function ActorChip({ event }: { event: BusinessEventView }) {
   );
 }
 
+/** 대상: 번호가 없으면(예약·초안) 이벤트가 가진 값으로 만든 이름(targetText)을 보인다 */
 function TargetLink({ event }: { event: BusinessEventView }) {
-  if (!event.targetNo) return <span className="text-ink-3">{event.targetTypeLabel}</span>;
-  return event.targetHref ? <LinkId href={event.targetHref}>{event.targetNo}</LinkId> : <MonoId>{event.targetNo}</MonoId>;
+  return event.targetHref ? <LinkId href={event.targetHref}>{event.targetText}</LinkId> : <MonoId>{event.targetText}</MonoId>;
 }
 
 function DiffTable({ event }: { event: BusinessEventView }) {
@@ -116,14 +116,15 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
           </time>
           <ActorChip event={event} />
           <b className="flex-none font-semibold">{event.businessEventTypeLabel}</b>
-          <span className="flex min-w-0 items-center gap-1.5 truncate">
-            <span className="text-xs text-ink-3">{event.targetTypeLabel}</span>
+          <span className="flex max-w-[45%] min-w-0 flex-none items-center gap-1.5 truncate">
+            {/* 유형과 대상 이름이 같으면(예: 예약 · 예약) 대상 이름은 한 번만 */}
+            {event.targetTypeLabel !== event.businessEventTypeLabel ? <span className="text-xs text-ink-3">{event.targetTypeLabel}</span> : null}
             <TargetLink event={event} />
           </span>
-          {event.reasonCode ? (
-            <Tag className="flex-none font-mono" title="사유 코드">
-              {event.reasonCode}
-            </Tag>
+          {event.reasonText ? (
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-2" title={event.reasonText}>
+              {event.reasonText}
+            </span>
           ) : null}
           <span className="ml-auto flex-none font-mono text-cap text-ink-3">{event.eventNo}</span>
           <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" className="flex-none text-ink-3" />
@@ -174,8 +175,17 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
                 {event.reasonCode || event.reasonText || event.messageId || event.actionDraftId ? (
                   <Kv
                     items={[
-                      ...(event.reasonCode ? ([['사유 코드', <MonoId key="code">{event.reasonCode}</MonoId>]] as const) : []),
                       ...(event.reasonText ? ([['사유', <span key="reason" className="font-normal">{event.reasonText}</span>]] as const) : []),
+                      ...(event.reasonCode
+                        ? ([
+                            [
+                              '사유 코드',
+                              <Tag key="code" size="sm" className="font-mono font-normal">
+                                {event.reasonCode}
+                              </Tag>,
+                            ],
+                          ] as const)
+                        : []),
                       ...(event.messageId
                         ? ([
                             [
@@ -193,7 +203,7 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
                           ] as const)
                         : []),
                       ...(event.actionDraftId
-                        ? ([['Action Draft', <LinkId key="draft" href={`/action-drafts/${event.actionDraftId}`}>{`초안 ${event.actionDraftId}`}</LinkId>]] as const)
+                        ? ([['Action Draft', <LinkId key="draft" href={`/action-drafts/${event.actionDraftId}`}>{`초안 #${event.actionDraftId}`}</LinkId>]] as const)
                         : []),
                     ]}
                   />

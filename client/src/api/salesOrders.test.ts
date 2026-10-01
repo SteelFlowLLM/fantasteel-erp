@@ -219,6 +219,40 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02, 9.3 SO-003·SO-004)', () => {
     );
     expect(invariants()).toEqual([]);
   });
+
+  it('취소 창의 구매 진행 영향(BP-PRD-01): 연결 해제될 계획의 구매요청·발주를 보여 주고, 취소해도 바꾸지 않는다. 수주 조회 권한이 없으면 COM-002', async () => {
+    const soId = salesOrderIdOf('SO-2609-003');
+    actAs(SEED_EMPLOYEE_NO.purchase);
+    expect(await codeOf(salesOrderApi.cancelPurchaseImpact(soId))).toBe('COM-002');
+    actAs(SEED_EMPLOYEE_NO.salesHead);
+    expect(await salesOrderApi.cancelPurchaseImpact(soId)).toMatchObject([
+      {
+        purchaseRequisitionNo: 'PR-2609-0002',
+        purchaseRequisitionStatus: 'ORDERED',
+        productionPlanNo: 'PP-2609-0004',
+        planEffect: 'UNLINK',
+        purchaseOrderNo: 'PO-2609-0005',
+        purchaseOrderStatus: 'PARTIALLY_RECEIVED',
+      },
+    ]);
+    const purchaseBefore = read((t) => ({ pr: t.purchaseRequisition.map((p) => ({ ...p })), po: t.purchaseOrder.map((p) => ({ ...p })) }));
+    await salesOrderApi.cancel({ salesOrderId: soId, cancelReason: '고객사 프로젝트 취소' });
+    expect(read((t) => ({ pr: t.purchaseRequisition, po: t.purchaseOrder }))).toEqual(purchaseBefore);
+    expect(await salesOrderApi.cancelPurchaseImpact(soId)).toEqual([]);
+  });
+
+  it('취소된 수주 상세: 취소로 실제 일어난 일(예약 해제 매수·취소 계획·연결 해제 계획)을 취소 작업 로그에서 읽는다', async () => {
+    const created = await create141();
+    expect((await salesOrderApi.detail(created.salesOrderId)).cancellation).toBeNull();
+    await salesOrderApi.cancel({ salesOrderId: created.salesOrderId, cancelReason: '고객 요청' });
+    const detail = await salesOrderApi.detail(created.salesOrderId);
+    expect(detail.cancellation).toEqual({ releasedReserved: [{ lineNo: 1, itemType: 'SLAB', qty: 6 }], cancelledPlanNos: created.productionPlanNos, unlinkedPlanNos: [] });
+    // 이력의 예약 대상은 번호 대신 수주 번호·품목·매수, 사유는 사람이 읽는 문구
+    const timeline = await salesOrderApi.timeline(created.salesOrderId);
+    expect(timeline.filter((e) => e.businessEventType === 'RESERVATION_RELEASED').map((e) => [e.targetText, e.reasonCode, e.reasonText])).toEqual([
+      [`${created.salesOrderNo} 품목 1 · 6매`, 'ORDER_CANCELLED', `수주 ${created.salesOrderNo} 취소로 예약 6매 해제`],
+    ]);
+  });
 });
 
 describe('재생산 계획 (REQ-PRD-006, 14.1-6)', () => {

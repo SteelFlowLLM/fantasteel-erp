@@ -3,6 +3,7 @@ import { ERROR_MESSAGE } from '@/codes';
 import { progressOf } from '@/lib/inventoryMath';
 import {
   activeFilterCount,
+  cancellationEffectsText,
   draftLineErrors,
   EMPTY_FILTER,
   filterSalesOrders,
@@ -86,5 +87,26 @@ describe('목록 거르기', () => {
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '나래' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-004']);
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '2609-003' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-003']);
     expect(activeFilterCount({ ...EMPTY_FILTER, riskOnly: true, customerId: 2, keyword: 'x' })).toBe(2);
+  });
+});
+
+describe('취소된 수주 안내 띠 (BP-SO-02: 실제로 일어난 일만)', () => {
+  it('예약 해제 매수(슬래브 매·코일 개)·취소한 계획·연결을 푼 진행중 계획을 있는 것만 말한다', () => {
+    expect(cancellationEffectsText({ releasedReserved: [{ itemType: 'SLAB', qty: 6 }], cancelledPlanNos: ['PP-2610-0001'], unlinkedPlanNos: [] })).toBe(
+      '예약 6매를 해제했어요 · 시작 전 생산계획 1건(PP-2610-0001)을 취소했어요',
+    );
+    expect(
+      cancellationEffectsText({
+        releasedReserved: [
+          { itemType: 'COIL', qty: 3 },
+          { itemType: 'SLAB', qty: 0 },
+        ],
+        cancelledPlanNos: [],
+        unlinkedPlanNos: ['PP-2609-0003', 'PP-2609-0004'],
+      }),
+    ).toBe('예약 3개를 해제했어요 · 진행중이던 생산계획 2건(PP-2609-0003, PP-2609-0004)은 수주 연결을 풀어 완료 후 여재가 돼요');
+    expect(cancellationEffectsText({ releasedReserved: [{ itemType: 'SLAB', qty: 0 }], cancelledPlanNos: [], unlinkedPlanNos: [] })).toBe(
+      '해제할 예약이나 취소·연결 해제할 생산계획은 없었어요',
+    );
   });
 });

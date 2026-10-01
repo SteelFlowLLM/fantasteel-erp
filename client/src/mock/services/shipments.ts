@@ -295,7 +295,7 @@ export function cancelShipmentRequest(tx: MockTx, actor: PersonActor, input: { s
   if (request.shipmentRequestStatus === 'CANCELLED') inputError('shipmentRequestId', '이미 취소된 출하요청이에요');
   const lineIds = new Set(tx.tables.shipmentRequestItem.filter((l) => l.shipmentRequestId === request.id).map((l) => l.id));
   for (const allocation of tx.tables.allocation.filter((a) => a.allocationStatus === 'CONFIRMED' && a.shipmentRequestItemId !== null && lineIds.has(a.shipmentRequestItemId))) {
-    releaseAllocationRow(tx, actor, allocation, { reasonCode: null, reasonText: `출하요청 ${request.shipmentRequestNo} 취소` });
+    releaseAllocationRow(tx, actor, allocation, { reasonCode: null, reasonText: `출하요청 ${request.shipmentRequestNo} 취소로 출하 배정 해제` });
   }
   return updateRow(tx, 'shipmentRequest', request.id, { shipmentRequestStatus: 'CANCELLED', cancelledAt: tx.nowIso }) ?? request;
 }

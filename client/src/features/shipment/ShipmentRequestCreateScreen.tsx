@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { InputError } from '@/api/client';
 import type { ShippableCustomer } from '@/api/shipmentRequests';
-import { PERMISSION, PRODUCT_QTY_UNIT } from '@/codes';
+import { PERMISSION, PRODUCT_QTY_UNIT, RESERVATION_STATUS_LABEL } from '@/codes';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -184,7 +184,7 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
             }
           </QueryBoundary>
         )}
-        <p className="px-4 py-3 text-cap text-ink-3">출하 가능 매수 = 예약 매수(ACTIVE) − 다른 진행 중 출하요청 매수예요.</p>
+        <p className="px-4 py-3 text-cap text-ink-3">출하 가능 매수 = {RESERVATION_STATUS_LABEL.ACTIVE} 매수 − 다른 진행 중 출하요청 매수예요.</p>
       </MasterPane>
       <PageMain>
         <PageHead

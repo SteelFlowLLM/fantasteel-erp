@@ -218,7 +218,7 @@
 | 업무 번호·LOT 번호 자리수를 넘을 때 | 자리를 늘려 그대로 붙인다 (예: SO-2610-1000) | 업무 프로세스 9.2에서 TBD |
 | 슬래브 LOT 순번(SS) 카운터 | 히트 번호마다 1부터 | 9.2 "히트번호-SS" 해석 |
 | 밀시트 순번 N | 출하요청마다 1부터 | 9.1 "수주별 순번" 해석 |
-| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v4`(`MOCK_DB_VERSION` = 4, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
+| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v5`(`MOCK_DB_VERSION` = 5, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
 | 계정 선택 저장 위치 | sessionStorage `fantasteel.session.employee-id` (탭마다 따로) | PLAN 2장 |
 | 가짜 API가 요청 사원을 아는 방법 | 이 탭의 계정 선택(sessionStorage 위 키)을 읽는다. 사용 안 함 사원은 아무것도 할 수 없다(COM-002) | 실제 서버의 JWT 확인 대신 (BP-AUTH-01 "각 API에서 권한 재확인") — 구현 선택 |
 | 메시지 첨부 1개의 최대 크기 | 512KB. 내용은 DB와 따로 localStorage `fantasteel.mock-files.v1`(파일 경로 → data URL)에 두고, 시드로 초기화하면 지운다 | REQ-MSG-003 "형식·용량 제한은 구현 단계". 브라우저 저장 공간(약 5MB)이 작아서 고른 값 (가정) |
@@ -234,7 +234,7 @@
 | 3 | `collab` | `client/src/mock/seeds/collab.ts` | 업무 6건과 업무 지정 알림, 1:1 채팅방 1개·그룹 채팅방 2개와 메시지(첨부 1개, 사원 멘션 2개, 부서 멘션 1개). 업무방은 core가 만든다 | REQ-NTF·MSG 계열 (내용은 시연용 가정값, 6-2장) |
 | 4 | `dashboard` | `client/src/mock/seeds/dashboard.ts` | 8월 말 수주 SO-2608-001~004(모두 출하완료, 규격·매수·난수 시드 6001~6004·출고일은 `SEED_DASHBOARD`), 8-31 원료 입고, 9월 실적·검사·출고 | BP-DSH-01 "추이 집계에는 시계열 시드", BP-SEED-01 |
 
-- 가짜 DB 버전 `MOCK_DB_VERSION` = 4 (`client/src/mock/store.ts`). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
+- 가짜 DB 버전 `MOCK_DB_VERSION` = 5 (`client/src/mock/store.ts`). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
 - 대시보드 시드는 core 뒤에 돌아서 그 출하요청 번호가 DR-2609-0003~0007이다(번호 순서와 날짜 순서가 다르다 — 시연용 가정).
 - 대시보드 시드의 원료 입고분은 자기 히트 소요만큼만 사서 FIFO로 먼저 다 쓰이므로, core 시드의 원료 잔량·입고예정과 14.1의 MRP 결과(실리코망가니즈 순소요 1.500t 등)가 바뀌지 않는다.
 - 시드가 아직 넣지 않은 것: 없다. 1단계에서 "다음 단계"로 미뤘던 수주·재고·LOT·생산·검사·구매·출하·밀시트·업무방·알림·메신저는 모두 위 시드로 들어갔다. 준비 중(P2·EX) 화면의 예시 내용(`client/src/features/agent/agentExample.ts`, `client/src/features/meetings/meetingExample.ts`, `client/src/features/pastCases/pastCaseExample.ts`)은 DB 시드가 아니라 코드의 고정 예시다.
@@ -307,6 +307,7 @@
 | **히트 LOT 잔량** — null (initial_ton = 히트 톤). 연주 한도는 initial_ton으로 계산 | ERD "원료·용선 잔량" | `client/src/mock/services/productionResults.ts` |
 | **히트→슬래브·슬래브→코일 input_ton** — 슬래브 1매 이론중량 | 문서에 없음 — 추적 화면 표시용 | `client/src/mock/services/productionResults.ts` |
 | **출하 작업 로그** — 출하요청 등록·출고 확정은 수주마다 한 건 | 수주 타임라인(REQ-LOG-003) | `client/src/mock/services/shipments.ts`, `client/src/mock/services/goodsIssues.ts` |
+| **작업 로그 사유 문구** — 사유 코드를 남기는 서비스는 실제 매수·LOT·수주 번호로 짧은 사유를 함께 남긴다. 단위는 슬래브 매·코일 개. 예: "재고 우선 예약 6매 (수주 10매 중)", "품목 1 부족 4매로 생산계획 생성 (히트 1개)", "FIFO 추천 4 LOT (생산완료일 → LOT 번호 순) · 추천대로 확정", "수주 충족 뒤 남은 합격 슬래브 6매를 여재로 전환", "수주 SO-… 취소로 예약 6매 해제". 사람이 입력한 사유(수주 취소·배정 변경·반려·불합격 처리)는 그대로 | 04 9.3 "사람이 읽을 사유와 함께 기록한다" — 문구는 문서에 없음 | `client/src/mock/services/*.ts` |
 | **원료 투입 LOT 범위** — 실적 완료일까지 입고(생산)된 LOT만 | 문서에 없음 — 시점이 뒤인 LOT을 쓰지 않게 | `client/src/mock/services/productionResults.ts` |
 | **초안 중복 생성** — 같은 메시지·유형에 반려되지 않은 초안이 있으면 그 초안을 돌려준다 | BP-ACT-01 중복 방지 | `client/src/mock/services/actionDrafts.ts` |
 | **초안 원료 필드** — `payload = {itemId, requiredTon, desiredReceiptDate, requestReason, sourceText}` | REQ-ACT-001 | `client/src/mock/services/actionDrafts.ts` |
@@ -428,6 +429,9 @@
 | **목록 진행 막대** — 검사합격(= 예약 + 출하) ÷ 수주 매수 | core 충족 지표 `passed`, 4.5 분모 명시 | `client/src/features/sales/components/SalesOrderParts.tsx`, `client/src/lib/salesOrderStatus.ts` |
 | **생산 연결의 '연결 해제' 계획** — 지금 연결된 계획 + 작업 로그에 이 수주로 남은 생산계획 이벤트의 계획 | 문서에 없음 — 취소 뒤에도 어떤 계획이 여재로 넘어갔는지 보이게 | `client/src/features/sales/components/ProductionLinkTab.tsx` |
 | **미리보기 납기** — 미리보기는 납기를 쓰지 않으므로 서비스 입력 확인용으로 오늘 날짜를 넣는다(저장 안 함) | 문서에 없음 — core `previewSalesOrder`가 납기 형식을 확인함 | `client/src/features/sales/SalesOrderCreateScreen.tsx`, `client/src/features/sales/lib/salesOrderForm.ts` |
+| **취소된 수주의 단추** — 출하요청 만들기는 숨긴다. 업무방이 없으면 '업무방 열기'도 숨긴다(있는 방은 갈 수 있다). 취소된 생산계획 카드의 [작업 실적]은 숨긴다 | 문서에 없음 — 취소된 수주에 더는 할 수 없는 일을 보이지 않게(2026-10-02 브라우저 점검) | `client/src/features/sales/components/SalesOrderActions.tsx`, `client/src/features/sales/components/FulfillmentTab.tsx`, `client/src/features/sales/components/ProductionLinkTab.tsx` |
+| **취소 결과 기록** — 수주 취소 작업 로그(SALES_ORDER_CANCELLED)의 after_data에 품목별 `releasedReservedQty`, `cancelledPlanNos`(시작 전 계획 취소), `unlinkedPlanNos`(진행중 계획 연결 해제)를 남기고, 취소된 수주 띠는 이 값으로 실제 일어난 일만 말한다 | BP-SO-02 취소 정상 흐름. after_data 모양은 문서에 없음 | `client/src/mock/services/salesOrders.ts`(`cancelSalesOrder`, `salesOrderDetail.cancellation`) |
+| **취소 창의 구매 진행 영향** — 취소·연결 해제될 계획에 `purchase_requisition_item.production_plan_id`로 연결된 구매요청(상태)과 발주(번호·상태)를 보여 주기만 한다. 수주 취소는 구매요청·발주를 바꾸지 않는다 | 04 BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다" — 처리 방법은 문서에 없어 표시만 | `client/src/mock/services/salesOrders.ts`(`cancelPurchaseImpactOf`), `client/src/features/sales/components/CancelSalesOrderModal.tsx` |
 | **다른 영역 주소** — `/messenger?room=`, `/shipment-requests/new?salesOrderId=`, `/shipment-requests/<id>`, `/mill-sheets?id=`, `/production/plans?plan=`, `/production/results?plan=`, `/lots/trace?lot=`, `/business-events?salesOrderId=` | 문서에 없음 — 옛 화면 주소를 따름. 병합 때 각 영역 주소와 맞춰야 함 | `client/src/features/sales/SalesOrderDetailScreen.tsx`, `client/src/features/sales/components/SalesOrderActions.tsx` |
 
 ### 6-13. 출하·밀시트(shipment)
@@ -460,6 +464,7 @@
 | **불합격 이벤트 판단(빨강)** — `INSPECTION_REGISTERED`의 after_data에 `inspectionResult: 'FAIL'`, 또는 `DISPOSITION_SET` | 문서에 없음 — 자동 판정 결과를 after_data에 남긴다는 전제(아래 7장) | `client/src/features/businessEvents/lib/eventTone.ts` |
 | **대상 한글명** — 용어 사전 엔티티 한글명(예: production_result = 작업 실적, quality_inspection = 품질검사, action_draft = Action Draft). 없는 테이블은 DB명 | 용어 사전 | `client/src/features/businessEvents/lib/eventTargets.ts` |
 | **대상 필터 목록** — sales_order, sales_order_item, production_plan, production_result, quality_inspection, lot, reservation, allocation, purchase_requisition, purchase_order, goods_receipt, shipment_request, shipment_request_item, mill_sheet, action_draft | 29개 이벤트의 대상 테이블 (shipment_request_item = 출하 배정 추천, 검토 반영 때 추가) | `client/src/features/businessEvents/components/SubjectPickers.tsx` |
-| **사유 코드 표시** — 코드 그대로(STOCK_FIRST 등) | 06에 표시명이 없다(codes/businessEvent.ts 주석) | `client/src/codes/businessEvent.ts` |
+| **사유 표시** — 한 줄에는 사람이 읽을 사유(reason_text)를 보이고, 사유 코드는 펼친 기록에 작은 코드 꼬리표로만 둔다(코드 그대로, STOCK_FIRST 등) | 04 9.3 "사유 코드는 … 사람이 읽을 사유와 함께 기록한다". 코드 표시명은 06에 없다(codes/businessEvent.ts 주석) | `client/src/features/businessEvents/components/EventRow.tsx`, `client/src/features/sales/components/SalesOrderParts.tsx` |
+| **번호 없는 대상의 화면 이름** — 예약 = 수주 번호 + 품목 번호 + 매수(after_data, 예 `SO-2610-001 품목 1 · 6매`), Action Draft = `초안 #id`, 그 밖 = `#id`. 유형과 대상 이름이 같으면(예약 · 예약) 대상 이름은 한 번만 | 문서에 없음 — 예약·초안은 업무 번호가 없다(9.1). 이벤트가 가진 값만 쓴다 | `client/src/mock/services/timelines.ts`(`eventTargetTextOf`), `client/src/api/businessEvents.ts` |
 | **작업 로그 한 번에 불러오는 수** — 50건, '더 보기'로 50건씩 | 문서에 없음 — 옛 화면과 같음 | `client/src/api/businessEvents.ts` |
 | **LOT 목록 수** — 최근 40개, 검색 20개 | 문서에 없음 — 옛 화면과 같음 | `client/src/features/lotTrace/components/TraceSearchPane.tsx`, `client/src/api/lotTrace.ts` |

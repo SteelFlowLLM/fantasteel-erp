@@ -233,7 +233,7 @@ describe('연결이 끊긴 진행 계획의 연주 → 여재 (합금철이 있�
     k.inspect('2026-10-01T13:30:00+09:00', heat.id);
     expect(slabLots.every((s) => t.lot.find((l) => l.id === s.id)?.surplusAt !== null)).toBe(true);
     expect(surplusEvents()).toHaveLength(beforeInspection + 1);
-    expect(surplusEvents().at(-1)).toMatchObject({ reasonCode: 'SURPLUS_CONVERSION', reasonText: '수주 연결이 해제된 계획의 합격 슬래브를 여재로 전환' });
+    expect(surplusEvents().at(-1)).toMatchObject({ reasonCode: 'SURPLUS_CONVERSION', reasonText: `수주 연결이 해제된 계획의 합격 슬래브 ${slabLots.length}매를 여재로 전환` });
     // 히트 생산량을 넘는 연주는 막는다
     k.expectClean();
   });

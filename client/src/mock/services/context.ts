@@ -1,6 +1,6 @@
 // 가짜 서버 서비스의 공통 도우미. 순환 참조를 피하려고 @/api/* 대신 @/api/errors만 쓴다.
 // - 쓰기 서비스: fn(tx, actor, input). 읽기: fn(tables, input). 역할 권한은 확인하지 않는다(각 화면 api가 requireActor로 먼저 확인).
-import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType } from '@/codes';
+import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, PRODUCT_QTY_UNIT, type ProcessType, type ProductItemType } from '@/codes';
 import { ApiError, FieldErrors, InputError } from '@/api/errors';
 import { decCmp, isDecimalText } from '@/lib/decimal';
 import { pickCurrentStandard } from '@/lib/inspectionJudgment';
@@ -151,6 +151,11 @@ export function productionSettingOf(tables: Tables): { heatCapacityTon: string; 
 export function productItemTypeOf(item: ItemRow): ProductItemType {
   if (item.itemType === 'RAW_MATERIAL') throw new ApiError('SO-001', item.itemCode);
   return item.itemType;
+}
+
+/** 제품 매수의 화면 단위: 슬래브 매, 코일 개 (작업 로그 사유 문구용). 규격을 못 찾으면 매 */
+export function qtyUnitOfItem(tables: Tables, itemId: number | null | undefined): string {
+  return PRODUCT_QTY_UNIT[findById(tables, 'item', itemId)?.itemType === 'COIL' ? 'COIL' : 'SLAB'];
 }
 
 /** 제품 규격 1매(1개) 이론중량 */

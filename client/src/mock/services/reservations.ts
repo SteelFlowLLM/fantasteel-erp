@@ -1,11 +1,11 @@
 // 예약 (REQ-INV-002·004·005·009, 업무 프로세스 4.2, BP-INV-02).
 // 불변조건: inventory.reserved_qty = ACTIVE 예약 합계 (refreshInventory로 같은 트랜잭션에서 맞춤), 예약 가용 ≥ 0.
-import type { EventReasonCode } from '@/codes';
+import { ALLOCATION_PURPOSE_LABEL, RESERVATION_STATUS_LABEL, type EventReasonCode } from '@/codes';
 import { recordBusinessEvent, type BusinessEventActor } from '@/mock/businessEvents';
-import type { ReservationRow, SalesOrderItemRow } from '@/mock/schema';
+import type { AllocationRow, MockTables, ReservationRow, SalesOrderItemRow } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
-import { activeReservedQtyOfItem, confirmedAllocationOf, reservationPoolOf } from '@/mock/services/inventoryPool';
-import { ApiError, mustGet, refreshInventory, SYSTEM_ACTOR } from '@/mock/services/context';
+import { activeReservedQtyOfItem, confirmedAllocationOf, lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
+import { ApiError, mustGet, qtyUnitOfItem, refreshInventory, SYSTEM_ACTOR } from '@/mock/services/context';
 import { releaseAllocationRow } from '@/mock/services/allocations';
 
 const reservationSnapshot = (r: ReservationRow) => ({ id: r.id, salesOrderItemId: r.salesOrderItemId, itemId: r.itemId, reservedQty: r.reservedQty, reservationStatus: r.reservationStatus });
@@ -52,12 +52,12 @@ export function unsecuredQtyOf(tx: MockTx | { tables: MockTx['tables'] }, soItem
 /**
  * 수주 품목의 미확보 매수 안에서 예약 가용만큼 예약한다 (REQ-INV-004 자동 예약, 14.1-5 여재 먼저).
  * 예약 가용은 규격 풀(같은 히트의 합격 여재 포함) 전체라 여재가 있으면 그것으로 먼저 채운다.
- * 예약한 매수(0 가능)를 돌려준다.
+ * 예약한 매수(0 가능)를 돌려준다. 사유 문구는 예약한 매수(단위 포함, 예: '3매')로 만든다.
  */
 export function reserveUpToShortage(
   tx: MockTx,
   actor: BusinessEventActor,
-  input: { salesOrderItemId: number; reasonText?: string | null; reasonCode?: EventReasonCode | null; lotIds?: readonly number[] },
+  input: { salesOrderItemId: number; reasonTextOf?: (qtyText: string) => string; reasonCode?: EventReasonCode | null; lotIds?: readonly number[] },
 ): { reservedQty: number; reservation: ReservationRow | null } {
   const soItem = mustGet(tx.tables, 'salesOrderItem', input.salesOrderItemId, '수주 품목');
   if (soItem.salesOrderItemStatus === 'CANCELLED' || soItem.salesOrderItemStatus === 'SHIPPED') return { reservedQty: 0, reservation: null };
@@ -67,14 +67,14 @@ export function reserveUpToShortage(
     salesOrderItemId: soItem.id,
     qty,
     reasonCode: input.reasonCode ?? null,
-    reasonText: input.reasonText ?? null,
+    reasonText: input.reasonTextOf?.(`${qty}${qtyUnitOfItem(tx.tables, soItem.itemId)}`) ?? null,
     lotIds: input.lotIds,
   });
   return { reservedQty: qty, reservation };
 }
 
-/** 예약 행 하나를 cutQty만큼 RELEASED로 나눈다 (전부면 행 자체를 RELEASED로) */
-function releasePart(tx: MockTx, actor: BusinessEventActor, row: ReservationRow, cutQty: number, reasonCode: EventReasonCode | null, reasonText: string | null, lotIds?: readonly number[]): void {
+/** 예약 행 하나를 cutQty만큼 RELEASED로 나눈다 (전부면 행 자체를 RELEASED로). 사유 = `${cause} 예약 n매 해제` */
+function releasePart(tx: MockTx, actor: BusinessEventActor, row: ReservationRow, cutQty: number, reasonCode: EventReasonCode | null, cause: string, lotIds?: readonly number[]): void {
   const before = reservationSnapshot(row);
   const salesOrderId = tx.tables.salesOrderItem.find((i) => i.id === row.salesOrderItemId)?.salesOrderId ?? null;
   let released: ReservationRow;
@@ -93,18 +93,21 @@ function releasePart(tx: MockTx, actor: BusinessEventActor, row: ReservationRow,
     beforeData: before,
     afterData: { ...reservationSnapshot(released), remainingActiveQty: cutQty >= row.reservedQty ? 0 : row.reservedQty - cutQty },
     reasonCode,
-    reasonText,
+    reasonText: `${cause} 예약 ${Math.min(cutQty, row.reservedQty)}${qtyUnitOfItem(tx.tables, row.itemId)} 해제`,
     lotIds,
   });
 }
 
-/** 수주 품목의 ACTIVE 예약을 모두 RELEASED로 (수주 취소, REQ-INV-005) */
-export function releaseReservationsOfItem(tx: MockTx, actor: BusinessEventActor, salesOrderItemId: number, reasonCode: EventReasonCode | null, reasonText: string | null): number {
+/**
+ * 수주 품목의 ACTIVE 예약을 모두 RELEASED로 (수주 취소, REQ-INV-005).
+ * cause는 사유 문구 앞부분(예: '수주 SO-2610-001 취소로')이고 뒤에 '예약 n매 해제'를 붙인다.
+ */
+export function releaseReservationsOfItem(tx: MockTx, actor: BusinessEventActor, salesOrderItemId: number, reasonCode: EventReasonCode | null, cause: string): number {
   const active = tx.tables.reservation.filter((r) => r.salesOrderItemId === salesOrderItemId && r.reservationStatus === 'ACTIVE');
   let total = 0;
   for (const row of active) {
     total += row.reservedQty;
-    releasePart(tx, actor, row, row.reservedQty, reasonCode, reasonText);
+    releasePart(tx, actor, row, row.reservedQty, reasonCode, cause);
   }
   const itemId = active[0]?.itemId;
   if (itemId !== undefined) refreshInventory(tx, itemId);
@@ -133,6 +136,8 @@ export function convertReservations(tx: MockTx, actor: BusinessEventActor, sales
       convertedRow = insertRow(tx, 'reservation', { salesOrderItemId, itemId: row.itemId, reservedQty: take, reservationStatus: 'CONVERTED' });
     }
     converted.push(convertedRow);
+    const unit = qtyUnitOfItem(tx.tables, row.itemId);
+    const remainingQty = row.reservedQty - take;
     recordBusinessEvent(tx, {
       businessEventType: 'RESERVATION_CONVERTED',
       actor,
@@ -140,8 +145,8 @@ export function convertReservations(tx: MockTx, actor: BusinessEventActor, sales
       targetId: convertedRow.id,
       salesOrderId: soItem.salesOrderId,
       beforeData: before,
-      afterData: { ...reservationSnapshot(convertedRow), remainingActiveQty: row.reservedQty - take },
-      reasonText: `출고 확정으로 ${take}매 전환`,
+      afterData: { ...reservationSnapshot(convertedRow), remainingActiveQty: remainingQty },
+      reasonText: `출고 확정으로 예약 ${take}${unit}를 ${RESERVATION_STATUS_LABEL.CONVERTED}${remainingQty > 0 ? ` · ${RESERVATION_STATUS_LABEL.ACTIVE} ${remainingQty}${unit} 남음` : ''}`,
       lotIds,
     });
     left -= take;
@@ -157,7 +162,10 @@ export function convertReservations(tx: MockTx, actor: BusinessEventActor, sales
  * 출하 배정이 줄어든 예약보다 많으면 최근 배정부터 RELEASED. 사유 QUALITY_FAILURE, 주체 SYSTEM.
  */
 export function rebalancePool(tx: MockTx, itemId: number, context: { affectedSalesOrderItemIds: readonly number[]; lotIds: readonly number[] }): void {
-  const reasonText = '품질 불합격으로 예약 가용이 줄어 조정';
+  // 사유 문구: "품질 불합격(HT-…-03)으로 예약 가용이 줄어 예약 1매 해제" / "… 열연 투입 배정 해제"
+  const failedLotNos = context.lotIds.map((id) => tx.tables.lot.find((l) => l.id === id)?.lotNo).filter((no): no is string => Boolean(no));
+  const cause = `품질 불합격(${failedLotNos.length === 1 ? failedLotNos[0] : `LOT ${failedLotNos.length}개`})으로 예약 가용이 줄어`;
+  const allocationReason = (allocation: AllocationRow) => `${cause} ${ALLOCATION_PURPOSE_LABEL[allocation.allocationPurpose]} 배정 해제`;
   const deficit = () => -reservationPoolOf(tx.tables, itemId).availableQty;
   const affected = new Set(context.affectedSalesOrderItemIds);
   const activeRows = () => tx.tables.reservation.filter((r) => r.itemId === itemId && r.reservationStatus === 'ACTIVE').sort((a, b) => b.id - a.id);
@@ -166,7 +174,7 @@ export function rebalancePool(tx: MockTx, itemId: number, context: { affectedSal
     for (const row of rows) {
       const need = deficit();
       if (need <= 0) return;
-      releasePart(tx, SYSTEM_ACTOR, row, Math.min(need, row.reservedQty), 'QUALITY_FAILURE', reasonText, context.lotIds);
+      releasePart(tx, SYSTEM_ACTOR, row, Math.min(need, row.reservedQty), 'QUALITY_FAILURE', cause, context.lotIds);
     }
   };
 
@@ -177,7 +185,7 @@ export function rebalancePool(tx: MockTx, itemId: number, context: { affectedSal
       .sort((a, b) => b.id - a.id);
     for (const allocation of hotRolling) {
       if (deficit() <= 0) break;
-      releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, { reasonCode: 'QUALITY_FAILURE', reasonText });
+      releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, { reasonCode: 'QUALITY_FAILURE', reasonText: allocationReason(allocation) });
     }
   }
   if (deficit() > 0) cutFrom(activeRows());
@@ -191,13 +199,27 @@ export function rebalancePool(tx: MockTx, itemId: number, context: { affectedSal
       .filter((a) => a.allocationStatus === 'CONFIRMED' && a.allocationPurpose === 'SHIPMENT' && a.salesOrderItemId === soItemId)
       .sort((a, b) => b.id - a.id);
     for (const allocation of allocations.slice(0, Math.max(0, allocations.length - reserved))) {
-      releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, { reasonCode: 'QUALITY_FAILURE', reasonText });
+      releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, { reasonCode: 'QUALITY_FAILURE', reasonText: allocationReason(allocation) });
     }
   }
+}
+
+/** 적격에서 빠진 까닭 (배정 해제 사유 문구 앞부분) */
+function lostEligibilityCause(tables: Readonly<MockTables>, lotId: number): string {
+  const lot = tables.lot.find((l) => l.id === lotId);
+  const eligibility = lot ? lotEligibility(tables, lot) : null;
+  if (eligibility === 'FAILED') return '제품 불합격으로';
+  if (eligibility === 'HEAT_FAILED') return '상위 히트 불합격으로';
+  if (eligibility === 'PENDING') return '판정 대기로 바뀌어';
+  return '품질 적격에서 빠져';
 }
 
 /** 이 LOT의 CONFIRMED 배정이 있으면 품질 불합격으로 해제한다 */
 export function releaseAllocationOfFailedLot(tx: MockTx, lotId: number): void {
   const allocation = confirmedAllocationOf(tx.tables, lotId);
-  if (allocation) releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, { reasonCode: 'QUALITY_FAILURE', reasonText: '품질 불합격 LOT 배정 해제' });
+  if (!allocation) return;
+  releaseAllocationRow(tx, SYSTEM_ACTOR, allocation, {
+    reasonCode: 'QUALITY_FAILURE',
+    reasonText: `${lostEligibilityCause(tx.tables, lotId)} ${ALLOCATION_PURPOSE_LABEL[allocation.allocationPurpose]} 배정 해제`,
+  });
 }

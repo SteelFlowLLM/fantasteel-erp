@@ -9,6 +9,7 @@ import { ApiError, mockQuery } from '@/api/client';
 import { targetHref, targetTableLabel } from '@/features/businessEvents/lib/eventTargets';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import type { BusinessEventRow, DbTableName, IsoDateTime, JsonValue, MockTables } from '@/mock/schema';
+import { eventTargetTextOf } from '@/mock/services';
 import { findRow } from '@/mock/store';
 
 export interface BusinessEventFilter {
@@ -52,6 +53,8 @@ export interface BusinessEventView {
   targetTypeLabel: string;
   targetId: number;
   targetNo: string | null;
+  /** 화면에 보일 대상: 대상 번호, 없으면 이벤트가 가진 값으로 만든 이름 (예약 "SO-… 품목 1 · 6매", 초안 "초안 #3") */
+  targetText: string;
   targetHref: string | null;
   salesOrderId: number | null;
   salesOrderNo: string | null;
@@ -136,6 +139,7 @@ function toView(tables: Readonly<MockTables>, row: BusinessEventRow, lotsByEvent
     targetTypeLabel: targetTableLabel(row.targetType),
     targetId: row.targetId,
     targetNo: row.targetNo,
+    targetText: eventTargetTextOf(tables, row),
     targetHref: targetHref({ targetType: row.targetType, targetId: row.targetId, targetNo: row.targetNo, salesOrderId: row.salesOrderId, lotId: inspectedLotId, productionPlanId, purchaseOrderId, shipmentRequestId }),
     salesOrderId: row.salesOrderId,
     salesOrderNo: salesOrder?.salesOrderNo ?? null,

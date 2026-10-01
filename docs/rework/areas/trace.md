@@ -26,8 +26,8 @@
 ### 작업 로그 · 이력 재현 (REQ-LOG-001~003, BP-LOG-01)
 - 필터: 이력 재현 대상(수주번호 고르기, LOT 번호 고르기), 주체(전체·사용자·시스템 = ACTOR_TYPE 표시명), 유형(BUSINESS_EVENT_TYPE 29개, 영역별 묶음), 대상(테이블), 기간(시작일~종료일, Asia/Seoul 날짜 포함). 조건은 모두 주소에 남는다. '조건 초기화'.
 - 수주·LOT을 고르면 **이력 재현**: 수주 = `business_event.sales_order_id`, LOT = `business_event_lot`. 오래된 순, 같은 시각은 id 순(BP-LOG-01). 둘 다 고르면 둘 다 맞는 것. 아니면 전체 작업 로그를 최신순으로.
-- 한 줄: 시각, 주체(사원 이름·부서 / '시스템'), 유형 표시명, 대상(테이블 한글명 + 번호 링크), 사유 코드, **EV- 번호**(`event_no`).
-- 펼치면: 당시 기록(작업 로그 번호·주체·일시·유형·대상 = 한글명 + 테이블 DB명 + 번호·수주·**AI 경유 '준비 중 (P2)'**), 사유·근거(사유 코드·사유·**원본 메시지 링크**·Action Draft 링크), 변경 전 → 변경 후 표(바뀐 줄 강조), 관련 LOT 링크.
+- 한 줄: 시각, 주체(사원 이름·부서 / '시스템'), 유형 표시명, 대상(테이블 한글명 + 번호 링크 — 유형과 같은 이름이면 한 번만), **사람이 읽을 사유**(reason_text), **EV- 번호**(`event_no`). 번호가 없는 대상(예약·초안)은 이벤트 값으로 이름을 만든다(`targetText`: 예약 `SO-… 품목 1 · 6매`, 초안 `초안 #id`, 그 밖 `#id`).
+- 펼치면: 당시 기록(작업 로그 번호·주체·일시·유형·대상 = 한글명 + 테이블 DB명 + 번호·수주·**AI 경유 '준비 중 (P2)'**), 사유·근거(사유·사유 코드(작은 코드 꼬리표)·**원본 메시지 링크**·Action Draft 링크), 변경 전 → 변경 후 표(바뀐 줄 강조), 관련 LOT 링크.
 - 점 색은 `features/businessEvents/lib/eventTone.ts` 한 곳에서 정한다: 사용자 = 파랑, 시스템 = 회색, 불합격(검사 등록·판정의 불합격, 불합격 처리 상태 지정) = 빨강. 범례에 같은 규칙.
 - '더 보기'는 50건씩 늘린다. 없는 수주·LOT id는 COM-003 화면("이 수주를 찾지 못했어요" + 조건 지우기).
 - 다시 쓰는 부품: `features/businessEvents/components/EventTimeline.tsx`
@@ -76,7 +76,8 @@
 | 불합격 이벤트 판단(빨강) | `INSPECTION_REGISTERED`의 after_data에 `inspectionResult: 'FAIL'`, 또는 `DISPOSITION_SET` | 자동 판정 결과를 after_data에 남긴다는 전제(아래 7장) |
 | 대상 한글명 | 용어 사전 엔티티 한글명(예: production_result = 작업 실적, quality_inspection = 품질검사, action_draft = Action Draft). 없는 테이블은 DB명 | 용어 사전 |
 | 대상 필터 목록 | sales_order, sales_order_item, production_plan, production_result, quality_inspection, lot, reservation, allocation, purchase_requisition, purchase_order, goods_receipt, shipment_request, shipment_request_item, mill_sheet, action_draft | 29개 이벤트의 대상 테이블 (shipment_request_item = 출하 배정 추천, 검토 반영 때 추가) |
-| 사유 코드 표시 | 코드 그대로(STOCK_FIRST 등) | 06에 표시명이 없다(codes/businessEvent.ts 주석) |
+| 사유 표시 | 한 줄에는 사람이 읽을 사유(reason_text), 사유 코드는 펼친 기록에 작은 코드 꼬리표로만(코드 그대로, STOCK_FIRST 등) | 04 9.3 "사람이 읽을 사유와 함께". 코드 표시명은 06에 없다(codes/businessEvent.ts 주석) |
+| 번호 없는 대상의 이름 | 예약 = 수주 번호 + 품목 번호 + 매수(after_data), Action Draft = 초안 #id, 그 밖 = #id (`mock/services/timelines.ts` `eventTargetTextOf`) | 예약·초안은 업무 번호가 없다(9.1). 이벤트가 가진 값만 쓴다 |
 | 작업 로그 한 번에 불러오는 수 | 50건, '더 보기'로 50건씩 | 옛 화면과 같음 |
 | LOT 목록 수 | 최근 40개, 검색 20개 | 옛 화면과 같음 |
 

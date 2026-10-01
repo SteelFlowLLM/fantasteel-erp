@@ -3,7 +3,7 @@
 // - 같은 검사 행을 고치고 전후 값을 작업 로그(INSPECTION_REGISTERED before/after)에 남긴다. 밀시트에 들어간 LOT은 고칠 수 없다.
 // - 합격으로 적격이 되면 원래 수주 품목의 미확보 안에서 자동 예약(SYSTEM). 예약하지 못한 합격 슬래브는 여재로 표시.
 // - 불합격(히트 불합격이면 하위 슬래브·코일 전체)은 배정 RELEASED(QUALITY_FAILURE)와 규격 풀 재조정.
-import { DISPOSITION_STATUS, type DispositionStatus } from '@/codes';
+import { DISPOSITION_STATUS, PRODUCT_QTY_UNIT, type DispositionStatus } from '@/codes';
 import { isQualityExcluded } from '@/lib/eligibility';
 import { pickFifo } from '@/lib/fifo';
 import { applicableItems, judgeInspection } from '@/lib/inspectionJudgment';
@@ -210,7 +210,7 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
       const ordered = pickFifo(sameSpec, sameSpec.length);
       const result = reserveUpToShortage(tx, SYSTEM_ACTOR, {
         salesOrderItemId: plan.salesOrderItemId,
-        reasonText: '검사 합격 생산분을 원래 수주에 자동 예약',
+        reasonTextOf: (qtyText) => `검사 합격 생산분 ${qtyText}를 원래 수주에 자동 예약`,
         lotIds: ordered.map((l) => l.id),
       });
       reserved = result.reservedQty;
@@ -246,9 +246,10 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
 }
 
 function surplusReasonOf(plan: ProductionPlanRow | undefined, lots: readonly LotRow[]): string {
-  if (plan && plan.salesOrderItemId === null) return '수주 연결이 해제된 계획의 합격 슬래브를 여재로 전환';
-  if (plan && lots.some((l) => l.itemId !== plan.itemId)) return '계획 완료 후 남은 합격 슬래브를 여재로 전환';
-  return '수주 미확보를 넘는 합격 슬래브를 여재로 전환';
+  const slabsText = `합격 슬래브 ${lots.length}${PRODUCT_QTY_UNIT.SLAB}를`;
+  if (plan && plan.salesOrderItemId === null) return `수주 연결이 해제된 계획의 ${slabsText} 여재로 전환`;
+  if (plan && lots.some((l) => l.itemId !== plan.itemId)) return `계획 완료 후 남은 ${slabsText} 여재로 전환`;
+  return `수주 충족 뒤 남은 ${slabsText} 여재로 전환`;
 }
 
 /** 불합격 처리 상태 지정 (REQ-QC-004): 불합격 LOT(또는 히트 불합격 하위 LOT)만. 후속 처리 로직은 없다. */

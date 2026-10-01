@@ -32,9 +32,11 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
             {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
-            <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
-              작업 실적
-            </ButtonLink>
+            {plan.productionPlanStatus === 'CANCELLED' ? null : (
+              <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
+                작업 실적
+              </ButtonLink>
+            )}
           </span>
         }
       />
