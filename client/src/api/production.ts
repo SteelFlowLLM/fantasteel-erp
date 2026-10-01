@@ -2,7 +2,7 @@
 // 계획은 수주 등록 때 core 서비스가 히트 편성까지 계산해 만든다. 이 화면은 편성표·진행·LOT을 보여 주고,
 // 생산 담당은 PLANNED 계획 취소와 재생산 계획 만들기를 한다 (PRODUCTION_PLAN_CONFIRM 사용 권한).
 // 규칙·작업 로그는 core 서비스(@/mock/services)가 처리한다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 조회만 한다.
-import { PERMISSION, type LotStatus, type LotType, type ProductionPlanStatus, type SalesOrderItemStatus } from '@/codes';
+import { PERMISSION, type AllocationPurpose, type LotStatus, type LotType, type ProductionPlanStatus, type SalesOrderItemStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
 import type { LotRow, MockTables, ProductionPlanRow, SalesOrderItemRow } from '@/mock/schema';
@@ -57,10 +57,12 @@ export interface PlanLotRow {
   lotType: LotType;
   lotStatus: LotStatus;
   itemCode: string | null;
+  /** 상위 히트 (슬래브·코일) */
+  heatLotId: number | null;
   heatLotNo: string | null;
   /** 생산완료일 (날짜) */
   producedDate: string;
-  /** 용선: 출선량 · 히트: 히트 톤 */
+  /** 용선: 용선량 · 히트: 히트 톤 */
   initialTon: string | null;
   /** 용선 잔량 */
   remainingTon: string | null;
@@ -69,7 +71,7 @@ export interface PlanLotRow {
   surplusAt: string | null;
   dispositionStatus: LotRow['dispositionStatus'];
   /** CONFIRMED 배정의 목적 (없으면 null) */
-  allocationPurpose: 'SHIPMENT' | 'HOT_ROLLING' | null;
+  allocationPurpose: AllocationPurpose | null;
   yardName: string | null;
 }
 
@@ -81,6 +83,7 @@ export function planLotRowOf(tables: Tables, lot: LotRow): PlanLotRow {
     lotType: lot.lotType,
     lotStatus: lot.lotStatus,
     itemCode: findById(tables, 'item', lot.itemId)?.itemCode ?? null,
+    heatLotId: heat?.id ?? null,
     heatLotNo: heat?.lotNo ?? null,
     producedDate: lot.producedDate,
     initialTon: lot.initialTon,
@@ -122,6 +125,11 @@ export interface ReproductionCheck {
   additionalPlanQty: number;
   /** 같은 규격 예약 가용 (여재 포함) */
   reservationAvailableQty: number;
+  /**
+   * 재생산 계획을 만들 때 먼저 여재로 예약하는 매수 = min(현재 미확보, 예약 가용).
+   * core createReproductionPlan → reserveUpToShortage가 실제로 예약하는 수와 같다 (진행 계획 잔여 목표로 덮인 몫도 재고로 먼저 잡는다).
+   */
+  surplusReserveQty: number;
   /** 재생산 필요 = max(0, 추가 계획 필요 − 예약 가용) */
   reproductionNeedQty: number;
   openPlans: OpenPlanOfItem[];
@@ -157,6 +165,7 @@ export function reproductionCheckOf(tables: Tables, soItem: SalesOrderItemRow): 
     openPlanRemainingQty: shortage.openPlanRemainingQty,
     additionalPlanQty: shortage.additionalPlanQty,
     reservationAvailableQty: shortage.reservationAvailableQty,
+    surplusReserveQty: Math.min(shortage.unsecuredQty, shortage.reservationAvailableQty),
     reproductionNeedQty: shortage.reproductionNeedQty,
     openPlans,
     canReproduce: soItem.salesOrderItemStatus === 'OPEN' || soItem.salesOrderItemStatus === 'PARTIALLY_SHIPPED',
@@ -187,6 +196,16 @@ function planDetailOf(tables: Tables, planId: number): ProductionPlanDetail {
   };
 }
 
+/** 목록 한 줄: 계획 요약 + 고객사 (옛 화면처럼 수주번호·고객사로 찾고 구분한다, reports/3 A-1) */
+export type ProductionPlanListRow = ProductionPlanSummary & { customerName: string | null };
+
+export function withCustomerNames(tables: Tables, plans: readonly ProductionPlanSummary[]): ProductionPlanListRow[] {
+  return plans.map((p) => {
+    const so = p.salesOrderId !== null ? findById(tables, 'salesOrder', p.salesOrderId) : undefined;
+    return { ...p, customerName: so ? (findById(tables, 'customer', so.customerId)?.customerName ?? null) : null };
+  });
+}
+
 export interface CancelPlanInput {
   productionPlanId: number;
   reasonText?: string | null;
@@ -202,11 +221,11 @@ export interface ReproductionResult {
 }
 
 export const productionPlanApi = {
-  /** 생산계획 목록 (최근 것 먼저) */
-  list: (): Promise<ProductionPlanSummary[]> =>
+  /** 생산계획 목록 (최근 것 먼저, 고객사 포함) */
+  list: (): Promise<ProductionPlanListRow[]> =>
     mockQuery((tables) => {
       requireActor(tables, { view: PLAN_VIEW });
-      return listProductionPlans(tables);
+      return withCustomerNames(tables, listProductionPlans(tables));
     }),
 
   /** 생산계획 상세: 편성표·히트·작업 실적·LOT·재생산 판단 */
@@ -229,7 +248,7 @@ export const productionPlanApi = {
     }),
 
   /**
-   * 재생산 (REQ-PRD-006, 14.1-6): 사람이 누를 때만 만든다. 먼저 같은 규격 여재로 미확보분을 예약하고,
+   * 재생산 (REQ-PRD-006, 14.1-6): 사람이 누를 때만 만든다. 먼저 같은 규격 여재로 미확보분(min(현재 미확보, 예약 가용))을 예약하고,
    * 그래도 '추가 계획 필요'가 남으면 is_reproduction 계획을 만든다 (REPRODUCTION_PLAN_CREATED).
    */
   createReproduction: (input: { salesOrderItemId: number }): Promise<ReproductionResult> =>

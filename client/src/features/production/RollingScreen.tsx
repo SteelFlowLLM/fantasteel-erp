@@ -4,7 +4,7 @@
 // REQ-PRD-004, REQ-INV-006·008·009, BP-INV-01, 14.2. '귀속' 단계는 없다. 판매 예약 몫은 침범하지 않는다.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { ALLOCATION_PURPOSE_LABEL, ALLOCATION_STATUS_LABEL, LOT_STATUS_LABEL, PERMISSION, type LotStatus } from '@/codes';
+import { ALLOCATION_PURPOSE_LABEL, ALLOCATION_STATUS_LABEL, LOT_STATUS_LABEL, PERMISSION, PRODUCTION_PLAN_STATUS_LABEL } from '@/codes';
 import type { RollingAllocationView, RollingDetail, RollingPlanListRow } from '@/api/rolling';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
@@ -34,6 +34,10 @@ import { permissionNeedText } from '@/lib/permissions';
 import { calcWeightTon } from '@/lib/weight';
 
 const isOpenStatus = (s: RollingPlanListRow['productionPlanStatus']) => s === 'PLANNED' || s === 'IN_PROGRESS';
+
+/** 목록 묶음 제목: 생산계획 상태 표시명으로 만든다 (공통 코드) */
+const OPEN_GROUP_TITLE = `${PRODUCTION_PLAN_STATUS_LABEL.PLANNED} · ${PRODUCTION_PLAN_STATUS_LABEL.IN_PROGRESS}`;
+const CLOSED_GROUP_TITLE = `${PRODUCTION_PLAN_STATUS_LABEL.COMPLETED} · ${PRODUCTION_PLAN_STATUS_LABEL.CANCELLED}`;
 
 function RollingPlanRow({ row, active, onPick }: { row: RollingPlanListRow; active: boolean; onPick: () => void }) {
   return (
@@ -78,7 +82,7 @@ function RollingPlanList({ rows, selectedId, onPick }: { rows: readonly RollingP
           </div>
           <div className="flex gap-1.5">
             <Chip on={!showAll} onClick={() => setShowAll(false)}>
-              계획·진행중 <b>{open.length}</b>
+              {OPEN_GROUP_TITLE} <b>{open.length}</b>
             </Chip>
             <Chip on={showAll} onClick={() => setShowAll(true)}>
               전체 코일 계획 <b>{rows.length}</b>
@@ -87,11 +91,11 @@ function RollingPlanList({ rows, selectedId, onPick }: { rows: readonly RollingP
         </>
       }
     >
-      <MasterListGroup title="계획 · 진행중" count={open.length} />
+      <MasterListGroup title={OPEN_GROUP_TITLE} count={open.length} />
       {open.length === 0 ? <EmptyNote>열연할 코일 계획이 없어요</EmptyNote> : open.map((r) => <RollingPlanRow key={r.productionPlanId} row={r} active={r.productionPlanId === selectedId} onPick={() => onPick(r.productionPlanId)} />)}
       {showAll ? (
         <>
-          <MasterListGroup title="완료 · 취소" count={closed.length} />
+          <MasterListGroup title={CLOSED_GROUP_TITLE} count={closed.length} />
           {closed.length === 0 ? <EmptyNote>완료·취소된 코일 계획이 없어요</EmptyNote> : closed.map((r) => <RollingPlanRow key={r.productionPlanId} row={r} active={r.productionPlanId === selectedId} onPick={() => onPick(r.productionPlanId)} />)}
         </>
       ) : null}
@@ -312,7 +316,7 @@ function CoilsCard({ detail }: { detail: RollingDetail }) {
                     <Td>
                       <LotQualityBadge quality={c.quality} />
                     </Td>
-                    <Td>{c.hasConfirmedAllocation ? `${ALLOCATION_STATUS_LABEL.CONFIRMED} · ${ALLOCATION_PURPOSE_LABEL.SHIPMENT}` : LOT_STATUS_LABEL[c.lotStatus as LotStatus]}</Td>
+                    <Td>{c.hasConfirmedAllocation ? `${ALLOCATION_STATUS_LABEL.CONFIRMED} · ${ALLOCATION_PURPOSE_LABEL.SHIPMENT}` : LOT_STATUS_LABEL[c.lotStatus]}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -348,7 +352,7 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
           <>
             <Link href="/production/rolling">열연 투입 배정</Link>
             <Icon name="chevron-right" size="sm" />
-            {plan.salesOrderNo ?? '수주 연결 없음'}
+            {detail.salesOrderId !== null && plan.salesOrderNo ? <Link href={`/sales-orders/${detail.salesOrderId}`}>{plan.salesOrderNo}</Link> : (plan.salesOrderNo ?? '수주 연결 없음')}
           </>
         }
         title={
@@ -360,6 +364,11 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canAllocate ? null : <ReadOnlyHint permissions={[PERMISSION.HOT_ROLLING_ALLOCATE]} />}
+            {detail.salesOrderId !== null ? (
+              <ButtonLink href={`/sales-orders/${detail.salesOrderId}`} icon="clipboard">
+                수주 상세
+              </ButtonLink>
+            ) : null}
             <ButtonLink href={`/production/plans?plan=${plan.productionPlanId}`} icon="calendar">
               생산계획
             </ButtonLink>
@@ -381,7 +390,7 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
       <StatBar>
         <Kpi flat label="코일 규격" value={<span className="font-mono text-base">{plan.coilItem.itemCode}</span>} sub={plan.dueDate ? `납기 ${fmtDate(plan.dueDate)}` : undefined} />
         <Kpi flat label="소재 슬래브 (규격 매핑)" value={<span className="font-mono text-base">{plan.slabItem.itemCode}</span>} sub={`1매 ${fmtTon(plan.slabItem.unitWeightTon)} → 코일 ${fmtTon(plan.coilItem.unitWeightTon)}`} />
-        <Kpi flat label="부족 매수 · 열연 완료" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" />
+        <Kpi flat label="열연 완료 / 부족 매수" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" />
         <Kpi flat label="배정 확정" value={plan.allocatedQty} unit="매" sub="열연 투입 대기" />
         <Kpi flat label="더 필요한 슬래브" value={plan.neededQty} unit="매" sub="부족 − 코일 − 배정" />
       </StatBar>

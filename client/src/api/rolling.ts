@@ -2,12 +2,13 @@
 // - 코일 계획 → 대응 슬래브 규격·필요 매수. FIFO 추천(생산완료일 → LOT 번호)은 저장하지 않고 확정 때 작업 로그로 남긴다(core).
 // - 판매 ACTIVE 예약 몫은 침범하지 않는다(예약 가용 안에서만). '귀속' 단계는 없다.
 // - 배정 확정·변경·해제 = HOT_ROLLING_ALLOCATE 사용 권한. 열연 실적(슬래브 소비 → 코일) = PRODUCTION_RESULT_CONFIRM 사용 권한.
-import { PERMISSION, type ProductionPlanStatus } from '@/codes';
+import { PERMISSION, type LotStatus, type ProductionPlanStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
 import { lotQualityOf, type LotQuality } from '@/api/production';
 import { sortFifo } from '@/lib/fifo';
 import type { MockTables } from '@/mock/schema';
+import { assertNoOpenWorkOnCompletion } from '@/mock/services/ext/production';
 import {
   changeAllocation,
   confirmRollingAllocations,
@@ -75,12 +76,14 @@ export interface RolledCoil {
   slabLotNo: string | null;
   producedDate: string;
   quality: LotQuality;
-  lotStatus: string;
+  lotStatus: LotStatus;
   hasConfirmedAllocation: boolean;
 }
 
 export interface RollingDetail {
   plan: RollingPlanView;
+  /** 연결 수주 (수주 상세 링크용, 연결이 없으면 null) */
+  salesOrderId: number | null;
   /** 배정할 수 있는 슬래브 전부 (적격·미소진·미배정, FIFO 순) */
   candidates: RollingCandidate[];
   /** 지금 추천 매수 = min(더 필요한 슬래브, 예약 가용) */
@@ -130,8 +133,10 @@ function rollingDetailOf(tables: Tables, planId: number): RollingDetail {
         hasConfirmedAllocation: tables.allocation.some((a) => a.lotId === coil.id && a.allocationStatus === 'CONFIRMED'),
       };
     });
+  const planRow = mustGet(tables, 'productionPlan', planId, '생산계획');
   return {
     plan,
+    salesOrderId: findById(tables, 'salesOrderItem', planRow.salesOrderItemId)?.salesOrderId ?? null,
     candidates,
     recommendedLotIds: recommendation.lots.map((l) => l.lotId),
     rollableAllocationIds,
@@ -240,6 +245,7 @@ export const rollingApi = {
         startedAt: input.startedAt,
         completedAt: input.completedAt,
       });
+      assertNoOpenWorkOnCompletion(tx.tables, input.productionPlanId);
       return { productionResultId: resultId, coilLotNos: coilLots.map((c) => c.lotNo) };
     }),
 };

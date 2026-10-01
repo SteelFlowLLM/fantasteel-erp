@@ -9,6 +9,8 @@ import { planIdOf } from '@/api/productionTestKit';
 import { productionResultApi } from '@/api/productionResults';
 import { rollingApi } from '@/api/rolling';
 import { sessionApi } from '@/api/session';
+import { lotStateText } from '@/features/production/components/PlanBadges';
+import { inspectionHrefOf } from '@/features/production/components/PlanLotsCard';
 import { PlanDetailBody } from '@/features/production/ProductionPlanScreen';
 import { WorkBody } from '@/features/production/ProductionResultScreen';
 import { RollingBody } from '@/features/production/RollingScreen';
@@ -51,7 +53,34 @@ describe('생산 화면 렌더', () => {
     const html = await render('2001010', createElement(RollingBody, { detail }));
     for (const word of ['FIFO 추천', '예약 가용', '확정 배정', '열연 실적', 'SL-SM355B-250x1500x10000']) expect(html).toContain(word);
     expect(html).not.toContain('귀속');
+    expect(html).toContain('열연 완료 / 부족 매수');
+    expect(html).toContain('수주 상세');
     const readOnly = await render(SEED_EMPLOYEE_NO.admin, createElement(RollingBody, { detail }));
     expect(readOnly).toContain('조회만 할 수 있어요');
+  });
+});
+
+describe('생산 LOT 표 (검토 반영)', () => {
+  it('판정 대기 LOT은 숫자 LOT id로 검사 입력에 가고, 히트만 판정 대기면 히트의 검사로 간다', () => {
+    expect(inspectionHrefOf({ id: 11, quality: 'PENDING', heatLotId: 3 })).toBe('/quality/inspections?lot=11');
+    expect(inspectionHrefOf({ id: 11, quality: 'HEAT_PENDING', heatLotId: 3 })).toBe('/quality/inspections?lot=3');
+    expect(inspectionHrefOf({ id: 11, quality: 'PASS', heatLotId: 3 })).toBeNull();
+  });
+
+  it("여재는 미배정 '합격' 슬래브만 (REQ-INV-008): 여재 표시가 있어도 불합격·판정 대기면 여재로 보이지 않는다", () => {
+    const slab = { dispositionStatus: null, lotStatus: 'AVAILABLE' as const, allocationPurpose: null, surplusAt: '2026-10-01T00:00:00.000Z', lotType: 'SLAB' as const };
+    expect(lotStateText({ ...slab, quality: 'PASS' })).toBe('여재');
+    expect(lotStateText({ ...slab, quality: 'FAIL' })).not.toBe('여재');
+    expect(lotStateText({ ...slab, quality: 'PENDING' })).not.toBe('여재');
+  });
+
+  it('작업 실적: 작업 시작만 한 공정은 실적 등록·시뮬레이션을 막고 작업 완료로만 진행한다', async () => {
+    actAs(SEED_EMPLOYEE_NO.steelmaking);
+    const planId = planIdOf('PP-2609-0004');
+    await productionResultApi.startWork({ productionPlanId: planId, processType: 'CONTINUOUS_CASTING', startedAt: new Date(Date.now() - 3_600_000).toISOString(), heatLotId: null });
+    const ctx = await productionResultApi.work(planId);
+    const html = await render(SEED_EMPLOYEE_NO.productionHead, createElement(WorkBody, { ctx }));
+    expect(html).toContain('진행 중인 작업이 있어요');
+    expect(html).toContain('작업 완료');
   });
 });

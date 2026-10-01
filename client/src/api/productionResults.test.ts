@@ -157,3 +157,44 @@ describe('실적 시뮬레이션 (REQ-PRD-007)', () => {
     await expect(productionResultApi.simulate({ productionPlanId: planIdOf('PP-2609-0004') })).rejects.toMatchObject({ code: 'COM-002' });
   });
 });
+
+describe('진행 중 작업 (검토 반영: 10장 작업 상태 = 시작·완료 시각)', () => {
+  it('연주를 작업 시작만 했으면 같은 공정의 새 실적·새 시작·시뮬레이션을 막고, 시작한 히트로만 완료한다', async () => {
+    actAs(SEED_EMPLOYEE_NO.steelmaking);
+    const planId = planIdOf('PP-2609-0004');
+    const heat = lotOf('HT-BOF1-260918-001');
+    const { productionResultId } = await productionResultApi.startWork({ productionPlanId: planId, processType: 'CONTINUOUS_CASTING', startedAt: hoursAgo(3), heatLotId: heat.id });
+
+    const work = await productionResultApi.work(planId);
+    expect(work.openWork).toEqual([expect.objectContaining({ productionResultId, processType: 'CONTINUOUS_CASTING', heatLotId: heat.id, heatLotNo: heat.lotNo })]);
+
+    const base = { productionPlanId: planId, heatLotId: heat.id, startedAt: hoursAgo(3), completedAt: hoursAgo(1), outputQty: 10 };
+    await expect(productionResultApi.registerCasting(base)).rejects.toMatchObject({ fieldErrors: { productionResultId: expect.stringContaining('작업 완료') } });
+    await expect(productionResultApi.startWork({ productionPlanId: planId, processType: 'CONTINUOUS_CASTING', startedAt: hoursAgo(2), heatLotId: heat.id })).rejects.toBeInstanceOf(InputError);
+    await expect(productionResultApi.simulate({ productionPlanId: planId, randomSeed: 1 })).rejects.toMatchObject({ fieldErrors: { productionPlanId: expect.stringContaining('작업 시작만 한') } });
+    const otherHeat = readDb((t) => t.lot.find((l) => l.lotType === 'HEAT' && l.id !== heat.id));
+    await expect(productionResultApi.registerCasting({ ...base, heatLotId: otherHeat?.id ?? 0, productionResultId })).rejects.toMatchObject({
+      fieldErrors: { heatLotId: expect.stringContaining(heat.lotNo) },
+    });
+
+    const done = await productionResultApi.registerCasting({ ...base, productionResultId });
+    expect(done.productionResultId).toBe(productionResultId);
+    expect(readDb((t) => t.productionResult.filter((r) => r.productionPlanId === planId && r.completedAt === null))).toEqual([]);
+    expect(planOf(planId).productionPlanStatus).toBe('COMPLETED');
+    clean();
+  });
+
+  it('다른 공정에 시작만 한 실적이 남아 있으면 계획을 완료하는 실적은 거부하고 아무것도 저장하지 않는다', async () => {
+    actAs(SEED_EMPLOYEE_NO.steelmaking);
+    const planId = planIdOf('PP-2609-0004');
+    await productionResultApi.startWork({ productionPlanId: planId, processType: 'IRONMAKING', startedAt: hoursAgo(4), blastFurnaceCode: 'BF2' });
+    const heat = lotOf('HT-BOF1-260918-001');
+    const slabCount = readDb((t) => t.lot.filter((l) => l.lotType === 'SLAB').length);
+    await expect(
+      productionResultApi.registerCasting({ productionPlanId: planId, heatLotId: heat.id, startedAt: hoursAgo(3), completedAt: hoursAgo(1), outputQty: 10 }),
+    ).rejects.toMatchObject({ fieldErrors: { productionPlanId: expect.stringContaining('제선') } });
+    expect(readDb((t) => t.lot.filter((l) => l.lotType === 'SLAB').length)).toBe(slabCount);
+    expect(planOf(planId).productionPlanStatus).toBe('IN_PROGRESS');
+    clean();
+  });
+});

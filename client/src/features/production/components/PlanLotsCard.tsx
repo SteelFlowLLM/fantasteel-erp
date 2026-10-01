@@ -1,6 +1,7 @@
 'use client';
 
 // 생산계획에서 나온 LOT (용선·히트·슬래브·코일). 생산완료일은 날짜로 보인다 (컨벤션 5장).
+// 판정 대기 LOT은 검사 입력(/quality/inspections?lot=<LOT id>)으로 간다. 자기는 합격이고 히트만 판정 대기면 히트의 검사로 간다.
 import Link from 'next/link';
 import { useState } from 'react';
 import { LOT_TYPE_LABEL, type LotType } from '@/codes';
@@ -14,6 +15,13 @@ import { fmtTon } from '@/lib/format';
 
 const TYPES: LotType[] = ['HOT_METAL', 'HEAT', 'SLAB', 'COIL'];
 const SHOW_LIMIT = 40;
+
+/** 검사 입력 화면 주소 (quality InspectionWorkspace의 inspectionHref와 같은 모양: 숫자 LOT id) */
+export function inspectionHrefOf(lot: Pick<PlanLotRow, 'id' | 'quality' | 'heatLotId'>): string | null {
+  if (lot.quality === 'PENDING') return `/quality/inspections?lot=${lot.id}`;
+  if (lot.quality === 'HEAT_PENDING' && lot.heatLotId !== null) return `/quality/inspections?lot=${lot.heatLotId}`;
+  return null;
+}
 
 function tonText(lot: PlanLotRow): string {
   if (lot.lotType === 'HOT_METAL') return `${fmtTon(lot.initialTon)} · 잔량 ${fmtTon(lot.remainingTon)}`;
@@ -49,7 +57,7 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
                 <tr>
                   <Th>LOT</Th>
                   {type === 'SLAB' || type === 'COIL' ? <Th>히트</Th> : null}
-                  <Th>{type === 'HOT_METAL' ? '출선량 · 잔량' : type === 'HEAT' ? '히트 톤' : '규격'}</Th>
+                  <Th>{type === 'HOT_METAL' ? '용선량 · 잔량' : type === 'HEAT' ? '히트 톤' : '규격'}</Th>
                   <Th>품질</Th>
                   <Th>상태</Th>
                   <Th>야드</Th>
@@ -67,8 +75,8 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
                     {type === 'SLAB' || type === 'COIL' ? <Td className="font-mono text-mono text-ink-2">{lot.heatLotNo ?? '-'}</Td> : null}
                     <Td className={type === 'SLAB' || type === 'COIL' ? 'font-mono text-mono' : undefined}>{tonText(lot)}</Td>
                     <Td>
-                      {lot.quality === 'PENDING' || lot.quality === 'HEAT_PENDING' ? (
-                        <Link href={`/quality/inspections?lot=${encodeURIComponent(lot.lotNo)}`} title="검사 입력으로 가기">
+                      {inspectionHrefOf(lot) ? (
+                        <Link href={inspectionHrefOf(lot) ?? ''} title={lot.quality === 'HEAT_PENDING' ? '히트 검사 입력으로 가기' : '검사 입력으로 가기'}>
                           <LotQualityBadge quality={lot.quality} />
                         </Link>
                       ) : (

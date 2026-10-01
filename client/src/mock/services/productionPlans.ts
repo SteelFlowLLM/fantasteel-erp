@@ -1,6 +1,6 @@
 // 생산계획·히트 편성·재생산 (REQ-PRD-001·002·006, BP-PRD-01, BP-QC-01, 업무 프로세스 4.4·4.5·10장).
 // 상태: PLANNED → IN_PROGRESS(첫 작업 실적) → COMPLETED(산출 완료), PLANNED에서만 CANCELLED. CONFIRMED 없음(PLAN 6-3).
-import type { ProductItemType } from '@/codes';
+import { PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
 import { formHeats, type HeatFormation } from '@/lib/heatPlanning';
 import { reproductionNeedQty, shortageOf, type Shortage } from '@/lib/inventoryMath';
@@ -116,7 +116,7 @@ export function createProductionPlan(tx: MockTx, actor: BusinessEventActor, inpu
     salesOrderId: salesOrderIdOfPlan(tx.tables, plan),
     afterData: { ...planSnapshot(plan), targetWeightTon: formation.targetWeightTon, heatTon: formation.heatTon, expectedSurplusSlabQty: formation.expectedSurplusSlabQty },
     reasonCode: 'ORDER_SHORTAGE',
-    reasonText: input.reasonText ?? `부족 ${input.shortageQty}매 생산`,
+    reasonText: input.reasonText ?? `부족 ${input.shortageQty}${PRODUCT_QTY_UNIT[productItemTypeOf(item)]} 생산`,
   });
   return plan;
 }
@@ -329,7 +329,7 @@ export function createReproductionPlan(tx: MockTx, actor: PersonActor, input: { 
     shortageQty: shortage.additionalPlanQty,
     isReproduction: true,
     createdEmployeeId: actor.employeeId,
-    reasonText: `여재·진행 계획으로도 부족한 ${shortage.additionalPlanQty}매 재생산`,
+    reasonText: `여재·진행 계획으로도 부족한 ${shortage.additionalPlanQty}${PRODUCT_QTY_UNIT[productItemTypeOf(mustGet(tx.tables, 'item', soItem.itemId, '규격'))]} 재생산`,
   });
   return { reservedFromSurplusQty: reservedQty, plan };
 }

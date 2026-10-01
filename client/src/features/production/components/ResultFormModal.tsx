@@ -4,7 +4,7 @@
 // 제선 = 고로 코드·작업일시·원료 투입 기간(= 작업 시작~완료)·용선량 / 제강 = 전로 코드·히트 순번·투입 용선량 / 연주 = 히트·규격·슬래브 생산 매수·작업일시.
 // 'start'는 작업 시작만 기록하고(완료 일시 없음), 'complete'는 시작한 실적을 같은 행으로 완료한다.
 import { useState } from 'react';
-import { PROCESS_TYPE_LABEL } from '@/codes';
+import { INSPECTION_RESULT_LABEL, PROCESS_TYPE_LABEL } from '@/codes';
 import { productionResultApi, type WorkContext } from '@/api/productionResults';
 import type { ProductionResultView } from '@/api/production';
 import { Banner } from '@/components/Banner';
@@ -49,9 +49,12 @@ export function ResultFormModal({ ctx, process, mode, openResult, onClose }: Res
   const [blastFurnaceCode, setBlastFurnaceCode] = useState(openResult?.blastFurnaceCode ?? ctx.lastBlastFurnaceCode ?? '');
   const [converterCode, setConverterCode] = useState(openResult?.converterCode ?? ctx.lastConverterCode ?? '');
   const [tonText, setTonText] = useState(ctx.hotMetalTonPerHeat);
-  const [heatLotId, setHeatLotId] = useState<number | null>(ctx.uncastHeats[0]?.heatLotId ?? null);
+  // 작업 완료: 작업 시작 때 기록한 히트로 고정한다 (작업 로그 PRODUCTION_STARTED와 실적·슬래브의 히트가 같아야 한다)
+  const startedHeatLotId = mode === 'complete' && openResult ? (ctx.openWork.find((w) => w.productionResultId === openResult.id)?.heatLotId ?? null) : null;
+  const firstHeat = ctx.uncastHeats.find((h) => h.heatLotId === startedHeatLotId) ?? ctx.uncastHeats[0];
+  const [heatLotId, setHeatLotId] = useState<number | null>(startedHeatLotId ?? firstHeat?.heatLotId ?? null);
   const heat = ctx.uncastHeats.find((h) => h.heatLotId === heatLotId) ?? null;
-  const [qtyText, setQtyText] = useState(String(ctx.uncastHeats[0]?.maxSlabQty ?? ''));
+  const [qtyText, setQtyText] = useState(String(firstHeat?.maxSlabQty ?? ''));
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
 
   const label = PROCESS_TYPE_LABEL[process];
@@ -132,9 +135,10 @@ export function ResultFormModal({ ctx, process, mode, openResult, onClose }: Res
       ) : null}
       {process === 'CONTINUOUS_CASTING' ? (
         <div className="grid grid-cols-2 gap-3">
-          <Field label="히트" required error={errors.heatLotId}>
+          <Field label="히트" required error={errors.heatLotId} hint={startedHeatLotId !== null ? '작업 시작 때 기록한 히트예요' : undefined}>
             <Select
               value={heatLotId ?? ''}
+              disabled={startedHeatLotId !== null}
               onChange={(e) => {
                 const id = Number(e.target.value);
                 setHeatLotId(id);
@@ -270,7 +274,7 @@ export function ResultFormModal({ ctx, process, mode, openResult, onClose }: Res
       ) : null}
       {heat && heat.inspectionResult !== 'PASS' && process === 'CONTINUOUS_CASTING' ? (
         <Banner tone="wait">
-          이 히트의 성분 판정이 {heat.inspectionResult === 'FAIL' ? '불합격' : '아직'}이에요. 연주는 할 수 있지만, 히트가 합격하기 전에는 슬래브를 예약·열연·출고할 수 없어요.
+          이 히트의 성분 판정이 {heat.inspectionResult === 'FAIL' ? INSPECTION_RESULT_LABEL.FAIL : '아직'}이에요. 연주는 할 수 있지만, 히트가 합격하기 전에는 슬래브를 예약·열연·출고할 수 없어요.
         </Banner>
       ) : null}
     </Modal>

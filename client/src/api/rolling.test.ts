@@ -19,10 +19,12 @@ describe('열연 대상 조회', () => {
     expect(plans.find((p) => p.productionPlanNo === 'PP-2609-0003')).toMatchObject({ shortageQty: 6, rolledQty: 3, allocatedQty: 0, neededQty: 3, rollable: true });
     const detail = await rollingApi.detail(pp3());
     expect(detail.plan.slabItem.itemCode).toBe('SL-SM355B-250x1500x10000');
+    // 수주 상세 링크용 (reports/3 A-3)
+    expect(detail.salesOrderId).toEqual(expect.any(Number));
     expect(detail.recommendedLotIds).toHaveLength(3);
     expect(detail.candidates.map((c) => c.fifoRank)).toEqual([1, 2, 3]);
-    const order = detail.candidates.map((c) => `${c.producedDate} ${c.lotNo}`);
-    expect(order).toEqual([...order].sort());
+    const fifoKeys = detail.candidates.map((c) => `${c.producedDate} ${c.lotNo}`);
+    expect(fifoKeys).toEqual([...fifoKeys].sort());
     expect(detail.coils).toHaveLength(3);
     expect(detail.coils[0].lotNo.startsWith('CBOF1-')).toBe(true);
 

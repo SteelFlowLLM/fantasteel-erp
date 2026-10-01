@@ -1,5 +1,6 @@
 // 생산계획 api (REQ-PRD-001·002·006, 10장 상태, 14.1-6 재생산): 가짜 DB 시드 위에서 api 함수를 그대로 부른다.
 import { describe, expect, it } from 'vitest';
+import { PRODUCT_QTY_UNIT } from '@/codes';
 import { InputError } from '@/api/client';
 import { lotQualityOf, productionPlanApi } from '@/api/production';
 import { eventsOf, planIdOf, planOf } from '@/api/productionTestKit';
@@ -16,6 +17,10 @@ describe('생산계획 조회', () => {
     expect(detail.formation).toMatchObject({ heatCount: 1, heatTon: '250.000', shortageQty: 5 });
     expect(detail.lots.map((l) => l.lotType)).toEqual(['HOT_METAL', 'HEAT']);
     expect(detail.lots[1].quality).toBe('PENDING');
+    // 목록 한 줄에 고객사 (검색에도 쓴다, reports/3 A-1)
+    const row = list.find((p) => p.productionPlanNo === 'PP-2609-0004');
+    expect(row?.customerName).toBe(detail.salesOrder?.customerName);
+    expect(row?.customerName).toEqual(expect.any(String));
 
     actAs(SEED_EMPLOYEE_NO.logistics);
     await expect(productionPlanApi.list()).rejects.toMatchObject({ code: 'COM-002' });
@@ -32,7 +37,7 @@ describe('생산계획 조회', () => {
     const detail = await productionPlanApi.detail(planIdOf('PP-2609-0005'));
     expect(detail.lots.find((l) => l.lotType === 'HEAT')?.quality).toBe('FAIL');
     expect(detail.lots.filter((l) => l.lotType === 'SLAB').every((l) => l.quality === 'HEAT_FAILED')).toBe(true);
-    expect(detail.reproduction).toMatchObject({ unsecuredQty: 8, openPlanRemainingQty: 0, additionalPlanQty: 8, reservationAvailableQty: 0, reproductionNeedQty: 8, canReproduce: true });
+    expect(detail.reproduction).toMatchObject({ unsecuredQty: 8, openPlanRemainingQty: 0, additionalPlanQty: 8, reservationAvailableQty: 0, surplusReserveQty: 0, reproductionNeedQty: 8, canReproduce: true });
   });
 
   it('LOT 품질 표시: 원료·용선은 검사 없음, 제품은 상위 히트 판정까지 본다', () => {
@@ -58,11 +63,14 @@ describe('재생산 계획 (REQ-PRD-006: 사람이 만든다)', () => {
     actAs(SEED_EMPLOYEE_NO.productionHead);
     const before = eventsOf('REPRODUCTION_PLAN_CREATED').length;
     const result = await productionPlanApi.createReproduction({ salesOrderItemId: soItemId });
-    expect(result.reservedFromSurplusQty).toBe(0);
+    // 창이 보여 준 '먼저 예약하는 여재' = core가 실제로 예약한 수
+    expect(result.reservedFromSurplusQty).toBe(pp5.reproduction?.surplusReserveQty);
     expect(result.plan).toMatchObject({ shortageQty: 8 });
     const plan = planOf(result.plan?.id ?? 0);
     expect(plan).toMatchObject({ isReproduction: true, productionPlanStatus: 'PLANNED', salesOrderItemId: soItemId });
     expect(eventsOf('REPRODUCTION_PLAN_CREATED')).toHaveLength(before + 1);
+    // 작업 로그 사유 글자의 단위는 품목 유형을 따른다 (04 4.1: 슬래브 매, 코일 개)
+    expect(eventsOf('REPRODUCTION_PLAN_CREATED').at(-1)?.reasonText).toContain(`8${PRODUCT_QTY_UNIT[pp5.item.itemType]} 재생산`);
 
     const after = await productionPlanApi.detail(planIdOf('PP-2609-0005'));
     expect(after.reproduction).toMatchObject({ openPlanRemainingQty: 8, additionalPlanQty: 0, reproductionNeedQty: 0 });

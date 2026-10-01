@@ -2,7 +2,7 @@
 
 // 생산계획 화면의 창: 계획 취소 (PLANNED일 때만) · 재생산 계획 (여재·진행 계획을 먼저 확인, 14.1-6)
 import { useState } from 'react';
-import { PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS_LABEL, type ProductItemType } from '@/codes';
+import { PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS_LABEL, RESERVATION_STATUS_LABEL, type ProductItemType } from '@/codes';
 import { productionPlanApi, type ReproductionCheck } from '@/api/production';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -57,7 +57,8 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
         : `여재 ${r.reservedFromSurplusQty}${unit}를 예약해서 새 계획 없이 채웠어요`,
     onSuccess: onClose,
   });
-  const surplusFirst = Math.min(check.additionalPlanQty, check.reservationAvailableQty);
+  // 먼저 예약하는 여재 = min(현재 미확보, 예약 가용): core createReproductionPlan이 실제로 예약하는 수와 같다
+  const surplusFirst = check.surplusReserveQty;
   return (
     <Modal
       title={`재생산 계획 · ${check.salesOrderNo} 품목 ${check.lineNo}`}
@@ -80,7 +81,7 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
           { label: '수주 매수', value: `${check.orderedQty}${unit}` },
           { label: '출고 누계', value: `${check.shippedQty}${unit}` },
           { label: '미출하', value: `${check.unshippedQty}${unit}` },
-          { label: '예약 (예약중)', value: `${check.activeReservedQty}${unit}` },
+          { label: `예약 (${RESERVATION_STATUS_LABEL.ACTIVE})`, value: `${check.activeReservedQty}${unit}` },
           { label: '현재 미확보', value: `${check.unsecuredQty}${unit}` },
           { label: '진행 계획 잔여 목표', value: `${check.openPlanRemainingQty}${unit}` },
           { label: '추가 계획 필요', value: `${check.additionalPlanQty}${unit}` },
@@ -89,7 +90,8 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
         ]}
       />
       <span className="text-cap text-ink-3">
-        현재 미확보 = max(0, 미출하 − 예약) · 추가 계획 필요 = max(0, 현재 미확보 − 진행 계획 잔여 목표) · 재생산 필요 = max(0, 추가 계획 필요 − 예약 가용)
+        현재 미확보 = max(0, 미출하 − 예약) · 추가 계획 필요 = max(0, 현재 미확보 − 진행 계획 잔여 목표) · 재생산 필요 = max(0, 추가 계획 필요 − 예약 가용) · 먼저
+        예약하는 여재 = min(현재 미확보, 예약 가용)
       </span>
       {check.openPlans.length > 0 ? (
         <Table compact>
@@ -126,8 +128,10 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
         <Banner tone="ok">진행 중인 계획과 예약으로 채울 수 있어요. 재생산 계획을 만들지 않아도 돼요.</Banner>
       ) : (
         <Banner tone="run">
-          먼저 같은 규격 여재로 {surplusFirst}
+          먼저 현재 미확보 {check.unsecuredQty}
+          {unit} 가운데 같은 규격 여재로 {surplusFirst}
           {unit}를 예약하고{check.reproductionNeedQty > 0 ? `, 그래도 모자란 ${check.reproductionNeedQty}${unit}만 재생산 계획(히트 편성 포함)으로 만들어요.` : ' 새 계획은 만들지 않아요.'}
+          {surplusFirst > check.additionalPlanQty ? ` 진행 계획 잔여 목표로 덮인 몫도 재고로 먼저 잡으므로, 그 계획의 산출은 뒤에 여재로 남을 수 있어요.` : ''}
         </Banner>
       )}
       <div className="flex items-center gap-2 text-cap text-ink-3">
