@@ -12,14 +12,7 @@ import { KvList } from '@/components/KvList';
 import { PageHead } from '@/components/Page';
 import { Steps } from '@/components/Steps';
 import { Timeline } from '@/components/Timeline';
-import {
-  BUSINESS_EVENT_TYPE_LABEL,
-  CASE_CATEGORY_LABEL,
-  PROPOSED_BUSINESS_EVENT_TYPE_LABEL,
-  type BusinessEventType,
-  type CaseCategory,
-  type ProposedBusinessEventType,
-} from '@/codes';
+import { CASE_CATEGORY_LABEL, type CaseCategory } from '@/codes';
 import {
   ActorTag,
   AiAssistedTag,
@@ -38,11 +31,7 @@ import {
   SELECTED_CASE_HISTORY,
   sameCategoryCases,
 } from '@/features/pastCases/pastCaseExample';
-
-const eventLabelOf = (eventType: BusinessEventType | ProposedBusinessEventType): string =>
-  eventType in PROPOSED_BUSINESS_EVENT_TYPE_LABEL
-    ? PROPOSED_BUSINESS_EVENT_TYPE_LABEL[eventType as ProposedBusinessEventType]
-    : BUSINESS_EVENT_TYPE_LABEL[eventType as BusinessEventType];
+import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 
 function CategoryBadge({ category }: { category: CaseCategory }) {
   return <Badge tone={category === 'QUALITY' ? 'run' : 'wait'}>{CASE_CATEGORY_LABEL[category]}</Badge>;
@@ -148,8 +137,8 @@ function CaseDetail() {
                 title: (
                   <span className="flex flex-wrap items-center gap-1.5">
                     <ActorTag actorType={entry.actorType} />
-                    <EventName>{eventLabelOf(entry.eventType)}</EventName>
-                    {entry.aiAssisted ? <AiAssistedTag /> : null}
+                    <EventName>{businessEventLabelOf(entry.businessEventType)}</EventName>
+                    {entry.isAiAssisted ? <AiAssistedTag /> : null}
                     <b className="font-semibold">{entry.head}</b>
                   </span>
                 ),

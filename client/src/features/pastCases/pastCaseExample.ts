@@ -12,10 +12,9 @@ import {
   formatHeatLotNo,
   formatSlabLotNo,
   type ActorType,
-  type BusinessEventType,
   type CaseCategory,
-  type ProposedBusinessEventType,
 } from '@/codes';
+import type { ExampleBusinessEventType } from '@/features/agent/lib/businessEventLabel';
 
 export interface PastCaseExample {
   caseNo: string;
@@ -107,12 +106,12 @@ export interface CaseHistoryEntry {
   key: string;
   time: string;
   actorType: ActorType;
-  eventType: BusinessEventType | ProposedBusinessEventType;
+  businessEventType: ExampleBusinessEventType;
   eventNo: string;
   head: string;
   detail: string;
   /** AI 초안으로 확정한 작업 (TRM-103 AI 경유) */
-  aiAssisted?: boolean;
+  isAiAssisted?: boolean;
 }
 
 /** 선택한 사례의 작업 로그 (REQ-LOG-002 이벤트만: 검사 등록·판정 → 불합격 처리 상태 지정 → 과거 사례 등록) */
@@ -121,7 +120,7 @@ export const SELECTED_CASE_HISTORY: readonly CaseHistoryEntry[] = [
     key: 'inspection',
     time: '09-12 09:40',
     actorType: 'USER',
-    eventType: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,
+    businessEventType: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,
     eventNo: formatEventNo('260912', 8),
     head: '히트 성분 검사 불합격',
     detail: '망가니즈(Mn) 1.68% · 기준 1.60% 이하',
@@ -130,7 +129,7 @@ export const SELECTED_CASE_HISTORY: readonly CaseHistoryEntry[] = [
     key: 'disposition',
     time: '09-12 10:05',
     actorType: 'USER',
-    eventType: BUSINESS_EVENT_TYPE.DISPOSITION_SET,
+    businessEventType: BUSINESS_EVENT_TYPE.DISPOSITION_SET,
     eventNo: formatEventNo('260912', 9),
     head: '처리 상태 보류 지정',
     detail: '불합격 LOT은 예약·배정·출고에서 빠져요',
@@ -139,11 +138,11 @@ export const SELECTED_CASE_HISTORY: readonly CaseHistoryEntry[] = [
     key: 'case',
     time: '09-13 09:00',
     actorType: 'USER',
-    eventType: PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED,
+    businessEventType: PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED,
     eventNo: formatEventNo('260913', 2),
     head: 'AI 초안을 품질 담당이 확인·저장',
     detail: `${SELECTED_CASE.caseNo} · 현상·원인·조치 기록`,
-    aiAssisted: true,
+    isAiAssisted: true,
   },
 ];
 

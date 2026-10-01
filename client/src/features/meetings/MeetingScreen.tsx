@@ -5,7 +5,6 @@
 // (초안 상태는 구매요청 초안으로 보낸 뒤에만, 공통 코드 표시명으로). 회의록 항목은 ERD만, '대화방' 공유·안건·수주 연결은 뺐다.
 import { useState } from 'react';
 import { Avatar } from '@/components/Avatar';
-import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { ComingSoonArea, SoonButton } from '@/components/ComingSoon';
@@ -18,7 +17,8 @@ import { Steps } from '@/components/Steps';
 import { Table, Td, Th } from '@/components/Table';
 import { Tabs } from '@/components/Tabs';
 import { Tag } from '@/components/Tag';
-import { DRAFT_STATUS, DRAFT_STATUS_LABEL, NOTIFICATION_TYPE_LABEL, TASK_STATUS_LABEL } from '@/codes';
+import { DRAFT_STATUS_LABEL, NOTIFICATION_TYPE_LABEL, ROLE_LABEL, TASK_STATUS_LABEL } from '@/codes';
+import { DRAFT_FLOW } from '@/features/agent/agentExample';
 import {
   AiBrief,
   AiCard,
@@ -33,14 +33,12 @@ import {
   ATTENDEES,
   DECISIONS,
   EXTRACTED_TASKS,
-  MEETING_LIST,
-  MEETING_LIST_STATE_LABEL,
+  MEETING_MINUTES_LIST,
   PURCHASE_ITEM,
-  SELECTED_MEETING,
+  SELECTED_MEETING_MINUTES,
   SUMMARY,
   TRANSCRIPT,
   isTaskReady,
-  type MeetingListState,
 } from '@/features/meetings/meetingExample';
 import { cn } from '@/lib/cn';
 
@@ -52,10 +50,6 @@ const TAB_ITEMS: readonly { key: MeetingTab; label: string }[] = [
   { key: 'result', label: '정리 결과' },
 ];
 
-const STATE_TONE: Record<MeetingListState, 'wait' | 'ok' | 'run'> = { UNCONFIRMED: 'wait', REGISTERED: 'ok', PROCESSING: 'run' };
-
-const DRAFT_FLOW = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL, DRAFT_STATUS.APPROVED, DRAFT_STATUS.EXECUTED] as const;
-
 const readyTaskCount = EXTRACTED_TASKS.filter(isTaskReady).length;
 
 function AttendeeChips() {
@@ -65,7 +59,7 @@ function AttendeeChips() {
         <span key={attendee.employeeName} className="inline-flex h-6 items-center gap-1 rounded-xl border border-line-strong bg-surface pr-2 pl-0.5 text-xs">
           <Avatar name={attendee.employeeName} size="sm" />
           {attendee.employeeName}
-          <span className="text-cap text-ink-3">{attendee.roleLabel}</span>
+          <span className="text-cap text-ink-3">{ROLE_LABEL[attendee.roleCode]}</span>
         </span>
       ))}
     </div>
@@ -149,17 +143,12 @@ function ListDesign() {
           <Input type="search" leadingIcon="search" placeholder="제목·참석자" aria-label="회의 검색" disabled />
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {MEETING_LIST.map((group) => (
+          {MEETING_MINUTES_LIST.map((group) => (
             <div key={group.day}>
               <DaySeparator>{group.day}</DaySeparator>
               {group.items.map((meeting) => (
                 <MasterItem key={meeting.key} active={meeting.key === 'weekly'}>
-                  <div className="flex items-center gap-2">
-                    <b className="text-sm font-semibold">{meeting.title}</b>
-                    <Badge tone={STATE_TONE[meeting.state]} className="ml-auto">
-                      {MEETING_LIST_STATE_LABEL[meeting.state]}
-                    </Badge>
-                  </div>
+                  <b className="text-sm font-semibold">{meeting.title}</b>
                   <span className="text-cap text-ink-3 tabular-nums">{meeting.meta}</span>
                   <span className="text-cap text-ink-2">{meeting.sub}</span>
                 </MasterItem>
@@ -175,15 +164,10 @@ function ListDesign() {
             <>
               회의록
               <Icon name="chevron-right" size="sm" />
-              {SELECTED_MEETING.meetingDate} {SELECTED_MEETING.time}
+              {SELECTED_MEETING_MINUTES.meetingDate} {SELECTED_MEETING_MINUTES.time}
             </>
           }
-          title={
-            <span className="flex items-center gap-2.5">
-              {SELECTED_MEETING.title}
-              <Badge tone="wait">{MEETING_LIST_STATE_LABEL.UNCONFIRMED}</Badge>
-            </span>
-          }
+          title={SELECTED_MEETING_MINUTES.title}
           actions={
             <SoonButton variant="primary">
               결과 확인하고 등록
@@ -193,9 +177,9 @@ function ListDesign() {
         />
         <Card className="flex-none">
           <CardBody className="grid grid-cols-[repeat(3,max-content)_minmax(0,1fr)] gap-x-7">
-            <KvList items={[{ label: '회의 날짜', value: `${SELECTED_MEETING.meetingDate} ${SELECTED_MEETING.time} · ${SELECTED_MEETING.duration}` }]} />
+            <KvList items={[{ label: '회의 날짜', value: `${SELECTED_MEETING_MINUTES.meetingDate} ${SELECTED_MEETING_MINUTES.time} · ${SELECTED_MEETING_MINUTES.duration}` }]} />
             <KvList items={[{ label: '입력', value: '음성 파일' }]} />
-            <KvList items={[{ label: '작성', value: SELECTED_MEETING.createdEmployeeName }]} />
+            <KvList items={[{ label: '작성', value: SELECTED_MEETING_MINUTES.createdEmployeeName }]} />
             <div className="flex flex-col gap-1">
               <span className="text-xs text-ink-3">참석자 {ATTENDEES.length}명</span>
               <AttendeeChips />
@@ -302,13 +286,13 @@ function NewDesign() {
         </Card>
 
         <Card>
-          <CardHead title="회의 정보" meta={`작성 ${SELECTED_MEETING.createdEmployeeName}`} />
+          <CardHead title="회의 정보" meta={`작성 ${SELECTED_MEETING_MINUTES.createdEmployeeName}`} />
           <CardBody className="flex-1 gap-3.5">
             <Field label="제목" htmlFor="meeting-title" required>
-              <Input id="meeting-title" readOnly defaultValue={SELECTED_MEETING.title} />
+              <Input id="meeting-title" readOnly defaultValue={SELECTED_MEETING_MINUTES.title} />
             </Field>
             <Field label="회의 날짜" htmlFor="meeting-date" required>
-              <Input id="meeting-date" readOnly leadingIcon="calendar" defaultValue={SELECTED_MEETING.meetingDate} />
+              <Input id="meeting-date" readOnly leadingIcon="calendar" defaultValue={SELECTED_MEETING_MINUTES.meetingDate} />
             </Field>
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-ink-2">참석자 {ATTENDEES.length}명</span>
@@ -329,7 +313,7 @@ function ResultDesign() {
   return (
     <div className="flex min-h-0 flex-1 gap-4">
       <Card className="w-80 flex-none">
-        <TranscriptCardHead meta={`발언 ${TRANSCRIPT.length} · ${SELECTED_MEETING.duration}`} />
+        <TranscriptCardHead meta={`발언 ${TRANSCRIPT.length} · ${SELECTED_MEETING_MINUTES.duration}`} />
         <div className="border-b border-line px-3.5 py-2">
           <Input type="search" leadingIcon="search" placeholder="전체 기록 검색" aria-label="전체 기록 검색" disabled />
         </div>
@@ -349,7 +333,7 @@ function ResultDesign() {
             <>
               회의록
               <Icon name="chevron-right" size="sm" />
-              {SELECTED_MEETING.title}
+              {SELECTED_MEETING_MINUTES.title}
             </>
           }
           title="정리 결과 확인"
@@ -360,7 +344,7 @@ function ResultDesign() {
           }
         />
 
-        <AiCard title="AI 요약" meta={`초안 · 확인 전 · ${SELECTED_MEETING.meetingDate} ${SELECTED_MEETING.time} · ${ATTENDEES.length}명`} className="flex-none">
+        <AiCard title="AI 요약" meta={`초안 · 확인 전 · ${SELECTED_MEETING_MINUTES.meetingDate} ${SELECTED_MEETING_MINUTES.time} · ${ATTENDEES.length}명`} className="flex-none">
           <SummaryBody />
         </AiCard>
 
@@ -389,7 +373,7 @@ function ResultDesign() {
                         </Td>
                         <Td>{task.assigneeName ?? <span className="text-danger">확인 필요</span>}</Td>
                         <Td className="whitespace-normal py-1.5">
-                          <span className="block font-medium">{task.text}</span>
+                          <span className="block font-medium">{task.title}</span>
                           <span className="text-cap text-ink-3">원문 {task.at}</span>
                         </Td>
                         <Td className="tabular-nums">{task.dueDate ?? <span className="text-danger">확인 필요</span>}</Td>
@@ -434,7 +418,7 @@ function ResultDesign() {
                 ]}
               />
               <OriginLine icon="mic">
-                {SELECTED_MEETING.title} · {PURCHASE_ITEM.requesterName} {PURCHASE_ITEM.at} &ldquo;철광석 재고를 보니 …&rdquo;
+                {SELECTED_MEETING_MINUTES.title} · {PURCHASE_ITEM.requesterName} {PURCHASE_ITEM.at} &ldquo;철광석 재고를 보니 …&rdquo;
               </OriginLine>
               <span className="text-cap text-ink-3">보내면 Message → ERP 구매요청 초안이 되고, 요청자가 확인·수정한 뒤 확정해요. 구매요청은 요청자 소속 부서장이 승인해요.</span>
               <div className="flex flex-col gap-1.5">

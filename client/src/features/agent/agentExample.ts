@@ -4,6 +4,8 @@
 import {
   ACTION_TYPE,
   BUSINESS_EVENT_TYPE,
+  DRAFT_STATUS,
+  DRAFT_STATUS_LABEL,
   PERMISSION,
   PROPOSED_BUSINESS_EVENT_TYPE,
   STEEL_GRADE,
@@ -12,10 +14,10 @@ import {
   formatRawMaterialLotNo,
   type ActionType,
   type ActorType,
-  type BusinessEventType,
+  type DraftStatus,
   type Permission,
-  type ProposedBusinessEventType,
 } from '@/codes';
+import type { ExampleBusinessEventType } from '@/features/agent/lib/businessEventLabel';
 
 /** BP-AGT-01 위험 코드 제안. 화면에는 코드 대신 요구사항(REQ-AGT-001)의 한글 이름을 쓴다. */
 export const AGENT_RISK_CODES = ['RAW_SHORTAGE', 'GOOD_QTY_SHORTAGE', 'DUE_RISK', 'AGED_SURPLUS', 'QUALITY_RATE_RISE'] as const;
@@ -144,9 +146,30 @@ export const RAW_SHORTAGE_METRICS: readonly { label: string; value: string; unit
   { label: '부족량', value: '1,200', unit: 't', danger: true },
 ];
 
-/** 대응 후보 (Action Draft로 저장된 구매요청 초안) 예시 */
+/** 초안 상태 흐름 (04 10장 Action Draft 상태 전이: 생성 → 확인 대기 → 확정 → ERP 반영) */
+export const DRAFT_FLOW: readonly DraftStatus[] = [
+  DRAFT_STATUS.AI_GENERATED,
+  DRAFT_STATUS.WAITING_APPROVAL,
+  DRAFT_STATUS.APPROVED,
+  DRAFT_STATUS.EXECUTED,
+];
+
+/** 초안 상태 흐름에서 한 단계의 표시 상태. 지금 상태 앞은 완료, 지금 상태는 진행, 뒤는 대기 */
+export function draftStepState(step: DraftStatus, current: DraftStatus): 'done' | 'run' | 'todo' {
+  const stepIndex = DRAFT_FLOW.indexOf(step);
+  const currentIndex = DRAFT_FLOW.indexOf(current);
+  if (stepIndex < 0 || currentIndex < 0) throw new RangeError(`초안 상태 흐름에 없는 상태예요: ${stepIndex < 0 ? step : current}`);
+  return stepIndex < currentIndex ? 'done' : stepIndex === currentIndex ? 'run' : 'todo';
+}
+
+/**
+ * 대응 후보 (Action Draft로 저장된 구매요청 초안) 예시.
+ * 규칙으로 만든 초안도 '생성'(AI_GENERATED)으로 시작해 곧바로 '확인 대기'(WAITING_APPROVAL)로 넘어간다 (REQ-ACT-003).
+ * 확정은 '확인 대기'에서만 할 수 있다 (04 13.4).
+ */
 export const RAW_SHORTAGE_CANDIDATE = {
   actionType: ACTION_TYPE.PURCHASE_REQUISITION_CREATE,
+  draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
   rawMaterial: '철광석',
   rawMaterialCode: 'ORE01',
   requiredTon: '1,200',
@@ -164,7 +187,7 @@ export interface AgentHistoryEntry {
   key: string;
   time: string;
   actorType: ActorType;
-  eventType: BusinessEventType | ProposedBusinessEventType;
+  businessEventType: ExampleBusinessEventType;
   eventNo?: string;
   head: string;
   detail: string;
@@ -178,7 +201,7 @@ export const AGENT_HISTORY: readonly AgentHistoryEntry[] = [
     key: 'detected',
     time: '10-01 06:00',
     actorType: 'SYSTEM',
-    eventType: PROPOSED_BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED,
+    businessEventType: PROPOSED_BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED,
     eventNo: formatEventNo('261001', 1),
     head: '원료 부족 감지',
     detail: '철광석(ORE01) 부족량 1,200 t',
@@ -187,16 +210,16 @@ export const AGENT_HISTORY: readonly AgentHistoryEntry[] = [
     key: 'draft',
     time: '10-01 06:00',
     actorType: 'SYSTEM',
-    eventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
+    businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
     eventNo: formatEventNo('261001', 2),
     head: '대응 후보를 구매요청 초안으로 저장',
-    detail: '같은 대상의 미처리 초안이 없어 새로 만들었어요',
+    detail: `같은 대상의 미처리 초안이 없어 새로 만들었어요 · '${DRAFT_STATUS_LABEL[DRAFT_STATUS.AI_GENERATED]}'으로 시작해 '${DRAFT_STATUS_LABEL[DRAFT_STATUS.WAITING_APPROVAL]}'로 넘어갔어요`,
   },
   {
     key: 'confirm',
-    time: '확정 대기',
+    time: DRAFT_STATUS_LABEL[DRAFT_STATUS.WAITING_APPROVAL],
     actorType: 'USER',
-    eventType: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
+    businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
     head: '구매 부서원이 확정하면 기록돼요',
     detail: '확정한 사람이 요청자가 되고, 그 사람 권한으로 구매요청을 등록해요',
     pending: true,

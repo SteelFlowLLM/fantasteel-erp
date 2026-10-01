@@ -40,9 +40,9 @@ describe('과거 사례 검색 예시 (BP-CASE-01)', () => {
 
   it('사례 작업 로그의 주체는 사용자뿐이고(AI 주체 없음), 등록은 AI 경유로 표시한다', () => {
     for (const entry of SELECTED_CASE_HISTORY) expect(entry.actorType).toBe(ACTOR_TYPE.USER);
-    const registered = SELECTED_CASE_HISTORY.find((entry) => entry.eventType === PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED);
-    expect(registered?.aiAssisted).toBe(true);
-    expect(SELECTED_CASE_HISTORY.map((entry) => entry.eventType)).toEqual(['INSPECTION_REGISTERED', 'DISPOSITION_SET', 'CASE_REGISTERED']);
+    const registered = SELECTED_CASE_HISTORY.find((entry) => entry.businessEventType === PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED);
+    expect(registered?.isAiAssisted).toBe(true);
+    expect(SELECTED_CASE_HISTORY.map((entry) => entry.businessEventType)).toEqual(['INSPECTION_REGISTERED', 'DISPOSITION_SET', 'CASE_REGISTERED']);
     expect(CASE_REGISTER_STEPS.at(-1)).toBe('품질 담당 확인·저장');
   });
 

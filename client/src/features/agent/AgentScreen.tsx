@@ -13,16 +13,7 @@ import { PageHead } from '@/components/Page';
 import { Steps } from '@/components/Steps';
 import { Tag } from '@/components/Tag';
 import { Timeline } from '@/components/Timeline';
-import {
-  ACTION_TYPE_LABEL,
-  BUSINESS_EVENT_TYPE_LABEL,
-  DRAFT_STATUS,
-  DRAFT_STATUS_LABEL,
-  PERMISSION_LABEL,
-  PROPOSED_BUSINESS_EVENT_TYPE_LABEL,
-  type BusinessEventType,
-  type ProposedBusinessEventType,
-} from '@/codes';
+import { ACTION_TYPE_LABEL, DRAFT_STATUS_LABEL, PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL } from '@/codes';
 import {
   ActorTag,
   AiBrief,
@@ -44,18 +35,14 @@ import {
   AGENT_RULES,
   AGENT_TRIGGER_NAME,
   CANDIDATE_FLOW,
+  DRAFT_FLOW,
   EXAMPLE_NO,
   RAW_SHORTAGE_CANDIDATE,
   RAW_SHORTAGE_METRICS,
   agentRuleOf,
+  draftStepState,
 } from '@/features/agent/agentExample';
-
-const eventLabelOf = (eventType: BusinessEventType | ProposedBusinessEventType): string =>
-  eventType in PROPOSED_BUSINESS_EVENT_TYPE_LABEL
-    ? PROPOSED_BUSINESS_EVENT_TYPE_LABEL[eventType as ProposedBusinessEventType]
-    : BUSINESS_EVENT_TYPE_LABEL[eventType as BusinessEventType];
-
-const DRAFT_FLOW = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL, DRAFT_STATUS.APPROVED, DRAFT_STATUS.EXECUTED] as const;
+import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 
 function DetectionList() {
   const selectedKey = AGENT_DETECTIONS[0]?.key;
@@ -144,7 +131,7 @@ function CandidateCard() {
       icon="cart"
       title={`대응 후보 1 · ${ACTION_TYPE_LABEL[RAW_SHORTAGE_CANDIDATE.actionType]}`}
       meta="규칙으로 생성 · Action Draft"
-      actions={<Badge tone="ai">{DRAFT_STATUS_LABEL[DRAFT_STATUS.AI_GENERATED]}</Badge>}
+      actions={<Badge tone="wait">{DRAFT_STATUS_LABEL[RAW_SHORTAGE_CANDIDATE.draftStatus]}</Badge>}
       className="flex-none"
     >
       <div className="grid grid-cols-[1.1fr_1fr] gap-4">
@@ -160,7 +147,7 @@ function CandidateCard() {
             },
             { label: '수량', value: `${RAW_SHORTAGE_CANDIDATE.requiredTon} t` },
             { label: '희망 입고일', value: RAW_SHORTAGE_CANDIDATE.desiredReceiptDate },
-            { label: '확정', value: `구매 부서원 (${confirmPermission} 사용 권한)` },
+            { label: '확정', value: `구매 부서원 (${confirmPermission} ${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} 권한)` },
             { label: '요청자', value: '확정한 사람' },
             { label: '최종 승인', value: '요청자 소속 부서장' },
           ]}
@@ -180,7 +167,11 @@ function CandidateCard() {
       <div className="flex items-center gap-3">
         <span className="flex-none text-cap text-ink-3">초안 상태</span>
         <Steps
-          items={DRAFT_FLOW.map((status, index) => ({ key: status, label: DRAFT_STATUS_LABEL[status], state: index === 0 ? 'run' : 'todo' }))}
+          items={DRAFT_FLOW.map((status) => ({
+            key: status,
+            label: DRAFT_STATUS_LABEL[status],
+            state: draftStepState(status, RAW_SHORTAGE_CANDIDATE.draftStatus),
+          }))}
         />
       </div>
       <div className="flex items-center gap-2 border-t border-ai-line pt-3">
@@ -269,7 +260,7 @@ function DetectionDetail() {
               title: (
                 <span className={entry.pending ? 'flex flex-wrap items-center gap-1.5 text-ink-3' : 'flex flex-wrap items-center gap-1.5'}>
                   <ActorTag actorType={entry.actorType} />
-                  <EventName>{eventLabelOf(entry.eventType)}</EventName>
+                  <EventName>{businessEventLabelOf(entry.businessEventType)}</EventName>
                   <b className="font-semibold">{entry.head}</b>
                   {entry.eventNo ? <span className="font-mono text-cap text-ink-3">{entry.eventNo}</span> : null}
                 </span>
