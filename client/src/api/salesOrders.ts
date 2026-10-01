@@ -86,7 +86,6 @@ function linkedPlanIdsOf(tables: Tables, salesOrderId: number): number[] {
   return [...ids].filter((id) => tables.productionPlan.some((p) => p.id === id)).sort((a, b) => a - b);
 }
 
-/** 수주 조회 권한이 없어도 그 수주 업무방 멤버면 요약을 볼 수 있다 (업무방은 조직도에서 고른 사람이 함께 쓴다) */
 export const salesOrderKeys = {
   all: ['sales-orders'] as const,
   list: () => ['sales-orders', 'list'] as const,

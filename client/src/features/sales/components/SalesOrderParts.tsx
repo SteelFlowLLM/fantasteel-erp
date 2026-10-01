@@ -100,7 +100,7 @@ export function ItemLabel({ lineNo, itemType, itemName, itemCode }: { lineNo?: n
   );
 }
 
-const MEASURE_FILL = { run: 'bg-run', ok: 'bg-ok', brand: 'bg-brand', muted: 'bg-[#9db6d1]' } as const;
+const MEASURE_FILL = { run: 'bg-run', ok: 'bg-ok', brand: 'bg-brand', muted: 'bg-chart-3' } as const;
 export type MeasureTone = keyof typeof MEASURE_FILL;
 
 /**

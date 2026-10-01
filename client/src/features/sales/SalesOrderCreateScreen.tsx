@@ -206,8 +206,8 @@ export function SalesOrderCreateScreen() {
   });
   const totalQty = validQtyLines.reduce((sum, l) => sum + l.qty, 0);
   const totalTon = sumTon(validQtyLines.map((l) => l.ton));
-  const reserveTotal = previewRows.reduce((sum, r) => sum + r.reserveQty, 0);
-  const shortageTotal = previewRows.reduce((sum, r) => sum + r.shortageQty, 0);
+  const reserveTotalQty = previewRows.reduce((sum, r) => sum + r.reserveQty, 0);
+  const shortageTotalQty = previewRows.reduce((sum, r) => sum + r.shortageQty, 0);
   const planCount = previewRows.filter((r) => r.shortageQty > 0).length;
   const customerName = customers.data?.find((c) => c.id === customerId)?.customerName ?? null;
 
@@ -346,10 +346,10 @@ export function SalesOrderCreateScreen() {
             unit={unit}
             sub={`${fmtTon(totalTon)} (계산값) · 품목 ${lines.length} · ${customerName ?? '고객사 미선택'}`}
           />
-          <Kpi label="재고 예약 (예상)" value={reserveTotal.toLocaleString('en-US')} unit={unit} sub="합격 재고 우선 · LOT은 정하지 않아요" />
+          <Kpi label="재고 예약 (예상)" value={reserveTotalQty.toLocaleString('en-US')} unit={unit} sub="합격 재고 우선 · LOT은 정하지 않아요" />
           <Kpi
             label="부족 매수 (예상)"
-            value={shortageTotal.toLocaleString('en-US')}
+            value={shortageTotalQty.toLocaleString('en-US')}
             unit={unit}
             sub={planCount > 0 ? `생산계획 ${planCount}건 · 히트 편성까지 계산해요` : '생산계획이 필요 없어요'}
           />

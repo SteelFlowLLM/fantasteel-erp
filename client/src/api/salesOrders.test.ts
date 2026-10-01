@@ -1,6 +1,7 @@
 // 수주 api: 권한 확인(requireActor) + core 서비스 호출이 화면에서 쓰는 모양대로 동작하는지 (14.1 1단계, 14.2 취소, 9.3 코드).
 import { describe, expect, it } from 'vitest';
 import { ApiError, InputError } from '@/api/client';
+import { messengerApi } from '@/api/messenger';
 import { salesOrderApi } from '@/api/salesOrders';
 import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
@@ -264,5 +265,20 @@ describe('업무방 열기 (REQ-MSG-001)', () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     expect(await codeOf(salesOrderApi.openWorkRoom({ salesOrderId: soId, memberEmployeeIds: [] }))).toBe('COM-002');
     expect(countOf('chatRoom')).toBe(rooms + 1);
+  });
+
+  it('BP-MSG-01: 업무방 멤버라도 수주 조회 권한이 없으면 수주를 못 보고, 메신저 수주 요약은 denied', async () => {
+    const soId = salesOrderIdOf('SO-2609-002');
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const room = await salesOrderApi.openWorkRoom({ salesOrderId: soId, memberEmployeeIds: [employeeIdOf(SEED_EMPLOYEE_NO.logistics)] });
+
+    actAs(SEED_EMPLOYEE_NO.logistics);
+    expect(await codeOf(salesOrderApi.detail(soId))).toBe('COM-002');
+    expect(await codeOf(salesOrderApi.workRoom(soId))).toBe('COM-002');
+    const view = await messengerApi.getRoom(room.chatRoomId);
+    expect(view).toMatchObject({ salesOrderState: 'denied', salesOrder: null });
+
+    actAs(SEED_EMPLOYEE_NO.sales);
+    expect(await messengerApi.getRoom(room.chatRoomId)).toMatchObject({ salesOrderState: 'ok', salesOrder: { id: soId } });
   });
 });

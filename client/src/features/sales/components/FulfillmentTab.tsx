@@ -35,7 +35,7 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
         : `여재 ${r.reservedFromSurplusQty}${unit}를 예약해 재생산이 필요 없어졌어요`,
     onSuccess: () => setConfirming(false),
   });
-  const need = item.shortage.reproductionNeedQty;
+  const reproductionNeedQty = item.shortage.reproductionNeedQty;
   return (
     <>
       <Banner
@@ -54,7 +54,7 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
         }
       >
         <b>
-          품목 {item.lineNo} · 재생산 필요 {need}
+          품목 {item.lineNo} · 재생산 필요 {reproductionNeedQty}
           {unit}
         </b>{' '}
         — 미확보 {item.shortage.unsecuredQty}
