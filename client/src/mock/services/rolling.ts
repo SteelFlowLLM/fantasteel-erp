@@ -142,9 +142,9 @@ export function confirmRollingAllocations(tx: MockTx, actor: PersonActor, input:
   if (!view.rollable) inputError('productionPlanId', view.notRollableReason ?? '열연할 수 없는 계획이에요');
   const lotIds = [...new Set(input.lotIds)];
   if (lotIds.length === 0) inputError('lotIds', '배정할 슬래브를 골라 주세요');
+  const lots = lotIds.map((id) => assertAllocatableLot(tx.tables, id, view.slabItem.id));
   if (lotIds.length > view.neededQty) throw new ApiError('INV-001', `열연에 더 필요한 슬래브는 ${view.neededQty}매예요`);
   if (lotIds.length > Math.max(0, view.slabPool.availableQty)) throw new ApiError('INV-001', `판매 예약을 빼고 배정할 수 있는 슬래브는 ${Math.max(0, view.slabPool.availableQty)}매예요`);
-  const lots = lotIds.map((id) => assertAllocatableLot(tx.tables, id, view.slabItem.id));
   const plan = mustGet(tx.tables, 'productionPlan', view.productionPlanId, '생산계획');
   recordRecommendation(tx, actor, {
     allocationPurpose: 'HOT_ROLLING',

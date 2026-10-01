@@ -240,11 +240,11 @@ export function confirmShipmentAllocations(
     const lotIds = [...new Set(lineInput.lotIds)];
     if (lotIds.length === 0) continue;
     const soItem = mustGet(tx.tables, 'salesOrderItem', line.salesOrderItemId, '수주 품목');
+    const lots = lotIds.map((id) => assertAllocatableLot(tx.tables, id, soItem.itemId));
     const allocated = tx.tables.allocation.filter((a) => a.shipmentRequestItemId === line.id && a.allocationStatus === 'CONFIRMED').length;
     if (allocated + lotIds.length > line.requestQty) throw new ApiError('INV-001', `배정 대기 ${line.requestQty - allocated}매`);
     const itemAllocated = tx.tables.allocation.filter((a) => a.salesOrderItemId === soItem.id && a.allocationPurpose === 'SHIPMENT' && a.allocationStatus === 'CONFIRMED').length;
     if (itemAllocated + lotIds.length > activeReservedQtyOfItem(tx.tables, soItem.id)) throw new ApiError('INV-001', '예약 매수보다 많이 배정할 수 없어요');
-    const lots = lotIds.map((id) => assertAllocatableLot(tx.tables, id, soItem.itemId));
     recordRecommendation(tx, actor, {
       allocationPurpose: 'SHIPMENT',
       itemId: soItem.itemId,
