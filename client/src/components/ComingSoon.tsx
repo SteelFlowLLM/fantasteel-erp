@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { Button, type ButtonSize, type ButtonVariant } from '@/components/Button';
 import { cn } from '@/lib/cn';
+import { withEunNeun } from '@/lib/josa';
 
 /** P2 = 2등급(AI), EX = 추가 기능, AI = 등급 표시 없이 '준비 중'만 (예: Message → ERP의 AI 자동 추출) */
 export type SoonGrade = 'P2' | 'EX' | 'AI';
@@ -32,7 +33,7 @@ export function ComingSoonArea({ grade = 'P2', title, className, children }: { g
       <SoonBanner>
         <ComingSoon grade={grade} />
         <span>
-          <b>{title}</b>은(는) {grade === 'P2' ? '2등급(AI) 기능' : '추가 기능'}이라 지금은 화면만 볼 수 있어요. 1등급 기능이 끝난 뒤 하나씩 추가돼요.
+          <b>{withEunNeun(title)}</b> {grade === 'P2' ? '2등급(AI) 기능' : '추가 기능'}이라 지금은 화면만 볼 수 있어요. 1등급 기능이 끝난 뒤 하나씩 추가돼요.
         </span>
       </SoonBanner>
       <div aria-hidden="true" inert className="pointer-events-none flex min-h-0 flex-1 flex-col gap-4 opacity-[0.62] grayscale-25 select-none">
