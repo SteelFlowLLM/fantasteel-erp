@@ -1,6 +1,8 @@
 // MRP (REQ-PRD-005, BP-PRD-01, 업무 프로세스 4.4, 12.2 GET /mrp/requirements?from&to).
 // - 실행 이력을 저장하지 않는다. 기간을 정해 바로 계산한다.
-// - 대상: 계획·진행중 생산계획 중 아직 만들지 않은 히트가 있고 필요일이 기간 안인 것.
+// - 대상: 계획·진행중 생산계획 중 아직 만들지 않은 히트가 있는 것 전부를 필요일 순으로 차감해 순소요를 낸다.
+//   기간(from~to)은 결과(plans·materials·requisitionLines)를 보여 줄 때만 거른다 → 기간 앞의 아직 못 만든 계획도
+//   먼저 잔량을 쓰고, 기간을 어떻게 고르든 같은 계획의 순소요가 같다 (BP-PRD-01 시점별 가용 공급 차감).
 //   필요일(가정값) = 연결 수주 품목의 납기일 (리드타임 기준이 문서에 없다). 수주 연결이 없으면 계획 등록일.
 // - 남은 히트 톤 → 필요 용선(÷ 제강 수율) → 철광석·석탄·석회석(× t/t), 합금철(히트 톤 × kg/t ÷ 1,000)
 //   → 시점별로 원료 LOT 잔량·입고예정(필요일까지 도착하는 확정 발주의 미입고량)을 빼서 순소요. 같은 공급을 두 번 빼지 않는다.
@@ -84,7 +86,6 @@ export function computeMrp(tables: Tables, period: { from: string; to: string })
   for (const plan of tables.productionPlan) {
     if (plan.productionPlanStatus !== 'PLANNED' && plan.productionPlanStatus !== 'IN_PROGRESS') continue;
     const needDate = needDateOfPlan(tables, plan);
-    if (needDate < period.from || needDate > period.to) continue;
     const heatsMade = tables.lot.filter((l) => l.productionPlanId === plan.id && l.lotType === 'HEAT').length;
     const remainingHeatCount = Math.max(0, plan.heatCount - heatsMade);
     if (remainingHeatCount === 0) continue;
@@ -130,12 +131,16 @@ export function computeMrp(tables: Tables, period: { from: string; to: string })
         return [{ kind: 'SCHEDULED', materialId: line.itemId, availableDate: po.dueDate, ton: line.scheduledReceiptTon, reservedForPlanId: planId, sourceId: line.id }];
       }),
   ];
-  const { lines } = netRequirements(
+  // 모든 열린 계획으로 차감한다 (기간 밖 계획 몫의 입고예정도 그 계획이 먼저 쓴다)
+  const { lines: allLines } = netRequirements(
     planRows.flatMap((p) => p.requirements),
     supplies,
   );
+  const inPeriod = (needDate: string) => needDate >= period.from && needDate <= period.to;
+  const lines = allLines.filter((l) => inPeriod(l.needDate));
 
   const plans: MrpPlanRow[] = planRows
+    .filter((p) => inPeriod(p.needDate))
     .sort((a, b) => a.needDate.localeCompare(b.needDate) || a.productionPlanId - b.productionPlanId)
     .map(({ requirements: _requirements, ...row }) => ({
       ...row,

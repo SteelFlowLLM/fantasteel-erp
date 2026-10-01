@@ -1,5 +1,6 @@
 // 열연 투입 배정·열연 실적 (REQ-PRD-004, REQ-INV-006·008, BP-INV-01, 14.2).
-// - 코일 계획 → 대응 슬래브 규격, 필요 매수 = 부족 매수 − 만든 코일 − 이미 열연 배정한 슬래브.
+// - 코일 계획 → 대응 슬래브 규격, 필요 매수 = 부족 매수 − 만든 코일(불합격 제외) − 이미 열연 배정한 슬래브.
+//   불합격 코일은 만든 코일로 세지 않는다 → 같은 계획에서 다시 열연해 채운다 (BP-QC-01 부족량 재계산 → 진행 계획 확인).
 // - FIFO 추천(생산완료일 → LOT 번호): 적격·미소진·미배정 슬래브 중 '예약 가용'(판매 ACTIVE 예약 몫을 뺀 수) 안에서만 → 판매 예약을 침범하지 않는다.
 // - 확정 = HOT_ROLLING 배정 CONFIRMED (production_plan_id). 추천은 저장하지 않고 확정 때 ALLOCATION_RECOMMENDED로 남긴다.
 // - 열연 실적: 배정 슬래브를 소비(배정 CONSUMED, LOT CONSUMED) → 슬래브 1매 = 코일 1개 `C+슬래브번호`(HT- 제외), 슬래브→코일 1:1, 코일 검사 대상.
@@ -29,7 +30,7 @@ import {
 import { ensurePendingInspection } from '@/mock/services/inspections';
 import { heatOf, reservationPoolOf, type ReservationPool } from '@/mock/services/inventoryPool';
 import { planForWork, upsertCompletedResult, type SimulationMark } from '@/mock/services/productionResults';
-import { refreshPlanStatus } from '@/mock/services/productionPlans';
+import { planProgressOf, refreshPlanStatus } from '@/mock/services/productionPlans';
 
 type Tables = Readonly<MockTables>;
 
@@ -57,11 +58,13 @@ export interface RollingPlanView {
   coilItem: { id: number; itemCode: string; itemName: string; unitWeightTon: string };
   slabItem: { id: number; itemCode: string; itemName: string; unitWeightTon: string };
   shortageQty: number;
-  /** 이미 만든 코일 */
+  /** 이미 만든 코일 = 합격 + 판정 대기 (불합격·히트 불합격 코일은 세지 않는다) */
   rolledQty: number;
+  /** 불합격(히트 불합격 포함) 코일 — 필요 매수에서 빼지 않는다 */
+  failedCoilQty: number;
   /** CONFIRMED 열연 배정 */
   allocatedQty: number;
-  /** 더 배정해야 할 슬래브 = max(0, 부족 − 코일 − 배정) */
+  /** 더 배정해야 할 슬래브 = max(0, 부족 − 코일(불합격 제외) − 배정) */
   neededQty: number;
   /** 슬래브 규격 풀 (예약 가용 = 판매 예약 몫을 뺀 수) */
   slabPool: ReservationPool;
@@ -90,7 +93,8 @@ export function rollingPlanView(tables: Tables, productionPlanId: number): Rolli
   const coil = mustGet(tables, 'item', plan.itemId, '규격');
   if (coil.itemType !== 'COIL') inputError('productionPlanId', '코일 계획만 열연해요');
   const slab = slabSpecOfCoil(tables, coil);
-  const rolledQty = tables.lot.filter((l) => l.productionPlanId === plan.id && l.lotType === 'COIL').length;
+  const progress = planProgressOf(tables, plan);
+  const rolledQty = progress.usableCoilQty;
   const allocations = hotRollingAllocationsOf(tables, plan.id);
   const neededQty = Math.max(0, plan.shortageQty - rolledQty - allocations.length);
   const slabPool = reservationPoolOf(tables, slab.id);
@@ -108,6 +112,7 @@ export function rollingPlanView(tables: Tables, productionPlanId: number): Rolli
     slabItem: { id: slab.id, itemCode: slab.itemCode, itemName: slab.itemName, unitWeightTon: unitWeightOf(slab) },
     shortageQty: plan.shortageQty,
     rolledQty,
+    failedCoilQty: progress.coilQty - progress.usableCoilQty,
     allocatedQty: allocations.length,
     neededQty,
     slabPool,
@@ -249,8 +254,8 @@ export function registerHotRolling(tx: MockTx, actor: PersonActor, input: HotRol
       productionPlanNo: plan.productionPlanNo,
       startedAt: times.startedAt,
       completedAt: times.completedAt,
-      slabLotNos: slabs.map((s) => s.lot.lotNo),
-      coilLotNos: coilLots.map((c) => c.lotNo),
+      slabNos: slabs.map((s) => s.lot.lotNo),
+      coilNos: coilLots.map((c) => c.lotNo),
       outputQty: coilLots.length,
       isSimulated: completed.isSimulated,
     },

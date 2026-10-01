@@ -1,6 +1,6 @@
 // 가짜 서버 서비스의 공통 도우미. 순환 참조를 피하려고 @/api/* 대신 @/api/errors만 쓴다.
 // - 쓰기 서비스: fn(tx, actor, input). 읽기: fn(tables, input). 역할 권한은 확인하지 않는다(각 화면 api가 requireActor로 먼저 확인).
-import type { ProcessType, ProductItemType } from '@/codes';
+import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType } from '@/codes';
 import { ApiError, FieldErrors, InputError } from '@/api/errors';
 import { decCmp, isDecimalText } from '@/lib/decimal';
 import { pickCurrentStandard } from '@/lib/inspectionJudgment';
@@ -162,7 +162,7 @@ export function unitWeightOf(item: ItemRow): string {
 /** 라우팅 계획 수율 (공정별). 없으면 MST-001. */
 export function routingYieldOf(tables: Tables, itemType: ProductItemType, processType: ProcessType): string {
   const row = tables.routing.find((r) => r.itemType === itemType && r.processType === processType);
-  if (!row || !row.plannedYieldRate) throw new ApiError('MST-001', `라우팅 계획 수율(${itemType === 'SLAB' ? '슬래브' : '코일'} ${processType})`);
+  if (!row || !row.plannedYieldRate) throw new ApiError('MST-001', `라우팅 계획 수율(${ITEM_TYPE_LABEL[itemType]} ${PROCESS_TYPE_LABEL[processType]})`);
   return row.plannedYieldRate;
 }
 

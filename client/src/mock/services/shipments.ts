@@ -68,8 +68,8 @@ export interface ShippableItem {
 
 /** 이 고객사의 출하할 수 있는 수주 품목 (진행중·부분출하, 잔량 > 0) */
 export function shippableItemsOf(tables: Tables, customerId: number): ShippableItem[] {
-  const orders = tables.salesOrder.filter((o) => o.customerId === customerId && !o.cancelledAt);
-  return orders
+  const salesOrders = tables.salesOrder.filter((o) => o.customerId === customerId && !o.cancelledAt);
+  return salesOrders
     .flatMap((so) =>
       tables.salesOrderItem
         .filter((i) => i.salesOrderId === so.id && (i.salesOrderItemStatus === 'OPEN' || i.salesOrderItemStatus === 'PARTIALLY_SHIPPED'))
@@ -202,7 +202,7 @@ export function createShipmentRequest(
   );
   // 수주 타임라인에 보이도록 수주마다 한 건씩 남긴다
   for (const soId of [...new Set(lines.map((l) => l.so.id))]) {
-    const orderLines = items.filter((_, i) => lines[i].so.id === soId);
+    const salesOrderLines = items.filter((_, i) => lines[i].so.id === soId);
     recordBusinessEvent(tx, {
       businessEventType: 'SHIPMENT_REQUEST_CREATED',
       actor,
@@ -214,7 +214,7 @@ export function createShipmentRequest(
         shipmentRequestNo: shipmentRequest.shipmentRequestNo,
         customerName: customer.customerName,
         requestedShipDate: shipmentRequest.requestedShipDate,
-        lines: orderLines.map((l) => ({ lineNo: l.lineNo, salesOrderItemId: l.salesOrderItemId, requestQty: l.requestQty })),
+        lines: salesOrderLines.map((l) => ({ lineNo: l.lineNo, salesOrderItemId: l.salesOrderItemId, requestQty: l.requestQty })),
       },
     });
   }

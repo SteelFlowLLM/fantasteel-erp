@@ -226,7 +226,7 @@ export function createMillSheet(
     targetId: row.id,
     targetNo: millSheetNo,
     salesOrderId: salesOrder.id,
-    afterData: { millSheetNo, shipmentRequestNo: input.shipmentRequest.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatLotNos: heats.map((h) => h.heatLotNo), totalQty: snapshot.totalQty },
+    afterData: { millSheetNo, shipmentRequestNo: input.shipmentRequest.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatNos: heats.map((h) => h.heatLotNo), totalQty: snapshot.totalQty },
     lotIds: snapshot.lotIds,
   });
   return row;

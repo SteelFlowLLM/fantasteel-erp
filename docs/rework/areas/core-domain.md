@@ -36,7 +36,7 @@ export const salesOrderApi = {
 | `decimal.ts` | BigInt 십진 계산: `decAdd/Sub/Mul/Div/Cmp/Sum/Round`, `decCeilDiv`(히트 수), `decFloorDiv`, `floorMulInt`(손실 매수). 반올림 0.5 올림 | 4.1 "십진수 연산" |
 | `eligibility.ts` | `productEligibility(lot, heat)` → `ELIGIBLE / PENDING / FAILED / HEAT_FAILED / NOT_AVAILABLE`, `isQualityExcluded` | 4.3, INV-003·007 |
 | `inventoryMath.ts` | `reservationAvailableQty`(4.2 식), `stockFirstSplit`, `shortageOf`(미출하·현재 미확보·추가 계획 필요), `reproductionNeedQty`, `progressOf`(분모 포함) | 4.2·4.5, SO-003, PRD-006 |
-| `heatPlanning.ts` | `formHeats`(목표중량·누적 수율·필요 용강·히트 수·히트 톤·히트당 슬래브·예상 여재), `cumulativeYieldRate`, `maxSlabQtyFromHeat` | 4.4, PRD-002 |
+| `heatPlanning.ts` | `planHeats`(목표중량·누적 수율·필요 용강·히트 수·히트 톤·히트당 슬래브·예상 여재), `cumulativeYieldRate`, `maxSlabQtyFromHeat` | 4.4, PRD-002 |
 | `mrp.ts` | `hotMetalTonFor`, `rawMaterialTonFor`, `ferroalloyTonFor`, `netRequirements`(시점별 순소요, 같은 공급 중복 차감 없음, 계획 몫 입고예정 우선) | 4.4, PRD-005 |
 | `fifo.ts` | `compareFifo/sortFifo/pickFifo`(생산완료일 → LOT 번호), `planFifoDeduction`(입고일 순 차감, 모자라면 shortage) | INV-006, LOT-002·004 |
 | `inspectionJudgment.ts` | `appliesToThickness`(초과~이하), `applicableItems`, `judgeValue`(이상·이하), `judgeInspection`(필수 누락·기준 없음 PENDING, 벗어나면 FAIL), `calcCarbonEquivalent`, `typicalPassValue`('기준 안 값으로 채우기') | QC-003 |
@@ -102,12 +102,12 @@ export const salesOrderApi = {
 ## 5. 생산계획·히트 편성·재생산 (`productionPlans.ts`) — REQ-PRD-001·002·006, BP-PRD-01
 
 - 상태: **PLANNED → IN_PROGRESS(그 계획의 첫 작업 실적, 시작만 해도) → COMPLETED**. CANCELLED는 PLANNED에서만. CONFIRMED 없음.
-- **COMPLETED 조건(정의)**: 편성한 히트 수만큼 제강·연주가 끝났고, 코일 계획이면서 수주 연결이 있으면 만든 코일 수 ≥ 부족 매수. (연결이 끊긴 코일 계획은 연주까지만.) 코일 계획이 완료되면 열연하지 않고 남은 그 계획의 적격 슬래브를 여재로 표시한다.
-- **진행 계획 잔여 목표(4.5)** `planProgressOf(...).remainingTargetQty`: 취소·수주 연결 없음 → 0. 연주할 히트가 남았으면 `부족 매수 − 합격 매수`. 모두 연주했으면 그 값과 "아직 합격할 수 있는 매수"(판정 대기 + 코일 계획의 열연 배정·열연 가능 자기 슬래브) 중 작은 값.
+- **COMPLETED 조건(정의)**: 편성한 히트 수만큼 제강·연주가 끝났고, 코일 계획이면서 수주 연결이 있으면 만든 코일(불합격·히트 불합격 제외 = 합격 + 판정 대기) 수 ≥ 부족 매수. (연결이 끊긴 코일 계획은 연주까지만 — 수주 취소로 연결이 끊기는 순간에도 다시 확인한다.) 코일 계획이 완료되면 열연하지 않고 남은 그 계획의 적격 슬래브를 여재로 표시한다(완료 뒤 합격한 슬래브도 합격 때 여재).
+- **진행 계획 잔여 목표(4.5)** `planProgressOf(...).remainingTargetQty`: 취소·수주 연결 없음 → 0. 연주할 히트가 남았으면 `부족 매수 − 합격 매수`. 모두 연주했으면 그 값과 "아직 합격할 수 있는 매수" 중 작은 값. 아직 합격할 수 있는 매수 = 판정 대기 + (완료 전 코일 계획만) 열연 배정 + `ownAllocatableSlabQty`(판정 대기 자기 슬래브 + min(적격 미배정 자기 슬래브, 슬래브 규격 예약 가용)). 다른 수주가 예약으로 가져간 자기 슬래브, 완료 계획의 남은 슬래브는 세지 않는다 → 그만큼 '추가 계획 필요'가 생겨 재생산할 수 있다.
 
 | 함수 | 입력 → 출력 | 규칙·오류 | 작업 로그 |
 |---|---|---|---|
-| `formHeatsFor(tables, item, shortageQty)` | → `HeatFormation` | 수율·배합(철광석·석탄·석회석 공통, 강종 합금철)·매핑 누락 MST-001 | — |
+| `planHeatsFor(tables, item, shortageQty)` | → `HeatPlan` | 수율·배합(철광석·석탄·석회석 공통, 강종 합금철)·매핑 누락 MST-001 | — |
 | `createProductionPlan(tx, actor, {salesOrderItemId, itemId, shortageQty, isReproduction, createdEmployeeId})` | 수주 등록·재생산이 부른다. shortage_qty·cumulative_yield_rate·required_steel_ton·heat_count 저장 | | PRODUCTION_PLAN_CREATED / REPRODUCTION_PLAN_CREATED (ORDER_SHORTAGE) |
 | `cancelProductionPlan(tx, actor, {productionPlanId, reasonText?, expectedUpdatedAt?})` | PLANNED가 아니면 입력 오류. 열연 배정 해제 | | PRODUCTION_PLAN_CANCELLED |
 | `createReproductionPlan(tx, actor, {salesOrderItemId})` | → `{reservedFromSurplusQty, plan}` | **사람이 만든다(자동 없음)**. 먼저 같은 규격 여재로 미확보 예약, 그래도 '추가 계획 필요'가 남을 때만 is_reproduction 계획. 남는 것이 없으면 입력 오류 | RESERVATION_CREATED(USER) · REPRODUCTION_PLAN_CREATED |
@@ -127,7 +127,7 @@ export const salesOrderApi = {
 | `startWork(tx, actor, {productionPlanId, processType, startedAt, blastFurnaceCode?, converterCode?, heatLotId?})` | 고로·전로 코드 형식 `[A-Z0-9]{2,10}` | production_result(completed_at null), 계획 IN_PROGRESS | — | PRODUCTION_STARTED |
 | `registerIronmaking(tx, actor, {productionPlanId, blastFurnaceCode, startedAt, completedAt, outputTon, productionResultId?})` | 고로 코드, 작업일시, 용선량 | 철광석·석탄·석회석 = 용선량 × t/t, **완료일까지 입고된** 원료 LOT에서 입고일 FIFO 차감 → 용선 `HM-고로-YYMMDD-NN` | 원료→용선 **PERIOD_BASED**(input_ton = 차감량, period = 실적 시작~종료, 차감된 LOT만) | PRODUCTION_STARTED · PRODUCTION_RESULT_REGISTERED (LOT: 용선 + 원료) |
 | `registerSteelmaking(tx, actor, {productionPlanId, converterCode, startedAt, completedAt, inputHotMetalTon, …})` | 전로 코드, 투입 용선량(용선 LOT은 생산 순 FIFO 자동) | 히트 톤 = 투입 용선 × 제강 계획 수율, 합금철 = 히트 톤 × kg/t ÷ 1,000 입고일 FIFO → 히트 `HT-전로-YYMMDD-NNN`(계획 강종), **성분 검사 대상(PENDING 검사 행)**. 편성 히트 수를 넘으면 입력 오류 | 용선→히트 **ACTUAL_INPUT(N:M)**, 합금철→히트 **ACTUAL_INPUT** | 위와 같음 (`afterData.heatSeq` = 편성 안 순번) |
-| `registerCasting(tx, actor, {productionPlanId, heatLotId, outputQty, startedAt, completedAt, itemId?, …})` | 히트, 규격(생략 가능), 슬래브 매수, 작업일시 | **최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량)**(넘으면 입력 오류), 같은 히트 두 번 연주 불가 → 슬래브 `히트번호-SS`, 표면·치수 검사 대상. 완료 후 여재 계획이면 surplus_at | 히트→슬래브 ACTUAL_INPUT (input_ton = 슬래브 1매 이론중량) | 위와 같음 (+ SURPLUS_CONVERTED) |
+| `registerCasting(tx, actor, {productionPlanId, heatLotId, outputQty, startedAt, completedAt, itemId?, …})` | 히트, 규격(생략 가능), 슬래브 매수, 작업일시 | **최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량)**(넘으면 입력 오류), 같은 히트 두 번 연주 불가 → 슬래브 `히트번호-SS`, 표면·치수 검사 대상. 완료 후 여재 계획이어도 연주 때는 surplus_at을 넣지 않는다(검사로 적격이 되면 여재) | 히트→슬래브 ACTUAL_INPUT (input_ton = 슬래브 1매 이론중량) | 위와 같음 |
 | `maxCastingQtyOf(tx, plan, heat)` | 화면 안내용 | | | |
 
 ## 7. 실적 시뮬레이션 (`simulation.ts`) — REQ-PRD-007, BP-SEED-01
@@ -144,7 +144,7 @@ export const salesOrderApi = {
 
 | 함수 | 내용 |
 |---|---|
-| `rollingPlans(tables)` / `rollingPlanView(tables, planId)` | 코일 계획(계획·진행중): 코일 규격·대응 슬래브 규격, 부족 매수, 만든 코일, 배정 수, **필요 매수 = 부족 − 코일 − 배정**, 슬래브 풀(예약 가용), `recommendableQty = min(필요, 예약 가용)`, 배정 목록, `rollable`(수주 연결 없으면 false + 이유) |
+| `rollingPlans(tables)` / `rollingPlanView(tables, planId)` | 코일 계획(계획·진행중): 코일 규격·대응 슬래브 규격, 부족 매수, 만든 코일(`rolledQty` = 불합격 제외)·불합격 코일(`failedCoilQty`), 배정 수, **필요 매수 = 부족 − 코일(불합격 제외) − 배정**, 슬래브 풀(예약 가용), `recommendableQty = min(필요, 예약 가용)`, 배정 목록, `rollable`(수주 연결 없으면 false + 이유) |
 | `rollingRecommendation(tables, planId)` | FIFO 추천(저장 안 함). **판매 ACTIVE 예약 몫을 뺀 예약 가용 안에서만** → 판매 예약을 침범하지 않는다(14.2) |
 | `confirmRollingAllocations(tx, actor, {productionPlanId, lotIds})` | HOT_ROLLING CONFIRMED (production_plan_id). LOT 확인(INV-002·003·004, 규격) 후 필요·예약 가용 초과 INV-001. 이벤트 ALLOCATION_RECOMMENDED + ALLOCATION_CONFIRMED |
 | 변경·해제 | `changeAllocation` / `releaseAllocation` (4장) |
@@ -169,7 +169,7 @@ export const salesOrderApi = {
 ## 10. MRP (`mrp.ts`) — REQ-PRD-005, BP-PRD-01
 
 `computeMrp(tables, {from, to})` → `MrpView` (저장 안 함, 바로 계산)
-- 대상 계획: 계획·진행중이고 아직 만들지 않은 히트가 있으며 **필요일**이 기간 안. 필요일(가정값) = 연결 수주 품목 납기, 없으면 계획 등록일.
+- 순소요 계산: 계획·진행중이고 아직 만들지 않은 히트가 있는 **모든** 계획을 필요일 순으로 차감한다(기간 앞의 못 만든 계획이 먼저 잔량을 쓴다). **기간은 결과(plans·materials·requisitionLines)를 보여 줄 때만** 거른다. 필요일(가정값) = 연결 수주 품목 납기, 없으면 계획 등록일.
 - `plans[]`: 남은 히트 수·히트 톤·필요 용선·예상 슬래브 여재·원료별 총소요/순소요.
 - `materials[]`: 원료별 총소요, 원료 LOT 잔량, 입고예정(확정 발주 미입고량 합계), 잔량·입고예정으로 채운 톤, **순소요**, 첫 부족 필요일, 원단위 단위(t/t, kg/t).
 - `requisitionLines[]`: 순소요 > 0인 (계획, 원료) 줄 = "구매요청 만들기" 미리 채움. 같은 계획·원료 구매요청이 있으면 `existingPurchaseRequisitionNo`(만들 때도 입력 오류로 막는다).
@@ -180,7 +180,7 @@ export const salesOrderApi = {
 | 함수 | 규칙·오류 | 작업 로그·알림 |
 |---|---|---|
 | `createPurchaseRequisition(tx, actor, {desiredReceiptDate?, requestReason?, items:[{itemId, requiredTon, productionPlanId?}], actionDraftId?, messageId?})` | 등록 = WAITING_APPROVAL. 요청자 = actor, 부서 = 요청 시점 소속. 부서장 없음 PUR-001. 원료만·톤 > 0(소수 3자리)·같은 원료 두 줄 불가·같은 (계획, 원료) 중복 불가(입력 오류). 같은 초안으로 두 번 불가 | PURCHASE_REQUISITION_CREATED(action_draft_id·message_id) · 부서장에게 **APPROVAL_REQUESTED** (`/approvals?pr=id`) |
-| `resubmitPurchaseRequisition(tx, actor, {purchaseRequisitionId, desiredReceiptDate?, requestReason?, items, expectedUpdatedAt?})` | REJECTED만, 요청자만(COM-002). 줄 교체 → WAITING_APPROVAL (반려 사유 지움) | PURCHASE_REQUISITION_CREATED(reasonText '반려 후 고쳐 다시 요청', before/after) · APPROVAL_REQUESTED |
+| `resubmitPurchaseRequisition(tx, actor, {purchaseRequisitionId, desiredReceiptDate?, requestReason?, items, expectedUpdatedAt?})` | REJECTED만, 요청자만(COM-002). 줄 교체 → WAITING_APPROVAL (반려 사유 지움). 요청 부서를 재요청 시점 소속으로 바꾼다(알림 대상 = 승인권자) | PURCHASE_REQUISITION_CREATED(reasonText '반려 후 고쳐 다시 요청', before/after) · APPROVAL_REQUESTED |
 | `canApproveRequisition(tables, employeeId, pr)` | 요청 부서(department_id)의 부서장 && 승인 대기 | — |
 | `approvePurchaseRequisition` / `rejectPurchaseRequisition(…, {rejectReason})` | 승인 대기만, 요청 부서 부서장만(COM-002), 부서장 없음 PUR-001, 반려 사유 필수 | PURCHASE_REQUISITION_APPROVED/REJECTED · 요청자에게 **APPROVAL_RESULT** |
 | `createPurchaseOrders(tx, actor, {purchaseRequisitionItemIds, dueDate?})` | 승인된 요청만(PUR-002), 이미 발주한 줄 입력 오류, 품목 **기본 공급업체별 발주 1건**(여러 줄), 발주량 = 요청 톤, 납기 = 입력값 또는 가장 이른 희망 입고일. 요청의 모든 줄을 발주하면 ORDERED | PURCHASE_ORDER_CREATED (발주마다) |
@@ -292,7 +292,7 @@ export const salesOrderApi = {
 | 판정: 필수 누락과 불합격이 같이 있을 때 | FAIL | 벗어난 값이 이미 있으면 합격할 수 없다 |
 | 기준 버전 선택 | 값을 한 번이라도 넣은 검사는 그 버전 유지, 값 없는 PENDING 행은 현재 버전으로 바꿔 판정 | "판정에 쓴 기준 버전 표시" + "새 버전" (QC-002·003) |
 | 검사 대상 행 | 제강·연주·열연 실적 때 현재 기준으로 PENDING 행을 만든다 | 검사 대상 목록 |
-| 생산계획 COMPLETED | 히트 수만큼 제강·연주 완료 + (코일·수주 연결) 코일 수 ≥ 부족 매수 | 10장 "완료" 조건이 문서에 없음 |
+| 생산계획 COMPLETED | 히트 수만큼 제강·연주 완료 + (코일·수주 연결) 불합격을 뺀 코일 수 ≥ 부족 매수 | 10장 "완료" 조건이 문서에 없음 |
 | 진행 계획 잔여 목표 | 5장 정의 | 4.5 "진행 계획 잔여 목표"의 계산 방법이 없음 |
 | 생산계획 생성 주체 | 이벤트는 SYSTEM(수주 등록 규칙), created_employee_id는 수주 등록자 | 자동 생성 |
 | 여재 표시(surplus_at) | 합격했지만 원래 수주가 이미 채워져 예약하지 못한 슬래브, 연결 끊긴 계획의 슬래브, 완료된 코일 계획의 남은 슬래브, 취소로 예약이 풀린 합격 슬래브 | REQ-INV-008 "미배정 합격 슬래브" — 예약이 매수 단위라 LOT 단위 표시 기준을 정함 |

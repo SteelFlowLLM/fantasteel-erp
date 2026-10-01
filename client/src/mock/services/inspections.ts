@@ -8,7 +8,7 @@ import { isQualityExcluded } from '@/lib/eligibility';
 import { pickFifo } from '@/lib/fifo';
 import { applicableItems, judgeInspection } from '@/lib/inspectionJudgment';
 import { recordBusinessEvent } from '@/mock/businessEvents';
-import type { InspectionStandardItemRow, LotRow, MockTables, QualityInspectionRow } from '@/mock/schema';
+import type { InspectionStandardItemRow, LotRow, MockTables, ProductionPlanRow, QualityInspectionRow } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 import {
   ApiError,
@@ -216,8 +216,10 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
       reserved = result.reservedQty;
       autoReservedQty += reserved;
     }
-    // 여재: 슬래브 계획(또는 수주 연결이 끊긴 계획)의 합격 슬래브 중 예약하지 못한 것
-    const surplusCandidates = lots.filter((l) => l.lotType === 'SLAB' && l.surplusAt === null && (!plan || plan.salesOrderItemId === null || plan.itemId === l.itemId));
+    // 여재: 슬래브 계획(또는 수주 연결이 끊긴 계획, 이미 완료되어 더 열연하지 않는 코일 계획)의 합격 슬래브 중 예약하지 못한 것
+    const surplusCandidates = lots.filter(
+      (l) => l.lotType === 'SLAB' && l.surplusAt === null && (!plan || plan.salesOrderItemId === null || plan.itemId === l.itemId || plan.productionPlanStatus === 'COMPLETED'),
+    );
     surplusLots.push(...pickFifo(surplusCandidates, surplusCandidates.length).slice(Math.min(reserved, surplusCandidates.length)));
   }
   if (surplusLots.length > 0) {
@@ -235,12 +237,18 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
         salesOrderId: salesOrderIdOfPlan(tx.tables, plan),
         afterData: { lotNos: lots.map((l) => l.lotNo), surplusQty: lots.length },
         reasonCode: 'SURPLUS_CONVERSION',
-        reasonText: '수주 미확보를 넘는 합격 슬래브를 여재로 전환',
+        reasonText: surplusReasonOf(plan, lots),
         lotIds: lots.map((l) => l.id),
       });
     }
   }
   return { autoReservedQty, surplusLotNos: surplusLots.map((l) => l.lotNo), excludedLotQty: lostEligibility.length };
+}
+
+function surplusReasonOf(plan: ProductionPlanRow | undefined, lots: readonly LotRow[]): string {
+  if (plan && plan.salesOrderItemId === null) return '수주 연결이 해제된 계획의 합격 슬래브를 여재로 전환';
+  if (plan && lots.some((l) => l.itemId !== plan.itemId)) return '계획 완료 후 남은 합격 슬래브를 여재로 전환';
+  return '수주 미확보를 넘는 합격 슬래브를 여재로 전환';
 }
 
 /** 불합격 처리 상태 지정 (REQ-QC-004): 불합격 LOT(또는 히트 불합격 하위 LOT)만. 후속 처리 로직은 없다. */

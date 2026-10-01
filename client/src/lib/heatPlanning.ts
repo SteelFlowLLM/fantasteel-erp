@@ -21,7 +21,7 @@ export function maxSlabQtyFromHeat(heatTon: string, castingYieldRate: string, sl
   return decFloorDiv(decMul(heatTon, castingYieldRate, 6), slabUnitWeightTon);
 }
 
-export interface HeatFormationInput {
+export interface HeatPlanInput {
   productType: ProductItemType;
   /** 부족 매수 (1 이상) */
   shortageQty: number;
@@ -37,7 +37,7 @@ export interface HeatFormationInput {
   slabUnitWeightTon: string;
 }
 
-export interface HeatFormation {
+export interface HeatPlan {
   shortageQty: number;
   /** 목표중량 = 부족 매수 × 1매 이론중량 (수주 목표) */
   targetWeightTon: string;
@@ -60,7 +60,7 @@ export interface HeatFormation {
   expectedSlabShortageQty: number;
 }
 
-export function formHeats(input: HeatFormationInput): HeatFormation {
+export function planHeats(input: HeatPlanInput): HeatPlan {
   if (!Number.isInteger(input.shortageQty) || input.shortageQty < 1) throw new RangeError(`부족 매수는 1 이상의 정수여야 해요: ${input.shortageQty}`);
   const targetWeightTon = calcWeightTon(input.shortageQty, input.unitWeightTon);
   const yieldRate = cumulativeYieldRate(input.productType, input.castingYieldRate, input.hotRollingYieldRate);

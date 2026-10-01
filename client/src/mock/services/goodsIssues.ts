@@ -74,7 +74,7 @@ export function confirmGoodsIssue(tx: MockTx, actor: PersonActor, input: { shipm
 
   const salesOrderIds = [...new Set(work.map((w) => w.soItem.salesOrderId))];
   for (const salesOrderId of salesOrderIds) {
-    const orderWork = work.filter((w) => w.soItem.salesOrderId === salesOrderId);
+    const salesOrderWork = work.filter((w) => w.soItem.salesOrderId === salesOrderId);
     const so = mustGet(tx.tables, 'salesOrder', salesOrderId, '수주');
     recordBusinessEvent(tx, {
       businessEventType: 'GOODS_ISSUE_CONFIRMED',
@@ -89,9 +89,9 @@ export function confirmGoodsIssue(tx: MockTx, actor: PersonActor, input: { shipm
         salesOrderNo: so.salesOrderNo,
         shipmentRequestStatus: 'ISSUED',
         issuedAt: tx.nowIso,
-        lines: orderWork.map((w) => ({ salesOrderItemId: w.soItem.id, lineNo: w.soItem.lineNo, qty: w.lots.length, lotNos: w.lots.map((l) => l.lotNo) })),
+        lines: salesOrderWork.map((w) => ({ salesOrderItemId: w.soItem.id, lineNo: w.soItem.lineNo, qty: w.lots.length, lotNos: w.lots.map((l) => l.lotNo) })),
       },
-      lotIds: orderWork.flatMap((w) => w.lots.map((l) => l.id)),
+      lotIds: salesOrderWork.flatMap((w) => w.lots.map((l) => l.id)),
     });
   }
 
@@ -104,8 +104,8 @@ export function confirmGoodsIssue(tx: MockTx, actor: PersonActor, input: { shipm
   }
 
   const millSheets = salesOrderIds.map((salesOrderId) => {
-    const orderWork = work.filter((w) => w.soItem.salesOrderId === salesOrderId);
-    const lines: { soItem: SalesOrderItemRow; lots: LotRow[] }[] = orderWork.map((w) => ({ soItem: mustGet(tx.tables, 'salesOrderItem', w.soItem.id, '수주 품목'), lots: w.lots }));
+    const salesOrderWork = work.filter((w) => w.soItem.salesOrderId === salesOrderId);
+    const lines: { soItem: SalesOrderItemRow; lots: LotRow[] }[] = salesOrderWork.map((w) => ({ soItem: mustGet(tx.tables, 'salesOrderItem', w.soItem.id, '수주 품목'), lots: w.lots }));
     return createMillSheet(tx, { shipmentRequest: issued, salesOrderId, lines });
   });
   return { shipmentRequest: issued, issuedLotNos: work.flatMap((w) => w.lots.map((l) => l.lotNo)), millSheets };

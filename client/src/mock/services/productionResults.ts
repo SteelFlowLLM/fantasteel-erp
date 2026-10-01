@@ -29,12 +29,11 @@ import {
   routingYieldOf,
   salesOrderIdOfPlan,
   seoulDateOf,
-  SYSTEM_ACTOR,
   unitWeightOf,
   type PersonActor,
 } from '@/mock/services/context';
 import { ensurePendingInspection } from '@/mock/services/inspections';
-import { planSnapshot, refreshPlanStatus } from '@/mock/services/productionPlans';
+import { refreshPlanStatus } from '@/mock/services/productionPlans';
 
 const CODE_PATTERN = /^[A-Z0-9]{2,10}$/;
 
@@ -456,7 +455,8 @@ export function registerCasting(tx: MockTx, actor: PersonActor, input: CastingIn
       dispositionStatus: null,
       dispositionReason: null,
       dispositionAt: null,
-      surplusAt: plan.isSurplusOnCompletion ? times.completedAt : null,
+      // 여재 표시는 검사로 적격이 된 뒤에 한다 (BP-SO-02, REQ-INV-008: 여재 = 미배정 합격 슬래브)
+      surplusAt: null,
       producedDate: completedDate,
       consumedAt: null,
       shippedAt: null,
@@ -477,7 +477,7 @@ export function registerCasting(tx: MockTx, actor: PersonActor, input: CastingIn
     afterData: {
       processType: 'CONTINUOUS_CASTING',
       productionPlanNo: plan.productionPlanNo,
-      heatLotNo: heat.lotNo,
+      heatNo: heat.lotNo,
       itemCode: slabSpec.itemCode,
       startedAt: times.startedAt,
       completedAt: times.completedAt,
@@ -491,20 +491,6 @@ export function registerCasting(tx: MockTx, actor: PersonActor, input: CastingIn
     },
     lotIds: [heat.id, ...slabLots.map((s) => s.id)],
   });
-  if (plan.isSurplusOnCompletion) {
-    recordBusinessEvent(tx, {
-      businessEventType: 'SURPLUS_CONVERTED',
-      actor: SYSTEM_ACTOR,
-      targetType: 'production_plan',
-      targetId: plan.id,
-      targetNo: plan.productionPlanNo,
-      beforeData: planSnapshot(plan),
-      afterData: { lotNos: slabLots.map((s) => s.lotNo), surplusQty: slabLots.length },
-      reasonCode: 'SURPLUS_CONVERSION',
-      reasonText: '수주 취소로 연결이 해제된 계획의 산출 슬래브를 여재로 표시',
-      lotIds: slabLots.map((s) => s.id),
-    });
-  }
   refreshPlanStatus(tx, plan.id);
   return { result: completed, slabLots };
 }
