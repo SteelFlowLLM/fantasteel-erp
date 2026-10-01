@@ -22,7 +22,7 @@ import {
   SALES_ORDER_ITEM_STATUS_LABEL,
   SHIPMENT_REQUEST_STATUS_LABEL,
 } from '@/codes';
-import { fmtDateTime } from '@/lib/format';
+import { fmtDateTime, trimNum } from '@/lib/format';
 import type { JsonValue } from '@/mock/schema';
 
 export interface DiffRow {
@@ -79,6 +79,8 @@ export function formatDiffValue(value: JsonValue, key = ''): string {
     if (value === '') return '(빈 값)';
     const codeLabel = CODE_LABEL_BY_KEY[lastSegment(key)]?.[value];
     if (codeLabel) return codeLabel;
+    // 측정값은 저장된 자리수와 상관없이 같은 글자로 보인다 (밀시트·검사 화면과 같은 규칙)
+    if (lastSegment(key) === 'measuredValue') return trimNum(value);
     return ISO_DATE_TIME.test(value) ? fmtDateTime(value) : value;
   }
   if (Array.isArray(value)) {

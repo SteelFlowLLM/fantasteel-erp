@@ -13,6 +13,7 @@ import { KvList } from '@/components/KvList';
 import { Modal } from '@/components/Modal';
 import { Table, Td, Th } from '@/components/Table';
 import { useAction } from '@/hooks/useAction';
+import { withEulReul } from '@/lib/josa';
 
 export function CancelPlanModal({ planId, planNo, updatedAt, onClose }: { planId: number; planNo: string; updatedAt: string; onClose: () => void }) {
   const [reason, setReason] = useState('');
@@ -53,7 +54,7 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
   const create = useAction(productionPlanApi.createReproduction, {
     success: (r) =>
       r.plan
-        ? `재생산 계획 ${r.plan.productionPlanNo}을(를) 만들었어요 (${r.plan.shortageQty}${unit}${r.reservedFromSurplusQty > 0 ? ` · 여재 ${r.reservedFromSurplusQty}${unit} 먼저 예약` : ''})`
+        ? `재생산 계획 ${withEulReul(r.plan.productionPlanNo)} 만들었어요 (${r.plan.shortageQty}${unit}${r.reservedFromSurplusQty > 0 ? ` · 여재 ${r.reservedFromSurplusQty}${unit} 먼저 예약` : ''})`
         : `여재 ${r.reservedFromSurplusQty}${unit}를 예약해서 새 계획 없이 채웠어요`,
     onSuccess: onClose,
   });

@@ -76,7 +76,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                       <Th>기본 야드</Th>
                       <Th>대응 규격</Th>
                       <Th align="right">열연 계획 수율</Th>
-                      <Th>사용 여부</Th>
+                      <Th>사용 이력</Th>
                       <Th aria-label="수정·삭제" />
                     </tr>
                   </thead>

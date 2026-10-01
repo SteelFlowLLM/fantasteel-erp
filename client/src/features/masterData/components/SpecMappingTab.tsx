@@ -57,7 +57,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                     <Th>코일 규격</Th>
                     <Th align="right">코일 1개</Th>
                     <Th align="right">열연 계획 수율</Th>
-                    <Th>사용 여부</Th>
+                    <Th>사용 이력</Th>
                     <Th aria-label="삭제" />
                   </tr>
                 </thead>

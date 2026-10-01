@@ -35,6 +35,7 @@ import { useConfirmGoodsIssue, useGoodsIssueDetail, useGoodsIssueQueue } from '@
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtMD, fmtMDHM, fmtTon, todayStr } from '@/lib/format';
+import { LOT_STATUS_TONE } from '@/lib/statusTone';
 import { sumTon } from '@/lib/weight';
 import { permissionNeedText } from '@/lib/permissions';
 
@@ -352,7 +353,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
                           <InspectionResultBadge result={lot.heatInspectionResult} />
                         </Td>
                         <Td>
-                          <Badge tone={lot.lotStatus === 'AVAILABLE' ? 'neutral' : 'danger'}>{LOT_STATUS_LABEL[lot.lotStatus]}</Badge>
+                          <Badge tone={LOT_STATUS_TONE[lot.lotStatus]}>{LOT_STATUS_LABEL[lot.lotStatus]}</Badge>
                         </Td>
                       </>
                     )}
