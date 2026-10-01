@@ -143,7 +143,7 @@ const SEED_ROOMS: readonly SeedRoom[] = [
     createdAt: '2026-09-30T09:00:00+09:00',
     members: ['2103003', '1608002', '1610014', '2304015', '2205013', '1802012'],
     messages: [
-      { sender: '2103003', at: '2026-09-30T09:05:00+09:00', content: `이번 주 출하 예정 건(${SEED_CORE.salesOrderNos[1]}, 출하요청 ${SEED_CORE.waitingShipmentRequestNo}) 같이 확인해 주세요.` },
+      { sender: '2103003', at: '2026-09-30T09:05:00+09:00', content: `다음 주 출하 예정 건(${SEED_CORE.salesOrderNos[1]}, 출하요청 ${SEED_CORE.waitingShipmentRequestNo}) 같이 확인해 주세요.` },
       { sender: '1610014', at: '2026-09-30T09:12:00+09:00', content: '@권예진 코일 야드 적재 위치 점검 결과 공유 부탁해요.' },
       { sender: '2304015', at: '2026-09-30T09:30:00+09:00', content: '점검 끝났어요. 적재 위치는 재고 화면에 맞춰 두었어요.' },
       { sender: '2103003', at: '2026-09-30T10:02:00+09:00', content: '@품질부 출하 전 검사 일정도 알려 주세요.' },

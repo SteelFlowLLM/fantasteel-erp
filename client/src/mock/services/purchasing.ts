@@ -56,6 +56,7 @@ export function requisitionSourceOf(tables: Tables, pr: PurchaseRequisitionRow):
 const prSnapshot = (tables: Tables, pr: PurchaseRequisitionRow) => ({
   purchaseRequisitionNo: pr.purchaseRequisitionNo,
   purchaseRequisitionStatus: pr.purchaseRequisitionStatus,
+  departmentId: pr.departmentId,
   desiredReceiptDate: pr.desiredReceiptDate,
   requestReason: pr.requestReason,
   rejectReason: pr.rejectReason,
@@ -160,7 +161,7 @@ export function createPurchaseRequisition(tx: MockTx, actor: PersonActor, input:
   return { purchaseRequisition: pr, items };
 }
 
-/** 반려된 구매요청을 요청자가 고쳐 다시 요청한다 (→ WAITING_APPROVAL) */
+/** 반려된 구매요청을 요청자가 고쳐 다시 요청한다 (→ WAITING_APPROVAL). 요청 부서는 재요청 시점 소속으로 바꾼다 (REQ-AUTH-004). */
 export function resubmitPurchaseRequisition(
   tx: MockTx,
   actor: PersonActor,
@@ -302,7 +303,7 @@ export function createPurchaseOrders(tx: MockTx, actor: PersonActor, input: { pu
     return { prItem, pr, item, supplierId: item.defaultSupplierId };
   });
   const supplierIds = [...new Set(lines.map((l) => l.supplierId))];
-  const orders = supplierIds.map((supplierId) => {
+  const purchaseOrders = supplierIds.map((supplierId) => {
     const group = lines.filter((l) => l.supplierId === supplierId);
     const groupDue = dueDate ?? group.map((l) => l.pr.desiredReceiptDate).filter((d): d is string => d !== null).sort()[0] ?? null;
     const po = insertRow(tx, 'purchaseOrder', { purchaseOrderNo: issueBusinessNo(tx, 'PURCHASE_ORDER'), supplierId, purchaseOrderStatus: 'CONFIRMED', dueDate: groupDue, orderedEmployeeId: actor.employeeId });
@@ -337,7 +338,7 @@ export function createPurchaseOrders(tx: MockTx, actor: PersonActor, input: { pu
     const prItems = tx.tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === prId);
     if (prItems.every((i) => orderedLineOf(tx.tables, i.id))) updateRow(tx, 'purchaseRequisition', prId, { purchaseRequisitionStatus: 'ORDERED' });
   }
-  return orders;
+  return purchaseOrders;
 }
 
 /** 입고 확정 (REQ-PUR-004, BP-PUR-02): 입고 1건 = 원료 LOT 1개 */

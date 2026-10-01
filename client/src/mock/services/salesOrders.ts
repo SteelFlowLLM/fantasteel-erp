@@ -4,7 +4,7 @@
 // - 취소: 출고 있으면 SO-003, 진행 중 출하요청 있으면 SO-004. ACTIVE 예약·CONFIRMED 배정 RELEASED, PLANNED 계획 CANCELLED,
 //   IN_PROGRESS 계획은 수주 연결 해제 + 완료 후 여재(SURPLUS_CONVERTED).
 import type { ProductItemType, SalesOrderItemStatus } from '@/codes';
-import type { HeatFormation } from '@/lib/heatPlanning';
+import type { HeatPlan } from '@/lib/heatPlanning';
 import { progressOf, stockFirstSplit, type ProgressMeasure } from '@/lib/inventoryMath';
 import { headerStatusOf, isDueRisk } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
@@ -32,7 +32,7 @@ import {
   type PersonActor,
 } from '@/mock/services/context';
 import { confirmedAllocationOf, lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
-import { cancelPlanRow, createProductionPlan, formHeatsFor, itemShortageOf, planProgressOf, planSnapshot, type ItemShortage } from '@/mock/services/productionPlans';
+import { cancelPlanRow, createProductionPlan, itemShortageOf, planHeatsFor, planProgressOf, planSnapshot, refreshPlanStatus, type ItemShortage } from '@/mock/services/productionPlans';
 import { createReservation, releaseReservationsOfItem } from '@/mock/services/reservations';
 
 type Tables = Readonly<MockTables>;
@@ -86,7 +86,7 @@ export interface SalesOrderPreviewLine {
   reserveQty: number;
   shortageQty: number;
   /** 부족분 히트 편성 (부족 없으면 null) */
-  formation: HeatFormation | null;
+  formation: HeatPlan | null;
 }
 
 /** 등록 전 미리보기 (저장 안 함): 예약 가능·부족과 히트 편성 */
@@ -110,7 +110,7 @@ export function previewSalesOrder(tables: Tables, items: readonly SalesOrderLine
       availableQty,
       reserveQty,
       shortageQty,
-      formation: shortageQty > 0 ? formHeatsFor(tables, item, shortageQty) : null,
+      formation: shortageQty > 0 ? planHeatsFor(tables, item, shortageQty) : null,
     };
   });
 }
@@ -247,7 +247,7 @@ export function cancelSalesOrder(tx: MockTx, actor: PersonActor, input: { salesO
   return cancelled;
 }
 
-/** 진행 중 계획: 수주 연결 해제 + 완료 후 여재 (ERD is_surplus_on_completion). 열연 배정은 풀고, 이미 나온 합격 슬래브는 바로 여재. */
+/** 진행 중 계획: 수주 연결 해제 + 완료 후 여재 (ERD is_surplus_on_completion). 열연 배정은 풀고, 이미 나온 합격 슬래브는 바로 여재. 완료 조건을 다시 본다. */
 function unlinkInProgressPlan(tx: MockTx, actor: PersonActor, plan: ProductionPlanRow, salesOrderId: number): void {
   const before = planSnapshot(plan);
   for (const allocation of tx.tables.allocation.filter((a) => a.productionPlanId === plan.id && a.allocationStatus === 'CONFIRMED')) {
@@ -269,6 +269,8 @@ function unlinkInProgressPlan(tx: MockTx, actor: PersonActor, plan: ProductionPl
     reasonText: '수주 취소: 진행 중 물량은 연결을 해제하고 완료 후 여재로 전환',
     lotIds: surplus.map((s) => s.id),
   });
+  // 연결이 끊긴 코일 계획은 연주까지만 하면 완료다 → 이미 다 연주했으면 지금 COMPLETED (10장 상태 흐름)
+  refreshPlanStatus(tx, plan.id);
 }
 
 const surplusCandidatesOf = (tables: Tables, plan: ProductionPlanRow) =>

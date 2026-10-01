@@ -214,7 +214,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     as('steelmakingHead');
     const cast = await productionResultApi.registerCasting({ productionPlanId: planId, heatLotId: heat.id, outputQty: 10, startedAt: '2026-10-07T16:20:00+09:00', completedAt: '2026-10-07T19:30:00+09:00', productionResultId: started.productionResultId });
     expect(cast.outputLotNos).toHaveLength(10);
-    expect(cast.outputLotNos.every((no) => lotOf(no).surplusAt !== null)).toBe(true);
+    expect(cast.outputLotNos.every((no) => lotOf(no).surplusAt === null)).toBe(true); // 판정 전에는 여재가 아니다 (검사 합격 뒤 여재)
     expect((await productionResultApi.work(planId)).plan.productionPlanStatus).toBe('COMPLETED');
     at('2026-10-08T09:00:00+09:00');
     for (const no of cast.outputLotNos) await inspectViaApi(lotOf(no).id);

@@ -188,17 +188,24 @@ describe('14.2 코일·슬래브 혼합 수주와 열연', () => {
       startedAt: '2026-10-07T18:00:00+09:00',
       completedAt: '2026-10-07T19:30:00+09:00',
     });
-    expect(slabLots.every((s) => s.surplusAt !== null)).toBe(true);
+    // 판정 전 슬래브는 아직 여재가 아니다 (BP-SO-02: 연주·검사 완료 후 적격 슬래브가 여재)
+    expect(slabLots.every((s) => t.lot.find((l) => l.id === s.id)?.surplusAt === null)).toBe(true);
     expect(t.productionPlan.find((p) => p.id === plan.id)?.productionPlanStatus).toBe('COMPLETED');
-    // 나중에 합격해도 끊긴 계획이라 자동 예약하지 않는다
-    for (const slab of slabLots) k.inspect('2026-10-08T09:00:00+09:00', slab.id);
-    expect(k.inspect('2026-10-08T09:30:00+09:00', heatLot.id).autoReservedQty).toBe(0);
+    // 나중에 합격해도 끊긴 계획이라 자동 예약하지 않는다. 합격한 슬래브만 여재, 불합격 슬래브는 여재 표시·전환 기록이 없다
+    const [failedSlab, ...passingSlabs] = slabLots;
+    k.inspect('2026-10-08T09:00:00+09:00', failedSlab.id, { SURFACE_DEFECT_DEPTH: '3.50' });
+    for (const slab of passingSlabs) k.inspect('2026-10-08T09:00:00+09:00', slab.id);
+    expect(k.inspect('2026-10-08T09:30:00+09:00', heatLot.id)).toMatchObject({ autoReservedQty: 0, surplusLotNos: passingSlabs.map((s) => s.lotNo) });
+    expect(passingSlabs.every((s) => t.lot.find((l) => l.id === s.id)?.surplusAt !== null)).toBe(true);
+    expect(t.lot.find((l) => l.id === failedSlab.id)?.surplusAt).toBeNull();
+    const surplusLotIds = new Set(t.businessEventLot.filter((r) => t.businessEvent.find((e) => e.id === r.businessEventId)?.businessEventType === 'SURPLUS_CONVERTED').map((r) => r.lotId));
+    expect(surplusLotIds.has(failedSlab.id)).toBe(false);
     k.expectClean();
   });
 });
 
 describe('연결이 끊긴 진행 계획의 연주 → 여재 (합금철이 있는 시드)', () => {
-  it('제강 뒤 취소 → 연주 슬래브 surplus_at + SURPLUS_CONVERTED, 계획 COMPLETED', () => {
+  it('제강 뒤 취소 → 연주 → 계획 COMPLETED, 검사 합격 뒤 슬래브 surplus_at + SURPLUS_CONVERTED', () => {
     const k = createKit();
     const t = k.tables;
     // 시드의 PP-2609-0004(SM355B 슬래브 계획)는 제선·제강까지 했다 → 수주 SO-2609-003 취소는 출하요청이 없으므로 가능
@@ -218,9 +225,15 @@ describe('연결이 끊긴 진행 계획의 연주 → 여재 (합금철이 있�
       startedAt: '2026-10-01T10:00:00+09:00',
       completedAt: '2026-10-01T11:30:00+09:00',
     });
-    expect(slabLots.every((s) => s.surplusAt !== null)).toBe(true);
+    expect(slabLots.every((s) => s.surplusAt === null)).toBe(true);
     expect(t.productionPlan.find((p) => p.id === plan.id)?.productionPlanStatus).toBe('COMPLETED');
-    expect(t.businessEvent.filter((e) => e.businessEventType === 'SURPLUS_CONVERTED' && e.targetId === plan.id).length).toBeGreaterThanOrEqual(2);
+    const surplusEvents = () => t.businessEvent.filter((e) => e.businessEventType === 'SURPLUS_CONVERTED' && e.targetType === 'production_plan' && e.targetId === plan.id);
+    const beforeInspection = surplusEvents().length;
+    for (const slab of slabLots) k.inspect('2026-10-01T13:00:00+09:00', slab.id);
+    k.inspect('2026-10-01T13:30:00+09:00', heat.id);
+    expect(slabLots.every((s) => t.lot.find((l) => l.id === s.id)?.surplusAt !== null)).toBe(true);
+    expect(surplusEvents()).toHaveLength(beforeInspection + 1);
+    expect(surplusEvents().at(-1)).toMatchObject({ reasonCode: 'SURPLUS_CONVERSION', reasonText: '수주 연결이 해제된 계획의 합격 슬래브를 여재로 전환' });
     // 히트 생산량을 넘는 연주는 막는다
     k.expectClean();
   });
