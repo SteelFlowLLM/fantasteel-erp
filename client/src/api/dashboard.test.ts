@@ -2,11 +2,25 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { dashboardApi, DASHBOARD_TREND_DAYS } from '@/api/dashboard';
+import { inventoryApi } from '@/api/inventories';
+import { typicalPassValue } from '@/lib/inspectionJudgment';
 import { getMockDb } from '@/mock/db';
 import { seedDashboard } from '@/mock/seeds/dashboard';
 import { seedTxAt } from '@/mock/seeds';
-import { createSalesOrder, fulfillmentOf, productInventory, userActor } from '@/mock/services';
-import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
+import {
+  approvePurchaseRequisition,
+  createPurchaseOrders,
+  createPurchaseRequisition,
+  createSalesOrder,
+  fulfillmentOf,
+  inspectionFormOf,
+  productInventory,
+  receiveGoods,
+  registerInspection,
+  simulatePlan,
+  userActor,
+} from '@/mock/services';
+import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const TODAY = '2026-10-01';
 const opts = { today: TODAY };
@@ -158,6 +172,8 @@ describe('숫자', () => {
     expect(after.planCount).toBe(1);
     const smn = after.materials.find((m) => m.itemCode === 'SMN01');
     expect([smn?.grossTon, smn?.onHandTon, smn?.netTon]).toEqual(['2.500', '1.000', '1.500']);
+    // 10-28 도착 입고예정 3.500t는 10-20 필요일에 못 써서 입고예정 칸(받아 쓰는 몫)은 0 → 2.500 − 1.000 − 0.000 = 1.500 (MRP 화면과 같다)
+    expect([smn?.scheduledReceiptTon, smn?.coveredScheduledTon]).toEqual(['3.500', '0.000']);
     expect(after.materials.filter((m) => m.itemCode !== 'SMN01').every((m) => m.netTon === '0.000')).toBe(true);
   });
 
@@ -211,7 +227,7 @@ describe('숫자', () => {
     expect(volume.series.filter((p) => p.slabQty + p.coilQty > 0).length).toBeGreaterThanOrEqual(8);
   });
 
-  it('여재 보유 기간: 규격별 여재(예약 가용) 매수와 여재 표시일부터의 일수', async () => {
+  it('여재 보유 기간: 규격별 여재(TRM-048) 매수와 여재로 바뀐 날부터의 일수', async () => {
     actAs(SEED_EMPLOYEE_NO.sales);
     const data = await dashboardApi.widget('SURPLUS_AGE', opts);
     expect(data.items.find((i) => i.itemCode === 'SL-SS275-250x1200x10000')).toMatchObject({ surplusQty: 6, surplusTon: '141.300', oldestSinceDate: '2026-09-06', maxAgeDays: 25 });
@@ -227,5 +243,65 @@ describe('숫자', () => {
     expect([...times].sort().reverse()).toEqual(times);
     expect(data.items.filter((i) => i.actorType === 'SYSTEM').every((i) => i.actorName === '시스템')).toBe(true);
     expect(data.totalCount).toBe(getMockDb().read((tables) => tables.businessEvent.length));
+  });
+});
+
+// 03 TRM-048 여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (04 4.3). 대시보드와 재고 화면이 같은 core 읽기 모델(surplusSlabs)을 쓴다.
+describe('여재 숫자: 대시보드 여재 위젯 = 재고 화면 여재 탭', () => {
+  const SS275_SLAB = 'SL-SS275-250x1200x10000';
+
+  /** 두 화면의 여재(규격별 매수·톤, 합계)가 같은지 보고 위젯 데이터를 돌려준다 */
+  async function expectSameSurplus() {
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const widget = await dashboardApi.widget('SURPLUS_AGE', opts);
+    const tab = (await inventoryApi.listSurplus()).filter((s) => s.surplusQty > 0);
+    const byItem = (rows: readonly { itemCode: string; surplusQty: number; surplusTon: string }[]) => rows.map((r) => [r.itemCode, r.surplusQty, r.surplusTon]).sort();
+    expect(byItem(widget.items)).toEqual(byItem(tab));
+    expect(widget.totalQty).toBe(tab.reduce((sum, s) => sum + s.surplusQty, 0));
+    return widget;
+  }
+
+  it('새 시드: 둘 다 SS275 6매 — 코일 계획이 열연할 SM355B 슬래브 3매(가용재고)는 여재가 아니다', async () => {
+    const widget = await expectSameSurplus();
+    expect(widget.totalQty).toBe(6);
+    expect(widget.items.map((i) => i.itemCode)).toEqual([SS275_SLAB]);
+  });
+
+  it('14.1처럼 수주(여재로 재고 우선 예약) → 합금철 구매·입고 → 실적 시뮬레이션 → 검사 뒤에도 같다', async () => {
+    const actor = (employeeNo: string) => userActor(employeeIdOf(employeeNo));
+    // 1단계: SS275 10매 → 여재 6매를 재고 우선 예약, 부족 4매 생산계획 → 여재 0
+    const planId = getMockDb().transact((tx) => {
+      const itemId = tx.tables.item.find((i) => i.itemCode === SS275_SLAB)?.id ?? 0;
+      const customerId = tx.tables.customer.find((c) => c.customerCode === 'CUS-01')?.id ?? 0;
+      const created = createSalesOrder(seedTxAt(tx, '2026-10-01T09:00:00+09:00'), actor(SEED_EMPLOYEE_NO.sales), { customerId, items: [{ itemId, orderedQty: 10, dueDate: '2026-10-20' }] });
+      return created.productionPlans[0]?.id ?? 0;
+    });
+    expect((await expectSameSurplus()).totalQty).toBe(0);
+
+    // 3~5단계: 합금철 1.500t 구매요청(계획 연결) → 승인 → 발주 → 입고 → 시뮬레이션(히트 1개) → 슬래브·히트 검사 합격
+    getMockDb().transact((tx) => {
+      const at = seedTxAt(tx, '2026-10-02T09:00:00+09:00');
+      const purchase = actor(SEED_EMPLOYEE_NO.purchase);
+      const smnId = tx.tables.item.find((i) => i.itemCode === 'SMN01')?.id ?? 0;
+      const { purchaseRequisition, items } = createPurchaseRequisition(at, purchase, { desiredReceiptDate: '2026-10-02', items: [{ itemId: smnId, requiredTon: '1.500', productionPlanId: planId }] });
+      approvePurchaseRequisition(at, actor(SEED_EMPLOYEE_NO.purchaseHead), { purchaseRequisitionId: purchaseRequisition.id });
+      createPurchaseOrders(at, purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
+      const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === items[0]?.id);
+      if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate: '2026-10-02' });
+      simulatePlan(seedTxAt(tx, '2026-10-03T18:00:00+09:00'), actor(SEED_EMPLOYEE_NO.steelmaking), { productionPlanId: planId, randomSeed: 42 });
+      const quality = actor(SEED_EMPLOYEE_NO.quality);
+      const lots = tx.tables.lot.filter((l) => l.productionPlanId === planId && (l.lotType === 'SLAB' || l.lotType === 'HEAT')).sort((a, b) => a.id - b.id);
+      for (const lot of lots) {
+        const form = inspectionFormOf(tx.tables, lot.id);
+        registerInspection(seedTxAt(tx, '2026-10-04T09:00:00+09:00'), quality, {
+          lotId: lot.id,
+          values: form.items.map((i) => ({ inspectionStandardItemId: i.inspectionStandardItemId, measuredValue: typicalPassValue(i) })),
+        });
+      }
+    });
+    // 히트 합격 → 부족 4매만 원래 수주에 자동 예약, 남는 합격 슬래브는 여재 → 두 화면이 같은 매수를 보인다
+    const widget = await expectSameSurplus();
+    const slabCount = getMockDb().read((t) => t.lot.filter((l) => l.productionPlanId === planId && l.lotType === 'SLAB').length);
+    expect(widget.items.find((i) => i.itemCode === SS275_SLAB)).toMatchObject({ surplusQty: slabCount - 4, oldestSinceDate: '2026-10-04' });
   });
 });

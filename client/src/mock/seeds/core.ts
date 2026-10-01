@@ -16,6 +16,7 @@
 //  6. DR-2609-0002 SO-2609-002 6매 출하요청 (배정 대기)
 //  7. SO-2609-005 보람강관 SPHC 슬래브 220×1400 8매 → 10매 연주 → 히트 성분 불합격(P) → 하위 10매 제외, 재생산 필요 8
 //  8. PR-2609-0003 철광석(승인, 미발주), PR-2609-0004 석회석(승인 대기)
+import { decAdd } from '@/lib/decimal';
 import { typicalPassValue } from '@/lib/inspectionJudgment';
 import type { MockTx } from '@/mock/store';
 import { insertRow, updateRow } from '@/mock/store';
@@ -57,6 +58,11 @@ export const SEED_CORE = {
   waitingShipmentRequestNo: 'DR-2609-0002',
   /** 시뮬레이션 난수 시드 */
   randomSeeds: { 'PP-2609-0001': 1001, 'PP-2609-0002': 2002, 'PP-2609-0003': 3003, 'PP-2609-0005': 5005 },
+  /**
+   * PR-2609-0001 원료 입고량(t, 가정값): 철광석 09-02·09-03 두 번, 나머지 한 번. 히트 1개에 철광석 444.445·석탄 166.667·석회석 41.667t를 쓴다.
+   * 시드 끝 잔량 = 철광석 2,333.330 · 석탄 899.998 · 석회석 229.998 · 실리코망가니즈 1.000t → 14.1 히트 뒤에도 구매 없이 히트 4개를 더 만든다.
+   */
+  rawMaterialReceipts: { ORE01: ['1800.000', '3200.000'], COL01: '1900.000', LIM01: '480.000', SMN01: '20.000' },
 } as const;
 
 function txAt(tx: MockTx, iso: string): MockTx {
@@ -101,29 +107,32 @@ export function seedCore(tx: MockTx): void {
   ensureInventoryRows(tx);
 
   // 1. 원료 확보 ────────────────────────────────────────
+  // 양(가정값, SEED_CORE.rawMaterialReceipts): 시드의 히트 6개를 만들고 남은 잔량으로 14.1 히트 1개 뒤에도 구매 없이 히트를 4개 더 만들 수 있게
+  // (철광석·석탄·석회석). 실리코망가니즈는 14.1 3단계 MRP(합금철만 순소요 1.500t)를 지키려고 20t 그대로다.
   const ore = itemId('ORE01');
   const coal = itemId('COL01');
   const lime = itemId('LIM01');
   const silicoManganese = itemId('SMN01');
+  const receipts = SEED_CORE.rawMaterialReceipts;
   const pr1 = createPurchaseRequisition(txAt(tx, '2026-09-01T09:00:00+09:00'), purchase, {
     desiredReceiptDate: '2026-09-03',
     requestReason: '9월 생산 대비 기초 원료 확보',
     items: [
-      { itemId: ore, requiredTon: '3300.000' },
-      { itemId: coal, requiredTon: '1250.000' },
-      { itemId: lime, requiredTon: '320.000' },
-      { itemId: silicoManganese, requiredTon: '20.000' },
+      { itemId: ore, requiredTon: decAdd(receipts.ORE01[0], receipts.ORE01[1]) },
+      { itemId: coal, requiredTon: receipts.COL01 },
+      { itemId: lime, requiredTon: receipts.LIM01 },
+      { itemId: silicoManganese, requiredTon: receipts.SMN01 },
     ],
   });
   approvePurchaseRequisition(txAt(tx, '2026-09-01T10:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr1.purchaseRequisition.id });
   createPurchaseOrders(txAt(tx, '2026-09-01T11:00:00+09:00'), purchase, { purchaseRequisitionItemIds: pr1.items.map((i) => i.id) });
   const poLineOf = (prItemId: number) => required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === prItemId), `발주 ${prItemId}`).id;
   const [oreLine, coalLine, limeLine, smnLine] = pr1.items.map((i) => poLineOf(i.id));
-  receiveGoods(txAt(tx, '2026-09-02T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: '1800.000', receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-02T10:30:00+09:00'), purchase, { purchaseOrderItemId: coalLine, receivedTon: '1250.000', receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-02T11:00:00+09:00'), purchase, { purchaseOrderItemId: limeLine, receivedTon: '320.000', receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-03T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: '1500.000', receiptDate: '2026-09-03' });
-  receiveGoods(txAt(tx, '2026-09-03T10:30:00+09:00'), purchase, { purchaseOrderItemId: smnLine, receivedTon: '20.000', receiptDate: '2026-09-03' });
+  receiveGoods(txAt(tx, '2026-09-02T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[0], receiptDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-02T10:30:00+09:00'), purchase, { purchaseOrderItemId: coalLine, receivedTon: receipts.COL01, receiptDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-02T11:00:00+09:00'), purchase, { purchaseOrderItemId: limeLine, receivedTon: receipts.LIM01, receiptDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-03T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[1], receiptDate: '2026-09-03' });
+  receiveGoods(txAt(tx, '2026-09-03T10:30:00+09:00'), purchase, { purchaseOrderItemId: smnLine, receivedTon: receipts.SMN01, receiptDate: '2026-09-03' });
 
   // 2. SO-2609-001 → 14.1 시작 재고 ─────────────────────
   const ss275SlabA = itemId(SEED_CORE.stock141ItemCode);

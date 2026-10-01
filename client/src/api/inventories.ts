@@ -1,17 +1,11 @@
 // 재고 조회 (REQ-INV-001·003·006·007·008, 업무 프로세스 4.2·4.3, PLAN 7장 재고). 조회 전용이다.
-// 계산(재고·합격·예약·가용재고·미배정 합격)은 핵심 서비스 `@/mock/services`의 재고 조회를 그대로 쓰고,
-// 여기서는 화면에 필요한 기준정보(치수·기본 야드·단위·톤)와 여재·배정 여부·검사 결과 표시 기준(`features/inventory/lib/inventoryRules`)을 덧붙인다.
+// 계산(재고·합격·예약·가용재고·미배정 합격·여재)은 핵심 서비스 `@/mock/services`의 재고 조회를 그대로 쓰고,
+// 여기서는 화면에 필요한 기준정보(치수·기본 야드·단위·톤)와 배정 여부·검사 결과 표시 기준(`features/inventory/lib/inventoryRules`)을 덧붙인다.
 // 재고 화면은 로그인한 모든 사원이 본다(screens.ts EVERYONE) → 조회마다 요청 사원만 확인한다(없거나 사용 안 함이면 COM-002).
 import { PRODUCT_QTY_UNIT, type AllocationPurpose, type LotStatus, type LotType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockQuery } from '@/api/client';
-import {
-  currentAllocationOf,
-  heatInspectionResult,
-  pickSurplusLots,
-  productInspectionResult,
-  type LotInspectionResult,
-} from '@/features/inventory/lib/inventoryRules';
+import { currentAllocationOf, heatInspectionResult, productInspectionResult, type LotInspectionResult } from '@/features/inventory/lib/inventoryRules';
 import { calcWeightTon } from '@/lib/weight';
 import type { AllocationRow, MockTables } from '@/mock/schema';
 import {
@@ -159,14 +153,12 @@ export function readRawMaterialInventory(tables: Tables): RawMaterialInventoryVi
 
 /**
  * 여재 (TRM-048 "수주에 쓰이지 않고 남은 미배정 합격 슬래브", REQ-INV-008). 가용재고에 포함한다.
- * core `surplusSlabs`의 미배정 합격 슬래브에서 여재 전환(surplus_at)된 LOT 중 수주 예약에 쓰이지 않은 몫만 여재로 센다(`pickSurplusLots`).
+ * 여재 매수·여재 슬래브는 core `surplusSlabs`(여재 전환된 미배정 합격 슬래브 중 수주 예약에 쓰이지 않은 몫) 그대로다.
+ * 대시보드 여재 위젯도 같은 core 결과를 쓴다. 여기서는 1매 이론중량·톤·야드·생산계획 id만 덧붙인다.
  */
 export function readSurplusSlabs(tables: Tables): SurplusSpecView[] {
   return surplusSlabs(tables).map((row) => {
     const theoreticalWeightTon = itemOf(tables, row.itemId)?.theoreticalWeightTon ?? '0.000';
-    // core 행의 surplusQty는 그 규격의 예약 가용(= 가용재고, 4.2)이다.
-    const availableQty = row.surplusQty;
-    const lots = pickSurplusLots(row.lots, availableQty);
     return {
       itemId: row.itemId,
       itemCode: row.itemCode,
@@ -176,11 +168,11 @@ export function readSurplusSlabs(tables: Tables): SurplusSpecView[] {
       unallocatedPassedQty: row.unallocatedPassedQty,
       unallocatedPassedTon: calcWeightTon(row.unallocatedPassedQty, theoreticalWeightTon),
       reservedQty: row.reservedQty,
-      availableQty,
-      availableTon: calcWeightTon(availableQty, theoreticalWeightTon),
-      surplusQty: lots.length,
-      surplusTon: calcWeightTon(lots.length, theoreticalWeightTon),
-      lots: lots.map((lot) => {
+      availableQty: row.availableQty,
+      availableTon: calcWeightTon(row.availableQty, theoreticalWeightTon),
+      surplusQty: row.surplusQty,
+      surplusTon: calcWeightTon(row.surplusQty, theoreticalWeightTon),
+      lots: row.lots.map((lot) => {
         const source = tables.lot.find((l) => l.id === lot.lotId);
         return { ...lot, yardName: yardNameOf(tables, source?.yardId), productionPlanId: source?.productionPlanId ?? null };
       }),

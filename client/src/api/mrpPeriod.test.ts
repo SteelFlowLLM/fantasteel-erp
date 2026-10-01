@@ -1,10 +1,11 @@
 // MRP 기간과 시점별 차감 (REQ-PRD-005 "수주에 연결된 생산계획은 다른 수주의 입고예정에서 제외", 04 4.4 "같은 공급을 계획별로 중복 차감하지 않는다", BP-PRD-01).
 // 차감은 고른 기간과 관계없이 열린 계획 전부로 하고(앞선 필요일이 먼저), 기간은 무엇을 보일지만 정한다.
-//   P: SS275 슬래브 36매 수주, 납기 2026-10-20 → 철광석이 모자란다
-//   Q: 같은 규격 36매 다른 수주, 납기 2026-11-20
+//   P: SS275 슬래브 66매 수주(재고 6 + 6히트), 납기 2026-10-20 → 철광석이 모자란다 (2,666.667t > 시드 잔량 2,333.330t)
+//   Q: 같은 규격 36매 다른 수주(4히트), 납기 2026-11-20
 import { describe, expect, it } from 'vitest';
-import { decCmp } from '@/lib/decimal';
-import { approvePurchaseRequisition, createPurchaseOrders, createPurchaseRequisition, createSalesOrder } from '@/mock/services';
+import { defaultMrpPeriod } from '@/features/purchasing/lib/purchasingView';
+import { decCmp, decSub, decSum } from '@/lib/decimal';
+import { approvePurchaseRequisition, createPurchaseOrders, createPurchaseRequisition, createSalesOrder, type MrpMaterialRow } from '@/mock/services';
 import { computeMrpForPeriod, type MrpPeriodView } from '@/mock/services/ext/purchasing';
 import { createKit, type Kit } from '@/mock/services/tests/kit';
 
@@ -14,19 +15,29 @@ const NOV = { from: '2026-11-01', to: '2026-11-30' };
 
 function setup(): { kit: Kit; planP: number; planQ: number; ore: number } {
   const kit = createKit();
-  const planOf = (dueDate: string): number => {
+  const planOf = (orderedQty: number, dueDate: string): number => {
     const result = createSalesOrder(kit.at(AT), kit.actor('sales'), {
       customerId: kit.customerId('CUS-01'),
-      items: [{ itemId: kit.itemId('SL-SS275-250x1200x10000'), orderedQty: 36, dueDate }],
+      items: [{ itemId: kit.itemId('SL-SS275-250x1200x10000'), orderedQty, dueDate }],
     });
     const plan = result.productionPlans[0];
     if (!plan) throw new Error('생산계획이 없어요');
     return plan.id;
   };
-  return { kit, planP: planOf('2026-10-20'), planQ: planOf('2026-11-20'), ore: kit.itemId('ORE01') };
+  return { kit, planP: planOf(66, '2026-10-20'), planQ: planOf(36, '2026-11-20'), ore: kit.itemId('ORE01') };
 }
 
 const materialOf = (view: MrpPeriodView, planId: number, itemId: number) => view.plans.find((p) => p.productionPlanId === planId)?.materials.find((m) => m.itemId === itemId);
+
+/** 원료 표 한 줄: 총소요 − 원료 LOT 잔량 칸 − 입고예정 칸 = 순소요(0보다 작으면 0), 입고예정 합계 = 칸 + 이유별로 뺀 몫 */
+function expectRowAdds(row: MrpMaterialRow | undefined): void {
+  expect(row).toBeDefined();
+  if (!row) return;
+  const left = decSub(decSub(row.grossTon, row.usableOnHandTon), row.coveredScheduledTon);
+  expect(decCmp(left, 0) > 0 ? left : '0.000', `${row.itemCode} 줄 산수`).toBe(row.netTon);
+  expect(decSum([row.coveredScheduledTon, row.scheduledOtherPlansTon, row.scheduledAfterNeedDateTon, row.scheduledEarlierPlansTon, row.scheduledSpareTon])).toBe(row.scheduledReceiptTon);
+  expect(decSub(row.onHandTon, row.onHandEarlierPlansTon)).toBe(row.usableOnHandTon);
+}
 
 describe('MRP 기간 · 시점별 차감', () => {
   it('기간 시작 전 계획(밀린 소요)이 잔량을 먼저 쓰고 함께 보인다 · 기간을 바꿔도 계획별 결과는 같다', () => {
@@ -78,11 +89,59 @@ describe('MRP 기간 · 시점별 차감', () => {
     const octAfter = computeMrpForPeriod(kit.tables, OCT);
     expect(materialOf(octAfter, planP, ore)?.netTon).toBe(pNetBefore);
     expect(octAfter.materials.find((m) => m.itemId === ore)?.coveredScheduledTon).toBe(octBefore.materials.find((m) => m.itemId === ore)?.coveredScheduledTon);
+    // 표 한 줄: 입고예정 칸은 0(이 기간 계획이 쓰는 몫), Q 몫 10,000t는 '다른 계획 몫'으로 따로 → 줄 산수가 맞는다
+    const oreOct = octAfter.materials.find((m) => m.itemId === ore);
+    expect(oreOct).toMatchObject({ scheduledReceiptTon: '10000.000', coveredScheduledTon: '0.000', scheduledOtherPlansTon: '10000.000', netTon: pNetBefore });
+    expectRowAdds(oreOct);
 
     // 11월 기간: Q가 자기 몫 입고예정으로 채우고, P는 여전히 밀린 부족으로 보인다
     const novAfter = computeMrpForPeriod(kit.tables, NOV);
     expect(materialOf(novAfter, planQ, ore)?.netTon).toBe('0.000');
     expect(materialOf(novAfter, planP, ore)?.netTon).toBe(pNetBefore);
+    // Q가 쓴 1,777.778t만 입고예정 칸에, 남은 Q 몫은 모자란 P에게 '다른 계획 몫'
+    const oreNov = novAfter.materials.find((m) => m.itemId === ore);
+    expect(oreNov).toMatchObject({ coveredScheduledTon: '1777.778', scheduledOtherPlansTon: '8222.222' });
+    expectRowAdds(oreNov);
+    kit.expectClean();
+  });
+});
+
+describe('MRP 원료 표 한 줄의 숫자 (총소요 − 원료 LOT 잔량 − 입고예정 = 순소요)', () => {
+  it('14.1 수주 뒤 /mrp 기본 기간: 합금철 2.500 − 1.000 − 0.000 = 1.500, 10-28 도착 입고예정 3.500t는 "필요일 뒤 도착"으로 따로', () => {
+    const kit = createKit();
+    const order = createSalesOrder(kit.at(AT), kit.actor('sales'), {
+      customerId: kit.customerId('CUS-01'),
+      items: [{ itemId: kit.itemId('SL-SS275-250x1200x10000'), orderedQty: 10, dueDate: '2026-10-20' }],
+    });
+    const planId = order.productionPlans[0]?.id ?? 0;
+    const period = defaultMrpPeriod('2026-10-02');
+    const before = computeMrpForPeriod(kit.tables, period);
+    const smn = before.materials.find((m) => m.itemCode === 'SMN01');
+    expect(smn).toMatchObject({
+      grossTon: '2.500',
+      onHandTon: '1.000',
+      usableOnHandTon: '1.000',
+      scheduledReceiptTon: '3.500',
+      coveredScheduledTon: '0.000',
+      scheduledAfterNeedDateTon: '3.500',
+      scheduledOtherPlansTon: '0.000',
+      netTon: '1.500',
+    });
+    // 철광석·석탄·석회석은 충분 (순소요 0), 모든 줄의 산수가 맞는다
+    expect(before.materials.filter((m) => m.itemCode !== 'SMN01').every((m) => m.netTon === '0.000')).toBe(true);
+    for (const row of before.materials) expectRowAdds(row);
+
+    // 14.1 3단계: MRP 줄로 구매요청(계획 연결) → 승인 → 발주(납기 10-10) → 이 계획 몫 입고예정 1.500t가 입고예정 칸에 들어간다
+    const purchase = kit.actor('purchase');
+    const { purchaseRequisition, items } = createPurchaseRequisition(kit.at(AT), purchase, {
+      desiredReceiptDate: '2026-10-10',
+      items: [{ itemId: kit.itemId('SMN01'), requiredTon: '1.500', productionPlanId: planId }],
+    });
+    approvePurchaseRequisition(kit.at(AT), kit.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
+    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
+    const after = computeMrpForPeriod(kit.tables, period).materials.find((m) => m.itemCode === 'SMN01');
+    expect(after).toMatchObject({ scheduledReceiptTon: '5.000', coveredScheduledTon: '1.500', scheduledAfterNeedDateTon: '3.500', netTon: '0.000' });
+    expectRowAdds(after);
     kit.expectClean();
   });
 });

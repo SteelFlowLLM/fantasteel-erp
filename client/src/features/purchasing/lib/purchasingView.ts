@@ -135,3 +135,32 @@ export function isOverdue(dueDate: string | null, today: string, scheduledReceip
 export function mrpRequestReason(line: { productionPlanNo: string; itemName: string; netTon: string; needDate: string }, period: { from: string; to: string }): string {
   return `MRP ${period.from} ~ ${period.to} · ${line.productionPlanNo} ${line.itemName} 순소요 ${line.netTon} t · 필요일 ${line.needDate}`;
 }
+
+/** MRP 원료 줄에서 이 계획들이 쓰지 않은 공급 (core MrpMaterialRow의 이유별 톤) */
+export interface MrpExcludedSupply {
+  onHandEarlierPlansTon: string;
+  scheduledOtherPlansTon: string;
+  scheduledAfterNeedDateTon: string;
+  scheduledEarlierPlansTon: string;
+  scheduledSpareTon: string;
+}
+
+const tonNote = (label: string, ton: string, suffix = ''): string[] => (decIsPositive(ton) ? [`${label} ${fmtTon(ton)}${suffix}`] : []);
+
+/** '원료 LOT 잔량' 칸 아래 작은 글씨: 표에 없는 앞선(필요일이 더 이른) 계획이 먼저 쓴 몫 (없으면 빈 배열) */
+export function mrpOnHandNotes(row: Pick<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
+  return tonNote('앞선 계획 몫', row.onHandEarlierPlansTon, ' 제외');
+}
+
+/**
+ * '입고예정' 칸 아래 작은 글씨: 칸의 숫자(이 계획들이 필요일까지 받아 쓰는 몫)에 넣지 않은 입고예정을 이유별로.
+ * 다른 계획 몫(REQ-PRD-005) · 필요일 뒤 도착(4.4) · 앞선 계획 몫 · 남는 몫(소요가 이미 채워짐). 0인 이유는 뺀다.
+ */
+export function mrpScheduledReceiptNotes(row: Omit<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
+  return [
+    ...tonNote('다른 계획 몫', row.scheduledOtherPlansTon, ' 제외'),
+    ...tonNote('필요일 뒤 도착', row.scheduledAfterNeedDateTon, ' 제외'),
+    ...tonNote('앞선 계획 몫', row.scheduledEarlierPlansTon, ' 제외'),
+    ...tonNote('남는 몫', row.scheduledSpareTon),
+  ];
+}

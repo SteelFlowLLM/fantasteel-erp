@@ -218,7 +218,7 @@
 | 업무 번호·LOT 번호 자리수를 넘을 때 | 자리를 늘려 그대로 붙인다 (예: SO-2610-1000) | 업무 프로세스 9.2에서 TBD |
 | 슬래브 LOT 순번(SS) 카운터 | 히트 번호마다 1부터 | 9.2 "히트번호-SS" 해석 |
 | 밀시트 순번 N | 출하요청마다 1부터 | 9.1 "수주별 순번" 해석 |
-| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v4`(`MOCK_DB_VERSION` = 4, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
+| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v5`(`MOCK_DB_VERSION` = 5, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
 | 계정 선택 저장 위치 | sessionStorage `fantasteel.session.employee-id` (탭마다 따로) | PLAN 2장 |
 | 가짜 API가 요청 사원을 아는 방법 | 이 탭의 계정 선택(sessionStorage 위 키)을 읽는다. 사용 안 함 사원은 아무것도 할 수 없다(COM-002) | 실제 서버의 JWT 확인 대신 (BP-AUTH-01 "각 API에서 권한 재확인") — 구현 선택 |
 | 메시지 첨부 1개의 최대 크기 | 512KB. 내용은 DB와 따로 localStorage `fantasteel.mock-files.v1`(파일 경로 → data URL)에 두고, 시드로 초기화하면 지운다 | REQ-MSG-003 "형식·용량 제한은 구현 단계". 브라우저 저장 공간(약 5MB)이 작아서 고른 값 (가정) |
@@ -230,11 +230,11 @@
 | 순서 | 등록 키 | 파일 | 만드는 것 | 근거 |
 |---|---|---|---|---|
 | 1 | `inspectionStandards` | `client/src/mock/seeds/inspectionStandards.ts` | 검사 기준 버전 1 (`is_current`): `QS-{강종}-ST`(제강 성분)·`QS-{강종}-CC`(연주 슬래브)·`QS-{강종}-HR`(열연 코일). 제강·열연은 KS 값, 연주는 사내 규격 가정값(6-3, 6-8장) | ks-values.md, PLAN 8-1, REQ-QC-001·002 |
-| 2 | `core` | `client/src/mock/seeds/core.ts` | 수주 SO-2609-001~005, 생산계획 PP-2609-0001~0005, 구매요청 PR-2609-0001~0004, 출하요청 DR-2609-0001~0002, 밀시트 MS-2609-0001-1, 수주 업무방(SO-2609-003), Message → ERP 시연 메시지. 시작 재고 = 14.1의 SS275 슬래브 250x1200x10000 합격 가용 6매 | 업무 프로세스 14.1·14.2, BP-SEED-01 |
+| 2 | `core` | `client/src/mock/seeds/core.ts` | 수주 SO-2609-001~005, 생산계획 PP-2609-0001~0005, 구매요청 PR-2609-0001~0004, 출하요청 DR-2609-0001~0002, 밀시트 MS-2609-0001-1, 수주 업무방(SO-2609-003), Message → ERP 시연 메시지. 시작 재고 = 14.1의 SS275 슬래브 250x1200x10000 합격 가용 6매. 원료 입고량은 6-3 '시드 원료 입고량'(가정값) | 업무 프로세스 14.1·14.2, BP-SEED-01 |
 | 3 | `collab` | `client/src/mock/seeds/collab.ts` | 업무 6건과 업무 지정 알림, 1:1 채팅방 1개·그룹 채팅방 2개와 메시지(첨부 1개, 사원 멘션 2개, 부서 멘션 1개). 업무방은 core가 만든다 | REQ-NTF·MSG 계열 (내용은 시연용 가정값, 6-2장) |
 | 4 | `dashboard` | `client/src/mock/seeds/dashboard.ts` | 8월 말 수주 SO-2608-001~004(모두 출하완료, 규격·매수·난수 시드 6001~6004·출고일은 `SEED_DASHBOARD`), 8-31 원료 입고, 9월 실적·검사·출고 | BP-DSH-01 "추이 집계에는 시계열 시드", BP-SEED-01 |
 
-- 가짜 DB 버전 `MOCK_DB_VERSION` = 4 (`client/src/mock/store.ts`). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
+- 가짜 DB 버전 `MOCK_DB_VERSION` = 5 (`client/src/mock/store.ts`, 2026-10-02 원료 입고량 변경으로 4 → 5). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
 - 대시보드 시드는 core 뒤에 돌아서 그 출하요청 번호가 DR-2609-0003~0007이다(번호 순서와 날짜 순서가 다르다 — 시연용 가정).
 - 대시보드 시드의 원료 입고분은 자기 히트 소요만큼만 사서 FIFO로 먼저 다 쓰이므로, core 시드의 원료 잔량·입고예정과 14.1의 MRP 결과(실리코망가니즈 순소요 1.500t 등)가 바뀌지 않는다.
 - 시드가 아직 넣지 않은 것: 없다. 1단계에서 "다음 단계"로 미뤘던 수주·재고·LOT·생산·검사·구매·출하·밀시트·업무방·알림·메신저는 모두 위 시드로 들어갔다. 준비 중(P2·EX) 화면의 예시 내용(`client/src/features/agent/agentExample.ts`, `client/src/features/meetings/meetingExample.ts`, `client/src/features/pastCases/pastCaseExample.ts`)은 DB 시드가 아니라 코드의 고정 예시다.
@@ -312,6 +312,8 @@
 | **초안 원료 필드** — `payload = {itemId, requiredTon, desiredReceiptDate, requestReason, sourceText}` | REQ-ACT-001 | `client/src/mock/services/actionDrafts.ts` |
 | **시드 측정값** — 기준 안 대표값(`typicalPassValue`) + 히트별 성분 값, 불합격 사례 값(표면 3.50mm, P 0.058) | PLAN 8-1 #5 | `client/src/mock/seeds/core.ts`, `client/src/lib/inspectionJudgment.ts` |
 | **시드 날짜·사람·수량** — 16-2 표 | 문서에 없음 — 시연용 | `client/src/mock/seeds/core.ts` |
+| **시드 원료 입고량** — PR-2609-0001: 철광석 5,000t(09-02 1,800 + 09-03 3,200)·석탄 1,900t·석회석 480t·실리코망가니즈 20t → 시드 끝 잔량 2,333.330 / 899.998 / 229.998 / 1.000t. 14.1 히트 1개 뒤에도 철광석·석탄·석회석은 구매 없이 히트 4개를 더 만든다 | 문서에 없음 — 시연용(2026-10-02 브라우저 점검: 예전 3,300·1,250·320t로는 14.1 뒤 189 / 83 / 28t만 남아 14.2 전에 구매 3건이 필요했다). 실리코망가니즈는 14.1 3단계 MRP(합금철만 순소요 1.500t, 04 14.1)를 지키려고 그대로 | `client/src/mock/seeds/core.ts` (`SEED_CORE.rawMaterialReceipts`) |
+| **MRP 원료 줄의 공급 나누기** — '원료 LOT 잔량' 칸 = 표에 보이는 계획이 쓸 수 있는 잔량(표에 없는 앞선 계획이 먼저 쓴 몫 제외), '입고예정' 칸 = 보이는 계획이 필요일까지 받아 쓰는 몫, 나머지 입고예정은 다른 계획 몫 · 필요일 뒤 도착(납기 없음 포함) · 앞선 계획 몫 · 남는 몫으로 칸 아래에 따로. 순소요가 남은 줄이 있으면 그 줄들이 쓰지 못한 까닭으로 이유를 정한다 | 4.4 "필요일까지 도착하는 확정 발주만", REQ-PRD-005 "다른 수주의 입고예정에서 제외". 한 줄을 어떻게 보일지는 문서에 없음 — "총소요 − 잔량 − 입고예정 = 순소요"가 그 줄 숫자로 맞게 | `client/src/lib/mrp.ts` (`supplyBreakdownOf`), `client/src/mock/services/mrp.ts` (`mrpMaterialRows`), `client/src/features/purchasing/MrpScreen.tsx` |
 
 ### 6-4. 화면 공통(cross-cutting)
 
@@ -329,7 +331,7 @@
 | **불합격률** — 판정 시각(inspected_at)이 기간 안인 PASS·FAIL 검사 수 중 FAIL. 히트 불합격으로 제외된 하위 LOT은 따로 세지 않음 | 문서에 없음 — 검사 단위 비율 | `client/src/api/dashboard.ts`, `client/src/features/dashboard/lib/widgetMath.ts` |
 | **원료 잔량 대비 소요 MRP 기간** — 필요일 ~ 오늘 + 30일 (지난 필요일 포함) | MRP 기간 기본값이 문서에 없음 | `client/src/api/dashboard.ts` |
 | **공정별 수율** — 완료된 작업 실적의 Σ산출 ÷ Σ투입(톤), 계획 수율은 투입량 가중(열연은 규격 매핑 수율). 제선은 계획 수율을 쓰지 않아 표시하지 않음 | 4.4: 제선은 원단위 | `client/src/api/dashboard.ts`, `client/src/features/dashboard/lib/widgetMath.ts` |
-| **여재 보유 일수** — 규격별 여재(예약 가용) > 0인 규격의 미배정 합격 슬래브 중 surplus_at(없으면 생산완료일)이 가장 이른 날부터 | 문서에 없음 — 예약이 매수 단위라 LOT별 여재를 정할 수 없음 | `client/src/api/dashboard.ts` |
+| **여재 보유 일수** — 규격별 여재(TRM-048, 재고 화면 여재 탭과 같은 core `surplusSlabs` 값) > 0인 규격의 여재 슬래브 중 surplus_at(없으면 생산완료일)이 가장 이른 날부터 | 문서에 없음 — 예약이 매수 단위라 LOT별 여재를 정할 수 없음. 여재 매수·여재 슬래브 기준은 6-7 '여재 매수·여재 LOT'(2026-10-02: 전에는 예약 가용을 여재로 세어 재고 화면과 달랐다) | `client/src/api/dashboard.ts`, `client/src/mock/services/inventoryViews.ts` |
 | **공정 흐름 단계** — 진행 중 수주 · 생산계획(계획·진행중) · 판정 대기 LOT · 제품 가용재고 · 출하요청(배정 대기·배정 확정) · 오늘 출고 확정 | 문서에 없음 — 문서에 위젯 이름만 있음 | `client/src/api/dashboard.ts`, `client/src/features/dashboard/widgets/ProcessFlowWidget.tsx` |
 | **위젯별 볼 권한** — 표 1장 "볼 권한" 열 (데이터를 보여 주는 화면의 여는 조건과 같게) | BP-DSH-01 "권한 내 집계" | `client/src/features/dashboard/widgetCatalog.ts` |
 | **위젯 크기·기본 배치** — 표 1장 (옛 화면 값) | SPEC 4장 3번 "최소 크기" | `client/src/features/dashboard/widgetCatalog.ts`, `client/src/features/dashboard/lib/layout.ts` |
@@ -358,7 +360,7 @@
 |---|---|---|
 | **히트 불합격 하위 LOT 품질 표시** — '불합격(히트)' (INSPECTION_RESULT '불합격' + 원인) | 공통 코드에 별도 값이 없고, 예약·배정 제외 이유(INV-007)를 구분해 보여야 함 | `client/src/features/inventory/lib/inventoryDisplay.ts` |
 | **배정 여부 표시** — 해제되지 않은 마지막 배정(CONFIRMED·CONSUMED)의 'ALLOCATION_PURPOSE 표시명 + 배정 · ALLOCATION_STATUS 표시명'(예: 출하 배정 · 소진). 재고 LOT에 배정이 없으면 '미배정', 소진·출고 LOT에 배정 기록이 없으면 '—' | 문서에 없음 — 배정 여부 코드가 따로 없음 (검토 반영 2번) | `client/src/features/inventory/lib/inventoryDisplay.ts` |
-| **여재 매수·여재 LOT** — 규격별 여재 = min(여재 전환(surplus_at) 미배정 합격 슬래브 수, 가용재고). 여재 LOT은 그중 최근 것부터 여재 매수만큼. LOT 목록 '여재' 꼬리표도 같은 LOT | 문서에 없음 — 검토 반영 1번 | `client/src/features/inventory/lib/inventoryRules.ts`, `client/src/mock/services/inventoryViews.ts` |
+| **여재 매수·여재 LOT** — 규격별 여재 = min(여재 전환(surplus_at) 미배정 합격 슬래브 수, 가용재고). 여재 LOT은 그중 최근 것부터 여재 매수만큼. LOT 목록 '여재' 꼬리표와 대시보드 여재 위젯도 같은 값(core `surplusSlabs`) | 문서에 없음 — 검토 반영 1번 | `client/src/lib/surplus.ts`, `client/src/mock/services/inventoryViews.ts` |
 | **1매 이론중량·톤 칸** — 규격 이론중량 그대로(`theoreticalWeightTon`), 톤 = 매수 × 이론중량(소수 3자리) | REQ-INV-001, TRM-022 이론중량 | `client/src/features/inventory/lib/inventoryDisplay.ts`, `client/src/lib/weight.ts` |
 | **링크 주소** — LOT → `/lots/trace?lot=<LOT 번호>`, 생산계획 → `/production/plans?plan=<id>` | 문서에 없음 — reports/3 A-0의 옛 화면 간 이동 규칙. 다른 영역이 다른 파라미터를 쓰면 병합 때 맞춘다 | `client/src/features/inventory/lib/inventoryDisplay.ts` |
 

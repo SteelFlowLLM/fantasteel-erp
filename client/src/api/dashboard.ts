@@ -444,7 +444,10 @@ export interface RawMaterialBalanceRow {
   itemName: string;
   rawMaterialType: RawMaterialType | null;
   onHandTon: string;
+  /** 입고예정 합계 (확정 발주의 미입고량) */
   scheduledReceiptTon: string;
+  /** 입고예정 중 이 계획들이 필요일까지 받아 쓰는 몫 (MRP 화면 입고예정 칸과 같은 값 — 다른 계획 몫·필요일 뒤 도착분 제외) */
+  coveredScheduledTon: string;
   grossTon: string;
   netTon: string;
   firstShortageDate: string | null;
@@ -471,6 +474,7 @@ function readRawMaterialBalance(tables: Tables, options: DashboardQueryOptions):
       rawMaterialType: m.rawMaterialType,
       onHandTon: m.onHandTon,
       scheduledReceiptTon: m.scheduledReceiptTon,
+      coveredScheduledTon: m.coveredScheduledTon,
       grossTon: m.grossTon,
       netTon: m.netTon,
       firstShortageDate: m.firstShortageDate,
@@ -717,10 +721,10 @@ export interface SurplusAgeRow {
   itemId: number;
   itemCode: string;
   steelGradeCode: string | null;
-  /** 여재 매수 = 규격의 예약 가용 (재고 화면 여재 탭과 같은 값) */
+  /** 여재 매수 (TRM-048) = core `surplusSlabs`의 여재 매수 — 재고 화면 여재 탭과 같은 값 */
   surplusQty: number;
   surplusTon: string;
-  /** 여재로 표시된 날(surplus_at, 없으면 생산완료일) 중 가장 이른 날 */
+  /** 여재 슬래브가 여재로 바뀐 날(surplus_at, 없으면 생산완료일) 중 가장 이른 날 */
   oldestSinceDate: string;
   /** 최장 보유 일수 = 오늘 − oldestSinceDate */
   maxAgeDays: number;
@@ -737,11 +741,11 @@ export interface SurplusAgeData {
 function readSurplusAge(tables: Tables, options: DashboardQueryOptions): SurplusAgeData {
   requireWidgetActor(tables, 'SURPLUS_AGE');
   const today = todayOf(options);
+  // 재고 화면 여재 탭과 같은 core 읽기 모델(surplusSlabs: 여재 매수·여재 슬래브)을 그대로 쓴다 → 두 화면의 여재 숫자가 같다
   const items = surplusSlabs(tables)
     .filter((row) => row.surplusQty > 0)
     .map((row): SurplusAgeRow => {
-      const marked = row.lots.filter((l) => l.surplusAt !== null);
-      const sinceDates = (marked.length > 0 ? marked.map((l) => seoulDate(l.surplusAt ?? '')) : row.lots.map((l) => l.producedDate)).sort();
+      const sinceDates = row.lots.map((l) => (l.surplusAt !== null ? seoulDate(l.surplusAt) : l.producedDate)).sort();
       const oldestSinceDate = sinceDates[0] ?? today;
       const item = findById(tables, 'item', row.itemId);
       return {

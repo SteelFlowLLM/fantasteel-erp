@@ -28,12 +28,12 @@ const requisitionIdOf = (no: string): number => {
 /** 날짜 문자열 + n일 */
 const plusDays = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-/** SS275 슬래브 36매 수주 (재고 6 + 부족 30 → 3히트) → 철광석이 모자란다 */
+/** SS275 슬래브 66매 수주 (재고 6 + 부족 60 → 6히트, 철광석 2,666.667t) → 시드 철광석 잔량 2,333.330t로는 모자란다 */
 function createBigSalesOrder(dueDate: string): number {
   const salesId = employeeIdOf(SEED_EMPLOYEE_NO.sales);
   const customerId = read((t) => t.customer.find((c) => c.customerCode === 'CUS-01')?.id) ?? 0;
   const result = getMockDb().transact((tx) =>
-    createSalesOrder(tx, userActor(salesId), { customerId, items: [{ itemId: itemIdOf('SL-SS275-250x1200x10000'), orderedQty: 36, dueDate }] }),
+    createSalesOrder(tx, userActor(salesId), { customerId, items: [{ itemId: itemIdOf('SL-SS275-250x1200x10000'), orderedQty: 66, dueDate }] }),
   );
   const plan = result.productionPlans[0];
   if (!plan) throw new Error('생산계획이 없어요');
@@ -49,7 +49,7 @@ describe('MRP api', () => {
     const period = { from: today, to: plusDays(today, 30) };
     const mrp = await mrpApi.requirements(period);
     const plan = mrp.plans.find((p) => p.productionPlanId === planId);
-    expect(plan).toMatchObject({ remainingHeatCount: 3, heatTon: '750.000', needDate: dueDate });
+    expect(plan).toMatchObject({ remainingHeatCount: 6, heatTon: '1500.000', needDate: dueDate });
     expect(plan?.expectedSurplusSlabQty).toBeGreaterThanOrEqual(0);
     const ore = mrp.materials.find((m) => m.itemCode === 'ORE01');
     expect(ore && Number(ore.netTon)).toBeGreaterThan(0);
