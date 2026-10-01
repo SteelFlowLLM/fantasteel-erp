@@ -1,7 +1,7 @@
 // 불합격 관리 API (REQ-QC-004, REQ-INV-007, REQ-PRD-006, BP-QC-01, 14.1-6).
 // 불합격 LOT(히트 포함)과 불합격 히트의 하위 LOT에 불합격 상태(보류·격하·폐기)와 사유를 기록한다. 후속 처리(재판정·재작업·폐기 처리)는 없다.
 // 재생산 계획은 사람이 만든다(자동 없음): 생산계획·히트 편성 사용 권한으로 핵심 서비스 createReproductionPlan을 부른다.
-import { linkedSalesOrderItemOf, type LinkedSalesOrderItem } from '@/api/inspections';
+import { historyWithItemNames, linkedSalesOrderItemOf, type LinkedSalesOrderItem } from '@/api/inspections';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { PERMISSION, type DispositionStatus, type ProductionPlanStatus } from '@/codes';
@@ -9,7 +9,6 @@ import {
   createReproductionPlan,
   findById,
   inspectionFormOf,
-  lotTimeline,
   rejectedLots,
   setDisposition,
   userActor,
@@ -44,6 +43,8 @@ export interface RejectedLotDetail {
   /** 같은 수주 품목의 생산계획 (재생산 포함, 등록 순) */
   plans: LinkedPlan[];
   history: TimelineEvent[];
+  /** 작업 로그의 검사 등록에 나온 항목 코드 → 검사 항목명. 하위 LOT이면 근거(히트 성분)와 달리 이 LOT 자신의 검사 항목도 들어 있다 */
+  inspectionItemNames: Record<string, string>;
 }
 
 export interface SetDispositionInput {
@@ -101,7 +102,7 @@ export const dispositionApi = {
                   isReproduction: p.isReproduction,
                   shortageQty: p.shortageQty,
                 })),
-        history: lotTimeline(tables, lotId),
+        ...historyWithItemNames(tables, lotId),
       };
     }),
 

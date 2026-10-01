@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { ApiError, InputError } from '@/api/client';
 import { inspectionApi } from '@/api/inspections';
-import { measuredValueChanges } from '@/features/quality/lib/qualityDisplay';
+import { inspectionItemCodesOfHistory, measuredValueChanges } from '@/features/quality/lib/qualityDisplay';
 import { typicalPassValue } from '@/lib/inspectionJudgment';
 import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
@@ -77,6 +77,7 @@ describe('검사 대상 목록·입력 폼 조회', () => {
     expect(failedSlab.items.find((i) => i.inspectionItemCode === 'SURFACE_DEFECT_DEPTH')).toMatchObject({ measuredValue: expect.stringMatching(/^3\.5/), isPassed: false });
     expect(failedSlab.salesOrderItem).toMatchObject({ salesOrderNo: 'SO-2609-002', lineNo: 1 });
     expect(failedSlab.history.some((e) => e.businessEventType === 'INSPECTION_REGISTERED')).toBe(true);
+    for (const code of inspectionItemCodesOfHistory(failedSlab.history)) expect(failedSlab.inspectionItemNames[code]).toBeTruthy();
     expect(failedSlab.locked).toBe(false);
     expect(await codeOf(inspectionApi.detail(999999))).toBe('COM-003');
   });

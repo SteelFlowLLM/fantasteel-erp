@@ -193,7 +193,6 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
   const canEdit = useCanUse(PERMISSION.INSPECTION_REGISTER);
   const { lot } = data;
   const typeName = LOT_TYPE_LABEL[lot.lotType];
-  const itemNames = new Map(data.items.map((i) => [i.inspectionItemCode, i.inspectionItemName]));
 
   return (
     <>
@@ -311,7 +310,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       <InspectionForm key={`${lot.lotId}-${data.updatedAt ?? 'new'}-${data.standard?.id ?? 0}`} detail={data} canEdit={canEdit} onSaved={onSaved} />
 
-      <LotHistoryCard events={data.history} itemNames={itemNames} />
+      <LotHistoryCard lotId={lot.lotId} events={data.history} itemNames={data.inspectionItemNames} />
     </>
   );
 }
