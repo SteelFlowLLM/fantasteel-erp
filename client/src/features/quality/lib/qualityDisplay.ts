@@ -9,7 +9,7 @@ import type { JsonValue } from '@/mock/schema';
 /** 측정값 형식: 정수 8자리·소수 4자리까지, 음수 허용 (quality_inspection_value.measured_value, 가짜 서버 checkDecimal과 같은 규칙) */
 export const MEASURED_VALUE_PATTERN = /^-?\d{1,8}(\.\d{1,4})?$/;
 
-/** 공정별 검사 이름 (REQ-QC-001 문구) */
+/** 공정마다의 검사 이름 (REQ-QC-001 문구) */
 export const INSPECTION_NAME: Partial<Record<ProcessType, string>> = {
   STEELMAKING: '히트 성분 검사',
   CONTINUOUS_CASTING: '슬래브 표면·치수 검사',

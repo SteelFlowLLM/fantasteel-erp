@@ -44,7 +44,7 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
   return (
     <Card className="flex-none">
       <CardHead title="영향과 자동 처리" meta="불합격 판정 때 시스템이 처리한 것" />
-      <CardBody className="gap-2.5">
+      <CardBody>
         <div className="flex flex-wrap items-center gap-1.5">
           <Tag tone="run">시스템</Tag>
           <span className="inline-flex h-[26px] items-center gap-1.5 rounded-[13px] border border-line-strong bg-surface px-2.5 text-xs text-ink-2">

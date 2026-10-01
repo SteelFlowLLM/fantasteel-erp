@@ -3,13 +3,13 @@
 // 불합격 관리 (REQ-QC-004, REQ-INV-007, BP-QC-01): 왼쪽 불합격 LOT 목록 | 오른쪽 근거 검사값 · 불합격 상태 지정 · 영향과 재생산 · 이력.
 // 목록 = 검사 기준을 충족하지 못한 LOT(히트 포함)과 불합격 히트의 하위 LOT(용어 사전 TRM-078). 후속 처리 로직은 없다.
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import type { RejectedLotDetail, RejectedLotListRow } from '@/api/dispositions';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { ButtonLink } from '@/components/Button';
-import { Card, CardBody, CardHead, CardFoot } from '@/components/Card';
+import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
 import { SoonButton } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
@@ -61,6 +61,7 @@ export function RejectedLotWorkspace() {
 }
 
 function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<StatusFilter>('ALL');
   const [reason, setReason] = useState<ReasonFilter>('ALL');
@@ -75,6 +76,10 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
   );
   const paramId = Number(searchParams.get('lot')) || null;
   const activeId = paramId ?? list[0]?.lotId ?? null;
+  // 고른 LOT을 주소에 둔다: 상태를 지정해 필터에서 빠져도 같은 LOT을 계속 보인다
+  useEffect(() => {
+    if (paramId === null && activeId !== null) router.replace(rejectedHref(activeId));
+  }, [paramId, activeId, router]);
   const count = (s: Exclude<StatusFilter, 'ALL'>) => rows.filter((r) => statusOf(r) === s).length;
 
   return (
@@ -305,7 +310,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
             ) : null}
             <CardBody flush>{evidence ? <InspectionValuesTable items={evidence.items} /> : <EmptyNote>연결된 검사 기록이 없어요</EmptyNote>}</CardBody>
             {!evidence && row.failedItems.length > 0 ? (
-              <CardFoot className="flex-col items-start gap-1">
+              <div className="flex flex-col items-start gap-1 rounded-b-md border-t border-line bg-surface-2 px-4 py-2.5">
                 <span className="text-cap text-ink-3">불합격 항목</span>
                 {row.failedItems.map((f) => (
                   <span key={f.inspectionItemCode} className="text-xs text-danger">
@@ -313,7 +318,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                     {f.unit ? ` ${f.unit}` : ''} (기준 {limitText(f)})
                   </span>
                 ))}
-              </CardFoot>
+              </div>
             ) : null}
           </Card>
           <DispositionForm key={`${row.lotId}-${row.updatedAt}`} row={row} canEdit={canEdit} />

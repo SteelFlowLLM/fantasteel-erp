@@ -4,7 +4,7 @@
 // 고른 LOT은 주소(?lot=)에 둔다. 판정 뒤 자동 예약·여재·히트 불합격 연쇄는 핵심 서비스가 같은 저장에서 처리하고, 여기서는 그 결과를 보인다.
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
@@ -60,19 +60,22 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   const paramId = Number(searchParams.get('lot')) || null;
   const paramRow = paramId === null ? undefined : rows.find((r) => r.lotId === paramId);
   const [process, setProcess] = useState<ProcessFilter>('ALL');
-  const [resultState, setResult] = useState<ResultFilter | null>(null);
+  // 처음에는 판정 대기만. 주소로 판정이 끝난 LOT을 열었으면 전체를 보인다.
+  const [result, setResult] = useState<ResultFilter>(() => (paramRow && paramRow.inspectionResult !== 'PENDING' ? 'ALL' : 'PENDING'));
   const [keyword, setKeyword] = useState('');
   /** 방금 저장한 결과 (LOT별). 판정 뒤 처리를 보여 준다. */
   const [outcome, setOutcome] = useState<RegisterInspectionOutcome | null>(null);
-
-  // 처음에는 판정 대기만. 주소로 판정이 끝난 LOT을 열었으면 전체를 보인다.
-  const result: ResultFilter = resultState ?? (paramRow && paramRow.inspectionResult !== 'PENDING' ? 'ALL' : 'PENDING');
   const byProcess = rows.filter((r) => process === 'ALL' || r.processType === process);
   const needle = keyword.trim().toUpperCase();
   const list = byProcess.filter((r) => (result === 'ALL' || r.inspectionResult === result) && (!needle || r.lotNo.toUpperCase().includes(needle)));
   const activeId = paramId ?? list[0]?.lotId ?? null;
   const pending = rows.filter((r) => r.inspectionResult === 'PENDING');
   const nextPending = pending.find((r) => r.lotId !== activeId) ?? null;
+
+  // 고른 LOT을 주소에 둔다: 저장 뒤 목록 필터에서 빠져도 같은 LOT을 계속 보인다
+  useEffect(() => {
+    if (paramId === null && activeId !== null) router.replace(inspectionHref(activeId));
+  }, [paramId, activeId, router]);
 
   const processCount = (p: ProcessFilter) => rows.filter((r) => r.inspectionResult === 'PENDING' && (p === 'ALL' || r.processType === p)).length;
   const resultCount = (r: Exclude<ResultFilter, 'ALL'>) => byProcess.filter((row) => row.inspectionResult === r).length;
@@ -128,10 +131,7 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
             nextPending={nextPending}
             onNext={() => {
               setOutcome(null);
-              if (nextPending) {
-                setResult(null);
-                router.replace(inspectionHref(nextPending.lotId));
-              }
+              if (nextPending) router.replace(inspectionHref(nextPending.lotId));
             }}
           />
         )}
@@ -359,7 +359,7 @@ function OutcomeCard({
   const fail = outcome.inspectionResult === 'FAIL';
   return (
     <Card className="flex-none">
-      <CardBody className="gap-2.5 px-4 py-3">
+      <div className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-[#115c38]' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-[#8e231e]' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-[#7a3d00]'}>
             <Icon name={pass ? 'check-circle' : fail ? 'x-circle' : 'clock'} size="lg" />
@@ -391,7 +391,7 @@ function OutcomeCard({
             </Button>
           </div>
         </div>
-      </CardBody>
+      </div>
     </Card>
   );
 }
