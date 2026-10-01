@@ -59,6 +59,8 @@ export interface JobGradeView {
   jobGradeName: string;
   sortOrder: number;
   employeeCount: number;
+  /** 수정 시각 (화면을 연 뒤 다른 곳에서 바뀌었는지 확인, COM-001) */
+  updatedAt: string;
 }
 
 export interface RoleView {
@@ -68,6 +70,8 @@ export interface RoleView {
   /** 권한 표 순서. 권한이 없으면 넣지 않는다. */
   permissions: { permission: Permission; permissionLevel: PermissionLevel }[];
   employeeCount: number;
+  /** 수정 시각. 권한을 저장하면 바뀐다 (COM-001 확인용) */
+  updatedAt: string;
 }
 
 function toEmployeeView(tables: Readonly<MockTables>, employeeId: number): EmployeeView | null {
@@ -166,6 +170,7 @@ export const directoryApi = {
           jobGradeName: g.jobGradeName,
           sortOrder: g.sortOrder,
           employeeCount: tables.employee.filter((e) => e.jobGradeId === g.id).length,
+          updatedAt: g.updatedAt,
         })),
     ),
 
@@ -182,6 +187,7 @@ export const directoryApi = {
             return row ? [{ permission, permissionLevel: row.permissionLevel }] : [];
           }),
           employeeCount: tables.employee.filter((e) => e.roleId === role.id).length,
+          updatedAt: role.updatedAt,
         };
       }),
     ),
