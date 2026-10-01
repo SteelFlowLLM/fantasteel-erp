@@ -12,7 +12,7 @@ import { Tabs } from '@/components/Tabs';
 import { ConsumptionTab } from '@/features/masterData/components/ConsumptionTab';
 import { ItemTab } from '@/features/masterData/components/ItemTab';
 import { isMasterTabKey, type MasterTabKey } from '@/features/masterData/components/MasterParts';
-import { PartyYardTab } from '@/features/masterData/components/PartyYardTab';
+import { CustomerSupplierYardTab } from '@/features/masterData/components/CustomerSupplierYardTab';
 import { ProductionSettingTab } from '@/features/masterData/components/ProductionSettingTab';
 import { ProductSpecTab } from '@/features/masterData/components/ProductSpecTab';
 import { ReadinessBanner } from '@/features/masterData/components/ReadinessBanner';
@@ -28,7 +28,7 @@ const TABS: readonly { key: MasterTabKey; label: string; icon: IconName; sub: st
   { key: 'routing', label: '라우팅', icon: 'flow', sub: '품목 유형별 공정 순서와 계획 수율' },
   { key: 'consumption', label: '배합 원단위', icon: 'calc', sub: '용선 1t당 원료, 용강 1t당 강종별 합금철 투입량' },
   { key: 'items', label: '품목', icon: 'box', sub: '원료 품목(원료 코드·원료 유형·기본 공급업체)과 제품 품목(슬래브·코일)' },
-  { key: 'parties', label: '고객사·공급업체·야드', icon: 'building', sub: '고객사·공급업체·야드 등록' },
+  { key: 'customer-supplier-yard', label: '고객사·공급업체·야드', icon: 'building', sub: '고객사·공급업체·야드 등록' },
   { key: 'settings', label: '생산 설정값', icon: 'gauge', sub: '히트 용량 · 납기 위험 기준일' },
 ];
 
@@ -79,7 +79,7 @@ export function MasterDataScreen() {
         {tab === 'routing' ? <RoutingTab canEdit={canEdit} onGoTab={goTab} /> : null}
         {tab === 'consumption' ? <ConsumptionTab canEdit={canEdit} /> : null}
         {tab === 'items' ? <ItemTab canEdit={canEdit} onGoTab={goTab} /> : null}
-        {tab === 'parties' ? <PartyYardTab canEdit={canEdit} /> : null}
+        {tab === 'customer-supplier-yard' ? <CustomerSupplierYardTab canEdit={canEdit} /> : null}
         {tab === 'settings' ? <ProductionSettingTab canEdit={canEdit} /> : null}
       </div>
     </PageMain>

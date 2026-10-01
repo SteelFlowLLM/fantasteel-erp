@@ -26,15 +26,15 @@ import { assertUnchanged, decimalText, nonNegativeInteger, optionalText, require
 import { findCurrentStandard } from '@/features/inspectionStandards/lib/standardItems';
 import { computeMasterReadiness, type MasterReadiness } from '@/features/masterData/lib/readiness';
 import {
-  customerReferencesOf,
+  countCustomerReferences,
   isSpecUsed,
-  productSpecReferencesOf,
-  rawMaterialReferencesOf,
-  referenceText,
-  specUsageOf,
-  steelGradeReferencesOf,
-  supplierReferencesOf,
-  yardReferencesOf,
+  countProductSpecReferences,
+  countRawMaterialReferences,
+  formatReferenceText,
+  countSpecUsage,
+  countSteelGradeReferences,
+  countSupplierReferences,
+  countYardReferences,
   type ReferenceCount,
 } from '@/features/masterData/lib/references';
 import { withEulReul, withGwaWa, withIGa } from '@/lib/josa';
@@ -113,8 +113,8 @@ export interface MasterSteelGradeView {
   steelGradeName: string;
   standardNo: string | null;
   specCount: number;
-  /** 성분 규격 = 제강 검사 기준의 지금 버전 (TRM-020) */
-  steelmakingStandard: { id: number; inspectionStandardCode: string; version: number; itemCount: number; isCommon: boolean } | null;
+  /** 성분 규격 = 그 강종의 제강 검사 기준 지금 버전 (TRM-020). 강종별로만 두므로 공통 기준으로 대신하지 않는다 */
+  steelmakingStandard: { id: number; inspectionStandardCode: string; version: number; itemCount: number } | null;
   referenceText: string | null;
   updatedAt: string;
 }
@@ -256,19 +256,40 @@ export interface RawMaterialUpdateInput {
   expectedUpdatedAt?: string | null;
 }
 
-export interface PartyInput {
-  code: string;
-  name: string;
+// 고객사·공급업체·야드 입력: ERD 칼럼 이름 그대로 (customer_code/customer_name, supplier_code/supplier_name, yard_code/yard_name/yard_type).
+// 입력칸 오류 키도 같은 이름을 쓴다. 코드(·야드 유형)는 만든 뒤 바꾸지 않아 수정 입력에는 이름만 있다.
+export interface CustomerInput {
+  customerCode: string;
+  customerName: string;
 }
 
-export interface PartyUpdateInput {
+export interface CustomerUpdateInput {
   id: number;
-  name: string;
+  customerName: string;
   expectedUpdatedAt?: string | null;
 }
 
-export interface YardInput extends PartyInput {
+export interface SupplierInput {
+  supplierCode: string;
+  supplierName: string;
+}
+
+export interface SupplierUpdateInput {
+  id: number;
+  supplierName: string;
+  expectedUpdatedAt?: string | null;
+}
+
+export interface YardInput {
+  yardCode: string;
+  yardName: string;
   yardType: YardType | null;
+}
+
+export interface YardUpdateInput {
+  id: number;
+  yardName: string;
+  expectedUpdatedAt?: string | null;
 }
 
 export interface ProductionSettingInput {
@@ -289,7 +310,7 @@ function removeRow<K extends TableName>(tx: MockTx, table: K, id: number): void 
 
 /** 참조가 있으면 삭제를 거부한다 */
 function assertNoReferences(what: string, references: readonly ReferenceCount[]): void {
-  const text = referenceText(references);
+  const text = formatReferenceText(references);
   if (text) throw new InputError(`${withEulReul(what)} 쓰는 곳이 있어 삭제할 수 없어요 (${text})`);
 }
 
@@ -298,7 +319,7 @@ const CODE_PATTERN = /^[A-Z0-9][A-Z0-9_-]*$/;
 /** 강종 코드: 영문 대문자·숫자·하이픈 (예: SM355A) */
 const STEEL_GRADE_CODE_PATTERN = /^[A-Z0-9][A-Z0-9-]*$/;
 
-function codeText(errors: FieldErrors, field: string, value: string, label: string, maxLength: number, pattern: RegExp, example: string): string | null {
+function readCode(errors: FieldErrors, field: string, value: string, label: string, maxLength: number, pattern: RegExp, example: string): string | null {
   const text = requiredText(errors, field, value.toUpperCase(), label, maxLength);
   if (text === null) return null;
   if (!pattern.test(text)) {
@@ -328,7 +349,7 @@ const isProductItem = (item: ItemRow): item is ItemRow & {
 
 const trimZeros = (value: string) => (value.includes('.') ? value.replace(/\.?0+$/, '') : value);
 /** 규격 품목명: 'SS275 슬래브 250×1200×10000' (시드와 같은 모양) */
-const specItemName = (itemType: ProductItemType, steelGradeCode: string, t: string, w: string, l: string) =>
+const buildSpecItemName = (itemType: ProductItemType, steelGradeCode: string, t: string, w: string, l: string) =>
   `${steelGradeCode} ${ITEM_TYPE_LABEL[itemType]} ${trimZeros(t)}×${trimZeros(w)}×${trimZeros(l)}`;
 
 interface ValidSpec {
@@ -385,7 +406,7 @@ function readSpecInput(tables: Readonly<MockTables>, itemType: ProductItemType, 
   return { steelGradeId: grade.id, steelGradeCode: grade.steelGradeCode, thicknessMm, widthMm, lengthMm, theoreticalWeightTon: weight, defaultYardId: yard.id };
 }
 
-const toBrief = (item: ItemRow): SpecBrief => ({
+const buildSpecBrief = (item: ItemRow): SpecBrief => ({
   id: item.id,
   itemCode: item.itemCode,
   thicknessMm: item.thicknessMm ?? '0',
@@ -394,8 +415,8 @@ const toBrief = (item: ItemRow): SpecBrief => ({
   theoreticalWeightTon: item.theoreticalWeightTon ?? '0',
 });
 
-const gradeCodeOf = (tables: Readonly<MockTables>, id: number | null) => tables.steelGrade.find((g) => g.id === id)?.steelGradeCode ?? '-';
-const yardNameOf = (tables: Readonly<MockTables>, id: number | null) => tables.yard.find((y) => y.id === id)?.yardName ?? '-';
+const findGradeCode = (tables: Readonly<MockTables>, id: number | null) => tables.steelGrade.find((g) => g.id === id)?.steelGradeCode ?? '-';
+const findYardName = (tables: Readonly<MockTables>, id: number | null) => tables.yard.find((y) => y.id === id)?.yardName ?? '-';
 
 /** 코일 1개 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004) */
 function assertCoilNotHeavier(slabWeight: string, coilWeight: string, field: string): void {
@@ -424,22 +445,22 @@ export const masterDataApi = {
           const mapped = mapping ? tables.item.find((i) => i.id === (item.itemType === 'SLAB' ? mapping.coilItemId : mapping.slabItemId)) : undefined;
           const slabWeight = item.itemType === 'SLAB' ? item.theoreticalWeightTon : mapped?.theoreticalWeightTon;
           const coilWeight = item.itemType === 'COIL' ? item.theoreticalWeightTon : mapped?.theoreticalWeightTon;
-          const usage = specUsageOf(tables, item.id);
+          const usage = countSpecUsage(tables, item.id);
           return {
-            ...toBrief(item),
+            ...buildSpecBrief(item),
             itemName: item.itemName,
             itemType: item.itemType,
             unitType: item.unitType,
             steelGradeId: item.steelGradeId,
-            steelGradeCode: gradeCodeOf(tables, item.steelGradeId),
+            steelGradeCode: findGradeCode(tables, item.steelGradeId),
             defaultYardId: item.defaultYardId,
-            defaultYardName: yardNameOf(tables, item.defaultYardId),
+            defaultYardName: findYardName(tables, item.defaultYardId),
             mappingId: mapping?.id ?? null,
-            mappedSpec: mapped ? toBrief(mapped) : null,
+            mappedSpec: mapped ? buildSpecBrief(mapped) : null,
             hotRollingPlannedYieldRate: slabWeight && coilWeight ? calcHotRollingYieldRate(coilWeight, slabWeight) : null,
-            isUsed: referenceText(usage) !== null,
-            usageText: referenceText(usage),
-            referenceText: referenceText(productSpecReferencesOf(tables, item.id)),
+            isUsed: formatReferenceText(usage) !== null,
+            usageText: formatReferenceText(usage),
+            referenceText: formatReferenceText(countProductSpecReferences(tables, item.id)),
             updatedAt: item.updatedAt,
           };
         })
@@ -462,7 +483,7 @@ export const masterDataApi = {
       if (tx.tables.item.some((i) => i.itemCode === itemCode)) throw new InputError('같은 규격 코드가 이미 있어요', { thicknessMm: `${withIGa(`규격 코드 ${itemCode}`)} 이미 있어요` });
       return insertRow(tx, 'item', {
         itemCode,
-        itemName: specItemName(input.itemType, spec.steelGradeCode, spec.thicknessMm, spec.widthMm, spec.lengthMm),
+        itemName: buildSpecItemName(input.itemType, spec.steelGradeCode, spec.thicknessMm, spec.widthMm, spec.lengthMm),
         itemType: input.itemType,
         unitType: ITEM_TYPE_UNIT_TYPE[input.itemType],
         rawMaterialType: null,
@@ -507,7 +528,7 @@ export const masterDataApi = {
         }
         updateRow(tx, 'item', row.id, {
           itemCode,
-          itemName: specItemName(row.itemType, spec.steelGradeCode, spec.thicknessMm, spec.widthMm, spec.lengthMm),
+          itemName: buildSpecItemName(row.itemType, spec.steelGradeCode, spec.thicknessMm, spec.widthMm, spec.lengthMm),
           steelGradeId: spec.steelGradeId,
           thicknessMm: spec.thicknessMm,
           widthMm: spec.widthMm,
@@ -526,7 +547,7 @@ export const masterDataApi = {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'item', id, '제품 규격');
       if (!isProductItem(row)) throw new ApiError('COM-003', '제품 규격');
-      assertNoReferences(`규격 ${row.itemCode}`, productSpecReferencesOf(tx.tables, row.id));
+      assertNoReferences(`규격 ${row.itemCode}`, countProductSpecReferences(tx.tables, row.id));
       // 매수가 0인 재고 행은 규격과 함께 지운다 (재고 계산용 행)
       for (const inventory of tx.tables.inventory.filter((r) => r.itemId === row.id)) removeRow(tx, 'inventory', inventory.id);
       removeRow(tx, 'item', row.id);
@@ -545,9 +566,9 @@ export const masterDataApi = {
             {
               id: m.id,
               steelGradeId: slab.steelGradeId,
-              steelGradeCode: gradeCodeOf(tables, slab.steelGradeId),
-              slab: toBrief(slab),
-              coil: toBrief(coil),
+              steelGradeCode: findGradeCode(tables, slab.steelGradeId),
+              slab: buildSpecBrief(slab),
+              coil: buildSpecBrief(coil),
               hotRollingPlannedYieldRate: calcHotRollingYieldRate(coil.theoreticalWeightTon, slab.theoreticalWeightTon),
               isUsed: isSpecUsed(tables, slab.id) || isSpecUsed(tables, coil.id),
             },
@@ -602,10 +623,9 @@ export const masterDataApi = {
                 inspectionStandardCode: standard.inspectionStandardCode,
                 version: standard.version,
                 itemCount: tables.inspectionStandardItem.filter((i) => i.inspectionStandardId === standard.id).length,
-                isCommon: standard.steelGradeId === null,
               }
             : null,
-          referenceText: referenceText(steelGradeReferencesOf(tables, grade.id)),
+          referenceText: formatReferenceText(countSteelGradeReferences(tables, grade.id)),
           updatedAt: grade.updatedAt,
         };
       }),
@@ -615,7 +635,7 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
-      const code = codeText(errors, 'steelGradeCode', input.steelGradeCode, '강종 코드', 20, STEEL_GRADE_CODE_PATTERN, 'SM355A');
+      const code = readCode(errors, 'steelGradeCode', input.steelGradeCode, '강종 코드', 20, STEEL_GRADE_CODE_PATTERN, 'SM355A');
       const name = requiredText(errors, 'steelGradeName', input.steelGradeName, '강종 이름', 50);
       const standardNo = optionalText(errors, 'standardNo', input.standardNo, '적용 규격 번호', 30);
       if (code && tx.tables.steelGrade.some((g) => g.steelGradeCode === code)) errors.add('steelGradeCode', `${withIGa(`강종 ${code}`)} 이미 있어요`);
@@ -642,7 +662,7 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'steelGrade', id, '강종');
-      assertNoReferences(`강종 ${row.steelGradeCode}`, steelGradeReferencesOf(tx.tables, row.id));
+      assertNoReferences(`강종 ${row.steelGradeCode}`, countSteelGradeReferences(tx.tables, row.id));
       removeRow(tx, 'steelGrade', row.id);
       return row.id;
     }),
@@ -756,10 +776,10 @@ export const masterDataApi = {
           rawMaterialType: item.rawMaterialType,
           unitType: item.unitType,
           defaultYardId: item.defaultYardId,
-          defaultYardName: yardNameOf(tables, item.defaultYardId),
+          defaultYardName: findYardName(tables, item.defaultYardId),
           defaultSupplierId: item.defaultSupplierId,
           defaultSupplierName: tables.supplier.find((s) => s.id === item.defaultSupplierId)?.supplierName ?? null,
-          referenceText: referenceText(rawMaterialReferencesOf(tables, item.id)),
+          referenceText: formatReferenceText(countRawMaterialReferences(tables, item.id)),
           updatedAt: item.updatedAt,
         }))
         .sort((a, b) => a.itemCode.localeCompare(b.itemCode)),
@@ -816,7 +836,7 @@ export const masterDataApi = {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'item', id, '원료');
       if (row.itemType !== 'RAW_MATERIAL') throw new ApiError('COM-003', '원료');
-      assertNoReferences(`원료 ${row.itemCode}`, rawMaterialReferencesOf(tx.tables, row.id));
+      assertNoReferences(`원료 ${row.itemCode}`, countRawMaterialReferences(tx.tables, row.id));
       for (const inventory of tx.tables.inventory.filter((r) => r.itemId === row.id)) removeRow(tx, 'inventory', inventory.id);
       removeRow(tx, 'item', row.id);
       return row.id;
@@ -826,29 +846,29 @@ export const masterDataApi = {
   listCustomers: (): Promise<MasterCustomerView[]> =>
     mockQuery((tables) =>
       tables.customer
-        .map((c) => ({ id: c.id, customerCode: c.customerCode, customerName: c.customerName, referenceText: referenceText(customerReferencesOf(tables, c.id)), updatedAt: c.updatedAt }))
+        .map((c) => ({ id: c.id, customerCode: c.customerCode, customerName: c.customerName, referenceText: formatReferenceText(countCustomerReferences(tables, c.id)), updatedAt: c.updatedAt }))
         .sort((a, b) => a.customerCode.localeCompare(b.customerCode)),
     ),
 
-  createCustomer: (input: PartyInput): Promise<number> =>
+  createCustomer: (input: CustomerInput): Promise<number> =>
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
-      const code = codeText(errors, 'code', input.code, '고객사 코드', 30, CODE_PATTERN, 'CUS-05');
-      const name = requiredText(errors, 'name', input.name, '고객사명', 100);
-      if (code && tx.tables.customer.some((c) => c.customerCode === code)) errors.add('code', `${withIGa(`고객사 코드 ${code}`)} 이미 있어요`);
+      const code = readCode(errors, 'customerCode', input.customerCode, '고객사 코드', 30, CODE_PATTERN, 'CUS-05');
+      const name = requiredText(errors, 'customerName', input.customerName, '고객사명', 100);
+      if (code && tx.tables.customer.some((c) => c.customerCode === code)) errors.add('customerCode', `${withIGa(`고객사 코드 ${code}`)} 이미 있어요`);
       errors.throwIfAny();
       if (!code || !name) throw new InputError('입력한 내용을 확인해 주세요');
       return insertRow(tx, 'customer', { customerCode: code, customerName: name }).id;
     }),
 
-  updateCustomer: (input: PartyUpdateInput): Promise<number> =>
+  updateCustomer: (input: CustomerUpdateInput): Promise<number> =>
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'customer', input.id, '고객사');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '고객사');
       const errors = new FieldErrors();
-      const name = requiredText(errors, 'name', input.name, '고객사명', 100);
+      const name = requiredText(errors, 'customerName', input.customerName, '고객사명', 100);
       errors.throwIfAny();
       if (!name) throw new InputError('입력한 내용을 확인해 주세요');
       updateRow(tx, 'customer', row.id, { customerName: name });
@@ -859,7 +879,7 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'customer', id, '고객사');
-      assertNoReferences(`고객사 ${row.customerName}`, customerReferencesOf(tx.tables, row.id));
+      assertNoReferences(`고객사 ${row.customerName}`, countCustomerReferences(tx.tables, row.id));
       removeRow(tx, 'customer', row.id);
       return row.id;
     }),
@@ -867,29 +887,29 @@ export const masterDataApi = {
   listSuppliers: (): Promise<MasterSupplierView[]> =>
     mockQuery((tables) =>
       tables.supplier
-        .map((s) => ({ id: s.id, supplierCode: s.supplierCode, supplierName: s.supplierName, referenceText: referenceText(supplierReferencesOf(tables, s.id)), updatedAt: s.updatedAt }))
+        .map((s) => ({ id: s.id, supplierCode: s.supplierCode, supplierName: s.supplierName, referenceText: formatReferenceText(countSupplierReferences(tables, s.id)), updatedAt: s.updatedAt }))
         .sort((a, b) => a.supplierCode.localeCompare(b.supplierCode)),
     ),
 
-  createSupplier: (input: PartyInput): Promise<number> =>
+  createSupplier: (input: SupplierInput): Promise<number> =>
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
-      const code = codeText(errors, 'code', input.code, '공급업체 코드', 30, CODE_PATTERN, 'SUP-05');
-      const name = requiredText(errors, 'name', input.name, '공급업체명', 100);
-      if (code && tx.tables.supplier.some((s) => s.supplierCode === code)) errors.add('code', `${withIGa(`공급업체 코드 ${code}`)} 이미 있어요`);
+      const code = readCode(errors, 'supplierCode', input.supplierCode, '공급업체 코드', 30, CODE_PATTERN, 'SUP-05');
+      const name = requiredText(errors, 'supplierName', input.supplierName, '공급업체명', 100);
+      if (code && tx.tables.supplier.some((s) => s.supplierCode === code)) errors.add('supplierCode', `${withIGa(`공급업체 코드 ${code}`)} 이미 있어요`);
       errors.throwIfAny();
       if (!code || !name) throw new InputError('입력한 내용을 확인해 주세요');
       return insertRow(tx, 'supplier', { supplierCode: code, supplierName: name }).id;
     }),
 
-  updateSupplier: (input: PartyUpdateInput): Promise<number> =>
+  updateSupplier: (input: SupplierUpdateInput): Promise<number> =>
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'supplier', input.id, '공급업체');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '공급업체');
       const errors = new FieldErrors();
-      const name = requiredText(errors, 'name', input.name, '공급업체명', 100);
+      const name = requiredText(errors, 'supplierName', input.supplierName, '공급업체명', 100);
       errors.throwIfAny();
       if (!name) throw new InputError('입력한 내용을 확인해 주세요');
       updateRow(tx, 'supplier', row.id, { supplierName: name });
@@ -900,7 +920,7 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'supplier', id, '공급업체');
-      assertNoReferences(`공급업체 ${row.supplierName}`, supplierReferencesOf(tx.tables, row.id));
+      assertNoReferences(`공급업체 ${row.supplierName}`, countSupplierReferences(tx.tables, row.id));
       removeRow(tx, 'supplier', row.id);
       return row.id;
     }),
@@ -909,7 +929,7 @@ export const masterDataApi = {
   listYards: (): Promise<MasterYardView[]> =>
     mockQuery((tables) =>
       tables.yard
-        .map((y) => ({ id: y.id, yardCode: y.yardCode, yardName: y.yardName, yardType: y.yardType, referenceText: referenceText(yardReferencesOf(tables, y.id)), updatedAt: y.updatedAt }))
+        .map((y) => ({ id: y.id, yardCode: y.yardCode, yardName: y.yardName, yardType: y.yardType, referenceText: formatReferenceText(countYardReferences(tables, y.id)), updatedAt: y.updatedAt }))
         .sort((a, b) => a.yardCode.localeCompare(b.yardCode)),
     ),
 
@@ -917,23 +937,23 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
-      const code = codeText(errors, 'code', input.code, '야드 코드', 30, CODE_PATTERN, 'YD-CL-02');
-      const name = requiredText(errors, 'name', input.name, '야드명', 50);
+      const code = readCode(errors, 'yardCode', input.yardCode, '야드 코드', 30, CODE_PATTERN, 'YD-CL-02');
+      const name = requiredText(errors, 'yardName', input.yardName, '야드명', 50);
       if (!input.yardType || !Object.values(YARD_TYPE).includes(input.yardType)) errors.add('yardType', '야드 유형을 선택해 주세요');
-      if (code && tx.tables.yard.some((y) => y.yardCode === code)) errors.add('code', `${withIGa(`야드 코드 ${code}`)} 이미 있어요`);
+      if (code && tx.tables.yard.some((y) => y.yardCode === code)) errors.add('yardCode', `${withIGa(`야드 코드 ${code}`)} 이미 있어요`);
       errors.throwIfAny();
       if (!code || !name || !input.yardType) throw new InputError('입력한 내용을 확인해 주세요');
       return insertRow(tx, 'yard', { yardCode: code, yardName: name, yardType: input.yardType }).id;
     }),
 
   /** 야드 유형은 만든 뒤 바꾸지 않는다 (품목 기본 야드·LOT가 유형에 맞게 쓰고 있음) */
-  updateYard: (input: PartyUpdateInput): Promise<number> =>
+  updateYard: (input: YardUpdateInput): Promise<number> =>
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'yard', input.id, '야드');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '야드');
       const errors = new FieldErrors();
-      const name = requiredText(errors, 'name', input.name, '야드명', 50);
+      const name = requiredText(errors, 'yardName', input.yardName, '야드명', 50);
       errors.throwIfAny();
       if (!name) throw new InputError('입력한 내용을 확인해 주세요');
       updateRow(tx, 'yard', row.id, { yardName: name });
@@ -944,7 +964,7 @@ export const masterDataApi = {
     mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'yard', id, '야드');
-      assertNoReferences(`야드 ${row.yardName}`, yardReferencesOf(tx.tables, row.id));
+      assertNoReferences(`야드 ${row.yardName}`, countYardReferences(tx.tables, row.id));
       removeRow(tx, 'yard', row.id);
       return row.id;
     }),

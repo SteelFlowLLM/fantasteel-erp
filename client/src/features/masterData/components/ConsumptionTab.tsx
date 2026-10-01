@@ -24,7 +24,7 @@ interface Loaded {
   consumptions: MasterSpecificConsumptionView[];
 }
 
-const cellKey = (itemId: number, steelGradeId: number | null) => `${itemId}:${steelGradeId ?? 'common'}`;
+const buildCellKey = (itemId: number, steelGradeId: number | null) => `${itemId}:${steelGradeId ?? 'common'}`;
 
 export function ConsumptionTab({ canEdit }: { canEdit: boolean }) {
   const materials = useMasterRawMaterials();
@@ -51,7 +51,7 @@ export function ConsumptionTab({ canEdit }: { canEdit: boolean }) {
 }
 
 function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
-  const initial = new Map(data.consumptions.map((c) => [cellKey(c.itemId, c.steelGradeId), c.consumptionRate]));
+  const initial = new Map(data.consumptions.map((c) => [buildCellKey(c.itemId, c.steelGradeId), c.consumptionRate]));
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(initial));
   const fieldErrors = useMasterDataFieldErrors();
   const save = useAction(masterDataApi.saveSpecificConsumptions, { success: (count) => `원단위 ${count}건을 저장했어요`, onError: fieldErrors.takeFrom });
@@ -70,15 +70,15 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
     }
   };
   const changes: SpecificConsumptionChange[] = [];
-  for (const m of common) if (isChanged(cellKey(m.id, null))) changes.push({ itemId: m.id, steelGradeId: null, consumptionRate: (values[cellKey(m.id, null)] ?? '').trim() || null });
+  for (const m of common) if (isChanged(buildCellKey(m.id, null))) changes.push({ itemId: m.id, steelGradeId: null, consumptionRate: (values[buildCellKey(m.id, null)] ?? '').trim() || null });
   for (const m of ferroalloys) {
     for (const g of data.grades) {
-      const key = cellKey(m.id, g.id);
+      const key = buildCellKey(m.id, g.id);
       if (isChanged(key)) changes.push({ itemId: m.id, steelGradeId: g.id, consumptionRate: (values[key] ?? '').trim() || null });
     }
   }
 
-  const cell = (key: string, unit: string, label: string) => {
+  const renderCell = (key: string, unit: string, label: string) => {
     const error = fieldErrors.errorOf(key);
     return (
       <span className="flex flex-col items-end gap-0.5">
@@ -123,7 +123,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
                 <Td>{m.itemName}</Td>
                 <Td>{RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType]}</Td>
                 <Td align="right" className="py-1">
-                  {cell(cellKey(m.id, null), 't/t', `${m.itemName} 원단위`)}
+                  {renderCell(buildCellKey(m.id, null), 't/t', `${m.itemName} 원단위`)}
                 </Td>
               </tr>
             ))}
@@ -153,7 +153,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
                   <Td>{m.itemName}</Td>
                   {data.grades.map((g) => (
                     <Td key={g.id} align="right" className="py-1">
-                      {cell(cellKey(m.id, g.id), 'kg/t', `${m.itemName} ${g.steelGradeCode} 원단위`)}
+                      {renderCell(buildCellKey(m.id, g.id), 'kg/t', `${m.itemName} ${g.steelGradeCode} 원단위`)}
                     </Td>
                   ))}
                 </tr>

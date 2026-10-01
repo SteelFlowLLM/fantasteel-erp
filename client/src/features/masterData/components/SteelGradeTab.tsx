@@ -19,7 +19,7 @@ import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterSteelGrades } from '@/hooks/useMasterData';
 
-const steelmakingHref = (steelGradeId: number) => `/quality/standards?process=STEELMAKING&grade=${steelGradeId}`;
+const buildSteelmakingHref = (steelGradeId: number) => `/quality/standards?process=STEELMAKING&grade=${steelGradeId}`;
 
 export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
   const grades = useMasterSteelGrades();
@@ -60,15 +60,14 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                       <Td>
                         {g.steelmakingStandard ? (
                           <span className="inline-flex items-center gap-1.5">
-                            <Link href={steelmakingHref(g.id)} className={CODE_LINK}>
+                            <Link href={buildSteelmakingHref(g.id)} className={CODE_LINK}>
                               {g.steelmakingStandard.inspectionStandardCode}
                             </Link>
                             <Tag size="sm">v{g.steelmakingStandard.version}</Tag>
                             <span className="text-cap text-ink-3">항목 {g.steelmakingStandard.itemCount}개</span>
-                            {g.steelmakingStandard.isCommon ? <Tag size="sm" tone="outline">공통 기준</Tag> : null}
                           </span>
                         ) : (
-                          <Link href={steelmakingHref(g.id)} className="text-cap font-semibold text-danger hover:underline">
+                          <Link href={buildSteelmakingHref(g.id)} className="text-cap font-semibold text-danger hover:underline">
                             제강 검사 기준 없음 · 검사 기준에서 만들기
                           </Link>
                         )}

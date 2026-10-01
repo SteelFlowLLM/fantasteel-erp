@@ -14,12 +14,12 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
 import {
-  changedItemKeys,
+  findChangedItemKeys,
   isInspectedProcess,
-  removedItemCount,
-  standardItemKey,
-  standardValueSourceOf,
-  thicknessBandText,
+  countRemovedItems,
+  buildStandardItemKey,
+  getStandardValueSource,
+  formatThicknessBand,
 } from '@/features/inspectionStandards/lib/standardItems';
 import { PROCESS_INSPECTION_TEXT, STANDARD_LOCK_TEXT } from '@/features/inspectionStandards/lib/standardText';
 import { useInspectionStandardDetail } from '@/hooks/useInspectionStandards';
@@ -27,7 +27,7 @@ import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtMD } from '@/lib/format';
 
 const trimZeros = (value: string) => (value.includes('.') ? value.replace(/\.?0+$/, '') : value);
-const valueText = (value: string | null) => (value === null ? '—' : trimZeros(value));
+const formatValue = (value: string | null) => (value === null ? '—' : trimZeros(value));
 
 /** 공정별 안내 (REQ-QC-001·002, ks-values.md) */
 const PROCESS_NOTE = {
@@ -60,9 +60,9 @@ export function StandardDetail({ id, canEdit, onSelectVersion, onNewVersion }: S
 
 function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: InspectionStandardDetailView } & Omit<StandardDetailProps, 'id'>) {
   const process = isInspectedProcess(view.processType) ? view.processType : null;
-  const source = standardValueSourceOf(view.processType);
-  const changed = view.previousItems ? changedItemKeys(view.items, view.previousItems) : new Set<string>();
-  const removed = view.previousItems ? removedItemCount(view.items, view.previousItems) : 0;
+  const source = getStandardValueSource(view.processType);
+  const changed = view.previousItems ? findChangedItemKeys(view.items, view.previousItems) : new Set<string>();
+  const removed = view.previousItems ? countRemovedItems(view.items, view.previousItems) : 0;
   const current = view.versions.find((v) => v.isCurrent);
 
   return (
@@ -121,7 +121,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: In
               </thead>
               <tbody>
                 {view.items.map((item, index) => (
-                  <ItemRow key={item.id} item={item} index={index} changed={changed.has(standardItemKey(item))} source={source} standardNo={view.standardNo} />
+                  <ItemRow key={item.id} item={item} index={index} changed={changed.has(buildStandardItemKey(item))} source={source} standardNo={view.standardNo} />
                 ))}
               </tbody>
             </Table>
@@ -187,9 +187,9 @@ function ItemRow({ item, index, changed, source, standardNo }: { item: Inspectio
       <Td className="font-mono text-mono">{item.inspectionItemCode}</Td>
       <Td>{item.inspectionItemName}</Td>
       <Td className="text-ink-2">{item.unit ?? '—'}</Td>
-      <Td align="right">{valueText(item.minValue)}</Td>
-      <Td align="right">{valueText(item.maxValue)}</Td>
-      <Td>{thicknessBandText(item)}</Td>
+      <Td align="right">{formatValue(item.minValue)}</Td>
+      <Td align="right">{formatValue(item.maxValue)}</Td>
+      <Td>{formatThicknessBand(item)}</Td>
       <Td>{item.isRequired ? <Badge tone="ok">필수</Badge> : <Badge>선택</Badge>}</Td>
       <Td>
         <span className="inline-flex items-center gap-1">

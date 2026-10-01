@@ -10,13 +10,13 @@ export interface ReferenceCount {
 const count = (rows: readonly unknown[]) => rows.length;
 
 /** 0건이 아닌 것만 '수주 3건 · LOT 2건'으로. 없으면 null. */
-export function referenceText(references: readonly ReferenceCount[]): string | null {
+export function formatReferenceText(references: readonly ReferenceCount[]): string | null {
   const used = references.filter((r) => r.count > 0);
   return used.length === 0 ? null : used.map((r) => `${r.label} ${r.count}건`).join(' · ');
 }
 
 /** 제품 규격이 수주·재고·LOT·생산계획·예약에 쓰였는지를 세어 준다 */
-export function specUsageOf(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
+export function countSpecUsage(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
   return [
     { label: '수주', count: count(tables.salesOrderItem.filter((r) => r.itemId === itemId)) },
     { label: '재고', count: count(tables.inventory.filter((r) => r.itemId === itemId && (r.onHandQty > 0 || r.reservedQty > 0))) },
@@ -26,17 +26,17 @@ export function specUsageOf(tables: Readonly<MockTables>, itemId: number): Refer
   ];
 }
 
-export const isSpecUsed = (tables: Readonly<MockTables>, itemId: number): boolean => referenceText(specUsageOf(tables, itemId)) !== null;
+export const isSpecUsed = (tables: Readonly<MockTables>, itemId: number): boolean => formatReferenceText(countSpecUsage(tables, itemId)) !== null;
 
 /** 제품 규격을 지울 수 없게 하는 참조 (쓰임 + 규격 매핑) */
-export function productSpecReferencesOf(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
+export function countProductSpecReferences(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
   return [
     { label: '규격 매핑', count: count(tables.specMapping.filter((m) => m.slabItemId === itemId || m.coilItemId === itemId)) },
-    ...specUsageOf(tables, itemId),
+    ...countSpecUsage(tables, itemId),
   ];
 }
 
-export function rawMaterialReferencesOf(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
+export function countRawMaterialReferences(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
   return [
     { label: '배합 원단위', count: count(tables.specificConsumption.filter((r) => r.itemId === itemId)) },
     { label: '구매요청', count: count(tables.purchaseRequisitionItem.filter((r) => r.itemId === itemId)) },
@@ -46,7 +46,7 @@ export function rawMaterialReferencesOf(tables: Readonly<MockTables>, itemId: nu
   ];
 }
 
-export function steelGradeReferencesOf(tables: Readonly<MockTables>, steelGradeId: number): ReferenceCount[] {
+export function countSteelGradeReferences(tables: Readonly<MockTables>, steelGradeId: number): ReferenceCount[] {
   return [
     { label: '제품 규격', count: count(tables.item.filter((r) => r.steelGradeId === steelGradeId)) },
     { label: '배합 원단위', count: count(tables.specificConsumption.filter((r) => r.steelGradeId === steelGradeId)) },
@@ -55,21 +55,21 @@ export function steelGradeReferencesOf(tables: Readonly<MockTables>, steelGradeI
   ];
 }
 
-export function customerReferencesOf(tables: Readonly<MockTables>, customerId: number): ReferenceCount[] {
+export function countCustomerReferences(tables: Readonly<MockTables>, customerId: number): ReferenceCount[] {
   return [
     { label: '수주', count: count(tables.salesOrder.filter((r) => r.customerId === customerId)) },
     { label: '출하요청', count: count(tables.shipmentRequest.filter((r) => r.customerId === customerId)) },
   ];
 }
 
-export function supplierReferencesOf(tables: Readonly<MockTables>, supplierId: number): ReferenceCount[] {
+export function countSupplierReferences(tables: Readonly<MockTables>, supplierId: number): ReferenceCount[] {
   return [
     { label: '원료 기본 공급업체', count: count(tables.item.filter((r) => r.defaultSupplierId === supplierId)) },
     { label: '발주', count: count(tables.purchaseOrder.filter((r) => r.supplierId === supplierId)) },
   ];
 }
 
-export function yardReferencesOf(tables: Readonly<MockTables>, yardId: number): ReferenceCount[] {
+export function countYardReferences(tables: Readonly<MockTables>, yardId: number): ReferenceCount[] {
   return [
     { label: '품목 기본 야드', count: count(tables.item.filter((r) => r.defaultYardId === yardId)) },
     { label: 'LOT', count: count(tables.lot.filter((r) => r.yardId === yardId)) },

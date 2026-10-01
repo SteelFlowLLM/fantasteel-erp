@@ -41,7 +41,7 @@ const isProduct = (item: ItemRow): item is ItemRow & { itemType: ProductItemType
 export function computeMasterReadiness(tables: Readonly<MockTables>): MasterReadiness {
   const problems: ReadinessProblem[] = [];
   const products = tables.item.filter(isProduct);
-  const gradeCode = (id: number | null) => tables.steelGrade.find((g) => g.id === id)?.steelGradeCode ?? '-';
+  const findGradeCode = (id: number | null) => tables.steelGrade.find((g) => g.id === id)?.steelGradeCode ?? '-';
 
   // 수율 (라우팅)
   for (const itemType of PRODUCT_ITEM_TYPES) {
@@ -80,7 +80,7 @@ export function computeMasterReadiness(tables: Readonly<MockTables>): MasterRead
   const specGradeIds = [...new Set(products.map((p) => p.steelGradeId).filter((id): id is number => id !== null))].sort((a, b) => a - b);
   for (const steelGradeId of specGradeIds) {
     if (!tables.specificConsumption.some((c) => ferroalloyIds.has(c.itemId) && c.steelGradeId === steelGradeId)) {
-      problems.push({ area: 'SPECIFIC_CONSUMPTION', key: `consumption-ferroalloy-${steelGradeId}`, message: `${gradeCode(steelGradeId)} 합금철 원단위(용강 1t당)가 없어요` });
+      problems.push({ area: 'SPECIFIC_CONSUMPTION', key: `consumption-ferroalloy-${steelGradeId}`, message: `${findGradeCode(steelGradeId)} 합금철 원단위(용강 1t당)가 없어요` });
     }
   }
 
@@ -119,7 +119,7 @@ export function computeMasterReadiness(tables: Readonly<MockTables>): MasterRead
         problems.push({
           area: 'INSPECTION_STANDARD',
           key: `standard-${steelGradeId}-${processType}`,
-          message: standard ? `${gradeCode(steelGradeId)} ${PROCESS_TYPE_LABEL[processType]} 검사 기준에 검사 항목이 없어요` : `${gradeCode(steelGradeId)} ${PROCESS_TYPE_LABEL[processType]} 검사 기준이 없어요`,
+          message: standard ? `${findGradeCode(steelGradeId)} ${PROCESS_TYPE_LABEL[processType]} 검사 기준에 검사 항목이 없어요` : `${findGradeCode(steelGradeId)} ${PROCESS_TYPE_LABEL[processType]} 검사 기준이 없어요`,
           processType,
           steelGradeId,
         });

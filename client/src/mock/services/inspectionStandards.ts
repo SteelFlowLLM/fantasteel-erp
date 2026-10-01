@@ -2,18 +2,20 @@
 // - 기준을 바꾸면 같은 코드로 버전 + 1인 새 행을 만들고, 이전 버전은 is_current = false로 남긴다(읽기 전용).
 //   이전 버전으로 판정한 검사 기록(quality_inspection.inspection_standard_id)은 그대로 그 버전을 가리킨다.
 // - 새 기준(공정 × 강종)은 버전 1로 만든다. 코드는 QS-강종-공정 (예: QS-SM355A-HR).
+// - 제강 검사 기준(성분 규격)은 강종별로만 만든다. 공통 기준(강종 없음)은 연주·열연만 (REQ-MST-002, TRM-020).
 // - 입력 확인(항목 형식·두께 구간 겹침)은 api/inspectionStandards.ts가 먼저 하고, 이 서비스는 버전 규칙과 참조만 확인한다.
 // 순환 참조를 피하려고 오류는 @/api/errors에서 가져온다 (docs/rework/areas/cross-cutting.md 9장).
 import { ApiError, InputError } from '@/api/errors';
 import { PROCESS_TYPE_LABEL } from '@/codes';
 import {
+  canHaveCommonStandard,
+  findCurrentStandard,
   formatInspectionStandardCode,
   isInspectedProcess,
   type InspectedProcessType,
 } from '@/features/inspectionStandards/lib/standardItems';
 import { withIGa } from '@/lib/josa';
 import type { InspectionStandardRow } from '@/mock/schema';
-import { currentStandardOf } from '@/mock/services/context';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 
 /** 확인을 마친 검사 항목 (decimal은 문자열) */
@@ -38,7 +40,7 @@ export type CreateInspectionStandardVersionInput =
   | {
       baseStandardId: null;
       processType: InspectedProcessType;
-      /** null = 공통 기준(모든 강종) */
+      /** null = 공통 기준(모든 강종). 제강은 공통 기준을 두지 않아 거부한다 */
       steelGradeId: number | null;
       items: readonly InspectionStandardItemValues[];
     };
@@ -47,7 +49,7 @@ function insertItems(tx: MockTx, standardId: number, items: readonly InspectionS
   for (const item of items) insertRow(tx, 'inspectionStandardItem', { inspectionStandardId: standardId, ...item });
 }
 
-const nextVersionOf = (tx: MockTx, code: string) => tx.tables.inspectionStandard.filter((s) => s.inspectionStandardCode === code).reduce((max, s) => Math.max(max, s.version), 0) + 1;
+const findNextVersion = (tx: MockTx, code: string) => tx.tables.inspectionStandard.filter((s) => s.inspectionStandardCode === code).reduce((max, s) => Math.max(max, s.version), 0) + 1;
 
 /** 검사 기준의 새 버전(또는 새 기준의 버전 1)을 만든다. 만든 버전 행을 돌려준다. */
 export function createInspectionStandardVersion(tx: MockTx, input: CreateInspectionStandardVersionInput): InspectionStandardRow {
@@ -65,7 +67,7 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
     }
     const created = insertRow(tx, 'inspectionStandard', {
       inspectionStandardCode: base.inspectionStandardCode,
-      version: nextVersionOf(tx, base.inspectionStandardCode),
+      version: findNextVersion(tx, base.inspectionStandardCode),
       processType: base.processType,
       steelGradeId: base.steelGradeId,
       isCurrent: true,
@@ -75,6 +77,9 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
   }
 
   if (!isInspectedProcess(input.processType)) throw new InputError('검사하는 공정이 아니에요', { processType: '제강·연주·열연 중에서 골라 주세요' });
+  if (input.steelGradeId === null && !canHaveCommonStandard(input.processType)) {
+    throw new InputError('제강 검사 기준은 강종별로 만들어요', { steelGradeId: '제강 검사 기준은 강종별로 만들어요. 강종을 선택해 주세요' });
+  }
   const grade = input.steelGradeId === null ? null : tx.tables.steelGrade.find((g) => g.id === input.steelGradeId);
   if (grade === undefined) throw new ApiError('COM-003', '강종');
   const existing = tx.tables.inspectionStandard.find((s) => s.isCurrent && s.processType === input.processType && s.steelGradeId === (grade?.id ?? null));
@@ -86,7 +91,7 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
   const code = formatInspectionStandardCode(grade?.steelGradeCode ?? null, input.processType);
   const created = insertRow(tx, 'inspectionStandard', {
     inspectionStandardCode: code,
-    version: nextVersionOf(tx, code),
+    version: findNextVersion(tx, code),
     processType: input.processType,
     steelGradeId: grade?.id ?? null,
     isCurrent: true,
@@ -95,7 +100,7 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
   return created;
 }
 
-/** 공정·강종에 쓰는 지금 버전 (강종 전용 → 없으면 공통). 검사 입력이 판정 기준을 고를 때 쓴다. */
-export function currentInspectionStandardOf(tx: Pick<MockTx, 'tables'>, processType: InspectedProcessType, steelGradeId: number): InspectionStandardRow | undefined {
-  return currentStandardOf(tx.tables, processType, steelGradeId);
+/** 공정·강종에 쓰는 지금 버전 (강종 전용 → 없으면 공통, 제강은 강종 전용만). 검사 입력이 판정 기준을 고를 때 쓴다. */
+export function findCurrentInspectionStandard(tx: Pick<MockTx, 'tables'>, processType: InspectedProcessType, steelGradeId: number): InspectionStandardRow | undefined {
+  return findCurrentStandard(tx.tables.inspectionStandard, processType, steelGradeId);
 }
