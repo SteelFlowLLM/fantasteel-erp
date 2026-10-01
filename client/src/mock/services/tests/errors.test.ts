@@ -170,7 +170,7 @@ describe('출하 SHP-002·003, 배정 INV-001~004', () => {
     expectCode(() => confirm([lots[1].lotId]), 'INV-004');
   });
 
-  it('출고 확정 재검증: 배정 대기 INV-001, 미합격 LOT SHP-002', () => {
+  it('출고 확정 재검증: 배정 대기 INV-001, 미합격 LOT INV-002', () => {
     const k = createKit();
     const request = k.tables.shipmentRequest.find((r) => r.shipmentRequestNo === 'DR-2609-0002');
     expectCode(() => confirmGoodsIssue(k.at(at), k.actor('logistics'), { shipmentRequestId: request?.id ?? 0 }), 'INV-001');
@@ -178,7 +178,7 @@ describe('출하 SHP-002·003, 배정 INV-001~004', () => {
     confirmShipmentAllocations(k.at(at), k.actor('sales'), { shipmentRequestId: request?.id ?? 0, lines: [{ shipmentRequestItemId: line.shipmentRequestItemId, lotIds: line.recommendedLots.map((l) => l.lotId) }] });
     // 배정 뒤 데이터가 어긋난 상황(판정 취소)을 흉내 낸다
     updateRow(k.at(at), 'lot', line.recommendedLots[0].lotId, { isPassed: null });
-    expectCode(() => confirmGoodsIssue(k.at(at), k.actor('logistics'), { shipmentRequestId: request?.id ?? 0 }), 'SHP-002');
+    expectCode(() => confirmGoodsIssue(k.at(at), k.actor('logistics'), { shipmentRequestId: request?.id ?? 0 }), 'INV-002');
   });
 });
 

@@ -1,7 +1,9 @@
 'use client';
 // 출하요청 목록 (REQ-SHP-001, 보고서 1 A-5). 상태 칩은 URL ?status=에 둔다.
 // C 반영: '출하번호' → '출하요청 번호', 상태 표시명은 공통 코드 그대로, 메모 없음.
+// 옛 목록처럼 출하요청 번호·수주·'LOT 배정 →'은 링크다(키보드로도 열 수 있게). 행 클릭은 마우스 지름길로 둔다.
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PERMISSION, SHIPMENT_REQUEST_STATUS, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
 import type { ShipmentListRow } from '@/api/shipmentRequests';
@@ -15,7 +17,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MillSheetLink, ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
+import { MillSheetLink, SalesOrderLink, ShipmentRequestLink, ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { qtyUnitOf } from '@/features/shipment/lib/shipmentForm';
 import { useCanUse } from '@/hooks/usePermission';
 import { useShipmentRequestList } from '@/hooks/useShipmentRequests';
@@ -150,7 +152,9 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                   const unit = qtyUnitOf(r.itemTypes);
                   return (
                     <tr key={r.id} className="cursor-pointer" onClick={() => router.push(`/shipment-requests/${r.id}`)}>
-                      <Td className="font-mono text-mono font-semibold">{r.shipmentRequestNo}</Td>
+                      <Td className="font-semibold">
+                        <ShipmentRequestLink id={r.id} no={r.shipmentRequestNo} />
+                      </Td>
                       <Td>
                         <ShipmentRequestStatusBadge status={r.shipmentRequestStatus} />
                       </Td>
@@ -160,7 +164,10 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                         {r.itemCodes[0] ?? '-'}
                         {r.itemCodes.length > 1 ? <span className="text-ink-3"> 외 {r.itemCodes.length - 1}</span> : null}
                       </Td>
-                      <Td className="font-mono text-mono">{r.salesOrderNos.length > 1 ? `${r.salesOrderNos[0]} 외 ${r.salesOrderNos.length - 1}` : r.salesOrderNos[0]}</Td>
+                      <Td title={r.salesOrders.map((so) => so.salesOrderNo).join('\n')}>
+                        {r.salesOrders[0] ? <SalesOrderLink salesOrderId={r.salesOrders[0].salesOrderId} salesOrderNo={r.salesOrders[0].salesOrderNo} /> : '-'}
+                        {r.salesOrders.length > 1 ? <span className="text-ink-3"> 외 {r.salesOrders.length - 1}</span> : null}
+                      </Td>
                       <Td align="right">
                         {r.totalRequestQty}
                         {unit}
@@ -186,7 +193,12 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
 }
 
 function NextStep({ row }: { row: ShipmentListRow }) {
-  if (row.shipmentRequestStatus === 'REQUESTED') return <span className="text-xs font-medium text-wait">LOT 배정 →</span>;
+  if (row.shipmentRequestStatus === 'REQUESTED')
+    return (
+      <Link href={`/shipment-requests/${row.id}`} className="text-xs font-medium text-wait hover:underline" onClick={(e) => e.stopPropagation()}>
+        LOT 배정 →
+      </Link>
+    );
   if (row.shipmentRequestStatus === 'ALLOCATED')
     return (
       <span onClick={(e) => e.stopPropagation()}>

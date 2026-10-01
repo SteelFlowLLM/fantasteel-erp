@@ -178,7 +178,7 @@ export const goodsIssueApi = {
       requireActor(tables, READ_RULE);
       return issueView(tables, shipmentRequestId);
     }),
-  /** 출고 확정 (출하요청 단위). 이미 출고면 COM-001, 배정 대기 INV-001, 소진 INV-004, 미검사·불합격 SHP-002 */
+  /** 출고 확정 (출하요청 단위). 이미 출고면 COM-001, 배정 대기 INV-001, 소진 INV-004, 미검사·불합격 INV-002, 예약·수주 잔량 초과 SHP-002 */
   confirm: (input: { shipmentRequestId: number; expectedUpdatedAt?: string | null }) =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, CONFIRM_RULE);

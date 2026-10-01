@@ -18,7 +18,7 @@ import { Input, Select } from '@/components/Input';
 import { Kpi, StatBar } from '@/components/Kpi';
 import { MasterPane, PageHead, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
-import { EmptyNote, StateView } from '@/components/StateView';
+import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { ItemTypeTag, SalesOrderLink } from '@/features/shipment/components/ShipmentBadges';
 import { lineWeightTon, qtyUnitOf, requestQtyError, totalWeightTon, validQtyOf } from '@/features/shipment/lib/shipmentForm';
@@ -130,54 +130,59 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
       >
         {customerId === null ? (
           <EmptyNote>고객사를 먼저 골라 주세요. 같은 고객사의 수주 품목만 묶을 수 있어요.</EmptyNote>
-        ) : itemsQuery.isPending ? (
-          <StateView kind="loading" />
-        ) : items.length === 0 ? (
-          <EmptyNote>이 고객사는 출하요청할 수 있는 품목이 없어요. 합격 재고가 예약된 품목만 나와요.</EmptyNote>
-        ) : groups.length === 0 ? (
-          <EmptyNote>조건에 맞는 품목이 없어요.</EmptyNote>
         ) : (
-          <ul className="flex flex-col">
-            {groups.map((group) => (
-              <li key={group[0].salesOrderId} className="border-b border-line">
-                <div className="flex items-center gap-2 bg-surface-2 px-4 py-1.5 text-xs">
-                  <SalesOrderLink salesOrderId={group[0].salesOrderId} salesOrderNo={group[0].salesOrderNo} />
-                  <span className="text-ink-3">{group.length}품목</span>
-                </div>
-                {group.map((row) => {
-                  const unitLabel = PRODUCT_QTY_UNIT[row.itemType];
-                  const checked = qtyTexts.has(row.salesOrderItemId);
-                  return (
-                    <label key={row.salesOrderItemId} className="flex cursor-pointer items-start gap-2.5 px-4 py-2 hover:bg-surface-2">
-                      <input type="checkbox" className="mt-1" checked={checked} onChange={() => toggle(row)} />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="flex items-center gap-1.5">
-                          <ItemTypeTag itemType={row.itemType} />
-                          <span className="truncate font-mono text-mono">{row.itemCode}</span>
-                        </span>
-                        <span className="text-xs text-ink-3">
-                          품목 {row.lineNo} · 납기 {fmtMD(row.dueDate)} · 출하 가능 {row.shippableQty}
-                          {unitLabel}
-                        </span>
-                      </span>
-                      <span className="text-right text-xs text-ink-2">
-                        {checked ? (
-                          <b className="text-run">
-                            {qtyOf(row) || '0'} 요청
-                          </b>
-                        ) : (
-                          <>
-                            예약 {row.activeReservedQty}
-                            {row.openRequestQty > 0 ? ` · 요청됨 ${row.openRequestQty}` : ''}
-                          </>
-                        )}
-                      </span>
-                    </label>
-                  );
-                })}
-              </li>
-            ))}
-          </ul>
+          // 불러오는 중·불러오지 못함은 QueryBoundary가 보인다 (오류를 '품목 없음'으로 숨기지 않는다)
+          <QueryBoundary query={itemsQuery} loadingLabel="출하할 수 있는 품목을 불러오는 중…">
+            {(loaded) =>
+              loaded.length === 0 ? (
+                <EmptyNote>이 고객사는 출하요청할 수 있는 품목이 없어요. 합격 재고가 예약된 품목만 나와요.</EmptyNote>
+              ) : groups.length === 0 ? (
+                <EmptyNote>조건에 맞는 품목이 없어요.</EmptyNote>
+              ) : (
+                <ul className="flex flex-col">
+                  {groups.map((group) => (
+                    <li key={group[0].salesOrderId} className="border-b border-line">
+                      <div className="flex items-center gap-2 bg-surface-2 px-4 py-1.5 text-xs">
+                        <SalesOrderLink salesOrderId={group[0].salesOrderId} salesOrderNo={group[0].salesOrderNo} />
+                        <span className="text-ink-3">{group.length}품목</span>
+                      </div>
+                      {group.map((row) => {
+                        const unitLabel = PRODUCT_QTY_UNIT[row.itemType];
+                        const checked = qtyTexts.has(row.salesOrderItemId);
+                        return (
+                          <label key={row.salesOrderItemId} className="flex cursor-pointer items-start gap-2.5 px-4 py-2 hover:bg-surface-2">
+                            <input type="checkbox" className="mt-1" checked={checked} onChange={() => toggle(row)} />
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <span className="flex items-center gap-1.5">
+                                <ItemTypeTag itemType={row.itemType} />
+                                <span className="truncate font-mono text-mono">{row.itemCode}</span>
+                              </span>
+                              <span className="text-xs text-ink-3">
+                                품목 {row.lineNo} · 납기 {fmtMD(row.dueDate)} · 출하 가능 {row.shippableQty}
+                                {unitLabel}
+                              </span>
+                            </span>
+                            <span className="text-right text-xs text-ink-2">
+                              {checked ? (
+                                <b className="text-run">
+                                  {qtyOf(row) || '0'} 요청
+                                </b>
+                              ) : (
+                                <>
+                                  예약 {row.activeReservedQty}
+                                  {row.openRequestQty > 0 ? ` · 요청됨 ${row.openRequestQty}` : ''}
+                                </>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+          </QueryBoundary>
         )}
         <p className="px-4 py-3 text-cap text-ink-3">출하 가능 매수 = 예약 매수(ACTIVE) − 다른 진행 중 출하요청 매수예요.</p>
       </MasterPane>

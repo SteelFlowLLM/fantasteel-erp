@@ -50,3 +50,38 @@ export function toggleLot(selected: readonly number[], lotId: number, maxCount: 
   if (selected.length >= maxCount) return [...selected];
   return [...selected, lotId];
 }
+
+/** 배정 카드에서 펼친 패널: 닫힘 · FIFO 추천 · 배정 변경 */
+export type AllocationPanel = { kind: 'closed' } | { kind: 'recommend' } | { kind: 'change'; allocationId: number; lotNo: string };
+
+export interface AllocationLineState {
+  /** 요청 상태가 배정 대기·배정 확정인지 */
+  editable: boolean;
+  waitingAllocationQty: number;
+  allocations: readonly { allocationId: number; allocationStatus: string }[];
+  recommendedLotIds: readonly number[];
+}
+
+/** 다시 불러온 배정 데이터가 바뀌었는지 비교하는 키 (바꿀 수 있는지·배정 대기·확정 배정·추천 LOT) */
+export function allocationLineSyncKey(line: AllocationLineState): string {
+  return [
+    line.editable ? 'E' : 'R',
+    line.waitingAllocationQty,
+    line.allocations.map((a) => `${a.allocationId}:${a.allocationStatus}`).join(','),
+    line.recommendedLotIds.join(','),
+  ].join('|');
+}
+
+/**
+ * 배정 데이터를 다시 불러온 뒤 펼친 패널을 새 상태에 맞춘다 (REQ-INV-006, 확정 후 상태 갱신).
+ * - 추천: 배정 대기가 남아 있고 바꿀 수 있는 상태일 때만 그대로, 아니면 닫는다([추천대로 모두 확정]·다른 탭의 확정 뒤).
+ * - 변경: 바꾸려던 배정이 아직 배정 확정일 때만 그대로.
+ */
+export function panelAfterRefresh(panel: AllocationPanel, line: AllocationLineState): AllocationPanel {
+  if (panel.kind === 'recommend') return line.editable && line.waitingAllocationQty > 0 ? panel : { kind: 'closed' };
+  if (panel.kind === 'change') {
+    const target = line.allocations.find((a) => a.allocationId === panel.allocationId);
+    return line.editable && target?.allocationStatus === 'CONFIRMED' ? panel : { kind: 'closed' };
+  }
+  return panel;
+}

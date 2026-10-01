@@ -1,10 +1,10 @@
 'use client';
 // 출고 확정 (REQ-SHP-002·003, REQ-INV-005, REQ-SO-005, BP-SHP-01 14.1-8, 보고서 1 A-8).
 // C 반영: 별도 출고 번호·'최근 출고' 목록 없음 → 출하요청(출고 완료)으로 보인다. 상태 문구는 공통 코드 그대로.
-// 확정은 출하요청 단위. core가 품질·배정·재고를 다시 확인하고(SHP-002·INV-001·INV-004), 예약 CONVERTED·배정 CONSUMED·LOT 출고·밀시트를 한 번에 처리한다.
+// 확정은 출하요청 단위. core가 품질·배정·재고·잔량을 다시 확인하고(INV-002·INV-001·INV-004·SHP-002), 예약 CONVERTED·배정 CONSUMED·LOT 출고·밀시트를 한 번에 처리한다.
 import { useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError } from '@/api/client';
 import type { GoodsIssueQueueRow, GoodsIssueView } from '@/api/goodsIssues';
 import { ERROR_MESSAGE, LOT_STATUS_LABEL, PERMISSION, PRODUCT_QTY_UNIT, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
@@ -151,7 +151,8 @@ function QueueItem({ row, selected }: { row: GoodsIssueQueueRow; selected: boole
 }
 
 const ERROR_HINT: Partial<Record<string, string>> = {
-  'SHP-002': '미검사·불합격 LOT이 있거나 예약·수주 잔량을 넘으면 출고 전체가 막혀요. 배정 화면에서 LOT을 바꿔 주세요.',
+  'INV-002': '미검사·불합격(제품 또는 상위 히트) LOT이 배정돼 있어 출고 전체가 막혀요. 배정 화면에서 합격 LOT으로 바꿔 주세요.',
+  'SHP-002': '요청 매수가 예약·수주 잔량(출하 가능 매수)을 넘어 출고 전체가 막혀요. 배정 화면에서 출하요청을 취소하고 매수를 줄여 다시 요청해 주세요.',
   'INV-004': '이미 투입·출고된 LOT이 배정돼 있어요. 배정 화면에서 다른 LOT으로 바꿔 주세요.',
   'INV-001': '배정 대기 매수가 남아 있어요. 영업이 배정을 모두 확정해야 출고할 수 있어요.',
   'COM-001': '다른 화면에서 이미 출고했거나 출하요청이 바뀌었어요. 목록을 다시 확인해 주세요.',
@@ -167,9 +168,17 @@ function IssueDetail({ shipmentRequestId }: { shipmentRequestId: number }) {
 }
 
 function IssueBody({ view }: { view: GoodsIssueView }) {
+  const router = useRouter();
+  const params = useSearchParams();
   const canConfirm = useCanUse(PERMISSION.GOODS_ISSUE_CONFIRM);
   const [failure, setFailure] = useState<unknown>(null);
   const confirm = useConfirmGoodsIssue({ onSuccess: () => setFailure(null), onError: setFailure });
+  const issue = () => {
+    // 주소에 ?request=가 없으면(레일 메뉴로 들어와 첫 배정 확정 요청이 골라진 상태) 출고 뒤 목록이 다시 불러와지면서
+    // 다음 배정 확정 요청으로 넘어가 버린다. 누르는 순간 이 요청을 주소에 고정해 출고 결과를 이 요청에서 보인다.
+    if (params.get('request') !== String(view.id)) router.replace(`/goods-issues?request=${view.id}`, { scroll: false });
+    confirm.mutate({ shipmentRequestId: view.id, expectedUpdatedAt: view.updatedAt });
+  };
   useShellTitle(`출고 확정 · ${view.shipmentRequestNo}`, view.customerName);
 
   const issued = view.shipmentRequestStatus === 'ISSUED';
@@ -414,7 +423,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
             className="ml-auto"
             disabled={!canConfirm || cancelled || view.shipmentRequestStatus !== 'ALLOCATED' || !view.ready || confirm.isPending}
             title={canConfirm ? undefined : permissionNeedText([PERMISSION.GOODS_ISSUE_CONFIRM])}
-            onClick={() => confirm.mutate({ shipmentRequestId: view.id, expectedUpdatedAt: view.updatedAt })}
+            onClick={issue}
           >
             {confirm.isPending ? '출고 확정 중…' : '출고 확정'}
           </Button>
