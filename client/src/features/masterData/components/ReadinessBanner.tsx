@@ -13,8 +13,8 @@ import { fmtHM } from '@/lib/format';
 
 /** 문제 영역 칩 이름과 이동할 탭 (검사 기준은 다른 화면) */
 const AREA: Record<ReadinessArea, { label: string; tab: MasterTabKey | null }> = {
-  ROUTING: { label: '수율', tab: 'routing' },
-  SPECIFIC_CONSUMPTION: { label: '배합', tab: 'consumption' },
+  ROUTING: { label: '계획 수율', tab: 'routing' },
+  SPECIFIC_CONSUMPTION: { label: '배합 원단위', tab: 'consumption' },
   SPEC_MAPPING: { label: '규격 매핑', tab: 'mapping' },
   INSPECTION_STANDARD: { label: '검사 기준', tab: null },
   DEFAULT_SUPPLIER: { label: '기본 공급업체', tab: 'items' },
@@ -70,7 +70,7 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
   if (readiness.ready) {
     return (
       <Banner tone="ok" actions={refresh} className="flex-none items-center">
-        <b>기준정보 준비 완료</b> <span className="opacity-80">· 생산·MRP 계산에 필요한 수율·배합·규격 매핑·검사 기준이 모두 있어요</span>
+        <b>기준정보 준비 완료</b> <span className="opacity-80">· 생산·MRP 계산에 필요한 계획 수율·배합 원단위·규격 매핑·검사 기준이 모두 있어요</span>
       </Banner>
     );
   }
