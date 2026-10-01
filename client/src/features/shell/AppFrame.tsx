@@ -4,6 +4,7 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { AiPanel } from '@/features/shell/AiPanel';
 import { Rail } from '@/features/shell/Rail';
+import { RouteGuard } from '@/features/shell/RouteGuard';
 import { ShellTitleContext, type ShellTitle } from '@/features/shell/ShellTitleContext';
 import { TopBar } from '@/features/shell/TopBar';
 import { useShellStore } from '@/stores/useShellStore';
@@ -19,7 +20,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar custom={custom} />
         <div className="relative flex min-h-0 flex-1">
-          <ShellTitleContext.Provider value={setTitle}>{children}</ShellTitleContext.Provider>
+          <ShellTitleContext.Provider value={setTitle}>
+            <RouteGuard>{children}</RouteGuard>
+          </ShellTitleContext.Provider>
           {aiPanelOpen ? <AiPanel /> : null}
         </div>
       </div>

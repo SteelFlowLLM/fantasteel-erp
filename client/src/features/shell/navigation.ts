@@ -1,19 +1,19 @@
-// 왼쪽 레일 메뉴 (B안). 역할별 업무 메뉴는 그 권한이 조회(VIEW) 이상일 때만 보인다. 승인함은 부서장에게만 보인다.
-// 다른 영역의 조회 권한은 메뉴를 늘리지 않고, 화면 안의 연결(링크)로 쓴다.
-import { PERMISSION, type Permission, type RoleCode } from '@/codes';
+// 왼쪽 레일 메뉴 (B안). 화면과 여는 조건은 screens.ts 한 표를 쓴다.
+// 1) 대시보드 2) 역할의 업무 메뉴(열 수 있는 것만) 3) 부서장이면 승인함
+// 4) 구분선 뒤: 조회·사용 권한으로 열 수 있는 다른 영역 화면을 영역 순서(영업 → 구매 → 생산 → 품질 → 물류 → 관리)로
+// 5) 구분선 뒤: 공통(LOT 추적·작업 로그·업무·알림·메신저) 6) 구분선 뒤: 준비 중(P2·EX)
+import { PERMISSION_AREAS, type RoleCode } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import type { SoonGrade } from '@/components/ComingSoon';
-import { canView, isDepartmentHead, type PermissionMap } from '@/lib/permissions';
+import { canOpenScreen, SCREEN, SCREENS, screenOfPath, type AccessUser, type NavBadgeKey, type ScreenDef } from '@/features/shell/screens';
 
-export type NavBadgeKey = 'notifications' | 'chat' | 'approvals';
+export type { NavBadgeKey } from '@/features/shell/screens';
 
 export interface NavItem {
   kind: 'item';
   href: string;
   label: string;
   icon: IconName;
-  /** 이 중 하나라도 조회(VIEW) 이상이면 보인다. 없으면 모든 사원에게 보인다. */
-  permissions?: readonly Permission[];
   /** 준비 중 (기능 없이 디자인만) */
   soon?: Exclude<SoonGrade, 'AI'>;
   badge?: NavBadgeKey;
@@ -28,86 +28,63 @@ export interface NavSeparator {
 
 export type NavEntry = NavItem | NavSeparator;
 
-const item = (value: Omit<NavItem, 'kind'>): NavItem => ({ kind: 'item', ...value });
+const toItem = (def: ScreenDef): NavItem => ({
+  kind: 'item',
+  href: def.href,
+  label: def.label,
+  icon: def.icon,
+  ...(def.soon ? { soon: def.soon } : {}),
+  ...(def.badge ? { badge: def.badge } : {}),
+  ...(def.match ? { match: def.match } : {}),
+});
 
-const INVENTORY = item({ href: '/inventories', label: '재고', icon: 'stock' });
-
-const ROLE_MENU: Record<RoleCode, readonly NavItem[]> = {
-  SALES: [
-    item({ href: '/sales-orders', label: '수주', icon: 'clipboard', permissions: [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL], match: ['/sales-orders/'] }),
-    item({ href: '/sales-orders/new', label: '등록', icon: 'plus', permissions: [PERMISSION.SALES_ORDER_CREATE] }),
-    item({ href: '/shipment-requests', label: '출하요청', icon: 'truck', permissions: [PERMISSION.SHIPMENT_REQUEST_MANAGE], match: ['/shipment-requests/'] }),
-    INVENTORY,
-  ],
-  PURCHASE: [
-    item({ href: '/mrp', label: 'MRP', icon: 'calc', permissions: [PERMISSION.PURCHASE_REQUISITION_CREATE] }),
-    item({ href: '/purchase-requisitions', label: '구매요청', icon: 'cart', permissions: [PERMISSION.PURCHASE_REQUISITION_CREATE], match: ['/purchase-requisitions/', '/action-drafts/'] }),
-    item({ href: '/purchase-orders', label: '발주', icon: 'building', permissions: [PERMISSION.PURCHASE_ORDER_CONFIRM] }),
-    item({ href: '/goods-receipts', label: '입고', icon: 'box', permissions: [PERMISSION.GOODS_RECEIPT_CONFIRM] }),
-    INVENTORY,
-  ],
-  PRODUCTION: [
-    item({ href: '/production/plans', label: '생산계획', icon: 'calendar', permissions: [PERMISSION.PRODUCTION_PLAN_CONFIRM] }),
-    item({ href: '/production/results', label: '작업 실적', icon: 'factory', permissions: [PERMISSION.PRODUCTION_RESULT_CONFIRM] }),
-    item({ href: '/production/rolling', label: '열연 투입 배정', icon: 'coil', permissions: [PERMISSION.HOT_ROLLING_ALLOCATE] }),
-    INVENTORY,
-  ],
-  QUALITY: [
-    item({ href: '/quality/inspections', label: '검사 입력', icon: 'quality', permissions: [PERMISSION.INSPECTION_REGISTER] }),
-    item({ href: '/quality/rejected', label: '불합격 관리', icon: 'alert', permissions: [PERMISSION.DISPOSITION_SET] }),
-    item({ href: '/quality/standards', label: '검사 기준', icon: 'book', permissions: [PERMISSION.INSPECTION_STANDARD_MANAGE] }),
-    INVENTORY,
-  ],
-  LOGISTICS: [
-    item({ href: '/goods-issues', label: '출고 확정', icon: 'truck', permissions: [PERMISSION.GOODS_ISSUE_CONFIRM] }),
-    item({ href: '/mill-sheets', label: '밀시트', icon: 'file', permissions: [PERMISSION.MILL_SHEET_READ] }),
-    INVENTORY,
-  ],
-  ADMIN: [
-    item({ href: '/admin/employees', label: '사원', icon: 'users', permissions: [PERMISSION.EMPLOYEE_MANAGE] }),
-    item({ href: '/admin/organization', label: '부서·직급·권한', icon: 'key', permissions: [PERMISSION.ORG_MANAGE] }),
-    item({ href: '/admin/master-data', label: '기준정보', icon: 'database', permissions: [PERMISSION.MASTER_MANAGE] }),
-  ],
+/** 역할의 업무 메뉴 (1단계 레일과 같다) */
+const ROLE_MENU: Record<RoleCode, readonly ScreenDef[]> = {
+  SALES: [SCREEN.salesOrders, SCREEN.salesOrderNew, SCREEN.shipmentRequests, SCREEN.inventories],
+  PURCHASE: [SCREEN.mrp, SCREEN.purchaseRequisitions, SCREEN.purchaseOrders, SCREEN.goodsReceipts, SCREEN.inventories],
+  PRODUCTION: [SCREEN.productionPlans, SCREEN.productionResults, SCREEN.hotRolling, SCREEN.inventories],
+  QUALITY: [SCREEN.inspections, SCREEN.rejectedLots, SCREEN.inspectionStandards, SCREEN.inventories],
+  LOGISTICS: [SCREEN.goodsIssues, SCREEN.millSheets, SCREEN.inventories],
+  ADMIN: [SCREEN.employees, SCREEN.organization, SCREEN.masterData],
 };
 
-export interface NavUser {
+/** 다른 영역 화면 묶음의 순서: 영역 순서대로, 같은 영역은 표 순서대로. 재고는 모든 사원 화면이라 맨 뒤에 둔다. */
+const AREA_SCREENS: readonly ScreenDef[] = [
+  ...PERMISSION_AREAS.flatMap((area) => SCREENS.filter((s) => s.area === area)),
+  SCREEN.inventories,
+];
+
+const COMMON_SCREENS: readonly ScreenDef[] = [SCREEN.lotTrace, SCREEN.businessEvents, SCREEN.tasks, SCREEN.messenger];
+const SOON_SCREENS: readonly ScreenDef[] = [SCREEN.agent, SCREEN.meetings, SCREEN.pastCases];
+
+export interface NavUser extends AccessUser {
   roleCode: RoleCode;
-  permissions: PermissionMap;
-  headDepartmentIds: readonly number[];
 }
 
 export function buildNavigation(user: NavUser): NavEntry[] {
-  const visible = (entry: NavItem) => !entry.permissions || canView(user, ...entry.permissions);
-  const approvals: NavItem[] = isDepartmentHead(user) ? [item({ href: '/approvals', label: '승인함', icon: 'approve', badge: 'approvals' })] : [];
+  const canOpen = (def: ScreenDef) => canOpenScreen(user, def.access);
+  const own = ROLE_MENU[user.roleCode].filter(canOpen);
+  const ownHrefs = new Set(own.map((def) => def.href));
+  const approvals = canOpen(SCREEN.approvals) ? [SCREEN.approvals] : [];
+  const others = AREA_SCREENS.filter((def) => !ownHrefs.has(def.href) && canOpen(def));
   return [
-    item({ href: '/dashboard', label: '대시보드', icon: 'dashboard' }),
-    ...ROLE_MENU[user.roleCode].filter(visible),
-    ...approvals,
+    toItem(SCREEN.dashboard),
+    ...own.map(toItem),
+    ...approvals.map(toItem),
+    ...(others.length ? [{ kind: 'separator', key: 'other-areas' } as const, ...others.map(toItem)] : []),
     { kind: 'separator', key: 'common' },
-    item({ href: '/lots/trace', label: 'LOT 추적', icon: 'trace' }),
-    item({ href: '/business-events', label: '작업 로그', icon: 'history' }),
-    item({ href: '/tasks', label: '업무·알림', icon: 'task', badge: 'notifications' }),
-    item({ href: '/messenger', label: '메신저', icon: 'chat', badge: 'chat' }),
+    ...COMMON_SCREENS.map(toItem),
     { kind: 'separator', key: 'soon' },
-    item({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', soon: 'P2' }),
-    item({ href: '/meetings', label: '회의록', icon: 'mic', soon: 'P2' }),
-    item({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', soon: 'EX' }),
+    ...SOON_SCREENS.map(toItem),
   ];
 }
 
 /** 지금 주소에 해당하는 메뉴 (가장 길게 맞는 것). '/sales-orders/new'는 '등록'이 '수주'보다 길게 맞는다. */
 export function activeNavHref(entries: readonly NavEntry[], pathname: string): string | null {
-  let best: string | null = null;
-  let bestLength = -1;
-  for (const entry of entries) {
-    if (entry.kind !== 'item') continue;
-    for (const candidate of [entry.href, ...(entry.match ?? [])]) {
-      const hit = candidate.endsWith('/') ? pathname.startsWith(candidate) : pathname === candidate || pathname.startsWith(`${candidate}/`);
-      if (hit && candidate.length > bestLength) {
-        best = entry.href;
-        bestLength = candidate.length;
-      }
-    }
-  }
-  return best;
+  const items = entries.flatMap((entry) => (entry.kind === 'item' ? [entry] : []));
+  const hit = screenOfPath(
+    pathname,
+    items.map((item) => ({ href: item.href, label: item.label, icon: item.icon, access: { kind: 'everyone' }, match: item.match })),
+  );
+  return hit?.href ?? null;
 }

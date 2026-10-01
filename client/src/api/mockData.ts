@@ -1,6 +1,7 @@
 // 가짜 데이터 관리 (SPEC 1장): 불러오기·탭 동기화·"시드로 초기화". 실제 API로 바꾸면 없어지는 부분이다.
 import { MOCK_LATENCY_MS } from '@/api/client';
 import { getMockDb, resetToSeed as resetMockDbToSeed } from '@/mock/db';
+import { clearMockFiles } from '@/mock/fileStorage';
 import type { MockDbChangeSource } from '@/mock/store';
 
 export const mockDataApi = {
@@ -17,6 +18,7 @@ export const mockDataApi = {
   /** 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다. 다른 탭에도 바로 반영된다. */
   resetToSeed: async (): Promise<void> => {
     await new Promise<void>((resolve) => setTimeout(resolve, MOCK_LATENCY_MS));
+    clearMockFiles();
     resetMockDbToSeed();
   },
 };

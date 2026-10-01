@@ -1,26 +1,7 @@
 // 이 탭에서 고른 계정(사원 id). 탭마다 다른 사원으로 들어갈 수 있게 sessionStorage에 둔다 (PLAN 2장).
 // 사원 정보·권한은 서버 데이터라 TanStack Query로 읽는다 (useSessionUser).
 import { create } from 'zustand';
-
-const SESSION_KEY = 'fantasteel.session.employee-id';
-
-function readStoredEmployeeId(): number | null {
-  try {
-    const value = Number(window.sessionStorage.getItem(SESSION_KEY));
-    return Number.isInteger(value) && value > 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredEmployeeId(employeeId: number | null): void {
-  try {
-    if (employeeId === null) window.sessionStorage.removeItem(SESSION_KEY);
-    else window.sessionStorage.setItem(SESSION_KEY, String(employeeId));
-  } catch {
-    // sessionStorage를 쓸 수 없는 환경이면 이 탭의 메모리에만 둔다
-  }
-}
+import { readSessionEmployeeId, writeSessionEmployeeId } from '@/lib/sessionEmployee';
 
 interface SessionState {
   /** sessionStorage를 읽었는지 (서버 렌더링 중에는 false) */
@@ -37,13 +18,13 @@ export const useSessionStore = create<SessionState>((set) => ({
   hydrated: false,
   employeeId: null,
   signedOut: false,
-  hydrate: () => set({ hydrated: true, employeeId: readStoredEmployeeId(), signedOut: false }),
+  hydrate: () => set({ hydrated: true, employeeId: readSessionEmployeeId(), signedOut: false }),
   signIn: (employeeId) => {
-    writeStoredEmployeeId(employeeId);
+    writeSessionEmployeeId(employeeId);
     set({ hydrated: true, employeeId, signedOut: false });
   },
   signOut: () => {
-    writeStoredEmployeeId(null);
+    writeSessionEmployeeId(null);
     set({ hydrated: true, employeeId: null, signedOut: true });
   },
 }));

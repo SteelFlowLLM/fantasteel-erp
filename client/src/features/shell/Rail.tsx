@@ -23,7 +23,8 @@ export function Rail() {
   return (
     <nav
       aria-label="주 메뉴"
-      className="flex w-[72px] flex-none flex-col items-center gap-0.5 overflow-y-auto bg-nav-dark py-2.5 text-nav-ink [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      // 조회 권한 화면까지 붙으면 레일이 길어진다(관리자는 모든 화면). 세로로 스크롤하고, 얇은 막대로 스크롤할 수 있음을 보인다.
+      className="flex w-[72px] flex-none flex-col items-center gap-0.5 overflow-y-auto overscroll-contain bg-nav-dark py-2.5 text-nav-ink [scrollbar-color:#2e3d4e_transparent] [scrollbar-width:thin]"
     >
       <Link href="/dashboard" aria-label="FantaSteel 대시보드" className="mb-2.5 flex size-10 flex-none items-center justify-center">
         <Logo />

@@ -29,9 +29,9 @@ export const useToastStore = create<ToastState>((set, get) => ({
   dismiss: (id) => set((state) => ({ items: state.items.filter((t) => t.id !== id) })),
 }));
 
-/** 오류를 사람이 읽을 문구로 바꾼다. 업무 오류는 코드를 함께 보인다. */
+/** 오류를 사람이 읽을 문구로 바꾼다. 업무 오류는 코드를 함께 보인다 (예: "해당 업무 권한 없음 · 기준정보 관리 사용 권한이 필요해요 (COM-002)"). */
 export function errorMessageOf(error: unknown): string {
-  if (error instanceof ApiError) return `${error.message} (${error.code})`;
+  if (error instanceof ApiError) return `${error.message}${error.detail ? ` · ${error.detail}` : ''} (${error.code})`;
   if (error instanceof Error) return error.message;
   return '알 수 없는 오류가 생겼어요';
 }

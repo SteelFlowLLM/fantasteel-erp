@@ -67,3 +67,25 @@ export function compareEmployees(tables: Readonly<MockTables>): (a: EmployeeRow,
     (gradeOrder.get(a.jobGradeId) ?? 0) - (gradeOrder.get(b.jobGradeId) ?? 0) ||
     a.employeeNo.localeCompare(b.employeeNo);
 }
+
+/** 이 부서 아래의 모든 하위 부서 id (자기 자신은 빼고) */
+export function descendantDepartmentIds(tables: Readonly<MockTables>, departmentId: number): Set<number> {
+  const result = new Set<number>();
+  const visit = (parentId: number) => {
+    for (const child of tables.department.filter((d) => d.parentId === parentId)) {
+      if (result.has(child.id)) continue;
+      result.add(child.id);
+      visit(child.id);
+    }
+  };
+  visit(departmentId);
+  return result;
+}
+
+/** 조직도 인원 정렬: 직급 표시 순서 → 사원번호 (REQ-ORG-003, TRM-036) */
+export function compareByJobGrade(tables: Readonly<MockTables>): (a: EmployeeRow, b: EmployeeRow) => number {
+  const gradeOrder = new Map(tables.jobGrade.map((g) => [g.id, g.sortOrder]));
+  return (a, b) =>
+    (gradeOrder.get(a.jobGradeId) ?? Number.MAX_SAFE_INTEGER) - (gradeOrder.get(b.jobGradeId) ?? Number.MAX_SAFE_INTEGER) ||
+    a.employeeNo.localeCompare(b.employeeNo);
+}

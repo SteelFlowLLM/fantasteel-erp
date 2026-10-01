@@ -25,7 +25,7 @@ export function QueryBoundary<T>({ query, loadingLabel, children }: QueryBoundar
     return (
       <StateView
         kind={isLock ? 'lock' : 'error'}
-        text={error instanceof Error ? error.message : undefined}
+        text={error instanceof ApiError ? [error.message, error.detail].filter(Boolean).join(' · ') : error instanceof Error ? error.message : undefined}
         code={error instanceof ApiError ? error.code : undefined}
         actions={
           <Button size="sm" onClick={() => void query.refetch()}>
