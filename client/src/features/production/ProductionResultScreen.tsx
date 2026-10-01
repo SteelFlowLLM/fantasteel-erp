@@ -147,13 +147,14 @@ function ProcessSection({
       : process === 'CONTINUOUS_CASTING' && ctx.uncastHeats.length === 0
         ? '연주할 히트가 없어요 (제강 먼저)'
         : null;
+  const failedCoilQty = plan.progress.coilQty - plan.progress.usableCoilQty;
   const meta =
     process === 'STEELMAKING'
       ? `히트 ${plan.progress.heatsMadeQty}/${plan.progress.heatCount}`
       : process === 'CONTINUOUS_CASTING'
         ? `연주 ${plan.progress.heatsCastQty}/${plan.progress.heatCount} · 슬래브 ${plan.progress.slabQty}매`
         : process === 'HOT_ROLLING'
-          ? `코일 ${plan.progress.coilQty}/${plan.formation?.shortageQty ?? 0}개 · 배정 확정 ${plan.progress.hotRollingAllocatedQty}매 투입 대기`
+          ? `코일 ${plan.progress.usableCoilQty}/${plan.formation?.shortageQty ?? 0}개${failedCoilQty > 0 ? ` (불합격 ${failedCoilQty}개 제외)` : ''} · 배정 확정 ${plan.progress.hotRollingAllocatedQty}매 투입 대기`
           : `${results.length}건 · 용선 ${fmtTon(plan.progress.hotMetalTon)}`;
   const workProcess = process as WorkProcess;
   return (
@@ -231,7 +232,7 @@ export function WorkBody({ ctx }: { ctx: WorkContext }) {
     heatCount: plan.progress.heatCount,
     heatsMadeQty: plan.progress.heatsMadeQty,
     heatsCastQty: plan.progress.heatsCastQty,
-    coilQty: plan.progress.coilQty,
+    usableCoilQty: plan.progress.usableCoilQty,
     shortageQty: plan.formation?.shortageQty ?? 0,
     ...countResultsByProcess(plan.results),
   });

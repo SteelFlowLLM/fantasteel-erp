@@ -12,26 +12,9 @@ import {
   type SalesOrderItemStatus,
   type ShipmentRequestStatus,
 } from '@/codes';
-import { Badge, type BadgeTone } from '@/components/Badge';
+import { Badge } from '@/components/Badge';
 import { Tag } from '@/components/Tag';
-
-export const SHIPMENT_REQUEST_STATUS_TONE: Record<ShipmentRequestStatus, BadgeTone> = {
-  REQUESTED: 'wait',
-  ALLOCATED: 'run',
-  ISSUED: 'ok',
-  CANCELLED: 'neutral',
-};
-
-const SALES_ORDER_ITEM_STATUS_TONE: Record<SalesOrderItemStatus, BadgeTone> = {
-  OPEN: 'run',
-  PARTIALLY_SHIPPED: 'wait',
-  SHIPPED: 'ok',
-  CANCELLED: 'danger',
-};
-
-const ALLOCATION_STATUS_TONE: Record<AllocationStatus, BadgeTone> = { CONFIRMED: 'run', CONSUMED: 'ok', RELEASED: 'neutral' };
-
-const INSPECTION_RESULT_TONE: Record<InspectionResult, BadgeTone> = { PENDING: 'wait', PASS: 'ok', FAIL: 'danger' };
+import { ALLOCATION_STATUS_TONE, INSPECTION_RESULT_TONE, SALES_ORDER_ITEM_STATUS_TONE, SHIPMENT_REQUEST_STATUS_TONE } from '@/lib/statusTone';
 
 export function ShipmentRequestStatusBadge({ status }: { status: ShipmentRequestStatus }) {
   return <Badge tone={SHIPMENT_REQUEST_STATUS_TONE[status]}>{SHIPMENT_REQUEST_STATUS_LABEL[status]}</Badge>;

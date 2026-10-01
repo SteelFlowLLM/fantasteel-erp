@@ -35,6 +35,7 @@ export function UserMenu() {
     <div ref={popover.ref} className="relative">
       <button
         type="button"
+        aria-label={`사원 메뉴 · ${me.employeeName}`}
         aria-haspopup="menu"
         aria-expanded={popover.open}
         onClick={() => popover.setOpen(!popover.open)}

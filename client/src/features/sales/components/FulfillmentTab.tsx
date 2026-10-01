@@ -17,6 +17,7 @@ import { useAction } from '@/hooks/useAction';
 import { useCanUse } from '@/hooks/usePermission';
 import { fmtDate, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
+import { SHIPMENT_REQUEST_STATUS_TONE } from '@/lib/statusTone';
 import { sumTon } from '@/lib/weight';
 import { ShipmentRequestButton, WorkRoomButton } from '@/features/sales/components/SalesOrderActions';
 import { DueRiskBadge, DueText, ItemLabel, MeasureBar, PlanLink, SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
@@ -254,17 +255,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                         </Link>
                       </Td>
                       <Td>
-                        <Badge
-                          tone={
-                            request.shipmentRequestStatus === 'ISSUED'
-                              ? 'ok'
-                              : request.shipmentRequestStatus === 'CANCELLED'
-                                ? 'neutral'
-                                : request.shipmentRequestStatus === 'ALLOCATED'
-                                  ? 'run'
-                                  : 'wait'
-                          }
-                        >
+                        <Badge tone={isShipmentRequestStatus(request.shipmentRequestStatus) ? SHIPMENT_REQUEST_STATUS_TONE[request.shipmentRequestStatus] : 'neutral'}>
                           {isShipmentRequestStatus(request.shipmentRequestStatus)
                             ? SHIPMENT_REQUEST_STATUS_LABEL[request.shipmentRequestStatus]
                             : request.shipmentRequestStatus}

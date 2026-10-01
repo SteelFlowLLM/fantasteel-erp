@@ -179,7 +179,7 @@ export function PurchaseOrderScreen() {
   );
 }
 
-function PurchaseOrderForm({
+export function PurchaseOrderForm({
   groups,
   initialIds,
   canConfirmPurchaseOrder,
@@ -229,6 +229,7 @@ function PurchaseOrderForm({
                   <label className="flex items-center gap-1.5 text-xs text-ink-2">
                     <input
                       type="checkbox"
+                      aria-label={`${group.supplierName ?? '공급업체'} 품목 전체 선택`}
                       checked={allOn}
                       onChange={(event) => setSelected((current) => new Set([...[...current].filter((id) => !groupIds.includes(id)), ...(event.target.checked ? groupIds : [])]))}
                     />

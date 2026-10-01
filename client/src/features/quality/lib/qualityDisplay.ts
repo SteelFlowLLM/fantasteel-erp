@@ -3,6 +3,7 @@
 import type { LotType, ProcessType } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { decCmp, decSub } from '@/lib/decimal';
+import { trimNum } from '@/lib/format';
 import { judgeValue, typicalPassValue } from '@/lib/inspectionJudgment';
 import type { JsonValue } from '@/mock/schema';
 
@@ -21,12 +22,8 @@ export const inspectionNameOf = (processType: string): string => INSPECTION_NAME
 /** 검사 대상 LOT 유형의 아이콘 */
 export const lotIconOf = (lotType: LotType): IconName => (lotType === 'HEAT' ? 'flame' : lotType === 'COIL' ? 'coil' : 'slab');
 
-/** "0.2500" → "0.25", "400.0000" → "400" (문자열 그대로 자리만 정리) */
-export function trimNum(value: string | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '';
-  if (!value.includes('.')) return value;
-  return value.replace(/0+$/, '').replace(/\.$/, '');
-}
+/** "0.2500" → "0.25", "400.0000" → "400". 구현은 화면 공통 포맷(lib/format)으로 옮겼고, 옛 import 경로가 그대로 되도록 다시 내보낸다. */
+export { trimNum };
 
 export interface LimitLike {
   minValue: string | null;

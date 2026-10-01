@@ -7,10 +7,10 @@ import {
 import type { LotQuality, PlanLotRow } from '@/api/production';
 import { Badge } from '@/components/Badge';
 import { Tag } from '@/components/Tag';
-import { PLAN_STATUS_TONE } from '@/features/production/lib/productionDisplay';
+import { PRODUCTION_PLAN_STATUS_TONE } from '@/lib/statusTone';
 
 export function PlanStatusBadge({ status }: { status: ProductionPlanStatus }) {
-  return <Badge tone={PLAN_STATUS_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={PRODUCTION_PLAN_STATUS_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
 }
 
 /** 재생산 계획(is_reproduction)과 완료 후 여재(is_surplus_on_completion) 표시 */

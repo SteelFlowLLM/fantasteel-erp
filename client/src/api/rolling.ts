@@ -49,6 +49,8 @@ export interface RollingPlanListRow {
   slabItemCode: string;
   shortageQty: number;
   rolledQty: number;
+  /** 불합격(히트 불합격 포함) 코일 수 — rolledQty에는 들어 있지 않다 */
+  failedCoilQty: number;
   allocatedQty: number;
   neededQty: number;
   rollable: boolean;
@@ -191,6 +193,7 @@ export const rollingApi = {
             slabItemCode: v.slabItem.itemCode,
             shortageQty: v.shortageQty,
             rolledQty: v.rolledQty,
+            failedCoilQty: v.failedCoilQty,
             allocatedQty: v.allocatedQty,
             neededQty: v.neededQty,
             rollable: v.rollable,

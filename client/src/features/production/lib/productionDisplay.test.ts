@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ProductionPlanStatus } from '@/codes';
 import { fromDateTimeLocal, toDateTimeLocal } from '@/features/production/lib/dateTimeLocal';
 import { actualLossRateText, countResultsByProcess, fmtYieldRate, planProcesses, processStepItems } from '@/features/production/lib/productionDisplay';
 
@@ -37,12 +38,28 @@ describe('생산 화면 표시 계산', () => {
       heatCount: 2,
       heatsMadeQty: 1,
       heatsCastQty: 0,
-      coilQty: 0,
+      usableCoilQty: 0,
       shortageQty: 6,
       ...counts,
     });
     expect(steps.map((s) => s.label)).toEqual(['히트 편성 · 2히트', '제선 1건', '제강 1/2', '연주 0/2', '열연 0/6']);
     expect(steps.map((s) => s.state)).toEqual(['done', 'run', 'run', 'run', 'todo']);
+  });
+
+  it('열연 단계는 쓸 수 있는 코일(불합격 제외) 수로 완료를 정한다', () => {
+    const rolling = (productionPlanStatus: ProductionPlanStatus, usableCoilQty: number) =>
+      processStepItems({ itemType: 'COIL', productionPlanStatus, heatCount: 2, heatsMadeQty: 2, heatsCastQty: 2, usableCoilQty, shortageQty: 6, resultCount: {}, openCount: {} }).at(-1);
+    expect(rolling('IN_PROGRESS', 5)).toMatchObject({ label: '열연 5/6', state: 'run' });
+    expect(rolling('IN_PROGRESS', 6)).toMatchObject({ label: '열연 6/6', state: 'done' });
+    expect(rolling('IN_PROGRESS', 0)).toMatchObject({ label: '열연 0/6', state: 'todo' });
+    // 완료된 계획은 더 열연하지 않는다: 완료 뒤 코일 1개가 불합격돼 5/6이 되어도 열연 단계는 끝난 것으로 둔다
+    expect(rolling('COMPLETED', 5)).toMatchObject({ label: '열연 5/6', state: 'done' });
+    expect(rolling('COMPLETED', 0)).toMatchObject({ label: '열연 0/6', state: 'todo' });
+  });
+
+  it('슬래브 계획에는 열연 단계가 없다', () => {
+    const steps = processStepItems({ itemType: 'SLAB', productionPlanStatus: 'IN_PROGRESS', heatCount: 1, heatsMadeQty: 1, heatsCastQty: 1, usableCoilQty: 0, shortageQty: 4, resultCount: {}, openCount: {} });
+    expect(steps.map((s) => s.key)).not.toContain('HOT_ROLLING');
   });
 
   it('작업일시 입력칸 값은 서울 시각이다', () => {

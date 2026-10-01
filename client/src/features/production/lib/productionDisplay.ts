@@ -1,16 +1,7 @@
 // 생산 화면(생산계획·작업 실적·열연 투입 배정)이 함께 쓰는 표시 계산. 업무 규칙은 core 서비스가 계산하고, 여기서는 보여 주는 모양만 정한다.
 import { PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType, type ProductionPlanStatus } from '@/codes';
 import type { StepItem, StepState } from '@/components/Steps';
-import type { BadgeTone } from '@/components/Badge';
 import { actualLossRateOf } from '@/lib/simulationLoss';
-
-/** 계획 상태 배지 색 */
-export const PLAN_STATUS_TONE: Record<ProductionPlanStatus, BadgeTone> = {
-  PLANNED: 'wait',
-  IN_PROGRESS: 'run',
-  COMPLETED: 'ok',
-  CANCELLED: 'neutral',
-};
 
 /** 수율 문자열 → 백분율 ("0.9596" → "95.96%"). 값을 다시 계산하지 않고 자리만 옮긴다. */
 export function fmtYieldRate(rate: string | null | undefined): string {
@@ -42,7 +33,8 @@ export interface StepProgressInput {
   heatCount: number;
   heatsMadeQty: number;
   heatsCastQty: number;
-  coilQty: number;
+  /** 쓸 수 있는 코일 수 = progress.usableCoilQty (합격 + 판정 대기). 불합격·히트 불합격 코일은 '만든 코일'로 세지 않는다 (BP-QC-01) */
+  usableCoilQty: number;
   shortageQty: number;
   /** 공정별 실적 수 (완료 + 진행 중) */
   resultCount: Partial<Record<ProcessType, number>>;
@@ -80,10 +72,12 @@ export function processStepItems(input: StepProgressInput): StepItem[] {
     },
   ];
   if (input.itemType === 'COIL') {
+    // 완료된 계획은 더 열연하지 않는다: 완료 뒤 코일이 불합격돼 5/6이 되어도 열연 단계는 끝난 것으로 둔다 (모자란 몫은 재생산 계획이 채운다)
+    const rollingDone = (input.usableCoilQty >= input.shortageQty && input.shortageQty > 0) || (input.productionPlanStatus === 'COMPLETED' && input.usableCoilQty > 0);
     items.push({
       key: 'HOT_ROLLING',
-      label: `${PROCESS_TYPE_LABEL.HOT_ROLLING} ${input.coilQty}/${input.shortageQty}`,
-      state: stateOf(input.coilQty >= input.shortageQty && input.shortageQty > 0, input.coilQty > 0 || open('HOT_ROLLING')),
+      label: `${PROCESS_TYPE_LABEL.HOT_ROLLING} ${input.usableCoilQty}/${input.shortageQty}`,
+      state: stateOf(rollingDone, input.usableCoilQty > 0 || open('HOT_ROLLING')),
     });
   }
   return items;

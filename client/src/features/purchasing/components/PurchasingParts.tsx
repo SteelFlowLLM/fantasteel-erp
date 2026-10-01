@@ -13,13 +13,7 @@ import { Badge, type BadgeTone } from '@/components/Badge';
 import { Tag } from '@/components/Tag';
 import { REQUISITION_SOURCE_LABEL } from '@/features/purchasing/lib/purchasingView';
 import { cn } from '@/lib/cn';
-
-const REQUISITION_TONE: Record<PurchaseRequisitionStatus, BadgeTone> = {
-  WAITING_APPROVAL: 'wait',
-  APPROVED: 'run',
-  REJECTED: 'danger',
-  ORDERED: 'ok',
-};
+import { PRODUCTION_PLAN_STATUS_TONE, PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
 const PURCHASE_ORDER_TONE: Record<PurchaseOrderStatus, BadgeTone> = {
   CONFIRMED: 'run',
@@ -27,15 +21,8 @@ const PURCHASE_ORDER_TONE: Record<PurchaseOrderStatus, BadgeTone> = {
   RECEIVED: 'ok',
 };
 
-const PLAN_TONE: Record<ProductionPlanStatus, BadgeTone> = {
-  PLANNED: 'neutral',
-  IN_PROGRESS: 'run',
-  COMPLETED: 'ok',
-  CANCELLED: 'neutral',
-};
-
 export function RequisitionStatusBadge({ status }: { status: PurchaseRequisitionStatus }) {
-  return <Badge tone={REQUISITION_TONE[status]}>{PURCHASE_REQUISITION_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={PURCHASE_REQUISITION_STATUS_TONE[status]}>{PURCHASE_REQUISITION_STATUS_LABEL[status]}</Badge>;
 }
 
 export function PurchaseOrderStatusBadge({ status }: { status: PurchaseOrderStatus }) {
@@ -43,7 +30,7 @@ export function PurchaseOrderStatusBadge({ status }: { status: PurchaseOrderStat
 }
 
 export function PlanStatusBadge({ status }: { status: ProductionPlanStatus }) {
-  return <Badge tone={PLAN_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={PRODUCTION_PLAN_STATUS_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
 }
 
 /** 출처(계산값) 꼬리표 */
@@ -61,18 +48,22 @@ export function MasterItem({
   onClick,
   onDoubleClick,
   title,
+  label,
   children,
 }: {
   selected: boolean;
   onClick: () => void;
   onDoubleClick?: () => void;
   title?: string;
+  /** 단추 이름 (화면 낭독기용). 안의 글자가 여러 칸으로 나뉘어 있으면 한 줄 요약을 준다 */
+  label?: string;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       aria-pressed={selected}
+      aria-label={label}
       title={title}
       onClick={onClick}
       onDoubleClick={onDoubleClick}

@@ -17,20 +17,14 @@ import { Icon } from '@/components/Icon';
 import { cn } from '@/lib/cn';
 import { dLabel, fmtDate, fmtMDHM } from '@/lib/format';
 import type { ProgressMeasure } from '@/lib/inventoryMath';
+import { PRODUCTION_PLAN_STATUS_TONE, SALES_ORDER_ITEM_STATUS_TONE } from '@/lib/statusTone';
 import type { TimelineEvent } from '@/api/salesOrders';
 import { measureText, percentOf } from '@/features/sales/lib/salesOrderForm';
-
-export const SALES_ORDER_STATUS_TONE: Record<SalesOrderItemStatus, BadgeTone> = {
-  OPEN: 'run',
-  PARTIALLY_SHIPPED: 'wait',
-  SHIPPED: 'ok',
-  CANCELLED: 'danger',
-};
 
 export const SALES_ORDER_STATUS_KEYS: readonly SalesOrderItemStatus[] = ['OPEN', 'PARTIALLY_SHIPPED', 'SHIPPED', 'CANCELLED'];
 
 export function SalesOrderStatusBadge({ status }: { status: SalesOrderItemStatus }) {
-  return <Badge tone={SALES_ORDER_STATUS_TONE[status]}>{SALES_ORDER_ITEM_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={SALES_ORDER_ITEM_STATUS_TONE[status]}>{SALES_ORDER_ITEM_STATUS_LABEL[status]}</Badge>;
 }
 
 /** 납기 위험 (공통 코드 비고: 계산 표시값, 납기 위험 기준일은 생산 설정값) */
@@ -42,10 +36,8 @@ export function DueRiskBadge() {
   );
 }
 
-const PLAN_TONE: Record<ProductionPlanStatus, BadgeTone> = { PLANNED: 'wait', IN_PROGRESS: 'run', COMPLETED: 'ok', CANCELLED: 'danger' };
-
 export function PlanStatusBadge({ status }: { status: ProductionPlanStatus }) {
-  return <Badge tone={PLAN_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={PRODUCTION_PLAN_STATUS_TONE[status]}>{PRODUCTION_PLAN_STATUS_LABEL[status]}</Badge>;
 }
 
 const RESERVATION_TONE: Record<ReservationStatus, BadgeTone> = { ACTIVE: 'run', CONVERTED: 'ok', RELEASED: 'neutral' };

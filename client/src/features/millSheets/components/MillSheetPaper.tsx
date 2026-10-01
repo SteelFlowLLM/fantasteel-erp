@@ -6,7 +6,7 @@ import { INSPECTION_RESULT_LABEL, ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, PRODUCT_Q
 import type { MillSheetInspectionSnapshot, MillSheetSnapshot } from '@/api/millSheets';
 import { inspectionColumns, inspectionRangeGroups, lotRowsOf, productInspectionGroups, standardText } from '@/features/millSheets/lib/millSheetView';
 import { cn } from '@/lib/cn';
-import { fmtDate, fmtDateTime, fmtDims, fmtTon } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtDims, fmtTon, trimNum } from '@/lib/format';
 
 const isProductType = (value: string): value is ProductItemType => value === 'SLAB' || value === 'COIL';
 const unitOf = (itemType: string) => (isProductType(itemType) ? PRODUCT_QTY_UNIT[itemType] : '');
@@ -73,7 +73,7 @@ function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; r
                   const v = row.inspection?.values.find((x) => x.inspectionItemCode === c.inspectionItemCode);
                   return (
                     <td key={c.inspectionItemCode} className={cn('text-right font-semibold', v?.isPassed === false && 'text-danger')}>
-                      {v?.measuredValue ?? '—'}
+                      {trimNum(v?.measuredValue) || '—'}
                     </td>
                   );
                 })}

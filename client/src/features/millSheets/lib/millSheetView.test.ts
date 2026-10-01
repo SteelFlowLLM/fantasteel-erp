@@ -53,10 +53,13 @@ const item = (lineNo: number, lots: MillSheetLotSnapshot[]): MillSheetItemSnapsh
 });
 
 describe('밀시트 종이 계산', () => {
-  it('기준 범위 글자 (경계 포함)', () => {
-    expect(rangeText('0.10', '0.25')).toBe('0.10~0.25');
+  it('기준 범위 글자 (경계 포함, 소수 끝의 0은 측정값처럼 지운다)', () => {
+    expect(rangeText('0.10', '0.25')).toBe('0.1~0.25');
+    expect(rangeText('-5.00', '5.0000')).toBe('-5~5');
     expect(rangeText(null, '0.25')).toBe('≤0.25');
+    expect(rangeText(null, '0.050')).toBe('≤0.05');
     expect(rangeText('270', null)).toBe('≥270');
+    expect(rangeText('270.000', null)).toBe('≥270');
     expect(rangeText(null, null)).toBe('—');
   });
 
@@ -77,8 +80,8 @@ describe('밀시트 종이 계산', () => {
       heat('H3', 'QS-SS275-ST', ['0.21', '0.25'], ['0.030', '0.050']),
     ]);
     expect(groups.map((g) => [g.standard, g.rows.map((r) => r.key), g.ranges])).toEqual([
-      ['QS-SS275-ST v1', ['H1', 'H3'], { C: '≤0.25', P: '≤0.050' }],
-      ['QS-SM355A-ST v1', ['H2'], { C: '≤0.20', P: '≤0.035' }],
+      ['QS-SS275-ST v1', ['H1', 'H3'], { C: '≤0.25', P: '≤0.05' }],
+      ['QS-SM355A-ST v1', ['H2'], { C: '≤0.2', P: '≤0.035' }],
     ]);
   });
 
@@ -89,7 +92,7 @@ describe('밀시트 종이 계산', () => {
     });
     const groups = inspectionRangeGroups([coil('C-2.3a', '0.20', '275'), coil('C-4.5', '0.28', '265'), coil('C-2.3b', '0.20', '275'), { key: 'C-none', inspection: null }]);
     expect(groups.map((g) => [g.rows.map((r) => r.key), g.ranges])).toEqual([
-      [['C-2.3a', 'C-2.3b'], { THICKNESS_TOL: '-0.20~0.20', YIELD_STRENGTH: '≥275' }],
+      [['C-2.3a', 'C-2.3b'], { THICKNESS_TOL: '-0.2~0.2', YIELD_STRENGTH: '≥275' }],
       [['C-4.5'], { THICKNESS_TOL: '-0.28~0.28', YIELD_STRENGTH: '≥265' }],
       [['C-none'], {}],
     ]);

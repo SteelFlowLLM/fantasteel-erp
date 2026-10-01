@@ -56,7 +56,8 @@ function RollingPlanRow({ row, active, onPick }: { row: RollingPlanListRow; acti
       <Row className="text-xs">
         {row.salesOrderNo ? <span className="font-mono">{row.salesOrderNo}</span> : <span className="text-ink-3">수주 연결 없음</span>}
         <span className="ml-auto whitespace-nowrap tabular-nums">
-          코일 {row.rolledQty}/{row.shortageQty} · 배정 {row.allocatedQty}
+          코일 {row.rolledQty}/{row.shortageQty}
+          {row.failedCoilQty > 0 ? ` · 불합격 ${row.failedCoilQty}` : ''} · 배정 {row.allocatedQty}
         </span>
       </Row>
       <Row className="text-cap text-ink-3">
@@ -288,7 +289,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
 function CoilsCard({ detail }: { detail: RollingDetail }) {
   return (
     <Card>
-      <CardHead title="열연 실적 · 코일" meta={`코일 ${detail.coils.length}개 · 슬래브 1매 = 코일 1개`} />
+      <CardHead title="열연 실적 · 코일" meta={`코일 ${detail.coils.length}개${detail.plan.failedCoilQty > 0 ? ` (불합격 ${detail.plan.failedCoilQty}개)` : ''} · 슬래브 1매 = 코일 1개`} />
       <CardBody flush>
         <ResultsTable results={detail.results} emptyText="아직 등록된 열연 실적이 없어요" />
         {detail.coils.length > 0 ? (
@@ -390,7 +391,7 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
       <StatBar>
         <Kpi flat label="코일 규격" value={<span className="font-mono text-base">{plan.coilItem.itemCode}</span>} sub={plan.dueDate ? `납기 ${fmtDate(plan.dueDate)}` : undefined} />
         <Kpi flat label="소재 슬래브 (규격 매핑)" value={<span className="font-mono text-base">{plan.slabItem.itemCode}</span>} sub={`1매 ${fmtTon(plan.slabItem.unitWeightTon)} → 코일 ${fmtTon(plan.coilItem.unitWeightTon)}`} />
-        <Kpi flat label="열연 완료 / 부족 매수" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" />
+        <Kpi flat label="열연 완료 / 부족 매수" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" sub={plan.failedCoilQty > 0 ? `불합격 코일 ${plan.failedCoilQty}개 제외` : undefined} />
         <Kpi flat label="배정 확정" value={plan.allocatedQty} unit="매" sub="열연 투입 대기" />
         <Kpi flat label="더 필요한 슬래브" value={plan.neededQty} unit="매" sub="부족 − 코일 − 배정" />
       </StatBar>
