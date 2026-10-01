@@ -1,11 +1,12 @@
 // 밀시트 종이 계산 (순수 함수, Vitest). 저장된 스냅샷만 쓴다 (REQ-SHP-003).
 import type { MillSheetInspectionSnapshot, MillSheetItemSnapshot, MillSheetLotSnapshot } from '@/api/millSheets';
+import { trimNum } from '@/lib/format';
 
-/** 판정 기준: "0.10~0.25" / "≤0.25" / "≥270" / "—" (경계 포함) */
+/** 판정 기준: "0.1~0.25" / "≤0.25" / "≥270" / "—" (경계 포함, 측정값처럼 소수 끝의 0은 지운다) */
 export function rangeText(minValue: string | null, maxValue: string | null): string {
-  if (minValue !== null && maxValue !== null) return `${minValue}~${maxValue}`;
-  if (maxValue !== null) return `≤${maxValue}`;
-  if (minValue !== null) return `≥${minValue}`;
+  if (minValue !== null && maxValue !== null) return `${trimNum(minValue)}~${trimNum(maxValue)}`;
+  if (maxValue !== null) return `≤${trimNum(maxValue)}`;
+  if (minValue !== null) return `≥${trimNum(minValue)}`;
   return '—';
 }
 

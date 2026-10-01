@@ -137,7 +137,7 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
           ? '이 수주의 업무방이 이미 있어요. 더할 사람을 고르면 함께 들어가요.'
           : '이 수주와 연결된 업무방을 만들어요. 함께할 사람을 조직도에서 골라 주세요. 연 사람은 늘 들어가요.'}
       </p>
-      <Input leadingIcon="search" placeholder="이름·부서 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+      <Input leadingIcon="search" aria-label="이름·부서 검색" placeholder="이름·부서 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
       <QueryBoundary query={orgChart} loadingLabel="조직도를 불러오는 중…">
         {(tree) => {
           const filtered = filterTree(tree, keyword.trim().toLowerCase());

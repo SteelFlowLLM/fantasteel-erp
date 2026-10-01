@@ -1,11 +1,11 @@
 // 검사 결과·불합격 상태 배지 (공통 코드 INSPECTION_RESULT·DISPOSITION_STATUS 표시명)
 import { Badge } from '@/components/Badge';
 import { DISPOSITION_STATUS_LABEL, INSPECTION_RESULT_LABEL, type DispositionStatus, type InspectionResult } from '@/codes';
+import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
 
 export function ResultBadge({ result, className }: { result: InspectionResult; className?: string }) {
-  const tone = result === 'PASS' ? 'ok' : result === 'FAIL' ? 'danger' : 'wait';
   return (
-    <Badge tone={tone} className={className}>
+    <Badge tone={INSPECTION_RESULT_TONE[result]} className={className}>
       {INSPECTION_RESULT_LABEL[result]}
     </Badge>
   );

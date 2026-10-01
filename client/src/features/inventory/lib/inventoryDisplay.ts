@@ -11,6 +11,7 @@ import {
 } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
 import type { LotInspectionResult } from '@/features/inventory/lib/inventoryRules';
+import { LOT_STATUS_TONE } from '@/lib/statusTone';
 
 export interface QualityDisplay {
   label: string;
@@ -47,10 +48,7 @@ export function allocationLabelOf(purpose: AllocationPurpose | null, status: 'CO
   return status ? `${base} · ${ALLOCATION_STATUS_LABEL[status]}` : base;
 }
 
-export function lotStatusTone(status: LotStatus): BadgeTone {
-  if (status === 'AVAILABLE') return 'run';
-  return 'neutral';
-}
+export const lotStatusTone = (status: LotStatus): BadgeTone => LOT_STATUS_TONE[status];
 
 export function dispositionLabelOf(status: DispositionStatus | null): string | null {
   return status ? DISPOSITION_STATUS_LABEL[status] : null;

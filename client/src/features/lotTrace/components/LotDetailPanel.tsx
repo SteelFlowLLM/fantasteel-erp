@@ -35,7 +35,7 @@ import type { TraceDirection } from '@/features/lotTrace/lib/traceGraph';
 import { DispositionBadge } from '@/features/quality/components/QualityBadges';
 import { AllocationStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { useLotDetail } from '@/hooks/useLotTrace';
-import { fmtDate, fmtDateTime, fmtDims, fmtTon } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtDims, fmtTon, trimNum } from '@/lib/format';
 
 function RelatedLotRow({ lot, direction }: { lot: RelatedLot; direction: TraceDirection }) {
   return (
@@ -99,11 +99,11 @@ function InspectionBlock({ inspection, lotId }: { inspection: LotInspectionView;
                   <tr key={v.id} data-risk={v.isPassed === false || undefined}>
                     <Td className="px-2">{v.inspectionItemName}</Td>
                     <Td className="px-2 text-ink-3">
-                      {v.minValue ?? '-'} ~ {v.maxValue ?? '-'}
+                      {trimNum(v.minValue) || '-'} ~ {trimNum(v.maxValue) || '-'}
                       {v.unit ? ` ${v.unit}` : ''}
                     </Td>
                     <Td align="right" className="px-2">
-                      {v.measuredValue ?? '-'}
+                      {trimNum(v.measuredValue) || '-'}
                     </Td>
                     <Td align="center" className="px-2">
                       {v.isPassed === null ? '-' : v.isPassed ? <Badge tone="ok">{INSPECTION_RESULT_LABEL.PASS}</Badge> : <Badge tone="danger">{INSPECTION_RESULT_LABEL.FAIL}</Badge>}

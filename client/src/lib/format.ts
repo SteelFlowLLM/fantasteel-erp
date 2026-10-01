@@ -115,6 +115,17 @@ export const fmtInt = (value: number | null | undefined): string =>
 export const fmtPct = (ratio: number | null | undefined, digits = 0): string =>
   ratio === null || ratio === undefined ? '-' : `${(ratio * 100).toFixed(digits)}%`;
 
+/**
+ * 소수 끝의 0을 지운다: "0.2500" → "0.25", "10.000" → "10", "0.000" → "0". 비어 있으면 ''.
+ * 숫자로 바꾸지 않고 문자열 그대로 자리만 정리한다. 시드 값("0.180")과 화면에서 입력해 저장한 값("0.18")이
+ * 같은 글자로 보이도록, 측정값·검사 기준을 보이는 모든 화면이 이 함수 하나를 쓴다.
+ */
+export function trimNum(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (!value.includes('.')) return value;
+  return value.replace(/0+$/, '').replace(/\.$/, '');
+}
+
 /** 규격 치수: 250 × 1,200 × 10,000 (소수 끝의 0은 지운다) */
 export function fmtDims(thickness: string | number, width: string | number, length: string | number): string {
   const one = (value: string | number) => {

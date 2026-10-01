@@ -8,8 +8,9 @@ import { ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
-import { DRAFT_STATUS_TONE, PURCHASE_REQUISITION_STATUS_TONE } from '@/features/actionDrafts/lib/draftDisplay';
+import { DRAFT_STATUS_TONE } from '@/features/actionDrafts/lib/draftDisplay';
 import { fmtDateTime } from '@/lib/format';
+import { PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
 export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
   const message = draft.message;

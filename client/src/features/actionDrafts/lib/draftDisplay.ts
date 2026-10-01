@@ -8,6 +8,7 @@ import {
 } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
 import type { StepItem } from '@/components/Steps';
+import { PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
 /** 초안 상태 배지 색 (옛 화면: 생성 ai · 확인 대기 wait · 확정 run · ERP 반영 ok · 반려 danger) */
 export const DRAFT_STATUS_TONE: Record<DraftStatus, BadgeTone> = {
@@ -16,14 +17,6 @@ export const DRAFT_STATUS_TONE: Record<DraftStatus, BadgeTone> = {
   APPROVED: 'run',
   EXECUTED: 'ok',
   REJECTED: 'danger',
-};
-
-/** 구매요청 상태 배지 색 */
-export const PURCHASE_REQUISITION_STATUS_TONE: Record<PurchaseRequisitionStatus, BadgeTone> = {
-  WAITING_APPROVAL: 'wait',
-  APPROVED: 'run',
-  REJECTED: 'danger',
-  ORDERED: 'ok',
 };
 
 const isPurchaseRequisitionStatus = (value: string): value is PurchaseRequisitionStatus => value in PURCHASE_REQUISITION_STATUS_LABEL;

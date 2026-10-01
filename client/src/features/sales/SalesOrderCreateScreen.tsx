@@ -93,6 +93,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
       <Field label="규격" required error={errors.itemId} htmlFor={`${id}-spec`}>
         <Select
           id={`${id}-spec`}
+          aria-label={`${index + 1}번째 규격`}
           invalid={Boolean(errors.itemId)}
           value={line.itemId ?? ''}
           onChange={(event) => {
@@ -121,6 +122,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
         >
           <Input
             id={`${id}-qty`}
+            aria-label={`${index + 1}번째 매수`}
             inputMode="numeric"
             numeric
             suffix={unit}
@@ -131,7 +133,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
           />
         </Field>
         <Field label="납기" required htmlFor={`${id}-due`} error={errors.dueDate ?? serverDueError}>
-          <DateInput id={`${id}-due`} value={line.dueDate} invalid={Boolean(errors.dueDate ?? serverDueError)} onChange={(dueDate) => onChange({ dueDate })} />
+          <DateInput id={`${id}-due`} ariaLabel={`${index + 1}번째 납기`} value={line.dueDate} invalid={Boolean(errors.dueDate ?? serverDueError)} onChange={(dueDate) => onChange({ dueDate })} />
         </Field>
       </div>
       <span className="text-cap text-ink-3">
@@ -254,6 +256,7 @@ export function SalesOrderCreateScreen() {
             >
               <Select
                 id="so-customer"
+                aria-label="고객사"
                 invalid={submitted && customerId === null}
                 value={customerId ?? ''}
                 onChange={(event) => setCustomerId(event.target.value === '' ? null : Number(event.target.value))}

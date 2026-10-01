@@ -28,7 +28,7 @@ import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { MasterGroupTitle, MasterItem, MasterNote, PurchaseOrderStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { isOverdue, ratioPercent, rawMaterialLotNoPattern, trimTonText } from '@/features/purchasing/lib/purchasingView';
+import { isOverdue, ratioPercent, rawMaterialLotNoPattern, receiptRowLabel, trimTonText } from '@/features/purchasing/lib/purchasingView';
 import { useGoodsReceiptList, useReceiptLines, useReceiveGoods } from '@/hooks/useGoodsReceipts';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -102,7 +102,12 @@ export function GoodsReceiptScreen() {
                 {shown.map((line) => {
                   const overdue = isOverdue(line.dueDate, today, line.scheduledReceiptTon);
                   return (
-                    <MasterItem key={line.purchaseOrderItemId} selected={line.purchaseOrderItemId === active?.purchaseOrderItemId} onClick={() => url.set({ item: line.purchaseOrderItemId, po: null })}>
+                    <MasterItem
+                      key={line.purchaseOrderItemId}
+                      selected={line.purchaseOrderItemId === active?.purchaseOrderItemId}
+                      label={receiptRowLabel(line)}
+                      onClick={() => url.set({ item: line.purchaseOrderItemId, po: null })}
+                    >
                       <span className="flex items-center gap-2">
                         <b className="font-mono text-sm font-semibold">
                           {line.purchaseOrderNo} <span className="font-sans text-cap font-medium text-ink-3">#{line.lineNo}</span>

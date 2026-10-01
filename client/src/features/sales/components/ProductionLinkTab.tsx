@@ -15,6 +15,7 @@ import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
 import { useSalesOrderProductionLinks } from '@/hooks/useSalesOrders';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
+import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
 import { PlanLink, PlanStatusBadge } from '@/features/sales/components/SalesOrderParts';
 import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
@@ -118,7 +119,7 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
                 </Td>
                 <Td>
                   {heat.inspectionResult ? (
-                    <Badge tone={heat.inspectionResult === 'PASS' ? 'ok' : heat.inspectionResult === 'FAIL' ? 'danger' : 'wait'}>
+                    <Badge tone={INSPECTION_RESULT_TONE[heat.inspectionResult]}>
                       {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
                     </Badge>
                   ) : (

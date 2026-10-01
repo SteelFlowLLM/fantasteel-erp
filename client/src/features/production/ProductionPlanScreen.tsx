@@ -32,6 +32,7 @@ import { useProductionPlanDetail, useProductionPlanList } from '@/hooks/useProdu
 import { useProductionPlanParam } from '@/hooks/useProductionPlanParam';
 import { dLabel, fmtDate, fmtDateTime, fmtMD, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
+import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
 
 type TypeFilter = 'ALL' | ProductItemType;
 
@@ -147,7 +148,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
     heatCount: plan.progress.heatCount,
     heatsMadeQty: plan.progress.heatsMadeQty,
     heatsCastQty: plan.progress.heatsCastQty,
-    coilQty: plan.progress.coilQty,
+    usableCoilQty: plan.progress.usableCoilQty,
     shortageQty: plan.formation?.shortageQty ?? 0,
     ...countResultsByProcess(plan.results),
   });
@@ -272,7 +273,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
                         {h.inspectionResult === null ? (
                           '-'
                         ) : (
-                          <Badge tone={h.inspectionResult === 'PASS' ? 'ok' : h.inspectionResult === 'FAIL' ? 'danger' : 'wait'}>{INSPECTION_RESULT_LABEL[h.inspectionResult]}</Badge>
+                          <Badge tone={INSPECTION_RESULT_TONE[h.inspectionResult]}>{INSPECTION_RESULT_LABEL[h.inspectionResult]}</Badge>
                         )}
                       </Td>
                       <Td>{h.heatLotId === null ? '-' : h.castDone ? '완료' : '연주 전'}</Td>

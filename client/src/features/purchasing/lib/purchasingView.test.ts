@@ -8,6 +8,7 @@ import {
   plannedPurchaseOrders,
   ratioPercent,
   rawMaterialLotNoPattern,
+  receiptRowLabel,
   summarizeItemNames,
   trimTonText,
 } from '@/features/purchasing/lib/purchasingView';
@@ -27,6 +28,12 @@ describe('구매 화면 표시값', () => {
     expect(trimTonText('1.500')).toBe('1.5');
     expect(trimTonText('0.000')).toBe('0');
     expect(trimTonText('12')).toBe('12');
+  });
+
+  it('입고예정 목록 줄 단추 이름: 발주번호·품목·공급업체·상태·입고예정·납기를 한 줄로 (화면 낭독기용)', () => {
+    const line = { purchaseOrderNo: 'PO-2609-0001', lineNo: 2, itemName: '철광석', supplierName: '가온광업', purchaseOrderStatus: 'CONFIRMED', isFullyReceived: false, scheduledReceiptTon: '500.000', dueDate: '2026-10-10' } as const;
+    expect(receiptRowLabel(line)).toBe('PO-2609-0001 2번 품목 · 철광석 · 가온광업 · 발주 확정 · 입고예정 500.000 t · 납기 10-10');
+    expect(receiptRowLabel({ ...line, purchaseOrderStatus: 'RECEIVED', isFullyReceived: true, dueDate: null })).toBe('PO-2609-0001 2번 품목 · 철광석 · 가온광업 · 입고 완료 · 입고 끝');
   });
 
   it('진행률은 십진 나눗셈으로, 분모 0이면 0', () => {

@@ -10,9 +10,11 @@ import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { LotNoLink, PlanLink, TableCaption } from '@/features/inventory/components/InventoryParts';
-import { allocationLabelOf, dispositionLabelOf, lotStatusTone, matchesLotNo, qualityDisplayOf } from '@/features/inventory/lib/inventoryDisplay';
+import { allocationLabelOf, lotStatusTone, matchesLotNo, qualityDisplayOf } from '@/features/inventory/lib/inventoryDisplay';
+import { DispositionBadge } from '@/features/quality/components/QualityBadges';
 import { useLotList } from '@/hooks/useInventories';
 import { fmtDate, fmtInt, fmtTon } from '@/lib/format';
+import { ALLOCATION_STATUS_TONE } from '@/lib/statusTone';
 
 export type LotTypeFilter = LotType | '';
 export type LotStatusFilter = LotStatus | '';
@@ -114,7 +116,6 @@ export function LotListTab({ lotType, lotStatus, onLotTypeChange, onLotStatusCha
 
 function LotRow({ row }: { row: LotListView }) {
   const quality = qualityDisplayOf(row.inspectionResult);
-  const disposition = dispositionLabelOf(row.dispositionStatus);
   const isProduct = row.lotType === 'SLAB' || row.lotType === 'COIL';
   return (
     <tr data-muted={row.lotStatus !== 'AVAILABLE' || undefined}>
@@ -132,7 +133,7 @@ function LotRow({ row }: { row: LotListView }) {
             <Badge tone={quality.tone} title={quality.note}>
               {quality.label}
             </Badge>
-            {disposition ? <Badge tone="outline">{disposition}</Badge> : null}
+            {row.dispositionStatus ? <DispositionBadge status={row.dispositionStatus} /> : null}
           </span>
         ) : (
           <span className="text-ink-3">—</span>
@@ -140,7 +141,7 @@ function LotRow({ row }: { row: LotListView }) {
       </Td>
       <Td>
         {isProduct && row.allocationPurpose ? (
-          <Badge tone={row.allocationStatus === 'CONFIRMED' ? 'run' : 'neutral'} plain>
+          <Badge tone={row.allocationStatus ? ALLOCATION_STATUS_TONE[row.allocationStatus] : 'neutral'} plain>
             {allocationLabelOf(row.allocationPurpose, row.allocationStatus)}
           </Badge>
         ) : isProduct && row.lotStatus === 'AVAILABLE' ? (

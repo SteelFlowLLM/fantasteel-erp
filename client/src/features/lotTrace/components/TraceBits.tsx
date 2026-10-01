@@ -1,14 +1,15 @@
 // LOT 추적·작업 로그가 함께 쓰는 작은 부품: LOT 종류 아이콘, 판정·LOT 상태·출하요청 상태 배지, 번호 링크, 기간 표시.
-// 상태 배지 색은 다른 화면과 같게 한 곳에서 가져온다: LOT 상태 = 재고 화면(lotStatusTone), 출하요청 상태 = 출하 화면(ShipmentBadges).
+// 상태 배지 색은 다른 화면과 같게 한 곳(lib/statusTone)에서 가져온다: 판정·LOT 상태 = statusTone, 출하요청 상태 = 출하 화면(ShipmentBadges).
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, type InspectionResult, type LotStatus, type LotType } from '@/codes';
-import { Badge, type BadgeTone } from '@/components/Badge';
+import { Badge } from '@/components/Badge';
 import { Icon, type IconName } from '@/components/Icon';
 import { lotStatusTone } from '@/features/inventory/lib/inventoryDisplay';
 import { ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtHM, fmtMD, fmtMDHM } from '@/lib/format';
+import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
 
 export const LOT_TYPE_ICON: Record<LotType, IconName> = {
   RAW_MATERIAL: 'box',
@@ -22,11 +23,9 @@ export function LotTypeIcon({ type, className }: { type: LotType; className?: st
   return <Icon name={LOT_TYPE_ICON[type]} size="sm" className={className} />;
 }
 
-const INSPECTION_TONE: Record<InspectionResult, BadgeTone> = { PASS: 'ok', FAIL: 'danger', PENDING: 'wait' };
-
 export function InspectionBadge({ result }: { result: InspectionResult | null }) {
   if (!result) return null;
-  return <Badge tone={INSPECTION_TONE[result]}>{INSPECTION_RESULT_LABEL[result]}</Badge>;
+  return <Badge tone={INSPECTION_RESULT_TONE[result]}>{INSPECTION_RESULT_LABEL[result]}</Badge>;
 }
 
 export function LotStatusBadge({ status }: { status: LotStatus }) {

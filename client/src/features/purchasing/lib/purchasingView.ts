@@ -1,6 +1,9 @@
 // 구매 화면 표시용 순수 함수 (MRP 기간 기본값, 품목 요약, 공급업체 묶음, 진행률, 톤 입력 초기값).
 // 업무 규칙(순소요·승인·발주·입고)은 core 서비스가 한다. 여기는 화면에 보이는 값만 만든다.
+import { PURCHASE_ORDER_STATUS_LABEL } from '@/codes';
 import { decCmp, decDiv, decIsPositive, decSum } from '@/lib/decimal';
+import { fmtMD, fmtTon } from '@/lib/format';
+import type { ReceiptLine } from '@/api/goodsReceipts';
 import type { RequisitionSource } from '@/api/purchasing';
 
 /** 구매요청 출처 표시명 (계산값: action_draft_id → Message → ERP, production_plan_id → MRP 계획, 그 밖 → 직접) */
@@ -33,6 +36,19 @@ export function defaultMrpPeriod(today: string): { from: string; to: string } {
 export function summarizeItemNames(items: readonly { itemName: string }[]): string {
   if (items.length === 0) return '-';
   return items.length === 1 ? items[0].itemName : `${items[0].itemName} 외 ${items.length - 1}종`;
+}
+
+/** 입고예정 목록 줄 단추의 이름 (화면 낭독기용): "PO-2609-0001 1번 품목 · 철광석 · 가온광업 · 발주 확정 · 입고예정 500.000 t · 납기 10-10" */
+export function receiptRowLabel(line: Pick<ReceiptLine, 'purchaseOrderNo' | 'lineNo' | 'itemName' | 'supplierName' | 'purchaseOrderStatus' | 'isFullyReceived' | 'scheduledReceiptTon' | 'dueDate'>): string {
+  const parts = [
+    `${line.purchaseOrderNo} ${line.lineNo}번 품목`,
+    line.itemName,
+    line.supplierName,
+    PURCHASE_ORDER_STATUS_LABEL[line.purchaseOrderStatus],
+    line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.scheduledReceiptTon)}`,
+  ];
+  if (line.dueDate) parts.push(`납기 ${fmtMD(line.dueDate)}`);
+  return parts.join(' · ');
 }
 
 /** 입력칸 초기값: 끝자리 0을 지운다 ("150.000" → "150", "1.500" → "1.5") */
