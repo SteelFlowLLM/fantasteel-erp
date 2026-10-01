@@ -36,7 +36,7 @@ describe('불합격 LOT 목록·상세', () => {
     const rows = await dispositionApi.list();
     expect(rows.find((r) => r.lotNo === FAILED_SLAB)).toMatchObject({ reason: 'FAILED', dispositionStatus: null, lotType: 'SLAB' });
     expect(rows.find((r) => r.lotNo === FAILED_HEAT)).toMatchObject({ reason: 'FAILED', lotType: 'HEAT' });
-    const children = rows.filter((r) => r.heatLotNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
+    const children = rows.filter((r) => r.heatNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
     expect(children).toHaveLength(10);
     // 히트 불합격으로 SO-2609-005는 재생산 필요 8매 (14.1-6)
     expect(children[0].salesOrderItem).toMatchObject({ salesOrderNo: 'SO-2609-005' });
@@ -46,7 +46,7 @@ describe('불합격 LOT 목록·상세', () => {
 
   it('상세: 하위 LOT의 근거는 상위 히트의 성분 검사, 같은 수주 품목의 계획과 작업 로그', async () => {
     actAs(SEED_EMPLOYEE_NO.quality);
-    const child = (await dispositionApi.list()).find((r) => r.heatLotNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
+    const child = (await dispositionApi.list()).find((r) => r.heatNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
     if (!child) throw new Error('하위 LOT 없음');
     const detail = await dispositionApi.detail(child.lotId);
     expect(detail?.evidence?.lot).toMatchObject({ lotNo: FAILED_HEAT, lotType: 'HEAT', inspectionResult: 'FAIL' });
@@ -109,7 +109,7 @@ describe('불합격 상태 지정 (REQ-QC-004)', () => {
 describe('재생산 계획 만들기 (REQ-PRD-006, 14.1-6)', () => {
   it('생산계획·히트 편성 사용 권한으로 부족분만큼 재생산 계획을 만든다. 품질 담당은 COM-002', async () => {
     actAs(SEED_EMPLOYEE_NO.quality);
-    const child = (await dispositionApi.list()).find((r) => r.heatLotNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
+    const child = (await dispositionApi.list()).find((r) => r.heatNo === FAILED_HEAT && r.reason === 'HEAT_FAILED');
     const salesOrderItemId = child?.salesOrderItem?.salesOrderItemId ?? 0;
     expect(await codeOf(dispositionApi.createReproductionPlan({ salesOrderItemId }))).toBe('COM-002');
 

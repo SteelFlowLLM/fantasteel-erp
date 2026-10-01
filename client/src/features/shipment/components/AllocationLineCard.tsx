@@ -144,7 +144,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
                     <Td>
                       <TraceLink no={a.lotNo} />
                     </Td>
-                    <Td className="font-mono text-mono">{a.heatLotNo ?? '-'}</Td>
+                    <Td className="font-mono text-mono">{a.heatNo ?? '-'}</Td>
                     <Td>{a.producedDate}</Td>
                     <Td>{a.yardName ?? '-'}</Td>
                     <Td className="text-xs text-ink-2">
@@ -339,7 +339,7 @@ function CandidateRow({
       </Td>
       <Td align="center">{rank}</Td>
       <Td className="font-mono text-mono">{lot.lotNo}</Td>
-      <Td className="font-mono text-mono">{lot.heatLotNo ?? '-'}</Td>
+      <Td className="font-mono text-mono">{lot.heatNo ?? '-'}</Td>
       <Td>{lot.producedDate}</Td>
       <Td>{lot.yardName ?? '-'}</Td>
       <Td>

@@ -27,7 +27,23 @@
 
 ### 남은 일 (화면 영역 파일)
 
-1. 조회 모델의 LOT 번호 필드 이름(`heatLotNo`·`slabLotNo`·`heatLotNos`, `MillSheetSnapshot`, `RollingLotView` 등)을 `heatNo`·`slabNo`·`coilNo`로 바꾸는 일이 남았다. 화면·api 파일 약 30개를 함께 바꿔야 해서 병합 단계에서 한 번에 한다.
-2. 생산 화면의 공정 단계 표시는 `progress.coilQty`(불합격 포함)를 쓴다(`ProductionPlanScreen.tsx`·`ProductionResultScreen.tsx`의 `coilQty: plan.progress.coilQty`). 그래서 불합격 코일이 있으면 계획은 진행중인데 '열연 6/6 완료'로 보인다. `progress.usableCoilQty`를 쓰도록 바꿔야 한다. 열연 화면에 불합격 코일 수를 보이려면 `api/rolling.ts`가 `failedCoilQty`도 넘겨야 한다.
+모두 처리했다. 3번만 문서에 기준이 없어 그대로 둔다.
+
+1. ~~조회 모델의 LOT 번호 필드 이름(`heatLotNo`·`slabLotNo`·`heatLotNos`, `MillSheetSnapshot`, `RollingLotView` 등)을 `heatNo`·`slabNo`·`coilNo`로 바꾸는 일이 남았다. 화면·api 파일 약 30개를 함께 바꿔야 해서 병합 단계에서 한 번에 한다.~~ → **완료**(2026-10-02, 아래 '이름 맞추기')
+2. ~~생산 화면의 공정 단계 표시는 `progress.coilQty`(불합격 포함)를 쓴다(`ProductionPlanScreen.tsx`·`ProductionResultScreen.tsx`의 `coilQty: plan.progress.coilQty`). 그래서 불합격 코일이 있으면 계획은 진행중인데 '열연 6/6 완료'로 보인다. `progress.usableCoilQty`를 쓰도록 바꿔야 한다. 열연 화면에 불합격 코일 수를 보이려면 `api/rolling.ts`가 `failedCoilQty`도 넘겨야 한다.~~ → **완료**(3c2a85d: 공정 단계·열연 화면이 `usableCoilQty`·`failedCoilQty`를 쓴다)
 3. 같은 슬래브 규격을 쓰는 코일 계획이 여럿이면, 각 계획이 `min(자기 적격 슬래브, 예약 가용)`을 따로 센다. 그래서 같은 예약 가용이 두 번 셀 수 있다. 예약이 매수 단위라 어느 계획 몫인지 나눌 기준이 문서에 없어 그대로 두었다.
-4. 시드 메시지 문구가 바뀌었다. 옛 브라우저 데이터를 버리려면 병합 단계에서 `MOCK_DB_VERSION`을 올려야 한다.
+4. ~~시드 메시지 문구가 바뀌었다. 옛 브라우저 데이터를 버리려면 병합 단계에서 `MOCK_DB_VERSION`을 올려야 한다.~~ → **완료**(ba9e1ad에서 3 → 4, 지금은 6)
+
+## 이름 맞추기·ext 서비스 합치기 (2026-10-02)
+
+근거: 05 2장 [강제](도메인 변수명은 용어 사전, 동의어 금지, `order` 단독 금지, 단위 `Ton`), 03 TRM-015~018·022, 04 9.2(히트번호·슬래브번호).
+
+- **이론중량(TRM-022)**: 1매(1개) 이론중량을 뜻하는 `unitWeightTon` → `theoreticalWeightTon`, `slabUnitWeightTon` → `slabTheoreticalWeightTon`, `unitWeightOf` → `theoreticalWeightOf`(context.ts). 지역 변수 `unitWeight`도 바꿨다. 재고 api의 `ProductInventoryView`는 이제 core 행의 이름을 그대로 쓴다(다시 이름 붙이기 없음).
+- **LOT 번호(TRM-016~018)**: 조회 모델·api 뷰·밀시트 스냅샷·화면·테스트의 `heatLotNo` → `heatNo`, `heatLotNos` → `heatNos`, `slabLotNo` → `slabNo`, `slabLotNos` → `slabNos`, `coilLotNos` → `coilNos`. 작업 로그 전후 값 키는 core가 이미 쓰던 `heatNo`·`heatNos`·`slabNos`·`coilNos`와 같다. 채번 도우미도 9.2 이름에 맞췄다: `formatHeatNo`·`formatSlabNo`·`formatCoilNo`·`formatHotMetalNo`(codes/numbering.ts), `issueHeatNo`·`issueSlabNo`·`issueHotMetalNo`·`coilNoOf`(mock/sequence.ts). 원료 LOT(TRM-070, 변수명 없음)의 `formatRawMaterialLotNo`·`issueRawMaterialLotNo`와 ERD 컬럼 `lot.heat_lot_id`에서 온 `heatLotId`·`heatLot`은 그대로 둔다.
+- **`order` 단독**: `orderLine` → `purchaseOrderLine`(salesOrders.ts), 테스트의 `const order = createSalesOrder(…)` → `created`, 수주 상세 `orderCancelled` → `salesOrderCancelled`.
+- 밀시트 스냅샷(저장된 JSON)의 키가 바뀌어 `MOCK_DB_VERSION`을 5 → 6으로 올렸다(옛 브라우저 데이터는 시드로 다시 만든다).
+- **ext 서비스 합치기**: `mock/services/ext/`를 지웠다.
+  - `ext/production.ts` → `productionResults.ts`의 '진행 중 작업' 함수(`openResultsOf`, `startedHeatLotIdOf`, `assertNoOpenWorkOnCompletion`, `assertNoOpenWorkForSimulation`, 내부 `assertNoOpenWorkOfProcess`·`assertStartedHeat`). 확인은 이제 api가 아니라 core가 한다: `startWork`·`registerIronmaking`·`registerSteelmaking`·`registerCasting`(시작한 히트 확인 포함)·`registerHotRolling`(rolling.ts)·`simulatePlan`(simulation.ts). api `productionResults.ts`·`rolling.ts`는 core를 부르기만 한다. 동작(완료로 이어지는 실적 거부, 트랜잭션 취소)은 그대로다.
+  - `ext/purchasing.ts` → `mrp.ts`의 `computeMrpForPeriod`·`MrpPeriodView`·`MrpPeriodPlanRow`. `computeMrp`와 계산 한 벌(`mrpViewOf`)을 같이 쓰고 보일 범위만 다르다(computeMrp: 필요일 from~to, computeMrpForPeriod: 필요일 ≤ to + `beforePeriod`). 전에는 ext가 core를 전체 기간으로 한 번 더 부르고 원료 행 차감을 다시 돌렸다. 결과는 같다(`mrpPeriod.test.ts`·`review.test.ts` 그대로 통과).
+- 바꾸지 않은 것: `heatLotId`·`heatLot`(ERD `lot.heat_lot_id`), `formatRawMaterialLotNo`·`issueRawMaterialLotNo`(TRM-070 원료 LOT은 변수명이 없고 한글명이 'LOT'을 포함), `orderDepartments`(정렬하다 뜻의 동사), 이론중량을 뜻하지만 '1매 중량'이 아닌 이름(`api/masterData.ts`의 `slabWeight`·`coilWeight`, lib `calcHotRollingYieldRate(coilWeightTon, slabWeightTon)`). 열연 화면·서비스의 영문 `rolling`(TRM-008 영문명 Hot Rolling, 변수명 없음, 금지어는 공정명 '압연')은 파일·경로까지 바뀌는 큰 이름 바꾸기라 그대로 두었다 — 팀 확인 필요.
+- 테스트는 더하거나 지우지 않았다(672개 통과, 테스트 파일은 이름·import만 바꿈). 브라우저에서 밀시트·열연 투입 배정 화면의 히트·슬래브 번호와 1매 이론중량 표시를 확인했다.

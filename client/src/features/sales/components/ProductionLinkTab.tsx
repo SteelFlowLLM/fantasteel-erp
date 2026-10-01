@@ -106,9 +106,9 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
                   {heat.seq}
                 </Td>
                 <Td>
-                  {heat.heatLotNo ? (
-                    <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatLotNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
-                      {heat.heatLotNo}
+                  {heat.heatNo ? (
+                    <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
+                      {heat.heatNo}
                     </Link>
                   ) : (
                     <span className="text-cap text-ink-3">제강 전</span>

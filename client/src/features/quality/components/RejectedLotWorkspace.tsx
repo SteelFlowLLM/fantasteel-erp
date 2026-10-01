@@ -72,7 +72,7 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
     (r) =>
       (status === 'ALL' || statusOf(r) === status) &&
       (reason === 'ALL' || r.reason === reason) &&
-      (!needle || r.lotNo.toUpperCase().includes(needle) || (r.heatLotNo ?? '').toUpperCase().includes(needle)),
+      (!needle || r.lotNo.toUpperCase().includes(needle) || (r.heatNo ?? '').toUpperCase().includes(needle)),
   );
   const paramId = Number(searchParams.get('lot')) || null;
   const activeId = paramId ?? list[0]?.lotId ?? null;
@@ -155,7 +155,7 @@ function RejectedItem({ row, active }: { row: RejectedLotListRow; active: boolea
       <div className="flex min-w-0 items-center gap-1.5 text-xs">
         <RejectReasonBadge reason={row.reason} />
         <span className="min-w-0 truncate text-danger" title={names}>
-          {row.reason === 'HEAT_FAILED' ? `${row.heatLotNo ?? '히트'} ${names || '성분'}` : names || '기준 밖'}
+          {row.reason === 'HEAT_FAILED' ? `${row.heatNo ?? '히트'} ${names || '성분'}` : names || '기준 밖'}
         </span>
       </div>
       <div className="flex items-center gap-1.5 text-cap text-ink-3">
@@ -245,9 +245,9 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                 ) : (
                   <span>
                     상위 히트{' '}
-                    {row.heatLotNo ? (
+                    {row.heatNo ? (
                       <Link href={rejectedHref(evidence?.lot.lotId ?? 0)} className="font-mono text-run hover:underline">
-                        {row.heatLotNo}
+                        {row.heatNo}
                       </Link>
                     ) : null}{' '}
                     성분 불합격
@@ -264,7 +264,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                   <span className="text-ink-3">기록 없음</span>
                 ),
               },
-              ...(row.lotType !== 'HEAT' ? [{ label: '상위 히트', value: row.heatLotNo ? <span className="font-mono">{row.heatLotNo}</span> : '—' }] : []),
+              ...(row.lotType !== 'HEAT' ? [{ label: '상위 히트', value: row.heatNo ? <span className="font-mono">{row.heatNo}</span> : '—' }] : []),
               {
                 label: '생산계획',
                 value:

@@ -24,7 +24,7 @@ import {
   slabSpecOfCoil,
   steelGradeCodeOf,
   SYSTEM_ACTOR,
-  unitWeightOf,
+  theoreticalWeightOf,
   ApiError,
   type PersonActor,
 } from '@/mock/services/context';
@@ -58,11 +58,11 @@ export function planHeatsFor(tables: Tables, item: ItemRow, shortageQty: number)
   return planHeats({
     productType,
     shortageQty,
-    unitWeightTon: unitWeightOf(item),
+    theoreticalWeightTon: theoreticalWeightOf(item),
     castingYieldRate,
     hotRollingYieldRate,
     heatCapacityTon: productionSettingOf(tables).heatCapacityTon,
-    slabUnitWeightTon: unitWeightOf(slabSpec),
+    slabTheoreticalWeightTon: theoreticalWeightOf(slabSpec),
   });
 }
 
@@ -363,7 +363,7 @@ export interface PlanHeatView {
   /** 편성 안의 순번 (1부터) */
   seq: number;
   heatLotId: number | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   converterCode: string | null;
   producedDate: string | null;
   heatTon: string | null;
@@ -401,9 +401,9 @@ export interface ProductionPlanView {
   createdEmployeeName: string | null;
   cancelledAt: string | null;
   updatedAt: string;
-  item: { id: number; itemCode: string; itemName: string; itemType: ProductItemType; steelGradeCode: string | null; unitWeightTon: string };
+  item: { id: number; itemCode: string; itemName: string; itemType: ProductItemType; steelGradeCode: string | null; theoreticalWeightTon: string };
   /** 연주할 슬래브 규격 (코일 계획 = 매핑된 슬래브) */
-  slabSpec: { id: number; itemCode: string; itemName: string; unitWeightTon: string } | null;
+  slabSpec: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string } | null;
   salesOrder: { salesOrderId: number; salesOrderNo: string; salesOrderItemId: number; lineNo: number; customerName: string | null; dueDate: string; orderedQty: number } | null;
   /** 편성표 (14.1-2: 히트 전체 톤과 수주 목표를 나눠 보인다) */
   formation: {
@@ -489,7 +489,7 @@ export function productionPlanView(tables: Tables, planId: number): ProductionPl
     heatViews.push({
       seq,
       heatLotId: heat?.id ?? null,
-      heatLotNo: heat?.lotNo ?? null,
+      heatNo: heat?.lotNo ?? null,
       converterCode: heat?.converterCode ?? null,
       producedDate: heat?.producedDate ?? null,
       heatTon: heat?.initialTon ?? null,
@@ -514,9 +514,9 @@ export function productionPlanView(tables: Tables, planId: number): ProductionPl
       itemName: item.itemName,
       itemType: productItemTypeOf(item),
       steelGradeCode: steelGradeCodeOf(tables, item.steelGradeId),
-      unitWeightTon: item.theoreticalWeightTon ?? '0.000',
+      theoreticalWeightTon: item.theoreticalWeightTon ?? '0.000',
     },
-    slabSpec: slabSpec ? { id: slabSpec.id, itemCode: slabSpec.itemCode, itemName: slabSpec.itemName, unitWeightTon: slabSpec.theoreticalWeightTon ?? '0.000' } : null,
+    slabSpec: slabSpec ? { id: slabSpec.id, itemCode: slabSpec.itemCode, itemName: slabSpec.itemName, theoreticalWeightTon: slabSpec.theoreticalWeightTon ?? '0.000' } : null,
     salesOrder:
       soItem && so
         ? {

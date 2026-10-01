@@ -177,7 +177,7 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
                       </Td>
                       <Td align="right">{c.fifoRank}</Td>
                       <Td className="font-mono text-mono">{c.lotNo}</Td>
-                      <Td className="font-mono text-mono text-ink-2">{c.heatLotNo ?? '-'}</Td>
+                      <Td className="font-mono text-mono text-ink-2">{c.heatNo ?? '-'}</Td>
                       <Td>{c.producedDate}</Td>
                       <Td>{c.yardName ?? '-'}</Td>
                       <Td className="font-mono text-mono">{c.sourcePlanNo ?? '-'}</Td>
@@ -193,7 +193,7 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
       </CardBody>
       <CardFoot>
         <span className="text-xs text-ink-2">
-          선택 {selected.length}매 · 이론중량 {fmtTon(calcWeightTon(selected.length, plan.slabItem.unitWeightTon))} (계산값)
+          선택 {selected.length}매 · 이론중량 {fmtTon(calcWeightTon(selected.length, plan.slabItem.theoreticalWeightTon))} (계산값)
           {selected.length > 0 && !followsRecommendation ? ' · 추천과 다르게 골랐어요 (작업 로그에 추천·선택 LOT이 함께 남아요)' : ''}
         </span>
         <div className="ml-auto flex gap-1.5">
@@ -259,7 +259,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
               {plan.allocations.map((a) => (
                 <tr key={a.allocationId}>
                   <Td className="font-mono text-mono">{a.lotNo}</Td>
-                  <Td className="font-mono text-mono text-ink-2">{a.heatLotNo ?? '-'}</Td>
+                  <Td className="font-mono text-mono text-ink-2">{a.heatNo ?? '-'}</Td>
                   <Td>{a.producedDate}</Td>
                   <Td>{fmtDateTime(a.confirmedAt)}</Td>
                   <Td>{a.confirmedEmployeeName ?? '-'}</Td>
@@ -312,7 +312,7 @@ function CoilsCard({ detail }: { detail: RollingDetail }) {
                         {c.lotNo}
                       </Link>
                     </Td>
-                    <Td className="font-mono text-mono text-ink-2">{c.slabLotNo ?? '-'}</Td>
+                    <Td className="font-mono text-mono text-ink-2">{c.slabNo ?? '-'}</Td>
                     <Td>{c.producedDate}</Td>
                     <Td>
                       <LotQualityBadge quality={c.quality} />
@@ -390,7 +390,7 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
 
       <StatBar>
         <Kpi flat label="코일 규격" value={<span className="font-mono text-base">{plan.coilItem.itemCode}</span>} sub={plan.dueDate ? `납기 ${fmtDate(plan.dueDate)}` : undefined} />
-        <Kpi flat label="소재 슬래브 (규격 매핑)" value={<span className="font-mono text-base">{plan.slabItem.itemCode}</span>} sub={`1매 ${fmtTon(plan.slabItem.unitWeightTon)} → 코일 ${fmtTon(plan.coilItem.unitWeightTon)}`} />
+        <Kpi flat label="소재 슬래브 (규격 매핑)" value={<span className="font-mono text-base">{plan.slabItem.itemCode}</span>} sub={`1매 ${fmtTon(plan.slabItem.theoreticalWeightTon)} → 코일 ${fmtTon(plan.coilItem.theoreticalWeightTon)}`} />
         <Kpi flat label="열연 완료 / 부족 매수" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" sub={plan.failedCoilQty > 0 ? `불합격 코일 ${plan.failedCoilQty}개 제외` : undefined} />
         <Kpi flat label="배정 확정" value={plan.allocatedQty} unit="매" sub="열연 투입 대기" />
         <Kpi flat label="더 필요한 슬래브" value={plan.neededQty} unit="매" sub="부족 − 코일 − 배정" />

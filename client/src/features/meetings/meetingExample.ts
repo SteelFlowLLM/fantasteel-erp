@@ -6,21 +6,21 @@ import {
   ROLE,
   STEEL_GRADE,
   formatBusinessNo,
-  formatCoilLotNo,
-  formatHeatLotNo,
-  formatSlabLotNo,
+  formatCoilNo,
+  formatHeatNo,
+  formatSlabNo,
   type RoleCode,
 } from '@/codes';
 
 export const EXAMPLE_NO = (() => {
-  const heat = formatHeatLotNo('BOF1', '260929', 15);
-  const slab = formatSlabLotNo(heat, 3);
+  const heat = formatHeatNo('BOF1', '260929', 15);
+  const slab = formatSlabNo(heat, 3);
   return {
     salesOrder: formatBusinessNo('SALES_ORDER', '2609', 14),
     productionPlan: formatBusinessNo('PRODUCTION_PLAN', '2610', 3),
     heat,
     slab,
-    coil: formatCoilLotNo(slab),
+    coil: formatCoilNo(slab),
   } as const;
 })();
 

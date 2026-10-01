@@ -27,6 +27,7 @@ export const salesOrderApi = {
 - 오류: 9.3 코드는 `ApiError(code, detail)`, 코드가 없는 입력 거부는 `InputError(message, fieldErrors)` (둘 다 `@/api/errors`). 오류가 나면 `mockMutation` 트랜잭션 전체가 취소된다.
 - 수정 폼은 연 시점의 `updatedAt`을 `expectedUpdatedAt`으로 넘기면 바뀐 경우 COM-001.
 - 날짜·시각: 날짜 `YYYY-MM-DD`, 시각 ISO. 톤은 문자열 소수 3자리(`'23.550'`), 수율 4자리.
+- 이름(05 2장, 03 용어 사전): 1매(1개) 이론중량 `theoreticalWeightTon`(TRM-022), LOT 번호 필드는 히트 `heatNo`·슬래브 `slabNo`·코일 `coilNo`(목록은 `heatNos`·`slabNos`·`coilNos`, TRM-016~018). 채번 도우미는 `issueHeatNo`·`issueSlabNo`·`coilNoOf`·`issueHotMetalNo`·`issueRawMaterialLotNo`(mock/sequence.ts, 9.2). `heatLotId`·`heatLot`은 ERD `lot.heat_lot_id`(상위 히트 LOT id) 이름이라 그대로다.
 - 작업 로그는 서비스가 같은 트랜잭션에서 `recordBusinessEvent`로 남긴다. 화면에서 따로 남기지 않는다. `target_type`은 테이블명, 수주 타임라인용 `sales_order_id`, LOT 타임라인용 `business_event_lot`을 빠짐없이 채운다.
 - 사유 코드(`reason_code`)를 남길 때는 사람이 읽을 사유(`reason_text`)를 함께 남긴다(9.3): 실제 매수·LOT·수주 번호로, 단위는 슬래브 매·코일 개(`qtyUnitOfItem`). 예 "재고 우선 예약 6매 (수주 10매 중)", "품목 1 부족 4매로 생산계획 생성 (히트 1개)". 번호 뒤 조사는 `lib/josa.ts`로 맞춘다.
 
@@ -50,7 +51,7 @@ export const salesOrderApi = {
 ### `context.ts`
 - `userActor(id)`, `SYSTEM_ACTOR`, `PersonActor`, **`SYSTEM_SENDER_ID = 0`**(시스템 메시지의 `message.sender_id`, 화면은 '시스템'으로 보인다 — 가정값).
 - `mustGet(tables, table, id, label)` → 없으면 COM-003. `refreshInventory(tx, itemId)`: `on_hand_qty` = 미소진(AVAILABLE) LOT 매수, `reserved_qty` = ACTIVE 예약 합계 (예약·LOT를 바꾸는 모든 서비스가 같은 트랜잭션에서 부른다).
-- 기준정보: `routingYieldOf`(없으면 MST-001), `slabSpecOfCoil`(매핑 없으면 MST-001), `hotRollingYieldOf`, `castingSlabSpecOf`, `currentStandardOf(process, gradeId)`, `inspectionProcessOf(lotType)`.
+- 기준정보: `theoreticalWeightOf(item)`(1매 이론중량, 없으면 MST-001), `routingYieldOf`(없으면 MST-001), `slabSpecOfCoil`(매핑 없으면 MST-001), `hotRollingYieldOf`, `castingSlabSpecOf`, `currentStandardOf(process, gradeId)`, `inspectionProcessOf(lotType)`.
 
 ### `inventoryPool.ts` (4.2·4.3, INV-003·007·008·009)
 - `lotEligibility(tables, lot)`, `eligibleLotsOf(tables, itemId)`, `confirmedAllocationOf(tables, lotId)`, `activeReservedQtyOfItem`.
@@ -122,6 +123,7 @@ export const salesOrderApi = {
 ## 6. 작업 실적 (`productionResults.ts`) — REQ-PRD-003, REQ-LOT-001~004, BP-PRD-02
 
 - 작업 상태값 없음: `started_at` / `completed_at`(null = 진행 중). **한 번에 등록**(시작·완료 함께)하거나 **`startWork`로 시작만** 기록한 뒤 같은 `productionResultId`로 완료할 수 있다.
+- **진행 중 작업(시작만 한 실적)**: 같은 공정에 있으면 새 실적·새 `startWork`를 입력 오류로 막고 '작업 완료'(`productionResultId`)로만 마친다. 연주 작업 완료는 시작 때 기록한 히트(PRODUCTION_STARTED `afterData.heatLotId`, `startedHeatLotIdOf`)로만 한다. 실적 등록(열연 포함)으로 계획이 COMPLETED가 되는데 다른 공정에 시작만 한 실적이 남으면 거부한다(`assertNoOpenWorkOnCompletion`, 트랜잭션 취소). 조회용 `openResultsOf(tables, planId, processType?)`. (2026-10-02 ext에서 core로 옮김)
 - 모든 LOT 번호는 기존 채번 도우미(9.2, 완료 일시의 서울 날짜). 제품 LOT 야드 = 규격 기본 야드. 원료·용선 잔량은 음수가 되지 않는다(모자라면 입력 오류, 아무것도 저장 안 됨). 잔량 0 → LOT CONSUMED.
 
 | 함수 | 입력 | 처리 | LOT 관계 | 작업 로그 |
@@ -141,6 +143,7 @@ export const salesOrderApi = {
 - 검사값은 넣지 않는다 → 갓 연주한 슬래브는 판정 대기라 열연할 수 없다. 적격 슬래브(여재 포함)가 있으면 FIFO 추천을 확정하고 열연한다. 없으면 `skippedRolling`에 이유. **검사 합격 뒤 다시 실행하면 남은 열연을 한다.**
 - 시각: 모두 지금(tx 시각)에 끝나도록 거꾸로 배치(제선 4h·제강 1h·연주 2h·열연 2h, 가정값).
 - 원료가 모자라면 제선·제강처럼 입력 오류(구매·입고 먼저).
+- 작업 시작만 한 실적이 있으면 실행하지 않는다(`assertNoOpenWorkForSimulation`, 입력 오류). '작업 완료'로 먼저 마친다.
 
 ## 8. 열연 (`rolling.ts`) — REQ-PRD-004, BP-INV-01
 
@@ -150,7 +153,7 @@ export const salesOrderApi = {
 | `rollingRecommendation(tables, planId)` | FIFO 추천(저장 안 함). **판매 ACTIVE 예약 몫을 뺀 예약 가용 안에서만** → 판매 예약을 침범하지 않는다(14.2) |
 | `confirmRollingAllocations(tx, actor, {productionPlanId, lotIds})` | HOT_ROLLING CONFIRMED (production_plan_id). LOT 확인(INV-002·003·004, 규격) 후 필요·예약 가용 초과 INV-001. 이벤트 ALLOCATION_RECOMMENDED + ALLOCATION_CONFIRMED |
 | 변경·해제 | `changeAllocation` / `releaseAllocation` (4장) |
-| `registerHotRolling(tx, actor, {productionPlanId, allocationIds?, startedAt, completedAt})` | 배정 슬래브 소비(배정 CONSUMED, LOT CONSUMED) → 코일 `C+슬래브번호`(HT- 제외), 코일 규격·상위 히트·코일 야드, 슬래브→코일 1:1 ACTUAL_INPUT, **코일 검사 대상**. 미소진 INV-004, 미합격 INV-002, 수주 연결 없으면 입력 오류. 작업 로그 PRODUCTION_STARTED·PRODUCTION_RESULT_REGISTERED. 열연 실적은 이 함수 하나(작업 실적 화면이든 열연 화면이든 이것을 부른다) |
+| `registerHotRolling(tx, actor, {productionPlanId, allocationIds?, startedAt, completedAt})` | 배정 슬래브 소비(배정 CONSUMED, LOT CONSUMED) → 코일 `C+슬래브번호`(HT- 제외), 코일 규격·상위 히트·코일 야드, 슬래브→코일 1:1 ACTUAL_INPUT, **코일 검사 대상**. 미소진 INV-004, 미합격 INV-002, 수주 연결 없으면 입력 오류. 작업 로그 PRODUCTION_STARTED·PRODUCTION_RESULT_REGISTERED. 이 실적으로 계획이 완료되는데 시작만 한 실적이 남으면 거부. 열연 실적은 이 함수 하나(작업 실적 화면이든 열연 화면이든 이것을 부른다) |
 
 ## 9. 검사·불합격 (`inspections.ts`) — REQ-QC-001~004, BP-QC-01
 
@@ -170,12 +173,14 @@ export const salesOrderApi = {
 
 ## 10. MRP (`mrp.ts`) — REQ-PRD-005, BP-PRD-01
 
-`computeMrp(tables, {from, to})` → `MrpView` (저장 안 함, 바로 계산)
+`computeMrp(tables, {from, to})` → `MrpView` (저장 안 함, 바로 계산) — 필요일이 from~to인 계획을 보인다.
+
+`computeMrpForPeriod(tables, {from, to})` → `MrpPeriodView` — MRP 화면(`api/mrp.ts`)용. 필요일 ≤ to인 계획을 보이고 from 전 계획은 밀린 소요(`plans[].beforePeriod`)로 함께 보인다. 기간 뒤 계획은 보이지 않지만 차감(계획 몫 입고예정 보호)에는 들어간다. 두 함수는 계산 한 벌(`mrpViewOf`)을 같이 쓰고 보일 범위만 다르다(2026-10-02 `ext/purchasing.ts`에서 옮김).
 - 순소요 계산: 계획·진행중이고 아직 만들지 않은 히트가 있는 **모든** 계획을 필요일 순으로 차감한다(기간 앞의 못 만든 계획이 먼저 잔량을 쓴다). **기간은 결과(plans·materials·requisitionLines)를 보여 줄 때만** 거른다. 필요일(가정값) = 연결 수주 품목 납기, 없으면 계획 등록일.
 - `plans[]`: 남은 히트 수·히트 톤·필요 용선·예상 슬래브 여재·원료별 총소요/순소요.
 - `materials[]`: 원료별 총소요, 원료 LOT 잔량, 입고예정(확정 발주 미입고량 합계), 잔량·입고예정으로 채운 톤, **순소요**, 첫 부족 필요일, 원단위 단위(t/t, kg/t).
   - 표 한 줄의 숫자가 맞도록 공급을 보이는 계획 기준으로 나눈다(2026-10-02, `mrpMaterialRows` + lib `supplyBreakdownOf`): `usableOnHandTon`(표 '원료 LOT 잔량' 칸 = 합계 − `onHandEarlierPlansTon`), `coveredScheduledTon`(표 '입고예정' 칸 = 필요일까지 받아 쓰는 몫), 쓰지 않은 입고예정의 이유별 톤 `scheduledOtherPlansTon`(다른 열린 계획 몫, REQ-PRD-005)·`scheduledAfterNeedDateTon`(필요일 뒤 도착·납기 없음)·`scheduledEarlierPlansTon`(표에 없는 앞선 계획이 씀)·`scheduledSpareTon`(소요가 채워져 남음). 합: 입고예정 = 칸 + 이유별 톤, 순소요 = max(0, 총소요 − 잔량 칸 − 입고예정 칸). 차감 규칙은 그대로다.
-  - `mrpSuppliesOf(tables)`(공급 목록)와 `mrpMaterialRows(tables, 소요 전부, 공급, 보이는 소요)`는 구매 영역의 기간 MRP(`ext/purchasing.ts computeMrpForPeriod`)도 같이 쓴다.
+  - `mrpSuppliesOf(tables)`(공급 목록)와 `mrpMaterialRows(tables, 소요 전부, 공급, 보이는 소요)`는 `computeMrp`·`computeMrpForPeriod`가 같이 쓴다.
 - `requisitionLines[]`: 순소요 > 0인 (계획, 원료) 줄 = "구매요청 만들기" 미리 채움. 같은 계획·원료 구매요청이 있으면 `existingPurchaseRequisitionNo`(만들 때도 입력 오류로 막는다).
 - 입고예정: 필요일까지(이하) 도착하는 확정 발주만, 시점별로 한 번만 쓴다. 구매요청 품목에 계획이 연결된 입고예정은 그 계획이 먼저 쓰고, 그 계획에 남은 소요가 없을 때만 다른 계획이 쓴다. 용선 잔량은 빼지 않는다.
 
@@ -241,7 +246,7 @@ export const salesOrderApi = {
 
 ## 16. 시드 (`client/src/mock/seeds/`)
 
-등록 순서(`seeds/index.ts`, 내가 관리): `inspectionStandards` → `core` → (병합 단계에서 그 아래에 seedAdmin·seedMaster·seedCollab … 등록). `MOCK_DB_VERSION`은 2로 올렸다(2026-10-02 원료 입고량을 바꿔 지금은 5).
+등록 순서(`seeds/index.ts`, 내가 관리): `inspectionStandards` → `core` → (병합 단계에서 그 아래에 seedAdmin·seedMaster·seedCollab … 등록). `MOCK_DB_VERSION`은 2로 올렸다(2026-10-02 원료 입고량을 바꿔 5, 밀시트 스냅샷 키 이름(`heatNo`·`slabNo`)을 바꿔 지금은 6).
 
 ### 16-1. 검사 기준 (`inspectionStandards.ts`, 버전 1·현재)
 

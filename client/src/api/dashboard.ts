@@ -40,7 +40,7 @@ import {
   salesOrderDetail,
   surplusSlabs,
   timelineEventOf,
-  unitWeightOf,
+  theoreticalWeightOf,
 } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
@@ -583,7 +583,7 @@ function readDeliveryRisk(tables: Tables, options: DashboardQueryOptions): Deliv
         orderedQty: item.orderedQty,
         shippedQty: item.shippedQty,
         unshippedQty: item.shortage.unshippedQty,
-        unshippedTon: calcWeightTon(item.shortage.unshippedQty, item.unitWeightTon),
+        unshippedTon: calcWeightTon(item.shortage.unshippedQty, item.theoreticalWeightTon),
         dueDate: item.dueDate,
         daysToDue,
         isOverdue: daysToDue < 0,
@@ -676,7 +676,7 @@ export interface ProductionVolumeData {
 function dailyProductSeries(tables: Tables, lots: readonly LotRow[], dateOf: (lot: LotRow) => string, window: ReturnType<typeof trendWindow>): DailyProductPoint[] {
   const tonOf = (lot: LotRow) => {
     const item = findById(tables, 'item', lot.itemId);
-    return item ? unitWeightOf(item) : '0';
+    return item ? theoreticalWeightOf(item) : '0';
   };
   return [...bucketByDate(lots, dateOf, window)].map(([date, rows]) => ({
     date,
@@ -753,7 +753,7 @@ function readSurplusAge(tables: Tables, options: DashboardQueryOptions): Surplus
         itemCode: row.itemCode,
         steelGradeCode: row.steelGradeCode,
         surplusQty: row.surplusQty,
-        surplusTon: item ? calcWeightTon(row.surplusQty, unitWeightOf(item)) : '0.000',
+        surplusTon: item ? calcWeightTon(row.surplusQty, theoreticalWeightOf(item)) : '0.000',
         oldestSinceDate,
         maxAgeDays: ageDays(oldestSinceDate, today),
       };

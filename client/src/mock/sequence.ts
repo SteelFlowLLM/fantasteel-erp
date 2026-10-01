@@ -3,13 +3,13 @@
 import {
   businessNoSequenceKey,
   formatBusinessNo,
-  formatCoilLotNo,
+  formatCoilNo,
   formatEventNo,
-  formatHeatLotNo,
-  formatHotMetalLotNo,
+  formatHeatNo,
+  formatHotMetalNo,
   formatMillSheetNo,
   formatRawMaterialLotNo,
-  formatSlabLotNo,
+  formatSlabNo,
   type BusinessNoKind,
 } from '@/codes';
 import { toSeoulYyMm, toSeoulYyMmDd } from '@/lib/seoulDate';
@@ -52,21 +52,21 @@ export function issueRawMaterialLotNo(tx: MockTx, rawMaterialCode: string, at: D
 }
 
 /** HM-고로-YYMMDD-NN */
-export function issueHotMetalLotNo(tx: MockTx, blastFurnaceCode: string, at: Date = tx.now): string {
+export function issueHotMetalNo(tx: MockTx, blastFurnaceCode: string, at: Date = tx.now): string {
   const yymmdd = toSeoulYyMmDd(at);
-  return formatHotMetalLotNo(blastFurnaceCode, yymmdd, nextSequenceValue(tx, `HM-${blastFurnaceCode}-${yymmdd}`));
+  return formatHotMetalNo(blastFurnaceCode, yymmdd, nextSequenceValue(tx, `HM-${blastFurnaceCode}-${yymmdd}`));
 }
 
 /** HT-전로-YYMMDD-NNN */
-export function issueHeatLotNo(tx: MockTx, converterCode: string, at: Date = tx.now): string {
+export function issueHeatNo(tx: MockTx, converterCode: string, at: Date = tx.now): string {
   const yymmdd = toSeoulYyMmDd(at);
-  return formatHeatLotNo(converterCode, yymmdd, nextSequenceValue(tx, `HT-${converterCode}-${yymmdd}`));
+  return formatHeatNo(converterCode, yymmdd, nextSequenceValue(tx, `HT-${converterCode}-${yymmdd}`));
 }
 
 /** 히트번호-SS (히트 안 순번) */
-export function issueSlabLotNo(tx: MockTx, heatLotNo: string): string {
-  return formatSlabLotNo(heatLotNo, nextSequenceValue(tx, heatLotNo));
+export function issueSlabNo(tx: MockTx, heatNo: string): string {
+  return formatSlabNo(heatNo, nextSequenceValue(tx, heatNo));
 }
 
 /** C + 슬래브번호(HT- 제외). 슬래브 1매 = 코일 1개라 카운터가 없다. */
-export const coilLotNoOf = (slabLotNo: string): string => formatCoilLotNo(slabLotNo);
+export const coilNoOf = (slabNo: string): string => formatCoilNo(slabNo);

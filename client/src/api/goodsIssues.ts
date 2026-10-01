@@ -55,7 +55,7 @@ export interface GoodsIssueLotRow {
   lotId: number;
   lotNo: string;
   producedDate: string;
-  heatLotNo: string | null;
+  heatNo: string | null;
   lotStatus: LotStatus;
   /** 제품 검사 판정 (검사 행이 없으면 null) */
   productInspectionResult: InspectionResult | null;
@@ -76,7 +76,7 @@ export interface GoodsIssueLineView {
   requestQty: number;
   requestTon: string;
   /** 1매(개) 이론중량 */
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   orderedQty: number;
   shippedQty: number;
   salesOrderItemStatus: 'OPEN' | 'PARTIALLY_SHIPPED' | 'SHIPPED' | 'CANCELLED';
@@ -137,7 +137,7 @@ function issueView(tables: Tables, shipmentRequestId: number): GoodsIssueView {
         itemType: line.itemType,
         requestQty: line.requestQty,
         requestTon: line.requestTon,
-        unitWeightTon: line.unitWeightTon,
+        theoreticalWeightTon: line.theoreticalWeightTon,
         orderedQty: soItem?.orderedQty ?? 0,
         shippedQty: soItem?.shippedQty ?? 0,
         salesOrderItemStatus: soItem?.salesOrderItemStatus ?? 'OPEN',
@@ -153,7 +153,7 @@ function issueView(tables: Tables, shipmentRequestId: number): GoodsIssueView {
             lotId: a.lotId,
             lotNo: a.lotNo,
             producedDate: a.producedDate,
-            heatLotNo: a.heatLotNo,
+            heatNo: a.heatNo,
             lotStatus: lot?.lotStatus ?? 'AVAILABLE',
             productInspectionResult: inspectionResultOf(tables, a.lotId),
             heatInspectionResult: inspectionResultOf(tables, heat?.id),

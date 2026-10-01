@@ -36,7 +36,7 @@ describe('이력 재현 (REQ-LOG-003)', () => {
 
   it('LOT 단위: business_event_lot으로 묶인 이벤트만', async () => {
     const page = await businessEventApi.list({ lotId: f.coilLotIds[0] });
-    expect(page.lot).toMatchObject({ id: f.coilLotIds[0], lotNo: f.coilLotNos[0], lotType: 'COIL' });
+    expect(page.lot).toMatchObject({ id: f.coilLotIds[0], lotNo: f.coilNos[0], lotType: 'COIL' });
     expect(page.items.map((e) => e.businessEventType)).toEqual(['INSPECTION_REGISTERED', 'GOODS_ISSUE_CONFIRMED', 'MILL_SHEET_ISSUED']);
   });
 
@@ -55,12 +55,12 @@ describe('이력 재현 (REQ-LOG-003)', () => {
       beforeData: { shipmentRequestStatus: 'ALLOCATED' },
       afterData: { shipmentRequestStatus: 'ISSUED' },
       isAiAssisted: false,
-      lots: [{ id: f.coilLotIds[0], lotNo: f.coilLotNos[0], lotType: 'COIL' }],
+      lots: [{ id: f.coilLotIds[0], lotNo: f.coilNos[0], lotType: 'COIL' }],
     });
     expect(issue?.eventNo).toMatch(/^EV-261002-\d{3}$/);
     const millSheet = page.items.find((e) => e.businessEventType === 'MILL_SHEET_ISSUED');
     expect(millSheet).toMatchObject({ actorType: 'SYSTEM', actor: null, targetTypeLabel: '밀시트' });
-    const failed = page.items.find((e) => e.targetNo === f.coilLotNos[1]);
+    const failed = page.items.find((e) => e.targetNo === f.coilNos[1]);
     expect(failed).toMatchObject({ reasonCode: 'QUALITY_FAILURE', targetTypeLabel: '품질검사', targetHref: `/quality/inspections?lot=${f.coilLotIds[1]}` });
   });
 });

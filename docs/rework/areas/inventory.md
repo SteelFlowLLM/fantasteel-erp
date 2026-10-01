@@ -93,7 +93,7 @@
    - `LotListView`에 `inspectionResult`·`allocationStatus`·`isSurplus`를 더했다. `allocationPurpose`의 뜻은 '해제되지 않은 마지막 배정의 목적'으로 바뀌었다.
 3. **이름 (05 2장 [강제])**
    - `SurplusSpecView`의 가용재고는 `availableQty`·`availableTon`이다(TRM-055). 이제 `surplusQty`·`surplusTon`은 여재 매수·여재 톤만 뜻한다. core 작업 로그 afterData의 `surplusQty`와 같은 뜻이다.
-   - 1매 이론중량은 `theoreticalWeightTon`이다(TRM-022). `SurplusSpecView`와 `ProductInventoryView`(core 행의 `unitWeightTon`을 빼고 다시 이름 붙임) 둘 다 바꿨다.
+   - 1매 이론중량은 `theoreticalWeightTon`이다(TRM-022). `SurplusSpecView`와 `ProductInventoryView`(core 행의 `unitWeightTon`을 빼고 다시 이름 붙임) 둘 다 바꿨다. → 2026-10-02 core `ProductInventoryRow`도 `theoreticalWeightTon`으로 바꿔, api는 다시 이름 붙이지 않고 그대로 쓴다.
 4. 테스트: `inventoryRules.test.ts`(8개)를 새로 넣었다. `inventories.test.ts`는 여재 정의, SM355A·SM355B, 여재 합계 = 꼬리표 수, 부분 예약 → 여재 2(-09·-10), 소진 배정·검사 결과 기대값을 고쳤다. `inventoryDisplay.test.ts`는 품질·배정 표시를 맞췄다. 전체 552개가 통과한다.
 5. 공유 파일 변경 없음. 확인 필요: core `surplusSlabs`의 `surplusQty`는 여전히 '예약 가용'을 뜻하고, `ProductInventoryRow.unitWeightTon`도 남아 있다(이 영역은 api에서 이름을 바꿔 쓴다). 병합 단계에서 core 이름을 맞출지 정해야 한다. 대시보드의 여재 보유일(seed-assumptions 448)은 '예약 가용 > 0인 규격' 기준이라 이 정의와 다를 수 있다. → 2026-10-02에 풀었다(아래).
 

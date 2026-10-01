@@ -1,6 +1,6 @@
 // 작업 실적·실적 시뮬레이션 API (REQ-PRD-003·007, REQ-LOT-001~004, BP-PRD-02, 업무 프로세스 8장·9.2).
 // 화면 이름은 '작업 실적'(용어 사전 TRM-047, PLAN 6-1). 작업 상태값은 없다: started_at / completed_at (null = 진행 중).
-// 변경은 모두 PRODUCTION_RESULT_CONFIRM 사용 권한. LOT 채번·FIFO 차감·LOT 관계·작업 로그·계획 상태는 core 서비스가 처리한다.
+// 변경은 모두 PRODUCTION_RESULT_CONFIRM 사용 권한. LOT 채번·FIFO 차감·LOT 관계·작업 로그·계획 상태·진행 중 작업 확인은 core 서비스가 처리한다.
 // 열연 실적은 열연 투입 배정 화면(api/rolling.ts)에서 등록한다 (한 곳에서만).
 import { INSPECTION_RESULT, PERMISSION, type InspectionResult, type ProcessType, type RawMaterialType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
@@ -9,14 +9,6 @@ import { decSum } from '@/lib/decimal';
 import { sortFifo } from '@/lib/fifo';
 import { hotMetalTonFor } from '@/lib/mrp';
 import type { MockTables } from '@/mock/schema';
-import {
-  assertNoOpenWorkForSimulation,
-  assertNoOpenWorkOfProcess,
-  assertNoOpenWorkOnCompletion,
-  assertStartedHeat,
-  openResultsOf,
-  startedHeatLotIdOf,
-} from '@/mock/services/ext/production';
 import { withCustomerNames, type ProductionPlanListRow } from '@/api/production';
 import {
   findById,
@@ -24,6 +16,7 @@ import {
   listProductionPlans,
   maxCastingQtyOf,
   mustGet,
+  openResultsOf,
   productionPlanView,
   productionSettingOf,
   productItemTypeOf,
@@ -32,6 +25,7 @@ import {
   registerSteelmaking,
   routingYieldOf,
   simulatePlan,
+  startedHeatLotIdOf,
   startWork,
   userActor,
   type ProductionPlanView,
@@ -68,7 +62,7 @@ export interface RawMaterialStock {
 
 export interface UncastHeat {
   heatLotId: number;
-  heatLotNo: string;
+  heatNo: string;
   heatTon: string;
   /** 연주 최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
   maxSlabQty: number;
@@ -81,7 +75,7 @@ export interface OpenWork {
   processType: ProcessType;
   startedAt: string;
   heatLotId: number | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
 }
 
 /** 작업 실적 화면의 계획 하나: 편성·실적 + 입력에 필요한 기준값 */
@@ -145,7 +139,7 @@ function workContextOf(tables: Tables, planId: number): WorkContext {
     .filter((h) => !tables.lot.some((l) => l.heatLotId === h.id && l.lotType === 'SLAB'))
     .map((h) => ({
       heatLotId: h.id,
-      heatLotNo: h.lotNo,
+      heatNo: h.lotNo,
       heatTon: h.initialTon ?? '0.000',
       maxSlabQty: maxCastingQtyOf({ tables: tables as MockTables }, planRow, h),
       inspectionResult: h.isPassed === true ? INSPECTION_RESULT.PASS : h.isPassed === false ? INSPECTION_RESULT.FAIL : INSPECTION_RESULT.PENDING,
@@ -153,7 +147,7 @@ function workContextOf(tables: Tables, planId: number): WorkContext {
   const results = tables.productionResult.filter((r) => r.productionPlanId === planId).sort((a, b) => b.id - a.id);
   const openWork = openResultsOf(tables, planId).map((r) => {
     const heatLotId = r.processType === 'CONTINUOUS_CASTING' ? startedHeatLotIdOf(tables, r.id) : null;
-    return { productionResultId: r.id, processType: r.processType, startedAt: r.startedAt, heatLotId, heatLotNo: heatLotId ? (findById(tables, 'lot', heatLotId)?.lotNo ?? null) : null };
+    return { productionResultId: r.id, processType: r.processType, startedAt: r.startedAt, heatLotId, heatNo: heatLotId ? (findById(tables, 'lot', heatLotId)?.lotNo ?? null) : null };
   });
   return {
     plan,
@@ -250,7 +244,6 @@ export const productionResultApi = {
   startWork: (input: StartWorkInput): Promise<{ productionResultId: number }> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
-      assertNoOpenWorkOfProcess(tx.tables, input.productionPlanId, input.processType);
       const result = startWork(tx, userActor(actor.employee.id), {
         productionPlanId: input.productionPlanId,
         processType: input.processType,
@@ -266,9 +259,7 @@ export const productionResultApi = {
   registerIronmaking: (input: IronmakingResultInput): Promise<RegisteredResult> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
-      assertNoOpenWorkOfProcess(tx.tables, input.productionPlanId, 'IRONMAKING', input.productionResultId);
       const { result, hotMetalLot } = registerIronmaking(tx, userActor(actor.employee.id), { ...input, blastFurnaceCode: codeOf(input.blastFurnaceCode) });
-      assertNoOpenWorkOnCompletion(tx.tables, input.productionPlanId);
       return { productionResultId: result.id, outputLotNos: [hotMetalLot.lotNo] };
     }),
 
@@ -276,9 +267,7 @@ export const productionResultApi = {
   registerSteelmaking: (input: SteelmakingResultInput): Promise<RegisteredResult> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
-      assertNoOpenWorkOfProcess(tx.tables, input.productionPlanId, 'STEELMAKING', input.productionResultId);
       const { result, heatLot } = registerSteelmaking(tx, userActor(actor.employee.id), { ...input, converterCode: codeOf(input.converterCode) });
-      assertNoOpenWorkOnCompletion(tx.tables, input.productionPlanId);
       return { productionResultId: result.id, outputLotNos: [heatLot.lotNo] };
     }),
 
@@ -287,10 +276,7 @@ export const productionResultApi = {
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       if (!Number.isInteger(input.outputQty)) inputError('outputQty', '슬래브 생산 매수는 1 이상의 정수로 입력해 주세요');
-      assertNoOpenWorkOfProcess(tx.tables, input.productionPlanId, 'CONTINUOUS_CASTING', input.productionResultId);
-      assertStartedHeat(tx.tables, input.productionResultId, input.heatLotId);
       const { result, slabLots } = registerCasting(tx, userActor(actor.employee.id), input);
-      assertNoOpenWorkOnCompletion(tx.tables, input.productionPlanId);
       return { productionResultId: result.id, outputLotNos: slabLots.map((s) => s.lotNo) };
     }),
 
@@ -305,7 +291,6 @@ export const productionResultApi = {
       if (seed !== null && (!Number.isInteger(seed) || seed < 0 || seed > MAX_RANDOM_SEED)) {
         inputError('randomSeed', `난수 시드는 0 ~ ${MAX_RANDOM_SEED.toLocaleString('en-US')} 사이의 정수로 입력해 주세요`);
       }
-      assertNoOpenWorkForSimulation(tx.tables, input.productionPlanId);
       return simulatePlan(tx, userActor(actor.employee.id), { productionPlanId: input.productionPlanId, randomSeed: seed, ...SIMULATION_DEFAULT_CODES });
     }),
 };

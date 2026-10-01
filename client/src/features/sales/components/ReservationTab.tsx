@@ -46,7 +46,7 @@ export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
                       {unit}
                     </Td>
                     <Td align="right" className="tabular-nums">
-                      {item ? fmtTon(calcWeightTon(r.reservedQty, item.unitWeightTon)) : '-'}
+                      {item ? fmtTon(calcWeightTon(r.reservedQty, item.theoreticalWeightTon)) : '-'}
                     </Td>
                     <Td className="tabular-nums">{fmtDateTime(r.createdAt)}</Td>
                     <Td className="tabular-nums">{r.updatedAt === r.createdAt ? '-' : fmtDateTime(r.updatedAt)}</Td>

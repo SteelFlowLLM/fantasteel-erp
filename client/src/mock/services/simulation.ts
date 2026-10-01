@@ -4,6 +4,7 @@
 // - 연주에서만 0~5% 샘플 손실률 → 손실 매수 = floor(계획 슬래브 × 손실률). 열연은 추가 손실 없음(슬래브 1매 = 코일 1개).
 // - 같은 난수 시드 → 같은 결과. 시드·손실률·손실 매수·is_simulated를 실적에 저장한다. 검사값은 넣지 않는다.
 // - 갓 연주한 슬래브는 판정 대기라 열연 배정을 할 수 없다 → 열연은 적격 슬래브가 있을 때만 (없으면 skippedRolling에 이유).
+// - 작업 시작만 한(완료 일시 없는) 실적이 있으면 실행하지 않는다. '작업 완료'로 먼저 마친다(productionResults.ts 진행 중 작업).
 import { decCmp, decSum } from '@/lib/decimal';
 import { hotMetalTonFor } from '@/lib/mrp';
 import { toSeoulDateString } from '@/lib/seoulDate';
@@ -11,7 +12,7 @@ import { createSeededRandom, drawSampleLossRate, lossQtyOf } from '@/lib/simulat
 import type { MockTx } from '@/mock/store';
 import { inputError, mustGet, productionSettingOf, productItemTypeOf, routingYieldOf, type PersonActor } from '@/mock/services/context';
 import { confirmRollingAllocations, registerHotRolling, rollingPlanView, rollingRecommendation } from '@/mock/services/rolling';
-import { maxCastingQtyOf, registerCasting, registerIronmaking, registerSteelmaking } from '@/mock/services/productionResults';
+import { assertNoOpenWorkForSimulation, maxCastingQtyOf, registerCasting, registerIronmaking, registerSteelmaking } from '@/mock/services/productionResults';
 
 export interface SimulationInput {
   productionPlanId: number;
@@ -43,6 +44,7 @@ const HOUR = 3_600_000;
 const DURATION = { IRONMAKING: 4 * HOUR, STEELMAKING: 1 * HOUR, CONTINUOUS_CASTING: 2 * HOUR, HOT_ROLLING: 2 * HOUR } as const;
 
 export function simulatePlan(tx: MockTx, actor: PersonActor, input: SimulationInput): SimulationResult {
+  assertNoOpenWorkForSimulation(tx.tables, input.productionPlanId);
   const plan = mustGet(tx.tables, 'productionPlan', input.productionPlanId, '생산계획');
   if (plan.productionPlanStatus === 'CANCELLED' || plan.productionPlanStatus === 'COMPLETED') inputError('productionPlanId', '계획·진행중인 생산계획만 시뮬레이션해요');
   const randomSeed = input.randomSeed ?? Math.floor(tx.now.getTime() / 1000) % 2_147_483_647;

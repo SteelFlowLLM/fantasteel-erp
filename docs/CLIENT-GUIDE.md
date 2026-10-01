@@ -31,7 +31,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
 - 처음 열면 **계정 선택** 화면(`/login`)이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
 - 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
-- 데이터는 `localStorage`(`fantasteel.mock-db.v5`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
+- 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
 ## 3. 폴더 (`client/src/`)
 

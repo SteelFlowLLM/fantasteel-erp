@@ -105,7 +105,7 @@ export function HotRollingModal({ detail, onClose }: { detail: RollingDetail; on
   const [completedText, setCompletedText] = useState(() => dateTimeLocalHoursAgo(0));
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const register = useAction(rollingApi.registerHotRolling, {
-    success: (r) => `열연 실적을 등록했어요 · 코일 ${r.coilLotNos.length}개`,
+    success: (r) => `열연 실적을 등록했어요 · 코일 ${r.coilNos.length}개`,
     onSuccess: onClose,
     onError: (e) => setErrors(fieldErrorsOf(e)),
   });
@@ -164,7 +164,7 @@ export function HotRollingModal({ detail, onClose }: { detail: RollingDetail; on
                   <input type="checkbox" checked={selected.includes(a.allocationId)} onChange={() => toggle(a.allocationId)} aria-label={`${a.lotNo} 선택`} />
                 </Td>
                 <Td className="font-mono text-mono">{a.lotNo}</Td>
-                <Td className="font-mono text-mono text-ink-2">{a.heatLotNo ?? '-'}</Td>
+                <Td className="font-mono text-mono text-ink-2">{a.heatNo ?? '-'}</Td>
                 <Td>{fmtDateTime(a.confirmedAt)}</Td>
                 <Td className="font-mono text-mono text-ink-3">C{a.lotNo.replace(/^HT-/, '')}</Td>
               </tr>
@@ -173,8 +173,8 @@ export function HotRollingModal({ detail, onClose }: { detail: RollingDetail; on
         </Table>
       )}
       <span className="text-xs text-ink-2">
-        투입 슬래브 {selected.length}매 · {fmtTon(calcWeightTon(selected.length, plan.slabItem.unitWeightTon))} → 코일 {selected.length}개 ·{' '}
-        {fmtTon(calcWeightTon(selected.length, plan.coilItem.unitWeightTon))} (계산값)
+        투입 슬래브 {selected.length}매 · {fmtTon(calcWeightTon(selected.length, plan.slabItem.theoreticalWeightTon))} → 코일 {selected.length}개 ·{' '}
+        {fmtTon(calcWeightTon(selected.length, plan.coilItem.theoreticalWeightTon))} (계산값)
       </span>
       <div className="grid grid-cols-2 gap-3">
         <Field label="작업 시작 일시" required error={errors.startedAt}>

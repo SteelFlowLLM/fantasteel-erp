@@ -107,9 +107,9 @@ describe('열연 실적 (슬래브 1매 → 코일 1개)', () => {
 
     actAs(HOT_ROLLING_NO);
     const result = await rollingApi.registerHotRolling({ productionPlanId: planId, startedAt: hoursAgo(2), completedAt: hoursAgo(1) });
-    expect(result.coilLotNos).toHaveLength(3);
+    expect(result.coilNos).toHaveLength(3);
     const slabNos = confirmed.plan.allocations.map((a) => a.lotNo);
-    expect(result.coilLotNos).toEqual(slabNos.map((no) => `C${no.replace(/^HT-/, '')}`));
+    expect(result.coilNos).toEqual(slabNos.map((no) => `C${no.replace(/^HT-/, '')}`));
     const coils = lotsOfPlan(planId, 'COIL');
     expect(coils).toHaveLength(6);
     expect(readDb((t) => t.qualityInspection.filter((q) => coils.some((c) => c.id === q.lotId)).length)).toBe(6);

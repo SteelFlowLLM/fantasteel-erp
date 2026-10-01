@@ -59,7 +59,7 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
   const visible = rows.filter(
     (r) =>
       (filter === 'ALL' || r.itemTypes.includes(filter)) &&
-      (!word || [r.millSheetNo, r.salesOrderNo, r.customerName, r.shipmentRequestNo, ...r.itemCodes, ...r.heatLotNos].some((t) => t.toLowerCase().includes(word))),
+      (!word || [r.millSheetNo, r.salesOrderNo, r.customerName, r.shipmentRequestNo, ...r.itemCodes, ...r.heatNos].some((t) => t.toLowerCase().includes(word))),
   );
   const groups = [...new Set(visible.map((r) => r.shipmentRequestId))].map((id) => visible.filter((r) => r.shipmentRequestId === id));
   return (

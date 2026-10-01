@@ -85,8 +85,8 @@ export function calcTheoreticalWeightTon(thicknessMm: string | number, widthMm: 
 /** 매수 × 1매 이론중량(t). 10매 × 23.550 → "235.500" */
 export function calcWeightTon(qty: number, theoreticalWeightTon: string): string {
   if (!Number.isInteger(qty) || qty < 0) throw new RangeError(`매수는 0 이상의 정수여야 해요: ${qty}`);
-  const unitWeight = rescale(parseDecimal(theoreticalWeightTon), TON_SCALE);
-  return toText(unitWeight * BigInt(qty), TON_SCALE);
+  const scaledWeight = rescale(parseDecimal(theoreticalWeightTon), TON_SCALE);
+  return toText(scaledWeight * BigInt(qty), TON_SCALE);
 }
 
 /** 톤 합계 (소수 3자리) */

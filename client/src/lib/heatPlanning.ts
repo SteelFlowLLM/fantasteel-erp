@@ -17,8 +17,8 @@ export function cumulativeYieldRate(productType: ProductItemType, castingYieldRa
 }
 
 /** 히트 하나(용강 heatTon)에서 연주할 수 있는 슬래브 최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
-export function maxSlabQtyFromHeat(heatTon: string, castingYieldRate: string, slabUnitWeightTon: string): number {
-  return decFloorDiv(decMul(heatTon, castingYieldRate, 6), slabUnitWeightTon);
+export function maxSlabQtyFromHeat(heatTon: string, castingYieldRate: string, slabTheoreticalWeightTon: string): number {
+  return decFloorDiv(decMul(heatTon, castingYieldRate, 6), slabTheoreticalWeightTon);
 }
 
 export interface HeatPlanInput {
@@ -26,15 +26,15 @@ export interface HeatPlanInput {
   /** 부족 매수 (1 이상) */
   shortageQty: number;
   /** 생산 대상 제품 1매(1개) 이론중량 */
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   /** 연주 계획 수율 */
   castingYieldRate: string;
   /** 열연 계획 수율 = 코일 이론중량 ÷ 대응 슬래브 이론중량 (코일만) */
   hotRollingYieldRate: string | null;
   /** 히트 용량 (용강 기준, production_setting) */
   heatCapacityTon: string;
-  /** 연주할 슬래브 규격의 1매 이론중량 (슬래브 수주는 unitWeightTon과 같고, 코일은 대응 슬래브) */
-  slabUnitWeightTon: string;
+  /** 연주할 슬래브 규격의 1매 이론중량 (슬래브 수주는 theoreticalWeightTon과 같고, 코일은 대응 슬래브) */
+  slabTheoreticalWeightTon: string;
 }
 
 export interface HeatPlan {
@@ -62,12 +62,12 @@ export interface HeatPlan {
 
 export function planHeats(input: HeatPlanInput): HeatPlan {
   if (!Number.isInteger(input.shortageQty) || input.shortageQty < 1) throw new RangeError(`부족 매수는 1 이상의 정수여야 해요: ${input.shortageQty}`);
-  const targetWeightTon = calcWeightTon(input.shortageQty, input.unitWeightTon);
+  const targetWeightTon = calcWeightTon(input.shortageQty, input.theoreticalWeightTon);
   const yieldRate = cumulativeYieldRate(input.productType, input.castingYieldRate, input.hotRollingYieldRate);
   const requiredSteelTon = decDiv(targetWeightTon, yieldRate, TON_DIGITS);
   const heatCount = decCeilDiv(requiredSteelTon, input.heatCapacityTon);
   const heatTon = decMul(input.heatCapacityTon, heatCount, TON_DIGITS);
-  const slabQtyPerHeat = maxSlabQtyFromHeat(input.heatCapacityTon, input.castingYieldRate, input.slabUnitWeightTon);
+  const slabQtyPerHeat = maxSlabQtyFromHeat(input.heatCapacityTon, input.castingYieldRate, input.slabTheoreticalWeightTon);
   const plannedSlabQty = slabQtyPerHeat * heatCount;
   const neededSlabQty = input.shortageQty;
   return {

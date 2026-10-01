@@ -81,7 +81,7 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
 
 export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
   const unit = qtyUnitOf(detail.itemTypes);
-  const orderCancelled = detail.status === 'CANCELLED';
+  const salesOrderCancelled = detail.status === 'CANCELLED';
   const live = detail.items.filter((i) => i.salesOrderItemStatus !== 'CANCELLED');
   const sum = (pick: (i: ItemFulfillment) => number) => detail.items.reduce((s, i) => s + pick(i), 0);
   const additional = live.filter((i) => i.shortage.additionalPlanQty > 0 && i.shortage.reproductionNeedQty === 0);
@@ -234,7 +234,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 </li>
               ))}
             </ul>
-            {orderCancelled ? null : <span className="text-cap text-ink-3">LOT은 출하요청 때 FIFO(생산완료일 오래된 순)로 추천받아 확정해요.</span>}
+            {salesOrderCancelled ? null : <span className="text-cap text-ink-3">LOT은 출하요청 때 FIFO(생산완료일 오래된 순)로 추천받아 확정해요.</span>}
             {detail.shipmentRequests.length === 0 ? (
               <EmptyNote className="py-2">이 수주의 출하요청이 없어요</EmptyNote>
             ) : (
@@ -289,12 +289,12 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             <p className="text-sm leading-5 text-ink-2">
               {detail.workRoomId !== null
                 ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.'
-                : orderCancelled
+                : salesOrderCancelled
                   ? '취소된 수주라 업무방을 새로 열지 않아요.'
                   : '아직 업무방이 없어요. 열면 이 수주와 연결된 방이 만들어지고, 멤버는 조직도에서 골라요.'}
             </p>
             <div>
-              <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} cancelled={orderCancelled} />
+              <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} cancelled={salesOrderCancelled} />
             </div>
           </CardBody>
         </Card>

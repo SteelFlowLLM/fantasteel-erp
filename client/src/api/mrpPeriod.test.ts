@@ -5,8 +5,15 @@
 import { describe, expect, it } from 'vitest';
 import { defaultMrpPeriod } from '@/features/purchasing/lib/purchasingView';
 import { decCmp, decSub, decSum } from '@/lib/decimal';
-import { approvePurchaseRequisition, createPurchaseOrders, createPurchaseRequisition, createSalesOrder, type MrpMaterialRow } from '@/mock/services';
-import { computeMrpForPeriod, type MrpPeriodView } from '@/mock/services/ext/purchasing';
+import {
+  approvePurchaseRequisition,
+  computeMrpForPeriod,
+  createPurchaseOrders,
+  createPurchaseRequisition,
+  createSalesOrder,
+  type MrpMaterialRow,
+  type MrpPeriodView,
+} from '@/mock/services';
 import { createKit, type Kit } from '@/mock/services/tests/kit';
 
 const AT = '2026-10-01T09:00:00+09:00';
@@ -109,11 +116,11 @@ describe('MRP 기간 · 시점별 차감', () => {
 describe('MRP 원료 표 한 줄의 숫자 (총소요 − 원료 LOT 잔량 − 입고예정 = 순소요)', () => {
   it('14.1 수주 뒤 /mrp 기본 기간: 합금철 2.500 − 1.000 − 0.000 = 1.500, 10-28 도착 입고예정 3.500t는 "필요일 뒤 도착"으로 따로', () => {
     const kit = createKit();
-    const order = createSalesOrder(kit.at(AT), kit.actor('sales'), {
+    const created = createSalesOrder(kit.at(AT), kit.actor('sales'), {
       customerId: kit.customerId('CUS-01'),
       items: [{ itemId: kit.itemId('SL-SS275-250x1200x10000'), orderedQty: 10, dueDate: '2026-10-20' }],
     });
-    const planId = order.productionPlans[0]?.id ?? 0;
+    const planId = created.productionPlans[0]?.id ?? 0;
     const period = defaultMrpPeriod('2026-10-02');
     const before = computeMrpForPeriod(kit.tables, period);
     const smn = before.materials.find((m) => m.itemCode === 'SMN01');

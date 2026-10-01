@@ -35,7 +35,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     at('2026-10-01T09:00:00+09:00');
     as('sales');
     const [preview] = await salesOrderApi.preview([{ itemId: slabItemId, orderedQty: 10 }]);
-    expect(preview).toMatchObject({ unitWeightTon: '23.550', weightTon: '235.500', availableQty: 6, reserveQty: 6, shortageQty: 4 });
+    expect(preview).toMatchObject({ theoreticalWeightTon: '23.550', weightTon: '235.500', availableQty: 6, reserveQty: 6, shortageQty: 4 });
     expect(preview.formation).toMatchObject({ heatCount: 1 });
     expect((await inventoryApi.listProducts()).find((r) => r.itemCode === SLAB_A)).toMatchObject({ availableQty: 6 });
 
@@ -243,9 +243,9 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const sheets = (await millSheetApi.list()).filter((m) => m.shipmentRequestId === dr1.id || m.shipmentRequestId === dr2.id).sort((a, b) => a.id - b.id);
     expect(sheets.map((m) => m.millSheetNo)).toEqual(['MS-2610-0001-1', 'MS-2610-0002-1']);
     const [a, b] = await Promise.all(sheets.map((m) => millSheetApi.detail(m.id)));
-    expect(a.snapshot.heats.map((h) => h.heatLotNo)).toEqual(['HT-BOF1-260905-001']);
-    expect(b.snapshot.heats.map((h) => h.heatLotNo)).toEqual(['HT-BOF1-260905-001', 'HT-BOF1-261003-001']);
-    const carbonOf = (heatLotNo: string) => b.snapshot.heats.find((h) => h.heatLotNo === heatLotNo)?.inspection?.values.find((v) => v.inspectionItemCode === 'C')?.measuredValue;
+    expect(a.snapshot.heats.map((h) => h.heatNo)).toEqual(['HT-BOF1-260905-001']);
+    expect(b.snapshot.heats.map((h) => h.heatNo)).toEqual(['HT-BOF1-260905-001', 'HT-BOF1-261003-001']);
+    const carbonOf = (heatNo: string) => b.snapshot.heats.find((h) => h.heatNo === heatNo)?.inspection?.values.find((v) => v.inspectionItemCode === 'C')?.measuredValue;
     expect([carbonOf('HT-BOF1-260905-001'), carbonOf('HT-BOF1-261003-001')]).toEqual(['0.18', '0.21']);
     expect(b.snapshot).toMatchObject({ customer: { customerCode: 'CUS-01' }, totalQty: 6, totalWeightTon: '141.300' });
     expect(b.snapshot.items[0]).toMatchObject({ standardNo: 'KS D 3503:2026', theoreticalWeightTon: '23.550' });

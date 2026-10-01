@@ -19,7 +19,7 @@ describe('작업 실적 조회', () => {
     expect(plans.every((p) => p.productionPlanStatus !== 'CANCELLED')).toBe(true);
     const work = await productionResultApi.work(planIdOf('PP-2609-0004'));
     expect(work).toMatchObject({ isOpen: true, heatsToMakeQty: 0, hotMetalTonPerHeat: '277.778' });
-    expect(work.uncastHeats).toEqual([expect.objectContaining({ heatLotNo: 'HT-BOF1-260918-001', maxSlabQty: 10, inspectionResult: 'PENDING' })]);
+    expect(work.uncastHeats).toEqual([expect.objectContaining({ heatNo: 'HT-BOF1-260918-001', maxSlabQty: 10, inspectionResult: 'PENDING' })]);
     expect(work.ironmakingMaterials.map((m) => m.itemCode).sort()).toEqual(['COL01', 'LIM01', 'ORE01']);
     expect(work.ferroalloys.map((m) => m.itemCode)).toEqual(['SMN01']);
 
@@ -166,7 +166,7 @@ describe('진행 중 작업 (검토 반영: 10장 작업 상태 = 시작·완료
     const { productionResultId } = await productionResultApi.startWork({ productionPlanId: planId, processType: 'CONTINUOUS_CASTING', startedAt: hoursAgo(3), heatLotId: heat.id });
 
     const work = await productionResultApi.work(planId);
-    expect(work.openWork).toEqual([expect.objectContaining({ productionResultId, processType: 'CONTINUOUS_CASTING', heatLotId: heat.id, heatLotNo: heat.lotNo })]);
+    expect(work.openWork).toEqual([expect.objectContaining({ productionResultId, processType: 'CONTINUOUS_CASTING', heatLotId: heat.id, heatNo: heat.lotNo })]);
 
     const base = { productionPlanId: planId, heatLotId: heat.id, startedAt: hoursAgo(3), completedAt: hoursAgo(1), outputQty: 10 };
     await expect(productionResultApi.registerCasting(base)).rejects.toMatchObject({ fieldErrors: { productionResultId: expect.stringContaining('작업 완료') } });

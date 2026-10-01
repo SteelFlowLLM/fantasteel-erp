@@ -7,10 +7,10 @@ import {
   CASE_CATEGORY,
   PROPOSED_BUSINESS_EVENT_TYPE,
   STEEL_GRADE,
-  formatCoilLotNo,
+  formatCoilNo,
   formatEventNo,
-  formatHeatLotNo,
-  formatSlabLotNo,
+  formatHeatNo,
+  formatSlabNo,
   type ActorType,
   type CaseCategory,
 } from '@/codes';
@@ -30,8 +30,8 @@ export interface PastCaseExample {
   occurredDate: string;
 }
 
-const heatOf = (yymmdd: string, seq: number) => formatHeatLotNo('BOF1', yymmdd, seq);
-const slabOf = (yymmdd: string, heatSeq: number, slabSeq: number) => formatSlabLotNo(heatOf(yymmdd, heatSeq), slabSeq);
+const heatOf = (yymmdd: string, seq: number) => formatHeatNo('BOF1', yymmdd, seq);
+const slabOf = (yymmdd: string, heatSeq: number, slabSeq: number) => formatSlabNo(heatOf(yymmdd, heatSeq), slabSeq);
 
 /** 검색 결과 예시 5건 (최신순). 품질 3건, 설비 2건. */
 export const PAST_CASES: readonly PastCaseExample[] = [
@@ -54,7 +54,7 @@ export const PAST_CASES: readonly PastCaseExample[] = [
     cause: '열연 전 스케일 제거가 부족했어요.',
     actionTaken: '스케일 제거 설비의 압력을 점검하고 다음 코일부터 표면을 다시 확인해요.',
     equipmentText: '열연 스케일 제거 설비',
-    lotNos: [formatCoilLotNo(slabOf('260825', 11, 2))],
+    lotNos: [formatCoilNo(slabOf('260825', 11, 2))],
     occurredDate: '08-27',
   },
   {
@@ -87,7 +87,7 @@ export const PAST_CASES: readonly PastCaseExample[] = [
     cause: '가열로 구역별 온도 편차가 컸어요.',
     actionTaken: '가열로 버너를 조정하고 구역별 온도를 매 히트 확인해요.',
     equipmentText: '열연 가열로',
-    lotNos: [formatCoilLotNo(slabOf('260630', 12, 3))],
+    lotNos: [formatCoilNo(slabOf('260630', 12, 3))],
     occurredDate: '06-30',
   },
 ];

@@ -214,8 +214,8 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
                 <td className="text-center">{row.no}</td>
                 <td>#{row.lineNo}</td>
                 <td className="font-mono">{row.lot.lotNo}</td>
-                <td className="font-mono">{row.lot.heatLotNo ?? '—'}</td>
-                {hasCoil ? <td className="font-mono">{row.lot.slabLotNo ?? '—'}</td> : null}
+                <td className="font-mono">{row.lot.heatNo ?? '—'}</td>
+                {hasCoil ? <td className="font-mono">{row.lot.slabNo ?? '—'}</td> : null}
                 <td className="text-right">{fmtTon(row.lot.theoreticalWeightTon)}</td>
                 <td className="tabular-nums">{row.lot.producedDate}</td>
               </tr>
@@ -245,7 +245,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
       <Section title="2. 화학성분 (히트 성분 검사)">
         <InspectionMatrix
           headLabel="히트"
-          rows={s.heats.map((h) => ({ key: String(h.heatLotId), head: <span className="font-mono">{h.heatLotNo}</span>, inspection: h.inspection }))}
+          rows={s.heats.map((h) => ({ key: String(h.heatLotId), head: <span className="font-mono">{h.heatNo}</span>, inspection: h.inspection }))}
           emptyText="히트 성분 검사값이 없어요"
         />
       </Section>

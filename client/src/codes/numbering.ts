@@ -58,26 +58,26 @@ export function formatRawMaterialLotNo(rawMaterialCode: string, yymmdd: string, 
 }
 
 /** 용선 LOT: HM-고로-YYMMDD-NN (예: HM-BF2-260929-03) */
-export function formatHotMetalLotNo(blastFurnaceCode: string, yymmdd: string, seq: number): string {
+export function formatHotMetalNo(blastFurnaceCode: string, yymmdd: string, seq: number): string {
   assertSequence(seq);
   return `HM-${blastFurnaceCode}-${yymmdd}-${pad(seq, 2)}`;
 }
 
 /** 히트 LOT: HT-전로-YYMMDD-NNN (예: HT-BOF1-260929-015) */
-export function formatHeatLotNo(converterCode: string, yymmdd: string, seq: number): string {
+export function formatHeatNo(converterCode: string, yymmdd: string, seq: number): string {
   assertSequence(seq);
   return `HT-${converterCode}-${yymmdd}-${pad(seq, 3)}`;
 }
 
 /** 슬래브 LOT: 히트번호-SS (예: HT-BOF1-260929-015-03) */
-export function formatSlabLotNo(heatLotNo: string, seq: number): string {
+export function formatSlabNo(heatNo: string, seq: number): string {
   assertSequence(seq);
-  return `${heatLotNo}-${pad(seq, 2)}`;
+  return `${heatNo}-${pad(seq, 2)}`;
 }
 
 /** 코일 LOT: C + 슬래브번호(HT- 제외) (예: CBOF1-260929-015-03) */
-export function formatCoilLotNo(slabLotNo: string): string {
-  return `C${slabLotNo.replace(/^HT-/, '')}`;
+export function formatCoilNo(slabNo: string): string {
+  return `C${slabNo.replace(/^HT-/, '')}`;
 }
 
 /** 원료 코드: 영문 3자 + 숫자 2자리 (REQ-MST-001, 예: ORE01) */

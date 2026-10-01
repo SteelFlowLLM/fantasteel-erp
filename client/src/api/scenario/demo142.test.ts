@@ -128,11 +128,11 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     at('2026-10-04T12:00:00+09:00');
     const slabNos = rolling.plan.allocations.map((a) => lotOf(readDb((t) => t.lot.find((l) => l.id === a.lotId)?.lotNo) ?? '').lotNo);
     const rolled = await rollingApi.registerHotRolling({ productionPlanId: coilPlanId, startedAt: '2026-10-04T10:00:00+09:00', completedAt: '2026-10-04T11:30:00+09:00' });
-    expect([...rolled.coilLotNos].sort()).toEqual(slabNos.map((no) => `C${no.replace(/^HT-/, '')}`).sort());
+    expect([...rolled.coilNos].sort()).toEqual(slabNos.map((no) => `C${no.replace(/^HT-/, '')}`).sort());
     const hotRollingResult = (await rollingApi.detail(coilPlanId)).results[0];
     expect(hotRollingResult).toMatchObject({ outputQty: 2, outputTon: '57.650' }); // 2 × 28.825
     expect(hotRollingResult.lossQty ?? 0).toBe(0);
-    const coilDetail = await lotTraceApi.detail(lotOf(rolled.coilLotNos[0]).id);
+    const coilDetail = await lotTraceApi.detail(lotOf(rolled.coilNos[0]).id);
     expect(coilDetail).toMatchObject({ lotType: 'COIL', item: { itemCode: COIL, theoreticalWeightTon: '28.825' }, inspectionResult: 'PENDING' });
     expect(coilDetail.parents).toHaveLength(1);
     expect(coilDetail.parents[0]).toMatchObject({ lotType: 'SLAB', lotRelationEvidence: 'ACTUAL_INPUT' });
@@ -142,7 +142,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     // 코일 검사 → 원래 수주 코일 품목에 자동 예약
     at('2026-10-04T14:00:00+09:00');
     let autoReserved = 0;
-    for (const coilNo of rolled.coilLotNos) autoReserved += (await inspectViaApi(lotOf(coilNo).id)).autoReservedQty;
+    for (const coilNo of rolled.coilNos) autoReserved += (await inspectViaApi(lotOf(coilNo).id)).autoReservedQty;
     expect(autoReserved).toBe(2);
     as('sales');
     const after = await salesOrderApi.detail(mixed.salesOrderId);

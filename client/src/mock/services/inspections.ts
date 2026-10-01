@@ -299,7 +299,7 @@ export interface InspectionQueueRow {
   thicknessMm: string | null;
   producedDate: string;
   heatLotId: number | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   heatResult: InspectionStatus | null;
   productionPlanNo: string | null;
   qualityInspectionId: number | null;
@@ -335,7 +335,7 @@ export function inspectionQueue(tables: Tables): InspectionQueueRow[] {
         thicknessMm: lotThicknessOf(tables, lot),
         producedDate: lot.producedDate,
         heatLotId: heat?.id ?? null,
-        heatLotNo: heat?.lotNo ?? null,
+        heatNo: heat?.lotNo ?? null,
         heatResult: resultOfLot(heat),
         productionPlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
         qualityInspectionId: inspection?.id ?? null,
@@ -439,7 +439,7 @@ export interface RejectedLotRow {
   itemCode: string | null;
   itemName: string | null;
   steelGradeCode: string | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   producedDate: string;
   productionPlanNo: string | null;
   inspectedAt: string | null;
@@ -480,7 +480,7 @@ export function rejectedLots(tables: Tables): RejectedLotRow[] {
         itemCode: item?.itemCode ?? null,
         itemName: item?.itemName ?? null,
         steelGradeCode: steelGradeCodeOf(tables, lot.steelGradeId),
-        heatLotNo: heat?.lotNo ?? null,
+        heatNo: heat?.lotNo ?? null,
         producedDate: lot.producedDate,
         productionPlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
         inspectedAt: inspection?.inspectedAt ?? null,

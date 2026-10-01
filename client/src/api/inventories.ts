@@ -51,9 +51,7 @@ export const inventoryKeys = {
 };
 
 /** 제품 재고 한 줄 (규격별) */
-export interface ProductInventoryView extends Omit<ProductInventoryRow, 'unitWeightTon'> {
-  /** 1매 이론중량 (TRM-022, item.theoretical_weight_ton) */
-  theoreticalWeightTon: string;
+export interface ProductInventoryView extends ProductInventoryRow {
   thicknessMm: string | null;
   widthMm: string | null;
   lengthMm: string | null;
@@ -104,17 +102,16 @@ const yardNameOf = (tables: Tables, yardId: number | null | undefined) =>
 
 /** 제품(슬래브·코일) 규격별 재고 — 재고 매수·합격·판정 대기·불합격·예약·열연 배정·가용재고(4.2)·톤 */
 export function readProductInventory(tables: Tables): ProductInventoryView[] {
-  return productInventory(tables).map(({ unitWeightTon, ...row }) => {
+  return productInventory(tables).map((row) => {
     const item = itemOf(tables, row.itemId);
     return {
       ...row,
-      theoreticalWeightTon: unitWeightTon,
       thicknessMm: item?.thicknessMm ?? null,
       widthMm: item?.widthMm ?? null,
       lengthMm: item?.lengthMm ?? null,
       defaultYardName: yardNameOf(tables, item?.defaultYardId),
       qtyUnit: PRODUCT_QTY_UNIT[row.itemType],
-      reservedTon: calcWeightTon(row.reservedQty, unitWeightTon),
+      reservedTon: calcWeightTon(row.reservedQty, row.theoreticalWeightTon),
     };
   });
 }

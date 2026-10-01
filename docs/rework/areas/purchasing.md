@@ -93,7 +93,7 @@
 
 | # | 지적 (근거) | 고친 것 |
 |---|---|---|
-| 1 | MRP가 필요일이 기간 밖인 계획을 차감 **전에** 빼서, 기간 전(밀린) 계획이 잔량·입고예정을 안 쓴 것처럼 계산하고, 기간 밖 계획 몫 입고예정을 다른 수주가 쓰고, 기간에 따라 결과가 달라짐 (02 REQ-PRD-005, 04 4.4·BP-PRD-01) | 새 서비스 `mock/services/ext/purchasing.ts` `computeMrpForPeriod`: 계획·진행중이고 남은 히트가 있는 계획 **전부**를 필요일 순으로 차감(core `computeMrp` 전체 기간 + `netRequirements`)한 뒤 필요일 ≤ 종료일만 보인다. 시작일 전 계획은 밀린 소요로 함께 보이고 `beforePeriod`로 표시(화면 '기간 전' 배지, 구매요청 줄도 같음). 기간 뒤 계획 몫 입고예정은 그 계획 전용으로 남는다. `api/mrp.ts`가 이 함수를 부른다. 시험 `api/mrpPeriod.test.ts`(기간 전 계획 + 잔량, 기간 뒤 계획 몫 발주) |
+| 1 | MRP가 필요일이 기간 밖인 계획을 차감 **전에** 빼서, 기간 전(밀린) 계획이 잔량·입고예정을 안 쓴 것처럼 계산하고, 기간 밖 계획 몫 입고예정을 다른 수주가 쓰고, 기간에 따라 결과가 달라짐 (02 REQ-PRD-005, 04 4.4·BP-PRD-01) | 새 서비스 `computeMrpForPeriod`(처음 `mock/services/ext/purchasing.ts`, 2026-10-02 core `mock/services/mrp.ts`로 옮김): 계획·진행중이고 남은 히트가 있는 계획 **전부**를 필요일 순으로 차감(core `computeMrp` 전체 기간 + `netRequirements`)한 뒤 필요일 ≤ 종료일만 보인다. 시작일 전 계획은 밀린 소요로 함께 보이고 `beforePeriod`로 표시(화면 '기간 전' 배지, 구매요청 줄도 같음). 기간 뒤 계획 몫 입고예정은 그 계획 전용으로 남는다. `api/mrp.ts`가 이 함수를 부른다. 시험 `api/mrpPeriod.test.ts`(기간 전 계획 + 잔량, 기간 뒤 계획 몫 발주) |
 | 2 | 재요청 때 알림은 요청자 **지금** 부서의 부서장에게 가는데 승인 확인은 옛 `department_id`로 해서, 부서를 옮기면 알림 받은 부서장은 COM-002, 옛 부서장 승인함에만 남음 (02 REQ-AUTH-004, 04 10장) | core `resubmitPurchaseRequisition`이 `department_id`를 다시 요청한 시점의 요청자 소속 부서로 바꾼다(등록 때 "요청 시점 소속"과 같은 규칙). 알림·승인함·승인 확인이 한 부서를 본다. 시험 `api/purchasingResubmit.test.ts` |
 | 3 | 구매요청 패널 '연결 발주'의 발주번호 링크가 발주 화면을 못 여는 역할(생산: PRC 조회만)에게도 보여 잠금 화면으로 감 (02 REQ-AUTH-003, shell `screens.ts`) | 발주 확정 조회 이상(`useCanView(PURCHASE_ORDER_CONFIRM)`)일 때만 링크, 아니면 글자로. 카드는 그대로 보인다 |
 | 4 | 발주 작성의 납기 안내가 고른 품목 전체의 가장 이른 희망 입고일 하나만 보여, 공급업체별로 다른 실제 납기와 다름 (04 BP-PUR-01) | 순수 함수 `plannedPurchaseOrders`(공급업체 1곳당 발주 1건, 납기 = 입력값 또는 그 묶음의 가장 이른 희망 입고일 — core `createPurchaseOrders`와 같음)로 '만들어질 발주'에 발주마다 "공급업체 · 납기 · 품목 수 · 톤"을 보인다. 시험 `purchasingView.test.ts` |
@@ -109,7 +109,7 @@
 
 ### 공유 파일 변경 (검토 반영)
 
-- **새 파일** `client/src/mock/services/ext/purchasing.ts` — `computeMrpForPeriod`·`MrpPeriodView`·`MrpPeriodPlanRow`. 병합 때 core `mock/services/mrp.ts`의 `computeMrp`를 이 동작(전체 차감 → 기간 필터, `beforePeriod`)으로 바꾸고 이 파일을 지우는 것을 권한다. 대시보드(`api/dashboard.ts`, 이 영역 밖)는 `MRP_EARLIEST`부터 계산해 기간 전 계획 문제는 피하지만, 종료일 뒤 계획 몫 입고예정 보호는 core를 고쳐야 같아진다.
+- **새 파일** `client/src/mock/services/ext/purchasing.ts` — `computeMrpForPeriod`·`MrpPeriodView`·`MrpPeriodPlanRow`. 병합 때 core `mock/services/mrp.ts`의 `computeMrp`를 이 동작(전체 차감 → 기간 필터, `beforePeriod`)으로 바꾸고 이 파일을 지우는 것을 권한다. 대시보드(`api/dashboard.ts`, 이 영역 밖)는 `MRP_EARLIEST`부터 계산해 기간 전 계획 문제는 피하지만, 종료일 뒤 계획 몫 입고예정 보호는 core를 고쳐야 같아진다. → 2026-10-02 core `mrp.ts`로 옮기고 이 파일을 지웠다. `computeMrp`(필요일 from~to)와 `computeMrpForPeriod`(필요일 ≤ to + `beforePeriod`)가 계산 한 벌(`mrpViewOf`)을 같이 쓰고 보일 범위만 다르다. core 테스트가 기간 from~to 결과를 확인하므로 `computeMrp`의 보일 범위는 바꾸지 않았다.
 - **core 2줄** `client/src/mock/services/purchasing.ts` `resubmitPurchaseRequisition` — `headOfRequesterDepartment`에서 `departmentId`도 받고 갱신 값에 `departmentId`를 넣었다.
 - `client/src/api/scenario/demo141.test.ts` — `purchaseOrderApi.orderableItems` → `candidateItems` 이름 바꿈만(2곳).
 

@@ -8,7 +8,6 @@ import { requireActor } from '@/api/actor';
 import { lotQualityOf, type LotQuality } from '@/api/production';
 import { sortFifo } from '@/lib/fifo';
 import type { MockTables } from '@/mock/schema';
-import { assertNoOpenWorkOnCompletion } from '@/mock/services/ext/production';
 import {
   changeAllocation,
   confirmRollingAllocations,
@@ -60,7 +59,7 @@ export interface RollingCandidate {
   lotId: number;
   lotNo: string;
   producedDate: string;
-  heatLotNo: string | null;
+  heatNo: string | null;
   sourcePlanNo: string | null;
   /** 이 코일 계획이 만든 슬래브인지 */
   isOwnPlan: boolean;
@@ -75,7 +74,7 @@ export interface RollingCandidate {
 export interface RolledCoil {
   lotId: number;
   lotNo: string;
-  slabLotNo: string | null;
+  slabNo: string | null;
   producedDate: string;
   quality: LotQuality;
   lotStatus: LotStatus;
@@ -106,7 +105,7 @@ function rollingDetailOf(tables: Tables, planId: number): RollingDetail {
     lotId: lot.id,
     lotNo: lot.lotNo,
     producedDate: lot.producedDate,
-    heatLotNo: heatOf(tables, lot)?.lotNo ?? null,
+    heatNo: heatOf(tables, lot)?.lotNo ?? null,
     sourcePlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
     isOwnPlan: lot.productionPlanId === planId,
     surplusAt: lot.surplusAt,
@@ -128,7 +127,7 @@ function rollingDetailOf(tables: Tables, planId: number): RollingDetail {
       return {
         lotId: coil.id,
         lotNo: coil.lotNo,
-        slabLotNo: findById(tables, 'lot', slabRelation?.parentLotId)?.lotNo ?? null,
+        slabNo: findById(tables, 'lot', slabRelation?.parentLotId)?.lotNo ?? null,
         producedDate: coil.producedDate,
         quality: lotQualityOf(coil, heatOf(tables, coil)),
         lotStatus: coil.lotStatus,
@@ -239,7 +238,7 @@ export const rollingApi = {
     }),
 
   /** 열연 실적: 배정 슬래브 소비 → 슬래브 1매 = 코일 1개 `C+슬래브번호`(HT- 제외), 코일 검사 대상 */
-  registerHotRolling: (input: HotRollingResultInput): Promise<{ productionResultId: number; coilLotNos: string[] }> =>
+  registerHotRolling: (input: HotRollingResultInput): Promise<{ productionResultId: number; coilNos: string[] }> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_RESULT_CONFIRM] });
       const { coilLots, resultId } = registerHotRolling(tx, userActor(actor.employee.id), {
@@ -248,8 +247,7 @@ export const rollingApi = {
         startedAt: input.startedAt,
         completedAt: input.completedAt,
       });
-      assertNoOpenWorkOnCompletion(tx.tables, input.productionPlanId);
-      return { productionResultId: resultId, coilLotNos: coilLots.map((c) => c.lotNo) };
+      return { productionResultId: resultId, coilNos: coilLots.map((c) => c.lotNo) };
     }),
 };
 

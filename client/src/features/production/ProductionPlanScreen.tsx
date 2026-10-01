@@ -266,7 +266,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
                   {plan.heats.map((h) => (
                     <tr key={h.seq} data-muted={h.heatLotId === null ? true : undefined}>
                       <Td>{h.seq}</Td>
-                      <Td className="font-mono text-mono">{h.heatLotNo ?? '제강 전'}</Td>
+                      <Td className="font-mono text-mono">{h.heatNo ?? '제강 전'}</Td>
                       <Td className="font-mono text-mono">{h.converterCode ?? '-'}</Td>
                       <Td align="right">{fmtTon(h.heatTon)}</Td>
                       <Td>

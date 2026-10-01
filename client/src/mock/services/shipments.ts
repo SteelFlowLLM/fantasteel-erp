@@ -30,7 +30,7 @@ import {
   inputError,
   mustGet,
   requirePositiveQty,
-  unitWeightOf,
+  theoreticalWeightOf,
   type PersonActor,
 } from '@/mock/services/context';
 import { activeReservedQtyOfItem, heatOf } from '@/mock/services/inventoryPool';
@@ -56,7 +56,7 @@ export interface ShippableItem {
   itemCode: string;
   itemName: string;
   itemType: ProductItemType;
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   orderedQty: number;
   shippedQty: number;
   dueDate: string;
@@ -86,7 +86,7 @@ export function shippableItemsOf(tables: Tables, customerId: number): ShippableI
             itemCode: item.itemCode,
             itemName: item.itemName,
             itemType: item.itemType === 'COIL' ? 'COIL' : 'SLAB',
-            unitWeightTon: unitWeightOf(item),
+            theoreticalWeightTon: theoreticalWeightOf(item),
             orderedQty: i.orderedQty,
             shippedQty: i.shippedQty,
             dueDate: i.dueDate,
@@ -104,7 +104,7 @@ export interface ShipmentLotView {
   lotId: number;
   lotNo: string;
   producedDate: string;
-  heatLotNo: string | null;
+  heatNo: string | null;
   yardId: number | null;
 }
 
@@ -112,7 +112,7 @@ const lotViewOf = (tables: Tables, lot: LotRow): ShipmentLotView => ({
   lotId: lot.id,
   lotNo: lot.lotNo,
   producedDate: lot.producedDate,
-  heatLotNo: heatOf(tables, lot)?.lotNo ?? null,
+  heatNo: heatOf(tables, lot)?.lotNo ?? null,
   yardId: lot.yardId,
 });
 
@@ -334,7 +334,7 @@ export interface ShipmentRequestLineView {
   itemCode: string;
   itemName: string;
   itemType: ProductItemType;
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   requestQty: number;
   requestTon: string;
   allocatedQty: number;
@@ -356,7 +356,7 @@ function linesOf(tables: Tables, request: ShipmentRequestRow): ShipmentRequestLi
       const so = mustGet(tables, 'salesOrder', soItem.salesOrderId, '수주');
       const item = mustGet(tables, 'item', soItem.itemId, '규격');
       const allocations = tables.allocation.filter((a) => a.shipmentRequestItemId === line.id && a.allocationStatus !== 'RELEASED').sort((a, b) => a.id - b.id);
-      const unitWeightTon = unitWeightOf(item);
+      const theoreticalWeightTon = theoreticalWeightOf(item);
       return {
         shipmentRequestItemId: line.id,
         lineNo: line.lineNo,
@@ -368,9 +368,9 @@ function linesOf(tables: Tables, request: ShipmentRequestRow): ShipmentRequestLi
         itemCode: item.itemCode,
         itemName: item.itemName,
         itemType: item.itemType === 'COIL' ? 'COIL' : 'SLAB',
-        unitWeightTon,
+        theoreticalWeightTon,
         requestQty: line.requestQty,
-        requestTon: calcWeightTon(line.requestQty, unitWeightTon),
+        requestTon: calcWeightTon(line.requestQty, theoreticalWeightTon),
         allocatedQty: allocations.length,
         waitingAllocationQty: Math.max(0, line.requestQty - allocations.length),
         allocations: allocations.map((a) => ({

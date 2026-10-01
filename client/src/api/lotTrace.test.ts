@@ -4,7 +4,7 @@ import { lotTraceApi } from '@/api/lotTrace';
 import { buildTraceFixture, type TraceFixture } from '@/features/lotTrace/testing/traceFixture';
 import { getMockDb } from '@/mock/db';
 import { seedTxAt } from '@/mock/seeds';
-import { issueBusinessNo, issueSlabLotNo } from '@/mock/sequence';
+import { issueBusinessNo, issueSlabNo } from '@/mock/sequence';
 import { insertRow } from '@/mock/store';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
@@ -17,9 +17,9 @@ beforeEach(() => {
 
 describe('lotTraceApi.trace', () => {
   it('역추적: 코일 → 슬래브 → 히트 → 용선·합금철 → 원료, 근거와 투입량을 그대로 준다', async () => {
-    const trace = await lotTraceApi.trace({ lotNo: f.coilLotNos[0] });
+    const trace = await lotTraceApi.trace({ lotNo: f.coilNos[0] });
     expect(trace.direction).toBe('backward');
-    expect(trace.start).toMatchObject({ kind: 'LOT', lotNo: f.coilLotNos[0], lotType: 'COIL', lotStatus: 'SHIPPED', inspectionResult: 'PASS' });
+    expect(trace.start).toMatchObject({ kind: 'LOT', lotNo: f.coilNos[0], lotType: 'COIL', lotStatus: 'SHIPPED', inspectionResult: 'PASS' });
     expect(trace.nodes.map((n) => n.lotType)).toEqual(['COIL', 'SLAB', 'HEAT', 'HOT_METAL', 'RAW_MATERIAL', 'RAW_MATERIAL']);
     expect(trace.nodes.find((n) => n.id === f.heatLotId)).toMatchObject({ converterCode: 'BOF1', steelGradeCode: 'SS275', depth: 2 });
     expect(trace.nodes.find((n) => n.id === f.hotMetalLotId)).toMatchObject({ blastFurnaceCode: 'BF2' });
@@ -33,7 +33,7 @@ describe('lotTraceApi.trace', () => {
   });
 
   it('슬래브 출하는 코일 단계 없이 역추적한다', async () => {
-    const trace = await lotTraceApi.trace({ lotNo: f.slabLotNos[2] });
+    const trace = await lotTraceApi.trace({ lotNo: f.slabNos[2] });
     expect(trace.nodes.map((n) => n.lotType)).toEqual(['SLAB', 'HEAT', 'HOT_METAL', 'RAW_MATERIAL', 'RAW_MATERIAL']);
   });
 
@@ -56,12 +56,12 @@ describe('lotTraceApi.trace', () => {
   });
 
   it('슬래브·코일에서 정추적하면 시작 LOT도 영향 제품으로 센다 (출하요청 목록과 같은 범위)', async () => {
-    const slab = await lotTraceApi.trace({ lotNo: f.slabLotNos[2], direction: 'forward' });
+    const slab = await lotTraceApi.trace({ lotNo: f.slabNos[2], direction: 'forward' });
     expect(slab.shipments.map((s) => s.shipmentRequestNo)).toEqual([f.allocatedRequestNo]);
     expect(slab.impact).toMatchObject({ slabCount: 1, coilCount: 0, shippedLotCount: 0, unshippedLotCount: 1, consumedLotCount: 0 });
     expect(slab.impact?.salesOrders).toEqual([expect.objectContaining({ salesOrderId: f.salesOrderId, hasShipped: false, lotCount: 1 })]);
 
-    const coil = await lotTraceApi.trace({ lotNo: f.coilLotNos[0], direction: 'forward' });
+    const coil = await lotTraceApi.trace({ lotNo: f.coilNos[0], direction: 'forward' });
     expect(coil.shipments.map((s) => s.shipmentRequestNo)).toEqual([f.issuedRequestNo]);
     expect(coil.impact).toMatchObject({ coilCount: 1, shippedLotCount: 1, unshippedLotCount: 0 });
     expect(coil.impact?.salesOrders).toEqual([expect.objectContaining({ salesOrderId: f.salesOrderId, hasShipped: true, lotCount: 1 })]);
@@ -94,7 +94,7 @@ describe('lotTraceApi.trace', () => {
       });
       // 히트의 재고 슬래브 한 매를 그 코일 계획의 열연에 배정 (아직 열연 전)
       const slab = insertRow(tx, 'lot', {
-        lotNo: issueSlabLotNo(tx, heat.lotNo),
+        lotNo: issueSlabNo(tx, heat.lotNo),
         lotType: 'SLAB',
         lotStatus: 'AVAILABLE',
         itemId: t.lot.find((l) => l.id === f.slabLotIds[2])?.itemId ?? null,
@@ -133,7 +133,7 @@ describe('lotTraceApi.trace', () => {
       return { salesOrderId: so.id, salesOrderNo: so.salesOrderNo, slabLotId: slab.id };
     });
 
-    const trace = await lotTraceApi.trace({ lotNo: f.heatLotNo });
+    const trace = await lotTraceApi.trace({ lotNo: f.heatNo });
     expect(trace.impact?.salesOrders).toContainEqual(
       expect.objectContaining({ salesOrderId: added.salesOrderId, salesOrderNo: added.salesOrderNo, hasShipped: false, lotCount: 1, dueDate: '2026-10-25' }),
     );
@@ -146,7 +146,7 @@ describe('lotTraceApi.trace', () => {
   });
 
   it('방향을 바꿀 수 있다 (히트에서 역추적)', async () => {
-    const trace = await lotTraceApi.trace({ lotNo: f.heatLotNo, direction: 'backward' });
+    const trace = await lotTraceApi.trace({ lotNo: f.heatNo, direction: 'backward' });
     expect(trace.nodes.map((n) => n.lotType)).toEqual(['HEAT', 'HOT_METAL', 'RAW_MATERIAL', 'RAW_MATERIAL']);
   });
 
@@ -167,7 +167,7 @@ describe('lotTraceApi.trace', () => {
 
   it('계정을 고르지 않았거나 사용 안 함 사원이면 COM-002', async () => {
     setActingEmployeeForTest(null);
-    await expect(lotTraceApi.trace({ lotNo: f.heatLotNo })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(lotTraceApi.trace({ lotNo: f.heatNo })).rejects.toMatchObject({ code: 'COM-002' });
     const id = employeeIdOf(SEED_EMPLOYEE_NO.logistics);
     getMockDb().transact((tx) => {
       const employee = tx.tables.employee.find((e) => e.id === id);
@@ -189,7 +189,7 @@ describe('lotTraceApi.detail', () => {
 
   it('코일 LOT: 상위 히트, 배정(소진), 출하·밀시트, 검사 값', async () => {
     const detail = await lotTraceApi.detail(f.coilLotIds[0]);
-    expect(detail.heatLot).toEqual({ id: f.heatLotId, lotNo: f.heatLotNo });
+    expect(detail.heatLot).toEqual({ id: f.heatLotId, lotNo: f.heatNo });
     expect(detail.allocations).toEqual([
       expect.objectContaining({ allocationPurpose: 'SHIPMENT', allocationStatus: 'CONSUMED', shipmentRequest: { id: f.issuedRequestId, shipmentRequestNo: f.issuedRequestNo } }),
     ]);
@@ -209,10 +209,10 @@ describe('lotTraceApi.detail', () => {
 
 describe('lotTraceApi.searchLots · searchShipmentRequests', () => {
   it('번호 일부로 찾고, 정확히 같은 번호를 맨 앞에 둔다', async () => {
-    const result = await lotTraceApi.searchLots({ keyword: f.slabLotNos[0].toLowerCase() });
-    expect(result.items[0]?.lotNo).toBe(f.slabLotNos[0]);
+    const result = await lotTraceApi.searchLots({ keyword: f.slabNos[0].toLowerCase() });
+    expect(result.items[0]?.lotNo).toBe(f.slabNos[0]);
     const heats = await lotTraceApi.searchLots({ keyword: 'bof1', lotType: 'HEAT' });
-    expect(heats.items.map((l) => l.lotNo)).toEqual([f.heatLotNo]);
+    expect(heats.items.map((l) => l.lotNo)).toEqual([f.heatNo]);
     expect(heats.items[0]?.summary).toBe('BOF1 · SS275');
   });
 

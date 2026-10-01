@@ -36,9 +36,9 @@ export type MillSheetLotSnapshot = {
   producedDate: string;
   theoreticalWeightTon: string;
   heatLotId: number | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   /** 코일이면 투입한 슬래브 LOT 번호 */
-  slabLotNo: string | null;
+  slabNo: string | null;
   /** 슬래브 검사(표면·치수) 또는 코일 검사(치수·기계적 성질) */
   productInspection: MillSheetInspectionSnapshot | null;
 };
@@ -63,7 +63,7 @@ export type MillSheetItemSnapshot = {
 
 export type MillSheetHeatSnapshot = {
   heatLotId: number;
-  heatLotNo: string;
+  heatNo: string;
   converterCode: string | null;
   producedDate: string;
   steelGradeCode: string | null;
@@ -146,7 +146,7 @@ export function createMillSheet(
   const items: MillSheetItemSnapshot[] = input.lines.map(({ soItem, lots }) => {
     const item = mustGet(tables, 'item', soItem.itemId, '규격');
     const grade = findById(tables, 'steelGrade', item.steelGradeId);
-    const unitWeight = item.theoreticalWeightTon ?? '0.000';
+    const theoreticalWeightTon = item.theoreticalWeightTon ?? '0.000';
     return {
       salesOrderItemId: soItem.id,
       lineNo: soItem.lineNo,
@@ -159,9 +159,9 @@ export function createMillSheet(
       thicknessMm: item.thicknessMm,
       widthMm: item.widthMm,
       lengthMm: item.lengthMm,
-      theoreticalWeightTon: unitWeight,
+      theoreticalWeightTon,
       qty: lots.length,
-      totalWeightTon: calcWeightTon(lots.length, unitWeight),
+      totalWeightTon: calcWeightTon(lots.length, theoreticalWeightTon),
       lots: lots.map((lot) => {
         const heat = findById(tables, 'lot', lot.heatLotId);
         if (heat) heatIds.add(heat.id);
@@ -171,10 +171,10 @@ export function createMillSheet(
           lotNo: lot.lotNo,
           lotType: lot.lotType,
           producedDate: lot.producedDate,
-          theoreticalWeightTon: unitWeight,
+          theoreticalWeightTon,
           heatLotId: heat?.id ?? null,
-          heatLotNo: heat?.lotNo ?? null,
-          slabLotNo: slabRelation ? (findById(tables, 'lot', slabRelation.parentLotId)?.lotNo ?? null) : null,
+          heatNo: heat?.lotNo ?? null,
+          slabNo: slabRelation ? (findById(tables, 'lot', slabRelation.parentLotId)?.lotNo ?? null) : null,
           productInspection: inspectionSnapshotOf(tables, lot),
         };
       }),
@@ -184,7 +184,7 @@ export function createMillSheet(
     const heat = mustGet(tables, 'lot', id, '히트');
     return {
       heatLotId: heat.id,
-      heatLotNo: heat.lotNo,
+      heatNo: heat.lotNo,
       converterCode: heat.converterCode,
       producedDate: heat.producedDate,
       steelGradeCode: steelGradeCodeOf(tables, heat.steelGradeId),
@@ -226,7 +226,7 @@ export function createMillSheet(
     targetId: row.id,
     targetNo: millSheetNo,
     salesOrderId: salesOrder.id,
-    afterData: { millSheetNo, shipmentRequestNo: input.shipmentRequest.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatNos: heats.map((h) => h.heatLotNo), totalQty: snapshot.totalQty },
+    afterData: { millSheetNo, shipmentRequestNo: input.shipmentRequest.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatNos: heats.map((h) => h.heatNo), totalQty: snapshot.totalQty },
     lotIds: snapshot.lotIds,
   });
   return row;
@@ -256,7 +256,7 @@ export interface MillSheetSummary {
   issuedAt: string;
   totalQty: number;
   totalWeightTon: string;
-  heatLotNos: string[];
+  heatNos: string[];
   pdfPath: string | null;
 }
 
@@ -276,7 +276,7 @@ export function listMillSheets(tables: Tables): MillSheetSummary[] {
         issuedAt: row.issuedAt,
         totalQty: snapshot?.totalQty ?? 0,
         totalWeightTon: snapshot?.totalWeightTon ?? '0.000',
-        heatLotNos: snapshot?.heats.map((h) => h.heatLotNo) ?? [],
+        heatNos: snapshot?.heats.map((h) => h.heatNo) ?? [],
         pdfPath: row.pdfPath,
       };
     });

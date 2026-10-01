@@ -131,7 +131,7 @@ describe('히트 불합격 연쇄·불합격 처리·재생산', () => {
     // 불합격 관리: 히트 자체 + 히트 불합격으로 제외된 하위 슬래브
     const rejected = rejectedLots(t);
     expect(rejected.find((r) => r.lotId === heat2.id)?.reason).toBe('FAILED');
-    expect(rejected.filter((r) => r.heatLotNo === heat2.lotNo && r.reason === 'HEAT_FAILED')).toHaveLength(8);
+    expect(rejected.filter((r) => r.heatNo === heat2.lotNo && r.reason === 'HEAT_FAILED')).toHaveLength(8);
     k.expectClean();
   });
 

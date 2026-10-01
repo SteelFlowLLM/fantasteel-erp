@@ -8,14 +8,14 @@ import { MillSheetPaper } from '@/features/millSheets/components/MillSheetPaper'
 
 type MeasuredRow = { code: string; name: string; unit: string; min: string | null; max: string | null; measured: string | null };
 
-const heat = (id: number, heatLotNo: string, rows: MeasuredRow[]): MillSheetHeatSnapshot => ({
+const heat = (id: number, heatNo: string, rows: MeasuredRow[]): MillSheetHeatSnapshot => ({
   heatLotId: id,
-  heatLotNo,
+  heatNo,
   converterCode: 'BOF-1',
   producedDate: '2026-09-05',
   steelGradeCode: 'SS275',
   inspection: {
-    lotNo: heatLotNo,
+    lotNo: heatNo,
     processType: 'STEELMAKING',
     inspectionStandardCode: 'QS-SS275-ST',
     version: 1,

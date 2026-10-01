@@ -72,7 +72,7 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
   const errorOf = (row: ShippableRow) => requestQtyError(qtyOf(row), row.shippableQty, PRODUCT_QTY_UNIT[row.itemType]);
   const lineErrors = selected.map(errorOf);
   const totalQty = selected.reduce((s, r) => s + validQtyOf(qtyOf(r)), 0);
-  const totalTon = totalWeightTon(selected.map((r) => ({ qtyText: qtyOf(r), unitWeightTon: r.unitWeightTon })));
+  const totalTon = totalWeightTon(selected.map((r) => ({ qtyText: qtyOf(r), theoreticalWeightTon: r.theoreticalWeightTon })));
   const unit = qtyUnitOf(selected.map((r) => r.itemType));
   const earliestDue = selected.map((r) => r.dueDate).sort()[0];
   const dateError = fieldErrors.requestedShipDate ?? (submitted && !requestedShipDate ? '출하 요청일을 입력해 주세요' : null);
@@ -270,7 +270,7 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
                             {error ? <span className="max-w-56 whitespace-normal text-right text-cap text-danger">{error}</span> : null}
                           </div>
                         </Td>
-                        <Td align="right">{fmtTon(lineWeightTon(qtyOf(row), row.unitWeightTon))}</Td>
+                        <Td align="right">{fmtTon(lineWeightTon(qtyOf(row), row.theoreticalWeightTon))}</Td>
                         <Td>
                           <IconButton icon="x" label="빼기" onClick={() => toggle(row)} />
                         </Td>

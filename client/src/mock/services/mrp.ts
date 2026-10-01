@@ -3,6 +3,7 @@
 // - 대상: 계획·진행중 생산계획 중 아직 만들지 않은 히트가 있는 것 전부를 필요일 순으로 차감해 순소요를 낸다.
 //   기간(from~to)은 결과(plans·materials·requisitionLines)를 보여 줄 때만 거른다 → 기간 앞의 아직 못 만든 계획도
 //   먼저 잔량을 쓰고, 기간을 어떻게 고르든 같은 계획의 순소요가 같다 (BP-PRD-01 시점별 가용 공급 차감).
+//   computeMrp는 필요일 from~to를, MRP 화면의 computeMrpForPeriod는 필요일 ≤ to를 보인다(from 전 = 밀린 소요 beforePeriod).
 //   필요일(가정값) = 연결 수주 품목의 납기일 (리드타임 기준이 문서에 없다). 수주 연결이 없으면 계획 등록일.
 // - 남은 히트 톤 → 필요 용선(÷ 제강 수율) → 철광석·석탄·석회석(× t/t), 합금철(히트 톤 × kg/t ÷ 1,000)
 //   → 시점별로 원료 LOT 잔량·입고예정(필요일까지 도착하는 확정 발주의 미입고량)을 빼서 순소요. 같은 공급을 두 번 빼지 않는다.
@@ -91,6 +92,16 @@ export interface MrpView {
   requisitionLines: MrpRequisitionLine[];
 }
 
+export interface MrpPeriodPlanRow extends MrpPlanRow {
+  /** 필요일이 기간 시작 전인 미생산 계획(밀린 소요). 기간 안 계획보다 먼저 잔량·입고예정을 쓴다. */
+  beforePeriod: boolean;
+}
+
+/** MRP 화면용 결과: 필요일 ≤ 기간 끝인 계획 (기간 시작 전 = 밀린 소요) */
+export interface MrpPeriodView extends Omit<MrpView, 'plans'> {
+  plans: MrpPeriodPlanRow[];
+}
+
 /** 계획의 필요일 (가정값: 연결 수주 품목 납기, 없으면 계획 등록일) */
 export function needDateOfPlan(tables: Tables, plan: ProductionPlanRow): string {
   return findById(tables, 'salesOrderItem', plan.salesOrderItemId)?.dueDate ?? seoulDateOf(plan.createdAt);
@@ -150,7 +161,11 @@ export function mrpMaterialRows(tables: Tables, allLines: readonly MrpNetLine[],
     });
 }
 
-export function computeMrp(tables: Tables, period: { from: string; to: string }): MrpView {
+/**
+ * MRP 계산 한 벌: 열린 계획 전부를 필요일 순으로 차감하고, 필요일이 isShown인 것만 결과(plans·materials·requisitionLines)에 보인다.
+ * 기간을 어떻게 고르든 같은 계획의 순소요가 같다. computeMrp·computeMrpForPeriod는 보일 범위만 다르다.
+ */
+function mrpViewOf(tables: Tables, period: { from: string; to: string }, isShown: (needDate: string) => boolean): MrpView {
   const setting = productionSettingOf(tables);
   const materials = tables.item.filter((i) => i.itemType === 'RAW_MATERIAL').sort((a, b) => a.id - b.id);
   const planRows: (MrpPlanRow & { requirements: MrpRequirement[] })[] = [];
@@ -195,11 +210,10 @@ export function computeMrp(tables: Tables, period: { from: string; to: string })
     planRows.flatMap((p) => p.requirements),
     supplies,
   );
-  const inPeriod = (needDate: string) => needDate >= period.from && needDate <= period.to;
-  const lines = allLines.filter((l) => inPeriod(l.needDate));
+  const lines = allLines.filter((l) => isShown(l.needDate));
 
   const plans: MrpPlanRow[] = planRows
-    .filter((p) => inPeriod(p.needDate))
+    .filter((p) => isShown(p.needDate))
     .sort((a, b) => a.needDate.localeCompare(b.needDate) || a.productionPlanId - b.productionPlanId)
     .map(({ requirements: _requirements, ...row }) => ({
       ...row,
@@ -208,7 +222,7 @@ export function computeMrp(tables: Tables, period: { from: string; to: string })
         .map((l) => ({ itemId: l.materialId, itemCode: findById(tables, 'item', l.materialId)?.itemCode ?? '', grossTon: l.grossTon, netTon: l.netTon })),
     }));
 
-  const materialRows = mrpMaterialRows(tables, allLines, supplies, (l) => inPeriod(l.needDate));
+  const materialRows = mrpMaterialRows(tables, allLines, supplies, (l) => isShown(l.needDate));
 
   const requisitionLines: MrpRequisitionLine[] = lines
     .filter((l) => decCmp(l.netTon, 0) > 0)
@@ -229,4 +243,18 @@ export function computeMrp(tables: Tables, period: { from: string; to: string })
     });
 
   return { from: period.from, to: period.to, heatCapacityTon: setting.heatCapacityTon, plans, materials: materialRows, requisitionLines };
+}
+
+/** 기간 MRP: 필요일이 from~to인 계획만 보인다 (차감은 열린 계획 전부로) */
+export function computeMrp(tables: Tables, period: { from: string; to: string }): MrpView {
+  return mrpViewOf(tables, period, (needDate) => needDate >= period.from && needDate <= period.to);
+}
+
+/**
+ * MRP 화면용 기간 MRP: 필요일 ≤ to인 계획을 보이고, from 전 계획은 밀린 소요(beforePeriod)로 함께 보인다.
+ * 기간 뒤 계획은 보이지 않지만 차감(계획 몫 입고예정 보호)에는 들어간다.
+ */
+export function computeMrpForPeriod(tables: Tables, period: { from: string; to: string }): MrpPeriodView {
+  const view = mrpViewOf(tables, period, (needDate) => needDate <= period.to);
+  return { ...view, plans: view.plans.map((p) => ({ ...p, beforePeriod: p.needDate < period.from })) };
 }

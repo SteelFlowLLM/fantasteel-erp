@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventReasonCode } from '@/codes';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import { createSeedTables } from '@/mock/seed';
-import { issueBusinessNo, issueHeatLotNo, issueSlabLotNo } from '@/mock/sequence';
+import { issueBusinessNo, issueHeatNo, issueSlabNo } from '@/mock/sequence';
 import type { MockTx } from '@/mock/store';
 
 function createTx(nowIso: string): MockTx {
@@ -75,10 +75,10 @@ describe('채번 카운터', () => {
     expect(issueBusinessNo(tx, 'SALES_ORDER')).toBe('SO-2610-002');
     expect(issueBusinessNo(tx, 'SALES_ORDER', new Date('2026-11-02T00:00:00.000Z'))).toBe('SO-2611-001');
     expect(issueBusinessNo(tx, 'PURCHASE_REQUISITION')).toBe('PR-2610-0001');
-    const heatNo = issueHeatLotNo(tx, 'BOF1');
+    const heatNo = issueHeatNo(tx, 'BOF1');
     expect(heatNo).toBe('HT-BOF1-261001-001');
-    expect(issueSlabLotNo(tx, heatNo)).toBe('HT-BOF1-261001-001-01');
-    expect(issueSlabLotNo(tx, heatNo)).toBe('HT-BOF1-261001-001-02');
+    expect(issueSlabNo(tx, heatNo)).toBe('HT-BOF1-261001-001-01');
+    expect(issueSlabNo(tx, heatNo)).toBe('HT-BOF1-261001-001-02');
     expect(tx.tables.numberSequence.find((s) => s.sequenceKey === 'SO-2610')?.lastValue).toBe(2);
   });
 });

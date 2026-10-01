@@ -218,7 +218,7 @@
 | 업무 번호·LOT 번호 자리수를 넘을 때 | 자리를 늘려 그대로 붙인다 (예: SO-2610-1000) | 업무 프로세스 9.2에서 TBD |
 | 슬래브 LOT 순번(SS) 카운터 | 히트 번호마다 1부터 | 9.2 "히트번호-SS" 해석 |
 | 밀시트 순번 N | 출하요청마다 1부터 | 9.1 "수주별 순번" 해석 |
-| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v5`(`MOCK_DB_VERSION` = 5, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
+| 가짜 DB 저장 위치 | localStorage `fantasteel.mock-db.v6`(`MOCK_DB_VERSION` = 6, `client/src/mock/store.ts`) (키에 버전 포함). 버전을 올리면 옛 키를 지우고 시드로 다시 만든다. 탭 동기화는 같은 이름의 BroadcastChannel(없으면 storage 이벤트) | 구현 선택 |
 | 계정 선택 저장 위치 | sessionStorage `fantasteel.session.employee-id` (탭마다 따로) | PLAN 2장 |
 | 가짜 API가 요청 사원을 아는 방법 | 이 탭의 계정 선택(sessionStorage 위 키)을 읽는다. 사용 안 함 사원은 아무것도 할 수 없다(COM-002) | 실제 서버의 JWT 확인 대신 (BP-AUTH-01 "각 API에서 권한 재확인") — 구현 선택 |
 | 메시지 첨부 1개의 최대 크기 | 512KB. 내용은 DB와 따로 localStorage `fantasteel.mock-files.v1`(파일 경로 → data URL)에 두고, 시드로 초기화하면 지운다 | REQ-MSG-003 "형식·용량 제한은 구현 단계". 브라우저 저장 공간(약 5MB)이 작아서 고른 값 (가정) |
@@ -234,7 +234,7 @@
 | 3 | `collab` | `client/src/mock/seeds/collab.ts` | 업무 6건과 업무 지정 알림, 1:1 채팅방 1개·그룹 채팅방 2개와 메시지(첨부 1개, 사원 멘션 2개, 부서 멘션 1개). 업무방은 core가 만든다 | REQ-NTF·MSG 계열 (내용은 시연용 가정값, 6-2장) |
 | 4 | `dashboard` | `client/src/mock/seeds/dashboard.ts` | 8월 말 수주 SO-2608-001~004(모두 출하완료, 규격·매수·난수 시드 6001~6004·출고일은 `SEED_DASHBOARD`), 8-31 원료 입고, 9월 실적·검사·출고 | BP-DSH-01 "추이 집계에는 시계열 시드", BP-SEED-01 |
 
-- 가짜 DB 버전 `MOCK_DB_VERSION` = 5 (`client/src/mock/store.ts`, 2026-10-02 원료 입고량 변경과 작업 로그 사유 문구 추가로 4 → 5). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
+- 가짜 DB 버전 `MOCK_DB_VERSION` = 6 (`client/src/mock/store.ts`, 2026-10-02 원료 입고량 변경과 작업 로그 사유 문구 추가로 4 → 5, 같은 날 밀시트 스냅샷 키 이름을 용어 사전에 맞춰(`heatNo`·`slabNo`) 5 → 6). 시드를 바꾸면 이 값을 올려 옛 브라우저 데이터를 버리게 한다.
 - 대시보드 시드는 core 뒤에 돌아서 그 출하요청 번호가 DR-2609-0003~0007이다(번호 순서와 날짜 순서가 다르다 — 시연용 가정).
 - 대시보드 시드의 원료 입고분은 자기 히트 소요만큼만 사서 FIFO로 먼저 다 쓰이므로, core 시드의 원료 잔량·입고예정과 14.1의 MRP 결과(실리코망가니즈 순소요 1.500t 등)가 바뀌지 않는다.
 - 시드가 아직 넣지 않은 것: 없다. 1단계에서 "다음 단계"로 미뤘던 수주·재고·LOT·생산·검사·구매·출하·밀시트·업무방·알림·메신저는 모두 위 시드로 들어갔다. 준비 중(P2·EX) 화면의 예시 내용(`client/src/features/agent/agentExample.ts`, `client/src/features/meetings/meetingExample.ts`, `client/src/features/pastCases/pastCaseExample.ts`)은 DB 시드가 아니라 코드의 고정 예시다.
@@ -406,7 +406,7 @@
 | **입고일** — 필수, 미래·과거 제한 없음, 기본값 오늘 | "오늘 이전" 규칙은 문서 밖(C-4) | `client/src/features/purchasing/GoodsReceiptScreen.tsx` |
 | **발주 작성 기본 선택** — 주소에 `?pr=`이 있으면 그 요청 품목, `?supplier=`면 그 공급업체 묶음, 없으면 첫 공급업체 묶음 | 문서에 없음 — 옛 화면 동작(A-7) | `client/src/features/purchasing/hooks/useUrlParams.ts`, `client/src/features/purchasing/PurchaseOrderScreen.tsx` |
 | **입고 확정 확인 창** — 확정 전에 한 번 묻는다 | 확정 = 등록이라 되돌릴 수 없음(10장 "확정 후 수정 차단") | `client/src/features/purchasing/GoodsReceiptScreen.tsx` |
-| **MRP 기간 결과** — 필요일 ≤ 종료일인 열린 계획을 보이고, 시작일 전 계획은 '기간 전'(밀린 소요)으로 함께 보인다. 기간 뒤 계획은 보이지 않지만 차감(계획 몫 입고예정 보호)에는 들어간다 | 04 4.4 "같은 공급을 계획별로 중복 차감하지 않는다", REQ-PRD-005. 밀린 소요를 어떻게 보일지는 문서에 없음 | `client/src/mock/services/ext/purchasing.ts`, `client/src/api/mrp.ts` |
+| **MRP 기간 결과** — 필요일 ≤ 종료일인 열린 계획을 보이고, 시작일 전 계획은 '기간 전'(밀린 소요)으로 함께 보인다. 기간 뒤 계획은 보이지 않지만 차감(계획 몫 입고예정 보호)에는 들어간다 | 04 4.4 "같은 공급을 계획별로 중복 차감하지 않는다", REQ-PRD-005. 밀린 소요를 어떻게 보일지는 문서에 없음 | `client/src/mock/services/mrp.ts` `computeMrpForPeriod`, `client/src/api/mrp.ts` |
 | **재요청 승인 부서** — 다시 요청한 시점의 요청자 소속 부서 | REQ-AUTH-004 "요청자 소속 부서의 부서장", core 등록 규칙 "부서 = 요청 시점 소속" | `client/src/mock/services/purchasing.ts` |
 
 ### 6-11. 품질(quality)

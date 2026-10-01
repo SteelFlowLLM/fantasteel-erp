@@ -116,8 +116,8 @@ describe('출하요청 → FIFO 배정 → 출고 확정 → 밀시트 (14.1 7~9
     const sheet = list.find((m) => m.millSheetNo === `MS-${serial}-1`);
     const detail = await millSheetApi.detail(sheet?.id ?? 0);
     expect(detail.snapshot.salesOrder.salesOrderNo).toBe('SO-2609-002');
-    const lotHeats = new Set(detail.snapshot.items.flatMap((i) => i.lots.map((l) => l.heatLotNo)));
-    expect(new Set(detail.snapshot.heats.map((h) => h.heatLotNo))).toEqual(lotHeats);
+    const lotHeats = new Set(detail.snapshot.items.flatMap((i) => i.lots.map((l) => l.heatNo)));
+    expect(new Set(detail.snapshot.heats.map((h) => h.heatNo))).toEqual(lotHeats);
     expect(detail.snapshot.heats.every((h) => (h.inspection?.values.length ?? 0) > 0 && h.inspection?.inspectionStandardCode)).toBe(true);
     expect(detail.snapshot.items[0].lots.every((l) => l.productInspection?.processType === 'CONTINUOUS_CASTING')).toBe(true);
     expect(detail.snapshot.lotIds.every((lotId) => read((t) => isInspectionLocked(t, lotId)))).toBe(true);

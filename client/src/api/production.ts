@@ -59,7 +59,7 @@ export interface PlanLotRow {
   itemCode: string | null;
   /** 상위 히트 (슬래브·코일) */
   heatLotId: number | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   /** 생산완료일 (날짜) */
   producedDate: string;
   /** 용선: 용선량 · 히트: 히트 톤 */
@@ -84,7 +84,7 @@ export function planLotRowOf(tables: Tables, lot: LotRow): PlanLotRow {
     lotStatus: lot.lotStatus,
     itemCode: findById(tables, 'item', lot.itemId)?.itemCode ?? null,
     heatLotId: heat?.id ?? null,
-    heatLotNo: heat?.lotNo ?? null,
+    heatNo: heat?.lotNo ?? null,
     producedDate: lot.producedDate,
     initialTon: lot.initialTon,
     remainingTon: lot.remainingTon,

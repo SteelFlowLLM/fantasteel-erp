@@ -122,7 +122,7 @@ export function SurplusTab({ steelGrade, onSteelGradeChange }: SurplusTabProps) 
                         </Td>
                         <Td className="font-mono text-mono">{lot.itemCode}</Td>
                         <Td className="font-mono text-mono">{lot.steelGradeCode ?? '—'}</Td>
-                        <Td>{lot.heatLotNo ? <LotNoLink lotNo={lot.heatLotNo} /> : <span className="text-ink-3">—</span>}</Td>
+                        <Td>{lot.heatNo ? <LotNoLink lotNo={lot.heatNo} /> : <span className="text-ink-3">—</span>}</Td>
                         <Td>{fmtDate(lot.producedDate)}</Td>
                         <Td>{lot.surplusAt ? fmtDate(lot.surplusAt) : <span className="text-ink-3">—</span>}</Td>
                         <Td align="right">{fmtTon(lot.theoreticalWeightTon)}</Td>

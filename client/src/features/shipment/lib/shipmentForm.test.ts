@@ -33,7 +33,7 @@ describe('이론중량 미리보기 (십진 계산)', () => {
   it('매수 × 1매 이론중량, 합계', () => {
     expect(lineWeightTon('4', '23.550')).toBe('94.200');
     expect(lineWeightTon('10.5', '23.550')).toBe('0.000');
-    expect(totalWeightTon([{ qtyText: '4', unitWeightTon: '23.550' }, { qtyText: '6', unitWeightTon: '23.550' }])).toBe('235.500');
+    expect(totalWeightTon([{ qtyText: '4', theoreticalWeightTon: '23.550' }, { qtyText: '6', theoreticalWeightTon: '23.550' }])).toBe('235.500');
   });
 });
 

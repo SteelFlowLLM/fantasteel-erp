@@ -125,7 +125,7 @@ describe('LOT 목록 탭', () => {
     const of = (n: string) => rows.find((r) => r.lotNo === `${SS275_HEAT}-${n}`);
     // 적격(예약·배정 가능) 여부와 검사 결과는 따로 본다: 출고된 LOT은 적격이 아니지만 검사 결과는 합격이다.
     expect(of('01')).toMatchObject({ lotStatus: 'SHIPPED', quality: 'NOT_AVAILABLE', inspectionResult: 'PASS', allocationPurpose: 'SHIPMENT', allocationStatus: 'CONSUMED', isSurplus: false });
-    expect(of('05')).toMatchObject({ lotStatus: 'AVAILABLE', quality: 'ELIGIBLE', inspectionResult: 'PASS', allocationPurpose: null, allocationStatus: null, isSurplus: true, heatLotNo: SS275_HEAT, itemCode: SS275_SLAB });
+    expect(of('05')).toMatchObject({ lotStatus: 'AVAILABLE', quality: 'ELIGIBLE', inspectionResult: 'PASS', allocationPurpose: null, allocationStatus: null, isSurplus: true, heatNo: SS275_HEAT, itemCode: SS275_SLAB });
     expect(of('05')?.surplusAt).not.toBeNull();
     expect(of('05')?.productionPlanId).toEqual(expect.any(Number));
     expect(of('05')?.yardName).toBeTruthy();
@@ -134,7 +134,7 @@ describe('LOT 목록 탭', () => {
   it('히트 불합격 하위 슬래브는 HEAT_FAILED, 히트는 성분 FAIL', async () => {
     actAs(SEED_EMPLOYEE_NO.quality);
     const slabs = await inventoryApi.listLots({ lotType: 'SLAB' });
-    const children = slabs.filter((r) => r.heatLotNo === SPHC_FAILED_HEAT);
+    const children = slabs.filter((r) => r.heatNo === SPHC_FAILED_HEAT);
     expect(children.length).toBe(10);
     expect(children.every((r) => r.quality === 'HEAT_FAILED' && r.inspectionResult === 'HEAT_FAILED')).toBe(true);
     const heats = await inventoryApi.listLots({ lotType: 'HEAT' });

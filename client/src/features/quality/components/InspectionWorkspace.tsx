@@ -256,10 +256,10 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 ? [
                     {
                       label: '상위 히트 성분 검사',
-                      value: lot.heatLotNo ? (
+                      value: lot.heatNo ? (
                         <span className="flex flex-wrap items-center gap-1.5">
-                          <Link href={lot.heatLotId ? inspectionHref(lot.heatLotId) : lotTraceHref(lot.heatLotNo)} className="font-mono text-run hover:underline">
-                            {lot.heatLotNo}
+                          <Link href={lot.heatLotId ? inspectionHref(lot.heatLotId) : lotTraceHref(lot.heatNo)} className="font-mono text-run hover:underline">
+                            {lot.heatNo}
                           </Link>
                           {lot.heatResult ? <ResultBadge result={lot.heatResult} /> : null}
                         </span>
@@ -300,11 +300,11 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
       ) : null}
       {lot.lotType !== 'HEAT' && lot.heatResult === 'PENDING' ? (
         <Banner tone="wait">
-          상위 히트 {lot.heatLotNo}의 성분 검사가 판정 대기예요. 먼저 검사할 수 있고, 히트가 합격해야 예약·배정할 수 있어요.
+          상위 히트 {lot.heatNo}의 성분 검사가 판정 대기예요. 먼저 검사할 수 있고, 히트가 합격해야 예약·배정할 수 있어요.
         </Banner>
       ) : null}
       {lot.lotType !== 'HEAT' && lot.heatResult === 'FAIL' ? (
-        <Banner tone="danger">상위 히트 {withIGa(lot.heatLotNo ?? '')} 성분 불합격이라 이 LOT은 합격해도 예약·배정·출고할 수 없어요.</Banner>
+        <Banner tone="danger">상위 히트 {withIGa(lot.heatNo ?? '')} 성분 불합격이라 이 LOT은 합격해도 예약·배정·출고할 수 없어요.</Banner>
       ) : null}
 
       {outcome ? <OutcomeCard outcome={outcome} lotType={lot.lotType} heatPending={lot.lotType !== 'HEAT' && lot.heatResult !== 'PASS'} nextPending={nextPending} onNext={onNext} /> : null}

@@ -232,9 +232,9 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     const sheets = t.millSheet.filter((m) => shipmentRequestIds.includes(m.shipmentRequestId)).sort((a, b) => a.id - b.id);
     expect(sheets.map((m) => m.millSheetNo)).toEqual(['MS-2610-0001-1', 'MS-2610-0002-1']);
     const [a, b] = sheets.map((m) => millSheetDetail(t, m.id).snapshot);
-    expect(a.heats.map((h) => h.heatLotNo)).toEqual(['HT-BOF1-260905-001']);
-    expect(b.heats.map((h) => h.heatLotNo)).toEqual(['HT-BOF1-260905-001', 'HT-BOF1-261003-001']);
-    const carbonOf = (heatLotNo: string) => b.heats.find((h) => h.heatLotNo === heatLotNo)?.inspection?.values.find((v) => v.inspectionItemCode === 'C')?.measuredValue;
+    expect(a.heats.map((h) => h.heatNo)).toEqual(['HT-BOF1-260905-001']);
+    expect(b.heats.map((h) => h.heatNo)).toEqual(['HT-BOF1-260905-001', 'HT-BOF1-261003-001']);
+    const carbonOf = (heatNo: string) => b.heats.find((h) => h.heatNo === heatNo)?.inspection?.values.find((v) => v.inspectionItemCode === 'C')?.measuredValue;
     expect(carbonOf('HT-BOF1-260905-001')).toBe('0.18');
     expect(carbonOf('HT-BOF1-261003-001')).toBe('0.21');
     expect(b.items[0].lots).toHaveLength(6);

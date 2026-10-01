@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   businessNoSequenceKey,
   formatBusinessNo,
-  formatCoilLotNo,
+  formatCoilNo,
   formatEventNo,
-  formatHeatLotNo,
-  formatHotMetalLotNo,
+  formatHeatNo,
+  formatHotMetalNo,
   formatMillSheetNo,
   formatRawMaterialLotNo,
-  formatSlabLotNo,
+  formatSlabNo,
   formatSpecCode,
   RAW_MATERIAL_CODE_PATTERN,
 } from '@/codes';
@@ -45,12 +45,12 @@ describe('업무 번호 (업무 프로세스 9.1 예시)', () => {
 describe('LOT 번호 (업무 프로세스 9.2 예시)', () => {
   it('원료·용선·히트·슬래브·코일', () => {
     expect(formatRawMaterialLotNo('ORE01', '260929', 1)).toBe('RM-ORE01-260929-001');
-    expect(formatHotMetalLotNo('BF2', '260929', 3)).toBe('HM-BF2-260929-03');
-    const heatNo = formatHeatLotNo('BOF1', '260929', 15);
+    expect(formatHotMetalNo('BF2', '260929', 3)).toBe('HM-BF2-260929-03');
+    const heatNo = formatHeatNo('BOF1', '260929', 15);
     expect(heatNo).toBe('HT-BOF1-260929-015');
-    const slabNo = formatSlabLotNo(heatNo, 3);
+    const slabNo = formatSlabNo(heatNo, 3);
     expect(slabNo).toBe('HT-BOF1-260929-015-03');
-    expect(formatCoilLotNo(slabNo)).toBe('CBOF1-260929-015-03');
+    expect(formatCoilNo(slabNo)).toBe('CBOF1-260929-015-03');
   });
 });
 

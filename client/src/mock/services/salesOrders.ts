@@ -29,7 +29,7 @@ import {
   refreshInventory,
   requirePositiveQty,
   SYSTEM_ACTOR,
-  unitWeightOf,
+  theoreticalWeightOf,
   type PersonActor,
 } from '@/mock/services/context';
 import { activeReservedQtyOfItem, confirmedAllocationOf, lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
@@ -79,7 +79,7 @@ export interface SalesOrderPreviewLine {
   itemName: string;
   itemType: ProductItemType;
   orderedQty: number;
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   /** 수주 톤 = 매수 × 1매 이론중량 (표시값, 저장 안 함) */
   weightTon: string;
   /** 이 줄을 볼 때의 예약 가용 (앞 줄이 같은 규격을 먼저 예약한 뒤) */
@@ -99,15 +99,15 @@ export function previewSalesOrder(tables: Tables, items: readonly SalesOrderLine
     const availableQty = Math.max(0, reservationPoolOf(tables, item.id).availableQty - (used.get(item.id) ?? 0));
     const { reserveQty, shortageQty } = stockFirstSplit(line.orderedQty, availableQty);
     used.set(item.id, (used.get(item.id) ?? 0) + reserveQty);
-    const unitWeightTon = unitWeightOf(item);
+    const theoreticalWeightTon = theoreticalWeightOf(item);
     return {
       itemId: item.id,
       itemCode: item.itemCode,
       itemName: item.itemName,
       itemType: item.itemType === 'COIL' ? 'COIL' : 'SLAB',
       orderedQty: line.orderedQty,
-      unitWeightTon,
-      weightTon: calcWeightTon(line.orderedQty, unitWeightTon),
+      theoreticalWeightTon,
+      weightTon: calcWeightTon(line.orderedQty, theoreticalWeightTon),
       availableQty,
       reserveQty,
       shortageQty,
@@ -241,8 +241,8 @@ export function cancelPurchaseImpactOf(tables: Tables, salesOrderId: number): Ca
         .filter((line) => line.productionPlanId === plan.id)
         .map((line): CancelPurchaseImpactLine => {
           const pr = mustGet(tables, 'purchaseRequisition', line.purchaseRequisitionId, '구매요청');
-          const orderLine = tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === line.id);
-          const purchaseOrder = findById(tables, 'purchaseOrder', orderLine?.purchaseOrderId);
+          const purchaseOrderLine = tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === line.id);
+          const purchaseOrder = findById(tables, 'purchaseOrder', purchaseOrderLine?.purchaseOrderId);
           return {
             purchaseRequisitionId: pr.id,
             purchaseRequisitionNo: pr.purchaseRequisitionNo,
@@ -376,7 +376,7 @@ export interface ItemFulfillment {
   itemCode: string;
   itemName: string;
   itemType: ProductItemType;
-  unitWeightTon: string;
+  theoreticalWeightTon: string;
   orderedQty: number;
   /** 수주 톤 = 매수 × 1매 이론중량 (계산값) */
   orderedTon: string;
@@ -418,7 +418,7 @@ export function fulfillmentOf(tables: Tables, soItem: SalesOrderItemRow, today?:
   const inProductionQty = planRows.filter((p) => p.productionPlanStatus === 'IN_PROGRESS' || p.productionPlanStatus === 'COMPLETED').reduce((s, p) => s + p.remainingTargetQty, 0);
   const plannedQty = planRows.filter((p) => p.productionPlanStatus === 'PLANNED').reduce((s, p) => s + p.remainingTargetQty, 0);
   const securedQty = shortage.activeReservedQty + soItem.shippedQty;
-  const unitWeightTon = unitWeightOf(item);
+  const theoreticalWeightTon = theoreticalWeightOf(item);
   const riskDays = productionSettingOf(tables).deliveryRiskDays;
   return {
     salesOrderItemId: soItem.id,
@@ -427,9 +427,9 @@ export function fulfillmentOf(tables: Tables, soItem: SalesOrderItemRow, today?:
     itemCode: item.itemCode,
     itemName: item.itemName,
     itemType: item.itemType === 'COIL' ? 'COIL' : 'SLAB',
-    unitWeightTon,
+    theoreticalWeightTon,
     orderedQty: soItem.orderedQty,
-    orderedTon: calcWeightTon(soItem.orderedQty, unitWeightTon),
+    orderedTon: calcWeightTon(soItem.orderedQty, theoreticalWeightTon),
     dueDate: soItem.dueDate,
     salesOrderItemStatus: soItem.salesOrderItemStatus,
     isDueRisk: isDueRisk({ dueDate: soItem.dueDate, today: todayOf(today), deliveryRiskDays: riskDays, unshippedQty: shortage.unshippedQty, status: soItem.salesOrderItemStatus }),

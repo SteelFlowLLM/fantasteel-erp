@@ -15,11 +15,11 @@ describe('실적 시뮬레이션 작업 시각', () => {
       }
     }
     stockRawMaterials(k, '2026-10-02T01:30:00+09:00');
-    const order = createSalesOrder(k.at('2026-10-02T01:40:00+09:00'), k.actor('sales'), {
+    const created = createSalesOrder(k.at('2026-10-02T01:40:00+09:00'), k.actor('sales'), {
       customerId: k.customerId('CUS-01'),
       items: [{ itemId: k.itemId('SL-SM355A-250x1200x10000'), orderedQty: 4, dueDate: '2026-10-30' }],
     });
-    const planId = order.productionPlans[0].id;
+    const planId = created.productionPlans[0].id;
 
     const now = '2026-10-02T02:00:00+09:00';
     const result = simulatePlan(k.at(now), k.actor('steelmaking'), { productionPlanId: planId, randomSeed: 11 });
@@ -38,11 +38,11 @@ describe('실적 시뮬레이션 작업 시각', () => {
   it('시간이 충분하면 정해진 시간(제선 4·제강 1·연주 2시간) 그대로 지금 끝나도록 둔다', () => {
     const k = createKit();
     stockRawMaterials(k, '2026-10-02T08:00:00+09:00');
-    const order = createSalesOrder(k.at('2026-10-02T09:00:00+09:00'), k.actor('sales'), {
+    const created = createSalesOrder(k.at('2026-10-02T09:00:00+09:00'), k.actor('sales'), {
       customerId: k.customerId('CUS-01'),
       items: [{ itemId: k.itemId('SL-SM355A-250x1200x10000'), orderedQty: 4, dueDate: '2026-10-30' }],
     });
-    const planId = order.productionPlans[0].id;
+    const planId = created.productionPlans[0].id;
     simulatePlan(k.at('2026-10-02T18:00:00+09:00'), k.actor('steelmaking'), { productionPlanId: planId, randomSeed: 11 });
     const results = k.tables.productionResult.filter((r) => r.productionPlanId === planId).sort((a, b) => a.id - b.id);
     const hours = results.map((r) => (new Date(r.completedAt ?? '').getTime() - new Date(r.startedAt).getTime()) / 3_600_000);

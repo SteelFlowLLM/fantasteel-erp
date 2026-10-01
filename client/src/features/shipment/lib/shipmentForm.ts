@@ -22,13 +22,13 @@ export function validQtyOf(text: string): number {
 }
 
 /** 출하 매수 × 1매 이론중량 (십진 계산, 4.1). 올바르지 않은 입력은 0으로 본다. */
-export function lineWeightTon(text: string, unitWeightTon: string): string {
-  return calcWeightTon(validQtyOf(text), unitWeightTon);
+export function lineWeightTon(text: string, theoreticalWeightTon: string): string {
+  return calcWeightTon(validQtyOf(text), theoreticalWeightTon);
 }
 
 /** 여러 줄의 이론중량 합계 */
-export function totalWeightTon(lines: readonly { qtyText: string; unitWeightTon: string }[]): string {
-  return sumTon(lines.map((l) => lineWeightTon(l.qtyText, l.unitWeightTon)));
+export function totalWeightTon(lines: readonly { qtyText: string; theoreticalWeightTon: string }[]): string {
+  return sumTon(lines.map((l) => lineWeightTon(l.qtyText, l.theoreticalWeightTon)));
 }
 
 /** 화면 단위: 한 가지 유형이면 매·개, 섞였으면 빈 글자 */

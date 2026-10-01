@@ -149,7 +149,7 @@ export function ResultFormModal({ ctx, process, mode, openResult, onClose }: Res
               {ctx.uncastHeats.length === 0 ? <option value="">연주할 히트가 없어요</option> : null}
               {ctx.uncastHeats.map((h) => (
                 <option key={h.heatLotId} value={h.heatLotId}>
-                  {h.heatLotNo} · {fmtTon(h.heatTon)}
+                  {h.heatNo} · {fmtTon(h.heatTon)}
                 </option>
               ))}
             </Select>

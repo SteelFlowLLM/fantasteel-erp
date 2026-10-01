@@ -159,7 +159,7 @@ export function qtyUnitOfItem(tables: Tables, itemId: number | null | undefined)
 }
 
 /** 제품 규격 1매(1개) 이론중량 */
-export function unitWeightOf(item: ItemRow): string {
+export function theoreticalWeightOf(item: ItemRow): string {
   if (!item.theoreticalWeightTon) throw new ApiError('MST-001', `${item.itemCode} 이론중량`);
   return item.theoreticalWeightTon;
 }
@@ -187,7 +187,7 @@ export function coilSpecOfSlab(tables: Tables, slabItemId: number): ItemRow | un
 
 /** 열연 계획 수율 = 코일 이론중량 ÷ 대응 슬래브 이론중량 (저장 안 함) */
 export function hotRollingYieldOf(tables: Tables, coilItem: ItemRow): string {
-  return calcHotRollingYieldRate(unitWeightOf(coilItem), unitWeightOf(slabSpecOfCoil(tables, coilItem)));
+  return calcHotRollingYieldRate(theoreticalWeightOf(coilItem), theoreticalWeightOf(slabSpecOfCoil(tables, coilItem)));
 }
 
 /** 생산계획의 연주 대상 슬래브 규격 (슬래브 계획 = 그 규격, 코일 계획 = 매핑된 슬래브) */

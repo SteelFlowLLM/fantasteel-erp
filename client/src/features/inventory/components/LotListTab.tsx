@@ -125,7 +125,7 @@ function LotRow({ row }: { row: LotListView }) {
       <Td>{LOT_TYPE_LABEL[row.lotType]}</Td>
       <Td className="font-mono text-mono">{row.itemCode ?? '—'}</Td>
       <Td className="font-mono text-mono">{row.steelGradeCode ?? '—'}</Td>
-      <Td>{row.heatLotNo && row.heatLotNo !== row.lotNo ? <LotNoLink lotNo={row.heatLotNo} /> : <span className="text-ink-3">—</span>}</Td>
+      <Td>{row.heatNo && row.heatNo !== row.lotNo ? <LotNoLink lotNo={row.heatNo} /> : <span className="text-ink-3">—</span>}</Td>
       <Td>{fmtDate(row.producedDate)}</Td>
       <Td>
         {quality ? (

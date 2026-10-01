@@ -21,7 +21,8 @@ export interface ProductInventoryRow {
   itemName: string;
   itemType: ProductItemType;
   steelGradeCode: string | null;
-  unitWeightTon: string;
+  /** 1매 이론중량 (TRM-022, item.theoretical_weight_ton) */
+  theoreticalWeightTon: string;
   /** 재고 매수 = 미소진 LOT (inventory.on_hand_qty) */
   onHandQty: number;
   /** 합격(적격) 매수 */
@@ -49,7 +50,7 @@ export function productInventory(tables: Tables): ProductInventoryRow[] {
       const eligibility = lots.map((l) => lotEligibility(tables, l));
       const pool = reservationPoolOf(tables, item.id);
       const inventory = tables.inventory.find((r) => r.itemId === item.id);
-      const unitWeightTon = item.theoreticalWeightTon ?? '0.000';
+      const theoreticalWeightTon = item.theoreticalWeightTon ?? '0.000';
       const availableQty = Math.max(0, pool.availableQty);
       return {
         itemId: item.id,
@@ -57,7 +58,7 @@ export function productInventory(tables: Tables): ProductInventoryRow[] {
         itemName: item.itemName,
         itemType: item.itemType === 'COIL' ? 'COIL' : 'SLAB',
         steelGradeCode: steelGradeCodeOf(tables, item.steelGradeId),
-        unitWeightTon,
+        theoreticalWeightTon,
         onHandQty: inventory?.onHandQty ?? lots.length,
         passedQty: pool.eligibleQty,
         pendingQty: eligibility.filter((e) => e === 'PENDING').length,
@@ -66,9 +67,9 @@ export function productInventory(tables: Tables): ProductInventoryRow[] {
         hotRollingAllocatedQty: pool.hotRollingConfirmedQty,
         shipmentAllocatedQty: pool.shipmentConfirmedQty,
         availableQty,
-        onHandTon: calcWeightTon(inventory?.onHandQty ?? lots.length, unitWeightTon),
-        passedTon: calcWeightTon(pool.eligibleQty, unitWeightTon),
-        availableTon: calcWeightTon(availableQty, unitWeightTon),
+        onHandTon: calcWeightTon(inventory?.onHandQty ?? lots.length, theoreticalWeightTon),
+        passedTon: calcWeightTon(pool.eligibleQty, theoreticalWeightTon),
+        availableTon: calcWeightTon(availableQty, theoreticalWeightTon),
       };
     });
 }
@@ -91,7 +92,7 @@ export interface LotListRow {
   yardName: string | null;
   initialTon: string | null;
   remainingTon: string | null;
-  heatLotNo: string | null;
+  heatNo: string | null;
   productionPlanNo: string | null;
   surplusAt: string | null;
   dispositionStatus: LotRow['dispositionStatus'];
@@ -120,7 +121,7 @@ export function lotList(tables: Tables, filter: { lotType?: LotType; lotStatus?:
         yardName: findById(tables, 'yard', lot.yardId)?.yardName ?? null,
         initialTon: lot.initialTon,
         remainingTon: lot.remainingTon,
-        heatLotNo: heatOf(tables, lot)?.lotNo ?? null,
+        heatNo: heatOf(tables, lot)?.lotNo ?? null,
         productionPlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
         surplusAt: lot.surplusAt,
         dispositionStatus: lot.dispositionStatus,
@@ -188,7 +189,7 @@ export interface SurplusSpecRow {
   /** 여재 매수 (TRM-048): 여재 전환된 미배정 합격 슬래브 중 수주 예약에 쓰이지 않은 몫 = min(여재 전환 LOT 수, 가용재고) */
   surplusQty: number;
   /** 여재 슬래브 (선입선출 순, surplusQty개) */
-  lots: { lotId: number; lotNo: string; producedDate: string; surplusAt: string | null; heatLotNo: string | null; productionPlanNo: string | null }[];
+  lots: { lotId: number; lotNo: string; producedDate: string; surplusAt: string | null; heatNo: string | null; productionPlanNo: string | null }[];
 }
 
 /**
@@ -221,7 +222,7 @@ export function surplusSlabs(tables: Tables): SurplusSpecRow[] {
           const lot = candidates.find((l) => l.id === picked.lotId);
           return {
             ...picked,
-            heatLotNo: lot ? (heatOf(tables, lot)?.lotNo ?? null) : null,
+            heatNo: lot ? (heatOf(tables, lot)?.lotNo ?? null) : null,
             productionPlanNo: findById(tables, 'productionPlan', lot?.productionPlanId)?.productionPlanNo ?? null,
           };
         }),

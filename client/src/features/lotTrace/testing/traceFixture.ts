@@ -5,13 +5,13 @@ import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
 import { seedTxAt } from '@/mock/seeds';
 import {
-  coilLotNoOf,
+  coilNoOf,
   issueBusinessNo,
-  issueHeatLotNo,
-  issueHotMetalLotNo,
+  issueHeatNo,
+  issueHotMetalNo,
   issueMillSheetNo,
   issueRawMaterialLotNo,
-  issueSlabLotNo,
+  issueSlabNo,
 } from '@/mock/sequence';
 import { insertRow, type MockTx } from '@/mock/store';
 import { resetToMasterSeed } from '@/test/masterSeed';
@@ -24,11 +24,11 @@ export interface TraceFixture {
   alloyLotId: number;
   hotMetalLotId: number;
   heatLotId: number;
-  heatLotNo: string;
+  heatNo: string;
   slabLotIds: [number, number, number];
-  slabLotNos: [string, string, string];
+  slabNos: [string, string, string];
   coilLotIds: [number, number];
-  coilLotNos: [string, string];
+  coilNos: [string, string];
   issuedRequestId: number;
   issuedRequestNo: string;
   allocatedRequestId: number;
@@ -207,7 +207,7 @@ export function buildTraceFixture(): TraceFixture {
     const tPr = at('2026-10-01T10:00:00+09:00');
     const hotMetal = insertRow(tPr, 'lot', {
       ...baseLot,
-      lotNo: issueHotMetalLotNo(tPr, 'BF2'),
+      lotNo: issueHotMetalNo(tPr, 'BF2'),
       lotType: 'HOT_METAL',
       itemId: null,
       initialTon: '300.000',
@@ -223,7 +223,7 @@ export function buildTraceFixture(): TraceFixture {
       periodStartedAt: '2026-10-01T00:00:00.000Z',
       periodEndedAt: '2026-10-01T06:00:00.000Z',
     });
-    const heatNo = issueHeatLotNo(tPr, 'BOF1');
+    const heatNo = issueHeatNo(tPr, 'BOF1');
     const heat = insertRow(tPr, 'lot', {
       ...baseLot,
       lotNo: heatNo,
@@ -254,7 +254,7 @@ export function buildTraceFixture(): TraceFixture {
     const slabs = [1, 2, 3].map(() =>
       insertRow(tPr, 'lot', {
         ...baseLot,
-        lotNo: issueSlabLotNo(tPr, heatNo),
+        lotNo: issueSlabNo(tPr, heatNo),
         lotType: 'SLAB',
         itemId: slabItem.id,
         steelGradeId: grade.id,
@@ -273,7 +273,7 @@ export function buildTraceFixture(): TraceFixture {
       slab.consumedAt = tPr.nowIso;
       const coil = insertRow(tPr, 'lot', {
         ...baseLot,
-        lotNo: coilLotNoOf(slab.lotNo),
+        lotNo: coilNoOf(slab.lotNo),
         lotType: 'COIL',
         itemId: coilItem.id,
         steelGradeId: grade.id,
@@ -450,11 +450,11 @@ export function buildTraceFixture(): TraceFixture {
       alloyLotId: alloyLot.id,
       hotMetalLotId: hotMetal.id,
       heatLotId: heat.id,
-      heatLotNo: heat.lotNo,
+      heatNo: heat.lotNo,
       slabLotIds: [slab1.id, slab2.id, slab3.id],
-      slabLotNos: [slab1.lotNo, slab2.lotNo, slab3.lotNo],
+      slabNos: [slab1.lotNo, slab2.lotNo, slab3.lotNo],
       coilLotIds: [coil1.id, coil2.id],
-      coilLotNos: [coil1.lotNo, coil2.lotNo],
+      coilNos: [coil1.lotNo, coil2.lotNo],
       issuedRequestId: issued.id,
       issuedRequestNo: issued.shipmentRequestNo,
       allocatedRequestId: allocated.id,

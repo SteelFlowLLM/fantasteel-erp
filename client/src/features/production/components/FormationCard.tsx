@@ -36,7 +36,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
   const yieldRule = plan.item.itemType === 'COIL' ? '연주 수율 × 열연 수율(규격 매핑 계산값)' : '연주 수율 (슬래브 수주는 연주만)';
   const rows: { label: string; value: string; rule: string }[] = [
     { label: '부족 매수', value: `${f.shortageQty}${unit}`, rule: '수주 등록 때 재고로 예약하지 못한 매수' },
-    { label: '수주 목표 (목표중량)', value: fmtTon(f.targetWeightTon), rule: `부족 매수 × 1매 이론중량 ${fmtTon(plan.item.unitWeightTon)}` },
+    { label: '수주 목표 (목표중량)', value: fmtTon(f.targetWeightTon), rule: `부족 매수 × 1매 이론중량 ${fmtTon(plan.item.theoreticalWeightTon)}` },
     { label: '누적 계획수율', value: fmtYieldRate(f.cumulativeYieldRate), rule: yieldRule },
     { label: '필요 용강량', value: fmtTon(f.requiredSteelTon), rule: '목표중량 ÷ 누적 계획수율' },
     { label: '히트 수', value: `${f.heatCount}개`, rule: `ceil(필요 용강량 ÷ 히트 용량 ${fmtTon(f.heatCapacityTon)})` },
@@ -44,7 +44,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
     {
       label: '히트당 슬래브',
       value: `${f.slabQtyPerHeat}매`,
-      rule: `floor(히트 용량 × 연주 수율 ÷ 슬래브 1매 이론중량 ${plan.slabSpec ? fmtTon(plan.slabSpec.unitWeightTon) : '-'})`,
+      rule: `floor(히트 용량 × 연주 수율 ÷ 슬래브 1매 이론중량 ${plan.slabSpec ? fmtTon(plan.slabSpec.theoreticalWeightTon) : '-'})`,
     },
     { label: '계획 슬래브', value: `${f.plannedSlabQty}매`, rule: '히트 수 × 히트당 슬래브' },
     { label: '예상 슬래브 여재', value: `${f.expectedSurplusSlabQty}매`, rule: 'max(0, 계획 슬래브 − 부족 매수) · 여재는 가용재고에 들어가요' },

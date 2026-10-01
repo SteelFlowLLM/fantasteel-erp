@@ -29,8 +29,8 @@ const lot = (lotNo: string, lotType: string, productInspection: MillSheetInspect
   producedDate: '2026-09-05',
   theoreticalWeightTon: '23.550',
   heatLotId: 1,
-  heatLotNo: 'HT-BOF1-260905-001',
-  slabLotNo: null,
+  heatNo: 'HT-BOF1-260905-001',
+  slabNo: null,
   productInspection,
 });
 

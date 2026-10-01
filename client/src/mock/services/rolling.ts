@@ -4,12 +4,13 @@
 // - FIFO 추천(생산완료일 → LOT 번호): 적격·미소진·미배정 슬래브 중 '예약 가용'(판매 ACTIVE 예약 몫을 뺀 수) 안에서만 → 판매 예약을 침범하지 않는다.
 // - 확정 = HOT_ROLLING 배정 CONFIRMED (production_plan_id). 추천은 저장하지 않고 확정 때 ALLOCATION_RECOMMENDED로 남긴다.
 // - 열연 실적: 배정 슬래브를 소비(배정 CONSUMED, LOT CONSUMED) → 슬래브 1매 = 코일 1개 `C+슬래브번호`(HT- 제외), 슬래브→코일 1:1, 코일 검사 대상.
+//   열연 실적으로 계획이 완료되는데 다른 공정에 작업 시작만 한 실적이 남아 있으면 거부한다(productionResults.ts 진행 중 작업).
 // - 수주 연결이 없는 코일 계획은 열연하지 않는다. '귀속' 단계는 없다.
 import { decSum } from '@/lib/decimal';
 import { calcWeightTon } from '@/lib/weight';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import type { AllocationRow, LotRow, MockTables, ProductionPlanRow } from '@/mock/schema';
-import { coilLotNoOf } from '@/mock/sequence';
+import { coilNoOf } from '@/mock/sequence';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 import { assertAllocatableLot, insertConfirmedAllocation, recommendFifoLots, recordRecommendation } from '@/mock/services/allocations';
 import {
@@ -24,12 +25,12 @@ import {
   salesOrderIdOfPlan,
   seoulDateOf,
   slabSpecOfCoil,
-  unitWeightOf,
+  theoreticalWeightOf,
   type PersonActor,
 } from '@/mock/services/context';
 import { ensurePendingInspection } from '@/mock/services/inspections';
 import { heatOf, reservationPoolOf, type ReservationPool } from '@/mock/services/inventoryPool';
-import { planForWork, upsertCompletedResult, type SimulationMark } from '@/mock/services/productionResults';
+import { assertNoOpenWorkOnCompletion, planForWork, upsertCompletedResult, type SimulationMark } from '@/mock/services/productionResults';
 import { planProgressOf, refreshPlanStatus } from '@/mock/services/productionPlans';
 
 type Tables = Readonly<MockTables>;
@@ -38,7 +39,7 @@ export interface RollingLotView {
   lotId: number;
   lotNo: string;
   producedDate: string;
-  heatLotNo: string | null;
+  heatNo: string | null;
   sourcePlanNo: string | null;
   surplusAt: string | null;
 }
@@ -55,8 +56,8 @@ export interface RollingPlanView {
   productionPlanStatus: ProductionPlanRow['productionPlanStatus'];
   salesOrderNo: string | null;
   dueDate: string | null;
-  coilItem: { id: number; itemCode: string; itemName: string; unitWeightTon: string };
-  slabItem: { id: number; itemCode: string; itemName: string; unitWeightTon: string };
+  coilItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
+  slabItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
   shortageQty: number;
   /** 이미 만든 코일 = 합격 + 판정 대기 (불합격·히트 불합격 코일은 세지 않는다) */
   rolledQty: number;
@@ -80,7 +81,7 @@ const lotViewOf = (tables: Tables, lot: LotRow): RollingLotView => ({
   lotId: lot.id,
   lotNo: lot.lotNo,
   producedDate: lot.producedDate,
-  heatLotNo: heatOf(tables, lot)?.lotNo ?? null,
+  heatNo: heatOf(tables, lot)?.lotNo ?? null,
   sourcePlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
   surplusAt: lot.surplusAt,
 });
@@ -108,8 +109,8 @@ export function rollingPlanView(tables: Tables, productionPlanId: number): Rolli
     productionPlanStatus: plan.productionPlanStatus,
     salesOrderNo: so?.salesOrderNo ?? null,
     dueDate: soItem?.dueDate ?? null,
-    coilItem: { id: coil.id, itemCode: coil.itemCode, itemName: coil.itemName, unitWeightTon: unitWeightOf(coil) },
-    slabItem: { id: slab.id, itemCode: slab.itemCode, itemName: slab.itemName, unitWeightTon: unitWeightOf(slab) },
+    coilItem: { id: coil.id, itemCode: coil.itemCode, itemName: coil.itemName, theoreticalWeightTon: theoreticalWeightOf(coil) },
+    slabItem: { id: slab.id, itemCode: slab.itemCode, itemName: slab.itemName, theoreticalWeightTon: theoreticalWeightOf(slab) },
     shortageQty: plan.shortageQty,
     rolledQty,
     failedCoilQty: progress.coilQty - progress.usableCoilQty,
@@ -199,15 +200,15 @@ export function registerHotRolling(tx: MockTx, actor: PersonActor, input: HotRol
   errors.throwIfAny();
   const times = { startedAt: startedAt ?? '', completedAt: completedAt ?? '' };
   const result = upsertCompletedResult(tx, actor, plan, { productionResultId: input.productionResultId, processType: 'HOT_ROLLING', times, simulation: input.simulation });
-  const slabWeight = unitWeightOf(slabSpec);
-  const coilWeight = unitWeightOf(coil);
+  const slabTheoreticalWeightTon = theoreticalWeightOf(slabSpec);
+  const coilTheoreticalWeightTon = theoreticalWeightOf(coil);
   const completedDate = seoulDateOf(times.completedAt);
   const coilLots: LotRow[] = [];
   for (const { allocation, lot } of slabs) {
     updateRow(tx, 'allocation', allocation.id, { allocationStatus: 'CONSUMED', consumedAt: tx.nowIso });
     updateRow(tx, 'lot', lot.id, { lotStatus: 'CONSUMED', consumedAt: tx.nowIso });
     const coilLot = insertRow(tx, 'lot', {
-      lotNo: coilLotNoOf(lot.lotNo),
+      lotNo: coilNoOf(lot.lotNo),
       lotType: 'COIL',
       lotStatus: 'AVAILABLE',
       itemId: coil.id,
@@ -230,15 +231,15 @@ export function registerHotRolling(tx: MockTx, actor: PersonActor, input: HotRol
       consumedAt: null,
       shippedAt: null,
     });
-    insertRow(tx, 'lotRelation', { parentLotId: lot.id, childLotId: coilLot.id, lotRelationEvidence: 'ACTUAL_INPUT', inputTon: slabWeight, periodStartedAt: null, periodEndedAt: null });
+    insertRow(tx, 'lotRelation', { parentLotId: lot.id, childLotId: coilLot.id, lotRelationEvidence: 'ACTUAL_INPUT', inputTon: slabTheoreticalWeightTon, periodStartedAt: null, periodEndedAt: null });
     ensurePendingInspection(tx, coilLot);
     coilLots.push(coilLot);
   }
   const completed =
     updateRow(tx, 'productionResult', result.id, {
-      inputTon: decSum(slabs.map(() => slabWeight)),
+      inputTon: decSum(slabs.map(() => slabTheoreticalWeightTon)),
       outputQty: coilLots.length,
-      outputTon: calcWeightTon(coilLots.length, coilWeight),
+      outputTon: calcWeightTon(coilLots.length, coilTheoreticalWeightTon),
     }) ?? result;
   refreshInventory(tx, slabSpec.id);
   refreshInventory(tx, coil.id);
@@ -262,5 +263,6 @@ export function registerHotRolling(tx: MockTx, actor: PersonActor, input: HotRol
     lotIds: [...slabs.map((s) => s.lot.id), ...coilLots.map((c) => c.id)],
   });
   refreshPlanStatus(tx, plan.id);
+  assertNoOpenWorkOnCompletion(tx.tables, plan.id);
   return { coilLots, resultId: completed.id };
 }

@@ -72,7 +72,7 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
                         {lot.lotNo}
                       </Link>
                     </Td>
-                    {type === 'SLAB' || type === 'COIL' ? <Td className="font-mono text-mono text-ink-2">{lot.heatLotNo ?? '-'}</Td> : null}
+                    {type === 'SLAB' || type === 'COIL' ? <Td className="font-mono text-mono text-ink-2">{lot.heatNo ?? '-'}</Td> : null}
                     <Td className={type === 'SLAB' || type === 'COIL' ? 'font-mono text-mono' : undefined}>{tonText(lot)}</Td>
                     <Td>
                       {inspectionHrefOf(lot) ? (

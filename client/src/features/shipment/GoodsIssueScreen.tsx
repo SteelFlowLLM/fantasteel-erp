@@ -341,9 +341,9 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
                     <Td>
                       <TraceLink no={lot.lotNo} />
                     </Td>
-                    <Td className="font-mono text-mono">{lot.heatLotNo ?? '-'}</Td>
+                    <Td className="font-mono text-mono">{lot.heatNo ?? '-'}</Td>
                     <Td>{lot.producedDate}</Td>
-                    <Td align="right">{fmtTon(line.unitWeightTon)}</Td>
+                    <Td align="right">{fmtTon(line.theoreticalWeightTon)}</Td>
                     {issued ? null : (
                       <>
                         <Td>
