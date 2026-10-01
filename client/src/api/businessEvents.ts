@@ -124,6 +124,7 @@ function toView(tables: Readonly<MockTables>, row: BusinessEventRow, lotsByEvent
   const productionPlanId = row.targetType === 'production_result' ? (findRow(tables, 'productionResult', row.targetId)?.productionPlanId ?? null) : null;
   const receivedItemId = row.targetType === 'goods_receipt' ? (findRow(tables, 'goodsReceipt', row.targetId)?.purchaseOrderItemId ?? null) : null;
   const purchaseOrderId = receivedItemId === null ? null : (findRow(tables, 'purchaseOrderItem', receivedItemId)?.purchaseOrderId ?? null);
+  const shipmentRequestId = row.targetType === 'shipment_request_item' ? (findRow(tables, 'shipmentRequestItem', row.targetId)?.shipmentRequestId ?? null) : null;
   return {
     id: row.id,
     eventNo: row.eventNo,
@@ -135,7 +136,7 @@ function toView(tables: Readonly<MockTables>, row: BusinessEventRow, lotsByEvent
     targetTypeLabel: targetTableLabel(row.targetType),
     targetId: row.targetId,
     targetNo: row.targetNo,
-    targetHref: targetHref({ targetType: row.targetType, targetId: row.targetId, targetNo: row.targetNo, salesOrderId: row.salesOrderId, lotId: inspectedLotId, productionPlanId, purchaseOrderId }),
+    targetHref: targetHref({ targetType: row.targetType, targetId: row.targetId, targetNo: row.targetNo, salesOrderId: row.salesOrderId, lotId: inspectedLotId, productionPlanId, purchaseOrderId, shipmentRequestId }),
     salesOrderId: row.salesOrderId,
     salesOrderNo: salesOrder?.salesOrderNo ?? null,
     beforeData: row.beforeData,

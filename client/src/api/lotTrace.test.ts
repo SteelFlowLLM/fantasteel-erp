@@ -3,6 +3,9 @@ import { setActingEmployeeForTest } from '@/api/actor';
 import { lotTraceApi } from '@/api/lotTrace';
 import { buildTraceFixture, type TraceFixture } from '@/features/lotTrace/testing/traceFixture';
 import { getMockDb } from '@/mock/db';
+import { seedTxAt } from '@/mock/seeds';
+import { issueBusinessNo, issueSlabLotNo } from '@/mock/sequence';
+import { insertRow } from '@/mock/store';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 let f: TraceFixture;
@@ -45,9 +48,100 @@ describe('lotTraceApi.trace', () => {
       [f.allocatedRequestNo, 'ALLOCATED', [f.slabLotIds[2]]],
     ]);
     expect(trace.shipments[0]?.millSheets.map((m) => m.millSheetNo)).toEqual([f.millSheetNo]);
-    expect(trace.impact).toMatchObject({ slabCount: 3, coilCount: 2, shippedLotCount: 1, unshippedLotCount: 4 });
+    // 슬래브1·2는 코일로 투입 소진(CONSUMED) → 출고 전 제품은 재고인 슬래브3·코일2 두 개뿐
+    expect(trace.impact).toMatchObject({ slabCount: 3, coilCount: 2, shippedLotCount: 1, unshippedLotCount: 2, consumedLotCount: 2 });
     expect(trace.impact?.salesOrders).toEqual([
       { salesOrderId: f.salesOrderId, salesOrderNo: f.salesOrderNo, customerName: '가람중공업', hasShipped: true, lotCount: 5, dueDate: '2026-10-15' },
+    ]);
+  });
+
+  it('슬래브·코일에서 정추적하면 시작 LOT도 영향 제품으로 센다 (출하요청 목록과 같은 범위)', async () => {
+    const slab = await lotTraceApi.trace({ lotNo: f.slabLotNos[2], direction: 'forward' });
+    expect(slab.shipments.map((s) => s.shipmentRequestNo)).toEqual([f.allocatedRequestNo]);
+    expect(slab.impact).toMatchObject({ slabCount: 1, coilCount: 0, shippedLotCount: 0, unshippedLotCount: 1, consumedLotCount: 0 });
+    expect(slab.impact?.salesOrders).toEqual([expect.objectContaining({ salesOrderId: f.salesOrderId, hasShipped: false, lotCount: 1 })]);
+
+    const coil = await lotTraceApi.trace({ lotNo: f.coilLotNos[0], direction: 'forward' });
+    expect(coil.shipments.map((s) => s.shipmentRequestNo)).toEqual([f.issuedRequestNo]);
+    expect(coil.impact).toMatchObject({ coilCount: 1, shippedLotCount: 1, unshippedLotCount: 0 });
+    expect(coil.impact?.salesOrders).toEqual([expect.objectContaining({ salesOrderId: f.salesOrderId, hasShipped: true, lotCount: 1 })]);
+  });
+
+  it('열연 투입 배정(HOT_ROLLING)은 생산계획을 거쳐 그 코일 수주를 영향 수주로 잡는다', async () => {
+    const added = getMockDb().transact((root) => {
+      const t = root.tables;
+      const tx = seedTxAt(root, '2026-10-03T10:00:00+09:00');
+      const heat = t.lot.find((l) => l.id === f.heatLotId);
+      const coilItem = t.item.find((i) => i.itemType === 'COIL');
+      const customer = t.customer.find((c) => c.customerCode === 'CUS-02') ?? t.customer[0];
+      if (!heat || !coilItem || !customer) throw new Error('테스트 데이터 준비 실패');
+      const sales = employeeIdOf(SEED_EMPLOYEE_NO.sales);
+      const so = insertRow(tx, 'salesOrder', { salesOrderNo: issueBusinessNo(tx, 'SALES_ORDER'), customerId: customer.id, ownerEmployeeId: sales, cancelledAt: null, cancelReason: null });
+      const soItem = insertRow(tx, 'salesOrderItem', { salesOrderId: so.id, lineNo: 1, itemId: coilItem.id, orderedQty: 1, shippedQty: 0, dueDate: '2026-10-25', salesOrderItemStatus: 'OPEN' });
+      const plan = insertRow(tx, 'productionPlan', {
+        productionPlanNo: issueBusinessNo(tx, 'PRODUCTION_PLAN'),
+        salesOrderItemId: soItem.id,
+        itemId: coilItem.id,
+        shortageQty: 1,
+        cumulativeYieldRate: '0.950',
+        requiredSteelTon: '0.000',
+        heatCount: 0,
+        productionPlanStatus: 'IN_PROGRESS',
+        isReproduction: false,
+        isSurplusOnCompletion: false,
+        createdEmployeeId: sales,
+        cancelledAt: null,
+      });
+      // 히트의 재고 슬래브 한 매를 그 코일 계획의 열연에 배정 (아직 압연 전)
+      const slab = insertRow(tx, 'lot', {
+        lotNo: issueSlabLotNo(tx, heat.lotNo),
+        lotType: 'SLAB',
+        lotStatus: 'AVAILABLE',
+        itemId: t.lot.find((l) => l.id === f.slabLotIds[2])?.itemId ?? null,
+        steelGradeId: heat.steelGradeId,
+        heatLotId: heat.id,
+        blastFurnaceCode: null,
+        converterCode: null,
+        yardId: null,
+        goodsReceiptId: null,
+        productionResultId: null,
+        productionPlanId: null,
+        isPassed: true,
+        dispositionStatus: null,
+        dispositionReason: null,
+        dispositionAt: null,
+        surplusAt: tx.nowIso,
+        consumedAt: null,
+        shippedAt: null,
+        initialTon: null,
+        remainingTon: null,
+        producedDate: '2026-10-01',
+      });
+      insertRow(tx, 'lotRelation', { parentLotId: heat.id, childLotId: slab.id, lotRelationEvidence: 'ACTUAL_INPUT', inputTon: null, periodStartedAt: null, periodEndedAt: null });
+      insertRow(tx, 'allocation', {
+        lotId: slab.id,
+        allocationPurpose: 'HOT_ROLLING',
+        salesOrderItemId: null,
+        shipmentRequestItemId: null,
+        productionPlanId: plan.id,
+        allocationStatus: 'CONFIRMED',
+        confirmedEmployeeId: sales,
+        confirmedAt: tx.nowIso,
+        consumedAt: null,
+        releasedAt: null,
+      });
+      return { salesOrderId: so.id, salesOrderNo: so.salesOrderNo, slabLotId: slab.id };
+    });
+
+    const trace = await lotTraceApi.trace({ lotNo: f.heatLotNo });
+    expect(trace.impact?.salesOrders).toContainEqual(
+      expect.objectContaining({ salesOrderId: added.salesOrderId, salesOrderNo: added.salesOrderNo, hasShipped: false, lotCount: 1, dueDate: '2026-10-25' }),
+    );
+    expect(trace.impact).toMatchObject({ slabCount: 4, unshippedLotCount: 3 });
+
+    const detail = await lotTraceApi.detail(added.slabLotId);
+    expect(detail.allocations).toEqual([
+      expect.objectContaining({ allocationPurpose: 'HOT_ROLLING', allocationStatus: 'CONFIRMED', salesOrder: expect.objectContaining({ salesOrderId: added.salesOrderId }) }),
     ]);
   });
 

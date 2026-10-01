@@ -5,8 +5,6 @@ import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import {
   ALLOCATION_PURPOSE_LABEL,
-  ALLOCATION_STATUS_LABEL,
-  DISPOSITION_STATUS_LABEL,
   INSPECTION_RESULT_LABEL,
   LOT_RELATION_EVIDENCE_LABEL,
   LOT_TYPE_LABEL,
@@ -34,6 +32,8 @@ import {
   fmtPeriod,
 } from '@/features/lotTrace/components/TraceBits';
 import type { TraceDirection } from '@/features/lotTrace/lib/traceGraph';
+import { DispositionBadge } from '@/features/quality/components/QualityBadges';
+import { AllocationStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { useLotDetail } from '@/hooks/useLotTrace';
 import { fmtDate, fmtDateTime, fmtDims, fmtTon } from '@/lib/format';
 
@@ -173,12 +173,12 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
       <div className="flex min-h-0 flex-col gap-3.5 overflow-auto px-4 py-3">
         <KvList items={rows} />
         {lot.disposition ? (
-          <PanelSection title="불합격 처리 상태">
+          <PanelSection title="불합격 상태">
             <KvList
               items={[
-                { label: '처리 상태', value: <Badge tone="danger">{DISPOSITION_STATUS_LABEL[lot.disposition.dispositionStatus]}</Badge> },
+                { label: '불합격 상태', value: <DispositionBadge status={lot.disposition.dispositionStatus} /> },
                 { label: '사유', value: lot.disposition.dispositionReason ?? '-' },
-                { label: '처리 시각', value: <span className="tabular-nums">{fmtDateTime(lot.disposition.dispositionAt)}</span> },
+                { label: '지정 시각', value: <span className="tabular-nums">{fmtDateTime(lot.disposition.dispositionAt)}</span> },
               ]}
             />
           </PanelSection>
@@ -189,7 +189,7 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
               {lot.allocations.map((a) => (
                 <li key={a.id} className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
                   <Tag>{ALLOCATION_PURPOSE_LABEL[a.allocationPurpose]}</Tag>
-                  <Badge tone={a.allocationStatus === 'CONFIRMED' ? 'run' : 'neutral'}>{ALLOCATION_STATUS_LABEL[a.allocationStatus]}</Badge>
+                  <AllocationStatusBadge status={a.allocationStatus} />
                   {a.salesOrder ? (
                     <LinkId href={`/sales-orders/${a.salesOrder.salesOrderId}`}>
                       {a.salesOrder.salesOrderNo} · 품목 {a.salesOrder.lineNo}

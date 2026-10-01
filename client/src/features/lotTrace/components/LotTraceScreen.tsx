@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { LOT_RELATION_EVIDENCE_LABEL, LOT_TYPE_LABEL } from '@/codes';
+import { LOT_RELATION_EVIDENCE_LABEL, LOT_TYPE_LABEL, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
 import { ApiError } from '@/api/client';
 import type { LotTraceInput, LotTraceView } from '@/api/lotTrace';
 import { Button, ButtonLink } from '@/components/Button';
@@ -190,7 +190,7 @@ function TraceBody({ trace, onReroot }: { trace: LotTraceView; onReroot: (lotNo:
                   <line x1="0" y1="3" x2="26" y2="3" className="stroke-brand" strokeWidth={2} />
                 </svg>
                 {LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}
-                {hasAlloy ? ' (합금철 포함)' : ''}
+                {hasAlloy ? ` (${RAW_MATERIAL_TYPE_LABEL.FERROALLOY} 포함)` : ''}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <svg width="26" height="6" aria-hidden="true">
