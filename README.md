@@ -9,11 +9,33 @@
 
 ## 실행
 
-필요: Node.js 22.18 이상. 처음 한 번만 설치합니다.
+필요: Node.js 22.18 이상. 명령은 모두 이 폴더(저장소 맨 위)에서 실행합니다.
+
+처음 한 번만 설치합니다. 설치가 끝나면 shared 빌드와 Prisma 클라이언트 생성이 자동으로 이어집니다.
 
 ```bash
 npm install
 ```
+
+서버 설정 파일을 만듭니다 (로컬 DB 주소가 이미 들어 있어서 고칠 것은 없습니다).
+
+```bash
+cp server/.env.example server/.env
+```
+
+처음 받은 PC라면 DB가 비어 있으니 스키마와 시드를 넣습니다. 한 터미널에서 DB를 띄우고,
+
+```bash
+npm run db
+```
+
+다른 터미널에서 초기화합니다. 끝나면 DB 터미널은 그대로 두거나 꺼도 됩니다.
+
+```bash
+npm run db:reset
+```
+
+이제 실행합니다.
 
 ```bash
 npm run dev
