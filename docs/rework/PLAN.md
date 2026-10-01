@@ -2,12 +2,12 @@
 
 이 파일 하나만 읽으면 이어서 작업할 수 있게 정리했다. 근거 자료 위치는 0장에 있다.
 
-## 0. 근거 자료 (scratchpad 기준 경로)
+## 0. 근거 자료 (저장소 경로)
 - 노션 6개 문서(기준): 기획안 3eafd8622270806a9adfcb5442d2c017 · 요구사항 3eafd86222708082b7d5d917cab5da14 · 용어 사전 3ebfd862227080e68127f2dadf67a855 · 업무 프로세스 3ebfd862227080b0beadf2f854f770c3 · 코드 컨벤션 3eafd862227080a3a7ecc25387aaf5e9 · 공통 코드 3ecfd862227080ad9553d6bcb92522f9
-  - 로컬 사본: `docs/01~06-*.md`. 04번(업무 프로세스)은 `process.md`와 같다.
-- KS 규격 정리(3ecfd862227081c9b880f4edadb4621d): 2026-10-01에 사용자가 읽기를 허용했다. 검사 기준 수치에만 쓴다. 사본은 `docs/07-KS-규격-정리.md`, 추출본은 `docs/ks-values.md`.
-- ERD 최종본 https://claude.ai/artifact/Q2DZcpJ4Cgr2vxQTQ4qVbd: 화면 항목 참고용으로만 쓴다. 정리본은 `reports/erd-final.txt`(테이블 49·컬럼 443·관계 95).
-- 지금 코드 조사 보고서(영역별, 파일:줄 근거 포함): `reports/1-sales-shipment.md`, `2-purchasing-mrp-actiondraft.md`, `3-production-inventory.md`, `4-quality-lot-log.md`, `5-admin-masterdata-login.md`, `6-collab-dashboard-p2.md`
+  - 로컬 사본: `docs/notion/01~06-*.md` (2026-10-01 사본).
+- KS 규격 정리(3ecfd862227081c9b880f4edadb4621d): 2026-10-01에 사용자가 읽기를 허용했다. 검사 기준 수치에만 쓴다. 사본은 `docs/notion/07-KS-규격-정리.md`, 추출본은 `docs/rework/ks-values.md`.
+- ERD 최종본 https://claude.ai/artifact/Q2DZcpJ4Cgr2vxQTQ4qVbd: 화면 항목 참고용으로만 쓴다. 정리본은 `docs/rework/erd-final.txt`(테이블 49·컬럼 443·관계 95).
+- 옛 화면 조사 보고서(영역별, 파일:줄 근거 포함, `docs/rework/reports/`): `1-sales-shipment.md`, `2-purchasing-mrp-actiondraft.md`, `3-production-inventory.md`, `4-quality-lot-log.md`, `5-admin-masterdata-login.md`, `6-collab-dashboard-p2.md`
 - 저장소 `SPEC.md`·`CLAUDE.md`는 6개 문서 밖이다. 이전 작업의 결정 파일이므로 인용할 때 "저장소 SPEC.md"라고 밝힌다.
 - 읽지 않는다: server/, prisma, docs/api, docs/names, docs/SERVER-GUIDE.md. 노션은 역할별 메뉴 (v2), 화면별 데이터·API 명세, API 명세서, 개발 스택·개발 환경 V2.
 - `../v1`은 이 PC에 없다(B안 원본 화면 없음). 지금 client가 B안 모양을 옮겨 둔 것이다.
