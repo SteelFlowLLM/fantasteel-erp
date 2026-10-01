@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { INSPECTION_RESULT_LABEL } from '@/codes';
 import type { SalesOrderPlanLink } from '@/api/salesOrders';
 import { Badge } from '@/components/Badge';
+import { ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { KvList } from '@/components/KvList';
 import { QueryBoundary } from '@/components/QueryBoundary';
@@ -31,6 +32,9 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
             {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
+            <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
+              작업 실적
+            </ButtonLink>
           </span>
         }
       />
@@ -51,7 +55,7 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             ]}
           />
         ) : (
-          <EmptyNote className="py-2">편성표를 계산할 수 없어요 (수율·배합·규격 매핑 확인 필요)</EmptyNote>
+          <EmptyNote className="py-2">편성표를 계산할 수 없어요 (계획 수율·배합 원단위·규격 매핑 확인 필요)</EmptyNote>
         )}
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-ink-2 tabular-nums">
           <span>
@@ -146,7 +150,7 @@ export function ProductionLinkTab({ salesOrderId }: { salesOrderId: number }) {
             {rows.map((link) => (
               <PlanCard key={link.plan.id} link={link} />
             ))}
-            <p className="text-cap text-ink-3">작업 실적과 실적 시뮬레이션은 생산계획 화면에서 해요. 예약은 LOT을 정하지 않고, LOT은 출하요청 때 배정해요.</p>
+            <p className="text-cap text-ink-3">작업 실적과 실적 시뮬레이션은 작업 실적 화면에서 해요. 예약은 LOT을 정하지 않고, LOT은 출하요청 때 배정해요.</p>
           </div>
         )
       }

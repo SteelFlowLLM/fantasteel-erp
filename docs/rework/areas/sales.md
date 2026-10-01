@@ -13,7 +13,7 @@
 
 탭 (`features/sales/components/`)
 - **충족 현황** `FulfillmentTab.tsx` — 품목별 표: 수주 매수·톤·납기·**예약 ÷ 미출하 · 생산중 ÷ 수주 · 검사합격 ÷ 수주 · 출하 ÷ 수주**(지표마다 막대 + "n / 분모" + %), 미확보, 추가 계획 필요, 합계 행. 아래 안내: 분모가 다르고 지표를 더하지 않는다(4.5). 재생산 필요 품목은 빨간 띠 + [재생산 계획 만들기](생산계획·히트 편성 USE, 확인 창). 추가 계획 필요가 여재로 채워질 수 있으면 안내 띠만. 출하 준비 카드(품목별 출하 가능 예약, 출하요청 목록·상태, 밀시트 번호), 업무방 카드, 품목별 생산계획 요약.
-- **생산 연결** `ProductionLinkTab.tsx` — 연결 계획마다 편성표(부족 매수·수주 목표·누적 계획수율·필요 용강량·히트 수×용량·히트 전체 톤·히트당 슬래브·계획 슬래브·예상 슬래브 여재), 진행(제강·연주 히트, 슬래브·코일, 합격·판정 대기·불합격, 잔여 목표), 편성 히트 표(순번·히트 번호(LOT 추적 링크)·전로·생산일·히트 톤·성분 판정·연주·슬래브). 재생산·완료 후 여재 꼬리표. 수주 취소로 연결이 풀린 진행 계획도 "수주 연결 해제"로 보인다(작업 로그의 이 수주 계획 이벤트 기준).
+- **생산 연결** `ProductionLinkTab.tsx` — 연결 계획마다 편성표(부족 매수·수주 목표·누적 계획수율·필요 용강량·히트 수×용량·히트 전체 톤·히트당 슬래브·계획 슬래브·예상 슬래브 여재), 진행(제강·연주 히트, 슬래브·코일, 합격·판정 대기·불합격, 잔여 목표), 편성 히트 표(순번·히트 번호(LOT 추적 링크)·전로·생산일·히트 톤·성분 판정·연주·슬래브), 카드마다 [작업 실적] 단추(`/production/results?plan=`). 재생산·완료 후 여재 꼬리표. 수주 취소로 연결이 풀린 진행 계획도 "수주 연결 해제"로 보인다(작업 로그의 이 수주 계획 이벤트 기준).
 - **예약** `ReservationTab.tsx` — 품목·규격 코드·상태(예약중/출고 전환/해제)·예약 매수·톤(계산값)·생성·변경. 해제 행은 흐리게.
 - **이력** `HistoryTab.tsx` — 이 수주(`business_event.sales_order_id`)의 작업 로그를 **시간순**(동률은 id)으로: 주체(시스템/사원 이름)·유형 표시명·대상 번호·사유·LOT 번호(추적 링크). [작업 로그에서 보기] → `/business-events?salesOrderId=…`.
 
@@ -48,10 +48,9 @@
 | `workRoom(id)` → `{chatRoomId, chatRoomName, memberEmployeeIds} \| null` | 수주 조회 | `workRoomOfSalesOrder` |
 | `openWorkRoom({salesOrderId, memberEmployeeIds})` | 수주 조회 | `openWorkRoom` |
 | `createReproduction({salesOrderItemId})` | 생산계획·히트 편성 USE | `createReproductionPlan` |
-| `roomSummary(id)` | 수주 조회 **또는 그 업무방 멤버** | `salesOrderDetail`(요약·품목만) — 메신저 영역용 |
 
 - 조회 키: `salesOrderKeys`(`['sales-orders', …]`) — 이 파일 안에 둠. 변경 뒤에는 `useAction`이 모든 조회를 무효화한다.
-- 훅: `useSalesOrderList`, `useSalesOrderDetail`, `useSalesOrderProductionLinks`, `useSalesOrderTimeline`, `useSalesOrderPreview`(keepPreviousData), `useSalesOrderRoomSummary`, `useSalesOrderWorkRoom`.
+- 훅: `useSalesOrderList`, `useSalesOrderDetail`, `useSalesOrderProductionLinks`, `useSalesOrderTimeline`, `useSalesOrderPreview`(keepPreviousData), `useSalesOrderWorkRoom`.
 - 순수 계산 `features/sales/lib/salesOrderForm.ts`(+테스트): 매수 확인(`/^\d+$/`, 1 이상, 글자를 지우지 않음), 줄 오류(문구는 SO-002 그대로), 미리보기 줄, 수량 단위(매/개/매·개), 분모 표시·% 버림, 목록 거르기.
 
 ## 4. 보고서 1 C 항목 반영
@@ -72,11 +71,11 @@
 |---|---|---|
 | 수주 화면 조회 권한 | 수주 등록·수주 취소 중 하나라도 VIEW 이상 (screens.ts와 같음). 조회 api도 같은 규칙으로 COM-002 | BP-AUTH-01 "각 API에서 권한 재확인" |
 | 업무방 열기 권한 | 수주를 볼 수 있는 사원이면 누구나(사용 권한 코드 없음) | 업무방·메신저는 권한 코드가 없다(공통 코드 PERMISSION) |
-| 업무방 수주 요약 | 수주 조회 권한이 없어도 그 업무방 멤버면 볼 수 있다 | 멤버는 조직도에서 고른 다른 부서 사람(REQ-MSG-001) |
+| 업무방 수주 요약 | 그 업무방 멤버이면서 수주 조회 권한(수주 등록·취소 VIEW 이상)도 있어야 볼 수 있다. 권한이 없으면 메신저가 "denied"(수주 조회 권한 없음)로 보인다 | 04 BP-MSG-01 "방 멤버 권한과 ERP 대상 조회 권한을 모두 확인한다". 요약은 메신저 영역(`messengerApi.getRoom`)이 만든다 |
 | 목록 진행 막대 | 검사합격(= 예약 + 출하) ÷ 수주 매수 | core 충족 지표 `passed`, 4.5 분모 명시 |
 | 생산 연결의 '연결 해제' 계획 | 지금 연결된 계획 + 작업 로그에 이 수주로 남은 생산계획 이벤트의 계획 | 취소 뒤에도 어떤 계획이 여재로 넘어갔는지 보이게 |
 | 미리보기 납기 | 미리보기는 납기를 쓰지 않으므로 서비스 입력 확인용으로 오늘 날짜를 넣는다(저장 안 함) | core `previewSalesOrder`가 납기 형식을 확인함 |
-| 다른 영역 주소 | `/messenger?room=`, `/shipment-requests/new?salesOrderId=`, `/shipment-requests/<id>`, `/mill-sheets?millSheet=`, `/production/plans?plan=`, `/lots/trace?lot=`, `/business-events?salesOrderId=` | 옛 화면 주소를 따름. 병합 때 각 영역 주소와 맞춰야 함 |
+| 다른 영역 주소 | `/messenger?room=`, `/shipment-requests/new?salesOrderId=`, `/shipment-requests/<id>`, `/mill-sheets?id=`, `/production/plans?plan=`, `/production/results?plan=`, `/lots/trace?lot=`, `/business-events?salesOrderId=` | 옛 화면 주소를 따름. 병합 때 각 영역 주소와 맞춰야 함 |
 
 ## 7. 공유 파일 변경
 
@@ -85,13 +84,29 @@
 ## 8. 확인·테스트
 
 - `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 167개 통과(이 영역 21개).
-  - `api/salesOrders.test.ts` 15개: 목록·권한(생산 VIEW 통과, 구매·물류 COM-002), 분모 지표, COM-003, 미리보기(14.1 6/4, 같은 규격 두 줄, SO-001·002), 등록(14.1 작업 로그 순서·주체·사유, 혼합 수주 14.2, COM-002·SO-001·SO-002·COM-003·납기 누락에 아무것도 저장 안 됨), 취소(SO-003·SO-004·COM-002·사유 필수·COM-001·해제/계획 취소·다시 취소 거부·풀린 재고 가용, 진행 중 계획 연결 해제 + SURPLUS_CONVERTED), 재생산(COM-002·생성·재생산 필요 0·중복 거부·COM-003), 업무방(생성·멤버 추가·COM-003·COM-002, 멤버 요약). 변경 뒤 `checkInvariants` = [].
+  - `api/salesOrders.test.ts` 15개: 목록·권한(생산 VIEW 통과, 구매·물류 COM-002), 분모 지표, COM-003, 미리보기(14.1 6/4, 같은 규격 두 줄, SO-001·002), 등록(14.1 작업 로그 순서·주체·사유, 혼합 수주 14.2, COM-002·SO-001·SO-002·COM-003·납기 누락에 아무것도 저장 안 됨), 취소(SO-003·SO-004·COM-002·사유 필수·COM-001·해제/계획 취소·다시 취소 거부·풀린 재고 가용, 진행 중 계획 연결 해제 + SURPLUS_CONVERTED), 재생산(COM-002·생성·재생산 필요 0·중복 거부·COM-003), 업무방(생성·멤버 추가·COM-003·COM-002). 변경 뒤 `checkInvariants` = [].
   - `features/sales/lib/salesOrderForm.test.ts` 6개.
 - 지시대로 dev 서버·`next build`는 돌리지 않았다. 화면은 타입 검사와 코드 검토로만 확인했다(병합 단계 빌드·화면 확인 필요).
 
 ## 9. 남은 일·확인 필요
 
-1. 메신저 영역: 업무방 머리의 수주 요약은 `salesOrderApi.roomSummary(salesOrderId)`(또는 `useSalesOrderRoomSummary`)를 쓰면 된다(2단계에서 []를 돌려주던 자리). 메신저 파일은 이 영역 소유가 아니라 연결하지 않았다.
-2. 출하요청·밀시트·생산계획 화면의 쿼리 이름(`?salesOrderId=`, `?millSheet=`, `?plan=`)이 각 영역과 같은지 병합 때 확인.
+1. 업무방 머리의 수주 요약은 메신저 영역(`messengerApi.getRoom`의 `salesOrderState`·`salesOrder`)이 만든다. 병합(a288b08) 때 `salesOrderApi.roomSummary`·`useSalesOrderRoomSummary`는 지웠다. 방 멤버이면서 수주 조회 권한이 있어야 요약이 보이고, 없으면 "denied"다(BP-MSG-01).
+2. 출하요청·밀시트·생산계획 화면의 쿼리 이름(`?salesOrderId=`, `?id=`, `?plan=`)이 각 영역과 같은지 병합 때 확인.
 3. 업무방 열기는 작업 로그 유형이 29개 안에 없어 남기지 않는다(시스템 메시지만).
 4. 예약 탭의 '구분'(재고 우선/자동 예약) 열은 예약 행에 사유가 없어 빼고, 이력 탭에서 보게 했다.
+
+## 10. 검토 반영 (2026-10-02)
+
+| 지적 | 근거 | 고친 것 |
+|---|---|---|
+| 업무방 수주 요약 가정값이 "멤버면 수주 조회 권한 없이 본다"로 남음. 지운 `roomSummary`·`useSalesOrderRoomSummary`가 문서에 남음 | 04 BP-MSG-01 "방 멤버 권한과 ERP 대상 조회 권한을 모두 확인한다" | §3 api 표의 `roomSummary` 행과 훅 목록의 `useSalesOrderRoomSummary`를 지웠다. §6 가정값과 `docs/rework/seed-assumptions.md`의 같은 행을 "멤버 **이면서** 수주 조회 권한, 없으면 메신저 denied"로 고쳤다. §9-1도 다시 썼다 |
+| `api/salesOrders.ts`의 `salesOrderKeys` 위에 지운 코드를 설명하는 주석이 남음 | 같은 BP-MSG-01 | 주석을 지웠다 |
+| 밀시트 주소가 `/mill-sheets?millSheet=` | `MillSheetScreen`·`FulfillmentTab`은 `?id=` | §6·§9-2를 `/mill-sheets?id=`로 고쳤다 (코드는 이미 `?id=`) |
+| 생산 연결 탭 안내가 "작업 실적과 실적 시뮬레이션은 생산계획 화면에서 해요" | PLAN §7 생산·재고, stage3.md 화면 4 (`/production/results?plan=…`) | "작업 실적 화면에서 해요"로 고치고, 계획 카드마다 [작업 실적] 단추(`/production/results?plan=<id>`, 생산계획 화면과 같은 모양)를 달았다 |
+| 편성표 빈 안내에 금지어 '배합' 단독 사용 | 03 용어 사전 TRM-027 배합 원단위(동의어 '배합' 사용 금지) | "편성표를 계산할 수 없어요 (계획 수율·배합 원단위·규격 매핑 확인 필요)" |
+| 충족 지표 막대 `muted` 색이 `bg-[#9db6d1]` | 05 §9, B안 토큰(`--color-chart-3`) | `bg-chart-3` (같은 색) |
+| 매수 변수에 `Qty`가 없음 | 05 §2 [강제] "매수는 Qty" | `reserveTotal`→`reserveTotalQty`, `shortageTotal`→`shortageTotalQty`(SalesOrderCreateScreen), `need`→`reproductionNeedQty`(FulfillmentTab) |
+
+- 테스트: `api/salesOrders.test.ts`에 1개 더함 — 업무방 멤버(물류)라도 수주 조회 권한이 없으면 `salesOrderApi.detail`·`workRoom`이 COM-002이고 `messengerApi.getRoom`의 `salesOrderState`가 `denied`, 영업은 `ok`(BP-MSG-01).
+- 공유 파일 변경: `docs/rework/seed-assumptions.md` 업무방 수주 요약 1행만 고침(위 BP-MSG-01).
+- 확인: `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 543개 통과(74 파일). dev 서버·`next build`는 돌리지 않았다.
