@@ -71,8 +71,10 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                       </div>
                       <FulfillmentMeasures item={item} compact />
                       {item.shortage.reproductionNeedQty > 0 ? (
-                        <span className="text-cap font-semibold text-danger">재생산 필요 {item.shortage.reproductionNeedQty}
-                          {qtyUnitOf([item.itemType])} · 상세에서 만들 수 있어요</span>
+                        <span className="text-cap font-semibold text-danger">
+                          재생산 필요 {item.shortage.reproductionNeedQty}
+                          {qtyUnitOf([item.itemType])} · 상세에서 만들 수 있어요
+                        </span>
                       ) : null}
                     </div>
                   ))}

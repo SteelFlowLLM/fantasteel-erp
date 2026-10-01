@@ -11,7 +11,17 @@ import { OpenWorkRoomModal } from '@/features/sales/components/OpenWorkRoomModal
 import { MeasureBar } from '@/features/sales/components/SalesOrderParts';
 import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
-export function WorkRoomButton({ salesOrderId, salesOrderNo, hasRoom, size = 'sm' }: { salesOrderId: number; salesOrderNo: string; hasRoom: boolean; size?: ButtonSize }) {
+export function WorkRoomButton({
+  salesOrderId,
+  salesOrderNo,
+  hasRoom,
+  size = 'sm',
+}: {
+  salesOrderId: number;
+  salesOrderNo: string;
+  hasRoom: boolean;
+  size?: ButtonSize;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>

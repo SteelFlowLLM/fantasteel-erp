@@ -85,8 +85,18 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
                   <input type="checkbox" className="size-3.5" checked={checked} disabled={locked} onChange={() => toggle(member.id)} />
                   <span className="font-medium">{member.employeeName}</span>
                   <span className="text-ink-3">{member.jobGradeName}</span>
-                  {member.isHead ? <Tag tone="outline" size="sm">부서장</Tag> : null}
-                  {isMe ? <Tag tone="brand" size="sm">나</Tag> : already ? <Tag size="sm">멤버</Tag> : null}
+                  {member.isHead ? (
+                    <Tag tone="outline" size="sm">
+                      부서장
+                    </Tag>
+                  ) : null}
+                  {isMe ? (
+                    <Tag tone="brand" size="sm">
+                      나
+                    </Tag>
+                  ) : already ? (
+                    <Tag size="sm">멤버</Tag>
+                  ) : null}
                 </label>
               </li>
             );
@@ -111,7 +121,12 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
           <Button onClick={onClose} disabled={open.isPending}>
             닫기
           </Button>
-          <Button variant="primary" icon="hash" disabled={open.isPending || room.isPending} onClick={() => open.mutate({ salesOrderId, memberEmployeeIds: [...picked] })}>
+          <Button
+            variant="primary"
+            icon="hash"
+            disabled={open.isPending || room.isPending}
+            onClick={() => open.mutate({ salesOrderId, memberEmployeeIds: [...picked] })}
+          >
             {open.isPending ? '여는 중…' : hasRoom ? '업무방으로 가기' : '업무방 만들기'}
           </Button>
         </>

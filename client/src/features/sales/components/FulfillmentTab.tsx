@@ -58,7 +58,7 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
           {unit}
         </b>{' '}
         — 미확보 {item.shortage.unsecuredQty}
-        {unit} 가운데 진행 중인 생산계획({item.shortage.openPlanRemainingQty}
+        {unit} 가운데 진행중인 생산계획({item.shortage.openPlanRemainingQty}
         {unit})과 같은 규격 예약 가용({item.shortage.reservationAvailableQty}
         {unit})으로도 채우지 못하는 매수예요.
       </Banner>
@@ -70,7 +70,8 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
           onCancel={() => setConfirming(false)}
           onConfirm={() => create.mutate({ salesOrderItemId: item.salesOrderItemId })}
         >
-          같은 규격 여재가 있으면 먼저 예약하고, 그래도 모자라는 매수만 재생산 계획(히트 편성 포함)으로 만들어요. 작업 로그에 &lsquo;재생산 계획 생성&rsquo;으로 남아요.
+          같은 규격 여재가 있으면 먼저 예약하고, 그래도 모자라는 매수만 재생산 계획(히트 편성 포함)으로 만들어요. 작업 로그에 &lsquo;재생산 계획 생성&rsquo;으로
+          남아요.
         </ConfirmDialog>
       ) : null}
     </>
@@ -196,8 +197,8 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
           </Table>
         </div>
         <div className="border-t border-line px-4 py-2.5 text-cap leading-[18px] text-ink-3">
-          지표마다 분모가 달라요. 예약은 미출하 매수로, 생산중·검사합격·출하는 수주 매수로 나눠요. 검사합격은 이 품목 몫으로 확보한 합격 제품(예약 + 출하)이라 예약과 겹쳐요 — 지표를 더하지 않아요.
-          미확보 = 미출하 − 예약, 추가 계획 필요 = 미확보 − 진행 계획 잔여 목표.
+          지표마다 분모가 달라요. 예약은 미출하 매수로, 생산중·검사합격·출하는 수주 매수로 나눠요. 검사합격은 이 품목 몫으로 확보한 합격 제품(예약 + 출하)이라
+          예약과 겹쳐요 — 지표를 더하지 않아요. 미확보 = 미출하 − 예약, 추가 계획 필요 = 미확보 − 진행 계획 잔여 목표.
         </div>
       </Card>
 
@@ -253,8 +254,20 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                         </Link>
                       </Td>
                       <Td>
-                        <Badge tone={request.shipmentRequestStatus === 'ISSUED' ? 'ok' : request.shipmentRequestStatus === 'CANCELLED' ? 'neutral' : request.shipmentRequestStatus === 'ALLOCATED' ? 'run' : 'wait'}>
-                          {isShipmentRequestStatus(request.shipmentRequestStatus) ? SHIPMENT_REQUEST_STATUS_LABEL[request.shipmentRequestStatus] : request.shipmentRequestStatus}
+                        <Badge
+                          tone={
+                            request.shipmentRequestStatus === 'ISSUED'
+                              ? 'ok'
+                              : request.shipmentRequestStatus === 'CANCELLED'
+                                ? 'neutral'
+                                : request.shipmentRequestStatus === 'ALLOCATED'
+                                  ? 'run'
+                                  : 'wait'
+                          }
+                        >
+                          {isShipmentRequestStatus(request.shipmentRequestStatus)
+                            ? SHIPMENT_REQUEST_STATUS_LABEL[request.shipmentRequestStatus]
+                            : request.shipmentRequestStatus}
                         </Badge>
                       </Td>
                       <Td className="tabular-nums">{fmtDate(request.requestedShipDate)}</Td>
@@ -282,7 +295,9 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
           <CardHead title="업무방" />
           <CardBody>
             <p className="text-sm leading-5 text-ink-2">
-              {detail.workRoomId !== null ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.' : '아직 업무방이 없어요. 열면 이 수주와 연결된 방이 만들어지고, 멤버는 조직도에서 골라요.'}
+              {detail.workRoomId !== null
+                ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.'
+                : '아직 업무방이 없어요. 열면 이 수주와 연결된 방이 만들어지고, 멤버는 조직도에서 골라요.'}
             </p>
             <div>
               <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} />

@@ -8,7 +8,7 @@ import { ITEM_TYPE_LABEL, PERMISSION, SALES_ORDER_ITEM_STATUS_LABEL } from '@/co
 import type { SalesOrderListRow } from '@/api/salesOrders';
 import { Button, ButtonLink } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { MasterPane, PageMain } from '@/components/Page';
+import { PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote } from '@/components/StateView';
@@ -113,56 +113,54 @@ export function SalesOrderListScreen() {
 
   return (
     <>
-      <MasterPane
-        className="w-60"
-        head={
-          <div className="flex items-center gap-2">
-            <b className="text-sm font-semibold">필터</b>
-            {applied > 0 ? <Tag tone="run">적용 {applied}</Tag> : null}
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => update(EMPTY_FILTER)} disabled={applied === 0 && filter.keyword === ''}>
-              초기화
-            </Button>
-          </div>
-        }
-      >
-        <FilterGroup title="상태">
-          <RadioRow name="so-status" checked={filter.status === 'ALL'} onChange={() => update({ status: 'ALL' })}>
-            전체
-          </RadioRow>
-          {SALES_ORDER_STATUS_KEYS.map((status) => (
-            <RadioRow key={status} name="so-status" checked={filter.status === status} onChange={() => update({ status })}>
-              {SALES_ORDER_ITEM_STATUS_LABEL[status]}
+      <section aria-label="수주 필터" className="flex min-h-0 w-60 flex-none flex-col border-r border-line bg-surface">
+        <div className="flex flex-none items-center gap-2 border-b border-line px-4 pt-3.5 pb-2.5">
+          <b className="text-sm font-semibold">필터</b>
+          {applied > 0 ? <Tag tone="run">적용 {applied}</Tag> : null}
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => update(EMPTY_FILTER)} disabled={applied === 0 && filter.keyword === ''}>
+            초기화
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <FilterGroup title="상태">
+            <RadioRow name="so-status" checked={filter.status === 'ALL'} onChange={() => update({ status: 'ALL' })}>
+              전체
             </RadioRow>
-          ))}
-          <label className="mt-1 flex h-7 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-sm font-medium text-danger hover:bg-danger-bg">
-            <input type="checkbox" className="size-3.5" checked={filter.riskOnly} onChange={(event) => update({ riskOnly: event.target.checked })} />
-            납기 위험만
-          </label>
-        </FilterGroup>
-        <FilterGroup title="고객사">
-          <RadioRow name="so-customer" checked={filter.customerId === null} onChange={() => update({ customerId: null })}>
-            전체
-          </RadioRow>
-          {customers.isPending ? <span className="px-1.5 text-cap text-ink-3">불러오는 중…</span> : null}
-          {customers.error ? <span className="px-1.5 text-cap text-danger">고객사 목록을 불러오지 못했어요</span> : null}
-          {(customers.data ?? []).map((customer) => (
-            <RadioRow key={customer.id} name="so-customer" checked={filter.customerId === customer.id} onChange={() => update({ customerId: customer.id })}>
-              {customer.customerName}
+            {SALES_ORDER_STATUS_KEYS.map((status) => (
+              <RadioRow key={status} name="so-status" checked={filter.status === status} onChange={() => update({ status })}>
+                {SALES_ORDER_ITEM_STATUS_LABEL[status]}
+              </RadioRow>
+            ))}
+            <label className="mt-1 flex h-7 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-sm font-medium text-danger hover:bg-danger-bg">
+              <input type="checkbox" className="size-3.5" checked={filter.riskOnly} onChange={(event) => update({ riskOnly: event.target.checked })} />
+              납기 위험만
+            </label>
+          </FilterGroup>
+          <FilterGroup title="고객사">
+            <RadioRow name="so-customer" checked={filter.customerId === null} onChange={() => update({ customerId: null })}>
+              전체
             </RadioRow>
-          ))}
-        </FilterGroup>
-        <FilterGroup title="품목 유형">
-          <RadioRow name="so-type" checked={filter.itemType === 'ALL'} onChange={() => update({ itemType: 'ALL' })}>
-            전체
-          </RadioRow>
-          <RadioRow name="so-type" checked={filter.itemType === 'SLAB'} onChange={() => update({ itemType: 'SLAB' })}>
-            {ITEM_TYPE_LABEL.SLAB}
-          </RadioRow>
-          <RadioRow name="so-type" checked={filter.itemType === 'COIL'} onChange={() => update({ itemType: 'COIL' })}>
-            {ITEM_TYPE_LABEL.COIL}
-          </RadioRow>
-        </FilterGroup>
-      </MasterPane>
+            {customers.isPending ? <span className="px-1.5 text-cap text-ink-3">불러오는 중…</span> : null}
+            {customers.error ? <span className="px-1.5 text-cap text-danger">고객사 목록을 불러오지 못했어요</span> : null}
+            {(customers.data ?? []).map((customer) => (
+              <RadioRow key={customer.id} name="so-customer" checked={filter.customerId === customer.id} onChange={() => update({ customerId: customer.id })}>
+                {customer.customerName}
+              </RadioRow>
+            ))}
+          </FilterGroup>
+          <FilterGroup title="품목 유형">
+            <RadioRow name="so-type" checked={filter.itemType === 'ALL'} onChange={() => update({ itemType: 'ALL' })}>
+              전체
+            </RadioRow>
+            <RadioRow name="so-type" checked={filter.itemType === 'SLAB'} onChange={() => update({ itemType: 'SLAB' })}>
+              {ITEM_TYPE_LABEL.SLAB}
+            </RadioRow>
+            <RadioRow name="so-type" checked={filter.itemType === 'COIL'} onChange={() => update({ itemType: 'COIL' })}>
+              {ITEM_TYPE_LABEL.COIL}
+            </RadioRow>
+          </FilterGroup>
+        </div>
+      </section>
 
       <PageMain className="min-w-[560px]">
         <div className="flex flex-none flex-wrap items-center gap-2">
@@ -233,7 +231,11 @@ export function SalesOrderListScreen() {
                           onClick={() => setSelectedId(row.id)}
                         >
                           <Td>
-                            <Link href={`/sales-orders/${row.id}`} className="font-mono text-xs font-semibold text-run hover:underline" onClick={(event) => event.stopPropagation()}>
+                            <Link
+                              href={`/sales-orders/${row.id}`}
+                              className="font-mono text-xs font-semibold text-run hover:underline"
+                              onClick={(event) => event.stopPropagation()}
+                            >
                               {row.salesOrderNo}
                             </Link>
                           </Td>
@@ -252,7 +254,7 @@ export function SalesOrderListScreen() {
                             <MeasureBar
                               label="검사합격"
                               unit={unit}
-                              tone={row.isDueRisk ? 'run' : 'ok'}
+                              tone="ok"
                               measure={progressOf(row.totalActiveReservedQty + row.totalShippedQty, row.totalOrderedQty)}
                             />
                           </Td>

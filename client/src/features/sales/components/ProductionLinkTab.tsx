@@ -62,10 +62,22 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
           </span>
           <span>슬래브 {plan.progress.slabQty}매</span>
           {plan.item.itemType === 'COIL' ? <span>코일 {plan.progress.coilQty}개</span> : null}
-          <span className="text-ok">합격 {plan.progress.passedQty}{unit}</span>
-          <span className="text-wait">판정 대기 {plan.progress.pendingQty}{unit}</span>
-          <span className="text-danger">불합격 {plan.progress.failedQty}{unit}</span>
-          <b className="font-semibold text-ink">잔여 목표 {plan.progress.remainingTargetQty}{unit}</b>
+          <span className="text-ok">
+            합격 {plan.progress.passedQty}
+            {unit}
+          </span>
+          <span className="text-wait">
+            판정 대기 {plan.progress.pendingQty}
+            {unit}
+          </span>
+          <span className="text-danger">
+            불합격 {plan.progress.failedQty}
+            {unit}
+          </span>
+          <b className="font-semibold text-ink">
+            잔여 목표 {plan.progress.remainingTargetQty}
+            {unit}
+          </b>
         </div>
         <Table compact>
           <thead>
@@ -102,7 +114,9 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
                 </Td>
                 <Td>
                   {heat.inspectionResult ? (
-                    <Badge tone={heat.inspectionResult === 'PASS' ? 'ok' : heat.inspectionResult === 'FAIL' ? 'danger' : 'wait'}>{INSPECTION_RESULT_LABEL[heat.inspectionResult]}</Badge>
+                    <Badge tone={heat.inspectionResult === 'PASS' ? 'ok' : heat.inspectionResult === 'FAIL' ? 'danger' : 'wait'}>
+                      {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
+                    </Badge>
                   ) : (
                     '-'
                   )}

@@ -90,7 +90,9 @@ export function Qty({ qty, unit, muted }: { qty: number; unit: string; muted?: b
 export function ItemLabel({ lineNo, itemType, itemName, itemCode }: { lineNo?: number; itemType: ProductItemType; itemName: string; itemCode?: string }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      {lineNo !== undefined ? <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-surface-3 px-1 text-cap font-semibold text-ink-2">{lineNo}</span> : null}
+      {lineNo !== undefined ? (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-surface-3 px-1 text-cap font-semibold text-ink-2">{lineNo}</span>
+      ) : null}
       <span className="text-cap text-ink-3">{ITEM_TYPE_LABEL[itemType]}</span>
       <span className="truncate font-medium">{itemName}</span>
       {itemCode ? <span className="truncate font-mono text-[11px] text-ink-3">{itemCode}</span> : null}
@@ -176,4 +178,5 @@ export function PlanLink({ productionPlanId, productionPlanNo }: { productionPla
   );
 }
 
-export const businessEventsHref = (salesOrderId: number | null) => (salesOrderId === null ? '/business-events' : `/business-events?salesOrderId=${salesOrderId}`);
+export const businessEventsHref = (salesOrderId: number | null) =>
+  salesOrderId === null ? '/business-events' : `/business-events?salesOrderId=${salesOrderId}`;

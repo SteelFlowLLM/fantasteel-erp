@@ -53,7 +53,8 @@ export function qtyUnitOf(itemTypes: readonly ProductItemType[]): string {
 export const percentOf = (measure: ProgressMeasure): number | null => (measure.ratio === null ? null : Math.floor(measure.ratio * 100));
 
 /** "6 / 10매" — 분모를 늘 함께 보인다 (4.5) */
-export const measureText = (measure: ProgressMeasure, unit: string): string => `${measure.qty.toLocaleString('en-US')} / ${measure.denominatorQty.toLocaleString('en-US')}${unit}`;
+export const measureText = (measure: ProgressMeasure, unit: string): string =>
+  `${measure.qty.toLocaleString('en-US')} / ${measure.denominatorQty.toLocaleString('en-US')}${unit}`;
 
 export type SalesOrderStatusFilter = 'ALL' | SalesOrderItemStatus;
 export type ItemTypeFilter = 'ALL' | ProductItemType;

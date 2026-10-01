@@ -66,7 +66,12 @@ export function CancelSalesOrderModal({ detail, onClose }: { detail: SalesOrderD
         <b className="text-sm font-semibold">취소하면 이렇게 돼요</b>
         <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm leading-5 text-ink-2">
           <li>
-            예약 해제: 예약중인 <b className="text-ink">{activeReservedQty.toLocaleString('en-US')}{unit}</b>를 해제해요. 풀린 합격 재고는 다른 수주가 쓸 수 있어요.
+            예약 해제: 예약중인{' '}
+            <b className="text-ink">
+              {activeReservedQty.toLocaleString('en-US')}
+              {unit}
+            </b>
+            를 해제해요. 풀린 합격 재고는 다른 수주가 쓸 수 있어요.
           </li>
           <li>
             시작 전(계획) 생산계획 <b className="text-ink">{plannedCount}건</b>을 취소해요.

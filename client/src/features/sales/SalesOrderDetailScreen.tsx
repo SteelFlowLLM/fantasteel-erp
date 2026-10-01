@@ -46,11 +46,17 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
   const rows = useMemo(() => {
     const k = keyword.trim().toLowerCase();
     return (list.data ?? [])
-      .filter((r) => (chip === 'OPEN' ? r.status === 'OPEN' || r.status === 'PARTIALLY_SHIPPED' : chip === 'RISK' ? r.isDueRisk : true))
+      .filter((r) => (chip === 'OPEN' ? r.status === 'OPEN' : chip === 'RISK' ? r.isDueRisk : true))
       .filter((r) => k === '' || r.salesOrderNo.toLowerCase().includes(k) || r.customerName.toLowerCase().includes(k));
   }, [list.data, keyword, chip]);
 
-  const emptyText = keyword ? '검색 결과가 없어요' : chip === 'RISK' ? '납기 위험 수주가 없어요' : chip === 'OPEN' ? '진행중인 수주가 없어요' : '등록된 수주가 없어요';
+  const emptyText = keyword
+    ? '검색 결과가 없어요'
+    : chip === 'RISK'
+      ? '납기 위험 수주가 없어요'
+      : chip === 'OPEN'
+        ? '진행중인 수주가 없어요'
+        : '등록된 수주가 없어요';
   return (
     <MasterPane
       head={
@@ -67,7 +73,13 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
               </ButtonLink>
             ) : null}
           </div>
-          <Input leadingIcon="search" placeholder="수주번호·고객사 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label="수주 검색" />
+          <Input
+            leadingIcon="search"
+            placeholder="수주번호·고객사 검색"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            aria-label="수주 검색"
+          />
           <div className="flex gap-1.5">
             <Chip on={chip === 'ALL'} onClick={() => setChip('ALL')}>
               전체
@@ -107,7 +119,12 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
                       <span className="text-cap text-ink-3">
                         납기 <DueText dueDate={row.earliestDueDate} risk={row.isDueRisk} done={row.status === 'SHIPPED' || row.status === 'CANCELLED'} />
                       </span>
-                      <MeasureBar label="검사합격" unit={unit} tone="ok" measure={progressOf(row.totalActiveReservedQty + row.totalShippedQty, row.totalOrderedQty)} />
+                      <MeasureBar
+                        label="검사합격"
+                        unit={unit}
+                        tone="ok"
+                        measure={progressOf(row.totalActiveReservedQty + row.totalShippedQty, row.totalOrderedQty)}
+                      />
                     </Link>
                   </li>
                 );
@@ -129,7 +146,14 @@ function CancelButton({ detail }: { detail: SalesOrderDetail }) {
   const title = !canCancel ? permissionNeedText([PERMISSION.SALES_ORDER_CANCEL]) : (blockText ?? undefined);
   return (
     <>
-      <Button size="sm" variant="danger-outline" icon="x-circle" disabled={!canCancel || detail.cancelBlock !== null} title={title} onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        variant="danger-outline"
+        icon="x-circle"
+        disabled={!canCancel || detail.cancelBlock !== null}
+        title={title}
+        onClick={() => setOpen(true)}
+      >
         수주 취소
       </Button>
       {open ? <CancelSalesOrderModal detail={detail} onClose={() => setOpen(false)} /> : null}
@@ -182,7 +206,8 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
       {detail.cancelledAt ? (
         <Banner tone="danger">
-          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'} · 예약은 해제됐고, 진행중이던 생산계획은 수주 연결을 풀어 완료 후 여재가 돼요.
+          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'} · 예약은 해제됐고, 진행중이던 생산계획은 수주 연결을
+          풀어 완료 후 여재가 돼요.
         </Banner>
       ) : null}
 

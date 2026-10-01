@@ -32,14 +32,7 @@ import { fmtDims, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 import { calcWeightTon, sumTon } from '@/lib/weight';
 import { errorMessageOf } from '@/stores/useToastStore';
-import {
-  draftLineErrors,
-  hasLineErrors,
-  parseOrderedQty,
-  previewLinesOf,
-  qtyUnitOf,
-  type DraftLine,
-} from '@/features/sales/lib/salesOrderForm';
+import { draftLineErrors, hasLineErrors, parseOrderedQty, previewLinesOf, qtyUnitOf, type DraftLine } from '@/features/sales/lib/salesOrderForm';
 
 let lineSeq = 0;
 const newLine = (from?: DraftLine): DraftLine => {
@@ -122,7 +115,9 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
           required
           htmlFor={`${id}-qty`}
           error={errors.qty}
-          hint={qty !== null && spec ? `= ${qty}${unit} · ${fmtTon(calcWeightTon(qty, spec.theoreticalWeightTon))} (계산값)` : '정수로 입력해요 · 톤은 자동 계산'}
+          hint={
+            qty !== null && spec ? `= ${qty}${unit} · ${fmtTon(calcWeightTon(qty, spec.theoreticalWeightTon))} (계산값)` : '정수로 입력해요 · 톤은 자동 계산'
+          }
         >
           <Input
             id={`${id}-qty`}
@@ -182,9 +177,10 @@ export function SalesOrderCreateScreen() {
   const previewTargets = useMemo(() => previewLinesOf(lines), [lines]);
   const previewInput = useMemo(() => previewTargets.map(({ itemId, orderedQty }) => ({ itemId, orderedQty })), [previewTargets]);
   const preview = useSalesOrderPreview(previewInput);
+  const previewRows = previewInput.length > 0 ? (preview.data ?? []) : [];
   const previewByLine = new Map<number, SalesOrderPreviewLine>();
   previewTargets.forEach((target, i) => {
-    const row = preview.data?.[i];
+    const row = previewRows[i];
     if (row && row.itemId === target.itemId) previewByLine.set(target.index, row);
   });
 
@@ -210,7 +206,6 @@ export function SalesOrderCreateScreen() {
   });
   const totalQty = validQtyLines.reduce((sum, l) => sum + l.qty, 0);
   const totalTon = sumTon(validQtyLines.map((l) => l.ton));
-  const previewRows = preview.data ?? [];
   const reserveTotal = previewRows.reduce((sum, r) => sum + r.reserveQty, 0);
   const shortageTotal = previewRows.reduce((sum, r) => sum + r.shortageQty, 0);
   const planCount = previewRows.filter((r) => r.shortageQty > 0).length;
@@ -251,7 +246,12 @@ export function SalesOrderCreateScreen() {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 py-4">
           <div className="flex flex-col gap-3">
             <b className="text-sm font-semibold">1 기본 정보</b>
-            <Field label="고객사" required htmlFor="so-customer" error={submitted && customerId === null ? '고객사를 선택해 주세요' : serverFieldErrors.customerId}>
+            <Field
+              label="고객사"
+              required
+              htmlFor="so-customer"
+              error={submitted && customerId === null ? '고객사를 선택해 주세요' : serverFieldErrors.customerId}
+            >
               <Select
                 id="so-customer"
                 invalid={submitted && customerId === null}
@@ -347,7 +347,12 @@ export function SalesOrderCreateScreen() {
             sub={`${fmtTon(totalTon)} (계산값) · 품목 ${lines.length} · ${customerName ?? '고객사 미선택'}`}
           />
           <Kpi label="재고 예약 (예상)" value={reserveTotal.toLocaleString('en-US')} unit={unit} sub="합격 재고 우선 · LOT은 정하지 않아요" />
-          <Kpi label="부족 매수 (예상)" value={shortageTotal.toLocaleString('en-US')} unit={unit} sub={planCount > 0 ? `생산계획 ${planCount}건 · 히트 편성까지 계산해요` : '생산계획이 필요 없어요'} />
+          <Kpi
+            label="부족 매수 (예상)"
+            value={shortageTotal.toLocaleString('en-US')}
+            unit={unit}
+            sub={planCount > 0 ? `생산계획 ${planCount}건 · 히트 편성까지 계산해요` : '생산계획이 필요 없어요'}
+          />
         </div>
 
         <Card>
@@ -403,7 +408,8 @@ export function SalesOrderCreateScreen() {
                           <Tag>{line.itemId === null ? '규격 선택 필요' : '매수 확인 필요'}</Tag>
                         ) : f ? (
                           <span className="tabular-nums">
-                            히트 {f.heatCount}개 · 히트 톤 {fmtTon(f.heatTon)} · 필요 용강량 {fmtTon(f.requiredSteelTon)} · 예상 여재 {f.expectedSurplusSlabQty}매
+                            히트 {f.heatCount}개 · 히트 톤 {fmtTon(f.heatTon)} · 필요 용강량 {fmtTon(f.requiredSteelTon)} · 예상 여재 {f.expectedSurplusSlabQty}
+                            매
                           </span>
                         ) : (
                           '재고로 모두 예약해요'
@@ -417,7 +423,7 @@ export function SalesOrderCreateScreen() {
           </div>
           <div className="flex items-center gap-2 border-t border-line bg-surface-2 px-4 py-2.5 text-cap text-ink-2">
             <Tag>시스템</Tag>
-            저장하면 합격·가용 재고를 매수 단위로 먼저 예약하고(부분 예약 허용), 부족 매수만 품목 라우팅대로 생산계획을 만들어요.
+            저장하면 합격한 가용재고를 매수 단위로 먼저 예약하고(부분 예약 허용), 부족 매수만 품목 라우팅대로 생산계획을 만들어요.
           </div>
         </Card>
 

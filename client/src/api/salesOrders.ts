@@ -28,7 +28,15 @@ import {
 type Tables = Readonly<MockTables>;
 
 // 화면은 데이터 모양을 이 파일에서 가져온다 (컨벤션 9장: 데이터 접근은 api 함수로만)
-export type { CreateSalesOrderInput, ItemFulfillment, ProductionPlanView, SalesOrderDetail, SalesOrderPreviewLine, SalesOrderSummary, TimelineEvent } from '@/mock/services';
+export type {
+  CreateSalesOrderInput,
+  ItemFulfillment,
+  ProductionPlanView,
+  SalesOrderDetail,
+  SalesOrderPreviewLine,
+  SalesOrderSummary,
+  TimelineEvent,
+} from '@/mock/services';
 
 /** 수주 화면을 여는 권한 (screens.ts의 salesOrders와 같다): 수주 등록·취소 중 하나라도 조회 이상 */
 export const SALES_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL];
