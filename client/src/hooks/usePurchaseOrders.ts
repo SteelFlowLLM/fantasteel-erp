@@ -7,8 +7,8 @@ export function usePurchaseOrderList(enabled = true) {
   return useQuery({ queryKey: purchaseOrderKeys.list(), queryFn: purchaseOrderApi.list, enabled });
 }
 
-export function useOrderableRequisitionItems(enabled = true) {
-  return useQuery({ queryKey: purchaseOrderKeys.orderableItems(), queryFn: purchaseOrderApi.orderableItems, enabled });
+export function usePurchaseOrderCandidateItems(enabled = true) {
+  return useQuery({ queryKey: purchaseOrderKeys.candidateItems(), queryFn: purchaseOrderApi.candidateItems, enabled });
 }
 
 export function useCreatePurchaseOrders(options: ActionOptions<PurchaseOrderCreateInput, PurchaseOrderView[]> = {}) {

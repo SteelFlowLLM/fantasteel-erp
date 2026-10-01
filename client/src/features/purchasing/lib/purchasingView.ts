@@ -1,6 +1,6 @@
 // 구매 화면 표시용 순수 함수 (MRP 기간 기본값, 품목 요약, 공급업체 묶음, 진행률, 톤 입력 초기값).
 // 업무 규칙(순소요·승인·발주·입고)은 core 서비스가 한다. 여기는 화면에 보이는 값만 만든다.
-import { decCmp, decDiv, decIsPositive } from '@/lib/decimal';
+import { decCmp, decDiv, decIsPositive, decSum } from '@/lib/decimal';
 import type { RequisitionSource } from '@/api/purchasing';
 
 /** 구매요청 출처 표시명 (계산값: action_draft_id → Message → ERP, production_plan_id → MRP 계획, 그 밖 → 직접) */
@@ -72,6 +72,39 @@ export function groupBySupplier<T extends { supplierId: number | null; supplierN
 /** 가장 이른 날짜 (없으면 null) */
 export function earliestDate(dates: readonly (string | null)[]): string | null {
   return dates.filter((d): d is string => d !== null && d !== '').sort()[0] ?? null;
+}
+
+/** 만들어질 발주 1건 미리보기: 공급업체 · 납기 · 품목 수 · 합계 톤 */
+export interface PlannedPurchaseOrder {
+  supplierId: number;
+  supplierName: string | null;
+  /** 입력한 납기, 비우면 그 공급업체 묶음의 가장 이른 희망 입고일(core createPurchaseOrders와 같다). 둘 다 없으면 null */
+  dueDate: string | null;
+  itemCount: number;
+  totalTon: string;
+}
+
+/**
+ * 고른 품목으로 만들어질 발주 (BP-PUR-01: 기본 공급업체 1곳당 발주 1건).
+ * 납기를 비우면 발주마다 자기 묶음의 가장 이른 희망 입고일이 납기가 된다. 기본 공급업체가 없는 품목은 발주하지 않는다.
+ */
+export function plannedPurchaseOrders(
+  chosen: readonly { supplierId: number | null; supplierName: string | null; desiredReceiptDate: string | null; requiredTon: string }[],
+  dueDate: string,
+): PlannedPurchaseOrder[] {
+  return groupBySupplier(chosen).flatMap((group) =>
+    group.supplierId === null
+      ? []
+      : [
+          {
+            supplierId: group.supplierId,
+            supplierName: group.supplierName,
+            dueDate: dueDate !== '' ? dueDate : earliestDate(group.items.map((i) => i.desiredReceiptDate)),
+            itemCount: group.items.length,
+            totalTon: decSum(group.items.map((i) => i.requiredTon)),
+          },
+        ],
+  );
 }
 
 /** 원료 LOT 번호 형식 미리보기 (9.2: RM-원료코드-YYMMDD-NNN, 번호는 확정할 때 매긴다) */

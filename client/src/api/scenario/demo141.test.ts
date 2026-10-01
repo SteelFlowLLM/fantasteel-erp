@@ -84,7 +84,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL', source: 'MRP' });
     await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', items: [{ itemId: line.itemId, requiredTon: '1.000', productionPlanId: planId }] })).rejects.toBeInstanceOf(InputError);
     expect((await mrpApi.requirements(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
-    expect((await purchaseOrderApi.orderableItems()).some((i) => i.purchaseRequisitionId === pr.id)).toBe(false);
+    expect((await purchaseOrderApi.candidateItems()).some((i) => i.purchaseRequisitionId === pr.id)).toBe(false);
     await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: [pr.items[0].id], dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
 
     as('salesHead'); // 다른 부서 부서장은 승인할 수 없다
@@ -96,8 +96,8 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(await approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: pr.updatedAt })).toMatchObject({ purchaseRequisitionStatus: 'APPROVED' });
     as('purchase');
     expect((await notificationApi.list()).items.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2610-0001'))).toBe(true);
-    const orderable = (await purchaseOrderApi.orderableItems()).find((i) => i.purchaseRequisitionId === pr.id);
-    expect(orderable?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
+    const candidate = (await purchaseOrderApi.candidateItems()).find((i) => i.purchaseRequisitionId === pr.id);
+    expect(candidate?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
     at('2026-10-01T11:00:00+09:00');
     const [po] = await purchaseOrderApi.create({ purchaseRequisitionItemIds: [pr.items[0].id], dueDate: '' });
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', dueDate: '2026-10-10' });

@@ -29,7 +29,7 @@ const requisitionIdOf = (no: string): number => {
 const plusDays = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 /** SS275 슬래브 36매 수주 (재고 6 + 부족 30 → 3히트) → 철광석이 모자란다 */
-function createBigOrder(dueDate: string): number {
+function createBigSalesOrder(dueDate: string): number {
   const salesId = employeeIdOf(SEED_EMPLOYEE_NO.sales);
   const customerId = read((t) => t.customer.find((c) => c.customerCode === 'CUS-01')?.id) ?? 0;
   const result = getMockDb().transact((tx) =>
@@ -44,7 +44,7 @@ describe('MRP api', () => {
   it('기간 안 계획의 순소요를 바로 계산하고, 구매요청 만들 줄을 준다 (저장하지 않음)', async () => {
     const today = todayStr();
     const dueDate = plusDays(today, 10);
-    const planId = createBigOrder(dueDate);
+    const planId = createBigSalesOrder(dueDate);
     actAs(SEED_EMPLOYEE_NO.purchase);
     const period = { from: today, to: plusDays(today, 30) };
     const mrp = await mrpApi.requirements(period);
@@ -62,7 +62,7 @@ describe('MRP api', () => {
 
   it('기간 밖 계획은 빠지고, 생산(조회 권한)도 볼 수 있다', async () => {
     const today = todayStr();
-    const planId = createBigOrder(plusDays(today, 60));
+    const planId = createBigSalesOrder(plusDays(today, 60));
     actAs(SEED_EMPLOYEE_NO.productionHead);
     const mrp = await mrpApi.requirements({ from: today, to: plusDays(today, 30) });
     expect(mrp.plans.some((p) => p.productionPlanId === planId)).toBe(false);
@@ -107,7 +107,7 @@ describe('구매요청 api', () => {
 
   it('MRP 줄로 만들면 근거 생산계획이 연결되고 출처가 MRP 계획, 같은 계획·원료는 두 번 못 만든다', async () => {
     const today = todayStr();
-    const planId = createBigOrder(plusDays(today, 10));
+    const planId = createBigSalesOrder(plusDays(today, 10));
     actAs(SEED_EMPLOYEE_NO.purchase);
     const period = { from: today, to: plusDays(today, 30) };
     const line = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
@@ -181,8 +181,8 @@ describe('승인함 api', () => {
   it('부서장의 승인 대기만 보이고, 부서장이 아니면 COM-002', async () => {
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const inbox = await approvalApi.inbox();
-    expect(inbox.map((pr) => pr.purchaseRequisitionNo)).toContain('PR-2609-0004');
-    expect(inbox.every((pr) => pr.purchaseRequisitionStatus === 'WAITING_APPROVAL')).toBe(true);
+    expect(inbox.map((purchaseRequisition) => purchaseRequisition.purchaseRequisitionNo)).toContain('PR-2609-0004');
+    expect(inbox.every((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL')).toBe(true);
     actAs(SEED_EMPLOYEE_NO.salesHead);
     expect(await approvalApi.inbox()).toEqual([]);
     actAs(SEED_EMPLOYEE_NO.purchase);
@@ -203,7 +203,7 @@ describe('승인함 api', () => {
     const result = read((t) => t.notification.find((n) => n.recipientId === requesterId && n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2609-0004')));
     expect(result?.linkPath).toBe(`/purchase-requisitions?pr=${id}`);
     expect(read((t) => t.businessEvent.some((e) => e.businessEventType === 'PURCHASE_REQUISITION_APPROVED' && e.targetId === id))).toBe(true);
-    expect((await approvalApi.inbox()).some((pr) => pr.id === id)).toBe(false);
+    expect((await approvalApi.inbox()).some((purchaseRequisition) => purchaseRequisition.id === id)).toBe(false);
   });
 
   it('반려(사유 필수) → 요청자가 고쳐 다시 요청 → 다시 승인 대기 (요청자만, COM-002)', async () => {
@@ -228,7 +228,7 @@ describe('승인함 api', () => {
     // 승인 대기 요청은 다시 요청할 수 없다
     await expect(purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: resubmitted.updatedAt, desiredReceiptDate: '', requestReason: '', items })).rejects.toBeInstanceOf(InputError);
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
-    expect((await approvalApi.inbox()).some((pr) => pr.id === id)).toBe(true);
+    expect((await approvalApi.inbox()).some((purchaseRequisition) => purchaseRequisition.id === id)).toBe(true);
   });
 });
 
@@ -254,20 +254,20 @@ describe('발주 api', () => {
     await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' })).rejects.toMatchObject({ code: 'COM-002' });
 
     actAs(SEED_EMPLOYEE_NO.purchase);
-    const orderable = await purchaseOrderApi.orderableItems();
-    expect(orderable.filter((i) => i.purchaseRequisitionId === created.id).map((i) => i.supplierName)).toHaveLength(2);
-    expect(orderable.some((i) => i.purchaseRequisitionNo === 'PR-2609-0003')).toBe(true);
-    const orders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' });
-    expect(orders).toHaveLength(2);
-    expect(new Set(orders.map((po) => po.supplierId)).size).toBe(2);
-    expect(orders.every((po) => po.purchaseOrderStatus === 'CONFIRMED' && po.dueDate === '2026-10-22')).toBe(true);
-    expect(orders.flatMap((po) => po.items.map((i) => i.scheduledReceiptTon)).sort()).toEqual(['100.000', '2.500']);
+    const candidates = await purchaseOrderApi.candidateItems();
+    expect(candidates.filter((i) => i.purchaseRequisitionId === created.id).map((i) => i.supplierName)).toHaveLength(2);
+    expect(candidates.some((i) => i.purchaseRequisitionNo === 'PR-2609-0003')).toBe(true);
+    const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' });
+    expect(purchaseOrders).toHaveLength(2);
+    expect(new Set(purchaseOrders.map((po) => po.supplierId)).size).toBe(2);
+    expect(purchaseOrders.every((po) => po.purchaseOrderStatus === 'CONFIRMED' && po.dueDate === '2026-10-22')).toBe(true);
+    expect(purchaseOrders.flatMap((po) => po.items.map((i) => i.scheduledReceiptTon)).sort()).toEqual(['100.000', '2.500']);
     expect((await purchaseRequisitionApi.detail(created.id)).purchaseRequisitionStatus).toBe('ORDERED');
-    expect((await purchaseRequisitionApi.detail(created.id)).orderLines).toHaveLength(2);
+    expect((await purchaseRequisitionApi.detail(created.id)).purchaseOrderLines).toHaveLength(2);
     // 이미 발주한 줄은 다시 발주하지 않는다
     await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' })).rejects.toBeInstanceOf(InputError);
-    expect(read((t) => t.businessEvent.filter((e) => e.businessEventType === 'PURCHASE_ORDER_CREATED' && orders.some((po) => po.id === e.targetId)).length)).toBe(2);
-    expect((await purchaseOrderApi.list()).slice(0, 2).map((po) => po.id).sort()).toEqual(orders.map((po) => po.id).sort());
+    expect(read((t) => t.businessEvent.filter((e) => e.businessEventType === 'PURCHASE_ORDER_CREATED' && purchaseOrders.some((po) => po.id === e.targetId)).length)).toBe(2);
+    expect((await purchaseOrderApi.list()).slice(0, 2).map((po) => po.id).sort()).toEqual(purchaseOrders.map((po) => po.id).sort());
   });
 });
 

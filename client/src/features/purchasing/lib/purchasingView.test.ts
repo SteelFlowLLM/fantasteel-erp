@@ -5,6 +5,7 @@ import {
   groupBySupplier,
   isOverdue,
   mrpRequestReason,
+  plannedPurchaseOrders,
   ratioPercent,
   rawMaterialLotNoPattern,
   summarizeItemNames,
@@ -58,5 +59,22 @@ describe('구매 화면 표시값', () => {
     expect(mrpRequestReason({ productionPlanNo: 'PP-2610-0001', itemName: '실리코망가니즈', netTon: '1.500', needDate: '2026-10-20' }, { from: '2026-10-01', to: '2026-11-30' })).toBe(
       'MRP 2026-10-01 ~ 2026-11-30 · PP-2610-0001 실리코망가니즈 순소요 1.500 t · 필요일 2026-10-20',
     );
+  });
+
+  it('만들어질 발주: 공급업체마다 1건, 납기를 비우면 그 공급업체 묶음의 가장 이른 희망 입고일 (BP-PUR-01)', () => {
+    const chosen = [
+      { supplierId: 1, supplierName: '가온광업', desiredReceiptDate: '2026-10-25', requiredTon: '100' },
+      { supplierId: 2, supplierName: '하람합금철', desiredReceiptDate: '2026-10-20', requiredTon: '2.5' },
+      { supplierId: 1, supplierName: '가온광업', desiredReceiptDate: null, requiredTon: '50' },
+      { supplierId: null, supplierName: null, desiredReceiptDate: '2026-10-01', requiredTon: '9' },
+    ];
+    expect(plannedPurchaseOrders(chosen, '')).toEqual([
+      { supplierId: 1, supplierName: '가온광업', dueDate: '2026-10-25', itemCount: 2, totalTon: '150.000' },
+      { supplierId: 2, supplierName: '하람합금철', dueDate: '2026-10-20', itemCount: 1, totalTon: '2.500' },
+    ]);
+    // 납기를 넣으면 모든 발주가 그 날짜
+    expect(plannedPurchaseOrders(chosen, '2026-10-30').map((p) => p.dueDate)).toEqual(['2026-10-30', '2026-10-30']);
+    // 희망 입고일이 하나도 없으면 납기 없음
+    expect(plannedPurchaseOrders([{ supplierId: 1, supplierName: '가온광업', desiredReceiptDate: null, requiredTon: '1' }], '')[0]?.dueDate).toBeNull();
   });
 });

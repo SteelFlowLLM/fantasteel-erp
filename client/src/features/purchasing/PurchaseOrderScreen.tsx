@@ -7,7 +7,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, PURCHASE_ORDER_STATUS_LABEL, type PurchaseOrderStatus } from '@/codes';
-import type { OrderableRequisitionItem, PurchaseOrderView } from '@/api/purchasing';
+import type { PurchaseOrderCandidateItem, PurchaseOrderView } from '@/api/purchasing';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
@@ -23,9 +23,9 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { MasterGroupTitle, MasterItem, MasterNote, PurchaseOrderStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { earliestDate, groupBySupplier, ratioPercent, summarizeItemNames, type SupplierGroup } from '@/features/purchasing/lib/purchasingView';
+import { groupBySupplier, plannedPurchaseOrders, ratioPercent, summarizeItemNames, type SupplierGroup } from '@/features/purchasing/lib/purchasingView';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
-import { useCreatePurchaseOrders, useOrderableRequisitionItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
+import { useCreatePurchaseOrders, usePurchaseOrderCandidateItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
 import { decSum } from '@/lib/decimal';
 import { fmtDate, fmtDateTime, fmtMD, fmtNum, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
@@ -35,28 +35,28 @@ const STATUS_FILTERS: readonly PurchaseOrderStatus[] = ['CONFIRMED', 'PARTIALLY_
 const NO_SUPPLIER = 'none';
 
 const supplierKey = (supplierId: number | null): string => (supplierId === null ? NO_SUPPLIER : String(supplierId));
-const orderReceivedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.receivedTon));
-const orderOrderedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.orderedTon));
-const orderScheduledTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.scheduledReceiptTon));
+const purchaseOrderReceivedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.receivedTon));
+const purchaseOrderOrderedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.orderedTon));
+const purchaseOrderScheduledTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.scheduledReceiptTon));
 
 export function PurchaseOrderScreen() {
   const url = useUrlParams();
   const selectedPoId = url.getNumber('po');
-  const prParam = url.getNumber('pr');
+  const purchaseRequisitionIdParam = url.getNumber('pr');
   const supplierParam = url.get('supplier');
-  const canOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
-  const orders = usePurchaseOrderList();
-  const orderable = useOrderableRequisitionItems();
+  const canConfirmPurchaseOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
+  const purchaseOrders = usePurchaseOrderList();
+  const candidates = usePurchaseOrderCandidateItems();
   const [status, setStatus] = useState<PurchaseOrderStatus | null>(null);
 
-  const orderRows = useMemo(() => orders.data ?? [], [orders.data]);
-  const filteredOrders = status === null ? orderRows : orderRows.filter((po) => po.purchaseOrderStatus === status);
-  const groups = useMemo(() => groupBySupplier(orderable.data ?? []), [orderable.data]);
-  const selectedPo = selectedPoId !== null ? orderRows.find((po) => po.id === selectedPoId) : undefined;
-  const writing = selectedPoId === null && (orderable.data?.length ?? 0) > 0;
+  const purchaseOrderRows = useMemo(() => purchaseOrders.data ?? [], [purchaseOrders.data]);
+  const filteredPurchaseOrders = status === null ? purchaseOrderRows : purchaseOrderRows.filter((po) => po.purchaseOrderStatus === status);
+  const groups = useMemo(() => groupBySupplier(candidates.data ?? []), [candidates.data]);
+  const selectedPo = selectedPoId !== null ? purchaseOrderRows.find((po) => po.id === selectedPoId) : undefined;
+  const writing = selectedPoId === null && (candidates.data?.length ?? 0) > 0;
   // 아무것도 고르지 않았으면 첫 공급업체 묶음을 고른 것으로 본다
   const firstSelectable = groups.find((g) => g.supplierId !== null);
-  const activeSupplier = supplierParam ?? (prParam === null && firstSelectable ? supplierKey(firstSelectable.supplierId) : null);
+  const activeSupplier = supplierParam ?? (purchaseRequisitionIdParam === null && firstSelectable ? supplierKey(firstSelectable.supplierId) : null);
 
   return (
     <>
@@ -65,27 +65,27 @@ export function PurchaseOrderScreen() {
           <>
             <div className="flex items-center gap-2">
               <b className="text-base font-semibold">발주</b>
-              <span className="text-xs text-ink-3">{orderRows.length}건</span>
+              <span className="text-xs text-ink-3">{purchaseOrderRows.length}건</span>
               <ButtonLink href="/goods-receipts" size="sm" icon="box" className="ml-auto">
                 입고
               </ButtonLink>
             </div>
             <div className="flex flex-wrap gap-1.5">
               <Chip on={status === null} onClick={() => setStatus(null)}>
-                전체 <b>{orderRows.length}</b>
+                전체 <b>{purchaseOrderRows.length}</b>
               </Chip>
               {STATUS_FILTERS.map((value) => (
                 <Chip key={value} on={status === value} onClick={() => setStatus(status === value ? null : value)}>
-                  {PURCHASE_ORDER_STATUS_LABEL[value]} <b>{orderRows.filter((po) => po.purchaseOrderStatus === value).length}</b>
+                  {PURCHASE_ORDER_STATUS_LABEL[value]} <b>{purchaseOrderRows.filter((po) => po.purchaseOrderStatus === value).length}</b>
                 </Chip>
               ))}
             </div>
-            {canOrder ? null : <ReadOnlyHint permissions={[PERMISSION.PURCHASE_ORDER_CONFIRM]} />}
+            {canConfirmPurchaseOrder ? null : <ReadOnlyHint permissions={[PERMISSION.PURCHASE_ORDER_CONFIRM]} />}
           </>
         }
       >
-        <MasterGroupTitle title="발주할 구매요청 (승인됨)" meta={orderable.data ? `${orderable.data.length}개 품목` : undefined} />
-        <QueryBoundary query={orderable} loadingLabel="발주할 구매요청을 불러오는 중…">
+        <MasterGroupTitle title="발주할 구매요청 (승인됨)" meta={candidates.data ? `${candidates.data.length}개 품목` : undefined} />
+        <QueryBoundary query={candidates} loadingLabel="발주할 구매요청을 불러오는 중…">
           {(items) =>
             items.length === 0 ? (
               <EmptyNote>발주를 기다리는 승인 요청이 없어요</EmptyNote>
@@ -110,16 +110,16 @@ export function PurchaseOrderScreen() {
             )
           }
         </QueryBoundary>
-        <MasterGroupTitle title="발주 내역" meta={`${filteredOrders.length}건`} />
-        <QueryBoundary query={orders} loadingLabel="발주를 불러오는 중…">
+        <MasterGroupTitle title="발주 내역" meta={`${filteredPurchaseOrders.length}건`} />
+        <QueryBoundary query={purchaseOrders} loadingLabel="발주를 불러오는 중…">
           {() =>
-            filteredOrders.length === 0 ? (
-              <EmptyNote>{orderRows.length === 0 ? '아직 발주가 없어요' : '조건에 맞는 발주가 없어요'}</EmptyNote>
+            filteredPurchaseOrders.length === 0 ? (
+              <EmptyNote>{purchaseOrderRows.length === 0 ? '아직 발주가 없어요' : '조건에 맞는 발주가 없어요'}</EmptyNote>
             ) : (
               <>
-                {filteredOrders.map((po) => {
-                  const ordered = orderOrderedTon(po);
-                  const received = orderReceivedTon(po);
+                {filteredPurchaseOrders.map((po) => {
+                  const ordered = purchaseOrderOrderedTon(po);
+                  const received = purchaseOrderReceivedTon(po);
                   return (
                     <MasterItem key={po.id} selected={po.id === selectedPoId} onClick={() => url.set({ po: po.id, pr: null, supplier: null })}>
                       <span className="flex items-center gap-2">
@@ -148,24 +148,24 @@ export function PurchaseOrderScreen() {
       <PageMain>
         {selectedPo ? (
           <PurchaseOrderDetail po={selectedPo} />
-        ) : selectedPoId !== null && orders.data ? (
+        ) : selectedPoId !== null && purchaseOrders.data ? (
           <StateView kind="empty" title="발주를 찾을 수 없어요" />
         ) : writing ? (
-          <OrderForm
-            key={`${prParam ?? ''}-${activeSupplier ?? ''}`}
+          <PurchaseOrderForm
+            key={`${purchaseRequisitionIdParam ?? ''}-${activeSupplier ?? ''}`}
             groups={groups}
-            initialIds={(orderable.data ?? [])
-              .filter((i) => (prParam !== null ? i.purchaseRequisitionId === prParam : supplierKey(i.supplierId) === activeSupplier))
+            initialIds={(candidates.data ?? [])
+              .filter((i) => (purchaseRequisitionIdParam !== null ? i.purchaseRequisitionId === purchaseRequisitionIdParam : supplierKey(i.supplierId) === activeSupplier))
               .filter((i) => i.supplierId !== null)
               .map((i) => i.id)}
-            canOrder={canOrder}
+            canConfirmPurchaseOrder={canConfirmPurchaseOrder}
             onDone={(created) => url.set({ po: created[0]?.id ?? null, pr: null, supplier: null })}
           />
-        ) : orderable.data && orders.data ? (
+        ) : candidates.data && purchaseOrders.data ? (
           <StateView
             kind="empty"
             icon="building"
-            title={orderRows.length === 0 ? '발주할 구매요청도, 발주 내역도 없어요' : '발주할 품목이 남아 있지 않아요'}
+            title={purchaseOrderRows.length === 0 ? '발주할 구매요청도, 발주 내역도 없어요' : '발주할 품목이 남아 있지 않아요'}
             text="구매요청이 부서장 승인을 받으면 여기에 올라와요. 왼쪽에서 발주를 고르면 입고 현황을 볼 수 있어요"
             actions={
               <ButtonLink href="/purchase-requisitions" size="sm" icon="cart">
@@ -179,15 +179,15 @@ export function PurchaseOrderScreen() {
   );
 }
 
-function OrderForm({
+function PurchaseOrderForm({
   groups,
   initialIds,
-  canOrder,
+  canConfirmPurchaseOrder,
   onDone,
 }: {
-  groups: SupplierGroup<OrderableRequisitionItem>[];
+  groups: SupplierGroup<PurchaseOrderCandidateItem>[];
   initialIds: number[];
-  canOrder: boolean;
+  canConfirmPurchaseOrder: boolean;
   onDone: (created: PurchaseOrderView[]) => void;
 }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set(initialIds));
@@ -199,8 +199,8 @@ function OrderForm({
 
   const allItems = groups.flatMap((g) => g.items);
   const chosen = allItems.filter((i) => selected.has(i.id));
-  const supplierCount = new Set(chosen.map((i) => i.supplierId)).size;
-  const earliest = earliestDate(chosen.map((i) => i.desiredReceiptDate));
+  // 공급업체 1곳당 발주 1건. 납기를 비우면 발주마다 자기 묶음의 가장 이른 희망 입고일이 납기가 된다(core createPurchaseOrders와 같은 규칙).
+  const planned = plannedPurchaseOrders(chosen, dueDate);
   const toggle = (id: number, on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -287,14 +287,19 @@ function OrderForm({
       <Card>
         <CardHead title="발주 확정" meta={`${chosen.length} / ${allItems.length}개 품목 선택`} />
         <CardBody className="flex-row flex-wrap items-start gap-6">
-          <Field label="납기 (입고 예정일)" htmlFor="po-due-date" hint={earliest ? `비우면 고른 요청의 가장 이른 희망 입고일 ${fmtDate(earliest)}` : '비우면 고른 요청의 가장 이른 희망 입고일'}>
+          <Field label="납기 (입고 예정일)" htmlFor="po-due-date" hint="비우면 발주마다 그 공급업체 품목의 가장 이른 희망 입고일이 납기가 돼요">
             <DateInput id="po-due-date" value={dueDate} onChange={setDueDate} />
           </Field>
           <div className="flex flex-col gap-1 text-sm">
             <span className="text-xs font-medium text-ink-2">만들어질 발주</span>
             <b className="font-semibold">
-              {supplierCount}건 · 공급업체 {supplierCount}곳 · 합계 {fmtTon(decSum(chosen.map((i) => i.requiredTon)))}
+              {planned.length}건 · 공급업체 {planned.length}곳 · 합계 {fmtTon(decSum(chosen.map((i) => i.requiredTon)))}
             </b>
+            {planned.map((purchaseOrder) => (
+              <span key={purchaseOrder.supplierId} className="text-cap text-ink-2">
+                {purchaseOrder.supplierName ?? '-'} · 납기 {purchaseOrder.dueDate ? fmtDate(purchaseOrder.dueDate) : '없음'} · 품목 {purchaseOrder.itemCount}개 · {fmtTon(purchaseOrder.totalTon)}
+              </span>
+            ))}
           </div>
         </CardBody>
         <CardFoot>
@@ -303,8 +308,8 @@ function OrderForm({
             variant="primary"
             icon="check"
             className="ml-auto"
-            disabled={!canOrder || chosen.length === 0 || create.isPending}
-            title={canOrder ? undefined : permissionNeedText([PERMISSION.PURCHASE_ORDER_CONFIRM])}
+            disabled={!canConfirmPurchaseOrder || chosen.length === 0 || create.isPending}
+            title={canConfirmPurchaseOrder ? undefined : permissionNeedText([PERMISSION.PURCHASE_ORDER_CONFIRM])}
             onClick={() => create.mutate({ purchaseRequisitionItemIds: chosen.map((i) => i.id), dueDate })}
           >
             {create.isPending ? '처리하는 중…' : '발주 확정'}
@@ -317,9 +322,9 @@ function OrderForm({
 
 function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
   const canSeeReceipts = useCanView(PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM);
-  const ordered = orderOrderedTon(po);
-  const received = orderReceivedTon(po);
-  const scheduled = orderScheduledTon(po);
+  const ordered = purchaseOrderOrderedTon(po);
+  const received = purchaseOrderReceivedTon(po);
+  const scheduled = purchaseOrderScheduledTon(po);
   const receipts = po.items.flatMap((line) => line.goodsReceipts.map((receipt) => ({ ...receipt, itemName: line.itemName, lineNo: line.lineNo })));
 
   return (
