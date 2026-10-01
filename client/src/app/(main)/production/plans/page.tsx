@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
-import { StagePlaceholder } from '@/components/StagePlaceholder';
+import { Suspense } from 'react';
+import { ProductionPlanScreen } from '@/features/production/ProductionPlanScreen';
 import { pageTitle } from '@/features/shell/routeTitles';
 
 export const metadata: Metadata = { title: pageTitle('/production/plans') };
 
 export default function ProductionPlanPage() {
-  return <StagePlaceholder stage={3} />;
+  return (
+    <Suspense>
+      <ProductionPlanScreen />
+    </Suspense>
+  );
 }

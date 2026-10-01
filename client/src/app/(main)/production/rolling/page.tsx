@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
-import { StagePlaceholder } from '@/components/StagePlaceholder';
+import { Suspense } from 'react';
+import { RollingScreen } from '@/features/production/RollingScreen';
 import { pageTitle } from '@/features/shell/routeTitles';
 
 export const metadata: Metadata = { title: pageTitle('/production/rolling') };
 
-export default function HotRollingAllocationPage() {
-  return <StagePlaceholder stage={4} />;
+export default function RollingAllocationPage() {
+  return (
+    <Suspense>
+      <RollingScreen />
+    </Suspense>
+  );
 }

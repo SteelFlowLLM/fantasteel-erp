@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
-import { StagePlaceholder } from '@/components/StagePlaceholder';
+import { Suspense } from 'react';
+import { ProductionResultScreen } from '@/features/production/ProductionResultScreen';
 import { pageTitle } from '@/features/shell/routeTitles';
 
 export const metadata: Metadata = { title: pageTitle('/production/results') };
 
 export default function ProductionResultPage() {
-  return <StagePlaceholder stage={4} />;
+  return (
+    <Suspense>
+      <ProductionResultScreen />
+    </Suspense>
+  );
 }
