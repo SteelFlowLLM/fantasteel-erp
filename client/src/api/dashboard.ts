@@ -9,12 +9,14 @@ import {
   PERMISSION,
   PROCESS_TYPE,
   PURCHASE_REQUISITION_STATUS,
+  SALES_ORDER_ITEM_STATUS,
   type ActorType,
   type Permission,
   type ProcessType,
   type ProductItemType,
   type PurchaseRequisitionStatus,
   type RawMaterialType,
+  type SalesOrderItemStatus,
 } from '@/codes';
 import { ageDays, bucketByDate, countRatio, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
 import { decSum } from '@/lib/decimal';
@@ -129,7 +131,11 @@ export interface DashboardQueryOptions {
 
 const todayOf = (options: DashboardQueryOptions = {}): string => options.today ?? toSeoulDateString(new Date());
 const seoulDate = (iso: string): string => toSeoulDateString(new Date(iso));
-const OPEN_ORDER_STATUSES = new Set(['OPEN', 'PARTIALLY_SHIPPED']);
+/** 진행 중 수주·수주 품목 상태 (진행중·부분출하) */
+const OPEN_SALES_ORDER_STATUSES: ReadonlySet<SalesOrderItemStatus> = new Set<SalesOrderItemStatus>([
+  SALES_ORDER_ITEM_STATUS.OPEN,
+  SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED,
+]);
 
 // ── 공정 흐름 현황 ───────────────────────────────────────
 
@@ -156,7 +162,7 @@ function readProcessFlow(tables: Tables, options: DashboardQueryOptions): Proces
 
   let salesOrders: ProcessFlowData['salesOrders'] = null;
   if (can('salesOrders')) {
-    const open = listSalesOrders(tables, { today }).filter((so) => OPEN_ORDER_STATUSES.has(so.status));
+    const open = listSalesOrders(tables, { today }).filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status));
     salesOrders = { openCount: open.length, dueRiskCount: open.filter((so) => so.isDueRisk).length };
   }
   let inspections: ProcessFlowData['inspections'] = null;
@@ -200,7 +206,7 @@ export interface FulfillmentItemRow {
   itemType: ProductItemType;
   orderedQty: number;
   orderedTon: string;
-  /** 생산중 = 진행중 연결 계획의 잔여 목표 (분모: 수주 매수) */
+  /** 생산중 = 진행중·완료 연결 계획의 잔여 목표 (분모: 수주 매수) */
   inProductionQty: number;
   /** 검사합격 = ACTIVE 예약 + 출고 (분모: 수주 매수) */
   passedQty: number;
@@ -215,7 +221,7 @@ export interface FulfillmentItemRow {
   isDueRisk: boolean;
 }
 
-export interface FulfillmentOrderRow {
+export interface FulfillmentSalesOrderRow {
   salesOrderId: number;
   salesOrderNo: string;
   customerName: string;
@@ -227,14 +233,14 @@ export interface FulfillmentOrderRow {
 export interface OrderFulfillmentData {
   today: string;
   deliveryRiskDays: number;
-  salesOrders: FulfillmentOrderRow[];
+  salesOrders: FulfillmentSalesOrderRow[];
 }
 
 function readOrderFulfillment(tables: Tables, options: DashboardQueryOptions): OrderFulfillmentData {
   requireWidgetActor(tables, 'ORDER_FULFILLMENT');
   const today = todayOf(options);
   const open = listSalesOrders(tables, { today })
-    .filter((so) => OPEN_ORDER_STATUSES.has(so.status))
+    .filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status))
     .sort((a, b) => (a.earliestDueDate ?? '9999').localeCompare(b.earliestDueDate ?? '9999') || a.id - b.id);
   return {
     today,
@@ -556,9 +562,9 @@ function readDeliveryRisk(tables: Tables, options: DashboardQueryOptions): Deliv
   const today = todayOf(options);
   const rows: DeliveryRiskRow[] = [];
   let openItemCount = 0;
-  for (const so of listSalesOrders(tables, { today }).filter((s) => OPEN_ORDER_STATUSES.has(s.status))) {
+  for (const so of listSalesOrders(tables, { today }).filter((s) => OPEN_SALES_ORDER_STATUSES.has(s.status))) {
     for (const item of salesOrderDetail(tables, so.id, { today }).items) {
-      if (!OPEN_ORDER_STATUSES.has(item.salesOrderItemStatus)) continue;
+      if (!OPEN_SALES_ORDER_STATUSES.has(item.salesOrderItemStatus)) continue;
       openItemCount += 1;
       if (!item.isDueRisk) continue;
       const daysToDue = daysBetween(today, item.dueDate);

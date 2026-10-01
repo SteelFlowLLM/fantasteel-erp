@@ -5,7 +5,7 @@ import { dashboardApi, DASHBOARD_TREND_DAYS } from '@/api/dashboard';
 import { getMockDb } from '@/mock/db';
 import { seedDashboard } from '@/mock/seeds/dashboard';
 import { seedTxAt } from '@/mock/seeds';
-import { createSalesOrder, productInventory, userActor } from '@/mock/services';
+import { createSalesOrder, fulfillmentOf, productInventory, userActor } from '@/mock/services';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const TODAY = '2026-10-01';
@@ -81,6 +81,25 @@ describe('숫자', () => {
     expect(mixed.items.map((i) => i.itemType)).toEqual(['COIL', 'SLAB']);
     expect(mixed.items[0]).toMatchObject({ orderedQty: 6, passedQty: 3, reservedQty: 3, shippedQty: 0 });
     for (const so of data.salesOrders) for (const item of so.items) expect(item.passedQty).toBe(item.reservedQty + item.shippedQty);
+  });
+
+  it('수주 충족 현황: 생산중 = 진행중·완료 연결 계획의 잔여 목표 (수주 상세 충족 현황과 같은 값)', async () => {
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const data = await dashboardApi.widget('ORDER_FULFILLMENT', opts);
+    const rows = data.salesOrders.flatMap((so) => so.items);
+    expect(rows.length).toBeGreaterThan(0);
+    getMockDb().read((tables) => {
+      for (const row of rows) {
+        const soItem = tables.salesOrderItem.find((i) => i.id === row.salesOrderItemId);
+        if (!soItem) throw new Error(`수주 품목 ${row.salesOrderItemId} 없음`);
+        const core = fulfillmentOf(tables, soItem, TODAY);
+        const expected = core.plans
+          .filter((p) => p.productionPlanStatus === 'IN_PROGRESS' || p.productionPlanStatus === 'COMPLETED')
+          .reduce((sum, p) => sum + p.remainingTargetQty, 0);
+        expect(row.inProductionQty).toBe(core.inProductionQty);
+        expect(row.inProductionQty).toBe(expected);
+      }
+    });
   });
 
   it('납기 위험 수주: 기준일 3일 이내·지난 납기, 남은 매수와 톤', async () => {

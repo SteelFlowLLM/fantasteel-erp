@@ -312,7 +312,7 @@ export interface ItemFulfillment {
   activeReservedQty: number;
   /** 검사합격(확보) = 이 품목 몫으로 확보한 합격 제품 = ACTIVE 예약 + 출고 (예약은 모두 합격 제품이다) */
   securedQty: number;
-  /** 생산중 = 진행중(IN_PROGRESS) 연결 계획의 잔여 목표 */
+  /** 생산중 = 진행중(IN_PROGRESS)·완료(COMPLETED) 연결 계획의 잔여 목표 */
   inProductionQty: number;
   /** 시작 전(PLANNED) 연결 계획의 잔여 목표 */
   plannedQty: number;

@@ -104,3 +104,10 @@ core 시드만으로는 9월 생산 5일·출고 1일뿐이라 추이 위젯이 
 2. 추이 기간(30일)·여재 보유 기준·불합격률 정의는 가정값이다.
 3. 위젯 행을 눌러 상세(수주 상세 등)로 가는 링크는 다른 영역의 상세 경로가 정해진 뒤 붙이면 된다(지금은 카드 머리 바로가기만).
 4. `errors.test.ts`의 시드 수주 수 5 고정값(4장).
+
+## 검토 반영
+
+1. 수주 충족 현황 `생산중` 설명 (04 4.5 / 02 REQ-SO-004 / 03 TRM-042): 위젯 열 머리 설명을 `진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)`로, `FulfillmentItemRow.inProductionQty` 주석을 `생산중 = 진행중·완료 연결 계획의 잔여 목표 (분모: 수주 매수)`로 고쳤다. 값은 core `fulfillmentOf().inProductionQty`(IN_PROGRESS·COMPLETED 계획의 잔여 목표 합) 그대로이고, 수주 상세 충족 현황 탭(`FulfillmentTab`·`SalesOrderActions`)과 같은 문구가 된다. 테스트 추가: 위젯의 생산중 = core `fulfillmentOf` 값 = 진행중·완료 계획 잔여 목표 합.
+2. `order` 단독 식별자 (05 2장 [강제], reports/6 C-6): `OPEN_ORDER_STATUSES` → `OPEN_SALES_ORDER_STATUSES`(문자열 대신 `SALES_ORDER_ITEM_STATUS.OPEN`·`PARTIALLY_SHIPPED` 상수, `Set<SalesOrderItemStatus>`), `FulfillmentOrderRow` → `FulfillmentSalesOrderRow`. 위 3장의 "`order` 단독 식별자 없음"은 이 수정으로 맞는 말이 됐다. `OrderFulfillment*` 이름은 TRM-042 영문명이라 그대로 둔다.
+3. 공유 파일 변경(한 줄): `client/src/mock/services/salesOrders.ts`의 `ItemFulfillment.inProductionQty` 주석을 `진행중(IN_PROGRESS)·완료(COMPLETED) 연결 계획의 잔여 목표`로 고쳤다(코드는 그대로, 주석이 실제 계산과 달랐음).
+4. 확인: typecheck 0 오류, 테스트 74개 파일 543개 통과.
