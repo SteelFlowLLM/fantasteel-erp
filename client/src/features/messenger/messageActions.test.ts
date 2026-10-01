@@ -15,11 +15,11 @@ describe('메시지 메뉴 등록부 (Message → ERP 확장 자리)', () => {
     expect(messageActionsFor(message, room, me)).toEqual([]);
   });
 
-  it('조건에 맞는 동작만 order 순으로, 같은 key는 바꾼다', () => {
-    registerMessageAction({ key: 'b', order: 20, Component: Noop });
-    registerMessageAction({ key: 'a', order: 10, Component: Noop });
+  it('조건에 맞는 동작만 sortOrder 순으로, 같은 key는 바꾼다', () => {
+    registerMessageAction({ key: 'b', sortOrder: 20, Component: Noop });
+    registerMessageAction({ key: 'a', sortOrder: 10, Component: Noop });
     registerMessageAction({ key: 'hidden', isAvailable: () => false, Component: Noop });
-    registerMessageAction({ key: 'b', order: 5, Component: Noop });
+    registerMessageAction({ key: 'b', sortOrder: 5, Component: Noop });
     expect(messageActionsFor(message, room, me).map((entry) => entry.key)).toEqual(['b', 'a']);
   });
 });

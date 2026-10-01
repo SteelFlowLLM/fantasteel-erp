@@ -1,6 +1,6 @@
 'use client';
 
-// 초안 카드: 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 · 요청 근거 (REQ-ACT-001, 추출 스키마)
+// 초안 카드: 추출 스키마(REQ-ACT-001 · TRM-095) 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 + 선택 입력 요청 근거
 // AI 자동 추출은 준비 중이라 요청자가 직접 입력한다(SPEC 5장 결정 2). 확정은 요청자만(REQ-ACT-002, BP-ACT-01).
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
@@ -18,8 +18,8 @@ import { Table, Td, Th } from '@/components/Table';
 import {
   DRAFT_FIELD_LABEL,
   DRAFT_STATUS_TONE,
-  draftFormOf,
-  draftPayloadOfForm,
+  buildDraftForm,
+  buildDraftPayload,
   isFieldUnresolved,
   isSameDraftForm,
   type DraftExecutionFailure,
@@ -55,9 +55,9 @@ function toastConfirmResult(result: DraftConfirmResult) {
 }
 
 export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCardProps) {
-  const canUsePr = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
+  const canUsePurchaseRequisition = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const materials = useDraftRawMaterials();
-  const saved = draftFormOf(draft.payload);
+  const saved = buildDraftForm(draft.payload);
   const [form, setForm] = useState<DraftForm>(saved);
   // 다른 탭·저장으로 초안이 바뀌면, 내가 고치는 중이 아닐 때만 폼을 맞춘다 (렌더 중 상태 맞추기)
   const [base, setBase] = useState({ updatedAt: draft.updatedAt, form: saved });
@@ -71,8 +71,8 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
 
   const status = draft.draftStatus;
   const open = status === 'AI_GENERATED' || status === 'WAITING_APPROVAL';
-  const editable = open && draft.isRequester && canUsePr;
-  const retryable = status === 'APPROVED' && failure !== null && draft.isRequester && canUsePr;
+  const editable = open && draft.isRequester && canUsePurchaseRequisition;
+  const retryable = status === 'APPROVED' && failure !== null && draft.isRequester && canUsePurchaseRequisition;
   const dirty = !isSameDraftForm(form, saved);
 
   const onInputError = (error: unknown) => {
@@ -101,14 +101,14 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
   });
   const pending = update.isPending || confirm.isPending || execute.isPending || reject.isPending;
 
-  const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const save = () => update.mutate({ actionDraftId: draft.id, payload: draftPayloadOfForm(form), expectedUpdatedAt: draft.updatedAt });
+  const setField = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const save = () => update.mutate({ actionDraftId: draft.id, payload: buildDraftPayload(form), expectedUpdatedAt: draft.updatedAt });
   const doConfirm = async () => {
     onConfirmFailure(null);
     setFieldErrors({});
     try {
       let expectedUpdatedAt = draft.updatedAt;
-      if (dirty) expectedUpdatedAt = (await update.mutateAsync({ actionDraftId: draft.id, payload: draftPayloadOfForm(form), expectedUpdatedAt })).updatedAt;
+      if (dirty) expectedUpdatedAt = (await update.mutateAsync({ actionDraftId: draft.id, payload: buildDraftPayload(form), expectedUpdatedAt })).updatedAt;
       await confirm.mutateAsync({ actionDraftId: draft.id, expectedUpdatedAt });
     } catch {
       // 안내는 useAction(토스트)과 onError(위 배너·칸 아래 안내)가 한다
@@ -117,32 +117,32 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
 
   const materialList = materials.data ?? [];
   const material = materialList.find((m) => m.id === form.itemId);
-  const unresolved = (field: keyof DraftForm) => open && isFieldUnresolved(field, draft.unresolvedFields, form, saved);
-  const errorOf = (field: keyof DraftForm) => fieldErrors[field] ?? null;
+  const isUnresolved = (field: keyof DraftForm) => open && isFieldUnresolved(field, draft.unresolvedFields, form, saved);
+  const getFieldError = (field: keyof DraftForm) => fieldErrors[field] ?? null;
   const reasonTooLong = form.requestReason.length > REASON_MAX;
 
-  const label = (field: keyof DraftForm, required: boolean) => (
+  const renderLabel = (field: keyof DraftForm, required: boolean) => (
     <span className="flex flex-wrap items-center gap-1.5">
       <span>
         {DRAFT_FIELD_LABEL[field]}
         {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </span>
-      {unresolved(field) ? (
+      {isUnresolved(field) ? (
         <Badge tone="wait" plain>
           미확정
         </Badge>
       ) : null}
     </span>
   );
-  const note = (field: keyof DraftForm) => {
-    const error = errorOf(field);
+  const renderFieldError = (field: keyof DraftForm) => {
+    const error = getFieldError(field);
     return error ? (
       <span role="alert" className="mt-1 block text-cap text-danger">
         {error}
       </span>
     ) : null;
   };
-  const readValue = (text: string | null) => (text ? <span className="text-sm text-ink">{text}</span> : <span className="text-sm text-ink-3">입력되지 않았어요</span>);
+  const renderReadValue = (text: string | null) => (text ? <span className="text-sm text-ink">{text}</span> : <span className="text-sm text-ink-3">입력되지 않았어요</span>);
   const cell = 'h-auto py-2.5 whitespace-normal align-middle';
 
   return (
@@ -170,17 +170,17 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
             </tr>
           </thead>
           <tbody>
-            <tr data-risk={unresolved('itemId') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{label('itemId', true)}</Td>
+            <tr data-risk={isUnresolved('itemId') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('itemId', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <Select
                     aria-label={DRAFT_FIELD_LABEL.itemId}
                     className="w-full max-w-80"
                     value={form.itemId ?? ''}
-                    invalid={Boolean(errorOf('itemId'))}
+                    invalid={Boolean(getFieldError('itemId'))}
                     disabled={pending || materials.isPending}
-                    onChange={(event) => set('itemId', event.target.value ? Number(event.target.value) : null)}
+                    onChange={(event) => setField('itemId', event.target.value ? Number(event.target.value) : null)}
                   >
                     <option value="">원료를 골라 주세요</option>
                     {materialList.map((m) => (
@@ -190,9 +190,9 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     ))}
                   </Select>
                 ) : (
-                  readValue(draft.itemName ? `${draft.itemName} · ${draft.itemCode ?? ''}` : null)
+                  renderReadValue(draft.itemName ? `${draft.itemName} · ${draft.itemCode ?? ''}` : null)
                 )}
-                {note('itemId')}
+                {renderFieldError('itemId')}
                 {materials.error ? <span className="mt-1 block text-cap text-danger">원료 목록을 불러오지 못했어요</span> : null}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>
@@ -201,8 +201,8 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                   : '기준정보에 등록된 원료'}
               </Td>
             </tr>
-            <tr data-risk={unresolved('requiredTon') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{label('requiredTon', true)}</Td>
+            <tr data-risk={isUnresolved('requiredTon') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requiredTon', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <Input
@@ -213,33 +213,33 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     placeholder="0.000"
                     className="w-44"
                     value={form.requiredTon}
-                    invalid={Boolean(errorOf('requiredTon'))}
+                    invalid={Boolean(getFieldError('requiredTon'))}
                     disabled={pending}
-                    onChange={(event) => set('requiredTon', event.target.value)}
+                    onChange={(event) => setField('requiredTon', event.target.value)}
                   />
                 ) : (
-                  readValue(draft.payload.requiredTon ? fmtTon(draft.payload.requiredTon) : null)
+                  renderReadValue(draft.payload.requiredTon ? fmtTon(draft.payload.requiredTon) : null)
                 )}
-                {note('requiredTon')}
+                {renderFieldError('requiredTon')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>0보다 큰 톤 · 소수 3자리까지</Td>
             </tr>
-            <tr data-risk={unresolved('desiredReceiptDate') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{label('desiredReceiptDate', true)}</Td>
+            <tr data-risk={isUnresolved('desiredReceiptDate') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('desiredReceiptDate', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <DateInput
                     ariaLabel={DRAFT_FIELD_LABEL.desiredReceiptDate}
                     value={form.desiredReceiptDate}
-                    onChange={(value) => set('desiredReceiptDate', value)}
-                    invalid={Boolean(errorOf('desiredReceiptDate'))}
+                    onChange={(value) => setField('desiredReceiptDate', value)}
+                    invalid={Boolean(getFieldError('desiredReceiptDate'))}
                     disabled={pending}
                     className="w-44"
                   />
                 ) : (
-                  readValue(draft.payload.desiredReceiptDate)
+                  renderReadValue(draft.payload.desiredReceiptDate)
                 )}
-                {note('desiredReceiptDate')}
+                {renderFieldError('desiredReceiptDate')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>YYYY-MM-DD 날짜</Td>
             </tr>
@@ -255,7 +255,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
               <Td className={cn(cell, 'text-cap text-ink-3')}>메시지 작성자 · 바꿀 수 없어요</Td>
             </tr>
             <tr>
-              <Td className={cn(cell, 'border-b-0 text-ink-2')}>{label('requestReason', false)}</Td>
+              <Td className={cn(cell, 'border-b-0 text-ink-2')}>{renderLabel('requestReason', false)}</Td>
               <Td className={cn(cell, 'border-b-0')}>
                 {editable ? (
                   <Textarea
@@ -263,14 +263,14 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     rows={2}
                     placeholder="어디에 쓰는지, 왜 필요한지 (선택)"
                     value={form.requestReason}
-                    invalid={reasonTooLong || Boolean(errorOf('requestReason'))}
+                    invalid={reasonTooLong || Boolean(getFieldError('requestReason'))}
                     disabled={pending}
-                    onChange={(event) => set('requestReason', event.target.value)}
+                    onChange={(event) => setField('requestReason', event.target.value)}
                   />
                 ) : (
-                  readValue(draft.payload.requestReason)
+                  renderReadValue(draft.payload.requestReason)
                 )}
-                {reasonTooLong && editable ? <span className="mt-1 block text-cap text-danger">{REASON_MAX}자까지 쓸 수 있어요</span> : note('requestReason')}
+                {reasonTooLong && editable ? <span className="mt-1 block text-cap text-danger">{REASON_MAX}자까지 쓸 수 있어요</span> : renderFieldError('requestReason')}
               </Td>
               <Td className={cn(cell, 'border-b-0 text-cap text-ink-3')}>{REASON_MAX}자 이하 · 선택 · 비우면 원본 메시지 글이 들어가요</Td>
             </tr>
@@ -324,17 +324,17 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
             </>
           )
         ) : (
-          <LockHint draft={draft} canUsePr={canUsePr} />
+          <LockHint draft={draft} canUsePurchaseRequisition={canUsePurchaseRequisition} />
         )}
       </CardFoot>
     </Card>
   );
 }
 
-function LockHint({ draft, canUsePr }: { draft: DraftDetailView; canUsePr: boolean }) {
+function LockHint({ draft, canUsePurchaseRequisition }: { draft: DraftDetailView; canUsePurchaseRequisition: boolean }) {
   const name = draft.requester.employeeName;
   const status = draft.draftStatus;
-  if (draft.isRequester && !canUsePr && status !== 'EXECUTED' && status !== 'REJECTED') return <ReadOnlyHint permissions={NEED} />;
+  if (draft.isRequester && !canUsePurchaseRequisition && status !== 'EXECUTED' && status !== 'REJECTED') return <ReadOnlyHint permissions={NEED} />;
   const text =
     status === 'AI_GENERATED' || status === 'WAITING_APPROVAL'
       ? `수정·확정·반려는 요청자(${name})만 할 수 있어요. ${name}님이 확정해야 구매요청이 만들어져요`

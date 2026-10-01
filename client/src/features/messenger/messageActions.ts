@@ -3,7 +3,7 @@
 //
 // 더하는 법 (둘 중 하나):
 // 1) 아래 MESSAGE_ACTIONS 배열에 한 줄을 넣는다.
-//      { key: 'purchase-requisition-draft', order: 10, isAvailable: (message, room, me) => …, Component: PurchaseRequisitionDraftAction }
+//      { key: 'purchase-requisition-draft', sortOrder: 10, isAvailable: (message, room, me) => …, Component: PurchaseRequisitionDraftAction }
 // 2) 다른 모듈에서 registerMessageAction({...})을 부른다 (그 모듈이 메신저 화면보다 먼저 불려야 한다).
 // Component는 MessageActionItem(features/messenger/components/MessageActionItem.tsx)으로 메뉴 한 줄을 그리고,
 // 안에서 훅(useAction·useRouter 등)을 자유롭게 쓴다. 일을 마치면 closeMenu()를 부른다.
@@ -22,8 +22,8 @@ export interface MessageActionProps {
 export interface MessageActionEntry {
   /** 같은 key로 다시 등록하면 바꾼다 */
   key: string;
-  /** 작은 수가 위 (기본 100) */
-  order?: number;
+  /** 메뉴 표시 순서 (ERD sort_order와 같은 뜻). 작은 수가 위 (기본 100) */
+  sortOrder?: number;
   /** 이 메시지에서 보일지 (권한·메시지 종류). 없으면 늘 보인다 */
   isAvailable?: (message: MessageView, room: ChatRoomDetailView, me: SessionUser) => boolean;
   Component: ComponentType<MessageActionProps>;
@@ -45,11 +45,11 @@ export function clearRegisteredMessageActions(): void {
   registered.length = 0;
 }
 
-/** 이 메시지에 보일 동작 (order 순) */
+/** 이 메시지에 보일 동작 (sortOrder 순) */
 export function messageActionsFor(message: MessageView, room: ChatRoomDetailView, me: SessionUser): MessageActionEntry[] {
   const byKey = new Map<string, MessageActionEntry>();
   for (const entry of [...MESSAGE_ACTIONS, ...registered]) byKey.set(entry.key, entry);
   return [...byKey.values()]
     .filter((entry) => !entry.isAvailable || entry.isAvailable(message, room, me))
-    .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.key.localeCompare(b.key));
+    .sort((a, b) => (a.sortOrder ?? 100) - (b.sortOrder ?? 100) || a.key.localeCompare(b.key));
 }

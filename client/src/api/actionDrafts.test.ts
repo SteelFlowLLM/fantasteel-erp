@@ -2,41 +2,41 @@ import { describe, expect, it } from 'vitest';
 import { actionDraftApi, ACTION_TYPE_CATALOG } from '@/api/actionDrafts';
 import { InputError } from '@/api/client';
 import { messengerApi } from '@/api/messenger';
-import { executionFailureOf } from '@/features/actionDrafts/lib/draftDisplay';
+import { getExecutionFailure } from '@/features/actionDrafts/lib/draftDisplay';
 import { getMockDb } from '@/mock/db';
-import { updateRow } from '@/mock/store';
+import { insertRow, updateRow } from '@/mock/store';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const DEMO_TEXT = '실리코망가니즈 20톤 10월 20일까지 필요합니다';
 
 /** 거래 시드 업무방(SO-2609-003 다온건설)의 구매 담당 메시지 */
-function demoMessage() {
+function findDemoMessage() {
   const message = getMockDb().read((t) => t.message.find((m) => m.content === DEMO_TEXT));
   if (!message) throw new Error('시드 메시지가 없어요');
   return message;
 }
 
-const itemIdOf = (itemCode: string) => {
+const getItemId = (itemCode: string) => {
   const item = getMockDb().read((t) => t.item.find((i) => i.itemCode === itemCode));
   if (!item) throw new Error(`품목이 없어요: ${itemCode}`);
   return item.id;
 };
 
-const eventsOf = (actionDraftId: number) => getMockDb().read((t) => t.businessEvent.filter((e) => e.actionDraftId === actionDraftId));
+const getDraftEvents = (actionDraftId: number) => getMockDb().read((t) => t.businessEvent.filter((e) => e.actionDraftId === actionDraftId));
 
-async function demoDraft() {
+async function createDemoDraft() {
   actAs(SEED_EMPLOYEE_NO.purchase);
-  const { id } = await actionDraftApi.createFromMessage({ messageId: demoMessage().id });
+  const { id } = await actionDraftApi.createFromMessage({ messageId: findDemoMessage().id });
   return actionDraftApi.get(id);
 }
 
 async function fillDemoDraft(id: number) {
-  return actionDraftApi.update({ actionDraftId: id, payload: { itemId: itemIdOf('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
+  return actionDraftApi.update({ actionDraftId: id, payload: { itemId: getItemId('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
 }
 
 describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
   it('메시지에서 만들면 요청자 = 메시지 작성자, 확인 대기, 원본 메시지 연결, 같은 메시지는 그 초안을 다시 연다', async () => {
-    const message = demoMessage();
+    const message = findDemoMessage();
     const purchaseId = actAs(SEED_EMPLOYEE_NO.purchase);
     const first = await actionDraftApi.createFromMessage({ messageId: message.id });
     expect(first.created).toBe(true);
@@ -57,7 +57,7 @@ describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
     expect(draft.message?.content).toBe(DEMO_TEXT);
     expect(draft.unresolvedFields).toEqual(['원료 품목', '수량(톤)', '희망 입고일']);
 
-    const created = eventsOf(first.id);
+    const created = getDraftEvents(first.id);
     expect(created.map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED']);
     expect(created[0]).toMatchObject({ messageId: message.id, actorEmployeeId: purchaseId });
 
@@ -66,10 +66,10 @@ describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
   });
 
   it('다른 멤버가 만들어도 요청자는 메시지 작성자다 (생산 부서장은 조회만 — 만들기 COM-002)', async () => {
-    const message = demoMessage();
+    const message = findDemoMessage();
     actAs(SEED_EMPLOYEE_NO.productionHead);
     await expect(actionDraftApi.createFromMessage({ messageId: message.id })).rejects.toMatchObject({ code: 'COM-002' });
-    const { id } = await demoDraft();
+    const { id } = await createDemoDraft();
     actAs(SEED_EMPLOYEE_NO.productionHead);
     const seenByOther = await actionDraftApi.get(id);
     expect(seenByOther.isRequester).toBe(false);
@@ -77,8 +77,8 @@ describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
   });
 
   it('권한·방 멤버 확인: 구매요청 조회 권한이 없으면 COM-002, 방 멤버가 아니면 COM-002', async () => {
-    const message = demoMessage();
-    const { id } = await demoDraft();
+    const message = findDemoMessage();
+    const { id } = await createDemoDraft();
     actAs(SEED_EMPLOYEE_NO.sales);
     await expect(actionDraftApi.get(id)).rejects.toMatchObject({ code: 'COM-002' });
     await expect(actionDraftApi.listMine()).rejects.toMatchObject({ code: 'COM-002' });
@@ -87,6 +87,45 @@ describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
     actAs(SEED_EMPLOYEE_NO.purchaseHead); // 구매 사용 권한은 있지만 업무방 멤버가 아니다
     await expect(actionDraftApi.createFromMessage({ messageId: message.id })).rejects.toMatchObject({ code: 'COM-002' });
     await expect(actionDraftApi.listOfRoom(message.chatRoomId)).rejects.toMatchObject({ code: 'COM-002' });
+  });
+
+  it('요청자(메시지 작성자)가 확정할 수 없으면 만들지 않는다 — 영업 부서장 메시지는 COM-002, 초안이 생기지 않아 메시지가 막히지 않는다', async () => {
+    const demo = findDemoMessage();
+    const salesHeadId = employeeIdOf(SEED_EMPLOYEE_NO.salesHead);
+    const salesMessage = getMockDb().read((t) => t.message.find((m) => m.chatRoomId === demo.chatRoomId && m.senderId === salesHeadId && m.content !== null));
+    if (!salesMessage) throw new Error('업무방에 영업 부서장 메시지가 없어요');
+
+    actAs(SEED_EMPLOYEE_NO.purchase); // 구매요청 등록 사용 권한이 있는 업무방 멤버
+    expect(await actionDraftApi.checkRequester(salesMessage.id)).toEqual({
+      requesterId: salesHeadId,
+      blockReason: '요청자(메시지 작성자)에게 구매요청 등록 권한이 없어 초안을 만들 수 없어요',
+    });
+    await expect(actionDraftApi.createFromMessage({ messageId: salesMessage.id })).rejects.toMatchObject({
+      code: 'COM-002',
+      detail: '요청자(메시지 작성자)에게 구매요청 등록 권한이 없어 초안을 만들 수 없어요',
+    });
+    expect(getMockDb().read((t) => t.actionDraft.filter((d) => d.messageId === salesMessage.id))).toEqual([]);
+    expect(getMockDb().read((t) => t.businessEvent.filter((e) => e.messageId === salesMessage.id && e.businessEventType === 'DRAFT_CREATED'))).toEqual([]);
+
+    // 확정할 수 있는 작성자(구매 담당)의 메시지는 그대로 만든다
+    expect(await actionDraftApi.checkRequester(demo.id)).toMatchObject({ blockReason: null });
+    expect((await actionDraftApi.createFromMessage({ messageId: demo.id })).created).toBe(true);
+  });
+
+  it('요청자가 사용 중인 사원이 아니어도 만들지 않는다, 방 멤버가 아니면 확인도 COM-002', async () => {
+    const demo = findDemoMessage();
+    const purchaseHeadId = employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead);
+    actAs(SEED_EMPLOYEE_NO.purchaseHead);
+    await expect(actionDraftApi.checkRequester(demo.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(actionDraftApi.checkRequester(99999)).rejects.toMatchObject({ code: 'COM-003' });
+
+    getMockDb().transact((tx) => {
+      insertRow(tx, 'chatRoomMember', { chatRoomId: demo.chatRoomId, employeeId: purchaseHeadId, lastReadMessageId: null });
+      updateRow(tx, 'employee', demo.senderId, { isActive: false });
+    });
+    const reason = '요청자(메시지 작성자)가 사용 중인 사원이 아니라 초안을 만들 수 없어요';
+    expect((await actionDraftApi.checkRequester(demo.id)).blockReason).toBe(reason);
+    await expect(actionDraftApi.createFromMessage({ messageId: demo.id })).rejects.toMatchObject({ code: 'COM-002', detail: reason });
   });
 
   it('없는 초안·메시지는 COM-003', async () => {
@@ -98,7 +137,7 @@ describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
 
 describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', () => {
   it('필수값이 비면 ACT-001 (칸 이름을 덧붙임), 형식이 틀리면 입력 오류', async () => {
-    const draft = await demoDraft();
+    const draft = await createDemoDraft();
     await expect(actionDraftApi.confirm({ actionDraftId: draft.id })).rejects.toMatchObject({ code: 'ACT-001', detail: '원료 품목, 수량(톤), 희망 입고일' });
 
     const wrong = actionDraftApi.update({ actionDraftId: draft.id, payload: { requiredTon: '1.2345', desiredReceiptDate: '10월 20일' } });
@@ -111,7 +150,7 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
   });
 
   it('요청자만 고치고 확정한다 (다른 사원 COM-002), 연 뒤 바뀌었으면 COM-001', async () => {
-    const draft = await demoDraft();
+    const draft = await createDemoDraft();
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     await expect(fillDemoDraft(draft.id)).rejects.toMatchObject({ code: 'COM-002' });
     actAs(SEED_EMPLOYEE_NO.productionHead); // 조회만
@@ -123,8 +162,8 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
   });
 
   it('확정하면 등록부 핸들러가 구매요청(부서장 승인 대기)을 만들고 ERP 반영, 작업 로그·시스템 메시지·승인 요청 알림', async () => {
-    const message = demoMessage();
-    const draft = await demoDraft();
+    const message = findDemoMessage();
+    const draft = await createDemoDraft();
     const filled = await fillDemoDraft(draft.id);
     expect(filled.unresolvedFields).toEqual([]);
     expect(filled.itemName).toBe('실리코망가니즈');
@@ -136,16 +175,16 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
     expect(result.draft.confirmedAt).not.toBeNull();
     expect(result.draft.executedAt).not.toBeNull();
 
-    const pr = getMockDb().read((t) => t.purchaseRequisition.find((p) => p.actionDraftId === draft.id));
-    expect(pr).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', requesterId: employeeIdOf(SEED_EMPLOYEE_NO.purchase), desiredReceiptDate: '2026-10-20' });
+    const purchaseRequisition = getMockDb().read((t) => t.purchaseRequisition.find((p) => p.actionDraftId === draft.id));
+    expect(purchaseRequisition).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', requesterId: employeeIdOf(SEED_EMPLOYEE_NO.purchase), desiredReceiptDate: '2026-10-20' });
 
-    const events = eventsOf(draft.id);
+    const events = getDraftEvents(draft.id);
     expect(events.map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED', 'DRAFT_CONFIRMED', 'PURCHASE_REQUISITION_CREATED', 'DRAFT_EXECUTED']);
     expect(events.find((e) => e.businessEventType === 'DRAFT_CONFIRMED')?.reasonCode).toBe('DRAFT_CONFIRMED');
     expect(events.every((e) => e.messageId === message.id)).toBe(true);
 
     const notices = getMockDb().read((t) => t.notification.filter((n) => n.recipientId === employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead) && n.notificationType === 'APPROVAL_REQUESTED'));
-    expect(notices.some((n) => n.linkPath === `/approvals?pr=${pr?.id}`)).toBe(true);
+    expect(notices.some((n) => n.linkPath === `/approvals?pr=${purchaseRequisition?.id}`)).toBe(true);
 
     const lastInRoom = getMockDb().read((t) => t.message.filter((m) => m.chatRoomId === message.chatRoomId).at(-1));
     expect(lastInRoom?.content).toContain(`초안 #${draft.id}`);
@@ -159,7 +198,7 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
   });
 
   it('구매요청을 만들지 못하면(부서장 없음 PUR-001) 확정 상태로 남고 결과를 기록, 원인을 고친 뒤 다시 실행', async () => {
-    const draft = await demoDraft();
+    const draft = await createDemoDraft();
     const filled = await fillDemoDraft(draft.id);
     const departmentId = getMockDb().read((t) => t.employee.find((e) => e.id === draft.requesterId)?.departmentId ?? 0);
     const headId = getMockDb().read((t) => t.department.find((d) => d.id === departmentId)?.headEmployeeId ?? null);
@@ -167,7 +206,7 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
 
     const failed = await actionDraftApi.confirm({ actionDraftId: draft.id, expectedUpdatedAt: filled.updatedAt });
     expect(failed).toMatchObject({ executed: false, errorCode: 'PUR-001', draft: { draftStatus: 'APPROVED', purchaseRequisition: null } });
-    expect(executionFailureOf(failed.draft.executionResult)).toMatchObject({ attempts: 1, errorCode: 'PUR-001' });
+    expect(getExecutionFailure(failed.draft.executionResult)).toMatchObject({ attempts: 1, errorCode: 'PUR-001' });
     // 확정 뒤에는 값을 고치거나 반려할 수 없다
     await expect(fillDemoDraft(draft.id)).rejects.toBeInstanceOf(InputError);
 
@@ -175,12 +214,12 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
     const retried = await actionDraftApi.execute({ actionDraftId: draft.id });
     expect(retried.executed).toBe(true);
     expect(retried.draft.draftStatus).toBe('EXECUTED');
-    expect(executionFailureOf(retried.draft.executionResult)).toBeNull();
+    expect(getExecutionFailure(retried.draft.executionResult)).toBeNull();
   });
 
   it('반려: 사유 필수, REJECTED로 끝나고 같은 메시지에서 새 초안을 만들 수 있다', async () => {
     const purchaseId = actAs(SEED_EMPLOYEE_NO.purchase);
-    const message = demoMessage();
+    const message = findDemoMessage();
     const sent = await messengerApi.sendMessage({ chatRoomId: message.chatRoomId, content: '석회석 30톤도 10월 말까지 필요해요' });
     const { id } = await actionDraftApi.createFromMessage({ messageId: sent.id });
     await expect(actionDraftApi.reject({ actionDraftId: id, rejectReason: '  ' })).rejects.toMatchObject({ fieldErrors: { rejectReason: expect.any(String) } });
@@ -191,8 +230,8 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
     actAs(SEED_EMPLOYEE_NO.purchase);
     const rejected = await actionDraftApi.reject({ actionDraftId: id, rejectReason: '이미 다른 요청으로 처리했어요' });
     expect(rejected).toMatchObject({ draftStatus: 'REJECTED', rejectReason: '이미 다른 요청으로 처리했어요', purchaseRequisition: null });
-    expect(eventsOf(id).map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED', 'DRAFT_REJECTED']);
-    expect(eventsOf(id)[1]).toMatchObject({ actorEmployeeId: purchaseId, messageId: sent.id });
+    expect(getDraftEvents(id).map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED', 'DRAFT_REJECTED']);
+    expect(getDraftEvents(id)[1]).toMatchObject({ actorEmployeeId: purchaseId, messageId: sent.id });
     await expect(actionDraftApi.confirm({ actionDraftId: id })).rejects.toBeInstanceOf(InputError);
 
     const again = await actionDraftApi.createFromMessage({ messageId: sent.id });
@@ -205,8 +244,11 @@ describe('초안 업무 유형 등록부 (REQ-ACT-004 · ACT-005 P2)', () => {
   it('구매요청 생성만 실행 핸들러가 있고 나머지는 준비 중(P2)', () => {
     const active = ACTION_TYPE_CATALOG.filter((entry) => entry.active);
     expect(active.map((entry) => entry.actionType)).toEqual(['PURCHASE_REQUISITION_CREATE']);
-    expect(active[0].fieldLabels).toEqual(['원료 품목', '수량(톤)', '희망 입고일', '요청 근거']);
-    expect(ACTION_TYPE_CATALOG.filter((entry) => !entry.active).every((entry) => entry.grade === 'P2')).toBe(true);
+    // 추출 스키마는 TRM-095 · REQ-ACT-001 그대로, 요청 근거는 스키마 밖 선택 입력
+    expect(active[0].schemaFieldLabels).toEqual(['원료 품목', '수량(톤)', '희망 입고일', '요청자']);
+    expect(active[0].optionalInputLabels).toEqual(['요청 근거']);
+    const inactive = ACTION_TYPE_CATALOG.filter((entry) => !entry.active);
+    expect(inactive.every((entry) => entry.grade === 'P2' && entry.schemaFieldLabels.length === 0)).toBe(true);
   });
 
   it('원료 품목 고르기는 원료만, 기본 공급업체와 함께', async () => {

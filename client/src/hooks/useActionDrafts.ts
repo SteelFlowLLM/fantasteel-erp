@@ -24,6 +24,12 @@ export function useRoomActionDrafts(chatRoomId: number) {
   return useQuery({ queryKey: actionDraftKeys.room(me.employeeId, chatRoomId), queryFn: () => actionDraftApi.listOfRoom(chatRoomId), retry: false });
 }
 
+/** 이 메시지로 초안을 만들 수 있는지 (요청자 = 메시지 작성자가 확정할 수 있어야 한다). 메시지 메뉴를 열 때만 부른다. */
+export function useDraftRequesterCheck(messageId: number) {
+  const me = useMe();
+  return useQuery({ queryKey: actionDraftKeys.requester(me.employeeId, messageId), queryFn: () => actionDraftApi.checkRequester(messageId), retry: false });
+}
+
 export function useDraftRawMaterials() {
   return useQuery({ queryKey: [...actionDraftKeys.all, 'raw-materials'], queryFn: actionDraftApi.listRawMaterials });
 }

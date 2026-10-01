@@ -18,18 +18,19 @@ export const DRAFT_STATUS_TONE: Record<DraftStatus, BadgeTone> = {
   REJECTED: 'danger',
 };
 
-const PR_STATUS_TONE: Record<PurchaseRequisitionStatus, BadgeTone> = {
+/** 구매요청 상태 배지 색 */
+export const PURCHASE_REQUISITION_STATUS_TONE: Record<PurchaseRequisitionStatus, BadgeTone> = {
   WAITING_APPROVAL: 'wait',
   APPROVED: 'run',
   REJECTED: 'danger',
   ORDERED: 'ok',
 };
 
-const isPrStatus = (value: string): value is PurchaseRequisitionStatus => value in PURCHASE_REQUISITION_STATUS_LABEL;
+const isPurchaseRequisitionStatus = (value: string): value is PurchaseRequisitionStatus => value in PURCHASE_REQUISITION_STATUS_LABEL;
 
 /** 만들어진 구매요청의 상태 표시 (표시명·색) */
-export function requisitionStatusDisplay(status: string): { label: string; tone: BadgeTone } {
-  return isPrStatus(status) ? { label: PURCHASE_REQUISITION_STATUS_LABEL[status], tone: PR_STATUS_TONE[status] } : { label: status, tone: 'neutral' };
+export function getRequisitionStatusDisplay(status: string): { label: string; tone: BadgeTone } {
+  return isPurchaseRequisitionStatus(status) ? { label: PURCHASE_REQUISITION_STATUS_LABEL[status], tone: PURCHASE_REQUISITION_STATUS_TONE[status] } : { label: status, tone: 'neutral' };
 }
 
 const FLOW: readonly DraftStatus[] = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL, DRAFT_STATUS.APPROVED, DRAFT_STATUS.EXECUTED];
@@ -38,7 +39,7 @@ const FLOW: readonly DraftStatus[] = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WA
  * 초안 흐름 (REQ-ACT-003): 생성 → 확인 대기 → 확정 → ERP 반영, 반려하면 반려로 끝난다.
  * 지금 상태는 '진행 중', 앞 단계는 '완료'. ERP 반영은 끝 상태라 모두 '완료'.
  */
-export function draftFlowSteps(status: DraftStatus): StepItem[] {
+export function buildDraftFlowSteps(status: DraftStatus): StepItem[] {
   if (status === DRAFT_STATUS.REJECTED) {
     return [
       { key: DRAFT_STATUS.AI_GENERATED, label: DRAFT_STATUS_LABEL.AI_GENERATED, state: 'done' },
@@ -63,7 +64,7 @@ export interface DraftExecutionFailure {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** 확정 뒤 구매요청을 만들지 못했을 때 core가 남긴 실행 결과 (attempts·errorCode·message). 성공했거나 없으면 null. */
-export function executionFailureOf(executionResult: unknown): DraftExecutionFailure | null {
+export function getExecutionFailure(executionResult: unknown): DraftExecutionFailure | null {
   if (!isRecord(executionResult) || typeof executionResult.message !== 'string' || executionResult.targetId) return null;
   return {
     attempts: typeof executionResult.attempts === 'number' ? executionResult.attempts : 1,
@@ -73,7 +74,7 @@ export function executionFailureOf(executionResult: unknown): DraftExecutionFail
 }
 
 /** 확정·실행이 막혔을 때 배너 제목 (ACT-001 · PUR-001 · 그 밖) */
-export function confirmFailureTitle(code: string | null): string {
+export function getConfirmFailureTitle(code: string | null): string {
   if (code === 'ACT-001') return '아직 확정할 수 없어요';
   if (code === 'PUR-001') return '승인권자가 없어 구매요청을 만들지 못했어요';
   return '확정했지만 구매요청을 만들지 못했어요';
@@ -96,14 +97,14 @@ export interface DraftPayloadLike {
 }
 
 /** 저장된 톤('20.000')은 입력칸에서 끝자리 0을 지워 보인다 ('20') */
-export function tonInputText(value: string | null): string {
+export function formatTonInput(value: string | null): string {
   if (!value) return '';
   return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
 }
 
-export const draftFormOf = (payload: DraftPayloadLike): DraftForm => ({
+export const buildDraftForm = (payload: DraftPayloadLike): DraftForm => ({
   itemId: payload.itemId,
-  requiredTon: tonInputText(payload.requiredTon),
+  requiredTon: formatTonInput(payload.requiredTon),
   desiredReceiptDate: payload.desiredReceiptDate ?? '',
   requestReason: payload.requestReason ?? '',
 });
@@ -115,7 +116,7 @@ export const isSameDraftForm = (a: DraftForm, b: DraftForm): boolean =>
   a.requestReason.trim() === b.requestReason.trim();
 
 /** 저장할 값 (빈칸은 null = 미확정) */
-export const draftPayloadOfForm = (form: DraftForm): DraftPayloadLike => ({
+export const buildDraftPayload = (form: DraftForm): DraftPayloadLike => ({
   itemId: form.itemId,
   requiredTon: form.requiredTon.trim() || null,
   desiredReceiptDate: form.desiredReceiptDate.trim() || null,
