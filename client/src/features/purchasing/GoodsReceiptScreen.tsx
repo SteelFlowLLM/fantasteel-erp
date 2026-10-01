@@ -32,7 +32,7 @@ import { isOverdue, ratioPercent, rawMaterialLotNoPattern, trimTonText } from '@
 import { useGoodsReceiptList, useReceiptLines, useReceiveGoods } from '@/hooks/useGoodsReceipts';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
-import { fmtDate, fmtMD, fmtMDHM, fmtTon, todayStr } from '@/lib/format';
+import { fmtDate, fmtMD, fmtMDHM, fmtNum, fmtTon, todayStr } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
 import { permissionNeedText } from '@/lib/permissions';
 import { errorMessageOf } from '@/stores/useToastStore';
@@ -257,9 +257,9 @@ function ReceiptWork({
         <span className="font-mono">{line.purchaseRequisitionNo ?? '-'}</span>
       </p>
       <StatBar>
-        <Kpi flat label="발주" value={fmtTon(line.orderedTon)} />
-        <Kpi flat label="입고 누계" value={fmtTon(line.receivedTon)} sub={`발주 대비 ${Math.round(ratioPercent(line.receivedTon, line.orderedTon))}%`} />
-        <Kpi flat label="입고예정" value={fmtTon(line.scheduledReceiptTon)} sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
+        <Kpi flat label="발주" value={fmtNum(line.orderedTon, 3)} unit="t" />
+        <Kpi flat label="입고 누계" value={fmtNum(line.receivedTon, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(line.receivedTon, line.orderedTon))}%`} />
+        <Kpi flat label="입고예정" value={fmtNum(line.scheduledReceiptTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
       </StatBar>
 
       {done ? (

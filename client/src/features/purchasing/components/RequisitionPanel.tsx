@@ -69,6 +69,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
   const canCreate = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const canOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
   const canSeeOrders = useCanView(PERMISSION.PURCHASE_ORDER_CONFIRM, PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_REQUISITION_CREATE);
+  const canSeeMrp = useCanView(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -235,10 +236,15 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
             )
           ) : detail.source === 'MRP' ? (
             <p className="text-sm text-ink-2">
-              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{planNos.join(', ')}</span> ·{' '}
-              <Link className="text-run hover:underline" href="/mrp">
-                MRP 보기
-              </Link>
+              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{planNos.join(', ')}</span>
+              {canSeeMrp ? (
+                <>
+                  {' · '}
+                  <Link className="text-run hover:underline" href="/mrp">
+                    MRP 보기
+                  </Link>
+                </>
+              ) : null}
             </p>
           ) : (
             <p className="text-sm text-ink-2">요청자가 직접 등록한 요청이에요.</p>

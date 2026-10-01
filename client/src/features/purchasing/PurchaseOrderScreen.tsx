@@ -27,7 +27,7 @@ import { earliestDate, groupBySupplier, ratioPercent, summarizeItemNames, type S
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { useCreatePurchaseOrders, useOrderableRequisitionItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
 import { decSum } from '@/lib/decimal';
-import { fmtDate, fmtDateTime, fmtMD, fmtTon } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtMD, fmtNum, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const STATUS_FILTERS: readonly PurchaseOrderStatus[] = ['CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED'];
@@ -344,9 +344,9 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
         {po.supplierName} · 발주 확정 {fmtDateTime(po.createdAt)} · 납기 {po.dueDate ? fmtDate(po.dueDate) : '-'} · 품목 {po.items.length}개 · 발주 {po.orderedEmployeeName ?? '-'}
       </p>
       <StatBar>
-        <Kpi flat label="발주" value={fmtTon(ordered)} />
-        <Kpi flat label="입고 누계" value={fmtTon(received)} sub={`발주 대비 ${Math.round(ratioPercent(received, ordered))}%`} />
-        <Kpi flat label="입고예정" value={fmtTon(scheduled)} sub="발주 − 입고 누계 (MRP 입고예정)" />
+        <Kpi flat label="발주" value={fmtNum(ordered, 3)} unit="t" />
+        <Kpi flat label="입고 누계" value={fmtNum(received, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(received, ordered))}%`} />
+        <Kpi flat label="입고예정" value={fmtNum(scheduled, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
       </StatBar>
       <Card>
         <CardHead title="발주 품목" />
