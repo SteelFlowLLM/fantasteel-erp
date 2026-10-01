@@ -16,7 +16,7 @@ import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { InviteModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
-import { dayLabelOf } from '@/features/messenger/lib/dayLabel';
+import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { useMe } from '@/hooks/useMe';
 import { useChatMessages, useChatRoom, useMarkRoomRead } from '@/hooks/useMessenger';
 import { fmtDate } from '@/lib/format';
@@ -24,7 +24,7 @@ import { fmtDate } from '@/lib/format';
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
 
-function captionOf(room: ChatRoomDetailView): string {
+function buildRoomCaption(room: ChatRoomDetailView): string {
   const others = room.members.filter((m) => !m.isMe);
   if (room.chatRoomType === 'DIRECT') {
     const other = others[0];
@@ -121,7 +121,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
           <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
           <div className="flex min-w-0 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
-            <span className="truncate text-cap text-ink-3">{captionOf(room)}</span>
+            <span className="truncate text-cap text-ink-3">{buildRoomCaption(room)}</span>
           </div>
           <div className="ml-auto flex flex-none items-center gap-1.5">
             {room.chatRoomType === 'WORK' ? (
@@ -160,7 +160,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
                     {showDay ? (
                       <div className="flex items-center gap-3 px-5 py-2 text-cap font-medium text-ink-3" role="separator">
                         <span className="h-px flex-1 bg-line" />
-                        {dayLabelOf(message.createdAt)}
+                        {formatDayLabel(message.createdAt)}
                         <span className="h-px flex-1 bg-line" />
                       </div>
                     ) : null}

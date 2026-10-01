@@ -8,6 +8,7 @@ import { requireActor } from '@/api/actor';
 import { ApiError, FieldErrors, mockMutation, mockQuery } from '@/api/client';
 import { optionalText, requiredText, requireRow } from '@/api/validation';
 import { isScreenPath, LINK_PATH_ERROR } from '@/features/tasks/lib/taskDue';
+import { NOTIFICATION_TITLE_MAX } from '@/features/tasks/lib/taskNotice';
 import type { MockTables, NotificationRow } from '@/mock/schema';
 import { createNotifications } from '@/mock/services/notifications';
 import { updateRow } from '@/mock/store';
@@ -143,7 +144,7 @@ export const notificationApi = {
       requireActor(tx.tables);
       const errors = new FieldErrors();
       if (!NOTIFICATION_TYPES.includes(input.type)) errors.add('type', '알림 유형을 골라 주세요');
-      const title = requiredText(errors, 'title', input.title, '제목', 200);
+      const title = requiredText(errors, 'title', input.title, '제목', NOTIFICATION_TITLE_MAX);
       const body = optionalText(errors, 'body', input.body, '내용', 1000);
       const linkPath = (input.linkPath ?? '').trim();
       if (linkPath && !isScreenPath(linkPath)) errors.add('linkPath', LINK_PATH_ERROR);

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { messengerApi } from '@/api/messenger';
 import { notificationApi } from '@/api/notifications';
 import { taskApi } from '@/api/tasks';
+import { formatItemQty } from '@/features/messenger/lib/salesOrderQty';
 import { getMockDb } from '@/mock/db';
+import { SEED_CORE } from '@/mock/seeds/core';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 /** 협업 시드는 AREA_SEEDERS에 등록되어 setup.ts의 resetToSeed()가 넣는다 */
@@ -55,5 +57,24 @@ describe('협업 시드', () => {
     expect(await messengerApi.countUnread(employeeIdOf(SEED_EMPLOYEE_NO.salesHead))).toBe(4);
     expect(await messengerApi.countUnread(employeeIdOf(SEED_EMPLOYEE_NO.productionHead))).toBe(3);
     expect(await messengerApi.countUnread(employeeIdOf(SEED_EMPLOYEE_NO.sales))).toBe(2);
+  });
+
+  it('출하 조율 방 메시지의 수주·출하요청 번호가 실제 행으로 이어진다 (REQ-MSG-006, 14.2 ERP 화면 이동)', async () => {
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const room = (await messengerApi.listRooms()).find((r) => r.displayName === '출하 조율');
+    if (!room) throw new Error('출하 조율 방이 없어요');
+    const message = (await messengerApi.listMessages({ chatRoomId: room.id })).items.find((m) => m.content?.includes('출하 예정 건'));
+    expect(message?.erpLinks.map((link) => link.text)).toEqual([SEED_CORE.salesOrderNos[1], SEED_CORE.waitingShipmentRequestNo]);
+    expect(message?.erpLinks.every((link) => /^\/(sales-orders|shipment-requests)\/\d+$/.test(link.href))).toBe(true);
+  });
+
+  it('업무방 수주 요약의 코일 품목은 개로 센다 (04 4.1)', async () => {
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const workRoom = (await messengerApi.listRooms()).find((r) => r.chatRoomType === 'WORK');
+    if (!workRoom) throw new Error('업무방이 없어요');
+    const detail = await messengerApi.getRoom(workRoom.id);
+    const coil = detail.salesOrder?.items.find((item) => item.itemType === 'COIL');
+    if (!coil) throw new Error('코일 품목이 없어요');
+    expect(formatItemQty(coil).ordered).toBe('6개');
   });
 });

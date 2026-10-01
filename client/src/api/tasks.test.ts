@@ -29,6 +29,17 @@ describe('업무 (REQ-NTF-001)', () => {
     expect(await taskApi.summary('2026-10-02')).toEqual({ openCount: 1, overdueCount: 0, dueTodayCount: 1 });
   });
 
+  it('제목이 200자인 업무도 업무 지정 알림 제목은 200자(ERD notification.title)를 넘지 않는다', async () => {
+    actAs(SEED_EMPLOYEE_NO.purchaseHead);
+    const assigneeId = employeeIdOf(SEED_EMPLOYEE_NO.purchase);
+    const title = '가'.repeat(200);
+    await taskApi.create({ title, assigneeId });
+    const [notice] = notificationsOf(assigneeId);
+    expect(notice.title).toHaveLength(200);
+    expect(notice.title.startsWith('업무 지정 · 가')).toBe(true);
+    expect(notice.title.endsWith('…')).toBe(true);
+  });
+
   it('나에게 맡기는 업무는 알림이 없다', async () => {
     const me = actAs(SEED_EMPLOYEE_NO.admin);
     await taskApi.create({ title: '사원 등록', assigneeId: me });

@@ -17,7 +17,7 @@
 
 ### 메신저 세부
 - **목록**: 머리 `채팅방 n개 · 안 읽음 n` + `새 채팅방`, 검색(방 이름·수주번호·고객사·마지막 메시지·멤버), 필터 `전체 / 안 읽음 n / 1:1 / 그룹 / 업무방 n`, 전체 보기는 업무방 → 그룹 → 1:1 묶음, 한 줄 = 아이콘·이름·시각(오늘 HH:mm, 어제, MM-DD)·`나:`/`보낸 사람:` 마지막 메시지·안 읽음 배지, 업무방은 `고객사 · 납기 MM-DD · 멤버 n` 한 줄 더.
-- **대화**: 머리(방 아이콘·이름·설명 줄, 업무방 태그, `멤버 초대`(1:1 제외), 방 정보 토글), 업무방 수주 정보 줄(수주번호 링크·고객사·납기 D-n·`수주 상세`·품목 줄 `행 유형 규격코드 · n매 (t) · 출고 n매 · 상태`), 날짜 구분선, `이전 메시지 더 보기`/`대화의 처음이에요`, 빈 대화 안내, 맨 아래를 보고 있지 않을 때 `새 메시지 n건`.
+- **대화**: 머리(방 아이콘·이름·설명 줄, 업무방 태그, `멤버 초대`(1:1 제외), 방 정보 토글), 업무방 수주 정보 줄(수주번호 링크·고객사·납기 D-n·`수주 상세`·품목 줄 `행 유형 규격코드 · n매|개 (t) · 출고 n매|개 · 상태`(슬래브 매, 코일 개)), 날짜 구분선, `이전 메시지 더 보기`/`대화의 처음이에요`, 빈 대화 안내, 맨 아래를 보고 있지 않을 때 `새 메시지 n건`.
 - **메시지**: 아바타·이름·`부서 · 직급 · 나`·시각, 본문의 @멘션 강조(나·내 부서를 부르면 노란 강조), 업무 번호 링크(수주 SO-·구매요청 PR-·출하요청 DR-, 실제 행이 있을 때만, 열 권한이 없으면 글자로), 아래에 `수주 상세 SO-… →` 같은 이동 링크 최대 3개, 첨부 칩(이름·크기·확장자·내려받기), 메시지 메뉴(아래 6장 확장 자리). 보낸 사원이 없는 메시지는 `시스템`으로 보인다.
 - **입력창**: 4000자, 6줄까지 늘어남, 파일 1개(512KB까지, 첨부 취소), `@ 멘션` 버튼과 `@` 입력 시 후보 팝업(방 멤버 + 부서, 최대 8개, ↑↓·Enter/Tab·Esc), `@AI 호출` 준비 중(P2), `Enter 보내기 · Shift+Enter 줄바꿈`, 한글 조합 중 Enter는 보내지 않음.
 - **방 정보**: 업무방 = 수주 요약(수주번호·고객사·납기·담당·품목별 상태·`수주 상세`), 그 밖 = 방 정보(유형·이름·개설일·만든 사람). 멤버 목록(직급·나·부서장·부서), `AI 어시스턴트 (@AI 호출) 준비 중 (P2)`, 1:1 안내.
@@ -56,7 +56,7 @@
 
 - `seedCollab(tx)`: 업무 6건(진행 5 · 완료 1, 마감 지남·오늘·마감 전·마감 없음 섞음), 담당자가 다른 업무 5건의 `업무 지정` 알림(2건 읽음), 채팅방 3개
   - 1:1 최준혁 ↔ 정다은: 메시지 3개, **첨부 1개**(`철광석-입고계획-2610.csv`, 내용은 `SEED_FILES`)
-  - 그룹 `출하 조율`(박서영·김도윤·신현우·권예진·서민지·오지훈): 메시지 5개, **사원 멘션** `@권예진`, **부서 멘션** `@품질부`(부서 알림 2건), 본문 `SO-2610-001`(거래 시드에 그 수주가 있으면 링크)
+  - 그룹 `출하 조율`(박서영·김도윤·신현우·권예진·서민지·오지훈): 메시지 5개, **사원 멘션** `@권예진`, **부서 멘션** `@품질부`(부서 알림 2건), 본문 `SO-2609-002`·`DR-2609-0002`(거래 시드 `SEED_CORE`의 번호라 `수주 상세`·`출하요청 보기` 링크가 붙음)
   - 그룹 `원료 수급`(윤성호·정다은·최준혁·강민석): 메시지 2개, 사원 멘션 `@윤성호`
   - 사원마다 읽은 위치를 달리 두어 안 읽은 수가 보인다(예: 김도윤 3, 강민석 2, 정다은 1)
 - `SEED_FILES`: 시드 첨부 내용(경로 → data URL). `api/messenger.ts`의 `getFile`이 `getMockFile(path, SEED_FILES)`로 읽는다. fileStorage.ts 주석의 `seedCollaboration.ts의 SEED_FILES`는 이 파일이다.
@@ -118,3 +118,17 @@
 
 - `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 18개 파일 122개 통과.
 - 새 테스트: 업무 api 9 · 알림 api 7 · 메신저 api 13 · 협업 시드 3 · 업무 마감 5 · 메시지 본문 6 · 메시지 메뉴 등록부 2.
+
+## 11. 검토 반영 (2026-10-02)
+
+| 지적 | 고친 것 | 근거 |
+|---|---|---|
+| 업무방 수주 정보 줄·방 정보 수주 요약이 코일 품목도 `n매`로 적음 | `features/messenger/lib/salesOrderQty.ts`의 `formatItemQty`가 `PRODUCT_QTY_UNIT[itemType]`(슬래브 매, 코일 개)으로 수주·출고 매수를 적고, `WorkRoomPin`·`WorkRoomSummary`가 이를 쓴다. `WorkRoomSalesOrderItemView.itemType`은 `ProductItemType`으로 좁혔다(수주 품목은 제품만). 시드 업무방 SO-2609-003의 코일 줄은 `6개` | 04 4.1, 06 UNIT_TYPE, REQ-SO-002 |
+| 수주 품목 상태 배지 색이 수주·출하 화면과 다름(취소 = neutral), 취소 배지 글자를 직접 씀 | 메신저 전용 `SALES_ORDER_ITEM_STATUS_TONE`을 지우고 수주 화면의 `SalesOrderStatusBadge`(취소 = danger, 표시명은 `SALES_ORDER_ITEM_STATUS_LABEL`)를 그대로 쓴다. 헤더 취소 배지도 `SalesOrderStatusBadge status="CANCELLED"` | common.md "badges colored by status", 보고서 1 A |
+| 시드 `출하 조율` 메시지가 없는 수주 `SO-2610-001`을 가리켜 링크가 안 붙음 | 거래 시드가 실제로 만드는 `SEED_CORE.salesOrderNos[1]`(SO-2609-002)과 `SEED_CORE.waitingShipmentRequestNo`(DR-2609-0002, 같은 수주의 배정 대기 출하요청)를 쓴다. `collab.test.ts`가 두 링크를 확인한다 | 04 14.2 마지막 줄, REQ-MSG-006 |
+| 업무 제목 200자면 `업무 지정 · {제목}` 알림 제목이 208자 | `features/tasks/lib/taskNotice.ts`에 `NOTIFICATION_TITLE_MAX = 200`과 `fitTitle(앞말, 내용)`을 두고, 넘치면 내용 끝을 잘라 `…`로 200자에 맞춘다. `notificationApi.notify`도 같은 상수로 확인한다 | ERD notification.title varchar(200) |
+| 함수 이름이 동사로 시작하지 않음(보고서 6 C-6) | `memberIdsUnder` → `collectMemberIds`, `dayLabelOf` → `formatDayLabel`, `shortTimeOf` → `formatShortTime`, `captionOf` → `buildRoomCaption`, `linkLabelOf` → `getLinkLabel`, `extensionOf` → `getFileExtension`, `fileExtensionOk` → `isValidFileName`(이름이 비지 않고 255자 이하인지 확인하는 함수라 이름을 맞춤) | 05 2장 네이밍 |
+
+- 새 테스트: `salesOrderQty.test.ts` 3 · `taskNotice.test.ts` 3 · `tasks.test.ts` 200자 제목 1 · `collab.test.ts` ERP 링크·코일 단위 2.
+- 공유 파일 변경: 없음. `features/sales/components/SalesOrderParts.tsx`의 `SalesOrderStatusBadge`는 가져다 쓰기만 한다.
+
