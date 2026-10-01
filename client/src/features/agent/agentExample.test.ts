@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_TYPE_GRADE, ACTOR_TYPE, PERMISSION } from '@/codes';
+import { ACTION_TYPE_GRADE, ACTOR_TYPE, DRAFT_STATUS, DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
 import { SEED_ROLE_PERMISSIONS } from '@/mock/seed';
 import {
   AGENT_DETECTIONS,
@@ -8,9 +8,13 @@ import {
   AGENT_RISK_CODES,
   AGENT_RULES,
   CANDIDATE_FLOW,
+  DRAFT_FLOW,
   EXAMPLE_NO,
+  RAW_SHORTAGE_CANDIDATE,
   agentRuleOf,
+  draftStepState,
 } from '@/features/agent/agentExample';
+import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 import { collectTexts, findForbiddenWords, findMalformedNumbers } from '@/features/agent/lib/exampleTextCheck';
 
 const ALL_EXAMPLE = { AGENT_DETECTIONS, AGENT_HISTORY, AGENT_RESOLVED_EXAMPLE, AGENT_RULES, CANDIDATE_FLOW, EXAMPLE_NO };
@@ -53,7 +57,7 @@ describe('AI Factory Agent 예시 (BP-AGT-01)', () => {
   it('감지 이력의 주체는 사용자/시스템뿐이고, 사람이 확정하는 단계는 사용자다', () => {
     const actors = new Set(AGENT_HISTORY.map((entry) => entry.actorType));
     for (const actor of actors) expect(Object.values(ACTOR_TYPE)).toContain(actor);
-    expect(AGENT_HISTORY.find((entry) => entry.eventType === 'DRAFT_CONFIRMED')?.actorType).toBe('USER');
+    expect(AGENT_HISTORY.find((entry) => entry.businessEventType === 'DRAFT_CONFIRMED')?.actorType).toBe('USER');
   });
 
   it('예시 번호는 9.1·9.2 형식이고, 금지어·단독 SM355가 없다', () => {
@@ -63,6 +67,24 @@ describe('AI Factory Agent 예시 (BP-AGT-01)', () => {
     expect(EXAMPLE_NO.rawShortagePlans).toEqual(['PP-2610-0003', 'PP-2610-0004']);
     expect(EXAMPLE_NO.goodQtySalesOrder).toBe('SO-2609-014');
     expect(EXAMPLE_NO.limestoneLot).toBe('RM-LIM01-260930-002');
+  });
+
+  it('확정 버튼이 있는 대응 후보는 확인 대기 상태다 (04 10장·13.4, REQ-ACT-003)', () => {
+    expect(RAW_SHORTAGE_CANDIDATE.draftStatus).toBe(DRAFT_STATUS.WAITING_APPROVAL);
+    expect(DRAFT_FLOW).toEqual(['AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED', 'EXECUTED']);
+    expect(DRAFT_FLOW.map((status) => draftStepState(status, RAW_SHORTAGE_CANDIDATE.draftStatus))).toEqual(['done', 'run', 'todo', 'todo']);
+    expect(draftStepState(DRAFT_STATUS.EXECUTED, DRAFT_STATUS.EXECUTED)).toBe('run');
+    expect(() => draftStepState(DRAFT_STATUS.REJECTED, DRAFT_STATUS.WAITING_APPROVAL)).toThrow(RangeError);
+    // 감지 이력: 초안 생성 기록은 '생성'으로 시작해 '확인 대기'로 넘어갔다고 쓰고, 확정 단계는 '확인 대기' 중이다
+    const created = AGENT_HISTORY.find((entry) => entry.businessEventType === 'DRAFT_CREATED');
+    expect(created?.detail).toContain(DRAFT_STATUS_LABEL.AI_GENERATED);
+    expect(created?.detail).toContain(DRAFT_STATUS_LABEL.WAITING_APPROVAL);
+    expect(AGENT_HISTORY.find((entry) => entry.pending)?.time).toBe(DRAFT_STATUS_LABEL.WAITING_APPROVAL);
+  });
+
+  it('작업 로그 이벤트 표시명은 확정 코드·제안 코드 모두 공통 코드에서 온다', () => {
+    expect(businessEventLabelOf('DRAFT_CREATED')).toBe('초안 생성');
+    expect(AGENT_HISTORY.map((entry) => businessEventLabelOf(entry.businessEventType)).every((label) => label.length > 0)).toBe(true);
   });
 
   it('없는 위험 코드는 RangeError', () => {

@@ -70,7 +70,6 @@
 | 과거 사례 번호 표기 | `CASE-NNNN` (예: CASE-0005) | ERD past_case.case_no "TBD: 번호 형식 미정". 화면에 "사례 번호 형식은 아직 정하지 않았어요 (예시 표기)"로 밝힘 |
 | 위험 유형 한글 이름 | 원료 부족 · 합격 매수 부족 · 납기 위험 · 여재 장기 보유 · 불합격률 상승 | 위험 코드(BP-AGT-01 제안)에 공통 코드 표시명이 없어 REQ-AGT-001·004 문구를 씀. 코드 원문은 화면에 안 보임 |
 | 트리거 이름 | 스케줄 / 이벤트 | REQ-AGT-001·TRM-105 문구 |
-| 회의 목록 상태 | 확인 전 / 등록 완료 / AI 정리 중 | 회의록에 상태 열이 없음(ERD). 예시 화면 표시용 문구일 뿐 코드가 아님 |
 | 예시 수치 | 철광석 소요 3,400 t · 잔량 1,600 t · 입고예정 600 t · 부족 1,200 t, Mn 1.68%(기준 1.60% 이하, ks-values SM355A) | 옛 화면 예시 수치 유지. 실제 데이터 아님 |
 
 ## 6. 공유 파일 변경
@@ -93,3 +92,19 @@ stage6 2번 마지막 항목의 접점은 다른 영역 화면에 있어 이 wor
 
 - 세 화면 모두 고정 예시이고, 목록 항목을 눌러 상세를 바꾸는 동작은 없다(회의록의 탭 3개 전환만 됨).
 - 브라우저 확인은 하지 않았다(병렬 규칙: 개발 서버·빌드 금지). 합친 뒤 `/agent`·`/meetings`·`/past-cases`와 AI 패널을 눈으로 확인해야 한다.
+
+## 10. 검토 반영 (2026-10-02)
+
+| # | 지적 | 고친 내용 | 근거 |
+|---|---|---|---|
+| 1 | Agent 대응 후보가 확정 버튼이 있는데 배지가 '생성'(AI_GENERATED)이고 초안 상태 단계도 '생성'이 진행 중 | 후보 `RAW_SHORTAGE_CANDIDATE.draftStatus = WAITING_APPROVAL`. 배지는 '확인 대기'(wait 색), 초안 상태 단계는 생성 완료 · 확인 대기 진행. 단계 표시는 순수 함수 `draftStepState(단계, 지금 상태)`(`agentExample.ts`, `DRAFT_FLOW`도 여기로 옮겨 회의록 화면도 같이 씀). 감지 이력 '초안 생성' 줄에 "'생성'으로 시작해 '확인 대기'로 넘어갔어요", 확정 단계 시각 칸은 '확인 대기' | 04 10장·13.4, REQ-ACT-003, BP-ACT-01 |
+| 2 | 회의 결정사항·요약이 이미 생산된 히트 LOT(HT-BOF1-260929-015)을 '우선 편성' | 결정사항 'SO-2609-014 납기 유지 · 생산계획 PP-2610-0003 히트 우선 편성', 요약도 생산계획 번호로. 히트 LOT 번호는 성분 검사 발언(17:45)·할 일에만 남김. `EXAMPLE_NO.productionPlan` 사용 | 04 BP-PRD-01·02, 9.2, PLAN 6-3 |
+| 3 | 회의록 식별자가 용어 사전(TRM-099 meetingMinutes)과 다름 | `SELECTED_MEETING` → `SELECTED_MEETING_MINUTES`, `MEETING_LIST` → `MEETING_MINUTES_LIST`, `MeetingListItem` → `MeetingMinutesListItem`. 추출한 할 일 `ExtractedTask.text` → `title`(등록하면 ERD task.title) | 03 TRM-099, 05 2장 |
+| 4 | 작업 로그 예시 필드 이름이 용어 사전·ERD와 다름 | `aiAssisted` → `isAiAssisted`(TRM-103), `eventType` → `businessEventType`(ERD business_event.business_event_type) — `CaseHistoryEntry`·`AgentHistoryEntry`. 두 화면에 똑같이 있던 `eventLabelOf`는 `features/agent/lib/businessEventLabel.ts`의 `businessEventLabelOf` 하나로 합침 | 03 TRM-084·103, ERD, 05 2장 |
+| 5 | 회의 목록에 문서에 없는 상태 묶음(확인 전/등록 완료/AI 정리 중)을 배지로 표시 | `MeetingListState`·`MEETING_LIST_STATE_LABEL`·`state` 필드와 목록·제목의 상태 배지를 뺐다. 목록 줄은 제목·시각·참석자 수·할 일/구매 관련 건수만. '전체 기록 변환 중'(상태 문구)은 '할 일 1'로. 5장 가정값의 '회의 목록 상태' 줄도 지웠다 | ERD meeting_minutes(상태 열 없음), 05 4장, reports/6 C-4 |
+| 6 | 코드 표시명을 문자열로 다시 씀 | 참석자는 `roleCode`(ROLE)를 갖고 화면에서 `ROLE_LABEL[roleCode]`로 보임. Agent 확정 권한 문구 '사용' → `PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]` | 05 4장, common.md |
+| 7 | 결정사항 2줄이 해라체('…만든다', '…공유한다') | '철광석 1,200 t 구매요청 초안 작성', '점검 결과 정리·공유'(명사형) | common.md 해요체 |
+
+- 테스트: `agentExample.test.ts` +2(후보 = 확인 대기, `draftStepState` 단계·없는 상태 RangeError, 감지 이력 문구 / 이벤트 표시명 도우미), `meetingExample.test.ts` +3(결정사항·요약은 생산계획으로 편성·히트 LOT은 검사 발언에만 / 결정사항 해라체 없음·요약 해요체 / 목록 줄에 상태 필드 없음), 기존 테스트는 새 이름(`roleCode`·`isAiAssisted`·`businessEventType`·`title`)으로 고침.
+- `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 74파일 547개 통과. 병렬 규칙대로 `next build`·개발 서버는 돌리지 않았다.
+- 공유 파일 변경 없음. 회의 상태를 화면에 다시 두려면 먼저 06 공통 코드 정의서에 🟡 묶음으로 넣을지 사용자 확인이 필요하다.
