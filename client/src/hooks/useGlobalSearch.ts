@@ -6,14 +6,19 @@ import { SEARCH_MIN_LENGTH, searchApi, type SearchHit } from '@/api/search';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** 입력이 멈춘 뒤의 값 (검색창 공통) */
+export function useDebouncedValue<T>(value: T, delayMs = SEARCH_DEBOUNCE_MS): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 export function useGlobalSearch(keyword: string): { items: SearchHit[]; isSearching: boolean; isActive: boolean } {
   const term = keyword.trim();
-  const [debounced, setDebounced] = useState(term);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(term), SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [term]);
-
+  const debounced = useDebouncedValue(term);
   const isActive = term.length >= SEARCH_MIN_LENGTH;
   const settled = debounced === term;
   const query = useQuery({ queryKey: queryKeys.search(debounced), queryFn: () => searchApi.search(debounced), enabled: isActive && settled });
