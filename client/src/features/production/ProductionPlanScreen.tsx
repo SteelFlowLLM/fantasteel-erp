@@ -125,7 +125,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
   );
 }
 
-function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
+export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
   const canPlan = useCanUse(PERMISSION.PRODUCTION_PLAN_CONFIRM);
   const [modal, setModal] = useState<'cancel' | 'reproduce' | null>(null);
   const unit = PRODUCT_QTY_UNIT[plan.item.itemType];

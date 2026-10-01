@@ -34,10 +34,10 @@ import { fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const PROCESS_NOTE: Record<ProcessType, string> = {
-  IRONMAKING: '원료(철광석·석탄·석회석) = 용선량 × 원단위, 입고일 순 FIFO 차감 → 용선 LOT',
-  STEELMAKING: '용선 LOT 생산 순 FIFO 투입 · 합금철 = 히트 톤 × 원단위 ÷ 1,000 → 히트 LOT',
-  CONTINUOUS_CASTING: '히트 1개 → 슬래브 여러 매 (히트번호-SS)',
-  HOT_ROLLING: '배정 확정 슬래브 1매 → 코일 1개 (C+슬래브번호)',
+  IRONMAKING: '원료(철광석·석탄·석회석) = 용선량 × 원단위(t/t), 입고일 순 FIFO 차감 → 용선 (HM-고로-YYMMDD-NN)',
+  STEELMAKING: '용선 LOT 생산 순 FIFO 투입 · 합금철 = 히트 톤 × 원단위(kg/t) ÷ 1,000, 입고일 순 FIFO → 히트 (성분 검사 대상)',
+  CONTINUOUS_CASTING: '히트 1개 → 슬래브 여러 매 (히트번호-SS) · 표면·치수 검사 대상',
+  HOT_ROLLING: '배정 확정 슬래브 1매 → 코일 1개 (C + 슬래브번호, HT- 제외)',
 };
 
 function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanSummary; active: boolean; onPick: () => void }) {
@@ -204,7 +204,7 @@ function ProcessSection({
   );
 }
 
-function WorkBody({ ctx }: { ctx: WorkContext }) {
+export function WorkBody({ ctx }: { ctx: WorkContext }) {
   const canWork = useCanUse(PERMISSION.PRODUCTION_RESULT_CONFIRM);
   const [form, setForm] = useState<FormState | null>(null);
   const [simulating, setSimulating] = useState(false);

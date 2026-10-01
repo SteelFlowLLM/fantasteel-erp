@@ -242,7 +242,7 @@ export const productionResultApi = {
       return { productionResultId: result.id, outputLotNos: [hotMetalLot.lotNo] };
     }),
 
-  /** 제강 실적 → 히트 LOT HT-전로-YYMMDD-NNN (성분 검사 대상), 용선·합금철 FIFO 투입 */
+  /** 제강 실적 → 히트 HT-전로-YYMMDD-NNN (성분 검사 대상), 용선·합금철 FIFO 투입 */
   registerSteelmaking: (input: SteelmakingResultInput): Promise<RegisteredResult> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
