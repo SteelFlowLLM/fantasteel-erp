@@ -43,11 +43,7 @@ export function PlanStatusBadge({ status }: { status: ProductionPlanStatus }) {
 const RESERVATION_TONE: Record<ReservationStatus, BadgeTone> = { ACTIVE: 'run', CONVERTED: 'ok', RELEASED: 'neutral' };
 
 export function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
-  return (
-    <Badge tone={RESERVATION_TONE[status]} title={status}>
-      {RESERVATION_STATUS_LABEL[status]}
-    </Badge>
-  );
+  return <Badge tone={RESERVATION_TONE[status]}>{RESERVATION_STATUS_LABEL[status]}</Badge>;
 }
 
 /** 납기: 2026-10-20 D-3. 위험이면 빨간색 + 경고 아이콘, 출하완료·취소면 날짜만 */
@@ -141,14 +137,23 @@ export function ActorChip({ event }: { event: Pick<TimelineEvent, 'actorType' | 
   );
 }
 
-/** 작업 로그 한 줄 (목록 미리보기·상세 옆 칸) */
+/** 작업 로그 한 줄 (목록 미리보기·상세 옆 칸): 시각·주체·유형·대상, 아래에 사람이 읽을 사유 */
 export function EventLine({ event }: { event: TimelineEvent }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-xs" title={event.reasonText ?? undefined}>
-      <time className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">{fmtMDHM(event.occurredAt)}</time>
-      <ActorChip event={event} />
-      <span className="flex-none font-medium">{event.businessEventTypeLabel}</span>
-      <span className="min-w-0 truncate text-ink-2">{event.targetNo ?? ''}</span>
+    <div className="flex min-w-0 flex-col gap-0.5 text-xs">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <time className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">{fmtMDHM(event.occurredAt)}</time>
+        <ActorChip event={event} />
+        <span className="flex-none font-medium">{event.businessEventTypeLabel}</span>
+        <span className="min-w-0 truncate text-ink-2" title={event.targetText}>
+          {event.targetText}
+        </span>
+      </div>
+      {event.reasonText ? (
+        <span className="truncate pl-[76px] text-cap text-ink-3" title={event.reasonText}>
+          {event.reasonText}
+        </span>
+      ) : null}
     </div>
   );
 }

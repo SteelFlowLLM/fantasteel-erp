@@ -31,7 +31,7 @@ import { ProductionLinkTab } from '@/features/sales/components/ProductionLinkTab
 import { ReservationTab } from '@/features/sales/components/ReservationTab';
 import { ShipmentRequestButton, WorkRoomButton } from '@/features/sales/components/SalesOrderActions';
 import { businessEventsHref, DueRiskBadge, DueText, MeasureBar, SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
-import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
+import { cancellationEffectsText, qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 type DetailTab = 'fulfillment' | 'production' | 'reservations' | 'history';
 type MasterChip = 'ALL' | 'OPEN' | 'RISK';
@@ -180,7 +180,7 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
           {detail.isDueRisk ? <DueRiskBadge /> : null}
           {detail.hasReproductionNeed ? <Tag tone="outline">재생산 필요</Tag> : null}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} />
+            <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} cancelled={detail.status === 'CANCELLED'} />
             <ButtonLink size="sm" icon="history" href={businessEventsHref(detail.id)}>
               작업 로그
             </ButtonLink>
@@ -206,8 +206,8 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
       {detail.cancelledAt ? (
         <Banner tone="danger">
-          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'} · 예약은 해제됐고, 진행중이던 생산계획은 수주 연결을
-          풀어 완료 후 여재가 돼요.
+          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'}
+          {detail.cancellation ? ` · ${cancellationEffectsText(detail.cancellation)}` : null}
         </Banner>
       ) : null}
 

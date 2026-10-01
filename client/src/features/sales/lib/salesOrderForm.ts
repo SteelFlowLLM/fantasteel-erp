@@ -94,3 +94,27 @@ export function filterSalesOrders<T extends FilterableSalesOrder>(rows: readonly
 /** 적용한 필터 수 (키워드 제외) */
 export const activeFilterCount = (filter: SalesOrderFilter): number =>
   [filter.status !== 'ALL', filter.customerId !== null, filter.itemType !== 'ALL', filter.riskOnly].filter(Boolean).length;
+
+export interface CancellationEffects {
+  releasedReserved: readonly { itemType: ProductItemType; qty: number }[];
+  cancelledPlanNos: readonly string[];
+  unlinkedPlanNos: readonly string[];
+}
+
+/**
+ * 취소된 수주 안내 띠: 취소로 실제 일어난 일만 말한다 (BP-SO-02 — 예약 해제 매수, 취소한 시작 전 계획, 연결을 푼 진행중 계획).
+ * 값은 수주 취소 작업 로그의 after_data에서 온다.
+ */
+export function cancellationEffectsText(effects: CancellationEffects): string {
+  const releasedTexts = (['SLAB', 'COIL'] as const)
+    .map((itemType) => ({ itemType, qty: effects.releasedReserved.filter((r) => r.itemType === itemType).reduce((sum, r) => sum + r.qty, 0) }))
+    .filter((r) => r.qty > 0)
+    .map((r) => `${r.qty.toLocaleString('en-US')}${PRODUCT_QTY_UNIT[r.itemType]}`);
+  const parts: string[] = [];
+  if (releasedTexts.length > 0) parts.push(`예약 ${releasedTexts.join('·')}를 해제했어요`);
+  if (effects.cancelledPlanNos.length > 0) parts.push(`시작 전 생산계획 ${effects.cancelledPlanNos.length}건(${effects.cancelledPlanNos.join(', ')})을 취소했어요`);
+  if (effects.unlinkedPlanNos.length > 0) {
+    parts.push(`진행중이던 생산계획 ${effects.unlinkedPlanNos.length}건(${effects.unlinkedPlanNos.join(', ')})은 수주 연결을 풀어 완료 후 여재가 돼요`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : '해제할 예약이나 취소·연결 해제할 생산계획은 없었어요';
+}

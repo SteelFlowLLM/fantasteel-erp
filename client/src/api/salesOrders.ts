@@ -6,6 +6,7 @@ import { PERMISSION, type Permission, type ProductItemType } from '@/codes';
 import { todayStr } from '@/lib/format';
 import type { MockTables } from '@/mock/schema';
 import {
+  cancelPurchaseImpactOf,
   cancelSalesOrder,
   createReproductionPlan,
   createSalesOrder,
@@ -17,6 +18,7 @@ import {
   salesOrderTimeline,
   userActor,
   workRoomOfSalesOrder,
+  type CancelPurchaseImpactLine,
   type CreateSalesOrderInput,
   type ProductionPlanView,
   type SalesOrderDetail,
@@ -29,9 +31,11 @@ type Tables = Readonly<MockTables>;
 
 // 화면은 데이터 모양을 이 파일에서 가져온다 (컨벤션 9장: 데이터 접근은 api 함수로만)
 export type {
+  CancelPurchaseImpactLine,
   CreateSalesOrderInput,
   ItemFulfillment,
   ProductionPlanView,
+  SalesOrderCancellation,
   SalesOrderDetail,
   SalesOrderPreviewLine,
   SalesOrderSummary,
@@ -92,6 +96,7 @@ export const salesOrderKeys = {
   detail: (salesOrderId: number) => ['sales-orders', 'detail', salesOrderId] as const,
   production: (salesOrderId: number) => ['sales-orders', 'production', salesOrderId] as const,
   timeline: (salesOrderId: number) => ['sales-orders', 'timeline', salesOrderId] as const,
+  cancelPurchaseImpact: (salesOrderId: number) => ['sales-orders', 'cancel-purchase-impact', salesOrderId] as const,
   preview: (lines: readonly SalesOrderPreviewInputLine[]) => ['sales-orders', 'preview', lines] as const,
   workRoom: (salesOrderId: number) => ['sales-orders', 'work-room', salesOrderId] as const,
 };
@@ -167,6 +172,16 @@ export const salesOrderApi = {
         shortageQty: result.productionPlans.reduce((sum, p) => sum + p.shortageQty, 0),
         productionPlanNos: result.productionPlans.map((p) => p.productionPlanNo),
       };
+    }),
+
+  /**
+   * 수주 취소 창의 구매 진행 영향 (04 BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"):
+   * 취소·연결 해제될 생산계획에 연결된 구매요청 품목과 발주. 보여 주기만 하고 아무것도 바꾸지 않는다.
+   */
+  cancelPurchaseImpact: (salesOrderId: number): Promise<CancelPurchaseImpactLine[]> =>
+    mockQuery((tables) => {
+      requireActor(tables, SALES_ORDER_VIEW_RULE);
+      return cancelPurchaseImpactOf(tables, salesOrderId);
     }),
 
   /** 수주 취소 (REQ-SO-006, BP-SO-02): 출고분 있으면 SO-003, 진행 중 출하요청 있으면 SO-004 */

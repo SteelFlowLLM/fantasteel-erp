@@ -28,6 +28,7 @@ export const salesOrderApi = {
 - 수정 폼은 연 시점의 `updatedAt`을 `expectedUpdatedAt`으로 넘기면 바뀐 경우 COM-001.
 - 날짜·시각: 날짜 `YYYY-MM-DD`, 시각 ISO. 톤은 문자열 소수 3자리(`'23.550'`), 수율 4자리.
 - 작업 로그는 서비스가 같은 트랜잭션에서 `recordBusinessEvent`로 남긴다. 화면에서 따로 남기지 않는다. `target_type`은 테이블명, 수주 타임라인용 `sales_order_id`, LOT 타임라인용 `business_event_lot`을 빠짐없이 채운다.
+- 사유 코드(`reason_code`)를 남길 때는 사람이 읽을 사유(`reason_text`)를 함께 남긴다(9.3): 실제 매수·LOT·수주 번호로, 단위는 슬래브 매·코일 개(`qtyUnitOfItem`). 예 "재고 우선 예약 6매 (수주 10매 중)", "품목 1 부족 4매로 생산계획 생성 (히트 1개)". 번호 뒤 조사는 `lib/josa.ts`로 맞춘다.
 
 ## 1. 순수 계산 (`client/src/lib/`, Vitest)
 
@@ -66,9 +67,10 @@ export const salesOrderApi = {
 | `previewSalesOrder(tables, items)` | `[{itemId, orderedQty, dueDate}]` → 줄마다 `{weightTon(표시값), availableQty, reserveQty, shortageQty, formation}` | 같은 규격 앞 줄이 먼저 예약한 뒤의 가용으로 계산. SO-001/002, MST-001 | 없음 |
 | `createSalesOrder(tx, actor, {customerId, items})` | → `{salesOrder, items, reservations, productionPlans}` | 규격 = 등록된 슬래브·코일만(SO-001), 매수 1 이상 정수(SO-002, `'10.5'`·`0`·`-1`·`''`·`'3매'` 거부, 글자를 지우지 않음), 품목별 납기(입력 오류), 고객사 COM-003. 톤 저장 안 함. 품목마다 예약 가용만큼 ACTIVE 예약(부분 허용), 부족분은 **품목 라우팅대로** 생산계획(히트 편성 계산·저장). 수율·배합·매핑 누락이면 저장 전에 MST-001 | SALES_ORDER_CREATED(USER) · RESERVATION_CREATED(SYSTEM, STOCK_FIRST) · PRODUCTION_PLAN_CREATED(SYSTEM, ORDER_SHORTAGE; created_employee_id = 등록자) |
 | `cancelBlockOf(tables, soId)` | → `null`(가능) / `'SO-003'` / `'SO-004'` / `'CANCELLED'` | 출고 있으면 SO-003, 진행 중(REQUESTED·ALLOCATED) 출하요청에 품목이 있으면 SO-004 | — |
-| `cancelSalesOrder(tx, actor, {salesOrderId, cancelReason, expectedUpdatedAt?})` | → sales_order | SO-003/004, 사유 필수(200자). ACTIVE 예약 → RELEASED, CONFIRMED 배정 → RELEASED, PLANNED 계획 → CANCELLED, **IN_PROGRESS 계획 → sales_order_item_id null + is_surplus_on_completion**(열연 배정 해제, 이미 나온 적격 슬래브는 바로 여재), COMPLETED 계획의 적격 미배정 슬래브는 여재 표시. 품목 CANCELLED | SALES_ORDER_CANCELLED(ORDER_CANCELLED) · RESERVATION_RELEASED(ORDER_CANCELLED) · ALLOCATION_RELEASED · PRODUCTION_PLAN_CANCELLED(ORDER_CANCELLED) · SURPLUS_CONVERTED(SURPLUS_CONVERSION, before = 옛 수주 연결) |
+| `cancelSalesOrder(tx, actor, {salesOrderId, cancelReason, expectedUpdatedAt?})` | → sales_order | SO-003/004, 사유 필수(200자). ACTIVE 예약 → RELEASED, CONFIRMED 배정 → RELEASED, PLANNED 계획 → CANCELLED, **IN_PROGRESS 계획 → sales_order_item_id null + is_surplus_on_completion**(열연 배정 해제, 이미 나온 적격 슬래브는 바로 여재), COMPLETED 계획의 적격 미배정 슬래브는 여재 표시. 품목 CANCELLED | SALES_ORDER_CANCELLED(ORDER_CANCELLED, after_data에 품목별 `releasedReservedQty`·`cancelledPlanNos`·`unlinkedPlanNos` → `salesOrderDetail.cancellation`) · RESERVATION_RELEASED(ORDER_CANCELLED) · ALLOCATION_RELEASED · PRODUCTION_PLAN_CANCELLED(ORDER_CANCELLED) · SURPLUS_CONVERTED(SURPLUS_CONVERSION, before = 옛 수주 연결) |
+| `cancelPurchaseImpactOf(tables, soId)` | → `CancelPurchaseImpactLine[]` | 취소 창의 구매 진행 영향(BP-PRD-01): PLANNED(취소)·IN_PROGRESS(연결 해제) 계획에 `production_plan_id`로 연결된 구매요청 품목(상태)과 발주(번호·상태). **표시만**, 수주 취소는 구매요청·발주를 바꾸지 않는다 | — |
 | `listSalesOrders(tables, {today?})` | → `SalesOrderSummary[]` (헤더 상태 계산값, 품목 수·유형, 총 매수·톤, 출고·예약 합계, 가장 이른 납기, `isDueRisk`, `hasReproductionNeed`, `workRoomId`) | today 기본 = 오늘(서울). 납기 위험 = 미출하 남음 && 납기까지 ≤ `delivery_risk_days` | — |
-| `salesOrderDetail(tables, id, {today?})` | → summary + `items: ItemFulfillment[]`, `reservations`, `shipmentRequests`(줄별 배정 수), `millSheets`, `cancelBlock` | — | — |
+| `salesOrderDetail(tables, id, {today?})` | → summary + `items: ItemFulfillment[]`, `reservations`, `shipmentRequests`(줄별 배정 수), `millSheets`, `cancelBlock`, `cancellation`(취소된 수주: 취소 작업 로그 after_data의 실제 결과, 아니면 null) | — | — |
 | `fulfillmentOf(tables, soItem, today?)` | → `ItemFulfillment` (SO-004 충족 현황) | 아래 표 | — |
 
 **충족 현황(SO-004)과 분모(4.5)** — `ItemFulfillment.measures`
@@ -87,8 +89,8 @@ export const salesOrderApi = {
 | 함수 | 규칙·오류 | 작업 로그 |
 |---|---|---|
 | `createReservation(tx, actor, {salesOrderItemId, qty, reasonCode?, reasonText?, lotIds?})` | 예약 가용 초과 INV-001 | RESERVATION_CREATED |
-| `reserveUpToShortage(tx, actor, {salesOrderItemId, …})` | **INV-004 자동 예약 도우미**: min(현재 미확보, 예약 가용). 같은 규격 여재(같은 히트 포함)로 먼저 채운다(14.1-5). 취소·출하완료 품목은 0 | RESERVATION_CREATED (자동 예약은 SYSTEM, 사람이 '여재로 채우기'를 누르면 USER) |
-| `releaseReservationsOfItem` | 수주 취소용 | RESERVATION_RELEASED |
+| `reserveUpToShortage(tx, actor, {salesOrderItemId, reasonTextOf?, …})` | **INV-004 자동 예약 도우미**: min(현재 미확보, 예약 가용). 같은 규격 여재(같은 히트 포함)로 먼저 채운다(14.1-5). 취소·출하완료 품목은 0. 사유 문구는 `reasonTextOf('3매')`로 예약한 매수를 넣어 만든다 | RESERVATION_CREATED (자동 예약은 SYSTEM, 사람이 '여재로 채우기'를 누르면 USER) |
+| `releaseReservationsOfItem(tx, actor, soItemId, reasonCode, cause)` | 수주 취소용. 사유 = `${cause} 예약 n매 해제` | RESERVATION_RELEASED |
 | `convertReservations(tx, actor, soItemId, qty, lotIds)` | 오래된 ACTIVE부터 CONVERTED, 부분이면 행 분할(ACTIVE 10 → 4 출고 → CONVERTED 4 + ACTIVE 6). 모자라면 SHP-002 | RESERVATION_CONVERTED (USER) |
 | `rebalancePool(tx, itemId, {affectedSalesOrderItemIds, lotIds})` | 품질 불합격 뒤 예약 가용 < 0일 때만 부족분 조정: ① 불합격 LOT을 만든 계획의 수주 예약(최근 것부터) ② 열연 CONFIRMED 배정(최근 것부터) ③ 그 밖의 예약. 예약보다 많은 출하 배정은 최근 것부터 해제 | RESERVATION_RELEASED·ALLOCATION_RELEASED (SYSTEM, QUALITY_FAILURE) |
 | `assertAllocatableLot(tables, lotId, itemId)` | 규격 다름 → 입력 오류, 소진·출고 INV-004, 이미 CONFIRMED INV-003, 미합격(제품·상위 히트) INV-002 | — |
@@ -235,6 +237,7 @@ export const salesOrderApi = {
 - `rawMaterialInventory(tables)`: 원료별 LOT 잔량 합계 + 입고예정, LOT(입고일·잔량·공급업체·입고 번호).
 - `surplusSlabs(tables)`: 미배정 합격 슬래브가 있는 슬래브 규격마다 미배정 합격 수·ACTIVE 예약·가용재고(`availableQty`, 예약 가용)와 **여재(TRM-048)** `surplusQty` = min(여재 전환(surplus_at) LOT 수, 가용재고), 여재 슬래브 `lots`(FIFO 순, 최근 여재 전환 LOT부터 여재 매수만큼 — lib `surplus.ts` `pickSurplusLots`). 재고 화면 여재 탭·LOT 목록 꼬리표·대시보드 여재 위젯이 이 결과를 그대로 쓴다(2026-10-02: 전에는 `surplusQty`가 예약 가용이라 대시보드가 코일 계획의 열연 대기 슬래브까지 여재로 셌다).
 - `salesOrderTimeline(tables, soId)` / `lotTimeline(tables, lotId)`: 시간순(동률은 이벤트 id), 주체 이름('시스템'), 사유, 전후, 메시지·초안, LOT 번호. (작업 로그 화면 전체는 다른 영역.)
+- `eventTargetTextOf(tables, event)` → 화면에 보일 대상(`TimelineEvent.targetText`, 작업 로그 api도 같은 함수): 대상 번호, 없으면 예약 = `SO-… 품목 1 · 6매`(after_data), 초안 = `초안 #id`, 그 밖 = `#id`.
 
 ## 16. 시드 (`client/src/mock/seeds/`)
 

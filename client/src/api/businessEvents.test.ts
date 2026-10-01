@@ -110,6 +110,35 @@ describe('작업 로그 목록 필터 (REQ-LOG-001·002)', () => {
     expect(replay.items.find((e) => e.businessEventType === 'ALLOCATION_RECOMMENDED')?.targetHref).toBe(`/shipment-requests/${f.allocatedRequestId}`);
   });
 
+  it('번호가 없는 대상은 이벤트 값으로 이름을 만든다(예약 = 수주 번호 품목 · 매수, 초안 = 초안 #id). 사유 문구는 그대로 준다', async () => {
+    getMockDb().transact((root) => {
+      const coilLine = root.tables.salesOrderItem.find((i) => i.salesOrderId === f.salesOrderId && i.lineNo === 1);
+      if (!coilLine) throw new Error('수주 품목 없음');
+      const tx = seedTxAt(root, '2026-10-03T09:00:00+09:00');
+      recordBusinessEvent(tx, {
+        businessEventType: 'RESERVATION_CREATED',
+        actor: { actorType: 'SYSTEM' },
+        targetType: 'reservation',
+        targetId: 77,
+        salesOrderId: f.salesOrderId,
+        afterData: { id: 77, salesOrderItemId: coilLine.id, itemId: coilLine.itemId, reservedQty: 1, reservationStatus: 'ACTIVE' },
+        reasonCode: 'STOCK_FIRST',
+        reasonText: '재고 우선 예약 1개 (수주 2개 중)',
+      });
+      recordBusinessEvent(tx, { businessEventType: 'DRAFT_CREATED', actor: { actorType: 'SYSTEM' }, targetType: 'action_draft', targetId: 5, salesOrderId: f.salesOrderId });
+    });
+    const page = await businessEventApi.list({ salesOrderId: f.salesOrderId });
+    expect(page.items.find((e) => e.businessEventType === 'RESERVATION_CREATED')).toMatchObject({
+      targetNo: null,
+      targetText: `${f.salesOrderNo} 품목 1 · 1개`,
+      targetHref: `/sales-orders/${f.salesOrderId}`,
+      reasonCode: 'STOCK_FIRST',
+      reasonText: '재고 우선 예약 1개 (수주 2개 중)',
+    });
+    expect(page.items.find((e) => e.businessEventType === 'DRAFT_CREATED')).toMatchObject({ targetText: '초안 #5', targetHref: '/action-drafts/5' });
+    expect(page.items.find((e) => e.businessEventType === 'SALES_ORDER_CREATED')?.targetText).toBe(f.salesOrderNo);
+  });
+
   it('건수 제한 (더 보기)', async () => {
     const page = await businessEventApi.list({ limit: 2 });
     expect(page.items).toHaveLength(2);

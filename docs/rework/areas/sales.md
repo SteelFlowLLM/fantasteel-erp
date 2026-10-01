@@ -18,7 +18,7 @@
 - **이력** `HistoryTab.tsx` — 이 수주(`business_event.sales_order_id`)의 작업 로그를 **시간순**(동률은 id)으로: 주체(시스템/사원 이름)·유형 표시명·대상 번호·사유·LOT 번호(추적 링크). [작업 로그에서 보기] → `/business-events?salesOrderId=…`.
 
 창
-- `CancelSalesOrderModal.tsx` — 수주 취소(사유 필수 200자, `cancel_reason`). 취소하면 일어나는 일(예약 해제 n, 시작 전 계획 취소 n건, 진행중 계획은 연결 해제 + 완료 후 여재, 품목 취소·작업 로그). 화면을 연 시점의 `updatedAt`을 넘겨 COM-001.
+- `CancelSalesOrderModal.tsx` — 수주 취소(사유 필수 200자, `cancel_reason`). 취소하면 일어나는 일(예약 해제 n, 시작 전 계획 취소 n건, 진행중 계획은 연결 해제 + 완료 후 여재 — 0인 줄은 빼고, 품목 취소·작업 로그). **구매 진행 영향**(BP-PRD-01): 취소·연결 해제될 계획에 연결된 구매요청(상태)·발주(번호·상태)를 보여 주기만 하고 "수주를 취소해도 그대로" 안내. 화면을 연 시점의 `updatedAt`을 넘겨 COM-001.
 - `OpenWorkRoomModal.tsx` — 업무방 열기: 조직도(부서 트리 + 사람, 이름·부서 검색)에서 멤버를 고른다. 나(연 사람)는 늘 포함, 이미 멤버는 체크·잠금. 만들기/가기 뒤 `/messenger?room=<id>`로 이동.
 
 ## 2. 흐름과 근거
@@ -45,6 +45,7 @@
 | `preview(lines)` | 수주 등록 VIEW 이상 | `previewSalesOrder` |
 | `create(input)` | 수주 등록 USE | `createSalesOrder` |
 | `cancel({salesOrderId, cancelReason, expectedUpdatedAt})` | 수주 취소 USE | `cancelSalesOrder` |
+| `cancelPurchaseImpact(id)` → `CancelPurchaseImpactLine[]` | 수주 조회 | `cancelPurchaseImpactOf` (표시만, 바꾸지 않음) |
 | `workRoom(id)` → `{chatRoomId, chatRoomName, memberEmployeeIds} \| null` | 수주 조회 | `workRoomOfSalesOrder` |
 | `openWorkRoom({salesOrderId, memberEmployeeIds})` | 수주 조회 | `openWorkRoom` |
 | `createReproduction({salesOrderItemId})` | 생산계획·히트 편성 USE | `createReproductionPlan` |
@@ -110,3 +111,15 @@
 - 테스트: `api/salesOrders.test.ts`에 1개 더함 — 업무방 멤버(물류)라도 수주 조회 권한이 없으면 `salesOrderApi.detail`·`workRoom`이 COM-002이고 `messengerApi.getRoom`의 `salesOrderState`가 `denied`, 영업은 `ok`(BP-MSG-01).
 - 공유 파일 변경: `docs/rework/seed-assumptions.md` 업무방 수주 요약 1행만 고침(위 BP-MSG-01).
 - 확인: `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 543개 통과(74 파일). dev 서버·`next build`는 돌리지 않았다.
+
+## 11. 브라우저 점검 반영 (2026-10-02, 14.1·14.2)
+
+| 지적 | 근거 | 고친 것 |
+|---|---|---|
+| 취소된 수주에도 '출하요청 만들기'가 보인다 | BP-SO-02 (취소된 수주는 더 진행하지 않음) | `ShipmentRequestButton`은 취소된 수주에 그리지 않는다. 업무방이 없으면 '업무방 열기'도 숨기고(있는 방은 갈 수 있음), 충족 현황의 FIFO 안내와 취소된 계획 카드의 [작업 실적]도 숨긴다 |
+| 취소 띠가 늘 "진행중이던 생산계획은 … 완료 후 여재가 돼요"라고 말한다 | BP-SO-02 취소 정상 흐름 | core `cancelSalesOrder`가 취소 작업 로그 after_data에 품목별 `releasedReservedQty`·`cancelledPlanNos`·`unlinkedPlanNos`를 남기고, `salesOrderDetail.cancellation`이 그 값을 준다. 띠 문구는 `cancellationEffectsText`(`features/sales/lib/salesOrderForm.ts`)가 실제 일어난 것만 만든다(예약 6매 해제 · 시작 전 생산계획 1건(PP-…) 취소 · 진행중 계획 n건 연결 해제) |
+| 취소 창에 구매 진행 영향이 없다 | 04 BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다" | `salesOrderApi.cancelPurchaseImpact` → core `cancelPurchaseImpactOf`: 취소(PLANNED)·연결 해제(IN_PROGRESS)될 계획에 `purchase_requisition_item.production_plan_id`로 연결된 구매요청·발주. 표시만 하고 바꾸지 않는다 |
+| 이력·미리보기의 작업 로그가 사유 코드만 보이고, 예약은 "예약 · 예약 · 예약" | 04 9.3 "사람이 읽을 사유와 함께" | 이력 탭(`EventTimeline`)과 미리보기 `EventLine`이 사람이 읽을 사유와 `targetText`(예약 = `SO-… 품목 1 · 6매`)를 보인다(trace.md 1장) |
+| 예약 상태 배지 툴팁·'예약 ÷ 미출하' 안내에 영문 코드(ACTIVE) | 06 표시명 = 화면 문구 | 예약 상태 배지의 `title={status}`를 지우고, '예약 ÷ 미출하' 안내를 `RESERVATION_STATUS_LABEL.ACTIVE`(예약중)로 |
+
+- 테스트: `api/salesOrders.test.ts` +2(구매 진행 영향·권한 COM-002·취소 뒤 구매요청·발주 그대로, 취소 결과와 이력 대상·사유), `features/sales/lib/salesOrderForm.test.ts` +1(취소 띠 문구), `mock/services/tests/reasonTexts.test.ts`(사유 문구·단위·취소 after_data·구매 진행 영향).

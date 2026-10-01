@@ -1,6 +1,6 @@
 // 생산계획·히트 편성·재생산 (REQ-PRD-001·002·006, BP-PRD-01, BP-QC-01, 업무 프로세스 4.4·4.5·10장).
 // 상태: PLANNED → IN_PROGRESS(첫 작업 실적) → COMPLETED(산출 완료), PLANNED에서만 CANCELLED. CONFIRMED 없음(PLAN 6-3).
-import { PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
+import { ALLOCATION_PURPOSE_LABEL, PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
 import { planHeats, type HeatPlan } from '@/lib/heatPlanning';
 import { reproductionNeedQty, shortageOf, type Shortage } from '@/lib/inventoryMath';
@@ -83,7 +83,16 @@ export interface CreatePlanInput {
   shortageQty: number;
   isReproduction: boolean;
   createdEmployeeId: number;
+  /** 작업 로그 사유. 생략하면 "품목 1 부족 4매로 생산계획 생성 (히트 1개)"처럼 만든다 */
   reasonText?: string | null;
+}
+
+/** 생산계획 생성 사유 문구 (업무 프로세스 9.3 "사람이 읽을 사유") */
+function planCreatedReasonOf(tables: Tables, input: CreatePlanInput, item: ItemRow, heatCount: number): string {
+  const lineNo = tables.salesOrderItem.find((i) => i.id === input.salesOrderItemId)?.lineNo;
+  const qtyText = `${input.shortageQty}${PRODUCT_QTY_UNIT[productItemTypeOf(item)]}`;
+  const what = input.isReproduction ? `여재·진행 계획으로 채우지 못한 ${qtyText} 재생산 계획 생성` : `부족 ${qtyText}로 생산계획 생성`;
+  return `${lineNo === undefined ? '' : `품목 ${lineNo} `}${what} (히트 ${heatCount}개)`;
 }
 
 /**
@@ -116,7 +125,7 @@ export function createProductionPlan(tx: MockTx, actor: BusinessEventActor, inpu
     salesOrderId: salesOrderIdOfPlan(tx.tables, plan),
     afterData: { ...planSnapshot(plan), targetWeightTon: formation.targetWeightTon, heatTon: formation.heatTon, expectedSurplusSlabQty: formation.expectedSurplusSlabQty },
     reasonCode: 'ORDER_SHORTAGE',
-    reasonText: input.reasonText ?? `부족 ${input.shortageQty}${PRODUCT_QTY_UNIT[productItemTypeOf(item)]} 생산`,
+    reasonText: input.reasonText ?? planCreatedReasonOf(tx.tables, input, item, formation.heatCount),
   });
   return plan;
 }
@@ -285,7 +294,7 @@ export function markLeftoverSlabsAsSurplus(tx: MockTx, plan: ProductionPlanRow):
     salesOrderId: salesOrderIdOfPlan(tx.tables, plan),
     afterData: { lotNos: slabs.map((s) => s.lotNo), surplusQty: slabs.length },
     reasonCode: 'SURPLUS_CONVERSION',
-    reasonText: '계획 완료 후 남은 합격 슬래브를 여재로 전환',
+    reasonText: `계획 완료 후 남은 합격 슬래브 ${slabs.length}${PRODUCT_QTY_UNIT.SLAB}를 여재로 전환`,
     lotIds: slabs.map((s) => s.id),
   });
 }
@@ -303,7 +312,10 @@ export function cancelPlanRow(tx: MockTx, actor: BusinessEventActor, plan: Produ
   const before = planSnapshot(plan);
   const salesOrderId = salesOrderIdOfPlan(tx.tables, plan);
   for (const allocation of tx.tables.allocation.filter((a) => a.productionPlanId === plan.id && a.allocationStatus === 'CONFIRMED')) {
-    releaseAllocationRow(tx, actor, allocation, { reasonCode: reason.reasonCode, reasonText: reason.reasonText });
+    releaseAllocationRow(tx, actor, allocation, {
+      reasonCode: reason.reasonCode,
+      reasonText: `생산계획 ${plan.productionPlanNo} 취소로 ${ALLOCATION_PURPOSE_LABEL[allocation.allocationPurpose]} 배정 해제`,
+    });
   }
   const updated = updateRow(tx, 'productionPlan', plan.id, { productionPlanStatus: 'CANCELLED', cancelledAt: tx.nowIso }) ?? plan;
   recordBusinessEvent(tx, {
@@ -329,7 +341,7 @@ export function cancelPlanRow(tx: MockTx, actor: BusinessEventActor, plan: Produ
 export function createReproductionPlan(tx: MockTx, actor: PersonActor, input: { salesOrderItemId: number }): { reservedFromSurplusQty: number; plan: ProductionPlanRow | null } {
   const soItem = mustGet(tx.tables, 'salesOrderItem', input.salesOrderItemId, '수주 품목');
   if (soItem.salesOrderItemStatus === 'CANCELLED' || soItem.salesOrderItemStatus === 'SHIPPED') inputError('salesOrderItemId', '진행중인 수주 품목만 재생산할 수 있어요');
-  const { reservedQty } = reserveUpToShortage(tx, actor, { salesOrderItemId: soItem.id, reasonText: '재생산 전에 여재로 미확보분 예약' });
+  const { reservedQty } = reserveUpToShortage(tx, actor, { salesOrderItemId: soItem.id, reasonTextOf: (qtyText) => `재생산 전에 같은 규격 여재 ${qtyText}를 미확보분에 예약` });
   const shortage = itemShortageOf(tx.tables, soItem);
   if (shortage.additionalPlanQty <= 0) {
     if (reservedQty > 0) return { reservedFromSurplusQty: reservedQty, plan: null };
@@ -341,7 +353,6 @@ export function createReproductionPlan(tx: MockTx, actor: PersonActor, input: { 
     shortageQty: shortage.additionalPlanQty,
     isReproduction: true,
     createdEmployeeId: actor.employeeId,
-    reasonText: `여재·진행 계획으로도 부족한 ${shortage.additionalPlanQty}${PRODUCT_QTY_UNIT[productItemTypeOf(mustGet(tx.tables, 'item', soItem.itemId, '규격'))]} 재생산`,
   });
   return { reservedFromSurplusQty: reservedQty, plan };
 }

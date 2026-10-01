@@ -1,4 +1,4 @@
-// 수주 조회 훅 (목록·상세·생산 연결·이력·등록 미리보기·업무방 요약)
+// 수주 조회 훅 (목록·상세·생산 연결·이력·등록 미리보기·업무방 요약·취소 창의 구매 진행 영향)
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { salesOrderApi, salesOrderKeys, type SalesOrderPreviewInputLine } from '@/api/salesOrders';
 
@@ -38,6 +38,14 @@ export function useSalesOrderPreview(lines: readonly SalesOrderPreviewInputLine[
     enabled: lines.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 0,
+  });
+}
+
+/** 수주 취소 창: 취소·연결 해제될 계획에 연결된 구매요청·발주 (표시만, BP-PRD-01) */
+export function useSalesOrderCancelPurchaseImpact(salesOrderId: number) {
+  return useQuery({
+    queryKey: salesOrderKeys.cancelPurchaseImpact(salesOrderId),
+    queryFn: () => salesOrderApi.cancelPurchaseImpact(salesOrderId),
   });
 }
 

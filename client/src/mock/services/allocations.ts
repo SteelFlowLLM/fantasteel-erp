@@ -4,6 +4,7 @@
 // - 변경 = 기존 배정 RELEASED + 새 배정 CONFIRMED를 한 트랜잭션에서 (사유 필수, ALLOCATION_CHANGED).
 import type { AllocationPurpose, EventReasonCode } from '@/codes';
 import { pickFifo } from '@/lib/fifo';
+import { withEunNeun } from '@/lib/josa';
 import { recordBusinessEvent, type BusinessEventActor } from '@/mock/businessEvents';
 import type { AllocationRow, LotRow, MockTables } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
@@ -34,8 +35,8 @@ export function salesOrderIdOfAllocation(tables: Tables, a: AllocationRow): numb
  */
 export function assertAllocatableLot(tables: Tables, lotId: number, expectedItemId: number, ignoreAllocationId?: number): LotRow {
   const lot = mustGet(tables, 'lot', lotId, 'LOT');
-  if (lot.lotType !== 'SLAB' && lot.lotType !== 'COIL') inputError('lotIds', `${lot.lotNo}은 제품(슬래브·코일) LOT이 아니에요`);
-  if (lot.itemId !== expectedItemId) inputError('lotIds', `${lot.lotNo}은 규격이 달라요`);
+  if (lot.lotType !== 'SLAB' && lot.lotType !== 'COIL') inputError('lotIds', `${withEunNeun(lot.lotNo)} 제품(슬래브·코일) LOT이 아니에요`);
+  if (lot.itemId !== expectedItemId) inputError('lotIds', `${withEunNeun(lot.lotNo)} 규격이 달라요`);
   if (lot.lotStatus !== 'AVAILABLE') throw new ApiError('INV-004', lot.lotNo);
   const existing = confirmedAllocationOf(tables, lot.id);
   if (existing && existing.id !== ignoreAllocationId) throw new ApiError('INV-003', lot.lotNo);
@@ -95,6 +96,10 @@ export function recordRecommendation(
   const lotNoOf = (id: number) => tx.tables.lot.find((l) => l.id === id)?.lotNo ?? String(id);
   const sameAsRecommended =
     input.recommendedLotIds.length === input.chosenLotIds.length && input.recommendedLotIds.every((id) => input.chosenLotIds.includes(id));
+  const recommendedQty = input.recommendedLotIds.length;
+  const chosenFromRecommended = input.chosenLotIds.every((id) => input.recommendedLotIds.includes(id));
+  const outcome = sameAsRecommended ? '추천대로 확정' : chosenFromRecommended ? `추천 중 ${input.chosenLotIds.length} LOT 확정` : '추천과 다르게 확정';
+  const reasonText = recommendedQty === 0 ? '추천할 FIFO LOT이 없어 고른 LOT으로 확정' : `FIFO 추천 ${recommendedQty} LOT (생산완료일 → LOT 번호 순) · ${outcome}`;
   recordBusinessEvent(tx, {
     businessEventType: 'ALLOCATION_RECOMMENDED',
     actor,
@@ -110,7 +115,7 @@ export function recordRecommendation(
       sameAsRecommended,
     },
     reasonCode: 'FIFO_RECOMMENDATION',
-    reasonText: '생산완료일 → LOT 번호 순 FIFO 추천',
+    reasonText,
     lotIds: input.recommendedLotIds,
   });
 }

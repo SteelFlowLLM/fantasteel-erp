@@ -9,6 +9,7 @@
 import { ACTION_TYPE_GRADE, ACTION_TYPE_LABEL, type ActionType, type DraftStatus, type ErrorCode } from '@/codes';
 import { ApiError, InputError } from '@/api/errors';
 import { decCmp, isDecimalText } from '@/lib/decimal';
+import { withEulReul, withEuroRo } from '@/lib/josa';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import type { ActionDraftRow, JsonValue, MockTables } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
@@ -238,7 +239,7 @@ function runHandler(tx: MockTx, actor: PersonActor, draft: ActionDraftRow): Draf
       messageId: draft.messageId,
     });
     const message = findById(tx.tables, 'message', draft.messageId);
-    if (message) postSystemMessage(tx, message.chatRoomId, `초안 #${draft.id}로 구매요청 ${target.targetNo}을 만들었어요. 부서장 승인을 기다려요`);
+    if (message) postSystemMessage(tx, message.chatRoomId, `${withEuroRo(`초안 #${draft.id}`)} ${withEulReul(`구매요청 ${target.targetNo}`)} 만들었어요. 부서장 승인을 기다려요`);
     return { draft: executed, executed: true, target, errorCode: null, errorMessage: null };
   } catch (error) {
     if (!(error instanceof ApiError) && !(error instanceof InputError)) throw error;
@@ -257,6 +258,8 @@ export function confirmDraft(tx: MockTx, actor: PersonActor, input: { actionDraf
   const unresolved = unresolvedDraftFields(tx.tables, draft);
   if (unresolved.length > 0) throw new ApiError('ACT-001', unresolved.join(', '));
   const approved = updateRow(tx, 'actionDraft', draft.id, { draftStatus: 'APPROVED', confirmedAt: tx.nowIso }) ?? draft;
+  const payload = draftPayloadOf(draft);
+  const itemName = findById(tx.tables, 'item', payload.itemId)?.itemName ?? '';
   recordBusinessEvent(tx, {
     businessEventType: 'DRAFT_CONFIRMED',
     actor,
@@ -266,7 +269,7 @@ export function confirmDraft(tx: MockTx, actor: PersonActor, input: { actionDraf
     beforeData: draftSnapshot(draft),
     afterData: draftSnapshot(approved),
     reasonCode: 'DRAFT_CONFIRMED',
-    reasonText: '요청자가 초안을 확인·확정',
+    reasonText: `요청자가 ${withEulReul(`초안 #${draft.id}`)} 확인·확정 (${itemName} ${payload.requiredTon ?? '-'}t, 희망 입고일 ${payload.desiredReceiptDate ?? '-'})`,
     actionDraftId: draft.id,
     messageId: draft.messageId,
   });

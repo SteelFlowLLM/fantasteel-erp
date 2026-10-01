@@ -4,7 +4,7 @@
 // 단계를 더해 수주보다 큰 숫자를 만들지 않는다. 재생산 필요 매수가 있으면 생산 담당이 재생산 계획을 만든다(REQ-PRD-006, 자동 없음).
 import Link from 'next/link';
 import { useState } from 'react';
-import { PERMISSION, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
+import { PERMISSION, RESERVATION_STATUS_LABEL, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
 import { salesOrderApi, type ItemFulfillment, type SalesOrderDetail } from '@/api/salesOrders';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
@@ -81,6 +81,7 @@ function ReproductionBanner({ item }: { item: ItemFulfillment }) {
 
 export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
   const unit = qtyUnitOf(detail.itemTypes);
+  const orderCancelled = detail.status === 'CANCELLED';
   const live = detail.items.filter((i) => i.salesOrderItemStatus !== 'CANCELLED');
   const sum = (pick: (i: ItemFulfillment) => number) => detail.items.reduce((s, i) => s + pick(i), 0);
   const additional = live.filter((i) => i.shortage.additionalPlanQty > 0 && i.shortage.reproductionNeedQty === 0);
@@ -98,7 +99,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                   톤 (계산값)
                 </Th>
                 <Th>납기</Th>
-                <Th title="예약중(ACTIVE) 매수 ÷ 미출하 매수">예약 ÷ 미출하</Th>
+                <Th title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 ÷ 미출하 매수`}>예약 ÷ 미출하</Th>
                 <Th title="진행중·완료 생산계획의 잔여 목표 ÷ 수주 매수">생산중 ÷ 수주</Th>
                 <Th title="이 품목 몫으로 확보한 합격 제품(예약 + 출하) ÷ 수주 매수">검사합격 ÷ 수주</Th>
                 <Th title="출고 확정 매수 ÷ 수주 매수">출하 ÷ 수주</Th>
@@ -233,7 +234,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 </li>
               ))}
             </ul>
-            <span className="text-cap text-ink-3">LOT은 출하요청 때 FIFO(생산완료일 오래된 순)로 추천받아 확정해요.</span>
+            {orderCancelled ? null : <span className="text-cap text-ink-3">LOT은 출하요청 때 FIFO(생산완료일 오래된 순)로 추천받아 확정해요.</span>}
             {detail.shipmentRequests.length === 0 ? (
               <EmptyNote className="py-2">이 수주의 출하요청이 없어요</EmptyNote>
             ) : (
@@ -288,10 +289,12 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             <p className="text-sm leading-5 text-ink-2">
               {detail.workRoomId !== null
                 ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.'
-                : '아직 업무방이 없어요. 열면 이 수주와 연결된 방이 만들어지고, 멤버는 조직도에서 골라요.'}
+                : orderCancelled
+                  ? '취소된 수주라 업무방을 새로 열지 않아요.'
+                  : '아직 업무방이 없어요. 열면 이 수주와 연결된 방이 만들어지고, 멤버는 조직도에서 골라요.'}
             </p>
             <div>
-              <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} />
+              <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} cancelled={orderCancelled} />
             </div>
           </CardBody>
         </Card>

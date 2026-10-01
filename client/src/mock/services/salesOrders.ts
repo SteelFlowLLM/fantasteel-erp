@@ -3,14 +3,14 @@
 // - 재고 우선 예약: 품목마다 예약 가용만큼 ACTIVE 예약(주체 SYSTEM, 사유 STOCK_FIRST), 부족분은 품목 라우팅대로 생산계획(히트 편성, ORDER_SHORTAGE).
 // - 취소: 출고 있으면 SO-003, 진행 중 출하요청 있으면 SO-004. ACTIVE 예약·CONFIRMED 배정 RELEASED, PLANNED 계획 CANCELLED,
 //   IN_PROGRESS 계획은 수주 연결 해제 + 완료 후 여재(SURPLUS_CONVERTED).
-import type { ProductItemType, SalesOrderItemStatus } from '@/codes';
+import { ALLOCATION_PURPOSE_LABEL, PRODUCT_QTY_UNIT, type ProductItemType, type PurchaseOrderStatus, type PurchaseRequisitionStatus, type SalesOrderItemStatus } from '@/codes';
 import type { HeatPlan } from '@/lib/heatPlanning';
 import { progressOf, stockFirstSplit, type ProgressMeasure } from '@/lib/inventoryMath';
 import { headerStatusOf, isDueRisk } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import { calcWeightTon, sumTon } from '@/lib/weight';
 import { recordBusinessEvent } from '@/mock/businessEvents';
-import type { MockTables, ProductionPlanRow, ReservationRow, SalesOrderItemRow, SalesOrderRow } from '@/mock/schema';
+import type { JsonValue, MockTables, ProductionPlanRow, ReservationRow, SalesOrderItemRow, SalesOrderRow } from '@/mock/schema';
 import { issueBusinessNo } from '@/mock/sequence';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 import { releaseAllocationRow } from '@/mock/services/allocations';
@@ -25,13 +25,14 @@ import {
   inputError,
   mustGet,
   productionSettingOf,
+  qtyUnitOfItem,
   refreshInventory,
   requirePositiveQty,
   SYSTEM_ACTOR,
   unitWeightOf,
   type PersonActor,
 } from '@/mock/services/context';
-import { confirmedAllocationOf, lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
+import { activeReservedQtyOfItem, confirmedAllocationOf, lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
 import { cancelPlanRow, createProductionPlan, itemShortageOf, planHeatsFor, planProgressOf, planSnapshot, refreshPlanStatus, type ItemShortage } from '@/mock/services/productionPlans';
 import { createReservation, releaseReservationsOfItem } from '@/mock/services/reservations';
 
@@ -167,11 +168,18 @@ export function createSalesOrder(tx: MockTx, actor: PersonActor, input: CreateSa
     const available = Math.max(0, reservationPoolOf(tx.tables, soItem.itemId).availableQty);
     const { reserveQty, shortageQty } = stockFirstSplit(soItem.orderedQty, available);
     if (reserveQty > 0) {
+      const unit = qtyUnitOfItem(tx.tables, soItem.itemId);
       reservations.push(
-        createReservation(tx, SYSTEM_ACTOR, { salesOrderItemId: soItem.id, qty: reserveQty, reasonCode: 'STOCK_FIRST', reasonText: `합격 재고 ${reserveQty}매 우선 예약` }),
+        createReservation(tx, SYSTEM_ACTOR, {
+          salesOrderItemId: soItem.id,
+          qty: reserveQty,
+          reasonCode: 'STOCK_FIRST',
+          reasonText: `재고 우선 예약 ${reserveQty}${unit} (수주 ${soItem.orderedQty}${unit} 중)`,
+        }),
       );
     }
     if (shortageQty > 0) {
+      // 사유 문구는 생산계획 서비스가 만든다: "품목 1 부족 4매로 생산계획 생성 (히트 1개)"
       productionPlans.push(
         createProductionPlan(tx, SYSTEM_ACTOR, {
           salesOrderItemId: soItem.id,
@@ -179,7 +187,6 @@ export function createSalesOrder(tx: MockTx, actor: PersonActor, input: CreateSa
           shortageQty,
           isReproduction: false,
           createdEmployeeId: actor.employeeId,
-          reasonText: `수주 ${salesOrder.salesOrderNo} ${soItem.lineNo}번 품목 부족 ${shortageQty}매`,
         }),
       );
     }
@@ -200,6 +207,60 @@ export function cancelBlockOf(tables: Tables, salesOrderId: number): 'SO-003' | 
   return null;
 }
 
+/** 수주 취소 창의 구매 진행 영향 한 줄: 취소·연결 해제될 생산계획에 연결된 구매요청 품목 (표시만, 바꾸지 않는다) */
+export interface CancelPurchaseImpactLine {
+  purchaseRequisitionId: number;
+  purchaseRequisitionNo: string;
+  purchaseRequisitionStatus: PurchaseRequisitionStatus;
+  itemName: string;
+  requiredTon: string;
+  productionPlanId: number;
+  productionPlanNo: string;
+  /** 수주를 취소하면 이 계획이: CANCEL 시작 전 계획 취소 · UNLINK 진행중 계획의 수주 연결 해제 */
+  planEffect: 'CANCEL' | 'UNLINK';
+  /** 발주했으면 그 발주 (purchase_order_item.purchase_requisition_item_id) */
+  purchaseOrderId: number | null;
+  purchaseOrderNo: string | null;
+  purchaseOrderStatus: PurchaseOrderStatus | null;
+}
+
+/**
+ * 수주 취소의 구매 진행 영향 (04 BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다").
+ * 이 수주의 계획(PLANNED = 취소, IN_PROGRESS = 연결 해제)에 production_plan_id로 연결된 구매요청 품목과 발주.
+ * 수주 취소는 구매요청·발주를 바꾸지 않는다 — 화면에 보여 주기만 한다.
+ */
+export function cancelPurchaseImpactOf(tables: Tables, salesOrderId: number): CancelPurchaseImpactLine[] {
+  const so = mustGet(tables, 'salesOrder', salesOrderId, '수주');
+  const itemIds = new Set(tables.salesOrderItem.filter((i) => i.salesOrderId === so.id).map((i) => i.id));
+  const plans = tables.productionPlan.filter(
+    (p) => p.salesOrderItemId !== null && itemIds.has(p.salesOrderItemId) && (p.productionPlanStatus === 'PLANNED' || p.productionPlanStatus === 'IN_PROGRESS'),
+  );
+  return plans
+    .flatMap((plan) =>
+      tables.purchaseRequisitionItem
+        .filter((line) => line.productionPlanId === plan.id)
+        .map((line): CancelPurchaseImpactLine => {
+          const pr = mustGet(tables, 'purchaseRequisition', line.purchaseRequisitionId, '구매요청');
+          const orderLine = tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === line.id);
+          const purchaseOrder = findById(tables, 'purchaseOrder', orderLine?.purchaseOrderId);
+          return {
+            purchaseRequisitionId: pr.id,
+            purchaseRequisitionNo: pr.purchaseRequisitionNo,
+            purchaseRequisitionStatus: pr.purchaseRequisitionStatus,
+            itemName: findById(tables, 'item', line.itemId)?.itemName ?? '',
+            requiredTon: line.requiredTon,
+            productionPlanId: plan.id,
+            productionPlanNo: plan.productionPlanNo,
+            planEffect: plan.productionPlanStatus === 'PLANNED' ? 'CANCEL' : 'UNLINK',
+            purchaseOrderId: purchaseOrder?.id ?? null,
+            purchaseOrderNo: purchaseOrder?.purchaseOrderNo ?? null,
+            purchaseOrderStatus: purchaseOrder?.purchaseOrderStatus ?? null,
+          };
+        }),
+    )
+    .sort((a, b) => a.purchaseRequisitionNo.localeCompare(b.purchaseRequisitionNo) || a.productionPlanNo.localeCompare(b.productionPlanNo));
+}
+
 /** 수주 취소 (REQ-SO-006, BP-SO-02, 9.3 SO-003·004) */
 export function cancelSalesOrder(tx: MockTx, actor: PersonActor, input: { salesOrderId: number; cancelReason: string; expectedUpdatedAt?: string | null }): SalesOrderRow {
   const so = mustGet(tx.tables, 'salesOrder', input.salesOrderId, '수주');
@@ -212,7 +273,13 @@ export function cancelSalesOrder(tx: MockTx, actor: PersonActor, input: { salesO
   errors.throwIfAny();
 
   const items = tx.tables.salesOrderItem.filter((i) => i.salesOrderId === so.id);
+  const itemIds = new Set(items.map((i) => i.id));
+  const linkedPlans = tx.tables.productionPlan.filter((p) => p.salesOrderItemId !== null && itemIds.has(p.salesOrderItemId));
   const before = { cancelledAt: so.cancelledAt, cancelReason: so.cancelReason, items: items.map((i) => ({ lineNo: i.lineNo, salesOrderItemStatus: i.salesOrderItemStatus })) };
+  // 취소로 일어나는 일을 취소 이벤트에 함께 남긴다 (취소된 수주 화면의 안내 띠가 이 값을 읽는다)
+  const afterItems = items.map((i) => ({ lineNo: i.lineNo, salesOrderItemStatus: 'CANCELLED', releasedReservedQty: activeReservedQtyOfItem(tx.tables, i.id) }));
+  const cancelledPlanNos = linkedPlans.filter((p) => p.productionPlanStatus === 'PLANNED').map((p) => p.productionPlanNo);
+  const unlinkedPlanNos = linkedPlans.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').map((p) => p.productionPlanNo);
   const cancelled = updateRow(tx, 'salesOrder', so.id, { cancelledAt: tx.nowIso, cancelReason }) ?? so;
   for (const item of items) updateRow(tx, 'salesOrderItem', item.id, { salesOrderItemStatus: 'CANCELLED' });
   recordBusinessEvent(tx, {
@@ -223,23 +290,24 @@ export function cancelSalesOrder(tx: MockTx, actor: PersonActor, input: { salesO
     targetNo: so.salesOrderNo,
     salesOrderId: so.id,
     beforeData: before,
-    afterData: { cancelledAt: cancelled.cancelledAt, cancelReason, items: items.map((i) => ({ lineNo: i.lineNo, salesOrderItemStatus: 'CANCELLED' })) },
+    afterData: { cancelledAt: cancelled.cancelledAt, cancelReason, items: afterItems, cancelledPlanNos, unlinkedPlanNos },
     reasonCode: 'ORDER_CANCELLED',
     reasonText: cancelReason,
   });
 
+  const cause = `수주 ${so.salesOrderNo} 취소로`;
   for (const item of items) {
-    releaseReservationsOfItem(tx, actor, item.id, 'ORDER_CANCELLED', '수주 취소로 예약 해제');
+    releaseReservationsOfItem(tx, actor, item.id, 'ORDER_CANCELLED', cause);
     for (const allocation of tx.tables.allocation.filter((a) => a.salesOrderItemId === item.id && a.allocationStatus === 'CONFIRMED')) {
-      releaseAllocationRow(tx, actor, allocation, { reasonCode: 'ORDER_CANCELLED', reasonText: '수주 취소로 배정 해제' });
+      releaseAllocationRow(tx, actor, allocation, { reasonCode: 'ORDER_CANCELLED', reasonText: `${cause} ${ALLOCATION_PURPOSE_LABEL[allocation.allocationPurpose]} 배정 해제` });
     }
     for (const plan of tx.tables.productionPlan.filter((p) => p.salesOrderItemId === item.id)) {
       if (plan.productionPlanStatus === 'PLANNED') {
-        cancelPlanRow(tx, actor, plan, { reasonCode: 'ORDER_CANCELLED', reasonText: '수주 취소로 시작 전 계획 취소' });
+        cancelPlanRow(tx, actor, plan, { reasonCode: 'ORDER_CANCELLED', reasonText: `${cause} 시작 전 계획 취소 (부족 ${plan.shortageQty}${qtyUnitOfItem(tx.tables, plan.itemId)})` });
       } else if (plan.productionPlanStatus === 'IN_PROGRESS') {
-        unlinkInProgressPlan(tx, actor, plan, so.id);
+        unlinkInProgressPlan(tx, actor, plan, so);
       } else if (plan.productionPlanStatus === 'COMPLETED') {
-        markPlanSlabsSurplus(tx, actor, plan, so.id, '수주 취소로 예약이 풀린 합격 슬래브를 여재로 전환');
+        markPlanSlabsSurplus(tx, actor, plan, so);
       }
     }
     refreshInventory(tx, item.itemId);
@@ -248,25 +316,29 @@ export function cancelSalesOrder(tx: MockTx, actor: PersonActor, input: { salesO
 }
 
 /** 진행 중 계획: 수주 연결 해제 + 완료 후 여재 (ERD is_surplus_on_completion). 열연 배정은 풀고, 이미 나온 합격 슬래브는 바로 여재. 완료 조건을 다시 본다. */
-function unlinkInProgressPlan(tx: MockTx, actor: PersonActor, plan: ProductionPlanRow, salesOrderId: number): void {
+function unlinkInProgressPlan(tx: MockTx, actor: PersonActor, plan: ProductionPlanRow, so: SalesOrderRow): void {
   const before = planSnapshot(plan);
   for (const allocation of tx.tables.allocation.filter((a) => a.productionPlanId === plan.id && a.allocationStatus === 'CONFIRMED')) {
-    releaseAllocationRow(tx, actor, allocation, { reasonCode: 'ORDER_CANCELLED', reasonText: '수주 취소로 열연 배정 해제' });
+    releaseAllocationRow(tx, actor, allocation, {
+      reasonCode: 'ORDER_CANCELLED',
+      reasonText: `수주 ${so.salesOrderNo} 취소로 ${ALLOCATION_PURPOSE_LABEL[allocation.allocationPurpose]} 배정 해제`,
+    });
   }
   const updated = updateRow(tx, 'productionPlan', plan.id, { salesOrderItemId: null, isSurplusOnCompletion: true }) ?? plan;
   const surplus = surplusCandidatesOf(tx.tables, plan);
   for (const slab of surplus) updateRow(tx, 'lot', slab.id, { surplusAt: tx.nowIso });
+  const nowSurplusText = surplus.length > 0 ? ` · 합격 슬래브 ${surplus.length}${PRODUCT_QTY_UNIT.SLAB}는 바로 여재` : '';
   recordBusinessEvent(tx, {
     businessEventType: 'SURPLUS_CONVERTED',
     actor,
     targetType: 'production_plan',
     targetId: plan.id,
     targetNo: plan.productionPlanNo,
-    salesOrderId,
+    salesOrderId: so.id,
     beforeData: before,
     afterData: { ...planSnapshot(updated), surplusLotNos: surplus.map((s) => s.lotNo) },
     reasonCode: 'SURPLUS_CONVERSION',
-    reasonText: '수주 취소: 진행 중 물량은 연결을 해제하고 완료 후 여재로 전환',
+    reasonText: `수주 ${so.salesOrderNo} 취소로 진행중 계획의 수주 연결을 풀고 완료 후 여재로 전환${nowSurplusText}`,
     lotIds: surplus.map((s) => s.id),
   });
   // 연결이 끊긴 코일 계획은 연주까지만 하면 완료다 → 이미 다 연주했으면 지금 COMPLETED (10장 상태 흐름)
@@ -276,7 +348,8 @@ function unlinkInProgressPlan(tx: MockTx, actor: PersonActor, plan: ProductionPl
 const surplusCandidatesOf = (tables: Tables, plan: ProductionPlanRow) =>
   tables.lot.filter((l) => l.productionPlanId === plan.id && l.lotType === 'SLAB' && l.surplusAt === null && lotEligibility(tables, l) === 'ELIGIBLE' && !confirmedAllocationOf(tables, l.id));
 
-function markPlanSlabsSurplus(tx: MockTx, actor: PersonActor, plan: ProductionPlanRow, salesOrderId: number, reasonText: string): void {
+/** 완료 계획: 수주 취소로 예약이 풀린 이 계획의 합격 슬래브를 여재로 */
+function markPlanSlabsSurplus(tx: MockTx, actor: PersonActor, plan: ProductionPlanRow, so: SalesOrderRow): void {
   const surplus = surplusCandidatesOf(tx.tables, plan);
   if (surplus.length === 0) return;
   for (const slab of surplus) updateRow(tx, 'lot', slab.id, { surplusAt: tx.nowIso });
@@ -286,10 +359,10 @@ function markPlanSlabsSurplus(tx: MockTx, actor: PersonActor, plan: ProductionPl
     targetType: 'production_plan',
     targetId: plan.id,
     targetNo: plan.productionPlanNo,
-    salesOrderId,
+    salesOrderId: so.id,
     afterData: { surplusLotNos: surplus.map((s) => s.lotNo) },
     reasonCode: 'SURPLUS_CONVERSION',
-    reasonText,
+    reasonText: `수주 ${so.salesOrderNo} 취소로 예약이 풀린 합격 슬래브 ${surplus.length}${PRODUCT_QTY_UNIT.SLAB}를 여재로 전환`,
     lotIds: surplus.map((s) => s.id),
   });
 }
@@ -458,6 +531,38 @@ export interface SalesOrderDetail extends SalesOrderSummary {
   millSheets: { id: number; millSheetNo: string; shipmentRequestId: number; issuedAt: string; pdfPath: string | null }[];
   /** 취소 가능 여부: null = 가능, 그 밖에는 막는 코드 */
   cancelBlock: 'SO-003' | 'SO-004' | 'CANCELLED' | null;
+  /** 취소된 수주: 취소로 실제 일어난 일 (수주 취소 작업 로그의 after_data). 취소 전이면 null */
+  cancellation: SalesOrderCancellation | null;
+}
+
+export interface SalesOrderCancellation {
+  /** 품목별로 해제한 예약 매수 (0인 품목 포함) */
+  releasedReserved: { lineNo: number; itemType: ProductItemType; qty: number }[];
+  /** 취소한 시작 전 생산계획 */
+  cancelledPlanNos: string[];
+  /** 수주 연결을 풀고 완료 후 여재로 둔 진행중 생산계획 */
+  unlinkedPlanNos: string[];
+}
+
+const isJsonRecord = (value: JsonValue | null | undefined): value is { [key: string]: JsonValue } =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** 취소 이벤트(SALES_ORDER_CANCELLED)의 after_data에서 취소로 일어난 일을 읽는다 */
+function cancellationOf(tables: Tables, so: SalesOrderRow, items: readonly ItemFulfillment[]): SalesOrderCancellation | null {
+  if (!so.cancelledAt) return null;
+  const event = tables.businessEvent.filter((e) => e.businessEventType === 'SALES_ORDER_CANCELLED' && e.salesOrderId === so.id).at(-1);
+  const after = isJsonRecord(event?.afterData) ? event.afterData : {};
+  const texts = (value: JsonValue | undefined) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
+  const lines = Array.isArray(after.items) ? after.items : [];
+  return {
+    releasedReserved: lines.flatMap((line) => {
+      if (!isJsonRecord(line) || typeof line.lineNo !== 'number' || typeof line.releasedReservedQty !== 'number') return [];
+      const item = items.find((i) => i.lineNo === line.lineNo);
+      return item ? [{ lineNo: line.lineNo, itemType: item.itemType, qty: line.releasedReservedQty }] : [];
+    }),
+    cancelledPlanNos: texts(after.cancelledPlanNos),
+    unlinkedPlanNos: texts(after.unlinkedPlanNos),
+  };
 }
 
 export function salesOrderDetail(tables: Tables, salesOrderId: number, options: { today?: string } = {}): SalesOrderDetail {
@@ -504,5 +609,6 @@ export function salesOrderDetail(tables: Tables, salesOrderId: number, options: 
       .filter((m) => m.salesOrderId === so.id)
       .map((m) => ({ id: m.id, millSheetNo: m.millSheetNo, shipmentRequestId: m.shipmentRequestId, issuedAt: m.issuedAt, pdfPath: m.pdfPath })),
     cancelBlock: cancelBlockOf(tables, so.id),
+    cancellation: cancellationOf(tables, so, summary.items),
   };
 }

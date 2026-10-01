@@ -53,7 +53,7 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                     등록 {fmtMDHM(so.createdAt)} · 담당 {so.ownerName ?? '-'} · 납기 <DueText dueDate={so.earliestDueDate} risk={so.isDueRisk} done={done} />
                   </span>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    <WorkRoomButton salesOrderId={so.id} salesOrderNo={so.salesOrderNo} hasRoom={so.workRoomId !== null} />
+                    <WorkRoomButton salesOrderId={so.id} salesOrderNo={so.salesOrderNo} hasRoom={so.workRoomId !== null} cancelled={so.status === 'CANCELLED'} />
                     <ShipmentRequestButton summary={so} />
                     <ButtonLink size="sm" variant="primary" href={`/sales-orders/${so.id}`}>
                       상세 보기

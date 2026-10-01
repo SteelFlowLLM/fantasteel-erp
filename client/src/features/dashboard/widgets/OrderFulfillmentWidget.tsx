@@ -2,6 +2,7 @@
 // 단계는 서로 다른 단계라 더해서 "충족 매수"로 보이지 않는다(4.5). 막대는 출하 | 예약(검사합격 중 미출하) | 생산중을 수주 매수 대비 길이로만 나란히 둔다.
 import Link from 'next/link';
 import type { FulfillmentItemRow, OrderFulfillmentData } from '@/api/dashboard';
+import { RESERVATION_STATUS_LABEL } from '@/codes';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
 import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
@@ -42,10 +43,10 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
               <Th align="right" title="진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)">
                 생산중
               </Th>
-              <Th align="right" title="ACTIVE 예약 + 출하 (분모: 수주 매수)">
+              <Th align="right" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 + 출하 (분모: 수주 매수)`}>
                 검사합격
               </Th>
-              <Th align="right" title="ACTIVE 예약 (분모: 미출하 매수)">
+              <Th align="right" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 (분모: 미출하 매수)`}>
                 예약
               </Th>
               <Th align="right">출하</Th>

@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError } from '@/api/client';
 import type { GoodsIssueQueueRow, GoodsIssueView } from '@/api/goodsIssues';
-import { ERROR_MESSAGE, LOT_STATUS_LABEL, PERMISSION, PRODUCT_QTY_UNIT, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
+import { ERROR_MESSAGE, LOT_STATUS_LABEL, PERMISSION, PRODUCT_QTY_UNIT, RESERVATION_STATUS_LABEL, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
 import { Banner } from '@/components/Banner';
 import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
@@ -387,7 +387,9 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
             <CardHead title="확정하면 바뀌는 것" />
             <CardBody className="gap-1.5 text-sm">
               <span>· 배정 {confirmedLots.length}건 → 소진, LOT → 출고</span>
-              <span>· 예약 {confirmedLots.length} → 출고 전환 (CONVERTED). 일부만 출고하면 예약을 나눠 남은 매수는 예약중으로 둬요</span>
+              <span>
+                · 예약 {confirmedLots.length} → {RESERVATION_STATUS_LABEL.CONVERTED}. 일부만 출고하면 예약을 나눠 남은 매수는 {RESERVATION_STATUS_LABEL.ACTIVE}으로 둬요
+              </span>
               <span>· 수주 품목 출고 매수 +{confirmedLots.length} → 품목 상태 갱신 (부분출하·출하완료)</span>
               <span>
                 · 밀시트: 수주마다 1장 · {salesOrderCount}장 자동 발행 (히트 성분 + 슬래브·코일 검사값 스냅샷)
@@ -446,7 +448,7 @@ function CheckRow({ ok, label, value }: { ok: boolean; label: string; value: str
 function IssueResult({ view }: { view: GoodsIssueView }) {
   return (
     <Card>
-      <CardHead title="출고 결과" meta={`예약 전환(CONVERTED) ${view.totalRequestQty} · ${fmtTon(view.totalWeightTon)}`} />
+      <CardHead title="출고 결과" meta={`${RESERVATION_STATUS_LABEL.CONVERTED} ${view.totalRequestQty} · ${fmtTon(view.totalWeightTon)}`} />
       <div className="overflow-auto">
         <Table compact>
           <thead>
