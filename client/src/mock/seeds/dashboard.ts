@@ -32,8 +32,8 @@ import {
 
 /** 이 시드가 만드는 기록 (문서·테스트가 가리키는 값) */
 export const SEED_DASHBOARD = {
-  /** 수주 4건: 규격 · 매수 · 실적 시뮬레이션 시각 · 난수 시드 · 출고 확정일(매수) */
-  orders: [
+  /** 수주 4건: 규격 · 매수(= 히트에서 나오는 매수) · 고객사 · 등록 시각 · 납기 */
+  salesOrders: [
     { itemCode: 'SL-SM355A-250x1200x10000', qty: 10, customerCode: 'CUS-01', createdAt: '2026-08-24T10:00:00+09:00', dueDate: '2026-09-12' },
     { itemCode: 'CL-SPHC-2.3x1200x1065000', qty: 10, customerCode: 'CUS-04', createdAt: '2026-08-25T10:00:00+09:00', dueDate: '2026-09-15' },
     { itemCode: 'SL-SS275-220x1400x9500', qty: 20, customerCode: 'CUS-03', createdAt: '2026-08-26T10:00:00+09:00', dueDate: '2026-09-26' },
@@ -80,12 +80,12 @@ export function seedDashboard(tx: MockTx): void {
   const lotsOf = (planId: number, lotType: 'HEAT' | 'SLAB' | 'COIL') => t.lot.filter((l) => l.productionPlanId === planId && l.lotType === lotType).sort((a, b) => a.id - b.id);
 
   // 1. 8월 말 수주 4건 (재고 없음 → 부족분 전부 생산계획) ─────────────
-  const [smA, sphcCoil, ss275, smB] = SEED_DASHBOARD.orders.map((order, index) => {
-    const created = createSalesOrder(txAt(tx, order.createdAt), index % 2 === 0 ? sales : salesHead, {
-      customerId: customerId(order.customerCode),
-      items: [{ itemId: itemOf(order.itemCode).id, orderedQty: order.qty, dueDate: order.dueDate }],
+  const [smA, sphcCoil, ss275, smB] = SEED_DASHBOARD.salesOrders.map((salesOrder, index) => {
+    const created = createSalesOrder(txAt(tx, salesOrder.createdAt), index % 2 === 0 ? sales : salesHead, {
+      customerId: customerId(salesOrder.customerCode),
+      items: [{ itemId: itemOf(salesOrder.itemCode).id, orderedQty: salesOrder.qty, dueDate: salesOrder.dueDate }],
     });
-    return { salesOrderItem: created.items[0], plan: required(created.productionPlans[0], `${order.itemCode} 생산계획`) };
+    return { salesOrderItem: created.items[0], plan: required(created.productionPlans[0], `${salesOrder.itemCode} 생산계획`) };
   });
   const plans: ProductionPlanRow[] = [smA.plan, sphcCoil.plan, ss275.plan, smB.plan];
 
