@@ -8,7 +8,7 @@
 
 | 경로·자리 | 내용 |
 |---|---|
-| 메신저 메시지 `더 보기` 메뉴 | **구매요청 초안 만들기**: 모든 채팅방(1:1·그룹·업무방)의 사원 글 메시지에서 보인다(시스템 메시지·첨부만 있는 메시지 제외, 구매요청 조회 이상 권한). 사용 권한이 없으면 막힌 채 `권한 필요` + 툴팁 `구매요청 등록·MRP 사용 권한이 필요해요`. 누르면 초안을 만들고 `/action-drafts/{id}`로 간다. 이 메시지에 반려되지 않은 초안이 있으면 대신 **구매요청 초안 보기 #id**(상태 표시)로 그 초안을 연다 |
+| 메신저 메시지 `더 보기` 메뉴 | **구매요청 초안 만들기**: 모든 채팅방(1:1·그룹·업무방)의 사원 글 메시지에서 보인다(시스템 메시지·첨부만 있는 메시지 제외, 구매요청 조회 이상 권한). 사용 권한이 없으면 막힌 채 `권한 필요` + 툴팁 `구매요청 등록·MRP 사용 권한이 필요해요`. 메시지 작성자(= 요청자)가 확정할 수 없으면(구매요청 등록 사용 권한 없음·사용 안 함) 막힌 채 `만들 수 없음` + 툴팁에 까닭(검토 반영 1). 누르면 초안을 만들고 `/action-drafts/{id}`로 간다. 이 메시지에 반려되지 않은 초안이 있으면 대신 **구매요청 초안 보기 #id**(상태 표시)로 그 초안을 연다 |
 | `/action-drafts/[id]` | 왼쪽 **내 초안**(MasterPane) + 오른쪽 초안 확인·확정 |
 
 ### `/action-drafts/[id]` 구성 (옛 화면 A-9의 B안 모양 + C절 반영)
@@ -21,7 +21,7 @@
   - 요청자 + 확인 대기 + 사용 권한: `반려`(사유 필수 → `반려 확정`), `저장하지 않은 수정이 있어요 / 마지막 저장 {일시}`, `저장`, `확정하고 구매요청 만들기`(고친 값이 있으면 먼저 저장하고 확정).
   - 요청자 + 확정했지만 생성 실패: `확정된 값은 바꿀 수 없어요` + `구매요청 만들기 다시 실행`.
   - 그 밖: 잠금 안내(요청자만 가능 / 확정 · 구매요청 생성 대기 / 확정·ERP 반영 시각 / 반려). 요청자인데 사용 권한이 없으면 `조회만 할 수 있어요 · 구매요청 등록·MRP 사용 권한이 필요해요`.
-- 오른쪽: **원본 메시지**(채팅방 · 보낸 사람 · 일시 · 내용 · 이동), **확정하면**(확정 → ERP 반영 → 승인 대기 안내, 출처: Message → ERP), **초안 업무 유형**(등록부: 구매요청 생성 = 추출 스키마 4칸, 출하요청 생성·수주 등록·생산계획 생성·배정 확정·재생산 계획 생성 = `준비 중 (P2)`).
+- 오른쪽: **원본 메시지**(채팅방 · 보낸 사람 · 일시 · 내용 · 이동), **확정하면**(확정 → ERP 반영 → 승인 대기 안내, 출처: Message → ERP), **초안 업무 유형**(등록부: 구매요청 생성 = 추출 스키마 `원료 품목 · 수량(톤) · 희망 입고일 · 요청자`(TRM-095) + 선택 입력 `요청 근거`(스키마 밖), 출하요청 생성·수주 등록·생산계획 생성·배정 확정·재생산 계획 생성 = `준비 중 (P2)`).
 - 상태: 불러오는 중 / 오류(COM-002는 잠금) / 없는 초안 `초안을 찾을 수 없어요` / 내 초안 없음 안내.
 
 ### '내 초안' 목록을 어디에 두었나
@@ -53,15 +53,16 @@
 | `get(id)` → `DraftDetailView`(core 뷰 + 요청자 직급·부서, `isRequester`, 채팅방 이름, 원료 기본 공급업체) | VIEW | `actionDraftView` | COM-002, COM-003 |
 | `listMine()` → `DraftListItemView[]` | VIEW | `listActionDrafts({requesterId})` | COM-002 |
 | `listOfRoom(chatRoomId)` → `{id, messageId, draftStatus}[]` | VIEW + 방 멤버 | (테이블 읽기) | COM-002 |
-| `createFromMessage({messageId})` → `{id, created}` | USE | `createDraftFromMessage` (방 멤버만) | COM-002, COM-003 |
+| `checkRequester(messageId)` → `{requesterId, blockReason}` | VIEW + 방 멤버 | (테이블 읽기) | COM-002, COM-003 |
+| `createFromMessage({messageId})` → `{id, created}` | USE + 요청자(메시지 작성자)가 확정할 수 있어야 함 | `createDraftFromMessage` (방 멤버만) | COM-002, COM-003 |
 | `update({actionDraftId, payload, expectedUpdatedAt})` | USE | `updateDraft` (요청자만, 확인 대기만) | COM-002, COM-001, InputError(형식) |
 | `confirm({actionDraftId, expectedUpdatedAt})` → `{draft, executed, target, errorCode, errorMessage}` | USE | `confirmDraft` | **ACT-001**(detail = 칸 이름), COM-002, COM-001 |
 | `execute({actionDraftId})` | USE | `executeDraft` (확정·실패한 초안만) | COM-002, InputError(이미 실행) |
 | `reject({actionDraftId, rejectReason, expectedUpdatedAt})` | USE | `rejectDraft` (사유 필수) | COM-002, InputError |
 | `listRawMaterials()` | VIEW | (테이블 읽기: 원료 + 기본 공급업체) | COM-002 |
-| `ACTION_TYPE_CATALOG` | — | `ACTION_TYPE_REGISTRY`를 화면용으로 | — |
+| `ACTION_TYPE_CATALOG` | — | `ACTION_TYPE_REGISTRY`를 화면용으로(`schemaFieldLabels` = 추출 스키마, `optionalInputLabels` = 스키마 밖 선택 입력) | — |
 
-- 조회 키: `actionDraftKeys`(`['action-drafts', …]`, 이 파일 안). 훅: `hooks/useActionDrafts.ts`(`useActionDraft`, `useMyActionDrafts`, `useRoomActionDrafts`, `useDraftRawMaterials`). 변경은 화면에서 `useAction(actionDraftApi.…)`(성공하면 모든 조회 무효화 → 구매요청·승인함·알림·메신저도 바로 바뀜).
+- 조회 키: `actionDraftKeys`(`['action-drafts', …]`, 이 파일 안). 훅: `hooks/useActionDrafts.ts`(`useActionDraft`, `useMyActionDrafts`, `useRoomActionDrafts`, `useDraftRequesterCheck`, `useDraftRawMaterials`). 변경은 화면에서 `useAction(actionDraftApi.…)`(성공하면 모든 조회 무효화 → 구매요청·승인함·알림·메신저도 바로 바뀜).
 - 순수 함수: `features/actionDrafts/lib/draftDisplay.ts`(상태 배지 색, 흐름 단계, 실행 실패 결과 읽기, 입력 폼 ↔ 저장 값, 미확정 표시, 상태별 개수, 구매요청 상태 표시).
 - 작업 로그는 core가 남긴다. `update`(값 저장)는 맞는 BUSINESS_EVENT_TYPE이 없어 남기지 않는다(core와 같음).
 
@@ -94,7 +95,7 @@
 ## 7. 열린 질문 (사용자 확인 필요)
 
 1. **남이 만든 초안의 알림**: 다른 멤버가 내 메시지로 초안을 만들면 요청자(나)에게 알릴 NOTIFICATION_TYPE이 없다(5개 중 맞는 것 없음). 지금은 요청자가 초안 화면의 '내 초안'에서 본다. 알림 유형을 더할지, 만들기를 내 메시지로만 제한할지 결정이 필요하다.
-2. **요청자에게 구매요청 권한이 없을 때**: 요청자 = 메시지 작성자(BP-ACT-01)인데, 그 사원에게 구매요청 등록 사용 권한이 없으면 확정할 수 없다(지금은 읽기 전용 안내). 예: 영업 사원이 업무방에 "철광석 필요"라고 쓴 경우. 요청자 확정에 역할 권한을 요구할지 정해야 한다.
+2. **요청자에게 구매요청 권한이 없을 때**: 요청자 = 메시지 작성자(BP-ACT-01)인데, 그 사원에게 구매요청 등록 사용 권한이 없으면 확정할 수 없다. 예: 영업 사원이 업무방에 "철광석 필요"라고 쓴 경우. **결정 전 임시 처리(검토 반영 1)**: 그런 메시지로는 초안을 만들지 않는다(COM-002, 메뉴도 막음). 고를 것: (가) 지금처럼 막는다, (나) 요청자는 역할 권한 없이도 자기 초안을 보고 확정·반려할 수 있게 한다. 만든 뒤에 요청자의 역할·사용 여부가 바뀌어 확정할 수 없게 된 초안은 지금도 확인 대기에 남는다(같은 결정으로 함께 풀린다).
 3. **초안 목록 경로**: `/action-drafts`(번호 없는 목록 경로)는 만들지 않았다. 구매요청 목록의 '확인 대기 초안' 구역(옛 화면)을 남길지, 별도 목록이 필요한지 정해야 한다(보고서 2 C-4는 그 구역을 '문서에 없음'으로 적었다).
 4. **AI 자동 추출**: 상대 날짜(예: "다음 주 화요일")를 메시지 작성일 기준 절대 날짜로 바꾸는 일(BP-ACT-01 구현 제안)은 AI 추출과 함께 나중에 한다.
 
@@ -110,3 +111,32 @@
 - `npm run typecheck -w @fantasteel/client` 0 오류.
 - 새 테스트: `api/actionDrafts.test.ts` 11개(만들기·중복 열기·남의 메시지·권한 COM-002·방 멤버·COM-003·ACT-001·형식 오류·요청자만·COM-001·확정 → 구매요청·작업 로그·알림·시스템 메시지·중복 실행 방지·PUR-001 실패 후 다시 실행·반려·등록부·원료 목록), `features/actionDrafts/lib/draftDisplay.test.ts` 6개 — 모두 통과.
 - 전체: 208개 중 203개 통과, 실패 5개는 위 8장(협업 테스트, 기존).
+
+## 10. 검토 반영 (2026-10-02)
+
+검토에서 확인된 7건을 고쳤다(추출 스키마 2건은 같은 원인이라 2번 한 항목). 근거는 각 줄 끝.
+
+1. **확정할 수 없는 요청자로 초안이 영영 막히던 문제** (02 REQ-ACT-002·003, 04 BP-ACT-01 두 승인의 구분 · 구현 제안 "요청자는 메시지 작성자")
+   - `createFromMessage`가 core를 부르기 전에 메시지 작성자를 확인한다. 사용 중이 아니거나 구매요청 등록·MRP **사용** 권한이 없으면 `COM-002`(덧붙임: `요청자(메시지 작성자)에게 구매요청 등록 권한이 없어 초안을 만들 수 없어요` / `요청자(메시지 작성자)가 사용 중인 사원이 아니라 초안을 만들 수 없어요`). 초안이 생기지 않으므로 그 메시지가 막히지 않는다.
+   - 새 조회 `checkRequester(messageId)`(VIEW + 방 멤버) → 메시지 메뉴 `구매요청 초안 만들기`가 같은 까닭으로 막히고(`만들 수 없음`, 툴팁 = 까닭) 누를 수 없다. 이미 있는 초안의 `구매요청 초안 보기`는 그대로 열린다.
+   - 사용자 결정 전 임시 처리다 → 7장 열린 질문 2.
+2. **추출 스키마 표시** (03 TRM-095, 02 REQ-ACT-001, 04 12.3 rawMaterialId·requiredTon·desiredReceiptDate·requesterId)
+   - `ACTION_TYPE_CATALOG` 항목을 `fieldLabels` → `schemaFieldLabels`(원료 품목 · 수량(톤) · 희망 입고일 · 요청자) + `optionalInputLabels`(요청 근거)로 나눴다. 요청자는 payload 칸이 아니라 초안의 requester_id다.
+   - 오른쪽 `초안 업무 유형` 카드: `추출 스키마 · 원료 품목 · 수량(톤) · 희망 입고일 · 요청자`, 아래 줄 `선택 입력 · 요청 근거 (추출 스키마 밖)`. 준비 중(P2) 유형은 스키마를 보이지 않는다.
+   - 요청 근거 입력 자체는 5장 가정값대로 남겼다(지울지는 사용자 확인 — 아래 열린 질문 5).
+3. **용어 사전에 없는 약어 `pr`** (05 2장 [강제], 03 TRM-063, 보고서 2 C-6): `pr` → `purchaseRequisition`, `prStatus` → `purchaseRequisitionStatusView`, `canUsePr` → `canUsePurchaseRequisition`, `PR_STATUS_TONE` → `PURCHASE_REQUISITION_STATUS_TONE`(내보냄), `isPrStatus` → `isPurchaseRequisitionStatus`.
+4. **함수는 동사로 시작** (05 2장 이름 표, 보고서 2 C-6): `draftFormOf` → `buildDraftForm`, `draftPayloadOfForm` → `buildDraftPayload`, `tonInputText` → `formatTonInput`, `executionFailureOf` → `getExecutionFailure`, `requisitionStatusDisplay` → `getRequisitionStatusDisplay`, `draftFlowSteps` → `buildDraftFlowSteps`, `confirmFailureTitle` → `getConfirmFailureTitle`, api의 `requesterOf`·`chatRoomLabelOf`·`detailOf`·`listItemOf`·`confirmResultOf` → `buildRequesterView`·`getChatRoomLabel`·`buildDetailView`·`buildListItem`·`buildConfirmResult`, 화면 `idOf` → `parseDraftId`. 초안 카드 안 도우미(`label`·`note`·`readValue`·`unresolved`·`errorOf`·`set`)와 테스트 도우미도 동사로 바꿨다.
+5. **`order` 단독 이름** (05 2장 [강제], ERD sort_order): 메시지 메뉴 등록 항목의 `order` → `sortOrder`(`MessageActionEntry`·`messageActionsFor`·설명 주석·`messageActions.test.ts`, 이 영역 항목 `sortOrder: 10`).
+6. **`확정하면` 카드의 손으로 쓴 상태 표시명** (common.md 코드·표시명은 `client/src/codes`에서만, 05 4장 [강제]): `DRAFT_STATUS_LABEL.APPROVED`·`EXECUTED` + `DRAFT_STATUS_TONE`, `PURCHASE_REQUISITION_STATUS_LABEL.WAITING_APPROVAL` + `PURCHASE_REQUISITION_STATUS_TONE`.
+
+### 공유 파일 변경 (검토 반영)
+- `client/src/features/messenger/messageActions.ts`(협업 영역): `MessageActionEntry.order` → `sortOrder`(속성 이름·정렬·주석 3곳). 다른 등록 항목이 없어 영향은 이 영역 항목과 `messageActions.test.ts`뿐이다. 협업 영역에 알릴 것.
+
+### 새 테스트
+- `api/actionDrafts.test.ts`: 영업 부서장 메시지로 만들기 COM-002(초안·작업 로그가 생기지 않음, `checkRequester` 까닭), 요청자 사용 안 함 COM-002, `checkRequester` 방 멤버 아님 COM-002·없는 메시지 COM-003, 등록부 추출 스키마·선택 입력.
+
+### 열린 질문 (추가)
+5. **요청 근거 입력**: 추출 스키마(TRM-095)에 없는 선택 입력이다. 구매요청 등록(BP-PUR-01)의 '요청 근거'로 넘기려고 남겼다. 초안 화면에서 뺄지 사용자 확인이 필요하다.
+
+### 확인
+- `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 74개 파일 544개 모두 통과.

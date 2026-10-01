@@ -22,20 +22,20 @@ import { Tag } from '@/components/Tag';
 import { ActionTypeCard, ConfirmGuideCard, OriginMessageCard } from '@/features/actionDrafts/components/DraftAside';
 import { DraftFormCard, type ConfirmFailure } from '@/features/actionDrafts/components/DraftFormCard';
 import { MyDraftList } from '@/features/actionDrafts/components/MyDraftList';
-import { confirmFailureTitle, DRAFT_STATUS_TONE, draftFlowSteps, executionFailureOf, requisitionStatusDisplay } from '@/features/actionDrafts/lib/draftDisplay';
+import { getConfirmFailureTitle, DRAFT_STATUS_TONE, buildDraftFlowSteps, getExecutionFailure, getRequisitionStatusDisplay } from '@/features/actionDrafts/lib/draftDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useActionDraft } from '@/hooks/useActionDrafts';
 import { fmtMDHM } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 
-const idOf = (value: string | string[] | undefined): number | null => {
+const parseDraftId = (value: string | string[] | undefined): number | null => {
   const id = Number(Array.isArray(value) ? value[0] : value);
   return Number.isInteger(id) && id > 0 ? id : null;
 };
 
 export function ActionDraftScreen() {
   const params = useParams<{ id: string }>();
-  const id = idOf(params.id);
+  const id = parseDraftId(params.id);
   const draft = useActionDraft(id);
   const notFound = id === null || (draft.error instanceof ApiError && draft.error.code === 'COM-003');
 
@@ -68,9 +68,9 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
   useShellTitle(`초안 #${draft.id}`, `${draft.actionTypeLabel} · 요청자 ${draft.requester.employeeName}`);
   const [confirmFailure, setConfirmFailure] = useState<ConfirmFailure | null>(null);
   const status = draft.draftStatus;
-  const failure = status === 'APPROVED' ? executionFailureOf(draft.executionResult) : null;
-  const pr = draft.purchaseRequisition;
-  const prStatus = pr ? requisitionStatusDisplay(pr.purchaseRequisitionStatus) : null;
+  const failure = status === 'APPROVED' ? getExecutionFailure(draft.executionResult) : null;
+  const purchaseRequisition = draft.purchaseRequisition;
+  const purchaseRequisitionStatusView = purchaseRequisition ? getRequisitionStatusDisplay(purchaseRequisition.purchaseRequisitionStatus) : null;
   const name = draft.requester.employeeName;
 
   return (
@@ -115,7 +115,7 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
 
       <Card className="flex-none">
         <div className="flex flex-wrap items-center gap-4 px-4 py-3">
-          <Steps items={draftFlowSteps(status)} className="min-w-[320px] flex-1" />
+          <Steps items={buildDraftFlowSteps(status)} className="min-w-[320px] flex-1" />
           <span aria-hidden="true" className="hidden h-6 w-px bg-line md:block" />
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-cap text-ink-3">{status === 'WAITING_APPROVAL' || status === 'AI_GENERATED' ? '다음' : '경로'}</span>
@@ -133,25 +133,25 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
         </div>
       </Card>
 
-      {status === 'EXECUTED' && pr && prStatus ? (
+      {status === 'EXECUTED' && purchaseRequisition && purchaseRequisitionStatusView ? (
         <Banner
           tone="ok"
           actions={
-            <ButtonLink href={`/purchase-requisitions/${pr.id}`} size="sm">
+            <ButtonLink href={`/purchase-requisitions/${purchaseRequisition.id}`} size="sm">
               구매요청 보기 <Icon name="chevron-right" size="sm" />
             </ButtonLink>
           }
         >
           <b>
             구매요청{' '}
-            <Link href={`/purchase-requisitions/${pr.id}`} className="font-mono underline">
-              {pr.purchaseRequisitionNo}
+            <Link href={`/purchase-requisitions/${purchaseRequisition.id}`} className="font-mono underline">
+              {purchaseRequisition.purchaseRequisitionNo}
             </Link>
-            {withEulReul(pr.purchaseRequisitionNo).slice(pr.purchaseRequisitionNo.length)} 만들었어요
+            {withEulReul(purchaseRequisition.purchaseRequisitionNo).slice(purchaseRequisition.purchaseRequisitionNo.length)} 만들었어요
           </b>{' '}
-          <Badge tone={prStatus.tone}>{prStatus.label}</Badge>
+          <Badge tone={purchaseRequisitionStatusView.tone}>{purchaseRequisitionStatusView.label}</Badge>
           <div>
-            {pr.purchaseRequisitionStatus === 'WAITING_APPROVAL'
+            {purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL'
               ? '이제 부서장 승인을 기다려요. 초안 확정과 구매요청 승인은 따로예요.'
               : '초안 확정은 끝났어요. 구매요청의 진행 상태는 구매요청 화면에서 볼 수 있어요.'}
           </div>
@@ -167,7 +167,7 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
       ) : null}
       {failure ? (
         <Banner tone="danger">
-          <b>{confirmFailureTitle(failure.errorCode)}</b>
+          <b>{getConfirmFailureTitle(failure.errorCode)}</b>
           <div>
             {failure.message}
             {failure.errorCode ? ` (${failure.errorCode})` : ''}
@@ -179,7 +179,7 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
       ) : null}
       {confirmFailure && !failure ? (
         <Banner tone="danger">
-          <b>{confirmFailure.code === 'ACT-001' ? confirmFailureTitle('ACT-001') : confirmFailure.code === 'PUR-001' ? confirmFailureTitle('PUR-001') : '확정하지 못했어요'}</b>
+          <b>{confirmFailure.code === 'ACT-001' ? getConfirmFailureTitle('ACT-001') : confirmFailure.code === 'PUR-001' ? getConfirmFailureTitle('PUR-001') : '확정하지 못했어요'}</b>
           <div>
             {confirmFailure.message}
             {confirmFailure.code ? ` (${confirmFailure.code})` : ''}

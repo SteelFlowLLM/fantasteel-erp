@@ -1,5 +1,6 @@
 // 초안 화면 오른쪽: 원본 메시지 · 확정하면 · 초안 업무 유형(추출 스키마·실행 핸들러 등록부, REQ-ACT-004 · ACT-005 P2)
 import Link from 'next/link';
+import { DRAFT_STATUS_LABEL, PURCHASE_REQUISITION_STATUS_LABEL } from '@/codes';
 import { ACTION_TYPE_CATALOG, type DraftDetailView } from '@/api/actionDrafts';
 import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
@@ -7,6 +8,7 @@ import { ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
+import { DRAFT_STATUS_TONE, PURCHASE_REQUISITION_STATUS_TONE } from '@/features/actionDrafts/lib/draftDisplay';
 import { fmtDateTime } from '@/lib/format';
 
 export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
@@ -44,27 +46,27 @@ export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
 }
 
 export function ConfirmGuideCard({ draft }: { draft: DraftDetailView }) {
-  const pr = draft.purchaseRequisition;
+  const purchaseRequisition = draft.purchaseRequisition;
   return (
     <Card>
       <CardHead title="확정하면" />
       <CardBody className="gap-2.5 px-3.5 py-3 text-xs">
         <div className="flex items-start gap-2">
-          <Badge tone="run" plain className="flex-none">
-            확정
+          <Badge tone={DRAFT_STATUS_TONE.APPROVED} plain className="flex-none">
+            {DRAFT_STATUS_LABEL.APPROVED}
           </Badge>
           <span>입력한 값으로 구매요청이 만들어져요 (출처: Message → ERP)</span>
         </div>
         <div className="flex items-start gap-2">
-          <Badge tone="ok" plain className="flex-none">
-            ERP 반영
+          <Badge tone={DRAFT_STATUS_TONE.EXECUTED} plain className="flex-none">
+            {DRAFT_STATUS_LABEL.EXECUTED}
           </Badge>
           <span>
-            {pr ? (
+            {purchaseRequisition ? (
               <>
                 구매요청{' '}
-                <Link href={`/purchase-requisitions/${pr.id}`} className="font-mono font-semibold text-brand hover:underline">
-                  {pr.purchaseRequisitionNo}
+                <Link href={`/purchase-requisitions/${purchaseRequisition.id}`} className="font-mono font-semibold text-brand hover:underline">
+                  {purchaseRequisition.purchaseRequisitionNo}
                 </Link>
               </>
             ) : (
@@ -73,8 +75,8 @@ export function ConfirmGuideCard({ draft }: { draft: DraftDetailView }) {
           </span>
         </div>
         <div className="flex items-start gap-2">
-          <Badge tone="wait" plain className="flex-none">
-            승인 대기
+          <Badge tone={PURCHASE_REQUISITION_STATUS_TONE.WAITING_APPROVAL} plain className="flex-none">
+            {PURCHASE_REQUISITION_STATUS_LABEL.WAITING_APPROVAL}
           </Badge>
           <span>요청자 소속 부서의 부서장이 승인해야 발주할 수 있어요</span>
         </div>
@@ -103,7 +105,10 @@ export function ActionTypeCard({ current }: { current: DraftDetailView['actionTy
                   <ComingSoon grade="P2" className="ml-auto" />
                 )}
               </span>
-              {entry.active ? <span className="text-cap text-ink-3">추출 스키마 · {entry.fieldLabels.join(' · ')}</span> : null}
+              {entry.schemaFieldLabels.length > 0 ? <span className="text-cap text-ink-3">추출 스키마 · {entry.schemaFieldLabels.join(' · ')}</span> : null}
+              {entry.active && entry.optionalInputLabels.length > 0 ? (
+                <span className="text-cap text-ink-3">선택 입력 · {entry.optionalInputLabels.join(' · ')} (추출 스키마 밖)</span>
+              ) : null}
             </li>
           ))}
         </ul>
