@@ -51,6 +51,7 @@ describe('recordBusinessEvent', () => {
 
   it('없는 사원·허용되지 않은 사유 코드는 거부한다', () => {
     const tx = createTx('2026-10-01T01:00:00.000Z');
+    const before = tx.tables.businessEvent.length;
     expect(() =>
       recordBusinessEvent(tx, { businessEventType: 'SALES_ORDER_CREATED', actor: { actorType: 'USER', employeeId: 999 }, targetType: 'sales_order', targetId: 1 }),
     ).toThrow();
@@ -63,7 +64,7 @@ describe('recordBusinessEvent', () => {
         reasonCode: 'CUSTOMER_REQUEST' as EventReasonCode,
       }),
     ).toThrow();
-    expect(tx.tables.businessEvent).toHaveLength(0);
+    expect(tx.tables.businessEvent).toHaveLength(before);
   });
 });
 
