@@ -3,7 +3,7 @@
 // 작업 로그 타임라인 (다시 쓰는 부품). 이력 재현(REQ-LOG-003)은 수주·LOT을 넘기면 오래된 순, 같은 시각은 id 순으로 보인다.
 // 수주 상세의 '이력' 탭에서도 그대로 쓴다: <EventTimeline filter={{ salesOrderId }} />
 import { Fragment, useMemo, useState } from 'react';
-import { ACTOR_TYPE_LABEL } from '@/codes';
+import { ACTOR_TYPE_LABEL, INSPECTION_RESULT_LABEL } from '@/codes';
 import { BUSINESS_EVENT_PAGE_SIZE, type BusinessEventFilter, type BusinessEventPage, type BusinessEventView } from '@/api/businessEvents';
 import { Button } from '@/components/Button';
 import { ComingSoon } from '@/components/ComingSoon';
@@ -51,7 +51,7 @@ export function EventLegend() {
       </span>
       <span className="inline-flex items-center gap-1">
         {dot('danger')}
-        불합격
+        {INSPECTION_RESULT_LABEL.FAIL}
       </span>
       <span className="inline-flex items-center gap-1">
         AI 경유 <ComingSoon grade="P2" />

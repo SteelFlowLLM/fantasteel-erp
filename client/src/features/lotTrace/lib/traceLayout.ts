@@ -1,6 +1,7 @@
 // LOT 추적 그래프 배치 (순수 함수). 열 = 공정 순서(원료 → 용선·합금철 → 히트 → 슬래브 → 코일 → 출하요청), 선 = LOT 관계.
 // 노드가 가장 많은 열을 기준으로 세우고, 나머지 열은 이미 놓인 이웃의 평균 높이에 맞춰 쌓는다 (히트 1개 ↔ 슬래브 여러 매도 읽히게).
 // 옛 traceLayout.ts를 옮겼다. 합금철은 히트에 직접 들어가므로 용선 열에 둔다(BP-LOT-01).
+import { LOT_TYPE_LABEL, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
 import type { LotTraceView, TraceLotNode, TraceRelationEdge, TraceShipment } from '@/api/lotTrace';
 
 export type ColumnKey = 'RAW' | 'HM' | 'HEAT' | 'SLAB' | 'COIL' | 'SHIP';
@@ -83,9 +84,11 @@ function columnTitle(column: ColumnKey, nodes: readonly GraphNode[]): string {
   if (column === 'HM') {
     const hasHotMetal = nodes.some((n) => n.lot?.lotType === 'HOT_METAL');
     const hasAlloy = nodes.some((n) => n.lot && isAlloyNode(n.lot));
-    return hasHotMetal && hasAlloy ? '용선 · 합금철' : hasAlloy ? '합금철' : '용선';
+    const alloy = RAW_MATERIAL_TYPE_LABEL.FERROALLOY;
+    return hasHotMetal && hasAlloy ? `${LOT_TYPE_LABEL.HOT_METAL} · ${alloy}` : hasAlloy ? alloy : LOT_TYPE_LABEL.HOT_METAL;
   }
-  return { RAW: '원료', HEAT: '히트', SLAB: '슬래브', COIL: '코일', SHIP: '출하요청' }[column];
+  // 출하요청은 LOT 종류가 아니라 용어 사전 화면 문구
+  return { RAW: LOT_TYPE_LABEL.RAW_MATERIAL, HEAT: LOT_TYPE_LABEL.HEAT, SLAB: LOT_TYPE_LABEL.SLAB, COIL: LOT_TYPE_LABEL.COIL, SHIP: '출하요청' }[column];
 }
 
 /** 용선 → 히트, 합금철 → 히트 (실제 투입량 표지를 다는 선) */

@@ -1,5 +1,5 @@
 // 정추적 영향 요약 (TRM-073 "불합격 영향 범위 확인"): 하위 슬래브·코일 수, 출고된·출고 전 제품, 출하요청, 수주.
-import { LOT_TYPE_LABEL } from '@/codes';
+import { LOT_STATUS_LABEL, LOT_TYPE_LABEL } from '@/codes';
 import type { LotTraceView, TraceImpact } from '@/api/lotTrace';
 import { Badge } from '@/components/Badge';
 import { Card, CardHead } from '@/components/Card';
@@ -28,6 +28,11 @@ export function ImpactSummary({ impact, shipments }: { impact: TraceImpact; ship
           <Stat label="출고된 제품" value={impact.shippedLotCount} danger />
           <Stat label="출고 전 제품" value={impact.unshippedLotCount} />
         </div>
+        {impact.consumedLotCount > 0 ? (
+          <p className="m-0 text-cap text-ink-3">
+            {LOT_STATUS_LABEL.CONSUMED} {fmtInt(impact.consumedLotCount)}개는 다음 공정 LOT에 들어가 출고 전 제품에서 뺐어요
+          </p>
+        ) : null}
         <PanelSection title="출하요청" meta={`${shipments.length}건`}>
           {shipments.length ? (
             <ul className="m-0 flex max-h-[160px] list-none flex-col gap-1.5 overflow-auto p-0">

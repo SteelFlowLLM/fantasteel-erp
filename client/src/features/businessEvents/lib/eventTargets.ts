@@ -44,6 +44,7 @@ export const TARGET_FILTER_TABLES: readonly DbTableName[] = [
   'purchase_order',
   'goods_receipt',
   'shipment_request',
+  'shipment_request_item',
   'mill_sheet',
   'action_draft',
 ];
@@ -66,6 +67,8 @@ export interface TargetRef {
   productionPlanId?: number | null;
   /** 입고 대상일 때 그 발주 id (입고 화면은 ?po=로 연다) */
   purchaseOrderId?: number | null;
+  /** 출하요청 품목 대상(배정 추천)일 때 그 출하요청 id */
+  shipmentRequestId?: number | null;
 }
 
 /** 대상 번호를 눌렀을 때 갈 화면 (없으면 null). 화면 주소의 쿼리 이름은 각 화면의 약속을 따른다. */
@@ -95,6 +98,8 @@ export function targetHref(target: TargetRef): string | null {
       return target.purchaseOrderId ? `/goods-receipts?po=${target.purchaseOrderId}` : '/goods-receipts';
     case 'shipment_request':
       return `/shipment-requests/${targetId}`;
+    case 'shipment_request_item':
+      return target.shipmentRequestId ? `/shipment-requests/${target.shipmentRequestId}` : null;
     case 'mill_sheet':
       return `/mill-sheets?id=${targetId}`;
     case 'action_draft':

@@ -3,7 +3,7 @@
 // LOT 관계 그래프: 열(공정 순서) + 노드 카드 + 연결선(SVG). 배치는 lib/traceLayout.ts. 옛 TraceGraph를 옮겼다.
 // 실선 = 실제 투입, 점선 = 기간 기반(그 기간에 쓰였을 수 있는 원료), 파란 선 = 출하요청 배정.
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import { LOT_TYPE_LABEL, LOT_RELATION_EVIDENCE_LABEL } from '@/codes';
+import { LOT_TYPE_LABEL, LOT_RELATION_EVIDENCE_LABEL, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
 import type { LotTraceView, TraceLotNode } from '@/api/lotTrace';
 import { Icon } from '@/components/Icon';
 import { Tag } from '@/components/Tag';
@@ -165,7 +165,7 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
           >
             <span className={cn('flex min-w-0 items-center gap-1.5 text-cap font-semibold text-ink-2', lot.isStart && 'pr-8')}>
               <LotTypeIcon type={lot.lotType} />
-              <span className="truncate">{isAlloyNode(lot) ? '합금철' : LOT_TYPE_LABEL[lot.lotType]}</span>
+              <span className="truncate">{isAlloyNode(lot) ? RAW_MATERIAL_TYPE_LABEL.FERROALLOY : LOT_TYPE_LABEL[lot.lotType]}</span>
               {lot.inspectionResult ? (
                 <span className="ml-auto">
                   <InspectionBadge result={lot.inspectionResult} />

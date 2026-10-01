@@ -115,8 +115,12 @@ export interface ImpactSalesOrder extends SalesOrderRef {
 export interface TraceImpact {
   slabCount: number;
   coilCount: number;
+  /** 출고(SHIPPED)된 슬래브·코일 */
   shippedLotCount: number;
+  /** 아직 재고(AVAILABLE)인 슬래브·코일 = 출고 전 제품 */
   unshippedLotCount: number;
+  /** 다음 공정에 모두 투입된(CONSUMED) 슬래브 — 그 코일이 따로 세어진다 */
+  consumedLotCount: number;
   salesOrders: ImpactSalesOrder[];
 }
 
@@ -403,9 +407,22 @@ function shipmentOfRequest(tables: Readonly<MockTables>, shipmentRequestId: numb
   };
 }
 
-/** 정추적 영향 요약: 하위 제품 LOT 수, 출고 여부, 연결된 수주 (배정의 수주 품목 + 생산계획의 수주 품목) */
+/**
+ * 배정의 수주 품목. 열연 투입 배정(HOT_ROLLING)은 sales_order_item_id가 비어 있고
+ * production_plan_id로만 수주에 이어지므로 생산계획의 수주 품목을 쓴다 (ERD allocation.production_plan_id).
+ */
+function allocationSalesOrderItemId(tables: Readonly<MockTables>, allocation: Pick<AllocationRow, 'salesOrderItemId' | 'allocationPurpose' | 'productionPlanId'>): number | null {
+  if (allocation.salesOrderItemId !== null) return allocation.salesOrderItemId;
+  if (allocation.allocationPurpose !== 'HOT_ROLLING') return null;
+  return findRow(tables, 'productionPlan', allocation.productionPlanId)?.salesOrderItemId ?? null;
+}
+
+/**
+ * 정추적 영향 요약: 하위 제품 LOT 수, 출고 여부, 연결된 수주 (배정의 수주 품목 + 생산계획의 수주 품목).
+ * 시작 LOT이 슬래브·코일이면 그 LOT도 영향 제품으로 센다(출하요청 목록과 맞춘다).
+ */
 function impactOf(tables: Readonly<MockTables>, nodes: readonly TraceLotNode[]): TraceImpact {
-  const products = nodes.filter((n) => !n.isStart && (n.lotType === 'SLAB' || n.lotType === 'COIL'));
+  const products = nodes.filter((n) => n.lotType === 'SLAB' || n.lotType === 'COIL');
   const productIds = new Set(products.map((n) => n.id));
   const bySalesOrder = new Map<number, ImpactSalesOrder & { lots: Set<number> }>();
   const touch = (salesOrderItemId: number | null, lotId: number, shipped: boolean) => {
@@ -422,7 +439,7 @@ function impactOf(tables: Readonly<MockTables>, nodes: readonly TraceLotNode[]):
   };
   for (const allocation of tables.allocation) {
     if (!productIds.has(allocation.lotId) || !LIVE_ALLOCATION.includes(allocation.allocationStatus)) continue;
-    touch(allocation.salesOrderItemId, allocation.lotId, allocation.allocationPurpose === 'SHIPMENT' && allocation.allocationStatus === 'CONSUMED');
+    touch(allocationSalesOrderItemId(tables, allocation), allocation.lotId, allocation.allocationPurpose === 'SHIPMENT' && allocation.allocationStatus === 'CONSUMED');
   }
   for (const node of products) {
     const lot = findRow(tables, 'lot', node.id);
@@ -436,7 +453,8 @@ function impactOf(tables: Readonly<MockTables>, nodes: readonly TraceLotNode[]):
     slabCount: products.filter((n) => n.lotType === 'SLAB').length,
     coilCount: products.filter((n) => n.lotType === 'COIL').length,
     shippedLotCount: products.filter((n) => n.lotStatus === 'SHIPPED').length,
-    unshippedLotCount: products.filter((n) => n.lotStatus !== 'SHIPPED').length,
+    unshippedLotCount: products.filter((n) => n.lotStatus === 'AVAILABLE').length,
+    consumedLotCount: products.filter((n) => n.lotStatus === 'CONSUMED').length,
     salesOrders,
   };
 }
@@ -543,7 +561,7 @@ function lotDetailOf(tables: Readonly<MockTables>, lot: LotRow): LotDetailView {
         allocationStatus: a.allocationStatus,
         confirmedAt: a.confirmedAt,
         consumedAt: a.consumedAt,
-        salesOrder: salesOrderRefOfItem(tables, a.salesOrderItemId),
+        salesOrder: salesOrderRefOfItem(tables, allocationSalesOrderItemId(tables, a)),
         shipmentRequest: request ? { id: request.id, shipmentRequestNo: request.shipmentRequestNo } : null,
         productionPlan: allocationPlan ? { id: allocationPlan.id, productionPlanNo: allocationPlan.productionPlanNo } : null,
       };

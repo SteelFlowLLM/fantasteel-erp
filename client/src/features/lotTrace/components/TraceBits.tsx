@@ -1,17 +1,12 @@
 // LOT 추적·작업 로그가 함께 쓰는 작은 부품: LOT 종류 아이콘, 판정·LOT 상태·출하요청 상태 배지, 번호 링크, 기간 표시.
+// 상태 배지 색은 다른 화면과 같게 한 곳에서 가져온다: LOT 상태 = 재고 화면(lotStatusTone), 출하요청 상태 = 출하 화면(ShipmentBadges).
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import {
-  INSPECTION_RESULT_LABEL,
-  LOT_STATUS_LABEL,
-  SHIPMENT_REQUEST_STATUS_LABEL,
-  type InspectionResult,
-  type LotStatus,
-  type LotType,
-  type ShipmentRequestStatus,
-} from '@/codes';
+import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, type InspectionResult, type LotStatus, type LotType } from '@/codes';
 import { Badge, type BadgeTone } from '@/components/Badge';
 import { Icon, type IconName } from '@/components/Icon';
+import { lotStatusTone } from '@/features/inventory/lib/inventoryDisplay';
+import { ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtHM, fmtMD, fmtMDHM } from '@/lib/format';
 
@@ -34,17 +29,12 @@ export function InspectionBadge({ result }: { result: InspectionResult | null })
   return <Badge tone={INSPECTION_TONE[result]}>{INSPECTION_RESULT_LABEL[result]}</Badge>;
 }
 
-const LOT_STATUS_TONE: Record<LotStatus, BadgeTone> = { AVAILABLE: 'ok', CONSUMED: 'neutral', SHIPPED: 'run' };
-
 export function LotStatusBadge({ status }: { status: LotStatus }) {
-  return <Badge tone={LOT_STATUS_TONE[status]}>{LOT_STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={lotStatusTone(status)}>{LOT_STATUS_LABEL[status]}</Badge>;
 }
 
-const SHIPMENT_TONE: Record<ShipmentRequestStatus, BadgeTone> = { REQUESTED: 'wait', ALLOCATED: 'run', ISSUED: 'ok', CANCELLED: 'neutral' };
-
-export function ShipmentStatusBadge({ status }: { status: ShipmentRequestStatus }) {
-  return <Badge tone={SHIPMENT_TONE[status]}>{SHIPMENT_REQUEST_STATUS_LABEL[status]}</Badge>;
-}
+/** 출하요청 상태 배지 = 출하 화면의 배지 그대로 */
+export const ShipmentStatusBadge = ShipmentRequestStatusBadge;
 
 /** 업무 번호·LOT 번호 링크 (옛 hl-link-id) */
 export function LinkId({ href, title, className, children }: { href: string; title?: string; className?: string; children: ReactNode }) {

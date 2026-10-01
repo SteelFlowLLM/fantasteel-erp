@@ -75,7 +75,7 @@
 | 영향 수주 | 배정(CONFIRMED·CONSUMED)의 수주 품목 + LOT 생산계획의 수주 품목 | ERD 연결 그대로 |
 | 불합격 이벤트 판단(빨강) | `INSPECTION_REGISTERED`의 after_data에 `inspectionResult: 'FAIL'`, 또는 `DISPOSITION_SET` | 자동 판정 결과를 after_data에 남긴다는 전제(아래 7장) |
 | 대상 한글명 | 용어 사전 엔티티 한글명(예: production_result = 작업 실적, quality_inspection = 품질검사, action_draft = Action Draft). 없는 테이블은 DB명 | 용어 사전 |
-| 대상 필터 목록 | sales_order, sales_order_item, production_plan, production_result, quality_inspection, lot, reservation, allocation, purchase_requisition, purchase_order, goods_receipt, shipment_request, mill_sheet, action_draft | 29개 이벤트의 대상 테이블 |
+| 대상 필터 목록 | sales_order, sales_order_item, production_plan, production_result, quality_inspection, lot, reservation, allocation, purchase_requisition, purchase_order, goods_receipt, shipment_request, shipment_request_item, mill_sheet, action_draft | 29개 이벤트의 대상 테이블 (shipment_request_item = 출하 배정 추천, 검토 반영 때 추가) |
 | 사유 코드 표시 | 코드 그대로(STOCK_FIRST 등) | 06에 표시명이 없다(codes/businessEvent.ts 주석) |
 | 작업 로그 한 번에 불러오는 수 | 50건, '더 보기'로 50건씩 | 옛 화면과 같음 |
 | LOT 목록 수 | 최근 40개, 검색 20개 | 옛 화면과 같음 |
@@ -101,3 +101,20 @@
 - 브라우저 확인은 하지 않았다(병렬 규칙: dev 서버·빌드 금지). 병합 뒤 시드가 들어오면 14.1 시나리오로 클릭 확인이 필요하다.
 - 거래 시드가 들어오기 전까지 세 화면은 빈 상태로 보인다.
 - 'AI 경유'(REQ-AST-010, P2)는 표시 자리만 '준비 중 (P2)'이다. `is_ai_assisted`는 늘 false.
+
+## 9. 검토 반영 (2026-10-02)
+
+| 지적 | 근거 | 고친 것 |
+|---|---|---|
+| 정추적 영향 요약의 '출고 전 제품'이 코일로 투입 소진된 슬래브까지 셈 | 03 TRM-073, 06 LOT_STATUS(CONSUMED = 투입 소진), REQ-LOT-005 | `api/lotTrace.ts` impactOf: 출고 전 제품 = 재고(AVAILABLE)인 슬래브·코일만. 투입 소진 수는 `consumedLotCount`로 따로 주고, 영향 요약 카드에 "투입 소진 N개는 다음 공정 LOT에 들어가 출고 전 제품에서 뺐어요" 한 줄(표시명은 `LOT_STATUS_LABEL.CONSUMED`). 테스트 기대값 4 → 2 |
+| 열연 투입 배정(HOT_ROLLING)의 수주가 영향 수주에 안 잡힘 | BP-LOT-01 '→ 대상 수주', ERD allocation.production_plan_id(HOT_ROLLING일 때), 14.2 | `allocationSalesOrderItemId`: sales_order_item_id가 비어 있는 HOT_ROLLING 배정은 production_plan → sales_order_item으로 수주를 찾는다. 영향 요약과 LOT 상세 배정 줄 모두 같은 함수 |
+| 슬래브·코일에서 정추적하면 출하요청은 나오는데 수주·출고 수는 0 | REQ-LOT-005, BP-LOT-01 | impactOf가 시작 LOT도 슬래브·코일이면 영향 제품으로 센다(출하요청 목록과 같은 범위). 원료·용선·히트 시작은 원래대로 빠진다 |
+| 배정 추천(대상 `shipment_request_item`)을 대상 필터로 못 고르고 번호에 링크가 없음 (지적 2건) | REQ-LOG-002, BP-LOG-01, trace.md 3·4장 | `TARGET_FILTER_TABLES`에 `shipment_request_item`(출하요청 품목) 추가 → 주소 `?targetType=`도 남는다. `businessEventApi` toView가 출하요청 품목의 `shipmentRequestId`를 찾아 넘기고, `targetHref`가 `/shipment-requests/:id`로 보낸다(작업 로그·수주 이력 재현 모두) |
+| 변경 전 → 변경 후 표에 공통 코드가 영문, 객체 배열이 JSON 덩어리 | PLAN 4장 '표시명 = 화면 문구', 06 각 코드 그룹, REQ-LOG-001, PLAN 7장 QC-003 | `eventDiff.ts`: 키 이름(경로 마지막) = 코드 그룹(05 4장 camelCase) 표로 `@/codes`의 *_LABEL 표시명을 보인다(allocationStatus, allocationPurpose, reservationStatus, shipmentRequestStatus, salesOrderItemStatus, inspectionResult, dispositionStatus, lotStatus, lotType, processType, draftStatus, productionPlanStatus, purchaseRequisitionStatus, purchaseOrderStatus, lotRelationEvidence, itemType, rawMaterialType, actionType, actorType). 객체 배열은 줄 이름(inspectionItemCode → lineNo → lotNo → id, 없으면 순번)으로 펴서 줄마다 비교(예: `values.C.measuredValue`). 항목 키 열은 그대로 DB 경로 |
+| LOT 상세의 '불합격 처리 상태'·'처리 상태' | 03 TRM-079 '불합격 상태', 보고서 4 C-2 | 섹션 제목·줄 이름을 '불합격 상태', '처리 시각' → '지정 시각'. 배지는 품질 화면의 `DispositionBadge`를 그대로 쓴다(보류·격하·폐기 색이 품질 화면과 같아짐) |
+| 그래프 열 제목·노드·범례에 표시명을 다시 직접 적음 | common.md 'labels only from codes', 보고서 4 C-3·C-6 | `traceLayout.ts` 열 제목 = `LOT_TYPE_LABEL`, 합금철 = `RAW_MATERIAL_TYPE_LABEL.FERROALLOY`(TraceGraph·LotTraceScreen 범례도), 작업 로그 범례 '불합격' = `INSPECTION_RESULT_LABEL.FAIL`. 출하요청 열 제목은 용어 사전 화면 문구라 그대로 |
+| 같은 상태 배지 색이 화면마다 다름 | common.md 'badges colored by status' | `TraceBits.LotStatusBadge` = 재고 화면 `lotStatusTone`(재고 파랑, 투입 소진·출고 회색), `ShipmentStatusBadge` = 출하 화면 `ShipmentRequestStatusBadge` 그대로, LOT 상세 배정 상태 = 출하 화면 `AllocationStatusBadge`(소진 초록) |
+
+- 테스트: `eventDiff.test.ts` +3(코드 표시명, 검사 값 줄 비교, 출하요청 품목 이동), `api/lotTrace.test.ts` +2(시작 LOT 포함, HOT_ROLLING 수주)·기대값 수정, `api/businessEvents.test.ts` +1(배정 추천 대상 필터·링크). 전체 typecheck 0 오류, 74파일 547개 통과.
+- 공유 파일 변경: 없음. 다른 영역 파일은 읽기(import)만 했다: `features/inventory/lib/inventoryDisplay.ts`(lotStatusTone), `features/shipment/components/ShipmentBadges.tsx`(ShipmentRequestStatusBadge·AllocationStatusBadge), `features/quality/components/QualityBadges.tsx`(DispositionBadge). 그쪽 색을 바꾸면 LOT 추적도 같이 바뀐다.
+

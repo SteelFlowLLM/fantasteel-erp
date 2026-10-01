@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { businessEventApi } from '@/api/businessEvents';
+import { isTargetFilterTable } from '@/features/businessEvents/lib/eventTargets';
 import { buildTraceFixture, type TraceFixture } from '@/features/lotTrace/testing/traceFixture';
+import { recordBusinessEvent } from '@/mock/businessEvents';
+import { getMockDb } from '@/mock/db';
+import { seedTxAt } from '@/mock/seeds';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 let f: TraceFixture;
@@ -76,6 +80,34 @@ describe('작업 로그 목록 필터 (REQ-LOG-001·002)', () => {
     const day = await businessEventApi.list({ from: '2026-10-01', to: '2026-10-01' });
     expect(day.items.map((e) => e.businessEventType).sort()).toEqual(['INSPECTION_REGISTERED', 'INSPECTION_REGISTERED', 'PRODUCTION_RESULT_REGISTERED']);
     expect((await businessEventApi.list({ from: '2026-10-03' })).total).toBe(1);
+  });
+
+  it('배정 추천(대상 = 출하요청 품목)도 대상 필터로 고르고, 번호는 그 출하요청으로 이동한다', async () => {
+    // core(mock/services/shipments.ts)가 출하 배정 때 남기는 것과 같은 모양
+    getMockDb().transact((root) => {
+      const line = root.tables.shipmentRequestItem.find((i) => i.shipmentRequestId === f.allocatedRequestId);
+      if (!line) throw new Error('출하요청 품목 없음');
+      recordBusinessEvent(seedTxAt(root, '2026-10-03T08:59:00+09:00'), {
+        businessEventType: 'ALLOCATION_RECOMMENDED',
+        actor: { actorType: 'SYSTEM' },
+        targetType: 'shipment_request_item',
+        targetId: line.id,
+        targetNo: f.allocatedRequestNo,
+        salesOrderId: f.salesOrderId,
+      });
+    });
+    expect(isTargetFilterTable('shipment_request_item')).toBe(true);
+    const page = await businessEventApi.list({ targetType: 'shipment_request_item' });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      businessEventType: 'ALLOCATION_RECOMMENDED',
+      targetTypeLabel: '출하요청 품목',
+      targetNo: f.allocatedRequestNo,
+      targetHref: `/shipment-requests/${f.allocatedRequestId}`,
+    });
+    // 수주 이력 재현에서도 같은 링크
+    const replay = await businessEventApi.list({ salesOrderId: f.salesOrderId });
+    expect(replay.items.find((e) => e.businessEventType === 'ALLOCATION_RECOMMENDED')?.targetHref).toBe(`/shipment-requests/${f.allocatedRequestId}`);
   });
 
   it('건수 제한 (더 보기)', async () => {
