@@ -1,84 +1,94 @@
 # 화면 작업 안내 (v2 client)
 
-v2 화면은 **v1의 B안 디자인**(어두운 아이콘 레일 + 목록|상세)을 그대로 쓰되, 데이터는 v2 서버(NestJS REST API)에서 가져온다. 셸·공용 부품·API 클라이언트는 이미 있다. 이 문서는 화면을 나눠 만드는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다.
+v2 화면(`client/`)은 **서버·DB 없이 브라우저 안의 가짜 DB(mock)만으로 동작하는 화면 전용 클라이언트**다. Next.js(App Router) + TypeScript(strict) + Tailwind + TanStack Query + Zustand로 만들었고, B안 디자인(어두운 아이콘 레일 + 목록|상세)을 쓴다. 이 문서는 화면을 고치거나 더하는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다. `server/`와 `shared/`, DB는 이번 화면 재작업에서 건드리지 않았고, 새 화면은 그쪽을 부르지 않는다.
 
-## 1. 기준
+## 1. 기준 (우선순위 순)
 
-1. `v2/SPEC.md` — 범위·결정. 특히 3번(P1만 기능, P2는 디자인만 + "준비 중 (P2)"), 5번(화면 개선), 8·9번.
-2. `v2/docs/notion/` — 업무 규칙·용어 (`02-요구사항-정의서.md`, `04-업무-프로세스-정의서.md`, `03-용어-사전.md`).
-3. `v2/docs/api/<모듈>.md` — **서버가 실제로 주는 요청·응답 모양. 화면은 이것만 보고 붙인다.** 문서와 실제가 다르면 실제 서버를 기준으로 하고 보고서에 적는다.
-4. 디자인 참고: `v1/web/src/screens/B/sNN.tsx`(+ `sNN.css`) — B안 화면의 마크업·클래스·문구. **모양(구조·className·인라인 스타일·해요체 문구)은 최대한 그대로 가져온다.** 데이터 연결 코드(v1의 `useDb`, `shared/domain` 등)는 가져오지 않는다. `v1/`은 수정 금지.
+1. 6개 설계 문서 — `docs/notion/01`~`06` (기획안, 요구사항 정의서, 용어 사전, 업무 프로세스 정의서, 코드 컨벤션, 공통 코드 정의서). 검사 기준 숫자만 `docs/notion/07-KS-규격-정리.md`와 `docs/rework/ks-values.md`.
+2. `docs/rework/erd-final.txt` — 화면이 보이고 받는 필드와 mock 행 이름(컬럼 이름의 camelCase)을 정할 때만.
+3. `SPEC.md`, `docs/rework/PLAN.md` — 범위와 결정. PLAN 4장 = 정확한 공통 코드, 5장 = 승인된 처리, 6장 = 문서끼리 어긋날 때의 기본값, 7장 = 화면별 변경.
+4. `docs/rework/areas/` — 영역별 노트(색인: [areas/README.md](rework/areas/README.md)). 화면·api 함수·요구사항 대응·가정값이 있다.
+5. 문서에 없는 값은 **가정값**이다. 임의로 넣지 말고 `docs/rework/seed-assumptions.md`에 행을 더해 근거를 남긴다.
 
-- 용어는 용어 사전을 따른다: 팀장 → **부서장**, 거래처 → 고객사, 원자재 → 원료, 강종은 SS275·SM355·SPHC, AI 이름은 "AI 어시스턴트". v1 문구에 옛 용어가 있으면 고친다.
-- v1에 있던 "시뮬레이션 시계·자동 조업·시안 전환"은 없다. 시간은 실제 시간이다.
-- SPEC·문서·API에 없는 기능이나 숫자를 만들어 내지 않는다. 화면의 모든 숫자·상태는 서버 응답에서 온다.
+용어는 용어 사전을 따르고 금지어(동의어)를 쓰지 않는다. 문서끼리 어긋날 때 기본값은 PLAN 6장: '작업 실적', '수주', '수주 매수', 'LOT 관계', '출하요청 번호', '공급업체', '채팅방', '입고예정'. 문구는 해요체.
 
-## 2. 폴더와 명령
+## 2. 실행과 명령
 
-```
-client/src/
-  api/          client.ts(api.get/post…, ApiError, fileUrl, newIdempotencyKey), queryClient.ts, realtime.ts, auth.ts, <영역>.ts
-  components/   ui.tsx (Badge, Icon, Spinner, EmptyNote, StateView, QueryBoundary, Modal, Field, ComingSoon, ComingSoonArea, SoonButton, Progress, Avatar), DateInput.tsx
-  hooks/        useApi.ts(useAction), useRealtime.ts(useRealtimeEvent)
-  lib/format.ts fmtDate, fmtMD, fmtHM, fmtMDHM, fmtDateTime, relTime, dLabel, todayStr, fmtTon, fmtInt, fmtNum, fmtPct, fmtDims, fmtBytes
-  stores/       auth.ts(useMe, canUse, canView, isDepartmentHead), toast.ts(toast.ok/info/error/apiError)
-  shell/        Shell.tsx, nav.ts, titles.ts, shellTitle.tsx(useShellTitle), shellData.ts
-  pages/<영역>/  XxxPage.tsx   ← 화면. 이미 자리 표시용 파일이 있고 App.tsx에 경로가 연결돼 있다
-  features/<영역>/  화면이 나눠 쓰는 부품·훅
-  styles/       hl-vars.css, bundle.css(B안 디자인), app.css(v2 보정)
+저장소 맨 위에서 실행한다 (Node.js 22.18 이상).
+
+```bash
+npm install
+npm run dev -w @fantasteel/client     # http://localhost:5173
 ```
 
 ```bash
-cd v2/client && npx tsc --noEmit -p tsconfig.json     # 타입 검사 (내 파일에 오류 0)
+npm run typecheck -w @fantasteel/client   # 타입 검사, 오류 0
+npm run test -w @fantasteel/client        # Vitest
+npm run build -w @fantasteel/client       # next build
+npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 ```
-- 개발 서버(`vite`)·브라우저는 띄우지 않는다 (다른 사람이 쓰고 있다). 서버 응답은 curl로 직접 확인한다: `http://localhost:8787/api/v1` (로그인 `POST /auth/login {employeeNo, password:"heatline"}`). **8787 서버의 데이터는 모두가 같이 쓰므로 조회(GET)만 한다.** 변경 API를 시험해야 하면 보고서에 "확인 못 함"으로 적는다.
 
-### 건드리면 안 되는 것
-- `src/App.tsx`, `src/main.tsx`, `src/shell/`, `src/components/`, `src/hooks/`, `src/lib/`, `src/stores/`, `src/api/client.ts`·`queryClient.ts`·`realtime.ts`·`auth.ts`, `src/styles/bundle.css`·`hl-vars.css`·`app.css`, `shared/`, `server/`, 다른 사람의 `pages/`·`features/`·`api/` 파일.
-- 공용 부품이 부족하면 고치지 말고 자기 `features/<영역>/` 안에 만들고 보고서에 적는다. 새 경로가 필요하면 보고서에 적는다.
-- 패키지 추가 금지.
-- 화면 전용 CSS가 필요하면 `pages/<영역>/<Page>.css`를 만들어 그 화면에서 import 한다 (v1의 `sNN.css`를 옮길 때도 같다). 클래스 이름이 다른 화면과 겹치지 않게 화면 접두사를 붙인다.
+- 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
+- 처음 열면 **계정 선택** 화면(`/login`)이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
+- 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
+- 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
-## 3. 코드 규칙 (코드 컨벤션 9장)
+## 3. 폴더 (`client/src/`)
 
-- 함수형 컴포넌트 + **named export** (`export function SalesOrderListPage()`), 파일명 PascalCase. `@/` alias 사용, `../../` 금지.
-- API 호출은 `src/api/<영역>.ts`의 함수 + 커스텀 훅으로만. 컴포넌트에서 `fetch` 직접 호출 금지.
-  ```ts
-  // src/api/salesOrders.ts
-  export interface SalesOrderRow { … }                        // docs/api의 응답 모양 그대로
-  export const salesOrderApi = {
-    list: (q: ListQuery) => api.get<SalesOrderRow[]>('/sales-orders', q),
-    create: (dto: CreateDto) => api.post<SalesOrder>('/sales-orders', dto, { 'Idempotency-Key': newIdempotencyKey() }),
-  };
-  // 화면
-  const list = useQuery({ queryKey: ['sales-orders', 'list', filters], queryFn: () => salesOrderApi.list(filters) });
-  const create = useAction(salesOrderApi.create, { success: '수주를 등록했어요', invalidate: ['sales-orders', 'inventories'], onSuccess: (o) => navigate(`/sales-orders/${o.id}`) });
-  ```
-- **쿼리 키의 첫 요소는 서버 실시간 주제 이름**(= API 복수 명사: `sales-orders`, `inventories`, `lots`, `allocations`, `production-plans`, `production-results`, `mrp-runs`, `purchase-requisitions`, `purchase-orders`, `goods-receipts`, `quality-inspections`, `shipment-requests`, `goods-issues`, `mill-sheets`, `business-events`, `tasks`, `notifications`, `chat-rooms`, `action-drafts`, `employees`, `departments`, `master-data`, `dashboard`). 서버가 데이터가 바뀌면 주제를 보내고, 그 주제로 시작하는 조회가 자동으로 다시 불린다 (다른 창에서 한 변경도 바로 보인다). 여러 주제에 걸친 조회는 가장 관련 큰 주제를 쓰고 `useAction`의 `invalidate`로 보완한다.
-- 서버 데이터를 전역 스토어에 복사하지 않는다. 화면 상태(선택·필터·폼)는 `useState`, 주소에 남길 것은 `useSearchParams`.
-- 로딩·오류는 `<QueryBoundary query={q}>{(data) => …}</QueryBoundary>` 또는 `StateView`. 빈 목록은 같은 자리에 `<EmptyNote>`. 403은 `QueryBoundary`가 "권한 없음" 상태로 보여준다.
-- 변경은 `useAction` (실패하면 서버 메시지를 토스트로 띄운다). 버튼은 `pending` 동안 비활성.
-- 권한: `const me = useMe()`. 변경 버튼은 `canUse(me, 'ORDER_CREATE')`가 아니면 `disabled` + `title="권한이 필요해요"` (디자인의 `hl-lockhint`가 있으면 그것). 부서장 여부는 `isDepartmentHead(me)`; 승인은 서버가 승인권자를 확인한다.
-- 수량 입력은 정수만 (`inputMode="numeric"`, 1 이상). 톤은 서버가 준 문자열을 `fmtTon`으로 표시만 한다 — 화면에서 다시 계산해 저장하지 않는다. 입력 중 미리보기 톤은 `calcWeightTon`(shared)으로 계산해 "계산값"임을 표시한다. 단위: 슬래브 매, 코일 개 (`ITEM_QTY_UNIT`).
-- 상태 표시는 shared의 라벨 상수(`SALES_ORDER_STATUS_LABEL` 등) + `Badge`. 상태 문자열을 화면에 직접 쓰지 않는다.
-- 날짜 입력은 전부 `DateInput` (숫자 직접 입력 + 달력 팝업, SPEC 5-2). 값은 `YYYY-MM-DD`.
-- 상단 바 제목을 바꾸려면 `useShellTitle('SO-20260930-0001', '한빛중공업')`.
-- 화면 사이 이동 경로는 `docs/SERVER-GUIDE.md` 8장과 `src/App.tsx`. 수주번호·LOT번호는 링크(`className="hl-link-id"`)로: 수주 → `/sales-orders/:id`, LOT → `/lots/trace?lot=<lotNo>`.
-- 화면 루트는 셸의 `.hl-body` 안에 들어간다: 보통 `<main className="hl-main">…</main>`, 목록|상세 구조면 `<section className="hl-master">…</section><main className="hl-main">…</main>` (v1 B안 화면과 같다). 창 크기가 달라질 수 있으니 고정 폭(1440) 가정은 빼고 표·카드가 늘어나게 한다 (`minWidth: 0`, 스크롤).
-- 접근성: 버튼은 `<button type="button">`, 아이콘만 있는 버튼은 `aria-label`, 입력은 `label` 연결, 오류 문구는 입력 가까이에.
-- 문구는 v1 디자인처럼 해요체. 오류 메시지는 서버 메시지를 그대로 보여준다.
+```
+app/            Next.js 경로. (main)/<주소>/page.tsx = 화면 진입점, login/page.tsx = 계정 선택
+features/<영역>/  화면과 영역 전용 부품·lib (sales, production, quality, purchasing, shipment, inventory, lotTrace,
+                 businessEvents, tasks, messenger, dashboard, admin, masterData, inspectionStandards, actionDrafts,
+                 millSheets, agent, meetings, pastCases, login, shell …)
+features/shell/  셸: 레일(Rail.tsx), 상단 바, 화면 접근표(screens.ts), 경로 제목(routeTitles.ts), AI 패널
+components/      공용 부품: Button, Input, Field, Modal, Table, Tabs, Badge, Banner, Card, Timeline, Toaster,
+                 QueryBoundary, StateView(EmptyNote), ComingSoon(ComingSoonArea·SoonButton) …
+api/             화면이 데이터를 읽고 쓰는 길. <영역>.ts 함수 + client.ts(mockQuery·mockMutation), actor.ts(requireActor),
+                 errors.ts(ApiError), queryKeys.ts, queryClient.ts
+hooks/           api 함수를 감싼 훅 (useQuery 래퍼, useAction, usePermission, useMockDataSync …)
+codes/           공통 코드(공통 코드 정의서의 값·표시명), 9.3 오류 코드(errors.ts), 번호 채번 규칙(numbering.ts)
+mock/            가짜 DB (4장)
+lib/             순수 계산 함수 (weight, fifo, mrp, inspectionJudgment, decimal, seoulDate …)와 Vitest 테스트
+stores/          Zustand: useSessionStore, useShellStore, useToastStore (화면·세션 상태만)
+styles/          globals.css, icons.css
+test/            Vitest 준비 (setup.ts, actors.ts, masterSeed.ts)
+```
 
-## 4. P2·EX 처리 (SPEC 3번)
+## 4. 가짜 DB와 시드 (`client/src/mock/`)
 
-- P2(AI Factory Agent, Voice2ERP 회의록, AI 어시스턴트·@AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인(버튼·화면)은 남기고 기능은 뺀다.**
-  - 버튼: `<SoonButton>비슷한 사례 찾기</SoonButton>` / 작은 표시 `<ComingSoon grade="P2" />`
-  - 화면·영역: `<ComingSoonArea grade="P2" title="AI Factory Agent">…v1 디자인 마크업(고정 예시 내용)…</ComingSoonArea>`
-- 예시 내용에 v1의 옛 용어·강종이 있으면 고친다. 실제 데이터처럼 오해할 숫자는 "예시"임을 알 수 있게 한다.
-- Message → ERP의 AI 자동 추출은 없다: 초안 값은 요청자가 직접 입력한다. 추출 자리에는 `<ComingSoon grade="AI" />`.
+| 파일·폴더 | 내용 |
+|---|---|
+| `schema.ts` | 테이블(행 타입)과 ERD 이름 |
+| `store.ts`, `db.ts` | 저장(`localStorage`)·탭 동기화·`MOCK_DB_VERSION`(시드를 바꾸면 올린다), 이 탭의 DB 인스턴스와 `resetToSeed` |
+| `seed.ts` | 조직·기준정보 시드 (부서·직급·역할·사원·권한·강종·품목·규격·라우팅·배합 원단위 …) |
+| `seeds/` | 거래·협업 시드. `index.ts`의 `AREA_SEEDERS` 순서: `inspectionStandards` → `core`(수주·생산·구매·출하·밀시트, 14.1 시작 재고) → `collab`(업무·채팅방) → `dashboard`(8~9월 끝난 거래) |
+| `services/` | **업무 규칙 서비스**(예약·FIFO 배정·히트 편성·실적·검사 판정·MRP·구매·출하·밀시트·초안 …). 영역 화면은 이 규칙을 다시 만들지 않고 부른다. API 문서는 `docs/rework/areas/core-domain.md` |
+| `businessEvents.ts` | 작업 로그 기록기 (수정·삭제 함수 없음) |
+| `sequence.ts`, `fileStorage.ts` | 업무 번호 순번 발급, 첨부 파일 저장소(파일 1개 512KB) |
 
-## 5. 끝낼 때
+- 시드는 서비스 함수를 그대로 불러 만들고, 날짜·난수 시드가 고정이라 매번 같은 결과가 나온다. 값 목록과 근거는 `docs/rework/seed-assumptions.md`.
+- 시드를 바꾸는 법: 영역 시드 파일을 `mock/seeds/`에 두고 `seeds/index.ts`의 `AREA_SEEDERS`에 한 줄 등록한다(거래 시드 뒤에 실행해야 하면 뒤에). 바꾼 뒤 `MOCK_DB_VERSION`을 올린다.
 
-1. `npx tsc --noEmit -p tsconfig.json`에서 내 파일 오류 0 (남의 파일 오류는 보고만).
-2. 내 화면이 쓰는 GET API를 curl로 불러 응답 모양이 내 타입과 맞는지 확인.
-3. v1 B안 화면과 나란히 다시 읽고, 보이던 것이 빠지지 않았는지·P2가 "준비 중"으로 남았는지 확인.
-4. 보고서: 화면별로 무엇이 실제 데이터인지 / 연결한 동작 / 준비 중으로 남긴 것 / 확인 못 한 것(변경 API 등) / API 문서와 달랐던 점 / 공용 코드에 필요한 것.
+## 5. 코드 규칙 (코드 컨벤션)
+
+- TypeScript strict, `any` 금지, `console.*` 금지, `@/` alias(`../../` 금지). 함수형 컴포넌트는 named export(Next 경로 파일만 default export), 컴포넌트 파일은 PascalCase, 훅은 `use*.ts`. 변수명 `order`만 쓰지 않는다(`salesOrder`, `purchaseOrder`).
+- 데이터 접근은 `api/*.ts` 함수 + 커스텀 훅(TanStack Query)으로만. 컴포넌트에서 mock DB를 직접 읽지 않는다. Zustand에는 서버 데이터를 복사하지 않는다.
+- 라벨·코드·오류 메시지는 `@/codes`에서만 가져온다(화면에 영어 코드 원문을 쓰지 않는다). 업무 번호·LOT 번호는 `codes/numbering.ts`의 채번 함수로만 만든다.
+- 모든 변경 함수(`api/`)는 맨 먼저 `requireActor`로 요청 사원의 USE 권한을 확인하고(없으면 COM-002), 9.3 오류 코드로 검증하고, `mockMutation` 안에서 mock DB를 바꾸며 작업 로그(BUSINESS_EVENT_TYPE, 주체 USER 또는 SYSTEM, 변경 전후, 사유 코드는 허용된 값만)를 같은 트랜잭션에서 남긴다. 화면에서도 권한이 없으면 버튼을 숨기거나 끈다.
+- 변경 뒤 영향받는 모든 화면이 갱신되게 쿼리를 무효화한다(`api/queryKeys.ts`). 다른 탭은 `BroadcastChannel` 동기화(`hooks/useMockDataSync.ts`)가 갱신한다.
+- 업무 계산은 순수 함수(`lib/` 또는 `features/<영역>/lib/`)로 두고 Vitest 테스트를 붙인다. api 함수는 mock DB 위에서 정상 흐름과 9.3 오류 경우를 시험한다(`*.test.ts`).
+- 스타일은 Tailwind 유틸리티와 B안 토큰. 목록|상세 구조, 상태 배지 색, 빈·로딩·오류 상태(`StateView`, `QueryBoundary`)를 다른 화면과 같게 맞춘다.
+- 날짜 입력은 `DateInput`, 수량은 정수, 톤은 문자열 소수 3자리(`lib/decimal.ts`).
+
+## 6. P2·EX 처리 (준비 중)
+
+- P2(AI Factory Agent, Voice2ERP 회의록, AI 어시스턴트·@AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. AI·LLM 호출도 없다.
+  - 버튼: `<SoonButton>` / 작은 표시: `<ComingSoon grade="P2" />` / 영역: `<ComingSoonArea grade="P2" title="…">예시 내용</ComingSoonArea>`. 모두 `components/ComingSoon.tsx`.
+  - 예시 내용은 `features/agent/agentExample.ts`, `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다. 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
+- 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).
+
+## 7. 끝낼 때
+
+1. `npm run typecheck -w @fantasteel/client` 오류 0, `npm run test -w @fantasteel/client` 전부 통과, `npm run build -w @fantasteel/client` 성공.
+2. 새로 정한 값이 있으면 `docs/rework/seed-assumptions.md`와 해당 영역 노트(`docs/rework/areas/<영역>.md`)에 가정값으로 적는다.
+3. 금지어와 코드 표시명을 다시 훑는다(용어 사전, 공통 코드 정의서).

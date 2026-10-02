@@ -1,6 +1,0 @@
-/* 과거 사례 검색 (준비 중 · EX) — 화면 안에 목록|상세 두 칸을 그린다. */
-/* 내용이 길면 줄어들지 않고 칸이 늘어난다(준비 중 영역은 pointer-events:none이라 카드 안 스크롤을 못 쓴다). */
-.pcase-split { display: flex; flex: 1 0 auto; min-height: 680px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; }
-.pcase-split > .hl-master { flex: none; }
-.pcase-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
-.pcase-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; flex: 1 0 auto; min-height: 300px; }

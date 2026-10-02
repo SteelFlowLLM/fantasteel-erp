@@ -1,0 +1,744 @@
+## group org_auth: department, job_grade, role, role_permission, employee
+## group master_data: steel_grade, item, spec_mapping, routing, specific_consumption, customer, supplier, yard, production_setting, inspection_standard, inspection_standard_item
+## group sales_inventory: sales_order, sales_order_item, inventory, reservation, allocation
+## group production_lot: production_plan, production_result, lot, lot_relation
+## group purchasing: purchase_requisition, purchase_requisition_item, purchase_order, purchase_order_item, goods_receipt
+## group quality_shipment: quality_inspection, quality_inspection_value, shipment_request, shipment_request_item, mill_sheet
+## group log_collab: business_event, business_event_lot, task, notification, chat_room, chat_room_member, message, action_draft
+## group system_support: number_sequence, idempotency_key
+## group p2_ex_placeholder: meeting_minutes, meeting_attendee, past_case, past_case_lot
+
+### department [org_auth] note=
+  - id int PK :: 
+  - department_code varchar(30) UK NN :: 
+  - department_name varchar(50) NN :: 
+  - parent_id int  :: 상위 부서 (REQ-ORG-001)
+  - head_employee_id int  :: 부서장 1명. 역할이 아님 (REQ-ORG-002, AUTH-004)
+  - sort_order int NN def=0 :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['parent_id'] 
+  * idx ['head_employee_id'] 
+
+### job_grade [org_auth] note=
+  - id int PK :: 
+  - job_grade_code varchar(30) UK NN :: 
+  - job_grade_name varchar(30) NN :: 
+  - sort_order int NN def=0 :: 조직도 표시 순서 (TRM-036)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### role [org_auth] note=
+  - id int PK :: 
+  - role_code varchar(30) UK NN :: ROLE: SALES·PURCHASE·PRODUCTION·QUALITY·LOGISTICS·ADMIN
+  - role_name varchar(30) NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### role_permission [org_auth] note=
+  - id int PK :: 
+  - role_id int NN :: 
+  - permission varchar(50) NN :: PERMISSION
+  - permission_level varchar(10) NN :: PERMISSION_LEVEL: USE·VIEW. 권한 없으면 행 없음
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['role_id', 'permission'] 
+
+### employee [org_auth] note=
+  - id int PK :: 
+  - employee_no varchar(20) UK NN :: 로그인 ID (REQ-AUTH-001)
+  - employee_name varchar(50) NN :: 
+  - password_hash varchar(100) NN :: bcrypt. 응답에서 제외
+  - department_id int NN :: 
+  - job_grade_id int NN :: 
+  - role_id int NN :: 사원당 역할 1개 (TRM-037, BP-AUTH-01)
+  - is_active bool NN def=true :: 퇴사 처리. 삭제 없음
+  - last_login_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['department_id'] 
+  * idx ['job_grade_id'] 
+  * idx ['role_id'] 
+
+### steel_grade [master_data] note=
+  - id int PK :: 
+  - steel_grade_code varchar(20) UK NN :: STEEL_GRADE 시드: SS275, SM355A~D, SPHC
+  - steel_grade_name varchar(50) NN :: 
+  - standard_no varchar(30)  :: 적용 규격 번호 (TRM-113). 예: KS D 3515:2018. 밀시트 표시
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### item [master_data] note=원료·슬래브·코일 단일 테이블 (컨벤션 7-2). 유형별 필수 컬럼은 CHECK 제약으로 보장
+  - id int PK :: 
+  - item_code varchar(50) UK NN :: 원료: 원료 코드(ORE01) / 제품: 규격 코드(SL-SS275-250x1500x10000)
+  - item_name varchar(100) NN :: 
+  - item_type varchar(20) NN :: ITEM_TYPE: RAW_MATERIAL·SLAB·COIL
+  - unit_type varchar(10) NN :: UNIT_TYPE: QTY(제품)·TON(원료)
+  - raw_material_type varchar(20)  :: RAW_MATERIAL_TYPE. 원료만 필수 (CHECK)
+  - steel_grade_id int  :: 제품만 필수 (CHECK)
+  - thickness_mm decimal(8,2)  :: 제품만 필수
+  - width_mm decimal(8,2)  :: 제품만 필수
+  - length_mm decimal(10,2)  :: 제품만 필수. 코일도 길이 포함
+  - theoretical_weight_ton decimal(12,3)  :: 두께×폭×길이×7.85÷10^9. 사용 후 수정 불가 (REQ-MST-003)
+  - default_yard_id int NN :: LOT 생성 시 자동 지정 (REQ-MST-008)
+  - default_supplier_id int  :: 원료만. 품목별 기본 공급업체 1곳 (REQ-MST-007)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['item_type', 'steel_grade_id', 'thickness_mm', 'width_mm', 'length_mm'] 제품 규격 조합 중복 금지
+  * idx ['steel_grade_id'] 
+  * idx ['default_yard_id'] 
+  * idx ['default_supplier_id'] 
+
+### spec_mapping [master_data] note=열연 계획 수율 = 코일 1개 이론중량 ÷ 슬래브 1매 이론중량 (저장 안 함)
+  - id int PK :: 
+  - slab_item_id int UK NN :: 슬래브 규격당 코일 규격 1개
+  - coil_item_id int NN :: 코일 이론중량 ≤ 슬래브 이론중량 (service 검증)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['coil_item_id'] 
+
+### routing [master_data] note=
+  - id int PK :: 
+  - item_type varchar(20) NN :: SLAB·COIL
+  - process_type varchar(30) NN :: PROCESS_TYPE
+  - process_seq int NN :: 
+  - planned_yield_rate decimal(6,4)  :: 열연은 입력 안 함(매핑에서 계산)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['item_type', 'process_type'] 
+  * idx UNIQUE ['item_type', 'process_seq'] 
+
+### specific_consumption [master_data] note=
+  - id int PK :: 
+  - item_id int NN :: 원료 품목. 단위는 원료 유형으로 결정(합금철 kg/톤 용강, 그 외 톤/톤 용선)
+  - steel_grade_id int  :: 합금철만 강종별. 철광석·석탄·석회석은 NULL(공통)
+  - consumption_rate decimal(12,3) NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['item_id', 'steel_grade_id'] 
+  * idx ['steel_grade_id'] 
+
+### customer [master_data] note=
+  - id int PK :: 
+  - customer_code varchar(30) UK NN :: 
+  - customer_name varchar(100) NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### supplier [master_data] note=
+  - id int PK :: 
+  - supplier_code varchar(30) UK NN :: 
+  - supplier_name varchar(100) NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### yard [master_data] note=
+  - id int PK :: 
+  - yard_code varchar(30) UK NN :: 
+  - yard_name varchar(50) NN :: 
+  - yard_type varchar(20) NN :: YARD_TYPE. 위치 관리 없음
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### production_setting [master_data] note=단일 행
+  - id int PK :: 
+  - heat_capacity_ton decimal(12,3) NN def=250 :: 용강 기준 (REQ-MST-009)
+  - delivery_risk_days int NN def=3 :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### inspection_standard [master_data] note=검사 기준(버전). 제강 기준의 항목 = 강종 성분 규격 (REQ-MST-002, QC-002)
+  - id int PK :: 
+  - inspection_standard_code varchar(30) NN :: 예: QS-SM355A-HR
+  - version int NN :: 
+  - process_type varchar(30) NN :: STEELMAKING(성분)·CONTINUOUS_CASTING·HOT_ROLLING
+  - steel_grade_id int  :: 강종별 기준. 공통 기준이면 NULL
+  - is_current bool NN def=true :: 변경 시 새 버전 추가, 이전 버전 false
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['inspection_standard_code', 'version'] 
+  * idx ['steel_grade_id'] 
+
+### inspection_standard_item [master_data] note=
+  - id int PK :: 
+  - inspection_standard_id int NN :: 
+  - inspection_item_code varchar(50) NN :: 예: C, TENSILE_STRENGTH, CHARPY_IMPACT
+  - inspection_item_name varchar(50) NN :: 
+  - unit varchar(20)  :: 
+  - min_value decimal(12,4)  :: 경계 포함(이상) (REQ-QC-003)
+  - max_value decimal(12,4)  :: 경계 포함(이하)
+  - min_thickness_mm decimal(8,2)  :: 적용 두께 구간 하한(초과). 선택
+  - max_thickness_mm decimal(8,2)  :: 적용 두께 구간 상한(이하). 선택
+  - is_required bool NN def=true :: 
+  - sort_order int NN def=0 :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['inspection_standard_id'] 
+
+### sales_order [sales_inventory] note=헤더 상태는 저장하지 않고 품목 상태로 계산 (REQ-SO-005)
+  - id int PK :: 
+  - sales_order_no varchar(20) UK NN :: SO-YYMM-NNN
+  - customer_id int NN :: 
+  - owner_employee_id int NN :: 등록 담당자. 납기 위험 알림 대상 (REQ-AGT-004)
+  - cancelled_at timestamptz  :: 
+  - cancel_reason varchar(200)  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['customer_id'] 
+  * idx ['owner_employee_id'] 
+
+### sales_order_item [sales_inventory] note=
+  - id int PK :: 
+  - sales_order_id int NN :: 
+  - line_no int NN :: 
+  - item_id int NN :: 등록된 제품 규격만 (SLAB·COIL)
+  - ordered_qty int NN :: 매수. 톤은 저장 안 함 (REQ-SO-002)
+  - shipped_qty int NN def=0 :: 출고 확정 누계
+  - due_date date NN :: 납기일. 품목 단위 (REQ-AGT-004 "수주 품목의 납기일")
+  - sales_order_item_status varchar(20) NN def=OPEN :: SALES_ORDER_ITEM_STATUS
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['sales_order_id', 'line_no'] 
+  * idx ['item_id'] 
+
+### inventory [sales_inventory] note=CHECK (reserved_qty <= on_hand_qty). 조건부 update로 동시성 처리 (컨벤션 8장). 가용재고(available_qty, TRM-055)는 저장하지 않고 조회·API에서 계산값으로 제공
+  - id int PK :: 
+  - item_id int UK NN :: 제품(SLAB·COIL)만. 원료 재고는 LOT 잔량 합계
+  - on_hand_qty int NN def=0 :: 
+  - reserved_qty int NN def=0 :: = ACTIVE 예약 합계. 예약과 같은 트랜잭션에서 갱신
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### reservation [sales_inventory] note=
+  - id int PK :: 
+  - sales_order_item_id int NN :: 
+  - item_id int NN :: 
+  - reserved_qty int NN :: 
+  - reservation_status varchar(20) NN def=ACTIVE :: RESERVATION_STATUS. 부분 출고 시 ACTIVE·CONVERTED 행으로 분리
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['sales_order_item_id'] 
+  * idx ['item_id'] 
+
+### allocation [sales_inventory] note=확정 시 생성. 추천은 저장 안 함(작업 로그). 마이그레이션 SQL: UNIQUE (lot_id) WHERE allocation_status = 'CONFIRMED'
+  - id int PK :: 
+  - lot_id int NN :: 
+  - allocation_purpose varchar(20) NN :: ALLOCATION_PURPOSE: SHIPMENT·HOT_ROLLING
+  - sales_order_item_id int  :: SHIPMENT일 때
+  - shipment_request_item_id int  :: SHIPMENT일 때
+  - production_plan_id int  :: HOT_ROLLING일 때
+  - allocation_status varchar(20) NN def=CONFIRMED :: ALLOCATION_STATUS
+  - confirmed_employee_id int NN :: 
+  - confirmed_at timestamptz NN :: 
+  - consumed_at timestamptz  :: 
+  - released_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['lot_id'] 
+  * idx ['sales_order_item_id'] 
+  * idx ['shipment_request_item_id'] 
+  * idx ['production_plan_id'] 
+  * idx ['confirmed_employee_id'] 
+
+### production_plan [production_lot] note=
+  - id int PK :: 
+  - production_plan_no varchar(20) UK NN :: PP-YYMM-NNNN
+  - sales_order_item_id int  :: 수주 품목 귀속. 수주 취소 시 진행 중 계획은 NULL로 해제(이전 연결은 작업 로그 before_data에 남음)
+  - item_id int NN :: 생산 대상 제품 규격
+  - shortage_qty int NN :: 부족 매수 (TRM-041)
+  - cumulative_yield_rate decimal(6,4) NN :: 연주·열연 누적 계획수율 (편성 시점 값)
+  - required_steel_ton decimal(12,3) NN :: 필요 용강량 = 부족 매수 × 1매 중량 ÷ 누적 계획수율
+  - heat_count int NN :: ceil(필요 용강량 ÷ 히트 용량)
+  - production_plan_status varchar(20) NN def=PLANNED :: PRODUCTION_PLAN_STATUS
+  - is_reproduction bool NN def=false :: 재생산 계획 (REQ-PRD-006)
+  - is_surplus_on_completion bool NN def=false :: 수주 취소로 연결이 해제된 진행 중 계획. 완료 후 산출 슬래브를 여재로 표시 (BP-SO-02)
+  - created_employee_id int NN :: 
+  - cancelled_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['sales_order_item_id'] 
+  * idx ['item_id'] 
+  * idx ['created_employee_id'] 
+
+### production_result [production_lot] note=
+  - id int PK :: 
+  - production_plan_id int  :: 실적 시뮬레이션·작업자 등록 모두 계획 기준
+  - process_type varchar(30) NN :: PROCESS_TYPE
+  - blast_furnace_code varchar(10)  :: 제선만. 예: BF2
+  - converter_code varchar(10)  :: 제강만. 예: BOF1
+  - started_at timestamptz NN :: 작업 시작 (REQ-PRD-003)
+  - completed_at timestamptz  :: 작업 완료. NULL이면 진행 중(작업 상태값 없음)
+  - input_ton decimal(12,3)  :: 
+  - output_ton decimal(12,3)  :: 용선·히트
+  - output_qty int  :: 슬래브·코일 매수
+  - loss_qty int  :: 시뮬레이션 손실 매수(연주)
+  - sample_loss_rate decimal(6,4)  :: 실적 시뮬레이션 샘플 손실률(0~0.05). 실제 감소율은 loss_qty로 계산
+  - random_seed int  :: 실적 시뮬레이션 재현용 난수 시드
+  - is_simulated bool NN def=false :: REQ-PRD-007
+  - operator_employee_id int  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['production_plan_id'] 
+  * idx ['operator_employee_id'] 
+
+### lot [production_lot] note=원료·용선·히트·슬래브·코일 단일 테이블 (컨벤션 7-2)
+  - id int PK :: 
+  - lot_no varchar(40) UK NN :: REQ-LOT-003 채번
+  - lot_type varchar(20) NN :: LOT_TYPE
+  - lot_status varchar(20) NN def=AVAILABLE :: LOT_STATUS
+  - item_id int  :: 원료 LOT: 원료 품목 / 슬래브·코일: 규격. 용선·히트는 NULL
+  - steel_grade_id int  :: 히트·슬래브·코일
+  - heat_lot_id int  :: 슬래브·코일 → 상위 히트 (적격성 판정·추적 단축)
+  - initial_ton decimal(12,3)  :: 원료·용선·히트
+  - remaining_ton decimal(12,3)  :: 원료·용선 잔량. ≥ 0 (REQ-LOT-004)
+  - blast_furnace_code varchar(10)  :: 용선
+  - converter_code varchar(10)  :: 히트
+  - yard_id int  :: 품목 기본 야드 자동 지정
+  - goods_receipt_id int  :: 원료 LOT 생성 근거
+  - production_result_id int  :: 용선·히트·슬래브·코일 생성 근거
+  - production_plan_id int  :: 생산 귀속 계획
+  - is_passed bool  :: 검사 판정 결과. NULL = 미판정
+  - disposition_status varchar(20)  :: DISPOSITION_STATUS. 불합격 시 품질 담당 지정
+  - disposition_reason varchar(500)  :: 
+  - disposition_at timestamptz  :: 
+  - surplus_at timestamptz  :: 여재 전환 시각. 여재 장기 보유(REQ-AGT-004, P2) 기간 계산용
+  - produced_date date NN :: 생산완료일·원료 입고일. FIFO 기준. 동률은 lot_no 순
+  - consumed_at timestamptz  :: 
+  - shipped_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['lot_type', 'lot_status'] 
+  * idx ['item_id'] 
+  * idx ['steel_grade_id'] 
+  * idx ['heat_lot_id'] 
+  * idx ['yard_id'] 
+  * idx ['goods_receipt_id'] 
+  * idx ['production_result_id'] 
+  * idx ['production_plan_id'] 
+
+### lot_relation [production_lot] note=원료→용선(기간), 용선→히트(N:M), 합금철→히트(실제 투입), 히트→슬래브(1:N), 슬래브→코일(1:1). 연결 종류는 부모·자식 lot_type으로 판단
+  - id int PK :: 
+  - parent_lot_id int NN :: 
+  - child_lot_id int NN :: 
+  - lot_relation_evidence varchar(20) NN :: LOT_RELATION_EVIDENCE: PERIOD_BASED(원료→용선)·ACTUAL_INPUT
+  - input_ton decimal(12,3)  :: FIFO 차감량(원료·합금철·용선 투입)
+  - period_started_at timestamptz  :: PERIOD_BASED: 제선 실적 시작
+  - period_ended_at timestamptz  :: PERIOD_BASED: 제선 실적 종료
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['parent_lot_id', 'child_lot_id'] 
+  * idx ['child_lot_id'] 
+
+### purchase_requisition [purchasing] note=
+  - id int PK :: 
+  - purchase_requisition_no varchar(20) UK NN :: PR-YYMM-NNNN
+  - requester_id int NN :: 
+  - department_id int NN :: 요청 시점 요청자 소속 부서 (승인권자 판단)
+  - approver_id int  :: 승인·반려한 부서장
+  - purchase_requisition_status varchar(20) NN def=WAITING_APPROVAL :: PURCHASE_REQUISITION_STATUS. 임시 저장 없음
+  - desired_receipt_date date  :: 
+  - request_reason varchar(500)  :: 
+  - reject_reason varchar(500)  :: 
+  - action_draft_id int UK :: Message → ERP 초안으로 생성된 경우
+  - approved_at timestamptz  :: 
+  - rejected_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['requester_id'] 
+  * idx ['department_id'] 
+  * idx ['approver_id'] 
+
+### purchase_requisition_item [purchasing] note=
+  - id int PK :: 
+  - purchase_requisition_id int NN :: 
+  - line_no int NN :: 
+  - item_id int NN :: 원료 품목
+  - required_ton decimal(12,3) NN :: 
+  - production_plan_id int  :: MRP 근거 생산계획. 같은 계획의 구매요청 중복 생성 방지. 수주는 계획을 통해 조회
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['purchase_requisition_id', 'line_no'] 
+  * idx ['item_id'] 
+  * idx ['production_plan_id'] 
+
+### purchase_order [purchasing] note=
+  - id int PK :: 
+  - purchase_order_no varchar(20) UK NN :: PO-YYMM-NNNN
+  - supplier_id int NN :: 공급업체 1곳당 발주 1건 (REQ-PUR-003)
+  - purchase_order_status varchar(20) NN def=CONFIRMED :: PURCHASE_ORDER_STATUS
+  - due_date date  :: 입고 예정일
+  - ordered_employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['supplier_id'] 
+  * idx ['ordered_employee_id'] 
+
+### purchase_order_item [purchasing] note=
+  - id int PK :: 
+  - purchase_order_id int NN :: 
+  - line_no int NN :: 
+  - item_id int NN :: 
+  - purchase_requisition_item_id int NN :: 승인된 구매요청 품목만 발주
+  - ordered_ton decimal(12,3) NN :: 
+  - received_ton decimal(12,3) NN def=0 :: 입고 누계 ≤ 발주
+  - scheduled_receipt_ton decimal(12,3) NN def=0 :: 입고예정 = ordered_ton − received_ton. received_ton과 같은 트랜잭션에서 갱신. 마이그레이션 SQL: CHECK (scheduled_receipt_ton = ordered_ton - received_ton)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['purchase_order_id', 'line_no'] 
+  * idx ['item_id'] 
+  * idx ['purchase_requisition_item_id'] 
+
+### goods_receipt [purchasing] note=입고 1건 = 원료 LOT 1개 (lot.goods_receipt_id). 부분 입고 허용
+  - id int PK :: 
+  - goods_receipt_no varchar(20) UK NN :: GR-YYMM-NNNN
+  - purchase_order_item_id int NN :: 
+  - received_ton decimal(12,3) NN :: 
+  - receipt_date date NN :: 
+  - yard_id int NN :: 
+  - confirmed_employee_id int NN :: 
+  - confirmed_at timestamptz NN :: 확정 시 생성. 상태값 없음, 수정 불가
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['purchase_order_item_id'] 
+  * idx ['yard_id'] 
+  * idx ['confirmed_employee_id'] 
+
+### quality_inspection [quality_shipment] note=
+  - id int PK :: 
+  - lot_id int UK NN :: LOT당 1건 (TRM-074). 히트·슬래브·코일
+  - inspection_standard_id int NN :: 판정에 쓴 기준 버전
+  - process_type varchar(30) NN :: 
+  - inspection_result varchar(20) NN def=PENDING :: INSPECTION_RESULT. PENDING이면 같은 행 보완
+  - inspector_employee_id int  :: 
+  - inspected_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['inspection_standard_id'] 
+  * idx ['inspector_employee_id'] 
+
+### quality_inspection_value [quality_shipment] note=밀시트 발행 후 수정 불가 (REQ-QC-003)
+  - id int PK :: 
+  - quality_inspection_id int NN :: 
+  - inspection_standard_item_id int NN :: 
+  - measured_value decimal(12,4)  :: 
+  - is_passed bool  :: 항목 판정. NULL = 미입력
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['quality_inspection_id', 'inspection_standard_item_id'] 
+  * idx ['inspection_standard_item_id'] 
+
+### shipment_request [quality_shipment] note=
+  - id int PK :: 
+  - shipment_request_no varchar(20) UK NN :: DR-YYMM-NNNN
+  - customer_id int NN :: 같은 고객사 수주 품목만 묶음
+  - requested_ship_date date NN :: 
+  - shipment_request_status varchar(20) NN def=REQUESTED :: SHIPMENT_REQUEST_STATUS
+  - requester_id int NN :: 
+  - issued_at timestamptz  :: 출고 확정 시각 (출고 테이블 없음)
+  - issued_employee_id int  :: 출고 확정자
+  - cancelled_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['customer_id'] 
+  * idx ['requester_id'] 
+  * idx ['issued_employee_id'] 
+
+### shipment_request_item [quality_shipment] note=배정 대기 = CONFIRMED 배정 수 < request_qty (상태 컬럼 없음, REQ-INV-006)
+  - id int PK :: 
+  - shipment_request_id int NN :: 
+  - line_no int NN :: 
+  - sales_order_item_id int NN :: 
+  - request_qty int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['shipment_request_id', 'line_no'] 
+  * idx ['sales_order_item_id'] 
+
+### mill_sheet [quality_shipment] note=
+  - id int PK :: 
+  - mill_sheet_no varchar(30) UK NN :: MS-{출하요청 일련}-N, 수주별 순번
+  - shipment_request_id int NN :: 
+  - sales_order_id int NN :: 
+  - issued_at timestamptz NN :: 
+  - snapshot jsonb NN :: 발행 시점 고객사·수주·규격·LOT·히트·이론중량·검사값 (REQ-SHP-003)
+  - pdf_path varchar(300)  :: Storage 경로. NULL = 미생성
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['shipment_request_id', 'sales_order_id'] 
+  * idx ['sales_order_id'] 
+
+### business_event [log_collab] note=본 거래와 같은 트랜잭션에서 저장. 수정·삭제 없음
+  - id int PK :: 
+  - event_no varchar(20) UK NN :: EV-YYMMDD-NNN
+  - business_event_type varchar(50) NN :: BUSINESS_EVENT_TYPE
+  - actor_type varchar(10) NN :: ACTOR_TYPE: USER·SYSTEM
+  - actor_employee_id int  :: USER일 때
+  - target_type varchar(30) NN :: TBD(공통코드 미등록): 대상 테이블명(용어 사전 DB명, 예: sales_order, lot, shipment_request). 공통코드 그룹은 추후 등록
+  - target_id int NN :: 
+  - target_no varchar(40)  :: 업무번호·LOT 번호 표시용
+  - sales_order_id int  :: 수주 타임라인 (REQ-LOG-003)
+  - before_data jsonb  :: 
+  - after_data jsonb  :: 
+  - reason_code varchar(50)  :: 업무 프로세스 9.3 제안값만 사용: STOCK_FIRST, FIFO_RECOMMENDATION, ORDER_SHORTAGE, ORDER_CANCELLED, QUALITY_FAILURE, SURPLUS_CONVERSION, ALLOCATION_CHANGE, DRAFT_CONFIRMED. 공통코드는 추후 등록
+  - reason_text varchar(500)  :: 
+  - is_ai_assisted bool NN def=false :: AI 경유 (REQ-AST-010, P2)
+  - action_draft_id int  :: 
+  - message_id int  :: 
+  - occurred_at timestamptz NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['sales_order_id', 'occurred_at'] 
+  * idx ['target_type', 'target_id'] 
+  * idx ['actor_employee_id'] 
+  * idx ['action_draft_id'] 
+  * idx ['message_id'] 
+
+### business_event_lot [log_collab] note=LOT 타임라인용. 이벤트 1건이 여러 LOT에 걸칠 때(출고 확정 등)
+  - id int PK :: 
+  - business_event_id int NN :: 
+  - lot_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['business_event_id', 'lot_id'] 
+  * idx ['lot_id'] 
+
+### task [log_collab] note=
+  - id int PK :: 
+  - title varchar(200) NN :: 
+  - description text  :: 
+  - assignee_id int NN :: 
+  - creator_id int NN :: 
+  - due_date date  :: 
+  - task_status varchar(10) NN def=OPEN :: TASK_STATUS: OPEN·DONE
+  - link_path varchar(300)  :: 연결 ERP 화면
+  - completed_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['assignee_id', 'task_status'] 
+  * idx ['creator_id'] 
+
+### notification [log_collab] note=
+  - id int PK :: 
+  - recipient_id int NN :: 부서 발송은 부서원 수만큼 행 생성
+  - department_id int  :: 부서 단위 발송일 때 대상 부서
+  - business_event_id int  :: 알림을 만든 작업 로그. 마이그레이션 SQL: UNIQUE (business_event_id, recipient_id) WHERE business_event_id IS NOT NULL
+  - notification_type varchar(30) NN :: NOTIFICATION_TYPE
+  - title varchar(200) NN :: 
+  - body varchar(1000)  :: 
+  - link_path varchar(300)  :: 
+  - is_read bool NN def=false :: 
+  - read_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['recipient_id', 'is_read'] 
+  * idx ['department_id'] 
+  * idx ['business_event_id'] 
+
+### chat_room [log_collab] note=
+  - id int PK :: 
+  - chat_room_type varchar(10) NN :: CHAT_ROOM_TYPE: DIRECT·GROUP·WORK
+  - chat_room_name varchar(100)  :: 
+  - sales_order_id int  :: 업무방(WORK)만. 수주당 1개
+  - created_employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['sales_order_id'] 마이그레이션 SQL: WHERE chat_room_type = 'WORK' 부분 unique로 대체 가능
+  * idx ['created_employee_id'] 
+
+### chat_room_member [log_collab] note=
+  - id int PK :: 
+  - chat_room_id int NN :: 
+  - employee_id int NN :: 
+  - last_read_message_id int  :: 안 읽은 수 계산 (REQ-MSG-004)
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['chat_room_id', 'employee_id'] 
+  * idx ['employee_id'] 
+  * idx ['last_read_message_id'] 
+
+### message [log_collab] note=
+  - id int PK :: 
+  - chat_room_id int NN :: 
+  - sender_id int NN :: 
+  - content text  :: 파일만 보낼 때 NULL 가능
+  - file_name varchar(255)  :: 첨부. 메시지당 1파일, 유형 코드 없음
+  - file_path varchar(300)  :: Storage 경로
+  - file_size int  :: 
+  - mime_type varchar(100)  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['chat_room_id', 'id'] 
+  * idx ['sender_id'] 
+
+### action_draft [log_collab] note=실행 결과는 대상 테이블의 action_draft_id로 연결 (P1: purchase_requisition)
+  - id int PK :: 
+  - action_type varchar(50) NN :: ACTION_TYPE. P1은 PURCHASE_REQUISITION_CREATE
+  - draft_status varchar(20) NN def=AI_GENERATED :: DRAFT_STATUS
+  - payload jsonb NN :: 추출 스키마 값. 미확정 필드 포함
+  - requester_id int NN :: 확정 주체(요청자)
+  - message_id int  :: 원본 메시지 (REQ-ACT-001)
+  - execution_result jsonb  :: 실행 실패 시 에러 코드·시도 횟수
+  - reject_reason varchar(500)  :: 
+  - confirmed_at timestamptz  :: 
+  - executed_at timestamptz  :: 
+  - rejected_at timestamptz  :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['requester_id', 'draft_status'] 
+  * idx ['message_id'] 
+
+### number_sequence [system_support] note=업무번호·LOT 채번 카운터 (업무 프로세스 9.2 구현 제안)
+  - id int PK :: 
+  - sequence_key varchar(50) UK NN :: 예: SO-2610, HT-BOF1-261001, RM-ORE01-261001
+  - last_value int NN def=0 :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+
+### idempotency_key [system_support] note=요청 고유키 중복 방지 (업무 프로세스 13장 claimRequestId)
+  - id int PK :: 
+  - request_key varchar(100) UK NN :: 
+  - employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['employee_id'] 
+
+### meeting_minutes [p2_ex_placeholder] note=P2 Voice2ERP (REQ-VOC-002). 할 일은 task, 구매요청은 action_draft로 연결
+  - id int PK :: 
+  - meeting_date date NN :: 
+  - title varchar(200) NN :: 
+  - transcript text  :: STT 전체 기록
+  - summary text  :: AI 요약·결정사항
+  - created_employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['created_employee_id'] 
+
+### meeting_attendee [p2_ex_placeholder] note=P2
+  - id int PK :: 
+  - meeting_minutes_id int NN :: 
+  - employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['meeting_minutes_id', 'employee_id'] 
+  * idx ['employee_id'] 
+
+### past_case [p2_ex_placeholder] note=EX (REQ-CASE-001). 한국어 ngram 전문검색 인덱스는 구현 시
+  - id int PK :: 
+  - case_no varchar(20) UK NN :: TBD: 번호 형식 미정
+  - case_category varchar(20) NN :: CASE_CATEGORY 🟡: QUALITY·EQUIPMENT
+  - title varchar(200) NN :: 
+  - phenomenon text NN :: 
+  - cause text  :: 
+  - action_taken text  :: 
+  - equipment_text varchar(200)  :: 설비 마스터 없이 텍스트
+  - occurred_date date NN :: 
+  - created_employee_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx ['created_employee_id'] 
+
+### past_case_lot [p2_ex_placeholder] note=EX
+  - id int PK :: 
+  - past_case_id int NN :: 
+  - lot_id int NN :: 
+  - created_at timestamptz NN def=now() :: 
+  - updated_at timestamptz NN def=now() :: 
+  * idx UNIQUE ['past_case_id', 'lot_id'] 
+  * idx ['lot_id'] 
+
+## refs
+  department.parent_id(*) -- department.id(1)
+  department.head_employee_id(*) -- employee.id(1)
+  role_permission.role_id(*) -- role.id(1)
+  employee.department_id(*) -- department.id(1)
+  employee.job_grade_id(*) -- job_grade.id(1)
+  employee.role_id(*) -- role.id(1)
+  item.steel_grade_id(*) -- steel_grade.id(1)
+  item.default_yard_id(*) -- yard.id(1)
+  item.default_supplier_id(*) -- supplier.id(1)
+  spec_mapping.slab_item_id(1) -- item.id(1)
+  spec_mapping.coil_item_id(*) -- item.id(1)
+  specific_consumption.item_id(*) -- item.id(1)
+  specific_consumption.steel_grade_id(*) -- steel_grade.id(1)
+  inspection_standard.steel_grade_id(*) -- steel_grade.id(1)
+  inspection_standard_item.inspection_standard_id(*) -- inspection_standard.id(1)
+  sales_order.customer_id(*) -- customer.id(1)
+  sales_order.owner_employee_id(*) -- employee.id(1)
+  sales_order_item.sales_order_id(*) -- sales_order.id(1)
+  sales_order_item.item_id(*) -- item.id(1)
+  inventory.item_id(1) -- item.id(1)
+  reservation.sales_order_item_id(*) -- sales_order_item.id(1)
+  reservation.item_id(*) -- item.id(1)
+  allocation.lot_id(*) -- lot.id(1)
+  allocation.sales_order_item_id(*) -- sales_order_item.id(1)
+  allocation.shipment_request_item_id(*) -- shipment_request_item.id(1)
+  allocation.production_plan_id(*) -- production_plan.id(1)
+  allocation.confirmed_employee_id(*) -- employee.id(1)
+  production_plan.sales_order_item_id(*) -- sales_order_item.id(1)
+  production_plan.item_id(*) -- item.id(1)
+  production_plan.created_employee_id(*) -- employee.id(1)
+  production_result.production_plan_id(*) -- production_plan.id(1)
+  production_result.operator_employee_id(*) -- employee.id(1)
+  lot.item_id(*) -- item.id(1)
+  lot.steel_grade_id(*) -- steel_grade.id(1)
+  lot.heat_lot_id(*) -- lot.id(1)
+  lot.yard_id(*) -- yard.id(1)
+  lot.goods_receipt_id(*) -- goods_receipt.id(1)
+  lot.production_result_id(*) -- production_result.id(1)
+  lot.production_plan_id(*) -- production_plan.id(1)
+  lot_relation.parent_lot_id(*) -- lot.id(1)
+  lot_relation.child_lot_id(*) -- lot.id(1)
+  purchase_requisition.requester_id(*) -- employee.id(1)
+  purchase_requisition.department_id(*) -- department.id(1)
+  purchase_requisition.approver_id(*) -- employee.id(1)
+  purchase_requisition.action_draft_id(1) -- action_draft.id(1)
+  purchase_requisition_item.purchase_requisition_id(*) -- purchase_requisition.id(1)
+  purchase_requisition_item.item_id(*) -- item.id(1)
+  purchase_requisition_item.production_plan_id(*) -- production_plan.id(1)
+  purchase_order.supplier_id(*) -- supplier.id(1)
+  purchase_order.ordered_employee_id(*) -- employee.id(1)
+  purchase_order_item.purchase_order_id(*) -- purchase_order.id(1)
+  purchase_order_item.item_id(*) -- item.id(1)
+  purchase_order_item.purchase_requisition_item_id(*) -- purchase_requisition_item.id(1)
+  goods_receipt.purchase_order_item_id(*) -- purchase_order_item.id(1)
+  goods_receipt.yard_id(*) -- yard.id(1)
+  goods_receipt.confirmed_employee_id(*) -- employee.id(1)
+  quality_inspection.lot_id(1) -- lot.id(1)
+  quality_inspection.inspection_standard_id(*) -- inspection_standard.id(1)
+  quality_inspection.inspector_employee_id(*) -- employee.id(1)
+  quality_inspection_value.quality_inspection_id(*) -- quality_inspection.id(1)
+  quality_inspection_value.inspection_standard_item_id(*) -- inspection_standard_item.id(1)
+  shipment_request.customer_id(*) -- customer.id(1)
+  shipment_request.requester_id(*) -- employee.id(1)
+  shipment_request.issued_employee_id(*) -- employee.id(1)
+  shipment_request_item.shipment_request_id(*) -- shipment_request.id(1)
+  shipment_request_item.sales_order_item_id(*) -- sales_order_item.id(1)
+  mill_sheet.shipment_request_id(*) -- shipment_request.id(1)
+  mill_sheet.sales_order_id(*) -- sales_order.id(1)
+  business_event.actor_employee_id(*) -- employee.id(1)
+  business_event.sales_order_id(*) -- sales_order.id(1)
+  business_event.action_draft_id(*) -- action_draft.id(1)
+  business_event.message_id(*) -- message.id(1)
+  business_event_lot.business_event_id(*) -- business_event.id(1)
+  business_event_lot.lot_id(*) -- lot.id(1)
+  task.assignee_id(*) -- employee.id(1)
+  task.creator_id(*) -- employee.id(1)
+  notification.recipient_id(*) -- employee.id(1)
+  notification.department_id(*) -- department.id(1)
+  notification.business_event_id(*) -- business_event.id(1)
+  chat_room.sales_order_id(*) -- sales_order.id(1)
+  chat_room.created_employee_id(*) -- employee.id(1)
+  chat_room_member.chat_room_id(*) -- chat_room.id(1)
+  chat_room_member.employee_id(*) -- employee.id(1)
+  chat_room_member.last_read_message_id(*) -- message.id(1)
+  message.chat_room_id(*) -- chat_room.id(1)
+  message.sender_id(*) -- employee.id(1)
+  action_draft.requester_id(*) -- employee.id(1)
+  action_draft.message_id(*) -- message.id(1)
+  idempotency_key.employee_id(*) -- employee.id(1)
+  meeting_minutes.created_employee_id(*) -- employee.id(1)
+  meeting_attendee.meeting_minutes_id(*) -- meeting_minutes.id(1)
+  meeting_attendee.employee_id(*) -- employee.id(1)
+  past_case.created_employee_id(*) -- employee.id(1)
+  past_case_lot.past_case_id(*) -- past_case.id(1)
+  past_case_lot.lot_id(*) -- lot.id(1)

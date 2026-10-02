@@ -1,6 +1,0 @@
-/* AI Factory Agent (준비 중 · P2) — 목록|상세 두 칸을 한 화면 안에 그린다. */
-.agent-split { display: flex; flex: 1; min-height: 640px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; }
-.agent-split > .hl-master { flex: none; }
-.agent-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; background: var(--bg, #F3F5F7); }
-.agent-chips { display: flex; gap: 3px; flex-wrap: wrap; }
-.agent-chips .hl-chip { height: 26px; padding: 0 7px; font-size: 11.5px; gap: 4px; }

@@ -1,105 +1,124 @@
-// 수주 충족 현황 (REQ-DSH-001): 진행 중 수주의 품목별 예약·생산 중·출하 매수와 진행률(출하 ÷ 주문).
-import { Link } from 'react-router';
-import type { OrderFulfillmentItem, OrderFulfillmentWidget as Data } from '@/api/dashboard';
-import { EmptyNote, Icon } from '@/components/ui';
-import { fmtMD, fmtTon } from '@/lib/format';
-import { dueLabel, pctW, rateText } from '@/features/dashboard/parts';
+// 수주 충족 현황 (REQ-DSH-001, TRM-042, REQ-SO-004): 진행 중 수주 품목의 생산중·검사합격·예약·출하 매수와 진행률.
+// 단계는 서로 다른 단계라 더해서 "충족 매수"로 보이지 않는다(4.5). 막대는 출하 | 예약(검사합격 중 미출하) | 생산중을 수주 매수 대비 길이로만 나란히 둔다.
+import Link from 'next/link';
+import type { FulfillmentItemRow, OrderFulfillmentData } from '@/api/dashboard';
+import { RESERVATION_STATUS_LABEL } from '@/codes';
+import { Icon } from '@/components/Icon';
+import { Table, Td, Th } from '@/components/Table';
+import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { dueLabel } from '@/features/dashboard/lib/widgetMath';
+import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
+import { fmtMD, fmtPct, fmtTon } from '@/lib/format';
+import { cn } from '@/lib/cn';
 
-const COLOR = { shipped: '#5E6977', reserved: '#23507F', inProduction: '#1F5FCC' } as const;
+const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0}%`;
 
-// 기본 크기(카드 본문 ≈650px)에서 진행률·납기까지 가로 스크롤 없이 보이게: 열 너비를 고정(px)하고 칸 여백을 줄인다.
-// 품목(undefined)만 남는 폭을 받아 말줄임(…) + title. 더 작게 줄이면 표 최소 폭부터 카드 안에서 가로 스크롤.
-const COL_W = [128, 76, undefined, 38, 38, 38, 48, 84, 72]; // 수주번호·고객사·품목·주문·출하·예약·생산 중·진행률·납기
-const TABLE_MIN_W = COL_W.reduce<number>((a, w) => a + (w ?? 100), 0);
-const PAD = { paddingInline: 4 } as const;
-
-/** 출하·예약·생산 중은 서로 다른 단계라 합쳐서 숫자로 쓰지 않고, 주문 매수 대비 길이로만 나란히 보여준다. */
-function StageBar({ it }: { it: OrderFulfillmentItem }) {
-  const whole = Math.max(it.orderedQty, it.shippedQty + it.reservedQty + it.inProductionQty);
-  const seg = (qty: number, color: string, label: string) =>
-    qty > 0 ? <span style={{ width: pctW(qty, whole), background: color }} title={`${label} ${qty}`} /> : null;
+function StageBar({ item }: { item: FulfillmentItemRow }) {
+  const whole = Math.max(item.orderedQty, item.shippedQty + item.reservedQty + item.inProductionQty);
+  const seg = (qty: number, colorClass: string, label: string) => (qty > 0 ? <span className={colorClass} style={{ width: pct(qty, whole) }} title={`${label} ${qty}`} /> : null);
   return (
-    <div className="hl-progress-cell" style={{ gap: 6 }}>
-      <div className="hl-bar-track" style={{ flex: 1, height: 12, minWidth: 30 }}>
-        {seg(it.shippedQty, COLOR.shipped, '출하')}
-        {seg(it.reservedQty, COLOR.reserved, '예약')}
-        {seg(it.inProductionQty, COLOR.inProduction, '생산 중')}
+    <div className="flex items-center gap-1.5">
+      <div className="flex h-3 min-w-10 flex-1 overflow-hidden rounded-xs bg-surface-3">
+        {seg(item.shippedQty, 'bg-ink-3', '출하')}
+        {seg(item.reservedQty, 'bg-chart-1', '예약')}
+        {seg(item.inProductionQty, 'bg-run', '생산중')}
       </div>
-      <b className="tnum">{rateText(it.progressRate)}</b>
+      <b className="w-9 text-right text-xs font-semibold tabular-nums">{fmtPct(item.shippedRatio)}</b>
     </div>
   );
 }
 
-export function OrderFulfillmentWidget({ data }: { data: Data }) {
-  const d = data.definitions;
+function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
+  if (data.salesOrders.length === 0) return <WidgetEmpty>진행 중인 수주가 없어요</WidgetEmpty>;
   return (
     <>
-      <div className="hl-card__body hl-card__body--flush">
-        <table className="hl-table hl-table--compact" style={{ tableLayout: 'fixed', minWidth: TABLE_MIN_W }}>
-          <colgroup>{COL_W.map((w, i) => <col key={i} style={w ? { width: w } : undefined} />)}</colgroup>
+      <div className="min-h-0 flex-1">
+        <Table compact className="min-w-[700px] [&_td]:px-1.5 [&_th]:sticky [&_th]:top-0 [&_th]:z-[1] [&_th]:px-1.5">
           <thead>
             <tr>
-              <th style={PAD}>수주번호</th>
-              <th style={PAD}>고객사</th>
-              <th style={PAD}>품목</th>
-              <th className="num" style={PAD}>주문</th>
-              <th className="num" style={PAD}>출하</th>
-              <th className="num" style={PAD} title={d.reservedQty}>예약</th>
-              <th className="num" style={PAD} title={d.inProductionQty}>생산 중</th>
-              <th style={PAD} title={d.progressRate}>진행률</th>
-              <th style={PAD}>납기</th>
+              <Th>수주 번호</Th>
+              <Th>고객사</Th>
+              <Th>품목</Th>
+              <Th align="right">수주</Th>
+              <Th align="right" title="진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)">
+                생산중
+              </Th>
+              <Th align="right" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 + 출하 (분모: 수주 매수)`}>
+                검사합격
+              </Th>
+              <Th align="right" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 (분모: 미출하 매수)`}>
+                예약
+              </Th>
+              <Th align="right">출하</Th>
+              <Th className="w-28" title="출하 ÷ 수주 매수">
+                진행률
+              </Th>
+              <Th>납기</Th>
             </tr>
           </thead>
           <tbody>
-            {data.salesOrders.map((o) => {
-              const n = Math.max(1, o.items.length);
-              const top = n > 1 ? ({ ...PAD, verticalAlign: 'top', paddingTop: 7 } as const) : PAD;
-              const due = <>{fmtMD(o.dueDate)} <span style={{ whiteSpace: 'nowrap' }}>({dueLabel(o.daysToDue)})</span></>; // 좁으면 날짜 / (D-n) 두 줄로
-              const head = (
-                <>
-                  <td rowSpan={n} style={top}><Link className="hl-link-id" to={o.linkPath}>{o.salesOrderNo}</Link></td>
-                  <td rowSpan={n} style={top}><span className="dsh-clip" title={o.customerName}>{o.customerName}</span></td>
-                </>
-              );
-              const tail = (
-                <td rowSpan={n} className={o.isDeliveryRisk ? undefined : 'tnum'} style={{ ...top, whiteSpace: 'normal', lineHeight: '15px' }}>
-                  {o.isDeliveryRisk ? <span className="hl-risk" title={`납기 ${data.deliveryRiskDays}일 이내 · 출하 남음`}><Icon name="alert" size="sm" /><span>{due}</span></span> : due}
-                </td>
-              );
-              if (!o.items.length) {
-                return (
-                  <tr key={o.salesOrderId} className={o.isDeliveryRisk ? 'is-risk' : undefined}>
-                    {head}
-                    <td colSpan={6} className="hl-muted" style={PAD}>품목 없음</td>
-                    {tail}
-                  </tr>
-                );
-              }
-              return o.items.map((it, i) => (
-                <tr key={it.salesOrderItemId} className={o.isDeliveryRisk ? 'is-risk' : undefined}>
-                  {i === 0 ? head : null}
-                  <td style={i > 0 ? { ...PAD, borderLeft: '1px solid var(--line)' } : PAD}><span className="mono dsh-clip" title={it.specCode}>{it.specCode}</span></td>
-                  <td className="num" style={PAD} title={fmtTon(it.orderedTon)}><span className="hl-sheets">{it.orderedQty}</span></td>
-                  <td className="num" style={PAD}>{it.shippedQty}</td>
-                  <td className="num" style={PAD}>{it.reservedQty}</td>
-                  <td className="num" style={PAD}>{it.inProductionQty}</td>
-                  <td style={PAD}><StageBar it={it} /></td>
-                  {i === 0 ? tail : null}
+            {data.salesOrders.map((so) =>
+              so.items.map((item, index) => (
+                <tr key={item.salesOrderItemId} data-risk={item.isDueRisk || undefined}>
+                  {index === 0 ? (
+                    <>
+                      <Td rowSpan={so.items.length} className="align-top font-mono text-xs font-medium">
+                        <Link href={`/sales-orders/${so.salesOrderId}`} className="text-run hover:underline">
+                          {so.salesOrderNo}
+                        </Link>
+                      </Td>
+                      <Td rowSpan={so.items.length} className="max-w-24 truncate align-top" title={so.customerName}>
+                        {so.customerName}
+                      </Td>
+                    </>
+                  ) : null}
+                  <Td className={cn('max-w-44 truncate font-mono text-xs', index > 0 && 'border-l border-line')} title={item.itemCode}>
+                    {item.itemCode}
+                  </Td>
+                  <Td align="right" title={fmtTon(item.orderedTon)}>
+                    {item.orderedQty}
+                  </Td>
+                  <Td align="right">{item.inProductionQty}</Td>
+                  <Td align="right">{item.passedQty}</Td>
+                  <Td align="right" title={`미출하 ${item.unshippedQty}`}>
+                    {item.reservedQty}
+                  </Td>
+                  <Td align="right">{item.shippedQty}</Td>
+                  <Td>
+                    <StageBar item={item} />
+                  </Td>
+                  <Td className={cn('tabular-nums', item.isDueRisk && 'font-semibold text-danger')} title={item.isDueRisk ? `납기 ${data.deliveryRiskDays}일 이내 · 출하 남음` : undefined}>
+                    <span className="inline-flex items-center gap-1">
+                      {item.isDueRisk ? <Icon name="alert" size="sm" /> : null}
+                      {fmtMD(item.dueDate)} ({dueLabel(item.daysToDue)})
+                    </span>
+                  </Td>
                 </tr>
-              ));
-            })}
-            {!data.salesOrders.length ? <tr><td colSpan={9}><EmptyNote>진행 중인 수주가 없어요</EmptyNote></td></tr> : null}
+              )),
+            )}
           </tbody>
-        </table>
+        </Table>
       </div>
-      <div className="hl-card__foot dsh-foot" title={d.note}>
-        <div className="hl-legend">
-          <span><i style={{ background: COLOR.shipped }} />출하</span>
-          <span><i style={{ background: COLOR.reserved }} />예약</span>
-          <span><i style={{ background: COLOR.inProduction }} />생산 중</span>
-        </div>
-        <span className="hl-cap dsh-clip" title={d.progressRate}>진행률 = {d.progressRate}</span>
-      </div>
+      <footer className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-t border-line bg-surface-2 px-4 py-1.5">
+        <LegendItem colorClass="bg-ink-3" label="출하" />
+        <LegendItem colorClass="bg-chart-1" label="예약" />
+        <LegendItem colorClass="bg-run" label="생산중" />
+        <span className="ml-auto truncate text-cap text-ink-3" title="검사합격 = 예약 + 출하 · 예약의 분모 = 미출하 매수 · 단계를 더해 충족 매수로 보지 않아요">
+          진행률 = 출하 ÷ 수주 매수 · 검사합격 = 예약 + 출하
+        </span>
+      </footer>
     </>
+  );
+}
+
+export function OrderFulfillmentWidget(props: WidgetProps) {
+  const access = useDashboardWidgetAccess('ORDER_FULFILLMENT');
+  const query = useDashboardWidget('ORDER_FULFILLMENT', access.allowed);
+  return (
+    <WidgetFrame widgetKey="ORDER_FULFILLMENT" {...props} meta={query.data ? `${query.data.salesOrders.length}건 · 납기 빠른 순` : null}>
+      <WidgetBody allowed={access.allowed} permissions={access.permissions} query={query}>
+        {(data) => <FulfillmentBody data={data} />}
+      </WidgetBody>
+    </WidgetFrame>
   );
 }

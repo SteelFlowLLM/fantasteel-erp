@@ -1,61 +1,58 @@
-// 위젯 격자 (SPEC 5-3): 12칸 격자에 위젯 카드를 놓는다. 편집 중에는 카드 머리를 끌어 옮기고, 모서리·변을 끌어 크기를 바꾼다.
+// 위젯 격자 (SPEC 4장 3번): 12칸 격자. 편집 중에는 카드 머리를 끌어 옮기고, 오른쪽 아래·오른쪽·아래 변을 끌어 크기를 바꾼다.
+// 위젯마다 최소 크기가 있고, 빈 줄은 위로 당겨 정리한다.
 import { useMemo } from 'react';
-import ReactGridLayout, { useContainerWidth, verticalCompactor, type Layout, type LayoutItem } from 'react-grid-layout';
+import ReactGridLayout, { useContainerWidth, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
-import type { WidgetCode, WidgetPlacement } from '@fantasteel/shared';
-import { WidgetCard } from './WidgetCard';
-import { GRID_COLS, GRID_GAP, GRID_ROW_HEIGHT, WIDGET_UI, samePlacements, widgetDef } from './widgetCatalog';
-
-const toLayout = (placements: readonly WidgetPlacement[]): LayoutItem[] =>
-  placements.map((p) => {
-    const ui = WIDGET_UI[p.widgetCode];
-    // 저장된 크기가 최소 크기보다 작으면 저장된 크기를 그대로 둔다 (최소 크기는 늘리고 줄일 때만 적용)
-    return { i: p.widgetCode, x: p.x, y: p.y, w: p.w, h: p.h, minW: Math.min(ui.minW, p.w), minH: Math.min(ui.minH, p.h) };
-  });
-
-const toPlacements = (layout: Layout): WidgetPlacement[] =>
-  layout.map((l) => ({ widgetCode: l.i as WidgetCode, x: l.x, y: l.y, w: l.w, h: l.h }));
-
-/** 격자가 화면에 놓는 모양(빈 줄을 위로 당긴 배치). 저장값과 비교할 때 쓴다. */
-export function compactPlacements(placements: readonly WidgetPlacement[]): WidgetPlacement[] {
-  return toPlacements(verticalCompactor.compact(toLayout(placements), GRID_COLS));
-}
+import type { DashboardWidgetKey } from '@/api/dashboard';
+import { DRAG_HANDLE_CLASS, NO_DRAG_CLASS } from '@/features/dashboard/components/WidgetFrame';
+import { fromLayoutItems, GRID_COLS, GRID_GAP, GRID_ROW_HEIGHT, samePlacements, toLayoutItems, type WidgetPlacement } from '@/features/dashboard/lib/layout';
+import { WIDGET_COMPONENTS } from '@/features/dashboard/widgets/widgetRegistry';
+import { cn } from '@/lib/cn';
 
 interface Props {
   placements: readonly WidgetPlacement[];
   editing: boolean;
   /** 편집 중 끌기·크기 조절·자동 정리로 배치가 바뀌었을 때 */
   onChange: (next: WidgetPlacement[]) => void;
-  onRemove: (code: WidgetCode) => void;
+  onRemove: (key: DashboardWidgetKey) => void;
 }
 
 export function DashboardGrid({ placements, editing, onChange, onRemove }: Props) {
   const { width, containerRef, mounted } = useContainerWidth();
-  // shared에 없는 코드(옛 저장값)는 그리지 않는다
-  const known = useMemo(() => placements.filter((p) => !!widgetDef(p.widgetCode)), [placements]);
-  const layout = useMemo(() => toLayout(known), [known]);
+  const layout = useMemo(() => toLayoutItems(placements), [placements]);
 
   return (
-    <div ref={containerRef} className={`app-grid dsh-grid${editing ? ' is-editing' : ''}`}>
+    <div
+      ref={containerRef}
+      className={cn(
+        'min-w-0 flex-none pb-2',
+        // 끄는 중인 카드 강조, 편집 중에는 크기 조절 손잡이를 늘 보인다
+        '[&_.react-grid-item.react-draggable-dragging>section]:shadow-pop [&_.react-grid-placeholder]:rounded-md [&_.react-grid-placeholder]:bg-run/20',
+        editing && '[&_.react-resizable-handle]:z-[2] [&_.react-resizable-handle]:opacity-100 [&_.react-resizable-handle::after]:border-run',
+      )}
+    >
       {mounted ? (
         <ReactGridLayout
           width={width}
           layout={layout}
           gridConfig={{ cols: GRID_COLS, rowHeight: GRID_ROW_HEIGHT, margin: [GRID_GAP, GRID_GAP], containerPadding: [0, 0] }}
-          dragConfig={{ enabled: editing, handle: '.dsh-card__head', cancel: '.dsh-nodrag' }}
+          dragConfig={{ enabled: editing, handle: `.${DRAG_HANDLE_CLASS}`, cancel: `.${NO_DRAG_CLASS}` }}
           resizeConfig={{ enabled: editing, handles: ['se', 'e', 's'] }}
           compactor={verticalCompactor}
           onLayoutChange={(next) => {
             if (!editing) return;
-            const moved = toPlacements(next);
-            if (!samePlacements(moved, known)) onChange(moved);
+            const moved = fromLayoutItems(next);
+            if (!samePlacements(moved, placements)) onChange(moved);
           }}
         >
-          {known.map((p) => (
-            <div key={p.widgetCode}>
-              <WidgetCard code={p.widgetCode} editing={editing} onRemove={onRemove} />
-            </div>
-          ))}
+          {placements.map((p) => {
+            const Widget = WIDGET_COMPONENTS[p.key];
+            return (
+              <div key={p.key}>
+                <Widget editing={editing} onRemove={onRemove} />
+              </div>
+            );
+          })}
         </ReactGridLayout>
       ) : null}
     </div>

@@ -1,0 +1,110 @@
+# 준비 중 화면 — AI Factory Agent · 회의록 · 과거 사례 검색 · AI 어시스턴트 패널 (6단계 2번)
+
+- 2026-10-01, 병렬 작업 worktree. 근거: stage6.md 2번, reports/6 A-1·A-5와 C절, PLAN 7장(협업·대시보드·P2/EX), 요구사항 REQ-AGT·VOC·AST·CASE, 업무 프로세스 7장(BP-AGT-01·BP-VOC-01·BP-AST-01·BP-CASE-01), 용어 사전 TRM-093~108, ERD meeting_minutes·meeting_attendee·past_case·past_case_lot.
+- 모두 P2·EX라 **디자인만** 있다. 고정 예시 내용을 `ComingSoonArea`(안내 띠 + 흐린·조작 불가 본문)와 `SoonButton`으로 보인다. API 함수·조회·저장·작업 로그 기록은 없다(데이터 변경 없음).
+
+## 1. 화면
+
+| 경로 | 화면 | 파일 | 요구사항 |
+|---|---|---|---|
+| `/agent` | AI Factory Agent (P2) | `features/agent/AgentScreen.tsx`, 예시 `agentExample.ts` | REQ-AGT-001~006, BP-AGT-01 |
+| `/meetings` | 회의록 (Voice2ERP, P2) | `features/meetings/MeetingScreen.tsx`, 예시 `meetingExample.ts` | REQ-VOC-001~004, BP-VOC-01 |
+| `/past-cases` | 과거 사례 검색 (EX) | `features/pastCases/PastCaseScreen.tsx`, 예시 `pastCaseExample.ts` | REQ-CASE-001~005, REQ-AST-006, BP-CASE-01 |
+| 상단 바 AI 버튼 | AI 어시스턴트 패널 (P2) | `features/shell/AiPanel.tsx` | REQ-AST-001·007·008·009, BP-AST-01 |
+
+- 공통 부품(예시 표시·AI 카드·근거 줄·주체 꼬리표·AI 경유 표시 등): `features/agent/components/SoonExampleParts.tsx` (회의록·과거 사례 화면도 여기서 가져온다).
+- 레일 이름·열림 조건은 이미 `screens.ts`에 맞게 있다: 'AI Factory Agent'·'회의록'·'과거 사례 검색', 모두 `everyone`(부서장 한정 아님).
+
+## 2. reports/6 C 항목 반영
+
+**AI Factory Agent**
+- 대응 후보는 **담당 부서원이 후보별로 확정**하고 확정한 사람이 요청자다. 확정 권한 = 후보가 만드는 업무의 권한(구매요청 생성 → '구매요청 등록·MRP', 재생산 계획 생성 → '생산계획·히트 편성'). 결과가 구매요청이면 **요청자 소속 부서장이 최종 승인**한다 (REQ-AGT-006, TRM-106, BP-AGT-01).
+  - 옛 문구 '부서장 개별 승인', '승인권자 구매부 부서장', '부서장 승인 후 SYSTEM이 반영', 버튼 '승인'을 → '처리 순서: 담당 부서원 확정 → 요청자 권한으로 구매요청 등록 → 요청자 소속 부서장 최종 승인', 버튼 '확정'·'반려'로 바꿨다.
+- AI는 상황 설명만 한다(후보는 규칙이 만든다). 상황 설명은 데이터를 바꾸지 않아 감지 이력(작업 로그)에서 뺐다.
+- 작업 로그 주체는 공통 코드 ACTOR_TYPE 표시명(사용자/시스템)만. AI 주체 없음. 'Action Draft 생성' → '초안 생성'(DRAFT_CREATED), 'Agent 위험 감지'는 🟡 AGENT_RISK_DETECTED 표시명.
+- 초안 상태는 영문 코드 대신 DRAFT_STATUS 표시명(생성 → 확인 대기 → 확정 → ERP 반영).
+- 번호는 9.1·9.2 도우미로 만든다(PP-2610-0003, SO-2609-014, RM-LIM01-260930-002, GR-2609-0021, EV-261001-001). 원료는 ORE01·LIM01, 강종은 SM355A·SM355B.
+- 위험 유형은 BP-AGT-01 위험 코드 5개(화면에는 REQ-AGT-001 한글 이름)와 트리거(스케줄/이벤트). 옛 '심각도 높음/주의/참고'(문서에 없음) 대신 트리거를 꼬리표로 보인다.
+- '최근 24시간 해소' → '확정 전에 해소됨'(BP-AGT-01 "승인 전 위험이 해소되면 재검증으로 실행을 막는다"). 문서에 없는 '감지 기준 설정'·'지금 감지 실행'·'사례 검색' 버튼은 뺐다.
+
+**회의록 (Voice2ERP)**
+- **원본 전사와 AI 요약을 나눴다** (BP-VOC-01 구현 제안): '전체 기록 (원본 전사)'는 기본색 카드 + "원본 전사는 AI가 고치지 않아요", 'AI 요약'만 보라색 AI 카드.
+- **AI_GENERATED 배지 남용 정리**: 회의 정리 결과·구매 관련 항목에 붙던 `AI_GENERATED` 배지를 뺐다. 구매 관련 항목은 "보내기 전"이고, 보낸 뒤의 초안 상태만 DRAFT_STATUS 표시명으로 보인다.
+- 담당자·마감일이 모호한 할 일은 '확인 필요'로 보이고 등록 대상에서 빠진다 (BP-VOC-01 "모호하면 확인 전 등록하지 않는다"). 등록하면 업무 '진행'(TASK_STATUS OPEN) + '업무 지정' 알림(NOTIFICATION_TYPE TASK_ASSIGNED)이라고 안내한다 (REQ-VOC-004).
+- 구매 관련 항목 → Message → ERP 구매요청 초안(요청자가 확인·확정, 요청자 소속 부서장 승인) (REQ-VOC-004, BP-ACT-01).
+- 회의 정보는 ERD 항목만(제목·회의 날짜·참석자·작성). '대화방 공유'(금지어 '대화방'), '안건', '수주 연결', '정리가 끝나면 참석자에게 알림', '다음 회의'·'예정' 목록, '다시 정리', '임시 저장', 200MB 제한은 문서·ERD에 없어 뺐다. '구매 초안' → '구매요청 초안'.
+- 입력 방식은 '녹음'·'음성 파일 업로드'만 둔다 (REQ-VOC-001 "회의 음성"). 텍스트 붙여넣기·.txt는 뺐다. 형식·용량 제한은 "구현 단계에서 정해요"로 표시.
+- 사람 이름은 시드 사원(강민석·김도윤·정다은·서민지·권예진), 고객사는 시드 '가람중공업'.
+
+**과거 사례 검색**
+- **부르는 곳을 REQ-CASE-004로 맞췄다**: 'AI 어시스턴트 패널', '사내 채팅 @AI', '품질 관리 [비슷한 사례 찾기] (AI 패널이 열리고 질문이 자동으로 들어감)'을 카드로 보인다. 사례 상세 안의 '비슷한 사례 찾기' 버튼은 품질 관리 몫이라 뺐다. 화면·레일 메뉴('과거 사례 검색')는 stage6 지시대로 둔다.
+- 작업 로그는 REQ-LOG-002 이벤트만: 검사 등록·판정 → 불합격 처리 상태 지정 → 과거 사례 등록(🟡 CASE_REGISTERED). 등록 주체는 '사용자'(품질 담당 확인·저장) + 'AI 경유' 표시 (BP-CASE-01, TRM-103). 옛 '원인 기록'·'조치 기록' 이벤트와 AI 주체는 뺐다.
+- 사례 항목은 ERD past_case 그대로(구분·제목·현상·원인·조치·관련 설비 텍스트·관련 LOT·발생일). 옛 '처리 상태'·'강종·품목' 칸과 '저장한 검색'·'강종' 필터는 뺐다.
+- '같은 종류의 다른 사례'는 같은 구분끼리만 고른다(옛 화면은 품질 사례에 설비 사례가 나왔음).
+- LOT 번호 9.2 형식(HT-BOF1-260912-004, CBOF1-260825-011-02 …), 강종 SM355A·SS275·SPHC.
+
+**AI 어시스턴트 패널**
+- 역할별 추천 질문 + '처음 쓰는 분께'(REQ-AST-008)는 그대로 두고, 아래를 예시로 더했다(모두 흐린 영역, 조작 불가):
+  - 보고 있는 화면 표시(REQ-AST-007 화면 맥락 전달): 지금 경로의 화면 제목.
+  - 출처를 붙인 답 예시(REQ-AST-009): '예약과 배정은 뭐가 달라?' → 용어 사전 TRM-056·TRM-060 정의 + 출처 줄. 출처 종류(용어 사전·업무 매뉴얼·조회 데이터·사례 번호)와 안전 규칙 문구.
+  - 크게 펼치기(REQ-AST-001)는 막힌 아이콘 버튼(툴팁 '크게 펼치기 · 준비 중 (P2)').
+- 입력·보내기는 막혀 있다.
+
+## 3. api 함수 · 시드
+
+- 없음. 이 영역은 P2·EX 디자인뿐이라 변경 함수가 없고(stage6 "No data writes"), 가짜 DB 테이블(meeting_minutes·past_case 등)도 쓰지 않는다. 시드 등록할 것 없음.
+
+## 4. 테스트 (Vitest, 새 파일 4개 · 30개)
+
+- `features/agent/lib/exampleTextCheck.ts` — 예시 문구 점검 순수 함수: 용어 사전 금지어(+PLAN 6장 '대화방'·'출하번호'), 'AI' 없는 'Factory Agent', 단독 'SM355', 9.1·9.2 형식이 아닌 번호.
+- `exampleTextCheck.test.ts` — 도우미 자체 + 화면 파일 5개(Agent·회의록·과거 사례·AI 패널·공통 부품)의 코드 문구에 금지어·잘못된 번호·초안 상태/주체 영문 코드가 없는지.
+- `agentExample.test.ts` — 위험 코드 5개 ↔ 규칙·감지 예시, 트리거, 확정 권한 = 후보 업무 권한(구매 역할의 USE), ACTION_TYPE 등급, 처리 순서(담당 부서원 → 요청자 소속 부서장, '시스템' 없음), 주체 사용자/시스템, 번호 형식.
+- `meetingExample.test.ts` — 참석자·작성자·요청자 = 시드 사원과 역할, 전사 시간순·구매 발언, 결정사항·할 일의 원문 시각, 모호한 할 일 제외(`isTaskReady`), 목록 건수, 번호 형식.
+- `pastCaseExample.test.ts` — REQ-CASE-001 항목, 최신순, 같은 구분 사례, 주체 사용자 + AI 경유, 부르는 곳 3곳, `similarCaseQuestion`, LOT 형식.
+- `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 15파일 107개 통과(기존 77 + 이 영역 새 30). 병렬 규칙대로 `next build`·개발 서버는 돌리지 않았다.
+
+## 5. 가정값
+
+| 무엇 | 값 | 왜 / 근거 |
+|---|---|---|
+| 과거 사례 번호 표기 | `CASE-NNNN` (예: CASE-0005) | ERD past_case.case_no "TBD: 번호 형식 미정". 화면에 "사례 번호 형식은 아직 정하지 않았어요 (예시 표기)"로 밝힘 |
+| 위험 유형 한글 이름 | 원료 부족 · 합격 매수 부족 · 납기 위험 · 여재 장기 보유 · 불합격률 상승 | 위험 코드(BP-AGT-01 제안)에 공통 코드 표시명이 없어 REQ-AGT-001·004 문구를 씀. 코드 원문은 화면에 안 보임 |
+| 트리거 이름 | 스케줄 / 이벤트 | REQ-AGT-001·TRM-105 문구 |
+| 예시 수치 | 철광석 소요 3,400 t · 잔량 1,600 t · 입고예정 600 t · 부족 1,200 t, Mn 1.68%(기준 1.60% 이하, ks-values SM355A) | 옛 화면 예시 수치 유지. 실제 데이터 아님 |
+
+## 6. 공유 파일 변경
+
+- `features/shell/AiPanel.tsx`만 고쳤다(이 영역 소유로 지정됨). `screens.ts`·`routeTitles.ts`·`navigation.ts`·`useShellStore`는 그대로다.
+
+## 7. 다른 영역에 남기는 확인 (P2·EX 접점, 이 worktree 소유 아님)
+
+stage6 2번 마지막 항목의 접점은 다른 영역 화면에 있어 이 worktree에서 고치지 않았다. 합칠 때 '준비 중'으로 있는지 확인한다.
+- MRP '구매요청 자동 초안'(REQ-PUR-005, P2) · Message → ERP의 구매요청 생성 밖 초안 유형(REQ-ACT-005, P2) · 재고 '정합성 보정'(REQ-INV-010) · 작업 로그 'AI 경유'(REQ-AST-010, P2) · 불합격 관리 '사례로 등록'·'비슷한 사례 찾기'(REQ-CASE-002·004, EX).
+- 불합격 관리의 '비슷한 사례 찾기'를 실제로 만들 때(EX 구현 시) AI 패널을 열고 `similarCaseQuestion(LOT, 강종)`(`features/pastCases/pastCaseExample.ts`)을 질문으로 넣으면 된다. 지금은 `useShellStore`에 질문을 넘길 자리가 없다.
+
+## 8. 열린 질문
+
+- 회의록 입력 방식: REQ-VOC-001은 "회의 음성", BP-VOC-01은 "입력 방식 TBD". 텍스트 붙여넣기를 다시 넣을지 사용자 확인 필요.
+- AI Factory Agent의 '여재 장기 보유 → 대기 수주 배정 추천' 후보가 만들 ACTION_TYPE이 공통 코드에 없다(배정 확정 ALLOCATION_CONFIRM인지 여재 전환인지 미정). 화면은 "대기 수주 배정 추천" 문구만 보인다.
+- 과거 사례 화면을 별도 화면·레일 메뉴로 둘지(REQ-CASE-004는 패널·@AI·품질 버튼만 듦). 지금은 stage6 지시대로 화면을 두고 부르는 곳을 함께 보인다.
+
+## 9. 알려진 한계
+
+- 세 화면 모두 고정 예시이고, 목록 항목을 눌러 상세를 바꾸는 동작은 없다(회의록의 탭 3개 전환만 됨).
+- 브라우저 확인은 하지 않았다(병렬 규칙: 개발 서버·빌드 금지). 합친 뒤 `/agent`·`/meetings`·`/past-cases`와 AI 패널을 눈으로 확인해야 한다.
+
+## 10. 검토 반영 (2026-10-02)
+
+| # | 지적 | 고친 내용 | 근거 |
+|---|---|---|---|
+| 1 | Agent 대응 후보가 확정 버튼이 있는데 배지가 '생성'(AI_GENERATED)이고 초안 상태 단계도 '생성'이 진행 중 | 후보 `RAW_SHORTAGE_CANDIDATE.draftStatus = WAITING_APPROVAL`. 배지는 '확인 대기'(wait 색), 초안 상태 단계는 생성 완료 · 확인 대기 진행. 단계 표시는 순수 함수 `draftStepState(단계, 지금 상태)`(`agentExample.ts`, `DRAFT_FLOW`도 여기로 옮겨 회의록 화면도 같이 씀). 감지 이력 '초안 생성' 줄에 "'생성'으로 시작해 '확인 대기'로 넘어갔어요", 확정 단계 시각 칸은 '확인 대기' | 04 10장·13.4, REQ-ACT-003, BP-ACT-01 |
+| 2 | 회의 결정사항·요약이 이미 생산된 히트 LOT(HT-BOF1-260929-015)을 '우선 편성' | 결정사항 'SO-2609-014 납기 유지 · 생산계획 PP-2610-0003 히트 우선 편성', 요약도 생산계획 번호로. 히트 LOT 번호는 성분 검사 발언(17:45)·할 일에만 남김. `EXAMPLE_NO.productionPlan` 사용 | 04 BP-PRD-01·02, 9.2, PLAN 6-3 |
+| 3 | 회의록 식별자가 용어 사전(TRM-099 meetingMinutes)과 다름 | `SELECTED_MEETING` → `SELECTED_MEETING_MINUTES`, `MEETING_LIST` → `MEETING_MINUTES_LIST`, `MeetingListItem` → `MeetingMinutesListItem`. 추출한 할 일 `ExtractedTask.text` → `title`(등록하면 ERD task.title) | 03 TRM-099, 05 2장 |
+| 4 | 작업 로그 예시 필드 이름이 용어 사전·ERD와 다름 | `aiAssisted` → `isAiAssisted`(TRM-103), `eventType` → `businessEventType`(ERD business_event.business_event_type) — `CaseHistoryEntry`·`AgentHistoryEntry`. 두 화면에 똑같이 있던 `eventLabelOf`는 `features/agent/lib/businessEventLabel.ts`의 `businessEventLabelOf` 하나로 합침 | 03 TRM-084·103, ERD, 05 2장 |
+| 5 | 회의 목록에 문서에 없는 상태 묶음(확인 전/등록 완료/AI 정리 중)을 배지로 표시 | `MeetingListState`·`MEETING_LIST_STATE_LABEL`·`state` 필드와 목록·제목의 상태 배지를 뺐다. 목록 줄은 제목·시각·참석자 수·할 일/구매 관련 건수만. '전체 기록 변환 중'(상태 문구)은 '할 일 1'로. 5장 가정값의 '회의 목록 상태' 줄도 지웠다 | ERD meeting_minutes(상태 열 없음), 05 4장, reports/6 C-4 |
+| 6 | 코드 표시명을 문자열로 다시 씀 | 참석자는 `roleCode`(ROLE)를 갖고 화면에서 `ROLE_LABEL[roleCode]`로 보임. Agent 확정 권한 문구 '사용' → `PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]` | 05 4장, common.md |
+| 7 | 결정사항 2줄이 해라체('…만든다', '…공유한다') | '철광석 1,200 t 구매요청 초안 작성', '점검 결과 정리·공유'(명사형) | common.md 해요체 |
+
+- 테스트: `agentExample.test.ts` +2(후보 = 확인 대기, `draftStepState` 단계·없는 상태 RangeError, 감지 이력 문구 / 이벤트 표시명 도우미), `meetingExample.test.ts` +3(결정사항·요약은 생산계획으로 편성·히트 LOT은 검사 발언에만 / 결정사항 해라체 없음·요약 해요체 / 목록 줄에 상태 필드 없음), 기존 테스트는 새 이름(`roleCode`·`isAiAssisted`·`businessEventType`·`title`)으로 고침.
+- `npm run typecheck -w @fantasteel/client` 0 오류, `npm run test -w @fantasteel/client` 74파일 547개 통과. 병렬 규칙대로 `next build`·개발 서버는 돌리지 않았다.
+- 공유 파일 변경 없음. 회의 상태를 화면에 다시 두려면 먼저 06 공통 코드 정의서에 🟡 묶음으로 넣을지 사용자 확인이 필요하다.
