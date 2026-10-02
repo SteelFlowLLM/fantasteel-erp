@@ -56,7 +56,8 @@ npm run db:reset                             # 개발 DB 초기화 (데이터 �
 
 ## Git
 
-- 브랜치 `feature/{이슈번호}-{기능}`, 커밋 `feat:`·`fix:`·`refactor:`·`docs:`·`chore:` + 한글 요약, PR은 리뷰어 1명 이상·squash 머지 (컨벤션 10장).
+- 흐름 `feature/{이슈번호}-{기능}` → `develop` → `main` (`docs/GIT-GUIDE.md`). 구현 브랜치는 `origin/develop`에서 만들고 PR도 `develop`으로 보낸다. `main`·`develop`에 직접 push하지 않는다.
+- 커밋 `feat:`·`fix:`·`refactor:`·`docs:`·`chore:` + 한글 요약, PR은 리뷰어 1명 이상·squash 머지 (컨벤션 10장). `develop` → `main`만 merge commit.
 - `.env`, `server/src/generated/`, `.local-db/`, `CLAUDE.md`는 커밋하지 않는다.
 - 패키지를 설치·변경하지 않았는데 `package-lock.json`이 바뀌었으면(OS에 따라 npm이 다시 쓸 수 있다) 그 변경은 커밋하지 않는다.
 - `../v1` 폴더가 있으면 참고만 하고 수정하지 않는다.

@@ -68,6 +68,7 @@ npm run build -w @fantasteel/client
 | [docs/notion/](docs/notion/) | 설계 문서 01~09 (기획안·요구사항·용어 사전·업무 프로세스·코드 컨벤션·공통 코드·KS 규격·API 명세서·역할·권한). 내용은 고치지 않습니다 |
 | [docs/erd/](docs/erd/) | ERD (DBML). 서버 스키마의 기준 |
 | [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md) · [docs/backend/](docs/backend/README.md) | 서버 실행·규칙, 모듈별 작업 안내, 세팅 때 정한 값 |
+| [docs/GIT-GUIDE.md](docs/GIT-GUIDE.md) | Git 흐름(`feature` → `develop` → `main`), PR이 쌓였을 때·다른 PR이 머지됐을 때 할 일, 예전 작업 옮기기 |
 | [CLAUDE.template.md](CLAUDE.template.md) | Claude Code 작업 규칙 초안. `npm install` 때 각자의 `CLAUDE.md`(git 제외)로 복사된다 |
 
 ## 서버와 DB
