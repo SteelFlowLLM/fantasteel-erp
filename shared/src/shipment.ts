@@ -36,6 +36,27 @@ export interface ShipmentRequestItemDetail {
   allocations: ShipmentRequestAllocation[];
 }
 
+/** 밀시트 목록 한 줄 (API-232). 발행 뒤 바뀌지 않는 번호·시각만 보여 준다 */
+export interface MillSheetSummary {
+  id: number;
+  millSheetNo: string;
+  shipmentRequestId: number;
+  shipmentRequestNo: string;
+  salesOrderId: number;
+  salesOrderNo: string;
+  issuedAt: string;
+  /** PDF를 만든 적이 있으면 Storage 경로 */
+  pdfPath: string | null;
+}
+
+/**
+ * 밀시트 조회 (API-233). snapshot은 출고 확정 때 저장한 값 그대로이고 현재 값을 다시 읽지 않는다 (REQ-SHP-003·004).
+ * snapshot의 모양은 출고 확정(밀시트 생성)을 구현할 때 정한다.
+ */
+export interface MillSheetDetail extends MillSheetSummary {
+  snapshot: unknown;
+}
+
 export interface ShipmentRequestDetail extends ShipmentRequestSummary {
   issuedEmployeeId: number | null;
   issuedEmployeeName: string | null;

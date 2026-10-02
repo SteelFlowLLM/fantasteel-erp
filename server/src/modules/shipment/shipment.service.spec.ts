@@ -210,4 +210,46 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
     await prisma.shipmentRequest.update({ where: { id: created.id }, data: { shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.CANCELLED } });
     await expect(prisma.$transaction((tx) => service.refreshAllocationStatus(tx, created.id))).resolves.toBe(SHIPMENT_REQUEST_STATUS.CANCELLED);
   });
+
+  describe('밀시트 조회 (REQ-SHP-004)', () => {
+    // 밀시트는 출고 확정 때 만들어지는데 아직 구현 전이라 행을 직접 넣는다
+    const millSheet = async (shipmentRequestId: number, shipmentRequestNo: string, salesOrderId: number, n: number, snapshot: object) =>
+      prisma.millSheet.create({
+        data: { millSheetNo: `MS-${shipmentRequestNo.slice(3)}-${n}`, shipmentRequestId, salesOrderId, snapshot, issuedAt: new Date() },
+      });
+
+    it('출하요청·수주로 거르고, 상세는 저장된 스냅샷을 그대로 돌려준다 (이후 원본이 바뀌어도 유지)', async () => {
+      const a = await salesOrderItem(customerB, 5);
+      const b = await salesOrderItem(customerB, 5);
+      const request = await service.create(sales, {
+        customerId: customerB,
+        items: [
+          { salesOrderItemId: a.salesOrderItemId, requestQty: 2 },
+          { salesOrderItemId: b.salesOrderItemId, requestQty: 2 },
+        ],
+      });
+      const snapshotA = { customerName: '나래조선', lots: [{ lotNo: 'SL-TEST-A', values: { thicknessMm: '250.00' } }] };
+      const sheetA = await millSheet(request.id, request.shipmentRequestNo, a.salesOrderId, 1, snapshotA);
+      const sheetB = await millSheet(request.id, request.shipmentRequestNo, b.salesOrderId, 2, { customerName: '나래조선', lots: [] });
+
+      const byRequest = await service.listMillSheets({ shipmentRequestId: request.id, page: 1, size: 20 });
+      expect(byRequest.total).toBe(2);
+      expect(byRequest.items.map((s) => s.id)).toEqual([sheetB.id, sheetA.id]);
+      expect(byRequest.items[0]).toMatchObject({ shipmentRequestNo: request.shipmentRequestNo, pdfPath: null });
+
+      const bySalesOrder = await service.listMillSheets({ salesOrderId: a.salesOrderId, page: 1, size: 20 });
+      expect(bySalesOrder.items.map((s) => s.millSheetNo)).toEqual([sheetA.millSheetNo]);
+
+      await prisma.customer.update({ where: { id: customerB }, data: { customerName: '나래조선(변경)' } });
+      try {
+        await expect(service.findMillSheet(sheetA.id)).resolves.toMatchObject({ millSheetNo: sheetA.millSheetNo, snapshot: snapshotA });
+      } finally {
+        await prisma.customer.update({ where: { id: customerB }, data: { customerName: '나래조선' } });
+      }
+    });
+
+    it('없는 밀시트는 COM-003', async () => {
+      await expect(service.findMillSheet(999999)).rejects.toMatchObject({ code: 'COM-003' });
+    });
+  });
 });

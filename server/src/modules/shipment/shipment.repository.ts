@@ -43,8 +43,23 @@ const detailSelect = {
   },
 } satisfies Prisma.ShipmentRequestSelect;
 
+const millSheetSummarySelect = {
+  id: true,
+  millSheetNo: true,
+  shipmentRequestId: true,
+  salesOrderId: true,
+  issuedAt: true,
+  pdfPath: true,
+  shipmentRequest: { select: { shipmentRequestNo: true } },
+  salesOrder: { select: { salesOrderNo: true } },
+} satisfies Prisma.MillSheetSelect;
+
+const millSheetDetailSelect = { ...millSheetSummarySelect, snapshot: true } satisfies Prisma.MillSheetSelect;
+
 export type ShipmentRequestSummaryRow = Prisma.ShipmentRequestGetPayload<{ select: typeof summarySelect }>;
 export type ShipmentRequestDetailRow = Prisma.ShipmentRequestGetPayload<{ select: typeof detailSelect }>;
+export type MillSheetSummaryRow = Prisma.MillSheetGetPayload<{ select: typeof millSheetSummarySelect }>;
+export type MillSheetDetailRow = Prisma.MillSheetGetPayload<{ select: typeof millSheetDetailSelect }>;
 
 @Injectable()
 export class ShipmentRepository {
@@ -126,5 +141,17 @@ export class ShipmentRepository {
 
   updateStatus(tx: Tx, id: number, shipmentRequestStatus: ShipmentRequestStatus) {
     return tx.shipmentRequest.update({ where: { id }, data: { shipmentRequestStatus }, select: { id: true } });
+  }
+
+  findMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput, skip: number, take: number) {
+    return tx.millSheet.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: millSheetSummarySelect });
+  }
+
+  countMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput) {
+    return tx.millSheet.count({ where });
+  }
+
+  findMillSheet(tx: Tx, id: number) {
+    return tx.millSheet.findUnique({ where: { id }, select: millSheetDetailSelect });
   }
 }

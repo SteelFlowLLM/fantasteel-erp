@@ -1,5 +1,13 @@
-import { ALLOCATION_STATUS, type AllocationStatus, type ShipmentRequestDetail, type ShipmentRequestStatus, type ShipmentRequestSummary } from '@fantasteel/shared';
-import type { ShipmentRequestDetailRow, ShipmentRequestSummaryRow } from './shipment.repository';
+import {
+  ALLOCATION_STATUS,
+  type AllocationStatus,
+  type MillSheetDetail,
+  type MillSheetSummary,
+  type ShipmentRequestDetail,
+  type ShipmentRequestStatus,
+  type ShipmentRequestSummary,
+} from '@fantasteel/shared';
+import type { MillSheetDetailRow, MillSheetSummaryRow, ShipmentRequestDetailRow, ShipmentRequestSummaryRow } from './shipment.repository';
 
 // date 컬럼은 UTC 자정으로 읽히므로 앞 10자리가 그대로 날짜다
 const toDateOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -44,4 +52,21 @@ export function toShipmentRequestDetail(row: ShipmentRequestDetailRow): Shipment
       };
     }),
   };
+}
+
+export function toMillSheetSummary(row: MillSheetSummaryRow): MillSheetSummary {
+  return {
+    id: row.id,
+    millSheetNo: row.millSheetNo,
+    shipmentRequestId: row.shipmentRequestId,
+    shipmentRequestNo: row.shipmentRequest.shipmentRequestNo,
+    salesOrderId: row.salesOrderId,
+    salesOrderNo: row.salesOrder.salesOrderNo,
+    issuedAt: row.issuedAt.toISOString(),
+    pdfPath: row.pdfPath,
+  };
+}
+
+export function toMillSheetDetail(row: MillSheetDetailRow): MillSheetDetail {
+  return { ...toMillSheetSummary(row), snapshot: row.snapshot };
 }

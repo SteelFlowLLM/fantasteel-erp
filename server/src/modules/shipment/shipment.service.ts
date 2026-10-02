@@ -7,6 +7,8 @@ import {
   SHIPMENT_REQUEST_STATUS,
   type AuthUser,
   type ItemType,
+  type MillSheetDetail,
+  type MillSheetSummary,
   type PageResult,
   type ShipmentRequestDetail,
   type ShipmentRequestStatus,
@@ -21,8 +23,9 @@ import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import type { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
+import type { ListMillSheetsQuery } from './dto/list-mill-sheets.query';
 import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
-import { toShipmentRequestDetail, toShipmentRequestSummary } from './shipment.mapper';
+import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary } from './shipment.mapper';
 import { ShipmentRepository } from './shipment.repository';
 
 /** 배정 대기·배정 확정. 출하 가능 매수에서 빼는 진행 중 출하요청 */
@@ -178,6 +181,26 @@ export class ShipmentService {
     const next = allAllocated ? SHIPMENT_REQUEST_STATUS.ALLOCATED : SHIPMENT_REQUEST_STATUS.REQUESTED;
     if (next !== current) await this.repository.updateStatus(tx, shipmentRequestId, next);
     return next;
+  }
+
+  /** 밀시트 목록 (API-232). 권한 MILL_SHEET_READ VIEW는 컨트롤러 데코레이터가 본다 */
+  async listMillSheets(query: ListMillSheetsQuery): Promise<PageResult<MillSheetSummary>> {
+    const where: Prisma.MillSheetWhereInput = {
+      ...(query.shipmentRequestId ? { shipmentRequestId: query.shipmentRequestId } : {}),
+      ...(query.salesOrderId ? { salesOrderId: query.salesOrderId } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      this.repository.findMillSheets(this.prisma, where, (query.page - 1) * query.size, query.size),
+      this.repository.countMillSheets(this.prisma, where),
+    ]);
+    return { items: rows.map(toMillSheetSummary), page: query.page, size: query.size, total };
+  }
+
+  /** 밀시트 조회 (API-233, REQ-SHP-004). 저장된 스냅샷만 돌려주고 현재 고객사·검사값을 다시 읽지 않는다 */
+  async findMillSheet(id: number): Promise<MillSheetDetail> {
+    const row = await this.repository.findMillSheet(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '밀시트를 찾을 수 없어요');
+    return toMillSheetDetail(row);
   }
 
   /** 목록·상세는 영업(SHIPMENT_REQUEST_MANAGE)과 물류(GOODS_ISSUE_CONFIRM) 중 하나의 VIEW면 된다. 데코레이터는 OR를 못 써서 여기서 본다 */
