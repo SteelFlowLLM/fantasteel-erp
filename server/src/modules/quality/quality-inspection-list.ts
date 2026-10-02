@@ -1,12 +1,13 @@
 import {
   LOT_TYPE,
   PROCESS_TYPE,
+  type InspectedLotSummary,
   type InspectionResult,
   type LotType,
   type ProcessType,
   type QualityInspectionListItem,
 } from '@fantasteel/shared';
-import type { QualityInspectionListLot } from './quality.repository';
+import type { InspectedLot, QualityInspectionListLot } from './quality.repository';
 
 /** LOT 유형 → 검사 공정 (quality.md 4장 "기준 고르기", REQ-QC-001) */
 export const INSPECTION_PROCESS_BY_LOT_TYPE = {
@@ -47,12 +48,12 @@ export function pickLatestStandards(standards: InspectionStandardVersion[]): Map
 }
 
 /** 히트는 자기 강종, 슬래브·코일은 규격의 강종 (quality.md 4장) */
-function steelGradeOf(lot: QualityInspectionListLot) {
+function steelGradeOf(lot: InspectedLot) {
   return lot.lotType === LOT_TYPE.HEAT ? lot.steelGrade : (lot.item?.steelGrade ?? null);
 }
 
 /** 슬래브는 부모 히트, 코일은 부모 슬래브의 부모 히트 */
-function heatOf(lot: QualityInspectionListLot) {
+function heatOf(lot: InspectedLot) {
   for (const { parentLot } of lot.lotRelationsAsChildLot) {
     if (parentLot.lotType === LOT_TYPE.HEAT) return parentLot;
     if (parentLot.lotType === LOT_TYPE.SLAB) {
@@ -63,29 +64,38 @@ function heatOf(lot: QualityInspectionListLot) {
   return null;
 }
 
-export function toQualityInspectionListItem(
-  lot: QualityInspectionListLot,
-  latestStandards: Map<string, InspectionStandardVersion>,
-): QualityInspectionListItem {
-  const processType = INSPECTION_PROCESS_BY_LOT_TYPE[lot.lotType as InspectedLotType];
+/** 검사 대상 LOT의 공정·강종·두께·상위 히트 (목록·상세 공용) */
+export function toInspectedLotSummary(lot: InspectedLot): InspectedLotSummary {
   const steelGrade = steelGradeOf(lot);
   const heat = lot.lotType === LOT_TYPE.HEAT ? null : heatOf(lot);
-  const inspection = lot.qualityInspection;
-  const standard =
-    inspection?.inspectionStandard ?? (steelGrade ? latestStandards.get(standardKey(processType, steelGrade.id)) : undefined) ?? null;
-
   return {
-    qualityInspectionId: inspection?.id ?? null,
     lotId: lot.id,
     lotNo: lot.lotNo,
     lotType: lot.lotType as LotType,
-    processType,
+    processType: INSPECTION_PROCESS_BY_LOT_TYPE[lot.lotType as InspectedLotType],
     steelGradeId: steelGrade?.id ?? null,
     steelGradeCode: steelGrade?.steelGradeCode ?? null,
     thicknessMm: lot.item?.thicknessMm?.toFixed(2) ?? null,
     heatLotId: heat?.id ?? null,
     heatLotNo: heat?.lotNo ?? null,
     heatInspectionResult: (heat?.qualityInspection?.inspectionResult as InspectionResult | undefined) ?? null,
+  };
+}
+
+export function toQualityInspectionListItem(
+  lot: QualityInspectionListLot,
+  latestStandards: Map<string, InspectionStandardVersion>,
+): QualityInspectionListItem {
+  const summary = toInspectedLotSummary(lot);
+  const inspection = lot.qualityInspection;
+  const standard =
+    inspection?.inspectionStandard ??
+    (summary.steelGradeId !== null ? latestStandards.get(standardKey(summary.processType, summary.steelGradeId)) : undefined) ??
+    null;
+
+  return {
+    ...summary,
+    qualityInspectionId: inspection?.id ?? null,
     inspectionStandardId: standard?.id ?? null,
     inspectionStandardCode: standard?.inspectionStandardCode ?? null,
     versionNo: standard?.versionNo ?? null,
