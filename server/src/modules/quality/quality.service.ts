@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import {
   QUALITY_INSPECTION_LIST_STATUS,
   type PageResult,
+  type QualityInspectionDetail,
   type QualityInspectionListItem,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JUDGED_INSPECTION_RESULTS, type ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
+import { toQualityInspectionDetail } from './quality-inspection-detail';
 import { lotTypesForProcess, pickLatestStandards, toQualityInspectionListItem } from './quality-inspection-list';
 import { QualityRepository } from './quality.repository';
 
@@ -50,5 +52,12 @@ export class QualityService {
     ]);
     const latestStandards = pickLatestStandards(standards);
     return { items: lots.map((lot) => toQualityInspectionListItem(lot, latestStandards)), page, size, total };
+  }
+
+  /** 검사 상세 (API-116, REQ-QC-001·003): LOT·항목별 측정값·판정과 판정에 쓴 기준 버전 */
+  async getQualityInspection(qualityInspectionId: number): Promise<QualityInspectionDetail> {
+    const record = await this.repository.findInspectionDetail(this.prisma, qualityInspectionId);
+    if (!record) throw new AppException('COM-003', '검사를 찾을 수 없어요');
+    return toQualityInspectionDetail(record);
   }
 }

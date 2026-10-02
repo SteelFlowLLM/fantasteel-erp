@@ -1,6 +1,7 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { PERMISSION, type PageResult, type QualityInspectionListItem } from '@fantasteel/shared';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { PERMISSION, type PageResult, type QualityInspectionDetail, type QualityInspectionListItem } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
+import { AppException } from '../../common/errors/app.exception';
 import { ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import { QualityService } from './quality.service';
 
@@ -18,5 +19,14 @@ export class QualityController {
   @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'VIEW')
   listQualityInspections(@Query() query: ListQualityInspectionsDto): Promise<PageResult<QualityInspectionListItem>> {
     return this.service.listQualityInspections(query);
+  }
+
+  /** 검사 상세 조회 (API-116). :id는 검사(quality_inspection) id */
+  @Get('quality-inspections/:id')
+  @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'VIEW')
+  getQualityInspection(
+    @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 id는 정수여야 해요') })) id: number,
+  ): Promise<QualityInspectionDetail> {
+    return this.service.getQualityInspection(id);
   }
 }

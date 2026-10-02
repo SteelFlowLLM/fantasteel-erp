@@ -163,3 +163,129 @@ describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
     expect(passedHeat).toMatchObject({ inspectionStandardId: v1.id, versionNo: 1 });
   });
 });
+
+describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
+  const prisma = new PrismaService();
+  const service = new QualityService(prisma, new QualityRepository());
+  const lotIds: number[] = [];
+  const resultIds: number[] = [];
+  const inspectionIds: Record<string, number> = {};
+  let inspectorName: string;
+
+  beforeAll(async () => {
+    const coilItem9 = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SM355A-9x1400x227500' } });
+    const coilItem45 = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SM355A-4.5x1500x544000' } });
+    const grade = await prisma.steelGrade.findUniqueOrThrow({ where: { steelGradeCode: 'SM355A' } });
+    const inspector = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
+    inspectorName = inspector.employeeName;
+    const standard = (code: string) =>
+      prisma.inspectionStandard.findUniqueOrThrow({
+        where: { inspectionStandardCode_versionNo: { inspectionStandardCode: code, versionNo: 1 } },
+        select: { id: true, inspectionStandardItems: { select: { id: true, inspectionItemCode: true, thicknessOverMm: true } } },
+      });
+    const hr = await standard('QS-SM355A-HR');
+    const st = await standard('QS-SM355A-ST');
+    const itemId = (code: string, over?: string) =>
+      hr.inspectionStandardItems.find((i) => i.inspectionItemCode === code && (over === undefined || i.thicknessOverMm?.toString() === over))!.id;
+
+    const result = async (processType: string) => {
+      const created = await prisma.productionResult.create({
+        data: { processType, converterCode: processType === 'STEELMAKING' ? 'BOF1' : null, startedAt: new Date() },
+      });
+      resultIds.push(created.id);
+      return created.id;
+    };
+    const heat = await prisma.lot.create({
+      data: { lotNo: 'QD-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: await result('STEELMAKING') },
+    });
+    const rolling = await result('HOT_ROLLING');
+    const coil = (lotNo: string, itemIdValue: number) =>
+      prisma.lot.create({
+        data: { lotNo, lotType: 'COIL', itemId: itemIdValue, productionResultId: rolling, producedDate: new Date('2026-10-02') },
+      });
+    const coil9 = await coil('QD-C9', coilItem9.id);
+    const coil45 = await coil('QD-C45', coilItem45.id);
+    lotIds.push(heat.id, coil9.id, coil45.id);
+
+    const inspect = (lotId: number, inspectionStandardId: number, inspectionResult: string) =>
+      prisma.qualityInspection.create({
+        data: { lotId, inspectionStandardId, inspectionResult, inspectorEmployeeId: inspector.id, inspectedAt: new Date('2026-10-02T05:00:00Z') },
+      });
+    const heatInspection = await inspect(heat.id, st.id, 'PASS');
+    const coil9Inspection = await inspect(coil9.id, hr.id, 'FAIL');
+    const coil45Inspection = await inspect(coil45.id, hr.id, 'PENDING');
+    inspectionIds.heat = heatInspection.id;
+    inspectionIds.coil9 = coil9Inspection.id;
+    inspectionIds.coil45 = coil45Inspection.id;
+
+    // 9mm 코일: 인장강도 경계값(490) 합격, 샤르피 26 불합격, 나머지는 미입력
+    await prisma.qualityInspectionValue.createMany({
+      data: [
+        { qualityInspectionId: coil9Inspection.id, inspectionStandardItemId: itemId('TENSILE_STRENGTH'), measuredValue: '490' },
+        { qualityInspectionId: coil9Inspection.id, inspectionStandardItemId: itemId('CHARPY'), measuredValue: '26' },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.qualityInspectionValue.deleteMany({ where: { qualityInspectionId: { in: Object.values(inspectionIds) } } });
+    await prisma.qualityInspection.deleteMany({ where: { lotId: { in: lotIds } } });
+    await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
+    await prisma.productionResult.deleteMany({ where: { id: { in: resultIds } } });
+    await prisma.$disconnect();
+  });
+
+  it('검사 1건과 판정에 쓴 기준 버전, 검사자를 준다', async () => {
+    const detail = await service.getQualityInspection(inspectionIds.coil9);
+    expect(detail).toMatchObject({
+      qualityInspectionId: inspectionIds.coil9,
+      lotNo: 'QD-C9',
+      lotType: 'COIL',
+      processType: 'HOT_ROLLING',
+      steelGradeCode: 'SM355A',
+      thicknessMm: '9.00',
+      inspectionStandardCode: 'QS-SM355A-HR',
+      versionNo: 1,
+      inspectionResult: 'FAIL',
+      inspectorEmployeeName: inspectorName,
+      inspectedAt: '2026-10-02T05:00:00.000Z',
+    });
+  });
+
+  it('9mm 코일은 두께에 맞는 항목만 (샤르피 포함 7개), 등록 순서대로', async () => {
+    const { items } = await service.getQualityInspection(inspectionIds.coil9);
+    expect(items.map((i) => [i.inspectionItemCode, i.thicknessOverMm, i.thicknessUptoMm])).toEqual([
+      ['YIELD_STRENGTH', null, '16.00'],
+      ['TENSILE_STRENGTH', null, null],
+      ['ELONGATION', '5.00', '16.00'],
+      ['CHARPY', '6.00', null],
+      ['THICKNESS_TOL', '8.00', '10.00'],
+      ['WIDTH_TOL', null, null],
+      ['CAMBER', null, null],
+    ]);
+  });
+
+  it('항목마다 측정값과 판정: 경계값 합격, 기준 미달 불합격, 값 없음은 null', async () => {
+    const { items } = await service.getQualityInspection(inspectionIds.coil9);
+    const byCode = (code: string) => items.find((i) => i.inspectionItemCode === code);
+    expect(byCode('TENSILE_STRENGTH')).toMatchObject({ minValue: '490.0000', maxValue: '630.0000', measuredValue: '490.0000', isPassed: true });
+    expect(byCode('CHARPY')).toMatchObject({ unit: 'J', minValue: '27.0000', measuredValue: '26.0000', isPassed: false, isRequired: true });
+    expect(byCode('CAMBER')).toMatchObject({ minValue: null, measuredValue: null, isPassed: null });
+  });
+
+  it('4.5mm 코일에는 샤르피가 적용되지 않는다 (REQ-QC-002)', async () => {
+    const { items } = await service.getQualityInspection(inspectionIds.coil45);
+    expect(items.map((i) => i.inspectionItemCode)).not.toContain('CHARPY');
+    expect(items).toHaveLength(6);
+  });
+
+  it('히트는 두께가 없어 구간 없는 성분 항목만, 상위 히트는 없다', async () => {
+    const detail = await service.getQualityInspection(inspectionIds.heat);
+    expect(detail).toMatchObject({ processType: 'STEELMAKING', thicknessMm: null, heatLotId: null, inspectionStandardCode: 'QS-SM355A-ST' });
+    expect(detail.items.map((i) => i.inspectionItemCode)).toEqual(['C', 'SI', 'MN', 'P', 'S', 'CEQ']);
+  });
+
+  it('없는 검사 id는 COM-003', async () => {
+    await expect(service.getQualityInspection(2_000_000_000)).rejects.toMatchObject({ code: 'COM-003' });
+  });
+});
