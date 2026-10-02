@@ -42,7 +42,8 @@ for (const [db, paths] of groups) {
   execSync('npx prisma migrate deploy', { env, stdio: 'ignore' });
   execSync('npx tsx prisma/seed.ts', { env, stdio: 'ignore' });
   process.stdout.write(`\n── ${db}: ${paths.join(' ')}\n`);
-  const r = spawnSync('npx', ['jest', '--passWithNoTests', ...paths], { env, stdio: 'inherit', shell });
+  // 같은 묶음의 파일들이 한 DB를 동시에 쓰면 채번(최댓값 + 1)이 겹쳐 unique 위반이 나므로 파일을 차례로 돌린다
+  const r = spawnSync('npx', ['jest', '--passWithNoTests', '--runInBand', ...paths], { env, stdio: 'inherit', shell });
   if (r.status !== 0) failed = true;
 }
 await admin.end();

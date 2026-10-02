@@ -1,12 +1,36 @@
-import { Controller } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import type { AllocationRecommendation, AllocationView, AuthUser } from '@fantasteel/shared';
+import { CurrentUser } from '../../common/auth/auth.decorators';
+import { ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
 import { InventoryService } from './inventory.service';
 
 /**
  * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
- * 경로는 API 명세서와 docs/backend/inventory.md. 리소스가 여러 개라 메서드마다 전체 경로를 쓴다 (예: @Get('sales-orders/:id')).
- * 전역 prefix /api/v1은 main.ts가 붙인다.
+ * 배정 권한은 목적(출하·열연)에 따라 달라 데코레이터 대신 service에서 확인한다 (docs/backend/inventory.md 3장).
  */
 @Controller()
 export class InventoryController {
   constructor(private readonly service: InventoryService) {}
+
+  @Get('allocations')
+  listAllocations(@CurrentUser() user: AuthUser, @Query() query: ListAllocationsQuery): Promise<AllocationView[]> {
+    return this.service.listAllocations(user, query);
+  }
+
+  @Post('allocations/recommend')
+  @HttpCode(200)
+  recommend(@CurrentUser() user: AuthUser, @Body() dto: RecommendAllocationDto): Promise<AllocationRecommendation> {
+    return this.service.recommendAllocations(user, dto);
+  }
+
+  @Post('allocations')
+  confirm(@CurrentUser() user: AuthUser, @Body() dto: ConfirmAllocationDto): Promise<AllocationView[]> {
+    return this.service.confirmAllocations(user, dto);
+  }
+
+  @Post('allocations/:id/release')
+  @HttpCode(200)
+  release(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ReleaseAllocationDto): Promise<AllocationView> {
+    return this.service.releaseAllocation(user, id, dto);
+  }
 }

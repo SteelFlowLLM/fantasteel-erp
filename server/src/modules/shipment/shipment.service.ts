@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   PERMISSION,
@@ -6,10 +6,12 @@ import {
   SALES_ORDER_ITEM_STATUS,
   SHIPMENT_REQUEST_STATUS,
   type AuthUser,
+  type ItemType,
   type PageResult,
   type ShipmentRequestDetail,
   type ShipmentRequestStatus,
   type ShipmentRequestSummary,
+  type ShippableSalesOrderItem,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -17,6 +19,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import type { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
 import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
 import { toShipmentRequestDetail, toShipmentRequestSummary } from './shipment.mapper';
@@ -33,6 +36,8 @@ export class ShipmentService {
     private readonly repository: ShipmentRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    // 취소하면 배정을 해제하고(inventory), 배정이 바뀌면 inventory가 refreshAllocationStatus를 부른다 → 서로 부른다
+    @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
   ) {}
 
   /**
@@ -112,6 +117,51 @@ export class ShipmentService {
     const row = await this.repository.findDetail(this.prisma, id);
     if (!row) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
     return toShipmentRequestDetail(row);
+  }
+
+  /** 출하 가능 품목 (API 목록 초안 행 GET /shipment-requests/shippable): 진행중·부분출하 수주 품목 중 출하 가능 매수가 남은 것 */
+  async listShippable(customerId?: number): Promise<ShippableSalesOrderItem[]> {
+    const items = await this.repository.findOpenSalesOrderItems(this.prisma, customerId);
+    if (items.length === 0) return [];
+    const qty = await this.repository.findShippableQty(this.prisma, items.map((i) => i.id), RESERVATION_STATUS.ACTIVE, PENDING_STATUSES);
+    const qtyById = new Map(qty.map((q) => [q.salesOrderItemId, q]));
+    return items
+      .map((i) => {
+        const activeReservedQty = qtyById.get(i.id)?.activeReservedQty ?? 0;
+        const pendingRequestQty = qtyById.get(i.id)?.pendingRequestQty ?? 0;
+        return {
+          salesOrderId: i.salesOrderId,
+          salesOrderNo: i.salesOrder.salesOrderNo,
+          salesOrderItemId: i.id,
+          customerId: i.salesOrder.customerId,
+          customerName: i.salesOrder.customer.customerName,
+          itemId: i.itemId,
+          itemCode: i.item.itemCode,
+          itemName: i.item.itemName,
+          itemType: i.item.itemType as ItemType,
+          orderedQty: i.orderedQty,
+          dueDate: i.dueDate.toISOString().slice(0, 10),
+          activeReservedQty,
+          pendingRequestQty,
+          shippableQty: Math.max(0, activeReservedQty - pendingRequestQty),
+        };
+      })
+      .filter((i) => i.shippableQty > 0);
+  }
+
+  /** 출하요청 취소: 출고 전(배정 대기·배정 확정)만. 확정 배정을 모두 해제한다. 출고 확정 후면 SHP-003 */
+  async cancel(user: AuthUser, id: number): Promise<ShipmentRequestDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await this.repository.lockShipmentRequest(tx, id);
+      if (!locked) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
+      if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.ISSUED) throw new AppException('SHP-003');
+      // 이미 취소된 요청의 재취소용 코드가 정의서 9.3에 없다 (shipment.md 8장)
+      if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.CANCELLED) throw new AppException('COM-001', '이미 취소된 출하요청이에요');
+      // 출하요청 취소용 작업 로그 유형은 공통 코드에 없다(shipment.md 8장 🟡). 배정 해제는 ALLOCATION_RELEASED로 남는다
+      await this.inventory.releaseShipmentAllocationsOfRequest(tx, { shipmentRequestId: id, actor: user, reason: `출하요청 취소로 배정 해제 (출하요청 id ${id})` });
+      await this.repository.updateStatus(tx, id, SHIPMENT_REQUEST_STATUS.CANCELLED);
+    });
+    return this.findOne(user, id);
   }
 
   /**

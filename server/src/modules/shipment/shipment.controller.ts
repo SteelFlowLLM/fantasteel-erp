@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type PageResult, type ShipmentRequestDetail, type ShipmentRequestSummary } from '@fantasteel/shared';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { PERMISSION, type AuthUser, type PageResult, type ShipmentRequestDetail, type ShipmentRequestSummary, type ShippableSalesOrderItem } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
 import { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
+import { ShippableQuery } from './dto/shippable.query';
 import { ShipmentService } from './shipment.service';
 
 /**
@@ -13,6 +14,13 @@ import { ShipmentService } from './shipment.service';
 @Controller()
 export class ShipmentController {
   constructor(private readonly service: ShipmentService) {}
+
+  /** 출하 가능 품목 (API 목록 초안 행). 경로가 :id보다 먼저 와야 한다 */
+  @Get('shipment-requests/shippable')
+  @RequirePermission(PERMISSION.SHIPMENT_REQUEST_MANAGE, 'VIEW')
+  shippable(@Query() query: ShippableQuery): Promise<ShippableSalesOrderItem[]> {
+    return this.service.listShippable(query.customerId);
+  }
 
   /** API-227 출하요청 목록 */
   @Get('shipment-requests')
@@ -31,5 +39,13 @@ export class ShipmentController {
   @Get('shipment-requests/:id')
   findOne(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ShipmentRequestDetail> {
     return this.service.findOne(user, id);
+  }
+
+  /** 출하요청 취소 (출고 확정 후면 SHP-003) */
+  @Post('shipment-requests/:id/cancel')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.SHIPMENT_REQUEST_MANAGE, 'USE')
+  cancel(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ShipmentRequestDetail> {
+    return this.service.cancel(user, id);
   }
 }

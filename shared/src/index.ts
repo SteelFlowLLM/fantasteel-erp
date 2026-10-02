@@ -4,3 +4,5 @@ export * from './weight';
 export * from './api';
 export * from './quality';
 export * from './shipment';
+export * from './sales-order';
+export * from './dashboard';

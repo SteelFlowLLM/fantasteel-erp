@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
+import { ALLOCATION_STATUS, SALES_ORDER_ITEM_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { getShippableQtyBySalesOrderItem, lockSalesOrderItemsForShipment } from '../../generated/prisma/sql';
+import { getShippableQtyBySalesOrderItem, lockSalesOrderItemsForShipment, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 const summarySelect = {
@@ -97,6 +97,31 @@ export class ShipmentRepository {
         },
       },
     });
+  }
+
+  /** 출하할 수 있는 상태(진행중·부분출하)의 수주 품목. 납기 순 */
+  findOpenSalesOrderItems(tx: Tx, customerId?: number) {
+    return tx.salesOrderItem.findMany({
+      where: {
+        salesOrderItemStatus: { in: [SALES_ORDER_ITEM_STATUS.OPEN, SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED] },
+        ...(customerId ? { salesOrder: { customerId } } : {}),
+      },
+      select: {
+        id: true,
+        salesOrderId: true,
+        itemId: true,
+        orderedQty: true,
+        dueDate: true,
+        salesOrder: { select: { salesOrderNo: true, customerId: true, customer: { select: { customerName: true } } } },
+        item: { select: { itemCode: true, itemName: true, itemType: true } },
+      },
+      orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  /** 출하요청을 잠근다. 취소·배정 확정·해제가 같은 요청의 상태를 동시에 바꾸지 않게 한다 */
+  async lockShipmentRequest(tx: Tx, id: number) {
+    return (await tx.$queryRawTyped(lockShipmentRequest(id)))[0] ?? null;
   }
 
   updateStatus(tx: Tx, id: number, shipmentRequestStatus: ShipmentRequestStatus) {
