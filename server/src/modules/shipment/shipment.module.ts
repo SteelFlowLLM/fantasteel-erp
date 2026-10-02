@@ -7,5 +7,7 @@ import { ShipmentService } from './shipment.service';
 @Module({
   controllers: [ShipmentController],
   providers: [ShipmentService, ShipmentRepository],
+  // inventory가 배정 확정·해제 후 refreshAllocationStatus를 부른다
+  exports: [ShipmentService],
 })
 export class ShipmentModule {}
