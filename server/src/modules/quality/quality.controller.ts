@@ -1,8 +1,15 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
-import { PERMISSION, type PageResult, type QualityInspectionDetail, type QualityInspectionListItem } from '@fantasteel/shared';
-import { RequirePermission } from '../../common/auth/auth.decorators';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import {
+  PERMISSION,
+  type AuthUser,
+  type PageResult,
+  type QualityInspectionDetail,
+  type QualityInspectionListItem,
+} from '@fantasteel/shared';
+import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
 import { ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
+import { RegisterQualityInspectionDto } from './dto/register-quality-inspection.dto';
 import { QualityService } from './quality.service';
 
 /**
@@ -19,6 +26,16 @@ export class QualityController {
   @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'VIEW')
   listQualityInspections(@Query() query: ListQualityInspectionsDto): Promise<PageResult<QualityInspectionListItem>> {
     return this.service.listQualityInspections(query);
+  }
+
+  /** 검사 등록·자동 판정 (API-117·224). LOT당 1건, 응답은 등록된 검사 상세 */
+  @Post('quality-inspections')
+  @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'USE')
+  registerQualityInspection(
+    @Body() dto: RegisterQualityInspectionDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<QualityInspectionDetail> {
+    return this.service.registerQualityInspection(dto, user);
   }
 
   /** 검사 상세 조회 (API-116). :id는 검사(quality_inspection) id */
