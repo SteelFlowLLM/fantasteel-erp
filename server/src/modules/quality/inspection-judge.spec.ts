@@ -1,5 +1,5 @@
 import { Prisma } from '../../generated/prisma/client';
-import { isItemApplicable, judgeMeasuredValue } from './inspection-judge';
+import { isItemApplicable, judgeInspection, judgeMeasuredValue } from './inspection-judge';
 
 const d = (value: string) => new Prisma.Decimal(value);
 const range = (over: string | null, upto: string | null) => ({
@@ -49,5 +49,44 @@ describe('항목 판정 (REQ-QC-003)', () => {
 
   it('측정값이 없으면 미입력(null)', () => {
     expect(judgeMeasuredValue(limits, null)).toBeNull();
+  });
+});
+
+describe('검사 판정 (REQ-QC-003, BP-QC-01)', () => {
+  const item = (id: number, min: string | null, max: string | null, isRequired = true) => ({
+    id,
+    minValue: min === null ? null : d(min),
+    maxValue: max === null ? null : d(max),
+    isRequired,
+  });
+  const items = [item(1, '490', '630'), item(2, '27', null), item(3, null, '5', false)];
+  const values = (entries: [number, string][]) => new Map(entries.map(([id, v]) => [id, d(v)]));
+
+  it('적용 항목이 모두 기준 안이면 PASS (선택 항목은 비어도 됨)', () => {
+    expect(judgeInspection(items, values([[1, '490'], [2, '27']]))).toEqual({
+      inspectionResult: 'PASS',
+      failedItemIds: [],
+      missingRequiredItemIds: [],
+    });
+  });
+
+  it('필수 항목 값이 비면 PENDING (누락은 합격으로 처리하지 않음)', () => {
+    expect(judgeInspection(items, values([[1, '500']]))).toEqual({
+      inspectionResult: 'PENDING',
+      failedItemIds: [],
+      missingRequiredItemIds: [2],
+    });
+  });
+
+  it('벗어난 값이 하나라도 있으면 필수 항목이 비어 있어도 FAIL (판정 우선순위)', () => {
+    expect(judgeInspection(items, values([[1, '489'], [3, '6']]))).toEqual({
+      inspectionResult: 'FAIL',
+      failedItemIds: [1, 3],
+      missingRequiredItemIds: [2],
+    });
+  });
+
+  it('적용 항목이 하나도 없으면 기준 누락이라 PENDING', () => {
+    expect(judgeInspection([], values([])).inspectionResult).toBe('PENDING');
   });
 });

@@ -114,6 +114,53 @@ export class QualityRepository {
     return tx.qualityInspection.findUnique({ where: { id: qualityInspectionId }, select: inspectionDetailSelect });
   }
 
+  /** 검사 등록 대상 LOT: 공정·강종·두께·이미 있는 검사, 작업 로그에 붙일 수주(LOT → 실적 → 계획 → 수주 품목) */
+  findLotForRegistration(tx: Tx, lotId: number) {
+    return tx.lot.findUnique({
+      where: { id: lotId },
+      select: {
+        ...inspectedLotSelect,
+        qualityInspection: { select: { id: true } },
+        productionResult: {
+          select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+        },
+      },
+    });
+  }
+
+  /** 그 공정·강종의 최신 기준 버전과 항목 (quality.md 4장 "기준 고르기") */
+  findLatestInspectionStandard(tx: Tx, processType: string, steelGradeId: number) {
+    return tx.inspectionStandard.findFirst({
+      where: { processType, steelGradeId },
+      orderBy: [{ versionNo: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        inspectionStandardCode: true,
+        versionNo: true,
+        inspectionStandardItems: {
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            inspectionItemCode: true,
+            minValue: true,
+            maxValue: true,
+            thicknessOverMm: true,
+            thicknessUptoMm: true,
+            isRequired: true,
+          },
+        },
+      },
+    });
+  }
+
+  createQualityInspection(tx: Tx, data: Prisma.QualityInspectionUncheckedCreateInput) {
+    return tx.qualityInspection.create({ data, select: { id: true } });
+  }
+
+  createQualityInspectionValues(tx: Tx, data: Prisma.QualityInspectionValueCreateManyInput[]) {
+    return tx.qualityInspectionValue.createMany({ data });
+  }
+
   /** 공정·강종별 최신 버전을 고르기 위한 기준 목록. 시드 기준 14개 수준이라 한 번에 읽는다 */
   findInspectionStandardVersions(tx: Tx) {
     return tx.inspectionStandard.findMany({
