@@ -1,19 +1,36 @@
-# Claude Code / oh-my-claudecode 세션 파일
+# ── 개인 설정 (팀과 공유하지 않음) ─────────────────────
+# Claude Code: 팀 공통은 CLAUDE.template.md(초안)·.claude/settings.json, 각자의 CLAUDE.md는 올리지 않는다
+CLAUDE.md
+.claude/settings.local.json
+.claude/*.local.*
+# oh-my-claudecode 세션 파일
 .omc/
+# 편집기
+.vscode/*
+!.vscode/extensions.json
+.idea/
 
-# macOS
-.DS_Store
+# ── 비밀값 ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
 
-# v2
+# ── 의존성·빌드 결과 ─────────────────────────────────
 node_modules
 dist
-.env
+.next
+.vite
+client/next-env.d.ts
+*.tsbuildinfo
 server/src/generated
+
+# ── 로컬 실행 데이터 ─────────────────────────────────
 .local-db
 server/storage
-*.log
-.vite
-.next
-client/next-env.d.ts
 .run
-*.tsbuildinfo
+coverage
+*.log
+
+# ── OS ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db

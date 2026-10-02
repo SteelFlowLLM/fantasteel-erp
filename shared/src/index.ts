@@ -1,4 +1,4 @@
-export * from './codes/define';
-export * from './codes/index';
+export * from './codes';
+export * from './errors';
 export * from './weight';
 export * from './api';

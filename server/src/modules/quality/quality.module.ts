@@ -1,14 +1,11 @@
 import { Module } from '@nestjs/common';
-import { QualityInspectionController } from './quality-inspection.controller';
-import { QualityInspectionService } from './quality-inspection.service';
+import { QualityController } from './quality.controller';
 import { QualityRepository } from './quality.repository';
-import { RejectedLotController } from './rejected-lot.controller';
-import { RejectedLotService } from './rejected-lot.service';
+import { QualityService } from './quality.service';
 
-// QualityInspectionService.registerInspection(tx, …)은 실적 시뮬레이션(production 모듈)도 쓴다.
+/** 검사 기준·검사·자동 판정·불합격 처리 (REQ-QC-001~004, BP-QC-01). 작업 안내: docs/backend/quality.md */
 @Module({
-  controllers: [QualityInspectionController, RejectedLotController],
-  providers: [QualityInspectionService, RejectedLotService, QualityRepository],
-  exports: [QualityInspectionService],
+  controllers: [QualityController],
+  providers: [QualityService, QualityRepository],
 })
 export class QualityModule {}

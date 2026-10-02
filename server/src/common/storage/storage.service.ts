@@ -1,37 +1,34 @@
 import { Injectable } from '@nestjs/common';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, normalize, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, type ReadStream } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
 
 /**
- * 파일 저장소. 코드 컨벤션은 Supabase Storage(첨부·밀시트 PDF)지만 로컬에서는 서버 폴더에 저장한다.
- * Supabase로 옮길 때 이 클래스만 바꾸면 된다.
+ * 파일 저장소: 메시지 첨부(REQ-MSG-003)·밀시트 PDF(REQ-SHP-004). DB에는 여기서 돌려준 경로만 저장한다.
+ * 지금은 로컬 폴더(STORAGE_DIR, 기본 server/storage)에 둔다. Supabase Storage로 옮길 때는 이 파일만 바꾼다 (컨벤션 3장).
  */
 @Injectable()
 export class StorageService {
-  private readonly root = resolve(process.env.STORAGE_DIR ?? './storage');
+  private readonly root = process.env.STORAGE_DIR ?? join(process.cwd(), 'storage');
 
-  /** 저장하고 저장 경로(키)를 돌려준다. */
-  async save(bucket: 'attachments' | 'mill-sheets', originalName: string, data: Buffer): Promise<string> {
-    const dir = join(this.root, bucket);
-    mkdirSync(dir, { recursive: true });
-    const key = `${bucket}/${randomUUID()}${extname(originalName).slice(0, 12)}`;
-    await writeFile(join(this.root, key), data);
-    return key;
+  /** folder 예: 'messages', 'mill-sheets'. 같은 이름 충돌을 피하려고 앞에 임의 id를 붙인다 */
+  async save(folder: string, fileName: string, content: Buffer): Promise<string> {
+    const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+    const path = `${folder}/${randomUUID()}-${safeName}`;
+    const full = this.resolve(path);
+    await mkdir(dirname(full), { recursive: true });
+    await writeFile(full, content);
+    return path;
   }
 
-  exists(key: string): boolean {
-    return existsSync(this.pathOf(key));
+  read(path: string): Promise<Buffer> {
+    return readFile(this.resolve(path));
   }
 
-  read(key: string): ReadStream {
-    return createReadStream(this.pathOf(key));
-  }
-
-  private pathOf(key: string): string {
-    const p = resolve(this.root, key);
-    if (!p.startsWith(this.root)) throw new Error('잘못된 파일 경로');
-    return p;
+  /** 저장소 밖 경로(../ 등)를 막는다 */
+  private resolve(path: string): string {
+    const full = normalize(join(this.root, path));
+    if (!full.startsWith(normalize(this.root) + sep)) throw new Error(`저장소 밖 경로입니다: ${path}`);
+    return full;
   }
 }

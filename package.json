@@ -12,7 +12,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "postinstall": "npm run build -w shared && npm run generate -w server",
+    "postinstall": "node scripts/init-claude-md.mjs && npm run build -w shared && npm run generate -w server",
     "db": "node scripts/local-db.mjs",
     "dev": "concurrently -k -n db,shared,server,client -c gray,yellow,blue,magenta \"npm:db\" \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:client\"",
     "dev:shared": "npm run dev -w shared",
@@ -22,8 +22,6 @@
     "migrate": "npm run migrate -w server",
     "seed": "npm run seed -w server",
     "db:reset": "cd server && node scripts/reset-db.mjs fantasteel",
-    "demo": "cd server && node scripts/demo-data.mjs",
-    "e2e": "cd server && node scripts/e2e-scenario.mjs",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "test": "npm run test -w server"
   },

@@ -1,17 +1,11 @@
-import { Global, Module } from '@nestjs/common';
-import { AllocationController } from './allocation.controller';
-import { AllocationRepository } from './allocation.repository';
-import { AllocationService } from './allocation.service';
+import { Module } from '@nestjs/common';
 import { InventoryController } from './inventory.controller';
 import { InventoryRepository } from './inventory.repository';
 import { InventoryService } from './inventory.service';
-import { StockService } from './stock.service';
 
-// StockService는 수주·생산·품질·출하가 함께 쓰므로 전역.
-@Global()
+/** 재고·예약·배정 (REQ-INV-001~009, BP-INV-01·02). 작업 안내: docs/backend/inventory.md */
 @Module({
-  controllers: [InventoryController, AllocationController],
-  providers: [StockService, InventoryService, InventoryRepository, AllocationService, AllocationRepository],
-  exports: [StockService],
+  controllers: [InventoryController],
+  providers: [InventoryService, InventoryRepository],
 })
 export class InventoryModule {}

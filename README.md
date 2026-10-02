@@ -5,7 +5,7 @@
 지금 저장소에는 두 가지가 같이 있습니다.
 
 - **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. **서버·DB 없이 브라우저 안의 가짜 DB(mock)만으로 동작하는 화면 전용 클라이언트**입니다. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
-- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 화면 재작업에서는 **건드리지 않았습니다.** 새 화면은 서버를 부르지 않고 `shared/`도 가져오지 않습니다. 화면을 서버에 다시 붙이는 일은 화면 재작업이 끝난 뒤의 과제입니다.
+- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)). 새 화면은 아직 서버를 부르지 않습니다.
 - P2(AI)·EX 기능은 화면만 있고 "준비 중"으로 표시됩니다. AI·LLM 호출은 없습니다.
 
 ## 화면 실행 (서버·DB 필요 없음)
@@ -65,42 +65,25 @@ npm run build -w @fantasteel/client
 | [docs/rework/PLAN.md](docs/rework/PLAN.md) | 화면 재작업 계획과 결정 |
 | [docs/rework/areas/README.md](docs/rework/areas/README.md) | 영역별 노트 색인 |
 | [docs/rework/seed-assumptions.md](docs/rework/seed-assumptions.md) | 시드 값과 6개 문서에 없어 정한 가정값 전체 |
-| [docs/notion/](docs/notion/) | 노션 설계 문서 스냅샷 (2026-09-30) |
-| [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md) · [docs/api/](docs/api/) · [docs/names/](docs/names/) | 서버 쪽 문서 (서버는 이번 재작업에서 그대로) |
+| [docs/notion/](docs/notion/) | 설계 문서 01~09 (기획안·요구사항·용어 사전·업무 프로세스·코드 컨벤션·공통 코드·KS 규격·API 명세서·역할·권한). 내용은 고치지 않습니다 |
+| [docs/erd/](docs/erd/) | ERD (DBML). 서버 스키마의 기준 |
+| [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md) · [docs/backend/](docs/backend/README.md) | 서버 실행·규칙, 모듈별 작업 안내, 세팅 때 정한 값 |
+| [CLAUDE.template.md](CLAUDE.template.md) | Claude Code 작업 규칙 초안. `npm install` 때 각자의 `CLAUDE.md`(git 제외)로 복사된다 |
 
-## 서버와 DB (이번 화면 재작업에서는 그대로)
+## 서버와 DB
 
-아래는 `server/`와 DB를 쓸 때의 안내입니다. 새 화면은 이 부분과 연결되어 있지 않습니다. 명령은 모두 저장소 맨 위에서 실행합니다.
+명령은 모두 저장소 맨 위에서 실행합니다. 자세한 내용은 [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md).
 
-`npm run dev`는 로컬 PostgreSQL(포트 54322) · shared 빌드 · API 서버(8787) · 화면을 함께 띄웁니다. 서버를 띄우기 전에 마이그레이션을 적용하고, DB가 비어 있으면 시드를 넣습니다(`server/scripts/prepare-db.mjs`). PostgreSQL·Docker 설치 없이 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 DB를 띄웁니다. `server/.env`는 다른 DB(예: Supabase)를 쓸 때만 만듭니다.
-
-### 데이터
+`npm run dev`는 로컬 PostgreSQL(포트 54322) · shared 빌드 · API 서버(8787) · 화면을 함께 띄웁니다. 서버를 띄우기 전에 마이그레이션을 적용하고, DB가 비어 있으면 시드를 넣고, TypedSQL 타입을 만듭니다(`server/scripts/prepare-db.mjs`). PostgreSQL·Docker 설치 없이 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 DB를 띄웁니다. `server/.env`는 다른 DB(예: Supabase)를 쓸 때만 만듭니다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run db:reset` | 개발 DB를 지우고 스키마 + 시드(조직·기준정보·초기 재고)만 넣습니다. **데이터가 모두 사라집니다** |
-| `npm run demo` | 시연용 거래 데이터를 실제 API로 만듭니다. 서버가 떠 있어야 하고, 수주가 하나도 없을 때만 동작합니다 |
-| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (Prisma Migrate) |
+| `npm run db:reset` | 개발 DB를 지우고 스키마 + 시드(조직·권한·기준정보·검사 기준)를 넣습니다. **데이터가 모두 사라집니다** |
+| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자) |
+| `npm test` | 서버 테스트. 묶음별 테스트 전용 DB(`fs_*`)를 새로 만들어 돌립니다(개발 DB는 건드리지 않음). DB가 떠 있어야 합니다 |
+| `npm run typecheck` | shared·server·client 타입 검사 |
 
-DB만 따로 띄우려면 `npm run db`.
-
-### 점검 (서버)
-
-```bash
-npm test
-```
-
-`npm test`는 서버 테스트를 묶음별 전용 DB(`fs_*`)에서 돌립니다(개발 DB는 건드리지 않습니다). DB가 떠 있어야 합니다. `npm run typecheck`는 shared·server·client를 모두 검사합니다.
-
-서버 쪽 인수 시나리오 14.1을 HTTP로 끝까지 돌려 보려면, 깨끗한 시드 DB로 서버를 하나 더 띄우고 실행합니다.
-
-```bash
-cd server && npx nest build && node scripts/reset-db.mjs fs_e2e && DATABASE_URL=postgresql://postgres:postgres@localhost:54322/fs_e2e API_PORT=8899 node dist/main.js
-```
-
-```bash
-npm run e2e
-```
+DB만 따로 띄우려면 `npm run db`. 테스트 계정은 [docs/backend/seed.md](docs/backend/seed.md) (비밀번호 `fantasteel`).
 
 ### Supabase로 옮길 때
 

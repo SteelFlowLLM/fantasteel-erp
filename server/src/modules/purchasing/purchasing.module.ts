@@ -1,25 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ApproverPolicy } from './approver.policy';
-import { GoodsReceiptController } from './goods-receipt.controller';
-import { GoodsReceiptRepository } from './goods-receipt.repository';
-import { GoodsReceiptService } from './goods-receipt.service';
-import { PurchaseOrderController } from './purchase-order.controller';
-import { PurchaseOrderRepository } from './purchase-order.repository';
-import { PurchaseOrderService } from './purchase-order.service';
-import { PurchaseRequisitionActionHandler } from './purchase-requisition-action.handler';
-import { ApprovalController, PurchaseRequisitionController } from './purchase-requisition.controller';
-import { PurchaseRequisitionRepository } from './purchase-requisition.repository';
-import { PurchaseRequisitionService } from './purchase-requisition.service';
+import { PurchasingController } from './purchasing.controller';
+import { PurchasingRepository } from './purchasing.repository';
+import { PurchasingService } from './purchasing.service';
 
-// 구매요청·부서장 승인·발주·입고 (REQ-PUR-001~004). 실행 핸들러는 message-action 모듈이 가져다 쓴다.
+/** 구매요청·부서장 승인·발주·입고 (REQ-PUR-001~004, BP-PUR-01·02). 작업 안내: docs/backend/purchasing.md */
 @Module({
-  controllers: [PurchaseRequisitionController, ApprovalController, PurchaseOrderController, GoodsReceiptController],
-  providers: [
-    ApproverPolicy,
-    PurchaseRequisitionRepository, PurchaseRequisitionService, PurchaseRequisitionActionHandler,
-    PurchaseOrderRepository, PurchaseOrderService,
-    GoodsReceiptRepository, GoodsReceiptService,
-  ],
-  exports: [PurchaseRequisitionActionHandler],
+  controllers: [PurchasingController],
+  providers: [PurchasingService, PurchasingRepository],
 })
 export class PurchasingModule {}

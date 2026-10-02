@@ -1,31 +1,12 @@
-import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { AuthUser } from '@fantasteel/shared';
-import { CurrentUser } from '../../common/auth/auth.decorators';
-import { ListNotificationsDto } from './dto/list-notifications.dto';
+import { Controller } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 
-// 내 알림만 다룬다. 로그인한 누구나 쓰므로 권한 데코레이터는 없다.
-@Controller('notifications')
+/**
+ * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
+ * 경로는 API 명세서와 docs/backend/notification.md. 리소스가 여러 개라 메서드마다 전체 경로를 쓴다 (예: @Get('sales-orders/:id')).
+ * 전역 prefix /api/v1은 main.ts가 붙인다.
+ */
+@Controller()
 export class NotificationController {
   constructor(private readonly service: NotificationService) {}
-
-  @Get()
-  list(@Query() q: ListNotificationsDto, @CurrentUser() user: AuthUser) {
-    return this.service.listMine(q, user);
-  }
-
-  @Get('unread-count')
-  unreadCount(@CurrentUser() user: AuthUser) {
-    return this.service.unreadCount(user);
-  }
-
-  @Post('read-all') @HttpCode(200)
-  readAll(@CurrentUser() user: AuthUser) {
-    return this.service.markAllRead(user);
-  }
-
-  @Post(':id/read') @HttpCode(200)
-  read(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
-    return this.service.markRead(id, user);
-  }
 }

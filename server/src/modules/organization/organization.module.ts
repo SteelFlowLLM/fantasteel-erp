@@ -1,22 +1,11 @@
-import { Global, Module } from '@nestjs/common';
-import { ApproverResolver } from './approver.resolver';
-import { DepartmentController } from './department.controller';
-import { DepartmentRepository } from './department.repository';
-import { DepartmentService } from './department.service';
-import { EmployeeController } from './employee.controller';
-import { EmployeeRepository } from './employee.repository';
-import { EmployeeService } from './employee.service';
-import { RoleController } from './role.controller';
-import { RoleRepository } from './role.repository';
-import { RoleService } from './role.service';
+import { Module } from '@nestjs/common';
+import { OrganizationController } from './organization.controller';
+import { OrganizationRepository } from './organization.repository';
+import { OrganizationService } from './organization.service';
 
-export { ApproverResolver, type ResolvedApprover } from './approver.resolver';
-
-// 전역: 구매 모듈 등이 imports 없이 ApproverResolver를 주입받는다.
-@Global()
+/** 조직관리·사원 (REQ-AUTH-002~004, REQ-ORG-001~004, BP-AUTH-01). 작업 안내: docs/backend/organization.md */
 @Module({
-  controllers: [EmployeeController, DepartmentController, RoleController],
-  providers: [EmployeeService, EmployeeRepository, DepartmentService, DepartmentRepository, RoleService, RoleRepository, ApproverResolver],
-  exports: [ApproverResolver],
+  controllers: [OrganizationController],
+  providers: [OrganizationService, OrganizationRepository],
 })
 export class OrganizationModule {}
