@@ -1,20 +1,11 @@
-import { Global, Module } from '@nestjs/common';
-import { AttachmentInterceptor } from './attachment.interceptor';
-import { ChatRoomController } from './chat-room.controller';
-import { ChatRoomService } from './chat-room.service';
-import { ChatSystemMessenger } from './chat-system-messenger';
-import { ErpReferenceResolver } from './erp-reference.resolver';
-import { MessageController } from './message.controller';
-import { MessagePublisher } from './message.publisher';
-import { MessageService } from './message.service';
+import { Module } from '@nestjs/common';
+import { MessengerController } from './messenger.controller';
 import { MessengerRepository } from './messenger.repository';
+import { MessengerService } from './messenger.service';
 
-// ChatSystemMessenger는 다른 모듈이 업무방에 시스템 메시지를 남길 때 쓰므로 전역으로 내보낸다.
-// 실시간 연결(인증·사원별 채널)은 common의 RealtimeGateway가 맡고, 메시지 보내기는 REST로만 받는다.
-@Global()
+/** 채팅방·메시지·첨부·읽음·실시간 (REQ-MSG-001~006, BP-MSG-01). 작업 안내: docs/backend/messenger.md */
 @Module({
-  controllers: [ChatRoomController, MessageController],
-  providers: [MessengerRepository, ErpReferenceResolver, MessagePublisher, ChatRoomService, MessageService, ChatSystemMessenger, AttachmentInterceptor],
-  exports: [ChatSystemMessenger],
+  controllers: [MessengerController],
+  providers: [MessengerService, MessengerRepository],
 })
 export class MessengerModule {}

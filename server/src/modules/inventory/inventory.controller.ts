@@ -1,19 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { ListInventoriesDto, ListSurplusDto } from './dto/list-inventories.dto';
+import { Controller } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 
-// 재고는 수주 입력(가용 매수)·생산·구매·출하·품질 화면이 모두 보므로 로그인한 사원이면 조회할 수 있다.
-@Controller('inventories')
+/**
+ * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
+ * 경로는 API 명세서와 docs/backend/inventory.md. 리소스가 여러 개라 메서드마다 전체 경로를 쓴다 (예: @Get('sales-orders/:id')).
+ * 전역 prefix /api/v1은 main.ts가 붙인다.
+ */
+@Controller()
 export class InventoryController {
   constructor(private readonly service: InventoryService) {}
-
-  @Get()
-  list(@Query() q: ListInventoriesDto) {
-    return this.service.list(q);
-  }
-
-  @Get('surplus')
-  surplus(@Query() q: ListSurplusDto) {
-    return this.service.surplus(q);
-  }
 }

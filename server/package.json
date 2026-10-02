@@ -8,11 +8,14 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "generate": "prisma generate",
+    "generate:sql": "prisma generate --sql",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
+    "check-orphans": "node scripts/check-orphans.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "test:unit": "node scripts/test.mjs --unit"
   },
   "dependencies": {
     "@fantasteel/shared": "*",

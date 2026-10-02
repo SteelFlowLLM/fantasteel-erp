@@ -1,21 +1,12 @@
-import { Controller, Get } from '@nestjs/common';
-import { PERMISSION } from '@fantasteel/shared';
-import { RequireView } from '../../common/auth/auth.decorators';
-import { LookupService } from './lookup.service';
-import { ValidationService } from './validation.service';
+import { Controller } from '@nestjs/common';
+import { MasterDataService } from './master-data.service';
 
-@Controller('master-data')
+/**
+ * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
+ * 경로는 API 명세서와 docs/backend/master-data.md. 리소스가 여러 개라 메서드마다 전체 경로를 쓴다 (예: @Get('sales-orders/:id')).
+ * 전역 prefix /api/v1은 main.ts가 붙인다.
+ */
+@Controller()
 export class MasterDataController {
-  constructor(
-    private readonly lookups: LookupService,
-    private readonly validation: ValidationService,
-  ) {}
-
-  /** 선택 목록. 권한 데코레이터 없음 = 로그인한 모든 사원 (수주·생산·구매 화면이 쓴다) */
-  @Get('lookups')
-  getLookups() { return this.lookups.lookups(); }
-
-  /** 기준정보 준비 상태 점검 (MST-001) */
-  @Get('validation') @RequireView(PERMISSION.MASTER_MANAGE)
-  check() { return this.validation.check(); }
+  constructor(private readonly service: MasterDataService) {}
 }

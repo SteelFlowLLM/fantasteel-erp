@@ -1,339 +1,436 @@
-// 시드: 역할·권한, 부서 계층·부서장, 테스트 계정, 강종 3종 × 슬래브 규격 3종과 코일 매핑, 라우팅, 배합 원단위,
-// 고객사·공급업체·야드, 검사 항목, 초기 재고(원료 LOT, 합격 슬래브·코일). 반복 실행해도 결과가 같다 (코드 컨벤션 7-4).
-// 원단위·수율·성분·검사 기준은 시연용 가정값이다 (기획안 가정).
+// 시드: 조직·권한·기준정보·검사 기준 (코드 컨벤션 7-4). 거래 데이터(수주·LOT 등)는 넣지 않는다.
+// 반복 실행해도 결과가 같다(unique 키로 upsert, unique가 없는 테이블은 찾아서 고치거나 만든다).
+// 문서에 값이 없는 것은 가정값이며 근거는 docs/backend/seed.md에 있다.
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
-import * as bcrypt from 'bcryptjs';
-import { calcTheoreticalWeightTon, DEFAULT_ROLE_PERMISSIONS, ROLE_CODE_LABEL, ROLE_CODES } from '@fantasteel/shared';
+import { hash } from 'bcryptjs';
+import {
+  calcTheoreticalWeightTon,
+  PERMISSION,
+  ROLE_LABEL,
+  type Permission,
+  type PermissionLevel,
+  type ProcessType,
+  type RawMaterialType,
+  type Role,
+  type YardType,
+} from '@fantasteel/shared';
 import { PrismaClient } from '../src/generated/prisma/client';
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54322/fantasteel' }) });
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54322/fantasteel' }),
+});
 
-/** 테스트 계정 공통 비밀번호 (로컬 시연용). */
-export const SEED_PASSWORD = 'heatline';
+/** 테스트 계정 비밀번호 (모든 사원 같음). 로컬·시연용 */
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'fantasteel';
 
-const DAY = 86_400_000;
-const daysAgo = (n: number, hour = 9) => {
-  const d = new Date(Date.now() - n * DAY);
-  d.setHours(hour, 0, 0, 0);
-  return d;
-};
-const yymmdd = (d: Date) => {
-  const k = new Date(d.getTime() + 9 * 3600_000);
-  return `${String(k.getUTCFullYear()).slice(2)}${String(k.getUTCMonth() + 1).padStart(2, '0')}${String(k.getUTCDate()).padStart(2, '0')}`;
-};
+// ── 조직 ────────────────────────────────────────────────
 
-async function seedRoles() {
-  for (const code of ROLE_CODES) {
-    const role = await prisma.role.upsert({ where: { roleCode: code }, create: { roleCode: code, roleName: ROLE_CODE_LABEL[code] }, update: { roleName: ROLE_CODE_LABEL[code] } });
-    for (const [permissionCode, permissionLevel] of Object.entries(DEFAULT_ROLE_PERMISSIONS[code])) {
-      await prisma.rolePermission.upsert({
-        where: { roleId_permissionCode: { roleId: role.id, permissionCode } },
-        create: { roleId: role.id, permissionCode, permissionLevel: permissionLevel! },
-        update: {},
-      });
-    }
-  }
+const JOB_GRADES = [
+  { jobGradeName: '부장', sortOrder: 10 },
+  { jobGradeName: '차장', sortOrder: 20 },
+  { jobGradeName: '과장', sortOrder: 30 },
+  { jobGradeName: '대리', sortOrder: 40 },
+  { jobGradeName: '사원', sortOrder: 50 },
+] as const;
+type JobGradeName = (typeof JOB_GRADES)[number]['jobGradeName'];
+
+/** 부서 계층 (REQ-ORG-001 예: 생산부 하위 제선·제강·연주·열연 파트) */
+const DEPARTMENTS = [
+  { departmentCode: 'SAL', departmentName: '영업부', parentCode: null },
+  { departmentCode: 'PUR', departmentName: '구매부', parentCode: null },
+  { departmentCode: 'PRD', departmentName: '생산부', parentCode: null },
+  { departmentCode: 'PRD-IRON', departmentName: '제선파트', parentCode: 'PRD' },
+  { departmentCode: 'PRD-STEEL', departmentName: '제강파트', parentCode: 'PRD' },
+  { departmentCode: 'PRD-CAST', departmentName: '연주파트', parentCode: 'PRD' },
+  { departmentCode: 'PRD-HR', departmentName: '열연파트', parentCode: 'PRD' },
+  { departmentCode: 'QC', departmentName: '품질부', parentCode: null },
+  { departmentCode: 'LOG', departmentName: '물류부', parentCode: null },
+  { departmentCode: 'MGT', departmentName: '경영지원부', parentCode: null },
+] as const;
+type DepartmentCode = (typeof DEPARTMENTS)[number]['departmentCode'];
+
+/** 역할마다 1명 이상, 부서마다 부서장 1명 (부서장은 역할이 아니다, REQ-AUTH-004) */
+const EMPLOYEES: { employeeNo: string; employeeName: string; department: DepartmentCode; jobGrade: JobGradeName; role: Role; headOf?: DepartmentCode }[] = [
+  { employeeNo: '1503001', employeeName: '이현정', department: 'MGT', jobGrade: '부장', role: 'ADMIN', headOf: 'MGT' },
+  { employeeNo: '1608002', employeeName: '김도윤', department: 'SAL', jobGrade: '부장', role: 'SALES', headOf: 'SAL' },
+  { employeeNo: '2103003', employeeName: '박서영', department: 'SAL', jobGrade: '대리', role: 'SALES' },
+  { employeeNo: '1702004', employeeName: '최준혁', department: 'PUR', jobGrade: '부장', role: 'PURCHASE', headOf: 'PUR' },
+  { employeeNo: '2207005', employeeName: '정다은', department: 'PUR', jobGrade: '사원', role: 'PURCHASE' },
+  { employeeNo: '1401006', employeeName: '강민석', department: 'PRD', jobGrade: '부장', role: 'PRODUCTION', headOf: 'PRD' },
+  { employeeNo: '1709007', employeeName: '윤성호', department: 'PRD-IRON', jobGrade: '차장', role: 'PRODUCTION', headOf: 'PRD-IRON' },
+  { employeeNo: '1804008', employeeName: '장혜린', department: 'PRD-STEEL', jobGrade: '과장', role: 'PRODUCTION', headOf: 'PRD-STEEL' },
+  { employeeNo: '1906009', employeeName: '임재원', department: 'PRD-CAST', jobGrade: '과장', role: 'PRODUCTION', headOf: 'PRD-CAST' },
+  { employeeNo: '2001010', employeeName: '한승우', department: 'PRD-HR', jobGrade: '과장', role: 'PRODUCTION', headOf: 'PRD-HR' },
+  { employeeNo: '2402011', employeeName: '조은서', department: 'PRD-STEEL', jobGrade: '사원', role: 'PRODUCTION' },
+  { employeeNo: '1802012', employeeName: '오지훈', department: 'QC', jobGrade: '부장', role: 'QUALITY', headOf: 'QC' },
+  { employeeNo: '2205013', employeeName: '서민지', department: 'QC', jobGrade: '대리', role: 'QUALITY' },
+  { employeeNo: '1610014', employeeName: '신현우', department: 'LOG', jobGrade: '부장', role: 'LOGISTICS', headOf: 'LOG' },
+  { employeeNo: '2304015', employeeName: '권예진', department: 'LOG', jobGrade: '사원', role: 'LOGISTICS' },
+];
+
+/**
+ * 역할별 기본 권한: docs/notion/roles-permissions/역할별 메뉴 (v2) 3장 표 그대로. ● = USE, ○ = VIEW, 빈칸 = 행 없음.
+ * 열 순서: 영업 · 구매 · 생산 · 품질 · 물류 · 관리자
+ */
+const ROLE_ORDER: Role[] = ['SALES', 'PURCHASE', 'PRODUCTION', 'QUALITY', 'LOGISTICS', 'ADMIN'];
+const ROLE_PERMISSION_TABLE: [Permission, string][] = [
+  [PERMISSION.SALES_ORDER_CREATE, '● _ ○ _ ○ ○'],
+  [PERMISSION.SALES_ORDER_CANCEL, '● _ _ _ _ ○'],
+  [PERMISSION.SHIPMENT_REQUEST_MANAGE, '● _ _ _ ○ ○'],
+  [PERMISSION.PURCHASE_REQUISITION_CREATE, '_ ● ○ _ _ ○'],
+  [PERMISSION.PURCHASE_ORDER_CONFIRM, '_ ● _ _ _ ○'],
+  [PERMISSION.GOODS_RECEIPT_CONFIRM, '_ ● _ _ ○ ○'],
+  [PERMISSION.PRODUCTION_PLAN_CONFIRM, '○ ○ ● ○ _ ○'],
+  [PERMISSION.PRODUCTION_RESULT_CONFIRM, '_ _ ● ○ _ ○'],
+  [PERMISSION.HOT_ROLLING_ALLOCATE, '_ _ ● _ _ ○'],
+  [PERMISSION.INSPECTION_REGISTER, '_ _ ○ ● _ ○'],
+  [PERMISSION.INSPECTION_STANDARD_MANAGE, '_ _ ○ ● _ ○'],
+  [PERMISSION.DISPOSITION_SET, '_ _ _ ● _ ○'],
+  [PERMISSION.GOODS_ISSUE_CONFIRM, '○ _ _ ○ ● ○'],
+  [PERMISSION.MILL_SHEET_READ, '○ _ _ ○ ● ○'],
+  [PERMISSION.EMPLOYEE_MANAGE, '_ _ _ _ _ ●'],
+  [PERMISSION.ORG_MANAGE, '_ _ _ _ _ ●'],
+  [PERMISSION.MASTER_MANAGE, '○ ○ ○ ○ _ ●'],
+];
+
+// ── 기준정보 ─────────────────────────────────────────────
+
+/** 강종 6종과 적용 규격 번호 (공통 코드 정의서 STEEL_GRADE, KS 규격 정리). SPHC는 판 연도 확인 전이라 번호만 */
+const STEEL_GRADES = [
+  { steelGradeCode: 'SS275', steelGradeName: 'SS275', standardNo: 'KS D 3503:2026' },
+  { steelGradeCode: 'SM355A', steelGradeName: 'SM355A', standardNo: 'KS D 3515:2018' },
+  { steelGradeCode: 'SM355B', steelGradeName: 'SM355B', standardNo: 'KS D 3515:2018' },
+  { steelGradeCode: 'SM355C', steelGradeName: 'SM355C', standardNo: 'KS D 3515:2018' },
+  { steelGradeCode: 'SM355D', steelGradeName: 'SM355D', standardNo: 'KS D 3515:2018' },
+  { steelGradeCode: 'SPHC', steelGradeName: 'SPHC', standardNo: 'KS D 3501' },
+] as const;
+type SteelGradeCode = (typeof STEEL_GRADES)[number]['steelGradeCode'];
+
+const CUSTOMERS = [
+  { customerCode: 'CUS-01', customerName: '가람중공업' },
+  { customerCode: 'CUS-02', customerName: '나래조선' },
+  { customerCode: 'CUS-03', customerName: '다온건설' },
+  { customerCode: 'CUS-04', customerName: '보람강관' },
+];
+
+const SUPPLIERS = [
+  { supplierCode: 'SUP-01', supplierName: '가온광업' },
+  { supplierCode: 'SUP-02', supplierName: '누리에너지' },
+  { supplierCode: 'SUP-03', supplierName: '소담광물' },
+  { supplierCode: 'SUP-04', supplierName: '하람합금철' },
+];
+
+const YARDS: { yardCode: string; yardName: string; yardType: YardType }[] = [
+  { yardCode: 'YD-RM-01', yardName: '원료 1야드', yardType: 'RAW_MATERIAL' },
+  { yardCode: 'YD-SL-01', yardName: '슬래브 1야드', yardType: 'SLAB' },
+  { yardCode: 'YD-CL-01', yardName: '코일 1야드', yardType: 'COIL' },
+];
+
+/** 원료 4종 (컨벤션 7-4) */
+const RAW_MATERIALS: { itemCode: string; itemName: string; rawMaterialType: RawMaterialType; supplierCode: string }[] = [
+  { itemCode: 'ORE01', itemName: '철광석', rawMaterialType: 'IRON_ORE', supplierCode: 'SUP-01' },
+  { itemCode: 'COL01', itemName: '석탄', rawMaterialType: 'COAL', supplierCode: 'SUP-02' },
+  { itemCode: 'LIM01', itemName: '석회석', rawMaterialType: 'LIMESTONE', supplierCode: 'SUP-03' },
+  { itemCode: 'SMN01', itemName: '실리코망가니즈', rawMaterialType: 'FERROALLOY', supplierCode: 'SUP-04' },
+];
+
+/** 규격을 만드는 강종 4종. SM355C·D는 강종만 등록 (REQ-MST-002) */
+const SPEC_GRADES: SteelGradeCode[] = ['SS275', 'SM355A', 'SM355B', 'SPHC'];
+
+interface Dimensions {
+  thicknessMm: string;
+  widthMm: string;
+  lengthMm: string;
 }
-
-const DEPARTMENTS: { code: string; name: string; parent?: string; order: number }[] = [
-  { code: 'HQ', name: '포항제철소', order: 0 },
-  { code: 'SALES', name: '영업부', parent: 'HQ', order: 1 },
-  { code: 'PURCHASE', name: '구매부', parent: 'HQ', order: 2 },
-  { code: 'PRODUCTION', name: '생산부', parent: 'HQ', order: 3 },
-  { code: 'PRD-IRON', name: '제선파트', parent: 'PRODUCTION', order: 1 },
-  { code: 'PRD-STEEL', name: '제강파트', parent: 'PRODUCTION', order: 2 },
-  { code: 'PRD-CAST', name: '연주파트', parent: 'PRODUCTION', order: 3 },
-  { code: 'PRD-ROLL', name: '열연파트', parent: 'PRODUCTION', order: 4 },
-  { code: 'QUALITY', name: '품질부', parent: 'HQ', order: 4 },
-  { code: 'LOGISTICS', name: '물류부', parent: 'HQ', order: 5 },
-  { code: 'ADMIN', name: '경영지원부', parent: 'HQ', order: 6 },
+/**
+ * 슬래브 규격 3종과 대응 코일 (ERD: 치수 decimal(8,2)).
+ * 슬래브 250×1200×10000·250×1500×10000은 문서 예시, 220×1400×9500은 가정값.
+ * 코일 폭은 슬래브와 같고 길이는 코일 이론중량이 슬래브보다 조금 작게(열연 계획 수율 약 0.98) 정했다.
+ * 코일 길이는 decimal(8,2) 최대값(999,999.99mm) 안에 들게 했다.
+ */
+const SLAB_COIL_DIMENSIONS: { slab: Dimensions; coil: Dimensions }[] = [
+  { slab: { thicknessMm: '250.00', widthMm: '1200.00', lengthMm: '10000.00' }, coil: { thicknessMm: '2.50', widthMm: '1200.00', lengthMm: '980000.00' } },
+  { slab: { thicknessMm: '250.00', widthMm: '1500.00', lengthMm: '10000.00' }, coil: { thicknessMm: '4.50', widthMm: '1500.00', lengthMm: '544000.00' } },
+  { slab: { thicknessMm: '220.00', widthMm: '1400.00', lengthMm: '9500.00' }, coil: { thicknessMm: '9.00', widthMm: '1400.00', lengthMm: '227500.00' } },
 ];
 
-// 부서장은 부서별 지정이다 (역할이 아니다). head = 그 부서의 부서장.
-const EMPLOYEES: { no: string; name: string; dept: string; role: string; grade: string; head?: string[] }[] = [
-  { no: '1001001', name: '한소장', dept: 'HQ', role: 'ADMIN', grade: '소장', head: ['HQ'] },
-  { no: '1502003', name: '오영업', dept: 'SALES', role: 'SALES', grade: '부장', head: ['SALES'] },
-  { no: '2104012', name: '김영업', dept: 'SALES', role: 'SALES', grade: '대리' },
-  { no: '2203018', name: '신영업', dept: 'SALES', role: 'SALES', grade: '사원' },
-  { no: '1604007', name: '남구매', dept: 'PURCHASE', role: 'PURCHASE', grade: '부장', head: ['PURCHASE'] },
-  { no: '1907015', name: '서구매', dept: 'PURCHASE', role: 'PURCHASE', grade: '과장' },
-  { no: '1402002', name: '강생산', dept: 'PRODUCTION', role: 'PRODUCTION', grade: '부장', head: ['PRODUCTION'] },
-  { no: '1803021', name: '박생산', dept: 'PRODUCTION', role: 'PRODUCTION', grade: '과장' },
-  { no: '2006027', name: '정제선', dept: 'PRD-IRON', role: 'PRODUCTION', grade: '대리', head: ['PRD-IRON'] },
-  { no: '2001009', name: '최생산', dept: 'PRD-STEEL', role: 'PRODUCTION', grade: '대리', head: ['PRD-STEEL'] },
-  { no: '2108031', name: '임연주', dept: 'PRD-CAST', role: 'PRODUCTION', grade: '대리', head: ['PRD-CAST'] },
-  { no: '2110033', name: '조열연', dept: 'PRD-ROLL', role: 'PRODUCTION', grade: '대리', head: ['PRD-ROLL'] },
-  { no: '1705011', name: '문품질', dept: 'QUALITY', role: 'QUALITY', grade: '부장', head: ['QUALITY'] },
-  { no: '1911030', name: '정품질', dept: 'QUALITY', role: 'QUALITY', grade: '과장' },
-  { no: '2207041', name: '한품질', dept: 'QUALITY', role: 'QUALITY', grade: '사원' },
-  { no: '1806013', name: '배물류', dept: 'LOGISTICS', role: 'LOGISTICS', grade: '부장', head: ['LOGISTICS'] },
-  { no: '2005024', name: '윤물류', dept: 'LOGISTICS', role: 'LOGISTICS', grade: '대리' },
-  { no: '1704010', name: '이관리', dept: 'ADMIN', role: 'ADMIN', grade: '차장', head: ['ADMIN'] },
+/** 라우팅과 공정별 계획 수율 (시연용 가정값, 기획안). 제선은 4.4 계산식에 쓰지 않아 비우고, 열연은 규격 매핑에서 계산 */
+const ROUTINGS: { itemType: 'SLAB' | 'COIL'; processType: ProcessType; sequenceNo: number; plannedYieldRate: string | null }[] = [
+  { itemType: 'SLAB', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null },
+  { itemType: 'SLAB', processType: 'STEELMAKING', sequenceNo: 2, plannedYieldRate: '0.9000' },
+  { itemType: 'SLAB', processType: 'CONTINUOUS_CASTING', sequenceNo: 3, plannedYieldRate: '0.9800' },
+  { itemType: 'COIL', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null },
+  { itemType: 'COIL', processType: 'STEELMAKING', sequenceNo: 2, plannedYieldRate: '0.9000' },
+  { itemType: 'COIL', processType: 'CONTINUOUS_CASTING', sequenceNo: 3, plannedYieldRate: '0.9800' },
+  { itemType: 'COIL', processType: 'HOT_ROLLING', sequenceNo: 4, plannedYieldRate: null },
 ];
+
+/** 배합 원단위 (가정값). 철광석·석탄·석회석은 용선 1t당 t(공통), 합금철은 용강 1t당 kg(강종별) */
+const SPECIFIC_CONSUMPTIONS: { itemCode: string; steelGradeCode: SteelGradeCode | null; consumptionRate: string }[] = [
+  { itemCode: 'ORE01', steelGradeCode: null, consumptionRate: '1.6000' },
+  { itemCode: 'COL01', steelGradeCode: null, consumptionRate: '0.6000' },
+  { itemCode: 'LIM01', steelGradeCode: null, consumptionRate: '0.1500' },
+  { itemCode: 'SMN01', steelGradeCode: 'SS275', consumptionRate: '10.0000' },
+  { itemCode: 'SMN01', steelGradeCode: 'SM355A', consumptionRate: '20.0000' },
+  { itemCode: 'SMN01', steelGradeCode: 'SM355B', consumptionRate: '20.0000' },
+  { itemCode: 'SMN01', steelGradeCode: 'SPHC', consumptionRate: '4.0000' },
+];
+
+// ── 검사 기준 (REQ-QC-001·002, KS 규격 정리) ───────────────────
+
+interface StandardItem {
+  code: string;
+  name: string;
+  unit: string | null;
+  min: string | null;
+  max: string | null;
+  /** 적용 두께 구간: 초과 */
+  over?: string | null;
+  /** 적용 두께 구간: 이하 */
+  upto?: string | null;
+}
+const pct = (code: string, name: string, max: string): StandardItem => ({ code, name, unit: '%', min: null, max });
+const N = 'N/mm²';
+
+/** 제강 = 히트 성분 상한 (KS). SM355 C·Ceq는 50mm 이하 값. SPHC는 Si 없음 */
+const STEELMAKING_ITEMS: Record<SteelGradeCode, StandardItem[]> = {
+  SS275: [pct('C', '탄소(C)', '0.25'), pct('SI', '규소(Si)', '0.45'), pct('MN', '망간(Mn)', '1.40'), pct('P', '인(P)', '0.050'), pct('S', '황(S)', '0.050')],
+  SM355A: [pct('C', '탄소(C)', '0.20'), pct('SI', '규소(Si)', '0.55'), pct('MN', '망간(Mn)', '1.60'), pct('P', '인(P)', '0.035'), pct('S', '황(S)', '0.035'), pct('CEQ', '탄소당량(Ceq)', '0.47')],
+  SM355B: [pct('C', '탄소(C)', '0.18'), pct('SI', '규소(Si)', '0.55'), pct('MN', '망간(Mn)', '1.60'), pct('P', '인(P)', '0.030'), pct('S', '황(S)', '0.030'), pct('CEQ', '탄소당량(Ceq)', '0.47')],
+  SM355C: [pct('C', '탄소(C)', '0.18'), pct('SI', '규소(Si)', '0.55'), pct('MN', '망간(Mn)', '1.60'), pct('P', '인(P)', '0.025'), pct('S', '황(S)', '0.025'), pct('CEQ', '탄소당량(Ceq)', '0.47')],
+  SM355D: [pct('C', '탄소(C)', '0.18'), pct('SI', '규소(Si)', '0.55'), pct('MN', '망간(Mn)', '1.60'), pct('P', '인(P)', '0.020'), pct('S', '황(S)', '0.020'), pct('CEQ', '탄소당량(Ceq)', '0.47')],
+  SPHC: [pct('C', '탄소(C)', '0.15'), pct('MN', '망간(Mn)', '0.60'), pct('P', '인(P)', '0.050'), pct('S', '황(S)', '0.050')],
+};
+
+/** 연주 = 슬래브 표면·치수. KS에 없어 사내 규격 가정값 (규격 대비 편차) */
+const CASTING_ITEMS: StandardItem[] = [
+  { code: 'THICKNESS_DEV', name: '두께 편차', unit: 'mm', min: '-5.00', max: '5.00' },
+  { code: 'WIDTH_DEV', name: '폭 편차', unit: 'mm', min: '-10.00', max: '10.00' },
+  { code: 'LENGTH_DEV', name: '길이 편차', unit: 'mm', min: '-10.00', max: '30.00' },
+  { code: 'SURFACE_DEFECT_DEPTH', name: '표면 결함 깊이', unit: 'mm', min: '0.00', max: '2.00' },
+];
+
+const bands = (code: string, name: string, unit: string, rows: [string | null, string | null, string][]): StandardItem[] =>
+  rows.map(([over, upto, min]) => ({ code, name, unit, min, max: null, over, upto }));
+
+/** 시드 코일 두께의 두께 허용차 (KS D 3500 표 5, 폭 1200~1600 칸), 너비 허용차, 캠버 */
+const COIL_DIMENSION_ITEMS: StandardItem[] = [
+  { code: 'THICKNESS_TOL', name: '두께 허용차', unit: 'mm', min: '-0.20', max: '0.20', over: '2.00', upto: '2.50' },
+  { code: 'THICKNESS_TOL', name: '두께 허용차', unit: 'mm', min: '-0.28', max: '0.28', over: '4.00', upto: '5.00' },
+  { code: 'THICKNESS_TOL', name: '두께 허용차', unit: 'mm', min: '-0.42', max: '0.42', over: '8.00', upto: '10.00' },
+  { code: 'WIDTH_TOL', name: '너비 허용차', unit: 'mm', min: '0.00', max: '25.00' },
+  { code: 'CAMBER', name: '캠버(길이 2000mm당)', unit: 'mm', min: null, max: '5.00' },
+];
+
+const SM_MECHANICAL: StandardItem[] = [
+  ...bands('YIELD_STRENGTH', '항복강도', N, [[null, '16.00', '355'], ['16.00', '40.00', '345'], ['40.00', '75.00', '335'], ['75.00', '100.00', '325'], ['100.00', '200.00', '305']]),
+  { code: 'TENSILE_STRENGTH', name: '인장강도', unit: N, min: '490', max: '630' },
+  ...bands('ELONGATION', '연신율', '%', [[null, '5.00', '22'], ['5.00', '16.00', '17'], ['16.00', '40.00', '19'], ['40.00', null, '23']]),
+];
+/** 샤르피 충격은 SM 계열, 두께 6mm 초과만 (REQ-QC-002) */
+const charpy = (temperature: string): StandardItem => ({ code: 'CHARPY', name: `샤르피 흡수 에너지(${temperature})`, unit: 'J', min: '27', max: null, over: '6.00', upto: null });
+
+/** 열연 = 코일 치수·기계적 성질 */
+const HOT_ROLLING_ITEMS: Partial<Record<SteelGradeCode, StandardItem[]>> = {
+  SS275: [
+    ...bands('YIELD_STRENGTH', '항복강도', N, [[null, '16.00', '275'], ['16.00', '40.00', '265'], ['40.00', '100.00', '245'], ['100.00', null, '235']]),
+    { code: 'TENSILE_STRENGTH', name: '인장강도', unit: N, min: '410', max: '550' },
+    ...bands('ELONGATION', '연신율', '%', [[null, '5.00', '21'], ['5.00', '16.00', '18'], ['16.00', '40.00', '21'], ['40.00', null, '23']]),
+    ...COIL_DIMENSION_ITEMS,
+  ],
+  SM355A: [...SM_MECHANICAL, charpy('20℃'), ...COIL_DIMENSION_ITEMS],
+  SM355B: [...SM_MECHANICAL, charpy('0℃'), ...COIL_DIMENSION_ITEMS],
+  SPHC: [
+    { code: 'TENSILE_STRENGTH', name: '인장강도', unit: N, min: '270', max: null },
+    ...bands('ELONGATION', '연신율', '%', [['1.20', '1.60', '27'], ['1.60', '3.20', '29'], ['3.20', '14.00', '31']]),
+    ...COIL_DIMENSION_ITEMS,
+  ],
+};
+
+/** 검사 기준 코드: QS-{강종}-{공정 약어}. 용어 사전 예(QS-SM355A-HR)를 따르고 ST·CC는 가정값 */
+const PROCESS_SUFFIX = { STEELMAKING: 'ST', CONTINUOUS_CASTING: 'CC', HOT_ROLLING: 'HR' } as const;
+
+// ── 실행 ────────────────────────────────────────────────
+
+const trim = (v: string) => (v.includes('.') ? v.replace(/\.?0+$/, '') : v);
+const specCode = (type: 'SLAB' | 'COIL', grade: string, d: Dimensions) => `${type === 'SLAB' ? 'SL' : 'CL'}-${grade}-${trim(d.thicknessMm)}x${trim(d.widthMm)}x${trim(d.lengthMm)}`;
+const specName = (type: 'SLAB' | 'COIL', grade: string, d: Dimensions) => `${grade} ${type === 'SLAB' ? '슬래브' : '코일'} ${trim(d.thicknessMm)}×${trim(d.widthMm)}×${trim(d.lengthMm)}`;
+
+function must<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`시드 참조를 찾지 못했습니다: ${what}`);
+  return value;
+}
 
 async function seedOrganization() {
-  const deptId = new Map<string, number>();
+  const jobGradeId = new Map<string, number>();
+  for (const g of JOB_GRADES) {
+    const found = await prisma.jobGrade.findFirst({ where: { jobGradeName: g.jobGradeName } });
+    const row = found ? await prisma.jobGrade.update({ where: { id: found.id }, data: g }) : await prisma.jobGrade.create({ data: g });
+    jobGradeId.set(g.jobGradeName, row.id);
+  }
+
+  const roleId = new Map<Role, number>();
+  for (const roleCode of ROLE_ORDER) {
+    const row = await prisma.role.upsert({ where: { roleCode }, create: { roleCode, roleName: ROLE_LABEL[roleCode] }, update: { roleName: ROLE_LABEL[roleCode] } });
+    roleId.set(roleCode, row.id);
+  }
+  for (const [permission, marks] of ROLE_PERMISSION_TABLE) {
+    const cells = marks.split(' ');
+    if (cells.length !== ROLE_ORDER.length) throw new Error(`권한 표 칸 수가 맞지 않습니다: ${permission}`);
+    for (const [index, roleCode] of ROLE_ORDER.entries()) {
+      const id = must(roleId.get(roleCode), roleCode);
+      const level: PermissionLevel | null = cells[index] === '●' ? 'USE' : cells[index] === '○' ? 'VIEW' : null;
+      if (level) {
+        await prisma.rolePermission.upsert({ where: { roleId_permission: { roleId: id, permission } }, create: { roleId: id, permission, permissionLevel: level }, update: { permissionLevel: level } });
+      } else {
+        await prisma.rolePermission.deleteMany({ where: { roleId: id, permission } });
+      }
+    }
+  }
+
+  const departmentId = new Map<string, number>();
   for (const d of DEPARTMENTS) {
+    const parentId = d.parentCode ? must(departmentId.get(d.parentCode), d.parentCode) : null;
     const row = await prisma.department.upsert({
-      where: { departmentCode: d.code },
-      create: { departmentCode: d.code, departmentName: d.name, sortOrder: d.order, parentId: d.parent ? deptId.get(d.parent)! : null },
-      update: { departmentName: d.name, sortOrder: d.order, parentId: d.parent ? deptId.get(d.parent)! : null },
+      where: { departmentCode: d.departmentCode },
+      create: { departmentCode: d.departmentCode, departmentName: d.departmentName, parentId },
+      update: { departmentName: d.departmentName, parentId },
     });
-    deptId.set(d.code, row.id);
+    departmentId.set(d.departmentCode, row.id);
   }
-  const roles = new Map((await prisma.role.findMany()).map((r) => [r.roleCode, r.id]));
-  const passwordHash = await bcrypt.hash(SEED_PASSWORD, 10);
+
+  const passwordHash = await hash(SEED_PASSWORD, 10);
   for (const e of EMPLOYEES) {
-    const row = await prisma.employee.upsert({
-      where: { employeeNo: e.no },
-      create: { employeeNo: e.no, employeeName: e.name, passwordHash, email: `${e.no}@fantasteel.example`, departmentId: deptId.get(e.dept)!, roleId: roles.get(e.role)!, jobGrade: e.grade },
-      update: {},
-    });
-    for (const h of e.head ?? []) await prisma.department.update({ where: { id: deptId.get(h)! }, data: { headEmployeeId: row.id } });
+    const data = {
+      employeeName: e.employeeName,
+      departmentId: must(departmentId.get(e.department), e.department),
+      jobGradeId: must(jobGradeId.get(e.jobGrade), e.jobGrade),
+      roleId: must(roleId.get(e.role), e.role),
+      isActive: true,
+    };
+    const row = await prisma.employee.upsert({ where: { employeeNo: e.employeeNo }, create: { employeeNo: e.employeeNo, passwordHash, ...data }, update: data });
+    if (e.headOf) await prisma.department.update({ where: { id: must(departmentId.get(e.headOf), e.headOf) }, data: { headEmployeeId: row.id } });
   }
 }
 
-const GRADES = [
-  { code: 'SS275', name: '일반 구조용 압연 강재', std: 'KS D 3503', comp: { C: [null, 0.25], Si: [null, 0.45], Mn: [null, 1.4], P: [null, 0.04], S: [null, 0.04] } },
-  { code: 'SM355', name: '용접 구조용 압연 강재', std: 'KS D 3515', comp: { C: [null, 0.2], Si: [null, 0.55], Mn: [null, 1.6], P: [null, 0.035], S: [null, 0.035] } },
-  { code: 'SPHC', name: '열간 압연 연강판', std: 'KS D 3501', comp: { C: [null, 0.12], Si: [null, 0.3], Mn: [null, 0.6], P: [null, 0.045], S: [null, 0.035] } },
-] as const;
-
-// 슬래브 규격 3종과 대응 코일 규격 (두께 × 폭 × 길이 mm). 코일 이론중량 ≤ 슬래브 이론중량.
-const SIZES = [
-  { slab: [250, 1200, 10000], coil: [4.5, 1200, 542000] },
-  { slab: [250, 1500, 10000], coil: [6.0, 1500, 407000] },
-  { slab: [230, 1000, 9000], coil: [3.2, 1000, 632000] },
-] as const;
-
-const RAW_MATERIALS = [
-  { code: 'IO', itemCode: 'RM-IO', name: '철광석', type: 'IRON_ORE', supplier: 'SUP-01', rate: { all: 1.6 } },
-  { code: 'CL', itemCode: 'RM-CL', name: '석탄', type: 'COAL', supplier: 'SUP-01', rate: { all: 0.75 } },
-  { code: 'LS', itemCode: 'RM-LS', name: '석회석', type: 'LIMESTONE', supplier: 'SUP-02', rate: { all: 0.25 } },
-  { code: 'FM', itemCode: 'RM-FM', name: '합금철 FeMn', type: 'FERROALLOY', supplier: 'SUP-03', rate: { SS275: 6, SM355: 12, SPHC: 3 } },
-  { code: 'FS', itemCode: 'RM-FS', name: '합금철 FeSi', type: 'FERROALLOY', supplier: 'SUP-03', rate: { SS275: 2.5, SM355: 4, SPHC: 0.5 } },
-] as const;
-
-async function seedMaster() {
-  for (const [code, name] of [['CUS-01', '한빛중공업'], ['CUS-02', '대성건설'], ['CUS-03', '동해조선'], ['CUS-04', '미래자동차부품']] as const) {
-    await prisma.customer.upsert({ where: { customerCode: code }, create: { customerCode: code, customerName: name }, update: {} });
+async function seedMasterData() {
+  const steelGradeId = new Map<string, number>();
+  for (const g of STEEL_GRADES) {
+    const row = await prisma.steelGrade.upsert({ where: { steelGradeCode: g.steelGradeCode }, create: g, update: g });
+    steelGradeId.set(g.steelGradeCode, row.id);
   }
+  for (const c of CUSTOMERS) await prisma.customer.upsert({ where: { customerCode: c.customerCode }, create: c, update: c });
   const supplierId = new Map<string, number>();
-  for (const [code, name] of [['SUP-01', '호주광업상사'], ['SUP-02', '강원석회'], ['SUP-03', '대한합금']] as const) {
-    supplierId.set(code, (await prisma.supplier.upsert({ where: { supplierCode: code }, create: { supplierCode: code, supplierName: name }, update: {} })).id);
-  }
-  const yardId = new Map<string, number>();
-  for (const [code, name, type] of [['RY-01', '원료 야드', 'RAW_MATERIAL'], ['SY-01', '슬래브 야드', 'SLAB'], ['CY-01', '코일 야드', 'COIL']] as const) {
-    yardId.set(type, (await prisma.yard.upsert({ where: { yardCode: code }, create: { yardCode: code, yardName: name, yardType: type }, update: {} })).id);
-  }
-  await prisma.productionSetting.upsert({ where: { id: 1 }, create: { id: 1, heatCapacityTon: 250, deliveryRiskDays: 3 }, update: {} });
+  for (const s of SUPPLIERS) supplierId.set(s.supplierCode, (await prisma.supplier.upsert({ where: { supplierCode: s.supplierCode }, create: s, update: s })).id);
+  const yardId = new Map<YardType, number>();
+  for (const y of YARDS) yardId.set(y.yardType, (await prisma.yard.upsert({ where: { yardCode: y.yardCode }, create: y, update: y })).id);
 
-  const slabItem = await prisma.item.upsert({ where: { itemCode: 'SLAB' }, create: { itemCode: 'SLAB', itemName: '슬래브', itemType: 'SLAB', unitType: 'QTY' }, update: {} });
-  const coilItem = await prisma.item.upsert({ where: { itemCode: 'COIL' }, create: { itemCode: 'COIL', itemName: '열연코일', itemType: 'COIL', unitType: 'QTY' }, update: {} });
-
-  const gradeId = new Map<string, number>();
-  for (const g of GRADES) {
-    const row = await prisma.steelGrade.upsert({ where: { steelGradeCode: g.code }, create: { steelGradeCode: g.code, steelGradeName: g.name, standardNo: g.std }, update: {} });
-    gradeId.set(g.code, row.id);
-    let order = 0;
-    for (const [el, [min, max]] of Object.entries(g.comp)) {
-      await prisma.compositionSpec.upsert({
-        where: { steelGradeId_elementCode: { steelGradeId: row.id, elementCode: el } },
-        create: { steelGradeId: row.id, elementCode: el, minValue: min, maxValue: max, sortOrder: order++ },
-        update: {},
-      });
-    }
-    for (const size of SIZES) {
-      const [st, sw, sl] = size.slab;
-      const [ct, cw, cl] = size.coil;
-      const slab = await prisma.productSpec.upsert({
-        where: { specCode: `SL-${g.code}-${st}x${sw}x${sl}` },
-        create: { specCode: `SL-${g.code}-${st}x${sw}x${sl}`, itemId: slabItem.id, steelGradeId: row.id, thicknessMm: st, widthMm: sw, lengthMm: sl, theoreticalWeightTon: calcTheoreticalWeightTon(st, sw, sl), yardId: yardId.get('SLAB') },
-        update: {},
-      });
-      const coil = await prisma.productSpec.upsert({
-        where: { specCode: `CL-${g.code}-${ct}x${cw}x${cl}` },
-        create: { specCode: `CL-${g.code}-${ct}x${cw}x${cl}`, itemId: coilItem.id, steelGradeId: row.id, thicknessMm: ct, widthMm: cw, lengthMm: cl, theoreticalWeightTon: calcTheoreticalWeightTon(ct, cw, cl), yardId: yardId.get('COIL') },
-        update: {},
-      });
-      await prisma.specMapping.upsert({ where: { slabSpecId: slab.id }, create: { slabSpecId: slab.id, coilSpecId: coil.id }, update: {} });
-      for (const s of [slab, coil]) await prisma.inventory.upsert({ where: { productSpecId: s.id }, create: { productSpecId: s.id }, update: {} });
-    }
-  }
-
-  // 라우팅: 열연 계획 수율은 입력하지 않는다(규격 매핑에서 계산). 제선은 원단위로 표현하므로 수율 없음.
-  const routing: [string, string, number, number | null][] = [
-    ['SLAB', 'IRONMAKING', 1, null], ['SLAB', 'STEELMAKING', 2, 0.95], ['SLAB', 'CASTING', 3, 0.96],
-    ['COIL', 'IRONMAKING', 1, null], ['COIL', 'STEELMAKING', 2, 0.95], ['COIL', 'CASTING', 3, 0.96], ['COIL', 'HOT_ROLLING', 4, null],
-  ];
-  for (const [itemType, processCode, processSeq, plannedYieldRate] of routing) {
-    await prisma.routing.upsert({ where: { itemType_processCode: { itemType, processCode } }, create: { itemType, processCode, processSeq, plannedYieldRate }, update: {} });
-  }
-
+  const itemId = new Map<string, number>();
   for (const m of RAW_MATERIALS) {
-    const item = await prisma.item.upsert({
-      where: { itemCode: m.itemCode },
-      create: { itemCode: m.itemCode, itemName: m.name, itemType: 'RAW_MATERIAL', unitType: 'TON', defaultSupplierId: supplierId.get(m.supplier) },
-      update: {},
-    });
-    const rm = await prisma.rawMaterial.upsert({
-      where: { itemId: item.id },
-      create: { itemId: item.id, materialCode: m.code, rawMaterialType: m.type, yardId: yardId.get('RAW_MATERIAL') },
-      update: {},
-    });
-    await prisma.inventory.upsert({ where: { rawMaterialId: rm.id }, create: { rawMaterialId: rm.id }, update: {} });
-    for (const [key, rate] of Object.entries(m.rate)) {
-      const steelGradeId = key === 'all' ? null : gradeId.get(key)!;
-      const found = await prisma.specificConsumption.findFirst({ where: { rawMaterialId: rm.id, steelGradeId } });
-      if (!found) await prisma.specificConsumption.create({ data: { rawMaterialId: rm.id, steelGradeId, consumptionRate: rate, consumptionUnit: key === 'all' ? 'TON_PER_TON' : 'KG_PER_TON' } });
+    const data = {
+      itemName: m.itemName,
+      itemType: 'RAW_MATERIAL',
+      unitType: 'TON',
+      rawMaterialType: m.rawMaterialType,
+      defaultYardId: must(yardId.get('RAW_MATERIAL'), 'RAW_MATERIAL yard'),
+      defaultSupplierId: must(supplierId.get(m.supplierCode), m.supplierCode),
+    };
+    itemId.set(m.itemCode, (await prisma.item.upsert({ where: { itemCode: m.itemCode }, create: { itemCode: m.itemCode, ...data }, update: data })).id);
+  }
+
+  const upsertSpec = async (itemType: 'SLAB' | 'COIL', grade: SteelGradeCode, d: Dimensions) => {
+    const code = specCode(itemType, grade, d);
+    const data = {
+      itemName: specName(itemType, grade, d),
+      itemType,
+      unitType: 'QTY',
+      steelGradeId: must(steelGradeId.get(grade), grade),
+      thicknessMm: d.thicknessMm,
+      widthMm: d.widthMm,
+      lengthMm: d.lengthMm,
+      theoreticalWeightTon: calcTheoreticalWeightTon(d.thicknessMm, d.widthMm, d.lengthMm),
+      defaultYardId: must(yardId.get(itemType), `${itemType} yard`),
+    };
+    return (await prisma.item.upsert({ where: { itemCode: code }, create: { itemCode: code, ...data }, update: data })).id;
+  };
+  for (const grade of SPEC_GRADES) {
+    for (const pair of SLAB_COIL_DIMENSIONS) {
+      const slabItemId = await upsertSpec('SLAB', grade, pair.slab);
+      const coilItemId = await upsertSpec('COIL', grade, pair.coil);
+      await prisma.specMapping.upsert({ where: { slabItemId }, create: { slabItemId, coilItemId }, update: { coilItemId } });
     }
   }
 
-  // 검사 항목: KS 인증심사기준의 제품 검사 항목 참고 (REQ-QC-002). 무게 검사는 제외.
-  type Insp = [string, string, string | null, number | null, number | null];
-  const slabItems: Insp[] = [
-    ['SURFACE_DEFECT_COUNT', '표면 결함 수', '개', null, 2],
-    ['THICKNESS_DEVIATION', '두께 편차', 'mm', -5, 5],
-    ['WIDTH_DEVIATION', '폭 편차', 'mm', -10, 10],
-    ['LENGTH_DEVIATION', '길이 편차', 'mm', -50, 50],
-  ];
-  const upsertInsp = async (processCode: string, steelGradeId: number | null, list: Insp[]) => {
-    let order = 0;
-    for (const [code, name, unit, min, max] of list) {
-      const found = await prisma.inspectionItem.findFirst({ where: { processCode, steelGradeId, inspectionItemCode: code } });
-      if (!found) await prisma.inspectionItem.create({ data: { processCode, steelGradeId, inspectionItemCode: code, inspectionItemName: name, unit, minValue: min, maxValue: max, sortOrder: order } });
-      order++;
-    }
-  };
-  await upsertInsp('CASTING', null, slabItems);
-  const coilCommon: Insp[] = [['THICKNESS_DEVIATION', '두께 편차', 'mm', -0.3, 0.3], ['WIDTH_DEVIATION', '폭 편차', 'mm', 0, 20]];
-  await upsertInsp('HOT_ROLLING', gradeId.get('SS275')!, [['TENSILE_STRENGTH', '인장강도', 'MPa', 410, 550], ['YIELD_STRENGTH', '항복강도', 'MPa', 275, null], ['ELONGATION', '연신율', '%', 18, null], ...coilCommon]);
-  await upsertInsp('HOT_ROLLING', gradeId.get('SM355')!, [
-    ['TENSILE_STRENGTH', '인장강도', 'MPa', 490, 630], ['YIELD_STRENGTH', '항복강도', 'MPa', 355, null], ['ELONGATION', '연신율', '%', 17, null],
-    ['CHARPY_IMPACT', '샤르피 충격', 'J', 27, null], ['CARBON_EQUIVALENT', '탄소당량', '%', null, 0.44], ...coilCommon,
-  ]);
-  await upsertInsp('HOT_ROLLING', gradeId.get('SPHC')!, [['TENSILE_STRENGTH', '인장강도', 'MPa', 270, null], ['ELONGATION', '연신율', '%', 27, null], ...coilCommon]);
+  for (const r of ROUTINGS) {
+    await prisma.routing.upsert({ where: { itemType_sequenceNo: { itemType: r.itemType, sequenceNo: r.sequenceNo } }, create: r, update: r });
+  }
+
+  for (const c of SPECIFIC_CONSUMPTIONS) {
+    const rawMaterialItemId = must(itemId.get(c.itemCode), c.itemCode);
+    const steelGrade = c.steelGradeCode ? must(steelGradeId.get(c.steelGradeCode), c.steelGradeCode) : null;
+    const found = await prisma.specificConsumption.findFirst({ where: { rawMaterialItemId, steelGradeId: steelGrade } });
+    if (found) await prisma.specificConsumption.update({ where: { id: found.id }, data: { consumptionRate: c.consumptionRate } });
+    else await prisma.specificConsumption.create({ data: { rawMaterialItemId, steelGradeId: steelGrade, consumptionRate: c.consumptionRate } });
+  }
+
+  // 생산 설정값은 1행만 둔다 (REQ-MST-009 초기값)
+  const setting = await prisma.productionSetting.findFirst();
+  if (!setting) await prisma.productionSetting.create({ data: { heatCapacityTon: '250.000', deliveryRiskDays: 3 } });
+
+  return steelGradeId;
 }
 
-/** 초기 재고: 원료 LOT, 과거에 생산·검사 합격한 히트와 슬래브·코일. LOT이 하나도 없을 때만 넣는다. */
-async function seedStock() {
-  if (await prisma.lot.count()) return;
-  const yards = new Map((await prisma.yard.findMany()).map((y) => [y.yardType, y.id]));
-  const raws = await prisma.rawMaterial.findMany({ include: { item: true } });
-  const rawTon: Record<string, number> = { IO: 900, CL: 300, LS: 150, FM: 2, FS: 1.5 };
-  const rawLots = new Map<string, number>();
-  for (const rm of raws) {
-    const at = daysAgo(12);
-    const ton = rawTon[rm.materialCode];
-    const lot = await prisma.lot.create({
-      data: { lotNo: `RM-${rm.materialCode}-${yymmdd(at)}-001`, lotType: 'RAW_MATERIAL', rawMaterialId: rm.id, initialTon: ton, remainingTon: ton, yardId: yards.get('RAW_MATERIAL'), supplierId: rm.item.defaultSupplierId, producedAt: at },
+async function seedInspectionStandards(steelGradeId: Map<string, number>) {
+  const add = async (grade: SteelGradeCode, processType: keyof typeof PROCESS_SUFFIX, items: StandardItem[]) => {
+    const inspectionStandardCode = `QS-${grade}-${PROCESS_SUFFIX[processType]}`;
+    const standard = await prisma.inspectionStandard.upsert({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode, versionNo: 1 } },
+      create: { inspectionStandardCode, versionNo: 1, processType, steelGradeId: must(steelGradeId.get(grade), grade) },
+      update: {},
     });
-    rawLots.set(rm.materialCode, lot.id);
-    await prisma.inventory.update({ where: { rawMaterialId: rm.id }, data: { onHandTon: ton } });
-    await prisma.numberSequence.upsert({ where: { sequenceKey: `RM-${rm.materialCode}-${yymmdd(at)}` }, create: { sequenceKey: `RM-${rm.materialCode}-${yymmdd(at)}`, lastValue: 1 }, update: {} });
-  }
-
-  const specs = await prisma.productSpec.findMany({ include: { steelGrade: { include: { compositionSpecs: true } }, item: true, slabMapping: { include: { coilSpec: true } } } });
-  const spec = (code: string) => specs.find((s) => s.specCode === code)!;
-  const slabInsp = await prisma.inspectionItem.findMany({ where: { processCode: 'CASTING' }, orderBy: { sortOrder: 'asc' } });
-  let qiSeq = 0;
-  const inspectionNo = (at: Date) => `QI-20${yymmdd(at)}-${String(++qiSeq).padStart(4, '0')}`;
-  const mid = (min: number | null, max: number | null) => (min !== null && max !== null ? (min + max) / 2 : max !== null ? max * 0.6 : min !== null ? min * 1.12 : 0);
-
-  // 과거 히트: [슬래브 규격, 전로, 며칠 전, 일련번호, 슬래브 매수, 그중 코일로 압연한 매수]
-  const heats: [string, string, number, number, number, number][] = [
-    ['SL-SS275-250x1200x10000', '1', 9, 1, 10, 4], // 슬래브 6매 재고 + 코일 4개 재고
-    ['SL-SM355-250x1500x10000', '2', 8, 1, 8, 4],
-    ['SL-SPHC-230x1000x9000', '1', 7, 1, 14, 9],
-  ];
-  let hmSeq = 0;
-  for (const [slabCode, converterNo, ago, seq, slabQty, rolledQty] of heats) {
-    const slabSpec = spec(slabCode);
-    const coilSpec = slabSpec.slabMapping!.coilSpec;
-    const at = daysAgo(ago);
-    const heatNo = `HT-${converterNo}-${yymmdd(at)}-${String(seq).padStart(3, '0')}`;
-    await prisma.numberSequence.upsert({ where: { sequenceKey: `HT-${converterNo}-${yymmdd(at)}` }, create: { sequenceKey: `HT-${converterNo}-${yymmdd(at)}`, lastValue: seq }, update: {} });
-
-    const hmAt = new Date(at.getTime() - 6 * 3600_000);
-    const hotMetal = await prisma.lot.create({
-      data: { lotNo: `HM-1-${yymmdd(hmAt)}-${String(++hmSeq).padStart(2, '0')}`, lotType: 'HOT_METAL', initialTon: 263.158, remainingTon: 0, blastFurnaceNo: '1', lotStatus: 'CONSUMED', producedAt: hmAt, consumedAt: at },
+    // 버전 1 항목을 다시 만든다. 이미 검사에 쓴 버전이면 건드리지 않는다 (기준은 수정하지 않고 새 버전으로, 컨벤션 7-2)
+    const used = await prisma.qualityInspection.count({ where: { inspectionStandardId: standard.id } });
+    if (used > 0) return;
+    await prisma.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: standard.id } });
+    await prisma.inspectionStandardItem.createMany({
+      data: items.map((i) => ({
+        inspectionStandardId: standard.id,
+        inspectionItemCode: i.code,
+        inspectionItemName: i.name,
+        unit: i.unit,
+        minValue: i.min,
+        maxValue: i.max,
+        thicknessOverMm: i.over ?? null,
+        thicknessUptoMm: i.upto ?? null,
+        isRequired: true,
+      })),
     });
-    await prisma.numberSequence.upsert({ where: { sequenceKey: `HM-1-${yymmdd(hmAt)}` }, create: { sequenceKey: `HM-1-${yymmdd(hmAt)}`, lastValue: hmSeq }, update: { lastValue: hmSeq } });
-    for (const code of ['IO', 'CL', 'LS']) {
-      await prisma.lotRelation.create({
-        data: { parentLotId: rawLots.get(code)!, childLotId: hotMetal.id, relationType: 'RAW_TO_HOT_METAL', evidenceType: 'PERIOD', periodStart: new Date(hmAt.getTime() - 8 * 3600_000), periodEnd: hmAt },
-      });
-    }
-    const heat = await prisma.lot.create({
-      data: { lotNo: heatNo, lotType: 'HEAT', steelGradeId: slabSpec.steelGradeId, initialTon: 250, converterNo, isPassed: true, lotStatus: 'CONSUMED', producedAt: at, consumedAt: new Date(at.getTime() + 3 * 3600_000) },
-    });
-    await prisma.lotRelation.create({ data: { parentLotId: hotMetal.id, childLotId: heat.id, relationType: 'HOT_METAL_TO_HEAT', evidenceType: 'DIRECT', inputTon: 263.158 } });
-    for (const code of ['FM', 'FS']) await prisma.lotRelation.create({ data: { parentLotId: rawLots.get(code)!, childLotId: heat.id, relationType: 'ALLOY_TO_HEAT', evidenceType: 'DIRECT' } });
-    await prisma.qualityInspection.create({
-      data: {
-        qualityInspectionNo: inspectionNo(at), lotId: heat.id, processCode: 'STEELMAKING', inspectionResult: 'PASS', inspectedAt: new Date(at.getTime() + 3600_000),
-        values: { create: slabSpec.steelGrade.compositionSpecs.map((c) => ({ inspectionItemCode: c.elementCode, inspectionItemName: c.elementCode, unit: '%', minValue: c.minValue, maxValue: c.maxValue, measuredValue: Number(c.maxValue) * 0.7, isPassed: true, sortOrder: c.sortOrder })) },
-      },
-    });
-
-    const coilInsp = await prisma.inspectionItem.findMany({ where: { processCode: 'HOT_ROLLING', steelGradeId: slabSpec.steelGradeId }, orderBy: { sortOrder: 'asc' } });
-    for (let i = 1; i <= slabQty; i++) {
-      const slabAt = new Date(at.getTime() + 4 * 3600_000 + i * 60_000);
-      const rolled = i <= rolledQty;
-      const slab = await prisma.lot.create({
-        data: {
-          lotNo: `${heatNo}-${String(i).padStart(2, '0')}`, lotType: 'SLAB', productSpecId: slabSpec.id, steelGradeId: slabSpec.steelGradeId, heatLotId: heat.id,
-          yardId: yards.get('SLAB'), isPassed: true, lotStatus: rolled ? 'CONSUMED' : 'IN_STOCK', producedAt: slabAt, consumedAt: rolled ? new Date(slabAt.getTime() + DAY) : null,
-        },
-      });
-      await prisma.lotRelation.create({ data: { parentLotId: heat.id, childLotId: slab.id, relationType: 'HEAT_TO_SLAB', evidenceType: 'DIRECT' } });
-      await prisma.qualityInspection.create({
-        data: {
-          qualityInspectionNo: inspectionNo(slabAt), lotId: slab.id, processCode: 'CASTING', inspectionResult: 'PASS', inspectedAt: new Date(slabAt.getTime() + 3600_000),
-          values: { create: slabInsp.map((it) => ({ inspectionItemCode: it.inspectionItemCode, inspectionItemName: it.inspectionItemName, unit: it.unit, minValue: it.minValue, maxValue: it.maxValue, measuredValue: it.inspectionItemCode === 'SURFACE_DEFECT_COUNT' ? 0 : 1, isPassed: true, sortOrder: it.sortOrder })) },
-        },
-      });
-      if (!rolled) continue;
-      const coilAt = new Date(slabAt.getTime() + DAY);
-      const coil = await prisma.lot.create({
-        data: {
-          lotNo: `C${slab.lotNo.replace(/^HT-/, '')}`, lotType: 'COIL', productSpecId: coilSpec.id, steelGradeId: slabSpec.steelGradeId, heatLotId: heat.id,
-          yardId: yards.get('COIL'), isPassed: true, lotStatus: 'IN_STOCK', producedAt: coilAt,
-        },
-      });
-      await prisma.lotRelation.create({ data: { parentLotId: slab.id, childLotId: coil.id, relationType: 'SLAB_TO_COIL', evidenceType: 'DIRECT' } });
-      await prisma.qualityInspection.create({
-        data: {
-          qualityInspectionNo: inspectionNo(coilAt), lotId: coil.id, processCode: 'HOT_ROLLING', inspectionResult: 'PASS', inspectedAt: new Date(coilAt.getTime() + 3600_000),
-          values: {
-            create: coilInsp.map((it) => ({
-              inspectionItemCode: it.inspectionItemCode, inspectionItemName: it.inspectionItemName, unit: it.unit, minValue: it.minValue, maxValue: it.maxValue,
-              measuredValue: mid(it.minValue === null ? null : Number(it.minValue), it.maxValue === null ? null : Number(it.maxValue)), isPassed: true, sortOrder: it.sortOrder,
-            })),
-          },
-        },
-      });
-    }
-    await prisma.inventory.update({ where: { productSpecId: slabSpec.id }, data: { onHandQty: slabQty - rolledQty } });
-    await prisma.inventory.update({ where: { productSpecId: coilSpec.id }, data: { onHandQty: rolledQty } });
-  }
-  const today = new Date();
-  await prisma.numberSequence.upsert({ where: { sequenceKey: `QI-20${yymmdd(today)}` }, create: { sequenceKey: `QI-20${yymmdd(today)}`, lastValue: 0 }, update: {} });
+  };
+  // SM355C·D는 규격 시드가 없지만 KS 성분 값이 있어 제강 기준만 넣는다
+  for (const grade of Object.keys(STEELMAKING_ITEMS) as SteelGradeCode[]) await add(grade, 'STEELMAKING', STEELMAKING_ITEMS[grade]);
+  for (const grade of SPEC_GRADES) await add(grade, 'CONTINUOUS_CASTING', CASTING_ITEMS);
+  for (const grade of SPEC_GRADES) await add(grade, 'HOT_ROLLING', must(HOT_ROLLING_ITEMS[grade], grade));
 }
 
 async function main() {
-  await seedRoles();
   await seedOrganization();
-  await seedMaster();
-  await seedStock();
-  const counts = { employee: await prisma.employee.count(), productSpec: await prisma.productSpec.count(), lot: await prisma.lot.count() };
-  process.stdout.write(`seed 완료 ${JSON.stringify(counts)}\n`);
+  const steelGradeId = await seedMasterData();
+  await seedInspectionStandards(steelGradeId);
+  const counts = {
+    employee: await prisma.employee.count(),
+    rolePermission: await prisma.rolePermission.count(),
+    item: await prisma.item.count(),
+    specMapping: await prisma.specMapping.count(),
+    inspectionStandard: await prisma.inspectionStandard.count(),
+    inspectionStandardItem: await prisma.inspectionStandardItem.count(),
+  };
+  process.stdout.write(`[seed] ${JSON.stringify(counts)}\n`);
 }
 
 main()
-  .catch((e) => {
-    process.stderr.write(`${e?.stack ?? e}\n`);
+  .catch((e: unknown) => {
+    process.stderr.write(`[seed] 실패: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());

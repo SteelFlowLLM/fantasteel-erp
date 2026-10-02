@@ -1,13 +1,11 @@
 import { Module } from '@nestjs/common';
-import { LotGraphModule } from './lot-graph.module';
 import { LotController } from './lot.controller';
-import { LotTraceService } from './lot-trace.service';
 import { LotRepository } from './lot.repository';
 import { LotService } from './lot.service';
 
+/** LOT 조회·정·역추적 (REQ-LOT-001~005, BP-LOT-01). 작업 안내: docs/backend/lot.md */
 @Module({
-  imports: [LotGraphModule],
   controllers: [LotController],
-  providers: [LotRepository, LotService, LotTraceService],
+  providers: [LotService, LotRepository],
 })
 export class LotModule {}

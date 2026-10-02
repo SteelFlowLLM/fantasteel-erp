@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(SPEC.md)",
+      "Edit(docs/notion/**)",
+      "Edit(docs/erd/**)"
+    ]
+  }
+}

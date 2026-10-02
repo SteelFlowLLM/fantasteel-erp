@@ -1,7 +1,8 @@
 // npm run dev 에서 서버를 띄우기 전에 DB를 쓸 수 있게 맞춘다. 반복 실행해도 안전하다.
 //   1) 로컬 DB(npm run db)면 fantasteel DB가 만들어질 때까지 기다린다
 //   2) 아직 적용되지 않은 마이그레이션을 적용한다 (prisma migrate deploy)
-//   3) 직원이 한 명도 없으면(빈 DB) 시드를 넣는다
+//   3) 사원이 한 명도 없으면(빈 DB) 시드를 넣는다
+//   4) prisma/sql/*.sql(TypedSQL) 타입을 만든다 (DB가 떠 있어야 해서 여기서 한다, 컨벤션 8장)
 import 'dotenv/config';
 import { execSync } from 'node:child_process';
 import pg from 'pg';
@@ -35,3 +36,5 @@ if (rows[0].n === 0) {
   process.stdout.write('[db] 빈 DB라 시드를 넣습니다\n');
   execSync('npx tsx prisma/seed.ts', { stdio: 'inherit' });
 }
+
+execSync('npx prisma generate --sql', { stdio: 'inherit' });

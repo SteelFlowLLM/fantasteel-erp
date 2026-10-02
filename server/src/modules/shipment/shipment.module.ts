@@ -1,18 +1,11 @@
 import { Module } from '@nestjs/common';
-import { GoodsIssueController } from './goods-issue.controller';
-import { GoodsIssueService } from './goods-issue.service';
-import { MillSheetPdfRenderer } from './mill-sheet-pdf.renderer';
-import { MillSheetController } from './mill-sheet.controller';
-import { MillSheetRepository } from './mill-sheet.repository';
-import { MillSheetService } from './mill-sheet.service';
-import { ShipmentRequestController } from './shipment-request.controller';
-import { ShipmentRequestService } from './shipment-request.service';
+import { ShipmentController } from './shipment.controller';
 import { ShipmentRepository } from './shipment.repository';
+import { ShipmentService } from './shipment.service';
 
-// ShipmentRequestService는 수주 취소(미출고 출하요청 취소)에서도 쓰므로 내보낸다.
+/** 출하요청·출고 확정·밀시트 (REQ-SHP-001~004, BP-SHP-01). 작업 안내: docs/backend/shipment.md */
 @Module({
-  controllers: [ShipmentRequestController, GoodsIssueController, MillSheetController],
-  providers: [ShipmentRequestService, GoodsIssueService, MillSheetService, MillSheetRepository, MillSheetPdfRenderer, ShipmentRepository],
-  exports: [ShipmentRequestService],
+  controllers: [ShipmentController],
+  providers: [ShipmentService, ShipmentRepository],
 })
 export class ShipmentModule {}

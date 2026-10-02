@@ -1,18 +1,19 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
-import { ERROR_CODE } from '@fantasteel/shared';
+import { HttpException } from '@nestjs/common';
+import { ERROR_CODE, type ErrorCode } from '@fantasteel/shared';
 
-/** 업무 오류. 컨트롤러별 try/catch 없이 이 예외를 throw한다 (코드 컨벤션 5장). */
+/**
+ * 업무 오류. 컨트롤러별 try/catch 없이 이 예외를 throw한다 (코드 컨벤션 5장).
+ * message·status를 생략하면 shared의 ERROR_CODE(업무 프로세스 정의서 9.3) 값을 쓴다.
+ *   throw new AppException('SO-002');
+ *   throw new AppException('INV-001', `가용 매수가 ${available}매뿐이에요`);
+ */
 export class AppException extends HttpException {
   constructor(
-    public readonly code: string,
-    message: string,
-    status: HttpStatus = HttpStatus.BAD_REQUEST,
+    public readonly code: ErrorCode,
+    message?: string,
+    status?: number,
   ) {
-    super({ code, message }, status);
+    const def = ERROR_CODE[code];
+    super({ code, message: message ?? def.message }, status ?? def.status);
   }
 }
-
-export const notFound = (what: string) => new AppException(ERROR_CODE.COM_004, `${what}을(를) 찾을 수 없습니다`, HttpStatus.NOT_FOUND);
-export const forbidden = (message = '해당 업무 권한이 없습니다') => new AppException(ERROR_CODE.COM_002, message, HttpStatus.FORBIDDEN);
-export const invalidState = (message: string) => new AppException(ERROR_CODE.COM_005, message, HttpStatus.CONFLICT);
-export const badInput = (message: string) => new AppException(ERROR_CODE.COM_003, message, HttpStatus.BAD_REQUEST);

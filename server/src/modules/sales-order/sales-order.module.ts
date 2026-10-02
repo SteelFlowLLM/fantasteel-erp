@@ -1,19 +1,11 @@
-import { Global, Module } from '@nestjs/common';
-import { ShipmentModule } from '../shipment/shipment.module';
-import { IdempotencyKeyRepository } from './idempotency-key.repository';
-import { IdempotencyService } from './idempotency.service';
-import { SalesOrderStatusService } from './sales-order-status.service';
+import { Module } from '@nestjs/common';
 import { SalesOrderController } from './sales-order.controller';
 import { SalesOrderRepository } from './sales-order.repository';
 import { SalesOrderService } from './sales-order.service';
 
-// 상태 재계산은 출하·생산 모듈도 쓰므로 전역. 요청 고유키 처리(IdempotencyService)는 출고 확정도 쓴다.
-// 수주 취소가 미출고 출하요청을 함께 취소하므로 ShipmentModule을 가져온다.
-@Global()
+/** 수주·충족 현황·수주 취소 (REQ-SO-001~006, BP-SO-01·02). 작업 안내: docs/backend/sales-order.md */
 @Module({
-  imports: [ShipmentModule],
   controllers: [SalesOrderController],
-  providers: [SalesOrderStatusService, SalesOrderService, SalesOrderRepository, IdempotencyService, IdempotencyKeyRepository],
-  exports: [SalesOrderStatusService, IdempotencyService],
+  providers: [SalesOrderService, SalesOrderRepository],
 })
 export class SalesOrderModule {}

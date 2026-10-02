@@ -1,34 +1,12 @@
-import { Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
-import { PERMISSION, type AuthUser } from '@fantasteel/shared';
-import { CurrentUser, RequireUse, RequireView } from '../../common/auth/auth.decorators';
+import { Controller } from '@nestjs/common';
 import { MrpService } from './mrp.service';
 
-@Controller('mrp-runs')
+/**
+ * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
+ * 경로는 API 명세서와 docs/backend/mrp.md. 리소스가 여러 개라 메서드마다 전체 경로를 쓴다 (예: @Get('sales-orders/:id')).
+ * 전역 prefix /api/v1은 main.ts가 붙인다.
+ */
+@Controller()
 export class MrpController {
   constructor(private readonly service: MrpService) {}
-
-  @Post()
-  @RequireUse(PERMISSION.PURCHASE_REQUISITION_CREATE, PERMISSION.PLAN_CONFIRM)
-  run(@CurrentUser() user: AuthUser) {
-    return this.service.run(user);
-  }
-
-  @Get()
-  @RequireView(PERMISSION.PURCHASE_REQUISITION_CREATE, PERMISSION.PLAN_CONFIRM)
-  list() {
-    return this.service.list();
-  }
-
-  /** 가장 최근 실행 (없으면 null). `:id`보다 먼저 선언한다. */
-  @Get('latest')
-  @RequireView(PERMISSION.PURCHASE_REQUISITION_CREATE, PERMISSION.PLAN_CONFIRM)
-  latest() {
-    return this.service.latest();
-  }
-
-  @Get(':id')
-  @RequireView(PERMISSION.PURCHASE_REQUISITION_CREATE, PERMISSION.PLAN_CONFIRM)
-  detail(@Param('id', ParseIntPipe) id: number) {
-    return this.service.detail(id);
-  }
 }

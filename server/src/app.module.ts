@@ -7,42 +7,40 @@ import { ResponseInterceptor } from './common/http/response.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
-import { NotificationModule } from './modules/notification/notification.module';
-import { ProductionModule } from './modules/production/production.module';
-import { SalesOrderModule } from './modules/sales-order/sales-order.module';
-import { OrganizationModule } from './modules/organization/organization.module';
-import { MasterDataModule } from './modules/master-data/master-data.module';
-import { MrpModule } from './modules/mrp/mrp.module';
-import { PurchasingModule } from './modules/purchasing/purchasing.module';
 import { LotModule } from './modules/lot/lot.module';
-import { QualityModule } from './modules/quality/quality.module';
-import { ShipmentModule } from './modules/shipment/shipment.module';
-import { MessengerModule } from './modules/messenger/messenger.module';
+import { MasterDataModule } from './modules/master-data/master-data.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { MessengerModule } from './modules/messenger/messenger.module';
+import { MrpModule } from './modules/mrp/mrp.module';
+import { NotificationModule } from './modules/notification/notification.module';
+import { OrganizationModule } from './modules/organization/organization.module';
+import { ProductionModule } from './modules/production/production.module';
+import { PurchasingModule } from './modules/purchasing/purchasing.module';
+import { QualityModule } from './modules/quality/quality.module';
+import { SalesOrderModule } from './modules/sales-order/sales-order.module';
+import { ShipmentModule } from './modules/shipment/shipment.module';
 import { PrismaModule } from './prisma/prisma.module';
 
-// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장).
+// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(factory-agent, voice-erp, ai-assistant, dashboard, past-case)은 그 단계에서 추가한다.
 @Module({
   imports: [
     PrismaModule,
     CommonModule,
-    BusinessEventModule,
-    NotificationModule,
     AuthModule,
-    InventoryModule,
-    ProductionModule,
-    SalesOrderModule,
     OrganizationModule,
     MasterDataModule,
+    SalesOrderModule,
+    InventoryModule,
+    ProductionModule,
     MrpModule,
     PurchasingModule,
+    LotModule,
     QualityModule,
-    LotModule, // GET /lots/rejected(quality)가 GET /lots/:id 보다 먼저 등록돼야 한다
     ShipmentModule,
+    BusinessEventModule,
+    NotificationModule,
     MessengerModule,
     MessageActionModule,
-    DashboardModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
