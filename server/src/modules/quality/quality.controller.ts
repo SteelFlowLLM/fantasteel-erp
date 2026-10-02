@@ -1,4 +1,7 @@
-import { Controller } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
+import { PERMISSION, type PageResult, type QualityInspectionListItem } from '@fantasteel/shared';
+import { RequirePermission } from '../../common/auth/auth.decorators';
+import { ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import { QualityService } from './quality.service';
 
 /**
@@ -9,4 +12,11 @@ import { QualityService } from './quality.service';
 @Controller()
 export class QualityController {
   constructor(private readonly service: QualityService) {}
+
+  /** 검사 대기·검사 목록 조회 (API-125). status=pending(기본)·done, 판정 필터 inspectionResult는 done만 */
+  @Get('quality-inspections')
+  @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'VIEW')
+  listQualityInspections(@Query() query: ListQualityInspectionsDto): Promise<PageResult<QualityInspectionListItem>> {
+    return this.service.listQualityInspections(query);
+  }
 }
