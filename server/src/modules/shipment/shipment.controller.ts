@@ -1,7 +1,17 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type PageResult, type ShipmentRequestDetail, type ShipmentRequestSummary, type ShippableSalesOrderItem } from '@fantasteel/shared';
+import {
+  PERMISSION,
+  type AuthUser,
+  type MillSheetDetail,
+  type MillSheetSummary,
+  type PageResult,
+  type ShipmentRequestDetail,
+  type ShipmentRequestSummary,
+  type ShippableSalesOrderItem,
+} from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
+import { ListMillSheetsQuery } from './dto/list-mill-sheets.query';
 import { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
 import { ShippableQuery } from './dto/shippable.query';
 import { ShipmentService } from './shipment.service';
@@ -47,5 +57,19 @@ export class ShipmentController {
   @RequirePermission(PERMISSION.SHIPMENT_REQUEST_MANAGE, 'USE')
   cancel(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ShipmentRequestDetail> {
     return this.service.cancel(user, id);
+  }
+
+  /** API-232 밀시트 목록 */
+  @Get('mill-sheets')
+  @RequirePermission(PERMISSION.MILL_SHEET_READ, 'VIEW')
+  listMillSheets(@Query() query: ListMillSheetsQuery): Promise<PageResult<MillSheetSummary>> {
+    return this.service.listMillSheets(query);
+  }
+
+  /** API-233 밀시트 조회 (저장된 스냅샷) */
+  @Get('mill-sheets/:id')
+  @RequirePermission(PERMISSION.MILL_SHEET_READ, 'VIEW')
+  findMillSheet(@Param('id', ParseIntPipe) id: number): Promise<MillSheetDetail> {
+    return this.service.findMillSheet(id);
   }
 }
