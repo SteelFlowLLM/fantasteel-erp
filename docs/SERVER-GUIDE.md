@@ -89,7 +89,7 @@ server/
 2. 서버를 띄워 정상 흐름과 주요 오류를 실제로 호출해 본다.
 3. `npm run check-orphans -w @fantasteel/server` 통과.
 4. 문서에 없는 이름·값을 새로 정했으면 PR 설명에 적고, 필요하면 설계 문서 수정을 요청한다 (문서는 직접 고치지 않는다).
-5. 브랜치 `feature/{이슈번호}-{기능}`, 커밋 `feat:`·`fix:`… + 한글 요약, PR 템플릿(작업 내용·관련 REQ ID·테스트 방법) (컨벤션 10장).
+5. 브랜치 `feature/{이슈번호}-{기능}`(`origin/develop`에서 만들고 PR은 `develop`으로, [GIT-GUIDE.md](GIT-GUIDE.md)), 커밋 `feat:`·`fix:`… + 한글 요약, PR 템플릿(작업 내용·관련 REQ ID·테스트 방법) (컨벤션 10장).
 
 ## 7. 스키마를 바꿀 때 (컨벤션 7-3)
 
