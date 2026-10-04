@@ -55,6 +55,30 @@ export class InspectionStandardRepository {
     return tx.inspectionStandard.findUnique({ where: { id: inspectionStandardId }, select: standardWithItemsSelect });
   }
 
+  findSteelGrade(tx: Tx, steelGradeId: number) {
+    return tx.steelGrade.findUnique({ where: { id: steelGradeId }, select: { id: true, steelGradeCode: true } });
+  }
+
+  /** 그 공정·강종에 이미 있는 기준(버전 무관) */
+  findStandardByProcessAndSteelGrade(tx: Tx, processType: string, steelGradeId: number) {
+    return tx.inspectionStandard.findFirst({
+      where: { processType, steelGradeId },
+      select: { id: true, inspectionStandardCode: true },
+    });
+  }
+
+  /** 기준 버전과 항목을 함께 만든다 */
+  createStandardWithItems(
+    tx: Tx,
+    data: Omit<Prisma.InspectionStandardUncheckedCreateInput, 'inspectionStandardItems'>,
+    items: Omit<Prisma.InspectionStandardItemUncheckedCreateInput, 'inspectionStandardId'>[],
+  ) {
+    return tx.inspectionStandard.create({
+      data: { ...data, inspectionStandardItems: { create: items } },
+      select: { id: true },
+    });
+  }
+
   /** 기준 버전과 항목 (한 페이지 분) */
   findStandardsWithItems(tx: Tx, inspectionStandardIds: number[]) {
     return tx.inspectionStandard.findMany({

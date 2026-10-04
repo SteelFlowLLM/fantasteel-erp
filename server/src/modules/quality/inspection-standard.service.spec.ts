@@ -211,3 +211,97 @@ describe('검사 기준 상세 조회 (API-120, REQ-QC-002)', () => {
     await expect(service.getInspectionStandard(2_000_000_000)).rejects.toMatchObject({ code: 'COM-003' });
   });
 });
+
+describe('검사 기준 등록 (API-121, REQ-QC-002)', () => {
+  const prisma = new PrismaService();
+  const service = new InspectionStandardService(prisma, new InspectionStandardRepository());
+  let tempSteelGradeId: number;
+
+  const hotRollingItems = () => [
+    { inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', unit: 'MPa', minValue: '490', maxValue: '630' },
+    { inspectionItemCode: 'YIELD_STRENGTH', inspectionItemName: '항복강도', unit: 'MPa', minValue: '355', thicknessUptoMm: '16' },
+    { inspectionItemCode: 'YIELD_STRENGTH', inspectionItemName: '항복강도', unit: 'MPa', minValue: '345', thicknessOverMm: '16', thicknessUptoMm: '40' },
+    { inspectionItemCode: 'CHARPY', inspectionItemName: '샤르피 충격', unit: 'J', minValue: '27', thicknessOverMm: '6', isRequired: false },
+    { inspectionItemCode: 'THICKNESS_TOL', inspectionItemName: '두께 허용차', unit: 'mm', minValue: '-0.42', maxValue: '0.42' },
+  ];
+
+  beforeAll(async () => {
+    const grade = await prisma.steelGrade.create({
+      data: { steelGradeCode: 'QSC-GRADE', steelGradeName: '검사 기준 등록 테스트 강종', standardNo: 'TEST' },
+    });
+    tempSteelGradeId = grade.id;
+  });
+
+  afterAll(async () => {
+    const standards = await prisma.inspectionStandard.findMany({ where: { steelGradeId: tempSteelGradeId }, select: { id: true } });
+    const ids = standards.map((s) => s.id);
+    await prisma.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: { in: ids } } });
+    await prisma.inspectionStandard.deleteMany({ where: { id: { in: ids } } });
+    await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
+    await prisma.$disconnect();
+  });
+
+  it('버전 1로 만들고 코드는 QS-{강종}-{공정 약어}, 응답은 등록된 기준 상세', async () => {
+    const detail = await service.createInspectionStandard({
+      processType: 'HOT_ROLLING',
+      steelGradeId: tempSteelGradeId,
+      items: hotRollingItems(),
+    });
+    expect(detail).toMatchObject({
+      inspectionStandardCode: 'QS-QSC-GRADE-HR',
+      versionNo: 1,
+      processType: 'HOT_ROLLING',
+      steelGradeId: tempSteelGradeId,
+      steelGradeCode: 'QSC-GRADE',
+    });
+    expect(detail.items.map((i) => [i.inspectionItemCode, i.minValue, i.maxValue, i.thicknessOverMm, i.thicknessUptoMm, i.isRequired])).toEqual([
+      ['TENSILE_STRENGTH', '490.0000', '630.0000', null, null, true],
+      ['YIELD_STRENGTH', '355.0000', null, null, '16.00', true],
+      ['YIELD_STRENGTH', '345.0000', null, '16.00', '40.00', true],
+      ['CHARPY', '27.0000', null, '6.00', null, false],
+      ['THICKNESS_TOL', '-0.4200', '0.4200', null, null, true],
+    ]);
+    // 등록한 기준은 목록의 최신 버전으로 나온다
+    const list = await service.listInspectionStandards({ steelGradeId: tempSteelGradeId });
+    expect(list.items.map((s) => s.inspectionStandardId)).toEqual([detail.inspectionStandardId]);
+  });
+
+  it('제강 기준(강종 성분 규격)은 같은 강종이라도 공정이 달라 따로 등록된다', async () => {
+    const detail = await service.createInspectionStandard({
+      processType: 'STEELMAKING',
+      steelGradeId: tempSteelGradeId,
+      items: [
+        { inspectionItemCode: 'C', inspectionItemName: '탄소', unit: '%', maxValue: '0.2' },
+        { inspectionItemCode: 'MN', inspectionItemName: '망간', unit: '%', maxValue: '1.6', isRequired: true },
+      ],
+    });
+    expect(detail).toMatchObject({ inspectionStandardCode: 'QS-QSC-GRADE-ST', versionNo: 1, processType: 'STEELMAKING' });
+  });
+
+  it('같은 공정·강종에 기준이 이미 있으면 COM-004 (새 버전으로 고치도록 안내)', async () => {
+    await expect(
+      service.createInspectionStandard({ processType: 'HOT_ROLLING', steelGradeId: tempSteelGradeId, items: hotRollingItems() }),
+    ).rejects.toMatchObject({ code: 'COM-004', message: expect.stringContaining('QS-QSC-GRADE-HR') });
+    expect(await prisma.inspectionStandard.count({ where: { steelGradeId: tempSteelGradeId, processType: 'HOT_ROLLING' } })).toBe(1);
+  });
+
+  it('항목이 맞지 않으면(두께 구간 겹침) COM-004, 아무것도 저장하지 않는다', async () => {
+    await expect(
+      service.createInspectionStandard({
+        processType: 'CONTINUOUS_CASTING',
+        steelGradeId: tempSteelGradeId,
+        items: [
+          { inspectionItemCode: 'WIDTH_TOL', inspectionItemName: '폭 허용차', minValue: '0', maxValue: '10' },
+          { inspectionItemCode: 'WIDTH_TOL', inspectionItemName: '폭 허용차', minValue: '0', maxValue: '20' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-004' });
+    expect(await prisma.inspectionStandard.count({ where: { steelGradeId: tempSteelGradeId, processType: 'CONTINUOUS_CASTING' } })).toBe(0);
+  });
+
+  it('없는 강종은 COM-003', async () => {
+    await expect(
+      service.createInspectionStandard({ processType: 'HOT_ROLLING', steelGradeId: 2_000_000_000, items: hotRollingItems() }),
+    ).rejects.toMatchObject({ code: 'COM-003' });
+  });
+});
