@@ -1,6 +1,7 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { PERMISSION, type InspectionStandardListItem, type PageResult } from '@fantasteel/shared';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { PERMISSION, type InspectionStandardDetail, type InspectionStandardListItem, type PageResult } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
+import { AppException } from '../../common/errors/app.exception';
 import { ListInspectionStandardsDto } from './dto/list-inspection-standards.dto';
 import { InspectionStandardService } from './inspection-standard.service';
 
@@ -17,5 +18,14 @@ export class InspectionStandardController {
   @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'VIEW')
   listInspectionStandards(@Query() query: ListInspectionStandardsDto): Promise<PageResult<InspectionStandardListItem>> {
     return this.service.listInspectionStandards(query);
+  }
+
+  /** 검사 기준 상세 조회 (API-120). :id는 기준 버전(inspection_standard) id, 옛 버전도 조회 */
+  @Get('inspection-standards/:id')
+  @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'VIEW')
+  getInspectionStandard(
+    @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 기준 id는 정수여야 해요') })) id: number,
+  ): Promise<InspectionStandardDetail> {
+    return this.service.getInspectionStandard(id);
   }
 }

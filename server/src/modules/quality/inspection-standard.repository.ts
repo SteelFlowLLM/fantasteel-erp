@@ -50,6 +50,11 @@ export class InspectionStandardRepository {
     });
   }
 
+  /** 기준 버전 1건과 항목 (API-120). 옛 버전도 읽는다 */
+  findStandardWithItems(tx: Tx, inspectionStandardId: number) {
+    return tx.inspectionStandard.findUnique({ where: { id: inspectionStandardId }, select: standardWithItemsSelect });
+  }
+
   /** 기준 버전과 항목 (한 페이지 분) */
   findStandardsWithItems(tx: Tx, inspectionStandardIds: number[]) {
     return tx.inspectionStandard.findMany({
