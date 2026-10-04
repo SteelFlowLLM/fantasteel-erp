@@ -8,6 +8,7 @@ const rejectedLotSelect = {
   ...inspectedLotSelect,
   dispositionStatus: true,
   dispositionReason: true,
+  updatedAt: true,
   qualityInspection: { select: { id: true, inspectionResult: true } },
 } satisfies Prisma.LotSelect;
 
@@ -48,5 +49,33 @@ export class RejectedLotRepository {
       tx.lot.count({ where: rejectedLotWhere }),
     ]);
     return { lots, total };
+  }
+
+  lotExists(tx: Tx, lotId: number): Promise<boolean> {
+    return tx.lot.count({ where: { id: lotId } }).then((count) => count > 0);
+  }
+
+  /** 불합격 LOT 1건 (목록과 같은 조건). 불합격이 아니면 null. 작업 로그에 붙일 수주(LOT → 실적 → 계획 → 수주 품목)도 읽는다 */
+  findRejectedLot(tx: Tx, lotId: number) {
+    return tx.lot.findFirst({
+      where: { AND: [{ id: lotId }, rejectedLotWhere] },
+      select: {
+        ...rejectedLotSelect,
+        productionResult: {
+          select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+        },
+      },
+    });
+  }
+
+  /** updated_at이 그대로일 때만 처리 상태·사유를 바꾼다(행 잠금 포함). false면 그 사이 다른 수정이 있었다 */
+  async updateDispositionIfUnchanged(
+    tx: Tx,
+    lotId: number,
+    expectedUpdatedAt: Date,
+    data: { dispositionStatus: string; dispositionReason: string },
+  ): Promise<boolean> {
+    const { count } = await tx.lot.updateMany({ where: { id: lotId, updatedAt: expectedUpdatedAt }, data });
+    return count === 1;
   }
 }
