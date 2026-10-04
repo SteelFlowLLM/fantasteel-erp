@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   PERMISSION,
   type AuthUser,
@@ -10,6 +10,7 @@ import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorator
 import { AppException } from '../../common/errors/app.exception';
 import { ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import { RegisterQualityInspectionDto } from './dto/register-quality-inspection.dto';
+import { UpdateQualityInspectionDto } from './dto/update-quality-inspection.dto';
 import { QualityService } from './quality.service';
 
 /**
@@ -45,5 +46,16 @@ export class QualityController {
     @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 id는 정수여야 해요') })) id: number,
   ): Promise<QualityInspectionDetail> {
     return this.service.getQualityInspection(id);
+  }
+
+  /** 측정값 보완·오타 수정 (REQ-QC-003). 같은 검사 행을 고치고 다시 판정, 응답은 수정된 검사 상세 */
+  @Patch('quality-inspections/:id')
+  @RequirePermission(PERMISSION.INSPECTION_REGISTER, 'USE')
+  updateQualityInspection(
+    @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 id는 정수여야 해요') })) id: number,
+    @Body() dto: UpdateQualityInspectionDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<QualityInspectionDetail> {
+    return this.service.updateQualityInspection(id, dto, user);
   }
 }

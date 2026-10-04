@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { INSPECTION_RESULT, LOT_TYPE, type InspectionResult, type LotType } from '@fantasteel/shared';
+import {
+  ALLOCATION_PURPOSE,
+  ALLOCATION_STATUS,
+  INSPECTION_RESULT,
+  LOT_TYPE,
+  type InspectionResult,
+  type LotType,
+} from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -61,6 +68,7 @@ const inspectionDetailSelect = {
   id: true,
   inspectionResult: true,
   inspectedAt: true,
+  updatedAt: true,
   inspectorEmployee: { select: { id: true, employeeName: true } },
   inspectionStandard: {
     select: {
@@ -92,6 +100,32 @@ export type InspectedLot = Prisma.LotGetPayload<{ select: typeof inspectedLotSel
 export type QualityInspectionListLot = Prisma.LotGetPayload<{ select: typeof listLotSelect }>;
 export type QualityInspectionDetailRecord = Prisma.QualityInspectionGetPayload<{ select: typeof inspectionDetailSelect }>;
 
+/** 판정에 필요한 기준 항목 컬럼 */
+const judgedStandardSelect = {
+  id: true,
+  inspectionStandardCode: true,
+  versionNo: true,
+  inspectionStandardItems: {
+    orderBy: { id: 'asc' },
+    select: {
+      id: true,
+      inspectionItemCode: true,
+      minValue: true,
+      maxValue: true,
+      thicknessOverMm: true,
+      thicknessUptoMm: true,
+      isRequired: true,
+    },
+  },
+} satisfies Prisma.InspectionStandardSelect;
+
+/** 작업 로그에 붙일 수주 (LOT → 실적 → 계획 → 수주 품목) */
+const lotSalesOrderSelect = {
+  productionResult: {
+    select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+  },
+} satisfies Prisma.LotSelect;
+
 const failedHeat = { lotType: LOT_TYPE.HEAT, qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.FAIL } } };
 
 @Injectable()
@@ -121,11 +155,90 @@ export class QualityRepository {
       select: {
         ...inspectedLotSelect,
         qualityInspection: { select: { id: true } },
-        productionResult: {
-          select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+        ...lotSalesOrderSelect,
+      },
+    });
+  }
+
+  /**
+   * 측정값 수정 대상 검사: 판정에 쓴 기준 버전(바꾸지 않음)·기존 값·LOT 두께,
+   * 밀시트 확인에 쓸 하위 LOT(히트 → 슬래브 → 코일, lot_relation)
+   */
+  findInspectionForUpdate(tx: Tx, qualityInspectionId: number) {
+    return tx.qualityInspection.findUnique({
+      where: { id: qualityInspectionId },
+      select: {
+        id: true,
+        inspectionResult: true,
+        inspectionStandard: { select: judgedStandardSelect },
+        qualityInspectionValues: { select: { inspectionStandardItemId: true, measuredValue: true } },
+        lot: {
+          select: {
+            id: true,
+            lotType: true,
+            item: { select: { thicknessMm: true } },
+            ...lotSalesOrderSelect,
+            lotRelationsAsParentLot: {
+              select: { childLot: { select: { id: true, lotRelationsAsParentLot: { select: { childLotId: true } } } } },
+            },
+          },
         },
       },
     });
+  }
+
+  /**
+   * 이 LOT들이 출고돼 발행된 밀시트 번호. LOT 연결 테이블이 없어
+   * allocation(SHIPMENT, CONSUMED) → 출하요청 품목 → (출하요청, 수주)로 밀시트를 찾는다 ([ERD] mill_sheet Note)
+   */
+  async findIssuedMillSheetNos(tx: Tx, lotIds: number[]): Promise<string[]> {
+    const allocations = await tx.allocation.findMany({
+      where: {
+        lotId: { in: lotIds },
+        allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT,
+        allocationStatus: ALLOCATION_STATUS.CONSUMED,
+      },
+      select: { shipmentRequestItem: { select: { shipmentRequestId: true, salesOrderItem: { select: { salesOrderId: true } } } } },
+    });
+    const keys = allocations.flatMap(({ shipmentRequestItem: item }) =>
+      item ? [{ shipmentRequestId: item.shipmentRequestId, salesOrderId: item.salesOrderItem.salesOrderId }] : [],
+    );
+    if (!keys.length) return [];
+    const millSheets = await tx.millSheet.findMany({
+      where: { OR: keys },
+      select: { millSheetNo: true },
+      orderBy: { millSheetNo: 'asc' },
+    });
+    return millSheets.map((m) => m.millSheetNo);
+  }
+
+  /** updated_at이 그대로일 때만 판정을 바꾼다(행 잠금 포함). false면 그 사이 다른 수정이 있었다 */
+  async updateInspectionResultIfUnchanged(
+    tx: Tx,
+    qualityInspectionId: number,
+    expectedUpdatedAt: Date,
+    inspectionResult: InspectionResult,
+  ): Promise<boolean> {
+    const { count } = await tx.qualityInspection.updateMany({
+      where: { id: qualityInspectionId, updatedAt: expectedUpdatedAt },
+      data: { inspectionResult },
+    });
+    return count === 1;
+  }
+
+  /** 보완은 새 값 행, 오타 수정은 같은 값 행을 고친다 ((검사, 항목) unique) */
+  async upsertQualityInspectionValues(
+    tx: Tx,
+    qualityInspectionId: number,
+    values: { inspectionStandardItemId: number; measuredValue: Prisma.Decimal }[],
+  ): Promise<void> {
+    for (const { inspectionStandardItemId, measuredValue } of values) {
+      await tx.qualityInspectionValue.upsert({
+        where: { qualityInspectionId_inspectionStandardItemId: { qualityInspectionId, inspectionStandardItemId } },
+        create: { qualityInspectionId, inspectionStandardItemId, measuredValue },
+        update: { measuredValue },
+      });
+    }
   }
 
   /** 그 공정·강종의 최신 기준 버전과 항목 (quality.md 4장 "기준 고르기") */
@@ -133,23 +246,7 @@ export class QualityRepository {
     return tx.inspectionStandard.findFirst({
       where: { processType, steelGradeId },
       orderBy: [{ versionNo: 'desc' }, { id: 'desc' }],
-      select: {
-        id: true,
-        inspectionStandardCode: true,
-        versionNo: true,
-        inspectionStandardItems: {
-          orderBy: { id: 'asc' },
-          select: {
-            id: true,
-            inspectionItemCode: true,
-            minValue: true,
-            maxValue: true,
-            thicknessOverMm: true,
-            thicknessUptoMm: true,
-            isRequired: true,
-          },
-        },
-      },
+      select: judgedStandardSelect,
     });
   }
 
