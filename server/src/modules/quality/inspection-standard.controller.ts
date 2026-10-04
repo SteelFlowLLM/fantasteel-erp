@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs
 import { PERMISSION, type InspectionStandardDetail, type InspectionStandardListItem, type PageResult } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { CreateInspectionStandardDto } from './dto/create-inspection-standard.dto';
+import { CreateInspectionStandardDto, CreateInspectionStandardVersionDto } from './dto/create-inspection-standard.dto';
 import { ListInspectionStandardsDto } from './dto/list-inspection-standards.dto';
 import { InspectionStandardService } from './inspection-standard.service';
 
@@ -26,6 +26,16 @@ export class InspectionStandardController {
   @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'USE')
   createInspectionStandard(@Body() dto: CreateInspectionStandardDto): Promise<InspectionStandardDetail> {
     return this.service.createInspectionStandard(dto);
+  }
+
+  /** 검사 기준 수정 = 새 버전 (API-122). :id는 최신 버전 id, body는 새 버전의 항목 전체. 응답은 새 버전 상세 */
+  @Post('inspection-standards/:id/versions')
+  @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'USE')
+  createInspectionStandardVersion(
+    @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 기준 id는 정수여야 해요') })) id: number,
+    @Body() dto: CreateInspectionStandardVersionDto,
+  ): Promise<InspectionStandardDetail> {
+    return this.service.createInspectionStandardVersion(id, dto);
   }
 
   /** 검사 기준 상세 조회 (API-120). :id는 기준 버전(inspection_standard) id, 옛 버전도 조회 */

@@ -305,3 +305,104 @@ describe('검사 기준 등록 (API-121, REQ-QC-002)', () => {
     ).rejects.toMatchObject({ code: 'COM-003' });
   });
 });
+
+describe('검사 기준 수정 = 새 버전 (API-122, REQ-QC-002)', () => {
+  const prisma = new PrismaService();
+  const service = new InspectionStandardService(prisma, new InspectionStandardRepository());
+  let tempSteelGradeId: number;
+  let v1Id: number;
+  let v2Id: number;
+
+  const itemsOf = async (inspectionStandardId: number) =>
+    prisma.inspectionStandardItem.findMany({
+      where: { inspectionStandardId },
+      orderBy: { id: 'asc' },
+      select: { inspectionItemCode: true, minValue: true, maxValue: true },
+    });
+
+  beforeAll(async () => {
+    const grade = await prisma.steelGrade.create({
+      data: { steelGradeCode: 'QSV-GRADE', steelGradeName: '검사 기준 새 버전 테스트 강종', standardNo: 'TEST' },
+    });
+    tempSteelGradeId = grade.id;
+    const v1 = await service.createInspectionStandard({
+      processType: 'HOT_ROLLING',
+      steelGradeId: grade.id,
+      items: [
+        { inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', unit: 'MPa', minValue: '400', maxValue: '510' },
+        { inspectionItemCode: 'CAMBER', inspectionItemName: '캠버', unit: 'mm', maxValue: '5' },
+      ],
+    });
+    v1Id = v1.inspectionStandardId;
+  });
+
+  afterAll(async () => {
+    const standards = await prisma.inspectionStandard.findMany({ where: { steelGradeId: tempSteelGradeId }, select: { id: true } });
+    const ids = standards.map((s) => s.id);
+    await prisma.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: { in: ids } } });
+    await prisma.inspectionStandard.deleteMany({ where: { id: { in: ids } } });
+    await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
+    await prisma.$disconnect();
+  });
+
+  it('같은 코드·공정·강종으로 version_no + 1을 만들고 새 항목 전체를 넣는다', async () => {
+    const v2 = await service.createInspectionStandardVersion(v1Id, {
+      items: [
+        { inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', unit: 'MPa', minValue: '410', maxValue: '550' },
+        { inspectionItemCode: 'CHARPY', inspectionItemName: '샤르피 충격', unit: 'J', minValue: '27', thicknessOverMm: '6' },
+      ],
+    });
+    v2Id = v2.inspectionStandardId;
+    expect(v2).toMatchObject({
+      inspectionStandardCode: 'QS-QSV-GRADE-HR',
+      versionNo: 2,
+      processType: 'HOT_ROLLING',
+      steelGradeId: tempSteelGradeId,
+    });
+    expect(v2Id).not.toBe(v1Id);
+    expect(v2.items.map((i) => [i.inspectionItemCode, i.minValue, i.maxValue, i.thicknessOverMm])).toEqual([
+      ['TENSILE_STRENGTH', '410.0000', '550.0000', null],
+      ['CHARPY', '27.0000', null, '6.00'],
+    ]);
+  });
+
+  it('기존 버전과 항목은 그대로 남는다 (수정·삭제하지 않음, [05] 7-2)', async () => {
+    const v1 = await service.getInspectionStandard(v1Id);
+    expect(v1).toMatchObject({ versionNo: 1, inspectionStandardCode: 'QS-QSV-GRADE-HR' });
+    expect((await itemsOf(v1Id)).map((i) => [i.inspectionItemCode, i.minValue?.toString() ?? null, i.maxValue?.toString() ?? null])).toEqual([
+      ['TENSILE_STRENGTH', '400', '510'],
+      ['CAMBER', null, '5'],
+    ]);
+  });
+
+  it('목록에는 새 버전이 최신으로 나온다 (이후 검사는 새 버전으로 판정)', async () => {
+    const list = await service.listInspectionStandards({ steelGradeId: tempSteelGradeId });
+    expect(list.items.map((s) => [s.inspectionStandardId, s.versionNo])).toEqual([[v2Id, 2]]);
+  });
+
+  it('최신이 아닌 버전에서 만들면 COM-001, 새 행을 만들지 않는다', async () => {
+    await expect(
+      service.createInspectionStandardVersion(v1Id, {
+        items: [{ inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', minValue: '420' }],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-001', message: expect.stringContaining('버전 2') });
+    expect(await prisma.inspectionStandard.count({ where: { steelGradeId: tempSteelGradeId } })).toBe(2);
+  });
+
+  it('항목이 맞지 않으면(min > max) COM-004, 새 행을 만들지 않는다', async () => {
+    await expect(
+      service.createInspectionStandardVersion(v2Id, {
+        items: [{ inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', minValue: '600', maxValue: '500' }],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-004' });
+    expect(await prisma.inspectionStandard.count({ where: { steelGradeId: tempSteelGradeId } })).toBe(2);
+  });
+
+  it('없는 기준 id는 COM-003', async () => {
+    await expect(
+      service.createInspectionStandardVersion(2_000_000_000, {
+        items: [{ inspectionItemCode: 'C', inspectionItemName: '탄소', maxValue: '0.2' }],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-003' });
+  });
+});
