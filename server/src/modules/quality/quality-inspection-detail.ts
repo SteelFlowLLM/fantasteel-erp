@@ -23,6 +23,7 @@ export function toQualityInspectionDetail(record: QualityInspectionDetailRecord)
     inspectorEmployeeId: record.inspectorEmployee.id,
     inspectorEmployeeName: record.inspectorEmployee.employeeName,
     inspectedAt: record.inspectedAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
     items: standard.inspectionStandardItems
       .filter((item) => isItemApplicable(item, thicknessMm))
       .map((item) => {
