@@ -84,13 +84,18 @@ function toJudgementLog(
   };
 }
 
-/** 규격별 재고 반영 결과를 검사 응답의 합계로 바꾼다. 적격이 된 매수 중 자동 예약하지 못한 것은 여재다 */
-function toStockSync(results: EligibilitySyncResult[]): InspectionStockSync {
+/**
+ * 재고 반영 결과를 검사 응답의 합계로 바꾼다. 적격이 된·빠진 매수는 판정 전후 적격 LOT을 견줘 LOT 단위로 센다:
+ * inventory는 on_hand를 다시 세므로 기존 숫자가 어긋나 있었다면 그 보정분이 on_hand 차이에 섞인다.
+ * 자동 예약·해제는 inventory 결과 그대로. 적격이 된 매수 중 자동 예약하지 못한 것은 여재다
+ */
+function toStockSync(results: EligibilitySyncResult[], eligibleBefore: ReadonlySet<number>, eligibleAfter: ReadonlySet<number>): InspectionStockSync {
   const sum = (pick: (r: EligibilitySyncResult) => number) => results.reduce((total, r) => total + pick(r), 0);
+  const countNotIn = (from: ReadonlySet<number>, other: ReadonlySet<number>) => [...from].filter((id) => !other.has(id)).length;
   return {
-    eligibleAddedQty: sum((r) => Math.max(0, r.onHandQty - r.previousOnHandQty)),
+    eligibleAddedQty: countNotIn(eligibleAfter, eligibleBefore),
     autoReservedQty: sum((r) => r.autoReservedQty),
-    eligibleRemovedQty: sum((r) => Math.max(0, r.previousOnHandQty - r.onHandQty)),
+    eligibleRemovedQty: countNotIn(eligibleBefore, eligibleAfter),
     releasedReservationQty: sum((r) => r.releasedReservationQty),
     releasedAllocationCount: sum((r) => r.releasedAllocationCount),
   };
@@ -167,6 +172,9 @@ export class QualityService {
         throw new AppException('COM-001', '이미 검사가 등록된 LOT이에요. 측정값은 검사 수정으로 고쳐 주세요');
       }
 
+      const stockScopeLotIds = lockScopeLotIds(lot);
+      const eligibleBefore = await this.repository.findEligibleProductLotIds(tx, stockScopeLotIds);
+
       const summary = toInspectedLotSummary(lot);
       const standard =
         summary.steelGradeId === null
@@ -211,7 +219,8 @@ export class QualityService {
       });
 
       // 판정 뒤 재고 반영: 적격이 된 LOT on_hand +1·자동 예약, FAIL이면 하위 LOT 배정 해제·예약 축소 (quality.md 4장, 이슈 #18)
-      const stockSync = toStockSync(await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user));
+      const syncResults = await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user);
+      const stockSync = toStockSync(syncResults, eligibleBefore, await this.repository.findEligibleProductLotIds(tx, stockScopeLotIds));
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
@@ -257,6 +266,11 @@ export class QualityService {
       const beforeJudgement = judgeInspection(applicableItems, beforeByItemId);
       const judgement = judgeInspection(applicableItems, afterByItemId);
 
+      // 판정이 바뀔 때만 적격이 바뀐다 (재고 반영도 그때만)
+      const isResultChanged = beforeJudgement.inspectionResult !== judgement.inspectionResult;
+      const stockScopeLotIds = lockScopeLotIds(lot);
+      const eligibleBefore = isResultChanged ? await this.repository.findEligibleProductLotIds(tx, stockScopeLotIds) : new Set<number>();
+
       const isUnchanged = await this.repository.updateInspectionResultIfUnchanged(
         tx,
         inspection.id,
@@ -288,9 +302,13 @@ export class QualityService {
       });
 
       // 판정이 바뀌면(PASS↔FAIL 등) 등록과 같은 재고 반영 (quality.md 4장 "측정값 수정"). 재판정 범위는 quality.md 8장 🟡
-      const stockSync = toStockSync(
-        beforeJudgement.inspectionResult !== judgement.inspectionResult ? await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user) : [],
-      );
+      const stockSync = isResultChanged
+        ? toStockSync(
+            await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user),
+            eligibleBefore,
+            await this.repository.findEligibleProductLotIds(tx, stockScopeLotIds),
+          )
+        : toStockSync([], eligibleBefore, eligibleBefore);
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');

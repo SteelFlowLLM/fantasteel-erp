@@ -3,11 +3,13 @@ import {
   ALLOCATION_PURPOSE,
   ALLOCATION_STATUS,
   INSPECTION_RESULT,
+  LOT_STATUS,
   LOT_TYPE,
   type InspectionResult,
   type LotType,
 } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { findLotEligibility } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 export interface QualityInspectionListFilter {
@@ -166,6 +168,7 @@ export class QualityRepository {
       where: { id: lotId },
       select: {
         ...inspectedLotSelect,
+        ...lotDescendantsSelect,
         qualityInspection: { select: { id: true } },
         ...lotSalesOrderSelect,
       },
@@ -220,6 +223,22 @@ export class QualityRepository {
       orderBy: { millSheetNo: 'asc' },
     });
     return millSheets.map((m) => m.millSheetNo);
+  }
+
+  /**
+   * 이 LOT들 가운데 재고에 들어가는 제품 LOT(슬래브·코일, AVAILABLE, 적격 = 자기 PASS + 상위 히트 PASS) id.
+   * 판정 전후로 읽어 적격이 된·빠진 매수를 LOT 단위로 센다 (inventory와 같은 적격 SQL)
+   */
+  async findEligibleProductLotIds(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    const products = await tx.lot.findMany({
+      where: { id: { in: lotIds }, lotType: { in: [LOT_TYPE.SLAB, LOT_TYPE.COIL] }, lotStatus: LOT_STATUS.AVAILABLE },
+      select: { id: true },
+    });
+    const eligible = new Set<number>();
+    for (const { id } of products) {
+      if ((await tx.$queryRawTyped(findLotEligibility(id)))[0]?.is_eligible) eligible.add(id);
+    }
+    return eligible;
   }
 
   /** 이 LOT들 가운데 출고돼 밀시트가 발행된 LOT id (목록 여러 행을 한 번에 확인) */
