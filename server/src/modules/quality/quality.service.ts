@@ -4,6 +4,7 @@ import {
   LOT_TYPE,
   QUALITY_INSPECTION_LIST_STATUS,
   type AuthUser,
+  type InspectionResult,
   type PageResult,
   type QualityInspectionDetail,
   type QualityInspectionListItem,
@@ -12,6 +13,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { JUDGED_INSPECTION_RESULTS, type ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import type { QualityInspectionValueInput, RegisterQualityInspectionDto } from './dto/register-quality-inspection.dto';
 import type { UpdateQualityInspectionDto } from './dto/update-quality-inspection.dto';
@@ -73,6 +75,7 @@ export class QualityService {
     private readonly prisma: PrismaService,
     private readonly repository: QualityRepository,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly inventory: InventoryService,
   ) {}
 
   /**
@@ -169,8 +172,8 @@ export class QualityService {
         },
       });
 
-      // TODO(leehs32780): inventory 모듈의 onLotsEligibilityChanged(tx, lotIds, actor)가 생기면 여기서 부른다.
-      //   적격이 된 LOT on_hand +1·자동 예약, FAIL이면 하위 LOT 배정 해제 (quality.md 4장 "판정 뒤 재고 반영", 이슈 #18)
+      // 판정 뒤 재고 반영: 적격이 된 제품 on_hand +1·자동 예약 (quality.md 4장 "판정 뒤 재고 반영")
+      await this.inventory.onLotsEligibilityChanged(tx, { lotId: lot.id, previousResult: null });
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
@@ -248,8 +251,13 @@ export class QualityService {
         },
       });
 
-      // TODO(leehs32780): 판정이 바뀌면(PASS↔FAIL 등) inventory 모듈의 onLotsEligibilityChanged(tx, lotIds, actor)를 부른다.
-      //   등록과 같은 재고 반영 (quality.md 4장 "측정값 수정"). 재판정 범위는 quality.md 8장 🟡
+      // 판정이 바뀌면 등록과 같은 재고 반영을 한다. 히트면 하위 제품까지 (2026-10-06 결정, quality.md 8장 "수정 후 재판정 범위")
+      if (inspection.inspectionResult !== judgement.inspectionResult) {
+        await this.inventory.onLotsEligibilityChanged(tx, {
+          lotId: lot.id,
+          previousResult: inspection.inspectionResult as InspectionResult,
+        });
+      }
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
