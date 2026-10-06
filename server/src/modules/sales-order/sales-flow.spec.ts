@@ -19,6 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { QualityService } from '../quality/quality.service';
+import { RejectedLotService } from '../quality/rejected-lot.service';
 import { ShipmentService } from '../shipment/shipment.service';
 import { SalesOrderService } from './sales-order.service';
 
@@ -632,5 +633,78 @@ describe('검사 판정 → 재고 반영·자동 예약 (REQ-INV-003·004·007,
     await setResult(heatId, INSPECTION_RESULT.FAIL);
     await sync([heatId]);
     expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 0, reservedQty: 0 });
+  });
+
+  /** 그 규격의 공정 기준(최신 버전)과 기준 안의 값: 최소·최대가 있으면 가운데, 한쪽만 있으면 그 값 */
+  const passValuesOf = async (itemId: number, processType: string) => {
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: itemId } });
+    const standard = await prisma.inspectionStandard.findFirstOrThrow({
+      where: { processType, steelGradeId: item.steelGradeId ?? 0 },
+      orderBy: { versionNo: 'desc' },
+      include: { inspectionStandardItems: true },
+    });
+    return standard.inspectionStandardItems.map((i) => {
+      const value = i.minValue && i.maxValue ? i.minValue.add(i.maxValue).div(2) : (i.maxValue ?? i.minValue);
+      return { inspectionStandardItemId: i.id, measuredValue: value ? value.toFixed(4) : '0' };
+    });
+  };
+
+  it('필수 측정값이 비어 판정 대기(PENDING)면 적격이 아니라 재고에 넣지 않고 자동 예약도 하지 않는다 (quality.md 7장)', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 1);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { slabs } = await castSlabs(itemId, 1, { productionPlanId: plan.id, lotResult: null });
+    const [first] = await passValuesOf(itemId, PROCESS_TYPE.CONTINUOUS_CASTING);
+
+    const inspection = await moduleRef.get(QualityService).registerQualityInspection({ lotId: slabs[0].id, values: [first] }, qualityUser);
+    expect(inspection.inspectionResult).toBe('PENDING');
+    expect(inspection.stockSync).toMatchObject({ eligibleAddedQty: 0, autoReservedQty: 0 });
+    expect((await prisma.inventory.findUnique({ where: { itemId } }))?.onHandQty ?? 0).toBe(0);
+    expect(await activeOf(salesOrderId)).toBe(0);
+  });
+
+  it('검사 API로 히트를 불합격으로 고치면 하위 합격 슬래브가 재고에서 빠지고 자동 예약도 풀린다 (INV-003·007)', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 2);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { heatId, slabs } = await castSlabs(itemId, 2, { productionPlanId: plan.id, lotResult: null });
+    const values = await passValuesOf(itemId, PROCESS_TYPE.CONTINUOUS_CASTING);
+    for (const slab of slabs) await moduleRef.get(QualityService).registerQualityInspection({ lotId: slab.id, values }, qualityUser);
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 2, reservedQty: 2 });
+
+    // 히트 검사 행의 기준 항목 중 하나를 상한보다 크게 고친다
+    const heatInspection = await prisma.qualityInspection.findUniqueOrThrow({
+      where: { lotId: heatId },
+      include: { inspectionStandard: { include: { inspectionStandardItems: true } } },
+    });
+    const limited = heatInspection.inspectionStandard.inspectionStandardItems.find((i) => i.maxValue !== null && i.thicknessOverMm === null && i.thicknessUptoMm === null);
+    if (!limited?.maxValue) throw new Error('상한이 있는 히트 기준 항목이 없습니다');
+    const failed = await moduleRef.get(QualityService).updateQualityInspection(
+      heatInspection.id,
+      { expectedUpdatedAt: heatInspection.updatedAt.toISOString(), values: [{ inspectionStandardItemId: limited.id, measuredValue: limited.maxValue.add(1000).toFixed(4) }] },
+      qualityUser,
+    );
+    expect(failed.inspectionResult).toBe('FAIL');
+    expect(failed.stockSync).toMatchObject({ eligibleRemovedQty: 2, releasedReservationQty: 2 });
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 0, reservedQty: 0 });
+    expect(await activeOf(salesOrderId)).toBe(0);
+  });
+
+  it('불합격 처리 상태를 지정해도 재고·예약은 바뀌지 않는다 (REQ-QC-004, 후속 재고 처리 없음)', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId } = await createSalesOrder(itemId, 1);
+    await addSlabs(itemId, 2);
+    const { slabs } = await castSlabs(itemId, 1, { lotResult: INSPECTION_RESULT.FAIL });
+    const before = { inventory: await inventoryOf(itemId), active: await activeOf(salesOrderId) };
+
+    const lot = await prisma.lot.findUniqueOrThrow({ where: { id: slabs[0].id } });
+    await moduleRef.get(RejectedLotService).setLotDisposition(
+      lot.id,
+      { dispositionStatus: 'SCRAPPED', dispositionReason: '표면 결함으로 폐기', expectedUpdatedAt: lot.updatedAt.toISOString() },
+      qualityUser,
+    );
+    expect(await prisma.lot.findUniqueOrThrow({ where: { id: lot.id } })).toMatchObject({ dispositionStatus: 'SCRAPPED', lotStatus: 'AVAILABLE' });
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: before.inventory.onHandQty, reservedQty: before.inventory.reservedQty });
+    expect(await activeOf(salesOrderId)).toBe(before.active);
   });
 });

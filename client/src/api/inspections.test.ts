@@ -142,6 +142,8 @@ describe('측정값 등록·수정과 자동 판정', () => {
     if (!p) throw new Error('P 항목 없음');
     const failed = await inspectionApi.register({ lotId: heatId, values: [{ inspectionStandardItemId: p.inspectionStandardItemId, measuredValue: '0.050' }] });
     expect(failed).toMatchObject({ inspectionResult: 'FAIL', excludedLotQty: 8 });
+    // 화면 안내용 해제 매수: 규격 풀을 다시 맞추며 줄인 예약이 있다
+    expect(failed.releasedReservationQty).toBeGreaterThan(0);
     expect(failed.salesOrderItem?.shortage).toMatchObject({ activeReservedQty: 4, unsecuredQty: 8, reproductionNeedQty: 8 });
     expect(read((t) => t.businessEvent.filter((e) => e.businessEventType === 'RESERVATION_RELEASED' && e.reasonCode === 'QUALITY_FAILURE' && e.actorType === 'SYSTEM')).length).toBeGreaterThan(0);
     expectClean();
