@@ -67,3 +67,23 @@ export interface PurchaseOrderView {
   updatedAt: string;
   items: PurchaseOrderItemView[];
 }
+
+/** 입고 기록 1건과 생성된 원료 LOT (API-150·219). 입고는 등록이 곧 확정이라 상태값이 없다 */
+export interface GoodsReceiptView {
+  id: number;
+  goodsReceiptNo: string;
+  purchaseOrderId: number;
+  purchaseOrderNo: string;
+  purchaseOrderItemId: number;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  receivedTon: string;
+  /** 원료 FIFO 기준일 */
+  receivedDate: string;
+  lotId: number | null;
+  lotNo: string | null;
+  yardId: number | null;
+  yardName: string | null;
+  createdAt: string;
+}
