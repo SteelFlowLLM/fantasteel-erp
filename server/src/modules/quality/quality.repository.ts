@@ -74,7 +74,7 @@ const listLotSelect = {
   },
 } satisfies Prisma.LotSelect;
 
-const inspectionDetailSelect = {
+export const inspectionDetailSelect = {
   id: true,
   inspectionResult: true,
   inspectedAt: true,

@@ -1,5 +1,5 @@
-// 불합격 관리 서버 어댑터: 불합격 LOT 목록 + 근거 검사(히트 불합격 하위 LOT은 상위 히트의 검사), 상태 지정, 재생산은 연결 전.
-import type { QualityInspectionDetail, QualityInspectionListItem, RejectedLotListItem } from '@fantasteel/shared';
+// 불합격 관리 서버 어댑터: 불합격 LOT 목록(근거 검사의 불합격 항목은 서버가 같이 줌), 상세는 lotId로 하나만, 상태 지정, 재생산은 연결 전.
+import type { QualityInspectionDetail, QualityInspectionListItem, RejectedLotEvidence, RejectedLotListItem } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dispositionApi } from '@/api/dispositions';
 import { ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
@@ -15,7 +15,9 @@ const lotBase = {
   productionPlanNo: null,
   steelGradeId: 3, steelGradeCode: 'SS275', heatInspectionResult: 'FAIL' as const, dispositionStatus: null, dispositionReason: null };
 
-const heat: RejectedLotListItem = {
+type RowBase = Omit<RejectedLotListItem, 'evidence'>;
+
+const heatBase: RowBase = {
   ...lotBase,
   lotId: 401,
   lotNo: 'HT-BOF1-261005-001',
@@ -30,7 +32,7 @@ const heat: RejectedLotListItem = {
   updatedAt: '2026-10-05T01:00:00.000Z',
 };
 
-const childSlab: RejectedLotListItem = {
+const childSlabBase: RowBase = {
   ...lotBase,
   lotId: 402,
   lotNo: 'SL-CC1-261005-001',
@@ -44,7 +46,7 @@ const childSlab: RejectedLotListItem = {
   updatedAt: '2026-10-05T01:00:01.000Z',
 };
 
-const failedCoil: RejectedLotListItem = {
+const failedCoilBase: RowBase = {
   ...lotBase,
   lotId: 501,
   lotNo: 'CL-HSM1-261005-001',
@@ -81,7 +83,7 @@ const detailItem = (id: number, code: string, measuredValue: string, isPassed: b
   isPassed,
 });
 
-const inspectionOf = (lot: RejectedLotListItem, id: number, items: QualityInspectionDetail['items']): QualityInspectionDetail => ({
+const inspectionOf = (lot: RowBase, id: number, items: QualityInspectionDetail['items']): QualityInspectionDetail => ({
   ...lot,
   qualityInspectionId: id,
   inspectionStandardId: 10,
@@ -96,12 +98,22 @@ const inspectionOf = (lot: RejectedLotListItem, id: number, items: QualityInspec
   items,
 });
 
-const heatInspection = inspectionOf(heat, 77, [detailItem(1, 'P', '0.0600', false), detailItem(2, 'S', '0.0100', true)]);
-const coilInspection = inspectionOf(failedCoil, 88, [detailItem(5, 'YIELD', '250.0000', false)]);
-const heatListRow: QualityInspectionListItem = { ...heat, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: heatInspection.inspectedAt };
+const heatInspection = inspectionOf(heatBase, 77, [detailItem(1, 'P', '0.0600', false), detailItem(2, 'S', '0.0100', true)]);
+const coilInspection = inspectionOf(failedCoilBase, 88, [detailItem(5, 'YIELD', '250.0000', false)]);
+const evidenceOf = (inspection: QualityInspectionDetail): RejectedLotEvidence => ({
+  qualityInspectionId: inspection.qualityInspectionId,
+  lotId: inspection.lotId,
+  inspectedAt: inspection.inspectedAt,
+  failedItems: inspection.items.filter((i) => i.isPassed === false),
+});
+// 서버가 목록 행에 근거 검사를 붙여 준다: 히트 불합격 하위 슬래브는 상위 히트의 검사
+const heat: RejectedLotListItem = { ...heatBase, evidence: evidenceOf(heatInspection) };
+const childSlab: RejectedLotListItem = { ...childSlabBase, evidence: evidenceOf(heatInspection) };
+const failedCoil: RejectedLotListItem = { ...failedCoilBase, evidence: evidenceOf(coilInspection) };
+const heatListRow: QualityInspectionListItem = { ...heatBase, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: heatInspection.inspectedAt };
 
 function respond(c: ServerCall) {
-  if (c.path === '/lots/rejected') return ok(page([failedCoil, childSlab, heat]));
+  if (c.path === '/lots/rejected') return ok(page([failedCoil, childSlab, heat].filter((r) => c.query.lotId === undefined || String(r.lotId) === c.query.lotId)));
   if (c.path === '/quality-inspections/77') return ok(heatInspection);
   if (c.path === '/quality-inspections/88') return ok(coilInspection);
   if (c.path === '/quality-inspections') return ok(page(c.query.lotId === '401' && c.query.status === 'done' ? [heatListRow] : []));
@@ -112,7 +124,7 @@ function respond(c: ServerCall) {
 afterEach(() => stopFakeServer());
 
 describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () => {
-  it('목록: 자기 불합격과 히트 불합격 하위 LOT을 나누고, 불합격 항목은 근거 검사에서 한 번씩만 읽는다', async () => {
+  it('목록: 자기 불합격과 히트 불합격 하위 LOT을 나누고, 불합격 항목은 목록 응답의 근거 검사에서 바로 쓴다 (검사 상세를 따로 부르지 않음)', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
     const rows = await dispositionApi.list();
     expect(rows.map((r) => [r.lotNo, r.reason, r.failedItems.map((f) => f.inspectionItemCode).join(','), r.inspectedAt])).toEqual([
@@ -124,21 +136,24 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
     expect(rows[0]).toMatchObject({ lotStatus: 'SHIPPED', itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanId: 300, productionPlanNo: 'PP-2610-0001' });
     // 히트는 규격·생산완료일이 없다
     expect(rows[2]).toMatchObject({ itemCode: null, producedDate: '', productionPlanNo: null });
-    expect(calls.filter((c) => c.path.startsWith('/quality-inspections/')).map((c) => c.path).sort()).toEqual(['/quality-inspections/77', '/quality-inspections/88']);
+    expect(calls.map((c) => c.path)).toEqual(['/lots/rejected']);
   });
 
-  it('근거 검사를 읽을 권한이 없으면 불합격 항목만 비운다', async () => {
+  it('상세: 검사 입력 조회 권한이 없으면 근거 검사 폼만 비우고, 불합격 항목은 목록 행 그대로 보인다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path.startsWith('/quality-inspections')) return new Response(JSON.stringify({ success: false, error: { code: 'COM-002', message: '권한이 없어요' } }), { status: 403 });
       return respond(c);
     });
-    const rows = await dispositionApi.list();
-    expect(rows.map((r) => r.failedItems)).toEqual([[], [], []]);
+    const detail = await dispositionApi.detail(501);
+    expect(detail?.evidence).toBeNull();
+    expect(detail?.row.failedItems.map((f) => f.inspectionItemCode)).toEqual(['YIELD']);
   });
 
   it('상세: 히트 불합격 하위 LOT의 근거는 상위 히트의 성분 검사다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
     const detail = await dispositionApi.detail(402);
+    // 불합격 목록 전체가 아니라 그 LOT 하나만 읽는다
+    expect(calls.find((c) => c.path === '/lots/rejected')?.query).toMatchObject({ lotId: '402', size: '1' });
     expect(detail?.row).toMatchObject({ lotId: 402, reason: 'HEAT_FAILED', heatNo: 'HT-BOF1-261005-001' });
     expect(detail?.evidence?.lot.lotId).toBe(401);
     expect(detail?.evidence?.items.filter((i) => i.isPassed === false).map((i) => i.inspectionItemCode)).toEqual(['P']);

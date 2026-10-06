@@ -1,26 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
+  INSPECTION_RESULT,
   PERMISSION,
   type AuthUser,
   type DispositionStatus,
   type InspectionResult,
   type PageResult,
+  type RejectedLotEvidence,
   type RejectedLotListItem,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ListRejectedLotsDto } from './dto/list-rejected-lots.dto';
 import type { SetLotDispositionDto } from './dto/set-lot-disposition.dto';
+import { toQualityInspectionDetail } from './quality-inspection-detail';
 import { toInspectedLotSummary } from './quality-inspection-list';
 import { RejectedLotRepository, type RejectedLot } from './rejected-lot.repository';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_SIZE = 20;
 
-function toRejectedLotListItem(lot: RejectedLot): RejectedLotListItem {
+/** 근거 검사의 LOT: 자기 검사가 FAIL이면 자기, 아니면(불합격 히트의 하위) 상위 히트 (TRM-078) */
+function evidenceLotIdOf(lot: RejectedLot): number | null {
+  return lot.qualityInspection?.inspectionResult === INSPECTION_RESULT.FAIL ? lot.id : toInspectedLotSummary(lot).heatLotId;
+}
+
+function toRejectedLotListItem(lot: RejectedLot, evidenceByLotId: ReadonlyMap<number, RejectedLotEvidence>): RejectedLotListItem {
+  const evidenceLotId = evidenceLotIdOf(lot);
   return {
     ...toInspectedLotSummary(lot),
     qualityInspectionId: lot.qualityInspection?.id ?? null,
@@ -28,6 +37,7 @@ function toRejectedLotListItem(lot: RejectedLot): RejectedLotListItem {
     dispositionStatus: (lot.dispositionStatus as DispositionStatus | null) ?? null,
     dispositionReason: lot.dispositionReason,
     updatedAt: lot.updatedAt.toISOString(),
+    evidence: (evidenceLotId === null ? undefined : evidenceByLotId.get(evidenceLotId)) ?? null,
   };
 }
 
@@ -52,8 +62,22 @@ export class RejectedLotService {
 
     const page = query.page ?? DEFAULT_PAGE;
     const size = query.size ?? DEFAULT_SIZE;
-    const { lots, total } = await this.repository.findRejectedLots(this.prisma, { skip: (page - 1) * size, take: size });
-    return { items: lots.map(toRejectedLotListItem), page, size, total };
+    const { lots, total } = await this.repository.findRejectedLots(this.prisma, { skip: (page - 1) * size, take: size, lotId: query.lotId });
+    return { items: await this.toListItems(this.prisma, lots), page, size, total };
+  }
+
+  /** 목록 행 + 근거 검사(불합격 항목·검사 시각). 화면이 LOT마다 검사 상세를 따로 부르지 않게 한 번에 읽는다 */
+  private async toListItems(tx: Tx, lots: RejectedLot[]): Promise<RejectedLotListItem[]> {
+    const evidenceLotIds = [...new Set(lots.flatMap((lot) => evidenceLotIdOf(lot) ?? []))];
+    const inspections = await this.repository.findInspectionsByLotIds(tx, evidenceLotIds);
+    const evidenceByLotId = new Map(
+      inspections.map((record): [number, RejectedLotEvidence] => {
+        const detail = toQualityInspectionDetail(record, []);
+        const failedItems = detail.items.filter((item) => item.isPassed === false);
+        return [detail.lotId, { qualityInspectionId: detail.qualityInspectionId, lotId: detail.lotId, inspectedAt: detail.inspectedAt, failedItems }];
+      }),
+    );
+    return lots.map((lot) => toRejectedLotListItem(lot, evidenceByLotId));
   }
 
   /**
@@ -93,7 +117,8 @@ export class RejectedLotService {
 
       const updated = await this.repository.findRejectedLot(tx, lot.id);
       if (!updated) throw new AppException('COM-003');
-      return toRejectedLotListItem(updated);
+      const [item] = await this.toListItems(tx, [updated]);
+      return item;
     });
   }
 }

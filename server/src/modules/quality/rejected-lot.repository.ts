@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
-import { inspectedLotSelect } from './quality.repository';
+import { inspectedLotSelect, inspectionDetailSelect } from './quality.repository';
 
 const rejectedLotSelect = {
   ...inspectedLotSelect,
@@ -37,18 +37,25 @@ const rejectedLotWhere = {
 @Injectable()
 export class RejectedLotRepository {
   /** 불합격 LOT 목록. 최근에 생긴 LOT부터 */
-  async findRejectedLots(tx: Tx, page: { skip: number; take: number }) {
+  async findRejectedLots(tx: Tx, page: { skip: number; take: number; lotId?: number }) {
+    const where = page.lotId === undefined ? rejectedLotWhere : { AND: [{ id: page.lotId }, rejectedLotWhere] };
     const [lots, total] = await Promise.all([
       tx.lot.findMany({
-        where: rejectedLotWhere,
+        where,
         select: rejectedLotSelect,
         orderBy: { id: 'desc' },
         skip: page.skip,
         take: page.take,
       }),
-      tx.lot.count({ where: rejectedLotWhere }),
+      tx.lot.count({ where }),
     ]);
     return { lots, total };
+  }
+
+  /** 근거 검사(항목·측정값·기준) 한 번에 읽기 */
+  findInspectionsByLotIds(tx: Tx, lotIds: number[]) {
+    if (!lotIds.length) return Promise.resolve([]);
+    return tx.qualityInspection.findMany({ where: { lotId: { in: lotIds } }, select: inspectionDetailSelect });
   }
 
   lotExists(tx: Tx, lotId: number): Promise<boolean> {
