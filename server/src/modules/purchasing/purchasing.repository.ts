@@ -113,6 +113,25 @@ export class PurchasingRepository {
     return count;
   }
 
+  findSupplier(tx: Tx, id: number) {
+    return tx.supplier.findUnique({ where: { id }, select: { id: true } });
+  }
+
+  /** 발주할 구매요청: 상태·요청량·희망 입고일과 원료의 기본 공급업체 */
+  findRequisitionsForOrder(tx: Tx, ids: number[]) {
+    return tx.purchaseRequisition.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, purchaseRequisitionNo: true, purchaseRequisitionStatus: true, itemId: true, requestedTon: true, desiredReceiptDate: true, item: { select: { defaultSupplierId: true } } },
+    });
+  }
+
+  createPurchaseOrder(tx: Tx, data: { purchaseOrderNo: string; supplierId: number; items: { purchaseRequisitionId: number; itemId: number; orderedTon: Prisma.Decimal; expectedReceiptDate: Date }[] }) {
+    return tx.purchaseOrder.create({
+      data: { purchaseOrderNo: data.purchaseOrderNo, supplierId: data.supplierId, purchaseOrderItems: { create: data.items } },
+      include: purchaseOrderInclude,
+    });
+  }
+
   countPurchaseOrders(tx: Tx, filter: PurchaseOrderFilter) {
     return tx.purchaseOrder.count({ where: purchaseOrderWhereOf(filter) });
   }

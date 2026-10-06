@@ -20,7 +20,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
-import type { ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
+import type { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingRepository, type PurchaseOrderFilter, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
@@ -51,11 +51,20 @@ const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNa
 
 /** 등록·재요청이 함께 쓰는 값 검사. Message → ERP 초안 payload는 DTO를 거치지 않아 여기서 본다 */
 function parseRequestValues(input: { requestedTon: string; desiredReceiptDate: string }): { requestedTon: Prisma.Decimal; desiredReceiptDate: Date } {
-  if (!TON_PATTERN.test(input.requestedTon)) throw new AppException('COM-004', '수량(톤)은 정수 9자리·소수 3자리 이하의 숫자로 입력해 주세요');
-  const requestedTon = new Prisma.Decimal(input.requestedTon);
-  if (requestedTon.lte(0)) throw new AppException('COM-004', '수량(톤)은 0보다 커야 해요');
-  if (!isValidDate(input.desiredReceiptDate)) throw new AppException('COM-004', `희망 입고일 ${input.desiredReceiptDate}는 없는 날짜예요`);
-  return { requestedTon, desiredReceiptDate: new Date(`${input.desiredReceiptDate}T00:00:00.000Z`) };
+  return { requestedTon: parseTon(input.requestedTon, '수량(톤)'), desiredReceiptDate: parseDate(input.desiredReceiptDate, '희망 입고일') };
+}
+
+/** 톤: decimal(12,3) 범위의 0보다 큰 값 */
+function parseTon(value: string, label: string): Prisma.Decimal {
+  if (!TON_PATTERN.test(value)) throw new AppException('COM-004', `${label}은 정수 9자리·소수 3자리 이하의 숫자로 입력해 주세요`);
+  const ton = new Prisma.Decimal(value);
+  if (ton.lte(0)) throw new AppException('COM-004', `${label}은 0보다 커야 해요`);
+  return ton;
+}
+
+function parseDate(value: string, label: string): Date {
+  if (!isValidDate(value)) throw new AppException('COM-004', `${label} ${value}는 없는 날짜예요`);
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 /** 작업 로그 before·after에 남기는 구매요청 값 */
@@ -247,6 +256,67 @@ export class PurchasingService {
     const row = await this.repository.findPurchaseOrder(this.prisma, id);
     if (!row) throw new AppException('COM-003', '발주를 찾을 수 없어요');
     return this.toPurchaseOrderView(row);
+  }
+
+  // ── 발주 등록 (REQ-PUR-003, BP-PUR-01) ────────────────
+
+  /**
+   * 승인된 구매요청을 공급업체 1곳당 발주 1건으로 묶어 확정(CONFIRMED)한다. 공급업체 메일 발송은 범위 밖.
+   * 구매요청 APPROVED → ORDERED와 발주 저장·작업 로그를 한 트랜잭션에서 한다.
+   */
+  async createPurchaseOrder(user: AuthUser, dto: CreatePurchaseOrderDto): Promise<PurchaseOrderView> {
+    const ids = dto.items.map((line) => line.purchaseRequisitionId);
+    if (new Set(ids).size !== ids.length) throw new AppException('COM-004', '같은 구매요청을 두 번 넣었어요');
+    const lines = dto.items.map((line) => ({
+      purchaseRequisitionId: line.purchaseRequisitionId,
+      orderedTon: parseTon(line.orderedTon, '발주량(톤)'),
+      expectedReceiptDate: line.expectedReceiptDate ? parseDate(line.expectedReceiptDate, '입고 예정일') : null,
+    }));
+    return retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createPurchaseOrderInTx(tx, user, dto.supplierId, lines)));
+  }
+
+  private async createPurchaseOrderInTx(
+    tx: Tx,
+    user: AuthUser,
+    supplierId: number,
+    lines: { purchaseRequisitionId: number; orderedTon: Prisma.Decimal; expectedReceiptDate: Date | null }[],
+  ): Promise<PurchaseOrderView> {
+    if (!(await this.repository.findSupplier(tx, supplierId))) throw new AppException('COM-003', '공급업체를 찾을 수 없어요');
+    const requisitions = await this.repository.findRequisitionsForOrder(tx, lines.map((l) => l.purchaseRequisitionId));
+    const items = lines.map((line) => {
+      const pr = requisitions.find((r) => r.id === line.purchaseRequisitionId);
+      if (!pr) throw new AppException('COM-003', '구매요청을 찾을 수 없어요');
+      if (pr.purchaseRequisitionStatus === PURCHASE_REQUISITION_STATUS.ORDERED) throw new AppException('COM-001', `${pr.purchaseRequisitionNo}는 이미 발주된 요청이에요`);
+      if (pr.purchaseRequisitionStatus !== PURCHASE_REQUISITION_STATUS.APPROVED) throw new AppException('PUR-002', `${pr.purchaseRequisitionNo}는 아직 승인되지 않았어요`);
+      if (line.orderedTon.gt(pr.requestedTon)) throw new AppException('COM-004', `${pr.purchaseRequisitionNo}의 발주량이 요청량 ${pr.requestedTon.toFixed(3)}t보다 많아요`);
+      // 잘못된 공급업체 차단(API-149): 품목 기본 공급업체가 있으면 그 공급업체로만 발주한다
+      if (pr.item.defaultSupplierId !== null && pr.item.defaultSupplierId !== supplierId) throw new AppException('COM-004', `${pr.purchaseRequisitionNo}의 원료는 기본 공급업체로 발주해 주세요`);
+      return { pr, purchaseRequisitionId: pr.id, itemId: pr.itemId, orderedTon: line.orderedTon, expectedReceiptDate: line.expectedReceiptDate ?? pr.desiredReceiptDate };
+    });
+
+    // 구매요청을 먼저 ORDERED로 바꾼다: 그사이 다른 발주·재요청이 바꿨으면 0건이라 COM-001 (id 순서로 잠가 교착을 피한다)
+    for (const id of [...items.map((i) => i.purchaseRequisitionId)].sort((a, b) => a - b)) {
+      const changed = await this.repository.updateRequisitionIfStatus(tx, id, PURCHASE_REQUISITION_STATUS.APPROVED, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDERED });
+      if (changed === 0) throw new AppException('COM-001', '다른 사람이 먼저 처리한 구매요청이 있어요. 다시 조회해 주세요');
+    }
+    const order = await this.repository.createPurchaseOrder(tx, {
+      purchaseOrderNo: await this.numbering.nextDocumentNumber(tx, 'PURCHASE_ORDER'),
+      supplierId,
+      items: items.map(({ purchaseRequisitionId, itemId, orderedTon, expectedReceiptDate }) => ({ purchaseRequisitionId, itemId, orderedTon, expectedReceiptDate })),
+    });
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED,
+      actor: user,
+      target: { table: 'purchase_order', id: order.id },
+      // 구매요청 ORDERED 전환에 맞는 이벤트 종류가 없어 발주 로그에 연결된 요청을 남긴다
+      after: {
+        purchaseOrderNo: order.purchaseOrderNo,
+        supplierId,
+        purchaseOrderStatus: order.purchaseOrderStatus,
+        items: items.map((i) => ({ purchaseRequisitionId: i.purchaseRequisitionId, purchaseRequisitionNo: i.pr.purchaseRequisitionNo, itemId: i.itemId, orderedTon: i.orderedTon.toFixed(3), expectedReceiptDate: dateOnly(i.expectedReceiptDate) })),
+      },
+    });
+    return this.toPurchaseOrderView(order);
   }
 
   // ── 계산·모양 ─────────────────────────────────────────
