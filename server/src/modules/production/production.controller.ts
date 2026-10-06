@@ -1,13 +1,16 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type ProductionResultView, type WorkContext } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type WorkContext } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
+import { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
 import { CancelProductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
 import { CompleteProductionResultDto, ListProductionResultsDto, RegisterProductionResultDto } from './dto/production-result.dto';
+import { HotRollingService } from './hot-rolling.service';
 import { ProductionResultService } from './production-result.service';
 import { ProductionService } from './production.service';
 
 const resultId = () => new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '작업 실적 id는 정수여야 해요') });
+const allocationId = () => new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '배정 id는 정수여야 해요') });
 const planId = () => new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '생산계획 id는 정수여야 해요') });
 
 /**
@@ -20,6 +23,7 @@ export class ProductionController {
   constructor(
     private readonly service: ProductionService,
     private readonly results: ProductionResultService,
+    private readonly hotRolling: HotRollingService,
   ) {}
 
   /** 생산계획 목록 (API-200) */
@@ -93,5 +97,41 @@ export class ProductionController {
   @RequirePermission(PERMISSION.PRODUCTION_RESULT_CONFIRM, 'USE')
   completeResult(@Param('id', resultId()) id: number, @Body() dto: CompleteProductionResultDto, @CurrentUser() user: AuthUser): Promise<ProductionResultView> {
     return this.results.complete(user, id, dto);
+  }
+
+  /** 열연 투입 화면: 필요 매수, 대응 슬래브 재고, FIFO 후보, 배정, 만든 코일 (API 목록 초안 행 API-102를 생산 화면용으로) */
+  @Get('production-plans/:id/hot-rolling')
+  @RequirePermission(PERMISSION.HOT_ROLLING_ALLOCATE, 'VIEW')
+  hotRollingDetail(@Param('id', planId()) id: number): Promise<HotRollingDetail> {
+    return this.hotRolling.detail(id);
+  }
+
+  /** 열연 투입 FIFO 추천: 저장하지 않고 작업 로그만 (12.2 allocations/recommend의 열연 목적) */
+  @Post('production-plans/:id/hot-rolling/recommend')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.HOT_ROLLING_ALLOCATE, 'USE')
+  recommendHotRolling(@Param('id', planId()) id: number, @CurrentUser() user: AuthUser): Promise<HotRollingDetail> {
+    return this.hotRolling.recommend(user, id);
+  }
+
+  /** 열연 투입 배정 확정 (API-103을 v1 경로로) */
+  @Post('production-plans/:id/hot-rolling/allocations')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.HOT_ROLLING_ALLOCATE, 'USE')
+  confirmHotRolling(@Param('id', planId()) id: number, @Body() dto: ConfirmHotRollingDto, @CurrentUser() user: AuthUser): Promise<HotRollingDetail> {
+    return this.hotRolling.confirm(user, id, dto);
+  }
+
+  /** 열연 배정 해제·변경 (투입 전만) */
+  @Post('production-plans/:id/hot-rolling/allocations/:allocationId/release')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.HOT_ROLLING_ALLOCATE, 'USE')
+  releaseHotRolling(
+    @Param('id', planId()) id: number,
+    @Param('allocationId', allocationId()) allocationIdParam: number,
+    @Body() dto: ReleaseHotRollingDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<HotRollingDetail> {
+    return this.hotRolling.release(user, id, allocationIdParam, dto);
   }
 }

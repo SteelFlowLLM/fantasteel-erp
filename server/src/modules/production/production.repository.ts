@@ -163,6 +163,13 @@ export class ProductionRepository {
     });
   }
 
+  /** LOT을 만든 생산계획 (열연 후보가 이 계획 생산분인지 표시) */
+  async findPlanIdsOfLots(tx: Tx, lotIds: number[]): Promise<Map<number, number | null>> {
+    if (lotIds.length === 0) return new Map();
+    const rows = await tx.lot.findMany({ where: { id: { in: lotIds } }, select: { id: true, productionResult: { select: { productionPlanId: true } } } });
+    return new Map(rows.map((r) => [r.id, r.productionResult?.productionPlanId ?? null]));
+  }
+
   findInventory(tx: Tx, itemId: number) {
     return tx.inventory.findUnique({ where: { itemId }, select: { onHandQty: true, reservedQty: true, rollingAllocatedQty: true } });
   }

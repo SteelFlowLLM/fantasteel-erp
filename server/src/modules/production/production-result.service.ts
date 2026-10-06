@@ -1,5 +1,6 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import {
+  ALLOCATION_STATUS,
   BUSINESS_EVENT_TYPE,
   INSPECTION_RESULT,
   ITEM_TYPE,
@@ -22,7 +23,7 @@ import {
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
-import { formatSlabNumber } from '../../common/numbering/number-format';
+import { formatCoilNumber, formatSlabNumber } from '../../common/numbering/number-format';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { seoulDateOnly } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
@@ -281,7 +282,7 @@ export class ProductionResultService {
         break;
       }
       default:
-        done = await this.completeHotRolling(tx, actor, resultId, this.required(ctx), window, input);
+        done = await this.completeHotRolling(tx, this.required(ctx), resultId, window, input);
     }
 
     await this.repository.completeResult(tx, resultId, { completedAt: input.completedAt, simulatedLossRate: input.simulatedLossRate ?? null });
@@ -409,9 +410,53 @@ export class ProductionResultService {
     };
   }
 
-  /** 열연: 3단계에서 채운다 */
-  protected async completeHotRolling(_tx: Tx, _actor: Actor, _resultId: number, _ctx: PlanContext, _window: { startedAt: Date; completedAt: Date }, _input: WorkOutputs): Promise<{ inputLotIds: number[]; outputLotIds: number[]; after: Record<string, unknown> }> {
-    throw new AppException('COM-004', '열연 실적은 아직 등록할 수 없어요');
+  /**
+   * 열연: 확정 배정된 합격 슬래브 1매 → 코일 1개 (C + 슬래브번호, HT- 제외), 슬래브→코일 1:1 실제 투입.
+   * 슬래브는 투입 소진, 배정은 CONSUMED, 재고는 rolling −n·현재고 −n (BP-INV-01). 수주 연결이 없는 계획은 열연하지 않는다.
+   */
+  private async completeHotRolling(tx: Tx, ctx: PlanContext, resultId: number, window: { startedAt: Date; completedAt: Date }, input: WorkOutputs) {
+    if (ctx.plan.salesOrderItemId === null) throw new AppException('COM-001', '수주 연결이 없는 코일 계획은 열연하지 않아요. 남은 합격 슬래브는 여재예요');
+    const slabItemId = ctx.basis.slabItem.id;
+    const allocations = await this.inventory.hotRollingAllocationsOfPlan(tx, ctx.plan.id);
+    let chosen = allocations.filter((a) => a.allocationStatus === ALLOCATION_STATUS.CONFIRMED);
+    if (input.allocationIds) {
+      const byId = new Map(allocations.map((a) => [a.id, a]));
+      for (const id of input.allocationIds) {
+        const allocation = byId.get(id);
+        if (!allocation) throw new AppException('COM-004', `배정(id ${id})은 이 계획의 열연 배정이 아니에요`);
+        if (allocation.allocationStatus !== ALLOCATION_STATUS.CONFIRMED) throw new AppException('INV-004', `${allocation.lotNo}은 확정 상태의 배정이 아니에요`);
+      }
+      chosen = chosen.filter((a) => input.allocationIds?.includes(a.id));
+    }
+    if (chosen.length === 0) throw new AppException('COM-004', '열연할 확정 배정이 없어요. 열연 투입에서 슬래브를 먼저 배정해 주세요');
+    chosen.sort((a, b) => a.lotId - b.lotId);
+
+    const coilItem = await tx.item.findUniqueOrThrow({ where: { id: ctx.plan.itemId }, select: { defaultYardId: true } });
+    const producedDate = seoulDateOnly(window.completedAt);
+    const coilIds: number[] = [];
+    const coilNos: string[] = [];
+    for (const allocation of chosen) {
+      // 투입 직전 재검증: 같은 규격·재고 상태·제품과 상위 히트 합격 (INV-002·INV-004)
+      await this.inventory.assertIssuableLot(tx, allocation.lotId, slabItemId);
+      const coil = await this.repository.createLot(tx, {
+        lotNo: formatCoilNumber(allocation.lotNo),
+        lotType: LOT_TYPE.COIL,
+        itemId: ctx.plan.itemId,
+        productionResultId: resultId,
+        yardId: coilItem.defaultYardId,
+        producedDate,
+      });
+      await this.repository.createLotRelations(tx, [{ parentLotId: allocation.lotId, childLotId: coil.id, lotRelationEvidence: LOT_RELATION_EVIDENCE.ACTUAL_INPUT }]);
+      await this.repository.updateLot(tx, allocation.lotId, { lotStatus: LOT_STATUS.CONSUMED });
+      coilIds.push(coil.id);
+      coilNos.push(coil.lotNo);
+    }
+    await this.inventory.consumeHotRollingAllocations(tx, { allocationIds: chosen.map((a) => a.id), slabItemId });
+    return {
+      inputLotIds: chosen.map((a) => a.lotId),
+      outputLotIds: coilIds,
+      after: { slabNos: chosen.map((a) => a.lotNo), coilNos, outputQty: coilIds.length },
+    };
   }
 
   // ── 내부 ──────────────────────────────────────────────
