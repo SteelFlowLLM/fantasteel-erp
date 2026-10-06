@@ -67,6 +67,14 @@ export class ShipmentController {
     return this.service.issue(user, id);
   }
 
+  /** API-115 밀시트 PDF 생성: 저장된 스냅샷으로 만들고 pdfPath를 돌려준다. 실패하면 SHP-001, 다시 눌러도 출고는 실행하지 않는다 */
+  @Post('mill-sheets/:id/pdf')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.MILL_SHEET_READ, 'USE')
+  generateMillSheetPdf(@Param('id', ParseIntPipe) id: number): Promise<MillSheetDetail> {
+    return this.service.generateMillSheetPdf(id);
+  }
+
   /** API-232 밀시트 목록 */
   @Get('mill-sheets')
   @RequirePermission(PERMISSION.MILL_SHEET_READ, 'VIEW')

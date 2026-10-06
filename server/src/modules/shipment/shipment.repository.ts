@@ -292,6 +292,12 @@ export class ShipmentRepository {
     return tx.millSheet.count({ where });
   }
 
+  /** PDF 경로는 한 번만 정한다: 동시에 만든 다른 요청이 먼저 저장했으면 바뀐 행이 없어 false */
+  async setPdfPath(tx: Tx, id: number, pdfPath: string): Promise<boolean> {
+    const result = await tx.millSheet.updateMany({ where: { id, pdfPath: null }, data: { pdfPath } });
+    return result.count > 0;
+  }
+
   findMillSheet(tx: Tx, id: number) {
     return tx.millSheet.findUnique({ where: { id }, select: millSheetDetailSelect });
   }
