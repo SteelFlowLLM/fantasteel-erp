@@ -110,7 +110,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
 
       {view.isCurrent ? null : (
         <Banner tone="wait">
-          이전 버전(v{view.version})이에요. 고칠 수 없고, 이 버전으로 판정한 검사 기록{view.inspectionCount === null ? '은' : ` ${view.inspectionCount}건은`} 그대로 이 버전을
+          이전 버전(v{view.version})이에요. 고칠 수 없고, 이 버전으로 판정한 검사 기록 {view.inspectionCount}건은 그대로 이 버전을
           참조해요. 바꾸려면 지금 버전에서 새 버전을 만들어 주세요.
         </Banner>
       )}
@@ -174,7 +174,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                   { label: '강종', value: view.steelGradeCode ?? '공통 (모든 강종)' },
                   { label: '적용 규격', value: view.standardNo ?? '—' },
                   { label: '버전 생성', value: fmtDateTime(view.createdAt) },
-                  { label: '판정한 검사', value: view.inspectionCount === null ? '—' : `${view.inspectionCount}건` },
+                  { label: '판정한 검사', value: `${view.inspectionCount}건` },
                 ]}
               />
             </div>
@@ -193,7 +193,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                   >
                     <span className="font-mono font-semibold">v{v.version}</span>
                     <span className="text-cap text-ink-3">
-                      {fmtMD(v.createdAt)} · 항목 {v.itemCount}개{v.inspectionCount === null ? '' : ` · 검사 ${v.inspectionCount}건`}
+                      {fmtMD(v.createdAt)} · 항목 {v.itemCount}개 · 검사 {v.inspectionCount}건
                     </span>
                     {v.isCurrent ? (
                       <Badge tone="ok" plain className="ml-auto">

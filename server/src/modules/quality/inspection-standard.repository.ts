@@ -101,6 +101,15 @@ export class InspectionStandardRepository {
     });
   }
 
+  /** 상세의 버전 이력: 같은 코드의 모든 버전과 버전별 항목 수·판정한 검사 수 */
+  findVersionHistory(tx: Tx, inspectionStandardCode: string) {
+    return tx.inspectionStandard.findMany({
+      where: { inspectionStandardCode },
+      select: { id: true, versionNo: true, createdAt: true, _count: { select: { inspectionStandardItems: true, qualityInspections: true } } },
+      orderBy: { versionNo: 'asc' },
+    });
+  }
+
   /** 같은 코드의 모든 버전 (삭제는 코드 단위) */
   findVersionsByCode(tx: Tx, inspectionStandardCode: string) {
     return tx.inspectionStandard.findMany({ where: { inspectionStandardCode }, select: { id: true, versionNo: true }, orderBy: { versionNo: 'asc' } });

@@ -53,6 +53,11 @@ const standard31: InspectionStandardDetail = {
   steelGradeCode: 'SS275',
   createdAt: '2026-10-01T00:00:00.000Z',
   items: [standardItem(1, 'YIELD', null, null), standardItem(2, 'CHARPY', '6.00', null), standardItem(3, 'THIN_ONLY', null, '6.00')],
+  inspectionCount: 0,
+  versions: [
+    { inspectionStandardId: 30, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 1, inspectionCount: 1 },
+    { inspectionStandardId: 31, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 3, inspectionCount: 0 },
+  ],
 };
 
 const inspectedCoilRow: QualityInspectionListItem = { ...coilRow, isLocked: true, qualityInspectionId: 90, inspectionStandardId: 30, versionNo: 1, inspectionResult: 'FAIL', inspectedAt: '2026-10-05T03:00:00.000Z' };

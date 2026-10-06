@@ -2,8 +2,7 @@
 // 화면의 강종 id는 계속 가짜 DB id라서 강종 코드로 바꿔 끼운다 (api/server/masterIds.ts).
 // 서버에 아직 없는 것은 빈 값이다:
 // - 공통 기준(강종 없음): ERD steel_grade_id NOT NULL이라 서버에는 없다. 공통 기준 만들기는 입력 오류로 막는다.
-// - 버전 이력 목록 API가 없어, 상세의 버전 목록은 지금 버전과 보고 있는 버전만 보인다. 바로 앞 버전 항목(바뀐 항목 표시)도 비어 있다.
-// - 버전별 판정한 검사 수를 주는 API가 없어 inspectionCount는 null(모름)이다.
+// 버전 이력·버전별 판정한 검사 수는 상세 응답(versions·inspectionCount)으로, 바로 앞 버전 항목은 그 버전 상세로 읽는다.
 // - 표시 순서 컬럼이 ERD에 없어 항목 순서는 서버가 준 순서(등록 순서)다.
 import type { InspectionStandardDeleteResult, InspectionStandardDetail, InspectionStandardListItem, PageResult } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
@@ -74,19 +73,28 @@ async function get(id: number): Promise<InspectionStandardDetailView | null> {
     if (e instanceof ApiError && e.code === 'COM-003') return null;
     throw e;
   }
-  const siblings = await allStandards({ processType: row.processType as InspectedProcessType, steelGradeId: row.steelGradeId });
-  const latest = siblings.find((s) => s.inspectionStandardCode === row.inspectionStandardCode) ?? row;
-  const isCurrent = latest.inspectionStandardId === row.inspectionStandardId;
-  const brief = (r: InspectionStandardListItem) => ({ id: r.inspectionStandardId, version: r.versionNo, isCurrent: r === latest, createdAt: r.createdAt, itemCount: r.items.length, inspectionCount: null });
+  // 서버는 버전 번호 순, 화면은 새 버전이 위
+  const versions = [...row.versions].sort((a, b) => b.versionNo - a.versionNo);
+  const latest = versions[0] ?? { inspectionStandardId: row.inspectionStandardId, versionNo: row.versionNo };
+  const previous = versions.find((v) => v.versionNo < row.versionNo) ?? null;
+  const previousItems =
+    previous === null ? null : (await serverRequest<InspectionStandardDetail>('GET', `/inspection-standards/${previous.inspectionStandardId}`)).items.map(toItemView);
   return {
     ...toSummaryView(row, latest.versionNo),
-    isCurrent,
+    isCurrent: latest.inspectionStandardId === row.inspectionStandardId,
     standardNo: mockSteelGradeOf(row.steelGradeCode)?.standardNo ?? null,
     items: row.items.map(toItemView),
-    previousItems: null,
-    versions: isCurrent ? [brief(latest)] : [brief(latest), brief(row)],
+    previousItems,
+    versions: versions.map((v) => ({
+      id: v.inspectionStandardId,
+      version: v.versionNo,
+      isCurrent: v.inspectionStandardId === latest.inspectionStandardId,
+      createdAt: v.createdAt,
+      itemCount: v.itemCount,
+      inspectionCount: v.inspectionCount,
+    })),
     currentId: latest.inspectionStandardId,
-    inspectionCount: null,
+    inspectionCount: row.inspectionCount,
   };
 }
 

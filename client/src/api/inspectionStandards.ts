@@ -64,8 +64,8 @@ export interface InspectionStandardVersionBrief {
   isCurrent: boolean;
   createdAt: string;
   itemCount: number;
-  /** 이 버전으로 판정한 품질검사 수 (null = 모름: 서버 모드에는 이 수를 주는 API가 없다) */
-  inspectionCount: number | null;
+  /** 이 버전으로 판정한 품질검사 수 */
+  inspectionCount: number;
 }
 
 export interface InspectionStandardDetailView extends InspectionStandardSummaryView {
@@ -79,8 +79,8 @@ export interface InspectionStandardDetailView extends InspectionStandardSummaryV
   versions: InspectionStandardVersionBrief[];
   /** 지금 버전의 id */
   currentId: number;
-  /** null = 모름 (서버 모드) */
-  inspectionCount: number | null;
+  /** 이 버전으로 판정한 품질검사 수 */
+  inspectionCount: number;
 }
 
 /** 삭제 결과: 지운 기준 코드와 그 코드의 모든 버전 번호 */

@@ -375,6 +375,17 @@ describe('검사 기준 수정 = 새 버전 (API-122, REQ-QC-002)', () => {
     ]);
   });
 
+  it('상세는 같은 코드의 버전 이력(버전 순)과 버전별 항목 수·판정한 검사 수를 준다 (옛 버전 상세도 같다)', async () => {
+    for (const id of [v1Id, v2Id]) {
+      const detail = await service.getInspectionStandard(id);
+      expect(detail.versions.map((v) => [v.inspectionStandardId, v.versionNo, v.itemCount, v.inspectionCount])).toEqual([
+        [v1Id, 1, 2, 0],
+        [v2Id, 2, 2, 0],
+      ]);
+      expect(detail.inspectionCount).toBe(0);
+    }
+  });
+
   it('목록에는 새 버전이 최신으로 나온다 (이후 검사는 새 버전으로 판정)', async () => {
     const list = await service.listInspectionStandards({ steelGradeId: tempSteelGradeId });
     expect(list.items.map((s) => [s.inspectionStandardId, s.versionNo])).toEqual([[v2Id, 2]]);
@@ -466,6 +477,13 @@ describe('검사 기준 삭제 (REQ-QC-002, SPEC 5장 "참조가 있으면 거�
 
     await expect(service.deleteInspectionStandard(v2.inspectionStandardId)).rejects.toMatchObject({ code: 'COM-004' });
     expect((await versionsOf('QS-QSD-GRADE-CC')).map((v) => v.versionNo).sort()).toEqual([1, 2]);
+    // 상세의 판정한 검사 수: 검사가 쓴 v1만 1건
+    const detail = await service.getInspectionStandard(v2.inspectionStandardId);
+    expect(detail.inspectionCount).toBe(0);
+    expect(detail.versions.map((v) => [v.versionNo, v.inspectionCount])).toEqual([
+      [1, 1],
+      [2, 0],
+    ]);
   });
 
   it('없는 기준 id는 COM-003', async () => {

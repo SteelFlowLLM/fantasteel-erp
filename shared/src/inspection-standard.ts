@@ -32,8 +32,27 @@ export interface InspectionStandardListItem {
   items: InspectionStandardItemView[];
 }
 
-/** 검사 기준 상세 (GET /inspection-standards/:id, API-120): 기준 버전 1건과 항목. 옛 버전도 같은 모양 */
-export type InspectionStandardDetail = InspectionStandardListItem;
+/** 상세의 버전 이력 한 줄: 같은 기준 코드의 버전 */
+export interface InspectionStandardVersionBrief {
+  inspectionStandardId: number;
+  versionNo: number;
+  /** ISO 8601 */
+  createdAt: string;
+  itemCount: number;
+  /** 이 버전으로 판정한 검사 수 */
+  inspectionCount: number;
+}
+
+/**
+ * 검사 기준 상세 (GET /inspection-standards/:id, API-120): 기준 버전 1건과 항목. 옛 버전도 같은 모양.
+ * 화면의 버전 이력·판정한 검사 수를 위해 versions·inspectionCount를 같이 준다 (API-120 명세에 없어 문서 반영 필요)
+ */
+export interface InspectionStandardDetail extends InspectionStandardListItem {
+  /** 이 버전으로 판정한 검사 수 */
+  inspectionCount: number;
+  /** 같은 기준 코드의 모든 버전 (버전 번호 순) */
+  versions: InspectionStandardVersionBrief[];
+}
 
 /** 검사 기준 삭제 결과 (DELETE /inspection-standards/:id): 지운 기준 코드와 그 코드의 모든 버전 */
 export interface InspectionStandardDeleteResult {
