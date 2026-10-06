@@ -54,6 +54,7 @@ export function AiPanel() {
   const me = useMe();
   const pathname = usePathname();
   const close = useShellStore((state) => state.closeAiPanel);
+  const context = useShellStore((state) => state.aiContext);
   const roleLabel = ROLE_LABEL[me.roleCode];
   const screenTitle = routeTitleOf(pathname).title || '대시보드';
 
@@ -78,11 +79,12 @@ export function AiPanel() {
           <span className="inline-flex items-center gap-1.5 self-start rounded-sm border border-line bg-surface-2 px-2 py-1 text-cap text-ink-2">
             <Icon name="eye" size="sm" />
             보고 있는 화면 · <b className="font-semibold">{screenTitle}</b>
+            {context ? <span className="text-ink-2">· {context.label}</span> : null}
             <span className="text-ink-3">(질문과 함께 보내요)</span>
           </span>
           <b className="mt-1 text-xs font-semibold">추천 질문 · {roleLabel}</b>
           <div className="flex flex-wrap gap-1.5">
-            {SUGGESTED_QUESTIONS[me.roleCode].map((question) => (
+            {[...(context ? [context.question] : []), ...SUGGESTED_QUESTIONS[me.roleCode]].map((question) => (
               <button key={question} type="button" disabled tabIndex={-1} className={QUESTION_CHIP}>
                 {question}
               </button>

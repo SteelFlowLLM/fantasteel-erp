@@ -91,6 +91,11 @@ describe('위젯 카드', () => {
     expect(sales).toContain('실리코망가니즈');
   });
 
+  it('강종별 불합격률: 강종 줄마다 AI에게 묻기(준비 중, P2) 버튼이 있다', async () => {
+    const html = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('REJECT_RATE') ?? '';
+    expect(html).toContain('aria-label="SM355A 불합격을 AI에게 묻기 · 준비 중 (P2)"');
+  });
+
   it('대시보드 화면 틀: 인사·위젯 편집 버튼 (격자는 브라우저에서 너비를 잰 뒤 그린다)', async () => {
     const employeeId = actAs(SEED_EMPLOYEE_NO.sales);
     const me = await sessionApi.getSessionUser(employeeId);
