@@ -65,3 +65,12 @@ export class AllocationCandidatesQuery {
   @Min(1)
   shipmentRequestId!: number;
 }
+
+/** 재고 조회 (GET /inventories). itemId를 주면 그 규격만 */
+export class ListInventoriesQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  itemId?: number;
+}
