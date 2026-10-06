@@ -5,7 +5,7 @@ import { SEED_CORE } from '@/mock/seeds/core';
 import {
   approvePurchaseRequisition,
   computeMrp,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   rawMaterialInventory,
@@ -22,9 +22,9 @@ function buySilicoManganese(k: Kit, receiptDate: string, ton: string, production
   const purchase = k.actor('purchase');
   const purchaseRequisition = createPurchaseRequisition(at, purchase, { itemId: k.itemId('SMN01'), requestedTon: ton, desiredReceiptDate: receiptDate, productionPlanId });
   approvePurchaseRequisition(at, k.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-  createPurchaseOrders(at, purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
+  createPurchaseOrdersBySupplier(at, purchase, [purchaseRequisition.id]);
   const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisition.id);
-  if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
+  if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate });
 }
 
 const remainingOf = (k: Kit): Record<string, string> => Object.fromEntries(rawMaterialInventory(k.tables).map((r) => [r.itemCode, r.remainingTon]));

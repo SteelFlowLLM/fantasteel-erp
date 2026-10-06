@@ -5,7 +5,7 @@ import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { decCmp } from '@/lib/decimal';
-import { findById, listGoodsReceipts, listPurchaseOrders, receiveGoods, userActor } from '@/mock/services';
+import { findById, listGoodsReceipts, listPurchaseOrders, mustGet, receivedTonOf, receiveGoods, remainingTonOf, userActor } from '@/mock/services';
 
 /** 입고 화면을 볼 수 있는 권한 (조회 이상) */
 export const GOODS_RECEIPT_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM];
@@ -16,22 +16,22 @@ export const goodsReceiptKeys = {
   lines: () => ['goods-receipts', 'purchase-order-lines'] as const,
 };
 
-/** 입고할 발주 품목 줄 (입고예정 = 발주 − 입고 누계) */
+/** 입고할 발주 품목 (미입고량 = 발주량 − 입고 누계, 저장하지 않고 계산) */
 export interface ReceiptLine {
   purchaseOrderItemId: number;
   purchaseOrderId: number;
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
   supplierName: string;
-  dueDate: string | null;
-  lineNo: number;
+  /** 발주 품목의 입고 예정일 */
+  expectedReceiptDate: string | null;
   itemId: number;
   itemCode: string;
   itemName: string;
   purchaseRequisitionNo: string | null;
   orderedTon: string;
   receivedTon: string;
-  scheduledReceiptTon: string;
+  remainingTon: string;
   /** 입고하면 들어갈 원료 기본 야드 */
   defaultYardName: string | null;
   isFullyReceived: boolean;
@@ -57,13 +57,13 @@ export interface GoodsReceiptResult {
   lotNo: string;
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
-  /** 이 발주 품목의 입고 누계·남은 입고예정 */
+  /** 이 발주 품목의 입고 누계·미입고량 */
   lineReceivedTon: string;
-  lineScheduledReceiptTon: string;
+  lineRemainingTon: string;
 }
 
 export const goodsReceiptApi = {
-  /** 모든 발주 품목 줄 (입고예정이 남은 줄 먼저, 납기순) */
+  /** 모든 발주 품목 (미입고량이 남은 것 먼저, 입고 예정일 순) */
   lines: (): Promise<ReceiptLine[]> =>
     mockQuery((tables) => {
       requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
@@ -77,26 +77,25 @@ export const goodsReceiptApi = {
               purchaseOrderNo: po.purchaseOrderNo,
               purchaseOrderStatus: po.purchaseOrderStatus,
               supplierName: po.supplierName,
-              dueDate: po.dueDate,
-              lineNo: line.lineNo,
+              expectedReceiptDate: line.expectedReceiptDate,
               itemId: line.itemId,
               itemCode: line.itemCode,
               itemName: line.itemName,
               purchaseRequisitionNo: line.purchaseRequisitionNo,
               orderedTon: line.orderedTon,
               receivedTon: line.receivedTon,
-              scheduledReceiptTon: line.scheduledReceiptTon,
+              remainingTon: line.remainingTon,
               defaultYardName: findById(tables, 'yard', item?.defaultYardId)?.yardName ?? null,
-              isFullyReceived: decCmp(line.scheduledReceiptTon, 0) <= 0,
+              isFullyReceived: decCmp(line.remainingTon, 0) <= 0,
             };
           }),
         )
         .sort(
           (a, b) =>
             Number(a.isFullyReceived) - Number(b.isFullyReceived) ||
-            (a.dueDate ?? '9999-12-31').localeCompare(b.dueDate ?? '9999-12-31') ||
+            (a.expectedReceiptDate ?? '9999-12-31').localeCompare(b.expectedReceiptDate ?? '9999-12-31') ||
             a.purchaseOrderNo.localeCompare(b.purchaseOrderNo) ||
-            a.lineNo - b.lineNo,
+            a.purchaseOrderItemId - b.purchaseOrderItemId,
         );
     }),
 
@@ -111,7 +110,7 @@ export const goodsReceiptApi = {
       }));
     }),
 
-  /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 입고 누계·입고예정·상태 갱신 */
+  /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
   receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.GOODS_RECEIPT_CONFIRM] });
@@ -120,7 +119,6 @@ export const goodsReceiptApi = {
         receivedTon: input.receivedTon,
         receiptDate: input.receiptDate,
       });
-      const line = findById(tx.tables, 'purchaseOrderItem', input.purchaseOrderItemId);
       return {
         goodsReceiptId: goodsReceipt.id,
         goodsReceiptNo: goodsReceipt.goodsReceiptNo,
@@ -131,8 +129,8 @@ export const goodsReceiptApi = {
         lotNo: lot.lotNo,
         purchaseOrderNo: purchaseOrder.purchaseOrderNo,
         purchaseOrderStatus: purchaseOrder.purchaseOrderStatus,
-        lineReceivedTon: line?.receivedTon ?? goodsReceipt.receivedTon,
-        lineScheduledReceiptTon: line?.scheduledReceiptTon ?? '0.000',
+        lineReceivedTon: receivedTonOf(tx.tables, input.purchaseOrderItemId),
+        lineRemainingTon: remainingTonOf(tx.tables, mustGet(tx.tables, 'purchaseOrderItem', input.purchaseOrderItemId, '발주 품목')),
       };
     }),
 };

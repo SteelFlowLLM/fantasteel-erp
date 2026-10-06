@@ -1,7 +1,7 @@
 // 구매요청·발주 API (REQ-PUR-001~003, REQ-AUTH-004, BP-PUR-01, 업무 프로세스 10장·12.2).
 // 권한은 이 층에서 먼저 확인하고(requireActor, 없으면 COM-002), 업무 규칙·작업 로그·알림은 core 서비스가 한다.
 // - 구매요청 등록 = 바로 승인 대기(임시 저장 없음). 반려되면 요청자가 고쳐 다시 요청한다(resubmit).
-// - 발주: 승인된 구매요청을 원료의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건.
+// - 발주: 공급업체 1곳당 발주 1건(서버 POST purchase-orders와 같은 입력). 화면이 공급업체별로 나눠 보낸다.
 import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
@@ -11,7 +11,7 @@ import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
 import {
   actionDraftView,
   canApproveRequisition,
-  createPurchaseOrders,
+  createPurchaseOrder,
   createPurchaseRequisition,
   findById,
   listPurchaseOrders,
@@ -19,6 +19,8 @@ import {
   orderableRequisitions,
   requisitionDepartmentId,
   purchaseOrderView,
+  receivedTonOf,
+  remainingTonOf,
   requisitionView,
   resubmitPurchaseRequisition,
   userActor,
@@ -80,11 +82,11 @@ export interface RequisitionPurchaseOrderLine {
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
   supplierName: string;
-  dueDate: string | null;
+  expectedReceiptDate: string | null;
   itemName: string;
   orderedTon: string;
   receivedTon: string;
-  scheduledReceiptTon: string;
+  remainingTon: string;
 }
 
 export interface RequisitionDetail extends RequisitionView {
@@ -125,11 +127,11 @@ function requisitionPurchaseOrderLines(tables: Tables, purchaseRequisition: Purc
             purchaseOrderNo: po.purchaseOrderNo,
             purchaseOrderStatus: po.purchaseOrderStatus,
             supplierName: findById(tables, 'supplier', po.supplierId)?.supplierName ?? '',
-            dueDate: po.dueDate,
+            expectedReceiptDate: line.expectedReceiptDate,
             itemName: findById(tables, 'item', line.itemId)?.itemName ?? '',
             orderedTon: line.orderedTon,
-            receivedTon: line.receivedTon,
-            scheduledReceiptTon: line.scheduledReceiptTon,
+            receivedTon: receivedTonOf(tables, line.id),
+            remainingTon: remainingTonOf(tables, line),
           },
         ];
     });
@@ -222,13 +224,18 @@ export const purchaseRequisitionApi = {
 export type PurchaseOrderCandidateItem = ReturnType<typeof orderableRequisitions>[number];
 
 export interface PurchaseOrderCreateInput {
-  purchaseRequisitionIds: readonly number[];
-  /** 입고예정일(납기). '' = 고른 요청의 가장 이른 희망 입고일 */
-  dueDate: string;
+  supplierId: number;
+  items: readonly {
+    purchaseRequisitionId: number;
+    /** 톤 (요청량 이하) */
+    orderedTon: string;
+    /** YYYY-MM-DD 또는 '' (= 구매요청의 희망 입고일) */
+    expectedReceiptDate: string;
+  }[];
 }
 
 export const purchaseOrderApi = {
-  /** 발주 목록 (줄별 입고·원료 LOT 포함) */
+  /** 발주 목록 (품목별 입고·원료 LOT 포함) */
   list: (): Promise<PurchaseOrderView[]> =>
     mockQuery((tables) => {
       requireActor(tables, { view: PURCHASE_ORDER_VIEW_PERMISSIONS });
@@ -242,14 +249,18 @@ export const purchaseOrderApi = {
       return orderableRequisitions(tables);
     }),
 
-  /** 발주 확정: 공급업체 1곳당 발주 1건 (승인 전이면 PUR-002) */
-  create: (input: PurchaseOrderCreateInput): Promise<PurchaseOrderView[]> =>
+  /** 발주 확정: 공급업체마다 발주 1건 (승인 전이면 PUR-002). 가짜 DB는 여러 공급업체를 한 거래로 만든다 */
+  create: (orders: readonly PurchaseOrderCreateInput[]): Promise<PurchaseOrderView[]> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
-      const purchaseOrders = createPurchaseOrders(tx, userActor(actor.employee.id), {
-        purchaseRequisitionIds: input.purchaseRequisitionIds,
-        dueDate: input.dueDate || null,
-      });
-      return purchaseOrders.map((po) => purchaseOrderView(tx.tables, po));
+      return orders.map((order) =>
+        purchaseOrderView(
+          tx.tables,
+          createPurchaseOrder(tx, userActor(actor.employee.id), {
+            supplierId: order.supplierId,
+            items: order.items.map((i) => ({ ...i, expectedReceiptDate: i.expectedReceiptDate || null })),
+          }),
+        ),
+      );
     }),
 };

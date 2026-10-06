@@ -9,7 +9,7 @@ import { seedDashboard } from '@/mock/seeds/dashboard';
 import { seedTxAt } from '@/mock/seeds';
 import {
   approvePurchaseRequisition,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   fulfillmentOf,
@@ -204,7 +204,7 @@ describe('숫자', () => {
       { status: 'ORDERED', count: 9 },
     ]);
     expect(data.openPurchaseOrders).toMatchObject({ count: 1, scheduledReceiptTon: '3.500' });
-    expect(data.openPurchaseOrders?.purchaseOrders[0]).toMatchObject({ supplierName: '하람합금철', dueDate: '2026-10-28' });
+    expect(data.openPurchaseOrders?.purchaseOrders[0]).toMatchObject({ supplierName: '하람합금철', expectedReceiptDate: '2026-10-28' });
 
     actAs(SEED_EMPLOYEE_NO.productionHead);
     const production = await dashboardApi.widget('PURCHASE_PROGRESS', opts);
@@ -286,9 +286,9 @@ describe('여재 숫자: 대시보드 여재 위젯 = 재고 화면 여재 탭',
       const smnId = tx.tables.item.find((i) => i.itemCode === 'SMN01')?.id ?? 0;
       const purchaseRequisition = createPurchaseRequisition(at, purchase, { itemId: smnId, requestedTon: '1.500', desiredReceiptDate: '2026-10-02', productionPlanId: planId });
       approvePurchaseRequisition(at, actor(SEED_EMPLOYEE_NO.purchaseHead), { purchaseRequisitionId: purchaseRequisition.id });
-      createPurchaseOrders(at, purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
+      createPurchaseOrdersBySupplier(at, purchase, [purchaseRequisition.id]);
       const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisition.id);
-      if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate: '2026-10-02' });
+      if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate: '2026-10-02' });
       simulatePlan(seedTxAt(tx, '2026-10-03T18:00:00+09:00'), actor(SEED_EMPLOYEE_NO.steelmaking), { productionPlanId: planId, randomSeed: 42 });
       const quality = actor(SEED_EMPLOYEE_NO.quality);
       const lots = tx.tables.lot.filter((l) => l.productionPlanId === planId && (l.lotType === 'SLAB' || l.lotType === 'HEAT')).sort((a, b) => a.id - b.id);

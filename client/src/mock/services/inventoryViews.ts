@@ -5,6 +5,7 @@
 // - 여재: 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (TRM-048, 가용재고에 포함). surplus_at = 여재 전환 시각.
 import type { AllocationPurpose, LotStatus, LotType, ProductItemType, RawMaterialType } from '@/codes';
 import { decCmp, decSum } from '@/lib/decimal';
+import { remainingTonOf } from '@/mock/services/purchasing';
 import { sortFifo } from '@/lib/fifo';
 import { pickSurplusLots } from '@/lib/surplus';
 import { calcWeightTon } from '@/lib/weight';
@@ -147,14 +148,17 @@ export function rawMaterialInventory(tables: Tables): RawMaterialInventoryRow[] 
     .sort((a, b) => a.id - b.id)
     .map((item) => {
       const lots = sortFifo(tables.lot.filter((l) => l.lotType === 'RAW_MATERIAL' && l.itemId === item.id));
-      const scheduled = tables.purchaseOrderItem.filter((line) => line.itemId === item.id && decCmp(line.scheduledReceiptTon, 0) > 0 && findById(tables, 'purchaseOrder', line.purchaseOrderId)?.purchaseOrderStatus !== 'RECEIVED');
+      const scheduled = tables.purchaseOrderItem
+        .filter((line) => line.itemId === item.id && findById(tables, 'purchaseOrder', line.purchaseOrderId)?.purchaseOrderStatus !== 'RECEIVED')
+        .map((line) => remainingTonOf(tables, line))
+        .filter((ton) => decCmp(ton, 0) > 0);
       return {
         itemId: item.id,
         itemCode: item.itemCode,
         itemName: item.itemName,
         rawMaterialType: item.rawMaterialType,
         remainingTon: decSum(lots.filter((l) => l.lotStatus === 'AVAILABLE').map((l) => l.remainingTon ?? '0')),
-        scheduledReceiptTon: decSum(scheduled.map((l) => l.scheduledReceiptTon)),
+        scheduledReceiptTon: decSum(scheduled),
         lots: lots.map((lot) => {
           const receipt = findById(tables, 'goodsReceipt', lot.goodsReceiptId);
           const poItem = findById(tables, 'purchaseOrderItem', receipt?.purchaseOrderItemId);

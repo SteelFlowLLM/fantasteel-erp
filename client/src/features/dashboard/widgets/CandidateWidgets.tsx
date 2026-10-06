@@ -253,7 +253,7 @@ function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
                 {po.supplierName}
               </span>
               <span className="ml-auto flex-none tabular-nums">{fmtTon(po.scheduledReceiptTon)}</span>
-              <span className="w-16 flex-none text-right text-cap text-ink-3 tabular-nums">{po.dueDate ? `납기 ${fmtMD(po.dueDate)}` : '납기 없음'}</span>
+              <span className="w-16 flex-none text-right text-cap text-ink-3 tabular-nums">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
             </div>
           ))}
           {open.purchaseOrders.length === 0 ? <WidgetEmpty>입고가 남은 발주가 없어요</WidgetEmpty> : null}

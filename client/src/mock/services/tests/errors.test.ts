@@ -7,7 +7,7 @@ import {
   cancelShipmentRequest,
   confirmGoodsIssue,
   confirmShipmentAllocations,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   createShipmentRequest,
@@ -91,12 +91,12 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
     const k = createKit();
     const waiting = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionStatus === 'WAITING_APPROVAL');
     if (!waiting) throw new Error('승인 대기 없음');
-    expectCode(() => createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionIds: [waiting.id] }), 'PUR-002');
+    expectCode(() => createPurchaseOrdersBySupplier(k.at(at), k.actor('purchase'), [waiting.id]), 'PUR-002');
     expectInputError(() => rejectPurchaseRequisition(k.at(at), k.actor('purchaseHead'), { purchaseRequisitionId: waiting.id, rejectReason: '' }), 'rejectReason');
     expectCode(() => rejectPurchaseRequisition(k.at(at), k.actor('productionHead'), { purchaseRequisitionId: waiting.id, rejectReason: '수량 과다' }), 'COM-002');
     rejectPurchaseRequisition(k.at(at), k.actor('purchaseHead'), { purchaseRequisitionId: waiting.id, rejectReason: '수량 과다' });
     expect(k.tables.notification.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.recipientId === waiting.requesterId && n.body?.includes('수량 과다'))).toBe(true);
-    expectCode(() => createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionIds: [waiting.id] }), 'PUR-002');
+    expectCode(() => createPurchaseOrdersBySupplier(k.at(at), k.actor('purchase'), [waiting.id]), 'PUR-002');
     expectCode(
       () => resubmitPurchaseRequisition(k.at(at), k.actor('purchaseHead'), { purchaseRequisitionId: waiting.id, requestedTon: '50', desiredReceiptDate: '2026-10-20' }),
       'COM-002',
@@ -111,9 +111,9 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
     expect(resubmitted.requestedTon).toBe('50.000');
     expectInputError(() => resubmitPurchaseRequisition(k.at(at), k.actor('purchase'), { purchaseRequisitionId: waiting.id, requestedTon: '50', desiredReceiptDate: '2026-10-20' }));
     approvePurchaseRequisition(k.at('2026-10-01T11:00:00+09:00'), k.actor('purchaseHead'), { purchaseRequisitionId: waiting.id });
-    const [po] = createPurchaseOrders(k.at('2026-10-01T12:00:00+09:00'), k.actor('purchase'), { purchaseRequisitionIds: [waiting.id] });
+    const [po] = createPurchaseOrdersBySupplier(k.at('2026-10-01T12:00:00+09:00'), k.actor('purchase'), [waiting.id]);
     expect(po.purchaseOrderStatus).toBe('CONFIRMED');
-    expectInputError(() => createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionIds: [waiting.id] }));
+    expectCode(() => createPurchaseOrdersBySupplier(k.at(at), k.actor('purchase'), [waiting.id]), 'COM-001');
     k.expectClean();
   });
 
@@ -125,7 +125,7 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
       createPurchaseRequisition(k.at(at), k.actor('purchase'), { itemId: k.itemId('COL01'), requestedTon: '5', desiredReceiptDate: '2026-10-20' }),
     ];
     for (const pr of created) approvePurchaseRequisition(k.at(at), k.actor('purchaseHead'), { purchaseRequisitionId: pr.id });
-    const purchaseOrders = createPurchaseOrders(k.at(at), k.actor('purchase'), { purchaseRequisitionIds: [approved?.id ?? 0, ...created.map((pr) => pr.id)] });
+    const purchaseOrders = createPurchaseOrdersBySupplier(k.at(at), k.actor('purchase'), [approved?.id ?? 0, ...created.map((pr) => pr.id)]);
     // 철광석 두 요청은 가온광업 발주 1건(2품목), 석탄은 누리에너지 1건
     expect(purchaseOrders).toHaveLength(2);
     expect(purchaseOrders.map((o) => k.tables.purchaseOrderItem.filter((l) => l.purchaseOrderId === o.id).length).sort()).toEqual([1, 2]);

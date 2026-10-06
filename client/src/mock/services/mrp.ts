@@ -12,6 +12,7 @@
 //   입고예정 칸 = 그 계획들이 필요일까지 받아 쓰는 몫, 나머지는 이유별(다른 계획 몫·필요일 뒤 도착·기간 앞 계획·남는 몫).
 import type { RawMaterialType } from '@/codes';
 import { decCmp, decMul, decSum, TON_DIGITS } from '@/lib/decimal';
+import { remainingTonOf } from '@/mock/services/purchasing';
 import { ferroalloyTonFor, hotMetalTonFor, netRequirements, rawMaterialTonFor, supplyBreakdownOf, type MrpNetLine, type MrpRequirement, type MrpSupply } from '@/lib/mrp';
 import type { MockTables, ProductionPlanRow } from '@/mock/schema';
 import { findById, productionSettingOf, productItemTypeOf, routingYieldOf, seoulDateOf, steelGradeCodeOf } from '@/mock/services/context';
@@ -114,12 +115,12 @@ export function mrpSuppliesOf(tables: Tables): MrpSupply[] {
       .filter((l) => l.lotType === 'RAW_MATERIAL' && l.lotStatus === 'AVAILABLE' && l.itemId !== null && l.remainingTon !== null && decCmp(l.remainingTon, 0) > 0)
       .map((l): MrpSupply => ({ kind: 'ON_HAND', materialId: l.itemId ?? 0, availableDate: null, ton: l.remainingTon ?? '0', reservedForPlanId: null, sourceId: l.id })),
     ...tables.purchaseOrderItem
-      .filter((line) => decCmp(line.scheduledReceiptTon, 0) > 0)
+      .filter((line) => decCmp(remainingTonOf(tables, line), 0) > 0)
       .flatMap((line): MrpSupply[] => {
         const purchaseOrder = findById(tables, 'purchaseOrder', line.purchaseOrderId);
         if (!purchaseOrder || purchaseOrder.purchaseOrderStatus === 'RECEIVED') return [];
         const planId = findById(tables, 'purchaseRequisition', line.purchaseRequisitionId)?.productionPlanId ?? null;
-        return [{ kind: 'SCHEDULED', materialId: line.itemId, availableDate: purchaseOrder.dueDate, ton: line.scheduledReceiptTon, reservedForPlanId: planId, sourceId: line.id }];
+        return [{ kind: 'SCHEDULED', materialId: line.itemId, availableDate: line.expectedReceiptDate, ton: remainingTonOf(tables, line), reservedForPlanId: planId, sourceId: line.id }];
       }),
   ];
 }

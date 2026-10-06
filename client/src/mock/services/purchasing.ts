@@ -2,10 +2,10 @@
 // - 구매요청: 1건 = 원료 1품목(ERD). 등록 = 바로 WAITING_APPROVAL (임시 저장 없음). 요청자 소속 부서에 부서장이 없으면 PUR-001. 부서장에게 APPROVAL_REQUESTED 알림.
 //   반려되면 요청자가 수량·희망 입고일·근거를 고쳐 다시 요청(→ WAITING_APPROVAL). 승인·반려는 요청자 소속 부서의 부서장만 (아니면 COM-002), 결과는 요청자에게 APPROVAL_RESULT.
 //   MRP에서 만든 요청은 production_plan_id를 연결하고 같은 계획·원료로 진행 중인 구매요청을 두 번 만들지 않는다.
-// - 발주: 승인된 구매요청만(아니면 PUR-002). 원료의 기본 공급업체별로 발주 1건에 여러 품목. 발주하면 구매요청 ORDERED.
-// - 입고: 등록 = 확정(상태·수정 없음). 미입고량 초과 PUR-003. 원료 LOT RM-원료코드-YYMMDD-NNN(잔량 = 입고량), 품목 기본 야드. 발주 입고 누계·입고예정·상태 갱신.
+// - 발주: 공급업체 1곳당 발주 1건(서버와 같은 모양), 승인된 구매요청만(아니면 PUR-002), 원료의 기본 공급업체로만. 발주하면 구매요청 ORDERED.
+// - 입고: 등록 = 확정(상태·수정 없음). 미입고량 초과 PUR-003. 원료 LOT RM-원료코드-YYMMDD-NNN(잔량 = 입고량), 품목 기본 야드. 입고 누계·미입고량은 입고 기록으로 계산(ERD), 발주 상태 갱신.
 import type { PurchaseRequisitionStatus } from '@/codes';
-import { decAdd, decCmp, decRound, decSub, TON_DIGITS } from '@/lib/decimal';
+import { decAdd, decCmp, decRound, decSub, decSum, TON_DIGITS } from '@/lib/decimal';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import type { GoodsReceiptRow, LotRow, MockTables, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseRequisitionRow } from '@/mock/schema';
 import { issueBusinessNo, issueRawMaterialLotNo } from '@/mock/sequence';
@@ -258,59 +258,79 @@ export function rejectPurchaseRequisition(tx: MockTx, actor: PersonActor, input:
 const orderedLineOf = (tables: Tables, purchaseRequisitionId: number): PurchaseOrderItemRow | undefined =>
   tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisitionId);
 
+/** 발주 품목의 입고 누계 (ERD: 저장하지 않고 입고 기록으로 계산) */
+export const receivedTonOf = (tables: Tables, purchaseOrderItemId: number): string =>
+  decSum(tables.goodsReceipt.filter((g) => g.purchaseOrderItemId === purchaseOrderItemId).map((g) => g.receivedTon));
+
+/** 발주 품목의 미입고량(입고예정) = 발주량 − 입고 누계 */
+export const remainingTonOf = (tables: Tables, line: PurchaseOrderItemRow): string => decSub(line.orderedTon, receivedTonOf(tables, line.id));
+
+export interface CreatePurchaseOrderInput {
+  supplierId: number;
+  items: readonly {
+    purchaseRequisitionId: number;
+    /** 톤 (소수 3자리), 요청량 이하 */
+    orderedTon: string;
+    /** 비우면 구매요청의 희망 입고일 */
+    expectedReceiptDate?: string | null;
+  }[];
+}
+
 /**
- * 발주 (REQ-PUR-003): 승인된 구매요청을 원료의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건.
- * 발주량 = 요청 톤. 납기(입고예정일) = 입력값, 없으면 묶인 요청의 가장 이른 희망 입고일.
+ * 발주 (REQ-PUR-003): 공급업체 1곳당 발주 1건에 승인된 구매요청 여러 개 (서버 POST purchase-orders와 같다).
+ * 승인 전 PUR-002, 이미 발주한 요청 COM-001, 요청량 초과·원료의 기본 공급업체가 아님은 입력 오류. 발주한 요청은 ORDERED.
  */
-export function createPurchaseOrders(tx: MockTx, actor: PersonActor, input: { purchaseRequisitionIds: readonly number[]; dueDate?: string | null }): PurchaseOrderRow[] {
-  const ids = [...new Set(input.purchaseRequisitionIds)];
-  if (ids.length === 0) inputError('purchaseRequisitionIds', '발주할 구매요청을 골라 주세요');
+export function createPurchaseOrder(tx: MockTx, actor: PersonActor, input: CreatePurchaseOrderInput): PurchaseOrderRow {
+  if (input.items.length === 0) inputError('items', '발주할 구매요청을 골라 주세요');
+  if (new Set(input.items.map((i) => i.purchaseRequisitionId)).size !== input.items.length) inputError('items', '같은 구매요청을 두 번 넣었어요');
+  const supplier = mustGet(tx.tables, 'supplier', input.supplierId, '공급업체');
   const errors = new FieldErrors();
-  const dueDate = checkDate(errors, 'dueDate', input.dueDate, '입고예정일', false);
-  errors.throwIfAny();
-  const lines = ids.map((id) => {
-    const pr = mustGet(tx.tables, 'purchaseRequisition', id, '구매요청');
-    if (orderedLineOf(tx.tables, pr.id)) inputError('purchaseRequisitionIds', `${pr.purchaseRequisitionNo}는 이미 발주했어요`);
+  const lines = input.items.map((line, index) => {
+    const pr = mustGet(tx.tables, 'purchaseRequisition', line.purchaseRequisitionId, '구매요청');
+    if (pr.purchaseRequisitionStatus === 'ORDERED' || orderedLineOf(tx.tables, pr.id)) throw new ApiError('COM-001', `${pr.purchaseRequisitionNo}는 이미 발주한 요청이에요`);
     if (pr.purchaseRequisitionStatus !== 'APPROVED') throw new ApiError('PUR-002', pr.purchaseRequisitionNo);
     const item = mustGet(tx.tables, 'item', pr.itemId, '원료');
-    if (item.defaultSupplierId === null) inputError('purchaseRequisitionIds', `${item.itemName}에 기본 공급업체가 없어요`);
-    return { pr, item, supplierId: item.defaultSupplierId };
+    // 잘못된 공급업체 차단(API-149): 원료에 기본 공급업체가 있으면 그 공급업체로만 발주한다
+    if (item.defaultSupplierId !== null && item.defaultSupplierId !== supplier.id) errors.add(`items.${index}.purchaseRequisitionId`, `${pr.purchaseRequisitionNo}의 원료는 기본 공급업체로 발주해 주세요`);
+    const orderedTonText = checkDecimal(errors, `items.${index}.orderedTon`, line.orderedTon, { label: '발주량(톤)', scale: 3, integerDigits: 9, positive: true, required: true });
+    const orderedTon = decRound(orderedTonText ?? '0', TON_DIGITS);
+    if (orderedTonText !== null && decCmp(orderedTon, pr.requestedTon) > 0) errors.add(`items.${index}.orderedTon`, `${pr.purchaseRequisitionNo}의 요청량 ${pr.requestedTon}t보다 많이 발주할 수 없어요`);
+    const expectedReceiptDate = checkDate(errors, `items.${index}.expectedReceiptDate`, line.expectedReceiptDate, '입고 예정일', false) ?? pr.desiredReceiptDate;
+    return { pr, item, orderedTon, expectedReceiptDate };
   });
-  const supplierIds = [...new Set(lines.map((l) => l.supplierId))];
-  const purchaseOrders = supplierIds.map((supplierId) => {
-    const group = lines.filter((l) => l.supplierId === supplierId);
-    const groupDue = dueDate ?? group.map((l) => l.pr.desiredReceiptDate).sort()[0] ?? null;
-    const po = insertRow(tx, 'purchaseOrder', { purchaseOrderNo: issueBusinessNo(tx, 'PURCHASE_ORDER'), supplierId, purchaseOrderStatus: 'CONFIRMED', dueDate: groupDue, orderedEmployeeId: actor.employeeId });
-    const poItems = group.map((l, index) =>
-      insertRow(tx, 'purchaseOrderItem', {
-        purchaseOrderId: po.id,
-        lineNo: index + 1,
-        itemId: l.item.id,
-        purchaseRequisitionId: l.pr.id,
-        orderedTon: l.pr.requestedTon,
-        receivedTon: '0.000',
-        scheduledReceiptTon: l.pr.requestedTon,
-      }),
-    );
-    const salesOrderIds = [...new Set(group.map((l) => salesOrderIdOf(tx.tables, l.pr)).filter((id): id is number => id !== null))];
-    recordBusinessEvent(tx, {
-      businessEventType: 'PURCHASE_ORDER_CREATED',
-      actor,
-      targetType: 'purchase_order',
-      targetId: po.id,
-      targetNo: po.purchaseOrderNo,
-      salesOrderId: salesOrderIds.length === 1 ? salesOrderIds[0] : null,
-      afterData: {
-        purchaseOrderNo: po.purchaseOrderNo,
-        supplierName: findById(tx.tables, 'supplier', supplierId)?.supplierName ?? '',
-        dueDate: po.dueDate,
-        lines: poItems.map((i, n) => ({ lineNo: i.lineNo, itemCode: group[n].item.itemCode, orderedTon: i.orderedTon, purchaseRequisitionNo: group[n].pr.purchaseRequisitionNo })),
-      },
-    });
-    return po;
-  });
+  errors.throwIfAny();
   for (const { pr } of lines) updateRow(tx, 'purchaseRequisition', pr.id, { purchaseRequisitionStatus: 'ORDERED' });
-  return purchaseOrders;
+  const po = insertRow(tx, 'purchaseOrder', { purchaseOrderNo: issueBusinessNo(tx, 'PURCHASE_ORDER'), supplierId: supplier.id, purchaseOrderStatus: 'CONFIRMED' });
+  for (const line of lines) {
+    insertRow(tx, 'purchaseOrderItem', { purchaseOrderId: po.id, purchaseRequisitionId: line.pr.id, itemId: line.item.id, orderedTon: line.orderedTon, expectedReceiptDate: line.expectedReceiptDate });
+  }
+  const salesOrderIds = [...new Set(lines.map((l) => salesOrderIdOf(tx.tables, l.pr)).filter((id): id is number => id !== null))];
+  recordBusinessEvent(tx, {
+    businessEventType: 'PURCHASE_ORDER_CREATED',
+    actor,
+    targetType: 'purchase_order',
+    targetId: po.id,
+    targetNo: po.purchaseOrderNo,
+    salesOrderId: salesOrderIds.length === 1 ? salesOrderIds[0] : null,
+    afterData: {
+      purchaseOrderNo: po.purchaseOrderNo,
+      supplierName: supplier.supplierName,
+      items: lines.map((l) => ({ purchaseRequisitionNo: l.pr.purchaseRequisitionNo, itemCode: l.item.itemCode, orderedTon: l.orderedTon, expectedReceiptDate: l.expectedReceiptDate })),
+    },
+  });
+  return po;
+}
+
+/** 시드·시험용: 승인된 구매요청을 원료의 기본 공급업체별로 묶어 요청량 그대로 발주한다 (공급업체마다 createPurchaseOrder 1번) */
+export function createPurchaseOrdersBySupplier(tx: MockTx, actor: PersonActor, purchaseRequisitionIds: readonly number[], expectedReceiptDate: string | null = null): PurchaseOrderRow[] {
+  const requisitions = purchaseRequisitionIds.map((id) => mustGet(tx.tables, 'purchaseRequisition', id, '구매요청'));
+  const supplierOf = (pr: PurchaseRequisitionRow) => mustGet(tx.tables, 'item', pr.itemId, '원료').defaultSupplierId;
+  const supplierIds = [...new Set(requisitions.map(supplierOf))];
+  return supplierIds.map((supplierId) => {
+    if (supplierId === null) inputError('items', '기본 공급업체가 없는 원료예요');
+    const group = requisitions.filter((pr) => supplierOf(pr) === supplierId);
+    return createPurchaseOrder(tx, actor, { supplierId, items: group.map((pr) => ({ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon, expectedReceiptDate })) });
+  });
 }
 
 /** 입고 확정 (REQ-PUR-004, BP-PUR-02): 입고 1건 = 원료 LOT 1개 */
@@ -327,7 +347,9 @@ export function receiveGoods(
   const receivedTon = receivedTonText === null ? null : decRound(receivedTonText, TON_DIGITS);
   const receiptDate = checkDate(errors, 'receiptDate', input.receiptDate, '입고일', true);
   errors.throwIfAny();
-  if (decCmp(receivedTon ?? '0', poItem.scheduledReceiptTon) > 0) throw new ApiError('PUR-003', `미입고 ${poItem.scheduledReceiptTon}t`);
+  const receivedBefore = receivedTonOf(tx.tables, poItem.id);
+  const remainingBefore = decSub(poItem.orderedTon, receivedBefore);
+  if (decCmp(receivedTon ?? '0', remainingBefore) > 0) throw new ApiError('PUR-003', `미입고 ${remainingBefore}t`);
   const goodsReceipt = insertRow(tx, 'goodsReceipt', {
     goodsReceiptNo: issueBusinessNo(tx, 'GOODS_RECEIPT'),
     purchaseOrderItemId: poItem.id,
@@ -361,10 +383,9 @@ export function receiveGoods(
     consumedAt: null,
     shippedAt: null,
   });
-  const receivedTotal = decAdd(poItem.receivedTon, goodsReceipt.receivedTon);
-  updateRow(tx, 'purchaseOrderItem', poItem.id, { receivedTon: receivedTotal, scheduledReceiptTon: decSub(poItem.orderedTon, receivedTotal) });
+  const receivedTotal = decAdd(receivedBefore, goodsReceipt.receivedTon);
   const poLines = tx.tables.purchaseOrderItem.filter((l) => l.purchaseOrderId === po.id);
-  const allReceived = poLines.every((l) => decCmp(l.scheduledReceiptTon, 0) <= 0);
+  const allReceived = poLines.every((l) => decCmp(remainingTonOf(tx.tables, l), 0) <= 0);
   const purchaseOrder = updateRow(tx, 'purchaseOrder', po.id, { purchaseOrderStatus: allReceived ? 'RECEIVED' : 'PARTIALLY_RECEIVED' }) ?? po;
   const pr = findById(tx.tables, 'purchaseRequisition', poItem.purchaseRequisitionId);
   recordBusinessEvent(tx, {
@@ -374,7 +395,7 @@ export function receiveGoods(
     targetId: goodsReceipt.id,
     targetNo: goodsReceipt.goodsReceiptNo,
     salesOrderId: pr ? salesOrderIdOf(tx.tables, pr) : null,
-    beforeData: { receivedTon: poItem.receivedTon, scheduledReceiptTon: poItem.scheduledReceiptTon, purchaseOrderStatus: po.purchaseOrderStatus },
+    beforeData: { receivedTon: receivedBefore, remainingTon: remainingBefore, purchaseOrderStatus: po.purchaseOrderStatus },
     afterData: {
       goodsReceiptNo: goodsReceipt.goodsReceiptNo,
       purchaseOrderNo: po.purchaseOrderNo,
@@ -383,7 +404,7 @@ export function receiveGoods(
       receiptDate: goodsReceipt.receiptDate,
       lotNo: lot.lotNo,
       purchaseOrderStatus: purchaseOrder.purchaseOrderStatus,
-      scheduledReceiptTon: decSub(poItem.orderedTon, receivedTotal),
+      remainingTon: decSub(poItem.orderedTon, receivedTotal),
     },
     lotIds: [lot.id],
   });
@@ -486,23 +507,28 @@ export interface PurchaseOrderView {
   supplierId: number;
   supplierName: string;
   purchaseOrderStatus: PurchaseOrderRow['purchaseOrderStatus'];
-  dueDate: string | null;
+  /** 발주한 사원 (ERD에 칸이 없어 작업 로그 PURCHASE_ORDER_CREATED로 본다) */
   orderedEmployeeName: string | null;
   createdAt: string;
   items: {
     id: number;
-    lineNo: number;
+    purchaseRequisitionId: number;
     itemId: number;
     itemCode: string;
     itemName: string;
     purchaseRequisitionNo: string | null;
     orderedTon: string;
+    expectedReceiptDate: string | null;
+    /** 입고 누계 (입고 기록 합계) */
     receivedTon: string;
-    /** 입고예정 (미입고량) */
-    scheduledReceiptTon: string;
+    /** 미입고량(입고예정) = 발주량 − 입고 누계 */
+    remainingTon: string;
     goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receiptDate: string; lotNo: string | null }[];
   }[];
 }
+
+const orderedEventOf = (tables: Tables, purchaseOrderId: number) =>
+  tables.businessEvent.find((e) => e.businessEventType === 'PURCHASE_ORDER_CREATED' && e.targetType === 'purchase_order' && e.targetId === purchaseOrderId);
 
 export function purchaseOrderView(tables: Tables, po: PurchaseOrderRow): PurchaseOrderView {
   return {
@@ -511,24 +537,24 @@ export function purchaseOrderView(tables: Tables, po: PurchaseOrderRow): Purchas
     supplierId: po.supplierId,
     supplierName: findById(tables, 'supplier', po.supplierId)?.supplierName ?? '',
     purchaseOrderStatus: po.purchaseOrderStatus,
-    dueDate: po.dueDate,
-    orderedEmployeeName: employeeNameOf(tables, po.orderedEmployeeId),
+    orderedEmployeeName: employeeNameOf(tables, orderedEventOf(tables, po.id)?.actorEmployeeId ?? null),
     createdAt: po.createdAt,
     items: tables.purchaseOrderItem
       .filter((l) => l.purchaseOrderId === po.id)
-      .sort((a, b) => a.lineNo - b.lineNo)
+      .sort((a, b) => a.id - b.id)
       .map((l) => {
         const item = findById(tables, 'item', l.itemId);
         return {
           id: l.id,
-          lineNo: l.lineNo,
+          purchaseRequisitionId: l.purchaseRequisitionId,
           itemId: l.itemId,
           itemCode: item?.itemCode ?? '',
           itemName: item?.itemName ?? '',
           purchaseRequisitionNo: findById(tables, 'purchaseRequisition', l.purchaseRequisitionId)?.purchaseRequisitionNo ?? null,
           orderedTon: l.orderedTon,
-          receivedTon: l.receivedTon,
-          scheduledReceiptTon: l.scheduledReceiptTon,
+          expectedReceiptDate: l.expectedReceiptDate,
+          receivedTon: receivedTonOf(tables, l.id),
+          remainingTon: remainingTonOf(tables, l),
           goodsReceipts: tables.goodsReceipt
             .filter((g) => g.purchaseOrderItemId === l.id)
             .map((g) => ({ id: g.id, goodsReceiptNo: g.goodsReceiptNo, receivedTon: g.receivedTon, receiptDate: g.receiptDate, lotNo: tables.lot.find((lot) => lot.goodsReceiptId === g.id)?.lotNo ?? null })),
@@ -541,7 +567,7 @@ export const listPurchaseOrders = (tables: Tables): PurchaseOrderView[] => [...t
 
 /** 입고할 수 있는 발주 품목 (미입고량 > 0) */
 export const receivablePurchaseOrders = (tables: Tables): PurchaseOrderView[] =>
-  listPurchaseOrders(tables).filter((po) => po.items.some((i) => decCmp(i.scheduledReceiptTon, 0) > 0));
+  listPurchaseOrders(tables).filter((po) => po.items.some((i) => decCmp(i.remainingTon, 0) > 0));
 
 export function listGoodsReceipts(tables: Tables): { id: number; goodsReceiptNo: string; purchaseOrderNo: string; supplierName: string; itemCode: string; itemName: string; receivedTon: string; receiptDate: string; yardName: string | null; lotNo: string | null; confirmedEmployeeName: string | null; confirmedAt: string }[] {
   return [...tables.goodsReceipt]

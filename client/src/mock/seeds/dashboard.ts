@@ -15,7 +15,7 @@ import {
   approvePurchaseRequisition,
   confirmGoodsIssue,
   confirmShipmentAllocations,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   createShipmentRequest,
@@ -118,7 +118,7 @@ export function seedDashboard(tx: MockTx): void {
     }),
   );
   for (const pr of prs) approvePurchaseRequisition(txAt(tx, '2026-08-27T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr.id });
-  createPurchaseOrders(txAt(tx, '2026-08-27T16:00:00+09:00'), purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+  createPurchaseOrdersBySupplier(txAt(tx, '2026-08-27T16:00:00+09:00'), purchase, prs.map((pr) => pr.id));
   for (const pr of prs) {
     const poLine = required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id), `발주 줄 ${pr.id}`);
     receiveGoods(txAt(tx, '2026-08-31T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: poLine.orderedTon, receiptDate: SEED_DASHBOARD.receiptDate });

@@ -323,25 +323,24 @@ export type PurchaseRequisitionRow = Timestamps & {
   purchaseRequisitionStatus: PurchaseRequisitionStatus;
 };
 
+/** ERD purchase_order: 공급업체 1곳당 발주 1건. 발주자는 작업 로그로 본다 */
 export type PurchaseOrderRow = Timestamps & {
   id: number;
   purchaseOrderNo: string;
   supplierId: number;
   purchaseOrderStatus: PurchaseOrderStatus;
-  dueDate: DateString | null;
-  orderedEmployeeId: number;
 };
 
+/** ERD purchase_order_item. 입고 누계·미입고량(입고예정)은 저장하지 않고 입고 기록으로 계산한다 */
 export type PurchaseOrderItemRow = Timestamps & {
   id: number;
   purchaseOrderId: number;
-  lineNo: number;
-  itemId: number;
   /** 발주 품목 1행 = 구매요청 1건 */
   purchaseRequisitionId: number;
+  itemId: number;
   orderedTon: DecimalString;
-  receivedTon: DecimalString;
-  scheduledReceiptTon: DecimalString;
+  /** MRP 입고예정 필요일 판단용 */
+  expectedReceiptDate: DateString | null;
 };
 
 export type GoodsReceiptRow = Timestamps & {

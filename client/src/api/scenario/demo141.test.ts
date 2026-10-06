@@ -85,7 +85,9 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: '', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
     expect((await mrpApi.requirements(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
     expect((await purchaseOrderApi.candidateItems()).some((i) => i.id === pr.id)).toBe(false);
-    await expect(purchaseOrderApi.create({ purchaseRequisitionIds: [pr.id], dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
+    const smnSupplierId = readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.id ?? 0);
+    const smnOrder = { supplierId: smnSupplierId, items: [{ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon, expectedReceiptDate: '' }] };
+    await expect(purchaseOrderApi.create([smnOrder])).rejects.toMatchObject({ code: 'PUR-002' });
 
     as('salesHead'); // 다른 부서 부서장은 승인할 수 없다
     await expect(approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: pr.updatedAt })).rejects.toMatchObject({ code: 'COM-002' });
@@ -99,8 +101,9 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const candidate = (await purchaseOrderApi.candidateItems()).find((i) => i.id === pr.id);
     expect(candidate?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
     at('2026-10-01T11:00:00+09:00');
-    const [po] = await purchaseOrderApi.create({ purchaseRequisitionIds: [candidate?.id ?? 0], dueDate: '' });
-    expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', dueDate: '2026-10-10' });
+    const [po] = await purchaseOrderApi.create([smnOrder]);
+    expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', supplierId: candidate?.supplierId });
+    expect(po.items[0].expectedReceiptDate).toBe('2026-10-10');
     expect((await purchaseRequisitionApi.detail(pr.id)).purchaseRequisitionStatus).toBe('ORDERED');
     expect((await mrpApi.requirements(period)).materials.find((m) => m.itemCode === 'SMN01')?.netTon).toBe('0.000');
 
@@ -108,14 +111,14 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     at('2026-10-02T09:00:00+09:00');
     await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.501', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
     const first = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receiptDate: '2026-10-02' });
-    expect(first).toMatchObject({ lotNo: 'RM-SMN01-261002-001', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '1.000', lineScheduledReceiptTon: '0.500' });
+    expect(first).toMatchObject({ lotNo: 'RM-SMN01-261002-001', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '1.000', lineRemainingTon: '0.500' });
     // 확정 재시도(같은 1t을 한 번 더): 미입고량 초과로 막히고 LOT이 늘지 않는다
     const lotCountBefore = readDb((t) => t.lot.length);
     await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
     expect(readDb((t) => t.lot.length)).toBe(lotCountBefore);
     at('2026-10-03T08:00:00+09:00');
     const second = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '0.500', receiptDate: '2026-10-03' });
-    expect(second).toMatchObject({ lotNo: 'RM-SMN01-261003-001', purchaseOrderStatus: 'RECEIVED', lineReceivedTon: '1.500', lineScheduledReceiptTon: '0.000' });
+    expect(second).toMatchObject({ lotNo: 'RM-SMN01-261003-001', purchaseOrderStatus: 'RECEIVED', lineReceivedTon: '1.500', lineRemainingTon: '0.000' });
     expect(readDb((t) => t.lot.find((l) => l.id === first.lotId))).toMatchObject({ lotType: 'RAW_MATERIAL', remainingTon: '1.000', producedDate: '2026-10-02' });
     expectClean();
 
