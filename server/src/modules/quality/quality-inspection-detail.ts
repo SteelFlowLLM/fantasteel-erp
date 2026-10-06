@@ -8,7 +8,7 @@ const toValueText = (value: Prisma.Decimal | null) => value?.toFixed(4) ?? null;
 const toThicknessText = (value: Prisma.Decimal | null) => value?.toFixed(2) ?? null;
 
 /** 검사 상세 응답 (API-116). 항목은 판정에 쓴 기준 버전에서 LOT 두께에 적용되는 것만 */
-export function toQualityInspectionDetail(record: QualityInspectionDetailRecord): QualityInspectionDetail {
+export function toQualityInspectionDetail(record: QualityInspectionDetailRecord, lockedMillSheetNos: string[]): QualityInspectionDetail {
   const thicknessMm = record.lot.item?.thicknessMm ?? null;
   const measuredByItemId = new Map(record.qualityInspectionValues.map((v) => [v.inspectionStandardItemId, v.measuredValue]));
   const standard = record.inspectionStandard;
@@ -24,6 +24,7 @@ export function toQualityInspectionDetail(record: QualityInspectionDetailRecord)
     inspectorEmployeeName: record.inspectorEmployee.employeeName,
     inspectedAt: record.inspectedAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
+    lockedMillSheetNos,
     items: standard.inspectionStandardItems
       .filter((item) => isItemApplicable(item, thicknessMm))
       .map((item) => {

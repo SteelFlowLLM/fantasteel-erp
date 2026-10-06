@@ -85,6 +85,11 @@ export interface QualityInspectionDetail extends InspectedLotSummary {
   inspectedAt: string;
   /** ISO 8601. 측정값 수정(PATCH) 때 expectedUpdatedAt으로 돌려보낸다 */
   updatedAt: string;
+  /**
+   * 이 LOT(히트면 하위 슬래브·코일까지)이 출고돼 발행된 밀시트 번호. 하나라도 있으면 측정값을 고칠 수 없다(PATCH COM-004).
+   * 화면이 저장 전에 미리 막을 수 있게 준다
+   */
+  lockedMillSheetNos: string[];
   items: QualityInspectionDetailItem[];
 }
 

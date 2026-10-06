@@ -89,7 +89,16 @@ describe('불합격 LOT 목록 조회 (API-123, REQ-QC-004)', () => {
     const slabPass = await product('S-PASS', 'SLAB', heatPass.id);
     const coilFail = await product('C-FAIL', 'COIL', slabPass.id);
 
-    await inspect(heatFail.id, st.id, 'FAIL');
+    const heatFailInspection = await inspect(heatFail.id, st.id, 'FAIL');
+    // 근거 검사의 불합격 항목: 탄소 기준(이하) 초과 1개, 규소는 기준 안
+    const stItem = (code: string) =>
+      prisma.inspectionStandardItem.findFirstOrThrow({ where: { inspectionStandardId: st.id, inspectionItemCode: code } });
+    await prisma.qualityInspectionValue.createMany({
+      data: [
+        { qualityInspectionId: heatFailInspection.id, inspectionStandardItemId: (await stItem('C')).id, measuredValue: '0.9' },
+        { qualityInspectionId: heatFailInspection.id, inspectionStandardItemId: (await stItem('SI')).id, measuredValue: '0.1' },
+      ],
+    });
     await inspect(heatPass.id, st.id, 'PASS');
     await inspect(slabFail.id, cc.id, 'FAIL');
     await inspect(slabPass.id, cc.id, 'PASS');
@@ -111,6 +120,7 @@ describe('불합격 LOT 목록 조회 (API-123, REQ-QC-004)', () => {
   });
 
   afterAll(async () => {
+    await prisma.qualityInspectionValue.deleteMany({ where: { qualityInspection: { lotId: { in: lotIds } } } });
     await prisma.qualityInspection.deleteMany({ where: { lotId: { in: lotIds } } });
     await prisma.lotRelation.deleteMany({ where: { childLotId: { in: lotIds } } });
     await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
@@ -155,6 +165,24 @@ describe('불합격 LOT 목록 조회 (API-123, REQ-QC-004)', () => {
       dispositionReason: '샤르피 미달, 재시험 대기',
     });
     expect(rows.find((row) => row.lotId === lots.slabFail)).toMatchObject({ dispositionStatus: null, dispositionReason: null });
+  });
+
+  it('근거 검사(자기 FAIL 검사, 불합격 히트의 하위면 상위 히트 검사)의 불합격 항목·검사 시각을 같이 준다', async () => {
+    const rows = await myRows();
+    const heatRow = rows.find((row) => row.lotId === lots.heatFail);
+    expect(heatRow?.evidence).toMatchObject({ lotId: lots.heatFail, qualityInspectionId: heatRow?.qualityInspectionId });
+    expect(heatRow?.evidence?.failedItems.map((item) => [item.inspectionItemCode, item.measuredValue])).toEqual([['C', '0.9000']]);
+    // 하위 슬래브·코일은 자기 검사가 없어도 상위 히트 검사를 근거로 쓴다
+    expect(rows.find((row) => row.lotId === lots.coilUnderFailHeat)?.evidence).toEqual(heatRow?.evidence);
+    // 자기 FAIL 검사는 자기 검사가 근거 (값이 없으면 불합격 항목은 비어 있다)
+    expect(rows.find((row) => row.lotId === lots.slabFail)?.evidence).toMatchObject({ lotId: lots.slabFail, failedItems: [] });
+  });
+
+  it('lotId로 불합격 LOT 하나만 고른다. 불합격이 아니면 빈 목록', async () => {
+    const one = await service.listRejectedLots({ lotId: lots.slabUnderFailHeat }, qualityUser());
+    expect(one).toMatchObject({ total: 1 });
+    expect(one.items.map((row) => row.lotId)).toEqual([lots.slabUnderFailHeat]);
+    expect((await service.listRejectedLots({ lotId: lots.slabPass }, qualityUser())).items).toEqual([]);
   });
 
   it('page·size로 나누고 total은 전체 불합격 LOT 수', async () => {

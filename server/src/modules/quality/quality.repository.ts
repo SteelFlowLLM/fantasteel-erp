@@ -55,6 +55,13 @@ export const inspectedLotSelect = {
   },
 } satisfies Prisma.LotSelect;
 
+/** 밀시트 잠금 확인에 쓰는 하위 LOT (히트 → 슬래브 → 코일, lot_relation) */
+const lotDescendantsSelect = {
+  lotRelationsAsParentLot: {
+    select: { childLot: { select: { id: true, lotRelationsAsParentLot: { select: { childLotId: true } } } } },
+  },
+} satisfies Prisma.LotSelect;
+
 const listLotSelect = {
   ...inspectedLotSelect,
   qualityInspection: {
@@ -67,7 +74,7 @@ const listLotSelect = {
   },
 } satisfies Prisma.LotSelect;
 
-const inspectionDetailSelect = {
+export const inspectionDetailSelect = {
   id: true,
   inspectionResult: true,
   inspectedAt: true,
@@ -96,7 +103,7 @@ const inspectionDetailSelect = {
     },
   },
   qualityInspectionValues: { select: { inspectionStandardItemId: true, measuredValue: true } },
-  lot: { select: inspectedLotSelect },
+  lot: { select: { ...inspectedLotSelect, ...lotDescendantsSelect } },
 } satisfies Prisma.QualityInspectionSelect;
 
 export type InspectedLot = Prisma.LotGetPayload<{ select: typeof inspectedLotSelect }>;
@@ -182,9 +189,7 @@ export class QualityRepository {
             lotType: true,
             item: { select: { thicknessMm: true } },
             ...lotSalesOrderSelect,
-            lotRelationsAsParentLot: {
-              select: { childLot: { select: { id: true, lotRelationsAsParentLot: { select: { childLotId: true } } } } },
-            },
+            ...lotDescendantsSelect,
           },
         },
       },

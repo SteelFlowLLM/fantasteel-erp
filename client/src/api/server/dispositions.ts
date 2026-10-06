@@ -1,26 +1,23 @@
 // 불합격 관리 화면 ↔ 서버 API (server/src/modules/quality의 rejected-lot). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
-// 불합격 항목·검사 시각은 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사) 상세에서 읽는다.
+// 불합격 항목·검사 시각은 서버가 목록 행에 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사)로 같이 준다.
 // 서버에 아직 없는 것(지정 시각, 연결 수주·계획, 작업 로그, 재생산 계획)은 빈 값이거나 "서버 연결 전" 오류다.
-import type { QualityInspectionDetail, RejectedLotListItem } from '@fantasteel/shared';
+import type { PageResult, RejectedLotListItem } from '@fantasteel/shared';
 import type { RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { allPages, inspectionFormOfLot, listRowOfLot, orEmpty } from '@/api/server/inspections';
-
-type FailedItem = RejectedLotListRow['failedItems'][number];
-type MeasuredItem = Omit<FailedItem, 'measuredValue'> & { measuredValue: string | null; isPassed: boolean | null };
+import { allPages, inspectionFormOfLot, orEmpty } from '@/api/server/inspections';
 
 const rejectedAll = () => allPages<RejectedLotListItem>('/lots/rejected');
+
+/** 불합격 LOT 하나 (서버가 lotId로 거른다). 불합격이 아니면 null */
+const rejectedOne = (lotId: number) =>
+  serverRequest<PageResult<RejectedLotListItem>>('GET', '/lots/rejected', { query: { lotId, page: 1, size: 1 } }).then((r) => r.items[0] ?? null);
 
 /** 자기 검사가 불합격이면 이 LOT 불합격, 아니면 상위 히트 불합격으로 빠진 하위 LOT (TRM-078) */
 const reasonOf = (row: RejectedLotListItem): RejectedLotListRow['reason'] => (row.inspectionResult === 'FAIL' ? 'FAILED' : 'HEAT_FAILED');
 
-const failedItemsOf = (items: readonly MeasuredItem[]): FailedItem[] =>
-  items
-    .filter((i) => i.isPassed === false)
-    .map((i) => ({ inspectionItemCode: i.inspectionItemCode, inspectionItemName: i.inspectionItemName, unit: i.unit, minValue: i.minValue, maxValue: i.maxValue, measuredValue: i.measuredValue }));
-
-function listRowOf(row: RejectedLotListItem, evidence: { items: readonly MeasuredItem[]; inspectedAt: string | null } | null): RejectedLotListRow {
+function listRowOf(row: RejectedLotListItem): RejectedLotListRow {
+  const evidence = row.evidence;
   return {
     lotId: row.lotId,
     lotNo: row.lotNo,
@@ -29,7 +26,15 @@ function listRowOf(row: RejectedLotListItem, evidence: { items: readonly Measure
     steelGradeCode: row.steelGradeCode,
     heatNo: row.heatLotNo,
     inspectedAt: evidence?.inspectedAt ?? null,
-    failedItems: failedItemsOf(evidence?.items ?? []),
+    // 불합격 항목에는 측정값이 있다 (값이 없으면 판정이 불합격이 아니라 판정 대기)
+    failedItems: (evidence?.failedItems ?? []).map((i) => ({
+      inspectionItemCode: i.inspectionItemCode,
+      inspectionItemName: i.inspectionItemName,
+      unit: i.unit,
+      minValue: i.minValue,
+      maxValue: i.maxValue,
+      measuredValue: i.measuredValue ?? '',
+    })),
     dispositionStatus: row.dispositionStatus,
     dispositionReason: row.dispositionReason,
     updatedAt: row.updatedAt,
@@ -46,38 +51,20 @@ function listRowOf(row: RejectedLotListItem, evidence: { items: readonly Measure
   };
 }
 
-/** 근거 검사 id: 자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사 (불합격 히트는 보통 같은 목록에 있다) */
-async function evidenceInspectionIdOf(row: RejectedLotListItem, ownByLotId: ReadonlyMap<number, number>): Promise<number | null> {
-  if (reasonOf(row) === 'FAILED') return row.qualityInspectionId;
-  if (row.heatLotId === null) return null;
-  const heatLotId = row.heatLotId;
-  return ownByLotId.get(heatLotId) ?? orEmpty(() => listRowOfLot(heatLotId).then((r) => r?.qualityInspectionId ?? null), null);
-}
-
-/** 불합격 LOT 목록. 근거 검사 상세는 검사 입력 조회 권한이 없으면 비워 둔다 */
+/** 불합격 LOT 목록 (근거 검사의 불합격 항목까지 한 번에 받는다) */
 async function list(): Promise<RejectedLotListRow[]> {
-  const rows = await rejectedAll();
-  const ownByLotId = new Map(rows.flatMap((r) => (r.qualityInspectionId === null ? [] : [[r.lotId, r.qualityInspectionId] as const])));
-  const evidenceIds = await Promise.all(rows.map((r) => evidenceInspectionIdOf(r, ownByLotId)));
-  const uniqueIds = [...new Set(evidenceIds.filter((id): id is number => id !== null))];
-  const details = await Promise.all(
-    uniqueIds.map((id) => orEmpty<QualityInspectionDetail | null>(() => serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${id}`), null)),
-  );
-  const detailById = new Map(uniqueIds.map((id, index) => [id, details[index]]));
-  return rows.map((r, index) => {
-    const id = evidenceIds[index];
-    return listRowOf(r, (id === null ? null : detailById.get(id)) ?? null);
-  });
+  return (await rejectedAll()).map(listRowOf);
 }
 
 /** 불합격 LOT 하나: 근거 검사 폼. 불합격 목록에 없으면 null */
 async function detail(lotId: number): Promise<RejectedLotDetail | null> {
-  const found = (await rejectedAll()).find((r) => r.lotId === lotId);
+  const found = await rejectedOne(lotId);
   if (!found) return null;
-  const evidenceLotId = reasonOf(found) === 'FAILED' ? lotId : found.heatLotId;
+  // 근거 검사 폼(전체 항목)은 검사 입력 조회 권한이 없으면 비워 둔다. 불합격 항목은 목록 행에 이미 있다
+  const evidenceLotId = found.evidence?.lotId ?? null;
   const evidence = evidenceLotId === null ? null : await orEmpty(() => inspectionFormOfLot(evidenceLotId), null);
   return {
-    row: listRowOf(found, evidence ? { items: evidence.items, inspectedAt: evidence.lot.inspectedAt } : null),
+    row: listRowOf(found),
     evidence,
     // 서버에 아직 없는 것: 같은 수주 품목의 생산계획(생산 모듈), 작업 로그 조회
     plans: [],
@@ -90,7 +77,7 @@ async function detail(lotId: number): Promise<RejectedLotDetail | null> {
 async function set(input: SetDispositionInput): Promise<SetDispositionResult> {
   let expectedUpdatedAt = input.expectedUpdatedAt ?? null;
   if (expectedUpdatedAt === null) {
-    const found = (await rejectedAll()).find((r) => r.lotId === input.lotId);
+    const found = await rejectedOne(input.lotId);
     if (!found) throw new ApiError('COM-003', `불합격 LOT ${input.lotId}`);
     expectedUpdatedAt = found.updatedAt;
   }

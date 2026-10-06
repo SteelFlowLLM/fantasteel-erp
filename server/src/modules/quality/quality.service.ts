@@ -30,6 +30,19 @@ import {
 } from './quality-inspection-list';
 import { QualityRepository } from './quality.repository';
 
+/** 밀시트 잠금 범위: 히트면 하위 제품(슬래브·코일)까지, 슬래브·코일은 그 LOT만 (quality.md 4장 "측정값 수정") */
+function lockScopeLotIds(lot: {
+  id: number;
+  lotType: string;
+  lotRelationsAsParentLot: { childLot: { id: number; lotRelationsAsParentLot: { childLotId: number }[] } }[];
+}): number[] {
+  if (lot.lotType !== LOT_TYPE.HEAT) return [lot.id];
+  return [
+    lot.id,
+    ...lot.lotRelationsAsParentLot.flatMap(({ childLot }) => [childLot.id, ...childLot.lotRelationsAsParentLot.map((relation) => relation.childLotId)]),
+  ];
+}
+
 const DEFAULT_PAGE = 1;
 const DEFAULT_SIZE = 20;
 
@@ -123,7 +136,7 @@ export class QualityService {
   async getQualityInspection(qualityInspectionId: number): Promise<QualityInspectionDetail> {
     const record = await this.repository.findInspectionDetail(this.prisma, qualityInspectionId);
     if (!record) throw new AppException('COM-003', '검사를 찾을 수 없어요');
-    return toQualityInspectionDetail(record);
+    return toQualityInspectionDetail(record, await this.repository.findIssuedMillSheetNos(this.prisma, lockScopeLotIds(record.lot)));
   }
 
   /**
@@ -190,7 +203,7 @@ export class QualityService {
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
-      return { ...toQualityInspectionDetail(detail), stockSync };
+      return { ...toQualityInspectionDetail(detail, await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(detail.lot))), stockSync };
     });
   }
 
@@ -209,18 +222,7 @@ export class QualityService {
       if (!inspection) throw new AppException('COM-003', '검사를 찾을 수 없어요');
       const { lot, inspectionStandard: standard } = inspection;
 
-      // 히트면 하위 제품(슬래브·코일)까지, 슬래브·코일은 그 LOT만 본다 (quality.md 4장 "측정값 수정")
-      const lineageLotIds =
-        lot.lotType === LOT_TYPE.HEAT
-          ? [
-              lot.id,
-              ...lot.lotRelationsAsParentLot.flatMap(({ childLot }) => [
-                childLot.id,
-                ...childLot.lotRelationsAsParentLot.map((relation) => relation.childLotId),
-              ]),
-            ]
-          : [lot.id];
-      const millSheetNos = await this.repository.findIssuedMillSheetNos(tx, lineageLotIds);
+      const millSheetNos = await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(lot));
       if (millSheetNos.length) {
         // [04] 9.3에 전용 코드가 없어 입력 에러로 돌려준다 (2026-10-04 결정)
         throw new AppException('COM-004', `밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요 (밀시트 ${millSheetNos.join(', ')})`);
@@ -271,7 +273,7 @@ export class QualityService {
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
-      return { ...toQualityInspectionDetail(detail), stockSync };
+      return { ...toQualityInspectionDetail(detail, await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(detail.lot))), stockSync };
     });
   }
 }
