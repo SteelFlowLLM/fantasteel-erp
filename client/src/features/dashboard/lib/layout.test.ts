@@ -122,3 +122,25 @@ describe('위젯 배치', () => {
     expect(readStoredLayout(9, null)).toBeNull();
   });
 });
+
+describe('역할별 기본 배치 (품질)', () => {
+  it('품질은 수주 충족 현황 자리에 같은 위치·크기로 강종별 불합격률을 둔다', () => {
+    const common = buildDefaultPlacements();
+    const quality = buildDefaultPlacements('QUALITY');
+    const slot = common.find((p) => p.key === 'ORDER_FULFILLMENT');
+    expect(quality.some((p) => p.key === 'ORDER_FULFILLMENT')).toBe(false);
+    expect(quality.find((p) => p.key === 'REJECT_RATE')).toEqual({ ...slot, key: 'REJECT_RATE' });
+    // 나머지 기본 위젯은 그대로
+    expect(quality.filter((p) => p.key !== 'REJECT_RATE')).toEqual(common.filter((p) => p.key !== 'ORDER_FULFILLMENT'));
+  });
+
+  it('다른 역할(영업 등)과 역할을 모를 때는 공통 기본 배치 그대로', () => {
+    expect(buildDefaultPlacements('SALES')).toEqual(buildDefaultPlacements());
+    expect(buildDefaultPlacements(undefined)).toEqual(buildDefaultPlacements());
+  });
+
+  it('품질의 기본 배치는 품질 기준으로 "기본"이다 (저장값을 남기지 않는다)', () => {
+    expect(isDefaultLayout(buildDefaultPlacements('QUALITY'), 'QUALITY')).toBe(true);
+    expect(isDefaultLayout(buildDefaultPlacements(), 'QUALITY')).toBe(false);
+  });
+});
