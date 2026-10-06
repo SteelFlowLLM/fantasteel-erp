@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
 import {
+  allocateRollingQty,
   countEligibleAvailableLots,
   countUnallocatedPassedLotsByItem,
   findAllocatableLots,
@@ -142,6 +143,11 @@ export class InventoryRepository {
     return { ...item, activeQty: sumOf(RESERVATION_STATUS.ACTIVE), convertedQty: sumOf(RESERVATION_STATUS.CONVERTED) };
   }
 
+  /** 열연 배정 확정: 가용 안에서만 rolling을 1 늘린다. 바뀐 행이 없으면 false (INV-001) */
+  async allocateRollingQty(tx: Tx, itemId: number): Promise<boolean> {
+    return (await tx.$queryRawTyped(allocateRollingQty(itemId))).length > 0;
+  }
+
   /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
   decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
     return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
@@ -254,6 +260,13 @@ export class InventoryRepository {
   createShipmentAllocation(tx: Tx, lotId: number, shipmentRequestItemId: number) {
     return tx.allocation.create({
       data: { lotId, shipmentRequestItemId, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
+      include: allocationInclude,
+    });
+  }
+
+  createHotRollingAllocation(tx: Tx, lotId: number, productionPlanId: number) {
+    return tx.allocation.create({
+      data: { lotId, productionPlanId, allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
       include: allocationInclude,
     });
   }

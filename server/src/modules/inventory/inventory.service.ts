@@ -589,6 +589,100 @@ export class InventoryService {
     return confirmed.map((a) => a.lotId);
   }
 
+  // ── 열연 투입 배정 (REQ-INV-006·009, BP-INV-01) — production이 tx를 넘겨 부른다 ──
+
+  /** 열연 배정 후보: 규격이 같은 적격·재고 상태·미배정 LOT을 FIFO(생산완료일 → LOT 번호) 순으로 */
+  hotRollingCandidates(tx: Tx, slabItemId: number) {
+    return this.repository.findAllocatableLots(tx, slabItemId);
+  }
+
+  /**
+   * 열연 배정 확정 1건: LOT 재검증(규격·재고 상태·적격·확정 배정 없음) 후 가용 안에서 rolling +1, CONFIRMED 배정.
+   * 판매 예약 몫을 침범하면 조건부 UPDATE가 0행이라 INV-001 (14.2)
+   */
+  async confirmHotRollingAllocation(tx: Tx, input: { productionPlanId: number; lotId: number; slabItemId: number; salesOrderId: number | null; actor: Actor }): Promise<AllocationView> {
+    await this.repository.ensureInventory(tx, input.slabItemId);
+    await this.repository.lockInventory(tx, input.slabItemId);
+    await this.assertAllocatableLot(tx, input.lotId, input.slabItemId);
+    if (!(await this.repository.allocateRollingQty(tx, input.slabItemId))) {
+      throw new AppException('INV-001', '판매 예약을 빼면 열연에 배정할 수 있는 합격 슬래브가 없어요');
+    }
+    const allocation = await this.repository.createHotRollingAllocation(tx, input.lotId, input.productionPlanId);
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.ALLOCATION_CONFIRMED,
+      actor: input.actor,
+      target: { table: 'allocation', id: allocation.id },
+      salesOrderId: input.salesOrderId,
+      lotIds: [input.lotId],
+      after: allocationSnapshot(allocation),
+    });
+    return toAllocationView(allocation);
+  }
+
+  /** 열연 배정 해제(newLotId 없음) 또는 변경(기존 해제 + 새 LOT 확정을 같은 tx에서, ALLOCATION_CHANGED). 소진된 배정은 바꿀 수 없다 (INV-004) */
+  async releaseHotRollingAllocation(tx: Tx, input: { allocationId: number; productionPlanId: number; slabItemId: number; salesOrderId: number | null; newLotId?: number; reason?: string; actor: Actor }): Promise<AllocationView> {
+    const found = await this.repository.findAllocation(tx, input.allocationId);
+    if (!found || found.allocationPurpose !== ALLOCATION_PURPOSE.HOT_ROLLING || found.productionPlanId !== input.productionPlanId) {
+      throw new AppException('COM-003', '이 계획의 열연 배정을 찾을 수 없어요');
+    }
+    await this.repository.lockInventory(tx, input.slabItemId);
+    const allocation = (await this.repository.findAllocation(tx, input.allocationId)) ?? found;
+    if (allocation.allocationStatus === ALLOCATION_STATUS.CONSUMED) throw new AppException('INV-004', '열연에 투입한 배정은 바꿀 수 없어요');
+    if (allocation.allocationStatus === ALLOCATION_STATUS.RELEASED) throw new AppException('COM-001', '이미 해제된 배정이에요');
+    if (input.newLotId === allocation.lotId) throw new AppException('COM-004', '지금 배정된 LOT과 같은 LOT이에요');
+
+    const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
+    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, 1);
+    if (input.newLotId === undefined) {
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED,
+        actor: input.actor,
+        target: { table: 'allocation', id: allocation.id },
+        salesOrderId: input.salesOrderId,
+        lotIds: [allocation.lotId],
+        before: allocationSnapshot(allocation),
+        after: allocationSnapshot(released),
+        reason: input.reason ?? null,
+      });
+      return toAllocationView(released);
+    }
+    await this.assertAllocatableLot(tx, input.newLotId, input.slabItemId);
+    if (!(await this.repository.allocateRollingQty(tx, input.slabItemId))) {
+      throw new AppException('INV-001', '판매 예약을 빼면 열연에 배정할 수 있는 합격 슬래브가 없어요');
+    }
+    const created = await this.repository.createHotRollingAllocation(tx, input.newLotId, input.productionPlanId);
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.ALLOCATION_CHANGED,
+      actor: input.actor,
+      target: { table: 'allocation', id: created.id },
+      salesOrderId: input.salesOrderId,
+      lotIds: [allocation.lotId, input.newLotId],
+      before: allocationSnapshot(allocation),
+      after: allocationSnapshot(created),
+      reason: `ALLOCATION_CHANGE: ${allocation.lot.lotNo} → ${created.lot.lotNo}${input.reason ? ` · ${input.reason}` : ''}`,
+    });
+    return toAllocationView(created);
+  }
+
+  /**
+   * 열연 투입: 확정 배정을 소진(CONSUMED)하고 rolling −n, 현재고를 적격 재고 LOT 수로 다시 맞춘다 (on_hand −n).
+   * 슬래브 LOT을 투입 소진(CONSUMED)으로 바꾼 뒤에 부른다. 소진 기록은 PRODUCTION_RESULT_REGISTERED 작업 로그가 대신한다.
+   */
+  async consumeHotRollingAllocations(tx: Tx, input: { allocationIds: number[]; slabItemId: number }): Promise<void> {
+    await this.repository.lockInventory(tx, input.slabItemId);
+    if (!(await this.repository.consumeConfirmedAllocations(tx, input.allocationIds))) {
+      throw new Error(`소진할 열연 배정 일부가 CONFIRMED가 아닙니다 (배정 ${input.allocationIds.join(',')})`);
+    }
+    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, input.allocationIds.length);
+    await this.repository.setOnHandQty(tx, input.slabItemId, await this.repository.countEligibleAvailableLots(tx, input.slabItemId));
+  }
+
+  /** 계획의 열연 배정 (상태 무관) */
+  async hotRollingAllocationsOfPlan(tx: Tx, productionPlanId: number): Promise<AllocationView[]> {
+    const rows = await this.repository.findAllocations(tx, { allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, productionPlanId });
+    return rows.map(toAllocationView);
+  }
+
   // ── 내부 ──────────────────────────────────────────────
 
   private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)) {

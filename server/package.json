@@ -12,6 +12,7 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
+    "seed:demo": "tsc -p tsconfig.json --outDir node_modules/.cache/seed-demo && node node_modules/.cache/seed-demo/seed/seed-production-demo.js",
     "check-orphans": "node scripts/check-orphans.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
     "test": "node scripts/test.mjs",

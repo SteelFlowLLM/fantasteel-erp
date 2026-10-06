@@ -33,9 +33,9 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
 - 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
-### 서버 연결 (영업 화면만, 선택)
+### 서버 연결 (영업·품질·생산 화면, 선택)
 
-수주·출하요청·출하 배정 화면과 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고)는 실제 서버(`server/`)로 바꿔 볼 수 있다. 기본은 가짜 DB이고, 다른 화면은 서버 모드에서도 가짜 DB를 쓴다.
+수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입)는 실제 서버(`server/`)로 바꿔 볼 수 있다. 기본은 가짜 DB이고, 다른 화면은 서버 모드에서도 가짜 DB를 쓴다.
 
 1. `client/.env.example`을 `client/.env.local`로 복사하고 `NEXT_PUBLIC_DATA_SOURCE=server`로 바꾼다.
 2. `npm run dev`로 DB·서버·화면을 띄운다(이미 떠 있으면 화면 서버만 다시 띄운다).
@@ -44,7 +44,8 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 연결 방식: `api/salesOrders.ts`·`api/shipmentRequests.ts`·`api/dashboard.ts`가 출처에 따라 가짜 DB 또는 `api/server/*.ts`를 부른다. 화면 컴포넌트는 그대로다.
 - 고객사·규격·사원 id는 화면에서 계속 가짜 DB id를 쓰고, 서버와 주고받을 때 코드(고객사 코드·규격 코드)와 이름으로 바꾼다(`api/server/masterIds.ts`). 화면 첫 코일 규격(2.3×1200×1,065,000)은 서버 시드(2.5×1200×980,000)에 없어 서버 모드에서 고를 수 없다.
 - 서버에 아직 없는 기능(수주 상세의 생산 연결·이력, 취소 창의 구매 진행 영향, 업무방, 재생산 계획)은 서버 모드에서 비어 있거나 "서버와 연결되지 않았어요" 오류다.
-- 서버 데이터는 '시드로 초기화'로 되돌아가지 않는다. 서버 DB는 `npm run db:reset`.
+- 서버 데이터는 '시드로 초기화'로 되돌아가지 않는다. 서버 DB는 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
+- 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 서버 모드면 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. LOT 추적 화면은 아직 가짜 DB라 생산 화면에서 LOT 추적으로 가는 링크는 서버 모드에서 맞지 않는다. 가짜 DB에만 있는 값(여재 표시 시각, 배정 확정자)은 비어 있다.
 - 쿠키는 브라우저의 모든 탭이 함께 쓴다. 탭마다 다른 계정을 고르면 요청마다 다시 로그인한다.
 
 ## 3. 폴더 (`client/src/`)

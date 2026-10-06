@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Tx } from '../../prisma/prisma.service';
-import type { DocumentNumberKind } from './number-format';
+import type { DatedLotKind, DocumentNumberKind } from './number-format';
 
 /** 같은 앞부분으로 시작하는 번호 중 가장 큰 값. 순번이 0으로 채워진 고정 자리수라 문자열 정렬이 곧 순번 순서다. */
 @Injectable()
@@ -24,8 +24,12 @@ export class NumberingRepository {
     }
   }
 
-  async findLastLotNumber(tx: Tx, prefix: string): Promise<string | null> {
-    return (await tx.lot.findFirst({ where: { lotNo: { startsWith: prefix } }, orderBy: { lotNo: 'desc' }, select: { lotNo: true } }))?.lotNo ?? null;
+  /**
+   * LOT 유형도 함께 거른다: 슬래브 번호(히트번호-SS)가 히트 번호로 시작해서 앞부분만 보면
+   * 같은 날 두 번째 히트를 채번할 때 슬래브 번호(…-001-10)를 최댓값으로 잡는다.
+   */
+  async findLastLotNumber(tx: Tx, prefix: string, lotType: DatedLotKind): Promise<string | null> {
+    return (await tx.lot.findFirst({ where: { lotNo: { startsWith: prefix }, lotType }, orderBy: { lotNo: 'desc' }, select: { lotNo: true } }))?.lotNo ?? null;
   }
 
   countMillSheets(tx: Tx, shipmentRequestId: number): Promise<number> {

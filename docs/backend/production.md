@@ -149,3 +149,47 @@
 | 수주 등록 중 MST-001 | 라우팅이 없으면 수주 등록 전체가 실패한다. 의도인지 확인 | [04] BP-PRD-01 |
 | 계획 수동 생성 | 초안 행 "생산계획 생성(수동)"은 "확인 필요"로 남아 있다. v1 행은 재생산 전용 | [CSV] |
 | 권한 표시명 | `PERMISSION_LABEL.PRODUCTION_RESULT_CONFIRM` = "공정 실적(…)"(06 그대로), 권한표·용어 사전은 "작업 실적". 06 표시명 수정 필요 | `shared/src/codes/index.ts`, [권한표] 6장, [03] TRM-047 |
+
+## 9. 구현 메모 (2026-10-06)
+
+**API** (전역 prefix `/api/v1` 제외). 명세서에 없어 추가한 것은 ➕.
+
+| Method | Path | 권한 | 내용 |
+| --- | --- | --- | --- |
+| GET | `production-plans` | PLAN VIEW | 목록. 필터 `productionPlanStatus`·`itemType`·`salesOrderId`·`isReproduction`, 페이징 |
+| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단 |
+| POST | `production-plans` | PLAN USE | 재생산 계획 `{ salesOrderItemId }` |
+| POST | `production-plans/:id/heat-preview` | PLAN USE | 편성 계산(저장 안 함) |
+| POST | `production-plans/:id/confirm` | PLAN USE | PLANNED에서 히트 수를 지금 기준정보로 다시 계산해 저장. 이벤트 없음(06에 없음) |
+| POST | `production-plans/:id/cancel` | PLAN USE | PLANNED만, `{ reason? }` |
+| GET ➕ | `production-plans/:id/work-context` | RESULT VIEW | 실적 입력 기준값(수율·히트 용량·용선/원료 잔량·연주 전 히트·작업 중 실적) |
+| GET | `production-results`, `production-results/:id` | RESULT VIEW | 작업 실적(투입·산출 LOT, 작업자) |
+| POST | `production-results` | RESULT USE | `completedAt`이 없으면 작업 시작만, 있으면 시작·완료를 한 번에 |
+| POST ➕ | `production-results/:id/complete` | RESULT USE | 작업 시작한 실적 완료(초안 행 API-101) |
+| POST | `production-plans/:id/simulate-results` | RESULT USE | 실적 시뮬레이션 `{ randomSeed? }` |
+| GET ➕ | `production-plans/:id/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 화면(필요 매수·슬래브 재고·FIFO 후보·배정·코일) |
+| POST ➕ | `production-plans/:id/hot-rolling/recommend` | HOT_ROLLING USE | FIFO 추천(ALLOCATION_RECOMMENDED만) |
+| POST | `production-plans/:id/hot-rolling/allocations` | HOT_ROLLING USE | 배정 확정 `{ lotIds }` (초안 행 API-103을 v1 경로로) |
+| POST ➕ | `production-plans/:id/hot-rolling/allocations/:allocationId/release` | HOT_ROLLING USE | 해제 또는 변경 `{ newLotId?, reason? }` |
+
+공정별 입력: 제선 `blastFurnaceCode`·`hotMetalTon`(계획은 선택), 제강 `converterCode`·`inputHotMetalTon`, 연주 `heatLotId`·`slabQty`, 열연 `allocationIds?`(없으면 그 계획의 확정 배정 전부).
+
+**8장 🟡에 대해 정한 값** (사용자 결정 2026-10-06 포함)
+
+| 항목 | 정한 값 |
+| --- | --- |
+| 작업 시작 분리 | 나눈다. 시작 = 완료 시각 없는 실적 + PRODUCTION_STARTED, 완료 = PRODUCTION_RESULT_REGISTERED |
+| 히트 편성 확정 | PLANNED에서 히트 수 재계산·저장 (사용자 결정) |
+| 계획 슬래브 매수 | 히트당 = floor(히트 용량 × 연주 수율 ÷ 슬래브 1매 이론중량), 계획 = 히트당 × 히트 수. 연주 실적 최대 매수는 그 히트의 실제 톤으로 같은 식 |
+| 히트 톤 (`initial_ton`) | 투입 용선 × 제강 수율 |
+| COMPLETED | 생산 완료 기준(사용자 결정): 작업 중 실적이 없고 편성 히트를 모두 연주. 수주에 연결된 코일 계획은 쓸 수 있는 코일 ≥ 부족 매수이거나 더 열연할 슬래브·배정이 없을 때. 검사는 기다리지 않는다 |
+| 원료 부족 오류 | INV-001, 문구에 원료별 부족 톤 |
+| 그 밖의 상태 충돌 | COM-001 (예: 진행중 계획 취소, 작업 중 실적이 있는데 새로 시작, 편성 히트를 다 만든 뒤 제강) |
+| 시뮬레이션 | 주체 USER. 연주의 샘플 손실률은 `simulated_loss_rate`, 시드·손실 매수·실제 감소율은 작업 로그 `after_data`. 검사는 하지 않는다. 고로·전로 BF2·BOF1, 공정 시간 4·1·2·2시간(가정값) |
+| 재생산 전 여재 | 재생산 계획을 만들 때 여재(예약 가용)를 먼저 예약하고 남은 매수만 계획 |
+| 제선과 계획 | 실적은 ERD대로 `production_plan_id = null`. 어느 계획 때문에 했는지는 작업 로그(`productionPlanId`)에 남기고 그 계획은 진행중이 된다 |
+| 연주 시작 히트 | ERD에 칸이 없어 PRODUCTION_STARTED `after_data.heatLotId`에 남기고 완료 때 같은 히트인지 본다 |
+
+**다른 모듈에 넣은 것**: inventory에 열연 배정 함수(`hotRollingCandidates`, `confirmHotRollingAllocation`, `releaseHotRollingAllocation`, `consumeHotRollingAllocations`, `hotRollingAllocationsOfPlan`)와 TypedSQL `allocateRollingQty.sql`. 공통 채번(`numbering.repository`)은 LOT 유형도 함께 거르도록 고쳤다(같은 날 두 번째 히트가 슬래브 번호를 최댓값으로 잡던 문제).
+
+**수주 담당 확인 필요**: 수주 충족 계산의 `planRemainingTargetQty`는 완료 계획을 0으로 본다. 생산 완료 기준이라 완료 계획에도 검사 대기 제품이 있을 수 있어, 생산 쪽 재생산 판단(`plan-progress.calculator.ts` `planOpenRemainingQty`)은 완료 계획의 판정 대기분을 남긴다. 같은 식으로 맞추면 수주 화면의 "재생산 필요"도 검사 중에 뜨지 않는다.

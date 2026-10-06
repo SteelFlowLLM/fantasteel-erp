@@ -44,3 +44,9 @@ export class CancelProductionPlanDto {
   @MaxLength(200, { message: '사유는 200자까지 쓸 수 있어요' })
   reason?: string;
 }
+
+export class CreateReproductionPlanDto {
+  @IsInt({ message: '수주 품목 id는 정수여야 해요' })
+  @Min(1, { message: '수주 품목 id는 1 이상이어야 해요' })
+  salesOrderItemId!: number;
+}
