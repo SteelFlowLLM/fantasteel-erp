@@ -252,7 +252,10 @@ export class ProductionService {
       this.repository.countConfirmedRollingByPlans(tx, [id]),
       this.repository.findPlanEvents(tx, id),
     ]);
-    const resultEvents = await this.results.findResultEvents(tx, resultRows.map((r) => r.id));
+    // 제선 실적은 계획에 묶이지 않지만 이 계획 때문에 한 것(작업 로그)은 함께 보인다
+    const ironmakingRows = await this.results.findResultsByIds(tx, await this.results.findIronmakingResultIdsOfPlan(tx, id));
+    const allResultRows = [...resultRows, ...ironmakingRows].sort((a, b) => b.id - a.id);
+    const resultEvents = await this.results.findResultEvents(tx, allResultRows.map((r) => r.id));
     let formation: HeatFormation | null = null;
     let formationError: string | null = null;
     try {
@@ -283,7 +286,7 @@ export class ProductionService {
       reproduction: plan.salesOrderItemId === null ? null : await this.reproductionCheck(tx, plan.salesOrderItemId),
       canCancel: planned,
       canConfirm: planned,
-      results: resultRows.map((r) => toResultView(r, resultEvents)).reverse(),
+      results: allResultRows.map((r) => toResultView(r, resultEvents)).reverse(),
       heats: planHeatsOf(plan.heatCount, lots),
       createdEmployeeName: created?.actorEmployee?.employeeName ?? null,
       cancelledAt: plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.CANCELLED ? (cancelled?.createdAt.toISOString() ?? plan.updatedAt.toISOString()) : null,

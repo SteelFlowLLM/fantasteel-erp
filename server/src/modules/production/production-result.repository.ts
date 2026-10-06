@@ -25,7 +25,7 @@ export const resultViewSelect = {
       item: { select: { itemCode: true, theoreticalWeightTon: true } },
       lotRelationsAsChildLot: {
         orderBy: { id: 'asc' },
-        select: { inputTon: true, parentLot: { select: { id: true, lotNo: true, lotType: true, item: { select: { itemCode: true } } } } },
+        select: { inputTon: true, parentLot: { select: { id: true, lotNo: true, lotType: true, initialTon: true, item: { select: { itemCode: true, theoreticalWeightTon: true } } } } },
       },
     },
   },
@@ -112,6 +112,22 @@ export class ProductionResultRepository {
 
   countResults(tx: Tx, filter: ResultListFilter) {
     return tx.productionResult.count({ where: { productionPlanId: filter.productionPlanId, processType: filter.processType } });
+  }
+
+  /** 이 계획 때문에 한 제선 실적: 제선은 계획에 묶이지 않아 작업 시작 로그(after_data.productionPlanId)로 찾는다 */
+  async findIronmakingResultIdsOfPlan(tx: Tx, productionPlanId: number): Promise<number[]> {
+    const events = await tx.businessEvent.findMany({
+      where: { targetType: 'production_result', businessEventType: BUSINESS_EVENT_TYPE.PRODUCTION_STARTED, afterData: { path: ['productionPlanId'], equals: productionPlanId } },
+      select: { targetId: true },
+    });
+    if (events.length === 0) return [];
+    const rows = await tx.productionResult.findMany({ where: { id: { in: events.map((e) => e.targetId) }, processType: 'IRONMAKING' }, select: { id: true } });
+    return rows.map((r) => r.id);
+  }
+
+  findResultsByIds(tx: Tx, ids: number[]) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return tx.productionResult.findMany({ where: { id: { in: ids } }, select: resultViewSelect, orderBy: { id: 'desc' } });
   }
 
   findResultView(tx: Tx, id: number) {

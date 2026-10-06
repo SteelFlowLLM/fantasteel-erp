@@ -1,4 +1,4 @@
-import { BUSINESS_EVENT_TYPE, LOT_TYPE, calcWeightTon, sumTon, type LotType, type ProcessType, type ProductionResultView, type ResultInputLot } from '@fantasteel/shared';
+import { BUSINESS_EVENT_TYPE, LOT_TYPE, PROCESS_TYPE, calcWeightTon, sumTon, type LotType, type ProcessType, type ProductionResultView, type ResultInputLot } from '@fantasteel/shared';
 import type { ResultViewRow } from './production-result.repository';
 
 export interface ResultEventRow {
@@ -32,7 +32,11 @@ export function toResultView(r: ResultViewRow, events: readonly ResultEventRow[]
   for (const lot of r.lots) {
     for (const rel of lot.lotRelationsAsChildLot) {
       const prev = inputs.get(rel.parentLot.id);
-      const ton = rel.inputTon?.toFixed(3) ?? null;
+      // 관계에 차감 톤이 없는 투입(히트→슬래브, 슬래브→코일)은 투입 LOT의 톤(히트 톤·슬래브 이론중량)을 쓴다
+      const ton =
+        rel.inputTon?.toFixed(3) ??
+        (rel.parentLot.lotType === LOT_TYPE.HEAT ? (rel.parentLot.initialTon?.toFixed(3) ?? null) : rel.parentLot.lotType === LOT_TYPE.SLAB ? (rel.parentLot.item?.theoreticalWeightTon?.toFixed(3) ?? null) : null);
+      if (prev && rel.inputTon === null) continue;
       inputs.set(rel.parentLot.id, {
         lotId: rel.parentLot.id,
         lotNo: rel.parentLot.lotNo,
@@ -45,7 +49,9 @@ export function toResultView(r: ResultViewRow, events: readonly ResultEventRow[]
   const products = r.lots.filter((l) => isProduct(l.lotType));
   const tons = r.lots.filter((l) => !isProduct(l.lotType)).map((l) => l.initialTon?.toFixed(3) ?? '0');
   const productTons = products.map((l) => calcWeightTon(1, l.item?.theoreticalWeightTon?.toFixed(3) ?? '0'));
-  const inputTons = [...inputs.values()].flatMap((i) => (i.inputTon ? [i.inputTon] : []));
+  // 투입 톤은 공정의 주 투입만: 제선 원료, 제강 용선(합금철 제외), 연주 히트, 열연 슬래브
+  const mainInputs = [...inputs.values()].filter((i) => r.processType !== PROCESS_TYPE.STEELMAKING || i.lotType === LOT_TYPE.HOT_METAL);
+  const inputTons = mainInputs.flatMap((i) => (i.inputTon ? [i.inputTon] : []));
   const mine = events.filter((e) => e.targetId === r.id);
   return {
     id: r.id,

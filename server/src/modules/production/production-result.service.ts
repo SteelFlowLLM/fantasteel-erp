@@ -136,7 +136,9 @@ export class ProductionResultService {
     });
     const ironmaking = consumptions.filter((c) => c.steelGradeId === null && c.rawMaterialItem.rawMaterialType !== RAW_MATERIAL_TYPE.FERROALLOY);
     const ferroalloys = consumptions.filter((c) => c.steelGradeId !== null && c.steelGradeId === basis.steelGradeId);
-    const open = [...ironOpen, ...planOpen];
+    // 제선 실적은 계획에 묶이지 않아, 작업 시작 로그에 이 계획을 남긴 제선만 보인다
+    const ironEvents = await this.repository.findResultEvents(tx, ironOpen.map((o) => o.id));
+    const open = [...ironOpen.filter((o) => this.planIdOfStart(ironEvents.filter((e) => e.targetId === o.id)) === productionPlanId), ...planOpen];
     const events = await this.repository.findResultEvents(tx, open.map((o) => o.id));
     const hotMetalAvailable = hotMetalLots.reduce((sum, l) => sum.add(l.remainingTon ?? '0'), new Prisma.Decimal(0));
     return {

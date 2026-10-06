@@ -168,7 +168,8 @@ describe('14.1 슬래브 4매: 제선 → 제강 → 연주', () => {
     const detail = await production.getPlanDetail(planId);
     expect(detail).toMatchObject({ productionPlanStatus: 'COMPLETED', canCancel: false });
     expect(detail.progress).toMatchObject({ madeHeatQty: 1, castHeatQty: 1, slabQty: 10, pendingQty: 10, openWorkCount: 0 });
-    expect(detail.results.map((r) => r.processType)).toEqual(['STEELMAKING', 'CONTINUOUS_CASTING']);
+    // 제선은 계획에 묶이지 않지만 이 계획 때문에 한 것(작업 시작 로그)은 상세에 함께 보인다
+    expect(detail.results.map((r) => r.processType)).toEqual(['IRONMAKING', 'STEELMAKING', 'CONTINUOUS_CASTING']);
     // 완료 계획이라도 판정 대기 슬래브가 남아 재생산이 필요하다고 보지 않는다
     expect(detail.reproduction).toMatchObject({ openPlanRemainingQty: 4, additionalPlanQty: 0 });
     expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: at('10:00') }))).toBe('COM-001');
