@@ -21,6 +21,8 @@
   --color-brand: #173a5e;
   --color-brand-hover: #0f2b47;
   --color-brand-tint: #e7eef5;
+  /* 선택된 목록 항목에 마우스를 올렸을 때: 선택색보다 한 단계 진하게 */
+  --color-brand-tint-hover: #d3e1ee;
   --color-on-brand: #ffffff;
   --color-nav-dark: #16202b;
   --color-nav-dark-2: #223040;

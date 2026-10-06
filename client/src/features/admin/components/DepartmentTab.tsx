@@ -63,7 +63,7 @@ export function DepartmentTab({ canEdit }: { canEdit: boolean }) {
                           className={cn(
                             'flex w-full flex-col gap-0.5 py-2 pr-4 text-left',
                             INDENT[Math.min(d.depth, INDENT.length - 1)],
-                            isSelected ? 'bg-brand-tint' : 'hover:bg-surface-2',
+                            isSelected ? 'bg-brand-tint hover:bg-brand-tint-hover' : 'hover:bg-surface-2',
                           )}
                         >
                           <span className="flex w-full items-center gap-2">

@@ -17,7 +17,7 @@ export function MasterListItem({ active, onPick, children }: { active: boolean; 
       }}
       className={cn(
         'flex flex-col gap-1 border-b border-line px-4 py-2.5 text-sm outline-none hover:bg-surface-2 focus-visible:bg-surface-2',
-        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
       )}
     >
       {children}

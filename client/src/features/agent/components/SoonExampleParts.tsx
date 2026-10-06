@@ -150,7 +150,7 @@ export function MasterItem({ active, muted, className, children }: { active?: bo
     <div
       className={cn(
         'flex flex-col gap-1 border-b border-line px-4 py-2.5',
-        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)]',
+        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
         muted && 'opacity-70',
         className,
       )}

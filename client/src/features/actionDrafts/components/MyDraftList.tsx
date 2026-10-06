@@ -71,7 +71,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
                     aria-current={draft.id === activeId ? 'page' : undefined}
                     className={cn(
                       'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2',
-                      draft.id === activeId && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+                      draft.id === activeId && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
                     )}
                   >
                     <span className="flex items-center gap-2">

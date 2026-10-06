@@ -115,7 +115,7 @@ export function InspectionStandardScreen() {
                         onClick={() => navigate({ process: processType, grade: steelGradeId, id: s.id })}
                         className={cn(
                           'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
-                          active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+                          active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
                         )}
                       >
                         <span className="flex items-center gap-2">

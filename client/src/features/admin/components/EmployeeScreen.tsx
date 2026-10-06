@@ -121,7 +121,7 @@ export function EmployeeScreen() {
                   type="button"
                   aria-current={isSelected || undefined}
                   onClick={() => setSelectedId(employee.id)}
-                  className={cn('flex w-full flex-col gap-0.5 px-4 py-2 text-left', isSelected ? 'bg-brand-tint' : 'hover:bg-surface-2')}
+                  className={cn('flex w-full flex-col gap-0.5 px-4 py-2 text-left', isSelected ? 'bg-brand-tint hover:bg-brand-tint-hover' : 'hover:bg-surface-2')}
                 >
                   <span className="flex w-full items-center gap-2">
                     <Avatar name={employee.employeeName} size="sm" tone={employee.isActive ? 'brand' : 'neutral'} />

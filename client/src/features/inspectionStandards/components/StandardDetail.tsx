@@ -189,7 +189,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                     type="button"
                     aria-current={v.id === view.id || undefined}
                     onClick={() => onSelectVersion(v.id)}
-                    className={cn('flex w-full items-center gap-2 border-b border-line px-4 py-2 text-left text-sm last:border-b-0 hover:bg-surface-2', v.id === view.id && 'bg-brand-tint hover:bg-brand-tint')}
+                    className={cn('flex w-full items-center gap-2 border-b border-line px-4 py-2 text-left text-sm last:border-b-0 hover:bg-surface-2', v.id === view.id && 'bg-brand-tint hover:bg-brand-tint-hover')}
                   >
                     <span className="font-mono font-semibold">v{v.version}</span>
                     <span className="text-cap text-ink-3">

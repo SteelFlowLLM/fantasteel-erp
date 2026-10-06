@@ -174,7 +174,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
                 event.preventDefault();
                 insertMention(target);
               }}
-              className={cn('flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-surface-2', index === activeIndex && 'bg-brand-tint')}
+              className={cn('flex items-center gap-2 px-3 py-1.5 text-left text-sm', index === activeIndex ? 'bg-brand-tint hover:bg-brand-tint-hover' : 'hover:bg-surface-2')}
             >
               <Icon name={target.kind === 'department' ? 'users' : 'user'} size="sm" className="text-ink-3" />
               {target.name}

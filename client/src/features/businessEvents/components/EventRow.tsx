@@ -108,7 +108,7 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
           }}
           className={cn(
             'flex min-h-7 min-w-0 cursor-pointer items-center gap-2 rounded-xs text-sm hover:bg-surface-2',
-            open && 'min-h-9 rounded-none bg-brand-tint px-2 hover:bg-brand-tint',
+            open && 'min-h-9 rounded-none bg-brand-tint px-2 hover:bg-brand-tint-hover',
           )}
         >
           <time className="w-[38px] flex-none text-xs text-ink-3 tabular-nums" dateTime={event.occurredAt}>

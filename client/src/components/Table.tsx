@@ -17,7 +17,7 @@ export function Table({ compact, className, children }: TableProps) {
     <table
       className={cn(
         'w-full border-collapse text-sm tabular-nums',
-        '[&_tbody_tr:hover_td]:bg-surface-2 [&_tr[data-selected=true]_td]:bg-brand-tint [&_tr[data-risk=true]_td]:bg-[#fff7f6] [&_tr[data-muted=true]_td]:text-ink-3',
+        '[&_tbody_tr:hover_td]:bg-surface-2 [&_tr[data-selected=true]_td]:bg-brand-tint [&_tbody_tr[data-selected=true]:hover_td]:bg-brand-tint-hover [&_tr[data-risk=true]_td]:bg-[#fff7f6] [&_tr[data-muted=true]_td]:text-ink-3',
         '[&_tfoot_td]:border-b-0 [&_tfoot_td]:bg-surface-2 [&_tfoot_td]:font-semibold',
         compact && '[&_td]:h-8',
         className,

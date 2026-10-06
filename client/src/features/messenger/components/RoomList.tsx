@@ -107,7 +107,7 @@ function RoomRow({ room, active, showType, onSelect }: { room: ChatRoomListItem;
       type="button"
       aria-current={active ? 'true' : undefined}
       onClick={() => onSelect(room.id)}
-      className={cn('flex w-full gap-2.5 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2', active && 'bg-brand-tint hover:bg-brand-tint')}
+      className={cn('flex w-full gap-2.5 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2', active && 'bg-brand-tint hover:bg-brand-tint-hover')}
     >
       <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
