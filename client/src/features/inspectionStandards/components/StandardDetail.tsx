@@ -158,7 +158,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
             </Table>
             {view.items.length === 0 ? <EmptyNote>검사 항목이 없어요</EmptyNote> : null}
           </div>
-          <p className="border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-4 text-ink-3">
+          <p className="border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-normal text-ink-3">
             최소·최대는 경계값을 포함해 판정해요(이상·이하) · 적용 두께 구간은 &lsquo;초과 ~ 이하&rsquo;로 고르고, 비어 있으면 모든 두께에 적용해요 · 필수 항목 값이 없거나 기준이
             없으면 판정 대기로 남아요 · 바꾸면 새 버전이 생기고 이전 버전은 그대로 남아요
           </p>
@@ -178,7 +178,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                 ]}
               />
             </div>
-            {process ? <p className="border-t border-line px-4 py-2.5 text-cap leading-4 text-ink-2">{PROCESS_NOTE[process]}</p> : null}
+            {process ? <p className="border-t border-line px-4 py-2.5 text-cap leading-normal text-ink-2">{PROCESS_NOTE[process]}</p> : null}
           </Card>
           <Card>
             <CardHead title="버전" meta={`${view.versions.length}개`} />

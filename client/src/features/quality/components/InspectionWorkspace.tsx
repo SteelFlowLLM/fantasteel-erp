@@ -115,7 +115,7 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
           <QueueItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
         {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
-        <Banner className="mx-4 my-3.5 text-xs leading-[17px]" icon="info">
+        <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
           제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
         </Banner>
       </MasterPane>

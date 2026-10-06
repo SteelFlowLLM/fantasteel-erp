@@ -20,7 +20,7 @@ const TABLE = 'w-full border-collapse border border-line-strong text-xs tabular-
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1.5 break-inside-avoid">
-      <b className="text-[12.5px]">{title}</b>
+      <b className="text-sm">{title}</b>
       <div className="overflow-x-auto print:overflow-visible">{children}</div>
     </section>
   );
@@ -136,7 +136,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
         </dl>
       </header>
 
-      <dl className="grid grid-cols-[repeat(3,max-content_minmax(0,1fr))] gap-x-4 gap-y-1.5 text-[12.5px]">
+      <dl className="grid grid-cols-[repeat(3,max-content_minmax(0,1fr))] gap-x-4 gap-y-1.5 text-sm">
         <dt className="text-ink-3">고객사</dt>
         <dd>
           {s.customer.customerName} <span className="font-mono text-ink-3">{s.customer.customerCode}</span>

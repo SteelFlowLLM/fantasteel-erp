@@ -90,5 +90,5 @@ export function MasterGroupTitle({ title, meta, actions }: { title: ReactNode; m
 
 /** 목록 칸 아래 안내 */
 export function MasterNote({ children }: { children: ReactNode }) {
-  return <p className="px-4 py-3 text-cap leading-4 text-ink-3">{children}</p>;
+  return <p className="px-4 py-3 text-cap leading-normal text-ink-3">{children}</p>;
 }

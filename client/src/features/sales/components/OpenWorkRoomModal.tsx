@@ -132,7 +132,7 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
         </>
       }
     >
-      <p className="text-sm leading-5 text-ink-2">
+      <p className="text-sm leading-normal text-ink-2">
         {hasRoom
           ? '이 수주의 업무방이 이미 있어요. 더할 사람을 고르면 함께 들어가요.'
           : '이 수주와 연결된 업무방을 만들어요. 함께할 사람을 조직도에서 골라 주세요. 연 사람은 늘 들어가요.'}

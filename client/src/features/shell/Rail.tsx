@@ -34,6 +34,7 @@ export function Rail() {
         const isActive = entry.href === active;
         const badge = entry.badge ? badges[entry.badge] : 0;
         const hint = entry.soon ? `${entry.label} · ${soonLabel(entry.soon)}` : entry.label;
+        // 레일은 너비가 60px로 고정이라 글자 크기 설정을 12px까지만 따른다. 더 크면 'Factory' 같은 단어가 넘친다.
         return (
           <Link
             key={entry.href}
@@ -42,7 +43,7 @@ export function Rail() {
             aria-label={entry.soon ? hint : undefined}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
-              'relative flex w-[60px] flex-none flex-col items-center gap-[3px] rounded-md pt-[7px] pb-1.5 text-center text-2xs font-medium break-keep [&_.ic]:size-5',
+              'relative flex w-[60px] flex-none flex-col items-center gap-[3px] rounded-md pt-[7px] pb-1.5 text-center text-[length:min(var(--text-2xs),12px)] leading-tight font-medium break-keep [&_.ic]:size-5',
               isActive ? 'bg-nav-dark-2 text-white [&_.ic]:text-[#8fb4e0]' : 'text-nav-ink hover:bg-nav-dark-2',
             )}
           >

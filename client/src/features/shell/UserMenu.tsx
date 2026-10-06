@@ -1,7 +1,7 @@
 'use client';
 
-// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 계정 바꾸기, 시드로 초기화
-import { useState } from 'react';
+// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기, 시드로 초기화
+import { useEffect, useState } from 'react';
 import { ROLE_LABEL } from '@/codes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
@@ -10,6 +10,8 @@ import { PopHead, PopItem, PopPanel } from '@/features/shell/PopPanel';
 import { useMe } from '@/hooks/useMe';
 import { usePopover } from '@/hooks/usePopover';
 import { useResetToSeed } from '@/hooks/useResetToSeed';
+import { cn } from '@/lib/cn';
+import { FONT_SIZES, FONT_SIZE_LABEL } from '@/lib/fontSize';
 import { isDepartmentHead } from '@/lib/permissions';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useShellStore } from '@/stores/useShellStore';
@@ -19,10 +21,17 @@ export function UserMenu() {
   const popover = usePopover<HTMLDivElement>();
   const signOut = useSessionStore((state) => state.signOut);
   const closeAiPanel = useShellStore((state) => state.closeAiPanel);
+  const fontSize = useShellStore((state) => state.fontSize);
+  const setFontSize = useShellStore((state) => state.setFontSize);
+  const hydrateFontSize = useShellStore((state) => state.hydrateFontSize);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const reset = useResetToSeed(() => setConfirmingReset(false));
   const isHead = isDepartmentHead(me);
   const headTitle = isHead ? `${me.headDepartmentNames.join('·')} 부서장 · 구매요청 승인권자` : undefined;
+
+  useEffect(() => {
+    hydrateFontSize();
+  }, [hydrateFontSize]);
 
   const switchAccount = () => {
     popover.setOpen(false);
@@ -41,7 +50,7 @@ export function UserMenu() {
         onClick={() => popover.setOpen(!popover.open)}
         className="ml-2 flex h-10 items-center gap-2 border-l border-line pr-2 pl-3 text-left hover:bg-surface-2"
       >
-        <span className="flex flex-col leading-[15px]">
+        <span className="flex flex-col leading-tight">
           <span className="flex items-center gap-1.5">
             <b className="text-sm font-semibold">{me.employeeName}</b>
             {isHead ? (
@@ -73,6 +82,26 @@ export function UserMenu() {
             </span>
             {isHead ? <span className="text-cap text-ink-3">{me.headDepartmentNames.join('·')} 부서장 (구매요청 승인권자)</span> : null}
           </PopHead>
+          <div role="group" aria-label="글자 크기" className="flex flex-col gap-1.5 border-b border-line px-3.5 py-2.5">
+            <span className="text-cap text-ink-3">글자 크기</span>
+            <div className="grid grid-cols-3 gap-1">
+              {FONT_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={fontSize === size}
+                  onClick={() => setFontSize(size)}
+                  className={cn(
+                    'min-h-8 rounded-sm border px-1 text-sm',
+                    fontSize === size ? 'border-brand bg-brand-tint font-semibold text-brand' : 'border-line bg-surface text-ink-2 hover:bg-surface-2',
+                  )}
+                >
+                  {FONT_SIZE_LABEL[size]}
+                </button>
+              ))}
+            </div>
+          </div>
           <PopItem role="menuitem" centered onClick={switchAccount}>
             <Icon name="users" className="text-ink-3" />
             계정 바꾸기

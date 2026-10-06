@@ -48,7 +48,7 @@ const EXAMPLE_ANSWER = {
 };
 
 const QUESTION_CHIP =
-  'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-ai-line bg-ai-bg px-2.5 py-1 text-left text-xs leading-4 font-medium text-ai-strong';
+  'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-ai-line bg-ai-bg px-2.5 py-1 text-left text-xs leading-snug font-medium text-ai-strong';
 
 export function AiPanel() {
   const me = useMe();
@@ -72,7 +72,7 @@ export function AiPanel() {
           <span>AI 어시스턴트는 2등급(P2) 기능이라 아직 답하지 않아요. 1등급 기능이 끝난 뒤 추가돼요.</span>
         </SoonBanner>
         <div aria-hidden="true" className="flex flex-col gap-2 opacity-70">
-          <p className="text-cap leading-[18px] text-ink-3">
+          <p className="text-cap leading-relaxed text-ink-3">
             용어·절차를 설명하고, 내 권한({roleLabel}) 범위의 데이터를 조회해 출처와 함께 답해요. AI는 조회와 초안만 만들고, 실행은 사람이 확정해요.
           </p>
           <span className="inline-flex items-center gap-1.5 self-start rounded-sm border border-line bg-surface-2 px-2 py-1 text-cap text-ink-2">
@@ -105,7 +105,7 @@ export function AiPanel() {
           <div className="flex gap-2">
             <AiMark size="sm" className="mt-0.5" />
             <div className="flex min-w-0 flex-1 flex-col gap-2 rounded-md border border-ai-line bg-surface px-3 py-2.5">
-              <div className="flex flex-col gap-1 text-sm leading-[19px]">
+              <div className="flex flex-col gap-1 text-sm leading-normal">
                 {EXAMPLE_ANSWER.lines.map((line) => (
                   <p key={line}>{line}</p>
                 ))}
@@ -121,7 +121,7 @@ export function AiPanel() {
               </div>
             </div>
           </div>
-          <p className="text-cap leading-[18px] text-ink-3">
+          <p className="text-cap leading-relaxed text-ink-3">
             답에는 늘 출처를 붙여요:{' '}
             {ANSWER_SOURCE_KINDS.map((kind) => kind.label).join(' · ')}. 숫자는 조회 결과로만 답하고, 자료에 없으면 확인할 수 없다고 답해요. 권한 밖
             요청은 담당 역할을 안내해요.
@@ -135,7 +135,7 @@ export function AiPanel() {
             disabled
             placeholder="AI에게 묻기 — 준비 중 (P2)"
             aria-label="AI에게 질문"
-            className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-5 outline-none disabled:cursor-not-allowed"
+            className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-snug outline-none disabled:cursor-not-allowed"
           />
           <div className="flex items-center gap-1 px-1.5 pt-1 pb-1.5">
             <span className="text-cap text-ink-3">Enter 보내기</span>

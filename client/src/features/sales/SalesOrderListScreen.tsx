@@ -72,14 +72,14 @@ function ItemSummary({ row }: { row: SalesOrderListRow }) {
     const line = row.itemLines[0];
     if (!line) return null;
     return (
-      <span className="truncate">
+      <span className="block truncate">
         {line.itemName} {line.orderedQty}
         {qtyUnitOf([line.itemType])}
       </span>
     );
   }
   return (
-    <span className="truncate" title={row.itemLines.map((l) => `${l.itemName} ${l.orderedQty}${qtyUnitOf([l.itemType])}`).join(' + ')}>
+    <span className="block truncate" title={row.itemLines.map((l) => `${l.itemName} ${l.orderedQty}${qtyUnitOf([l.itemType])}`).join(' + ')}>
       {row.itemLines.map((line, index) => (
         <Fragment key={line.lineNo}>
           {index > 0 ? ' + ' : ''}

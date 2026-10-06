@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { IBM_Plex_Mono, IBM_Plex_Sans_KR } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { AppProviders } from '@/features/app/AppProviders';
+import { FONT_SIZE_BOOT_SCRIPT } from '@/lib/fontSize';
 import '@/styles/globals.css';
 
 // B안 글꼴: IBM Plex Sans KR / IBM Plex Mono (빌드할 때 받아서 함께 배포한다)
@@ -27,7 +28,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ko" className={`${plexSans.variable} ${plexMono.variable}`}>
+    // 글자 크기 스크립트가 data-font-size를 먼저 달아서 서버 HTML과 달라진다
+    <html lang="ko" className={`${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: FONT_SIZE_BOOT_SCRIPT }} />
+      </head>
       <body>
         <AppProviders>{children}</AppProviders>
       </body>

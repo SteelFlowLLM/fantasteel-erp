@@ -57,7 +57,7 @@ export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
           </Table>
         </div>
       )}
-      <div className="border-t border-line px-4 py-2.5 text-cap leading-[18px] text-ink-3">
+      <div className="border-t border-line px-4 py-2.5 text-cap leading-relaxed text-ink-3">
         수주 등록 때 합격 재고를 먼저 예약하고, 부족분은 생산·검사 합격 뒤 자동 예약해요. 출고가 확정되면 &lsquo;출고 전환&rsquo;, 수주를 취소하면
         &lsquo;해제&rsquo;가 돼요. 부분 출고는 예약을 둘로 나눠요. 누가 예약했는지는 이력 탭에서 볼 수 있어요.
       </div>

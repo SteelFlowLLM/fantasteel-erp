@@ -330,7 +330,7 @@ function ReceiptWork({
           <CardHead title="원료 LOT" meta="확정할 때 생성" />
           <CardBody>
             <span className="font-mono text-base font-semibold">{rawMaterialLotNoPattern(line.itemCode)}</span>
-            <span className="text-cap leading-4 text-ink-3">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일) · 입고 1건마다 LOT 1개 · 잔량 = 입고 톤</span>
+            <span className="text-cap leading-normal text-ink-3">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일) · 입고 1건마다 LOT 1개 · 잔량 = 입고 톤</span>
           </CardBody>
         </Card>
       </div>

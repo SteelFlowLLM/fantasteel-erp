@@ -88,7 +88,7 @@ export function AccountPicker() {
         <div className="flex items-center gap-3">
           <Logo size={36} />
           <span className="flex flex-col gap-0.5">
-            <span className="text-lg leading-[22px] font-bold tracking-[0.08em]">FANTASTEEL</span>
+            <span className="text-lg leading-snug font-bold tracking-[0.08em]">FANTASTEEL</span>
             <span className="text-xs text-nav-ink">철강 제조 AI 협업 ERP</span>
           </span>
         </div>
@@ -97,7 +97,7 @@ export function AccountPicker() {
             수주에서 출하까지,
             <br />한 흐름으로 일해요.
           </h1>
-          <p className="max-w-[560px] text-base leading-[22px] text-nav-ink">
+          <p className="max-w-[560px] text-base leading-relaxed text-nav-ink">
             영업·구매·생산·품질·물류가 같은 수주와 LOT를 보고 일해요. 재고는 시스템이 먼저 예약하고, LOT 배정은 시스템이 추천한 뒤 담당자가 확정해요.
           </p>
         </div>

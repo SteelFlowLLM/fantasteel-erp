@@ -390,7 +390,7 @@ export function SalesOrderCreateScreen() {
                           <span className="font-medium">
                             {index + 1}. {spec ? spec.itemName : `${ITEM_TYPE_LABEL[line.itemType]} · 규격 미선택`}
                           </span>
-                          {spec ? <span className="font-mono text-[11px] text-ink-3">{spec.itemCode}</span> : null}
+                          {spec ? <span className="font-mono text-cap text-ink-3">{spec.itemCode}</span> : null}
                         </span>
                       </Td>
                       <Td align="right" className="tabular-nums">

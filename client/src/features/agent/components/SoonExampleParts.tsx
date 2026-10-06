@@ -88,7 +88,7 @@ export function SourceList({ label = '근거', items, caption, className }: { la
 /** 원본 연결 줄 (옛 hl-origin) */
 export function OriginLine({ icon, children }: { icon: IconName; children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-xs leading-[17px] text-ink-2">
+    <div className="flex items-start gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-xs leading-snug text-ink-2">
       <Icon name={icon} size="sm" className="mt-px text-ink-3" />
       <span className="min-w-0">{children}</span>
     </div>
@@ -112,7 +112,7 @@ export function EventName({ children }: { children: ReactNode }) {
 /** 'AI 경유' 표시 (TRM-103) */
 export function AiAssistedTag() {
   return (
-    <span className="inline-flex h-4 items-center rounded-xs bg-ai-bg px-1 text-[10px] font-semibold text-ai-strong">AI 경유</span>
+    <span className="inline-flex min-h-4 items-center rounded-xs bg-ai-bg px-1 text-2xs font-semibold text-ai-strong">AI 경유</span>
   );
 }
 
