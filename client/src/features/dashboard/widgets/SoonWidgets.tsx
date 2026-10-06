@@ -7,11 +7,15 @@ import { SoonButton } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Figure, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { useMe } from '@/hooks/useMe';
+import { cn } from '@/lib/cn';
 
-/** 흐린 예시 영역: 눌리지 않고 화면 낭독기에서 숨긴다 */
-function SoonArea({ children }: { children: ReactNode }) {
+/**
+ * 예시 영역: 눌리지 않고 화면 낭독기에서 숨긴다. 기본은 흐리게 그린다.
+ * dim=false면 글씨는 선명하게 두고 비활성 표시는 "준비 중 (P2)"·"예시"·눌리지 않는 버튼으로 한다 (BP-DSH-01 "Agent 영역은 비활성으로 표시")
+ */
+function SoonArea({ children, dim = true }: { children: ReactNode; dim?: boolean }) {
   return (
-    <div aria-hidden="true" inert className="pointer-events-none flex flex-col gap-2.5 px-4 py-3 opacity-[0.62] grayscale-25 select-none">
+    <div aria-hidden="true" inert className={cn('pointer-events-none flex flex-col gap-2.5 px-4 py-3 select-none', dim && 'opacity-[0.62] grayscale-25')}>
       {children}
     </div>
   );
@@ -65,10 +69,12 @@ const AGENT_RISK_EXAMPLE_BY_ROLE: Partial<Record<RoleCode, AgentRiskExample>> = 
 
 export function AgentRiskWidget(props: WidgetProps) {
   const me = useMe();
-  const example = AGENT_RISK_EXAMPLE_BY_ROLE[me.roleCode] ?? RAW_MATERIAL_EXAMPLE;
+  const roleExample = AGENT_RISK_EXAMPLE_BY_ROLE[me.roleCode];
+  const example = roleExample ?? RAW_MATERIAL_EXAMPLE;
   return (
     <WidgetFrame widgetKey="AGENT_RISK" {...props} meta="예시">
-      <SoonArea>
+      {/* 역할에 맞춘 예시(품질)는 읽으라고 둔 것이라 선명하게 */}
+      <SoonArea dim={!roleExample}>
         <div className="flex flex-wrap gap-1">
           {AGENT_RISK_TYPES.map((type) => (
             <Badge key={type} tone={type === example.type ? 'danger' : 'neutral'} plain>
