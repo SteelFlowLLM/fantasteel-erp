@@ -101,6 +101,8 @@ describe('구매요청 등록 (REQ-PUR-001, BP-PUR-01)', () => {
         purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL,
         itemId: oreId,
         itemCode: 'ORE01',
+        defaultSupplierId: expect.any(Number),
+        defaultSupplierName: expect.any(String),
         requestedTon: '120.500',
         desiredReceiptDate: DESIRED,
         requesterId: purchaser.employeeId,
