@@ -68,6 +68,7 @@ const coilDetail: QualityInspectionDetail = {
   inspectorEmployeeName: '서민지',
   inspectedAt: '2026-10-05T03:00:00.000Z',
   updatedAt: '2026-10-05T03:00:00.123Z',
+  lockedMillSheetNos: [],
   items: [{ ...standardItem(11, 'YIELD', null, null), measuredValue: '250.0000', isPassed: false }],
 };
 
@@ -143,6 +144,19 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     expect(detail.currentStandard).toEqual({ id: 31, inspectionStandardCode: 'QS-HR-SS275', version: 2 });
     expect(detail.lot.inspectorName).toBe('서민지');
     expect(detail.items[0]).toMatchObject({ inspectionStandardItemId: 11, measuredValue: '250.0000', isPassed: false });
+    expect(detail).toMatchObject({ locked: false, lockedMillSheetNos: [] });
+  });
+
+  it('밀시트가 발행된 LOT이면 상세를 열 때부터 잠금으로 보인다 (저장 전에 막음)', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+      if (c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
+      if (c.path === '/quality-inspections/90') return ok({ ...coilDetail, lockedMillSheetNos: ['MS-2610-0001-1'] });
+      if (c.path === '/inspection-standards') return ok(page([{ ...standard31 }]));
+      return undefined;
+    });
+    const detail = await inspectionApi.detail(501);
+    expect(detail).toMatchObject({ locked: true, lockedMillSheetNos: ['MS-2610-0001-1'] });
+    expect(detail.lot.locked).toBe(true);
   });
 
   it('LOT이 검사 목록에 없으면 COM-003', async () => {

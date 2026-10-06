@@ -1,6 +1,6 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
-// 서버에 아직 없는 것(연결 수주, 작업 로그, 밀시트 잠금 표시, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
+// 서버에 아직 없는 것(연결 수주, 작업 로그, 목록의 밀시트 잠금 표시, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,
@@ -46,7 +46,7 @@ export async function orEmpty<T>(read: () => Promise<T>, empty: T): Promise<T> {
 /** 목록 행과 상세가 같이 쓰는 LOT 정보 + 검사 행 요약 */
 type InspectedRow = InspectedLotSummary & Pick<QualityInspectionListItem, 'qualityInspectionId' | 'inspectionStandardCode' | 'versionNo' | 'inspectionResult' | 'inspectedAt'>;
 
-function queueRowOf(row: InspectedRow, inspectorName: string | null = null): InspectionQueueRow {
+function queueRowOf(row: InspectedRow, inspectorName: string | null = null, locked = false): InspectionQueueRow {
   return {
     lotId: row.lotId,
     lotNo: row.lotNo,
@@ -71,8 +71,8 @@ function queueRowOf(row: InspectedRow, inspectorName: string | null = null): Ins
     inspectionStandardVersion: row.versionNo,
     inspectedAt: row.inspectedAt,
     inspectorName,
-    // 밀시트 잠금은 서버가 저장할 때 막는다(COM-004). 목록 응답에는 잠금 여부가 없다
-    locked: false,
+    // 목록 응답에는 잠금 여부가 없어 검사 상세(lockedMillSheetNos)를 읽었을 때만 잠금으로 보인다
+    locked,
   };
 }
 
@@ -135,7 +135,7 @@ function formItemOf(item: InspectionStandardItemView | QualityInspectionDetailIt
 
 function formOfInspection(row: QualityInspectionListItem, detail: QualityInspectionDetail, current: InspectionStandardListItem | null): InspectionFormView {
   return {
-    lot: queueRowOf({ ...row, ...detail }, detail.inspectorEmployeeName),
+    lot: queueRowOf({ ...row, ...detail }, detail.inspectorEmployeeName, detail.lockedMillSheetNos.length > 0),
     qualityInspectionId: detail.qualityInspectionId,
     updatedAt: detail.updatedAt,
     inspectionResult: detail.inspectionResult,
@@ -144,8 +144,8 @@ function formOfInspection(row: QualityInspectionListItem, detail: QualityInspect
     currentStandard: current ? standardView(current) : null,
     // 서버가 이미 LOT 두께로 걸러 준다
     items: detail.items.map(formItemOf),
-    locked: false,
-    lockedMillSheetNos: [],
+    locked: detail.lockedMillSheetNos.length > 0,
+    lockedMillSheetNos: detail.lockedMillSheetNos,
   };
 }
 

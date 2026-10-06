@@ -92,6 +92,7 @@ const inspectionOf = (lot: RejectedLotListItem, id: number, items: QualityInspec
   inspectorEmployeeName: '서민지',
   inspectedAt: `2026-10-05T0${id === 77 ? 1 : 2}:00:00.000Z`,
   updatedAt: lot.updatedAt,
+  lockedMillSheetNos: [],
   items,
 });
 

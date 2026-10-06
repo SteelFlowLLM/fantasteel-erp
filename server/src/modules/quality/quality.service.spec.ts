@@ -257,6 +257,7 @@ describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
 
   it('검사 1건과 판정에 쓴 기준 버전, 검사자를 준다', async () => {
     const detail = await service.getQualityInspection(inspectionIds.coil9);
+    expect(detail.lockedMillSheetNos).toEqual([]);
     expect(detail).toMatchObject({
       qualityInspectionId: inspectionIds.coil9,
       lotNo: 'QD-C9',
@@ -764,7 +765,11 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
       code: 'COM-004',
       message: expect.stringContaining('QU-MS-1'),
     });
-    expect(await service.getQualityInspection(registered.qualityInspectionId)).toMatchObject({ inspectionResult: 'PENDING' });
+    // 상세가 잠금(밀시트 번호)을 미리 알려 줘서 화면이 저장 전에 막는다
+    expect(await service.getQualityInspection(registered.qualityInspectionId)).toMatchObject({
+      inspectionResult: 'PENDING',
+      lockedMillSheetNos: [expect.stringContaining('QU-MS-1')],
+    });
   });
 
   it('히트는 하위 코일이 밀시트에 들어갔으면 막는다', async () => {
@@ -773,6 +778,7 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     await expect(
       update(registered.qualityInspectionId, registered.updatedAt, [{ inspectionStandardItemId: st('CEQ'), measuredValue: '0.4' }]),
     ).rejects.toMatchObject({ code: 'COM-004', message: expect.stringContaining('QU-MS-1') });
+    expect((await service.getQualityInspection(registered.qualityInspectionId)).lockedMillSheetNos).toEqual([expect.stringContaining('QU-MS-1')]);
   });
 
   it('없는 검사 id는 COM-003', async () => {
