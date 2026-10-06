@@ -126,11 +126,15 @@ describe('검사 기준 서버 모드: 조회', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('옛 버전 상세: 항목 두께 구간을 화면 이름으로 바꾸고, 지금 버전은 같은 공정·강종 목록에서 찾는다. 서버에 없는 값은 비운다', async () => {
-    const latest = serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] });
-    useServer((c) => (c.path === '/inspection-standards/501' ? ok(serverStandard()) : page([latest])));
+  it('옛 버전 상세: 항목 두께 구간을 화면 이름으로 바꾸고, 버전 이력·판정한 검사 수는 상세 응답으로 채운다 (새 버전이 위)', async () => {
+    const versions = [
+      { inspectionStandardId: 501, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 2, inspectionCount: 3 },
+      { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
+    ];
+    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), inspectionCount: 3, versions }) : fail(404, 'COM-003', '없음')));
     const detail = await inspectionStandardApi.get(501);
-    expect(calls[1].path).toBe('/inspection-standards?processType=HOT_ROLLING&steelGradeId=902&page=1&size=100');
+    // 목록을 다시 읽지 않는다 (버전 1이라 앞 버전도 없다)
+    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501']);
     expect(detail).toMatchObject({
       id: 501,
       version: 1,
@@ -140,16 +144,31 @@ describe('검사 기준 서버 모드: 조회', () => {
       steelGradeId: mockGradeId('SM355A'),
       standardNo: 'KS D 3515:2018',
       previousItems: null,
-      inspectionCount: null,
+      inspectionCount: 3,
     });
     expect(detail?.items.map((i) => [i.id, i.minThicknessMm, i.maxThicknessMm, i.sortOrder])).toEqual([
       [7001, null, '16.00', 1],
       [7002, '16.00', '40.00', 2],
     ]);
-    expect(detail?.versions.map((v) => [v.id, v.version, v.isCurrent, v.inspectionCount])).toEqual([
-      [520, 2, true, null],
-      [501, 1, false, null],
+    expect(detail?.versions.map((v) => [v.id, v.version, v.isCurrent, v.itemCount, v.inspectionCount])).toEqual([
+      [520, 2, true, 0, 0],
+      [501, 1, false, 2, 3],
     ]);
+  });
+
+  it('지금 버전 상세: 바로 앞 버전 항목(바뀐 항목 표시용)은 그 버전 상세에서 읽는다', async () => {
+    const versions = [
+      { inspectionStandardId: 501, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 2, inspectionCount: 3 },
+      { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
+    ];
+    useServer((c) => {
+      if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), inspectionCount: 0, versions });
+      if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), inspectionCount: 3, versions });
+      return fail(404, 'COM-003', '없음');
+    });
+    const detail = await inspectionStandardApi.get(520);
+    expect(detail).toMatchObject({ id: 520, isCurrent: true, currentId: 520, inspectionCount: 0 });
+    expect(detail?.previousItems?.map((i) => i.id)).toEqual([7001, 7002]);
   });
 
   it('없는 기준(COM-003)은 null', async () => {

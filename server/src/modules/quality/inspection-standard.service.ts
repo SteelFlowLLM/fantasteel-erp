@@ -96,7 +96,19 @@ export class InspectionStandardService {
   async getInspectionStandard(inspectionStandardId: number): Promise<InspectionStandardDetail> {
     const standard = await this.repository.findStandardWithItems(this.prisma, inspectionStandardId);
     if (!standard) throw new AppException('COM-003', '검사 기준을 찾을 수 없어요');
-    return toInspectionStandardListItem(standard);
+    const history = await this.repository.findVersionHistory(this.prisma, standard.inspectionStandardCode);
+    const versions = history.map((v) => ({
+      inspectionStandardId: v.id,
+      versionNo: v.versionNo,
+      createdAt: v.createdAt.toISOString(),
+      itemCount: v._count.inspectionStandardItems,
+      inspectionCount: v._count.qualityInspections,
+    }));
+    return {
+      ...toInspectionStandardListItem(standard),
+      inspectionCount: versions.find((v) => v.inspectionStandardId === standard.id)?.inspectionCount ?? 0,
+      versions,
+    };
   }
 
   /**
