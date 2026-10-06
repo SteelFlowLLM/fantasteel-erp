@@ -2,6 +2,7 @@
 // 배치는 화면 설정이라 가짜 DB가 아니라 이 브라우저에 사원마다 저장한다 (ERD에 배치 테이블이 없다).
 import { verticalCompactor, type LayoutItem } from 'react-grid-layout';
 import type { DashboardWidgetKey } from '@/api/dashboard';
+import type { RoleCode } from '@/codes';
 import { isWidgetKey, widgetDef, WIDGETS } from '@/features/dashboard/widgetCatalog';
 
 export const GRID_COLS = 12;
@@ -16,8 +17,17 @@ export interface WidgetPlacement {
   h: number;
 }
 
-/** 기본 배치: 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄 */
-export function buildDefaultPlacements(): WidgetPlacement[] {
+/**
+ * 역할별 기본 위젯 바꾸기: 그 역할이 볼 권한이 없는 기본 위젯 자리에, 같은 위치·크기로 그 역할이 볼 수 있는 후보 위젯을 넣는다.
+ * 품질은 수주 충족 현황(수주 조회 권한 없음) 대신 강종별 불합격률을 본다.
+ */
+const ROLE_DEFAULT_SWAPS: Partial<Record<RoleCode, Partial<Record<DashboardWidgetKey, DashboardWidgetKey>>>> = {
+  QUALITY: { ORDER_FULFILLMENT: 'REJECT_RATE' },
+};
+
+/** 기본 배치: 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄. 역할을 주면 그 역할의 바꾸기를 적용한다 */
+export function buildDefaultPlacements(roleCode?: RoleCode): WidgetPlacement[] {
+  const swaps = roleCode ? (ROLE_DEFAULT_SWAPS[roleCode] ?? {}) : {};
   const out: WidgetPlacement[] = [];
   let x = 0;
   let rowTop = 0;
@@ -28,7 +38,7 @@ export function buildDefaultPlacements(): WidgetPlacement[] {
       x = 0;
       rowHeight = 0;
     }
-    out.push({ key: def.key, x, y: rowTop, w: def.defaultW, h: def.defaultH });
+    out.push({ key: swaps[def.key] ?? def.key, x, y: rowTop, w: def.defaultW, h: def.defaultH });
     x += def.defaultW;
     rowHeight = Math.max(rowHeight, def.defaultH);
   }
@@ -70,7 +80,8 @@ export function samePlacements(a: readonly WidgetPlacement[], b: readonly Widget
   });
 }
 
-export const isDefaultLayout = (placements: readonly WidgetPlacement[]): boolean => samePlacements(compactPlacements(placements), compactPlacements(buildDefaultPlacements()));
+export const isDefaultLayout = (placements: readonly WidgetPlacement[], roleCode?: RoleCode): boolean =>
+  samePlacements(compactPlacements(placements), compactPlacements(buildDefaultPlacements(roleCode)));
 
 const isGridInt = (value: unknown, min: number, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 
@@ -106,10 +117,15 @@ export function readStoredLayout(employeeId: number, storage: Storage | null = b
 }
 
 /** 저장. 기본 배치와 같으면 저장값을 지운다(나중에 기본 배치가 바뀌면 따라가도록). 저장하지 못하면 false */
-export function writeStoredLayout(employeeId: number, placements: readonly WidgetPlacement[], storage: Storage | null = browserStorage()): boolean {
+export function writeStoredLayout(
+  employeeId: number,
+  placements: readonly WidgetPlacement[],
+  storage: Storage | null = browserStorage(),
+  roleCode?: RoleCode,
+): boolean {
   if (!storage) return false;
   try {
-    if (isDefaultLayout(placements)) storage.removeItem(layoutStorageKey(employeeId));
+    if (isDefaultLayout(placements, roleCode)) storage.removeItem(layoutStorageKey(employeeId));
     else storage.setItem(layoutStorageKey(employeeId), JSON.stringify(compactPlacements(placements)));
     return true;
   } catch {
