@@ -9,3 +9,4 @@ export * from './shipment';
 export * from './sales-order';
 export * from './dashboard';
 export * from './purchasing';
+export * from './master-data';

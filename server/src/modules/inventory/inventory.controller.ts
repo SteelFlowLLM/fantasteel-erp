@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { AllocationRecommendation, AllocationView, AuthUser } from '@fantasteel/shared';
+import type { AllocationRecommendation, AllocationView, AuthUser, ShipmentAllocationCandidates } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
+import { AllocationCandidatesQuery, ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
 import { InventoryService } from './inventory.service';
 
 /**
@@ -15,6 +15,12 @@ export class InventoryController {
   @Get('allocations')
   listAllocations(@CurrentUser() user: AuthUser, @Query() query: ListAllocationsQuery): Promise<AllocationView[]> {
     return this.service.listAllocations(user, query);
+  }
+
+  /** 배정 후보·FIFO 추천 조회 (API 목록 초안 행 GET /allocations/recommendations). 작업 로그는 남기지 않는다 */
+  @Get('allocations/recommendations')
+  candidates(@CurrentUser() user: AuthUser, @Query() query: AllocationCandidatesQuery): Promise<ShipmentAllocationCandidates[]> {
+    return this.service.listShipmentCandidates(user, query.shipmentRequestId);
   }
 
   @Post('allocations/recommend')

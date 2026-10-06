@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BUSINESS_EVENT_TYPE, SALES_ORDER_ITEM_STATUS, type SalesOrderItemStatus } from '@fantasteel/shared';
+import { ALLOCATION_STATUS, BUSINESS_EVENT_TYPE, SALES_ORDER_ITEM_STATUS, type SalesOrderItemStatus } from '@fantasteel/shared';
 import { countPassedProductsByPlan, lockSalesOrderItemsForShipment } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -71,13 +71,26 @@ export class SalesOrderRepository {
   findShipmentRequestsOfItems(tx: Tx, salesOrderItemIds: number[]) {
     return tx.shipmentRequest.findMany({
       where: { shipmentRequestItems: { some: { salesOrderItemId: { in: salesOrderItemIds } } } },
-      include: { shipmentRequestItems: { where: { salesOrderItemId: { in: salesOrderItemIds } }, select: { salesOrderItemId: true, requestQty: true } } },
+      include: {
+        shipmentRequestItems: {
+          where: { salesOrderItemId: { in: salesOrderItemIds } },
+          select: {
+            salesOrderItemId: true,
+            requestQty: true,
+            _count: { select: { allocations: { where: { allocationStatus: { in: [ALLOCATION_STATUS.CONFIRMED, ALLOCATION_STATUS.CONSUMED] } } } } },
+          },
+        },
+      },
       orderBy: { id: 'asc' },
     });
   }
 
   countPassedProductsByPlan(tx: Tx, productionPlanIds: number[]) {
     return tx.$queryRawTyped(countPassedProductsByPlan(productionPlanIds));
+  }
+
+  findInventories(tx: Tx, itemIds: number[]) {
+    return tx.inventory.findMany({ where: { itemId: { in: itemIds } }, select: { itemId: true, onHandQty: true, reservedQty: true, rollingAllocatedQty: true } });
   }
 
   findProductionSetting(tx: Tx) {

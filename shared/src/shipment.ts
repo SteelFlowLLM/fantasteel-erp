@@ -12,6 +12,8 @@ export interface ShipmentRequestSummary {
   totalRequestQty: number;
   issuedAt: string | null;
   createdAt: string;
+  /** 마지막 변경 시각 (취소된 요청이면 취소 시각) */
+  updatedAt: string;
 }
 
 export interface ShipmentRequestAllocation {
@@ -93,6 +95,9 @@ export interface AllocationView {
   lotNo: string;
   producedDate: string | null;
   lotStatus: LotStatus;
+  /** 상위 히트 번호 (슬래브는 부모 히트, 코일은 슬래브를 거친 히트) */
+  heatNo: string | null;
+  yardId: number | null;
   shipmentRequestItemId: number | null;
   productionPlanId: number | null;
   createdAt: string;
@@ -104,8 +109,25 @@ export interface AllocationCandidate {
   lotId: number;
   lotNo: string;
   producedDate: string | null;
+  heatNo: string | null;
+  yardId: number | null;
   /** 앞에서부터 미배정 매수만큼 추천 */
   isRecommended: boolean;
+}
+
+/**
+ * 출하요청 품목별 배정 후보 (GET allocations/recommendations, 작업 로그 없음).
+ * 같은 규격 품목이 여러 줄이면 앞 줄이 추천받은 LOT은 뒤 줄 추천에서 뺀다.
+ */
+export interface ShipmentAllocationCandidates {
+  shipmentRequestItemId: number;
+  salesOrderItemId: number;
+  itemId: number;
+  requestQty: number;
+  /** 확정 배정 수 */
+  allocatedQty: number;
+  unallocatedQty: number;
+  candidates: AllocationCandidate[];
 }
 
 export interface AllocationRecommendation {

@@ -5,6 +5,8 @@
 // - 위젯 키는 화면 상수다 (공통 코드 그룹이 아니다).
 import { requireActor, type Actor } from '@/api/actor';
 import { mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverDashboardApi } from '@/api/server/dashboard';
 import {
   PERMISSION,
   PROCESS_TYPE,
@@ -807,11 +809,25 @@ export const dashboardKeys = {
   widget: (key: DataWidgetKey, employeeId: number) => ['dashboard', 'widgets', key, employeeId] as const,
 };
 
+/** 서버 모드에서 서버를 읽는 위젯 (영업 위젯). 나머지는 서버 모드에서도 가짜 DB를 읽는다 */
+type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK';
+const SERVER_READERS: { [K in ServerWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
+  PROCESS_FLOW: serverDashboardApi.processFlow,
+  ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
+  PRODUCT_STOCK: serverDashboardApi.productStock,
+};
+const isServerWidget = (key: DataWidgetKey): key is ServerWidgetKey => key in SERVER_READERS;
+
 export const dashboardApi = {
-  /** 위젯 하나의 데이터 (권한이 없으면 COM-002) */
-  widget: <K extends DataWidgetKey>(key: K, options: DashboardQueryOptions = {}): Promise<DashboardWidgetDataMap[K]> =>
-    mockQuery((tables) => {
+  /** 위젯 하나의 데이터 (권한이 없으면 COM-002). today 옵션은 가짜 DB 테스트용이라 서버 모드에서는 쓰지 않는다 */
+  widget: <K extends DataWidgetKey>(key: K, options: DashboardQueryOptions = {}): Promise<DashboardWidgetDataMap[K]> => {
+    if (isServerDataSource() && isServerWidget(key)) {
+      // key가 ServerWidgetKey로 좁혀져도 K는 좁혀지지 않아 같은 위젯 키의 반환 타입으로 맞춘다
+      return (SERVER_READERS[key] as () => Promise<DashboardWidgetDataMap[K]>)();
+    }
+    return mockQuery((tables) => {
       const reader: WidgetReaders[K] = READERS[key];
       return reader(tables, options);
-    }),
+    });
+  },
 };
