@@ -142,35 +142,50 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     await expect(inspectionApi.detail(999)).rejects.toMatchObject({ code: 'COM-003' });
   });
 
+  /** 판정이 그대로라 재고를 다시 맞추지 않은 응답 */
+  const noStock = { eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 };
+
   it('처음 저장은 POST, 빈 값 없이 입력한 값만 보낸다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [coilRow]);
-      if (c.method === 'POST' && c.path === '/quality-inspections') return ok({ ...coilDetail, inspectionResult: 'PENDING' });
+      if (c.method === 'POST' && c.path === '/quality-inspections') return ok({ ...coilDetail, inspectionResult: 'PENDING', stockSync: noStock });
       return undefined;
     });
     const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 1, measuredValue: ' 300.5 ' }], expectedUpdatedAt: null });
     expect(writes(calls)).toEqual(['POST /quality-inspections']);
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ lotId: 501, values: [{ inspectionStandardItemId: 1, measuredValue: '300.5' }] });
-    expect(outcome).toEqual({ lotId: 501, lotNo: 'CL-HSM1-261005-001', inspectionResult: 'PENDING', autoReservedQty: 0, surplusLotNos: [], excludedLotQty: 0, salesOrderItem: null });
+    expect(outcome).toEqual({ lotId: 501, lotNo: 'CL-HSM1-261005-001', inspectionResult: 'PENDING', autoReservedQty: 0, surplusLotNos: [], surplusQty: 0, excludedLotQty: 0, salesOrderItem: null });
   });
 
   it('검사 행이 있으면 PATCH로 고치고 화면을 연 시각을 expectedUpdatedAt으로 보낸다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
-      if (c.method === 'PATCH' && c.path === '/quality-inspections/90') return ok({ ...coilDetail, inspectionResult: 'PASS' });
+      if (c.method === 'PATCH' && c.path === '/quality-inspections/90') return ok({ ...coilDetail, inspectionResult: 'PASS', stockSync: { ...noStock, eligibleAddedQty: 3, autoReservedQty: 2 } });
       return undefined;
     });
     const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: '280' }], expectedUpdatedAt: coilDetail.updatedAt });
     expect(writes(calls)).toEqual(['PATCH /quality-inspections/90']);
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ expectedUpdatedAt: coilDetail.updatedAt, values: [{ inspectionStandardItemId: 11, measuredValue: '280' }] });
     expect(outcome.inspectionResult).toBe('PASS');
+    // 판정 뒤 재고 반영: 적격 3매 중 2매 자동 예약, 1매는 여재
+    expect(outcome).toMatchObject({ autoReservedQty: 2, surplusQty: 1, excludedLotQty: 0 });
+  });
+
+  it('불합격으로 바뀌면 적격에서 빠진 매수를 excludedLotQty로 준다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+      if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
+      if (c.method === 'PATCH') return ok({ ...coilDetail, inspectionResult: 'FAIL', stockSync: { ...noStock, eligibleRemovedQty: 1, releasedReservationQty: 1, releasedAllocationCount: 1 } });
+      return undefined;
+    });
+    const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: '999' }], expectedUpdatedAt: coilDetail.updatedAt });
+    expect(outcome).toMatchObject({ inspectionResult: 'FAIL', autoReservedQty: 0, surplusQty: 0, excludedLotQty: 1 });
   });
 
   it('화면을 연 시각이 없으면 지금 검사 상세의 updatedAt으로 고친다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'GET' && c.path === '/quality-inspections/90') return ok(coilDetail);
-      if (c.method === 'PATCH') return ok(coilDetail);
+      if (c.method === 'PATCH') return ok({ ...coilDetail, stockSync: noStock });
       return undefined;
     });
     await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: '280' }] });

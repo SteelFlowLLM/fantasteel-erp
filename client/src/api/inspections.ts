@@ -63,6 +63,8 @@ export interface RegisterInspectionOutcome {
   autoReservedQty: number;
   /** 여재로 표시한 LOT 번호 */
   surplusLotNos: string[];
+  /** 여재가 된 매수. 서버 모드는 LOT 번호 없이 매수만 안다 */
+  surplusQty: number;
   /** 불합격으로 적격에서 빠진 LOT 수 (히트면 하위 슬래브·코일 포함) */
   excludedLotQty: number;
   salesOrderItem: LinkedSalesOrderItem | null;
@@ -135,6 +137,7 @@ export const inspectionApi = {
         inspectionResult: result.inspection.inspectionResult,
         autoReservedQty: result.autoReservedQty,
         surplusLotNos: result.surplusLotNos,
+        surplusQty: result.surplusLotNos.length,
         excludedLotQty: result.excludedLotQty,
         salesOrderItem: linkedSalesOrderItemOf(tx.tables, lot?.productionPlanId ?? null),
       };

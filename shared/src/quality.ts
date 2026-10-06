@@ -77,3 +77,25 @@ export interface QualityInspectionDetail extends InspectedLotSummary {
   updatedAt: string;
   items: QualityInspectionDetailItem[];
 }
+
+/**
+ * 판정 뒤 재고 반영 결과 (검사 등록·측정값 수정 응답). 히트면 하위 슬래브·코일까지 합친 값이다.
+ * 측정값을 고쳐도 판정이 그대로면 재고를 다시 맞추지 않아 모두 0이다.
+ */
+export interface InspectionStockSync {
+  /** 적격이 되어 합격 재고에 들어간 매수 */
+  eligibleAddedQty: number;
+  /** 그중 원래 수주 품목에 자동 예약한 매수. 나머지는 여재 */
+  autoReservedQty: number;
+  /** 적격에서 빠져 합격 재고에서 나간 매수 */
+  eligibleRemovedQty: number;
+  /** 가용이 줄어 해제한 예약 매수 */
+  releasedReservationQty: number;
+  /** 해제한 확정 배정 수 */
+  releasedAllocationCount: number;
+}
+
+/** 검사 등록·측정값 수정 응답 (POST·PATCH /quality-inspections): 검사 상세 + 판정 뒤 재고 반영 결과 */
+export interface QualityInspectionSaveResult extends QualityInspectionDetail {
+  stockSync: InspectionStockSync;
+}

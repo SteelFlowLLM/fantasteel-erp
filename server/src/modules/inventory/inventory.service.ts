@@ -39,6 +39,8 @@ type Actor = AuthUser | 'SYSTEM';
 /** 검사 판정 반영 결과 (규격별) */
 export interface EligibilitySyncResult {
   itemId: number;
+  /** 반영 전 합격 재고 매수. onHandQty와의 차이가 적격이 된(+)·빠진(−) LOT 수다 */
+  previousOnHandQty: number;
   /** 다시 맞춘 합격 재고 매수 */
   onHandQty: number;
   autoReservedQty: number;
@@ -301,7 +303,7 @@ export class InventoryService {
           autoReservedQty += 1;
         }
       }
-      results.push({ itemId, onHandQty, autoReservedQty, releasedReservationQty, releasedAllocationCount: allocations.length });
+      results.push({ itemId, previousOnHandQty: inventory.on_hand_qty, onHandQty, autoReservedQty, releasedReservationQty, releasedAllocationCount: allocations.length });
     }
     for (const shipmentRequestId of refreshRequestIds) await this.shipment.refreshAllocationStatus(tx, shipmentRequestId);
     return results;
