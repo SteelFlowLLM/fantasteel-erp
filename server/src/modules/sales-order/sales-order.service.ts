@@ -56,6 +56,11 @@ interface ReadContext {
 
 /** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(수주·계획·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 */
 const NUMBER_CONFLICT_ATTEMPTS = 3;
+/**
+ * 등록·취소는 품목마다 예약·계획·작업 로그(번호 채번 포함) 쿼리가 수십 번 돈다. Prisma 기본 제한(5초)은
+ * 원격 DB(Supabase 풀러)에서 품목이 많으면 넘을 수 있어 늘려 둔다.
+ */
+const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
 async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -169,7 +174,7 @@ export class SalesOrderService {
       if (typeof line.orderedQty !== 'number' || !Number.isInteger(line.orderedQty) || line.orderedQty < 1) throw new AppException('SO-002');
       if (!isValidDate(line.dueDate)) throw new AppException('COM-004', `납기 ${line.dueDate}는 없는 날짜예요`);
     }
-    return this.idempotency.run(`${user.employeeId}:sales-order`, idempotencyKey, () => retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createInTx(tx, user, dto))));
+    return this.idempotency.run(`${user.employeeId}:sales-order`, idempotencyKey, () => retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createInTx(tx, user, dto), LONG_TX)));
   }
 
   private async createInTx(tx: Tx, user: AuthUser, dto: CreateSalesOrderDto): Promise<CreateSalesOrderResult> {
@@ -273,7 +278,7 @@ export class SalesOrderService {
         salesOrderNo: row.salesOrderNo,
         cancellation: { cancelledAt: touched.updatedAt.toISOString(), reason: dto.reason, releasedReservations, cancelledPlanNos, unlinkedPlanNos },
       };
-    });
+    }, LONG_TX);
   }
 
   // ── 계산·모양 ─────────────────────────────────────────

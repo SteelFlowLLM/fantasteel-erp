@@ -161,7 +161,7 @@ export class ShipmentService {
       // 이미 취소된 요청의 재취소용 코드가 정의서 9.3에 없다 (shipment.md 8장)
       if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.CANCELLED) throw new AppException('COM-001', '이미 취소된 출하요청이에요');
       // 출하요청 취소용 작업 로그 유형은 공통 코드에 없다(shipment.md 8장 🟡). 배정 해제는 ALLOCATION_RELEASED로 남는다
-      await this.inventory.releaseShipmentAllocationsOfRequest(tx, { shipmentRequestId: id, actor: user, reason: `출하요청 취소로 배정 해제 (출하요청 id ${id})` });
+      await this.inventory.releaseShipmentAllocationsOfRequest(tx, { shipmentRequestId: id, actor: user, reason: `출하요청 ${locked.shipment_request_no} 취소로 배정 해제` });
       await this.repository.updateStatus(tx, id, SHIPMENT_REQUEST_STATUS.CANCELLED);
     });
     return this.findOne(user, id);
