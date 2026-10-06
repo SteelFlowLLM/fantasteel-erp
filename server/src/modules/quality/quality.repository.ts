@@ -250,6 +250,12 @@ export class QualityRepository {
     }
   }
 
+  /** 측정값 지우기: 그 항목의 값 행을 지운다 (없으면 그대로) */
+  async deleteQualityInspectionValues(tx: Tx, qualityInspectionId: number, inspectionStandardItemIds: number[]): Promise<void> {
+    if (!inspectionStandardItemIds.length) return;
+    await tx.qualityInspectionValue.deleteMany({ where: { qualityInspectionId, inspectionStandardItemId: { in: inspectionStandardItemIds } } });
+  }
+
   /** 그 공정·강종의 최신 기준 버전과 항목 (quality.md 4장 "기준 고르기") */
   findLatestInspectionStandard(tx: Tx, processType: string, steelGradeId: number) {
     return tx.inspectionStandard.findFirst({

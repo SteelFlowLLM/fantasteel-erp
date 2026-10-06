@@ -46,19 +46,24 @@ function lockScopeLotIds(lot: {
 const DEFAULT_PAGE = 1;
 const DEFAULT_SIZE = 20;
 
-/** 입력 측정값 → 항목 id별 값. 같은 항목을 두 번 보내거나 이 LOT에 적용되지 않는 항목이면 COM-004 */
-function toMeasuredValues(values: QualityInspectionValueInput[], applicableItemIds: Set<number>): Map<number, Prisma.Decimal> {
-  const measured = new Map<number, Prisma.Decimal>();
-  for (const { inspectionStandardItemId, measuredValue } of values) {
+/** 보낸 항목 확인: 같은 항목을 두 번 보내거나 이 LOT에 적용되지 않는 항목이면 COM-004 */
+function assertValueTargets(itemIds: number[], applicableItemIds: Set<number>): void {
+  const seen = new Set<number>();
+  for (const inspectionStandardItemId of itemIds) {
     if (!applicableItemIds.has(inspectionStandardItemId)) {
       throw new AppException('COM-004', `이 LOT에 적용되지 않는 검사 항목이에요 (항목 id ${inspectionStandardItemId})`);
     }
-    if (measured.has(inspectionStandardItemId)) {
+    if (seen.has(inspectionStandardItemId)) {
       throw new AppException('COM-004', `같은 검사 항목을 두 번 보냈어요 (항목 id ${inspectionStandardItemId})`);
     }
-    measured.set(inspectionStandardItemId, new Prisma.Decimal(measuredValue));
+    seen.add(inspectionStandardItemId);
   }
-  return measured;
+}
+
+/** 입력 측정값 → 항목 id별 값 (보낸 항목 확인 포함) */
+function toMeasuredValues(values: QualityInspectionValueInput[], applicableItemIds: Set<number>): Map<number, Prisma.Decimal> {
+  assertValueTargets(values.map((v) => v.inspectionStandardItemId), applicableItemIds);
+  return new Map(values.map((v) => [v.inspectionStandardItemId, new Prisma.Decimal(v.measuredValue)]));
 }
 
 /** 작업 로그에 남길 측정값·판정 (등록의 after, 수정의 before·after가 같은 모양) */
@@ -231,9 +236,17 @@ export class QualityService {
       const applicableItems = standard.inspectionStandardItems.filter((item) =>
         isItemApplicable(item, lot.item?.thicknessMm ?? null),
       );
-      const changedByItemId = toMeasuredValues(dto.values, new Set(applicableItems.map((item) => item.id)));
+      const applicableItemIds = new Set(applicableItems.map((item) => item.id));
+      assertValueTargets(dto.values.map((v) => v.inspectionStandardItemId), applicableItemIds);
+      // null은 저장한 값 지우기 (2026-10-06 사용자 결정, 명세에 없음)
+      const clearedItemIds = dto.values.filter((v) => v.measuredValue === null).map((v) => v.inspectionStandardItemId);
+      const changedByItemId = toMeasuredValues(
+        dto.values.flatMap(({ inspectionStandardItemId, measuredValue }) => (measuredValue === null ? [] : [{ inspectionStandardItemId, measuredValue }])),
+        applicableItemIds,
+      );
       const beforeByItemId = new Map(inspection.qualityInspectionValues.map((v) => [v.inspectionStandardItemId, v.measuredValue]));
       const afterByItemId = new Map([...beforeByItemId, ...changedByItemId]);
+      for (const itemId of clearedItemIds) afterByItemId.delete(itemId);
       const beforeJudgement = judgeInspection(applicableItems, beforeByItemId);
       const judgement = judgeInspection(applicableItems, afterByItemId);
 
@@ -249,6 +262,7 @@ export class QualityService {
         inspection.id,
         [...changedByItemId].map(([inspectionStandardItemId, measuredValue]) => ({ inspectionStandardItemId, measuredValue })),
       );
+      await this.repository.deleteQualityInspectionValues(tx, inspection.id, clearedItemIds);
 
       const codeOf = new Map(applicableItems.map((item) => [item.id, item.inspectionItemCode]));
       await this.businessEventRecorder.record(tx, {
