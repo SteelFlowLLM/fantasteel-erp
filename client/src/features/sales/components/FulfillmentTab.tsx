@@ -123,7 +123,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                         <span className="flex items-center gap-1">
                           <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
                           {item.isDueRisk ? <DueRiskBadge /> : null}
-                          <span className="font-mono text-[11px] text-ink-3">{item.itemCode}</span>
+                          <span className="font-mono text-cap text-ink-3">{item.itemCode}</span>
                         </span>
                       </span>
                     </Td>
@@ -198,7 +198,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             </tfoot>
           </Table>
         </div>
-        <div className="border-t border-line px-4 py-2.5 text-cap leading-[18px] text-ink-3">
+        <div className="border-t border-line px-4 py-2.5 text-cap leading-relaxed text-ink-3">
           지표마다 분모가 달라요. 예약은 미출하 매수로, 생산중·검사합격·출하는 수주 매수로 나눠요. 검사합격은 이 품목 몫으로 확보한 합격 제품(예약 + 출하)이라
           예약과 겹쳐요 — 지표를 더하지 않아요. 미확보 = 미출하 − 예약, 추가 계획 필요 = 미확보 − 진행 계획 잔여 목표.
         </div>
@@ -286,7 +286,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
         <Card>
           <CardHead title="업무방" />
           <CardBody>
-            <p className="text-sm leading-5 text-ink-2">
+            <p className="text-sm leading-normal text-ink-2">
               {detail.workRoomId !== null
                 ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.'
                 : salesOrderCancelled

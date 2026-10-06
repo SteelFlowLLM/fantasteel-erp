@@ -340,7 +340,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
                   ]}
                 />
               ) : (
-                <span className="text-cap leading-4 text-ink-3">
+                <span className="text-cap leading-normal text-ink-3">
                   수주 연결이 없는 계획이에요. 만들어진 합격 슬래브는 여재(가용재고)로 남아요.
                 </span>
               )}

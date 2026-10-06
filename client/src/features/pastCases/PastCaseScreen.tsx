@@ -60,7 +60,7 @@ function ResultList() {
               <span className="truncate font-mono text-xs">{item.lotNos[0]}</span>
               <CategoryBadge category={item.caseCategory} />
             </div>
-            <span className="text-xs leading-[17px]">
+            <span className="text-xs leading-snug">
               <span className="font-mono text-ink-3">{item.caseNo}</span> · {item.title}
             </span>
           </MasterItem>
@@ -116,7 +116,7 @@ function CaseDetail() {
         }
         className="flex-none"
       >
-        <p className="text-base leading-[21px]">
+        <p className="text-base leading-normal">
           &ldquo;{EXAMPLE_QUERY}&rdquo;와 비슷한 사례 {PAST_CASES.length}건을 찾았어요. 성분 불합격은 합금철 투입량 편차나 온도 측정 오차가 원인인
           경우가 많았고, 투입량·측정값을 다시 확인하도록 조치했어요. 표면 결함은 열연·연주 조건과 함께 살펴본 사례가 있어요.
         </p>
@@ -164,7 +164,7 @@ function CaseDetail() {
                 { label: '발생일', value: SELECTED_CASE.occurredDate },
               ]}
             />
-            <div className="flex flex-col gap-1.5 border-t border-line pt-3 text-xs leading-[19px] text-ink-2">
+            <div className="flex flex-col gap-1.5 border-t border-line pt-3 text-xs leading-relaxed text-ink-2">
               <p>
                 <b className="font-semibold text-ink">현상</b> {SELECTED_CASE.phenomenon}
               </p>

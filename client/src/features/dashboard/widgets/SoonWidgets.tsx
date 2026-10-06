@@ -33,7 +33,7 @@ export function AgentRiskWidget(props: WidgetProps) {
           <Badge tone="danger">원료 부족</Badge>
           <span className="truncate text-sm text-ink-2">실리코망가니즈 · PP-2610-0001</span>
         </div>
-        <p className="text-sm leading-5">AI Factory Agent가 생산계획 소요와 원료 잔량·입고예정을 살펴 위험을 찾으면 여기에 알려 줘요. AI는 상황만 설명하고, 대응 후보는 규칙이 만들어요.</p>
+        <p className="text-sm leading-normal">AI Factory Agent가 생산계획 소요와 원료 잔량·입고예정을 살펴 위험을 찾으면 여기에 알려 줘요. AI는 상황만 설명하고, 대응 후보는 규칙이 만들어요.</p>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 rounded-md bg-surface-2 px-3 py-2.5 text-sm">
           <dt className="text-ink-3">총소요</dt>
           <dd className="tabular-nums">2.500 t</dd>

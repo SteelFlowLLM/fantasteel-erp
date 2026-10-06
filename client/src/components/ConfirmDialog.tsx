@@ -31,7 +31,7 @@ export function ConfirmDialog({ title, confirmLabel, cancelLabel = '취소', ton
         </>
       }
     >
-      <div className="text-sm leading-5 text-ink-2">{children}</div>
+      <div className="text-sm leading-normal text-ink-2">{children}</div>
     </Modal>
   );
 }

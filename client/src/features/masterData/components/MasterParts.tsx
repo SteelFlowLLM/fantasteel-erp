@@ -26,7 +26,7 @@ export const CODE_LINK = 'font-mono text-mono text-run hover:underline';
 export const formatYieldPercent = (rate: string | null): string => (rate === null ? '-' : fmtPct(Number(rate), 2));
 
 export function TableFoot({ className, children }: { className?: string; children: ReactNode }) {
-  return <p className={cn('border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-4 text-ink-3', className)}>{children}</p>;
+  return <p className={cn('border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-normal text-ink-3', className)}>{children}</p>;
 }
 
 export interface RowActionsProps {

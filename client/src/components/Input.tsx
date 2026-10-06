@@ -69,5 +69,5 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
 }
 
 export function Textarea({ invalid, className, rows = 3, ...rest }: TextareaProps) {
-  return <textarea rows={rows} aria-invalid={invalid || undefined} className={cn(FIELD, 'resize-none px-2.5 py-2 leading-5', className)} {...rest} />;
+  return <textarea rows={rows} aria-invalid={invalid || undefined} className={cn(FIELD, 'resize-none px-2.5 py-2 leading-normal', className)} {...rest} />;
 }

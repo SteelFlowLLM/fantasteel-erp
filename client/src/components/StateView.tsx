@@ -56,8 +56,8 @@ export function StateView({ kind, title, text, code, icon, actions, className }:
         <Icon name={icon ?? DEFAULT_ICON[kind]} />
       </span>
       <b className="text-lg font-semibold text-ink">{title ?? DEFAULT_TITLE[kind]}</b>
-      {text ? <p className="max-w-[420px] text-sm leading-5 text-ink-2">{text}</p> : null}
-      {code ? <span className="font-mono text-[11.5px] text-ink-3">{code}</span> : null}
+      {text ? <p className="max-w-[420px] text-sm leading-normal text-ink-2">{text}</p> : null}
+      {code ? <span className="font-mono text-xs text-ink-3">{code}</span> : null}
       {actions ? <div className="flex justify-center gap-2">{actions}</div> : null}
     </div>
   );

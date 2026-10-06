@@ -30,7 +30,7 @@ export function Qty({ value, unit, tone, strong }: { value: number; unit: string
 /** 표 아래 안내 글 */
 export function TableCaption({ children }: { children: ReactNode }) {
   return (
-    <span className="flex items-start gap-1.5 text-cap leading-4 text-ink-3">
+    <span className="flex items-start gap-1.5 text-cap leading-normal text-ink-3">
       <Icon name="info" size="sm" className="mt-px flex-none" />
       <span>{children}</span>
     </span>

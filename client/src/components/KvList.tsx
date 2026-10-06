@@ -18,7 +18,7 @@ export function KvList({ items, columns = 1, className }: { items: readonly KvIt
     >
       {items.map((item, index) => (
         <Fragment key={index}>
-          <dt className="text-xs leading-[18px] text-ink-3">{item.label}</dt>
+          <dt className="text-xs leading-normal text-ink-3">{item.label}</dt>
           <dd className="m-0 font-medium text-ink">{item.value}</dd>
         </Fragment>
       ))}

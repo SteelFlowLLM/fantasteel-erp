@@ -126,7 +126,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                         const counts = countLevels(levelsOf(role.permissions));
                         return (
                           <Th key={role.id} align="center" className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
-                            <span className="flex flex-col items-center py-1 leading-4">
+                            <span className="flex flex-col items-center py-1 leading-snug">
                               <b className="text-xs font-semibold text-ink">{ROLE_LABEL[role.roleCode]}</b>
                               <span className="text-2xs text-ink-3">{levelCountText(counts)}</span>
                             </span>

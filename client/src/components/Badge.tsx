@@ -31,7 +31,7 @@ export function Badge({ tone = 'neutral', plain, title, className, children }: B
     <span
       title={title}
       className={cn(
-        'inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-xs px-[7px] text-[11.5px] leading-5 font-semibold',
+        'inline-flex min-h-5 items-center gap-[5px] whitespace-nowrap rounded-xs px-[7px] text-xs font-semibold',
         TONE[tone],
         !plain && tone !== 'outline' && DOT,
         className,

@@ -24,7 +24,7 @@ export function Tag({ tone = 'neutral', size = 'md', title, className, children 
   return (
     <span
       title={title}
-      className={cn('inline-flex items-center whitespace-nowrap rounded-xs', size === 'sm' ? 'h-4 px-1 text-[10px]' : 'h-5 px-1.5 text-cap', TONE[tone], className)}
+      className={cn('inline-flex items-center whitespace-nowrap rounded-xs', size === 'sm' ? 'min-h-4 px-1 text-2xs' : 'min-h-5 px-1.5 text-cap', TONE[tone], className)}
     >
       {children}
     </span>

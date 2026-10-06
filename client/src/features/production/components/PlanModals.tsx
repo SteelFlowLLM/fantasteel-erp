@@ -38,7 +38,7 @@ export function CancelPlanModal({ planId, planNo, updatedAt, onClose }: { planId
         </>
       }
     >
-      <p className="text-sm leading-5 text-ink-2">
+      <p className="text-sm leading-normal text-ink-2">
         작업 실적이 하나도 없는 <b className="font-semibold">계획</b> 상태에서만 취소할 수 있어요. 열연 투입 배정이 있으면 함께 해제돼요. 수주 품목은 그대로 남아 부족분이 다시
         &lsquo;추가 계획 필요&rsquo;로 보여요.
       </p>

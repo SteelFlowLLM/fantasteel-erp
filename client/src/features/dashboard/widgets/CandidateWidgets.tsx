@@ -253,7 +253,7 @@ function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
                 {po.supplierName}
               </span>
               <span className="ml-auto flex-none tabular-nums">{fmtTon(po.scheduledReceiptTon)}</span>
-              <span className="w-16 flex-none text-right text-cap text-ink-3 tabular-nums">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
+              <span className="min-w-16 flex-none whitespace-nowrap text-right text-cap text-ink-3 tabular-nums">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
             </div>
           ))}
           {open.purchaseOrders.length === 0 ? <WidgetEmpty>입고가 남은 발주가 없어요</WidgetEmpty> : null}
@@ -329,7 +329,7 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
             <div className="h-1.5 w-16 flex-none overflow-hidden rounded-[3px] bg-surface-3">
               <span className="block h-full bg-[#c9731a]" style={{ width: pct(item.maxAgeDays, maxAge) }} />
             </div>
-            <b className="w-10 flex-none text-right font-semibold tabular-nums">{item.maxAgeDays}일</b>
+            <b className="min-w-10 flex-none whitespace-nowrap text-right font-semibold tabular-nums">{item.maxAgeDays}일</b>
           </div>
         ))}
         {data.items.length === 0 ? <WidgetEmpty>여재 슬래브가 없어요</WidgetEmpty> : null}
