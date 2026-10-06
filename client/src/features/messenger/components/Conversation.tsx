@@ -17,9 +17,9 @@ import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { InviteModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
+import { layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
 import { useChatMessages, useChatRoom, useMarkRoomRead } from '@/hooks/useMessenger';
-import { fmtDate } from '@/lib/format';
 
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
@@ -61,6 +61,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   const items = useMemo(() => messages.data?.items ?? [], [messages.data]);
   const lastId = items.at(-1)?.id ?? 0;
   const lastOthersId = [...items].reverse().find((m) => !m.isMine)?.id ?? 0;
+  const layout = useMemo(() => layoutMessages(items, null), [items]);
 
   const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
   const myNames = useMemo(() => [me.employeeName, me.departmentName], [me.employeeName, me.departmentName]);
@@ -154,7 +155,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
               </div>
               {items.length === 0 ? <StateView kind="empty" icon="chat" title="아직 메시지가 없어요" text="첫 메시지를 보내 보세요" /> : null}
               {items.map((message, index) => {
-                const showDay = index === 0 || fmtDate(items[index - 1].createdAt) !== fmtDate(message.createdAt);
+                const { showDay, isGroupStart, isGroupEnd } = layout[index];
                 return (
                   <div key={message.id}>
                     {showDay ? (
@@ -164,7 +165,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
                         <span className="h-px flex-1 bg-line" />
                       </div>
                     ) : null}
-                    <MessageBubble message={message} room={room} mentionNames={mentionNames} myNames={myNames} />
+                    <MessageBubble message={message} room={room} mentionNames={mentionNames} myNames={myNames} isGroupStart={isGroupStart} isGroupEnd={isGroupEnd} />
                   </div>
                 );
               })}
