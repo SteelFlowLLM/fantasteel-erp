@@ -3,7 +3,11 @@ import type { InspectionStandardDetail, InspectionStandardListItem, PageResult, 
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { CreateInspectionStandardDto } from './dto/create-inspection-standard.dto';
+import type {
+  CreateInspectionStandardDto,
+  CreateInspectionStandardVersionDto,
+  InspectionStandardItemInput,
+} from './dto/create-inspection-standard.dto';
 import { INSPECTED_PROCESS_TYPES } from './dto/list-quality-inspections.dto';
 import type { ListInspectionStandardsDto } from './dto/list-inspection-standards.dto';
 import { findStandardItemProblem, inspectionStandardCodeOf } from './inspection-standard-items';
@@ -95,19 +99,7 @@ export class InspectionStandardService {
    * 제강 기준의 항목이 강종 성분 규격이다(TRM-020). 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 없어 작업 로그는 남기지 않는다([06]).
    */
   async createInspectionStandard(dto: CreateInspectionStandardDto): Promise<InspectionStandardDetail> {
-    const items = dto.items.map((item) => ({
-      inspectionItemCode: item.inspectionItemCode.trim(),
-      inspectionItemName: item.inspectionItemName.trim(),
-      unit: item.unit?.trim() || null,
-      minValue: toDecimal(item.minValue),
-      maxValue: toDecimal(item.maxValue),
-      thicknessOverMm: toDecimal(item.thicknessOverMm),
-      thicknessUptoMm: toDecimal(item.thicknessUptoMm),
-      isRequired: item.isRequired ?? true,
-    }));
-    const problem = findStandardItemProblem(items);
-    if (problem) throw new AppException('COM-004', problem);
-
+    const items = toValidatedItems(dto.items);
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const steelGrade = await this.repository.findSteelGrade(tx, dto.steelGradeId);
@@ -133,9 +125,69 @@ export class InspectionStandardService {
       throw error;
     }
   }
+
+  /**
+   * 검사 기준 수정 = 새 버전 (API-122, REQ-QC-002, quality.md 4장 "검사 기준 새 버전").
+   * 기존 기준·항목은 수정·삭제하지 않고 같은 코드·공정·강종으로 version_no + 1 행을 만든다([05] 7-2, [ERD] Note).
+   * 기존 검사 기록은 당시 버전을 유지하고, 이후 검사는 최신 버전인 새 버전으로 판정한다([07] 5장).
+   * 항목은 새 버전 전체를 받는다. 최신이 아닌 버전에서 만들면 COM-001 (2026-10-04 결정).
+   */
+  async createInspectionStandardVersion(
+    inspectionStandardId: number,
+    dto: CreateInspectionStandardVersionDto,
+  ): Promise<InspectionStandardDetail> {
+    const items = toValidatedItems(dto.items);
+    try {
+      const created = await this.prisma.$transaction(async (tx) => {
+        const base = await this.repository.findStandardVersion(tx, inspectionStandardId);
+        if (!base) throw new AppException('COM-003', '검사 기준을 찾을 수 없어요');
+        const latestVersionNo = await this.repository.findLatestVersionNo(tx, base.inspectionStandardCode);
+        if (latestVersionNo !== base.versionNo) throw staleVersion(latestVersionNo);
+
+        return this.repository.createStandardWithItems(
+          tx,
+          {
+            inspectionStandardCode: base.inspectionStandardCode,
+            versionNo: base.versionNo + 1,
+            processType: base.processType,
+            steelGradeId: base.steelGradeId,
+          },
+          items,
+        );
+      });
+      return this.getInspectionStandard(created.id);
+    } catch (error) {
+      // 두 사람이 같은 버전에서 동시에 만들면 (코드, 버전) unique가 막는다
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw staleVersion();
+      throw error;
+    }
+  }
 }
 
 const toDecimal = (value: string | null | undefined) => (value === null || value === undefined ? null : new Prisma.Decimal(value));
+
+/** 입력 항목을 저장 형태로 바꾸고 검증한다 (등록·새 버전 공용). 문제가 있으면 COM-004 */
+function toValidatedItems(inputs: InspectionStandardItemInput[]) {
+  const items = inputs.map((item) => ({
+    inspectionItemCode: item.inspectionItemCode.trim(),
+    inspectionItemName: item.inspectionItemName.trim(),
+    unit: item.unit?.trim() || null,
+    minValue: toDecimal(item.minValue),
+    maxValue: toDecimal(item.maxValue),
+    thicknessOverMm: toDecimal(item.thicknessOverMm),
+    thicknessUptoMm: toDecimal(item.thicknessUptoMm),
+    isRequired: item.isRequired ?? true,
+  }));
+  const problem = findStandardItemProblem(items);
+  if (problem) throw new AppException('COM-004', problem);
+  return items;
+}
+
+const staleVersion = (latestVersionNo?: number | null) =>
+  new AppException(
+    'COM-001',
+    `그 사이 새 버전${latestVersionNo ? `(버전 ${latestVersionNo})` : ''}이 만들어졌어요. 최신 버전을 다시 불러와 고쳐 주세요`,
+  );
 
 /** 중복 등록 (2026-10-04 결정: [04] 9.3에 코드가 없어 입력 에러로 돌려준다) */
 const duplicateStandard = (code?: string) =>

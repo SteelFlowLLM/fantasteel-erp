@@ -67,6 +67,20 @@ export class InspectionStandardRepository {
     });
   }
 
+  /** 새 버전의 바탕이 될 기준 버전 (코드·공정·강종은 그대로 이어받는다) */
+  findStandardVersion(tx: Tx, inspectionStandardId: number) {
+    return tx.inspectionStandard.findUnique({
+      where: { id: inspectionStandardId },
+      select: { id: true, inspectionStandardCode: true, versionNo: true, processType: true, steelGradeId: true },
+    });
+  }
+
+  /** 같은 코드의 가장 큰 버전 번호 */
+  async findLatestVersionNo(tx: Tx, inspectionStandardCode: string): Promise<number | null> {
+    const { _max } = await tx.inspectionStandard.aggregate({ where: { inspectionStandardCode }, _max: { versionNo: true } });
+    return _max.versionNo;
+  }
+
   /** 기준 버전과 항목을 함께 만든다 */
   createStandardWithItems(
     tx: Tx,

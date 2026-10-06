@@ -68,6 +68,16 @@ export class InspectionStandardItemInput {
   isRequired?: boolean;
 }
 
+/** 새 버전 (API-122): 새 버전의 항목 전체. 코드·공정·강종은 바꾸지 않는다 (2026-10-04 결정) */
+export class CreateInspectionStandardVersionDto {
+  @IsArray({ message: '검사 항목 목록은 배열이어야 해요' })
+  @ArrayMinSize(1, { message: '검사 항목을 1개 이상 넣어 주세요' })
+  @ArrayMaxSize(100, { message: '검사 항목은 100개 이하로 넣어 주세요' })
+  @ValidateNested({ each: true })
+  @Type(() => InspectionStandardItemInput)
+  items!: InspectionStandardItemInput[];
+}
+
 export class CreateInspectionStandardDto {
   @IsIn(INSPECTED_PROCESS_TYPES, { message: '공정은 제강·연주·열연 중 하나여야 해요' })
   processType!: ProcessType;
