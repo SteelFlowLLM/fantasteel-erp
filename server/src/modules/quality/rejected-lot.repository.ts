@@ -62,7 +62,8 @@ export class RejectedLotRepository {
       select: {
         ...rejectedLotSelect,
         productionResult: {
-          select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+          // inspectedLotSelect의 productionResult를 덮어쓰므로 계획 id·번호도 같이 읽는다
+          select: { productionPlan: { select: { id: true, productionPlanNo: true, salesOrderItem: { select: { salesOrderId: true } } } } },
         },
       },
     });

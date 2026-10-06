@@ -34,8 +34,11 @@ export const inspectedLotSelect = {
   id: true,
   lotNo: true,
   lotType: true,
+  lotStatus: true,
+  producedDate: true,
+  productionResult: { select: { productionPlan: { select: { id: true, productionPlanNo: true } } } },
   steelGrade: { select: { id: true, steelGradeCode: true } },
-  item: { select: { thicknessMm: true, steelGrade: { select: { id: true, steelGradeCode: true } } } },
+  item: { select: { id: true, itemCode: true, itemName: true, thicknessMm: true, steelGrade: { select: { id: true, steelGradeCode: true } } } },
   lotRelationsAsChildLot: {
     where: { parentLot: { lotType: { in: [LOT_TYPE.HEAT, LOT_TYPE.SLAB] } } },
     select: {
@@ -122,7 +125,8 @@ const judgedStandardSelect = {
 /** 작업 로그에 붙일 수주 (LOT → 실적 → 계획 → 수주 품목) */
 const lotSalesOrderSelect = {
   productionResult: {
-    select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+    // inspectedLotSelect의 productionResult를 덮어쓰므로 계획 id·번호도 같이 읽는다
+    select: { productionPlan: { select: { id: true, productionPlanNo: true, salesOrderItem: { select: { salesOrderId: true } } } } },
   },
 } satisfies Prisma.LotSelect;
 
