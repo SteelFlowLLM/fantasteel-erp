@@ -152,10 +152,7 @@ export function buildTraceFixture(): TraceFixture {
       goodsReceiptNo: issueBusinessNo(tRm, 'GOODS_RECEIPT'),
       purchaseOrderItemId: poItem.id,
       receivedTon: '500.000',
-      receiptDate: '2026-09-29',
-      yardId: rmYard,
-      confirmedEmployeeId: purchase,
-      confirmedAt: tRm.nowIso,
+      receivedDate: '2026-09-29',
     });
     const baseLot = {
       lotStatus: 'AVAILABLE' as const,

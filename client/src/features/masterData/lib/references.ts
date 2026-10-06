@@ -73,6 +73,5 @@ export function countYardReferences(tables: Readonly<MockTables>, yardId: number
   return [
     { label: '품목 기본 야드', count: count(tables.item.filter((r) => r.defaultYardId === yardId)) },
     { label: 'LOT', count: count(tables.lot.filter((r) => r.yardId === yardId)) },
-    { label: '입고', count: count(tables.goodsReceipt.filter((r) => r.yardId === yardId)) },
   ];
 }

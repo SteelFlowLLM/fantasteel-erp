@@ -87,6 +87,6 @@ export async function stockRawMaterialsViaApi(receiptDate: string, tons: Partial
     candidates.map((i) => ({ supplierId: i.supplierId ?? 0, items: [{ purchaseRequisitionId: i.id, orderedTon: i.requestedTon, expectedReceiptDate: '' }] })),
   );
   for (const line of purchaseOrders.flatMap((po) => po.items)) {
-    await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.remainingTon, receiptDate });
+    await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.remainingTon, receivedDate: receiptDate });
   }
 }

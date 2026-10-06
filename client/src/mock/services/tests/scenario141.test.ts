@@ -124,15 +124,15 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
 
     const poLine = t.purchaseOrderItem.find((l) => l.purchaseOrderId === po.id);
     if (!poLine) throw new Error('발주 품목 없음');
-    expectCode(() => receiveGoods(k.at('2026-10-02T09:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '1.501', receiptDate: '2026-10-02' }), 'PUR-003');
-    const first = receiveGoods(k.at('2026-10-02T09:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '1.000', receiptDate: '2026-10-02' });
+    expectCode(() => receiveGoods(k.at('2026-10-02T09:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '1.501', receivedDate: '2026-10-02' }), 'PUR-003');
+    const first = receiveGoods(k.at('2026-10-02T09:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '1.000', receivedDate: '2026-10-02' });
     newSmnLotId = first.lot.id;
     expect(first.lot).toMatchObject({ lotNo: 'RM-SMN01-261002-001', lotType: 'RAW_MATERIAL', remainingTon: '1.000', producedDate: '2026-10-02' });
     expect(first.purchaseOrder.purchaseOrderStatus).toBe('PARTIALLY_RECEIVED');
     expect([receivedTonOf(t, poLine.id), remainingTonOf(t, poLine)]).toEqual(['1.000', '0.500']);
-    const second = receiveGoods(k.at('2026-10-03T08:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '0.500', receiptDate: '2026-10-03' });
+    const second = receiveGoods(k.at('2026-10-03T08:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '0.500', receivedDate: '2026-10-03' });
     expect(second.purchaseOrder.purchaseOrderStatus).toBe('RECEIVED');
-    expect(t.yard.find((y) => y.id === first.goodsReceipt.yardId)?.yardType).toBe('RAW_MATERIAL');
+    expect(t.yard.find((y) => y.id === first.lot.yardId)?.yardType).toBe('RAW_MATERIAL');
     k.expectClean();
   });
 

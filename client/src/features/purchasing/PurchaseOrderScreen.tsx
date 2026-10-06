@@ -453,7 +453,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
                     <Td>
                       {receipt.itemName} <span className="font-mono text-cap text-ink-3">{receipt.purchaseRequisitionNo}</span>
                     </Td>
-                    <Td>{fmtDate(receipt.receiptDate)}</Td>
+                    <Td>{fmtDate(receipt.receivedDate)}</Td>
                     <Td align="right">{fmtTon(receipt.receivedTon)}</Td>
                     <Td>
                       {receipt.lotNo ? (
