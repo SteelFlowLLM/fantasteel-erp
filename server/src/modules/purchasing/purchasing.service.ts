@@ -3,9 +3,11 @@ import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
   PERMISSION,
+  PURCHASE_ORDER_STATUS,
   PURCHASE_REQUISITION_STATUS,
   type AuthUser,
   type BusinessEventType,
+  type GoodsReceiptView,
   type PageResult,
   type PurchaseOrderStatus,
   type PurchaseOrderView,
@@ -18,14 +20,17 @@ import { assertDepartmentHead } from '../../common/auth/department-head';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
+import { seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import type { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
 import type { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingRepository, type PurchaseOrderFilter, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
 type RequisitionRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findRequisition']>>>;
 type PurchaseOrderRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findPurchaseOrder']>>>;
+type GoodsReceiptRow = Awaited<ReturnType<PurchasingRepository['findGoodsReceipt']>>;
 
 /** 구매요청 등록 값. REST(DTO)와 Message → ERP 초안 payload가 같은 모양으로 들어온다 */
 export interface CreateRequisitionInput {
@@ -319,6 +324,66 @@ export class PurchasingService {
     return this.toPurchaseOrderView(order);
   }
 
+  // ── 입고 (REQ-PUR-004, BP-PUR-02) ─────────────────────
+
+  async listGoodsReceipts(query: ListGoodsReceiptsQuery): Promise<PageResult<GoodsReceiptView>> {
+    const page = query.page ?? 1;
+    const size = query.size ?? DEFAULT_PAGE_SIZE;
+    const [total, rows] = await Promise.all([
+      this.repository.countGoodsReceipts(this.prisma, query.purchaseOrderId),
+      this.repository.findGoodsReceipts(this.prisma, query.purchaseOrderId, { skip: (page - 1) * size, take: size }),
+    ]);
+    return { items: rows.map((row) => this.toGoodsReceiptView(row)), page, size, total };
+  }
+
+  /**
+   * 입고 확정(등록이 곧 확정, 부분 입고 허용, 입고 검사 없음): 발주 행 잠금 → 미입고량 확인(PUR-003) → 입고 저장 →
+   * 원료 LOT 생성(기본 야드) → 발주 상태 갱신 → 작업 로그. 원료 재고는 원료 LOT 잔량 합계라 따로 늘리지 않는다.
+   */
+  async confirmGoodsReceipt(user: AuthUser, dto: CreateGoodsReceiptDto): Promise<GoodsReceiptView> {
+    const receivedTon = parseTon(dto.receivedTon, '입고량(톤)');
+    const receivedDate = parseDate(dto.receivedDate, '입고일');
+    // 실제로 들어온 원료를 기록하는 일이라 미래 날짜는 받지 않는다
+    if (dto.receivedDate > seoulToday()) throw new AppException('COM-004', '입고일은 오늘 이후로 할 수 없어요');
+    return retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.confirmGoodsReceiptInTx(tx, user, dto.purchaseOrderItemId, receivedTon, receivedDate)));
+  }
+
+  private async confirmGoodsReceiptInTx(tx: Tx, user: AuthUser, purchaseOrderItemId: number, receivedTon: Prisma.Decimal, receivedDate: Date): Promise<GoodsReceiptView> {
+    if ((await this.repository.lockPurchaseOrderByItemId(tx, purchaseOrderItemId)).length === 0) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
+    const line = await this.repository.findPurchaseOrderItemForReceipt(tx, purchaseOrderItemId);
+    if (!line) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
+    const order = line.purchaseOrder;
+    const receivedOf = (l: (typeof order.purchaseOrderItems)[number]) => l.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), new Prisma.Decimal(0));
+    const self = order.purchaseOrderItems.find((l) => l.id === line.id);
+    const receivedBefore = self ? receivedOf(self) : new Prisma.Decimal(0);
+    const remaining = line.orderedTon.minus(receivedBefore);
+    if (receivedTon.gt(remaining)) throw new AppException('PUR-003', `미입고량 ${remaining.toFixed(3)}t보다 많이 입고할 수 없어요`);
+
+    const receipt = await this.repository.createGoodsReceipt(tx, { goodsReceiptNo: await this.numbering.nextDocumentNumber(tx, 'GOODS_RECEIPT'), purchaseOrderItemId, receivedTon, receivedDate });
+    // LOT 번호 날짜는 입고일: 원료 FIFO가 입고일 기준이라 번호와 투입 순서를 맞춘다
+    const lot = await this.repository.createRawMaterialLot(tx, {
+      lotNo: await this.numbering.nextLotNumber(tx, 'RAW_MATERIAL', line.item.itemCode, receivedDate),
+      itemId: line.itemId,
+      goodsReceiptId: receipt.id,
+      yardId: line.item.defaultYardId,
+      ton: receivedTon,
+    });
+    const allReceived = order.purchaseOrderItems.every((l) => (l.id === line.id ? receivedBefore.plus(receivedTon) : receivedOf(l)).gte(l.orderedTon));
+    const status = allReceived ? PURCHASE_ORDER_STATUS.RECEIVED : PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED;
+    if (status !== order.purchaseOrderStatus) await this.repository.updatePurchaseOrderStatus(tx, order.id, status);
+
+    const view = this.toGoodsReceiptView(await this.repository.findGoodsReceipt(tx, receipt.id));
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED,
+      actor: user,
+      target: { table: 'goods_receipt', id: receipt.id },
+      lotIds: [lot.id],
+      before: { purchaseOrderStatus: order.purchaseOrderStatus, receivedTon: receivedBefore.toFixed(3) },
+      after: { ...view, purchaseOrderStatus: status, cumulativeReceivedTon: receivedBefore.plus(receivedTon).toFixed(3) },
+    });
+    return view;
+  }
+
   // ── 계산·모양 ─────────────────────────────────────────
 
   /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
@@ -406,6 +471,26 @@ export class PurchasingService {
       rejectReason: row.rejectReason,
       salesOrderId: salesOrder?.id ?? null,
       salesOrderNo: salesOrder?.salesOrderNo ?? null,
+    };
+  }
+
+  private toGoodsReceiptView(row: GoodsReceiptRow): GoodsReceiptView {
+    return {
+      id: row.id,
+      goodsReceiptNo: row.goodsReceiptNo,
+      purchaseOrderId: row.purchaseOrderItem.purchaseOrderId,
+      purchaseOrderNo: row.purchaseOrderItem.purchaseOrder.purchaseOrderNo,
+      purchaseOrderItemId: row.purchaseOrderItemId,
+      itemId: row.purchaseOrderItem.itemId,
+      itemCode: row.purchaseOrderItem.item.itemCode,
+      itemName: row.purchaseOrderItem.item.itemName,
+      receivedTon: row.receivedTon.toFixed(3),
+      receivedDate: dateOnly(row.receivedDate),
+      lotId: row.lot?.id ?? null,
+      lotNo: row.lot?.lotNo ?? null,
+      yardId: row.lot?.yardId ?? null,
+      yardName: row.lot?.yard?.yardName ?? null,
+      createdAt: row.createdAt.toISOString(),
     };
   }
 

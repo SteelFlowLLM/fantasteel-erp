@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PURCHASE_REQUISITION_STATUS, type PurchaseOrderStatus, type PurchaseRequisitionStatus } from '@fantasteel/shared';
+import { LOT_STATUS, LOT_TYPE, PURCHASE_REQUISITION_STATUS, type PurchaseOrderStatus, type PurchaseRequisitionStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
+import { lockPurchaseOrderByItemId } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 목록·상세가 함께 쓰는 읽기 모양: 품목·요청자(부서)·승인자·근거 계획(→ 수주) */
@@ -43,6 +44,14 @@ const purchaseOrderInclude = {
     },
   },
 } as const;
+
+/** 입고 목록 읽기 모양: 발주·원료·생성된 원료 LOT(야드) */
+const goodsReceiptInclude = {
+  lot: { select: { id: true, lotNo: true, yardId: true, yard: { select: { yardName: true } } } },
+  purchaseOrderItem: { select: { purchaseOrderId: true, itemId: true, item: { select: { itemCode: true, itemName: true } }, purchaseOrder: { select: { purchaseOrderNo: true } } } },
+} as const;
+
+const goodsReceiptWhereOf = (purchaseOrderId?: number): Prisma.GoodsReceiptWhereInput => (purchaseOrderId !== undefined ? { purchaseOrderItem: { purchaseOrderId } } : {});
 
 export interface PurchaseOrderFilter {
   purchaseOrderStatus?: PurchaseOrderStatus;
@@ -142,5 +151,54 @@ export class PurchasingRepository {
 
   findPurchaseOrder(tx: Tx, id: number) {
     return tx.purchaseOrder.findUnique({ where: { id }, include: purchaseOrderInclude });
+  }
+
+  /** 발주 행 잠금(TypedSQL). 발주 품목이 없으면 빈 배열 */
+  lockPurchaseOrderByItemId(tx: Tx, purchaseOrderItemId: number) {
+    return tx.$queryRawTyped(lockPurchaseOrderByItemId(purchaseOrderItemId));
+  }
+
+  /** 입고할 발주 품목: 원료 코드·기본 야드와 같은 발주의 모든 품목 입고 기록(미입고량·발주 상태 계산용) */
+  findPurchaseOrderItemForReceipt(tx: Tx, id: number) {
+    return tx.purchaseOrderItem.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        itemId: true,
+        orderedTon: true,
+        item: { select: { itemCode: true, defaultYardId: true } },
+        purchaseOrder: {
+          select: { id: true, purchaseOrderNo: true, purchaseOrderStatus: true, purchaseOrderItems: { select: { id: true, orderedTon: true, goodsReceipts: { select: { receivedTon: true } } } } },
+        },
+      },
+    });
+  }
+
+  createGoodsReceipt(tx: Tx, data: { goodsReceiptNo: string; purchaseOrderItemId: number; receivedTon: Prisma.Decimal; receivedDate: Date }) {
+    return tx.goodsReceipt.create({ data, select: { id: true } });
+  }
+
+  /** 입고 1건 = 원료 LOT 1개. 처음 양·잔량 = 입고량 */
+  createRawMaterialLot(tx: Tx, data: { lotNo: string; itemId: number; goodsReceiptId: number; yardId: number; ton: Prisma.Decimal }) {
+    return tx.lot.create({
+      data: { lotNo: data.lotNo, lotType: LOT_TYPE.RAW_MATERIAL, itemId: data.itemId, goodsReceiptId: data.goodsReceiptId, yardId: data.yardId, lotStatus: LOT_STATUS.AVAILABLE, initialTon: data.ton, remainingTon: data.ton },
+      select: { id: true, lotNo: true },
+    });
+  }
+
+  updatePurchaseOrderStatus(tx: Tx, id: number, purchaseOrderStatus: PurchaseOrderStatus) {
+    return tx.purchaseOrder.update({ where: { id }, data: { purchaseOrderStatus } });
+  }
+
+  countGoodsReceipts(tx: Tx, purchaseOrderId?: number) {
+    return tx.goodsReceipt.count({ where: goodsReceiptWhereOf(purchaseOrderId) });
+  }
+
+  findGoodsReceipts(tx: Tx, purchaseOrderId: number | undefined, page: { skip: number; take: number }) {
+    return tx.goodsReceipt.findMany({ where: goodsReceiptWhereOf(purchaseOrderId), include: goodsReceiptInclude, orderBy: { id: 'desc' }, skip: page.skip, take: page.take });
+  }
+
+  findGoodsReceipt(tx: Tx, id: number) {
+    return tx.goodsReceipt.findUniqueOrThrow({ where: { id }, include: goodsReceiptInclude });
   }
 }
