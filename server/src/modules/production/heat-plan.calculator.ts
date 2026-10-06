@@ -49,6 +49,20 @@ export function calcHeatPlan(input: HeatPlanInput): HeatPlan {
   };
 }
 
+/**
+ * 히트 1개(용강 톤)에서 연주로 나오는 슬래브 매수 = floor(용강 톤 × 연주 수율 ÷ 슬래브 1매 이론중량).
+ * 계획 단계에서는 히트 용량, 연주 실적에서는 그 히트의 실제 톤을 넣는다 (BP-PRD-02 "히트 생산량 초과 산출 차단").
+ */
+export function slabQtyFromHeat(heatTon: Prisma.Decimal | string, castingYieldRate: Prisma.Decimal | string, slabTheoreticalWeightTon: Prisma.Decimal | string): number {
+  return D(heatTon).mul(D(castingYieldRate)).div(D(slabTheoreticalWeightTon)).floor().toNumber();
+}
+
+/** 계획 슬래브 매수와 예상 여재 (4.4에 없는 값이라 정했다 — 히트 단위 생산으로 수주보다 많이 나오는 슬래브) */
+export function plannedSlabQtyOf(input: { slabQtyPerHeat: number; heatCount: number; shortageQty: number }): { plannedSlabQty: number; expectedSurplusSlabQty: number } {
+  const plannedSlabQty = input.slabQtyPerHeat * input.heatCount;
+  return { plannedSlabQty, expectedSurplusSlabQty: Math.max(0, plannedSlabQty - input.shortageQty) };
+}
+
 /** 열연 수율 = 코일 이론중량 ÷ 슬래브 이론중량 (저장하지 않음) */
 export function hotRollingYieldRateOf(coilTheoreticalWeightTon: Prisma.Decimal | string, slabTheoreticalWeightTon: Prisma.Decimal | string): Prisma.Decimal {
   return D(coilTheoreticalWeightTon).div(D(slabTheoreticalWeightTon));

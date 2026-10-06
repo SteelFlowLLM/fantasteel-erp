@@ -11,4 +11,5 @@ export * from './dashboard';
 export * from './inventory';
 export * from './purchasing';
 export * from './master-data';
+export * from './production';
 export * from './lot';
