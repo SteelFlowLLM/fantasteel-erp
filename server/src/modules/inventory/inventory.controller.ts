@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { AllocationRecommendation, AllocationView, AuthUser, ShipmentAllocationCandidates } from '@fantasteel/shared';
+import type { AllocationRecommendation, InventoryOverview, AllocationView, AuthUser, ShipmentAllocationCandidates } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AllocationCandidatesQuery, ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
+import { AllocationCandidatesQuery, ConfirmAllocationDto, ListAllocationsQuery, ListInventoriesQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
 import { InventoryService } from './inventory.service';
 
 /**
@@ -11,6 +11,12 @@ import { InventoryService } from './inventory.service';
 @Controller()
 export class InventoryController {
   constructor(private readonly service: InventoryService) {}
+
+  /** 재고 조회: 재고 메뉴는 로그인한 전 역할이 보므로 권한 데코레이터를 두지 않는다 */
+  @Get('inventories')
+  listInventories(@Query() query: ListInventoriesQuery): Promise<InventoryOverview> {
+    return this.service.listInventories(query);
+  }
 
   @Get('allocations')
   listAllocations(@CurrentUser() user: AuthUser, @Query() query: ListAllocationsQuery): Promise<AllocationView[]> {
