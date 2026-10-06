@@ -44,6 +44,7 @@
 
 - "또는 부서장"인 조회 API는 데코레이터 하나로 표현할 수 없다. 데코레이터 없이 service에서 `hasPermission(user, {permission: 'PURCHASE_REQUISITION_CREATE', level: 'VIEW'}) || user.headDepartmentIds.length > 0`로 확인하고, 부서장은 자기 부서원의 요청만 보이게 거른다.
 - [권한표]: 구매 USE(3종), 생산 PR VIEW, 물류 입고 VIEW, 관리자 VIEW. 승인 권한 코드는 없다(REQ-AUTH-004).
+- ERD에 칸이 없는 값은 작업 로그(가장 최근 이벤트)에서 읽어 응답에 넣는다: 구매요청 `rejectedAt`(REJECTED일 때 `PURCHASE_REQUISITION_REJECTED` 시각), 발주 `orderedEmployeeName`(`PURCHASE_ORDER_CREATED` 사원), 입고 `confirmedEmployeeName`(`GOODS_RECEIPT_CONFIRMED` 사원).
 - [CSV]에 같은 경로 행이 두 벌(12.2 명시 행 + 긴 비고 행) 있다. 내용은 같고 비고만 다르다.
 
 ## 4. 업무 규칙

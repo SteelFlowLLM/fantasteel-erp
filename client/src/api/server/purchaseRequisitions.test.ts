@@ -35,6 +35,7 @@ const summary: PurchaseRequisitionSummary = {
   productionPlanNo: 'PP-2610-0001',
   actionDraftId: null,
   purchaseOrderNo: null,
+  rejectedAt: null,
   createdAt: '2026-10-06T01:00:00.000Z',
   updatedAt: '2026-10-06T01:00:00.000Z',
 };
@@ -46,8 +47,9 @@ afterEach(() => {
 });
 
 describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions.ts)', () => {
-  it('목록: 출처를 계산하고 원료·요청자·부서 id를 화면 id로 맞추며 발주번호를 그대로 둔다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/purchase-requisitions' ? ok(page([{ ...summary, purchaseOrderNo: 'PO-2610-0001' }, { ...summary, id: 902, productionPlanId: null, actionDraftId: 5 }])) : undefined));
+  it('목록: 출처를 계산하고 원료·요청자·부서 id를 화면 id로 맞추며 발주번호·반려 일시를 그대로 둔다', async () => {
+    const rejected = { ...summary, id: 902, purchaseRequisitionStatus: 'REJECTED' as const, productionPlanId: null, actionDraftId: 5, rejectedAt: '2026-10-06T02:00:00.000Z' };
+    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/purchase-requisitions' ? ok(page([{ ...summary, purchaseOrderNo: 'PO-2610-0001' }, rejected])) : undefined));
     const rows = await purchaseRequisitionApi.list();
 
     expect(rows.map((r) => r.source)).toEqual(['MRP', 'MESSAGE']);
@@ -59,6 +61,7 @@ describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions
       purchaseOrderNo: 'PO-2610-0001',
       rejectedAt: null,
     });
+    expect(rows[1].rejectedAt).toBe('2026-10-06T02:00:00.000Z');
   });
 
   it('상세: 요청자 본인이면 isRequester, 승인권자(구매부장)가 보면 canApprove', async () => {

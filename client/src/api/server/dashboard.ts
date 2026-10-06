@@ -1,5 +1,5 @@
 // 대시보드 위젯 ↔ 서버 API (server/src/modules/dashboard). 서버가 데이터를 주는 영업 위젯 3개만 바꾼다.
-// 나머지 위젯(작업 로그·수율·원료·불합격률 …)은 아직 가짜 DB를 읽는다.
+// 구매 위젯 2개(원료 잔량 대비 소요·구매 진행)는 api/dashboard.ts가 구매·MRP 어댑터로 읽는다. 나머지(작업 로그·수율·불합격률 …)는 아직 가짜 DB를 읽는다.
 import type { OrderFulfillmentWidget, ProcessFlowWidget, ProductStockWidget } from '@fantasteel/shared';
 import type { OrderFulfillmentData, ProcessFlowData, ProductStockData } from '@/api/dashboard';
 import { serverRequest } from '@/api/http';

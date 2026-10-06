@@ -1,6 +1,5 @@
 // 발주·입고 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 발주·발주 품목·입고·공급업체 id는 서버 id를 그대로 쓰고, 원료 id만 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
-// 서버에 없어 비워 두는 것: 발주자·입고 확정자 이름(작업 로그에만 있다).
 import type { GoodsReceiptView as ServerGoodsReceiptView, PageResult, PurchaseOrderView as ServerPurchaseOrderView } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
 import type { GoodsReceiptInput, GoodsReceiptResult, GoodsReceiptView } from '@/api/goodsReceipts';
@@ -41,7 +40,7 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
     supplierId: po.supplierId,
     supplierName: po.supplierName,
     purchaseOrderStatus: po.purchaseOrderStatus,
-    orderedEmployeeName: null,
+    orderedEmployeeName: po.orderedEmployeeName,
     createdAt: po.createdAt,
     items: po.items.map((i) => ({
       id: i.purchaseOrderItemId,
@@ -63,7 +62,7 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
 }
 
 function toReceiptView(g: ServerGoodsReceiptView, supplierNameOf: ReadonlyMap<number, string>): GoodsReceiptView {
-  return { ...g, itemId: mockItemIdOf(g.itemCode, g.itemId), supplierName: supplierNameOf.get(g.purchaseOrderId) ?? '', confirmedEmployeeName: null };
+  return { ...g, itemId: mockItemIdOf(g.itemCode, g.itemId), supplierName: supplierNameOf.get(g.purchaseOrderId) ?? '' };
 }
 
 /** 이미 만든 발주가 있으면 오류 문구에 덧붙인다 (서버는 공급업체마다 따로 거래라 앞의 발주는 남는다) */

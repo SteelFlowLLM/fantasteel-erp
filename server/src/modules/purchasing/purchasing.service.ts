@@ -52,6 +52,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const TON_PATTERN = /^\d{1,9}(\.\d{1,3})?$/;
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
+const isRejected = (row: { purchaseRequisitionStatus: string }) => row.purchaseRequisitionStatus === PURCHASE_REQUISITION_STATUS.REJECTED;
 const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && dateOnly(new Date(`${s}T00:00:00.000Z`)) === s;
 
 /** 등록·재요청이 함께 쓰는 값 검사. Message → ERP 초안 payload는 DTO를 거치지 않아 여기서 본다 */
@@ -142,14 +143,15 @@ export class PurchasingService {
     const page = query.page ?? 1;
     const size = query.size ?? DEFAULT_PAGE_SIZE;
     const [total, rows] = await Promise.all([this.repository.countRequisitions(this.prisma, filter), this.repository.findRequisitions(this.prisma, filter, { skip: (page - 1) * size, take: size })]);
-    return { items: rows.map((row) => this.toSummary(row)), page, size, total };
+    const rejected = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, 'purchase_requisition', rows.filter(isRejected).map((r) => r.id));
+    return { items: rows.map((row) => this.toSummary(row, rejected.get(row.id)?.at ?? null)), page, size, total };
   }
 
   /** 권한(VIEW)이 있거나 그 요청의 승인권자(요청자 소속 부서의 부서장)만 본다 */
   async requisitionDetail(user: AuthUser, id: number): Promise<PurchaseRequisitionDetail> {
     const row = await this.mustFindRequisition(this.prisma, id);
     if (!this.canViewAll(user) && !user.headDepartmentIds.includes(row.requester.departmentId)) throw new AppException('COM-002');
-    return this.toDetail(row);
+    return this.detailOf(this.prisma, row);
   }
 
   // ── 등록 (REQ-PUR-001) ────────────────────────────────
@@ -262,13 +264,15 @@ export class PurchasingService {
     const page = query.page ?? 1;
     const size = query.size ?? DEFAULT_PAGE_SIZE;
     const [total, rows] = await Promise.all([this.repository.countPurchaseOrders(this.prisma, filter), this.repository.findPurchaseOrders(this.prisma, filter, { skip: (page - 1) * size, take: size })]);
-    return { items: rows.map((row) => this.toPurchaseOrderView(row)), page, size, total };
+    const ordered = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED, 'purchase_order', rows.map((r) => r.id));
+    return { items: rows.map((row) => this.toPurchaseOrderView(row, ordered.get(row.id)?.actorName ?? null)), page, size, total };
   }
 
   async purchaseOrderDetail(id: number): Promise<PurchaseOrderView> {
     const row = await this.repository.findPurchaseOrder(this.prisma, id);
     if (!row) throw new AppException('COM-003', '발주를 찾을 수 없어요');
-    return this.toPurchaseOrderView(row);
+    const ordered = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED, 'purchase_order', [row.id]);
+    return this.toPurchaseOrderView(row, ordered.get(row.id)?.actorName ?? null);
   }
 
   // ── 발주 등록 (REQ-PUR-003, BP-PUR-01) ────────────────
@@ -329,7 +333,7 @@ export class PurchasingService {
         items: items.map((i) => ({ purchaseRequisitionId: i.purchaseRequisitionId, purchaseRequisitionNo: i.pr.purchaseRequisitionNo, itemId: i.itemId, orderedTon: i.orderedTon.toFixed(3), expectedReceiptDate: dateOnly(i.expectedReceiptDate) })),
       },
     });
-    return this.toPurchaseOrderView(order);
+    return this.toPurchaseOrderView(order, user.employeeName);
   }
 
   // ── 입고 (REQ-PUR-004, BP-PUR-02) ─────────────────────
@@ -341,7 +345,8 @@ export class PurchasingService {
       this.repository.countGoodsReceipts(this.prisma, query.purchaseOrderId),
       this.repository.findGoodsReceipts(this.prisma, query.purchaseOrderId, { skip: (page - 1) * size, take: size }),
     ]);
-    return { items: rows.map((row) => this.toGoodsReceiptView(row)), page, size, total };
+    const confirmed = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED, 'goods_receipt', rows.map((r) => r.id));
+    return { items: rows.map((row) => this.toGoodsReceiptView(row, confirmed.get(row.id)?.actorName ?? null)), page, size, total };
   }
 
   /**
@@ -380,7 +385,7 @@ export class PurchasingService {
     const status = allReceived ? PURCHASE_ORDER_STATUS.RECEIVED : PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED;
     if (status !== order.purchaseOrderStatus) await this.repository.updatePurchaseOrderStatus(tx, order.id, status);
 
-    const view = this.toGoodsReceiptView(await this.repository.findGoodsReceipt(tx, receipt.id));
+    const view = this.toGoodsReceiptView(await this.repository.findGoodsReceipt(tx, receipt.id), user.employeeName);
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED,
       actor: user,
@@ -422,7 +427,7 @@ export class PurchasingService {
       after: snapshotOf(after),
       reason,
     });
-    return this.toDetail(after);
+    return this.detailOf(tx, after);
   }
 
   private async assertHasDepartmentHead(tx: Tx, departmentId: number): Promise<void> {
@@ -446,7 +451,23 @@ export class PurchasingService {
     return row;
   }
 
-  private toSummary(row: RequisitionRow): PurchaseRequisitionSummary {
+  /** 대상별 가장 최근 작업 로그의 사원·시각 (ERD에 칸이 없는 반려 일시·발주자·입고 확정자) */
+  private async latestEvents(tx: Tx, type: BusinessEventType, targetType: string, ids: number[]): Promise<Map<number, { actorName: string | null; at: Date }>> {
+    const latest = new Map<number, { actorName: string | null; at: Date }>();
+    if (ids.length === 0) return latest;
+    for (const e of await this.repository.findEvents(tx, type, targetType, ids)) {
+      if (!latest.has(e.targetId)) latest.set(e.targetId, { actorName: e.actorEmployee?.employeeName ?? null, at: e.createdAt });
+    }
+    return latest;
+  }
+
+  private async detailOf(tx: Tx, row: RequisitionRow): Promise<PurchaseRequisitionDetail> {
+    if (!isRejected(row)) return this.toDetail(row);
+    const rejected = await this.latestEvents(tx, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, 'purchase_requisition', [row.id]);
+    return this.toDetail(row, rejected.get(row.id)?.at ?? null);
+  }
+
+  private toSummary(row: RequisitionRow, rejectedAt: Date | null = null): PurchaseRequisitionSummary {
     return {
       id: row.id,
       purchaseRequisitionNo: row.purchaseRequisitionNo,
@@ -469,15 +490,16 @@ export class PurchasingService {
       productionPlanNo: row.productionPlan?.productionPlanNo ?? null,
       actionDraftId: row.actionDraftId,
       purchaseOrderNo: row.purchaseOrderItem?.purchaseOrder.purchaseOrderNo ?? null,
+      rejectedAt: rejectedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
 
-  private toDetail(row: RequisitionRow): PurchaseRequisitionDetail {
+  private toDetail(row: RequisitionRow, rejectedAt: Date | null = null): PurchaseRequisitionDetail {
     const salesOrder = row.productionPlan?.salesOrderItem?.salesOrder ?? null;
     return {
-      ...this.toSummary(row),
+      ...this.toSummary(row, rejectedAt),
       requestReason: row.requestReason,
       rejectReason: row.rejectReason,
       salesOrderId: salesOrder?.id ?? null,
@@ -485,7 +507,7 @@ export class PurchasingService {
     };
   }
 
-  private toGoodsReceiptView(row: GoodsReceiptRow): GoodsReceiptView {
+  private toGoodsReceiptView(row: GoodsReceiptRow, confirmedEmployeeName: string | null): GoodsReceiptView {
     return {
       id: row.id,
       goodsReceiptNo: row.goodsReceiptNo,
@@ -501,11 +523,12 @@ export class PurchasingService {
       lotNo: row.lot?.lotNo ?? null,
       yardId: row.lot?.yardId ?? null,
       yardName: row.lot?.yard?.yardName ?? null,
+      confirmedEmployeeName,
       createdAt: row.createdAt.toISOString(),
     };
   }
 
-  private toPurchaseOrderView(row: PurchaseOrderRow): PurchaseOrderView {
+  private toPurchaseOrderView(row: PurchaseOrderRow, orderedEmployeeName: string | null): PurchaseOrderView {
     const zero = new Prisma.Decimal(0);
     const lines = row.purchaseOrderItems.map((line) => {
       const received = line.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), zero);
@@ -518,6 +541,7 @@ export class PurchasingService {
       purchaseOrderStatus: row.purchaseOrderStatus as PurchaseOrderStatus,
       supplierId: row.supplierId,
       supplierName: row.supplier.supplierName,
+      orderedEmployeeName,
       totalOrderedTon: total((l) => l.line.orderedTon),
       totalReceivedTon: total((l) => l.received),
       totalRemainingTon: total((l) => l.remaining),

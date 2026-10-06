@@ -79,7 +79,11 @@ describe('구매요청 승인·반려 (REQ-PUR-002, REQ-AUTH-004)', () => {
     const rejected = await purchasing.reject(purchaseHead, id, { rejectReason: ' 수량 과다 ' });
 
     expect(rejected).toEqual(expect.objectContaining({ purchaseRequisitionStatus: 'REJECTED', approverId: purchaseHead.employeeId, approvedAt: null, rejectReason: '수량 과다' }));
-    expect((await eventsOf(id)).at(-1)).toEqual(expect.objectContaining({ businessEventType: BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, reason: '수량 과다' }));
+    const event = (await eventsOf(id)).at(-1);
+    expect(event).toEqual(expect.objectContaining({ businessEventType: BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, reason: '수량 과다' }));
+    // 반려 일시는 ERD에 칸이 없어 반려 작업 로그 시각을 준다 (상세·목록 모두)
+    expect(rejected.rejectedAt).toBe(event?.createdAt.toISOString());
+    expect((await purchasing.listRequisitions(purchaseHead, { size: 100 })).items.find((r) => r.id === id)?.rejectedAt).toBe(event?.createdAt.toISOString());
   });
 
   it('반려 사유가 비어 있으면 COM-004', async () => {
