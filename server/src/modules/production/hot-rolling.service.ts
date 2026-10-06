@@ -3,7 +3,9 @@ import {
   ALLOCATION_STATUS,
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
+  LOT_STATUS,
   LOT_TYPE,
+  PROCESS_TYPE,
   PRODUCTION_PLAN_STATUS,
   type AuthUser,
   type HotRollingDetail,
@@ -14,6 +16,8 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import type { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
 import { toPlanLot, toPlanSummary } from './production-plan.mapper';
+import { toResultView } from './production-result.mapper';
+import { ProductionResultRepository } from './production-result.repository';
 import { ProductionService } from './production.service';
 import { ProductionRepository } from './production.repository';
 
@@ -29,6 +33,7 @@ export class HotRollingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly plans: ProductionRepository,
+    private readonly resultRepository: ProductionResultRepository,
     private readonly production: ProductionService,
     private readonly businessEventRecorder: BusinessEventRecorder,
     @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
@@ -46,7 +51,7 @@ export class HotRollingService {
       this.plans.findInventory(tx, slabItemId),
       this.inventory.hotRollingCandidates(tx, slabItemId),
     ]);
-    const coils = lots.filter((l) => l.lotType === LOT_TYPE.COIL).map(toPlanLot);
+    const coils = lots.filter((l) => l.lotType === LOT_TYPE.COIL).map((l) => ({ ...toPlanLot(l), hasConfirmedAllocation: l.allocations.length > 0 }));
     const failedCoilQty = coils.filter((c) => c.judgement === 'FAIL').length;
     const usableCoilQty = coils.length - failedCoilQty;
     const confirmedAllocationQty = allocations.filter((a) => a.allocationStatus === ALLOCATION_STATUS.CONFIRMED).length;
@@ -62,9 +67,30 @@ export class HotRollingService {
     const notRollableReason =
       plan.salesOrderItemId === null ? '수주 연결이 없는 코일 계획은 열연하지 않아요. 남은 합격 슬래브는 여재예요' : !open ? '완료·취소된 계획이에요' : null;
     const recommendableQty = notRollableReason === null ? Math.min(neededQty, Math.max(0, pool.availableQty)) : 0;
-    const owners = await this.plans.findPlanIdsOfLots(tx, candidates.map((c) => c.id));
+    const allocatedLotIds = allocations.map((a) => a.lotId);
+    const [owners, yards, allocatedLots, resultRows] = await Promise.all([
+      this.plans.findPlanIdsOfLots(tx, [...candidates.map((c) => c.id), ...allocatedLotIds]),
+      this.plans.findYardNames(tx),
+      this.plans.findLotsByIds(tx, allocatedLotIds),
+      this.resultRepository.findResults(tx, { productionPlanId, processType: PROCESS_TYPE.HOT_ROLLING }),
+    ]);
+    const planNos = await this.plans.findPlanNos(tx, [...new Set([...owners.values()].flatMap((id) => (id === null ? [] : [id])))]);
+    const sourcePlanNoOf = (lotId: number) => {
+      const owner = owners.get(lotId);
+      return owner === undefined || owner === null ? null : (planNos.get(owner) ?? null);
+    };
+    const allocatedLotById = new Map(allocatedLots.map((l) => [l.id, toPlanLot(l)]));
+    const resultEvents = await this.resultRepository.findResultEvents(tx, resultRows.map((r) => r.id));
+    const item = await this.plans.findItemForPlan(tx, plan.itemId);
     return {
       plan: toPlanSummary(plan),
+      coilItem: { id: plan.itemId, itemCode: plan.item.itemCode, itemName: plan.item.itemName, theoreticalWeightTon: basis.theoreticalWeightTon.toFixed(3) },
+      slabItem: {
+        id: slabItemId,
+        itemCode: basis.slabItem.itemCode,
+        itemName: item?.specMappingAsCoilItem?.slabItem.itemName ?? basis.slabItem.itemCode,
+        theoreticalWeightTon: basis.slabItem.theoreticalWeightTon.toFixed(3),
+      },
       slabItemId,
       slabItemCode: basis.slabItem.itemCode,
       shortageQty: plan.shortageQty,
@@ -85,8 +111,25 @@ export class HotRollingService {
         fifoRank: index + 1,
         isRecommended: index < recommendableQty,
         isOwnPlan: owners.get(c.id) === productionPlanId,
+        sourcePlanNo: sourcePlanNoOf(c.id),
+        yardName: c.yard_id === null ? null : (yards.get(c.yard_id) ?? null),
       })),
       allocations,
+      rollingAllocations: allocations.map((a) => {
+        const lot = allocatedLotById.get(a.lotId);
+        return {
+          allocationId: a.id,
+          allocationStatus: a.allocationStatus,
+          lotId: a.lotId,
+          lotNo: a.lotNo,
+          producedDate: a.producedDate,
+          heatNo: a.heatNo,
+          sourcePlanNo: sourcePlanNoOf(a.lotId),
+          confirmedAt: a.createdAt,
+          isRollable: a.allocationStatus === ALLOCATION_STATUS.CONFIRMED && lot?.lotStatus === LOT_STATUS.AVAILABLE && lot.judgement === 'PASS',
+        };
+      }),
+      results: resultRows.map((r) => toResultView(r, resultEvents)).reverse(),
       coils,
     };
   }

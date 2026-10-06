@@ -2,9 +2,12 @@
 // 화면 이름은 '작업 실적'(용어 사전 TRM-047, PLAN 6-1). 작업 상태값은 없다: started_at / completed_at (null = 진행 중).
 // 변경은 모두 PRODUCTION_RESULT_CONFIRM 사용 권한. LOT 채번·FIFO 차감·LOT 관계·작업 로그·계획 상태·진행 중 작업 확인은 core 서비스가 처리한다.
 // 열연 실적은 열연 투입 배정 화면(api/rolling.ts)에서 등록한다 (한 곳에서만).
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/production.ts).
 import { INSPECTION_RESULT, PERMISSION, type InspectionResult, type ProcessType, type RawMaterialType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverProductionResultApi } from '@/api/server/production';
 import { decSum } from '@/lib/decimal';
 import { sortFifo } from '@/lib/fifo';
 import { hotMetalTonFor } from '@/lib/mrp';
@@ -225,7 +228,9 @@ const codeOf = (value: string | null | undefined): string => (value ?? '').trim(
 export const productionResultApi = {
   /** 작업 실적 화면의 계획 목록 (취소 제외, 최근 것 먼저, 고객사 포함) */
   plans: (): Promise<ProductionPlanListRow[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverProductionResultApi.plans()
+      : mockQuery((tables) => {
       requireActor(tables, { view: RESULT_VIEW });
       return withCustomerNames(
         tables,
@@ -235,14 +240,18 @@ export const productionResultApi = {
 
   /** 계획 하나의 실적·입력 기준값 */
   work: (productionPlanId: number): Promise<WorkContext> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverProductionResultApi.work(productionPlanId)
+      : mockQuery((tables) => {
       requireActor(tables, { view: RESULT_VIEW });
       return workContextOf(tables, productionPlanId);
     }),
 
   /** 작업 시작만 기록 (completed_at = null, PRODUCTION_STARTED). 첫 실적이면 계획이 진행중이 된다. */
   startWork: (input: StartWorkInput): Promise<{ productionResultId: number }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionResultApi.startWork(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       const result = startWork(tx, userActor(actor.employee.id), {
         productionPlanId: input.productionPlanId,
@@ -257,7 +266,9 @@ export const productionResultApi = {
 
   /** 제선 실적 → 용선 LOT HM-고로-YYMMDD-NN, 원료 FIFO 차감(입고일 순), 원료→용선 기간 기반 LOT 관계 */
   registerIronmaking: (input: IronmakingResultInput): Promise<RegisteredResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionResultApi.registerIronmaking(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       const { result, hotMetalLot } = registerIronmaking(tx, userActor(actor.employee.id), { ...input, blastFurnaceCode: codeOf(input.blastFurnaceCode) });
       return { productionResultId: result.id, outputLotNos: [hotMetalLot.lotNo] };
@@ -265,7 +276,9 @@ export const productionResultApi = {
 
   /** 제강 실적 → 히트 HT-전로-YYMMDD-NNN (성분 검사 대상), 용선·합금철 FIFO 투입 */
   registerSteelmaking: (input: SteelmakingResultInput): Promise<RegisteredResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionResultApi.registerSteelmaking(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       const { result, heatLot } = registerSteelmaking(tx, userActor(actor.employee.id), { ...input, converterCode: codeOf(input.converterCode) });
       return { productionResultId: result.id, outputLotNos: [heatLot.lotNo] };
@@ -273,7 +286,9 @@ export const productionResultApi = {
 
   /** 연주 실적 → 슬래브 LOT 히트번호-SS (표면·치수 검사 대상). 히트에서 나올 수 있는 매수를 넘으면 거부 */
   registerCasting: (input: CastingResultInput): Promise<RegisteredResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionResultApi.registerCasting(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       if (!Number.isInteger(input.outputQty)) inputError('outputQty', '슬래브 생산 매수는 1 이상의 정수로 입력해 주세요');
       const { result, slabLots } = registerCasting(tx, userActor(actor.employee.id), input);
@@ -285,7 +300,9 @@ export const productionResultApi = {
    * 같은 시드·같은 상태 → 같은 결과. 검사값은 넣지 않는다. 작업 시작만 한 실적이 있으면 먼저 완료해야 한다.
    */
   simulate: (input: SimulateInput): Promise<SimulationResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionResultApi.simulate(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: RESULT_USE });
       const seed = input.randomSeed ?? null;
       if (seed !== null && (!Number.isInteger(seed) || seed < 0 || seed > MAX_RANDOM_SEED)) {

@@ -2,9 +2,12 @@
 // - 코일 계획 → 대응 슬래브 규격·필요 매수. FIFO 추천(생산완료일 → LOT 번호)은 저장하지 않고 확정 때 작업 로그로 남긴다(core).
 // - 판매 ACTIVE 예약 몫은 침범하지 않는다(예약 가용 안에서만). '귀속' 단계는 없다.
 // - 배정 확정·변경·해제 = HOT_ROLLING_ALLOCATE 사용 권한. 열연 실적(슬래브 소비 → 코일) = PRODUCTION_RESULT_CONFIRM 사용 권한.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/production.ts).
 import { PERMISSION, type LotStatus, type ProductionPlanStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverRollingApi } from '@/api/server/production';
 import { lotQualityOf, type LotQuality } from '@/api/production';
 import { sortFifo } from '@/lib/fifo';
 import type { MockTables } from '@/mock/schema';
@@ -175,7 +178,9 @@ export interface HotRollingResultInput {
 export const rollingApi = {
   /** 코일 계획 목록 (최근 것 먼저). 진행 중(계획·진행중)이 먼저 오도록 화면에서 묶는다. */
   plans: (): Promise<RollingPlanListRow[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverRollingApi.plans()
+      : mockQuery((tables) => {
       requireActor(tables, { view: ROLLING_VIEW });
       const rows: RollingPlanListRow[] = [];
       const coilPlans = tables.productionPlan.filter((p) => findById(tables, 'item', p.itemId)?.itemType === 'COIL').sort((a, b) => b.id - a.id);
@@ -206,14 +211,18 @@ export const rollingApi = {
 
   /** 코일 계획 하나: 필요 매수·슬래브 풀·FIFO 추천·확정 배정·열연 실적·코일 */
   detail: (productionPlanId: number): Promise<RollingDetail> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverRollingApi.detail(productionPlanId)
+      : mockQuery((tables) => {
       requireActor(tables, { view: ROLLING_VIEW });
       return rollingDetailOf(tables, productionPlanId);
     }),
 
   /** 배정 확정 (HOT_ROLLING CONFIRMED). INV-001 필요·예약 가용 초과 / INV-002 미합격 / INV-003 이미 배정 / INV-004 소진 */
   confirm: (input: ConfirmRollingInput): Promise<{ allocatedQty: number }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverRollingApi.confirm(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: ROLLING_USE });
       const rows = confirmRollingAllocations(tx, userActor(actor.employee.id), { productionPlanId: input.productionPlanId, lotIds: input.lotIds });
       return { allocatedQty: rows.length };
@@ -221,7 +230,9 @@ export const rollingApi = {
 
   /** 배정 변경: 기존 배정 해제 + 새 LOT 배정을 한 번에, 사유 필수 (BP-INV-01) */
   change: (input: ChangeRollingInput): Promise<{ allocationId: number }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverRollingApi.change(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: ROLLING_USE });
       assertHotRollingAllocation(tx.tables, input.allocationId);
       const row = changeAllocation(tx, userActor(actor.employee.id), input);
@@ -230,7 +241,9 @@ export const rollingApi = {
 
   /** 배정 해제 (소진된 배정은 INV-004) */
   release: (input: { allocationId: number; reasonText?: string | null }): Promise<{ allocationId: number }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverRollingApi.release(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: ROLLING_USE });
       assertHotRollingAllocation(tx.tables, input.allocationId);
       const row = releaseAllocation(tx, userActor(actor.employee.id), { allocationId: input.allocationId, reasonText: input.reasonText?.trim().slice(0, 500) || null });
@@ -239,7 +252,9 @@ export const rollingApi = {
 
   /** 열연 실적: 배정 슬래브 소비 → 슬래브 1매 = 코일 1개 `C+슬래브번호`(HT- 제외), 코일 검사 대상 */
   registerHotRolling: (input: HotRollingResultInput): Promise<{ productionResultId: number; coilNos: string[] }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverRollingApi.registerHotRolling(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_RESULT_CONFIRM] });
       const { coilLots, resultId } = registerHotRolling(tx, userActor(actor.employee.id), {
         productionPlanId: input.productionPlanId,

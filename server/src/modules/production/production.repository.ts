@@ -23,7 +23,16 @@ export const planSummarySelect = {
       orderedQty: true,
       dueDate: true,
       salesOrderItemStatus: true,
-      salesOrder: { select: { id: true, salesOrderNo: true, customer: { select: { customerName: true } } } },
+      salesOrder: {
+        select: {
+          id: true,
+          salesOrderNo: true,
+          customer: { select: { customerName: true } },
+          ownerEmployee: { select: { employeeName: true } },
+          // 수주 안 품목 순번(ERD에 줄 번호가 없어 품목 id 순으로 센다)
+          salesOrderItems: { select: { id: true }, orderBy: { id: 'asc' } },
+        },
+      },
     },
   },
 } satisfies Prisma.ProductionPlanSelect;
@@ -41,8 +50,12 @@ export const planLotSelect = {
   initialTon: true,
   producedDate: true,
   productionResultId: true,
+  remainingTon: true,
+  dispositionStatus: true,
+  yard: { select: { yardName: true } },
+  allocations: { where: { allocationStatus: 'CONFIRMED' }, select: { allocationPurpose: true } },
   item: { select: { itemCode: true } },
-  productionResult: { select: { processType: true, productionPlanId: true } },
+  productionResult: { select: { processType: true, productionPlanId: true, converterCode: true, completedAt: true } },
   qualityInspection: inspectionSelect,
   lotRelationsAsChildLot: {
     select: {
@@ -84,7 +97,8 @@ export class ProductionRepository {
         itemType: true,
         steelGradeId: true,
         theoreticalWeightTon: true,
-        specMappingAsCoilItem: { select: { slabItem: { select: { id: true, itemCode: true, theoreticalWeightTon: true } } } },
+        itemName: true,
+        specMappingAsCoilItem: { select: { slabItem: { select: { id: true, itemCode: true, itemName: true, theoreticalWeightTon: true } } } },
       },
     });
   }
@@ -162,9 +176,43 @@ export class ProductionRepository {
         orderedQty: true,
         salesOrderItemStatus: true,
         reservations: { select: { reservationStatus: true, reservedQty: true } },
-        productionPlans: { select: { id: true, productionPlanStatus: true, shortageQty: true, itemId: true }, orderBy: { id: 'asc' } },
+        productionPlans: { select: { id: true, productionPlanNo: true, productionPlanStatus: true, isReproduction: true, shortageQty: true, itemId: true, item: { select: { itemType: true } } }, orderBy: { id: 'asc' } },
+        salesOrder: { select: { salesOrderNo: true, salesOrderItems: { select: { id: true }, orderBy: { id: 'asc' } } } },
       },
     });
+  }
+
+  /** LOT과 판정 (계획과 상관없이 id로) */
+  findLotsByIds(tx: Tx, lotIds: number[]) {
+    if (lotIds.length === 0) return Promise.resolve([]);
+    return tx.lot.findMany({ where: { id: { in: lotIds } }, select: planLotSelect, orderBy: { id: 'asc' } });
+  }
+
+  /** 계획 번호 */
+  async findPlanNos(tx: Tx, planIds: number[]): Promise<Map<number, string>> {
+    if (planIds.length === 0) return new Map();
+    const rows = await tx.productionPlan.findMany({ where: { id: { in: planIds } }, select: { id: true, productionPlanNo: true } });
+    return new Map(rows.map((r) => [r.id, r.productionPlanNo]));
+  }
+
+  async findYardNames(tx: Tx): Promise<Map<number, string>> {
+    return new Map((await tx.yard.findMany({ select: { id: true, yardName: true } })).map((y) => [y.id, y.yardName]));
+  }
+
+  /** 계획 생성·취소 작업 로그 (등록자·취소 시각) */
+  findPlanEvents(tx: Tx, productionPlanId: number) {
+    return tx.businessEvent.findMany({
+      where: { targetType: 'production_plan', targetId: productionPlanId, businessEventType: { in: ['PRODUCTION_PLAN_CREATED', 'REPRODUCTION_PLAN_CREATED', 'PRODUCTION_PLAN_CANCELLED'] } },
+      select: { businessEventType: true, createdAt: true, actorEmployee: { select: { employeeName: true } } },
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  /** 계획들의 확정 열연 배정 수 */
+  async countConfirmedRollingByPlans(tx: Tx, productionPlanIds: number[]): Promise<Map<number, number>> {
+    if (productionPlanIds.length === 0) return new Map();
+    const rows = await tx.allocation.groupBy({ by: ['productionPlanId'], where: { productionPlanId: { in: productionPlanIds }, allocationPurpose: 'HOT_ROLLING', allocationStatus: 'CONFIRMED' }, _count: { _all: true } });
+    return new Map(rows.flatMap((r) => (r.productionPlanId === null ? [] : [[r.productionPlanId, r._count._all] as const])));
   }
 
   /** LOT을 만든 생산계획 (열연 후보가 이 계획 생산분인지 표시) */

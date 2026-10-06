@@ -40,8 +40,11 @@ export interface ReproductionInput {
   reservationAvailableQty: number;
 }
 
+/** 4.5 계산값 (수주 번호·계획 목록 같은 표시값은 서비스가 붙인다) */
+export type ReproductionNumbers = Pick<ReproductionCheck, 'salesOrderItemId' | 'orderedQty' | 'shippedQty' | 'activeReservedQty' | 'unsecuredQty' | 'openPlanRemainingQty' | 'additionalPlanQty' | 'reservationAvailableQty' | 'reproductionNeedQty'>;
+
 /** 4.5: 미출하 → 현재 미확보 → 추가 계획 필요, 14.1-6: 여재(예약 가용)로도 모자란 만큼만 재생산 */
-export function reproductionCheckOf(input: ReproductionInput): ReproductionCheck {
+export function reproductionCheckOf(input: ReproductionInput): ReproductionNumbers {
   const sumOf = (status: string) => input.reservations.filter((r) => r.reservationStatus === status).reduce((sum, r) => sum + r.reservedQty, 0);
   const closed = input.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED || input.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.SHIPPED;
   const shippedQty = sumOf(RESERVATION_STATUS.CONVERTED);

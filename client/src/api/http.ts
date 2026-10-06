@@ -12,7 +12,7 @@ import { getMockDb } from '@/mock/db';
 
 export type DataSource = 'mock' | 'server';
 
-/** 수주·출하·배정·대시보드 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
+/** 수주·출하·배정·대시보드·생산 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'server' ? 'server' : 'mock';
 }

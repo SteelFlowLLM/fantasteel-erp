@@ -1,5 +1,5 @@
 // 생산 모듈 응답 타입 (docs/backend/production.md). 톤은 소수 3자리 문자열, 수율은 소수 4자리 문자열, 매수는 정수.
-import type { InspectionResult, ItemType, LotStatus, LotType, ProcessType, ProductionPlanStatus, SalesOrderItemStatus } from './codes';
+import type { AllocationPurpose, AllocationStatus, DispositionStatus, InspectionResult, ItemType, LotStatus, LotType, ProcessType, ProductionPlanStatus, RawMaterialType, SalesOrderItemStatus } from './codes';
 import type { AllocationView } from './shipment';
 
 /** 생산계획 목록 한 줄 (GET /production-plans) */
@@ -24,6 +24,16 @@ export interface ProductionPlanSummary {
   customerName: string | null;
   /** 품목 납기 'YYYY-MM-DD' */
   dueDate: string | null;
+  /** 필요 용강 (지금 기준정보로 계산, 기준정보가 모자라면 null) */
+  requiredMoltenSteelTon: string | null;
+  /** 제강 실적으로 만든 히트 수 */
+  heatsMadeQty: number;
+  /** 연주까지 한 히트 수 */
+  heatsCastQty: number;
+  /** 계획 규격 제품 중 합격 매수 */
+  passedQty: number;
+  /** 진행 계획 잔여 목표 (4.5) */
+  remainingTargetQty: number;
   createdAt: string;
 }
 
@@ -91,6 +101,14 @@ export interface PlanLot {
   heatInspectionResult: InspectionResult | null;
   /** 히트는 자기 판정, 제품은 자기 + 상위 히트 판정 */
   judgement: LotJudgement;
+  /** 원료·용선 잔량 */
+  remainingTon: string | null;
+  dispositionStatus: DispositionStatus | null;
+  /** 확정(CONFIRMED) 배정의 목적. 없으면 null */
+  allocationPurpose: AllocationPurpose | null;
+  yardName: string | null;
+  /** 코일: 투입한 슬래브 번호 */
+  parentSlabNo: string | null;
 }
 
 /** 계획 진행 (분모를 함께 준다, 업무 프로세스 4.5) */
@@ -110,6 +128,31 @@ export interface PlanProgress {
   failedQty: number;
   /** 완료 시각이 없는 작업 실적 (작업 중) */
   openWorkCount: number;
+  /** 코일 계획: 불합격을 뺀 코일 */
+  usableCoilQty: number;
+  /** 코일 계획: 확정(CONFIRMED) 열연 배정 */
+  hotRollingAllocatedQty: number;
+  /** 코일 계획: 이 계획이 만든, 아직 열연할 수 있는 슬래브 (재고 상태·불합격 아님·미배정) */
+  ownRollableSlabQty: number;
+  allHeatsCast: boolean;
+  /** 진행 계획 잔여 목표 (4.5) */
+  remainingTargetQty: number;
+}
+
+/** 편성한 히트 한 줄 (편성 순번) */
+export interface PlanHeat {
+  seq: number;
+  /** 아직 만들지 않은 히트면 null */
+  heatLotId: number | null;
+  heatNo: string | null;
+  converterCode: string | null;
+  /** 제강 완료일 'YYYY-MM-DD' */
+  producedDate: string | null;
+  heatTon: string | null;
+  /** 히트 성분 판정. 히트가 없으면 null, 검사 전이면 PENDING */
+  inspectionResult: InspectionResult | null;
+  castDone: boolean;
+  slabQty: number;
 }
 
 /**
@@ -118,6 +161,15 @@ export interface PlanProgress {
  */
 export interface ReproductionCheck {
   salesOrderItemId: number;
+  salesOrderId: number;
+  salesOrderNo: string;
+  /** 수주 안 품목 순번 (품목 id 순, ERD에 줄 번호 칸이 없어 계산) */
+  lineNo: number;
+  salesOrderItemStatus: SalesOrderItemStatus;
+  /** 미출하 = 주문 − 출고 */
+  unshippedQty: number;
+  /** 연결 계획 (취소 제외) */
+  openPlans: { id: number; productionPlanNo: string; productionPlanStatus: ProductionPlanStatus; isReproduction: boolean; shortageQty: number; remainingTargetQty: number }[];
   orderedQty: number;
   shippedQty: number;
   activeReservedQty: number;
@@ -151,6 +203,13 @@ export interface ProductionPlanDetail extends ProductionPlanSummary {
   canConfirm: boolean;
   /** 이 계획의 작업 실적 (제강·연주·열연. 제선은 계획에 묶이지 않는다) */
   results: ProductionResultView[];
+  heats: PlanHeat[];
+  /** 계획을 만든 사원 (작업 로그) */
+  createdEmployeeName: string | null;
+  /** 취소 시각 (작업 로그) */
+  cancelledAt: string | null;
+  salesOrderOwnerName: string | null;
+  salesOrderLineNo: number | null;
   updatedAt: string;
 }
 
@@ -202,6 +261,10 @@ export interface ProductionResultView {
   startedHeatLotId: number | null;
   /** 실적을 등록(또는 시작)한 사원 */
   operatorName: string | null;
+  /** 실적 시뮬레이션으로 만든 실적 */
+  isSimulated: boolean;
+  /** 시뮬레이션 값 (작업 로그 after_data). 연주만 계획 매수·손실 */
+  simulation: { randomSeed: number | null; plannedQty: number | null; lossQty: number | null; sampleLossRate: string | null } | null;
 }
 
 /** 원료·합금철 잔량과 원단위 (실적 입력 화면) */
@@ -209,6 +272,7 @@ export interface RawMaterialStock {
   itemId: number;
   itemCode: string;
   itemName: string;
+  rawMaterialType: RawMaterialType;
   /** 철광석·석탄·석회석은 용선 1t당 t, 합금철은 용강 1t당 kg */
   consumptionRate: string;
   isKgPerTon: boolean;
@@ -252,7 +316,7 @@ export interface WorkContext {
   slabItemCode: string;
   slabTheoreticalWeightTon: string;
   /** 쓸 수 있는 용선 LOT (생산 순) */
-  hotMetalLots: { lotId: number; lotNo: string; remainingTon: string }[];
+  hotMetalLots: { lotId: number; lotNo: string; remainingTon: string; /** 제선 완료일 'YYYY-MM-DD' */ producedDate: string | null }[];
   hotMetalAvailableTon: string;
   ironmakingMaterials: RawMaterialStock[];
   ferroalloys: RawMaterialStock[];
@@ -279,11 +343,35 @@ export interface HotRollingCandidate {
   isRecommended: boolean;
   /** 이 계획이 만든 슬래브인지 (아니면 다른 계획의 여재) */
   isOwnPlan: boolean;
+  sourcePlanNo: string | null;
+  yardName: string | null;
+}
+
+/** 이 계획의 열연 배정 한 줄 */
+export interface HotRollingAllocation {
+  allocationId: number;
+  allocationStatus: AllocationStatus;
+  lotId: number;
+  lotNo: string;
+  producedDate: string | null;
+  heatNo: string | null;
+  sourcePlanNo: string | null;
+  /** 배정 확정 시각 */
+  confirmedAt: string;
+  /** 확정 배정이고 슬래브가 재고 상태·합격이라 지금 열연할 수 있는지 */
+  isRollable: boolean;
+}
+
+/** 만든 코일 */
+export interface HotRollingCoil extends PlanLot {
+  hasConfirmedAllocation: boolean;
 }
 
 /** 열연 투입 화면 (GET /production-plans/:id/hot-rolling) */
 export interface HotRollingDetail {
   plan: ProductionPlanSummary;
+  coilItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
+  slabItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
   slabItemId: number;
   slabItemCode: string;
   /** 부족 매수 = 만들 코일 수 */
@@ -304,8 +392,12 @@ export interface HotRollingDetail {
   notRollableReason: string | null;
   candidates: HotRollingCandidate[];
   allocations: AllocationView[];
+  /** 이 계획의 열연 배정 (상태 무관, 열연 가능 여부 포함) */
+  rollingAllocations: HotRollingAllocation[];
+  /** 이 계획의 열연 실적 */
+  results: ProductionResultView[];
   /** 이 계획의 열연 실적이 만든 코일 */
-  coils: PlanLot[];
+  coils: HotRollingCoil[];
 }
 
 // ── 실적 시뮬레이션 (REQ-PRD-007, BP-SEED-01) ─────────────

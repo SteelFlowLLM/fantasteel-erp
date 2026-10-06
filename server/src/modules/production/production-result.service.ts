@@ -19,13 +19,14 @@ import {
   type ProcessType,
   type ProductionResultView,
   type RawMaterialStock,
+  type RawMaterialType,
   type WorkContext,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { formatCoilNumber, formatSlabNumber } from '../../common/numbering/number-format';
 import { NumberingService } from '../../common/numbering/numbering.service';
-import { seoulDateOnly } from '../../common/time/seoul-date';
+import { seoulDateOnly, seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -128,13 +129,16 @@ export class ProductionResultService {
       itemId: c.rawMaterialItem.id,
       itemCode: c.rawMaterialItem.itemCode,
       itemName: c.rawMaterialItem.itemName,
+      rawMaterialType: c.rawMaterialItem.rawMaterialType as RawMaterialType,
       consumptionRate: c.consumptionRate.toFixed(4),
       isKgPerTon,
       remainingTon: ton3(await this.repository.sumRawMaterialRemaining(tx, c.rawMaterialItem.id)),
     });
     const ironmaking = consumptions.filter((c) => c.steelGradeId === null && c.rawMaterialItem.rawMaterialType !== RAW_MATERIAL_TYPE.FERROALLOY);
     const ferroalloys = consumptions.filter((c) => c.steelGradeId !== null && c.steelGradeId === basis.steelGradeId);
-    const open = [...ironOpen, ...planOpen];
+    // 제선 실적은 계획에 묶이지 않아, 작업 시작 로그에 이 계획을 남긴 제선만 보인다
+    const ironEvents = await this.repository.findResultEvents(tx, ironOpen.map((o) => o.id));
+    const open = [...ironOpen.filter((o) => this.planIdOfStart(ironEvents.filter((e) => e.targetId === o.id)) === productionPlanId), ...planOpen];
     const events = await this.repository.findResultEvents(tx, open.map((o) => o.id));
     const hotMetalAvailable = hotMetalLots.reduce((sum, l) => sum.add(l.remainingTon ?? '0'), new Prisma.Decimal(0));
     return {
@@ -151,7 +155,12 @@ export class ProductionResultService {
       slabItemId: basis.slabItem.id,
       slabItemCode: basis.slabItem.itemCode,
       slabTheoreticalWeightTon: ton3(basis.slabItem.theoreticalWeightTon),
-      hotMetalLots: hotMetalLots.map((l) => ({ lotId: l.id, lotNo: l.lotNo, remainingTon: ton3(l.remainingTon ?? new Prisma.Decimal(0)) })),
+      hotMetalLots: hotMetalLots.map((l) => ({
+        lotId: l.id,
+        lotNo: l.lotNo,
+        remainingTon: ton3(l.remainingTon ?? new Prisma.Decimal(0)),
+        producedDate: l.productionResult?.completedAt ? seoulToday(l.productionResult.completedAt) : null,
+      })),
       hotMetalAvailableTon: ton3(hotMetalAvailable),
       ironmakingMaterials: await Promise.all(ironmaking.map((c) => stockOf(c, false))),
       ferroalloys: await Promise.all(ferroalloys.map((c) => stockOf(c, true))),

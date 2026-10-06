@@ -25,7 +25,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import type { CancelProductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
 import { calcHeatPlan, hotRollingYieldRateOf, plannedSlabQtyOf, slabQtyFromHeat, type HeatPlan } from './heat-plan.calculator';
 import { reproductionCheckOf } from './plan-progress.calculator';
-import { planProgressOf, toPlanLot, toPlanSummary } from './production-plan.mapper';
+import { planHeatsOf, planProgressOf, toPlanLot, toPlanSummary } from './production-plan.mapper';
 import { toResultView } from './production-result.mapper';
 import { ProductionResultRepository } from './production-result.repository';
 import { ProductionRepository, type PlanLotRow } from './production.repository';
@@ -223,18 +223,39 @@ export class ProductionService {
       this.repository.findPlans(this.prisma, filter, { skip: (page - 1) * size, take: size }),
       this.repository.countPlans(this.prisma, filter),
     ]);
-    return { items: rows.map(toPlanSummary), page, size, total };
+    // 진행 값은 이 쪽 계획들의 LOT·열연 배정을 한 번에 읽어 계산한다
+    const ids = rows.map((r) => r.id);
+    const [lots, rolling] = await Promise.all([this.repository.findLotsOfPlans(this.prisma, ids), this.repository.countConfirmedRollingByPlans(this.prisma, ids)]);
+    const basisByItem = new Map<number, HeatPlanBasis | null>();
+    const items: ProductionPlanSummary[] = [];
+    for (const row of rows) {
+      if (!basisByItem.has(row.itemId)) basisByItem.set(row.itemId, await this.heatPlanBasisOf(this.prisma, row.itemId).catch(() => null));
+      const basis = basisByItem.get(row.itemId);
+      const progress = planProgressOf(
+        { ...row, itemType: row.item.itemType as ItemType, productionPlanStatus: row.productionPlanStatus as ProductionPlanStatus },
+        lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === row.id),
+        [],
+        rolling.get(row.id) ?? 0,
+      );
+      items.push(toPlanSummary(row, progress, basis ? calcHeatPlan(this.heatPlanInputOf(basis, row.shortageQty)).requiredMoltenSteelTon : null));
+    }
+    return { items, page, size, total };
   }
 
   async getPlanDetail(id: number, tx: Tx = this.prisma): Promise<ProductionPlanDetail> {
     const plan = await this.repository.findPlan(tx, id);
     if (!plan) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
-    const [lots, results, resultRows] = await Promise.all([
+    const [lots, results, resultRows, rolling, planEvents] = await Promise.all([
       this.repository.findLotsOfPlans(tx, [id]),
       this.repository.findResultsOfPlan(tx, id),
       this.results.findResults(tx, { productionPlanId: id }),
+      this.repository.countConfirmedRollingByPlans(tx, [id]),
+      this.repository.findPlanEvents(tx, id),
     ]);
-    const resultEvents = await this.results.findResultEvents(tx, resultRows.map((r) => r.id));
+    // 제선 실적은 계획에 묶이지 않지만 이 계획 때문에 한 것(작업 로그)은 함께 보인다
+    const ironmakingRows = await this.results.findResultsByIds(tx, await this.results.findIronmakingResultIdsOfPlan(tx, id));
+    const allResultRows = [...resultRows, ...ironmakingRows].sort((a, b) => b.id - a.id);
+    const resultEvents = await this.results.findResultEvents(tx, allResultRows.map((r) => r.id));
     let formation: HeatFormation | null = null;
     let formationError: string | null = null;
     try {
@@ -244,19 +265,33 @@ export class ProductionService {
       formationError = e.message;
     }
     const planned = plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED;
+    const progress = planProgressOf(
+      { ...plan, itemType: plan.item.itemType as ItemType, productionPlanStatus: plan.productionPlanStatus as ProductionPlanStatus },
+      lots,
+      results,
+      rolling.get(id) ?? 0,
+    );
+    const created = planEvents.find((e) => e.businessEventType !== BUSINESS_EVENT_TYPE.PRODUCTION_PLAN_CANCELLED);
+    const cancelled = planEvents.findLast((e) => e.businessEventType === BUSINESS_EVENT_TYPE.PRODUCTION_PLAN_CANCELLED);
+    const soItems = plan.salesOrderItem?.salesOrder.salesOrderItems ?? [];
     return {
-      ...toPlanSummary(plan),
+      ...toPlanSummary(plan, progress, formation?.requiredMoltenSteelTon ?? null),
       salesOrderItem: plan.salesOrderItem
         ? { id: plan.salesOrderItem.id, orderedQty: plan.salesOrderItem.orderedQty, salesOrderItemStatus: plan.salesOrderItem.salesOrderItemStatus as SalesOrderItemStatus }
         : null,
       formation,
       formationError,
-      progress: planProgressOf({ itemId: plan.itemId, itemType: plan.item.itemType as ItemType, heatCount: plan.heatCount }, lots, results),
+      progress,
       lots: lots.map(toPlanLot),
       reproduction: plan.salesOrderItemId === null ? null : await this.reproductionCheck(tx, plan.salesOrderItemId),
       canCancel: planned,
       canConfirm: planned,
-      results: resultRows.map((r) => toResultView(r, resultEvents)).reverse(),
+      results: allResultRows.map((r) => toResultView(r, resultEvents)).reverse(),
+      heats: planHeatsOf(plan.heatCount, lots),
+      createdEmployeeName: created?.actorEmployee?.employeeName ?? null,
+      cancelledAt: plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.CANCELLED ? (cancelled?.createdAt.toISOString() ?? plan.updatedAt.toISOString()) : null,
+      salesOrderOwnerName: plan.salesOrderItem?.salesOrder.ownerEmployee.employeeName ?? null,
+      salesOrderLineNo: plan.salesOrderItem ? soItems.findIndex((i) => i.id === plan.salesOrderItem?.id) + 1 : null,
       updatedAt: plan.updatedAt.toISOString(),
     };
   }
@@ -372,20 +407,38 @@ export class ProductionService {
     const lots = soItem.productionPlans.length > 0 ? await this.repository.findLotsOfPlans(tx, soItem.productionPlans.map((p) => p.id)) : [];
     const plans = soItem.productionPlans.map((p) => {
       const progress = planProgressOf(
-        { itemId: p.itemId, itemType: ITEM_TYPE.SLAB, heatCount: 0 },
+        { itemId: p.itemId, itemType: p.item.itemType as ItemType, heatCount: 0, shortageQty: p.shortageQty, productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, salesOrderItemId },
         lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === p.id),
         [],
       );
-      return { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty };
+      return { plan: p, input: { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty }, remainingTargetQty: progress.remainingTargetQty };
     });
     const inventory = await this.repository.findInventory(tx, soItem.itemId);
-    return reproductionCheckOf({
+    const check = reproductionCheckOf({
       salesOrderItemId: soItem.id,
       orderedQty: soItem.orderedQty,
       salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
       reservations: soItem.reservations,
-      plans,
+      plans: plans.map((p) => p.input),
       reservationAvailableQty: inventory ? inventory.onHandQty - inventory.reservedQty - inventory.rollingAllocatedQty : 0,
     });
+    return {
+      ...check,
+      salesOrderId: soItem.salesOrderId,
+      salesOrderNo: soItem.salesOrder.salesOrderNo,
+      lineNo: soItem.salesOrder.salesOrderItems.findIndex((i) => i.id === soItem.id) + 1,
+      salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
+      unshippedQty: Math.max(0, check.orderedQty - check.shippedQty),
+      openPlans: plans
+        .filter((p) => p.plan.productionPlanStatus !== PRODUCTION_PLAN_STATUS.CANCELLED)
+        .map((p) => ({
+          id: p.plan.id,
+          productionPlanNo: p.plan.productionPlanNo,
+          productionPlanStatus: p.plan.productionPlanStatus as ProductionPlanStatus,
+          isReproduction: p.plan.isReproduction,
+          shortageQty: p.plan.shortageQty,
+          remainingTargetQty: p.remainingTargetQty,
+        })),
+    };
   }
 }

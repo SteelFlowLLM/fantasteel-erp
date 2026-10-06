@@ -2,9 +2,12 @@
 // 계획은 수주 등록 때 core 서비스가 히트 편성까지 계산해 만든다. 이 화면은 편성표·진행·LOT을 보여 주고,
 // 생산 담당은 PLANNED 계획 취소와 재생산 계획 만들기를 한다 (PRODUCTION_PLAN_CONFIRM 사용 권한).
 // 규칙·작업 로그는 core 서비스(@/mock/services)가 처리한다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 조회만 한다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/production.ts).
 import { PERMISSION, type AllocationPurpose, type LotStatus, type LotType, type ProductionPlanStatus, type SalesOrderItemStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverProductionPlanApi } from '@/api/server/production';
 import type { LotRow, MockTables, ProductionPlanRow, SalesOrderItemRow } from '@/mock/schema';
 import {
   cancelProductionPlan,
@@ -223,21 +226,27 @@ export interface ReproductionResult {
 export const productionPlanApi = {
   /** 생산계획 목록 (최근 것 먼저, 고객사 포함) */
   list: (): Promise<ProductionPlanListRow[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverProductionPlanApi.list()
+      : mockQuery((tables) => {
       requireActor(tables, { view: PLAN_VIEW });
       return withCustomerNames(tables, listProductionPlans(tables));
     }),
 
   /** 생산계획 상세: 편성표·히트·작업 실적·LOT·재생산 판단 */
   detail: (productionPlanId: number): Promise<ProductionPlanDetail> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverProductionPlanApi.detail(productionPlanId)
+      : mockQuery((tables) => {
       requireActor(tables, { view: PLAN_VIEW });
       return planDetailOf(tables, productionPlanId);
     }),
 
   /** 생산 담당의 계획 취소: PLANNED일 때만 (10장). 작업 로그 PRODUCTION_PLAN_CANCELLED는 서비스가 남긴다. */
   cancel: (input: CancelPlanInput): Promise<{ id: number; productionPlanNo: string }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionPlanApi.cancel(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
       const plan = cancelProductionPlan(tx, userActor(actor.employee.id), {
         productionPlanId: input.productionPlanId,
@@ -252,7 +261,9 @@ export const productionPlanApi = {
    * 그래도 '추가 계획 필요'가 남으면 is_reproduction 계획을 만든다 (REPRODUCTION_PLAN_CREATED).
    */
   createReproduction: (input: { salesOrderItemId: number }): Promise<ReproductionResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverProductionPlanApi.createReproduction(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
       const result = createReproductionPlan(tx, userActor(actor.employee.id), { salesOrderItemId: input.salesOrderItemId });
       return {
