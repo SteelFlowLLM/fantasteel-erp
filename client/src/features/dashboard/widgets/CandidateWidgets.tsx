@@ -1,6 +1,7 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
 // 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
 import Link from 'next/link';
+import { useState } from 'react';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -13,6 +14,7 @@ import type {
 } from '@/api/dashboard';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
+import { Segmented } from '@/components/Tabs';
 import { DailyBars } from '@/features/dashboard/components/DailyBars';
 import { Figure, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { dueLabel } from '@/features/dashboard/lib/widgetMath';
@@ -98,29 +100,48 @@ export function RawMaterialBalanceWidget(props: WidgetProps) {
 
 // ── 강종별 불합격률 ─────────────────────────────────────
 
+type RateMode = 'reject' | 'pass';
+const RATE_MODES = [
+  { key: 'reject', label: '불합격률' },
+  { key: 'pass', label: '합격률' },
+] as const satisfies readonly { key: RateMode; label: string }[];
+
+/** 보는 기준에 맞춘 비율·건수. 판정 수에는 판정 대기가 없어(PASS·FAIL만) 합격 = 판정 − 불합격 */
+const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate: number | null }, mode: RateMode) => ({
+  rate: cell.rejectRate === null ? null : mode === 'pass' ? 1 - cell.rejectRate : cell.rejectRate,
+  count: mode === 'pass' ? cell.inspectedCount - cell.failedCount : cell.failedCount,
+});
+
 function RejectRateBody({ data }: { data: RejectRateData }) {
+  const [mode, setMode] = useState<RateMode>('reject');
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
-  // 막대 끝 = 100%: 막대 길이가 불합격률 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
+  // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
   const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
+  const isPass = mode === 'pass';
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
+      <Segmented ariaLabel="보는 기준" items={RATE_MODES} active={mode} onChange={setMode} className="self-start" />
       {data.grades.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
+        const { rate, count } = rateOf(g, mode);
         // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
           <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
-            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{g.rejectRate ? <span className="bg-danger" style={{ width: pct(g.rejectRate, 1) }} /> : null}</div>
+            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
             <span className="text-right tabular-nums">
-              <b className={cn('font-semibold', g.rejectRate ? 'text-danger' : undefined)}>{fmtPct(g.rejectRate, 1)}</b> <span className="text-cap text-ink-3">{g.failedCount}/{g.inspectedCount}건</span>
+              <b className={cn('font-semibold', rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)}>{fmtPct(rate, 1)}</b>{' '}
+              <span className="text-cap text-ink-3">
+                {count}/{g.inspectedCount}건
+              </span>
             </span>
             <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
-              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${p.failedCount}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
+              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
             </span>
           </div>
         );
       })}
-      <span className="text-cap text-ink-3">불합격률 = 불합격 ÷ 판정된 검사 수 · 막대 끝 = 100%</span>
+      <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100%</span>
       {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
     </div>
   );
