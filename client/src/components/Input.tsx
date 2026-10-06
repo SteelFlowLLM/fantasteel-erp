@@ -21,11 +21,21 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   suffix?: string;
 }
 
+/**
+ * 단위 글자는 입력칸 오른쪽 안에 겹쳐 그리므로 그 폭만큼 오른쪽을 비워 둔다. 오른쪽 정렬 숫자가 단위에 덮이지 않게 하려는 것이다.
+ * 글자 수로 단계를 나눈다(Tailwind는 동적 폭을 클래스로 못 만든다): 한 글자(t·%·매)는 그대로, mm·N/mm²처럼 길수록 넓게.
+ */
+function suffixPadding(suffix: string): string {
+  if (suffix.length <= 1) return 'pr-8';
+  if (suffix.length <= 3) return 'pr-11';
+  return 'pr-14';
+}
+
 export function Input({ invalid, numeric, leadingIcon, suffix, className, ...rest }: InputProps) {
   const input = (
     <input
       aria-invalid={invalid || undefined}
-      className={cn(FIELD, 'h-8', leadingIcon ? 'pl-[30px]' : 'pl-2.5', suffix ? 'pr-8' : 'pr-2.5', numeric && 'text-right tabular-nums', className)}
+      className={cn(FIELD, 'h-8', leadingIcon ? 'pl-[30px]' : 'pl-2.5', suffix ? suffixPadding(suffix) : 'pr-2.5', numeric && 'text-right tabular-nums', className)}
       {...rest}
     />
   );
