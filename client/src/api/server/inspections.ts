@@ -8,6 +8,7 @@ import type {
   InspectionStandardListItem,
   PageResult,
   QualityInspectionDetail,
+  QualityInspectionSaveResult,
   QualityInspectionDetailItem,
   QualityInspectionListItem,
 } from '@fantasteel/shared';
@@ -208,22 +209,23 @@ async function register(input: RegisterInspectionInput): Promise<RegisterInspect
   const row = await listRowOfLot(input.lotId);
   if (!row) throw new ApiError('COM-003', `LOT ${input.lotId}`);
 
-  let saved: QualityInspectionDetail;
+  let saved: QualityInspectionSaveResult;
   if (row.qualityInspectionId === null) {
-    saved = await serverRequest<QualityInspectionDetail>('POST', '/quality-inspections', { body: { lotId: input.lotId, values } });
+    saved = await serverRequest<QualityInspectionSaveResult>('POST', '/quality-inspections', { body: { lotId: input.lotId, values } });
   } else {
     // 가짜 DB처럼 화면을 연 시각이 없으면 동시 수정 확인을 하지 않는다 (지금 값을 그대로 보낸다)
     const expectedUpdatedAt = input.expectedUpdatedAt ?? (await serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${row.qualityInspectionId}`)).updatedAt;
-    saved = await serverRequest<QualityInspectionDetail>('PATCH', `/quality-inspections/${row.qualityInspectionId}`, { body: { expectedUpdatedAt, values } });
+    saved = await serverRequest<QualityInspectionSaveResult>('PATCH', `/quality-inspections/${row.qualityInspectionId}`, { body: { expectedUpdatedAt, values } });
   }
   return {
     lotId: saved.lotId,
     lotNo: saved.lotNo,
     inspectionResult: saved.inspectionResult,
-    // 서버에 아직 없는 것: 판정 뒤 재고 반영(자동 예약·여재·적격 제외)은 서버가 같은 저장에서 하지만 응답에 결과가 없다
-    autoReservedQty: 0,
+    // 판정 뒤 재고 반영 결과(stockSync). 적격이 된 매수 중 자동 예약하지 못한 것이 여재다. 서버는 여재 LOT 번호를 주지 않는다
+    autoReservedQty: saved.stockSync.autoReservedQty,
     surplusLotNos: [],
-    excludedLotQty: 0,
+    surplusQty: Math.max(0, saved.stockSync.eligibleAddedQty - saved.stockSync.autoReservedQty),
+    excludedLotQty: saved.stockSync.eligibleRemovedQty,
     salesOrderItem: null,
   };
 }
