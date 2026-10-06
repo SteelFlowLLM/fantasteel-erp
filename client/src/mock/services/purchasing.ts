@@ -420,11 +420,20 @@ export function receiveGoods(
 
 // ── 조회 ──────────────────────────────────────────────
 
+/** 구매요청 1건 = 원료 1품목 (ERD purchase_requisition, 서버 PurchaseRequisitionSummary와 같은 모양) */
 export interface RequisitionView {
   id: number;
   purchaseRequisitionNo: string;
   purchaseRequisitionStatus: PurchaseRequisitionStatus;
   source: RequisitionSource;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  requestedTon: string;
+  productionPlanId: number | null;
+  productionPlanNo: string | null;
+  /** 발주했으면 발주번호 */
+  purchaseOrderNo: string | null;
   requesterId: number;
   requesterName: string | null;
   departmentId: number;
@@ -438,44 +447,41 @@ export interface RequisitionView {
   updatedAt: string;
   approvedAt: string | null;
   rejectedAt: string | null;
-  totalTon: string;
-  items: {
-    id: number;
-    lineNo: number;
-    itemId: number;
-    itemCode: string;
-    itemName: string;
-    requiredTon: string;
-    productionPlanId: number | null;
-    productionPlanNo: string | null;
-    purchaseOrderNo: string | null;
-  }[];
+}
+
+/** 요청 품목 한 줄 (발주 후보가 쓴다) */
+function requisitionLineView(tables: Tables, line: PurchaseRequisitionItemRow) {
+  const item = findById(tables, 'item', line.itemId);
+  const poLine = orderedLineOf(tables, line.id);
+  return {
+    id: line.id,
+    lineNo: line.lineNo,
+    itemId: line.itemId,
+    itemCode: item?.itemCode ?? '',
+    itemName: item?.itemName ?? '',
+    requiredTon: line.requiredTon,
+    productionPlanId: line.productionPlanId,
+    productionPlanNo: findById(tables, 'productionPlan', line.productionPlanId)?.productionPlanNo ?? null,
+    purchaseOrderNo: poLine ? (findById(tables, 'purchaseOrder', poLine.purchaseOrderId)?.purchaseOrderNo ?? null) : null,
+  };
 }
 
 export function requisitionView(tables: Tables, pr: PurchaseRequisitionRow): RequisitionView {
-  const items = tables.purchaseRequisitionItem
-    .filter((i) => i.purchaseRequisitionId === pr.id)
-    .sort((a, b) => a.lineNo - b.lineNo)
-    .map((i) => {
-      const item = findById(tables, 'item', i.itemId);
-      const poLine = orderedLineOf(tables, i.id);
-      return {
-        id: i.id,
-        lineNo: i.lineNo,
-        itemId: i.itemId,
-        itemCode: item?.itemCode ?? '',
-        itemName: item?.itemName ?? '',
-        requiredTon: i.requiredTon,
-        productionPlanId: i.productionPlanId,
-        productionPlanNo: findById(tables, 'productionPlan', i.productionPlanId)?.productionPlanNo ?? null,
-        purchaseOrderNo: poLine ? (findById(tables, 'purchaseOrder', poLine.purchaseOrderId)?.purchaseOrderNo ?? null) : null,
-      };
-    });
+  // 가짜 DB 테이블은 아직 품목 줄 구조라 첫 줄을 이 요청의 원료로 읽는다 (화면은 ERD 모양을 먼저 쓴다)
+  const firstLine = tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === pr.id).sort((a, b) => a.lineNo - b.lineNo)[0];
+  const line = firstLine ? requisitionLineView(tables, firstLine) : null;
   return {
     id: pr.id,
     purchaseRequisitionNo: pr.purchaseRequisitionNo,
     purchaseRequisitionStatus: pr.purchaseRequisitionStatus,
     source: requisitionSourceOf(tables, pr),
+    itemId: line?.itemId ?? 0,
+    itemCode: line?.itemCode ?? '',
+    itemName: line?.itemName ?? '',
+    requestedTon: line?.requiredTon ?? '0.000',
+    productionPlanId: line?.productionPlanId ?? null,
+    productionPlanNo: line?.productionPlanNo ?? null,
+    purchaseOrderNo: line?.purchaseOrderNo ?? null,
     requesterId: pr.requesterId,
     requesterName: employeeNameOf(tables, pr.requesterId),
     departmentId: pr.departmentId,
@@ -489,8 +495,6 @@ export function requisitionView(tables: Tables, pr: PurchaseRequisitionRow): Req
     updatedAt: pr.updatedAt,
     approvedAt: pr.approvedAt,
     rejectedAt: pr.rejectedAt,
-    totalTon: decSum(items.map((i) => i.requiredTon)),
-    items,
   };
 }
 
@@ -502,12 +506,15 @@ export function approvalInbox(tables: Tables, employeeId: number): RequisitionVi
 }
 
 /** 발주할 수 있는 요청 품목 (승인됨·미발주), 기본 공급업체 포함 */
-export function orderableRequisitionItems(tables: Tables): (RequisitionView['items'][number] & { purchaseRequisitionId: number; purchaseRequisitionNo: string; desiredReceiptDate: string | null; supplierId: number | null; supplierName: string | null })[] {
+export function orderableRequisitionItems(tables: Tables): (ReturnType<typeof requisitionLineView> & { purchaseRequisitionId: number; purchaseRequisitionNo: string; desiredReceiptDate: string | null; supplierId: number | null; supplierName: string | null })[] {
   return tables.purchaseRequisition
     .filter((pr) => pr.purchaseRequisitionStatus === 'APPROVED')
     .flatMap((pr) =>
-      requisitionView(tables, pr)
-        .items.filter((i) => i.purchaseOrderNo === null)
+      tables.purchaseRequisitionItem
+        .filter((line) => line.purchaseRequisitionId === pr.id)
+        .sort((a, b) => a.lineNo - b.lineNo)
+        .map((line) => requisitionLineView(tables, line))
+        .filter((i) => i.purchaseOrderNo === null)
         .map((i) => {
           const supplierId = findById(tables, 'item', i.itemId)?.defaultSupplierId ?? null;
           return { ...i, purchaseRequisitionId: pr.id, purchaseRequisitionNo: pr.purchaseRequisitionNo, desiredReceiptDate: pr.desiredReceiptDate, supplierId, supplierName: findById(tables, 'supplier', supplierId)?.supplierName ?? null };

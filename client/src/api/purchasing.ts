@@ -4,7 +4,7 @@
 // - 발주: 승인된 요청 품목을 품목의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건.
 import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
-import { ApiError, mockMutation, mockQuery } from '@/api/client';
+import { ApiError, InputError, mockMutation, mockQuery } from '@/api/client';
 import { employeeBasicsOf } from '@/api/orgViews';
 import { canView } from '@/lib/permissions';
 import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
@@ -22,11 +22,10 @@ import {
   resubmitPurchaseRequisition,
   userActor,
   type PurchaseOrderView,
-  type RequisitionLineInput,
   type RequisitionView,
 } from '@/mock/services';
 
-export type { PurchaseOrderView, RequisitionLineInput, RequisitionSource, RequisitionView } from '@/mock/services';
+export type { PurchaseOrderView, RequisitionSource, RequisitionView } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
 
@@ -56,12 +55,29 @@ export const purchaseOrderKeys = {
 
 // ── 구매요청 ─────────────────────────────────────────
 
+/** 구매요청 1건 = 원료 1품목 (ERD, 서버 POST purchase-requisitions와 같은 칸) */
 export interface RequisitionInput {
+  itemId: number;
+  /** 톤 (소수 3자리) */
+  requestedTon: string;
   /** YYYY-MM-DD 또는 '' */
   desiredReceiptDate: string;
   /** 요청 근거 */
   requestReason: string;
-  items: readonly RequisitionLineInput[];
+  /** MRP 근거 생산계획 */
+  productionPlanId?: number | null;
+}
+
+/** 가짜 DB는 아직 품목 줄로 받으므로 한 줄로 넘기고, 줄 오류(items.0.*)는 화면 칸 이름으로 돌려준다 */
+const toLines = (input: RequisitionInput) => [{ itemId: input.itemId, requiredTon: input.requestedTon, productionPlanId: input.productionPlanId ?? null }];
+const LINE_FIELD: Readonly<Record<string, string>> = { items: 'itemId', 'items.0.itemId': 'itemId', 'items.0.requiredTon': 'requestedTon' };
+function withSingleItemFields<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (!(error instanceof InputError)) throw error;
+    throw new InputError(error.message, Object.fromEntries(Object.entries(error.fieldErrors).map(([field, message]) => [LINE_FIELD[field] ?? field, message])));
+  }
 }
 
 export interface RequisitionResubmitInput extends RequisitionInput {
@@ -191,11 +207,13 @@ export const purchaseRequisitionApi = {
   create: (input: RequisitionInput): Promise<RequisitionView> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
-      const { purchaseRequisition } = createPurchaseRequisition(tx, userActor(actor.employee.id), {
-        desiredReceiptDate: input.desiredReceiptDate || null,
-        requestReason: input.requestReason.trim() || null,
-        items: input.items,
-      });
+      const { purchaseRequisition } = withSingleItemFields(() =>
+        createPurchaseRequisition(tx, userActor(actor.employee.id), {
+          desiredReceiptDate: input.desiredReceiptDate || null,
+          requestReason: input.requestReason.trim() || null,
+          items: toLines(input),
+        }),
+      );
       return requisitionView(tx.tables, purchaseRequisition);
     }),
 
@@ -203,13 +221,15 @@ export const purchaseRequisitionApi = {
   resubmit: (input: RequisitionResubmitInput): Promise<RequisitionView> =>
     mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
-      const updated = resubmitPurchaseRequisition(tx, userActor(actor.employee.id), {
-        purchaseRequisitionId: input.purchaseRequisitionId,
-        desiredReceiptDate: input.desiredReceiptDate || null,
-        requestReason: input.requestReason.trim() || null,
-        items: input.items,
-        expectedUpdatedAt: input.expectedUpdatedAt,
-      });
+      const updated = withSingleItemFields(() =>
+        resubmitPurchaseRequisition(tx, userActor(actor.employee.id), {
+          purchaseRequisitionId: input.purchaseRequisitionId,
+          desiredReceiptDate: input.desiredReceiptDate || null,
+          requestReason: input.requestReason.trim() || null,
+          items: toLines(input),
+          expectedUpdatedAt: input.expectedUpdatedAt,
+        }),
+      );
       return requisitionView(tx.tables, updated);
     }),
 };
