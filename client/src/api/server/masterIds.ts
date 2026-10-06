@@ -6,7 +6,7 @@ import type { CustomerView, ItemView } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { getMockDb } from '@/mock/db';
-import type { ItemRow, MockTables } from '@/mock/schema';
+import type { ItemRow, MockTables, SteelGradeRow } from '@/mock/schema';
 
 let customersPromise: Promise<CustomerView[]> | null = null;
 let itemsPromise: Promise<ItemView[]> | null = null;
@@ -88,6 +88,41 @@ export function mockDefaultYardOf(itemCode: string): { yardId: number | null; ya
     const yard = t.yard.find((y) => y.id === item?.defaultYardId);
     return { yardId: yard?.id ?? null, yardName: yard?.yardName ?? null };
   });
+}
+
+// ── 강종 (검사 기준 화면) ─────────────────────────────────
+
+/** 강종: 서버 응답의 강종 코드로 찾는다 */
+export function mockSteelGradeOf(steelGradeCode: string): SteelGradeRow | undefined {
+  return readMock((t) => t.steelGrade.find((g) => g.steelGradeCode === steelGradeCode));
+}
+
+export function mockSteelGradeIdOf(steelGradeCode: string, serverSteelGradeId: number): number {
+  return mockSteelGradeOf(steelGradeCode)?.id ?? serverSteelGradeId;
+}
+
+export function mockSteelGradeCodeById(mockSteelGradeId: number): string | null {
+  return readMock((t) => t.steelGrade.find((g) => g.id === mockSteelGradeId)?.steelGradeCode) ?? null;
+}
+
+/**
+ * 화면 강종 id → 서버 강종 id. 서버에 강종 목록 API가 없어(기준정보 모듈 미완성) 이미 받은 행(검사 기준 목록)의 강종 코드·id에서 찾고,
+ * 없으면 규격 목록(GET /items, 기준정보 조회 권한 필요)의 강종에서 찾는다. 둘 다 없으면 COM-003.
+ */
+export async function serverSteelGradeIdOf(mockSteelGradeId: number, known: readonly { steelGradeId: number; steelGradeCode: string }[]): Promise<number> {
+  const code = mockSteelGradeCodeById(mockSteelGradeId);
+  if (!code) throw new ApiError('COM-003', '강종');
+  const fromKnown = known.find((k) => k.steelGradeCode === code);
+  if (fromKnown) return fromKnown.steelGradeId;
+  let items: ItemView[] = [];
+  try {
+    items = await serverItems();
+  } catch (e) {
+    if (!(e instanceof ApiError && e.code === 'COM-002')) throw e;
+  }
+  const fromItems = items.find((i) => i.steelGradeCode === code)?.steelGradeId;
+  if (fromItems) return fromItems;
+  throw new ApiError('COM-003', `서버에서 강종을 찾을 수 없어요 (${code})`);
 }
 
 /** 계정을 바꾸면 권한이 달라질 수 있어 기준정보 캐시를 비운다 (테스트용) */

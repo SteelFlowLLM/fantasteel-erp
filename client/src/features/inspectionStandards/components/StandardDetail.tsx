@@ -2,12 +2,14 @@
 
 // 검사 기준 한 버전의 상세: 머리(코드·공정·강종·적용 규격·버전), 버전 목록, 검사 항목 표.
 // 이전 버전은 읽기 전용으로 보인다. 값의 근거(KS / 가정값)와 이전 버전에서 바뀐 항목을 표시한다.
+import { useState } from 'react';
 import { PROCESS_TYPE_LABEL } from '@/codes';
-import type { InspectionStandardDetailView, InspectionStandardItemView } from '@/api/inspectionStandards';
+import { inspectionStandardApi, type InspectionStandardDetailView, type InspectionStandardItemView } from '@/api/inspectionStandards';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { KvList } from '@/components/KvList';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
@@ -22,6 +24,7 @@ import {
   formatThicknessBand,
 } from '@/features/inspectionStandards/lib/standardItems';
 import { PROCESS_INSPECTION_TEXT, STANDARD_LOCK_TEXT } from '@/features/inspectionStandards/lib/standardText';
+import { useAction } from '@/hooks/useAction';
 import { useInspectionStandardDetail } from '@/hooks/useInspectionStandards';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtMD } from '@/lib/format';
@@ -41,9 +44,11 @@ export interface StandardDetailProps {
   canEdit: boolean;
   onSelectVersion: (id: number) => void;
   onNewVersion: (detail: InspectionStandardDetailView) => void;
+  /** 기준(모든 버전)을 지운 뒤 */
+  onDeleted: () => void;
 }
 
-export function StandardDetail({ id, canEdit, onSelectVersion, onNewVersion }: StandardDetailProps) {
+export function StandardDetail({ id, canEdit, onSelectVersion, onNewVersion, onDeleted }: StandardDetailProps) {
   const detail = useInspectionStandardDetail(id);
   return (
     <QueryBoundary query={detail} loadingLabel="검사 기준을 불러오는 중…">
@@ -51,19 +56,28 @@ export function StandardDetail({ id, canEdit, onSelectVersion, onNewVersion }: S
         view === null ? (
           <StateView kind="empty" icon="book" title="검사 기준을 찾지 못했어요" text="지워졌거나 잘못된 주소예요. 왼쪽 목록에서 다시 골라 주세요." code="COM-003" />
         ) : (
-          <DetailBody view={view} canEdit={canEdit} onSelectVersion={onSelectVersion} onNewVersion={onNewVersion} />
+          <DetailBody view={view} canEdit={canEdit} onSelectVersion={onSelectVersion} onNewVersion={onNewVersion} onDeleted={onDeleted} />
         )
       }
     </QueryBoundary>
   );
 }
 
-function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: InspectionStandardDetailView } & Omit<StandardDetailProps, 'id'>) {
+function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }: { view: InspectionStandardDetailView } & Omit<StandardDetailProps, 'id'>) {
   const process = isInspectedProcess(view.processType) ? view.processType : null;
   const source = getStandardValueSource(view.processType);
   const changed = view.previousItems ? findChangedItemKeys(view.items, view.previousItems) : new Set<string>();
   const removed = view.previousItems ? countRemovedItems(view.items, view.previousItems) : 0;
   const current = view.versions.find((v) => v.isCurrent);
+  const [deleting, setDeleting] = useState(false);
+  const remove = useAction(inspectionStandardApi.remove, {
+    success: (result) => `${result.inspectionStandardCode} 검사 기준을 삭제했어요 (버전 ${result.deletedVersions.length}개)`,
+    onSuccess: () => {
+      setDeleting(false);
+      onDeleted();
+    },
+    onError: () => setDeleting(false),
+  });
 
   return (
     <>
@@ -79,6 +93,9 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: In
           </h2>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <Button icon="trash" disabled={!canEdit} title={canEdit ? '이 기준의 모든 버전을 지워요' : STANDARD_LOCK_TEXT} onClick={() => setDeleting(true)}>
+            기준 삭제
+          </Button>
           {view.isCurrent ? (
             <Button variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : STANDARD_LOCK_TEXT} onClick={() => onNewVersion(view)}>
               새 버전 만들기
@@ -93,10 +110,24 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: In
 
       {view.isCurrent ? null : (
         <Banner tone="wait">
-          이전 버전(v{view.version})이에요. 고칠 수 없고, 이 버전으로 판정한 검사 기록 {view.inspectionCount}건은 그대로 이 버전을 참조해요. 바꾸려면 지금 버전에서 새 버전을
-          만들어 주세요.
+          이전 버전(v{view.version})이에요. 고칠 수 없고, 이 버전으로 판정한 검사 기록{view.inspectionCount === null ? '은' : ` ${view.inspectionCount}건은`} 그대로 이 버전을
+          참조해요. 바꾸려면 지금 버전에서 새 버전을 만들어 주세요.
         </Banner>
       )}
+
+      {deleting ? (
+        <ConfirmDialog
+          title="검사 기준을 삭제할까요?"
+          confirmLabel="삭제"
+          tone="danger"
+          pending={remove.isPending}
+          onCancel={() => setDeleting(false)}
+          onConfirm={() => remove.mutate(view.id)}
+        >
+          {view.inspectionStandardCode}의 모든 버전({view.versionCount}개)과 검사 항목을 지워요. 되돌릴 수 없어요. 어느 버전이든 검사 판정에 쓰였으면 삭제할 수 없고, 그때는 새
+          버전으로 고쳐 주세요.
+        </ConfirmDialog>
+      ) : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)_280px] items-start gap-4">
         <Card>
@@ -143,7 +174,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: In
                   { label: '강종', value: view.steelGradeCode ?? '공통 (모든 강종)' },
                   { label: '적용 규격', value: view.standardNo ?? '—' },
                   { label: '버전 생성', value: fmtDateTime(view.createdAt) },
-                  { label: '판정한 검사', value: `${view.inspectionCount}건` },
+                  { label: '판정한 검사', value: view.inspectionCount === null ? '—' : `${view.inspectionCount}건` },
                 ]}
               />
             </div>
@@ -162,7 +193,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion }: { view: In
                   >
                     <span className="font-mono font-semibold">v{v.version}</span>
                     <span className="text-cap text-ink-3">
-                      {fmtMD(v.createdAt)} · 항목 {v.itemCount}개 · 검사 {v.inspectionCount}건
+                      {fmtMD(v.createdAt)} · 항목 {v.itemCount}개{v.inspectionCount === null ? '' : ` · 검사 ${v.inspectionCount}건`}
                     </span>
                     {v.isCurrent ? (
                       <Badge tone="ok" plain className="ml-auto">

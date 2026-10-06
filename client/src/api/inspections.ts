@@ -1,7 +1,10 @@
 // 검사 입력 API (REQ-QC-001·003, REQ-INV-004·007, BP-QC-01, 14.1 4~6단계).
 // 권한은 이 층이 먼저 확인하고(requireActor), 판정·자동 예약·여재·히트 불합격 연쇄·작업 로그는 핵심 서비스(registerInspection)가 한다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/inspections.ts). 권한·판정·재고 반영은 서버가 한다.
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverInspectionApi } from '@/api/server/inspections';
 import { PERMISSION, type InspectionResult, type SalesOrderItemStatus } from '@/codes';
 import { inspectionItemCodesOfHistory } from '@/features/quality/lib/qualityDisplay';
 import type { MockTables } from '@/mock/schema';
@@ -91,14 +94,18 @@ const READ_RULE = { view: [PERMISSION.INSPECTION_REGISTER] } as const;
 export const inspectionApi = {
   /** 검사 대상 목록: 판정 대기 먼저(생산완료일 → LOT 번호), 그다음 최근 판정 */
   queue: (): Promise<InspectionQueueRow[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverInspectionApi.queue()
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       return inspectionQueue(tables);
     }),
 
   /** 입력 폼: 판정에 쓰는 기준 버전, 두께 구간으로 거른 항목, 현재 값, 잠금, 연결 수주의 부족, 작업 로그 */
   detail: (lotId: number): Promise<InspectionDetail> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverInspectionApi.detail(lotId)
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       const form = inspectionFormOf(tables, lotId);
       const lot = findById(tables, 'lot', lotId);
@@ -116,7 +123,9 @@ export const inspectionApi = {
    * 오류: COM-002(검사 입력 사용 권한), COM-003(LOT 없음), COM-001(연 뒤 바뀜), MST-001(검사 기준 없음), 입력 오류(형식·기준에 없는 항목·잠금)
    */
   register: (input: RegisterInspectionInput): Promise<RegisterInspectionOutcome> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverInspectionApi.register(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.INSPECTION_REGISTER] });
       const result = registerInspection(tx, userActor(actor.employee.id), input);
       const lot = findById(tx.tables, 'lot', input.lotId);

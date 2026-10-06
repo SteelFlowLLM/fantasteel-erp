@@ -1,0 +1,128 @@
+// 검사 기준 화면 ↔ 서버 API (server/src/modules/quality/inspection-standard.*).
+// 화면의 강종 id는 계속 가짜 DB id라서 강종 코드로 바꿔 끼운다 (api/server/masterIds.ts).
+// 서버에 아직 없는 것은 빈 값이다:
+// - 공통 기준(강종 없음): ERD steel_grade_id NOT NULL이라 서버에는 없다. 공통 기준 만들기는 입력 오류로 막는다.
+// - 버전 이력 목록 API가 없어, 상세의 버전 목록은 지금 버전과 보고 있는 버전만 보인다. 바로 앞 버전 항목(바뀐 항목 표시)도 비어 있다.
+// - 버전별 판정한 검사 수를 주는 API가 없어 inspectionCount는 null(모름)이다.
+// - 표시 순서 컬럼이 ERD에 없어 항목 순서는 서버가 준 순서(등록 순서)다.
+import type { InspectionStandardDeleteResult, InspectionStandardDetail, InspectionStandardListItem, PageResult } from '@fantasteel/shared';
+import { ApiError, InputError } from '@/api/errors';
+import { serverRequest } from '@/api/http';
+import { mockSteelGradeCodeById, mockSteelGradeIdOf, mockSteelGradeOf, serverSteelGradeIdOf } from '@/api/server/masterIds';
+import type {
+  InspectionStandardDeleteView,
+  InspectionStandardDetailView,
+  InspectionStandardItemView,
+  InspectionStandardListQuery,
+  InspectionStandardSummaryView,
+} from '@/api/inspectionStandards';
+import type { InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
+import type { InspectionStandardItemValues } from '@/mock/services/inspectionStandards';
+
+const PAGE_SIZE = 100;
+
+async function allStandards(query: { processType?: InspectedProcessType; steelGradeId?: number } = {}): Promise<InspectionStandardListItem[]> {
+  const rows: InspectionStandardListItem[] = [];
+  for (let page = 1; ; page++) {
+    const result = await serverRequest<PageResult<InspectionStandardListItem>>('GET', '/inspection-standards', { query: { ...query, page, size: PAGE_SIZE } });
+    rows.push(...result.items);
+    if (rows.length >= result.total || result.items.length === 0) return rows;
+  }
+}
+
+const toItemView = (item: InspectionStandardListItem['items'][number], index: number): InspectionStandardItemView => ({
+  id: item.inspectionStandardItemId,
+  inspectionItemCode: item.inspectionItemCode,
+  inspectionItemName: item.inspectionItemName,
+  unit: item.unit,
+  minValue: item.minValue,
+  maxValue: item.maxValue,
+  minThicknessMm: item.thicknessOverMm,
+  maxThicknessMm: item.thicknessUptoMm,
+  isRequired: item.isRequired,
+  sortOrder: index + 1,
+});
+
+/** latestVersionNo: 같은 코드의 최신 버전 번호. 삭제는 코드 단위라 버전은 1부터 빠짐없이 있어 버전 수와 같다 */
+function toSummaryView(row: InspectionStandardListItem, latestVersionNo: number): InspectionStandardSummaryView {
+  return {
+    id: row.inspectionStandardId,
+    inspectionStandardCode: row.inspectionStandardCode,
+    version: row.versionNo,
+    processType: row.processType,
+    steelGradeId: mockSteelGradeIdOf(row.steelGradeCode, row.steelGradeId),
+    steelGradeCode: row.steelGradeCode,
+    itemCount: row.items.length,
+    versionCount: latestVersionNo,
+    createdAt: row.createdAt,
+  };
+}
+
+async function list(query: InspectionStandardListQuery = {}): Promise<InspectionStandardSummaryView[]> {
+  // 강종은 화면(가짜 DB) id라 서버 id 대신 코드로 거른다
+  const gradeCode = query.steelGradeId === undefined ? undefined : mockSteelGradeCodeById(query.steelGradeId);
+  if (gradeCode === null) return [];
+  const rows = await allStandards({ processType: query.processType });
+  return rows.filter((r) => gradeCode === undefined || r.steelGradeCode === gradeCode).map((r) => toSummaryView(r, r.versionNo));
+}
+
+async function get(id: number): Promise<InspectionStandardDetailView | null> {
+  let row: InspectionStandardDetail;
+  try {
+    row = await serverRequest<InspectionStandardDetail>('GET', `/inspection-standards/${id}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 'COM-003') return null;
+    throw e;
+  }
+  const siblings = await allStandards({ processType: row.processType as InspectedProcessType, steelGradeId: row.steelGradeId });
+  const latest = siblings.find((s) => s.inspectionStandardCode === row.inspectionStandardCode) ?? row;
+  const isCurrent = latest.inspectionStandardId === row.inspectionStandardId;
+  const brief = (r: InspectionStandardListItem) => ({ id: r.inspectionStandardId, version: r.versionNo, isCurrent: r === latest, createdAt: r.createdAt, itemCount: r.items.length, inspectionCount: null });
+  return {
+    ...toSummaryView(row, latest.versionNo),
+    isCurrent,
+    standardNo: mockSteelGradeOf(row.steelGradeCode)?.standardNo ?? null,
+    items: row.items.map(toItemView),
+    previousItems: null,
+    versions: isCurrent ? [brief(latest)] : [brief(latest), brief(row)],
+    currentId: latest.inspectionStandardId,
+    inspectionCount: null,
+  };
+}
+
+const toServerItem = (item: InspectionStandardItemValues) => ({
+  inspectionItemCode: item.inspectionItemCode,
+  inspectionItemName: item.inspectionItemName,
+  unit: item.unit,
+  minValue: item.minValue,
+  maxValue: item.maxValue,
+  thicknessOverMm: item.minThicknessMm,
+  thicknessUptoMm: item.maxThicknessMm,
+  isRequired: item.isRequired,
+});
+
+/** 새 기준(버전 1). 입력 확인은 api/inspectionStandards.ts가 먼저 했다. steelGradeId는 화면 강종 id, null = 공통 기준 */
+async function create(input: { processType: InspectedProcessType; steelGradeId: number | null; items: readonly InspectionStandardItemValues[] }): Promise<number> {
+  if (input.steelGradeId === null) {
+    throw new InputError('서버에는 공통 기준이 없어요', { steelGradeId: '서버에는 공통 기준(모든 강종)이 없어요. 강종을 선택해 주세요' });
+  }
+  const steelGradeId = await serverSteelGradeIdOf(input.steelGradeId, await allStandards());
+  const created = await serverRequest<InspectionStandardDetail>('POST', '/inspection-standards', {
+    body: { processType: input.processType, steelGradeId, items: input.items.map(toServerItem) },
+  });
+  return created.inspectionStandardId;
+}
+
+/** 새 버전. 서버는 baseStandardId가 최신 버전이 아니면 COM-001로 거부한다 */
+async function createVersion(input: { baseStandardId: number; items: readonly InspectionStandardItemValues[] }): Promise<number> {
+  const created = await serverRequest<InspectionStandardDetail>('POST', `/inspection-standards/${input.baseStandardId}/versions`, { body: { items: input.items.map(toServerItem) } });
+  return created.inspectionStandardId;
+}
+
+/** 삭제: 그 코드의 모든 버전. 검사가 쓴 기준이면 서버가 COM-004(입력 오류)로 거부한다 */
+async function remove(id: number): Promise<InspectionStandardDeleteView> {
+  const result = await serverRequest<InspectionStandardDeleteResult>('DELETE', `/inspection-standards/${id}`);
+  return { inspectionStandardCode: result.inspectionStandardCode, deletedVersions: result.deletedVersionNos };
+}
+
+export const serverInspectionStandardApi = { list, get, create, createVersion, remove };
