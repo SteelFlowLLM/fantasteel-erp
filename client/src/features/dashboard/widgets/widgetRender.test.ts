@@ -69,6 +69,18 @@ describe('위젯 카드', () => {
     expect(html.get('PRODUCT_STOCK')).toContain('SL-SS275-250x1200x10000');
   });
 
+  it('품질 담당: 공정 흐름의 판정 대기 칸을 "내 업무"로 강조하고 검사 입력으로 연결한다. 다른 역할은 강조 없음', async () => {
+    const quality = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('PROCESS_FLOW') ?? '';
+    expect(quality).toContain('내 업무');
+    // 판정 대기 칸(링크 하나)에 검사 입력 주소와 "내 업무" 태그가 함께 있다
+    const inspectionLink = quality.split('</a>').find((part) => part.includes('판정 대기')) ?? '';
+    expect(inspectionLink).toContain('href="/quality/inspections"');
+    expect(inspectionLink).toContain('내 업무');
+    const sales = (await renderWidgets(SEED_EMPLOYEE_NO.sales)).get('PROCESS_FLOW') ?? '';
+    expect(sales).toContain('판정 대기');
+    expect(sales).not.toContain('내 업무');
+  });
+
   it('대시보드 화면 틀: 인사·위젯 편집 버튼 (격자는 브라우저에서 너비를 잰 뒤 그린다)', async () => {
     const employeeId = actAs(SEED_EMPLOYEE_NO.sales);
     const me = await sessionApi.getSessionUser(employeeId);
