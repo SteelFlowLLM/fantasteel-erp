@@ -148,5 +148,117 @@ export interface ProductionPlanDetail extends ProductionPlanSummary {
   /** PLANNED일 때만 취소·히트 편성 확정 */
   canCancel: boolean;
   canConfirm: boolean;
+  /** 이 계획의 작업 실적 (제강·연주·열연. 제선은 계획에 묶이지 않는다) */
+  results: ProductionResultView[];
   updatedAt: string;
+}
+
+// ── 작업 실적 (API-207·208, REQ-PRD-003, BP-PRD-02) ─────────────
+
+/** 실적에 투입된 LOT (원료→용선 기간 기반, 그 밖 실제 투입) */
+export interface ResultInputLot {
+  lotId: number;
+  lotNo: string;
+  lotType: LotType;
+  itemCode: string | null;
+  /** 차감 톤. 히트→슬래브·슬래브→코일은 null */
+  inputTon: string | null;
+}
+
+/** 실적이 만든 LOT */
+export interface ResultOutputLot {
+  lotId: number;
+  lotNo: string;
+  lotType: LotType;
+  itemCode: string | null;
+  /** 용선·히트 톤. 슬래브·코일은 null (톤은 매수 × 이론중량) */
+  initialTon: string | null;
+}
+
+/** 작업 실적 한 건 (GET /production-results) */
+export interface ProductionResultView {
+  id: number;
+  /** 제선은 null (ERD: 용선은 계획에 묶이지 않는 공용 풀) */
+  productionPlanId: number | null;
+  productionPlanNo: string | null;
+  processType: ProcessType;
+  blastFurnaceCode: string | null;
+  converterCode: string | null;
+  startedAt: string;
+  /** null이면 작업 중 (작업 상태값 없음, 업무 프로세스 10장) */
+  completedAt: string | null;
+  /** 실적 시뮬레이션의 연주 샘플 손실률 (0~0.0500) */
+  simulatedLossRate: string | null;
+  inputs: ResultInputLot[];
+  outputs: ResultOutputLot[];
+  /** 투입 톤 합계 (원료·용선·합금철) */
+  inputTon: string | null;
+  /** 산출 매수 (슬래브·코일) */
+  outputQty: number | null;
+  /** 산출 톤: 용선·히트는 LOT 톤, 슬래브·코일은 매수 × 이론중량 */
+  outputTon: string | null;
+  /** 작업 시작을 따로 기록한 연주의 히트 (완료 때 같은 히트여야 한다) */
+  startedHeatLotId: number | null;
+  /** 실적을 등록(또는 시작)한 사원 */
+  operatorName: string | null;
+}
+
+/** 원료·합금철 잔량과 원단위 (실적 입력 화면) */
+export interface RawMaterialStock {
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  /** 철광석·석탄·석회석은 용선 1t당 t, 합금철은 용강 1t당 kg */
+  consumptionRate: string;
+  isKgPerTon: boolean;
+  remainingTon: string;
+}
+
+/** 연주 전 히트 */
+export interface UncastHeat {
+  lotId: number;
+  lotNo: string;
+  heatTon: string;
+  /** floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
+  maxSlabQty: number;
+  inspectionResult: InspectionResult | null;
+}
+
+/** 작업 중 실적 */
+export interface OpenWork {
+  productionResultId: number;
+  processType: ProcessType;
+  startedAt: string;
+  blastFurnaceCode: string | null;
+  converterCode: string | null;
+  heatLotId: number | null;
+}
+
+/** 실적 입력 기준값 (GET /production-plans/:id/work-context) */
+export interface WorkContext {
+  productionPlanId: number;
+  productionPlanNo: string;
+  productionPlanStatus: ProductionPlanStatus;
+  itemType: ItemType;
+  steelGradeCode: string | null;
+  heatCount: number;
+  castingYieldRate: string;
+  steelmakingYieldRate: string;
+  heatCapacityTon: string;
+  /** 히트 1개에 필요한 용선 = 히트 용량 ÷ 제강 수율 */
+  hotMetalTonPerHeat: string;
+  slabItemId: number;
+  slabItemCode: string;
+  slabTheoreticalWeightTon: string;
+  /** 쓸 수 있는 용선 LOT (생산 순) */
+  hotMetalLots: { lotId: number; lotNo: string; remainingTon: string }[];
+  hotMetalAvailableTon: string;
+  ironmakingMaterials: RawMaterialStock[];
+  ferroalloys: RawMaterialStock[];
+  /** 아직 만들 히트 수 = 히트 수 − 만든 히트 */
+  heatsToMakeQty: number;
+  uncastHeats: UncastHeat[];
+  openWork: OpenWork[];
+  lastBlastFurnaceCode: string | null;
+  lastConverterCode: string | null;
 }

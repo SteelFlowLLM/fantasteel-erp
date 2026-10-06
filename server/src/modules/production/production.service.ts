@@ -24,6 +24,8 @@ import type { CancelProductionPlanDto, ListProductionPlansDto } from './dto/prod
 import { calcHeatPlan, hotRollingYieldRateOf, plannedSlabQtyOf, slabQtyFromHeat, type HeatPlan } from './heat-plan.calculator';
 import { reproductionCheckOf } from './plan-progress.calculator';
 import { planProgressOf, toPlanLot, toPlanSummary } from './production-plan.mapper';
+import { toResultView } from './production-result.mapper';
+import { ProductionResultRepository } from './production-result.repository';
 import { ProductionRepository, type PlanLotRow } from './production.repository';
 
 type Actor = AuthUser | 'SYSTEM';
@@ -64,6 +66,7 @@ export class ProductionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: ProductionRepository,
+    private readonly results: ProductionResultRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
     @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
@@ -224,7 +227,12 @@ export class ProductionService {
   async getPlanDetail(id: number, tx: Tx = this.prisma): Promise<ProductionPlanDetail> {
     const plan = await this.repository.findPlan(tx, id);
     if (!plan) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
-    const [lots, results] = await Promise.all([this.repository.findLotsOfPlans(tx, [id]), this.repository.findResultsOfPlan(tx, id)]);
+    const [lots, results, resultRows] = await Promise.all([
+      this.repository.findLotsOfPlans(tx, [id]),
+      this.repository.findResultsOfPlan(tx, id),
+      this.results.findResults(tx, { productionPlanId: id }),
+    ]);
+    const resultEvents = await this.results.findResultEvents(tx, resultRows.map((r) => r.id));
     let formation: HeatFormation | null = null;
     let formationError: string | null = null;
     try {
@@ -246,6 +254,7 @@ export class ProductionService {
       reproduction: plan.salesOrderItemId === null ? null : await this.reproductionCheck(tx, plan.salesOrderItemId),
       canCancel: planned,
       canConfirm: planned,
+      results: resultRows.map((r) => toResultView(r, resultEvents)).reverse(),
       updatedAt: plan.updatedAt.toISOString(),
     };
   }
