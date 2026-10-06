@@ -105,16 +105,16 @@ export function expectInputError(work: () => unknown, field?: string): void {
 export function stockRawMaterials(k: Kit, iso: string, tons: { ORE01?: string; COL01?: string; LIM01?: string; SMN01?: string } = {}): void {
   const amounts = { ORE01: '2000.000', COL01: '800.000', LIM01: '200.000', SMN01: '30.000', ...tons };
   const purchase = k.actor('purchase');
-  const { purchaseRequisition, items } = createPurchaseRequisition(k.at(iso), purchase, {
-    requestReason: '테스트 원료 확보',
-    items: Object.entries(amounts).map(([code, ton]) => ({ itemId: k.itemId(code), requiredTon: ton })),
-  });
-  approvePurchaseRequisition(k.at(iso), k.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-  createPurchaseOrders(k.at(iso), purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
   const date = new Date(iso);
   const receiptDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(date);
-  for (const item of items) {
-    const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === item.id);
+  // 구매요청 1건 = 원료 1품목이라 원료마다 요청한다
+  const prs = Object.entries(amounts).map(([code, ton]) =>
+    createPurchaseRequisition(k.at(iso), purchase, { itemId: k.itemId(code), requestedTon: ton, desiredReceiptDate: receiptDate, requestReason: '테스트 원료 확보' }),
+  );
+  for (const pr of prs) approvePurchaseRequisition(k.at(iso), k.actor('purchaseHead'), { purchaseRequisitionId: pr.id });
+  createPurchaseOrders(k.at(iso), purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+  for (const pr of prs) {
+    const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
     if (line) receiveGoods(k.at(iso), purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
   }
 }

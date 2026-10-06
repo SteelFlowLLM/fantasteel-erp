@@ -188,11 +188,11 @@ export const salesOrderApi = {
 
 | 함수 | 규칙·오류 | 작업 로그·알림 |
 |---|---|---|
-| `createPurchaseRequisition(tx, actor, {desiredReceiptDate?, requestReason?, items:[{itemId, requiredTon, productionPlanId?}], actionDraftId?, messageId?})` | 등록 = WAITING_APPROVAL. 요청자 = actor, 부서 = 요청 시점 소속. 부서장 없음 PUR-001. 원료만·톤 > 0(소수 3자리)·같은 원료 두 줄 불가·같은 (계획, 원료) 중복 불가(입력 오류). 같은 초안으로 두 번 불가 | PURCHASE_REQUISITION_CREATED(action_draft_id·message_id) · 부서장에게 **APPROVAL_REQUESTED** (`/approvals?pr=id`) |
-| `resubmitPurchaseRequisition(tx, actor, {purchaseRequisitionId, desiredReceiptDate?, requestReason?, items, expectedUpdatedAt?})` | REJECTED만, 요청자만(COM-002). 줄 교체 → WAITING_APPROVAL (반려 사유 지움). 요청 부서를 재요청 시점 소속으로 바꾼다(알림 대상 = 승인권자) | PURCHASE_REQUISITION_CREATED(reasonText '반려 후 고쳐 다시 요청', before/after) · APPROVAL_REQUESTED |
-| `canApproveRequisition(tables, employeeId, pr)` | 요청 부서(department_id)의 부서장 && 승인 대기 | — |
-| `approvePurchaseRequisition` / `rejectPurchaseRequisition(…, {rejectReason})` | 승인 대기만, 요청 부서 부서장만(COM-002), 부서장 없음 PUR-001, 반려 사유 필수 | PURCHASE_REQUISITION_APPROVED/REJECTED · 요청자에게 **APPROVAL_RESULT** |
-| `createPurchaseOrders(tx, actor, {purchaseRequisitionItemIds, dueDate?})` | 승인된 요청만(PUR-002), 이미 발주한 줄 입력 오류, 품목 **기본 공급업체별 발주 1건**(여러 줄), 발주량 = 요청 톤, 납기 = 입력값 또는 가장 이른 희망 입고일. 요청의 모든 줄을 발주하면 ORDERED | PURCHASE_ORDER_CREATED (발주마다) |
+| `createPurchaseRequisition(tx, actor, {itemId, requestedTon, desiredReceiptDate, requestReason?, productionPlanId?, actionDraftId?, messageId?})` | 구매요청 1건 = 원료 1품목(ERD). 등록 = WAITING_APPROVAL. 요청자 = actor (요청 부서는 저장하지 않고 요청자 소속 부서로 본다). 부서장 없음 PUR-001. 원료만·톤 > 0(소수 3자리)·희망 입고일 필수·같은 (계획, 원료)로 진행 중인 요청 중복 불가(입력 오류, 반려된 요청은 제외). 같은 초안으로 두 번 불가 | PURCHASE_REQUISITION_CREATED(action_draft_id·message_id) · 부서장에게 **APPROVAL_REQUESTED** (`/approvals?pr=id`) |
+| `resubmitPurchaseRequisition(tx, actor, {purchaseRequisitionId, requestedTon, desiredReceiptDate, requestReason?, expectedUpdatedAt?})` | REJECTED만, 요청자만(COM-002). 수량·희망 입고일·근거를 고쳐 → WAITING_APPROVAL (원료 품목은 그대로, 반려 사유·승인자 지움). 알림 대상 = 요청자 지금 소속 부서의 부서장 | PURCHASE_REQUISITION_CREATED(reasonText '반려 후 고쳐 다시 요청', before/after) · APPROVAL_REQUESTED |
+| `canApproveRequisition(tables, employeeId, pr)` | 요청자 지금 소속 부서(`requisitionDepartmentId`)의 부서장 && 승인 대기 | — |
+| `approvePurchaseRequisition` / `rejectPurchaseRequisition(…, {rejectReason})` | 승인 대기만, 요청자 소속 부서의 부서장만(COM-002), 부서장 없음 PUR-001, 반려 사유 필수. 반려 시각은 ERD에 칸이 없어 작업 로그로 본다 | PURCHASE_REQUISITION_APPROVED/REJECTED · 요청자에게 **APPROVAL_RESULT** |
+| `createPurchaseOrders(tx, actor, {purchaseRequisitionIds, dueDate?})` | 승인된 요청만(PUR-002), 이미 발주한 요청 입력 오류, 원료 **기본 공급업체별 발주 1건**(여러 품목, 발주 품목 1행 = 구매요청 1건), 발주량 = 요청 톤, 납기 = 입력값 또는 가장 이른 희망 입고일. 발주한 요청은 ORDERED | PURCHASE_ORDER_CREATED (발주마다) |
 | `receiveGoods(tx, actor, {purchaseOrderItemId, receivedTon, receiptDate})` | 등록 = 확정(수정 없음). 미입고량 초과 PUR-003. 야드 = 품목 기본 야드. 원료 LOT `RM-원료코드-YYMMDD(입고일)-NNN`, 잔량 = 입고량. 발주 줄 received/scheduled, 발주 상태 PARTIALLY_RECEIVED/RECEIVED | GOODS_RECEIPT_CONFIRMED (LOT 연결) |
 | 조회 | `listPurchaseRequisitions`, `requisitionView`(출처 MESSAGE/MRP/DIRECT 계산), `approvalInbox(tables, employeeId)`, `orderableRequisitionItems`(공급업체 포함), `listPurchaseOrders`/`purchaseOrderView`(줄별 입고·LOT), `receivablePurchaseOrders`, `listGoodsReceipts` | — |
 
@@ -262,18 +262,18 @@ export const salesOrderApi = {
 
 | 대상 | 기록 | 상태 |
 |---|---|---|
-| 원료 확보 (**가정값**, 아래 "원료 입고량") | PR-2609-0001(직접) 승인 → PO-2609-0001~0004(공급업체별) → GR 5건 → RM-ORE01-260902-001(1800t)·260903-001(3200t), RM-COL01-260902-001(1900t), RM-LIM01-260902-001(480t), RM-SMN01-260903-001(20t) — 양은 `SEED_CORE.rawMaterialReceipts` | 모두 입고 완료 |
+| 원료 확보 (**가정값**, 아래 "원료 입고량") | PR-2609-0001~0004(직접, 원료마다 1건) 승인 → PO-2609-0001~0004(공급업체별) → GR 5건 → RM-ORE01-260902-001(1800t)·260903-001(3200t), RM-COL01-260902-001(1900t), RM-LIM01-260902-001(480t), RM-SMN01-260903-001(20t) — 양은 `SEED_CORE.rawMaterialReceipts` | 모두 입고 완료 |
 | **14.1 시작 재고** | SO-2609-001 가람중공업 SS275 슬래브 250×1200×10000 **4매** → PP-2609-0001(1히트) → 시뮬레이션(시드 1001) HM-BF2-260905-01 → **HT-BOF1-260905-001**(성분 C 0.18 등 합격) → 슬래브 -01~-10 합격 → 자동 예약 4·여재 6 → DR-2609-0001 FIFO 배정(-01~-04) → 출고 → **MS-2609-0001-1**(PDF 생성됨) | 남은 **HT-BOF1-260905-001-05 ~ -10 = 합격·미예약 6매**(예약 가용 6, surplus_at 있음) |
 | 나래조선 | SO-2609-002 SM355A 슬래브 250×1500 **12매**(납기 10-15) → PP-2609-0002(2히트, 시드 2002) → 16매, **HT-BOF1-260914-001-03 표면 불합격(처리 상태 비어 있음)** → 예약 12, 여재 3 | 완료 |
 | 다온건설(혼합) | SO-2609-003: ① SM355B 코일 4.5mm **6개** ② SM355B 슬래브 250×1200 **5매**(납기 10-14) | — |
 | └ 코일 계획 | PP-2609-0003(1히트, 시드 3003) → 슬래브 8매(SL-SM355B-250x1500) 중 6매 합격·**2매 판정 대기** → 3매 열연 → 코일 3개 합격·자동 예약 3 | **진행중**, 열연할 적격 슬래브 3매 남음(필요 3) |
 | └ 슬래브 계획 | PP-2609-0004: 제선(HM-BF2-260918-01)·제강(**HT-BOF1-260918-001, 판정 대기**)만 | **진행중, 연주 전** |
 | └ 업무방 | "SO-2609-003 다온건설" 멤버 김도윤(연 사람)·박서영·정다은·강민석·오지훈, 시스템 메시지 + 메시지 3개(마지막: 정다은 "**실리코망가니즈 20톤 10월 20일까지 필요합니다**") | 안 읽은 메시지 있음 |
-| └ 합금철 | PR-2609-0002(MRP, PP-2609-0004 연결) 승인 → PO-2609-0005(하람합금철, 납기 10-28) → GR 4.5t | **부분 입고**(입고예정 3.5t) |
+| └ 합금철 | PR-2609-0005(MRP, PP-2609-0004 연결) 승인 → PO-2609-0005(하람합금철, 납기 10-28) → GR 4.5t | **부분 입고**(입고예정 3.5t) |
 | 여재 사용 | SO-2609-004 나래조선 SM355A 슬래브 **3매**(납기 **10-02**, 납기 위험) → 여재로 재고 우선 예약, 계획 없음 | 예약 3 |
 | 배정 대기 | DR-2609-0002 SO-2609-002 6매(요청일 10-05) | REQUESTED, 배정 0 |
 | 히트 불합격 | SO-2609-005 보람강관 SPHC 슬래브 220×1400 **8매** → PP-2609-0005(시드 5005) → 슬래브 10매 표면 합격, **HT-BOF1-260924-001 성분 불합격(P 0.058)** → 10매 히트 불합격 제외 | 계획 완료, **재생산 필요 8** |
-| 구매요청 | PR-2609-0003 철광석 500t **승인(미발주)**, PR-2609-0004 석회석 80t **승인 대기**(최준혁 승인함) | — |
+| 구매요청 | PR-2609-0006 철광석 500t **승인(미발주)**, PR-2609-0007 석회석 80t **승인 대기**(최준혁 승인함) | — |
 
 - 원료 잔량(시드 끝): 철광석 2,333.330t, 석탄 899.998t, 석회석 229.998t, 실리코망가니즈 1.000t(+ 입고예정 3.5t, 10-28).
 - **원료 입고량 (가정값, 2026-10-02)**: 철광석 5,000t(09-02 1,800 + 09-03 3,200)·석탄 1,900t·석회석 480t·실리코망가니즈 20t. 시드 히트 6개가 철광석 2,666.670t·석탄 1,000.002t·석회석 250.002t를 쓰고 남은 양이 위 잔량이다. 히트 1개 = 용선 277.778t = 철광석 444.445·석탄 166.667·석회석 41.667t라서 **14.1 히트 1개 뒤에도 철광석·석탄·석회석을 사지 않고 히트 4개를 더 만든다**(14.1 뒤 1,888.885 / 733.331 / 188.331t). 이유: 예전 양(3,300·1,250·320t)으로는 14.1 뒤 189 / 83 / 28t만 남아 14.2를 돌리려면 MRP → 구매요청 3건 → 승인 → 발주 → 입고를 먼저 해야 했다(2026-10-02 브라우저 점검). 실리코망가니즈는 14.1 3단계 MRP(합금철만 순소요 1.500t, 나머지 충분 — 04 14.1)를 지키려고 20t 그대로라, 14.1 뒤 합금철은 구매하거나 PO-2609-0005 남은 3.5t를 입고해야 한다. 시드 히트의 LOT 관계(어느 원료 LOT을 얼마 썼는지)는 그대로다(늘린 것은 09-03 철광석 LOT과 석탄·석회석 LOT의 양뿐). 시험 `tests/seedRawMaterials.test.ts`.

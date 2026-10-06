@@ -2,20 +2,20 @@
 // 날짜는 2026년 9월(Asia/Seoul), 난수 시드는 고정이라 매번 같은 결과가 나온다. 가정값은 docs/rework/areas/core-domain.md "가정값"에 있다.
 //
 // 이야기 (모두 9월):
-//  1. 원료 확보: PR-2609-0001(직접) → 승인 → 공급업체별 발주 4건 → 입고 5건(RM LOT)
+//  1. 원료 확보: PR-2609-0001~0004(직접, 원료마다 1건) → 승인 → 공급업체별 발주 4건 → 입고 5건(RM LOT)
 //  2. SO-2609-001 가람중공업 SS275 슬래브 250×1200×10000 4매 → 계획 1히트 → 실적 시뮬레이션 10매 → 검사 합격 → 자동 예약 4·여재 6
 //     → 출하요청 DR-2609-0001 4매 FIFO 배정 → 출고 → 밀시트 MS-2609-0001-1 (PDF 생성됨)
 //     ⇒ 남은 합격·미예약 SS275 슬래브 6매 = 업무 프로세스 14.1의 시작 재고 (이 6매는 아래에서 건드리지 않는다)
 //  3. SO-2609-002 나래조선 SM355A 슬래브 250×1500 12매 → 2히트 → 16매(1매 표면 불합격) → 예약 12·여재 3
 //  4. SO-2609-003 다온건설 혼합: SM355B 코일 4.5mm 6개 + SM355B 슬래브 250×1200 5매 → 코일 계획·슬래브 계획
 //     업무방(멤버 5명, 시스템 메시지, 구매 담당 "실리코망가니즈 20톤 10월 20일까지 필요합니다")
-//     MRP 부족 → PR-2609-0002(계획 연결) 승인 → 발주 → 부분 입고(4.5t, 3.5t 입고예정)
+//     MRP 부족 → PR-2609-0005(계획 연결) 승인 → 발주 → 부분 입고(4.5t, 3.5t 입고예정)
 //     코일 계획: 8매 연주 → 6매 합격·2매 판정 대기 → 3매 열연 → 코일 3개 합격·자동 예약 (3개 더 열연할 적격 슬래브 3매 남음)
 //     슬래브 계획: 제선·제강만 (연주 전, 히트 판정 대기)
 //  5. SO-2609-004 나래조선 SM355A 슬래브 3매 → 여재로 재고 우선 예약(계획 없음), 납기 10-02(납기 위험)
 //  6. DR-2609-0002 SO-2609-002 6매 출하요청 (배정 대기)
 //  7. SO-2609-005 보람강관 SPHC 슬래브 220×1400 8매 → 10매 연주 → 히트 성분 불합격(P) → 하위 10매 제외, 재생산 필요 8
-//  8. PR-2609-0003 철광석(승인, 미발주), PR-2609-0004 석회석(승인 대기)
+//  8. PR-2609-0006 철광석(승인, 미발주), PR-2609-0007 석회석(승인 대기)
 import { decAdd } from '@/lib/decimal';
 import { typicalPassValue } from '@/lib/inspectionJudgment';
 import type { MockTx } from '@/mock/store';
@@ -114,20 +114,19 @@ export function seedCore(tx: MockTx): void {
   const lime = itemId('LIM01');
   const silicoManganese = itemId('SMN01');
   const receipts = SEED_CORE.rawMaterialReceipts;
-  const pr1 = createPurchaseRequisition(txAt(tx, '2026-09-01T09:00:00+09:00'), purchase, {
-    desiredReceiptDate: '2026-09-03',
-    requestReason: '9월 생산 대비 기초 원료 확보',
-    items: [
-      { itemId: ore, requiredTon: decAdd(receipts.ORE01[0], receipts.ORE01[1]) },
-      { itemId: coal, requiredTon: receipts.COL01 },
-      { itemId: lime, requiredTon: receipts.LIM01 },
-      { itemId: silicoManganese, requiredTon: receipts.SMN01 },
-    ],
-  });
-  approvePurchaseRequisition(txAt(tx, '2026-09-01T10:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr1.purchaseRequisition.id });
-  createPurchaseOrders(txAt(tx, '2026-09-01T11:00:00+09:00'), purchase, { purchaseRequisitionItemIds: pr1.items.map((i) => i.id) });
-  const poLineOf = (prItemId: number) => required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === prItemId), `발주 ${prItemId}`).id;
-  const [oreLine, coalLine, limeLine, smnLine] = pr1.items.map((i) => poLineOf(i.id));
+  // 구매요청 1건 = 원료 1품목(ERD)이라 원료마다 요청한다: PR-2609-0001~0004
+  const pr1 = [
+    { itemId: ore, requestedTon: decAdd(receipts.ORE01[0], receipts.ORE01[1]) },
+    { itemId: coal, requestedTon: receipts.COL01 },
+    { itemId: lime, requestedTon: receipts.LIM01 },
+    { itemId: silicoManganese, requestedTon: receipts.SMN01 },
+  ].map((line) =>
+    createPurchaseRequisition(txAt(tx, '2026-09-01T09:00:00+09:00'), purchase, { ...line, desiredReceiptDate: '2026-09-03', requestReason: '9월 생산 대비 기초 원료 확보' }),
+  );
+  for (const pr of pr1) approvePurchaseRequisition(txAt(tx, '2026-09-01T10:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr.id });
+  createPurchaseOrders(txAt(tx, '2026-09-01T11:00:00+09:00'), purchase, { purchaseRequisitionIds: pr1.map((pr) => pr.id) });
+  const poLineOf = (prId: number) => required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionId === prId), `발주 ${prId}`).id;
+  const [oreLine, coalLine, limeLine, smnLine] = pr1.map((pr) => poLineOf(pr.id));
   receiveGoods(txAt(tx, '2026-09-02T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[0], receiptDate: '2026-09-02' });
   receiveGoods(txAt(tx, '2026-09-02T10:30:00+09:00'), purchase, { purchaseOrderItemId: coalLine, receivedTon: receipts.COL01, receiptDate: '2026-09-02' });
   receiveGoods(txAt(tx, '2026-09-02T11:00:00+09:00'), purchase, { purchaseOrderItemId: limeLine, receivedTon: receipts.LIM01, receiptDate: '2026-09-02' });
@@ -197,11 +196,13 @@ export function seedCore(tx: MockTx): void {
   const pr2 = createPurchaseRequisition(txAt(tx, '2026-09-15T14:00:00+09:00'), purchase, {
     desiredReceiptDate: '2026-09-17',
     requestReason: 'MRP 부족: 다온건설 수주 슬래브 계획 합금철',
-    items: [{ itemId: silicoManganese, requiredTon: '8.000', productionPlanId: pp4.id }],
+    itemId: silicoManganese,
+    requestedTon: '8.000',
+    productionPlanId: pp4.id,
   });
-  approvePurchaseRequisition(txAt(tx, '2026-09-15T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr2.purchaseRequisition.id });
-  createPurchaseOrders(txAt(tx, '2026-09-15T16:00:00+09:00'), purchase, { purchaseRequisitionItemIds: pr2.items.map((i) => i.id), dueDate: '2026-10-28' });
-  receiveGoods(txAt(tx, '2026-09-16T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLineOf(pr2.items[0].id), receivedTon: '4.500', receiptDate: '2026-09-16' });
+  approvePurchaseRequisition(txAt(tx, '2026-09-15T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr2.id });
+  createPurchaseOrders(txAt(tx, '2026-09-15T16:00:00+09:00'), purchase, { purchaseRequisitionIds: [pr2.id], dueDate: '2026-10-28' });
+  receiveGoods(txAt(tx, '2026-09-16T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLineOf(pr2.id), receivedTon: '4.500', receiptDate: '2026-09-16' });
 
   // 코일 계획: 시뮬레이션(연주까지) → 6매 검사·2매 판정 대기 → 열연 3매 → 코일 3개 합격
   simulatePlan(txAt(tx, '2026-09-17T18:00:00+09:00'), steelmakingStaff, { productionPlanId: pp3.id, randomSeed: SEED_CORE.randomSeeds['PP-2609-0003'] });
@@ -262,13 +263,15 @@ export function seedCore(tx: MockTx): void {
   const pr3 = createPurchaseRequisition(txAt(tx, '2026-09-26T10:00:00+09:00'), purchase, {
     desiredReceiptDate: '2026-10-10',
     requestReason: '10월 철광석 보충',
-    items: [{ itemId: ore, requiredTon: '500.000' }],
+    itemId: ore,
+    requestedTon: '500.000',
   });
-  approvePurchaseRequisition(txAt(tx, '2026-09-26T11:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr3.purchaseRequisition.id });
+  approvePurchaseRequisition(txAt(tx, '2026-09-26T11:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr3.id });
   createPurchaseRequisition(txAt(tx, '2026-09-29T17:00:00+09:00'), purchase, {
     desiredReceiptDate: '2026-10-08',
     requestReason: '석회석 재고 보충',
-    items: [{ itemId: lime, requiredTon: '80.000' }],
+    itemId: lime,
+    requestedTon: '80.000',
   });
 
   // 업무방: 구매 담당의 Message → ERP 시연 메시지 + 읽음 위치
@@ -282,7 +285,7 @@ export function seedCore(tx: MockTx): void {
   markRead(purchase.employeeId, m3.id);
   markRead(sales.employeeId, m1.id);
 
-  // 이미 승인한 구매요청의 승인 요청 알림은 부서장이 처리한 것이라 읽음으로 둔다(승인 대기 PR-2609-0004만 안 읽음)
+  // 이미 승인한 구매요청의 승인 요청 알림은 부서장이 처리한 것이라 읽음으로 둔다(승인 대기 PR-2609-0007만 안 읽음)
   for (const notification of t.notification.filter((n) => n.notificationType === 'APPROVAL_REQUESTED' && !n.isRead)) {
     const prId = Number(/[?&]pr=(\d+)/.exec(notification.linkPath ?? '')?.[1]);
     const pr = t.purchaseRequisition.find((r) => r.id === prId);

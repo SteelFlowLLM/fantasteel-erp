@@ -14,6 +14,7 @@ import {
   planProgressOf,
   registerHotRolling,
   rejectPurchaseRequisition,
+  requisitionDepartmentId,
   resubmitPurchaseRequisition,
   approvePurchaseRequisition,
   rollingPlanView,
@@ -194,7 +195,7 @@ describe('MRP: 기간은 보여 줄 때만 거른다 (BP-PRD-01 시점별 가용
 describe('재요청 승인 부서 (REQ-AUTH-004·REQ-PUR-002)', () => {
   it('반려 뒤 부서를 옮겨 다시 요청하면 요청 부서가 지금 소속으로 바뀌고, 알림을 받은 새 부서장이 승인한다', () => {
     const k = createKit();
-    const pr = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionNo === 'PR-2609-0004');
+    const pr = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionNo === 'PR-2609-0007');
     if (!pr) throw new Error('시드 없음');
     rejectPurchaseRequisition(k.at('2026-10-01T09:00:00+09:00'), k.actor('purchaseHead'), { purchaseRequisitionId: pr.id, rejectReason: '수량 다시 확인' });
     // 요청자(구매 담당)를 영업 부서로 옮긴다
@@ -204,9 +205,11 @@ describe('재요청 승인 부서 (REQ-AUTH-004·REQ-PUR-002)', () => {
     const resubmitted = resubmitPurchaseRequisition(k.at('2026-10-01T10:00:00+09:00'), k.actor('purchase'), {
       purchaseRequisitionId: pr.id,
       requestReason: '석회석 재고 보충 (수량 확인)',
-      items: [{ itemId: k.itemId('LIM01'), requiredTon: '60' }],
+      requestedTon: '60',
+      desiredReceiptDate: '2026-10-08',
     });
-    expect(resubmitted).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', departmentId: salesDepartmentId });
+    expect(resubmitted.purchaseRequisitionStatus).toBe('WAITING_APPROVAL');
+    expect(requisitionDepartmentId(k.tables, resubmitted)).toBe(salesDepartmentId);
     const notified = k.tables.notification.filter((n) => n.notificationType === 'APPROVAL_REQUESTED' && n.linkPath === `/approvals?pr=${pr.id}`).at(-1);
     expect(notified?.recipientId).toBe(salesHeadId);
     expect(canApproveRequisition(k.tables, salesHeadId, resubmitted)).toBe(true);

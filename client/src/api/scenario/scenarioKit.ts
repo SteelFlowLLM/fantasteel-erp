@@ -76,13 +76,13 @@ export async function stockRawMaterialsViaApi(receiptDate: string, tons: Partial
   const requisitionIds: number[] = [];
   for (const [code, ton] of Object.entries(amounts)) {
     const itemId = readDb((t) => must(t.item.find((i) => i.itemCode === code), code).id);
-    requisitionIds.push((await purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '시연 원료 확보', itemId, requestedTon: ton })).id);
+    requisitionIds.push((await purchaseRequisitionApi.create({ desiredReceiptDate: receiptDate, requestReason: '시연 원료 확보', itemId, requestedTon: ton })).id);
   }
   as('purchaseHead');
   for (const id of requisitionIds) await approvalApi.approve({ purchaseRequisitionId: id, expectedUpdatedAt: (await purchaseRequisitionApi.detail(id)).updatedAt });
   as('purchase');
-  const candidateIds = (await purchaseOrderApi.candidateItems()).filter((i) => requisitionIds.includes(i.purchaseRequisitionId)).map((i) => i.id);
-  const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: candidateIds, dueDate: '' });
+  const candidateIds = (await purchaseOrderApi.candidateItems()).filter((i) => requisitionIds.includes(i.id)).map((i) => i.id);
+  const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionIds: candidateIds, dueDate: '' });
   for (const line of purchaseOrders.flatMap((po) => po.items)) {
     await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
   }

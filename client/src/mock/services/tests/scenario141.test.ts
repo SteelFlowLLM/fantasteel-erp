@@ -90,24 +90,26 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
 
     const line = mrp.requisitionLines[0];
     const purchase = k.actor('purchase');
-    const { purchaseRequisition: pr, items } = createPurchaseRequisition(k.at('2026-10-01T10:00:00+09:00'), purchase, {
+    const pr = createPurchaseRequisition(k.at('2026-10-01T10:00:00+09:00'), purchase, {
+      itemId: line.itemId,
+      requestedTon: line.netTon,
       desiredReceiptDate: '2026-10-10',
       requestReason: 'MRP 합금철 부족',
-      items: [{ itemId: line.itemId, requiredTon: line.netTon, productionPlanId: line.productionPlanId }],
+      productionPlanId: line.productionPlanId,
     });
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL' });
     const head = k.actor('purchaseHead');
     expect(t.notification.filter((n) => n.notificationType === 'APPROVAL_REQUESTED' && n.recipientId === head.employeeId).length).toBeGreaterThan(0);
     // 같은 계획·원료는 두 번 만들지 않는다
-    expectInputError(() => createPurchaseRequisition(k.at('2026-10-01T10:05:00+09:00'), purchase, { items: [{ itemId: line.itemId, requiredTon: '1.000', productionPlanId: planId }] }));
+    expectInputError(() => createPurchaseRequisition(k.at('2026-10-01T10:05:00+09:00'), purchase, { itemId: line.itemId, requestedTon: '1.000', desiredReceiptDate: '2026-10-10', productionPlanId: planId }));
     expect(computeMrp(t, { from: '2026-10-01', to: '2026-10-31' }).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
     // 승인 전 발주 불가
-    expectCode(() => createPurchaseOrders(k.at('2026-10-01T10:10:00+09:00'), purchase, { purchaseRequisitionItemIds: [items[0].id] }), 'PUR-002');
-    // 요청 부서의 부서장만 승인
+    expectCode(() => createPurchaseOrders(k.at('2026-10-01T10:10:00+09:00'), purchase, { purchaseRequisitionIds: [pr.id] }), 'PUR-002');
+    // 요청자 소속 부서의 부서장만 승인
     expectCode(() => approvePurchaseRequisition(k.at('2026-10-01T10:20:00+09:00'), k.actor('salesHead'), { purchaseRequisitionId: pr.id }), 'COM-002');
     approvePurchaseRequisition(k.at('2026-10-01T10:30:00+09:00'), head, { purchaseRequisitionId: pr.id });
     expect(t.notification.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.recipientId === purchase.employeeId && n.title.includes('PR-2610-0001'))).toBe(true);
-    const [po] = createPurchaseOrders(k.at('2026-10-01T11:00:00+09:00'), purchase, { purchaseRequisitionItemIds: [items[0].id] });
+    const [po] = createPurchaseOrders(k.at('2026-10-01T11:00:00+09:00'), purchase, { purchaseRequisitionIds: [pr.id] });
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', dueDate: '2026-10-10' });
     expect(t.supplier.find((s) => s.id === po.supplierId)?.supplierCode).toBe('SUP-04');
     expect(t.purchaseRequisition.find((p) => p.id === pr.id)?.purchaseRequisitionStatus).toBe('ORDERED');

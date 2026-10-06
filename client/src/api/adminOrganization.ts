@@ -144,7 +144,6 @@ function departmentInUseReason(tables: Readonly<MockTables>, departmentId: numbe
   if (employees > 0) return `소속 사원이 ${employees}명 있어 삭제할 수 없어요. 사원을 다른 부서로 옮긴 뒤 지워 주세요`;
   const children = tables.department.filter((d) => d.parentId === departmentId).length;
   if (children > 0) return `하위 부서가 ${children}개 있어 삭제할 수 없어요`;
-  if (tables.purchaseRequisition.some((r) => r.departmentId === departmentId)) return '구매요청에 쓰인 부서라 삭제할 수 없어요';
   if (tables.notification.some((n) => n.departmentId === departmentId)) return '부서 알림에 쓰인 부서라 삭제할 수 없어요';
   return null;
 }

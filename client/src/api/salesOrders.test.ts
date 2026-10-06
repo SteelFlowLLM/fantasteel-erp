@@ -227,7 +227,7 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02, 9.3 SO-003·SO-004)', () => {
     actAs(SEED_EMPLOYEE_NO.salesHead);
     expect(await salesOrderApi.cancelPurchaseImpact(soId)).toMatchObject([
       {
-        purchaseRequisitionNo: 'PR-2609-0002',
+        purchaseRequisitionNo: 'PR-2609-0005',
         purchaseRequisitionStatus: 'ORDERED',
         productionPlanNo: 'PP-2609-0004',
         planEffect: 'UNLINK',

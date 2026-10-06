@@ -2,7 +2,7 @@
 // 승인·반려는 권한 코드가 아니라 "요청 부서의 부서장인지"로 판단한다. 결과 알림(APPROVAL_RESULT)·작업 로그는 core 서비스가 남긴다.
 import { requireDepartmentHead } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
-import { approvalInbox, approvePurchaseRequisition, rejectPurchaseRequisition, requisitionView, userActor, type RequisitionView } from '@/mock/services';
+import { approvalInbox, approvePurchaseRequisition, rejectPurchaseRequisition, requisitionDepartmentId, requisitionView, userActor, type RequisitionView } from '@/mock/services';
 
 export const approvalKeys = {
   all: ['purchase-requisitions', 'approvals'] as const,
@@ -24,7 +24,7 @@ export const approvalApi = {
   countWaiting: (employeeId: number): Promise<number> =>
     mockQuery((tables) => {
       const headOf = new Set(tables.department.filter((d) => d.headEmployeeId === employeeId).map((d) => d.id));
-      return tables.purchaseRequisition.filter((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL' && headOf.has(purchaseRequisition.departmentId)).length;
+      return tables.purchaseRequisition.filter((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL' && headOf.has(requisitionDepartmentId(tables, purchaseRequisition) ?? 0)).length;
     }),
 
   /** 승인함: 내가 부서장인 부서의 승인 대기 구매요청 (먼저 온 것부터). 부서장이 아니면 COM-002. */

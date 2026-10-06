@@ -237,18 +237,17 @@ export function cancelPurchaseImpactOf(tables: Tables, salesOrderId: number): Ca
   );
   return plans
     .flatMap((plan) =>
-      tables.purchaseRequisitionItem
-        .filter((line) => line.productionPlanId === plan.id)
-        .map((line): CancelPurchaseImpactLine => {
-          const pr = mustGet(tables, 'purchaseRequisition', line.purchaseRequisitionId, '구매요청');
-          const purchaseOrderLine = tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === line.id);
+      tables.purchaseRequisition
+        .filter((pr) => pr.productionPlanId === plan.id)
+        .map((pr): CancelPurchaseImpactLine => {
+          const purchaseOrderLine = tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
           const purchaseOrder = findById(tables, 'purchaseOrder', purchaseOrderLine?.purchaseOrderId);
           return {
             purchaseRequisitionId: pr.id,
             purchaseRequisitionNo: pr.purchaseRequisitionNo,
             purchaseRequisitionStatus: pr.purchaseRequisitionStatus,
-            itemName: findById(tables, 'item', line.itemId)?.itemName ?? '',
-            requiredTon: line.requiredTon,
+            itemName: findById(tables, 'item', pr.itemId)?.itemName ?? '',
+            requiredTon: pr.requestedTon,
             productionPlanId: plan.id,
             productionPlanNo: plan.productionPlanNo,
             planEffect: plan.productionPlanStatus === 'PLANNED' ? 'CANCEL' : 'UNLINK',

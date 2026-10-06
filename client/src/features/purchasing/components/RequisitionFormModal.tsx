@@ -139,7 +139,12 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
         {failure ? <Banner tone="danger">{failure}</Banner> : null}
         {materials.error ? <Banner tone="danger">원료 목록을 불러오지 못했어요 · {errorMessageOf(materials.error)}</Banner> : null}
 
-        <Field label="원료 품목 · 수량(톤)" required htmlFor="pr-item" hint="구매요청 1건에 원료 1품목이에요. 여러 원료는 따로 요청해 주세요">
+        <Field
+          label="원료 품목 · 수량(톤)"
+          required
+          htmlFor="pr-item"
+          hint={mode === 'resubmit' ? '다시 요청할 때는 수량만 고칠 수 있어요. 다른 원료는 새로 요청해 주세요' : '구매요청 1건에 원료 1품목이에요. 여러 원료는 따로 요청해 주세요'}
+        >
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <Select
@@ -148,7 +153,7 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
                 className="w-[240px]"
                 value={values.itemId ?? ''}
                 invalid={Boolean(fieldErrors.itemId)}
-                disabled={materials.isPending}
+                disabled={materials.isPending || mode === 'resubmit'}
                 onChange={(event) => setValues((current) => ({ ...current, itemId: event.target.value ? Number(event.target.value) : null }))}
               >
                 <option value="">{materials.isPending ? '원료 목록을 불러오는 중…' : '원료를 골라 주세요'}</option>
@@ -187,7 +192,7 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
           </div>
         </Field>
 
-        <Field label="희망 입고일" htmlFor="pr-desired-date" error={fieldErrors.desiredReceiptDate ?? null} hint="발주할 때 납기의 기본값이 돼요">
+        <Field label="희망 입고일" required htmlFor="pr-desired-date" error={fieldErrors.desiredReceiptDate ?? null} hint="발주할 때 납기의 기본값이 돼요">
           <DateInput id="pr-desired-date" value={values.desiredReceiptDate} onChange={(value) => setValues((current) => ({ ...current, desiredReceiptDate: value }))} invalid={Boolean(fieldErrors.desiredReceiptDate)} />
         </Field>
 

@@ -85,12 +85,9 @@ describe('MRP 기간 · 시점별 차감', () => {
 
     // Q 몫 철광석 구매요청(production_plan_id = Q) → 승인 → 발주(입고예정 10-10, P의 필요일보다 앞섬)
     const purchase = kit.actor('purchase');
-    const { purchaseRequisition, items } = createPurchaseRequisition(kit.at(AT), purchase, {
-      desiredReceiptDate: '2026-10-10',
-      items: [{ itemId: ore, requiredTon: '10000', productionPlanId: planQ }],
-    });
+    const purchaseRequisition = createPurchaseRequisition(kit.at(AT), purchase, { itemId: ore, requestedTon: '10000', desiredReceiptDate: '2026-10-10', productionPlanId: planQ });
     approvePurchaseRequisition(kit.at(AT), kit.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionItemIds: items.map((i) => i.id), dueDate: '2026-10-10' });
+    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionIds: [purchaseRequisition.id], dueDate: '2026-10-10' });
 
     // 10월 기간: Q는 보이지 않지만 그 몫 입고예정은 Q 전용이라 P의 순소요는 그대로
     const octAfter = computeMrpForPeriod(kit.tables, OCT);
@@ -140,12 +137,9 @@ describe('MRP 원료 표 한 줄의 숫자 (총소요 − 원료 LOT 잔량 − 
 
     // 14.1 3단계: MRP 줄로 구매요청(계획 연결) → 승인 → 발주(납기 10-10) → 이 계획 몫 입고예정 1.500t가 입고예정 칸에 들어간다
     const purchase = kit.actor('purchase');
-    const { purchaseRequisition, items } = createPurchaseRequisition(kit.at(AT), purchase, {
-      desiredReceiptDate: '2026-10-10',
-      items: [{ itemId: kit.itemId('SMN01'), requiredTon: '1.500', productionPlanId: planId }],
-    });
+    const purchaseRequisition = createPurchaseRequisition(kit.at(AT), purchase, { itemId: kit.itemId('SMN01'), requestedTon: '1.500', desiredReceiptDate: '2026-10-10', productionPlanId: planId });
     approvePurchaseRequisition(kit.at(AT), kit.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
+    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
     const after = computeMrpForPeriod(kit.tables, period).materials.find((m) => m.itemCode === 'SMN01');
     expect(after).toMatchObject({ scheduledReceiptTon: '5.000', coveredScheduledTon: '1.500', scheduledAfterNeedDateTon: '3.500', netTon: '0.000' });
     expectRowAdds(after);

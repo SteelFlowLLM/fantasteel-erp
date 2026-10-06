@@ -108,19 +108,24 @@ export function seedDashboard(tx: MockTx): void {
       }
     }
   }
-  const pr = createPurchaseRequisition(txAt(tx, '2026-08-27T14:00:00+09:00'), purchase, {
-    desiredReceiptDate: SEED_DASHBOARD.receiptDate,
-    requestReason: '8월 수주 4건 생산 원료',
-    items: [...needs].map(([itemId, tons]) => ({ itemId, requiredTon: decSum(tons, TON_DIGITS) })),
-  });
-  approvePurchaseRequisition(txAt(tx, '2026-08-27T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr.purchaseRequisition.id });
-  createPurchaseOrders(txAt(tx, '2026-08-27T16:00:00+09:00'), purchase, { purchaseRequisitionItemIds: pr.items.map((i) => i.id) });
-  for (const prItem of pr.items) {
-    const poLine = required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === prItem.id), `발주 줄 ${prItem.id}`);
+  // 구매요청 1건 = 원료 1품목(ERD)이라 원료마다 요청한다
+  const prs = [...needs].map(([itemId, tons]) =>
+    createPurchaseRequisition(txAt(tx, '2026-08-27T14:00:00+09:00'), purchase, {
+      itemId,
+      requestedTon: decSum(tons, TON_DIGITS),
+      desiredReceiptDate: SEED_DASHBOARD.receiptDate,
+      requestReason: '8월 수주 4건 생산 원료',
+    }),
+  );
+  for (const pr of prs) approvePurchaseRequisition(txAt(tx, '2026-08-27T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr.id });
+  createPurchaseOrders(txAt(tx, '2026-08-27T16:00:00+09:00'), purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+  for (const pr of prs) {
+    const poLine = required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id), `발주 줄 ${pr.id}`);
     receiveGoods(txAt(tx, '2026-08-31T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: poLine.orderedTon, receiptDate: SEED_DASHBOARD.receiptDate });
   }
   // 8월에 처리한 구매 알림은 읽음
-  for (const notification of t.notification.filter((n) => !n.isRead && n.linkPath?.endsWith(`?pr=${pr.purchaseRequisition.id}`))) {
+  const prLinks = prs.map((pr) => `?pr=${pr.id}`);
+  for (const notification of t.notification.filter((n) => !n.isRead && prLinks.some((link) => n.linkPath?.endsWith(link)))) {
     updateRow(txAt(tx, '2026-08-27T17:00:00+09:00'), 'notification', notification.id, { isRead: true, readAt: new Date('2026-08-27T17:00:00+09:00').toISOString() });
   }
 

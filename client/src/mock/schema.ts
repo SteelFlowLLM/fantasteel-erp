@@ -303,28 +303,24 @@ export type LotRelationRow = Timestamps & {
 };
 
 // ── purchasing ───────────────────────────────────────────
+/** ERD purchase_requisition: 구매요청 1건 = 원료 1품목. 요청 부서는 저장하지 않고 요청자의 소속 부서로 본다 */
 export type PurchaseRequisitionRow = Timestamps & {
   id: number;
   purchaseRequisitionNo: string;
-  requesterId: number;
-  departmentId: number;
-  approverId: number | null;
-  purchaseRequisitionStatus: PurchaseRequisitionStatus;
-  desiredReceiptDate: DateString | null;
-  requestReason: string | null;
-  rejectReason: string | null;
-  actionDraftId: number | null;
-  approvedAt: IsoDateTime | null;
-  rejectedAt: IsoDateTime | null;
-};
-
-export type PurchaseRequisitionItemRow = Timestamps & {
-  id: number;
-  purchaseRequisitionId: number;
-  lineNo: number;
   itemId: number;
-  requiredTon: DecimalString;
+  /** required_ton(MRP 소요량)과 구분 */
+  requestedTon: DecimalString;
+  desiredReceiptDate: DateString;
+  requesterId: number;
+  /** 승인·반려한 부서장 */
+  approverId: number | null;
+  approvedAt: IsoDateTime | null;
+  rejectReason: string | null;
+  requestReason: string | null;
+  /** 근거 생산계획 (MRP 중복 요청 방지) */
   productionPlanId: number | null;
+  actionDraftId: number | null;
+  purchaseRequisitionStatus: PurchaseRequisitionStatus;
 };
 
 export type PurchaseOrderRow = Timestamps & {
@@ -341,7 +337,8 @@ export type PurchaseOrderItemRow = Timestamps & {
   purchaseOrderId: number;
   lineNo: number;
   itemId: number;
-  purchaseRequisitionItemId: number;
+  /** 발주 품목 1행 = 구매요청 1건 */
+  purchaseRequisitionId: number;
   orderedTon: DecimalString;
   receivedTon: DecimalString;
   scheduledReceiptTon: DecimalString;
@@ -577,7 +574,6 @@ export type MockTables = {
   lot: LotRow[];
   lotRelation: LotRelationRow[];
   purchaseRequisition: PurchaseRequisitionRow[];
-  purchaseRequisitionItem: PurchaseRequisitionItemRow[];
   purchaseOrder: PurchaseOrderRow[];
   purchaseOrderItem: PurchaseOrderItemRow[];
   goodsReceipt: GoodsReceiptRow[];
@@ -636,7 +632,6 @@ export const DB_TABLE_NAME = {
   lot: 'lot',
   lotRelation: 'lot_relation',
   purchaseRequisition: 'purchase_requisition',
-  purchaseRequisitionItem: 'purchase_requisition_item',
   purchaseOrder: 'purchase_order',
   purchaseOrderItem: 'purchase_order_item',
   goodsReceipt: 'goods_receipt',
@@ -692,7 +687,6 @@ export function createEmptyTables(): MockTables {
     lot: [],
     lotRelation: [],
     purchaseRequisition: [],
-    purchaseRequisitionItem: [],
     purchaseOrder: [],
     purchaseOrderItem: [],
     goodsReceipt: [],

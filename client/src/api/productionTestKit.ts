@@ -51,14 +51,15 @@ export async function stockRawMaterialsForTest(): Promise<void> {
   const head = userActor(employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead));
   const amounts: Record<string, string> = { ORE01: '2000.000', COL01: '800.000', LIM01: '200.000', SMN01: '30.000' };
   await mockMutation((tx) => {
-    const { purchaseRequisition, items } = createPurchaseRequisition(tx, purchase, {
-      requestReason: '테스트 원료 확보',
-      items: Object.entries(amounts).map(([code, ton]) => ({ itemId: itemIdOf(code), requiredTon: ton })),
-    });
-    approvePurchaseRequisition(tx, head, { purchaseRequisitionId: purchaseRequisition.id });
-    createPurchaseOrders(tx, purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
-    for (const item of items) {
-      const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === item.id);
+    const today = toSeoulDateString(tx.now);
+    // 구매요청 1건 = 원료 1품목이라 원료마다 요청한다
+    const prs = Object.entries(amounts).map(([code, ton]) =>
+      createPurchaseRequisition(tx, purchase, { itemId: itemIdOf(code), requestedTon: ton, desiredReceiptDate: today, requestReason: '테스트 원료 확보' }),
+    );
+    for (const pr of prs) approvePurchaseRequisition(tx, head, { purchaseRequisitionId: pr.id });
+    createPurchaseOrders(tx, purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+    for (const pr of prs) {
+      const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
       if (line) receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate: toSeoulDateString(tx.now) });
     }
   });
