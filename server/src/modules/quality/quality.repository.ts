@@ -30,7 +30,7 @@ const heatParentSelect = {
 } as const;
 
 /** 슬래브 → 히트, 코일 → 슬래브 → 히트 (lot_relation, LOT 번호 파싱으로 계보를 만들지 않음 [ERD]) */
-const inspectedLotSelect = {
+export const inspectedLotSelect = {
   id: true,
   lotNo: true,
   lotType: true,
