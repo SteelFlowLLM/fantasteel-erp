@@ -17,7 +17,7 @@ import { MasterItem, MasterNote, RequisitionSourceTag, RequisitionStatusBadge } 
 import { RequisitionFormModal } from '@/features/purchasing/components/RequisitionFormModal';
 import { RequisitionPanel } from '@/features/purchasing/components/RequisitionPanel';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { REQUISITION_SOURCE_LABEL, REQUISITION_SOURCES, summarizeItemNames } from '@/features/purchasing/lib/purchasingView';
+import { REQUISITION_SOURCE_LABEL, REQUISITION_SOURCES } from '@/features/purchasing/lib/purchasingView';
 import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { usePurchaseRequisitionList } from '@/hooks/usePurchaseRequisitions';
@@ -63,7 +63,8 @@ export function RequisitionListScreen() {
         (word === '' ||
           purchaseRequisition.purchaseRequisitionNo.toLowerCase().includes(word) ||
           (purchaseRequisition.requesterName ?? '').includes(word) ||
-          purchaseRequisition.items.some((i) => i.itemName.includes(word) || i.itemCode.toLowerCase().includes(word))),
+          purchaseRequisition.itemName.includes(word) ||
+          purchaseRequisition.itemCode.toLowerCase().includes(word)),
     );
   }, [rows, status, source, mineOnly, keyword, me.employeeId]);
   const activeId = selectedId ?? filtered[0]?.id ?? null;
@@ -137,8 +138,8 @@ export function RequisitionListScreen() {
                       <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-sm text-ink">
-                      {summarizeItemNames(purchaseRequisition.items)}
-                      <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
+                      {purchaseRequisition.itemName}
+                      <span className="text-ink-3">· {fmtTon(purchaseRequisition.requestedTon)}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
                       {purchaseRequisition.requesterName ?? '-'}

@@ -80,12 +80,12 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const line = mrp.requisitionLines[0];
 
     at('2026-10-01T10:00:00+09:00');
-    const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', items: [{ itemId: line.itemId, requiredTon: line.netTon, productionPlanId: line.productionPlanId }] });
+    const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netTon, productionPlanId: line.productionPlanId });
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL', source: 'MRP' });
-    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', items: [{ itemId: line.itemId, requiredTon: '1.000', productionPlanId: planId }] })).rejects.toBeInstanceOf(InputError);
+    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
     expect((await mrpApi.requirements(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
     expect((await purchaseOrderApi.candidateItems()).some((i) => i.purchaseRequisitionId === pr.id)).toBe(false);
-    await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: [pr.items[0].id], dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
+    await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: readDb((t) => t.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === pr.id).map((i) => i.id)), dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
 
     as('salesHead'); // 다른 부서 부서장은 승인할 수 없다
     await expect(approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: pr.updatedAt })).rejects.toMatchObject({ code: 'COM-002' });
@@ -99,7 +99,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const candidate = (await purchaseOrderApi.candidateItems()).find((i) => i.purchaseRequisitionId === pr.id);
     expect(candidate?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
     at('2026-10-01T11:00:00+09:00');
-    const [po] = await purchaseOrderApi.create({ purchaseRequisitionItemIds: [pr.items[0].id], dueDate: '' });
+    const [po] = await purchaseOrderApi.create({ purchaseRequisitionItemIds: [candidate?.id ?? 0], dueDate: '' });
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', dueDate: '2026-10-10' });
     expect((await purchaseRequisitionApi.detail(pr.id)).purchaseRequisitionStatus).toBe('ORDERED');
     expect((await mrpApi.requirements(period)).materials.find((m) => m.itemCode === 'SMN01')?.netTon).toBe('0.000');

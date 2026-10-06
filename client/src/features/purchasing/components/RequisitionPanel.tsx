@@ -20,7 +20,7 @@ import { Steps, type StepItem } from '@/components/Steps';
 import { Table, Td, Th } from '@/components/Table';
 import { PurchaseOrderStatusBadge, RequisitionSourceTag, RequisitionStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionFormModal } from '@/features/purchasing/components/RequisitionFormModal';
-import { REQUISITION_SOURCE_LABEL, summarizeItemNames, trimTonText } from '@/features/purchasing/lib/purchasingView';
+import { REQUISITION_SOURCE_LABEL, trimTonText } from '@/features/purchasing/lib/purchasingView';
 import { useApproveRequisition, useRejectRequisition } from '@/hooks/useApprovals';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { usePurchaseRequisitionDetail } from '@/hooks/usePurchaseRequisitions';
@@ -91,10 +91,8 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
   });
 
   const status = detail.purchaseRequisitionStatus;
-  const hasUnordered = detail.items.some((i) => i.purchaseOrderNo === null);
   const orderedTotal = decSum(detail.purchaseOrderLines.map((l) => l.orderedTon));
   const receivedTotal = decSum(detail.purchaseOrderLines.map((l) => l.receivedTon));
-  const planNos = [...new Set(detail.items.map((i) => i.productionPlanNo).filter((no): no is string => no !== null))];
 
   const submitReject = () => {
     if (!rejectReason.trim()) {
@@ -123,7 +121,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 초안 #{detail.sourceDraft.id} 보기
               </ButtonLink>
             ) : null}
-            {status === 'APPROVED' && hasUnordered ? (
+            {status === 'APPROVED' && detail.purchaseOrderNo === null ? (
               canConfirmPurchaseOrder ? (
                 <ButtonLink href={`/purchase-orders?pr=${detail.id}`} variant="primary" icon="building" size="sm">
                   발주 만들기
@@ -139,7 +137,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         }
       />
       <p className="-mt-2 text-sm text-ink-2">
-        {summarizeItemNames(detail.items)} · 합계 <b className="font-semibold tabular-nums">{fmtTon(detail.totalTon)}</b> · {detail.requesterName ?? '-'} · {fmtDateTime(detail.createdAt)} 등록
+        {detail.itemName} · <b className="font-semibold tabular-nums">{fmtTon(detail.requestedTon)}</b> · {detail.requesterName ?? '-'} · {fmtDateTime(detail.createdAt)} 등록
       </p>
 
       <Card>
@@ -156,47 +154,21 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
       ) : null}
 
       <Card>
-        <CardHead title="요청 내용" meta={`${REQUISITION_SOURCE_LABEL[detail.source]} · 원료 ${detail.items.length}종`} />
-        <CardBody flush>
-          <Table>
-            <thead>
-              <tr>
-                <Th align="right">#</Th>
-                <Th>원료</Th>
-                <Th align="right">수량(톤)</Th>
-                <Th>근거 생산계획</Th>
-                <Th>발주</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.items.map((line) => (
-                <tr key={line.id}>
-                  <Td align="right" className="text-ink-3">
-                    {line.lineNo}
-                  </Td>
-                  <Td>
-                    {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
-                  </Td>
-                  <Td align="right">{fmtTon(line.requiredTon)}</Td>
-                  <Td>{line.productionPlanNo ? <span className="font-mono">{line.productionPlanNo}</span> : <span className="text-ink-3">-</span>}</Td>
-                  <Td>{line.purchaseOrderNo ? <span className="font-mono">{line.purchaseOrderNo}</span> : <span className="text-ink-3">미발주</span>}</Td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <Td />
-                <Td>합계</Td>
-                <Td align="right">{fmtTon(detail.totalTon)}</Td>
-                <Td />
-                <Td />
-              </tr>
-            </tfoot>
-          </Table>
-        </CardBody>
+        <CardHead title="요청 내용" meta={REQUISITION_SOURCE_LABEL[detail.source]} />
         <CardBody>
           <KvList
             items={[
+              {
+                label: '원료',
+                value: (
+                  <>
+                    {detail.itemName} <span className="font-mono text-cap text-ink-3">{detail.itemCode}</span>
+                  </>
+                ),
+              },
+              { label: '수량(톤)', value: <span className="tabular-nums">{fmtTon(detail.requestedTon)}</span> },
+              { label: '근거 생산계획', value: detail.productionPlanNo ? <span className="font-mono">{detail.productionPlanNo}</span> : <span className="text-ink-3">-</span> },
+              { label: '발주', value: detail.purchaseOrderNo ? <span className="font-mono">{detail.purchaseOrderNo}</span> : <span className="text-ink-3">미발주</span> },
               { label: '희망 입고일', value: detail.desiredReceiptDate ? fmtDate(detail.desiredReceiptDate) : '-' },
               { label: '요청자', value: `${detail.requesterName ?? '-'}${detail.requesterJobGradeName ? ` ${detail.requesterJobGradeName}` : ''} · ${detail.departmentName ?? '-'}` },
               {
@@ -238,7 +210,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
             )
           ) : detail.source === 'MRP' ? (
             <p className="text-sm text-ink-2">
-              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{planNos.join(', ')}</span>
+              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{detail.productionPlanNo}</span>
               {canSeeMrp ? (
                 <>
                   {' · '}
@@ -377,14 +349,12 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
           mode="resubmit"
           requisition={{ id: detail.id, purchaseRequisitionNo: detail.purchaseRequisitionNo, updatedAt: detail.updatedAt, rejectReason: detail.rejectReason }}
           initial={{
+            itemId: detail.itemId,
+            requestedTon: trimTonText(detail.requestedTon),
+            productionPlanId: detail.productionPlanId,
+            productionPlanNo: detail.productionPlanNo,
             desiredReceiptDate: detail.desiredReceiptDate ?? '',
             requestReason: detail.requestReason ?? '',
-            items: detail.items.map((line) => ({
-              itemId: line.itemId,
-              requiredTon: trimTonText(line.requiredTon),
-              productionPlanId: line.productionPlanId,
-              productionPlanNo: line.productionPlanNo,
-            })),
           }}
           onClose={() => setEditing(false)}
         />

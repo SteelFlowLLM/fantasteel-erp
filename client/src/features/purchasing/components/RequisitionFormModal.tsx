@@ -2,7 +2,7 @@
 
 // 구매요청 등록·다시 요청 창 (REQ-PUR-001, BP-PUR-01). 등록하면 바로 승인 대기가 되고 소속 부서장에게 승인 요청이 간다.
 // 임시 저장·'작성 중'은 없다(공통 코드 정의서). 반려된 요청은 요청자가 고쳐 다시 요청한다(10장 REJECTED → WAITING_APPROVAL).
-// 입력: 원료 품목 · 수량(톤, 소수 3자리) 줄 반복, 희망 입고일, 요청 근거. 요청자·부서는 자동(요청한 사원·요청 시점 소속).
+// 입력: 원료 1품목 · 수량(톤, 소수 3자리) (ERD: 구매요청 1건 = 원료 1품목), 희망 입고일, 요청 근거. 요청자·부서는 자동(요청한 사원·요청 시점 소속).
 import { useState, type ReactNode } from 'react';
 import { ApiError, InputError } from '@/api/client';
 import type { RequisitionView } from '@/api/purchasing';
@@ -10,7 +10,6 @@ import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';
 import { Field } from '@/components/Field';
-import { IconButton } from '@/components/IconButton';
 import { Input, Select, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { Tag } from '@/components/Tag';
@@ -19,19 +18,15 @@ import { useCreatePurchaseRequisition, usePurchaseRequisitionFormContext, useRes
 import { withEulReul } from '@/lib/josa';
 import { errorMessageOf } from '@/stores/useToastStore';
 
-export interface RequisitionFormLine {
+export interface RequisitionFormValues {
   itemId: number | null;
   /** 입력 글자 그대로 */
-  requiredTon: string;
-  /** MRP에서 온 줄: 근거 생산계획 */
+  requestedTon: string;
+  /** MRP에서 온 요청: 근거 생산계획 */
   productionPlanId: number | null;
   productionPlanNo: string | null;
-}
-
-export interface RequisitionFormValues {
   desiredReceiptDate: string;
   requestReason: string;
-  items: RequisitionFormLine[];
 }
 
 export interface RequisitionFormModalProps {
@@ -46,10 +41,10 @@ export interface RequisitionFormModalProps {
 }
 
 const REASON_MAX = 500;
-const EMPTY_LINE: RequisitionFormLine = { itemId: null, requiredTon: '', productionPlanId: null, productionPlanNo: null };
+const EMPTY_VALUES: RequisitionFormValues = { itemId: null, requestedTon: '', productionPlanId: null, productionPlanNo: null, desiredReceiptDate: '', requestReason: '' };
 
 export function RequisitionFormModal({ mode, initial, requisition, notice, onClose, onDone }: RequisitionFormModalProps) {
-  const [values, setValues] = useState<RequisitionFormValues>(() => initial ?? { desiredReceiptDate: '', requestReason: '', items: [{ ...EMPTY_LINE }] });
+  const [values, setValues] = useState<RequisitionFormValues>(() => initial ?? EMPTY_VALUES);
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const materials = useItemList({ itemType: 'RAW_MATERIAL' });
@@ -84,27 +79,19 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
   });
   const pending = create.isPending || resubmit.isPending;
 
-  const setLine = (index: number, patch: Partial<RequisitionFormLine>) =>
-    setValues((current) => ({ ...current, items: current.items.map((line, i) => (i === index ? { ...line, ...patch } : line)) }));
-  const removeLine = (index: number) => setValues((current) => ({ ...current, items: current.items.filter((_, i) => i !== index) }));
-  const addLine = () => setValues((current) => ({ ...current, items: [...current.items, { ...EMPTY_LINE }] }));
-
   const submit = () => {
-    const missing: Record<string, string> = {};
-    values.items.forEach((line, index) => {
-      if (line.itemId === null) missing[`items.${index}.itemId`] = '원료를 골라 주세요';
-    });
-    if (values.items.length === 0) missing.items = '원료 품목을 하나 이상 넣어 주세요';
-    if (Object.keys(missing).length > 0) {
-      setFieldErrors(missing);
+    if (values.itemId === null) {
+      setFieldErrors({ itemId: '원료를 골라 주세요' });
       return;
     }
     setFieldErrors({});
     setFailure(null);
     const payload = {
+      itemId: values.itemId,
+      requestedTon: values.requestedTon.trim(),
+      productionPlanId: values.productionPlanId,
       desiredReceiptDate: values.desiredReceiptDate,
       requestReason: values.requestReason,
-      items: values.items.map((line) => ({ itemId: line.itemId ?? 0, requiredTon: line.requiredTon.trim(), productionPlanId: line.productionPlanId })),
     };
     if (mode === 'resubmit' && requisition) {
       resubmit.mutate({ ...payload, purchaseRequisitionId: requisition.id, expectedUpdatedAt: requisition.updatedAt });
@@ -114,7 +101,8 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
   };
 
   const materialRows = materials.data ?? [];
-  const usedIds = new Set(values.items.map((line) => line.itemId));
+  const material = materialRows.find((m) => m.id === values.itemId);
+  const lineError = [fieldErrors.itemId, fieldErrors.requestedTon].filter(Boolean).join(' · ');
   const noHead = context.data !== undefined && headName === null;
 
   return (
@@ -151,66 +139,51 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
         {failure ? <Banner tone="danger">{failure}</Banner> : null}
         {materials.error ? <Banner tone="danger">원료 목록을 불러오지 못했어요 · {errorMessageOf(materials.error)}</Banner> : null}
 
-        <Field label="원료 품목 · 수량(톤)" required error={fieldErrors.items ?? null} htmlFor="pr-line-0">
-          <div className="flex flex-col gap-2">
-            {values.items.map((line, index) => {
-              const material = materialRows.find((m) => m.id === line.itemId);
-              const itemError = fieldErrors[`items.${index}.itemId`];
-              const tonError = fieldErrors[`items.${index}.requiredTon`];
-              return (
-                <div key={index} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <Select
-                      id={`pr-line-${index}`}
-                      aria-label={`${index + 1}번 원료`}
-                      className="w-[240px]"
-                      value={line.itemId ?? ''}
-                      invalid={Boolean(itemError)}
-                      disabled={materials.isPending}
-                      onChange={(event) => setLine(index, { itemId: event.target.value ? Number(event.target.value) : null })}
-                    >
-                      <option value="">{materials.isPending ? '원료 목록을 불러오는 중…' : '원료를 골라 주세요'}</option>
-                      {materialRows.map((m) => (
-                        <option key={m.id} value={m.id} disabled={m.id !== line.itemId && usedIds.has(m.id)}>
-                          {m.itemName} · {m.itemCode}
-                        </option>
-                      ))}
-                    </Select>
-                    <Input
-                      aria-label={`${index + 1}번 수량(톤)`}
-                      className="w-[140px]"
-                      numeric
-                      inputMode="decimal"
-                      placeholder="0.000"
-                      suffix="t"
-                      value={line.requiredTon}
-                      invalid={Boolean(tonError)}
-                      onChange={(event) => setLine(index, { requiredTon: event.target.value })}
-                    />
-                    {line.productionPlanNo ? (
-                      <Tag tone="neutral" size="md" title="MRP 근거 생산계획 (이 계획·원료로는 구매요청을 한 번만 만들어요)">
-                        근거 {line.productionPlanNo}
-                      </Tag>
-                    ) : null}
-                    <IconButton icon="x" label={`${index + 1}번 줄 지우기`} size="sm" className="ml-auto" disabled={values.items.length <= 1} onClick={() => removeLine(index)} />
-                  </div>
-                  {itemError || tonError ? (
-                    <span role="alert" className="text-cap text-danger">
-                      {[itemError, tonError].filter(Boolean).join(' · ')}
-                    </span>
-                  ) : material ? (
-                    <span className="text-cap text-ink-3">
-                      {material.defaultSupplierName ? `기본 공급업체 ${material.defaultSupplierName}` : '기본 공급업체가 지정되지 않았어요'} · 기본 야드 {material.defaultYardName}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-            <div>
-              <Button size="sm" icon="plus" onClick={addLine} disabled={values.items.length >= materialRows.length}>
-                품목 추가
-              </Button>
+        <Field label="원료 품목 · 수량(톤)" required htmlFor="pr-item" hint="구매요청 1건에 원료 1품목이에요. 여러 원료는 따로 요청해 주세요">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <Select
+                id="pr-item"
+                aria-label="원료"
+                className="w-[240px]"
+                value={values.itemId ?? ''}
+                invalid={Boolean(fieldErrors.itemId)}
+                disabled={materials.isPending}
+                onChange={(event) => setValues((current) => ({ ...current, itemId: event.target.value ? Number(event.target.value) : null }))}
+              >
+                <option value="">{materials.isPending ? '원료 목록을 불러오는 중…' : '원료를 골라 주세요'}</option>
+                {materialRows.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.itemName} · {m.itemCode}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                aria-label="수량(톤)"
+                className="w-[140px]"
+                numeric
+                inputMode="decimal"
+                placeholder="0.000"
+                suffix="t"
+                value={values.requestedTon}
+                invalid={Boolean(fieldErrors.requestedTon)}
+                onChange={(event) => setValues((current) => ({ ...current, requestedTon: event.target.value }))}
+              />
+              {values.productionPlanNo ? (
+                <Tag tone="neutral" size="md" title="MRP 근거 생산계획 (이 계획·원료로는 구매요청을 한 번만 만들어요)">
+                  근거 {values.productionPlanNo}
+                </Tag>
+              ) : null}
             </div>
+            {lineError ? (
+              <span role="alert" className="text-cap text-danger">
+                {lineError}
+              </span>
+            ) : material ? (
+              <span className="text-cap text-ink-3">
+                {material.defaultSupplierName ? `기본 공급업체 ${material.defaultSupplierName}` : '기본 공급업체가 지정되지 않았어요'} · 기본 야드 {material.defaultYardName}
+              </span>
+            ) : null}
           </div>
         </Field>
 
