@@ -115,14 +115,19 @@ export class HotRollingService {
   async confirm(user: AuthUser, productionPlanId: number, dto: ConfirmHotRollingDto): Promise<HotRollingDetail> {
     await this.prisma.$transaction(async (tx) => {
       if (!(await this.plans.lockPlan(tx, productionPlanId))) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
-      const detail = await this.detail(productionPlanId, tx);
-      if (!detail.isRollable) throw new AppException('COM-001', detail.notRollableReason ?? '열연할 수 없는 계획이에요');
-      if (dto.lotIds.length > detail.neededQty) throw new AppException('INV-001', `더 배정할 슬래브는 ${detail.neededQty}매예요`);
-      for (const lotId of [...dto.lotIds].sort((a, b) => a - b)) {
-        await this.inventory.confirmHotRollingAllocation(tx, { productionPlanId, lotId, slabItemId: detail.slabItemId, salesOrderId: detail.plan.salesOrderId, actor: user });
-      }
+      await this.confirmInTx(tx, user, productionPlanId, dto.lotIds);
     });
     return this.detail(productionPlanId);
+  }
+
+  /** 배정 확정 본체 (계획을 잠근 tx 안에서). 실적 시뮬레이션도 부른다 */
+  async confirmInTx(tx: Tx, actor: AuthUser | 'SYSTEM', productionPlanId: number, lotIds: readonly number[]): Promise<void> {
+    const detail = await this.detail(productionPlanId, tx);
+    if (!detail.isRollable) throw new AppException('COM-001', detail.notRollableReason ?? '열연할 수 없는 계획이에요');
+    if (lotIds.length > detail.neededQty) throw new AppException('INV-001', `더 배정할 슬래브는 ${detail.neededQty}매예요`);
+    for (const lotId of [...lotIds].sort((a, b) => a - b)) {
+      await this.inventory.confirmHotRollingAllocation(tx, { productionPlanId, lotId, slabItemId: detail.slabItemId, salesOrderId: detail.plan.salesOrderId, actor });
+    }
   }
 
   /** 배정 해제·변경 (투입 전만) */
