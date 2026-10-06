@@ -349,7 +349,10 @@ function OutcomeCard({
   const notes: string[] = [];
   if (outcome.inspectionResult === 'PASS') {
     if (outcome.autoReservedQty > 0) notes.push(`원래 수주 품목에 ${outcome.autoReservedQty}매를 자동 예약했어요`);
-    if (outcome.surplusLotNos.length > 0) notes.push(`수주에 필요한 매수를 넘는 ${outcome.surplusLotNos.length}매는 여재가 됐어요 (${outcome.surplusLotNos.join(', ')})`);
+    if (outcome.surplusQty > 0) {
+      const lotNos = outcome.surplusLotNos.length > 0 ? ` (${outcome.surplusLotNos.join(', ')})` : '';
+      notes.push(`수주에 필요한 매수를 넘는 ${outcome.surplusQty}매는 여재가 됐어요${lotNos}`);
+    }
     if (lotType !== 'HEAT' && heatPending) notes.push('상위 히트가 합격하면 예약·배정할 수 있어요');
     if (lotType === 'HEAT') notes.push('이미 제품 검사에 합격한 하위 슬래브·코일이 있으면 같이 예약·배정할 수 있게 돼요');
   } else if (outcome.inspectionResult === 'FAIL') {

@@ -3,6 +3,7 @@ import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION
 import {
   allocateRollingQty,
   countEligibleAvailableLots,
+  countUnallocatedPassedLotsByItem,
   findAllocatableLots,
   findLotEligibility,
   lockInventoryByItemId,
@@ -167,6 +168,20 @@ export class InventoryRepository {
       },
       orderBy: { id: 'asc' },
     });
+  }
+
+  /** 규격별 미배정 합격 제품 LOT 수 */
+  countUnallocatedPassedLots(tx: Tx) {
+    return tx.$queryRawTyped(countUnallocatedPassedLotsByItem());
+  }
+
+  /** 원료 규격과 잔량이 남은 원료 LOT의 잔량 합계·LOT 수 (원료 재고 = 원료 LOT 잔량 합계, TRM-054) */
+  async findRawMaterialStock(tx: Tx) {
+    const [items, sums] = await Promise.all([
+      tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true, itemCode: true, itemName: true }, orderBy: { id: 'asc' } }),
+      tx.lot.groupBy({ by: ['itemId'], where: { lotType: LOT_TYPE.RAW_MATERIAL, remainingTon: { gt: 0 } }, _sum: { remainingTon: true }, _count: { _all: true } }),
+    ]);
+    return { items, sums };
   }
 
   // ── 예약 ──────────────────────────────────────────────

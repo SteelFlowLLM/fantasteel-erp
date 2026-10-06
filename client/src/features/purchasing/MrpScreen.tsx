@@ -57,7 +57,10 @@ export function MrpScreen() {
       values: {
         desiredReceiptDate: line.needDate >= today ? line.needDate : '',
         requestReason: mrpRequestReason(line, period),
-        items: [{ itemId: line.itemId, requiredTon: trimTonText(line.netTon), productionPlanId: line.productionPlanId, productionPlanNo: line.productionPlanNo }],
+        itemId: line.itemId,
+        requestedTon: trimTonText(line.netTon),
+        productionPlanId: line.productionPlanId,
+        productionPlanNo: line.productionPlanNo,
       },
     });
 

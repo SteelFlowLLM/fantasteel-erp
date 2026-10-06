@@ -172,3 +172,49 @@ describe('검사 기준 새 버전 (TRM-110 변경 시 새 버전 생성)', () =
     expect(await catchError(inspectionStandardApi.createVersion({ baseStandardId: v1, items: [buildItem()] }))).toMatchObject({ code: 'COM-002' });
   });
 });
+
+describe('검사 기준 삭제 (REQ-QC-002, 서버와 같은 규칙)', () => {
+  it('검사가 쓰지 않은 기준은 같은 코드의 모든 버전과 항목을 지운다', async () => {
+    const gradeId = createTestGrade();
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const v1 = await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: gradeId, items: [buildItem()] });
+    const v2 = await inspectionStandardApi.createVersion({ baseStandardId: v1, items: [buildItem({ minValue: '360' }), buildItem({ minValue: '345', minThicknessMm: '16', maxThicknessMm: '40' })] });
+
+    await expect(inspectionStandardApi.remove(v1)).resolves.toEqual({ inspectionStandardCode: 'QS-TEST355-HR', deletedVersions: [1, 2] });
+    const left = getMockDb().read((t) => ({
+      standards: t.inspectionStandard.filter((s) => s.inspectionStandardCode === 'QS-TEST355-HR').length,
+      items: t.inspectionStandardItem.filter((i) => i.inspectionStandardId === v1 || i.inspectionStandardId === v2).length,
+    }));
+    expect(left).toEqual({ standards: 0, items: 0 });
+    await expect(inspectionStandardApi.get(v2)).resolves.toBeNull();
+    // 지운 뒤 같은 공정·강종을 다시 버전 1로 만들 수 있다
+    const again = await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: gradeId, items: [buildItem()] });
+    expect(await inspectionStandardApi.get(again)).toMatchObject({ inspectionStandardCode: 'QS-TEST355-HR', version: 1 });
+  });
+
+  it('어느 버전이든 검사가 판정에 썼으면 입력 오류로 거부하고 아무것도 지우지 않는다', async () => {
+    const gradeId = createTestGrade();
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const v1 = await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: gradeId, items: [buildItem()] });
+    const v2 = await inspectionStandardApi.createVersion({ baseStandardId: v1, items: [buildItem({ minValue: '360' })] });
+    getMockDb().transact((tx) => {
+      const lotId = tx.tables.lot[0].id;
+      insertRow(tx, 'qualityInspection', { lotId, inspectionStandardId: v1, processType: 'HOT_ROLLING', inspectionResult: 'PASS', inspectorEmployeeId: null, inspectedAt: tx.nowIso });
+    });
+    const before = getMockDb().read((t) => [t.inspectionStandard.length, t.inspectionStandardItem.length]);
+
+    const error = await catchError(inspectionStandardApi.remove(v2));
+    expect(error).toBeInstanceOf(InputError);
+    expect(error.message).toContain('검사 1건');
+    expect(getMockDb().read((t) => [t.inspectionStandard.length, t.inspectionStandardItem.length])).toEqual(before);
+  });
+
+  it('검사 기준 관리 사용 권한이 없으면 COM-002, 없는 기준은 COM-003', async () => {
+    const gradeId = createTestGrade();
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const v1 = await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: gradeId, items: [buildItem()] });
+    expect(await catchError(inspectionStandardApi.remove(99999))).toMatchObject({ code: 'COM-003' });
+    actAs(SEED_EMPLOYEE_NO.sales);
+    expect(await catchError(inspectionStandardApi.remove(v1))).toMatchObject({ code: 'COM-002' });
+  });
+});

@@ -5,14 +5,16 @@ import {
   QUALITY_INSPECTION_LIST_STATUS,
   type AuthUser,
   type PageResult,
+  type InspectionStockSync,
   type QualityInspectionDetail,
+  type QualityInspectionSaveResult,
   type QualityInspectionListItem,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { InventoryService } from '../inventory/inventory.service';
+import { InventoryService, type EligibilitySyncResult } from '../inventory/inventory.service';
 import { JUDGED_INSPECTION_RESULTS, type ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import type { QualityInspectionValueInput, RegisterQualityInspectionDto } from './dto/register-quality-inspection.dto';
 import type { UpdateQualityInspectionDto } from './dto/update-quality-inspection.dto';
@@ -61,6 +63,18 @@ function toJudgementLog(
     })),
     failedItemCodes: judgement.failedItemIds.map((id) => codeOf.get(id)),
     missingRequiredItemCodes: judgement.missingRequiredItemIds.map((id) => codeOf.get(id)),
+  };
+}
+
+/** 규격별 재고 반영 결과를 검사 응답의 합계로 바꾼다. 적격이 된 매수 중 자동 예약하지 못한 것은 여재다 */
+function toStockSync(results: EligibilitySyncResult[]): InspectionStockSync {
+  const sum = (pick: (r: EligibilitySyncResult) => number) => results.reduce((total, r) => total + pick(r), 0);
+  return {
+    eligibleAddedQty: sum((r) => Math.max(0, r.onHandQty - r.previousOnHandQty)),
+    autoReservedQty: sum((r) => r.autoReservedQty),
+    eligibleRemovedQty: sum((r) => Math.max(0, r.previousOnHandQty - r.onHandQty)),
+    releasedReservationQty: sum((r) => r.releasedReservationQty),
+    releasedAllocationCount: sum((r) => r.releasedAllocationCount),
   };
 }
 
@@ -116,7 +130,7 @@ export class QualityService {
    * 검사 등록·자동 판정 (API-117·224, REQ-QC-001·003, BP-QC-01).
    * LOT당 1건. 그 공정·강종의 최신 기준 버전으로 판정하고 버전을 남긴다. 작업 로그는 같은 tx에서 남긴다.
    */
-  async registerQualityInspection(dto: RegisterQualityInspectionDto, user: AuthUser): Promise<QualityInspectionDetail> {
+  async registerQualityInspection(dto: RegisterQualityInspectionDto, user: AuthUser): Promise<QualityInspectionSaveResult> {
     return this.prisma.$transaction(async (tx) => {
       const lot = await this.repository.findLotForRegistration(tx, dto.lotId);
       if (!lot) throw new AppException('COM-003', 'LOT을 찾을 수 없어요');
@@ -172,11 +186,11 @@ export class QualityService {
       });
 
       // 판정 뒤 재고 반영: 적격이 된 LOT on_hand +1·자동 예약, FAIL이면 하위 LOT 배정 해제·예약 축소 (quality.md 4장, 이슈 #18)
-      await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user);
+      const stockSync = toStockSync(await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user));
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
-      return toQualityInspectionDetail(detail);
+      return { ...toQualityInspectionDetail(detail), stockSync };
     });
   }
 
@@ -189,7 +203,7 @@ export class QualityService {
     qualityInspectionId: number,
     dto: UpdateQualityInspectionDto,
     user: AuthUser,
-  ): Promise<QualityInspectionDetail> {
+  ): Promise<QualityInspectionSaveResult> {
     return this.prisma.$transaction(async (tx) => {
       const inspection = await this.repository.findInspectionForUpdate(tx, qualityInspectionId);
       if (!inspection) throw new AppException('COM-003', '검사를 찾을 수 없어요');
@@ -251,11 +265,13 @@ export class QualityService {
       });
 
       // 판정이 바뀌면(PASS↔FAIL 등) 등록과 같은 재고 반영 (quality.md 4장 "측정값 수정"). 재판정 범위는 quality.md 8장 🟡
-      if (beforeJudgement.inspectionResult !== judgement.inspectionResult) await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user);
+      const stockSync = toStockSync(
+        beforeJudgement.inspectionResult !== judgement.inspectionResult ? await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user) : [],
+      );
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
-      return toQualityInspectionDetail(detail);
+      return { ...toQualityInspectionDetail(detail), stockSync };
     });
   }
 }

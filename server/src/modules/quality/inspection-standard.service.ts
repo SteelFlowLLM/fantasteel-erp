@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import type { InspectionStandardDetail, InspectionStandardListItem, PageResult, ProcessType } from '@fantasteel/shared';
+import type {
+  InspectionStandardDeleteResult,
+  InspectionStandardDetail,
+  InspectionStandardListItem,
+  PageResult,
+  ProcessType,
+} from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -161,6 +167,31 @@ export class InspectionStandardService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw staleVersion();
       throw error;
     }
+  }
+
+  /**
+   * 검사 기준 삭제 (REQ-QC-002, SPEC 5장 "삭제만, 참조가 있으면 거부", [05] 기준정보 삭제 규칙).
+   * 버전은 기준의 이력이라 코드 단위로 지운다: 같은 코드의 어느 버전이든 검사가 판정에 썼으면 거부하고,
+   * 아니면 그 코드의 모든 버전과 항목을 지운다. 쓰인 기준을 그만 쓰려면 새 버전으로 고친다.
+   * API 목록 CSV에 없는 API다 (2026-10-06 사용자 결정, 문서 반영 필요). 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 없어 작업 로그는 남기지 않는다.
+   */
+  async deleteInspectionStandard(inspectionStandardId: number): Promise<InspectionStandardDeleteResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const base = await this.repository.findStandardVersion(tx, inspectionStandardId);
+      if (!base) throw new AppException('COM-003', '검사 기준을 찾을 수 없어요');
+      const versions = await this.repository.findVersionsByCode(tx, base.inspectionStandardCode);
+      const versionIds = versions.map((v) => v.id);
+      const usedCount = await this.repository.countInspectionsUsingStandards(tx, versionIds);
+      if (usedCount > 0) {
+        // [04] 9.3에 "참조가 있어 삭제 불가" 코드가 없어 입력 에러로 돌려준다
+        throw new AppException(
+          'COM-004',
+          `검사 ${usedCount}건이 판정에 쓴 기준이라 삭제할 수 없어요 (${base.inspectionStandardCode}). 바꾸려면 새 버전으로 고쳐 주세요`,
+        );
+      }
+      await this.repository.deleteStandardsWithItems(tx, versionIds);
+      return { inspectionStandardCode: base.inspectionStandardCode, deletedVersionNos: versions.map((v) => v.versionNo) };
+    });
   }
 }
 

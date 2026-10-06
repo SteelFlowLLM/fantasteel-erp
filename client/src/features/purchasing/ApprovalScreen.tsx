@@ -11,7 +11,6 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { MasterItem, MasterNote, RequisitionSourceTag, RequisitionStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionPanel } from '@/features/purchasing/components/RequisitionPanel';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { summarizeItemNames } from '@/features/purchasing/lib/purchasingView';
 import { useApprovalInbox } from '@/hooks/useApprovals';
 import { useMe } from '@/hooks/useMe';
 import { useCanView } from '@/hooks/usePermission';
@@ -57,7 +56,7 @@ export function ApprovalScreen() {
                       <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
                     </span>
                     <span className="text-sm text-ink">
-                      {summarizeItemNames(purchaseRequisition.items)} <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
+                      {purchaseRequisition.itemName} <span className="text-ink-3">· {fmtTon(purchaseRequisition.requestedTon)}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
                       {purchaseRequisition.requesterName ?? '-'} · {purchaseRequisition.departmentName ?? '-'} · 등록 {fmtMDHM(purchaseRequisition.createdAt)}

@@ -14,7 +14,7 @@ import { RejectedLotService } from './rejected-lot.service';
 @Module({
   // 판정 뒤 재고 반영(onLotsEligibilityChanged)을 같은 tx에서 부른다
   imports: [InventoryModule],
-  // RejectedLotController가 먼저: quality-inspections/rejected-lots가 quality-inspections/:id보다 먼저 잡혀야 한다
+  // RejectedLotController가 먼저: 같은 모듈 안에서 고정 경로(lots/rejected)를 :id 경로보다 먼저 등록한다
   controllers: [RejectedLotController, QualityController, InspectionStandardController],
   providers: [
     QualityService,
