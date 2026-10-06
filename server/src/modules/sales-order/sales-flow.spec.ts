@@ -18,6 +18,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { QualityService } from '../quality/quality.service';
 import { ShipmentService } from '../shipment/shipment.service';
 import { SalesOrderService } from './sales-order.service';
 
@@ -74,22 +75,21 @@ async function nextSlabItemId(): Promise<number> {
   return item.id;
 }
 
-/**
- * 합격 제품 LOT을 만든다: 제강 실적 → 히트(검사) → 연주 실적 → 슬래브 n매(검사) + 히트→슬래브 관계.
- * 적격(자기 PASS + 히트 PASS)인 매수만큼 재고 on_hand를 늘린다 (품질 모듈이 할 일을 테스트에서 대신한다).
- */
-async function addSlabs(itemId: number, count: number, options: { producedDate?: string; heatResult?: InspectionResult; lotResult?: InspectionResult; productionPlanId?: number } = {}) {
+/** lotResult: null이면 슬래브 검사 행을 만들지 않는다 (검사 등록 API로 판정하는 테스트용) */
+type SlabOptions = { producedDate?: string; heatResult?: InspectionResult; lotResult?: InspectionResult | null; productionPlanId?: number };
+
+/** 제강 실적 → 히트(검사) → 연주 실적 → 슬래브 n매(검사) + 히트→슬래브 관계. 재고(on_hand)는 건드리지 않는다 */
+async function castSlabs(itemId: number, count: number, options: SlabOptions = {}) {
   const item = await prisma.item.findUniqueOrThrow({ where: { id: itemId } });
   const now = new Date();
   const steelmaking = await prisma.productionResult.create({ data: { processType: PROCESS_TYPE.STEELMAKING, converterCode: 'BOF1', startedAt: now, completedAt: now } });
   seq += 1;
   const heat = await prisma.lot.create({ data: { lotNo: `T-HT-${seq}`, lotType: 'HEAT', steelGradeId: item.steelGradeId, productionResultId: steelmaking.id } });
-  const heatResult = options.heatResult ?? INSPECTION_RESULT.PASS;
-  await prisma.qualityInspection.create({ data: { lotId: heat.id, inspectionStandardId, inspectorEmployeeId: inspectorId, inspectedAt: now, inspectionResult: heatResult } });
+  await prisma.qualityInspection.create({ data: { lotId: heat.id, inspectionStandardId, inspectorEmployeeId: inspectorId, inspectedAt: now, inspectionResult: options.heatResult ?? INSPECTION_RESULT.PASS } });
   const casting = await prisma.productionResult.create({
     data: { processType: PROCESS_TYPE.CONTINUOUS_CASTING, productionPlanId: options.productionPlanId ?? null, startedAt: now, completedAt: now },
   });
-  const lots = [];
+  const slabs = [];
   for (let n = 1; n <= count; n++) {
     const slab = await prisma.lot.create({
       data: {
@@ -100,13 +100,22 @@ async function addSlabs(itemId: number, count: number, options: { producedDate?:
         producedDate: new Date(`${options.producedDate ?? '2026-09-01'}T00:00:00.000Z`),
       },
     });
-    await prisma.qualityInspection.create({ data: { lotId: slab.id, inspectionStandardId, inspectorEmployeeId: inspectorId, inspectedAt: now, inspectionResult: options.lotResult ?? INSPECTION_RESULT.PASS } });
+    if (options.lotResult !== null) {
+      await prisma.qualityInspection.create({ data: { lotId: slab.id, inspectionStandardId, inspectorEmployeeId: inspectorId, inspectedAt: now, inspectionResult: options.lotResult ?? INSPECTION_RESULT.PASS } });
+    }
     await prisma.lotRelation.create({ data: { parentLotId: heat.id, childLotId: slab.id, lotRelationEvidence: LOT_RELATION_EVIDENCE.ACTUAL_INPUT } });
-    lots.push(slab);
+    slabs.push(slab);
   }
-  const eligible = heatResult === INSPECTION_RESULT.PASS && (options.lotResult ?? INSPECTION_RESULT.PASS) === INSPECTION_RESULT.PASS ? count : 0;
+  return { heatId: heat.id, slabs };
+}
+
+/** 합격 제품 LOT을 만들고 적격 매수만큼 재고 on_hand를 늘린다 (자동 예약 없이 재고만 필요한 테스트용) */
+async function addSlabs(itemId: number, count: number, options: SlabOptions = {}) {
+  const { slabs } = await castSlabs(itemId, count, options);
+  const passed = (options.heatResult ?? INSPECTION_RESULT.PASS) === INSPECTION_RESULT.PASS && options.lotResult !== null && (options.lotResult ?? INSPECTION_RESULT.PASS) === INSPECTION_RESULT.PASS;
+  const eligible = passed ? count : 0;
   await prisma.inventory.upsert({ where: { itemId }, create: { itemId, onHandQty: eligible }, update: { onHandQty: { increment: eligible } } });
-  return lots;
+  return slabs;
 }
 
 const inventoryOf = (itemId: number) => prisma.inventory.findUniqueOrThrow({ where: { itemId } });
@@ -493,5 +502,134 @@ describe('대시보드 위젯 (REQ-DSH-001)', () => {
     const limited = await dashboard.processFlow(noSales);
     expect(limited).toMatchObject({ salesOrders: null, productionPlans: null, inspections: null, shipmentRequests: null, goodsIssues: null });
     expect(await codeOf(dashboard.orderFulfillment(noSales))).toBe('COM-002');
+  });
+});
+
+describe('검사 판정 → 재고 반영·자동 예약 (REQ-INV-003·004·007, quality.md 4장)', () => {
+  let qualityUser: AuthUser;
+  const sync = (lotIds: number[]) => prisma.$transaction((tx) => inventory.onLotsEligibilityChanged(tx, lotIds, qualityUser));
+  const setResult = (lotId: number, inspectionResult: InspectionResult) => prisma.qualityInspection.update({ where: { lotId }, data: { inspectionResult } });
+  const activeOf = async (salesOrderId: number) =>
+    (await prisma.reservation.aggregate({ where: { salesOrderItem: { salesOrderId }, reservationStatus: 'ACTIVE' }, _sum: { reservedQty: true } }))._sum.reservedQty ?? 0;
+  const planOf = (productionPlanNo: string | null) => prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: productionPlanNo ?? '' } });
+
+  beforeAll(async () => {
+    const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
+    const user = await moduleRef.get(AuthUserService).load(employee.id);
+    if (!user) throw new Error('품질 사원');
+    qualityUser = user;
+  });
+
+  it('부족분 생산분이 합격하면 원래 수주 품목에 1매씩 자동 예약(SYSTEM)하고, 같은 LOT으로 다시 불러도 그대로다', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 5);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { slabs } = await castSlabs(itemId, 3, { productionPlanId: plan.id });
+
+    const [result] = await sync(slabs.map((s) => s.id));
+    expect(result).toMatchObject({ itemId, onHandQty: 3, autoReservedQty: 3, releasedReservationQty: 0 });
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 3, reservedQty: 3 });
+    expect(await activeOf(salesOrderId)).toBe(3);
+    const events = await prisma.businessEvent.findMany({ where: { salesOrderId, businessEventType: BUSINESS_EVENT_TYPE.RESERVATION_CREATED, actorType: 'SYSTEM' }, include: { businessEventLots: true } });
+    expect(events.flatMap((e) => e.businessEventLots.map((l) => l.lotId)).sort()).toEqual(slabs.map((s) => s.id).sort());
+
+    await sync(slabs.map((s) => s.id));
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 3, reservedQty: 3 });
+    const detail = await salesOrders.detail(salesOrderId);
+    expect(detail.items[0]).toMatchObject({ activeReservedQty: 3, unsecuredQty: 2, plannedQty: 2 });
+  });
+
+  it('히트가 판정 대기면 적격이 아니고, 히트가 합격하면 하위 슬래브가 함께 적격이 된다', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 2);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { heatId, slabs } = await castSlabs(itemId, 2, { productionPlanId: plan.id, heatResult: INSPECTION_RESULT.PENDING });
+
+    await sync(slabs.map((s) => s.id));
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 0, reservedQty: 0 });
+
+    await setResult(heatId, INSPECTION_RESULT.PASS);
+    await sync([heatId]);
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 2, reservedQty: 2 });
+    expect(await activeOf(salesOrderId)).toBe(2);
+  });
+
+  it('수주에서 연결이 풀린 계획의 산출물은 여재로 남고 자동 예약하지 않는다', async () => {
+    const itemId = await nextSlabItemId();
+    const { items } = await createSalesOrder(itemId, 2);
+    const plan = await planOf(items[0].productionPlanNo);
+    await prisma.productionPlan.update({ where: { id: plan.id }, data: { salesOrderItemId: null, productionPlanStatus: 'IN_PROGRESS' } });
+    const { slabs } = await castSlabs(itemId, 2, { productionPlanId: plan.id });
+
+    const [result] = await sync(slabs.map((s) => s.id));
+    expect(result).toMatchObject({ onHandQty: 2, autoReservedQty: 0 });
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 2, reservedQty: 0 });
+  });
+
+  it('미확보 매수까지만 예약하고 남는 합격품은 가용 재고(여재)로 둔다', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 2);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { slabs } = await castSlabs(itemId, 3, { productionPlanId: plan.id });
+
+    const [result] = await sync(slabs.map((s) => s.id));
+    expect(result).toMatchObject({ onHandQty: 3, autoReservedQty: 2 });
+    expect(await activeOf(salesOrderId)).toBe(2);
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 3, reservedQty: 2 });
+  });
+
+  it('배정된 합격 LOT이 불합격으로 바뀌면 배정 해제(출하요청은 배정 대기로), 합격 재고 −1, 넘친 예약 축소', async () => {
+    const itemId = await nextSlabItemId();
+    const { slabs } = await castSlabs(itemId, 2);
+    await sync(slabs.map((s) => s.id));
+    const { salesOrderId } = await createSalesOrder(itemId, 2);
+    const soItem = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId } });
+    const request = await shipments.create(sales, { customerId: customerA, items: [{ salesOrderItemId: soItem.id, requestQty: 2 }] });
+    await inventory.confirmAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: request.items[0].id, lotIds: slabs.map((s) => s.id) });
+    expect((await shipments.findOne(sales, request.id)).shipmentRequestStatus).toBe('ALLOCATED');
+
+    await setResult(slabs[0].id, INSPECTION_RESULT.FAIL);
+    const [result] = await sync([slabs[0].id]);
+    expect(result).toMatchObject({ onHandQty: 1, releasedReservationQty: 1, releasedAllocationCount: 1 });
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 1, reservedQty: 1 });
+    expect(await activeOf(salesOrderId)).toBe(1);
+    expect(await prisma.allocation.findFirstOrThrow({ where: { lotId: slabs[0].id } })).toMatchObject({ allocationStatus: 'RELEASED' });
+    expect((await shipments.findOne(sales, request.id)).shipmentRequestStatus).toBe('REQUESTED');
+    const released = await prisma.reservation.findMany({ where: { salesOrderItemId: soItem.id, reservationStatus: 'RELEASED' } });
+    expect(released.map((r) => r.reservedQty)).toEqual([1]);
+    expect(await codeOf(inventory.confirmAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: request.items[0].id, lotIds: [slabs[0].id] }))).toBe('INV-002');
+  });
+
+  it('품질 검사 등록(자동 판정 PASS)이 같은 트랜잭션에서 재고 반영·자동 예약까지 한다', async () => {
+    const itemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(itemId, 1);
+    const plan = await planOf(items[0].productionPlanNo);
+    const { slabs } = await castSlabs(itemId, 1, { productionPlanId: plan.id, lotResult: null });
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: itemId } });
+    const standard = await prisma.inspectionStandard.findFirstOrThrow({
+      where: { processType: PROCESS_TYPE.CONTINUOUS_CASTING, steelGradeId: item.steelGradeId ?? 0 },
+      orderBy: { versionNo: 'desc' },
+      include: { inspectionStandardItems: true },
+    });
+    // 기준 범위 안의 값: 최소·최대가 있으면 가운데, 한쪽만 있으면 그 값
+    const values = standard.inspectionStandardItems.map((i) => {
+      const value = i.minValue && i.maxValue ? i.minValue.add(i.maxValue).div(2) : (i.maxValue ?? i.minValue);
+      return { inspectionStandardItemId: i.id, measuredValue: value ? value.toFixed(4) : '0' };
+    });
+
+    const inspection = await moduleRef.get(QualityService).registerQualityInspection({ lotId: slabs[0].id, values }, qualityUser);
+    expect(inspection.inspectionResult).toBe('PASS');
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 1, reservedQty: 1 });
+    expect(await activeOf(salesOrderId)).toBe(1);
+  });
+
+  it('히트가 불합격으로 바뀌면 하위 제품이 모두 빠진다', async () => {
+    const itemId = await nextSlabItemId();
+    const { heatId, slabs } = await castSlabs(itemId, 3);
+    await sync(slabs.map((s) => s.id));
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 3 });
+    await setResult(heatId, INSPECTION_RESULT.FAIL);
+    await sync([heatId]);
+    expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 0, reservedQty: 0 });
   });
 });

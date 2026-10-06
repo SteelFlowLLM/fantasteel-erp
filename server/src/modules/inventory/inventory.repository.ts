@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
 import {
+  countEligibleAvailableLots,
   findAllocatableLots,
   findLotEligibility,
   lockInventoryByItemId,
@@ -58,6 +59,86 @@ export class InventoryRepository {
       data: { onHandQty: { decrement: qty }, reservedQty: { decrement: qty } },
     });
     return result.count > 0;
+  }
+
+  /** 재고 행이 없으면 만든다 (시드에 재고 행이 없고, 처음 적격이 될 때 생긴다) */
+  ensureInventory(tx: Tx, itemId: number) {
+    return tx.inventory.upsert({ where: { itemId }, create: { itemId }, update: {} });
+  }
+
+  async countEligibleAvailableLots(tx: Tx, itemId: number): Promise<number> {
+    return (await tx.$queryRawTyped(countEligibleAvailableLots(itemId)))[0]?.eligible_qty ?? 0;
+  }
+
+  setOnHandQty(tx: Tx, itemId: number, onHandQty: number) {
+    return tx.inventory.update({ where: { itemId }, data: { onHandQty } });
+  }
+
+  /** 판정이 바뀐 LOT에서 재고에 영향을 받는 제품 LOT: 히트면 하위 슬래브와 그 코일, 슬래브면 자기와 코일, 코일이면 자기 */
+  async findAffectedProductLotIds(tx: Tx, lotIds: number[]): Promise<number[]> {
+    const lots = await tx.lot.findMany({
+      where: { id: { in: lotIds } },
+      select: {
+        id: true,
+        lotType: true,
+        lotRelationsAsParentLot: { select: { childLot: { select: { id: true, lotType: true, lotRelationsAsParentLot: { select: { childLot: { select: { id: true, lotType: true } } } } } } } },
+      },
+    });
+    const ids = new Set<number>();
+    const isProduct = (lotType: string) => lotType === LOT_TYPE.SLAB || lotType === LOT_TYPE.COIL;
+    for (const lot of lots) {
+      if (isProduct(lot.lotType)) ids.add(lot.id);
+      for (const { childLot } of lot.lotRelationsAsParentLot) {
+        if (isProduct(childLot.lotType)) ids.add(childLot.id);
+        for (const grand of childLot.lotRelationsAsParentLot) if (isProduct(grand.childLot.lotType)) ids.add(grand.childLot.id);
+      }
+    }
+    return [...ids].sort((a, b) => a - b);
+  }
+
+  /** 제품 LOT과 그 LOT을 만든 생산계획(자동 예약 대상 수주 품목 찾기: LOT → 실적 → 계획 → 수주 품목) */
+  findProductLots(tx: Tx, lotIds: number[]) {
+    return tx.lot.findMany({
+      where: { id: { in: lotIds } },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        lotNo: true,
+        itemId: true,
+        lotStatus: true,
+        productionResult: { select: { productionPlan: { select: { id: true, itemId: true, salesOrderItemId: true } } } },
+      },
+    });
+  }
+
+  findConfirmedAllocationsOfLots(tx: Tx, lotIds: number[]) {
+    return tx.allocation.findMany({ where: { lotId: { in: lotIds }, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, include: allocationInclude, orderBy: { lotId: 'asc' } });
+  }
+
+  /** 규격의 ACTIVE 예약 (초과 예약 축소 대상) */
+  findActiveReservationsOfItem(tx: Tx, itemId: number) {
+    return tx.reservation.findMany({
+      where: { itemId, reservationStatus: RESERVATION_STATUS.ACTIVE },
+      include: { salesOrderItem: { select: { salesOrderId: true } } },
+      orderBy: { id: 'desc' },
+    });
+  }
+
+  updateReservationQty(tx: Tx, id: number, reservedQty: number) {
+    return tx.reservation.update({ where: { id }, data: { reservedQty } });
+  }
+
+  createReleasedReservation(tx: Tx, data: { salesOrderItemId: number; itemId: number; reservedQty: number }) {
+    return tx.reservation.create({ data: { ...data, reservationStatus: RESERVATION_STATUS.RELEASED } });
+  }
+
+  /** 자동 예약 판단: 수주 품목의 주문 매수·상태와 예약 상태별 합계 */
+  async findSalesOrderItemSecured(tx: Tx, salesOrderItemId: number) {
+    const item = await tx.salesOrderItem.findUnique({ where: { id: salesOrderItemId }, select: { id: true, salesOrderId: true, itemId: true, orderedQty: true, salesOrderItemStatus: true } });
+    if (!item) return null;
+    const sums = await tx.reservation.groupBy({ by: ['reservationStatus'], where: { salesOrderItemId }, _sum: { reservedQty: true } });
+    const sumOf = (status: string) => sums.find((r) => r.reservationStatus === status)?._sum.reservedQty ?? 0;
+    return { ...item, activeQty: sumOf(RESERVATION_STATUS.ACTIVE), convertedQty: sumOf(RESERVATION_STATUS.CONVERTED) };
   }
 
   /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
