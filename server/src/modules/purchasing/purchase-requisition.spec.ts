@@ -112,6 +112,7 @@ describe('구매요청 등록 (REQ-PUR-001, BP-PUR-01)', () => {
         requestReason: '10월 MRP 부족분',
         productionPlanId: null,
         actionDraftId: null,
+        purchaseOrderNo: null,
         salesOrderId: null,
       }),
     );
@@ -224,6 +225,20 @@ describe('구매요청 목록·상세 조회 범위 (REQ-PUR-001·002, REQ-AUTH-
 
   it('없는 구매요청은 COM-003', async () => {
     expect(await codeOf(purchasing.requisitionDetail(purchaser, 999_999))).toBe('COM-003');
+  });
+
+  it('approvable이면 권한과 상관없이 내가 승인할 요청만: 내 부서원의 승인 대기, 내 요청 제외', async () => {
+    const ownId = (await createAs(purchaseHead)).id;
+    const approvedId = (await createAs(purchaser)).id;
+    await prisma.purchaseRequisition.update({ where: { id: approvedId }, data: { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.APPROVED } });
+
+    const ids = (await purchasing.listRequisitions(purchaseHead, { approvable: true, size: 100 })).items.map((r) => r.id);
+    expect(ids).toContain(purchaseRequisitionId);
+    expect(ids).not.toContain(salesRequisitionId);
+    expect(ids).not.toContain(ownId);
+    expect(ids).not.toContain(approvedId);
+    expect((await purchasing.listRequisitions(salesHead, { approvable: true, size: 100 })).items.map((r) => r.id)).toContain(salesRequisitionId);
+    expect(await codeOf(purchasing.listRequisitions(purchaser, { approvable: true }))).toBe('COM-002');
   });
 
   it('상태로 거르고 최신 요청이 먼저 온다', async () => {

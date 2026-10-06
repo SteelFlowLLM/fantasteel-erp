@@ -2,10 +2,13 @@
 // 권한은 이 층에서 먼저 확인하고(requireActor, 없으면 COM-002), 업무 규칙·작업 로그·알림은 core 서비스가 한다.
 // - 구매요청 등록 = 바로 승인 대기(임시 저장 없음). 반려되면 요청자가 고쳐 다시 요청한다(resubmit).
 // - 발주: 공급업체 1곳당 발주 1건(서버 POST purchase-orders와 같은 입력). 화면이 공급업체별로 나눠 보낸다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 구매요청은 실제 서버를 부른다 (api/server/purchaseRequisitions.ts). 등록 창 정보는 두 모드 모두 조직 정보에서 읽는다.
 import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
 import { employeeBasicsOf } from '@/api/orgViews';
+import { serverPurchaseRequisitionApi } from '@/api/server/purchaseRequisitions';
 import { canView } from '@/lib/permissions';
 import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
 import {
@@ -160,14 +163,16 @@ function requisitionDetailOf(tables: Tables, purchaseRequisition: PurchaseRequis
 export const purchaseRequisitionApi = {
   /** 구매요청 목록 (최근 것부터) */
   list: (): Promise<RequisitionView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: REQUISITION_VIEW_PERMISSIONS });
-      return listPurchaseRequisitions(tables);
-    }),
+    isServerDataSource()
+      ? serverPurchaseRequisitionApi.list()
+      : mockQuery((tables) => {
+          requireActor(tables, { view: REQUISITION_VIEW_PERMISSIONS });
+          return listPurchaseRequisitions(tables);
+        }),
 
   /** 구매요청 한 건. 조회 권한이 없어도 요청자와 요청 부서의 부서장(승인권자)은 볼 수 있다. */
   detail: (id: number): Promise<RequisitionDetail> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverPurchaseRequisitionApi.detail(id) : mockQuery((tables) => {
       const actor = requireActor(tables);
       const purchaseRequisition = findById(tables, 'purchaseRequisition', id);
       if (!purchaseRequisition) throw new ApiError('COM-003', `구매요청 ${id}`);
@@ -191,7 +196,7 @@ export const purchaseRequisitionApi = {
 
   /** 등록 = 바로 승인 대기. 요청자 소속 부서에 부서장이 없으면 PUR-001. 부서장에게 승인 요청 알림. */
   create: (input: RequisitionInput): Promise<RequisitionView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverPurchaseRequisitionApi.create(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
       const purchaseRequisition = createPurchaseRequisition(tx, userActor(actor.employee.id), {
         itemId: input.itemId,
@@ -205,7 +210,7 @@ export const purchaseRequisitionApi = {
 
   /** 반려된 요청을 요청자가 수량·희망 입고일·근거를 고쳐 다시 요청 → 승인 대기 (원료 품목은 그대로) */
   resubmit: (input: RequisitionResubmitInput): Promise<RequisitionView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverPurchaseRequisitionApi.resubmit(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
       const updated = resubmitPurchaseRequisition(tx, userActor(actor.employee.id), {
         purchaseRequisitionId: input.purchaseRequisitionId,
