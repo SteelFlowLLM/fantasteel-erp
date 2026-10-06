@@ -33,7 +33,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: FONT_SIZE_BOOT_SCRIPT }} />
       </head>
-      <body>
+      {/* 브라우저 확장 프로그램(예: Grammarly)이 hydration 전에 body에 속성을 달아 경고가 난다. body 자기 속성만 무시하고 안쪽은 그대로 검사한다 */}
+      <body suppressHydrationWarning>
         <AppProviders>{children}</AppProviders>
       </body>
     </html>
