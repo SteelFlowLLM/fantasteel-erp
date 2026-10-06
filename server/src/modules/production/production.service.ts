@@ -290,6 +290,7 @@ export class ProductionService {
     await this.prisma.$transaction(async (tx) => {
       const locked = await this.repository.lockPlan(tx, id);
       if (!locked) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
+      if (locked.production_plan_status === PRODUCTION_PLAN_STATUS.CANCELLED) throw new AppException('COM-001', '이미 취소된 계획이에요');
       if (locked.production_plan_status !== PRODUCTION_PLAN_STATUS.PLANNED) {
         throw new AppException('COM-001', '작업 실적이 등록된 계획은 취소할 수 없어요 (계획 상태에서만 취소)');
       }
