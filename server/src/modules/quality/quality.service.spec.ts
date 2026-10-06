@@ -539,7 +539,7 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
   const charpy = (measuredValue: string) => ({ inspectionStandardItemId: hr('CHARPY'), measuredValue });
   const register = (lotId: number, values: { inspectionStandardItemId: number; measuredValue: string }[]) =>
     service.registerQualityInspection({ lotId, values }, user);
-  const update = (qualityInspectionId: number, expectedUpdatedAt: string, values: { inspectionStandardItemId: number; measuredValue: string }[]) =>
+  const update = (qualityInspectionId: number, expectedUpdatedAt: string, values: { inspectionStandardItemId: number; measuredValue: string | null }[]) =>
     service.updateQualityInspection(qualityInspectionId, { expectedUpdatedAt, values }, user);
 
   beforeAll(async () => {
@@ -605,6 +605,7 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     const created = {
       coilPending: await coil('QU-C-PENDING'),
       coilTypo: await coil('QU-C-TYPO'),
+      coilClear: await coil('QU-C-CLEAR'),
       coilConflict: await coil('QU-C-CONFLICT'),
       coilVersion: await coil('QU-C-VERSION'),
       coilStock: await coil('QU-C-STOCK'),
@@ -723,6 +724,28 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     expect(updated.items.find((i) => i.inspectionItemCode === 'CHARPY')).toMatchObject({ measuredValue: '3.0000', isPassed: false });
     const after = await prisma.qualityInspectionValue.findUniqueOrThrow({ where: { id: before.id } });
     expect(after.measuredValue.toString()).toBe('3');
+  });
+
+  it('측정값을 null로 보내면 저장한 값 행을 지우고, 필수 항목이 비어 판정 대기(PENDING)가 된다 (2026-10-06 사용자 결정)', async () => {
+    const registered = await register(lots.coilClear, [...valuesWithoutCharpy(), charpy('30')]);
+    expect(registered.inspectionResult).toBe('PASS');
+
+    const cleared = await update(registered.qualityInspectionId, registered.updatedAt, [{ inspectionStandardItemId: hr('CHARPY'), measuredValue: null }]);
+    expect(cleared.inspectionResult).toBe('PENDING');
+    expect(cleared.items.find((i) => i.inspectionItemCode === 'CHARPY')).toMatchObject({ measuredValue: null, isPassed: null });
+    const charpyKey = { qualityInspectionId: registered.qualityInspectionId, inspectionStandardItemId: hr('CHARPY') };
+    expect(await prisma.qualityInspectionValue.findUnique({ where: { qualityInspectionId_inspectionStandardItemId: charpyKey } })).toBeNull();
+
+    // 다시 넣으면 새 값 행으로 보완된다
+    const refilled = await update(registered.qualityInspectionId, cleared.updatedAt, [charpy('28')]);
+    expect(refilled.inspectionResult).toBe('PASS');
+  });
+
+  it('같은 항목을 지우기와 값으로 두 번 보내면 COM-004', async () => {
+    const inspection = await prisma.qualityInspection.findUniqueOrThrow({ where: { lotId: lots.coilClear } });
+    await expect(
+      update(inspection.id, inspection.updatedAt.toISOString(), [{ inspectionStandardItemId: hr('CHARPY'), measuredValue: null }, charpy('30')]),
+    ).rejects.toMatchObject({ code: 'COM-004' });
   });
 
   it('expectedUpdatedAt이 지금 값과 다르면 COM-001, 아무것도 바꾸지 않는다', async () => {
