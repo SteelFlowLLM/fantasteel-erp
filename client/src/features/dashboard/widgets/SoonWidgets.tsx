@@ -6,7 +6,9 @@ import { Badge } from '@/components/Badge';
 import { SoonButton } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Figure, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { REJECT_RATE_ALERT } from '@/features/dashboard/lib/widgetMath';
 import { useMe } from '@/hooks/useMe';
+import { fmtPct } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 /**
@@ -34,14 +36,14 @@ interface AgentRiskExample {
   action: string;
 }
 
-/** 품질 예시: 강종별 불합격률이 기준을 넘으면 품질 부서에 알린다 (REQ-AGT-004). 기준값은 아직 정하지 않아 예시 값이다 */
+/** 품질 예시: 강종별 불합격률이 기준을 넘으면 품질 부서에 알린다 (REQ-AGT-004). 기준은 불합격률 위젯의 "기준 초과"와 같은 값 */
 const REJECT_RATE_EXAMPLE: AgentRiskExample = {
   type: '불합격률 상승',
   target: 'SM355A · 최근 30일',
   text: 'AI Factory Agent가 강종별 불합격률을 살펴 기준을 넘으면 품질 부서에 알려 줘요. AI는 상황만 설명하고, 원인 확인과 조치는 품질 담당이 해요.',
   rows: [
     ['불합격률', '5.6% (1/18건)'],
-    ['기준 (예시)', '5.0%'],
+    ['기준', fmtPct(REJECT_RATE_ALERT, 1)],
     ['공정별 불합격', '연주 1/16건'],
   ],
   note: '알림은 품질 부서원에게 가요. 불합격 LOT의 처리 상태는 불합격 관리에서 지정해요.',

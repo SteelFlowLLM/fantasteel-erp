@@ -65,3 +65,12 @@ export function weightedPlannedYield(parts: readonly YieldPart[]): string | null
   );
   return ratioText(planned, input);
 }
+
+/**
+ * 강종별 불합격률 주의 기준 (0~1). 이 값을 넘는 강종을 "기준 초과"로 표시한다.
+ * 문서에 정한 값이 없어 2026-10-06 사용자 결정으로 5%로 둔다 (문서 반영 필요). 나중에 Agent 불합격률 상승 알림(REQ-AGT-004)이 같은 기준을 쓴다
+ */
+export const REJECT_RATE_ALERT = 0.05;
+
+/** 불합격률이 주의 기준을 넘는지 (같으면 넘지 않음) */
+export const isOverRejectRateAlert = (rejectRate: number | null): boolean => rejectRate !== null && rejectRate > REJECT_RATE_ALERT;
