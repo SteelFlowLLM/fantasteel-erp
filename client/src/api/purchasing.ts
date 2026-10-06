@@ -2,12 +2,13 @@
 // 권한은 이 층에서 먼저 확인하고(requireActor, 없으면 COM-002), 업무 규칙·작업 로그·알림은 core 서비스가 한다.
 // - 구매요청 등록 = 바로 승인 대기(임시 저장 없음). 반려되면 요청자가 고쳐 다시 요청한다(resubmit).
 // - 발주: 공급업체 1곳당 발주 1건(서버 POST purchase-orders와 같은 입력). 화면이 공급업체별로 나눠 보낸다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 구매요청은 실제 서버를 부른다 (api/server/purchaseRequisitions.ts). 등록 창 정보는 두 모드 모두 조직 정보에서 읽는다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 구매요청·발주는 실제 서버를 부른다 (api/server/purchaseRequisitions.ts·purchaseOrders.ts). 등록 창 정보는 두 모드 모두 조직 정보에서 읽는다.
 import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { employeeBasicsOf } from '@/api/orgViews';
+import { serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
 import { serverPurchaseRequisitionApi } from '@/api/server/purchaseRequisitions';
 import { canView } from '@/lib/permissions';
 import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
@@ -242,21 +243,25 @@ export interface PurchaseOrderCreateInput {
 export const purchaseOrderApi = {
   /** 발주 목록 (품목별 입고·원료 LOT 포함) */
   list: (): Promise<PurchaseOrderView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: PURCHASE_ORDER_VIEW_PERMISSIONS });
-      return listPurchaseOrders(tables);
-    }),
+    isServerDataSource()
+      ? serverPurchaseOrderApi.list()
+      : mockQuery((tables) => {
+          requireActor(tables, { view: PURCHASE_ORDER_VIEW_PERMISSIONS });
+          return listPurchaseOrders(tables);
+        }),
 
   /** 발주할 수 있는 구매요청: 승인됨·미발주, 원료의 기본 공급업체 포함 */
   candidateItems: (): Promise<PurchaseOrderCandidateItem[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
-      return orderableRequisitions(tables);
-    }),
+    isServerDataSource()
+      ? serverPurchaseRequisitionApi.orderable()
+      : mockQuery((tables) => {
+          requireActor(tables, { view: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
+          return orderableRequisitions(tables);
+        }),
 
-  /** 발주 확정: 공급업체마다 발주 1건 (승인 전이면 PUR-002). 가짜 DB는 여러 공급업체를 한 거래로 만든다 */
+  /** 발주 확정: 공급업체마다 발주 1건 (승인 전이면 PUR-002). 가짜 DB는 여러 공급업체를 한 거래로, 서버는 공급업체마다 차례로 만든다 */
   create: (orders: readonly PurchaseOrderCreateInput[]): Promise<PurchaseOrderView[]> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverPurchaseOrderApi.create(orders) : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
       return orders.map((order) =>
         purchaseOrderView(

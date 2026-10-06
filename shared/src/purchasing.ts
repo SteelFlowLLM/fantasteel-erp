@@ -9,6 +9,9 @@ export interface PurchaseRequisitionSummary {
   itemId: number;
   itemCode: string;
   itemName: string;
+  /** 원료의 기본 공급업체. 발주는 이 공급업체로만 한다 (발주 후보를 공급업체별로 묶을 때 쓴다) */
+  defaultSupplierId: number | null;
+  defaultSupplierName: string | null;
   requestedTon: string;
   desiredReceiptDate: string;
   requesterId: number;

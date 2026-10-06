@@ -1,11 +1,27 @@
 // 입고 API (REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02, 업무 프로세스 10장 "입고: 상태값 없음").
 // 입고 등록 = 입고 확정(수정 없음). 미입고량을 넘으면 PUR-003. 야드는 원료의 기본 야드로 자동 지정하고,
 // 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN) 1개를 만든다. 규칙·작업 로그는 core 서비스(receiveGoods)가 한다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/purchaseOrders.ts).
 import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { mockDefaultYardOf } from '@/api/server/masterIds';
+import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
 import { decCmp } from '@/lib/decimal';
-import { findById, goodsReceiptView, listGoodsReceipts, listPurchaseOrders, mustGet, receivedTonOf, receiveGoods, remainingTonOf, userActor, type GoodsReceiptView } from '@/mock/services';
+import {
+  findById,
+  goodsReceiptView,
+  listGoodsReceipts,
+  listPurchaseOrders,
+  mustGet,
+  receivedTonOf,
+  receiveGoods,
+  remainingTonOf,
+  userActor,
+  type GoodsReceiptView,
+  type PurchaseOrderView,
+} from '@/mock/services';
 
 export type { GoodsReceiptView };
 
@@ -62,53 +78,62 @@ export interface GoodsReceiptResult {
   lineRemainingTon: string;
 }
 
+/** 발주 목록 → 입고할 발주 품목 줄 (미입고량이 남은 것 먼저, 입고 예정일 순). 야드는 원료 코드로 찾는다 */
+function receiptLinesOf(orders: readonly PurchaseOrderView[], defaultYardNameOf: (itemCode: string) => string | null): ReceiptLine[] {
+  return orders
+    .flatMap((po) =>
+      po.items.map(
+        (line): ReceiptLine => ({
+          purchaseOrderItemId: line.id,
+          purchaseOrderId: po.id,
+          purchaseOrderNo: po.purchaseOrderNo,
+          purchaseOrderStatus: po.purchaseOrderStatus,
+          supplierName: po.supplierName,
+          expectedReceiptDate: line.expectedReceiptDate,
+          itemId: line.itemId,
+          itemCode: line.itemCode,
+          itemName: line.itemName,
+          purchaseRequisitionNo: line.purchaseRequisitionNo,
+          orderedTon: line.orderedTon,
+          receivedTon: line.receivedTon,
+          remainingTon: line.remainingTon,
+          defaultYardName: defaultYardNameOf(line.itemCode),
+          isFullyReceived: decCmp(line.remainingTon, 0) <= 0,
+        }),
+      ),
+    )
+    .sort(
+      (a, b) =>
+        Number(a.isFullyReceived) - Number(b.isFullyReceived) ||
+        (a.expectedReceiptDate ?? '9999-12-31').localeCompare(b.expectedReceiptDate ?? '9999-12-31') ||
+        a.purchaseOrderNo.localeCompare(b.purchaseOrderNo) ||
+        a.purchaseOrderItemId - b.purchaseOrderItemId,
+    );
+}
+
 export const goodsReceiptApi = {
   /** 모든 발주 품목 (미입고량이 남은 것 먼저, 입고 예정일 순) */
-  lines: (): Promise<ReceiptLine[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
-      return listPurchaseOrders(tables)
-        .flatMap((po) =>
-          po.items.map((line): ReceiptLine => {
-            const item = findById(tables, 'item', line.itemId);
-            return {
-              purchaseOrderItemId: line.id,
-              purchaseOrderId: po.id,
-              purchaseOrderNo: po.purchaseOrderNo,
-              purchaseOrderStatus: po.purchaseOrderStatus,
-              supplierName: po.supplierName,
-              expectedReceiptDate: line.expectedReceiptDate,
-              itemId: line.itemId,
-              itemCode: line.itemCode,
-              itemName: line.itemName,
-              purchaseRequisitionNo: line.purchaseRequisitionNo,
-              orderedTon: line.orderedTon,
-              receivedTon: line.receivedTon,
-              remainingTon: line.remainingTon,
-              defaultYardName: findById(tables, 'yard', item?.defaultYardId)?.yardName ?? null,
-              isFullyReceived: decCmp(line.remainingTon, 0) <= 0,
-            };
-          }),
-        )
-        .sort(
-          (a, b) =>
-            Number(a.isFullyReceived) - Number(b.isFullyReceived) ||
-            (a.expectedReceiptDate ?? '9999-12-31').localeCompare(b.expectedReceiptDate ?? '9999-12-31') ||
-            a.purchaseOrderNo.localeCompare(b.purchaseOrderNo) ||
-            a.purchaseOrderItemId - b.purchaseOrderItemId,
-        );
-    }),
+  lines: async (): Promise<ReceiptLine[]> =>
+    isServerDataSource()
+      ? receiptLinesOf(await serverPurchaseOrderApi.list(), (itemCode) => mockDefaultYardOf(itemCode).yardName)
+      : mockQuery((tables) => {
+          requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
+          const yardNameOf = (itemCode: string) => findById(tables, 'yard', tables.item.find((i) => i.itemCode === itemCode)?.defaultYardId)?.yardName ?? null;
+          return receiptLinesOf(listPurchaseOrders(tables), yardNameOf);
+        }),
 
   /** 입고 내역 (최근 것부터) */
   list: (): Promise<GoodsReceiptView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
-      return listGoodsReceipts(tables);
-    }),
+    isServerDataSource()
+      ? serverGoodsReceiptApi.list()
+      : mockQuery((tables) => {
+          requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
+          return listGoodsReceipts(tables);
+        }),
 
   /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
   receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverGoodsReceiptApi.receive(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.GOODS_RECEIPT_CONFIRM] });
       const { goodsReceipt, lot, purchaseOrder } = receiveGoods(tx, userActor(actor.employee.id), {
         purchaseOrderItemId: input.purchaseOrderItemId,

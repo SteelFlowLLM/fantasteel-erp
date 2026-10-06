@@ -6,7 +6,7 @@ import type { Tx } from '../../prisma/prisma.service';
 
 /** 목록·상세가 함께 쓰는 읽기 모양: 품목·요청자(부서)·승인자·근거 계획(→ 수주) */
 const requisitionInclude = {
-  item: { select: { itemCode: true, itemName: true } },
+  item: { select: { itemCode: true, itemName: true, defaultSupplierId: true, defaultSupplier: { select: { supplierName: true } } } },
   requester: { select: { employeeName: true, departmentId: true, department: { select: { departmentName: true } } } },
   approver: { select: { employeeName: true } },
   productionPlan: { select: { productionPlanNo: true, salesOrderItem: { select: { salesOrder: { select: { id: true, salesOrderNo: true } } } } } },

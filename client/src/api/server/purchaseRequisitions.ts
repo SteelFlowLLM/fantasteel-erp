@@ -2,7 +2,6 @@
 // 구매요청 id는 서버 id를 그대로 쓰고, 원료·사원·부서 id는 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
 // 서버에 없어 비워 두는 것:
 // - 반려 일시(rejectedAt): 작업 로그에만 있다.
-// - 연결 발주 줄(purchaseOrderLines): 발주 화면을 서버에 연결할 때 채운다.
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.
 // 승인권자·직급·등록 창 정보는 조직 정보(가짜 DB와 서버 시드가 같다)에서 읽는다.
 import type { PageResult, ProductionPlanSummary, PurchaseRequisitionDetail, PurchaseRequisitionSummary } from '@fantasteel/shared';
@@ -11,8 +10,9 @@ import { ApiError, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { employeeBasicsOf } from '@/api/orgViews';
 import type { ApprovalInput, RejectInput } from '@/api/approvals';
-import type { RequisitionDetail, RequisitionInput, RequisitionResubmitInput, RequisitionView } from '@/api/purchasing';
+import type { PurchaseOrderCandidateItem, RequisitionDetail, RequisitionInput, RequisitionPurchaseOrderLine, RequisitionResubmitInput, RequisitionView } from '@/api/purchasing';
 import { mockEmployeeIdOf, mockItemOf, serverItemIdOf } from '@/api/server/masterIds';
+import { serverRequisitionPurchaseOrderLines } from '@/api/server/purchaseOrders';
 import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
 import { requisitionSourceOf } from '@/mock/services';
@@ -67,7 +67,7 @@ const activeHeadOf = (tables: Readonly<MockTables>, departmentId: number | null)
   return head && head.isActive ? head : undefined;
 };
 
-function toDetail(row: PurchaseRequisitionDetail): RequisitionDetail {
+function toDetail(row: PurchaseRequisitionDetail, purchaseOrderLines: RequisitionPurchaseOrderLine[]): RequisitionDetail {
   const view = toView(row);
   const viewerId = actingEmployeeId();
   return readMock((tables) => {
@@ -80,7 +80,7 @@ function toDetail(row: PurchaseRequisitionDetail): RequisitionDetail {
       departmentHeadName: head?.employeeName ?? null,
       isRequester,
       canApprove: view.purchaseRequisitionStatus === 'WAITING_APPROVAL' && head !== undefined && head.id === viewerId && !isRequester,
-      purchaseOrderLines: [],
+      purchaseOrderLines,
       sourceDraft: null,
     };
   });
@@ -109,7 +109,16 @@ const requestBody = (input: RequisitionInput) => ({
 export const serverPurchaseRequisitionApi = {
   list: async (): Promise<RequisitionView[]> => (await listAll()).map(toView),
 
-  detail: async (id: number): Promise<RequisitionDetail> => toDetail(await serverRequest<PurchaseRequisitionDetail>('GET', `/purchase-requisitions/${id}`)),
+  detail: async (id: number): Promise<RequisitionDetail> => {
+    const row = await serverRequest<PurchaseRequisitionDetail>('GET', `/purchase-requisitions/${id}`);
+    return toDetail(row, row.purchaseOrderNo === null ? [] : await serverRequisitionPurchaseOrderLines(row.id));
+  },
+
+  /** 발주 후보: 서버에서 승인됨(APPROVED) = 아직 발주하지 않은 요청. 공급업체는 원료의 기본 공급업체 */
+  orderable: async (): Promise<PurchaseOrderCandidateItem[]> =>
+    (await listAll({ purchaseRequisitionStatus: 'APPROVED' }))
+      .map((row) => ({ ...toView(row), supplierId: row.defaultSupplierId, supplierName: row.defaultSupplierName }))
+      .sort((a, b) => a.id - b.id),
 
   create: async (input: RequisitionInput): Promise<RequisitionView> => {
     const [itemId, productionPlanId] = await Promise.all([serverItemIdOf(input.itemId), serverPlanIdOf(input.productionPlanId)]);
