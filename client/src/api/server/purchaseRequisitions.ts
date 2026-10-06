@@ -1,7 +1,6 @@
 // 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 구매요청 id는 서버 id를 그대로 쓰고, 원료·사원·부서 id는 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
 // 서버에 없어 비워 두는 것:
-// - 반려 일시(rejectedAt): 작업 로그에만 있다.
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.
 // 승인권자·직급·등록 창 정보는 조직 정보(가짜 DB와 서버 시드가 같다)에서 읽는다.
 import type { PageResult, PurchaseRequisitionDetail, PurchaseRequisitionSummary } from '@fantasteel/shared';
@@ -56,7 +55,7 @@ function toView(row: PurchaseRequisitionSummary | PurchaseRequisitionDetail): Re
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     approvedAt: row.approvedAt,
-    rejectedAt: null,
+    rejectedAt: row.rejectedAt,
   };
 }
 

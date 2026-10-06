@@ -158,6 +158,15 @@ export class PurchasingRepository {
   }
 
   /** 발주 행 잠금(TypedSQL). 발주 품목이 없으면 빈 배열 */
+  /** 대상별 작업 로그(최근 것부터). ERD에 칸이 없는 반려 일시·발주자·입고 확정자를 여기서 읽는다 */
+  findEvents(tx: Tx, businessEventType: string, targetType: string, targetIds: number[]) {
+    return tx.businessEvent.findMany({
+      where: { businessEventType, targetType, targetId: { in: targetIds } },
+      select: { targetId: true, createdAt: true, actorEmployee: { select: { employeeName: true } } },
+      orderBy: { id: 'desc' },
+    });
+  }
+
   lockPurchaseOrderByItemId(tx: Tx, purchaseOrderItemId: number) {
     return tx.$queryRawTyped(lockPurchaseOrderByItemId(purchaseOrderItemId));
   }

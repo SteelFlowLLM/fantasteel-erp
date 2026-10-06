@@ -145,6 +145,8 @@ describe('입고 목록 (API-150·219)', () => {
 
     expect(result.total).toBe(2);
     expect(result.items.map((r) => r.id)).toEqual([second.id, first.id]);
-    expect(result.items[0]).toEqual(expect.objectContaining({ lotNo: second.lotNo, yardName: expect.any(String), purchaseOrderId: orderId }));
+    // 입고 확정자는 ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED의 사원을 준다
+    expect(result.items[0]).toEqual(expect.objectContaining({ lotNo: second.lotNo, yardName: expect.any(String), purchaseOrderId: orderId, confirmedEmployeeName: purchaser.employeeName }));
+    expect(second.confirmedEmployeeName).toBe(purchaser.employeeName);
   });
 });

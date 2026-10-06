@@ -29,6 +29,8 @@ export interface PurchaseRequisitionSummary {
   actionDraftId: number | null;
   /** 발주했으면 발주번호 (발주 품목 1행 = 구매요청 1건) */
   purchaseOrderNo: string | null;
+  /** 반려된 요청이면 마지막 반려 작업 로그 시각 (ERD에 칸이 없다) */
+  rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +67,8 @@ export interface PurchaseOrderView {
   purchaseOrderStatus: PurchaseOrderStatus;
   supplierId: number;
   supplierName: string;
+  /** 발주한 사원 (작업 로그 PURCHASE_ORDER_CREATED, ERD에 칸이 없다) */
+  orderedEmployeeName: string | null;
   totalOrderedTon: string;
   totalReceivedTon: string;
   totalRemainingTon: string;
@@ -90,5 +94,7 @@ export interface GoodsReceiptView {
   lotNo: string | null;
   yardId: number | null;
   yardName: string | null;
+  /** 입고를 확정한 사원 (작업 로그 GOODS_RECEIPT_CONFIRMED, ERD에 칸이 없다) */
+  confirmedEmployeeName: string | null;
   createdAt: string;
 }

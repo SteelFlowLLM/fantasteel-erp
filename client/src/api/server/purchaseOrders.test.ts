@@ -16,6 +16,7 @@ const order: PurchaseOrderView = {
   purchaseOrderStatus: 'PARTIALLY_RECEIVED',
   supplierId: 8,
   supplierName: '한국합금철',
+  orderedEmployeeName: '정다은',
   totalOrderedTon: '5.000',
   totalReceivedTon: '1.500',
   totalRemainingTon: '3.500',
@@ -40,6 +41,7 @@ const receipt: GoodsReceiptView = {
   lotNo: 'RM-SMN01-261006-001',
   yardId: 2,
   yardName: '원료 야드',
+  confirmedEmployeeName: '정다은',
   createdAt: '2026-10-06T02:00:00.000Z',
 };
 const approved: PurchaseRequisitionSummary = {
@@ -64,6 +66,7 @@ const approved: PurchaseRequisitionSummary = {
   productionPlanNo: null,
   actionDraftId: null,
   purchaseOrderNo: null,
+  rejectedAt: null,
   createdAt: '2026-10-06T01:00:00.000Z',
   updatedAt: '2026-10-06T03:00:00.000Z',
 };
@@ -78,10 +81,10 @@ function respond(c: ServerCall) {
 afterEach(() => stopFakeServer());
 
 describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () => {
-  it('발주 목록: 품목별 입고 내역을 입고 목록에서 붙이고 원료 id는 화면 id, 발주자는 비운다. 입고 조회 권한이 없으면 입고 내역만 빈다', async () => {
+  it('발주 목록: 품목별 입고 내역을 입고 목록에서 붙이고 원료 id는 화면 id, 발주자는 서버 값 그대로. 입고 조회 권한이 없으면 입고 내역만 빈다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchase, respond);
     const [po] = await purchaseOrderApi.list();
-    expect(po).toMatchObject({ id: 31, supplierId: 8, orderedEmployeeName: null });
+    expect(po).toMatchObject({ id: 31, supplierId: 8, orderedEmployeeName: '정다은' });
     expect(po.items[0]).toMatchObject({ id: 61, itemId: mockItem('SMN01')?.id, remainingTon: '3.500', goodsReceipts: [{ id: 71, receivedDate: '2026-10-06', lotNo: 'RM-SMN01-261006-001' }] });
     stopFakeServer();
 
@@ -112,10 +115,10 @@ describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () =>
     expect(failure).toMatchObject({ code: 'COM-001', detail: expect.stringContaining('PO-2610-0001') });
   });
 
-  it('입고 줄·내역: 기본 야드는 원료 코드로, 공급업체는 발주에서 채우고 확정자는 비운다', async () => {
+  it('입고 줄·내역: 기본 야드는 원료 코드로, 공급업체는 발주에서 채우고 확정자는 서버 값 그대로', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchase, respond);
     expect(await goodsReceiptApi.lines()).toEqual([expect.objectContaining({ purchaseOrderItemId: 61, supplierName: '한국합금철', defaultYardName: mockYardName('SMN01'), isFullyReceived: false })]);
-    expect(await goodsReceiptApi.list()).toEqual([expect.objectContaining({ id: 71, supplierName: '한국합금철', confirmedEmployeeName: null, itemId: mockItem('SMN01')?.id })]);
+    expect(await goodsReceiptApi.list()).toEqual([expect.objectContaining({ id: 71, supplierName: '한국합금철', confirmedEmployeeName: '정다은', itemId: mockItem('SMN01')?.id })]);
   });
 
   it('입고 확정: 입력 그대로 보내고, 발주를 다시 읽어 상태·입고 누계·미입고량을 채운다', async () => {

@@ -177,6 +177,9 @@ describe('발주 등록 (API-149·217, REQ-PUR-003, BP-PUR-01)', () => {
       expect.objectContaining({ purchaseRequisitionId: second.id, orderedTon: '50.000', expectedReceiptDate: '2026-11-25' }),
     ]);
     expect([await statusOf(first.id), await statusOf(second.id)]).toEqual(['ORDERED', 'ORDERED']);
+    // 발주자는 ERD에 칸이 없어 작업 로그 PURCHASE_ORDER_CREATED의 사원을 준다 (등록 응답·상세 모두)
+    expect(order.orderedEmployeeName).toBe(purchaser.employeeName);
+    expect((await purchasing.purchaseOrderDetail(order.id)).orderedEmployeeName).toBe(purchaser.employeeName);
     expect((await purchasing.requisitionDetail(purchaser, first.id)).purchaseOrderNo).toBe(order.purchaseOrderNo);
     const events = await prisma.businessEvent.findMany({ where: { targetType: 'purchase_order', targetId: order.id } });
     expect(events).toEqual([

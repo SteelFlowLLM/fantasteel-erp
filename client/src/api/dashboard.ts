@@ -6,7 +6,11 @@
 import { requireActor, type Actor } from '@/api/actor';
 import { mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
+import type { PurchaseOrderView, RequisitionView } from '@/api/purchasing';
 import { serverDashboardApi } from '@/api/server/dashboard';
+import { serverMrpRequirements } from '@/api/server/mrp';
+import { serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
+import { serverPurchaseRequisitionApi } from '@/api/server/purchaseRequisitions';
 import {
   PERMISSION,
   PROCESS_TYPE,
@@ -26,6 +30,7 @@ import { canView } from '@/lib/permissions';
 import { addDays, daysBetween } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import { calcWeightTon, sumTon } from '@/lib/weight';
+import { getMockDb } from '@/mock/db';
 import type { LotRow, MockTables } from '@/mock/schema';
 import {
   computeMrp,
@@ -484,6 +489,29 @@ function readRawMaterialBalance(tables: Tables, options: DashboardQueryOptions):
   };
 }
 
+/** 서버 모드 원료 잔량 대비 소요: 서버 MRP(GET mrp/requirements)를 같은 기간으로 읽는다 */
+async function readRawMaterialBalanceFromServer(): Promise<RawMaterialBalanceData> {
+  getMockDb().read((tables) => requireWidgetActor(tables, 'RAW_MATERIAL_BALANCE'));
+  const to = addDays(todayOf(), DASHBOARD_MRP_HORIZON_DAYS);
+  const mrp = await serverMrpRequirements({ from: MRP_EARLIEST, to });
+  return {
+    to,
+    planCount: mrp.plans.length,
+    materials: mrp.materials.map((m) => ({
+      itemId: m.itemId,
+      itemCode: m.itemCode,
+      itemName: m.itemName,
+      rawMaterialType: m.rawMaterialType,
+      onHandTon: m.remainingTon,
+      scheduledReceiptTon: m.scheduledReceiptTon,
+      coveredScheduledTon: m.usedScheduledReceiptTon,
+      grossTon: m.requiredTon,
+      netTon: m.netRequirementTon,
+      firstShortageDate: m.firstShortageDate,
+    })),
+  };
+}
+
 // ── 강종별 불합격률 ─────────────────────────────────────
 
 const INSPECTED_PROCESSES = ['STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING'] as const satisfies readonly ProcessType[];
@@ -616,32 +644,42 @@ export interface PurchaseProgressData {
   openPurchaseOrders: { count: number; scheduledReceiptTon: string; purchaseOrders: OpenPurchaseOrderRow[] } | null;
 }
 
+/** 구매요청·발주 목록 → 구매 진행 위젯 (가짜 DB·서버 모드가 같이 쓴다). 조회 권한이 없는 쪽은 null */
+function purchaseProgressOf(requisitions: readonly RequisitionView[] | null, purchaseOrders: readonly PurchaseOrderView[] | null): PurchaseProgressData {
+  const requisitionsByStatus = requisitions
+    ? Object.values(PURCHASE_REQUISITION_STATUS).map((status) => ({ status, count: requisitions.filter((r) => r.purchaseRequisitionStatus === status).length }))
+    : null;
+  if (!purchaseOrders) return { requisitionsByStatus, openPurchaseOrders: null };
+  const open = purchaseOrders
+    .filter((po) => po.purchaseOrderStatus !== 'RECEIVED')
+    .map((po) => ({
+      purchaseOrderId: po.id,
+      purchaseOrderNo: po.purchaseOrderNo,
+      supplierName: po.supplierName,
+      expectedReceiptDate: po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate).filter((d): d is string => d !== null).sort()[0] ?? null,
+      scheduledReceiptTon: decSum(po.items.map((i) => i.remainingTon)),
+      lineCount: po.items.length,
+    }))
+    .sort((a, b) => (a.expectedReceiptDate ?? '9999').localeCompare(b.expectedReceiptDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
+  return { requisitionsByStatus, openPurchaseOrders: { count: open.length, scheduledReceiptTon: decSum(open.map((po) => po.scheduledReceiptTon)), purchaseOrders: open } };
+}
+
 function readPurchaseProgress(tables: Tables): PurchaseProgressData {
   const actor = requireWidgetActor(tables, 'PURCHASE_PROGRESS');
-  let requisitionsByStatus: PurchaseProgressData['requisitionsByStatus'] = null;
-  if (canView(actor, PERMISSION.PURCHASE_REQUISITION_CREATE)) {
-    const requisitions = listPurchaseRequisitions(tables);
-    requisitionsByStatus = Object.values(PURCHASE_REQUISITION_STATUS).map((status) => ({
-      status,
-      count: requisitions.filter((r) => r.purchaseRequisitionStatus === status).length,
-    }));
-  }
-  let openPurchaseOrders: PurchaseProgressData['openPurchaseOrders'] = null;
-  if (canView(actor, PERMISSION.PURCHASE_ORDER_CONFIRM)) {
-    const open = listPurchaseOrders(tables)
-      .filter((po) => po.purchaseOrderStatus !== 'RECEIVED')
-      .map((po) => ({
-        purchaseOrderId: po.id,
-        purchaseOrderNo: po.purchaseOrderNo,
-        supplierName: po.supplierName,
-        expectedReceiptDate: po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate).filter((d): d is string => d !== null).sort()[0] ?? null,
-        scheduledReceiptTon: decSum(po.items.map((i) => i.remainingTon)),
-        lineCount: po.items.length,
-      }))
-      .sort((a, b) => (a.expectedReceiptDate ?? '9999').localeCompare(b.expectedReceiptDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
-    openPurchaseOrders = { count: open.length, scheduledReceiptTon: decSum(open.map((po) => po.scheduledReceiptTon)), purchaseOrders: open };
-  }
-  return { requisitionsByStatus, openPurchaseOrders };
+  return purchaseProgressOf(
+    canView(actor, PERMISSION.PURCHASE_REQUISITION_CREATE) ? listPurchaseRequisitions(tables) : null,
+    canView(actor, PERMISSION.PURCHASE_ORDER_CONFIRM) ? listPurchaseOrders(tables) : null,
+  );
+}
+
+/** 서버 모드 구매 진행: 권한은 가짜 DB 모드와 같이 보고(계정 선택이 가짜 DB 사원), 목록은 서버에서 읽는다 */
+async function readPurchaseProgressFromServer(): Promise<PurchaseProgressData> {
+  const actor = getMockDb().read((tables) => requireWidgetActor(tables, 'PURCHASE_PROGRESS'));
+  const [requisitions, purchaseOrders] = await Promise.all([
+    canView(actor, PERMISSION.PURCHASE_REQUISITION_CREATE) ? serverPurchaseRequisitionApi.list() : null,
+    canView(actor, PERMISSION.PURCHASE_ORDER_CONFIRM) ? serverPurchaseOrderApi.list() : null,
+  ]);
+  return purchaseProgressOf(requisitions, purchaseOrders);
 }
 
 // ── 출하 실적 · 생산량 (하루 단위) ────────────────────────
@@ -810,12 +848,14 @@ export const dashboardKeys = {
   widget: (key: DataWidgetKey, employeeId: number) => ['dashboard', 'widgets', key, employeeId] as const,
 };
 
-/** 서버 모드에서 서버를 읽는 위젯 (영업 위젯). 나머지는 서버 모드에서도 가짜 DB를 읽는다 */
-type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK';
+/** 서버 모드에서 서버를 읽는 위젯 (영업·구매 위젯). 나머지는 서버 모드에서도 가짜 DB를 읽는다 */
+type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK' | 'RAW_MATERIAL_BALANCE' | 'PURCHASE_PROGRESS';
 const SERVER_READERS: { [K in ServerWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
   PROCESS_FLOW: serverDashboardApi.processFlow,
   ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
   PRODUCT_STOCK: serverDashboardApi.productStock,
+  RAW_MATERIAL_BALANCE: readRawMaterialBalanceFromServer,
+  PURCHASE_PROGRESS: readPurchaseProgressFromServer,
 };
 const isServerWidget = (key: DataWidgetKey): key is ServerWidgetKey => key in SERVER_READERS;
 
