@@ -199,7 +199,8 @@ export class InventoryService {
         isRecommended: index < unallocatedQty,
       }));
       const recommended = candidates.filter((c) => c.isRecommended);
-      await this.businessEventRecorder.record(tx, {
+      // 미배정 매수가 없으면 추천한 LOT이 없으므로 작업 로그도 남기지 않는다
+      if (recommended.length > 0) await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED,
         actor: user,
         target: { table: 'shipment_request_item', id: requestItem.id },

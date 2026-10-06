@@ -294,6 +294,23 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02)', () => {
     expect((await eventsOf(salesOrderId)).map((e) => e.businessEventType)).toContain(BUSINESS_EVENT_TYPE.SURPLUS_CONVERTED);
   });
 
+  it('취소하면 그 계획의 확정 열연 배정을 해제하고 rolling_allocated_qty를 되돌린다', async () => {
+    const slabItemId = await nextSlabItemId();
+    const [slab] = await addSlabs(slabItemId, 1);
+    const orderItemId = await nextSlabItemId();
+    const { salesOrderId, items } = await createSalesOrder(orderItemId, 2);
+    const plan = await prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: items[0].productionPlanNo ?? '' } });
+    // 열연 배정 확정(생산 담당 범위)이 하는 일을 DB에 직접 넣는다
+    const allocation = await prisma.allocation.create({ data: { lotId: slab.id, allocationPurpose: 'HOT_ROLLING', productionPlanId: plan.id, allocationStatus: 'CONFIRMED' } });
+    await prisma.inventory.update({ where: { itemId: slabItemId }, data: { rollingAllocatedQty: 1 } });
+
+    await salesOrders.cancel(sales, salesOrderId, { reason: '열연 전 취소' });
+    expect(await prisma.allocation.findUniqueOrThrow({ where: { id: allocation.id } })).toMatchObject({ allocationStatus: 'RELEASED' });
+    expect(await inventoryOf(slabItemId)).toMatchObject({ onHandQty: 1, rollingAllocatedQty: 0 });
+    const released = await prisma.businessEvent.findFirstOrThrow({ where: { salesOrderId, businessEventType: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED }, include: { businessEventLots: true } });
+    expect(released.businessEventLots.map((l) => l.lotId)).toEqual([slab.id]);
+  });
+
   it('출고된 매수가 있으면 SO-003, 진행 중 출하요청이 있으면 SO-004', async () => {
     const itemId = await nextSlabItemId();
     await addSlabs(itemId, 4);
