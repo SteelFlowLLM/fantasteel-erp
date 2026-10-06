@@ -5,7 +5,9 @@ import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { decCmp } from '@/lib/decimal';
-import { findById, listGoodsReceipts, listPurchaseOrders, mustGet, receivedTonOf, receiveGoods, remainingTonOf, userActor } from '@/mock/services';
+import { findById, goodsReceiptView, listGoodsReceipts, listPurchaseOrders, mustGet, receivedTonOf, receiveGoods, remainingTonOf, userActor, type GoodsReceiptView } from '@/mock/services';
+
+export type { GoodsReceiptView };
 
 /** 입고 화면을 볼 수 있는 권한 (조회 이상) */
 export const GOODS_RECEIPT_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM];
@@ -37,21 +39,19 @@ export interface ReceiptLine {
   isFullyReceived: boolean;
 }
 
-export type GoodsReceiptView = ReturnType<typeof listGoodsReceipts>[number] & { purchaseOrderItemId: number; lotId: number | null };
-
 export interface GoodsReceiptInput {
   purchaseOrderItemId: number;
   /** 톤 (소수 3자리) */
   receivedTon: string;
-  /** YYYY-MM-DD */
-  receiptDate: string;
+  /** YYYY-MM-DD, 오늘 이후는 안 된다 */
+  receivedDate: string;
 }
 
 export interface GoodsReceiptResult {
   goodsReceiptId: number;
   goodsReceiptNo: string;
   receivedTon: string;
-  receiptDate: string;
+  receivedDate: string;
   yardName: string | null;
   lotId: number;
   lotNo: string;
@@ -103,11 +103,7 @@ export const goodsReceiptApi = {
   list: (): Promise<GoodsReceiptView[]> =>
     mockQuery((tables) => {
       requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
-      return listGoodsReceipts(tables).map((receipt) => ({
-        ...receipt,
-        purchaseOrderItemId: findById(tables, 'goodsReceipt', receipt.id)?.purchaseOrderItemId ?? 0,
-        lotId: tables.lot.find((lot) => lot.goodsReceiptId === receipt.id)?.id ?? null,
-      }));
+      return listGoodsReceipts(tables);
     }),
 
   /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
@@ -117,14 +113,14 @@ export const goodsReceiptApi = {
       const { goodsReceipt, lot, purchaseOrder } = receiveGoods(tx, userActor(actor.employee.id), {
         purchaseOrderItemId: input.purchaseOrderItemId,
         receivedTon: input.receivedTon,
-        receiptDate: input.receiptDate,
+        receivedDate: input.receivedDate,
       });
       return {
         goodsReceiptId: goodsReceipt.id,
         goodsReceiptNo: goodsReceipt.goodsReceiptNo,
         receivedTon: goodsReceipt.receivedTon,
-        receiptDate: goodsReceipt.receiptDate,
-        yardName: findById(tx.tables, 'yard', goodsReceipt.yardId)?.yardName ?? null,
+        receivedDate: goodsReceipt.receivedDate,
+        yardName: goodsReceiptView(tx.tables, goodsReceipt).yardName,
         lotId: lot.id,
         lotNo: lot.lotNo,
         purchaseOrderNo: purchaseOrder.purchaseOrderNo,

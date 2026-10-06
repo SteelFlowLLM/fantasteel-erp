@@ -348,10 +348,8 @@ export type GoodsReceiptRow = Timestamps & {
   goodsReceiptNo: string;
   purchaseOrderItemId: number;
   receivedTon: DecimalString;
-  receiptDate: DateString;
-  yardId: number;
-  confirmedEmployeeId: number;
-  confirmedAt: IsoDateTime;
+  /** 원료 FIFO 기준일. 야드는 원료 LOT에, 확정자는 작업 로그에 있다 */
+  receivedDate: DateString;
 };
 
 // ── quality_shipment ─────────────────────────────────────

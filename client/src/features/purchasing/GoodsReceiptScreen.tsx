@@ -1,7 +1,7 @@
 'use client';
 
 // 입고 (REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02): 발주 품목 줄을 골라 입고 톤·입고일을 넣으면 등록이 곧 확정이다(상태값·수정 없음).
-// 미입고량을 넘으면 PUR-003. 야드는 원료의 기본 야드로 자동 지정한다(야드 선택·비고 없음, PLAN 7장).
+// 미입고량을 넘으면 PUR-003, 입고일은 오늘까지. 야드는 원료의 기본 야드로 자동 지정한다(야드 선택·비고 없음, PLAN 7장).
 // 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN, 잔량 = 입고량)이 생기고 발주 입고 누계·입고예정·상태가 바뀐다.
 // 주소: ?item= 발주 품목 줄, ?po= 그 발주의 첫 미입고 줄.
 import Link from 'next/link';
@@ -143,7 +143,7 @@ export function GoodsReceiptScreen() {
                       <span className="ml-auto tabular-nums">{fmtTon(receipt.receivedTon)}</span>
                     </span>
                     <span>
-                      {receipt.itemName} · {receipt.supplierName} · {fmtDate(receipt.receiptDate)}
+                      {receipt.itemName} · {receipt.supplierName} · {fmtDate(receipt.receivedDate)}
                     </span>
                     {receipt.lotNo ? (
                       <Link className="font-mono text-run hover:underline" href={lotHref(receipt.lotNo)}>
@@ -203,7 +203,7 @@ function ReceiptWork({
   onPin: () => void;
 }) {
   const [receivedTon, setReceivedTon] = useState(() => trimTonText(line.remainingTon));
-  const [receiptDate, setReceiptDate] = useState(() => todayStr());
+  const [receivedDate, setReceivedDate] = useState(() => todayStr());
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -303,8 +303,8 @@ function ReceiptWork({
                     onChange={(event) => setReceivedTon(event.target.value)}
                   />
                 </Field>
-                <Field label="입고일" required htmlFor="gr-date" error={fieldErrors.receiptDate ?? null} hint="원료 LOT 번호의 날짜가 돼요">
-                  <DateInput id="gr-date" value={receiptDate} onChange={setReceiptDate} invalid={Boolean(fieldErrors.receiptDate)} disabled={!canReceive} />
+                <Field label="입고일" required htmlFor="gr-date" error={fieldErrors.receivedDate ?? null} hint="오늘까지 · 원료 LOT 번호의 날짜가 돼요">
+                  <DateInput id="gr-date" value={receivedDate} onChange={setReceivedDate} invalid={Boolean(fieldErrors.receivedDate)} disabled={!canReceive} />
                 </Field>
                 <Field label="야드" hint="원료의 기본 야드로 자동 지정돼요">
                   <span className="flex h-8 items-center text-sm font-medium">{line.defaultYardName ?? '-'}</span>
@@ -373,7 +373,7 @@ function ReceiptWork({
                     <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
                     <Td className="font-mono">{receipt.purchaseOrderNo}</Td>
                     <Td>{receipt.itemName}</Td>
-                    <Td>{fmtDate(receipt.receiptDate)}</Td>
+                    <Td>{fmtDate(receipt.receivedDate)}</Td>
                     <Td align="right">{fmtTon(receipt.receivedTon)}</Td>
                     <Td>{receipt.yardName ?? '-'}</Td>
                     <Td>
@@ -386,7 +386,7 @@ function ReceiptWork({
                       )}
                     </Td>
                     <Td className="text-cap text-ink-3">
-                      {receipt.confirmedEmployeeName ?? '-'} · {fmtMDHM(receipt.confirmedAt)}
+                      {receipt.confirmedEmployeeName ?? '-'} · {fmtMDHM(receipt.createdAt)}
                     </Td>
                   </tr>
                 ))}
@@ -404,14 +404,14 @@ function ReceiptWork({
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             onPin();
-            receive.mutate({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon, receiptDate });
+            receive.mutate({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon, receivedDate });
           }}
         >
           <KvList
             items={[
               { label: '발주 품목', value: `${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? ''} · ${line.itemName}` },
               { label: '입고 톤', value: receivedTon ? `${receivedTon} t` : '-' },
-              { label: '입고일', value: receiptDate || '-' },
+              { label: '입고일', value: receivedDate || '-' },
               { label: '야드', value: line.defaultYardName ?? '-' },
             ]}
           />

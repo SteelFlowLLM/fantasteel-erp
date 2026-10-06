@@ -109,15 +109,15 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
 
     const poLineId = po.items[0].id;
     at('2026-10-02T09:00:00+09:00');
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.501', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
-    const first = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receiptDate: '2026-10-02' });
+    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.501', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
+    const first = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receivedDate: '2026-10-02' });
     expect(first).toMatchObject({ lotNo: 'RM-SMN01-261002-001', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '1.000', lineRemainingTon: '0.500' });
     // 확정 재시도(같은 1t을 한 번 더): 미입고량 초과로 막히고 LOT이 늘지 않는다
     const lotCountBefore = readDb((t) => t.lot.length);
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
+    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
     expect(readDb((t) => t.lot.length)).toBe(lotCountBefore);
     at('2026-10-03T08:00:00+09:00');
-    const second = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '0.500', receiptDate: '2026-10-03' });
+    const second = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '0.500', receivedDate: '2026-10-03' });
     expect(second).toMatchObject({ lotNo: 'RM-SMN01-261003-001', purchaseOrderStatus: 'RECEIVED', lineReceivedTon: '1.500', lineRemainingTon: '0.000' });
     expect(readDb((t) => t.lot.find((l) => l.id === first.lotId))).toMatchObject({ lotType: 'RAW_MATERIAL', remainingTon: '1.000', producedDate: '2026-10-02' });
     expectClean();

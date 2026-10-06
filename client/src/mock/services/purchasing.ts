@@ -23,6 +23,7 @@ import {
   inputError,
   mustGet,
   salesOrderIdOfPlan,
+  txDate,
   type PersonActor,
 } from '@/mock/services/context';
 
@@ -337,7 +338,7 @@ export function createPurchaseOrdersBySupplier(tx: MockTx, actor: PersonActor, p
 export function receiveGoods(
   tx: MockTx,
   actor: PersonActor,
-  input: { purchaseOrderItemId: number; receivedTon: string; receiptDate: string },
+  input: { purchaseOrderItemId: number; receivedTon: string; receivedDate: string },
 ): { goodsReceipt: GoodsReceiptRow; lot: LotRow; purchaseOrder: PurchaseOrderRow } {
   const poItem = mustGet(tx.tables, 'purchaseOrderItem', input.purchaseOrderItemId, '발주 품목');
   const po = mustGet(tx.tables, 'purchaseOrder', poItem.purchaseOrderId, '발주');
@@ -345,7 +346,9 @@ export function receiveGoods(
   const errors = new FieldErrors();
   const receivedTonText = checkDecimal(errors, 'receivedTon', input.receivedTon, { label: '입고 톤', scale: 3, integerDigits: 9, positive: true, required: true });
   const receivedTon = receivedTonText === null ? null : decRound(receivedTonText, TON_DIGITS);
-  const receiptDate = checkDate(errors, 'receiptDate', input.receiptDate, '입고일', true);
+  const receivedDate = checkDate(errors, 'receivedDate', input.receivedDate, '입고일', true);
+  // 실제로 들어온 원료를 기록하는 일이라 미래 날짜는 받지 않는다 (서버와 같은 규칙)
+  if (receivedDate !== null && receivedDate > txDate(tx)) errors.add('receivedDate', '입고일은 오늘 이후로 할 수 없어요');
   errors.throwIfAny();
   const receivedBefore = receivedTonOf(tx.tables, poItem.id);
   const remainingBefore = decSub(poItem.orderedTon, receivedBefore);
@@ -354,13 +357,10 @@ export function receiveGoods(
     goodsReceiptNo: issueBusinessNo(tx, 'GOODS_RECEIPT'),
     purchaseOrderItemId: poItem.id,
     receivedTon: receivedTon ?? '0',
-    receiptDate: receiptDate ?? '',
-    yardId: item.defaultYardId,
-    confirmedEmployeeId: actor.employeeId,
-    confirmedAt: tx.nowIso,
+    receivedDate: receivedDate ?? '',
   });
   const lot = insertRow(tx, 'lot', {
-    lotNo: issueRawMaterialLotNo(tx, item.itemCode, new Date(`${goodsReceipt.receiptDate}T12:00:00+09:00`)),
+    lotNo: issueRawMaterialLotNo(tx, item.itemCode, new Date(`${goodsReceipt.receivedDate}T12:00:00+09:00`)),
     lotType: 'RAW_MATERIAL',
     lotStatus: 'AVAILABLE',
     itemId: item.id,
@@ -379,7 +379,7 @@ export function receiveGoods(
     dispositionReason: null,
     dispositionAt: null,
     surplusAt: null,
-    producedDate: goodsReceipt.receiptDate,
+    producedDate: goodsReceipt.receivedDate,
     consumedAt: null,
     shippedAt: null,
   });
@@ -401,7 +401,7 @@ export function receiveGoods(
       purchaseOrderNo: po.purchaseOrderNo,
       itemCode: item.itemCode,
       receivedTon: goodsReceipt.receivedTon,
-      receiptDate: goodsReceipt.receiptDate,
+      receivedDate: goodsReceipt.receivedDate,
       lotNo: lot.lotNo,
       purchaseOrderStatus: purchaseOrder.purchaseOrderStatus,
       remainingTon: decSub(poItem.orderedTon, receivedTotal),
@@ -523,7 +523,7 @@ export interface PurchaseOrderView {
     receivedTon: string;
     /** 미입고량(입고예정) = 발주량 − 입고 누계 */
     remainingTon: string;
-    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receiptDate: string; lotNo: string | null }[];
+    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receivedDate: string; lotNo: string | null }[];
   }[];
 }
 
@@ -557,7 +557,7 @@ export function purchaseOrderView(tables: Tables, po: PurchaseOrderRow): Purchas
           remainingTon: remainingTonOf(tables, l),
           goodsReceipts: tables.goodsReceipt
             .filter((g) => g.purchaseOrderItemId === l.id)
-            .map((g) => ({ id: g.id, goodsReceiptNo: g.goodsReceiptNo, receivedTon: g.receivedTon, receiptDate: g.receiptDate, lotNo: tables.lot.find((lot) => lot.goodsReceiptId === g.id)?.lotNo ?? null })),
+            .map((g) => ({ id: g.id, goodsReceiptNo: g.goodsReceiptNo, receivedTon: g.receivedTon, receivedDate: g.receivedDate, lotNo: tables.lot.find((lot) => lot.goodsReceiptId === g.id)?.lotNo ?? null })),
         };
       }),
   };
@@ -569,26 +569,53 @@ export const listPurchaseOrders = (tables: Tables): PurchaseOrderView[] => [...t
 export const receivablePurchaseOrders = (tables: Tables): PurchaseOrderView[] =>
   listPurchaseOrders(tables).filter((po) => po.items.some((i) => decCmp(i.remainingTon, 0) > 0));
 
-export function listGoodsReceipts(tables: Tables): { id: number; goodsReceiptNo: string; purchaseOrderNo: string; supplierName: string; itemCode: string; itemName: string; receivedTon: string; receiptDate: string; yardName: string | null; lotNo: string | null; confirmedEmployeeName: string | null; confirmedAt: string }[] {
-  return [...tables.goodsReceipt]
-    .sort((a, b) => b.id - a.id)
-    .map((g) => {
-      const poItem = findById(tables, 'purchaseOrderItem', g.purchaseOrderItemId);
-      const po = findById(tables, 'purchaseOrder', poItem?.purchaseOrderId);
-      const item = findById(tables, 'item', poItem?.itemId);
-      return {
-        id: g.id,
-        goodsReceiptNo: g.goodsReceiptNo,
-        purchaseOrderNo: po?.purchaseOrderNo ?? '',
-        supplierName: findById(tables, 'supplier', po?.supplierId)?.supplierName ?? '',
-        itemCode: item?.itemCode ?? '',
-        itemName: item?.itemName ?? '',
-        receivedTon: g.receivedTon,
-        receiptDate: g.receiptDate,
-        yardName: findById(tables, 'yard', g.yardId)?.yardName ?? null,
-        lotNo: tables.lot.find((l) => l.goodsReceiptId === g.id)?.lotNo ?? null,
-        confirmedEmployeeName: employeeNameOf(tables, g.confirmedEmployeeId),
-        confirmedAt: g.confirmedAt,
-      };
-    });
+/** 입고 1건과 원료 LOT (서버 GoodsReceiptView와 같은 모양 + 화면용 공급업체·확정자) */
+export interface GoodsReceiptView {
+  id: number;
+  goodsReceiptNo: string;
+  purchaseOrderId: number;
+  purchaseOrderNo: string;
+  purchaseOrderItemId: number;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  receivedTon: string;
+  receivedDate: string;
+  lotId: number | null;
+  lotNo: string | null;
+  yardId: number | null;
+  yardName: string | null;
+  createdAt: string;
+  supplierName: string;
+  /** 입고를 확정한 사원 (ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED로 본다) */
+  confirmedEmployeeName: string | null;
 }
+
+export function goodsReceiptView(tables: Tables, g: GoodsReceiptRow): GoodsReceiptView {
+  const poItem = findById(tables, 'purchaseOrderItem', g.purchaseOrderItemId);
+  const po = findById(tables, 'purchaseOrder', poItem?.purchaseOrderId);
+  const item = findById(tables, 'item', poItem?.itemId);
+  const lot = tables.lot.find((l) => l.goodsReceiptId === g.id);
+  const confirmed = tables.businessEvent.find((e) => e.businessEventType === 'GOODS_RECEIPT_CONFIRMED' && e.targetType === 'goods_receipt' && e.targetId === g.id);
+  return {
+    id: g.id,
+    goodsReceiptNo: g.goodsReceiptNo,
+    purchaseOrderId: po?.id ?? 0,
+    purchaseOrderNo: po?.purchaseOrderNo ?? '',
+    purchaseOrderItemId: g.purchaseOrderItemId,
+    itemId: item?.id ?? 0,
+    itemCode: item?.itemCode ?? '',
+    itemName: item?.itemName ?? '',
+    receivedTon: g.receivedTon,
+    receivedDate: g.receivedDate,
+    lotId: lot?.id ?? null,
+    lotNo: lot?.lotNo ?? null,
+    yardId: lot?.yardId ?? null,
+    yardName: findById(tables, 'yard', lot?.yardId)?.yardName ?? null,
+    createdAt: g.createdAt,
+    supplierName: findById(tables, 'supplier', po?.supplierId)?.supplierName ?? '',
+    confirmedEmployeeName: employeeNameOf(tables, confirmed?.actorEmployeeId ?? null),
+  };
+}
+
+export const listGoodsReceipts = (tables: Tables): GoodsReceiptView[] => [...tables.goodsReceipt].sort((a, b) => b.id - a.id).map((g) => goodsReceiptView(tables, g));

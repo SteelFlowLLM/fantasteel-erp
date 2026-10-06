@@ -115,6 +115,6 @@ export function stockRawMaterials(k: Kit, iso: string, tons: { ORE01?: string; C
   createPurchaseOrdersBySupplier(k.at(iso), purchase, prs.map((pr) => pr.id));
   for (const pr of prs) {
     const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
-    if (line) receiveGoods(k.at(iso), purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate });
+    if (line) receiveGoods(k.at(iso), purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receivedDate: receiptDate });
   }
 }

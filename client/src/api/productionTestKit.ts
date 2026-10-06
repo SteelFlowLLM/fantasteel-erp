@@ -60,7 +60,7 @@ export async function stockRawMaterialsForTest(): Promise<void> {
     createPurchaseOrdersBySupplier(tx, purchase, prs.map((pr) => pr.id));
     for (const pr of prs) {
       const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
-      if (line) receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate: toSeoulDateString(tx.now) });
+      if (line) receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receivedDate: toSeoulDateString(tx.now) });
     }
   });
 }

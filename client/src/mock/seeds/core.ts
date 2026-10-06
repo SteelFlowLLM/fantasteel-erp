@@ -127,11 +127,11 @@ export function seedCore(tx: MockTx): void {
   createPurchaseOrdersBySupplier(txAt(tx, '2026-09-01T11:00:00+09:00'), purchase, pr1.map((pr) => pr.id));
   const poLineOf = (prId: number) => required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionId === prId), `발주 ${prId}`).id;
   const [oreLine, coalLine, limeLine, smnLine] = pr1.map((pr) => poLineOf(pr.id));
-  receiveGoods(txAt(tx, '2026-09-02T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[0], receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-02T10:30:00+09:00'), purchase, { purchaseOrderItemId: coalLine, receivedTon: receipts.COL01, receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-02T11:00:00+09:00'), purchase, { purchaseOrderItemId: limeLine, receivedTon: receipts.LIM01, receiptDate: '2026-09-02' });
-  receiveGoods(txAt(tx, '2026-09-03T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[1], receiptDate: '2026-09-03' });
-  receiveGoods(txAt(tx, '2026-09-03T10:30:00+09:00'), purchase, { purchaseOrderItemId: smnLine, receivedTon: receipts.SMN01, receiptDate: '2026-09-03' });
+  receiveGoods(txAt(tx, '2026-09-02T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[0], receivedDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-02T10:30:00+09:00'), purchase, { purchaseOrderItemId: coalLine, receivedTon: receipts.COL01, receivedDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-02T11:00:00+09:00'), purchase, { purchaseOrderItemId: limeLine, receivedTon: receipts.LIM01, receivedDate: '2026-09-02' });
+  receiveGoods(txAt(tx, '2026-09-03T10:00:00+09:00'), purchase, { purchaseOrderItemId: oreLine, receivedTon: receipts.ORE01[1], receivedDate: '2026-09-03' });
+  receiveGoods(txAt(tx, '2026-09-03T10:30:00+09:00'), purchase, { purchaseOrderItemId: smnLine, receivedTon: receipts.SMN01, receivedDate: '2026-09-03' });
 
   // 2. SO-2609-001 → 14.1 시작 재고 ─────────────────────
   const ss275SlabA = itemId(SEED_CORE.stock141ItemCode);
@@ -202,7 +202,7 @@ export function seedCore(tx: MockTx): void {
   });
   approvePurchaseRequisition(txAt(tx, '2026-09-15T15:00:00+09:00'), purchaseHead, { purchaseRequisitionId: pr2.id });
   createPurchaseOrdersBySupplier(txAt(tx, '2026-09-15T16:00:00+09:00'), purchase, [pr2.id], '2026-10-28');
-  receiveGoods(txAt(tx, '2026-09-16T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLineOf(pr2.id), receivedTon: '4.500', receiptDate: '2026-09-16' });
+  receiveGoods(txAt(tx, '2026-09-16T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLineOf(pr2.id), receivedTon: '4.500', receivedDate: '2026-09-16' });
 
   // 코일 계획: 시뮬레이션(연주까지) → 6매 검사·2매 판정 대기 → 열연 3매 → 코일 3개 합격
   simulatePlan(txAt(tx, '2026-09-17T18:00:00+09:00'), steelmakingStaff, { productionPlanId: pp3.id, randomSeed: SEED_CORE.randomSeeds['PP-2609-0003'] });

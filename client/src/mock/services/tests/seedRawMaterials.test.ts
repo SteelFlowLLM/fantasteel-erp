@@ -24,7 +24,7 @@ function buySilicoManganese(k: Kit, receiptDate: string, ton: string, production
   approvePurchaseRequisition(at, k.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
   createPurchaseOrdersBySupplier(at, purchase, [purchaseRequisition.id]);
   const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisition.id);
-  if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate });
+  if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receivedDate: receiptDate });
 }
 
 const remainingOf = (k: Kit): Record<string, string> => Object.fromEntries(rawMaterialInventory(k.tables).map((r) => [r.itemCode, r.remainingTon]));

@@ -121,7 +121,7 @@ export function seedDashboard(tx: MockTx): void {
   createPurchaseOrdersBySupplier(txAt(tx, '2026-08-27T16:00:00+09:00'), purchase, prs.map((pr) => pr.id));
   for (const pr of prs) {
     const poLine = required(t.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id), `발주 줄 ${pr.id}`);
-    receiveGoods(txAt(tx, '2026-08-31T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: poLine.orderedTon, receiptDate: SEED_DASHBOARD.receiptDate });
+    receiveGoods(txAt(tx, '2026-08-31T10:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: poLine.orderedTon, receivedDate: SEED_DASHBOARD.receiptDate });
   }
   // 8월에 처리한 구매 알림은 읽음
   const prLinks = prs.map((pr) => `?pr=${pr.id}`);

@@ -273,12 +273,13 @@ describe('입고 api', () => {
     expect(smn).toMatchObject({ purchaseOrderStatus: 'PARTIALLY_RECEIVED', remainingTon: '3.500' });
     expect(lines.findIndex((l) => l.isFullyReceived)).toBeGreaterThan(lines.findIndex((l) => !l.isFullyReceived));
 
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '3.501', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
+    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '3.501', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
     const fieldsOf = async (promise: Promise<unknown>) => Object.keys(((await promise.catch((e: unknown) => e)) as InputError).fieldErrors);
-    expect(await fieldsOf(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '0', receiptDate: '2026-10-02' }))).toContain('receivedTon');
-    expect(await fieldsOf(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '1', receiptDate: '' }))).toContain('receiptDate');
+    expect(await fieldsOf(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '0', receivedDate: '2026-10-02' }))).toContain('receivedTon');
+    expect(await fieldsOf(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '1', receivedDate: '' }))).toContain('receivedDate');
+    expect(await fieldsOf(goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '1', receivedDate: '2099-01-01' }))).toContain('receivedDate');
 
-    const first = await goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: ' 1.5 ', receiptDate: '2026-10-02' });
+    const first = await goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: ' 1.5 ', receivedDate: '2026-10-02' });
     expect(first).toMatchObject({ receivedTon: '1.500', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '6.000', lineRemainingTon: '2.000', yardName: smn.defaultYardName });
     expect(first.lotNo).toBe('RM-SMN01-261002-001');
     expect(first.goodsReceiptNo).toMatch(/^GR-\d{4}-\d{4}$/);
@@ -288,10 +289,12 @@ describe('입고 api', () => {
     expect(event).toBeDefined();
     expect(read((t) => t.businessEventLot.some((l) => l.businessEventId === event?.id && l.lotId === first.lotId))).toBe(true);
 
-    const second = await goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '2', receiptDate: '2026-10-02' });
+    const second = await goodsReceiptApi.receive({ purchaseOrderItemId: smn.purchaseOrderItemId, receivedTon: '2', receivedDate: '2026-10-02' });
     expect(second).toMatchObject({ lotNo: 'RM-SMN01-261002-002', purchaseOrderStatus: 'RECEIVED', lineRemainingTon: '0.000' });
     const history = await goodsReceiptApi.list();
-    expect(history[0]).toMatchObject({ goodsReceiptNo: second.goodsReceiptNo, purchaseOrderItemId: smn.purchaseOrderItemId, lotId: second.lotId });
+    expect(history[0]).toMatchObject({ goodsReceiptNo: second.goodsReceiptNo, purchaseOrderItemId: smn.purchaseOrderItemId, lotId: second.lotId, receivedDate: '2026-10-02', yardName: smn.defaultYardName });
+    // 확정자는 입고 행이 아니라 작업 로그에서 읽는다
+    expect(history[0].confirmedEmployeeName).toBe(read((t) => t.employee.find((e) => e.employeeNo === SEED_EMPLOYEE_NO.purchase)?.employeeName));
     expect((await goodsReceiptApi.lines()).find((l) => l.purchaseOrderItemId === smn.purchaseOrderItemId)?.isFullyReceived).toBe(true);
   });
 
@@ -299,10 +302,10 @@ describe('입고 api', () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     const [line] = (await goodsReceiptApi.lines()).filter((l) => !l.isFullyReceived);
     actAs(SEED_EMPLOYEE_NO.sales);
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon: '1', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon: '1', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'COM-002' });
     await expect(goodsReceiptApi.lines()).rejects.toMatchObject({ code: 'COM-002' });
     actAs(SEED_EMPLOYEE_NO.admin);
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon: '1', receiptDate: '2026-10-02' })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: line.purchaseOrderItemId, receivedTon: '1', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'COM-002' });
     expect((await goodsReceiptApi.list()).length).toBeGreaterThan(0);
   });
 });
