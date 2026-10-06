@@ -7,5 +7,7 @@ import { PurchasingService } from './purchasing.service';
 @Module({
   controllers: [PurchasingController],
   providers: [PurchasingService, PurchasingRepository],
+  // message-action이 초안 확정 트랜잭션에서 createRequisition을 부른다
+  exports: [PurchasingService],
 })
 export class PurchasingModule {}
