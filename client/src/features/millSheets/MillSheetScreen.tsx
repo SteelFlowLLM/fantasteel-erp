@@ -1,10 +1,10 @@
 'use client';
 // 밀시트 (REQ-SHP-003·004, BP-SHP-01 문서 보존, 보고서 1 A-9). 목록 | 종이 화면. 선택은 URL ?id=.
-// 'PDF 생성' = 브라우저 인쇄(종이만 찍히는 인쇄 CSS) → 끝나면 pdf_path를 남겨 'PDF 생성됨'으로 보인다.
-// 인쇄를 시작하지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
+// 'PDF 생성' = 브라우저에서 스냅샷으로 PDF 파일을 만들어 {밀시트 번호}_{고객사}_{발행일}.pdf로 내려받는다 → 끝나면 pdf_path를 남겨 'PDF 생성됨'으로 보인다.
+// 만들지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
 // C 반영: PDF 상태 코드 없음(pdf_path 유무), 출고번호 대신 출하요청, 칩 문구는 공통 코드 ITEM_TYPE 표시명.
 import { millSheetPdfFileName } from '@fantasteel/shared';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
@@ -19,6 +19,7 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { MillSheetPaper } from '@/features/millSheets/components/MillSheetPaper';
 import { MillSheetPrintPortal } from '@/features/millSheets/components/MillSheetPrintPortal';
+import { downloadMillSheetPdf, toPdfSnapshot } from '@/features/millSheets/lib/millSheetPdf';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { PdfBadge, SalesOrderLink, ShipmentRequestLink } from '@/features/shipment/components/ShipmentBadges';
 import { useMarkMillSheetPdf, useMillSheetDetail, useMillSheetList } from '@/hooks/useMillSheets';
@@ -153,30 +154,20 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
   const canPrint = useCanUse(PERMISSION.MILL_SHEET_READ);
   const mark = useMarkMillSheetPdf();
   const [printFailed, setPrintFailed] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const s = detail.snapshot;
   useShellTitle(detail.millSheetNo, s.customer.customerName);
 
-  /**
-   * 브라우저는 문서 제목을 'PDF로 저장'의 기본 파일 이름으로 쓴다. 인쇄 직전에만 바꾸면 print()가 바로 돌아오는 브라우저에서
-   * 제목이 먼저 되돌아가 이름이 안 들어가므로, 밀시트를 보는 동안 제목을 저장 이름 양식(확장자 제외)으로 둔다 (Ctrl+P도 같은 이름).
-   */
-  const pdfTitle = millSheetPdfFileName(s).replace(/\.pdf$/, '');
-  useEffect(() => {
-    const previousTitle = document.title;
-    document.title = pdfTitle;
-    return () => {
-      document.title = previousTitle;
-    };
-  }, [pdfTitle]);
-
-  /** 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다. */
-  const generatePdf = () => {
+  /** 스냅샷으로 PDF 파일을 만들어 저장 이름 양식으로 내려받는다 (브라우저 인쇄 창은 환경에 따라 파일 이름을 못 채운다). */
+  const generatePdf = async () => {
+    setGenerating(true);
     try {
-      if (typeof window.print !== 'function') throw new Error('print unavailable');
-      window.print();
+      await downloadMillSheetPdf(s);
     } catch {
       setPrintFailed(true);
       return;
+    } finally {
+      setGenerating(false);
     }
     setPrintFailed(false);
     if (!detail.pdfPath) mark.mutate({ millSheetId: detail.id });
@@ -202,8 +193,8 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
               <ButtonLink href={`/lots/trace?shipmentRequestNo=${encodeURIComponent(s.shipmentRequest.shipmentRequestNo)}`} variant="ghost" icon="trace">
                 LOT 추적
               </ButtonLink>
-              <Button variant="primary" icon="print" disabled={!canPrint || mark.isPending} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
-                {mark.isPending ? 'PDF 만드는 중…' : detail.pdfPath ? 'PDF 다시 출력' : 'PDF 생성'}
+              <Button variant="primary" icon="print" disabled={!canPrint || mark.isPending || generating} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
+                {mark.isPending || generating ? 'PDF 만드는 중…' : detail.pdfPath ? 'PDF 다시 내려받기' : 'PDF 생성'}
               </Button>
             </>
           }
@@ -231,7 +222,7 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
           </Banner>
         ) : null}
         <Banner tone="neutral" icon="info">
-          발행 시점 값을 스냅샷으로 저장해요. 화면과 PDF 모두 이 스냅샷만 써요. 인쇄 창에서 &lsquo;PDF로 저장&rsquo;을 고르면 PDF 파일이 돼요.
+          발행 시점 값을 스냅샷으로 저장해요. 화면과 PDF 모두 이 스냅샷만 써요. &lsquo;PDF 생성&rsquo;을 누르면 {millSheetPdfFileName(toPdfSnapshot(s))} 이름으로 내려받아요.
         </Banner>
       </div>
       <MillSheetPaper snapshot={s} />
