@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   PERMISSION,
@@ -19,6 +19,7 @@ import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
+import { StorageService } from '../../common/storage/storage.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -26,6 +27,7 @@ import { SalesOrderService } from '../sales-order/sales-order.service';
 import type { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
 import type { ListMillSheetsQuery } from './dto/list-mill-sheets.query';
 import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
+import { renderMillSheetPdf } from './mill-sheet-pdf';
 import { buildMillSheetSnapshot } from './mill-sheet-snapshot';
 import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
 import { ShipmentRepository } from './shipment.repository';
@@ -36,11 +38,14 @@ const PENDING_STATUSES: ShipmentRequestStatus[] = [SHIPMENT_REQUEST_STATUS.REQUE
 /** 출하요청·출고 확정·밀시트 (REQ-SHP-001~004, BP-SHP-01) */
 @Injectable()
 export class ShipmentService {
+  private readonly logger = new Logger(ShipmentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: ShipmentRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly storage: StorageService,
     // 취소하면 배정을 해제하고(inventory), 배정이 바뀌면 inventory가 refreshAllocationStatus를 부른다 → 서로 부른다
     @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
     // 출고하면 수주 품목 상태를 다시 계산한다. sales-order → inventory → shipment 순환이라 forwardRef
@@ -334,6 +339,26 @@ export class ShipmentService {
     const row = await this.repository.findMillSheet(this.prisma, id);
     if (!row) throw new AppException('COM-003', '밀시트를 찾을 수 없어요');
     return toMillSheetDetail(row);
+  }
+
+  /**
+   * 밀시트 PDF 생성 (API-115, REQ-SHP-004). 저장된 스냅샷으로만 그리고 출고·스냅샷은 건드리지 않는다.
+   * 이미 만들었으면 그 경로를 그대로 돌려준다. 렌더링·저장이 실패하면 SHP-001이고 스냅샷은 그대로라 다시 누르면 PDF만 다시 만든다.
+   */
+  async generateMillSheetPdf(id: number): Promise<MillSheetDetail> {
+    const row = await this.repository.findMillSheet(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '밀시트를 찾을 수 없어요');
+    if (row.pdfPath) return toMillSheetDetail(row);
+    const { snapshot } = toMillSheetDetail(row);
+    try {
+      const pdf = await renderMillSheetPdf(snapshot);
+      const pdfPath = await this.storage.save('mill-sheets', `${row.millSheetNo}.pdf`, pdf);
+      await this.repository.setPdfPath(this.prisma, id, pdfPath);
+    } catch (error) {
+      this.logger.error(`밀시트 PDF 생성 실패 (${row.millSheetNo})`, error instanceof Error ? error.stack : String(error));
+      throw new AppException('SHP-001');
+    }
+    return this.findMillSheet(id);
   }
 
   /** 목록·상세는 영업(SHIPMENT_REQUEST_MANAGE)과 물류(GOODS_ISSUE_CONFIRM) 중 하나의 VIEW면 된다. 데코레이터는 OR를 못 써서 여기서 본다 */

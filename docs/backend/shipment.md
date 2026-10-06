@@ -139,4 +139,11 @@
 - Prisma 7에서 중첩 select(배정·검사·부모 LOT)를 여러 행에 걸쳐 읽으면 "Expected zero or one element"로 실패해서, 배정과 LOT 계보·검사는 따로 읽는다.
 - 출고 후 출하요청 상세의 미배정 매수는 소진(CONSUMED)된 배정도 배정된 것으로 센다.
 
+**밀시트 PDF 구현 메모 (API-115)**
+
+- `POST mill-sheets/:id/pdf`는 파일이 아니라 갱신된 밀시트 상세(`pdfPath` 포함)를 돌려준다. 이미 만들었으면 그 경로를 그대로 돌려주고 다시 렌더링하지 않는다.
+- 저장된 스냅샷만으로 그린다(`mill-sheet-pdf.ts`). 렌더링·저장이 실패하면 SHP-001이고 스냅샷·출고는 그대로다.
+- 한글은 저장소에 포함한 Noto Sans KR(`server/assets/fonts`, OFL)로 찍는다. 서버는 `server` 폴더에서 실행해야 하고, 다른 폰트는 환경변수 `MILL_SHEET_FONT`로 지정한다.
+- 파일 받기용 GET은 만들지 않았다(8장 "PDF 받기" 미정).
+
 참고: `nextMillSheetNumber`는 같은 tx 안의 밀시트 수 + 1이므로, 수주가 여럿이면 밀시트를 하나 저장한 뒤 다음 번호를 받는 순서로 부른다(미리 여러 번 받으면 같은 번호가 나온다).
