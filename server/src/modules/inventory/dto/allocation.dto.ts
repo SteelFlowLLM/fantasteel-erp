@@ -55,3 +55,13 @@ export class ListAllocationsQuery {
   @Min(1)
   shipmentRequestItemId?: number;
 }
+
+export class AllocationCandidatesQuery {
+  @IsIn(OPEN_PURPOSES, { message: PURPOSE_MESSAGE })
+  allocationPurpose!: AllocationPurpose;
+
+  @Type(() => Number)
+  @IsInt({ message: '출하요청을 골라 주세요' })
+  @Min(1)
+  shipmentRequestId!: number;
+}

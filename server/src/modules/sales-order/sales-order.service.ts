@@ -50,6 +50,8 @@ const isValidDate = (s: string) => !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`
 /** 읽기 계산에 필요한 값: 계획별 합격 제품 매수, 납기 위험 기준일, 오늘(서울) */
 interface ReadContext {
   passedQtyByPlan: Map<number, number>;
+  /** 규격별 예약 가용 (on_hand − reserved − rolling). 재생산 필요 매수 계산에 쓴다 */
+  availableQtyByItem: Map<number, number>;
   deliveryRiskDays: number;
   today: string;
 }
@@ -129,7 +131,7 @@ export class SalesOrderService {
         shipmentRequestStatus: r.shipmentRequestStatus as ShipmentRequestStatus,
         shipDate: r.shipDate ? dateOnly(r.shipDate) : null,
         issuedAt: r.issuedAt?.toISOString() ?? null,
-        items: r.shipmentRequestItems.map((l) => ({ salesOrderItemId: l.salesOrderItemId, requestQty: l.requestQty })),
+        items: r.shipmentRequestItems.map((l) => ({ salesOrderItemId: l.salesOrderItemId, requestQty: l.requestQty, allocatedQty: l._count.allocations })),
       })),
       cancelBlock: this.cancelBlockOf(row, requests),
       cancellation: cancelEvent ? this.cancellationOf(cancelEvent) : null,
@@ -291,9 +293,15 @@ export class SalesOrderService {
 
   private async readContext(tx: Tx, rows: readonly SalesOrderRow[]): Promise<ReadContext> {
     const planIds = rows.flatMap((r) => r.salesOrderItems.flatMap((i) => i.productionPlans.map((p) => p.id)));
-    const [passed, setting] = await Promise.all([planIds.length ? this.repository.countPassedProductsByPlan(tx, planIds) : Promise.resolve([]), this.repository.findProductionSetting(tx)]);
+    const itemIds = [...new Set(rows.flatMap((r) => r.salesOrderItems.map((i) => i.itemId)))];
+    const [passed, setting, inventories] = await Promise.all([
+      planIds.length ? this.repository.countPassedProductsByPlan(tx, planIds) : Promise.resolve([]),
+      this.repository.findProductionSetting(tx),
+      this.repository.findInventories(tx, itemIds),
+    ]);
     return {
       passedQtyByPlan: new Map(passed.flatMap((p) => (p.production_plan_id === null ? [] : [[p.production_plan_id, p.passed_qty ?? 0] as const]))),
+      availableQtyByItem: new Map(inventories.map((v) => [v.itemId, Math.max(0, v.onHandQty - v.reservedQty - v.rollingAllocatedQty)])),
       deliveryRiskDays: setting?.deliveryRiskDays ?? DEFAULT_DELIVERY_RISK_DAYS,
       today: seoulToday(),
     };
@@ -323,6 +331,9 @@ export class SalesOrderService {
       dueDate: dateOnly(i.dueDate),
       salesOrderItemStatus: status,
       ...numbers,
+      openPlanRemainingQty: numbers.inProductionQty + numbers.plannedQty,
+      reservationAvailableQty: ctx.availableQtyByItem.get(i.itemId) ?? 0,
+      reproductionNeedQty: Math.max(0, numbers.additionalPlanQty - (ctx.availableQtyByItem.get(i.itemId) ?? 0)),
     };
   }
 
@@ -342,6 +353,8 @@ export class SalesOrderService {
       totalOrderedQty: items.reduce((sum, i) => sum + i.orderedQty, 0),
       totalOrderedTon: sumTon(items.map((i) => i.orderedTon)),
       totalShippedQty: items.reduce((sum, i) => sum + i.shippedQty, 0),
+      totalActiveReservedQty: items.reduce((sum, i) => sum + i.activeReservedQty, 0),
+      hasReproductionNeed: items.some((i) => i.reproductionNeedQty > 0),
       earliestDueDate: live.map((i) => i.dueDate).sort()[0] ?? null,
       isDueRisk: items.some((i) => i.isDueRisk),
       progress: progressOf(

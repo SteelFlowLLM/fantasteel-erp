@@ -12,6 +12,7 @@ const summarySelect = {
   shipmentRequestStatus: true,
   issuedAt: true,
   createdAt: true,
+  updatedAt: true,
   customer: { select: { customerName: true } },
   shipmentRequestItems: { select: { requestQty: true } },
 } satisfies Prisma.ShipmentRequestSelect;

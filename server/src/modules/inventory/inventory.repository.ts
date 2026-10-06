@@ -11,7 +11,20 @@ import {
 import type { Tx } from '../../prisma/prisma.service';
 
 const allocationInclude = {
-  lot: { select: { id: true, lotNo: true, itemId: true, producedDate: true, lotStatus: true } },
+  lot: {
+    select: {
+      id: true,
+      lotNo: true,
+      itemId: true,
+      yardId: true,
+      producedDate: true,
+      lotStatus: true,
+      // 상위 히트 번호 표시용: 슬래브 → 히트, 코일 → 슬래브 → 히트
+      lotRelationsAsChildLot: {
+        select: { parentLot: { select: { lotType: true, lotNo: true, lotRelationsAsChildLot: { select: { parentLot: { select: { lotType: true, lotNo: true } } } } } } },
+      },
+    },
+  },
   shipmentRequestItem: { select: { shipmentRequestId: true, salesOrderItem: { select: { salesOrderId: true } } } },
   productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } },
 } as const;
@@ -102,6 +115,20 @@ export class InventoryRepository {
       include: {
         shipmentRequest: { select: { id: true, shipmentRequestNo: true, shipmentRequestStatus: true } },
         salesOrderItem: { select: { id: true, salesOrderId: true, itemId: true } },
+      },
+    });
+  }
+
+  /** 출하요청의 품목과 품목별 확정 배정 수 (줄 순서) */
+  findShipmentRequestItemsOfRequest(tx: Tx, shipmentRequestId: number) {
+    return tx.shipmentRequestItem.findMany({
+      where: { shipmentRequestId },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        requestQty: true,
+        salesOrderItem: { select: { id: true, itemId: true } },
+        _count: { select: { allocations: { where: { allocationStatus: ALLOCATION_STATUS.CONFIRMED } } } },
       },
     });
   }
