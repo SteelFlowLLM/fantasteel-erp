@@ -30,7 +30,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `purchase-requisitions` | 구매요청 목록 | `PURCHASE_REQUISITION_CREATE` VIEW **또는 부서장** | 부서장 승인 대기 목록도 이 API |
+| GET | `purchase-requisitions` | 구매요청 목록 | `PURCHASE_REQUISITION_CREATE` VIEW **또는 부서장** | 승인함은 `?approvable=true`: 내 부서원의 승인 대기만(내 요청 제외), 부서장이 아니면 COM-002. 응답에 발주번호(`purchaseOrderNo`, 미발주면 null) |
 | POST | `purchase-requisitions` | 구매요청 등록 | `PURCHASE_REQUISITION_CREATE` USE | 부서장 미지정 시 PUR-001. 임시 저장 없음 |
 | GET | `purchase-requisitions/:id` | 구매요청 상세 | VIEW **또는 그 요청의 승인권자** | 초안 연결(`action_draft_id`) 표시 |
 | POST | `purchase-requisitions/:id/approve` | 구매요청 승인 | 권한 코드 없음 → `assertDepartmentHead` | 아니면 COM-002 |

@@ -24,6 +24,8 @@ export interface PurchaseRequisitionSummary {
   productionPlanNo: string | null;
   /** Message → ERP 초안으로 만든 요청이면 원본 초안 */
   actionDraftId: number | null;
+  /** 발주했으면 발주번호 (발주 품목 1행 = 구매요청 1건) */
+  purchaseOrderNo: string | null;
   createdAt: string;
   updatedAt: string;
 }

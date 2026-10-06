@@ -177,6 +177,7 @@ describe('발주 등록 (API-149·217, REQ-PUR-003, BP-PUR-01)', () => {
       expect.objectContaining({ purchaseRequisitionId: second.id, orderedTon: '50.000', expectedReceiptDate: '2026-11-25' }),
     ]);
     expect([await statusOf(first.id), await statusOf(second.id)]).toEqual(['ORDERED', 'ORDERED']);
+    expect((await purchasing.requisitionDetail(purchaser, first.id)).purchaseOrderNo).toBe(order.purchaseOrderNo);
     const events = await prisma.businessEvent.findMany({ where: { targetType: 'purchase_order', targetId: order.id } });
     expect(events).toEqual([
       expect.objectContaining({

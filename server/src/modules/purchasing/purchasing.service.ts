@@ -124,10 +124,18 @@ export class PurchasingService {
 
   // ── 조회 ──────────────────────────────────────────────
 
-  /** 권한(VIEW)이 있으면 전체, 없으면 부서장만 자기 부서원의 요청을 본다 (승인 대기 목록도 이 API) */
+  /**
+   * 권한(VIEW)이 있으면 전체, 없으면 부서장만 자기 부서원의 요청을 본다.
+   * approvable이면 승인함: 권한과 상관없이 내가 승인할 요청(내 부서원의 승인 대기, 내 요청 제외)만 준다.
+   */
   async listRequisitions(user: AuthUser, query: ListPurchaseRequisitionsQuery): Promise<PageResult<PurchaseRequisitionSummary>> {
     const filter: RequisitionFilter = { purchaseRequisitionStatus: query.purchaseRequisitionStatus };
-    if (!this.canViewAll(user)) {
+    if (query.approvable) {
+      if (user.headDepartmentIds.length === 0) throw new AppException('COM-002');
+      filter.purchaseRequisitionStatus = PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL;
+      filter.requesterDepartmentIds = user.headDepartmentIds;
+      filter.excludeRequesterId = user.employeeId;
+    } else if (!this.canViewAll(user)) {
       if (user.headDepartmentIds.length === 0) throw new AppException('COM-002');
       filter.requesterDepartmentIds = user.headDepartmentIds;
     }
@@ -458,6 +466,7 @@ export class PurchasingService {
       productionPlanId: row.productionPlanId,
       productionPlanNo: row.productionPlan?.productionPlanNo ?? null,
       actionDraftId: row.actionDraftId,
+      purchaseOrderNo: row.purchaseOrderItem?.purchaseOrder.purchaseOrderNo ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
