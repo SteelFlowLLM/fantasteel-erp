@@ -3,20 +3,23 @@ import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
   PERMISSION,
+  PURCHASE_REQUISITION_STATUS,
   type AuthUser,
+  type BusinessEventType,
   type PageResult,
   type PurchaseRequisitionDetail,
   type PurchaseRequisitionStatus,
   type PurchaseRequisitionSummary,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { assertDepartmentHead } from '../../common/auth/department-head';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
-import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery } from './dto/purchase-requisition.dto';
-import { PurchasingRepository, type RequisitionFilter } from './purchasing.repository';
+import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
+import { PurchasingRepository, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
 type RequisitionRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findRequisition']>>>;
 
@@ -41,6 +44,39 @@ const TON_PATTERN = /^\d{1,9}(\.\d{1,3})?$/;
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && dateOnly(new Date(`${s}T00:00:00.000Z`)) === s;
+
+/** 등록·재요청이 함께 쓰는 값 검사. Message → ERP 초안 payload는 DTO를 거치지 않아 여기서 본다 */
+function parseRequestValues(input: { requestedTon: string; desiredReceiptDate: string }): { requestedTon: Prisma.Decimal; desiredReceiptDate: Date } {
+  if (!TON_PATTERN.test(input.requestedTon)) throw new AppException('COM-004', '수량(톤)은 정수 9자리·소수 3자리 이하의 숫자로 입력해 주세요');
+  const requestedTon = new Prisma.Decimal(input.requestedTon);
+  if (requestedTon.lte(0)) throw new AppException('COM-004', '수량(톤)은 0보다 커야 해요');
+  if (!isValidDate(input.desiredReceiptDate)) throw new AppException('COM-004', `희망 입고일 ${input.desiredReceiptDate}는 없는 날짜예요`);
+  return { requestedTon, desiredReceiptDate: new Date(`${input.desiredReceiptDate}T00:00:00.000Z`) };
+}
+
+/** 작업 로그 before·after에 남기는 구매요청 값 */
+function snapshotOf(row: RequisitionRow) {
+  return {
+    purchaseRequisitionNo: row.purchaseRequisitionNo,
+    purchaseRequisitionStatus: row.purchaseRequisitionStatus,
+    itemId: row.itemId,
+    requestedTon: row.requestedTon.toFixed(3),
+    desiredReceiptDate: dateOnly(row.desiredReceiptDate),
+    requestReason: row.requestReason,
+    requesterId: row.requesterId,
+    approverId: row.approverId,
+    rejectReason: row.rejectReason,
+    productionPlanId: row.productionPlanId,
+  };
+}
+
+/** 이미 처리된 요청에 다시 승인·반려·재요청할 때 (수주 "이미 취소된 수주"와 같은 COM-001) */
+const ALREADY_DONE: Record<PurchaseRequisitionStatus, string> = {
+  WAITING_APPROVAL: '이미 승인 대기 중인 요청이에요',
+  APPROVED: '이미 승인된 요청이에요',
+  REJECTED: '이미 반려된 요청이에요',
+  ORDERED: '이미 발주된 요청이에요',
+};
 
 /** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(구매요청·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 */
 const NUMBER_CONFLICT_ATTEMPTS = 3;
@@ -101,17 +137,12 @@ export class PurchasingService {
    * 요청자·부서는 actor에서 가져온다. 부서장이 없으면 승인할 사람이 없으므로 PUR-001.
    */
   async createRequisition(tx: Tx, input: CreateRequisitionInput, actor: AuthUser, origin?: RequisitionOrigin): Promise<PurchaseRequisitionDetail> {
-    if (!TON_PATTERN.test(input.requestedTon)) throw new AppException('COM-004', '수량(톤)은 정수 9자리·소수 3자리 이하의 숫자로 입력해 주세요');
-    const requestedTon = new Prisma.Decimal(input.requestedTon);
-    if (requestedTon.lte(0)) throw new AppException('COM-004', '수량(톤)은 0보다 커야 해요');
-    if (!isValidDate(input.desiredReceiptDate)) throw new AppException('COM-004', `희망 입고일 ${input.desiredReceiptDate}는 없는 날짜예요`);
-
+    const { requestedTon, desiredReceiptDate } = parseRequestValues(input);
     const item = await this.repository.findItem(tx, input.itemId);
     if (!item) throw new AppException('COM-003', '원료 품목을 찾을 수 없어요');
     if (item.itemType !== ITEM_TYPE.RAW_MATERIAL) throw new AppException('COM-004', '원료 품목만 구매요청할 수 있어요');
 
-    const department = await this.repository.findDepartmentHead(tx, actor.departmentId);
-    if (!department?.headEmployeeId) throw new AppException('PUR-001');
+    await this.assertHasDepartmentHead(tx, actor.departmentId);
 
     const productionPlanId = input.productionPlanId ?? null;
     let salesOrderId: number | null = null;
@@ -119,16 +150,14 @@ export class PurchasingService {
       const plan = await this.repository.findProductionPlan(tx, productionPlanId);
       if (!plan) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
       salesOrderId = plan.salesOrderItem?.salesOrderId ?? null;
-      // MRP를 다시 계산해도 같은 계획의 구매요청을 중복 생성하지 않는다 (API-143 비고)
-      const open = await this.repository.findOpenRequisitionForPlan(tx, productionPlanId, item.id);
-      if (open) throw new AppException('COM-004', `같은 생산계획·원료로 진행 중인 구매요청 ${open.purchaseRequisitionNo}이 있어요`);
+      await this.assertNoOpenRequisitionForPlan(tx, productionPlanId, item.id);
     }
 
     const row = await this.repository.createRequisition(tx, {
       purchaseRequisitionNo: await this.numbering.nextDocumentNumber(tx, 'PURCHASE_REQUISITION'),
       itemId: item.id,
       requestedTon,
-      desiredReceiptDate: new Date(`${input.desiredReceiptDate}T00:00:00.000Z`),
+      desiredReceiptDate,
       requesterId: actor.employeeId,
       requestReason: input.requestReason?.trim() || null,
       productionPlanId,
@@ -139,15 +168,7 @@ export class PurchasingService {
       actor,
       target: { table: 'purchase_requisition', id: row.id },
       salesOrderId,
-      after: {
-        purchaseRequisitionNo: row.purchaseRequisitionNo,
-        purchaseRequisitionStatus: row.purchaseRequisitionStatus,
-        itemId: row.itemId,
-        requestedTon: row.requestedTon.toFixed(3),
-        desiredReceiptDate: dateOnly(row.desiredReceiptDate),
-        requesterId: row.requesterId,
-        productionPlanId: row.productionPlanId,
-      },
+      after: snapshotOf(row),
       reason: row.requestReason,
       actionDraftId: origin?.actionDraftId ?? null,
       messageId: origin?.messageId ?? null,
@@ -155,7 +176,102 @@ export class PurchasingService {
     return this.toDetail(row);
   }
 
+  // ── 승인·반려·재요청 (REQ-PUR-002, REQ-AUTH-004) ────────
+
+  approve(user: AuthUser, id: number): Promise<PurchaseRequisitionDetail> {
+    return retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const before = await this.mustFindForDecision(tx, user, id);
+        await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.APPROVED, approverId: user.employeeId, approvedAt: new Date() });
+        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_APPROVED, null);
+      }),
+    );
+  }
+
+  async reject(user: AuthUser, id: number, dto: RejectPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
+    const rejectReason = dto.rejectReason.trim();
+    if (!rejectReason) throw new AppException('COM-004', '반려 사유를 입력해 주세요');
+    return retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const before = await this.mustFindForDecision(tx, user, id);
+        await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.REJECTED, approverId: user.employeeId, rejectReason });
+        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, rejectReason);
+      }),
+    );
+  }
+
+  /**
+   * 반려된 요청을 요청자 본인이 수량·희망 입고일·요청 근거를 고쳐 다시 승인 대기로 보낸다. 원료 품목은 바꾸지 않는다.
+   * 승인자·반려 사유는 지금 상태를 나타내는 칸이라 비우고, 이전 반려 기록은 작업 로그 before에 남는다.
+   */
+  async resubmit(user: AuthUser, id: number, dto: ResubmitPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
+    const { requestedTon, desiredReceiptDate } = parseRequestValues(dto);
+    return retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const before = await this.mustFindRequisition(tx, id);
+        if (before.requesterId !== user.employeeId) throw new AppException('COM-002', '요청자 본인만 재요청할 수 있어요');
+        if (before.purchaseRequisitionStatus !== PURCHASE_REQUISITION_STATUS.REJECTED) throw new AppException('COM-001', '반려된 요청만 재요청할 수 있어요');
+        await this.assertHasDepartmentHead(tx, before.requester.departmentId);
+        // 반려된 사이 같은 계획·원료로 새 요청이 들어왔으면 재요청하면 중복이 된다
+        if (before.productionPlanId !== null) await this.assertNoOpenRequisitionForPlan(tx, before.productionPlanId, before.itemId);
+        await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.REJECTED, {
+          purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL,
+          requestedTon,
+          desiredReceiptDate,
+          requestReason: dto.requestReason?.trim() || null,
+          approverId: null,
+          approvedAt: null,
+          rejectReason: null,
+        });
+        // BUSINESS_EVENT_TYPE에 재요청이 없어(docs/backend/purchasing.md 8장) 등록 이벤트로 남기고 사유로 구분한다
+        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, '반려 후 재요청');
+      }),
+    );
+  }
+
   // ── 계산·모양 ─────────────────────────────────────────
+
+  /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
+  private async mustFindForDecision(tx: Tx, user: AuthUser, id: number): Promise<RequisitionRow> {
+    const row = await this.mustFindRequisition(tx, id);
+    await this.assertHasDepartmentHead(tx, row.requester.departmentId);
+    assertDepartmentHead(user, row.requester.departmentId);
+    // 부서장 자기 요청의 승인 경로는 TBD(업무 프로세스 16장)이고 자동 승인은 금지라 우선 막는다
+    if (row.requesterId === user.employeeId) throw new AppException('COM-002', '본인 요청은 승인·반려할 수 없어요');
+    return row;
+  }
+
+  /** 상태가 그대로일 때만 바꾼다. 그사이 다른 사람이 처리했으면 0건이라 COM-001 (승인과 재요청이 겹쳐도 한쪽만 반영) */
+  private async changeStatus(tx: Tx, row: RequisitionRow, from: PurchaseRequisitionStatus, data: RequisitionStatusChange): Promise<void> {
+    const status = row.purchaseRequisitionStatus as PurchaseRequisitionStatus;
+    if (status !== from) throw new AppException('COM-001', ALREADY_DONE[status]);
+    if ((await this.repository.updateRequisitionIfStatus(tx, row.id, from, data)) === 0) throw new AppException('COM-001', '다른 사람이 먼저 처리한 요청이에요. 다시 조회해 주세요');
+  }
+
+  private async recordChange(tx: Tx, user: AuthUser, before: RequisitionRow, type: BusinessEventType, reason: string | null): Promise<PurchaseRequisitionDetail> {
+    const after = await this.mustFindRequisition(tx, before.id);
+    await this.businessEventRecorder.record(tx, {
+      type,
+      actor: user,
+      target: { table: 'purchase_requisition', id: before.id },
+      salesOrderId: after.productionPlan?.salesOrderItem?.salesOrder.id ?? null,
+      before: snapshotOf(before),
+      after: snapshotOf(after),
+      reason,
+    });
+    return this.toDetail(after);
+  }
+
+  private async assertHasDepartmentHead(tx: Tx, departmentId: number): Promise<void> {
+    const department = await this.repository.findDepartmentHead(tx, departmentId);
+    if (!department?.headEmployeeId) throw new AppException('PUR-001');
+  }
+
+  /** MRP를 다시 계산해도 같은 계획의 구매요청을 중복 생성하지 않는다 (API-143 비고) */
+  private async assertNoOpenRequisitionForPlan(tx: Tx, productionPlanId: number, itemId: number): Promise<void> {
+    const open = await this.repository.findOpenRequisitionForPlan(tx, productionPlanId, itemId);
+    if (open) throw new AppException('COM-004', `같은 생산계획·원료로 진행 중인 구매요청 ${open.purchaseRequisitionNo}이 있어요`);
+  }
 
   private canViewAll(user: AuthUser): boolean {
     return hasPermission(user, { permission: PERMISSION.PURCHASE_REQUISITION_CREATE, level: 'VIEW' });

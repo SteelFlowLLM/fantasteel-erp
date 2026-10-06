@@ -24,6 +24,27 @@ export class CreatePurchaseRequisitionDto {
   productionPlanId?: number | null;
 }
 
+export class RejectPurchaseRequisitionDto {
+  /** 요청자가 무엇을 고쳐 재요청할지 알 수 있게 필수로 받는다 */
+  @IsString({ message: '반려 사유를 입력해 주세요' })
+  @MaxLength(500, { message: '반려 사유는 500자까지 쓸 수 있어요' })
+  rejectReason!: string;
+}
+
+/** 재요청은 수량·희망 입고일·요청 근거만 고친다 (원료 품목은 그대로) */
+export class ResubmitPurchaseRequisitionDto {
+  @IsString({ message: '수량(톤)을 입력해 주세요' })
+  requestedTon!: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '희망 입고일은 YYYY-MM-DD로 입력해 주세요' })
+  desiredReceiptDate!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500, { message: '요청 근거는 500자까지 쓸 수 있어요' })
+  requestReason?: string | null;
+}
+
 export class ListPurchaseRequisitionsQuery {
   @IsOptional()
   @IsIn(Object.values(PURCHASE_REQUISITION_STATUS), { message: '구매요청 상태 값이 올바르지 않아요' })
