@@ -83,7 +83,7 @@ describe('구매요청 api', () => {
   it('톤 입력은 decimal(12,3) 모양(소수 3자리)으로 저장하고(core), 형식이 틀리면 입력 오류', async () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     const view = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-20', requestReason: '', itemId: itemIdOf('COL01'), requestedTon: ' 1,200 ' });
-    expect(read((t) => t.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === view.id).map((i) => i.requiredTon))).toEqual(['1200.000']);
+    expect(read((t) => t.purchaseRequisition.find((pr) => pr.id === view.id)?.requestedTon)).toBe('1200.000');
     for (const requestedTon of ['1.2345', '3매']) {
       await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-20', requestReason: '', itemId: itemIdOf('COL01'), requestedTon })).rejects.toBeInstanceOf(InputError);
     }
@@ -112,17 +112,17 @@ describe('구매요청 api', () => {
     const period = { from: today, to: plusDays(today, 30) };
     const line = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     if (!line) throw new Error('MRP 줄 없음');
-    const view = await purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', itemId: line.itemId, requestedTon: line.netTon, productionPlanId: planId });
+    const view = await purchaseRequisitionApi.create({ desiredReceiptDate: line.needDate, requestReason: '', itemId: line.itemId, requestedTon: line.netTon, productionPlanId: planId });
     expect(view.source).toBe('MRP');
     expect(view).toMatchObject({ productionPlanId: planId, requestedTon: line.netTon });
     const again = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     expect(again?.existingPurchaseRequisitionNo).toBe(view.purchaseRequisitionNo);
-    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', itemId: line.itemId, requestedTon: '1', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
+    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: line.needDate, requestReason: '', itemId: line.itemId, requestedTon: '1', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
   });
 
-  it('입력 확인: 원료만, 톤 > 0 (소수 3자리), 없는 품목 COM-003', async () => {
+  it('입력 확인: 원료만, 톤 > 0 (소수 3자리), 희망 입고일 필수, 없는 품목 COM-003', async () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
-    const base = { desiredReceiptDate: '', requestReason: '' };
+    const base = { desiredReceiptDate: '2026-10-20', requestReason: '' };
     const fieldsOf = async (promise: Promise<unknown>) => {
       const error = await promise.catch((e: unknown) => e);
       expect(error).toBeInstanceOf(InputError);
@@ -132,11 +132,12 @@ describe('구매요청 api', () => {
     expect(await fieldsOf(purchaseRequisitionApi.create({ ...base, itemId: itemIdOf('COL01'), requestedTon: '1.2345' }))).toContain('requestedTon');
     expect(await fieldsOf(purchaseRequisitionApi.create({ ...base, itemId: itemIdOf('SL-SS275-250x1200x10000'), requestedTon: '1' }))).toContain('itemId');
     expect(await fieldsOf(purchaseRequisitionApi.create({ ...base, desiredReceiptDate: '2026-13-01', itemId: itemIdOf('COL01'), requestedTon: '1' }))).toContain('desiredReceiptDate');
+    expect(await fieldsOf(purchaseRequisitionApi.create({ ...base, desiredReceiptDate: '', itemId: itemIdOf('COL01'), requestedTon: '1' }))).toContain('desiredReceiptDate');
     await expect(purchaseRequisitionApi.create({ ...base, itemId: 99999, requestedTon: '1' })).rejects.toMatchObject({ code: 'COM-003' });
   });
 
   it('사용 권한이 없으면 COM-002 (영업·조회만 가진 생산), 부서장 없는 부서는 PUR-001', async () => {
-    const input = { desiredReceiptDate: '', requestReason: '', itemId: itemIdOf('COL01'), requestedTon: '1' };
+    const input = { desiredReceiptDate: '2026-10-20', requestReason: '', itemId: itemIdOf('COL01'), requestedTon: '1' };
     actAs(SEED_EMPLOYEE_NO.sales);
     await expect(purchaseRequisitionApi.create(input)).rejects.toMatchObject({ code: 'COM-002' });
     actAs(SEED_EMPLOYEE_NO.productionHead);
@@ -153,7 +154,7 @@ describe('구매요청 api', () => {
   });
 
   it('상세: 요청자·승인권자·조회 권한자는 보고, 그 밖은 COM-002, 없는 번호는 COM-003', async () => {
-    const id = requisitionIdOf('PR-2609-0004');
+    const id = requisitionIdOf('PR-2609-0007');
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     expect(await purchaseRequisitionApi.detail(id)).toMatchObject({ canApprove: true, isRequester: false, departmentHeadName: '최준혁', purchaseRequisitionStatus: 'WAITING_APPROVAL' });
     actAs(SEED_EMPLOYEE_NO.purchase);
@@ -170,7 +171,7 @@ describe('승인함 api', () => {
   it('부서장의 승인 대기만 보이고, 부서장이 아니면 COM-002', async () => {
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const inbox = await approvalApi.inbox();
-    expect(inbox.map((purchaseRequisition) => purchaseRequisition.purchaseRequisitionNo)).toContain('PR-2609-0004');
+    expect(inbox.map((purchaseRequisition) => purchaseRequisition.purchaseRequisitionNo)).toContain('PR-2609-0007');
     expect(inbox.every((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL')).toBe(true);
     actAs(SEED_EMPLOYEE_NO.salesHead);
     expect(await approvalApi.inbox()).toEqual([]);
@@ -179,7 +180,7 @@ describe('승인함 api', () => {
   });
 
   it('승인: 요청 부서 부서장만(다른 부서장 COM-002), 그사이 바뀌면 COM-001, 요청자에게 결과 알림', async () => {
-    const id = requisitionIdOf('PR-2609-0004');
+    const id = requisitionIdOf('PR-2609-0007');
     const requesterId = employeeIdOf(SEED_EMPLOYEE_NO.purchase);
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const opened = await purchaseRequisitionApi.detail(id);
@@ -189,14 +190,14 @@ describe('승인함 api', () => {
     await expect(approvalApi.approve({ purchaseRequisitionId: id, expectedUpdatedAt: '2000-01-01T00:00:00.000Z' })).rejects.toMatchObject({ code: 'COM-001' });
     const approved = await approvalApi.approve({ purchaseRequisitionId: id, expectedUpdatedAt: opened.updatedAt });
     expect(approved).toMatchObject({ purchaseRequisitionStatus: 'APPROVED', approverName: '최준혁' });
-    const result = read((t) => t.notification.find((n) => n.recipientId === requesterId && n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2609-0004')));
+    const result = read((t) => t.notification.find((n) => n.recipientId === requesterId && n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2609-0007')));
     expect(result?.linkPath).toBe(`/purchase-requisitions?pr=${id}`);
     expect(read((t) => t.businessEvent.some((e) => e.businessEventType === 'PURCHASE_REQUISITION_APPROVED' && e.targetId === id))).toBe(true);
     expect((await approvalApi.inbox()).some((purchaseRequisition) => purchaseRequisition.id === id)).toBe(false);
   });
 
   it('반려(사유 필수) → 요청자가 고쳐 다시 요청 → 다시 승인 대기 (요청자만, COM-002)', async () => {
-    const id = requisitionIdOf('PR-2609-0004');
+    const id = requisitionIdOf('PR-2609-0007');
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const opened = await purchaseRequisitionApi.detail(id);
     await expect(approvalApi.reject({ purchaseRequisitionId: id, rejectReason: '   ', expectedUpdatedAt: opened.updatedAt })).rejects.toBeInstanceOf(InputError);
@@ -206,7 +207,7 @@ describe('승인함 api', () => {
 
     const values = { itemId: itemIdOf('LIM01'), requestedTon: '60' };
     // 부서장(구매 역할)도 요청자가 아니면 고칠 수 없다
-    await expect(purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: rejected.updatedAt, desiredReceiptDate: '', requestReason: '', ...values })).rejects.toMatchObject({
+    await expect(purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: rejected.updatedAt, desiredReceiptDate: '2026-10-25', requestReason: '', ...values })).rejects.toMatchObject({
       code: 'COM-002',
     });
     actAs(SEED_EMPLOYEE_NO.purchase);
@@ -215,7 +216,7 @@ describe('승인함 api', () => {
     const resubmitted = await purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: detail.updatedAt, desiredReceiptDate: '2026-10-25', requestReason: '60톤으로 줄임', ...values });
     expect(resubmitted).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', rejectReason: null, requestedTon: '60.000', desiredReceiptDate: '2026-10-25' });
     // 승인 대기 요청은 다시 요청할 수 없다
-    await expect(purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: resubmitted.updatedAt, desiredReceiptDate: '', requestReason: '', ...values })).rejects.toBeInstanceOf(InputError);
+    await expect(purchaseRequisitionApi.resubmit({ purchaseRequisitionId: id, expectedUpdatedAt: resubmitted.updatedAt, desiredReceiptDate: '2026-10-25', requestReason: '', ...values })).rejects.toBeInstanceOf(InputError);
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     expect((await approvalApi.inbox()).some((purchaseRequisition) => purchaseRequisition.id === id)).toBe(true);
   });
@@ -230,20 +231,19 @@ describe('발주 api', () => {
       await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-22', requestReason: '', itemId: itemIdOf('SMN01'), requestedTon: '2.5' }),
     ];
     const createdIds = created.map((pr) => pr.id);
-    const lineIds = read((t) => t.purchaseRequisitionItem.filter((i) => createdIds.includes(i.purchaseRequisitionId)).map((i) => i.id));
-    await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
+    await expect(purchaseOrderApi.create({ purchaseRequisitionIds: createdIds, dueDate: '' })).rejects.toMatchObject({ code: 'PUR-002' });
 
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     for (const pr of created) await approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: (await purchaseRequisitionApi.detail(pr.id)).updatedAt });
 
     actAs(SEED_EMPLOYEE_NO.productionHead);
-    await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(purchaseOrderApi.create({ purchaseRequisitionIds: createdIds, dueDate: '' })).rejects.toMatchObject({ code: 'COM-002' });
 
     actAs(SEED_EMPLOYEE_NO.purchase);
     const candidates = await purchaseOrderApi.candidateItems();
-    expect(candidates.filter((i) => createdIds.includes(i.purchaseRequisitionId)).map((i) => i.supplierName)).toHaveLength(2);
-    expect(candidates.some((i) => i.purchaseRequisitionNo === 'PR-2609-0003')).toBe(true);
-    const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' });
+    expect(candidates.filter((i) => createdIds.includes(i.id)).map((i) => i.supplierName)).toHaveLength(2);
+    expect(candidates.some((i) => i.purchaseRequisitionNo === 'PR-2609-0006')).toBe(true);
+    const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionIds: createdIds, dueDate: '' });
     expect(purchaseOrders).toHaveLength(2);
     expect(new Set(purchaseOrders.map((po) => po.supplierId)).size).toBe(2);
     expect(purchaseOrders.every((po) => po.purchaseOrderStatus === 'CONFIRMED' && po.dueDate === '2026-10-22')).toBe(true);
@@ -251,8 +251,8 @@ describe('발주 api', () => {
     for (const pr of created) {
       expect(await purchaseRequisitionApi.detail(pr.id)).toMatchObject({ purchaseRequisitionStatus: 'ORDERED', purchaseOrderLines: [expect.anything()] });
     }
-    // 이미 발주한 줄은 다시 발주하지 않는다
-    await expect(purchaseOrderApi.create({ purchaseRequisitionItemIds: lineIds, dueDate: '' })).rejects.toBeInstanceOf(InputError);
+    // 이미 발주한 구매요청은 다시 발주하지 않는다
+    await expect(purchaseOrderApi.create({ purchaseRequisitionIds: createdIds, dueDate: '' })).rejects.toBeInstanceOf(InputError);
     expect(read((t) => t.businessEvent.filter((e) => e.businessEventType === 'PURCHASE_ORDER_CREATED' && purchaseOrders.some((po) => po.id === e.targetId)).length)).toBe(2);
     expect((await purchaseOrderApi.list()).slice(0, 2).map((po) => po.id).sort()).toEqual(purchaseOrders.map((po) => po.id).sort());
   });

@@ -102,7 +102,7 @@ export function PurchaseOrderScreen() {
                       <span className="ml-auto text-cap text-ink-3">발주 대기 {group.items.length}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                      {summarizeItemNames(group.items)} · {fmtTon(decSum(group.items.map((i) => i.requiredTon)))}
+                      {summarizeItemNames(group.items)} · {fmtTon(decSum(group.items.map((i) => i.requestedTon)))}
                     </span>
                   </MasterItem>
                 ))}
@@ -155,7 +155,7 @@ export function PurchaseOrderScreen() {
             key={`${purchaseRequisitionIdParam ?? ''}-${activeSupplier ?? ''}`}
             groups={groups}
             initialIds={(candidates.data ?? [])
-              .filter((i) => (purchaseRequisitionIdParam !== null ? i.purchaseRequisitionId === purchaseRequisitionIdParam : supplierKey(i.supplierId) === activeSupplier))
+              .filter((i) => (purchaseRequisitionIdParam !== null ? i.id === purchaseRequisitionIdParam : supplierKey(i.supplierId) === activeSupplier))
               .filter((i) => i.supplierId !== null)
               .map((i) => i.id)}
             canConfirmPurchaseOrder={canConfirmPurchaseOrder}
@@ -223,7 +223,7 @@ export function PurchaseOrderForm({
           <Card key={supplierKey(group.supplierId)}>
             <CardHead
               title={group.supplierName ?? '기본 공급업체 없음'}
-              meta={`승인된 요청 품목 ${group.items.length}건 · 미발주 ${fmtTon(decSum(group.items.map((i) => i.requiredTon)))}`}
+              meta={`승인된 구매요청 ${group.items.length}건 · 미발주 ${fmtTon(decSum(group.items.map((i) => i.requestedTon)))}`}
               actions={
                 selectable ? (
                   <label className="flex items-center gap-1.5 text-xs text-ink-2">
@@ -257,17 +257,16 @@ export function PurchaseOrderForm({
                       <Td>
                         <input
                           type="checkbox"
-                          aria-label={`${item.purchaseRequisitionNo} ${item.lineNo}번 품목 고르기`}
+                          aria-label={`${item.purchaseRequisitionNo} 고르기`}
                           disabled={!selectable}
                           checked={selected.has(item.id)}
                           onChange={(event) => toggle(item.id, event.target.checked)}
                         />
                       </Td>
                       <Td>
-                        <Link className="font-mono text-run hover:underline" href={`/purchase-requisitions/${item.purchaseRequisitionId}`}>
+                        <Link className="font-mono text-run hover:underline" href={`/purchase-requisitions/${item.id}`}>
                           {item.purchaseRequisitionNo}
-                        </Link>{' '}
-                        <span className="text-cap text-ink-3">#{item.lineNo}</span>
+                        </Link>
                       </Td>
                       <Td>
                         {item.itemName} <span className="font-mono text-cap text-ink-3">{item.itemCode}</span>
@@ -275,7 +274,7 @@ export function PurchaseOrderForm({
                       <Td className="font-mono">{item.productionPlanNo ?? <span className="font-sans text-ink-3">-</span>}</Td>
                       <Td>{item.desiredReceiptDate ? fmtDate(item.desiredReceiptDate) : '-'}</Td>
                       <Td align="right" className="font-semibold">
-                        {fmtTon(item.requiredTon)}
+                        {fmtTon(item.requestedTon)}
                       </Td>
                     </tr>
                   ))}
@@ -294,7 +293,7 @@ export function PurchaseOrderForm({
           <div className="flex flex-col gap-1 text-sm">
             <span className="text-xs font-medium text-ink-2">만들어질 발주</span>
             <b className="font-semibold">
-              {planned.length}건 · 공급업체 {planned.length}곳 · 합계 {fmtTon(decSum(chosen.map((i) => i.requiredTon)))}
+              {planned.length}건 · 공급업체 {planned.length}곳 · 합계 {fmtTon(decSum(chosen.map((i) => i.requestedTon)))}
             </b>
             {planned.map((purchaseOrder) => (
               <span key={purchaseOrder.supplierId} className="text-cap text-ink-2">
@@ -311,7 +310,7 @@ export function PurchaseOrderForm({
             className="ml-auto"
             disabled={!canConfirmPurchaseOrder || chosen.length === 0 || create.isPending}
             title={canConfirmPurchaseOrder ? undefined : permissionNeedText([PERMISSION.PURCHASE_ORDER_CONFIRM])}
-            onClick={() => create.mutate({ purchaseRequisitionItemIds: chosen.map((i) => i.id), dueDate })}
+            onClick={() => create.mutate({ purchaseRequisitionIds: chosen.map((i) => i.id), dueDate })}
           >
             {create.isPending ? '처리하는 중…' : '발주 확정'}
           </Button>

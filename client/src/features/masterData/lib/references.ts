@@ -39,7 +39,7 @@ export function countProductSpecReferences(tables: Readonly<MockTables>, itemId:
 export function countRawMaterialReferences(tables: Readonly<MockTables>, itemId: number): ReferenceCount[] {
   return [
     { label: '배합 원단위', count: count(tables.specificConsumption.filter((r) => r.itemId === itemId)) },
-    { label: '구매요청', count: count(tables.purchaseRequisitionItem.filter((r) => r.itemId === itemId)) },
+    { label: '구매요청', count: count(tables.purchaseRequisition.filter((r) => r.itemId === itemId)) },
     { label: '발주', count: count(tables.purchaseOrderItem.filter((r) => r.itemId === itemId)) },
     { label: 'LOT', count: count(tables.lot.filter((r) => r.itemId === itemId)) },
     { label: '재고', count: count(tables.inventory.filter((r) => r.itemId === itemId && (r.onHandQty > 0 || r.reservedQty > 0))) },

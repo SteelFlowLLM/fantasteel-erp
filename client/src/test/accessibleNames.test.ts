@@ -50,8 +50,8 @@ describe('발주 작성: 공급업체별 전체 선택', () => {
     const html = await render(SEED_EMPLOYEE_NO.purchase, createElement(PurchaseOrderForm, { groups, initialIds: [], canConfirmPurchaseOrder: true, onDone: () => undefined }));
     const labels = ariaLabelsOf(html, 'input');
     for (const group of groups.filter((g) => g.supplierId !== null)) expect(labels).toContain(`${group.supplierName} 품목 전체 선택`);
-    // 줄마다 고르는 칸도 이름이 있다
-    expect(labels.filter((label) => label.endsWith('번 품목 고르기'))).toHaveLength(items.length);
+    // 구매요청마다 고르는 칸도 이름이 있다
+    for (const item of items) expect(labels).toContain(`${item.purchaseRequisitionNo} 고르기`);
   });
 });
 

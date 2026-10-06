@@ -230,7 +230,7 @@
 | 순서 | 등록 키 | 파일 | 만드는 것 | 근거 |
 |---|---|---|---|---|
 | 1 | `inspectionStandards` | `client/src/mock/seeds/inspectionStandards.ts` | 검사 기준 버전 1 (`is_current`): `QS-{강종}-ST`(제강 성분)·`QS-{강종}-CC`(연주 슬래브)·`QS-{강종}-HR`(열연 코일). 제강·열연은 KS 값, 연주는 사내 규격 가정값(6-3, 6-8장) | ks-values.md, PLAN 8-1, REQ-QC-001·002 |
-| 2 | `core` | `client/src/mock/seeds/core.ts` | 수주 SO-2609-001~005, 생산계획 PP-2609-0001~0005, 구매요청 PR-2609-0001~0004, 출하요청 DR-2609-0001~0002, 밀시트 MS-2609-0001-1, 수주 업무방(SO-2609-003), Message → ERP 시연 메시지. 시작 재고 = 14.1의 SS275 슬래브 250x1200x10000 합격 가용 6매. 원료 입고량은 6-3 '시드 원료 입고량'(가정값) | 업무 프로세스 14.1·14.2, BP-SEED-01 |
+| 2 | `core` | `client/src/mock/seeds/core.ts` | 수주 SO-2609-001~005, 생산계획 PP-2609-0001~0005, 구매요청 PR-2609-0001~0007(원료마다 1건), 출하요청 DR-2609-0001~0002, 밀시트 MS-2609-0001-1, 수주 업무방(SO-2609-003), Message → ERP 시연 메시지. 시작 재고 = 14.1의 SS275 슬래브 250x1200x10000 합격 가용 6매. 원료 입고량은 6-3 '시드 원료 입고량'(가정값) | 업무 프로세스 14.1·14.2, BP-SEED-01 |
 | 3 | `collab` | `client/src/mock/seeds/collab.ts` | 업무 6건과 업무 지정 알림, 1:1 채팅방 1개·그룹 채팅방 2개와 메시지(첨부 1개, 사원 멘션 2개, 부서 멘션 1개). 업무방은 core가 만든다 | REQ-NTF·MSG 계열 (내용은 시연용 가정값, 6-2장) |
 | 4 | `dashboard` | `client/src/mock/seeds/dashboard.ts` | 8월 말 수주 SO-2608-001~004(모두 출하완료, 규격·매수·난수 시드 6001~6004·출고일은 `SEED_DASHBOARD`), 8-31 원료 입고, 9월 실적·검사·출고 | BP-DSH-01 "추이 집계에는 시계열 시드", BP-SEED-01 |
 
@@ -313,7 +313,7 @@
 | **초안 원료 필드** — `payload = {itemId, requiredTon, desiredReceiptDate, requestReason, sourceText}` | REQ-ACT-001 | `client/src/mock/services/actionDrafts.ts` |
 | **시드 측정값** — 기준 안 대표값(`typicalPassValue`) + 히트별 성분 값, 불합격 사례 값(표면 3.50mm, P 0.058) | PLAN 8-1 #5 | `client/src/mock/seeds/core.ts`, `client/src/lib/inspectionJudgment.ts` |
 | **시드 날짜·사람·수량** — 16-2 표 | 문서에 없음 — 시연용 | `client/src/mock/seeds/core.ts` |
-| **시드 원료 입고량** — PR-2609-0001: 철광석 5,000t(09-02 1,800 + 09-03 3,200)·석탄 1,900t·석회석 480t·실리코망가니즈 20t → 시드 끝 잔량 2,333.330 / 899.998 / 229.998 / 1.000t. 14.1 히트 1개 뒤에도 철광석·석탄·석회석은 구매 없이 히트 4개를 더 만든다 | 문서에 없음 — 시연용(2026-10-02 브라우저 점검: 예전 3,300·1,250·320t로는 14.1 뒤 189 / 83 / 28t만 남아 14.2 전에 구매 3건이 필요했다). 실리코망가니즈는 14.1 3단계 MRP(합금철만 순소요 1.500t, 04 14.1)를 지키려고 그대로 | `client/src/mock/seeds/core.ts` (`SEED_CORE.rawMaterialReceipts`) |
+| **시드 원료 입고량** — PR-2609-0001~0004: 철광석 5,000t(09-02 1,800 + 09-03 3,200)·석탄 1,900t·석회석 480t·실리코망가니즈 20t → 시드 끝 잔량 2,333.330 / 899.998 / 229.998 / 1.000t. 14.1 히트 1개 뒤에도 철광석·석탄·석회석은 구매 없이 히트 4개를 더 만든다 | 문서에 없음 — 시연용(2026-10-02 브라우저 점검: 예전 3,300·1,250·320t로는 14.1 뒤 189 / 83 / 28t만 남아 14.2 전에 구매 3건이 필요했다). 실리코망가니즈는 14.1 3단계 MRP(합금철만 순소요 1.500t, 04 14.1)를 지키려고 그대로 | `client/src/mock/seeds/core.ts` (`SEED_CORE.rawMaterialReceipts`) |
 | **MRP 원료 줄의 공급 나누기** — '원료 LOT 잔량' 칸 = 표에 보이는 계획이 쓸 수 있는 잔량(표에 없는 앞선 계획이 먼저 쓴 몫 제외), '입고예정' 칸 = 보이는 계획이 필요일까지 받아 쓰는 몫, 나머지 입고예정은 다른 계획 몫 · 필요일 뒤 도착(납기 없음 포함) · 앞선 계획 몫 · 남는 몫으로 칸 아래에 따로. 순소요가 남은 줄이 있으면 그 줄들이 쓰지 못한 까닭으로 이유를 정한다 | 4.4 "필요일까지 도착하는 확정 발주만", REQ-PRD-005 "다른 수주의 입고예정에서 제외". 한 줄을 어떻게 보일지는 문서에 없음 — "총소요 − 잔량 − 입고예정 = 순소요"가 그 줄 숫자로 맞게 | `client/src/lib/mrp.ts` (`supplyBreakdownOf`), `client/src/mock/services/mrp.ts` (`mrpMaterialRows`), `client/src/features/purchasing/MrpScreen.tsx` |
 
 ### 6-4. 화면 공통(cross-cutting)
@@ -433,7 +433,7 @@
 | **미리보기 납기** — 미리보기는 납기를 쓰지 않으므로 서비스 입력 확인용으로 오늘 날짜를 넣는다(저장 안 함) | 문서에 없음 — core `previewSalesOrder`가 납기 형식을 확인함 | `client/src/features/sales/SalesOrderCreateScreen.tsx`, `client/src/features/sales/lib/salesOrderForm.ts` |
 | **취소된 수주의 단추** — 출하요청 만들기는 숨긴다. 업무방이 없으면 '업무방 열기'도 숨긴다(있는 방은 갈 수 있다). 취소된 생산계획 카드의 [작업 실적]은 숨긴다 | 문서에 없음 — 취소된 수주에 더는 할 수 없는 일을 보이지 않게(2026-10-02 브라우저 점검) | `client/src/features/sales/components/SalesOrderActions.tsx`, `client/src/features/sales/components/FulfillmentTab.tsx`, `client/src/features/sales/components/ProductionLinkTab.tsx` |
 | **취소 결과 기록** — 수주 취소 작업 로그(SALES_ORDER_CANCELLED)의 after_data에 품목별 `releasedReservedQty`, `cancelledPlanNos`(시작 전 계획 취소), `unlinkedPlanNos`(진행중 계획 연결 해제)를 남기고, 취소된 수주 띠는 이 값으로 실제 일어난 일만 말한다 | BP-SO-02 취소 정상 흐름. after_data 모양은 문서에 없음 | `client/src/mock/services/salesOrders.ts`(`cancelSalesOrder`, `salesOrderDetail.cancellation`) |
-| **취소 창의 구매 진행 영향** — 취소·연결 해제될 계획에 `purchase_requisition_item.production_plan_id`로 연결된 구매요청(상태)과 발주(번호·상태)를 보여 주기만 한다. 수주 취소는 구매요청·발주를 바꾸지 않는다 | 04 BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다" — 처리 방법은 문서에 없어 표시만 | `client/src/mock/services/salesOrders.ts`(`cancelPurchaseImpactOf`), `client/src/features/sales/components/CancelSalesOrderModal.tsx` |
+| **취소 창의 구매 진행 영향** — 취소·연결 해제될 계획에 `purchase_requisition.production_plan_id`로 연결된 구매요청(상태)과 발주(번호·상태)를 보여 주기만 한다. 수주 취소는 구매요청·발주를 바꾸지 않는다 | 04 BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다" — 처리 방법은 문서에 없어 표시만 | `client/src/mock/services/salesOrders.ts`(`cancelPurchaseImpactOf`), `client/src/features/sales/components/CancelSalesOrderModal.tsx` |
 | **다른 영역 주소** — `/messenger?room=`, `/shipment-requests/new?salesOrderId=`, `/shipment-requests/<id>`, `/mill-sheets?id=`, `/production/plans?plan=`, `/production/results?plan=`, `/lots/trace?lot=`, `/business-events?salesOrderId=` | 문서에 없음 — 옛 화면 주소를 따름. 병합 때 각 영역 주소와 맞춰야 함 | `client/src/features/sales/SalesOrderDetailScreen.tsx`, `client/src/features/sales/components/SalesOrderActions.tsx` |
 
 ### 6-13. 출하·밀시트(shipment)

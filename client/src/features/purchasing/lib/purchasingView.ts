@@ -105,7 +105,7 @@ export interface PlannedPurchaseOrder {
  * 납기를 비우면 발주마다 자기 묶음의 가장 이른 희망 입고일이 납기가 된다. 기본 공급업체가 없는 품목은 발주하지 않는다.
  */
 export function plannedPurchaseOrders(
-  chosen: readonly { supplierId: number | null; supplierName: string | null; desiredReceiptDate: string | null; requiredTon: string }[],
+  chosen: readonly { supplierId: number | null; supplierName: string | null; desiredReceiptDate: string | null; requestedTon: string }[],
   dueDate: string,
 ): PlannedPurchaseOrder[] {
   return groupBySupplier(chosen).flatMap((group) =>
@@ -117,7 +117,7 @@ export function plannedPurchaseOrders(
             supplierName: group.supplierName,
             dueDate: dueDate !== '' ? dueDate : earliestDate(group.items.map((i) => i.desiredReceiptDate)),
             itemCount: group.items.length,
-            totalTon: decSum(group.items.map((i) => i.requiredTon)),
+            totalTon: decSum(group.items.map((i) => i.requestedTon)),
           },
         ],
   );

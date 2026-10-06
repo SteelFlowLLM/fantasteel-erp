@@ -157,10 +157,12 @@ describe('수주 취소: 실제로 일어난 일을 남기고, 구매요청·발
     const k = createKit();
     const { salesOrder, productionPlans } = create141(k);
     const plan = productionPlans[0];
-    const { purchaseRequisition } = createPurchaseRequisition(k.at('2026-10-02T10:00:00+09:00'), k.actor('purchase'), {
+    const purchaseRequisition = createPurchaseRequisition(k.at('2026-10-02T10:00:00+09:00'), k.actor('purchase'), {
+      itemId: k.itemId('SMN01'),
+      requestedTon: '1.500',
       desiredReceiptDate: '2026-10-15',
       requestReason: 'MRP 순소요',
-      items: [{ itemId: k.itemId('SMN01'), requiredTon: '1.500', productionPlanId: plan.id }],
+      productionPlanId: plan.id,
     });
     expect(cancelPurchaseImpactOf(k.tables, salesOrder.id)).toEqual([
       {
@@ -207,14 +209,14 @@ describe('수주 취소: 실제로 일어난 일을 남기고, 구매요청·발
     const [impact, ...rest] = cancelPurchaseImpactOf(k.tables, so.id);
     expect(rest).toEqual([]);
     expect(impact).toMatchObject({
-      purchaseRequisitionNo: 'PR-2609-0002',
+      purchaseRequisitionNo: 'PR-2609-0005',
       purchaseRequisitionStatus: 'ORDERED',
       productionPlanNo: 'PP-2609-0004',
       planEffect: 'UNLINK',
       purchaseOrderNo: 'PO-2609-0005',
       purchaseOrderStatus: 'PARTIALLY_RECEIVED',
     });
-    const prBefore = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionNo === 'PR-2609-0002');
+    const prBefore = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionNo === 'PR-2609-0005');
     const poBefore = k.tables.purchaseOrder.find((p) => p.purchaseOrderNo === 'PO-2609-0005');
 
     const since = lastEventId(k);

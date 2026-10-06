@@ -16,7 +16,7 @@ describe('구매요청 재요청 · 요청자 부서 이동', () => {
     const values = { itemId: oreId, requestedTon: '10' };
 
     actAs(SEED_EMPLOYEE_NO.purchase);
-    const created = await purchaseRequisitionApi.create({ desiredReceiptDate: '', requestReason: '', ...values });
+    const created = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-20', requestReason: '', ...values });
     expect(created.departmentId).toBe(departmentIdOf('PUR'));
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const rejected = await approvalApi.reject({ purchaseRequisitionId: created.id, expectedUpdatedAt: created.updatedAt, rejectReason: '수량을 다시 확인해 주세요' });
@@ -26,7 +26,7 @@ describe('구매요청 재요청 · 요청자 부서 이동', () => {
     getMockDb().transact((tx) => updateRow(tx, 'employee', requesterId, { departmentId: departmentIdOf('SAL') }));
 
     actAs(SEED_EMPLOYEE_NO.purchase);
-    const resubmitted = await purchaseRequisitionApi.resubmit({ purchaseRequisitionId: created.id, expectedUpdatedAt: rejected.updatedAt, desiredReceiptDate: '', requestReason: '부서 이동 뒤 다시 요청', ...values });
+    const resubmitted = await purchaseRequisitionApi.resubmit({ purchaseRequisitionId: created.id, expectedUpdatedAt: rejected.updatedAt, desiredReceiptDate: '2026-10-20', requestReason: '부서 이동 뒤 다시 요청', ...values });
     expect(resubmitted).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', departmentId: departmentIdOf('SAL'), departmentName: '영업부' });
 
     // 승인 요청 알림은 영업부 부서장(김도윤)에게 간다

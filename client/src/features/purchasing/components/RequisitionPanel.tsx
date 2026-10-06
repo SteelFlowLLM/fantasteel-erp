@@ -248,7 +248,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 </thead>
                 <tbody>
                   {detail.purchaseOrderLines.map((line) => (
-                    <tr key={`${line.purchaseOrderId}-${line.purchaseRequisitionLineNo}`}>
+                    <tr key={line.purchaseOrderId}>
                       <Td>
                         {canOpenPurchaseOrders ? (
                           <Link className="font-mono text-run hover:underline" href={`/purchase-orders?po=${line.purchaseOrderId}`}>

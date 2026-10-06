@@ -200,7 +200,8 @@ describe('숫자', () => {
       { status: 'WAITING_APPROVAL', count: 1 },
       { status: 'APPROVED', count: 1 },
       { status: 'REJECTED', count: 0 },
-      { status: 'ORDERED', count: 3 },
+      // 구매요청 1건 = 원료 1품목: core 원료 확보 4건 + MRP 합금철 1건 + dashboard 8월 원료 4건
+      { status: 'ORDERED', count: 9 },
     ]);
     expect(data.openPurchaseOrders).toMatchObject({ count: 1, scheduledReceiptTon: '3.500' });
     expect(data.openPurchaseOrders?.purchaseOrders[0]).toMatchObject({ supplierName: '하람합금철', dueDate: '2026-10-28' });
@@ -283,10 +284,10 @@ describe('여재 숫자: 대시보드 여재 위젯 = 재고 화면 여재 탭',
       const at = seedTxAt(tx, '2026-10-02T09:00:00+09:00');
       const purchase = actor(SEED_EMPLOYEE_NO.purchase);
       const smnId = tx.tables.item.find((i) => i.itemCode === 'SMN01')?.id ?? 0;
-      const { purchaseRequisition, items } = createPurchaseRequisition(at, purchase, { desiredReceiptDate: '2026-10-02', items: [{ itemId: smnId, requiredTon: '1.500', productionPlanId: planId }] });
+      const purchaseRequisition = createPurchaseRequisition(at, purchase, { itemId: smnId, requestedTon: '1.500', desiredReceiptDate: '2026-10-02', productionPlanId: planId });
       approvePurchaseRequisition(at, actor(SEED_EMPLOYEE_NO.purchaseHead), { purchaseRequisitionId: purchaseRequisition.id });
-      createPurchaseOrders(at, purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
-      const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === items[0]?.id);
+      createPurchaseOrders(at, purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
+      const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisition.id);
       if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate: '2026-10-02' });
       simulatePlan(seedTxAt(tx, '2026-10-03T18:00:00+09:00'), actor(SEED_EMPLOYEE_NO.steelmaking), { productionPlanId: planId, randomSeed: 42 });
       const quality = actor(SEED_EMPLOYEE_NO.quality);

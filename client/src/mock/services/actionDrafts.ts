@@ -60,10 +60,11 @@ const PURCHASE_REQUISITION_FIELDS: readonly ActionDraftField[] = [
 function executePurchaseRequisition(tx: MockTx, actor: PersonActor, draft: ActionDraftRow): ActionExecution {
   const payload = draftPayloadOf(draft);
   const message = findById(tx.tables, 'message', draft.messageId);
-  const { purchaseRequisition } = createPurchaseRequisition(tx, actor, {
+  const purchaseRequisition = createPurchaseRequisition(tx, actor, {
+    itemId: payload.itemId ?? 0,
+    requestedTon: payload.requiredTon ?? '0',
     desiredReceiptDate: payload.desiredReceiptDate,
     requestReason: payload.requestReason ?? (message?.content ? `메시지: ${message.content}`.slice(0, 500) : null),
-    items: [{ itemId: payload.itemId ?? 0, requiredTon: payload.requiredTon ?? '0', productionPlanId: null }],
     actionDraftId: draft.id,
     messageId: draft.messageId,
   });

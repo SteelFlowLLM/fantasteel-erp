@@ -124,18 +124,18 @@ export function buildTraceFixture(): TraceFixture {
     const tRm = at('2026-09-29T08:00:00+09:00');
     const pr = insertRow(tRm, 'purchaseRequisition', {
       purchaseRequisitionNo: issueBusinessNo(tRm, 'PURCHASE_REQUISITION'),
+      itemId: ore.id,
+      requestedTon: '500.000',
+      desiredReceiptDate: '2026-09-29',
       requesterId: purchase,
-      departmentId: need(t.employee.find((e) => e.id === purchase), 'purchase').departmentId,
       approverId: null,
-      purchaseRequisitionStatus: 'APPROVED',
-      desiredReceiptDate: null,
-      requestReason: null,
-      rejectReason: null,
-      actionDraftId: null,
       approvedAt: tRm.nowIso,
-      rejectedAt: null,
+      rejectReason: null,
+      requestReason: null,
+      productionPlanId: null,
+      actionDraftId: null,
+      purchaseRequisitionStatus: 'APPROVED',
     });
-    const prItem = insertRow(tRm, 'purchaseRequisitionItem', { purchaseRequisitionId: pr.id, lineNo: 1, itemId: ore.id, requiredTon: '500.000', productionPlanId: null });
     const po = insertRow(tRm, 'purchaseOrder', {
       purchaseOrderNo: issueBusinessNo(tRm, 'PURCHASE_ORDER'),
       supplierId: supplier.id,
@@ -147,7 +147,7 @@ export function buildTraceFixture(): TraceFixture {
       purchaseOrderId: po.id,
       lineNo: 1,
       itemId: ore.id,
-      purchaseRequisitionItemId: prItem.id,
+      purchaseRequisitionId: pr.id,
       orderedTon: '500.000',
       receivedTon: '500.000',
       scheduledReceiptTon: '0.000',

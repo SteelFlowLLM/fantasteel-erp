@@ -118,7 +118,7 @@ export function mrpSuppliesOf(tables: Tables): MrpSupply[] {
       .flatMap((line): MrpSupply[] => {
         const purchaseOrder = findById(tables, 'purchaseOrder', line.purchaseOrderId);
         if (!purchaseOrder || purchaseOrder.purchaseOrderStatus === 'RECEIVED') return [];
-        const planId = findById(tables, 'purchaseRequisitionItem', line.purchaseRequisitionItemId)?.productionPlanId ?? null;
+        const planId = findById(tables, 'purchaseRequisition', line.purchaseRequisitionId)?.productionPlanId ?? null;
         return [{ kind: 'SCHEDULED', materialId: line.itemId, availableDate: purchaseOrder.dueDate, ton: line.scheduledReceiptTon, reservedForPlanId: planId, sourceId: line.id }];
       }),
   ];
@@ -229,7 +229,7 @@ function mrpViewOf(tables: Tables, period: { from: string; to: string }, isShown
     .map((l) => {
       const plan = findById(tables, 'productionPlan', l.planId);
       const material = findById(tables, 'item', l.materialId);
-      const existing = tables.purchaseRequisitionItem.find((i) => i.productionPlanId === l.planId && i.itemId === l.materialId);
+      const existing = tables.purchaseRequisition.find((pr) => pr.productionPlanId === l.planId && pr.itemId === l.materialId);
       return {
         productionPlanId: l.planId,
         productionPlanNo: plan?.productionPlanNo ?? '',
@@ -238,7 +238,7 @@ function mrpViewOf(tables: Tables, period: { from: string; to: string }, isShown
         itemName: material?.itemName ?? '',
         netTon: l.netTon,
         needDate: l.needDate,
-        existingPurchaseRequisitionNo: existing ? (findById(tables, 'purchaseRequisition', existing.purchaseRequisitionId)?.purchaseRequisitionNo ?? null) : null,
+        existingPurchaseRequisitionNo: existing?.purchaseRequisitionNo ?? null,
       };
     });
 

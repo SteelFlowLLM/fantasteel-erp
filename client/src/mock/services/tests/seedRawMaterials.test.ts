@@ -20,16 +20,11 @@ const SS275_SLAB = 'SL-SS275-250x1200x10000';
 function buySilicoManganese(k: Kit, receiptDate: string, ton: string, productionPlanId: number): void {
   const at = k.at(`${receiptDate}T09:00:00+09:00`);
   const purchase = k.actor('purchase');
-  const { purchaseRequisition, items } = createPurchaseRequisition(at, purchase, {
-    desiredReceiptDate: receiptDate,
-    items: [{ itemId: k.itemId('SMN01'), requiredTon: ton, productionPlanId }],
-  });
+  const purchaseRequisition = createPurchaseRequisition(at, purchase, { itemId: k.itemId('SMN01'), requestedTon: ton, desiredReceiptDate: receiptDate, productionPlanId });
   approvePurchaseRequisition(at, k.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-  createPurchaseOrders(at, purchase, { purchaseRequisitionItemIds: items.map((i) => i.id) });
-  for (const item of items) {
-    const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionItemId === item.id);
-    if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
-  }
+  createPurchaseOrders(at, purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
+  const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === purchaseRequisition.id);
+  if (line) receiveGoods(at, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
 }
 
 const remainingOf = (k: Kit): Record<string, string> => Object.fromEntries(rawMaterialInventory(k.tables).map((r) => [r.itemCode, r.remainingTon]));
@@ -45,7 +40,7 @@ describe('시드 원료 (철광석·석탄·석회석 넉넉히, 실리코망가
   it('14.1 히트 1개 뒤에도 철광석·석탄·석회석을 사지 않고 히트 4개를 더 만든다', () => {
     const k = createKit();
     const ironmakingMaterials = ['ORE01', 'COL01', 'LIM01'].map((code) => k.itemId(code));
-    const ironmakingRequisitionCount = () => k.tables.purchaseRequisitionItem.filter((i) => ironmakingMaterials.includes(i.itemId)).length;
+    const ironmakingRequisitionCount = () => k.tables.purchaseRequisition.filter((pr) => ironmakingMaterials.includes(pr.itemId)).length;
     const seededRequisitionCount = ironmakingRequisitionCount();
 
     // 14.1 1~3단계: SS275 250×1,200×10,000 10매(재고 6 + 부족 4, 히트 1) → MRP는 실리코망가니즈만 1.500t 부족
