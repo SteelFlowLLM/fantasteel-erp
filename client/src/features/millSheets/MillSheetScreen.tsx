@@ -4,7 +4,7 @@
 // 인쇄를 시작하지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
 // C 반영: PDF 상태 코드 없음(pdf_path 유무), 출고번호 대신 출하요청, 칩 문구는 공통 코드 ITEM_TYPE 표시명.
 import { millSheetPdfFileName } from '@fantasteel/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
@@ -157,20 +157,26 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
   useShellTitle(detail.millSheetNo, s.customer.customerName);
 
   /**
-   * 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다.
-   * 브라우저는 문서 제목을 저장 파일 이름으로 쓰므로, 인쇄하는 동안만 제목을 저장 이름 양식(확장자 제외)으로 바꾼다.
+   * 브라우저는 문서 제목을 'PDF로 저장'의 기본 파일 이름으로 쓴다. 인쇄 직전에만 바꾸면 print()가 바로 돌아오는 브라우저에서
+   * 제목이 먼저 되돌아가 이름이 안 들어가므로, 밀시트를 보는 동안 제목을 저장 이름 양식(확장자 제외)으로 둔다 (Ctrl+P도 같은 이름).
    */
-  const generatePdf = () => {
+  const pdfTitle = millSheetPdfFileName(s).replace(/\.pdf$/, '');
+  useEffect(() => {
     const previousTitle = document.title;
+    document.title = pdfTitle;
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [pdfTitle]);
+
+  /** 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다. */
+  const generatePdf = () => {
     try {
       if (typeof window.print !== 'function') throw new Error('print unavailable');
-      document.title = millSheetPdfFileName(s).replace(/.pdf$/, '');
       window.print();
     } catch {
       setPrintFailed(true);
       return;
-    } finally {
-      document.title = previousTitle;
     }
     setPrintFailed(false);
     if (!detail.pdfPath) mark.mutate({ millSheetId: detail.id });
