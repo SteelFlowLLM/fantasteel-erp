@@ -71,7 +71,7 @@ export function EmptyNote({ className, children }: { className?: string; childre
 /** 셸 없이 화면 전체를 쓰는 상태 (처음 불러올 때, 로그인 확인 중) */
 export function FullScreenState(props: StateViewProps) {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg">
+    <div className="flex h-viewport w-viewport items-center justify-center bg-bg">
       <StateView {...props} />
     </div>
   );

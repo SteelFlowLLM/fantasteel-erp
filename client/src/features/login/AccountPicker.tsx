@@ -83,7 +83,7 @@ export function AccountPicker() {
   const admin = accounts.data?.find((account) => account.roleCode === ROLE.ADMIN);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg">
+    <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
       <section aria-label="FantaSteel 소개" className="flex w-[min(760px,52vw)] flex-none flex-col gap-7 overflow-hidden bg-nav-dark px-15 pt-11 pb-10 text-white">
         <div className="flex items-center gap-3">
           <Logo size={36} />
