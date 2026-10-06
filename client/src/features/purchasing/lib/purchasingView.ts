@@ -1,6 +1,6 @@
 // 구매 화면 표시용 순수 함수 (MRP 기간 기본값, 품목 요약, 공급업체 묶음, 진행률, 톤 입력 초기값).
 // 업무 규칙(순소요·승인·발주·입고)은 core 서비스가 한다. 여기는 화면에 보이는 값만 만든다.
-import { PURCHASE_ORDER_STATUS_LABEL } from '@/codes';
+import { PURCHASE_ORDER_STATUS_LABEL, RAW_MATERIAL_TYPE } from '@/codes';
 import { decCmp, decDiv, decIsPositive, decSum } from '@/lib/decimal';
 import { fmtMD, fmtTon } from '@/lib/format';
 import type { ReceiptLine } from '@/api/goodsReceipts';
@@ -134,35 +134,9 @@ export function isOverdue(expectedReceiptDate: string | null, today: string, rem
 }
 
 /** MRP에서 만드는 구매요청의 요청 근거 기본 문구 */
-export function mrpRequestReason(line: { productionPlanNo: string; itemName: string; netTon: string; needDate: string }, period: { from: string; to: string }): string {
-  return `MRP ${period.from} ~ ${period.to} · ${line.productionPlanNo} ${line.itemName} 순소요 ${line.netTon} t · 필요일 ${line.needDate}`;
+export function mrpRequestReason(line: { productionPlanNo: string; itemName: string; netRequirementTon: string; requiredDate: string }, period: { from: string; to: string }): string {
+  return `MRP ${period.from} ~ ${period.to} · ${line.productionPlanNo} ${line.itemName} 순소요 ${line.netRequirementTon} t · 필요일 ${line.requiredDate}`;
 }
 
-/** MRP 원료 줄에서 이 계획들이 쓰지 않은 공급 (core MrpMaterialRow의 이유별 톤) */
-export interface MrpExcludedSupply {
-  onHandEarlierPlansTon: string;
-  scheduledOtherPlansTon: string;
-  scheduledAfterNeedDateTon: string;
-  scheduledEarlierPlansTon: string;
-  scheduledSpareTon: string;
-}
-
-const tonNote = (label: string, ton: string, suffix = ''): string[] => (decIsPositive(ton) ? [`${label} ${fmtTon(ton)}${suffix}`] : []);
-
-/** '원료 LOT 잔량' 칸 아래 작은 글씨: 표에 없는 앞선(필요일이 더 이른) 계획이 먼저 쓴 몫 (없으면 빈 배열) */
-export function mrpOnHandNotes(row: Pick<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
-  return tonNote('앞선 계획 몫', row.onHandEarlierPlansTon, ' 제외');
-}
-
-/**
- * '입고예정' 칸 아래 작은 글씨: 칸의 숫자(이 계획들이 필요일까지 받아 쓰는 몫)에 넣지 않은 입고예정을 이유별로.
- * 다른 계획 몫(REQ-PRD-005) · 필요일 뒤 도착(4.4) · 앞선 계획 몫 · 남는 몫(소요가 이미 채워짐). 0인 이유는 뺀다.
- */
-export function mrpScheduledReceiptNotes(row: Omit<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
-  return [
-    ...tonNote('다른 계획 몫', row.scheduledOtherPlansTon, ' 제외'),
-    ...tonNote('필요일 뒤 도착', row.scheduledAfterNeedDateTon, ' 제외'),
-    ...tonNote('앞선 계획 몫', row.scheduledEarlierPlansTon, ' 제외'),
-    ...tonNote('남는 몫', row.scheduledSpareTon),
-  ];
-}
+/** 원단위 단위: 합금철은 용강 1t당 kg, 그 밖은 용선 1t당 t */
+export const mrpConsumptionUnit = (rawMaterialType: string | null): 'kg/t' | 't/t' => (rawMaterialType === RAW_MATERIAL_TYPE.FERROALLOY ? 'kg/t' : 't/t');

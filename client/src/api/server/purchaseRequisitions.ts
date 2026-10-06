@@ -4,9 +4,9 @@
 // - 반려 일시(rejectedAt): 작업 로그에만 있다.
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.
 // 승인권자·직급·등록 창 정보는 조직 정보(가짜 DB와 서버 시드가 같다)에서 읽는다.
-import type { PageResult, ProductionPlanSummary, PurchaseRequisitionDetail, PurchaseRequisitionSummary } from '@fantasteel/shared';
+import type { PageResult, PurchaseRequisitionDetail, PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { actingEmployeeId } from '@/api/actor';
-import { ApiError, InputError } from '@/api/errors';
+import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { employeeBasicsOf } from '@/api/orgViews';
 import type { ApprovalInput, RejectInput } from '@/api/approvals';
@@ -86,20 +86,6 @@ function toDetail(row: PurchaseRequisitionDetail, purchaseOrderLines: Requisitio
   });
 }
 
-/** MRP 화면은 아직 가짜 DB라 계획 id가 가짜 DB id다. 계획 번호로 서버 계획을 찾고, 없으면 엉뚱한 계획에 묶지 않도록 막는다 */
-async function serverPlanIdOf(mockPlanId: number | null | undefined): Promise<number | null> {
-  if (mockPlanId === null || mockPlanId === undefined) return null;
-  const planNo = readMock((t) => t.productionPlan.find((p) => p.id === mockPlanId)?.productionPlanNo);
-  for (let page = 1; planNo; page++) {
-    const result = await serverRequest<PageResult<ProductionPlanSummary>>('GET', '/production-plans', { query: { page, size: PAGE_SIZE } });
-    const found = result.items.find((p) => p.productionPlanNo === planNo);
-    if (found) return found.id;
-    if (page * PAGE_SIZE >= result.total || result.items.length === 0) break;
-  }
-  const message = '서버에서 근거 생산계획을 찾을 수 없어요';
-  throw new InputError(message, { productionPlanId: message });
-}
-
 const requestBody = (input: RequisitionInput) => ({
   requestedTon: input.requestedTon,
   desiredReceiptDate: input.desiredReceiptDate,
@@ -120,9 +106,10 @@ export const serverPurchaseRequisitionApi = {
       .map((row) => ({ ...toView(row), supplierId: row.defaultSupplierId, supplierName: row.defaultSupplierName }))
       .sort((a, b) => a.id - b.id),
 
+  /** 근거 생산계획 id는 서버 모드 MRP(api/server/mrp.ts)가 준 서버 id라 그대로 보낸다 */
   create: async (input: RequisitionInput): Promise<RequisitionView> => {
-    const [itemId, productionPlanId] = await Promise.all([serverItemIdOf(input.itemId), serverPlanIdOf(input.productionPlanId)]);
-    return toView(await serverRequest<PurchaseRequisitionDetail>('POST', '/purchase-requisitions', { body: { itemId, productionPlanId, ...requestBody(input) } }));
+    const itemId = await serverItemIdOf(input.itemId);
+    return toView(await serverRequest<PurchaseRequisitionDetail>('POST', '/purchase-requisitions', { body: { itemId, productionPlanId: input.productionPlanId ?? null, ...requestBody(input) } }));
   },
 
   /** 서버는 상태(반려됨)로 동시 수정을 막아 expectedUpdatedAt은 보내지 않는다 */

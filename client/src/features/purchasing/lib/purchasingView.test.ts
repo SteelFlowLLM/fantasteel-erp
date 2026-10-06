@@ -4,9 +4,8 @@ import {
   earliestDate,
   groupBySupplier,
   isOverdue,
-  mrpOnHandNotes,
+  mrpConsumptionUnit,
   mrpRequestReason,
-  mrpScheduledReceiptNotes,
   plannedPurchaseOrders,
   ratioPercent,
   rawMaterialLotNoPattern,
@@ -65,7 +64,7 @@ describe('구매 화면 표시값', () => {
     expect(isOverdue('2026-09-30', '2026-10-01', '0.000')).toBe(false);
     expect(isOverdue('2026-10-01', '2026-10-01', '3.500')).toBe(false);
     expect(rawMaterialLotNoPattern('SMN01')).toBe('RM-SMN01-YYMMDD-NNN');
-    expect(mrpRequestReason({ productionPlanNo: 'PP-2610-0001', itemName: '실리코망가니즈', netTon: '1.500', needDate: '2026-10-20' }, { from: '2026-10-01', to: '2026-11-30' })).toBe(
+    expect(mrpRequestReason({ productionPlanNo: 'PP-2610-0001', itemName: '실리코망가니즈', netRequirementTon: '1.500', requiredDate: '2026-10-20' }, { from: '2026-10-01', to: '2026-11-30' })).toBe(
       'MRP 2026-10-01 ~ 2026-11-30 · PP-2610-0001 실리코망가니즈 순소요 1.500 t · 필요일 2026-10-20',
     );
   });
@@ -87,16 +86,9 @@ describe('구매 화면 표시값', () => {
     expect(plannedPurchaseOrders([{ supplierId: 1, supplierName: '가온광업', desiredReceiptDate: null, requestedTon: '1' }], '')[0]?.expectedReceiptDate).toBeNull();
   });
 
-  it('MRP 원료 줄: 입고예정·잔량 칸에 넣지 않은 몫을 이유별 작은 글씨로 (0인 이유는 빼고 천 단위 쉼표)', () => {
-    const none = { onHandEarlierPlansTon: '0.000', scheduledOtherPlansTon: '0.000', scheduledAfterNeedDateTon: '0.000', scheduledEarlierPlansTon: '0.000', scheduledSpareTon: '0.000' };
-    expect(mrpScheduledReceiptNotes(none)).toEqual([]);
-    expect(mrpOnHandNotes(none)).toEqual([]);
-    expect(mrpScheduledReceiptNotes({ ...none, scheduledAfterNeedDateTon: '3.500' })).toEqual(['필요일 뒤 도착 3.500 t 제외']);
-    expect(mrpScheduledReceiptNotes({ ...none, scheduledOtherPlansTon: '3.500', scheduledEarlierPlansTon: '1.000', scheduledSpareTon: '1200.000' })).toEqual([
-      '다른 계획 몫 3.500 t 제외',
-      '앞선 계획 몫 1.000 t 제외',
-      '남는 몫 1,200.000 t',
-    ]);
-    expect(mrpOnHandNotes({ onHandEarlierPlansTon: '444.445' })).toEqual(['앞선 계획 몫 444.445 t 제외']);
+  it('MRP 원단위 단위: 합금철 kg/t, 그 밖(유형 없음 포함) t/t', () => {
+    expect(mrpConsumptionUnit('FERROALLOY')).toBe('kg/t');
+    expect(mrpConsumptionUnit('IRON_ORE')).toBe('t/t');
+    expect(mrpConsumptionUnit(null)).toBe('t/t');
   });
 });

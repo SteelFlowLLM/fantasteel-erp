@@ -1,4 +1,4 @@
-// 구매요청·승인 서버 어댑터: 서버 응답 → 화면 모양(출처 계산, 원료·사원·부서 id 맞춤), 승인함 쿼리, 등록 시 원료·계획 id 바꾸기.
+// 구매요청·승인 서버 어댑터: 서버 응답 → 화면 모양(출처 계산, 원료·사원·부서 id 맞춤), 승인함 쿼리, 등록 시 원료 id 바꾸기.
 import type { ItemView, PurchaseRequisitionDetail, PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { approvalApi } from '@/api/approvals';
@@ -81,22 +81,21 @@ describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions
     expect(await approvalApi.countWaiting(0)).toBe(0);
   });
 
-  it('등록: 원료 id는 서버 id로, 근거 계획은 계획 번호로 서버 id를 찾아 보낸다. 서버에 없는 계획이면 입력 오류', async () => {
-    const plan = read((t) => t.productionPlan[0]);
+  it('등록: 원료 id는 서버 id로 바꾸고, 근거 계획 id는 서버 모드 MRP가 준 서버 id라 그대로 보낸다', async () => {
     const items: Partial<ItemView>[] = [{ id: 41, itemCode: 'SMN01' }];
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
       if (c.path === '/items') return ok(items);
-      if (c.path === '/production-plans') return ok(page([{ id: 300, productionPlanNo: plan?.productionPlanNo }]));
       if (c.path === '/purchase-requisitions' && c.method === 'POST') return ok(detail);
       return undefined;
     });
-    const input = { itemId: mockItemId('SMN01') ?? 0, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: '  ', productionPlanId: plan?.id };
-    await purchaseRequisitionApi.create(input);
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ itemId: 41, productionPlanId: 300, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: null });
-    stopFakeServer();
+    await purchaseRequisitionApi.create({ itemId: mockItemId('SMN01') ?? 0, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: '  ', productionPlanId: 300 });
+    await purchaseRequisitionApi.create({ itemId: mockItemId('SMN01') ?? 0, requestedTon: '1', desiredReceiptDate: '2026-10-20', requestReason: '' });
 
-    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/items' ? ok(items) : c.path === '/production-plans' ? ok(page([])) : undefined));
-    await expect(purchaseRequisitionApi.create(input)).rejects.toMatchObject({ fieldErrors: { productionPlanId: expect.any(String) } });
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
+      { itemId: 41, productionPlanId: 300, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: null },
+      { itemId: 41, productionPlanId: null, requestedTon: '1', desiredReceiptDate: '2026-10-20', requestReason: null },
+    ]);
+    expect(calls.some((c) => c.path === '/production-plans')).toBe(false);
   });
 
   it('승인·반려·재요청은 해당 경로로 보내고 expectedUpdatedAt은 보내지 않는다', async () => {
