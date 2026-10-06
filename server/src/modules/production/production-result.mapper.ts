@@ -10,6 +10,15 @@ export interface ResultEventRow {
 
 const isProduct = (lotType: string) => lotType === LOT_TYPE.SLAB || lotType === LOT_TYPE.COIL;
 
+/** 실적 시뮬레이션 값: 실적 등록 로그 after_data의 simulation·randomSeed·plannedQty·lossQty·sampleLossRate (04 8장) */
+export function simulationOf(events: readonly ResultEventRow[], resultId: number): ProductionResultView['simulation'] {
+  const registered = events.find((e) => e.targetId === resultId && e.businessEventType === BUSINESS_EVENT_TYPE.PRODUCTION_RESULT_REGISTERED);
+  const after = registered?.afterData as Record<string, unknown> | null | undefined;
+  if (after?.simulation !== true) return null;
+  const num = (v: unknown) => (typeof v === 'number' ? v : null);
+  return { randomSeed: num(after.randomSeed), plannedQty: num(after.plannedQty), lossQty: num(after.lossQty), sampleLossRate: typeof after.sampleLossRate === 'string' ? after.sampleLossRate : null };
+}
+
 /** 작업 시작 로그에 남긴 연주 히트 (ERD production_result에 히트 칸이 없어 작업 로그 after_data에 둔다) */
 export function startedHeatLotIdOf(events: readonly ResultEventRow[], resultId: number): number | null {
   const started = events.find((e) => e.targetId === resultId && e.businessEventType === BUSINESS_EVENT_TYPE.PRODUCTION_STARTED);
@@ -55,5 +64,7 @@ export function toResultView(r: ResultViewRow, events: readonly ResultEventRow[]
     outputTon: r.lots.length === 0 ? null : sumTon([...tons, ...productTons]),
     startedHeatLotId: startedHeatLotIdOf(events, r.id),
     operatorName: (mine.at(-1) ?? mine[0])?.actorEmployee?.employeeName ?? null,
+    isSimulated: simulationOf(events, r.id) !== null,
+    simulation: simulationOf(events, r.id),
   };
 }

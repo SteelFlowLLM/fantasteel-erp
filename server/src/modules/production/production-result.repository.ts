@@ -72,7 +72,7 @@ export class ProductionResultRepository {
   findAvailableHotMetalLots(tx: Tx) {
     return tx.lot.findMany({
       where: { lotType: LOT_TYPE.HOT_METAL, lotStatus: LOT_STATUS.AVAILABLE, remainingTon: { gt: 0 } },
-      select: { id: true, lotNo: true, remainingTon: true },
+      select: { id: true, lotNo: true, remainingTon: true, productionResult: { select: { completedAt: true } } },
       orderBy: [{ productionResult: { completedAt: 'asc' } }, { lotNo: 'asc' }],
     });
   }

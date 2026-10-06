@@ -19,13 +19,14 @@ import {
   type ProcessType,
   type ProductionResultView,
   type RawMaterialStock,
+  type RawMaterialType,
   type WorkContext,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { formatCoilNumber, formatSlabNumber } from '../../common/numbering/number-format';
 import { NumberingService } from '../../common/numbering/numbering.service';
-import { seoulDateOnly } from '../../common/time/seoul-date';
+import { seoulDateOnly, seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -128,6 +129,7 @@ export class ProductionResultService {
       itemId: c.rawMaterialItem.id,
       itemCode: c.rawMaterialItem.itemCode,
       itemName: c.rawMaterialItem.itemName,
+      rawMaterialType: c.rawMaterialItem.rawMaterialType as RawMaterialType,
       consumptionRate: c.consumptionRate.toFixed(4),
       isKgPerTon,
       remainingTon: ton3(await this.repository.sumRawMaterialRemaining(tx, c.rawMaterialItem.id)),
@@ -151,7 +153,12 @@ export class ProductionResultService {
       slabItemId: basis.slabItem.id,
       slabItemCode: basis.slabItem.itemCode,
       slabTheoreticalWeightTon: ton3(basis.slabItem.theoreticalWeightTon),
-      hotMetalLots: hotMetalLots.map((l) => ({ lotId: l.id, lotNo: l.lotNo, remainingTon: ton3(l.remainingTon ?? new Prisma.Decimal(0)) })),
+      hotMetalLots: hotMetalLots.map((l) => ({
+        lotId: l.id,
+        lotNo: l.lotNo,
+        remainingTon: ton3(l.remainingTon ?? new Prisma.Decimal(0)),
+        producedDate: l.productionResult?.completedAt ? seoulToday(l.productionResult.completedAt) : null,
+      })),
       hotMetalAvailableTon: ton3(hotMetalAvailable),
       ironmakingMaterials: await Promise.all(ironmaking.map((c) => stockOf(c, false))),
       ferroalloys: await Promise.all(ferroalloys.map((c) => stockOf(c, true))),
