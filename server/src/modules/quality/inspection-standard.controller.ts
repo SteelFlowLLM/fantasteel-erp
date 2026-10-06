@@ -1,5 +1,11 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type InspectionStandardDetail, type InspectionStandardListItem, type PageResult } from '@fantasteel/shared';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import {
+  PERMISSION,
+  type InspectionStandardDeleteResult,
+  type InspectionStandardDetail,
+  type InspectionStandardListItem,
+  type PageResult,
+} from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
 import { CreateInspectionStandardDto, CreateInspectionStandardVersionDto } from './dto/create-inspection-standard.dto';
@@ -36,6 +42,15 @@ export class InspectionStandardController {
     @Body() dto: CreateInspectionStandardVersionDto,
   ): Promise<InspectionStandardDetail> {
     return this.service.createInspectionStandardVersion(id, dto);
+  }
+
+  /** 검사 기준 삭제. :id는 그 코드의 아무 버전 id. 검사가 쓴 기준이면 거부하고, 아니면 그 코드의 모든 버전을 지운다 */
+  @Delete('inspection-standards/:id')
+  @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'USE')
+  deleteInspectionStandard(
+    @Param('id', new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '검사 기준 id는 정수여야 해요') })) id: number,
+  ): Promise<InspectionStandardDeleteResult> {
+    return this.service.deleteInspectionStandard(id);
   }
 
   /** 검사 기준 상세 조회 (API-120). :id는 기준 버전(inspection_standard) id, 옛 버전도 조회 */

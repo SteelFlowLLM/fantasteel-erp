@@ -3,7 +3,7 @@ import type { DispositionStatus, InspectionResult } from './codes';
 import type { InspectedLotSummary } from './quality';
 
 /**
- * 불합격 LOT 목록의 한 행 (GET /quality-inspections/rejected-lots, API-123).
+ * 불합격 LOT 목록의 한 행 (GET /lots/rejected, API-123).
  * 자기 검사 FAIL이면 inspectionResult = FAIL, 불합격 히트의 하위 LOT이면 heatInspectionResult = FAIL (TRM-078)
  */
 export interface RejectedLotListItem extends InspectedLotSummary {

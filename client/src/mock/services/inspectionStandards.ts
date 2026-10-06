@@ -1,4 +1,4 @@
-// 검사 기준 버전 만들기 (REQ-QC-002, TRM-110, 컨벤션 7-2 "검사 기준은 새 버전으로 추가").
+// 검사 기준 버전 만들기·삭제 (REQ-QC-002, TRM-110, 컨벤션 7-2 "검사 기준은 새 버전으로 추가").
 // - 기준을 바꾸면 같은 코드로 버전 + 1인 새 행을 만들고, 이전 버전은 is_current = false로 남긴다(읽기 전용).
 //   이전 버전으로 판정한 검사 기록(quality_inspection.inspection_standard_id)은 그대로 그 버전을 가리킨다.
 // - 새 기준(공정 × 강종)은 버전 1로 만든다. 코드는 QS-강종-공정 (예: QS-SM355A-HR).
@@ -98,6 +98,34 @@ export function createInspectionStandardVersion(tx: MockTx, input: CreateInspect
   });
   insertItems(tx, created.id, input.items);
   return created;
+}
+
+/** 검사 기준 삭제 결과: 지운 기준 코드와 그 코드의 모든 버전 번호 */
+export interface InspectionStandardDeleteResult {
+  inspectionStandardCode: string;
+  deletedVersions: number[];
+}
+
+function removeWhere<T>(rows: T[], shouldRemove: (row: T) => boolean): void {
+  rows.splice(0, rows.length, ...rows.filter((row) => !shouldRemove(row)));
+}
+
+/**
+ * 검사 기준 삭제 (서버 deleteInspectionStandard와 같은 규칙, SPEC 5장 "삭제만, 참조가 있으면 거부").
+ * 버전은 기준의 이력이라 코드 단위로 지운다: 같은 코드의 어느 버전이든 검사가 판정에 썼으면 거부하고,
+ * 아니면 그 코드의 모든 버전과 항목을 지운다. 9.3에 "참조가 있어 삭제 불가" 코드가 없어 입력 오류로 거부한다.
+ */
+export function deleteInspectionStandard(tx: MockTx, standardId: number): InspectionStandardDeleteResult {
+  const base = tx.tables.inspectionStandard.find((s) => s.id === standardId);
+  if (!base) throw new ApiError('COM-003', '검사 기준');
+  const code = base.inspectionStandardCode;
+  const versions = tx.tables.inspectionStandard.filter((s) => s.inspectionStandardCode === code).sort((a, b) => a.version - b.version);
+  const versionIds = new Set(versions.map((v) => v.id));
+  const usedCount = tx.tables.qualityInspection.filter((q) => versionIds.has(q.inspectionStandardId)).length;
+  if (usedCount > 0) throw new InputError(`검사 ${usedCount}건이 판정에 쓴 기준이라 삭제할 수 없어요 (${code}). 바꾸려면 새 버전으로 고쳐 주세요`);
+  removeWhere(tx.tables.inspectionStandardItem, (i) => versionIds.has(i.inspectionStandardId));
+  removeWhere(tx.tables.inspectionStandard, (s) => versionIds.has(s.id));
+  return { inspectionStandardCode: code, deletedVersions: versions.map((v) => v.version) };
 }
 
 /** 공정·강종에 쓰는 지금 버전 (강종 전용 → 없으면 공통, 제강은 강종 전용만). 검사 입력이 판정 기준을 고를 때 쓴다. */

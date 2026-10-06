@@ -35,8 +35,9 @@ import { PrismaModule } from './prisma/prisma.module';
     ProductionModule,
     MrpModule,
     PurchasingModule,
-    LotModule,
+    // QualityModule이 먼저: GET lots/rejected(quality)가 lot 모듈의 lots/:id보다 먼저 잡혀야 한다
     QualityModule,
+    LotModule,
     ShipmentModule,
     BusinessEventModule,
     NotificationModule,

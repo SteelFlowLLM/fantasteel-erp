@@ -145,6 +145,7 @@ export function InspectionStandardScreen() {
             canEdit={canEdit}
             onSelectVersion={(id) => navigate({ process: processType, grade: steelGradeId, id })}
             onNewVersion={(detail) => setEditor({ mode: 'version', detail })}
+            onDeleted={() => navigate({ process: processType, grade: steelGradeId })}
           />
         ) : list.data ? (
           <StateView
