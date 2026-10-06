@@ -137,7 +137,7 @@ describe('출하요청 → FIFO 배정 → 출고 확정 → 밀시트 (14.1 7~9
     await expect(millSheetApi.markPdfGenerated({ millSheetId: sheet.id })).rejects.toMatchObject({ code: 'COM-002' });
     actAs(SEED_EMPLOYEE_NO.logistics);
     const first = await millSheetApi.markPdfGenerated({ millSheetId: sheet.id });
-    expect(first.pdfPath).toBe('mill-sheets/MS-2609-0001-1.pdf');
+    expect(first.pdfPath).toBe('mill-sheets/MS-2609-0001-1_가람중공업_20260912.pdf');
     const again = await millSheetApi.markPdfGenerated({ millSheetId: sheet.id });
     expect(again.pdfPath).toBe(first.pdfPath);
     await expect(millSheetApi.detail(99999)).rejects.toMatchObject({ code: 'COM-003' });

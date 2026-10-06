@@ -9,6 +9,7 @@ import {
   type ItemType,
   type MillSheetDetail,
   type MillSheetSummary,
+  millSheetPdfFileName,
   type PageResult,
   type ShipmentRequestDetail,
   type ShipmentRequestStatus,
@@ -352,7 +353,7 @@ export class ShipmentService {
     const { snapshot } = toMillSheetDetail(row);
     try {
       const pdf = await renderMillSheetPdf(snapshot);
-      const pdfPath = await this.storage.save('mill-sheets', `${row.millSheetNo}.pdf`, pdf);
+      const pdfPath = await this.storage.save('mill-sheets', millSheetPdfFileName(snapshot), pdf);
       await this.repository.setPdfPath(this.prisma, id, pdfPath);
     } catch (error) {
       this.logger.error(`밀시트 PDF 생성 실패 (${row.millSheetNo})`, error instanceof Error ? error.stack : String(error));

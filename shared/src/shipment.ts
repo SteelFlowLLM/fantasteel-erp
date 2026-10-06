@@ -133,6 +133,20 @@ export interface MillSheetSnapshot {
   lotIds: number[];
 }
 
+/** 파일 이름에 쓸 수 없는 글자(백슬래시 / : * ? " < > |)와 공백·제어 문자 */
+const FILE_NAME_UNSAFE = /[\\/:*?"<>|\s\u0000-\u001f]+/g;
+
+/**
+ * 밀시트 PDF 저장 이름: `{밀시트 번호}_{고객사}_{발행일 YYYYMMDD}.pdf`. 예: `MS-2610-0028-1_나래조선_20261006.pdf`.
+ * 서버 저장 파일, 브라우저 'PDF로 저장' 기본 이름, 화면에 보이는 경로가 같은 규칙을 쓴다.
+ * 고객사 이름의 사용할 수 없는 글자와 공백은 _로 바꾸고, 이름이 너무 길면 30자까지만 쓴다. 발행일은 서울 날짜(스냅샷 issuedDate)다.
+ */
+export function millSheetPdfFileName(snapshot: { millSheetNo: string; issuedDate: string; customer: { customerName: string } }): string {
+  const customer = snapshot.customer.customerName.replace(FILE_NAME_UNSAFE, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+  const issued = snapshot.issuedDate.replace(/-/g, '');
+  return [snapshot.millSheetNo, customer, issued].filter((part) => part !== '').join('_') + '.pdf';
+}
+
 /** 밀시트 조회 (API-233). snapshot은 출고 확정 때 저장한 값 그대로이고 현재 값을 다시 읽지 않는다 (REQ-SHP-003·004) */
 export interface MillSheetDetail extends MillSheetSummary {
   snapshot: MillSheetSnapshot;

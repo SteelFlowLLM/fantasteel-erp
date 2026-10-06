@@ -53,7 +53,7 @@ export function MasterItemLink({ href, active, children }: { href: string; activ
       aria-current={active ? 'true' : undefined}
       className={
         active
-          ? 'flex flex-col gap-1 border-b border-line bg-brand-tint px-4 py-2.5 shadow-[inset_3px_0_0_var(--color-brand)]'
+          ? 'flex flex-col gap-1 border-b border-line bg-brand-tint px-4 py-2.5 shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover'
           : 'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2'
       }
     >

@@ -255,8 +255,8 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(b.snapshot.items[0].lots.every((l) => l.productInspection?.inspectionResult === 'PASS')).toBe(true);
     expect(b.pdfPath).toBeNull();
     // PDF만 다시: 같은 경로, 밀시트·출고는 그대로
-    expect((await millSheetApi.markPdfGenerated({ millSheetId: b.id })).pdfPath).toBe('mill-sheets/MS-2610-0002-1.pdf');
-    expect((await millSheetApi.markPdfGenerated({ millSheetId: b.id })).pdfPath).toBe('mill-sheets/MS-2610-0002-1.pdf');
+    expect((await millSheetApi.markPdfGenerated({ millSheetId: b.id })).pdfPath).toBe('mill-sheets/MS-2610-0002-1_가람중공업_20261008.pdf');
+    expect((await millSheetApi.markPdfGenerated({ millSheetId: b.id })).pdfPath).toBe('mill-sheets/MS-2610-0002-1_가람중공업_20261008.pdf');
     expect((await millSheetApi.list()).length).toBe(readDb((t) => t.millSheet.length));
     // 밀시트에 들어간 히트는 측정값을 고칠 수 없다
     as('quality');

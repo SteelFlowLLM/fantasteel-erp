@@ -69,7 +69,7 @@ export function MasterItem({
       onDoubleClick={onDoubleClick}
       className={cn(
         'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left text-sm hover:bg-surface-2',
-        selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+        selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
       )}
     >
       {children}

@@ -3,6 +3,7 @@
 // 'PDF 생성' = 브라우저 인쇄(종이만 찍히는 인쇄 CSS) → 끝나면 pdf_path를 남겨 'PDF 생성됨'으로 보인다.
 // 인쇄를 시작하지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
 // C 반영: PDF 상태 코드 없음(pdf_path 유무), 출고번호 대신 출하요청, 칩 문구는 공통 코드 ITEM_TYPE 표시명.
+import { millSheetPdfFileName } from '@fantasteel/shared';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -117,7 +118,7 @@ function ListItem({ row, selected }: { row: MillSheetListRow; selected: boolean 
       <Link
         href={`/mill-sheets?id=${row.id}`}
         aria-current={selected ? 'page' : undefined}
-        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint')}
+        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover')}
       >
         <span className="flex items-center gap-2">
           <span className="font-mono text-mono font-semibold">{row.millSheetNo}</span>
@@ -155,14 +156,21 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
   const s = detail.snapshot;
   useShellTitle(detail.millSheetNo, s.customer.customerName);
 
-  /** 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다. */
+  /**
+   * 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다.
+   * 브라우저는 문서 제목을 저장 파일 이름으로 쓰므로, 인쇄하는 동안만 제목을 저장 이름 양식(확장자 제외)으로 바꾼다.
+   */
   const generatePdf = () => {
+    const previousTitle = document.title;
     try {
       if (typeof window.print !== 'function') throw new Error('print unavailable');
+      document.title = millSheetPdfFileName(s).replace(/.pdf$/, '');
       window.print();
     } catch {
       setPrintFailed(true);
       return;
+    } finally {
+      document.title = previousTitle;
     }
     setPrintFailed(false);
     if (!detail.pdfPath) mark.mutate({ millSheetId: detail.id });

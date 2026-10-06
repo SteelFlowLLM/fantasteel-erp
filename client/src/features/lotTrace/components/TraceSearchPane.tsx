@@ -38,8 +38,8 @@ function ListButton({ active, onClick, children }: { active: boolean; onClick: (
       onClick={onClick}
       aria-current={active ? 'true' : undefined}
       className={cn(
-        'flex w-full flex-col gap-0.5 border-0 border-b border-line px-4 py-2 text-left text-ink hover:bg-surface-2',
-        active ? 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)]' : 'bg-transparent',
+        'flex w-full flex-col gap-0.5 border-0 border-b border-line px-4 py-2 text-left text-ink',
+        active ? 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover' : 'bg-transparent hover:bg-surface-2',
       )}
     >
       {children}

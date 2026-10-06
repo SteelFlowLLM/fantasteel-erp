@@ -2,6 +2,7 @@
 // - 출고 확정 때 출하요청 × 수주마다 1장 (ERD unique), 번호 MS-{출하요청 일련}-N (N = 출하요청 안의 수주별 순번).
 // - 발행 시점의 고객사·수주·규격·LOT·히트·이론중량·검사 항목과 값(히트 성분 + 슬래브 또는 코일 검사, 기준 버전)·발행일을 스냅샷으로 복사한다.
 // - PDF는 같은 스냅샷을 브라우저 인쇄로 만든다. 생성 여부는 pdf_path 유무. 출고를 다시 실행하지 않는다.
+import { millSheetPdfFileName } from '@fantasteel/shared';
 import { calcWeightTon, sumTon } from '@/lib/weight';
 import { recordBusinessEvent } from '@/mock/businessEvents';
 import type { JsonValue, LotRow, MillSheetRow, MockTables, SalesOrderItemRow, ShipmentRequestRow } from '@/mock/schema';
@@ -232,8 +233,8 @@ export function createMillSheet(
   return row;
 }
 
-/** PDF 저장 경로 (가짜 저장소): mill-sheets/<밀시트 번호>.pdf */
-export const millSheetPdfPathOf = (millSheetNo: string): string => `mill-sheets/${millSheetNo}.pdf`;
+/** PDF 저장 경로 (가짜 저장소): mill-sheets/{밀시트 번호}_{고객사}_{발행일}.pdf. 이름 양식은 서버와 같다 (shared millSheetPdfFileName) */
+export const millSheetPdfPathOf = (snapshot: MillSheetSnapshot): string => `mill-sheets/${millSheetPdfFileName(snapshot)}`;
 
 /**
  * 'PDF 생성'(브라우저 인쇄) 뒤 pdf_path를 남긴다. 이미 있으면 그대로 둔다. 출고·스냅샷은 바꾸지 않는다.
@@ -242,7 +243,7 @@ export const millSheetPdfPathOf = (millSheetNo: string): string => `mill-sheets/
 export function markMillSheetPdfGenerated(tx: MockTx, _actor: PersonActor, input: { millSheetId: number }): MillSheetRow {
   const row = mustGet(tx.tables, 'millSheet', input.millSheetId, '밀시트');
   if (row.pdfPath) return row;
-  return updateRow(tx, 'millSheet', row.id, { pdfPath: millSheetPdfPathOf(row.millSheetNo) }) ?? row;
+  return updateRow(tx, 'millSheet', row.id, { pdfPath: millSheetPdfPathOf(millSheetDetail(tx.tables, row.id).snapshot) }) ?? row;
 }
 
 export interface MillSheetSummary {

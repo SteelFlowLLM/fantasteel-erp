@@ -106,7 +106,7 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
                     <Link
                       href={`/sales-orders/${row.id}`}
                       aria-current={row.id === currentId ? 'page' : undefined}
-                      className="flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2 aria-[current=page]:bg-brand-tint"
+                      className="flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2 aria-[current=page]:bg-brand-tint aria-[current=page]:hover:bg-brand-tint-hover"
                     >
                       <span className="flex items-center gap-1.5">
                         <b className="font-mono text-xs font-semibold">{row.salesOrderNo}</b>
