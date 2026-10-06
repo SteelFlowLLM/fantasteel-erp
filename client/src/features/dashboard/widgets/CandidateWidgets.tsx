@@ -12,18 +12,16 @@ import type {
   ShipmentResultData,
   SurplusAgeData,
 } from '@/api/dashboard';
-import { AiMark, soonLabel } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { DailyBars } from '@/features/dashboard/components/DailyBars';
-import { Figure, NO_DRAG_CLASS, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { Figure, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { dueLabel } from '@/features/dashboard/lib/widgetMath';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { decCmp } from '@/lib/decimal';
 import { fmtInt, fmtMD, fmtPct, fmtTon } from '@/lib/format';
 import { cn } from '@/lib/cn';
-import { useShellStore } from '@/stores/useShellStore';
 
 const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0}%`;
 
@@ -114,27 +112,6 @@ const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate:
   count: mode === 'pass' ? cell.inspectedCount - cell.failedCount : cell.failedCount,
 });
 
-/**
- * 강종 줄의 'AI에게 묻기' (REQ-AST-004·007, P2): 그 강종·기간을 맥락으로 AI 패널을 연다.
- * AI 호출은 P2라(SPEC 5장) 패널은 준비 중 그대로이고, 맥락과 추천 질문만 미리 보인다
- */
-function AskAiButton({ steelGradeCode, days }: { steelGradeCode: string; days: number }) {
-  const openAiPanel = useShellStore((state) => state.openAiPanel);
-  return (
-    <button
-      type="button"
-      aria-label={`${steelGradeCode} 불합격을 AI에게 묻기 · ${soonLabel('P2')}`}
-      title={`AI에게 묻기 · ${soonLabel('P2')}`}
-      onClick={() =>
-        openAiPanel({ label: `강종별 불합격률 · ${steelGradeCode} · 최근 ${days}일`, question: `${steelGradeCode} 최근 ${days}일 불합격 원인 알려줘` })
-      }
-      className={cn(NO_DRAG_CLASS, 'inline-flex rounded-sm opacity-60 hover:opacity-100 focus-visible:opacity-100')}
-    >
-      <AiMark size="sm" />
-    </button>
-  );
-}
-
 function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
   // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
@@ -147,7 +124,7 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
         const { rate, count } = rateOf(g, mode);
         // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
-          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px_20px] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
             <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
             <span className="text-right tabular-nums">
@@ -156,7 +133,6 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
                 {count}/{g.inspectedCount}건
               </span>
             </span>
-            <AskAiButton steelGradeCode={g.steelGradeCode} days={data.days} />
             <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
               {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
             </span>
