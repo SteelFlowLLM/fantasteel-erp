@@ -1,6 +1,6 @@
 // 불합격 관리 화면 ↔ 서버 API (server/src/modules/quality의 rejected-lot). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 불합격 항목·검사 시각은 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사) 상세에서 읽는다.
-// 서버에 아직 없는 것(LOT 상태·규격·생산완료일·생산계획, 지정 시각, 연결 수주·계획, 작업 로그, 재생산 계획)은 빈 값이거나 "서버 연결 전" 오류다.
+// 서버에 아직 없는 것(지정 시각, 연결 수주·계획, 작업 로그, 재생산 계획)은 빈 값이거나 "서버 연결 전" 오류다.
 import type { QualityInspectionDetail, RejectedLotListItem } from '@fantasteel/shared';
 import type { RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
 import { ApiError } from '@/api/errors';
@@ -33,14 +33,15 @@ function listRowOf(row: RejectedLotListItem, evidence: { items: readonly Measure
     dispositionStatus: row.dispositionStatus,
     dispositionReason: row.dispositionReason,
     updatedAt: row.updatedAt,
-    // 서버에 아직 없는 것: 불합격 LOT 응답에 LOT 상태·규격·생산완료일·생산계획·지정 시각이 없고, 연결 수주는 LOT 조회 API가 없다
-    lotStatus: 'AVAILABLE',
-    itemCode: null,
-    itemName: null,
-    producedDate: '',
-    productionPlanNo: null,
+    lotStatus: row.lotStatus,
+    itemCode: row.itemCode,
+    itemName: row.itemName,
+    // 히트는 생산완료일이 없다. 가짜 DB처럼 빈 문자열로 둔다
+    producedDate: row.producedDate ?? '',
+    productionPlanNo: row.productionPlanNo,
+    productionPlanId: row.productionPlanId,
+    // 서버에 아직 없는 것: 불합격 LOT 응답에 지정 시각이 없고, 연결 수주는 LOT 조회 API가 없다
     dispositionAt: null,
-    productionPlanId: null,
     salesOrderItem: null,
   };
 }

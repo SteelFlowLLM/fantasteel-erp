@@ -13,6 +13,9 @@ const heatLot = (overrides: Partial<QualityInspectionListLot> = {}): QualityInsp
   id: 1,
   lotNo: 'H260101-BOF1-01',
   lotType: 'HEAT',
+  lotStatus: 'AVAILABLE',
+  producedDate: null,
+  productionResult: { productionPlan: { id: 5, productionPlanNo: 'PP-2610-0001' } },
   steelGrade: grade,
   item: null,
   qualityInspection: null,
@@ -24,8 +27,11 @@ const coilLot = (heatResult: string | null): QualityInspectionListLot => ({
   id: 3,
   lotNo: 'CS1',
   lotType: 'COIL',
+  lotStatus: 'SHIPPED',
+  producedDate: new Date('2026-10-03T00:00:00.000Z'),
+  productionResult: null,
   steelGrade: null,
-  item: { thicknessMm: new Prisma.Decimal('9'), steelGrade: grade },
+  item: { id: 40, itemCode: 'CL-SM355A-9x1500', itemName: '열연코일 SM355A 9x1500', thicknessMm: new Prisma.Decimal('9'), steelGrade: grade },
   qualityInspection: null,
   lotRelationsAsChildLot: [
     {
@@ -106,6 +112,26 @@ describe('검사 목록 행 만들기', () => {
       heatLotNo: 'H1',
       heatInspectionResult: 'FAIL',
       inspectionStandardCode: 'QS-SM355A-HR',
+    });
+  });
+
+  it('LOT 상태·규격·생산완료일·생산계획을 같이 준다. 히트는 규격·생산완료일이 없고, 계획 없는 실적이면 계획은 null', () => {
+    expect(toQualityInspectionListItem(heatLot(), latest)).toMatchObject({
+      lotStatus: 'AVAILABLE',
+      itemId: null,
+      itemCode: null,
+      producedDate: null,
+      productionPlanId: 5,
+      productionPlanNo: 'PP-2610-0001',
+    });
+    expect(toQualityInspectionListItem(coilLot('PASS'), latest)).toMatchObject({
+      lotStatus: 'SHIPPED',
+      itemId: 40,
+      itemCode: 'CL-SM355A-9x1500',
+      itemName: '열연코일 SM355A 9x1500',
+      producedDate: '2026-10-03',
+      productionPlanId: null,
+      productionPlanNo: null,
     });
   });
 

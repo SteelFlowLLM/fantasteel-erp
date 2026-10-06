@@ -1,5 +1,5 @@
 // 품질 모듈 응답 타입 (docs/backend/quality.md). 서버 매퍼와 화면이 함께 쓴다.
-import type { InspectionResult, LotType, ProcessType } from './codes';
+import type { InspectionResult, LotStatus, LotType, ProcessType } from './codes';
 
 /** 검사 목록 구분 (API-125): pending = 검사 대기, done = 판정 끝(PASS·FAIL) */
 export const QUALITY_INSPECTION_LIST_STATUS = {
@@ -14,11 +14,21 @@ export interface InspectedLotSummary {
   lotId: number;
   lotNo: string;
   lotType: LotType;
+  lotStatus: LotStatus;
   processType: ProcessType;
   steelGradeId: number | null;
   steelGradeCode: string | null;
   /** 규격 두께(mm, 소수 2자리 문자열). 히트는 두께가 없어 null */
   thicknessMm: string | null;
+  /** 슬래브·코일의 규격. 히트는 null */
+  itemId: number | null;
+  itemCode: string | null;
+  itemName: string | null;
+  /** 슬래브·코일 생산완료일 (YYYY-MM-DD). 히트는 null */
+  producedDate: string | null;
+  /** LOT → 작업 실적 → 생산계획. 계획 없는 실적이면 null */
+  productionPlanId: number | null;
+  productionPlanNo: string | null;
   /** 상위 히트. 히트 자신이면 null */
   heatLotId: number | null;
   heatLotNo: string | null;

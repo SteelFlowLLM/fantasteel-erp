@@ -1,6 +1,6 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
-// 서버에 아직 없는 것(LOT 상태·규격·생산완료일·생산계획, 연결 수주, 작업 로그, 밀시트 잠금 표시, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
+// 서버에 아직 없는 것(연결 수주, 작업 로그, 밀시트 잠금 표시, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,
@@ -51,13 +51,13 @@ function queueRowOf(row: InspectedRow, inspectorName: string | null = null): Ins
     lotId: row.lotId,
     lotNo: row.lotNo,
     lotType: row.lotType,
-    // 서버에 아직 없는 것: 검사 목록 응답에 LOT 상태·규격·생산완료일·생산계획이 없다
-    lotStatus: 'AVAILABLE',
-    itemId: null,
-    itemCode: null,
-    itemName: null,
-    producedDate: '',
-    productionPlanNo: null,
+    lotStatus: row.lotStatus,
+    itemId: row.itemId,
+    itemCode: row.itemCode,
+    itemName: row.itemName,
+    // 히트는 생산완료일이 없다. 가짜 DB처럼 빈 문자열로 둔다
+    producedDate: row.producedDate ?? '',
+    productionPlanNo: row.productionPlanNo,
     processType: row.processType,
     steelGradeCode: row.steelGradeCode,
     thicknessMm: row.thicknessMm,
@@ -168,23 +168,28 @@ async function formOfStandard(row: QualityInspectionListItem): Promise<Inspectio
 
 /** LOT id로 검사 폼을 만든다 (불합격 관리의 근거 검사도 이것을 쓴다) */
 export async function inspectionFormOfLot(lotId: number): Promise<InspectionFormView> {
+  return (await inspectionOfLot(lotId)).form;
+}
+
+/** 검사 폼과 그 목록 행 (상세는 목록 행의 생산계획도 쓴다) */
+async function inspectionOfLot(lotId: number): Promise<{ row: QualityInspectionListItem; form: InspectionFormView }> {
   const row = await listRowOfLot(lotId);
   if (!row) throw new ApiError('COM-003', `LOT ${lotId}`);
-  if (row.qualityInspectionId === null) return formOfStandard(row);
+  if (row.qualityInspectionId === null) return { row, form: await formOfStandard(row) };
   const [detail, current] = await Promise.all([
     serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${row.qualityInspectionId}`),
     currentStandardOf(row),
   ]);
-  return formOfInspection(row, detail, current);
+  return { row, form: formOfInspection(row, detail, current) };
 }
 
 async function detail(lotId: number): Promise<InspectionDetail> {
-  const form = await inspectionFormOfLot(lotId);
+  const { row, form } = await inspectionOfLot(lotId);
   return {
     ...form,
     heatLotId: form.lot.heatLotId,
-    // 서버에 아직 없는 것: LOT의 생산계획·연결 수주(LOT 조회 API 없음), 작업 로그 조회
-    productionPlanId: null,
+    productionPlanId: row.productionPlanId,
+    // 서버에 아직 없는 것: 연결 수주(LOT 조회 API 없음), 작업 로그 조회
     salesOrderItem: null,
     history: [],
     inspectionItemNames: {},

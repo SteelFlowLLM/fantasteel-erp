@@ -5,7 +5,15 @@ import { dispositionApi } from '@/api/dispositions';
 import { ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
-const lotBase = { steelGradeId: 3, steelGradeCode: 'SS275', heatInspectionResult: 'FAIL' as const, dispositionStatus: null, dispositionReason: null };
+const lotBase = {
+  lotStatus: 'AVAILABLE' as const,
+  itemId: null,
+  itemCode: null,
+  itemName: null,
+  producedDate: null,
+  productionPlanId: null,
+  productionPlanNo: null,
+  steelGradeId: 3, steelGradeCode: 'SS275', heatInspectionResult: 'FAIL' as const, dispositionStatus: null, dispositionReason: null };
 
 const heat: RejectedLotListItem = {
   ...lotBase,
@@ -42,6 +50,13 @@ const failedCoil: RejectedLotListItem = {
   lotNo: 'CL-HSM1-261005-001',
   lotType: 'COIL',
   processType: 'HOT_ROLLING',
+  lotStatus: 'SHIPPED',
+  itemId: 61,
+  itemCode: 'CL-SS275-8x1500',
+  itemName: '열연코일 SS275 8x1500',
+  producedDate: '2026-10-05',
+  productionPlanId: 300,
+  productionPlanNo: 'PP-2610-0001',
   thicknessMm: '8.00',
   heatLotId: 401,
   heatLotNo: 'HT-BOF1-261005-001',
@@ -105,6 +120,9 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
       ['HT-BOF1-261005-001', 'FAILED', 'P', heatInspection.inspectedAt],
     ]);
     expect(rows[0]).toMatchObject({ heatNo: 'HT-BOF1-261005-001', dispositionStatus: 'HOLD', dispositionReason: '재검 대기', updatedAt: failedCoil.updatedAt, salesOrderItem: null });
+    expect(rows[0]).toMatchObject({ lotStatus: 'SHIPPED', itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanId: 300, productionPlanNo: 'PP-2610-0001' });
+    // 히트는 규격·생산완료일이 없다
+    expect(rows[2]).toMatchObject({ itemCode: null, producedDate: '', productionPlanNo: null });
     expect(calls.filter((c) => c.path.startsWith('/quality-inspections/')).map((c) => c.path).sort()).toEqual(['/quality-inspections/77', '/quality-inspections/88']);
   });
 

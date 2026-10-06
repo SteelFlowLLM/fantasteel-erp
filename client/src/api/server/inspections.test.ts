@@ -10,7 +10,14 @@ const coilRow: QualityInspectionListItem = {
   lotId: 501,
   lotNo: 'CL-HSM1-261005-001',
   lotType: 'COIL',
+  lotStatus: 'AVAILABLE',
   processType: 'HOT_ROLLING',
+  itemId: 61,
+  itemCode: 'CL-SS275-8x1500',
+  itemName: '열연코일 SS275 8x1500',
+  producedDate: '2026-10-05',
+  productionPlanId: 300,
+  productionPlanNo: 'PP-2610-0001',
   steelGradeId: 3,
   steelGradeCode: 'SS275',
   thicknessMm: '8.00',
@@ -86,6 +93,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     const rows = await inspectionApi.queue();
     expect(rows).toHaveLength(102);
     expect(rows[0]).toMatchObject({ lotId: 1000, inspectionResult: 'PENDING', heatNo: 'HT-BOF1-261005-001', heatResult: 'PENDING', inspectionStandardVersion: 2, locked: false });
+    expect(rows[0]).toMatchObject({ lotStatus: 'AVAILABLE', itemId: 61, itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanNo: 'PP-2610-0001' });
     expect(rows[101]).toMatchObject({ lotId: 501, qualityInspectionId: 90, inspectionResult: 'FAIL' });
     expect(calls.filter((c) => c.query.status === 'pending').map((c) => [c.query.page, c.query.size])).toEqual([
       ['1', '100'],
@@ -107,7 +115,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
       ['YIELD', null, null, null],
       ['CHARPY', '6.00', null, null],
     ]);
-    expect(detail).toMatchObject({ heatLotId: 401, salesOrderItem: null, history: [], productionPlanId: null });
+    expect(detail).toMatchObject({ heatLotId: 401, salesOrderItem: null, history: [], productionPlanId: 300 });
   });
 
   it('히트는 두께가 없어 구간 없는 항목만 적용한다', async () => {
