@@ -107,13 +107,13 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
   REJECT_RATE: {
     label: '강종별 불합격률',
     isDefault: false,
-    description: '최근 판정된 검사의 강종별·공정별 불합격률을 보여 줘요',
+    description: '최근 판정된 검사의 강종별·공정별 불합격률을 보여 줘요 (합격률로 바꿔 볼 수 있어요)',
     icon: 'quality',
     defaultW: 6,
     defaultH: 4,
     minW: 3,
     minH: 3,
-    link: { screen: SCREEN.rejectedLots, label: '불합격 관리' },
+    // 바로가기 없음: 불합격 관리는 왼쪽 메뉴에 있고, 머리 오른쪽은 불합격률·합격률 전환이 쓴다
   },
   DELIVERY_RISK: {
     label: '납기 위험 수주',

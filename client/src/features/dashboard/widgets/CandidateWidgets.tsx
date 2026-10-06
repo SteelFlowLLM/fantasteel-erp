@@ -149,7 +149,7 @@ export function RejectRateWidget(props: WidgetProps) {
   const access = useDashboardWidgetAccess('REJECT_RATE');
   const query = useDashboardWidget('REJECT_RATE', access.allowed);
   const [mode, setMode] = useState<RateMode>('reject');
-  // 전환은 머리 오른쪽(바로가기 앞)에 둔다: 본문 한 줄을 아껴 강종 목록이 스크롤 없이 보이게
+  // 전환은 머리 오른쪽에 둔다(바로가기 자리): 본문 한 줄을 아껴 강종 목록이 스크롤 없이 보이게
   return (
     <WidgetFrame
       widgetKey="REJECT_RATE"
