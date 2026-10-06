@@ -1,6 +1,7 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
 // 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
 import Link from 'next/link';
+import { useState } from 'react';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -11,11 +12,13 @@ import type {
   ShipmentResultData,
   SurplusAgeData,
 } from '@/api/dashboard';
+import { Badge } from '@/components/Badge';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
+import { Segmented } from '@/components/Tabs';
 import { DailyBars } from '@/features/dashboard/components/DailyBars';
 import { Figure, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
-import { dueLabel } from '@/features/dashboard/lib/widgetMath';
+import { dueLabel, isOverRejectRateAlert, REJECT_RATE_ALERT } from '@/features/dashboard/lib/widgetMath';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { decCmp } from '@/lib/decimal';
 import { fmtInt, fmtMD, fmtPct, fmtTon } from '@/lib/format';
@@ -98,29 +101,54 @@ export function RawMaterialBalanceWidget(props: WidgetProps) {
 
 // ── 강종별 불합격률 ─────────────────────────────────────
 
-function RejectRateBody({ data }: { data: RejectRateData }) {
+type RateMode = 'reject' | 'pass';
+const RATE_MODES = [
+  { key: 'reject', label: '불합격률' },
+  { key: 'pass', label: '합격률' },
+] as const satisfies readonly { key: RateMode; label: string }[];
+
+/** 보는 기준에 맞춘 비율·건수. 판정 수에는 판정 대기가 없어(PASS·FAIL만) 합격 = 판정 − 불합격 */
+const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate: number | null }, mode: RateMode) => ({
+  rate: cell.rejectRate === null ? null : mode === 'pass' ? 1 - cell.rejectRate : cell.rejectRate,
+  count: mode === 'pass' ? cell.inspectedCount - cell.failedCount : cell.failedCount,
+});
+
+function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
-  // 불합격률은 작은 값이라 가장 큰 값(최소 10%)을 막대 끝으로 잡는다
-  const scale = Math.max(0.1, ...data.grades.map((g) => g.rejectRate ?? 0));
+  // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
   const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
+  const isPass = mode === 'pass';
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
       {data.grades.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
+        const { rate, count } = rateOf(g, mode);
+        // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
-          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_max-content] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
-            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{g.rejectRate ? <span className="bg-danger" style={{ width: pct(g.rejectRate, scale) }} /> : null}</div>
+            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
             <span className="text-right tabular-nums">
-              <b className={cn('font-semibold', g.rejectRate ? 'text-danger' : undefined)}>{fmtPct(g.rejectRate, 1)}</b> <span className="text-cap text-ink-3">{g.failedCount}/{g.inspectedCount}건</span>
+              <b className={cn('font-semibold', rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)}>{fmtPct(rate, 1)}</b>{' '}
+              <span className="text-cap text-ink-3">
+                {count}/{g.inspectedCount}건
+              </span>
             </span>
-            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
-              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${p.failedCount}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
+            <span className="col-start-2 col-end-4 flex min-w-0 items-center gap-1.5 text-cap text-ink-3">
+              {isOverRejectRateAlert(g.rejectRate) ? (
+                <Badge tone="danger" plain className="flex-none" title={`불합격률이 기준 ${fmtPct(REJECT_RATE_ALERT, 0)}를 넘었어요`}>
+                  기준 초과
+                </Badge>
+              ) : null}
+              <span className="truncate">
+              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
+              </span>
             </span>
           </div>
         );
       })}
-      <span className="text-cap text-ink-3">불합격률 = 불합격 ÷ 판정된 검사 수 · 막대 끝 = {Math.round(scale * 100)}%</span>
+      <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100% · 불합격률 {fmtPct(REJECT_RATE_ALERT, 0)} 넘으면 기준 초과
+      </span>
       {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
     </div>
   );
@@ -129,10 +157,17 @@ function RejectRateBody({ data }: { data: RejectRateData }) {
 export function RejectRateWidget(props: WidgetProps) {
   const access = useDashboardWidgetAccess('REJECT_RATE');
   const query = useDashboardWidget('REJECT_RATE', access.allowed);
+  const [mode, setMode] = useState<RateMode>('reject');
+  // 전환은 머리 오른쪽에 둔다(바로가기 자리): 본문 한 줄을 아껴 강종 목록이 스크롤 없이 보이게
   return (
-    <WidgetFrame widgetKey="REJECT_RATE" {...props} meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}>
+    <WidgetFrame
+      widgetKey="REJECT_RATE"
+      {...props}
+      meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}
+      actions={access.allowed ? <Segmented ariaLabel="보는 기준" items={RATE_MODES} active={mode} onChange={setMode} /> : null}
+    >
       <WidgetBody allowed={access.allowed} permissions={access.permissions} query={query}>
-        {(data) => <RejectRateBody data={data} />}
+        {(data) => <RejectRateBody data={data} mode={mode} />}
       </WidgetBody>
     </WidgetFrame>
   );

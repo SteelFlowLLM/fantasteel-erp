@@ -29,10 +29,12 @@ export interface WidgetFrameProps extends WidgetProps {
   widgetKey: DashboardWidgetKey;
   /** 제목 옆 짧은 보조 문구 */
   meta?: string | null;
+  /** 머리 오른쪽, 바로가기 앞에 둘 조작 (예: 보는 기준 전환). 편집 중에는 숨긴다 */
+  actions?: ReactNode;
   children: ReactNode;
 }
 
-export function WidgetFrame({ widgetKey, editing, onRemove, meta, children }: WidgetFrameProps) {
+export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, children }: WidgetFrameProps) {
   const def = widgetDef(widgetKey);
   const me = useMe();
   const link = def.link && !editing && !def.soon && canOpenScreen(me, def.link.screen.access) ? def.link : null;
@@ -55,6 +57,7 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, children }: Wi
           {meta}
         </span>
         <div className="flex flex-none items-center gap-1">
+          {actions && !editing ? <div className={NO_DRAG_CLASS}>{actions}</div> : null}
           {link ? (
             <Link href={link.screen.href} className="px-1 text-xs whitespace-nowrap text-run hover:underline">
               {link.label}
