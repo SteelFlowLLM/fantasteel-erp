@@ -49,10 +49,9 @@ describe('MRP api', () => {
     const period = { from: today, to: plusDays(today, 30) };
     const mrp = await mrpApi.requirements(period);
     const plan = mrp.plans.find((p) => p.productionPlanId === planId);
-    expect(plan).toMatchObject({ remainingHeatCount: 6, heatTon: '1500.000', needDate: dueDate });
-    expect(plan?.expectedSurplusSlabQty).toBeGreaterThanOrEqual(0);
+    expect(plan).toMatchObject({ remainingHeatCount: 6, heatTon: '1500.000', requiredDate: dueDate, isBeforePeriod: false });
     const ore = mrp.materials.find((m) => m.itemCode === 'ORE01');
-    expect(ore && Number(ore.netTon)).toBeGreaterThan(0);
+    expect(ore && Number(ore.netRequirementTon)).toBeGreaterThan(0);
     expect(mrp.requisitionLines).toEqual(expect.arrayContaining([expect.objectContaining({ productionPlanId: planId, itemCode: 'ORE01', existingPurchaseRequisitionNo: null })]));
     // 결과를 저장하지 않는다: 이벤트·테이블 변화 없음
     const before = read((t) => t.businessEvent.length);
@@ -112,12 +111,12 @@ describe('구매요청 api', () => {
     const period = { from: today, to: plusDays(today, 30) };
     const line = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     if (!line) throw new Error('MRP 줄 없음');
-    const view = await purchaseRequisitionApi.create({ desiredReceiptDate: line.needDate, requestReason: '', itemId: line.itemId, requestedTon: line.netTon, productionPlanId: planId });
+    const view = await purchaseRequisitionApi.create({ desiredReceiptDate: line.requiredDate, requestReason: '', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: planId });
     expect(view.source).toBe('MRP');
-    expect(view).toMatchObject({ productionPlanId: planId, requestedTon: line.netTon });
+    expect(view).toMatchObject({ productionPlanId: planId, requestedTon: line.netRequirementTon });
     const again = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     expect(again?.existingPurchaseRequisitionNo).toBe(view.purchaseRequisitionNo);
-    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: line.needDate, requestReason: '', itemId: line.itemId, requestedTon: '1', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
+    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: line.requiredDate, requestReason: '', itemId: line.itemId, requestedTon: '1', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
   });
 
   it('입력 확인: 원료만, 톤 > 0 (소수 3자리), 희망 입고일 필수, 없는 품목 COM-003', async () => {

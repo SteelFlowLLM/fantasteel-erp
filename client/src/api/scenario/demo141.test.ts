@@ -71,16 +71,16 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     let mrp = await mrpApi.requirements(period);
     expect(mrp.plans.map((p) => [p.productionPlanNo, p.remainingHeatCount, p.heatTon, p.requiredHotMetalTon])).toEqual([['PP-2610-0001', 1, '250.000', '277.778']]);
     const byCode = Object.fromEntries(mrp.materials.map((m) => [m.itemCode, m]));
-    expect(byCode.ORE01).toMatchObject({ grossTon: '444.445', netTon: '0.000' });
-    expect(byCode.SMN01).toMatchObject({ consumptionUnit: 'kg/t', grossTon: '2.500', onHandTon: '1.000', scheduledReceiptTon: '3.500', netTon: '1.500' });
+    expect(byCode.ORE01).toMatchObject({ requiredTon: '444.445', netRequirementTon: '0.000' });
+    expect(byCode.SMN01).toMatchObject({ rawMaterialType: 'FERROALLOY', requiredTon: '2.500', remainingTon: '1.000', scheduledReceiptTon: '3.500', netRequirementTon: '1.500' });
     // 합금철 소요 = 히트 톤 × kg/t ÷ 1,000 (14.3)
     const smnRate = readDb((t) => t.specificConsumption.find((c) => c.itemId === itemIdOf('SMN01') && c.steelGradeId === t.item.find((i) => i.id === slabItemId)?.steelGradeId)?.consumptionRate) ?? '0';
-    expect(byCode.SMN01.grossTon).toBe(decDiv(decMul('250.000', smnRate, 6), 1000, 3));
-    expect(mrp.requisitionLines).toEqual([expect.objectContaining({ productionPlanId: planId, itemCode: 'SMN01', netTon: '1.500', needDate: '2026-10-20', existingPurchaseRequisitionNo: null })]);
+    expect(byCode.SMN01.requiredTon).toBe(decDiv(decMul('250.000', smnRate, 6), 1000, 3));
+    expect(mrp.requisitionLines).toEqual([expect.objectContaining({ productionPlanId: planId, itemCode: 'SMN01', netRequirementTon: '1.500', requiredDate: '2026-10-20', existingPurchaseRequisitionNo: null })]);
     const line = mrp.requisitionLines[0];
 
     at('2026-10-01T10:00:00+09:00');
-    const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netTon, productionPlanId: line.productionPlanId });
+    const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: line.productionPlanId });
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL', source: 'MRP' });
     await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: '', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
     expect((await mrpApi.requirements(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
@@ -105,7 +105,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', supplierId: candidate?.supplierId });
     expect(po.items[0].expectedReceiptDate).toBe('2026-10-10');
     expect((await purchaseRequisitionApi.detail(pr.id)).purchaseRequisitionStatus).toBe('ORDERED');
-    expect((await mrpApi.requirements(period)).materials.find((m) => m.itemCode === 'SMN01')?.netTon).toBe('0.000');
+    expect((await mrpApi.requirements(period)).materials.find((m) => m.itemCode === 'SMN01')?.netRequirementTon).toBe('0.000');
 
     const poLineId = po.items[0].id;
     at('2026-10-02T09:00:00+09:00');

@@ -2,16 +2,15 @@
 
 // MRP (REQ-PRD-005, BP-PRD-01, 업무 프로세스 4.4): 기간을 정하면 지금 데이터로 바로 계산한다(실행 이력 저장 없음, PLAN 7장).
 // 계획별 남은 히트 → 히트 톤 → 필요 용선(÷ 제강 수율) → 철광석·석탄·석회석(× t/t), 합금철(히트 톤 × kg/t ÷ 1,000)
-// → 총소요 − 원료 LOT 잔량 − 입고예정(필요일까지 도착하는 확정 발주) = 순소요. 예상 슬래브 여재도 보인다(여재는 가용재고에 포함).
-// 원료 줄의 입고예정 칸은 이 계획들이 실제로 받아 쓰는 몫만 보이고, 뺀 몫(다른 계획 몫·필요일 뒤 도착 등)은 칸 아래 작은 글씨로 보여
-// 한 줄의 숫자끼리 산수가 맞는다(core mrpMaterialRows).
+// → 총소요 − 원료 LOT 잔량 − 입고예정(필요일까지 도착하는 확정 발주) = 순소요.
+// 원료 줄의 잔량·입고예정 칸은 이 계획들이 실제로 쓰는 몫이고, 전체 합계는 칸 아래 작은 글씨로 보인다.
 // "구매요청 만들기"는 순소요 줄(계획·원료)로 미리 채우고 production_plan_id를 연결한다. 같은 계획·원료는 한 번만 만든다.
 // 구매요청 자동 초안(REQ-PUR-005)은 P2라 준비 중이다.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
 import { InputError } from '@/api/client';
-import type { MrpPeriod, MrpRequisitionLine, MrpView } from '@/api/mrp';
+import type { MrpPeriod, MrpRequirementsView, MrpRequisitionLineView } from '@/api/mrp';
 import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
@@ -26,7 +25,7 @@ import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { PlanStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionFormModal, type RequisitionFormValues } from '@/features/purchasing/components/RequisitionFormModal';
-import { defaultMrpPeriod, mrpOnHandNotes, mrpRequestReason, mrpScheduledReceiptNotes, trimTonText } from '@/features/purchasing/lib/purchasingView';
+import { defaultMrpPeriod, mrpConsumptionUnit, mrpRequestReason, trimTonText } from '@/features/purchasing/lib/purchasingView';
 import { useMrpRequirements } from '@/hooks/useMrp';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { decCmp, decSum } from '@/lib/decimal';
@@ -38,7 +37,7 @@ type MaterialFilter = 'all' | 'net';
 
 interface RequisitionDraft {
   values: RequisitionFormValues;
-  line: MrpRequisitionLine;
+  line: MrpRequisitionLineView;
 }
 
 export function MrpScreen() {
@@ -51,14 +50,14 @@ export function MrpScreen() {
   const query = useMrpRequirements(period);
   const periodErrors = query.error instanceof InputError ? query.error.fieldErrors : {};
 
-  const openRequisition = (line: MrpRequisitionLine) =>
+  const openRequisition = (line: MrpRequisitionLineView) =>
     setDraft({
       line,
       values: {
-        desiredReceiptDate: line.needDate >= today ? line.needDate : '',
+        desiredReceiptDate: line.requiredDate >= today ? line.requiredDate : '',
         requestReason: mrpRequestReason(line, period),
         itemId: line.itemId,
-        requestedTon: trimTonText(line.netTon),
+        requestedTon: trimTonText(line.netRequirementTon),
         productionPlanId: line.productionPlanId,
         productionPlanNo: line.productionPlanNo,
       },
@@ -110,14 +109,14 @@ export function MrpScreen() {
       <p className="text-cap leading-normal text-ink-3">
         계산 방법 · 필요 용선 = 히트 톤 ÷ 제강 수율 · 철광석·석탄·석회석 = 필요 용선 × 원단위(t/t) · 합금철 = 히트 톤 × 원단위(kg/t) ÷ 1,000 · 순소요 = 총소요 − 원료 LOT 잔량 − 입고예정 (0보다 작으면 0). 잔량·입고예정은
         필요일이 이른 계획부터 한 번만 빼고, 계획에 연결된 발주의 입고예정은 그 계획이 먼저 써요. 입고예정은 필요일까지 도착하는 몫만 쓰고 수주에 연결된 다른 계획 몫은 쓰지 않으므로, 표의 입고예정 칸은 이
-        계획들이 실제로 쓰는 몫이고 뺀 몫은 이유와 함께 칸 아래에 보여요. MRP는 구매요청을 저절로 만들지 않아요. 구매 담당이 등록하고 부서장이 승인해요.
+        계획들이 실제로 쓰는 몫이고 전체 합계는 칸 아래에 보여요. MRP는 구매요청을 저절로 만들지 않아요. 구매 담당이 등록하고 부서장이 승인해요.
       </p>
 
       {draft ? (
         <RequisitionFormModal
           mode="create"
           initial={draft.values}
-          notice={`MRP 순소요로 채웠어요 (${draft.line.productionPlanNo} · ${draft.line.itemName} ${fmtTon(draft.line.netTon)} · 필요일 ${fmtDate(draft.line.needDate)}). 수량과 희망 입고일을 확인한 뒤 등록해 주세요. 근거 생산계획이 함께 연결돼요.`}
+          notice={`MRP 순소요로 채웠어요 (${draft.line.productionPlanNo} · ${draft.line.itemName} ${fmtTon(draft.line.netRequirementTon)} · 필요일 ${fmtDate(draft.line.requiredDate)}). 수량과 희망 입고일을 확인한 뒤 등록해 주세요. 근거 생산계획이 함께 연결돼요.`}
           onClose={() => setDraft(null)}
         />
       ) : null}
@@ -132,21 +131,20 @@ function MrpResult({
   canCreate,
   onCreate,
 }: {
-  mrp: MrpView;
+  mrp: MrpRequirementsView;
   filter: MaterialFilter;
   onFilter: (value: MaterialFilter) => void;
   canCreate: boolean;
-  onCreate: (line: MrpRequisitionLine) => void;
+  onCreate: (line: MrpRequisitionLineView) => void;
 }) {
-  const shortMaterials = mrp.materials.filter((m) => decCmp(m.netTon, 0) > 0);
+  const shortMaterials = mrp.materials.filter((m) => decCmp(m.netRequirementTon, 0) > 0);
   const materials = filter === 'net' ? shortMaterials : mrp.materials;
   const totalHeats = mrp.plans.reduce((sum, p) => sum + p.remainingHeatCount, 0);
   const totalHeatTon = decSum(mrp.plans.map((p) => p.heatTon));
   const totalHotMetal = decSum(mrp.plans.map((p) => p.requiredHotMetalTon));
-  const totalSurplus = mrp.plans.reduce((sum, p) => sum + p.expectedSurplusSlabQty, 0);
   const openLines = mrp.requisitionLines.filter((l) => l.existingPurchaseRequisitionNo === null);
   const linesByMaterial = useMemo(() => {
-    const map = new Map<number, MrpRequisitionLine[]>();
+    const map = new Map<number, MrpRequisitionLineView[]>();
     for (const line of mrp.requisitionLines) map.set(line.itemId, [...(map.get(line.itemId) ?? []), line]);
     return map;
   }, [mrp.requisitionLines]);
@@ -162,9 +160,8 @@ function MrpResult({
           label="순소요 원료"
           value={fmtInt(shortMaterials.length)}
           unit="종"
-          sub={shortMaterials.length > 0 ? shortMaterials.map((m) => `${m.itemName} ${fmtTon(m.netTon)}`).join(' · ') : '모든 원료가 잔량·입고예정으로 충분해요'}
+          sub={shortMaterials.length > 0 ? shortMaterials.map((m) => `${m.itemName} ${fmtTon(m.netRequirementTon)}`).join(' · ') : '모든 원료가 잔량·입고예정으로 충분해요'}
         />
-        <Kpi flat label="예상 슬래브 여재" value={fmtInt(totalSurplus)} unit="매" sub="히트 단위 생산으로 수주보다 더 나오는 슬래브 (가용재고에 포함)" />
       </StatBar>
 
       <Card>
@@ -197,7 +194,7 @@ function MrpResult({
                   <Th align="right" title="지금 원료 LOT 잔량 합계. 필요일이 이른 계획부터 써요">
                     원료 LOT 잔량
                   </Th>
-                  <Th align="right" title="확정 발주의 미입고량 중 이 계획들이 필요일까지 받아 쓰는 몫. 다른 계획 몫·필요일 뒤 도착분은 아래 작은 글씨로 따로 보여요">
+                  <Th align="right" title="확정 발주의 미입고량 중 이 계획들이 필요일까지 받아 쓰는 몫. 전체 입고예정은 아래 작은 글씨로 보여요">
                     입고예정
                   </Th>
                   <Th align="right">순소요</Th>
@@ -207,7 +204,7 @@ function MrpResult({
               </thead>
               <tbody>
                 {materials.map((m) => {
-                  const isShort = decCmp(m.netTon, 0) > 0;
+                  const isShort = decCmp(m.netRequirementTon, 0) > 0;
                   const lines = linesByMaterial.get(m.itemId) ?? [];
                   const requested = lines.filter((l) => l.existingPurchaseRequisitionNo !== null);
                   return (
@@ -215,19 +212,19 @@ function MrpResult({
                       <Td className="font-mono">{m.itemCode}</Td>
                       <Td>{m.itemName}</Td>
                       <Td className="text-ink-2">
-                        {m.rawMaterialType ? RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType] : '-'} <span className="text-cap text-ink-3">({m.consumptionUnit})</span>
+                        {m.rawMaterialType ? RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType] : '-'} <span className="text-cap text-ink-3">({mrpConsumptionUnit(m.rawMaterialType)})</span>
                       </Td>
-                      <Td align="right">{fmtTon(m.grossTon)}</Td>
-                      <Td align="right" title={`원료 LOT 잔량 합계 ${fmtTon(m.onHandTon)} · 소요에 쓴 잔량 ${fmtTon(m.coveredOnHandTon)}`}>
-                        {fmtTon(m.usableOnHandTon)}
-                        <SupplyNotes notes={mrpOnHandNotes(m)} />
+                      <Td align="right">{fmtTon(m.requiredTon)}</Td>
+                      <Td align="right">
+                        {fmtTon(m.usedRemainingTon)}
+                        <TotalNote ton={m.remainingTon} />
                       </Td>
-                      <Td align="right" title={`입고예정 합계 ${fmtTon(m.scheduledReceiptTon)} 중 이 계획들이 필요일까지 받아 쓰는 몫 ${fmtTon(m.coveredScheduledTon)}`}>
-                        {fmtTon(m.coveredScheduledTon)}
-                        <SupplyNotes notes={mrpScheduledReceiptNotes(m)} />
+                      <Td align="right">
+                        {fmtTon(m.usedScheduledReceiptTon)}
+                        <TotalNote ton={m.scheduledReceiptTon} />
                       </Td>
                       <Td align="right" className={cn(isShort ? 'font-semibold text-danger' : 'text-ink-3')}>
-                        {fmtTon(m.netTon)}
+                        {fmtTon(m.netRequirementTon)}
                       </Td>
                       <Td>{m.firstShortageDate ? fmtDate(m.firstShortageDate) : '-'}</Td>
                       <Td>
@@ -248,7 +245,7 @@ function MrpResult({
         </CardBody>
         <CardFoot>
           <span className="text-cap text-ink-3">
-            입고예정 칸 = 확정 발주의 미입고량(발주 − 입고 누계) 중 이 계획들이 필요일까지 받아 쓰는 몫 (다른 계획 몫·필요일 뒤 도착분은 칸 아래에 따로) · 용선 재고는 빼지 않아요 · 아직 요청하지 않은 순소요{' '}
+            입고예정 칸 = 확정 발주의 미입고량(발주 − 입고 누계) 중 이 계획들이 필요일까지 받아 쓰는 몫 (전체는 칸 아래) · 용선 재고는 빼지 않아요 · 아직 요청하지 않은 순소요{' '}
             {openLines.length}줄
           </span>
         </CardFoot>
@@ -278,11 +275,11 @@ function MrpResult({
                       {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
                     </Td>
                     <Td align="right" className="font-semibold">
-                      {fmtTon(line.netTon)}
+                      {fmtTon(line.netRequirementTon)}
                     </Td>
                     <Td>
-                      {fmtDate(line.needDate)}
-                      {line.needDate < mrp.from ? <BeforePeriodBadge /> : null}
+                      {fmtDate(line.requiredDate)}
+                      {line.requiredDate < mrp.from ? <BeforePeriodBadge /> : null}
                     </Td>
                     <Td align="right">
                       {line.existingPurchaseRequisitionNo ? (
@@ -333,13 +330,12 @@ function MrpResult({
                   <Th align="right">남은 히트</Th>
                   <Th align="right">히트 톤</Th>
                   <Th align="right">필요 용선</Th>
-                  <Th align="right">예상 슬래브 여재</Th>
                   <Th>순소요</Th>
                 </tr>
               </thead>
               <tbody>
                 {mrp.plans.map((plan) => {
-                  const short = plan.materials.filter((m) => decCmp(m.netTon, 0) > 0);
+                  const short = plan.materials.filter((m) => decCmp(m.netRequirementTon, 0) > 0);
                   return (
                     <tr key={plan.productionPlanId}>
                       <Td className="font-mono">{plan.productionPlanNo}</Td>
@@ -351,15 +347,14 @@ function MrpResult({
                       </Td>
                       <Td className="font-mono">{plan.salesOrderNo ?? <span className="font-sans text-ink-3">연결 없음</span>}</Td>
                       <Td>
-                        {fmtDate(plan.needDate)}
-                        {plan.beforePeriod ? <BeforePeriodBadge /> : null}
+                        {fmtDate(plan.requiredDate)}
+                        {plan.isBeforePeriod ? <BeforePeriodBadge /> : null}
                       </Td>
                       <Td align="right">{fmtInt(plan.remainingHeatCount)}</Td>
                       <Td align="right">{fmtTon(plan.heatTon)}</Td>
                       <Td align="right">{fmtTon(plan.requiredHotMetalTon)}</Td>
-                      <Td align="right">{fmtInt(plan.expectedSurplusSlabQty)}매</Td>
                       <Td className="text-cap">
-                        {short.length === 0 ? <span className="text-ink-3">없음</span> : short.map((m) => `${m.itemCode} ${fmtTon(m.netTon)}`).join(' · ')}
+                        {short.length === 0 ? <span className="text-ink-3">없음</span> : short.map((m) => `${m.itemCode} ${fmtTon(m.netRequirementTon)}`).join(' · ')}
                       </Td>
                     </tr>
                   );
@@ -375,7 +370,6 @@ function MrpResult({
                   <Td align="right">{fmtInt(totalHeats)}</Td>
                   <Td align="right">{fmtTon(totalHeatTon)}</Td>
                   <Td align="right">{fmtTon(totalHotMetal)}</Td>
-                  <Td align="right">{fmtInt(totalSurplus)}매</Td>
                   <Td />
                 </tr>
               </tfoot>
@@ -387,18 +381,9 @@ function MrpResult({
   );
 }
 
-/** 칸의 숫자에 넣지 않은 몫 (이유별 작은 글씨, 없으면 그리지 않음) */
-function SupplyNotes({ notes }: { notes: readonly string[] }) {
-  if (notes.length === 0) return null;
-  return (
-    <>
-      {notes.map((note) => (
-        <span key={note} className="block text-cap leading-normal text-ink-3">
-          {note}
-        </span>
-      ))}
-    </>
-  );
+/** 칸 아래 작은 글씨: 원료 전체 합계 (칸의 숫자는 이 계획들이 쓰는 몫) */
+function TotalNote({ ton }: { ton: string }) {
+  return <span className="block text-cap leading-normal text-ink-3">전체 {fmtTon(ton)}</span>;
 }
 
 /** 필요일이 기간 시작 전인 미생산 계획(밀린 소요): 기간 안 계획보다 먼저 잔량·입고예정을 쓴다 */
