@@ -112,15 +112,13 @@ const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate:
   count: mode === 'pass' ? cell.inspectedCount - cell.failedCount : cell.failedCount,
 });
 
-function RejectRateBody({ data }: { data: RejectRateData }) {
-  const [mode, setMode] = useState<RateMode>('reject');
+function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
   // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
   const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
   const isPass = mode === 'pass';
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
-      <Segmented ariaLabel="보는 기준" items={RATE_MODES} active={mode} onChange={setMode} className="self-start" />
       {data.grades.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
         const { rate, count } = rateOf(g, mode);
@@ -150,10 +148,17 @@ function RejectRateBody({ data }: { data: RejectRateData }) {
 export function RejectRateWidget(props: WidgetProps) {
   const access = useDashboardWidgetAccess('REJECT_RATE');
   const query = useDashboardWidget('REJECT_RATE', access.allowed);
+  const [mode, setMode] = useState<RateMode>('reject');
+  // 전환은 머리 오른쪽(바로가기 앞)에 둔다: 본문 한 줄을 아껴 강종 목록이 스크롤 없이 보이게
   return (
-    <WidgetFrame widgetKey="REJECT_RATE" {...props} meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}>
+    <WidgetFrame
+      widgetKey="REJECT_RATE"
+      {...props}
+      meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}
+      actions={access.allowed ? <Segmented ariaLabel="보는 기준" items={RATE_MODES} active={mode} onChange={setMode} /> : null}
+    >
       <WidgetBody allowed={access.allowed} permissions={access.permissions} query={query}>
-        {(data) => <RejectRateBody data={data} />}
+        {(data) => <RejectRateBody data={data} mode={mode} />}
       </WidgetBody>
     </WidgetFrame>
   );
