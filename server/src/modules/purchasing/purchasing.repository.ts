@@ -10,6 +10,7 @@ const requisitionInclude = {
   requester: { select: { employeeName: true, departmentId: true, department: { select: { departmentName: true } } } },
   approver: { select: { employeeName: true } },
   productionPlan: { select: { productionPlanNo: true, salesOrderItem: { select: { salesOrder: { select: { id: true, salesOrderNo: true } } } } } },
+  purchaseOrderItem: { select: { purchaseOrder: { select: { purchaseOrderNo: true } } } },
 } as const;
 
 /** 같은 계획·품목으로 다시 요청하면 중복인 상태. 반려된 요청은 수정·재요청하므로 새 요청을 막지 않는다 */
@@ -19,6 +20,8 @@ export interface RequisitionFilter {
   purchaseRequisitionStatus?: PurchaseRequisitionStatus;
   /** 부서장 조회 범위: 이 부서 소속 요청자의 요청만 */
   requesterDepartmentIds?: number[];
+  /** 승인함: 이 사원의 요청은 빼고 (본인 요청은 본인이 승인하지 않는다) */
+  excludeRequesterId?: number;
 }
 
 /** 승인·반려·재요청이 바꾸는 칸 */
@@ -30,6 +33,7 @@ export type RequisitionStatusChange = Pick<
 const whereOf = (filter: RequisitionFilter): Prisma.PurchaseRequisitionWhereInput => ({
   ...(filter.purchaseRequisitionStatus ? { purchaseRequisitionStatus: filter.purchaseRequisitionStatus } : {}),
   ...(filter.requesterDepartmentIds ? { requester: { departmentId: { in: filter.requesterDepartmentIds } } } : {}),
+  ...(filter.excludeRequesterId !== undefined ? { requesterId: { not: filter.excludeRequesterId } } : {}),
 });
 
 /** 발주 목록·상세가 함께 쓰는 읽기 모양: 공급업체·품목별 원료·구매요청·입고 기록(입고 누계 계산용) */

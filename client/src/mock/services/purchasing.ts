@@ -45,7 +45,7 @@ export interface CreateRequisitionInput {
 
 /** 출처(계산값): Message → ERP 초안 / MRP 계획 / 직접 */
 export type RequisitionSource = 'MESSAGE' | 'MRP' | 'DIRECT';
-export function requisitionSourceOf(pr: PurchaseRequisitionRow): RequisitionSource {
+export function requisitionSourceOf(pr: Pick<PurchaseRequisitionRow, 'actionDraftId' | 'productionPlanId'>): RequisitionSource {
   if (pr.actionDraftId !== null) return 'MESSAGE';
   return pr.productionPlanId !== null ? 'MRP' : 'DIRECT';
 }

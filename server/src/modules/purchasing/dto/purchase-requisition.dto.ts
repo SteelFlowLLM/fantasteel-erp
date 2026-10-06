@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { PURCHASE_REQUISITION_STATUS, type PurchaseRequisitionStatus } from '@fantasteel/shared';
 
 export class CreatePurchaseRequisitionDto {
@@ -49,6 +49,12 @@ export class ListPurchaseRequisitionsQuery {
   @IsOptional()
   @IsIn(Object.values(PURCHASE_REQUISITION_STATUS), { message: '구매요청 상태 값이 올바르지 않아요' })
   purchaseRequisitionStatus?: PurchaseRequisitionStatus;
+
+  /** true면 승인함: 내가 부서장인 부서원의 승인 대기 요청만 (내 요청 제외) */
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean({ message: 'approvable은 true 또는 false여야 해요' })
+  approvable?: boolean;
 
   @IsOptional()
   @Type(() => Number)
