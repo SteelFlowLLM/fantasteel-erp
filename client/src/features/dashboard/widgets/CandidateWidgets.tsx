@@ -12,13 +12,12 @@ import type {
   ShipmentResultData,
   SurplusAgeData,
 } from '@/api/dashboard';
-import { Badge } from '@/components/Badge';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { DailyBars } from '@/features/dashboard/components/DailyBars';
 import { Figure, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
-import { dueLabel, isOverRejectRateAlert, REJECT_RATE_ALERT } from '@/features/dashboard/lib/widgetMath';
+import { dueLabel } from '@/features/dashboard/lib/widgetMath';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { decCmp } from '@/lib/decimal';
 import { fmtInt, fmtMD, fmtPct, fmtTon } from '@/lib/format';
@@ -134,21 +133,13 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
                 {count}/{g.inspectedCount}건
               </span>
             </span>
-            <span className="col-start-2 col-end-4 flex min-w-0 items-center gap-1.5 text-cap text-ink-3">
-              {isOverRejectRateAlert(g.rejectRate) ? (
-                <Badge tone="danger" plain className="flex-none" title={`불합격률이 기준 ${fmtPct(REJECT_RATE_ALERT, 0)}를 넘었어요`}>
-                  기준 초과
-                </Badge>
-              ) : null}
-              <span className="truncate">
+            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
               {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
-              </span>
             </span>
           </div>
         );
       })}
-      <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100% · 불합격률 {fmtPct(REJECT_RATE_ALERT, 0)} 넘으면 기준 초과
-      </span>
+      <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100%</span>
       {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
     </div>
   );

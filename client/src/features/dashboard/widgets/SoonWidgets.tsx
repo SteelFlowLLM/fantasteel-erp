@@ -36,7 +36,7 @@ interface AgentRiskExample {
   action: string;
 }
 
-/** 품질 예시: 강종별 불합격률이 기준을 넘으면 품질 부서에 알린다 (REQ-AGT-004). 기준은 불합격률 위젯의 "기준 초과"와 같은 값 */
+/** 품질 예시: 강종별 불합격률이 기준을 넘으면 품질 부서에 알린다 (REQ-AGT-004). 기준은 예시값(widgetMath REJECT_RATE_ALERT) */
 const REJECT_RATE_EXAMPLE: AgentRiskExample = {
   type: '불합격률 상승',
   target: 'SM355A · 최근 30일',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageDays, bucketByDate, countRatio, dueLabel, isOverRejectRateAlert, isWithin, ratioText, REJECT_RATE_ALERT, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
+import { ageDays, bucketByDate, countRatio, dueLabel, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
 
 describe('대시보드 집계 계산', () => {
   it('비율: 소수 4자리, 분모 0이면 null', () => {
@@ -48,15 +48,5 @@ describe('대시보드 집계 계산', () => {
     ).toBe('0.9500');
     expect(weightedPlannedYield([{ inputTon: '100.000', plannedYieldRate: null }])).toBeNull();
     expect(weightedPlannedYield([])).toBeNull();
-  });
-});
-
-describe('강종별 불합격률 주의 기준 (5%)', () => {
-  it('기준을 넘을 때만 기준 초과 — 같으면 넘지 않음, 판정 없음(null)은 아님', () => {
-    expect(REJECT_RATE_ALERT).toBe(0.05);
-    expect(isOverRejectRateAlert(1 / 18)).toBe(true); // 5.6%
-    expect(isOverRejectRateAlert(0.05)).toBe(false);
-    expect(isOverRejectRateAlert(1 / 32)).toBe(false); // 3.1%
-    expect(isOverRejectRateAlert(null)).toBe(false);
   });
 });
