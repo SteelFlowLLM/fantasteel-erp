@@ -5,7 +5,7 @@ import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
 import {
   approvePurchaseRequisition,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   receiveGoods,
@@ -57,10 +57,10 @@ export async function stockRawMaterialsForTest(): Promise<void> {
       createPurchaseRequisition(tx, purchase, { itemId: itemIdOf(code), requestedTon: ton, desiredReceiptDate: today, requestReason: '테스트 원료 확보' }),
     );
     for (const pr of prs) approvePurchaseRequisition(tx, head, { purchaseRequisitionId: pr.id });
-    createPurchaseOrders(tx, purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+    createPurchaseOrdersBySupplier(tx, purchase, prs.map((pr) => pr.id));
     for (const pr of prs) {
       const line = tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
-      if (line) receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate: toSeoulDateString(tx.now) });
+      if (line) receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate: toSeoulDateString(tx.now) });
     }
   });
 }

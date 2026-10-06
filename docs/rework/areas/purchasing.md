@@ -28,7 +28,7 @@
 | 승인함: 요청 부서 부서장만 승인·반려(다른 부서장 COM-002), 반려 사유 필수, 요청자에게 APPROVAL_RESULT 알림(core). 권한 코드가 아니라 부서장 여부로 판단 | REQ-PUR-002, REQ-AUTH-004 |
 | 반려 → 요청자가 고쳐 다시 요청 → 승인 대기(요청자만, COM-002) | 10장 REJECTED → WAITING_APPROVAL |
 | 발주: 승인된 요청 품목만(PUR-002), 품목 기본 공급업체별 발주 1건(여러 줄), 발주량 = 요청 톤, 납기 = 입력값 또는 가장 이른 희망 입고일, CONFIRMED → 입고예정 반영, 요청 모든 줄 발주 → ORDERED | REQ-PUR-003, BP-PUR-01 |
-| 입고: 등록 = 확정(상태·수정 없음), 미입고량 초과 PUR-003, 야드 = 원료 기본 야드 자동, 원료 LOT RM-원료코드-YYMMDD-NNN(잔량 = 입고 톤), 발주 입고 누계·입고예정·상태 PARTIALLY_RECEIVED/RECEIVED, GOODS_RECEIPT_CONFIRMED(core) | REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02, 9.2 |
+| 입고: 등록 = 확정(상태·수정 없음), 미입고량 초과 PUR-003, 야드 = 원료 기본 야드 자동, 원료 LOT RM-원료코드-YYMMDD-NNN(잔량 = 입고 톤), 입고 누계·미입고량은 계산값(ERD), 발주 상태 PARTIALLY_RECEIVED/RECEIVED, GOODS_RECEIPT_CONFIRMED(core) | REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02, 9.2 |
 | 14.1 3단계(합금철 부족 → 구매요청 → 승인 → 발주 → 부분 입고 → RM LOT)를 화면으로 그대로 따라갈 수 있다 | 14.1 |
 
 ## 3. api 함수 (모두 `requireActor` 먼저)
@@ -37,7 +37,7 @@
 |---|---|---|---|
 | `api/mrp.ts` | `mrpApi.requirements({from,to})` (+ `mrpKeys`, `MRP_VIEW_PERMISSIONS`) | 조회 PURCHASE_REQUISITION_CREATE 또는 PRODUCTION_PLAN_CONFIRM. 기간 형식·순서 입력 오류 | `computeMrp` |
 | `api/purchasing.ts` | `purchaseRequisitionApi.list / detail(id) / formContext / create / resubmit` | list: 조회 PRC·PO / detail: 조회 PRC·PO 또는 요청자 또는 요청 부서 부서장(아니면 COM-002, 없으면 COM-003) / create·resubmit: 사용 PRC | `listPurchaseRequisitions`, `requisitionView`, `canApproveRequisition`, `actionDraftView`, `createPurchaseRequisition`, `resubmitPurchaseRequisition` |
-| | `purchaseOrderApi.list / orderableItems / create` | list: 조회 PO·GR·PRC / orderable: 조회 PO / create: 사용 PO | `listPurchaseOrders`, `orderableRequisitionItems`, `createPurchaseOrders` |
+| | `purchaseOrderApi.list / candidateItems / create` | list: 조회 PO·GR·PRC / candidateItems: 조회 PO / create(공급업체별 발주 목록): 사용 PO | `listPurchaseOrders`, `orderableRequisitions`, `createPurchaseOrder` |
 | | `toTonText` | — | 잘 쓴 톤 입력을 '1.500' 모양으로 맞춤(아래 가정값) |
 | `api/approvals.ts` | `approvalApi.countWaiting`(셸 배지, 그대로) / `inbox / approve / reject` | 부서장(`requireDepartmentHead`) | `approvalInbox`, `approvePurchaseRequisition`, `rejectPurchaseRequisition` |
 | `api/goodsReceipts.ts` | `goodsReceiptApi.lines / list / receive` | lines·list: 조회 GR·PO / receive: 사용 GR | `listPurchaseOrders`, `listGoodsReceipts`, `receiveGoods` |

@@ -100,7 +100,7 @@ export function GoodsReceiptScreen() {
             ) : (
               <>
                 {shown.map((line) => {
-                  const overdue = isOverdue(line.dueDate, today, line.scheduledReceiptTon);
+                  const overdue = isOverdue(line.expectedReceiptDate, today, line.remainingTon);
                   return (
                     <MasterItem
                       key={line.purchaseOrderItemId}
@@ -110,16 +110,16 @@ export function GoodsReceiptScreen() {
                     >
                       <span className="flex items-center gap-2">
                         <b className="font-mono text-sm font-semibold">
-                          {line.purchaseOrderNo} <span className="font-sans text-cap font-medium text-ink-3">#{line.lineNo}</span>
+                          {line.purchaseOrderNo} <span className="text-cap font-medium text-ink-3">{line.purchaseRequisitionNo}</span>
                         </b>
                         <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
-                        <span className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>{line.dueDate ? `납기 ${fmtMD(line.dueDate)}` : ''}</span>
+                        <span className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>{line.expectedReceiptDate ? `입고 예정 ${fmtMD(line.expectedReceiptDate)}` : ''}</span>
                       </span>
                       <span className="text-sm text-ink">
                         {line.itemName} <span className="text-ink-3">· {line.supplierName}</span>
                       </span>
                       <span className="flex items-center gap-2 text-cap text-ink-3">
-                        <span className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.scheduledReceiptTon)}`}</span>
+                        <span className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
                         <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={line.isFullyReceived ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
                       </span>
                     </MasterItem>
@@ -202,7 +202,7 @@ function ReceiptWork({
   /** 확정할 때 이 줄을 주소에 고정한다 (모두 들어와 입고예정 목록에서 빠져도 결과를 계속 보이게) */
   onPin: () => void;
 }) {
-  const [receivedTon, setReceivedTon] = useState(() => trimTonText(line.scheduledReceiptTon));
+  const [receivedTon, setReceivedTon] = useState(() => trimTonText(line.remainingTon));
   const [receiptDate, setReceiptDate] = useState(() => todayStr());
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
@@ -217,7 +217,7 @@ function ReceiptWork({
       setConfirming(false);
       setFieldErrors({});
       setFailure(null);
-      setReceivedTon(trimTonText(result.lineScheduledReceiptTon));
+      setReceivedTon(trimTonText(result.lineRemainingTon));
     },
     onError: (error) => {
       setConfirming(false);
@@ -226,7 +226,7 @@ function ReceiptWork({
         setFailure(Object.keys(error.fieldErrors).length === 0 ? error.message : null);
       } else {
         setFieldErrors({});
-        setFailure(error instanceof ApiError && error.code === 'PUR-003' ? `미입고량(${fmtTon(line.scheduledReceiptTon)})보다 많이 입고할 수 없어요 · ${errorMessageOf(error)}` : errorMessageOf(error));
+        setFailure(error instanceof ApiError && error.code === 'PUR-003' ? `미입고량(${fmtTon(line.remainingTon)})보다 많이 입고할 수 없어요 · ${errorMessageOf(error)}` : errorMessageOf(error));
       }
     },
   });
@@ -240,7 +240,7 @@ function ReceiptWork({
         title={
           <span className="flex items-center gap-2">
             <span className="font-mono">{line.purchaseOrderNo}</span>
-            <span className="text-lg font-medium text-ink-3">#{line.lineNo}</span>
+            <span className="font-mono text-lg font-medium text-ink-3">{line.purchaseRequisitionNo}</span>
             <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
           </span>
         }
@@ -258,13 +258,13 @@ function ReceiptWork({
         }
       />
       <p className="-mt-2 text-sm text-ink-2">
-        {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span> · {line.supplierName} · 납기 {line.dueDate ? fmtDate(line.dueDate) : '-'} · 구매요청{' '}
+        {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span> · {line.supplierName} · 입고 예정 {line.expectedReceiptDate ? fmtDate(line.expectedReceiptDate) : '-'} · 구매요청{' '}
         <span className="font-mono">{line.purchaseRequisitionNo ?? '-'}</span>
       </p>
       <StatBar>
         <Kpi flat label="발주" value={fmtNum(line.orderedTon, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(line.receivedTon, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(line.receivedTon, line.orderedTon))}%`} />
-        <Kpi flat label="입고예정" value={fmtNum(line.scheduledReceiptTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
+        <Kpi flat label="입고예정" value={fmtNum(line.remainingTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
       </StatBar>
 
       {done ? (
@@ -274,7 +274,7 @@ function ReceiptWork({
             {done.lotNo}
           </Link>{' '}
           · {line.itemName} {fmtTon(done.receivedTon)} · {done.yardName ?? '야드 미지정'} · 잔량 {fmtTon(done.receivedTon)} · 발주 품목 입고 누계 {fmtTon(done.lineReceivedTon)} · 입고예정{' '}
-          {fmtTon(done.lineScheduledReceiptTon)}
+          {fmtTon(done.lineRemainingTon)}
         </Banner>
       ) : null}
 
@@ -409,7 +409,7 @@ function ReceiptWork({
         >
           <KvList
             items={[
-              { label: '발주 품목', value: `${line.purchaseOrderNo} #${line.lineNo} · ${line.itemName}` },
+              { label: '발주 품목', value: `${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? ''} · ${line.itemName}` },
               { label: '입고 톤', value: receivedTon ? `${receivedTon} t` : '-' },
               { label: '입고일', value: receiptDate || '-' },
               { label: '야드', value: line.defaultYardName ?? '-' },

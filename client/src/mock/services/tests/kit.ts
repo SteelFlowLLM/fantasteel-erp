@@ -8,7 +8,7 @@ import type { MockTx } from '@/mock/store';
 import {
   approvePurchaseRequisition,
   checkInvariants,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   inspectionFormOf,
   receiveGoods,
@@ -112,9 +112,9 @@ export function stockRawMaterials(k: Kit, iso: string, tons: { ORE01?: string; C
     createPurchaseRequisition(k.at(iso), purchase, { itemId: k.itemId(code), requestedTon: ton, desiredReceiptDate: receiptDate, requestReason: '테스트 원료 확보' }),
   );
   for (const pr of prs) approvePurchaseRequisition(k.at(iso), k.actor('purchaseHead'), { purchaseRequisitionId: pr.id });
-  createPurchaseOrders(k.at(iso), purchase, { purchaseRequisitionIds: prs.map((pr) => pr.id) });
+  createPurchaseOrdersBySupplier(k.at(iso), purchase, prs.map((pr) => pr.id));
   for (const pr of prs) {
     const line = k.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id);
-    if (line) receiveGoods(k.at(iso), purchase, { purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
+    if (line) receiveGoods(k.at(iso), purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receiptDate });
   }
 }

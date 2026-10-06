@@ -242,7 +242,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                     <Th align="right">발주</Th>
                     <Th align="right">입고</Th>
                     <Th align="right">입고예정</Th>
-                    <Th>납기</Th>
+                    <Th>입고 예정일</Th>
                     <Th>상태</Th>
                   </tr>
                 </thead>
@@ -262,10 +262,10 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                       <Td>{line.supplierName}</Td>
                       <Td align="right">{fmtTon(line.orderedTon)}</Td>
                       <Td align="right">{fmtTon(line.receivedTon)}</Td>
-                      <Td align="right" className={decCmp(line.scheduledReceiptTon, 0) > 0 ? 'font-semibold' : 'text-ink-3'}>
-                        {fmtTon(line.scheduledReceiptTon)}
+                      <Td align="right" className={decCmp(line.remainingTon, 0) > 0 ? 'font-semibold' : 'text-ink-3'}>
+                        {fmtTon(line.remainingTon)}
                       </Td>
-                      <Td>{line.dueDate ? fmtDate(line.dueDate) : '-'}</Td>
+                      <Td>{line.expectedReceiptDate ? fmtDate(line.expectedReceiptDate) : '-'}</Td>
                       <Td>
                         <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
                       </Td>

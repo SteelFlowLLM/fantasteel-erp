@@ -11,6 +11,6 @@ export function usePurchaseOrderCandidateItems(enabled = true) {
   return useQuery({ queryKey: purchaseOrderKeys.candidateItems(), queryFn: purchaseOrderApi.candidateItems, enabled });
 }
 
-export function useCreatePurchaseOrders(options: ActionOptions<PurchaseOrderCreateInput, PurchaseOrderView[]> = {}) {
+export function useCreatePurchaseOrders(options: ActionOptions<readonly PurchaseOrderCreateInput[], PurchaseOrderView[]> = {}) {
   return useAction(purchaseOrderApi.create, { invalidate: [purchaseOrderKeys.all], ...options });
 }

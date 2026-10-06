@@ -1,9 +1,9 @@
 'use client';
 
-// 발주 (REQ-PUR-003, BP-PUR-01): 승인된 구매요청 품목을 품목의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건(여러 줄).
-// 발주는 만들면 바로 확정(CONFIRMED)이고 입고예정(scheduled_receipt_ton)에 반영된다. 발주량 = 요청 톤(나눠 발주하지 않음).
-// 요청의 모든 품목을 발주하면 구매요청이 '발주 완료'가 된다. 승인 전이면 PUR-002.
-// 주소: ?po= 발주 상세, ?pr= 그 요청 품목을 골라 둔 발주 작성, ?supplier= 그 공급업체 품목을 골라 둔 발주 작성.
+// 발주 (REQ-PUR-003, BP-PUR-01): 승인된 구매요청을 원료의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건(여러 품목, 발주 품목 1행 = 구매요청 1건).
+// 발주는 만들면 바로 확정(CONFIRMED)이고 입고예정에 반영된다(미입고량 = 발주량 − 입고 누계, 계산값). 발주량 = 요청 톤(나눠 발주하지 않음).
+// 발주한 구매요청은 '발주 완료'가 된다. 승인 전이면 PUR-002.
+// 주소: ?po= 발주 상세, ?pr= 그 구매요청을 골라 둔 발주 작성, ?supplier= 그 공급업체 요청을 골라 둔 발주 작성.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, PURCHASE_ORDER_STATUS_LABEL, type PurchaseOrderStatus } from '@/codes';
@@ -23,10 +23,10 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { MasterGroupTitle, MasterItem, MasterNote, PurchaseOrderStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { groupBySupplier, plannedPurchaseOrders, ratioPercent, summarizeItemNames, type SupplierGroup } from '@/features/purchasing/lib/purchasingView';
+import { earliestDate, groupBySupplier, plannedPurchaseOrders, ratioPercent, summarizeItemNames, type SupplierGroup } from '@/features/purchasing/lib/purchasingView';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { useCreatePurchaseOrders, usePurchaseOrderCandidateItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
-import { decSum } from '@/lib/decimal';
+import { decCmp, decSum } from '@/lib/decimal';
 import { fmtDate, fmtDateTime, fmtMD, fmtNum, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
@@ -37,7 +37,10 @@ const NO_SUPPLIER = 'none';
 const supplierKey = (supplierId: number | null): string => (supplierId === null ? NO_SUPPLIER : String(supplierId));
 const purchaseOrderReceivedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.receivedTon));
 const purchaseOrderOrderedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.orderedTon));
-const purchaseOrderScheduledTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.scheduledReceiptTon));
+const purchaseOrderRemainingTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.remainingTon));
+/** 남은 품목 중 가장 이른 입고 예정일 (발주 단위 납기는 ERD에 없다) */
+const nextExpectedDate = (po: PurchaseOrderView): string | null =>
+  earliestDate(po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate));
 
 export function PurchaseOrderScreen() {
   const url = useUrlParams();
@@ -125,7 +128,7 @@ export function PurchaseOrderScreen() {
                       <span className="flex items-center gap-2">
                         <b className="font-mono text-sm font-semibold">{po.purchaseOrderNo}</b>
                         <PurchaseOrderStatusBadge status={po.purchaseOrderStatus} />
-                        <span className="ml-auto text-cap text-ink-3">{po.dueDate ? `납기 ${fmtMD(po.dueDate)}` : ''}</span>
+                        <span className="ml-auto text-cap text-ink-3">{nextExpectedDate(po) ? `입고 예정 ${fmtMD(nextExpectedDate(po) ?? '')}` : ''}</span>
                       </span>
                       <span className="text-sm text-ink">
                         {po.supplierName} <span className="text-ink-3">· {summarizeItemNames(po.items)}</span>
@@ -191,7 +194,7 @@ export function PurchaseOrderForm({
   onDone: (created: PurchaseOrderView[]) => void;
 }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set(initialIds));
-  const [dueDate, setDueDate] = useState('');
+  const [expectedReceiptDate, setExpectedReceiptDate] = useState('');
   const create = useCreatePurchaseOrders({
     success: (created) => `${created.map((po) => po.purchaseOrderNo).join(', ')} 발주를 확정했어요. 입고예정에 반영돼요`,
     onSuccess: (created) => onDone(created),
@@ -199,8 +202,13 @@ export function PurchaseOrderForm({
 
   const allItems = groups.flatMap((g) => g.items);
   const chosen = allItems.filter((i) => selected.has(i.id));
-  // 공급업체 1곳당 발주 1건. 납기를 비우면 발주마다 자기 묶음의 가장 이른 희망 입고일이 납기가 된다(core createPurchaseOrders와 같은 규칙).
-  const planned = plannedPurchaseOrders(chosen, dueDate);
+  // 공급업체 1곳당 발주 1건. 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(서버·가짜 DB 같은 규칙).
+  const planned = plannedPurchaseOrders(chosen, expectedReceiptDate);
+  const orders = groupBySupplier(chosen).flatMap((group) =>
+    group.supplierId === null
+      ? []
+      : [{ supplierId: group.supplierId, items: group.items.map((i) => ({ purchaseRequisitionId: i.id, orderedTon: i.requestedTon, expectedReceiptDate })) }],
+  );
   const toggle = (id: number, on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -213,7 +221,7 @@ export function PurchaseOrderForm({
     <div className="flex flex-col gap-4">
       <PageHead crumb="발주" title="발주 작성" />
       <Banner tone="run">
-        고른 품목은 품목의 <b>기본 공급업체</b>별로 묶여 공급업체 1곳당 발주 1건이 돼요. 발주량은 요청 톤 그대로이고, 발주는 만들면 바로 확정되어 입고예정에 반영돼요.
+        고른 구매요청은 원료의 <b>기본 공급업체</b>별로 묶여 공급업체 1곳당 발주 1건이 돼요. 발주량은 요청 톤 그대로이고, 발주는 만들면 바로 확정되어 입고예정에 반영돼요.
       </Banner>
       {groups.map((group) => {
         const selectable = group.supplierId !== null;
@@ -287,8 +295,8 @@ export function PurchaseOrderForm({
       <Card>
         <CardHead title="발주 확정" meta={`${chosen.length} / ${allItems.length}개 품목 선택`} />
         <CardBody className="flex-row flex-wrap items-start gap-6">
-          <Field label="납기 (입고예정일)" htmlFor="po-due-date" hint="비우면 발주마다 그 공급업체 품목의 가장 이른 희망 입고일이 납기가 돼요">
-            <DateInput id="po-due-date" value={dueDate} onChange={setDueDate} />
+          <Field label="입고 예정일" htmlFor="po-expected-date" hint="고른 품목 모두에 들어가요. 비우면 품목마다 구매요청의 희망 입고일이 들어가요">
+            <DateInput id="po-expected-date" value={expectedReceiptDate} onChange={setExpectedReceiptDate} />
           </Field>
           <div className="flex flex-col gap-1 text-sm">
             <span className="text-xs font-medium text-ink-2">만들어질 발주</span>
@@ -297,20 +305,20 @@ export function PurchaseOrderForm({
             </b>
             {planned.map((purchaseOrder) => (
               <span key={purchaseOrder.supplierId} className="text-cap text-ink-2">
-                {purchaseOrder.supplierName ?? '-'} · 납기 {purchaseOrder.dueDate ? fmtDate(purchaseOrder.dueDate) : '없음'} · 품목 {purchaseOrder.itemCount}개 · {fmtTon(purchaseOrder.totalTon)}
+                {purchaseOrder.supplierName ?? '-'} · 입고 예정 {purchaseOrder.expectedReceiptDate ? fmtDate(purchaseOrder.expectedReceiptDate) : '없음'} · 품목 {purchaseOrder.itemCount}개 · {fmtTon(purchaseOrder.totalTon)}
               </span>
             ))}
           </div>
         </CardBody>
         <CardFoot>
-          <span className="text-cap text-ink-3">{chosen.length === 0 ? '발주할 품목을 하나 이상 골라 주세요' : '요청의 모든 품목을 발주하면 그 구매요청은 발주 완료가 돼요'}</span>
+          <span className="text-cap text-ink-3">{chosen.length === 0 ? '발주할 구매요청을 하나 이상 골라 주세요' : '발주한 구매요청은 발주 완료가 돼요'}</span>
           <Button
             variant="primary"
             icon="check"
             className="ml-auto"
             disabled={!canConfirmPurchaseOrder || chosen.length === 0 || create.isPending}
             title={canConfirmPurchaseOrder ? undefined : permissionNeedText([PERMISSION.PURCHASE_ORDER_CONFIRM])}
-            onClick={() => create.mutate({ purchaseRequisitionIds: chosen.map((i) => i.id), dueDate })}
+            onClick={() => create.mutate(orders)}
           >
             {create.isPending ? '처리하는 중…' : '발주 확정'}
           </Button>
@@ -324,8 +332,8 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
   const canSeeReceipts = useCanView(PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM);
   const ordered = purchaseOrderOrderedTon(po);
   const received = purchaseOrderReceivedTon(po);
-  const scheduled = purchaseOrderScheduledTon(po);
-  const receipts = po.items.flatMap((line) => line.goodsReceipts.map((receipt) => ({ ...receipt, itemName: line.itemName, lineNo: line.lineNo })));
+  const remaining = purchaseOrderRemainingTon(po);
+  const receipts = po.items.flatMap((line) => line.goodsReceipts.map((receipt) => ({ ...receipt, itemName: line.itemName, purchaseRequisitionNo: line.purchaseRequisitionNo })));
 
   return (
     <div className="flex flex-col gap-4">
@@ -346,12 +354,12 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
         }
       />
       <p className="-mt-2 text-sm text-ink-2">
-        {po.supplierName} · 발주 확정 {fmtDateTime(po.createdAt)} · 납기 {po.dueDate ? fmtDate(po.dueDate) : '-'} · 품목 {po.items.length}개 · 발주 {po.orderedEmployeeName ?? '-'}
+        {po.supplierName} · 발주 확정 {fmtDateTime(po.createdAt)} · 품목 {po.items.length}개 · 발주 {po.orderedEmployeeName ?? '-'}
       </p>
       <StatBar>
         <Kpi flat label="발주" value={fmtNum(ordered, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(received, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(received, ordered))}%`} />
-        <Kpi flat label="입고예정" value={fmtNum(scheduled, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
+        <Kpi flat label="입고예정" value={fmtNum(remaining, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
       </StatBar>
       <Card>
         <CardHead title="발주 품목" />
@@ -359,9 +367,9 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
           <Table>
             <thead>
               <tr>
-                <Th align="right">#</Th>
                 <Th>원료</Th>
                 <Th>연결 구매요청</Th>
+                <Th>입고 예정일</Th>
                 <Th align="right">발주</Th>
                 <Th align="right">입고</Th>
                 <Th align="right">입고예정</Th>
@@ -372,20 +380,18 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
             <tbody>
               {po.items.map((line) => (
                 <tr key={line.id}>
-                  <Td align="right" className="text-ink-3">
-                    {line.lineNo}
-                  </Td>
                   <Td>
                     {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
                   </Td>
                   <Td className="font-mono">{line.purchaseRequisitionNo ?? '-'}</Td>
+                  <Td>{line.expectedReceiptDate ? fmtDate(line.expectedReceiptDate) : '-'}</Td>
                   <Td align="right">{fmtTon(line.orderedTon)}</Td>
                   <Td align="right">{fmtTon(line.receivedTon)}</Td>
                   <Td align="right" className="font-semibold">
-                    {fmtTon(line.scheduledReceiptTon)}
+                    {fmtTon(line.remainingTon)}
                   </Td>
                   <Td className="w-40">
-                    <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? 'ok' : 'run'} label={`${line.lineNo}번 입고 진행`} />
+                    <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? 'ok' : 'run'} label={`${line.purchaseRequisitionNo ?? line.itemName} 입고 진행`} />
                   </Td>
                   <Td align="right">
                     {ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? (
@@ -401,12 +407,12 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
             </tbody>
             <tfoot>
               <tr>
-                <Td />
                 <Td>합계</Td>
+                <Td />
                 <Td />
                 <Td align="right">{fmtTon(ordered)}</Td>
                 <Td align="right">{fmtTon(received)}</Td>
-                <Td align="right">{fmtTon(scheduled)}</Td>
+                <Td align="right">{fmtTon(remaining)}</Td>
                 <Td />
                 <Td />
               </tr>
@@ -445,7 +451,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
                   <tr key={receipt.id}>
                     <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
                     <Td>
-                      {receipt.itemName} <span className="text-cap text-ink-3">#{receipt.lineNo}</span>
+                      {receipt.itemName} <span className="font-mono text-cap text-ink-3">{receipt.purchaseRequisitionNo}</span>
                     </Td>
                     <Td>{fmtDate(receipt.receiptDate)}</Td>
                     <Td align="right">{fmtTon(receipt.receivedTon)}</Td>

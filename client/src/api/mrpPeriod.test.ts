@@ -8,7 +8,7 @@ import { decCmp, decSub, decSum } from '@/lib/decimal';
 import {
   approvePurchaseRequisition,
   computeMrpForPeriod,
-  createPurchaseOrders,
+  createPurchaseOrdersBySupplier,
   createPurchaseRequisition,
   createSalesOrder,
   type MrpMaterialRow,
@@ -87,7 +87,7 @@ describe('MRP 기간 · 시점별 차감', () => {
     const purchase = kit.actor('purchase');
     const purchaseRequisition = createPurchaseRequisition(kit.at(AT), purchase, { itemId: ore, requestedTon: '10000', desiredReceiptDate: '2026-10-10', productionPlanId: planQ });
     approvePurchaseRequisition(kit.at(AT), kit.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionIds: [purchaseRequisition.id], dueDate: '2026-10-10' });
+    createPurchaseOrdersBySupplier(kit.at(AT), purchase, [purchaseRequisition.id], '2026-10-10');
 
     // 10월 기간: Q는 보이지 않지만 그 몫 입고예정은 Q 전용이라 P의 순소요는 그대로
     const octAfter = computeMrpForPeriod(kit.tables, OCT);
@@ -139,7 +139,7 @@ describe('MRP 원료 표 한 줄의 숫자 (총소요 − 원료 LOT 잔량 − 
     const purchase = kit.actor('purchase');
     const purchaseRequisition = createPurchaseRequisition(kit.at(AT), purchase, { itemId: kit.itemId('SMN01'), requestedTon: '1.500', desiredReceiptDate: '2026-10-10', productionPlanId: planId });
     approvePurchaseRequisition(kit.at(AT), kit.actor('purchaseHead'), { purchaseRequisitionId: purchaseRequisition.id });
-    createPurchaseOrders(kit.at(AT), purchase, { purchaseRequisitionIds: [purchaseRequisition.id] });
+    createPurchaseOrdersBySupplier(kit.at(AT), purchase, [purchaseRequisition.id]);
     const after = computeMrpForPeriod(kit.tables, period).materials.find((m) => m.itemCode === 'SMN01');
     expect(after).toMatchObject({ scheduledReceiptTon: '5.000', coveredScheduledTon: '1.500', scheduledAfterNeedDateTon: '3.500', netTon: '0.000' });
     expectRowAdds(after);

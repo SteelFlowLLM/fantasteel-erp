@@ -1,5 +1,6 @@
 // 불변조건 점검 (BP-INV-02, ERD CHECK·unique 메모). 테스트와 (P2) 정합성 보정 화면이 쓴다. 위반 문장 목록을 돌려준다(없으면 []).
-import { decCmp, decSub } from '@/lib/decimal';
+import { decCmp } from '@/lib/decimal';
+import { receivedTonOf } from '@/mock/services/purchasing';
 import type { MockTables } from '@/mock/schema';
 import { lotEligibility, reservationPoolOf } from '@/mock/services/inventoryPool';
 
@@ -35,7 +36,7 @@ export function checkInvariants(tables: Readonly<MockTables>): string[] {
     if (lot.remainingTon !== null && decCmp(lot.remainingTon, 0) < 0) problems.push(`${lot.lotNo}: 잔량 음수`);
   }
   for (const line of tables.purchaseOrderItem) {
-    if (decCmp(line.scheduledReceiptTon, decSub(line.orderedTon, line.receivedTon)) !== 0) problems.push(`발주 품목 ${line.id}: 입고예정 ≠ 발주 − 입고`);
+    if (decCmp(receivedTonOf(tables, line.id), line.orderedTon) > 0) problems.push(`발주 품목 ${line.id}: 입고 누계 > 발주량`);
   }
   const millSheetKeys = tables.millSheet.map((m) => `${m.shipmentRequestId}:${m.salesOrderId}`);
   if (new Set(millSheetKeys).size !== millSheetKeys.length) problems.push('밀시트: 출하요청 × 수주 중복');

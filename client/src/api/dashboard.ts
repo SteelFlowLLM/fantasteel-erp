@@ -21,7 +21,7 @@ import {
   type SalesOrderItemStatus,
 } from '@/codes';
 import { ageDays, bucketByDate, countRatio, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
-import { decSum } from '@/lib/decimal';
+import { decCmp, decSum } from '@/lib/decimal';
 import { canView } from '@/lib/permissions';
 import { addDays, daysBetween } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
@@ -602,7 +602,8 @@ export interface OpenPurchaseOrderRow {
   purchaseOrderId: number;
   purchaseOrderNo: string;
   supplierName: string;
-  dueDate: string | null;
+  /** 남은 품목 중 가장 이른 입고 예정일 (발주 단위 납기는 ERD에 없다) */
+  expectedReceiptDate: string | null;
   /** 입고예정 (미입고량 합계) */
   scheduledReceiptTon: string;
   lineCount: number;
@@ -633,11 +634,11 @@ function readPurchaseProgress(tables: Tables): PurchaseProgressData {
         purchaseOrderId: po.id,
         purchaseOrderNo: po.purchaseOrderNo,
         supplierName: po.supplierName,
-        dueDate: po.dueDate,
-        scheduledReceiptTon: decSum(po.items.map((i) => i.scheduledReceiptTon)),
+        expectedReceiptDate: po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate).filter((d): d is string => d !== null).sort()[0] ?? null,
+        scheduledReceiptTon: decSum(po.items.map((i) => i.remainingTon)),
         lineCount: po.items.length,
       }))
-      .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
+      .sort((a, b) => (a.expectedReceiptDate ?? '9999').localeCompare(b.expectedReceiptDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
     openPurchaseOrders = { count: open.length, scheduledReceiptTon: decSum(open.map((po) => po.scheduledReceiptTon)), purchaseOrders: open };
   }
   return { requisitionsByStatus, openPurchaseOrders };

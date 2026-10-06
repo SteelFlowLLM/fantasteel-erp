@@ -8,7 +8,9 @@ import {
   confirmGoodsIssue,
   confirmShipmentAllocations,
   createDraftFromMessage,
-  createPurchaseOrders,
+  createPurchaseOrder,
+  receivedTonOf,
+  remainingTonOf,
   createPurchaseRequisition,
   createReproductionPlan,
   createSalesOrder,
@@ -104,13 +106,17 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     expectInputError(() => createPurchaseRequisition(k.at('2026-10-01T10:05:00+09:00'), purchase, { itemId: line.itemId, requestedTon: '1.000', desiredReceiptDate: '2026-10-10', productionPlanId: planId }));
     expect(computeMrp(t, { from: '2026-10-01', to: '2026-10-31' }).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
     // 승인 전 발주 불가
-    expectCode(() => createPurchaseOrders(k.at('2026-10-01T10:10:00+09:00'), purchase, { purchaseRequisitionIds: [pr.id] }), 'PUR-002');
+    const smnSupplierId = t.supplier.find((s) => s.supplierCode === 'SUP-04')?.id ?? 0;
+    const smnOrder = { supplierId: smnSupplierId, items: [{ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon }] };
+    expectCode(() => createPurchaseOrder(k.at('2026-10-01T10:10:00+09:00'), purchase, smnOrder), 'PUR-002');
     // 요청자 소속 부서의 부서장만 승인
     expectCode(() => approvePurchaseRequisition(k.at('2026-10-01T10:20:00+09:00'), k.actor('salesHead'), { purchaseRequisitionId: pr.id }), 'COM-002');
     approvePurchaseRequisition(k.at('2026-10-01T10:30:00+09:00'), head, { purchaseRequisitionId: pr.id });
     expect(t.notification.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.recipientId === purchase.employeeId && n.title.includes('PR-2610-0001'))).toBe(true);
-    const [po] = createPurchaseOrders(k.at('2026-10-01T11:00:00+09:00'), purchase, { purchaseRequisitionIds: [pr.id] });
-    expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', dueDate: '2026-10-10' });
+    const po = createPurchaseOrder(k.at('2026-10-01T11:00:00+09:00'), purchase, smnOrder);
+    expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED' });
+    // 입고 예정일을 비우면 구매요청의 희망 입고일
+    expect(t.purchaseOrderItem.find((l) => l.purchaseOrderId === po.id)?.expectedReceiptDate).toBe('2026-10-10');
     expect(t.supplier.find((s) => s.id === po.supplierId)?.supplierCode).toBe('SUP-04');
     expect(t.purchaseRequisition.find((p) => p.id === pr.id)?.purchaseRequisitionStatus).toBe('ORDERED');
     // 입고예정이 필요일 전에 오면 순소요가 0이 된다
@@ -123,7 +129,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     newSmnLotId = first.lot.id;
     expect(first.lot).toMatchObject({ lotNo: 'RM-SMN01-261002-001', lotType: 'RAW_MATERIAL', remainingTon: '1.000', producedDate: '2026-10-02' });
     expect(first.purchaseOrder.purchaseOrderStatus).toBe('PARTIALLY_RECEIVED');
-    expect(t.purchaseOrderItem.find((l) => l.id === poLine.id)).toMatchObject({ receivedTon: '1.000', scheduledReceiptTon: '0.500' });
+    expect([receivedTonOf(t, poLine.id), remainingTonOf(t, poLine)]).toEqual(['1.000', '0.500']);
     const second = receiveGoods(k.at('2026-10-03T08:00:00+09:00'), purchase, { purchaseOrderItemId: poLine.id, receivedTon: '0.500', receiptDate: '2026-10-03' });
     expect(second.purchaseOrder.purchaseOrderStatus).toBe('RECEIVED');
     expect(t.yard.find((y) => y.id === first.goodsReceipt.yardId)?.yardType).toBe('RAW_MATERIAL');

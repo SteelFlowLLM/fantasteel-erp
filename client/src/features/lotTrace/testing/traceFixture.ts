@@ -140,17 +140,13 @@ export function buildTraceFixture(): TraceFixture {
       purchaseOrderNo: issueBusinessNo(tRm, 'PURCHASE_ORDER'),
       supplierId: supplier.id,
       purchaseOrderStatus: 'RECEIVED',
-      dueDate: null,
-      orderedEmployeeId: purchase,
     });
     const poItem = insertRow(tRm, 'purchaseOrderItem', {
       purchaseOrderId: po.id,
-      lineNo: 1,
-      itemId: ore.id,
       purchaseRequisitionId: pr.id,
+      itemId: ore.id,
       orderedTon: '500.000',
-      receivedTon: '500.000',
-      scheduledReceiptTon: '0.000',
+      expectedReceiptDate: '2026-09-29',
     });
     const receipt = insertRow(tRm, 'goodsReceipt', {
       goodsReceiptNo: issueBusinessNo(tRm, 'GOODS_RECEIPT'),

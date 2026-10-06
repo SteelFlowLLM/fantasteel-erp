@@ -81,9 +81,12 @@ export async function stockRawMaterialsViaApi(receiptDate: string, tons: Partial
   as('purchaseHead');
   for (const id of requisitionIds) await approvalApi.approve({ purchaseRequisitionId: id, expectedUpdatedAt: (await purchaseRequisitionApi.detail(id)).updatedAt });
   as('purchase');
-  const candidateIds = (await purchaseOrderApi.candidateItems()).filter((i) => requisitionIds.includes(i.id)).map((i) => i.id);
-  const purchaseOrders = await purchaseOrderApi.create({ purchaseRequisitionIds: candidateIds, dueDate: '' });
+  // 발주는 공급업체 1곳당 1건: 원료마다 기본 공급업체가 달라 후보 요청마다 발주 1건
+  const candidates = (await purchaseOrderApi.candidateItems()).filter((i) => requisitionIds.includes(i.id));
+  const purchaseOrders = await purchaseOrderApi.create(
+    candidates.map((i) => ({ supplierId: i.supplierId ?? 0, items: [{ purchaseRequisitionId: i.id, orderedTon: i.requestedTon, expectedReceiptDate: '' }] })),
+  );
   for (const line of purchaseOrders.flatMap((po) => po.items)) {
-    await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.scheduledReceiptTon, receiptDate });
+    await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.remainingTon, receiptDate });
   }
 }
