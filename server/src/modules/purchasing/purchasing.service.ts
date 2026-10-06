@@ -7,6 +7,8 @@ import {
   type AuthUser,
   type BusinessEventType,
   type PageResult,
+  type PurchaseOrderStatus,
+  type PurchaseOrderView,
   type PurchaseRequisitionDetail,
   type PurchaseRequisitionStatus,
   type PurchaseRequisitionSummary,
@@ -18,10 +20,12 @@ import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import type { ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
-import { PurchasingRepository, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
+import { PurchasingRepository, type PurchaseOrderFilter, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
 type RequisitionRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findRequisition']>>>;
+type PurchaseOrderRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findPurchaseOrder']>>>;
 
 /** 구매요청 등록 값. REST(DTO)와 Message → ERP 초안 payload가 같은 모양으로 들어온다 */
 export interface CreateRequisitionInput {
@@ -229,6 +233,22 @@ export class PurchasingService {
     );
   }
 
+  // ── 발주 조회 (REQ-PUR-003·004) ───────────────────────
+
+  async listPurchaseOrders(query: ListPurchaseOrdersQuery): Promise<PageResult<PurchaseOrderView>> {
+    const filter: PurchaseOrderFilter = { purchaseOrderStatus: query.purchaseOrderStatus, supplierId: query.supplierId };
+    const page = query.page ?? 1;
+    const size = query.size ?? DEFAULT_PAGE_SIZE;
+    const [total, rows] = await Promise.all([this.repository.countPurchaseOrders(this.prisma, filter), this.repository.findPurchaseOrders(this.prisma, filter, { skip: (page - 1) * size, take: size })]);
+    return { items: rows.map((row) => this.toPurchaseOrderView(row)), page, size, total };
+  }
+
+  async purchaseOrderDetail(id: number): Promise<PurchaseOrderView> {
+    const row = await this.repository.findPurchaseOrder(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '발주를 찾을 수 없어요');
+    return this.toPurchaseOrderView(row);
+  }
+
   // ── 계산·모양 ─────────────────────────────────────────
 
   /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
@@ -316,6 +336,39 @@ export class PurchasingService {
       rejectReason: row.rejectReason,
       salesOrderId: salesOrder?.id ?? null,
       salesOrderNo: salesOrder?.salesOrderNo ?? null,
+    };
+  }
+
+  private toPurchaseOrderView(row: PurchaseOrderRow): PurchaseOrderView {
+    const zero = new Prisma.Decimal(0);
+    const lines = row.purchaseOrderItems.map((line) => {
+      const received = line.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), zero);
+      return { line, received, remaining: line.orderedTon.minus(received) };
+    });
+    const total = (pick: (l: (typeof lines)[number]) => Prisma.Decimal) => lines.reduce((sum, l) => sum.plus(pick(l)), zero).toFixed(3);
+    return {
+      id: row.id,
+      purchaseOrderNo: row.purchaseOrderNo,
+      purchaseOrderStatus: row.purchaseOrderStatus as PurchaseOrderStatus,
+      supplierId: row.supplierId,
+      supplierName: row.supplier.supplierName,
+      totalOrderedTon: total((l) => l.line.orderedTon),
+      totalReceivedTon: total((l) => l.received),
+      totalRemainingTon: total((l) => l.remaining),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      items: lines.map(({ line, received, remaining }) => ({
+        purchaseOrderItemId: line.id,
+        purchaseRequisitionId: line.purchaseRequisitionId,
+        purchaseRequisitionNo: line.purchaseRequisition.purchaseRequisitionNo,
+        itemId: line.itemId,
+        itemCode: line.item.itemCode,
+        itemName: line.item.itemName,
+        orderedTon: line.orderedTon.toFixed(3),
+        expectedReceiptDate: line.expectedReceiptDate ? dateOnly(line.expectedReceiptDate) : null,
+        receivedTon: received.toFixed(3),
+        remainingTon: remaining.toFixed(3),
+      })),
     };
   }
 }

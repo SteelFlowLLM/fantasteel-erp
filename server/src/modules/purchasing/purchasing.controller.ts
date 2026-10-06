@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type PageResult, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type PageResult, type PurchaseOrderView, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
+import { ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingService } from './purchasing.service';
 
@@ -49,5 +50,17 @@ export class PurchasingController {
   @RequirePermission(PERMISSION.PURCHASE_REQUISITION_CREATE, 'USE')
   resubmitRequisition(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ResubmitPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
     return this.service.resubmit(user, id, dto);
+  }
+
+  @Get('purchase-orders')
+  @RequirePermission(PERMISSION.PURCHASE_ORDER_CONFIRM, 'VIEW')
+  listPurchaseOrders(@Query() query: ListPurchaseOrdersQuery): Promise<PageResult<PurchaseOrderView>> {
+    return this.service.listPurchaseOrders(query);
+  }
+
+  @Get('purchase-orders/:id')
+  @RequirePermission(PERMISSION.PURCHASE_ORDER_CONFIRM, 'VIEW')
+  purchaseOrderDetail(@Param('id', ParseIntPipe) id: number): Promise<PurchaseOrderView> {
+    return this.service.purchaseOrderDetail(id);
   }
 }
