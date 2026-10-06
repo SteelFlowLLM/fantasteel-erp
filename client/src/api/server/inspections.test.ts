@@ -181,6 +181,32 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     expect(outcome).toEqual({ lotId: 501, lotNo: 'CL-HSM1-261005-001', inspectionResult: 'PENDING', autoReservedQty: 0, surplusLotNos: [], surplusQty: 0, excludedLotQty: 0, releasedAllocationCount: 0, releasedReservationQty: 0, salesOrderItem: null });
   });
 
+  it('저장 뒤 LOT 생산계획의 연결 수주 품목과 부족(판정 반영 뒤 값)을 안내에 싣는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+      if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [coilRow]);
+      if (c.method === 'POST' && c.path === '/quality-inspections') return ok({ ...coilDetail, inspectionResult: 'PASS', stockSync: { ...noStock, eligibleAddedQty: 1, autoReservedQty: 1 } });
+      if (c.path === '/production-plans/300') {
+        return ok({
+          id: 300,
+          itemCode: 'CL-SS275-8x1500',
+          customerName: '한빛건설',
+          dueDate: '2026-10-30',
+          reproduction: {
+            salesOrderItemId: 41, salesOrderId: 4, salesOrderNo: 'SO-2610-001', lineNo: 1, salesOrderItemStatus: 'OPEN',
+            unshippedQty: 5, openPlans: [], orderedQty: 5, shippedQty: 0, activeReservedQty: 4, unsecuredQty: 1,
+            openPlanRemainingQty: 1, additionalPlanQty: 0, reservationAvailableQty: 0, reproductionNeedQty: 0,
+          },
+        });
+      }
+      return undefined;
+    });
+    const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 1, measuredValue: '300' }], expectedUpdatedAt: null });
+    // 계획은 저장 뒤에 읽는다 (자동 예약이 반영된 부족)
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    expect(paths.indexOf('GET /production-plans/300')).toBeGreaterThan(paths.indexOf('POST /quality-inspections'));
+    expect(outcome.salesOrderItem).toMatchObject({ salesOrderNo: 'SO-2610-001', lineNo: 1, shortage: { unsecuredQty: 1, openPlanRemainingQty: 1 } });
+  });
+
   it('검사 행이 있으면 PATCH로 고치고 화면을 연 시각을 expectedUpdatedAt으로 보낸다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);

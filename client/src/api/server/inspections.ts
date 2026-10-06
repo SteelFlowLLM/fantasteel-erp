@@ -278,18 +278,21 @@ async function register(input: RegisterInspectionInput): Promise<RegisterInspect
     const expectedUpdatedAt = input.expectedUpdatedAt ?? (await serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${row.qualityInspectionId}`)).updatedAt;
     saved = await serverRequest<QualityInspectionSaveResult>('PATCH', `/quality-inspections/${row.qualityInspectionId}`, { body: { expectedUpdatedAt, values } });
   }
+  // 저장 뒤 연결 수주 품목의 부족 (판정·자동 예약이 반영된 값). 계획을 못 읽으면 비워 둔다
+  const linked = await linkedOfPlan(row.productionPlanId);
   return {
     lotId: saved.lotId,
     lotNo: saved.lotNo,
     inspectionResult: saved.inspectionResult,
-    // 판정 뒤 재고 반영 결과(stockSync). 적격이 된 매수 중 자동 예약하지 못한 것이 여재다. 서버는 여재 LOT 번호를 주지 않는다
+    // 판정 뒤 재고 반영 결과(stockSync). 적격이 된 매수 중 자동 예약하지 못한 것이 여재다.
+    // 여재 LOT 번호는 주지 않는다: 어느 LOT이 여재인지 계산식이 문서에 없다 (inventory.md 8장 🟡)
     autoReservedQty: saved.stockSync.autoReservedQty,
     surplusLotNos: [],
     surplusQty: Math.max(0, saved.stockSync.eligibleAddedQty - saved.stockSync.autoReservedQty),
     excludedLotQty: saved.stockSync.eligibleRemovedQty,
     releasedAllocationCount: saved.stockSync.releasedAllocationCount,
     releasedReservationQty: saved.stockSync.releasedReservationQty,
-    salesOrderItem: null,
+    salesOrderItem: linked.salesOrderItem,
   };
 }
 
