@@ -3,17 +3,20 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { NumberingRepository } from '../../common/numbering/numbering.repository';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { InventoryService } from '../inventory/inventory.service';
 import { QualityRepository } from './quality.repository';
 import { QualityService } from './quality.service';
 
 const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
+// 이 파일은 검사 판정만 본다. 판정 뒤 재고 반영(inventory.onLotsEligibilityChanged)은 sales-order/sales-flow.spec.ts에서 확인한다
+const inventory = { onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
 
 // 실제 DB(npm test의 fs_prod)를 쓴다. 다른 테스트의 LOT과 섞이지 않도록 이 파일의 LOT 번호는 모두 PREFIX로 시작한다.
 const PREFIX = 'QT-';
 
 describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const standardIds: number[] = [];
@@ -172,7 +175,7 @@ describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
 
 describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const inspectionIds: Record<string, number> = {};
@@ -298,7 +301,7 @@ describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
 
 describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   let tempSteelGradeId: number;
@@ -491,7 +494,7 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
 
 describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const standardIds: number[] = [];
