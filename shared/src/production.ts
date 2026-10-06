@@ -307,3 +307,35 @@ export interface HotRollingDetail {
   /** 이 계획의 열연 실적이 만든 코일 */
   coils: PlanLot[];
 }
+
+// ── 실적 시뮬레이션 (REQ-PRD-007, BP-SEED-01) ─────────────
+
+/** 시뮬레이션이 만든 공정 실적 한 건 */
+export interface SimulationStep {
+  processType: ProcessType;
+  productionResultId: number;
+  startedAt: string;
+  completedAt: string;
+  outputLotNos: string[];
+  /** 연주만: 히트에서 나올 수 있는 최대 매수 */
+  plannedQty: number | null;
+  /** 연주만: 샘플 손실률 0~0.0500 */
+  sampleLossRate: string | null;
+  /** 연주만: floor(계획 매수 × 샘플 손실률) */
+  lossQty: number | null;
+  outputQty: number | null;
+  /** 연주만: 손실 매수 ÷ 계획 매수 */
+  actualLossRate: string | null;
+}
+
+/** 실적 시뮬레이션 결과 (POST /production-plans/:id/simulate-results) */
+export interface SimulationResult {
+  productionPlanId: number;
+  productionPlanNo: string;
+  /** 같은 시드로 다시 실행하면 같은 손실이 나온다 */
+  randomSeed: number;
+  steps: SimulationStep[];
+  /** 코일 계획에서 열연을 건너뛴 이유 (예: 검사 합격한 슬래브가 없음). 건너뛰지 않았으면 null */
+  skippedRolling: string | null;
+  productionPlanStatus: ProductionPlanStatus;
+}

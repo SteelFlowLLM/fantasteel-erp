@@ -4,6 +4,7 @@ import { HotRollingService } from './hot-rolling.service';
 import { ProductionController } from './production.controller';
 import { ProductionResultRepository } from './production-result.repository';
 import { ProductionResultService } from './production-result.service';
+import { ProductionSimulationService } from './production-simulation.service';
 import { ProductionRepository } from './production.repository';
 import { ProductionService } from './production.service';
 
@@ -12,7 +13,7 @@ import { ProductionService } from './production.service';
   // inventory → shipment → sales-order → production 순환 import라 forwardRef
   imports: [forwardRef(() => InventoryModule)],
   controllers: [ProductionController],
-  providers: [ProductionService, ProductionRepository, ProductionResultService, ProductionResultRepository, HotRollingService],
+  providers: [ProductionService, ProductionRepository, ProductionResultService, ProductionResultRepository, HotRollingService, ProductionSimulationService],
   exports: [ProductionService],
 })
 export class ProductionModule {}

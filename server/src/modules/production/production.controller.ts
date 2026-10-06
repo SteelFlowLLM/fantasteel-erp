@@ -1,12 +1,14 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type WorkContext } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type SimulationResult, type WorkContext } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
 import { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
 import { CancelProductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
+import { SimulateResultsDto } from './dto/simulation.dto';
 import { CompleteProductionResultDto, ListProductionResultsDto, RegisterProductionResultDto } from './dto/production-result.dto';
 import { HotRollingService } from './hot-rolling.service';
 import { ProductionResultService } from './production-result.service';
+import { ProductionSimulationService } from './production-simulation.service';
 import { ProductionService } from './production.service';
 
 const resultId = () => new ParseIntPipe({ exceptionFactory: () => new AppException('COM-004', '작업 실적 id는 정수여야 해요') });
@@ -24,6 +26,7 @@ export class ProductionController {
     private readonly service: ProductionService,
     private readonly results: ProductionResultService,
     private readonly hotRolling: HotRollingService,
+    private readonly simulation: ProductionSimulationService,
   ) {}
 
   /** 생산계획 목록 (API-200) */
@@ -133,5 +136,13 @@ export class ProductionController {
     @CurrentUser() user: AuthUser,
   ): Promise<HotRollingDetail> {
     return this.hotRolling.release(user, id, allocationIdParam, dto);
+  }
+
+  /** 실적 시뮬레이션 (API-209, BP-SEED-01): 계획을 골라 공정별 실적을 한 번에 만든다. 검사는 하지 않는다 */
+  @Post('production-plans/:id/simulate-results')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.PRODUCTION_RESULT_CONFIRM, 'USE')
+  simulate(@Param('id', planId()) id: number, @Body() dto: SimulateResultsDto, @CurrentUser() user: AuthUser): Promise<SimulationResult> {
+    return this.simulation.simulate(user, id, dto);
   }
 }
