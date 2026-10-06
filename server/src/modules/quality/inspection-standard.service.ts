@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import type { InspectionStandardDetail, InspectionStandardListItem, PageResult, ProcessType } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { CreateInspectionStandardDto } from './dto/create-inspection-standard.dto';
 import { INSPECTED_PROCESS_TYPES } from './dto/list-quality-inspections.dto';
 import type { ListInspectionStandardsDto } from './dto/list-inspection-standards.dto';
+import { findStandardItemProblem, inspectionStandardCodeOf } from './inspection-standard-items';
 import { InspectionStandardRepository, type InspectionStandardWithItems } from './inspection-standard.repository';
 import { pickLatestStandards } from './quality-inspection-list';
 
@@ -86,4 +88,55 @@ export class InspectionStandardService {
     if (!standard) throw new AppException('COM-003', '검사 기준을 찾을 수 없어요');
     return toInspectionStandardListItem(standard);
   }
+
+  /**
+   * 검사 기준 등록 (API-121, REQ-QC-002): 공정·강종의 첫 기준을 버전 1로 만든다.
+   * 이미 기준이 있으면 거부하고 새 버전(API-122)으로 고치게 한다 (quality.md 8장 API 모양, 2026-10-04 결정).
+   * 제강 기준의 항목이 강종 성분 규격이다(TRM-020). 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 없어 작업 로그는 남기지 않는다([06]).
+   */
+  async createInspectionStandard(dto: CreateInspectionStandardDto): Promise<InspectionStandardDetail> {
+    const items = dto.items.map((item) => ({
+      inspectionItemCode: item.inspectionItemCode.trim(),
+      inspectionItemName: item.inspectionItemName.trim(),
+      unit: item.unit?.trim() || null,
+      minValue: toDecimal(item.minValue),
+      maxValue: toDecimal(item.maxValue),
+      thicknessOverMm: toDecimal(item.thicknessOverMm),
+      thicknessUptoMm: toDecimal(item.thicknessUptoMm),
+      isRequired: item.isRequired ?? true,
+    }));
+    const problem = findStandardItemProblem(items);
+    if (problem) throw new AppException('COM-004', problem);
+
+    try {
+      const created = await this.prisma.$transaction(async (tx) => {
+        const steelGrade = await this.repository.findSteelGrade(tx, dto.steelGradeId);
+        if (!steelGrade) throw new AppException('COM-003', '강종을 찾을 수 없어요');
+        const existing = await this.repository.findStandardByProcessAndSteelGrade(tx, dto.processType, steelGrade.id);
+        if (existing) throw duplicateStandard(existing.inspectionStandardCode);
+
+        return this.repository.createStandardWithItems(
+          tx,
+          {
+            inspectionStandardCode: inspectionStandardCodeOf(steelGrade.steelGradeCode, dto.processType),
+            versionNo: 1,
+            processType: dto.processType,
+            steelGradeId: steelGrade.id,
+          },
+          items,
+        );
+      });
+      return this.getInspectionStandard(created.id);
+    } catch (error) {
+      // 같은 공정·강종을 동시에 등록하면 (코드, 버전) unique가 막는다
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw duplicateStandard();
+      throw error;
+    }
+  }
 }
+
+const toDecimal = (value: string | null | undefined) => (value === null || value === undefined ? null : new Prisma.Decimal(value));
+
+/** 중복 등록 (2026-10-04 결정: [04] 9.3에 코드가 없어 입력 에러로 돌려준다) */
+const duplicateStandard = (code?: string) =>
+  new AppException('COM-004', `이미 있는 검사 기준이에요${code ? ` (${code})` : ''}. 새 버전으로 고쳐 주세요`);

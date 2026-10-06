@@ -1,7 +1,8 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { PERMISSION, type InspectionStandardDetail, type InspectionStandardListItem, type PageResult } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
+import { CreateInspectionStandardDto } from './dto/create-inspection-standard.dto';
 import { ListInspectionStandardsDto } from './dto/list-inspection-standards.dto';
 import { InspectionStandardService } from './inspection-standard.service';
 
@@ -18,6 +19,13 @@ export class InspectionStandardController {
   @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'VIEW')
   listInspectionStandards(@Query() query: ListInspectionStandardsDto): Promise<PageResult<InspectionStandardListItem>> {
     return this.service.listInspectionStandards(query);
+  }
+
+  /** 검사 기준 등록 (API-121). 공정·강종의 첫 기준을 버전 1로 만든다. 응답은 등록된 기준 상세 */
+  @Post('inspection-standards')
+  @RequirePermission(PERMISSION.INSPECTION_STANDARD_MANAGE, 'USE')
+  createInspectionStandard(@Body() dto: CreateInspectionStandardDto): Promise<InspectionStandardDetail> {
+    return this.service.createInspectionStandard(dto);
   }
 
   /** 검사 기준 상세 조회 (API-120). :id는 기준 버전(inspection_standard) id, 옛 버전도 조회 */
