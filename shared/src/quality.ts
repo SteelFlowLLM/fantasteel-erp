@@ -73,5 +73,7 @@ export interface QualityInspectionDetail extends InspectedLotSummary {
   inspectorEmployeeName: string;
   /** ISO 8601 */
   inspectedAt: string;
+  /** ISO 8601. 측정값 수정(PATCH) 때 expectedUpdatedAt으로 돌려보낸다 */
+  updatedAt: string;
   items: QualityInspectionDetailItem[];
 }
