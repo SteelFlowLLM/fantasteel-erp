@@ -32,6 +32,21 @@ export function LotHeader({ area, lotNo, typeName, badges, actions }: { area: st
 }
 
 /** 이름-값 칸 묶음 (옛 qc-kv): 폭에 맞춰 여러 줄로 흐른다 */
+/** 강종 · 규격 칸: 강종과 규격 코드를 줄을 나눈다. 규격 코드는 하이픈에서 끊지 않고, 칸보다 길면 말줄임(전체는 툴팁) */
+export function GradeSpec({ steelGradeCode, itemCode }: { steelGradeCode: string | null; itemCode: string | null }) {
+  if (!steelGradeCode && !itemCode) return <span>—</span>;
+  return (
+    <span className="flex min-w-0 flex-col font-mono">
+      {steelGradeCode ? <span>{steelGradeCode}</span> : null}
+      {itemCode ? (
+        <span className="truncate whitespace-nowrap text-ink-2" title={itemCode}>
+          {itemCode}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function InfoGrid({ items }: { items: readonly { label: ReactNode; value: ReactNode }[] }) {
   return (
     <dl className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-x-4.5 gap-y-3">

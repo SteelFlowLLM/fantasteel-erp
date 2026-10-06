@@ -21,7 +21,7 @@ import { Segmented } from '@/components/Tabs';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
-import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
+import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
 import { inspectionOutcomeNotes } from '@/features/quality/lib/inspectionOutcomeNotes';
 import { pickNextPendingLot } from '@/features/quality/lib/nextPendingLot';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
@@ -155,9 +155,9 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           <ResultBadge result={row.inspectionResult} />
         </span>
       </div>
-      <span className="text-cap text-ink-3">
-        {LOT_TYPE_LABEL[row.lotType]} · {inspectionNameOf(row.processType)} · {row.steelGradeCode ?? '—'}
-        {row.itemCode ? ` ${row.itemCode}` : ''}
+      {/* 검사 이름에 LOT 유형이 들어 있다(예: 슬래브 표면·치수 검사). 규격 코드에 강종이 있어 히트만 강종을 쓴다 */}
+      <span className="truncate text-cap text-ink-3" title={row.itemCode ?? undefined}>
+        {inspectionNameOf(row.processType)} · {row.itemCode ?? row.steelGradeCode ?? '—'}
       </span>
       <span className="text-cap text-ink-3">
         {row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음'} · 생산완료일 {fmtDate(row.producedDate)}
@@ -234,7 +234,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
         <CardBody className="px-4 py-3">
           <InfoGrid
             items={[
-              { label: '강종 · 규격', value: <span className="font-mono">{[lot.steelGradeCode, lot.itemCode].filter(Boolean).join(' ') || '—'}</span> },
+              { label: '강종 · 규격', value: <GradeSpec steelGradeCode={lot.steelGradeCode} itemCode={lot.itemCode} /> },
               { label: '검사', value: inspectionNameOf(lot.processType) },
               {
                 label: '검사 기준',

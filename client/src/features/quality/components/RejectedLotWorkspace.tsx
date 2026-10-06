@@ -22,7 +22,7 @@ import { DispositionForm } from '@/features/quality/components/DispositionForm';
 import { ImpactCard } from '@/features/quality/components/ImpactCard';
 import { InspectionValuesTable } from '@/features/quality/components/InspectionValuesTable';
 import { inspectionHref } from '@/features/quality/components/InspectionWorkspace';
-import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
+import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { DispositionBadge, RejectReasonBadge, ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, limitText, lotIconOf, trimNum } from '@/features/quality/lib/qualityDisplay';
@@ -45,8 +45,8 @@ const TILES: readonly { key: Exclude<StatusFilter, 'ALL'>; label: string; classN
   {
     key: 'DOWNGRADED',
     label: DISPOSITION_STATUS_LABEL.DOWNGRADED,
-    className: 'bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
-    onClassName: 'shadow-[inset_0_0_0_2px_var(--color-ink-2)]',
+    className: 'bg-run-bg text-run',
+    onClassName: 'shadow-[inset_0_0_0_2px_var(--color-run)]',
   },
   { key: 'SCRAPPED', label: DISPOSITION_STATUS_LABEL.SCRAPPED, className: 'bg-danger-bg text-danger', onClassName: 'shadow-[inset_0_0_0_2px_var(--color-danger)]' },
 ];
@@ -237,7 +237,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
         <CardBody className="px-4 py-3">
           <InfoGrid
             items={[
-              { label: '강종 · 규격', value: <span className="font-mono">{[row.steelGradeCode, row.itemCode].filter(Boolean).join(' ') || '—'}</span> },
+              { label: '강종 · 규격', value: <GradeSpec steelGradeCode={row.steelGradeCode} itemCode={row.itemCode} /> },
               {
                 label: '불합격 원인',
                 value: own ? (
