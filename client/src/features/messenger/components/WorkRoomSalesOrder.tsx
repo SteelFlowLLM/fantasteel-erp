@@ -1,10 +1,13 @@
+'use client';
+
 // 업무방 상단 수주 정보 (REQ-MSG-001 "업무방은 수주에 연결하고 상단에 수주 정보를 표시", REQ-MSG-006 수주 화면 이동)
 import Link from 'next/link';
+import { useState } from 'react';
 import { ITEM_TYPE_LABEL } from '@/codes';
 import type { ChatRoomDetailView, WorkRoomSalesOrderItemView } from '@/api/messenger';
-import { ButtonLink } from '@/components/Button';
+import { Button, ButtonLink } from '@/components/Button';
 import { Icon } from '@/components/Icon';
-import { formatItemQty } from '@/features/messenger/lib/salesOrderQty';
+import { formatItemQty, formatShippedSummary } from '@/features/messenger/lib/salesOrderQty';
 import { SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
 import { dLabel, fmtTon } from '@/lib/format';
 
@@ -15,8 +18,9 @@ export function salesOrderStateNote(room: ChatRoomDetailView): string | null {
   return null;
 }
 
-/** 대화 위에 고정하는 한 줄 + 품목 줄 */
+/** 대화 위에 고정하는 한 줄. 품목 줄은 펼쳐서 본다 (방 정보 칸이 닫히거나 좁은 화면에서 숨어도 품목을 볼 수 있게) */
 export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
+  const [expanded, setExpanded] = useState(false);
   const note = salesOrderStateNote(room);
   if (room.chatRoomType !== 'WORK') return null;
   if (!room.salesOrder) {
@@ -29,29 +33,36 @@ export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
   }
   const salesOrder = room.salesOrder;
   return (
-    <div className="flex flex-none flex-col gap-1.5 border-b border-line bg-brand-tint/50 px-5 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-        <span className="inline-flex items-center gap-1.5">
-          <Icon name="clipboard" size="sm" className="text-brand" />
-          수주
-          <Link href={salesOrder.linkPath} className="font-mono font-semibold text-brand hover:underline">
-            {salesOrder.salesOrderNo}
-          </Link>
-          · {salesOrder.customerName}
-        </span>
+    <div className="flex flex-none flex-col gap-1.5 border-b border-line bg-brand-tint/50 px-5 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+        <Icon name="clipboard" size="sm" className="text-brand" />
+        <Link href={salesOrder.linkPath} className="font-mono text-sm font-semibold text-brand hover:underline">
+          {salesOrder.salesOrderNo}
+        </Link>
+        <span>{salesOrder.customerName}</span>
         {salesOrder.dueDate ? (
-          <span className="text-xs text-ink-2">
-            납기 {salesOrder.dueDate} ({dLabel(salesOrder.dueDate)})
-          </span>
+          <>
+            <span className="text-ink-3">·</span>
+            <span>
+              납기 {salesOrder.dueDate} ({dLabel(salesOrder.dueDate)})
+            </span>
+          </>
         ) : null}
+        <span className="text-ink-3">·</span>
+        <span>{formatShippedSummary(salesOrder.items)}</span>
         {salesOrder.cancelledAt ? <SalesOrderStatusBadge status="CANCELLED" /> : null}
-        <ButtonLink href={salesOrder.linkPath} size="sm" className="ml-auto">
-          수주 상세
-        </ButtonLink>
+        <span className="ml-auto flex items-center gap-1">
+          {salesOrder.items.length > 0 ? (
+            <Button size="sm" variant="ghost" icon={expanded ? 'chevron-up' : 'chevron-down'} aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+              품목 {salesOrder.items.length}
+            </Button>
+          ) : null}
+          <ButtonLink href={salesOrder.linkPath} size="sm">
+            수주 상세
+          </ButtonLink>
+        </span>
       </div>
-      {salesOrder.items.map((item) => (
-        <SalesOrderItemLine key={item.id} item={item} />
-      ))}
+      {expanded ? salesOrder.items.map((item) => <SalesOrderItemLine key={item.id} item={item} />) : null}
     </div>
   );
 }

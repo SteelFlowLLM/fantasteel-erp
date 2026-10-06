@@ -1,6 +1,7 @@
 'use client';
 
 // 대화 영역: 방 머리 · 업무방 수주 정보 · 메시지 · 입력창 (REQ-MSG-001~006)
+// 새 메시지 구분선: 방을 연 순간의 읽음 위치 뒤 첫 남의 메시지 위. 열자마자 읽음 처리돼도 남기고, 내가 보내면 지운다.
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
@@ -17,9 +18,9 @@ import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { InviteModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
+import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
 import { useChatMessages, useChatRoom, useMarkRoomRead } from '@/hooks/useMessenger';
-import { fmtDate } from '@/lib/format';
 
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
@@ -57,10 +58,16 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   /** 이전 메시지를 더 불러올 때 보던 자리를 지키려고 기억하는 스크롤 높이 */
   const keepFromHeight = useRef<number | null>(null);
   const lastMarkedId = useRef<number>(0);
+  const initialScrollDone = useRef(false);
+  const dividerRef = useRef<HTMLDivElement>(null);
+  /** 방을 연 순간의 읽음 위치. 안 읽은 메시지가 없었거나 내가 보낸 뒤면 null */
+  const [readBaseline, setReadBaseline] = useState<number | null>(() => (room.unreadCount > 0 ? (room.lastReadMessageId ?? 0) : null));
 
   const items = useMemo(() => messages.data?.items ?? [], [messages.data]);
   const lastId = items.at(-1)?.id ?? 0;
   const lastOthersId = [...items].reverse().find((m) => !m.isMine)?.id ?? 0;
+  const newDividerId = readBaseline === null ? null : firstUnreadId(items, readBaseline);
+  const layout = useMemo(() => layoutMessages(items, newDividerId), [items, newDividerId]);
 
   const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
   const myNames = useMemo(() => [me.employeeName, me.departmentName], [me.employeeName, me.departmentName]);
@@ -74,7 +81,16 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   useLayoutEffect(() => {
     const feed = feedRef.current;
     if (!feed) return;
-    if (keepFromHeight.current !== null) {
+    if (!initialScrollDone.current && items.length > 0) {
+      // 처음 열 때: 새 메시지 구분선이 있으면 그 자리를 위쪽에 보여 준다
+      initialScrollDone.current = true;
+      const divider = dividerRef.current;
+      if (divider) feed.scrollTop = divider.offsetTop - 8;
+      else scrollToBottom();
+      const bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight <= BOTTOM_SLACK;
+      atBottomRef.current = bottom;
+      setAtBottom(bottom);
+    } else if (keepFromHeight.current !== null) {
       feed.scrollTop += feed.scrollHeight - keepFromHeight.current;
       keepFromHeight.current = null;
     } else if (atBottomRef.current) {
@@ -95,7 +111,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
 
   // 읽음 처리: 보고 있고(창 포커스 + 맨 아래) 읽지 않은 남의 메시지가 있을 때만
   useEffect(() => {
-    if (!focused || !atBottom || lastOthersId === 0) return;
+    if (!focused || !atBottom || !atBottomRef.current || lastOthersId === 0) return;
     if (lastOthersId <= (room.lastReadMessageId ?? 0) || lastOthersId <= lastMarkedId.current) return;
     lastMarkedId.current = lastOthersId;
     markRead({ chatRoomId: room.id, lastMessageId: lastOthersId });
@@ -154,7 +170,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
               </div>
               {items.length === 0 ? <StateView kind="empty" icon="chat" title="아직 메시지가 없어요" text="첫 메시지를 보내 보세요" /> : null}
               {items.map((message, index) => {
-                const showDay = index === 0 || fmtDate(items[index - 1].createdAt) !== fmtDate(message.createdAt);
+                const { showDay, showNewDivider, isGroupStart, isGroupEnd } = layout[index];
                 return (
                   <div key={message.id}>
                     {showDay ? (
@@ -164,7 +180,14 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
                         <span className="h-px flex-1 bg-line" />
                       </div>
                     ) : null}
-                    <MessageBubble message={message} room={room} mentionNames={mentionNames} myNames={myNames} />
+                    {showNewDivider ? (
+                      <div ref={dividerRef} className="flex items-center gap-3 px-5 py-2 text-cap font-semibold text-danger" role="separator">
+                        <span className="h-px flex-1 bg-danger/40" />
+                        여기부터 새 메시지
+                        <span className="h-px flex-1 bg-danger/40" />
+                      </div>
+                    ) : null}
+                    <MessageBubble message={message} room={room} mentionNames={mentionNames} myNames={myNames} isGroupStart={isGroupStart} isGroupEnd={isGroupEnd} />
                   </div>
                 );
               })}
@@ -189,6 +212,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
         <Composer
           room={room}
           onSent={() => {
+            setReadBaseline(null);
             atBottomRef.current = true;
             setAtBottom(true);
           }}
