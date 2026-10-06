@@ -226,6 +226,8 @@ async function register(input: RegisterInspectionInput): Promise<RegisterInspect
     surplusLotNos: [],
     surplusQty: Math.max(0, saved.stockSync.eligibleAddedQty - saved.stockSync.autoReservedQty),
     excludedLotQty: saved.stockSync.eligibleRemovedQty,
+    releasedAllocationCount: saved.stockSync.releasedAllocationCount,
+    releasedReservationQty: saved.stockSync.releasedReservationQty,
     salesOrderItem: null,
   };
 }

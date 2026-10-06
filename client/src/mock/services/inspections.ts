@@ -99,6 +99,10 @@ export interface RegisterInspectionResult {
   surplusLotNos: string[];
   /** 품질 불합격으로 적격에서 빠진 LOT 수 */
   excludedLotQty: number;
+  /** 적격에서 빠진 LOT의 확정 배정을 해제한 건수 */
+  releasedAllocationCount: number;
+  /** 규격 풀을 다시 맞추며 해제한 ACTIVE 예약 매수 */
+  releasedReservationQty: number;
 }
 
 /** 측정값 등록·수정과 자동 판정 */
@@ -188,7 +192,13 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
     if (now !== 'ELIGIBLE' && (was === 'ELIGIBLE' || now === 'FAILED' || now === 'HEAT_FAILED')) lostEligibility.push(current);
   }
 
-  // 적격에서 빠진 것: 배정 해제 → 풀 재조정
+  // 적격에서 빠진 것: 배정 해제 → 풀 재조정. 화면 안내에 쓰려고 해제 전후를 센다 (해제 함수는 개수를 돌려주지 않는다)
+  const lostLotIds = new Set(lostEligibility.map((l) => l.id));
+  const releasedAllocationCount = tx.tables.allocation.filter((a) => lostLotIds.has(a.lotId) && a.allocationStatus === 'CONFIRMED').length;
+  const lostItemIds = new Set(lostEligibility.flatMap((l) => (l.itemId === null ? [] : [l.itemId])));
+  const activeReservedQty = () =>
+    tx.tables.reservation.filter((r) => lostItemIds.has(r.itemId) && r.reservationStatus === 'ACTIVE').reduce((sum, r) => sum + r.reservedQty, 0);
+  const reservedBefore = activeReservedQty();
   for (const lot of lostEligibility) releaseAllocationOfFailedLot(tx, lot.id);
   const lostByItem = new Map<number, LotRow[]>();
   for (const lot of lostEligibility) if (lot.itemId !== null) lostByItem.set(lot.itemId, [...(lostByItem.get(lot.itemId) ?? []), lot]);
@@ -196,6 +206,8 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
     const affected = uniqueIds(lots.map((l) => findById(tx.tables, 'productionPlan', l.productionPlanId)?.salesOrderItemId).filter((id): id is number => typeof id === 'number'));
     rebalancePool(tx, itemId, { affectedSalesOrderItemIds: affected, lotIds: lots.map((l) => l.id) });
   }
+
+  const releasedReservationQty = Math.max(0, reservedBefore - activeReservedQty());
 
   // 적격이 된 것: 계획별로 자동 예약
   let autoReservedQty = 0;
@@ -242,7 +254,7 @@ function applyEligibilityChanges(tx: MockTx, products: readonly LotRow[], before
       });
     }
   }
-  return { autoReservedQty, surplusLotNos: surplusLots.map((l) => l.lotNo), excludedLotQty: lostEligibility.length };
+  return { autoReservedQty, surplusLotNos: surplusLots.map((l) => l.lotNo), excludedLotQty: lostEligibility.length, releasedAllocationCount, releasedReservationQty };
 }
 
 function surplusReasonOf(plan: ProductionPlanRow | undefined, lots: readonly LotRow[]): string {

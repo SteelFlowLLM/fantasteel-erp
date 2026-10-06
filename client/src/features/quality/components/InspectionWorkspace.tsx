@@ -22,6 +22,7 @@ import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, 
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
+import { inspectionOutcomeNotes } from '@/features/quality/lib/inspectionOutcomeNotes';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, lotIconOf } from '@/features/quality/lib/qualityDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -346,21 +347,7 @@ function OutcomeCard({
   onNext: () => void;
 }) {
   const shortage = outcome.salesOrderItem?.shortage ?? null;
-  const notes: string[] = [];
-  if (outcome.inspectionResult === 'PASS') {
-    if (outcome.autoReservedQty > 0) notes.push(`원래 수주 품목에 ${outcome.autoReservedQty}매를 자동 예약했어요`);
-    if (outcome.surplusQty > 0) {
-      const lotNos = outcome.surplusLotNos.length > 0 ? ` (${outcome.surplusLotNos.join(', ')})` : '';
-      notes.push(`수주에 필요한 매수를 넘는 ${outcome.surplusQty}매는 여재가 됐어요${lotNos}`);
-    }
-    if (lotType !== 'HEAT' && heatPending) notes.push('상위 히트가 합격하면 예약·배정할 수 있어요');
-    if (lotType === 'HEAT') notes.push('이미 제품 검사에 합격한 하위 슬래브·코일이 있으면 같이 예약·배정할 수 있게 돼요');
-  } else if (outcome.inspectionResult === 'FAIL') {
-    notes.push(lotType === 'HEAT' ? '하위 슬래브·코일도 쓸 수 없어요' : '예약·배정·출고 대상에서 빠져요');
-    if (outcome.excludedLotQty > 0) notes.push(`적격에서 빠진 LOT ${outcome.excludedLotQty}개 · 걸려 있던 배정은 해제하고 부족분만 예약을 조정했어요`);
-  } else {
-    notes.push('필수 항목이 비어 있어 판정 대기로 저장했어요');
-  }
+  const notes = inspectionOutcomeNotes(outcome, lotType, heatPending);
   const pass = outcome.inspectionResult === 'PASS';
   const fail = outcome.inspectionResult === 'FAIL';
   return (

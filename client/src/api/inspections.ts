@@ -67,6 +67,10 @@ export interface RegisterInspectionOutcome {
   surplusQty: number;
   /** 불합격으로 적격에서 빠진 LOT 수 (히트면 하위 슬래브·코일 포함) */
   excludedLotQty: number;
+  /** 적격에서 빠진 LOT의 확정 배정을 해제한 건수 */
+  releasedAllocationCount: number;
+  /** 가용이 줄어 해제한 예약 매수 */
+  releasedReservationQty: number;
   salesOrderItem: LinkedSalesOrderItem | null;
 }
 
@@ -139,6 +143,8 @@ export const inspectionApi = {
         surplusLotNos: result.surplusLotNos,
         surplusQty: result.surplusLotNos.length,
         excludedLotQty: result.excludedLotQty,
+        releasedAllocationCount: result.releasedAllocationCount,
+        releasedReservationQty: result.releasedReservationQty,
         salesOrderItem: linkedSalesOrderItemOf(tx.tables, lot?.productionPlanId ?? null),
       };
     }),

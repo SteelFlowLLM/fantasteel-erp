@@ -154,7 +154,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 1, measuredValue: ' 300.5 ' }], expectedUpdatedAt: null });
     expect(writes(calls)).toEqual(['POST /quality-inspections']);
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ lotId: 501, values: [{ inspectionStandardItemId: 1, measuredValue: '300.5' }] });
-    expect(outcome).toEqual({ lotId: 501, lotNo: 'CL-HSM1-261005-001', inspectionResult: 'PENDING', autoReservedQty: 0, surplusLotNos: [], surplusQty: 0, excludedLotQty: 0, salesOrderItem: null });
+    expect(outcome).toEqual({ lotId: 501, lotNo: 'CL-HSM1-261005-001', inspectionResult: 'PENDING', autoReservedQty: 0, surplusLotNos: [], surplusQty: 0, excludedLotQty: 0, releasedAllocationCount: 0, releasedReservationQty: 0, salesOrderItem: null });
   });
 
   it('검사 행이 있으면 PATCH로 고치고 화면을 연 시각을 expectedUpdatedAt으로 보낸다', async () => {
@@ -178,7 +178,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
       return undefined;
     });
     const outcome = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: '999' }], expectedUpdatedAt: coilDetail.updatedAt });
-    expect(outcome).toMatchObject({ inspectionResult: 'FAIL', autoReservedQty: 0, surplusQty: 0, excludedLotQty: 1 });
+    expect(outcome).toMatchObject({ inspectionResult: 'FAIL', autoReservedQty: 0, surplusQty: 0, excludedLotQty: 1, releasedAllocationCount: 1, releasedReservationQty: 1 });
   });
 
   it('화면을 연 시각이 없으면 지금 검사 상세의 updatedAt으로 고친다', async () => {
