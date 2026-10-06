@@ -1,7 +1,7 @@
 // 불합격 관리 API (REQ-QC-004, REQ-INV-007, REQ-PRD-006, BP-QC-01, 14.1-6).
 // 불합격 LOT(히트 포함)과 불합격 히트의 하위 LOT에 불합격 상태(보류·격하·폐기)와 사유를 기록한다. 후속 처리(재판정·재작업·폐기 처리)는 없다.
 // 재생산 계획은 사람이 만든다(자동 없음): 생산계획·히트 편성 사용 권한으로 핵심 서비스 createReproductionPlan을 부른다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 목록·상세·상태 지정은 실제 서버를 부른다 (api/server/dispositions.ts). 재생산 계획은 서버 생산 모듈이 없어 "연결 전" 오류다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 목록·상세·상태 지정·재생산 계획은 실제 서버를 부른다 (api/server/dispositions.ts).
 import { historyWithItemNames, linkedSalesOrderItemOf, type LinkedSalesOrderItem } from '@/api/inspections';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
@@ -137,7 +137,7 @@ export const dispositionApi = {
    */
   createReproductionPlan: (input: { salesOrderItemId: number }): Promise<ReproductionOutcome> =>
     isServerDataSource()
-      ? Promise.reject<ReproductionOutcome>(new Error('재생산 계획은 아직 서버와 연결되지 않았어요'))
+      ? serverDispositionApi.createReproductionPlan(input)
       : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
       const result = createReproductionPlan(tx, userActor(actor.employee.id), input);

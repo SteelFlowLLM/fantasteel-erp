@@ -26,7 +26,7 @@ import {
 type Tables = Readonly<MockTables>;
 
 /**
- * 서버 모드에서 아직 받아 오지 못하는 값(연결 수주·작업 로그·불합격 지정 시각, api/server 주석 참고)인지.
+ * 서버 모드에서 아직 받아 오지 못하는 값(작업 로그·불합격 지정 시각, api/server 주석 참고)인지.
  * 화면은 실제로 없는 값("없음")과 구분해 "준비 중"으로 보인다
  */
 export const isServerPendingValue = (): boolean => isServerDataSource();

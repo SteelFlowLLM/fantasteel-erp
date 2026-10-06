@@ -110,13 +110,43 @@ const evidenceOf = (inspection: QualityInspectionDetail): RejectedLotEvidence =>
 const heat: RejectedLotListItem = { ...heatBase, evidence: evidenceOf(heatInspection) };
 const childSlab: RejectedLotListItem = { ...childSlabBase, evidence: evidenceOf(heatInspection) };
 const failedCoil: RejectedLotListItem = { ...failedCoilBase, evidence: evidenceOf(coilInspection) };
+const coilListRow: QualityInspectionListItem = { ...failedCoilBase, isLocked: false, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: coilInspection.inspectedAt };
 const heatListRow: QualityInspectionListItem = { ...heatBase, isLocked: false, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: heatInspection.inspectedAt };
 
+/** 코일(LOT 501)을 만든 생산계획 300: 수주 SO-2610-001 품목 1에 연결, 불합격으로 미확보 2매 · 재생산 필요 2매 */
+const plan300 = {
+  id: 300,
+  itemCode: 'CL-SS275-8x1500',
+  customerName: '한빛건설',
+  dueDate: '2026-10-30',
+  reproduction: {
+    salesOrderItemId: 41,
+    salesOrderId: 4,
+    salesOrderNo: 'SO-2610-001',
+    lineNo: 1,
+    salesOrderItemStatus: 'OPEN',
+    unshippedQty: 5,
+    openPlans: [{ id: 300, productionPlanNo: 'PP-2610-0001', productionPlanStatus: 'COMPLETED', isReproduction: false, shortageQty: 5, remainingTargetQty: 0 }],
+    orderedQty: 5,
+    shippedQty: 0,
+    activeReservedQty: 3,
+    unsecuredQty: 2,
+    openPlanRemainingQty: 0,
+    additionalPlanQty: 2,
+    reservationAvailableQty: 0,
+    reproductionNeedQty: 2,
+  },
+};
+
 function respond(c: ServerCall) {
+  if (c.path === '/production-plans/300') return ok(plan300);
   if (c.path === '/lots/rejected') return ok(page([failedCoil, childSlab, heat].filter((r) => c.query.lotId === undefined || String(r.lotId) === c.query.lotId)));
   if (c.path === '/quality-inspections/77') return ok(heatInspection);
   if (c.path === '/quality-inspections/88') return ok(coilInspection);
-  if (c.path === '/quality-inspections') return ok(page(c.query.lotId === '401' && c.query.status === 'done' ? [heatListRow] : []));
+  if (c.path === '/quality-inspections') {
+    const done = c.query.status === 'done' ? [heatListRow, coilListRow].filter((r) => String(r.lotId) === c.query.lotId) : [];
+    return ok(page(done));
+  }
   if (c.path === '/inspection-standards') return ok(page([]));
   return undefined;
 }
@@ -132,11 +162,15 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
       ['SL-CC1-261005-001', 'HEAT_FAILED', 'P', heatInspection.inspectedAt],
       ['HT-BOF1-261005-001', 'FAILED', 'P', heatInspection.inspectedAt],
     ]);
-    expect(rows[0]).toMatchObject({ heatNo: 'HT-BOF1-261005-001', dispositionStatus: 'HOLD', dispositionReason: '재검 대기', updatedAt: failedCoil.updatedAt, salesOrderItem: null });
+    expect(rows[0]).toMatchObject({ heatNo: 'HT-BOF1-261005-001', dispositionStatus: 'HOLD', dispositionReason: '재검 대기', updatedAt: failedCoil.updatedAt });
     expect(rows[0]).toMatchObject({ lotStatus: 'SHIPPED', itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanId: 300, productionPlanNo: 'PP-2610-0001' });
     // 히트는 규격·생산완료일이 없다
     expect(rows[2]).toMatchObject({ itemCode: null, producedDate: '', productionPlanNo: null });
-    expect(calls.map((c) => c.path)).toEqual(['/lots/rejected']);
+    // 근거 검사는 목록 응답에 있고, 연결 수주는 생산계획마다 한 번만 읽는다
+    expect(calls.map((c) => c.path).sort()).toEqual(['/lots/rejected', '/production-plans/300']);
+    expect(rows[0].salesOrderItem).toMatchObject({ salesOrderNo: 'SO-2610-001', lineNo: 1, customerName: '한빛건설', orderedQty: 5, shortage: { unsecuredQty: 2, reproductionNeedQty: 2 } });
+    // 계획이 없는 LOT(히트)은 연결 수주 없음
+    expect(rows[2].salesOrderItem).toBeNull();
   });
 
   it('상세: 검사 입력 조회 권한이 없으면 근거 검사 폼만 비우고, 불합격 항목은 목록 행 그대로 보인다', async () => {
@@ -183,9 +217,28 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
     await expect(dispositionApi.set({ lotId: 999, dispositionStatus: 'HOLD', dispositionReason: '확인' })).rejects.toMatchObject({ code: 'COM-003' });
   });
 
-  it('재생산 계획은 서버 생산 모듈이 없어 서버를 부르지 않고 연결 전 오류', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
-    await expect(dispositionApi.createReproductionPlan({ salesOrderItemId: 1 })).rejects.toThrow('아직 서버와 연결되지 않았어요');
-    expect(calls).toHaveLength(0);
+  it('상세: 영향과 자동 처리에 연결 수주 품목의 부족·재생산 필요와 같은 수주 품목의 계획을 채운다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    const detail = await dispositionApi.detail(501);
+    expect(detail?.row.salesOrderItem).toMatchObject({ salesOrderItemId: 41, dueDate: '2026-10-30', shortage: { activeReservedQty: 3, openPlanRemainingQty: 0, reproductionNeedQty: 2 } });
+    expect(detail?.plans).toEqual([{ productionPlanId: 300, productionPlanNo: 'PP-2610-0001', productionPlanStatus: 'COMPLETED', isReproduction: false, shortageQty: 5 }]);
+  });
+
+  it('상세: 생산계획을 읽을 권한이 없으면 연결 수주만 비우고 나머지는 보인다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) =>
+      c.path.startsWith('/production-plans') ? new Response(JSON.stringify({ success: false, error: { code: 'COM-002', message: '권한이 없어요' } }), { status: 403 }) : respond(c),
+    );
+    const detail = await dispositionApi.detail(501);
+    expect(detail?.row).toMatchObject({ lotId: 501, salesOrderItem: null });
+    expect(detail?.plans).toEqual([]);
+  });
+
+  it('재생산 계획은 생산 모듈의 재생산 API(POST /production-plans)를 부른다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
+      c.method === 'POST' && c.path === '/production-plans' ? ok({ reservedFromSurplusQty: 0, plan: { id: 301, productionPlanNo: 'PP-2610-0002', shortageQty: 2 } }) : respond(c),
+    );
+    const outcome = await dispositionApi.createReproductionPlan({ salesOrderItemId: 41 });
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ salesOrderItemId: 41 });
+    expect(outcome).toEqual({ reservedFromSurplusQty: 0, productionPlanNo: 'PP-2610-0002', shortageQty: 2 });
   });
 });

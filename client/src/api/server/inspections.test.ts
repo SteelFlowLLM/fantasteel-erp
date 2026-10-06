@@ -117,6 +117,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
       ['YIELD', null, null, null],
       ['CHARPY', '6.00', null, null],
     ]);
+    // 생산계획 300을 못 읽으면(이 테스트 서버에 없음) 연결 수주만 비운다
     expect(detail).toMatchObject({ heatLotId: 401, salesOrderItem: null, history: [], productionPlanId: 300 });
   });
 

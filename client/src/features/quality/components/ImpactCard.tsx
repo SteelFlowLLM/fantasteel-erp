@@ -5,7 +5,6 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { LinkedPlan, RejectedLotDetail } from '@/api/dispositions';
-import { isServerPendingValue } from '@/api/inspections';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -110,9 +109,7 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
             )}
           </div>
         ) : (
-          <span className="text-cap text-ink-3">
-            {isServerPendingValue() ? '연결 수주는 준비 중이에요 (서버 연결 전)' : '연결된 수주 품목이 없어 재생산 대상이 아니에요'}
-          </span>
+          <span className="text-cap text-ink-3">연결된 수주 품목이 없어 재생산 대상이 아니에요</span>
         )}
 
         <div className="flex flex-wrap gap-2">

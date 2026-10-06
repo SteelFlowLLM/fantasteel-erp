@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { RejectedLotDetail, RejectedLotListRow } from '@/api/dispositions';
-import { isServerPendingValue } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { ButtonLink } from '@/components/Button';
@@ -25,7 +24,6 @@ import { InspectionValuesTable } from '@/features/quality/components/InspectionV
 import { inspectionHref } from '@/features/quality/components/InspectionWorkspace';
 import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
-import { PendingValue } from '@/features/quality/components/PendingValue';
 import { DispositionBadge, RejectReasonBadge, ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, limitText, lotIconOf, trimNum } from '@/features/quality/lib/qualityDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -161,7 +159,7 @@ function RejectedItem({ row, active }: { row: RejectedLotListRow; active: boolea
         </span>
       </div>
       <div className="flex items-center gap-1.5 text-cap text-ink-3">
-        <span className="min-w-0 truncate">{row.salesOrderItem ? `${row.salesOrderItem.salesOrderNo} 품목 ${row.salesOrderItem.lineNo}` : isServerPendingValue() ? '연결 수주 준비 중' : '연결 수주 없음'}</span>
+        <span className="min-w-0 truncate">{row.salesOrderItem ? `${row.salesOrderItem.salesOrderNo} 품목 ${row.salesOrderItem.lineNo}` : '연결 수주 없음'}</span>
         {need > 0 ? (
           <Badge tone="danger" className="ml-auto">
             재생산 필요 {need}매
@@ -291,8 +289,6 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                       {SALES_ORDER_ITEM_STATUS_LABEL[soItem.salesOrderItemStatus]}
                     </span>
                   </span>
-                ) : isServerPendingValue() ? (
-                  <PendingValue />
                 ) : (
                   <span className="text-ink-3">없음 · 연결된 수주 품목이 없어요</span>
                 ),
