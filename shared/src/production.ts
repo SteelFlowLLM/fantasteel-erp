@@ -1,5 +1,6 @@
 // 생산 모듈 응답 타입 (docs/backend/production.md). 톤은 소수 3자리 문자열, 수율은 소수 4자리 문자열, 매수는 정수.
 import type { InspectionResult, ItemType, LotStatus, LotType, ProcessType, ProductionPlanStatus, SalesOrderItemStatus } from './codes';
+import type { AllocationView } from './shipment';
 
 /** 생산계획 목록 한 줄 (GET /production-plans) */
 export interface ProductionPlanSummary {
@@ -261,4 +262,48 @@ export interface WorkContext {
   openWork: OpenWork[];
   lastBlastFurnaceCode: string | null;
   lastConverterCode: string | null;
+}
+
+// ── 열연 투입 (REQ-PRD-004, REQ-INV-006, BP-INV-01) ─────────────
+
+/** 열연 배정 후보 슬래브 (FIFO: 생산완료일 → LOT 번호) */
+export interface HotRollingCandidate {
+  lotId: number;
+  lotNo: string;
+  producedDate: string | null;
+  heatNo: string | null;
+  yardId: number | null;
+  /** 1부터 */
+  fifoRank: number;
+  /** 앞에서 배정할 수 있는 매수만큼 추천 */
+  isRecommended: boolean;
+  /** 이 계획이 만든 슬래브인지 (아니면 다른 계획의 여재) */
+  isOwnPlan: boolean;
+}
+
+/** 열연 투입 화면 (GET /production-plans/:id/hot-rolling) */
+export interface HotRollingDetail {
+  plan: ProductionPlanSummary;
+  slabItemId: number;
+  slabItemCode: string;
+  /** 부족 매수 = 만들 코일 수 */
+  shortageQty: number;
+  /** 만든 코일 중 불합격이 아닌 것 */
+  usableCoilQty: number;
+  failedCoilQty: number;
+  /** 지금 확정(CONFIRMED) 열연 배정 수 */
+  confirmedAllocationQty: number;
+  /** 더 배정할 슬래브 = max(0, 부족 − 쓸 수 있는 코일 − 확정 배정) */
+  neededQty: number;
+  /** 대응 슬래브 규격 재고: 가용 = 현재고 − 판매 예약 − 열연 배정 (여재 포함) */
+  slabPool: { onHandQty: number; reservedQty: number; rollingAllocatedQty: number; availableQty: number };
+  /** 지금 배정할 수 있는 매수 = min(더 필요한 슬래브, 가용) */
+  recommendableQty: number;
+  /** 수주에 연결된 계획·진행중인 코일 계획만 열연한다 */
+  isRollable: boolean;
+  notRollableReason: string | null;
+  candidates: HotRollingCandidate[];
+  allocations: AllocationView[];
+  /** 이 계획의 열연 실적이 만든 코일 */
+  coils: PlanLot[];
 }
