@@ -339,3 +339,15 @@ export interface SimulationResult {
   skippedRolling: string | null;
   productionPlanStatus: ProductionPlanStatus;
 }
+
+// ── 재생산 (REQ-PRD-006, 14.1-6) ─────────────
+
+/** 재생산 계획 생성 결과 (POST /production-plans) */
+export interface ReproductionResult {
+  /** 만들기 전 판단값 */
+  check: ReproductionCheck;
+  /** 여재(예약 가용)에서 먼저 예약한 매수 */
+  reservedFromSurplusQty: number;
+  /** 여재로 다 채웠으면 null */
+  plan: ProductionPlanSummary | null;
+}

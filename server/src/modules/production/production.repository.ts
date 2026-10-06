@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ItemType, ProductionPlanStatus } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { lockProductionPlan } from '../../generated/prisma/sql';
+import { lockProductionPlan, lockSalesOrderItemForReproduction } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 목록·상세가 함께 쓰는 계획 요약 */
@@ -145,6 +145,10 @@ export class ProductionRepository {
   /** 계획의 작업 실적 (작업 중 여부·공정별 수) */
   findResultsOfPlan(tx: Tx, productionPlanId: number) {
     return tx.productionResult.findMany({ where: { productionPlanId }, select: { id: true, processType: true, startedAt: true, completedAt: true }, orderBy: { id: 'asc' } });
+  }
+
+  async lockSalesOrderItem(tx: Tx, salesOrderItemId: number) {
+    return (await tx.$queryRawTyped(lockSalesOrderItemForReproduction(salesOrderItemId)))[0] ?? null;
   }
 
   /** 재생산 판단: 수주 품목의 주문·상태·예약과 연결 계획 */

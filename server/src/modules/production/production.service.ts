@@ -4,6 +4,7 @@ import {
   ITEM_TYPE,
   PROCESS_TYPE,
   PRODUCTION_PLAN_STATUS,
+  SALES_ORDER_ITEM_STATUS,
   type AuthUser,
   type HeatFormation,
   type ItemType,
@@ -12,6 +13,7 @@ import {
   type ProductionPlanStatus,
   type ProductionPlanSummary,
   type ReproductionCheck,
+  type ReproductionResult,
   type SalesOrderItemStatus,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -308,6 +310,56 @@ export class ProductionService {
       });
     });
     return this.getPlanDetail(id);
+  }
+
+  // ── 재생산 계획 생성 (API-202, REQ-PRD-006, BP-QC-01) ────────
+
+  /**
+   * 합격 매수가 수주 대비 부족하면(추가 계획 필요 > 0) 여재(예약 가용)를 먼저 예약하고, 남은 매수만 재생산 계획으로 만든다 (14.1-5·6).
+   * 진행 계획 잔여 목표나 판정 대기 제품으로 채울 수 있으면 만들지 않는다. 자동 초안은 P2(REQ-AGT-003)라 담당자가 직접 만든다.
+   */
+  async createReproductionPlan(user: AuthUser, salesOrderItemId: number): Promise<ReproductionResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await this.repository.lockSalesOrderItem(tx, salesOrderItemId);
+      if (!locked) throw new AppException('COM-003', '수주 품목을 찾을 수 없어요');
+      if (locked.sales_order_item_status !== SALES_ORDER_ITEM_STATUS.OPEN && locked.sales_order_item_status !== SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED) {
+        throw new AppException('COM-001', '취소·출하완료된 수주 품목은 재생산하지 않아요');
+      }
+      const check = await this.reproductionCheck(tx, salesOrderItemId);
+      if (!check || check.additionalPlanQty <= 0) {
+        throw new AppException('COM-001', '추가 계획이 필요하지 않아요 (예약·진행 계획·검사 대기 제품으로 채워져요)');
+      }
+      const reservedFromSurplusQty = await this.inventory.reserveForSalesOrderItem(tx, {
+        salesOrderId: locked.sales_order_id,
+        salesOrderItemId,
+        itemId: locked.item_id,
+        qty: check.additionalPlanQty,
+        actor: user,
+      });
+      const shortageQty = check.additionalPlanQty - reservedFromSurplusQty;
+      if (shortageQty <= 0) return { check, reservedFromSurplusQty, plan: null };
+
+      const heat = await this.calcHeatPlanForItem(tx, locked.item_id, shortageQty);
+      const plan = await this.repository.createPlan(tx, {
+        productionPlanNo: await this.numbering.nextDocumentNumber(tx, 'PRODUCTION_PLAN'),
+        salesOrderItemId,
+        itemId: locked.item_id,
+        shortageQty,
+        heatCount: heat.heatCount,
+        productionPlanStatus: PRODUCTION_PLAN_STATUS.PLANNED,
+        isReproduction: true,
+      });
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.REPRODUCTION_PLAN_CREATED,
+        actor: user,
+        target: { table: 'production_plan', id: plan.id },
+        salesOrderId: locked.sales_order_id,
+        after: { ...planSnapshot(plan), isReproduction: true, targetTon: heat.targetTon, heatTon: heat.heatTon, reservedFromSurplusQty, check },
+        reason: `QUALITY_FAILURE: 합격 매수가 수주 대비 ${check.additionalPlanQty}매 부족${reservedFromSurplusQty > 0 ? ` (여재 ${reservedFromSurplusQty}매 먼저 예약)` : ''} → 재생산 ${shortageQty}매 (히트 ${heat.heatCount}개)`,
+      });
+      const created = await this.repository.findPlan(tx, plan.id);
+      return { check, reservedFromSurplusQty, plan: created ? toPlanSummary(created) : null };
+    });
   }
 
   // ── 재생산 판단 (4.5, 14.1-6) ─────────────────────────

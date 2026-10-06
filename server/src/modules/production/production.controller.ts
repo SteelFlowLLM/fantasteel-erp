@@ -1,9 +1,9 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type SimulationResult, type WorkContext } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type ReproductionResult, type SimulationResult, type WorkContext } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
 import { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
-import { CancelProductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
+import { CancelProductionPlanDto, CreateReproductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
 import { SimulateResultsDto } from './dto/simulation.dto';
 import { CompleteProductionResultDto, ListProductionResultsDto, RegisterProductionResultDto } from './dto/production-result.dto';
 import { HotRollingService } from './hot-rolling.service';
@@ -34,6 +34,13 @@ export class ProductionController {
   @RequirePermission(PERMISSION.PRODUCTION_PLAN_CONFIRM, 'VIEW')
   listPlans(@Query() query: ListProductionPlansDto): Promise<PageResult<ProductionPlanSummary>> {
     return this.service.listPlans(query);
+  }
+
+  /** 재생산 계획 생성 (API-202): 일반 계획은 수주 등록 때 자동으로 생기므로 이 API는 재생산용 */
+  @Post('production-plans')
+  @RequirePermission(PERMISSION.PRODUCTION_PLAN_CONFIRM, 'USE')
+  createReproductionPlan(@Body() dto: CreateReproductionPlanDto, @CurrentUser() user: AuthUser): Promise<ReproductionResult> {
+    return this.service.createReproductionPlan(user, dto.salesOrderItemId);
   }
 
   /** 생산계획 상세 (API-201): 연결 수주 품목, 히트 편성표, 진행, 생산 LOT과 판정, 재생산 판단 */
