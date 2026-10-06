@@ -14,7 +14,7 @@ export function ResultBadge({ result, className }: { result: InspectionResult; c
 /** 불합격 상태: 보류 / 격하 / 폐기. 아직 지정하지 않았으면 '미지정' */
 export function DispositionBadge({ status }: { status: DispositionStatus | null }) {
   if (status === 'HOLD') return <Badge tone="wait">{DISPOSITION_STATUS_LABEL.HOLD}</Badge>;
-  if (status === 'DOWNGRADED') return <Badge tone="outline">{DISPOSITION_STATUS_LABEL.DOWNGRADED}</Badge>;
+  if (status === 'DOWNGRADED') return <Badge tone="run">{DISPOSITION_STATUS_LABEL.DOWNGRADED}</Badge>;
   if (status === 'SCRAPPED') return <Badge tone="danger">{DISPOSITION_STATUS_LABEL.SCRAPPED}</Badge>;
   return <Badge>미지정</Badge>;
 }
