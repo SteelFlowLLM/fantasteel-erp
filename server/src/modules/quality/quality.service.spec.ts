@@ -404,6 +404,17 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     };
     lots = Object.fromEntries(Object.entries(created).map(([key, lot]) => [key, lot.id]));
     lotIds.push(...Object.values(lots));
+
+    // 재고 반영 매수 확인용: 합격 히트 아래의 코일 (적격 = 자기 PASS + 상위 히트 PASS)
+    const stStandard = await prisma.inspectionStandard.findUniqueOrThrow({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
+    });
+    const stockHeat = await prisma.lot.create({ data: { lotNo: 'QR-H-STOCK', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } });
+    lotIds.push(stockHeat.id);
+    await prisma.qualityInspection.create({
+      data: { lotId: stockHeat.id, inspectionStandardId: stStandard.id, inspectionResult: 'PASS', inspectorEmployeeId: user.employeeId, inspectedAt: new Date() },
+    });
+    await prisma.lotRelation.create({ data: { parentLotId: stockHeat.id, childLotId: lots.coilStock, lotRelationEvidence: 'ACTUAL_INPUT' } });
   });
 
   afterAll(async () => {
@@ -413,6 +424,7 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     await prisma.businessEvent.deleteMany({ where: { targetType: 'quality_inspection', targetId: { in: inspectionIds } } });
     await prisma.qualityInspectionValue.deleteMany({ where: { qualityInspectionId: { in: inspectionIds } } });
     await prisma.qualityInspection.deleteMany({ where: { id: { in: inspectionIds } } });
+    await prisma.lotRelation.deleteMany({ where: { childLotId: { in: lotIds } } });
     await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
     await prisma.productionResult.deleteMany({ where: { id: { in: resultIds } } });
     await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
@@ -432,14 +444,15 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     expect(await prisma.qualityInspectionValue.count({ where: { qualityInspectionId: detail.qualityInspectionId } })).toBe(7);
   });
 
-  it('판정 뒤 재고 반영 결과를 응답 stockSync로 합친다: 적격 +3 중 자동 예약 2, 나머지 1매는 여재', async () => {
+  it('적격이 된 매수는 판정 전후 적격 LOT으로 센다 (재고를 다시 세며 생긴 on_hand 보정분은 섞지 않음), 자동 예약은 inventory 결과', async () => {
+    // inventory가 on_hand를 4 → 7로 다시 셌어도(보정 2매 포함) 이번 판정으로 적격이 된 LOT은 코일 1개다
     const { stub, calls } = syncingInventory([
-      { itemId: 1, previousOnHandQty: 4, onHandQty: 7, autoReservedQty: 2, releasedReservationQty: 0, releasedAllocationCount: 0 },
+      { itemId: 1, previousOnHandQty: 4, onHandQty: 7, autoReservedQty: 1, releasedReservationQty: 0, releasedAllocationCount: 0 },
     ]);
     const withStock = new QualityService(prisma, new QualityRepository(), recorder, stub);
     const detail = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: passValues9mm() }, user);
     expect(calls).toEqual([[lots.coilStock]]);
-    expect(detail.stockSync).toEqual({ eligibleAddedQty: 3, autoReservedQty: 2, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
+    expect(detail.stockSync).toEqual({ eligibleAddedQty: 1, autoReservedQty: 1, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
   });
 
   it('작업 로그 INSPECTION_REGISTERED를 남기고 LOT 타임라인에 연결한다 (REQ-LOG-002)', async () => {
@@ -615,6 +628,17 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     };
     lots = Object.fromEntries(Object.entries(created).map(([key, lot]) => [key, lot.id]));
     lotIds.push(...Object.values(lots));
+
+    // 재고 반영 매수 확인용: 합격 히트 아래의 코일 (적격 = 자기 PASS + 상위 히트 PASS)
+    const stStandard = await prisma.inspectionStandard.findUniqueOrThrow({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
+    });
+    const stockHeat = await prisma.lot.create({ data: { lotNo: 'QU-H-STOCK', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } });
+    lotIds.push(stockHeat.id);
+    await prisma.qualityInspection.create({
+      data: { lotId: stockHeat.id, inspectionStandardId: stStandard.id, inspectionResult: 'PASS', inspectorEmployeeId: user.employeeId, inspectedAt: new Date() },
+    });
+    await prisma.lotRelation.create({ data: { parentLotId: stockHeat.id, childLotId: lots.coilStock, lotRelationEvidence: 'ACTUAL_INPUT' } });
 
     const customer = await prisma.customer.findFirstOrThrow({ select: { id: true } });
     const salesOrder = await prisma.salesOrder.create({
