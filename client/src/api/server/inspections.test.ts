@@ -1,7 +1,6 @@
 // 검사 입력 서버 어댑터: 서버 응답 → 화면 모양, LOT id로 폼 만들기(검사 행 없으면 기준에서), 등록(POST)·수정(PATCH) 고르기.
 import type { InspectionStandardDetail, QualityInspectionDetail, QualityInspectionListItem } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { InputError } from '@/api/errors';
 import { inspectionApi } from '@/api/inspections';
 import { fail, ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
@@ -214,12 +213,15 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     expect((calls.find((c) => c.method === 'PATCH')?.body as { expectedUpdatedAt: string }).expectedUpdatedAt).toBe(coilDetail.updatedAt);
   });
 
-  it('저장한 값을 지우려 하면 서버에 보내지 않고 그 칸에 입력 오류를 보인다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, () => undefined);
-    const error = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: '' }], expectedUpdatedAt: null }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(InputError);
-    expect((error as InputError).fieldErrors).toHaveProperty('values.11');
-    expect(calls).toHaveLength(0);
+  it('검사 행이 있으면 비운 칸은 null로 보내 저장한 값을 지운다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+      if (c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
+      if (c.method === 'PATCH') return ok({ ...coilDetail, inspectionResult: 'PENDING', stockSync: { eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 } });
+      return undefined;
+    });
+    const saved = await inspectionApi.register({ lotId: 501, values: [{ inspectionStandardItemId: 11, measuredValue: ' ' }], expectedUpdatedAt: coilDetail.updatedAt });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ expectedUpdatedAt: coilDetail.updatedAt, values: [{ inspectionStandardItemId: 11, measuredValue: null }] });
+    expect(saved.inspectionResult).toBe('PENDING');
   });
 
   it('밀시트 발행 뒤 수정 거부(COM-004)는 입력 오류, 동시 수정(COM-001)은 업무 오류로 받는다', async () => {

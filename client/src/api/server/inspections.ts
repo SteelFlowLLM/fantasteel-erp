@@ -12,7 +12,7 @@ import type {
   QualityInspectionDetailItem,
   QualityInspectionListItem,
 } from '@fantasteel/shared';
-import { ApiError, InputError } from '@/api/errors';
+import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { InspectionDetail, RegisterInspectionOutcome } from '@/api/inspections';
 import { appliesToThickness } from '@/lib/inspectionJudgment';
@@ -200,23 +200,20 @@ const isBlank = (value: string | null): boolean => value === null || value.trim(
 
 /**
  * 측정값 등록·수정. 검사 행이 없으면 POST(등록), 있으면 PATCH(같은 검사 행 수정·재판정).
- * 서버는 보낸 항목만 저장하고 값을 지우는 요청이 없어서, 저장한 값을 지우려 하면 서버에 보내지 않고 입력 오류로 막는다.
+ * 빈 칸은 등록에서는 보내지 않고, 수정에서는 null로 보내 저장한 값을 지운다 (서버 PATCH, 2026-10-06 사용자 결정).
  */
 async function register(input: RegisterInspectionInput): Promise<RegisterInspectionOutcome> {
-  const cleared = input.values.filter((v) => isBlank(v.measuredValue));
-  if (cleared.length > 0) {
-    throw new InputError(
-      '서버 연결 모드에서는 저장한 측정값을 지울 수 없어요',
-      Object.fromEntries(cleared.map((v) => [`values.${v.inspectionStandardItemId}`, '측정값 지우기는 아직 서버에서 안 돼요. 값을 입력해 주세요'])),
-    );
-  }
-  const values = input.values.map((v) => ({ inspectionStandardItemId: v.inspectionStandardItemId, measuredValue: (v.measuredValue ?? '').trim() }));
+  const values = input.values.map((v) => ({
+    inspectionStandardItemId: v.inspectionStandardItemId,
+    measuredValue: v.measuredValue === null || isBlank(v.measuredValue) ? null : v.measuredValue.trim(),
+  }));
   const row = await listRowOfLot(input.lotId);
   if (!row) throw new ApiError('COM-003', `LOT ${input.lotId}`);
 
   let saved: QualityInspectionSaveResult;
   if (row.qualityInspectionId === null) {
-    saved = await serverRequest<QualityInspectionSaveResult>('POST', '/quality-inspections', { body: { lotId: input.lotId, values } });
+    const filled = values.filter((v) => v.measuredValue !== null);
+    saved = await serverRequest<QualityInspectionSaveResult>('POST', '/quality-inspections', { body: { lotId: input.lotId, values: filled } });
   } else {
     // 가짜 DB처럼 화면을 연 시각이 없으면 동시 수정 확인을 하지 않는다 (지금 값을 그대로 보낸다)
     const expectedUpdatedAt = input.expectedUpdatedAt ?? (await serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${row.qualityInspectionId}`)).updatedAt;
