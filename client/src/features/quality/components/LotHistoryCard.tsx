@@ -1,6 +1,7 @@
 // 이 LOT의 작업 로그 (business_event_lot 기준, 최근 것부터). 검사 등록·판정은 바뀐 측정값의 전·후를 함께 보인다 (REQ-QC-003).
 // '작업 로그' 링크는 이 LOT의 이력 재현(/business-events?lotId=)으로 간다 (REQ-LOG-003).
 import Link from 'next/link';
+import { isServerPendingValue } from '@/api/inspections';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
@@ -67,7 +68,7 @@ export function LotHistoryCard({
     <Card className="flex-none">
       <CardHead
         title="이력"
-        meta={`이 LOT의 작업 로그 ${events.length}건`}
+        meta={events.length === 0 && isServerPendingValue() ? '작업 로그 준비 중' : `이 LOT의 작업 로그 ${events.length}건`}
         actions={
           <Link href={`/business-events?lotId=${lotId}`} className="text-cap text-run hover:underline">
             작업 로그
@@ -76,7 +77,7 @@ export function LotHistoryCard({
       />
       <CardBody className="pb-1">
         {recent.length === 0 ? (
-          <EmptyNote>기록된 작업 로그가 없어요</EmptyNote>
+          <EmptyNote>{isServerPendingValue() ? '작업 로그는 준비 중이에요 (서버 연결 전)' : '기록된 작업 로그가 없어요'}</EmptyNote>
         ) : (
           <Timeline
             items={recent.map((event) => ({
