@@ -4,6 +4,7 @@ import {
   ALLOCATION_STATUS,
   BUSINESS_EVENT_TYPE,
   LOT_STATUS,
+  LOT_TYPE,
   PERMISSION,
   RESERVATION_STATUS,
   SHIPMENT_REQUEST_STATUS,
@@ -20,6 +21,7 @@ import {
   type PermissionLevel,
   type ReservationStatus,
   type SalesOrderReservationView,
+  type ShipmentAllocationCandidates,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -52,6 +54,17 @@ const allocationSnapshot = (a: AllocationRow) => ({
   shipmentRequestItemId: a.shipmentRequestItemId,
   productionPlanId: a.productionPlanId,
 });
+type LotWithParents = AllocationRow['lot'];
+/** 상위 히트 번호: 슬래브는 부모 히트, 코일은 부모 슬래브의 부모 히트 */
+export function heatNoOfLot(lot: LotWithParents): string | null {
+  for (const { parentLot } of lot.lotRelationsAsChildLot) {
+    if (parentLot.lotType === LOT_TYPE.HEAT) return parentLot.lotNo;
+    const heat = parentLot.lotRelationsAsChildLot.find((r) => r.parentLot.lotType === LOT_TYPE.HEAT);
+    if (heat) return heat.parentLot.lotNo;
+  }
+  return null;
+}
+
 const salesOrderIdOf = (a: AllocationRow) => a.shipmentRequestItem?.salesOrderItem.salesOrderId ?? a.productionPlan?.salesOrderItem?.salesOrderId ?? null;
 
 export function toAllocationView(a: AllocationRow): AllocationView {
@@ -63,6 +76,8 @@ export function toAllocationView(a: AllocationRow): AllocationView {
     lotNo: a.lot.lotNo,
     producedDate: dateOnly(a.lot.producedDate),
     lotStatus: a.lot.lotStatus as LotStatus,
+    heatNo: heatNoOfLot(a.lot),
+    yardId: a.lot.yardId,
     shipmentRequestItemId: a.shipmentRequestItemId,
     productionPlanId: a.productionPlanId,
     createdAt: a.createdAt.toISOString(),
@@ -196,6 +211,8 @@ export class InventoryService {
         lotId: lot.id,
         lotNo: lot.lot_no,
         producedDate: dateOnly(lot.produced_date),
+        heatNo: lot.heat_no,
+        yardId: lot.yard_id,
         isRecommended: index < unallocatedQty,
       }));
       const recommended = candidates.filter((c) => c.isRecommended);
@@ -210,6 +227,39 @@ export class InventoryService {
       });
       return { allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, shipmentRequestItemId: requestItem.id, itemId: requestItem.salesOrderItem.itemId, unallocatedQty, candidates };
     });
+  }
+
+  /**
+   * 출하요청 품목별 배정 후보와 FIFO 추천 (조회만, 작업 로그 없음). 배정 화면이 열릴 때 보여 준다.
+   * 추천을 작업 로그로 남기는 것은 POST allocations/recommend다.
+   */
+  async listShipmentCandidates(user: AuthUser, shipmentRequestId: number): Promise<ShipmentAllocationCandidates[]> {
+    this.assertPurposePermission(user, ALLOCATION_PURPOSE.SHIPMENT, 'VIEW');
+    const tx = this.prisma;
+    const items = await this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId);
+    const lotsByItem = new Map<number, Awaited<ReturnType<InventoryRepository['findAllocatableLots']>>>();
+    const taken = new Set<number>();
+    const result: ShipmentAllocationCandidates[] = [];
+    for (const line of items) {
+      const itemId = line.salesOrderItem.itemId;
+      if (!lotsByItem.has(itemId)) lotsByItem.set(itemId, await this.repository.findAllocatableLots(tx, itemId));
+      const lots = lotsByItem.get(itemId) ?? [];
+      const allocatedQty = line._count.allocations;
+      const unallocatedQty = Math.max(0, line.requestQty - allocatedQty);
+      // 같은 규격 품목이 여러 줄이면 앞 줄이 추천받은 LOT은 뒤 줄 추천에서 뺀다 ([추천대로 모두 확정]이 INV-003에 걸리지 않게)
+      const recommendedIds = new Set(lots.filter((l) => !taken.has(l.id)).slice(0, unallocatedQty).map((l) => l.id));
+      recommendedIds.forEach((id) => taken.add(id));
+      result.push({
+        shipmentRequestItemId: line.id,
+        salesOrderItemId: line.salesOrderItem.id,
+        itemId,
+        requestQty: line.requestQty,
+        allocatedQty,
+        unallocatedQty,
+        candidates: lots.map((l) => ({ lotId: l.id, lotNo: l.lot_no, producedDate: dateOnly(l.produced_date), heatNo: l.heat_no, yardId: l.yard_id, isRecommended: recommendedIds.has(l.id) })),
+      });
+    }
+    return result;
   }
 
   /** 배정 확정: 고른 LOT마다 CONFIRMED 배정 1건. 같은 LOT의 동시 확정은 부분 unique(allocation_confirmed_lot_key)가 막는다 (REQ-INV-009) */

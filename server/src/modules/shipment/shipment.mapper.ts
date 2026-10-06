@@ -23,6 +23,7 @@ export function toShipmentRequestSummary(row: ShipmentRequestSummaryRow): Shipme
     totalRequestQty: row.shipmentRequestItems.reduce((sum, i) => sum + i.requestQty, 0),
     issuedAt: row.issuedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 

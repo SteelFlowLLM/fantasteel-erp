@@ -1,7 +1,11 @@
 // 수주 api (REQ-SO-001~006, REQ-INV-002~005, BP-SO-01·02, REQ-PRD-006 재생산, REQ-MSG-001 업무방).
 // 이 층은 권한 확인(requireActor)만 하고 업무 규칙·작업 로그·불변조건은 core 서비스(@/mock/services)가 맡는다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 목록·상세·미리보기·등록·취소는 실제 서버를 부른다 (api/server/salesOrders.ts).
+// 서버에 아직 없는 생산 연결·이력·구매 영향·업무방·재생산은 서버 모드에서 비어 있거나 "연결 전" 오류다.
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import { PERMISSION, type Permission, type ProductItemType } from '@/codes';
 import { todayStr } from '@/lib/format';
 import type { MockTables } from '@/mock/schema';
@@ -110,7 +114,9 @@ export interface SalesOrderWorkRoomView {
 export const salesOrderApi = {
   /** 수주 목록 (최근 것 먼저, 헤더 상태·납기 위험은 계산값) */
   list: (): Promise<SalesOrderListRow[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverSalesOrderApi.listAll()
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       return listSalesOrders(tables).map((summary) => ({
         ...summary,
@@ -127,14 +133,18 @@ export const salesOrderApi = {
 
   /** 수주 상세: 품목별 충족 현황(SO-004, 분모 포함), 예약, 출하요청, 밀시트, 취소 가능 여부 */
   detail: (salesOrderId: number): Promise<SalesOrderDetail> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverSalesOrderApi.detail(salesOrderId)
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       return salesOrderDetail(tables, salesOrderId);
     }),
 
   /** 생산 연결: 연결 계획의 편성표·편성 히트 */
   productionLinks: (salesOrderId: number): Promise<SalesOrderPlanLink[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? Promise.resolve([])
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       salesOrderDetail(tables, salesOrderId); // 없는 수주면 COM-003
       const lineNoOf = (soItemId: number | null) => tables.salesOrderItem.find((i) => i.id === soItemId)?.lineNo ?? null;
@@ -147,7 +157,9 @@ export const salesOrderApi = {
 
   /** 이력: 이 수주의 작업 로그를 시간순으로 (REQ-LOG-003) */
   timeline: (salesOrderId: number): Promise<TimelineEvent[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? Promise.resolve([])
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       salesOrderDetail(tables, salesOrderId);
       return salesOrderTimeline(tables, salesOrderId);
@@ -155,14 +167,18 @@ export const salesOrderApi = {
 
   /** 등록 전 미리보기 (저장 안 함): 줄마다 예약 가능·부족 매수와 부족분 히트 편성 */
   preview: (lines: readonly SalesOrderPreviewInputLine[]): Promise<SalesOrderPreviewLine[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverSalesOrderApi.preview(lines)
+      : mockQuery((tables) => {
       requireActor(tables, { view: [PERMISSION.SALES_ORDER_CREATE] });
       return previewSalesOrder(tables, previewLinesOf(lines));
     }),
 
   /** 수주 등록 (REQ-SO-001~003): 재고 우선 예약 + 부족분 생산계획. 작업 로그는 서비스가 남긴다. */
   create: (input: CreateSalesOrderInput): Promise<CreateSalesOrderResultView> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverSalesOrderApi.create(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.SALES_ORDER_CREATE] });
       const result = createSalesOrder(tx, userActor(actor.employee.id), input);
       return {
@@ -179,14 +195,18 @@ export const salesOrderApi = {
    * 취소·연결 해제될 생산계획에 연결된 구매요청 품목과 발주. 보여 주기만 하고 아무것도 바꾸지 않는다.
    */
   cancelPurchaseImpact: (salesOrderId: number): Promise<CancelPurchaseImpactLine[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? Promise.resolve([])
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       return cancelPurchaseImpactOf(tables, salesOrderId);
     }),
 
   /** 수주 취소 (REQ-SO-006, BP-SO-02): 출고분 있으면 SO-003, 진행 중 출하요청 있으면 SO-004 */
   cancel: (input: { salesOrderId: number; cancelReason: string; expectedUpdatedAt?: string | null }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverSalesOrderApi.cancel(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.SALES_ORDER_CANCEL] });
       const cancelled = cancelSalesOrder(tx, userActor(actor.employee.id), input);
       return { salesOrderId: cancelled.id, salesOrderNo: cancelled.salesOrderNo };
@@ -194,7 +214,9 @@ export const salesOrderApi = {
 
   /** 이 수주의 업무방 (없으면 null)과 지금 멤버 */
   workRoom: (salesOrderId: number): Promise<SalesOrderWorkRoomView | null> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? Promise.resolve(null)
+      : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       const room = workRoomOfSalesOrder(tables, salesOrderId);
       if (!room) return null;
@@ -207,7 +229,9 @@ export const salesOrderApi = {
 
   /** 업무방 열기 (REQ-MSG-001): 수주당 WORK 방 1개, 멤버는 조직도에서 고른다. 이미 있으면 그 방(새 멤버만 더함). */
   openWorkRoom: (input: { salesOrderId: number; memberEmployeeIds: readonly number[] }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? Promise.reject<{ chatRoomId: number; chatRoomName: string | null; created: boolean }>(new Error('업무방은 아직 서버와 연결되지 않았어요'))
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, SALES_ORDER_VIEW_RULE);
       const { chatRoom, created } = openWorkRoom(tx, userActor(actor.employee.id), input);
       return { chatRoomId: chatRoom.id, chatRoomName: chatRoom.chatRoomName, created };
@@ -215,7 +239,11 @@ export const salesOrderApi = {
 
   /** 재생산 계획 만들기 (REQ-PRD-006, 14.1-6): 여재로 먼저 채우고 그래도 남는 '추가 계획 필요'만 계획한다. 자동으로 만들지 않는다. */
   createReproduction: (input: { salesOrderItemId: number }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? Promise.reject<{ reservedFromSurplusQty: number; productionPlanId: number | null; productionPlanNo: string | null; shortageQty: number }>(
+          new Error('재생산 계획은 아직 서버와 연결되지 않았어요'),
+        )
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
       const soItem = tx.tables.salesOrderItem.find((i) => i.id === input.salesOrderItemId);
       if (!soItem) throw new ApiError('COM-003', '수주 품목');

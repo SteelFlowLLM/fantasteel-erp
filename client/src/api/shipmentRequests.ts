@@ -1,7 +1,10 @@
 // 출하요청·출하 배정 API (REQ-SHP-001, REQ-INV-006·007·009, BP-SHP-01).
 // 규칙·작업 로그는 core 서비스(@/mock/services)가 맡는다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 덧붙임만 한다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/shipmentRequests.ts).
 import { PERMISSION, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverShipmentRequestApi } from '@/api/server/shipmentRequests';
 import { requireActor } from '@/api/actor';
 import type { MockTables } from '@/mock/schema';
 import {
@@ -150,37 +153,49 @@ function shippableCustomers(tables: Tables): ShippableCustomer[] {
 
 export const shipmentRequestApi = {
   list: () =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.list()
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       return listRows(tables);
     }),
   detail: (id: number) =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.detail(id)
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       return detailView(tables, id);
     }),
   /** 출하요청 등록: 고객사마다 출하할 수 있는 품목 수 */
   shippableCustomers: () =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.shippableCustomers()
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       return shippableCustomers(tables);
     }),
   /** 이 고객사의 출하할 수 있는 수주 품목 (출하 가능 잔량 = ACTIVE 예약 − 진행 중 출하요청 매수) */
   shippableItems: (customerId: number) =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.shippableItems(customerId)
+      : mockQuery((tables) => {
       requireActor(tables, READ_RULE);
       return shippableItemsOf(tables, customerId).map((i) => ({ ...i, steelGradeCode: steelGradeCodeOf(tables, findById(tables, 'item', i.itemId)?.steelGradeId ?? null) }));
     }),
   /** 등록. 결과에 FIFO 추천이 함께 온다 (화면은 바로 배정 화면으로 가서 추천을 연다) */
   create: (input: CreateShipmentRequestForm) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.create(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, MANAGE_RULE);
       const result = createShipmentRequest(tx, userActor(actor.employee.id), input);
       return { id: result.shipmentRequest.id, shipmentRequestNo: result.shipmentRequest.shipmentRequestNo, recommendation: result.recommendation };
     }),
   /** 배정 확정 (품목마다 고른 LOT → CONFIRMED) */
   confirmAllocations: (input: { shipmentRequestId: number; lines: { shipmentRequestItemId: number; lotIds: number[] }[] }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.confirmAllocations(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, MANAGE_RULE);
       const created = confirmShipmentAllocations(tx, userActor(actor.employee.id), input);
       const request = findById(tx.tables, 'shipmentRequest', input.shipmentRequestId);
@@ -188,20 +203,26 @@ export const shipmentRequestApi = {
     }),
   /** 배정 변경 = 기존 해제 + 새 배정 (사유 필수) */
   changeAllocation: (input: { allocationId: number; newLotId: number; reasonText: string }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.changeAllocation(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, MANAGE_RULE);
       const created = changeShipmentAllocation(tx, userActor(actor.employee.id), input);
       return { allocationId: created.id, lotNo: findById(tx.tables, 'lot', created.lotId)?.lotNo ?? '' };
     }),
   releaseAllocation: (input: { allocationId: number; reasonText?: string | null }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.releaseAllocation(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, MANAGE_RULE);
       const released = releaseShipmentAllocation(tx, userActor(actor.employee.id), input);
       return { allocationId: released.id, lotNo: findById(tx.tables, 'lot', released.lotId)?.lotNo ?? '' };
     }),
   /** 취소: 출고 확정이면 SHP-003. 배정은 해제, 예약은 ACTIVE 그대로 */
   cancel: (input: { shipmentRequestId: number; expectedUpdatedAt?: string | null }) =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverShipmentRequestApi.cancel(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, MANAGE_RULE);
       const row = cancelShipmentRequest(tx, userActor(actor.employee.id), input);
       return { id: row.id, shipmentRequestNo: row.shipmentRequestNo };

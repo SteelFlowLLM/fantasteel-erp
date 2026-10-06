@@ -42,6 +42,12 @@ export interface SalesOrderItemFulfillment {
   additionalPlanQty: number;
   /** 진행률 = 출하 ÷ 주문 */
   progress: ProgressMeasure;
+  /** 진행 계획 잔여 목표 = 생산중 + 시작 전 */
+  openPlanRemainingQty: number;
+  /** 같은 규격의 지금 예약 가용 (여재 포함) */
+  reservationAvailableQty: number;
+  /** 재생산 필요 = max(0, 추가 계획 필요 − 예약 가용) (14.1-6) */
+  reproductionNeedQty: number;
 }
 
 /** 목록 한 줄의 품목 요약 */
@@ -68,6 +74,10 @@ export interface SalesOrderSummary {
   totalOrderedQty: number;
   totalOrderedTon: string;
   totalShippedQty: number;
+  /** ACTIVE 예약 매수 합계 */
+  totalActiveReservedQty: number;
+  /** 재생산이 필요한 품목이 있는지 (재생산 필요 매수 > 0, 14.1-6) */
+  hasReproductionNeed: boolean;
   /** 취소 품목을 뺀 가장 이른 납기 */
   earliestDueDate: string | null;
   isDueRisk: boolean;
@@ -109,7 +119,8 @@ export interface SalesOrderShipmentRequestView {
   shipmentRequestStatus: ShipmentRequestStatus;
   shipDate: string | null;
   issuedAt: string | null;
-  items: { salesOrderItemId: number; requestQty: number }[];
+  /** allocatedQty = 확정·소진 배정 수 */
+  items: { salesOrderItemId: number; requestQty: number; allocatedQty: number }[];
 }
 
 /** 취소로 일어난 일 (SALES_ORDER_CANCELLED 작업 로그의 after_data) */
