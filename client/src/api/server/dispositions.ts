@@ -1,11 +1,13 @@
 // 불합격 관리 화면 ↔ 서버 API (server/src/modules/quality의 rejected-lot). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 불합격 항목·검사 시각은 서버가 목록 행에 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사)로 같이 준다.
-// 서버에 아직 없는 것(지정 시각, 연결 수주·계획, 작업 로그, 재생산 계획)은 빈 값이거나 "서버 연결 전" 오류다.
+// 연결 수주·부족·같은 수주 품목의 계획은 LOT의 생산계획 상세에서, 재생산 계획은 생산 모듈 API(POST /production-plans)로.
+// 서버에 아직 없는 것(지정 시각, 작업 로그)은 빈 값이다.
 import type { PageResult, RejectedLotListItem } from '@fantasteel/shared';
-import type { RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
+import type { ReproductionOutcome, RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { allPages, inspectionFormOfLot, orEmpty } from '@/api/server/inspections';
+import { allPages, inspectionFormOfLot, linkedOfPlan, orEmpty, type LinkedOfPlan } from '@/api/server/inspections';
+import { serverProductionPlanApi } from '@/api/server/production';
 
 const rejectedAll = () => allPages<RejectedLotListItem>('/lots/rejected');
 
@@ -16,7 +18,7 @@ const rejectedOne = (lotId: number) =>
 /** 자기 검사가 불합격이면 이 LOT 불합격, 아니면 상위 히트 불합격으로 빠진 하위 LOT (TRM-078) */
 const reasonOf = (row: RejectedLotListItem): RejectedLotListRow['reason'] => (row.inspectionResult === 'FAIL' ? 'FAILED' : 'HEAT_FAILED');
 
-function listRowOf(row: RejectedLotListItem): RejectedLotListRow {
+function listRowOf(row: RejectedLotListItem, linked: LinkedOfPlan): RejectedLotListRow {
   const evidence = row.evidence;
   return {
     lotId: row.lotId,
@@ -45,15 +47,18 @@ function listRowOf(row: RejectedLotListItem): RejectedLotListRow {
     producedDate: row.producedDate ?? '',
     productionPlanNo: row.productionPlanNo,
     productionPlanId: row.productionPlanId,
-    // 서버에 아직 없는 것: 불합격 LOT 응답에 지정 시각이 없고, 연결 수주는 LOT 조회 API가 없다
+    salesOrderItem: linked.salesOrderItem,
+    // 서버에 아직 없는 것: 불합격 LOT 응답에 지정 시각이 없다
     dispositionAt: null,
-    salesOrderItem: null,
   };
 }
 
-/** 불합격 LOT 목록 (근거 검사의 불합격 항목까지 한 번에 받는다) */
+/** 불합격 LOT 목록 (근거 검사의 불합격 항목까지 한 번에 받는다). 연결 수주는 생산계획마다 한 번씩 읽는다 */
 async function list(): Promise<RejectedLotListRow[]> {
-  return (await rejectedAll()).map(listRowOf);
+  const rows = await rejectedAll();
+  const planIds = [...new Set(rows.flatMap((r) => (r.productionPlanId === null ? [] : [r.productionPlanId])))];
+  const linkedByPlan = new Map(await Promise.all(planIds.map(async (id) => [id, await linkedOfPlan(id)] as const)));
+  return rows.map((r) => listRowOf(r, (r.productionPlanId === null ? undefined : linkedByPlan.get(r.productionPlanId)) ?? { salesOrderItem: null, plans: [] }));
 }
 
 /** 불합격 LOT 하나: 근거 검사 폼. 불합격 목록에 없으면 null */
@@ -62,12 +67,15 @@ async function detail(lotId: number): Promise<RejectedLotDetail | null> {
   if (!found) return null;
   // 근거 검사 폼(전체 항목)은 검사 입력 조회 권한이 없으면 비워 둔다. 불합격 항목은 목록 행에 이미 있다
   const evidenceLotId = found.evidence?.lotId ?? null;
-  const evidence = evidenceLotId === null ? null : await orEmpty(() => inspectionFormOfLot(evidenceLotId), null);
+  const [evidence, linked] = await Promise.all([
+    evidenceLotId === null ? null : orEmpty(() => inspectionFormOfLot(evidenceLotId), null),
+    linkedOfPlan(found.productionPlanId),
+  ]);
   return {
-    row: listRowOf(found),
+    row: listRowOf(found, linked),
     evidence,
-    // 서버에 아직 없는 것: 같은 수주 품목의 생산계획(생산 모듈), 작업 로그 조회
-    plans: [],
+    plans: linked.plans,
+    // 서버에 아직 없는 것: 작업 로그 조회
     history: [],
     inspectionItemNames: {},
   };
@@ -87,4 +95,10 @@ async function set(input: SetDispositionInput): Promise<SetDispositionResult> {
   return { lotNo: saved.lotNo, dispositionStatus: saved.dispositionStatus, dispositionReason: saved.dispositionReason, updatedAt: saved.updatedAt };
 }
 
-export const serverDispositionApi = { list, detail, set };
+/** 재생산 계획 (REQ-PRD-006): 생산 모듈의 재생산 API. 같은 규격 여재로 먼저 예약하고 그래도 부족할 때만 계획을 만든다 */
+async function createReproductionPlan(input: { salesOrderItemId: number }): Promise<ReproductionOutcome> {
+  const result = await serverProductionPlanApi.createReproduction(input);
+  return { reservedFromSurplusQty: result.reservedFromSurplusQty, productionPlanNo: result.plan?.productionPlanNo ?? null, shortageQty: result.plan?.shortageQty ?? null };
+}
+
+export const serverDispositionApi = { list, detail, set, createReproductionPlan };

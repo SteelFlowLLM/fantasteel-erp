@@ -1,12 +1,14 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
-// 서버에 아직 없는 것(연결 수주, 작업 로그, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
+// 연결 수주·부족은 LOT의 생산계획 상세(GET /production-plans/:id, 품질은 조회 권한 있음)에서 읽는다.
+// 서버에 아직 없는 것(작업 로그, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,
   InspectionStandardItemView,
   InspectionStandardListItem,
   PageResult,
+  ProductionPlanDetail,
   QualityInspectionDetail,
   QualityInspectionSaveResult,
   QualityInspectionDetailItem,
@@ -14,7 +16,8 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import type { InspectionDetail, RegisterInspectionOutcome } from '@/api/inspections';
+import type { LinkedPlan } from '@/api/dispositions';
+import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { appliesToThickness } from '@/lib/inspectionJudgment';
 import type { InspectionFormView, InspectionQueueRow, RegisterInspectionInput } from '@/mock/services';
 
@@ -41,6 +44,61 @@ export async function orEmpty<T>(read: () => Promise<T>, empty: T): Promise<T> {
     if (e instanceof ApiError && e.code === 'COM-002') return empty;
     throw e;
   }
+}
+
+export interface LinkedOfPlan {
+  salesOrderItem: LinkedSalesOrderItem | null;
+  /** 같은 수주 품목의 진행 계획 (재생산 포함, 취소 제외) */
+  plans: LinkedPlan[];
+}
+
+const NO_LINK: LinkedOfPlan = { salesOrderItem: null, plans: [] };
+
+/**
+ * LOT을 만든 생산계획의 연결 수주 품목과 부족·재생산 필요 (업무 프로세스 4.5, REQ-PRD-006).
+ * 계획 상세의 재생산 판단(reproduction)은 수주 품목이 연결된 계획에만 있다.
+ * 곁들이는 정보라 계획을 못 읽으면(조회 권한 없음 COM-002, 없음 COM-003) 화면 전체를 실패시키지 않고 비워 둔다
+ */
+export async function linkedOfPlan(productionPlanId: number | null): Promise<LinkedOfPlan> {
+  if (productionPlanId === null) return NO_LINK;
+  let plan: ProductionPlanDetail;
+  try {
+    plan = await serverRequest<ProductionPlanDetail>('GET', `/production-plans/${productionPlanId}`);
+  } catch (e) {
+    if (e instanceof ApiError && (e.code === 'COM-002' || e.code === 'COM-003')) return NO_LINK;
+    throw e;
+  }
+  const r = plan.reproduction;
+  if (!r) return NO_LINK;
+  return {
+    salesOrderItem: {
+      salesOrderId: r.salesOrderId,
+      salesOrderNo: r.salesOrderNo,
+      salesOrderItemId: r.salesOrderItemId,
+      lineNo: r.lineNo,
+      customerName: plan.customerName ?? '',
+      itemCode: plan.itemCode,
+      orderedQty: r.orderedQty,
+      dueDate: plan.dueDate ?? '',
+      salesOrderItemStatus: r.salesOrderItemStatus,
+      shortage: {
+        unshippedQty: r.unshippedQty,
+        unsecuredQty: r.unsecuredQty,
+        additionalPlanQty: r.additionalPlanQty,
+        activeReservedQty: r.activeReservedQty,
+        openPlanRemainingQty: r.openPlanRemainingQty,
+        reservationAvailableQty: r.reservationAvailableQty,
+        reproductionNeedQty: r.reproductionNeedQty,
+      },
+    },
+    plans: r.openPlans.map((p) => ({
+      productionPlanId: p.id,
+      productionPlanNo: p.productionPlanNo,
+      productionPlanStatus: p.productionPlanStatus,
+      isReproduction: p.isReproduction,
+      shortageQty: p.shortageQty,
+    })),
+  };
 }
 
 /** 목록 행과 상세가 같이 쓰는 LOT 정보 + 검사 행 요약 */
@@ -185,12 +243,13 @@ async function inspectionOfLot(lotId: number): Promise<{ row: QualityInspectionL
 
 async function detail(lotId: number): Promise<InspectionDetail> {
   const { row, form } = await inspectionOfLot(lotId);
+  const linked = await linkedOfPlan(row.productionPlanId);
   return {
     ...form,
     heatLotId: form.lot.heatLotId,
     productionPlanId: row.productionPlanId,
-    // 서버에 아직 없는 것: 연결 수주(LOT 조회 API 없음), 작업 로그 조회
-    salesOrderItem: null,
+    salesOrderItem: linked.salesOrderItem,
+    // 서버에 아직 없는 것: 작업 로그 조회
     history: [],
     inspectionItemNames: {},
   };
