@@ -134,7 +134,14 @@ export class QualityService {
       this.repository.findInspectionStandardVersions(this.prisma),
     ]);
     const latestStandards = pickLatestStandards(standards);
-    return { items: lots.map((lot) => toQualityInspectionListItem(lot, latestStandards)), page, size, total };
+    const lockScopes = lots.map(lockScopeLotIds);
+    const lockedLotIds = await this.repository.findMillSheetLockedLotIds(this.prisma, [...new Set(lockScopes.flat())]);
+    return {
+      items: lots.map((lot, index) => toQualityInspectionListItem(lot, latestStandards, lockScopes[index].some((id) => lockedLotIds.has(id)))),
+      page,
+      size,
+      total,
+    };
   }
 
   /** 검사 상세 (API-116, REQ-QC-001·003): LOT·항목별 측정값·판정과 판정에 쓴 기준 버전 */

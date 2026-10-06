@@ -93,6 +93,7 @@ export function toInspectedLotSummary(lot: InspectedLot): InspectedLotSummary {
 export function toQualityInspectionListItem(
   lot: QualityInspectionListLot,
   latestStandards: Map<string, InspectionStandardVersion>,
+  isLocked: boolean,
 ): QualityInspectionListItem {
   const summary = toInspectedLotSummary(lot);
   const inspection = lot.qualityInspection;
@@ -109,5 +110,6 @@ export function toQualityInspectionListItem(
     versionNo: standard?.versionNo ?? null,
     inspectionResult: (inspection?.inspectionResult as InspectionResult | undefined) ?? null,
     inspectedAt: inspection?.inspectedAt.toISOString() ?? null,
+    isLocked,
   };
 }

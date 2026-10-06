@@ -110,7 +110,7 @@ const evidenceOf = (inspection: QualityInspectionDetail): RejectedLotEvidence =>
 const heat: RejectedLotListItem = { ...heatBase, evidence: evidenceOf(heatInspection) };
 const childSlab: RejectedLotListItem = { ...childSlabBase, evidence: evidenceOf(heatInspection) };
 const failedCoil: RejectedLotListItem = { ...failedCoilBase, evidence: evidenceOf(coilInspection) };
-const heatListRow: QualityInspectionListItem = { ...heatBase, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: heatInspection.inspectedAt };
+const heatListRow: QualityInspectionListItem = { ...heatBase, isLocked: false, inspectionStandardId: 10, inspectionStandardCode: 'QS', versionNo: 1, inspectedAt: heatInspection.inspectedAt };
 
 function respond(c: ServerCall) {
   if (c.path === '/lots/rejected') return ok(page([failedCoil, childSlab, heat].filter((r) => c.query.lotId === undefined || String(r.lotId) === c.query.lotId)));

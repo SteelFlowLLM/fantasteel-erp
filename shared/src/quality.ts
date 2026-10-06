@@ -48,6 +48,8 @@ export interface QualityInspectionListItem extends InspectedLotSummary {
   inspectionResult: InspectionResult | null;
   /** ISO 8601. 검사 행이 없으면 null */
   inspectedAt: string | null;
+  /** 이 LOT(히트면 하위 슬래브·코일까지)이 출고돼 밀시트가 발행돼 측정값을 고칠 수 없는지. 목록의 자물쇠 표시용 (번호는 검사 상세 lockedMillSheetNos) */
+  isLocked: boolean;
 }
 
 /** 검사 상세의 항목 한 줄. 판정에 쓴 기준 버전의 항목 중 LOT 두께에 적용되는 것만 */
