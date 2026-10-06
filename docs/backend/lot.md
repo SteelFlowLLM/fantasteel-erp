@@ -56,6 +56,15 @@ LOT을 **만드는** 일은 production(용선·히트·슬래브·코일)과 pur
 
 **상세**: LOT 기본값 + 검사 판정·기준 버전 + 적격 여부(계산) + 불합격 처리 상태·사유 + 현재 CONFIRMED 배정 + 원료·용선 잔량.
 
+**구현 메모** (API-235~237, 응답 타입은 shared `lot.ts`)
+
+- 목록 `GET lots`: `lotType`·`lotStatus`·`itemId`·`lotNo`(앞부분, 대소문자 무관)·`page`·`size`. 생산완료일 최근 순 → LOT 번호 순. 한 줄에 규격·강종·야드·잔량·자기 검사 판정을 담는다.
+- 상세 `GET lots/:id`: 위 값 + 검사 값·기준 버전 + 적격 여부(슬래브·코일만, 아니면 null) + 상위 히트 + 불합격 처리 상태·사유 + 해제되지 않은 배정 + 바로 위(부모)·아래(자식) LOT과 연결 근거 + 출하(출하요청·수주·밀시트).
+- 추적 `GET lots/:id/trace?direction=backward|forward`: `traceLotBackward.sql`·`traceLotForward.sql`(`WITH RECURSIVE`)로 시작 LOT과 조상·자손의 id와 최소 거리만 구하고, 노드·연결·출하는 Prisma로 따로 읽는다. 경로 배열로 순환을 막고 같은 LOT은 한 번만 나온다(연결은 N:M 그대로 모두 남는다).
+- `direction`을 생략하면 코일·슬래브는 `backward`, 원료·용선·히트는 `forward`다. 역추적은 출하·영향 범위를 채우지 않는다. 정추적은 `shipments`(출하요청 × 수주 단위, 묶음의 LOT이 모두 출고돼야 CONSUMED)와 `impact`(슬래브·코일 수, 출고·미출고·소진 수, 연결된 수주)를 더한다.
+- Prisma 7은 중첩 select를 여러 행에 걸쳐 깊게 읽으면 "Expected zero or one element"로 실패해서 강종·실적·검사·출하는 한 단계씩 따로 읽는다.
+- 🟡 출하요청 번호로 시작하는 추적과 LOT 번호 검색 API는 만들지 않았다(8장). 목록의 `lotNo` 필터로 번호를 찾는다.
+
 **적격 계산 공용화**(권장): 적격 여부는 inventory(예약·배정), quality(자동 예약 트리거), shipment(출고 재검증), lot(조회)가 모두 쓴다. 한 곳에 TypedSQL(`getLotEligibility.sql`)과 함수를 두고 export한다. 이 모듈에 두면 다른 모듈이 `LotModule`을 import해 쓴다.
 
 ## 5. 오류 코드·작업 로그
@@ -92,7 +101,7 @@ LOT을 **만드는** 일은 production(용선·히트·슬래브·코일)과 pur
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
 | `/lots/rejected` 경로 충돌 | quality의 `GET lots/rejected`와 이 모듈의 `GET lots/:id`가 겹친다. `app.module.ts`에서 LotModule이 QualityModule보다 먼저 등록돼 `rejected`가 `:id`로 잡혀 `ParseIntPipe`에서 COM-004가 날 수 있다. [CSV]는 대안 경로 `/quality-inspections/rejected-lots`를 함께 제안했다 | [CSV] 불합격 LOT 목록 비고, `app.module.ts` |
-| `direction` 값 | `?direction=`의 값(예: `backward`·`forward`)이 정의돼 있지 않다 | [04] 12.2 |
+| `direction` 값 | **구현:** `backward`(역추적)·`forward`(정추적). 생략하면 LOT 유형에 맞춰 정한다. 값은 정의서에 없어 우리가 정했다 | [04] 12.2 |
 | 출하요청 번호로 추적 | BP-LOT-01 입력에 "출하번호"(SPEC 기본값: "출하요청 번호")가 있지만 API는 LOT id만 받는다 | [04] BP-LOT-01, `SPEC.md` 5장 |
 | 번호 검색 | LOT 번호로 찾는 검색(목록 `lotNo` 필터 vs 별도 API) 미정 | [CSV] |
 | 순환 방지 | CHECK는 자기 연결만 막는다. 긴 순환(A→B→A)은 생성 쪽(production)이 막아야 하고, 추적 쿼리도 방문 기록으로 방어한다 | [04] BP-LOT-01 예외, [ERD] |
