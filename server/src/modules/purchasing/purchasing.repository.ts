@@ -20,7 +20,13 @@ export interface RequisitionFilter {
   requesterDepartmentIds?: number[];
 }
 
-const whereOf = (filter: RequisitionFilter): Prisma.PurchaseRequisitionWhereInput => ({
+/** 승인·반려·재요청이 바꾸는 칸 */
+export type RequisitionStatusChange = Pick<
+  Prisma.PurchaseRequisitionUncheckedUpdateManyInput,
+  'purchaseRequisitionStatus' | 'approverId' | 'approvedAt' | 'rejectReason' | 'requestedTon' | 'desiredReceiptDate' | 'requestReason'
+>;
+
+const whereOf =(filter: RequisitionFilter): Prisma.PurchaseRequisitionWhereInput => ({
   ...(filter.purchaseRequisitionStatus ? { purchaseRequisitionStatus: filter.purchaseRequisitionStatus } : {}),
   ...(filter.requesterDepartmentIds ? { requester: { departmentId: { in: filter.requesterDepartmentIds } } } : {}),
 });
@@ -76,5 +82,11 @@ export class PurchasingRepository {
 
   findRequisition(tx: Tx, id: number) {
     return tx.purchaseRequisition.findUnique({ where: { id }, include: requisitionInclude });
+  }
+
+  /** 상태가 from일 때만 바꾸는 조건부 UPDATE. 바뀐 건수(0 또는 1)를 돌려준다 */
+  async updateRequisitionIfStatus(tx: Tx, id: number, from: PurchaseRequisitionStatus, data: RequisitionStatusChange): Promise<number> {
+    const { count } = await tx.purchaseRequisition.updateMany({ where: { id, purchaseRequisitionStatus: from }, data });
+    return count;
   }
 }

@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { PERMISSION, type AuthUser, type PageResult, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
-import { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery } from './dto/purchase-requisition.dto';
+import { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingService } from './purchasing.service';
 
 /**
@@ -28,5 +28,26 @@ export class PurchasingController {
   @Get('purchase-requisitions/:id')
   requisitionDetail(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<PurchaseRequisitionDetail> {
     return this.service.requisitionDetail(user, id);
+  }
+
+  /** 승인 권한 코드는 없다. 요청자 소속 부서의 부서장인지 service가 확인한다 (REQ-AUTH-004) */
+  @Post('purchase-requisitions/:id/approve')
+  @HttpCode(200)
+  approveRequisition(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<PurchaseRequisitionDetail> {
+    return this.service.approve(user, id);
+  }
+
+  @Post('purchase-requisitions/:id/reject')
+  @HttpCode(200)
+  rejectRequisition(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: RejectPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
+    return this.service.reject(user, id, dto);
+  }
+
+  /** 요청자 본인인지는 service가 확인한다 */
+  @Post('purchase-requisitions/:id/resubmit')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.PURCHASE_REQUISITION_CREATE, 'USE')
+  resubmitRequisition(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ResubmitPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
+    return this.service.resubmit(user, id, dto);
   }
 }
