@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type PageResult, type PurchaseOrderView, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type GoodsReceiptView, type PageResult, type PurchaseOrderView, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
+import { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
 import { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingService } from './purchasing.service';
@@ -62,6 +63,20 @@ export class PurchasingController {
   @RequirePermission(PERMISSION.PURCHASE_ORDER_CONFIRM, 'USE')
   createPurchaseOrder(@CurrentUser() user: AuthUser, @Body() dto: CreatePurchaseOrderDto): Promise<PurchaseOrderView> {
     return this.service.createPurchaseOrder(user, dto);
+  }
+
+  /** 입고 기록과 생성된 원료 LOT. 물류·관리자도 VIEW로 본다 */
+  @Get('goods-receipts')
+  @RequirePermission(PERMISSION.GOODS_RECEIPT_CONFIRM, 'VIEW')
+  listGoodsReceipts(@Query() query: ListGoodsReceiptsQuery): Promise<PageResult<GoodsReceiptView>> {
+    return this.service.listGoodsReceipts(query);
+  }
+
+  /** 등록이 곧 확정이다 (API-151) */
+  @Post('goods-receipts')
+  @RequirePermission(PERMISSION.GOODS_RECEIPT_CONFIRM, 'USE')
+  confirmGoodsReceipt(@CurrentUser() user: AuthUser, @Body() dto: CreateGoodsReceiptDto): Promise<GoodsReceiptView> {
+    return this.service.confirmGoodsReceipt(user, dto);
   }
 
   @Get('purchase-orders/:id')

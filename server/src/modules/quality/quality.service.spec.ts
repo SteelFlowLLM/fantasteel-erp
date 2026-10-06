@@ -3,13 +3,24 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { NumberingRepository } from '../../common/numbering/numbering.repository';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { InventoryService } from '../inventory/inventory.service';
+import type { EligibilitySyncResult, InventoryService } from '../inventory/inventory.service';
 import { QualityRepository } from './quality.repository';
 import { QualityService } from './quality.service';
 
 const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
 // 이 파일은 검사 판정만 본다. 판정 뒤 재고 반영(inventory.onLotsEligibilityChanged)은 sales-order/sales-flow.spec.ts에서 확인한다
 const inventory = { onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
+/** 재고 반영 결과를 정해 두고 불린 횟수를 세는 inventory 대역 (응답 stockSync 확인용) */
+function syncingInventory(results: EligibilitySyncResult[]) {
+  const calls: number[][] = [];
+  const stub = {
+    onLotsEligibilityChanged: async (_tx: unknown, lotIds: readonly number[]) => {
+      calls.push([...lotIds]);
+      return results;
+    },
+  } as unknown as InventoryService;
+  return { stub, calls };
+}
 
 // 실제 DB(npm test의 fs_prod)를 쓴다. 다른 테스트의 LOT과 섞이지 않도록 이 파일의 LOT 번호는 모두 PREFIX로 시작한다.
 const PREFIX = 'QT-';
@@ -381,6 +392,7 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
       coilPending: await coil('QR-C-PENDING', coilItem9.id),
       coilFail: await coil('QR-C-FAIL', coilItem9.id),
       coilThin: await coil('QR-C-THIN', coilItem45.id),
+      coilStock: await coil('QR-C-STOCK', coilItem9.id),
       heat: await prisma.lot.create({ data: { lotNo: 'QR-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } }),
       heatNoStandard: await prisma.lot.create({
         data: { lotNo: 'QR-H-NOSTD', lotType: 'HEAT', steelGradeId: tempGrade.id, productionResultId: steelmaking },
@@ -417,6 +429,16 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     });
     expect(detail.items.every((i) => i.isPassed === true)).toBe(true);
     expect(await prisma.qualityInspectionValue.count({ where: { qualityInspectionId: detail.qualityInspectionId } })).toBe(7);
+  });
+
+  it('판정 뒤 재고 반영 결과를 응답 stockSync로 합친다: 적격 +3 중 자동 예약 2, 나머지 1매는 여재', async () => {
+    const { stub, calls } = syncingInventory([
+      { itemId: 1, previousOnHandQty: 4, onHandQty: 7, autoReservedQty: 2, releasedReservationQty: 0, releasedAllocationCount: 0 },
+    ]);
+    const withStock = new QualityService(prisma, new QualityRepository(), recorder, stub);
+    const detail = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: passValues9mm() }, user);
+    expect(calls).toEqual([[lots.coilStock]]);
+    expect(detail.stockSync).toEqual({ eligibleAddedQty: 3, autoReservedQty: 2, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
   });
 
   it('작업 로그 INSPECTION_REGISTERED를 남기고 LOT 타임라인에 연결한다 (REQ-LOG-002)', async () => {
@@ -584,6 +606,7 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
       coilTypo: await coil('QU-C-TYPO'),
       coilConflict: await coil('QU-C-CONFLICT'),
       coilVersion: await coil('QU-C-VERSION'),
+      coilStock: await coil('QU-C-STOCK'),
       shippedHeat,
       shippedSlab,
       shippedCoil,
@@ -665,6 +688,25 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     });
     expect((updateEvent.beforeData as { values: unknown[] }).values).toHaveLength(6);
     expect((updateEvent.afterData as { values: unknown[] }).values).toHaveLength(7);
+  });
+
+  it('판정이 그대로면 재고를 다시 맞추지 않아 stockSync는 0, 판정이 바뀌면 재고 반영 결과를 준다', async () => {
+    const { stub, calls } = syncingInventory([
+      { itemId: 1, previousOnHandQty: 5, onHandQty: 4, autoReservedQty: 0, releasedReservationQty: 1, releasedAllocationCount: 1 },
+    ]);
+    const withStock = new QualityService(prisma, new QualityRepository(), recorder, stub);
+    const registered = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: [...valuesWithoutCharpy(), charpy('30')] }, user);
+    calls.length = 0;
+
+    const same = await withStock.updateQualityInspection(registered.qualityInspectionId, { expectedUpdatedAt: registered.updatedAt, values: [charpy('31')] }, user);
+    expect(same.inspectionResult).toBe('PASS');
+    expect(calls).toEqual([]);
+    expect(same.stockSync).toEqual({ eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
+
+    const failed = await withStock.updateQualityInspection(registered.qualityInspectionId, { expectedUpdatedAt: same.updatedAt, values: [charpy('3')] }, user);
+    expect(failed.inspectionResult).toBe('FAIL');
+    expect(calls).toEqual([[lots.coilStock]]);
+    expect(failed.stockSync).toEqual({ eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 1, releasedReservationQty: 1, releasedAllocationCount: 1 });
   });
 
   it('오타 수정은 같은 값 행을 고치고, 기준을 벗어나면 FAIL로 바뀐다', async () => {

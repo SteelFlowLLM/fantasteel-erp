@@ -406,3 +406,69 @@ describe('검사 기준 수정 = 새 버전 (API-122, REQ-QC-002)', () => {
     ).rejects.toMatchObject({ code: 'COM-003' });
   });
 });
+
+describe('검사 기준 삭제 (REQ-QC-002, SPEC 5장 "참조가 있으면 거부")', () => {
+  const prisma = new PrismaService();
+  const service = new InspectionStandardService(prisma, new InspectionStandardRepository());
+  let tempSteelGradeId: number;
+  let lotId: number;
+  let resultId: number;
+
+  const items = [{ inspectionItemCode: 'CAMBER', inspectionItemName: '캠버', unit: 'mm', maxValue: '5' }];
+  const create = (processType: 'HOT_ROLLING' | 'CONTINUOUS_CASTING') => service.createInspectionStandard({ processType, steelGradeId: tempSteelGradeId, items });
+  const versionsOf = (inspectionStandardCode: string) => prisma.inspectionStandard.findMany({ where: { inspectionStandardCode } });
+
+  beforeAll(async () => {
+    const grade = await prisma.steelGrade.create({
+      data: { steelGradeCode: 'QSD-GRADE', steelGradeName: '검사 기준 삭제 테스트 강종', standardNo: 'TEST' },
+    });
+    tempSteelGradeId = grade.id;
+    const result = await prisma.productionResult.create({ data: { processType: 'STEELMAKING', converterCode: 'BOF1', startedAt: new Date() } });
+    resultId = result.id;
+    lotId = (await prisma.lot.create({ data: { lotNo: 'QSD-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: result.id } })).id;
+  });
+
+  afterAll(async () => {
+    await prisma.qualityInspection.deleteMany({ where: { lotId } });
+    await prisma.lot.delete({ where: { id: lotId } });
+    await prisma.productionResult.delete({ where: { id: resultId } });
+    const standards = await prisma.inspectionStandard.findMany({ where: { steelGradeId: tempSteelGradeId }, select: { id: true } });
+    const ids = standards.map((s) => s.id);
+    await prisma.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: { in: ids } } });
+    await prisma.inspectionStandard.deleteMany({ where: { id: { in: ids } } });
+    await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
+    await prisma.$disconnect();
+  });
+
+  it('검사가 쓰지 않은 기준은 그 코드의 모든 버전과 항목을 지운다 (아무 버전 id로 불러도 같다)', async () => {
+    const v1 = await create('HOT_ROLLING');
+    const v2 = await service.createInspectionStandardVersion(v1.inspectionStandardId, { items });
+
+    const result = await service.deleteInspectionStandard(v1.inspectionStandardId);
+
+    expect(result).toEqual({ inspectionStandardCode: 'QS-QSD-GRADE-HR', deletedVersionNos: [1, 2] });
+    expect(await versionsOf('QS-QSD-GRADE-HR')).toEqual([]);
+    expect(await prisma.inspectionStandardItem.count({ where: { inspectionStandardId: { in: [v1.inspectionStandardId, v2.inspectionStandardId] } } })).toBe(0);
+  });
+
+  it('지운 뒤에는 같은 공정·강종에 다시 버전 1로 등록할 수 있다', async () => {
+    const again = await create('HOT_ROLLING');
+    expect(again).toMatchObject({ inspectionStandardCode: 'QS-QSD-GRADE-HR', versionNo: 1 });
+  });
+
+  it('어느 버전이든 검사가 판정에 썼으면 COM-004로 거부하고 아무것도 지우지 않는다', async () => {
+    const v1 = await create('CONTINUOUS_CASTING');
+    const v2 = await service.createInspectionStandardVersion(v1.inspectionStandardId, { items });
+    const inspector = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
+    await prisma.qualityInspection.create({
+      data: { lotId, inspectionStandardId: v1.inspectionStandardId, inspectorEmployeeId: inspector.id, inspectedAt: new Date(), inspectionResult: 'PASS' },
+    });
+
+    await expect(service.deleteInspectionStandard(v2.inspectionStandardId)).rejects.toMatchObject({ code: 'COM-004' });
+    expect((await versionsOf('QS-QSD-GRADE-CC')).map((v) => v.versionNo).sort()).toEqual([1, 2]);
+  });
+
+  it('없는 기준 id는 COM-003', async () => {
+    await expect(service.deleteInspectionStandard(2_000_000_000)).rejects.toMatchObject({ code: 'COM-003' });
+  });
+});

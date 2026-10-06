@@ -100,6 +100,13 @@ RETURNING id;
 
 **재고 조회**(REQ-INV-001·008, 4.3): 제품 규격별 on_hand·reserved·rolling·가용 매수와 톤 계산값(`calcWeightTon`). 여재 = 적격 + AVAILABLE + CONFIRMED 배정 없는 SLAB LOT(저장 안 함). 원료는 RAW_MATERIAL LOT `remaining_ton` 합계(소수 3자리). 다른 수주에 ACTIVE 예약된 매수를 자유 재고로 보이지 않는다.
 
+**재고 조회 구현 메모** (`GET inventories`, 로그인만, `?itemId=`)
+
+- 응답은 `{ products, rawMaterials }`다(shared `InventoryOverview`). `products`는 제품 규격마다 한 줄(재고 행이 없으면 0매)이고, 대시보드 위젯과 같은 `productStock` 계산에 `unallocatedPassedQty`(미배정 합격 LOT 수)를 더한다. `rawMaterials`는 원료 규격마다 잔량이 남은 원료 LOT의 `remaining_ton` 합계와 LOT 수다.
+- `unallocatedPassedQty` = 적격(자기 검사 PASS + 상위 히트 PASS) + AVAILABLE + CONFIRMED 배정 없음(`countUnallocatedPassedLotsByItem.sql`). 수주 예약 몫도 들어 있어서 "여재" 매수가 아니다.
+- 🟡 여재 매수는 만들지 않았다. 스키마에 여재 전환 시각이 없고 "수주 예약에 쓰이지 않은 몫"의 계산식이 정의돼 있지 않다.
+- 불합격·판정 대기 LOT 수, LOT 목록은 `lots` 모듈 몫이라 이 응답에 넣지 않았다.
+
 **동시성**(REQ-INV-009, BP-INV-02): 예약 매수는 조건부 UPDATE 한 줄, LOT 중복 배정은 부분 unique, 여러 행을 함께 검증하는 처리는 `SELECT … FOR UPDATE`(TypedSQL)로 잠근다([05] 8장). 잠금 순서는 inventory(item_id 오름차순) → reservation → allocation → lot(id 오름차순)으로 고정한다(13.2 "고정 순서").
 
 ## 5. 오류 코드·작업 로그

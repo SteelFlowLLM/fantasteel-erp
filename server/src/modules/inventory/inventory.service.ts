@@ -16,6 +16,7 @@ import {
   type AllocationStatus,
   type AllocationView,
   type AuthUser,
+  type InventoryOverview,
   type ItemType,
   type LotStatus,
   type ProductStockRow,
@@ -27,9 +28,10 @@ import {
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { ShipmentService } from '../shipment/shipment.service';
-import type { ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
+import type { ConfirmAllocationDto, ListAllocationsQuery, ListInventoriesQuery, RecommendAllocationDto, ReleaseAllocationDto } from './dto/allocation.dto';
 import { InventoryRepository } from './inventory.repository';
 
 type Actor = AuthUser | 'SYSTEM';
@@ -37,6 +39,8 @@ type Actor = AuthUser | 'SYSTEM';
 /** 검사 판정 반영 결과 (규격별) */
 export interface EligibilitySyncResult {
   itemId: number;
+  /** 반영 전 합격 재고 매수. onHandQty와의 차이가 적격이 된(+)·빠진(−) LOT 수다 */
+  previousOnHandQty: number;
   /** 다시 맞춘 합격 재고 매수 */
   onHandQty: number;
   autoReservedQty: number;
@@ -134,6 +138,33 @@ export class InventoryService {
         availableTon: calcWeightTon(availableQty, weight),
       };
     });
+  }
+
+  /**
+   * 재고 조회 (API GET /inventories, REQ-INV-001·008): 제품 규격별 재고(합격·예약·열연 배정·가용·톤 + 미배정 합격 LOT 수)와
+   * 원료별 LOT 잔량 합계. itemId를 주면 그 규격만 돌려준다. 읽기 전용이라 잠그지 않는다.
+   */
+  async listInventories(query: ListInventoriesQuery): Promise<InventoryOverview> {
+    const [stock, unallocated, raw] = await Promise.all([
+      this.productStock(this.prisma),
+      this.repository.countUnallocatedPassedLots(this.prisma),
+      this.repository.findRawMaterialStock(this.prisma),
+    ]);
+    const unallocatedByItem = new Map(unallocated.map((row) => [row.item_id, row.lot_count ?? 0]));
+    const sumByItem = new Map(raw.sums.map((row) => [row.itemId, row]));
+    const wanted = (itemId: number) => query.itemId === undefined || query.itemId === itemId;
+    return {
+      products: stock.filter((row) => wanted(row.itemId)).map((row) => ({ ...row, unallocatedPassedQty: unallocatedByItem.get(row.itemId) ?? 0 })),
+      rawMaterials: raw.items
+        .filter((item) => wanted(item.id))
+        .map((item) => ({
+          itemId: item.id,
+          itemCode: item.itemCode,
+          itemName: item.itemName,
+          remainingTon: (sumByItem.get(item.id)?._sum.remainingTon ?? new Prisma.Decimal(0)).toFixed(3),
+          lotCount: sumByItem.get(item.id)?._count._all ?? 0,
+        })),
+    };
   }
 
   // ── 예약 (REQ-INV-002·003) ─────────────────────────────
@@ -272,7 +303,7 @@ export class InventoryService {
           autoReservedQty += 1;
         }
       }
-      results.push({ itemId, onHandQty, autoReservedQty, releasedReservationQty, releasedAllocationCount: allocations.length });
+      results.push({ itemId, previousOnHandQty: inventory.on_hand_qty, onHandQty, autoReservedQty, releasedReservationQty, releasedAllocationCount: allocations.length });
     }
     for (const shipmentRequestId of refreshRequestIds) await this.shipment.refreshAllocationStatus(tx, shipmentRequestId);
     return results;

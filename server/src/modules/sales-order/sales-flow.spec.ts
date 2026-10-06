@@ -619,6 +619,7 @@ describe('검사 판정 → 재고 반영·자동 예약 (REQ-INV-003·004·007,
 
     const inspection = await moduleRef.get(QualityService).registerQualityInspection({ lotId: slabs[0].id, values }, qualityUser);
     expect(inspection.inspectionResult).toBe('PASS');
+    expect(inspection.stockSync).toEqual({ eligibleAddedQty: 1, autoReservedQty: 1, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
     expect(await inventoryOf(itemId)).toMatchObject({ onHandQty: 1, reservedQty: 1 });
     expect(await activeOf(salesOrderId)).toBe(1);
   });
