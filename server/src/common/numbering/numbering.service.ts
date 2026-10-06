@@ -33,7 +33,8 @@ export class NumberingService {
   /** 원료 RM-원료코드- · 용선 HM-고로- · 히트 HT-전로- (+YYMMDD-순번). 슬래브·코일은 number-format의 formatSlabNumber·formatCoilNumber */
   async nextLotNumber(tx: Tx, kind: DatedLotKind, code: string, at: Date = new Date()): Promise<string> {
     const prefix = lotNumberPrefix(kind, code, at);
-    const last = await this.repository.findLastLotNumber(tx, prefix);
+    // 채번 종류(RAW_MATERIAL·HOT_METAL·HEAT)가 곧 LOT 유형 값이다 (공통 코드 LOT_TYPE)
+    const last = await this.repository.findLastLotNumber(tx, prefix, kind);
     return formatLotNumber(kind, code, nextSequence(prefix, last), at);
   }
 
