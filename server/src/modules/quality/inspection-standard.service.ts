@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { InspectionStandardListItem, PageResult, ProcessType } from '@fantasteel/shared';
+import type { InspectionStandardDetail, InspectionStandardListItem, PageResult, ProcessType } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -75,5 +75,15 @@ export class InspectionStandardService {
       return toInspectionStandardListItem(standard);
     });
     return { items, page, size, total: latest.length };
+  }
+
+  /**
+   * 검사 기준 상세 (API-120): 기준 버전 1건의 항목·단위·min/max·적용 두께 구간·필수 여부.
+   * :id는 버전 id라 옛 버전도 그대로 보여 준다(검사 기록은 판정에 쓴 버전을 참조, REQ-QC-002).
+   */
+  async getInspectionStandard(inspectionStandardId: number): Promise<InspectionStandardDetail> {
+    const standard = await this.repository.findStandardWithItems(this.prisma, inspectionStandardId);
+    if (!standard) throw new AppException('COM-003', '검사 기준을 찾을 수 없어요');
+    return toInspectionStandardListItem(standard);
   }
 }

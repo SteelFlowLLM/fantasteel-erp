@@ -129,3 +129,85 @@ describe('검사 기준 목록 조회 (API-221, REQ-QC-002)', () => {
     expect(result).toMatchObject({ items: [], total: 0 });
   });
 });
+
+describe('검사 기준 상세 조회 (API-120, REQ-QC-002)', () => {
+  const prisma = new PrismaService();
+  const service = new InspectionStandardService(prisma, new InspectionStandardRepository());
+  let tempSteelGradeId: number;
+  let v1Id: number;
+  let v2Id: number;
+
+  beforeAll(async () => {
+    const grade = await prisma.steelGrade.create({
+      data: { steelGradeCode: 'QSD-GRADE', steelGradeName: '검사 기준 상세 테스트 강종', standardNo: 'TEST' },
+    });
+    tempSteelGradeId = grade.id;
+    const standard = (versionNo: number) =>
+      prisma.inspectionStandard.create({
+        data: { inspectionStandardCode: 'QS-QSD-GRADE-HR', versionNo, processType: 'HOT_ROLLING', steelGradeId: grade.id },
+      });
+    const v1 = await standard(1);
+    const v2 = await standard(2);
+    v1Id = v1.id;
+    v2Id = v2.id;
+    await prisma.inspectionStandardItem.create({
+      data: { inspectionStandardId: v1.id, inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', unit: 'MPa', minValue: '400' },
+    });
+    await prisma.inspectionStandardItem.createMany({
+      data: [
+        { inspectionStandardId: v2.id, inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', unit: 'MPa', minValue: '410' },
+        {
+          inspectionStandardId: v2.id,
+          inspectionItemCode: 'YIELD_STRENGTH',
+          inspectionItemName: '항복강도',
+          unit: 'MPa',
+          minValue: '345',
+          thicknessOverMm: '16',
+          thicknessUptoMm: '40',
+        },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: { in: [v1Id, v2Id] } } });
+    await prisma.inspectionStandard.deleteMany({ where: { id: { in: [v1Id, v2Id] } } });
+    await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
+    await prisma.$disconnect();
+  });
+
+  it('기준 버전 1건과 항목의 단위·min/max·적용 두께 구간·필수 여부를 준다', async () => {
+    const detail = await service.getInspectionStandard(v2Id);
+    expect(detail).toMatchObject({
+      inspectionStandardId: v2Id,
+      inspectionStandardCode: 'QS-QSD-GRADE-HR',
+      versionNo: 2,
+      processType: 'HOT_ROLLING',
+      steelGradeId: tempSteelGradeId,
+      steelGradeCode: 'QSD-GRADE',
+    });
+    expect(detail.items.map((i) => [i.inspectionItemCode, i.unit, i.minValue, i.maxValue, i.thicknessOverMm, i.thicknessUptoMm, i.isRequired])).toEqual([
+      ['TENSILE_STRENGTH', 'MPa', '410.0000', null, null, null, true],
+      ['YIELD_STRENGTH', 'MPa', '345.0000', null, '16.00', '40.00', true],
+    ]);
+  });
+
+  it('옛 버전도 그 버전의 항목 그대로 보여 준다 (검사 기록이 참조하는 버전)', async () => {
+    const detail = await service.getInspectionStandard(v1Id);
+    expect(detail).toMatchObject({ inspectionStandardId: v1Id, versionNo: 1 });
+    expect(detail.items.map((i) => [i.inspectionItemCode, i.minValue])).toEqual([['TENSILE_STRENGTH', '400.0000']]);
+  });
+
+  it('제강 기준은 강종 성분 규격 항목을 준다 (TRM-020)', async () => {
+    const seed = await prisma.inspectionStandard.findUniqueOrThrow({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
+    });
+    const detail = await service.getInspectionStandard(seed.id);
+    expect(detail).toMatchObject({ processType: 'STEELMAKING', steelGradeCode: 'SM355A' });
+    expect(detail.items.map((i) => i.inspectionItemCode)).toEqual(['C', 'SI', 'MN', 'P', 'S', 'CEQ']);
+  });
+
+  it('없는 기준 id는 COM-003', async () => {
+    await expect(service.getInspectionStandard(2_000_000_000)).rejects.toMatchObject({ code: 'COM-003' });
+  });
+});

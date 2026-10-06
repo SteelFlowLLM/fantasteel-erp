@@ -31,3 +31,6 @@ export interface InspectionStandardListItem {
   /** 등록 순서(id). ERD에 표시 순서 컬럼이 없다 */
   items: InspectionStandardItemView[];
 }
+
+/** 검사 기준 상세 (GET /inspection-standards/:id, API-120): 기준 버전 1건과 항목. 옛 버전도 같은 모양 */
+export type InspectionStandardDetail = InspectionStandardListItem;
