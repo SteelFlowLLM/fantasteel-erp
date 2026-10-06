@@ -13,3 +13,4 @@ export * from './purchasing';
 export * from './master-data';
 export * from './production';
 export * from './lot';
+export * from './mrp';
