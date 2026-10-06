@@ -47,7 +47,7 @@ export function Modal({ title, onClose, children, footer, width = 520 }: ModalPr
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex max-h-[calc(100vh-80px)] max-w-full flex-col overflow-hidden rounded-lg bg-surface shadow-pop outline-none"
+        className="flex max-h-[calc(100dvh/var(--app-zoom)-80px)] max-w-full flex-col overflow-hidden rounded-lg bg-surface shadow-pop outline-none"
         // 너비는 화면마다 다른 숫자라 style로 준다
         style={{ width }}
       >

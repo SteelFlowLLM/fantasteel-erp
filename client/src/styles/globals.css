@@ -85,64 +85,31 @@
   --text-5xl--line-height: 42px;
 }
 
-/* 글자 크기 설정 (사원 메뉴, lib/fontSize.ts): 여백·칸 크기는 그대로 두고 글자 토큰만 약 1.3배·1.5배로 바꾼다.
-   Tailwind 유틸리티가 var(--text-*)를 읽으므로 이 값만 바꾸면 화면 전체 글자가 따라 커진다. */
+/* 글자 크기 설정 (사원 메뉴, lib/fontSize.ts): 브라우저 확대(Ctrl +)처럼 화면 전체를 zoom으로 키운다.
+   글자만 키우면 고정 너비 칸에서 글자가 한 자씩 끊겨서, 칸·여백·아이콘까지 같은 비율로 키운다.
+   zoom 안에서는 100vh·100vw도 함께 커져 화면을 넘치므로 높이·너비는 아래 viewport 유틸리티로 준다. */
+html {
+  --app-zoom: 1;
+}
+
 html[data-font-size='large'] {
-  --text-2xs: 14px;
-  --text-2xs--line-height: 17px;
-  --text-cap: 14.5px;
-  --text-cap--line-height: 18px;
-  --text-xs: 16px;
-  --text-xs--line-height: 20px;
-  --text-mono: 16px;
-  --text-mono--line-height: 22px;
-  --text-sm: 17px;
-  --text-sm--line-height: 23px;
-  --text-base: 18px;
-  --text-base--line-height: 26px;
-  --text-md: 19.5px;
-  --text-md--line-height: 28px;
-  --text-lg: 21px;
-  --text-lg--line-height: 31px;
-  --text-xl: 22px;
-  --text-xl--line-height: 31px;
-  --text-2xl: 26px;
-  --text-2xl--line-height: 36px;
-  --text-3xl: 31px;
-  --text-3xl--line-height: 42px;
-  --text-4xl: 36px;
-  --text-4xl--line-height: 42px;
-  --text-5xl: 39px;
-  --text-5xl--line-height: 55px;
+  --app-zoom: 1.25;
 }
 
 html[data-font-size='xlarge'] {
-  --text-2xs: 16px;
-  --text-2xs--line-height: 20px;
-  --text-cap: 16.5px;
-  --text-cap--line-height: 21px;
-  --text-xs: 18px;
-  --text-xs--line-height: 24px;
-  --text-mono: 19px;
-  --text-mono--line-height: 27px;
-  --text-sm: 19.5px;
-  --text-sm--line-height: 27px;
-  --text-base: 21px;
-  --text-base--line-height: 30px;
-  --text-md: 22.5px;
-  --text-md--line-height: 33px;
-  --text-lg: 24px;
-  --text-lg--line-height: 36px;
-  --text-xl: 25.5px;
-  --text-xl--line-height: 36px;
-  --text-2xl: 30px;
-  --text-2xl--line-height: 42px;
-  --text-3xl: 36px;
-  --text-3xl--line-height: 48px;
-  --text-4xl: 42px;
-  --text-4xl--line-height: 48px;
-  --text-5xl: 45px;
-  --text-5xl--line-height: 63px;
+  --app-zoom: 1.5;
+}
+
+html[data-font-size] {
+  zoom: var(--app-zoom);
+}
+
+@utility h-viewport {
+  height: calc(100dvh / var(--app-zoom));
+}
+
+@utility w-viewport {
+  width: calc(100dvw / var(--app-zoom));
 }
 
 /* 글꼴: next/font가 <html>에 --font-plex-sans / --font-plex-mono 변수를 단다 */

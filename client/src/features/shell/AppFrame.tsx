@@ -15,7 +15,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const setTitle = useCallback((title: ShellTitle) => setCustom(title), []);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg">
+    <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
       <Rail />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar custom={custom} />

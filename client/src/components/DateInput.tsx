@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
 import { inputClass } from '@/components/Input';
 import { cn } from '@/lib/cn';
+import { appZoom } from '@/lib/fontSize';
 import { parseDateText, toDateText } from '@/lib/dateText';
 import { todayStr } from '@/lib/format';
 
@@ -126,8 +127,11 @@ export function DateInput({ value, onChange, min, id, placeholder = 'YYYY-MM-DD'
     }
     const rect = rootRef.current?.getBoundingClientRect();
     if (rect) {
-      const below = rect.bottom + 4 + CALENDAR_HEIGHT <= window.innerHeight;
-      setPosition({ top: below ? rect.bottom + 4 : Math.max(8, rect.top - 4 - CALENDAR_HEIGHT), left: rect.left });
+      const zoom = appZoom();
+      const top = rect.top / zoom;
+      const bottom = rect.bottom / zoom;
+      const below = bottom + 4 + CALENDAR_HEIGHT <= window.innerHeight / zoom;
+      setPosition({ top: below ? bottom + 4 : Math.max(8, top - 4 - CALENDAR_HEIGHT), left: rect.left / zoom });
     }
     setView(monthOf(value || today));
     setOpen(true);

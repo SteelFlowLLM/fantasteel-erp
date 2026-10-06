@@ -10,6 +10,7 @@ import { Tag } from '@/components/Tag';
 import { InspectionBadge, LotStatusBadge, LotTypeIcon, ShipmentStatusBadge, fmtPeriod } from '@/features/lotTrace/components/TraceBits';
 import { HEAD_H, NODE_H, NODE_W, isAlloyNode, layoutTrace, type GraphEdge } from '@/features/lotTrace/lib/traceLayout';
 import { cn } from '@/lib/cn';
+import { appZoom } from '@/lib/fontSize';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
 
 /** 'lot:12' | 'ship:3' */
@@ -57,12 +58,16 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
     const box = canvasRef.current?.parentElement;
     const start = canvasRef.current?.querySelector<HTMLElement>('[data-start="true"]');
     if (!box || !start) return;
+    // 화면 확대 중이면 rect는 확대된 좌표라 clientLeft·scrollLeft와 단위를 맞춘다
+    const zoom = appZoom();
     const b = box.getBoundingClientRect();
     const r = start.getBoundingClientRect();
-    const left = b.left + box.clientLeft;
+    const left = b.left / zoom + box.clientLeft;
     const right = left + box.clientWidth;
-    if (r.left >= left && r.right <= right) return;
-    box.scrollLeft += (r.left + r.right) / 2 - (left + right) / 2;
+    const startLeft = r.left / zoom;
+    const startRight = r.right / zoom;
+    if (startLeft >= left && startRight <= right) return;
+    box.scrollLeft += (startLeft + startRight) / 2 - (left + right) / 2;
   }, [startKey, layout.width]);
 
   return (
