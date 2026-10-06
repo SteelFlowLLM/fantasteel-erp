@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
@@ -88,8 +88,9 @@ export class SalesOrderService {
     private readonly repository: SalesOrderRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
-    private readonly inventory: InventoryService,
-    private readonly production: ProductionService,
+    // shipment가 출고 확정에서 recalcItemStatus를 부른다 → sales-order → inventory → shipment → sales-order 순환이라 forwardRef
+    @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
+    @Inject(forwardRef(() => ProductionService)) private readonly production: ProductionService,
     private readonly idempotency: IdempotencyStore,
   ) {}
 
@@ -281,6 +282,24 @@ export class SalesOrderService {
         cancellation: { cancelledAt: touched.updatedAt.toISOString(), reason: dto.reason, releasedReservations, cancelledPlanNos, unlinkedPlanNos },
       };
     }, LONG_TX);
+  }
+
+  // ── 출고 확정이 부른다 (REQ-SO-005) ─────────────────────
+
+  /**
+   * 출고(CONVERTED 예약) 매수로 품목 상태를 다시 정한다: 수주 매수 이상이면 SHIPPED, 하나라도 있으면 PARTIALLY_SHIPPED.
+   * 취소된 품목은 건드리지 않는다. 헤더 상태는 저장하지 않고 품목 상태에서 계산한다.
+   */
+  async recalcItemStatus(tx: Tx, salesOrderItemId: number): Promise<SalesOrderItemStatus> {
+    const item = await this.repository.findItemForStatus(tx, salesOrderItemId);
+    if (!item) throw new AppException('COM-003', '수주 품목을 찾을 수 없어요');
+    const current = item.salesOrderItemStatus as SalesOrderItemStatus;
+    if (current === SALES_ORDER_ITEM_STATUS.CANCELLED) return current;
+    const reservations = await this.inventory.listReservations(tx, [salesOrderItemId]);
+    const shippedQty = reservations.filter((r) => r.reservationStatus === RESERVATION_STATUS.CONVERTED).reduce((sum, r) => sum + r.reservedQty, 0);
+    const next = shippedQty >= item.orderedQty ? SALES_ORDER_ITEM_STATUS.SHIPPED : shippedQty > 0 ? SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED : SALES_ORDER_ITEM_STATUS.OPEN;
+    if (next !== current) await this.repository.updateItemStatus(tx, salesOrderItemId, next);
+    return next;
   }
 
   // ── 계산·모양 ─────────────────────────────────────────

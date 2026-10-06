@@ -123,12 +123,20 @@
 | --- | --- | --- |
 | 출하 가능 매수 | SHP-002의 기준 식이 없다. 후보: `min(미출하 매수, ACTIVE 예약 매수) − 진행 중(REQUESTED·ALLOCATED) 출하요청 매수` | [04] BP-SHP-01 "ACTIVE 예약·출하 가능 잔량 확인", 9.3 |
 | 부분 출고 단위 | [04] 10장은 출하요청 상태를 ISSUED 하나로 끝내므로 부분 출하는 출하요청을 나눠야 한다. 한 요청 안에서 일부 품목만 출고하는 경우는 정의 없음 | [04] 10장·13.3 |
-| 출고 전 ALLOCATED 필요 여부 | 미배정 품목이 남은 REQUESTED 상태에서 출고를 허용할지 | [04] 13.3, [06] |
+| 출고 전 ALLOCATED 필요 여부 | **구현:** 요청 품목마다 CONFIRMED 배정이 요청 매수만큼 있어야 하고(상태 컬럼이 아니라 배정 수로 본다), 모자라면 INV-001. 한 요청 안에서 일부 품목만 출고하는 경우는 지원하지 않는다(요청 전체를 출고) | [04] 13.3, [06] |
 | 이벤트 단위 | 여러 수주를 묶은 출하요청의 SHIPMENT_REQUEST_CREATED·GOODS_ISSUE_CONFIRMED를 수주별로 나눌지 | [ERD] business_event.sales_order_id |
 | 취소 이벤트 | 출하요청 취소용 BUSINESS_EVENT_TYPE이 없다 | [06] |
 | 오류 코드 | 고객사 불일치, 상태 전이 위반(이미 취소·출고)용 코드가 없다 | [04] 9.3 |
-| 중복 출고 방지 | [CSV]·13.3 "Idempotency-Key 적용 후보", 요청 키 저장소 미정. 상태(ISSUED) 검사로 1차 방어 | [CSV], 08 공통 규약 |
+| 중복 출고 방지 | **구현:** 출하요청 행을 잠근 뒤 상태(ISSUED)를 보고 이미 출고했으면 COM-001. Idempotency-Key 저장소는 아직 없다 | [CSV], 08 공통 규약 |
 | PDF 받기 | `POST mill-sheets/:id/pdf`가 파일을 돌려줄지 경로만 줄지, 다운로드 GET이 필요한지 [CSV]에 없다 | [CSV] |
 | 출하 가능 품목 조회 | 초안 행 `GET shipment-requests/shippable`이 v1 목록에 없다 | [CSV] |
+
+**출고 확정 구현 메모 (API-112)**
+
+- 이미 출고·취소된 요청은 COM-001, 배정 대기 남음 INV-001, 미합격·미검사 LOT INV-002, 이미 투입·출고된 LOT INV-004, 미출하·ACTIVE 예약 초과 SHP-002. 하나라도 어긋나면 전부 롤백한다.
+- 밀시트 스냅샷 모양은 shared의 `MillSheetSnapshot`(프런트 목업과 같은 모양). 히트·검사값은 출고 시점 값을 복사한다.
+- 작업 로그 MILL_SHEET_ISSUED의 행위자는 출고 확정한 로그인 사용자다(목업은 SYSTEM).
+- Prisma 7에서 중첩 select(배정·검사·부모 LOT)를 여러 행에 걸쳐 읽으면 "Expected zero or one element"로 실패해서, 배정과 LOT 계보·검사는 따로 읽는다.
+- 출고 후 출하요청 상세의 미배정 매수는 소진(CONSUMED)된 배정도 배정된 것으로 센다.
 
 참고: `nextMillSheetNumber`는 같은 tx 안의 밀시트 수 + 1이므로, 수주가 여럿이면 밀시트를 하나 저장한 뒤 다음 번호를 받는 순서로 부른다(미리 여러 번 받으면 같은 번호가 나온다).

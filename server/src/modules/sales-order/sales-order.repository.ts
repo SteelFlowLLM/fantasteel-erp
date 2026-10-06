@@ -102,6 +102,10 @@ export class SalesOrderRepository {
     return tx.$queryRawTyped(lockSalesOrderItemsForShipment([...salesOrderItemIds].sort((a, b) => a - b)));
   }
 
+  findItemForStatus(tx: Tx, id: number) {
+    return tx.salesOrderItem.findUnique({ where: { id }, select: { id: true, orderedQty: true, salesOrderItemStatus: true } });
+  }
+
   updateItemStatus(tx: Tx, id: number, salesOrderItemStatus: SalesOrderItemStatus) {
     return tx.salesOrderItem.update({ where: { id }, data: { salesOrderItemStatus } });
   }
