@@ -100,17 +100,17 @@ export function RawMaterialBalanceWidget(props: WidgetProps) {
 
 function RejectRateBody({ data }: { data: RejectRateData }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
-  // 불합격률은 작은 값이라 가장 큰 값(최소 10%)을 막대 끝으로 잡는다
-  const scale = Math.max(0.1, ...data.grades.map((g) => g.rejectRate ?? 0));
+  // 막대 끝 = 100%: 막대 길이가 불합격률 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
   const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
       {data.grades.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
+        // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
-          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_max-content] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
-            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{g.rejectRate ? <span className="bg-danger" style={{ width: pct(g.rejectRate, scale) }} /> : null}</div>
+            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{g.rejectRate ? <span className="bg-danger" style={{ width: pct(g.rejectRate, 1) }} /> : null}</div>
             <span className="text-right tabular-nums">
               <b className={cn('font-semibold', g.rejectRate ? 'text-danger' : undefined)}>{fmtPct(g.rejectRate, 1)}</b> <span className="text-cap text-ink-3">{g.failedCount}/{g.inspectedCount}건</span>
             </span>
@@ -120,7 +120,7 @@ function RejectRateBody({ data }: { data: RejectRateData }) {
           </div>
         );
       })}
-      <span className="text-cap text-ink-3">불합격률 = 불합격 ÷ 판정된 검사 수 · 막대 끝 = {Math.round(scale * 100)}%</span>
+      <span className="text-cap text-ink-3">불합격률 = 불합격 ÷ 판정된 검사 수 · 막대 끝 = 100%</span>
       {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
     </div>
   );
