@@ -4,7 +4,6 @@ import {
   LOT_TYPE,
   QUALITY_INSPECTION_LIST_STATUS,
   type AuthUser,
-  type InspectionResult,
   type PageResult,
   type QualityInspectionDetail,
   type QualityInspectionListItem,
@@ -172,8 +171,8 @@ export class QualityService {
         },
       });
 
-      // 판정 뒤 재고 반영: 적격이 된 제품 on_hand +1·자동 예약 (quality.md 4장 "판정 뒤 재고 반영")
-      await this.inventory.onLotsEligibilityChanged(tx, { lotId: lot.id, previousResult: null });
+      // 판정 뒤 재고 반영: 적격이 된 LOT on_hand +1·자동 예약, FAIL이면 하위 LOT 배정 해제·예약 축소 (quality.md 4장, 이슈 #18)
+      await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user);
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
@@ -251,13 +250,8 @@ export class QualityService {
         },
       });
 
-      // 판정이 바뀌면 등록과 같은 재고 반영을 한다. 히트면 하위 제품까지 (2026-10-06 결정, quality.md 8장 "수정 후 재판정 범위")
-      if (inspection.inspectionResult !== judgement.inspectionResult) {
-        await this.inventory.onLotsEligibilityChanged(tx, {
-          lotId: lot.id,
-          previousResult: inspection.inspectionResult as InspectionResult,
-        });
-      }
+      // 판정이 바뀌면(PASS↔FAIL 등) 등록과 같은 재고 반영 (quality.md 4장 "측정값 수정"). 재판정 범위는 quality.md 8장 🟡
+      if (beforeJudgement.inspectionResult !== judgement.inspectionResult) await this.inventory.onLotsEligibilityChanged(tx, [lot.id], user);
 
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');

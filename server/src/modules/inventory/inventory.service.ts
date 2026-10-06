@@ -3,7 +3,6 @@ import {
   ALLOCATION_PURPOSE,
   ALLOCATION_STATUS,
   BUSINESS_EVENT_TYPE,
-  INSPECTION_RESULT,
   LOT_STATUS,
   LOT_TYPE,
   PERMISSION,
@@ -17,7 +16,6 @@ import {
   type AllocationStatus,
   type AllocationView,
   type AuthUser,
-  type InspectionResult,
   type ItemType,
   type LotStatus,
   type ProductStockRow,
@@ -35,9 +33,17 @@ import type { ConfirmAllocationDto, ListAllocationsQuery, RecommendAllocationDto
 import { InventoryRepository } from './inventory.repository';
 
 type Actor = AuthUser | 'SYSTEM';
+
+/** 검사 판정 반영 결과 (규격별) */
+export interface EligibilitySyncResult {
+  itemId: number;
+  /** 다시 맞춘 합격 재고 매수 */
+  onHandQty: number;
+  autoReservedQty: number;
+  releasedReservationQty: number;
+  releasedAllocationCount: number;
+}
 type AllocationRow = NonNullable<Awaited<ReturnType<InventoryRepository['findAllocation']>>>;
-/** 판정으로 적격이 달라진 재고 상태 제품 LOT */
-type EligibilityChange = { lotId: number; lotNo: string; itemId: number; isEligible: boolean };
 
 /** 예약 조건부 UPDATE가 0행일 때 가용을 다시 읽어 시도하는 횟수 (재고 행을 잠근 뒤라 보통 첫 번에 끝난다) */
 const RESERVE_ATTEMPTS = 3;
@@ -202,6 +208,128 @@ export class InventoryService {
     }));
   }
 
+  // ── 검사 판정 반영 (REQ-INV-003·004·007, quality.md 4장 "판정 뒤 재고 반영") ──
+
+  /**
+   * 검사 판정이 바뀐 LOT의 재고 반영. 품질 검사 등록·수정 트랜잭션 안에서 부른다.
+   * on_hand_qty를 "적격 AVAILABLE LOT 수"로 다시 맞추므로([ERD] 불변조건) 같은 LOT으로 여러 번 불러도 결과가 같다.
+   *  - 적격이 아니게 된 LOT(불합격 LOT, 불합격 히트의 하위 LOT): 확정 배정 해제 → 가용을 넘는 ACTIVE 예약 축소 (SYSTEM, QUALITY_FAILURE)
+   *  - 적격이 된 LOT: 늘어난 매수 안에서 그 LOT을 만든 계획의 수주 품목에 미확보 매수만큼 1매씩 자동 예약 (SYSTEM)
+   *    계획이 수주에서 해제됐으면(여재) 예약하지 않는다 (REQ-INV-004, [ERD] lot Note)
+   * 히트를 넘기면 하위 슬래브·코일까지 본다.
+   */
+  async onLotsEligibilityChanged(tx: Tx, lotIds: readonly number[], actor: Actor): Promise<EligibilitySyncResult[]> {
+    const productLotIds = await this.repository.findAffectedProductLotIds(tx, [...lotIds]);
+    if (productLotIds.length === 0) return [];
+    const lots = await this.repository.findProductLots(tx, productLotIds);
+    const eligibleLotIds = new Set<number>();
+    for (const lot of lots) {
+      const eligibility = await this.repository.findLotEligibility(tx, lot.id);
+      if (eligibility?.is_eligible && lot.lotStatus === LOT_STATUS.AVAILABLE) eligibleLotIds.add(lot.id);
+    }
+    const triggeredBy = actor === 'SYSTEM' ? null : actor.employeeId;
+    const refreshRequestIds = new Set<number>();
+    const results: EligibilitySyncResult[] = [];
+
+    // 재고 행 잠금 순서를 고정한다 (item_id 오름차순, 13.2)
+    const itemIds = [...new Set(lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])))].sort((a, b) => a - b);
+    for (const itemId of itemIds) {
+      await this.repository.ensureInventory(tx, itemId);
+      const inventory = await this.repository.lockInventory(tx, itemId);
+      if (!inventory) continue;
+      const ofItem = lots.filter((l) => l.itemId === itemId);
+      const ineligible = ofItem.filter((l) => !eligibleLotIds.has(l.id));
+
+      // 1. 적격이 아닌 LOT의 확정 배정 해제 (출하·열연 모두)
+      const allocations = await this.repository.findConfirmedAllocationsOfLots(tx, ineligible.map((l) => l.id));
+      let rollingReleased = 0;
+      for (const allocation of allocations) {
+        await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${allocation.lot.lotNo}이 불합격(또는 상위 히트 불합격)이라 배정 해제`);
+        if (allocation.allocationPurpose === ALLOCATION_PURPOSE.HOT_ROLLING) rollingReleased += 1;
+        if (allocation.shipmentRequestItem) refreshRequestIds.add(allocation.shipmentRequestItem.shipmentRequestId);
+      }
+      if (rollingReleased > 0) await this.repository.decrementRollingAllocatedQty(tx, itemId, rollingReleased);
+
+      // 2. 가용을 넘는 예약을 먼저 줄이고 on_hand를 맞춘다 (CHECK: on_hand − reserved − rolling ≥ 0)
+      const onHandQty = await this.repository.countEligibleAvailableLots(tx, itemId);
+      const rollingQty = inventory.rolling_allocated_qty - rollingReleased;
+      const excessQty = inventory.reserved_qty + rollingQty - onHandQty;
+      // 어느 예약을 줄일지 문서에 없어 정한 값(inventory.md 8장 🟡): 불합격 LOT을 만든 계획의 수주 품목 예약부터, 그다음 최근 예약부터
+      const preferred = new Set(ineligible.flatMap((l) => (l.productionResult?.productionPlan?.salesOrderItemId ? [l.productionResult.productionPlan.salesOrderItemId] : [])));
+      const releasedReservationQty = excessQty > 0 ? await this.shrinkReservations(tx, itemId, excessQty, preferred, triggeredBy) : 0;
+      await this.repository.setOnHandQty(tx, itemId, onHandQty);
+
+      // 3. 늘어난 매수 안에서 자동 예약
+      let room = onHandQty - inventory.on_hand_qty;
+      let autoReservedQty = 0;
+      for (const lot of ofItem) {
+        if (room <= 0) break;
+        if (!eligibleLotIds.has(lot.id)) continue;
+        const plan = lot.productionResult?.productionPlan;
+        if (!plan?.salesOrderItemId || plan.itemId !== itemId) continue;
+        if (await this.autoReserveOne(tx, plan.salesOrderItemId, itemId, lot, triggeredBy)) {
+          room -= 1;
+          autoReservedQty += 1;
+        }
+      }
+      results.push({ itemId, onHandQty, autoReservedQty, releasedReservationQty, releasedAllocationCount: allocations.length });
+    }
+    for (const shipmentRequestId of refreshRequestIds) await this.shipment.refreshAllocationStatus(tx, shipmentRequestId);
+    return results;
+  }
+
+  /** 자동 예약 1매: 수주 품목이 진행 중이고 미확보 매수(미출하 − ACTIVE 예약)가 남았고 가용이 1 이상일 때만 */
+  private async autoReserveOne(tx: Tx, salesOrderItemId: number, itemId: number, lot: { id: number; lotNo: string }, triggeredBy: number | null): Promise<boolean> {
+    const soItem = await this.repository.findSalesOrderItemSecured(tx, salesOrderItemId);
+    if (!soItem || soItem.itemId !== itemId) return false;
+    if (soItem.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.OPEN && soItem.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED) return false;
+    const unsecuredQty = soItem.orderedQty - soItem.convertedQty - soItem.activeQty;
+    if (unsecuredQty <= 0) return false;
+    if (!(await this.repository.reserveQty(tx, itemId, 1))) return false;
+    const reservation = await this.repository.createReservation(tx, { salesOrderItemId, itemId, reservedQty: 1 });
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.RESERVATION_CREATED,
+      actor: 'SYSTEM',
+      target: { table: 'reservation', id: reservation.id },
+      salesOrderId: soItem.salesOrderId,
+      lotIds: [lot.id],
+      after: { ...reservationSnapshot(reservation), triggeredByEmployeeId: triggeredBy },
+      reason: `자동 예약: ${lot.lotNo} 합격으로 원래 수주 품목 부족분 1매 예약 (미확보 ${unsecuredQty}매)`,
+    });
+    return true;
+  }
+
+  /** 초과 예약 축소: preferred 수주 품목의 예약부터, 그다음 최근 예약부터 줄인다. 일부만 줄이면 ACTIVE를 나누고 줄인 몫은 RELEASED 행으로 남긴다 */
+  private async shrinkReservations(tx: Tx, itemId: number, excessQty: number, preferred: ReadonlySet<number>, triggeredBy: number | null): Promise<number> {
+    const actives = await this.repository.findActiveReservationsOfItem(tx, itemId);
+    const ordered = [...actives.filter((r) => preferred.has(r.salesOrderItemId)), ...actives.filter((r) => !preferred.has(r.salesOrderItemId))];
+    let remaining = excessQty;
+    for (const reservation of ordered) {
+      if (remaining <= 0) break;
+      const cutQty = Math.min(remaining, reservation.reservedQty);
+      const released =
+        cutQty === reservation.reservedQty
+          ? await this.repository.updateReservationStatus(tx, reservation.id, RESERVATION_STATUS.RELEASED)
+          : await this.repository.createReleasedReservation(tx, { salesOrderItemId: reservation.salesOrderItemId, itemId, reservedQty: cutQty });
+      if (cutQty < reservation.reservedQty) await this.repository.updateReservationQty(tx, reservation.id, reservation.reservedQty - cutQty);
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.RESERVATION_RELEASED,
+        actor: 'SYSTEM',
+        target: { table: 'reservation', id: released.id },
+        salesOrderId: reservation.salesOrderItem.salesOrderId,
+        before: reservationSnapshot(reservation),
+        after: { ...reservationSnapshot(released), triggeredByEmployeeId: triggeredBy },
+        reason: `QUALITY_FAILURE: 불합격으로 합격 재고가 줄어 예약 ${cutQty}매 축소`,
+      });
+      remaining -= cutQty;
+    }
+    const releasedQty = excessQty - remaining;
+    if (releasedQty > 0 && !(await this.repository.releaseReservedQty(tx, itemId, releasedQty))) {
+      throw new Error(`inventory.reserved_qty가 ACTIVE 예약 합계보다 작습니다 (item ${itemId}, 축소 ${releasedQty})`);
+    }
+    return releasedQty;
+  }
+
   // ── 배정 (REQ-INV-006, BP-SHP-01) ──────────────────────
 
   /** 배정 추천: 저장하지 않고 작업 로그(ALLOCATION_RECOMMENDED)만 남긴다. 후보 전부를 FIFO 순서로 주고 앞에서 미배정 매수만큼 추천한다 */
@@ -355,6 +483,49 @@ export class InventoryService {
     return rows.map(toAllocationView);
   }
 
+  /**
+   * 출고 확정: 수주 품목의 ACTIVE 예약을 qty만큼 CONVERTED로 바꾸고 현재고·예약 매수를 줄인다 (REQ-INV-005, shipment가 부른다).
+   * 예약이 qty보다 크면 행을 나눈다. 규격 재고 행을 먼저 잠그므로 호출하는 쪽은 규격(item_id) 오름차순으로 부른다.
+   */
+  async convertReservations(tx: Tx, input: { salesOrderId: number; salesOrderItemId: number; itemId: number; qty: number; lotIds: number[]; actor: Actor }): Promise<number> {
+    await this.repository.lockInventory(tx, input.itemId);
+    const active = await this.repository.findReservationsOfItem(tx, input.salesOrderItemId, RESERVATION_STATUS.ACTIVE);
+    let remaining = input.qty;
+    for (const reservation of active) {
+      if (remaining === 0) break;
+      const take = Math.min(reservation.reservedQty, remaining);
+      const converted =
+        take === reservation.reservedQty
+          ? await this.repository.updateReservationStatus(tx, reservation.id, RESERVATION_STATUS.CONVERTED)
+          : (await this.repository.splitReservation(tx, reservation, take)).converted;
+      remaining -= take;
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.RESERVATION_CONVERTED,
+        actor: input.actor,
+        target: { table: 'reservation', id: converted.id },
+        salesOrderId: input.salesOrderId,
+        lotIds: input.lotIds,
+        before: reservationSnapshot(reservation),
+        after: reservationSnapshot(converted),
+      });
+    }
+    // 출하 가능 매수 검사(SHP-002)와 같은 잠금 안에서 불러서 여기까지 오면 예약이 모자랄 수 없다. 모자라면 호출한 쪽의 검사가 빠진 것이다
+    if (remaining > 0) throw new AppException('SHP-002', `수주 품목(id ${input.salesOrderItemId})의 ACTIVE 예약이 ${input.qty}매보다 적어요`);
+    if (!(await this.repository.consumeOnHandAndReserved(tx, input.itemId, input.qty))) {
+      // on_hand·reserved_qty가 LOT·예약 합계와 어긋난 경우다. 업무 오류가 아니라 서버 오류로 남긴다
+      throw new Error(`inventory 현재고·예약 매수가 출고 매수보다 작습니다 (item ${input.itemId}, 출고 ${input.qty})`);
+    }
+    return input.qty;
+  }
+
+  /** 출고 확정: 배정을 소진(CONSUMED)으로 (shipment가 부른다). 소진 기록은 GOODS_ISSUE_CONFIRMED 작업 로그가 대신한다 */
+  async consumeShipmentAllocations(tx: Tx, allocationIds: number[]): Promise<void> {
+    if (!(await this.repository.consumeConfirmedAllocations(tx, allocationIds))) {
+      // 출하요청을 잠근 안이라 확정 배정이 바뀔 수 없다. 어긋났으면 서버 오류로 남기고 전부 되돌린다
+      throw new Error(`소진할 배정 일부가 CONFIRMED가 아닙니다 (배정 ${allocationIds.join(",")})`);
+    }
+  }
+
   /** 출하요청 취소: 그 요청의 CONFIRMED 배정을 모두 해제한다 (shipment가 부른다) */
   async releaseShipmentAllocationsOfRequest(tx: Tx, input: { shipmentRequestId: number; actor: Actor; reason: string }): Promise<number[]> {
     const confirmed = await this.repository.findAllocations(tx, {
@@ -387,124 +558,7 @@ export class InventoryService {
     return confirmed.map((a) => a.lotId);
   }
 
-  // ── 적격 변화 (REQ-INV-003·004·007, quality.md 4장) ────
-
-  /**
-   * 검사 판정이 바뀐 뒤 재고에 반영한다. quality가 판정과 같은 tx에서 부르고, 작업 로그 주체는 SYSTEM이다.
-   * 적격 = 자기 PASS + 상위 히트 PASS. 판정 전 결과(previousResult, 첫 등록이면 null)로 전 적격을 다시 계산해 비교한다.
-   * 문서의 권장 모양 (tx, lotIds, actor)과 달리 검사한 LOT 하나와 전 결과를 받는다: 판정 전 적격은 저장돼 있지 않아서다.
-   * - 적격이 됨: on_hand +1 → 원래 수주 품목의 미확보 매수 안에서 1매 자동 예약
-   * - 적격에서 빠짐: 확정 배정 해제 → 가용이 모자라면 예약 축소 → on_hand −1
-   * on_hand는 재고 상태(AVAILABLE) LOT만 세므로 투입·출고된 LOT은 건드리지 않는다.
-   */
-  async onLotsEligibilityChanged(tx: Tx, input: { lotId: number; previousResult: InspectionResult | null }): Promise<void> {
-    const wasPassed = input.previousResult === INSPECTION_RESULT.PASS;
-    const targets = await this.repository.findEligibilityTargets(tx, input.lotId);
-    const changes: EligibilityChange[] = targets.flatMap((t) => {
-      if (t.item_id === null || t.lot_status !== LOT_STATUS.AVAILABLE) return [];
-      const isOwnPassed = t.is_own_passed === true;
-      const isHeatPassed = t.is_heat_passed === true;
-      // 검사한 LOT이 이 제품이면 자기 판정이, 아니면(히트) 상위 히트 판정이 바뀐 것이다
-      const wasEligible = t.id === input.lotId ? wasPassed && isHeatPassed : isOwnPassed && wasPassed;
-      const isEligible = isOwnPassed && isHeatPassed;
-      return wasEligible === isEligible ? [] : [{ lotId: t.id, lotNo: t.lot_no, itemId: t.item_id, isEligible }];
-    });
-
-    // 잠금 순서 inventory(item_id 오름차순) → reservation → allocation (업무 프로세스 13.2). 대상은 item_id 순으로 온다
-    for (const itemId of new Set(changes.map((c) => c.itemId))) {
-      const ofItem = changes.filter((c) => c.itemId === itemId);
-      await this.repository.ensureInventory(tx, itemId);
-      await this.repository.lockInventory(tx, itemId);
-      for (const lot of ofItem.filter((c) => !c.isEligible)) await this.removeIneligibleLot(tx, lot);
-      for (const lot of ofItem.filter((c) => c.isEligible)) await this.addEligibleLot(tx, lot);
-    }
-  }
-
   // ── 내부 ──────────────────────────────────────────────
-
-  /** 적격이 됨: on_hand +1, 원래 수주 품목에 미확보 매수가 있으면 1매 자동 예약 (REQ-INV-004). 없으면 여재로 남는다 */
-  private async addEligibleLot(tx: Tx, lot: EligibilityChange): Promise<void> {
-    await this.repository.changeOnHandQty(tx, lot.itemId, 1);
-    const salesOrderItem = (await this.repository.findLotOrigin(tx, lot.lotId))?.productionResult?.productionPlan?.salesOrderItem;
-    // 계획이 수주에서 해제됐으면(null) 예약하지 않는다 (inventory.md 4장)
-    if (!salesOrderItem || salesOrderItem.itemId !== lot.itemId || salesOrderItem.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED) return;
-
-    const sums = await this.repository.sumReservedQtyByStatus(tx, salesOrderItem.id);
-    const sumOf = (status: ReservationStatus) => sums.find((s) => s.reservationStatus === status)?._sum.reservedQty ?? 0;
-    const unsecuredQty = Math.max(0, salesOrderItem.orderedQty - sumOf(RESERVATION_STATUS.CONVERTED) - sumOf(RESERVATION_STATUS.ACTIVE));
-    if (unsecuredQty === 0 || !(await this.repository.reserveQty(tx, lot.itemId, 1))) return;
-
-    const reservation = await this.repository.createReservation(tx, { salesOrderItemId: salesOrderItem.id, itemId: lot.itemId, reservedQty: 1 });
-    await this.businessEventRecorder.record(tx, {
-      type: BUSINESS_EVENT_TYPE.RESERVATION_CREATED,
-      actor: 'SYSTEM',
-      target: { table: 'reservation', id: reservation.id },
-      salesOrderId: salesOrderItem.salesOrderId,
-      lotIds: [lot.lotId],
-      after: reservationSnapshot(reservation),
-      reason: `자동 예약: ${lot.lotNo} 합격으로 미확보 ${unsecuredQty}매 중 1매 예약`,
-    });
-  }
-
-  /** 적격에서 빠짐: 확정 배정 해제, 가용이 음수가 되지 않게 예약 축소, on_hand −1 ([ERD] inventory 갱신 규칙) */
-  private async removeIneligibleLot(tx: Tx, lot: EligibilityChange): Promise<void> {
-    const allocation = await this.repository.findConfirmedAllocationOfLot(tx, lot.lotId);
-    if (allocation) {
-      await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${lot.lotNo}이 적격에서 빠져 배정 해제`);
-      if (allocation.allocationPurpose === ALLOCATION_PURPOSE.HOT_ROLLING) {
-        await this.repository.decrementRollingAllocatedQty(tx, lot.itemId, 1);
-      } else if (allocation.shipmentRequestItem) {
-        await this.shipment.refreshAllocationStatus(tx, allocation.shipmentRequestItem.shipmentRequestId);
-      }
-    }
-    const inventory = await this.repository.lockInventory(tx, lot.itemId);
-    if (!inventory) throw new Error(`적격 LOT ${lot.lotNo}의 재고 행이 없습니다 (item ${lot.itemId})`);
-    const shortQty = inventory.reserved_qty + inventory.rolling_allocated_qty - (inventory.on_hand_qty - 1);
-    if (shortQty > 0) await this.shrinkReservations(tx, lot, shortQty);
-    await this.repository.changeOnHandQty(tx, lot.itemId, -1);
-  }
-
-  /**
-   * 불합격으로 모자라게 된 매수만큼 ACTIVE 예약을 줄인다. 그 LOT을 만든 계획의 수주 품목부터, 그다음 최근 예약부터
-   * (2026-10-06 결정, inventory.md 8장 "FAIL 시 줄일 예약"). 일부만 줄이면 출고 전환처럼 행을 나눠 RELEASED 이력을 남긴다.
-   */
-  private async shrinkReservations(tx: Tx, lot: EligibilityChange, qty: number): Promise<void> {
-    const originItemId = (await this.repository.findLotOrigin(tx, lot.lotId))?.productionResult?.productionPlan?.salesOrderItem?.id ?? null;
-    const active = await this.repository.findActiveReservationsOfInventoryItem(tx, lot.itemId);
-    const ordered = [...active.filter((r) => r.salesOrderItemId === originItemId), ...active.filter((r) => r.salesOrderItemId !== originItemId)];
-
-    let remaining = qty;
-    for (const reservation of ordered) {
-      if (remaining === 0) break;
-      const cut = Math.min(remaining, reservation.reservedQty);
-      remaining -= cut;
-      let released;
-      if (cut === reservation.reservedQty) {
-        released = await this.repository.updateReservationStatus(tx, reservation.id, RESERVATION_STATUS.RELEASED);
-      } else {
-        await this.repository.updateReservationQty(tx, reservation.id, reservation.reservedQty - cut);
-        released = await this.repository.createReservation(
-          tx,
-          { salesOrderItemId: reservation.salesOrderItemId, itemId: lot.itemId, reservedQty: cut },
-          RESERVATION_STATUS.RELEASED,
-        );
-      }
-      await this.businessEventRecorder.record(tx, {
-        type: BUSINESS_EVENT_TYPE.RESERVATION_RELEASED,
-        actor: 'SYSTEM',
-        target: { table: 'reservation', id: released.id },
-        salesOrderId: reservation.salesOrderItem.salesOrderId,
-        lotIds: [lot.lotId],
-        before: reservationSnapshot(reservation),
-        after: reservationSnapshot(released),
-        reason: `QUALITY_FAILURE: ${lot.lotNo}이 적격에서 빠져 가용이 줄어 ${cut}매 예약 해제`,
-      });
-    }
-    // reserved_qty = ACTIVE 예약 합계 불변조건이 깨진 경우다. 업무 오류가 아니라 서버 오류로 남긴다
-    if (remaining > 0 || !(await this.repository.releaseReservedQty(tx, lot.itemId, qty))) {
-      throw new Error(`불합격 예약 축소 실패: item ${lot.itemId}, 필요 ${qty}매, 남음 ${remaining}매`);
-    }
-  }
 
   private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)) {
     const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
@@ -543,13 +597,26 @@ export class InventoryService {
 
   /** 배정 직전 재검증 (13.2 confirmAllocation): 규격 일치, 재고 상태, 적격, 확정 배정 없음 */
   private async assertAllocatableLot(tx: Tx, lotId: number, itemId: number): Promise<void> {
+    const lot = await this.loadEligibleLot(tx, lotId, itemId);
+    if (lot.confirmed_allocation_id !== null) throw new AppException('INV-003', `${lot.lot_no}은 이미 배정된 LOT이에요`);
+  }
+
+  /**
+   * 출고 직전 LOT 재검증 (13.3 confirmGoodsIssue, shipment가 부른다): 규격 일치, 재고(AVAILABLE) 상태, 제품 + 상위 히트 합격.
+   * 출고하는 LOT은 자기 CONFIRMED 배정이 있어야 하므로 배정 여부는 보지 않는다.
+   */
+  async assertIssuableLot(tx: Tx, lotId: number, itemId: number): Promise<void> {
+    await this.loadEligibleLot(tx, lotId, itemId);
+  }
+
+  private async loadEligibleLot(tx: Tx, lotId: number, itemId: number) {
     const lot = await this.repository.findLotEligibility(tx, lotId);
     if (!lot) throw new AppException('COM-003', `LOT(${lotId})을 찾을 수 없어요`);
     // 규격 불일치용 오류 코드가 정의서 9.3에 없다 (docs/backend/inventory.md 8장 🟡)
     if (lot.item_id !== itemId) throw new AppException('COM-004', `${lot.lot_no}은 수주 품목과 규격이 달라요`);
     if (lot.lot_status !== LOT_STATUS.AVAILABLE) throw new AppException('INV-004', `${lot.lot_no}은 이미 투입·출고된 LOT이에요`);
     if (!lot.is_eligible) throw new AppException('INV-002', `${lot.lot_no}은 제품 또는 상위 히트가 합격이 아니에요`);
-    if (lot.confirmed_allocation_id !== null) throw new AppException('INV-003', `${lot.lot_no}은 이미 배정된 LOT이에요`);
+    return lot;
   }
 
   /** 배정 목적별 권한: 출하 = 출하요청·배정 확정, 열연 = 열연 투입 배정 */

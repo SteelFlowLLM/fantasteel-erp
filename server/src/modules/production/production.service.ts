@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { BUSINESS_EVENT_TYPE, ITEM_TYPE, PROCESS_TYPE, PRODUCTION_PLAN_STATUS, type AuthUser, type ItemType } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
@@ -32,7 +32,7 @@ export class ProductionService {
     private readonly repository: ProductionRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
-    private readonly inventory: InventoryService,
+    @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
   ) {}
 
   /** 히트 편성 계산 (4.4). 수율·매핑·히트 용량이 없으면 MST-001 */

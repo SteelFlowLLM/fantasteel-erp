@@ -1,28 +1,22 @@
-import { Test, type TestingModule } from '@nestjs/testing';
-import { calcTheoreticalWeightTon, type AuthUser } from '@fantasteel/shared';
-import { AppModule } from '../../app.module';
+import type { AuthUser } from '@fantasteel/shared';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import { NumberingRepository } from '../../common/numbering/numbering.repository';
+import { NumberingService } from '../../common/numbering/numbering.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { InventoryService } from '../inventory/inventory.service';
+import { QualityRepository } from './quality.repository';
 import { QualityService } from './quality.service';
 
-// 판정 뒤 재고 반영(inventory)까지 함께 돌도록 서비스는 Nest 모듈에서 꺼낸다
-let moduleRef: TestingModule;
-beforeAll(async () => {
-  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  await moduleRef.init();
-}, 60_000);
-afterAll(async () => {
-  await moduleRef?.close();
-});
+const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
+// 이 파일은 검사 판정만 본다. 판정 뒤 재고 반영(inventory.onLotsEligibilityChanged)은 sales-order/sales-flow.spec.ts에서 확인한다
+const inventory = { onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
 
 // 실제 DB(npm test의 fs_prod)를 쓴다. 다른 테스트의 LOT과 섞이지 않도록 이 파일의 LOT 번호는 모두 PREFIX로 시작한다.
 const PREFIX = 'QT-';
 
 describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
   const prisma = new PrismaService();
-  let service: QualityService;
-  beforeAll(() => {
-    service = moduleRef.get(QualityService);
-  });
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const standardIds: number[] = [];
@@ -181,10 +175,7 @@ describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
 
 describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  let service: QualityService;
-  beforeAll(() => {
-    service = moduleRef.get(QualityService);
-  });
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const inspectionIds: Record<string, number> = {};
@@ -310,10 +301,7 @@ describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
 
 describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  let service: QualityService;
-  beforeAll(() => {
-    service = moduleRef.get(QualityService);
-  });
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   let tempSteelGradeId: number;
@@ -506,10 +494,7 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
 
 describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
   const prisma = new PrismaService();
-  let service: QualityService;
-  beforeAll(() => {
-    service = moduleRef.get(QualityService);
-  });
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const standardIds: number[] = [];
@@ -750,114 +735,5 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
 
   it('없는 검사 id는 COM-003', async () => {
     await expect(update(2_000_000_000, new Date().toISOString(), [charpy('27')])).rejects.toMatchObject({ code: 'COM-003' });
-  });
-});
-
-describe('판정 뒤 재고 반영 (quality.md 4장, [04] 14.3)', () => {
-  const prisma = new PrismaService();
-  let service: QualityService;
-  beforeAll(() => {
-    service = moduleRef.get(QualityService);
-  });
-  let user: AuthUser;
-  let st: (code: string) => number;
-  let itemId: number;
-  let salesOrderItemId: number;
-  let heatId: number;
-  let slabIds: number[];
-
-  // 시드 SM355A 성분 상한: C 0.20, SI 0.55, MN 1.60, P·S 0.035, CEQ 0.47
-  const composition = (carbon: string) =>
-    ([['C', carbon], ['SI', '0.4'], ['MN', '1.5'], ['P', '0.03'], ['S', '0.035'], ['CEQ', '0.45']] as const).map(([code, measuredValue]) => ({
-      inspectionStandardItemId: st(code),
-      measuredValue,
-    }));
-
-  beforeAll(async () => {
-    const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
-    user = {
-      employeeId: employee.id,
-      employeeNo: employee.employeeNo,
-      employeeName: employee.employeeName,
-      roleCode: 'QUALITY',
-      departmentId: employee.departmentId,
-      jobGradeId: employee.jobGradeId,
-      headDepartmentIds: [],
-      permissions: { INSPECTION_REGISTER: 'USE' },
-    };
-    const stItems = (
-      await prisma.inspectionStandard.findUniqueOrThrow({
-        where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
-        select: { inspectionStandardItems: { select: { id: true, inspectionItemCode: true } } },
-      })
-    ).inspectionStandardItems;
-    st = (code) => stItems.find((i) => i.inspectionItemCode === code)!.id;
-
-    // 재고가 다른 테스트와 섞이지 않도록 새 슬래브 규격을 만든다
-    const grade = await prisma.steelGrade.findUniqueOrThrow({ where: { steelGradeCode: 'SM355A' } });
-    const base = await prisma.item.findFirstOrThrow({ where: { itemType: 'SLAB', steelGradeId: grade.id } });
-    const item = await prisma.item.create({
-      data: {
-        itemCode: 'QE-SLAB',
-        itemName: '재고 반영 테스트 슬래브',
-        itemType: 'SLAB',
-        unitType: 'QTY',
-        steelGradeId: grade.id,
-        // 규격(유형·강종·치수)은 unique라 시드에 없는 길이를 쓴다
-        thicknessMm: '250',
-        widthMm: '1200',
-        lengthMm: '10777',
-        theoreticalWeightTon: calcTheoreticalWeightTon('250', '1200', 10777),
-        defaultYardId: base.defaultYardId,
-      },
-    });
-    const castingStandardId = (await prisma.inspectionStandard.findFirstOrThrow({ where: { inspectionStandardCode: 'QS-SM355A-CC' } })).id;
-    itemId = item.id;
-    const customer = await prisma.customer.findFirstOrThrow({ orderBy: { id: 'asc' } });
-    const salesOrder = await prisma.salesOrder.create({ data: { salesOrderNo: 'QE-SO', customerId: customer.id, ownerEmployeeId: employee.id } });
-    const soItem = await prisma.salesOrderItem.create({ data: { salesOrderId: salesOrder.id, itemId, orderedQty: 2, dueDate: new Date('2026-12-31') } });
-    salesOrderItemId = soItem.id;
-    const plan = await prisma.productionPlan.create({ data: { productionPlanNo: 'QE-PP', salesOrderItemId, itemId, shortageQty: 2, heatCount: 1 } });
-
-    const now = new Date();
-    const steelmaking = await prisma.productionResult.create({ data: { processType: 'STEELMAKING', converterCode: 'BOF1', startedAt: now } });
-    const casting = await prisma.productionResult.create({ data: { processType: 'CONTINUOUS_CASTING', productionPlanId: plan.id, startedAt: now } });
-    heatId = (await prisma.lot.create({ data: { lotNo: 'QE-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking.id } })).id;
-    slabIds = [];
-    for (const n of [1, 2, 3]) {
-      const slab = await prisma.lot.create({
-        data: { lotNo: `QE-H-0${n}`, lotType: 'SLAB', itemId, productionResultId: casting.id, producedDate: new Date('2026-10-02') },
-      });
-      await prisma.lotRelation.create({ data: { parentLotId: heatId, childLotId: slab.id, lotRelationEvidence: 'ACTUAL_INPUT' } });
-      // 슬래브 판정은 이 테스트의 관심이 아니라 PASS로 바로 넣는다
-      await prisma.qualityInspection.create({
-        data: { lotId: slab.id, inspectionStandardId: castingStandardId, inspectorEmployeeId: employee.id, inspectedAt: now, inspectionResult: 'PASS' },
-      });
-      slabIds.push(slab.id);
-    }
-  });
-
-  afterAll(async () => {
-    await prisma.$disconnect();
-  });
-
-  it('히트 검사를 합격으로 등록하면 하위 합격 슬래브가 적격이 되고, 원래 수주 부족분(2매)만 자동 예약한다 (INV-004)', async () => {
-    const detail = await service.registerQualityInspection({ lotId: heatId, values: composition('0.18') }, user);
-    expect(detail.inspectionResult).toBe('PASS');
-    expect(await prisma.inventory.findUniqueOrThrow({ where: { itemId } })).toMatchObject({ onHandQty: 3, reservedQty: 2 });
-    const reservations = await prisma.reservation.findMany({ where: { salesOrderItemId, reservationStatus: 'ACTIVE' } });
-    expect(reservations.reduce((sum, r) => sum + r.reservedQty, 0)).toBe(2);
-  });
-
-  it('측정값을 고쳐 히트가 불합격이 되면 하위 슬래브를 재고에서 빼고 그 수주의 예약을 해제한다 (INV-003·007)', async () => {
-    const inspection = await prisma.qualityInspection.findUniqueOrThrow({ where: { lotId: heatId } });
-    const detail = await service.updateQualityInspection(
-      inspection.id,
-      { expectedUpdatedAt: inspection.updatedAt.toISOString(), values: [{ inspectionStandardItemId: st('C'), measuredValue: '0.25' }] },
-      user,
-    );
-    expect(detail.inspectionResult).toBe('FAIL');
-    expect(await prisma.inventory.findUniqueOrThrow({ where: { itemId } })).toMatchObject({ onHandQty: 0, reservedQty: 0 });
-    expect(await prisma.reservation.count({ where: { salesOrderItemId, reservationStatus: 'ACTIVE' } })).toBe(0);
   });
 });

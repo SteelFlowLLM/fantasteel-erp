@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
 import {
+  countEligibleAvailableLots,
   findAllocatableLots,
-  findEligibilityTargets,
   findLotEligibility,
   lockInventoryByItemId,
   lockShipmentRequest,
@@ -52,19 +52,98 @@ export class InventoryRepository {
     return (await tx.$queryRawTyped(releaseInventoryReservedQty(itemId, qty))).length > 0;
   }
 
-  /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
-  decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
-    return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
+  /** 출고: 현재고와 예약 매수를 함께 줄인다. 어느 쪽이든 모자라면 바뀐 행이 없어 false */
+  async consumeOnHandAndReserved(tx: Tx, itemId: number, qty: number): Promise<boolean> {
+    const result = await tx.inventory.updateMany({
+      where: { itemId, onHandQty: { gte: qty }, reservedQty: { gte: qty } },
+      data: { onHandQty: { decrement: qty }, reservedQty: { decrement: qty } },
+    });
+    return result.count > 0;
   }
 
-  /** 시드는 재고 행을 만들지 않으므로 제품이 처음 적격이 될 때 만든다 (2026-10-06 결정, inventory.md 6장) */
+  /** 재고 행이 없으면 만든다 (시드에 재고 행이 없고, 처음 적격이 될 때 생긴다) */
   ensureInventory(tx: Tx, itemId: number) {
     return tx.inventory.upsert({ where: { itemId }, create: { itemId }, update: {} });
   }
 
-  /** 적격이 됨·적격에서 빠짐. 줄일 때는 예약·열연 배정을 먼저 맞춰 두고, 가용 ≥ 0 CHECK가 최종 방어다 */
-  changeOnHandQty(tx: Tx, itemId: number, delta: number) {
-    return tx.inventory.update({ where: { itemId }, data: { onHandQty: { increment: delta } } });
+  async countEligibleAvailableLots(tx: Tx, itemId: number): Promise<number> {
+    return (await tx.$queryRawTyped(countEligibleAvailableLots(itemId)))[0]?.eligible_qty ?? 0;
+  }
+
+  setOnHandQty(tx: Tx, itemId: number, onHandQty: number) {
+    return tx.inventory.update({ where: { itemId }, data: { onHandQty } });
+  }
+
+  /** 판정이 바뀐 LOT에서 재고에 영향을 받는 제품 LOT: 히트면 하위 슬래브와 그 코일, 슬래브면 자기와 코일, 코일이면 자기 */
+  async findAffectedProductLotIds(tx: Tx, lotIds: number[]): Promise<number[]> {
+    const lots = await tx.lot.findMany({
+      where: { id: { in: lotIds } },
+      select: {
+        id: true,
+        lotType: true,
+        lotRelationsAsParentLot: { select: { childLot: { select: { id: true, lotType: true, lotRelationsAsParentLot: { select: { childLot: { select: { id: true, lotType: true } } } } } } } },
+      },
+    });
+    const ids = new Set<number>();
+    const isProduct = (lotType: string) => lotType === LOT_TYPE.SLAB || lotType === LOT_TYPE.COIL;
+    for (const lot of lots) {
+      if (isProduct(lot.lotType)) ids.add(lot.id);
+      for (const { childLot } of lot.lotRelationsAsParentLot) {
+        if (isProduct(childLot.lotType)) ids.add(childLot.id);
+        for (const grand of childLot.lotRelationsAsParentLot) if (isProduct(grand.childLot.lotType)) ids.add(grand.childLot.id);
+      }
+    }
+    return [...ids].sort((a, b) => a - b);
+  }
+
+  /** 제품 LOT과 그 LOT을 만든 생산계획(자동 예약 대상 수주 품목 찾기: LOT → 실적 → 계획 → 수주 품목) */
+  findProductLots(tx: Tx, lotIds: number[]) {
+    return tx.lot.findMany({
+      where: { id: { in: lotIds } },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        lotNo: true,
+        itemId: true,
+        lotStatus: true,
+        productionResult: { select: { productionPlan: { select: { id: true, itemId: true, salesOrderItemId: true } } } },
+      },
+    });
+  }
+
+  findConfirmedAllocationsOfLots(tx: Tx, lotIds: number[]) {
+    return tx.allocation.findMany({ where: { lotId: { in: lotIds }, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, include: allocationInclude, orderBy: { lotId: 'asc' } });
+  }
+
+  /** 규격의 ACTIVE 예약 (초과 예약 축소 대상) */
+  findActiveReservationsOfItem(tx: Tx, itemId: number) {
+    return tx.reservation.findMany({
+      where: { itemId, reservationStatus: RESERVATION_STATUS.ACTIVE },
+      include: { salesOrderItem: { select: { salesOrderId: true } } },
+      orderBy: { id: 'desc' },
+    });
+  }
+
+  updateReservationQty(tx: Tx, id: number, reservedQty: number) {
+    return tx.reservation.update({ where: { id }, data: { reservedQty } });
+  }
+
+  createReleasedReservation(tx: Tx, data: { salesOrderItemId: number; itemId: number; reservedQty: number }) {
+    return tx.reservation.create({ data: { ...data, reservationStatus: RESERVATION_STATUS.RELEASED } });
+  }
+
+  /** 자동 예약 판단: 수주 품목의 주문 매수·상태와 예약 상태별 합계 */
+  async findSalesOrderItemSecured(tx: Tx, salesOrderItemId: number) {
+    const item = await tx.salesOrderItem.findUnique({ where: { id: salesOrderItemId }, select: { id: true, salesOrderId: true, itemId: true, orderedQty: true, salesOrderItemStatus: true } });
+    if (!item) return null;
+    const sums = await tx.reservation.groupBy({ by: ['reservationStatus'], where: { salesOrderItemId }, _sum: { reservedQty: true } });
+    const sumOf = (status: string) => sums.find((r) => r.reservationStatus === status)?._sum.reservedQty ?? 0;
+    return { ...item, activeQty: sumOf(RESERVATION_STATUS.ACTIVE), convertedQty: sumOf(RESERVATION_STATUS.CONVERTED) };
+  }
+
+  /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
+  decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
+    return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
   }
 
   /** 제품 규격(슬래브·코일)과 재고 행 (재고 행이 없으면 0매) */
@@ -86,30 +165,21 @@ export class InventoryRepository {
 
   // ── 예약 ──────────────────────────────────────────────
 
-  createReservation(tx: Tx, data: { salesOrderItemId: number; itemId: number; reservedQty: number }, reservationStatus: ReservationStatus = RESERVATION_STATUS.ACTIVE) {
-    return tx.reservation.create({ data: { ...data, reservationStatus } });
-  }
-
-  updateReservationQty(tx: Tx, id: number, reservedQty: number) {
-    return tx.reservation.update({ where: { id }, data: { reservedQty } });
-  }
-
-  /** 규격의 ACTIVE 예약, 최근 것부터 (불합격으로 예약을 줄일 때 쓴다) */
-  findActiveReservationsOfInventoryItem(tx: Tx, itemId: number) {
-    return tx.reservation.findMany({
-      where: { itemId, reservationStatus: RESERVATION_STATUS.ACTIVE },
-      include: { salesOrderItem: { select: { salesOrderId: true } } },
-      orderBy: { id: 'desc' },
-    });
-  }
-
-  /** 수주 품목의 예약 상태별 합계 (미확보 매수 = max(0, 주문 − CONVERTED − ACTIVE), 업무 프로세스 4.5) */
-  sumReservedQtyByStatus(tx: Tx, salesOrderItemId: number) {
-    return tx.reservation.groupBy({ by: ['reservationStatus'], where: { salesOrderItemId }, _sum: { reservedQty: true } });
+  createReservation(tx: Tx, data: { salesOrderItemId: number; itemId: number; reservedQty: number }) {
+    return tx.reservation.create({ data: { ...data, reservationStatus: RESERVATION_STATUS.ACTIVE } });
   }
 
   findReservationsOfItem(tx: Tx, salesOrderItemId: number, status: ReservationStatus) {
     return tx.reservation.findMany({ where: { salesOrderItemId, reservationStatus: status }, orderBy: { id: 'asc' } });
+  }
+
+  /** 부분 출고: ACTIVE 예약 매수를 줄이고, 줄인 만큼 CONVERTED 예약 행을 새로 만든다 (ACTIVE 10 → ACTIVE 6 + CONVERTED 4) */
+  async splitReservation(tx: Tx, reservation: { id: number; salesOrderItemId: number; itemId: number; reservedQty: number }, convertedQty: number) {
+    const remaining = await tx.reservation.update({ where: { id: reservation.id }, data: { reservedQty: reservation.reservedQty - convertedQty } });
+    const converted = await tx.reservation.create({
+      data: { salesOrderItemId: reservation.salesOrderItemId, itemId: reservation.itemId, reservedQty: convertedQty, reservationStatus: RESERVATION_STATUS.CONVERTED },
+    });
+    return { remaining, converted };
   }
 
   updateReservationStatus(tx: Tx, id: number, reservationStatus: ReservationStatus) {
@@ -132,31 +202,6 @@ export class InventoryRepository {
 
   async findLotEligibility(tx: Tx, lotId: number) {
     return (await tx.$queryRawTyped(findLotEligibility(lotId)))[0] ?? null;
-  }
-
-  /** 검사한 LOT의 판정으로 적격이 달라질 수 있는 제품 LOT과 자기·상위 히트 합격 여부 */
-  findEligibilityTargets(tx: Tx, lotId: number) {
-    return tx.$queryRawTyped(findEligibilityTargets(lotId));
-  }
-
-  /** 자동 예약 대상: LOT → 실적 → 계획 → 원래 수주 품목 ([ERD] lot Note) */
-  findLotOrigin(tx: Tx, lotId: number) {
-    return tx.lot.findUnique({
-      where: { id: lotId },
-      select: {
-        productionResult: {
-          select: {
-            productionPlan: {
-              select: { salesOrderItem: { select: { id: true, salesOrderId: true, itemId: true, orderedQty: true, salesOrderItemStatus: true } } },
-            },
-          },
-        },
-      },
-    });
-  }
-
-  findConfirmedAllocationOfLot(tx: Tx, lotId: number) {
-    return tx.allocation.findFirst({ where: { lotId, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, include: allocationInclude });
   }
 
   async lockShipmentRequest(tx: Tx, shipmentRequestId: number) {
@@ -204,6 +249,16 @@ export class InventoryRepository {
 
   updateAllocationStatus(tx: Tx, id: number, allocationStatus: AllocationStatus) {
     return tx.allocation.update({ where: { id }, data: { allocationStatus }, include: allocationInclude });
+  }
+
+  /** 출고 확정: 확정(CONFIRMED) 배정만 소진으로. 바뀐 수가 모자라면 false */
+  async consumeConfirmedAllocations(tx: Tx, ids: number[]): Promise<boolean> {
+    // id IN (…)인 updateMany는 Prisma 쿼리 인터프리터가 실패해서 배정마다 고친다 (shipment.repository markLotsShipped 참고)
+    let changed = 0;
+    for (const id of [...ids].sort((a, b) => a - b)) {
+      changed += (await tx.allocation.updateMany({ where: { id, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, data: { allocationStatus: ALLOCATION_STATUS.CONSUMED } })).count;
+    }
+    return changed === ids.length;
   }
 
   findAllocations(tx: Tx, where: { allocationPurpose?: AllocationPurpose; shipmentRequestId?: number; shipmentRequestItemId?: number; productionPlanId?: number; allocationStatus?: AllocationStatus[] }) {

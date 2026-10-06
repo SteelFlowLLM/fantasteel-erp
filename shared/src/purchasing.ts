@@ -1,5 +1,5 @@
 // 구매 API 응답 타입 (docs/backend/purchasing.md). 톤은 소수 3자리 문자열.
-import type { PurchaseRequisitionStatus } from './codes';
+import type { PurchaseOrderStatus, PurchaseRequisitionStatus } from './codes';
 
 /** 구매요청 목록 한 줄 (API-141·210). ERD: 구매요청 1건 = 원료 1품목 */
 export interface PurchaseRequisitionSummary {
@@ -35,4 +35,35 @@ export interface PurchaseRequisitionDetail extends PurchaseRequisitionSummary {
   /** 근거 계획이 수주에 연결돼 있을 때 (production_plan → sales_order_item → sales_order) */
   salesOrderId: number | null;
   salesOrderNo: string | null;
+}
+
+/** 발주 품목 1행 = 구매요청 1건. 입고 누계·미입고량은 저장하지 않고 입고 기록으로 계산한다 (ERD) */
+export interface PurchaseOrderItemView {
+  purchaseOrderItemId: number;
+  purchaseRequisitionId: number;
+  purchaseRequisitionNo: string;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  orderedTon: string;
+  expectedReceiptDate: string | null;
+  /** 입고 누계 = 입고 기록 합계 */
+  receivedTon: string;
+  /** 미입고량(입고예정) = 발주량 − 입고 누계 */
+  remainingTon: string;
+}
+
+/** 발주 목록·상세 (API-147·148). 목록도 품목별 미입고량을 보여 주므로 같은 모양을 쓴다 */
+export interface PurchaseOrderView {
+  id: number;
+  purchaseOrderNo: string;
+  purchaseOrderStatus: PurchaseOrderStatus;
+  supplierId: number;
+  supplierName: string;
+  totalOrderedTon: string;
+  totalReceivedTon: string;
+  totalRemainingTon: string;
+  createdAt: string;
+  updatedAt: string;
+  items: PurchaseOrderItemView[];
 }

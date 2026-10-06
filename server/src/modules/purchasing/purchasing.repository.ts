@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PURCHASE_REQUISITION_STATUS, type PurchaseRequisitionStatus } from '@fantasteel/shared';
+import { PURCHASE_REQUISITION_STATUS, type PurchaseOrderStatus, type PurchaseRequisitionStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -20,9 +20,38 @@ export interface RequisitionFilter {
   requesterDepartmentIds?: number[];
 }
 
+/** 승인·반려·재요청이 바꾸는 칸 */
+export type RequisitionStatusChange = Pick<
+  Prisma.PurchaseRequisitionUncheckedUpdateManyInput,
+  'purchaseRequisitionStatus' | 'approverId' | 'approvedAt' | 'rejectReason' | 'requestedTon' | 'desiredReceiptDate' | 'requestReason'
+>;
+
 const whereOf = (filter: RequisitionFilter): Prisma.PurchaseRequisitionWhereInput => ({
   ...(filter.purchaseRequisitionStatus ? { purchaseRequisitionStatus: filter.purchaseRequisitionStatus } : {}),
   ...(filter.requesterDepartmentIds ? { requester: { departmentId: { in: filter.requesterDepartmentIds } } } : {}),
+});
+
+/** 발주 목록·상세가 함께 쓰는 읽기 모양: 공급업체·품목별 원료·구매요청·입고 기록(입고 누계 계산용) */
+const purchaseOrderInclude = {
+  supplier: { select: { supplierName: true } },
+  purchaseOrderItems: {
+    orderBy: { id: 'asc' },
+    include: {
+      item: { select: { itemCode: true, itemName: true } },
+      purchaseRequisition: { select: { purchaseRequisitionNo: true } },
+      goodsReceipts: { select: { receivedTon: true } },
+    },
+  },
+} as const;
+
+export interface PurchaseOrderFilter {
+  purchaseOrderStatus?: PurchaseOrderStatus;
+  supplierId?: number;
+}
+
+const purchaseOrderWhereOf = (filter: PurchaseOrderFilter): Prisma.PurchaseOrderWhereInput => ({
+  ...(filter.purchaseOrderStatus ? { purchaseOrderStatus: filter.purchaseOrderStatus } : {}),
+  ...(filter.supplierId !== undefined ? { supplierId: filter.supplierId } : {}),
 });
 
 /**
@@ -76,5 +105,23 @@ export class PurchasingRepository {
 
   findRequisition(tx: Tx, id: number) {
     return tx.purchaseRequisition.findUnique({ where: { id }, include: requisitionInclude });
+  }
+
+  /** 상태가 from일 때만 바꾸는 조건부 UPDATE. 바뀐 건수(0 또는 1)를 돌려준다 */
+  async updateRequisitionIfStatus(tx: Tx, id: number, from: PurchaseRequisitionStatus, data: RequisitionStatusChange): Promise<number> {
+    const { count } = await tx.purchaseRequisition.updateMany({ where: { id, purchaseRequisitionStatus: from }, data });
+    return count;
+  }
+
+  countPurchaseOrders(tx: Tx, filter: PurchaseOrderFilter) {
+    return tx.purchaseOrder.count({ where: purchaseOrderWhereOf(filter) });
+  }
+
+  findPurchaseOrders(tx: Tx, filter: PurchaseOrderFilter, page: { skip: number; take: number }) {
+    return tx.purchaseOrder.findMany({ where: purchaseOrderWhereOf(filter), include: purchaseOrderInclude, orderBy: { id: 'desc' }, skip: page.skip, take: page.take });
+  }
+
+  findPurchaseOrder(tx: Tx, id: number) {
+    return tx.purchaseOrder.findUnique({ where: { id }, include: purchaseOrderInclude });
   }
 }
