@@ -29,6 +29,7 @@ const coilRow: QualityInspectionListItem = {
   versionNo: 2,
   inspectionResult: null,
   inspectedAt: null,
+  isLocked: false,
 };
 
 const standardItem = (id: number, code: string, over: string | null, upto: string | null) => ({
@@ -54,7 +55,7 @@ const standard31: InspectionStandardDetail = {
   items: [standardItem(1, 'YIELD', null, null), standardItem(2, 'CHARPY', '6.00', null), standardItem(3, 'THIN_ONLY', null, '6.00')],
 };
 
-const inspectedCoilRow: QualityInspectionListItem = { ...coilRow, qualityInspectionId: 90, inspectionStandardId: 30, versionNo: 1, inspectionResult: 'FAIL', inspectedAt: '2026-10-05T03:00:00.000Z' };
+const inspectedCoilRow: QualityInspectionListItem = { ...coilRow, isLocked: true, qualityInspectionId: 90, inspectionStandardId: 30, versionNo: 1, inspectionResult: 'FAIL', inspectedAt: '2026-10-05T03:00:00.000Z' };
 
 const coilDetail: QualityInspectionDetail = {
   ...coilRow,
@@ -94,7 +95,8 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
     expect(rows).toHaveLength(102);
     expect(rows[0]).toMatchObject({ lotId: 1000, inspectionResult: 'PENDING', heatNo: 'HT-BOF1-261005-001', heatResult: 'PENDING', inspectionStandardVersion: 2, locked: false });
     expect(rows[0]).toMatchObject({ lotStatus: 'AVAILABLE', itemId: 61, itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanNo: 'PP-2610-0001' });
-    expect(rows[101]).toMatchObject({ lotId: 501, qualityInspectionId: 90, inspectionResult: 'FAIL' });
+    expect(rows[101]).toMatchObject({ lotId: 501, qualityInspectionId: 90, inspectionResult: 'FAIL', locked: true });
+    expect(rows[0].locked).toBe(false);
     expect(calls.filter((c) => c.query.status === 'pending').map((c) => [c.query.page, c.query.size])).toEqual([
       ['1', '100'],
       ['2', '100'],

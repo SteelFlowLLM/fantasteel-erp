@@ -64,6 +64,7 @@ const lotDescendantsSelect = {
 
 const listLotSelect = {
   ...inspectedLotSelect,
+  ...lotDescendantsSelect,
   qualityInspection: {
     select: {
       id: true,
@@ -219,6 +220,25 @@ export class QualityRepository {
       orderBy: { millSheetNo: 'asc' },
     });
     return millSheets.map((m) => m.millSheetNo);
+  }
+
+  /** 이 LOT들 가운데 출고돼 밀시트가 발행된 LOT id (목록 여러 행을 한 번에 확인) */
+  async findMillSheetLockedLotIds(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    if (!lotIds.length) return new Set();
+    const allocations = await tx.allocation.findMany({
+      where: { lotId: { in: lotIds }, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: ALLOCATION_STATUS.CONSUMED },
+      select: { lotId: true, shipmentRequestItem: { select: { shipmentRequestId: true, salesOrderItem: { select: { salesOrderId: true } } } } },
+    });
+    const keyed = allocations.flatMap(({ lotId, shipmentRequestItem: item }) =>
+      item ? [{ lotId, shipmentRequestId: item.shipmentRequestId, salesOrderId: item.salesOrderItem.salesOrderId }] : [],
+    );
+    if (!keyed.length) return new Set();
+    const millSheets = await tx.millSheet.findMany({
+      where: { OR: keyed.map(({ shipmentRequestId, salesOrderId }) => ({ shipmentRequestId, salesOrderId })) },
+      select: { shipmentRequestId: true, salesOrderId: true },
+    });
+    const issued = new Set(millSheets.map((m) => `${m.shipmentRequestId}:${m.salesOrderId}`));
+    return new Set(keyed.filter((k) => issued.has(`${k.shipmentRequestId}:${k.salesOrderId}`)).map((k) => k.lotId));
   }
 
   /** updated_at이 그대로일 때만 판정을 바꾼다(행 잠금 포함). false면 그 사이 다른 수정이 있었다 */

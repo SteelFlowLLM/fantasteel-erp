@@ -804,6 +804,19 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
     expect((await service.getQualityInspection(registered.qualityInspectionId)).lockedMillSheetNos).toEqual([expect.stringContaining('QU-MS-1')]);
   });
 
+  it('검사 목록도 밀시트 잠금(isLocked)을 준다: 출고된 코일과 그 상위 히트는 잠금, 출고 안 된 LOT은 아님', async () => {
+    const rowOf = async (lotId: number) => {
+      const [pending, done] = await Promise.all([
+        service.listQualityInspections({ status: 'pending', lotId }),
+        service.listQualityInspections({ status: 'done', lotId }),
+      ]);
+      return [...pending.items, ...done.items][0];
+    };
+    expect((await rowOf(lots.shippedCoil))?.isLocked).toBe(true);
+    expect((await rowOf(lots.shippedHeat))?.isLocked).toBe(true);
+    expect((await rowOf(lots.coilTypo))?.isLocked).toBe(false);
+  });
+
   it('없는 검사 id는 COM-003', async () => {
     await expect(update(2_000_000_000, new Date().toISOString(), [charpy('27')])).rejects.toMatchObject({ code: 'COM-003' });
   });

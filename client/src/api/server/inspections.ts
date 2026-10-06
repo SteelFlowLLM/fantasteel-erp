@@ -1,6 +1,6 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
-// 서버에 아직 없는 것(연결 수주, 작업 로그, 목록의 밀시트 잠금 표시, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
+// 서버에 아직 없는 것(연결 수주, 작업 로그, 판정 뒤 자동 예약·여재 결과)은 빈 값이다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,
@@ -71,7 +71,7 @@ function queueRowOf(row: InspectedRow, inspectorName: string | null = null, lock
     inspectionStandardVersion: row.versionNo,
     inspectedAt: row.inspectedAt,
     inspectorName,
-    // 목록 응답에는 잠금 여부가 없어 검사 상세(lockedMillSheetNos)를 읽었을 때만 잠금으로 보인다
+    // 목록은 isLocked, 상세는 lockedMillSheetNos로 밀시트 잠금을 받는다
     locked,
   };
 }
@@ -81,7 +81,7 @@ const listOf = (status: ListStatus) => allPages<QualityInspectionListItem>('/qua
 /** 검사 대상 목록: 판정 대기 먼저(먼저 생긴 LOT부터), 그다음 최근 판정 순. 정렬은 서버가 한다 */
 async function queue(): Promise<InspectionQueueRow[]> {
   const [pending, done] = await Promise.all([listOf('pending'), listOf('done')]);
-  return [...pending, ...done].map((row) => queueRowOf(row));
+  return [...pending, ...done].map((row) => queueRowOf(row, null, row.isLocked));
 }
 
 /**
