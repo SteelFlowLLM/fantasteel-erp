@@ -96,7 +96,7 @@ export function MrpScreen() {
           <Button size="sm" className="mb-0.5" onClick={() => setPeriod(defaultMrpPeriod(today))}>
             기본 기간
           </Button>
-          <span className="mb-1.5 ml-auto max-w-[460px] text-cap leading-4 text-ink-3">
+          <span className="mb-1.5 ml-auto max-w-[460px] text-cap leading-normal text-ink-3">
             필요일(연결 수주 품목 납기, 수주 연결이 없으면 계획 등록일)이 기간 안에 있는 계획·진행중 생산계획의 남은 히트로 계산해요. 원료 LOT 잔량·입고예정은 필요일이 앞선 계획부터 쓰므로, 시작일 전에 필요한 밀린 계획도 &apos;기간 전&apos;으로 함께 보여요. 결과는 저장하지 않고, 잔량·입고예정은 지금 값이에요.
           </span>
           {canCreate ? null : <ReadOnlyHint permissions={[PERMISSION.PURCHASE_REQUISITION_CREATE]} className="w-full" />}
@@ -107,7 +107,7 @@ export function MrpScreen() {
         {(mrp) => <MrpResult mrp={mrp} filter={filter} onFilter={setFilter} canCreate={canCreate} onCreate={openRequisition} />}
       </QueryBoundary>
 
-      <p className="text-cap leading-4 text-ink-3">
+      <p className="text-cap leading-normal text-ink-3">
         계산 방법 · 필요 용선 = 히트 톤 ÷ 제강 수율 · 철광석·석탄·석회석 = 필요 용선 × 원단위(t/t) · 합금철 = 히트 톤 × 원단위(kg/t) ÷ 1,000 · 순소요 = 총소요 − 원료 LOT 잔량 − 입고예정 (0보다 작으면 0). 잔량·입고예정은
         필요일이 이른 계획부터 한 번만 빼고, 계획에 연결된 발주의 입고예정은 그 계획이 먼저 써요. 입고예정은 필요일까지 도착하는 몫만 쓰고 수주에 연결된 다른 계획 몫은 쓰지 않으므로, 표의 입고예정 칸은 이
         계획들이 실제로 쓰는 몫이고 뺀 몫은 이유와 함께 칸 아래에 보여요. MRP는 구매요청을 저절로 만들지 않아요. 구매 담당이 등록하고 부서장이 승인해요.
@@ -393,7 +393,7 @@ function SupplyNotes({ notes }: { notes: readonly string[] }) {
   return (
     <>
       {notes.map((note) => (
-        <span key={note} className="block text-cap leading-4 text-ink-3">
+        <span key={note} className="block text-cap leading-normal text-ink-3">
           {note}
         </span>
       ))}

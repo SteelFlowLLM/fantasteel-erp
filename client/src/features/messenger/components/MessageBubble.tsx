@@ -55,7 +55,7 @@ export function MessageBubble({ message, room, mentionNames, myNames }: { messag
           <time className="text-cap text-ink-3">{fmtHM(message.createdAt)}</time>
         </div>
         {segments.length > 0 ? (
-          <p className="text-sm leading-5 break-words whitespace-pre-wrap text-ink">
+          <p className="text-sm leading-normal break-words whitespace-pre-wrap text-ink">
             {segments.map((segment, index) => {
               if (segment.kind === 'mention') {
                 return (

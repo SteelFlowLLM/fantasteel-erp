@@ -81,9 +81,9 @@ export function ItemLabel({ lineNo, itemType, itemName, itemCode }: { lineNo?: n
       {lineNo !== undefined ? (
         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-surface-3 px-1 text-cap font-semibold text-ink-2">{lineNo}</span>
       ) : null}
-      <span className="text-cap text-ink-3">{ITEM_TYPE_LABEL[itemType]}</span>
+      <span className="flex-none whitespace-nowrap text-cap text-ink-3">{ITEM_TYPE_LABEL[itemType]}</span>
       <span className="truncate font-medium">{itemName}</span>
-      {itemCode ? <span className="truncate font-mono text-[11px] text-ink-3">{itemCode}</span> : null}
+      {itemCode ? <span className="truncate font-mono text-cap text-ink-3">{itemCode}</span> : null}
     </span>
   );
 }

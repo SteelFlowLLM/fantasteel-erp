@@ -25,13 +25,13 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
 
   return (
     <header className="flex h-[52px] flex-none items-center gap-3 border-b border-line bg-surface px-4">
-      <div className="flex min-w-[220px] flex-col leading-[18px]">
+      <div className="flex min-w-[220px] flex-col leading-tight">
         <small className="text-cap text-ink-3 tabular-nums">
           {base.area ? `${base.area} · ` : ''}
           {fmtMDdow(now)} {fmtHM(now)}
           {custom.subtitle ? ` · ${custom.subtitle}` : ''}
         </small>
-        <b className="text-lg leading-[18px] font-semibold">{title}</b>
+        <b className="text-lg leading-tight font-semibold">{title}</b>
       </div>
       <SearchBox />
       <div className="ml-auto flex items-center gap-1">

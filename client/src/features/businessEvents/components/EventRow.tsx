@@ -20,12 +20,12 @@ const MAX_LOT_LINKS = 12;
 
 export function ActorChip({ event }: { event: BusinessEventView }) {
   if (event.actorType === 'SYSTEM' || !event.actor) {
-    return <span className="inline-flex h-5 flex-none items-center rounded-xs bg-surface-3 px-1.5 text-[11.5px] font-semibold text-ink-2">{ACTOR_TYPE_LABEL.SYSTEM}</span>;
+    return <span className="inline-flex min-h-5 flex-none items-center rounded-xs bg-surface-3 px-1.5 text-xs font-semibold text-ink-2">{ACTOR_TYPE_LABEL.SYSTEM}</span>;
   }
   const a = event.actor;
   return (
     <span
-      className="inline-flex h-5 flex-none items-center gap-1 rounded-xs bg-run-bg px-1.5 text-[11.5px] font-semibold text-run"
+      className="inline-flex min-h-5 flex-none items-center gap-1 rounded-xs bg-run-bg px-1.5 text-xs font-semibold text-run"
       title={`${a.employeeName} · ${a.departmentName} ${a.jobGradeName} (${a.employeeNo})`}
     >
       {a.employeeName}
@@ -45,7 +45,7 @@ function DiffTable({ event }: { event: BusinessEventView }) {
   return (
     <table className="w-full border-collapse text-xs tabular-nums">
       <thead>
-        <tr className="text-left text-[11px] text-ink-3">
+        <tr className="text-left text-cap text-ink-3">
           <th className="pr-1.5 pb-1 font-medium">항목</th>
           <th className="pr-1.5 pb-1 font-medium">변경 전</th>
           <th aria-hidden="true" />
@@ -55,7 +55,7 @@ function DiffTable({ event }: { event: BusinessEventView }) {
       <tbody>
         {rows.map((row) => (
           <tr key={row.key} className={cn('align-top', row.changed && '[&>td]:bg-[#fffbea]')}>
-            <td className="py-[3px] pr-1.5 font-mono text-[11.5px] whitespace-nowrap text-ink-3">{row.key}</td>
+            <td className="py-[3px] pr-1.5 font-mono text-xs whitespace-nowrap text-ink-3">{row.key}</td>
             <td className={cn('py-[3px] pr-1.5 [overflow-wrap:anywhere]', row.before === undefined && 'text-ink-3')}>{row.before ?? '-'}</td>
             <td className="py-[3px] pr-1.5 text-ink-3">
               <Icon name="arrow-right" size="sm" />

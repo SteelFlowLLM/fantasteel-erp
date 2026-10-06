@@ -205,7 +205,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         onKeyDown={onKeyDown}
         onClick={(event) => updateMention(event.currentTarget.value, event.currentTarget.selectionStart)}
         onBlur={() => setMention(null)}
-        className="w-full resize-none rounded-sm border border-line-strong bg-surface px-3 py-2 text-sm leading-5 outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--color-brand-tint)]"
+        className="w-full resize-none rounded-sm border border-line-strong bg-surface px-3 py-2 text-sm leading-normal outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--color-brand-tint)]"
       />
       <div className="flex items-center gap-1.5">
         <input

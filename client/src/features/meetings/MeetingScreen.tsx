@@ -69,8 +69,8 @@ function AttendeeChips() {
 /** 원본 전사 한 줄 (사람 발언, AI 아님) */
 function TranscriptRow({ at, speaker, text, highlight }: { at: string; speaker: string; text: string; highlight?: boolean }) {
   return (
-    <div className={cn('grid grid-cols-[40px_minmax(0,1fr)] gap-x-2 px-3.5 py-1.5 text-xs leading-[17px]', highlight && 'bg-wait-bg')}>
-      <time className="font-mono text-[11px] text-ink-3">{at}</time>
+    <div className={cn('grid grid-cols-[40px_minmax(0,1fr)] gap-x-2 px-3.5 py-1.5 text-xs leading-snug', highlight && 'bg-wait-bg')}>
+      <time className="font-mono text-cap text-ink-3">{at}</time>
       <span>
         <b className="font-semibold">{speaker}</b> {text}
         {highlight ? (
@@ -104,7 +104,7 @@ function SummaryBody() {
     <>
       <div className="flex flex-col gap-1">
         <span className="text-cap font-semibold text-ai-strong">요약</span>
-        <ol className="flex flex-col gap-0.5 text-sm leading-[19px]">
+        <ol className="flex flex-col gap-0.5 text-sm leading-normal">
           {SUMMARY.map((line, index) => (
             <li key={line}>
               {index + 1}. {line}
@@ -114,7 +114,7 @@ function SummaryBody() {
       </div>
       <div className="flex flex-col gap-1">
         <span className="text-cap font-semibold text-ai-strong">결정사항 {DECISIONS.length}</span>
-        <ul className="flex flex-col gap-1 text-sm leading-[19px]">
+        <ul className="flex flex-col gap-1 text-sm leading-normal">
           {DECISIONS.map((decision) => (
             <li key={decision.text} className="flex items-start gap-1.5">
               <Icon name="check" size="sm" className="mt-0.5 text-ok" />

@@ -28,7 +28,7 @@ export function Banner({ tone = 'neutral', icon, actions, className, children }:
   return (
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
-      className={cn('flex items-start gap-2.5 rounded-md border px-3.5 py-2.5 text-sm leading-[19px] [&_b]:font-semibold', style.box, className)}
+      className={cn('flex items-start gap-2.5 rounded-md border px-3.5 py-2.5 text-sm leading-normal [&_b]:font-semibold', style.box, className)}
     >
       {iconName ? <Icon name={iconName} className={cn('mt-px', style.icon)} /> : null}
       <div className="min-w-0 flex-1">{children}</div>

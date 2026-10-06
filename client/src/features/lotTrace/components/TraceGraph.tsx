@@ -69,7 +69,7 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
     <div ref={canvasRef} className="relative flex-none" style={{ width: layout.width, height: layout.height }}>
       {layout.heads.map((h) => (
         <div key={h.column} className="absolute top-0 flex items-baseline gap-1.5 text-xs" style={{ left: h.x, width: NODE_W, height: HEAD_H - 8 }}>
-          <b className="text-[12.5px] font-semibold">{h.title}</b>
+          <b className="text-sm font-semibold">{h.title}</b>
           <span className="text-cap text-ink-3">{h.count}</span>
         </div>
       ))}
@@ -108,7 +108,7 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
       {layout.edgeLabels.map((l) => (
         <div
           key={l.key}
-          className="pointer-events-none absolute z-[2] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[9px] bg-surface px-1.5 py-px text-[10px] leading-[13px] whitespace-nowrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+          className="pointer-events-none absolute z-[2] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[9px] bg-surface px-1.5 py-px text-2xs whitespace-nowrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
           style={{ left: l.x, top: l.y }}
         >
           <span>{LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}</span>

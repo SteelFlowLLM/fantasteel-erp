@@ -214,7 +214,7 @@ export function StandardEditorModal({ target, onClose, onSaved }: { target: Stan
                           invalid={error !== null}
                           onChange={(e) => update(index, { [c.field]: e.target.value })}
                         />
-                        {error ? <span className="text-cap leading-4 whitespace-normal text-danger">{error}</span> : null}
+                        {error ? <span className="text-cap leading-normal whitespace-normal text-danger">{error}</span> : null}
                       </span>
                     </Td>
                   );

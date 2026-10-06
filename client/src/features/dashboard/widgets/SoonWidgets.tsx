@@ -153,7 +153,7 @@ export function AgentRiskWidget(props: WidgetProps) {
           <Badge tone="danger">{example.type}</Badge>
           <span className="truncate text-sm text-ink-2">{example.target}</span>
         </div>
-        <p className="text-sm leading-5">{example.text}</p>
+        <p className="text-sm leading-normal">{example.text}</p>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 rounded-md bg-surface-2 px-3 py-2.5 text-sm">
           {example.rows.map(([label, value]) => (
             <Fragment key={label}>

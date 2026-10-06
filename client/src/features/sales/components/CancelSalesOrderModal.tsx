@@ -110,7 +110,7 @@ export function CancelSalesOrderModal({ detail, onClose }: { detail: SalesOrderD
       </Banner>
       <div className="flex flex-col gap-2">
         <b className="text-sm font-semibold">취소하면 이렇게 돼요</b>
-        <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm leading-5 text-ink-2">
+        <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm leading-normal text-ink-2">
           {activeReservedQty > 0 ? (
             <li>
               예약 해제: 예약중인{' '}

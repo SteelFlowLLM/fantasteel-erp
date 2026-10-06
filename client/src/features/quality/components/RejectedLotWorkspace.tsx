@@ -101,7 +101,7 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
                   className={cn('flex flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left', tile.className, status === tile.key && tile.onClassName)}
                 >
                   <span className="text-cap">{tile.label}</span>
-                  <b className="text-lg leading-6 font-semibold tabular-nums">{count(tile.key)}</b>
+                  <b className="text-lg font-semibold tabular-nums">{count(tile.key)}</b>
                 </button>
               ))}
             </div>
@@ -124,7 +124,7 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
           <RejectedItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
         {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '불합격 LOT이 없어요' : '조건에 맞는 불합격 LOT이 없어요'}</EmptyNote> : null}
-        <Banner className="mx-4 my-3.5 text-xs leading-[17px]" icon="info">
+        <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
           검사 기준을 충족하지 못한 LOT과 불합격 히트의 하위 LOT이에요. 예약·배정·출고 대상에서 빠져 있고, 여기서는 불합격 상태와 사유만 기록해요.
         </Banner>
       </MasterPane>

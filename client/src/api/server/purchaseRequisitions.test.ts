@@ -20,6 +20,8 @@ const summary: PurchaseRequisitionSummary = {
   itemId: 41,
   itemCode: 'SMN01',
   itemName: '실리코망가니즈',
+  defaultSupplierId: 8,
+  defaultSupplierName: '한국합금철',
   requestedTon: '2.500',
   desiredReceiptDate: '2026-10-20',
   requesterId: 77,

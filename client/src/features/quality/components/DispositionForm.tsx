@@ -99,7 +99,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
             </Button>
           </div>
 
-          <Banner className="text-xs leading-[17px]">
+          <Banner className="text-xs leading-snug">
             불합격 상태와 사유만 기록해요. 격하 재판정·재작업·폐기 재고 처리는 하지 않아요. 불합격 LOT은 이미 예약·배정·출고 대상에서 빠져 있어요. 지정·변경 내역은 작업 로그에 남아요.
           </Banner>
         </CardBody>

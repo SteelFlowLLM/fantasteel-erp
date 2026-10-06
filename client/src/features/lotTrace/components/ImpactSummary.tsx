@@ -12,7 +12,7 @@ function Stat({ label, value, danger }: { label: string; value: number; danger?:
   return (
     <div className="flex flex-col gap-0.5 rounded-sm border border-line bg-surface-2 px-2 py-1.5">
       <span className="text-cap text-ink-3">{label}</span>
-      <b className={cn('text-lg leading-[22px] font-semibold tabular-nums', danger && value > 0 && 'text-danger')}>{fmtInt(value)}</b>
+      <b className={cn('text-lg leading-snug font-semibold tabular-nums', danger && value > 0 && 'text-danger')}>{fmtInt(value)}</b>
     </div>
   );
 }
@@ -37,7 +37,7 @@ export function ImpactSummary({ impact, shipments }: { impact: TraceImpact; ship
           {shipments.length ? (
             <ul className="m-0 flex max-h-[160px] list-none flex-col gap-1.5 overflow-auto p-0">
               {shipments.map((s) => (
-                <li key={s.shipmentRequestId} className="flex flex-wrap items-center gap-2 rounded-sm border border-line px-2 py-1.5 text-[12.5px]">
+                <li key={s.shipmentRequestId} className="flex flex-wrap items-center gap-2 rounded-sm border border-line px-2 py-1.5 text-sm">
                   <LinkId href={`/shipment-requests/${s.shipmentRequestId}`}>{s.shipmentRequestNo}</LinkId>
                   <ShipmentStatusBadge status={s.shipmentRequestStatus} />
                   <span>{s.customerName}</span>
@@ -53,7 +53,7 @@ export function ImpactSummary({ impact, shipments }: { impact: TraceImpact; ship
           {impact.salesOrders.length ? (
             <ul className="m-0 flex max-h-[160px] list-none flex-col gap-1.5 overflow-auto p-0">
               {impact.salesOrders.map((so) => (
-                <li key={so.salesOrderId} className="flex flex-col gap-0.5 rounded-sm border border-line px-2 py-1.5 text-[12.5px]">
+                <li key={so.salesOrderId} className="flex flex-col gap-0.5 rounded-sm border border-line px-2 py-1.5 text-sm">
                   <div className="flex items-center gap-2">
                     <LinkId href={`/sales-orders/${so.salesOrderId}`}>{so.salesOrderNo}</LinkId>
                     <span>{so.customerName}</span>

@@ -454,6 +454,8 @@ export class PurchasingService {
       itemId: row.itemId,
       itemCode: row.item.itemCode,
       itemName: row.item.itemName,
+      defaultSupplierId: row.item.defaultSupplierId,
+      defaultSupplierName: row.item.defaultSupplier?.supplierName ?? null,
       requestedTon: row.requestedTon.toFixed(3),
       desiredReceiptDate: dateOnly(row.desiredReceiptDate),
       requesterId: row.requesterId,

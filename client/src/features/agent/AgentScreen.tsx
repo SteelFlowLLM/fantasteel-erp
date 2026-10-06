@@ -109,7 +109,7 @@ function DetectionList() {
               <Fragment key={rule.riskCode}>
                 <dt className="text-ink-3">
                   {AGENT_RISK_NAME[rule.riskCode]}
-                  <span className="ml-1 text-[10px]">({AGENT_TRIGGER_NAME[rule.trigger]})</span>
+                  <span className="ml-1 text-2xs">({AGENT_TRIGGER_NAME[rule.trigger]})</span>
                 </dt>
                 <dd className="m-0 text-ink-2">
                   {rule.condition} → <b className="font-semibold">{rule.response}</b>
@@ -219,7 +219,7 @@ function DetectionDetail() {
       </AiBrief>
 
       <AiCard title="상황 설명" meta="AI가 작성 · 데이터 변경 없음" className="flex-none">
-        <p className="text-base leading-[21px]">
+        <p className="text-base leading-normal">
           <b className="font-semibold">철광석 1,200 t 부족 예상</b> — 생산계획{' '}
           <span className="font-mono text-sm">{EXAMPLE_NO.rawShortagePlans.join(' · ')}</span>의 소요량이 원료 잔량과 입고예정을 합친 양보다 많아요.
         </p>
@@ -245,7 +245,7 @@ function DetectionDetail() {
           <Icon name="info" size="sm" className="text-ink-3" />
           <b className="text-sm font-semibold">대응 후보가 없는 유형은 이렇게 보여요 (예: 불합격률 상승)</b>
         </div>
-        <span className="text-xs leading-[17px] text-ink-2">
+        <span className="text-xs leading-snug text-ink-2">
           상황 설명과 함께 품질 부서에 알림만 보내요. 원인 분석과 조치는 품질 담당이 판단해요.
         </span>
       </div>
