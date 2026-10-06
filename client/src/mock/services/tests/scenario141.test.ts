@@ -244,7 +244,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     expect(b).toMatchObject({ customer: { customerCode: 'CUS-01' }, totalQty: 6, totalWeightTon: '141.300' });
     expect(b.items[0]).toMatchObject({ standardNo: 'KS D 3503:2026', theoreticalWeightTon: '23.550' });
     // PDF = 같은 스냅샷 인쇄, 경로만 남긴다
-    expect(markMillSheetPdfGenerated(k.at('2026-10-08T11:00:00+09:00'), k.actor('logistics'), { millSheetId: sheets[1].id }).pdfPath).toBe('mill-sheets/MS-2610-0002-1.pdf');
+    expect(markMillSheetPdfGenerated(k.at('2026-10-08T11:00:00+09:00'), k.actor('logistics'), { millSheetId: sheets[1].id }).pdfPath).toBe('mill-sheets/MS-2610-0002-1_가람중공업_20261008.pdf');
     // 밀시트에 들어간 LOT·히트는 측정값을 고칠 수 없다
     const heat = k.lot('HT-BOF1-261003-001');
     expect(inspectionFormOf(t, heat.id).locked).toBe(true);

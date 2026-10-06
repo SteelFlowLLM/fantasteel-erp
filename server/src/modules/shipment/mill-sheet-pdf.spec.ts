@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
-import { SHIPMENT_REQUEST_STATUS } from '@fantasteel/shared';
+import { SHIPMENT_REQUEST_STATUS, millSheetPdfFileName } from '@fantasteel/shared';
 import { CommonModule } from '../../common/common.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -61,6 +61,27 @@ const sampleSnapshot = (millSheetNo: string, lotCount = 3) =>
   });
 
 const pageCount = (pdf: Buffer) => (pdf.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length;
+
+describe('밀시트 PDF 저장 이름 (millSheetPdfFileName)', () => {
+  const name = (millSheetNo: string, customerName: string, issuedDate = '2026-10-06') => millSheetPdfFileName({ millSheetNo, issuedDate, customer: { customerName } });
+
+  it('{밀시트 번호}_{고객사}_{발행일 YYYYMMDD}.pdf', () => {
+    expect(name('MS-2610-0028-1', '나래조선')).toBe('MS-2610-0028-1_나래조선_20261006.pdf');
+  });
+
+  it('고객사 이름의 공백·사용할 수 없는 글자는 _로 바꾸고 앞뒤 _는 지운다', () => {
+    expect(name('MS-2610-0028-2', '(주) 한강/철강: "본사"?')).toBe('MS-2610-0028-2_(주)_한강_철강_본사_20261006.pdf');
+    expect(name('MS-2610-0028-2', '  나래  조선  ')).toBe('MS-2610-0028-2_나래_조선_20261006.pdf');
+  });
+
+  it('고객사 이름이 길면 30자까지만 쓴다', () => {
+    expect(name('MS-2610-0028-1', '가'.repeat(50))).toBe(`MS-2610-0028-1_${'가'.repeat(30)}_20261006.pdf`);
+  });
+
+  it('고객사 이름이 비어도 이름이 깨지지 않는다', () => {
+    expect(name('MS-2610-0028-1', ' / ')).toBe('MS-2610-0028-1_20261006.pdf');
+  });
+});
 
 describe('밀시트 PDF 렌더링 (REQ-SHP-004)', () => {
   it('스냅샷으로 PDF를 만들고 한글 폰트를 내장한다', async () => {
@@ -131,7 +152,7 @@ describe('ShipmentService 밀시트 PDF 생성 (API-115)', () => {
     const sheet = await millSheet();
     const first = await service.generateMillSheetPdf(sheet.id);
 
-    expect(first.pdfPath).toMatch(new RegExp(`^mill-sheets/.+-${sheet.millSheetNo}\\.pdf$`));
+    expect(first.pdfPath).toMatch(new RegExp(`^mill-sheets/.+-${sheet.millSheetNo}_나래조선_20261006\\.pdf$`));
     const saved = await readFile(join(storageDir, first.pdfPath!));
     expect(saved.subarray(0, 5).toString()).toBe('%PDF-');
     expect(first.snapshot).toEqual(sheet.snapshot);
