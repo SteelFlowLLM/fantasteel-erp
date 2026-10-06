@@ -34,3 +34,9 @@ export interface InspectionStandardListItem {
 
 /** 검사 기준 상세 (GET /inspection-standards/:id, API-120): 기준 버전 1건과 항목. 옛 버전도 같은 모양 */
 export type InspectionStandardDetail = InspectionStandardListItem;
+
+/** 검사 기준 삭제 결과 (DELETE /inspection-standards/:id): 지운 기준 코드와 그 코드의 모든 버전 */
+export interface InspectionStandardDeleteResult {
+  inspectionStandardCode: string;
+  deletedVersionNos: number[];
+}

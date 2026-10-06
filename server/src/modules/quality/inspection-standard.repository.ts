@@ -100,4 +100,20 @@ export class InspectionStandardRepository {
       select: standardWithItemsSelect,
     });
   }
+
+  /** 같은 코드의 모든 버전 (삭제는 코드 단위) */
+  findVersionsByCode(tx: Tx, inspectionStandardCode: string) {
+    return tx.inspectionStandard.findMany({ where: { inspectionStandardCode }, select: { id: true, versionNo: true }, orderBy: { versionNo: 'asc' } });
+  }
+
+  /** 이 기준 버전들로 판정한 검사 수. 측정값 행은 검사에 딸려 있어 따로 세지 않는다 */
+  countInspectionsUsingStandards(tx: Tx, inspectionStandardIds: number[]) {
+    return tx.qualityInspection.count({ where: { inspectionStandardId: { in: inspectionStandardIds } } });
+  }
+
+  /** 기준 버전과 항목을 지운다. 삭제는 Prisma Client로만 한다 (컨벤션 7-2) */
+  async deleteStandardsWithItems(tx: Tx, inspectionStandardIds: number[]): Promise<void> {
+    await tx.inspectionStandardItem.deleteMany({ where: { inspectionStandardId: { in: inspectionStandardIds } } });
+    await tx.inspectionStandard.deleteMany({ where: { id: { in: inspectionStandardIds } } });
+  }
 }
