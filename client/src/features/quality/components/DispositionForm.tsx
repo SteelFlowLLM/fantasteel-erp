@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { InputError } from '@/api/client';
 import type { RejectedLotListRow } from '@/api/dispositions';
+import { isServerPendingValue } from '@/api/inspections';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -11,6 +12,7 @@ import { Field } from '@/components/Field';
 import { Textarea } from '@/components/Input';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { DISPOSITION_STATUS, DISPOSITION_STATUS_LABEL, PERMISSION, type DispositionStatus } from '@/codes';
+import { PendingValue } from '@/features/quality/components/PendingValue';
 import { DispositionBadge } from '@/features/quality/components/QualityBadges';
 import { useSetDisposition } from '@/hooks/useDispositions';
 import { cn } from '@/lib/cn';
@@ -52,7 +54,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
         <CardBody>
           {row.dispositionStatus ? (
             <div className="flex flex-col gap-0.5 text-cap text-ink-3">
-              <span>지정 {fmtDateTime(row.dispositionAt)}</span>
+              <span>지정 {row.dispositionAt === null && isServerPendingValue() ? <PendingValue label="시각 준비 중" /> : fmtDateTime(row.dispositionAt)}</span>
               <span className="text-xs text-ink-2">사유: {row.dispositionReason ?? '—'}</span>
             </div>
           ) : (

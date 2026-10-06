@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
+import { isServerPendingValue, type InspectionDetail, type LinkedSalesOrderItem, type RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -22,7 +22,9 @@ import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, 
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
+import { PendingValue } from '@/features/quality/components/PendingValue';
 import { inspectionOutcomeNotes } from '@/features/quality/lib/inspectionOutcomeNotes';
+import { pickNextPendingLot } from '@/features/quality/lib/nextPendingLot';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, lotIconOf } from '@/features/quality/lib/qualityDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -71,7 +73,7 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   const list = byProcess.filter((r) => (result === 'ALL' || r.inspectionResult === result) && (!needle || r.lotNo.toUpperCase().includes(needle)));
   const activeId = paramId ?? list[0]?.lotId ?? null;
   const pending = rows.filter((r) => r.inspectionResult === 'PENDING');
-  const nextPending = pending.find((r) => r.lotId !== activeId) ?? null;
+  const nextPending = pickNextPendingLot(pending, rows.find((r) => r.lotId === activeId) ?? null);
 
   // 고른 LOT을 주소에 둔다: 저장 뒤 목록 필터에서 빠져도 같은 LOT을 계속 보인다
   useEffect(() => {
@@ -318,7 +320,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 }
 
 function SalesOrderLink({ item }: { item: LinkedSalesOrderItem | null }) {
-  if (!item) return <span className="text-ink-3">없음</span>;
+  if (!item) return isServerPendingValue() ? <PendingValue /> : <span className="text-ink-3">없음</span>;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       <Link href={`/sales-orders/${item.salesOrderId}`} className="font-mono text-run hover:underline">
