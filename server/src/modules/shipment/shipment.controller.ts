@@ -59,6 +59,14 @@ export class ShipmentController {
     return this.service.cancel(user, id);
   }
 
+  /** API-112 출고 확정: 배정 확정된 출하요청을 출고하고 밀시트를 발행한다 */
+  @Post('shipment-requests/:id/issue')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.GOODS_ISSUE_CONFIRM, 'USE')
+  issue(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ShipmentRequestDetail> {
+    return this.service.issue(user, id);
+  }
+
   /** API-232 밀시트 목록 */
   @Get('mill-sheets')
   @RequirePermission(PERMISSION.MILL_SHEET_READ, 'VIEW')

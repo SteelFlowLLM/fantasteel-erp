@@ -49,12 +49,91 @@ export interface MillSheetSummary {
   pdfPath: string | null;
 }
 
-/**
- * 밀시트 조회 (API-233). snapshot은 출고 확정 때 저장한 값 그대로이고 현재 값을 다시 읽지 않는다 (REQ-SHP-003·004).
- * snapshot의 모양은 출고 확정(밀시트 생성)을 구현할 때 정한다.
- */
+/** 밀시트에 찍는 검사 한 건 (슬래브·코일 또는 히트). 기준(min·max)은 발행 시점 값을 복사해 둔다 */
+export interface MillSheetInspectionSnapshot {
+  lotNo: string;
+  processType: string;
+  inspectionStandardCode: string;
+  version: number;
+  inspectionResult: string;
+  inspectedAt: string;
+  values: {
+    inspectionItemCode: string;
+    inspectionItemName: string;
+    unit: string | null;
+    /** 소수 4자리 문자열 */
+    minValue: string | null;
+    maxValue: string | null;
+    measuredValue: string;
+    /** 기준(이상·이하, 경계 포함) 안이면 true. 기준이 없으면 null */
+    isPassed: boolean | null;
+  }[];
+}
+
+/** 밀시트의 출고 LOT 1매. 기존 재고와 새 생산분이 섞이면 LOT마다 다른 히트 값이 그대로 들어간다 */
+export interface MillSheetLotSnapshot {
+  lotId: number;
+  lotNo: string;
+  lotType: string;
+  producedDate: string | null;
+  /** 1매 이론중량(t), 소수 3자리 */
+  theoreticalWeightTon: string;
+  heatLotId: number | null;
+  heatNo: string | null;
+  /** 코일이면 투입한 슬래브 LOT 번호 */
+  slabNo: string | null;
+  /** 슬래브 검사 또는 코일 검사 */
+  productInspection: MillSheetInspectionSnapshot | null;
+}
+
+export interface MillSheetItemSnapshot {
+  salesOrderItemId: number;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  itemType: string;
+  steelGradeCode: string | null;
+  /** KS 규격 번호 (TRM-113) */
+  standardNo: string | null;
+  thicknessMm: string | null;
+  widthMm: string | null;
+  lengthMm: string | null;
+  theoreticalWeightTon: string;
+  /** 이번 출고 매수 */
+  qty: number;
+  totalWeightTon: string;
+  lots: MillSheetLotSnapshot[];
+}
+
+export interface MillSheetHeatSnapshot {
+  heatLotId: number;
+  heatNo: string;
+  converterCode: string | null;
+  producedDate: string | null;
+  steelGradeCode: string | null;
+  /** 히트 성분 검사 */
+  inspection: MillSheetInspectionSnapshot | null;
+}
+
+/** 밀시트 스냅샷: 출고 확정 때 한 번 만들고 이후 바꾸지 않는다 (REQ-SHP-003, TRM-083) */
+export interface MillSheetSnapshot {
+  millSheetNo: string;
+  issuedAt: string;
+  issuedDate: string;
+  customer: { customerId: number; customerCode: string; customerName: string };
+  salesOrder: { salesOrderId: number; salesOrderNo: string };
+  shipmentRequest: { shipmentRequestId: number; shipmentRequestNo: string; shipDate: string | null; issuedAt: string | null; issuedEmployeeName: string | null };
+  items: MillSheetItemSnapshot[];
+  heats: MillSheetHeatSnapshot[];
+  totalQty: number;
+  totalWeightTon: string;
+  /** 스냅샷에 들어간 제품·히트 LOT id (측정값 수정 차단 확인용) */
+  lotIds: number[];
+}
+
+/** 밀시트 조회 (API-233). snapshot은 출고 확정 때 저장한 값 그대로이고 현재 값을 다시 읽지 않는다 (REQ-SHP-003·004) */
 export interface MillSheetDetail extends MillSheetSummary {
-  snapshot: unknown;
+  snapshot: MillSheetSnapshot;
 }
 
 export interface ShipmentRequestDetail extends ShipmentRequestSummary {

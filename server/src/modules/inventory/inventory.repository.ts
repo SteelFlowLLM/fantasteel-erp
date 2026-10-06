@@ -38,6 +38,15 @@ export class InventoryRepository {
     return (await tx.$queryRawTyped(releaseInventoryReservedQty(itemId, qty))).length > 0;
   }
 
+  /** 출고: 현재고와 예약 매수를 함께 줄인다. 어느 쪽이든 모자라면 바뀐 행이 없어 false */
+  async consumeOnHandAndReserved(tx: Tx, itemId: number, qty: number): Promise<boolean> {
+    const result = await tx.inventory.updateMany({
+      where: { itemId, onHandQty: { gte: qty }, reservedQty: { gte: qty } },
+      data: { onHandQty: { decrement: qty }, reservedQty: { decrement: qty } },
+    });
+    return result.count > 0;
+  }
+
   /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
   decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
     return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
@@ -68,6 +77,15 @@ export class InventoryRepository {
 
   findReservationsOfItem(tx: Tx, salesOrderItemId: number, status: ReservationStatus) {
     return tx.reservation.findMany({ where: { salesOrderItemId, reservationStatus: status }, orderBy: { id: 'asc' } });
+  }
+
+  /** 부분 출고: ACTIVE 예약 매수를 줄이고, 줄인 만큼 CONVERTED 예약 행을 새로 만든다 (ACTIVE 10 → ACTIVE 6 + CONVERTED 4) */
+  async splitReservation(tx: Tx, reservation: { id: number; salesOrderItemId: number; itemId: number; reservedQty: number }, convertedQty: number) {
+    const remaining = await tx.reservation.update({ where: { id: reservation.id }, data: { reservedQty: reservation.reservedQty - convertedQty } });
+    const converted = await tx.reservation.create({
+      data: { salesOrderItemId: reservation.salesOrderItemId, itemId: reservation.itemId, reservedQty: convertedQty, reservationStatus: RESERVATION_STATUS.CONVERTED },
+    });
+    return { remaining, converted };
   }
 
   updateReservationStatus(tx: Tx, id: number, reservationStatus: ReservationStatus) {
@@ -123,6 +141,16 @@ export class InventoryRepository {
 
   updateAllocationStatus(tx: Tx, id: number, allocationStatus: AllocationStatus) {
     return tx.allocation.update({ where: { id }, data: { allocationStatus }, include: allocationInclude });
+  }
+
+  /** 출고 확정: 확정(CONFIRMED) 배정만 소진으로. 바뀐 수가 모자라면 false */
+  async consumeConfirmedAllocations(tx: Tx, ids: number[]): Promise<boolean> {
+    // id IN (…)인 updateMany는 Prisma 쿼리 인터프리터가 실패해서 배정마다 고친다 (shipment.repository markLotsShipped 참고)
+    let changed = 0;
+    for (const id of [...ids].sort((a, b) => a - b)) {
+      changed += (await tx.allocation.updateMany({ where: { id, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, data: { allocationStatus: ALLOCATION_STATUS.CONSUMED } })).count;
+    }
+    return changed === ids.length;
   }
 
   findAllocations(tx: Tx, where: { allocationPurpose?: AllocationPurpose; shipmentRequestId?: number; shipmentRequestItemId?: number; productionPlanId?: number; allocationStatus?: AllocationStatus[] }) {

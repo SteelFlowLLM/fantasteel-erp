@@ -22,10 +22,12 @@ import { NumberingService } from '../../common/numbering/numbering.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { SalesOrderService } from '../sales-order/sales-order.service';
 import type { CreateShipmentRequestDto } from './dto/create-shipment-request.dto';
 import type { ListMillSheetsQuery } from './dto/list-mill-sheets.query';
 import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
-import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary } from './shipment.mapper';
+import { buildMillSheetSnapshot } from './mill-sheet-snapshot';
+import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
 import { ShipmentRepository } from './shipment.repository';
 
 /** 배정 대기·배정 확정. 출하 가능 매수에서 빼는 진행 중 출하요청 */
@@ -41,6 +43,8 @@ export class ShipmentService {
     private readonly businessEventRecorder: BusinessEventRecorder,
     // 취소하면 배정을 해제하고(inventory), 배정이 바뀌면 inventory가 refreshAllocationStatus를 부른다 → 서로 부른다
     @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
+    // 출고하면 수주 품목 상태를 다시 계산한다. sales-order → inventory → shipment 순환이라 forwardRef
+    @Inject(forwardRef(() => SalesOrderService)) private readonly salesOrders: SalesOrderService,
   ) {}
 
   /**
@@ -163,6 +167,135 @@ export class ShipmentService {
       // 출하요청 취소용 작업 로그 유형은 공통 코드에 없다(shipment.md 8장 🟡). 배정 해제는 ALLOCATION_RELEASED로 남는다
       await this.inventory.releaseShipmentAllocationsOfRequest(tx, { shipmentRequestId: id, actor: user, reason: `출하요청 취소로 배정 해제 (출하요청 id ${id})` });
       await this.repository.updateStatus(tx, id, SHIPMENT_REQUEST_STATUS.CANCELLED);
+    });
+    return this.findOne(user, id);
+  }
+
+  /**
+   * 출고 확정 (API-112, REQ-SHP-002·003, 업무 프로세스 13.3). 한 트랜잭션에서 끝낸다:
+   * 출하요청·수주 품목 잠금 → 재검증(배정·LOT·예약) → 배정 소진·LOT 출고·예약 전환·재고 차감 → 수주 품목 상태 → ISSUED → 수주별 밀시트 스냅샷 → 작업 로그.
+   * 하나라도 어긋나면 아무것도 바뀌지 않는다. 이미 출고했으면 COM-001이라 다시 눌러도 출고·문서가 중복되지 않는다.
+   */
+  async issue(user: AuthUser, id: number): Promise<ShipmentRequestDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await this.repository.lockShipmentRequest(tx, id);
+      if (!locked) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
+      if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.ISSUED) throw new AppException('COM-001', '이미 출고 확정된 출하요청이에요');
+      if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.CANCELLED) throw new AppException('COM-001', '취소된 출하요청이에요');
+
+      // 출하요청 등록·수주 취소와 같은 수주 품목 잠금: 출고하는 사이 수주가 취소되거나 같은 품목이 또 출고되지 않게.
+      // 잠금 뒤에 다시 읽어야 그사이 바뀐 수주 품목 상태·예약을 본다
+      const first = await this.repository.findIssueContext(tx, id);
+      if (!first) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
+      await this.repository.lockSalesOrderItems(tx, first.shipmentRequestItems.map((i) => i.salesOrderItem.id).sort((a, b) => a - b));
+      const request = await this.repository.findIssueContext(tx, id);
+      if (!request) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
+
+      // 재고 행 잠금 순서(규격 id 오름차순)와 맞추려고 규격 순으로 처리한다
+      const lines = [...request.shipmentRequestItems].sort((a, b) => a.salesOrderItem.itemId - b.salesOrderItem.itemId || a.id - b.id);
+      const reservations = await this.inventory.listReservations(tx, lines.map((l) => l.salesOrderItem.id));
+      const reservedQty = (soItemId: number, status: string) =>
+        reservations.filter((r) => r.salesOrderItemId === soItemId && r.reservationStatus === status).reduce((sum, r) => sum + r.reservedQty, 0);
+
+      for (const line of lines) {
+        const soItem = line.salesOrderItem;
+        if (soItem.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED) throw new AppException('SHP-002', `취소된 수주 품목(id ${soItem.id})은 출고할 수 없어요`);
+        if (line.allocations.length < line.requestQty) {
+          throw new AppException('INV-001', `${soItem.item.itemCode}은 배정 대기가 ${line.requestQty - line.allocations.length}매 남아 있어요`);
+        }
+        const unshipped = soItem.orderedQty - reservedQty(soItem.id, RESERVATION_STATUS.CONVERTED);
+        if (line.requestQty > unshipped || line.requestQty > reservedQty(soItem.id, RESERVATION_STATUS.ACTIVE)) {
+          throw new AppException('SHP-002', `수주 품목(id ${soItem.id})의 미출하·예약 매수보다 많이 출고할 수 없어요`);
+        }
+        for (const allocation of line.allocations) await this.inventory.assertIssuableLot(tx, allocation.lotId, soItem.itemId);
+      }
+
+      const issuedAt = new Date();
+      const allLotIds = lines.flatMap((l) => l.allocations.map((a) => a.lotId));
+      await this.inventory.consumeShipmentAllocations(tx, lines.flatMap((l) => l.allocations.map((a) => a.id)));
+      if (!(await this.repository.markLotsShipped(tx, allLotIds))) {
+        // 위에서 AVAILABLE을 확인했으므로 잠금 밖에서 상태가 바뀐 경우다. 서버 오류로 남기고 전부 되돌린다
+        throw new Error(`출고할 LOT 일부가 AVAILABLE이 아닙니다 (출하요청 ${id})`);
+      }
+      for (const line of lines) {
+        const soItem = line.salesOrderItem;
+        await this.inventory.convertReservations(tx, {
+          salesOrderId: soItem.salesOrderId,
+          salesOrderItemId: soItem.id,
+          itemId: soItem.itemId,
+          qty: line.requestQty,
+          lotIds: line.allocations.map((a) => a.lotId),
+          actor: user,
+        });
+        await this.salesOrders.recalcItemStatus(tx, soItem.id);
+      }
+      await this.repository.markIssued(tx, id, issuedAt, user.employeeId);
+
+      // 수주마다 작업 로그 한 건(수주 타임라인)과 밀시트 한 장 (ERD: 출하요청 × 수주당 1장)
+      const lotRows = new Map((await this.repository.findLotsForSnapshot(tx, allLotIds)).map((l) => [l.id, l]));
+      const salesOrderIds = [...new Set(lines.map((l) => l.salesOrderItem.salesOrderId))].sort((a, b) => a - b);
+      for (const salesOrderId of salesOrderIds) {
+        const ofOrder = lines.filter((l) => l.salesOrderItem.salesOrderId === salesOrderId);
+        const salesOrder = ofOrder[0].salesOrderItem.salesOrder;
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.GOODS_ISSUE_CONFIRMED,
+          actor: user,
+          target: { table: 'shipment_request', id },
+          salesOrderId,
+          lotIds: ofOrder.flatMap((l) => l.allocations.map((a) => a.lotId)),
+          before: { shipmentRequestStatus: request.shipmentRequestStatus },
+          after: {
+            shipmentRequestNo: request.shipmentRequestNo,
+            salesOrderNo: salesOrder.salesOrderNo,
+            shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.ISSUED,
+            issuedAt: issuedAt.toISOString(),
+            items: ofOrder.map((l) => ({ salesOrderItemId: l.salesOrderItem.id, qty: l.allocations.length, lotNos: l.allocations.map((a) => lotRows.get(a.lotId)?.lotNo) })),
+          },
+        });
+
+        const millSheetNo = await this.numbering.nextMillSheetNumber(tx, id, request.shipmentRequestNo);
+        const snapshot = buildMillSheetSnapshot({
+          millSheetNo,
+          issuedAt,
+          customer: request.customer,
+          salesOrder,
+          shipmentRequest: { id, shipmentRequestNo: request.shipmentRequestNo, shipDate: request.shipDate, issuedEmployeeName: user.employeeName },
+          items: ofOrder.map((l) => {
+            const item = l.salesOrderItem.item;
+            return {
+              salesOrderItemId: l.salesOrderItem.id,
+              item: {
+                id: item.id,
+                itemCode: item.itemCode,
+                itemName: item.itemName,
+                itemType: item.itemType,
+                steelGradeCode: item.steelGrade?.steelGradeCode ?? null,
+                standardNo: item.steelGrade?.standardNo ?? null,
+                thicknessMm: item.thicknessMm?.toFixed(2) ?? null,
+                widthMm: item.widthMm?.toFixed(2) ?? null,
+                lengthMm: item.lengthMm?.toFixed(2) ?? null,
+                theoreticalWeightTon: item.theoreticalWeightTon?.toFixed(3) ?? null,
+              },
+              lots: l.allocations.map((a) => toSnapshotLotInput(lotRows.get(a.lotId)!)),
+            };
+          }),
+        });
+        const millSheet = await this.repository.createMillSheet(tx, {
+          millSheetNo,
+          shipmentRequestId: id,
+          salesOrderId,
+          snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
+          issuedAt,
+        });
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.MILL_SHEET_ISSUED,
+          actor: user,
+          target: { table: 'mill_sheet', id: millSheet.id },
+          salesOrderId,
+          lotIds: snapshot.lotIds,
+          after: { millSheetNo, shipmentRequestNo: request.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatNos: snapshot.heats.map((h) => h.heatNo), totalQty: snapshot.totalQty },
+        });
+      }
     });
     return this.findOne(user, id);
   }

@@ -299,6 +299,49 @@ export class InventoryService {
     return rows.map(toAllocationView);
   }
 
+  /**
+   * 출고 확정: 수주 품목의 ACTIVE 예약을 qty만큼 CONVERTED로 바꾸고 현재고·예약 매수를 줄인다 (REQ-INV-005, shipment가 부른다).
+   * 예약이 qty보다 크면 행을 나눈다. 규격 재고 행을 먼저 잠그므로 호출하는 쪽은 규격(item_id) 오름차순으로 부른다.
+   */
+  async convertReservations(tx: Tx, input: { salesOrderId: number; salesOrderItemId: number; itemId: number; qty: number; lotIds: number[]; actor: Actor }): Promise<number> {
+    await this.repository.lockInventory(tx, input.itemId);
+    const active = await this.repository.findReservationsOfItem(tx, input.salesOrderItemId, RESERVATION_STATUS.ACTIVE);
+    let remaining = input.qty;
+    for (const reservation of active) {
+      if (remaining === 0) break;
+      const take = Math.min(reservation.reservedQty, remaining);
+      const converted =
+        take === reservation.reservedQty
+          ? await this.repository.updateReservationStatus(tx, reservation.id, RESERVATION_STATUS.CONVERTED)
+          : (await this.repository.splitReservation(tx, reservation, take)).converted;
+      remaining -= take;
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.RESERVATION_CONVERTED,
+        actor: input.actor,
+        target: { table: 'reservation', id: converted.id },
+        salesOrderId: input.salesOrderId,
+        lotIds: input.lotIds,
+        before: reservationSnapshot(reservation),
+        after: reservationSnapshot(converted),
+      });
+    }
+    // 출하 가능 매수 검사(SHP-002)와 같은 잠금 안에서 불러서 여기까지 오면 예약이 모자랄 수 없다. 모자라면 호출한 쪽의 검사가 빠진 것이다
+    if (remaining > 0) throw new AppException('SHP-002', `수주 품목(id ${input.salesOrderItemId})의 ACTIVE 예약이 ${input.qty}매보다 적어요`);
+    if (!(await this.repository.consumeOnHandAndReserved(tx, input.itemId, input.qty))) {
+      // on_hand·reserved_qty가 LOT·예약 합계와 어긋난 경우다. 업무 오류가 아니라 서버 오류로 남긴다
+      throw new Error(`inventory 현재고·예약 매수가 출고 매수보다 작습니다 (item ${input.itemId}, 출고 ${input.qty})`);
+    }
+    return input.qty;
+  }
+
+  /** 출고 확정: 배정을 소진(CONSUMED)으로 (shipment가 부른다). 소진 기록은 GOODS_ISSUE_CONFIRMED 작업 로그가 대신한다 */
+  async consumeShipmentAllocations(tx: Tx, allocationIds: number[]): Promise<void> {
+    if (!(await this.repository.consumeConfirmedAllocations(tx, allocationIds))) {
+      // 출하요청을 잠근 안이라 확정 배정이 바뀔 수 없다. 어긋났으면 서버 오류로 남기고 전부 되돌린다
+      throw new Error(`소진할 배정 일부가 CONFIRMED가 아닙니다 (배정 ${allocationIds.join(",")})`);
+    }
+  }
+
   /** 출하요청 취소: 그 요청의 CONFIRMED 배정을 모두 해제한다 (shipment가 부른다) */
   async releaseShipmentAllocationsOfRequest(tx: Tx, input: { shipmentRequestId: number; actor: Actor; reason: string }): Promise<number[]> {
     const confirmed = await this.repository.findAllocations(tx, {
@@ -370,13 +413,26 @@ export class InventoryService {
 
   /** 배정 직전 재검증 (13.2 confirmAllocation): 규격 일치, 재고 상태, 적격, 확정 배정 없음 */
   private async assertAllocatableLot(tx: Tx, lotId: number, itemId: number): Promise<void> {
+    const lot = await this.loadEligibleLot(tx, lotId, itemId);
+    if (lot.confirmed_allocation_id !== null) throw new AppException('INV-003', `${lot.lot_no}은 이미 배정된 LOT이에요`);
+  }
+
+  /**
+   * 출고 직전 LOT 재검증 (13.3 confirmGoodsIssue, shipment가 부른다): 규격 일치, 재고(AVAILABLE) 상태, 제품 + 상위 히트 합격.
+   * 출고하는 LOT은 자기 CONFIRMED 배정이 있어야 하므로 배정 여부는 보지 않는다.
+   */
+  async assertIssuableLot(tx: Tx, lotId: number, itemId: number): Promise<void> {
+    await this.loadEligibleLot(tx, lotId, itemId);
+  }
+
+  private async loadEligibleLot(tx: Tx, lotId: number, itemId: number) {
     const lot = await this.repository.findLotEligibility(tx, lotId);
     if (!lot) throw new AppException('COM-003', `LOT(${lotId})을 찾을 수 없어요`);
     // 규격 불일치용 오류 코드가 정의서 9.3에 없다 (docs/backend/inventory.md 8장 🟡)
     if (lot.item_id !== itemId) throw new AppException('COM-004', `${lot.lot_no}은 수주 품목과 규격이 달라요`);
     if (lot.lot_status !== LOT_STATUS.AVAILABLE) throw new AppException('INV-004', `${lot.lot_no}은 이미 투입·출고된 LOT이에요`);
     if (!lot.is_eligible) throw new AppException('INV-002', `${lot.lot_no}은 제품 또는 상위 히트가 합격이 아니에요`);
-    if (lot.confirmed_allocation_id !== null) throw new AppException('INV-003', `${lot.lot_no}은 이미 배정된 LOT이에요`);
+    return lot;
   }
 
   /** 배정 목적별 권한: 출하 = 출하요청·배정 확정, 열연 = 열연 투입 배정 */
