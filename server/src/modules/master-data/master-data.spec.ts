@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)를 실제 앱과 DB(fs_master)로 확인한다.
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록 API(API-166)를 실제 앱과 DB(fs_master)로 확인한다.
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -51,6 +51,11 @@ beforeAll(async () => {
   productionCookie = await login('1401006');
   logisticsCookie = await login('1610014');
 }, 60_000);
+
+async function send<T>(method: 'POST', path: string, payload: unknown, cookie = adminCookie) {
+  const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+  return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string; message: string } } };
+}
 
 afterAll(async () => {
   await app?.close();
@@ -154,5 +159,62 @@ describe('GET /production-settings (API-187)', () => {
   it('히트 용량(소수 3자리)과 납기 위험 기준일', async () => {
     const { body } = await get<ProductionSettingView>('/production-settings');
     expect(body.data).toMatchObject({ heatCapacityTon: '250.000', deliveryRiskDays: 3 });
+  });
+});
+
+describe('등록 (API-166)', () => {
+  let yardIdOf: Record<string, number>;
+  let gradeIdOf: Record<string, number>;
+
+  beforeAll(async () => {
+    const yards = (await get<YardView[]>('/yards')).body.data;
+    yardIdOf = Object.fromEntries(yards.map((y) => [y.yardType, y.id]));
+    const grades = (await get<SteelGradeView[]>('/steel-grades')).body.data;
+    gradeIdOf = Object.fromEntries(grades.map((g) => [g.steelGradeCode, g.id]));
+  });
+
+  const slab = (thicknessMm: string) => ({
+    itemType: 'SLAB',
+    steelGradeId: gradeIdOf.SM355C,
+    thicknessMm,
+    widthMm: '1200',
+    lengthMm: '10000',
+    defaultYardId: yardIdOf.SLAB,
+  });
+
+  it('권한이 조회뿐이면 COM-002', async () => {
+    const { body } = await send('POST', '/items', slab('250'), productionCookie);
+    expect(body.error?.code).toBe('COM-002');
+  });
+
+  it('규격 등록: 코드·품목명·1매 이론중량(250 × 1,200 × 10,000 → 23.550)을 서버가 만든다', async () => {
+    const { status, body } = await send<ItemView>('POST', '/items', slab('250'));
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({
+      itemCode: 'SL-SM355C-250x1200x10000',
+      itemName: 'SM355C 슬래브 250×1200×10000',
+      unitType: 'QTY',
+      thicknessMm: '250.00',
+      theoreticalWeightTon: '23.550',
+    });
+  });
+
+  it('같은 강종·두께·폭·길이 재등록은 거부 (COM-004)', async () => {
+    const { body } = await send('POST', '/items', { ...slab('250.00'), lengthMm: '10000.0' });
+    expect(body.error?.code).toBe('COM-004');
+  });
+
+  it('없는 강종은 COM-003, 다른 유형의 야드는 COM-004', async () => {
+    expect((await send('POST', '/items', { ...slab('260'), steelGradeId: 999_999 })).body.error?.code).toBe('COM-003');
+    expect((await send('POST', '/items', { ...slab('260'), defaultYardId: yardIdOf.COIL })).body.error?.code).toBe('COM-004');
+  });
+
+  it('원료 등록: 원료 코드 형식을 보고 기본 공급업체를 지정한다', async () => {
+    const suppliers = (await get<SupplierView[]>('/suppliers')).body.data;
+    const raw = { itemType: 'RAW_MATERIAL', itemCode: 'ore02', itemName: '철광석(분광)', rawMaterialType: 'IRON_ORE', defaultYardId: yardIdOf.RAW_MATERIAL };
+    expect((await send('POST', '/items', { ...raw, itemCode: 'ORE2' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/items', { ...raw, defaultSupplierId: 999_999 })).body.error?.code).toBe('COM-003');
+    const { body } = await send<ItemView>('POST', '/items', { ...raw, defaultSupplierId: suppliers[0].id });
+    expect(body.data).toMatchObject({ itemCode: 'ORE02', unitType: 'TON', rawMaterialType: 'IRON_ORE', defaultSupplierId: suppliers[0].id, theoreticalWeightTon: null });
   });
 });
