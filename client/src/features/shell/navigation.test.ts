@@ -43,10 +43,10 @@ describe('buildNavigation', () => {
     expect(otherAreaHrefs(navOf('LOGISTICS'))).toEqual(['/shipment-requests']);
   });
 
-  it('관리자: 사원 · 부서·직급·권한 · 기준정보, 그 뒤에 조회 권한으로 여는 14개 화면과 재고', () => {
+  it('관리자: 사원 · 부서·직급·권한 · 기준정보 · AI 연결, 그 뒤에 조회 권한으로 여는 14개 화면과 재고', () => {
     const all: PermissionMap = Object.fromEntries(PERMISSIONS.map((p: Permission): [Permission, PermissionLevel] => [p, 'VIEW']));
     const nav = buildNavigation({ roleCode: 'ADMIN', permissions: { ...all, ...permissionsOf('ADMIN') }, headDepartmentIds: [] });
-    expect(hrefs(nav).slice(0, 4)).toEqual(['/dashboard', '/admin/employees', '/admin/organization', '/admin/master-data']);
+    expect(hrefs(nav).slice(0, 5)).toEqual(['/dashboard', '/admin/employees', '/admin/organization', '/admin/master-data', '/admin/llm']);
     expect(otherAreaHrefs(nav)).toEqual([
       '/sales-orders',
       '/shipment-requests',

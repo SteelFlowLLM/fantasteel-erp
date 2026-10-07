@@ -36,6 +36,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, RouteTitle]> = [
   [/^\/admin\/employees/, { title: '사원', area: '관리자' }],
   [/^\/admin\/organization/, { title: '부서·직급·권한', area: '관리자' }],
   [/^\/admin\/master-data/, { title: '기준정보', area: '관리자' }],
+  [/^\/admin\/llm/, { title: 'AI 연결', area: '관리자' }],
   [/^\/agent/, { title: 'AI Factory Agent', area: '준비 중 (P2)' }],
   [/^\/meetings/, { title: '회의록', area: '준비 중 (P2)' }],
   [/^\/past-cases/, { title: '과거 사례 검색', area: '준비 중 (EX)' }],

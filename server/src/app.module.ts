@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { LlmModule } from './modules/llm/llm.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
@@ -44,6 +45,7 @@ import { PrismaModule } from './prisma/prisma.module';
     MessengerModule,
     MessageActionModule,
     DashboardModule,
+    LlmModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
