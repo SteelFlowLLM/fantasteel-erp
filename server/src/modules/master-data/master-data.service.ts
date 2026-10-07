@@ -1,11 +1,28 @@
 import { Injectable } from '@nestjs/common';
-import type { CustomerView, ItemType, ItemView, UnitType } from '@fantasteel/shared';
+import type {
+  CustomerView,
+  ItemType,
+  ItemView,
+  ProcessType,
+  RawMaterialType,
+  RoutingView,
+  SpecificConsumptionView,
+  SpecMappingItemView,
+  SpecMappingView,
+  SteelGradeView,
+  UnitType,
+} from '@fantasteel/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterDataRepository } from './master-data.repository';
 
+type SpecRow = Awaited<ReturnType<MasterDataRepository['findSpecMappings']>>[number]['coilItem'];
+
+/** 열연 계획 수율·라우팅 수율은 routing.planned_yield_rate와 같은 소수 4자리 */
+const YIELD_SCALE = 4;
+
 /**
  * 업무 로직·트랜잭션·데이터에 따른 권한 검사 (컨벤션 6장).
- * 지금은 수주 등록 화면이 쓰는 조회(고객사·품목)만 있다. 등록·수정은 기준정보 담당이 채운다.
+ * BUSINESS_EVENT_TYPE([06])에 기준정보 이벤트가 없어 작업 로그는 남기지 않는다 (master-data.md 5장).
  */
 @Injectable()
 export class MasterDataService {
@@ -35,4 +52,64 @@ export class MasterDataService {
       defaultYardId: r.defaultYardId,
     }));
   }
+
+  /** API-168 */
+  async listSteelGrades(): Promise<SteelGradeView[]> {
+    return this.repository.findSteelGrades(this.prisma);
+  }
+
+  /** API-170. 매핑된 규격은 슬래브·코일이라 치수·이론중량이 늘 있다 (item CHECK) */
+  async listSpecMappings(): Promise<SpecMappingView[]> {
+    const rows = await this.repository.findSpecMappings(this.prisma);
+    return rows.map((r) => {
+      const slabWeight = r.slabItem.theoreticalWeightTon;
+      const coilWeight = r.coilItem.theoreticalWeightTon;
+      return {
+        id: r.id,
+        steelGradeId: r.slabItem.steelGradeId ?? 0,
+        steelGradeCode: r.slabItem.steelGrade?.steelGradeCode ?? '',
+        slabItem: toSpecMappingItemView(r.slabItem),
+        coilItem: toSpecMappingItemView(r.coilItem),
+        hotRollingYieldRate: slabWeight && coilWeight && slabWeight.gt(0) ? coilWeight.div(slabWeight).toFixed(YIELD_SCALE) : '',
+      };
+    });
+  }
+
+  /** API-172. 품목 유형별 공정 순서대로 */
+  async listRoutings(): Promise<RoutingView[]> {
+    const rows = await this.repository.findRoutings(this.prisma);
+    return rows.map((r) => ({
+      id: r.id,
+      itemType: r.itemType as ItemType,
+      processType: r.processType as ProcessType,
+      sequenceNo: r.sequenceNo,
+      plannedYieldRate: r.plannedYieldRate?.toFixed(YIELD_SCALE) ?? null,
+    }));
+  }
+
+  /** API-175 */
+  async listSpecificConsumptions(): Promise<SpecificConsumptionView[]> {
+    const rows = await this.repository.findSpecificConsumptions(this.prisma);
+    return rows.map((r) => ({
+      id: r.id,
+      rawMaterialItemId: r.rawMaterialItemId,
+      rawMaterialItemCode: r.rawMaterialItem.itemCode,
+      rawMaterialType: r.rawMaterialItem.rawMaterialType as RawMaterialType,
+      steelGradeId: r.steelGradeId,
+      steelGradeCode: r.steelGrade?.steelGradeCode ?? null,
+      consumptionRate: r.consumptionRate.toFixed(4),
+    }));
+  }
+
+}
+
+function toSpecMappingItemView(r: SpecRow): SpecMappingItemView {
+  return {
+    id: r.id,
+    itemCode: r.itemCode,
+    thicknessMm: r.thicknessMm?.toFixed(2) ?? '',
+    widthMm: r.widthMm?.toFixed(2) ?? '',
+    lengthMm: r.lengthMm?.toFixed(2) ?? '',
+    theoreticalWeightTon: r.theoreticalWeightTon?.toFixed(3) ?? '',
+  };
 }
