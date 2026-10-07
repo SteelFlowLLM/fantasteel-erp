@@ -1,5 +1,13 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { PERMISSION, type CustomerView, type ItemView } from '@fantasteel/shared';
+import {
+  PERMISSION,
+  type CustomerView,
+  type ItemView,
+  type RoutingView,
+  type SpecificConsumptionView,
+  type SpecMappingView,
+  type SteelGradeView,
+} from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { ListItemsQuery } from './dto/list-items.query';
 import { MasterDataService } from './master-data.service';
@@ -13,17 +21,47 @@ import { MasterDataService } from './master-data.service';
 export class MasterDataController {
   constructor(private readonly service: MasterDataService) {}
 
-  /** 고객사 목록 (수주 등록 고객사 선택) */
+  /** API-165 품목·규격 목록 (수주 등록 규격 선택에도 사용, 톤은 문자열) */
+  @Get('items')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listItems(@Query() query: ListItemsQuery): Promise<ItemView[]> {
+    return this.service.listItems(query.itemType);
+  }
+
+  /** API-168 강종 목록 */
+  @Get('steel-grades')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listSteelGrades(): Promise<SteelGradeView[]> {
+    return this.service.listSteelGrades();
+  }
+
+  /** API-170 규격 매핑 (열연 계획 수율은 계산값) */
+  @Get('spec-mappings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listSpecMappings(): Promise<SpecMappingView[]> {
+    return this.service.listSpecMappings();
+  }
+
+  /** API-172 라우팅 */
+  @Get('routings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listRoutings(): Promise<RoutingView[]> {
+    return this.service.listRoutings();
+  }
+
+  /** API-175 배합 원단위 */
+  @Get('specific-consumptions')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listSpecificConsumptions(): Promise<SpecificConsumptionView[]> {
+    return this.service.listSpecificConsumptions();
+  }
+
+  /** API-178 고객사 목록 (수주 등록 고객사 선택에도 사용) */
   @Get('customers')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listCustomers(): Promise<CustomerView[]> {
     return this.service.listCustomers();
   }
 
-  /** 품목·규격 목록 (수주 등록 규격 선택에도 사용, 톤은 문자열) */
-  @Get('items')
-  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
-  listItems(@Query() query: ListItemsQuery): Promise<ItemView[]> {
-    return this.service.listItems(query.itemType);
-  }
+
 }
