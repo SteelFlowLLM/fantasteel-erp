@@ -5,7 +5,7 @@
 // - 제선 수율은 4.4 계산(원료 → 용선은 용선 1t당 원단위)에 쓰지 않아 '—'로 보이고 준비 상태에서도 누락으로 보지 않는다 (사용자 확인 필요, master.md).
 import { useState } from 'react';
 import { ITEM_TYPE_LABEL, PROCESS_TYPE, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
-import { masterDataApi, type MasterRoutingView } from '@/api/masterData';
+import { isMasterServerMode, masterDataApi, type MasterRoutingView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { IconButton } from '@/components/IconButton';
@@ -122,7 +122,8 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
                   )}
                 </Td>
                 <Td align="right">
-                  <span className="inline-flex">
+                  {/* 서버에는 라우팅 삭제 API가 없어 서버 모드에서는 순서 바꾸기·공정 빼기를 숨긴다 */}
+                  <span className={isMasterServerMode() ? 'hidden' : 'inline-flex'}>
                     <IconButton icon="chevron-up" label="위로" size="sm" disabled={!canEdit || index === 0} onClick={() => move(index, -1)} />
                     <IconButton icon="chevron-down" label="아래로" size="sm" disabled={!canEdit || index === steps.length - 1} onClick={() => move(index, 1)} />
                     <IconButton

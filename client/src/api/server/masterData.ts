@@ -14,9 +14,11 @@ import type {
   SupplierView,
   YardView,
 } from '@fantasteel/shared';
-import { ApiError } from '@/api/errors';
+import { ApiError, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type {
+  CustomerInput,
+  CustomerUpdateInput,
   MasterCustomerView,
   MasterProductionSettingView,
   MasterProductSpecView,
@@ -27,7 +29,20 @@ import type {
   MasterSteelGradeView,
   MasterSupplierView,
   MasterYardView,
+  ProductionSettingInput,
+  ProductSpecInput,
+  ProductSpecUpdateInput,
+  RawMaterialInput,
+  RawMaterialUpdateInput,
+  RoutingSaveInput,
   SpecBrief,
+  SpecificConsumptionChange,
+  SpecMappingInput,
+  SteelGradeInput,
+  SupplierInput,
+  SupplierUpdateInput,
+  YardInput,
+  YardUpdateInput,
 } from '@/api/masterData';
 import type { ProductItemType, RawMaterialType } from '@/codes';
 import { specificConsumptionUnitOf } from '@/lib/units';
@@ -217,4 +232,118 @@ export const serverMasterDataApi = {
   listSuppliers,
   listYards,
   getProductionSetting,
+};
+
+// ── 변경 (API-166~188). 서버 거부(COM-004·MST-002)는 그대로 화면 오류로 보인다 ──
+
+const idOf = async (method: 'POST' | 'PATCH', path: string, body: unknown): Promise<number> => (await serverRequest<{ id: number }>(method, path, { body })).id;
+
+function requireChoice(value: number | null, field: string, message: string): number {
+  if (value === null) throw new InputError(message, { [field]: message });
+  return value;
+}
+
+const createProductSpec = async (input: ProductSpecInput) =>
+  idOf('POST', '/items', {
+    itemType: input.itemType,
+    steelGradeId: requireChoice(input.steelGradeId, 'steelGradeId', '강종을 선택해 주세요'),
+    thicknessMm: input.thicknessMm.trim(),
+    widthMm: input.widthMm.trim(),
+    lengthMm: input.lengthMm.trim(),
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+  });
+
+const updateProductSpec = async (input: ProductSpecUpdateInput) =>
+  idOf('PATCH', `/items/${input.id}`, {
+    steelGradeId: requireChoice(input.steelGradeId, 'steelGradeId', '강종을 선택해 주세요'),
+    thicknessMm: input.thicknessMm.trim(),
+    widthMm: input.widthMm.trim(),
+    lengthMm: input.lengthMm.trim(),
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+  });
+
+const createSpecMapping = async (input: SpecMappingInput) =>
+  idOf('POST', '/spec-mappings', {
+    slabItemId: requireChoice(input.slabItemId, 'slabItemId', '슬래브 규격을 선택해 주세요'),
+    coilItemId: requireChoice(input.coilItemId, 'coilItemId', '코일 규격을 선택해 주세요'),
+  });
+
+/** 서버는 적용 규격 번호가 필수다 (ERD not null) */
+async function createSteelGrade(input: SteelGradeInput): Promise<number> {
+  if (!input.standardNo.trim()) throw new InputError('적용 규격 번호를 입력해 주세요', { standardNo: '적용 규격 번호를 입력해 주세요' });
+  return idOf('POST', '/steel-grades', { steelGradeCode: input.steelGradeCode, steelGradeName: input.steelGradeName, standardNo: input.standardNo });
+}
+
+/** 서버에는 라우팅 삭제 API가 없어 공정 빼기·순서 바꾸기는 막고, 수율 수정(PATCH)과 맨 뒤 공정 추가(POST)만 보낸다 */
+async function saveRouting(input: RoutingSaveInput): Promise<number> {
+  const current = (await serverRequest<RoutingView[]>('GET', '/routings')).filter((r) => r.itemType === input.itemType).sort((a, b) => a.sequenceNo - b.sequenceNo);
+  const kept = input.steps.filter((s) => current.some((r) => r.processType === s.processType));
+  if (kept.length !== current.length || kept.some((s, i) => s.processType !== current[i].processType)) {
+    throw new InputError('서버에는 공정을 빼거나 순서를 바꾸는 API가 없어요');
+  }
+  let nextSeq = (current.at(-1)?.sequenceNo ?? 0) + 1;
+  for (const step of input.steps) {
+    const row = current.find((r) => r.processType === step.processType);
+    if (!row) await serverRequest('POST', '/routings', { body: { itemType: input.itemType, processType: step.processType, sequenceNo: nextSeq++, plannedYieldRate: step.plannedYieldRate } });
+    else if ((row.plannedYieldRate ?? null) !== step.plannedYieldRate && !(row.plannedYieldRate && step.plannedYieldRate && compareDecimal(row.plannedYieldRate, step.plannedYieldRate) === 0)) {
+      await serverRequest('PATCH', `/routings/${row.id}`, { body: { plannedYieldRate: step.plannedYieldRate } });
+    }
+  }
+  return input.steps.length;
+}
+
+/** 서버에는 원단위 삭제 API가 없어 칸 비우기는 막는다. 일괄 저장 API가 없어 칸마다 차례로 보낸다 */
+async function saveSpecificConsumptions(changes: SpecificConsumptionChange[]): Promise<number> {
+  const cleared = changes.filter((c) => !c.consumptionRate);
+  if (cleared.length > 0) {
+    throw new InputError('서버에서는 원단위를 비울 수 없어요', Object.fromEntries(cleared.map((c) => [`${c.itemId}:${c.steelGradeId ?? 'common'}`, '서버에서는 원단위를 비울 수 없어요'])));
+  }
+  const rows = await serverRequest<SpecificConsumptionView[]>('GET', '/specific-consumptions');
+  for (const c of changes) {
+    const row = rows.find((r) => r.rawMaterialItemId === c.itemId && r.steelGradeId === c.steelGradeId);
+    if (row) await serverRequest('PATCH', `/specific-consumptions/${row.id}`, { body: { consumptionRate: c.consumptionRate } });
+    else await serverRequest('POST', '/specific-consumptions', { body: { rawMaterialItemId: c.itemId, steelGradeId: c.steelGradeId, consumptionRate: c.consumptionRate } });
+  }
+  return changes.length;
+}
+
+const createRawMaterial = async (input: RawMaterialInput) =>
+  idOf('POST', '/items', {
+    itemType: 'RAW_MATERIAL',
+    itemCode: input.itemCode,
+    itemName: input.itemName,
+    rawMaterialType: input.rawMaterialType ?? undefined,
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    defaultSupplierId: input.defaultSupplierId,
+  });
+
+const updateRawMaterial = async (input: RawMaterialUpdateInput) =>
+  idOf('PATCH', `/items/${input.id}`, {
+    itemName: input.itemName,
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    defaultSupplierId: input.defaultSupplierId,
+  });
+
+async function saveProductionSetting(input: ProductionSettingInput): Promise<number> {
+  const days = Number(String(input.deliveryRiskDays).trim());
+  if (!Number.isInteger(days) || days < 0) throw new InputError('납기 위험 기준일을 확인해 주세요', { deliveryRiskDays: '납기 위험 기준일은 0 이상의 정수예요' });
+  return idOf('PATCH', '/production-settings', { heatCapacityTon: input.heatCapacityTon.trim(), deliveryRiskDays: days });
+}
+
+export const serverMasterDataWriteApi = {
+  createProductSpec,
+  updateProductSpec,
+  createSpecMapping,
+  createSteelGrade,
+  saveRouting,
+  saveSpecificConsumptions,
+  createRawMaterial,
+  updateRawMaterial,
+  createCustomer: (input: CustomerInput) => idOf('POST', '/customers', input),
+  updateCustomer: (input: CustomerUpdateInput) => idOf('PATCH', `/customers/${input.id}`, { customerName: input.customerName }),
+  createSupplier: (input: SupplierInput) => idOf('POST', '/suppliers', input),
+  updateSupplier: (input: SupplierUpdateInput) => idOf('PATCH', `/suppliers/${input.id}`, { supplierName: input.supplierName }),
+  createYard: (input: YardInput) => idOf('POST', '/yards', { ...input, yardType: input.yardType ?? undefined }),
+  updateYard: (input: YardUpdateInput) => idOf('PATCH', `/yards/${input.id}`, { yardName: input.yardName }),
+  saveProductionSetting,
 };

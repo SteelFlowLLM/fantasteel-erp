@@ -4,7 +4,7 @@
 // 단위는 원료 유형으로 정한다(합금철 kg/t, 그 밖 t/t — PLAN 4장). 바뀐 칸을 한 번에 저장한다(하나라도 틀리면 아무것도 저장하지 않음).
 import { useState } from 'react';
 import { RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { masterDataApi, type MasterRawMaterialView, type MasterSpecificConsumptionView, type MasterSteelGradeView, type SpecificConsumptionChange } from '@/api/masterData';
+import { isMasterServerMode, masterDataApi, type MasterRawMaterialView, type MasterSpecificConsumptionView, type MasterSteelGradeView, type SpecificConsumptionChange } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Input } from '@/components/Input';
@@ -167,7 +167,9 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
         <TableFoot className="flex items-center gap-3 rounded-md border-t-0">
           <span className="min-w-0 flex-1">
             {changes.length > 0
-              ? `변경 ${changes.length}건 · 칸을 비우고 저장하면 그 원단위를 지워요 (지우면 준비 상태에 누락으로 나와요)`
+              ? isMasterServerMode()
+                ? `변경 ${changes.length}건 · 서버에는 원단위 삭제 API가 없어 칸을 비울 수 없어요`
+                : `변경 ${changes.length}건 · 칸을 비우고 저장하면 그 원단위를 지워요 (지우면 준비 상태에 누락으로 나와요)`
               : '값을 고치고 저장해요 · 0보다 커야 해요 · 비어 있으면 미설정이에요 · 제품 규격이 없는 강종은 비워 둬도 돼요'}
           </span>
           <Button
