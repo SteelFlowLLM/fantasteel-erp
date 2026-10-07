@@ -1,11 +1,12 @@
 // 불합격 관리 화면 ↔ 서버 API (server/src/modules/quality의 rejected-lot). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 불합격 항목·검사 시각은 서버가 목록 행에 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사)로 같이 준다.
 // 연결 수주·부족·같은 수주 품목의 계획은 LOT의 생산계획 상세에서, 재생산 계획은 생산 모듈 API(POST /production-plans)로.
-// 서버에 아직 없는 것(지정 시각, 작업 로그)은 빈 값이다.
+// 서버에 아직 없는 것(지정 시각)은 빈 값이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
 import type { PageResult, RejectedLotListItem } from '@fantasteel/shared';
 import type { ReproductionOutcome, RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
+import { inspectionItemNamesOf, serverBusinessEventApi } from '@/api/server/businessEvents';
 import { allPages, inspectionFormOfLot, linkedOfPlan, orEmpty, type LinkedOfPlan } from '@/api/server/inspections';
 import { serverProductionPlanApi } from '@/api/server/production';
 
@@ -67,17 +68,18 @@ async function detail(lotId: number): Promise<RejectedLotDetail | null> {
   if (!found) return null;
   // 근거 검사 폼(전체 항목)은 검사 입력 조회 권한이 없으면 비워 둔다. 불합격 항목은 목록 행에 이미 있다
   const evidenceLotId = found.evidence?.lotId ?? null;
-  const [evidence, linked] = await Promise.all([
+  const [evidence, linked, history] = await Promise.all([
     evidenceLotId === null ? null : orEmpty(() => inspectionFormOfLot(evidenceLotId), null),
     linkedOfPlan(found.productionPlanId),
+    serverBusinessEventApi.lotTimeline(lotId),
   ]);
   return {
     row: listRowOf(found, linked),
     evidence,
     plans: linked.plans,
-    // 서버에 아직 없는 것: 작업 로그 조회
-    history: [],
-    inspectionItemNames: {},
+    history,
+    // 검사 항목명: 근거 검사 폼 항목, 없으면(권한 없음) 목록 행의 불합격 항목
+    inspectionItemNames: inspectionItemNamesOf([...(found.evidence?.failedItems ?? []), ...(evidence?.items ?? [])]),
   };
 }
 

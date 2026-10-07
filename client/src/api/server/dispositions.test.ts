@@ -151,11 +151,15 @@ function respond(c: ServerCall) {
   return undefined;
 }
 
+/** LOT 작업 로그(GET /business-events)는 따로 시험하므로(businessEvents.test.ts) 여기서는 빈 목록으로 답한다 */
+const fakeServer = (employeeNo: string, respond: (call: ServerCall) => Response | undefined) =>
+  useFakeServer(employeeNo, (c) => (c.path === '/business-events' ? ok(page([])) : respond(c)));
+
 afterEach(() => stopFakeServer());
 
 describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () => {
   it('목록: 자기 불합격과 히트 불합격 하위 LOT을 나누고, 불합격 항목은 목록 응답의 근거 검사에서 바로 쓴다 (검사 상세를 따로 부르지 않음)', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, respond);
     const rows = await dispositionApi.list();
     expect(rows.map((r) => [r.lotNo, r.reason, r.failedItems.map((f) => f.inspectionItemCode).join(','), r.inspectedAt])).toEqual([
       ['CL-HSM1-261005-001', 'FAILED', 'YIELD', coilInspection.inspectedAt],
@@ -174,7 +178,7 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
   });
 
   it('상세: 검사 입력 조회 권한이 없으면 근거 검사 폼만 비우고, 불합격 항목은 목록 행 그대로 보인다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path.startsWith('/quality-inspections')) return new Response(JSON.stringify({ success: false, error: { code: 'COM-002', message: '권한이 없어요' } }), { status: 403 });
       return respond(c);
     });
@@ -184,7 +188,7 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
   });
 
   it('상세: 히트 불합격 하위 LOT의 근거는 상위 히트의 성분 검사다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, respond);
     const detail = await dispositionApi.detail(402);
     // 불합격 목록 전체가 아니라 그 LOT 하나만 읽는다
     expect(calls.find((c) => c.path === '/lots/rejected')?.query).toMatchObject({ lotId: '402', size: '1' });
@@ -196,12 +200,12 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
   });
 
   it('상세: 불합격 목록에 없는 LOT이면 null', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    fakeServer(SEED_EMPLOYEE_NO.quality, respond);
     await expect(dispositionApi.detail(999)).resolves.toBeNull();
   });
 
   it('상태 지정: 화면을 연 시각을 expectedUpdatedAt으로 보내고, 응답의 updatedAt을 다음 지정에 쓴다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'POST' && c.path === '/lots/501/disposition') return ok({ ...failedCoil, dispositionStatus: 'DOWNGRADED', dispositionReason: '격하 판매', updatedAt: '2026-10-06T00:00:00.000Z' });
       return respond(c);
     });
@@ -211,21 +215,21 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
   });
 
   it('상태 지정: 화면을 연 시각이 없으면 지금 목록 행의 updatedAt을 쓰고, 목록에 없으면 COM-003', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => (c.method === 'POST' ? ok(childSlab) : respond(c)));
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => (c.method === 'POST' ? ok(childSlab) : respond(c)));
     await dispositionApi.set({ lotId: 402, dispositionStatus: 'SCRAPPED', dispositionReason: '히트 P 초과' });
     expect((calls.find((c) => c.method === 'POST')?.body as { expectedUpdatedAt: string }).expectedUpdatedAt).toBe(childSlab.updatedAt);
     await expect(dispositionApi.set({ lotId: 999, dispositionStatus: 'HOLD', dispositionReason: '확인' })).rejects.toMatchObject({ code: 'COM-003' });
   });
 
   it('상세: 영향과 자동 처리에 연결 수주 품목의 부족·재생산 필요와 같은 수주 품목의 계획을 채운다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, respond);
+    fakeServer(SEED_EMPLOYEE_NO.quality, respond);
     const detail = await dispositionApi.detail(501);
     expect(detail?.row.salesOrderItem).toMatchObject({ salesOrderItemId: 41, dueDate: '2026-10-30', shortage: { activeReservedQty: 3, openPlanRemainingQty: 0, reproductionNeedQty: 2 } });
     expect(detail?.plans).toEqual([{ productionPlanId: 300, productionPlanNo: 'PP-2610-0001', productionPlanStatus: 'COMPLETED', isReproduction: false, shortageQty: 5 }]);
   });
 
   it('상세: 생산계획을 읽을 권한이 없으면 연결 수주만 비우고 나머지는 보인다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) =>
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) =>
       c.path.startsWith('/production-plans') ? new Response(JSON.stringify({ success: false, error: { code: 'COM-002', message: '권한이 없어요' } }), { status: 403 }) : respond(c),
     );
     const detail = await dispositionApi.detail(501);
@@ -234,7 +238,7 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
   });
 
   it('재생산 계획은 생산 모듈의 재생산 API(POST /production-plans)를 부른다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
+    const calls = fakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
       c.method === 'POST' && c.path === '/production-plans' ? ok({ reservedFromSurplusQty: 0, plan: { id: 301, productionPlanNo: 'PP-2610-0002', shortageQty: 2 } }) : respond(c),
     );
     const outcome = await dispositionApi.createReproductionPlan({ salesOrderItemId: 41 });
