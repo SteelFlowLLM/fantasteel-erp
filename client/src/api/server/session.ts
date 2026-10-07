@@ -10,6 +10,12 @@ import type { SessionAccount } from '@/lib/sessionEmployee';
 const flatten = (nodes: DepartmentNode[]): DepartmentNode[] => nodes.flatMap((node) => [node, ...flatten(node.children)]);
 const accountOf = (user: AuthUser): SessionAccount => ({ employeeId: user.employeeId, employeeNo: user.employeeNo });
 
+/** 로그인 사원과 조직도(펼친 부서 목록). 구매요청 승인권자·등록 창 정보도 이것으로 판단한다 */
+export async function serverMeAndDepartments(): Promise<{ me: AuthUser; departments: DepartmentNode[] }> {
+  const [me, tree] = await Promise.all([serverRequest<AuthUser>('GET', '/auth/me'), serverRequest<DepartmentNode[]>('GET', '/departments')]);
+  return { me, departments: flatten(tree) };
+}
+
 export const serverSessionApi = {
   login: async (employeeNo: string, password: string): Promise<SessionAccount> => accountOf(await serverLogin(employeeNo, password)),
 
@@ -22,10 +28,9 @@ export const serverSessionApi = {
   logout: serverLogout,
 
   getSessionUser: async (employeeId: number): Promise<SessionUser> => {
-    const [me, tree] = await Promise.all([serverRequest<AuthUser>('GET', '/auth/me'), serverRequest<DepartmentNode[]>('GET', '/departments')]);
+    const { me, departments } = await serverMeAndDepartments();
     // 탭에 남은 사원과 쿠키의 사원이 다르면 셸이 세션을 비우고 다시 로그인하게 한다
     if (me.employeeId !== employeeId) throw new ApiError('COM-002', '다시 로그인해 주세요');
-    const departments = flatten(tree);
     const department = departments.find((d) => d.id === me.departmentId);
     const heads = departments.filter((d) => me.headDepartmentIds.includes(d.id));
     return {

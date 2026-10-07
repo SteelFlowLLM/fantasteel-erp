@@ -13,7 +13,7 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { mockCustomerIdOf, mockEmployeeIdOf, mockItemOf, serverCustomerIdOf, serverItemIdOf } from '@/api/server/masterIds';
+import { mockCustomerIdOf, mockItemOf, serverCustomerIdOf, serverItemIdOf } from '@/api/server/masterIds';
 import type {
   CreateSalesOrderInput,
   CreateSalesOrderResultView,
@@ -91,7 +91,7 @@ function toListRow(s: ServerSalesOrderSummary): SalesOrderListRow {
     salesOrderNo: s.salesOrderNo,
     customerId: mockCustomerIdOf(s.customerName, s.customerId),
     customerName: s.customerName,
-    ownerEmployeeId: mockEmployeeIdOf(s.ownerEmployeeName, s.ownerEmployeeId),
+    ownerEmployeeId: s.ownerEmployeeId,
     ownerName: s.ownerEmployeeName,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
