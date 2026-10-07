@@ -2,6 +2,7 @@
 // - 시작점: LOT 번호 또는 출하요청 번호 (PLAN 6장: '출하번호' → '출하요청 번호').
 // - LOT 관계는 lot_relation의 부모·자식 id로만 따라간다(LOT 번호를 해석하지 않음). 출하는 배정(SHIPMENT, CONFIRMED·CONSUMED)으로 잇는다.
 // - LOT 추적은 모든 사원이 여는 화면이라(screens.ts) 로그인한 사용 중 사원인지만 확인한다.
+// - NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/lotTrace.ts). LOT·출하요청 id는 서버 id다.
 import type {
   AllocationPurpose,
   AllocationStatus,
@@ -16,6 +17,8 @@ import type {
 } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverLotTraceApi } from '@/api/server/lotTrace';
 import { defaultTraceDirection, walkLotRelations, type TraceDirection } from '@/features/lotTrace/lib/traceGraph';
 import type { AllocationRow, DateString, DecimalString, IsoDateTime, LotRow, MockTables } from '@/mock/schema';
 import { findRow } from '@/mock/store';
@@ -628,7 +631,7 @@ const byProducedDesc = (a: LotRow, b: LotRow) => b.producedDate.localeCompare(a.
 
 // ── API ──────────────────────────────────────────────────
 
-export const lotTraceApi = {
+const mockLotTraceApi = {
   /** LOT 목록: 번호 일부로 찾기(정확히 같은 번호가 맨 앞), 없으면 최근 생산 순 */
   searchLots: (query: LotSearchQuery = {}): Promise<LotListResult> =>
     mockQuery((tables) => {
@@ -711,4 +714,12 @@ export const lotTraceApi = {
       if (!lot) throw new ApiError('COM-003', `LOT ${lotId}`);
       return lotDetailOf(tables, lot);
     }),
+};
+
+/** 데이터 출처를 부를 때마다 고른다 (테스트가 서버 모드를 켜고 끈다) */
+export const lotTraceApi: typeof mockLotTraceApi = {
+  searchLots: (query = {}) => (isServerDataSource() ? serverLotTraceApi.searchLots(query) : mockLotTraceApi.searchLots(query)),
+  searchShipmentRequests: (keyword) => (isServerDataSource() ? serverLotTraceApi.searchShipmentRequests(keyword) : mockLotTraceApi.searchShipmentRequests(keyword)),
+  trace: (input) => (isServerDataSource() ? serverLotTraceApi.trace(input) : mockLotTraceApi.trace(input)),
+  detail: (lotId) => (isServerDataSource() ? serverLotTraceApi.detail(lotId) : mockLotTraceApi.detail(lotId)),
 };
