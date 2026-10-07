@@ -9,7 +9,6 @@ import {
   type AuthUser,
   type ItemType,
   type OrderFulfillmentWidget,
-  type Permission,
   type ProcessFlowWidget,
   type ProductStockWidget,
 } from '@fantasteel/shared';
@@ -26,7 +25,7 @@ const DAY_MS = 86_400_000;
 
 /**
  * 대시보드 위젯 (REQ-DSH-001, BP-DSH-01 "권한 내 집계"). 숫자는 각 모듈의 계산을 그대로 쓰고 다시 만들지 않는다.
- * 공정 흐름 현황은 단계마다 그 화면의 조회 권한을 보고, 없으면 그 단계만 null로 준다.
+ * 공정 흐름 현황은 로그인한 모든 사원에게 6단계 건수를 모두 준다. 그 화면을 열 권한은 화면이 따로 본다(바로가기만 막음, 2026-10-07 사용자 결정).
  * Agent 위험 감지·대응 후보 확정은 P2라 여기 없다.
  */
 @Injectable()
@@ -38,45 +37,31 @@ export class DashboardService {
     private readonly inventory: InventoryService,
   ) {}
 
-  async processFlow(user: AuthUser): Promise<ProcessFlowWidget> {
-    const can = (permission: Permission) => hasPermission(user, { permission, level: 'VIEW' });
+  async processFlow(): Promise<ProcessFlowWidget> {
     const tx = this.prisma;
-    const [open, stock] = await Promise.all([this.salesOrders.openSalesOrderFulfillments(tx), this.inventory.productStock(tx)]);
+    const [open, stock, planRows, pending, requestRows] = await Promise.all([
+      this.salesOrders.openSalesOrderFulfillments(tx),
+      this.inventory.productStock(tx),
+      this.repository.countPlansByStatus(tx),
+      this.repository.countPendingInspectionLots(tx),
+      this.repository.countShipmentRequestsByStatus(tx),
+    ]);
     const availableOf = (itemType: ItemType) => stock.filter((r) => r.itemType === itemType).reduce((sum, r) => sum + r.availableQty, 0);
     const openOrders = open.salesOrders.filter((so) => OPEN_STATUSES.includes(so.salesOrderStatus));
 
-    let productionPlans: ProcessFlowWidget['productionPlans'] = null;
-    if (can(PERMISSION.PRODUCTION_PLAN_CONFIRM)) {
-      const rows = await this.repository.countPlansByStatus(tx);
-      const countOf = (status: string) => rows.find((r) => r.productionPlanStatus === status)?._count._all ?? 0;
-      productionPlans = { plannedCount: countOf(PRODUCTION_PLAN_STATUS.PLANNED), inProgressCount: countOf(PRODUCTION_PLAN_STATUS.IN_PROGRESS) };
-    }
-    let inspections: ProcessFlowWidget['inspections'] = null;
-    if (can(PERMISSION.INSPECTION_REGISTER)) {
-      const pending = await this.repository.countPendingInspectionLots(tx);
-      inspections = { pendingCount: pending.heat + pending.slab + pending.coil, heatCount: pending.heat, slabCount: pending.slab, coilCount: pending.coil };
-    }
-    let shipmentRequests: ProcessFlowWidget['shipmentRequests'] = null;
-    if (can(PERMISSION.SHIPMENT_REQUEST_MANAGE)) {
-      const rows = await this.repository.countShipmentRequestsByStatus(tx);
-      const countOf = (status: string) => rows.find((r) => r.shipmentRequestStatus === status)?._count._all ?? 0;
-      shipmentRequests = { requestedCount: countOf(SHIPMENT_REQUEST_STATUS.REQUESTED), allocatedCount: countOf(SHIPMENT_REQUEST_STATUS.ALLOCATED) };
-    }
-    let goodsIssues: ProcessFlowWidget['goodsIssues'] = null;
-    if (can(PERMISSION.GOODS_ISSUE_CONFIRM)) {
-      // 서울 오늘 00:00 ~ 내일 00:00
-      const from = new Date(`${open.today}T00:00:00.000+09:00`);
-      const issued = await this.repository.countIssuedBetween(tx, from, new Date(from.getTime() + DAY_MS));
-      goodsIssues = { issuedRequestCount: issued.requests, issuedLotCount: issued.lots };
-    }
+    const planCount = (status: string) => planRows.find((r) => r.productionPlanStatus === status)?._count._all ?? 0;
+    const requestCount = (status: string) => requestRows.find((r) => r.shipmentRequestStatus === status)?._count._all ?? 0;
+    // 오늘 출고 확정: 서울 오늘 00:00 ~ 내일 00:00
+    const from = new Date(`${open.today}T00:00:00.000+09:00`);
+    const issued = await this.repository.countIssuedBetween(tx, from, new Date(from.getTime() + DAY_MS));
     return {
       today: open.today,
-      salesOrders: can(PERMISSION.SALES_ORDER_CREATE) ? { openCount: openOrders.length, dueRiskCount: openOrders.filter((so) => so.isDueRisk).length } : null,
-      productionPlans,
-      inspections,
+      salesOrders: { openCount: openOrders.length, dueRiskCount: openOrders.filter((so) => so.isDueRisk).length },
+      productionPlans: { plannedCount: planCount(PRODUCTION_PLAN_STATUS.PLANNED), inProgressCount: planCount(PRODUCTION_PLAN_STATUS.IN_PROGRESS) },
+      inspections: { pendingCount: pending.heat + pending.slab + pending.coil, heatCount: pending.heat, slabCount: pending.slab, coilCount: pending.coil },
       inventories: { slabAvailableQty: availableOf(ITEM_TYPE.SLAB), coilAvailableQty: availableOf(ITEM_TYPE.COIL) },
-      shipmentRequests,
-      goodsIssues,
+      shipmentRequests: { requestedCount: requestCount(SHIPMENT_REQUEST_STATUS.REQUESTED), allocatedCount: requestCount(SHIPMENT_REQUEST_STATUS.ALLOCATED) },
+      goodsIssues: { issuedRequestCount: issued.requests, issuedLotCount: issued.lots },
     };
   }
 

@@ -12,8 +12,8 @@ export class DashboardController {
   constructor(private readonly service: DashboardService) {}
 
   @Get('dashboard/widgets/process-flow')
-  processFlow(@CurrentUser() user: AuthUser): Promise<ProcessFlowWidget> {
-    return this.service.processFlow(user);
+  processFlow(): Promise<ProcessFlowWidget> {
+    return this.service.processFlow();
   }
 
   @Get('dashboard/widgets/order-fulfillment')

@@ -21,7 +21,7 @@
 
 | 키 | 이름 | 구분 | 기본 / 최소 | 볼 권한(조회 이상, 빈칸 = 모든 사원) | 내용 (출처) |
 |---|---|---|---|---|---|
-| PROCESS_FLOW | 공정 흐름 현황 | 기본 | 12×3 / 4×2 | 단계마다 따로 | 진행 중 수주(납기 위험 n) → 생산계획(계획·진행중) → 판정 대기 LOT(히트·슬래브·코일) → 제품 가용재고(슬래브 매·코일 개) → 출하요청(배정 대기·배정 확정) → 오늘 출고 확정(LOT 수). 볼 수 없는 단계는 `권한 없음` |
+| PROCESS_FLOW | 공정 흐름 현황 | 기본 | 12×3 / 4×2 | 모든 사원 | 진행 중 수주(납기 위험 n) → 생산계획(계획·진행중) → 판정 대기 LOT(히트·슬래브·코일) → 제품 가용재고(슬래브 매·코일 개) → 출하요청(배정 대기·배정 확정) → 오늘 출고 확정(LOT 수). 모든 사원이 6단계 건수를 본다. 그 화면을 열 권한이 없는 단계는 누를 수 없고 안내만 띄운다(2026-10-07 사용자 결정. 업무 프로세스 BP-DSH-01 "권한 내 집계"와 달라 문서 반영 요청 필요) |
 | ORDER_FULFILLMENT | 수주 충족 현황 | 기본 | 6×5 / 4×3 | 수주 등록·수주 취소 | 진행 중 수주를 납기 빠른 순: 수주 번호·고객사·품목·수주·**생산중·검사합격·예약**·출하·진행률·납기(D-n, 납기 위험 빨간 행). `salesOrderDetail().items`(core `fulfillmentOf`) 그대로. 진행률 = 출하 ÷ 수주 매수, 검사합격 = 예약 + 출하, 예약 분모 = 미출하 매수를 하단·머리 툴팁에 밝힘(4.5). 막대는 출하·예약·생산중을 나란히(더해서 충족 매수로 보지 않음) |
 | AGENT_RISK | Agent 위험 감지 | 기본·P2 | 6×5 / 3×3 | — | 준비 중 예시(흐림·조작 불가): 위험 유형 5개(공통 코드 P2 이후 추가 코드), 원료 부족 예시(PP-2610-0001 실리코망가니즈 2.500/1.000/1.500t), "대응 후보는 담당 부서원이 확정(확정한 사람이 요청자), 구매요청이면 요청자 소속 부서장이 최종 승인", `대응 후보 확정` 준비 중 버튼 |
 | RECENT_EVENTS | 최근 작업 로그 | 기본 | 6×5 / 3×2 | 모든 사원(작업 로그 화면과 같음) | 최신 20건: 상대 시각 · 주체(사원 이름/`시스템`) · 이벤트 표시명 · `AI 경유`(is_ai_assisted, 지금은 늘 없음) · 대상 번호·사유 (core `timelineEventOf`) |
@@ -49,7 +49,7 @@
 ## 3. api 함수 — `client/src/api/dashboard.ts`
 
 - `dashboardApi.widget(key, { today? })` → 위젯 데이터(`DashboardWidgetDataMap[key]`). 안에서 `requireActor(tables, { view: DASHBOARD_WIDGET_VIEW[key] })` → 권한이 없으면 `COM-002`(덧붙임 `… 조회 권한이 필요해요`). P2 위젯(AGENT_RISK·AI_USAGE)은 데이터 함수가 없다.
-- `dashboardKeys.widget(key, employeeId)` 조회 키(공유 queryKeys.ts는 건드리지 않음). `DASHBOARD_WIDGET_KEYS`, `DASHBOARD_WIDGET_VIEW`, `PROCESS_FLOW_STAGE_VIEW`, `DASHBOARD_TREND_DAYS`(30), `DASHBOARD_MRP_HORIZON_DAYS`(30), `DASHBOARD_RECENT_EVENT_LIMIT`(20).
+- `dashboardKeys.widget(key, employeeId)` 조회 키(공유 queryKeys.ts는 건드리지 않음). `DASHBOARD_WIDGET_KEYS`, `DASHBOARD_WIDGET_VIEW`, `DASHBOARD_TREND_DAYS`(30), `DASHBOARD_MRP_HORIZON_DAYS`(30), `DASHBOARD_RECENT_EVENT_LIMIT`(20).
 - 계산은 core 읽기 모델 그대로: `listSalesOrders`·`salesOrderDetail`(충족 현황·납기 위험), `productInventory`, `inspectionQueue`, `computeMrp`, `listPurchaseRequisitions`·`listPurchaseOrders`, `surplusSlabs`, `timelineEventOf`, `routingYieldOf`·`hotRollingYieldOf`. 묶는 방법(비율·최근 N일·날짜 묶음·보유 일수·투입량 가중 계획 수율·D-n)은 `features/dashboard/lib/widgetMath.ts`(순수 함수).
 - 변경 api는 없다(배치 저장은 화면 설정이라 localStorage, 작업 로그 대상 아님).
 - 훅: `hooks/useDashboardWidget.ts`(`useDashboardWidgetAccess`, `useDashboardWidget`), `hooks/useDashboardLayout.ts`.

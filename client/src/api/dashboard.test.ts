@@ -63,18 +63,13 @@ describe('권한', () => {
     await expect(dashboardApi.widget('SURPLUS_AGE', opts)).resolves.toBeTruthy();
   });
 
-  it('공정 흐름 현황: 볼 수 없는 단계는 숫자 없이(null) 온다', async () => {
+  it('공정 흐름 현황: 권한과 관계없이 6단계 건수를 모두 준다 (구매도 관리자와 같은 숫자)', async () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     const flow = await dashboardApi.widget('PROCESS_FLOW', opts);
-    expect(flow.salesOrders).toBeNull();
-    expect(flow.inspections).toBeNull();
-    expect(flow.shipmentRequests).toBeNull();
-    expect(flow.goodsIssues).toBeNull();
-    expect(flow.productionPlans).not.toBeNull(); // 구매 → 생산계획 조회
-    expect(flow.inventories.slabAvailableQty).toBeGreaterThan(0);
-
     actAs(SEED_EMPLOYEE_NO.admin);
     const all = await dashboardApi.widget('PROCESS_FLOW', opts);
+    expect(flow).toEqual(all);
+    expect(flow.inventories.slabAvailableQty).toBeGreaterThan(0);
     expect(all.salesOrders).toEqual({ openCount: 4, dueRiskCount: 1 }); // SO-2609-002~005, 납기 위험 SO-2609-004
     expect(all.productionPlans).toEqual({ plannedCount: 0, inProgressCount: 2 }); // PP-2609-0003·0004
     expect(all.inspections).toMatchObject({ pendingCount: 3, heatCount: 1, slabCount: 2, coilCount: 0 });

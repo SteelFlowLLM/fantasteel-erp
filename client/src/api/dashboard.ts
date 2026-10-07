@@ -85,7 +85,7 @@ const SALES_ORDER_VIEW = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_
  * 그 데이터를 보여 주는 화면의 여는 조건(features/shell/screens.ts)과 같게 둔다.
  */
 export const DASHBOARD_WIDGET_VIEW: Record<DataWidgetKey, readonly Permission[]> = {
-  /** 단계마다 따로 확인한다 (PROCESS_FLOW_STAGE_VIEW) */
+  /** 모든 사원이 6단계 건수를 모두 본다. 단계를 눌러 화면으로 가는 것만 그 화면을 열 권한이 있을 때 (2026-10-07 사용자 결정) */
   PROCESS_FLOW: [],
   ORDER_FULFILLMENT: SALES_ORDER_VIEW,
   /** 작업 로그 화면은 모든 사원이 연다 */
@@ -103,18 +103,6 @@ export const DASHBOARD_WIDGET_VIEW: Record<DataWidgetKey, readonly Permission[]>
   PRODUCTION_VOLUME: [PERMISSION.PRODUCTION_RESULT_CONFIRM],
 };
 
-export type ProcessFlowStageKey = 'salesOrders' | 'productionPlans' | 'inspections' | 'inventories' | 'shipmentRequests' | 'goodsIssues';
-
-/** 공정 흐름 현황의 단계별 조회 권한 (빈 배열 = 모든 사원). 권한이 없는 단계는 숫자 대신 잠금으로 보인다. */
-export const PROCESS_FLOW_STAGE_VIEW: Record<ProcessFlowStageKey, readonly Permission[]> = {
-  salesOrders: SALES_ORDER_VIEW,
-  productionPlans: [PERMISSION.PRODUCTION_PLAN_CONFIRM],
-  inspections: [PERMISSION.INSPECTION_REGISTER],
-  inventories: [],
-  shipmentRequests: [PERMISSION.SHIPMENT_REQUEST_MANAGE],
-  goodsIssues: [PERMISSION.GOODS_ISSUE_CONFIRM],
-};
-
 /** 추이 위젯(강종별 불합격률·출하 실적·생산량)의 기간: 오늘 포함 최근 30일 (가정값, docs/rework/areas/dashboard.md) */
 export const DASHBOARD_TREND_DAYS = 30;
 /** 원료 잔량 대비 소요: 필요일이 오늘부터 30일 안인 계획까지 (지난 필요일 포함, 가정값) */
@@ -123,8 +111,6 @@ export const DASHBOARD_MRP_HORIZON_DAYS = 30;
 export const DASHBOARD_RECENT_EVENT_LIMIT = 20;
 
 const MRP_EARLIEST = '0001-01-01';
-
-const allowed = (actor: Actor, permissions: readonly Permission[]): boolean => permissions.length === 0 || canView(actor, ...permissions);
 
 /** 위젯 권한 확인: 로그인 사원 + 그 위젯의 조회 권한 (없으면 COM-002) */
 function requireWidgetActor(tables: Tables, key: DataWidgetKey): Actor {
@@ -149,7 +135,7 @@ const OPEN_SALES_ORDER_STATUSES: ReadonlySet<SalesOrderItemStatus> = new Set<Sal
 
 export interface ProcessFlowData {
   today: string;
-  /** 진행 중 수주 (진행중·부분출하) — 권한이 없으면 null */
+  /** 진행 중 수주 (진행중·부분출하). 서버 타입과 같이 null을 허용하지만 지금은 늘 채운다 */
   salesOrders: { openCount: number; dueRiskCount: number } | null;
   productionPlans: { plannedCount: number; inProgressCount: number } | null;
   /** 판정 대기 LOT (히트·슬래브·코일) */
@@ -162,46 +148,31 @@ export interface ProcessFlowData {
 }
 
 function readProcessFlow(tables: Tables, options: DashboardQueryOptions): ProcessFlowData {
-  const actor = requireWidgetActor(tables, 'PROCESS_FLOW');
+  requireWidgetActor(tables, 'PROCESS_FLOW');
   const today = todayOf(options);
-  const can = (key: ProcessFlowStageKey) => allowed(actor, PROCESS_FLOW_STAGE_VIEW[key]);
   const inventory = productInventory(tables);
   const availableOf = (type: ProductItemType) => inventory.filter((r) => r.itemType === type).reduce((s, r) => s + r.availableQty, 0);
 
-  let salesOrders: ProcessFlowData['salesOrders'] = null;
-  if (can('salesOrders')) {
-    const open = listSalesOrders(tables, { today }).filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status));
-    salesOrders = { openCount: open.length, dueRiskCount: open.filter((so) => so.isDueRisk).length };
-  }
-  let inspections: ProcessFlowData['inspections'] = null;
-  if (can('inspections')) {
-    const pending = inspectionQueue(tables).filter((r) => r.inspectionResult === 'PENDING');
-    const countOf = (type: LotRow['lotType']) => pending.filter((r) => r.lotType === type).length;
-    inspections = { pendingCount: pending.length, heatCount: countOf('HEAT'), slabCount: countOf('SLAB'), coilCount: countOf('COIL') };
-  }
+  const open = listSalesOrders(tables, { today }).filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status));
+  const pending = inspectionQueue(tables).filter((r) => r.inspectionResult === 'PENDING');
+  const countOf = (type: LotRow['lotType']) => pending.filter((r) => r.lotType === type).length;
   return {
     today,
-    salesOrders,
-    productionPlans: can('productionPlans')
-      ? {
-          plannedCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'PLANNED').length,
-          inProgressCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length,
-        }
-      : null,
-    inspections,
+    salesOrders: { openCount: open.length, dueRiskCount: open.filter((so) => so.isDueRisk).length },
+    productionPlans: {
+      plannedCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'PLANNED').length,
+      inProgressCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length,
+    },
+    inspections: { pendingCount: pending.length, heatCount: countOf('HEAT'), slabCount: countOf('SLAB'), coilCount: countOf('COIL') },
     inventories: { slabAvailableQty: availableOf('SLAB'), coilAvailableQty: availableOf('COIL') },
-    shipmentRequests: can('shipmentRequests')
-      ? {
-          requestedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'REQUESTED').length,
-          allocatedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'ALLOCATED').length,
-        }
-      : null,
-    goodsIssues: can('goodsIssues')
-      ? {
-          issuedRequestCount: tables.shipmentRequest.filter((r) => r.issuedAt !== null && seoulDate(r.issuedAt) === today).length,
-          issuedLotCount: tables.lot.filter((l) => l.shippedAt !== null && seoulDate(l.shippedAt) === today).length,
-        }
-      : null,
+    shipmentRequests: {
+      requestedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'REQUESTED').length,
+      allocatedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'ALLOCATED').length,
+    },
+    goodsIssues: {
+      issuedRequestCount: tables.shipmentRequest.filter((r) => r.issuedAt !== null && seoulDate(r.issuedAt) === today).length,
+      issuedLotCount: tables.lot.filter((l) => l.shippedAt !== null && seoulDate(l.shippedAt) === today).length,
+    },
   };
 }
 
