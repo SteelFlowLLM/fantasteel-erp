@@ -181,7 +181,7 @@ export class DashboardService {
 
   /**
    * 여재 보유 기간 (REQ-DSH-002, TRM-048). 재고 화면을 모든 사원이 열어 권한을 보지 않는다.
-   * 여재 매수 = 미배정 합격 슬래브 LOT 수 − ACTIVE 예약 매수 (예약은 매수 단위라 LOT을 정할 수 없어, FIFO상 가장 늦게 쓰일 LOT을 여재로 본다).
+   * 여재 매수 = 미배정 합격 슬래브 LOT 수(진행 중인 코일 수주에 묶인 슬래브 제외) − ACTIVE 예약 매수 (예약은 매수 단위라 LOT을 정할 수 없어, FIFO상 가장 늦게 쓰일 LOT을 여재로 본다).
    * 여재 전환 시각이 ERD에 없어 보유 기간은 그 LOT들의 생산완료일부터 센다 (inventory.md 8장 임시 결정).
    */
   async surplusAge(): Promise<SurplusAgeWidget> {
@@ -190,7 +190,9 @@ export class DashboardService {
     const weightOf = new Map((await this.repository.findItemWeights(this.prisma, slabs.map((r) => r.itemId))).map((i) => [i.id, i.theoreticalWeightTon?.toFixed(3) ?? '0']));
     const items: SurplusAgeRow[] = [];
     for (const slab of slabs) {
-      const lots = await this.repository.findUnallocatedPassedLots(this.prisma, slab.itemId);
+      const candidates = await this.repository.findUnallocatedPassedLots(this.prisma, slab.itemId);
+      const forCoilOrders = await this.repository.findLotIdsForOpenCoilOrders(this.prisma, candidates.map((l) => l.id));
+      const lots = candidates.filter((l) => !forCoilOrders.has(l.id));
       const surplusQty = Math.max(0, lots.length - slab.reservedQty);
       if (surplusQty === 0) continue;
       const oldestSinceDate = lots
