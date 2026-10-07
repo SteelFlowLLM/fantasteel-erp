@@ -47,7 +47,7 @@ describe('협업 시드', () => {
     if (!direct) throw new Error('1:1 방이 없어요');
     const withFile = (await messengerApi.listMessages({ chatRoomId: direct.id })).items.find((m) => m.file);
     if (!withFile) throw new Error('첨부 메시지가 없어요');
-    const file = await messengerApi.getFile(withFile.id);
+    const file = await messengerApi.getFile({ messageId: withFile.id, fileName: '' });
     expect(file.name).toBe('철광석-입고계획-2610.csv');
     expect(decodeURIComponent(file.dataUrl.split(',')[1])).toContain('ORE01 철광석');
   });

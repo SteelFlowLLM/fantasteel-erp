@@ -14,7 +14,7 @@ import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { useAction } from '@/hooks/useAction';
 import { useOrgChart } from '@/hooks/useDirectory';
-import { useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
 import { useSalesOrderWorkRoom } from '@/hooks/useSalesOrders';
 import { cn } from '@/lib/cn';
 
@@ -37,7 +37,7 @@ function filterTree(nodes: readonly OrgChartNode[], keyword: string): OrgChartNo
 
 export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props) {
   const router = useRouter();
-  const myId = useMockEmployeeId();
+  const myId = useMe().employeeId;
   const orgChart = useOrgChart();
   const room = useSalesOrderWorkRoom(salesOrderId);
   const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());

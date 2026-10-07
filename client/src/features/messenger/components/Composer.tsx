@@ -15,7 +15,7 @@ import { toast } from '@/stores/useToastStore';
 
 const MAX_LINES = 6;
 const MAX_CANDIDATES = 8;
-const FILE_LIMIT_TEXT = `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
+const FILE_LIMIT_TEXT = MESSAGE_FILE_MAX_BYTES >= 1024 * 1024 ? `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024 / 1024)}MB` : `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
 
 interface MentionState {
   /** '@' 자리 */

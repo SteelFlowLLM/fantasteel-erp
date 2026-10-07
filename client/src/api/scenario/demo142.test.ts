@@ -255,7 +255,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     const page = await messengerApi.listMessages({ chatRoomId: room.id });
     const mine = page.items.find((m) => m.id === sent.id);
     expect(mine).toMatchObject({ mentionsMe: true, erpLinks: [{ text: 'SO-2609-003', href: `/sales-orders/${salesOrderId}` }] });
-    expect(await messengerApi.getFile(sent.id)).toEqual({ name: '일정.txt', mimeType: 'text/plain', dataUrl });
+    expect(await messengerApi.getFile({ messageId: sent.id, fileName: '' })).toEqual({ name: '일정.txt', mimeType: 'text/plain', dataUrl });
     expect(await messengerApi.markRead({ chatRoomId: room.id, lastMessageId: sent.id })).toBe(0);
     as('purchase');
     expect((await notificationApi.list()).items.filter((n) => n.notificationType === 'WORK_ROOM_MESSAGE').map((n) => n.title)).toContain('SO-2609-003 다온건설 새 메시지');
@@ -264,6 +264,6 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     expect((await salesOrderApi.detail(salesOrderId)).salesOrderNo).toBe('SO-2609-003');
     // 멤버가 아니면 첨부를 받을 수 없다
     as('logistics');
-    await expect(messengerApi.getFile(sent.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(messengerApi.getFile({ messageId: sent.id, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
   });
 });

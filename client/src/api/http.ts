@@ -10,7 +10,7 @@ import { isErrorCode } from '@/codes';
 
 export type DataSource = 'mock' | 'server';
 
-/** 수주·출하·배정·출고 확정·밀시트·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·LOT 추적·재고·작업 로그·조직 관리·조직도·업무·알림 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
+/** 수주·출하·배정·출고 확정·밀시트·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·LOT 추적·재고·작업 로그·조직 관리·조직도·업무·알림·메신저 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'server' ? 'server' : 'mock';
 }
@@ -147,6 +147,42 @@ export async function serverRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' 
     throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
   }
   return readBody<T>(res);
+}
+
+/** 로그인 확인을 거쳐 fetch한다. 401이면 세션이 끊긴 것으로 본다 (serverRequest와 같은 규칙, 본문은 그대로 넘긴다) */
+async function sendRaw(method: 'GET' | 'POST', path: string, body?: BodyInit): Promise<Response> {
+  const employeeNo = actingEmployeeNo();
+  if (!employeeNo) throw new ApiError('COM-002', '로그인해 주세요');
+  const loggedIn = readLoggedIn();
+  if (loggedIn !== employeeNo) throw sessionLost(otherLoginMessage(loggedIn));
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, { method, credentials: 'include', body });
+  } catch {
+    throw new Error(`서버(${API_BASE_URL})에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요`);
+  }
+  if (res.status === 401) {
+    writeLoggedIn(null);
+    throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
+  }
+  return res;
+}
+
+/** 파일 올리기 (multipart). content-type은 브라우저가 경계값과 함께 정한다 */
+export async function serverUpload<T>(path: string, form: FormData): Promise<T> {
+  return readBody<T>(await sendRaw('POST', path, form));
+}
+
+/** 파일 내려받기. 실패하면 서버 오류 응답(JSON)을 화면 오류로 바꾼다 */
+export async function serverDownload(path: string): Promise<Blob> {
+  const res = await sendRaw('GET', path);
+  if (!res.ok) await readBody<never>(res);
+  return res.blob();
+}
+
+/** 실시간 연결(WebSocket)용 서버 주소: API 주소에서 /api/v1을 뺀 origin */
+export function serverOrigin(): string {
+  return new URL(API_BASE_URL).origin;
 }
 
 /** 테스트에서 이 사원으로 로그인한 상태로 둔다 (null이면 로그아웃 상태) */

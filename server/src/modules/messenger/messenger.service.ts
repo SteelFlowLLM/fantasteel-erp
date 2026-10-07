@@ -195,6 +195,7 @@ export class MessengerService {
           id: e.id,
           employeeNo: e.employeeNo,
           employeeName: e.employeeName,
+          departmentId: e.departmentId,
           departmentName: e.department.departmentName,
           jobGradeName: e.jobGrade.jobGradeName,
           isHead: headIds.has(e.id),

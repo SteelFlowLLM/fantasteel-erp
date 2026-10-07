@@ -10,13 +10,12 @@ import { SearchBox } from '@/features/shell/SearchBox';
 import type { ShellTitle } from '@/features/shell/ShellTitleContext';
 import { UserMenu } from '@/features/shell/UserMenu';
 import { useClock } from '@/hooks/useClock';
-import { useMe, useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
 import { fmtHM, fmtMDdow } from '@/lib/format';
 import { useShellStore } from '@/stores/useShellStore';
 
 export function TopBar({ custom }: { custom: ShellTitle }) {
   const me = useMe();
-  const mockEmployeeId = useMockEmployeeId();
   const pathname = usePathname();
   const now = useClock();
   const aiPanelOpen = useShellStore((state) => state.aiPanelOpen);
@@ -47,7 +46,7 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
           AI 어시스턴트
         </button>
         <NotificationMenu employeeId={me.employeeId} />
-        <MessengerMenu employeeId={mockEmployeeId} />
+        <MessengerMenu employeeId={me.employeeId} />
         <UserMenu />
       </div>
     </header>
