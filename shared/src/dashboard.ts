@@ -106,3 +106,26 @@ export interface ProcessYieldRow {
 export interface ProcessYieldWidget {
   processes: ProcessYieldRow[];
 }
+
+/** 여재 보유 규격 한 줄 */
+export interface SurplusAgeRow {
+  itemId: number;
+  itemCode: string;
+  steelGradeCode: string | null;
+  /** 여재 매수 = 미배정 합격 슬래브 LOT 수 − ACTIVE 예약 매수 (0 미만은 0, inventory.md 8장 임시 결정) */
+  surplusQty: number;
+  surplusTon: string;
+  /** 여재 LOT(FIFO상 가장 늦게 쓰일 LOT) 중 가장 이른 생산완료일. 여재 전환 시각은 ERD에 없다 */
+  oldestSinceDate: string;
+  /** 최장 보유 일수 = 오늘 − oldestSinceDate */
+  maxAgeDays: number;
+}
+
+/** 여재 보유 기간 (REQ-DSH-002) */
+export interface SurplusAgeWidget {
+  today: string;
+  totalQty: number;
+  totalTon: string;
+  maxAgeDays: number | null;
+  items: SurplusAgeRow[];
+}

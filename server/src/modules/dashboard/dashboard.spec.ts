@@ -1,9 +1,9 @@
-// 대시보드 출하 실적·공정별 수율 위젯(GET dashboard/widgets/shipment-result·process-yield)을 실제 앱과 DB(fs_sales)로 확인한다.
+// 대시보드 출하 실적·공정별 수율·여재 보유 위젯(GET dashboard/widgets/shipment-result·process-yield·surplus-age)을 실제 앱과 DB(fs_sales)로 확인한다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { ProcessYieldWidget, ShipmentResultWidget } from '@fantasteel/shared';
+import type { ProcessYieldWidget, ShipmentResultWidget, SurplusAgeWidget } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { seoulToday } from '../../common/time/seoul-date';
 
@@ -65,5 +65,16 @@ describe('GET dashboard/widgets/process-yield', () => {
   it('작업 실적 조회 권한이 없으면 COM-002', async () => {
     const { body } = await get('/dashboard/widgets/process-yield', await login('1610014'));
     expect(body.error?.code).toBe('COM-002');
+  });
+});
+
+describe('GET dashboard/widgets/surplus-age', () => {
+  it('모든 사원이 읽고, 여재가 없으면 빈 목록과 0 t', async () => {
+    const { status, body } = await get<SurplusAgeWidget>('/dashboard/widgets/surplus-age', await login('2304015'));
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({ today: seoulToday() });
+    expect(body.data.totalQty).toBe(body.data.items.reduce((s, r) => s + r.surplusQty, 0));
+    expect(body.data.totalTon).toMatch(/^\d+\.\d{3}$/);
+    for (const row of body.data.items) expect(row.surplusQty).toBeGreaterThan(0);
   });
 });

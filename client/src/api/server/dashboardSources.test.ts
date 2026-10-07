@@ -84,4 +84,11 @@ describe('대시보드 서버 묶음 위젯 (api/server/dashboard.ts)', () => {
     useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/dashboard/widgets/process-yield' ? ok({ processes: [row] }) : undefined));
     expect(await serverDashboardApi.processYield()).toEqual({ processes: [{ ...row, qtyAttainmentRate: null }] });
   });
+
+  it('여재 보유 기간: 서버 응답을 그대로 쓴다', async () => {
+    const data = { today: '2026-10-07', totalQty: 2, totalTon: '47.100', maxAgeDays: 5, items: [{ itemId: 101, itemCode: 'SL-SS275-250x1200x10000', steelGradeCode: 'SS275', surplusQty: 2, surplusTon: '47.100', oldestSinceDate: '2026-10-02', maxAgeDays: 5 }] };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/dashboard/widgets/surplus-age' ? ok(data) : undefined));
+    expect(await serverDashboardApi.surplusAge()).toEqual(data);
+    expect(calls.map((c) => c.path)).toEqual(['/dashboard/widgets/surplus-age']);
+  });
 });

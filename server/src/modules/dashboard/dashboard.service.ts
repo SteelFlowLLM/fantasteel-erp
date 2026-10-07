@@ -7,6 +7,7 @@ import {
   PRODUCTION_PLAN_STATUS,
   SALES_ORDER_ITEM_STATUS,
   SHIPMENT_REQUEST_STATUS,
+  calcWeightTon,
   sumTon,
   type AuthUser,
   type ItemType,
@@ -16,6 +17,8 @@ import {
   type ProductionResultView,
   type ProductStockWidget,
   type ShipmentResultWidget,
+  type SurplusAgeRow,
+  type SurplusAgeWidget,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
@@ -174,6 +177,44 @@ export class DashboardService {
       return { processType, resultCount: rows.length, inputTon, outputTon, actualYieldRate: new Prisma.Decimal(outputTon).div(input).toFixed(YIELD_SCALE), plannedYieldRate };
     });
     return { processes };
+  }
+
+  /**
+   * 여재 보유 기간 (REQ-DSH-002, TRM-048). 재고 화면을 모든 사원이 열어 권한을 보지 않는다.
+   * 여재 매수 = 미배정 합격 슬래브 LOT 수 − ACTIVE 예약 매수 (예약은 매수 단위라 LOT을 정할 수 없어, FIFO상 가장 늦게 쓰일 LOT을 여재로 본다).
+   * 여재 전환 시각이 ERD에 없어 보유 기간은 그 LOT들의 생산완료일부터 센다 (inventory.md 8장 임시 결정).
+   */
+  async surplusAge(): Promise<SurplusAgeWidget> {
+    const today = seoulToday();
+    const slabs = (await this.inventory.productStock(this.prisma)).filter((r) => r.itemType === ITEM_TYPE.SLAB);
+    const weightOf = new Map((await this.repository.findItemWeights(this.prisma, slabs.map((r) => r.itemId))).map((i) => [i.id, i.theoreticalWeightTon?.toFixed(3) ?? '0']));
+    const items: SurplusAgeRow[] = [];
+    for (const slab of slabs) {
+      const lots = await this.repository.findUnallocatedPassedLots(this.prisma, slab.itemId);
+      const surplusQty = Math.max(0, lots.length - slab.reservedQty);
+      if (surplusQty === 0) continue;
+      const oldestSinceDate = lots
+        .slice(lots.length - surplusQty)
+        .flatMap((l) => (l.produced_date ? [l.produced_date.toISOString().slice(0, 10)] : []))
+        .sort()[0] ?? today;
+      items.push({
+        itemId: slab.itemId,
+        itemCode: slab.itemCode,
+        steelGradeCode: slab.steelGradeCode,
+        surplusQty,
+        surplusTon: calcWeightTon(surplusQty, weightOf.get(slab.itemId) ?? '0'),
+        oldestSinceDate,
+        maxAgeDays: Math.max(0, daysBetween(oldestSinceDate, today)),
+      });
+    }
+    items.sort((a, b) => b.maxAgeDays - a.maxAgeDays || a.itemCode.localeCompare(b.itemCode));
+    return {
+      today,
+      totalQty: items.reduce((s, r) => s + r.surplusQty, 0),
+      totalTon: sumTon(items.map((r) => r.surplusTon)),
+      maxAgeDays: items.length > 0 ? Math.max(...items.map((r) => r.maxAgeDays)) : null,
+      items,
+    };
   }
 
   /** 제품 재고: 슬래브·코일 합계와 재고가 있는 규격 (재고 화면은 모든 사원이 연다) */
