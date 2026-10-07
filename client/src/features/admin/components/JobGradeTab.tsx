@@ -3,7 +3,7 @@
 // 직급 탭 (REQ-AUTH-002, TRM-036): 직급 코드·직급명·표시 순서 등록·수정·삭제. 표시 순서는 조직도 인원 순서에 쓴다.
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
-import { jobGradeAdminApi } from '@/api/adminOrganization';
+import { isOrgServerMode, jobGradeAdminApi } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
 import type { JobGradeView } from '@/api/directory';
 import { Button } from '@/components/Button';
@@ -18,14 +18,19 @@ import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { useAction } from '@/hooks/useAction';
 import { useJobGradeList } from '@/hooks/useDirectory';
+import { useCanUse } from '@/hooks/usePermission';
 import { permissionNeedText } from '@/lib/permissions';
 
-export function JobGradeTab({ canEdit }: { canEdit: boolean }) {
+export function JobGradeTab({ canEdit: canEditOrg }: { canEdit: boolean }) {
   const jobGrades = useJobGradeList();
+  // 서버 모드: 직급 등록은 API 명세대로 사원 관리 권한이고, 직급 코드·수정·삭제는 ERD·API에 없어 숨긴다
+  const serverMode = isOrgServerMode();
+  const canUseEmployeeManage = useCanUse(PERMISSION.EMPLOYEE_MANAGE);
+  const canEdit = serverMode ? canUseEmployeeManage : canEditOrg;
   const [editing, setEditing] = useState<JobGradeView | 'new' | null>(null);
   const [deleting, setDeleting] = useState<JobGradeView | null>(null);
   const remove = useAction(jobGradeAdminApi.remove, { success: (saved) => `${saved.name} 직급을 삭제했어요`, onSuccess: () => setDeleting(null) });
-  const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
+  const lockTitle = canEdit ? undefined : permissionNeedText([serverMode ? PERMISSION.EMPLOYEE_MANAGE : PERMISSION.ORG_MANAGE]);
 
   return (
     <Card className="flex-none">
@@ -50,12 +55,14 @@ export function JobGradeTab({ canEdit }: { canEdit: boolean }) {
                     <Th align="right" className="w-24">
                       표시 순서
                     </Th>
-                    <Th>직급 코드</Th>
+                    {serverMode ? null : <Th>직급 코드</Th>}
                     <Th>직급명</Th>
                     <Th align="right">사원 수</Th>
-                    <Th className="w-24">
-                      <span className="sr-only">관리</span>
-                    </Th>
+                    {serverMode ? null : (
+                      <Th className="w-24">
+                        <span className="sr-only">관리</span>
+                      </Th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -64,20 +71,22 @@ export function JobGradeTab({ canEdit }: { canEdit: boolean }) {
                     return (
                       <tr key={g.id}>
                         <Td align="right">{g.sortOrder}</Td>
-                        <Td className="font-mono text-xs">{g.jobGradeCode}</Td>
+                        {serverMode ? null : <Td className="font-mono text-xs">{g.jobGradeCode}</Td>}
                         <Td className="font-medium">{g.jobGradeName}</Td>
                         <Td align="right">{g.employeeCount}명</Td>
-                        <Td align="right">
-                          <IconButton icon="edit" label={`${g.jobGradeName} 수정`} size="sm" disabled={!canEdit} title={lockTitle} onClick={() => setEditing(g)} />
-                          <IconButton
-                            icon="trash"
-                            label={`${g.jobGradeName} 삭제`}
-                            size="sm"
-                            disabled={!canEdit || g.employeeCount > 0}
-                            title={deleteTitle}
-                            onClick={() => setDeleting(g)}
-                          />
-                        </Td>
+                        {serverMode ? null : (
+                          <Td align="right">
+                            <IconButton icon="edit" label={`${g.jobGradeName} 수정`} size="sm" disabled={!canEdit} title={lockTitle} onClick={() => setEditing(g)} />
+                            <IconButton
+                              icon="trash"
+                              label={`${g.jobGradeName} 삭제`}
+                              size="sm"
+                              disabled={!canEdit || g.employeeCount > 0}
+                              title={deleteTitle}
+                              onClick={() => setDeleting(g)}
+                            />
+                          </Td>
+                        )}
                       </tr>
                     );
                   })}
@@ -136,16 +145,18 @@ function JobGradeFormModal({ target, onClose }: { target?: JobGradeView; onClose
         </>
       }
     >
-      <Field label="직급 코드" required error={errors.jobGradeCode} hint="영문 대문자·숫자·밑줄 30자 이내 (예: MANAGER)" htmlFor="job-grade-code">
-        <Input
-          id="job-grade-code"
-          className="font-mono"
-          maxLength={30}
-          value={jobGradeCode}
-          invalid={Boolean(errors.jobGradeCode)}
-          onChange={(e) => setJobGradeCode(e.target.value.toUpperCase())}
-        />
-      </Field>
+      {isOrgServerMode() ? null : (
+        <Field label="직급 코드" required error={errors.jobGradeCode} hint="영문 대문자·숫자·밑줄 30자 이내 (예: MANAGER)" htmlFor="job-grade-code">
+          <Input
+            id="job-grade-code"
+            className="font-mono"
+            maxLength={30}
+            value={jobGradeCode}
+            invalid={Boolean(errors.jobGradeCode)}
+            onChange={(e) => setJobGradeCode(e.target.value.toUpperCase())}
+          />
+        </Field>
+      )}
       <Field label="직급명" required error={errors.jobGradeName} htmlFor="job-grade-name">
         <Input id="job-grade-name" maxLength={30} placeholder="예: 과장" value={jobGradeName} invalid={Boolean(errors.jobGradeName)} onChange={(e) => setJobGradeName(e.target.value)} />
       </Field>

@@ -2,7 +2,7 @@
 
 // 부서 만들기 창. 부서장은 소속 사원이 생긴 뒤 부서 탭에서 지정한다 (부서장 = 그 부서 사원).
 import { useState } from 'react';
-import { departmentAdminApi } from '@/api/adminOrganization';
+import { departmentAdminApi, isOrgServerMode } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
 import type { DepartmentView } from '@/api/directory';
 import { Button } from '@/components/Button';
@@ -69,9 +69,12 @@ export function DepartmentCreateModal({ departments, onClose, onSaved }: { depar
           ))}
         </Select>
       </Field>
-      <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="new-department-sort">
-        <Input id="new-department-sort" inputMode="numeric" numeric value={sortOrder} invalid={Boolean(errors.sortOrder)} onChange={(e) => setSortOrder(e.target.value)} />
-      </Field>
+      {/* 정렬 순서는 ERD에 없어 서버 모드에서 숨긴다 */}
+      {isOrgServerMode() ? null : (
+        <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="new-department-sort">
+          <Input id="new-department-sort" inputMode="numeric" numeric value={sortOrder} invalid={Boolean(errors.sortOrder)} onChange={(e) => setSortOrder(e.target.value)} />
+        </Field>
+      )}
       <p className="text-cap text-ink-3">부서장은 부서를 만들고 사원을 이 부서로 등록한 뒤, 부서 탭에서 그 사원 중 1명을 지정해요.</p>
     </Modal>
   );

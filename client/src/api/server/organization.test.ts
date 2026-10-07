@@ -1,8 +1,10 @@
-// 조직 서버 어댑터: 관리 화면 조회는 서버(GET employees·departments·job-grades·roles), 멤버 선택용 조회는 서버 모드에서도 가짜 DB.
+// 조직 서버 어댑터: 관리 화면 조회·변경은 서버(employees·departments·job-grades·roles), 멤버 선택용 조회는 서버 모드에서도 가짜 DB.
 import type { DepartmentNode, EmployeeView, JobGradeView, RoleView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { adminOrgApi } from '@/api/adminOrganization';
+import { employeeAdminApi } from '@/api/adminEmployees';
+import { adminOrgApi, departmentAdminApi, jobGradeAdminApi, roleAdminApi } from '@/api/adminOrganization';
 import { directoryApi } from '@/api/directory';
+import { InputError } from '@/api/errors';
 import { ok, page, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
@@ -97,5 +99,69 @@ describe('조직 서버 어댑터 (api/server/organization.ts)', () => {
     expect(calls).toEqual([]);
     expect(employees.length).toBeGreaterThan(0);
     expect(chart.length).toBeGreaterThan(0);
+  });
+});
+
+describe('조직 서버 어댑터 — 변경', () => {
+  const department = { id: 7, departmentCode: 'T-1', departmentName: '테스트부', parentId: 2, headEmployeeId: 11, headEmployeeName: '강부장', createdAt: AT, updatedAt: AT };
+  const echo = (c: { method: string; path: string }) => {
+    if (c.path === '/employees' && c.method === 'POST') return ok(employee(21, '새사원'));
+    if (c.path.startsWith('/employees/')) return ok({ ...employee(11, '강부장'), isActive: false });
+    if (c.path.startsWith('/departments')) return ok(department);
+    if (c.path === '/job-grades') return ok({ id: 9, jobGradeName: '수석', sortOrder: 0, employeeCount: 0, createdAt: AT, updatedAt: AT });
+    if (c.path.startsWith('/roles/')) return ok({ id: 6, roleCode: 'LOGISTICS', roleName: '물류', permissions: [], employeeCount: 2, createdAt: AT, updatedAt: AT });
+    return undefined;
+  };
+
+  it('사원 등록은 비밀번호를 함께 보내고, 비밀번호가 없으면 서버를 부르지 않는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    const input = { employeeNo: '2610099', employeeName: '새사원', departmentId: 2, jobGradeId: 1, roleId: 3 };
+    const missing = await employeeAdminApi.create(input).catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(InputError);
+    expect((missing as InputError).fieldErrors).toHaveProperty('password');
+    expect(calls).toEqual([]);
+
+    const saved = await employeeAdminApi.create({ ...input, password: 'pass-1' });
+    expect(calls[0]).toMatchObject({ method: 'POST', path: '/employees', body: { ...input, password: 'pass-1' } });
+    expect(saved).toEqual({ id: 21, employeeNo: '9000021', employeeName: '새사원', isActive: true });
+  });
+
+  it('사원 수정은 화면 확인값(expectedUpdatedAt) 없이 보내고, 사용 안 함·다시 사용은 isActive만 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    await employeeAdminApi.update({ id: 11, employeeName: '강부장', departmentId: 5, jobGradeId: 1, roleId: 3, expectedUpdatedAt: AT });
+    await employeeAdminApi.deactivate({ id: 11, expectedUpdatedAt: AT });
+    await employeeAdminApi.activate({ id: 11 });
+
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ['PATCH', '/employees/11', { employeeName: '강부장', departmentId: 5, jobGradeId: 1, roleId: 3 }],
+      ['PATCH', '/employees/11', { isActive: false }],
+      ['PATCH', '/employees/11', { isActive: true }],
+    ]);
+  });
+
+  it('부서 등록은 정렬 순서를, 부서 수정은 부서코드를 보내지 않는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    const created = await departmentAdminApi.create({ departmentCode: 'T-1', departmentName: '테스트부', parentId: 2, sortOrder: '3' });
+    await departmentAdminApi.update({ id: 7, departmentCode: 'CHANGED', departmentName: '테스트부', parentId: null, headEmployeeId: 11, sortOrder: '3', expectedUpdatedAt: AT });
+
+    expect(created).toEqual({ id: 7, name: '테스트부' });
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ['POST', '/departments', { departmentCode: 'T-1', departmentName: '테스트부', parentId: 2 }],
+      ['PATCH', '/departments/7', { departmentName: '테스트부', parentId: null, headEmployeeId: 11 }],
+    ]);
+  });
+
+  it('직급 등록은 표시 순서를 정수로 보내고 직급 코드는 보내지 않는다 (정수가 아니면 서버를 부르지 않음)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: ' 0 ' })).toEqual({ id: 9, name: '수석' });
+    expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: '1.5' }).catch((e: unknown) => e)).toBeInstanceOf(InputError);
+    expect(calls.map((c) => c.body)).toEqual([{ jobGradeName: '수석', sortOrder: 0 }]);
+  });
+
+  it('역할 권한 저장은 PUT으로 권한 목록만 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    const permissions = [{ permission: 'GOODS_ISSUE_CONFIRM' as const, permissionLevel: 'USE' as const }];
+    expect(await roleAdminApi.replacePermissions({ roleId: 6, permissions, expectedUpdatedAt: AT })).toEqual({ id: 6, name: '물류' });
+    expect(calls[0]).toMatchObject({ method: 'PUT', path: '/roles/6/permissions', body: { permissions } });
   });
 });

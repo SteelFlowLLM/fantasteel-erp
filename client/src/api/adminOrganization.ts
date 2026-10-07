@@ -24,6 +24,9 @@ import { insertRow, updateRow } from '@/mock/store';
 
 const MANAGE = { use: [PERMISSION.ORG_MANAGE] } as const;
 
+/** 서버 모드: ERD·API 명세에 없는 화면 기능(부서 정렬 순서·삭제, 직급 코드·수정·삭제, 최근 접속)을 숨기고 사원 등록에 비밀번호를 받는다 */
+export const isOrgServerMode = (): boolean => isServerDataSource();
+
 export const adminOrgKeys = {
   orgChart: () => ['departments', 'admin-org-chart'] as const,
 };
@@ -177,7 +180,7 @@ export const adminOrgApi = {
 export const departmentAdminApi = {
   /** 부서 만들기. 부서장은 소속 사원이 생긴 뒤 수정에서 지정한다. */
   create: (input: DepartmentCreateInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.createDepartment(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const fields = readDepartmentFields(tx.tables, new FieldErrors(), input, null);
       const row = insertRow(tx, 'department', { ...fields, headEmployeeId: null });
@@ -186,7 +189,7 @@ export const departmentAdminApi = {
 
   /** 부서 수정: 부서 코드·부서명·상위 부서·부서장·정렬 순서 */
   update: (input: DepartmentUpdateInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.updateDepartment(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const department = requireRow(tx.tables, 'department', input.id, '부서');
       assertUnchanged(department.updatedAt, input.expectedUpdatedAt, '부서');
@@ -216,7 +219,7 @@ export const departmentAdminApi = {
 
 export const jobGradeAdminApi = {
   create: (input: JobGradeCreateInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.createJobGrade(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const fields = readJobGradeFields(tx.tables, new FieldErrors(), input, null);
       const row = insertRow(tx, 'jobGrade', fields);
@@ -252,7 +255,7 @@ export const roleAdminApi = {
    * 저장하면 그 역할 사원의 메뉴·버튼이 바로 바뀐다 (이 탭은 조회 무효화, 다른 탭은 BroadcastChannel).
    */
   replacePermissions: (input: RolePermissionsInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.replaceRolePermissions(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const role = requireRow(tx.tables, 'role', input.roleId, '역할');
       assertUnchanged(role.updatedAt, input.expectedUpdatedAt, `${role.roleName} 역할 권한`);
