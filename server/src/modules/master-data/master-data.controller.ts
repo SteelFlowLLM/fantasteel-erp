@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import {
   PERMISSION,
   type CustomerView,
@@ -12,6 +12,7 @@ import {
   type YardView,
 } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CreateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
 import { MasterDataService } from './master-data.service';
 
@@ -29,6 +30,13 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listItems(@Query() query: ListItemsQuery): Promise<ItemView[]> {
     return this.service.listItems(query.itemType);
+  }
+
+  /** API-166 품목·규격 등록 (규격 코드·1매 이론중량은 서버가 만든다) */
+  @Post('items')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createItem(@Body() dto: CreateItemDto): Promise<ItemView> {
+    return this.service.createItem(dto);
   }
 
   /** API-168 강종 목록 */
