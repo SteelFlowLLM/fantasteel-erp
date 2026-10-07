@@ -43,4 +43,24 @@ export class SendMessageDto {
   @IsString({ message: '메시지는 글자여야 해요' })
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content!: string;
+
+  /** @멘션한 사원 (본문을 해석하지 않고 따로 받는다, 2026-10-07 결정). 방 멤버가 아니면 무시한다 */
+  @IsOptional()
+  @IsArray({ message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
+  @IsInt({ each: true, message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
+  mentionedEmployeeIds?: number[];
+}
+
+export class MarkReadDto {
+  /** 화면에서 마지막으로 본 메시지 id. 이 방의 메시지여야 한다 */
+  @IsInt({ message: 'lastMessageId는 메시지 id여야 해요' })
+  lastMessageId!: number;
+}
+
+/** 첨부 업로드(multipart)의 글 필드. 파일은 file 필드로 받는다 */
+export class UploadAttachmentDto {
+  @IsOptional()
+  @IsString({ message: '메시지는 글자여야 해요' })
+  @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
+  content?: string;
 }

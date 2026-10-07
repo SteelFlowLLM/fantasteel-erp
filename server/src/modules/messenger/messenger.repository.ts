@@ -136,8 +136,12 @@ export class MessengerRepository {
     });
   }
 
-  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string }) {
+  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null }) {
     return tx.message.create({ data, include: { sender: { include: employeeInclude } } });
+  }
+
+  findMessage(tx: Tx, id: number) {
+    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, attachmentPath: true, attachmentName: true } });
   }
 
   /** 읽음 위치는 앞으로만 옮긴다 */

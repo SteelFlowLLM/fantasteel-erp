@@ -88,6 +88,7 @@ export interface ChatMessageView {
   senderJobGradeName: string;
   isMine: boolean;
   content: string | null;
+  /** 첨부 파일 이름. 내려받기는 GET attachments/:메시지 id */
   attachmentName: string | null;
   createdAt: string;
 }
@@ -102,4 +103,35 @@ export interface ChatMessagePage {
 export interface CreateChatRoomResult {
   id: number;
   reused: boolean;
+}
+
+/** 첨부 파일 최대 크기 (REQ-MSG-003 "구현 단계에서 정함" → 2026-10-07 결정 10MB) */
+export const MESSAGE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/** 첨부를 막는 확장자: 실행 파일만 (2026-10-07 결정) */
+export const BLOCKED_ATTACHMENT_EXTENSIONS = ['exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'ps1', 'vbs', 'js', 'jar', 'sh', 'app', 'dll'] as const;
+
+/** 읽음 위치 갱신 결과 */
+export interface ChatRoomReadResult {
+  chatRoomId: number;
+  lastReadMessageId: number | null;
+  unreadCount: number;
+}
+
+// ── 실시간 (WebSocket, namespace /messenger) ─────────────
+
+export const MESSENGER_SOCKET_NAMESPACE = '/messenger';
+
+export const MESSENGER_EVENT = {
+  /** 새 메시지. 페이로드 ChatMessageView (isMine은 받는 사원 기준) */
+  MESSAGE_NEW: 'message:new',
+  /** 내 읽음 위치가 바뀜 (다른 탭·기기 동기화). 페이로드 ChatRoomReadEvent */
+  ROOM_READ: 'room:read',
+  /** 방이 생기거나 멤버가 바뀜. 페이로드 ChatRoomUpdatedEvent */
+  ROOM_UPDATED: 'room:updated',
+} as const;
+
+export type ChatRoomReadEvent = ChatRoomReadResult;
+
+export interface ChatRoomUpdatedEvent {
+  chatRoomId: number;
 }
