@@ -3,12 +3,15 @@
 import type {
   DepartmentNode,
   PageResult,
+  DepartmentView as ServerDepartmentView,
   EmployeeView as ServerEmployeeView,
   JobGradeView as ServerJobGradeView,
   RoleView as ServerRoleView,
 } from '@fantasteel/shared';
-import type { OrgChartDepartmentView } from '@/api/adminOrganization';
+import type { EmployeeCreateInput, EmployeeSaved, EmployeeUpdateInput } from '@/api/adminEmployees';
+import type { DepartmentCreateInput, DepartmentUpdateInput, JobGradeCreateInput, OrgChartDepartmentView, RolePermissionsInput, SavedRef } from '@/api/adminOrganization';
 import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api/directory';
+import { InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { EmployeeListQuery } from '@/api/queryKeys';
 
@@ -89,4 +92,63 @@ async function listRoles(): Promise<RoleView[]> {
   return rows.map((r) => ({ id: r.id, roleCode: r.roleCode, roleName: r.roleName, permissions: r.permissions, employeeCount: r.employeeCount, updatedAt: r.updatedAt }));
 }
 
-export const serverOrganizationApi = { listEmployees, listDepartments, getOrgChart, listJobGrades, listRoles };
+// ── 변경 (API-156·157·159·160·162·164). 서버에는 화면을 연 뒤 바뀌었는지 보는 확인(expectedUpdatedAt)이 없어 보내지 않는다 ──
+
+const savedEmployee = (e: ServerEmployeeView): EmployeeSaved => ({ id: e.id, employeeNo: e.employeeNo, employeeName: e.employeeName, isActive: e.isActive });
+
+async function createEmployee(input: EmployeeCreateInput): Promise<EmployeeSaved> {
+  const { employeeNo, password, employeeName, departmentId, jobGradeId, roleId } = input;
+  if (!password) throw new InputError('비밀번호를 입력해 주세요', { password: '비밀번호를 입력해 주세요' });
+  return savedEmployee(await serverRequest<ServerEmployeeView>('POST', '/employees', { body: { employeeNo, password, employeeName, departmentId, jobGradeId, roleId } }));
+}
+
+async function updateEmployee(input: EmployeeUpdateInput): Promise<EmployeeSaved> {
+  const { employeeName, departmentId, jobGradeId, roleId } = input;
+  return savedEmployee(await serverRequest<ServerEmployeeView>('PATCH', `/employees/${input.id}`, { body: { employeeName, departmentId, jobGradeId, roleId } }));
+}
+
+/** 퇴사 처리·다시 사용 (사원은 삭제하지 않는다) */
+async function setEmployeeActive(id: number, isActive: boolean): Promise<EmployeeSaved> {
+  return savedEmployee(await serverRequest<ServerEmployeeView>('PATCH', `/employees/${id}`, { body: { isActive } }));
+}
+
+const savedDepartment = (d: ServerDepartmentView): SavedRef => ({ id: d.id, name: d.departmentName });
+
+/** 부서 정렬 순서는 ERD에 없어 보내지 않는다 */
+async function createDepartment(input: DepartmentCreateInput): Promise<SavedRef> {
+  const { departmentCode, departmentName, parentId } = input;
+  return savedDepartment(await serverRequest<ServerDepartmentView>('POST', '/departments', { body: { departmentCode, departmentName, parentId } }));
+}
+
+/** 부서코드는 바꾸지 않는다 */
+async function updateDepartment(input: DepartmentUpdateInput): Promise<SavedRef> {
+  const { departmentName, parentId, headEmployeeId } = input;
+  return savedDepartment(await serverRequest<ServerDepartmentView>('PATCH', `/departments/${input.id}`, { body: { departmentName, parentId, headEmployeeId } }));
+}
+
+async function createJobGrade(input: JobGradeCreateInput): Promise<SavedRef> {
+  const sortOrder = String(input.sortOrder).trim();
+  if (!/^-?\d+$/.test(sortOrder)) throw new InputError('표시 순서를 확인해 주세요', { sortOrder: '표시 순서는 정수로 입력해 주세요' });
+  const saved = await serverRequest<ServerJobGradeView>('POST', '/job-grades', { body: { jobGradeName: input.jobGradeName, sortOrder: Number(sortOrder) } });
+  return { id: saved.id, name: saved.jobGradeName };
+}
+
+async function replaceRolePermissions(input: RolePermissionsInput): Promise<SavedRef> {
+  const saved = await serverRequest<ServerRoleView>('PUT', `/roles/${input.roleId}/permissions`, { body: { permissions: input.permissions } });
+  return { id: saved.id, name: saved.roleName };
+}
+
+export const serverOrganizationApi = {
+  listEmployees,
+  listDepartments,
+  getOrgChart,
+  listJobGrades,
+  listRoles,
+  createEmployee,
+  updateEmployee,
+  setEmployeeActive,
+  createDepartment,
+  updateDepartment,
+  createJobGrade,
+  replaceRolePermissions,
+};

@@ -3,7 +3,7 @@
 // 부서 탭 (REQ-ORG-001·002): 왼쪽 부서 계층 | 오른쪽 편집(부서 코드·부서명·상위 부서·부서장·정렬 순서). 삭제는 참조가 없을 때만.
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
-import { departmentAdminApi } from '@/api/adminOrganization';
+import { departmentAdminApi, isOrgServerMode } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
 import type { DepartmentView, EmployeeView } from '@/api/directory';
 import { Badge } from '@/components/Badge';
@@ -166,6 +166,8 @@ function DepartmentEditor({
   const deleteBlock =
     members.length > 0 ? `소속 사원이 ${members.length}명 있어 삭제할 수 없어요` : childCount > 0 ? `하위 부서가 ${childCount}개 있어 삭제할 수 없어요` : null;
   const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
+  // 서버 모드: 부서코드는 바꾸지 않고, 정렬 순서·삭제는 ERD·API에 없어 숨긴다
+  const serverMode = isOrgServerMode();
 
   const submit = () => {
     setErrors({});
@@ -188,12 +190,19 @@ function DepartmentEditor({
       />
       <CardBody>
         <div className="grid grid-cols-2 gap-3.5">
-          <Field label="부서 코드" required error={errors.departmentCode} hint="영문 대문자·숫자·하이픈 30자 이내" htmlFor="department-code">
+          <Field
+            label="부서 코드"
+            required
+            error={errors.departmentCode}
+            hint={serverMode ? '부서 코드는 바꿀 수 없어요' : '영문 대문자·숫자·하이픈 30자 이내'}
+            htmlFor="department-code"
+          >
             <Input
               id="department-code"
               className="font-mono"
               maxLength={30}
               disabled={!canEdit}
+              readOnly={serverMode}
               value={form.departmentCode}
               invalid={Boolean(errors.departmentCode)}
               onChange={(e) => set('departmentCode', e.target.value.toUpperCase())}
@@ -240,30 +249,34 @@ function DepartmentEditor({
               ))}
             </Select>
           </Field>
-          <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="department-sort">
-            <Input
-              id="department-sort"
-              inputMode="numeric"
-              numeric
-              disabled={!canEdit}
-              value={form.sortOrder}
-              invalid={Boolean(errors.sortOrder)}
-              onChange={(e) => set('sortOrder', e.target.value)}
-            />
-          </Field>
+          {serverMode ? null : (
+            <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="department-sort">
+              <Input
+                id="department-sort"
+                inputMode="numeric"
+                numeric
+                disabled={!canEdit}
+                value={form.sortOrder}
+                invalid={Boolean(errors.sortOrder)}
+                onChange={(e) => set('sortOrder', e.target.value)}
+              />
+            </Field>
+          )}
         </div>
       </CardBody>
       <CardFoot>
-        <Button
-          variant="danger-outline"
-          size="sm"
-          icon="trash"
-          disabled={!canEdit || deleteBlock !== null}
-          title={lockTitle ?? deleteBlock ?? undefined}
-          onClick={() => setConfirmDelete(true)}
-        >
-          삭제
-        </Button>
+        {serverMode ? null : (
+          <Button
+            variant="danger-outline"
+            size="sm"
+            icon="trash"
+            disabled={!canEdit || deleteBlock !== null}
+            title={lockTitle ?? deleteBlock ?? undefined}
+            onClick={() => setConfirmDelete(true)}
+          >
+            삭제
+          </Button>
+        )}
         {dirty ? <span className="ml-auto text-cap text-wait">저장 전 변경이 있어요</span> : <span className="ml-auto" />}
         <Button
           size="sm"

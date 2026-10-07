@@ -12,7 +12,7 @@ import { getMockDb } from '@/mock/db';
 
 export type DataSource = 'mock' | 'server';
 
-/** 수주·출하·배정·출고 확정·밀시트·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·LOT 추적·재고·작업 로그 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
+/** 수주·출하·배정·출고 확정·밀시트·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·LOT 추적·재고·작업 로그·조직 관리 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'server' ? 'server' : 'mock';
 }
@@ -115,7 +115,7 @@ export interface ServerRequestOptions {
 }
 
 /** 서버 API 호출. 성공 응답의 data를 돌려주고, 실패는 화면 오류(ApiError·InputError)로 던진다 */
-export async function serverRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, options: ServerRequestOptions = {}): Promise<T> {
+export async function serverRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, options: ServerRequestOptions = {}): Promise<T> {
   const query = Object.entries(options.query ?? {}).filter((entry): entry is [string, string | number] => entry[1] !== undefined);
   const url = query.length ? `${path}?${new URLSearchParams(query.map(([k, v]) => [k, String(v)])).toString()}` : path;
   await ensureLogin();

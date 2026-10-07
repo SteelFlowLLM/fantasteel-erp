@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { ROLE_LABEL } from '@/codes';
 import { employeeAdminApi } from '@/api/adminEmployees';
+import { isOrgServerMode } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
 import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api/directory';
 import { Banner } from '@/components/Banner';
@@ -35,6 +36,9 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
   const [opened] = useState(() => openEmployeeForm(target));
   const initial = opened.values;
   const [form, setForm] = useState<EmployeeFormValues>(initial);
+  // 비밀번호는 서버 모드 등록에서만 받는다 (API-156). 가짜 DB에는 비밀번호가 없다.
+  const askPassword = !isEdit && isOrgServerMode();
+  const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const set = <K extends keyof EmployeeFormValues>(key: K, value: EmployeeFormValues[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -68,7 +72,14 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
         expectedUpdatedAt: opened.expectedUpdatedAt,
       });
     } else {
-      create.mutate({ employeeNo: form.employeeNo, employeeName: form.employeeName, departmentId: form.departmentId, jobGradeId: form.jobGradeId, roleId: form.roleId });
+      create.mutate({
+        employeeNo: form.employeeNo,
+        employeeName: form.employeeName,
+        departmentId: form.departmentId,
+        jobGradeId: form.jobGradeId,
+        roleId: form.roleId,
+        password: askPassword ? password : undefined,
+      });
     }
   };
 
@@ -113,6 +124,11 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
             onChange={(e) => set('employeeNo', e.target.value.replace(/\D/g, ''))}
           />
         </Field>
+        {askPassword ? (
+          <Field label="비밀번호" required error={errors.password} hint="로그인할 때 써요 · 72자 이하" htmlFor="employee-password">
+            <Input id="employee-password" type="password" autoComplete="new-password" maxLength={72} value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+        ) : null}
         <Field
           label="부서"
           required

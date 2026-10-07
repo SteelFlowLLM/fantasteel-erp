@@ -7,6 +7,8 @@
 import { PERMISSION } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { FieldErrors, InputError, mockMutation } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverOrganizationApi } from '@/api/server/organization';
 import { assertUnchanged, requiredText, requireRow } from '@/api/validation';
 import { EMPLOYEE_NO_PATTERN, EMPLOYEE_NO_RULE_TEXT } from '@/features/admin/lib/orgRules';
 import type { EmployeeRow, MockTables } from '@/mock/schema';
@@ -20,6 +22,8 @@ export interface EmployeeCreateInput {
   departmentId: number | null;
   jobGradeId: number | null;
   roleId: number | null;
+  /** 서버 모드에서만 보낸다 (API-156 bcrypt 저장). 가짜 DB는 비밀번호를 두지 않는다 */
+  password?: string;
 }
 
 export interface EmployeeUpdateInput {
@@ -85,7 +89,7 @@ function setActive(tx: MockTx, input: EmployeeActiveInput, isActive: boolean): E
 export const employeeAdminApi = {
   /** 사원 등록: 사용 중(is_active = true)으로 만든다. 비밀번호는 로그인 작업 때 정한다. */
   create: (input: EmployeeCreateInput): Promise<EmployeeSaved> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.createEmployee(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const errors = new FieldErrors();
       const employeeNo = requiredText(errors, 'employeeNo', input.employeeNo, '사원번호', 20);
@@ -107,7 +111,7 @@ export const employeeAdminApi = {
 
   /** 사원 정보 수정: 이름·부서·직급·역할. 사원번호는 바꾸지 않는다. */
   update: (input: EmployeeUpdateInput): Promise<EmployeeSaved> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.updateEmployee(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const employee = requireRow(tx.tables, 'employee', input.id, '사원');
       assertUnchanged(employee.updatedAt, input.expectedUpdatedAt, '사원 정보');
@@ -130,8 +134,10 @@ export const employeeAdminApi = {
     }),
 
   /** 사용 안 함으로 바꾸기 (퇴사 처리, 컨벤션 7-2). 계정 선택·조직도·담당자 목록에서 빠지고 업무를 할 수 없다. */
-  deactivate: (input: EmployeeActiveInput): Promise<EmployeeSaved> => mockMutation((tx) => setActive(tx, input, false)),
+  deactivate: (input: EmployeeActiveInput): Promise<EmployeeSaved> =>
+    isServerDataSource() ? serverOrganizationApi.setEmployeeActive(input.id, false) : mockMutation((tx) => setActive(tx, input, false)),
 
   /** 다시 사용 */
-  activate: (input: EmployeeActiveInput): Promise<EmployeeSaved> => mockMutation((tx) => setActive(tx, input, true)),
+  activate: (input: EmployeeActiveInput): Promise<EmployeeSaved> =>
+    isServerDataSource() ? serverOrganizationApi.setEmployeeActive(input.id, true) : mockMutation((tx) => setActive(tx, input, true)),
 };
