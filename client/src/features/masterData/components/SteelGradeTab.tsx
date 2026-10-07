@@ -4,7 +4,7 @@
 // 성분 규격(C·Si·Mn·P·S …)은 여기서 고치지 않는다. 제강 검사 기준의 항목이 곧 성분 규격이다(TRM-020) → 품질의 검사 기준으로 연결한다.
 import Link from 'next/link';
 import { useState } from 'react';
-import { masterDataApi, type MasterSteelGradeView } from '@/api/masterData';
+import { isMasterServerMode, masterDataApi, type MasterSteelGradeView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -75,7 +75,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                       <Td align="right">
                         <RowActions
                           canEdit={canEdit}
-                          onEdit={() => setEditing(g)}
+                          onEdit={isMasterServerMode() ? undefined : () => setEditing(g)}
                           remove={{ what: `강종 ${g.steelGradeCode}`, run: () => masterDataApi.deleteSteelGrade(g.id), success: '강종을 삭제했어요', blockedReason: g.referenceText }}
                         />
                       </Td>

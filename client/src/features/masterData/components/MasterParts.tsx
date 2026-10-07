@@ -2,6 +2,7 @@
 
 // 기준정보 탭이 함께 쓰는 작은 부품: 탭 키, 행 버튼(수정·삭제), 삭제 확인, 표 바닥 안내, 수율 표시.
 import { useState, type ReactNode } from 'react';
+import { isMasterServerMode } from '@/api/masterData';
 import { PERMISSION } from '@/codes';
 import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -37,7 +38,9 @@ export interface RowActionsProps {
 }
 
 /** 행 끝의 수정·삭제 아이콘. 사용 권한이 없으면 막고 툴팁을 보인다. 삭제는 한 번 더 묻는다. */
-export function RowActions({ canEdit, onEdit, remove }: RowActionsProps) {
+export function RowActions({ canEdit, onEdit, remove: removeProp }: RowActionsProps) {
+  // 삭제 API가 없어 서버 모드에서는 삭제 버튼을 숨긴다 (master-data.md 8-1)
+  const remove = isMasterServerMode() ? undefined : removeProp;
   const [confirming, setConfirming] = useState(false);
   const action = useAction(() => (remove ? remove.run() : Promise.resolve(null)), {
     success: remove?.success,

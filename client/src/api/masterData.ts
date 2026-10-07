@@ -3,6 +3,7 @@
 // - 없는 대상 id는 COM-003, 화면을 연 뒤 다른 곳에서 바뀌었으면 COM-001, 쓰인 규격의 치수·이론중량 변경은 MST-002.
 // - 중복·형식·참조 중 삭제처럼 9.3에 코드가 없는 거부는 InputError(입력칸별 안내)다.
 // - 기준정보 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
+// - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server) 조회는 api/server/masterData.ts가 서버를 읽는다.
 import {
   ITEM_TYPE_LABEL,
   ITEM_TYPE_UNIT_TYPE,
@@ -22,6 +23,8 @@ import {
 } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverMasterDataApi } from '@/api/server/masterData';
 import { assertUnchanged, decimalText, nonNegativeInteger, optionalText, requiredText, requireRow } from '@/api/validation';
 import { findCurrentStandard } from '@/features/inspectionStandards/lib/standardItems';
 import { computeMasterReadiness, type MasterReadiness } from '@/features/masterData/lib/readiness';
@@ -42,6 +45,12 @@ import { specificConsumptionUnitOf, type SpecificConsumptionUnit } from '@/lib/u
 import { calcHotRollingYieldRate, calcTheoreticalWeightTon, compareDecimal, formatDecimal } from '@/lib/weight';
 import type { ItemRow, MockTables, RowOf, TableName } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
+
+/**
+ * 서버 모드: ERD·API에 없는 화면 기능(준비 상태, 삭제, 강종 수정, 사용 여부 표시)을 숨긴다.
+ * 가짜 DB 모드는 그대로 둔다.
+ */
+export const isMasterServerMode = (): boolean => isServerDataSource();
 
 // ── 조회 키 ──────────────────────────────────────────────
 
@@ -437,7 +446,7 @@ export const masterDataApi = {
 
   // ── 제품 규격 (REQ-MST-003) ──
   listProductSpecs: (): Promise<MasterProductSpecView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listProductSpecs() : mockQuery((tables) =>
       tables.item
         .filter(isProductItem)
         .map((item): MasterProductSpecView => {
@@ -556,7 +565,7 @@ export const masterDataApi = {
 
   // ── 규격 매핑 (REQ-MST-004) ──
   listSpecMappings: (): Promise<MasterSpecMappingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSpecMappings() : mockQuery((tables) =>
       tables.specMapping
         .flatMap((m): MasterSpecMappingView[] => {
           const slab = tables.item.find((i) => i.id === m.slabItemId);
@@ -608,7 +617,7 @@ export const masterDataApi = {
 
   // ── 강종 (REQ-MST-002). 성분 규격은 제강 검사 기준에서 관리한다 ──
   listSteelGrades: (): Promise<MasterSteelGradeView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSteelGrades() : mockQuery((tables) =>
       tables.steelGrade.map((grade): MasterSteelGradeView => {
         const standard = findCurrentStandard(tables.inspectionStandard, 'STEELMAKING', grade.id);
         return {
@@ -669,7 +678,7 @@ export const masterDataApi = {
 
   // ── 라우팅 (REQ-MST-005) ──
   listRoutings: (): Promise<MasterRoutingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listRoutings() : mockQuery((tables) =>
       PRODUCT_ITEM_TYPES.map((itemType) => {
         const rows = tables.routing.filter((r) => r.itemType === itemType).sort((a, b) => a.processSeq - b.processSeq);
         return {
@@ -722,7 +731,7 @@ export const masterDataApi = {
 
   // ── 배합 원단위 (REQ-MST-006) ──
   listSpecificConsumptions: (): Promise<MasterSpecificConsumptionView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSpecificConsumptions() : mockQuery((tables) =>
       tables.specificConsumption.flatMap((c) => {
         const item = tables.item.find((i) => i.id === c.itemId);
         if (!item?.rawMaterialType) return [];
@@ -766,7 +775,7 @@ export const masterDataApi = {
 
   // ── 원료 품목 (REQ-MST-001·007·008) ──
   listRawMaterials: (): Promise<MasterRawMaterialView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listRawMaterials() : mockQuery((tables) =>
       tables.item
         .filter((i): i is ItemRow & { rawMaterialType: RawMaterialType } => i.itemType === 'RAW_MATERIAL' && i.rawMaterialType !== null)
         .map((item) => ({
@@ -844,7 +853,7 @@ export const masterDataApi = {
 
   // ── 고객사·공급업체 (REQ-MST-007) ──
   listCustomers: (): Promise<MasterCustomerView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listCustomers() : mockQuery((tables) =>
       tables.customer
         .map((c) => ({ id: c.id, customerCode: c.customerCode, customerName: c.customerName, referenceText: formatReferenceText(countCustomerReferences(tables, c.id)), updatedAt: c.updatedAt }))
         .sort((a, b) => a.customerCode.localeCompare(b.customerCode)),
@@ -885,7 +894,7 @@ export const masterDataApi = {
     }),
 
   listSuppliers: (): Promise<MasterSupplierView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSuppliers() : mockQuery((tables) =>
       tables.supplier
         .map((s) => ({ id: s.id, supplierCode: s.supplierCode, supplierName: s.supplierName, referenceText: formatReferenceText(countSupplierReferences(tables, s.id)), updatedAt: s.updatedAt }))
         .sort((a, b) => a.supplierCode.localeCompare(b.supplierCode)),
@@ -927,7 +936,7 @@ export const masterDataApi = {
 
   // ── 야드 (REQ-MST-008). 야드 안 위치는 관리하지 않는다 ──
   listYards: (): Promise<MasterYardView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listYards() : mockQuery((tables) =>
       tables.yard
         .map((y) => ({ id: y.id, yardCode: y.yardCode, yardName: y.yardName, yardType: y.yardType, referenceText: formatReferenceText(countYardReferences(tables, y.id)), updatedAt: y.updatedAt }))
         .sort((a, b) => a.yardCode.localeCompare(b.yardCode)),
@@ -971,7 +980,7 @@ export const masterDataApi = {
 
   // ── 생산 설정값 (REQ-MST-009, 단일 행) ──
   getProductionSetting: (): Promise<MasterProductionSettingView | null> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMasterDataApi.getProductionSetting() : mockQuery((tables) => {
       const row = tables.productionSetting[0];
       return row ? { id: row.id, heatCapacityTon: row.heatCapacityTon, deliveryRiskDays: row.deliveryRiskDays, updatedAt: row.updatedAt } : null;
     }),
