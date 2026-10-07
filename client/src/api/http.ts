@@ -4,11 +4,10 @@
 // 로그인 화면은 아직 "계정 선택"이다 (SPEC 5장 결정 1). 서버는 쿠키 로그인이 필요해서, 서버 모드에서는
 // 이 탭에서 고른 사원의 사원번호와 개발용 시드 비밀번호로 화면 뒤에서 POST /auth/login을 불러 쿠키를 받는다.
 // 실제 로그인 화면을 넣으면 ensureLogin만 지운다.
-import type { ApiResponse } from '@fantasteel/shared';
-import { actingEmployeeId } from '@/api/actor';
+import type { ApiResponse, AuthUser } from '@fantasteel/shared';
+import { actingEmployeeNo } from '@/api/actor';
 import { ApiError, InputError } from '@/api/errors';
 import { isErrorCode } from '@/codes';
-import { getMockDb } from '@/mock/db';
 
 export type DataSource = 'mock' | 'server';
 
@@ -49,11 +48,9 @@ function writeLoggedIn(employeeNo: string | null): void {
   }
 }
 
-/** 이 탭에서 고른 계정의 사원번호 (가짜 DB와 서버 시드는 사원번호가 같다) */
+/** 이 탭에서 고른 계정의 사원번호 (테스트에서는 setActingEmployeeForTest로 정한 사원) */
 function sessionEmployeeNo(): string {
-  // 이 탭의 계정 선택 (테스트에서는 setActingEmployeeForTest로 정한 사원)
-  const employeeId = actingEmployeeId();
-  const employeeNo = employeeId === null ? undefined : getMockDb().read((tables) => tables.employee.find((e) => e.id === employeeId)?.employeeNo);
+  const employeeNo = actingEmployeeNo();
   if (!employeeNo) throw new ApiError('COM-002', '계정을 먼저 골라 주세요');
   return employeeNo;
 }
@@ -91,15 +88,18 @@ async function readBody<T>(res: Response): Promise<T> {
   throw toClientError(json.error);
 }
 
+/** 계정 선택: 이 사원번호로 서버에 로그인하고 로그인 사원을 돌려준다 */
+export async function loginWithDevPassword(employeeNo: string): Promise<AuthUser> {
+  const user = await readBody<AuthUser>(await send('POST', '/auth/login', { employeeNo, password: DEV_LOGIN_PASSWORD }));
+  writeLoggedIn(employeeNo);
+  return user;
+}
+
 async function ensureLogin(): Promise<void> {
   const employeeNo = sessionEmployeeNo();
   if (readLoggedIn() === employeeNo) return;
   if (!pendingLogin) {
-    pendingLogin = (async () => {
-      const res = await send('POST', '/auth/login', { employeeNo, password: DEV_LOGIN_PASSWORD });
-      await readBody<unknown>(res);
-      writeLoggedIn(employeeNo);
-    })().finally(() => {
+    pendingLogin = loginWithDevPassword(employeeNo).then(() => undefined).finally(() => {
       pendingLogin = null;
     });
   }
