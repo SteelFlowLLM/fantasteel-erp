@@ -1,5 +1,5 @@
-// 계정 선택과 로그인 사원 정보. 사원번호·비밀번호 로그인은 나중에 넣는다 (SPEC 5장 결정 1).
-// 서버 모드에서는 고른 사원으로 서버에 로그인하고 사원 정보·권한을 서버에서 읽는다 (api/server/session.ts).
+// 로그인과 로그인 사원 정보. 가짜 DB 모드는 계정 선택(SPEC 5장 결정 1), 서버 모드는 사원번호·비밀번호 로그인이고
+// 사원 정보·권한을 서버에서 읽는다 (api/server/session.ts, 2026-10-07 사용자 결정).
 import type { RoleCode } from '@/codes';
 import type { PermissionMap } from '@/lib/permissions';
 import type { MockTables } from '@/mock/schema';
@@ -59,12 +59,6 @@ function buildSessionUser(tables: Readonly<MockTables>, employeeId: number): Ses
   };
 }
 
-async function serverSelectAccount(employeeId: number): Promise<SessionAccount> {
-  const employeeNo = await mockQuery((tables) => findRow(tables, 'employee', employeeId)?.employeeNo);
-  if (!employeeNo) throw new ApiError('COM-003');
-  return serverSessionApi.selectAccount(employeeNo);
-}
-
 export const sessionApi = {
   /** 계정 선택 목록: 사용 중인 사원 */
   listAccounts: (): Promise<AccountView[]> =>
@@ -90,12 +84,17 @@ export const sessionApi = {
   getSessionUser: (employeeId: number): Promise<SessionUser> =>
     isServerDataSource() ? serverSessionApi.getSessionUser(employeeId) : mockQuery((tables) => buildSessionUser(tables, employeeId)),
 
-  /** 계정을 고르면 최근 접속 시각(last_login_at)을 남긴다. 서버 모드는 목록(가짜 DB)의 사원번호로 서버에 로그인한다 */
+  /** 계정을 고르면 최근 접속 시각(last_login_at)을 남긴다 (가짜 DB 모드) */
   selectAccount: (employeeId: number): Promise<SessionAccount> =>
-    isServerDataSource() ? serverSelectAccount(employeeId) : mockMutation((tx) => {
+    mockMutation((tx) => {
       const user = buildSessionUser(tx.tables, employeeId);
       updateRow(tx, 'employee', employeeId, { lastLoginAt: tx.nowIso });
       return user;
     }),
-};
 
+  // ── 서버 모드 로그인 ──
+  login: serverSessionApi.login,
+  current: serverSessionApi.current,
+  /** 서버 모드만 쿠키를 지운다. 가짜 DB 모드는 탭 세션만 비우면 된다 */
+  logout: (): Promise<void> => (isServerDataSource() ? serverSessionApi.logout() : Promise.resolve()),
+};

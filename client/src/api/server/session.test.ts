@@ -1,9 +1,10 @@
-// 서버 모드 로그인 사원: 계정 선택은 서버 로그인, 사원 정보·권한은 GET /auth/me (사원·부서 id는 서버 id).
+// 서버 모드 로그인 사원: 사원번호·비밀번호 로그인, 사원 정보·권한은 GET /auth/me (사원·부서 id는 서버 id).
 // 가짜 DB만 쓰는 화면의 요청 사원은 세션 사원번호로 가짜 DB 사원을 찾는다.
 import type { AuthUser, DepartmentNode } from '@fantasteel/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actingEmployeeId, setActingEmployeeForTest } from '@/api/actor';
 import { ApiError } from '@/api/errors';
+import { resetServerSessionForTest } from '@/api/http';
 import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { sessionApi } from '@/api/session';
 import { writeSessionAccount } from '@/lib/sessionEmployee';
@@ -58,17 +59,14 @@ function stubWindow(): void {
 afterEach(() => stopFakeServer());
 
 describe('서버 모드 세션 (api/server/session.ts)', () => {
-  it('계정을 고르면 목록의 사원번호로 서버에 로그인하고 서버 사원 id를 세션에 둔다', async () => {
-    const logins: unknown[] = [];
-    useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, () => undefined);
-    // 가짜 서버의 로그인은 빈 성공이라 이 테스트만 로그인 응답을 바꾼다
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-      if (!url.endsWith('/auth/login')) throw new Error(`로그인 말고 부르면 안 돼요: ${url}`);
-      logins.push(JSON.parse(String(init.body)));
-      return ok(authUser);
-    });
-    await expect(sessionApi.selectAccount(employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead))).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
-    expect(logins).toEqual([{ employeeNo: SEED_EMPLOYEE_NO.purchaseHead, password: 'fantasteel' }]);
+  it('로그인하면 서버 사원 id·사원번호를 돌려주고, 새 탭은 쿠키의 사원으로 이어서 들어간다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, (c) => (c.path === '/auth/login' || c.path === '/auth/me' ? ok(authUser) : undefined));
+    await expect(sessionApi.login(SEED_EMPLOYEE_NO.purchaseHead, 'fantasteel')).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
+    expect(calls[0].body).toEqual({ employeeNo: SEED_EMPLOYEE_NO.purchaseHead, password: 'fantasteel' });
+    await expect(sessionApi.current()).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
+    resetServerSessionForTest(null);
+    await expect(sessionApi.current()).resolves.toBeNull();
+    expect(calls.map((c) => c.path)).toEqual(['/auth/login', '/auth/me']);
   });
 
   it('사원 정보·권한은 /auth/me, 부서·직급·부서장 부서 이름은 조직도에서 채운다', async () => {

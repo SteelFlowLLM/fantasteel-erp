@@ -1,13 +1,15 @@
 'use client';
 
-// 계정 선택 (옛 LoginPage의 B안 디자인). 사원번호·비밀번호 로그인은 나중에 넣는다 (SPEC 5장 결정 1).
-// 계정을 고르면 이 탭의 sessionStorage에 사원 id를 두고 대시보드(또는 원래 가려던 화면)로 간다.
+// 계정 선택 (옛 LoginPage의 B안 디자인). 가짜 DB 모드는 계정 선택(SPEC 5장 결정 1), 서버 모드는 사원번호·비밀번호 로그인(LoginForm).
+// 들어가면 이 탭의 sessionStorage에 사원 id를 두고 대시보드(또는 원래 가려던 화면)로 간다.
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
+import { isServerDataSource } from '@/api/http';
 import { ROLE, ROLE_LABEL } from '@/codes';
 import { Icon, type IconName } from '@/components/Icon';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { Tag } from '@/components/Tag';
+import { LoginForm } from '@/features/login/LoginForm';
 import { Logo } from '@/features/shell/Logo';
 import { useAccountList, useSelectAccount } from '@/hooks/useAccounts';
 import { useSessionStore } from '@/stores/useSessionStore';
@@ -72,15 +74,12 @@ export function AccountPicker() {
   const next = safeNext(params.get('next'));
   const hydrated = useSessionStore((state) => state.hydrated);
   const employeeId = useSessionStore((state) => state.employeeId);
-  const accounts = useAccountList();
-  const select = useSelectAccount();
+  const server = isServerDataSource();
 
   // 이미 계정을 골랐으면(또는 방금 골랐으면) 가려던 화면으로 보낸다
   useEffect(() => {
     if (hydrated && employeeId !== null) router.replace(next);
   }, [hydrated, employeeId, next, router]);
-
-  const admin = accounts.data?.find((account) => account.roleCode === ROLE.ADMIN);
 
   return (
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
@@ -117,57 +116,76 @@ export function AccountPicker() {
         </ul>
       </section>
 
-      <section aria-label="계정 선택" className="flex min-w-0 flex-1 flex-col overflow-auto bg-surface">
+      <section aria-label={server ? '로그인' : '계정 선택'} className="flex min-w-0 flex-1 flex-col overflow-auto bg-surface">
         <div className="flex flex-1 justify-center px-6 pt-14 pb-6">
           <div className="flex w-[400px] max-w-full flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <h2 className="text-3xl font-semibold">계정 선택</h2>
-              <p className="text-sm text-ink-3">시연용이에요. 계정을 누르면 그 사원으로 바로 들어가요.</p>
+              <h2 className="text-3xl font-semibold">{server ? '로그인' : '계정 선택'}</h2>
+              <p className="text-sm text-ink-3">{server ? '사원번호와 비밀번호로 로그인해요.' : '시연용이에요. 계정을 누르면 그 사원으로 바로 들어가요.'}</p>
             </div>
-            <QueryBoundary query={accounts} loadingLabel="계정을 불러오는 중…">
-              {(list) => (
-                <ul className="flex flex-col rounded-md border border-line">
-                  {list.map((account) => (
-                    <li key={account.employeeId} className="border-b border-line last:border-b-0">
-                      <button
-                        type="button"
-                        disabled={select.isPending}
-                        onClick={() => select.mutate(account.employeeId)}
-                        className="flex h-11 w-full items-center gap-2.5 px-3 text-left text-sm text-ink enabled:hover:bg-surface-2 disabled:opacity-55"
-                      >
-                        <Tag tone="brand" className="w-[52px] flex-none justify-center">
-                          {ROLE_LABEL[account.roleCode]}
-                        </Tag>
-                        <b className="w-14 flex-none font-semibold">{account.employeeName}</b>
-                        <span className="min-w-0 truncate text-cap text-ink-3">
-                          {account.departmentName} · {account.jobGradeName}
-                        </span>
-                        {account.headDepartmentNames.length ? (
-                          <Tag tone="outline" size="sm" title={`${account.headDepartmentNames.join('·')} 부서장 · 구매요청 승인권자`} className="flex-none">
-                            부서장
-                          </Tag>
-                        ) : null}
-                        <Icon name="chevron-right" size="sm" className="ml-auto flex-none text-ink-3" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </QueryBoundary>
-            {select.isPending ? <span className="text-cap text-ink-3">들어가는 중…</span> : null}
-            {select.error ? (
-              <span role="alert" className="flex items-center gap-1.5 text-xs text-danger">
-                <Icon name="alert" size="sm" />
-                {errorMessageOf(select.error)}
-              </span>
-            ) : null}
+            {server ? <LoginForm /> : <AccountList />}
           </div>
         </div>
         <footer className="flex h-12 flex-none items-center gap-2 border-t border-line px-10 text-cap text-ink-3">
           <Icon name="shield" size="sm" />
-          <span>인가된 사원만 접속해요{admin ? ` · 계정 문의 ${admin.departmentName} ${admin.employeeName}` : ''}</span>
+          <span>
+            인가된 사원만 접속해요
+            {server ? null : <AdminContact />}
+          </span>
         </footer>
       </section>
     </div>
   );
+}
+
+/** 가짜 DB 모드: 사용 중인 사원 목록에서 고른다 */
+function AccountList() {
+  const accounts = useAccountList();
+  const select = useSelectAccount();
+  return (
+    <>
+      <QueryBoundary query={accounts} loadingLabel="계정을 불러오는 중…">
+        {(list) => (
+          <ul className="flex flex-col rounded-md border border-line">
+            {list.map((account) => (
+              <li key={account.employeeId} className="border-b border-line last:border-b-0">
+                <button
+                  type="button"
+                  disabled={select.isPending}
+                  onClick={() => select.mutate(account.employeeId)}
+                  className="flex h-11 w-full items-center gap-2.5 px-3 text-left text-sm text-ink enabled:hover:bg-surface-2 disabled:opacity-55"
+                >
+                  <Tag tone="brand" className="w-[52px] flex-none justify-center">
+                    {ROLE_LABEL[account.roleCode]}
+                  </Tag>
+                  <b className="w-14 flex-none font-semibold">{account.employeeName}</b>
+                  <span className="min-w-0 truncate text-cap text-ink-3">
+                    {account.departmentName} · {account.jobGradeName}
+                  </span>
+                  {account.headDepartmentNames.length ? (
+                    <Tag tone="outline" size="sm" title={`${account.headDepartmentNames.join('·')} 부서장 · 구매요청 승인권자`} className="flex-none">
+                      부서장
+                    </Tag>
+                  ) : null}
+                  <Icon name="chevron-right" size="sm" className="ml-auto flex-none text-ink-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </QueryBoundary>
+      {select.isPending ? <span className="text-cap text-ink-3">들어가는 중…</span> : null}
+      {select.error ? (
+        <span role="alert" className="flex items-center gap-1.5 text-xs text-danger">
+          <Icon name="alert" size="sm" />
+          {errorMessageOf(select.error)}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function AdminContact() {
+  const admin = useAccountList().data?.find((account) => account.roleCode === ROLE.ADMIN);
+  return admin ? <> · 계정 문의 {admin.departmentName} {admin.employeeName}</> : null;
 }
