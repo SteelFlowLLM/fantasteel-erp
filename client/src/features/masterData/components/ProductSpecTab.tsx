@@ -4,7 +4,7 @@
 // 같은 조합은 화면에서 먼저 막고, 쓰인 규격은 치수·이론중량을 잠근다(MST-002). 쓰이지 않은 규격만 지운다.
 import { useMemo, useState } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
-import { masterDataApi, type MasterProductSpecView } from '@/api/masterData';
+import { isMasterServerMode, masterDataApi, type MasterProductSpecView } from '@/api/masterData';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -36,6 +36,8 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
   const [gradeFilter, setGradeFilter] = useState('');
   const [editing, setEditing] = useState<MasterProductSpecView | 'new' | null>(null);
+  // 서버는 사용 여부를 주지 않는다. 쓰인 규격의 치수 수정은 저장할 때 MST-002로 안내된다
+  const showUsage = !isMasterServerMode();
 
   return (
     <Card>
@@ -76,7 +78,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                       <Th>기본 야드</Th>
                       <Th>대응 규격</Th>
                       <Th align="right">열연 계획 수율</Th>
-                      <Th>사용 이력</Th>
+                      {showUsage ? <Th>사용 이력</Th> : null}
                       <Th aria-label="수정·삭제" />
                     </tr>
                   </thead>
@@ -99,15 +101,17 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                           )}
                         </Td>
                         <Td align="right">{formatYieldPercent(spec.hotRollingPlannedYieldRate)}</Td>
-                        <Td>
-                          {spec.isUsed ? (
-                            <Badge tone="run" title={`${spec.usageText ?? ''}에 쓰였어요`}>
-                              사용됨
-                            </Badge>
-                          ) : (
-                            <Badge tone="neutral">미사용</Badge>
-                          )}
-                        </Td>
+                        {showUsage ? (
+                          <Td>
+                            {spec.isUsed ? (
+                              <Badge tone="run" title={`${spec.usageText ?? ''}에 쓰였어요`}>
+                                사용됨
+                              </Badge>
+                            ) : (
+                              <Badge tone="neutral">미사용</Badge>
+                            )}
+                          </Td>
+                        ) : null}
                         <Td align="right">
                           <RowActions
                             canEdit={canEdit}
