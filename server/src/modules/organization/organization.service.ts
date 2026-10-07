@@ -11,15 +11,22 @@ import {
   type Role,
   type RoleView,
 } from '@fantasteel/shared';
-import { PrismaService } from '../../prisma/prisma.service';
+import { hash } from 'bcryptjs';
+import { AppException } from '../../common/errors/app.exception';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import type { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
+import type { CreateJobGradeDto } from './dto/job-grade.dto';
 import type { ListEmployeesQuery } from './dto/list-employees.query';
 import { OrganizationRepository } from './organization.repository';
 
 const DEFAULT_PAGE_SIZE = 20;
+/** 시드(prisma/seed.ts)와 같은 bcrypt 강도 */
+const BCRYPT_ROUNDS = 10;
 const PERMISSION_ORDER: readonly string[] = Object.values(PERMISSION);
 
 type EmployeeRow = Awaited<ReturnType<OrganizationRepository['findEmployees']>>[number];
 type DepartmentRow = Awaited<ReturnType<OrganizationRepository['findDepartments']>>[number];
+type JobGradeRow = Awaited<ReturnType<OrganizationRepository['findJobGrades']>>[number];
 
 /**
  * 업무 로직·트랜잭션·데이터에 따른 권한 검사 (컨벤션 6장).
@@ -41,6 +48,63 @@ export class OrganizationService {
       this.repository.findEmployees(this.prisma, filter, { skip: (page - 1) * size, take: size }),
     ]);
     return { items: rows.map(toEmployeeView), page, size, total };
+  }
+
+  /** API-156. 사원번호가 겹치면 unique 위반을 전역 필터가 COM-001로 바꾼다 (organization.md 5장 🟡) */
+  async createEmployee(dto: CreateEmployeeDto): Promise<EmployeeView> {
+    const passwordHash = await hash(dto.password, BCRYPT_ROUNDS);
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      await this.assertReferences(tx, dto);
+      return this.repository.createEmployee(tx, {
+        employeeNo: dto.employeeNo,
+        employeeName: dto.employeeName,
+        passwordHash,
+        departmentId: dto.departmentId,
+        jobGradeId: dto.jobGradeId,
+        roleId: dto.roleId,
+      });
+    });
+    return this.employeeView(id);
+  }
+
+  /** API-157. 부서장은 사용 중인 사원이어야 하므로 부서장인 사원은 퇴사 처리 전에 부서장을 먼저 바꾼다 */
+  async updateEmployee(id: number, dto: UpdateEmployeeDto): Promise<EmployeeView> {
+    await this.prisma.$transaction(async (tx) => {
+      const employee = await this.repository.findEmployeeHeadships(tx, id);
+      if (!employee) throw new AppException('COM-003', '사원을 찾을 수 없어요');
+      await this.assertReferences(tx, dto);
+      if (dto.isActive === false && employee.departmentsAsHeadEmployee.length > 0) {
+        throw new AppException('COM-004', '부서장인 사원은 퇴사 처리할 수 없어요. 부서장을 먼저 바꿔 주세요');
+      }
+      await this.repository.updateEmployee(tx, id, {
+        employeeName: dto.employeeName,
+        departmentId: dto.departmentId,
+        jobGradeId: dto.jobGradeId,
+        roleId: dto.roleId,
+        isActive: dto.isActive,
+      });
+    });
+    return this.employeeView(id);
+  }
+
+  private async employeeView(id: number): Promise<EmployeeView> {
+    const row = await this.repository.findEmployee(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '사원을 찾을 수 없어요');
+    return toEmployeeView(row);
+  }
+
+  /** API-162 */
+  async createJobGrade(dto: CreateJobGradeDto): Promise<JobGradeView> {
+    const row = await this.repository.createJobGrade(this.prisma, { jobGradeName: dto.jobGradeName, sortOrder: dto.sortOrder });
+    return toJobGradeView(row);
+  }
+
+  /** 요청으로 받은 부서·직급·역할 id는 조회해서 확인한다 (컨벤션 7-2) */
+  private async assertReferences(tx: Tx, ref: { departmentId?: number; jobGradeId?: number; roleId?: number }) {
+    const found = await this.repository.findReferences(tx, ref);
+    if (ref.departmentId !== undefined && !found.department) throw new AppException('COM-003', '부서를 찾을 수 없어요');
+    if (ref.jobGradeId !== undefined && !found.jobGrade) throw new AppException('COM-003', '직급을 찾을 수 없어요');
+    if (ref.roleId !== undefined && !found.role) throw new AppException('COM-003', '역할을 찾을 수 없어요');
   }
 
   /** 부서 트리와 부서별 인원 (REQ-ORG-001·003). 최상위 부서부터 부서코드 순 */
@@ -81,14 +145,7 @@ export class OrganizationService {
 
   async listJobGrades(): Promise<JobGradeView[]> {
     const rows = await this.repository.findJobGrades(this.prisma);
-    return rows.map((r) => ({
-      id: r.id,
-      jobGradeName: r.jobGradeName,
-      sortOrder: r.sortOrder,
-      employeeCount: r._count.employees,
-      createdAt: r.createdAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
-    }));
+    return rows.map(toJobGradeView);
   }
 
   async listRoles(): Promise<RoleView[]> {
@@ -105,6 +162,17 @@ export class OrganizationService {
       updatedAt: r.updatedAt.toISOString(),
     }));
   }
+}
+
+function toJobGradeView(row: JobGradeRow): JobGradeView {
+  return {
+    id: row.id,
+    jobGradeName: row.jobGradeName,
+    sortOrder: row.sortOrder,
+    employeeCount: row._count.employees,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 function toEmployeeView(row: EmployeeRow): EmployeeView {
