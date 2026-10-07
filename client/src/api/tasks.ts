@@ -2,9 +2,12 @@
 // - 만든 사람과 담당자만 고치거나 완료할 수 있다 (가정값, docs/rework/areas/collab.md).
 // - 담당자가 내가 아니면 담당자에게 '업무 지정' 알림을 보낸다 (NOTIFICATION_TYPE 🟡 TASK_ASSIGNED).
 // - 업무에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
+// - 서버 모드는 api/server/tasks.ts (내 담당 업무만, 수정 없음).
 import { NOTIFICATION_TYPE, TASK_STATUS, type TaskStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverTaskApi } from '@/api/server/tasks';
 import { assertUnchanged, optionalDate, optionalText, requiredText, requireRow } from '@/api/validation';
 import { compareTasksByDue, isScreenPath, LINK_PATH_ERROR } from '@/features/tasks/lib/taskDue';
 import { taskAssignedNotice } from '@/features/tasks/lib/taskNotice';
@@ -135,7 +138,7 @@ export interface TaskSummary {
 
 export const taskApi = {
   list: (scope: TaskScope): Promise<TaskView[]> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverTaskApi.list() : mockQuery((tables) => {
       const actor = requireActor(tables);
       const me = actor.employee.id;
       return tables.task
@@ -146,7 +149,7 @@ export const taskApi = {
 
   /** 내 업무 요약 (탭 숫자·부제). today = 'YYYY-MM-DD' (Asia/Seoul) */
   summary: (today: string): Promise<TaskSummary> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverTaskApi.summary(today) : mockQuery((tables) => {
       const me = requireActor(tables).employee.id;
       const open = tables.task.filter((task) => task.assigneeId === me && task.taskStatus === TASK_STATUS.OPEN);
       return {
@@ -157,7 +160,7 @@ export const taskApi = {
     }),
 
   create: (input: TaskInput): Promise<TaskView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverTaskApi.create(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const values = validateInput(tx.tables, input);
       const task = insertRow(tx, 'task', { ...values, creatorId: actor.employee.id, taskStatus: TASK_STATUS.OPEN, completedAt: null });
@@ -179,7 +182,7 @@ export const taskApi = {
 
   /** 완료 (OPEN → DONE). 되돌리기는 없다 (업무 프로세스 10장 OPEN → DONE). */
   complete: ({ id, expectedUpdatedAt }: { id: number; expectedUpdatedAt?: string | null }): Promise<TaskView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverTaskApi.complete(id) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const task = requireEditable(tx.tables, actor, id);
       if (task.taskStatus === TASK_STATUS.DONE) throw new ApiError('COM-001', '이미 완료한 업무예요');

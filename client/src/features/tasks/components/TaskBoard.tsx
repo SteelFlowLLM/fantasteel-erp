@@ -1,8 +1,10 @@
 'use client';
 
 // 업무 탭: 범위(내 업무·내가 만든 업무·전체) + 진행/완료 두 열 (업무 상태 OPEN 진행 → DONE 완료, 업무 프로세스 10장)
+// 서버 모드는 내 담당 업무만이고 수정 API가 없어 범위 선택·수정 버튼을 숨긴다 (api/server/tasks.ts).
 import { useEffect, useRef, useState } from 'react';
 import { TASK_STATUS, TASK_STATUS_LABEL, type TaskStatus } from '@/codes';
+import { isServerDataSource } from '@/api/http';
 import { taskApi, type TaskScope, type TaskView } from '@/api/tasks';
 import { Badge, type BadgeTone } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
@@ -15,7 +17,7 @@ import { Segmented } from '@/components/Tabs';
 import { TaskFormModal } from '@/features/tasks/components/TaskFormModal';
 import { taskDueStateOf, taskDueText } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
-import { useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
 import { useTaskList } from '@/hooks/useTasks';
 import { cn } from '@/lib/cn';
 
@@ -42,7 +44,7 @@ export function TaskBoard({ today, focusTaskId }: { today: string; focusTaskId: 
   return (
     <PageMain>
       <div className="flex flex-none flex-wrap items-center gap-2.5">
-        <Segmented ariaLabel="업무 범위" items={SCOPES} active={scope} onChange={setScope} />
+        {isServerDataSource() ? null : <Segmented ariaLabel="업무 범위" items={SCOPES} active={scope} onChange={setScope} />}
         {overdueCount > 0 ? <Badge tone="danger">마감 지남 {overdueCount}</Badge> : null}
         {todayCount > 0 ? <Badge tone="wait">오늘 마감 {todayCount}</Badge> : null}
         <span className="text-cap text-ink-3">정렬: 마감일 빠른 순</span>
@@ -97,7 +99,7 @@ export function TaskBoard({ today, focusTaskId }: { today: string; focusTaskId: 
 }
 
 function TaskCard({ task, today, focused, onEdit, onComplete }: { task: TaskView; today: string; focused: boolean; onEdit: () => void; onComplete: () => void }) {
-  const myId = useMockEmployeeId();
+  const myId = useMe().employeeId;
   const ref = useRef<HTMLElement>(null);
   const state = taskDueStateOf(task, today);
   const done = state === 'done';
@@ -118,7 +120,7 @@ function TaskCard({ task, today, focused, onEdit, onComplete }: { task: TaskView
     >
       <div className="flex items-start gap-2">
         <b className={cn('min-w-0 flex-1 text-base font-semibold break-words', done && 'text-ink-3 line-through')}>{task.title}</b>
-        {task.canEdit && !done ? <IconButton icon="edit" label="업무 고치기" size="sm" onClick={onEdit} /> : null}
+        {task.canEdit && !done && !isServerDataSource() ? <IconButton icon="edit" label="업무 고치기" size="sm" onClick={onEdit} /> : null}
       </div>
       {task.description ? <p className="line-clamp-3 text-sm whitespace-pre-line text-ink-2">{task.description}</p> : null}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-3">
