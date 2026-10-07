@@ -46,7 +46,7 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
           <AiMark size="sm" />
           AI 어시스턴트
         </button>
-        <NotificationMenu employeeId={mockEmployeeId} />
+        <NotificationMenu employeeId={me.employeeId} />
         <MessengerMenu employeeId={mockEmployeeId} />
         <UserMenu />
       </div>
