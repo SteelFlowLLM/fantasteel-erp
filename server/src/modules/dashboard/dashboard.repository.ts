@@ -37,4 +37,20 @@ export class DashboardRepository {
     ]);
     return { requests, lots };
   }
+
+  /** [from, to) 사이에 출고 확정된 출하요청과 그 출고 LOT(소진된 출하 배정)의 유형·1매 이론중량 */
+  async findIssuedBetween(tx: Tx, from: Date, to: Date) {
+    const issuedAt = { gte: from, lt: to };
+    const [requests, allocations] = await Promise.all([
+      tx.shipmentRequest.count({ where: { issuedAt } }),
+      tx.allocation.findMany({
+        where: { allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: ALLOCATION_STATUS.CONSUMED, shipmentRequestItem: { shipmentRequest: { issuedAt } } },
+        select: {
+          lot: { select: { lotType: true, item: { select: { theoreticalWeightTon: true } } } },
+          shipmentRequestItem: { select: { shipmentRequest: { select: { issuedAt: true } } } },
+        },
+      }),
+    ]);
+    return { requests, allocations };
+  }
 }

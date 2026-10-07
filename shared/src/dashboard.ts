@@ -67,3 +67,24 @@ export interface ProductStockWidget {
   /** 재고가 있는 규격만 */
   items: ProductStockRow[];
 }
+
+/** 하루 단위 제품 매수·톤 (톤 = 매수 × 1매 이론중량) */
+export interface DailyProductPoint {
+  date: string;
+  slabQty: number;
+  coilQty: number;
+  ton: string;
+}
+
+/** 출하 실적: 오늘 포함 최근 days일에 출고 확정한 슬래브·코일 LOT (출고 확정 시각 = shipment_request.issued_at, 서울 날짜) */
+export interface ShipmentResultWidget {
+  from: string;
+  to: string;
+  days: number;
+  /** 기간 안 출고 확정 출하요청 수 */
+  issuedRequestCount: number;
+  totalSlabQty: number;
+  totalCoilQty: number;
+  totalTon: string;
+  series: DailyProductPoint[];
+}

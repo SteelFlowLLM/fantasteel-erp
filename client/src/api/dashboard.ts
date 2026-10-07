@@ -831,8 +831,8 @@ function fromServer<T>(key: DataWidgetKey, read: () => Promise<T>): () => Promis
 }
 const serverTrendWindow = () => trendWindow(todayOf(), DASHBOARD_TREND_DAYS);
 
-/** 서버 모드에서 서버를 읽는 위젯. 나머지(수율·출하 실적·여재)는 서버 모드에서도 가짜 DB를 읽는다 */
-type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK' | 'RAW_MATERIAL_BALANCE' | 'PURCHASE_PROGRESS' | 'RECENT_EVENTS' | 'DELIVERY_RISK' | 'REJECT_RATE' | 'PRODUCTION_VOLUME';
+/** 서버 모드에서 서버를 읽는 위젯. 나머지(수율·여재)는 서버 모드에서도 가짜 DB를 읽는다 */
+type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK' | 'RAW_MATERIAL_BALANCE' | 'PURCHASE_PROGRESS' | 'RECENT_EVENTS' | 'DELIVERY_RISK' | 'REJECT_RATE' | 'PRODUCTION_VOLUME' | 'SHIPMENT_RESULT';
 const SERVER_READERS: { [K in ServerWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
   PROCESS_FLOW: serverDashboardApi.processFlow,
   ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
@@ -842,6 +842,7 @@ const SERVER_READERS: { [K in ServerWidgetKey]: () => Promise<DashboardWidgetDat
   RECENT_EVENTS: () => serverBusinessEventApi.recentEvents(DASHBOARD_RECENT_EVENT_LIMIT),
   DELIVERY_RISK: fromServer('DELIVERY_RISK', serverDashboardSourceApi.deliveryRisk),
   REJECT_RATE: fromServer('REJECT_RATE', () => serverDashboardSourceApi.rejectRate(serverTrendWindow())),
+  SHIPMENT_RESULT: serverDashboardApi.shipmentResult,
   PRODUCTION_VOLUME: fromServer('PRODUCTION_VOLUME', () => serverDashboardSourceApi.productionVolume(serverTrendWindow())),
 };
 const isServerWidget = (key: DataWidgetKey): key is ServerWidgetKey => key in SERVER_READERS;

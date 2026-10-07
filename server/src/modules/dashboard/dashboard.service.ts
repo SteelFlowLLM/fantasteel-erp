@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ITEM_TYPE,
+  LOT_TYPE,
   PERMISSION,
   PRODUCTION_PLAN_STATUS,
   SALES_ORDER_ITEM_STATUS,
@@ -11,9 +12,11 @@ import {
   type OrderFulfillmentWidget,
   type ProcessFlowWidget,
   type ProductStockWidget,
+  type ShipmentResultWidget,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
+import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { daysBetween } from '../sales-order/fulfillment.calculator';
@@ -22,6 +25,8 @@ import { DashboardRepository } from './dashboard.repository';
 
 const OPEN_STATUSES: readonly string[] = [SALES_ORDER_ITEM_STATUS.OPEN, SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED];
 const DAY_MS = 86_400_000;
+/** 추이 위젯 기간: 오늘 포함 최근 30일 (가정값, docs/rework/areas/dashboard.md 5장 — 화면 DASHBOARD_TREND_DAYS와 같다) */
+const TREND_DAYS = 30;
 
 /**
  * 대시보드 위젯 (REQ-DSH-001, BP-DSH-01 "권한 내 집계"). 숫자는 각 모듈의 계산을 그대로 쓰고 다시 만들지 않는다.
@@ -82,6 +87,38 @@ export class DashboardService {
         items: so.fulfillments.map((i) => ({ ...i, daysToDue: daysBetween(open.today, i.dueDate) })),
       }));
     return { today: open.today, deliveryRiskDays: open.deliveryRiskDays, salesOrders };
+  }
+
+  /**
+   * 출하 실적 (REQ-DSH-002): 오늘 포함 최근 30일에 출고 확정한 슬래브·코일 LOT을 하루 단위로 센다.
+   * 기간·기준일은 정의가 없어 docs/rework/areas/dashboard.md 5장 가정값을 따르고, 서버에는 LOT 출고 시각이 없어 출하요청 출고 확정 시각을 쓴다.
+   */
+  async shipmentResult(user: AuthUser): Promise<ShipmentResultWidget> {
+    if (!hasPermission(user, { permission: PERMISSION.GOODS_ISSUE_CONFIRM, level: 'VIEW' })) throw new AppException('COM-002');
+    const today = seoulToday();
+    const toAt = new Date(new Date(`${today}T00:00:00.000+09:00`).getTime() + DAY_MS);
+    const dates = Array.from({ length: TREND_DAYS }, (_, i) => seoulToday(new Date(toAt.getTime() - (TREND_DAYS - i) * DAY_MS)));
+    const fromAt = new Date(`${dates[0]}T00:00:00.000+09:00`);
+    const { requests, allocations } = await this.repository.findIssuedBetween(this.prisma, fromAt, toAt);
+    const series = dates.map((date) => {
+      const lots = allocations.filter((a) => a.shipmentRequestItem?.shipmentRequest.issuedAt && seoulToday(a.shipmentRequestItem.shipmentRequest.issuedAt) === date).map((a) => a.lot);
+      return {
+        date,
+        slabQty: lots.filter((l) => l.lotType === LOT_TYPE.SLAB).length,
+        coilQty: lots.filter((l) => l.lotType === LOT_TYPE.COIL).length,
+        ton: sumTon(lots.map((l) => l.item?.theoreticalWeightTon?.toFixed(3) ?? '0')),
+      };
+    });
+    return {
+      from: dates[0],
+      to: today,
+      days: TREND_DAYS,
+      issuedRequestCount: requests,
+      totalSlabQty: series.reduce((s, p) => s + p.slabQty, 0),
+      totalCoilQty: series.reduce((s, p) => s + p.coilQty, 0),
+      totalTon: sumTon(series.map((p) => p.ton)),
+      series,
+    };
   }
 
   /** 제품 재고: 슬래브·코일 합계와 재고가 있는 규격 (재고 화면은 모든 사원이 연다) */
