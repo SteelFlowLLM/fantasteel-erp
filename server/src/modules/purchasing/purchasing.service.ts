@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
+  NOTIFICATION_TYPE,
   PERMISSION,
   PURCHASE_ORDER_STATUS,
   PURCHASE_REQUISITION_STATUS,
@@ -23,6 +24,7 @@ import { NumberingService } from '../../common/numbering/numbering.service';
 import { seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import type { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
 import type { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
 import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
@@ -121,6 +123,7 @@ export class PurchasingService {
     private readonly repository: PurchasingRepository,
     private readonly numbering: NumberingService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly notifications: NotificationService,
   ) {}
 
   // ── 조회 ──────────────────────────────────────────────
@@ -170,7 +173,7 @@ export class PurchasingService {
     if (!item) throw new AppException('COM-003', '원료 품목을 찾을 수 없어요');
     if (item.itemType !== ITEM_TYPE.RAW_MATERIAL) throw new AppException('COM-004', '원료 품목만 구매요청할 수 있어요');
 
-    await this.assertHasDepartmentHead(tx, actor.departmentId);
+    const headId = await this.requireDepartmentHeadId(tx, actor.departmentId);
 
     const productionPlanId = input.productionPlanId ?? null;
     let salesOrderId: number | null = null;
@@ -191,7 +194,7 @@ export class PurchasingService {
       productionPlanId,
       actionDraftId: origin?.actionDraftId ?? null,
     });
-    await this.businessEventRecorder.record(tx, {
+    const event = await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED,
       actor,
       target: { table: 'purchase_requisition', id: row.id },
@@ -201,6 +204,7 @@ export class PurchasingService {
       actionDraftId: origin?.actionDraftId ?? null,
       messageId: origin?.messageId ?? null,
     });
+    await this.notifyApprovalRequested(tx, headId, row, actor, event.id);
     return this.toDetail(row);
   }
 
@@ -211,7 +215,9 @@ export class PurchasingService {
       this.prisma.$transaction(async (tx) => {
         const before = await this.mustFindForDecision(tx, user, id);
         await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.APPROVED, approverId: user.employeeId, approvedAt: new Date() });
-        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_APPROVED, null);
+        const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_APPROVED, null);
+        await this.notifyApprovalResult(tx, after, '승인됨', eventId);
+        return this.detailOf(tx, after);
       }),
     );
   }
@@ -223,7 +229,9 @@ export class PurchasingService {
       this.prisma.$transaction(async (tx) => {
         const before = await this.mustFindForDecision(tx, user, id);
         await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.REJECTED, approverId: user.employeeId, rejectReason });
-        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, rejectReason);
+        const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, rejectReason);
+        await this.notifyApprovalResult(tx, after, `반려됨 · ${rejectReason}`, eventId);
+        return this.detailOf(tx, after);
       }),
     );
   }
@@ -239,7 +247,7 @@ export class PurchasingService {
         const before = await this.mustFindRequisition(tx, id);
         if (before.requesterId !== user.employeeId) throw new AppException('COM-002', '요청자 본인만 재요청할 수 있어요');
         if (before.purchaseRequisitionStatus !== PURCHASE_REQUISITION_STATUS.REJECTED) throw new AppException('COM-001', '반려된 요청만 재요청할 수 있어요');
-        await this.assertHasDepartmentHead(tx, before.requester.departmentId);
+        const headId = await this.requireDepartmentHeadId(tx, before.requester.departmentId);
         // 반려된 사이 같은 계획·원료로 새 요청이 들어왔으면 재요청하면 중복이 된다
         if (before.productionPlanId !== null) await this.assertNoOpenRequisitionForPlan(tx, before.productionPlanId, before.itemId);
         await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.REJECTED, {
@@ -252,7 +260,9 @@ export class PurchasingService {
           rejectReason: null,
         });
         // BUSINESS_EVENT_TYPE에 재요청이 없어(docs/backend/purchasing.md 8장) 등록 이벤트로 남기고 사유로 구분한다
-        return this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, '반려 후 재요청');
+        const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, '반려 후 재요청');
+        await this.notifyApprovalRequested(tx, headId, after, user, eventId);
+        return this.detailOf(tx, after);
       }),
     );
   }
@@ -402,7 +412,7 @@ export class PurchasingService {
   /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
   private async mustFindForDecision(tx: Tx, user: AuthUser, id: number): Promise<RequisitionRow> {
     const row = await this.mustFindRequisition(tx, id);
-    await this.assertHasDepartmentHead(tx, row.requester.departmentId);
+    await this.requireDepartmentHeadId(tx, row.requester.departmentId);
     assertDepartmentHead(user, row.requester.departmentId);
     // 부서장 자기 요청의 승인 경로는 TBD(업무 프로세스 16장)이고 자동 승인은 금지라 우선 막는다
     if (row.requesterId === user.employeeId) throw new AppException('COM-002', '본인 요청은 승인·반려할 수 없어요');
@@ -416,9 +426,9 @@ export class PurchasingService {
     if ((await this.repository.updateRequisitionIfStatus(tx, row.id, from, data)) === 0) throw new AppException('COM-001', '다른 사람이 먼저 처리한 요청이에요. 다시 조회해 주세요');
   }
 
-  private async recordChange(tx: Tx, user: AuthUser, before: RequisitionRow, type: BusinessEventType, reason: string | null): Promise<PurchaseRequisitionDetail> {
+  private async recordChange(tx: Tx, user: AuthUser, before: RequisitionRow, type: BusinessEventType, reason: string | null): Promise<{ after: RequisitionRow; eventId: number }> {
     const after = await this.mustFindRequisition(tx, before.id);
-    await this.businessEventRecorder.record(tx, {
+    const event = await this.businessEventRecorder.record(tx, {
       type,
       actor: user,
       target: { table: 'purchase_requisition', id: before.id },
@@ -427,12 +437,38 @@ export class PurchasingService {
       after: snapshotOf(after),
       reason,
     });
-    return this.detailOf(tx, after);
+    return { after, eventId: event.id };
   }
 
-  private async assertHasDepartmentHead(tx: Tx, departmentId: number): Promise<void> {
+  /** 승인권자(요청자 소속 부서의 부서장) id. 없으면 승인할 사람이 없으므로 PUR-001 */
+  private async requireDepartmentHeadId(tx: Tx, departmentId: number): Promise<number> {
     const department = await this.repository.findDepartmentHead(tx, departmentId);
     if (!department?.headEmployeeId) throw new AppException('PUR-001');
+    return department.headEmployeeId;
+  }
+
+  /**
+   * 등록·재요청 → 승인권자에게 승인 요청 알림 ([04] 13.4). 작업 로그 id로 같은 알림을 두 번 만들지 않는다.
+   * 부서장 자기 요청은 승인 경로가 TBD라(8장) 자기 자신에게 보내지 않는다 (2026-10-07 사용자 결정).
+   */
+  private async notifyApprovalRequested(tx: Tx, headId: number, row: { id: number; purchaseRequisitionNo: string }, requester: AuthUser, eventId: number): Promise<void> {
+    if (headId === requester.employeeId) return;
+    await this.notifications.notifyEmployees(tx, [headId], {
+      notificationType: NOTIFICATION_TYPE.APPROVAL_REQUESTED,
+      notificationContent: `구매요청 ${row.purchaseRequisitionNo} 승인 요청 · ${requester.employeeName}님`,
+      linkPath: `/approvals?pr=${row.id}`,
+      businessEventId: eventId,
+    });
+  }
+
+  /** 승인·반려 → 요청자에게 결과 알림 */
+  private async notifyApprovalResult(tx: Tx, row: RequisitionRow, result: string, eventId: number): Promise<void> {
+    await this.notifications.notifyEmployees(tx, [row.requesterId], {
+      notificationType: NOTIFICATION_TYPE.APPROVAL_RESULT,
+      notificationContent: `구매요청 ${row.purchaseRequisitionNo} ${result}`,
+      linkPath: `/purchase-requisitions?pr=${row.id}`,
+      businessEventId: eventId,
+    });
   }
 
   /** MRP를 다시 계산해도 같은 계획의 구매요청을 중복 생성하지 않는다 (API-143 비고) */

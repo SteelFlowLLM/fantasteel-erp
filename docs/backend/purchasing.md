@@ -98,7 +98,7 @@
 | 읽힘 | mrp | 발주 품목·입고 합계(입고예정), 계획별 기존 구매요청 |
 | 읽힘 | production | 원료 LOT FIFO(`goods_receipt.received_date`) |
 | 호출 | organization(데이터) | 요청자 부서·부서장 |
-| 호출 | notification | 승인 요청·결과 알림 🟡(알림 유형 미확정) |
+| 호출 | notification | `notifyEmployees(tx, …)` — 등록·재요청 → 부서장에게 APPROVAL_REQUESTED(`/approvals?pr={id}`), 승인·반려 → 요청자에게 APPROVAL_RESULT(`/purchase-requisitions?pr={id}`, 반려는 사유 포함). 작업 로그 id로 중복 방지, 부서장 자기 요청은 보내지 않음 |
 
 `PurchasingService`를 `exports`에 넣는다.
 
@@ -121,12 +121,11 @@
 
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
-| 부서장 자기 요청·부재 | 구매부장(시드 1702004)이 직접 요청하면 승인권자가 자기 자신이다. 경로 TBD, 자동 승인 금지 | [04] 2장·16장 |
+| 부서장 자기 요청·부재 | 구매부장(시드 1702004)이 직접 요청하면 승인권자가 자기 자신이다. 경로 TBD, 자동 승인 금지. 그때까지 승인 요청 알림은 보내지 않는다(2026-10-07 사용자 결정) | [04] 2장·16장 |
 | 다른 역할 요청자 | Message → ERP로 영업·생산 사원이 요청자가 되면 그 부서장(예: 영업부장)이 승인하는데, 영업부장은 PR 조회 권한이 없다 → 조회 API를 "권한 또는 부서장"으로 열어야 한다. 요청자에게 `PURCHASE_REQUISITION_CREATE` USE가 필요한지도 미정(message-action.md 8장) | [권한표], [CSV] 목록 비고 |
 | 재요청 이벤트 | BUSINESS_EVENT_TYPE에 재요청이 없다 | [CSV] 재요청 비고, [06] |
 | 오류 코드 | 승인량 초과(`ordered_ton > requested_ton`), 잘못된 공급업체, 같은 계획 중복 요청, 상태 전이 위반(이미 승인된 요청 승인 등)에 쓸 코드가 없다 | [04] BP-PUR-01 예외, 9.3 |
 | "잘못된 공급업체" | 품목 기본 공급업체와 다른 공급업체로 발주하는 것을 막는지, 기본값만 제안하는지 | [04] BP-PUR-01, REQ-MST-007 |
 | 입고 반복 확정 | "반복 확정 차단"을 요청 키로 막을지 미정. 지금은 미입고량 검사만 막는다 | [CSV], 08 공통 규약 |
 | 원료 LOT 날짜 | `RM-…-YYMMDD`의 날짜를 입고일(`received_date`)로 할지 등록일로 할지 | [04] 9.2 |
-| 알림 유형 | 승인 요청·결과 알림(APPROVAL_REQUESTED·APPROVAL_RESULT)은 [06] 3장 제안값이라 아직 쓸 수 없다 | [06] 3장, [04] 13.4 |
 | 발주 묶음 주기 | TBD | [04] BP-PUR-01 |
