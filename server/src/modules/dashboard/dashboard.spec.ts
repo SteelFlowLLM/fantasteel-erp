@@ -5,7 +5,11 @@ import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import type { ProcessYieldWidget, ShipmentResultWidget, SurplusAgeWidget } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
+import { AuthUserService } from '../../common/auth/auth-user.service';
 import { seoulToday } from '../../common/time/seoul-date';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ProductionSimulationService } from '../production/production-simulation.service';
+import { SalesOrderService } from '../sales-order/sales-order.service';
 
 let app: INestApplication;
 let baseUrl: string;
@@ -77,4 +81,57 @@ describe('GET dashboard/widgets/surplus-age', () => {
     expect(body.data.totalTon).toMatch(/^\d+\.\d{3}$/);
     for (const row of body.data.items) expect(row.surplusQty).toBeGreaterThan(0);
   });
+});
+
+describe('여재 보유: 진행 중인 코일 수주용 슬래브 (inventory.md 8-1)', () => {
+  it('코일 수주가 진행 중이면 그 계획이 만든 합격 슬래브는 여재가 아니고, 수주를 취소하면 여재가 된다', async () => {
+    const prisma = app.get(PrismaService);
+    const authUsers = app.get(AuthUserService);
+    const userOf = async (employeeNo: string) => {
+      const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo } });
+      const user = await authUsers.load(employee.id);
+      if (!user) throw new Error(employeeNo);
+      return user;
+    };
+    const sales = await userOf('2103003');
+    const producer = await userOf('1401006');
+    const quality = await userOf('2205013');
+
+    // 원료 입고 (실적 시뮬레이션이 원료 LOT을 쓴다. production-simulation.service.spec.ts와 같은 방식)
+    const supplier = await prisma.supplier.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    const date = new Date(`${seoulToday()}T00:00:00Z`);
+    for (const [itemCode, ton] of [['ORE01', '3000'], ['COL01', '1100'], ['LIM01', '300'], ['SMN01', '40']] as const) {
+      const item = await prisma.item.findUniqueOrThrow({ where: { itemCode } });
+      const pr = await prisma.purchaseRequisition.create({ data: { purchaseRequisitionNo: `PR-DSH-${itemCode}`, itemId: item.id, requestedTon: ton, desiredReceiptDate: date, requesterId: producer.employeeId, purchaseRequisitionStatus: 'ORDERED' } });
+      const po = await prisma.purchaseOrder.create({ data: { purchaseOrderNo: `PO-DSH-${itemCode}`, supplierId: supplier.id } });
+      const poi = await prisma.purchaseOrderItem.create({ data: { purchaseOrderId: po.id, purchaseRequisitionId: pr.id, itemId: item.id, orderedTon: ton } });
+      const gr = await prisma.goodsReceipt.create({ data: { goodsReceiptNo: `GR-DSH-${itemCode}`, purchaseOrderItemId: poi.id, receivedTon: ton, receivedDate: date } });
+      await prisma.lot.create({ data: { lotNo: `RM-DSH-${itemCode}`, lotType: 'RAW_MATERIAL', itemId: item.id, goodsReceiptId: gr.id, yardId: item.defaultYardId, initialTon: ton, remainingTon: ton } });
+    }
+
+    // 코일 수주 → 슬래브까지 생산(열연 투입 전) → 히트·슬래브 합격
+    const coil = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SS275-2.5x1200x980000' } });
+    const customerId = (await prisma.customer.findFirstOrThrow({ orderBy: { id: 'asc' } })).id;
+    const order = await app.get(SalesOrderService).create(sales, { customerId, items: [{ itemId: coil.id, orderedQty: 2, dueDate: '2099-12-31' }] });
+    const plan = await prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: order.items[0].productionPlanNo ?? '' } });
+    await app.get(ProductionSimulationService).simulate(producer, plan.id, { randomSeed: 20261007 });
+    const lots = await prisma.lot.findMany({ where: { productionResult: { productionPlanId: plan.id }, lotType: { in: ['HEAT', 'SLAB'] } } });
+    const slabLots = lots.filter((l) => l.lotType === 'SLAB');
+    expect(slabLots.length).toBeGreaterThan(0);
+    const standard = await prisma.inspectionStandard.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    for (const lot of lots) {
+      await prisma.qualityInspection.create({ data: { lotId: lot.id, inspectionStandardId: standard.id, inspectionResult: 'PASS', inspectorEmployeeId: quality.employeeId, inspectedAt: new Date() } });
+    }
+    const slabItemCode = 'SL-SS275-250x1200x10000';
+    const surplusOf = async () => {
+      const { body } = await get<SurplusAgeWidget>('/dashboard/widgets/surplus-age', await login('2205013'));
+      return body.data.items.find((r) => r.itemCode === slabItemCode)?.surplusQty ?? 0;
+    };
+
+    expect(await surplusOf()).toBe(0);
+
+    // 수주를 취소하면 계획의 수주 품목이 해제되어(null) 그 슬래브가 여재가 된다
+    await app.get(SalesOrderService).cancel(sales, order.salesOrderId, { reason: '대시보드 여재 테스트' });
+    expect(await surplusOf()).toBe(slabLots.length);
+  }, 120_000);
 });
