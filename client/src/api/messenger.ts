@@ -482,7 +482,7 @@ export const messengerApi = {
 
   /** 멤버 초대 (1:1 제외). 새 멤버는 이전 대화를 볼 수 있고, 지금까지의 메시지는 읽은 것으로 시작한다. 초대한 수를 돌려준다 */
   inviteMembers: ({ chatRoomId, memberIds }: { chatRoomId: number; memberIds: number[] }): Promise<number> =>
-    isServerDataSource() ? Promise.reject<number>(new Error('멤버 초대는 아직 서버와 연결되지 않았어요')) : mockMutation((tx) => {
+    isServerDataSource() ? serverMessengerApi.inviteMembers({ chatRoomId, memberIds }) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const room = requireMemberRoom(tx.tables, actor, chatRoomId);
       if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new InputError('1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요');
@@ -493,6 +493,19 @@ export const messengerApi = {
       const lastId = lastMessageOf(tx.tables, room.id)?.id ?? null;
       for (const employeeId of newIds) insertRow(tx, 'chatRoomMember', { chatRoomId: room.id, employeeId, lastReadMessageId: lastId });
       return newIds.length;
+    }),
+
+  /** 그룹방 이름 바꾸기 (방 멤버만). 비우면 이름 없음 → 멤버 이름으로 보인다. 1:1·업무방은 바꾸지 않는다 */
+  renameRoom: ({ chatRoomId, chatRoomName }: { chatRoomId: number; chatRoomName: string | null }): Promise<{ id: number; chatRoomName: string | null; displayName: string }> =>
+    isServerDataSource() ? serverMessengerApi.renameRoom({ chatRoomId, chatRoomName }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const room = requireMemberRoom(tx.tables, actor, chatRoomId);
+      if (room.chatRoomType !== CHAT_ROOM_TYPE.GROUP) throw new InputError('그룹 채팅방만 이름을 바꿀 수 있어요');
+      const errors = new FieldErrors();
+      const name = optionalText(errors, 'chatRoomName', chatRoomName, '방 이름', CHAT_ROOM_NAME_MAX);
+      errors.throwIfAny();
+      const updated = updateRow(tx, 'chatRoom', room.id, { chatRoomName: name }) ?? room;
+      return { id: updated.id, chatRoomName: updated.chatRoomName, displayName: displayNameOf(tx.tables, updated, actor.employee.id) };
     }),
 
   /** 메시지 보내기 (글, 파일 1개, 또는 둘 다). @멘션·업무방 알림은 messengerRules.postMessage가 만든다 */

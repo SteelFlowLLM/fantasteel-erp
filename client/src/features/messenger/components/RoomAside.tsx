@@ -21,7 +21,7 @@ function Section({ title, actions, children }: { title: ReactNode; actions?: Rea
   );
 }
 
-export function RoomAside({ room, onInvite }: { room: ChatRoomDetailView; onInvite: () => void }) {
+export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void }) {
   return (
     <aside className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex" aria-label="방 정보">
       {room.chatRoomType === 'WORK' ? (
@@ -32,9 +32,16 @@ export function RoomAside({ room, onInvite }: { room: ChatRoomDetailView; onInvi
         <Section
           title="방 정보"
           actions={
-            <Tag size="sm" tone="neutral">
-              {CHAT_ROOM_TYPE_LABEL[room.chatRoomType]}
-            </Tag>
+            <span className="flex items-center gap-1.5">
+              {room.chatRoomType === 'GROUP' ? (
+                <Button size="sm" variant="ghost" onClick={onRename}>
+                  이름 바꾸기
+                </Button>
+              ) : null}
+              <Tag size="sm" tone="neutral">
+                {CHAT_ROOM_TYPE_LABEL[room.chatRoomType]}
+              </Tag>
+            </span>
           }
         >
           <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1.5 text-xs">

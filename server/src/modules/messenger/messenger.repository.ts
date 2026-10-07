@@ -91,6 +91,10 @@ export class MessengerRepository {
     return tx.chatRoomMember.createMany({ data: employeeIds.map((employeeId) => ({ chatRoomId, employeeId, lastReadMessageId })), skipDuplicates: true });
   }
 
+  updateRoomName(tx: Tx, id: number, chatRoomName: string | null) {
+    return tx.chatRoom.update({ where: { id }, data: { chatRoomName } });
+  }
+
   findLastMessageId(tx: Tx, chatRoomId: number) {
     return tx.message.findFirst({ where: { chatRoomId }, orderBy: { id: 'desc' }, select: { id: true } });
   }

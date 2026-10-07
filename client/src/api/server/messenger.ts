@@ -1,9 +1,11 @@
 // 메신저 화면(목록·대화·업무방·상단 드롭다운·레일 배지) ↔ 서버 API (server/src/modules/messenger). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // - 멘션: 서버는 본문을 해석하지 않고 멘션 대상 사원 id를 따로 받는다. 화면 본문의 @이름을 방 멤버·멤버 부서로 찾아 사원 id로 바꿔 보낸다
 //   (부서 멘션 = 그 부서에 속한 방 멤버).
-// - 서버에 없는 값: 시스템 메시지, 방 만든 사람, 첨부 크기·형식, 본문의 업무 번호 링크는 비어 있다. 멤버 초대 API가 아직 없어 초대는 막는다.
+// - 서버에 없는 값: 시스템 메시지, 방 만든 사람, 첨부 크기·형식, 본문의 업무 번호 링크는 비어 있다.
 // - 업무방 상단 수주 요약은 수주 상세 어댑터(serverSalesOrderApi.detail)로 채운다 (출고 매수·취소 여부가 서버 요약에 없다).
 import type {
+  InviteChatMembersResult,
+  RenameChatRoomResult,
   ChatMessagePage as ServerMessagePage,
   ChatMessageView as ServerMessageView,
   ChatRoomDetail as ServerRoomDetail,
@@ -165,8 +167,7 @@ export const serverMessengerApi = {
       unreadCount: room.unreadCount,
       lastReadMessageId: room.lastReadMessageId,
       mentionTargets: mentionTargetsOf(room),
-      // TODO(명재): 멤버 초대 API(방 관리 PR)가 생기면 1:1이 아닌 방은 true
-      canInvite: false,
+      canInvite: room.chatRoomType !== 'DIRECT',
     };
   },
 
@@ -215,6 +216,12 @@ export const serverMessengerApi = {
     });
     return toMessageView(sent, myTargets);
   },
+
+  inviteMembers: async ({ chatRoomId, memberIds }: { chatRoomId: number; memberIds: number[] }): Promise<number> =>
+    (await serverRequest<InviteChatMembersResult>('POST', `/chat-rooms/${chatRoomId}/members`, { body: { memberIds } })).addedCount,
+
+  renameRoom: async ({ chatRoomId, chatRoomName }: { chatRoomId: number; chatRoomName: string | null }): Promise<RenameChatRoomResult> =>
+    serverRequest<RenameChatRoomResult>('PATCH', `/chat-rooms/${chatRoomId}`, { body: { chatRoomName } }),
 
   markRead: async ({ chatRoomId, lastMessageId }: { chatRoomId: number; lastMessageId: number }): Promise<number> =>
     (await serverRequest<ChatRoomReadResult>('POST', `/chat-rooms/${chatRoomId}/read`, { body: { lastMessageId } })).unreadCount,

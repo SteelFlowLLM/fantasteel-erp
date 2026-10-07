@@ -64,3 +64,18 @@ export class UploadAttachmentDto {
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content?: string;
 }
+
+export class InviteMembersDto {
+  /** 초대할 사원. 이미 멤버인 사원은 건너뛴다 */
+  @IsArray({ message: 'memberIds는 사원 id 배열이어야 해요' })
+  @IsInt({ each: true, message: 'memberIds는 사원 id 배열이어야 해요' })
+  memberIds!: number[];
+}
+
+export class RenameChatRoomDto {
+  /** 비우면 이름 없음(null) */
+  @IsOptional()
+  @IsString({ message: '방 이름은 글자여야 해요' })
+  @MaxLength(CHAT_ROOM_NAME_MAX, { message: `방 이름은 ${CHAT_ROOM_NAME_MAX}자까지예요` })
+  chatRoomName?: string | null;
+}

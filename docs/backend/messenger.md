@@ -36,6 +36,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | 업로드는 서버에서, 형식·용량 제한은 구현 단계 |
 | GET | `attachments/:id` | 첨부 파일 다운로드 | 방 멤버 | 첨부에도 방 접근 권한 적용 |
 | POST | `chat-rooms/:id/read` | 읽음 위치 갱신 | 방 멤버 | |
+| POST | `chat-rooms/:id/members` | 멤버 초대 | 방 멤버 | **명세에 없음** (방 관리, 2026-10-07 단계별 추가). `{ memberIds }` → `{ chatRoomId, addedCount }` |
+| PATCH | `chat-rooms/:id` | 그룹방 이름 바꾸기 | 방 멤버 | **명세에 없음** (방 관리). `{ chatRoomName }` → `{ id, chatRoomName, displayName }` |
 
 - "방 멤버" 검사는 기능 권한 코드가 아니라 service에서 `chat_room_member`를 조회해 확인하고, 아니면 `COM-002`.
 - 업무방의 "연결 수주 조회 권한"은 `hasPermission(user, { permission: 'SALES_ORDER_CREATE', level: 'VIEW' })`로 확인한다(`common/auth/auth.guard.ts`). [권한표]상 영업·생산·물류·관리자만 통과한다 🟡.
@@ -76,6 +78,10 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 업로드: multipart(`@nestjs/platform-express`의 `FileInterceptor`) → `StorageService.save('messages', 파일명, buffer)` → 반환 경로를 `attachment_path`, 원래 이름을 `attachment_name`에 저장한 메시지 1건 생성.
 - 다운로드: 첨부 테이블이 없으므로 `:id`는 메시지 id로 둔다 🟡. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 첨부가 없는 메시지면 COM-003.
 - Supabase Storage로 옮길 때는 `StorageService`만 바꾼다(`storage.service.ts` 주석).
+
+**방 관리** (문서에 없는 기능, 2026-10-07 단계별 추가 결정)
+- 멤버 초대: 1:1 방은 COM-004. 이미 멤버인 사원은 건너뛰고, 새 멤버가 없으면 COM-004. 없는 사원 COM-003·퇴사자 COM-004. 새 멤버는 이전 대화를 보고 지금까지의 메시지는 읽은 것으로 시작한다. 끝나면 기존·새 멤버 모두에게 `room:updated`.
+- 이름 바꾸기: 그룹방만(1:1은 상대 이름, 업무방은 수주로 정해짐 → COM-004). 앞뒤 공백을 지우고 비우면 null(멤버 이름으로 보임), 100자까지. 끝나면 멤버에게 `room:updated`.
 
 **읽음**(REQ-MSG-004): `POST chat-rooms/:id/read { lastMessageId }` → `{ chatRoomId, lastReadMessageId, unreadCount }`. `last_read_message_id`를 그 방의 메시지 id로 갱신한다(뒤로 가지 않게 더 큰 값만, 다른 방의 메시지면 COM-003). 갱신 뒤 본인에게 `room:read`를 보낸다. 안 읽은 수 = 그 방에서 `id > last_read_message_id`이고 내가 보내지 않은 메시지 수.
 
@@ -123,5 +129,5 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | 파일 형식·용량 제한 | 구현 단계에서 정함(아직 없음) | [02] REQ-MSG-003 |
 | 업무방 권한 | 구매·품질 역할은 `SALES_ORDER_CREATE` VIEW가 없어 업무방을 만들 수 없다. 멤버로 초대받은 경우 방 상단 수주 정보를 보여도 되는지도 미정 | [CSV] 채팅방 생성 비고, [권한표] |
 | ~~DIRECT 중복~~ | 결정(2026-10-07): 기존 방을 돌려준다 | [02] REQ-MSG-001 |
-| 멤버 추가·나가기 | API가 없다 | [CSV] |
+| 멤버 추가·나가기 | 멤버 추가는 `POST chat-rooms/:id/members`로 추가함(2026-10-07). 나가기는 아직 없다(ERD `left_at` 여부 결정 필요) | [CSV] |
 | ~~소켓 이벤트 이름~~ | 결정(2026-10-07): `message:new`, `room:read`, `room:updated`. 페이로드는 소켓 PR에서 정한다 | [05] 6장 |

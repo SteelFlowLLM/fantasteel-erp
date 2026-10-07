@@ -18,6 +18,8 @@ import {
   type ChatRoomReadResult,
   type ChatRoomType,
   type CreateChatRoomResult,
+  type InviteChatMembersResult,
+  type RenameChatRoomResult,
   type ItemType,
   type SalesOrderItemStatus,
   type WorkRoomSalesOrderState,
@@ -29,7 +31,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, ListMessagesQuery, MarkReadDto, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -295,6 +297,37 @@ export class MessengerService {
     });
     if (changed) await this.emitRoomUpdated(result.id);
     return result;
+  }
+
+  /**
+   * 멤버 초대 (방 관리, 문서에 없는 기능: 2026-10-07 단계별 추가 결정). 방 멤버만 초대할 수 있고 1:1 방은 안 된다.
+   * 새 멤버는 이전 대화를 볼 수 있고 지금까지의 메시지는 읽은 것으로 시작한다. 이미 멤버인 사원은 건너뛴다.
+   */
+  async inviteMembers(user: AuthUser, chatRoomId: number, dto: InviteMembersDto): Promise<InviteChatMembersResult> {
+    const addedCount = await this.prisma.$transaction(async (tx) => {
+      const room = await this.requireMember(tx, chatRoomId, user.employeeId);
+      if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new AppException('COM-004', '1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요');
+      const existing = new Set((await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId));
+      const newIds = [...new Set(dto.memberIds)].filter((id) => !existing.has(id));
+      if (newIds.length === 0) throw new AppException('COM-004', '초대할 멤버를 1명 이상 골라 주세요');
+      await this.requireActiveEmployees(tx, newIds);
+      return this.addMembers(tx, chatRoomId, newIds);
+    });
+    await this.emitRoomUpdated(chatRoomId);
+    return { chatRoomId, addedCount };
+  }
+
+  /** 그룹방 이름 바꾸기 (방 멤버만). 1:1은 상대 이름, 업무방은 수주로 이름이 정해져 바꾸지 않는다 */
+  async renameRoom(user: AuthUser, chatRoomId: number, dto: RenameChatRoomDto): Promise<RenameChatRoomResult> {
+    const chatRoomName = dto.chatRoomName?.trim() || null;
+    await this.prisma.$transaction(async (tx) => {
+      const room = await this.requireMember(tx, chatRoomId, user.employeeId);
+      if (room.chatRoomType !== CHAT_ROOM_TYPE.GROUP) throw new AppException('COM-004', '그룹 채팅방만 이름을 바꿀 수 있어요');
+      await this.repository.updateRoomName(tx, chatRoomId, chatRoomName);
+    });
+    await this.emitRoomUpdated(chatRoomId);
+    const detail = await this.getRoom(user, chatRoomId);
+    return { id: chatRoomId, chatRoomName: detail.chatRoomName, displayName: detail.displayName };
   }
 
   /** 최근 메시지부터 limit개 (응답은 오래된 순). before를 주면 그보다 오래된 메시지 */

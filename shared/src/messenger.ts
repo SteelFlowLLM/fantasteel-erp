@@ -111,6 +111,19 @@ export const MESSAGE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 /** 첨부를 막는 확장자: 실행 파일만 (2026-10-07 결정) */
 export const BLOCKED_ATTACHMENT_EXTENSIONS = ['exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'ps1', 'vbs', 'js', 'jar', 'sh', 'app', 'dll'] as const;
 
+/** 멤버 초대 결과: 새로 들어온 사원 수 (이미 멤버인 사원은 건너뛴다) */
+export interface InviteChatMembersResult {
+  chatRoomId: number;
+  addedCount: number;
+}
+
+/** 방 이름 바꾸기 결과 (그룹방만). 비우면 null → 목록에서는 멤버 이름으로 보인다 */
+export interface RenameChatRoomResult {
+  id: number;
+  chatRoomName: string | null;
+  displayName: string;
+}
+
 /** 읽음 위치 갱신 결과 */
 export interface ChatRoomReadResult {
   chatRoomId: number;
