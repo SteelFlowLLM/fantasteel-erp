@@ -1,9 +1,12 @@
 // 출고 확정 API (REQ-SHP-002·003, REQ-INV-005, REQ-SO-005, BP-SHP-01).
 // 별도 출고 테이블·번호가 없다: 출하요청의 issued_at·issued_employee_id와 상태 ISSUED로 남는다.
 // 재검증·전환·밀시트 발행·작업 로그는 core 서비스(confirmGoodsIssue)가 한 트랜잭션에서 한다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/goodsIssues.ts). 출하요청·LOT id는 서버 id다.
 import { PERMISSION, type InspectionResult, type LotStatus, type ShipmentRequestStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverGoodsIssueApi } from '@/api/server/goodsIssues';
 import type { ProductEligibility } from '@/lib/eligibility';
 import type { MockTables } from '@/mock/schema';
 import {
@@ -168,25 +171,31 @@ function issueView(tables: Tables, shipmentRequestId: number): GoodsIssueView {
 export const goodsIssueApi = {
   /** 출고 확정 화면 왼쪽 목록: 배정 확정 → 배정 대기 → 출고 완료 순 */
   queue: () =>
-    mockQuery((tables) => {
-      requireActor(tables, READ_RULE);
-      return queueRows(tables);
-    }),
+    isServerDataSource()
+      ? serverGoodsIssueApi.queue()
+      : mockQuery((tables) => {
+          requireActor(tables, READ_RULE);
+          return queueRows(tables);
+        }),
   /** 출고 확정 화면 본문: 배정 LOT과 품질·재고 재검증 결과 */
   detail: (shipmentRequestId: number) =>
-    mockQuery((tables) => {
-      requireActor(tables, READ_RULE);
-      return issueView(tables, shipmentRequestId);
-    }),
+    isServerDataSource()
+      ? serverGoodsIssueApi.detail(shipmentRequestId)
+      : mockQuery((tables) => {
+          requireActor(tables, READ_RULE);
+          return issueView(tables, shipmentRequestId);
+        }),
   /** 출고 확정 (출하요청 단위). 이미 출고면 COM-001, 배정 대기 INV-001, 소진 INV-004, 미검사·불합격 INV-002, 예약·수주 잔량 초과 SHP-002 */
   confirm: (input: { shipmentRequestId: number; expectedUpdatedAt?: string | null }) =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, CONFIRM_RULE);
-      const result = confirmGoodsIssue(tx, userActor(actor.employee.id), input);
-      return {
-        shipmentRequestNo: result.shipmentRequest.shipmentRequestNo,
-        issuedLotNos: result.issuedLotNos,
-        millSheets: result.millSheets.map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
-      };
-    }),
+    isServerDataSource()
+      ? serverGoodsIssueApi.confirm(input)
+      : mockMutation((tx) => {
+          const actor = requireActor(tx.tables, CONFIRM_RULE);
+          const result = confirmGoodsIssue(tx, userActor(actor.employee.id), input);
+          return {
+            shipmentRequestNo: result.shipmentRequest.shipmentRequestNo,
+            issuedLotNos: result.issuedLotNos,
+            millSheets: result.millSheets.map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
+          };
+        }),
 };
