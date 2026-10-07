@@ -14,12 +14,12 @@ import { Modal } from '@/components/Modal';
 import { Segmented } from '@/components/Tabs';
 import { MemberPicker } from '@/features/messenger/components/MemberPicker';
 import { useAction } from '@/hooks/useAction';
-import { useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
 
 type NewRoomType = 'DIRECT' | 'GROUP';
 
 export function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
-  const myId = useMockEmployeeId();
+  const myId = useMe().employeeId;
   const [chatRoomType, setChatRoomType] = useState<NewRoomType>('DIRECT');
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [chatRoomName, setChatRoomName] = useState('');

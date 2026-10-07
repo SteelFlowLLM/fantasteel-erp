@@ -157,9 +157,9 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect(sent.file).toEqual({ name: '메모.txt', size: 5, mimeType: 'text/plain' });
 
     actAs(SEED_EMPLOYEE_NO.quality);
-    expect(await messengerApi.getFile(sent.id)).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
+    expect(await messengerApi.getFile({ messageId: sent.id, fileName: '' })).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
     actAs(SEED_EMPLOYEE_NO.purchase);
-    await expect(messengerApi.getFile(sent.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(messengerApi.getFile({ messageId: sent.id, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
     expect((await messengerApi.listRooms()).map((r) => r.id)).not.toContain(roomId);
   });
 

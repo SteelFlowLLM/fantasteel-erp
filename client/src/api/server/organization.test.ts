@@ -91,14 +91,14 @@ describe('조직 서버 어댑터 (api/server/organization.ts)', () => {
     expect((await directoryApi.listRoles())[0]).toMatchObject({ roleCode: 'ADMIN', permissions: [{ permission: 'ORG_MANAGE', permissionLevel: 'USE' }] });
   });
 
-  it('메신저·업무 멤버 선택용 조회는 서버 모드에서도 서버를 부르지 않는다', async () => {
+  it('사원 목록(관리자 전용 API)은 서버 모드에서도 서버를 부르지 않고, 멤버 선택 조직도는 서버 조직도를 쓴다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, () => undefined);
     const employees = await directoryApi.listEmployees({ isActive: true });
-    const chart = await directoryApi.getOrgChart();
-
     expect(calls).toEqual([]);
     expect(employees.length).toBeGreaterThan(0);
-    expect(chart.length).toBeGreaterThan(0);
+
+    await expect(directoryApi.getOrgChart()).rejects.toThrow();
+    expect(calls.map((c) => c.path)).toContain('/departments');
   });
 });
 

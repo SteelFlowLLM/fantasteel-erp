@@ -31,6 +31,7 @@ export interface ChatMemberView {
   id: number;
   employeeNo: string;
   employeeName: string;
+  departmentId: number;
   departmentName: string;
   jobGradeName: string;
   isHead: boolean;

@@ -8,6 +8,7 @@ export interface ServerCall {
   /** /api/v1 뒤 경로 (쿼리 제외) */
   path: string;
   query: Record<string, string>;
+  /** JSON 본문은 읽은 값, multipart는 FormData 그대로 */
   body: unknown;
 }
 
@@ -28,7 +29,7 @@ export function useFakeServer(employeeNo: string, respond: (call: ServerCall) =>
       method: init.method ?? 'GET',
       path: parsed.pathname.replace(/^.*\/api\/v1/, ''),
       query: Object.fromEntries(parsed.searchParams.entries()),
-      body: init.body ? JSON.parse(String(init.body)) : undefined,
+      body: init.body instanceof FormData ? init.body : init.body ? JSON.parse(String(init.body)) : undefined,
     };
     calls.push(call);
     return respond(call) ?? fail(404, 'COM-003', `없는 경로 ${call.method} ${call.path}`);

@@ -170,7 +170,7 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
           {getFileExtension(name) ? ` · ${getFileExtension(name)}` : ''}
         </span>
       </span>
-      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate(messageId)} />
+      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileName: name })} />
     </div>
   );
 }

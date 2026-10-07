@@ -7,7 +7,7 @@ import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { EmptyNote, Spinner } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
-import { useEmployeeList, useOrgChart } from '@/hooks/useDirectory';
+import { useOrgChart } from '@/hooks/useDirectory';
 import { cn } from '@/lib/cn';
 
 export interface MemberPickerProps {
@@ -24,6 +24,14 @@ export interface MemberPickerProps {
 /** 이 부서와 하위 부서의 부서원 */
 function collectMemberIds(node: OrgChartNode): number[] {
   return [...node.members.map((m) => m.id), ...node.children.flatMap(collectMemberIds)];
+}
+
+/** 검색용: 조직도의 모든 사원과 소속 부서 이름 (서버 모드에서도 조직도만 읽을 수 있다) */
+function flattenMembers(nodes: readonly OrgChartNode[]): { id: number; employeeNo: string; employeeName: string; jobGradeName: string; departmentName: string }[] {
+  return nodes.flatMap((node) => [
+    ...node.members.map((m) => ({ id: m.id, employeeNo: m.employeeNo, employeeName: m.employeeName, jobGradeName: m.jobGradeName, departmentName: node.departmentName })),
+    ...flattenMembers(node.children),
+  ]);
 }
 
 function Check({ checked, indeterminate, single, disabled, label, onChange }: { checked: boolean; indeterminate?: boolean; single?: boolean; disabled?: boolean; label: string; onChange: () => void }) {
@@ -46,14 +54,14 @@ function Check({ checked, indeterminate, single, disabled, label, onChange }: { 
 
 export function MemberPicker({ selected, onChange, single, excludeIds = [], lockedIds = [] }: MemberPickerProps) {
   const orgChart = useOrgChart();
-  const employees = useEmployeeList({ isActive: true });
+  const employees = useMemo(() => flattenMembers(orgChart.data ?? []), [orgChart.data]);
   const [keyword, setKeyword] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(new Set());
 
   const excluded = useMemo(() => new Set(excludeIds), [excludeIds]);
   const locked = useMemo(() => new Set(lockedIds), [lockedIds]);
   const chosen = useMemo(() => new Set(selected), [selected]);
-  const nameOf = useMemo(() => new Map((employees.data ?? []).map((e) => [e.id, e.employeeName])), [employees.data]);
+  const nameOf = useMemo(() => new Map(employees.map((e) => [e.id, e.employeeName])), [employees]);
 
   const toggle = (id: number) => {
     if (locked.has(id) || excluded.has(id)) return;
@@ -69,7 +77,7 @@ export function MemberPicker({ selected, onChange, single, excludeIds = [], lock
 
   const search = keyword.trim().toLowerCase();
   const results = search
-    ? (employees.data ?? []).filter(
+    ? employees.filter(
         (e) => !excluded.has(e.id) && (e.employeeName.toLowerCase().includes(search) || e.employeeNo.includes(search) || e.departmentName.toLowerCase().includes(search)),
       )
     : [];
@@ -162,7 +170,7 @@ export function MemberPicker({ selected, onChange, single, excludeIds = [], lock
         </div>
       ) : null}
       <div className="max-h-[320px] min-h-[160px] overflow-auto rounded-sm border border-line">
-        {orgChart.isPending || employees.isPending ? (
+        {orgChart.isPending ? (
           <Spinner className="py-8" />
         ) : search ? (
           results.length === 0 ? (

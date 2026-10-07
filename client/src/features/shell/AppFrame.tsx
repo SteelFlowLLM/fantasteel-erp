@@ -7,12 +7,14 @@ import { Rail } from '@/features/shell/Rail';
 import { RouteGuard } from '@/features/shell/RouteGuard';
 import { ShellTitleContext, type ShellTitle } from '@/features/shell/ShellTitleContext';
 import { TopBar } from '@/features/shell/TopBar';
+import { useMessengerSocket } from '@/hooks/useMessengerSocket';
 import { useShellStore } from '@/stores/useShellStore';
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const aiPanelOpen = useShellStore((state) => state.aiPanelOpen);
   const [custom, setCustom] = useState<ShellTitle>({});
   const setTitle = useCallback((title: ShellTitle) => setCustom(title), []);
+  useMessengerSocket();
 
   return (
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">

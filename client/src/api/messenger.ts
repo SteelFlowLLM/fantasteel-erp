@@ -3,10 +3,14 @@
 // - 방 멤버만 방·메시지·첨부를 본다(BP-MSG-01 구현 제안 "방 멤버 권한", "첨부파일에도 방 접근 권한"). 아니면 COM-002.
 // - 업무방 상단 수주 요약은 수주 화면을 열 수 있는 사원에게만 보인다("ERP 대상 조회 권한").
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
+// - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
+import { MESSAGE_ATTACHMENT_MAX_BYTES } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverMessengerApi } from '@/api/server/messenger';
 import { MESSAGE_CONTENT_MAX, memberIdsOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
 import { optionalText, requireRow } from '@/api/validation';
 import { SCREEN, canOpenScreen } from '@/features/shell/screens';
@@ -18,7 +22,8 @@ import { SEED_FILES } from '@/mock/seeds/collab';
 import { insertRow, updateRow } from '@/mock/store';
 
 export { MESSAGE_CONTENT_MAX } from '@/api/messengerRules';
-export const MESSAGE_FILE_MAX_BYTES = MOCK_FILE_MAX_BYTES;
+/** 서버는 10MB(2026-10-07 결정), 가짜 DB는 브라우저 저장 공간 때문에 더 작다 */
+export const MESSAGE_FILE_MAX_BYTES = isServerDataSource() ? MESSAGE_ATTACHMENT_MAX_BYTES : MOCK_FILE_MAX_BYTES;
 export const CHAT_ROOM_NAME_MAX = 100;
 export const MESSAGE_PAGE_SIZE = 50;
 export const RECENT_CHAT_ROOM_LIMIT = 8;
@@ -323,13 +328,13 @@ const isValidFileName = (name: string) => name.trim().length > 0 && name.length 
 export const messengerApi = {
   /** 안 읽은 메시지 합계 (레일·상단 배지) */
   countUnread: (employeeId: number): Promise<number> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMessengerApi.countUnread() : mockQuery((tables) =>
       tables.chatRoomMember.filter((m) => m.employeeId === employeeId).reduce((sum, m) => sum + unreadCountOf(tables, m.chatRoomId, employeeId), 0),
     ),
 
   /** 상단 드롭다운의 최근 채팅방 */
   listRecentRooms: (employeeId: number, limit: number = RECENT_CHAT_ROOM_LIMIT): Promise<ChatRoomPreview[]> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMessengerApi.listRecentRooms(limit) : mockQuery((tables) => {
       const roomIds = roomIdsOfMember(tables, employeeId);
       return tables.chatRoom
         .filter((room) => roomIds.has(room.id))
@@ -341,7 +346,7 @@ export const messengerApi = {
 
   /** 내가 멤버인 채팅방, 최근 대화 순 */
   listRooms: (): Promise<ChatRoomListItem[]> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMessengerApi.listRooms() : mockQuery((tables) => {
       const actor = requireActor(tables);
       const me = actor.employee.id;
       const showSalesOrder = canViewSalesOrders(actor);
@@ -374,7 +379,7 @@ export const messengerApi = {
 
   /** 채팅방 정보: 멤버, 업무방이면 수주 요약 */
   getRoom: (chatRoomId: number): Promise<ChatRoomDetailView> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMessengerApi.getRoom(chatRoomId) : mockQuery((tables) => {
       const actor = requireActor(tables);
       const room = requireMemberRoom(tables, actor, chatRoomId);
       const me = actor.employee.id;
@@ -422,7 +427,7 @@ export const messengerApi = {
 
   /** 최근 메시지부터 limit개 (화면에는 오래된 것부터). 더 오래된 메시지가 있으면 hasMore */
   listMessages: ({ chatRoomId, limit = MESSAGE_PAGE_SIZE }: { chatRoomId: number; limit?: number }): Promise<MessagePage> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMessengerApi.listMessages({ chatRoomId, limit }) : mockQuery((tables) => {
       const actor = requireActor(tables);
       requireMemberRoom(tables, actor, chatRoomId);
       const all = tables.message.filter((m) => m.chatRoomId === chatRoomId).sort((a, b) => a.id - b.id);
@@ -433,9 +438,9 @@ export const messengerApi = {
       };
     }),
 
-  /** 첨부 내려받기 (방 멤버만) */
-  getFile: (messageId: number): Promise<MessageFileContent> =>
-    mockQuery((tables) => {
+  /** 첨부 내려받기 (방 멤버만). 서버는 파일 이름을 응답 헤더로만 주고 다른 origin에서는 읽을 수 없어 화면이 넘긴다 */
+  getFile: ({ messageId, fileName }: { messageId: number; fileName: string }): Promise<MessageFileContent> =>
+    isServerDataSource() ? serverMessengerApi.getFile({ messageId, fileName }) : mockQuery((tables) => {
       const actor = requireActor(tables);
       const message = requireRow(tables, 'message', messageId, '메시지');
       requireMemberRoom(tables, actor, message.chatRoomId);
@@ -446,7 +451,7 @@ export const messengerApi = {
 
   /** 1:1·그룹 채팅방 만들기. 같은 상대와의 1:1 방이 있으면 그 방을 돌려준다 */
   createRoom: (input: CreateChatRoomInput): Promise<{ id: number; reused: boolean }> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMessengerApi.createRoom(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const me = actor.employee.id;
       if (input.chatRoomType === CHAT_ROOM_TYPE.WORK) {
@@ -477,7 +482,7 @@ export const messengerApi = {
 
   /** 멤버 초대 (1:1 제외). 새 멤버는 이전 대화를 볼 수 있고, 지금까지의 메시지는 읽은 것으로 시작한다. 초대한 수를 돌려준다 */
   inviteMembers: ({ chatRoomId, memberIds }: { chatRoomId: number; memberIds: number[] }): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? Promise.reject<number>(new Error('멤버 초대는 아직 서버와 연결되지 않았어요')) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const room = requireMemberRoom(tx.tables, actor, chatRoomId);
       if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new InputError('1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요');
@@ -492,7 +497,7 @@ export const messengerApi = {
 
   /** 메시지 보내기 (글, 파일 1개, 또는 둘 다). @멘션·업무방 알림은 messengerRules.postMessage가 만든다 */
   sendMessage: (input: SendMessageInput): Promise<MessageView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMessengerApi.sendMessage(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const room = requireMemberRoom(tx.tables, actor, input.chatRoomId);
       const content = (input.content ?? '').trim();
@@ -526,7 +531,7 @@ export const messengerApi = {
 
   /** 읽음 위치를 옮긴다 (뒤로 돌아가지 않는다). 남은 안 읽은 수를 돌려준다 */
   markRead: ({ chatRoomId, lastMessageId }: { chatRoomId: number; lastMessageId: number }): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMessengerApi.markRead({ chatRoomId, lastMessageId }) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const room = requireMemberRoom(tx.tables, actor, chatRoomId);
       const message = requireRow(tx.tables, 'message', lastMessageId, '메시지');

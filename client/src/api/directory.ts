@@ -1,7 +1,7 @@
 // 조직 조회: 사원·부서(트리)·직급·역할과 권한 (REQ-AUTH-002·003, REQ-ORG-001~004).
 // 등록·수정은 2단계(조직·기준정보 화면)에서 더한다.
-// 서버 모드에서는 관리 화면이 쓰는 조회(listManagedEmployees·부서·직급·역할)만 서버를 읽는다. listEmployees·getOrgChart는 메신저·업무 멤버 선택용이라
-// 그 화면들이 서버에 연결될 때까지 가짜 DB를 읽는다(서버 사원 id를 가짜 DB 메신저에 넘기면 맞지 않음).
+// 서버 모드에서는 관리 화면이 쓰는 조회(listManagedEmployees·부서·직급·역할)와 조직도(getOrgChart: 메신저·업무방 멤버 선택)가 서버를 읽는다.
+// listEmployees는 서버에서 관리자 전용(GET employees)이라 가짜 DB를 읽는다(서버 모드에서 멤버 선택은 조직도만 쓴다).
 import type { Permission, PermissionLevel, RoleCode } from '@/codes';
 import { PERMISSIONS } from '@/codes';
 import { mockQuery } from '@/api/client';
@@ -53,7 +53,7 @@ export interface OrgChartNode {
   departmentCode: string;
   departmentName: string;
   head: { id: number; employeeName: string; jobGradeName: string } | null;
-  members: { id: number; employeeName: string; jobGradeName: string; isHead: boolean }[];
+  members: { id: number; employeeNo: string; employeeName: string; jobGradeName: string; isHead: boolean }[];
   children: OrgChartNode[];
 }
 
@@ -131,7 +131,7 @@ function buildOrgChart(tables: Readonly<MockTables>, parentId: number | null): O
         members: tables.employee
           .filter((e) => e.isActive && e.departmentId === department.id)
           .sort(compareMembers)
-          .map((e) => ({ id: e.id, employeeName: e.employeeName, jobGradeName: gradeOf(e.jobGradeId), isHead: e.id === department.headEmployeeId })),
+          .map((e) => ({ id: e.id, employeeNo: e.employeeNo, employeeName: e.employeeName, jobGradeName: gradeOf(e.jobGradeId), isHead: e.id === department.headEmployeeId })),
         children: buildOrgChart(tables, department.id),
       };
     });
@@ -166,7 +166,7 @@ export const directoryApi = {
       }),
     ),
 
-  getOrgChart: (): Promise<OrgChartNode[]> => mockQuery((tables) => buildOrgChart(tables, null)),
+  getOrgChart: (): Promise<OrgChartNode[]> => (isServerDataSource() ? serverOrganizationApi.getOrgChart() : mockQuery((tables) => buildOrgChart(tables, null))),
 
   listJobGrades: (): Promise<JobGradeView[]> =>
     isServerDataSource() ? serverOrganizationApi.listJobGrades() : mockQuery((tables) =>
