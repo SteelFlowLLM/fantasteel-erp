@@ -1,6 +1,6 @@
 // 대시보드 위젯 중 이미 있는 서버 API를 모아 화면에서 묶는 3개(납기 위험·강종별 불합격률·생산량)를 본다.
 import { afterEach, describe, expect, it } from 'vitest';
-import { serverDashboardSourceApi } from '@/api/server/dashboard';
+import { serverDashboardApi, serverDashboardSourceApi } from '@/api/server/dashboard';
 import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { trendWindow } from '@/features/dashboard/lib/widgetMath';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
@@ -77,5 +77,11 @@ describe('대시보드 서버 묶음 위젯 (api/server/dashboard.ts)', () => {
     const result = await serverDashboardSourceApi.productionVolume(WINDOW);
     expect(result).toMatchObject({ days: 30, totalSlabQty: 2, totalCoilQty: 1, totalTon: '70.179' });
     expect(result.series.at(-1)).toEqual({ date: '2026-10-07', slabQty: 2, coilQty: 0, ton: '47.100' });
+  });
+
+  it('공정별 수율: 서버 값을 그대로 쓰고 연주 계획 대비 매수는 비운다', async () => {
+    const row = { processType: 'CONTINUOUS_CASTING', resultCount: 2, inputTon: '500.000', outputTon: '490.000', actualYieldRate: '0.9800', plannedYieldRate: '0.9800' };
+    useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/dashboard/widgets/process-yield' ? ok({ processes: [row] }) : undefined));
+    expect(await serverDashboardApi.processYield()).toEqual({ processes: [{ ...row, qtyAttainmentRate: null }] });
   });
 });

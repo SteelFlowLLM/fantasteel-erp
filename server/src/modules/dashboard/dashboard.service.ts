@@ -3,6 +3,7 @@ import {
   ITEM_TYPE,
   LOT_TYPE,
   PERMISSION,
+  PROCESS_TYPE,
   PRODUCTION_PLAN_STATUS,
   SALES_ORDER_ITEM_STATUS,
   SHIPMENT_REQUEST_STATUS,
@@ -11,14 +12,19 @@ import {
   type ItemType,
   type OrderFulfillmentWidget,
   type ProcessFlowWidget,
+  type ProcessYieldWidget,
+  type ProductionResultView,
   type ProductStockWidget,
   type ShipmentResultWidget,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductionResultService } from '../production/production-result.service';
+import { ProductionService, type HeatPlanBasis } from '../production/production.service';
 import { daysBetween } from '../sales-order/fulfillment.calculator';
 import { SalesOrderService } from '../sales-order/sales-order.service';
 import { DashboardRepository } from './dashboard.repository';
@@ -27,6 +33,9 @@ const OPEN_STATUSES: readonly string[] = [SALES_ORDER_ITEM_STATUS.OPEN, SALES_OR
 const DAY_MS = 86_400_000;
 /** 추이 위젯 기간: 오늘 포함 최근 30일 (가정값, docs/rework/areas/dashboard.md 5장 — 화면 DASHBOARD_TREND_DAYS와 같다) */
 const TREND_DAYS = 30;
+const RESULT_PAGE_SIZE = 100;
+/** 수율은 routing.planned_yield_rate와 같은 소수 4자리 */
+const YIELD_SCALE = 4;
 
 /**
  * 대시보드 위젯 (REQ-DSH-001, BP-DSH-01 "권한 내 집계"). 숫자는 각 모듈의 계산을 그대로 쓰고 다시 만들지 않는다.
@@ -40,6 +49,8 @@ export class DashboardService {
     private readonly repository: DashboardRepository,
     private readonly salesOrders: SalesOrderService,
     private readonly inventory: InventoryService,
+    private readonly production: ProductionService,
+    private readonly productionResults: ProductionResultService,
   ) {}
 
   async processFlow(): Promise<ProcessFlowWidget> {
@@ -119,6 +130,50 @@ export class DashboardService {
       totalTon: sumTon(series.map((p) => p.ton)),
       series,
     };
+  }
+
+  /**
+   * 공정별 수율 (REQ-DSH-001): 완료된 작업 실적의 Σ산출 ÷ Σ투입(톤)과, 계획 수율(라우팅·규격 매핑)을 투입량으로 가중한 값.
+   * 투입·산출 톤과 계획 수율은 생산 모듈 계산(작업 실적 조회·heatPlanBasisOf)을 그대로 쓴다. 제선은 계획 수율을 쓰지 않아(4.4) 수율 없이 톤만.
+   * 계산 방식은 문서에 정의가 없어 docs/rework/areas/dashboard.md 5장 가정값을 따른다. 연주 계획 대비 매수는 손실 매수 칼럼이 없어 주지 않는다.
+   */
+  async processYield(user: AuthUser): Promise<ProcessYieldWidget> {
+    if (!hasPermission(user, { permission: PERMISSION.PRODUCTION_RESULT_CONFIRM, level: 'VIEW' })) throw new AppException('COM-002');
+    const results: ProductionResultView[] = [];
+    for (let page = 1; ; page++) {
+      const result = await this.productionResults.listResults({ page, size: RESULT_PAGE_SIZE });
+      results.push(...result.items);
+      if (results.length >= result.total || result.items.length === 0) break;
+    }
+    const done = results.filter((r) => r.completedAt !== null && r.inputTon !== null && r.outputTon !== null);
+    const planIds = [...new Set(done.flatMap((r) => (r.productionPlanId === null ? [] : [r.productionPlanId])))];
+    const itemOfPlan = new Map((await this.repository.findPlanItems(this.prisma, planIds)).map((p) => [p.id, p.itemId]));
+    const basisOfItem = new Map<number, HeatPlanBasis | null>();
+    for (const itemId of new Set(itemOfPlan.values())) {
+      // 기준정보가 빠진 규격(MST-001)은 계획 수율 없이 보인다
+      basisOfItem.set(itemId, await this.production.heatPlanBasisOf(this.prisma, itemId).catch(() => null));
+    }
+    const plannedRateOf = (r: ProductionResultView): Prisma.Decimal | string | null => {
+      const basis = r.productionPlanId === null ? null : basisOfItem.get(itemOfPlan.get(r.productionPlanId) ?? 0);
+      if (!basis) return null;
+      if (r.processType === PROCESS_TYPE.STEELMAKING) return basis.steelmakingYieldRate;
+      if (r.processType === PROCESS_TYPE.CONTINUOUS_CASTING) return basis.castingYieldRate;
+      if (r.processType === PROCESS_TYPE.HOT_ROLLING) return basis.hotRollingYieldRate;
+      return null;
+    };
+    const processes = Object.values(PROCESS_TYPE).map((processType) => {
+      const rows = done.filter((r) => r.processType === processType);
+      const inputTon = sumTon(rows.map((r) => r.inputTon ?? '0'));
+      const outputTon = sumTon(rows.map((r) => r.outputTon ?? '0'));
+      const input = new Prisma.Decimal(inputTon);
+      if (processType === PROCESS_TYPE.IRONMAKING || input.lte(0)) return { processType, resultCount: rows.length, inputTon, outputTon, actualYieldRate: null, plannedYieldRate: null };
+      const rates = rows.map(plannedRateOf);
+      const plannedYieldRate = rates.some((rate) => rate === null)
+        ? null
+        : rows.reduce((sum, r, i) => sum.add(new Prisma.Decimal(r.inputTon ?? '0').mul(rates[i] ?? 0)), new Prisma.Decimal(0)).div(input).toFixed(YIELD_SCALE);
+      return { processType, resultCount: rows.length, inputTon, outputTon, actualYieldRate: new Prisma.Decimal(outputTon).div(input).toFixed(YIELD_SCALE), plannedYieldRate };
+    });
+    return { processes };
   }
 
   /** 제품 재고: 슬래브·코일 합계와 재고가 있는 규격 (재고 화면은 모든 사원이 연다) */

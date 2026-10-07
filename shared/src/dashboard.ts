@@ -1,5 +1,5 @@
 // 대시보드 위젯 응답 타입 (REQ-DSH-001·002, BP-DSH-01 "권한 내 집계"). 권한이 없는 단계는 null로 준다.
-import type { ItemType } from './codes';
+import type { ItemType, ProcessType } from './codes';
 import type { ProgressMeasure, SalesOrderItemFulfillment } from './sales-order';
 
 /** 서버가 데이터를 주는 위젯. AGENT_RISK(Agent 위험 감지)·대응 후보는 P2라 없다 */
@@ -87,4 +87,22 @@ export interface ShipmentResultWidget {
   totalCoilQty: number;
   totalTon: string;
   series: DailyProductPoint[];
+}
+
+/** 공정별 수율 한 줄: 완료된 작업 실적의 투입·산출 톤 합계 */
+export interface ProcessYieldRow {
+  processType: ProcessType;
+  /** 완료된 작업 실적 수 */
+  resultCount: number;
+  inputTon: string;
+  outputTon: string;
+  /** 실적 수율 = Σ산출 ÷ Σ투입 (소수 4자리). 제선은 계획 수율을 쓰지 않아 null */
+  actualYieldRate: string | null;
+  /** 계획 수율(라우팅·규격 매핑)을 투입량으로 가중한 값. 계획 수율이 없는 실적이 섞이면 null. 제선은 null */
+  plannedYieldRate: string | null;
+}
+
+/** 공정별 수율 (REQ-DSH-001) */
+export interface ProcessYieldWidget {
+  processes: ProcessYieldRow[];
 }
