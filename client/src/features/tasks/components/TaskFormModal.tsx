@@ -1,8 +1,11 @@
 'use client';
 
 // 업무 추가·수정 창 (REQ-NTF-001: 담당자와 마감일 지정). 담당자는 조직 정보의 사용 중 사원에서 고른다 (REQ-ORG-004).
+// 서버 모드는 담당자를 조직도(GET /departments)에서 고르고, 마감일이 필수이며 연결 화면 칸이 없다 (api/server/tasks.ts).
 import { useId, useMemo, useState } from 'react';
+import type { OrgChartDepartmentView } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
 import { TASK_DESCRIPTION_MAX, TASK_TITLE_MAX, taskApi, type TaskView } from '@/api/tasks';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';
@@ -11,13 +14,22 @@ import { Input, Select, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { LINK_PATH_MAX_LENGTH } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
+import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 import { useEmployeeList } from '@/hooks/useDirectory';
-import { useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
+
+type MemberGroup = { departmentName: string; members: { id: number; employeeName: string; jobGradeName: string }[] };
+
+const groupsOfChart = (nodes: readonly OrgChartDepartmentView[]): MemberGroup[] =>
+  nodes.flatMap((node) => [{ departmentName: node.departmentName, members: node.members }, ...groupsOfChart(node.children)]).filter((group) => group.members.length > 0);
 
 export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClose: () => void }) {
-  const myId = useMockEmployeeId();
+  const myId = useMe().employeeId;
+  const serverMode = isServerDataSource();
   const formId = useId();
+  // 가짜 DB 모드는 지금처럼 사원 목록, 서버 모드는 조직도(사용 중인 사원)
   const employees = useEmployeeList({ isActive: true });
+  const chart = useAdminOrgChart();
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
   const [assigneeId, setAssigneeId] = useState<number | null>(task?.assignee.id ?? myId);
@@ -34,17 +46,22 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
   const pending = create.isPending || update.isPending;
 
   const groups = useMemo(() => {
-    const result: { departmentName: string; members: { id: number; label: string }[] }[] = [];
-    for (const employee of employees.data ?? []) {
-      let group = result.find((g) => g.departmentName === employee.departmentName);
-      if (!group) {
-        group = { departmentName: employee.departmentName, members: [] };
-        result.push(group);
+    const result: MemberGroup[] = [];
+    if (serverMode) result.push(...groupsOfChart(chart.data ?? []));
+    else
+      for (const employee of employees.data ?? []) {
+        let group = result.find((g) => g.departmentName === employee.departmentName);
+        if (!group) {
+          group = { departmentName: employee.departmentName, members: [] };
+          result.push(group);
+        }
+        group.members.push(employee);
       }
-      group.members.push({ id: employee.id, label: `${employee.employeeName} ${employee.jobGradeName}${employee.id === myId ? ' (나)' : ''}` });
-    }
-    return result;
-  }, [employees.data, myId]);
+    return result.map((group) => ({
+      departmentName: group.departmentName,
+      members: group.members.map((m) => ({ id: m.id, label: `${m.employeeName} ${m.jobGradeName}${m.id === myId ? ' (나)' : ''}` })),
+    }));
+  }, [serverMode, chart.data, employees.data, myId]);
 
   const submit = () => {
     const input = { title, description, assigneeId, dueDate, linkPath };
@@ -106,7 +123,7 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
             <Select
               id={`${formId}-assignee`}
               value={assigneeId ?? ''}
-              disabled={employees.isPending}
+              disabled={serverMode ? chart.isPending : employees.isPending}
               invalid={Boolean(fieldErrors.assigneeId)}
               onChange={(event) => setAssigneeId(event.target.value ? Number(event.target.value) : null)}
             >
@@ -122,25 +139,33 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
               ))}
             </Select>
           </Field>
-          <Field label="마감일" htmlFor={`${formId}-due`} hint="비워 두면 마감 없음" error={fieldErrors.dueDate}>
+          <Field
+            label="마감일"
+            required={serverMode}
+            htmlFor={`${formId}-due`}
+            hint={serverMode ? undefined : '비워 두면 마감 없음'}
+            error={fieldErrors.dueDate}
+          >
             <DateInput id={`${formId}-due`} value={dueDate} onChange={setDueDate} invalid={Boolean(fieldErrors.dueDate)} className="w-full" />
           </Field>
         </div>
-        <Field
-          label="연결 화면"
-          htmlFor={`${formId}-link`}
-          hint="업무에서 바로 열 화면 경로 (선택). 예: /goods-receipts, /sales-orders/12"
-          error={fieldErrors.linkPath}
-        >
-          <Input
-            id={`${formId}-link`}
-            value={linkPath}
-            maxLength={LINK_PATH_MAX_LENGTH}
-            placeholder="/…"
-            invalid={Boolean(fieldErrors.linkPath)}
-            onChange={(event) => setLinkPath(event.target.value)}
-          />
-        </Field>
+        {serverMode ? null : (
+          <Field
+            label="연결 화면"
+            htmlFor={`${formId}-link`}
+            hint="업무에서 바로 열 화면 경로 (선택). 예: /goods-receipts, /sales-orders/12"
+            error={fieldErrors.linkPath}
+          >
+            <Input
+              id={`${formId}-link`}
+              value={linkPath}
+              maxLength={LINK_PATH_MAX_LENGTH}
+              placeholder="/…"
+              invalid={Boolean(fieldErrors.linkPath)}
+              onChange={(event) => setLinkPath(event.target.value)}
+            />
+          </Field>
+        )}
       </form>
     </Modal>
   );
