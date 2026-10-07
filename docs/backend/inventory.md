@@ -178,6 +178,5 @@ RETURNING id;
 
 | 항목 | 임시 결정 |
 | --- | --- |
-| 여재 매수 | 슬래브 규격별 미배정 합격 LOT 수(적격 + AVAILABLE + CONFIRMED 배정 없음, `findAllocatableLots.sql`) − ACTIVE 예약 매수, 0 미만은 0 (사용자 결정) |
+| 여재 매수 | 슬래브 규격별 미배정 합격 LOT 수(적격 + AVAILABLE + CONFIRMED 배정 없음, `findAllocatableLots.sql`) − ACTIVE 예약 매수, 0 미만은 0 (사용자 결정). 진행 중(진행중·부분출하)인 코일 수주에 묶인 슬래브(LOT → 실적 → 계획 → 수주 품목, 4장 자동 예약과 같은 경로)는 열연에 쓰일 몫이라 빼고 센다 |
 | 여재 LOT·보유 기간 | 예약은 매수 단위라 LOT을 정할 수 없어 FIFO상 가장 늦게 쓰일 LOT을 여재로 보고, 그중 가장 이른 생산완료일부터 센다(여재 전환 시각이 ERD에 없다) |
-| 한계 | 코일 수주용으로 만든 슬래브는 열연 배정이 CONFIRMED 되기 전까지 여재로 세어진다 |

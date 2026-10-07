@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, INSPECTION_RESULT, ITEM_TYPE, LOT_TYPE, SALES_ORDER_ITEM_STATUS } from '@fantasteel/shared';
 import { findAllocatableLots } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -42,6 +42,25 @@ export class DashboardRepository {
   /** 미배정 합격 LOT (적격 + AVAILABLE + CONFIRMED 배정 없음, FIFO 순서). 배정 후보와 같은 쿼리를 쓴다 */
   findUnallocatedPassedLots(tx: Tx, itemId: number) {
     return tx.$queryRawTyped(findAllocatableLots(itemId));
+  }
+
+  /**
+   * 진행 중인 코일 수주에 묶인 슬래브 LOT (열연에 쓰일 몫).
+   * LOT → 작업 실적 → 생산계획 → 수주 품목(inventory.md 4장 자동 예약과 같은 경로). 수주가 취소되면 계획의 수주 품목이 null이 되어 빠진다.
+   */
+  async findLotIdsForOpenCoilOrders(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    const rows = await tx.lot.findMany({
+      where: {
+        id: { in: lotIds },
+        productionResult: {
+          productionPlan: {
+            salesOrderItem: { salesOrderItemStatus: { in: [SALES_ORDER_ITEM_STATUS.OPEN, SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED] }, item: { itemType: ITEM_TYPE.COIL } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return new Set(rows.map((r) => r.id));
   }
 
   /** 규격의 1매 이론중량 (여재 톤 계산) */

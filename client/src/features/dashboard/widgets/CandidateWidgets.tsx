@@ -364,7 +364,7 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
       <span className="text-cap text-ink-3">
         {/* 서버에는 여재 전환 시각이 없어 생산완료일부터 센다 (inventory.md 8-1) */}
         {isServerDataSource()
-          ? '여재 = 미배정 합격 슬래브 − 수주 예약 매수 · 보유 일수 = 생산완료일부터 · 열연 배정 전의 코일용 슬래브도 들어가요'
+          ? '여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터'
           : '여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (재고 화면 여재와 같은 값) · 보유 일수 = 여재로 바뀐 날부터'}
       </span>
     </div>
