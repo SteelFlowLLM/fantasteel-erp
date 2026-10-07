@@ -27,8 +27,9 @@ export class MasterDataRepository {
     return tx.steelGrade.findMany({ orderBy: { id: 'asc' }, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
   }
 
-  findSpecMappings(tx: Tx) {
+  findSpecMappings(tx: Tx, id?: number) {
     return tx.specMapping.findMany({
+      where: { id },
       orderBy: { id: 'asc' },
       select: {
         id: true,
@@ -64,13 +65,17 @@ export class MasterDataRepository {
 
   // ── 등록·수정 (트랜잭션 안에서 부르므로 관계를 함께 고르지 않는다) ──
 
+  findItem(tx: Tx, id: number) {
+    return tx.item.findUnique({ where: { id } });
+  }
+
   findItemByCode(tx: Tx, itemCode: string) {
     return tx.item.findUnique({ where: { itemCode }, select: { id: true } });
   }
 
   /** 같은 유형·강종·두께·폭·길이 규격 (REQ-MST-003 중복 금지) */
-  findSameSpec(tx: Tx, spec: { itemType: ItemType; steelGradeId: number; thicknessMm: string; widthMm: string; lengthMm: string }) {
-    return tx.item.findFirst({ where: spec, select: { itemCode: true } });
+  findSameSpec(tx: Tx, spec: { itemType: ItemType; steelGradeId: number; thicknessMm: string; widthMm: string; lengthMm: string }, exceptId?: number) {
+    return tx.item.findFirst({ where: { ...spec, id: exceptId === undefined ? undefined : { not: exceptId } }, select: { itemCode: true } });
   }
 
   findSteelGrade(tx: Tx, id: number) {
@@ -89,12 +94,35 @@ export class MasterDataRepository {
     return tx.supplier.findUnique({ where: { id }, select: { id: true } });
   }
 
+  /**
+   * 규격이 쓰였는지 (MST-002): 수주 품목·LOT이 있거나 재고 수량이 있다 (master-data.md 8장 임시 결정).
+   * 재고 행은 inventory 모듈이 필요할 때 만들어서 행이 있다는 것만으로는 보지 않는다.
+   * 같은 tx에서 동시에 쿼리하지 않도록 차례로 센다.
+   */
+  async isSpecUsed(tx: Tx, itemId: number): Promise<boolean> {
+    if ((await tx.salesOrderItem.count({ where: { itemId } })) > 0) return true;
+    if ((await tx.lot.count({ where: { itemId } })) > 0) return true;
+    return (await tx.inventory.count({ where: { itemId, OR: [{ onHandQty: { gt: 0 } }, { reservedQty: { gt: 0 } }] } })) > 0;
+  }
+
+  /** 이 규격이 슬래브나 코일로 들어간 매핑 */
+  findSpecMappingOf(tx: Tx, itemId: number) {
+    return tx.specMapping.findFirst({ where: { OR: [{ slabItemId: itemId }, { coilItemId: itemId }] } });
+  }
+
   createItem(tx: Tx, data: Prisma.ItemUncheckedCreateInput) {
     return tx.item.create({ data, select: { id: true } });
+  }
+
+  updateItem(tx: Tx, id: number, data: Prisma.ItemUncheckedUpdateInput) {
+    return tx.item.update({ where: { id }, data, select: { id: true } });
   }
 
   createSteelGrade(tx: Tx, data: { steelGradeCode: string; steelGradeName: string; standardNo: string }) {
     return tx.steelGrade.create({ data, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
   }
 
+  createSpecMapping(tx: Tx, data: { slabItemId: number; coilItemId: number }) {
+    return tx.specMapping.create({ data, select: { id: true } });
+  }
 }

@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록 API(API-166·169)를 실제 앱과 DB(fs_master)로 확인한다.
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록·수정 API(API-166·167·169·171)를 실제 앱과 DB(fs_master)로 확인한다.
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -52,7 +52,7 @@ beforeAll(async () => {
   logisticsCookie = await login('1610014');
 }, 60_000);
 
-async function send<T>(method: 'POST', path: string, payload: unknown, cookie = adminCookie) {
+async function send<T>(method: 'POST' | 'PATCH', path: string, payload: unknown, cookie = adminCookie) {
   const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string; message: string } } };
 }
@@ -162,9 +162,15 @@ describe('GET /production-settings (API-187)', () => {
   });
 });
 
-describe('등록 (API-166·169)', () => {
+describe('등록·수정 (API-166·167·169·171)', () => {
   let yardIdOf: Record<string, number>;
   let gradeIdOf: Record<string, number>;
+
+  async function itemIdOf(itemCode: string): Promise<number> {
+    const item = (await get<ItemView[]>('/items')).body.data.find((i) => i.itemCode === itemCode);
+    if (!item) throw new Error(`품목 없음: ${itemCode}`);
+    return item.id;
+  }
 
   beforeAll(async () => {
     const yards = (await get<YardView[]>('/yards')).body.data;
@@ -181,6 +187,7 @@ describe('등록 (API-166·169)', () => {
     lengthMm: '10000',
     defaultYardId: yardIdOf.SLAB,
   });
+  const coil = (thicknessMm: string) => ({ ...slab(thicknessMm), itemType: 'COIL', lengthMm: '980000', defaultYardId: yardIdOf.COIL });
 
   it('권한이 조회뿐이면 COM-002', async () => {
     const { body } = await send('POST', '/items', slab('250'), productionCookie);
@@ -216,6 +223,56 @@ describe('등록 (API-166·169)', () => {
     expect((await send('POST', '/items', { ...raw, defaultSupplierId: 999_999 })).body.error?.code).toBe('COM-003');
     const { body } = await send<ItemView>('POST', '/items', { ...raw, defaultSupplierId: suppliers[0].id });
     expect(body.data).toMatchObject({ itemCode: 'ORE02', unitType: 'TON', rawMaterialType: 'IRON_ORE', defaultSupplierId: suppliers[0].id, theoreticalWeightTon: null });
+    const patched = await send<ItemView>('PATCH', `/items/${body.data.id}`, { itemName: '철광석 분광', defaultSupplierId: null });
+    expect(patched.body.data).toMatchObject({ itemName: '철광석 분광', defaultSupplierId: null });
+  });
+
+  it('수주에 쓰인 규격의 치수·강종 수정은 MST-002, 기본 야드만 바꾸는 것은 된다', async () => {
+    const id = await itemIdOf('SL-SS275-250x1200x10000');
+    // 기본 시드에는 수주가 없어 영업 사원이 수주를 등록해 규격을 쓰인 상태로 만든다
+    const customers = (await get<{ id: number }[]>('/customers')).body.data;
+    const salesCookie = await login('2103003');
+    const ordered = await send('POST', '/sales-orders', { customerId: customers[0].id, items: [{ itemId: id, orderedQty: 1, dueDate: '2099-12-31' }] }, salesCookie);
+    expect(ordered.status).toBe(201);
+
+    const { status, body } = await send('PATCH', `/items/${id}`, { thicknessMm: '240' });
+    expect(status).toBe(409);
+    expect(body.error?.code).toBe('MST-002');
+    expect((await send('PATCH', `/items/${id}`, { steelGradeId: gradeIdOf.SM355D })).body.error?.code).toBe('MST-002');
+    expect((await send<ItemView>('PATCH', `/items/${id}`, { defaultYardId: yardIdOf.SLAB })).body.data.theoreticalWeightTon).toBe('23.550');
+  });
+
+  it('안 쓰인 규격은 치수를 고치면 코드·이론중량을 다시 만든다', async () => {
+    const id = await itemIdOf('SL-SM355C-250x1200x10000');
+    const { body } = await send<ItemView>('PATCH', `/items/${id}`, { thicknessMm: '200' });
+    expect(body.data).toMatchObject({ itemCode: 'SL-SM355C-200x1200x10000', theoreticalWeightTon: '18.840' });
+  });
+
+  it('없는 품목 수정은 COM-003', async () => {
+    expect((await send('PATCH', '/items/999999', { defaultYardId: yardIdOf.SLAB })).body.error?.code).toBe('COM-003');
+  });
+
+  it('규격 매핑: 코일이 슬래브보다 무거우면 거부, 맞으면 열연 계획 수율을 계산한다', async () => {
+    const slabId = await itemIdOf('SL-SM355C-200x1200x10000');
+    const heavy = (await send<ItemView>('POST', '/items', coil('2.5'))).body.data;
+    expect(heavy.theoreticalWeightTon).toBe('23.079');
+    expect((await send('POST', '/spec-mappings', { slabItemId: slabId, coilItemId: heavy.id })).body.error?.code).toBe('COM-004');
+
+    const light = (await send<ItemView>('POST', '/items', coil('2'))).body.data;
+    const { status, body } = await send<SpecMappingView>('POST', '/spec-mappings', { slabItemId: slabId, coilItemId: light.id });
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ steelGradeCode: 'SM355C', coilItem: { theoreticalWeightTon: '18.463' }, hotRollingYieldRate: '0.9800' });
+
+    expect((await send('POST', '/spec-mappings', { slabItemId: slabId, coilItemId: heavy.id })).body.error?.code).toBe('COM-004');
+    // 매핑된 슬래브를 코일보다 가볍게 고치면 매핑 조건 위반
+    expect((await send('PATCH', `/items/${slabId}`, { thicknessMm: '150' })).body.error?.code).toBe('COM-004');
+  });
+
+  it('규격 매핑: 강종이 다르면 COM-004, 없는 규격이면 COM-003', async () => {
+    const slabId = await itemIdOf('SL-SS275-250x1200x10000');
+    const coilId = await itemIdOf('CL-SM355A-2.5x1200x980000');
+    expect((await send('POST', '/spec-mappings', { slabItemId: slabId, coilItemId: coilId })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/spec-mappings', { slabItemId: 999_999, coilItemId: coilId })).body.error?.code).toBe('COM-003');
   });
 
   it('강종 등록: 코드 중복은 COM-004, 적용 규격 번호는 필수', async () => {

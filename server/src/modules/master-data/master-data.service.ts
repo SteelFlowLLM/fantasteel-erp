@@ -24,7 +24,8 @@ import {
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
-import type { CreateItemDto } from './dto/item.dto';
+import type { CreateItemDto, UpdateItemDto } from './dto/item.dto';
+import type { CreateSpecMappingDto } from './dto/spec-mapping.dto';
 import type { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataRepository } from './master-data.repository';
 
@@ -97,8 +98,54 @@ export class MasterDataService {
     return this.itemView(id);
   }
 
+  /**
+   * API-167. 쓰인 규격은 강종·치수·이론중량을 바꾸지 않는다 (MST-002, 다른 치수는 새 규격으로).
+   * 안 쓰인 규격은 오타 수정을 허용하고 규격 코드·품목명·이론중량을 다시 만든다 (BP-MST-01).
+   */
+  async updateItem(id: number, dto: UpdateItemDto): Promise<ItemView> {
+    await this.prisma.$transaction(async (tx) => {
+      const item = await this.repository.findItem(tx, id);
+      if (!item) throw new AppException('COM-003', '품목을 찾을 수 없어요');
+      const itemType = item.itemType as ItemType;
+      if (dto.defaultYardId !== undefined) await this.assertYard(tx, dto.defaultYardId, itemType);
+
+      if (itemType === ITEM_TYPE.RAW_MATERIAL) {
+        if (dto.steelGradeId !== undefined || dto.thicknessMm !== undefined || dto.widthMm !== undefined || dto.lengthMm !== undefined) {
+          throw new AppException('COM-004', '원료에는 강종·치수가 없어요');
+        }
+        if (dto.defaultSupplierId != null) await this.assertSupplier(tx, dto.defaultSupplierId);
+        await this.repository.updateItem(tx, id, { itemName: dto.itemName, defaultYardId: dto.defaultYardId, defaultSupplierId: dto.defaultSupplierId });
+        return;
+      }
+
+      if (dto.itemName !== undefined) throw new AppException('COM-004', '규격 품목명은 강종·치수로 만들어져 따로 바꿀 수 없어요');
+      if (dto.defaultSupplierId !== undefined) throw new AppException('COM-004', '기본 공급업체는 원료에만 지정해요');
+      const next: SpecInput = {
+        steelGradeId: dto.steelGradeId ?? item.steelGradeId ?? 0,
+        thicknessMm: dto.thicknessMm ?? item.thicknessMm?.toFixed(2) ?? '0',
+        widthMm: dto.widthMm ?? item.widthMm?.toFixed(2) ?? '0',
+        lengthMm: dto.lengthMm ?? item.lengthMm?.toFixed(2) ?? '0',
+      };
+      const sameDecimal = (value: string, current: Prisma.Decimal | null) => current !== null && current.equals(value);
+      const specChanged =
+        next.steelGradeId !== item.steelGradeId ||
+        !sameDecimal(next.thicknessMm, item.thicknessMm) ||
+        !sameDecimal(next.widthMm, item.widthMm) ||
+        !sameDecimal(next.lengthMm, item.lengthMm);
+      if (!specChanged) {
+        await this.repository.updateItem(tx, id, { defaultYardId: dto.defaultYardId });
+        return;
+      }
+      if (await this.repository.isSpecUsed(tx, id)) throw new AppException('MST-002', '수주·재고에 쓰인 규격이에요. 다른 치수가 필요하면 새 규격을 추가해 주세요');
+      const spec = await this.readSpec(tx, itemType, next, id);
+      await this.assertMappingStillValid(tx, id, itemType, spec);
+      await this.repository.updateItem(tx, id, { ...spec, defaultYardId: dto.defaultYardId });
+    });
+    return this.itemView(id);
+  }
+
   /** 강종·치수 확인 → 규격 코드·품목명·1매 이론중량 (REQ-MST-003, 코드 모양은 seed.ts specCode와 같다) */
-  private async readSpec(tx: Tx, itemType: ItemType, input: SpecInput) {
+  private async readSpec(tx: Tx, itemType: ItemType, input: SpecInput, exceptId?: number) {
     const grade = await this.repository.findSteelGrade(tx, input.steelGradeId);
     if (!grade) throw new AppException('COM-003', '강종을 찾을 수 없어요');
     const dims = {
@@ -108,7 +155,7 @@ export class MasterDataService {
     };
     const theoreticalWeightTon = calcTheoreticalWeightTon(dims.thicknessMm, dims.widthMm, dims.lengthMm);
     if (!new Prisma.Decimal(theoreticalWeightTon).gt(0)) throw new AppException('COM-004', '1매 이론중량이 0이 되는 치수예요. 치수를 확인해 주세요');
-    const same = await this.repository.findSameSpec(tx, { itemType, steelGradeId: grade.id, ...dims });
+    const same = await this.repository.findSameSpec(tx, { itemType, steelGradeId: grade.id, ...dims }, exceptId);
     if (same) throw new AppException('COM-004', `같은 강종·두께·폭·길이의 규격이 이미 있어요 (${same.itemCode})`);
     const size = [dims.thicknessMm, dims.widthMm, dims.lengthMm].map(trimZeros);
     return {
@@ -118,6 +165,17 @@ export class MasterDataService {
       ...dims,
       theoreticalWeightTon,
     };
+  }
+
+  /** 매핑된 규격의 강종·치수를 바꾸면 매핑 조건(같은 강종, 코일 ≤ 슬래브)을 다시 본다 */
+  private async assertMappingStillValid(tx: Tx, id: number, itemType: ItemType, spec: { steelGradeId: number; theoreticalWeightTon: string }) {
+    const mapping = await this.repository.findSpecMappingOf(tx, id);
+    if (!mapping) return;
+    const other = await this.repository.findItem(tx, itemType === ITEM_TYPE.SLAB ? mapping.coilItemId : mapping.slabItemId);
+    if (!other?.theoreticalWeightTon) throw new AppException('COM-003', '대응 규격을 찾을 수 없어요');
+    if (other.steelGradeId !== spec.steelGradeId) throw new AppException('COM-004', `대응 규격 ${other.itemCode}과(와) 강종이 같아야 해요`);
+    if (itemType === ITEM_TYPE.SLAB) assertCoilNotHeavier(spec.theoreticalWeightTon, other.theoreticalWeightTon);
+    else assertCoilNotHeavier(other.theoreticalWeightTon, spec.theoreticalWeightTon);
   }
 
   /** 기본 야드는 품목 유형과 같은 유형의 야드 (master-data.md 8장 임시 결정) */
@@ -145,8 +203,8 @@ export class MasterDataService {
   }
 
   /** API-170. 매핑된 규격은 슬래브·코일이라 치수·이론중량이 늘 있다 (item CHECK) */
-  async listSpecMappings(): Promise<SpecMappingView[]> {
-    const rows = await this.repository.findSpecMappings(this.prisma);
+  async listSpecMappings(id?: number): Promise<SpecMappingView[]> {
+    const rows = await this.repository.findSpecMappings(this.prisma, id);
     return rows.map((r) => {
       const slabWeight = r.slabItem.theoreticalWeightTon;
       const coilWeight = r.coilItem.theoreticalWeightTon;
@@ -159,6 +217,26 @@ export class MasterDataService {
         hotRollingYieldRate: slabWeight && coilWeight && slabWeight.gt(0) ? coilWeight.div(slabWeight).toFixed(YIELD_SCALE) : '',
       };
     });
+  }
+
+  /** API-171. 슬래브 규격마다 대응 코일 1개, 같은 강종, 코일 1개 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004) */
+  async createSpecMapping(dto: CreateSpecMappingDto): Promise<SpecMappingView> {
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      const slab = await this.repository.findItem(tx, dto.slabItemId);
+      if (!slab) throw new AppException('COM-003', '슬래브 규격을 찾을 수 없어요');
+      const coil = await this.repository.findItem(tx, dto.coilItemId);
+      if (!coil) throw new AppException('COM-003', '코일 규격을 찾을 수 없어요');
+      if (slab.itemType !== ITEM_TYPE.SLAB || !slab.theoreticalWeightTon) throw new AppException('COM-004', '슬래브 규격을 골라 주세요');
+      if (coil.itemType !== ITEM_TYPE.COIL || !coil.theoreticalWeightTon) throw new AppException('COM-004', '코일 규격을 골라 주세요');
+      if (slab.steelGradeId !== coil.steelGradeId) throw new AppException('COM-004', '슬래브와 같은 강종의 코일 규격을 골라 주세요');
+      if (await this.repository.findSpecMappingOf(tx, slab.id)) throw new AppException('COM-004', '이미 대응 코일이 있는 슬래브 규격이에요');
+      if (await this.repository.findSpecMappingOf(tx, coil.id)) throw new AppException('COM-004', '다른 슬래브 규격에 이미 매핑된 코일 규격이에요');
+      assertCoilNotHeavier(slab.theoreticalWeightTon, coil.theoreticalWeightTon);
+      return this.repository.createSpecMapping(tx, { slabItemId: slab.id, coilItemId: coil.id });
+    });
+    const [view] = await this.listSpecMappings(id);
+    if (!view) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
+    return view;
   }
 
   /** API-172. 품목 유형별 공정 순서대로 */
@@ -203,6 +281,13 @@ export class MasterDataService {
     const row = await this.repository.findProductionSetting(this.prisma);
     if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
     return { id: row.id, heatCapacityTon: row.heatCapacityTon.toFixed(3), deliveryRiskDays: row.deliveryRiskDays };
+  }
+}
+
+/** 코일 1개 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004) */
+function assertCoilNotHeavier(slabWeightTon: Prisma.Decimal | string, coilWeightTon: Prisma.Decimal | string): void {
+  if (new Prisma.Decimal(coilWeightTon).gt(slabWeightTon)) {
+    throw new AppException('COM-004', `코일 1개 이론중량(${new Prisma.Decimal(coilWeightTon).toFixed(3)} t)이 슬래브 1매 이론중량(${new Prisma.Decimal(slabWeightTon).toFixed(3)} t)보다 커서 매핑할 수 없어요`);
   }
 }
 
