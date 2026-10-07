@@ -89,6 +89,7 @@ export const SCREEN = {
   employees: screen({ href: '/admin/employees', label: '사원', icon: 'users', access: view(PERMISSION.EMPLOYEE_MANAGE), area: '관리' }),
   organization: screen({ href: '/admin/organization', label: '부서·직급·권한', icon: 'key', access: view(PERMISSION.ORG_MANAGE), area: '관리' }),
   masterData: screen({ href: '/admin/master-data', label: '기준정보', icon: 'database', access: view(PERMISSION.MASTER_MANAGE), area: '관리' }),
+  llmSettings: screen({ href: '/admin/llm', label: 'AI 연결', icon: 'link', access: view(PERMISSION.ORG_MANAGE), area: '관리' }),
   lotTrace: screen({ href: '/lots/trace', label: 'LOT 추적', icon: 'trace', access: EVERYONE }),
   businessEvents: screen({ href: '/business-events', label: '작업 로그', icon: 'history', access: EVERYONE }),
   tasks: screen({ href: '/tasks', label: '업무·알림', icon: 'task', access: EVERYONE, badge: 'notifications' }),

@@ -45,7 +45,7 @@ const ROLE_MENU: Record<RoleCode, readonly ScreenDef[]> = {
   PRODUCTION: [SCREEN.productionPlans, SCREEN.productionResults, SCREEN.hotRolling, SCREEN.inventories],
   QUALITY: [SCREEN.inspections, SCREEN.rejectedLots, SCREEN.inspectionStandards, SCREEN.inventories],
   LOGISTICS: [SCREEN.goodsIssues, SCREEN.millSheets, SCREEN.inventories],
-  ADMIN: [SCREEN.employees, SCREEN.organization, SCREEN.masterData],
+  ADMIN: [SCREEN.employees, SCREEN.organization, SCREEN.masterData, SCREEN.llmSettings],
 };
 
 /** 다른 영역 화면 묶음의 순서: 영역 순서대로, 같은 영역은 표 순서대로. 재고는 모든 사원 화면이라 맨 뒤에 둔다. */
