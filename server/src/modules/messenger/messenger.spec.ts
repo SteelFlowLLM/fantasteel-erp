@@ -53,7 +53,7 @@ async function login(employeeNo: string, password = process.env.SEED_PASSWORD ??
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'POST', path: string, cookie: string, body?: unknown) {
+async function call<T>(method: 'GET' | 'POST' | 'PATCH', path: string, cookie: string, body?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: body === undefined ? { cookie } : { cookie, 'content-type': 'application/json' },
@@ -384,5 +384,56 @@ describe('첨부', () => {
     const outsider = await upload(qualityCookie, room.id, 'note.txt', new Uint8Array([1]));
     expect([outsider.status, outsider.body.error?.code]).toEqual([403, 'COM-002']);
     expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(0);
+  });
+});
+
+describe('방 관리', () => {
+  it('멤버 초대: 새 멤버만 더하고(이전 메시지는 읽은 것으로 시작), 기존·새 멤버 모두에게 room:updated를 보낸다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId], chatRoomName: '초대' });
+    await send(salesCookie, room.id, '초대 전 메시지');
+    socketRecords.length = 0;
+
+    const invited = await call<{ chatRoomId: number; addedCount: number }>('POST', `/chat-rooms/${room.id}/members`, qualityCookie, { memberIds: [salesId, logisticsId, logisticsId] });
+    expect(invited.status).toBe(201);
+    expect(invited.body.data).toEqual({ chatRoomId: room.id, addedCount: 1 });
+    expect(recordsOf('room:updated').map((r) => r.employeeId).sort()).toEqual([salesId, qualityId, logisticsId].sort());
+
+    const logistics = await login('2304015');
+    const detail = await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, logistics);
+    expect(detail.body.data).toMatchObject({ unreadCount: 0 });
+    const history = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, logistics);
+    expect(history.body.data.items.map((m) => m.content)).toEqual(['초대 전 메시지']);
+  });
+
+  it('1:1 방·새 멤버 없음·퇴사자는 COM-004, 멤버가 아니면 COM-002', async () => {
+    const direct = await createRoom(salesCookie, { chatRoomType: 'DIRECT', memberIds: [productionId] });
+    const group = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const retired = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '9910001' } });
+    const cases = await Promise.all([
+      call('POST', `/chat-rooms/${direct.id}/members`, salesCookie, { memberIds: [qualityId] }),
+      call('POST', `/chat-rooms/${group.id}/members`, salesCookie, { memberIds: [qualityId] }),
+      call('POST', `/chat-rooms/${group.id}/members`, salesCookie, { memberIds: [retired.id] }),
+      call('POST', `/chat-rooms/${group.id}/members`, purchaseCookie, { memberIds: [purchaseId] }),
+    ]);
+    expect(cases.map((c) => [c.status, c.body.error?.code])).toEqual([
+      [400, 'COM-004'],
+      [400, 'COM-004'],
+      [400, 'COM-004'],
+      [403, 'COM-002'],
+    ]);
+  });
+
+  it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1·업무방은 COM-004', async () => {
+    const group = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId], chatRoomName: '옛 이름' });
+    socketRecords.length = 0;
+    const renamed = await call<{ chatRoomName: string | null; displayName: string }>('PATCH', `/chat-rooms/${group.id}`, qualityCookie, { chatRoomName: '  새 이름  ' });
+    expect(renamed.body.data).toMatchObject({ chatRoomName: '새 이름', displayName: '새 이름' });
+    expect(recordsOf('room:updated')).toHaveLength(2);
+    const cleared = await call<{ chatRoomName: string | null; displayName: string }>('PATCH', `/chat-rooms/${group.id}`, salesCookie, { chatRoomName: '' });
+    expect(cleared.body.data).toEqual({ id: group.id, chatRoomName: null, displayName: '서민지' });
+
+    const direct = await createRoom(salesCookie, { chatRoomType: 'DIRECT', memberIds: [qualityId] });
+    const directRename = await call('PATCH', `/chat-rooms/${direct.id}`, salesCookie, { chatRoomName: '안 됨' });
+    expect([directRename.status, directRename.body.error?.code]).toEqual([400, 'COM-004']);
   });
 });

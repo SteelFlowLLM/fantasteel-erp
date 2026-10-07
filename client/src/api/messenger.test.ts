@@ -194,6 +194,19 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     await expect(messengerApi.inviteMembers({ chatRoomId: direct.id, memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.sales)] })).rejects.toBeInstanceOf(InputError);
   });
 
+  it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
+    const roomId = await createGroup();
+    expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });
+    const cleared = await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: null });
+    expect(cleared.chatRoomName).toBeNull();
+    expect(cleared.displayName).toContain('김도윤');
+
+    const direct = await messengerApi.createRoom({ chatRoomType: 'DIRECT', memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead)] });
+    await expect(messengerApi.renameRoom({ chatRoomId: direct.id, chatRoomName: '안 됨' })).rejects.toBeInstanceOf(InputError);
+    actAs(SEED_EMPLOYEE_NO.purchase);
+    await expect(messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '남의 방' })).rejects.toMatchObject({ code: 'COM-002' });
+  });
+
   it('메시지는 최근 limit개, 더 오래된 것이 있으면 hasMore. 다른 방 메시지로 읽음 처리하면 COM-003', async () => {
     const roomId = await createGroup();
     for (let index = 1; index <= 3; index += 1) await messengerApi.sendMessage({ chatRoomId: roomId, content: `메시지 ${index}` });

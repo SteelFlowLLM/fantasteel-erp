@@ -16,7 +16,7 @@ import { MessageBubble } from '@/features/messenger/components/MessageBubble';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
-import { InviteModal } from '@/features/messenger/components/RoomModals';
+import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
@@ -50,6 +50,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   const me = useMe();
   const [limit, setLimit] = useState(MESSAGE_PAGE_SIZE);
   const [inviting, setInviting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const messages = useChatMessages(room.id, limit);
   const outbox = useMessageOutbox(room.id);
   const { mutate: markRead } = useMarkRoomRead();
@@ -223,8 +224,9 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
           }}
         />
       </section>
-      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} /> : null}
+      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} onRename={() => setRenaming(true)} /> : null}
       {inviting ? <InviteModal room={room} onClose={() => setInviting(false)} /> : null}
+      {renaming ? <RenameRoomModal room={room} onClose={() => setRenaming(false)} /> : null}
     </div>
   );
 }

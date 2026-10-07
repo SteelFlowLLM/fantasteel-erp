@@ -72,10 +72,10 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(rooms[1]).toMatchObject({ lastMessage: null, lastMessagePreview: null });
   });
 
-  it('방 정보: 멘션 후보는 나를 뺀 멤버와 멤버 부서, 멤버 초대는 아직 막는다', async () => {
+  it('방 정보: 멘션 후보는 나를 뺀 멤버와 멤버 부서, 1:1이 아닌 방은 초대할 수 있다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms/7' ? ok(detail()) : undefined));
     const room = await messengerApi.getRoom(7);
-    expect(room).toMatchObject({ id: 7, canInvite: false, createdEmployeeName: '-', salesOrderState: 'none', salesOrder: null, unreadCount: 2, lastReadMessageId: 40 });
+    expect(room).toMatchObject({ id: 7, canInvite: true, createdEmployeeName: '-', salesOrderState: 'none', salesOrder: null, unreadCount: 2, lastReadMessageId: 40 });
     expect(room.mentionTargets).toEqual([
       { kind: 'employee', id: 5, name: '정다은' },
       { kind: 'employee', id: 13, name: '서민지' },
@@ -84,7 +84,20 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
       { kind: 'department', id: 3, name: '구매부' },
       { kind: 'department', id: 9, name: '품질부' },
     ]);
-    await expect(messengerApi.inviteMembers({ chatRoomId: 7, memberIds: [1] })).rejects.toThrow('서버와 연결되지 않았어요');
+  });
+
+  it('멤버 초대는 POST /chat-rooms/:id/members의 새 멤버 수, 이름 바꾸기는 PATCH /chat-rooms/:id', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7/members') return ok({ chatRoomId: 7, addedCount: 2 });
+      if (c.path === '/chat-rooms/7' && c.method === 'PATCH') return ok({ id: 7, chatRoomName: null, displayName: '정다은, 서민지' });
+      return undefined;
+    });
+    expect(await messengerApi.inviteMembers({ chatRoomId: 7, memberIds: [5, 13] })).toBe(2);
+    expect(await messengerApi.renameRoom({ chatRoomId: 7, chatRoomName: null })).toEqual({ id: 7, chatRoomName: null, displayName: '정다은, 서민지' });
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ['POST', '/chat-rooms/7/members', { memberIds: [5, 13] }],
+      ['PATCH', '/chat-rooms/7', { chatRoomName: null }],
+    ]);
   });
 
   it('메시지 limit이 서버 상한(100)을 넘으면 before로 이어 읽고, 나·내 부서 멘션을 표시한다', async () => {
