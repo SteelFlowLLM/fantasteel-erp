@@ -2,11 +2,14 @@
 import type { ItemType, ProcessType } from './codes';
 import type { ProgressMeasure, SalesOrderItemFulfillment } from './sales-order';
 
-/** 서버가 데이터를 주는 위젯. AGENT_RISK(Agent 위험 감지)·대응 후보는 P2라 없다 */
+/** 서버가 GET dashboard/widgets/<이름>으로 데이터를 주는 위젯. 납기 위험·불합격률·생산량은 다른 API를 화면에서 묶고, AGENT_RISK(Agent 위험 감지)·대응 후보는 P2라 없다 */
 export const DASHBOARD_WIDGET_KEY = {
   PROCESS_FLOW: 'PROCESS_FLOW',
   ORDER_FULFILLMENT: 'ORDER_FULFILLMENT',
   PRODUCT_STOCK: 'PRODUCT_STOCK',
+  SHIPMENT_RESULT: 'SHIPMENT_RESULT',
+  PROCESS_YIELD: 'PROCESS_YIELD',
+  SURPLUS_AGE: 'SURPLUS_AGE',
 } as const;
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGET_KEY)[keyof typeof DASHBOARD_WIDGET_KEY];
 
