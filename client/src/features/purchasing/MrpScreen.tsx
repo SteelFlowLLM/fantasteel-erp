@@ -81,7 +81,7 @@ export function MrpScreen() {
         }
       />
 
-      <Card>
+      <Card className="flex-none">
         <CardBody className="flex-row flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1.5 text-xs font-medium text-ink-2">
             필요일 기간 시작
@@ -164,7 +164,7 @@ function MrpResult({
         />
       </StatBar>
 
-      <Card>
+      <Card className="flex-none">
         <CardHead
           title="원료·합금철 소요량"
           meta={`${mrp.from} ~ ${mrp.to}`}
@@ -251,7 +251,7 @@ function MrpResult({
         </CardFoot>
       </Card>
 
-      <Card>
+      <Card className="flex-none">
         <CardHead title="구매요청 만들 순소요" meta="계획·원료마다 한 번만 만들어요" />
         <CardBody flush>
           {mrp.requisitionLines.length === 0 ? (
@@ -305,7 +305,7 @@ function MrpResult({
         </CardBody>
       </Card>
 
-      <Card>
+      <Card className="flex-none">
         <CardHead
           title="근거 생산계획"
           meta={`${mrp.plans.length}건`}
