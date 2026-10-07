@@ -14,5 +14,6 @@ export * from './master-data';
 export * from './organization';
 export * from './production';
 export * from './lot';
+export * from './business-event';
 export * from './mrp';
 export * from './mill-sheet-pdf';

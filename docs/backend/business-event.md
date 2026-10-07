@@ -36,6 +36,13 @@
 
 **조회**: 시간순(`created_at` 오름차순), 동률은 이벤트 id 순([04] BP-LOG-01). LOT 타임라인은 `business_event_lot`으로 조인한다. 3개 이상 조인이 되면 TypedSQL로 둔다([05] 8장).
 
+**조회 구현 메모** (API-238 `GET business-events`, 로그인만, 응답 shared `BusinessEventView`의 `PageResult`)
+
+- 조건: `salesOrderId`(수주 타임라인), `lotId`(LOT 타임라인, `business_event_lot`), `businessEventType`, `actorType`(USER·SYSTEM), `targetType`(ERD 테이블명), `from`·`to`(`YYYY-MM-DD`, 서울 날짜로 시작·끝 포함), `sort`(`asc` 기본 = 이력 재현, `desc` = 최신순, 작업 로그 전체·대시보드 최근 로그용), `page`·`size`(기본 20, 최대 100). `actorType`·`targetType`·`sort`는 작업 로그 화면 필터·최신순 목록을 위해 더했다(문서 권장 조건 밖, 2026-10-07 확인).
+- 정렬: 발생 시각 → 이벤트 id(같은 방향). 없는 날짜(2월 30일)·시작일 > 종료일은 COM-004.
+- 응답: 번호, 유형·표시명(`BUSINESS_EVENT_TYPE_LABEL`), 주체 구분·사원 id·사원번호·이름(SYSTEM이면 null), 대상 테이블·id, 수주 id·번호, 변경 전·후(jsonb 그대로), 사유(코드와 문장을 합친 원문), AI 경유, 초안·메시지 id, 발생 시각, LOT(id·번호·유형). 대상 번호(예: 대상 수주의 번호)는 테이블마다 따로 읽어야 해서 넣지 않았다(화면이 변경 전·후로 보여 준다).
+- 조인이 `business_event_lot` 하나라 TypedSQL 없이 Prisma로 이벤트 페이지를 읽고, 사원·수주·LOT은 id로 따로 읽는다.
+
 **기록 규칙(모든 모듈)**
 
 ```ts
@@ -102,7 +109,7 @@ await this.businessEventRecorder.record(tx, {
 | --- | --- | --- |
 | 이벤트 번호 경합 | 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → **본 거래 전체가 COM-001로 실패**한다. 업무 tx가 많을수록 자주 생긴다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음) |
 | 하루 999건 한도 | EV 순번은 3자리(NNN)라 하루 1,000번째 이벤트에서 채번 함수가 Error를 던져 COM-999가 된다. 실적 시뮬레이션·시연 시드가 하루에 많은 이벤트를 만들 수 있다 | [04] 9.1, `number-format.ts` `seq` |
-| `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다 | [04] 12.2, REQ-LOG-003 |
+| `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다. **구현:** REQ-LOG-003 "LOT 단위"를 위해 넣었다(4장 조회 구현 메모) | [04] 12.2, REQ-LOG-003 |
 | 빠진 이벤트 유형 | 구매요청 재요청, 출하요청 취소, 검사 측정값 수정, 히트 편성 확정에 맞는 유형이 없다. 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
 | 여러 수주를 묶은 이벤트 | `sales_order_id`가 하나라 출하요청 이벤트를 수주별로 나눠 기록해야 한다(shipment.md 8장) | [ERD] |
 | 조회 범위 | 작업 로그가 전 역할에 열려 있다. 권한 밖 데이터(예: 구매 금액이 생기면)를 거를지 | [CSV] 권한 |
