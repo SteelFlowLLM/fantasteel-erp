@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록 API(API-166)를 실제 앱과 DB(fs_master)로 확인한다.
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록 API(API-166·169)를 실제 앱과 DB(fs_master)로 확인한다.
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -162,7 +162,7 @@ describe('GET /production-settings (API-187)', () => {
   });
 });
 
-describe('등록 (API-166)', () => {
+describe('등록 (API-166·169)', () => {
   let yardIdOf: Record<string, number>;
   let gradeIdOf: Record<string, number>;
 
@@ -216,5 +216,12 @@ describe('등록 (API-166)', () => {
     expect((await send('POST', '/items', { ...raw, defaultSupplierId: 999_999 })).body.error?.code).toBe('COM-003');
     const { body } = await send<ItemView>('POST', '/items', { ...raw, defaultSupplierId: suppliers[0].id });
     expect(body.data).toMatchObject({ itemCode: 'ORE02', unitType: 'TON', rawMaterialType: 'IRON_ORE', defaultSupplierId: suppliers[0].id, theoreticalWeightTon: null });
+  });
+
+  it('강종 등록: 코드 중복은 COM-004, 적용 규격 번호는 필수', async () => {
+    const payload = { steelGradeCode: 'tst-01', steelGradeName: '시험 강종', standardNo: 'KS D 0000' };
+    expect((await send<SteelGradeView>('POST', '/steel-grades', payload)).body.data).toMatchObject({ steelGradeCode: 'TST-01', standardNo: 'KS D 0000' });
+    expect((await send('POST', '/steel-grades', payload)).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/steel-grades', { ...payload, steelGradeCode: 'TST-02', standardNo: ' ' })).body.error?.code).toBe('COM-004');
   });
 });

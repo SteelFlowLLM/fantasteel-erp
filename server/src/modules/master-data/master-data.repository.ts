@@ -77,6 +77,10 @@ export class MasterDataRepository {
     return tx.steelGrade.findUnique({ where: { id } });
   }
 
+  findSteelGradeByCode(tx: Tx, steelGradeCode: string) {
+    return tx.steelGrade.findUnique({ where: { steelGradeCode }, select: { id: true } });
+  }
+
   findYard(tx: Tx, id: number) {
     return tx.yard.findUnique({ where: { id }, select: { id: true, yardType: true } });
   }
@@ -88,4 +92,9 @@ export class MasterDataRepository {
   createItem(tx: Tx, data: Prisma.ItemUncheckedCreateInput) {
     return tx.item.create({ data, select: { id: true } });
   }
+
+  createSteelGrade(tx: Tx, data: { steelGradeCode: string; steelGradeName: string; standardNo: string }) {
+    return tx.steelGrade.create({ data, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
+  }
+
 }
