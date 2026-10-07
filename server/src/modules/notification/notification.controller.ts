@@ -1,8 +1,10 @@
-import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { AuthUser, NotificationPage, NotificationReadAllResult, NotificationView } from '@fantasteel/shared';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import type { AuthUser, NotificationPage, NotificationReadAllResult, NotificationView, PageResult, TaskView } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { ListNotificationsQuery } from './dto/notification.dto';
+import { CreateTaskDto, ListTasksQuery } from './dto/task.dto';
 import { NotificationService } from './notification.service';
+import { TaskService } from './task.service';
 
 /**
  * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
@@ -11,7 +13,29 @@ import { NotificationService } from './notification.service';
  */
 @Controller()
 export class NotificationController {
-  constructor(private readonly service: NotificationService) {}
+  constructor(
+    private readonly service: NotificationService,
+    private readonly tasks: TaskService,
+  ) {}
+
+  /** API-239. 내 담당 업무만 */
+  @Get('tasks')
+  listTasks(@CurrentUser() user: AuthUser, @Query() query: ListTasksQuery): Promise<PageResult<TaskView>> {
+    return this.tasks.list(user, query);
+  }
+
+  /** API-240 */
+  @Post('tasks')
+  createTask(@CurrentUser() user: AuthUser, @Body() dto: CreateTaskDto): Promise<TaskView> {
+    return this.tasks.create(user, dto);
+  }
+
+  /** API-241. 담당자 본인인지 service가 확인한다 */
+  @Post('tasks/:id/complete')
+  @HttpCode(200)
+  completeTask(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<TaskView> {
+    return this.tasks.complete(user, id);
+  }
 
   /** API-242. 내 알림만 */
   @Get('notifications')
