@@ -41,8 +41,9 @@
 
 [권한표] 기본값: `EMPLOYEE_MANAGE`·`ORG_MANAGE`는 관리자만 USE, 다른 역할은 권한 행 없음.
 
-**구현 상태:** 조회 4개(`GET employees`·`departments`·`job-grades`·`roles`)와 `POST employees`·`PATCH employees/:id`·`POST job-grades` 구현. 응답 타입은 `shared/src/organization.ts`.
+**구현 상태:** 3장 API 10개 모두 구현. 응답 타입은 `shared/src/organization.ts`.
 - 사원 수정은 이름·부서·직급·역할·`isActive`만 받는다. 사원번호(로그인 ID)는 바꾸지 않는다. 부서장인 사원의 퇴사 처리는 `COM-004`(부서장을 먼저 바꿈).
+- 부서 수정은 이름·상위 부서·부서장만 받는다(부서코드는 바꾸지 않음). `parentId`·`headEmployeeId`는 null이면 비우고, 보내지 않으면 그대로 둔다. 부서 등록·수정 응답은 트리 없이 부서 한 건(`DepartmentView`).
 - `GET employees`: 정렬은 부서코드 → 직급 `sort_order` → 사원번호로 고정. [CSV]에 없는 거르기 `departmentId`·`roleCode`·`isActive`·`keyword`(이름·사원번호)는 사원 관리 화면용으로 추가했다.
 - `GET departments`: 최상위부터 부서코드 순 트리. 부서마다 사용 중인 인원(직급 순, 부서장 여부)을 넣는다.
 - 직급·역할의 `employeeCount`는 사용 중인 사원 수(계산값).
@@ -95,6 +96,7 @@
 | 오류 코드 없음 | 부서 순환, 부서장 지정 오류(퇴사자·없는 사원)용 코드가 9.3에 없다. **임시 결정(2026-10-07):** 새 코드를 만들지 않고 `COM-004` + 구체 문구, 없는 id는 `COM-003`. 정의서에 코드가 생기면 바꾼다 | [04] 9.3, BP-AUTH-01 예외 처리 |
 | 직급 권한 | 직급 등록에 쓸 권한 코드가 없다(EMPLOYEE_MANAGE vs ORG_MANAGE). **임시 결정(2026-10-07):** [CSV]에 적힌 `EMPLOYEE_MANAGE`를 쓴다 | [CSV] 직급 등록 비고 |
 | 부서장 자격 | 다른 부서 사원·퇴사자를 부서장으로 지정할 수 있는지 정해지지 않았다. **임시 결정(2026-10-07):** 퇴사자는 부서장이 될 수 없다(퇴사자는 로그인이 막혀 REQ-AUTH-004 승인을 할 수 없음). 같은 부서 조건은 문서에 없어 두지 않는다 | [02] REQ-ORG-002 |
+| 관리자 권한 잠금 | 관리자 역할에서 `ORG_MANAGE`를 빼면 그 뒤로는 아무도 권한을 되돌릴 수 없다. 문서에 규칙이 없어 막지 않는다 | [02] REQ-AUTH-003 |
 | 부서장 변경·부재·자기 요청 | 승인 경로 TBD. 자동 승인은 하지 않는다 | [04] 2장 구현 제안, 16장 |
 | 비밀번호 변경·초기화 | API가 없다. SPEC은 "비밀번호 재설정은 로그인 때 다시 봄" | [CSV], `SPEC.md` 5장 |
 | 직급 수정·삭제 | [CSV]에 GET·POST만 있다. 기준정보 삭제 규칙([05] 7-2)은 있으나 API가 없으므로 만들지 않는다 | [CSV], [05] 7-2 |

@@ -33,6 +33,11 @@ const employeeSelect = {
   departmentsAsHeadEmployee: { select: { id: true }, orderBy: { id: 'asc' } },
 } satisfies Prisma.EmployeeSelect;
 
+const roleInclude = {
+  rolePermissions: { select: { permission: true, permissionLevel: true } },
+  _count: { select: { employees: { where: { isActive: true } } } },
+} satisfies Prisma.RoleInclude;
+
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
  * 집계·3개 이상 JOIN·잠금(FOR UPDATE)은 prisma/sql/*.sql(TypedSQL)로 만들고 tx.$queryRawTyped(...)로 부른다.
@@ -83,6 +88,28 @@ export class OrganizationRepository {
     return tx.jobGrade.create({ data, include: { _count: { select: { employees: { where: { isActive: true } } } } } });
   }
 
+  /** 순환 확인용: 부서마다 상위 부서 */
+  findDepartmentLinks(tx: Tx) {
+    return tx.department.findMany({ select: { id: true, parentId: true } });
+  }
+
+  findDepartment(tx: Tx, id: number) {
+    return tx.department.findUnique({ where: { id }, include: { headEmployee: { select: { employeeName: true } } } });
+  }
+
+  createDepartment(tx: Tx, data: { departmentCode: string; departmentName: string; parentId: number | null }) {
+    return tx.department.create({ data, select: { id: true } });
+  }
+
+  updateDepartment(tx: Tx, id: number, data: Prisma.DepartmentUncheckedUpdateInput) {
+    return tx.department.update({ where: { id }, data, select: { id: true } });
+  }
+
+  /** 부서장 지정 확인용 */
+  findEmployeeStatus(tx: Tx, id: number) {
+    return tx.employee.findUnique({ where: { id }, select: { id: true, isActive: true } });
+  }
+
   findDepartments(tx: Tx) {
     return tx.department.findMany({ orderBy: { departmentCode: 'asc' }, include: { headEmployee: { select: { employeeName: true } } } });
   }
@@ -101,9 +128,16 @@ export class OrganizationRepository {
   }
 
   findRoles(tx: Tx) {
-    return tx.role.findMany({
-      orderBy: { id: 'asc' },
-      include: { rolePermissions: { select: { permission: true, permissionLevel: true } }, _count: { select: { employees: { where: { isActive: true } } } } },
-    });
+    return tx.role.findMany({ orderBy: { id: 'asc' }, include: roleInclude });
+  }
+
+  findRole(tx: Tx, id: number) {
+    return tx.role.findUnique({ where: { id }, include: roleInclude });
+  }
+
+  /** 역할의 권한 행을 통째로 바꾼다 */
+  async replaceRolePermissions(tx: Tx, roleId: number, permissions: { permission: string; permissionLevel: string }[]) {
+    await tx.rolePermission.deleteMany({ where: { roleId } });
+    await tx.rolePermission.createMany({ data: permissions.map((p) => ({ roleId, ...p })) });
   }
 }

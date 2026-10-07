@@ -1,10 +1,10 @@
-// 조직 API(조회 API-155·158·161·163, 등록·수정 API-156·157·162)를 실제 앱과 DB(fs_common)로 확인한다.
+// 조직 API(조회 API-155·158·161·163, 등록·수정 API-156·157·159·160·162·164)를 실제 앱과 DB(fs_common)로 확인한다.
 // 권한 가드·쿼리 변환·날짜 변환까지 보려고 HTTP로 부른다. 조회는 시드(seed.md) 조직 데이터를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import { PERMISSION, type DepartmentNode, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
+import { PERMISSION, type DepartmentNode, type DepartmentView, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 
 let app: INestApplication;
@@ -29,7 +29,7 @@ async function get<T>(path: string, cookie = adminCookie) {
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
 }
 
-async function send<T>(method: 'POST' | 'PATCH', path: string, payload: unknown, cookie = adminCookie) {
+async function send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, payload: unknown, cookie = adminCookie) {
   const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
 }
@@ -221,5 +221,89 @@ describe('POST /job-grades (API-162)', () => {
   it('사원 관리 권한이 없으면 COM-002', async () => {
     const { body } = await send('POST', '/job-grades', { jobGradeName: '권한없음', sortOrder: 1 }, salesCookie);
     expect(body.error?.code).toBe('COM-002');
+  });
+});
+
+// ── 부서 등록·수정 (API-159·160), 역할 권한 변경 (API-164). 이 파일이 만든 부서와, 끝나면 되돌리는 물류 역할로만 확인한다 ──
+
+const newDepartment = (parentId: number | null = null) => {
+  seq += 1;
+  return send<DepartmentView>('POST', '/departments', { departmentCode: `T-${Date.now()}-${seq}`, departmentName: `테스트부서${seq}`, parentId });
+};
+
+describe('POST /departments (API-159)', () => {
+  it('최상위·하위 부서를 등록하고 트리에 들어간다', async () => {
+    const top = await newDepartment();
+    expect(top.status).toBe(201);
+    expect(top.body.data).toMatchObject({ parentId: null, headEmployeeId: null });
+    const child = await newDepartment(top.body.data.id);
+    expect(child.body.data.parentId).toBe(top.body.data.id);
+    const node = (await get<DepartmentNode[]>('/departments')).body.data.find((d) => d.id === top.body.data.id);
+    expect(node?.children.map((c) => c.id)).toEqual([child.body.data.id]);
+  });
+
+  it('없는 상위 부서는 COM-003, 겹치는 부서코드는 COM-001, 권한이 없으면 COM-002', async () => {
+    const top = (await newDepartment()).body.data;
+    expect((await send('POST', '/departments', { departmentCode: `T-X-${Date.now()}`, departmentName: '없음', parentId: 999999 })).body.error?.code).toBe('COM-003');
+    expect((await send('POST', '/departments', { departmentCode: top.departmentCode, departmentName: '겹침' })).body.error?.code).toBe('COM-001');
+    expect((await send('POST', '/departments', { departmentCode: `T-Y-${Date.now()}`, departmentName: '권한없음' }, salesCookie)).body.error?.code).toBe('COM-002');
+  });
+});
+
+describe('PATCH /departments/:id (API-160)', () => {
+  it('자기 자신이나 하위 부서를 상위로 지정하면 COM-004 (계층 순환)', async () => {
+    const a = (await newDepartment()).body.data;
+    const b = (await newDepartment(a.id)).body.data;
+    const c = (await newDepartment(b.id)).body.data;
+    expect((await send('PATCH', `/departments/${a.id}`, { parentId: a.id })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', `/departments/${a.id}`, { parentId: c.id })).body.error?.code).toBe('COM-004');
+    const moved = await send<DepartmentView>('PATCH', `/departments/${c.id}`, { parentId: a.id, departmentName: '옮긴부서' });
+    expect(moved.body.data).toMatchObject({ parentId: a.id, departmentName: '옮긴부서', departmentCode: c.departmentCode });
+  });
+
+  it('부서장을 지정·해제하고, 퇴사자는 COM-004, 없는 사원은 COM-003', async () => {
+    const dept = (await newDepartment()).body.data;
+    const payload = await newEmployeePayload();
+    const employee = (await send<EmployeeView>('POST', '/employees', payload)).body.data;
+
+    const assigned = await send<DepartmentView>('PATCH', `/departments/${dept.id}`, { headEmployeeId: employee.id });
+    expect(assigned.body.data).toMatchObject({ headEmployeeId: employee.id, headEmployeeName: employee.employeeName });
+    const cleared = await send<DepartmentView>('PATCH', `/departments/${dept.id}`, { headEmployeeId: null });
+    expect(cleared.body.data.headEmployeeId).toBeNull();
+
+    await send('PATCH', `/employees/${employee.id}`, { isActive: false });
+    expect((await send('PATCH', `/departments/${dept.id}`, { headEmployeeId: employee.id })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', `/departments/${dept.id}`, { headEmployeeId: 999999 })).body.error?.code).toBe('COM-003');
+    expect((await send('PATCH', '/departments/999999', { departmentName: '없음' })).body.error?.code).toBe('COM-003');
+  });
+});
+
+describe('PUT /roles/:id/permissions (API-164)', () => {
+  it('권한을 통째로 바꾸면 그 역할 사원의 다음 요청부터 반영된다 (빠진 권한은 COM-002)', async () => {
+    const logistics = (await get<RoleView[]>('/roles')).body.data.find((r) => r.roleCode === 'LOGISTICS')!;
+    const original = logistics.permissions;
+    const logisticsCookie = await login('2304015');
+    expect((await get('/roles', logisticsCookie)).body.error?.code).toBe('COM-002');
+
+    try {
+      const granted = await send<RoleView>('PUT', `/roles/${logistics.id}/permissions`, { permissions: [...original, { permission: 'ORG_MANAGE', permissionLevel: 'VIEW' }] });
+      expect(granted.body.data.permissions).toContainEqual({ permission: 'ORG_MANAGE', permissionLevel: 'VIEW' });
+      expect((await get('/roles', logisticsCookie)).status).toBe(200);
+    } finally {
+      const restored = await send<RoleView>('PUT', `/roles/${logistics.id}/permissions`, { permissions: original });
+      expect(restored.body.data.permissions).toEqual(original);
+    }
+    expect((await get('/roles', logisticsCookie)).body.error?.code).toBe('COM-002');
+  });
+
+  it('같은 권한 두 번·잘못된 값은 COM-004, 없는 역할은 COM-003, 권한이 없으면 COM-002', async () => {
+    const twice = [
+      { permission: 'MILL_SHEET_READ', permissionLevel: 'USE' },
+      { permission: 'MILL_SHEET_READ', permissionLevel: 'VIEW' },
+    ];
+    expect((await send('PUT', '/roles/1/permissions', { permissions: twice })).body.error?.code).toBe('COM-004');
+    expect((await send('PUT', '/roles/1/permissions', { permissions: [{ permission: 'NOPE', permissionLevel: 'USE' }] })).body.error?.code).toBe('COM-004');
+    expect((await send('PUT', '/roles/999999/permissions', { permissions: [] })).body.error?.code).toBe('COM-003');
+    expect((await send('PUT', '/roles/1/permissions', { permissions: [] }, salesCookie)).body.error?.code).toBe('COM-002');
   });
 });
