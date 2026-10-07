@@ -86,9 +86,9 @@ const buildItem = (overrides: Partial<InspectionStandardItemInput> = {}): Inspec
 
 beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', 'server');
-  resetServerSessionForTest();
   resetMasterIdCacheForTest();
   actAs(SEED_EMPLOYEE_NO.quality);
+  resetServerSessionForTest(SEED_EMPLOYEE_NO.quality);
 });
 afterEach(() => {
   vi.unstubAllGlobals();

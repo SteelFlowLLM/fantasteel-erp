@@ -1,14 +1,12 @@
 // 실제 서버(server/) 호출. NEXT_PUBLIC_DATA_SOURCE=server일 때만 쓰고, 기본은 지금처럼 브라우저 안 가짜 DB다.
 // 화면은 이 파일을 직접 부르지 않는다: 각 api/<영역>.ts 함수가 데이터 출처에 따라 가짜 DB 또는 이 파일을 부른다.
 //
-// 로그인 화면은 아직 "계정 선택"이다 (SPEC 5장 결정 1). 서버는 쿠키 로그인이 필요해서, 서버 모드에서는
-// 이 탭에서 고른 사원의 사원번호와 개발용 시드 비밀번호로 화면 뒤에서 POST /auth/login을 불러 쿠키를 받는다.
-// 실제 로그인 화면을 넣으면 ensureLogin만 지운다.
-import type { ApiResponse } from '@fantasteel/shared';
-import { actingEmployeeId } from '@/api/actor';
+// 서버 모드 로그인은 사원번호·비밀번호다 (REQ-AUTH-001, 2026-10-07 사용자 결정. 가짜 DB 모드는 계정 선택 그대로).
+// 로그인 쿠키(JWT)는 브라우저의 모든 탭이 같이 쓰므로 한 브라우저에서는 한 계정만 쓸 수 있다.
+import type { ApiResponse, AuthUser } from '@fantasteel/shared';
+import { actingEmployeeNo } from '@/api/actor';
 import { ApiError, InputError } from '@/api/errors';
 import { isErrorCode } from '@/codes';
-import { getMockDb } from '@/mock/db';
 
 export type DataSource = 'mock' | 'server';
 
@@ -20,16 +18,13 @@ export function dataSource(): DataSource {
 export const isServerDataSource = (): boolean => dataSource() === 'server';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8787/api/v1').replace(/\/$/, '');
-/** 서버 시드 비밀번호 (docs/backend/seed.md). 개발·시연용이며 실제 로그인 화면이 생기면 쓰지 않는다 */
-const DEV_LOGIN_PASSWORD = process.env.NEXT_PUBLIC_DEV_LOGIN_PASSWORD ?? 'fantasteel';
 
 /**
- * 서버 쿠키가 지금 누구 것인지. 쿠키는 브라우저의 모든 탭이 같이 쓰므로, 탭마다 다른 계정을 고르면
- * 다른 탭의 로그인이 쿠키를 덮어쓴다. 그래서 마지막 로그인 사원번호를 localStorage(탭 공유)에 두고 요청마다 비교한다.
+ * 서버 쿠키가 지금 누구 것인지. 다른 탭이 다른 사원으로 로그인하면 쿠키가 바뀌므로, 마지막 로그인 사원번호를
+ * localStorage(탭 공유)에 두고 요청마다 이 탭의 사원과 비교한다. 다르면 요청을 보내지 않고 다시 로그인하게 한다.
  */
 const SERVER_LOGIN_KEY = 'fantasteel.server-login.employee-no';
 let memoryLoggedIn: string | null = null;
-let pendingLogin: Promise<void> | null = null;
 
 function readLoggedIn(): string | null {
   try {
@@ -49,13 +44,30 @@ function writeLoggedIn(employeeNo: string | null): void {
   }
 }
 
-/** 이 탭에서 고른 계정의 사원번호 (가짜 DB와 서버 시드는 사원번호가 같다) */
-function sessionEmployeeNo(): string {
-  // 이 탭의 계정 선택 (테스트에서는 setActingEmployeeForTest로 정한 사원)
-  const employeeId = actingEmployeeId();
-  const employeeNo = employeeId === null ? undefined : getMockDb().read((tables) => tables.employee.find((e) => e.id === employeeId)?.employeeNo);
-  if (!employeeNo) throw new ApiError('COM-002', '계정을 먼저 골라 주세요');
-  return employeeNo;
+// ── 서버 세션이 끊김 (만료·로그아웃·다른 탭 로그인): 셸이 듣고 로그인 화면으로 보낸다 ──
+
+type SessionLostListener = (message: string) => void;
+const sessionLostListeners = new Set<SessionLostListener>();
+
+const otherLoginMessage = (loggedIn: string | null) =>
+  loggedIn === null ? '로그아웃됐어요. 다시 로그인해 주세요' : '다른 탭에서 다른 계정으로 로그인했어요. 다시 로그인해 주세요';
+
+function sessionLost(message: string): ApiError {
+  for (const listener of sessionLostListeners) listener(message);
+  return new ApiError('COM-002', message);
+}
+
+/** 세션이 끊기면 부른다. 다른 탭의 로그인·로그아웃은 storage 이벤트로 바로 알아챈다. 해제 함수를 돌려준다 */
+export function onServerSessionLost(listener: SessionLostListener): () => void {
+  sessionLostListeners.add(listener);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === SERVER_LOGIN_KEY && event.newValue !== actingEmployeeNo()) listener(otherLoginMessage(event.newValue));
+  };
+  window.addEventListener('storage', onStorage);
+  return () => {
+    sessionLostListeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+  };
 }
 
 type ServerError = { code: string; message: string };
@@ -67,7 +79,8 @@ type ServerError = { code: string; message: string };
 function toClientError(error: ServerError): Error {
   if (isErrorCode(error.code)) return new ApiError(error.code, error.message);
   if (error.code === 'COM-004') return new InputError(error.message);
-  if (error.code === 'AUTH-001' || error.code === 'AUTH-002') return new ApiError('COM-002', error.message);
+  // 로그인 실패(AUTH-001)는 로그인 화면에 서버 문구 그대로 보인다
+  if (error.code === 'AUTH-001' || error.code === 'AUTH-002') return new Error(error.message);
   return new Error(error.message);
 }
 
@@ -91,21 +104,27 @@ async function readBody<T>(res: Response): Promise<T> {
   throw toClientError(json.error);
 }
 
-async function ensureLogin(): Promise<void> {
-  const employeeNo = sessionEmployeeNo();
-  if (readLoggedIn() === employeeNo) return;
-  if (!pendingLogin) {
-    pendingLogin = (async () => {
-      const res = await send('POST', '/auth/login', { employeeNo, password: DEV_LOGIN_PASSWORD });
-      await readBody<unknown>(res);
-      writeLoggedIn(employeeNo);
-    })().finally(() => {
-      pendingLogin = null;
-    });
-  }
-  await pendingLogin;
-  // 기다리는 사이 계정이 바뀌었으면 한 번 더
-  if (readLoggedIn() !== sessionEmployeeNo()) await ensureLogin();
+/** 로그인 (API-152). 쿠키는 서버가 httpOnly로 내려준다 */
+export async function serverLogin(employeeNo: string, password: string): Promise<AuthUser> {
+  const user = await readBody<AuthUser>(await send('POST', '/auth/login', { employeeNo, password }));
+  writeLoggedIn(user.employeeNo);
+  return user;
+}
+
+/** 이미 로그인된 브라우저에서 새 탭을 열면 쿠키의 사원을 돌려준다 (없거나 만료면 null) */
+export async function currentServerLogin(): Promise<AuthUser | null> {
+  if (readLoggedIn() === null) return null;
+  const res = await send('GET', '/auth/me');
+  if (res.status !== 401) return readBody<AuthUser>(res);
+  writeLoggedIn(null);
+  return null;
+}
+
+/** 로그아웃 (API-153). 다른 탭이 다른 사원으로 로그인해 쿠키가 바뀌었으면 그 로그인은 두고 이 탭만 나간다 */
+export async function serverLogout(): Promise<void> {
+  if (readLoggedIn() !== actingEmployeeNo()) return;
+  writeLoggedIn(null);
+  await send('POST', '/auth/logout').catch(() => undefined);
 }
 
 export interface ServerRequestOptions {
@@ -118,19 +137,19 @@ export interface ServerRequestOptions {
 export async function serverRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, options: ServerRequestOptions = {}): Promise<T> {
   const query = Object.entries(options.query ?? {}).filter((entry): entry is [string, string | number] => entry[1] !== undefined);
   const url = query.length ? `${path}?${new URLSearchParams(query.map(([k, v]) => [k, String(v)])).toString()}` : path;
-  await ensureLogin();
-  let res = await send(method, url, options.body, options.headers);
+  const employeeNo = actingEmployeeNo();
+  if (!employeeNo) throw new ApiError('COM-002', '로그인해 주세요');
+  const loggedIn = readLoggedIn();
+  if (loggedIn !== employeeNo) throw sessionLost(otherLoginMessage(loggedIn));
+  const res = await send(method, url, options.body, options.headers);
   if (res.status === 401) {
-    // 쿠키가 만료됐거나 다른 탭이 다른 사원으로 로그인했다
     writeLoggedIn(null);
-    await ensureLogin();
-    res = await send(method, url, options.body, options.headers);
+    throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
   }
   return readBody<T>(res);
 }
 
-/** 테스트에서 로그인 상태를 비운다 */
-export function resetServerSessionForTest(): void {
-  writeLoggedIn(null);
-  pendingLogin = null;
+/** 테스트에서 이 사원으로 로그인한 상태로 둔다 (null이면 로그아웃 상태) */
+export function resetServerSessionForTest(employeeNo: string | null = null): void {
+  writeLoggedIn(employeeNo);
 }

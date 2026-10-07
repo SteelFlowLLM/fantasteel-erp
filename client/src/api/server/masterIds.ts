@@ -1,6 +1,7 @@
 // 서버 모드에서 기준정보 id를 맞춘다.
-// 수주·출하 화면만 서버를 쓰고 나머지 화면(기준정보·재고·생산 …)은 아직 가짜 DB를 쓰므로, 화면에 보이는 고객사·규격·사원 id는
-// 계속 가짜 DB id로 둔다. 서버에 보낼 때와 서버 응답을 받을 때 코드(고객사 코드·규격 코드·사원번호)나 이름으로 바꿔 끼운다.
+// 수주·출하 화면만 서버를 쓰고 나머지 화면(기준정보·재고·생산 …)은 아직 가짜 DB를 쓰므로, 화면에 보이는 고객사·규격 id는
+// 계속 가짜 DB id로 둔다. 서버에 보낼 때와 서버 응답을 받을 때 코드(고객사 코드·규격 코드)나 이름으로 바꿔 끼운다.
+// 사원 id는 서버 모드 로그인 사원이 서버 id라 바꾸지 않는다 (api/server/session.ts).
 // 가짜 DB 시드와 서버 시드는 코드가 같다 (다른 것: 화면 첫 코일 규격 2.3×1200×1,065,000 ↔ 서버 2.5×1200×980,000).
 import type { CustomerView, ItemView } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
@@ -67,11 +68,6 @@ export function mockCustomerCodeOf(customerName: string): string {
 /** 규격: 서버 응답의 규격 코드로 찾는다 */
 export function mockItemOf(itemCode: string): ItemRow | undefined {
   return readMock((t) => t.item.find((i) => i.itemCode === itemCode));
-}
-
-/** 사원: 이름으로 찾는다 (가짜 DB와 서버 시드의 사원번호·이름이 같다) */
-export function mockEmployeeIdOf(employeeName: string, serverEmployeeId: number): number {
-  return readMock((t) => t.employee.find((e) => e.employeeName === employeeName)?.id) ?? serverEmployeeId;
 }
 
 export function mockSteelGradeCodeOf(itemCode: string): string | null {

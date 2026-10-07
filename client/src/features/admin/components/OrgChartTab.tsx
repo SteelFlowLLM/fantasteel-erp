@@ -1,6 +1,6 @@
 'use client';
 
-// 조직도 탭 (REQ-ORG-003): 부서 트리와 부서별 인원(이름, 직급, 부서장 여부). 읽기 전용.
+// 조직도 (REQ-ORG-003): 부서 트리와 부서별 인원(이름, 직급, 부서장 여부). 읽기 전용. 관리 화면 탭과 공통 조직도 화면이 같이 쓴다.
 import type { OrgChartDepartmentView } from '@/api/adminOrganization';
 import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
@@ -16,7 +16,7 @@ export function OrgChartTab() {
   const chart = useAdminOrgChart();
   return (
     <>
-      <Banner className="flex-none">사용 중인 사원만 보여요 · 부서 안에서는 직급 표시 순서(직급 탭) → 사원번호 순이에요</Banner>
+      <Banner className="flex-none">사용 중인 사원만 보여요 · 부서 안에서는 직급 순서 → 사원번호 순이에요</Banner>
       <QueryBoundary query={chart} loadingLabel="조직도를 불러오는 중…">
         {(departments) =>
           departments.length === 0 ? (

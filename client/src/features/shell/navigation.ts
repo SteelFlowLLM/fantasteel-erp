@@ -1,7 +1,7 @@
 // 왼쪽 레일 메뉴 (B안). 화면과 여는 조건은 screens.ts 한 표를 쓴다.
 // 1) 대시보드 2) 역할의 업무 메뉴(열 수 있는 것만) 3) 부서장이면 승인함
 // 4) 구분선 뒤: 조회·사용 권한으로 열 수 있는 다른 영역 화면을 영역 순서(영업 → 구매 → 생산 → 품질 → 물류 → 관리)로
-// 5) 구분선 뒤: 공통(LOT 추적·작업 로그·업무·알림·메신저) 6) 구분선 뒤: 준비 중(P2·EX)
+// 5) 구분선 뒤: 공통(조직도·LOT 추적·작업 로그·업무·알림·메신저, 역할별 메뉴 v2 표 순서) 6) 구분선 뒤: 준비 중(P2·EX)
 import { PERMISSION_AREAS, type RoleCode } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import type { SoonGrade } from '@/components/ComingSoon';
@@ -54,7 +54,7 @@ const AREA_SCREENS: readonly ScreenDef[] = [
   SCREEN.inventories,
 ];
 
-const COMMON_SCREENS: readonly ScreenDef[] = [SCREEN.lotTrace, SCREEN.businessEvents, SCREEN.tasks, SCREEN.messenger];
+const COMMON_SCREENS: readonly ScreenDef[] = [SCREEN.orgChart, SCREEN.lotTrace, SCREEN.businessEvents, SCREEN.tasks, SCREEN.messenger];
 const SOON_SCREENS: readonly ScreenDef[] = [SCREEN.agent, SCREEN.meetings, SCREEN.pastCases];
 
 export interface NavUser extends AccessUser {

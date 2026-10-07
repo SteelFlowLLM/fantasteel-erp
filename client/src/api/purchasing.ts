@@ -186,7 +186,7 @@ export const purchaseRequisitionApi = {
 
   /** 등록 창: 요청자·소속 부서·승인권자 */
   formContext: (): Promise<RequisitionFormContext> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverPurchaseRequisitionApi.formContext() : mockQuery((tables) => {
       const actor = requireActor(tables);
       return {
         requesterName: actor.employee.employeeName,

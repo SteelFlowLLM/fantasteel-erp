@@ -32,7 +32,7 @@ describe('buildNavigation', () => {
     const nav = hrefs(navOf('SALES'));
     expect(nav.slice(0, 5)).toEqual(['/dashboard', '/sales-orders', '/sales-orders/new', '/shipment-requests', '/inventories']);
     expect(nav).not.toContain('/approvals');
-    expect(nav.slice(-7)).toEqual(['/lots/trace', '/business-events', '/tasks', '/messenger', '/agent', '/meetings', '/past-cases']);
+    expect(nav.slice(-8)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/agent', '/meetings', '/past-cases']);
   });
 
   it('다른 영역의 조회 권한 화면은 구분선 뒤에 영역 순서로 붙는다 (seed-assumptions 2-2 표)', () => {
@@ -112,10 +112,10 @@ describe('화면 잠금 (screens.ts)', () => {
     expect(open(admin, '/sales-orders/12')).toBe(true);
   });
 
-  it('승인함은 부서장만, 업무·알림·메신저·재고는 모든 사원이 연다', () => {
+  it('승인함은 부서장만, 조직도·업무·알림·메신저·재고는 모든 사원이 연다', () => {
     expect(open(sales, '/approvals')).toBe(false);
     expect(open({ ...sales, headDepartmentIds: [1] }, '/approvals')).toBe(true);
-    for (const path of ['/dashboard', '/tasks', '/messenger', '/inventories', '/lots/trace', '/business-events']) expect(open(sales, path)).toBe(true);
+    for (const path of ['/dashboard', '/org-chart', '/tasks', '/messenger', '/inventories', '/lots/trace', '/business-events']) expect(open(sales, path)).toBe(true);
   });
 });
 

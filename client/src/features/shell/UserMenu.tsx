@@ -1,7 +1,9 @@
 'use client';
 
-// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기, 시드로 초기화
+// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기(서버 모드는 로그아웃), 시드로 초기화
 import { useEffect, useState } from 'react';
+import { isServerDataSource } from '@/api/http';
+import { sessionApi } from '@/api/session';
 import { ROLE_LABEL } from '@/codes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
@@ -36,8 +38,8 @@ export function UserMenu() {
   const switchAccount = () => {
     popover.setOpen(false);
     closeAiPanel();
-    // (main) 레이아웃이 세션이 비면 계정 선택 화면으로 보낸다
-    signOut();
+    // (main) 레이아웃이 세션이 비면 로그인(계정 선택) 화면으로 보낸다. 서버 쿠키를 지우지 못해도 이 탭은 나간다
+    void sessionApi.logout().finally(signOut);
   };
 
   return (
@@ -103,8 +105,8 @@ export function UserMenu() {
             </div>
           </div>
           <PopItem role="menuitem" centered onClick={switchAccount}>
-            <Icon name="users" className="text-ink-3" />
-            계정 바꾸기
+            <Icon name={isServerDataSource() ? 'logout' : 'users'} className="text-ink-3" />
+            {isServerDataSource() ? '로그아웃' : '계정 바꾸기'}
           </PopItem>
           <PopItem
             role="menuitem"

@@ -73,7 +73,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
     <QueryBoundary query={roles} loadingLabel="역할 권한을 불러오는 중…">
       {(list) => {
         const changedRoles = list.filter((role) => changedCellsOf(levelsOf(role.permissions), draft[role.id]).length > 0);
-        const myRole = list.find((role) => role.id === me.roleId);
+        const myRole = list.find((role) => role.roleCode === me.roleCode);
         const losesOwnManage =
           myRole !== undefined &&
           changedCellsOf(levelsOf(myRole.permissions), draft[myRole.id]).length > 0 &&

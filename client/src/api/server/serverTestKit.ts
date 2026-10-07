@@ -16,12 +16,12 @@ export const ok = (data: unknown): Response => json(200, { success: true, data }
 export const fail = (status: number, code: string, message: string): Response => json(status, { success: false, error: { code, message } });
 export const page = <T>(items: T[], total = items.length) => ({ items, page: 1, size: 100, total });
 
-/** 서버 모드로 바꾸고 이 사원으로 로그인한 것처럼 응답한다. respond가 undefined를 돌려주면 404 */
+/** 서버 모드로 바꾸고 이 사원으로 로그인한 상태에서 응답한다. respond가 undefined를 돌려주면 404 */
 export function useFakeServer(employeeNo: string, respond: (call: ServerCall) => Response | undefined): ServerCall[] {
   const calls: ServerCall[] = [];
   vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', 'server');
-  resetServerSessionForTest();
   actAs(employeeNo);
+  resetServerSessionForTest(employeeNo);
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     const parsed = new URL(url);
     const call: ServerCall = {
@@ -30,7 +30,6 @@ export function useFakeServer(employeeNo: string, respond: (call: ServerCall) =>
       query: Object.fromEntries(parsed.searchParams.entries()),
       body: init.body ? JSON.parse(String(init.body)) : undefined,
     };
-    if (call.path === '/auth/login') return ok({});
     calls.push(call);
     return respond(call) ?? fail(404, 'COM-003', `없는 경로 ${call.method} ${call.path}`);
   });

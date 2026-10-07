@@ -12,15 +12,15 @@ import { Modal } from '@/components/Modal';
 import { LINK_PATH_MAX_LENGTH } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
 import { useEmployeeList } from '@/hooks/useDirectory';
-import { useMe } from '@/hooks/useMe';
+import { useMockEmployeeId } from '@/hooks/useMe';
 
 export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClose: () => void }) {
-  const me = useMe();
+  const myId = useMockEmployeeId();
   const formId = useId();
   const employees = useEmployeeList({ isActive: true });
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
-  const [assigneeId, setAssigneeId] = useState<number | null>(task?.assignee.id ?? me.employeeId);
+  const [assigneeId, setAssigneeId] = useState<number | null>(task?.assignee.id ?? myId);
   const [dueDate, setDueDate] = useState(task?.dueDate ?? '');
   const [linkPath, setLinkPath] = useState(task?.linkPath ?? '');
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
@@ -41,10 +41,10 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
         group = { departmentName: employee.departmentName, members: [] };
         result.push(group);
       }
-      group.members.push({ id: employee.id, label: `${employee.employeeName} ${employee.jobGradeName}${employee.id === me.employeeId ? ' (나)' : ''}` });
+      group.members.push({ id: employee.id, label: `${employee.employeeName} ${employee.jobGradeName}${employee.id === myId ? ' (나)' : ''}` });
     }
     return result;
-  }, [employees.data, me.employeeId]);
+  }, [employees.data, myId]);
 
   const submit = () => {
     const input = { title, description, assigneeId, dueDate, linkPath };
@@ -60,7 +60,7 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
       footer={
         <>
           <span className="mr-auto self-center text-cap text-ink-3">
-            {assigneeId === me.employeeId ? '나에게 맡기는 업무는 알림이 없어요' : '담당자에게 업무 지정 알림이 가요'}
+            {assigneeId === myId ? '나에게 맡기는 업무는 알림이 없어요' : '담당자에게 업무 지정 알림이 가요'}
           </span>
           <Button onClick={onClose} disabled={pending}>
             취소

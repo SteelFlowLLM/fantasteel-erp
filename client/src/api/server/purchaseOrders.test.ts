@@ -131,7 +131,14 @@ describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () =>
 
   it('구매요청 상세: 발주됐으면 연결 발주 줄을 발주 목록에서 채운다', async () => {
     const detail: PurchaseRequisitionDetail = { ...approved, id: 901, purchaseRequisitionStatus: 'ORDERED', purchaseOrderNo: 'PO-2610-0001', requestReason: null, rejectReason: null, salesOrderId: null, salesOrderNo: null };
-    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/purchase-requisitions/901' ? ok(detail) : respond(c)));
+    const me = { employeeId: detail.requesterId, employeeNo: SEED_EMPLOYEE_NO.purchase, employeeName: detail.requesterName, roleCode: 'PURCHASE', departmentId: detail.departmentId, jobGradeId: 1, headDepartmentIds: [], permissions: {} };
+    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
+      if (c.path === '/purchase-requisitions/901') return ok(detail);
+      // 승인 판단용 로그인 사원·조직도 (이 테스트는 연결 발주 줄만 본다)
+      if (c.path === '/auth/me') return ok(me);
+      if (c.path === '/departments') return ok([]);
+      return respond(c);
+    });
     expect((await purchaseRequisitionApi.detail(901)).purchaseOrderLines).toEqual([
       { purchaseOrderId: 31, purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'PARTIALLY_RECEIVED', supplierName: '한국합금철', expectedReceiptDate: '2026-10-10', itemName: '실리코망가니즈', orderedTon: '5.000', receivedTon: '1.500', remainingTon: '3.500' },
     ]);

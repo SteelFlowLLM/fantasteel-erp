@@ -14,12 +14,12 @@ import { Modal } from '@/components/Modal';
 import { Segmented } from '@/components/Tabs';
 import { MemberPicker } from '@/features/messenger/components/MemberPicker';
 import { useAction } from '@/hooks/useAction';
-import { useMe } from '@/hooks/useMe';
+import { useMockEmployeeId } from '@/hooks/useMe';
 
 type NewRoomType = 'DIRECT' | 'GROUP';
 
 export function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
-  const me = useMe();
+  const myId = useMockEmployeeId();
   const [chatRoomType, setChatRoomType] = useState<NewRoomType>('DIRECT');
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [chatRoomName, setChatRoomName] = useState('');
@@ -82,7 +82,7 @@ export function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCr
             *
           </span>
         </span>
-        <MemberPicker single={chatRoomType === 'DIRECT'} selected={memberIds} onChange={setMemberIds} excludeIds={[me.employeeId]} />
+        <MemberPicker single={chatRoomType === 'DIRECT'} selected={memberIds} onChange={setMemberIds} excludeIds={[myId]} />
         {fieldErrors.memberIds ? (
           <span role="alert" className="text-cap text-danger">
             {fieldErrors.memberIds}

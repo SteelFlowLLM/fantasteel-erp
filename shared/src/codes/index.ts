@@ -391,11 +391,17 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 export const NOTIFICATION_TYPE = {
   MENTION: 'MENTION',
   WORK_ROOM_MESSAGE: 'WORK_ROOM_MESSAGE',
+  TASK_ASSIGNED: 'TASK_ASSIGNED',
+  APPROVAL_REQUESTED: 'APPROVAL_REQUESTED',
+  APPROVAL_RESULT: 'APPROVAL_RESULT',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   MENTION: '멘션',
   WORK_ROOM_MESSAGE: '업무방 메시지',
+  TASK_ASSIGNED: '업무 지정',
+  APPROVAL_REQUESTED: '승인 요청',
+  APPROVAL_RESULT: '승인 결과',
 };
 
 /** 작업 로그 이벤트 유형 (REQ-LOG-002) */
