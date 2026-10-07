@@ -1,5 +1,6 @@
 // 공정 흐름 현황 (REQ-DSH-001): 수주 → 생산계획 → 검사 → 재고 → 출하요청 → 출고 단계별 건수.
-// 볼 수 없는 단계는 숫자 대신 잠금으로 보인다(PROCESS_FLOW_STAGE_VIEW). 바로가기는 열 수 있는 화면만.
+// 모든 사원이 6단계 건수를 본다. 눌러서 화면으로 가는 것은 그 화면을 열 권한이 있을 때만이고, 없으면 안내만 띄운다.
+// (값이 null인 단계는 예전 서버 응답과의 호환용으로 잠금 표시를 남겨 둔다)
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 import type { ProcessFlowData } from '@/api/dashboard';
@@ -128,7 +129,9 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 {inner}
               </Link>
             ) : (
-              <div className={boxClass}>{inner}</div>
+              <div className={boxClass} title={stage.value !== null ? `${stage.screen.label} 화면을 열 권한이 없어요` : undefined}>
+                {inner}
+              </div>
             )}
           </Fragment>
         );

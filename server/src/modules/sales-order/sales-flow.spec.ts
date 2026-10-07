@@ -493,15 +493,15 @@ describe('대시보드 위젯 (REQ-DSH-001)', () => {
     expect(dueDates).toEqual([...dueDates].sort());
   });
 
-  it('공정 흐름 현황: 권한이 없는 단계는 null, 재고 단계는 모두 본다', async () => {
-    const full = await dashboard.processFlow(sales);
+  it('공정 흐름 현황: 권한과 관계없이 6단계 건수를 모두 준다 (화면 이동만 권한으로 막는다)', async () => {
+    const full = await dashboard.processFlow();
     expect(full.salesOrders?.openCount).toBeGreaterThan(0);
     expect(full.shipmentRequests).not.toBeNull();
     expect(full.inventories.slabAvailableQty).toBeGreaterThan(0);
+    expect(full).toMatchObject({ productionPlans: expect.any(Object), inspections: expect.any(Object), goodsIssues: expect.any(Object) });
 
+    // 수주 충족 현황은 수주 화면 데이터라 그대로 수주 조회 권한이 필요하다
     const noSales: AuthUser = { ...sales, permissions: {} };
-    const limited = await dashboard.processFlow(noSales);
-    expect(limited).toMatchObject({ salesOrders: null, productionPlans: null, inspections: null, shipmentRequests: null, goodsIssues: null });
     expect(await codeOf(dashboard.orderFulfillment(noSales))).toBe('COM-002');
   });
 });

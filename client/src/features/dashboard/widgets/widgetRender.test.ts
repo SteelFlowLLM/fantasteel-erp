@@ -59,13 +59,13 @@ describe('위젯 카드', () => {
     expect(html.get('SHIPMENT_RESULT')).toContain('슬래브(매)');
   });
 
-  it('물류 담당: 수주·수율 위젯은 잠금, 공정 흐름은 볼 수 없는 단계만 잠금', async () => {
+  it('물류 담당: 수주·수율 위젯은 잠금, 공정 흐름은 모든 단계 건수가 보인다', async () => {
     const html = await renderWidgets(SEED_EMPLOYEE_NO.logistics);
     expect(html.get('ORDER_FULFILLMENT')).toContain('이 위젯을 볼 권한이 없어요');
     expect(html.get('ORDER_FULFILLMENT')).toContain('수주 등록·수주 취소 조회 권한이 필요해요');
     expect(html.get('PROCESS_YIELD')).toContain('이 위젯을 볼 권한이 없어요');
     expect(html.get('SHIPMENT_RESULT')).not.toContain('이 위젯을 볼 권한이 없어요');
-    expect(html.get('PROCESS_FLOW')).toContain('권한 없음');
+    expect(html.get('PROCESS_FLOW')).not.toContain('권한 없음');
     expect(html.get('PRODUCT_STOCK')).toContain('SL-SS275-250x1200x10000');
   });
 
@@ -79,6 +79,18 @@ describe('위젯 카드', () => {
     const sales = (await renderWidgets(SEED_EMPLOYEE_NO.sales)).get('PROCESS_FLOW') ?? '';
     expect(sales).toContain('판정 대기');
     expect(sales).not.toContain('내 업무');
+  });
+
+  it('품질 담당: 열 권한이 없는 단계(수주·출하요청)도 건수는 보이고, 누를 수 없으며 안내만 띄운다', async () => {
+    const quality = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('PROCESS_FLOW') ?? '';
+    expect(quality).not.toContain('권한 없음');
+    expect(quality).toContain('납기 위험');
+    expect(quality).toContain('배정 대기');
+    expect(quality).not.toContain('href="/sales-orders"');
+    expect(quality).not.toContain('href="/shipment-requests"');
+    expect(quality).toContain('화면을 열 권한이 없어요');
+    // 열 수 있는 단계(재고·판정 대기)는 그대로 바로가기
+    expect(quality).toContain('href="/inventories"');
   });
 
   it('품질 담당: Agent 위험 감지(예시)는 유형을 눌러 바꿔 볼 수 있고 처음엔 불합격률 상승. 다른 역할은 누를 수 없는 원료 부족 예시', async () => {
