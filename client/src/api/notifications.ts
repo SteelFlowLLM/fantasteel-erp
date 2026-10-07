@@ -3,9 +3,12 @@
 // - 알림은 늘 받는 사원 한 명의 행이다. 부서 발송은 부서원 수만큼 행을 만들고 departmentId를 남긴다 (ERD notification).
 // - 알림 만들기 규칙은 mock/services/notifications.ts의 createNotifications 하나에 있다. 다른 영역의 변경 함수는
 //   자기 트랜잭션 안에서 그 함수를 부르고, 화면에서 따로 보낼 때만 아래 notificationApi.notify를 쓴다.
+// - 서버 모드는 api/server/notifications.ts (조회·읽음만. 발송은 서버가 본 거래 안에서 한다).
 import { NOTIFICATION_TYPE, type NotificationType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, FieldErrors, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverNotificationApi } from '@/api/server/notifications';
 import { optionalText, requiredText, requireRow } from '@/api/validation';
 import { isScreenPath, LINK_PATH_ERROR } from '@/features/tasks/lib/taskDue';
 import { NOTIFICATION_TITLE_MAX } from '@/features/tasks/lib/taskNotice';
@@ -90,11 +93,11 @@ const NOTIFICATION_TYPES = Object.values(NOTIFICATION_TYPE) as string[];
 export const notificationApi = {
   /** 안 읽은 알림 수 (레일·상단 배지) */
   countUnread: (recipientId: number): Promise<number> =>
-    mockQuery((tables) => tables.notification.filter((n) => n.recipientId === recipientId && !n.isRead).length),
+    isServerDataSource() ? serverNotificationApi.countUnread() : mockQuery((tables) => tables.notification.filter((n) => n.recipientId === recipientId && !n.isRead).length),
 
   /** 상단 드롭다운의 최근 알림 */
   listRecent: (recipientId: number, limit: number = RECENT_NOTIFICATION_LIMIT): Promise<NotificationPreview[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverNotificationApi.listRecent(limit) : mockQuery((tables) =>
       tables.notification
         .filter((n) => n.recipientId === recipientId)
         .sort(byNewest)
@@ -104,7 +107,7 @@ export const notificationApi = {
 
   /** 알림함: 요청한 사원이 받은 알림, 최신순 */
   list: (query: NotificationListQuery = {}): Promise<NotificationPage> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverNotificationApi.list(query) : mockQuery((tables) => {
       const me = requireActor(tables).employee.id;
       const mine = tables.notification.filter((n) => n.recipientId === me);
       const filtered = mine.filter((n) => !query.unreadOnly || !n.isRead).sort(byNewest);
@@ -118,7 +121,7 @@ export const notificationApi = {
 
   /** 읽음 처리. 받은 사람만 할 수 있다. 이미 읽었으면 그대로 둔다. */
   markRead: (id: number): Promise<NotificationView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverNotificationApi.markRead(id) : mockMutation((tx) => {
       const me = requireActor(tx.tables).employee.id;
       const row = requireRow(tx.tables, 'notification', id, '알림');
       if (row.recipientId !== me) throw new ApiError('COM-002', '받은 사람만 읽음 처리할 수 있어요');
@@ -128,7 +131,7 @@ export const notificationApi = {
 
   /** 모두 읽음. 읽음 처리한 건수를 돌려준다. */
   markAllRead: (): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverNotificationApi.markAllRead() : mockMutation((tx) => {
       const me = requireActor(tx.tables).employee.id;
       const unread = tx.tables.notification.filter((n) => n.recipientId === me && !n.isRead);
       for (const row of unread) updateRow(tx, 'notification', row.id, { isRead: true, readAt: tx.nowIso });
