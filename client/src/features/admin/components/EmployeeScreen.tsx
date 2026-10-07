@@ -17,7 +17,7 @@ import { EmployeeDetail } from '@/features/admin/components/EmployeeDetail';
 import { EmployeeFormModal } from '@/features/admin/components/EmployeeFormModal';
 import { ActiveBadge, HeadTag } from '@/features/admin/components/OrgBadges';
 import { departmentOptionLabel } from '@/features/admin/lib/orgRules';
-import { useDepartmentList, useEmployeeList, useJobGradeList, useRoleList } from '@/hooks/useDirectory';
+import { useDepartmentList, useJobGradeList, useManagedEmployeeList, useRoleList } from '@/hooks/useDirectory';
 import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -58,8 +58,8 @@ export function EmployeeScreen() {
     [departmentId, roleCode, active, keywordQuery],
   );
   const filtered = Object.keys(query).length > 0;
-  const all = useEmployeeList();
-  const list = useEmployeeList(query);
+  const all = useManagedEmployeeList();
+  const list = useManagedEmployeeList(query);
   const departments = useDepartmentList();
   const jobGrades = useJobGradeList();
   const roles = useRoleList();
