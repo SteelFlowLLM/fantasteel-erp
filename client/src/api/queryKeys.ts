@@ -21,6 +21,7 @@ export const queryKeys = {
   session: (employeeId: number) => ['session', employeeId] as const,
   accounts: () => ['employees', 'accounts'] as const,
   employees: (query: EmployeeListQuery = {}) => ['employees', 'list', query] as const,
+  managedEmployees: (query: EmployeeListQuery = {}) => ['employees', 'managed', query] as const,
   departments: () => ['departments', 'list'] as const,
   orgChart: () => ['departments', 'org-chart'] as const,
   jobGrades: () => ['job-grades', 'list'] as const,

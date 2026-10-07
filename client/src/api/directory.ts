@@ -1,10 +1,14 @@
 // 조직 조회: 사원·부서(트리)·직급·역할과 권한 (REQ-AUTH-002·003, REQ-ORG-001~004).
 // 등록·수정은 2단계(조직·기준정보 화면)에서 더한다.
+// 서버 모드에서는 관리 화면이 쓰는 조회(listManagedEmployees·부서·직급·역할)만 서버를 읽는다. listEmployees·getOrgChart는 메신저·업무 멤버 선택용이라
+// 그 화면들이 서버에 연결될 때까지 가짜 DB를 읽는다(서버 사원 id를 가짜 DB 메신저에 넘기면 맞지 않음).
 import type { Permission, PermissionLevel, RoleCode } from '@/codes';
 import { PERMISSIONS } from '@/codes';
 import { mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
 import { compareEmployees, employeeBasicsOf, headDepartmentIdsOf, orderDepartments } from '@/api/orgViews';
 import type { EmployeeListQuery } from '@/api/queryKeys';
+import { serverOrganizationApi } from '@/api/server/organization';
 import type { MockTables } from '@/mock/schema';
 
 export interface EmployeeView {
@@ -136,8 +140,12 @@ function buildOrgChart(tables: Readonly<MockTables>, parentId: number | null): O
 export const directoryApi = {
   listEmployees: (query: EmployeeListQuery = {}): Promise<EmployeeView[]> => mockQuery((tables) => listEmployeeViews(tables, query)),
 
+  /** 사원 관리·부서 화면용 (서버는 사원 관리 조회 권한 필요) */
+  listManagedEmployees: (query: EmployeeListQuery = {}): Promise<EmployeeView[]> =>
+    isServerDataSource() ? serverOrganizationApi.listEmployees(query) : mockQuery((tables) => listEmployeeViews(tables, query)),
+
   listDepartments: (): Promise<DepartmentView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverOrganizationApi.listDepartments() : mockQuery((tables) =>
       orderDepartments(tables).map(({ department, depth }) => {
         const parent = tables.department.find((d) => d.id === department.parentId);
         const head = tables.employee.find((e) => e.id === department.headEmployeeId);
@@ -161,7 +169,7 @@ export const directoryApi = {
   getOrgChart: (): Promise<OrgChartNode[]> => mockQuery((tables) => buildOrgChart(tables, null)),
 
   listJobGrades: (): Promise<JobGradeView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverOrganizationApi.listJobGrades() : mockQuery((tables) =>
       [...tables.jobGrade]
         .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
         .map((g) => ({
@@ -175,7 +183,7 @@ export const directoryApi = {
     ),
 
   listRoles: (): Promise<RoleView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverOrganizationApi.listRoles() : mockQuery((tables) =>
       tables.role.map((role) => {
         const rows = tables.rolePermission.filter((p) => p.roleId === role.id);
         return {

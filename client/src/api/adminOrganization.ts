@@ -8,7 +8,9 @@
 import { PERMISSION_LEVEL, PERMISSIONS, PERMISSION, type Permission, type PermissionLevel } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
 import { compareByJobGrade, orderDepartments } from '@/api/orgViews';
+import { serverOrganizationApi } from '@/api/server/organization';
 import { assertUnchanged, nonNegativeInteger, requiredText, requireRow } from '@/api/validation';
 import {
   DEPARTMENT_CODE_PATTERN,
@@ -169,7 +171,7 @@ function removeById<T extends { id: number }>(rows: T[], id: number): void {
 
 export const adminOrgApi = {
   /** 조직도: 부서 트리와 부서별 인원(이름, 직급, 부서장 여부). 사용 중인 사원만, 직급 표시 순서대로. */
-  getOrgChart: (): Promise<OrgChartDepartmentView[]> => mockQuery(buildOrgChart),
+  getOrgChart: (): Promise<OrgChartDepartmentView[]> => (isServerDataSource() ? serverOrganizationApi.getOrgChart() : mockQuery(buildOrgChart)),
 };
 
 export const departmentAdminApi = {

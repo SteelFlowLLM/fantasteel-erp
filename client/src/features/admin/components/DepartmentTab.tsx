@@ -18,7 +18,7 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { DepartmentCreateModal } from '@/features/admin/components/DepartmentCreateModal';
 import { blockedParentIdsOf, departmentOptionLabel } from '@/features/admin/lib/orgRules';
 import { useAction } from '@/hooks/useAction';
-import { useDepartmentList, useEmployeeList } from '@/hooks/useDirectory';
+import { useDepartmentList, useManagedEmployeeList } from '@/hooks/useDirectory';
 import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
 
@@ -26,7 +26,7 @@ const INDENT = ['pl-4', 'pl-8', 'pl-12', 'pl-16', 'pl-20'] as const;
 
 export function DepartmentTab({ canEdit }: { canEdit: boolean }) {
   const departments = useDepartmentList();
-  const employees = useEmployeeList();
+  const employees = useManagedEmployeeList();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
