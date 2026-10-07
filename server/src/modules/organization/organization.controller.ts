@@ -1,4 +1,7 @@
-import { Controller } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
+import { PERMISSION, type DepartmentNode, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
+import { RequirePermission } from '../../common/auth/auth.decorators';
+import { ListEmployeesQuery } from './dto/list-employees.query';
 import { OrganizationService } from './organization.service';
 
 /**
@@ -9,4 +12,30 @@ import { OrganizationService } from './organization.service';
 @Controller()
 export class OrganizationController {
   constructor(private readonly service: OrganizationService) {}
+
+  /** API-155 사원 목록 */
+  @Get('employees')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'VIEW')
+  listEmployees(@Query() query: ListEmployeesQuery): Promise<PageResult<EmployeeView>> {
+    return this.service.listEmployees(query);
+  }
+
+  /** API-158 부서 트리·조직도. 로그인한 사원 모두 (메신저 멤버·알림 대상 선택에도 사용) */
+  @Get('departments')
+  listDepartments(): Promise<DepartmentNode[]> {
+    return this.service.listDepartments();
+  }
+
+  /** API-161 직급 목록. 로그인한 사원 모두 */
+  @Get('job-grades')
+  listJobGrades(): Promise<JobGradeView[]> {
+    return this.service.listJobGrades();
+  }
+
+  /** API-163 역할·권한 */
+  @Get('roles')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  listRoles(): Promise<RoleView[]> {
+    return this.service.listRoles();
+  }
 }

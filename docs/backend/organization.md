@@ -41,6 +41,11 @@
 
 [권한표] 기본값: `EMPLOYEE_MANAGE`·`ORG_MANAGE`는 관리자만 USE, 다른 역할은 권한 행 없음.
 
+**구현 상태:** 조회 4개(`GET employees`·`departments`·`job-grades`·`roles`) 구현. 응답 타입은 `shared/src/organization.ts`.
+- `GET employees`: 정렬은 부서코드 → 직급 `sort_order` → 사원번호로 고정. [CSV]에 없는 거르기 `departmentId`·`roleCode`·`isActive`·`keyword`(이름·사원번호)는 사원 관리 화면용으로 추가했다.
+- `GET departments`: 최상위부터 부서코드 순 트리. 부서마다 사용 중인 인원(직급 순, 부서장 여부)을 넣는다.
+- 직급·역할의 `employeeCount`는 사용 중인 사원 수(계산값).
+
 ## 4. 업무 규칙
 
 - **사원 등록**: `employeeNo` 중복 불가. 비밀번호는 `bcryptjs`의 `hash`로 저장하고 평문을 저장·로그 출력하지 않는다([05] 6장 [강제]). 응답 매퍼(`toEmployeeResponse`)에서 `passwordHash`를 뺀다. `departmentId`·`jobGradeId`·`roleId`는 조회해서 없으면 `COM-003`([05] 7-2).
