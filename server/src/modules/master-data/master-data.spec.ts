@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178)를 실제 앱과 DB(fs_master)로 확인한다.
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)를 실제 앱과 DB(fs_master)로 확인한다.
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -6,10 +6,13 @@ import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import type {
   ItemView,
+  ProductionSettingView,
   RoutingView,
   SpecificConsumptionView,
   SpecMappingView,
   SteelGradeView,
+  SupplierView,
+  YardView,
 } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 
@@ -54,7 +57,7 @@ afterAll(async () => {
 });
 
 describe('기준정보 조회 권한', () => {
-  const paths = ['/items', '/steel-grades', '/spec-mappings', '/routings', '/specific-consumptions', '/customers'];
+  const paths = ['/items', '/steel-grades', '/spec-mappings', '/routings', '/specific-consumptions', '/customers', '/suppliers', '/yards', '/production-settings'];
 
   it.each(paths)('%s: 조회 권한이 있으면 읽는다', async (path) => {
     const { status, body } = await get(path, productionCookie);
@@ -70,10 +73,13 @@ describe('기준정보 조회 권한', () => {
 });
 
 describe('GET /items (API-165)', () => {
-  it('규격은 치수·이론중량(소수 3자리)을 준다', async () => {
+  it('원료는 원료 유형·기본 공급업체를, 규격은 치수·이론중량(소수 3자리)을 준다', async () => {
     const { body } = await get<ItemView[]>('/items');
+    const ore = body.data.find((i) => i.itemCode === 'ORE01');
+    expect(ore).toMatchObject({ itemType: 'RAW_MATERIAL', unitType: 'TON', rawMaterialType: 'IRON_ORE', steelGradeId: null, theoreticalWeightTon: null });
+    expect(ore?.defaultSupplierId).not.toBeNull();
     const slab = body.data.find((i) => i.itemCode === 'SL-SS275-250x1200x10000');
-    expect(slab).toMatchObject({ itemType: 'SLAB', unitType: 'QTY', steelGradeCode: 'SS275', thicknessMm: '250.00', theoreticalWeightTon: '23.550' });
+    expect(slab).toMatchObject({ itemType: 'SLAB', unitType: 'QTY', rawMaterialType: null, steelGradeCode: 'SS275', thicknessMm: '250.00', theoreticalWeightTon: '23.550', defaultSupplierId: null });
   });
 
   it('itemType으로 거른다', async () => {
@@ -125,5 +131,28 @@ describe('GET /specific-consumptions (API-175)', () => {
     expect(body.data).toHaveLength(7);
     expect(body.data.find((c) => c.rawMaterialItemCode === 'ORE01')).toMatchObject({ rawMaterialType: 'IRON_ORE', steelGradeId: null, consumptionRate: '1.6000' });
     expect(body.data.find((c) => c.rawMaterialItemCode === 'SMN01' && c.steelGradeCode === 'SPHC')).toMatchObject({ rawMaterialType: 'FERROALLOY', consumptionRate: '4.0000' });
+  });
+});
+
+describe('GET /suppliers · /yards (API-181·184)', () => {
+  it('공급업체 4곳', async () => {
+    const { body } = await get<SupplierView[]>('/suppliers');
+    expect(body.data.map((s) => s.supplierCode)).toEqual(['SUP-01', 'SUP-02', 'SUP-03', 'SUP-04']);
+  });
+
+  it('야드 3곳과 야드 유형', async () => {
+    const { body } = await get<YardView[]>('/yards');
+    expect(body.data.map((y) => [y.yardCode, y.yardType])).toEqual([
+      ['YD-CL-01', 'COIL'],
+      ['YD-RM-01', 'RAW_MATERIAL'],
+      ['YD-SL-01', 'SLAB'],
+    ]);
+  });
+});
+
+describe('GET /production-settings (API-187)', () => {
+  it('히트 용량(소수 3자리)과 납기 위험 기준일', async () => {
+    const { body } = await get<ProductionSettingView>('/production-settings');
+    expect(body.data).toMatchObject({ heatCapacityTon: '250.000', deliveryRiskDays: 3 });
   });
 });
