@@ -29,7 +29,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 ```
 
 - 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
-- 처음 열면 **계정 선택** 화면(`/login`)이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
+- 처음 열면 **계정 선택** 화면(`/login`)이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 서버 모드는 사원번호·비밀번호 로그인이다(아래 서버 연결). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
 - 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
 - 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
@@ -39,26 +39,27 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 
 1. `client/.env.example`을 `client/.env.local`로 복사하고 `NEXT_PUBLIC_DATA_SOURCE=server`로 바꾼다.
 2. `npm run dev`로 DB·서버·화면을 띄운다(이미 떠 있으면 화면 서버만 다시 띄운다).
-3. 계정 선택 화면은 그대로다. 서버 모드에서는 고른 사원의 사원번호와 시드 비밀번호(`NEXT_PUBLIC_DEV_LOGIN_PASSWORD`)로 화면 뒤에서 서버에 로그인한다(`api/http.ts`).
+3. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
 
 - 연결 방식: `api/salesOrders.ts`·`api/shipmentRequests.ts`·`api/dashboard.ts`가 출처에 따라 가짜 DB 또는 `api/server/*.ts`를 부른다. 화면 컴포넌트는 그대로다.
-- 고객사·규격·사원 id는 화면에서 계속 가짜 DB id를 쓰고, 서버와 주고받을 때 코드(고객사 코드·규격 코드)와 이름으로 바꾼다(`api/server/masterIds.ts`). 화면 첫 코일 규격(2.3×1200×1,065,000)은 서버 시드(2.5×1200×980,000)에 없어 서버 모드에서 고를 수 없다.
+- 고객사·규격 id는 화면에서 계속 가짜 DB id를 쓰고, 서버와 주고받을 때 코드(고객사 코드·규격 코드)와 이름으로 바꾼다(`api/server/masterIds.ts`). 사원·부서 id는 로그인 사원(`useMe()`)과 같이 서버 id다. 화면 첫 코일 규격(2.3×1200×1,065,000)은 서버 시드(2.5×1200×980,000)에 없어 서버 모드에서 고를 수 없다.
 - 서버에 아직 없는 기능(수주 상세의 생산 연결, 취소 창의 구매 진행 영향, 업무방, 재생산 계획)은 서버 모드에서 비어 있거나 "서버와 연결되지 않았어요" 오류다.
 - 서버 데이터는 '시드로 초기화'로 되돌아가지 않는다. 서버 DB는 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
 - 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 서버 모드면 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. 가짜 DB에만 있는 값(여재 표시 시각, 배정 확정자)은 비어 있다.
-- 구매 화면: `api/purchasing.ts`·`api/approvals.ts`·`api/goodsReceipts.ts`·`api/mrp.ts`가 `api/server/purchaseRequisitions.ts`·`purchaseOrders.ts`·`mrp.ts`를 부른다. 구매요청·발주·입고·생산계획 id는 서버 id, 원료 id는 화면 id다. 반려 일시·발주자·입고 확정자는 서버가 작업 로그에서 읽어 준다. Message → ERP 원본 초안은 서버 조회가 없어 비어 있다. MRP 결과를 보려면 생산계획이 있어야 해서 `seed:demo`가 필요하다.
+- 구매 화면: `api/purchasing.ts`·`api/approvals.ts`·`api/goodsReceipts.ts`·`api/mrp.ts`가 `api/server/purchaseRequisitions.ts`·`purchaseOrders.ts`·`mrp.ts`를 부른다. 구매요청·발주·입고·생산계획·사원·부서 id는 서버 id, 원료 id는 화면 id다. 상세의 승인 가능 여부·요청자 직급·부서장 이름과 등록 창의 요청자·부서·부서장은 로그인 사원과 조직도로 판단한다. 반려 일시·발주자·입고 확정자는 서버가 작업 로그에서 읽어 준다. Message → ERP 원본 초안은 서버 조회가 없어 비어 있다. MRP 결과를 보려면 생산계획이 있어야 해서 `seed:demo`가 필요하다.
 - 출고 확정 화면: `api/goodsIssues.ts`가 `api/server/goodsIssues.ts`를 부른다. 출하요청·LOT id는 서버 id다. 서버에 출고 전 확인 API가 없어 "출고 전 확인"은 출하요청·수주·LOT 상세로 화면에서 계산해 보이고, 확정할 때 서버가 다시 확인한다. 품질 사원은 수주 조회 권한이 없어 수주 매수·출하 매수가 비어 있다. 요청자는 ERD에 컬럼이 없어 비어 있다.
 - 밀시트 화면: `api/millSheets.ts`가 `api/server/millSheets.ts`를 부른다. 서버 스냅샷만으로 그리고, 수주 줄 번호는 스냅샷에 없어 수주 상세의 품목 순서로 매긴다(수주 조회 권한이 없는 품질은 밀시트 안 순서). 'PDF 생성'은 브라우저에서 내려받은 뒤 서버도 같은 스냅샷으로 PDF를 만들어 저장한다(`POST mill-sheets/:id/pdf`).
 - LOT 추적 화면: `api/lotTrace.ts`가 `api/server/lotTrace.ts`를 부른다. 화면 주소의 LOT 번호로 서버 LOT id를 찾아 추적하므로 생산·검사·출고 화면의 LOT 링크가 맞는다. 출하요청 번호로 시작하는 추적은 그 출하요청의 배정 LOT마다 역추적해 합친다(출하요청 조회 권한이 없는 구매·생산은 권한 없음). LOT 번호 검색은 앞부분 일치다. 서버 응답에 없는 값(공급업체, LOT의 생산계획, 배정 확정 시각·수주, 소진·출고·여재 시각)은 비어 있다.
 - 재고 화면: `api/inventories.ts`가 `api/server/inventories.ts`를 부른다. 서버 재고의 `onHandQty`는 합격 재고라 화면의 합격 매수로 보이고, 재고 매수는 재고 상태 LOT 수로 센다(판정 대기에 상위 히트만 불합격인 LOT도 섞인다). LOT 목록은 제품·히트 LOT 상세로 히트·배정·처리 상태를 채운다. 원료 입고일·입고 번호(입고 조회 권한)와 입고예정(발주 조회 권한)은 권한이 있을 때만 보인다. 여재는 서버가 계산하지 않아 여재 탭이 비어 있다.
 - 작업 로그: `api/businessEvents.ts`(작업 로그 화면), 수주 상세 이력(`api/salesOrders.ts`), 검사·불합격 LOT 이력(`api/server/inspections.ts`·`dispositions.ts`), 대시보드 최근 작업 로그(`api/dashboard.ts`)가 `api/server/businessEvents.ts`로 `GET /business-events`를 부른다. 대상 번호는 기록 데이터(변경 후·전)의 번호로 보이고, 주체의 부서·직급과 원본 메시지 링크는 서버 응답에 없어 비어 있다.
 - 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. ERD·API 명세에 없는 기능(부서 정렬 순서·삭제, 직급 코드·수정·삭제, 최근 접속)은 서버 모드에서 숨기고, 사원 등록은 비밀번호를 받는다. 메신저·업무·업무방의 멤버 선택은 그 화면들이 가짜 DB라 서버 모드에서도 가짜 DB 사원을 쓴다.
-- 쿠키는 브라우저의 모든 탭이 함께 쓴다. 탭마다 다른 계정을 고르면 요청마다 다시 로그인한다.
+- 로그인 쿠키는 브라우저의 모든 탭이 함께 쓴다. 그래서 한 브라우저에서는 한 계정만 쓴다(승인 시연은 시크릿 창이나 다른 브라우저로). 이미 로그인된 브라우저에서 새 탭을 열면 그 사원으로 바로 들어간다. 다른 탭에서 다른 계정으로 로그인하거나 로그아웃하면, 또는 쿠키가 만료(401)되면 안내하고 로그인 화면으로 보낸다(`api/http.ts`의 `onServerSessionLost`).
+- 아직 가짜 DB만 쓰는 화면(업무·알림·메신저·업무방·Message → ERP 초안 등)은 로그인 사원의 사원번호로 가짜 DB 사원을 찾아 쓴다(`api/actor.ts`, 화면은 `useMockEmployeeId()`). 서버에서 새로 등록한 사원은 가짜 DB에 없어 이 화면들을 쓸 수 없다.
 
 ## 3. 폴더 (`client/src/`)
 
 ```
-app/            Next.js 경로. (main)/<주소>/page.tsx = 화면 진입점, login/page.tsx = 계정 선택
+app/            Next.js 경로. (main)/<주소>/page.tsx = 화면 진입점, login/page.tsx = 계정 선택(서버 모드는 로그인)
 features/<영역>/  화면과 영역 전용 부품·lib (sales, production, quality, purchasing, shipment, inventory, lotTrace,
                  businessEvents, tasks, messenger, dashboard, admin, masterData, inspectionStandards, actionDrafts,
                  millSheets, agent, meetings, pastCases, login, shell …)

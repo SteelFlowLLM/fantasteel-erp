@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { isServerDataSource } from '@/api/http';
 import { FullScreenState } from '@/components/StateView';
 import { AccountPicker } from '@/features/login/AccountPicker';
 
-export const metadata: Metadata = { title: '계정 선택' };
+export const metadata: Metadata = { title: isServerDataSource() ? '로그인' : '계정 선택' };
 
 export default function LoginPage() {
   return (

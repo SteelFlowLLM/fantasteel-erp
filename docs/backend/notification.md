@@ -29,16 +29,18 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `tasks` | 업무 목록 | 로그인만(업무·알림은 전 역할) | 상태는 TASK_STATUS |
+| GET | `tasks` | 업무 목록 | 로그인만(업무·알림은 전 역할) | 상태는 TASK_STATUS. 내 담당 업무만(8장) |
 | POST | `tasks` | 업무 등록 | 로그인만 | |
 | POST | `tasks/:id/complete` | 업무 완료 | 담당자 본인(service 확인) | OPEN → DONE |
-| GET | `notifications` | 알림 목록 | 본인 알림 | 알림 발송은 서버 내부 처리(API 없음), 유형은 NOTIFICATION_TYPE |
+| GET | `notifications` | 알림 목록 | 본인 알림 | 알림 발송은 서버 내부 처리(API 없음), 유형은 NOTIFICATION_TYPE. 응답에 안 읽은 수(`unreadCount`) |
+| POST | `notifications/:id/read` | 알림 읽음 | 본인 알림 | [CSV]에 없는 임시 API(8장). 남의 알림 COM-002 |
+| POST | `notifications/read-all` | 모두 읽음 | 로그인만 | [CSV]에 없는 임시 API(8장) |
 
 ## 4. 업무 규칙
 
 **업무**(REQ-NTF-001)
-- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN.
-- 완료: 담당자 본인만, OPEN에서만 DONE([06] TASK_STATUS, [04] 10장). 다른 사람이면 COM-002.
+- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks`).
+- 완료: 담당자 본인만, OPEN에서만 DONE([06] TASK_STATUS, [04] 10장). 다른 사람이면 COM-002, 이미 완료면 COM-001.
 - 작업(공정 작업)과 다르다: 공정 작업은 상태값이 없고 실적의 시작·완료 시각으로 판단한다([04] 10장 "작업").
 
 **알림**(REQ-NTF-002)
@@ -48,17 +50,18 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 | 함수 | 내용 |
 | --- | --- |
 | `notifyEmployees(tx, { type, recipientIds, content, linkPath, messageId?, businessEventId? })` | 개인 알림. `createMany({ skipDuplicates: true })`로 부분 unique 중복을 건너뛴다 |
-| `notifyDepartment(tx, departmentId, {...})` | 부서 알림. 그 부서의 재직 중 사원별 행으로 펼친다([ERD] Note, REQ-ORG-004) |
+| `notifyDepartment(tx, departmentId, {...})` | 부서 알림. 그 부서의 재직 중 사원별 행으로 펼친다([ERD] Note, REQ-ORG-004). 하위 부서는 넣지 않는다(8장) |
 
-- 유형 값은 [06] 확정값 MENTION·WORK_ROOM_MESSAGE만 쓴다. `link_path`는 프론트 화면 경로(REQ-MSG-006 "ERP 화면 이동").
+- 유형 값은 [06] NOTIFICATION_TYPE: MENTION·WORK_ROOM_MESSAGE·TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT(뒤의 셋은 2026-10-07 확정). `link_path`는 프론트 화면 경로(REQ-MSG-006 "ERP 화면 이동").
 - 알림은 본 거래와 같은 tx에서 저장한다(본 거래가 롤백되면 알림도 없어야 한다).
 
 ## 5. 오류 코드·작업 로그
 
 | 코드 | 언제 |
 | --- | --- |
-| COM-002 | 담당자가 아닌 사람의 업무 완료 |
-| COM-003 | 담당자·업무 없음 |
+| COM-001 | 이미 완료된 업무를 다시 완료 |
+| COM-002 | 담당자가 아닌 사람의 업무 완료, 남의 알림 읽음 처리 |
+| COM-003 | 담당자(없음·퇴사)·업무·알림 없음 |
 | COM-004 | DTO 검증 실패 |
 
 작업 로그: 없음. REQ-LOG-002·BUSINESS_EVENT_TYPE에 업무·알림 이벤트가 없다.
@@ -84,11 +87,20 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 
 ## 8. 확인 필요 🟡
 
+**2026-10-07 사용자 결정 (임시 결정 포함)**
+
+| 항목 | 결정 |
+| --- | --- |
+| 알림 유형 | TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT를 확정한다([06] 2장으로 옮김). 업무 지정·구매요청 승인 요청·결과 알림에 쓴다 |
+| 읽음 처리 API | [CSV]에 없지만 임시로 둔다: `POST notifications/:id/read`, `POST notifications/read-all`(컨벤션 5장 액션 URL, `chat-rooms/:id/read`와 같은 모양). 이미 읽은 알림의 읽은 시각은 바꾸지 않는다 |
+| 업무 목록 범위 | 내 담당 업무만(`assignee_id = 로그인 사원`). `task`에 등록자 칸이 없어 "내가 만든 업무"는 없다 |
+| 부서 알림 하위 부서 | 넣지 않는다. 그 부서에 소속된 재직 중 사원만 |
+| 업무 수정·담당자 변경 | API를 만들지 않는다. 화면은 서버 모드에서 숨긴다 |
+| 실시간 알림 | 지금은 만들지 않는다. 화면이 다시 읽을 때 반영된다 |
+
+**남은 것**
+
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
-| 알림 유형 부족 | TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT는 [06] 3장 제안값이다. 확정 전에는 업무 지정·구매요청 승인 요청(13.4 `notify(departmentHeadOf(actor))`) 알림을 보낼 유형이 없다 | [06] 3장, [04] 13.4 |
-| 읽음 처리 API | `read_at` 컬럼은 있지만 [CSV]에 읽음 처리 API가 없다 | [ERD], [CSV] |
-| 업무 목록 범위 | 내 업무만인지, 내가 만든 업무·전체인지 정해지지 않았다. `task`에 등록자 컬럼이 없다 | [CSV], [ERD] |
-| 업무 수정·담당자 변경 | API가 없다 | [CSV] |
-| 실시간 알림 | 알림을 WebSocket으로 밀어 줄지(메신저 Gateway 재사용) 정해지지 않았다 | [02] REQ-MSG-002·005 |
-| 부서 알림 하위 부서 | 부서 알림에 하위 부서원을 포함할지 | [02] REQ-NTF-002, REQ-ORG-001 |
+| 업무 제목·설명 길이 | 200자·2000자는 화면 가정값이다 | [ERD] varchar·text |
+| 실시간 알림 | 메신저 Gateway로 밀어 줄지 | [02] REQ-MSG-002·005 |

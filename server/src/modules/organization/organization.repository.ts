@@ -123,6 +123,10 @@ export class OrganizationRepository {
     });
   }
 
+  findActiveMemberIdsOf(tx: Tx, departmentId: number) {
+    return tx.employee.findMany({ where: { departmentId, isActive: true }, select: { id: true }, orderBy: { id: 'asc' } });
+  }
+
   findJobGrades(tx: Tx) {
     return tx.jobGrade.findMany({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }], include: { _count: { select: { employees: { where: { isActive: true } } } } } });
   }

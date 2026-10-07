@@ -28,6 +28,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, RouteTitle]> = [
   [/^\/quality\/standards/, { title: '검사 기준', area: '품질' }],
   [/^\/goods-issues/, { title: '출고 확정', area: '물류' }],
   [/^\/mill-sheets/, { title: '밀시트', area: '물류' }],
+  [/^\/org-chart/, { title: '조직도', area: '조직' }],
   [/^\/lots\/trace/, { title: 'LOT 추적', area: '추적' }],
   [/^\/business-events/, { title: '작업 로그', area: '추적' }],
   [/^\/tasks/, { title: '업무·알림', area: '협업' }],
