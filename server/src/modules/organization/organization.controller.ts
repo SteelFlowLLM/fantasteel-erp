@@ -1,6 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSION, type DepartmentNode, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
+import { CreateJobGradeDto } from './dto/job-grade.dto';
 import { ListEmployeesQuery } from './dto/list-employees.query';
 import { OrganizationService } from './organization.service';
 
@@ -20,6 +22,20 @@ export class OrganizationController {
     return this.service.listEmployees(query);
   }
 
+  /** API-156 사원 등록 */
+  @Post('employees')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  createEmployee(@Body() dto: CreateEmployeeDto): Promise<EmployeeView> {
+    return this.service.createEmployee(dto);
+  }
+
+  /** API-157 사원 수정·퇴사 처리 */
+  @Patch('employees/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  updateEmployee(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateEmployeeDto): Promise<EmployeeView> {
+    return this.service.updateEmployee(id, dto);
+  }
+
   /** API-158 부서 트리·조직도. 로그인한 사원 모두 (메신저 멤버·알림 대상 선택에도 사용) */
   @Get('departments')
   listDepartments(): Promise<DepartmentNode[]> {
@@ -30,6 +46,13 @@ export class OrganizationController {
   @Get('job-grades')
   listJobGrades(): Promise<JobGradeView[]> {
     return this.service.listJobGrades();
+  }
+
+  /** API-162 직급 등록. 직급 관리 권한 코드가 따로 없어 API 명세대로 사원 관리 권한을 쓴다 (organization.md 8장) */
+  @Post('job-grades')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  createJobGrade(@Body() dto: CreateJobGradeDto): Promise<JobGradeView> {
+    return this.service.createJobGrade(dto);
   }
 
   /** API-163 역할·권한 */

@@ -1,5 +1,5 @@
-// 조직 조회 API(API-155·158·161·163)를 실제 앱과 DB(fs_common)로 확인한다.
-// 권한 가드·쿼리 변환·날짜 변환까지 보려고 HTTP로 부른다. 시드(seed.md)의 조직 데이터만 읽는다.
+// 조직 API(조회 API-155·158·161·163, 등록·수정 API-156·157·162)를 실제 앱과 DB(fs_common)로 확인한다.
+// 권한 가드·쿼리 변환·날짜 변환까지 보려고 HTTP로 부른다. 조회는 시드(seed.md) 조직 데이터를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -14,11 +14,11 @@ let adminCookie: string;
 /** 영업 사원 박서영 — 사원 관리·부서·권한 관리 권한 없음 */
 let salesCookie: string;
 
-async function login(employeeNo: string): Promise<string> {
+async function login(employeeNo: string, password = process.env.SEED_PASSWORD ?? 'fantasteel'): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD ?? 'fantasteel' }),
+    body: JSON.stringify({ employeeNo, password }),
   });
   if (!res.ok) throw new Error(`로그인 실패 (HTTP ${res.status})`);
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
@@ -26,6 +26,11 @@ async function login(employeeNo: string): Promise<string> {
 
 async function get<T>(path: string, cookie = adminCookie) {
   const res = await fetch(`${baseUrl}${path}`, { headers: { cookie } });
+  return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
+}
+
+async function send<T>(method: 'POST' | 'PATCH', path: string, payload: unknown, cookie = adminCookie) {
+  const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
 }
 
@@ -129,6 +134,92 @@ describe('GET /roles (API-163)', () => {
 
   it('부서·권한 관리 권한이 없으면 COM-002', async () => {
     const { body } = await get('/roles', salesCookie);
+    expect(body.error?.code).toBe('COM-002');
+  });
+});
+
+// ── 등록·수정 (API-156·157·162). 이 파일이 만든 사원·직급으로만 확인한다 (물류부에 넣어 위 조직도 확인과 겹치지 않게) ──
+
+let seq = 0;
+async function newEmployeePayload() {
+  const [departments, grades, roles] = await Promise.all([get<DepartmentNode[]>('/departments'), get<JobGradeView[]>('/job-grades'), get<RoleView[]>('/roles')]);
+  seq += 1;
+  return {
+    employeeNo: `T${Date.now()}${seq}`,
+    password: 'new-pass-1',
+    employeeName: `테스트사원${seq}`,
+    departmentId: flatten(departments.body.data).find((d) => d.departmentName === '물류부')!.id,
+    jobGradeId: grades.body.data.find((g) => g.jobGradeName === '사원')!.id,
+    roleId: roles.body.data.find((r) => r.roleCode === 'LOGISTICS')!.id,
+  };
+}
+
+describe('POST /employees (API-156)', () => {
+  it('등록하면 비밀번호는 응답에 없고, 그 비밀번호로 로그인할 수 있다', async () => {
+    const payload = await newEmployeePayload();
+    const { status, body } = await send<EmployeeView>('POST', '/employees', payload);
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ employeeNo: payload.employeeNo, departmentName: '물류부', roleCode: 'LOGISTICS', isActive: true, headDepartmentIds: [] });
+    expect(body.data).not.toHaveProperty('password');
+    expect(body.data).not.toHaveProperty('passwordHash');
+    await expect(login(payload.employeeNo, payload.password)).resolves.toContain('=');
+  });
+
+  it('없는 부서는 COM-003, 겹치는 사원번호는 COM-001', async () => {
+    const payload = await newEmployeePayload();
+    expect((await send('POST', '/employees', { ...payload, departmentId: 999999 })).body.error?.code).toBe('COM-003');
+    await send('POST', '/employees', payload);
+    expect((await send('POST', '/employees', payload)).body.error?.code).toBe('COM-001');
+  });
+
+  it('사원 관리 권한이 없으면 COM-002', async () => {
+    const { body } = await send('POST', '/employees', await newEmployeePayload(), salesCookie);
+    expect(body.error?.code).toBe('COM-002');
+  });
+});
+
+describe('PATCH /employees/:id (API-157)', () => {
+  it('부서·직급·역할을 바꾸고, 퇴사 처리하면 그 사원의 다음 요청은 AUTH-002', async () => {
+    const payload = await newEmployeePayload();
+    const created = (await send<EmployeeView>('POST', '/employees', payload)).body.data;
+    const cookie = await login(payload.employeeNo, payload.password);
+    const roles = (await get<RoleView[]>('/roles')).body.data;
+    const quality = roles.find((r) => r.roleCode === 'QUALITY')!;
+
+    const changed = await send<EmployeeView>('PATCH', `/employees/${created.id}`, { employeeName: '바뀐이름', roleId: quality.id });
+    expect(changed.body.data).toMatchObject({ employeeNo: payload.employeeNo, employeeName: '바뀐이름', roleCode: 'QUALITY' });
+
+    const retired = await send<EmployeeView>('PATCH', `/employees/${created.id}`, { isActive: false });
+    expect(retired.body.data.isActive).toBe(false);
+    expect((await get('/departments', cookie)).body.error?.code).toBe('AUTH-002');
+  });
+
+  it('부서장인 사원은 퇴사 처리할 수 없다 (COM-004)', async () => {
+    const head = (await get<PageResult<EmployeeView>>('/employees?keyword=1702004')).body.data.items[0];
+    const { body } = await send('PATCH', `/employees/${head.id}`, { isActive: false });
+    expect(body.error?.code).toBe('COM-004');
+    expect((await get<PageResult<EmployeeView>>('/employees?keyword=1702004')).body.data.items[0].isActive).toBe(true);
+  });
+
+  it('사원번호는 바꿀 수 없다 (받지 않는 값은 COM-004), 없는 사원은 COM-003', async () => {
+    const head = (await get<PageResult<EmployeeView>>('/employees?keyword=1702004')).body.data.items[0];
+    expect((await send('PATCH', `/employees/${head.id}`, { employeeNo: '9999999' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', '/employees/999999', { employeeName: '없음' })).body.error?.code).toBe('COM-003');
+  });
+});
+
+describe('POST /job-grades (API-162)', () => {
+  it('등록하면 표시 순서대로 목록에 들어간다', async () => {
+    const name = `테스트직급${Date.now()}`;
+    const { status, body } = await send<JobGradeView>('POST', '/job-grades', { jobGradeName: name, sortOrder: 99 });
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ jobGradeName: name, sortOrder: 99, employeeCount: 0 });
+    const list = (await get<JobGradeView[]>('/job-grades')).body.data;
+    expect(list.at(-1)?.jobGradeName).toBe(name);
+  });
+
+  it('사원 관리 권한이 없으면 COM-002', async () => {
+    const { body } = await send('POST', '/job-grades', { jobGradeName: '권한없음', sortOrder: 1 }, salesCookie);
     expect(body.error?.code).toBe('COM-002');
   });
 });
