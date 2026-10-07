@@ -121,6 +121,8 @@ export const DASHBOARD_TREND_DAYS = 30;
 export const DASHBOARD_MRP_HORIZON_DAYS = 30;
 /** 최근 작업 로그 줄 수 */
 export const DASHBOARD_RECENT_EVENT_LIMIT = 20;
+/** 서버 모드에서 위젯을 다시 읽는 간격: 다른 사원이 바꾼 내용을 따라가도록 30초 (가정값, docs/rework/areas/dashboard.md) */
+export const DASHBOARD_REFRESH_MS = 30_000;
 
 const MRP_EARLIEST = '0001-01-01';
 
