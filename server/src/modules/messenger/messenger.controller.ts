@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { AuthUser, ChatMessagePage, ChatMessageView, ChatRoomDetail, ChatRoomListItem, CreateChatRoomResult } from '@fantasteel/shared';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, ListMessagesQuery, SendMessageDto } from './dto/messenger.dto';
-import { MessengerService } from './messenger.service';
+import { CreateChatRoomDto, ListMessagesQuery, MarkReadDto, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
  * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
@@ -38,5 +39,34 @@ export class MessengerController {
   @Post('chat-rooms/:id/messages')
   sendMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: SendMessageDto): Promise<ChatMessageView> {
     return this.service.sendMessage(user, id, dto);
+  }
+
+  /** 업로드 = 메시지 1건 생성. multipart: file(파일), content(글, 선택). 용량을 넘으면 multer가 끝까지 읽지 않고 413(COM-004)으로 끊는다 */
+  @Post('chat-rooms/:id/attachments')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MESSAGE_ATTACHMENT_MAX_BYTES, files: 1 } }))
+  sendAttachment(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: UploadedAttachment | undefined,
+    @Body() dto: UploadAttachmentDto,
+  ): Promise<ChatMessageView> {
+    return this.service.sendAttachment(user, id, file, dto);
+  }
+
+  /** id는 메시지 id. 응답 포맷으로 감싸지 않고 파일 그대로 보낸다 */
+  @Get('attachments/:id')
+  async readAttachment(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<StreamableFile> {
+    const { fileName, content } = await this.service.readAttachment(user, id);
+    return new StreamableFile(content, {
+      type: 'application/octet-stream',
+      disposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      length: content.length,
+    });
+  }
+
+  @Post('chat-rooms/:id/read')
+  @HttpCode(200)
+  markRead(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: MarkReadDto): Promise<ChatRoomReadResult> {
+    return this.service.markRead(user, id, dto);
   }
 }
