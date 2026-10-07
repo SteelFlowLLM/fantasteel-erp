@@ -3,6 +3,9 @@ import type { ItemType } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
+const CUSTOMER_SELECT = { id: true, customerCode: true, customerName: true } as const;
+const SUPPLIER_SELECT = { id: true, supplierCode: true, supplierName: true } as const;
+const YARD_SELECT = { id: true, yardCode: true, yardName: true, yardType: true } as const;
 const SPEC_SELECT = { id: true, itemCode: true, steelGradeId: true, thicknessMm: true, widthMm: true, lengthMm: true, theoreticalWeightTon: true } as const;
 
 /**
@@ -12,7 +15,7 @@ const SPEC_SELECT = { id: true, itemCode: true, steelGradeId: true, thicknessMm:
 @Injectable()
 export class MasterDataRepository {
   findCustomers(tx: Tx) {
-    return tx.customer.findMany({ orderBy: { customerCode: 'asc' }, select: { id: true, customerCode: true, customerName: true } });
+    return tx.customer.findMany({ orderBy: { customerCode: 'asc' }, select: CUSTOMER_SELECT });
   }
 
   findItems(tx: Tx, filter: { itemType?: ItemType; id?: number } = {}) {
@@ -52,11 +55,11 @@ export class MasterDataRepository {
   }
 
   findSuppliers(tx: Tx) {
-    return tx.supplier.findMany({ orderBy: { supplierCode: 'asc' }, select: { id: true, supplierCode: true, supplierName: true } });
+    return tx.supplier.findMany({ orderBy: { supplierCode: 'asc' }, select: SUPPLIER_SELECT });
   }
 
   findYards(tx: Tx) {
-    return tx.yard.findMany({ orderBy: { yardCode: 'asc' }, select: { id: true, yardCode: true, yardName: true, yardType: true } });
+    return tx.yard.findMany({ orderBy: { yardCode: 'asc' }, select: YARD_SELECT });
   }
 
   /** production_setting은 1행만 둔다 */
@@ -165,6 +168,42 @@ export class MasterDataRepository {
 
   updateSpecificConsumption(tx: Tx, id: number, consumptionRate: string) {
     return tx.specificConsumption.update({ where: { id }, data: { consumptionRate }, select: { id: true } });
+  }
+
+  findCustomer(tx: Tx, where: { id: number } | { customerCode: string }) {
+    return tx.customer.findUnique({ where, select: CUSTOMER_SELECT });
+  }
+
+  createCustomer(tx: Tx, data: { customerCode: string; customerName: string }) {
+    return tx.customer.create({ data, select: CUSTOMER_SELECT });
+  }
+
+  updateCustomer(tx: Tx, id: number, customerName: string) {
+    return tx.customer.update({ where: { id }, data: { customerName }, select: CUSTOMER_SELECT });
+  }
+
+  findSupplierByCode(tx: Tx, supplierCode: string) {
+    return tx.supplier.findUnique({ where: { supplierCode }, select: { id: true } });
+  }
+
+  createSupplier(tx: Tx, data: { supplierCode: string; supplierName: string }) {
+    return tx.supplier.create({ data, select: SUPPLIER_SELECT });
+  }
+
+  updateSupplier(tx: Tx, id: number, supplierName: string) {
+    return tx.supplier.update({ where: { id }, data: { supplierName }, select: SUPPLIER_SELECT });
+  }
+
+  findYardByCode(tx: Tx, yardCode: string) {
+    return tx.yard.findUnique({ where: { yardCode }, select: { id: true } });
+  }
+
+  createYard(tx: Tx, data: { yardCode: string; yardName: string; yardType: string }) {
+    return tx.yard.create({ data, select: YARD_SELECT });
+  }
+
+  updateYard(tx: Tx, id: number, yardName: string) {
+    return tx.yard.update({ where: { id }, data: { yardName }, select: YARD_SELECT });
   }
 
   updateProductionSetting(tx: Tx, id: number, data: { heatCapacityTon?: string; deliveryRiskDays?: number }) {

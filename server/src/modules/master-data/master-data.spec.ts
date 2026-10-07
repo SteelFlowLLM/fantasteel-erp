@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록·수정 API(API-166·167·169·171·173·174·176·177·188)를
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록·수정 API(API-166·167·169·171·173·174·176·177·179·180·182·183·185·186·188)를
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -342,5 +342,37 @@ describe('라우팅·배합 원단위·생산 설정값 등록·수정 (API-173�
     const { body } = await send<ProductionSettingView>('PATCH', '/production-settings', { heatCapacityTon: '260.5', deliveryRiskDays: 5 });
     expect(body.data).toMatchObject({ heatCapacityTon: '260.500', deliveryRiskDays: 5 });
     await send('PATCH', '/production-settings', { heatCapacityTon: '250', deliveryRiskDays: 3 });
+  });
+});
+
+describe('고객사·공급업체·야드 등록·수정 (API-179·180·182·183·185·186)', () => {
+  it('고객사: 코드는 대문자로, 중복은 COM-004, 수정은 이름만', async () => {
+    const { status, body } = await send<{ id: number; customerCode: string; customerName: string }>('POST', '/customers', { customerCode: 'cus-05', customerName: '새고객' });
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ customerCode: 'CUS-05', customerName: '새고객' });
+    expect((await send('POST', '/customers', { customerCode: 'CUS-05', customerName: '다른 고객' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/customers', { customerCode: '고객', customerName: '다른 고객' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', `/customers/${body.data.id}`, { customerName: '새고객(주)' })).body.data).toMatchObject({ customerCode: 'CUS-05', customerName: '새고객(주)' });
+    expect((await send('PATCH', `/customers/${body.data.id}`, { customerCode: 'CUS-06', customerName: '새고객' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', '/customers/999999', { customerName: '없음' })).body.error?.code).toBe('COM-003');
+    expect((await send('POST', '/customers', { customerCode: 'CUS-07', customerName: '권한 없음' }, productionCookie)).body.error?.code).toBe('COM-002');
+  });
+
+  it('공급업체: 등록·이름 수정, 중복 코드 거부', async () => {
+    const { body } = await send<SupplierView>('POST', '/suppliers', { supplierCode: 'SUP-05', supplierName: '새공급' });
+    expect(body.data).toMatchObject({ supplierCode: 'SUP-05', supplierName: '새공급' });
+    expect((await send('POST', '/suppliers', { supplierCode: 'SUP-01', supplierName: '중복' })).body.error?.code).toBe('COM-004');
+    expect((await send<SupplierView>('PATCH', `/suppliers/${body.data.id}`, { supplierName: '새공급(주)' })).body.data.supplierName).toBe('새공급(주)');
+    expect((await send('PATCH', '/suppliers/999999', { supplierName: '없음' })).body.error?.code).toBe('COM-003');
+  });
+
+  it('야드: 야드 유형은 YARD_TYPE, 수정은 이름만', async () => {
+    expect((await send('POST', '/yards', { yardCode: 'YD-CL-02', yardName: '코일 2야드', yardType: 'SCRAP' })).body.error?.code).toBe('COM-004');
+    const { body } = await send<YardView>('POST', '/yards', { yardCode: 'YD-CL-02', yardName: '코일 2야드', yardType: 'COIL' });
+    expect(body.data).toMatchObject({ yardCode: 'YD-CL-02', yardType: 'COIL' });
+    expect((await send('POST', '/yards', { yardCode: 'YD-CL-02', yardName: '중복', yardType: 'COIL' })).body.error?.code).toBe('COM-004');
+    expect((await send<YardView>('PATCH', `/yards/${body.data.id}`, { yardName: '코일 2야드(동)' })).body.data).toMatchObject({ yardName: '코일 2야드(동)', yardType: 'COIL' });
+    expect((await send('PATCH', `/yards/${body.data.id}`, { yardName: '코일', yardType: 'SLAB' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', '/yards/999999', { yardName: '없음' })).body.error?.code).toBe('COM-003');
   });
 });

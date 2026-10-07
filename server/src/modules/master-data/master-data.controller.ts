@@ -14,6 +14,7 @@ import {
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
+import { CreateCustomerDto, CreateSupplierDto, CreateYardDto, UpdateCustomerDto, UpdateSupplierDto, UpdateYardDto } from './dto/partner.dto';
 import { UpdateProductionSettingDto } from './dto/production-setting.dto';
 import { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
 import { CreateSpecMappingDto } from './dto/spec-mapping.dto';
@@ -128,6 +129,20 @@ export class MasterDataController {
     return this.service.listCustomers();
   }
 
+  /** API-179 고객사 등록 */
+  @Post('customers')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createCustomer(@Body() dto: CreateCustomerDto): Promise<CustomerView> {
+    return this.service.createCustomer(dto);
+  }
+
+  /** API-180 고객사 수정 */
+  @Patch('customers/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateCustomer(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCustomerDto): Promise<CustomerView> {
+    return this.service.updateCustomer(id, dto);
+  }
+
   /** API-181 공급업체 목록 (발주 화면에도 사용) */
   @Get('suppliers')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
@@ -135,11 +150,39 @@ export class MasterDataController {
     return this.service.listSuppliers();
   }
 
+  /** API-182 공급업체 등록 */
+  @Post('suppliers')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createSupplier(@Body() dto: CreateSupplierDto): Promise<SupplierView> {
+    return this.service.createSupplier(dto);
+  }
+
+  /** API-183 공급업체 수정 */
+  @Patch('suppliers/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateSupplier(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSupplierDto): Promise<SupplierView> {
+    return this.service.updateSupplier(id, dto);
+  }
+
   /** API-184 야드 목록 */
   @Get('yards')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listYards(): Promise<YardView[]> {
     return this.service.listYards();
+  }
+
+  /** API-185 야드 등록 */
+  @Post('yards')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createYard(@Body() dto: CreateYardDto): Promise<YardView> {
+    return this.service.createYard(dto);
+  }
+
+  /** API-186 야드 수정 */
+  @Patch('yards/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateYard(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateYardDto): Promise<YardView> {
+    return this.service.updateYard(id, dto);
   }
 
   /** API-187 생산 설정값 (단건 리소스라 :id 없음) */
