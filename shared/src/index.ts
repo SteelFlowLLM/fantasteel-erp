@@ -12,6 +12,7 @@ export * from './inventory';
 export * from './purchasing';
 export * from './master-data';
 export * from './organization';
+export * from './notification';
 export * from './production';
 export * from './lot';
 export * from './business-event';

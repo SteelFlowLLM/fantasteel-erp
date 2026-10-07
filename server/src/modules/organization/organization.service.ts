@@ -147,6 +147,11 @@ export class OrganizationService {
     return build(null);
   }
 
+  /** 부서 알림 대상: 그 부서의 재직 중 사원 (하위 부서 제외, 2026-10-07 사용자 결정). notification이 같은 tx에서 부른다 */
+  async findActiveMemberIds(tx: Tx, departmentId: number): Promise<number[]> {
+    return (await this.repository.findActiveMemberIdsOf(tx, departmentId)).map((e) => e.id);
+  }
+
   async listJobGrades(): Promise<JobGradeView[]> {
     const rows = await this.repository.findJobGrades(this.prisma);
     return rows.map(toJobGradeView);
