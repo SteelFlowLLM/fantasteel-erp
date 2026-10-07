@@ -7,6 +7,7 @@ import { requireActor, type Actor } from '@/api/actor';
 import { mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import type { PurchaseOrderView, RequisitionView } from '@/api/purchasing';
+import { serverBusinessEventApi } from '@/api/server/businessEvents';
 import { serverDashboardApi } from '@/api/server/dashboard';
 import { serverMrpRequirements } from '@/api/server/mrp';
 import { serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
@@ -848,14 +849,15 @@ export const dashboardKeys = {
   widget: (key: DataWidgetKey, employeeId: number) => ['dashboard', 'widgets', key, employeeId] as const,
 };
 
-/** 서버 모드에서 서버를 읽는 위젯 (영업·구매 위젯). 나머지는 서버 모드에서도 가짜 DB를 읽는다 */
-type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK' | 'RAW_MATERIAL_BALANCE' | 'PURCHASE_PROGRESS';
+/** 서버 모드에서 서버를 읽는 위젯 (영업·구매 위젯, 최근 작업 로그). 나머지는 서버 모드에서도 가짜 DB를 읽는다 */
+type ServerWidgetKey = 'PROCESS_FLOW' | 'ORDER_FULFILLMENT' | 'PRODUCT_STOCK' | 'RAW_MATERIAL_BALANCE' | 'PURCHASE_PROGRESS' | 'RECENT_EVENTS';
 const SERVER_READERS: { [K in ServerWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
   PROCESS_FLOW: serverDashboardApi.processFlow,
   ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
   PRODUCT_STOCK: serverDashboardApi.productStock,
   RAW_MATERIAL_BALANCE: readRawMaterialBalanceFromServer,
   PURCHASE_PROGRESS: readPurchaseProgressFromServer,
+  RECENT_EVENTS: () => serverBusinessEventApi.recentEvents(DASHBOARD_RECENT_EVENT_LIMIT),
 };
 const isServerWidget = (key: DataWidgetKey): key is ServerWidgetKey => key in SERVER_READERS;
 

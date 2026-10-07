@@ -3,9 +3,12 @@
 // - 이력 재현: 수주(business_event.sales_order_id) 또는 LOT(business_event_lot) 단위, 오래된 순, 같은 시각이면 id 순.
 // - 전체 작업 로그는 최신순. 필터: 유형(29개), 주체(사용자·시스템), 대상(테이블), 기간(Asia/Seoul 날짜, 시작·끝 포함).
 // - 작업 로그는 모든 사원이 여는 화면이라(screens.ts) 로그인한 사용 중 사원인지만 확인한다.
+// - NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/businessEvents.ts).
 import { BUSINESS_EVENT_TYPE_LABEL, type ActorType, type BusinessEventType, type EventReasonCode, type LotType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverBusinessEventApi } from '@/api/server/businessEvents';
 import { targetHref, targetTableLabel } from '@/features/businessEvents/lib/eventTargets';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import type { BusinessEventRow, DbTableName, IsoDateTime, JsonValue, MockTables } from '@/mock/schema';
@@ -193,7 +196,7 @@ export function filterBusinessEvents(tables: Readonly<MockTables>, filter: Busin
   });
 }
 
-export const businessEventApi = {
+const mockBusinessEventApi = {
   /** 작업 로그 목록. 수주·LOT을 고르면 이력 재현(오래된 순), 아니면 최신순. 없는 수주·LOT id는 COM-003. */
   list: (filter: BusinessEventFilter = {}): Promise<BusinessEventPage> =>
     mockQuery((tables) => {
@@ -228,4 +231,10 @@ export const businessEventApi = {
         .slice(0, 10)
         .map((so) => ({ id: so.id, salesOrderNo: so.salesOrderNo, customerName: findRow(tables, 'customer', so.customerId)?.customerName ?? '' }));
     }),
+};
+
+/** 데이터 출처를 부를 때마다 고른다 (테스트가 서버 모드를 켜고 끈다) */
+export const businessEventApi: typeof mockBusinessEventApi = {
+  list: (filter = {}) => (isServerDataSource() ? serverBusinessEventApi.list(filter) : mockBusinessEventApi.list(filter)),
+  searchSalesOrders: (keyword) => (isServerDataSource() ? serverBusinessEventApi.searchSalesOrders(keyword) : mockBusinessEventApi.searchSalesOrders(keyword)),
 };

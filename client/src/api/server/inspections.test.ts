@@ -86,12 +86,16 @@ function listByLot(call: ServerCall, rows: readonly QualityInspectionListItem[])
 
 const writes = (calls: ServerCall[]) => calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`);
 
+/** LOT 작업 로그(GET /business-events)는 따로 시험하므로(businessEvents.test.ts) 여기서는 빈 목록으로 답한다 */
+const fakeServer = (employeeNo: string, respond: (call: ServerCall) => Response | undefined) =>
+  useFakeServer(employeeNo, (c) => (c.path === '/business-events' ? ok(page([])) : respond(c)));
+
 afterEach(() => stopFakeServer());
 
 describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   it('검사 대상 목록: 판정 대기를 끝까지 읽고(100건 넘으면 다음 페이지) 판정 끝을 뒤에 붙인다', async () => {
     const pendingRows = Array.from({ length: 101 }, (_, i) => ({ ...coilRow, lotId: 1000 + i, lotNo: `CL-${1000 + i}` }));
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path !== '/quality-inspections') return undefined;
       if (c.query.status === 'done') return ok(page([inspectedCoilRow]));
       return ok(page(c.query.page === '1' ? pendingRows.slice(0, 100) : pendingRows.slice(100), 101));
@@ -109,7 +113,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('검사 행이 없는 LOT의 폼은 최신 기준 버전 항목을 두께 구간(초과~이하)으로 거른다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path === '/quality-inspections') return listByLot(c, [coilRow]);
       if (c.path === '/inspection-standards/31') return ok(standard31);
       return undefined;
@@ -128,7 +132,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
 
   it('히트는 두께가 없어 구간 없는 항목만 적용한다', async () => {
     const heatRow: QualityInspectionListItem = { ...coilRow, lotId: 401, lotType: 'HEAT', processType: 'STEELMAKING', thicknessMm: null, heatLotId: null, heatLotNo: null };
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path === '/quality-inspections') return listByLot(c, [heatRow]);
       if (c.path === '/inspection-standards/31') return ok(standard31);
       return undefined;
@@ -139,7 +143,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('검사 행이 있으면 검사 상세를 읽고, 최신 버전이 다르면 옛 버전으로 표시한다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.path === '/quality-inspections/90') return ok(coilDetail);
       if (c.path === '/inspection-standards') return ok(page([{ ...standard31 }]));
@@ -155,7 +159,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('밀시트가 발행된 LOT이면 상세를 열 때부터 잠금으로 보인다 (저장 전에 막음)', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.path === '/quality-inspections/90') return ok({ ...coilDetail, lockedMillSheetNos: ['MS-2610-0001-1'] });
       if (c.path === '/inspection-standards') return ok(page([{ ...standard31 }]));
@@ -167,7 +171,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('LOT이 검사 목록에 없으면 COM-003', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => (c.path === '/quality-inspections' ? ok(page([])) : undefined));
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => (c.path === '/quality-inspections' ? ok(page([])) : undefined));
     await expect(inspectionApi.detail(999)).rejects.toMatchObject({ code: 'COM-003' });
   });
 
@@ -175,7 +179,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   const noStock = { eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 };
 
   it('처음 저장은 POST, 빈 값 없이 입력한 값만 보낸다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [coilRow]);
       if (c.method === 'POST' && c.path === '/quality-inspections') return ok({ ...coilDetail, inspectionResult: 'PENDING', stockSync: noStock });
       return undefined;
@@ -187,7 +191,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('저장 뒤 LOT 생산계획의 연결 수주 품목과 부족(판정 반영 뒤 값)을 안내에 싣는다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [coilRow]);
       if (c.method === 'POST' && c.path === '/quality-inspections') return ok({ ...coilDetail, inspectionResult: 'PASS', stockSync: { ...noStock, eligibleAddedQty: 1, autoReservedQty: 1 } });
       if (c.path === '/production-plans/300') {
@@ -213,7 +217,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('검사 행이 있으면 PATCH로 고치고 화면을 연 시각을 expectedUpdatedAt으로 보낸다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'PATCH' && c.path === '/quality-inspections/90') return ok({ ...coilDetail, inspectionResult: 'PASS', stockSync: { ...noStock, eligibleAddedQty: 3, autoReservedQty: 2 } });
       return undefined;
@@ -227,7 +231,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('불합격으로 바뀌면 적격에서 빠진 매수를 excludedLotQty로 준다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'PATCH') return ok({ ...coilDetail, inspectionResult: 'FAIL', stockSync: { ...noStock, eligibleRemovedQty: 1, releasedReservationQty: 1, releasedAllocationCount: 1 } });
       return undefined;
@@ -237,7 +241,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('화면을 연 시각이 없으면 지금 검사 상세의 updatedAt으로 고친다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'GET' && c.path === '/quality-inspections/90') return ok(coilDetail);
       if (c.method === 'PATCH') return ok({ ...coilDetail, stockSync: noStock });
@@ -248,7 +252,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
   });
 
   it('검사 행이 있으면 비운 칸은 null로 보내 저장한 값을 지운다', async () => {
-    const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    const calls = fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'PATCH') return ok({ ...coilDetail, inspectionResult: 'PENDING', stockSync: { eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 } });
       return undefined;
@@ -260,7 +264,7 @@ describe('검사 입력 서버 어댑터 (api/server/inspections.ts)', () => {
 
   it('밀시트 발행 뒤 수정 거부(COM-004)는 입력 오류, 동시 수정(COM-001)은 업무 오류로 받는다', async () => {
     let code = 'COM-004';
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) => {
       if (c.method === 'GET' && c.path === '/quality-inspections') return listByLot(c, [inspectedCoilRow]);
       if (c.method === 'PATCH') return code === 'COM-004' ? fail(400, 'COM-004', '밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요 (밀시트 MS-1)') : fail(409, 'COM-001', '그 사이 다른 사람이 검사를 고쳤어요');
       return undefined;
