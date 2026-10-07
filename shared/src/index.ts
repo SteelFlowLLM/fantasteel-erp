@@ -19,3 +19,4 @@ export * from './business-event';
 export * from './mrp';
 export * from './mill-sheet-pdf';
 export * from './llm';
+export * from './messenger';
