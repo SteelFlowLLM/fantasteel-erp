@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import {
   ITEM_TYPE,
   ITEM_TYPE_LABEL,
+  PROCESS_TYPE,
+  PROCESS_TYPE_LABEL,
+  RAW_MATERIAL_TYPE,
   UNIT_TYPE,
   YARD_TYPE_LABEL,
   calcTheoreticalWeightTon,
@@ -25,6 +28,9 @@ import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateItemDto, UpdateItemDto } from './dto/item.dto';
+import type { UpdateProductionSettingDto } from './dto/production-setting.dto';
+import type { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
+import type { CreateSpecificConsumptionDto, UpdateSpecificConsumptionDto } from './dto/specific-consumption.dto';
 import type { CreateSpecMappingDto } from './dto/spec-mapping.dto';
 import type { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataRepository } from './master-data.repository';
@@ -240,8 +246,8 @@ export class MasterDataService {
   }
 
   /** API-172. 품목 유형별 공정 순서대로 */
-  async listRoutings(): Promise<RoutingView[]> {
-    const rows = await this.repository.findRoutings(this.prisma);
+  async listRoutings(id?: number): Promise<RoutingView[]> {
+    const rows = await this.repository.findRoutings(this.prisma, id);
     return rows.map((r) => ({
       id: r.id,
       itemType: r.itemType as ItemType,
@@ -251,9 +257,45 @@ export class MasterDataService {
     }));
   }
 
+  /** API-173. 공정 순서는 DB에서 읽으므로 공정 변경은 데이터 수정만으로 반영된다 (REQ-MST-005) */
+  async createRouting(dto: CreateRoutingDto): Promise<RoutingView> {
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      if (dto.itemType === ITEM_TYPE.SLAB && dto.processType === PROCESS_TYPE.HOT_ROLLING) throw new AppException('COM-004', '슬래브 라우팅에는 열연 공정을 넣을 수 없어요');
+      const plannedYieldRate = readPlannedYieldRate(dto.processType, dto.plannedYieldRate);
+      await this.assertNoRoutingConflict(tx, dto.itemType, { processType: dto.processType, sequenceNo: dto.sequenceNo });
+      return this.repository.createRouting(tx, { itemType: dto.itemType, processType: dto.processType, sequenceNo: dto.sequenceNo, plannedYieldRate });
+    });
+    return this.routingView(id);
+  }
+
+  /** API-174 */
+  async updateRouting(id: number, dto: UpdateRoutingDto): Promise<RoutingView> {
+    await this.prisma.$transaction(async (tx) => {
+      const routing = await this.repository.findRouting(tx, id);
+      if (!routing) throw new AppException('COM-003', '라우팅을 찾을 수 없어요');
+      const plannedYieldRate = dto.plannedYieldRate === undefined ? undefined : readPlannedYieldRate(routing.processType as ProcessType, dto.plannedYieldRate);
+      if (dto.sequenceNo !== undefined) await this.assertNoRoutingConflict(tx, routing.itemType, { sequenceNo: dto.sequenceNo }, id);
+      await this.repository.updateRouting(tx, id, { sequenceNo: dto.sequenceNo, plannedYieldRate });
+    });
+    return this.routingView(id);
+  }
+
+  private async assertNoRoutingConflict(tx: Tx, itemType: string, key: { processType?: string; sequenceNo?: number }, exceptId?: number) {
+    const conflict = await this.repository.findRoutingConflict(tx, itemType, key, exceptId);
+    if (!conflict) return;
+    if (conflict.processType === key.processType) throw new AppException('COM-004', `${PROCESS_TYPE_LABEL[conflict.processType as ProcessType]} 공정이 이미 있어요`);
+    throw new AppException('COM-004', `${conflict.sequenceNo}번 순서에 이미 다른 공정이 있어요`);
+  }
+
+  private async routingView(id: number): Promise<RoutingView> {
+    const [view] = await this.listRoutings(id);
+    if (!view) throw new AppException('COM-003', '라우팅을 찾을 수 없어요');
+    return view;
+  }
+
   /** API-175 */
-  async listSpecificConsumptions(): Promise<SpecificConsumptionView[]> {
-    const rows = await this.repository.findSpecificConsumptions(this.prisma);
+  async listSpecificConsumptions(id?: number): Promise<SpecificConsumptionView[]> {
+    const rows = await this.repository.findSpecificConsumptions(this.prisma, id);
     return rows.map((r) => ({
       id: r.id,
       rawMaterialItemId: r.rawMaterialItemId,
@@ -263,6 +305,42 @@ export class MasterDataService {
       steelGradeCode: r.steelGrade?.steelGradeCode ?? null,
       consumptionRate: r.consumptionRate.toFixed(4),
     }));
+  }
+
+  /** API-176. 강종은 합금철 원단위에만, 합금철은 강종별로 (REQ-MST-006, ERD Note) */
+  async createSpecificConsumption(dto: CreateSpecificConsumptionDto): Promise<SpecificConsumptionView> {
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      const item = await this.repository.findItem(tx, dto.rawMaterialItemId);
+      if (!item) throw new AppException('COM-003', '원료를 찾을 수 없어요');
+      if (item.itemType !== ITEM_TYPE.RAW_MATERIAL) throw new AppException('COM-004', '원료 품목만 원단위를 넣을 수 있어요');
+      const steelGradeId = dto.steelGradeId ?? null;
+      if (item.rawMaterialType === RAW_MATERIAL_TYPE.FERROALLOY) {
+        if (steelGradeId === null) throw new AppException('COM-004', '합금철 원단위는 강종별로 넣어요');
+        if (!(await this.repository.findSteelGrade(tx, steelGradeId))) throw new AppException('COM-003', '강종을 찾을 수 없어요');
+      } else if (steelGradeId !== null) {
+        throw new AppException('COM-004', '철광석·석탄·석회석 원단위는 강종과 상관없는 공통값이에요');
+      }
+      assertPositive(dto.consumptionRate, '원단위');
+      if (await this.repository.findSameSpecificConsumption(tx, item.id, steelGradeId)) throw new AppException('COM-004', '같은 원료·강종의 원단위가 이미 있어요. 수정으로 바꿔 주세요');
+      return this.repository.createSpecificConsumption(tx, { rawMaterialItemId: item.id, steelGradeId, consumptionRate: dto.consumptionRate });
+    });
+    return this.specificConsumptionView(id);
+  }
+
+  /** API-177 */
+  async updateSpecificConsumption(id: number, dto: UpdateSpecificConsumptionDto): Promise<SpecificConsumptionView> {
+    assertPositive(dto.consumptionRate, '원단위');
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findSpecificConsumption(tx, id))) throw new AppException('COM-003', '배합 원단위를 찾을 수 없어요');
+      await this.repository.updateSpecificConsumption(tx, id, dto.consumptionRate);
+    });
+    return this.specificConsumptionView(id);
+  }
+
+  private async specificConsumptionView(id: number): Promise<SpecificConsumptionView> {
+    const [view] = await this.listSpecificConsumptions(id);
+    if (!view) throw new AppException('COM-003', '배합 원단위를 찾을 수 없어요');
+    return view;
   }
 
   /** API-181 */
@@ -282,6 +360,34 @@ export class MasterDataService {
     if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
     return { id: row.id, heatCapacityTon: row.heatCapacityTon.toFixed(3), deliveryRiskDays: row.deliveryRiskDays };
   }
+
+  /** API-188. 1행만 두므로 :id 없이 그 행을 바꾼다 */
+  async updateProductionSetting(dto: UpdateProductionSettingDto): Promise<ProductionSettingView> {
+    if (dto.heatCapacityTon !== undefined) assertPositive(dto.heatCapacityTon, '히트 용량');
+    await this.prisma.$transaction(async (tx) => {
+      const row = await this.repository.findProductionSetting(tx);
+      if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
+      await this.repository.updateProductionSetting(tx, row.id, { heatCapacityTon: dto.heatCapacityTon, deliveryRiskDays: dto.deliveryRiskDays });
+    });
+    return this.getProductionSetting();
+  }
+}
+
+/** 0 < 계획 수율 ≤ 1. 열연(규격 매핑에서 계산)·제선(4.4 계산식에 쓰지 않음)은 null (REQ-MST-005, master-data.md 8-1) */
+function readPlannedYieldRate(processType: ProcessType, value: string | null | undefined): string | null {
+  const label = PROCESS_TYPE_LABEL[processType];
+  if (processType === PROCESS_TYPE.HOT_ROLLING || processType === PROCESS_TYPE.IRONMAKING) {
+    if (value != null) throw new AppException('COM-004', `${label} 공정은 계획 수율을 넣지 않아요`);
+    return null;
+  }
+  if (value == null) throw new AppException('COM-004', `${label} 계획 수율을 입력해 주세요`);
+  const rate = new Prisma.Decimal(value);
+  if (rate.lte(0) || rate.gt(1)) throw new AppException('COM-004', '계획 수율은 0보다 크고 1 이하여야 해요');
+  return value;
+}
+
+function assertPositive(value: string, label: string): void {
+  if (!new Prisma.Decimal(value).gt(0)) throw new AppException('COM-004', `${label}은(는) 0보다 커야 해요`);
 }
 
 /** 코일 1개 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004) */

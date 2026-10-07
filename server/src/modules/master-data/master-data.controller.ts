@@ -14,7 +14,10 @@ import {
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
+import { UpdateProductionSettingDto } from './dto/production-setting.dto';
+import { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
 import { CreateSpecMappingDto } from './dto/spec-mapping.dto';
+import { CreateSpecificConsumptionDto, UpdateSpecificConsumptionDto } from './dto/specific-consumption.dto';
 import { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataService } from './master-data.service';
 
@@ -83,11 +86,39 @@ export class MasterDataController {
     return this.service.listRoutings();
   }
 
+  /** API-173 라우팅 등록 (수율 0 이하·1 초과 차단, 열연은 수율 없음) */
+  @Post('routings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createRouting(@Body() dto: CreateRoutingDto): Promise<RoutingView> {
+    return this.service.createRouting(dto);
+  }
+
+  /** API-174 라우팅 수정 */
+  @Patch('routings/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateRouting(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoutingDto): Promise<RoutingView> {
+    return this.service.updateRouting(id, dto);
+  }
+
   /** API-175 배합 원단위 */
   @Get('specific-consumptions')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listSpecificConsumptions(): Promise<SpecificConsumptionView[]> {
     return this.service.listSpecificConsumptions();
+  }
+
+  /** API-176 배합 원단위 등록 */
+  @Post('specific-consumptions')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createSpecificConsumption(@Body() dto: CreateSpecificConsumptionDto): Promise<SpecificConsumptionView> {
+    return this.service.createSpecificConsumption(dto);
+  }
+
+  /** API-177 배합 원단위 수정 */
+  @Patch('specific-consumptions/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateSpecificConsumption(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSpecificConsumptionDto): Promise<SpecificConsumptionView> {
+    return this.service.updateSpecificConsumption(id, dto);
   }
 
   /** API-178 고객사 목록 (수주 등록 고객사 선택에도 사용) */
@@ -116,5 +147,12 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   getProductionSetting(): Promise<ProductionSettingView> {
     return this.service.getProductionSetting();
+  }
+
+  /** API-188 생산 설정값 변경 */
+  @Patch('production-settings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateProductionSetting(@Body() dto: UpdateProductionSettingDto): Promise<ProductionSettingView> {
+    return this.service.updateProductionSetting(dto);
   }
 }

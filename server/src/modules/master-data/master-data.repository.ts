@@ -39,12 +39,13 @@ export class MasterDataRepository {
     });
   }
 
-  findRoutings(tx: Tx) {
-    return tx.routing.findMany({ orderBy: [{ itemType: 'asc' }, { sequenceNo: 'asc' }] });
+  findRoutings(tx: Tx, id?: number) {
+    return tx.routing.findMany({ where: { id }, orderBy: [{ itemType: 'asc' }, { sequenceNo: 'asc' }] });
   }
 
-  findSpecificConsumptions(tx: Tx) {
+  findSpecificConsumptions(tx: Tx, id?: number) {
     return tx.specificConsumption.findMany({
+      where: { id },
       orderBy: [{ rawMaterialItemId: 'asc' }, { steelGradeId: { sort: 'asc', nulls: 'first' } }],
       include: { rawMaterialItem: { select: { itemCode: true, rawMaterialType: true } }, steelGrade: { select: { steelGradeCode: true } } },
     });
@@ -124,5 +125,49 @@ export class MasterDataRepository {
 
   createSpecMapping(tx: Tx, data: { slabItemId: number; coilItemId: number }) {
     return tx.specMapping.create({ data, select: { id: true } });
+  }
+
+  findRouting(tx: Tx, id: number) {
+    return tx.routing.findUnique({ where: { id } });
+  }
+
+  /** 같은 품목 유형에서 공정이나 순서가 겹치는 라우팅 (unique (item_type, process_type)·(item_type, sequence_no)) */
+  findRoutingConflict(tx: Tx, itemType: string, key: { processType?: string; sequenceNo?: number }, exceptId?: number) {
+    // undefined 조건은 Prisma가 빼 버려 모든 행과 맞으므로 보낸 키만 OR에 넣는다
+    const or = [...(key.processType ? [{ processType: key.processType }] : []), ...(key.sequenceNo !== undefined ? [{ sequenceNo: key.sequenceNo }] : [])];
+    if (or.length === 0) return Promise.resolve(null);
+    return tx.routing.findFirst({
+      where: { itemType, id: exceptId === undefined ? undefined : { not: exceptId }, OR: or },
+      select: { processType: true, sequenceNo: true },
+    });
+  }
+
+  createRouting(tx: Tx, data: { itemType: string; processType: string; sequenceNo: number; plannedYieldRate: string | null }) {
+    return tx.routing.create({ data, select: { id: true } });
+  }
+
+  updateRouting(tx: Tx, id: number, data: { sequenceNo?: number; plannedYieldRate?: string | null }) {
+    return tx.routing.update({ where: { id }, data, select: { id: true } });
+  }
+
+  findSpecificConsumption(tx: Tx, id: number) {
+    return tx.specificConsumption.findUnique({ where: { id }, select: { id: true } });
+  }
+
+  /** 원료당 공통 원단위 1행, 원료·강종당 1행 (부분 unique) */
+  findSameSpecificConsumption(tx: Tx, rawMaterialItemId: number, steelGradeId: number | null) {
+    return tx.specificConsumption.findFirst({ where: { rawMaterialItemId, steelGradeId }, select: { id: true } });
+  }
+
+  createSpecificConsumption(tx: Tx, data: { rawMaterialItemId: number; steelGradeId: number | null; consumptionRate: string }) {
+    return tx.specificConsumption.create({ data, select: { id: true } });
+  }
+
+  updateSpecificConsumption(tx: Tx, id: number, consumptionRate: string) {
+    return tx.specificConsumption.update({ where: { id }, data: { consumptionRate }, select: { id: true } });
+  }
+
+  updateProductionSetting(tx: Tx, id: number, data: { heatCapacityTon?: string; deliveryRiskDays?: number }) {
+    return tx.productionSetting.update({ where: { id }, data, select: { id: true } });
   }
 }

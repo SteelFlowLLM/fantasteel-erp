@@ -1,4 +1,4 @@
-// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록·수정 API(API-166·167·169·171)를 실제 앱과 DB(fs_master)로 확인한다.
+// 기준정보 조회 API(API-165·168·170·172·175·178·181·184·187)와 등록·수정 API(API-166·167·169·171·173·174·176·177·188)를
 // 권한 가드·쿼리 변환·Decimal 문자열 변환까지 보려고 HTTP로 부른다. 값은 시드(seed.ts) 기준정보를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -15,6 +15,7 @@ import type {
   YardView,
 } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
+import { PrismaService } from '../../prisma/prisma.service';
 
 let app: INestApplication;
 let baseUrl: string;
@@ -280,5 +281,66 @@ describe('등록·수정 (API-166·167·169·171)', () => {
     expect((await send<SteelGradeView>('POST', '/steel-grades', payload)).body.data).toMatchObject({ steelGradeCode: 'TST-01', standardNo: 'KS D 0000' });
     expect((await send('POST', '/steel-grades', payload)).body.error?.code).toBe('COM-004');
     expect((await send('POST', '/steel-grades', { ...payload, steelGradeCode: 'TST-02', standardNo: ' ' })).body.error?.code).toBe('COM-004');
+  });
+});
+
+describe('라우팅·배합 원단위·생산 설정값 등록·수정 (API-173·174·176·177·188)', () => {
+  const routingOf = async (itemType: string, processType: string) => {
+    const routing = (await get<RoutingView[]>('/routings')).body.data.find((r) => r.itemType === itemType && r.processType === processType);
+    if (!routing) throw new Error(`라우팅 없음: ${itemType} ${processType}`);
+    return routing;
+  };
+  const itemIdOf = async (itemCode: string) => (await get<ItemView[]>('/items')).body.data.find((i) => i.itemCode === itemCode)?.id ?? 0;
+
+  it('라우팅 등록: 같은 공정·열연 슬래브·수율 범위는 거부, 맞으면 등록', async () => {
+    expect((await send('POST', '/routings', { itemType: 'COIL', processType: 'STEELMAKING', sequenceNo: 9, plannedYieldRate: '0.9' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/routings', { itemType: 'SLAB', processType: 'HOT_ROLLING', sequenceNo: 4 })).body.error?.code).toBe('COM-004');
+
+    // 시드 라우팅은 공정이 다 차 있어 연주 행을 지우고 다시 등록한다 (삭제 API는 없다)
+    const casting = await routingOf('SLAB', 'CONTINUOUS_CASTING');
+    await app.get(PrismaService).routing.delete({ where: { id: casting.id } });
+    const payload = { itemType: 'SLAB', processType: 'CONTINUOUS_CASTING', sequenceNo: 3 };
+    expect((await send('POST', '/routings', payload)).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/routings', { ...payload, plannedYieldRate: '1.0001' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/routings', { ...payload, sequenceNo: 2, plannedYieldRate: '0.98' })).body.error?.code).toBe('COM-004');
+    const { status, body } = await send<RoutingView>('POST', '/routings', { ...payload, plannedYieldRate: '0.98' });
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ itemType: 'SLAB', processType: 'CONTINUOUS_CASTING', sequenceNo: 3, plannedYieldRate: '0.9800' });
+  });
+
+  it('라우팅 수정: 수율은 0 초과 1 이하, 열연·제선은 수율 없음, 순서 중복 거부', async () => {
+    const steelmaking = await routingOf('SLAB', 'STEELMAKING');
+    expect((await send('PATCH', `/routings/${steelmaking.id}`, { plannedYieldRate: '0' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', `/routings/${steelmaking.id}`, { sequenceNo: 3 })).body.error?.code).toBe('COM-004');
+    expect((await send<RoutingView>('PATCH', `/routings/${steelmaking.id}`, { plannedYieldRate: '0.92' })).body.data.plannedYieldRate).toBe('0.9200');
+    const ironmaking = await routingOf('SLAB', 'IRONMAKING');
+    expect((await send('PATCH', `/routings/${ironmaking.id}`, { plannedYieldRate: '0.9' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', '/routings/999999', { sequenceNo: 9 })).body.error?.code).toBe('COM-003');
+  });
+
+  it('배합 원단위 등록: 강종은 합금철에만, 원료·강종당 1행', async () => {
+    const ore = await itemIdOf('ORE01');
+    const smn = await itemIdOf('SMN01');
+    const grades = (await get<SteelGradeView[]>('/steel-grades')).body.data;
+    const sm355c = grades.find((g) => g.steelGradeCode === 'SM355C')?.id;
+    expect((await send('POST', '/specific-consumptions', { rawMaterialItemId: ore, consumptionRate: '1.5' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/specific-consumptions', { rawMaterialItemId: ore, steelGradeId: sm355c, consumptionRate: '1.5' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/specific-consumptions', { rawMaterialItemId: smn, consumptionRate: '15' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/specific-consumptions', { rawMaterialItemId: smn, steelGradeId: sm355c, consumptionRate: '0' })).body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/specific-consumptions', { rawMaterialItemId: await itemIdOf('SL-SS275-250x1200x10000'), consumptionRate: '1' })).body.error?.code).toBe('COM-004');
+    const { status, body } = await send<SpecificConsumptionView>('POST', '/specific-consumptions', { rawMaterialItemId: smn, steelGradeId: sm355c, consumptionRate: '15' });
+    expect(status).toBe(201);
+    expect(body.data).toMatchObject({ rawMaterialItemCode: 'SMN01', steelGradeCode: 'SM355C', consumptionRate: '15.0000' });
+
+    expect((await send<SpecificConsumptionView>('PATCH', `/specific-consumptions/${body.data.id}`, { consumptionRate: '12.5' })).body.data.consumptionRate).toBe('12.5000');
+    expect((await send('PATCH', '/specific-consumptions/999999', { consumptionRate: '1' })).body.error?.code).toBe('COM-003');
+  });
+
+  it('생산 설정값 변경: 히트 용량은 0보다 커야 한다', async () => {
+    expect((await send('PATCH', '/production-settings', { heatCapacityTon: '0' })).body.error?.code).toBe('COM-004');
+    expect((await send('PATCH', '/production-settings', { deliveryRiskDays: -1 })).body.error?.code).toBe('COM-004');
+    const { body } = await send<ProductionSettingView>('PATCH', '/production-settings', { heatCapacityTon: '260.5', deliveryRiskDays: 5 });
+    expect(body.data).toMatchObject({ heatCapacityTon: '260.500', deliveryRiskDays: 5 });
+    await send('PATCH', '/production-settings', { heatCapacityTon: '250', deliveryRiskDays: 3 });
   });
 });
