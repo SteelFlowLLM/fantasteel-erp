@@ -5,7 +5,7 @@
 // - 제품 품목(슬래브·코일): 품목 코드 = 규격 코드, 단위 유형 매수, 기본 야드. 공급업체는 지정하지 않는다(TRM-029). 추가·수정은 제품 규격 탭에서.
 import { useState } from 'react';
 import { ITEM_TYPE_LABEL, RAW_MATERIAL_TYPE, RAW_MATERIAL_TYPE_LABEL, UNIT_TYPE_LABEL, type RawMaterialType } from '@/codes';
-import { masterDataApi, type MasterRawMaterialView } from '@/api/masterData';
+import { isMasterServerMode, masterDataApi, type MasterRawMaterialView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -92,7 +92,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
               </Table>
               {shown.length === 0 ? <EmptyNote>조건에 맞는 원료가 없어요</EmptyNote> : null}
               <TableFoot>
-                원료 코드·원료 유형은 만든 뒤 바꿀 수 없어요 · 기본 공급업체를 비우면 준비 상태에 누락으로 나와요 · 원료 재고는 원료 LOT 잔량 합계라 재고 화면에서 봐요
+                원료 코드·원료 유형은 만든 뒤 바꿀 수 없어요{isMasterServerMode() ? '' : ' · 기본 공급업체를 비우면 준비 상태에 누락으로 나와요'} · 원료 재고는 원료 LOT 잔량 합계라 재고 화면에서 봐요
               </TableFoot>
             </>
           );
@@ -176,7 +176,8 @@ function RawMaterialModal({ material, onClose }: { material: MasterRawMaterialVi
           }}
         />
       </Field>
-      <Field label="기본 공급업체" hint="품목별 1곳. 비우면 준비 상태에 누락으로 나와요">
+      {/* 준비 상태는 서버 API가 없어 서버 모드에서 안내하지 않는다 */}
+      <Field label="기본 공급업체" hint={isMasterServerMode() ? '품목별 1곳' : '품목별 1곳. 비우면 준비 상태에 누락으로 나와요'}>
         <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
           <option value="">지정 안 함</option>
           {(suppliers.data ?? []).map((s) => (
