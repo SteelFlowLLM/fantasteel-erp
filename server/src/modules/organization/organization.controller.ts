@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
-import { PERMISSION, type DepartmentNode, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { PERMISSION, type DepartmentNode, type DepartmentView, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
 import { CreateJobGradeDto } from './dto/job-grade.dto';
 import { ListEmployeesQuery } from './dto/list-employees.query';
+import { UpdateRolePermissionsDto } from './dto/role-permission.dto';
 import { OrganizationService } from './organization.service';
 
 /**
@@ -42,6 +44,20 @@ export class OrganizationController {
     return this.service.listDepartments();
   }
 
+  /** API-159 부서 등록 */
+  @Post('departments')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  createDepartment(@Body() dto: CreateDepartmentDto): Promise<DepartmentView> {
+    return this.service.createDepartment(dto);
+  }
+
+  /** API-160 부서 수정·부서장 지정 */
+  @Patch('departments/:id')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateDepartment(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDepartmentDto): Promise<DepartmentView> {
+    return this.service.updateDepartment(id, dto);
+  }
+
   /** API-161 직급 목록. 로그인한 사원 모두 */
   @Get('job-grades')
   listJobGrades(): Promise<JobGradeView[]> {
@@ -60,5 +76,12 @@ export class OrganizationController {
   @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
   listRoles(): Promise<RoleView[]> {
     return this.service.listRoles();
+  }
+
+  /** API-164 역할별 권한 변경 */
+  @Put('roles/:id/permissions')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateRolePermissions(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRolePermissionsDto): Promise<RoleView> {
+    return this.service.updateRolePermissions(id, dto);
   }
 }

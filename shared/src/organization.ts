@@ -44,6 +44,18 @@ export interface DepartmentNode {
   updatedAt: string;
 }
 
+/** 부서 등록·수정 응답 (트리·인원 없이 부서 한 건) */
+export interface DepartmentView {
+  id: number;
+  departmentCode: string;
+  departmentName: string;
+  parentId: number | null;
+  headEmployeeId: number | null;
+  headEmployeeName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface JobGradeView {
   id: number;
   jobGradeName: string;

@@ -3,6 +3,7 @@ import {
   PERMISSION,
   type DepartmentMemberView,
   type DepartmentNode,
+  type DepartmentView,
   type EmployeeView,
   type JobGradeView,
   type PageResult,
@@ -14,9 +15,11 @@ import {
 import { hash } from 'bcryptjs';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import type { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import type { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
 import type { CreateJobGradeDto } from './dto/job-grade.dto';
 import type { ListEmployeesQuery } from './dto/list-employees.query';
+import type { UpdateRolePermissionsDto } from './dto/role-permission.dto';
 import { OrganizationRepository } from './organization.repository';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -27,6 +30,7 @@ const PERMISSION_ORDER: readonly string[] = Object.values(PERMISSION);
 type EmployeeRow = Awaited<ReturnType<OrganizationRepository['findEmployees']>>[number];
 type DepartmentRow = Awaited<ReturnType<OrganizationRepository['findDepartments']>>[number];
 type JobGradeRow = Awaited<ReturnType<OrganizationRepository['findJobGrades']>>[number];
+type RoleRow = Awaited<ReturnType<OrganizationRepository['findRoles']>>[number];
 
 /**
  * 업무 로직·트랜잭션·데이터에 따른 권한 검사 (컨벤션 6장).
@@ -150,18 +154,86 @@ export class OrganizationService {
 
   async listRoles(): Promise<RoleView[]> {
     const rows = await this.repository.findRoles(this.prisma);
-    return rows.map((r) => ({
-      id: r.id,
-      roleCode: r.roleCode as Role,
-      roleName: r.roleName,
-      permissions: [...r.rolePermissions]
-        .sort((a, b) => PERMISSION_ORDER.indexOf(a.permission) - PERMISSION_ORDER.indexOf(b.permission))
-        .map((p) => ({ permission: p.permission as Permission, permissionLevel: p.permissionLevel as PermissionLevel })),
-      employeeCount: r._count.employees,
-      createdAt: r.createdAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
-    }));
+    return rows.map(toRoleView);
   }
+
+  /** API-159. 부서코드가 겹치면 unique 위반을 전역 필터가 COM-001로 바꾼다 (organization.md 5장 🟡) */
+  async createDepartment(dto: CreateDepartmentDto): Promise<DepartmentView> {
+    const parentId = dto.parentId ?? null;
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      if (parentId !== null && !(await this.repository.findDepartment(tx, parentId))) throw new AppException('COM-003', '상위 부서를 찾을 수 없어요');
+      return this.repository.createDepartment(tx, { departmentCode: dto.departmentCode, departmentName: dto.departmentName, parentId });
+    });
+    return this.departmentView(id);
+  }
+
+  /** API-160. 상위 부서 변경은 계층 순환을 막고(BP-AUTH-01), 부서장은 사용 중인 사원만 지정한다 (organization.md 8장) */
+  async updateDepartment(id: number, dto: UpdateDepartmentDto): Promise<DepartmentView> {
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findDepartment(tx, id))) throw new AppException('COM-003', '부서를 찾을 수 없어요');
+      if (dto.parentId !== undefined && dto.parentId !== null) await this.assertParentAllowed(tx, id, dto.parentId);
+      if (dto.headEmployeeId !== undefined && dto.headEmployeeId !== null) {
+        const head = await this.repository.findEmployeeStatus(tx, dto.headEmployeeId);
+        if (!head) throw new AppException('COM-003', '부서장으로 지정할 사원을 찾을 수 없어요');
+        if (!head.isActive) throw new AppException('COM-004', '퇴사한 사원은 부서장으로 지정할 수 없어요');
+      }
+      await this.repository.updateDepartment(tx, id, { departmentName: dto.departmentName, parentId: dto.parentId, headEmployeeId: dto.headEmployeeId });
+    });
+    return this.departmentView(id);
+  }
+
+  /** API-164. 같은 권한을 두 번 보내면 어느 수준인지 알 수 없어 거부한다 */
+  async updateRolePermissions(roleId: number, dto: UpdateRolePermissionsDto): Promise<RoleView> {
+    const permissions = dto.permissions.map((p) => p.permission);
+    if (new Set(permissions).size !== permissions.length) throw new AppException('COM-004', '같은 권한을 두 번 넣었어요');
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findRole(tx, roleId))) throw new AppException('COM-003', '역할을 찾을 수 없어요');
+      await this.repository.replaceRolePermissions(tx, roleId, dto.permissions);
+    });
+    const row = await this.repository.findRole(this.prisma, roleId);
+    if (!row) throw new AppException('COM-003', '역할을 찾을 수 없어요');
+    return toRoleView(row);
+  }
+
+  /** 새 상위 부서에서 위로 올라가며 자기 자신이 나오면 순환이다 (자기 자신을 상위로 지정 포함) */
+  private async assertParentAllowed(tx: Tx, id: number, parentId: number) {
+    const links = new Map((await this.repository.findDepartmentLinks(tx)).map((d) => [d.id, d.parentId]));
+    if (!links.has(parentId)) throw new AppException('COM-003', '상위 부서를 찾을 수 없어요');
+    const seen = new Set<number>();
+    for (let cur: number | null | undefined = parentId; cur != null && !seen.has(cur); cur = links.get(cur)) {
+      if (cur === id) throw new AppException('COM-004', '자기 자신이나 하위 부서를 상위 부서로 지정할 수 없어요');
+      seen.add(cur);
+    }
+  }
+
+  private async departmentView(id: number): Promise<DepartmentView> {
+    const row = await this.repository.findDepartment(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '부서를 찾을 수 없어요');
+    return {
+      id: row.id,
+      departmentCode: row.departmentCode,
+      departmentName: row.departmentName,
+      parentId: row.parentId,
+      headEmployeeId: row.headEmployeeId,
+      headEmployeeName: row.headEmployee?.employeeName ?? null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+}
+
+function toRoleView(row: RoleRow): RoleView {
+  return {
+    id: row.id,
+    roleCode: row.roleCode as Role,
+    roleName: row.roleName,
+    permissions: [...row.rolePermissions]
+      .sort((a, b) => PERMISSION_ORDER.indexOf(a.permission) - PERMISSION_ORDER.indexOf(b.permission))
+      .map((p) => ({ permission: p.permission as Permission, permissionLevel: p.permissionLevel as PermissionLevel })),
+    employeeCount: row._count.employees,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 function toJobGradeView(row: JobGradeRow): JobGradeView {
