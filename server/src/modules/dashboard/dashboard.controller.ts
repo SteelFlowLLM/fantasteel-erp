@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProductStockWidget } from '@fantasteel/shared';
+import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProductStockWidget, ShipmentResultWidget } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { DashboardService } from './dashboard.service';
 
@@ -24,5 +24,11 @@ export class DashboardController {
   @Get('dashboard/widgets/product-stock')
   productStock(): Promise<ProductStockWidget> {
     return this.service.productStock();
+  }
+
+  /** 출하 실적 (REQ-DSH-002). 출고 확정 조회 권한 */
+  @Get('dashboard/widgets/shipment-result')
+  shipmentResult(@CurrentUser() user: AuthUser): Promise<ShipmentResultWidget> {
+    return this.service.shipmentResult(user);
   }
 }
