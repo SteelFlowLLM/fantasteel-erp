@@ -14,6 +14,6 @@ import { ProductionService } from './production.service';
   imports: [forwardRef(() => InventoryModule)],
   controllers: [ProductionController],
   providers: [ProductionService, ProductionRepository, ProductionResultService, ProductionResultRepository, HotRollingService, ProductionSimulationService],
-  exports: [ProductionService],
+  exports: [ProductionService, ProductionResultService],
 })
 export class ProductionModule {}

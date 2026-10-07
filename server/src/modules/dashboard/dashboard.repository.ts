@@ -38,6 +38,11 @@ export class DashboardRepository {
     return { requests, lots };
   }
 
+  /** 생산계획의 품목 (계획 수율을 품목별로 고르려고) */
+  findPlanItems(tx: Tx, productionPlanIds: number[]) {
+    return tx.productionPlan.findMany({ where: { id: { in: productionPlanIds } }, select: { id: true, itemId: true } });
+  }
+
   /** [from, to) 사이에 출고 확정된 출하요청과 그 출고 LOT(소진된 출하 배정)의 유형·1매 이론중량 */
   async findIssuedBetween(tx: Tx, from: Date, to: Date) {
     const issuedAt = { gte: from, lt: to };

@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProductStockWidget, ShipmentResultWidget } from '@fantasteel/shared';
+import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProcessYieldWidget, ProductStockWidget, ShipmentResultWidget } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { DashboardService } from './dashboard.service';
 
@@ -30,5 +30,11 @@ export class DashboardController {
   @Get('dashboard/widgets/shipment-result')
   shipmentResult(@CurrentUser() user: AuthUser): Promise<ShipmentResultWidget> {
     return this.service.shipmentResult(user);
+  }
+
+  /** 공정별 수율 (REQ-DSH-001). 작업 실적 조회 권한 */
+  @Get('dashboard/widgets/process-yield')
+  processYield(@CurrentUser() user: AuthUser): Promise<ProcessYieldWidget> {
+    return this.service.processYield(user);
   }
 }

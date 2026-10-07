@@ -1,9 +1,9 @@
-// 대시보드 출하 실적 위젯(GET dashboard/widgets/shipment-result)을 실제 앱과 DB(fs_sales)로 확인한다.
+// 대시보드 출하 실적·공정별 수율 위젯(GET dashboard/widgets/shipment-result·process-yield)을 실제 앱과 DB(fs_sales)로 확인한다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { ShipmentResultWidget } from '@fantasteel/shared';
+import type { ProcessYieldWidget, ShipmentResultWidget } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { seoulToday } from '../../common/time/seoul-date';
 
@@ -46,6 +46,24 @@ describe('GET dashboard/widgets/shipment-result', () => {
 
   it('출고 확정 권한이 없으면 COM-002', async () => {
     const { body } = await get('/dashboard/widgets/shipment-result', await login('1709007'));
+    expect(body.error?.code).toBe('COM-002');
+  });
+});
+
+describe('GET dashboard/widgets/process-yield', () => {
+  it('작업 실적 조회 권한이 있으면 공정 4개를 주고, 완료 실적이 없으면 수율은 비어 있다', async () => {
+    const { status, body } = await get<ProcessYieldWidget>('/dashboard/widgets/process-yield', await login('1401006'));
+    expect(status).toBe(200);
+    expect(body.data.processes.map((p) => p.processType)).toEqual(['IRONMAKING', 'STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING']);
+    for (const p of body.data.processes) {
+      expect(p.inputTon).toMatch(/^\d+\.\d{3}$/);
+      if (p.resultCount === 0) expect(p).toMatchObject({ actualYieldRate: null, plannedYieldRate: null });
+    }
+    expect(body.data.processes[0]).toMatchObject({ actualYieldRate: null, plannedYieldRate: null });
+  });
+
+  it('작업 실적 조회 권한이 없으면 COM-002', async () => {
+    const { body } = await get('/dashboard/widgets/process-yield', await login('1610014'));
     expect(body.error?.code).toBe('COM-002');
   });
 });
