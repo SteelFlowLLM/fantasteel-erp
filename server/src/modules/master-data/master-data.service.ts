@@ -28,6 +28,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateItemDto, UpdateItemDto } from './dto/item.dto';
+import type { CreateCustomerDto, CreateSupplierDto, CreateYardDto, UpdateCustomerDto, UpdateSupplierDto, UpdateYardDto } from './dto/partner.dto';
 import type { UpdateProductionSettingDto } from './dto/production-setting.dto';
 import type { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
 import type { CreateSpecificConsumptionDto, UpdateSpecificConsumptionDto } from './dto/specific-consumption.dto';
@@ -61,6 +62,22 @@ export class MasterDataService {
 
   async listCustomers(): Promise<CustomerView[]> {
     return this.repository.findCustomers(this.prisma);
+  }
+
+  /** API-179 */
+  async createCustomer(dto: CreateCustomerDto): Promise<CustomerView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (await this.repository.findCustomer(tx, { customerCode: dto.customerCode })) throw new AppException('COM-004', `고객사 코드 ${dto.customerCode}이(가) 이미 있어요`);
+      return this.repository.createCustomer(tx, { customerCode: dto.customerCode, customerName: dto.customerName });
+    });
+  }
+
+  /** API-180. 이름만 바꾼다 */
+  async updateCustomer(id: number, dto: UpdateCustomerDto): Promise<CustomerView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findCustomer(tx, { id }))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
+      return this.repository.updateCustomer(tx, id, dto.customerName);
+    });
   }
 
   async listItems(itemType?: ItemType): Promise<ItemView[]> {
@@ -348,10 +365,44 @@ export class MasterDataService {
     return this.repository.findSuppliers(this.prisma);
   }
 
+  /** API-182 */
+  async createSupplier(dto: CreateSupplierDto): Promise<SupplierView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (await this.repository.findSupplierByCode(tx, dto.supplierCode)) throw new AppException('COM-004', `공급업체 코드 ${dto.supplierCode}이(가) 이미 있어요`);
+      return this.repository.createSupplier(tx, { supplierCode: dto.supplierCode, supplierName: dto.supplierName });
+    });
+  }
+
+  /** API-183. 이름만 바꾼다 */
+  async updateSupplier(id: number, dto: UpdateSupplierDto): Promise<SupplierView> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertSupplier(tx, id);
+      return this.repository.updateSupplier(tx, id, dto.supplierName);
+    });
+  }
+
   /** API-184 */
   async listYards(): Promise<YardView[]> {
     const rows = await this.repository.findYards(this.prisma);
-    return rows.map((r) => ({ ...r, yardType: r.yardType as YardType }));
+    return rows.map(toYardView);
+  }
+
+  /** API-185 */
+  async createYard(dto: CreateYardDto): Promise<YardView> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (await this.repository.findYardByCode(tx, dto.yardCode)) throw new AppException('COM-004', `야드 코드 ${dto.yardCode}이(가) 이미 있어요`);
+      return this.repository.createYard(tx, { yardCode: dto.yardCode, yardName: dto.yardName, yardType: dto.yardType });
+    });
+    return toYardView(row);
+  }
+
+  /** API-186. 이름만 바꾼다 */
+  async updateYard(id: number, dto: UpdateYardDto): Promise<YardView> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findYard(tx, id))) throw new AppException('COM-003', '야드를 찾을 수 없어요');
+      return this.repository.updateYard(tx, id, dto.yardName);
+    });
+    return toYardView(row);
   }
 
   /** API-187 */
@@ -418,6 +469,8 @@ function toItemView(r: ItemRow): ItemView {
     defaultSupplierId: r.defaultSupplierId,
   };
 }
+
+const toYardView = (r: { id: number; yardCode: string; yardName: string; yardType: string }): YardView => ({ ...r, yardType: r.yardType as YardType });
 
 function toSpecMappingItemView(r: SpecRow): SpecMappingItemView {
   return {
