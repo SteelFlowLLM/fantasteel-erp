@@ -1,9 +1,12 @@
 // 밀시트 API (REQ-SHP-003·004, BP-SHP-01 문서 보존).
 // 밀시트는 출고 확정 때 core 서비스가 만든다(출하요청 × 수주 1장, 발행 시점 스냅샷). 화면은 스냅샷만으로 그린다.
 // 'PDF 생성' = 브라우저 인쇄 → 성공하면 pdf_path를 남긴다 (생성 여부 = pdf_path 유무).
+// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/millSheets.ts). 밀시트·출하요청·수주 id는 서버 id다.
 import { PERMISSION, type ProductItemType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverMillSheetApi } from '@/api/server/millSheets';
 import type { MockTables } from '@/mock/schema';
 import {
   asMillSheetSnapshot,
@@ -63,21 +66,27 @@ function listRows(tables: Tables): MillSheetListRow[] {
 
 export const millSheetApi = {
   list: () =>
-    mockQuery((tables) => {
-      requireActor(tables, READ_RULE);
-      return listRows(tables);
-    }),
+    isServerDataSource()
+      ? serverMillSheetApi.list()
+      : mockQuery((tables) => {
+          requireActor(tables, READ_RULE);
+          return listRows(tables);
+        }),
   detail: (id: number) =>
-    mockQuery((tables): MillSheetDetailView => {
-      requireActor(tables, READ_RULE);
-      const { row, snapshot } = millSheetDetail(tables, id);
-      return { id: row.id, millSheetNo: row.millSheetNo, shipmentRequestId: row.shipmentRequestId, salesOrderId: row.salesOrderId, issuedAt: row.issuedAt, pdfPath: row.pdfPath, snapshot };
-    }),
-  /** 인쇄(PDF 생성)가 끝난 뒤 pdf_path를 남긴다. 이미 있으면 그대로. 출고·스냅샷은 바꾸지 않는다. */
+    isServerDataSource()
+      ? serverMillSheetApi.detail(id)
+      : mockQuery((tables): MillSheetDetailView => {
+          requireActor(tables, READ_RULE);
+          const { row, snapshot } = millSheetDetail(tables, id);
+          return { id: row.id, millSheetNo: row.millSheetNo, shipmentRequestId: row.shipmentRequestId, salesOrderId: row.salesOrderId, issuedAt: row.issuedAt, pdfPath: row.pdfPath, snapshot };
+        }),
+  /** 인쇄(PDF 생성)가 끝난 뒤 pdf_path를 남긴다. 이미 있으면 그대로. 출고·스냅샷은 바꾸지 않는다. 서버 모드면 서버가 같은 스냅샷으로 PDF를 만들어 저장한다 */
   markPdfGenerated: (input: { millSheetId: number }) =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, PRINT_RULE);
-      const row = markMillSheetPdfGenerated(tx, userActor(actor.employee.id), input);
-      return { id: row.id, millSheetNo: row.millSheetNo, pdfPath: row.pdfPath };
-    }),
+    isServerDataSource()
+      ? serverMillSheetApi.markPdfGenerated(input)
+      : mockMutation((tx) => {
+          const actor = requireActor(tx.tables, PRINT_RULE);
+          const row = markMillSheetPdfGenerated(tx, userActor(actor.employee.id), input);
+          return { id: row.id, millSheetNo: row.millSheetNo, pdfPath: row.pdfPath };
+        }),
 };

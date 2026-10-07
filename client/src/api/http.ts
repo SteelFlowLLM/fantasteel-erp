@@ -12,7 +12,7 @@ import { getMockDb } from '@/mock/db';
 
 export type DataSource = 'mock' | 'server';
 
-/** 수주·출하·배정·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고) 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
+/** 수주·출하·배정·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·밀시트 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'server' ? 'server' : 'mock';
 }
