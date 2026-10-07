@@ -14,6 +14,7 @@ import {
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
+import { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataService } from './master-data.service';
 
 /**
@@ -44,6 +45,13 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listSteelGrades(): Promise<SteelGradeView[]> {
     return this.service.listSteelGrades();
+  }
+
+  /** API-169 강종 등록 */
+  @Post('steel-grades')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createSteelGrade(@Body() dto: CreateSteelGradeDto): Promise<SteelGradeView> {
+    return this.service.createSteelGrade(dto);
   }
 
   /** API-170 규격 매핑 (열연 계획 수율은 계산값) */

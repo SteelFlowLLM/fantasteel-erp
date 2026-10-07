@@ -25,6 +25,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateItemDto } from './dto/item.dto';
+import type { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataRepository } from './master-data.repository';
 
 type ItemRow = Awaited<ReturnType<MasterDataRepository['findItems']>>[number];
@@ -133,6 +134,14 @@ export class MasterDataService {
   /** API-168 */
   async listSteelGrades(): Promise<SteelGradeView[]> {
     return this.repository.findSteelGrades(this.prisma);
+  }
+
+  /** API-169 */
+  async createSteelGrade(dto: CreateSteelGradeDto): Promise<SteelGradeView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (await this.repository.findSteelGradeByCode(tx, dto.steelGradeCode)) throw new AppException('COM-004', `강종 ${dto.steelGradeCode}이(가) 이미 있어요`);
+      return this.repository.createSteelGrade(tx, { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo });
+    });
   }
 
   /** API-170. 매핑된 규격은 슬래브·코일이라 치수·이론중량이 늘 있다 (item CHECK) */
