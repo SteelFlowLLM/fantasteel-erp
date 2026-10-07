@@ -3,10 +3,13 @@ import {
   PERMISSION,
   type CustomerView,
   type ItemView,
+  type ProductionSettingView,
   type RoutingView,
   type SpecificConsumptionView,
   type SpecMappingView,
   type SteelGradeView,
+  type SupplierView,
+  type YardView,
 } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { ListItemsQuery } from './dto/list-items.query';
@@ -63,5 +66,24 @@ export class MasterDataController {
     return this.service.listCustomers();
   }
 
+  /** API-181 공급업체 목록 (발주 화면에도 사용) */
+  @Get('suppliers')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listSuppliers(): Promise<SupplierView[]> {
+    return this.service.listSuppliers();
+  }
 
+  /** API-184 야드 목록 */
+  @Get('yards')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  listYards(): Promise<YardView[]> {
+    return this.service.listYards();
+  }
+
+  /** API-187 생산 설정값 (단건 리소스라 :id 없음) */
+  @Get('production-settings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
+  getProductionSetting(): Promise<ProductionSettingView> {
+    return this.service.getProductionSetting();
+  }
 }

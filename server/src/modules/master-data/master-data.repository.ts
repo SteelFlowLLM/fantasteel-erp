@@ -48,4 +48,16 @@ export class MasterDataRepository {
     });
   }
 
+  findSuppliers(tx: Tx) {
+    return tx.supplier.findMany({ orderBy: { supplierCode: 'asc' }, select: { id: true, supplierCode: true, supplierName: true } });
+  }
+
+  findYards(tx: Tx) {
+    return tx.yard.findMany({ orderBy: { yardCode: 'asc' }, select: { id: true, yardCode: true, yardName: true, yardType: true } });
+  }
+
+  /** production_setting은 1행만 둔다 */
+  findProductionSetting(tx: Tx) {
+    return tx.productionSetting.findFirst({ orderBy: { id: 'asc' } });
+  }
 }

@@ -4,14 +4,19 @@ import type {
   ItemType,
   ItemView,
   ProcessType,
+  ProductionSettingView,
   RawMaterialType,
   RoutingView,
   SpecificConsumptionView,
   SpecMappingItemView,
   SpecMappingView,
   SteelGradeView,
+  SupplierView,
   UnitType,
+  YardType,
+  YardView,
 } from '@fantasteel/shared';
+import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterDataRepository } from './master-data.repository';
 
@@ -43,6 +48,7 @@ export class MasterDataService {
       itemName: r.itemName,
       itemType: r.itemType as ItemType,
       unitType: r.unitType as UnitType,
+      rawMaterialType: r.rawMaterialType as RawMaterialType | null,
       steelGradeId: r.steelGradeId,
       steelGradeCode: r.steelGrade?.steelGradeCode ?? null,
       thicknessMm: r.thicknessMm?.toFixed(2) ?? null,
@@ -50,6 +56,7 @@ export class MasterDataService {
       lengthMm: r.lengthMm?.toFixed(2) ?? null,
       theoreticalWeightTon: r.theoreticalWeightTon?.toFixed(3) ?? null,
       defaultYardId: r.defaultYardId,
+      defaultSupplierId: r.defaultSupplierId,
     }));
   }
 
@@ -101,6 +108,23 @@ export class MasterDataService {
     }));
   }
 
+  /** API-181 */
+  async listSuppliers(): Promise<SupplierView[]> {
+    return this.repository.findSuppliers(this.prisma);
+  }
+
+  /** API-184 */
+  async listYards(): Promise<YardView[]> {
+    const rows = await this.repository.findYards(this.prisma);
+    return rows.map((r) => ({ ...r, yardType: r.yardType as YardType }));
+  }
+
+  /** API-187 */
+  async getProductionSetting(): Promise<ProductionSettingView> {
+    const row = await this.repository.findProductionSetting(this.prisma);
+    if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
+    return { id: row.id, heatCapacityTon: row.heatCapacityTon.toFixed(3), deliveryRiskDays: row.deliveryRiskDays };
+  }
 }
 
 function toSpecMappingItemView(r: SpecRow): SpecMappingItemView {

@@ -1,5 +1,5 @@
 // 기준정보 조회 응답 타입 (REQ-MST-001~009, docs/backend/master-data.md). 톤·치수·수율은 문자열.
-import type { ItemType, ProcessType, RawMaterialType, UnitType } from './codes';
+import type { ItemType, ProcessType, RawMaterialType, UnitType, YardType } from './codes';
 
 export interface CustomerView {
   id: number;
@@ -13,6 +13,8 @@ export interface ItemView {
   itemName: string;
   itemType: ItemType;
   unitType: UnitType;
+  /** 원료만 */
+  rawMaterialType: RawMaterialType | null;
   /** 제품만 */
   steelGradeId: number | null;
   steelGradeCode: string | null;
@@ -22,6 +24,8 @@ export interface ItemView {
   /** 1매 이론중량(t, 소수 3자리). 제품만 */
   theoreticalWeightTon: string | null;
   defaultYardId: number;
+  /** 원료만. 품목별 기본 공급업체 1곳 */
+  defaultSupplierId: number | null;
 }
 
 /** API-168. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리한다 */
@@ -70,4 +74,24 @@ export interface SpecificConsumptionView {
   steelGradeId: number | null;
   steelGradeCode: string | null;
   consumptionRate: string;
+}
+
+export interface SupplierView {
+  id: number;
+  supplierCode: string;
+  supplierName: string;
+}
+
+export interface YardView {
+  id: number;
+  yardCode: string;
+  yardName: string;
+  yardType: YardType;
+}
+
+/** API-187. 1행만 둔다 */
+export interface ProductionSettingView {
+  id: number;
+  heatCapacityTon: string;
+  deliveryRiskDays: number;
 }
