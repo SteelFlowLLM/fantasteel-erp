@@ -57,3 +57,39 @@ export class CreateItemDto {
   @IsInt({ message: '기본 공급업체를 골라 주세요' })
   defaultSupplierId?: number | null;
 }
+
+/**
+ * API-167. 보내지 않은 값은 그대로 둔다. 품목 유형·원료 코드·원료 유형은 바꾸지 않는다.
+ * 원료는 이름·기본 야드·기본 공급업체(null이면 비움), 규격은 강종·치수·기본 야드를 바꾼다.
+ */
+export class UpdateItemDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: '원료명을 입력해 주세요' })
+  itemName?: string;
+
+  @IsOptional()
+  @IsInt({ message: '강종을 골라 주세요' })
+  steelGradeId?: number;
+
+  @IsOptional()
+  @Matches(DIMENSION_MM, { message: '두께는 소수 2자리까지의 mm로 입력해 주세요' })
+  thicknessMm?: string;
+
+  @IsOptional()
+  @Matches(DIMENSION_MM, { message: '폭은 소수 2자리까지의 mm로 입력해 주세요' })
+  widthMm?: string;
+
+  @IsOptional()
+  @Matches(DIMENSION_MM, { message: '길이는 소수 2자리까지의 mm로 입력해 주세요' })
+  lengthMm?: string;
+
+  @IsOptional()
+  @IsInt({ message: '기본 야드를 골라 주세요' })
+  defaultYardId?: number;
+
+  @IsOptional()
+  @IsInt({ message: '기본 공급업체를 골라 주세요' })
+  defaultSupplierId?: number | null;
+}

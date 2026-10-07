@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   PERMISSION,
   type CustomerView,
@@ -12,8 +12,9 @@ import {
   type YardView,
 } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
-import { CreateItemDto } from './dto/item.dto';
+import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
+import { CreateSpecMappingDto } from './dto/spec-mapping.dto';
 import { CreateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataService } from './master-data.service';
 
@@ -40,6 +41,13 @@ export class MasterDataController {
     return this.service.createItem(dto);
   }
 
+  /** API-167 품목·규격 수정 (쓰인 규격의 치수·이론중량은 MST-002) */
+  @Patch('items/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateItem(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateItemDto): Promise<ItemView> {
+    return this.service.updateItem(id, dto);
+  }
+
   /** API-168 강종 목록 */
   @Get('steel-grades')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
@@ -59,6 +67,13 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
   listSpecMappings(): Promise<SpecMappingView[]> {
     return this.service.listSpecMappings();
+  }
+
+  /** API-171 규격 매핑 등록 (대응 코일 중복·중량 초과 차단) */
+  @Post('spec-mappings')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  createSpecMapping(@Body() dto: CreateSpecMappingDto): Promise<SpecMappingView> {
+    return this.service.createSpecMapping(dto);
   }
 
   /** API-172 라우팅 */
