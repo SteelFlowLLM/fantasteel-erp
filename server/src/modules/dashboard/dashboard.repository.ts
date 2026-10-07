@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
+import { findAllocatableLots } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 대시보드는 읽기만 한다. 여러 모듈의 테이블을 단계별로 센다 */
@@ -36,6 +37,16 @@ export class DashboardRepository {
       }),
     ]);
     return { requests, lots };
+  }
+
+  /** 미배정 합격 LOT (적격 + AVAILABLE + CONFIRMED 배정 없음, FIFO 순서). 배정 후보와 같은 쿼리를 쓴다 */
+  findUnallocatedPassedLots(tx: Tx, itemId: number) {
+    return tx.$queryRawTyped(findAllocatableLots(itemId));
+  }
+
+  /** 규격의 1매 이론중량 (여재 톤 계산) */
+  findItemWeights(tx: Tx, itemIds: number[]) {
+    return tx.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, theoreticalWeightTon: true } });
   }
 
   /** 생산계획의 품목 (계획 수율을 품목별로 고르려고) */

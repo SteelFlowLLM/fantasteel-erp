@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProcessYieldWidget, ProductStockWidget, ShipmentResultWidget } from '@fantasteel/shared';
+import type { AuthUser, OrderFulfillmentWidget, ProcessFlowWidget, ProcessYieldWidget, ProductStockWidget, ShipmentResultWidget, SurplusAgeWidget } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { DashboardService } from './dashboard.service';
 
@@ -36,5 +36,11 @@ export class DashboardController {
   @Get('dashboard/widgets/process-yield')
   processYield(@CurrentUser() user: AuthUser): Promise<ProcessYieldWidget> {
     return this.service.processYield(user);
+  }
+
+  /** 여재 보유 기간 (REQ-DSH-002). 재고 화면처럼 모든 사원 */
+  @Get('dashboard/widgets/surplus-age')
+  surplusAge(): Promise<SurplusAgeWidget> {
+    return this.service.surplusAge();
   }
 }
