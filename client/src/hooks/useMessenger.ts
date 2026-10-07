@@ -1,7 +1,9 @@
-// 메신저 조회 훅과 읽음 처리
+// 메신저 조회 훅, 읽음 처리, 보내기(보내는 중·실패·다시 보내기)
 import { keepPreviousData, skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { messengerApi, messengerKeys } from '@/api/messenger';
+import { useCallback, useMemo } from 'react';
+import { messengerApi, messengerKeys, type SendMessageInput } from '@/api/messenger';
 import { useMe } from '@/hooks/useMe';
+import { deliverOutboxItem, retryOutboxItem, useOutboxStore } from '@/stores/useOutboxStore';
 import { toast } from '@/stores/useToastStore';
 
 export function useChatRoomList() {
@@ -55,4 +57,35 @@ export function useMessageFileDownload() {
     },
     onError: (error) => toast.apiError(error),
   });
+}
+
+/**
+ * 메시지 보내기 (REQ-MSG-002). 누르면 바로 '보내는 중' 말풍선으로 보이고, 저장되면 조회를 다시 읽은 뒤 말풍선을 지운다(깜빡임 없이 바뀐다).
+ * 실패하면 '전송 실패' 말풍선으로 남아 다시 보내거나 지울 수 있다. items는 이 방의 보내는 중·실패 메시지.
+ */
+export function useMessageOutbox(chatRoomId: number) {
+  const queryClient = useQueryClient();
+  const all = useOutboxStore((state) => state.items);
+  const items = useMemo(() => all.filter((item) => item.input.chatRoomId === chatRoomId), [all, chatRoomId]);
+
+  const sendAndRefresh = useCallback(
+    async (input: SendMessageInput) => {
+      await messengerApi.sendMessage(input);
+      // 멘션·업무방 알림도 함께 생겨서 알림 조회도 다시 읽는다
+      await Promise.all([queryClient.invalidateQueries({ queryKey: messengerKeys.all }), queryClient.invalidateQueries({ queryKey: ['notifications'] })]);
+    },
+    [queryClient],
+  );
+
+  const send = useCallback(
+    (input: SendMessageInput) => {
+      const localId = useOutboxStore.getState().add(input);
+      void deliverOutboxItem(localId, sendAndRefresh);
+    },
+    [sendAndRefresh],
+  );
+  const retry = useCallback((localId: string) => void retryOutboxItem(localId, sendAndRefresh), [sendAndRefresh]);
+  const discard = useCallback((localId: string) => useOutboxStore.getState().remove(localId), []);
+
+  return { items, send, retry, discard };
 }
