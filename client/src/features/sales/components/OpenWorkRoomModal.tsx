@@ -14,7 +14,7 @@ import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { useAction } from '@/hooks/useAction';
 import { useOrgChart } from '@/hooks/useDirectory';
-import { useMe } from '@/hooks/useMe';
+import { useMockEmployeeId } from '@/hooks/useMe';
 import { useSalesOrderWorkRoom } from '@/hooks/useSalesOrders';
 import { cn } from '@/lib/cn';
 
@@ -37,7 +37,7 @@ function filterTree(nodes: readonly OrgChartNode[], keyword: string): OrgChartNo
 
 export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props) {
   const router = useRouter();
-  const me = useMe();
+  const myId = useMockEmployeeId();
   const orgChart = useOrgChart();
   const room = useSalesOrderWorkRoom(salesOrderId);
   const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
@@ -69,7 +69,7 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
       {node.members.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5" style={{ paddingLeft: depth * 14 }}>
           {node.members.map((member) => {
-            const isMe = member.id === me.employeeId;
+            const isMe = member.id === myId;
             const already = existing.has(member.id);
             const checked = isMe || already || picked.has(member.id);
             const locked = isMe || already;

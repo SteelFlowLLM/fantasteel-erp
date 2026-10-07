@@ -18,7 +18,7 @@ import { RequisitionFormModal } from '@/features/purchasing/components/Requisiti
 import { RequisitionPanel } from '@/features/purchasing/components/RequisitionPanel';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { REQUISITION_SOURCE_LABEL, REQUISITION_SOURCES } from '@/features/purchasing/lib/purchasingView';
-import { useMe } from '@/hooks/useMe';
+import { useMockEmployeeId } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { usePurchaseRequisitionList } from '@/hooks/usePurchaseRequisitions';
 import { fmtMD, fmtTon } from '@/lib/format';
@@ -40,7 +40,8 @@ function statusLine(purchaseRequisition: RequisitionView): string {
 }
 
 export function RequisitionListScreen() {
-  const me = useMe();
+  // 서버 어댑터가 요청자 id를 가짜 DB id로 바꿔 준다 (api/server/purchaseRequisitions.ts)
+  const myId = useMockEmployeeId();
   const router = useRouter();
   const url = useUrlParams();
   const selectedId = url.getNumber('pr');
@@ -59,14 +60,14 @@ export function RequisitionListScreen() {
       (purchaseRequisition) =>
         (status === null || purchaseRequisition.purchaseRequisitionStatus === status) &&
         (source === null || purchaseRequisition.source === source) &&
-        (!mineOnly || purchaseRequisition.requesterId === me.employeeId) &&
+        (!mineOnly || purchaseRequisition.requesterId === myId) &&
         (word === '' ||
           purchaseRequisition.purchaseRequisitionNo.toLowerCase().includes(word) ||
           (purchaseRequisition.requesterName ?? '').includes(word) ||
           purchaseRequisition.itemName.includes(word) ||
           purchaseRequisition.itemCode.toLowerCase().includes(word)),
     );
-  }, [rows, status, source, mineOnly, keyword, me.employeeId]);
+  }, [rows, status, source, mineOnly, keyword, myId]);
   const activeId = selectedId ?? filtered[0]?.id ?? null;
   const countOf = (value: PurchaseRequisitionStatus) => rows.filter((purchaseRequisition) => purchaseRequisition.purchaseRequisitionStatus === value).length;
 

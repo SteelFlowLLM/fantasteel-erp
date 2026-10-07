@@ -15,7 +15,7 @@ import { Segmented } from '@/components/Tabs';
 import { TaskFormModal } from '@/features/tasks/components/TaskFormModal';
 import { taskDueStateOf, taskDueText } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
-import { useMe } from '@/hooks/useMe';
+import { useMockEmployeeId } from '@/hooks/useMe';
 import { useTaskList } from '@/hooks/useTasks';
 import { cn } from '@/lib/cn';
 
@@ -97,11 +97,11 @@ export function TaskBoard({ today, focusTaskId }: { today: string; focusTaskId: 
 }
 
 function TaskCard({ task, today, focused, onEdit, onComplete }: { task: TaskView; today: string; focused: boolean; onEdit: () => void; onComplete: () => void }) {
-  const me = useMe();
+  const myId = useMockEmployeeId();
   const ref = useRef<HTMLElement>(null);
   const state = taskDueStateOf(task, today);
   const done = state === 'done';
-  const nameOf = (person: TaskView['assignee']) => `${person.employeeName}${person.id === me.employeeId ? ' (나)' : ''}`;
+  const nameOf = (person: TaskView['assignee']) => `${person.employeeName}${person.id === myId ? ' (나)' : ''}`;
 
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'center' });
