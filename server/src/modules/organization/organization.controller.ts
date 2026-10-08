@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { PERMISSION, type DepartmentNode, type DepartmentView, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
-import { CreateJobGradeDto } from './dto/job-grade.dto';
+import { CreateJobGradeDto, UpdateJobGradeDto } from './dto/job-grade.dto';
 import { ListEmployeesQuery } from './dto/list-employees.query';
 import { UpdateRolePermissionsDto } from './dto/role-permission.dto';
 import { OrganizationService } from './organization.service';
@@ -58,6 +58,13 @@ export class OrganizationController {
     return this.service.updateDepartment(id, dto);
   }
 
+  /** API-271 부서 삭제. 참조(하위 부서·소속 사원)가 없을 때만 (컨벤션 7-2). 지운 부서를 돌려준다 */
+  @Delete('departments/:id')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  deleteDepartment(@Param('id', ParseIntPipe) id: number): Promise<DepartmentView> {
+    return this.service.deleteDepartment(id);
+  }
+
   /** API-161 직급 목록. 로그인한 사원 모두 */
   @Get('job-grades')
   listJobGrades(): Promise<JobGradeView[]> {
@@ -69,6 +76,20 @@ export class OrganizationController {
   @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
   createJobGrade(@Body() dto: CreateJobGradeDto): Promise<JobGradeView> {
     return this.service.createJobGrade(dto);
+  }
+
+  /** API-272 직급 수정 (이름·표시 순서). 권한은 직급 등록과 같다 */
+  @Patch('job-grades/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  updateJobGrade(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateJobGradeDto): Promise<JobGradeView> {
+    return this.service.updateJobGrade(id, dto);
+  }
+
+  /** API-273 직급 삭제. 쓰는 사원이 없을 때만 (컨벤션 7-2). 지운 직급을 돌려준다 */
+  @Delete('job-grades/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  deleteJobGrade(@Param('id', ParseIntPipe) id: number): Promise<JobGradeView> {
+    return this.service.deleteJobGrade(id);
   }
 
   /** API-163 역할·권한 */

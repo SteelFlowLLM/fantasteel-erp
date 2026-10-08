@@ -69,8 +69,11 @@ PATCH,사원 수정,/api/v1/employees/:id,인증·조직,P1,초안,도출: 컨�
 GET,부서 트리·조직도 조회,/api/v1/departments,인증·조직,P1,초안,12.2 명시. 메신저 멤버·알림 대상 선택에도 사용 (REQ-ORG-004)
 POST,부서 등록,/api/v1/departments,인증·조직,P1,초안,12.2 명시
 PATCH,부서 수정·부서장 지정,/api/v1/departments/:id,인증·조직,P1,초안,도출: 컨벤션 5장. 계층 순환 차단 (BP-AUTH-01 예외 처리)
+DELETE,부서 삭제,/api/v1/departments/:id,인증·조직,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙. 하위 부서·소속 사원(퇴사자 포함)이 있으면 거부 (2026-10-08 추가)"
 GET,직급 목록 조회,/api/v1/job-grades,인증·조직,P1,초안,도출: 컨벤션 5장. 조직도에 직급 표시 (REQ-ORG-003)
 POST,직급 등록,/api/v1/job-grades,인증·조직,P1,초안,도출. 🟡 기준 문서에 직급 관리 권한 코드가 따로 없음(EMPLOYEE_MANAGE·ORG_MANAGE 중 팀 확인)
+PATCH,직급 수정,/api/v1/job-grades/:id,인증·조직,P1,초안,"도출: 컨벤션 5장. 이름·표시 순서. 권한은 직급 등록과 같음 (2026-10-08 추가)"
+DELETE,직급 삭제,/api/v1/job-grades/:id,인증·조직,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙. 쓰는 사원(퇴사자 포함)이 있으면 거부 (2026-10-08 추가)"
 GET,역할·권한 조회,/api/v1/roles,인증·조직,P1,초안,도출: 공통코드 ROLE·PERMISSION·PERMISSION_LEVEL
 PUT,역할별 권한 변경,/api/v1/roles/:id/permissions,인증·조직,P1,초안,"도출. 승인 권한 코드는 없음(부서장으로 판단, REQ-AUTH-004)"
 GET,품목·규격 목록 조회,/api/v1/items,기준정보,P1,초안,12.2 명시. 수주 등록 화면의 규격 선택에도 사용. 톤은 문자열로 응답 (컨벤션 5장)
