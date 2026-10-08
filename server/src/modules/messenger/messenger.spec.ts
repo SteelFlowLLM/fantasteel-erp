@@ -1000,6 +1000,15 @@ describe('18번: 이모티콘', () => {
     expect(deleted.body.data).toMatchObject({ isDeleted: true, emoticonKey: null });
   });
 
+  it('19번 묶음에서 더한 이모티콘도 받고, 목록 미리보기는 "이모티콘 · 이름"이다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const sent = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '', emoticonKey: 'steelman-hot-rolling' });
+    expect(sent.status).toBe(201);
+    expect(sent.body.data).toMatchObject({ content: null, emoticonKey: 'steelman-hot-rolling' });
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('이모티콘 · 열연 중');
+  });
+
   it('목록에 없는 이모티콘이나 글·이모티콘이 모두 없으면 COM-004', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     const unknown = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '', emoticonKey: 'steelman-none' });

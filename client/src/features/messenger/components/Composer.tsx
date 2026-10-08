@@ -1,7 +1,7 @@
 'use client';
 
-// 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지) 또는 이모티콘(18번), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
-// 이모티콘은 서버 첨부 API가 받지 않아 파일과 함께 고를 수 없다.
+// 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지) 또는 이모티콘(18번·19번), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
+// 이모티콘은 서버 첨부 API가 받지 않아 파일과 함께 고를 수 없다. 최근 이모티콘은 고를 때가 아니라 보낼 때 쌓는다 (골랐다 빼면 최근이 아니다).
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { MESSAGE_ATTACHMENT_MAX_COUNT, type MessageEmoticonKey } from '@fantasteel/shared';
@@ -10,8 +10,10 @@ import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
 import { SoonButton, soonLabel } from '@/components/ComingSoon';
 import { EmoticonImage, EmoticonPicker, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
+import { pushRecentEmoticon } from '@/features/messenger/lib/emoticonRecent';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { useMe } from '@/hooks/useMe';
 import { useMessageOutbox } from '@/hooks/useMessenger';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
@@ -49,6 +51,7 @@ function mentionAt(text: string, caret: number): MentionState | null {
 }
 
 export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: () => void }) {
+  const myId = useMe().employeeId;
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [emoticon, setEmoticon] = useState<MessageEmoticonKey | null>(null);
@@ -132,6 +135,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       }
     }
     send({ chatRoomId: room.id, content, files: payload, emoticonKey: emoticon, parentMessageId: replyTo?.id ?? null });
+    if (emoticon) pushRecentEmoticon(myId, emoticon);
     clearReply();
     setText('');
     setFiles([]);
@@ -261,6 +265,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           onClick={() => fileInputRef.current?.click()}
         />
         <EmoticonPicker
+          employeeId={myId}
           disabled={pending || files.length > 0}
           disabledReason="이모티콘은 파일과 함께 보낼 수 없어요"
           onPick={(key) => {

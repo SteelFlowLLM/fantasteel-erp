@@ -4,20 +4,56 @@ import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 export const MESSAGE_REACTION_EMOJIS = ['👍', '✅', '👀', '🙏', '❤️', '😂'] as const;
 export type MessageReactionEmoji = (typeof MESSAGE_REACTION_EMOJIS)[number];
 
+/** 이모티콘 묶음 (19번). 고르기 창의 탭 순서 */
+export const MESSAGE_EMOTICON_SETS = [
+  { key: 'steelman-work', label: '철강맨 업무' },
+  { key: 'steelman-daily', label: '철강맨 일상' },
+] as const;
+export type MessageEmoticonSetKey = (typeof MESSAGE_EMOTICON_SETS)[number]['key'];
+
 /**
- * 메신저 이모티콘 (18번, 문서에 없는 추가 기능). key를 message.emoticon_key에 저장한다.
- * 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
+ * 메신저 이모티콘 (18번·19번, 문서에 없는 추가 기능): 묶음 2개, 37종. key를 message.emoticon_key에 저장한다.
+ * 순서가 고르기 창 순서다. 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
  */
 export const MESSAGE_EMOTICONS = [
-  { key: 'steelman-ok', label: '확인' },
-  { key: 'steelman-yes', label: '넵넵' },
-  { key: 'steelman-thanks', label: '감사합니다' },
-  { key: 'steelman-sorry', label: '죄송합니다' },
-  { key: 'steelman-approve', label: '결재 완료' },
-  { key: 'steelman-best', label: '최고' },
-  { key: 'steelman-gasp', label: '헉' },
-  { key: 'steelman-off', label: '퇴근' },
-] as const;
+  { key: 'steelman-ok', label: '확인', set: 'steelman-work' },
+  { key: 'steelman-yes', label: '넵넵', set: 'steelman-work' },
+  { key: 'steelman-thanks', label: '감사합니다', set: 'steelman-work' },
+  { key: 'steelman-sorry', label: '죄송합니다', set: 'steelman-work' },
+  { key: 'steelman-approve', label: '결재 완료', set: 'steelman-work' },
+  { key: 'steelman-best', label: '최고', set: 'steelman-work' },
+  { key: 'steelman-gasp', label: '헉', set: 'steelman-work' },
+  { key: 'steelman-off', label: '퇴근', set: 'steelman-work' },
+  { key: 'steelman-checking', label: '확인 중', set: 'steelman-work' },
+  { key: 'steelman-review', label: '검토 부탁드려요', set: 'steelman-work' },
+  { key: 'steelman-reject', label: '반려', set: 'steelman-work' },
+  { key: 'steelman-done', label: '완료', set: 'steelman-work' },
+  { key: 'steelman-urgent', label: '긴급', set: 'steelman-work' },
+  { key: 'steelman-wait', label: '잠시만요', set: 'steelman-work' },
+  { key: 'steelman-fighting', label: '화이팅', set: 'steelman-work' },
+  { key: 'steelman-well-done', label: '수고하셨습니다', set: 'steelman-work' },
+  { key: 'steelman-hot-rolling', label: '열연 중', set: 'steelman-work' },
+  { key: 'steelman-strike', label: '쇠뿔도 단김에', set: 'steelman-work' },
+  { key: 'steelman-panic', label: '멘붕', set: 'steelman-daily' },
+  { key: 'steelman-lol', label: 'ㅋㅋㅋ', set: 'steelman-daily' },
+  { key: 'steelman-love', label: '사랑해요', set: 'steelman-daily' },
+  { key: 'steelman-hungry', label: '배고파', set: 'steelman-daily' },
+  { key: 'steelman-coffee', label: '커피 수혈', set: 'steelman-daily' },
+  { key: 'steelman-monday', label: '월요일', set: 'steelman-daily' },
+  { key: 'steelman-friday', label: '불금', set: 'steelman-daily' },
+  { key: 'steelman-sleepy', label: '졸려요', set: 'steelman-daily' },
+  { key: 'steelman-cry', label: 'ㅠㅠ', set: 'steelman-daily' },
+  { key: 'steelman-angry', label: '부글부글', set: 'steelman-daily' },
+  { key: 'steelman-wow', label: '대박', set: 'steelman-daily' },
+  { key: 'steelman-morning', label: '굿모닝', set: 'steelman-daily' },
+  { key: 'steelman-yummy', label: '군침 싹', set: 'steelman-daily' },
+  { key: 'steelman-cold-no', label: '냉정하게 거절', set: 'steelman-daily' },
+  { key: 'steelman-rolled', label: '압연 당함', set: 'steelman-daily' },
+  { key: 'steelman-quench', label: '담금질 중', set: 'steelman-daily' },
+  { key: 'steelman-wall', label: '철벽 방어', set: 'steelman-daily' },
+  { key: 'steelman-steel-mind', label: '강철 멘탈', set: 'steelman-daily' },
+  { key: 'steelman-melting', label: '멘탈 녹는 중', set: 'steelman-daily' },
+] as const satisfies readonly { key: string; label: string; set: MessageEmoticonSetKey }[];
 export type MessageEmoticonKey = (typeof MESSAGE_EMOTICONS)[number]['key'];
 export const MESSAGE_EMOTICON_KEYS: readonly MessageEmoticonKey[] = MESSAGE_EMOTICONS.map((e) => e.key);
 
