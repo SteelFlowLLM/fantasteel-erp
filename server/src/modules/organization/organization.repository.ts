@@ -88,6 +88,23 @@ export class OrganizationRepository {
     return tx.jobGrade.create({ data, include: { _count: { select: { employees: { where: { isActive: true } } } } } });
   }
 
+  findJobGrade(tx: Tx, id: number) {
+    return tx.jobGrade.findUnique({ where: { id }, include: { _count: { select: { employees: { where: { isActive: true } } } } } });
+  }
+
+  updateJobGrade(tx: Tx, id: number, data: { jobGradeName?: string; sortOrder?: number }) {
+    return tx.jobGrade.update({ where: { id }, data, select: { id: true } });
+  }
+
+  /** 삭제 확인용: 퇴사자 포함 */
+  countEmployeesOfJobGrade(tx: Tx, jobGradeId: number) {
+    return tx.employee.count({ where: { jobGradeId } });
+  }
+
+  deleteJobGrade(tx: Tx, id: number) {
+    return tx.jobGrade.delete({ where: { id }, select: { id: true } });
+  }
+
   /** 순환 확인용: 부서마다 상위 부서 */
   findDepartmentLinks(tx: Tx) {
     return tx.department.findMany({ select: { id: true, parentId: true } });
@@ -103,6 +120,17 @@ export class OrganizationRepository {
 
   updateDepartment(tx: Tx, id: number, data: Prisma.DepartmentUncheckedUpdateInput) {
     return tx.department.update({ where: { id }, data, select: { id: true } });
+  }
+
+  /** 삭제 확인용: 하위 부서 수와 소속 사원 수(퇴사자 포함). 트랜잭션 연결에서 겹치지 않게 차례로 센다 */
+  async countDepartmentReferences(tx: Tx, id: number) {
+    const children = await tx.department.count({ where: { parentId: id } });
+    const employees = await tx.employee.count({ where: { departmentId: id } });
+    return { children, employees };
+  }
+
+  deleteDepartment(tx: Tx, id: number) {
+    return tx.department.delete({ where: { id }, select: { id: true } });
   }
 
   /** 부서장 지정 확인용 */

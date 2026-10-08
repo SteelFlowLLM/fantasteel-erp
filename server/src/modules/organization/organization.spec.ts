@@ -1,4 +1,4 @@
-// 조직 API(조회 API-155·158·161·163, 등록·수정 API-156·157·159·160·162·164)를 실제 앱과 DB(fs_common)로 확인한다.
+// 조직 API(조회 API-155·158·161·163, 등록·수정 API-156·157·159·160·162·164, 삭제·직급 수정 API-271·272·273)를 실제 앱과 DB(fs_common)로 확인한다.
 // 권한 가드·쿼리 변환·날짜 변환까지 보려고 HTTP로 부른다. 조회는 시드(seed.md) 조직 데이터를 읽는다.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
@@ -29,7 +29,7 @@ async function get<T>(path: string, cookie = adminCookie) {
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
 }
 
-async function send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, payload: unknown, cookie = adminCookie) {
+async function send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, payload?: unknown, cookie = adminCookie) {
   const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
 }
@@ -305,5 +305,74 @@ describe('PUT /roles/:id/permissions (API-164)', () => {
     expect((await send('PUT', '/roles/1/permissions', { permissions: [{ permission: 'NOPE', permissionLevel: 'USE' }] })).body.error?.code).toBe('COM-004');
     expect((await send('PUT', '/roles/999999/permissions', { permissions: [] })).body.error?.code).toBe('COM-003');
     expect((await send('PUT', '/roles/1/permissions', { permissions: [] }, salesCookie)).body.error?.code).toBe('COM-002');
+  });
+});
+
+// ── 삭제·직급 수정 (API-271·272·273, 2026-10-08 추가). 이 파일이 만든 부서·직급·사원으로만 확인한다 ──
+
+/** 퇴사 처리한 사원 1명을 만든다 (퇴사자도 참조로 세는지 보려고) */
+async function createRetiredEmployee(override: { departmentId?: number; jobGradeId?: number }) {
+  const created = await send<EmployeeView>('POST', '/employees', { ...(await newEmployeePayload()), ...override });
+  await send('PATCH', `/employees/${created.body.data.id}`, { isActive: false });
+}
+
+describe('PATCH·DELETE /job-grades/:id (API-272·273)', () => {
+  const newGrade = async () => (await send<JobGradeView>('POST', '/job-grades', { jobGradeName: `삭제직급${Date.now()}`, sortOrder: 98 })).body.data;
+
+  it('이름·표시 순서를 바꾸고, 쓰는 사원이 없으면 지워 목록에서 빠진다', async () => {
+    const grade = await newGrade();
+    const renamed = await send<JobGradeView>('PATCH', `/job-grades/${grade.id}`, { jobGradeName: `${grade.jobGradeName}수정`, sortOrder: 97 });
+    expect(renamed.body.data).toMatchObject({ id: grade.id, jobGradeName: `${grade.jobGradeName}수정`, sortOrder: 97 });
+
+    const deleted = await send<JobGradeView>('DELETE', `/job-grades/${grade.id}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.data).toMatchObject({ id: grade.id, jobGradeName: `${grade.jobGradeName}수정` });
+    expect((await get<JobGradeView[]>('/job-grades')).body.data.some((g) => g.id === grade.id)).toBe(false);
+  });
+
+  it('쓰는 사원이 있으면(퇴사자 포함) 지우지 않는다 (COM-004)', async () => {
+    const grade = await newGrade();
+    await createRetiredEmployee({ jobGradeId: grade.id });
+    expect((await send('DELETE', `/job-grades/${grade.id}`)).body.error?.code).toBe('COM-004');
+  });
+
+  it('없는 직급은 COM-003, 빈 이름은 COM-004, 권한이 없으면 COM-002', async () => {
+    expect((await send('PATCH', '/job-grades/999999', { sortOrder: 1 })).body.error?.code).toBe('COM-003');
+    expect((await send('DELETE', '/job-grades/999999')).body.error?.code).toBe('COM-003');
+    const grade = await newGrade();
+    expect((await send('PATCH', `/job-grades/${grade.id}`, { jobGradeName: '  ' })).body.error?.code).toBe('COM-004');
+    expect((await send('DELETE', `/job-grades/${grade.id}`, undefined, salesCookie)).body.error?.code).toBe('COM-002');
+  });
+});
+
+describe('DELETE /departments/:id (API-271)', () => {
+  const newDepartment = async (parentId?: number) => {
+    seq += 1;
+    const code = `D${Date.now()}${seq}`;
+    return (await send<DepartmentView>('POST', '/departments', { departmentCode: code, departmentName: `삭제부서${seq}`, parentId })).body.data;
+  };
+
+  it('하위 부서·소속 사원이 없으면 지워 조직도에서 빠진다', async () => {
+    const department = await newDepartment();
+    const deleted = await send<DepartmentView>('DELETE', `/departments/${department.id}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.data).toMatchObject({ id: department.id, departmentCode: department.departmentCode });
+    expect(flatten((await get<DepartmentNode[]>('/departments')).body.data).some((d) => d.id === department.id)).toBe(false);
+  });
+
+  it('하위 부서나 소속 사원(퇴사자 포함)이 있으면 지우지 않는다 (COM-004)', async () => {
+    const parent = await newDepartment();
+    await newDepartment(parent.id);
+    expect((await send('DELETE', `/departments/${parent.id}`)).body.error?.code).toBe('COM-004');
+
+    const withRetired = await newDepartment();
+    await createRetiredEmployee({ departmentId: withRetired.id });
+    expect((await send('DELETE', `/departments/${withRetired.id}`)).body.error?.code).toBe('COM-004');
+  });
+
+  it('없는 부서는 COM-003, 권한이 없으면 COM-002', async () => {
+    expect((await send('DELETE', '/departments/999999')).body.error?.code).toBe('COM-003');
+    const department = await newDepartment();
+    expect((await send('DELETE', `/departments/${department.id}`, undefined, salesCookie)).body.error?.code).toBe('COM-002');
   });
 });

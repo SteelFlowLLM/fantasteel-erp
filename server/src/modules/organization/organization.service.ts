@@ -17,7 +17,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import type { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
-import type { CreateJobGradeDto } from './dto/job-grade.dto';
+import type { CreateJobGradeDto, UpdateJobGradeDto } from './dto/job-grade.dto';
 import type { ListEmployeesQuery } from './dto/list-employees.query';
 import type { UpdateRolePermissionsDto } from './dto/role-permission.dto';
 import { OrganizationRepository } from './organization.repository';
@@ -103,6 +103,32 @@ export class OrganizationService {
     return toJobGradeView(row);
   }
 
+  /** API-272 */
+  async updateJobGrade(id: number, dto: UpdateJobGradeDto): Promise<JobGradeView> {
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findJobGrade(tx, id))) throw new AppException('COM-003', '직급을 찾을 수 없어요');
+      await this.repository.updateJobGrade(tx, id, { jobGradeName: dto.jobGradeName, sortOrder: dto.sortOrder });
+    });
+    return this.jobGradeView(id);
+  }
+
+  /** API-273. 기준정보는 참조가 없을 때만 지운다 (컨벤션 7-2). 퇴사자도 직급을 참조하므로 함께 센다 */
+  async deleteJobGrade(id: number): Promise<JobGradeView> {
+    return this.prisma.$transaction(async (tx) => {
+      const row = await this.repository.findJobGrade(tx, id);
+      if (!row) throw new AppException('COM-003', '직급을 찾을 수 없어요');
+      if ((await this.repository.countEmployeesOfJobGrade(tx, id)) > 0) throw new AppException('COM-004', '이 직급을 쓰는 사원(퇴사자 포함)이 있어 삭제할 수 없어요');
+      await this.repository.deleteJobGrade(tx, id);
+      return toJobGradeView(row);
+    });
+  }
+
+  private async jobGradeView(id: number): Promise<JobGradeView> {
+    const row = await this.repository.findJobGrade(this.prisma, id);
+    if (!row) throw new AppException('COM-003', '직급을 찾을 수 없어요');
+    return toJobGradeView(row);
+  }
+
   /** 요청으로 받은 부서·직급·역할 id는 조회해서 확인한다 (컨벤션 7-2) */
   private async assertReferences(tx: Tx, ref: { departmentId?: number; jobGradeId?: number; roleId?: number }) {
     const found = await this.repository.findReferences(tx, ref);
@@ -185,6 +211,19 @@ export class OrganizationService {
       await this.repository.updateDepartment(tx, id, { departmentName: dto.departmentName, parentId: dto.parentId, headEmployeeId: dto.headEmployeeId });
     });
     return this.departmentView(id);
+  }
+
+  /** API-271. 하위 부서나 소속 사원(퇴사자 포함)이 있으면 지우지 않는다 (컨벤션 7-2). 부서장은 다른 부서 사원일 수 있어 따로 막지 않는다 */
+  async deleteDepartment(id: number): Promise<DepartmentView> {
+    const view = await this.departmentView(id);
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findDepartment(tx, id))) throw new AppException('COM-003', '부서를 찾을 수 없어요');
+      const refs = await this.repository.countDepartmentReferences(tx, id);
+      if (refs.children > 0) throw new AppException('COM-004', '하위 부서가 있는 부서는 삭제할 수 없어요');
+      if (refs.employees > 0) throw new AppException('COM-004', '소속 사원(퇴사자 포함)이 있는 부서는 삭제할 수 없어요');
+      await this.repository.deleteDepartment(tx, id);
+    });
+    return view;
   }
 
   /** API-164. 같은 권한을 두 번 보내면 어느 수준인지 알 수 없어 거부한다 */
