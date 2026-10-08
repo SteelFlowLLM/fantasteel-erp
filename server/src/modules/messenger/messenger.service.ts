@@ -18,6 +18,8 @@ import {
   PERMISSION,
   SALES_ORDER_ITEM_STATUS,
   calcWeightTon,
+  emoticonPreview,
+  isMessageEmoticonKey,
   type AuthUser,
   type BusinessEventType,
   type ChatMemberView,
@@ -35,6 +37,7 @@ import {
   type CreateChatRoomResult,
   type InviteChatMembersResult,
   type LeaveChatRoomResult,
+  type MessageEmoticonKey,
   type RenameChatRoomResult,
   type ItemType,
   type SalesOrderItemStatus,
@@ -68,6 +71,7 @@ export interface AttachmentContent {
 /** 저장할 새 메시지 (첨부는 저장소에 올린 뒤의 경로) */
 interface NewMessage {
   content: string | null;
+  emoticonKey?: MessageEmoticonKey | null;
   attachments?: readonly { filePath: string; fileName: string; fileSize: number }[];
   clientMessageId: string | null;
   parentMessageId: number | null;
@@ -108,16 +112,18 @@ function filePreview(firstName: string | null, count: number): string {
   return count > 1 ? `파일 · ${firstName} 외 ${count - 1}개` : `파일 · ${firstName}`;
 }
 
-function previewOf(message: { content: string | null; deletedAt?: Date | null; messageAttachments: readonly { fileName: string }[] }): string {
+function previewOf(message: { content: string | null; emoticonKey: string | null; deletedAt?: Date | null; messageAttachments: readonly { fileName: string }[] }): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
+  if (message.emoticonKey) return emoticonPreview(message.emoticonKey);
   return filePreview(message.messageAttachments[0]?.fileName ?? null, message.messageAttachments.length);
 }
 
 /** 목록 SQL의 마지막 메시지 (첨부는 첫 이름과 개수만 온다) */
-function lastPreviewOf(last: { content: string | null; deletedAt: Date | null; firstAttachmentName: string | null; attachmentCount: number }): string {
+function lastPreviewOf(last: { content: string | null; emoticonKey: string | null; deletedAt: Date | null; firstAttachmentName: string | null; attachmentCount: number }): string {
   if (last.deletedAt) return DELETED_MESSAGE_TEXT;
   if (last.content) return last.content.replace(/\s+/g, ' ').trim();
+  if (last.emoticonKey) return emoticonPreview(last.emoticonKey);
   return filePreview(last.firstAttachmentName, last.attachmentCount);
 }
 
@@ -232,6 +238,8 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     // 삭제된 메시지는 본문·첨부를 내보내지 않는다 (행은 남김)
     content: deleted ? null : message.content,
     attachments: deleted ? [] : message.messageAttachments.map((a) => ({ id: a.id, fileName: a.fileName, fileSize: a.fileSize })),
+    // 목록에서 뺀 키가 DB에 남아 있으면 화면이 그릴 수 없으므로 null
+    emoticonKey: !deleted && message.emoticonKey && isMessageEmoticonKey(message.emoticonKey) ? message.emoticonKey : null,
     unreadMemberCount,
     erpLinks: deleted ? [] : erpLinksOf(message.content),
     editedAt: message.editedAt?.toISOString() ?? null,
@@ -650,11 +658,17 @@ export class MessengerService implements OnModuleInit {
       });
   }
 
-  /** 글 메시지 보내기 (REQ-MSG-002). @멘션 대상은 mentionedEmployeeIds로 받는다 */
+  /** 글 메시지 보내기 (REQ-MSG-002). @멘션 대상은 mentionedEmployeeIds로 받는다. 이모티콘(18번)이 있으면 글은 비워도 된다 */
   sendMessage(user: AuthUser, chatRoomId: number, dto: SendMessageDto): Promise<ChatMessageView> {
-    const content = dto.content.trim();
-    if (!content) throw new AppException('COM-004', '보낼 메시지를 넣어 주세요');
-    return this.postMessage(user, chatRoomId, { content, clientMessageId: dto.clientMessageId ?? null, parentMessageId: dto.parentMessageId ?? null }, dto.mentionedEmployeeIds ?? []);
+    const content = dto.content.trim() || null;
+    const emoticonKey = dto.emoticonKey ?? null;
+    if (!content && !emoticonKey) throw new AppException('COM-004', '보낼 메시지를 넣어 주세요');
+    return this.postMessage(
+      user,
+      chatRoomId,
+      { content, emoticonKey, clientMessageId: dto.clientMessageId ?? null, parentMessageId: dto.parentMessageId ?? null },
+      dto.mentionedEmployeeIds ?? [],
+    );
   }
 
   /**
@@ -702,14 +716,14 @@ export class MessengerService implements OnModuleInit {
   }
 
   /**
-   * 내 메시지 고치기 (#151, 문서에 없는 추가 기능). 일반 메시지·삭제 안 된 것만. 본문은 비울 수 없고(첨부가 있으면 비워도 됨),
+   * 내 메시지 고치기 (#151, 문서에 없는 추가 기능). 일반 메시지·삭제 안 된 것만. 본문은 비울 수 없고(첨부·이모티콘이 있으면 비워도 됨, 이모티콘은 그대로),
    * 고친 시각을 남긴다. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않는다(팀 결정 전).
    */
   async editMessage(user: AuthUser, messageId: number, dto: EditMessageDto): Promise<ChatMessageView> {
     const content = dto.content.trim() || null;
     const updated = await this.prisma.$transaction(async (tx) => {
       const message = await this.requireOwnMessage(tx, user, messageId);
-      if (!content && message._count.messageAttachments === 0) throw new AppException('COM-004', '고칠 메시지를 넣어 주세요');
+      if (!content && message._count.messageAttachments === 0 && !message.emoticonKey) throw new AppException('COM-004', '고칠 메시지를 넣어 주세요');
       return this.repository.updateMessageContent(tx, messageId, content);
     });
     return this.emitUpdated(updated, user.employeeId);

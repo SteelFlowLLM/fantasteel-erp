@@ -101,6 +101,7 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
     isMine: message.isMine,
     content: message.content,
     files: message.attachments.map((a) => ({ id: a.id, name: a.fileName, size: a.fileSize, mimeType: null })),
+    emoticonKey: message.emoticonKey,
     createdAt: message.createdAt,
     mentionsMe: !message.isMine && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: message.erpLinks,
@@ -235,7 +236,7 @@ export const serverMessengerApi = {
       body: { chatRoomType: input.chatRoomType, memberIds: input.memberIds, chatRoomName: input.chatRoomName ?? null },
     }),
 
-  /** 글은 메시지 API, 파일은 첨부 API(여러 개를 files로 한 번에, 글을 함께 보내면 파일 메시지의 글이 된다). 멘션은 글 메시지에만 붙는다 */
+  /** 글·이모티콘은 메시지 API, 파일은 첨부 API(여러 개를 files로 한 번에, 글을 함께 보내면 파일 메시지의 글이 된다). 멘션은 글 메시지에만 붙는다 */
   sendMessage: async (input: SendMessageInput): Promise<MessageView> => {
     const content = (input.content ?? '').trim();
     const room = await roomRaw(input.chatRoomId);
@@ -249,7 +250,13 @@ export const serverMessengerApi = {
       return toMessageView(await serverUpload<ServerMessageView>(`/chat-rooms/${input.chatRoomId}/attachments`, form), myTargets);
     }
     const sent = await serverRequest<ServerMessageView>('POST', `/chat-rooms/${input.chatRoomId}/messages`, {
-      body: { content, mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room), clientMessageId: input.clientMessageId, parentMessageId: input.parentMessageId ?? undefined },
+      body: {
+        content,
+        emoticonKey: input.emoticonKey ?? undefined,
+        mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room),
+        clientMessageId: input.clientMessageId,
+        parentMessageId: input.parentMessageId ?? undefined,
+      },
     });
     return toMessageView(sent, myTargets);
   },

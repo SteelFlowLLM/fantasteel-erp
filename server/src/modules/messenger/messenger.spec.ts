@@ -974,3 +974,38 @@ describe('15번: 방 나가기', () => {
     expect((await call('POST', `/chat-rooms/${group.id}/leave`, purchaseCookie)).status).toBe(403);
   });
 });
+
+describe('18번: 이모티콘', () => {
+  it('이모티콘만 보내면 글 없이 저장되고, 목록·답글 미리보기는 "이모티콘 · 이름"이다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    socketRecords.length = 0;
+    const sent = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '', emoticonKey: 'steelman-approve' });
+    expect(sent.status).toBe(201);
+    expect(sent.body.data).toMatchObject({ content: null, emoticonKey: 'steelman-approve', attachments: [] });
+    expect(recordsOf('message:new').map((r) => (r.payload as ChatMessageView).emoticonKey)).toEqual(['steelman-approve', 'steelman-approve']);
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('이모티콘 · 결재 완료');
+    const reply = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, qualityCookie, { content: '확인했어요', parentMessageId: sent.body.data.id });
+    expect(reply.body.data.parent?.preview).toBe('이모티콘 · 결재 완료');
+  });
+
+  it('글과 함께 보내면 미리보기는 글이고, 글을 비우는 수정도 된다. 삭제하면 이모티콘도 비운다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const sent = (await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '오늘 고생했어요', emoticonKey: 'steelman-off' })).body.data;
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('오늘 고생했어요');
+    const edited = await call<ChatMessageView>('PATCH', `/messages/${sent.id}`, salesCookie, { content: '' });
+    expect(edited.body.data).toMatchObject({ content: null, emoticonKey: 'steelman-off' });
+    const deleted = await call<ChatMessageView>('DELETE', `/messages/${sent.id}`, salesCookie);
+    expect(deleted.body.data).toMatchObject({ isDeleted: true, emoticonKey: null });
+  });
+
+  it('목록에 없는 이모티콘이나 글·이모티콘이 모두 없으면 COM-004', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const unknown = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '', emoticonKey: 'steelman-none' });
+    const empty = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '  ' });
+    expect([unknown.status, unknown.body.error?.code]).toEqual([400, 'COM-004']);
+    expect([empty.status, empty.body.error?.code]).toEqual([400, 'COM-004']);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(0);
+  });
+});

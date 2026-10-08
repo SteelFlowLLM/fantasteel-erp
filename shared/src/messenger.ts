@@ -4,6 +4,33 @@ import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 export const MESSAGE_REACTION_EMOJIS = ['👍', '✅', '👀', '🙏', '❤️', '😂'] as const;
 export type MessageReactionEmoji = (typeof MESSAGE_REACTION_EMOJIS)[number];
 
+/**
+ * 메신저 이모티콘 (18번, 문서에 없는 추가 기능). key를 message.emoticon_key에 저장한다.
+ * 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
+ */
+export const MESSAGE_EMOTICONS = [
+  { key: 'steelman-ok', label: '확인' },
+  { key: 'steelman-yes', label: '넵넵' },
+  { key: 'steelman-thanks', label: '감사합니다' },
+  { key: 'steelman-sorry', label: '죄송합니다' },
+  { key: 'steelman-approve', label: '결재 완료' },
+  { key: 'steelman-best', label: '최고' },
+  { key: 'steelman-gasp', label: '헉' },
+  { key: 'steelman-off', label: '퇴근' },
+] as const;
+export type MessageEmoticonKey = (typeof MESSAGE_EMOTICONS)[number]['key'];
+export const MESSAGE_EMOTICON_KEYS: readonly MessageEmoticonKey[] = MESSAGE_EMOTICONS.map((e) => e.key);
+
+export function isMessageEmoticonKey(key: string): key is MessageEmoticonKey {
+  return (MESSAGE_EMOTICON_KEYS as readonly string[]).includes(key);
+}
+
+/** 이모티콘만 있는 메시지의 미리보기 (목록·알림·답글·공지). 모르는 키(목록에서 뺀 것)는 '이모티콘' */
+export function emoticonPreview(key: string): string {
+  const found = MESSAGE_EMOTICONS.find((e) => e.key === key);
+  return found ? `이모티콘 · ${found.label}` : '이모티콘';
+}
+
 /** 삭제된 메시지 자리에 보이는 문구 */
 export const DELETED_MESSAGE_TEXT = '삭제된 메시지예요';
 
@@ -131,6 +158,8 @@ export interface ChatMessageView {
   content: string | null;
   /** 첨부 파일 (올린 순서, 스키마 3차). 내려받기는 GET attachments/:첨부 id. 삭제된 메시지는 빈 배열 */
   attachments: ChatMessageAttachmentView[];
+  /** 이모티콘 (스키마 4차). 없거나 삭제된 메시지는 null */
+  emoticonKey: MessageEmoticonKey | null;
   /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
   unreadMemberCount: number;
   /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006). 화면 권한은 화면이 따로 본다 */
@@ -157,7 +186,7 @@ export interface ChatMessageReactionView {
 export interface ChatMessageParentView {
   id: number;
   senderName: string;
-  /** 원본 본문 앞부분 (파일만 있으면 '파일 · 이름', 삭제됐으면 빈 값) */
+  /** 원본 본문 앞부분 (파일만 있으면 '파일 · 이름', 이모티콘만 있으면 '이모티콘 · 이름', 삭제됐으면 빈 값) */
   preview: string;
   isDeleted: boolean;
 }

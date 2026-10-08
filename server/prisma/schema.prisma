@@ -828,6 +828,7 @@ model Message {
   messageType String @default("USER") @map("message_type") @db.VarChar /// MESSAGE_TYPE: USER, SYSTEM
   senderId Int? @map("sender_id") /// SYSTEM이면 null
   content String?
+  emoticonKey String? @map("emoticon_key") @db.VarChar(32) /// 이모티콘 키 (스키마 4차). 허용 목록은 shared MESSAGE_EMOTICONS. 글·첨부와 함께 보낼 수 있음
   clientMessageId String? @map("client_message_id") @db.VarChar(64) /// 화면이 만든 보내기 id(UUID). 재전송 중복 방지
   parentMessageId Int? @map("parent_message_id") /// 답글 대상. 같은 방 메시지만(service)
   editedAt DateTime? @map("edited_at") @db.Timestamptz(3) /// 본문을 마지막으로 고친 시각

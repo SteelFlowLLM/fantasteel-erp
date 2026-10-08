@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageReactionEmoji } from '@fantasteel/shared';
+import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_EMOTICON_KEYS, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageEmoticonKey, type MessageReactionEmoji } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
   @IsIn(Object.values(CHAT_ROOM_TYPE), { message: '채팅방 유형은 DIRECT, GROUP, WORK 중 하나여야 해요' })
@@ -40,9 +40,15 @@ export class ListMessagesQuery {
 }
 
 export class SendMessageDto {
+  /** 이모티콘을 보내면 비워도 된다 */
   @IsString({ message: '메시지는 글자여야 해요' })
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content!: string;
+
+  /** 이모티콘 (스키마 4차, 18번). 글과 함께 보낼 수 있다 */
+  @IsOptional()
+  @IsIn(MESSAGE_EMOTICON_KEYS, { message: '쓸 수 없는 이모티콘이에요' })
+  emoticonKey?: MessageEmoticonKey;
 
   /** @멘션한 사원 (본문을 해석하지 않고 따로 받는다, 2026-10-07 결정). 방 멤버가 아니면 무시한다 */
   @IsOptional()
@@ -140,7 +146,7 @@ export class SearchMessagesQuery {
 }
 
 export class EditMessageDto {
-  /** 첨부가 있는 메시지는 비울 수 있다 */
+  /** 첨부·이모티콘이 있는 메시지는 비울 수 있다 */
   @IsString({ message: '메시지는 글자여야 해요' })
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content!: string;

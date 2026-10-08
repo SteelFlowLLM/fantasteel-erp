@@ -13,6 +13,7 @@ SELECT crm.chat_room_id,
        lm.id AS last_message_id,
        lm.sender_id AS last_sender_id,
        lm.content AS last_content,
+       lm.emoticon_key AS last_emoticon_key,
        (SELECT ma.file_name
           FROM message_attachment ma
          WHERE ma.message_id = lm.id
@@ -25,7 +26,7 @@ SELECT crm.chat_room_id,
        lm.deleted_at AS last_deleted_at
 FROM chat_room_member crm
 LEFT JOIN LATERAL (
-  SELECT m.id, m.sender_id, m.content, m.created_at, m.deleted_at
+  SELECT m.id, m.sender_id, m.content, m.emoticon_key, m.created_at, m.deleted_at
     FROM message m
    WHERE m.chat_room_id = crm.chat_room_id
    ORDER BY m.id DESC

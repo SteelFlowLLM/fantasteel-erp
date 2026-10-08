@@ -10,6 +10,7 @@ import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Field } from '@/components/Field';
 import { Modal } from '@/components/Modal';
+import { emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { MessageActionItem } from '@/features/messenger/components/MessageActionItem';
 import type { MessageActionEntry, MessageActionProps } from '@/features/messenger/messageActions';
 import { useAction } from '@/hooks/useAction';
@@ -112,11 +113,11 @@ function TaskAction({ message, closeMenu }: MessageActionProps) {
 
 const TASK_TITLE_FROM_MESSAGE_MAX = 50;
 
-/** 메시지로 업무 창을 미리 채운다: 제목 = 본문 첫 줄(50자, 가정값) 또는 파일 이름, 설명 = 본문과 보낸 사람 */
+/** 메시지로 업무 창을 미리 채운다: 제목 = 본문 첫 줄(50자, 가정값) 또는 파일 이름·이모티콘 이름, 설명 = 본문과 보낸 사람 */
 export function taskSourceOf(message: MessageView): TaskSourceMessage {
   const content = (message.content ?? '').trim();
   const firstLine = content.split('\n')[0]?.trim() ?? '';
-  const base = firstLine || message.files[0]?.name || '메시지 확인';
+  const base = firstLine || message.files[0]?.name || (message.emoticonKey ? `이모티콘 · ${emoticonLabelOf(message.emoticonKey)}` : '') || '메시지 확인';
   const title = base.length > TASK_TITLE_FROM_MESSAGE_MAX ? `${base.slice(0, TASK_TITLE_FROM_MESSAGE_MAX - 1)}…` : base;
   const description = [content, `— ${message.senderName}님의 메시지에서 등록`].filter(Boolean).join('\n\n');
   return { messageId: message.id, title, description };

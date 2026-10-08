@@ -342,3 +342,29 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     await expect(messengerApi.markRead({ chatRoomId: roomId, lastMessageId: otherMessage.id })).rejects.toMatchObject({ code: 'COM-003' });
   });
 });
+
+describe('이모티콘 (18번)', () => {
+  it('이모티콘만 보내면 글 없이 저장되고, 목록·업무방 알림·답글 미리보기는 "이모티콘 · 이름"이다', async () => {
+    const { roomId } = createWorkRoom([SEED_EMPLOYEE_NO.sales, SEED_EMPLOYEE_NO.quality]);
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-approve' });
+    expect(sent).toMatchObject({ content: null, emoticonKey: 'steelman-approve', files: [] });
+    expect((await messengerApi.listRooms()).find((r) => r.id === roomId)?.lastMessagePreview).toBe('이모티콘 · 결재 완료');
+    expect(notificationsOf(employeeIdOf(SEED_EMPLOYEE_NO.quality)).at(-1)?.body).toContain('이모티콘 · 결재 완료');
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const reply = await messengerApi.sendMessage({ chatRoomId: roomId, content: '확인했어요', parentMessageId: sent.id });
+    expect(reply.parent?.preview).toBe('이모티콘 · 결재 완료');
+  });
+
+  it('글과 함께 보낼 수 있고 글을 비우는 수정도 된다. 삭제하면 비우고, 파일과 함께·없는 키는 입력 오류', async () => {
+    const roomId = await createGroup();
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, content: '오늘 고생했어요', emoticonKey: 'steelman-off' });
+    expect((await messengerApi.listRooms()).find((r) => r.id === roomId)?.lastMessagePreview).toBe('오늘 고생했어요');
+    expect(await messengerApi.editMessage({ messageId: sent.id, content: '' })).toMatchObject({ content: null, emoticonKey: 'steelman-off' });
+    expect(await messengerApi.deleteMessage(sent.id)).toMatchObject({ isDeleted: true, emoticonKey: null });
+    const file = { name: 'a.txt', size: 1, mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,YQ==' };
+    await expect(messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-ok', files: [file] })).rejects.toBeInstanceOf(InputError);
+    // @ts-expect-error 목록에 없는 키
+    await expect(messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-none' })).rejects.toBeInstanceOf(InputError);
+  });
+});
