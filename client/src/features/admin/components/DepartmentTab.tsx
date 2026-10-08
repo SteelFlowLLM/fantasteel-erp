@@ -166,7 +166,7 @@ function DepartmentEditor({
   const deleteBlock =
     members.length > 0 ? `소속 사원이 ${members.length}명 있어 삭제할 수 없어요` : childCount > 0 ? `하위 부서가 ${childCount}개 있어 삭제할 수 없어요` : null;
   const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
-  // 서버 모드: 부서코드는 바꾸지 않고, 정렬 순서·삭제는 ERD·API에 없어 숨긴다
+  // 서버 모드: 부서코드는 바꾸지 않고, 정렬 순서는 ERD에 없어 숨긴다. 퇴사자가 남은 부서는 서버가 삭제를 막는다(API-271)
   const serverMode = isOrgServerMode();
 
   const submit = () => {
@@ -265,18 +265,16 @@ function DepartmentEditor({
         </div>
       </CardBody>
       <CardFoot>
-        {serverMode ? null : (
-          <Button
-            variant="danger-outline"
-            size="sm"
-            icon="trash"
-            disabled={!canEdit || deleteBlock !== null}
-            title={lockTitle ?? deleteBlock ?? undefined}
-            onClick={() => setConfirmDelete(true)}
-          >
-            삭제
-          </Button>
-        )}
+        <Button
+          variant="danger-outline"
+          size="sm"
+          icon="trash"
+          disabled={!canEdit || deleteBlock !== null}
+          title={lockTitle ?? deleteBlock ?? undefined}
+          onClick={() => setConfirmDelete(true)}
+        >
+          삭제
+        </Button>
         {dirty ? <span className="ml-auto text-cap text-wait">저장 전 변경이 있어요</span> : <span className="ml-auto" />}
         <Button
           size="sm"

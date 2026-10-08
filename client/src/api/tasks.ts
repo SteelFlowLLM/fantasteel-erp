@@ -49,6 +49,8 @@ export interface TaskView {
   updatedAt: string;
   /** 요청한 사원이 고치거나 완료할 수 있는지 (만든 사람·담당자) */
   canEdit: boolean;
+  /** 완료할 수 있는지. 없으면 canEdit을 따른다 (서버는 담당자만 완료, API-241) */
+  canComplete?: boolean;
 }
 
 export interface TaskInput {
@@ -150,7 +152,7 @@ export interface TaskSummary {
 
 export const taskApi = {
   list: (scope: TaskScope): Promise<TaskView[]> =>
-    isServerDataSource() ? serverTaskApi.list() : mockQuery((tables) => {
+    isServerDataSource() ? serverTaskApi.list(scope) : mockQuery((tables) => {
       const actor = requireActor(tables);
       const me = actor.employee.id;
       return tables.task
@@ -183,7 +185,7 @@ export const taskApi = {
     }),
 
   update: ({ id, ...input }: TaskUpdateInput & { id: number }): Promise<TaskView> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverTaskApi.update({ id, ...input }) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const task = requireEditable(tx.tables, actor, id);
       assertUnchanged(task.updatedAt, input.expectedUpdatedAt, '업무');

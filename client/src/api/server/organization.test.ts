@@ -108,7 +108,7 @@ describe('조직 서버 어댑터 — 변경', () => {
     if (c.path === '/employees' && c.method === 'POST') return ok(employee(21, '새사원'));
     if (c.path.startsWith('/employees/')) return ok({ ...employee(11, '강부장'), isActive: false });
     if (c.path.startsWith('/departments')) return ok(department);
-    if (c.path === '/job-grades') return ok({ id: 9, jobGradeName: '수석', sortOrder: 0, employeeCount: 0, createdAt: AT, updatedAt: AT });
+    if (c.path.startsWith('/job-grades')) return ok({ id: 9, jobGradeName: '수석', sortOrder: 0, employeeCount: 0, createdAt: AT, updatedAt: AT });
     if (c.path.startsWith('/roles/')) return ok({ id: 6, roleCode: 'LOGISTICS', roleName: '물류', permissions: [], employeeCount: 2, createdAt: AT, updatedAt: AT });
     return undefined;
   };
@@ -156,6 +156,18 @@ describe('조직 서버 어댑터 — 변경', () => {
     expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: ' 0 ' })).toEqual({ id: 9, name: '수석' });
     expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: '1.5' }).catch((e: unknown) => e)).toBeInstanceOf(InputError);
     expect(calls.map((c) => c.body)).toEqual([{ jobGradeName: '수석', sortOrder: 0 }]);
+  });
+
+  it('부서 삭제·직급 삭제는 DELETE, 직급 수정은 이름과 정수 표시 순서만 PATCH로 보낸다 (API-271·272·273)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    expect(await departmentAdminApi.remove({ id: 7, expectedUpdatedAt: AT })).toEqual({ id: 7, name: '테스트부' });
+    expect(await jobGradeAdminApi.update({ id: 9, jobGradeCode: '', jobGradeName: '수석', sortOrder: '2', expectedUpdatedAt: AT })).toEqual({ id: 9, name: '수석' });
+    expect(await jobGradeAdminApi.remove({ id: 9, expectedUpdatedAt: AT })).toEqual({ id: 9, name: '수석' });
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ['DELETE', '/departments/7', undefined],
+      ['PATCH', '/job-grades/9', { jobGradeName: '수석', sortOrder: 2 }],
+      ['DELETE', '/job-grades/9', undefined],
+    ]);
   });
 
   it('역할 권한 저장은 PUT으로 권한 목록만 보낸다', async () => {
