@@ -26,6 +26,7 @@ server/src/generated
 
 # ── 로컬 실행 데이터 ─────────────────────────────────
 .local-db
+.local-db-pg17
 server/storage
 .run
 coverage
