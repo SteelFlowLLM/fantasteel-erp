@@ -7,10 +7,15 @@ import type { Tx } from '../../prisma/prisma.service';
 export interface ChatRoomStatsRow {
   chatRoomId: number;
   unreadCount: number;
-  lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date } | null;
+  lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date; deletedAt: Date | null } | null;
 }
 
 const employeeInclude = { department: true, jobGrade: true } as const;
+/** 메시지와 보낸 사람, 답글이면 원본 메시지(보낸 사람 이름) */
+const messageInclude = {
+  sender: { include: employeeInclude },
+  parentMessage: { include: { sender: { select: { employeeName: true } } } },
+} as const;
 
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
@@ -54,13 +59,20 @@ export class MessengerRepository {
         lastMessage:
           lastMessageId === null
             ? null
-            : { id: lastMessageId, senderId: row.last_sender_id, content: row.last_content, attachmentName: row.last_attachment_name, createdAt: row.last_created_at },
+            : {
+                id: lastMessageId,
+                senderId: row.last_sender_id,
+                content: row.last_content,
+                attachmentName: row.last_attachment_name,
+                createdAt: row.last_created_at,
+                deletedAt: row.last_deleted_at,
+              },
       };
     });
   }
 
   countUnread(tx: Tx, chatRoomId: number, employeeId: number, lastReadMessageId: number | null) {
-    return tx.message.count({ where: { chatRoomId, id: { gt: lastReadMessageId ?? 0 }, senderId: { not: employeeId } } });
+    return tx.message.count({ where: { chatRoomId, id: { gt: lastReadMessageId ?? 0 }, senderId: { not: employeeId }, deletedAt: null } });
   }
 
   /** 두 사람만 멤버인 1:1 방 (같은 상대와의 방을 다시 만들지 않으려고) */
@@ -136,27 +148,27 @@ export class MessengerRepository {
       where: { chatRoomId, id: before === undefined ? undefined : { lt: before } },
       orderBy: { id: 'desc' },
       take,
-      include: { sender: { include: employeeInclude } },
+      include: messageInclude,
     });
   }
 
   /** 첨부가 있는 메시지만, before보다 오래된 것을 최신순으로 take개 (파일 모아보기) */
   findAttachmentMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
     return tx.message.findMany({
-      where: { chatRoomId, attachmentPath: { not: null }, id: before === undefined ? undefined : { lt: before } },
+      where: { chatRoomId, attachmentPath: { not: null }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
       orderBy: { id: 'desc' },
       take,
-      include: { sender: { include: employeeInclude } },
+      include: messageInclude,
     });
   }
 
   /** 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시) */
   searchMessages(tx: Tx, chatRoomId: number, keyword: string, before: number | undefined, take: number) {
     return tx.message.findMany({
-      where: { chatRoomId, content: { contains: keyword, mode: 'insensitive' }, id: before === undefined ? undefined : { lt: before } },
+      where: { chatRoomId, content: { contains: keyword, mode: 'insensitive' }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
       orderBy: { id: 'desc' },
       take,
-      include: { sender: { include: employeeInclude } },
+      include: messageInclude,
     });
   }
 
@@ -182,24 +194,34 @@ export class MessengerRepository {
 
   /** 시스템 메시지(보낸 사원 없음): 입장·초대·이름 변경 안내, 수주 업무 진행 알림 */
   createSystemMessage(tx: Tx, chatRoomId: number, content: string) {
-    return tx.message.create({ data: { chatRoomId, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content }, include: { sender: { include: employeeInclude } } });
+    return tx.message.create({ data: { chatRoomId, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content }, include: messageInclude });
   }
 
   /** 재전송 중복 확인: 같은 사람이 같은 보내기 id로 이미 저장한 메시지 */
   findMessageByClientId(tx: Tx, senderId: number, clientMessageId: string) {
-    return tx.message.findFirst({ where: { senderId, clientMessageId }, include: { sender: { include: employeeInclude } } });
+    return tx.message.findFirst({ where: { senderId, clientMessageId }, include: messageInclude });
   }
 
   findMessageWithSender(tx: Tx, id: number) {
-    return tx.message.findUnique({ where: { id }, include: { sender: { include: employeeInclude } } });
+    return tx.message.findUnique({ where: { id }, include: messageInclude });
   }
 
-  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null; clientMessageId?: string | null }) {
-    return tx.message.create({ data, include: { sender: { include: employeeInclude } } });
+  /** 본문 고치기: 고친 시각을 남긴다 */
+  updateMessageContent(tx: Tx, id: number, content: string | null) {
+    return tx.message.update({ where: { id }, data: { content, editedAt: new Date() }, include: messageInclude });
+  }
+
+  /** 삭제는 표시만 한다 (행·첨부 파일은 남김, #151) */
+  markMessageDeleted(tx: Tx, id: number) {
+    return tx.message.update({ where: { id }, data: { deletedAt: new Date() }, include: messageInclude });
+  }
+
+  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null; clientMessageId?: string | null; parentMessageId?: number | null }) {
+    return tx.message.create({ data, include: messageInclude });
   }
 
   findMessage(tx: Tx, id: number) {
-    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, attachmentPath: true, attachmentName: true } });
+    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, attachmentPath: true, attachmentName: true, senderId: true, messageType: true, deletedAt: true } });
   }
 
   /** 읽음 위치는 앞으로만 옮긴다 */

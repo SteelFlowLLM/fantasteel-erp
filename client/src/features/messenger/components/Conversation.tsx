@@ -14,6 +14,7 @@ import { Spinner, StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
+import { DeleteMessageDialog, EditMessageModal } from '@/features/messenger/components/MessageEditActions';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { PresenceDot, useIsOnline } from '@/features/messenger/components/Presence';
@@ -26,6 +27,7 @@ import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { toast } from '@/stores/useToastStore';
 import { useChatMessages, useChatRoom, useMarkRoomRead, useMessageOutbox } from '@/hooks/useMessenger';
+import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { typingText, useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
 
 const NO_TYPING: readonly never[] = [];
@@ -78,6 +80,8 @@ function RoomView({
   const [renaming, setRenaming] = useState(false);
   const messages = useChatMessages(room.id, limit);
   const outbox = useMessageOutbox(room.id);
+  const editing = useMessageComposeStore((state) => (state.editing?.chatRoomId === room.id ? state.editing : null));
+  const deleting = useMessageComposeStore((state) => (state.deleting?.chatRoomId === room.id ? state.deleting : null));
   const counterpartId = room.chatRoomType === 'DIRECT' ? (room.members.find((m) => !m.isMe)?.id ?? null) : null;
   const counterpartOnline = useIsOnline(counterpartId);
   const typing = typingText(useMessengerLiveStore((state) => state.typing[room.id] ?? NO_TYPING));
@@ -250,7 +254,15 @@ function RoomView({
                         <span className="h-px flex-1 bg-danger/40" />
                       </div>
                     ) : null}
-                    <MessageBubble message={message} room={room} mentionNames={mentionNames} myNames={myNames} isGroupStart={isGroupStart} isGroupEnd={isGroupEnd} />
+                    <MessageBubble
+                      message={message}
+                      room={room}
+                      mentionNames={mentionNames}
+                      myNames={myNames}
+                      isGroupStart={isGroupStart}
+                      isGroupEnd={isGroupEnd}
+                      onJumpToMessage={onJump}
+                    />
                   </div>
                 );
               })}
@@ -293,6 +305,8 @@ function RoomView({
       {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} onRename={() => setRenaming(true)} onJump={onJump} /> : null}
       {inviting ? <InviteModal room={room} onClose={() => setInviting(false)} /> : null}
       {renaming ? <RenameRoomModal room={room} onClose={() => setRenaming(false)} /> : null}
+      {editing ? <EditMessageModal message={editing} onClose={() => useMessageComposeStore.getState().setEditing(null)} /> : null}
+      {deleting ? <DeleteMessageDialog message={deleting} onClose={() => useMessageComposeStore.getState().setDeleting(null)} /> : null}
     </div>
   );
 }

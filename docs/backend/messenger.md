@@ -72,6 +72,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | `presence:changed` | 메신저에 연결된 모든 사원 | `{ employeeId, online }` — 첫 연결(접속)·마지막 연결 끊김(나감) |
 | `typing` (화면 → 서버) | — | `{ chatRoomId }`. 방 멤버가 아니거나 형식이 틀리면 조용히 무시 |
 | `typing` (서버 → 화면) | 보낸 사람을 뺀 방 멤버 | `{ chatRoomId, employeeId, employeeName }` |
+| `message:updated` | 방 멤버 전원 | `ChatMessageView` — 고침·삭제 (`isMine`은 받는 사원 기준) |
 | `member:read` | 읽은 사람을 뺀 방 멤버 | `{ chatRoomId, employeeId, lastReadMessageId }` — 메시지별 안 읽은 사람 수 갱신 |
 | `room:updated` | 방 멤버 전원 | `{ chatRoomId }` — 방이 새로 생기거나 업무방에 멤버가 더해졌을 때 |
 
@@ -99,6 +100,11 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 
 **중복 전송 방지** (#151 `client_message_id`)
 - 메시지 보내기·첨부 업로드에 `clientMessageId`(영문·숫자·-, 64자) 선택. 같은 사람이 같은 값으로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다(알림·소켓 다시 없음, 첨부는 파일도 다시 저장하지 않음). 다른 방에 같은 값이면 COM-004. 거의 동시에 두 번 들어와 부분 unique에 걸려도 먼저 저장된 메시지를 돌려준다.
+
+**수정·삭제·답글** (2026-10-08, 스키마 1차 #151, 명세에 없는 API)
+- `PATCH messages/:id { content }`: 내 일반 메시지만(남의 것·시스템 COM-004, 비멤버 COM-002). 본문은 비울 수 없고 첨부가 있으면 비워도 된다. `edited_at`을 남기고 멤버에게 `message:updated`. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않았다(팀 결정 전).
+- `DELETE messages/:id`: 내 일반 메시지에 `deleted_at`만 표시한다(행·첨부 파일은 남김, 다시 지우면 그대로). 응답·목록은 본문·첨부를 비우고 `isDeleted: true`, 목록 미리보기는 '삭제된 메시지예요'. 안 읽은 수·검색·파일 모아보기·첨부 내려받기에서 빠진다. 멤버에게 `message:updated`.
+- 답글: 보내기·첨부에 `parentMessageId`. 같은 방의 삭제되지 않은 일반 메시지만(없거나 다른 방 COM-003, 삭제·시스템 COM-004). 응답 `parent: { id, senderName, preview, isDeleted }`, 원본이 지워지면 preview는 빈 값.
 
 **방 관리** (문서에 없는 기능, 2026-10-07 단계별 추가 결정)
 - 멤버 초대: 1:1 방은 COM-004. 이미 멤버인 사원은 건너뛰고, 새 멤버가 없으면 COM-004. 없는 사원 COM-003·퇴사자 COM-004. 새 멤버는 이전 대화를 보고 지금까지의 메시지는 읽은 것으로 시작한다. 끝나면 기존·새 멤버 모두에게 `room:updated`.

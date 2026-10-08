@@ -87,6 +87,11 @@ export class MessengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     for (const employeeId of memberIds) this.emit(employeeId, MESSENGER_EVENT.MESSAGE_NEW, toView(employeeId));
   }
 
+  /** 고친·삭제한 메시지를 방 멤버에게 다시 보낸다 */
+  emitMessageUpdated(memberIds: readonly number[], toView: (employeeId: number) => ChatMessageView): void {
+    for (const employeeId of memberIds) this.emit(employeeId, MESSENGER_EVENT.MESSAGE_UPDATED, toView(employeeId));
+  }
+
   /** 내 다른 탭·기기의 안 읽은 수를 맞춘다 */
   emitRead(employeeId: number, event: ChatRoomReadEvent): void {
     this.emit(employeeId, MESSENGER_EVENT.ROOM_READ, event);

@@ -5,7 +5,7 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_SEARCH_SIZE } from '@fantasteel/shared';
+import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_SEARCH_SIZE } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
@@ -147,6 +147,12 @@ export interface MessageView {
   erpLinks: ErpLink[];
   /** 아직 안 읽은 멤버 수 (보낸 사람 제외). 0이면 모두 읽음 */
   unreadMemberCount: number;
+  /** 본문을 고친 시각 (고친 적 없으면 null) */
+  editedAt: string | null;
+  /** 삭제 표시된 메시지 (본문·첨부는 비어 있다) */
+  isDeleted: boolean;
+  /** 답글이면 원본 요약 */
+  parent: { id: number; senderName: string; preview: string; isDeleted: boolean } | null;
 }
 
 export interface MessagePage {
@@ -177,6 +183,8 @@ export interface SendMessageInput {
   file?: { name: string; size: number; mimeType: string; dataUrl: string } | null;
   /** 보내기 id. 다시 보낼 때 같은 값을 쓰면 서버가 두 번 저장하지 않는다 (서버 모드만, 가짜 DB는 네트워크 실패가 없어 쓰지 않는다) */
   clientMessageId?: string;
+  /** 답글 대상 메시지 */
+  parentMessageId?: number | null;
 }
 
 // ── 내부 도우미 ─────────────────────────────────────────
@@ -186,6 +194,7 @@ function lastMessageOf(tables: Readonly<MockTables>, chatRoomId: number): Messag
 }
 
 function messagePreviewOf(message: MessageRow): string {
+  if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
   return message.fileName ? `파일 · ${message.fileName}` : '';
 }
@@ -292,8 +301,18 @@ function erpLinksOf(tables: Readonly<MockTables>, content: string | null): ErpLi
   });
 }
 
+/** 답글 원본 요약 (서버와 같은 모양) */
+function parentViewOf(tables: Readonly<MockTables>, message: MessageRow): MessageView['parent'] {
+  const parent = message.parentMessageId ? tables.message.find((m) => m.id === message.parentMessageId) : undefined;
+  if (!parent) return null;
+  const deleted = Boolean(parent.deletedAt);
+  const preview = deleted ? '' : messagePreviewOf(parent);
+  return { id: parent.id, senderName: employeeOf(tables, parent.senderId)?.employeeName ?? '시스템', preview: preview.length > 50 ? `${preview.slice(0, 50)}…` : preview, isDeleted: deleted };
+}
+
 function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor: Actor, myTargets: readonly MentionTarget[]): MessageView {
   const sender = employeeOf(tables, message.senderId);
+  const deleted = Boolean(message.deletedAt);
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
@@ -303,11 +322,14 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     senderJobGradeName: sender ? jobGradeNameOf(tables, sender.jobGradeId) : null,
     isSystem: !sender,
     isMine: message.senderId === actor.employee.id,
-    content: message.content,
-    file: message.fileName ? { name: message.fileName, size: message.fileSize, mimeType: message.mimeType } : null,
+    content: deleted ? null : message.content,
+    file: !deleted && message.fileName ? { name: message.fileName, size: message.fileSize, mimeType: message.mimeType } : null,
     createdAt: message.createdAt,
-    mentionsMe: message.senderId !== actor.employee.id && message.content !== null && findMentions(message.content, myTargets).length > 0,
-    erpLinks: erpLinksOf(tables, message.content),
+    mentionsMe: !deleted && message.senderId !== actor.employee.id && message.content !== null && findMentions(message.content, myTargets).length > 0,
+    erpLinks: deleted ? [] : erpLinksOf(tables, message.content),
+    editedAt: message.editedAt ?? null,
+    isDeleted: deleted,
+    parent: parentViewOf(tables, message),
     unreadMemberCount: tables.chatRoomMember.filter((m) => m.chatRoomId === message.chatRoomId && m.employeeId !== message.senderId && (m.lastReadMessageId ?? 0) < message.id).length,
   };
 }
@@ -326,6 +348,15 @@ function requireActiveEmployees(tables: Readonly<MockTables>, ids: readonly numb
     const employee = requireRow(tables, 'employee', id, '사원');
     if (!employee.isActive) throw new InputError('입력한 내용을 확인해 주세요', { memberIds: `${employee.employeeName}님은 사용 중인 사원이 아니에요` });
   }
+}
+
+/** 내 일반 메시지만 고치거나 지운다 (방 멤버 확인 포함) */
+function requireOwnMessage(tables: Readonly<MockTables>, actor: Actor, messageId: number, allowDeleted = false): MessageRow {
+  const message = requireRow(tables, 'message', messageId, '메시지');
+  requireMemberRoom(tables, actor, message.chatRoomId);
+  if (message.senderId !== actor.employee.id) throw new InputError('내가 보낸 메시지만 고치거나 지울 수 있어요');
+  if (message.deletedAt && !allowDeleted) throw new InputError('삭제된 메시지예요');
+  return message;
 }
 
 const isValidFileName = (name: string) => name.trim().length > 0 && name.length <= 255;
@@ -555,7 +586,13 @@ export const messengerApi = {
       errors.throwIfAny();
 
       const pathOf = (messageId: number) => `chat/${room.id}/${messageId}/${file?.name ?? ''}`;
+      if (input.parentMessageId) {
+        const parent = tx.tables.message.find((m) => m.id === input.parentMessageId);
+        if (!parent || parent.chatRoomId !== room.id) throw new ApiError('COM-003', '답글을 달 메시지');
+        if (parent.deletedAt || !employeeOf(tx.tables, parent.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지에는 답글을 달 수 없어요');
+      }
       const message = postMessage(tx, room, actor.employee.id, {
+        parentMessageId: input.parentMessageId ?? null,
         content: content || null,
         file: file ? { name: file.name, size: file.size, mimeType: (file.mimeType || 'application/octet-stream').slice(0, 100), path: '' } : null,
         pathOf,
@@ -569,6 +606,27 @@ export const messengerApi = {
         }
       }
       return toMessageView(tx.tables, message, actor, myMentionTargets(tx.tables, actor));
+    }),
+
+  /** 내 메시지 고치기. 본문은 비울 수 없다(첨부가 있으면 비워도 됨). 삭제된 메시지는 못 고친다 */
+  editMessage: ({ messageId, content }: { messageId: number; content: string }): Promise<MessageView> =>
+    isServerDataSource() ? serverMessengerApi.editMessage({ messageId, content }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const message = requireOwnMessage(tx.tables, actor, messageId);
+      const text = content.trim();
+      if (!text && !message.fileName) throw new InputError('입력한 내용을 확인해 주세요', { content: '고칠 메시지를 넣어 주세요' });
+      if (text.length > MESSAGE_CONTENT_MAX) throw new InputError('입력한 내용을 확인해 주세요', { content: `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요` });
+      const updated = updateRow(tx, 'message', message.id, { content: text || null, editedAt: tx.nowIso }) ?? message;
+      return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));
+    }),
+
+  /** 내 메시지 삭제: 표시만 하고 행은 남긴다 */
+  deleteMessage: (messageId: number): Promise<MessageView> =>
+    isServerDataSource() ? serverMessengerApi.deleteMessage(messageId) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const message = requireOwnMessage(tx.tables, actor, messageId, true);
+      const updated = message.deletedAt ? message : (updateRow(tx, 'message', message.id, { deletedAt: tx.nowIso }) ?? message);
+      return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));
     }),
 
   /** 읽음 위치를 옮긴다 (뒤로 돌아가지 않는다). 남은 안 읽은 수를 돌려준다 */

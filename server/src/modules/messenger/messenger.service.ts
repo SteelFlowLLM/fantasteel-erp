@@ -3,6 +3,8 @@ import {
   BLOCKED_ATTACHMENT_EXTENSIONS,
   BUSINESS_EVENT_TYPE,
   BUSINESS_EVENT_TYPE_LABEL,
+  DELETED_MESSAGE_TEXT,
+  MESSAGE_TYPE,
   ERP_LINK_PATH,
   findErpNos,
   CHAT_ROOM_TYPE,
@@ -18,6 +20,7 @@ import {
   type BusinessEventType,
   type ChatMemberView,
   type ChatMessagePage,
+  type ChatMessageParentView,
   type ChatMessageView,
   type ChatRoomDetail,
   type ChatRoomListItem,
@@ -40,7 +43,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -76,7 +79,8 @@ function earliestOpenDueDate(items: readonly { dueDate: Date; salesOrderItemStat
   return dates.sort()[0] ?? null;
 }
 
-function previewOf(message: { content: string | null; attachmentName: string | null }): string {
+function previewOf(message: { content: string | null; attachmentName: string | null; deletedAt?: Date | null }): string {
+  if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
   return message.attachmentName ? `파일 · ${message.attachmentName}` : '';
 }
@@ -156,7 +160,21 @@ const SYSTEM_SENDER_NAME = '시스템';
 /** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
 type ErpLinkResolver = (content: string | null) => ErpLink[];
 
+/** 답글의 원본 요약 */
+function parentOf(message: MessageWithSender): ChatMessageParentView | null {
+  const parent = message.parentMessage;
+  if (!parent) return null;
+  const deleted = parent.deletedAt !== null;
+  return {
+    id: parent.id,
+    senderName: parent.sender?.employeeName ?? SYSTEM_SENDER_NAME,
+    preview: deleted ? '' : shorten(previewOf(parent)),
+    isDeleted: deleted,
+  };
+}
+
 function toMessageView(message: MessageWithSender, me: number, unreadMemberCount: number, erpLinksOf: ErpLinkResolver): ChatMessageView {
+  const deleted = message.deletedAt !== null;
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
@@ -166,10 +184,14 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     senderJobGradeName: message.sender?.jobGrade.jobGradeName ?? null,
     isSystem: message.senderId === null,
     isMine: message.senderId === me,
-    content: message.content,
-    attachmentName: message.attachmentName,
+    // 삭제된 메시지는 본문·첨부를 내보내지 않는다 (행은 남김)
+    content: deleted ? null : message.content,
+    attachmentName: deleted ? null : message.attachmentName,
     unreadMemberCount,
-    erpLinks: erpLinksOf(message.content),
+    erpLinks: deleted ? [] : erpLinksOf(message.content),
+    editedAt: message.editedAt?.toISOString() ?? null,
+    isDeleted: deleted,
+    parent: parentOf(message),
     createdAt: message.createdAt.toISOString(),
   };
 }
@@ -506,7 +528,7 @@ export class MessengerService implements OnModuleInit {
   sendMessage(user: AuthUser, chatRoomId: number, dto: SendMessageDto): Promise<ChatMessageView> {
     const content = dto.content.trim();
     if (!content) throw new AppException('COM-004', '보낼 메시지를 넣어 주세요');
-    return this.postMessage(user, chatRoomId, { content, clientMessageId: dto.clientMessageId ?? null }, dto.mentionedEmployeeIds ?? []);
+    return this.postMessage(user, chatRoomId, { content, clientMessageId: dto.clientMessageId ?? null, parentMessageId: dto.parentMessageId ?? null }, dto.mentionedEmployeeIds ?? []);
   }
 
   /** 파일 첨부 (REQ-MSG-003). 업로드하면 바로 메시지 1건이 생긴다. 메시지당 파일 1개, 글은 선택 */
@@ -525,7 +547,7 @@ export class MessengerService implements OnModuleInit {
     if (duplicate) return duplicate;
     const attachmentPath = await this.storage.save('messages', fileName, file.buffer);
     const content = dto.content?.trim() || null;
-    return this.postMessage(user, chatRoomId, { content, attachmentPath, attachmentName: fileName, clientMessageId }, []);
+    return this.postMessage(user, chatRoomId, { content, attachmentPath, attachmentName: fileName, clientMessageId, parentMessageId: dto.parentMessageId ?? null }, []);
   }
 
   /** 같은 보내기 id로 이미 저장한 메시지가 있으면 그 메시지 (다른 방이면 잘못된 재사용이라 COM-004) */
@@ -541,13 +563,65 @@ export class MessengerService implements OnModuleInit {
   /** 첨부 내려받기. id는 메시지 id (첨부 테이블이 없다, messenger.md 8장). 방 멤버만 */
   async readAttachment(user: AuthUser, messageId: number): Promise<AttachmentContent> {
     const message = await this.repository.findMessage(this.prisma, messageId);
-    if (!message || !message.attachmentPath || !message.attachmentName) throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
+    if (!message || !message.attachmentPath || !message.attachmentName || message.deletedAt) throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
     await this.requireMember(this.prisma, message.chatRoomId, user.employeeId);
     try {
       return { fileName: message.attachmentName, content: await this.storage.read(message.attachmentPath) };
     } catch {
       throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
     }
+  }
+
+  /**
+   * 내 메시지 고치기 (#151, 문서에 없는 추가 기능). 일반 메시지·삭제 안 된 것만. 본문은 비울 수 없고(첨부가 있으면 비워도 됨),
+   * 고친 시각을 남긴다. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않는다(팀 결정 전).
+   */
+  async editMessage(user: AuthUser, messageId: number, dto: EditMessageDto): Promise<ChatMessageView> {
+    const content = dto.content.trim() || null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const message = await this.requireOwnMessage(tx, user, messageId);
+      if (!content && !message.attachmentName) throw new AppException('COM-004', '고칠 메시지를 넣어 주세요');
+      return this.repository.updateMessageContent(tx, messageId, content);
+    });
+    return this.emitUpdated(updated, user.employeeId);
+  }
+
+  /** 내 메시지 삭제 (#151). 행·첨부 파일은 남기고 삭제 표시만 한다. 다시 지우면 그대로 돌려준다 */
+  async deleteMessage(user: AuthUser, messageId: number): Promise<ChatMessageView> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.requireOwnMessage(tx, user, messageId, { allowDeleted: true });
+      const current = await this.repository.findMessageWithSender(tx, messageId);
+      if (current?.deletedAt) return current;
+      return this.repository.markMessageDeleted(tx, messageId);
+    });
+    return this.emitUpdated(updated, user.employeeId);
+  }
+
+  /** 고침·삭제를 방 멤버에게 보내고 내 기준 화면 값을 돌려준다 */
+  private async emitUpdated(message: MessageWithSender, me: number): Promise<ChatMessageView> {
+    const memberIds = (await this.repository.findMemberIds(this.prisma, message.chatRoomId)).map((m) => m.employeeId);
+    const reads = await this.repository.findMemberReads(this.prisma, message.chatRoomId);
+    const erpLinksOf = await this.erpLinkResolver([message.content]);
+    const unread = unreadMemberCountOf(message, reads);
+    this.gateway.emitMessageUpdated(memberIds, (employeeId) => toMessageView(message, employeeId, unread, erpLinksOf));
+    return toMessageView(message, me, unread, erpLinksOf);
+  }
+
+  /** 메시지가 없으면 COM-003, 방 멤버가 아니면 COM-002, 내 일반 메시지가 아니거나 삭제됐으면 COM-004 */
+  private async requireOwnMessage(tx: Tx, user: AuthUser, messageId: number, options: { allowDeleted?: boolean } = {}) {
+    const message = await this.repository.findMessage(tx, messageId);
+    if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
+    await this.requireMember(tx, message.chatRoomId, user.employeeId);
+    if (message.messageType !== MESSAGE_TYPE.USER || message.senderId !== user.employeeId) throw new AppException('COM-004', '내가 보낸 메시지만 고치거나 지울 수 있어요');
+    if (message.deletedAt && !options.allowDeleted) throw new AppException('COM-004', '삭제된 메시지예요');
+    return message;
+  }
+
+  /** 답글 대상: 같은 방의 삭제되지 않은 일반 메시지 */
+  private async requireReplyTarget(tx: Tx, chatRoomId: number, parentMessageId: number): Promise<void> {
+    const parent = await this.repository.findMessage(tx, parentMessageId);
+    if (!parent || parent.chatRoomId !== chatRoomId) throw new AppException('COM-003', '답글을 달 메시지를 이 채팅방에서 찾을 수 없어요');
+    if (parent.deletedAt || parent.messageType !== MESSAGE_TYPE.USER) throw new AppException('COM-004', '삭제된 메시지나 시스템 메시지에는 답글을 달 수 없어요');
   }
 
   /** 읽음 위치 갱신 (REQ-MSG-004). 뒤로 돌아가지 않는다. 남은 안 읽은 수를 돌려주고 내 다른 화면에도 알린다 */
@@ -575,7 +649,7 @@ export class MessengerService implements OnModuleInit {
   private async postMessage(
     user: AuthUser,
     chatRoomId: number,
-    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null },
+    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null; parentMessageId: number | null },
     mentionedEmployeeIds: readonly number[],
   ): Promise<ChatMessageView> {
     const me = user.employeeId;
@@ -606,12 +680,13 @@ export class MessengerService implements OnModuleInit {
   private saveMessage(
     user: AuthUser,
     chatRoomId: number,
-    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null },
+    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null; parentMessageId: number | null },
     mentionedEmployeeIds: readonly number[],
   ): Promise<{ message: MessageWithSender; memberIds: number[] }> {
     const me = user.employeeId;
     return this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, me);
+      if (data.parentMessageId !== null) await this.requireReplyTarget(tx, chatRoomId, data.parentMessageId);
       const created = await this.repository.createMessage(tx, { chatRoomId, senderId: me, ...data });
       await this.repository.moveLastRead(tx, chatRoomId, me, created.id);
       const members = (await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId);

@@ -479,6 +479,12 @@ export type MessageRow = Timestamps & {
   filePath: string | null;
   fileSize: number | null;
   mimeType: string | null;
+  /** 답글 대상 (없으면 비움, #151 스키마 1차와 같은 뜻) */
+  parentMessageId?: number | null;
+  /** 본문을 고친 시각 */
+  editedAt?: string | null;
+  /** 삭제 표시 (행은 남김) */
+  deletedAt?: string | null;
 };
 
 export type ActionDraftRow = Timestamps & {

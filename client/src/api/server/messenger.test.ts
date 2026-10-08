@@ -58,6 +58,9 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   attachmentName: null,
   unreadMemberCount: 0,
   erpLinks: [],
+  editedAt: null,
+  isDeleted: false,
+  parent: null,
   createdAt: AT,
   ...extra,
 });
@@ -183,6 +186,22 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     });
     const page = await messengerApi.listMessages({ chatRoomId: 7, limit: 10 });
     expect(page.items[0].erpLinks).toEqual([{ text: 'SO-2610-001', href: '/sales-orders/21' }]);
+  });
+
+  it('수정은 PATCH /messages/:id, 삭제는 DELETE /messages/:id, 답글은 parentMessageId를 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/messages/50' && c.method === 'PATCH') return ok(message(50, '고친 글', { isMine: true, editedAt: AT }));
+      if (c.path === '/messages/50' && c.method === 'DELETE') return ok(message(50, null, { isMine: true, isDeleted: true }));
+      if (c.path === '/chat-rooms/7/messages') return ok(message(51, '답장', { parent: { id: 50, senderName: '정다은', preview: '원본', isDeleted: false } }));
+      return undefined;
+    });
+    expect(await messengerApi.editMessage({ messageId: 50, content: '고친 글' })).toMatchObject({ content: '고친 글', editedAt: AT });
+    expect(await messengerApi.deleteMessage(50)).toMatchObject({ isDeleted: true, content: null });
+    const reply = await messengerApi.sendMessage({ chatRoomId: 7, content: '답장', parentMessageId: 50 });
+    expect(reply.parent).toMatchObject({ id: 50, preview: '원본' });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ content: '고친 글' });
+    expect((calls.find((c) => c.path === '/chat-rooms/7/messages')?.body as { parentMessageId?: number }).parentMessageId).toBe(50);
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

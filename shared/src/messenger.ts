@@ -1,5 +1,8 @@
 import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 
+/** 삭제된 메시지 자리에 보이는 문구 */
+export const DELETED_MESSAGE_TEXT = '삭제된 메시지예요';
+
 /** 메시지 검색어 최대 길이 */
 export const MESSAGE_SEARCH_QUERY_MAX = 100;
 /** 메시지 검색 결과 기본·최대 개수 */
@@ -103,7 +106,21 @@ export interface ChatMessageView {
   unreadMemberCount: number;
   /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006). 화면 권한은 화면이 따로 본다 */
   erpLinks: ErpLink[];
+  /** 본문을 고친 시각 (고친 적 없으면 null) */
+  editedAt: string | null;
+  /** 삭제 표시된 메시지. 본문·첨부는 비워서 준다 */
+  isDeleted: boolean;
+  /** 답글이면 원본 메시지 요약 */
+  parent: ChatMessageParentView | null;
   createdAt: string;
+}
+
+export interface ChatMessageParentView {
+  id: number;
+  senderName: string;
+  /** 원본 본문 앞부분 (파일만 있으면 '파일 · 이름', 삭제됐으면 빈 값) */
+  preview: string;
+  isDeleted: boolean;
 }
 
 /** 최근 메시지부터 limit개를 오래된 순으로. 더 오래된 메시지가 있으면 hasMore */
@@ -156,6 +173,8 @@ export const MESSENGER_EVENT = {
   ROOM_UPDATED: 'room:updated',
   /** 다른 멤버가 읽음 위치를 옮김 (메시지별 안 읽은 사람 수 갱신). 페이로드 ChatMemberReadEvent */
   MEMBER_READ: 'member:read',
+  /** 메시지가 고쳐지거나 삭제됨. 페이로드 ChatMessageView (isMine은 받는 사원 기준) */
+  MESSAGE_UPDATED: 'message:updated',
   /** 연결 직후 한 번: 지금 접속 중인 사원. 페이로드 PresenceSnapshotEvent */
   PRESENCE_SNAPSHOT: 'presence:snapshot',
   /** 사원이 접속하거나(첫 연결) 나감(마지막 연결 끊김). 페이로드 PresenceChangedEvent */
