@@ -20,6 +20,7 @@ import {
 } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
 
 interface SocketRecord {
@@ -486,5 +487,76 @@ describe('편의: 안 읽은 사람 수 · 파일 모아보기 · 검색', () =>
     expect(found.body.data.items.map((m) => m.content)).toEqual(['so-2610-001 납기 변경', 'SO-2610-001 출하 확인']);
     const blank = await call('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('  ')}`, qualityCookie);
     expect([blank.status, blank.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+});
+
+describe('접속 상태 · 입력 중 (소켓)', () => {
+  /** handshake 쿠키만 가진 가짜 소켓: 서버가 보낸 이벤트와 끊김을 기록한다 */
+  function fakeSocket(cookie: string) {
+    const emitted: { event: string; payload: unknown }[] = [];
+    const socket = {
+      handshake: { headers: { cookie } },
+      data: {},
+      disconnected: false,
+      join: async () => undefined,
+      emit: (event: string, payload: unknown) => void emitted.push({ event, payload }),
+      disconnect: () => {
+        socket.disconnected = true;
+      },
+    };
+    return { socket, emitted, asSocket: socket as unknown as Socket };
+  }
+
+  type GatewayInternals = { broadcast: (event: string, payload: unknown) => void; emit: (employeeId: number, event: string, payload: unknown) => void };
+  let originals: Pick<GatewayInternals, 'broadcast' | 'emit'>;
+  beforeEach(() => {
+    const internals = app.get(MessengerGateway) as unknown as GatewayInternals;
+    originals = { broadcast: internals.broadcast, emit: internals.emit };
+  });
+  afterEach(() => Object.assign(app.get(MessengerGateway), originals));
+
+  it('첫 연결에서 접속을 알리고 지금 접속자 목록을 주며, 마지막 연결이 끊기면 나감을 알린다. 쿠키가 없으면 끊는다', async () => {
+    const gateway = app.get(MessengerGateway);
+    const broadcasts: { event: string; payload: unknown }[] = [];
+    (gateway as unknown as GatewayInternals).broadcast = (event, payload) => void broadcasts.push({ event, payload });
+
+    const tab1 = fakeSocket(qualityCookie);
+    const tab2 = fakeSocket(qualityCookie);
+    await gateway.handleConnection(tab1.asSocket);
+    await gateway.handleConnection(tab2.asSocket);
+    expect(broadcasts).toEqual([{ event: 'presence:changed', payload: { employeeId: qualityId, online: true } }]);
+    expect(tab2.emitted).toEqual([{ event: 'presence:snapshot', payload: { onlineEmployeeIds: expect.arrayContaining([qualityId]) } }]);
+
+    gateway.handleDisconnect(tab1.asSocket);
+    expect(broadcasts).toHaveLength(1);
+    gateway.handleDisconnect(tab2.asSocket);
+    expect(broadcasts.at(-1)).toEqual({ event: 'presence:changed', payload: { employeeId: qualityId, online: false } });
+
+    const anonymous = fakeSocket('');
+    await gateway.handleConnection(anonymous.asSocket);
+    expect(anonymous.socket.disconnected).toBe(true);
+  });
+
+  it('입력 중은 방 멤버일 때만 나를 뺀 멤버에게 보내고, 멤버가 아니거나 형식이 틀리면 무시한다', async () => {
+    const gateway = app.get(MessengerGateway);
+    const sent: { employeeId: number; event: string; payload: unknown }[] = [];
+    (gateway as unknown as GatewayInternals).emit = (employeeId, event, payload) => void sent.push({ employeeId, event, payload });
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, purchaseId] });
+
+    const sales = fakeSocket(salesCookie);
+    await gateway.handleConnection(sales.asSocket);
+    await gateway.handleTyping(sales.asSocket, { chatRoomId: room.id });
+    expect(sent.map((s) => s.employeeId).sort()).toEqual([qualityId, purchaseId].sort());
+    expect(sent[0]).toMatchObject({ event: 'typing', payload: { chatRoomId: room.id, employeeId: salesId, employeeName: '박서영' } });
+
+    sent.length = 0;
+    const outsider = fakeSocket(await login('2304015'));
+    await gateway.handleConnection(outsider.asSocket);
+    await gateway.handleTyping(outsider.asSocket, { chatRoomId: room.id });
+    await gateway.handleTyping(sales.asSocket, { chatRoomId: 'x' });
+    await gateway.handleTyping(sales.asSocket, null);
+    expect(sent).toEqual([]);
+    gateway.handleDisconnect(sales.asSocket);
+    gateway.handleDisconnect(outsider.asSocket);
   });
 });

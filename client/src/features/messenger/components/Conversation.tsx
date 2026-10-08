@@ -5,6 +5,7 @@
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
+import { isServerDataSource } from '@/api/http';
 import { MESSAGE_PAGE_SIZE, type ChatRoomDetailView } from '@/api/messenger';
 import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
@@ -15,6 +16,7 @@ import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
+import { PresenceDot, useIsOnline } from '@/features/messenger/components/Presence';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
@@ -22,6 +24,9 @@ import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
 import { useChatMessages, useChatRoom, useMarkRoomRead, useMessageOutbox } from '@/hooks/useMessenger';
+import { typingText, useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
+
+const NO_TYPING: readonly never[] = [];
 
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
@@ -53,6 +58,9 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   const [renaming, setRenaming] = useState(false);
   const messages = useChatMessages(room.id, limit);
   const outbox = useMessageOutbox(room.id);
+  const counterpartId = room.chatRoomType === 'DIRECT' ? (room.members.find((m) => !m.isMe)?.id ?? null) : null;
+  const counterpartOnline = useIsOnline(counterpartId);
+  const typing = typingText(useMessengerLiveStore((state) => state.typing[room.id] ?? NO_TYPING));
   const { mutate: markRead } = useMarkRoomRead();
   const feedRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -137,10 +145,16 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
     <div className="flex min-h-0 min-w-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
         <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
-          <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
+          <span className="relative flex-none">
+            <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
+            <PresenceDot employeeId={counterpartId} />
+          </span>
           <div className="flex min-w-0 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
-            <span className="truncate text-cap text-ink-3">{buildRoomCaption(room)}</span>
+            <span className="truncate text-cap text-ink-3">
+              {buildRoomCaption(room)}
+              {counterpartOnline === null ? null : counterpartOnline ? ' · 접속 중' : ' · 접속 안 함'}
+            </span>
           </div>
           <div className="ml-auto flex flex-none items-center gap-1.5">
             {room.chatRoomType === 'WORK' ? (
@@ -213,6 +227,12 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
             >
               새 메시지 {room.unreadCount}건
             </Button>
+          </div>
+        ) : null}
+        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 (서버 모드만) */}
+        {isServerDataSource() ? (
+          <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
+            {typing}
           </div>
         ) : null}
         <Composer
