@@ -3,7 +3,7 @@
 // - 구매요청 등록 = 바로 승인 대기(임시 저장 없음). 반려되면 요청자가 고쳐 다시 요청한다(resubmit).
 // - 발주: 공급업체 1곳당 발주 1건(서버 POST purchase-orders와 같은 입력). 화면이 공급업체별로 나눠 보낸다.
 // NEXT_PUBLIC_DATA_SOURCE=server면 구매요청·발주는 실제 서버를 부른다 (api/server/purchaseRequisitions.ts·purchaseOrders.ts). 등록 창 정보는 두 모드 모두 조직 정보에서 읽는다.
-import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
+import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus, type PurchaseRequisitionStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
@@ -28,11 +28,7 @@ import {
   requisitionView,
   resubmitPurchaseRequisition,
   userActor,
-  type PurchaseOrderView,
-  type RequisitionView,
 } from '@/mock/services';
-
-export type { PurchaseOrderView, RequisitionSource, RequisitionView } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
 
@@ -61,6 +57,40 @@ export const purchaseOrderKeys = {
 
 
 // ── 구매요청 ─────────────────────────────────────────
+
+/** 출처(계산값): Message → ERP 초안 / MRP 계획 / 직접 */
+export type RequisitionSource = 'MESSAGE' | 'MRP' | 'DIRECT';
+
+/** 구매요청 1건 = 원료 1품목 (ERD purchase_requisition, 서버 PurchaseRequisitionSummary와 같은 모양) */
+export interface RequisitionView {
+  id: number;
+  purchaseRequisitionNo: string;
+  purchaseRequisitionStatus: PurchaseRequisitionStatus;
+  source: RequisitionSource;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  requestedTon: string;
+  productionPlanId: number | null;
+  productionPlanNo: string | null;
+  /** 발주했으면 발주번호 */
+  purchaseOrderNo: string | null;
+  requesterId: number;
+  requesterName: string | null;
+  /** 요청 시점 요청자 소속 부서 */
+  departmentId: number | null;
+  departmentName: string | null;
+  approverName: string | null;
+  desiredReceiptDate: string;
+  requestReason: string | null;
+  rejectReason: string | null;
+  actionDraftId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  /** 작업 로그의 반려 시각 (ERD에 칸이 없다) */
+  rejectedAt: string | null;
+}
 
 /** 구매요청 1건 = 원료 1품목 (ERD, 서버 POST purchase-requisitions와 같은 칸) */
 export interface RequisitionInput {
@@ -226,8 +256,35 @@ export const purchaseRequisitionApi = {
 
 // ── 발주 ─────────────────────────────────────────────
 
-/** 발주 후보 = 승인됐고 아직 발주하지 않은 구매요청 1건 */
-export type PurchaseOrderCandidateItem = ReturnType<typeof orderableRequisitions>[number];
+/** 발주 후보 = 승인됐고 아직 발주하지 않은 구매요청 1건, 원료의 기본 공급업체 포함 */
+export type PurchaseOrderCandidateItem = RequisitionView & { supplierId: number | null; supplierName: string | null };
+
+/** 발주 1건과 품목별 입고·원료 LOT */
+export interface PurchaseOrderView {
+  id: number;
+  purchaseOrderNo: string;
+  supplierId: number;
+  supplierName: string;
+  purchaseOrderStatus: PurchaseOrderStatus;
+  /** 발주한 사원 (ERD에 칸이 없어 작업 로그 PURCHASE_ORDER_CREATED로 본다) */
+  orderedEmployeeName: string | null;
+  createdAt: string;
+  items: {
+    id: number;
+    purchaseRequisitionId: number;
+    itemId: number;
+    itemCode: string;
+    itemName: string;
+    purchaseRequisitionNo: string | null;
+    orderedTon: string;
+    expectedReceiptDate: string | null;
+    /** 입고 누계 (입고 기록 합계) */
+    receivedTon: string;
+    /** 미입고량(입고예정) = 발주량 − 입고 누계 */
+    remainingTon: string;
+    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receivedDate: string; lotNo: string | null }[];
+  }[];
+}
 
 export interface PurchaseOrderCreateInput {
   supplierId: number;

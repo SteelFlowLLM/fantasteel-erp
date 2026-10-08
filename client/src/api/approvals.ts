@@ -4,8 +4,9 @@
 import { requireDepartmentHead } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
+import type { RequisitionView } from '@/api/purchasing';
 import { serverApprovalApi } from '@/api/server/purchaseRequisitions';
-import { approvalInbox, approvePurchaseRequisition, rejectPurchaseRequisition, requisitionDepartmentId, requisitionView, userActor, type RequisitionView } from '@/mock/services';
+import { approvalInbox, approvePurchaseRequisition, rejectPurchaseRequisition, requisitionDepartmentId, requisitionView, userActor } from '@/mock/services';
 
 export const approvalKeys = {
   all: ['purchase-requisitions', 'approvals'] as const,

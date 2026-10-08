@@ -4,10 +4,11 @@ import { afterEach, beforeEach, expect, vi } from 'vitest';
 import { approvalApi } from '@/api/approvals';
 import { goodsReceiptApi } from '@/api/goodsReceipts';
 import { inspectionApi, type RegisterInspectionOutcome } from '@/api/inspections';
+import type { MrpPeriod, MrpRequirementsView } from '@/api/mrp';
 import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
 import { readDb } from '@/api/productionTestKit';
 import { typicalPassValue } from '@/lib/inspectionJudgment';
-import { checkInvariants } from '@/mock/services';
+import { checkInvariants, computeMrpForPeriod } from '@/mock/services';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 export { itemIdOf, lotOf, lotsOfPlan, planIdOf, readDb } from '@/api/productionTestKit';
@@ -26,6 +27,39 @@ export type EmpKey = keyof typeof EMP;
 /** 이 사원으로 요청한다 */
 export const as = (key: EmpKey): number => actAs(EMP[key]);
 export const idOf = (key: EmpKey): number => employeeIdOf(EMP[key]);
+
+/**
+ * MRP: 화면 API는 두 모드 모두 서버가 계산해서, 가짜 DB 시나리오는 core 계산을 서버 응답 모양으로 옮겨 본다
+ * (이유별 공급 내역·예상 여재는 서버에 없어 뺀다)
+ */
+export function mockMrp(period: MrpPeriod): MrpRequirementsView {
+  const view = readDb((t) => computeMrpForPeriod(t, period));
+  return {
+    from: view.from,
+    to: view.to,
+    heatCapacityTon: view.heatCapacityTon,
+    plans: view.plans.map(({ needDate, beforePeriod, expectedSurplusSlabQty: _surplus, materials, ...plan }) => ({
+      ...plan,
+      requiredDate: needDate,
+      isBeforePeriod: beforePeriod,
+      materials: materials.map((m) => ({ itemId: m.itemId, itemCode: m.itemCode, requiredTon: m.grossTon, netRequirementTon: m.netTon })),
+    })),
+    materials: view.materials.map((m) => ({
+      itemId: m.itemId,
+      itemCode: m.itemCode,
+      itemName: m.itemName,
+      rawMaterialType: m.rawMaterialType,
+      requiredTon: m.grossTon,
+      remainingTon: m.onHandTon,
+      scheduledReceiptTon: m.scheduledReceiptTon,
+      usedRemainingTon: m.coveredOnHandTon,
+      usedScheduledReceiptTon: m.coveredScheduledTon,
+      netRequirementTon: m.netTon,
+      firstShortageDate: m.firstShortageDate,
+    })),
+    requisitionLines: view.requisitionLines.map(({ netTon, needDate, ...line }) => ({ ...line, netRequirementTon: netTon, requiredDate: needDate })),
+  };
+}
 
 /** 이 describe 안에서 Date만 가짜로 돌린다 (응답 지연용 setTimeout은 그대로) */
 export function useScenarioClock(): void {

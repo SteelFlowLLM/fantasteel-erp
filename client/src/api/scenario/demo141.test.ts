@@ -12,7 +12,6 @@ import { inventoryApi } from '@/api/inventories';
 import { lotTraceApi } from '@/api/lotTrace';
 import { messengerApi } from '@/api/messenger';
 import { millSheetApi } from '@/api/millSheets';
-import { mrpApi } from '@/api/mrp';
 import { notificationApi } from '@/api/notifications';
 import { productionPlanApi } from '@/api/production';
 import { productionResultApi } from '@/api/productionResults';
@@ -20,7 +19,7 @@ import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
 import { salesOrderApi } from '@/api/salesOrders';
 import { shipmentRequestApi } from '@/api/shipmentRequests';
 import { decDiv, decMul } from '@/lib/decimal';
-import { as, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
+import { as, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, mockMrp, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
 
 const SLAB_A = 'SL-SS275-250x1200x10000';
 
@@ -68,7 +67,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     // ── 3. MRP 부족 원료 → 구매요청 → 부서장 승인 → 공급업체별 발주 → 부분 입고 ──
     as('purchase');
     const period = { from: '2026-10-01', to: '2026-10-31' };
-    let mrp = await mrpApi.requirements(period);
+    let mrp = mockMrp(period);
     expect(mrp.plans.map((p) => [p.productionPlanNo, p.remainingHeatCount, p.heatTon, p.requiredHotMetalTon])).toEqual([['PP-2610-0001', 1, '250.000', '277.778']]);
     const byCode = Object.fromEntries(mrp.materials.map((m) => [m.itemCode, m]));
     expect(byCode.ORE01).toMatchObject({ requiredTon: '444.445', netRequirementTon: '0.000' });
@@ -83,7 +82,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: line.productionPlanId });
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL', source: 'MRP' });
     await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: '', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
-    expect((await mrpApi.requirements(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
+    expect((mockMrp(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
     expect((await purchaseOrderApi.candidateItems()).some((i) => i.id === pr.id)).toBe(false);
     const smnSupplierId = readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.id ?? 0);
     const smnOrder = { supplierId: smnSupplierId, items: [{ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon, expectedReceiptDate: '' }] };
@@ -105,7 +104,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', supplierId: candidate?.supplierId });
     expect(po.items[0].expectedReceiptDate).toBe('2026-10-10');
     expect((await purchaseRequisitionApi.detail(pr.id)).purchaseRequisitionStatus).toBe('ORDERED');
-    expect((await mrpApi.requirements(period)).materials.find((m) => m.itemCode === 'SMN01')?.netRequirementTon).toBe('0.000');
+    expect((mockMrp(period)).materials.find((m) => m.itemCode === 'SMN01')?.netRequirementTon).toBe('0.000');
 
     const poLineId = po.items[0].id;
     at('2026-10-02T09:00:00+09:00');

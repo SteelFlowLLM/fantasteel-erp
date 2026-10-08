@@ -6,6 +6,7 @@ import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
+import type { PurchaseOrderView } from '@/api/purchasing';
 import { serverMasterDataApi } from '@/api/server/masterData';
 import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
 import { decCmp } from '@/lib/decimal';
@@ -19,11 +20,7 @@ import {
   receiveGoods,
   remainingTonOf,
   userActor,
-  type GoodsReceiptView,
-  type PurchaseOrderView,
 } from '@/mock/services';
-
-export type { GoodsReceiptView };
 
 /** 입고 화면을 볼 수 있는 권한 (조회 이상) */
 export const GOODS_RECEIPT_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM];
@@ -33,6 +30,28 @@ export const goodsReceiptKeys = {
   list: () => ['goods-receipts', 'list'] as const,
   lines: () => ['goods-receipts', 'purchase-order-lines'] as const,
 };
+
+/** 입고 1건과 원료 LOT (서버 GoodsReceiptView와 같은 모양 + 화면용 공급업체·확정자) */
+export interface GoodsReceiptView {
+  id: number;
+  goodsReceiptNo: string;
+  purchaseOrderId: number;
+  purchaseOrderNo: string;
+  purchaseOrderItemId: number;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  receivedTon: string;
+  receivedDate: string;
+  lotId: number | null;
+  lotNo: string | null;
+  yardId: number | null;
+  yardName: string | null;
+  createdAt: string;
+  supplierName: string;
+  /** 입고를 확정한 사원 (ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED로 본다) */
+  confirmedEmployeeName: string | null;
+}
 
 /** 입고할 발주 품목 (미입고량 = 발주량 − 입고 누계, 저장하지 않고 계산) */
 export interface ReceiptLine {
