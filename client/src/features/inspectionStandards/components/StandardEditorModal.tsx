@@ -3,6 +3,7 @@
 // 검사 기준 입력 창: 새 기준(공정 × 강종, 버전 1) 또는 지금 버전을 바탕으로 새 버전 만들기 (REQ-QC-002, TRM-110).
 // 항목: 코드·이름·단위·최소(이상)·최대(이하)·적용 두께 구간(초과~이하)·필수·순서(행 순서).
 import { useRef, useState } from 'react';
+import { isServerDataSource } from '@/api/http';
 import { PROCESS_TYPE_LABEL } from '@/codes';
 import { COMMON_STANDARD_GRADE, inspectionStandardApi, type InspectionStandardDetailView, type InspectionStandardItemInput } from '@/api/inspectionStandards';
 import { Banner } from '@/components/Banner';
@@ -13,7 +14,7 @@ import { Input, Select } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { Table, Td, Th } from '@/components/Table';
 import { ModalFooter } from '@/features/masterData/components/MasterParts';
-import { canHaveCommonStandard, formatInspectionStandardCode, INSPECTED_PROCESS_TYPES, type InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
+import { canChooseCommonStandard, canHaveCommonStandard, formatInspectionStandardCode, INSPECTED_PROCESS_TYPES, type InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
 import { PROCESS_INSPECTION_TEXT } from '@/features/inspectionStandards/lib/standardText';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
@@ -78,7 +79,8 @@ export function StandardEditorModal({ target, onClose, onSaved }: { target: Stan
   const [processType, setProcessType] = useState<InspectedProcessType | ''>(target.mode === 'create' ? (target.processType ?? '') : '');
   // '' = 아직 고르지 않음 · 'common' = 공통 기준 · 그 밖 = 강종 id. 고르지 않은 채 저장하면 강종 칸에 안내가 뜬다(공통 기준으로 바꾸지 않음).
   const [gradeValue, setGradeValue] = useState(target.mode === 'create' && target.steelGradeId ? String(target.steelGradeId) : '');
-  const commonAllowed = processType === '' || canHaveCommonStandard(processType);
+  // 서버 모드는 공통 기준을 저장할 수 없어(ERD steel_grade_id NOT NULL) 선택지를 보이지 않는다
+  const commonAllowed = canChooseCommonStandard(processType, isServerDataSource());
 
   const options = { onSuccess: (id: number) => onSaved(id), onError: fieldErrors.takeFrom };
   const createVersion = useAction(inspectionStandardApi.createVersion, { ...options, success: '새 버전을 만들었어요' });
@@ -156,7 +158,9 @@ export function StandardEditorModal({ target, onClose, onSaved }: { target: Stan
             label="강종"
             required
             error={fieldErrors.errorOf('steelGradeId')}
-            hint={commonAllowed ? '강종 전용 기준이 없으면 공통 기준으로 판정해요' : '제강 검사 기준(성분 규격)은 강종별로 만들어요'}
+            hint={
+              commonAllowed ? '강종 전용 기준이 없으면 공통 기준으로 판정해요' : processType === 'STEELMAKING' ? '제강 검사 기준(성분 규격)은 강종별로 만들어요' : '검사 기준은 강종별로 만들어요'
+            }
           >
             <Select
               value={gradeValue}
