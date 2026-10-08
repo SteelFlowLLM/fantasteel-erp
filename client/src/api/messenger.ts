@@ -175,6 +175,8 @@ export interface SendMessageInput {
   content?: string | null;
   /** 메시지당 파일 1개 (ERD message, REQ-MSG-003) */
   file?: { name: string; size: number; mimeType: string; dataUrl: string } | null;
+  /** 보내기 id. 다시 보낼 때 같은 값을 쓰면 서버가 두 번 저장하지 않는다 (서버 모드만, 가짜 DB는 네트워크 실패가 없어 쓰지 않는다) */
+  clientMessageId?: string;
 }
 
 // ── 내부 도우미 ─────────────────────────────────────────

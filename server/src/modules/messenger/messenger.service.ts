@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
   BLOCKED_ATTACHMENT_EXTENSIONS,
+  BUSINESS_EVENT_TYPE,
+  BUSINESS_EVENT_TYPE_LABEL,
   ERP_LINK_PATH,
   findErpNos,
   CHAT_ROOM_TYPE,
@@ -13,6 +15,7 @@ import {
   SALES_ORDER_ITEM_STATUS,
   calcWeightTon,
   type AuthUser,
+  type BusinessEventType,
   type ChatMemberView,
   type ChatMessagePage,
   type ChatMessageView,
@@ -31,9 +34,10 @@ import {
   type WorkRoomSalesOrderView,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { BusinessEventRecorder, type RecordedBusinessEvent } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { StorageService } from '../../common/storage/storage.service';
-import type { ChatRoom } from '../../generated/prisma/client';
+import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import type { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
@@ -110,6 +114,42 @@ function unreadMemberCountOf(message: { id: number; senderId: number | null }, r
   return reads.filter((r) => r.employeeId !== message.senderId && (r.lastReadMessageId ?? 0) < message.id).length;
 }
 
+/**
+ * 업무방에 진행 알림(시스템 메시지)을 남길 작업 로그 (수주에 연결된 것만). 수주 타임라인과 같은 근거(작업 로그)를 쓴다.
+ * 예약·배정 추천처럼 자주 바뀌는 내부 단계는 넣지 않는다 (2026-10-08, 문서에 없는 추가 기능)
+ */
+const WORK_ROOM_NOTICE_TYPES: ReadonlySet<BusinessEventType> = new Set<BusinessEventType>([
+  BUSINESS_EVENT_TYPE.SALES_ORDER_CANCELLED,
+  BUSINESS_EVENT_TYPE.PRODUCTION_PLAN_CREATED,
+  BUSINESS_EVENT_TYPE.PRODUCTION_PLAN_CANCELLED,
+  BUSINESS_EVENT_TYPE.REPRODUCTION_PLAN_CREATED,
+  BUSINESS_EVENT_TYPE.PRODUCTION_STARTED,
+  BUSINESS_EVENT_TYPE.PRODUCTION_RESULT_REGISTERED,
+  BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CREATED,
+  BUSINESS_EVENT_TYPE.ALLOCATION_CONFIRMED,
+  BUSINESS_EVENT_TYPE.GOODS_ISSUE_CONFIRMED,
+  BUSINESS_EVENT_TYPE.MILL_SHEET_ISSUED,
+]);
+
+/** 작업 로그의 변경 후 데이터에서 업무 번호(…No로 끝나는 첫 값)를 꺼낸다. 모듈마다 모양이 달라 이름 규칙으로만 찾는다 */
+function documentNoOf(after: unknown): string | null {
+  if (typeof after !== 'object' || after === null || Array.isArray(after)) return null;
+  for (const [key, value] of Object.entries(after)) {
+    if (key.endsWith('No') && typeof value === 'string' && value) return value;
+  }
+  return null;
+}
+
+/** 업무방 진행 알림 문구: [출고 확정] DR-2610-0001 · 신현우님 */
+function workRoomNoticeOf(event: RecordedBusinessEvent): string {
+  const no = documentNoOf(event.after);
+  const actor = event.actor === 'SYSTEM' ? '시스템' : `${event.actor.employeeName}님`;
+  return `[${BUSINESS_EVENT_TYPE_LABEL[event.type]}]${no ? ` ${no}` : ''} · ${actor}`;
+}
+
+/** 커밋을 기다렸다 소켓으로 보낼 때 다시 확인하는 간격(ms). 끝까지 없으면 롤백된 것으로 보고 보내지 않는다 */
+const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000];
+
 /** 시스템 메시지(보낸 사원 없음)의 보낸 사람 표시 */
 const SYSTEM_SENDER_NAME = '시스템';
 
@@ -139,14 +179,56 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
  * 알림은 메시지와 같은 tx에서 만들고, 소켓 발송은 커밋 뒤에 한다 (롤백된 메시지를 보내지 않도록).
  */
 @Injectable()
-export class MessengerService {
+export class MessengerService implements OnModuleInit {
+  private readonly logger = new Logger(MessengerService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: MessengerRepository,
     private readonly notifications: NotificationService,
     private readonly storage: StorageService,
     private readonly gateway: MessengerGateway,
+    private readonly businessEvents: BusinessEventRecorder,
   ) {}
+
+  /** 수주 작업 로그가 기록되면 같은 tx에서 그 수주의 업무방에 진행 알림을 남긴다 (다른 모듈 코드를 고치지 않으려고 기록기에 건다) */
+  onModuleInit(): void {
+    this.businessEvents.onRecorded((tx, event) => this.postWorkRoomNotice(tx, event));
+  }
+
+  private async postWorkRoomNotice(tx: Tx, event: RecordedBusinessEvent): Promise<void> {
+    if (event.salesOrderId === null || !WORK_ROOM_NOTICE_TYPES.has(event.type)) return;
+    const room = await this.repository.findWorkRoomOf(tx, event.salesOrderId);
+    if (!room) return;
+    const message = await this.repository.createSystemMessage(tx, room.id, workRoomNoticeOf(event));
+    // 본 거래의 tx는 다른 모듈이 열어서 커밋 시점을 알 수 없다 → 커밋된 뒤(행이 보일 때) 보낸다
+    this.emitWhenCommitted(message.id);
+  }
+
+  /** 커밋된 메시지만 소켓으로 보낸다. 행이 끝까지 안 보이면(롤백) 보내지 않는다 */
+  private emitWhenCommitted(messageId: number, attempt = 0): void {
+    const timer = setTimeout(() => {
+      void (async () => {
+        const message = await this.repository.findMessageWithSender(this.prisma, messageId);
+        if (!message) {
+          if (attempt + 1 < EMIT_RETRY_DELAYS_MS.length) this.emitWhenCommitted(messageId, attempt + 1);
+          return;
+        }
+        await this.emitNewMessage(message);
+      })().catch((error: unknown) => this.logger.warn(`시스템 메시지 발송 실패 (메시지 ${messageId}): ${String(error)}`));
+    }, EMIT_RETRY_DELAYS_MS[attempt]);
+    // 서버 종료(테스트 포함)를 이 타이머가 붙잡지 않게 한다
+    timer.unref();
+  }
+
+  /** 방 멤버 전원에게 새 메시지를 보낸다 (안 읽은 사람 수·ERP 링크 포함) */
+  private async emitNewMessage(message: MessageWithSender): Promise<void> {
+    const memberIds = (await this.repository.findMemberIds(this.prisma, message.chatRoomId)).map((m) => m.employeeId);
+    const reads = await this.repository.findMemberReads(this.prisma, message.chatRoomId);
+    const erpLinksOf = await this.erpLinkResolver([message.content]);
+    const unread = unreadMemberCountOf(message, reads);
+    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unread, erpLinksOf));
+  }
 
   /** 내가 멤버인 채팅방, 최근 대화 순 */
   async listRooms(user: AuthUser): Promise<ChatRoomListItem[]> {
@@ -295,13 +377,14 @@ export class MessengerService {
       if (!canViewSalesOrder(user)) throw new AppException('COM-002', '수주를 볼 수 있는 사원만 업무방을 열 수 있어요');
     }
 
-    const { result, changed } = await this.prisma.$transaction(async (tx) => {
+    const { result, changed, notices } = await this.prisma.$transaction(async (tx) => {
       await this.requireActiveEmployees(tx, memberIds);
+      const notices: MessageWithSender[] = [];
 
       if (dto.chatRoomType === CHAT_ROOM_TYPE.DIRECT) {
         const existing = await this.repository.findDirectRoomOf(tx, [me, memberIds[0]]);
-        if (existing) return { result: { id: existing.id, reused: true }, changed: false };
-        return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.DIRECT, chatRoomName: null, salesOrderId: null }, [me, ...memberIds]), changed: true };
+        if (existing) return { result: { id: existing.id, reused: true }, changed: false, notices };
+        return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.DIRECT, chatRoomName: null, salesOrderId: null }, [me, ...memberIds]), changed: true, notices };
       }
 
       if (dto.chatRoomType === CHAT_ROOM_TYPE.WORK) {
@@ -310,17 +393,21 @@ export class MessengerService {
         if (!salesOrder) throw new AppException('COM-003', '수주를 찾을 수 없어요');
         const existing = await this.repository.findWorkRoomOf(tx, salesOrderId);
         if (existing) {
-          const added = await this.addMembers(tx, existing.id, [me, ...memberIds]);
-          return { result: { id: existing.id, reused: true }, changed: added > 0 };
+          const addedIds = await this.addMembers(tx, existing.id, [me, ...memberIds]);
+          if (addedIds.length > 0) notices.push(await this.repository.createSystemMessage(tx, existing.id, await this.joinedNotice(tx, user, addedIds)));
+          return { result: { id: existing.id, reused: true }, changed: addedIds.length > 0, notices };
         }
         const chatRoomName = `${salesOrder.salesOrderNo} ${salesOrder.customer.customerName}`;
-        return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.WORK, chatRoomName, salesOrderId }, [me, ...memberIds]), changed: true };
+        const created = await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.WORK, chatRoomName, salesOrderId }, [me, ...memberIds]);
+        notices.push(await this.repository.createSystemMessage(tx, created.id, `${user.employeeName}님이 수주 ${salesOrder.salesOrderNo} 업무방을 열었어요`));
+        return { result: created, changed: true, notices };
       }
 
       const chatRoomName = dto.chatRoomName?.trim() || null;
-      return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.GROUP, chatRoomName, salesOrderId: null }, [me, ...memberIds]), changed: true };
+      return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.GROUP, chatRoomName, salesOrderId: null }, [me, ...memberIds]), changed: true, notices };
     });
     if (changed) await this.emitRoomUpdated(result.id);
+    for (const notice of notices) await this.emitNewMessage(notice);
     return result;
   }
 
@@ -329,28 +416,33 @@ export class MessengerService {
    * 새 멤버는 이전 대화를 볼 수 있고 지금까지의 메시지는 읽은 것으로 시작한다. 이미 멤버인 사원은 건너뛴다.
    */
   async inviteMembers(user: AuthUser, chatRoomId: number, dto: InviteMembersDto): Promise<InviteChatMembersResult> {
-    const addedCount = await this.prisma.$transaction(async (tx) => {
+    const { addedCount, notice } = await this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, user.employeeId);
       if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new AppException('COM-004', '1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요');
       const existing = new Set((await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId));
       const newIds = [...new Set(dto.memberIds)].filter((id) => !existing.has(id));
       if (newIds.length === 0) throw new AppException('COM-004', '초대할 멤버를 1명 이상 골라 주세요');
       await this.requireActiveEmployees(tx, newIds);
-      return this.addMembers(tx, chatRoomId, newIds);
+      const addedIds = await this.addMembers(tx, chatRoomId, newIds);
+      return { addedCount: addedIds.length, notice: await this.repository.createSystemMessage(tx, chatRoomId, await this.joinedNotice(tx, user, addedIds)) };
     });
     await this.emitRoomUpdated(chatRoomId);
+    await this.emitNewMessage(notice);
     return { chatRoomId, addedCount };
   }
 
   /** 그룹방 이름 바꾸기 (방 멤버만). 1:1은 상대 이름, 업무방은 수주로 이름이 정해져 바꾸지 않는다 */
   async renameRoom(user: AuthUser, chatRoomId: number, dto: RenameChatRoomDto): Promise<RenameChatRoomResult> {
     const chatRoomName = dto.chatRoomName?.trim() || null;
-    await this.prisma.$transaction(async (tx) => {
+    const notice = await this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, user.employeeId);
       if (room.chatRoomType !== CHAT_ROOM_TYPE.GROUP) throw new AppException('COM-004', '그룹 채팅방만 이름을 바꿀 수 있어요');
       await this.repository.updateRoomName(tx, chatRoomId, chatRoomName);
+      const text = chatRoomName ? `${user.employeeName}님이 방 이름을 '${chatRoomName}'(으)로 바꿨어요` : `${user.employeeName}님이 방 이름을 지웠어요`;
+      return this.repository.createSystemMessage(tx, chatRoomId, text);
     });
     await this.emitRoomUpdated(chatRoomId);
+    await this.emitNewMessage(notice);
     const detail = await this.getRoom(user, chatRoomId);
     return { id: chatRoomId, chatRoomName: detail.chatRoomName, displayName: detail.displayName };
   }
@@ -414,7 +506,7 @@ export class MessengerService {
   sendMessage(user: AuthUser, chatRoomId: number, dto: SendMessageDto): Promise<ChatMessageView> {
     const content = dto.content.trim();
     if (!content) throw new AppException('COM-004', '보낼 메시지를 넣어 주세요');
-    return this.postMessage(user, chatRoomId, { content }, dto.mentionedEmployeeIds ?? []);
+    return this.postMessage(user, chatRoomId, { content, clientMessageId: dto.clientMessageId ?? null }, dto.mentionedEmployeeIds ?? []);
   }
 
   /** 파일 첨부 (REQ-MSG-003). 업로드하면 바로 메시지 1건이 생긴다. 메시지당 파일 1개, 글은 선택 */
@@ -427,9 +519,23 @@ export class MessengerService {
     if (extension && (BLOCKED_ATTACHMENT_EXTENSIONS as readonly string[]).includes(extension)) throw new AppException('COM-004', `실행 파일(.${extension})은 보낼 수 없어요`);
     // 저장소에 먼저 올리면 멤버가 아닌 사람의 파일이 남으므로 멤버 확인을 먼저 한다
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
+    // 재전송이면 파일을 다시 저장하지 않는다
+    const clientMessageId = dto.clientMessageId ?? null;
+    const duplicate = clientMessageId ? await this.findDuplicate(user.employeeId, chatRoomId, clientMessageId) : null;
+    if (duplicate) return duplicate;
     const attachmentPath = await this.storage.save('messages', fileName, file.buffer);
     const content = dto.content?.trim() || null;
-    return this.postMessage(user, chatRoomId, { content, attachmentPath, attachmentName: fileName }, []);
+    return this.postMessage(user, chatRoomId, { content, attachmentPath, attachmentName: fileName, clientMessageId }, []);
+  }
+
+  /** 같은 보내기 id로 이미 저장한 메시지가 있으면 그 메시지 (다른 방이면 잘못된 재사용이라 COM-004) */
+  private async findDuplicate(senderId: number, chatRoomId: number, clientMessageId: string): Promise<ChatMessageView | null> {
+    const existing = await this.repository.findMessageByClientId(this.prisma, senderId, clientMessageId);
+    if (!existing) return null;
+    if (existing.chatRoomId !== chatRoomId) throw new AppException('COM-004', '이미 다른 채팅방에 쓴 보내기 id예요');
+    const reads = await this.repository.findMemberReads(this.prisma, chatRoomId);
+    const erpLinksOf = await this.erpLinkResolver([existing.content]);
+    return toMessageView(existing, senderId, unreadMemberCountOf(existing, reads), erpLinksOf);
   }
 
   /** 첨부 내려받기. id는 메시지 id (첨부 테이블이 없다, messenger.md 8장). 방 멤버만 */
@@ -469,11 +575,42 @@ export class MessengerService {
   private async postMessage(
     user: AuthUser,
     chatRoomId: number,
-    data: { content: string | null; attachmentPath?: string; attachmentName?: string },
+    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null },
     mentionedEmployeeIds: readonly number[],
   ): Promise<ChatMessageView> {
     const me = user.employeeId;
-    const { message, memberIds } = await this.prisma.$transaction(async (tx) => {
+    // 재전송 중복 방지 (#151): 이미 저장된 보내기 id면 알림·소켓 없이 처음 메시지를 돌려준다
+    if (data.clientMessageId) {
+      const duplicate = await this.findDuplicate(me, chatRoomId, data.clientMessageId);
+      if (duplicate) return duplicate;
+    }
+    let saved: { message: MessageWithSender; memberIds: number[] };
+    try {
+      saved = await this.saveMessage(user, chatRoomId, data, mentionedEmployeeIds);
+    } catch (error) {
+      // 같은 보내기 id가 거의 동시에 두 번 들어오면 부분 unique에 걸린다 → 먼저 저장된 메시지를 돌려준다
+      if (data.clientMessageId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const duplicate = await this.findDuplicate(me, chatRoomId, data.clientMessageId);
+        if (duplicate) return duplicate;
+      }
+      throw error;
+    }
+    const { message, memberIds } = saved;
+    // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다
+    const unreadMemberCount = memberIds.length - 1;
+    const erpLinksOf = await this.erpLinkResolver([message.content]);
+    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
+    return toMessageView(message, me, unreadMemberCount, erpLinksOf);
+  }
+
+  private saveMessage(
+    user: AuthUser,
+    chatRoomId: number,
+    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null },
+    mentionedEmployeeIds: readonly number[],
+  ): Promise<{ message: MessageWithSender; memberIds: number[] }> {
+    const me = user.employeeId;
+    return this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, me);
       const created = await this.repository.createMessage(tx, { chatRoomId, senderId: me, ...data });
       await this.repository.moveLastRead(tx, chatRoomId, me, created.id);
@@ -481,11 +618,6 @@ export class MessengerService {
       await this.notifyForMessage(tx, room, created, members, mentionedEmployeeIds);
       return { message: created, memberIds: members };
     });
-    // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다
-    const unreadMemberCount = memberIds.length - 1;
-    const erpLinksOf = await this.erpLinkResolver([message.content]);
-    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
-    return toMessageView(message, me, unreadMemberCount, erpLinksOf);
   }
 
   private async notifyForMessage(tx: Tx, room: ChatRoom, message: MessageWithSender, memberIds: readonly number[], mentionedEmployeeIds: readonly number[]): Promise<void> {
@@ -550,12 +682,21 @@ export class MessengerService {
   }
 
   /** 기존 업무방에 새 멤버를 더한다. 새 멤버는 지금까지의 메시지를 읽은 것으로 시작한다 */
-  private async addMembers(tx: Tx, chatRoomId: number, employeeIds: readonly number[]): Promise<number> {
+  private async addMembers(tx: Tx, chatRoomId: number, employeeIds: readonly number[]): Promise<number[]> {
     const existing = new Set((await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId));
     const newIds = employeeIds.filter((id) => !existing.has(id));
-    if (newIds.length === 0) return 0;
+    if (newIds.length === 0) return [];
     const lastMessage = await this.repository.findLastMessageId(tx, chatRoomId);
     await this.repository.createMembers(tx, chatRoomId, newIds, lastMessage?.id ?? null);
-    return newIds.length;
+    return newIds;
+  }
+
+  /** 초대 안내: 이현정님이 권예진님, 신현우님을 초대했어요 (스스로 들어온 경우는 '들어왔어요') */
+  private async joinedNotice(tx: Tx, user: AuthUser, addedIds: readonly number[]): Promise<string> {
+    const names = new Map((await this.repository.findEmployees(tx, addedIds)).map((e) => [e.id, e.employeeName]));
+    const others = addedIds.filter((id) => id !== user.employeeId).map((id) => `${names.get(id) ?? '-'}님`);
+    if (others.length === 0) return `${user.employeeName}님이 들어왔어요`;
+    // 이름마다 '님'이 붙어 받침이 있으므로 '을'
+    return `${user.employeeName}님이 ${others.join(', ')}을 초대했어요`;
   }
 }

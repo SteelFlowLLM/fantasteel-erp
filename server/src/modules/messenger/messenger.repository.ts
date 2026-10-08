@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CHAT_ROOM_TYPE } from '@fantasteel/shared';
+import { CHAT_ROOM_TYPE, MESSAGE_TYPE } from '@fantasteel/shared';
 import { getChatRoomListStats } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -180,7 +180,21 @@ export class MessengerRepository {
     return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true, lastReadMessageId: true } });
   }
 
-  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null }) {
+  /** 시스템 메시지(보낸 사원 없음): 입장·초대·이름 변경 안내, 수주 업무 진행 알림 */
+  createSystemMessage(tx: Tx, chatRoomId: number, content: string) {
+    return tx.message.create({ data: { chatRoomId, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content }, include: { sender: { include: employeeInclude } } });
+  }
+
+  /** 재전송 중복 확인: 같은 사람이 같은 보내기 id로 이미 저장한 메시지 */
+  findMessageByClientId(tx: Tx, senderId: number, clientMessageId: string) {
+    return tx.message.findFirst({ where: { senderId, clientMessageId }, include: { sender: { include: employeeInclude } } });
+  }
+
+  findMessageWithSender(tx: Tx, id: number) {
+    return tx.message.findUnique({ where: { id }, include: { sender: { include: employeeInclude } } });
+  }
+
+  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null; clientMessageId?: string | null }) {
     return tx.message.create({ data, include: { sender: { include: employeeInclude } } });
   }
 
