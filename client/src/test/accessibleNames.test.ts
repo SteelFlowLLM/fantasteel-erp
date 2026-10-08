@@ -6,7 +6,6 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { lookupApi } from '@/api/lookups';
 import { queryKeys } from '@/api/queryKeys';
-import { purchaseOrderApi } from '@/api/purchasing';
 import { sessionApi } from '@/api/session';
 import { PurchaseOrderForm } from '@/features/purchasing/PurchaseOrderScreen';
 import { MasterItem } from '@/features/purchasing/components/PurchasingParts';
@@ -14,6 +13,8 @@ import { groupBySupplier } from '@/features/purchasing/lib/purchasingView';
 import { SalesOrderCreateScreen } from '@/features/sales/SalesOrderCreateScreen';
 import { UserMenu } from '@/features/shell/UserMenu';
 import { MeContext } from '@/hooks/useMe';
+import { getMockDb } from '@/mock/db';
+import { orderableRequisitions } from '@/mock/services';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 // 수주 등록 화면은 목록으로 돌아가려고 next/navigation을 쓴다. 서버 렌더에는 라우터가 없어서 비워 둔다.
@@ -44,7 +45,8 @@ const ariaLabelsOf = (html: string, tagName: string): string[] =>
 describe('발주 작성: 공급업체별 전체 선택', () => {
   it('공급업체 이름이 들어간 이름이 붙는다 (카드마다 같은 "전체 선택"으로 겹치지 않는다)', async () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
-    const items = await purchaseOrderApi.candidateItems();
+    // 발주 후보 화면 API는 서버만 불러 가짜 DB 시드의 후보를 core로 읽는다
+    const items = getMockDb().read(orderableRequisitions);
     const groups = groupBySupplier(items);
     expect(groups.length).toBeGreaterThan(0);
     const html = await render(SEED_EMPLOYEE_NO.purchase, createElement(PurchaseOrderForm, { groups, initialIds: [], canConfirmPurchaseOrder: true, onDone: () => undefined }));

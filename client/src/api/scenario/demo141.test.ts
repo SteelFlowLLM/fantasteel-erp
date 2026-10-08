@@ -1,12 +1,10 @@
-// 업무 프로세스 14.1 P1 슬래브 수주 전체 흐름 (1~10단계)을 화면 api 함수로 끝까지 돌린다.
+// 업무 프로세스 14.1 P1 슬래브 수주 전체 흐름 (1~10단계)을 화면 api 함수로 끝까지 돌린다. 구매(MRP·요청·승인·발주·입고)는 화면 api가 서버만 불러 core 서비스로 돌린다.
 // 사원은 단계마다 맡은 역할로 바꾼다(actAs): 영업 박서영 → 생산 강민석 → 구매 정다은·부서장 최준혁 → 제강 조은서 → 품질 서민지 → 영업 → 물류 권예진.
 import { describe, expect, it } from 'vitest';
 import { actionDraftApi } from '@/api/actionDrafts';
-import { approvalApi } from '@/api/approvals';
 import { businessEventApi } from '@/api/businessEvents';
 import { InputError } from '@/api/client';
 import { goodsIssueApi } from '@/api/goodsIssues';
-import { goodsReceiptApi } from '@/api/goodsReceipts';
 import { inspectionApi } from '@/api/inspections';
 import { inventoryApi } from '@/api/inventories';
 import { lotTraceApi } from '@/api/lotTrace';
@@ -15,11 +13,25 @@ import { millSheetApi } from '@/api/millSheets';
 import { notificationApi } from '@/api/notifications';
 import { productionPlanApi } from '@/api/production';
 import { productionResultApi } from '@/api/productionResults';
-import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
 import { salesOrderApi } from '@/api/salesOrders';
 import { shipmentRequestApi } from '@/api/shipmentRequests';
 import { decDiv, decMul } from '@/lib/decimal';
-import { as, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, mockMrp, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
+import {
+  actionDraftView,
+  approvalInbox,
+  approvePurchaseRequisition,
+  createPurchaseOrder,
+  createPurchaseRequisition,
+  listPurchaseRequisitions,
+  mustGet,
+  orderableRequisitions,
+  purchaseOrderView,
+  receivedTonOf,
+  receiveGoods,
+  remainingTonOf,
+  requisitionView,
+} from '@/mock/services';
+import { as, asPurchaseCore, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, mockMrp, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
 
 const SLAB_A = 'SL-SS275-250x1200x10000';
 
@@ -79,44 +91,51 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     const line = mrp.requisitionLines[0];
 
     at('2026-10-01T10:00:00+09:00');
-    const pr = await purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: line.productionPlanId });
+    const pr = await asPurchaseCore((tx, me) => requisitionView(tx.tables, createPurchaseRequisition(tx, me, { desiredReceiptDate: '2026-10-10', requestReason: 'MRP 합금철 부족', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: line.productionPlanId })));
     expect(pr).toMatchObject({ purchaseRequisitionNo: 'PR-2610-0001', purchaseRequisitionStatus: 'WAITING_APPROVAL', source: 'MRP' });
-    await expect(purchaseRequisitionApi.create({ desiredReceiptDate: '2026-10-10', requestReason: '', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
+    await expect(asPurchaseCore((tx, me) => createPurchaseRequisition(tx, me, { desiredReceiptDate: '2026-10-10', itemId: line.itemId, requestedTon: '1.000', productionPlanId: planId }))).rejects.toBeInstanceOf(InputError);
     expect((mockMrp(period)).requisitionLines[0].existingPurchaseRequisitionNo).toBe('PR-2610-0001');
-    expect((await purchaseOrderApi.candidateItems()).some((i) => i.id === pr.id)).toBe(false);
+    expect(readDb(orderableRequisitions).some((i) => i.id === pr.id)).toBe(false);
     const smnSupplierId = readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.id ?? 0);
-    const smnOrder = { supplierId: smnSupplierId, items: [{ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon, expectedReceiptDate: '' }] };
-    await expect(purchaseOrderApi.create([smnOrder])).rejects.toMatchObject({ code: 'PUR-002' });
+    const smnOrder = { supplierId: smnSupplierId, items: [{ purchaseRequisitionId: pr.id, orderedTon: pr.requestedTon }] };
+    await expect(asPurchaseCore((tx, me) => createPurchaseOrder(tx, me, smnOrder))).rejects.toMatchObject({ code: 'PUR-002' });
 
     as('salesHead'); // 다른 부서 부서장은 승인할 수 없다
-    await expect(approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: pr.updatedAt })).rejects.toMatchObject({ code: 'COM-002' });
+    const approve = (purchaseRequisitionId: number, expectedUpdatedAt: string) => asPurchaseCore((tx, me) => approvePurchaseRequisition(tx, me, { purchaseRequisitionId, expectedUpdatedAt }));
+    await expect(approve(pr.id, pr.updatedAt)).rejects.toMatchObject({ code: 'COM-002' });
     as('purchaseHead');
-    expect((await approvalApi.inbox()).map((r) => r.purchaseRequisitionNo)).toContain('PR-2610-0001');
+    expect(readDb((t) => approvalInbox(t, idOf('purchaseHead'))).map((r) => r.purchaseRequisitionNo)).toContain('PR-2610-0001');
     expect((await notificationApi.list()).items.some((n) => n.notificationType === 'APPROVAL_REQUESTED' && n.title.includes('PR-2610-0001'))).toBe(true);
     at('2026-10-01T10:30:00+09:00');
-    expect(await approvalApi.approve({ purchaseRequisitionId: pr.id, expectedUpdatedAt: pr.updatedAt })).toMatchObject({ purchaseRequisitionStatus: 'APPROVED' });
+    expect(await approve(pr.id, pr.updatedAt)).toMatchObject({ purchaseRequisitionStatus: 'APPROVED' });
     as('purchase');
     expect((await notificationApi.list()).items.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2610-0001'))).toBe(true);
-    const candidate = (await purchaseOrderApi.candidateItems()).find((i) => i.id === pr.id);
+    const candidate = readDb(orderableRequisitions).find((i) => i.id === pr.id);
     expect(candidate?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
     at('2026-10-01T11:00:00+09:00');
-    const [po] = await purchaseOrderApi.create([smnOrder]);
+    const po = await asPurchaseCore((tx, me) => purchaseOrderView(tx.tables, createPurchaseOrder(tx, me, smnOrder)));
     expect(po).toMatchObject({ purchaseOrderNo: 'PO-2610-0001', purchaseOrderStatus: 'CONFIRMED', supplierId: candidate?.supplierId });
     expect(po.items[0].expectedReceiptDate).toBe('2026-10-10');
-    expect((await purchaseRequisitionApi.detail(pr.id)).purchaseRequisitionStatus).toBe('ORDERED');
+    expect(readDb((t) => t.purchaseRequisition.find((r) => r.id === pr.id)?.purchaseRequisitionStatus)).toBe('ORDERED');
     expect((mockMrp(period)).materials.find((m) => m.itemCode === 'SMN01')?.netRequirementTon).toBe('0.000');
 
     const poLineId = po.items[0].id;
+    const receive = (receivedTon: string, receivedDate: string) =>
+      asPurchaseCore((tx, me) => {
+        const { lot, purchaseOrder } = receiveGoods(tx, me, { purchaseOrderItemId: poLineId, receivedTon, receivedDate });
+        const line = mustGet(tx.tables, 'purchaseOrderItem', poLineId, '발주 품목');
+        return { lotId: lot.id, lotNo: lot.lotNo, purchaseOrderStatus: purchaseOrder.purchaseOrderStatus, lineReceivedTon: receivedTonOf(tx.tables, line.id), lineRemainingTon: remainingTonOf(tx.tables, line) };
+      });
     at('2026-10-02T09:00:00+09:00');
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.501', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
-    const first = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receivedDate: '2026-10-02' });
+    await expect(receive('1.501', '2026-10-02')).rejects.toMatchObject({ code: 'PUR-003' });
+    const first = await receive('1.000', '2026-10-02');
     expect(first).toMatchObject({ lotNo: 'RM-SMN01-261002-001', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '1.000', lineRemainingTon: '0.500' });
     // 확정 재시도(같은 1t을 한 번 더): 미입고량 초과로 막히고 LOT이 늘지 않는다
     const lotCountBefore = readDb((t) => t.lot.length);
-    await expect(goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '1.000', receivedDate: '2026-10-02' })).rejects.toMatchObject({ code: 'PUR-003' });
+    await expect(receive('1.000', '2026-10-02')).rejects.toMatchObject({ code: 'PUR-003' });
     expect(readDb((t) => t.lot.length)).toBe(lotCountBefore);
     at('2026-10-03T08:00:00+09:00');
-    const second = await goodsReceiptApi.receive({ purchaseOrderItemId: poLineId, receivedTon: '0.500', receivedDate: '2026-10-03' });
+    const second = await receive('0.500', '2026-10-03');
     expect(second).toMatchObject({ lotNo: 'RM-SMN01-261003-001', purchaseOrderStatus: 'RECEIVED', lineReceivedTon: '1.500', lineRemainingTon: '0.000' });
     expect(readDb((t) => t.lot.find((l) => l.id === first.lotId))).toMatchObject({ lotType: 'RAW_MATERIAL', remainingTon: '1.000', producedDate: '2026-10-02' });
     expectClean();
@@ -324,14 +343,13 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     as('purchase');
     const outcome = await actionDraftApi.confirm({ actionDraftId: draft.id, expectedUpdatedAt: draft.updatedAt });
     expect(outcome).toMatchObject({ executed: true, draft: { draftStatus: 'EXECUTED' } });
-    const draftPr = (await purchaseRequisitionApi.list()).find((p) => p.actionDraftId === draft.id);
+    const draftPr = readDb(listPurchaseRequisitions).find((p) => p.actionDraftId === draft.id);
     expect(draftPr).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', requesterId: idOf('purchase'), desiredReceiptDate: '2026-10-20', source: 'MESSAGE' });
     await expect(actionDraftApi.execute({ actionDraftId: draft.id })).rejects.toBeInstanceOf(InputError);
     as('purchaseHead');
-    const draftPrDetail = await purchaseRequisitionApi.detail(draftPr?.id ?? 0);
-    expect(draftPrDetail.sourceDraft).toMatchObject({ id: draft.id, draftStatus: 'EXECUTED', message: { id: message.id } });
+    expect(readDb((t) => actionDraftView(t, draft.id))).toMatchObject({ draftStatus: 'EXECUTED', message: { id: message.id } });
     at('2026-10-09T10:00:00+09:00');
-    await approvalApi.approve({ purchaseRequisitionId: draftPrDetail.id, expectedUpdatedAt: draftPrDetail.updatedAt });
+    await approve(draftPr?.id ?? 0, draftPr?.updatedAt ?? '');
     const draftEvents = readDb((t) => t.businessEvent.filter((e) => e.actionDraftId === draft.id).sort((x, y) => x.id - y.id));
     expect(draftEvents.map((e) => e.businessEventType)).toEqual(['DRAFT_CREATED', 'DRAFT_CONFIRMED', 'PURCHASE_REQUISITION_CREATED', 'DRAFT_EXECUTED', 'PURCHASE_REQUISITION_APPROVED']);
     expect(draftEvents[0].salesOrderId).toBe(salesOrderIdOf('SO-2609-003'));

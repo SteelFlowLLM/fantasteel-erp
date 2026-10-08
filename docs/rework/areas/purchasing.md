@@ -87,7 +87,7 @@
 ## 9. 확인
 
 - `npm run typecheck -w @fantasteel/client` 0 오류.
-- `npm run test -w @fantasteel/client` 전체 통과. 이 영역 시험: `api/purchasingFlow.test.ts`(15: MRP 계산·기간 밖·권한·기간 오류, 톤 정규화, 등록·알림·작업 로그, MRP 줄 연결·중복 금지, 입력 확인·COM-003, COM-002·PUR-001, 상세 권한, 승인함·COM-001·결과 알림, 반려 → 재요청, PUR-002·공급업체별 발주·ORDERED, 부분 입고·RM LOT·PUR-003·입력 오류, 입고 권한), `features/purchasing/lib/purchasingView.test.ts`(5).
+- `npm run test -w @fantasteel/client` 전체 통과. 이 영역 시험: `api/purchasingFlow.test.ts`(15: MRP 계산·기간 밖·권한·기간 오류, 톤 정규화, 등록·알림·작업 로그, MRP 줄 연결·중복 금지, 입력 확인·COM-003, COM-002·PUR-001, 상세 권한, 승인함·COM-001·결과 알림, 반려 → 재요청, PUR-002·공급업체별 발주·ORDERED, 부분 입고·RM LOT·PUR-003·입력 오류, 입고 권한), `features/purchasing/lib/purchasingView.test.ts`(5). (2026-10-08: 구매 화면 api의 가짜 DB 분기를 지우며 `purchasingFlow`·`purchasingResubmit`도 삭제. 같은 규칙은 서버 구매 테스트가 본다)
 
 ## 10. 검토 반영 (2026-10-02)
 
