@@ -1,12 +1,9 @@
 // 조직 조회: 사원·부서(트리)·직급·역할과 권한 (REQ-AUTH-002·003, REQ-ORG-001~004).
-// 등록·수정은 2단계(조직·기준정보 화면)에서 더한다.
-// 서버 모드에서는 관리 화면이 쓰는 조회(listManagedEmployees·부서·직급·역할)와 조직도(getOrgChart: 메신저·업무방 멤버 선택)가 서버를 읽는다.
-// listEmployees는 서버에서 관리자 전용(GET employees)이라 가짜 DB를 읽는다(서버 모드에서 멤버 선택은 조직도만 쓴다).
+// 관리 화면이 쓰는 조회(listManagedEmployees·부서·직급·역할)와 조직도(getOrgChart: 메신저·업무방 멤버 선택)는 두 데이터 모드 모두 서버를 읽는다.
+// listEmployees는 서버에서 관리자 전용(GET employees)이라 가짜 DB를 읽는다(업무 담당자 선택의 가짜 DB 모드만 쓴다).
 import type { Permission, PermissionLevel, RoleCode } from '@/codes';
-import { PERMISSIONS } from '@/codes';
 import { mockQuery } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
-import { compareEmployees, employeeBasicsOf, headDepartmentIdsOf, orderDepartments } from '@/api/orgViews';
+import { compareEmployees, employeeBasicsOf, headDepartmentIdsOf } from '@/api/orgViews';
 import type { EmployeeListQuery } from '@/api/queryKeys';
 import { serverOrganizationApi } from '@/api/server/organization';
 import type { MockTables } from '@/mock/schema';
@@ -116,87 +113,18 @@ function listEmployeeViews(tables: Readonly<MockTables>, query: EmployeeListQuer
     });
 }
 
-function buildOrgChart(tables: Readonly<MockTables>, parentId: number | null): OrgChartNode[] {
-  const gradeOf = (jobGradeId: number) => tables.jobGrade.find((g) => g.id === jobGradeId)?.jobGradeName ?? '-';
-  const compareMembers = compareEmployees(tables);
-  return orderDepartments(tables)
-    .filter(({ department }) => department.parentId === parentId)
-    .map(({ department }) => {
-      const head = tables.employee.find((e) => e.id === department.headEmployeeId);
-      return {
-        id: department.id,
-        departmentCode: department.departmentCode,
-        departmentName: department.departmentName,
-        head: head ? { id: head.id, employeeName: head.employeeName, jobGradeName: gradeOf(head.jobGradeId) } : null,
-        members: tables.employee
-          .filter((e) => e.isActive && e.departmentId === department.id)
-          .sort(compareMembers)
-          .map((e) => ({ id: e.id, employeeNo: e.employeeNo, employeeName: e.employeeName, jobGradeName: gradeOf(e.jobGradeId), isHead: e.id === department.headEmployeeId })),
-        children: buildOrgChart(tables, department.id),
-      };
-    });
-}
-
 export const directoryApi = {
+  /** 업무 담당자 선택(가짜 DB 모드)용. 서버의 사원 목록은 관리자 전용이라 가짜 DB를 읽는다 */
   listEmployees: (query: EmployeeListQuery = {}): Promise<EmployeeView[]> => mockQuery((tables) => listEmployeeViews(tables, query)),
 
   /** 사원 관리·부서 화면용 (서버는 사원 관리 조회 권한 필요) */
-  listManagedEmployees: (query: EmployeeListQuery = {}): Promise<EmployeeView[]> =>
-    isServerDataSource() ? serverOrganizationApi.listEmployees(query) : mockQuery((tables) => listEmployeeViews(tables, query)),
+  listManagedEmployees: (query: EmployeeListQuery = {}): Promise<EmployeeView[]> => serverOrganizationApi.listEmployees(query),
 
-  listDepartments: (): Promise<DepartmentView[]> =>
-    isServerDataSource() ? serverOrganizationApi.listDepartments() : mockQuery((tables) =>
-      orderDepartments(tables).map(({ department, depth }) => {
-        const parent = tables.department.find((d) => d.id === department.parentId);
-        const head = tables.employee.find((e) => e.id === department.headEmployeeId);
-        return {
-          id: department.id,
-          departmentCode: department.departmentCode,
-          departmentName: department.departmentName,
-          parentId: department.parentId,
-          parentName: parent?.departmentName ?? null,
-          headEmployeeId: department.headEmployeeId,
-          headEmployeeName: head?.employeeName ?? null,
-          sortOrder: department.sortOrder,
-          depth,
-          memberCount: tables.employee.filter((e) => e.isActive && e.departmentId === department.id).length,
-          createdAt: department.createdAt,
-          updatedAt: department.updatedAt,
-        };
-      }),
-    ),
+  listDepartments: (): Promise<DepartmentView[]> => serverOrganizationApi.listDepartments(),
 
-  getOrgChart: (): Promise<OrgChartNode[]> => (isServerDataSource() ? serverOrganizationApi.getOrgChart() : mockQuery((tables) => buildOrgChart(tables, null))),
+  getOrgChart: (): Promise<OrgChartNode[]> => serverOrganizationApi.getOrgChart(),
 
-  listJobGrades: (): Promise<JobGradeView[]> =>
-    isServerDataSource() ? serverOrganizationApi.listJobGrades() : mockQuery((tables) =>
-      [...tables.jobGrade]
-        .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
-        .map((g) => ({
-          id: g.id,
-          jobGradeCode: g.jobGradeCode,
-          jobGradeName: g.jobGradeName,
-          sortOrder: g.sortOrder,
-          employeeCount: tables.employee.filter((e) => e.jobGradeId === g.id).length,
-          updatedAt: g.updatedAt,
-        })),
-    ),
+  listJobGrades: (): Promise<JobGradeView[]> => serverOrganizationApi.listJobGrades(),
 
-  listRoles: (): Promise<RoleView[]> =>
-    isServerDataSource() ? serverOrganizationApi.listRoles() : mockQuery((tables) =>
-      tables.role.map((role) => {
-        const rows = tables.rolePermission.filter((p) => p.roleId === role.id);
-        return {
-          id: role.id,
-          roleCode: role.roleCode,
-          roleName: role.roleName,
-          permissions: PERMISSIONS.flatMap((permission) => {
-            const row = rows.find((p) => p.permission === permission);
-            return row ? [{ permission, permissionLevel: row.permissionLevel }] : [];
-          }),
-          employeeCount: tables.employee.filter((e) => e.roleId === role.id).length,
-          updatedAt: role.updatedAt,
-        };
-      }),
-    ),
+  listRoles: (): Promise<RoleView[]> => serverOrganizationApi.listRoles(),
 };

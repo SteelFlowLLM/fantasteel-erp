@@ -65,9 +65,3 @@ export function weightedPlannedYield(parts: readonly YieldPart[]): string | null
   );
   return ratioText(planned, input);
 }
-
-/**
- * Agent 위험 감지 예시(불합격률 상승, REQ-AGT-004)에 보이는 불합격률 기준 (0~1).
- * 문서에 정한 값이 없어 예시용으로 5%를 둔다. 불합격률 위젯에는 기준 초과 표시를 하지 않는다(막대·숫자로 충분)
- */
-export const REJECT_RATE_ALERT = 0.05;

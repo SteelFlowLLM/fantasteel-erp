@@ -91,7 +91,7 @@ export function OrganizationScreen() {
         ]}
       />
       {tab === 'departments' ? <DepartmentTab canEdit={canEdit} /> : null}
-      {tab === 'job-grades' ? <JobGradeTab canEdit={canEdit} /> : null}
+      {tab === 'job-grades' ? <JobGradeTab /> : null}
       {tab === 'permissions' ? <PermissionMatrixTab canEdit={canEdit} draft={draft} onDraftChange={setDraft} highlightRole={highlightRole} /> : null}
       {tab === 'org-chart' ? <OrgChartTab /> : null}
     </PageMain>

@@ -6,7 +6,6 @@ import { Fragment, type ReactNode } from 'react';
 import type { ProcessFlowData } from '@/api/dashboard';
 import type { RoleCode } from '@/codes';
 import { Icon } from '@/components/Icon';
-import { Tag } from '@/components/Tag';
 import { WidgetBody, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { SCREEN, canOpenScreen, type ScreenDef } from '@/features/shell/screens';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
@@ -21,6 +20,10 @@ interface Stage {
   /** null = 볼 권한 없음 */
   value: ReactNode | null;
   detail?: string;
+  /** 내 업무 단계가 0건일 때 보여 줄 말 (할 일이 없다는 것을 바로 알게) */
+  emptyText?: string;
+  /** 0건인지 보려고 두는 건수 (emptyText가 있는 단계만) */
+  total?: number;
 }
 
 const count = (n: number, unit: string) => (
@@ -52,6 +55,8 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       screen: SCREEN.inspections,
       value: inspections && count(inspections.pendingCount, 'LOT'),
       detail: inspections ? `히트 ${inspections.heatCount} · 슬래브 ${inspections.slabCount} · 코일 ${inspections.coilCount}` : undefined,
+      emptyText: '판정할 LOT 없음',
+      total: inspections?.pendingCount,
     },
     {
       key: 'inventories',
@@ -88,6 +93,7 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
     <div className="flex min-h-full items-stretch gap-1.5 px-4 py-3">
       {stagesOf(data).map((stage, index) => {
         const isMine = stage.key === myStage;
+        const isEmptyMine = isMine && stage.emptyText !== undefined && stage.total === 0;
         const inner = (
           <>
             <span className="flex min-w-0 items-center gap-1">
@@ -95,9 +101,8 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 {stage.label}
               </span>
               {isMine ? (
-                <Tag size="sm" tone="run" className="flex-none">
-                  내 업무
-                </Tag>
+                // 칸 배경이 run-bg라 같은 색 태그(Tag tone="run")는 묻힌다: 진한 바탕에 흰 글자로
+                <span className="inline-flex min-h-4 flex-none items-center rounded-full bg-run px-1.5 text-2xs font-semibold whitespace-nowrap text-white">내 업무</span>
               ) : null}
             </span>
             {stage.value === null ? (
@@ -106,19 +111,29 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 권한 없음
               </span>
             ) : (
-              <span className={cn('text-2xl font-bold whitespace-nowrap tabular-nums', isMine ? 'text-run' : 'text-ink')}>{stage.value}</span>
+              <span className={cn('font-bold whitespace-nowrap tabular-nums', isMine ? 'text-[34px] leading-none text-run' : 'text-2xl text-ink')}>{stage.value}</span>
             )}
             {stage.value !== null && stage.detail ? (
-              <span className="truncate text-cap font-medium text-ink-2" title={stage.detail}>
-                {stage.detail}
+              <span className="truncate text-cap font-medium text-ink-2" title={isEmptyMine ? `${stage.emptyText} · ${stage.detail}` : stage.detail}>
+                {/* 0건이면 내역도 모두 0이라 할 일이 없다는 말만 둔다 (내역은 마우스를 올리면 보인다) */}
+                {isEmptyMine ? (
+                  <span className="font-semibold text-ok">
+                    <Icon name="check" size="sm" className="mr-0.5 align-[-2px]" />
+                    {stage.emptyText}
+                  </span>
+                ) : (
+                  stage.detail
+                )}
               </span>
             ) : null}
           </>
         );
         const boxClass = cn(
-          'flex min-w-[104px] flex-1 flex-col justify-center gap-1 rounded-md border px-3 py-2',
-          // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식)
-          isMine ? 'border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run)]' : 'border-line-strong bg-surface',
+          'flex min-w-[104px] flex-col justify-center gap-1 rounded-md border px-3 py-2',
+          // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식). 내 업무 칸은 조금 넓게
+          isMine ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]' : 'flex-1 border-line-strong bg-surface',
+          // 내 업무가 있으면 나머지 단계는 흐리게 (숫자·바로가기는 그대로, 올리면 또렷하게)
+          myStage && !isMine && 'opacity-60 hover:opacity-100',
         );
         const canOpen = stage.value !== null && canOpenScreen(me, stage.screen.access);
         return (

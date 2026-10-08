@@ -1,5 +1,5 @@
 // 조직 관리 화면 ↔ 서버 API (server/src/modules/organization). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 사원·부서·직급·역할 id는 서버 id를 그대로 쓴다. ERD에 없는 칸(직급 코드·부서 정렬 순서·최근 접속)은 빈 값으로 두고 화면이 서버 모드에서 숨긴다.
+// 사원·부서·직급·역할 id는 서버 id를 그대로 쓴다. ERD에 없는 칸(직급 코드·부서 정렬 순서·최근 접속)은 빈 값으로 둔다.
 import type {
   DepartmentNode,
   PageResult,
@@ -11,9 +11,10 @@ import type {
 import type { EmployeeCreateInput, EmployeeSaved, EmployeeUpdateInput } from '@/api/adminEmployees';
 import type { DeleteInput, DepartmentCreateInput, DepartmentUpdateInput, JobGradeCreateInput, JobGradeUpdateInput, OrgChartDepartmentView, RolePermissionsInput, SavedRef } from '@/api/adminOrganization';
 import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api/directory';
-import { InputError } from '@/api/errors';
+import { FieldErrors, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { EmployeeListQuery } from '@/api/queryKeys';
+import { DEPARTMENT_CODE_PATTERN, DEPARTMENT_CODE_RULE_TEXT, EMPLOYEE_NO_PATTERN, EMPLOYEE_NO_RULE_TEXT } from '@/features/admin/lib/orgRules';
 
 const PAGE_SIZE = 100;
 
@@ -96,9 +97,14 @@ async function listRoles(): Promise<RoleView[]> {
 
 const savedEmployee = (e: ServerEmployeeView): EmployeeSaved => ({ id: e.id, employeeNo: e.employeeNo, employeeName: e.employeeName, isActive: e.isActive });
 
+/** 사원번호 형식(가정값, orgRules)은 서버에 검사가 없어 화면에서 먼저 확인한다 */
 async function createEmployee(input: EmployeeCreateInput): Promise<EmployeeSaved> {
-  const { employeeNo, password, employeeName, departmentId, jobGradeId, roleId } = input;
-  if (!password) throw new InputError('비밀번호를 입력해 주세요', { password: '비밀번호를 입력해 주세요' });
+  const { password, employeeName, departmentId, jobGradeId, roleId } = input;
+  const employeeNo = input.employeeNo.trim();
+  const errors = new FieldErrors();
+  if (employeeNo && !EMPLOYEE_NO_PATTERN.test(employeeNo)) errors.add('employeeNo', EMPLOYEE_NO_RULE_TEXT);
+  if (!password) errors.add('password', '비밀번호를 입력해 주세요');
+  errors.throwIfAny();
   return savedEmployee(await serverRequest<ServerEmployeeView>('POST', '/employees', { body: { employeeNo, password, employeeName, departmentId, jobGradeId, roleId } }));
 }
 
@@ -114,9 +120,11 @@ async function setEmployeeActive(id: number, isActive: boolean): Promise<Employe
 
 const savedDepartment = (d: ServerDepartmentView): SavedRef => ({ id: d.id, name: d.departmentName });
 
-/** 부서 정렬 순서는 ERD에 없어 보내지 않는다 */
+/** 부서 코드 형식(가정값, orgRules)은 서버에 검사가 없어 화면에서 먼저 확인한다 */
 async function createDepartment(input: DepartmentCreateInput): Promise<SavedRef> {
-  const { departmentCode, departmentName, parentId } = input;
+  const departmentCode = input.departmentCode.trim().toUpperCase();
+  if (departmentCode && !DEPARTMENT_CODE_PATTERN.test(departmentCode)) throw new InputError('부서 코드를 확인해 주세요', { departmentCode: DEPARTMENT_CODE_RULE_TEXT });
+  const { departmentName, parentId } = input;
   return savedDepartment(await serverRequest<ServerDepartmentView>('POST', '/departments', { body: { departmentCode, departmentName, parentId } }));
 }
 

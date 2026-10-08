@@ -1,14 +1,12 @@
 import type { SessionUser } from '@/api/session';
 import type { NavBadgeKey } from '@/features/shell/navigation';
-import { useMockEmployeeId } from '@/hooks/useMe';
 import { useApprovalWaitingCount, useUnreadChatCount, useUnreadNotificationCount } from '@/hooks/useShellCounts';
 import { isDepartmentHead } from '@/lib/permissions';
 
-/** 레일 배지 숫자: 안 읽은 알림 · 안 읽은 메시지 · 승인 대기 구매요청 (메시지는 아직 가짜 DB라 가짜 DB 사원 id로 센다) */
+/** 레일 배지 숫자: 안 읽은 알림 · 안 읽은 메시지 · 승인 대기 구매요청 (모두 서버, 로그인 사원 id) */
 export function useNavBadges(me: SessionUser): Record<NavBadgeKey, number> {
-  const mockEmployeeId = useMockEmployeeId();
   const notifications = useUnreadNotificationCount(me.employeeId).data ?? 0;
   const chat = useUnreadChatCount(me.employeeId).data ?? 0;
-  const approvals = useApprovalWaitingCount(mockEmployeeId, isDepartmentHead(me)).data ?? 0;
+  const approvals = useApprovalWaitingCount(me.employeeId, isDepartmentHead(me)).data ?? 0;
   return { notifications, chat, approvals };
 }

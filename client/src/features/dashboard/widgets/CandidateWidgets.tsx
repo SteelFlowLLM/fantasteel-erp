@@ -116,32 +116,49 @@ const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate:
 function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
   // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
-  const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
+  // 판정된 검사가 없는 강종은 막대 줄 대신 한 줄에 이름만 둔다: 0%(불합격 없음)와 "모름"이 같은 빈 막대로 보이지 않게
+  const inspected = data.grades.filter((g) => g.inspectedCount > 0);
+  const notInspected = data.grades.filter((g) => g.inspectedCount === 0);
   const isPass = mode === 'pass';
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
-      {data.grades.map((g) => {
+      {inspected.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
         const { rate, count } = rateOf(g, mode);
+        const noReject = !isPass && g.failedCount === 0;
         // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
           <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
-            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
+            {noReject ? (
+              <div className="flex h-3.5 items-center overflow-hidden rounded-xs bg-ok-bg pl-2 text-2xs font-semibold text-ok">불합격 없음</div>
+            ) : (
+              <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
+            )}
             <span className="text-right tabular-nums">
-              <b className={cn('font-semibold', rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)}>{fmtPct(rate, 1)}</b>{' '}
+              <b className={cn('font-semibold', noReject ? 'text-ok' : rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)}>{fmtPct(rate, 1)}</b>{' '}
               <span className="text-cap text-ink-3">
                 {count}/{g.inspectedCount}건
               </span>
             </span>
             <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
-              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
+              {byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ')}
             </span>
           </div>
         );
       })}
+      {inspected.length === 0 ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
+      {notInspected.length > 0 ? (
+        <div className={cn('flex flex-wrap items-center gap-1.5 text-cap text-ink-3', inspected.length > 0 && 'border-t border-dashed border-line-strong pt-2')}>
+          <b className="font-semibold">판정된 검사 없는 강종</b>
+          {notInspected.map((g) => (
+            <span key={g.steelGradeId} className="rounded-xs bg-surface-3 px-1.5 font-mono">
+              {g.steelGradeCode}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100%</span>
-      {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
     </div>
   );
 }

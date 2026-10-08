@@ -113,12 +113,14 @@ describe('조직 서버 어댑터 — 변경', () => {
     return undefined;
   };
 
-  it('사원 등록은 비밀번호를 함께 보내고, 비밀번호가 없으면 서버를 부르지 않는다', async () => {
+  it('사원 등록은 비밀번호를 함께 보내고, 비밀번호가 없거나 사원번호가 숫자 7자리가 아니면 서버를 부르지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
     const input = { employeeNo: '2610099', employeeName: '새사원', departmentId: 2, jobGradeId: 1, roleId: 3 };
     const missing = await employeeAdminApi.create(input).catch((e: unknown) => e);
     expect(missing).toBeInstanceOf(InputError);
     expect((missing as InputError).fieldErrors).toHaveProperty('password');
+    const badNo = await employeeAdminApi.create({ ...input, employeeNo: '26100', password: 'pass-1' }).catch((e: unknown) => e);
+    expect((badNo as InputError).fieldErrors).toEqual({ employeeNo: expect.any(String) });
     expect(calls).toEqual([]);
 
     const saved = await employeeAdminApi.create({ ...input, password: 'pass-1' });
@@ -139,10 +141,12 @@ describe('조직 서버 어댑터 — 변경', () => {
     ]);
   });
 
-  it('부서 등록은 정렬 순서를, 부서 수정은 부서코드를 보내지 않는다', async () => {
+  it('부서 등록은 부서코드를 대문자로 형식 확인해 보내고(틀리면 서버를 부르지 않음), 부서 수정은 부서코드를 보내지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
-    const created = await departmentAdminApi.create({ departmentCode: 'T-1', departmentName: '테스트부', parentId: 2, sortOrder: '3' });
-    await departmentAdminApi.update({ id: 7, departmentCode: 'CHANGED', departmentName: '테스트부', parentId: null, headEmployeeId: 11, sortOrder: '3', expectedUpdatedAt: AT });
+    const invalid = await departmentAdminApi.create({ departmentCode: '-PRD', departmentName: '테스트부', parentId: null }).catch((e: unknown) => e);
+    expect((invalid as InputError).fieldErrors).toEqual({ departmentCode: expect.any(String) });
+    const created = await departmentAdminApi.create({ departmentCode: ' t-1 ', departmentName: '테스트부', parentId: 2 });
+    await departmentAdminApi.update({ id: 7, departmentCode: 'CHANGED', departmentName: '테스트부', parentId: null, headEmployeeId: 11, expectedUpdatedAt: AT });
 
     expect(created).toEqual({ id: 7, name: '테스트부' });
     expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
@@ -151,17 +155,17 @@ describe('조직 서버 어댑터 — 변경', () => {
     ]);
   });
 
-  it('직급 등록은 표시 순서를 정수로 보내고 직급 코드는 보내지 않는다 (정수가 아니면 서버를 부르지 않음)', async () => {
+  it('직급 등록은 표시 순서를 정수로 보낸다 (정수가 아니면 서버를 부르지 않음)', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
-    expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: ' 0 ' })).toEqual({ id: 9, name: '수석' });
-    expect(await jobGradeAdminApi.create({ jobGradeCode: '', jobGradeName: '수석', sortOrder: '1.5' }).catch((e: unknown) => e)).toBeInstanceOf(InputError);
+    expect(await jobGradeAdminApi.create({ jobGradeName: '수석', sortOrder: ' 0 ' })).toEqual({ id: 9, name: '수석' });
+    expect(await jobGradeAdminApi.create({ jobGradeName: '수석', sortOrder: '1.5' }).catch((e: unknown) => e)).toBeInstanceOf(InputError);
     expect(calls.map((c) => c.body)).toEqual([{ jobGradeName: '수석', sortOrder: 0 }]);
   });
 
   it('부서 삭제·직급 삭제는 DELETE, 직급 수정은 이름과 정수 표시 순서만 PATCH로 보낸다 (API-271·272·273)', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
     expect(await departmentAdminApi.remove({ id: 7, expectedUpdatedAt: AT })).toEqual({ id: 7, name: '테스트부' });
-    expect(await jobGradeAdminApi.update({ id: 9, jobGradeCode: '', jobGradeName: '수석', sortOrder: '2', expectedUpdatedAt: AT })).toEqual({ id: 9, name: '수석' });
+    expect(await jobGradeAdminApi.update({ id: 9, jobGradeName: '수석', sortOrder: '2', expectedUpdatedAt: AT })).toEqual({ id: 9, name: '수석' });
     expect(await jobGradeAdminApi.remove({ id: 9, expectedUpdatedAt: AT })).toEqual({ id: 9, name: '수석' });
     expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
       ['DELETE', '/departments/7', undefined],
