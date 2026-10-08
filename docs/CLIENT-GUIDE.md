@@ -33,9 +33,9 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
 - 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
-### 서버 연결 (영업·출하·품질·생산·구매·LOT·재고·작업 로그·조직 관리·업무·알림·기준정보 화면, 선택)
+### 서버 연결 (영업·출하·품질·생산·구매·LOT·재고·작업 로그·조직 관리·업무·알림·메신저 화면, 선택)
 
-수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 기준정보 화면과 대시보드 위젯 6개(공정별 수율·납기 위험 수주·강종별 불합격률·출하 실적·여재 보유 기간·생산량)는 실제 서버(`server/`)로 바꿔 볼 수 있다. 기본은 가짜 DB이고, 다른 화면은 서버 모드에서도 가짜 DB를 쓴다.
+수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)로 바꿔 볼 수 있다. 기본은 가짜 DB이고, 다른 화면은 서버 모드에서도 가짜 DB를 쓴다.
 
 1. `client/.env.example`을 `client/.env.local`로 복사하고 `NEXT_PUBLIC_DATA_SOURCE=server`로 바꾼다.
 2. `npm run dev`로 DB·서버·화면을 띄운다(이미 떠 있으면 화면 서버만 다시 띄운다).
@@ -43,7 +43,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 
 - 연결 방식: `api/salesOrders.ts`·`api/shipmentRequests.ts`·`api/dashboard.ts`가 출처에 따라 가짜 DB 또는 `api/server/*.ts`를 부른다. 화면 컴포넌트는 그대로다.
 - 고객사·규격 id는 화면에서 계속 가짜 DB id를 쓰고, 서버와 주고받을 때 코드(고객사 코드·규격 코드)와 이름으로 바꾼다(`api/server/masterIds.ts`). 사원·부서 id는 로그인 사원(`useMe()`)과 같이 서버 id다. 화면 첫 코일 규격(2.3×1200×1,065,000)은 서버 시드(2.5×1200×980,000)에 없어 서버 모드에서 고를 수 없다.
-- 서버에 아직 없는 기능(수주 상세의 생산 연결, 취소 창의 구매 진행 영향, 업무방, 재생산 계획)은 서버 모드에서 비어 있거나 "서버와 연결되지 않았어요" 오류다.
+- 서버에 아직 없는 기능(수주 상세의 생산 연결, 취소 창의 구매 진행 영향, 재생산 계획)은 서버 모드에서 비어 있거나 "서버와 연결되지 않았어요" 오류다.
 - 서버 데이터는 '시드로 초기화'로 되돌아가지 않는다. 서버 DB는 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
 - 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 서버 모드면 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. 가짜 DB에만 있는 값(여재 표시 시각, 배정 확정자)은 비어 있다.
 - 구매 화면: `api/purchasing.ts`·`api/approvals.ts`·`api/goodsReceipts.ts`·`api/mrp.ts`가 `api/server/purchaseRequisitions.ts`·`purchaseOrders.ts`·`mrp.ts`를 부른다. 구매요청·발주·입고·생산계획·사원·부서 id는 서버 id, 원료 id는 화면 id다. 상세의 승인 가능 여부·요청자 직급·부서장 이름과 등록 창의 요청자·부서·부서장은 로그인 사원과 조직도로 판단한다. 반려 일시·발주자·입고 확정자는 서버가 작업 로그에서 읽어 준다. Message → ERP 원본 초안은 서버 조회가 없어 비어 있다. MRP 결과를 보려면 생산계획이 있어야 해서 `seed:demo`가 필요하다.
@@ -52,12 +52,17 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - LOT 추적 화면: `api/lotTrace.ts`가 `api/server/lotTrace.ts`를 부른다. 화면 주소의 LOT 번호로 서버 LOT id를 찾아 추적하므로 생산·검사·출고 화면의 LOT 링크가 맞는다. 출하요청 번호로 시작하는 추적은 그 출하요청의 배정 LOT마다 역추적해 합친다(출하요청 조회 권한이 없는 구매·생산은 권한 없음). LOT 번호 검색은 앞부분 일치다. 서버 응답에 없는 값(공급업체, LOT의 생산계획, 배정 확정 시각·수주, 소진·출고·여재 시각)은 비어 있다.
 - 재고 화면: `api/inventories.ts`가 `api/server/inventories.ts`를 부른다. 서버 재고의 `onHandQty`는 합격 재고라 화면의 합격 매수로 보이고, 재고 매수는 재고 상태 LOT 수로 센다(판정 대기에 상위 히트만 불합격인 LOT도 섞인다). LOT 목록은 제품·히트 LOT 상세로 히트·배정·처리 상태를 채운다. 원료 입고일·입고 번호(입고 조회 권한)와 입고예정(발주 조회 권한)은 권한이 있을 때만 보인다. 여재는 서버가 계산하지 않아 여재 탭이 비어 있다.
 - 작업 로그: `api/businessEvents.ts`(작업 로그 화면), 수주 상세 이력(`api/salesOrders.ts`), 검사·불합격 LOT 이력(`api/server/inspections.ts`·`dispositions.ts`), 대시보드 최근 작업 로그(`api/dashboard.ts`)가 `api/server/businessEvents.ts`로 `GET /business-events`를 부른다. 대상 번호는 기록 데이터(변경 후·전)의 번호로 보이고, 주체의 부서·직급과 원본 메시지 링크는 서버 응답에 없어 비어 있다.
+- 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. ERD·API 명세에 없는 기능(부서 정렬 순서·삭제, 직급 코드·수정·삭제, 최근 접속)은 서버 모드에서 숨기고, 사원 등록은 비밀번호를 받는다. 메신저·업무방의 멤버 선택은 서버 조직도(`GET /departments`)를 쓴다(`directoryApi.getOrgChart`). 사원 목록(`GET /employees`)은 관리자 전용이라 `directoryApi.listEmployees`는 서버 모드에서도 가짜 DB다.
+- 업무·알림: `api/tasks.ts`·`api/notifications.ts`가 `api/server/tasks.ts`·`notifications.ts`를 부른다. 업무 목록은 내 담당 업무만이고(서버 `GET /tasks`), 업무 추가의 담당자는 조직도(`GET /departments`)에서 고른다. 서버 모드에서는 범위 선택(내가 만든 업무·전체), 요청자, 수정, 연결 화면을 숨기고 마감일이 필수다(`task`에 등록자·연결 화면 칸이 없고 수정 API가 없다). 알림은 내용 한 줄이라 제목 자리에 보이고 부서 표시가 없다. 읽음·모두 읽음은 서버 임시 API(`POST notifications/:id/read`·`read-all`)를 쓴다. 알림은 서버가 본 거래 안에서 보낸다(업무 지정, 구매요청 승인 요청·결과). 멘션·업무방 메시지 알림은 서버가 메시지와 함께 만든다.
 - 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. ERD·API 명세에 없는 기능(부서 정렬 순서·삭제, 직급 코드·수정·삭제, 최근 접속)은 서버 모드에서 숨기고, 사원 등록은 비밀번호를 받는다. 메신저·업무방의 멤버 선택은 그 화면들이 가짜 DB라 서버 모드에서도 가짜 DB 사원을 쓴다.
 - 업무·알림: `api/tasks.ts`·`api/notifications.ts`가 `api/server/tasks.ts`·`notifications.ts`를 부른다. 업무 목록은 내 담당 업무만이고(서버 `GET /tasks`), 업무 추가의 담당자는 조직도(`GET /departments`)에서 고른다. 서버 모드에서는 범위 선택(내가 만든 업무·전체), 요청자, 수정, 연결 화면을 숨기고 마감일이 필수다(`task`에 등록자·연결 화면 칸이 없고 수정 API가 없다). 알림은 내용 한 줄이라 제목 자리에 보이고 부서 표시가 없다. 읽음·모두 읽음은 서버 임시 API(`POST notifications/:id/read`·`read-all`)를 쓴다. 알림은 서버가 본 거래 안에서 보낸다(업무 지정, 구매요청 승인 요청·결과). 메신저는 아직 가짜 DB라 안 읽은 메시지 수는 가짜 DB 값이고, 멘션·업무방 메시지 알림은 가짜 DB에만 만들어져 서버 모드 알림함에는 보이지 않는다.
 - 기준정보 화면: `api/masterData.ts`가 `api/server/masterData.ts`를 부른다(API-165~188). 강종·품목·야드 id는 서버 id다. ERD·API 명세에 없는 기능(준비 상태, 모든 삭제, 강종 수정, 사용 여부·참조 표시, 라우팅 공정 빼기·순서 바꾸기, 원단위 비우기)은 서버 모드에서 숨기거나 막는다. 쓰인 규격의 치수 수정은 저장할 때 서버가 MST-002로 거부한다. 원단위·라우팅은 일괄 저장 API가 없어 칸마다 차례로 보낸다(중간에 실패하면 앞 칸만 저장된다).
 - 대시보드 위젯: 납기 위험 수주는 수주 충족 위젯 API, 강종별 불합격률은 검사 목록과 강종, 생산량은 LOT 목록과 품목 이론중량을 화면에서 묶는다. 출하 실적은 `GET /dashboard/widgets/shipment-result`(출고 확정 시각 기준), 공정별 수율은 `GET /dashboard/widgets/process-yield`(완료 실적의 Σ산출 ÷ Σ투입, 투입량 가중 계획 수율)다. 추이 기간은 오늘 포함 최근 30일(가정값). 연주 계획 대비 매수는 서버에 손실 매수가 없어 비어 있다. 여재 보유 기간은 `GET /dashboard/widgets/surplus-age`(미배정 합격 슬래브 − 예약 매수, 생산완료일부터 보유 일수, inventory.md 8-1)다. 진행 중인 코일 수주용으로 만든 슬래브는 여재에서 뺀다.
 - 로그인 쿠키는 브라우저의 모든 탭이 함께 쓴다. 그래서 한 브라우저에서는 한 계정만 쓴다(승인 시연은 시크릿 창이나 다른 브라우저로). 이미 로그인된 브라우저에서 새 탭을 열면 그 사원으로 바로 들어간다. 다른 탭에서 다른 계정으로 로그인하거나 로그아웃하면, 또는 쿠키가 만료(401)되면 안내하고 로그인 화면으로 보낸다(`api/http.ts`의 `onServerSessionLost`).
-- 아직 가짜 DB만 쓰는 화면(업무·알림·메신저·업무방·Message → ERP 초안 등)은 로그인 사원의 사원번호로 가짜 DB 사원을 찾아 쓴다(`api/actor.ts`, 화면은 `useMockEmployeeId()`). 서버에서 새로 등록한 사원은 가짜 DB에 없어 이 화면들을 쓸 수 없다.
+- 메신저: `api/messenger.ts`와 수주 화면의 업무방(`api/salesOrders.ts`의 `workRoom`·`openWorkRoom`)이 `api/server/messenger.ts`를 부른다. 채팅방·메시지·사원 id는 서버 id다(`useMe().employeeId`). 실시간은 셸이 소켓(`hooks/useMessengerSocket.ts`, namespace `/messenger`, 로그인 쿠키로 인증)에 붙어 `message:new`·`room:read`·`room:updated`를 받으면 메신저 조회를 다시 부르고, 연결이 끊겼다 다시 붙으면 놓친 메시지를 읽으려고 메신저 조회를 모두 다시 부른다. 본문의 @이름·@부서는 방 멤버 사원 id로 바꿔 서버에 보낸다(부서 멘션 = 그 부서의 방 멤버). 첨부는 10MB까지, 실행 파일은 막힌다. 서버에 없는 값(시스템 메시지, 방 만든 사람, 첨부 크기·형식, 본문 업무 번호 링크)은 비어 있다. 멤버 초대(`POST /chat-rooms/:id/members`)와 그룹방 이름 바꾸기(`PATCH /chat-rooms/:id`, 방 정보 칸의 [이름 바꾸기])는 두 모드 모두 된다. 업무방은 내가 멤버인 방만 수주 화면에서 찾는다(수주 화면의 '업무방' 버튼은 서버 모드에서 늘 '업무방 열기'로 보이고, 열면 있는 방을 돌려준다).
+- 편의(두 모드 공통): 메시지 옆에 아직 안 읽은 멤버 수(보낸 사람 제외)를 보이고, 방 정보 칸에 대화 검색(본문, 대소문자 무시, 최신순)과 파일 모아보기(첨부만, 최신순)가 있다. 서버 모드는 다른 멤버가 읽으면 소켓 `member:read`로 수가 바로 줄어든다. 검색 결과에서 그 메시지로 이동하는 기능은 아직 없다.
+- 메시지 보내기(두 모드 공통): 누르면 입력창을 비우고 대화에 '보내는 중' 말풍선을 바로 띄운다(`stores/useOutboxStore.ts`, `hooks/useMessenger.ts`의 `useMessageOutbox`). 저장되면 조회를 다시 읽고 말풍선을 지우며, 실패하면 이유와 [다시 보내기]·[삭제]가 있는 '전송 실패' 말풍선으로 남는다. 보관함은 브라우저 메모리라 새로고침하면 사라진다.
+- 아직 가짜 DB만 쓰는 화면(Message → ERP 초안 등)은 로그인 사원의 사원번호로 가짜 DB 사원을 찾아 쓴다(`api/actor.ts`, 화면은 `useMockEmployeeId()`). 서버에서 새로 등록한 사원은 가짜 DB에 없어 이 화면들을 쓸 수 없다.
 
 ## 3. 폴더 (`client/src/`)
 

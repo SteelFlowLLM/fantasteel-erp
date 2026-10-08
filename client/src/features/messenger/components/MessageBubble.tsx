@@ -113,7 +113,20 @@ export function MessageBubble({
       ) : null}
     </div>
   );
-  const time = isGroupEnd ? <time className="flex-none pb-0.5 text-cap text-ink-3">{fmtHM(message.createdAt)}</time> : null;
+  // 안 읽은 사람 수는 메시지마다 달라 묶음 중간에도 보이고, 시각은 묶음 마지막에만 붙인다
+  const unread =
+    message.unreadMemberCount > 0 ? (
+      <span className="text-cap font-semibold text-brand" title={`아직 ${message.unreadMemberCount}명이 읽지 않았어요`} aria-label={`안 읽은 사람 ${message.unreadMemberCount}명`}>
+        {message.unreadMemberCount}
+      </span>
+    ) : null;
+  const time =
+    unread || isGroupEnd ? (
+      <span className={cn('flex flex-none flex-col pb-0.5', mine ? 'items-end' : 'items-start')}>
+        {unread}
+        {isGroupEnd ? <time className="text-cap text-ink-3">{fmtHM(message.createdAt)}</time> : null}
+      </span>
+    ) : null;
 
   if (mine) {
     return (
@@ -170,7 +183,7 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
           {getFileExtension(name) ? ` · ${getFileExtension(name)}` : ''}
         </span>
       </span>
-      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate(messageId)} />
+      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileName: name })} />
     </div>
   );
 }

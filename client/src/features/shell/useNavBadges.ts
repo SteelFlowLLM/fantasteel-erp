@@ -8,7 +8,7 @@ import { isDepartmentHead } from '@/lib/permissions';
 export function useNavBadges(me: SessionUser): Record<NavBadgeKey, number> {
   const mockEmployeeId = useMockEmployeeId();
   const notifications = useUnreadNotificationCount(me.employeeId).data ?? 0;
-  const chat = useUnreadChatCount(mockEmployeeId).data ?? 0;
+  const chat = useUnreadChatCount(me.employeeId).data ?? 0;
   const approvals = useApprovalWaitingCount(mockEmployeeId, isDepartmentHead(me)).data ?? 0;
   return { notifications, chat, approvals };
 }

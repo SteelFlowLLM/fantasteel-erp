@@ -1,5 +1,10 @@
 import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 
+/** 메시지 검색어 최대 길이 */
+export const MESSAGE_SEARCH_QUERY_MAX = 100;
+/** 메시지 검색 결과 기본·최대 개수 */
+export const MESSAGE_SEARCH_SIZE = 30;
+
 /** 메시지 본문 최대 길이 (ERD는 text라 제한이 없다. 화면 입력과 같은 4000자로 둔다) */
 export const MESSAGE_CONTENT_MAX = 4000;
 /** 그룹방 이름 최대 길이 */
@@ -31,6 +36,7 @@ export interface ChatMemberView {
   id: number;
   employeeNo: string;
   employeeName: string;
+  departmentId: number;
   departmentName: string;
   jobGradeName: string;
   isHead: boolean;
@@ -88,7 +94,10 @@ export interface ChatMessageView {
   senderJobGradeName: string;
   isMine: boolean;
   content: string | null;
+  /** 첨부 파일 이름. 내려받기는 GET attachments/:메시지 id */
   attachmentName: string | null;
+  /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
+  unreadMemberCount: number;
   createdAt: string;
 }
 
@@ -102,4 +111,56 @@ export interface ChatMessagePage {
 export interface CreateChatRoomResult {
   id: number;
   reused: boolean;
+}
+
+/** 첨부 파일 최대 크기 (REQ-MSG-003 "구현 단계에서 정함" → 2026-10-07 결정 10MB) */
+export const MESSAGE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/** 첨부를 막는 확장자: 실행 파일만 (2026-10-07 결정) */
+export const BLOCKED_ATTACHMENT_EXTENSIONS = ['exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'ps1', 'vbs', 'js', 'jar', 'sh', 'app', 'dll'] as const;
+
+/** 멤버 초대 결과: 새로 들어온 사원 수 (이미 멤버인 사원은 건너뛴다) */
+export interface InviteChatMembersResult {
+  chatRoomId: number;
+  addedCount: number;
+}
+
+/** 방 이름 바꾸기 결과 (그룹방만). 비우면 null → 목록에서는 멤버 이름으로 보인다 */
+export interface RenameChatRoomResult {
+  id: number;
+  chatRoomName: string | null;
+  displayName: string;
+}
+
+/** 읽음 위치 갱신 결과 */
+export interface ChatRoomReadResult {
+  chatRoomId: number;
+  lastReadMessageId: number | null;
+  unreadCount: number;
+}
+
+// ── 실시간 (WebSocket, namespace /messenger) ─────────────
+
+export const MESSENGER_SOCKET_NAMESPACE = '/messenger';
+
+export const MESSENGER_EVENT = {
+  /** 새 메시지. 페이로드 ChatMessageView (isMine은 받는 사원 기준) */
+  MESSAGE_NEW: 'message:new',
+  /** 내 읽음 위치가 바뀜 (다른 탭·기기 동기화). 페이로드 ChatRoomReadEvent */
+  ROOM_READ: 'room:read',
+  /** 방이 생기거나 멤버가 바뀜. 페이로드 ChatRoomUpdatedEvent */
+  ROOM_UPDATED: 'room:updated',
+  /** 다른 멤버가 읽음 위치를 옮김 (메시지별 안 읽은 사람 수 갱신). 페이로드 ChatMemberReadEvent */
+  MEMBER_READ: 'member:read',
+} as const;
+
+export interface ChatMemberReadEvent {
+  chatRoomId: number;
+  employeeId: number;
+  lastReadMessageId: number | null;
+}
+
+export type ChatRoomReadEvent = ChatRoomReadResult;
+
+export interface ChatRoomUpdatedEvent {
+  chatRoomId: number;
 }

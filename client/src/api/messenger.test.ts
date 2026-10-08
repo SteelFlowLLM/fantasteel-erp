@@ -157,9 +157,9 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect(sent.file).toEqual({ name: '메모.txt', size: 5, mimeType: 'text/plain' });
 
     actAs(SEED_EMPLOYEE_NO.quality);
-    expect(await messengerApi.getFile(sent.id)).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
+    expect(await messengerApi.getFile({ messageId: sent.id, fileName: '' })).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
     actAs(SEED_EMPLOYEE_NO.purchase);
-    await expect(messengerApi.getFile(sent.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(messengerApi.getFile({ messageId: sent.id, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
     expect((await messengerApi.listRooms()).map((r) => r.id)).not.toContain(roomId);
   });
 
@@ -192,6 +192,38 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
 
     const direct = await messengerApi.createRoom({ chatRoomType: 'DIRECT', memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead)] });
     await expect(messengerApi.inviteMembers({ chatRoomId: direct.id, memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.sales)] })).rejects.toBeInstanceOf(InputError);
+  });
+
+  it('메시지마다 안 읽은 멤버 수, 파일 모아보기(첨부만 최신순), 대화 검색(대소문자 무시, 최신순)', async () => {
+    const roomId = await createGroup();
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, content: 'SO-2610-001 출하 확인' });
+    expect(sent.unreadMemberCount).toBe(3);
+    await messengerApi.sendMessage({ chatRoomId: roomId, content: '자료', file: { name: '일정.txt', size: 4, mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,dGVzdA==' } });
+    await messengerApi.sendMessage({ chatRoomId: roomId, content: 'so-2610-001 납기 변경' });
+
+    actAs(SEED_EMPLOYEE_NO.quality);
+    await messengerApi.markRead({ chatRoomId: roomId, lastMessageId: sent.id });
+    const page = await messengerApi.listMessages({ chatRoomId: roomId });
+    expect(page.items.map((m) => m.unreadMemberCount)).toEqual([2, 3, 3]);
+
+    const files = await messengerApi.listFiles({ chatRoomId: roomId, limit: 5 });
+    expect(files.items.map((m) => m.file?.name)).toEqual(['일정.txt']);
+    const found = await messengerApi.searchMessages({ chatRoomId: roomId, keyword: 'So-2610' });
+    expect(found.items.map((m) => m.content)).toEqual(['so-2610-001 납기 변경', 'SO-2610-001 출하 확인']);
+    await expect(messengerApi.searchMessages({ chatRoomId: roomId, keyword: '  ' })).rejects.toBeInstanceOf(InputError);
+  });
+
+  it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
+    const roomId = await createGroup();
+    expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });
+    const cleared = await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: null });
+    expect(cleared.chatRoomName).toBeNull();
+    expect(cleared.displayName).toContain('김도윤');
+
+    const direct = await messengerApi.createRoom({ chatRoomType: 'DIRECT', memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead)] });
+    await expect(messengerApi.renameRoom({ chatRoomId: direct.id, chatRoomName: '안 됨' })).rejects.toBeInstanceOf(InputError);
+    actAs(SEED_EMPLOYEE_NO.purchase);
+    await expect(messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '남의 방' })).rejects.toMatchObject({ code: 'COM-002' });
   });
 
   it('메시지는 최근 limit개, 더 오래된 것이 있으면 hasMore. 다른 방 메시지로 읽음 처리하면 COM-003', async () => {

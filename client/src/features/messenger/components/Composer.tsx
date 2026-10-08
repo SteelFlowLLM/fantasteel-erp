@@ -1,21 +1,22 @@
 'use client';
 
 // 메시지 입력창: 글 + 파일 1개(REQ-MSG-003), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
+// 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
-import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, messengerApi, type ChatRoomDetailView } from '@/api/messenger';
+import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
 import { SoonButton, soonLabel } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
-import { useAction } from '@/hooks/useAction';
+import { useMessageOutbox } from '@/hooks/useMessenger';
 import { cn } from '@/lib/cn';
 import { fmtBytes } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
 const MAX_LINES = 6;
 const MAX_CANDIDATES = 8;
-const FILE_LIMIT_TEXT = `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
+const FILE_LIMIT_TEXT = MESSAGE_FILE_MAX_BYTES >= 1024 * 1024 ? `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024 / 1024)}MB` : `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
 
 interface MentionState {
   /** '@' 자리 */
@@ -50,14 +51,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const [reading, setReading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const send = useAction(messengerApi.sendMessage, {
-    onSuccess: () => {
-      setText('');
-      setFile(null);
-      onSent();
-    },
-  });
-  const pending = send.isPending || reading;
+  const { send } = useMessageOutbox(room.id);
+  const pending = reading;
 
   const candidates = useMemo<MentionTarget[]>(() => {
     if (!mention) return [];
@@ -124,7 +119,11 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         setReading(false);
       }
     }
-    send.mutate({ chatRoomId: room.id, content, file: payload });
+    send({ chatRoomId: room.id, content, file: payload });
+    setText('');
+    setFile(null);
+    setMention(null);
+    onSent();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -226,7 +225,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         </SoonButton>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
         <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && !file)} onClick={() => void submit()}>
-          {pending ? '보내는 중…' : '보내기'}
+          {reading ? '파일 읽는 중…' : '보내기'}
         </Button>
       </div>
     </div>

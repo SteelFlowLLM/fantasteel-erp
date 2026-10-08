@@ -13,14 +13,15 @@ import { Spinner, StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
+import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
-import { InviteModal } from '@/features/messenger/components/RoomModals';
+import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
-import { useChatMessages, useChatRoom, useMarkRoomRead } from '@/hooks/useMessenger';
+import { useChatMessages, useChatRoom, useMarkRoomRead, useMessageOutbox } from '@/hooks/useMessenger';
 
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
@@ -49,7 +50,9 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
   const me = useMe();
   const [limit, setLimit] = useState(MESSAGE_PAGE_SIZE);
   const [inviting, setInviting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const messages = useChatMessages(room.id, limit);
+  const outbox = useMessageOutbox(room.id);
   const { mutate: markRead } = useMarkRoomRead();
   const feedRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -96,7 +99,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
     } else if (atBottomRef.current) {
       scrollToBottom();
     }
-  }, [lastId, items.length, scrollToBottom]);
+  }, [lastId, items.length, outbox.items.length, scrollToBottom]);
 
   useEffect(() => {
     const onFocus = () => setFocused(true);
@@ -168,7 +171,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
                   <span className="text-cap text-ink-3">대화의 처음이에요</span>
                 ) : null}
               </div>
-              {items.length === 0 ? <StateView kind="empty" icon="chat" title="아직 메시지가 없어요" text="첫 메시지를 보내 보세요" /> : null}
+              {items.length === 0 && outbox.items.length === 0 ? <StateView kind="empty" icon="chat" title="아직 메시지가 없어요" text="첫 메시지를 보내 보세요" /> : null}
               {items.map((message, index) => {
                 const { showDay, showNewDivider, isGroupStart, isGroupEnd } = layout[index];
                 return (
@@ -191,6 +194,9 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
                   </div>
                 );
               })}
+              {outbox.items.map((item) => (
+                <OutboxBubble key={item.localId} item={item} onRetry={() => outbox.retry(item.localId)} onDiscard={() => outbox.discard(item.localId)} />
+              ))}
             </>
           ) : null}
         </div>
@@ -218,8 +224,9 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
           }}
         />
       </section>
-      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} /> : null}
+      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} onRename={() => setRenaming(true)} /> : null}
       {inviting ? <InviteModal room={room} onClose={() => setInviting(false)} /> : null}
+      {renaming ? <RenameRoomModal room={room} onClose={() => setRenaming(false)} /> : null}
     </div>
   );
 }

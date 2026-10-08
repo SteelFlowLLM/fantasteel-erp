@@ -6,6 +6,7 @@ import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
+import { serverMessengerApi } from '@/api/server/messenger';
 import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import { PERMISSION, type Permission, type ProductItemType } from '@/codes';
 import { todayStr } from '@/lib/format';
@@ -216,7 +217,7 @@ export const salesOrderApi = {
   /** 이 수주의 업무방 (없으면 null)과 지금 멤버 */
   workRoom: (salesOrderId: number): Promise<SalesOrderWorkRoomView | null> =>
     isServerDataSource()
-      ? Promise.resolve(null)
+      ? serverMessengerApi.workRoomOf(salesOrderId)
       : mockQuery((tables) => {
       requireActor(tables, SALES_ORDER_VIEW_RULE);
       const room = workRoomOfSalesOrder(tables, salesOrderId);
@@ -231,7 +232,7 @@ export const salesOrderApi = {
   /** 업무방 열기 (REQ-MSG-001): 수주당 WORK 방 1개, 멤버는 조직도에서 고른다. 이미 있으면 그 방(새 멤버만 더함). */
   openWorkRoom: (input: { salesOrderId: number; memberEmployeeIds: readonly number[] }) =>
     isServerDataSource()
-      ? Promise.reject<{ chatRoomId: number; chatRoomName: string | null; created: boolean }>(new Error('업무방은 아직 서버와 연결되지 않았어요'))
+      ? serverMessengerApi.openWorkRoom(input)
       : mockMutation((tx) => {
       const actor = requireActor(tx.tables, SALES_ORDER_VIEW_RULE);
       const { chatRoom, created } = openWorkRoom(tx, userActor(actor.employee.id), input);

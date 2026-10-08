@@ -1,6 +1,6 @@
 'use client';
 
-// 새 채팅방(1:1·그룹)과 멤버 초대 창. 멤버는 조직도에서 고른다 (REQ-MSG-001, REQ-ORG-004).
+// 새 채팅방(1:1·그룹), 멤버 초대, 그룹방 이름 바꾸기 창. 멤버는 조직도에서 고른다 (REQ-MSG-001, REQ-ORG-004).
 // 업무방은 수주 1건에 1개씩 수주 상세에서 연다.
 import { useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
@@ -14,12 +14,12 @@ import { Modal } from '@/components/Modal';
 import { Segmented } from '@/components/Tabs';
 import { MemberPicker } from '@/features/messenger/components/MemberPicker';
 import { useAction } from '@/hooks/useAction';
-import { useMockEmployeeId } from '@/hooks/useMe';
+import { useMe } from '@/hooks/useMe';
 
 type NewRoomType = 'DIRECT' | 'GROUP';
 
 export function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
-  const myId = useMockEmployeeId();
+  const myId = useMe().employeeId;
   const [chatRoomType, setChatRoomType] = useState<NewRoomType>('DIRECT');
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [chatRoomName, setChatRoomName] = useState('');
@@ -115,6 +115,51 @@ export function InviteModal({ room, onClose }: { room: ChatRoomDetailView; onClo
       }
     >
       <MemberPicker selected={memberIds} onChange={setMemberIds} lockedIds={room.members.map((m) => m.id)} />
+    </Modal>
+  );
+}
+
+/** 그룹방 이름 바꾸기. 비우면 멤버 이름으로 보인다 */
+export function RenameRoomModal({ room, onClose }: { room: ChatRoomDetailView; onClose: () => void }) {
+  const [chatRoomName, setChatRoomName] = useState(room.chatRoomName ?? '');
+  const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
+  const rename = useAction(messengerApi.renameRoom, {
+    success: '방 이름을 바꿨어요',
+    onSuccess: onClose,
+    onError: (error) => setFieldErrors(error instanceof InputError ? error.fieldErrors : {}),
+  });
+  const submit = () => rename.mutate({ chatRoomId: room.id, chatRoomName: chatRoomName.trim() || null });
+  return (
+    <Modal
+      title="방 이름 바꾸기"
+      width={440}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mr-auto self-center text-cap text-ink-3">비우면 멤버 이름으로 보여요</span>
+          <Button onClick={onClose} disabled={rename.isPending}>
+            취소
+          </Button>
+          <Button variant="primary" disabled={rename.isPending} onClick={submit}>
+            {rename.isPending ? '바꾸는 중…' : '바꾸기'}
+          </Button>
+        </>
+      }
+    >
+      <Field label="방 이름" htmlFor="rename-room-name" hint={`${CHAT_ROOM_NAME_MAX}자까지`} error={fieldErrors.chatRoomName}>
+        <Input
+          id="rename-room-name"
+          value={chatRoomName}
+          maxLength={CHAT_ROOM_NAME_MAX}
+          placeholder="예: 납기 대응 TF"
+          autoFocus
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => setChatRoomName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) submit();
+          }}
+        />
+      </Field>
     </Modal>
   );
 }
