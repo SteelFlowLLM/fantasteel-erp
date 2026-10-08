@@ -48,6 +48,7 @@ export function MessengerScreen() {
           chatRoomId={chatRoomId}
           asideOpen={asideOpen}
           onToggleAside={() => setAsideOpen((open) => !open)}
+          onLeft={() => router.replace(pathname)}
           focusMessageId={focusMessageId}
           onJump={(messageId) => jumpToMessage(chatRoomId, messageId)}
           onFocusDone={() => openRoom(chatRoomId)}

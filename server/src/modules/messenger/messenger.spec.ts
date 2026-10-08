@@ -18,6 +18,7 @@ import {
   type ChatRoomListItem,
   type ChatRoomReadResult,
   type ChatRoomSettings,
+  type LeaveChatRoomResult,
   type CreateChatRoomResult,
 } from '@fantasteel/shared';
 import type { AuthUser } from '@fantasteel/shared';
@@ -900,5 +901,41 @@ describe('14번: 방 알림 끄기 · 목록 위 고정', () => {
     expect((await settings(purchaseCookie, room.id, { muted: true })).status).toBe(403);
     const bad = await settings(salesCookie, room.id, { muted: 'yes' });
     expect([bad.status, bad.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+});
+
+describe('15번: 방 나가기', () => {
+  it('그룹방에서 나가면 목록에서 사라지고 볼 수 없으며, 남은 멤버에게 시스템 메시지·room:updated를 보낸다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, purchaseId] });
+    socketRecords.length = 0;
+    const left = await call<LeaveChatRoomResult>('POST', `/chat-rooms/${room.id}/leave`, purchaseCookie);
+    expect([left.status, left.body.data]).toEqual([200, { chatRoomId: room.id }]);
+    expect(recordsOf('room:updated').map((r) => r.employeeId).sort()).toEqual([salesId, qualityId, purchaseId].sort());
+    expect(recordsOf('message:new').map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
+
+    const list = (await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie)).body.data;
+    expect(list.some((r) => r.id === room.id)).toBe(false);
+    expect((await call('GET', `/chat-rooms/${room.id}/messages`, purchaseCookie)).status).toBe(403);
+    const page = (await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie)).body.data;
+    expect(page.items.at(-1)).toMatchObject({ isSystem: true, content: '정다은님이 나갔어요' });
+    expect((await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, salesCookie)).body.data.members.map((m) => m.id).sort()).toEqual([salesId, qualityId].sort());
+  });
+
+  it('업무방에서 나간 뒤 수주 화면에서 다시 열면 돌아온다', async () => {
+    const salesOrder = await createSalesOrder('SO-2610-915');
+    const room = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId], salesOrderId: salesOrder.id });
+    await call('POST', `/chat-rooms/${room.id}/leave`, salesCookie);
+    const reopened = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [], salesOrderId: salesOrder.id });
+    expect(reopened).toMatchObject({ id: room.id, reused: true });
+    const page = (await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie)).body.data;
+    expect(page.items.at(-1)).toMatchObject({ isSystem: true, content: '박서영님이 들어왔어요' });
+  });
+
+  it('1:1 방은 COM-004, 멤버가 아니면 COM-002', async () => {
+    const direct = await createRoom(salesCookie, { chatRoomType: 'DIRECT', memberIds: [qualityId] });
+    const res = await call('POST', `/chat-rooms/${direct.id}/leave`, salesCookie);
+    expect([res.status, res.body.error?.code]).toEqual([400, 'COM-004']);
+    const group = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    expect((await call('POST', `/chat-rooms/${group.id}/leave`, purchaseCookie)).status).toBe(403);
   });
 });

@@ -33,6 +33,7 @@ import {
   type ChatRoomType,
   type CreateChatRoomResult,
   type InviteChatMembersResult,
+  type LeaveChatRoomResult,
   type RenameChatRoomResult,
   type ItemType,
   type SalesOrderItemStatus,
@@ -410,6 +411,25 @@ export class MessengerService implements OnModuleInit {
       muted: membership.muted,
       pinnedAt: membership.pinnedAt?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * 방 나가기 (15번, 문서에 없는 추가 기능). 그룹방·업무방만(1:1은 상대 이름으로 보이는 방이라 COM-004).
+   * 멤버 행을 지우고 남은 멤버에게 '…님이 나갔어요' 시스템 메시지를 남긴다. 업무방은 수주 화면에서 다시 열거나 초대받으면 돌아온다.
+   * 나간 사람에게도 room:updated를 보내 다른 탭의 목록에서 지운다.
+   */
+  async leaveRoom(user: AuthUser, chatRoomId: number): Promise<LeaveChatRoomResult> {
+    const me = user.employeeId;
+    const notice = await this.prisma.$transaction(async (tx) => {
+      const room = await this.requireMember(tx, chatRoomId, me);
+      if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new AppException('COM-004', '1:1 채팅방은 나갈 수 없어요');
+      await this.repository.deleteMember(tx, chatRoomId, me);
+      return this.repository.createSystemMessage(tx, chatRoomId, `${user.employeeName}님이 나갔어요`);
+    });
+    const memberIds = (await this.repository.findMemberIds(this.prisma, chatRoomId)).map((m) => m.employeeId);
+    this.gateway.emitRoomUpdated([...memberIds, me], { chatRoomId });
+    await this.emitNewMessage(notice);
+    return { chatRoomId };
   }
 
   /**

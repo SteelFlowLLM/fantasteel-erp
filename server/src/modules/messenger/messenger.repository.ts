@@ -108,6 +108,11 @@ export class MessengerRepository {
     return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true } });
   }
 
+  /** 방 나가기: 멤버 행을 지운다 (읽음 위치·방 설정도 함께 사라진다) */
+  deleteMember(tx: Tx, chatRoomId: number, employeeId: number) {
+    return tx.chatRoomMember.delete({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } } });
+  }
+
   /** 알림을 끈 멤버 (업무방 새 메시지 알림에서 뺀다) */
   findMutedMemberIds(tx: Tx, chatRoomId: number) {
     return tx.chatRoomMember.findMany({ where: { chatRoomId, muted: true }, select: { employeeId: true } });

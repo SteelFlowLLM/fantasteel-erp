@@ -273,6 +273,22 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect((await messengerApi.getRoom(roomId)).pinnedAt).toBeNull();
   });
 
+  it('방 나가기: 목록에서 사라지고 볼 수 없으며 남은 멤버에게 시스템 메시지를 남긴다. 1:1은 나갈 수 없다', async () => {
+    const roomId = await createGroup();
+    actAs(SEED_EMPLOYEE_NO.quality);
+    await messengerApi.leaveRoom(roomId);
+    expect((await messengerApi.listRooms()).some((r) => r.id === roomId)).toBe(false);
+    await expect(messengerApi.listMessages({ chatRoomId: roomId })).rejects.toThrow();
+
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const page = await messengerApi.listMessages({ chatRoomId: roomId });
+    expect(page.items.at(-1)).toMatchObject({ isSystem: true, content: '서민지님이 나갔어요' });
+    expect((await messengerApi.getRoom(roomId)).members.map((m) => m.employeeName)).not.toContain('서민지');
+
+    const direct = await messengerApi.createRoom({ chatRoomType: 'DIRECT', memberIds: [employeeIdOf(SEED_EMPLOYEE_NO.quality)] });
+    await expect(messengerApi.leaveRoom(direct.id)).rejects.toBeInstanceOf(InputError);
+  });
+
   it('이모지 반응: 누르면 더하고 다시 누르면 빼며, 이모지별 인원·내 반응을 보여 준다', async () => {
     const roomId = await createGroup();
     const message = await messengerApi.sendMessage({ chatRoomId: roomId, content: '검사 끝' });

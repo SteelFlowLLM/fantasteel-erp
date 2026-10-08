@@ -670,6 +670,18 @@ export const messengerApi = {
       postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 공지를 내렸어요`);
     }),
 
+  /** 방 나가기 (그룹방·업무방만). 남은 멤버에게 '…님이 나갔어요'를 남긴다. 업무방은 수주 화면에서 다시 열면 돌아온다 */
+  leaveRoom: (chatRoomId: number): Promise<void> =>
+    isServerDataSource() ? serverMessengerApi.leaveRoom(chatRoomId) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const room = requireMemberRoom(tx.tables, actor, chatRoomId);
+      if (room.chatRoomType === CHAT_ROOM_TYPE.DIRECT) throw new InputError('1:1 채팅방은 나갈 수 없어요');
+      const rows = tx.tables.chatRoomMember;
+      const index = rows.findIndex((m) => m.chatRoomId === room.id && m.employeeId === actor.employee.id);
+      if (index >= 0) rows.splice(index, 1);
+      postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 나갔어요`);
+    }),
+
   /** 내 방 설정: 알림 끄기·목록 위 고정 (나에게만). 이미 고정한 방은 처음 고정한 시각을 둔다 */
   updateSettings: ({ chatRoomId, muted, pinned }: ChatRoomSettingsInput): Promise<void> =>
     isServerDataSource() ? serverMessengerApi.updateSettings({ chatRoomId, muted, pinned }) : mockMutation((tx) => {

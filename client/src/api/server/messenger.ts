@@ -13,6 +13,7 @@ import type {
   ChatRoomReadResult,
   ChatRoomSettings,
   CreateChatRoomResult,
+  LeaveChatRoomResult,
 } from '@fantasteel/shared';
 import { MESSAGE_PAGE_SIZE_MAX, type MessageReactionEmoji } from '@fantasteel/shared';
 import { serverDownload, serverRequest, serverUpload } from '@/api/http';
@@ -260,6 +261,10 @@ export const serverMessengerApi = {
 
   pinMessage: async ({ chatRoomId, messageId }: { chatRoomId: number; messageId: number }): Promise<void> => {
     await serverRequest<ServerRoomDetail>('POST', `/chat-rooms/${chatRoomId}/pin`, { body: { messageId } });
+  },
+
+  leaveRoom: async (chatRoomId: number): Promise<void> => {
+    await serverRequest<LeaveChatRoomResult>('POST', `/chat-rooms/${chatRoomId}/leave`);
   },
 
   updateSettings: async ({ chatRoomId, muted, pinned }: ChatRoomSettingsInput): Promise<void> => {

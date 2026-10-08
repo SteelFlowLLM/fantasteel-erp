@@ -96,6 +96,12 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/chat-rooms/2/settings', body: { muted: false, pinned: true } });
   });
 
+  it('방 나가기는 POST /chat-rooms/:id/leave', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms/7/leave' ? ok({ chatRoomId: 7 }) : undefined));
+    await messengerApi.leaveRoom(7);
+    expect(calls).toEqual([expect.objectContaining({ method: 'POST', path: '/chat-rooms/7/leave' })]);
+  });
+
   it('방 정보: 멘션 후보는 나를 뺀 멤버와 멤버 부서, 1:1이 아닌 방은 초대할 수 있다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms/7' ? ok(detail()) : undefined));
     const room = await messengerApi.getRoom(7);
