@@ -7,10 +7,9 @@ import type { PageResult, PurchaseRequisitionDetail, PurchaseRequisitionSummary 
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { ApprovalInput, RejectInput } from '@/api/approvals';
-import type { PurchaseOrderCandidateItem, RequisitionDetail, RequisitionFormContext, RequisitionInput, RequisitionPurchaseOrderLine, RequisitionResubmitInput, RequisitionView } from '@/api/purchasing';
+import type { PurchaseOrderCandidateItem, RequisitionDetail, RequisitionFormContext, RequisitionInput, RequisitionPurchaseOrderLine, RequisitionResubmitInput, RequisitionSource, RequisitionView } from '@/api/purchasing';
 import { serverRequisitionPurchaseOrderLines } from '@/api/server/purchaseOrders';
 import { serverMeAndDepartments } from '@/api/server/session';
-import { requisitionSourceOf } from '@/mock/services';
 
 const PAGE_SIZE = 100;
 
@@ -23,13 +22,19 @@ async function listAll(query: Record<string, string | number | undefined> = {}):
   }
 }
 
+/** 출처: 초안에서 왔으면 Message → ERP, 근거 생산계획이 있으면 MRP, 아니면 직접 */
+function sourceOf(row: PurchaseRequisitionSummary): RequisitionSource {
+  if (row.actionDraftId !== null) return 'MESSAGE';
+  return row.productionPlanId !== null ? 'MRP' : 'DIRECT';
+}
+
 function toView(row: PurchaseRequisitionSummary | PurchaseRequisitionDetail): RequisitionView {
   const detail = 'requestReason' in row ? row : null;
   return {
     id: row.id,
     purchaseRequisitionNo: row.purchaseRequisitionNo,
     purchaseRequisitionStatus: row.purchaseRequisitionStatus,
-    source: requisitionSourceOf(row),
+    source: sourceOf(row),
     itemId: row.itemId,
     itemCode: row.itemCode,
     itemName: row.itemName,

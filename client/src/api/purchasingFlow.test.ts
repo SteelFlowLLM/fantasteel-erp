@@ -1,12 +1,11 @@
-// 구매 영역 api 함수 시험: MRP → 구매요청 → 승인함 → 발주 → 입고 (14.1 3단계) 와 9.3 에러 코드 (PUR-001~003, COM-001~003).
+// 구매 영역 api 함수 시험: 구매요청 → 승인함 → 발주 → 입고 (14.1 3단계) 와 9.3 에러 코드 (PUR-001~003, COM-001~003). MRP 줄은 core 계산(mockMrp)으로 만든다.
 // 시드(2026년 9월 거래)를 쓰고, 큰 수주 하나를 core 서비스로 만들어 원료가 모자라게 한다.
 import { describe, expect, it } from 'vitest';
 import { approvalApi } from '@/api/approvals';
 import { InputError } from '@/api/client';
 import { goodsReceiptApi } from '@/api/goodsReceipts';
-import { mrpApi } from '@/api/mrp';
 import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
-import { defaultMrpPeriod } from '@/features/purchasing/lib/purchasingView';
+import { mockMrp } from '@/api/scenario/scenarioKit';
 import { todayStr } from '@/lib/format';
 import { getMockDb } from '@/mock/db';
 import type { MockTables } from '@/mock/schema';
@@ -40,44 +39,6 @@ function createBigSalesOrder(dueDate: string): number {
   return plan.id;
 }
 
-describe('MRP api', () => {
-  it('기간 안 계획의 순소요를 바로 계산하고, 구매요청 만들 줄을 준다 (저장하지 않음)', async () => {
-    const today = todayStr();
-    const dueDate = plusDays(today, 10);
-    const planId = createBigSalesOrder(dueDate);
-    actAs(SEED_EMPLOYEE_NO.purchase);
-    const period = { from: today, to: plusDays(today, 30) };
-    const mrp = await mrpApi.requirements(period);
-    const plan = mrp.plans.find((p) => p.productionPlanId === planId);
-    expect(plan).toMatchObject({ remainingHeatCount: 6, heatTon: '1500.000', requiredDate: dueDate, isBeforePeriod: false });
-    const ore = mrp.materials.find((m) => m.itemCode === 'ORE01');
-    expect(ore && Number(ore.netRequirementTon)).toBeGreaterThan(0);
-    expect(mrp.requisitionLines).toEqual(expect.arrayContaining([expect.objectContaining({ productionPlanId: planId, itemCode: 'ORE01', existingPurchaseRequisitionNo: null })]));
-    // 결과를 저장하지 않는다: 이벤트·테이블 변화 없음
-    const before = read((t) => t.businessEvent.length);
-    await mrpApi.requirements(period);
-    expect(read((t) => t.businessEvent.length)).toBe(before);
-  });
-
-  it('기간 밖 계획은 빠지고, 생산(조회 권한)도 볼 수 있다', async () => {
-    const today = todayStr();
-    const planId = createBigSalesOrder(plusDays(today, 60));
-    actAs(SEED_EMPLOYEE_NO.productionHead);
-    const mrp = await mrpApi.requirements({ from: today, to: plusDays(today, 30) });
-    expect(mrp.plans.some((p) => p.productionPlanId === planId)).toBe(false);
-  });
-
-  it('조회 권한이 없으면 COM-002, 기간이 거꾸로면 입력 오류', async () => {
-    actAs(SEED_EMPLOYEE_NO.logistics);
-    await expect(mrpApi.requirements(defaultMrpPeriod('2026-10-01'))).rejects.toMatchObject({ code: 'COM-002' });
-    actAs(SEED_EMPLOYEE_NO.purchase);
-    const error = await mrpApi.requirements({ from: '2026-10-31', to: '2026-10-01' }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(InputError);
-    expect(Object.keys((error as InputError).fieldErrors)).toContain('to');
-    await expect(mrpApi.requirements({ from: '2026-10', to: '2026-10-31' })).rejects.toBeInstanceOf(InputError);
-  });
-});
-
 describe('구매요청 api', () => {
   it('톤 입력은 decimal(12,3) 모양(소수 3자리)으로 저장하고(core), 형식이 틀리면 입력 오류', async () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
@@ -109,12 +70,12 @@ describe('구매요청 api', () => {
     const planId = createBigSalesOrder(plusDays(today, 10));
     actAs(SEED_EMPLOYEE_NO.purchase);
     const period = { from: today, to: plusDays(today, 30) };
-    const line = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
+    const line = mockMrp(period).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     if (!line) throw new Error('MRP 줄 없음');
     const view = await purchaseRequisitionApi.create({ desiredReceiptDate: line.requiredDate, requestReason: '', itemId: line.itemId, requestedTon: line.netRequirementTon, productionPlanId: planId });
     expect(view.source).toBe('MRP');
     expect(view).toMatchObject({ productionPlanId: planId, requestedTon: line.netRequirementTon });
-    const again = (await mrpApi.requirements(period)).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
+    const again = mockMrp(period).requisitionLines.find((l) => l.productionPlanId === planId && l.itemCode === 'ORE01');
     expect(again?.existingPurchaseRequisitionNo).toBe(view.purchaseRequisitionNo);
     await expect(purchaseRequisitionApi.create({ desiredReceiptDate: line.requiredDate, requestReason: '', itemId: line.itemId, requestedTon: '1', productionPlanId: planId })).rejects.toBeInstanceOf(InputError);
   });
