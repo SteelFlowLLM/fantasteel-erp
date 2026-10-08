@@ -42,6 +42,20 @@ export function limitText(item: LimitLike): string {
   return '기준 없음';
 }
 
+/**
+ * 게이지 양 끝 눈금 글자: 단위를 붙이고, 한쪽 기준만 있으면 이상·이하를 붙인다.
+ * 예: -5 – 5 mm → "-5 mm" · "5 mm", 0.25 % 이하 → 상한 "0.25 % 이하", 355 이상 → 하한 "355 N/mm² 이상"
+ */
+export function gaugeEdgeLabels(item: LimitLike): { min: string | null; max: string | null } {
+  const unit = item.unit ? ` ${item.unit}` : '';
+  const lo = trimNum(item.minValue);
+  const hi = trimNum(item.maxValue);
+  return {
+    min: lo ? `${lo}${unit}${hi ? '' : ' 이상'}` : null,
+    max: hi ? `${hi}${unit}${lo ? '' : ' 이하'}` : null,
+  };
+}
+
 /** 적용 두께 구간 문구 (초과~이하). 구간이 없으면 null */
 export function thicknessBandText(minThicknessMm: string | null, maxThicknessMm: string | null): string | null {
   const lo = trimNum(minThicknessMm);

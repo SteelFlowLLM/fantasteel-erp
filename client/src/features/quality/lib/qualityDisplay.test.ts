@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   fillTypicalValues,
+  gaugeEdgeLabels,
   gaugeGeometry,
   inspectionItemCodesOfHistory,
   inspectionResultOfSnapshot,
@@ -20,6 +21,13 @@ describe('기준 문구', () => {
     expect(limitText({ minValue: '355', maxValue: null, unit: 'MPa' })).toBe('355 MPa 이상');
     expect(limitText({ minValue: null, maxValue: '0.045', unit: '%' })).toBe('0.045 % 이하');
     expect(limitText({ minValue: null, maxValue: null })).toBe('기준 없음');
+  });
+
+  it('게이지 눈금 글자는 단위를 붙이고, 한쪽 기준만 있으면 이상·이하를 붙인다 (카드 아래 "기준" 줄 대신)', () => {
+    expect(gaugeEdgeLabels({ minValue: '-5.0000', maxValue: '5.0000', unit: 'mm' })).toEqual({ min: '-5 mm', max: '5 mm' });
+    expect(gaugeEdgeLabels({ minValue: null, maxValue: '0.2500', unit: '%' })).toEqual({ min: null, max: '0.25 % 이하' });
+    expect(gaugeEdgeLabels({ minValue: '355', maxValue: null, unit: 'N/mm²' })).toEqual({ min: '355 N/mm² 이상', max: null });
+    expect(gaugeEdgeLabels({ minValue: '0', maxValue: '2' })).toEqual({ min: '0', max: '2' });
   });
 
   it('두께 구간은 초과~이하로 보인다', () => {
