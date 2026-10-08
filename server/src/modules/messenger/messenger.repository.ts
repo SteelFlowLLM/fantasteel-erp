@@ -15,6 +15,7 @@ const employeeInclude = { department: true, jobGrade: true } as const;
 const messageInclude = {
   sender: { include: employeeInclude },
   parentMessage: { include: { sender: { select: { employeeName: true } } } },
+  messageReactions: { include: { employee: { select: { employeeName: true } } }, orderBy: { id: 'asc' } },
 } as const;
 
 /**
@@ -212,6 +213,19 @@ export class MessengerRepository {
 
   findMessageWithSender(tx: Tx, id: number) {
     return tx.message.findUnique({ where: { id }, include: messageInclude });
+  }
+
+  findReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.findUnique({ where: { messageId_employeeId_emoji: { messageId, employeeId, emoji } } });
+  }
+
+  createReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.create({ data: { messageId, employeeId, emoji } });
+  }
+
+  /** 반응 취소는 행을 지운다 (업무 거래가 아니라 표시용) */
+  deleteReaction(tx: Tx, id: number) {
+    return tx.messageReaction.delete({ where: { id } });
   }
 
   /** 본문 고치기: 고친 시각을 남긴다 */

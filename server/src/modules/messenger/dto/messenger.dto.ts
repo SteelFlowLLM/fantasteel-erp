@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType } from '@fantasteel/shared';
+import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageReactionEmoji } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
   @IsIn(Object.values(CHAT_ROOM_TYPE), { message: '채팅방 유형은 DIRECT, GROUP, WORK 중 하나여야 해요' })
@@ -138,4 +138,9 @@ export class PinMessageDto {
   /** 이 방의 삭제되지 않은 일반 메시지 */
   @IsInt({ message: 'messageId는 메시지 id여야 해요' })
   messageId!: number;
+}
+
+export class ToggleReactionDto {
+  @IsIn(MESSAGE_REACTION_EMOJIS, { message: `반응은 ${MESSAGE_REACTION_EMOJIS.join(' ')} 중 하나여야 해요` })
+  emoji!: MessageReactionEmoji;
 }

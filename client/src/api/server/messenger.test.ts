@@ -62,6 +62,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   editedAt: null,
   isDeleted: false,
   parent: null,
+  reactions: [],
   createdAt: AT,
   ...extra,
 });
@@ -219,6 +220,17 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
       ['/chat-rooms/7/pin', { messageId: 50 }],
       ['/chat-rooms/7/unpin', undefined],
     ]);
+  });
+
+  it('이모지 반응은 POST /messages/:id/reactions { emoji }, 서버가 준 반응을 그대로 쓴다', async () => {
+    const reactions = [{ emoji: '👍' as const, count: 2, reactedByMe: true, employeeNames: ['박서영', '정다은'] }];
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/messages/50/reactions') return ok(message(50, '글', { reactions }));
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      return undefined;
+    });
+    expect((await messengerApi.toggleReaction({ messageId: 50, emoji: '👍' })).reactions).toEqual(reactions);
+    expect(calls[0].body).toEqual({ emoji: '👍' });
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

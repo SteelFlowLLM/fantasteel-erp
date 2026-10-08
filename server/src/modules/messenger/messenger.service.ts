@@ -4,6 +4,7 @@ import {
   BUSINESS_EVENT_TYPE,
   BUSINESS_EVENT_TYPE_LABEL,
   DELETED_MESSAGE_TEXT,
+  MESSAGE_REACTION_EMOJIS,
   MESSAGE_TYPE,
   ERP_LINK_PATH,
   findErpNos,
@@ -21,6 +22,7 @@ import {
   type ChatMemberView,
   type ChatMessagePage,
   type ChatMessageParentView,
+  type ChatMessageReactionView,
   type ChatMessageView,
   type ChatRoomDetail,
   type ChatRoomListItem,
@@ -43,7 +45,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -160,6 +162,15 @@ const SYSTEM_SENDER_NAME = '시스템';
 /** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
 type ErpLinkResolver = (content: string | null) => ErpLink[];
 
+/** 이모지별로 묶은 반응 (허용 목록 순서) */
+function reactionsOf(message: MessageWithSender, me: number): ChatMessageReactionView[] {
+  return MESSAGE_REACTION_EMOJIS.flatMap((emoji) => {
+    const rows = message.messageReactions.filter((r) => r.emoji === emoji);
+    if (rows.length === 0) return [];
+    return [{ emoji, count: rows.length, reactedByMe: rows.some((r) => r.employeeId === me), employeeNames: rows.map((r) => r.employee.employeeName) }];
+  });
+}
+
 /** 답글의 원본 요약 */
 function parentOf(message: MessageWithSender): ChatMessageParentView | null {
   const parent = message.parentMessage;
@@ -192,6 +203,7 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     editedAt: message.editedAt?.toISOString() ?? null,
     isDeleted: deleted,
     parent: parentOf(message),
+    reactions: deleted ? [] : reactionsOf(message, me),
     createdAt: message.createdAt.toISOString(),
   };
 }
@@ -634,6 +646,25 @@ export class MessengerService implements OnModuleInit {
       if (current?.deletedAt) return current;
       return this.repository.markMessageDeleted(tx, messageId);
     });
+    return this.emitUpdated(updated, user.employeeId);
+  }
+
+  /**
+   * 이모지 반응 누르기 (13번, 문서에 없는 추가 기능). 없으면 더하고 있으면 뺀다. 방 멤버가 삭제되지 않은 일반 메시지에만.
+   * 알림은 보내지 않고, 멤버에게 message:updated로 다시 보낸다.
+   */
+  async toggleReaction(user: AuthUser, messageId: number, dto: ToggleReactionDto): Promise<ChatMessageView> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const message = await this.repository.findMessage(tx, messageId);
+      if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
+      await this.requireMember(tx, message.chatRoomId, user.employeeId);
+      if (message.deletedAt || message.messageType !== MESSAGE_TYPE.USER) throw new AppException('COM-004', '삭제된 메시지나 시스템 메시지에는 반응할 수 없어요');
+      const existing = await this.repository.findReaction(tx, messageId, user.employeeId, dto.emoji);
+      if (existing) await this.repository.deleteReaction(tx, existing.id);
+      else await this.repository.createReaction(tx, messageId, user.employeeId, dto.emoji);
+      return this.repository.findMessageWithSender(tx, messageId);
+    });
+    if (!updated) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
     return this.emitUpdated(updated, user.employeeId);
   }
 

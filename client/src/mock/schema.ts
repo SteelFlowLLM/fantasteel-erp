@@ -487,6 +487,8 @@ export type MessageRow = Timestamps & {
   editedAt?: string | null;
   /** 삭제 표시 (행은 남김) */
   deletedAt?: string | null;
+  /** 이모지 반응. 서버는 message_reaction 테이블이지만, 가짜 DB에 표를 더하면 저장된 데이터가 시드로 돌아가서 메시지 행에 둔다 */
+  reactions?: { employeeId: number; emoji: string }[];
 };
 
 export type ActionDraftRow = Timestamps & {

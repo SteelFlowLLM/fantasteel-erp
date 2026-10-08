@@ -5,7 +5,7 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_SEARCH_SIZE } from '@fantasteel/shared';
+import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_SIZE, type MessageReactionEmoji } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
@@ -156,6 +156,8 @@ export interface MessageView {
   isDeleted: boolean;
   /** 답글이면 원본 요약 */
   parent: { id: number; senderName: string; preview: string; isDeleted: boolean } | null;
+  /** 이모지 반응 (허용 목록 순서, 0명인 것은 없음) */
+  reactions: { emoji: MessageReactionEmoji; count: number; reactedByMe: boolean; employeeNames: string[] }[];
 }
 
 export interface MessagePage {
@@ -341,6 +343,13 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     editedAt: message.editedAt ?? null,
     isDeleted: deleted,
     parent: parentViewOf(tables, message),
+    reactions: deleted
+      ? []
+      : MESSAGE_REACTION_EMOJIS.flatMap((emoji) => {
+          const rows = (message.reactions ?? []).filter((r) => r.emoji === emoji);
+          if (rows.length === 0) return [];
+          return [{ emoji, count: rows.length, reactedByMe: rows.some((r) => r.employeeId === actor.employee.id), employeeNames: rows.map((r) => employeeOf(tables, r.employeeId)?.employeeName ?? '-') }];
+        }),
     unreadMemberCount: tables.chatRoomMember.filter((m) => m.chatRoomId === message.chatRoomId && m.employeeId !== message.senderId && (m.lastReadMessageId ?? 0) < message.id).length,
   };
 }
@@ -640,6 +649,20 @@ export const messengerApi = {
       if (!room.pinnedMessageId) return;
       updateRow(tx, 'chatRoom', room.id, { pinnedMessageId: null });
       postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 공지를 내렸어요`);
+    }),
+
+  /** 이모지 반응 누르기·취소 (방 멤버, 삭제되지 않은 일반 메시지) */
+  toggleReaction: ({ messageId, emoji }: { messageId: number; emoji: MessageReactionEmoji }): Promise<MessageView> =>
+    isServerDataSource() ? serverMessengerApi.toggleReaction({ messageId, emoji }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const message = requireRow(tx.tables, 'message', messageId, '메시지');
+      requireMemberRoom(tx.tables, actor, message.chatRoomId);
+      if (message.deletedAt || !employeeOf(tx.tables, message.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지에는 반응할 수 없어요');
+      const reactions = message.reactions ?? [];
+      const mine = (r: { employeeId: number; emoji: string }) => r.employeeId === actor.employee.id && r.emoji === emoji;
+      const next = reactions.some(mine) ? reactions.filter((r) => !mine(r)) : [...reactions, { employeeId: actor.employee.id, emoji }];
+      const updated = updateRow(tx, 'message', message.id, { reactions: next }) ?? message;
+      return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));
     }),
 
   /** 내 메시지 고치기. 본문은 비울 수 없다(첨부가 있으면 비워도 됨). 삭제된 메시지는 못 고친다 */

@@ -1,5 +1,9 @@
 import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 
+/** 쓸 수 있는 반응 이모지 (가정값, 13번). DB에는 이 글자 그대로 저장한다 */
+export const MESSAGE_REACTION_EMOJIS = ['👍', '✅', '👀', '🙏', '❤️', '😂'] as const;
+export type MessageReactionEmoji = (typeof MESSAGE_REACTION_EMOJIS)[number];
+
 /** 삭제된 메시지 자리에 보이는 문구 */
 export const DELETED_MESSAGE_TEXT = '삭제된 메시지예요';
 
@@ -122,7 +126,17 @@ export interface ChatMessageView {
   isDeleted: boolean;
   /** 답글이면 원본 메시지 요약 */
   parent: ChatMessageParentView | null;
+  /** 이모지 반응 (MESSAGE_REACTION_EMOJIS 순서, 0명인 것은 뺀다) */
+  reactions: ChatMessageReactionView[];
   createdAt: string;
+}
+
+export interface ChatMessageReactionView {
+  emoji: MessageReactionEmoji;
+  count: number;
+  reactedByMe: boolean;
+  /** 반응한 사람 이름 (마우스를 올리면 보인다) */
+  employeeNames: string[];
 }
 
 export interface ChatMessageParentView {

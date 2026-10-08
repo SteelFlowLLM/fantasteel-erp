@@ -13,7 +13,7 @@ import type {
   ChatRoomReadResult,
   CreateChatRoomResult,
 } from '@fantasteel/shared';
-import { MESSAGE_PAGE_SIZE_MAX } from '@fantasteel/shared';
+import { MESSAGE_PAGE_SIZE_MAX, type MessageReactionEmoji } from '@fantasteel/shared';
 import { serverDownload, serverRequest, serverUpload } from '@/api/http';
 import type {
   ChatRoomDetailView,
@@ -103,6 +103,7 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
     editedAt: message.editedAt,
     isDeleted: message.isDeleted,
     parent: message.parent,
+    reactions: message.reactions,
   };
 }
 
@@ -256,6 +257,11 @@ export const serverMessengerApi = {
 
   unpinMessage: async (chatRoomId: number): Promise<void> => {
     await serverRequest<ServerRoomDetail>('POST', `/chat-rooms/${chatRoomId}/unpin`);
+  },
+
+  toggleReaction: async ({ messageId, emoji }: { messageId: number; emoji: MessageReactionEmoji }): Promise<MessageView> => {
+    const updated = await serverRequest<ServerMessageView>('POST', `/messages/${messageId}/reactions`, { body: { emoji } });
+    return toMessageView(updated, myTargetsOf(await roomRaw(updated.chatRoomId)));
   },
 
   editMessage: async ({ messageId, content }: { messageId: number; content: string }): Promise<MessageView> => {

@@ -813,3 +813,40 @@ describe('12번: 공지 고정', () => {
     ]);
   });
 });
+
+describe('13번: 이모지 반응', () => {
+  it('누르면 더하고 다시 누르면 빼며, 이모지별 인원·내 반응·이름을 보여 주고 message:updated를 보낸다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, purchaseId] });
+    const message = (await send(qualityCookie, room.id, '검사 끝났어요')).body.data;
+    socketRecords.length = 0;
+
+    await call('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: '👍' });
+    await call('POST', `/messages/${message.id}/reactions`, purchaseCookie, { emoji: '👍' });
+    const mine = await call<ChatMessageView>('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: '✅' });
+    expect(mine.body.data.reactions).toEqual([
+      { emoji: '👍', count: 2, reactedByMe: true, employeeNames: ['박서영', '정다은'] },
+      { emoji: '✅', count: 1, reactedByMe: true, employeeNames: ['박서영'] },
+    ]);
+    expect(recordsOf('message:updated').length).toBeGreaterThanOrEqual(9);
+
+    const removed = await call<ChatMessageView>('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: '👍' });
+    expect(removed.body.data.reactions).toEqual([
+      { emoji: '👍', count: 1, reactedByMe: false, employeeNames: ['정다은'] },
+      { emoji: '✅', count: 1, reactedByMe: true, employeeNames: ['박서영'] },
+    ]);
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, purchaseCookie);
+    expect(page.body.data.items[0].reactions[0]).toMatchObject({ emoji: '👍', reactedByMe: true });
+  });
+
+  it('허용 목록 밖 이모지는 COM-004, 삭제된 메시지·비멤버는 막는다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const message = (await send(salesCookie, room.id, '지울 글')).body.data;
+    const bad = await call('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: '🍕' });
+    expect([bad.status, bad.body.error?.code]).toEqual([400, 'COM-004']);
+    const outsider = await call('POST', `/messages/${message.id}/reactions`, purchaseCookie, { emoji: '👍' });
+    expect(outsider.status).toBe(403);
+    await call('DELETE', `/messages/${message.id}`, salesCookie);
+    const deleted = await call('POST', `/messages/${message.id}/reactions`, qualityCookie, { emoji: '👍' });
+    expect([deleted.status, deleted.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+});

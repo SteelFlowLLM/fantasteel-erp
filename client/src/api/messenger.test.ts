@@ -249,6 +249,17 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect((await messengerApi.getRoom(roomId)).pinnedMessage).toBeNull();
   });
 
+  it('이모지 반응: 누르면 더하고 다시 누르면 빼며, 이모지별 인원·내 반응을 보여 준다', async () => {
+    const roomId = await createGroup();
+    const message = await messengerApi.sendMessage({ chatRoomId: roomId, content: '검사 끝' });
+    await messengerApi.toggleReaction({ messageId: message.id, emoji: '👍' });
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const both = await messengerApi.toggleReaction({ messageId: message.id, emoji: '👍' });
+    expect(both.reactions).toEqual([{ emoji: '👍', count: 2, reactedByMe: true, employeeNames: ['박서영', '서민지'] }]);
+    const undone = await messengerApi.toggleReaction({ messageId: message.id, emoji: '👍' });
+    expect(undone.reactions).toEqual([{ emoji: '👍', count: 1, reactedByMe: false, employeeNames: ['박서영'] }]);
+  });
+
   it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
     const roomId = await createGroup();
     expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });

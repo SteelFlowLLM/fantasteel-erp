@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Po
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
@@ -83,6 +83,13 @@ export class MessengerController {
   @Patch('messages/:id')
   editMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: EditMessageDto): Promise<ChatMessageView> {
     return this.service.editMessage(user, id, dto);
+  }
+
+  /** 이모지 반응 누르기·취소 (명세에 없는 API, 13번) */
+  @Post('messages/:id/reactions')
+  @HttpCode(200)
+  toggleReaction(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ToggleReactionDto): Promise<ChatMessageView> {
+    return this.service.toggleReaction(user, id, dto);
   }
 
   /** 내 메시지 삭제 — 삭제 표시만 한다 (명세에 없는 API, #151) */

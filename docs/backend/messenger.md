@@ -108,6 +108,11 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - `POST chat-rooms/:id/unpin` → 방 정보. 고정이 없으면 그대로.
 - 고정·해제는 시스템 메시지(`…메시지를 공지로 고정했어요`·`…공지를 내렸어요`)와 `room:updated`. 방 정보 `pinnedMessage { id, senderName, preview, createdAt }`, 고정한 메시지가 삭제되면 null.
 
+**이모지 반응** (13번, 스키마 2차 `message_reaction`, 명세에 없는 API)
+- `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS` 6개(👍 ✅ 👀 🙏 ❤️ 😂, 가정값)만, 아니면 COM-004.
+- 방 멤버만(COM-002), 삭제·시스템 메시지는 COM-004. 알림은 보내지 않고 멤버에게 `message:updated`.
+- 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
+
 **수정·삭제·답글** (2026-10-08, 스키마 1차 #151, 명세에 없는 API)
 - `PATCH messages/:id { content }`: 내 일반 메시지만(남의 것·시스템 COM-004, 비멤버 COM-002). 본문은 비울 수 없고 첨부가 있으면 비워도 된다. `edited_at`을 남기고 멤버에게 `message:updated`. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않았다(팀 결정 전).
 - `DELETE messages/:id`: 내 일반 메시지에 `deleted_at`만 표시한다(행·첨부 파일은 남김, 다시 지우면 그대로). 응답·목록은 본문·첨부를 비우고 `isDeleted: true`, 목록 미리보기는 '삭제된 메시지예요'. 안 읽은 수·검색·파일 모아보기·첨부 내려받기에서 빠진다. 멤버에게 `message:updated`.
