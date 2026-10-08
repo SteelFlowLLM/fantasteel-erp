@@ -13,6 +13,8 @@ const task = (id: number, dueDate: string, extra: Partial<ServerTaskView> = {}):
   taskDescription: null,
   assigneeId: 77,
   assigneeName: '정다은',
+  creatorId: 77,
+  creatorName: '정다은',
   dueDate,
   taskStatus: 'OPEN',
   createdAt: AT,

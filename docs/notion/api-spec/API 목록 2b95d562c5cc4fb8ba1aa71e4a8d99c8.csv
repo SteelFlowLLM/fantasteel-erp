@@ -150,9 +150,10 @@ GET,LOT 목록 조회,/api/v1/lots,LOT·로그,P1,초안,도출: 컨벤션 5장
 GET,LOT 상세 조회,/api/v1/lots/:id,LOT·로그,P1,초안,도출: 컨벤션 5장
 GET,LOT 정·역추적,/api/v1/lots/:id/trace,LOT·로그,P1,초안,"12.2 명시(?direction=). lot_relation 내부 ID로 조회, 번호 파싱 금지 (BP-LOT-01)"
 GET,작업 로그·이력 재현 조회,/api/v1/business-events,LOT·로그,P1,초안,12.2 명시(?salesOrderId=). 이벤트 유형은 공통코드 BUSINESS_EVENT_TYPE
-GET,업무 목록 조회,/api/v1/tasks,업무·알림,P1,초안,12.2 명시(/tasks). 상태는 공통코드 TASK_STATUS
-POST,업무 등록,/api/v1/tasks,업무·알림,P1,초안,12.2 명시(/tasks)
+GET,업무 목록 조회,/api/v1/tasks,업무·알림,P1,초안,"12.2 명시(/tasks). 상태는 공통코드 TASK_STATUS. scope=mine(담당, 기본)·created(등록)·all(담당 또는 등록) (2026-10-08 추가)"
+POST,업무 등록,/api/v1/tasks,업무·알림,P1,초안,"12.2 명시(/tasks). 선택 linkPath(관련 화면 경로, 2026-10-08 추가)"
 POST,업무 완료,/api/v1/tasks/:id/complete,업무·알림,P1,초안,"도출: 공통코드 TASK_STATUS OPEN → DONE, 컨벤션 5장 상태 변경 액션 URL"
+PATCH,업무 수정,/api/v1/tasks/:id,업무·알림,P1,초안,"도출: 컨벤션 5장. 제목·설명·담당자·마감일·연결 화면. 진행(OPEN) 업무만, 담당자가 바뀌면 새 담당자에게 업무 지정 알림 (2026-10-08 추가)"
 GET,알림 목록 조회,/api/v1/notifications,업무·알림,P1,초안,"12.2 명시(/notifications). 알림 발송은 서버 내부 처리(API 없음), 유형은 공통코드 NOTIFICATION_TYPE"
 GET,채팅방 목록 조회,/api/v1/chat-rooms,메신저·Action,P1,초안,12.2 명시(/chat-rooms)
 POST,채팅방 생성,/api/v1/chat-rooms,메신저·Action,P1,초안,12.2 명시(/chat-rooms). 유형은 공통코드 CHAT_ROOM_TYPE. 방 멤버·ERP 대상 조회 권한 모두 확인 (BP-MSG-01)

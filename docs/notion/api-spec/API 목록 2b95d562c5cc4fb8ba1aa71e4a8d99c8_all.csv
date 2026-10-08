@@ -155,17 +155,18 @@ LOT 목록 조회,API-235,GET,/api/v1/lots,BP-LOT-01,없음 (LOT 추적은 전 �
 초안 확정·실행,API-255,POST,/api/v1/action-drafts/:id/confirm,"BP-ACT-01, BP-ACT-02","확정 주체 — 구매요청 초안은 요청자, Agent 후보는 해당 업무 권한 보유 부서원",,메신저·Action,P1,12.2 명시. 필수값 미확정 시 ACT-001. actionDraftId로 중복 실행 차단 (업무 프로세스 13.4),"APPROVED → 유형별 실행 핸들러 → EXECUTED. 생성된 구매요청은 부서장 승인 대기 (REQ-ACT-002~004, REQ-AGT-006)",AUTHENTICATED,초안
 초안 상세 조회,API-253,GET,/api/v1/action-drafts/:id,BP-ACT-01,없음 (확정 주체 본인),,메신저·Action,P1,도출: 컨벤션 5장,"추출 필드, 미확정 필드, 원본 메시지, 실행 결과 연결 (REQ-ACT-001·003)",AUTHENTICATED,초안
 메시지에서 구매요청 초안 생성,API-251,POST,/api/v1/messages/:id/action-drafts,BP-ACT-01,없음 (방 멤버),,메신저·Action,P1,12.2 명시. 요청자는 메시지 작성자(AI가 지정하지 않음). 유형은 공통코드 ACTION_TYPE,"메시지에서 원료 품목·수량(톤)·희망 입고일·요청자 추출, 원본 연결 Action Draft 생성 (REQ-ACT-001·004)",AUTHENTICATED,초안
-업무 등록,API-240,POST,/api/v1/tasks,BP-MSG-01,없음 (업무·알림은 전 역할),,업무·알림,P1,12.2 명시(/tasks),업무에 담당자와 마감일 지정 (REQ-NTF-001),AUTHENTICATED,초안
+업무 등록,API-240,POST,/api/v1/tasks,BP-MSG-01,없음 (업무·알림은 전 역할),,업무·알림,P1,"12.2 명시(/tasks). 선택 linkPath(관련 화면 경로, 2026-10-08 추가)",업무에 담당자와 마감일 지정 (REQ-NTF-001),AUTHENTICATED,초안
 채팅방 목록 조회,API-243,GET,/api/v1/chat-rooms,BP-MSG-01,없음 (방 멤버),,메신저·Action,P1,12.2 명시(/chat-rooms),내가 속한 채팅방과 안 읽은 메시지 수 (REQ-MSG-001·004),AUTHENTICATED,초안
 채팅방 생성,API-244,POST,/api/v1/chat-rooms,BP-MSG-01,없음. 업무방은 연결 수주 조회 권한 확인,,메신저·Action,P1,12.2 명시(/chat-rooms). 유형은 공통코드 CHAT_ROOM_TYPE. 방 멤버·ERP 대상 조회 권한 모두 확인 (BP-MSG-01),"1:1·그룹·업무방 생성. 업무방은 수주 연결, 멤버는 조직 정보에서 선택 (REQ-MSG-001, REQ-ORG-004)",AUTHENTICATED,초안
 메시지 목록 조회,API-246,GET,/api/v1/chat-rooms/:id/messages,BP-MSG-01,없음 (방 멤버),,메신저·Action,P1,도출: 12.2의 /messages를 채팅방 하위 경로로 둠,채팅방 메시지와 첨부 (REQ-MSG-002·003),AUTHENTICATED,초안
 읽음 위치 갱신,API-250,POST,/api/v1/chat-rooms/:id/read,BP-MSG-01,없음 (방 멤버),,메신저·Action,P1,도출: 컨벤션 5장 상태 변경 액션 URL,"사용자별 마지막 읽은 메시지 갱신, 안 읽은 수 재계산 (REQ-MSG-004)",AUTHENTICATED,초안
 첨부 파일 다운로드,API-249,GET,/api/v1/attachments/:id,BP-MSG-01,없음 (방 멤버),,메신저·Action,P1,"도출. 서명 URL은 서버에서 발급 (컨벤션 3장), 첨부에도 방 접근 권한 적용 (BP-MSG-01)",첨부 파일 다운로드용 서명 URL 발급 (REQ-MSG-003),AUTHENTICATED,초안
-업무 목록 조회,API-239,GET,/api/v1/tasks,BP-MSG-01,없음 (업무·알림은 전 역할),,업무·알림,P1,12.2 명시(/tasks). 상태는 공통코드 TASK_STATUS,내 업무(담당자·마감일·상태) (REQ-NTF-001),AUTHENTICATED,초안
+업무 목록 조회,API-239,GET,/api/v1/tasks,BP-MSG-01,없음 (업무·알림은 전 역할),,업무·알림,P1,"12.2 명시(/tasks). 상태는 공통코드 TASK_STATUS. scope=mine(담당, 기본)·created(등록)·all(담당 또는 등록) (2026-10-08 추가)",내 업무(담당자·마감일·상태) (REQ-NTF-001),AUTHENTICATED,초안
 알림 목록 조회,API-242,GET,/api/v1/notifications,BP-MSG-01,없음 (본인 알림),,업무·알림,P1,"12.2 명시(/notifications). 알림 발송은 서버 내부 처리(API 없음), 유형은 공통코드 NOTIFICATION_TYPE","개인·부서 단위로 받은 알림. 메신저·Agent 알림 포함 (REQ-NTF-002, REQ-MSG-005)",AUTHENTICATED,초안
 초안 수정,API-254,PATCH,/api/v1/action-drafts/:id,BP-ACT-01,없음 (확정 주체 본인),,메신저·Action,P1,도출: 컨벤션 5장,요청자가 추출값을 확인·수정 (REQ-ACT-002),AUTHENTICATED,초안
 초안 목록 조회,API-252,GET,/api/v1/action-drafts,"BP-ACT-01, BP-AGT-01, BP-AST-01",없음 (확정 주체 본인),,메신저·Action,P1,도출. Agent 대응 후보·AI 실행 카드(P2)도 같은 API로 조회. 상태는 공통코드 DRAFT_STATUS,"내가 확인·확정할 초안과 상태 (REQ-ACT-003, REQ-AGT-005, REQ-AST-005)",AUTHENTICATED,초안
 업무 완료,API-241,POST,/api/v1/tasks/:id/complete,BP-MSG-01,없음 (담당자),,업무·알림,P1,"도출: 공통코드 TASK_STATUS OPEN → DONE, 컨벤션 5장 상태 변경 액션 URL",업무를 완료(DONE)로 변경 (REQ-NTF-001),AUTHENTICATED,초안
+업무 수정,API-274,PATCH,/api/v1/tasks/:id,BP-MSG-01,없음 (등록자·담당자),,업무·알림,P1,"도출: 컨벤션 5장. 제목·설명·담당자·마감일·연결 화면. 진행(OPEN) 업무만, 담당자가 바뀌면 새 담당자에게 업무 지정 알림 (2026-10-08 추가)",업무 내용·담당자·마감일 변경 (REQ-NTF-001),AUTHENTICATED,초안
 초안 반려,API-256,POST,/api/v1/action-drafts/:id/reject,BP-ACT-01,확정 주체 본인,,메신저·Action,P1,12.2 명시,초안 반려(REJECTED) (REQ-ACT-003),AUTHENTICATED,초안
 파일 첨부 업로드,API-248,POST,/api/v1/chat-rooms/:id/attachments,BP-MSG-01,없음 (방 멤버),,메신저·Action,P1,도출. Storage 업로드는 서버에서 (컨벤션 3장). 형식·용량 제한은 구현 단계,메시지 첨부 파일 업로드 (REQ-MSG-003),AUTHENTICATED,초안
 회의록 상세 조회,API-259,GET,/api/v1/meeting-minutes/:id,BP-VOC-01,없음 (회의록은 전 역할),,Voice2ERP,P2,도출: 컨벤션 5장. 원본 전사와 AI 요약을 구분 (BP-VOC-01),전체 기록과 AI 분석 결과 (REQ-VOC-002·003),AUTHENTICATED,초안
