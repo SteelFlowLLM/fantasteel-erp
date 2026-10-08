@@ -37,7 +37,8 @@ type ProcessFilter = 'ALL' | Extract<ProcessType, 'STEELMAKING' | 'CONTINUOUS_CA
 type ResultFilter = 'ALL' | 'PENDING' | 'PASS' | 'FAIL';
 
 const PROCESS_FILTERS: readonly ProcessFilter[] = ['ALL', 'STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING'];
-const RESULT_FILTERS: readonly Exclude<ResultFilter, 'ALL'>[] = ['PENDING', 'PASS', 'FAIL'];
+/** 판정 결과 칩 순서: 전체 · 합격 · 불합격 · 판정 대기 (처음 고른 칩은 판정 대기) */
+const RESULT_FILTERS: readonly ResultFilter[] = ['ALL', 'PASS', 'FAIL', 'PENDING'];
 const PROCESS_HINT: Record<ProcessFilter, string> = {
   ALL: '제강 히트 성분 · 연주 슬래브 표면·치수 · 열연 코일 치수·기계적 성질',
   STEELMAKING: inspectionNameOf('STEELMAKING'),
@@ -99,14 +100,17 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
             />
             <span className="text-cap text-ink-3">{PROCESS_HINT[process]}</span>
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="판정 결과">
-              {RESULT_FILTERS.map((r) => (
-                <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)}>
-                  {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
-                </Chip>
-              ))}
-              <Chip on={result === 'ALL'} onClick={() => setResult('ALL')}>
-                전체 <b>{byProcess.length}</b>
-              </Chip>
+              {RESULT_FILTERS.map((r) =>
+                r === 'ALL' ? (
+                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')}>
+                    전체 <b>{byProcess.length}</b>
+                  </Chip>
+                ) : (
+                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)}>
+                    {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
+                  </Chip>
+                ),
+              )}
             </div>
             <Input type="search" leadingIcon="search" placeholder="LOT 번호 검색" aria-label="LOT 번호 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
           </>
