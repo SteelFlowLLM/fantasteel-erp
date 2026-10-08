@@ -41,7 +41,7 @@ npm run db:reset                             # 개발 DB 초기화 (데이터 �
 - 공통 기반은 `server/src/common/`에 있다: `AppException('SO-002')`, `@RequirePermission(PERMISSION.X, 'USE')`, `@CurrentUser()`, `assertDepartmentHead`, `businessEventRecorder.record(tx, …)`, `NumberingService`, `seoulToday()`, `StorageService`. 새로 만들지 말고 이것을 쓴다. 공통 기반을 바꿔야 하면 먼저 팀에 알린다.
 - 작업 로그는 본 거래와 같은 트랜잭션에서 남긴다 (REQ-LOG-002 이벤트 빠짐없이).
 - `$queryRaw` 인라인·`$queryRawUnsafe` 금지. 집계·잠금·조건부 UPDATE는 `server/prisma/sql/*.sql`(TypedSQL).
-- 스키마(`schema.prisma`·마이그레이션)는 스키마 담당자만 바꾼다. 순서: ERD 수정 → schema → `npm run migrate`. 커밋된 마이그레이션은 고치지 않는다.
+- 스키마(`schema.prisma`·마이그레이션)는 스키마 담당자(2명, 컨벤션 7-3)만 바꾼다. 순서: ERD 수정 → schema → 로컬 DB에서 `npm run migrate`. 커밋된 마이그레이션은 고치지 않는다. 공용 DB 반영은 DB 담당자만 `db:deploy`로 한다 (SERVER-GUIDE 8장).
 - 예약·배정·MRP·이론중량·출고 확정 로직은 단위 테스트 필수.
 
 ## 화면 (`client/`)

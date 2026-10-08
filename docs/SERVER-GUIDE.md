@@ -17,7 +17,7 @@ npm install          # shared 빌드 + Prisma Client 생성까지 자동
 npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173)
 ```
 
-- `npm run dev`는 서버를 띄우기 전에 `server/scripts/prepare-db.mjs`로 마이그레이션 적용 → 빈 DB면 시드 → TypedSQL 생성을 한다.
+- `npm run dev`는 서버를 띄우기 전에 `server/scripts/prepare-db.mjs`로 마이그레이션 적용 → 빈 DB면 시드 → TypedSQL 생성을 한다. 마이그레이션·시드는 로컬 DB(54322)일 때만 하고, 공용 DB(Supabase)면 건너뛴다(8장).
 - 로컬 DB는 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 뜬다. Docker가 필요 없다. DB만 띄우려면 `npm run db`.
 - 서버만: `npm run dev:server` (DB가 떠 있어야 한다).
 - 테스트 계정: 시드 사원 15명, 비밀번호 모두 `fantasteel`. 사원번호는 [backend/seed.md](backend/seed.md).
@@ -26,8 +26,9 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 | 명령 | 하는 일 |
 |---|---|
 | `npm run db:reset` | 개발 DB(`fantasteel`)를 지우고 스키마 + 시드를 다시 넣는다. **데이터가 모두 사라진다** |
-| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자만, 7장) |
-| `npm run seed` | 시드 다시 넣기 (반복 실행해도 결과 같음) |
+| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자만, 7장). 로컬 DB에서만 실행된다 |
+| `npm run seed` | 시드 다시 넣기 (반복 실행해도 결과 같음). 로컬 DB에서만 실행된다 |
+| `npm run db:deploy -w @fantasteel/server` | 공용 DB에 마이그레이션 반영 (DB 담당자만, 최신 develop에서만, 8장). 처음 한 번은 `-- --seed`로 빈 DB에 시드까지 |
 | `npm test` | 서버 테스트. 묶음마다 테스트 전용 DB(`fs_*`)를 새로 만들어 돌린다. DB가 떠 있어야 한다 |
 | `npm run test:unit -w @fantasteel/server` | DB 없이 공통 단위 테스트만 |
 | `npm run typecheck` | shared·server·client 타입 검사 |
@@ -93,10 +94,39 @@ server/
 
 ## 7. 스키마를 바꿀 때 (컨벤션 7-3)
 
-- 스키마 담당자 1명이 `schema.prisma`와 마이그레이션을 관리한다. 다른 사람은 이슈·PR 설명으로 요청한다.
-- 순서: ERD(`docs/erd/`) 수정 → `schema.prisma` 반영 → `npm run migrate` (`prisma migrate dev`) → 커밋. 커밋된 마이그레이션 파일은 고치지 않는다.
+- 스키마 담당자 2명(정건희, 김명재)이 `schema.prisma`와 마이그레이션을 만든다. 다른 사람은 자기 범위의 ERD·`docs/backend/<모듈>.md`를 고치고 이슈·PR 설명으로 요청한다.
+- 순서: ERD(`docs/erd/`) 수정 → `schema.prisma` 반영 → 로컬 DB에서 `npm run migrate` → 커밋 → PR. 커밋된 마이그레이션 파일은 고치지 않는다.
 - CHECK·부분 unique는 Prisma 스키마로 표현되지 않아 마이그레이션 SQL에 직접 쓴다 (초기 마이그레이션 맨 아래 참고). Prisma는 이것을 지우지 않는다.
+- 두 담당자: 마이그레이션 PR은 한 번에 하나만 열고, 시작 전에 서로 알린다. 다른 마이그레이션이 먼저 머지되면 최신 develop을 받아 자기 마이그레이션을 지우고 다시 만든다.
+- 마이그레이션 PR 리뷰 체크리스트:
+  - 데이터가 있는 표에 기본값 없는 NOT NULL 칸을 넣지 않는가 (공용 DB에는 이미 데이터가 있다)
+  - 마이그레이션 파일이 PR에 들어 있는가 (`prisma db push`나 DB 직접 수정은 공용 DB로 넘어가지 않는다)
+  - 커밋된 마이그레이션을 고치지 않았는가
+  - PostgreSQL 17에서 도는 SQL인가 (로컬 18, 공용 DB 17)
 
-## 8. Supabase로 옮길 때
+## 8. 공용 DB (Supabase)
 
-`server/.env`의 두 값만 바꾼다 (`server/.env.example` 참고). `DATABASE_URL`은 Transaction pooler(6543) + `?pgbouncer=true`, `DIRECT_URL`은 Direct 또는 Session pooler(5432). 그다음 `cd server && npx prisma migrate deploy && npx tsx prisma/seed.ts`.
+**연결**
+- `server/.env`의 두 줄만 바꾼다. Supabase Connect → ORM → Prisma에서 복사한다.
+  - `DATABASE_URL`: Transaction pooler(6543) + `?pgbouncer=true`. 서버·시드가 쓴다.
+  - `DIRECT_URL`: Session pooler(5432). 마이그레이션이 쓴다.
+  - Direct 주소(`db.<ref>.supabase.co`)는 IPv6 전용이라 쓰지 않는다.
+- 접속 주소는 비공개 채널로 받고, 커밋·채팅·PR에 붙이지 않는다. 로컬로 돌아가려면 두 줄을 `.env.example` 값으로 되돌린다.
+- 최신 develop을 받은 뒤에 주소를 바꾼다 (그 전 코드에는 아래 보호 장치가 없다).
+
+**공용 DB를 가리킬 때**
+- `npm run dev`는 마이그레이션·시드를 건너뛰고 TypedSQL만 만든다. `migrate`·`migrate:deploy`·`seed`는 실행되지 않는다. 로컬 DB(54322)는 `npm test`용으로 함께 뜬다.
+- 스키마 작업(7장)을 할 때는 `.env`를 로컬 DB로 돌려 놓는다.
+
+**반영 (DB 담당자 정건희만)**
+1. 마이그레이션 PR이 develop에 머지되면 develop을 받는다.
+2. 마이그레이션 SQL을 7장 체크리스트로 다시 본다.
+3. `npm run db:deploy -w @fantasteel/server`(처음 한 번은 `-- --seed`). develop 브랜치·고치던 파일 없음·`origin/develop`과 같음을 확인하고, 대상 호스트를 보여 준 뒤 반영한다.
+4. 반영된 마이그레이션 이름을 팀에 알린다. 받은 사람은 develop을 받고 `npm run generate:sql -w @fantasteel/server`를 돌린다.
+- 칸 삭제·이름 변경은 옛 코드가 바로 깨지므로 미리 공지하고 반영한다.
+- 반영이 실패하면 Prisma가 실패로 기록하고 다음 반영을 막는다. 고친 새 마이그레이션으로 해결한다.
+
+**함께 쓸 때**
+- 다른 사람이 만든 거래 데이터는 지우거나 바꾸지 않는다.
+- `seed.ts` 변경은 공용 DB에 자동으로 들어가지 않는다. 생기면 DB 담당자와 반영 방법을 정한다.
+- 첨부·밀시트 PDF는 각자 PC의 `STORAGE_DIR`에 저장된다 (공유하려면 Supabase Storage 이전이 필요하고, 이는 별도 작업).
