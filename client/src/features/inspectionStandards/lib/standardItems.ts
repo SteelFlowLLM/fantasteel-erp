@@ -146,6 +146,15 @@ export function canHaveCommonStandard(processType: ProcessType): boolean {
   return processType !== 'STEELMAKING';
 }
 
+/**
+ * 새 기준 창에서 '공통 (모든 강종)'을 고를 수 있는지. 공정을 아직 안 골랐으면 고를 수 있게 둔다.
+ * 서버 모드는 고를 수 없다: 서버 ERD는 inspection_standard.steel_grade_id가 NOT NULL이라 강종 없는 기준을 저장할 수 없다.
+ */
+export function canChooseCommonStandard(processType: ProcessType | '', serverMode: boolean): boolean {
+  if (serverMode) return false;
+  return processType === '' || canHaveCommonStandard(processType);
+}
+
 /** 공정·강종에 쓰는 지금 버전: 강종 전용 기준이 먼저, 없으면 공통 기준(강종 없음). 제강은 강종 전용 기준만 본다. */
 export function findCurrentStandard<T extends StandardHeadLike>(standards: readonly T[], processType: ProcessType, steelGradeId: number): T | undefined {
   if (!canHaveCommonStandard(processType)) return standards.find((s) => s.isCurrent && s.processType === processType && s.steelGradeId === steelGradeId);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pickCurrentStandard } from '@/lib/inspectionJudgment';
 import {
+  canChooseCommonStandard,
   canHaveCommonStandard,
   findChangedItemKeys,
   findCurrentStandard,
@@ -99,6 +100,12 @@ describe('지금 버전 찾기', () => {
     expect(pickCurrentStandard(standards, 'STEELMAKING', 8)).toBeUndefined();
     expect(canHaveCommonStandard('STEELMAKING')).toBe(false);
     expect(canHaveCommonStandard('CONTINUOUS_CASTING')).toBe(true);
+    // 새 기준 창의 '공통 (모든 강종)' 선택지: 가짜 DB 모드는 제강 말고 보이고, 서버 모드(ERD steel_grade_id NOT NULL)는 늘 숨긴다
+    expect(canChooseCommonStandard('', false)).toBe(true);
+    expect(canChooseCommonStandard('HOT_ROLLING', false)).toBe(true);
+    expect(canChooseCommonStandard('STEELMAKING', false)).toBe(false);
+    expect(canChooseCommonStandard('', true)).toBe(false);
+    expect(canChooseCommonStandard('HOT_ROLLING', true)).toBe(false);
     expect(canHaveCommonStandard('HOT_ROLLING')).toBe(true);
   });
 });

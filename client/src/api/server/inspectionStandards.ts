@@ -1,7 +1,7 @@
 // 검사 기준 화면 ↔ 서버 API (server/src/modules/quality/inspection-standard.*).
 // 강종 id는 서버 id 그대로다 (강종 선택은 기준정보 화면과 같은 서버 강종 목록). 적용 규격 번호는 강종 목록에서 읽는다.
 // 서버에 아직 없는 것은 빈 값이다:
-// - 공통 기준(강종 없음): ERD steel_grade_id NOT NULL이라 서버에는 없다. 공통 기준 만들기는 입력 오류로 막는다.
+// - 공통 기준(강종 없음): ERD steel_grade_id NOT NULL이라 서버에는 없다. 새 기준 창은 서버 모드에서 공통 선택지를 숨기고, 여기서도 입력 오류로 막는다.
 // 버전 이력·버전별 판정한 검사 수는 상세 응답(versions·inspectionCount)으로, 바로 앞 버전 항목은 그 버전 상세로 읽는다.
 // - 표시 순서 컬럼이 ERD에 없어 항목 순서는 서버가 준 순서(등록 순서)다.
 import type { InspectionStandardDeleteResult, InspectionStandardDetail, InspectionStandardListItem, PageResult, SteelGradeView } from '@fantasteel/shared';
