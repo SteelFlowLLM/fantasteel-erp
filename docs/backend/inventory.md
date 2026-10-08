@@ -102,9 +102,9 @@ RETURNING id;
 
 **재고 조회 구현 메모** (`GET inventories`, 로그인만, `?itemId=`)
 
-- 응답은 `{ products, rawMaterials }`다(shared `InventoryOverview`). `products`는 제품 규격마다 한 줄(재고 행이 없으면 0매)이고, 대시보드 위젯과 같은 `productStock` 계산에 `unallocatedPassedQty`(미배정 합격 LOT 수)를 더한다. `rawMaterials`는 원료 규격마다 잔량이 남은 원료 LOT의 `remaining_ton` 합계와 LOT 수다.
+- 응답은 `{ products, rawMaterials, surplus }`다(shared `InventoryOverview`). `products`는 제품 규격마다 한 줄(재고 행이 없으면 0매)이고, 대시보드 위젯과 같은 `productStock` 계산에 `unallocatedPassedQty`(미배정 합격 LOT 수)를 더한다. `rawMaterials`는 원료 규격마다 잔량이 남은 원료 LOT의 `remaining_ton` 합계와 LOT 수다.
 - `unallocatedPassedQty` = 적격(자기 검사 PASS + 상위 히트 PASS) + AVAILABLE + CONFIRMED 배정 없음(`countUnallocatedPassedLotsByItem.sql`). 수주 예약 몫도 들어 있어서 "여재" 매수가 아니다.
-- 🟡 여재 매수는 만들지 않았다. 스키마에 여재 전환 시각이 없고 "수주 예약에 쓰이지 않은 몫"의 계산식이 정의돼 있지 않다.
+- `surplus`(API-195 "여재 포함")는 여재가 있는 슬래브 규격마다 한 줄이다(`SurplusSlabRow`: 1매 이론중량, 미배정 합격·예약·가용·여재 매수, 여재 슬래브의 LOT 번호·생산완료일·히트 번호·야드·생산계획). 계산은 8-1 임시 결정이고 `InventoryService.surplusSlabs`에 한 번만 두어 대시보드 여재 보유 위젯도 같은 값을 쓴다. 여재 전환 시각은 ERD에 없어 주지 않는다.
 - 불합격·판정 대기 LOT 수, LOT 목록은 `lots` 모듈 몫이라 이 응답에 넣지 않았다.
 
 **동시성**(REQ-INV-009, BP-INV-02): 예약 매수는 조건부 UPDATE 한 줄, LOT 중복 배정은 부분 unique, 여러 행을 함께 검증하는 처리는 `SELECT … FOR UPDATE`(TypedSQL)로 잠근다([05] 8장). 잠금 순서는 inventory(item_id 오름차순) → reservation → allocation → lot(id 오름차순)으로 고정한다(13.2 "고정 순서").
@@ -174,7 +174,7 @@ RETURNING id;
 | 오류 코드 | LOT 규격 불일치, 미배정 매수 초과 배정에 쓸 코드가 없다(SHP-002는 "출하 가능 매수") | [04] 9.3 |
 | 중복 요청 | 배정 확정 재시도 방지 키 미정(부분 unique가 LOT 중복은 막음) | 08 공통 규약 |
 
-### 8-1. 임시 결정 (2026-10-07, 대시보드 여재 보유 위젯)
+### 8-1. 임시 결정 (2026-10-07, 대시보드 여재 보유 위젯 · 2026-10-08 재고 조회 여재도 같은 기준)
 
 | 항목 | 임시 결정 |
 | --- | --- |

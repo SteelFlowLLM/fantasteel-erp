@@ -3,6 +3,7 @@ import {
   ALLOCATION_PURPOSE,
   ALLOCATION_STATUS,
   BUSINESS_EVENT_TYPE,
+  ITEM_TYPE,
   LOT_STATUS,
   LOT_TYPE,
   PERMISSION,
@@ -24,6 +25,7 @@ import {
   type ReservationStatus,
   type SalesOrderReservationView,
   type ShipmentAllocationCandidates,
+  type SurplusSlabRow,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -142,7 +144,7 @@ export class InventoryService {
 
   /**
    * 재고 조회 (API GET /inventories, REQ-INV-001·008): 제품 규격별 재고(합격·예약·열연 배정·가용·톤 + 미배정 합격 LOT 수)와
-   * 원료별 LOT 잔량 합계. itemId를 주면 그 규격만 돌려준다. 읽기 전용이라 잠그지 않는다.
+   * 원료별 LOT 잔량 합계, 여재가 있는 슬래브 규격(API-195 "여재 포함"). itemId를 주면 그 규격만 돌려준다. 읽기 전용이라 잠그지 않는다.
    */
   async listInventories(query: ListInventoriesQuery): Promise<InventoryOverview> {
     const [stock, unallocated, raw] = await Promise.all([
@@ -150,6 +152,7 @@ export class InventoryService {
       this.repository.countUnallocatedPassedLots(this.prisma),
       this.repository.findRawMaterialStock(this.prisma),
     ]);
+    const surplus = await this.surplusSlabs(this.prisma, stock.filter((row) => query.itemId === undefined || query.itemId === row.itemId));
     const unallocatedByItem = new Map(unallocated.map((row) => [row.item_id, row.lot_count ?? 0]));
     const sumByItem = new Map(raw.sums.map((row) => [row.itemId, row]));
     const wanted = (itemId: number) => query.itemId === undefined || query.itemId === itemId;
@@ -164,7 +167,56 @@ export class InventoryService {
           remainingTon: (sumByItem.get(item.id)?._sum.remainingTon ?? new Prisma.Decimal(0)).toFixed(3),
           lotCount: sumByItem.get(item.id)?._count._all ?? 0,
         })),
+      surplus,
     };
+  }
+
+  /**
+   * 슬래브 규격별 여재 (REQ-INV-008, TRM-048). 재고 조회와 대시보드 여재 보유 위젯이 같이 쓴다. 여재가 없는 규격은 빠진다.
+   * 여재 매수 = 미배정 합격 슬래브 LOT 수(진행 중인 코일 수주에 묶인 슬래브 제외) − ACTIVE 예약 매수, 0 미만은 0 (inventory.md 8-1).
+   * 예약은 매수 단위라 LOT을 정할 수 없어, FIFO상 가장 늦게 쓰일 LOT을 여재로 본다.
+   */
+  async surplusSlabs(tx: Tx, stock?: ProductStockRow[]): Promise<SurplusSlabRow[]> {
+    const slabs = (stock ?? (await this.productStock(tx))).filter((row) => row.itemType === ITEM_TYPE.SLAB);
+    if (slabs.length === 0) return [];
+    const weightOf = new Map((await this.repository.findItemWeights(tx, slabs.map((row) => row.itemId))).map((i) => [i.id, i.theoreticalWeightTon?.toFixed(3) ?? '0.000']));
+    const rows: (Omit<SurplusSlabRow, 'lots'> & { lots: { id: number; lot_no: string; produced_date: Date | null; heat_no: string | null }[] })[] = [];
+    for (const slab of slabs) {
+      const candidates = await this.repository.findAllocatableLots(tx, slab.itemId);
+      const forCoilOrders = await this.repository.findLotIdsForOpenCoilOrders(tx, candidates.map((lot) => lot.id));
+      const lots = candidates.filter((lot) => !forCoilOrders.has(lot.id));
+      const surplusQty = Math.max(0, lots.length - slab.reservedQty);
+      if (surplusQty === 0) continue;
+      rows.push({
+        itemId: slab.itemId,
+        itemCode: slab.itemCode,
+        itemName: slab.itemName,
+        steelGradeCode: slab.steelGradeCode,
+        theoreticalWeightTon: weightOf.get(slab.itemId) ?? '0.000',
+        unallocatedPassedQty: candidates.length,
+        reservedQty: slab.reservedQty,
+        availableQty: slab.availableQty,
+        surplusQty,
+        lots: lots.slice(lots.length - surplusQty),
+      });
+    }
+    const details = new Map((await this.repository.findSurplusLotDetails(tx, rows.flatMap((row) => row.lots.map((lot) => lot.id)))).map((d) => [d.id, d]));
+    return rows.map((row) => ({
+      ...row,
+      lots: row.lots.map((lot) => {
+        const detail = details.get(lot.id);
+        const plan = detail?.productionResult?.productionPlan ?? null;
+        return {
+          lotId: lot.id,
+          lotNo: lot.lot_no,
+          producedDate: dateOnly(lot.produced_date),
+          heatNo: lot.heat_no,
+          yardName: detail?.yard?.yardName ?? null,
+          productionPlanId: plan?.id ?? null,
+          productionPlanNo: plan?.productionPlanNo ?? null,
+        };
+      }),
+    }));
   }
 
   // ── 예약 (REQ-INV-002·003) ─────────────────────────────

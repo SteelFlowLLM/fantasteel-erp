@@ -202,7 +202,6 @@ export const inventoryApi = {
           requireActor(tables);
           return readRawMaterialInventory(tables);
         }),
-  /** 서버 모드에서는 빈 목록 (서버가 여재를 계산하지 않는다) */
   listSurplus: () =>
     isServerDataSource()
       ? serverInventoryApi.listSurplus()

@@ -1,4 +1,4 @@
-// 재고 서버 어댑터: 제품(합격 = 서버 onHandQty, 재고 매수 = AVAILABLE LOT 수), LOT 목록(상세로 히트·배정·처리), 원료(입고·발주로 채움), 여재(빈 목록).
+// 재고 서버 어댑터: 제품(합격 = 서버 onHandQty, 재고 매수 = AVAILABLE LOT 수), LOT 목록(상세로 히트·배정·처리), 원료(입고·발주로 채움), 여재(서버 재고 응답의 surplus).
 import { afterEach, describe, expect, it } from 'vitest';
 import { inventoryApi } from '@/api/inventories';
 import { fail, ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
@@ -75,6 +75,20 @@ function listLots(call: ServerCall) {
 const overview = {
   products: [{ ...slabSpec, itemType: 'SLAB', onHandQty: 1, reservedQty: 1, rollingAllocatedQty: 0, availableQty: 0, onHandTon: '23.550', availableTon: '0.000', unallocatedPassedQty: 0 }],
   rawMaterials: [{ itemId: 1, itemCode: 'ORE01', itemName: '철광석', remainingTon: '1200.000', lotCount: 1 }],
+  surplus: [
+    {
+      ...slabSpec,
+      theoreticalWeightTon: '23.550',
+      unallocatedPassedQty: 3,
+      reservedQty: 1,
+      availableQty: 2,
+      surplusQty: 2,
+      lots: [
+        { lotId: 31, lotNo: 'HT-003-01', producedDate: '2026-10-01', heatNo: 'HT-003', yardName: '슬래브 1야드', productionPlanId: 7, productionPlanNo: 'PP-2610-0007' },
+        { lotId: 32, lotNo: 'HT-003-02', producedDate: null, heatNo: null, yardName: null, productionPlanId: null, productionPlanNo: null },
+      ],
+    },
+  ],
 };
 
 const receipts = [
@@ -169,9 +183,14 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
     ]);
   });
 
-  it('여재: 서버가 계산하지 않아 서버를 부르지 않고 빈 목록', async () => {
+  it('여재: 서버 재고 응답의 surplus를 그대로 쓰고 톤은 매수 × 이론중량, 여재 전환 시각은 비운다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) => respond(c));
-    expect(await inventoryApi.listSurplus()).toEqual([]);
-    expect(calls).toEqual([]);
+    const [row] = await inventoryApi.listSurplus();
+    expect(row).toMatchObject({ itemCode: 'SL-1', unallocatedPassedQty: 3, unallocatedPassedTon: '70.650', reservedQty: 1, availableTon: '47.100', surplusQty: 2, surplusTon: '47.100' });
+    expect(row.lots).toEqual([
+      { lotId: 31, lotNo: 'HT-003-01', producedDate: '2026-10-01', surplusAt: null, heatNo: 'HT-003', yardName: '슬래브 1야드', productionPlanId: 7, productionPlanNo: 'PP-2610-0007' },
+      { lotId: 32, lotNo: 'HT-003-02', producedDate: '', surplusAt: null, heatNo: null, yardName: null, productionPlanId: null, productionPlanNo: null },
+    ]);
+    expect(calls.map((c) => c.path)).toEqual(['/inventories']);
   });
 });
