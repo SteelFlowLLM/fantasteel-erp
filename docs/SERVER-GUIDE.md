@@ -17,7 +17,7 @@ npm install          # shared 빌드 + Prisma Client 생성까지 자동
 npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173)
 ```
 
-- `npm run dev`는 서버를 띄우기 전에 `server/scripts/prepare-db.mjs`로 마이그레이션 적용 → 빈 DB면 시드 → TypedSQL 생성을 한다.
+- `npm run dev`는 서버를 띄우기 전에 `server/scripts/prepare-db.mjs`로 마이그레이션 적용 → 빈 DB면 시드 → TypedSQL 생성을 한다. 마이그레이션·시드는 로컬 DB(54322)일 때만 하고, 공용 DB(Supabase)면 건너뛴다(8장).
 - 로컬 DB는 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 뜬다. Docker가 필요 없다. DB만 띄우려면 `npm run db`.
 - 서버만: `npm run dev:server` (DB가 떠 있어야 한다).
 - 테스트 계정: 시드 사원 15명, 비밀번호 모두 `fantasteel`. 사원번호는 [backend/seed.md](backend/seed.md).
@@ -26,8 +26,9 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 | 명령 | 하는 일 |
 |---|---|
 | `npm run db:reset` | 개발 DB(`fantasteel`)를 지우고 스키마 + 시드를 다시 넣는다. **데이터가 모두 사라진다** |
-| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자만, 7장) |
-| `npm run seed` | 시드 다시 넣기 (반복 실행해도 결과 같음) |
+| `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자만, 7장). 로컬 DB에서만 실행된다 |
+| `npm run seed` | 시드 다시 넣기 (반복 실행해도 결과 같음). 로컬 DB에서만 실행된다 |
+| `npm run db:deploy -w @fantasteel/server` | 공용 DB에 마이그레이션 반영 (DB 담당자만, 최신 develop에서만, 8장). 처음 한 번은 `-- --seed`로 빈 DB에 시드까지 |
 | `npm test` | 서버 테스트. 묶음마다 테스트 전용 DB(`fs_*`)를 새로 만들어 돌린다. DB가 떠 있어야 한다 |
 | `npm run test:unit -w @fantasteel/server` | DB 없이 공통 단위 테스트만 |
 | `npm run typecheck` | shared·server·client 타입 검사 |
@@ -99,4 +100,7 @@ server/
 
 ## 8. Supabase로 옮길 때
 
-`server/.env`의 두 값만 바꾼다 (`server/.env.example` 참고). `DATABASE_URL`은 Transaction pooler(6543) + `?pgbouncer=true`, `DIRECT_URL`은 Direct 또는 Session pooler(5432). 그다음 `cd server && npx prisma migrate deploy && npx tsx prisma/seed.ts`.
+`server/.env`의 두 값만 바꾼다 (`server/.env.example` 참고). `DATABASE_URL`은 Transaction pooler(6543) + `?pgbouncer=true`, `DIRECT_URL`은 Direct 또는 Session pooler(5432).
+
+- 공용 DB를 가리키면 `npm run dev`는 마이그레이션·시드를 건너뛰고, `migrate`·`migrate:deploy`·`seed`는 실행하지 않는다. 누가 머지 전 브랜치로 dev를 켜도 공용 DB가 바뀌지 않게 하려는 것이다.
+- 공용 DB 반영은 DB 담당자가 최신 develop에서 `npm run db:deploy -w @fantasteel/server`로만 한다(처음 한 번은 `-- --seed`). develop 브랜치·고치던 파일 없음·`origin/develop`과 같음을 확인하고 대상 호스트를 보여 준 뒤 반영한다.
