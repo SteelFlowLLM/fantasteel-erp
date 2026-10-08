@@ -191,6 +191,11 @@ export interface ChatRoomSettings {
   pinnedAt: string | null;
 }
 
+/** 방 나가기 결과 (15번). 1:1 방은 나갈 수 없다 */
+export interface LeaveChatRoomResult {
+  chatRoomId: number;
+}
+
 /** 읽음 위치 갱신 결과 */
 export interface ChatRoomReadResult {
   chatRoomId: number;

@@ -59,11 +59,11 @@ interface JumpProps {
   onFocusDone: () => void;
 }
 
-export function Conversation({ chatRoomId, asideOpen, onToggleAside, ...jump }: { chatRoomId: number; asideOpen: boolean; onToggleAside: () => void } & JumpProps) {
+export function Conversation({ chatRoomId, asideOpen, onToggleAside, onLeft, ...jump }: { chatRoomId: number; asideOpen: boolean; onToggleAside: () => void; onLeft: () => void } & JumpProps) {
   const room = useChatRoom(chatRoomId);
   return (
     <QueryBoundary query={room} loadingLabel="채팅방을 불러오는 중…">
-      {(data) => <RoomView room={data} asideOpen={asideOpen} onToggleAside={onToggleAside} {...jump} />}
+      {(data) => <RoomView room={data} asideOpen={asideOpen} onToggleAside={onToggleAside} onLeft={onLeft} {...jump} />}
     </QueryBoundary>
   );
 }
@@ -72,10 +72,11 @@ function RoomView({
   room,
   asideOpen,
   onToggleAside,
+  onLeft,
   focusMessageId,
   onJump,
   onFocusDone,
-}: { room: ChatRoomDetailView; asideOpen: boolean; onToggleAside: () => void } & JumpProps) {
+}: { room: ChatRoomDetailView; asideOpen: boolean; onToggleAside: () => void; onLeft: () => void } & JumpProps) {
   const me = useMe();
   const [limit, setLimit] = useState(MESSAGE_PAGE_SIZE);
   const [inviting, setInviting] = useState(false);
@@ -219,7 +220,7 @@ function RoomView({
                 멤버 초대
               </Button>
             ) : null}
-            <RoomSettingsButtons room={room} />
+            <RoomSettingsButtons room={room} onLeft={onLeft} />
             <IconButton icon="panel" label={asideOpen ? '방 정보 닫기' : '방 정보 열기'} aria-pressed={asideOpen} onClick={onToggleAside} />
           </div>
         </header>
