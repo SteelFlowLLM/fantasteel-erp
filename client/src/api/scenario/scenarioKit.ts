@@ -1,14 +1,23 @@
 // 시연 시나리오(업무 프로세스 14.1·14.2·14.3) 시험 도우미: 화면 api 함수만 부르고, 사원은 actAs로 바꾼다.
 // 테스트 파일에서만 쓴다 (화면 코드는 쓰지 않는다). 시각은 Date만 가짜로 돌려 업무 번호·납기 계산을 고정한다.
 import { afterEach, beforeEach, expect, vi } from 'vitest';
-import { approvalApi } from '@/api/approvals';
-import { goodsReceiptApi } from '@/api/goodsReceipts';
+import { actingEmployeeId } from '@/api/actor';
+import { mockMutation } from '@/api/client';
 import { inspectionApi, type RegisterInspectionOutcome } from '@/api/inspections';
 import type { MrpPeriod, MrpRequirementsView } from '@/api/mrp';
-import { purchaseOrderApi, purchaseRequisitionApi } from '@/api/purchasing';
 import { readDb } from '@/api/productionTestKit';
 import { typicalPassValue } from '@/lib/inspectionJudgment';
-import { checkInvariants, computeMrpForPeriod } from '@/mock/services';
+import {
+  approvePurchaseRequisition,
+  checkInvariants,
+  computeMrpForPeriod,
+  createPurchaseOrdersBySupplier,
+  createPurchaseRequisition,
+  receiveGoods,
+  userActor,
+  type PersonActor,
+} from '@/mock/services';
+import type { MockTx } from '@/mock/store';
 import { actAs, employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 export { itemIdOf, lotOf, lotsOfPlan, planIdOf, readDb } from '@/api/productionTestKit';
@@ -102,25 +111,25 @@ export async function inspectViaApi(lotId: number, overrides: Record<string, str
   });
 }
 
-/** 원료를 넉넉히 들여온다: 구매 담당 요청 → 구매 부서장 승인 → 발주 → 전량 입고 (모두 화면 api) */
-export async function stockRawMaterialsViaApi(receiptDate: string, tons: Partial<Record<'ORE01' | 'COL01' | 'LIM01' | 'SMN01', string>> = {}): Promise<void> {
+/** 원료를 넉넉히 들여온다: 구매 담당 요청 → 구매 부서장 승인 → 공급업체별 발주 → 전량 입고 (core 서비스) */
+export async function stockRawMaterials(receiptDate: string, tons: Partial<Record<'ORE01' | 'COL01' | 'LIM01' | 'SMN01', string>> = {}): Promise<void> {
   const amounts = { ORE01: '2000.000', COL01: '800.000', LIM01: '200.000', SMN01: '30.000', ...tons };
-  as('purchase');
-  // 구매요청 1건 = 원료 1품목이라 원료마다 요청한다
-  const requisitionIds: number[] = [];
-  for (const [code, ton] of Object.entries(amounts)) {
-    const itemId = readDb((t) => must(t.item.find((i) => i.itemCode === code), code).id);
-    requisitionIds.push((await purchaseRequisitionApi.create({ desiredReceiptDate: receiptDate, requestReason: '시연 원료 확보', itemId, requestedTon: ton })).id);
-  }
-  as('purchaseHead');
-  for (const id of requisitionIds) await approvalApi.approve({ purchaseRequisitionId: id, expectedUpdatedAt: (await purchaseRequisitionApi.detail(id)).updatedAt });
-  as('purchase');
-  // 발주는 공급업체 1곳당 1건: 원료마다 기본 공급업체가 달라 후보 요청마다 발주 1건
-  const candidates = (await purchaseOrderApi.candidateItems()).filter((i) => requisitionIds.includes(i.id));
-  const purchaseOrders = await purchaseOrderApi.create(
-    candidates.map((i) => ({ supplierId: i.supplierId ?? 0, items: [{ purchaseRequisitionId: i.id, orderedTon: i.requestedTon, expectedReceiptDate: '' }] })),
-  );
-  for (const line of purchaseOrders.flatMap((po) => po.items)) {
-    await goodsReceiptApi.receive({ purchaseOrderItemId: line.id, receivedTon: line.remainingTon, receivedDate: receiptDate });
-  }
+  const purchase = userActor(idOf('purchase'));
+  const head = userActor(idOf('purchaseHead'));
+  await mockMutation((tx) => {
+    // 구매요청 1건 = 원료 1품목이라 원료마다 요청한다
+    const requisitions = Object.entries(amounts).map(([code, ton]) =>
+      createPurchaseRequisition(tx, purchase, { itemId: must(tx.tables.item.find((i) => i.itemCode === code), code).id, requestedTon: ton, desiredReceiptDate: receiptDate, requestReason: '시연 원료 확보' }),
+    );
+    for (const pr of requisitions) approvePurchaseRequisition(tx, head, { purchaseRequisitionId: pr.id });
+    createPurchaseOrdersBySupplier(tx, purchase, requisitions.map((pr) => pr.id));
+    for (const pr of requisitions) {
+      const line = must(tx.tables.purchaseOrderItem.find((l) => l.purchaseRequisitionId === pr.id), `발주 품목 ${pr.purchaseRequisitionNo}`);
+      receiveGoods(tx, purchase, { purchaseOrderItemId: line.id, receivedTon: line.orderedTon, receivedDate: receiptDate });
+    }
+  });
 }
+
+/** 구매(요청·승인·발주·입고) 화면 API는 서버만 불러서, 가짜 DB 시나리오는 지금 사원(as)으로 core 서비스를 바로 부른다 */
+export const asPurchaseCore = <T>(work: (tx: MockTx, actor: PersonActor) => T): Promise<T> =>
+  mockMutation((tx) => work(tx, userActor(must(actingEmployeeId(), '로그인 사원'))));

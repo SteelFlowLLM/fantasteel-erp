@@ -24,7 +24,7 @@ import {
   readDb,
   salesOrderIdOf,
   soItemIdsOf,
-  stockRawMaterialsViaApi,
+  stockRawMaterials,
   useScenarioClock,
 } from '@/api/scenario/scenarioKit';
 
@@ -39,7 +39,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
 
   it('혼합 수주는 코일 부족분만 코일 라우팅으로 계획하고, 필요 슬래브만 판매 예약을 피해 열연 배정 → 슬래브 1매 = 코일 1개 → 검사 → 자동 예약', async () => {
     at('2026-10-01T08:00:00+09:00');
-    await stockRawMaterialsViaApi('2026-10-01');
+    await stockRawMaterials('2026-10-01');
 
     // 혼합 수주: 슬래브는 재고 우선 예약으로 끝나고, 코일만 부족 3개 → 코일 계획 1건
     at('2026-10-01T09:00:00+09:00');
@@ -160,7 +160,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
 
   it('생산 시작 전 수주 취소 → 계획 취소·예약 RELEASED, 연주 진행 중 취소 → 완료 후 여재, 출하요청 진행 중이면 SO-004', async () => {
     at('2026-10-01T08:00:00+09:00');
-    await stockRawMaterialsViaApi('2026-10-01');
+    await stockRawMaterials('2026-10-01');
     const slabA = itemIdOf(SLAB_A);
 
     // 시작 전 취소
