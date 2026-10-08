@@ -97,7 +97,8 @@ function notifyForMessage(tx: MockTx, room: ChatRoomRow, senderId: number, messa
   const senderName = sender?.employeeName ?? '시스템';
   const roomLabel = roomLabelOf(tx.tables, room);
   const preview = message.content ? previewText(message.content) : `파일 · ${message.fileName ?? ''}`;
-  const linkPath = `/messenger?room=${room.id}`;
+  // 알림을 누르면 그 메시지까지 이동한다 (서버와 같은 경로)
+  const linkPath = `/messenger?room=${room.id}&message=${message.id}`;
   const notified = new Set<number>([senderId]);
 
   if (message.content) {

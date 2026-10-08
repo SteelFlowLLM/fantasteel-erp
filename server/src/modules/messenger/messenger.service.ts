@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import {
   BLOCKED_ATTACHMENT_EXTENSIONS,
+  ERP_LINK_PATH,
+  findErpNos,
   CHAT_ROOM_TYPE,
   CHAT_ROOM_TYPE_LABEL,
   MESSAGE_ATTACHMENT_MAX_BYTES,
@@ -16,6 +18,8 @@ import {
   type ChatMessageView,
   type ChatRoomDetail,
   type ChatRoomListItem,
+  type ErpLink,
+  type ErpNoKind,
   type ChatRoomReadResult,
   type ChatRoomType,
   type CreateChatRoomResult,
@@ -106,7 +110,10 @@ function unreadMemberCountOf(message: { id: number; senderId: number }, reads: r
   return reads.filter((r) => r.employeeId !== message.senderId && (r.lastReadMessageId ?? 0) < message.id).length;
 }
 
-function toMessageView(message: MessageWithSender, me: number, unreadMemberCount: number): ChatMessageView {
+/** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
+type ErpLinkResolver = (content: string | null) => ErpLink[];
+
+function toMessageView(message: MessageWithSender, me: number, unreadMemberCount: number, erpLinksOf: ErpLinkResolver): ChatMessageView {
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
@@ -118,6 +125,7 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     content: message.content,
     attachmentName: message.attachmentName,
     unreadMemberCount,
+    erpLinks: erpLinksOf(message.content),
     createdAt: message.createdAt.toISOString(),
   };
 }
@@ -166,7 +174,7 @@ export class MessengerService {
         memberCount: employees.length,
         memberNames: others.map((e) => e.employeeName),
         counterpart: counterpart
-          ? { employeeName: counterpart.employeeName, departmentName: counterpart.department.departmentName, jobGradeName: counterpart.jobGrade.jobGradeName }
+          ? { employeeId: counterpart.id, employeeName: counterpart.employeeName, departmentName: counterpart.department.departmentName, jobGradeName: counterpart.jobGrade.jobGradeName }
           : null,
         lastMessage: last
           ? { senderName: lastSender?.employeeName ?? '-', isMine: last.senderId === me, preview: previewOf(last), createdAt: last.createdAt.toISOString() }
@@ -366,7 +374,30 @@ export class MessengerService {
   /** 메시지 목록 응답: 멤버 읽음 위치를 한 번 읽어 메시지마다 안 읽은 사람 수를 붙인다 */
   private async toPage(chatRoomId: number, me: number, rows: readonly MessageWithSender[], hasMore: boolean): Promise<ChatMessagePage> {
     const reads = await this.repository.findMemberReads(this.prisma, chatRoomId);
-    return { items: rows.map((m) => toMessageView(m, me, unreadMemberCountOf(m, reads))), hasMore };
+    const erpLinksOf = await this.erpLinkResolver(rows.map((m) => m.content));
+    return { items: rows.map((m) => toMessageView(m, me, unreadMemberCountOf(m, reads), erpLinksOf)), hasMore };
+  }
+
+  /** 본문들의 업무 번호를 모아 실제로 있는 문서만 링크로 바꾸는 함수를 만든다 (REQ-MSG-006) */
+  private async erpLinkResolver(contents: readonly (string | null)[]): Promise<ErpLinkResolver> {
+    const found = contents.flatMap((content) => (content ? findErpNos(content) : []));
+    if (found.length === 0) return () => [];
+    const numbersOf = (kind: ErpNoKind) => [...new Set(found.filter((f) => f.kind === kind).map((f) => f.no))];
+    const documents = await this.repository.findErpDocuments(this.prisma, {
+      salesOrderNos: numbersOf('SALES_ORDER'),
+      purchaseRequisitionNos: numbersOf('PURCHASE_REQUISITION'),
+      shipmentRequestNos: numbersOf('SHIPMENT_REQUEST'),
+    });
+    const idOf = new Map<string, number>([
+      ...documents.salesOrders.map((d) => [`SALES_ORDER:${d.no}`, d.id] as const),
+      ...documents.purchaseRequisitions.map((d) => [`PURCHASE_REQUISITION:${d.no}`, d.id] as const),
+      ...documents.shipmentRequests.map((d) => [`SHIPMENT_REQUEST:${d.no}`, d.id] as const),
+    ]);
+    return (content) =>
+      (content ? findErpNos(content) : []).flatMap(({ no, kind }) => {
+        const id = idOf.get(`${kind}:${no}`);
+        return id === undefined ? [] : [{ text: no, href: ERP_LINK_PATH[kind](id) }];
+      });
   }
 
   /** 글 메시지 보내기 (REQ-MSG-002). @멘션 대상은 mentionedEmployeeIds로 받는다 */
@@ -442,8 +473,9 @@ export class MessengerService {
     });
     // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다
     const unreadMemberCount = memberIds.length - 1;
-    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount));
-    return toMessageView(message, me, unreadMemberCount);
+    const erpLinksOf = await this.erpLinkResolver([message.content]);
+    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
+    return toMessageView(message, me, unreadMemberCount, erpLinksOf);
   }
 
   private async notifyForMessage(tx: Tx, room: ChatRoom, message: MessageWithSender, memberIds: readonly number[], mentionedEmployeeIds: readonly number[]): Promise<void> {
@@ -457,7 +489,8 @@ export class MessengerService {
     const roomLabel = roomLabelOf(room, salesOrderNo);
     const preview = shorten(previewOf(message));
     const senderName = message.sender.employeeName;
-    const linkPath = `/messenger?room=${room.id}`;
+    // 알림을 누르면 그 메시지까지 이동한다
+    const linkPath = `/messenger?room=${room.id}&message=${message.id}`;
     await this.notifications.notifyEmployees(tx, mentioned, {
       notificationType: NOTIFICATION_TYPE.MENTION,
       notificationContent: `${senderName}님이 멘션했어요 · ${roomLabel} · ${preview}`,

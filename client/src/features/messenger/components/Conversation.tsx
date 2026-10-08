@@ -5,6 +5,7 @@
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
+import { isServerDataSource } from '@/api/http';
 import { MESSAGE_PAGE_SIZE, type ChatRoomDetailView } from '@/api/messenger';
 import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
@@ -15,13 +16,21 @@ import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
+import { PresenceDot, useIsOnline } from '@/features/messenger/components/Presence';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
+import { cn } from '@/lib/cn';
+import { toast } from '@/stores/useToastStore';
 import { useChatMessages, useChatRoom, useMarkRoomRead, useMessageOutbox } from '@/hooks/useMessenger';
+import { typingText, useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
+
+const NO_TYPING: readonly never[] = [];
+/** 이동한 메시지를 강조하는 시간 */
+const HIGHLIGHT_MS = 2500;
 
 /** 맨 아래로 볼 때의 여유 (px) */
 const BOTTOM_SLACK = 48;
@@ -37,22 +46,41 @@ function buildRoomCaption(room: ChatRoomDetailView): string {
   return `${CHAT_ROOM_TYPE_LABEL.GROUP} · ${departments.slice(0, 3).join(', ')}${departments.length > 3 ? ' 외' : ''} · 멤버 ${room.members.length}`;
 }
 
-export function Conversation({ chatRoomId, asideOpen, onToggleAside }: { chatRoomId: number; asideOpen: boolean; onToggleAside: () => void }) {
+interface JumpProps {
+  /** 이 메시지까지 스크롤해 잠깐 강조한다 (알림·검색에서 이동) */
+  focusMessageId: number | null;
+  /** 검색 결과를 눌렀을 때 */
+  onJump: (messageId: number) => void;
+  /** 이동이 끝났거나 찾지 못했을 때 (주소에서 message를 지운다) */
+  onFocusDone: () => void;
+}
+
+export function Conversation({ chatRoomId, asideOpen, onToggleAside, ...jump }: { chatRoomId: number; asideOpen: boolean; onToggleAside: () => void } & JumpProps) {
   const room = useChatRoom(chatRoomId);
   return (
     <QueryBoundary query={room} loadingLabel="채팅방을 불러오는 중…">
-      {(data) => <RoomView room={data} asideOpen={asideOpen} onToggleAside={onToggleAside} />}
+      {(data) => <RoomView room={data} asideOpen={asideOpen} onToggleAside={onToggleAside} {...jump} />}
     </QueryBoundary>
   );
 }
 
-function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView; asideOpen: boolean; onToggleAside: () => void }) {
+function RoomView({
+  room,
+  asideOpen,
+  onToggleAside,
+  focusMessageId,
+  onJump,
+  onFocusDone,
+}: { room: ChatRoomDetailView; asideOpen: boolean; onToggleAside: () => void } & JumpProps) {
   const me = useMe();
   const [limit, setLimit] = useState(MESSAGE_PAGE_SIZE);
   const [inviting, setInviting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const messages = useChatMessages(room.id, limit);
   const outbox = useMessageOutbox(room.id);
+  const counterpartId = room.chatRoomType === 'DIRECT' ? (room.members.find((m) => !m.isMe)?.id ?? null) : null;
+  const counterpartOnline = useIsOnline(counterpartId);
+  const typing = typingText(useMessengerLiveStore((state) => state.typing[room.id] ?? NO_TYPING));
   const { mutate: markRead } = useMarkRoomRead();
   const feedRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -120,6 +148,32 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
     markRead({ chatRoomId: room.id, lastMessageId: lastOthersId });
   }, [focused, atBottom, lastOthersId, room.id, room.lastReadMessageId, markRead]);
 
+  // 메시지로 이동: 지금 불러온 범위에 없으면 이전 메시지를 더 불러오고, 있으면 가운데로 스크롤해 잠깐 강조한다
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+  useEffect(() => {
+    if (focusMessageId === null || !messages.data || messages.isFetching) return;
+    const target = feedRef.current?.querySelector<HTMLElement>(`[data-message-id="${focusMessageId}"]`);
+    if (target) {
+      target.scrollIntoView({ block: 'center' });
+      onScroll();
+      setHighlightId(focusMessageId);
+      onFocusDone();
+      return;
+    }
+    if (messages.data.hasMore) {
+      setLimit((current) => current + MESSAGE_PAGE_SIZE);
+      return;
+    }
+    toast.info('메시지를 찾을 수 없어요');
+    onFocusDone();
+    // onScroll·onFocusDone은 렌더마다 새로 만들어져 의존성에서 뺀다 (메시지·대상이 바뀔 때만 다시 본다)
+  }, [focusMessageId, messages.data, messages.isFetching]);
+  useEffect(() => {
+    if (highlightId === null) return;
+    const timer = window.setTimeout(() => setHighlightId(null), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlightId]);
+
   const onScroll = () => {
     const feed = feedRef.current;
     if (!feed) return;
@@ -137,10 +191,16 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
     <div className="flex min-h-0 min-w-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
         <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
-          <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
+          <span className="relative flex-none">
+            <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
+            <PresenceDot employeeId={counterpartId} />
+          </span>
           <div className="flex min-w-0 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
-            <span className="truncate text-cap text-ink-3">{buildRoomCaption(room)}</span>
+            <span className="truncate text-cap text-ink-3">
+              {buildRoomCaption(room)}
+              {counterpartOnline === null ? null : counterpartOnline ? ' · 접속 중' : ' · 접속 안 함'}
+            </span>
           </div>
           <div className="ml-auto flex flex-none items-center gap-1.5">
             {room.chatRoomType === 'WORK' ? (
@@ -175,7 +235,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
               {items.map((message, index) => {
                 const { showDay, showNewDivider, isGroupStart, isGroupEnd } = layout[index];
                 return (
-                  <div key={message.id}>
+                  <div key={message.id} data-message-id={message.id} className={cn('transition-colors duration-700', highlightId === message.id && 'bg-brand-tint')}>
                     {showDay ? (
                       <div className="flex items-center gap-3 px-5 py-2 text-cap font-medium text-ink-3" role="separator">
                         <span className="h-px flex-1 bg-line" />
@@ -215,6 +275,12 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
             </Button>
           </div>
         ) : null}
+        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 (서버 모드만) */}
+        {isServerDataSource() ? (
+          <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
+            {typing}
+          </div>
+        ) : null}
         <Composer
           room={room}
           onSent={() => {
@@ -224,7 +290,7 @@ function RoomView({ room, asideOpen, onToggleAside }: { room: ChatRoomDetailView
           }}
         />
       </section>
-      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} onRename={() => setRenaming(true)} /> : null}
+      {asideOpen ? <RoomAside room={room} onInvite={() => setInviting(true)} onRename={() => setRenaming(true)} onJump={onJump} /> : null}
       {inviting ? <InviteModal room={room} onClose={() => setInviting(false)} /> : null}
       {renaming ? <RenameRoomModal room={room} onClose={() => setRenaming(false)} /> : null}
     </div>

@@ -56,7 +56,7 @@ export interface ChatRoomListItem extends ChatRoomPreview {
   /** 검색용 멤버 이름 (나 제외) */
   memberNames: string[];
   /** 1:1 상대 */
-  counterpart: { employeeName: string; departmentName: string; jobGradeName: string } | null;
+  counterpart: { employeeId: number; employeeName: string; departmentName: string; jobGradeName: string } | null;
   lastMessage: { senderName: string; isMine: boolean; isSystem: boolean; preview: string; createdAt: string } | null;
   /** 업무방의 수주 (수주 화면을 열 수 있을 때만) */
   salesOrder: { id: number; salesOrderNo: string; customerName: string; dueDate: string | null } | null;
@@ -370,7 +370,7 @@ export const messengerApi = {
             memberCount: otherIds.length + 1,
             memberNames: otherIds.map((id) => employeeOf(tables, id)?.employeeName ?? '').filter(Boolean),
             counterpart: counterpartRow
-              ? { employeeName: counterpartRow.employeeName, departmentName: departmentNameOf(tables, counterpartRow.departmentId), jobGradeName: jobGradeNameOf(tables, counterpartRow.jobGradeId) }
+              ? { employeeId: counterpartRow.id, employeeName: counterpartRow.employeeName, departmentName: departmentNameOf(tables, counterpartRow.departmentId), jobGradeName: jobGradeNameOf(tables, counterpartRow.jobGradeId) }
               : null,
             lastMessage: last
               ? { senderName: lastSender?.employeeName ?? '시스템', isMine: last.senderId === me, isSystem: !lastSender, preview: messagePreviewOf(last), createdAt: last.createdAt }

@@ -24,7 +24,7 @@ export interface ChatRoomListItem {
   /** 검색용 멤버 이름 (나 제외) */
   memberNames: string[];
   /** 1:1 상대 */
-  counterpart: { employeeName: string; departmentName: string; jobGradeName: string } | null;
+  counterpart: { employeeId: number; employeeName: string; departmentName: string; jobGradeName: string } | null;
   lastMessage: { senderName: string; isMine: boolean; preview: string; createdAt: string } | null;
   unreadCount: number;
   /** 업무방의 수주 (수주 조회 권한이 있을 때만) */
@@ -98,6 +98,8 @@ export interface ChatMessageView {
   attachmentName: string | null;
   /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
   unreadMemberCount: number;
+  /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006). 화면 권한은 화면이 따로 본다 */
+  erpLinks: ErpLink[];
   createdAt: string;
 }
 
@@ -151,7 +153,33 @@ export const MESSENGER_EVENT = {
   ROOM_UPDATED: 'room:updated',
   /** 다른 멤버가 읽음 위치를 옮김 (메시지별 안 읽은 사람 수 갱신). 페이로드 ChatMemberReadEvent */
   MEMBER_READ: 'member:read',
+  /** 연결 직후 한 번: 지금 접속 중인 사원. 페이로드 PresenceSnapshotEvent */
+  PRESENCE_SNAPSHOT: 'presence:snapshot',
+  /** 사원이 접속하거나(첫 연결) 나감(마지막 연결 끊김). 페이로드 PresenceChangedEvent */
+  PRESENCE_CHANGED: 'presence:changed',
+  /** 화면 → 서버: { chatRoomId } (입력 중). 서버 → 다른 멤버: TypingEvent */
+  TYPING: 'typing',
 } as const;
+
+/** 입력 중 신호를 보내는 최소 간격 (가정값). 계속 입력하면 이 간격마다 다시 보낸다 */
+export const TYPING_SEND_INTERVAL_MS = 3000;
+/** 마지막 입력 중 신호 뒤 이 시간이 지나면 표시를 지운다 (가정값, 보내는 간격의 2배) */
+export const TYPING_SHOW_MS = 6000;
+
+export interface PresenceSnapshotEvent {
+  onlineEmployeeIds: number[];
+}
+
+export interface PresenceChangedEvent {
+  employeeId: number;
+  online: boolean;
+}
+
+export interface TypingEvent {
+  chatRoomId: number;
+  employeeId: number;
+  employeeName: string;
+}
 
 export interface ChatMemberReadEvent {
   chatRoomId: number;
@@ -163,4 +191,41 @@ export type ChatRoomReadEvent = ChatRoomReadResult;
 
 export interface ChatRoomUpdatedEvent {
   chatRoomId: number;
+}
+
+// ── 본문의 업무 번호 → ERP 화면 링크 (REQ-MSG-006) ─────────────
+
+export type ErpNoKind = 'SALES_ORDER' | 'PURCHASE_REQUISITION' | 'SHIPMENT_REQUEST';
+
+/** 수주(SO-)·구매요청(PR-)·출하요청(DR-) 번호 (업무 프로세스 9.1) */
+const ERP_NO_PATTERN = /\b(SO-\d{4}-\d{3,}|PR-\d{4}-\d{4,}|DR-\d{4}-\d{4,})\b/g;
+
+const KIND_OF_PREFIX: Record<string, ErpNoKind> = {
+  SO: 'SALES_ORDER',
+  PR: 'PURCHASE_REQUISITION',
+  DR: 'SHIPMENT_REQUEST',
+};
+
+/** 본문의 업무 번호 (같은 번호는 한 번만) */
+export function findErpNos(content: string): { no: string; kind: ErpNoKind }[] {
+  const result: { no: string; kind: ErpNoKind }[] = [];
+  for (const match of content.matchAll(ERP_NO_PATTERN)) {
+    const no = match[1];
+    const kind = KIND_OF_PREFIX[no.slice(0, 2)];
+    if (kind && !result.some((r) => r.no === no)) result.push({ no, kind });
+  }
+  return result;
+}
+
+/** 업무 번호 → 상세 화면 경로 */
+export const ERP_LINK_PATH: Record<ErpNoKind, (id: number) => string> = {
+  SALES_ORDER: (id) => `/sales-orders/${id}`,
+  PURCHASE_REQUISITION: (id) => `/purchase-requisitions/${id}`,
+  SHIPMENT_REQUEST: (id) => `/shipment-requests/${id}`,
+};
+
+/** 본문의 업무 번호 중 실제로 있는 것의 상세 화면 링크 */
+export interface ErpLink {
+  text: string;
+  href: string;
 }

@@ -2,6 +2,7 @@
 
 // 업무방 열기 (REQ-MSG-001, BP-MSG-01): 수주 1건에 업무방 1개. 멤버는 조직도에서 고른다. 연 사람은 늘 들어간다.
 // 이미 방이 있으면 그 방을 열고, 새로 고른 사람만 더한다.
+// 위에 추천 멤버(담당 영업, 생산·물류 부서장)를 보여 주고 한 번에 더할 수 있다. 추천만 하고 미리 고르지는 않는다.
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type { OrgChartNode } from '@/api/directory';
@@ -12,10 +13,11 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
+import { suggestWorkRoomMembers } from '@/features/sales/lib/workRoomSuggest';
 import { useAction } from '@/hooks/useAction';
 import { useOrgChart } from '@/hooks/useDirectory';
 import { useMe } from '@/hooks/useMe';
-import { useSalesOrderWorkRoom } from '@/hooks/useSalesOrders';
+import { useSalesOrderDetail, useSalesOrderWorkRoom } from '@/hooks/useSalesOrders';
 import { cn } from '@/lib/cn';
 
 interface Props {
@@ -43,6 +45,12 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
   const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
   const [keyword, setKeyword] = useState('');
   const existing = useMemo(() => new Set(room.data?.memberEmployeeIds ?? []), [room.data]);
+  const salesOrder = useSalesOrderDetail(salesOrderId);
+  const suggested = useMemo(
+    () => (orgChart.data ? suggestWorkRoomMembers(orgChart.data, { ownerEmployeeId: salesOrder.data?.ownerEmployeeId ?? null, myId, existingIds: existing }) : []),
+    [orgChart.data, salesOrder.data, myId, existing],
+  );
+  const unpickedSuggested = suggested.filter((s) => !picked.has(s.id));
 
   const open = useAction(salesOrderApi.openWorkRoom, {
     success: (result) => (result.created ? `${result.chatRoomName ?? salesOrderNo} 업무방을 열었어요` : '업무방을 열었어요'),
@@ -137,6 +145,26 @@ export function OpenWorkRoomModal({ salesOrderId, salesOrderNo, onClose }: Props
           ? '이 수주의 업무방이 이미 있어요. 더할 사람을 고르면 함께 들어가요.'
           : '이 수주와 연결된 업무방을 만들어요. 함께할 사람을 조직도에서 골라 주세요. 연 사람은 늘 들어가요.'}
       </p>
+      {suggested.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-xs" aria-label="추천 멤버">
+          <b className="font-semibold text-ink-2">추천</b>
+          {suggested.map((s) => (
+            <Tag key={s.id} size="sm" tone={picked.has(s.id) ? 'brand' : 'neutral'}>
+              {s.employeeName} · {s.reason}
+            </Tag>
+          ))}
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="plus"
+            className="ml-auto"
+            disabled={unpickedSuggested.length === 0}
+            onClick={() => setPicked((prev) => new Set([...prev, ...unpickedSuggested.map((s) => s.id)]))}
+          >
+            {unpickedSuggested.length === 0 ? '모두 골랐어요' : `추천 ${unpickedSuggested.length}명 더하기`}
+          </Button>
+        </div>
+      ) : null}
       <Input leadingIcon="search" aria-label="이름·부서 검색" placeholder="이름·부서 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
       <QueryBoundary query={orgChart} loadingLabel="조직도를 불러오는 중…">
         {(tree) => {

@@ -42,7 +42,7 @@ function Highlighted({ text, keyword }: { text: string; keyword: string }) {
 
 const whenOf = (message: MessageView) => `${fmtDate(message.createdAt)} ${fmtHM(message.createdAt)}`;
 
-export function RoomSearch({ chatRoomId }: { chatRoomId: number }) {
+export function RoomSearch({ chatRoomId, onJump }: { chatRoomId: number; onJump: (messageId: number) => void }) {
   const [draft, setDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const search = useChatSearch(chatRoomId, keyword);
@@ -74,13 +74,20 @@ export function RoomSearch({ chatRoomId }: { chatRoomId: number }) {
         ) : (
           <ul className="flex flex-col gap-2" aria-label="검색 결과">
             {search.data.items.map((message) => (
-              <li key={message.id} className="flex flex-col gap-0.5 rounded-sm bg-surface-2 px-2.5 py-2 text-xs">
-                <span className="text-cap text-ink-3">
-                  <b className="font-semibold text-ink-2">{message.senderName}</b> · {whenOf(message)}
-                </span>
-                <span className="break-words whitespace-pre-wrap">
-                  <Highlighted text={message.content ?? ''} keyword={keyword} />
-                </span>
+              <li key={message.id}>
+                <button
+                  type="button"
+                  onClick={() => onJump(message.id)}
+                  title="대화에서 이 메시지로 이동"
+                  className="flex w-full flex-col gap-0.5 rounded-sm bg-surface-2 px-2.5 py-2 text-left text-xs hover:bg-surface-3"
+                >
+                  <span className="text-cap text-ink-3">
+                    <b className="font-semibold text-ink-2">{message.senderName}</b> · {whenOf(message)}
+                  </span>
+                  <span className="break-words whitespace-pre-wrap">
+                    <Highlighted text={message.content ?? ''} keyword={keyword} />
+                  </span>
+                </button>
               </li>
             ))}
             {search.data.hasMore ? <li className="text-cap text-ink-3">최근 {search.data.items.length}건만 보여요. 검색어를 더 자세히 넣어 보세요</li> : null}

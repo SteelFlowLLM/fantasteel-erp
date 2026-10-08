@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Tag } from '@/components/Tag';
 import { WorkRoomSummary } from '@/features/messenger/components/WorkRoomSalesOrder';
+import { PresenceDot } from '@/features/messenger/components/Presence';
 import { RoomFiles, RoomSearch } from '@/features/messenger/components/RoomAsideTools';
 import { fmtDate } from '@/lib/format';
 
@@ -22,11 +23,11 @@ function Section({ title, actions, children }: { title: ReactNode; actions?: Rea
   );
 }
 
-export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void }) {
+export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void; onJump: (messageId: number) => void }) {
   return (
     <aside className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex" aria-label="방 정보">
       <Section title="대화 검색">
-        <RoomSearch chatRoomId={room.id} />
+        <RoomSearch chatRoomId={room.id} onJump={onJump} />
       </Section>
       {room.chatRoomType === 'WORK' ? (
         <Section title="수주 요약">
@@ -71,7 +72,10 @@ export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailVi
         <ul className="flex flex-col gap-2">
           {room.members.map((member) => (
             <li key={member.id} className="flex items-center gap-2 text-sm">
-              <Avatar name={member.employeeName} size="sm" tone={member.isMe ? 'brand' : 'neutral'} />
+              <span className="relative flex-none">
+                <Avatar name={member.employeeName} size="sm" tone={member.isMe ? 'brand' : 'neutral'} />
+                {member.isMe ? null : <PresenceDot employeeId={member.id} />}
+              </span>
               <span className="min-w-0 truncate">
                 {member.employeeName} <span className="text-xs text-ink-3">{member.jobGradeName}</span>
                 {member.isMe ? <span className="text-xs text-ink-3"> · 나</span> : null}

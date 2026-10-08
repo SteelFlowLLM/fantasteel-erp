@@ -2,6 +2,7 @@
 import { keepPreviousData, skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { messengerApi, messengerKeys, type SendMessageInput } from '@/api/messenger';
+import { imageMimeOf } from '@/features/messenger/lib/attachment';
 import { useMe } from '@/hooks/useMe';
 import { deliverOutboxItem, retryOutboxItem, useOutboxStore } from '@/stores/useOutboxStore';
 import { toast } from '@/stores/useToastStore';
@@ -55,6 +56,18 @@ export function useChatSearch(chatRoomId: number, keyword: string) {
   return useQuery({
     queryKey: messengerKeys.search(me.employeeId, chatRoomId, trimmed),
     queryFn: trimmed ? () => messengerApi.searchMessages({ chatRoomId, keyword: trimmed }) : skipToken,
+    retry: false,
+  });
+}
+
+/** 그림 첨부 미리보기 (REQ-MSG-003). 그림일 때만 읽고, 한 번 읽은 그림은 다시 받지 않는다 */
+export function useImagePreview(messageId: number, fileName: string) {
+  const me = useMe();
+  const isImage = imageMimeOf(fileName) !== null;
+  return useQuery({
+    queryKey: [...messengerKeys.all, 'image', me.employeeId, messageId] as const,
+    queryFn: isImage ? () => messengerApi.getFile({ messageId, fileName }) : skipToken,
+    staleTime: Infinity,
     retry: false,
   });
 }
