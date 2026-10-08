@@ -117,8 +117,9 @@ export function AccountPicker() {
       </section>
 
       <section aria-label={server ? '로그인' : '계정 선택'} className="flex min-w-0 flex-1 flex-col overflow-auto bg-surface">
-        <div className="flex flex-1 justify-center px-6 pt-14 pb-6">
-          <div className="flex w-[400px] max-w-full flex-col gap-4">
+        <div className="flex flex-1 justify-center px-6 py-6">
+          {/* 세로 가운데. 계정 목록이 화면보다 길면 my-auto가 0이 되어 위부터 스크롤된다 */}
+          <div className="my-auto flex w-[400px] max-w-full flex-col gap-4">
             <div className="flex flex-col gap-1">
               <h2 className="text-3xl font-semibold">{server ? '로그인' : '계정 선택'}</h2>
               <p className="text-sm text-ink-3">{server ? '사원번호와 비밀번호로 로그인해요.' : '시연용이에요. 계정을 누르면 그 사원으로 바로 들어가요.'}</p>
