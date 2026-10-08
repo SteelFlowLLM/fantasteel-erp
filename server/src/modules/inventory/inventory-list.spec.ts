@@ -146,7 +146,29 @@ describe('InventoryService 재고 조회 (GET /inventories, REQ-INV-001·008)', 
     expect(raw.products).toEqual([]);
     expect(raw.rawMaterials.map((r) => r.itemId)).toEqual([rawItem.id]);
 
-    expect(await service.listInventories({ itemId: 999999 })).toEqual({ products: [], rawMaterials: [] });
+    expect(await service.listInventories({ itemId: 999999 })).toEqual({ products: [], rawMaterials: [], surplus: [] });
+  });
+
+  it('여재 = 미배정 합격 슬래브 − ACTIVE 예약 매수이고, 여재 슬래브는 그 매수만큼 돌려준다 (inventory.md 8-1)', async () => {
+    const setReserved = (reservedQty: number) =>
+      prisma.inventory.upsert({ where: { itemId: slabItem.id }, create: { itemId: slabItem.id, onHandQty: 10, reservedQty }, update: { reservedQty } });
+    const surplusRow = async () => (await service.listInventories({ itemId: slabItem.id })).surplus.find((row) => row.itemId === slabItem.id);
+
+    await setReserved(0);
+    const before = (await surplusRow())?.surplusQty ?? 0;
+    await slabLot();
+    await slabLot();
+    const row = await surplusRow();
+    expect(row).toMatchObject({ itemCode: 'SL-SM355A-250x1500x10000', steelGradeCode: 'SM355A', theoreticalWeightTon: slabItem.theoreticalWeightTon, reservedQty: 0, surplusQty: before + 2 });
+    expect(row?.lots).toHaveLength(before + 2);
+    expect(row?.lots[0]).toEqual(expect.objectContaining({ lotNo: expect.any(String), heatNo: expect.any(String) }));
+
+    // 예약 1매가 늘면 여재가 1매 준다 (FIFO상 가장 늦게 쓰일 LOT이 여재로 남는다)
+    await setReserved(1);
+    expect((await surplusRow())?.surplusQty).toBe(before + 1);
+    await setReserved(before + 2);
+    expect(await surplusRow()).toBeUndefined();
+    await setReserved(3);
   });
 
   it('itemId 없이 부르면 제품 규격과 원료 규격 전부를 돌려준다', async () => {

@@ -2,7 +2,7 @@
 // LOT 목록·원료 LOT은 LOT 목록·상세에서, 입고일·입고 번호는 입고 목록, 입고예정은 발주 목록에서 채운다(권한이 없으면 비운다).
 // - 서버 onHandQty는 "합격 재고"(적격·미소진)라 화면의 합격 매수다. 화면의 재고 매수는 재고 상태(AVAILABLE) LOT 수로 센다.
 //   불합격 = 그 가운데 자기 검사 불합격, 판정 대기 = 나머지(상위 히트만 불합격인 LOT도 여기에 든다).
-// - 여재는 서버가 계산하지 않는다(docs/backend/inventory.md 🟡). 여재 탭은 빈 목록, LOT 목록의 여재 표시는 끈다.
+// - 여재 탭은 서버 재고 응답의 surplus(inventory.md 8-1)를 쓴다. 여재 전환 시각은 ERD에 없어 비우고, LOT 목록의 여재 표시는 끈다.
 // - 생산계획 링크, 공급업체, 기본 야드는 서버 응답에 없어 비운다.
 import type { InventoryOverview, InspectionResult, ItemView, LotDetail, LotSummary, PurchaseOrderView, GoodsReceiptView } from '@fantasteel/shared';
 import type { LotListFilter, LotListView, ProductInventoryView, RawMaterialInventoryView, SurplusSpecView } from '@/api/inventories';
@@ -176,9 +176,25 @@ async function listRawMaterials(): Promise<RawMaterialInventoryView[]> {
   );
 }
 
-/** 여재는 서버가 계산하지 않는다 (inventory.md 🟡: 여재 전환 시각 컬럼·계산식 없음). 숫자를 만들지 않고 빈 목록을 준다 */
+/** 여재 = 서버 재고 응답의 surplus (inventory.md 8-1). 톤은 매수 × 1매 이론중량으로 계산한다 */
 async function listSurplus(): Promise<SurplusSpecView[]> {
-  return [];
+  const { surplus } = await readOverview();
+  return surplus.map((row) => ({
+    itemId: row.itemId,
+    itemCode: row.itemCode,
+    itemName: row.itemName,
+    steelGradeCode: row.steelGradeCode,
+    theoreticalWeightTon: row.theoreticalWeightTon,
+    unallocatedPassedQty: row.unallocatedPassedQty,
+    unallocatedPassedTon: calcWeightTon(row.unallocatedPassedQty, row.theoreticalWeightTon),
+    reservedQty: row.reservedQty,
+    availableQty: row.availableQty,
+    availableTon: calcWeightTon(row.availableQty, row.theoreticalWeightTon),
+    surplusQty: row.surplusQty,
+    surplusTon: calcWeightTon(row.surplusQty, row.theoreticalWeightTon),
+    // 여재 전환 시각은 ERD에 없다 (inventory.md 8-1)
+    lots: row.lots.map((lot) => ({ ...lot, producedDate: lot.producedDate ?? '', surplusAt: null })),
+  }));
 }
 
 export const serverInventoryApi = { listProducts, listLots, listRawMaterials, listSurplus };

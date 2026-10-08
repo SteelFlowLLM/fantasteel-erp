@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, LOT_TYPE, RESERVATION_STATUS, SALES_ORDER_ITEM_STATUS, type AllocationPurpose, type AllocationStatus, type ReservationStatus } from '@fantasteel/shared';
 import {
   allocateRollingQty,
   countEligibleAvailableLots,
@@ -219,6 +219,40 @@ export class InventoryRepository {
 
   findAllocatableLots(tx: Tx, itemId: number) {
     return tx.$queryRawTyped(findAllocatableLots(itemId));
+  }
+
+  // ── 여재 (inventory.md 8-1) ───────────────────────────
+
+  /**
+   * 진행 중인 코일 수주에 묶인 슬래브 LOT (열연에 쓰일 몫).
+   * LOT → 작업 실적 → 생산계획 → 수주 품목(4장 자동 예약과 같은 경로). 수주가 취소되면 계획의 수주 품목이 null이 되어 빠진다.
+   */
+  async findLotIdsForOpenCoilOrders(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    const rows = await tx.lot.findMany({
+      where: {
+        id: { in: lotIds },
+        productionResult: {
+          productionPlan: {
+            salesOrderItem: { salesOrderItemStatus: { in: [SALES_ORDER_ITEM_STATUS.OPEN, SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED] }, item: { itemType: ITEM_TYPE.COIL } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** 여재 슬래브의 야드 이름과 만든 생산계획 (화면 표시용) */
+  findSurplusLotDetails(tx: Tx, lotIds: number[]) {
+    return tx.lot.findMany({
+      where: { id: { in: lotIds } },
+      select: { id: true, yard: { select: { yardName: true } }, productionResult: { select: { productionPlan: { select: { id: true, productionPlanNo: true } } } } },
+    });
+  }
+
+  /** 규격의 1매 이론중량 (여재 톤 계산) */
+  findItemWeights(tx: Tx, itemIds: number[]) {
+    return tx.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, theoreticalWeightTon: true } });
   }
 
   async findLotEligibility(tx: Tx, lotId: number) {
