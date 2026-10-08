@@ -16,6 +16,7 @@
 | quality | [quality.md](quality.md) | 검사 기준·검사·자동 판정·불합격 처리 | |
 | shipment | [shipment.md](shipment.md) | 출하요청·출고 확정·밀시트 | |
 | business-event | [business-event.md](business-event.md) | 작업 로그 조회·이력 재현 | |
+| dashboard | [dashboard.md](dashboard.md) | 대시보드 위젯 조회(P3) | |
 | notification | [notification.md](notification.md) | 업무·알림 | |
 | messenger | [messenger.md](messenger.md) | 채팅방·메시지·첨부·읽음·실시간 | |
 | message-action | [message-action.md](message-action.md) | Message → ERP 구매요청 초안 | |
