@@ -13,7 +13,7 @@ import { calcWeightTon, sumTon } from '@/lib/weight';
 
 const productType = (itemType: string): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
 
-/** 공정 흐름 현황: 서버도 단계마다 권한을 보고 없으면 null을 준다 */
+/** 공정 흐름 현황: 서버는 로그인한 모든 사원에게 6단계 건수를 모두 준다(단계 화면 바로가기 권한은 화면이 본다) */
 async function processFlow(): Promise<ProcessFlowData> {
   return serverRequest<ProcessFlowWidget>('GET', '/dashboard/widgets/process-flow');
 }
