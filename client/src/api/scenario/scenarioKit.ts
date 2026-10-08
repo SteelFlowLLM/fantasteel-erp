@@ -111,6 +111,9 @@ export async function inspectViaApi(lotId: number, overrides: Record<string, str
   });
 }
 
+/** 이 사원이 받은 가짜 DB 알림 (알림 화면 api는 서버만 불러 가짜 DB 시나리오는 행을 직접 본다) */
+export const mockNotificationsOf = (key: EmpKey) => readDb((t) => t.notification.filter((n) => n.recipientId === idOf(key)));
+
 /** 원료를 넉넉히 들여온다: 구매 담당 요청 → 구매 부서장 승인 → 공급업체별 발주 → 전량 입고 (core 서비스) */
 export async function stockRawMaterials(receiptDate: string, tons: Partial<Record<'ORE01' | 'COL01' | 'LIM01' | 'SMN01', string>> = {}): Promise<void> {
   const amounts = { ORE01: '2000.000', COL01: '800.000', LIM01: '200.000', SMN01: '30.000', ...tons };
