@@ -7,6 +7,8 @@ import type { Tx } from '../../prisma/prisma.service';
 export interface ChatRoomStatsRow {
   chatRoomId: number;
   unreadCount: number;
+  muted: boolean;
+  pinnedAt: Date | null;
   lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date; deletedAt: Date | null } | null;
 }
 
@@ -65,6 +67,8 @@ export class MessengerRepository {
       return {
         chatRoomId: row.chat_room_id,
         unreadCount: row.unread_count ?? 0,
+        muted: row.muted,
+        pinnedAt: row.pinned_at,
         lastMessage:
           lastMessageId === null
             ? null
@@ -102,6 +106,16 @@ export class MessengerRepository {
 
   findMemberIds(tx: Tx, chatRoomId: number) {
     return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true } });
+  }
+
+  /** 알림을 끈 멤버 (업무방 새 메시지 알림에서 뺀다) */
+  findMutedMemberIds(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId, muted: true }, select: { employeeId: true } });
+  }
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 */
+  updateMemberSettings(tx: Tx, chatRoomId: number, employeeId: number, data: { muted?: boolean; pinnedAt?: Date | null }) {
+    return tx.chatRoomMember.update({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } }, data });
   }
 
   createRoom(tx: Tx, data: { chatRoomType: string; chatRoomName: string | null; salesOrderId: number | null }) {

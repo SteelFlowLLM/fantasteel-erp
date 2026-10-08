@@ -42,6 +42,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | GET | `chat-rooms/:id/attachments` | 파일 모아보기 | 방 멤버 | **명세에 없음** (편의). 첨부가 있는 메시지만 최신순, `?before=&limit=` |
 | GET | `chat-rooms/:id/messages/search` | 대화 검색 | 방 멤버 | **명세에 없음** (편의). `?q=`(1~100자, 대소문자 무시)`&before=&limit=`(기본 30) 최신순 |
 | PATCH | `chat-rooms/:id` | 그룹방 이름 바꾸기 | 방 멤버 | **명세에 없음** (방 관리). `{ chatRoomName }` → `{ id, chatRoomName, displayName }` |
+| PATCH | `chat-rooms/:id/settings` | 내 방 설정 | 방 멤버 | **명세에 없음** (14번). `{ muted?, pinned? }` → `{ chatRoomId, muted, pinnedAt }` |
 
 - "방 멤버" 검사는 기능 권한 코드가 아니라 service에서 `chat_room_member`를 조회해 확인하고, 아니면 `COM-002`.
 - 업무방의 "연결 수주 조회 권한"은 `hasPermission(user, { permission: 'SALES_ORDER_CREATE', level: 'VIEW' })`로 확인한다(`common/auth/auth.guard.ts`). [권한표]상 영업·생산·물류·관리자만 통과한다 🟡.
@@ -107,6 +108,11 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - `POST chat-rooms/:id/pin { messageId }` → 방 정보(`ChatRoomDetail`). 방 멤버 누구나, 이 방의 삭제되지 않은 일반 메시지 하나(새로 고정하면 바뀜). 다른 방 메시지 COM-003, 삭제·시스템 COM-004.
 - `POST chat-rooms/:id/unpin` → 방 정보. 고정이 없으면 그대로.
 - 고정·해제는 시스템 메시지(`…메시지를 공지로 고정했어요`·`…공지를 내렸어요`)와 `room:updated`. 방 정보 `pinnedMessage { id, senderName, preview, createdAt }`, 고정한 메시지가 삭제되면 null.
+
+**방 알림 끄기·목록 위 고정** (14번, 스키마 2차 `chat_room_member.muted`·`pinned_at`, 명세에 없는 API)
+- `PATCH chat-rooms/:id/settings { muted?, pinned? }`: 나에게만 적용(준 값만 바꿈). 시스템 메시지 없이 나에게만 `room:updated`(내 다른 탭 갱신). 이미 고정한 방을 다시 고정하면 처음 시각을 둔다.
+- 알림을 끄면 업무방 새 메시지(WORK_ROOM_MESSAGE) 알림에서 빠진다. **멘션 알림은 받는다**(가정). 화면은 메신저 배지 합계에서 뺀다(방별 안 읽은 수는 회색으로 보임).
+- 목록(`GET chat-rooms`)은 내가 고정한 방이 먼저, 그 안에서는 최근 대화 순. 목록·방 정보에 `muted`·`pinnedAt`.
 
 **이모지 반응** (13번, 스키마 2차 `message_reaction`, 명세에 없는 API)
 - `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS` 6개(👍 ✅ 👀 🙏 ❤️ 😂, 가정값)만, 아니면 COM-004.

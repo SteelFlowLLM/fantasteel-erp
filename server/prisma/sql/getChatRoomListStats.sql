@@ -1,6 +1,8 @@
 -- 내가 멤버인 채팅방별 안 읽은 수와 마지막 메시지 (REQ-MSG-004). 안 읽은 수 = 마지막 읽은 메시지 뒤에 남이 보낸 메시지 수 (삭제된 메시지·시스템 메시지 제외)
 -- @param {Int} $1:employeeId
 SELECT crm.chat_room_id,
+       crm.muted,
+       crm.pinned_at,
        (SELECT count(*)::int
           FROM message u
          WHERE u.chat_room_id = crm.chat_room_id

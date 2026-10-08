@@ -37,6 +37,10 @@ export interface ChatRoomListItem {
   /** 업무방의 수주 (수주 조회 권한이 있을 때만) */
   salesOrder: { id: number; salesOrderNo: string; customerName: string; dueDate: string | null } | null;
   createdAt: string;
+  /** 내가 이 방 알림을 껐는지 (14번) */
+  muted: boolean;
+  /** 내가 목록 위에 고정한 시각 (고정하지 않았으면 null, 14번) */
+  pinnedAt: string | null;
 }
 
 export interface ChatMemberView {
@@ -92,6 +96,9 @@ export interface ChatRoomDetail {
   lastReadMessageId: number | null;
   /** 방 위에 고정한 공지 (삭제된 메시지면 null) */
   pinnedMessage: ChatPinnedMessageView | null;
+  /** 내 방 설정: 알림 끄기·목록 위 고정 (14번) */
+  muted: boolean;
+  pinnedAt: string | null;
 }
 
 /** 공지로 고정한 메시지 요약 */
@@ -175,6 +182,13 @@ export interface RenameChatRoomResult {
   id: number;
   chatRoomName: string | null;
   displayName: string;
+}
+
+/** 내 방 설정 (14번, 사원마다 따로). 알림을 끄면 업무방 새 메시지 알림을 받지 않고 메신저 배지에서 빠진다(멘션은 받는다) */
+export interface ChatRoomSettings {
+  chatRoomId: number;
+  muted: boolean;
+  pinnedAt: string | null;
 }
 
 /** 읽음 위치 갱신 결과 */

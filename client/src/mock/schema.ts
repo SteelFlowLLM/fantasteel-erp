@@ -470,6 +470,9 @@ export type ChatRoomMemberRow = Timestamps & {
   chatRoomId: number;
   employeeId: number;
   lastReadMessageId: number | null;
+  /** 내 방 설정 (14번): 알림 끄기·목록 위 고정. 선택 값이라 저장된 가짜 DB를 지우지 않는다 */
+  muted?: boolean;
+  pinnedAt?: string | null;
 };
 
 export type MessageRow = Timestamps & {

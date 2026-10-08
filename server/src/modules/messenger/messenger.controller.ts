@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
+import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type ChatRoomSettings, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UpdateChatRoomSettingsDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
@@ -35,6 +35,12 @@ export class MessengerController {
   @Patch('chat-rooms/:id')
   renameRoom(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: RenameChatRoomDto): Promise<RenameChatRoomResult> {
     return this.service.renameRoom(user, id, dto);
+  }
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 (명세에 없는 API, 14번) */
+  @Patch('chat-rooms/:id/settings')
+  updateSettings(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateChatRoomSettingsDto): Promise<ChatRoomSettings> {
+    return this.service.updateSettings(user, id, dto);
   }
 
   /** 공지 고정 (명세에 없는 API, 12번) */

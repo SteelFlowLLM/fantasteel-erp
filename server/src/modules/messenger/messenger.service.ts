@@ -29,6 +29,7 @@ import {
   type ErpLink,
   type ErpNoKind,
   type ChatRoomReadResult,
+  type ChatRoomSettings,
   type ChatRoomType,
   type CreateChatRoomResult,
   type InviteChatMembersResult,
@@ -45,7 +46,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UpdateChatRoomSettingsDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -311,10 +312,13 @@ export class MessengerService implements OnModuleInit {
             ? { id: salesOrder.id, salesOrderNo: salesOrder.salesOrderNo, customerName: salesOrder.customer.customerName, dueDate: earliestOpenDueDate(salesOrder.salesOrderItems) }
             : null,
         createdAt: room.createdAt.toISOString(),
+        muted: stat?.muted ?? false,
+        pinnedAt: stat?.pinnedAt?.toISOString() ?? null,
       };
     });
+    // 내가 고정한 방이 먼저, 그 안에서는 최근 대화 순
     const recentAt = (item: ChatRoomListItem) => item.lastMessage?.createdAt ?? item.createdAt;
-    return items.sort((a, b) => recentAt(b).localeCompare(recentAt(a)) || b.id - a.id);
+    return items.sort((a, b) => Number(b.pinnedAt !== null) - Number(a.pinnedAt !== null) || recentAt(b).localeCompare(recentAt(a)) || b.id - a.id);
   }
 
   /** 채팅방 정보: 멤버, 업무방이면 수주 요약 */
@@ -403,7 +407,25 @@ export class MessengerService implements OnModuleInit {
               createdAt: room.pinnedMessage.createdAt.toISOString(),
             }
           : null,
+      muted: membership.muted,
+      pinnedAt: membership.pinnedAt?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * 내 방 설정 (14번, 문서에 없는 추가 기능): 알림 끄기·목록 위 고정. 나에게만 적용되고 시스템 메시지는 남기지 않는다.
+   * 이미 고정한 방을 다시 고정하면 처음 고정한 시각을 그대로 둔다. 내 다른 화면(탭)도 갱신되게 나에게 room:updated를 보낸다.
+   */
+  async updateSettings(user: AuthUser, chatRoomId: number, dto: UpdateChatRoomSettingsDto): Promise<ChatRoomSettings> {
+    const me = user.employeeId;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.requireMember(tx, chatRoomId, me);
+      const membership = await this.repository.findMembership(tx, chatRoomId, me);
+      const pinnedAt = dto.pinned === undefined ? undefined : dto.pinned ? (membership?.pinnedAt ?? new Date()) : null;
+      return this.repository.updateMemberSettings(tx, chatRoomId, me, { muted: dto.muted, pinnedAt });
+    });
+    this.gateway.emitRoomUpdated([me], { chatRoomId });
+    return { chatRoomId, muted: updated.muted, pinnedAt: updated.pinnedAt?.toISOString() ?? null };
   }
 
   /**
@@ -770,7 +792,9 @@ export class MessengerService implements OnModuleInit {
     const senderId = message.senderId;
     const others = memberIds.filter((id) => id !== senderId);
     const mentioned = [...new Set(mentionedEmployeeIds)].filter((id) => others.includes(id));
-    const workRoomRecipients = room.chatRoomType === CHAT_ROOM_TYPE.WORK ? others.filter((id) => !mentioned.includes(id)) : [];
+    // 알림을 끈 멤버는 업무방 새 메시지 알림만 빼고 멘션은 받는다 (14번, 가정)
+    const muted = room.chatRoomType === CHAT_ROOM_TYPE.WORK ? new Set((await this.repository.findMutedMemberIds(tx, room.id)).map((m) => m.employeeId)) : new Set<number>();
+    const workRoomRecipients = room.chatRoomType === CHAT_ROOM_TYPE.WORK ? others.filter((id) => !mentioned.includes(id) && !muted.has(id)) : [];
     if (mentioned.length === 0 && workRoomRecipients.length === 0) return;
 
     const salesOrderNo = room.salesOrderId === null ? undefined : (await this.repository.findSalesOrderNos(tx, [room.salesOrderId]))[0]?.salesOrderNo;

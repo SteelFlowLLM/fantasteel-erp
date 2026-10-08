@@ -11,6 +11,7 @@ import type {
   ChatRoomDetail as ServerRoomDetail,
   ChatRoomListItem as ServerRoomListItem,
   ChatRoomReadResult,
+  ChatRoomSettings,
   CreateChatRoomResult,
 } from '@fantasteel/shared';
 import { MESSAGE_PAGE_SIZE_MAX, type MessageReactionEmoji } from '@fantasteel/shared';
@@ -19,6 +20,7 @@ import type {
   ChatRoomDetailView,
   ChatRoomListItem,
   ChatRoomPreview,
+  ChatRoomSettingsInput,
   CreateChatRoomInput,
   MessageFileContent,
   MessagePage,
@@ -41,6 +43,8 @@ const previewOf = (room: ServerRoomListItem): ChatRoomPreview => ({
   lastMessagePreview: room.lastMessage?.preview ?? null,
   lastMessageAt: room.lastMessage?.createdAt ?? null,
   unreadCount: room.unreadCount,
+  muted: room.muted,
+  pinnedAt: room.pinnedAt,
 });
 
 const listItemOf = (room: ServerRoomListItem): ChatRoomListItem => ({
@@ -152,7 +156,8 @@ function dataUrlOf(blob: Blob): Promise<string> {
 }
 
 export const serverMessengerApi = {
-  countUnread: async (): Promise<number> => (await listRaw()).reduce((sum, room) => sum + room.unreadCount, 0),
+  /** 알림을 끈 방은 배지 합계에서 뺀다 */
+  countUnread: async (): Promise<number> => (await listRaw()).reduce((sum, room) => sum + (room.muted ? 0 : room.unreadCount), 0),
 
   listRecentRooms: async (limit: number): Promise<ChatRoomPreview[]> => (await listRaw()).slice(0, limit).map(previewOf),
 
@@ -176,6 +181,8 @@ export const serverMessengerApi = {
       mentionTargets: mentionTargetsOf(room),
       canInvite: room.chatRoomType !== 'DIRECT',
       pinnedMessage: room.pinnedMessage,
+      muted: room.muted,
+      pinnedAt: room.pinnedAt,
     };
   },
 
@@ -253,6 +260,10 @@ export const serverMessengerApi = {
 
   pinMessage: async ({ chatRoomId, messageId }: { chatRoomId: number; messageId: number }): Promise<void> => {
     await serverRequest<ServerRoomDetail>('POST', `/chat-rooms/${chatRoomId}/pin`, { body: { messageId } });
+  },
+
+  updateSettings: async ({ chatRoomId, muted, pinned }: ChatRoomSettingsInput): Promise<void> => {
+    await serverRequest<ChatRoomSettings>('PATCH', `/chat-rooms/${chatRoomId}/settings`, { body: { muted, pinned } });
   },
 
   unpinMessage: async (chatRoomId: number): Promise<void> => {

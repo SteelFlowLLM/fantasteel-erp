@@ -17,6 +17,7 @@ import {
   type ChatRoomDetail,
   type ChatRoomListItem,
   type ChatRoomReadResult,
+  type ChatRoomSettings,
   type CreateChatRoomResult,
 } from '@fantasteel/shared';
 import type { AuthUser } from '@fantasteel/shared';
@@ -848,5 +849,56 @@ describe('13번: 이모지 반응', () => {
     await call('DELETE', `/messages/${message.id}`, salesCookie);
     const deleted = await call('POST', `/messages/${message.id}/reactions`, qualityCookie, { emoji: '👍' });
     expect([deleted.status, deleted.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+});
+
+describe('14번: 방 알림 끄기 · 목록 위 고정', () => {
+  const settings = (cookie: string, chatRoomId: number, body: object) => call<ChatRoomSettings>('PATCH', `/chat-rooms/${chatRoomId}/settings`, cookie, body);
+
+  it('알림을 끈 멤버는 업무방 새 메시지 알림을 받지 않지만 멘션은 받는다. 설정은 나에게만 적용된다', async () => {
+    const salesOrder = await createSalesOrder('SO-2610-914');
+    const room = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId, qualityId], salesOrderId: salesOrder.id });
+    socketRecords.length = 0;
+    const muted = await settings(qualityCookie, room.id, { muted: true });
+    expect(muted.body.data).toEqual({ chatRoomId: room.id, muted: true, pinnedAt: null });
+    expect(recordsOf('room:updated').map((r) => r.employeeId)).toEqual([qualityId]);
+
+    const plain = (await send(salesCookie, room.id, '진행 공유')).body.data;
+    const plainRows = await prisma.notification.findMany({ where: { messageId: plain.id } });
+    expect(plainRows.map((r) => r.recipientId)).toEqual([productionId]);
+    const mention = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '@서민지 확인', mentionedEmployeeIds: [qualityId] });
+    const mentionRows = await prisma.notification.findMany({ where: { messageId: mention.body.data.id, recipientId: qualityId } });
+    expect(mentionRows.map((r) => r.notificationType)).toEqual([NOTIFICATION_TYPE.MENTION]);
+
+    const detail = await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, qualityCookie);
+    expect(detail.body.data).toMatchObject({ muted: true, pinnedAt: null });
+    const others = await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, salesCookie);
+    expect(others.body.data.muted).toBe(false);
+  });
+
+  it('고정한 방은 목록 맨 위에 오고, 다시 고정해도 처음 시각을 두며, 해제하면 최근 대화 순으로 돌아간다', async () => {
+    const pinnedRoom = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const recentRoom = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    await send(salesCookie, recentRoom.id, '최근 대화');
+    const first = (await settings(salesCookie, pinnedRoom.id, { pinned: true })).body.data;
+    expect(first.pinnedAt).not.toBeNull();
+    const again = (await settings(salesCookie, pinnedRoom.id, { pinned: true })).body.data;
+    expect(again.pinnedAt).toBe(first.pinnedAt);
+
+    const list = (await call<ChatRoomListItem[]>('GET', '/chat-rooms', salesCookie)).body.data;
+    expect(list[0]).toMatchObject({ id: pinnedRoom.id, pinnedAt: first.pinnedAt, muted: false });
+    const qualityList = (await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie)).body.data;
+    expect(qualityList.find((r) => r.id === pinnedRoom.id)?.pinnedAt).toBeNull();
+
+    await settings(salesCookie, pinnedRoom.id, { pinned: false });
+    const after = (await call<ChatRoomListItem[]>('GET', '/chat-rooms', salesCookie)).body.data;
+    expect(after.findIndex((r) => r.id === recentRoom.id)).toBeLessThan(after.findIndex((r) => r.id === pinnedRoom.id));
+  });
+
+  it('멤버가 아니면 COM-002, 형식이 틀리면 COM-004', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    expect((await settings(purchaseCookie, room.id, { muted: true })).status).toBe(403);
+    const bad = await settings(salesCookie, room.id, { muted: 'yes' });
+    expect([bad.status, bad.body.error?.code]).toEqual([400, 'COM-004']);
   });
 });

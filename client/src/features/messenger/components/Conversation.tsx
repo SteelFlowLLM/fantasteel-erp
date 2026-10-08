@@ -20,6 +20,7 @@ import { PinnedNotice } from '@/features/messenger/components/PinnedNotice';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { PresenceDot, useIsOnline } from '@/features/messenger/components/Presence';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
+import { RoomSettingsButtons } from '@/features/messenger/components/RoomSettings';
 import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
@@ -218,6 +219,7 @@ function RoomView({
                 멤버 초대
               </Button>
             ) : null}
+            <RoomSettingsButtons room={room} />
             <IconButton icon="panel" label={asideOpen ? '방 정보 닫기' : '방 정보 열기'} aria-pressed={asideOpen} onClick={onToggleAside} />
           </div>
         </header>

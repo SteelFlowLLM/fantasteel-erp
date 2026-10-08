@@ -249,6 +249,30 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect((await messengerApi.getRoom(roomId)).pinnedMessage).toBeNull();
   });
 
+  it('방 알림 끄기: 업무방 새 메시지 알림·배지 합계에서 빠지고 멘션은 받는다. 고정한 방은 목록 맨 위에 온다', async () => {
+    const { roomId } = createWorkRoom([SEED_EMPLOYEE_NO.sales, SEED_EMPLOYEE_NO.productionHead, SEED_EMPLOYEE_NO.logistics]);
+    actAs(SEED_EMPLOYEE_NO.logistics);
+    const logisticsId = employeeIdOf(SEED_EMPLOYEE_NO.logistics);
+    const before = await messengerApi.countUnread(logisticsId);
+    await messengerApi.updateSettings({ chatRoomId: roomId, muted: true, pinned: true });
+
+    actAs(SEED_EMPLOYEE_NO.sales);
+    await messengerApi.sendMessage({ chatRoomId: roomId, content: '진행 공유' });
+    await messengerApi.sendMessage({ chatRoomId: roomId, content: '@권예진 출하 확인' });
+    expect(notificationsOf(logisticsId).map((n) => n.notificationType)).toEqual(['MENTION']);
+
+    actAs(SEED_EMPLOYEE_NO.logistics);
+    expect(await messengerApi.countUnread(logisticsId)).toBe(before);
+    const rooms = await messengerApi.listRooms();
+    expect(rooms[0]).toMatchObject({ id: roomId, muted: true, unreadCount: 2 });
+    expect(rooms[0].pinnedAt).not.toBeNull();
+    expect(await messengerApi.getRoom(roomId)).toMatchObject({ muted: true });
+
+    await messengerApi.updateSettings({ chatRoomId: roomId, muted: false, pinned: false });
+    expect(await messengerApi.countUnread(logisticsId)).toBe(before + 2);
+    expect((await messengerApi.getRoom(roomId)).pinnedAt).toBeNull();
+  });
+
   it('이모지 반응: 누르면 더하고 다시 누르면 빼며, 이모지별 인원·내 반응을 보여 준다', async () => {
     const roomId = await createGroup();
     const message = await messengerApi.sendMessage({ chatRoomId: roomId, content: '검사 끝' });

@@ -49,6 +49,10 @@ export interface ChatRoomPreview {
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  /** 내가 이 방 알림을 껐는지 (배지 합계에서 빠진다) */
+  muted: boolean;
+  /** 내가 목록 위에 고정한 시각 */
+  pinnedAt: string | null;
 }
 
 export interface ChatRoomListItem extends ChatRoomPreview {
@@ -123,6 +127,15 @@ export interface ChatRoomDetailView {
   canInvite: boolean;
   /** 방 위에 고정한 공지 (삭제된 메시지면 null) */
   pinnedMessage: { id: number; senderName: string; preview: string; createdAt: string } | null;
+  /** 내 방 설정: 알림 끄기·목록 위 고정 */
+  muted: boolean;
+  pinnedAt: string | null;
+}
+
+export interface ChatRoomSettingsInput {
+  chatRoomId: number;
+  muted?: boolean;
+  pinned?: boolean;
 }
 
 export interface MessageFileView {
@@ -227,6 +240,7 @@ function displayNameOf(tables: Readonly<MockTables>, room: ChatRoomRow, employee
 
 function previewOfRoom(tables: Readonly<MockTables>, room: ChatRoomRow, employeeId: number): ChatRoomPreview {
   const last = lastMessageOf(tables, room.id);
+  const membership = tables.chatRoomMember.find((m) => m.chatRoomId === room.id && m.employeeId === employeeId);
   return {
     id: room.id,
     chatRoomType: room.chatRoomType,
@@ -234,11 +248,14 @@ function previewOfRoom(tables: Readonly<MockTables>, room: ChatRoomRow, employee
     lastMessagePreview: last ? messagePreviewOf(last) : null,
     lastMessageAt: last?.createdAt ?? null,
     unreadCount: unreadCountOf(tables, room.id, employeeId),
+    muted: membership?.muted ?? false,
+    pinnedAt: membership?.pinnedAt ?? null,
   };
 }
 
+/** 내가 고정한 방이 먼저, 그 안에서는 최근 대화 순 (서버와 같다) */
 const byRecent = (a: ChatRoomPreview & { createdAt?: string }, b: ChatRoomPreview & { createdAt?: string }) =>
-  (b.lastMessageAt ?? b.createdAt ?? '').localeCompare(a.lastMessageAt ?? a.createdAt ?? '') || b.id - a.id;
+  Number(b.pinnedAt !== null) - Number(a.pinnedAt !== null) || (b.lastMessageAt ?? b.createdAt ?? '').localeCompare(a.lastMessageAt ?? a.createdAt ?? '') || b.id - a.id;
 
 const roomIdsOfMember = (tables: Readonly<MockTables>, employeeId: number) =>
   new Set(tables.chatRoomMember.filter((m) => m.employeeId === employeeId).map((m) => m.chatRoomId));
@@ -387,7 +404,7 @@ export const messengerApi = {
   /** 안 읽은 메시지 합계 (레일·상단 배지) */
   countUnread: (employeeId: number): Promise<number> =>
     isServerDataSource() ? serverMessengerApi.countUnread() : mockQuery((tables) =>
-      tables.chatRoomMember.filter((m) => m.employeeId === employeeId).reduce((sum, m) => sum + unreadCountOf(tables, m.chatRoomId, employeeId), 0),
+      tables.chatRoomMember.filter((m) => m.employeeId === employeeId && !m.muted).reduce((sum, m) => sum + unreadCountOf(tables, m.chatRoomId, employeeId), 0),
     ),
 
   /** 상단 드롭다운의 최근 채팅방 */
@@ -481,6 +498,8 @@ export const messengerApi = {
         mentionTargets: mentionTargetsOf(tables, room.id, me),
         canInvite: room.chatRoomType !== CHAT_ROOM_TYPE.DIRECT,
         pinnedMessage: pinnedViewOf(tables, room),
+        muted: membership?.muted ?? false,
+        pinnedAt: membership?.pinnedAt ?? null,
       };
     }),
 
@@ -649,6 +668,19 @@ export const messengerApi = {
       if (!room.pinnedMessageId) return;
       updateRow(tx, 'chatRoom', room.id, { pinnedMessageId: null });
       postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 공지를 내렸어요`);
+    }),
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 (나에게만). 이미 고정한 방은 처음 고정한 시각을 둔다 */
+  updateSettings: ({ chatRoomId, muted, pinned }: ChatRoomSettingsInput): Promise<void> =>
+    isServerDataSource() ? serverMessengerApi.updateSettings({ chatRoomId, muted, pinned }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      requireMemberRoom(tx.tables, actor, chatRoomId);
+      const membership = tx.tables.chatRoomMember.find((m) => m.chatRoomId === chatRoomId && m.employeeId === actor.employee.id);
+      if (!membership) return;
+      updateRow(tx, 'chatRoomMember', membership.id, {
+        ...(muted === undefined ? {} : { muted }),
+        ...(pinned === undefined ? {} : { pinnedAt: pinned ? (membership.pinnedAt ?? tx.nowIso) : null }),
+      });
     }),
 
   /** 이모지 반응 누르기·취소 (방 멤버, 삭제되지 않은 일반 메시지) */
