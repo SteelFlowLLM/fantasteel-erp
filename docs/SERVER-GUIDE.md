@@ -121,7 +121,7 @@ server/
 **반영 (DB 담당자 정건희만)**
 1. 마이그레이션 PR이 develop에 머지되면 develop을 받는다.
 2. 마이그레이션 SQL을 7장 체크리스트로 다시 본다.
-3. `npm run db:deploy -w @fantasteel/server`(처음 한 번은 `-- --seed`). develop 브랜치·고치던 파일 없음·`origin/develop`과 같음을 확인하고, 대상 호스트를 보여 준 뒤 반영한다.
+3. `npm run db:deploy -w @fantasteel/server`(처음 한 번은 `-- --seed --organization-only`: 사원·조직만 넣고 기준정보는 화면에서 등록, [backend/seed.md](backend/seed.md)). develop 브랜치·고치던 파일 없음·`origin/develop`과 같음을 확인하고, 대상 호스트를 보여 준 뒤 반영한다.
 4. 반영된 마이그레이션 이름을 팀에 알린다. 받은 사람은 develop을 받고 `npm run generate:sql -w @fantasteel/server`를 돌린다.
 - 칸 삭제·이름 변경은 옛 코드가 바로 깨지므로 미리 공지하고 반영한다.
 - 반영이 실패하면 Prisma가 실패로 기록하고 다음 반영을 막는다. 고친 새 마이그레이션으로 해결한다.
