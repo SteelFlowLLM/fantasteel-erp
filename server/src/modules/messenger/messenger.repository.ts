@@ -7,6 +7,8 @@ import type { Tx } from '../../prisma/prisma.service';
 export interface ChatRoomStatsRow {
   chatRoomId: number;
   unreadCount: number;
+  muted: boolean;
+  pinnedAt: Date | null;
   lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date; deletedAt: Date | null } | null;
 }
 
@@ -15,6 +17,7 @@ const employeeInclude = { department: true, jobGrade: true } as const;
 const messageInclude = {
   sender: { include: employeeInclude },
   parentMessage: { include: { sender: { select: { employeeName: true } } } },
+  messageReactions: { include: { employee: { select: { employeeName: true } } }, orderBy: { id: 'asc' } },
 } as const;
 
 /**
@@ -64,6 +67,8 @@ export class MessengerRepository {
       return {
         chatRoomId: row.chat_room_id,
         unreadCount: row.unread_count ?? 0,
+        muted: row.muted,
+        pinnedAt: row.pinned_at,
         lastMessage:
           lastMessageId === null
             ? null
@@ -101,6 +106,16 @@ export class MessengerRepository {
 
   findMemberIds(tx: Tx, chatRoomId: number) {
     return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true } });
+  }
+
+  /** 알림을 끈 멤버 (업무방 새 메시지 알림에서 뺀다) */
+  findMutedMemberIds(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId, muted: true }, select: { employeeId: true } });
+  }
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 */
+  updateMemberSettings(tx: Tx, chatRoomId: number, employeeId: number, data: { muted?: boolean; pinnedAt?: Date | null }) {
+    return tx.chatRoomMember.update({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } }, data });
   }
 
   createRoom(tx: Tx, data: { chatRoomType: string; chatRoomName: string | null; salesOrderId: number | null }) {
@@ -212,6 +227,19 @@ export class MessengerRepository {
 
   findMessageWithSender(tx: Tx, id: number) {
     return tx.message.findUnique({ where: { id }, include: messageInclude });
+  }
+
+  findReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.findUnique({ where: { messageId_employeeId_emoji: { messageId, employeeId, emoji } } });
+  }
+
+  createReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.create({ data: { messageId, employeeId, emoji } });
+  }
+
+  /** 반응 취소는 행을 지운다 (업무 거래가 아니라 표시용) */
+  deleteReaction(tx: Tx, id: number) {
+    return tx.messageReaction.delete({ where: { id } });
   }
 
   /** 본문 고치기: 고친 시각을 남긴다 */

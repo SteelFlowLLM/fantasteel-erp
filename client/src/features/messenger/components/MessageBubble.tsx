@@ -3,7 +3,7 @@
 // 메시지 한 개: 내 메시지는 오른쪽 말풍선, 남의 메시지는 왼쪽(보낸 사람·아바타). 본문(@멘션 강조, 업무 번호 링크)·첨부(그림은 미리보기)·ERP 이동 링크·메시지 메뉴(Message → ERP 확장 자리)
 import Link from 'next/link';
 import { useState } from 'react';
-import type { ChatRoomDetailView, MessageView } from '@/api/messenger';
+import { messengerApi, type ChatRoomDetailView, type MessageView } from '@/api/messenger';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
@@ -12,6 +12,7 @@ import { Modal } from '@/components/Modal';
 import { messageActionsFor } from '@/features/messenger/messageActions';
 import { splitMessageText, type ErpLink } from '@/features/messenger/lib/messageText';
 import { canOpenScreen, screenOfPath } from '@/features/shell/screens';
+import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
 import { useImagePreview, useMessageFileDownload } from '@/hooks/useMessenger';
 import { usePopover } from '@/hooks/usePopover';
@@ -127,6 +128,7 @@ export function MessageBubble({
         </p>
       ) : null}
       {message.file ? <FileChip messageId={message.id} name={message.file.name} size={message.file.size} /> : null}
+      {message.reactions.length > 0 ? <ReactionChips message={message} /> : null}
       {openableLinks.length > 0 ? (
         <div className={cn('flex flex-wrap gap-x-3 gap-y-1', mine && 'justify-end')}>
           {openableLinks.map((link) => (
@@ -193,6 +195,33 @@ export function MessageBubble({
       <span className="self-center">
         <MessageMenu message={message} room={room} />
       </span>
+    </div>
+  );
+}
+
+/** 말풍선 아래 반응 칩: 누르면 내 반응을 더하거나 뺀다, 올리면 누가 했는지 */
+function ReactionChips({ message }: { message: MessageView }) {
+  const toggle = useAction(messengerApi.toggleReaction);
+  return (
+    <div className={cn('flex flex-wrap gap-1', message.isMine && 'justify-end')} aria-label="반응">
+      {message.reactions.map((reaction) => (
+        <button
+          key={reaction.emoji}
+          type="button"
+          title={reaction.employeeNames.join(', ')}
+          aria-pressed={reaction.reactedByMe}
+          aria-label={`${reaction.emoji} ${reaction.count}명${reaction.reactedByMe ? ', 내 반응 취소' : ', 반응 더하기'}`}
+          disabled={toggle.isPending}
+          onClick={() => toggle.mutate({ messageId: message.id, emoji: reaction.emoji })}
+          className={cn(
+            'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-xs',
+            reaction.reactedByMe ? 'border-brand bg-brand-tint text-brand' : 'border-line bg-surface text-ink-2 hover:bg-surface-2',
+          )}
+        >
+          <span>{reaction.emoji}</span>
+          <span className="font-semibold">{reaction.count}</span>
+        </button>
+      ))}
     </div>
   );
 }

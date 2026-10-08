@@ -3,6 +3,7 @@
 // 메시지 메뉴의 기본 동작: 답장·공지로 고정(모든 일반 메시지), 수정·삭제(내 메시지). 스키마 1차(#151)의 답글·수정·삭제 표시를 쓴다.
 // 메뉴는 고르자마자 닫히므로 창은 대화 영역(Conversation)이 useMessageComposeStore를 보고 그린다.
 import { useState } from 'react';
+import { MESSAGE_REACTION_EMOJIS } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, messengerApi, type MessageView } from '@/api/messenger';
 import { InputError } from '@/api/errors';
 import { Button } from '@/components/Button';
@@ -12,6 +13,7 @@ import { Modal } from '@/components/Modal';
 import { MessageActionItem } from '@/features/messenger/components/MessageActionItem';
 import type { MessageActionEntry, MessageActionProps } from '@/features/messenger/messageActions';
 import { useAction } from '@/hooks/useAction';
+import { cn } from '@/lib/cn';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 
 const isPlain = (message: MessageView) => !message.isSystem && !message.isDeleted;
@@ -69,6 +71,31 @@ function PinAction({ message, room, closeMenu }: MessageActionProps) {
   );
 }
 
+/** 메뉴 맨 위 이모지 줄: 누르면 반응을 더하거나 뺀다 */
+function ReactionAction({ message, closeMenu }: MessageActionProps) {
+  const toggle = useAction(messengerApi.toggleReaction, { onSuccess: closeMenu });
+  const mine = new Set(message.reactions.filter((r) => r.reactedByMe).map((r) => r.emoji));
+  return (
+    <div role="group" aria-label="반응 남기기" className="flex items-center justify-between gap-1 border-b border-line px-2 pb-1.5 pt-0.5">
+      {MESSAGE_REACTION_EMOJIS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          role="menuitem"
+          aria-pressed={mine.has(emoji)}
+          aria-label={`${emoji} 반응${mine.has(emoji) ? ' 취소' : ''}`}
+          disabled={toggle.isPending}
+          onClick={() => toggle.mutate({ messageId: message.id, emoji })}
+          className={cn('flex size-8 items-center justify-center rounded-sm text-base hover:bg-surface-2', mine.has(emoji) && 'bg-brand-tint')}
+        >
+          {emoji}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export const REACTION_MESSAGE_ACTION: MessageActionEntry = { key: 'reaction', sortOrder: 0, isAvailable: isPlain, Component: ReactionAction };
 export const PIN_MESSAGE_ACTION: MessageActionEntry = { key: 'pin', sortOrder: 4, isAvailable: isPlain, Component: PinAction };
 export const REPLY_MESSAGE_ACTION: MessageActionEntry = { key: 'reply', sortOrder: 1, isAvailable: isPlain, Component: ReplyAction };
 export const EDIT_MESSAGE_ACTION: MessageActionEntry = { key: 'edit', sortOrder: 2, isAvailable: (message) => isPlain(message) && message.isMine, Component: EditAction };

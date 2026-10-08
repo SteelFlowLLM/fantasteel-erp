@@ -470,6 +470,9 @@ export type ChatRoomMemberRow = Timestamps & {
   chatRoomId: number;
   employeeId: number;
   lastReadMessageId: number | null;
+  /** 내 방 설정 (14번): 알림 끄기·목록 위 고정. 선택 값이라 저장된 가짜 DB를 지우지 않는다 */
+  muted?: boolean;
+  pinnedAt?: string | null;
 };
 
 export type MessageRow = Timestamps & {
@@ -487,6 +490,8 @@ export type MessageRow = Timestamps & {
   editedAt?: string | null;
   /** 삭제 표시 (행은 남김) */
   deletedAt?: string | null;
+  /** 이모지 반응. 서버는 message_reaction 테이블이지만, 가짜 DB에 표를 더하면 저장된 데이터가 시드로 돌아가서 메시지 행에 둔다 */
+  reactions?: { employeeId: number; emoji: string }[];
 };
 
 export type ActionDraftRow = Timestamps & {

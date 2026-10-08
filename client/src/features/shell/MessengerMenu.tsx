@@ -59,7 +59,7 @@ export function MessengerMenu({ employeeId }: { employeeId: number }) {
                 </span>
                 <span className="flex flex-none flex-col items-end gap-1">
                   <time className="text-cap text-ink-3">{room.lastMessageAt ? relTime(room.lastMessageAt) : ''}</time>
-                  <CountBadge count={room.unreadCount} placement="inline" />
+                  <CountBadge count={room.unreadCount} placement="inline" tone={room.muted ? 'muted' : 'danger'} />
                 </span>
               </PopItem>
             ))}

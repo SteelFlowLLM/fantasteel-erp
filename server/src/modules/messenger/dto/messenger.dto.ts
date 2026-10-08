@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType } from '@fantasteel/shared';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageReactionEmoji } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
   @IsIn(Object.values(CHAT_ROOM_TYPE), { message: '채팅방 유형은 DIRECT, GROUP, WORK 중 하나여야 해요' })
@@ -106,6 +106,18 @@ export class RenameChatRoomDto {
   chatRoomName?: string | null;
 }
 
+/** 내 방 설정 바꾸기 (14번). 준 값만 바꾼다 */
+export class UpdateChatRoomSettingsDto {
+  @IsOptional()
+  @IsBoolean({ message: 'muted는 true 또는 false여야 해요' })
+  muted?: boolean;
+
+  /** true = 목록 위에 고정, false = 고정 해제 */
+  @IsOptional()
+  @IsBoolean({ message: 'pinned는 true 또는 false여야 해요' })
+  pinned?: boolean;
+}
+
 export class SearchMessagesQuery {
   /** 본문에 들어 있는 글자 (대소문자 무시) */
   @IsString({ message: '검색어를 넣어 주세요' })
@@ -138,4 +150,9 @@ export class PinMessageDto {
   /** 이 방의 삭제되지 않은 일반 메시지 */
   @IsInt({ message: 'messageId는 메시지 id여야 해요' })
   messageId!: number;
+}
+
+export class ToggleReactionDto {
+  @IsIn(MESSAGE_REACTION_EMOJIS, { message: `반응은 ${MESSAGE_REACTION_EMOJIS.join(' ')} 중 하나여야 해요` })
+  emoji!: MessageReactionEmoji;
 }

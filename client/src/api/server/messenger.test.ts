@@ -21,6 +21,8 @@ const listItem = (id: number, unreadCount: number, extra: Partial<ChatRoomListIt
   unreadCount,
   salesOrder: null,
   createdAt: AT,
+  muted: false,
+  pinnedAt: null,
   ...extra,
 });
 
@@ -43,6 +45,8 @@ const detail = (extra: Partial<ChatRoomDetail> = {}): ChatRoomDetail => ({
   unreadCount: 2,
   lastReadMessageId: 40,
   pinnedMessage: null,
+  muted: false,
+  pinnedAt: null,
   ...extra,
 });
 
@@ -62,6 +66,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   editedAt: null,
   isDeleted: false,
   parent: null,
+  reactions: [],
   createdAt: AT,
   ...extra,
 });
@@ -72,11 +77,23 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
   it('목록·드롭다운·배지는 GET /chat-rooms 한 번으로 만든다 (안 읽은 수 합계, 서버 정렬 그대로)', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms' ? ok([listItem(2, 3), listItem(1, 1, { lastMessage: null })]) : undefined));
     expect(await messengerApi.countUnread(0)).toBe(4);
-    expect(await messengerApi.listRecentRooms(0, 1)).toEqual([{ id: 2, chatRoomType: 'GROUP', displayName: '방 2', lastMessagePreview: '안녕하세요', lastMessageAt: AT, unreadCount: 3 }]);
+    expect(await messengerApi.listRecentRooms(0, 1)).toEqual([{ id: 2, chatRoomType: 'GROUP', displayName: '방 2', lastMessagePreview: '안녕하세요', lastMessageAt: AT, unreadCount: 3, muted: false, pinnedAt: null }]);
     const rooms = await messengerApi.listRooms();
     expect(rooms.map((r) => r.id)).toEqual([2, 1]);
     expect(rooms[0].lastMessage).toEqual({ senderName: '정다은', isMine: false, isSystem: false, preview: '안녕하세요', createdAt: AT });
     expect(rooms[1]).toMatchObject({ lastMessage: null, lastMessagePreview: null });
+  });
+
+  it('알림을 끈 방은 배지 합계에서 빠지고, 방 설정은 PATCH /chat-rooms/:id/settings로 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms') return ok([listItem(2, 3, { muted: true }), listItem(1, 1, { pinnedAt: AT })]);
+      if (c.path === '/chat-rooms/2/settings') return ok({ chatRoomId: 2, muted: false, pinnedAt: AT });
+      return undefined;
+    });
+    expect(await messengerApi.countUnread(0)).toBe(1);
+    expect((await messengerApi.listRooms())[1]).toMatchObject({ id: 1, muted: false, pinnedAt: AT });
+    await messengerApi.updateSettings({ chatRoomId: 2, muted: false, pinned: true });
+    expect(calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/chat-rooms/2/settings', body: { muted: false, pinned: true } });
   });
 
   it('방 정보: 멘션 후보는 나를 뺀 멤버와 멤버 부서, 1:1이 아닌 방은 초대할 수 있다', async () => {
@@ -219,6 +236,17 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
       ['/chat-rooms/7/pin', { messageId: 50 }],
       ['/chat-rooms/7/unpin', undefined],
     ]);
+  });
+
+  it('이모지 반응은 POST /messages/:id/reactions { emoji }, 서버가 준 반응을 그대로 쓴다', async () => {
+    const reactions = [{ emoji: '👍' as const, count: 2, reactedByMe: true, employeeNames: ['박서영', '정다은'] }];
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/messages/50/reactions') return ok(message(50, '글', { reactions }));
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      return undefined;
+    });
+    expect((await messengerApi.toggleReaction({ messageId: 50, emoji: '👍' })).reactions).toEqual(reactions);
+    expect(calls[0].body).toEqual({ emoji: '👍' });
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

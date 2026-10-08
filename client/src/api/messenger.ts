@@ -5,7 +5,7 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_SEARCH_SIZE } from '@fantasteel/shared';
+import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_SIZE, type MessageReactionEmoji } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
@@ -49,6 +49,10 @@ export interface ChatRoomPreview {
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  /** 내가 이 방 알림을 껐는지 (배지 합계에서 빠진다) */
+  muted: boolean;
+  /** 내가 목록 위에 고정한 시각 */
+  pinnedAt: string | null;
 }
 
 export interface ChatRoomListItem extends ChatRoomPreview {
@@ -123,6 +127,15 @@ export interface ChatRoomDetailView {
   canInvite: boolean;
   /** 방 위에 고정한 공지 (삭제된 메시지면 null) */
   pinnedMessage: { id: number; senderName: string; preview: string; createdAt: string } | null;
+  /** 내 방 설정: 알림 끄기·목록 위 고정 */
+  muted: boolean;
+  pinnedAt: string | null;
+}
+
+export interface ChatRoomSettingsInput {
+  chatRoomId: number;
+  muted?: boolean;
+  pinned?: boolean;
 }
 
 export interface MessageFileView {
@@ -156,6 +169,8 @@ export interface MessageView {
   isDeleted: boolean;
   /** 답글이면 원본 요약 */
   parent: { id: number; senderName: string; preview: string; isDeleted: boolean } | null;
+  /** 이모지 반응 (허용 목록 순서, 0명인 것은 없음) */
+  reactions: { emoji: MessageReactionEmoji; count: number; reactedByMe: boolean; employeeNames: string[] }[];
 }
 
 export interface MessagePage {
@@ -225,6 +240,7 @@ function displayNameOf(tables: Readonly<MockTables>, room: ChatRoomRow, employee
 
 function previewOfRoom(tables: Readonly<MockTables>, room: ChatRoomRow, employeeId: number): ChatRoomPreview {
   const last = lastMessageOf(tables, room.id);
+  const membership = tables.chatRoomMember.find((m) => m.chatRoomId === room.id && m.employeeId === employeeId);
   return {
     id: room.id,
     chatRoomType: room.chatRoomType,
@@ -232,11 +248,14 @@ function previewOfRoom(tables: Readonly<MockTables>, room: ChatRoomRow, employee
     lastMessagePreview: last ? messagePreviewOf(last) : null,
     lastMessageAt: last?.createdAt ?? null,
     unreadCount: unreadCountOf(tables, room.id, employeeId),
+    muted: membership?.muted ?? false,
+    pinnedAt: membership?.pinnedAt ?? null,
   };
 }
 
+/** 내가 고정한 방이 먼저, 그 안에서는 최근 대화 순 (서버와 같다) */
 const byRecent = (a: ChatRoomPreview & { createdAt?: string }, b: ChatRoomPreview & { createdAt?: string }) =>
-  (b.lastMessageAt ?? b.createdAt ?? '').localeCompare(a.lastMessageAt ?? a.createdAt ?? '') || b.id - a.id;
+  Number(b.pinnedAt !== null) - Number(a.pinnedAt !== null) || (b.lastMessageAt ?? b.createdAt ?? '').localeCompare(a.lastMessageAt ?? a.createdAt ?? '') || b.id - a.id;
 
 const roomIdsOfMember = (tables: Readonly<MockTables>, employeeId: number) =>
   new Set(tables.chatRoomMember.filter((m) => m.employeeId === employeeId).map((m) => m.chatRoomId));
@@ -341,6 +360,13 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     editedAt: message.editedAt ?? null,
     isDeleted: deleted,
     parent: parentViewOf(tables, message),
+    reactions: deleted
+      ? []
+      : MESSAGE_REACTION_EMOJIS.flatMap((emoji) => {
+          const rows = (message.reactions ?? []).filter((r) => r.emoji === emoji);
+          if (rows.length === 0) return [];
+          return [{ emoji, count: rows.length, reactedByMe: rows.some((r) => r.employeeId === actor.employee.id), employeeNames: rows.map((r) => employeeOf(tables, r.employeeId)?.employeeName ?? '-') }];
+        }),
     unreadMemberCount: tables.chatRoomMember.filter((m) => m.chatRoomId === message.chatRoomId && m.employeeId !== message.senderId && (m.lastReadMessageId ?? 0) < message.id).length,
   };
 }
@@ -378,7 +404,7 @@ export const messengerApi = {
   /** 안 읽은 메시지 합계 (레일·상단 배지) */
   countUnread: (employeeId: number): Promise<number> =>
     isServerDataSource() ? serverMessengerApi.countUnread() : mockQuery((tables) =>
-      tables.chatRoomMember.filter((m) => m.employeeId === employeeId).reduce((sum, m) => sum + unreadCountOf(tables, m.chatRoomId, employeeId), 0),
+      tables.chatRoomMember.filter((m) => m.employeeId === employeeId && !m.muted).reduce((sum, m) => sum + unreadCountOf(tables, m.chatRoomId, employeeId), 0),
     ),
 
   /** 상단 드롭다운의 최근 채팅방 */
@@ -472,6 +498,8 @@ export const messengerApi = {
         mentionTargets: mentionTargetsOf(tables, room.id, me),
         canInvite: room.chatRoomType !== CHAT_ROOM_TYPE.DIRECT,
         pinnedMessage: pinnedViewOf(tables, room),
+        muted: membership?.muted ?? false,
+        pinnedAt: membership?.pinnedAt ?? null,
       };
     }),
 
@@ -640,6 +668,33 @@ export const messengerApi = {
       if (!room.pinnedMessageId) return;
       updateRow(tx, 'chatRoom', room.id, { pinnedMessageId: null });
       postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 공지를 내렸어요`);
+    }),
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 (나에게만). 이미 고정한 방은 처음 고정한 시각을 둔다 */
+  updateSettings: ({ chatRoomId, muted, pinned }: ChatRoomSettingsInput): Promise<void> =>
+    isServerDataSource() ? serverMessengerApi.updateSettings({ chatRoomId, muted, pinned }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      requireMemberRoom(tx.tables, actor, chatRoomId);
+      const membership = tx.tables.chatRoomMember.find((m) => m.chatRoomId === chatRoomId && m.employeeId === actor.employee.id);
+      if (!membership) return;
+      updateRow(tx, 'chatRoomMember', membership.id, {
+        ...(muted === undefined ? {} : { muted }),
+        ...(pinned === undefined ? {} : { pinnedAt: pinned ? (membership.pinnedAt ?? tx.nowIso) : null }),
+      });
+    }),
+
+  /** 이모지 반응 누르기·취소 (방 멤버, 삭제되지 않은 일반 메시지) */
+  toggleReaction: ({ messageId, emoji }: { messageId: number; emoji: MessageReactionEmoji }): Promise<MessageView> =>
+    isServerDataSource() ? serverMessengerApi.toggleReaction({ messageId, emoji }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const message = requireRow(tx.tables, 'message', messageId, '메시지');
+      requireMemberRoom(tx.tables, actor, message.chatRoomId);
+      if (message.deletedAt || !employeeOf(tx.tables, message.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지에는 반응할 수 없어요');
+      const reactions = message.reactions ?? [];
+      const mine = (r: { employeeId: number; emoji: string }) => r.employeeId === actor.employee.id && r.emoji === emoji;
+      const next = reactions.some(mine) ? reactions.filter((r) => !mine(r)) : [...reactions, { employeeId: actor.employee.id, emoji }];
+      const updated = updateRow(tx, 'message', message.id, { reactions: next }) ?? message;
+      return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));
     }),
 
   /** 내 메시지 고치기. 본문은 비울 수 없다(첨부가 있으면 비워도 됨). 삭제된 메시지는 못 고친다 */
