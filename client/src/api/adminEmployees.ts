@@ -1,4 +1,4 @@
-// 사원 등록·수정·사용 여부 (REQ-AUTH-002, BP-AUTH-01). 조회는 directory.ts(directoryApi.listEmployees)를 쓴다.
+// 사원 등록·수정·사용 여부 (REQ-AUTH-002, BP-AUTH-01). 조회는 directory.ts(directoryApi.listManagedEmployees)를 쓴다.
 // 두 데이터 모드 모두 실제 서버를 부른다 (api/server/organization.ts). 사원 관리(EMPLOYEE_MANAGE) 권한과 부서장 확인은 서버가 한다.
 // - 사원번호는 로그인 ID라 등록한 뒤에는 바꾸지 않는다. 등록 때 비밀번호를 받는다.
 // - 사용 여부(is_active)는 수정과 따로 '사용 안 함으로 바꾸기'·'다시 사용' 동작으로 바꾼다 (컨벤션 5장 상태 변경은 동작으로).

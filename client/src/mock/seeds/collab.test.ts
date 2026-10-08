@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { rowFilesOf } from '@/api/messengerRules';
 import { messengerApi } from '@/api/messenger';
 import { notificationApi } from '@/api/notifications';
-import { taskApi } from '@/api/tasks';
 import { formatItemQty } from '@/features/messenger/lib/salesOrderQty';
 import { getMockDb } from '@/mock/db';
 import { SEED_CORE } from '@/mock/seeds/core';
@@ -23,8 +22,9 @@ describe('협업 시드', () => {
     expect(counts.files).toBe(1);
 
     // 구매 정다은: 업무 1건(오늘 기준 마감 전), 업무 지정 알림 1건, 1:1 방에 안 읽은 메시지 1건
-    actAs(SEED_EMPLOYEE_NO.purchase);
-    expect((await taskApi.list('mine')).map((t) => t.title)).toEqual(['10월 첫째 주 철광석 입고 일정 확인']);
+    const purchaseId = actAs(SEED_EMPLOYEE_NO.purchase);
+    // 업무 화면 api는 서버만 불러 시드 업무는 가짜 DB에서 직접 본다
+    expect(getMockDb().read((tables) => tables.task.filter((t) => t.assigneeId === purchaseId).map((t) => t.title))).toEqual(['10월 첫째 주 철광석 입고 일정 확인']);
     const notices = await notificationApi.list();
     // 승인 결과 알림은 거래·대시보드 시드의 구매요청 승인에서 온다
     expect(notices.items.map((n) => n.notificationType).filter((type) => type !== 'APPROVAL_RESULT')).toEqual(['TASK_ASSIGNED']);

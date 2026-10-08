@@ -3,11 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { directoryApi } from '@/api/directory';
 import { queryKeys, type EmployeeListQuery } from '@/api/queryKeys';
 
-export function useEmployeeList(query: EmployeeListQuery = {}) {
-  return useQuery({ queryKey: queryKeys.employees(query), queryFn: () => directoryApi.listEmployees(query) });
-}
-
-/** 사원 관리·부서 화면용. 서버 모드에서는 서버 사원 목록 */
+/** 사원 관리·부서 화면용 (서버 사원 목록, 사원 관리 조회 권한) */
 export function useManagedEmployeeList(query: EmployeeListQuery = {}) {
   return useQuery({ queryKey: queryKeys.managedEmployees(query), queryFn: () => directoryApi.listManagedEmployees(query) });
 }
