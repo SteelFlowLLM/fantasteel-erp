@@ -19,7 +19,9 @@ import {
   type ChatRoomReadResult,
   type CreateChatRoomResult,
 } from '@fantasteel/shared';
+import type { AuthUser } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
@@ -408,7 +410,10 @@ describe('방 관리', () => {
     const detail = await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, logistics);
     expect(detail.body.data).toMatchObject({ unreadCount: 0 });
     const history = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, logistics);
-    expect(history.body.data.items.map((m) => m.content)).toEqual(['초대 전 메시지']);
+    expect(history.body.data.items.map((m) => [m.content, m.isSystem])).toEqual([
+      ['초대 전 메시지', false],
+      ['서민지님이 권예진님을 초대했어요', true],
+    ]);
   });
 
   it('1:1 방·새 멤버 없음·퇴사자는 COM-004, 멤버가 아니면 COM-002', async () => {
@@ -607,5 +612,86 @@ describe('스키마 1차 (#151): 메시지 유형·중복 방지 제약', () => 
     // client_message_id가 없으면 몇 번이든 된다
     await prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: 'a' } });
     await expect(prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: 'b' } })).resolves.toBeTruthy();
+  });
+});
+
+describe('10번: 중복 전송 방지 · 시스템 메시지 · 업무방 진행 알림', () => {
+  it('같은 clientMessageId로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려주며, 알림·소켓도 다시 보내지 않는다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const body = { content: '@서민지 한 번만', mentionedEmployeeIds: [qualityId], clientMessageId: 'a1b2c3d4-0000-4000-8000-000000000010' };
+    const first = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, body);
+    socketRecords.length = 0;
+    const again = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, body);
+    expect(again.body.data.id).toBe(first.body.data.id);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(1);
+    expect(await prisma.notification.count({ where: { messageId: first.body.data.id } })).toBe(1);
+    expect(recordsOf('message:new')).toEqual([]);
+
+    const otherRoom = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const reused = await call('POST', `/chat-rooms/${otherRoom.id}/messages`, salesCookie, body);
+    expect([reused.status, reused.body.error?.code]).toEqual([400, 'COM-004']);
+    const badId = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: 'x', clientMessageId: '공백 있음' });
+    expect(badId.status).toBe(400);
+  });
+
+  it('첨부도 같은 clientMessageId면 파일을 다시 저장하지 않는다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const form = () => {
+      const f = new FormData();
+      f.append('file', new Blob([new Uint8Array([1, 2])]), 'a.pdf');
+      f.append('clientMessageId', 'a1b2c3d4-0000-4000-8000-000000000011');
+      return f;
+    };
+    const post = async () => (await fetch(`${baseUrl}/chat-rooms/${room.id}/attachments`, { method: 'POST', headers: { cookie: salesCookie }, body: form() })).json() as Promise<{ data: ChatMessageView }>;
+    const first = await post();
+    const again = await post();
+    expect(again.data.id).toBe(first.data.id);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(1);
+  });
+
+  it('그룹방 이름 바꾸기·업무방 열기는 시스템 메시지를 남기고 소켓으로 보낸다 (안 읽은 수에는 넣지 않는다)', async () => {
+    const group = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    socketRecords.length = 0;
+    await call('PATCH', `/chat-rooms/${group.id}`, salesCookie, { chatRoomName: '품질 회의' });
+    const delivered = recordsOf('message:new');
+    expect(delivered.map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
+    expect(delivered[0].payload).toMatchObject({ isSystem: true, senderId: null, content: "박서영님이 방 이름을 '품질 회의'(으)로 바꿨어요" });
+    const detail = await call<ChatRoomDetail>('GET', `/chat-rooms/${group.id}`, qualityCookie);
+    expect(detail.body.data.unreadCount).toBe(0);
+
+    const salesOrder = await createSalesOrder('SO-2610-905');
+    const work = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId], salesOrderId: salesOrder.id });
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${work.id}/messages`, salesCookie);
+    expect(page.body.data.items.map((m) => m.content)).toEqual(['박서영님이 수주 SO-2610-905 업무방을 열었어요']);
+  });
+
+  it('수주 작업 로그가 기록되면 같은 tx에서 업무방에 진행 알림을 남기고, 커밋 뒤 소켓으로 보낸다. 롤백되면 남지도 보내지도 않는다', async () => {
+    const recorder = app.get(BusinessEventRecorder);
+    const salesOrder = await createSalesOrder('SO-2610-906');
+    const work = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId], salesOrderId: salesOrder.id });
+    const actor = { employeeId: salesId, employeeName: '박서영' } as unknown as AuthUser;
+    socketRecords.length = 0;
+
+    await prisma.$transaction((tx) =>
+      recorder.record(tx, { type: 'GOODS_ISSUE_CONFIRMED', actor, target: { table: 'goods_issue', id: 1 }, salesOrderId: salesOrder.id, after: { shipmentRequestNo: 'DR-2610-0099', lots: [] } }),
+    );
+    // 수주에 연결되지 않았거나 알림 대상이 아닌 작업 로그는 남기지 않는다
+    await prisma.$transaction((tx) => recorder.record(tx, { type: 'RESERVATION_CREATED', actor: 'SYSTEM', target: { table: 'reservation', id: 1 }, salesOrderId: salesOrder.id }));
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await recorder.record(tx, { type: 'SALES_ORDER_CANCELLED', actor, target: { table: 'sales_order', id: salesOrder.id }, salesOrderId: salesOrder.id });
+        throw new Error('본 거래 실패');
+      }),
+    ).rejects.toThrow('본 거래 실패');
+
+    const contents = (await prisma.message.findMany({ where: { chatRoomId: work.id }, orderBy: { id: 'asc' } })).map((m) => [m.messageType, m.content]);
+    expect(contents).toEqual([
+      ['SYSTEM', '박서영님이 수주 SO-2610-906 업무방을 열었어요'],
+      ['SYSTEM', '[출고 확정] DR-2610-0099 · 박서영님'],
+    ]);
+    // 커밋을 확인한 뒤(100ms 간격) 보낸다
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const notices = recordsOf('message:new').filter((r) => (r.payload as ChatMessageView).content?.startsWith('['));
+    expect(notices.map((r) => r.employeeId).sort()).toEqual([salesId, productionId].sort());
   });
 });

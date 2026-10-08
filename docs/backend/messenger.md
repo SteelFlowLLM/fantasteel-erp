@@ -86,6 +86,20 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 다운로드: 첨부 테이블이 없으므로 `:id`는 메시지 id로 둔다 🟡. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 첨부가 없는 메시지면 COM-003.
 - Supabase Storage로 옮길 때는 `StorageService`만 바꾼다(`storage.service.ts` 주석).
 
+**시스템 메시지** (2026-10-08, 스키마 1차 #151 위에서. 문서에 없는 추가 기능)
+- `message_type = SYSTEM`, `sender_id = null`. 화면에는 보낸 사람 '시스템', `isSystem: true`.
+- 남기는 때: 업무방을 새로 열 때(`{이름}님이 수주 {번호} 업무방을 열었어요`), 멤버 초대(`{이름}님이 {A}님, {B}님을 초대했어요`, 업무방을 다시 열며 멤버를 더할 때 포함), 그룹방 이름 바꾸기(`…방 이름을 '{이름}'(으)로 바꿨어요` / `…지웠어요`). 커밋 뒤 방 멤버에게 `message:new`.
+- 안 읽은 수에 넣지 않는다(안 읽은 수는 `sender_id <> 나` 조건이라 null은 빠진다). 알림도 만들지 않는다.
+
+**업무방 진행 알림** (2026-10-08, 문서에 없는 추가 기능)
+- 공통 `BusinessEventRecorder.onRecorded`(새로 둔 연결 지점)에 메신저가 등록한다. 수주에 연결된 작업 로그(`salesOrderId`)가 아래 유형이면 **같은 tx에서** 그 수주의 업무방에 시스템 메시지 `[{작업 로그 표시명}] {업무 번호} · {사람}님`을 남긴다. 업무 번호는 작업 로그 변경 후 데이터에서 `…No`로 끝나는 첫 값.
+- 유형: SALES_ORDER_CANCELLED, PRODUCTION_PLAN_CREATED·CANCELLED, REPRODUCTION_PLAN_CREATED, PRODUCTION_STARTED, PRODUCTION_RESULT_REGISTERED, SHIPMENT_REQUEST_CREATED, ALLOCATION_CONFIRMED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED. 예약·배정 추천처럼 자주 바뀌는 내부 단계는 넣지 않는다.
+- 본 거래의 tx는 다른 모듈이 열어 커밋 시점을 모르므로, 소켓은 행이 보일 때까지 100·300·1000·3000ms 간격으로 확인한 뒤 보낸다(끝까지 없으면 롤백으로 보고 보내지 않음). 서버를 여러 대로 늘리면 바꿔야 한다.
+- 이 처리가 실패하면 본 거래도 롤백된다(같은 tx). 조회 1번 + 저장 1번이라 실패할 일은 적다.
+
+**중복 전송 방지** (#151 `client_message_id`)
+- 메시지 보내기·첨부 업로드에 `clientMessageId`(영문·숫자·-, 64자) 선택. 같은 사람이 같은 값으로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다(알림·소켓 다시 없음, 첨부는 파일도 다시 저장하지 않음). 다른 방에 같은 값이면 COM-004. 거의 동시에 두 번 들어와 부분 unique에 걸려도 먼저 저장된 메시지를 돌려준다.
+
 **방 관리** (문서에 없는 기능, 2026-10-07 단계별 추가 결정)
 - 멤버 초대: 1:1 방은 COM-004. 이미 멤버인 사원은 건너뛰고, 새 멤버가 없으면 COM-004. 없는 사원 COM-003·퇴사자 COM-004. 새 멤버는 이전 대화를 보고 지금까지의 메시지는 읽은 것으로 시작한다. 끝나면 기존·새 멤버 모두에게 `room:updated`.
 - 이름 바꾸기: 그룹방만(1:1은 상대 이름, 업무방은 수주로 정해짐 → COM-004). 앞뒤 공백을 지우고 비우면 null(멤버 이름으로 보임), 100자까지. 끝나면 멤버에게 `room:updated`.

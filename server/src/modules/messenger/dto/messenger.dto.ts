@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
@@ -49,6 +49,13 @@ export class SendMessageDto {
   @IsArray({ message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
   @IsInt({ each: true, message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
   mentionedEmployeeIds?: number[];
+
+  /** 화면이 만든 보내기 id(UUID 권장). 같은 id로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다 (#151) */
+  @IsOptional()
+  @IsString({ message: 'clientMessageId는 글자여야 해요' })
+  @MaxLength(64, { message: 'clientMessageId는 64자까지예요' })
+  @Matches(/^[A-Za-z0-9-]+$/, { message: 'clientMessageId는 영문·숫자·-만 쓸 수 있어요' })
+  clientMessageId?: string;
 }
 
 export class MarkReadDto {
@@ -63,6 +70,13 @@ export class UploadAttachmentDto {
   @IsString({ message: '메시지는 글자여야 해요' })
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content?: string;
+
+  /** 화면이 만든 보내기 id(UUID 권장). 같은 id로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다 (#151) */
+  @IsOptional()
+  @IsString({ message: 'clientMessageId는 글자여야 해요' })
+  @MaxLength(64, { message: 'clientMessageId는 64자까지예요' })
+  @Matches(/^[A-Za-z0-9-]+$/, { message: 'clientMessageId는 영문·숫자·-만 쓸 수 있어요' })
+  clientMessageId?: string;
 }
 
 export class InviteMembersDto {

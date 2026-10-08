@@ -25,9 +25,12 @@ describe('메시지 보관함 (useOutboxStore)', () => {
     expect(await deliverOutboxItem(id, () => Promise.reject(new Error('서버에 연결할 수 없어요')))).toBe(false);
     expect(items()[0]).toMatchObject({ status: 'failed', errorText: '서버에 연결할 수 없어요' });
 
+    const firstId = items()[0].input.clientMessageId;
+    expect(firstId).toMatch(/^[A-Za-z0-9-]+$/);
     const sent: SendMessageInput[] = [];
     expect(await retryOutboxItem(id, async (value) => void sent.push(value))).toBe(true);
-    expect(sent).toEqual([input('확인 부탁해요')]);
+    // 다시 보내도 같은 보내기 id라 서버가 두 번 저장하지 않는다
+    expect(sent).toEqual([{ ...input('확인 부탁해요'), clientMessageId: firstId }]);
     expect(items()).toEqual([]);
   });
 

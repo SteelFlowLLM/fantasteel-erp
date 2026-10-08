@@ -230,10 +230,11 @@ export const serverMessengerApi = {
       const form = new FormData();
       form.append('file', blobOf(input.file.dataUrl), input.file.name);
       if (content) form.append('content', content);
+      if (input.clientMessageId) form.append('clientMessageId', input.clientMessageId);
       return toMessageView(await serverUpload<ServerMessageView>(`/chat-rooms/${input.chatRoomId}/attachments`, form), myTargets);
     }
     const sent = await serverRequest<ServerMessageView>('POST', `/chat-rooms/${input.chatRoomId}/messages`, {
-      body: { content, mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room) },
+      body: { content, mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room), clientMessageId: input.clientMessageId },
     });
     return toMessageView(sent, myTargets);
   },

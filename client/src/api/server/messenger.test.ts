@@ -135,6 +135,8 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     const sent = await messengerApi.sendMessage({ chatRoomId: 7, content: ' @정다은 @품질부 @영업부 확인 ' });
     expect(sent).toMatchObject({ id: 50, isMine: true, mentionsMe: false });
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ content: '@정다은 @품질부 @영업부 확인', mentionedEmployeeIds: [5, 13, 12] });
+    await messengerApi.sendMessage({ chatRoomId: 7, content: '다시', clientMessageId: 'abc-1' });
+    expect((calls.filter((c) => c.method === 'POST').at(-1)?.body as { clientMessageId?: string }).clientMessageId).toBe('abc-1');
   });
 
   it('파일은 첨부 API로 multipart를 보내고(글은 content), 첨부 이름을 파일로 보여 준다', async () => {
