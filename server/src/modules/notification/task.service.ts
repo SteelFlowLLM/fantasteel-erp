@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { NOTIFICATION_TYPE, TASK_STATUS, type AuthUser, type PageResult, type TaskStatus, type TaskView } from '@fantasteel/shared';
+import { MESSAGE_TYPE, NOTIFICATION_TYPE, TASK_STATUS, type AuthUser, type PageResult, type TaskStatus, type TaskView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateTaskDto, ListTasksQuery } from './dto/task.dto';
 import { NotificationService } from './notification.service';
 import { TaskRepository, type TaskRow } from './task.repository';
@@ -27,6 +27,8 @@ function toView(row: TaskRow): TaskView {
     taskStatus: row.taskStatus as TaskStatus,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    messageId: row.messageId,
+    linkPath: row.message && row.messageId !== null ? `/messenger?room=${row.message.chatRoomId}&message=${row.messageId}` : null,
   };
 }
 
@@ -53,7 +55,10 @@ export class TaskService {
     return { items: rows.map(toView), page, size, total };
   }
 
-  /** API-240. 담당자가 내가 아니면 같은 tx에서 담당자에게 업무 지정 알림 */
+  /**
+   * API-240. 담당자가 내가 아니면 같은 tx에서 담당자에게 업무 지정 알림.
+   * messageId(16번, 명세에 없는 값)를 주면 메신저 메시지에서 등록한 업무로 남긴다: 메시지 없음 COM-003, 그 방 멤버가 아님 COM-002, 삭제·시스템 메시지 COM-004.
+   */
   async create(user: AuthUser, dto: CreateTaskDto): Promise<TaskView> {
     const taskTitle = dto.taskTitle.trim();
     if (!taskTitle) throw new AppException('COM-004', '제목을 입력해 주세요');
@@ -61,7 +66,15 @@ export class TaskService {
     const id = await this.prisma.$transaction(async (tx) => {
       const assignee = await this.repository.findEmployeeStatus(tx, dto.assigneeId);
       if (!assignee?.isActive) throw new AppException('COM-003', '담당자를 찾을 수 없어요');
-      const task = await this.repository.createTask(tx, { taskTitle, taskDescription: dto.taskDescription?.trim() || null, assigneeId: dto.assigneeId, dueDate, taskStatus: TASK_STATUS.OPEN });
+      if (dto.messageId !== undefined) await this.requireSourceMessage(tx, user, dto.messageId);
+      const task = await this.repository.createTask(tx, {
+        taskTitle,
+        taskDescription: dto.taskDescription?.trim() || null,
+        assigneeId: dto.assigneeId,
+        dueDate,
+        taskStatus: TASK_STATUS.OPEN,
+        messageId: dto.messageId ?? null,
+      });
       if (dto.assigneeId !== user.employeeId) {
         await this.notifications.notifyEmployees(tx, [dto.assigneeId], { notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: `업무 지정 · ${taskTitle}`, linkPath: '/tasks' });
       }
@@ -80,6 +93,13 @@ export class TaskService {
       if (count === 0) throw new AppException('COM-001', '이미 완료된 업무예요');
     });
     return this.view(id);
+  }
+
+  private async requireSourceMessage(tx: Tx, user: AuthUser, messageId: number): Promise<void> {
+    const message = await this.repository.findMessageForTask(tx, messageId, user.employeeId);
+    if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
+    if (message.chatRoom.chatRoomMembers.length === 0) throw new AppException('COM-002', '채팅방 멤버만 이 메시지로 업무를 등록할 수 있어요');
+    if (message.deletedAt || message.messageType !== MESSAGE_TYPE.USER) throw new AppException('COM-004', '삭제된 메시지나 시스템 메시지로는 업무를 등록할 수 없어요');
   }
 
   /** 응답용 조회는 커밋 뒤에 한다 (트랜잭션 안 관계 조회는 pg 경고) */

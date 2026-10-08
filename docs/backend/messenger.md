@@ -110,6 +110,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - `POST chat-rooms/:id/unpin` → 방 정보. 고정이 없으면 그대로.
 - 고정·해제는 시스템 메시지(`…메시지를 공지로 고정했어요`·`…공지를 내렸어요`)와 `room:updated`. 방 정보 `pinnedMessage { id, senderName, preview, createdAt }`, 고정한 메시지가 삭제되면 null.
 
+**메시지에서 업무 등록** (16번, 스키마 2차 `task.message_id`): 메시지 메뉴 [업무로 등록] → 업무 등록 API(`POST tasks`)에 `messageId`를 붙여 보낸다. 규칙은 `docs/backend/notification.md`. 메신저 쪽 시스템 메시지·알림은 따로 없다(담당자에게 업무 지정 알림만).
+
 **방 나가기** (15번, ERD 변경 없음, 명세에 없는 API)
 - 그룹방·업무방만(1:1은 상대 이름으로 보이는 방이라 COM-004). `chat_room_member` 행을 지운다(읽음 위치·방 설정도 사라짐). 메시지·알림은 그대로 둔다.
 - 남은 멤버에게 시스템 메시지 `…님이 나갔어요`, 남은 멤버와 나간 사람 모두에게 `room:updated`. 마지막 멤버가 나가도 방 행은 남긴다.

@@ -23,15 +23,22 @@ type MemberGroup = { departmentName: string; members: { id: number; employeeName
 const groupsOfChart = (nodes: readonly OrgChartDepartmentView[]): MemberGroup[] =>
   nodes.flatMap((node) => [{ departmentName: node.departmentName, members: node.members }, ...groupsOfChart(node.children)]).filter((group) => group.members.length > 0);
 
-export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClose: () => void }) {
+/** 메신저 메시지에서 업무를 등록할 때 (16번): 제목·설명을 메시지로 미리 채우고, 연결 화면은 그 메시지로 정해진다 */
+export interface TaskSourceMessage {
+  messageId: number;
+  title: string;
+  description: string;
+}
+
+export function TaskFormModal({ task, source, onClose }: { task: TaskView | null; source?: TaskSourceMessage; onClose: () => void }) {
   const myId = useMe().employeeId;
   const serverMode = isServerDataSource();
   const formId = useId();
   // 가짜 DB 모드는 지금처럼 사원 목록, 서버 모드는 조직도(사용 중인 사원)
   const employees = useEmployeeList({ isActive: true });
   const chart = useAdminOrgChart();
-  const [title, setTitle] = useState(task?.title ?? '');
-  const [description, setDescription] = useState(task?.description ?? '');
+  const [title, setTitle] = useState(task?.title ?? source?.title ?? '');
+  const [description, setDescription] = useState(task?.description ?? source?.description ?? '');
   const [assigneeId, setAssigneeId] = useState<number | null>(task?.assignee.id ?? myId);
   const [dueDate, setDueDate] = useState(task?.dueDate ?? '');
   const [linkPath, setLinkPath] = useState(task?.linkPath ?? '');
@@ -66,12 +73,12 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
   const submit = () => {
     const input = { title, description, assigneeId, dueDate, linkPath };
     if (task) update.mutate({ ...input, id: task.id, expectedUpdatedAt: task.updatedAt });
-    else create.mutate(input);
+    else create.mutate(source ? { ...input, linkPath: null, messageId: source.messageId } : input);
   };
 
   return (
     <Modal
-      title={task ? '업무 고치기' : '업무 추가'}
+      title={task ? '업무 고치기' : source ? '메시지로 업무 등록' : '업무 추가'}
       onClose={onClose}
       width={560}
       footer={
@@ -149,7 +156,7 @@ export function TaskFormModal({ task, onClose }: { task: TaskView | null; onClos
             <DateInput id={`${formId}-due`} value={dueDate} onChange={setDueDate} invalid={Boolean(fieldErrors.dueDate)} className="w-full" />
           </Field>
         </div>
-        {serverMode ? null : (
+        {source ? <p className="text-cap text-ink-3">업무에서 이 메시지로 바로 갈 수 있어요.</p> : serverMode ? null : (
           <Field
             label="연결 화면"
             htmlFor={`${formId}-link`}
