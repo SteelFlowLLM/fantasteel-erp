@@ -6,7 +6,7 @@ import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
-import { mockDefaultYardOf } from '@/api/server/masterIds';
+import { serverMasterDataApi } from '@/api/server/masterData';
 import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
 import { decCmp } from '@/lib/decimal';
 import {
@@ -115,7 +115,7 @@ export const goodsReceiptApi = {
   /** 모든 발주 품목 (미입고량이 남은 것 먼저, 입고 예정일 순) */
   lines: async (): Promise<ReceiptLine[]> =>
     isServerDataSource()
-      ? receiptLinesOf(await serverPurchaseOrderApi.list(), (itemCode) => mockDefaultYardOf(itemCode).yardName)
+      ? receiptLinesOf(await serverPurchaseOrderApi.list(), await serverMasterDataApi.rawMaterialYardNames())
       : mockQuery((tables) => {
           requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
           const yardNameOf = (itemCode: string) => findById(tables, 'yard', tables.item.find((i) => i.itemCode === itemCode)?.defaultYardId)?.yardName ?? null;

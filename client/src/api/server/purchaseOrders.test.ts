@@ -8,7 +8,6 @@ import { getMockDb } from '@/mock/db';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const mockItem = (itemCode: string) => getMockDb().read((t) => t.item.find((i) => i.itemCode === itemCode));
-const mockYardName = (itemCode: string) => getMockDb().read((t) => t.yard.find((y) => y.id === mockItem(itemCode)?.defaultYardId)?.yardName);
 
 const order: PurchaseOrderView = {
   id: 31,
@@ -115,9 +114,14 @@ describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () =>
     expect(failure).toMatchObject({ code: 'COM-001', detail: expect.stringContaining('PO-2610-0001') });
   });
 
-  it('입고 줄·내역: 기본 야드는 원료 코드로, 공급업체는 발주에서 채우고 확정자는 서버 값 그대로', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.purchase, respond);
-    expect(await goodsReceiptApi.lines()).toEqual([expect.objectContaining({ purchaseOrderItemId: 61, supplierName: '한국합금철', defaultYardName: mockYardName('SMN01'), isFullyReceived: false })]);
+  it('입고 줄·내역: 기본 야드는 서버 기준정보(원료 품목·야드)에서, 공급업체는 발주에서 채우고 확정자는 서버 값 그대로', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
+      if (c.path === '/items') return ok([{ id: 4, itemCode: 'SMN01', defaultYardId: 1 }]);
+      if (c.path === '/yards') return ok([{ id: 1, yardCode: 'YD-RM-01', yardName: '원료 1야드', yardType: 'RAW_MATERIAL' }]);
+      return respond(c);
+    });
+    expect(await goodsReceiptApi.lines()).toEqual([expect.objectContaining({ purchaseOrderItemId: 61, supplierName: '한국합금철', defaultYardName: '원료 1야드', isFullyReceived: false })]);
+    expect(calls.find((c) => c.path === '/items')?.query).toEqual({ itemType: 'RAW_MATERIAL' });
     expect(await goodsReceiptApi.list()).toEqual([expect.objectContaining({ id: 71, supplierName: '한국합금철', confirmedEmployeeName: '정다은', itemId: mockItem('SMN01')?.id })]);
   });
 

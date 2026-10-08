@@ -128,8 +128,8 @@ describe('같은 상태는 화면이 달라도 같은 색으로 그려진다', (
     }
   });
 
-  it('불합격 처리 상태: 품질 화면의 배지 색(보류 = 노랑, 격하 = 테두리, 폐기 = 빨강)을 재고 화면도 같이 쓴다', () => {
-    const tones: Record<DispositionStatus, BadgeTone> = { HOLD: 'wait', DOWNGRADED: 'outline', SCRAPPED: 'danger' };
+  it('불합격 처리 상태: 품질 화면의 배지 색(보류 = 노랑, 격하 = 파랑, 폐기 = 빨강)을 재고 화면도 같이 쓴다', () => {
+    const tones: Record<DispositionStatus, BadgeTone> = { HOLD: 'wait', DOWNGRADED: 'run', SCRAPPED: 'danger' };
     for (const status of keysOf<DispositionStatus>(DISPOSITION_STATUS_LABEL)) {
       expect(classOf(createElement(DispositionBadge, { status }))).toBe(toneClass(tones[status]));
     }
