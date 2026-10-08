@@ -1,6 +1,6 @@
 'use client';
 
-// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기(서버 모드는 로그아웃), 시드로 초기화
+// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기(서버 모드는 로그아웃), 시드로 초기화(가짜 DB 모드만)
 import { useEffect, useState } from 'react';
 import { isServerDataSource } from '@/api/http';
 import { sessionApi } from '@/api/session';
@@ -108,17 +108,20 @@ export function UserMenu() {
             <Icon name={isServerDataSource() ? 'logout' : 'users'} className="text-ink-3" />
             {isServerDataSource() ? '로그아웃' : '계정 바꾸기'}
           </PopItem>
-          <PopItem
-            role="menuitem"
-            centered
-            onClick={() => {
-              popover.setOpen(false);
-              setConfirmingReset(true);
-            }}
-          >
-            <Icon name="refresh" className="text-ink-3" />
-            시드로 초기화
-          </PopItem>
+          {/* 가짜 DB만 되돌리는 메뉴라 서버 모드에서는 숨긴다 (서버 DB는 npm run db:reset) */}
+          {isServerDataSource() ? null : (
+            <PopItem
+              role="menuitem"
+              centered
+              onClick={() => {
+                popover.setOpen(false);
+                setConfirmingReset(true);
+              }}
+            >
+              <Icon name="refresh" className="text-ink-3" />
+              시드로 초기화
+            </PopItem>
+          )}
         </PopPanel>
       ) : null}
       {confirmingReset ? (

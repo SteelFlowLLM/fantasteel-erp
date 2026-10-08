@@ -221,7 +221,21 @@ async function getProductionSetting(): Promise<MasterProductionSettingView> {
   return { ...row, updatedAt: '' };
 }
 
+/** 원료 품목 코드 → 기본 야드 이름 (입고 화면). 기준정보 조회 권한이 없으면 이름을 비운다 */
+async function rawMaterialYardNames(): Promise<(itemCode: string) => string | null> {
+  try {
+    const [items, yards] = await Promise.all([serverRequest<ItemView[]>('GET', '/items', { query: { itemType: 'RAW_MATERIAL' } }), getYards()]);
+    const yardNameOf = new Map(yards.map((y) => [y.id, y.yardName]));
+    const byCode = new Map(items.map((i) => [i.itemCode, yardNameOf.get(i.defaultYardId) ?? null]));
+    return (itemCode) => byCode.get(itemCode) ?? null;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'COM-002') return () => null;
+    throw error;
+  }
+}
+
 export const serverMasterDataApi = {
+  rawMaterialYardNames,
   listProductSpecs,
   listSpecMappings,
   listSteelGrades,

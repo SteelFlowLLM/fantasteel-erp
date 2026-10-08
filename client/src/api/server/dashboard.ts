@@ -1,6 +1,7 @@
-// 대시보드 위젯 ↔ 서버 API (server/src/modules/dashboard). 서버가 데이터를 주는 영업 위젯 3개를 바꾼다.
-// 납기 위험·강종별 불합격률·생산량은 이미 있는 서버 API(수주 충족·검사·LOT·기준정보)를 읽어 화면에서 묶는다 (구매 위젯과 같은 방식).
-// 구매 위젯 2개(원료 잔량 대비 소요·구매 진행)는 api/dashboard.ts가 구매·MRP 어댑터로 읽는다. 나머지(작업 로그·수율·불합격률 …)는 아직 가짜 DB를 읽는다.
+// 대시보드 위젯 ↔ 서버 API (server/src/modules/dashboard).
+// 서버가 위젯 데이터를 주는 것: 공정 흐름·수주 충족·제품 재고·출하 실적·공정별 수율·여재 보유 (GET dashboard/widgets/*).
+// 납기 위험·강종별 불합격률·생산량은 이미 있는 서버 API(수주 충족·검사·LOT·기준정보)를 읽어 화면에서 묶는다.
+// 구매 위젯 2개(원료 잔량 대비 소요·구매 진행)와 최근 작업 로그는 api/dashboard.ts가 구매·MRP·작업 로그 어댑터로 읽는다.
 import type { ItemView, LotSummary, OrderFulfillmentWidget, PageResult, ProcessFlowWidget, ProcessYieldWidget, ProductStockWidget, QualityInspectionListItem, ShipmentResultWidget, SurplusAgeWidget, SteelGradeView } from '@fantasteel/shared';
 import type { DeliveryRiskData, OrderFulfillmentData, ProcessFlowData, ProcessYieldData, ProductionVolumeData, ProductStockData, RejectRateData } from '@/api/dashboard';
 import { serverRequest } from '@/api/http';

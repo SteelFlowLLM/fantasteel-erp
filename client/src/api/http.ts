@@ -10,7 +10,7 @@ import { isErrorCode } from '@/codes';
 
 export type DataSource = 'mock' | 'server';
 
-/** 수주·출하·배정·출고 확정·밀시트·대시보드·품질(검사·검사 기준·불합격)·생산(생산계획·작업 실적·열연 투입)·구매(구매요청·승인·발주·입고)·LOT 추적·재고·작업 로그·조직 관리·조직도·업무·알림·메신저 화면의 데이터 출처. 다른 화면은 아직 가짜 DB만 쓴다 */
+/** 화면 데이터 출처. 서버 모드에서 연결된 화면 목록은 docs/CLIENT-GUIDE.md 서버 연결 절. 연결되지 않은 기능(Message → ERP 초안·전역 검색 등)은 가짜 DB를 쓴다 */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'server' ? 'server' : 'mock';
 }
