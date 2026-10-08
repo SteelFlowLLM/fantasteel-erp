@@ -100,9 +100,11 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 
 **알림 연동**(REQ-MSG-005): 메시지 저장 tx 안에서 notification 서비스를 부른다. 멘션 대상은 본문을 해석하지 않고 요청의 `mentionedEmployeeIds`(사원 id 배열)로 받는다(2026-10-07 결정).
 - 멘션된 멤버 → MENTION. 업무방의 새 메시지 → 보낸 사람을 뺀 멤버에게 WORK_ROOM_MESSAGE. 방 멤버가 아닌 사원·나 자신 멘션은 무시한다. 첨부 메시지는 멘션을 받지 않는다(업무방 알림만).
-- 문구: MENTION `{보낸 사람}님이 멘션했어요 · {방 이름} · {미리보기}`, WORK_ROOM_MESSAGE `{방 이름} 새 메시지 · {보낸 사람}: {미리보기}`. 미리보기는 50자(가정값), 1:1 방 이름은 '1:1 채팅'. `link_path`는 `/messenger?room={방 id}`(방 상단에서 수주 화면으로 이동).
+- 문구: MENTION `{보낸 사람}님이 멘션했어요 · {방 이름} · {미리보기}`, WORK_ROOM_MESSAGE `{방 이름} 새 메시지 · {보낸 사람}: {미리보기}`. 미리보기는 50자(가정값), 1:1 방 이름은 '1:1 채팅'. `link_path`는 아래 줄 참고.
 - 부분 unique `(message_id, recipient_id)` 때문에 한 메시지로 한 사람에게 알림은 1건뿐이다 → 업무방에서 멘션된 사람은 MENTION 1건만 만든다.
-- `link_path`는 채팅방, 업무방이면 수주 화면으로 이동할 수 있게 한다(REQ-MSG-006).
+- `link_path`는 `/messenger?room={방 id}&message={메시지 id}` — 알림을 누르면 그 메시지까지 이동해 강조한다. 업무방은 방 상단에서 수주 화면으로 이동한다(REQ-MSG-006).
+
+**ERP 링크**(REQ-MSG-006): 메시지 응답의 `erpLinks`. 본문의 수주(SO-)·구매요청(PR-)·출하요청(DR-) 번호(업무 프로세스 9.1) 중 실제로 있는 문서만 `{ text, href }`로 준다. 번호 해석은 화면과 같은 `shared`의 `findErpNos`를 쓰고, 목록은 번호를 모아 종류별로 한 번씩만 조회한다. 화면을 열 권한은 화면이 따로 본다.
 
 ## 5. 오류 코드·작업 로그
 

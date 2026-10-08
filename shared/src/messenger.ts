@@ -98,6 +98,8 @@ export interface ChatMessageView {
   attachmentName: string | null;
   /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
   unreadMemberCount: number;
+  /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006). 화면 권한은 화면이 따로 본다 */
+  erpLinks: ErpLink[];
   createdAt: string;
 }
 
@@ -189,4 +191,41 @@ export type ChatRoomReadEvent = ChatRoomReadResult;
 
 export interface ChatRoomUpdatedEvent {
   chatRoomId: number;
+}
+
+// ── 본문의 업무 번호 → ERP 화면 링크 (REQ-MSG-006) ─────────────
+
+export type ErpNoKind = 'SALES_ORDER' | 'PURCHASE_REQUISITION' | 'SHIPMENT_REQUEST';
+
+/** 수주(SO-)·구매요청(PR-)·출하요청(DR-) 번호 (업무 프로세스 9.1) */
+const ERP_NO_PATTERN = /\b(SO-\d{4}-\d{3,}|PR-\d{4}-\d{4,}|DR-\d{4}-\d{4,})\b/g;
+
+const KIND_OF_PREFIX: Record<string, ErpNoKind> = {
+  SO: 'SALES_ORDER',
+  PR: 'PURCHASE_REQUISITION',
+  DR: 'SHIPMENT_REQUEST',
+};
+
+/** 본문의 업무 번호 (같은 번호는 한 번만) */
+export function findErpNos(content: string): { no: string; kind: ErpNoKind }[] {
+  const result: { no: string; kind: ErpNoKind }[] = [];
+  for (const match of content.matchAll(ERP_NO_PATTERN)) {
+    const no = match[1];
+    const kind = KIND_OF_PREFIX[no.slice(0, 2)];
+    if (kind && !result.some((r) => r.no === no)) result.push({ no, kind });
+  }
+  return result;
+}
+
+/** 업무 번호 → 상세 화면 경로 */
+export const ERP_LINK_PATH: Record<ErpNoKind, (id: number) => string> = {
+  SALES_ORDER: (id) => `/sales-orders/${id}`,
+  PURCHASE_REQUISITION: (id) => `/purchase-requisitions/${id}`,
+  SHIPMENT_REQUEST: (id) => `/shipment-requests/${id}`,
+};
+
+/** 본문의 업무 번호 중 실제로 있는 것의 상세 화면 링크 */
+export interface ErpLink {
+  text: string;
+  href: string;
 }

@@ -160,6 +160,22 @@ export class MessengerRepository {
     });
   }
 
+  /** 본문에 나온 업무 번호 중 실제로 있는 것 (ERP 링크) */
+  async findErpDocuments(tx: Tx, numbers: { salesOrderNos: string[]; purchaseRequisitionNos: string[]; shipmentRequestNos: string[] }) {
+    const [salesOrders, purchaseRequisitions, shipmentRequests] = await Promise.all([
+      numbers.salesOrderNos.length ? tx.salesOrder.findMany({ where: { salesOrderNo: { in: numbers.salesOrderNos } }, select: { id: true, salesOrderNo: true } }) : [],
+      numbers.purchaseRequisitionNos.length
+        ? tx.purchaseRequisition.findMany({ where: { purchaseRequisitionNo: { in: numbers.purchaseRequisitionNos } }, select: { id: true, purchaseRequisitionNo: true } })
+        : [],
+      numbers.shipmentRequestNos.length ? tx.shipmentRequest.findMany({ where: { shipmentRequestNo: { in: numbers.shipmentRequestNos } }, select: { id: true, shipmentRequestNo: true } }) : [],
+    ]);
+    return {
+      salesOrders: salesOrders.map((r) => ({ id: r.id, no: r.salesOrderNo })),
+      purchaseRequisitions: purchaseRequisitions.map((r) => ({ id: r.id, no: r.purchaseRequisitionNo })),
+      shipmentRequests: shipmentRequests.map((r) => ({ id: r.id, no: r.shipmentRequestNo })),
+    };
+  }
+
   findMemberReads(tx: Tx, chatRoomId: number) {
     return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true, lastReadMessageId: true } });
   }

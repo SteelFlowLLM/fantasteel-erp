@@ -332,7 +332,7 @@ describe('멘션·업무방 알림', () => {
     );
     expect(rows.find((r) => r.recipientId === productionId)).toMatchObject({
       notificationContent: expect.stringMatching(/^박서영님이 멘션했어요 · SO-2610-903 .+ · @임재원 출하 확인 부탁해요$/),
-      linkPath: `/messenger?room=${room.id}`,
+      linkPath: `/messenger?room=${room.id}&message=${sent.body.data.id}`,
     });
   });
 
@@ -558,5 +558,20 @@ describe('접속 상태 · 입력 중 (소켓)', () => {
     expect(sent).toEqual([]);
     gateway.handleDisconnect(sales.asSocket);
     gateway.handleDisconnect(outsider.asSocket);
+  });
+});
+
+describe('ERP 링크 (REQ-MSG-006)', () => {
+  it('본문의 수주 번호 중 실제로 있는 것만 상세 화면 링크가 되고, 보낼 때와 목록·검색이 같다', async () => {
+    const salesOrder = await createSalesOrder('SO-2610-904');
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const sent = (await send(salesCookie, room.id, 'SO-2610-904 확인, SO-2610-999는 없는 번호, SO-2610-904 다시')).body.data;
+    expect(sent.erpLinks).toEqual([{ text: 'SO-2610-904', href: `/sales-orders/${salesOrder.id}` }]);
+    await send(salesCookie, room.id, '번호 없는 메시지');
+
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
+    expect(page.body.data.items.map((m) => m.erpLinks)).toEqual([[{ text: 'SO-2610-904', href: `/sales-orders/${salesOrder.id}` }], []]);
+    const found = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=SO-2610`, qualityCookie);
+    expect(found.body.data.items[0].erpLinks).toHaveLength(1);
   });
 });
