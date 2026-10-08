@@ -56,6 +56,12 @@ export class SendMessageDto {
   @MaxLength(64, { message: 'clientMessageId는 64자까지예요' })
   @Matches(/^[A-Za-z0-9-]+$/, { message: 'clientMessageId는 영문·숫자·-만 쓸 수 있어요' })
   clientMessageId?: string;
+
+  /** 답글 대상 메시지 (같은 방, 삭제되지 않은 일반 메시지) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'parentMessageId는 메시지 id여야 해요' })
+  parentMessageId?: number;
 }
 
 export class MarkReadDto {
@@ -77,6 +83,12 @@ export class UploadAttachmentDto {
   @MaxLength(64, { message: 'clientMessageId는 64자까지예요' })
   @Matches(/^[A-Za-z0-9-]+$/, { message: 'clientMessageId는 영문·숫자·-만 쓸 수 있어요' })
   clientMessageId?: string;
+
+  /** 답글 대상 메시지 (같은 방, 삭제되지 않은 일반 메시지) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'parentMessageId는 메시지 id여야 해요' })
+  parentMessageId?: number;
 }
 
 export class InviteMembersDto {
@@ -113,4 +125,11 @@ export class SearchMessagesQuery {
   @Min(1)
   @Max(MESSAGE_PAGE_SIZE_MAX, { message: `limit는 ${MESSAGE_PAGE_SIZE_MAX}까지예요` })
   limit?: number;
+}
+
+export class EditMessageDto {
+  /** 첨부가 있는 메시지는 비울 수 있다 */
+  @IsString({ message: '메시지는 글자여야 해요' })
+  @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
+  content!: string;
 }

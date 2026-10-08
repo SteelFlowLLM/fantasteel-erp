@@ -62,6 +62,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 그림 첨부 미리보기(두 모드 공통): png·jpg·jpeg·gif·webp·bmp는 말풍선에 작은 그림으로 보이고 누르면 크게 본다(`features/messenger/lib/attachment.ts`). ERD에 형식 컬럼이 없어 확장자로 판단하고, 서버는 늘 octet-stream으로 보내서 화면이 확장자로 형식을 붙인다. SVG는 스크립트가 들어갈 수 있어 미리보지 않는다.
 - 업무방 멤버 추천(두 모드 공통): 업무방 열기 창 위에 담당 영업과 생산부·물류부 부서장을 추천으로 보이고 [추천 N명 더하기]로 한 번에 고른다(`features/sales/lib/workRoomSuggest.ts`). 미리 고르지는 않는다. 부서는 시드 부서 코드(PRD·LOG, 가정값)로 찾는다.
 - 접속 상태·입력 중(서버 모드만): 1:1 목록·방 머리·멤버 아바타에 접속 점(초록 = 접속 중), 1:1 머리에 '접속 중/접속 안 함', 입력창 위에 'OO님이 입력 중…'. 소켓으로만 오는 잠깐의 상태라 `stores/useMessengerLiveStore.ts`에 두고, 소켓이 끊기면 접속 표시를 숨긴다(알 수 없음). 가짜 DB 모드에서는 표시하지 않는다.
+- 수정·삭제·답글(두 모드 공통): 말풍선 메뉴에 답장(모든 일반 메시지)·수정·삭제(내 메시지)가 기본으로 있다(`features/messenger/components/MessageEditActions.tsx`, 메뉴 등록부 맨 앞). 답장은 입력창 위에 원본 줄이 생기고, 답글 말풍선 위 원본을 누르면 그 메시지로 이동한다. 고친 메시지는 '수정됨', 지운 메시지는 '삭제된 메시지예요'로 남는다. 고른 메시지는 `stores/useMessageComposeStore.ts`에 둔다.
 - 메시지 보내기(두 모드 공통): 누르면 입력창을 비우고 대화에 '보내는 중' 말풍선을 바로 띄운다(`stores/useOutboxStore.ts`, `hooks/useMessenger.ts`의 `useMessageOutbox`). 저장되면 조회를 다시 읽고 말풍선을 지우며, 실패하면 이유와 [다시 보내기]·[삭제]가 있는 '전송 실패' 말풍선으로 남는다. 보관함은 브라우저 메모리라 새로고침하면 사라진다. 메시지마다 보내기 id(`clientMessageId`, UUID)를 붙여 서버 모드에서 다시 보내도 두 번 저장되지 않는다.
 - 아직 가짜 DB만 쓰는 화면(Message → ERP 초안 등)은 로그인 사원의 사원번호로 가짜 DB 사원을 찾아 쓴다(`api/actor.ts`, 화면은 `useMockEmployeeId()`). 서버에서 새로 등록한 사원은 가짜 DB에 없어 이 화면들을 쓸 수 없다.
 

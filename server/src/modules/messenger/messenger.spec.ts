@@ -27,7 +27,7 @@ import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
 
 interface SocketRecord {
-  event: 'message:new' | 'room:read' | 'room:updated' | 'member:read';
+  event: 'message:new' | 'message:updated' | 'room:read' | 'room:updated' | 'member:read';
   employeeId: number;
   payload: unknown;
 }
@@ -57,7 +57,7 @@ async function login(employeeNo: string, password = process.env.SEED_PASSWORD ??
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'POST' | 'PATCH', path: string, cookie: string, body?: unknown) {
+async function call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, cookie: string, body?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: body === undefined ? { cookie } : { cookie, 'content-type': 'application/json' },
@@ -118,6 +118,9 @@ beforeAll(async () => {
     for (const employeeId of memberIds) socketRecords.push({ event: 'message:new', employeeId, payload: toView(employeeId) });
   };
   gateway.emitRead = (employeeId, payload) => socketRecords.push({ event: 'room:read', employeeId, payload });
+  gateway.emitMessageUpdated = (memberIds, toView) => {
+    for (const employeeId of memberIds) socketRecords.push({ event: 'message:updated', employeeId, payload: toView(employeeId) });
+  };
   gateway.emitMemberRead = (memberIds, payload) => {
     for (const employeeId of memberIds) socketRecords.push({ event: 'member:read', employeeId, payload });
   };
@@ -693,5 +696,76 @@ describe('10번: 중복 전송 방지 · 시스템 메시지 · 업무방 진행
     await new Promise((resolve) => setTimeout(resolve, 600));
     const notices = recordsOf('message:new').filter((r) => (r.payload as ChatMessageView).content?.startsWith('['));
     expect(notices.map((r) => r.employeeId).sort()).toEqual([salesId, productionId].sort());
+  });
+});
+
+describe('11번: 메시지 수정·삭제·답글', () => {
+  it('내 메시지를 고치면 고친 시각이 남고 방 멤버에게 message:updated를 보낸다. 남의 메시지·시스템 메시지는 COM-004', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const mine = (await send(salesCookie, room.id, '처음 글')).body.data;
+    const theirs = (await send(qualityCookie, room.id, '서민지 글')).body.data;
+    socketRecords.length = 0;
+
+    const edited = await call<ChatMessageView>('PATCH', `/messages/${mine.id}`, salesCookie, { content: '  고친 글 SO-2610-907  ' });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toMatchObject({ id: mine.id, content: '고친 글 SO-2610-907', isDeleted: false });
+    expect(edited.body.data.editedAt).not.toBeNull();
+    const updates = recordsOf('message:updated');
+    expect(updates.map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
+    expect(updates.find((r) => r.employeeId === qualityId)?.payload).toMatchObject({ id: mine.id, isMine: false });
+
+    const notMine = await call('PATCH', `/messages/${theirs.id}`, salesCookie, { content: '남의 글' });
+    expect([notMine.status, notMine.body.error?.code]).toEqual([400, 'COM-004']);
+    const blank = await call('PATCH', `/messages/${mine.id}`, salesCookie, { content: '   ' });
+    expect([blank.status, blank.body.error?.code]).toEqual([400, 'COM-004']);
+    const outsider = await call('PATCH', `/messages/${mine.id}`, purchaseCookie, { content: 'x' });
+    expect(outsider.status).toBe(403);
+  });
+
+  it('삭제는 표시만 하고 본문·첨부를 비워 보여 주며, 안 읽은 수·검색·파일 목록·첨부 내려받기에서 빠진다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const text = (await send(salesCookie, room.id, '지울 비밀 글')).body.data;
+    const file = (await upload(salesCookie, room.id, '지울.pdf', new Uint8Array([1]))).body.data;
+    expect((await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, qualityCookie)).body.data.unreadCount).toBe(2);
+
+    const removed = await call<ChatMessageView>('DELETE', `/messages/${text.id}`, salesCookie);
+    expect(removed.body.data).toMatchObject({ isDeleted: true, content: null });
+    await call('DELETE', `/messages/${file.id}`, salesCookie);
+    const again = await call<ChatMessageView>('DELETE', `/messages/${text.id}`, salesCookie);
+    expect(again.status).toBe(200);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(2);
+
+    expect((await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, qualityCookie)).body.data.unreadCount).toBe(0);
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
+    expect(page.body.data.items.map((m) => [m.isDeleted, m.content, m.attachmentName])).toEqual([
+      [true, null, null],
+      [true, null, null],
+    ]);
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('삭제된 메시지예요');
+    expect((await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('비밀')}`, qualityCookie)).body.data.items).toEqual([]);
+    expect((await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments`, qualityCookie)).body.data.items).toEqual([]);
+    const download = await call('GET', `/attachments/${file.id}`, qualityCookie);
+    expect(download.status).toBe(404);
+    const editDeleted = await call('PATCH', `/messages/${text.id}`, salesCookie, { content: '되살리기' });
+    expect(editDeleted.body.error?.code).toBe('COM-004');
+  });
+
+  it('답글은 같은 방의 일반 메시지에만 달리고, 원본 요약을 함께 보여 준다 (원본이 지워지면 비움)', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const other = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const original = (await send(qualityCookie, room.id, '검사 결과 공유해요')).body.data;
+    const otherMessage = (await send(salesCookie, other.id, '다른 방')).body.data;
+
+    const reply = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: '확인했어요', parentMessageId: original.id });
+    expect(reply.body.data.parent).toEqual({ id: original.id, senderName: '서민지', preview: '검사 결과 공유해요', isDeleted: false });
+    const wrongRoom = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: 'x', parentMessageId: otherMessage.id });
+    expect([wrongRoom.status, wrongRoom.body.error?.code]).toEqual([404, 'COM-003']);
+
+    await call('DELETE', `/messages/${original.id}`, qualityCookie);
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+    expect(page.body.data.items.find((m) => m.id === reply.body.data.id)?.parent).toEqual({ id: original.id, senderName: '서민지', preview: '', isDeleted: true });
+    const toDeleted = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: 'x', parentMessageId: original.id });
+    expect(toDeleted.body.error?.code).toBe('COM-004');
   });
 });

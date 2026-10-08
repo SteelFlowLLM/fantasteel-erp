@@ -10,6 +10,7 @@ import { SoonButton, soonLabel } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { useMessageOutbox } from '@/hooks/useMessenger';
+import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
 import { cn } from '@/lib/cn';
 import { fmtBytes } from '@/lib/format';
@@ -53,6 +54,9 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { send } = useMessageOutbox(room.id);
+  // 메시지 메뉴의 '답장'으로 고른 메시지 (이 방 것만)
+  const replyTo = useMessageComposeStore((state) => (state.replyTo?.chatRoomId === room.id ? state.replyTo : null));
+  const clearReply = () => useMessageComposeStore.getState().setReplyTo(null);
   const pending = reading;
 
   const candidates = useMemo<MentionTarget[]>(() => {
@@ -122,7 +126,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         setReading(false);
       }
     }
-    send({ chatRoomId: room.id, content, file: payload });
+    send({ chatRoomId: room.id, content, file: payload, parentMessageId: replyTo?.id ?? null });
+    clearReply();
     setText('');
     setFile(null);
     setMention(null);
@@ -183,6 +188,14 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
               <span className="ml-auto text-cap text-ink-3">{target.kind === 'department' ? '부서 알림' : '멤버'}</span>
             </button>
           ))}
+        </div>
+      ) : null}
+      {replyTo ? (
+        <div className="flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-2 px-3 py-1.5 text-xs" aria-label="답장할 메시지">
+          <span className="min-w-0 flex-1 truncate">
+            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.file?.name ?? ''}</span>
+          </span>
+          <IconButton icon="x" label="답장 취소" size="sm" onClick={clearReply} />
         </div>
       ) : null}
       {file ? (

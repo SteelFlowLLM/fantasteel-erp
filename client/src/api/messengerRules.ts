@@ -18,7 +18,8 @@ export function unreadCountOf(tables: Readonly<MockTables>, chatRoomId: number, 
   const member = tables.chatRoomMember.find((m) => m.chatRoomId === chatRoomId && m.employeeId === employeeId);
   if (!member) return 0;
   const lastRead = member.lastReadMessageId ?? 0;
-  return tables.message.filter((m) => m.chatRoomId === chatRoomId && m.id > lastRead && m.senderId !== employeeId).length;
+  // 삭제된 메시지는 세지 않는다 (서버와 같음)
+  return tables.message.filter((m) => m.chatRoomId === chatRoomId && m.id > lastRead && m.senderId !== employeeId && !m.deletedAt).length;
 }
 
 export function memberIdsOf(tables: Readonly<MockTables>, chatRoomId: number): number[] {
@@ -62,6 +63,8 @@ export interface MessageFileValues {
 export interface PostMessageValues {
   content: string | null;
   file: MessageFileValues | null;
+  /** 답글 대상 (같은 방 메시지인지는 부르는 쪽이 확인) */
+  parentMessageId?: number | null;
 }
 
 /**
@@ -82,6 +85,7 @@ export function postMessage(
     filePath: values.file?.path ?? null,
     fileSize: values.file?.size ?? null,
     mimeType: values.file?.mimeType ?? null,
+    parentMessageId: values.parentMessageId ?? null,
   });
   const message = values.file && values.pathOf ? (updateRow(tx, 'message', inserted.id, { filePath: values.pathOf(inserted.id) }) ?? inserted) : inserted;
 

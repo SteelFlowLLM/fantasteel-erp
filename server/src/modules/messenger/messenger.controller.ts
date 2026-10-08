@@ -1,8 +1,8 @@
-import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
@@ -63,6 +63,18 @@ export class MessengerController {
   @Post('chat-rooms/:id/messages')
   sendMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: SendMessageDto): Promise<ChatMessageView> {
     return this.service.sendMessage(user, id, dto);
+  }
+
+  /** 내 메시지 고치기 (명세에 없는 API, #151) */
+  @Patch('messages/:id')
+  editMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: EditMessageDto): Promise<ChatMessageView> {
+    return this.service.editMessage(user, id, dto);
+  }
+
+  /** 내 메시지 삭제 — 삭제 표시만 한다 (명세에 없는 API, #151) */
+  @Delete('messages/:id')
+  deleteMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ChatMessageView> {
+    return this.service.deleteMessage(user, id);
   }
 
   /** 업로드 = 메시지 1건 생성. multipart: file(파일), content(글, 선택). 용량을 넘으면 multer가 끝까지 읽지 않고 413(COM-004)으로 끊는다 */

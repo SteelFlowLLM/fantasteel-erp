@@ -100,6 +100,9 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
     mentionsMe: !message.isMine && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: message.erpLinks,
     unreadMemberCount: message.unreadMemberCount,
+    editedAt: message.editedAt,
+    isDeleted: message.isDeleted,
+    parent: message.parent,
   };
 }
 
@@ -231,10 +234,11 @@ export const serverMessengerApi = {
       form.append('file', blobOf(input.file.dataUrl), input.file.name);
       if (content) form.append('content', content);
       if (input.clientMessageId) form.append('clientMessageId', input.clientMessageId);
+      if (input.parentMessageId) form.append('parentMessageId', String(input.parentMessageId));
       return toMessageView(await serverUpload<ServerMessageView>(`/chat-rooms/${input.chatRoomId}/attachments`, form), myTargets);
     }
     const sent = await serverRequest<ServerMessageView>('POST', `/chat-rooms/${input.chatRoomId}/messages`, {
-      body: { content, mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room), clientMessageId: input.clientMessageId },
+      body: { content, mentionedEmployeeIds: mentionedEmployeeIdsOf(content, room), clientMessageId: input.clientMessageId, parentMessageId: input.parentMessageId ?? undefined },
     });
     return toMessageView(sent, myTargets);
   },
@@ -244,6 +248,16 @@ export const serverMessengerApi = {
 
   renameRoom: async ({ chatRoomId, chatRoomName }: { chatRoomId: number; chatRoomName: string | null }): Promise<RenameChatRoomResult> =>
     serverRequest<RenameChatRoomResult>('PATCH', `/chat-rooms/${chatRoomId}`, { body: { chatRoomName } }),
+
+  editMessage: async ({ messageId, content }: { messageId: number; content: string }): Promise<MessageView> => {
+    const updated = await serverRequest<ServerMessageView>('PATCH', `/messages/${messageId}`, { body: { content } });
+    return toMessageView(updated, myTargetsOf(await roomRaw(updated.chatRoomId)));
+  },
+
+  deleteMessage: async (messageId: number): Promise<MessageView> => {
+    const updated = await serverRequest<ServerMessageView>('DELETE', `/messages/${messageId}`);
+    return toMessageView(updated, myTargetsOf(await roomRaw(updated.chatRoomId)));
+  },
 
   markRead: async ({ chatRoomId, lastMessageId }: { chatRoomId: number; lastMessageId: number }): Promise<number> =>
     (await serverRequest<ChatRoomReadResult>('POST', `/chat-rooms/${chatRoomId}/read`, { body: { lastMessageId } })).unreadCount,

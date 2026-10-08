@@ -24,6 +24,9 @@ const getLinkLabel = (link: ErpLink): string => {
   return `출하요청 보기 ${link.text}`;
 };
 
+/** 메뉴를 아래로 펼칠 때 필요한 높이 (항목 4개 정도) */
+const MENU_SPACE_PX = 180;
+
 const getFileExtension = (name: string) => (name.includes('.') ? name.split('.').pop()?.toUpperCase() ?? '' : '');
 
 export function MessageBubble({
@@ -33,6 +36,7 @@ export function MessageBubble({
   myNames,
   isGroupStart = true,
   isGroupEnd = true,
+  onJumpToMessage,
 }: {
   message: MessageView;
   room: ChatRoomDetailView;
@@ -42,6 +46,8 @@ export function MessageBubble({
   isGroupStart?: boolean;
   /** 묶음의 마지막 메시지: 시각을 붙인다 */
   isGroupEnd?: boolean;
+  /** 답글 원본을 누르면 그 메시지로 이동 */
+  onJumpToMessage?: (messageId: number) => void;
 }) {
   const me = useMe();
   const canOpen = (href: string) => {
@@ -63,8 +69,24 @@ export function MessageBubble({
   const segments = message.content ? splitMessageText(message.content, { mentionNames, myNames, links: message.erpLinks }) : [];
   const openableLinks = message.erpLinks.filter((link) => canOpen(link.href)).slice(0, 3);
 
+  const parent = message.parent;
   const body = (
     <div className={cn('flex min-w-0 flex-col gap-1', mine ? 'items-end' : 'items-start')}>
+      {parent ? (
+        <button
+          type="button"
+          onClick={() => onJumpToMessage?.(parent.id)}
+          disabled={parent.isDeleted}
+          title={parent.isDeleted ? undefined : '원본 메시지로 이동'}
+          className="flex max-w-full flex-col rounded-md border-l-2 border-line-strong bg-surface-3 px-2.5 py-1 text-left text-cap text-ink-2 enabled:hover:bg-surface-2"
+        >
+          <b className="font-semibold">{parent.senderName}님에게 답장</b>
+          <span className="truncate text-ink-3">{parent.isDeleted ? '삭제된 메시지예요' : parent.preview}</span>
+        </button>
+      ) : null}
+      {message.isDeleted ? (
+        <p className={cn('rounded-lg border border-dashed border-line px-3 py-2 text-sm text-ink-3 italic')}>삭제된 메시지예요</p>
+      ) : null}
       {segments.length > 0 ? (
         <p
           className={cn(
@@ -118,15 +140,16 @@ export function MessageBubble({
   );
   // 안 읽은 사람 수는 메시지마다 달라 묶음 중간에도 보이고, 시각은 묶음 마지막에만 붙인다
   const unread =
-    message.unreadMemberCount > 0 ? (
+    message.unreadMemberCount > 0 && !message.isDeleted ? (
       <span className="text-cap font-semibold text-brand" title={`아직 ${message.unreadMemberCount}명이 읽지 않았어요`} aria-label={`안 읽은 사람 ${message.unreadMemberCount}명`}>
         {message.unreadMemberCount}
       </span>
     ) : null;
   const time =
-    unread || isGroupEnd ? (
+    unread || isGroupEnd || (message.editedAt && !message.isDeleted) ? (
       <span className={cn('flex flex-none flex-col pb-0.5', mine ? 'items-end' : 'items-start')}>
         {unread}
+        {message.editedAt && !message.isDeleted ? <span className="text-cap text-ink-3">수정됨</span> : null}
         {isGroupEnd ? <time className="text-cap text-ink-3">{fmtHM(message.createdAt)}</time> : null}
       </span>
     ) : null;
@@ -227,13 +250,25 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
 function MessageMenu({ message, room }: { message: MessageView; room: ChatRoomDetailView }) {
   const me = useMe();
   const popover = usePopover<HTMLDivElement>();
+  // 아래 공간이 모자라면(대화 맨 아래 메시지 등) 위로 펼친다. 대화 영역이 스크롤 상자라 넘치면 잘린다
+  const [openUp, setOpenUp] = useState(false);
   const actions = messageActionsFor(message, room, me);
   if (actions.length === 0) return null;
+  const toggle = () => {
+    const button = popover.ref.current;
+    const box = button?.closest('.overflow-auto')?.getBoundingClientRect();
+    if (button && box) setOpenUp(box.bottom - button.getBoundingClientRect().bottom < MENU_SPACE_PX);
+    popover.setOpen(!popover.open);
+  };
   return (
     <div ref={popover.ref} className={cn('relative flex-none', popover.open ? 'visible' : 'invisible group-hover:visible group-focus-within:visible')}>
-      <IconButton icon="more" label="메시지 메뉴" size="sm" aria-haspopup="menu" aria-expanded={popover.open} onClick={() => popover.setOpen(!popover.open)} className="bg-surface shadow-1" />
+      <IconButton icon="more" label="메시지 메뉴" size="sm" aria-haspopup="menu" aria-expanded={popover.open} onClick={toggle} className="bg-surface shadow-1" />
       {popover.open ? (
-        <div role="menu" aria-label="메시지 메뉴" className="absolute top-8 right-0 z-30 flex w-56 flex-col overflow-hidden rounded-md border border-line bg-surface py-1 shadow-pop">
+        <div
+          role="menu"
+          aria-label="메시지 메뉴"
+          className={cn('absolute right-0 z-30 flex w-56 flex-col overflow-hidden rounded-md border border-line bg-surface py-1 shadow-pop', openUp ? 'bottom-8' : 'top-8')}
+        >
           {actions.map(({ key, Component }) => (
             <Component key={key} message={message} room={room} closeMenu={() => popover.setOpen(false)} />
           ))}

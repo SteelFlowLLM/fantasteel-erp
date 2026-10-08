@@ -214,6 +214,26 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     await expect(messengerApi.searchMessages({ chatRoomId: roomId, keyword: '  ' })).rejects.toBeInstanceOf(InputError);
   });
 
+  it('메시지 수정·삭제(내 것만, 삭제는 표시만)와 답글(원본 요약, 원본 삭제 시 비움)', async () => {
+    const roomId = await createGroup();
+    const mine = await messengerApi.sendMessage({ chatRoomId: roomId, content: '처음 글' });
+    const edited = await messengerApi.editMessage({ messageId: mine.id, content: ' 고친 글 ' });
+    expect(edited).toMatchObject({ content: '고친 글', isDeleted: false });
+    expect(edited.editedAt).not.toBeNull();
+    await expect(messengerApi.editMessage({ messageId: mine.id, content: '  ' })).rejects.toBeInstanceOf(InputError);
+
+    actAs(SEED_EMPLOYEE_NO.quality);
+    await expect(messengerApi.editMessage({ messageId: mine.id, content: '남의 글' })).rejects.toBeInstanceOf(InputError);
+    const reply = await messengerApi.sendMessage({ chatRoomId: roomId, content: '확인했어요', parentMessageId: mine.id });
+    expect(reply.parent).toEqual({ id: mine.id, senderName: '박서영', preview: '고친 글', isDeleted: false });
+
+    actAs(SEED_EMPLOYEE_NO.sales);
+    expect(await messengerApi.deleteMessage(mine.id)).toMatchObject({ isDeleted: true, content: null });
+    const page = await messengerApi.listMessages({ chatRoomId: roomId });
+    expect(page.items.find((m) => m.id === reply.id)?.parent).toMatchObject({ isDeleted: true, preview: '' });
+    await expect(messengerApi.sendMessage({ chatRoomId: roomId, content: 'x', parentMessageId: mine.id })).rejects.toBeInstanceOf(InputError);
+  });
+
   it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
     const roomId = await createGroup();
     expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });
