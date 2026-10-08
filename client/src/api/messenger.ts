@@ -5,13 +5,13 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_SIZE, type MessageReactionEmoji } from '@fantasteel/shared';
+import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_ATTACHMENT_MAX_COUNT, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_SIZE, type MessageReactionEmoji } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverMessengerApi } from '@/api/server/messenger';
-import { MESSAGE_CONTENT_MAX, memberIdsOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
+import { MESSAGE_CONTENT_MAX, filePreviewOf, memberIdsOf, rowFilesOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
 import { optionalText, requireRow } from '@/api/validation';
 import { SCREEN, canOpenScreen } from '@/features/shell/screens';
 import { findErpNos, findMentions, type ErpLink } from '@/features/messenger/lib/messageText';
@@ -139,6 +139,8 @@ export interface ChatRoomSettingsInput {
 }
 
 export interface MessageFileView {
+  /** 첨부 id (서버 = message_attachment id, 가짜 DB = 메시지 안 순번 1부터). 내려받기에 쓴다 */
+  id: number;
   name: string;
   size: number | null;
   mimeType: string | null;
@@ -155,7 +157,8 @@ export interface MessageView {
   isSystem: boolean;
   isMine: boolean;
   content: string | null;
-  file: MessageFileView | null;
+  /** 첨부 (올린 순서, 여러 개 = 스키마 3차) */
+  files: MessageFileView[];
   createdAt: string;
   /** 나(또는 내 부서)를 멘션했는지 */
   mentionsMe: boolean;
@@ -197,8 +200,8 @@ export interface CreateChatRoomInput {
 export interface SendMessageInput {
   chatRoomId: number;
   content?: string | null;
-  /** 메시지당 파일 1개 (ERD message, REQ-MSG-003) */
-  file?: { name: string; size: number; mimeType: string; dataUrl: string } | null;
+  /** 첨부 (REQ-MSG-003). 스키마 3차부터 메시지 1건에 MESSAGE_ATTACHMENT_MAX_COUNT개까지 */
+  files?: { name: string; size: number; mimeType: string; dataUrl: string }[];
   /** 보내기 id. 다시 보낼 때 같은 값을 쓰면 서버가 두 번 저장하지 않는다 (서버 모드만, 가짜 DB는 네트워크 실패가 없어 쓰지 않는다) */
   clientMessageId?: string;
   /** 답글 대상 메시지 */
@@ -214,7 +217,7 @@ function lastMessageOf(tables: Readonly<MockTables>, chatRoomId: number): Messag
 function messagePreviewOf(message: MessageRow): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
-  return message.fileName ? `파일 · ${message.fileName}` : '';
+  return filePreviewOf(rowFilesOf(message));
 }
 
 const employeeOf = (tables: Readonly<MockTables>, id: number | undefined) => tables.employee.find((e) => e.id === id);
@@ -353,7 +356,7 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     isSystem: !sender,
     isMine: message.senderId === actor.employee.id,
     content: deleted ? null : message.content,
-    file: !deleted && message.fileName ? { name: message.fileName, size: message.fileSize, mimeType: message.mimeType } : null,
+    files: deleted ? [] : rowFilesOf(message).map((file, index) => ({ id: index + 1, name: file.name, size: file.size, mimeType: file.mimeType })),
     createdAt: message.createdAt,
     mentionsMe: !deleted && message.senderId !== actor.employee.id && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: deleted ? [] : erpLinksOf(tables, message.content),
@@ -521,7 +524,7 @@ export const messengerApi = {
     isServerDataSource() ? serverMessengerApi.listFiles({ chatRoomId, limit }) : mockQuery((tables) => {
       const actor = requireActor(tables);
       requireMemberRoom(tables, actor, chatRoomId);
-      const files = tables.message.filter((m) => m.chatRoomId === chatRoomId && m.fileName !== null).sort((a, b) => b.id - a.id);
+      const files = tables.message.filter((m) => m.chatRoomId === chatRoomId && !m.deletedAt && rowFilesOf(m).length > 0).sort((a, b) => b.id - a.id);
       const myTargets = myMentionTargets(tables, actor);
       return { items: files.slice(0, limit).map((m) => toMessageView(tables, m, actor, myTargets)), hasMore: files.length > limit };
     }),
@@ -539,14 +542,15 @@ export const messengerApi = {
     }),
 
   /** 첨부 내려받기 (방 멤버만). 서버는 파일 이름을 응답 헤더로만 주고 다른 origin에서는 읽을 수 없어 화면이 넘긴다 */
-  getFile: ({ messageId, fileName }: { messageId: number; fileName: string }): Promise<MessageFileContent> =>
-    isServerDataSource() ? serverMessengerApi.getFile({ messageId, fileName }) : mockQuery((tables) => {
+  getFile: ({ messageId, fileId, fileName }: { messageId: number; fileId: number; fileName: string }): Promise<MessageFileContent> =>
+    isServerDataSource() ? serverMessengerApi.getFile({ fileId, fileName }) : mockQuery((tables) => {
       const actor = requireActor(tables);
       const message = requireRow(tables, 'message', messageId, '메시지');
       requireMemberRoom(tables, actor, message.chatRoomId);
-      const dataUrl = message.filePath ? getMockFile(message.filePath, SEED_FILES) : null;
-      if (!message.fileName || !dataUrl) throw new ApiError('COM-003', '첨부 파일');
-      return { name: message.fileName, mimeType: message.mimeType ?? 'application/octet-stream', dataUrl };
+      const file = message.deletedAt ? undefined : rowFilesOf(message)[fileId - 1];
+      const dataUrl = file?.path ? getMockFile(file.path, SEED_FILES) : null;
+      if (!file || !dataUrl) throw new ApiError('COM-003', '첨부 파일');
+      return { name: file.name, mimeType: file.mimeType || 'application/octet-stream', dataUrl };
     }),
 
   /** 1:1·그룹 채팅방 만들기. 같은 상대와의 1:1 방이 있으면 그 방을 돌려준다 */
@@ -608,24 +612,25 @@ export const messengerApi = {
       return { id: updated.id, chatRoomName: updated.chatRoomName, displayName: displayNameOf(tx.tables, updated, actor.employee.id) };
     }),
 
-  /** 메시지 보내기 (글, 파일 1개, 또는 둘 다). @멘션·업무방 알림은 messengerRules.postMessage가 만든다 */
+  /** 메시지 보내기 (글, 파일 여러 개, 또는 둘 다). @멘션·업무방 알림은 messengerRules.postMessage가 만든다 */
   sendMessage: (input: SendMessageInput): Promise<MessageView> =>
     isServerDataSource() ? serverMessengerApi.sendMessage(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const room = requireMemberRoom(tx.tables, actor, input.chatRoomId);
       const content = (input.content ?? '').trim();
-      const file = input.file ?? null;
+      const files = input.files ?? [];
       const errors = new FieldErrors();
       if (content.length > MESSAGE_CONTENT_MAX) errors.add('content', `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요`);
-      if (!content && !file) errors.add('content', '보낼 메시지나 파일을 넣어 주세요');
-      if (file) {
+      if (!content && files.length === 0) errors.add('content', '보낼 메시지나 파일을 넣어 주세요');
+      if (files.length > MESSAGE_ATTACHMENT_MAX_COUNT) errors.add('file', `파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
+      for (const file of files) {
         if (!isValidFileName(file.name)) errors.add('file', '파일 이름은 255자까지예요');
-        if (file.size > MOCK_FILE_MAX_BYTES) errors.add('file', `파일은 ${Math.round(MOCK_FILE_MAX_BYTES / 1024)}KB까지 보낼 수 있어요`);
+        if (file.size > MOCK_FILE_MAX_BYTES) errors.add('file', `파일은 ${Math.round(MOCK_FILE_MAX_BYTES / 1024)}KB까지 보낼 수 있어요 (${file.name})`);
         if (!file.dataUrl.startsWith('data:')) errors.add('file', '파일을 읽지 못했어요. 다시 골라 주세요');
       }
       errors.throwIfAny();
 
-      const pathOf = (messageId: number) => `chat/${room.id}/${messageId}/${file?.name ?? ''}`;
+      const pathOf = (messageId: number, index: number) => `chat/${room.id}/${messageId}/${index + 1}-${files[index]?.name ?? ''}`;
       if (input.parentMessageId) {
         const parent = tx.tables.message.find((m) => m.id === input.parentMessageId);
         if (!parent || parent.chatRoomId !== room.id) throw new ApiError('COM-003', '답글을 달 메시지');
@@ -634,12 +639,12 @@ export const messengerApi = {
       const message = postMessage(tx, room, actor.employee.id, {
         parentMessageId: input.parentMessageId ?? null,
         content: content || null,
-        file: file ? { name: file.name, size: file.size, mimeType: (file.mimeType || 'application/octet-stream').slice(0, 100), path: '' } : null,
+        files: files.map((file) => ({ name: file.name, size: file.size, mimeType: (file.mimeType || 'application/octet-stream').slice(0, 100), path: '' })),
         pathOf,
       });
-      if (file) {
+      if (files.length > 0) {
         try {
-          putMockFile(pathOf(message.id), file.dataUrl);
+          files.forEach((file, index) => putMockFile(pathOf(message.id, index), file.dataUrl));
         } catch (error) {
           if (error instanceof MockFileStorageFullError) throw new InputError(error.message, { file: error.message });
           throw error;
@@ -715,7 +720,7 @@ export const messengerApi = {
       const actor = requireActor(tx.tables);
       const message = requireOwnMessage(tx.tables, actor, messageId);
       const text = content.trim();
-      if (!text && !message.fileName) throw new InputError('입력한 내용을 확인해 주세요', { content: '고칠 메시지를 넣어 주세요' });
+      if (!text && rowFilesOf(message).length === 0) throw new InputError('입력한 내용을 확인해 주세요', { content: '고칠 메시지를 넣어 주세요' });
       if (text.length > MESSAGE_CONTENT_MAX) throw new InputError('입력한 내용을 확인해 주세요', { content: `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요` });
       const updated = updateRow(tx, 'message', message.id, { content: text || null, editedAt: tx.nowIso }) ?? message;
       return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));

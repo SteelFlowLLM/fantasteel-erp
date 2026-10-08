@@ -7,7 +7,7 @@
 // - 방 알림을 끈 멤버(chat_room_member.muted, 14번)는 업무방 새 메시지 알림만 받지 않는다 (멘션은 받는다)
 import { CHAT_ROOM_TYPE, CHAT_ROOM_TYPE_LABEL, NOTIFICATION_TYPE } from '@/codes';
 import { findMentions, previewText } from '@/features/messenger/lib/messageText';
-import type { ChatRoomRow, MessageRow, MockTables } from '@/mock/schema';
+import type { ChatRoomRow, MessageFileValues, MessageRow, MockTables } from '@/mock/schema';
 import { withEulReul } from '@/lib/josa';
 import { createNotifications } from '@/mock/services/notifications';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
@@ -54,41 +54,55 @@ export function mentionTargetsOf(tables: Readonly<MockTables>, chatRoomId: numbe
   return [...employees, ...departments];
 }
 
-export interface MessageFileValues {
-  name: string;
-  size: number;
-  mimeType: string;
-  path: string;
+export type { MessageFileValues };
+
+/** 메시지의 첨부 (새 files, 없으면 파일 1개짜리 옛 칸) */
+export function rowFilesOf(message: MessageRow): MessageFileValues[] {
+  if (message.files && message.files.length > 0) return message.files;
+  if (!message.fileName) return [];
+  return [{ name: message.fileName, size: message.fileSize ?? 0, mimeType: message.mimeType ?? 'application/octet-stream', path: message.filePath ?? '' }];
+}
+
+/** 첨부만 있는 메시지의 미리보기: '파일 · 이름', 여러 개면 '파일 · 이름 외 N개' (서버와 같다) */
+export function filePreviewOf(files: readonly { name: string }[]): string {
+  if (files.length === 0) return '';
+  return files.length > 1 ? `파일 · ${files[0].name} 외 ${files.length - 1}개` : `파일 · ${files[0].name}`;
 }
 
 export interface PostMessageValues {
   content: string | null;
-  file: MessageFileValues | null;
+  /** 첨부 (올린 순서). 시드는 파일 1개짜리 file로 넘겨도 된다 */
+  files?: MessageFileValues[];
+  file?: MessageFileValues | null;
   /** 답글 대상 (같은 방 메시지인지는 부르는 쪽이 확인) */
   parentMessageId?: number | null;
 }
 
 /**
  * 메시지를 저장하고 읽음 위치·알림을 처리한다. 입력 확인과 방 멤버 확인은 부르는 쪽에서 한다.
- * file.path는 저장소 경로(chat/{방}/{메시지}/{파일명}). 메시지 id가 필요하면 pathOf로 만든다.
+ * 파일 path는 저장소 경로. 메시지 id가 필요하면 pathOf(메시지 id, 순번)로 만든다.
  */
 export function postMessage(
   tx: MockTx,
   room: ChatRoomRow,
   senderId: number,
-  values: PostMessageValues & { pathOf?: (messageId: number) => string },
+  values: PostMessageValues & { pathOf?: (messageId: number, index: number) => string },
 ): MessageRow {
+  const files = values.files ?? (values.file ? [values.file] : []);
   const inserted = insertRow(tx, 'message', {
     chatRoomId: room.id,
     senderId,
     content: values.content,
-    fileName: values.file?.name ?? null,
-    filePath: values.file?.path ?? null,
-    fileSize: values.file?.size ?? null,
-    mimeType: values.file?.mimeType ?? null,
+    fileName: null,
+    filePath: null,
+    fileSize: null,
+    mimeType: null,
+    files,
     parentMessageId: values.parentMessageId ?? null,
   });
-  const message = values.file && values.pathOf ? (updateRow(tx, 'message', inserted.id, { filePath: values.pathOf(inserted.id) }) ?? inserted) : inserted;
+  const pathOf = values.pathOf;
+  const message =
+    files.length > 0 && pathOf ? (updateRow(tx, 'message', inserted.id, { files: files.map((file, index) => ({ ...file, path: pathOf(inserted.id, index) })) }) ?? inserted) : inserted;
 
   const own = tx.tables.chatRoomMember.find((m) => m.chatRoomId === room.id && m.employeeId === senderId);
   if (own) updateRow(tx, 'chatRoomMember', own.id, { lastReadMessageId: message.id });
@@ -101,7 +115,7 @@ function notifyForMessage(tx: MockTx, room: ChatRoomRow, senderId: number, messa
   const sender = tx.tables.employee.find((e) => e.id === senderId);
   const senderName = sender?.employeeName ?? '시스템';
   const roomLabel = roomLabelOf(tx.tables, room);
-  const preview = message.content ? previewText(message.content) : `파일 · ${message.fileName ?? ''}`;
+  const preview = message.content ? previewText(message.content) : filePreviewOf(rowFilesOf(message));
   // 알림을 누르면 그 메시지까지 이동한다 (서버와 같은 경로)
   const linkPath = `/messenger?room=${room.id}&message=${message.id}`;
   const notified = new Set<number>([senderId]);

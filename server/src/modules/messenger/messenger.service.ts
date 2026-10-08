@@ -11,6 +11,7 @@ import {
   CHAT_ROOM_TYPE,
   CHAT_ROOM_TYPE_LABEL,
   MESSAGE_ATTACHMENT_MAX_BYTES,
+  MESSAGE_ATTACHMENT_MAX_COUNT,
   MESSAGE_PAGE_SIZE,
   MESSAGE_SEARCH_SIZE,
   NOTIFICATION_TYPE,
@@ -64,6 +65,24 @@ export interface AttachmentContent {
   content: Buffer;
 }
 
+/** 저장할 새 메시지 (첨부는 저장소에 올린 뒤의 경로) */
+interface NewMessage {
+  content: string | null;
+  attachments?: readonly { filePath: string; fileName: string; fileSize: number }[];
+  clientMessageId: string | null;
+  parentMessageId: number | null;
+}
+
+/** 파일 이름·크기·확장자 확인 (하나라도 걸리면 COM-004) */
+function checkedFileName(file: UploadedAttachment): string {
+  const fileName = decodeFileName(file.originalname).trim();
+  if (!fileName || fileName.length > 255) throw new AppException('COM-004', '파일 이름은 1~255자여야 해요');
+  if (file.size > MESSAGE_ATTACHMENT_MAX_BYTES) throw new AppException('COM-004', `파일은 ${MESSAGE_ATTACHMENT_MAX_BYTES / 1024 / 1024}MB까지 보낼 수 있어요 (${fileName})`);
+  const extension = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : undefined;
+  if (extension && (BLOCKED_ATTACHMENT_EXTENSIONS as readonly string[]).includes(extension)) throw new AppException('COM-004', `실행 파일(.${extension})은 보낼 수 없어요`);
+  return fileName;
+}
+
 /** 알림 문구에 넣는 메시지 미리보기 길이 (가정값) */
 const NOTIFICATION_PREVIEW_MAX = 50;
 
@@ -83,10 +102,23 @@ function earliestOpenDueDate(items: readonly { dueDate: Date; salesOrderItemStat
   return dates.sort()[0] ?? null;
 }
 
-function previewOf(message: { content: string | null; attachmentName: string | null; deletedAt?: Date | null }): string {
+/** 첨부만 있는 메시지의 미리보기: '파일 · 이름', 여러 개면 '파일 · 이름 외 N개' */
+function filePreview(firstName: string | null, count: number): string {
+  if (!firstName || count === 0) return '';
+  return count > 1 ? `파일 · ${firstName} 외 ${count - 1}개` : `파일 · ${firstName}`;
+}
+
+function previewOf(message: { content: string | null; deletedAt?: Date | null; messageAttachments: readonly { fileName: string }[] }): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
-  return message.attachmentName ? `파일 · ${message.attachmentName}` : '';
+  return filePreview(message.messageAttachments[0]?.fileName ?? null, message.messageAttachments.length);
+}
+
+/** 목록 SQL의 마지막 메시지 (첨부는 첫 이름과 개수만 온다) */
+function lastPreviewOf(last: { content: string | null; deletedAt: Date | null; firstAttachmentName: string | null; attachmentCount: number }): string {
+  if (last.deletedAt) return DELETED_MESSAGE_TEXT;
+  if (last.content) return last.content.replace(/\s+/g, ' ').trim();
+  return filePreview(last.firstAttachmentName, last.attachmentCount);
 }
 
 /** 방 이름: 1:1 = 상대 이름, 그룹 = 방 이름 또는 멤버 이름, 업무방 = 방 이름 또는 '업무방 · 수주번호' */
@@ -199,7 +231,7 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     isMine: message.senderId === me,
     // 삭제된 메시지는 본문·첨부를 내보내지 않는다 (행은 남김)
     content: deleted ? null : message.content,
-    attachmentName: deleted ? null : message.attachmentName,
+    attachments: deleted ? [] : message.messageAttachments.map((a) => ({ id: a.id, fileName: a.fileName, fileSize: a.fileSize })),
     unreadMemberCount,
     erpLinks: deleted ? [] : erpLinksOf(message.content),
     editedAt: message.editedAt?.toISOString() ?? null,
@@ -303,7 +335,7 @@ export class MessengerService implements OnModuleInit {
               senderName: last.senderId === null ? SYSTEM_SENDER_NAME : (lastSender?.employeeName ?? '-'),
               isMine: last.senderId === me,
               isSystem: last.senderId === null,
-              preview: previewOf(last),
+              preview: lastPreviewOf(last),
               createdAt: last.createdAt.toISOString(),
             }
           : null,
@@ -625,23 +657,26 @@ export class MessengerService implements OnModuleInit {
     return this.postMessage(user, chatRoomId, { content, clientMessageId: dto.clientMessageId ?? null, parentMessageId: dto.parentMessageId ?? null }, dto.mentionedEmployeeIds ?? []);
   }
 
-  /** 파일 첨부 (REQ-MSG-003). 업로드하면 바로 메시지 1건이 생긴다. 메시지당 파일 1개, 글은 선택 */
-  async sendAttachment(user: AuthUser, chatRoomId: number, file: UploadedAttachment | undefined, dto: UploadAttachmentDto): Promise<ChatMessageView> {
-    if (!file) throw new AppException('COM-004', '첨부할 파일을 골라 주세요 (file 필드)');
-    const fileName = decodeFileName(file.originalname).trim();
-    if (!fileName || fileName.length > 255) throw new AppException('COM-004', '파일 이름은 1~255자여야 해요');
-    if (file.size > MESSAGE_ATTACHMENT_MAX_BYTES) throw new AppException('COM-004', `파일은 ${MESSAGE_ATTACHMENT_MAX_BYTES / 1024 / 1024}MB까지 보낼 수 있어요`);
-    const extension = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : undefined;
-    if (extension && (BLOCKED_ATTACHMENT_EXTENSIONS as readonly string[]).includes(extension)) throw new AppException('COM-004', `실행 파일(.${extension})은 보낼 수 없어요`);
+  /**
+   * 파일 첨부 (REQ-MSG-003). 업로드하면 바로 메시지 1건이 생긴다. 스키마 3차부터 메시지 1건에 파일 여러 개(최대 MESSAGE_ATTACHMENT_MAX_COUNT, 가정값),
+   * 파일마다 10MB·실행 파일 거부. 하나라도 걸리면 아무것도 저장하지 않는다. 글은 선택
+   */
+  async sendAttachments(user: AuthUser, chatRoomId: number, files: readonly UploadedAttachment[], dto: UploadAttachmentDto): Promise<ChatMessageView> {
+    if (files.length === 0) throw new AppException('COM-004', '첨부할 파일을 골라 주세요 (files 필드)');
+    if (files.length > MESSAGE_ATTACHMENT_MAX_COUNT) throw new AppException('COM-004', `파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
+    const named = files.map((file) => ({ file, fileName: checkedFileName(file) }));
     // 저장소에 먼저 올리면 멤버가 아닌 사람의 파일이 남으므로 멤버 확인을 먼저 한다
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
     // 재전송이면 파일을 다시 저장하지 않는다
     const clientMessageId = dto.clientMessageId ?? null;
     const duplicate = clientMessageId ? await this.findDuplicate(user.employeeId, chatRoomId, clientMessageId) : null;
     if (duplicate) return duplicate;
-    const attachmentPath = await this.storage.save('messages', fileName, file.buffer);
+    const attachments = [];
+    for (const { file, fileName } of named) {
+      attachments.push({ filePath: await this.storage.save('messages', fileName, file.buffer), fileName, fileSize: file.size });
+    }
     const content = dto.content?.trim() || null;
-    return this.postMessage(user, chatRoomId, { content, attachmentPath, attachmentName: fileName, clientMessageId, parentMessageId: dto.parentMessageId ?? null }, []);
+    return this.postMessage(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId: dto.parentMessageId ?? null }, []);
   }
 
   /** 같은 보내기 id로 이미 저장한 메시지가 있으면 그 메시지 (다른 방이면 잘못된 재사용이라 COM-004) */
@@ -654,13 +689,13 @@ export class MessengerService implements OnModuleInit {
     return toMessageView(existing, senderId, unreadMemberCountOf(existing, reads), erpLinksOf);
   }
 
-  /** 첨부 내려받기. id는 메시지 id (첨부 테이블이 없다, messenger.md 8장). 방 멤버만 */
-  async readAttachment(user: AuthUser, messageId: number): Promise<AttachmentContent> {
-    const message = await this.repository.findMessage(this.prisma, messageId);
-    if (!message || !message.attachmentPath || !message.attachmentName || message.deletedAt) throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
-    await this.requireMember(this.prisma, message.chatRoomId, user.employeeId);
+  /** 첨부 내려받기. id는 첨부(message_attachment) id (스키마 3차). 방 멤버만, 삭제된 메시지의 첨부는 COM-003 */
+  async readAttachment(user: AuthUser, attachmentId: number): Promise<AttachmentContent> {
+    const attachment = await this.repository.findAttachment(this.prisma, attachmentId);
+    if (!attachment || attachment.message.deletedAt) throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
+    await this.requireMember(this.prisma, attachment.message.chatRoomId, user.employeeId);
     try {
-      return { fileName: message.attachmentName, content: await this.storage.read(message.attachmentPath) };
+      return { fileName: attachment.fileName, content: await this.storage.read(attachment.filePath) };
     } catch {
       throw new AppException('COM-003', '첨부 파일을 찾을 수 없어요');
     }
@@ -674,7 +709,7 @@ export class MessengerService implements OnModuleInit {
     const content = dto.content.trim() || null;
     const updated = await this.prisma.$transaction(async (tx) => {
       const message = await this.requireOwnMessage(tx, user, messageId);
-      if (!content && !message.attachmentName) throw new AppException('COM-004', '고칠 메시지를 넣어 주세요');
+      if (!content && message._count.messageAttachments === 0) throw new AppException('COM-004', '고칠 메시지를 넣어 주세요');
       return this.repository.updateMessageContent(tx, messageId, content);
     });
     return this.emitUpdated(updated, user.employeeId);
@@ -762,7 +797,7 @@ export class MessengerService implements OnModuleInit {
   private async postMessage(
     user: AuthUser,
     chatRoomId: number,
-    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null; parentMessageId: number | null },
+    data: NewMessage,
     mentionedEmployeeIds: readonly number[],
   ): Promise<ChatMessageView> {
     const me = user.employeeId;
@@ -793,14 +828,14 @@ export class MessengerService implements OnModuleInit {
   private saveMessage(
     user: AuthUser,
     chatRoomId: number,
-    data: { content: string | null; attachmentPath?: string; attachmentName?: string; clientMessageId: string | null; parentMessageId: number | null },
+    { attachments, ...data }: NewMessage,
     mentionedEmployeeIds: readonly number[],
   ): Promise<{ message: MessageWithSender; memberIds: number[] }> {
     const me = user.employeeId;
     return this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, me);
       if (data.parentMessageId !== null) await this.requireReplyTarget(tx, chatRoomId, data.parentMessageId);
-      const created = await this.repository.createMessage(tx, { chatRoomId, senderId: me, ...data });
+      const created = await this.repository.createMessage(tx, { chatRoomId, senderId: me, ...data }, attachments);
       await this.repository.moveLastRead(tx, chatRoomId, me, created.id);
       const members = (await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId);
       await this.notifyForMessage(tx, room, created, members, mentionedEmployeeIds);

@@ -107,10 +107,11 @@ export function RoomFiles({ chatRoomId }: { chatRoomId: number }) {
   if (files.data.items.length === 0) return <p className="text-cap text-ink-3">주고받은 파일이 없어요</p>;
   return (
     <ul className="flex flex-col gap-1.5" aria-label="주고받은 파일">
-      {files.data.items.map((message) => {
-        const name = message.file?.name ?? '';
+      {files.data.items.flatMap((message) =>
+        message.files.map((file) => {
+        const name = file.name;
         return (
-          <li key={message.id} className="flex items-center gap-2 text-xs">
+          <li key={`${message.id}-${file.id}`} className="flex items-center gap-2 text-xs">
             <Icon name="clip" size="sm" className="flex-none text-ink-3" />
             <span className="flex min-w-0 flex-col">
               <span className="truncate font-medium" title={name}>
@@ -120,10 +121,11 @@ export function RoomFiles({ chatRoomId }: { chatRoomId: number }) {
                 {message.senderName} · {fmtDate(message.createdAt)}
               </span>
             </span>
-            <IconButton icon="download" label={`${name} 내려받기`} size="sm" className="ml-auto" disabled={download.isPending} onClick={() => download.mutate({ messageId: message.id, fileName: name })} />
+            <IconButton icon="download" label={`${name} 내려받기`} size="sm" className="ml-auto" disabled={download.isPending} onClick={() => download.mutate({ messageId: message.id, fileId: file.id, fileName: name })} />
           </li>
         );
-      })}
+      }),
+      )}
       {files.data.hasMore ? (
         <li>
           <Button size="sm" variant="ghost" disabled={files.isFetching} onClick={() => setLimit((current) => current + FILE_PAGE * 2)}>

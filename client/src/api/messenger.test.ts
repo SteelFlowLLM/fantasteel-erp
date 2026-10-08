@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { MESSAGE_ATTACHMENT_MAX_COUNT } from '@fantasteel/shared';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { InputError } from '@/api/client';
 import { messengerApi } from '@/api/messenger';
@@ -153,15 +154,29 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
   it('첨부 1개를 보내고 멤버가 내려받는다. 멤버가 아니면 COM-002', async () => {
     const roomId = await createGroup();
     const dataUrl = `data:text/plain;base64,${btoa('hello')}`;
-    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, file: { name: '메모.txt', size: 5, mimeType: 'text/plain', dataUrl } });
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, files: [{ name: '메모.txt', size: 5, mimeType: 'text/plain', dataUrl }] });
     expect(sent.content).toBeNull();
-    expect(sent.file).toEqual({ name: '메모.txt', size: 5, mimeType: 'text/plain' });
+    expect(sent.files).toEqual([{ id: 1, name: '메모.txt', size: 5, mimeType: 'text/plain' }]);
 
     actAs(SEED_EMPLOYEE_NO.quality);
-    expect(await messengerApi.getFile({ messageId: sent.id, fileName: '' })).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
+    expect(await messengerApi.getFile({ messageId: sent.id, fileId: 1, fileName: '' })).toEqual({ name: '메모.txt', mimeType: 'text/plain', dataUrl });
     actAs(SEED_EMPLOYEE_NO.purchase);
-    await expect(messengerApi.getFile({ messageId: sent.id, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(messengerApi.getFile({ messageId: sent.id, fileId: 1, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
     expect((await messengerApi.listRooms()).map((r) => r.id)).not.toContain(roomId);
+  });
+
+  it('여러 파일을 한 메시지로 보내면 올린 순서대로 보이고 각각 내려받는다. 미리보기는 "파일 · 첫 이름 외 N개"', async () => {
+    const roomId = await createGroup();
+    const fileOf = (name: string, text: string) => ({ name, size: text.length, mimeType: 'text/plain', dataUrl: `data:text/plain;base64,${btoa(text)}` });
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, files: [fileOf('a.txt', 'aa'), fileOf('b.txt', 'bbb')] });
+    expect(sent.files.map((f) => [f.id, f.name])).toEqual([
+      [1, 'a.txt'],
+      [2, 'b.txt'],
+    ]);
+    expect((await messengerApi.getFile({ messageId: sent.id, fileId: 2, fileName: '' })).dataUrl).toBe(fileOf('b.txt', 'bbb').dataUrl);
+    expect((await messengerApi.listRooms()).find((r) => r.id === roomId)?.lastMessagePreview).toBe('파일 · a.txt 외 1개');
+    const tooMany = Array.from({ length: MESSAGE_ATTACHMENT_MAX_COUNT + 1 }, (_, i) => fileOf(`${i}.txt`, 'x'));
+    await expect(messengerApi.sendMessage({ chatRoomId: roomId, files: tooMany })).rejects.toBeInstanceOf(InputError);
   });
 
   it('입력 확인: 빈 메시지, 4000자 초과, 512KB 초과 파일', async () => {
@@ -169,7 +184,7 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, content: '   ' })).rejects.toBeInstanceOf(InputError);
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, content: '가'.repeat(4001) })).rejects.toBeInstanceOf(InputError);
     await expect(
-      messengerApi.sendMessage({ chatRoomId: roomId, file: { name: 'big.bin', size: MOCK_FILE_MAX_BYTES + 1, mimeType: 'application/octet-stream', dataUrl: 'data:,' } }),
+      messengerApi.sendMessage({ chatRoomId: roomId, files: [{ name: 'big.bin', size: MOCK_FILE_MAX_BYTES + 1, mimeType: 'application/octet-stream', dataUrl: 'data:,' }] }),
     ).rejects.toBeInstanceOf(InputError);
   });
 
@@ -199,7 +214,7 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     const roomId = await createGroup();
     const sent = await messengerApi.sendMessage({ chatRoomId: roomId, content: 'SO-2610-001 출하 확인' });
     expect(sent.unreadMemberCount).toBe(3);
-    await messengerApi.sendMessage({ chatRoomId: roomId, content: '자료', file: { name: '일정.txt', size: 4, mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,dGVzdA==' } });
+    await messengerApi.sendMessage({ chatRoomId: roomId, content: '자료', files: [{ name: '일정.txt', size: 4, mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,dGVzdA==' }] });
     await messengerApi.sendMessage({ chatRoomId: roomId, content: 'so-2610-001 납기 변경' });
 
     actAs(SEED_EMPLOYEE_NO.quality);
@@ -208,7 +223,7 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect(page.items.map((m) => m.unreadMemberCount)).toEqual([2, 3, 3]);
 
     const files = await messengerApi.listFiles({ chatRoomId: roomId, limit: 5 });
-    expect(files.items.map((m) => m.file?.name)).toEqual(['일정.txt']);
+    expect(files.items.map((m) => m.files.map((f) => f.name))).toEqual([['일정.txt']]);
     const found = await messengerApi.searchMessages({ chatRoomId: roomId, keyword: 'So-2610' });
     expect(found.items.map((m) => m.content)).toEqual(['so-2610-001 납기 변경', 'SO-2610-001 출하 확인']);
     await expect(messengerApi.searchMessages({ chatRoomId: roomId, keyword: '  ' })).rejects.toBeInstanceOf(InputError);

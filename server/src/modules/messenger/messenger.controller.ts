@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type ChatRoomSettings, type CreateChatRoomResult, type InviteChatMembersResult, type LeaveChatRoomResult, type RenameChatRoomResult } from '@fantasteel/shared';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, StreamableFile, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_ATTACHMENT_MAX_COUNT, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type ChatRoomSettings, type CreateChatRoomResult, type InviteChatMembersResult, type LeaveChatRoomResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UpdateChatRoomSettingsDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
@@ -111,19 +111,22 @@ export class MessengerController {
     return this.service.deleteMessage(user, id);
   }
 
-  /** 업로드 = 메시지 1건 생성. multipart: file(파일), content(글, 선택). 용량을 넘으면 multer가 끝까지 읽지 않고 413(COM-004)으로 끊는다 */
+  /**
+   * 업로드 = 메시지 1건 생성. multipart: files(파일 1~10개, 스키마 3차), content(글, 선택).
+   * 한 파일이 용량을 넘으면 multer가 끝까지 읽지 않고 413(COM-004)으로, 파일 수가 넘으면 400(COM-004)으로 끊는다
+   */
   @Post('chat-rooms/:id/attachments')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MESSAGE_ATTACHMENT_MAX_BYTES, files: 1 } }))
-  sendAttachment(
+  @UseInterceptors(FilesInterceptor('files', MESSAGE_ATTACHMENT_MAX_COUNT, { limits: { fileSize: MESSAGE_ATTACHMENT_MAX_BYTES, files: MESSAGE_ATTACHMENT_MAX_COUNT } }))
+  sendAttachments(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
-    @UploadedFile() file: UploadedAttachment | undefined,
+    @UploadedFiles() files: UploadedAttachment[] | undefined,
     @Body() dto: UploadAttachmentDto,
   ): Promise<ChatMessageView> {
-    return this.service.sendAttachment(user, id, file, dto);
+    return this.service.sendAttachments(user, id, files ?? [], dto);
   }
 
-  /** id는 메시지 id. 응답 포맷으로 감싸지 않고 파일 그대로 보낸다 */
+  /** id는 첨부(message_attachment) id. 응답 포맷으로 감싸지 않고 파일 그대로 보낸다 */
   @Get('attachments/:id')
   async readAttachment(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<StreamableFile> {
     const { fileName, content } = await this.service.readAttachment(user, id);

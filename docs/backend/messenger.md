@@ -19,8 +19,9 @@
 | --- | --- | --- |
 | 쓰기 | `chat_room` | `chat_room_type`(DIRECT·GROUP·WORK), `chat_room_name`, `sales_order_id`(업무방만). CHECK `chat_room_work_sales_order_check`: WORK면 `sales_order_id` 필수 |
 | 쓰기 | `chat_room_member` | `(chat_room_id, employee_id)` unique, `last_read_message_id`(안 읽은 수 계산 기준) |
-| 쓰기 | `message` | `chat_room_id`, `message_type`(USER·SYSTEM, 기본 USER), `sender_id`(SYSTEM이면 null), `content`, `attachment_path`·`attachment_name`(**메시지 1건에 파일 1개**, Storage 경로), `client_message_id`(재전송 중복 방지), `parent_message_id`(답글), `edited_at`·`deleted_at`(수정·삭제 표시), `created_at`(발송 시각). CHECK `message_type_sender_check`, 부분 unique `message_sender_client_message_id_key` — 스키마 1차(#151, 마이그레이션 `20261008013557_messenger_schema_1`) |
-| 쓰기 | `message_reaction` | 스키마 2차(#159 예정). `(message_id, employee_id, emoji)` unique — 이모지 반응 |
+| 쓰기 | `message` | `chat_room_id`, `message_type`(USER·SYSTEM, 기본 USER), `sender_id`(SYSTEM이면 null), `content`, `client_message_id`(재전송 중복 방지), `parent_message_id`(답글), `edited_at`·`deleted_at`(수정·삭제 표시), `created_at`(발송 시각). CHECK `message_type_sender_check`, 부분 unique `message_sender_client_message_id_key` — 스키마 1차(#151, 마이그레이션 `20261008013557_messenger_schema_1`) |
+| 쓰기 | `message_reaction` | 스키마 2차(#159). `(message_id, employee_id, emoji)` unique — 이모지 반응 |
+| 쓰기 | `message_attachment` | 스키마 3차(마이그레이션 `20261008040000_messenger_schema_3`). 메시지 1건에 파일 여러 개: `file_path`(Storage 경로), `file_name`, `file_size`(바이트, 3차 전 첨부는 null), `sort_order`(올린 순서). 옛 `message.attachment_path`·`attachment_name`은 이 표로 옮기고 지웠다 |
 | 추가 컬럼 | `chat_room.pinned_message_id`, `chat_room_member.muted`·`pinned_at`, `task.message_id` | 스키마 2차: 공지 고정, 방 알림 끄기·상단 고정, 메시지에서 업무 등록 |
 | 읽기 | `employee`, `department`, `sales_order` | 멤버·업무방 상단 수주 정보 |
 
@@ -35,8 +36,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | GET | `chat-rooms/:id` | 채팅방 상세 | 방 멤버 | |
 | GET | `chat-rooms/:id/messages` | 메시지 목록 | 방 멤버 | 12.2의 `/messages`를 방 하위 경로로 둠. `?before=<메시지 id>&limit=` (기본 50, 최대 100) |
 | POST | `chat-rooms/:id/messages` | 메시지 전송 | 방 멤버 | 실시간 수신은 WebSocket Gateway |
-| POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | 업로드는 서버에서, 형식·용량 제한은 구현 단계 |
-| GET | `attachments/:id` | 첨부 파일 다운로드 | 방 멤버 | 첨부에도 방 접근 권한 적용 |
+| POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | multipart `files`(1~10개, 스키마 3차) + `content`(선택). 파일마다 10MB, 실행 파일 거부 |
+| GET | `attachments/:id` | 첨부 파일 다운로드 | 방 멤버 | `:id` = `message_attachment.id` (스키마 3차) |
 | POST | `chat-rooms/:id/read` | 읽음 위치 갱신 | 방 멤버 | |
 | POST | `chat-rooms/:id/members` | 멤버 초대 | 방 멤버 | **명세에 없음** (방 관리, 2026-10-07 단계별 추가). `{ memberIds }` → `{ chatRoomId, addedCount }` |
 | GET | `chat-rooms/:id/attachments` | 파일 모아보기 | 방 멤버 | **명세에 없음** (편의). 첨부가 있는 메시지만 최신순, `?before=&limit=` |
@@ -83,12 +84,14 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 소켓 발송이 실패해도 이미 커밋된 거래는 그대로 두고 로그만 남긴다.
 
 **첨부**(REQ-MSG-003)
-- 업로드하면 바로 메시지 1건이 생긴다(업로드 = 전송, 2026-10-07 결정). multipart 필드: `file`(필수), `content`(글, 선택).
-- 제한(2026-10-07 결정): **10MB까지**(`MESSAGE_ATTACHMENT_MAX_BYTES`, 넘으면 multer가 413·COM-004로 끊는다), **실행 파일 확장자만 거부**(`BLOCKED_ATTACHMENT_EXTENSIONS`: exe·msi·bat·cmd·com·scr·ps1·vbs·js·jar·sh·app·dll, COM-004). 파일 이름 1~255자.
+- 업로드하면 바로 메시지 1건이 생긴다(업로드 = 전송, 2026-10-07 결정). multipart 필드: `files`(1~10개, 스키마 3차부터 메시지 1건에 여러 파일), `content`(글, 선택).
+- 파일 수: **10개까지**(`MESSAGE_ATTACHMENT_MAX_COUNT`, 가정값, 넘으면 multer가 400·COM-004). 하나라도 규칙에 걸리면 아무것도 저장하지 않는다.
+- 제한(2026-10-07 결정): **파일마다 10MB까지**(`MESSAGE_ATTACHMENT_MAX_BYTES`, 넘으면 multer가 413·COM-004로 끊는다), **실행 파일 확장자만 거부**(`BLOCKED_ATTACHMENT_EXTENSIONS`: exe·msi·bat·cmd·com·scr·ps1·vbs·js·jar·sh·app·dll, COM-004). 파일 이름 1~255자.
 - multer는 파일 이름을 latin1로 읽어 한글이 깨지므로 UTF-8로 다시 읽는다.
 - 방 멤버인지 먼저 확인하고 저장한다(멤버가 아닌 사람의 파일이 저장소에 남지 않게).
-- 업로드: multipart(`@nestjs/platform-express`의 `FileInterceptor`) → `StorageService.save('messages', 파일명, buffer)` → 반환 경로를 `attachment_path`, 원래 이름을 `attachment_name`에 저장한 메시지 1건 생성.
-- 다운로드: 첨부 테이블이 없으므로 `:id`는 메시지 id로 둔다 🟡. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 첨부가 없는 메시지면 COM-003.
+- 업로드: multipart(`FilesInterceptor('files')`) → 파일마다 `StorageService.save('messages', 파일명, buffer)` → 메시지 1건과 `message_attachment` 행(올린 순서 = `sort_order`, 크기 저장)을 같은 tx에서 만든다. 응답 `attachments: [{ id, fileName, fileSize }]`.
+- 미리보기(목록·알림·답글·공지): 글이 없으면 `파일 · 이름`, 여러 개면 `파일 · 첫 이름 외 N개`.
+- 다운로드: `:id`는 첨부(`message_attachment`) id. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 없는 첨부·삭제된 메시지의 첨부는 COM-003.
 - Supabase Storage로 옮길 때는 `StorageService`만 바꾼다(`storage.service.ts` 주석).
 
 **시스템 메시지** (2026-10-08, 스키마 1차 #151 위에서. 문서에 없는 추가 기능)
@@ -185,7 +188,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
 | ~~멘션 표현~~ | 결정(2026-10-07): 요청에 멘션 대상 사원 id 배열을 따로 받는다 | [ERD] message, [02] REQ-MSG-005 |
-| 첨부 다운로드 id | 첨부 테이블이 없어 `attachments/:id`의 id를 메시지 id로 볼 수밖에 없다. 경로를 `messages/:id/attachment`로 바꿀지 | [ERD], [CSV] |
+| ~~첨부 다운로드 id~~ | 해결(스키마 3차): `attachments/:id`의 id = `message_attachment.id` | [ERD], [CSV] |
 | ~~첨부 업로드 모양~~ | 결정(2026-10-07): 업로드하면 바로 메시지 1건 생성 | [CSV] |
 | 파일 형식·용량 제한 | 구현 단계에서 정함(아직 없음) | [02] REQ-MSG-003 |
 | 업무방 권한 | 구매·품질 역할은 `SALES_ORDER_CREATE` VIEW가 없어 업무방을 만들 수 없다. 멤버로 초대받은 경우 방 상단 수주 정보를 보여도 되는지도 미정 | [CSV] 채팅방 생성 비고, [권한표] |

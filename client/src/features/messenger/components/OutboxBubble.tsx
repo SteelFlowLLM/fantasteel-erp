@@ -8,7 +8,7 @@ import type { OutboxItem } from '@/stores/useOutboxStore';
 
 export function OutboxBubble({ item, onRetry, onDiscard }: { item: OutboxItem; onRetry: () => void; onDiscard: () => void }) {
   const failed = item.status === 'failed';
-  const { content, file } = item.input;
+  const { content, files = [] } = item.input;
   return (
     <div className="flex justify-end px-5 pt-2 pb-1" aria-live="polite">
       <div className="flex max-w-[70%] min-w-0 flex-col items-end gap-1">
@@ -22,12 +22,12 @@ export function OutboxBubble({ item, onRetry, onDiscard }: { item: OutboxItem; o
             {content}
           </p>
         ) : null}
-        {file ? (
-          <span className={cn('inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs', failed ? 'border-danger' : 'border-line opacity-60')}>
+        {files.map((file, index) => (
+          <span key={`${index}-${file.name}`} className={cn('inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs', failed ? 'border-danger' : 'border-line opacity-60')}>
             <Icon name="clip" size="sm" className="text-ink-3" />
             <span className="max-w-[240px] truncate">{file.name}</span>
           </span>
-        ) : null}
+        ))}
         {failed ? (
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <span className="text-cap text-danger" role="alert">

@@ -60,7 +60,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   isSystem: false,
   isMine: false,
   content,
-  attachmentName: null,
+  attachments: [],
   unreadMemberCount: 0,
   erpLinks: [],
   editedAt: null,
@@ -148,7 +148,7 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
       ['100', undefined],
       ['20', '31'],
     ]);
-    expect(page.items.at(-1)).toMatchObject({ mentionsMe: true, isSystem: false, file: null, erpLinks: [] });
+    expect(page.items.at(-1)).toMatchObject({ mentionsMe: true, isSystem: false, files: [], erpLinks: [] });
     expect(page.items.at(-2)?.mentionsMe).toBe(true);
     expect(page.items.at(-3)?.mentionsMe).toBe(false);
   });
@@ -166,34 +166,44 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect((calls.filter((c) => c.method === 'POST').at(-1)?.body as { clientMessageId?: string }).clientMessageId).toBe('abc-1');
   });
 
-  it('파일은 첨부 API로 multipart를 보내고(글은 content), 첨부 이름을 파일로 보여 준다', async () => {
+  it('파일은 첨부 API로 multipart files(여러 개)를 보내고(글은 content), 서버 첨부 id·크기를 그대로 쓴다', async () => {
+    const attachments = [
+      { id: 31, fileName: '성적서.txt', fileSize: 5 },
+      { id: 32, fileName: '사진.png', fileSize: 3 },
+    ];
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
       if (c.path === '/chat-rooms/7') return ok(detail());
-      if (c.path === '/chat-rooms/7/attachments') return ok(message(51, '첨부해요', { senderId: 3, isMine: true, attachmentName: '성적서.txt' }));
+      if (c.path === '/chat-rooms/7/attachments') return ok(message(51, '첨부해요', { senderId: 3, isMine: true, attachments }));
       return undefined;
     });
     const sent = await messengerApi.sendMessage({
       chatRoomId: 7,
       content: '첨부해요',
-      file: { name: '성적서.txt', size: 5, mimeType: 'text/plain', dataUrl: `data:text/plain;base64,${btoa('hello')}` },
+      files: [
+        { name: '성적서.txt', size: 5, mimeType: 'text/plain', dataUrl: `data:text/plain;base64,${btoa('hello')}` },
+        { name: '사진.png', size: 3, mimeType: 'image/png', dataUrl: `data:image/png;base64,${btoa('png')}` },
+      ],
     });
-    expect(sent.file).toEqual({ name: '성적서.txt', size: null, mimeType: null });
+    expect(sent.files).toEqual([
+      { id: 31, name: '성적서.txt', size: 5, mimeType: null },
+      { id: 32, name: '사진.png', size: 3, mimeType: null },
+    ]);
     const form = calls.find((c) => c.path === '/chat-rooms/7/attachments')?.body as FormData;
     expect(form.get('content')).toBe('첨부해요');
-    const file = form.get('file') as File;
-    expect(file.name).toBe('성적서.txt');
-    expect(await file.text()).toBe('hello');
+    const files = form.getAll('files') as File[];
+    expect(files.map((f) => f.name)).toEqual(['성적서.txt', '사진.png']);
+    expect(await files[0].text()).toBe('hello');
   });
 
   it('파일 모아보기는 GET …/attachments, 검색은 GET …/messages/search?q=, 안 읽은 멤버 수는 그대로 쓴다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
       if (c.path === '/chat-rooms/7') return ok(detail());
-      if (c.path === '/chat-rooms/7/attachments') return ok({ items: [message(9, null, { attachmentName: 'a.pdf', unreadMemberCount: 1 })], hasMore: true });
+      if (c.path === '/chat-rooms/7/attachments') return ok({ items: [message(9, null, { attachments: [{ id: 4, fileName: 'a.pdf', fileSize: null }], unreadMemberCount: 1 })], hasMore: true });
       if (c.path === '/chat-rooms/7/messages/search') return ok({ items: [message(8, 'SO 확인')], hasMore: false });
       return undefined;
     });
     const files = await messengerApi.listFiles({ chatRoomId: 7, limit: 5 });
-    expect(files).toMatchObject({ hasMore: true, items: [{ id: 9, file: { name: 'a.pdf' }, unreadMemberCount: 1 }] });
+    expect(files).toMatchObject({ hasMore: true, items: [{ id: 9, files: [{ id: 4, name: 'a.pdf' }], unreadMemberCount: 1 }] });
     const found = await messengerApi.searchMessages({ chatRoomId: 7, keyword: 'SO' });
     expect(found.items.map((m) => m.content)).toEqual(['SO 확인']);
     expect(calls.filter((c) => c.path !== '/chat-rooms/7').map((c) => [c.path, c.query])).toEqual([

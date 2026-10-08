@@ -60,7 +60,7 @@ export function MessageBubble({
     return (
       <div className="flex justify-center px-5 py-1.5">
         <span className="rounded-full bg-surface-3 px-3 py-1 text-xs text-ink-2">
-          <b className="font-semibold">시스템</b> · {message.content ?? message.file?.name} · {fmtHM(message.createdAt)}
+          <b className="font-semibold">시스템</b> · {message.content ?? message.files[0]?.name} · {fmtHM(message.createdAt)}
         </span>
       </div>
     );
@@ -127,7 +127,13 @@ export function MessageBubble({
           })}
         </p>
       ) : null}
-      {message.file ? <FileChip messageId={message.id} name={message.file.name} size={message.file.size} /> : null}
+      {message.files.length > 0 ? (
+        <div className={cn('flex max-w-full flex-wrap gap-1.5', message.isMine && 'justify-end')}>
+          {message.files.map((file) => (
+            <FileChip key={file.id} messageId={message.id} fileId={file.id} name={file.name} size={file.size} />
+          ))}
+        </div>
+      ) : null}
       {message.reactions.length > 0 ? <ReactionChips message={message} /> : null}
       {openableLinks.length > 0 ? (
         <div className={cn('flex flex-wrap gap-x-3 gap-y-1', mine && 'justify-end')}>
@@ -226,9 +232,9 @@ function ReactionChips({ message }: { message: MessageView }) {
   );
 }
 
-function FileChip({ messageId, name, size }: { messageId: number; name: string; size: number | null }) {
+function FileChip({ messageId, fileId, name, size }: { messageId: number; fileId: number; name: string; size: number | null }) {
   const download = useMessageFileDownload();
-  const preview = useImagePreview(messageId, name);
+  const preview = useImagePreview(messageId, fileId, name);
   const [enlarged, setEnlarged] = useState(false);
   if (preview.data) {
     const src = preview.data.dataUrl;
@@ -245,7 +251,7 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
             footer={
               <>
                 <span className="mr-auto self-center text-cap text-ink-3">{fmtBytes(size)}</span>
-                <Button icon="download" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileName: name })}>
+                <Button icon="download" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileId, fileName: name })}>
                   내려받기
                 </Button>
                 <Button variant="primary" onClick={() => setEnlarged(false)}>
@@ -270,7 +276,7 @@ function FileChip({ messageId, name, size }: { messageId: number; name: string; 
           {getFileExtension(name) ? ` · ${getFileExtension(name)}` : ''}
         </span>
       </span>
-      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileName: name })} />
+      <IconButton icon="download" label={`${name} 내려받기`} size="sm" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileId, fileName: name })} />
     </div>
   );
 }
