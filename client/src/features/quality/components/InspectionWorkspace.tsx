@@ -82,6 +82,8 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
 
   const processCount = (p: ProcessFilter) => rows.filter((r) => r.inspectionResult === 'PENDING' && (p === 'ALL' || r.processType === p)).length;
   const resultCount = (r: Exclude<ResultFilter, 'ALL'>) => byProcess.filter((row) => row.inspectionResult === r).length;
+  // 판정 대기만 보는데 판정할 LOT이 없다 (판정이 끝난 LOT은 있다): 할 일이 없다는 좋은 상태로 보인다
+  const noPending = rows.length > 0 && result === 'PENDING' && !needle && resultCount('PENDING') === 0;
 
   return (
     <>
@@ -92,21 +94,39 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
               <b className="text-base font-semibold">검사 대상 LOT</b>
               <span className="text-cap text-ink-3">판정 대기 먼저 · 생산완료일 순</span>
             </div>
+            {/* 탭 숫자는 판정 대기 수다. 아래 판정 결과 칩(모든 LOT 수)과 같은 "전체 0 / 전체 20"이 겹쳐 보이지 않게, 0이면 숫자를 붙이지 않는다 */}
             <Segmented
               ariaLabel="공정별 보기"
-              items={PROCESS_FILTERS.map((p) => ({ key: p, label: `${p === 'ALL' ? '전체' : PROCESS_TYPE_LABEL[p]} ${processCount(p)}` }))}
+              items={PROCESS_FILTERS.map((p) => {
+                const name = p === 'ALL' ? '전체' : PROCESS_TYPE_LABEL[p];
+                const count = processCount(p);
+                return {
+                  key: p,
+                  label:
+                    count > 0 ? (
+                      <span className="inline-flex items-center gap-1" title={`판정 대기 ${count}개`}>
+                        {name}
+                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-run px-1 text-2xs font-semibold text-white tabular-nums">{count}</span>
+                      </span>
+                    ) : (
+                      name
+                    ),
+                };
+              })}
               active={process}
               onChange={setProcess}
             />
             <span className="text-cap text-ink-3">{PROCESS_HINT[process]}</span>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="판정 결과">
+            <span className="-mt-1.5 text-cap text-ink-3">탭 숫자 = 판정 대기 (없으면 숫자를 붙이지 않아요)</span>
+            {/* 네 칩이 목록 칸(320px) 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 */}
+            <div className="flex flex-nowrap gap-1" role="group" aria-label="판정 결과">
               {RESULT_FILTERS.map((r) =>
                 r === 'ALL' ? (
-                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')}>
+                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="px-2">
                     전체 <b>{byProcess.length}</b>
                   </Chip>
                 ) : (
-                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)}>
+                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="px-2">
                     {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
                   </Chip>
                 ),
@@ -119,15 +139,26 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
         {list.map((r) => (
           <QueueItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
-        {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
-        <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
-          제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
-        </Banner>
+        {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : noPending ? '판정 대기 LOT 없음' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
+        {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 여기서는 되풀이하지 않는다 */}
+        {list.length > 0 ? (
+          <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
+            제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
+          </Banner>
+        ) : null}
       </MasterPane>
 
       <PageMain>
         {activeId === null ? (
-          <StateView kind="empty" title="검사 대상 LOT이 없어요" text="제강·연주·열연 실적이 저장되면 목록에 올라와요." />
+          noPending ? (
+            <NoPendingView doneCount={byProcess.length} onShowAll={() => setResult('ALL')} />
+          ) : (
+            <StateView
+              kind="empty"
+              title={rows.length === 0 ? '검사 대상 LOT이 없어요' : '조건에 맞는 LOT이 없어요'}
+              text={rows.length === 0 ? '제강·연주·열연 실적이 저장되면 목록에 올라와요.' : '공정·판정 결과·검색어를 바꿔 보세요.'}
+            />
+          )
         ) : (
           <Detail
             key={activeId}
@@ -143,6 +174,31 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
         )}
       </PageMain>
     </>
+  );
+}
+
+/** 판정할 LOT이 없을 때 (판정이 끝난 LOT은 있다). "LOT이 없다"로 읽히지 않게 할 일이 없다는 것과 판정 끝난 LOT으로 가는 길을 보인다 */
+function NoPendingView({ doneCount, onShowAll }: { doneCount: number; onShowAll: () => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+      <span className="flex size-14 items-center justify-center rounded-full bg-ok-bg text-ok [&_.ic]:size-6">
+        <Icon name="check" />
+      </span>
+      <b className="text-lg font-semibold text-ink">판정할 LOT이 없어요</b>
+      <p className="max-w-[420px] text-sm leading-normal text-ink-2">
+        {doneCount > 0 ? (
+          <>
+            판정이 끝난 LOT {doneCount}개는 <b className="font-semibold">전체</b>에서 볼 수 있어요.{' '}
+          </>
+        ) : null}
+        새 실적이 저장되면 판정 대기로 올라와요.
+      </p>
+      {doneCount > 0 ? (
+        <Button size="sm" onClick={onShowAll}>
+          판정 끝난 LOT 보기 (전체 {doneCount})
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
