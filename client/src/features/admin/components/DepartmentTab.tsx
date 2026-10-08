@@ -3,7 +3,7 @@
 // 부서 탭 (REQ-ORG-001·002): 왼쪽 부서 계층 | 오른쪽 편집(부서 코드·부서명·상위 부서·부서장·정렬 순서). 삭제는 참조가 없을 때만.
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
-import { departmentAdminApi, isOrgServerMode } from '@/api/adminOrganization';
+import { departmentAdminApi } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
 import type { DepartmentView, EmployeeView } from '@/api/directory';
 import { Badge } from '@/components/Badge';
@@ -119,7 +119,6 @@ interface EditorState {
   departmentName: string;
   parentId: number | null;
   headEmployeeId: number | null;
-  sortOrder: string;
 }
 
 function DepartmentEditor({
@@ -140,7 +139,6 @@ function DepartmentEditor({
     departmentName: department.departmentName,
     parentId: department.parentId,
     headEmployeeId: department.headEmployeeId,
-    sortOrder: String(department.sortOrder),
   };
   const [form, setForm] = useState<EditorState>(initial);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
@@ -166,8 +164,7 @@ function DepartmentEditor({
   const deleteBlock =
     members.length > 0 ? `소속 사원이 ${members.length}명 있어 삭제할 수 없어요` : childCount > 0 ? `하위 부서가 ${childCount}개 있어 삭제할 수 없어요` : null;
   const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
-  // 서버 모드: 부서코드는 바꾸지 않고, 정렬 순서는 ERD에 없어 숨긴다. 퇴사자가 남은 부서는 서버가 삭제를 막는다(API-271)
-  const serverMode = isOrgServerMode();
+  // 부서코드는 바꾸지 않는다. 퇴사자가 남은 부서는 서버가 삭제를 막는다(API-271)
 
   const submit = () => {
     setErrors({});
@@ -194,7 +191,7 @@ function DepartmentEditor({
             label="부서 코드"
             required
             error={errors.departmentCode}
-            hint={serverMode ? '부서 코드는 바꿀 수 없어요' : '영문 대문자·숫자·하이픈 30자 이내'}
+            hint="부서 코드는 바꿀 수 없어요"
             htmlFor="department-code"
           >
             <Input
@@ -202,10 +199,9 @@ function DepartmentEditor({
               className="font-mono"
               maxLength={30}
               disabled={!canEdit}
-              readOnly={serverMode}
+              readOnly
               value={form.departmentCode}
               invalid={Boolean(errors.departmentCode)}
-              onChange={(e) => set('departmentCode', e.target.value.toUpperCase())}
             />
           </Field>
           <Field label="부서명" required error={errors.departmentName} htmlFor="department-name">
@@ -249,19 +245,6 @@ function DepartmentEditor({
               ))}
             </Select>
           </Field>
-          {serverMode ? null : (
-            <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="department-sort">
-              <Input
-                id="department-sort"
-                inputMode="numeric"
-                numeric
-                disabled={!canEdit}
-                value={form.sortOrder}
-                invalid={Boolean(errors.sortOrder)}
-                onChange={(e) => set('sortOrder', e.target.value)}
-              />
-            </Field>
-          )}
         </div>
       </CardBody>
       <CardFoot>

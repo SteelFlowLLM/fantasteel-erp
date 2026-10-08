@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { PERMISSION, ROLE_LABEL } from '@/codes';
 import { employeeAdminApi } from '@/api/adminEmployees';
-import { isOrgServerMode } from '@/api/adminOrganization';
 import type { DepartmentView, EmployeeView, RoleView } from '@/api/directory';
 import { Avatar } from '@/components/Avatar';
 import { Banner } from '@/components/Banner';
@@ -21,7 +20,7 @@ import { RolePermissionSummary } from '@/features/admin/components/RolePermissio
 import { activeLabelOf } from '@/features/admin/lib/orgRules';
 import { useAction } from '@/hooks/useAction';
 import { useCanView } from '@/hooks/usePermission';
-import { fmtDate, fmtDateTime } from '@/lib/format';
+import { fmtDate } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 export interface EmployeeDetailProps {
@@ -111,7 +110,6 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
                 { label: '직급', value: employee.jobGradeName },
                 { label: '역할', value: ROLE_LABEL[employee.roleCode] },
                 { label: '사용 여부', value: activeLabelOf(employee.isActive) },
-                ...(isOrgServerMode() ? [] : [{ label: '최근 접속', value: employee.lastLoginAt ? fmtDateTime(employee.lastLoginAt) : '접속 기록 없음' }]),
                 { label: '등록일', value: fmtDate(employee.createdAt) },
               ]}
             />

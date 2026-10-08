@@ -3,7 +3,6 @@ import { PERMISSIONS } from '@/codes';
 import {
   DEPARTMENT_CODE_PATTERN,
   EMPLOYEE_NO_PATTERN,
-  JOB_GRADE_CODE_PATTERN,
   blockedParentIdsOf,
   descendantIdsOf,
   totalMemberCountOf,
@@ -54,13 +53,11 @@ describe('입력 형식 (가정값)', () => {
     expect(EMPLOYEE_NO_PATTERN.test('A503001')).toBe(false);
   });
 
-  it('부서 코드·직급 코드', () => {
+  it('부서 코드', () => {
     expect(DEPARTMENT_CODE_PATTERN.test('PRD-IRON')).toBe(true);
     expect(DEPARTMENT_CODE_PATTERN.test('prd')).toBe(false);
     expect(DEPARTMENT_CODE_PATTERN.test('-PRD')).toBe(false);
     expect(DEPARTMENT_CODE_PATTERN.test('A'.repeat(31))).toBe(false);
-    expect(JOB_GRADE_CODE_PATTERN.test('GENERAL_MANAGER')).toBe(true);
-    expect(JOB_GRADE_CODE_PATTERN.test('1GRADE')).toBe(false);
   });
 });
 
