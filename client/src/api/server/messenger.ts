@@ -28,6 +28,7 @@ import type {
 } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { serverSalesOrderApi } from '@/api/server/salesOrders';
+import { imageMimeOf } from '@/features/messenger/lib/attachment';
 import { findMentions } from '@/features/messenger/lib/messageText';
 
 const listRaw = () => serverRequest<ServerRoomListItem[]>('GET', '/chat-rooms');
@@ -207,7 +208,10 @@ export const serverMessengerApi = {
   },
 
   getFile: async ({ messageId, fileName }: { messageId: number; fileName: string }): Promise<MessageFileContent> => {
-    const blob = await serverDownload(`/attachments/${messageId}`);
+    const downloaded = await serverDownload(`/attachments/${messageId}`);
+    // 서버는 형식 컬럼이 없어 늘 octet-stream으로 보낸다. 그림은 확장자로 형식을 붙여 화면에서 미리볼 수 있게 한다
+    const imageMime = imageMimeOf(fileName);
+    const blob = imageMime ? new Blob([downloaded], { type: imageMime }) : downloaded;
     return { name: fileName, mimeType: blob.type || 'application/octet-stream', dataUrl: await dataUrlOf(blob) };
   },
 
