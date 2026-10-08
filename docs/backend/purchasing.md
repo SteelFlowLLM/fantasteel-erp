@@ -53,7 +53,7 @@
 - `itemId`는 RAW_MATERIAL 품목, `requestedTon > 0`(소수 3자리), `desiredReceiptDate`(date), 요청자·부서는 인증 컨텍스트에서 가져온다.
 - 요청자 부서의 `head_employee_id`가 없으면 `PUR-001`. 상태는 바로 WAITING_APPROVAL([06]: 임시 저장 없음).
 - `productionPlanId`가 있으면 같은 계획·품목의 진행 중 요청이 있는지 확인해 중복을 막는다(BP-PRD-01, [ERD] Note).
-- message-action이 쓸 함수를 export한다: `createRequisition(tx, input, actor, { actionDraftId, messageId })`([04] 12.3 `purchasing.createRequisitionPendingApproval`, BP-ACT-01 "실행 핸들러는 해당 모듈 담당자가 구현").
+- message-action이 쓸 함수를 export한다: `createRequisition(tx, input, actor, { actionDraftId, messageId })`([04] 12.3 `purchasing.createRequisitionPendingApproval`, BP-ACT-01 "실행 핸들러는 해당 모듈 담당자가 구현"). 저장한 구매요청 행(관계 없음)을 돌려주고, 화면 응답은 커밋 뒤에 읽는다.
 
 **승인·반려·재요청**(REQ-PUR-002, REQ-AUTH-004)
 - 승인·반려는 WAITING_APPROVAL에서만. 요청자 사원을 조회해 `assertDepartmentHead(user, requester.departmentId)`(`common/auth/department-head.ts`). 부서에 부서장이 없으면 먼저 `PUR-001`.
@@ -70,6 +70,10 @@
 - 발주 품목 행을 `SELECT … FOR UPDATE`(TypedSQL)로 잠그고 `입고 합계 + 이번 입고 ≤ ordered_ton`이 아니면 `PUR-003`. 입고량 0 이하는 거부.
 - 같은 tx에서: 입고 저장(`nextDocumentNumber(tx,'GOODS_RECEIPT')`) → 원료 LOT 생성(`nextLotNumber(tx,'RAW_MATERIAL', item.itemCode, 날짜)` → `RM-원료코드-YYMMDD-NNN`, 야드 = 품목 기본 야드, `lot_status` AVAILABLE) → 발주 상태 갱신(모든 품목 입고 완료면 RECEIVED, 아니면 PARTIALLY_RECEIVED).
 - 원료 입고 검사는 없다. 확정 후 수정 API는 없다(반대 거래 방식 필요, 범위 TBD).
+
+**트랜잭션 안 조회**(2026-10-08)
+- 트랜잭션 안에서는 관계를 여러 개 한꺼번에 읽지 않는다. Prisma가 트랜잭션 연결 하나에 쿼리를 겹쳐 보내 pg 경고("client is already executing a query", pg@9에서 제거 예정)가 난다.
+- 업무 확인에 필요한 관계 하나(요청자 부서, 계획의 수주)만 읽고, 응답 모양(목록·상세 include)은 커밋 뒤에 읽는다. `purchase-tx-queries.spec.ts`가 겹침이 없는지 확인한다.
 
 ## 5. 오류 코드·작업 로그
 
@@ -88,7 +92,7 @@
 | PURCHASE_REQUISITION_APPROVED | USER(부서장) | `purchase_requisition` | 〃 | - | |
 | PURCHASE_REQUISITION_REJECTED | USER(부서장) | `purchase_requisition` | 〃 | - | `reason` = 반려 사유 |
 | PURCHASE_ORDER_CREATED | USER | `purchase_order` | - | - | |
-| GOODS_RECEIPT_CONFIRMED | USER | `goods_receipt` | - | 생성된 원료 LOT | |
+| GOODS_RECEIPT_CONFIRMED | USER | `goods_receipt` | - | 생성된 원료 LOT | after: 입고 번호·발주·원료 코드·입고량·입고일·LOT·야드 id·발주 상태·입고 누계 |
 
 ## 6. 다른 모듈과의 경계
 
