@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rowFilesOf } from '@/api/messengerRules';
 import { messengerApi } from '@/api/messenger';
-import { notificationApi } from '@/api/notifications';
-import { taskApi } from '@/api/tasks';
 import { formatItemQty } from '@/features/messenger/lib/salesOrderQty';
 import { getMockDb } from '@/mock/db';
 import { SEED_CORE } from '@/mock/seeds/core';
@@ -23,11 +21,12 @@ describe('협업 시드', () => {
     expect(counts.files).toBe(1);
 
     // 구매 정다은: 업무 1건(오늘 기준 마감 전), 업무 지정 알림 1건, 1:1 방에 안 읽은 메시지 1건
-    actAs(SEED_EMPLOYEE_NO.purchase);
-    expect((await taskApi.list('mine')).map((t) => t.title)).toEqual(['10월 첫째 주 철광석 입고 일정 확인']);
-    const notices = await notificationApi.list();
-    // 승인 결과 알림은 거래·대시보드 시드의 구매요청 승인에서 온다
-    expect(notices.items.map((n) => n.notificationType).filter((type) => type !== 'APPROVAL_RESULT')).toEqual(['TASK_ASSIGNED']);
+    const purchaseId = actAs(SEED_EMPLOYEE_NO.purchase);
+    // 업무 화면 api는 서버만 불러 시드 업무는 가짜 DB에서 직접 본다
+    expect(getMockDb().read((tables) => tables.task.filter((t) => t.assigneeId === purchaseId).map((t) => t.title))).toEqual(['10월 첫째 주 철광석 입고 일정 확인']);
+    // 알림 화면 api도 서버만 불러 가짜 DB 행을 직접 본다. 승인 결과 알림은 거래·대시보드 시드의 구매요청 승인에서 온다
+    const notices = getMockDb().read((tables) => tables.notification.filter((n) => n.recipientId === purchaseId));
+    expect(notices.map((n) => n.notificationType).filter((type) => type !== 'APPROVAL_RESULT')).toEqual(['TASK_ASSIGNED']);
     const rooms = await messengerApi.listRooms();
     expect(rooms.map((r) => [r.displayName, r.unreadCount])).toEqual([
       ['원료 수급', 0],
@@ -37,11 +36,10 @@ describe('협업 시드', () => {
   });
 
   it('사원 멘션과 부서 멘션 알림이 있고, 시드 첨부를 내려받을 수 있다', async () => {
-    actAs(SEED_EMPLOYEE_NO.logistics);
-    expect((await notificationApi.list()).items.some((n) => n.notificationType === 'MENTION' && n.departmentId === null)).toBe(true);
-    actAs(SEED_EMPLOYEE_NO.qualityHead);
-    const qcMention = (await notificationApi.list()).items.find((n) => n.notificationType === 'MENTION');
-    expect(qcMention?.departmentName).toBe('품질부');
+    const noticesOf = (employeeNo: string) => getMockDb().read((tables) => tables.notification.filter((n) => n.recipientId === employeeIdOf(employeeNo)));
+    expect(noticesOf(SEED_EMPLOYEE_NO.logistics).some((n) => n.notificationType === 'MENTION' && n.departmentId === null)).toBe(true);
+    const qcMention = noticesOf(SEED_EMPLOYEE_NO.qualityHead).find((n) => n.notificationType === 'MENTION');
+    expect(getMockDb().read((tables) => tables.department.find((d) => d.id === qcMention?.departmentId)?.departmentName)).toBe('품질부');
 
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const direct = (await messengerApi.listRooms()).find((r) => r.chatRoomType === 'DIRECT');

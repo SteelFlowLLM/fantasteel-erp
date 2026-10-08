@@ -1,19 +1,9 @@
 // 업무 (REQ-NTF-001: 업무에 담당자와 마감일을 지정한다). 상태는 OPEN 진행 → DONE 완료 (업무 프로세스 10장).
-// - 만든 사람과 담당자만 고치거나 완료할 수 있다 (가정값, docs/rework/areas/collab.md).
-// - 담당자가 내가 아니면 담당자에게 '업무 지정' 알림을 보낸다 (NOTIFICATION_TYPE 🟡 TASK_ASSIGNED).
+// 두 데이터 모드 모두 실제 서버를 부른다 (api/server/tasks.ts, API-239~241·274).
+// - 고치기는 등록자·담당자, 완료는 담당자만 (서버 규칙). 담당자가 내가 아니면 서버가 담당자에게 '업무 지정' 알림을 보낸다.
 // - 업무에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-// - 서버 모드는 api/server/tasks.ts (내 담당 업무만, 수정 없음).
-import { NOTIFICATION_TYPE, TASK_STATUS, type TaskStatus } from '@/codes';
-import { requireActor, type Actor } from '@/api/actor';
-import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
+import type { TaskStatus } from '@/codes';
 import { serverTaskApi } from '@/api/server/tasks';
-import { assertUnchanged, optionalDate, optionalText, requiredText, requireRow } from '@/api/validation';
-import { compareTasksByDue, isScreenPath, LINK_PATH_ERROR } from '@/features/tasks/lib/taskDue';
-import { taskAssignedNotice } from '@/features/tasks/lib/taskNotice';
-import type { MockTables, TaskRow } from '@/mock/schema';
-import { createNotifications } from '@/mock/services/notifications';
-import { insertRow, updateRow, type MockTx } from '@/mock/store';
 
 /** 내 업무 = 내가 담당 · 내가 만든 업무 · 전체 = 둘을 합친 것 */
 export type TaskScope = 'mine' | 'created' | 'all';
@@ -68,81 +58,6 @@ export interface TaskUpdateInput extends TaskInput {
   expectedUpdatedAt?: string | null;
 }
 
-function personOf(tables: Readonly<MockTables>, employeeId: number): TaskPersonView {
-  const employee = tables.employee.find((e) => e.id === employeeId);
-  return {
-    id: employeeId,
-    employeeName: employee?.employeeName ?? '알 수 없는 사원',
-    departmentName: tables.department.find((d) => d.id === employee?.departmentId)?.departmentName ?? '-',
-    jobGradeName: tables.jobGrade.find((g) => g.id === employee?.jobGradeId)?.jobGradeName ?? '-',
-  };
-}
-
-const canEditTask = (task: TaskRow, employeeId: number) => task.creatorId === employeeId || task.assigneeId === employeeId;
-
-function toView(tables: Readonly<MockTables>, task: TaskRow, viewerId: number): TaskView {
-  return {
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    assignee: personOf(tables, task.assigneeId),
-    creator: personOf(tables, task.creatorId),
-    dueDate: task.dueDate,
-    taskStatus: task.taskStatus,
-    linkPath: task.linkPath,
-    completedAt: task.completedAt,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    canEdit: canEditTask(task, viewerId),
-  };
-}
-
-function inScope(task: TaskRow, employeeId: number, scope: TaskScope): boolean {
-  if (scope === 'mine') return task.assigneeId === employeeId;
-  if (scope === 'created') return task.creatorId === employeeId;
-  return task.assigneeId === employeeId || task.creatorId === employeeId;
-}
-
-/** 입력 확인. 담당자가 없으면 COM-003, 사용 안 함 사원이면 입력칸 오류. */
-function validateInput(tables: Readonly<MockTables>, input: TaskInput) {
-  const errors = new FieldErrors();
-  const title = requiredText(errors, 'title', input.title, '제목', TASK_TITLE_MAX);
-  const description = optionalText(errors, 'description', input.description, '설명', TASK_DESCRIPTION_MAX);
-  const dueDate = optionalDate(errors, 'dueDate', input.dueDate, '마감일');
-  const linkText = (input.linkPath ?? '').trim();
-  if (linkText && !isScreenPath(linkText)) errors.add('linkPath', LINK_PATH_ERROR);
-  if (input.assigneeId === null || input.assigneeId === undefined) errors.add('assigneeId', '담당자를 골라 주세요');
-  errors.throwIfAny();
-  const assignee = requireRow(tables, 'employee', input.assigneeId, '담당자');
-  if (!assignee.isActive) throw new InputError('입력한 내용을 확인해 주세요', { assigneeId: '사용 중인 사원만 담당자로 지정할 수 있어요' });
-  return { title: title ?? '', description, dueDate: dueDate ?? null, linkPath: linkText || null, assigneeId: assignee.id };
-}
-
-/** 메시지에서 업무 등록: 그 방 멤버만, 삭제·시스템 메시지는 안 된다. 연결 화면은 그 메시지 */
-function messageLinkOf(tables: Readonly<MockTables>, actor: Actor, messageId: number): string {
-  const message = requireRow(tables, 'message', messageId, '메시지');
-  if (!tables.chatRoomMember.some((m) => m.chatRoomId === message.chatRoomId && m.employeeId === actor.employee.id)) {
-    throw new ApiError('COM-002', '채팅방 멤버만 이 메시지로 업무를 등록할 수 있어요');
-  }
-  if (message.deletedAt || !tables.employee.some((e) => e.id === message.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지로는 업무를 등록할 수 없어요');
-  return `/messenger?room=${message.chatRoomId}&message=${message.id}`;
-}
-
-function notifyAssignee(tx: MockTx, actor: Actor, task: TaskRow): void {
-  if (task.assigneeId === actor.employee.id) return;
-  createNotifications(tx, {
-    notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED,
-    ...taskAssignedNotice(task, actor.employee.employeeName),
-    recipientEmployeeIds: [task.assigneeId],
-  });
-}
-
-function requireEditable(tables: Readonly<MockTables>, actor: Actor, taskId: number): TaskRow {
-  const task = requireRow(tables, 'task', taskId, '업무');
-  if (!canEditTask(task, actor.employee.id)) throw new ApiError('COM-002', '업무를 만든 사람과 담당자만 바꿀 수 있어요');
-  return task;
-}
-
 export interface TaskSummary {
   /** 내가 담당한 진행 업무 수 */
   openCount: number;
@@ -151,59 +66,15 @@ export interface TaskSummary {
 }
 
 export const taskApi = {
-  list: (scope: TaskScope): Promise<TaskView[]> =>
-    isServerDataSource() ? serverTaskApi.list(scope) : mockQuery((tables) => {
-      const actor = requireActor(tables);
-      const me = actor.employee.id;
-      return tables.task
-        .filter((task) => inScope(task, me, scope))
-        .sort(compareTasksByDue)
-        .map((task) => toView(tables, task, me));
-    }),
+  list: (scope: TaskScope): Promise<TaskView[]> => serverTaskApi.list(scope),
 
   /** 내 업무 요약 (탭 숫자·부제). today = 'YYYY-MM-DD' (Asia/Seoul) */
-  summary: (today: string): Promise<TaskSummary> =>
-    isServerDataSource() ? serverTaskApi.summary(today) : mockQuery((tables) => {
-      const me = requireActor(tables).employee.id;
-      const open = tables.task.filter((task) => task.assigneeId === me && task.taskStatus === TASK_STATUS.OPEN);
-      return {
-        openCount: open.length,
-        overdueCount: open.filter((task) => task.dueDate !== null && task.dueDate < today).length,
-        dueTodayCount: open.filter((task) => task.dueDate === today).length,
-      };
-    }),
+  summary: (today: string): Promise<TaskSummary> => serverTaskApi.summary(today),
 
-  create: (input: TaskInput): Promise<TaskView> =>
-    isServerDataSource() ? serverTaskApi.create(input) : mockMutation((tx) => {
-      const actor = requireActor(tx.tables);
-      const values = validateInput(tx.tables, input);
-      const messageId = input.messageId ?? null;
-      const linkPath = messageId === null ? values.linkPath : messageLinkOf(tx.tables, actor, messageId);
-      const task = insertRow(tx, 'task', { ...values, linkPath, messageId, creatorId: actor.employee.id, taskStatus: TASK_STATUS.OPEN, completedAt: null });
-      notifyAssignee(tx, actor, task);
-      return toView(tx.tables, task, actor.employee.id);
-    }),
+  create: (input: TaskInput): Promise<TaskView> => serverTaskApi.create(input),
 
-  update: ({ id, ...input }: TaskUpdateInput & { id: number }): Promise<TaskView> =>
-    isServerDataSource() ? serverTaskApi.update({ id, ...input }) : mockMutation((tx) => {
-      const actor = requireActor(tx.tables);
-      const task = requireEditable(tx.tables, actor, id);
-      assertUnchanged(task.updatedAt, input.expectedUpdatedAt, '업무');
-      if (task.taskStatus === TASK_STATUS.DONE) throw new InputError('완료한 업무는 고칠 수 없어요');
-      const values = validateInput(tx.tables, input);
-      const next = updateRow(tx, 'task', id, values) ?? task;
-      if (values.assigneeId !== task.assigneeId) notifyAssignee(tx, actor, next);
-      return toView(tx.tables, next, actor.employee.id);
-    }),
+  update: (input: TaskUpdateInput & { id: number }): Promise<TaskView> => serverTaskApi.update(input),
 
-  /** 완료 (OPEN → DONE). 되돌리기는 없다 (업무 프로세스 10장 OPEN → DONE). */
-  complete: ({ id, expectedUpdatedAt }: { id: number; expectedUpdatedAt?: string | null }): Promise<TaskView> =>
-    isServerDataSource() ? serverTaskApi.complete(id) : mockMutation((tx) => {
-      const actor = requireActor(tx.tables);
-      const task = requireEditable(tx.tables, actor, id);
-      if (task.taskStatus === TASK_STATUS.DONE) throw new ApiError('COM-001', '이미 완료한 업무예요');
-      assertUnchanged(task.updatedAt, expectedUpdatedAt, '업무');
-      const next = updateRow(tx, 'task', id, { taskStatus: TASK_STATUS.DONE, completedAt: tx.nowIso }) ?? task;
-      return toView(tx.tables, next, actor.employee.id);
-    }),
+  /** 완료 (OPEN → DONE, 담당자만). 되돌리기는 없다 (업무 프로세스 10장 OPEN → DONE). */
+  complete: ({ id }: { id: number; expectedUpdatedAt?: string | null }): Promise<TaskView> => serverTaskApi.complete(id),
 };

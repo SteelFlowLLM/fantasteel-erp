@@ -10,7 +10,6 @@ import { inventoryApi } from '@/api/inventories';
 import { lotTraceApi } from '@/api/lotTrace';
 import { messengerApi } from '@/api/messenger';
 import { millSheetApi } from '@/api/millSheets';
-import { notificationApi } from '@/api/notifications';
 import { productionPlanApi } from '@/api/production';
 import { productionResultApi } from '@/api/productionResults';
 import { salesOrderApi } from '@/api/salesOrders';
@@ -31,7 +30,7 @@ import {
   remainingTonOf,
   requisitionView,
 } from '@/mock/services';
-import { as, asPurchaseCore, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, mockMrp, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
+import { as, asPurchaseCore, at, customerIdOf, expectClean, idOf, inspectViaApi, itemIdOf, lotOf, lotsOfPlan, mockMrp, mockNotificationsOf, readDb, salesOrderIdOf, soItemIdsOf, useScenarioClock } from '@/api/scenario/scenarioKit';
 
 const SLAB_A = 'SL-SS275-250x1200x10000';
 
@@ -105,11 +104,11 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     await expect(approve(pr.id, pr.updatedAt)).rejects.toMatchObject({ code: 'COM-002' });
     as('purchaseHead');
     expect(readDb((t) => approvalInbox(t, idOf('purchaseHead'))).map((r) => r.purchaseRequisitionNo)).toContain('PR-2610-0001');
-    expect((await notificationApi.list()).items.some((n) => n.notificationType === 'APPROVAL_REQUESTED' && n.title.includes('PR-2610-0001'))).toBe(true);
+    expect(mockNotificationsOf('purchaseHead').some((n) => n.notificationType === 'APPROVAL_REQUESTED' && n.title.includes('PR-2610-0001'))).toBe(true);
     at('2026-10-01T10:30:00+09:00');
     expect(await approve(pr.id, pr.updatedAt)).toMatchObject({ purchaseRequisitionStatus: 'APPROVED' });
     as('purchase');
-    expect((await notificationApi.list()).items.some((n) => n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2610-0001'))).toBe(true);
+    expect(mockNotificationsOf('purchase').some((n) => n.notificationType === 'APPROVAL_RESULT' && n.title.includes('PR-2610-0001'))).toBe(true);
     const candidate = readDb(orderableRequisitions).find((i) => i.id === pr.id);
     expect(candidate?.supplierName).toBe(readDb((t) => t.supplier.find((s) => s.supplierCode === 'SUP-04')?.supplierName));
     at('2026-10-01T11:00:00+09:00');
