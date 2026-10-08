@@ -92,27 +92,36 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
               <span className="text-cap text-ink-3">{rows.length}건</span>
             </div>
             <div className="grid grid-cols-4 gap-1.5" role="group" aria-label="불합격 상태">
-              {TILES.map((tile) => (
-                <button
-                  key={tile.key}
-                  type="button"
-                  aria-pressed={status === tile.key}
-                  onClick={() => setStatus(status === tile.key ? 'ALL' : tile.key)}
-                  className={cn('flex flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left', tile.className, status === tile.key && tile.onClassName)}
-                >
-                  <span className="text-cap">{tile.label}</span>
-                  <b className="text-lg font-semibold tabular-nums">{count(tile.key)}</b>
-                </button>
-              ))}
+              {TILES.map((tile) => {
+                const n = count(tile.key);
+                return (
+                  <button
+                    key={tile.key}
+                    type="button"
+                    aria-pressed={status === tile.key}
+                    onClick={() => setStatus(status === tile.key ? 'ALL' : tile.key)}
+                    className={cn(
+                      'flex flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left',
+                      // 0건이면 회색: 처리할 일이 없는데 경고색이 칠해져 있지 않게 (색은 건수가 있을 때만)
+                      n > 0 ? tile.className : 'bg-surface-2 text-ink-3',
+                      status === tile.key && tile.onClassName,
+                    )}
+                  >
+                    <span className="text-cap">{tile.label}</span>
+                    <b className="text-lg font-semibold tabular-nums">{n}</b>
+                  </button>
+                );
+              })}
             </div>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="불합격 원인">
-              <Chip on={reason === 'ALL'} onClick={() => setReason('ALL')}>
+            {/* 세 칩이 목록 칸 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 (문구는 용어 사전 TRM-078 그대로) */}
+            <div className="flex flex-nowrap gap-1" role="group" aria-label="불합격 원인">
+              <Chip on={reason === 'ALL'} onClick={() => setReason('ALL')} className="px-2">
                 모든 원인
               </Chip>
-              <Chip on={reason === 'FAILED'} onClick={() => setReason('FAILED')}>
+              <Chip on={reason === 'FAILED'} onClick={() => setReason('FAILED')} className="px-2">
                 검사 불합격
               </Chip>
-              <Chip on={reason === 'HEAT_FAILED'} onClick={() => setReason('HEAT_FAILED')}>
+              <Chip on={reason === 'HEAT_FAILED'} onClick={() => setReason('HEAT_FAILED')} className="px-2">
                 불합격 히트의 하위 LOT
               </Chip>
             </div>
