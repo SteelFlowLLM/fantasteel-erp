@@ -1,6 +1,6 @@
 # 화면 작업 안내 (v2 client)
 
-v2 화면(`client/`)은 **서버·DB 없이 브라우저 안의 가짜 DB(mock)만으로 동작하는 화면 전용 클라이언트**다. Next.js(App Router) + TypeScript(strict) + Tailwind + TanStack Query + Zustand로 만들었고, B안 디자인(어두운 아이콘 레일 + 목록|상세)을 쓴다. 이 문서는 화면을 고치거나 더하는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다. `server/`와 `shared/`, DB는 이번 화면 재작업에서 건드리지 않았고, 새 화면은 그쪽을 부르지 않는다.
+v2 화면(`client/`)은 **기본으로 실제 서버(`server/`)를 부르는 클라이언트**다. 서버에 아직 연결되지 않은 기능과 테스트는 브라우저 안의 가짜 DB(mock)를 쓴다(아래 서버 연결 절). Next.js(App Router) + TypeScript(strict) + Tailwind + TanStack Query + Zustand로 만들었고, B안 디자인(어두운 아이콘 레일 + 목록|상세)을 쓴다. 이 문서는 화면을 고치거나 더하는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다.
 
 ## 1. 기준 (우선순위 순)
 
@@ -18,7 +18,7 @@ v2 화면(`client/`)은 **서버·DB 없이 브라우저 안의 가짜 DB(mock)�
 
 ```bash
 npm install
-npm run dev -w @fantasteel/client     # http://localhost:5173
+npm run dev                           # DB · shared · 서버 · 화면(http://localhost:5173)
 ```
 
 ```bash
@@ -29,17 +29,16 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 ```
 
 - 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
-- 처음 열면 **계정 선택** 화면(`/login`)이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 서버 모드는 사원번호·비밀번호 로그인이다(아래 서버 연결). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
-- 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
+- 기본(서버 모드)은 처음 열면 사원번호·비밀번호 **로그인** 화면(`/login`)이 나온다(아래 서버 연결). 가짜 DB 모드(`NEXT_PUBLIC_DATA_SOURCE=mock`)는 **계정 선택** 화면이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 서버 모드는 사원번호·비밀번호 로그인이다(아래 서버 연결). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
+- 가짜 DB 모드에서 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
 - 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
 
-### 서버 연결 (영업·출하·품질·생산·구매·LOT·재고·작업 로그·조직 관리·업무·알림·메신저 화면, 선택)
+### 서버 연결 (기본, 2026-10-08부터)
 
-수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)로 바꿔 볼 수 있다. 기본은 가짜 DB이고, 다른 화면은 서버 모드에서도 가짜 DB를 쓴다.
+수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)를 부른다. 데이터 출처 기본값은 서버이고(`api/http.ts`의 `dataSource()`: 비우거나 `mock`이 아니면 서버), 다른 기능(Message → ERP 초안·전역 검색 등)은 서버 모드에서도 가짜 DB를 쓴다. `NEXT_PUBLIC_DATA_SOURCE=mock`은 테스트용이다(`vitest.config.ts`가 지정, 서버 어댑터 테스트는 `useFakeServer`가 server로 바꾼다).
 
-1. `client/.env.example`을 `client/.env.local`로 복사하고 `NEXT_PUBLIC_DATA_SOURCE=server`로 바꾼다.
-2. `npm run dev`로 DB·서버·화면을 띄운다(이미 떠 있으면 화면 서버만 다시 띄운다).
-3. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
+1. `npm run dev`로 DB·서버·화면을 띄운다. `client/.env.local`은 없어도 된다(있으면 `NEXT_PUBLIC_DATA_SOURCE`를 비우거나 `server`로, 바꾼 뒤에는 화면 서버를 다시 띄운다).
+2. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
 
 - 연결 방식: 화면이 부르는 `api/*.ts` 함수가 출처(`isServerDataSource()`)에 따라 가짜 DB 또는 `api/server/*.ts` 어댑터를 부른다. 화면 컴포넌트는 되도록 그대로다. 화면별로 어떤 어댑터를 쓰는지는 아래 줄에 적는다.
 - 서버 모드에서 고객사·규격·강종·야드·사원·부서 id는 모두 서버 id다. 수주 등록·수주 목록·구매요청 등록·재고 강종 필터의 선택 목록(`api/lookups.ts`)은 서버 기준정보를 읽으므로(`api/server/lookups.ts`) 기준정보 화면에서 새로 만든 고객사·규격·원료도 고를 수 있다. 기준정보 조회 권한이 없는 물류는 이 선택 목록이 비고, 출하요청 등록 창의 고객사는 출하 가능 품목이 있는 고객사만 보인다. 응답에 없는 규격 표시값(유형·이론중량·강종·기본 야드)은 서버 규격 목록에서, 그 권한이 없으면 시드의 같은 코드에서 찾는다(`api/server/masterIds.ts`, 표시용).
@@ -52,7 +51,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - LOT 추적 화면: `api/lotTrace.ts`가 `api/server/lotTrace.ts`를 부른다. 화면 주소의 LOT 번호로 서버 LOT id를 찾아 추적하므로 생산·검사·출고 화면의 LOT 링크가 맞는다. 출하요청 번호로 시작하는 추적은 그 출하요청의 배정 LOT마다 역추적해 합친다(출하요청 조회 권한이 없는 구매·생산은 권한 없음). LOT 번호 검색은 앞부분 일치다. 서버 응답에 없는 값(공급업체, LOT의 생산계획, 배정 확정 시각·수주, 소진·출고·여재 시각)은 비어 있다.
 - 재고 화면: `api/inventories.ts`가 `api/server/inventories.ts`를 부른다. 서버 재고의 `onHandQty`는 합격 재고라 화면의 합격 매수로 보이고, 재고 매수는 재고 상태 LOT 수로 센다(판정 대기에 상위 히트만 불합격인 LOT도 섞인다). LOT 목록은 제품·히트 LOT 상세로 히트·배정·처리 상태를 채운다. 원료 입고일·입고 번호(입고 조회 권한)와 입고예정(발주 조회 권한)은 권한이 있을 때만 보인다. 여재 탭은 서버 재고 응답의 `surplus`(대시보드 여재 위젯과 같은 계산, inventory.md 8-1)를 쓰고, 여재 전환 시각과 LOT 목록의 여재 표시는 비어 있다.
 - 작업 로그: `api/businessEvents.ts`(작업 로그 화면), 수주 상세 이력(`api/salesOrders.ts`), 검사·불합격 LOT 이력(`api/server/inspections.ts`·`dispositions.ts`), 대시보드 최근 작업 로그(`api/dashboard.ts`)가 `api/server/businessEvents.ts`로 `GET /business-events`를 부른다. 대상 번호는 기록 데이터(변경 후·전)의 번호로 보이고, 주체의 부서·직급과 원본 메시지 링크는 서버 응답에 없어 비어 있다.
-- 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. 사원 관리(`api/adminEmployees.ts`), 부서·직급·역할 권한·관리 조직도(`api/adminOrganization.ts`), 조직 조회(`api/directory.ts`의 관리 화면용 조회·조직도)는 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다. ERD에 없는 기능(부서 정렬 순서, 직급 코드, 최근 접속)은 화면에 없고, 사원 등록은 비밀번호를 받는다. 사원번호·부서 코드 형식(가정값, `features/admin/lib/orgRules.ts`)은 서버에 검사가 없어 서버 어댑터가 먼저 확인한다. 부서 삭제·직급 수정·직급 삭제는 서버 API(API-271·272·273, 2026-10-08)를 쓰고, 퇴사자가 남은 부서·직급은 서버가 삭제를 막는다. 메신저·업무방의 멤버 선택은 서버 조직도(`GET /departments`)를 쓴다(`directoryApi.getOrgChart`). 사원 목록(`GET /employees`)은 관리자 전용이라 `directoryApi.listEmployees`는 서버 모드에서도 가짜 DB다.
+- 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. 사원 관리(`api/adminEmployees.ts`), 부서·직급·역할 권한·관리 조직도(`api/adminOrganization.ts`), 조직 조회(`api/directory.ts`의 관리 화면용 조회·조직도)는 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다. ERD에 없는 기능(부서 정렬 순서, 직급 코드, 최근 접속)은 화면에 없고, 사원 등록은 비밀번호를 받는다. 사원번호·부서 코드 형식(가정값, `features/admin/lib/orgRules.ts`)은 서버에 검사가 없어 서버 어댑터가 먼저 확인한다. 부서 삭제·직급 수정·직급 삭제는 서버 API(API-271·272·273, 2026-10-08)를 쓰고, 퇴사자가 남은 부서·직급은 서버가 삭제를 막는다. 메신저·업무방의 멤버 선택은 서버 조직도(`GET /departments`)를 쓴다(`directoryApi.getOrgChart`).
 - 업무·알림: `api/tasks.ts`·`api/notifications.ts`가 `api/server/tasks.ts`·`notifications.ts`를 부른다. 업무 범위(내 담당·내가 만든 업무·전체)는 서버 `GET /tasks?scope=`로 거르고, 업무 추가·고치기의 담당자는 조직도(`GET /departments`)에서 고른다. 고치기(`PATCH /tasks/:id`, API-274)는 등록자·담당자, 완료는 담당자만 할 수 있고(로그인 사원은 `GET /auth/me`), 연결 화면은 `/`로 시작하는 경로만 받는다. 마감일은 필수다(2026-10-08, `task.creator_id`·`link_path` 추가). 업무(`api/tasks.ts`)와 알림(`api/notifications.ts`)은 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다(가짜 DB 시험은 알림 행을 직접 읽는다, `scenarioKit`의 `mockNotificationsOf`). 알림은 내용 한 줄이라 제목 자리에 보이고 부서 표시가 없다. 읽음·모두 읽음은 서버 임시 API(`POST notifications/:id/read`·`read-all`)를 쓴다. 알림은 서버가 본 거래 안에서 보낸다(업무 지정, 구매요청 승인 요청·결과). 멘션·업무방 메시지 알림은 서버가 메시지와 함께 만든다.
 - 기준정보 화면: `api/masterData.ts`가 `api/server/masterData.ts`를 부른다(API-165~188). 강종·품목·야드 id는 서버 id다. ERD·API 명세에 없는 기능(준비 상태, 모든 삭제, 강종 수정, 사용 여부·참조 표시, 라우팅 공정 빼기·순서 바꾸기, 원단위 비우기)은 서버 모드에서 숨기거나 막는다. 쓰인 규격의 치수 수정은 저장할 때 서버가 MST-002로 거부한다. 원단위·라우팅은 일괄 저장 API가 없어 칸마다 차례로 보낸다(중간에 실패하면 앞 칸만 저장된다).
 - 대시보드 위젯: 납기 위험 수주는 수주 충족 위젯 API, 강종별 불합격률은 검사 목록과 강종, 생산량은 LOT 목록과 품목 이론중량을 화면에서 묶는다. 출하 실적은 `GET /dashboard/widgets/shipment-result`(출고 확정 시각 기준), 공정별 수율은 `GET /dashboard/widgets/process-yield`(완료 실적의 Σ산출 ÷ Σ투입, 투입량 가중 계획 수율)다. 추이 기간은 오늘 포함 최근 30일(가정값). 연주 계획 대비 매수는 서버에 손실 매수가 없어 비어 있다. 여재 보유 기간은 `GET /dashboard/widgets/surplus-age`(미배정 합격 슬래브 − 예약 매수, 생산완료일부터 보유 일수, inventory.md 8-1)다. 진행 중인 코일 수주용으로 만든 슬래브는 여재에서 뺀다. 화면에서 묶는 위젯(원료 잔량 대비 소요·구매 진행·납기 위험·불합격률·생산량)의 권한은 서버 로그인 사원(`/auth/me`)의 역할 권한으로 본다.
