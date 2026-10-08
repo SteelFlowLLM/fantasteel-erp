@@ -413,10 +413,15 @@ async function seedInspectionStandards(steelGradeId: Map<string, number>) {
   for (const grade of SPEC_GRADES) await add(grade, 'HOT_ROLLING', must(HOT_ROLLING_ITEMS[grade], grade));
 }
 
+/** --organization-only: 조직(직급·역할·권한·부서·사원)만 넣는다. 공용 DB는 기준정보를 화면에서 등록한다 (2026-10-08 결정) */
+const organizationOnly = process.argv.includes('--organization-only');
+
 async function main() {
   await seedOrganization();
-  const steelGradeId = await seedMasterData();
-  await seedInspectionStandards(steelGradeId);
+  if (!organizationOnly) {
+    const steelGradeId = await seedMasterData();
+    await seedInspectionStandards(steelGradeId);
+  }
   const counts = {
     employee: await prisma.employee.count(),
     rolePermission: await prisma.rolePermission.count(),
