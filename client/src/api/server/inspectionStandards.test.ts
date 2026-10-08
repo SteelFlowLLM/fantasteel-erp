@@ -1,11 +1,9 @@
-// 검사 기준 화면의 서버 모드 (api/server/inspectionStandards.ts): 서버 응답을 화면 모양으로 바꾸고, 강종 id는 코드로 맞춘다.
+// 검사 기준 화면의 서버 모드 (api/server/inspectionStandards.ts): 서버 응답을 화면 모양으로 바꾸고, 강종 id는 서버 id 그대로 쓴다.
 import type { InspectionStandardListItem } from '@fantasteel/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InputError } from '@/api/errors';
 import { resetServerSessionForTest } from '@/api/http';
 import { inspectionStandardApi, type InspectionStandardItemInput } from '@/api/inspectionStandards';
-import { resetMasterIdCacheForTest } from '@/api/server/masterIds';
-import { getMockDb } from '@/mock/db';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 interface Call {
@@ -32,9 +30,9 @@ function useServer(respond: (call: Call) => Response) {
 }
 
 const page = (items: InspectionStandardListItem[]) => ok({ items, page: 1, size: 100, total: items.length });
-const mockGradeId = (code: string) => getMockDb().read((t) => t.steelGrade.find((g) => g.steelGradeCode === code)?.id ?? 0);
+/** 강종 목록 (적용 규격 번호) */
+const grades = () => ok([{ id: 902, steelGradeCode: 'SM355A', steelGradeName: 'SM355A', standardNo: 'KS D 3515:2018' }]);
 
-/** 서버 시드 id는 가짜 DB id와 다르다 (강종 SM355A = 902) */
 function serverStandard(overrides: Partial<InspectionStandardListItem> = {}): InspectionStandardListItem {
   return {
     inspectionStandardId: 501,
@@ -86,7 +84,6 @@ const buildItem = (overrides: Partial<InspectionStandardItemInput> = {}): Inspec
 
 beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', 'server');
-  resetMasterIdCacheForTest();
   actAs(SEED_EMPLOYEE_NO.quality);
   resetServerSessionForTest(SEED_EMPLOYEE_NO.quality);
 });
@@ -96,10 +93,10 @@ afterEach(() => {
 });
 
 describe('검사 기준 서버 모드: 조회', () => {
-  it('목록은 공정으로 서버에서 거르고, 강종은 화면 id의 코드로 거른다. 강종 id는 화면 id로 바꾼다', async () => {
+  it('목록은 공정으로 서버에서 거르고, 강종은 서버 강종 id로 거른다', async () => {
     const ss = serverStandard({ inspectionStandardId: 502, inspectionStandardCode: 'QS-SS275-HR', steelGradeId: 903, steelGradeCode: 'SS275' });
     useServer(() => page([serverStandard({ versionNo: 3 }), ss]));
-    const rows = await inspectionStandardApi.list({ processType: 'HOT_ROLLING', steelGradeId: mockGradeId('SM355A') });
+    const rows = await inspectionStandardApi.list({ processType: 'HOT_ROLLING', steelGradeId: 902 });
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /inspection-standards?processType=HOT_ROLLING&page=1&size=100']);
     expect(rows).toEqual([
       {
@@ -107,7 +104,7 @@ describe('검사 기준 서버 모드: 조회', () => {
         inspectionStandardCode: 'QS-SM355A-HR',
         version: 3,
         processType: 'HOT_ROLLING',
-        steelGradeId: mockGradeId('SM355A'),
+        steelGradeId: 902,
         steelGradeCode: 'SM355A',
         itemCount: 2,
         versionCount: 3,
@@ -131,17 +128,17 @@ describe('검사 기준 서버 모드: 조회', () => {
       { inspectionStandardId: 501, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 2, inspectionCount: 3 },
       { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
     ];
-    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), inspectionCount: 3, versions }) : fail(404, 'COM-003', '없음')));
+    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), inspectionCount: 3, versions }) : c.path === '/steel-grades' ? grades() : fail(404, 'COM-003', '없음')));
     const detail = await inspectionStandardApi.get(501);
-    // 목록을 다시 읽지 않는다 (버전 1이라 앞 버전도 없다)
-    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501']);
+    // 목록을 다시 읽지 않는다 (버전 1이라 앞 버전도 없다). 적용 규격 번호는 강종 목록에서
+    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501', '/steel-grades']);
     expect(detail).toMatchObject({
       id: 501,
       version: 1,
       isCurrent: false,
       currentId: 520,
       versionCount: 2,
-      steelGradeId: mockGradeId('SM355A'),
+      steelGradeId: 902,
       standardNo: 'KS D 3515:2018',
       previousItems: null,
       inspectionCount: 3,
@@ -164,6 +161,7 @@ describe('검사 기준 서버 모드: 조회', () => {
     useServer((c) => {
       if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), inspectionCount: 0, versions });
       if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), inspectionCount: 3, versions });
+      if (c.path === '/steel-grades') return grades();
       return fail(404, 'COM-003', '없음');
     });
     const detail = await inspectionStandardApi.get(520);
@@ -178,13 +176,14 @@ describe('검사 기준 서버 모드: 조회', () => {
 });
 
 describe('검사 기준 서버 모드: 변경', () => {
-  it('새 기준: 서버 강종 id는 검사 기준 목록의 같은 강종 코드에서 찾고, 항목은 서버 이름으로 보낸다', async () => {
+  it('새 기준: 강종 id는 서버 id 그대로 보내고(목록을 읽지 않는다), 항목은 서버 이름으로 보낸다', async () => {
     useServer((c) => {
       if (c.method === 'POST') return ok(serverStandard({ inspectionStandardId: 610, processType: 'STEELMAKING', inspectionStandardCode: 'QS-SM355A-ST' }));
       return page([serverStandard()]);
     });
-    const id = await inspectionStandardApi.create({ processType: 'STEELMAKING', steelGradeId: mockGradeId('SM355A'), items: [buildItem({ minThicknessMm: '6' })] });
+    const id = await inspectionStandardApi.create({ processType: 'STEELMAKING', steelGradeId: 902, items: [buildItem({ minThicknessMm: '6' })] });
     expect(id).toBe(610);
+    expect(calls.map((c) => c.method)).toEqual(['POST']);
     const post = calls.find((c) => c.method === 'POST');
     expect(post).toEqual({
       method: 'POST',
@@ -197,19 +196,11 @@ describe('검사 기준 서버 모드: 변경', () => {
     });
   });
 
-  it('검사 기준 목록에 없는 강종은 규격 목록(/items)에서 찾고, 거기도 없으면(권한 없음 포함) COM-003', async () => {
-    useServer((c) => {
-      if (c.path === '/items') return ok([{ id: 1, itemCode: 'X', steelGradeId: 904, steelGradeCode: 'SM355B' }]);
-      if (c.method === 'POST') return ok(serverStandard({ inspectionStandardId: 611 }));
-      return page([serverStandard()]);
-    });
-    await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: mockGradeId('SM355B'), items: [buildItem()] });
-    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ steelGradeId: 904 });
-
-    resetMasterIdCacheForTest();
-    useServer((c) => (c.path === '/items' ? fail(403, 'COM-002', '권한이 없어요') : page([serverStandard()])));
-    await expect(inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: mockGradeId('SS275'), items: [buildItem()] })).rejects.toMatchObject({ code: 'COM-003' });
-    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  it('서버에서 새로 등록한 강종(검사 기준이 아직 없는 강종)도 그 id로 바로 만든다', async () => {
+    useServer((c) => (c.method === 'POST' ? ok(serverStandard({ inspectionStandardId: 611 })) : fail(404, 'COM-003', '없음')));
+    await inspectionStandardApi.create({ processType: 'HOT_ROLLING', steelGradeId: 907, items: [buildItem()] });
+    expect(calls.map((c) => [c.method, c.path])).toEqual([['POST', '/inspection-standards']]);
+    expect(calls[0].body).toMatchObject({ steelGradeId: 907 });
   });
 
   it('공통 기준과 잘못된 항목은 서버를 부르지 않고 입력 오류', async () => {

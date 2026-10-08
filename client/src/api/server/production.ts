@@ -1,5 +1,5 @@
 // 생산 화면(생산계획·작업 실적·열연 투입) ↔ 서버 API (server/src/modules/production). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 생산계획·LOT·실적·배정 id는 서버 id를 그대로 쓴다. 규격 id만 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
+// 생산계획·LOT·실적·배정·규격 id는 서버 id를 그대로 쓴다. 응답에 없는 규격 이론중량·이름만 시드의 같은 코드로 채운다(api/server/masterIds.ts).
 // LOT 추적·검사 입력도 서버 모드라 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
 import type {
   HotRollingDetail as ServerHotRollingDetail,
@@ -14,7 +14,7 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { mockItemOf } from '@/api/server/masterIds';
+import { seedItemOf } from '@/api/server/masterIds';
 import type { CancelPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
@@ -36,7 +36,6 @@ const PAGE_SIZE = 100;
 
 const productType = (itemType: string): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
 /** 화면 규격 id (규격 코드로 찾는다). 화면에 없는 서버 규격이면 서버 id를 그대로 둔다 */
-const mockItemIdOf = (itemCode: string, serverItemId: number) => mockItemOf(itemCode)?.id ?? serverItemId;
 const upper = (value: string | null | undefined) => (value ?? '').trim().toUpperCase() || undefined;
 
 async function listAllPlans(query: Record<string, string | number | undefined> = {}): Promise<ServerPlanSummary[]> {
@@ -58,7 +57,7 @@ function toListRow(s: ServerPlanSummary): ProductionPlanListRow {
     productionPlanStatus: s.productionPlanStatus,
     isReproduction: s.isReproduction,
     isSurplusOnCompletion: isSurplusOnCompletion(s),
-    itemId: mockItemIdOf(s.itemCode, s.itemId),
+    itemId: s.itemId,
     itemCode: s.itemCode,
     itemName: s.itemName,
     itemType: productType(s.itemType),
@@ -132,7 +131,7 @@ function toPlanLotRow(lot: PlanLot, heatDates: Map<number, string>): PlanLotRow 
 
 function toPlanView(d: ServerPlanDetail): ProductionPlanView {
   const f = d.formation;
-  const slabMock = f ? mockItemOf(f.slabItemCode) : undefined;
+  const slabSeed = f ? seedItemOf(f.slabItemCode) : undefined;
   // 용선 톤: 이 계획 히트에 투입한 용선 (제선 실적은 계획에 묶이지 않는다)
   const hotMetalTons = d.results.filter((r) => r.processType === 'STEELMAKING').flatMap((r) => r.inputs.filter((i) => i.lotType === 'HOT_METAL' && i.inputTon !== null).map((i) => i.inputTon ?? '0'));
   const plannedSlabQty = f ? f.slabQtyPerHeat * d.heatCount : 0;
@@ -147,14 +146,14 @@ function toPlanView(d: ServerPlanDetail): ProductionPlanView {
     cancelledAt: d.cancelledAt,
     updatedAt: d.updatedAt,
     item: {
-      id: mockItemIdOf(d.itemCode, d.itemId),
+      id: d.itemId,
       itemCode: d.itemCode,
       itemName: d.itemName,
       itemType: productType(d.itemType),
       steelGradeCode: d.steelGradeCode,
-      theoreticalWeightTon: f?.theoreticalWeightTon ?? mockItemOf(d.itemCode)?.theoreticalWeightTon ?? '0.000',
+      theoreticalWeightTon: f?.theoreticalWeightTon ?? seedItemOf(d.itemCode)?.theoreticalWeightTon ?? '0.000',
     },
-    slabSpec: f ? { id: slabMock?.id ?? f.slabItemId, itemCode: f.slabItemCode, itemName: slabMock?.itemName ?? f.slabItemCode, theoreticalWeightTon: f.slabTheoreticalWeightTon } : null,
+    slabSpec: f ? { id: f.slabItemId, itemCode: f.slabItemCode, itemName: slabSeed?.itemName ?? f.slabItemCode, theoreticalWeightTon: f.slabTheoreticalWeightTon } : null,
     salesOrder:
       d.salesOrderId !== null && d.salesOrderNo !== null && d.salesOrderItemId !== null
         ? {
@@ -267,7 +266,7 @@ export const serverProductionPlanApi = {
 // ── 작업 실적 ────────────────────────────────────────────
 
 function toStock(m: ServerWorkContext['ironmakingMaterials'][number]): RawMaterialStock {
-  return { itemId: mockItemIdOf(m.itemCode, m.itemId), itemCode: m.itemCode, itemName: m.itemName, rawMaterialType: m.rawMaterialType, consumptionRate: m.consumptionRate, remainingTon: m.remainingTon };
+  return { itemId: m.itemId, itemCode: m.itemCode, itemName: m.itemName, rawMaterialType: m.rawMaterialType, consumptionRate: m.consumptionRate, remainingTon: m.remainingTon };
 }
 
 const registered = (r: ServerResultView): RegisteredResult => ({ productionResultId: r.id, outputLotNos: r.outputs.map((o) => o.lotNo) });
@@ -384,15 +383,15 @@ function toRollingDetail(d: ServerHotRollingDetail): RollingDetail {
       productionPlanStatus: d.plan.productionPlanStatus,
       salesOrderNo: d.plan.salesOrderNo,
       dueDate: d.plan.dueDate,
-      coilItem: { ...d.coilItem, id: mockItemIdOf(d.coilItem.itemCode, d.coilItem.id) },
-      slabItem: { ...d.slabItem, id: mockItemIdOf(d.slabItem.itemCode, d.slabItem.id) },
+      coilItem: d.coilItem,
+      slabItem: d.slabItem,
       shortageQty: d.shortageQty,
       rolledQty: d.usableCoilQty,
       failedCoilQty: d.failedCoilQty,
       allocatedQty: d.confirmedAllocationQty,
       neededQty: d.neededQty,
       slabPool: {
-        itemId: mockItemIdOf(d.slabItem.itemCode, d.slabItem.id),
+        itemId: d.slabItem.id,
         eligibleQty: d.slabPool.onHandQty,
         activeReservedQty: d.slabPool.reservedQty,
         hotRollingConfirmedQty: d.slabPool.rollingAllocatedQty,

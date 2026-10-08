@@ -5,7 +5,6 @@
 import type { ItemView, LotSummary, OrderFulfillmentWidget, PageResult, ProcessFlowWidget, ProcessYieldWidget, ProductStockWidget, QualityInspectionListItem, ShipmentResultWidget, SurplusAgeWidget, SteelGradeView } from '@fantasteel/shared';
 import type { DeliveryRiskData, OrderFulfillmentData, ProcessFlowData, ProcessYieldData, ProductionVolumeData, ProductStockData, RejectRateData } from '@/api/dashboard';
 import { serverRequest } from '@/api/http';
-import { mockItemOf } from '@/api/server/masterIds';
 import type { ProductItemType, SalesOrderItemStatus } from '@/codes';
 import { bucketByDate, countRatio, isWithin, type TrendWindow } from '@/features/dashboard/lib/widgetMath';
 import { toSeoulDateString } from '@/lib/seoulDate';
@@ -65,7 +64,7 @@ async function productStock(): Promise<ProductStockData> {
       availableTon: t.availableTon,
     })),
     items: w.items.map((r) => ({
-      itemId: mockItemOf(r.itemCode)?.id ?? r.itemId,
+      itemId: r.itemId,
       itemCode: r.itemCode,
       itemType: productType(r.itemType),
       steelGradeCode: r.steelGradeCode,
