@@ -55,6 +55,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   isMine: false,
   content,
   attachmentName: null,
+  unreadMemberCount: 0,
   createdAt: AT,
   ...extra,
 });
@@ -151,6 +152,23 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     const file = form.get('file') as File;
     expect(file.name).toBe('성적서.txt');
     expect(await file.text()).toBe('hello');
+  });
+
+  it('파일 모아보기는 GET …/attachments, 검색은 GET …/messages/search?q=, 안 읽은 멤버 수는 그대로 쓴다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/chat-rooms/7/attachments') return ok({ items: [message(9, null, { attachmentName: 'a.pdf', unreadMemberCount: 1 })], hasMore: true });
+      if (c.path === '/chat-rooms/7/messages/search') return ok({ items: [message(8, 'SO 확인')], hasMore: false });
+      return undefined;
+    });
+    const files = await messengerApi.listFiles({ chatRoomId: 7, limit: 5 });
+    expect(files).toMatchObject({ hasMore: true, items: [{ id: 9, file: { name: 'a.pdf' }, unreadMemberCount: 1 }] });
+    const found = await messengerApi.searchMessages({ chatRoomId: 7, keyword: 'SO' });
+    expect(found.items.map((m) => m.content)).toEqual(['SO 확인']);
+    expect(calls.filter((c) => c.path !== '/chat-rooms/7').map((c) => [c.path, c.query])).toEqual([
+      ['/chat-rooms/7/attachments', { limit: '5' }],
+      ['/chat-rooms/7/messages/search', { q: 'SO' }],
+    ]);
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

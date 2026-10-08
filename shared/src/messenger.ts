@@ -1,5 +1,10 @@
 import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 
+/** 메시지 검색어 최대 길이 */
+export const MESSAGE_SEARCH_QUERY_MAX = 100;
+/** 메시지 검색 결과 기본·최대 개수 */
+export const MESSAGE_SEARCH_SIZE = 30;
+
 /** 메시지 본문 최대 길이 (ERD는 text라 제한이 없다. 화면 입력과 같은 4000자로 둔다) */
 export const MESSAGE_CONTENT_MAX = 4000;
 /** 그룹방 이름 최대 길이 */
@@ -91,6 +96,8 @@ export interface ChatMessageView {
   content: string | null;
   /** 첨부 파일 이름. 내려받기는 GET attachments/:메시지 id */
   attachmentName: string | null;
+  /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
+  unreadMemberCount: number;
   createdAt: string;
 }
 
@@ -142,7 +149,15 @@ export const MESSENGER_EVENT = {
   ROOM_READ: 'room:read',
   /** 방이 생기거나 멤버가 바뀜. 페이로드 ChatRoomUpdatedEvent */
   ROOM_UPDATED: 'room:updated',
+  /** 다른 멤버가 읽음 위치를 옮김 (메시지별 안 읽은 사람 수 갱신). 페이로드 ChatMemberReadEvent */
+  MEMBER_READ: 'member:read',
 } as const;
+
+export interface ChatMemberReadEvent {
+  chatRoomId: number;
+  employeeId: number;
+  lastReadMessageId: number | null;
+}
 
 export type ChatRoomReadEvent = ChatRoomReadResult;
 

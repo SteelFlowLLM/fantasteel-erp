@@ -97,6 +97,7 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
     createdAt: message.createdAt,
     mentionsMe: !message.isMine && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: [],
+    unreadMemberCount: message.unreadMemberCount,
   };
 }
 
@@ -188,6 +189,21 @@ export const serverMessengerApi = {
     }
     const myTargets = myTargetsOf(room);
     return { items: items.map((m) => toMessageView(m, myTargets)), hasMore };
+  },
+
+  listFiles: async ({ chatRoomId, limit }: { chatRoomId: number; limit: number }): Promise<MessagePage> => {
+    const [room, page] = await Promise.all([
+      roomRaw(chatRoomId),
+      serverRequest<ServerMessagePage>('GET', `/chat-rooms/${chatRoomId}/attachments`, { query: { limit: Math.min(limit, MESSAGE_PAGE_SIZE_MAX) } }),
+    ]);
+    const myTargets = myTargetsOf(room);
+    return { items: page.items.map((m) => toMessageView(m, myTargets)), hasMore: page.hasMore };
+  },
+
+  searchMessages: async ({ chatRoomId, keyword }: { chatRoomId: number; keyword: string }): Promise<MessagePage> => {
+    const [room, page] = await Promise.all([roomRaw(chatRoomId), serverRequest<ServerMessagePage>('GET', `/chat-rooms/${chatRoomId}/messages/search`, { query: { q: keyword } })]);
+    const myTargets = myTargetsOf(room);
+    return { items: page.items.map((m) => toMessageView(m, myTargets)), hasMore: page.hasMore };
   },
 
   getFile: async ({ messageId, fileName }: { messageId: number; fileName: string }): Promise<MessageFileContent> => {

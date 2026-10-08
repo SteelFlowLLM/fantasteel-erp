@@ -140,6 +140,30 @@ export class MessengerRepository {
     });
   }
 
+  /** 첨부가 있는 메시지만, before보다 오래된 것을 최신순으로 take개 (파일 모아보기) */
+  findAttachmentMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
+    return tx.message.findMany({
+      where: { chatRoomId, attachmentPath: { not: null }, id: before === undefined ? undefined : { lt: before } },
+      orderBy: { id: 'desc' },
+      take,
+      include: { sender: { include: employeeInclude } },
+    });
+  }
+
+  /** 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시) */
+  searchMessages(tx: Tx, chatRoomId: number, keyword: string, before: number | undefined, take: number) {
+    return tx.message.findMany({
+      where: { chatRoomId, content: { contains: keyword, mode: 'insensitive' }, id: before === undefined ? undefined : { lt: before } },
+      orderBy: { id: 'desc' },
+      take,
+      include: { sender: { include: employeeInclude } },
+    });
+  }
+
+  findMemberReads(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true, lastReadMessageId: true } });
+  }
+
   createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null }) {
     return tx.message.create({ data, include: { sender: { include: employeeInclude } } });
   }

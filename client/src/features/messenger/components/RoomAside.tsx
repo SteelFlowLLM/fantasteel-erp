@@ -1,4 +1,4 @@
-// 방 정보 칸: 업무방이면 수주 요약, 아니면 방 정보 + 멤버
+// 방 정보 칸: 대화 검색, 업무방이면 수주 요약·아니면 방 정보, 멤버, 파일 모아보기
 import type { ReactNode } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import type { ChatRoomDetailView } from '@/api/messenger';
@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Tag } from '@/components/Tag';
 import { WorkRoomSummary } from '@/features/messenger/components/WorkRoomSalesOrder';
+import { RoomFiles, RoomSearch } from '@/features/messenger/components/RoomAsideTools';
 import { fmtDate } from '@/lib/format';
 
 function Section({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
@@ -24,6 +25,9 @@ function Section({ title, actions, children }: { title: ReactNode; actions?: Rea
 export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void }) {
   return (
     <aside className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex" aria-label="방 정보">
+      <Section title="대화 검색">
+        <RoomSearch chatRoomId={room.id} />
+      </Section>
       {room.chatRoomType === 'WORK' ? (
         <Section title="수주 요약">
           <WorkRoomSummary room={room} />
@@ -89,6 +93,9 @@ export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailVi
           </li>
         </ul>
         {room.chatRoomType === 'DIRECT' ? <p className="text-cap text-ink-3">1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요</p> : null}
+      </Section>
+      <Section title="파일">
+        <RoomFiles chatRoomId={room.id} />
       </Section>
     </aside>
   );
