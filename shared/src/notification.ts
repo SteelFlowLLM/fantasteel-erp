@@ -26,13 +26,20 @@ export interface NotificationReadAllResult {
   readCount: number;
 }
 
-/** 업무 한 건 (REQ-NTF-001). 등록자는 ERD에 칸이 없어 담당자만 둔다 */
+/** 업무 목록 범위 (API-239 scope): 담당한 업무, 등록한 업무, 담당하거나 등록한 업무 */
+export const TASK_SCOPES = ['mine', 'created', 'all'] as const;
+export type TaskScope = (typeof TASK_SCOPES)[number];
+
+/** 업무 한 건 (REQ-NTF-001) */
 export interface TaskView {
   id: number;
   taskTitle: string;
   taskDescription: string | null;
   assigneeId: number;
   assigneeName: string;
+  /** 등록자 (ERD task.creator_id, 2026-10-08) */
+  creatorId: number;
+  creatorName: string;
   /** YYYY-MM-DD */
   dueDate: string;
   taskStatus: TaskStatus;
@@ -40,6 +47,6 @@ export interface TaskView {
   updatedAt: string;
   /** 메신저 메시지에서 등록한 업무의 원본 메시지 (16번, 없으면 null) */
   messageId: number | null;
-  /** 원본 메시지로 가는 화면 경로 `/messenger?room=&message=` (없으면 null) */
+  /** 관련 화면 경로: 등록·수정 때 넣은 경로, 없고 메시지에서 등록했으면 `/messenger?room=&message=`, 둘 다 없으면 null */
   linkPath: string | null;
 }
