@@ -10,7 +10,7 @@ const base = 'postgresql://postgres:postgres@localhost:54322';
 const groups = [
   ['fs_common', ['src/common', 'src/modules/auth', 'src/modules/organization']],
   ['fs_master', ['src/modules/master-data']],
-  ['fs_sales', ['src/modules/sales-order', 'src/modules/inventory', 'src/modules/shipment']],
+  ['fs_sales', ['src/modules/sales-order', 'src/modules/inventory', 'src/modules/shipment', 'src/modules/dashboard']],
   ['fs_prod', ['src/modules/production', 'src/modules/mrp', 'src/modules/quality']],
   ['fs_pur', ['src/modules/purchasing', 'src/modules/message-action']],
   ['fs_collab', ['src/modules/messenger', 'src/modules/notification']],

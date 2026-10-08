@@ -26,7 +26,7 @@ interface Stage {
 const count = (n: number, unit: string) => (
   <>
     {fmtInt(n)}
-    <small className="ml-0.5 text-xs font-medium text-ink-3">{unit}</small>
+    <small className="ml-0.5 text-xs font-semibold text-ink-2">{unit}</small>
   </>
 );
 
@@ -59,7 +59,7 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       screen: SCREEN.inventories,
       value: (
         <>
-          {count(inventories.slabAvailableQty, '매')} <span className="text-ink-3">·</span> {count(inventories.coilAvailableQty, '개')}
+          {count(inventories.slabAvailableQty, '매')} <span className="text-ink-2">·</span> {count(inventories.coilAvailableQty, '개')}
         </>
       ),
       detail: '슬래브 · 코일',
@@ -91,7 +91,7 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
         const inner = (
           <>
             <span className="flex min-w-0 items-center gap-1">
-              <span className={cn('truncate text-cap font-medium', isMine ? 'text-run' : 'text-ink-2')} title={stage.label}>
+              <span className={cn('truncate text-xs font-semibold', isMine ? 'text-run' : 'text-ink')} title={stage.label}>
                 {stage.label}
               </span>
               {isMine ? (
@@ -106,10 +106,10 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 권한 없음
               </span>
             ) : (
-              <span className={cn('text-2xl font-semibold whitespace-nowrap tabular-nums', isMine && 'text-run')}>{stage.value}</span>
+              <span className={cn('text-2xl font-bold whitespace-nowrap tabular-nums', isMine ? 'text-run' : 'text-ink')}>{stage.value}</span>
             )}
             {stage.value !== null && stage.detail ? (
-              <span className="truncate text-cap text-ink-3" title={stage.detail}>
+              <span className="truncate text-cap font-medium text-ink-2" title={stage.detail}>
                 {stage.detail}
               </span>
             ) : null}
@@ -118,12 +118,12 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
         const boxClass = cn(
           'flex min-w-[104px] flex-1 flex-col justify-center gap-1 rounded-md border px-3 py-2',
           // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식)
-          isMine ? 'border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run)]' : 'border-line bg-surface-2',
+          isMine ? 'border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run)]' : 'border-line-strong bg-surface',
         );
         const canOpen = stage.value !== null && canOpenScreen(me, stage.screen.access);
         return (
           <Fragment key={stage.key}>
-            {index > 0 ? <Icon name="chevron-right" size="sm" className="flex-none self-center text-ink-3" /> : null}
+            {index > 0 ? <Icon name="chevron-right" size="sm" className="flex-none self-center text-ink-2" /> : null}
             {canOpen ? (
               <Link href={stage.screen.href} className={cn(boxClass, 'text-ink no-underline hover:border-run hover:bg-surface')}>
                 {inner}

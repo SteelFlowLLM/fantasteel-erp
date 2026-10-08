@@ -3,6 +3,7 @@
 // - 없는 대상 id는 COM-003, 화면을 연 뒤 다른 곳에서 바뀌었으면 COM-001, 쓰인 규격의 치수·이론중량 변경은 MST-002.
 // - 중복·형식·참조 중 삭제처럼 9.3에 코드가 없는 거부는 InputError(입력칸별 안내)다.
 // - 기준정보 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
+// - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server) 조회·변경은 api/server/masterData.ts가 서버를 부른다.
 import {
   ITEM_TYPE_LABEL,
   ITEM_TYPE_UNIT_TYPE,
@@ -22,6 +23,8 @@ import {
 } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
+import { serverMasterDataApi, serverMasterDataWriteApi } from '@/api/server/masterData';
 import { assertUnchanged, decimalText, nonNegativeInteger, optionalText, requiredText, requireRow } from '@/api/validation';
 import { findCurrentStandard } from '@/features/inspectionStandards/lib/standardItems';
 import { computeMasterReadiness, type MasterReadiness } from '@/features/masterData/lib/readiness';
@@ -42,6 +45,12 @@ import { specificConsumptionUnitOf, type SpecificConsumptionUnit } from '@/lib/u
 import { calcHotRollingYieldRate, calcTheoreticalWeightTon, compareDecimal, formatDecimal } from '@/lib/weight';
 import type { ItemRow, MockTables, RowOf, TableName } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
+
+/**
+ * 서버 모드: ERD·API에 없는 화면 기능(준비 상태, 삭제, 강종 수정, 사용 여부 표시)을 숨긴다.
+ * 가짜 DB 모드는 그대로 둔다.
+ */
+export const isMasterServerMode = (): boolean => isServerDataSource();
 
 // ── 조회 키 ──────────────────────────────────────────────
 
@@ -437,7 +446,7 @@ export const masterDataApi = {
 
   // ── 제품 규격 (REQ-MST-003) ──
   listProductSpecs: (): Promise<MasterProductSpecView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listProductSpecs() : mockQuery((tables) =>
       tables.item
         .filter(isProductItem)
         .map((item): MasterProductSpecView => {
@@ -475,7 +484,7 @@ export const masterDataApi = {
     ),
 
   createProductSpec: (input: ProductSpecInput): Promise<MasterProductSpecView['id']> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createProductSpec(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       if (!PRODUCT_ITEM_TYPES.includes(input.itemType)) throw new InputError('품목 유형을 확인해 주세요', { itemType: '슬래브 또는 코일을 골라 주세요' });
       const spec = readSpecInput(tx.tables, input.itemType, input, null);
@@ -499,7 +508,7 @@ export const masterDataApi = {
 
   /** 쓰이지 않은 규격은 모두 고칠 수 있고, 쓰인 규격은 기본 야드만 고친다 (MST-002) */
   updateProductSpec: (input: ProductSpecUpdateInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.updateProductSpec(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'item', input.id, '제품 규격');
       if (!isProductItem(row)) throw new ApiError('COM-003', '제품 규격');
@@ -556,7 +565,7 @@ export const masterDataApi = {
 
   // ── 규격 매핑 (REQ-MST-004) ──
   listSpecMappings: (): Promise<MasterSpecMappingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSpecMappings() : mockQuery((tables) =>
       tables.specMapping
         .flatMap((m): MasterSpecMappingView[] => {
           const slab = tables.item.find((i) => i.id === m.slabItemId);
@@ -578,7 +587,7 @@ export const masterDataApi = {
     ),
 
   createSpecMapping: (input: SpecMappingInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createSpecMapping(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       if (input.slabItemId === null) errors.add('slabItemId', '슬래브 규격을 선택해 주세요');
@@ -608,7 +617,7 @@ export const masterDataApi = {
 
   // ── 강종 (REQ-MST-002). 성분 규격은 제강 검사 기준에서 관리한다 ──
   listSteelGrades: (): Promise<MasterSteelGradeView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSteelGrades() : mockQuery((tables) =>
       tables.steelGrade.map((grade): MasterSteelGradeView => {
         const standard = findCurrentStandard(tables.inspectionStandard, 'STEELMAKING', grade.id);
         return {
@@ -632,7 +641,7 @@ export const masterDataApi = {
     ),
 
   createSteelGrade: (input: SteelGradeInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createSteelGrade(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const code = readCode(errors, 'steelGradeCode', input.steelGradeCode, '강종 코드', 20, STEEL_GRADE_CODE_PATTERN, 'SM355A');
@@ -669,7 +678,7 @@ export const masterDataApi = {
 
   // ── 라우팅 (REQ-MST-005) ──
   listRoutings: (): Promise<MasterRoutingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listRoutings() : mockQuery((tables) =>
       PRODUCT_ITEM_TYPES.map((itemType) => {
         const rows = tables.routing.filter((r) => r.itemType === itemType).sort((a, b) => a.processSeq - b.processSeq);
         return {
@@ -682,7 +691,7 @@ export const masterDataApi = {
 
   /** 품목 유형의 공정 순서와 계획 수율을 통째로 저장한다. 순서 = 목록 순서 (0 < 수율 ≤ 1, BP-MST-01) */
   saveRouting: (input: RoutingSaveInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.saveRouting(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       if (!PRODUCT_ITEM_TYPES.includes(input.itemType)) throw new InputError('품목 유형을 확인해 주세요');
       const existing = tx.tables.routing.filter((r) => r.itemType === input.itemType);
@@ -722,7 +731,7 @@ export const masterDataApi = {
 
   // ── 배합 원단위 (REQ-MST-006) ──
   listSpecificConsumptions: (): Promise<MasterSpecificConsumptionView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSpecificConsumptions() : mockQuery((tables) =>
       tables.specificConsumption.flatMap((c) => {
         const item = tables.item.find((i) => i.id === c.itemId);
         if (!item?.rawMaterialType) return [];
@@ -732,7 +741,7 @@ export const masterDataApi = {
 
   /** 바뀐 칸을 한 번에 저장한다 (하나라도 틀리면 아무것도 저장하지 않음). 입력칸 키 = `${itemId}:${steelGradeId ?? 'common'}` */
   saveSpecificConsumptions: (changes: SpecificConsumptionChange[]): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.saveSpecificConsumptions(changes) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const valid: { change: SpecificConsumptionChange; rate: string | null }[] = [];
@@ -766,7 +775,7 @@ export const masterDataApi = {
 
   // ── 원료 품목 (REQ-MST-001·007·008) ──
   listRawMaterials: (): Promise<MasterRawMaterialView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listRawMaterials() : mockQuery((tables) =>
       tables.item
         .filter((i): i is ItemRow & { rawMaterialType: RawMaterialType } => i.itemType === 'RAW_MATERIAL' && i.rawMaterialType !== null)
         .map((item) => ({
@@ -786,7 +795,7 @@ export const masterDataApi = {
     ),
 
   createRawMaterial: (input: RawMaterialInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createRawMaterial(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const code = requiredText(errors, 'itemCode', input.itemCode.toUpperCase(), '원료 코드', 50);
@@ -816,7 +825,7 @@ export const masterDataApi = {
 
   /** 원료 코드·원료 유형은 만든 뒤 바꾸지 않는다 (LOT 번호 RM-원료코드-…에 쓰임) */
   updateRawMaterial: (input: RawMaterialUpdateInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.updateRawMaterial(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'item', input.id, '원료');
       if (row.itemType !== 'RAW_MATERIAL') throw new ApiError('COM-003', '원료');
@@ -844,14 +853,14 @@ export const masterDataApi = {
 
   // ── 고객사·공급업체 (REQ-MST-007) ──
   listCustomers: (): Promise<MasterCustomerView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listCustomers() : mockQuery((tables) =>
       tables.customer
         .map((c) => ({ id: c.id, customerCode: c.customerCode, customerName: c.customerName, referenceText: formatReferenceText(countCustomerReferences(tables, c.id)), updatedAt: c.updatedAt }))
         .sort((a, b) => a.customerCode.localeCompare(b.customerCode)),
     ),
 
   createCustomer: (input: CustomerInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createCustomer(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const code = readCode(errors, 'customerCode', input.customerCode, '고객사 코드', 30, CODE_PATTERN, 'CUS-05');
@@ -863,7 +872,7 @@ export const masterDataApi = {
     }),
 
   updateCustomer: (input: CustomerUpdateInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.updateCustomer(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'customer', input.id, '고객사');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '고객사');
@@ -885,14 +894,14 @@ export const masterDataApi = {
     }),
 
   listSuppliers: (): Promise<MasterSupplierView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listSuppliers() : mockQuery((tables) =>
       tables.supplier
         .map((s) => ({ id: s.id, supplierCode: s.supplierCode, supplierName: s.supplierName, referenceText: formatReferenceText(countSupplierReferences(tables, s.id)), updatedAt: s.updatedAt }))
         .sort((a, b) => a.supplierCode.localeCompare(b.supplierCode)),
     ),
 
   createSupplier: (input: SupplierInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createSupplier(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const code = readCode(errors, 'supplierCode', input.supplierCode, '공급업체 코드', 30, CODE_PATTERN, 'SUP-05');
@@ -904,7 +913,7 @@ export const masterDataApi = {
     }),
 
   updateSupplier: (input: SupplierUpdateInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.updateSupplier(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'supplier', input.id, '공급업체');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '공급업체');
@@ -927,14 +936,14 @@ export const masterDataApi = {
 
   // ── 야드 (REQ-MST-008). 야드 안 위치는 관리하지 않는다 ──
   listYards: (): Promise<MasterYardView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource() ? serverMasterDataApi.listYards() : mockQuery((tables) =>
       tables.yard
         .map((y) => ({ id: y.id, yardCode: y.yardCode, yardName: y.yardName, yardType: y.yardType, referenceText: formatReferenceText(countYardReferences(tables, y.id)), updatedAt: y.updatedAt }))
         .sort((a, b) => a.yardCode.localeCompare(b.yardCode)),
     ),
 
   createYard: (input: YardInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.createYard(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const errors = new FieldErrors();
       const code = readCode(errors, 'yardCode', input.yardCode, '야드 코드', 30, CODE_PATTERN, 'YD-CL-02');
@@ -948,7 +957,7 @@ export const masterDataApi = {
 
   /** 야드 유형은 만든 뒤 바꾸지 않는다 (품목 기본 야드·LOT가 유형에 맞게 쓰고 있음) */
   updateYard: (input: YardUpdateInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.updateYard(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = requireRow(tx.tables, 'yard', input.id, '야드');
       assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '야드');
@@ -971,13 +980,13 @@ export const masterDataApi = {
 
   // ── 생산 설정값 (REQ-MST-009, 단일 행) ──
   getProductionSetting: (): Promise<MasterProductionSettingView | null> =>
-    mockQuery((tables) => {
+    isServerDataSource() ? serverMasterDataApi.getProductionSetting() : mockQuery((tables) => {
       const row = tables.productionSetting[0];
       return row ? { id: row.id, heatCapacityTon: row.heatCapacityTon, deliveryRiskDays: row.deliveryRiskDays, updatedAt: row.updatedAt } : null;
     }),
 
   saveProductionSetting: (input: ProductionSettingInput): Promise<number> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverMasterDataWriteApi.saveProductionSetting(input) : mockMutation((tx) => {
       requireMasterManager(tx.tables);
       const row = tx.tables.productionSetting[0];
       if (row) assertUnchanged(row.updatedAt, input.expectedUpdatedAt, '생산 설정값');

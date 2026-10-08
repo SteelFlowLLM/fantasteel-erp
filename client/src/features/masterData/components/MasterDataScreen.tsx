@@ -4,6 +4,7 @@
 // 성분 규격은 강종 화면이 아니라 품질의 검사 기준(제강)에서 버전으로 관리한다 (REQ-MST-002, TRM-020).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
+import { isMasterServerMode } from '@/api/masterData';
 import { PERMISSION } from '@/codes';
 import { Icon, type IconName } from '@/components/Icon';
 import { PageMain } from '@/components/Page';
@@ -57,7 +58,8 @@ export function MasterDataScreen() {
         </div>
         {canEdit ? null : <ReadOnlyHint className="ml-auto" permissions={[PERMISSION.MASTER_MANAGE]} />}
       </div>
-      <ReadinessBanner onGoTab={goTab} />
+      {/* 준비 상태는 서버 API가 없어 서버 모드에서 숨긴다 */}
+      {isMasterServerMode() ? null : <ReadinessBanner onGoTab={goTab} />}
       <Tabs
         ariaLabel="기준정보 영역"
         items={TABS.map((t) => ({
