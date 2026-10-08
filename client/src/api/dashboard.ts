@@ -1,11 +1,13 @@
 // 대시보드 위젯 조회 (REQ-DSH-001·002, BP-DSH-01 "권한 내 집계").
 // - 숫자는 모두 core 읽기 모델(@/mock/services: 수주 충족 현황·재고·검사·MRP·구매·여재·작업 로그)과 테이블 행에서 가져와 묶기만 한다.
 //   업무 계산식(가용·검사합격·납기 위험·순소요)을 다시 만들지 않는다. 묶는 방법은 features/dashboard/lib/widgetMath.ts.
-// - 위젯마다 그 데이터를 보여 주는 화면과 같은 조회 권한을 요구한다(requireActor view → 없으면 COM-002, 화면은 잠금 표시).
+// - 위젯마다 그 데이터를 보여 주는 화면과 같은 조회 권한을 요구한다(가짜 DB 모드는 requireActor, 서버 모드는 /auth/me 권한 → 없으면 COM-002, 화면은 잠금 표시).
 // - 위젯 키는 화면 상수다 (공통 코드 그룹이 아니다).
+import type { AuthUser } from '@fantasteel/shared';
 import { requireActor, type Actor } from '@/api/actor';
 import { mockQuery } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
+import { ApiError } from '@/api/errors';
+import { isServerDataSource, serverRequest } from '@/api/http';
 import type { PurchaseOrderView, RequisitionView } from '@/api/purchasing';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
 import { serverDashboardApi, serverDashboardSourceApi } from '@/api/server/dashboard';
@@ -27,11 +29,10 @@ import {
 } from '@/codes';
 import { ageDays, bucketByDate, countRatio, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
 import { decCmp, decSum } from '@/lib/decimal';
-import { canView } from '@/lib/permissions';
+import { canView, permissionNeedText } from '@/lib/permissions';
 import { addDays, daysBetween } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
 import { calcWeightTon, sumTon } from '@/lib/weight';
-import { getMockDb } from '@/mock/db';
 import type { LotRow, MockTables } from '@/mock/schema';
 import {
   computeMrp,
@@ -118,6 +119,14 @@ const MRP_EARLIEST = '0001-01-01';
 function requireWidgetActor(tables: Tables, key: DataWidgetKey): Actor {
   const view = DASHBOARD_WIDGET_VIEW[key];
   return requireActor(tables, view.length > 0 ? { view } : {});
+}
+
+/** 서버 모드 위젯 권한: 서버 로그인 사원(/auth/me)의 역할 권한으로 본다. 서버에서 새로 만든 사원·바꾼 역할 권한도 그대로 맞는다 */
+async function requireServerWidgetUser(key: DataWidgetKey): Promise<AuthUser> {
+  const me = await serverRequest<AuthUser>('GET', '/auth/me');
+  const view = DASHBOARD_WIDGET_VIEW[key];
+  if (view.length > 0 && !canView(me, ...view)) throw new ApiError('COM-002', permissionNeedText(view, 'VIEW'));
+  return me;
 }
 
 export interface DashboardQueryOptions {
@@ -465,7 +474,7 @@ function readRawMaterialBalance(tables: Tables, options: DashboardQueryOptions):
 
 /** 서버 모드 원료 잔량 대비 소요: 서버 MRP(GET mrp/requirements)를 같은 기간으로 읽는다 */
 async function readRawMaterialBalanceFromServer(): Promise<RawMaterialBalanceData> {
-  getMockDb().read((tables) => requireWidgetActor(tables, 'RAW_MATERIAL_BALANCE'));
+  await requireServerWidgetUser('RAW_MATERIAL_BALANCE');
   const to = addDays(todayOf(), DASHBOARD_MRP_HORIZON_DAYS);
   const mrp = await serverMrpRequirements({ from: MRP_EARLIEST, to });
   return {
@@ -648,10 +657,10 @@ function readPurchaseProgress(tables: Tables): PurchaseProgressData {
 
 /** 서버 모드 구매 진행: 권한은 가짜 DB 모드와 같이 보고(계정 선택이 가짜 DB 사원), 목록은 서버에서 읽는다 */
 async function readPurchaseProgressFromServer(): Promise<PurchaseProgressData> {
-  const actor = getMockDb().read((tables) => requireWidgetActor(tables, 'PURCHASE_PROGRESS'));
+  const me = await requireServerWidgetUser('PURCHASE_PROGRESS');
   const [requisitions, purchaseOrders] = await Promise.all([
-    canView(actor, PERMISSION.PURCHASE_REQUISITION_CREATE) ? serverPurchaseRequisitionApi.list() : null,
-    canView(actor, PERMISSION.PURCHASE_ORDER_CONFIRM) ? serverPurchaseOrderApi.list() : null,
+    canView(me, PERMISSION.PURCHASE_REQUISITION_CREATE) ? serverPurchaseRequisitionApi.list() : null,
+    canView(me, PERMISSION.PURCHASE_ORDER_CONFIRM) ? serverPurchaseOrderApi.list() : null,
   ]);
   return purchaseProgressOf(requisitions, purchaseOrders);
 }
@@ -822,10 +831,10 @@ export const dashboardKeys = {
   widget: (key: DataWidgetKey, employeeId: number) => ['dashboard', 'widgets', key, employeeId] as const,
 };
 
-/** 서버 모드: 권한은 가짜 DB 모드와 같이 보고(계정 선택이 가짜 DB 사원), 데이터는 서버 API를 모아 묶는다 */
+/** 서버 모드: 권한은 서버 로그인 사원으로 보고, 데이터는 서버 API를 모아 묶는다 */
 function fromServer<T>(key: DataWidgetKey, read: () => Promise<T>): () => Promise<T> {
-  return () => {
-    getMockDb().read((tables) => requireWidgetActor(tables, key));
+  return async () => {
+    await requireServerWidgetUser(key);
     return read();
   };
 }
