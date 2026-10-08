@@ -42,7 +42,7 @@
 - 9.3에 없는 거부(필수·형식·중복·순환·참조 중 삭제)는 `InputError`(입력칸 안내), 권한 COM-002, 참조 없음 COM-003, 동시 수정 COM-001.
 - 순수 함수: `features/admin/lib/orgRules.ts`(형식 규칙, 하위 부서·순환 판정, 인원 합계, 부서 목록 들여쓰기), `features/admin/lib/permissionMatrix.ts`(칸 순환, 저장 전 변경 계산, 저장 목록, 영역별 행).
 - 훅: 목록은 기존 `hooks/useDirectory.ts`, 조직도는 `hooks/useAdminOrganization.ts`(`useAdminOrgChart`). 변경은 `useAction`.
-- 테스트: `api/adminEmployees.test.ts` 13개, `api/adminOrganization.test.ts` 13개, `features/admin/lib/admin.test.ts` 10개 (전체 113개 통과) (actAs로 권한별 정상·오류 코드 확인).
+- 테스트: `api/adminEmployees.test.ts` 13개, `api/adminOrganization.test.ts` 13개, `features/admin/lib/admin.test.ts` 10개 (전체 113개 통과) (actAs로 권한별 정상·오류 코드 확인). (2026-10-08: 부서·직급·역할 권한 api의 가짜 DB 분기를 지우며 `adminOrganization.test.ts` 삭제)
 - 작업 로그: 조직 변경에 맞는 BUSINESS_EVENT_TYPE이 29개 안에 없어 남기지 않는다(cross-cutting 7장). 알림도 보내지 않는다.
 
 ## 4. 시드
