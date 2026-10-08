@@ -1,11 +1,10 @@
 'use client';
 
-// 업무 추가·수정 창 (REQ-NTF-001: 담당자와 마감일 지정). 담당자는 조직 정보의 사용 중 사원에서 고른다 (REQ-ORG-004).
-// 서버 모드는 담당자를 조직도(GET /departments)에서 고르고, 마감일이 필수이며 연결 화면 칸이 없다 (api/server/tasks.ts).
+// 업무 추가·수정 창 (REQ-NTF-001: 담당자와 마감일 지정). 담당자는 조직도(GET /departments)의 사용 중 사원에서 고른다 (REQ-ORG-004).
+// 마감일은 서버에서 필수다 (api/server/tasks.ts).
 import { useId, useMemo, useState } from 'react';
 import type { OrgChartDepartmentView } from '@/api/adminOrganization';
 import { InputError } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
 import { TASK_DESCRIPTION_MAX, TASK_TITLE_MAX, taskApi, type TaskView } from '@/api/tasks';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';
@@ -15,7 +14,6 @@ import { Modal } from '@/components/Modal';
 import { LINK_PATH_MAX_LENGTH } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
-import { useEmployeeList } from '@/hooks/useDirectory';
 import { useMe } from '@/hooks/useMe';
 
 type MemberGroup = { departmentName: string; members: { id: number; employeeName: string; jobGradeName: string }[] };
@@ -32,10 +30,7 @@ export interface TaskSourceMessage {
 
 export function TaskFormModal({ task, source, onClose }: { task: TaskView | null; source?: TaskSourceMessage; onClose: () => void }) {
   const myId = useMe().employeeId;
-  const serverMode = isServerDataSource();
   const formId = useId();
-  // 가짜 DB 모드는 지금처럼 사원 목록, 서버 모드는 조직도(사용 중인 사원)
-  const employees = useEmployeeList({ isActive: true });
   const chart = useAdminOrgChart();
   const [title, setTitle] = useState(task?.title ?? source?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? source?.description ?? '');
@@ -52,23 +47,14 @@ export function TaskFormModal({ task, source, onClose }: { task: TaskView | null
   const update = useAction(taskApi.update, { success: '업무를 고쳤어요', ...options });
   const pending = create.isPending || update.isPending;
 
-  const groups = useMemo(() => {
-    const result: MemberGroup[] = [];
-    if (serverMode) result.push(...groupsOfChart(chart.data ?? []));
-    else
-      for (const employee of employees.data ?? []) {
-        let group = result.find((g) => g.departmentName === employee.departmentName);
-        if (!group) {
-          group = { departmentName: employee.departmentName, members: [] };
-          result.push(group);
-        }
-        group.members.push(employee);
-      }
-    return result.map((group) => ({
-      departmentName: group.departmentName,
-      members: group.members.map((m) => ({ id: m.id, label: `${m.employeeName} ${m.jobGradeName}${m.id === myId ? ' (나)' : ''}` })),
-    }));
-  }, [serverMode, chart.data, employees.data, myId]);
+  const groups = useMemo(
+    () =>
+      groupsOfChart(chart.data ?? []).map((group) => ({
+        departmentName: group.departmentName,
+        members: group.members.map((m) => ({ id: m.id, label: `${m.employeeName} ${m.jobGradeName}${m.id === myId ? ' (나)' : ''}` })),
+      })),
+    [chart.data, myId],
+  );
 
   const submit = () => {
     const input = { title, description, assigneeId, dueDate, linkPath };
@@ -126,11 +112,11 @@ export function TaskFormModal({ task, source, onClose }: { task: TaskView | null
           />
         </Field>
         <div className="grid grid-cols-2 gap-3.5">
-          <Field label="담당자" required htmlFor={`${formId}-assignee`} hint="조직 정보의 사용 중인 사원" error={fieldErrors.assigneeId}>
+          <Field label="담당자" required htmlFor={`${formId}-assignee`} hint="조직도의 사용 중인 사원" error={fieldErrors.assigneeId}>
             <Select
               id={`${formId}-assignee`}
               value={assigneeId ?? ''}
-              disabled={serverMode ? chart.isPending : employees.isPending}
+              disabled={chart.isPending}
               invalid={Boolean(fieldErrors.assigneeId)}
               onChange={(event) => setAssigneeId(event.target.value ? Number(event.target.value) : null)}
             >
@@ -146,13 +132,7 @@ export function TaskFormModal({ task, source, onClose }: { task: TaskView | null
               ))}
             </Select>
           </Field>
-          <Field
-            label="마감일"
-            required={serverMode}
-            htmlFor={`${formId}-due`}
-            hint={serverMode ? undefined : '비워 두면 마감 없음'}
-            error={fieldErrors.dueDate}
-          >
+          <Field label="마감일" required htmlFor={`${formId}-due`} error={fieldErrors.dueDate}>
             <DateInput id={`${formId}-due`} value={dueDate} onChange={setDueDate} invalid={Boolean(fieldErrors.dueDate)} className="w-full" />
           </Field>
         </div>
