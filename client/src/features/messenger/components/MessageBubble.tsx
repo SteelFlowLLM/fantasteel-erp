@@ -1,16 +1,19 @@
 'use client';
 
-// 메시지 한 개: 내 메시지는 오른쪽 말풍선, 남의 메시지는 왼쪽(보낸 사람·아바타). 본문(@멘션 강조, 업무 번호 링크)·첨부·ERP 이동 링크·메시지 메뉴(Message → ERP 확장 자리)
+// 메시지 한 개: 내 메시지는 오른쪽 말풍선, 남의 메시지는 왼쪽(보낸 사람·아바타). 본문(@멘션 강조, 업무 번호 링크)·첨부(그림은 미리보기)·ERP 이동 링크·메시지 메뉴(Message → ERP 확장 자리)
 import Link from 'next/link';
+import { useState } from 'react';
 import type { ChatRoomDetailView, MessageView } from '@/api/messenger';
 import { Avatar } from '@/components/Avatar';
+import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Modal } from '@/components/Modal';
 import { messageActionsFor } from '@/features/messenger/messageActions';
 import { splitMessageText, type ErpLink } from '@/features/messenger/lib/messageText';
 import { canOpenScreen, screenOfPath } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
-import { useMessageFileDownload } from '@/hooks/useMessenger';
+import { useImagePreview, useMessageFileDownload } from '@/hooks/useMessenger';
 import { usePopover } from '@/hooks/usePopover';
 import { cn } from '@/lib/cn';
 import { fmtBytes, fmtHM } from '@/lib/format';
@@ -173,6 +176,38 @@ export function MessageBubble({
 
 function FileChip({ messageId, name, size }: { messageId: number; name: string; size: number | null }) {
   const download = useMessageFileDownload();
+  const preview = useImagePreview(messageId, name);
+  const [enlarged, setEnlarged] = useState(false);
+  if (preview.data) {
+    const src = preview.data.dataUrl;
+    return (
+      <>
+        <button type="button" onClick={() => setEnlarged(true)} className="block w-fit max-w-full overflow-hidden rounded-md border border-line bg-surface" title={`${name} 크게 보기`}>
+          <img src={src} alt={name} className="block max-h-48 max-w-60 object-contain" />
+        </button>
+        {enlarged ? (
+          <Modal
+            title={name}
+            width={880}
+            onClose={() => setEnlarged(false)}
+            footer={
+              <>
+                <span className="mr-auto self-center text-cap text-ink-3">{fmtBytes(size)}</span>
+                <Button icon="download" disabled={download.isPending} onClick={() => download.mutate({ messageId, fileName: name })}>
+                  내려받기
+                </Button>
+                <Button variant="primary" onClick={() => setEnlarged(false)}>
+                  닫기
+                </Button>
+              </>
+            }
+          >
+            <img src={src} alt={name} className="mx-auto block max-h-[70vh] max-w-full object-contain" />
+          </Modal>
+        ) : null}
+      </>
+    );
+  }
   return (
     <div className="flex w-fit max-w-full items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2">
       <Icon name="file" className="text-ink-3" />
