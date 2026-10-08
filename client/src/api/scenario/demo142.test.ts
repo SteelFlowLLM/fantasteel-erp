@@ -251,7 +251,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     expect(await messengerApi.countUnread(productionId)).toBe(unreadBefore + 1);
     const mentions = (await notificationApi.list()).items.filter((n) => n.notificationType === 'MENTION');
     expect(mentions).toHaveLength(1);
-    expect(mentions[0].linkPath).toBe(`/messenger?room=${room.id}`);
+    expect(mentions[0].linkPath).toBe(`/messenger?room=${room.id}&message=${sent.id}`);
     const page = await messengerApi.listMessages({ chatRoomId: room.id });
     const mine = page.items.find((m) => m.id === sent.id);
     expect(mine).toMatchObject({ mentionsMe: true, erpLinks: [{ text: 'SO-2609-003', href: `/sales-orders/${salesOrderId}` }] });

@@ -56,6 +56,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   content,
   attachmentName: null,
   unreadMemberCount: 0,
+  erpLinks: [],
   createdAt: AT,
   ...extra,
 });
@@ -169,6 +170,16 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
       ['/chat-rooms/7/attachments', { limit: '5' }],
       ['/chat-rooms/7/messages/search', { q: 'SO' }],
     ]);
+  });
+
+  it('본문의 업무 번호 링크는 서버가 준 그대로 쓴다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/chat-rooms/7/messages') return ok({ items: [message(1, 'SO-2610-001 확인', { erpLinks: [{ text: 'SO-2610-001', href: '/sales-orders/21' }] })], hasMore: false });
+      return undefined;
+    });
+    const page = await messengerApi.listMessages({ chatRoomId: 7, limit: 10 });
+    expect(page.items[0].erpLinks).toEqual([{ text: 'SO-2610-001', href: '/sales-orders/21' }]);
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

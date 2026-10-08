@@ -23,11 +23,11 @@ function Section({ title, actions, children }: { title: ReactNode; actions?: Rea
   );
 }
 
-export function RoomAside({ room, onInvite, onRename }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void }) {
+export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void; onJump: (messageId: number) => void }) {
   return (
     <aside className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex" aria-label="방 정보">
       <Section title="대화 검색">
-        <RoomSearch chatRoomId={room.id} />
+        <RoomSearch chatRoomId={room.id} onJump={onJump} />
       </Section>
       {room.chatRoomType === 'WORK' ? (
         <Section title="수주 요약">

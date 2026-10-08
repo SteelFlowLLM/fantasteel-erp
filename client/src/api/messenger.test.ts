@@ -102,10 +102,11 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
 
   it('@이름은 개인 멘션 알림, @부서는 부서 알림. 보낸 사람은 받지 않는다', async () => {
     const roomId = await createGroup();
-    await messengerApi.sendMessage({ chatRoomId: roomId, content: '@김도윤 확인 부탁해요. @품질부 검사 일정도요' });
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, content: '@김도윤 확인 부탁해요. @품질부 검사 일정도요' });
     const head = notificationsOf(employeeIdOf(SEED_EMPLOYEE_NO.salesHead));
     expect(head).toHaveLength(1);
-    expect(head[0]).toMatchObject({ notificationType: 'MENTION', departmentId: null, linkPath: `/messenger?room=${roomId}` });
+    // 알림을 누르면 그 메시지까지 이동한다
+    expect(head[0]).toMatchObject({ notificationType: 'MENTION', departmentId: null, linkPath: `/messenger?room=${roomId}&message=${sent.id}` });
     for (const no of [SEED_EMPLOYEE_NO.quality, SEED_EMPLOYEE_NO.qualityHead]) {
       const rows = notificationsOf(employeeIdOf(no));
       expect(rows).toHaveLength(1);
