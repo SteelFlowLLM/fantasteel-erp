@@ -1,5 +1,6 @@
 // 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 서버에 아직 없는 것(생산 연결 편성표, 구매 진행 영향)은 빈 값이다. 재생산 계획은 생산계획 어댑터, 이력 타임라인은 작업 로그 어댑터, 업무방은 메신저 어댑터가 맡는다.
+// 생산 연결 탭은 수주 상세의 계획 id로 생산계획 상세를 읽는다. 서버에 아직 없는 것(취소 창의 구매 진행 영향)은 빈 값이다.
+// 재생산 계획은 생산계획 어댑터, 이력 타임라인은 작업 로그 어댑터, 업무방은 메신저 어댑터가 맡는다.
 import type {
   CancelSalesOrderResult,
   CreateSalesOrderResult,
@@ -14,12 +15,14 @@ import type {
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { mockCustomerIdOf, mockItemOf, serverCustomerIdOf, serverItemIdOf } from '@/api/server/masterIds';
+import { serverProductionPlanApi } from '@/api/server/production';
 import type {
   CreateSalesOrderInput,
   CreateSalesOrderResultView,
   ItemFulfillment,
   SalesOrderDetail,
   SalesOrderListRow,
+  SalesOrderPlanLink,
   SalesOrderPreviewInputLine,
   SalesOrderPreviewLine,
 } from '@/api/salesOrders';
@@ -259,4 +262,28 @@ async function cancel(input: { salesOrderId: number; cancelReason: string }): Pr
   return { salesOrderId: result.salesOrderId, salesOrderNo: result.salesOrderNo };
 }
 
-export const serverSalesOrderApi = { listAll, detail, preview, create, cancel };
+/**
+ * 생산 연결 탭: 수주 품목에 연결된 계획과, 수주 취소로 연결이 풀린 진행 계획(취소 기록의 계획 번호)의 생산계획 상세.
+ * 생산계획 조회 권한이 없으면(물류) 빈 목록이다.
+ */
+async function productionLinks(salesOrderId: number): Promise<SalesOrderPlanLink[]> {
+  const d = await serverRequest<ServerSalesOrderDetail>('GET', `/sales-orders/${salesOrderId}`);
+  const lineNoOf = (salesOrderItemId: number) => d.items.findIndex((i) => i.salesOrderItemId === salesOrderItemId) + 1;
+  const lineNoByPlan = new Map<number, number | null>(d.productionPlans.map((p) => [p.id, lineNoOf(p.salesOrderItemId)]));
+  try {
+    const unlinkedNos = new Set(d.cancellation?.unlinkedPlanNos ?? []);
+    if (unlinkedNos.size > 0) for (const p of await serverProductionPlanApi.list()) if (unlinkedNos.has(p.productionPlanNo) && !lineNoByPlan.has(p.id)) lineNoByPlan.set(p.id, null);
+    const planIds = [...lineNoByPlan.keys()].sort((a, b) => a - b);
+    return await Promise.all(
+      planIds.map(async (id) => {
+        const { results: _results, salesOrderItemStatus: _status, salesOrderOwnerName: _owner, lots: _lots, reproduction: _reproduction, ...plan } = await serverProductionPlanApi.detail(id);
+        return { lineNo: lineNoByPlan.get(id) ?? null, plan };
+      }),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 'COM-002') return [];
+    throw e;
+  }
+}
+
+export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel };
