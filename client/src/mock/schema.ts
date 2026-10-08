@@ -477,15 +477,26 @@ export type ChatRoomMemberRow = Timestamps & {
   pinnedAt?: string | null;
 };
 
+/** 메시지 첨부 파일 하나 (가짜 DB). path는 저장소 경로 chat/{방}/{메시지}/{순번}-{파일명} */
+export type MessageFileValues = {
+  name: string;
+  size: number;
+  mimeType: string;
+  path: string;
+};
+
 export type MessageRow = Timestamps & {
   id: number;
   chatRoomId: number;
   senderId: number;
   content: string | null;
+  /** 파일 1개짜리 옛 모양 (시드·이미 저장된 가짜 DB). 새 메시지는 files를 쓰고 이 칸은 비운다 */
   fileName: string | null;
   filePath: string | null;
   fileSize: number | null;
   mimeType: string | null;
+  /** 첨부 여러 개 (서버 스키마 3차 message_attachment와 같은 뜻). 올린 순서 */
+  files?: MessageFileValues[];
   /** 답글 대상 (없으면 비움, #151 스키마 1차와 같은 뜻) */
   parentMessageId?: number | null;
   /** 본문을 고친 시각 */

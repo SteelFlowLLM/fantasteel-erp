@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   MESSAGE_ATTACHMENT_MAX_BYTES,
+  MESSAGE_ATTACHMENT_MAX_COUNT,
   MESSAGE_TYPE,
   NOTIFICATION_TYPE,
   type ChatMessagePage,
@@ -145,8 +146,12 @@ beforeEach(() => {
 const recordsOf = (event: SocketRecord['event']) => socketRecords.filter((r) => r.event === event);
 
 async function upload(cookie: string, chatRoomId: number, fileName: string, content: Uint8Array, text?: string) {
+  return uploadMany(cookie, chatRoomId, [{ fileName, content }], text);
+}
+
+async function uploadMany(cookie: string, chatRoomId: number, files: readonly { fileName: string; content: Uint8Array }[], text?: string) {
   const form = new FormData();
-  form.append('file', new Blob([content]), fileName);
+  for (const file of files) form.append('files', new Blob([file.content]), file.fileName);
   if (text !== undefined) form.append('content', text);
   const res = await fetch(`${baseUrl}/chat-rooms/${chatRoomId}/attachments`, { method: 'POST', headers: { cookie }, body: form });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: ChatMessageView; error?: { code: string; message: string } } };
@@ -359,28 +364,57 @@ describe('첨부', () => {
     const bytes = new TextEncoder().encode('밀시트 확인용 파일');
     const sent = await upload(salesCookie, room.id, '검사 성적서.txt', bytes, '첨부해요');
     expect(sent.status).toBe(201);
-    expect(sent.body.data).toMatchObject({ attachmentName: '검사 성적서.txt', content: '첨부해요', isMine: true });
+    expect(sent.body.data).toMatchObject({ attachments: [{ fileName: '검사 성적서.txt', fileSize: bytes.length }], content: '첨부해요', isMine: true });
     expect(recordsOf('message:new')).toHaveLength(2);
+    const attachmentId = sent.body.data.attachments[0].id;
 
-    const res = await fetch(`${baseUrl}/attachments/${sent.body.data.id}`, { headers: { cookie: qualityCookie } });
+    const res = await fetch(`${baseUrl}/attachments/${attachmentId}`, { headers: { cookie: qualityCookie } });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toContain(encodeURIComponent('검사 성적서.txt'));
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
 
-    const outsider = await fetch(`${baseUrl}/attachments/${sent.body.data.id}`, { headers: { cookie: purchaseCookie } });
+    const outsider = await fetch(`${baseUrl}/attachments/${attachmentId}`, { headers: { cookie: purchaseCookie } });
     expect(outsider.status).toBe(403);
     const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
     expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('첨부해요');
   });
 
-  it('파일만 보내면 목록 미리보기는 "파일 · 이름", 글만 있는 메시지의 첨부 내려받기는 COM-003', async () => {
+  it('파일만 보내면 목록 미리보기는 "파일 · 이름", 없는 첨부 내려받기는 COM-003', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [logisticsId] });
     await upload(salesCookie, room.id, 'plan.pdf', new Uint8Array([1, 2, 3]));
     const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', salesCookie);
     expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('파일 · plan.pdf');
-    const text = (await send(salesCookie, room.id, '글만')).body.data;
-    const res = await call('GET', `/attachments/${text.id}`, salesCookie);
+    const res = await call('GET', '/attachments/999999', salesCookie);
     expect([res.status, res.body.error?.code]).toEqual([404, 'COM-003']);
+  });
+
+  it('여러 파일을 한 메시지로 올리면 올린 순서대로 보이고 각각 내려받는다. 미리보기는 "파일 · 첫 이름 외 N개"', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const files = ['a.pdf', 'b.png', 'c.xlsx'].map((fileName, i) => ({ fileName, content: new Uint8Array(i + 1).fill(i + 1) }));
+    const sent = await uploadMany(salesCookie, room.id, files);
+    expect(sent.status).toBe(201);
+    expect(sent.body.data.attachments.map((a) => [a.fileName, a.fileSize])).toEqual([
+      ['a.pdf', 1],
+      ['b.png', 2],
+      ['c.xlsx', 3],
+    ]);
+    const second = await fetch(`${baseUrl}/attachments/${sent.body.data.attachments[1].id}`, { headers: { cookie: qualityCookie } });
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(new Uint8Array([2, 2]));
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('파일 · a.pdf 외 2개');
+    expect(await prisma.messageAttachment.count({ where: { messageId: sent.body.data.id } })).toBe(3);
+  });
+
+  it('파일 수가 넘거나 하나라도 실행 파일이면 COM-004이고 아무것도 저장하지 않는다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const tooMany = await uploadMany(salesCookie, room.id, Array.from({ length: MESSAGE_ATTACHMENT_MAX_COUNT + 1 }, (_, i) => ({ fileName: `${i}.txt`, content: new Uint8Array([1]) })));
+    expect([tooMany.status, tooMany.body.error?.code]).toEqual([400, 'COM-004']);
+    const mixed = await uploadMany(salesCookie, room.id, [
+      { fileName: 'ok.pdf', content: new Uint8Array([1]) },
+      { fileName: 'run.bat', content: new Uint8Array([1]) },
+    ]);
+    expect([mixed.status, mixed.body.error?.code]).toEqual([400, 'COM-004']);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(0);
   });
 
   it('실행 파일·파일 없음·용량 초과는 COM-004이고, 멤버가 아니면 저장하지 않고 COM-002', async () => {
@@ -479,10 +513,10 @@ describe('편의: 안 읽은 사람 수 · 파일 모아보기 · 검색', () =>
     await send(salesCookie, room.id, '글만');
     await upload(qualityCookie, room.id, 'b.xlsx', new Uint8Array([2]));
     const files = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments?limit=1`, salesCookie);
-    expect(files.body.data.items.map((m) => m.attachmentName)).toEqual(['b.xlsx']);
+    expect(files.body.data.items.map((m) => m.attachments.map((a) => a.fileName))).toEqual([['b.xlsx']]);
     expect(files.body.data.hasMore).toBe(true);
     const older = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments?before=${files.body.data.items[0].id}`, salesCookie);
-    expect(older.body.data).toMatchObject({ items: [expect.objectContaining({ attachmentName: 'a.pdf' })], hasMore: false });
+    expect(older.body.data).toMatchObject({ items: [expect.objectContaining({ attachments: [expect.objectContaining({ fileName: 'a.pdf' })] })], hasMore: false });
     const outsider = await call('GET', `/chat-rooms/${room.id}/attachments`, purchaseCookie);
     expect(outsider.status).toBe(403);
   });
@@ -643,7 +677,7 @@ describe('10번: 중복 전송 방지 · 시스템 메시지 · 업무방 진행
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     const form = () => {
       const f = new FormData();
-      f.append('file', new Blob([new Uint8Array([1, 2])]), 'a.pdf');
+      f.append('files', new Blob([new Uint8Array([1, 2])]), 'a.pdf');
       f.append('clientMessageId', 'a1b2c3d4-0000-4000-8000-000000000011');
       return f;
     };
@@ -652,6 +686,7 @@ describe('10번: 중복 전송 방지 · 시스템 메시지 · 업무방 진행
     const again = await post();
     expect(again.data.id).toBe(first.data.id);
     expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(1);
+    expect(await prisma.messageAttachment.count({ where: { messageId: first.data.id } })).toBe(1);
   });
 
   it('그룹방 이름 바꾸기·업무방 열기는 시스템 메시지를 남기고 소켓으로 보낸다 (안 읽은 수에는 넣지 않는다)', async () => {
@@ -739,15 +774,15 @@ describe('11번: 메시지 수정·삭제·답글', () => {
 
     expect((await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, qualityCookie)).body.data.unreadCount).toBe(0);
     const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
-    expect(page.body.data.items.map((m) => [m.isDeleted, m.content, m.attachmentName])).toEqual([
-      [true, null, null],
-      [true, null, null],
+    expect(page.body.data.items.map((m) => [m.isDeleted, m.content, m.attachments])).toEqual([
+      [true, null, []],
+      [true, null, []],
     ]);
     const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
     expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('삭제된 메시지예요');
     expect((await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('비밀')}`, qualityCookie)).body.data.items).toEqual([]);
     expect((await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments`, qualityCookie)).body.data.items).toEqual([]);
-    const download = await call('GET', `/attachments/${file.id}`, qualityCookie);
+    const download = await call('GET', `/attachments/${file.attachments[0].id}`, qualityCookie);
     expect(download.status).toBe(404);
     const editDeleted = await call('PATCH', `/messages/${text.id}`, salesCookie, { content: '되살리기' });
     expect(editDeleted.body.error?.code).toBe('COM-004');

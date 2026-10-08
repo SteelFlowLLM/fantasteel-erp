@@ -9,14 +9,19 @@ export interface ChatRoomStatsRow {
   unreadCount: number;
   muted: boolean;
   pinnedAt: Date | null;
-  lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date; deletedAt: Date | null } | null;
+  lastMessage: { id: number; senderId: number | null; content: string | null; firstAttachmentName: string | null; attachmentCount: number; createdAt: Date; deletedAt: Date | null } | null;
 }
 
 const employeeInclude = { department: true, jobGrade: true } as const;
-/** 메시지와 보낸 사람, 답글이면 원본 메시지(보낸 사람 이름) */
+/** 첨부는 올린 순서대로 (스키마 3차) */
+// orderBy 배열은 Prisma가 readonly를 받지 않아 as const를 쓰지 않는다
+const attachmentInclude = { orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }] };
+const attachmentNameInclude = { select: { fileName: true }, ...attachmentInclude } as const;
+/** 메시지와 보낸 사람, 첨부, 답글이면 원본 메시지(보낸 사람 이름·첨부 이름) */
 const messageInclude = {
   sender: { include: employeeInclude },
-  parentMessage: { include: { sender: { select: { employeeName: true } } } },
+  messageAttachments: attachmentInclude,
+  parentMessage: { include: { sender: { select: { employeeName: true } }, messageAttachments: attachmentNameInclude } },
   messageReactions: { include: { employee: { select: { employeeName: true } } }, orderBy: { id: 'asc' } },
 } as const;
 
@@ -41,7 +46,7 @@ export class MessengerRepository {
       where: { id },
       include: {
         chatRoomMembers: { include: { employee: { include: employeeInclude } } },
-        pinnedMessage: { include: { sender: { select: { employeeName: true } } } },
+        pinnedMessage: { include: { sender: { select: { employeeName: true } }, messageAttachments: attachmentNameInclude } },
       },
     });
   }
@@ -76,7 +81,8 @@ export class MessengerRepository {
                 id: lastMessageId,
                 senderId: row.last_sender_id,
                 content: row.last_content,
-                attachmentName: row.last_attachment_name,
+                firstAttachmentName: row.last_first_attachment_name,
+                attachmentCount: row.last_attachment_count ?? 0,
                 createdAt: row.last_created_at,
                 deletedAt: row.last_deleted_at,
               },
@@ -183,7 +189,7 @@ export class MessengerRepository {
   /** 첨부가 있는 메시지만, before보다 오래된 것을 최신순으로 take개 (파일 모아보기) */
   findAttachmentMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
     return tx.message.findMany({
-      where: { chatRoomId, attachmentPath: { not: null }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
+      where: { chatRoomId, messageAttachments: { some: {} }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
       orderBy: { id: 'desc' },
       take,
       include: messageInclude,
@@ -257,12 +263,25 @@ export class MessengerRepository {
     return tx.message.update({ where: { id }, data: { deletedAt: new Date() }, include: messageInclude });
   }
 
-  createMessage(tx: Tx, data: { chatRoomId: number; senderId: number; content: string | null; attachmentPath?: string | null; attachmentName?: string | null; clientMessageId?: string | null; parentMessageId?: number | null }) {
-    return tx.message.create({ data, include: messageInclude });
+  /** 메시지와 첨부를 함께 만든다. 첨부는 받은 순서가 sort_order */
+  createMessage(
+    tx: Tx,
+    data: { chatRoomId: number; senderId: number; content: string | null; clientMessageId?: string | null; parentMessageId?: number | null },
+    attachments: readonly { filePath: string; fileName: string; fileSize: number }[] = [],
+  ) {
+    return tx.message.create({
+      data: { ...data, messageAttachments: { create: attachments.map((a, index) => ({ ...a, sortOrder: index })) } },
+      include: messageInclude,
+    });
   }
 
   findMessage(tx: Tx, id: number) {
-    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, attachmentPath: true, attachmentName: true, senderId: true, messageType: true, deletedAt: true } });
+    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, senderId: true, messageType: true, deletedAt: true, _count: { select: { messageAttachments: true } } } });
+  }
+
+  /** 첨부 내려받기: 첨부와 그 메시지의 방·삭제 여부 */
+  findAttachment(tx: Tx, id: number) {
+    return tx.messageAttachment.findUnique({ where: { id }, include: { message: { select: { chatRoomId: true, deletedAt: true } } } });
   }
 
   /** 읽음 위치는 앞으로만 옮긴다 */

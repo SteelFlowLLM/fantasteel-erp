@@ -242,8 +242,8 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
 
     as('sales');
     const dataUrl = `data:text/plain;base64,${btoa('coil schedule')}`;
-    const sent = await messengerApi.sendMessage({ chatRoomId: room.id, content: '@강민석 SO-2609-003 코일 일정 확인 부탁해요', file: { name: '일정.txt', size: 13, mimeType: 'text/plain', dataUrl } });
-    expect(sent.file).toEqual({ name: '일정.txt', size: 13, mimeType: 'text/plain' });
+    const sent = await messengerApi.sendMessage({ chatRoomId: room.id, content: '@강민석 SO-2609-003 코일 일정 확인 부탁해요', files: [{ name: '일정.txt', size: 13, mimeType: 'text/plain', dataUrl }] });
+    expect(sent.files).toEqual([{ id: 1, name: '일정.txt', size: 13, mimeType: 'text/plain' }]);
     expect(sent.erpLinks).toEqual([{ text: 'SO-2609-003', href: `/sales-orders/${salesOrderId}` }]);
 
     // 멘션 받은 사람은 MENTION 한 번, 다른 멤버는 업무방 메시지 알림
@@ -255,7 +255,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     const page = await messengerApi.listMessages({ chatRoomId: room.id });
     const mine = page.items.find((m) => m.id === sent.id);
     expect(mine).toMatchObject({ mentionsMe: true, erpLinks: [{ text: 'SO-2609-003', href: `/sales-orders/${salesOrderId}` }] });
-    expect(await messengerApi.getFile({ messageId: sent.id, fileName: '' })).toEqual({ name: '일정.txt', mimeType: 'text/plain', dataUrl });
+    expect(await messengerApi.getFile({ messageId: sent.id, fileId: 1, fileName: '' })).toEqual({ name: '일정.txt', mimeType: 'text/plain', dataUrl });
     expect(await messengerApi.markRead({ chatRoomId: room.id, lastMessageId: sent.id })).toBe(0);
     as('purchase');
     expect((await notificationApi.list()).items.filter((n) => n.notificationType === 'WORK_ROOM_MESSAGE').map((n) => n.title)).toContain('SO-2609-003 다온건설 새 메시지');
@@ -264,6 +264,6 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     expect((await salesOrderApi.detail(salesOrderId)).salesOrderNo).toBe('SO-2609-003');
     // 멤버가 아니면 첨부를 받을 수 없다
     as('logistics');
-    await expect(messengerApi.getFile({ messageId: sent.id, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(messengerApi.getFile({ messageId: sent.id, fileId: 1, fileName: '' })).rejects.toMatchObject({ code: 'COM-002' });
   });
 });

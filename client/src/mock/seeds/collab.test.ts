@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { rowFilesOf } from '@/api/messengerRules';
 import { messengerApi } from '@/api/messenger';
 import { notificationApi } from '@/api/notifications';
 import { taskApi } from '@/api/tasks';
@@ -14,7 +15,7 @@ describe('협업 시드', () => {
     const counts = getMockDb().read((tables) => ({
       tasks: tables.task.length,
       rooms: tables.chatRoom.map((r) => r.chatRoomType),
-      files: tables.message.filter((m) => m.fileName).length,
+      files: tables.message.filter((m) => rowFilesOf(m).length > 0).length,
     }));
     expect(counts.tasks).toBe(6);
     // 업무방(WORK)은 거래 시드(core)가 SO-2609-003에 만든다
@@ -45,9 +46,9 @@ describe('협업 시드', () => {
     actAs(SEED_EMPLOYEE_NO.purchaseHead);
     const direct = (await messengerApi.listRooms()).find((r) => r.chatRoomType === 'DIRECT');
     if (!direct) throw new Error('1:1 방이 없어요');
-    const withFile = (await messengerApi.listMessages({ chatRoomId: direct.id })).items.find((m) => m.file);
+    const withFile = (await messengerApi.listMessages({ chatRoomId: direct.id })).items.find((m) => m.files.length > 0);
     if (!withFile) throw new Error('첨부 메시지가 없어요');
-    const file = await messengerApi.getFile({ messageId: withFile.id, fileName: '' });
+    const file = await messengerApi.getFile({ messageId: withFile.id, fileId: withFile.files[0].id, fileName: '' });
     expect(file.name).toBe('철광석-입고계획-2610.csv');
     expect(decodeURIComponent(file.dataUrl.split(',')[1])).toContain('ORE01 철광석');
   });

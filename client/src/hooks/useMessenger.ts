@@ -61,12 +61,12 @@ export function useChatSearch(chatRoomId: number, keyword: string) {
 }
 
 /** 그림 첨부 미리보기 (REQ-MSG-003). 그림일 때만 읽고, 한 번 읽은 그림은 다시 받지 않는다 */
-export function useImagePreview(messageId: number, fileName: string) {
+export function useImagePreview(messageId: number, fileId: number, fileName: string) {
   const me = useMe();
   const isImage = imageMimeOf(fileName) !== null;
   return useQuery({
-    queryKey: [...messengerKeys.all, 'image', me.employeeId, messageId] as const,
-    queryFn: isImage ? () => messengerApi.getFile({ messageId, fileName }) : skipToken,
+    queryKey: [...messengerKeys.all, 'image', me.employeeId, messageId, fileId] as const,
+    queryFn: isImage ? () => messengerApi.getFile({ messageId, fileId, fileName }) : skipToken,
     staleTime: Infinity,
     retry: false,
   });

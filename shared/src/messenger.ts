@@ -109,6 +109,14 @@ export interface ChatPinnedMessageView {
   createdAt: string;
 }
 
+/** 메시지 첨부 파일 하나 */
+export interface ChatMessageAttachmentView {
+  id: number;
+  fileName: string;
+  /** 바이트. 스키마 3차 전에 올린 첨부는 null */
+  fileSize: number | null;
+}
+
 export interface ChatMessageView {
   id: number;
   chatRoomId: number;
@@ -121,8 +129,8 @@ export interface ChatMessageView {
   isSystem: boolean;
   isMine: boolean;
   content: string | null;
-  /** 첨부 파일 이름. 내려받기는 GET attachments/:메시지 id */
-  attachmentName: string | null;
+  /** 첨부 파일 (올린 순서, 스키마 3차). 내려받기는 GET attachments/:첨부 id. 삭제된 메시지는 빈 배열 */
+  attachments: ChatMessageAttachmentView[];
   /** 이 메시지를 아직 읽지 않은 멤버 수 (보낸 사람 제외, 읽음 위치로 계산) */
   unreadMemberCount: number;
   /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006). 화면 권한은 화면이 따로 본다 */
@@ -168,6 +176,8 @@ export interface CreateChatRoomResult {
 
 /** 첨부 파일 최대 크기 (REQ-MSG-003 "구현 단계에서 정함" → 2026-10-07 결정 10MB) */
 export const MESSAGE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/** 메시지 1건에 올릴 수 있는 파일 수 (스키마 3차, 가정값) */
+export const MESSAGE_ATTACHMENT_MAX_COUNT = 10;
 /** 첨부를 막는 확장자: 실행 파일만 (2026-10-07 결정) */
 export const BLOCKED_ATTACHMENT_EXTENSIONS = ['exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'ps1', 'vbs', 'js', 'jar', 'sh', 'app', 'dll'] as const;
 

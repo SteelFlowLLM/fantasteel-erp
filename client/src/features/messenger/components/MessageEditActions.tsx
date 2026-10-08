@@ -116,7 +116,7 @@ const TASK_TITLE_FROM_MESSAGE_MAX = 50;
 export function taskSourceOf(message: MessageView): TaskSourceMessage {
   const content = (message.content ?? '').trim();
   const firstLine = content.split('\n')[0]?.trim() ?? '';
-  const base = firstLine || message.file?.name || '메시지 확인';
+  const base = firstLine || message.files[0]?.name || '메시지 확인';
   const title = base.length > TASK_TITLE_FROM_MESSAGE_MAX ? `${base.slice(0, TASK_TITLE_FROM_MESSAGE_MAX - 1)}…` : base;
   const description = [content, `— ${message.senderName}님의 메시지에서 등록`].filter(Boolean).join('\n\n');
   return { messageId: message.id, title, description };
@@ -155,7 +155,7 @@ export function EditMessageModal({ message, onClose }: { message: MessageView; o
         </>
       }
     >
-      <Field label="메시지" htmlFor="edit-message-content" error={error} hint={message.file ? '첨부가 있어 비워도 돼요' : undefined}>
+      <Field label="메시지" htmlFor="edit-message-content" error={error} hint={message.files.length > 0 ? '첨부가 있어 비워도 돼요' : undefined}>
         <textarea
           id="edit-message-content"
           value={content}

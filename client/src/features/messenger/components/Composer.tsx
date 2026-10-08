@@ -1,8 +1,9 @@
 'use client';
 
-// 메시지 입력창: 글 + 파일 1개(REQ-MSG-003), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
+// 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { MESSAGE_ATTACHMENT_MAX_COUNT } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
@@ -47,7 +48,7 @@ function mentionAt(text: string, caret: number): MentionState | null {
 
 export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: () => void }) {
   const [text, setText] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reading, setReading] = useState(false);
@@ -109,16 +110,17 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const submit = async () => {
     if (pending) return;
     const content = text.trim();
-    if (!content && !file) return;
-    if (file && file.size > MESSAGE_FILE_MAX_BYTES) {
-      toast.error(`파일은 ${FILE_LIMIT_TEXT}까지 보낼 수 있어요`);
+    if (!content && files.length === 0) return;
+    const tooBig = files.find((file) => file.size > MESSAGE_FILE_MAX_BYTES);
+    if (tooBig) {
+      toast.error(`파일은 ${FILE_LIMIT_TEXT}까지 보낼 수 있어요 (${tooBig.name})`);
       return;
     }
-    let payload: { name: string; size: number; mimeType: string; dataUrl: string } | null = null;
-    if (file) {
+    let payload: { name: string; size: number; mimeType: string; dataUrl: string }[] = [];
+    if (files.length > 0) {
       setReading(true);
       try {
-        payload = { name: file.name, size: file.size, mimeType: file.type, dataUrl: await readAsDataUrl(file) };
+        payload = await Promise.all(files.map(async (file) => ({ name: file.name, size: file.size, mimeType: file.type, dataUrl: await readAsDataUrl(file) })));
       } catch (error) {
         toast.apiError(error);
         return;
@@ -126,10 +128,10 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         setReading(false);
       }
     }
-    send({ chatRoomId: room.id, content, file: payload, parentMessageId: replyTo?.id ?? null });
+    send({ chatRoomId: room.id, content, files: payload, parentMessageId: replyTo?.id ?? null });
     clearReply();
     setText('');
-    setFile(null);
+    setFiles([]);
     setMention(null);
     onSent();
   };
@@ -193,20 +195,24 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       {replyTo ? (
         <div className="flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-2 px-3 py-1.5 text-xs" aria-label="답장할 메시지">
           <span className="min-w-0 flex-1 truncate">
-            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.file?.name ?? ''}</span>
+            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.files[0]?.name ?? ''}</span>
           </span>
           <IconButton icon="x" label="답장 취소" size="sm" onClick={clearReply} />
         </div>
       ) : null}
-      {file ? (
-        <div className="flex w-fit items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-sm">
-          <Icon name="clip" size="sm" className="text-ink-3" />
-          <span className="max-w-[320px] truncate">{file.name}</span>
-          <span className={cn('text-cap', file.size > MESSAGE_FILE_MAX_BYTES ? 'text-danger' : 'text-ink-3')}>
-            {fmtBytes(file.size)}
-            {file.size > MESSAGE_FILE_MAX_BYTES ? ` · ${FILE_LIMIT_TEXT}까지 보낼 수 있어요` : ''}
-          </span>
-          <IconButton icon="x" label="첨부 취소" size="sm" disabled={pending} onClick={() => setFile(null)} />
+      {files.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5" aria-label={`첨부할 파일 ${files.length}개`}>
+          {files.map((file, index) => (
+            <div key={`${index}-${file.name}`} className="flex w-fit items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-sm">
+              <Icon name="clip" size="sm" className="text-ink-3" />
+              <span className="max-w-[240px] truncate">{file.name}</span>
+              <span className={cn('text-cap', file.size > MESSAGE_FILE_MAX_BYTES ? 'text-danger' : 'text-ink-3')}>
+                {fmtBytes(file.size)}
+                {file.size > MESSAGE_FILE_MAX_BYTES ? ` · ${FILE_LIMIT_TEXT}까지 보낼 수 있어요` : ''}
+              </span>
+              <IconButton icon="x" label={`${file.name} 첨부 취소`} size="sm" disabled={pending} onClick={() => setFiles((current) => current.filter((_, i) => i !== index))} />
+            </div>
+          ))}
         </div>
       ) : null}
       <textarea
@@ -215,7 +221,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         rows={lines}
         maxLength={MESSAGE_CONTENT_MAX}
         aria-label="메시지 입력"
-        placeholder={file ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션'}
+        placeholder={files.length > 0 ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션'}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onClick={(event) => updateMention(event.currentTarget.value, event.currentTarget.selectionStart)}
@@ -226,13 +232,24 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           className="hidden"
           onChange={(event) => {
-            setFile(event.target.files?.[0] ?? null);
+            const picked = Array.from(event.target.files ?? []);
             event.target.value = '';
+            // 이미 고른 파일에 더한다. 넘치는 파일은 버리고 알린다
+            const next = [...files, ...picked];
+            if (next.length > MESSAGE_ATTACHMENT_MAX_COUNT) toast.error(`파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
+            setFiles(next.slice(0, MESSAGE_ATTACHMENT_MAX_COUNT));
           }}
         />
-        <IconButton icon="clip" label={`파일 첨부 (${FILE_LIMIT_TEXT}까지, 1개)`} title={`파일 첨부 (${FILE_LIMIT_TEXT}까지, 1개)`} disabled={pending} onClick={() => fileInputRef.current?.click()} />
+        <IconButton
+          icon="clip"
+          label={`파일 첨부 (파일마다 ${FILE_LIMIT_TEXT}까지, ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지)`}
+          title={`파일 첨부 (파일마다 ${FILE_LIMIT_TEXT}까지, ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지)`}
+          disabled={pending || files.length >= MESSAGE_ATTACHMENT_MAX_COUNT}
+          onClick={() => fileInputRef.current?.click()}
+        />
         <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startMention} disabled={pending}>
           @ 멘션
         </Button>
@@ -240,7 +257,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           @AI 호출
         </SoonButton>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
-        <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && !file)} onClick={() => void submit()}>
+        <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && files.length === 0)} onClick={() => void submit()}>
           {reading ? '파일 읽는 중…' : '보내기'}
         </Button>
       </div>

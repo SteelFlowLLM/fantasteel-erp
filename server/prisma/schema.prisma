@@ -828,8 +828,6 @@ model Message {
   messageType String @default("USER") @map("message_type") @db.VarChar /// MESSAGE_TYPE: USER, SYSTEM
   senderId Int? @map("sender_id") /// SYSTEM이면 null
   content String?
-  attachmentPath String? @map("attachment_path") @db.VarChar /// Storage 경로. 메시지 1건에 파일 1개
-  attachmentName String? @map("attachment_name") @db.VarChar
   clientMessageId String? @map("client_message_id") @db.VarChar(64) /// 화면이 만든 보내기 id(UUID). 재전송 중복 방지
   parentMessageId Int? @map("parent_message_id") /// 답글 대상. 같은 방 메시지만(service)
   editedAt DateTime? @map("edited_at") @db.Timestamptz(3) /// 본문을 마지막으로 고친 시각
@@ -843,6 +841,7 @@ model Message {
   chatRoomsAsPinnedMessage ChatRoom[] @relation("ChatRoomPinnedMessage")
   tasks Task[] @relation("TaskMessage")
   messageReactions MessageReaction[] @relation("MessageReactionMessage")
+  messageAttachments MessageAttachment[] @relation("MessageAttachmentMessage")
   chatRoom ChatRoom @relation("MessageChatRoom", fields: [chatRoomId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   sender Employee? @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   parentMessage Message? @relation("MessageParentMessage", fields: [parentMessageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -870,6 +869,23 @@ model MessageReaction {
   @@unique([messageId, employeeId, emoji])
   @@index([employeeId])
   @@map("message_reaction")
+}
+
+/// 메시지 첨부 파일 (스키마 3차). 메시지 1건에 여러 개, sort_order 순으로 보인다
+model MessageAttachment {
+  id Int @id @default(autoincrement())
+  messageId Int @map("message_id")
+  filePath String @map("file_path") @db.VarChar /// Storage 경로
+  fileName String @map("file_name") @db.VarChar
+  fileSize Int? @map("file_size") /// 바이트. 스키마 3차 전에 올린 첨부는 null
+  sortOrder Int @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  message Message @relation("MessageAttachmentMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("message_attachment")
 }
 
 /// / 부분 unique: (message_id, action_type) /   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지) / 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id) /
