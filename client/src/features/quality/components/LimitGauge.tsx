@@ -1,24 +1,26 @@
 // 측정값을 기준 구간 위에 놓아 보여 주는 게이지 (옛 B안 hl-gauge). 위치(%)는 값마다 달라 style로 준다.
-import { gaugeGeometry, limitText, trimNum, type LimitLike } from '@/features/quality/lib/qualityDisplay';
+import { gaugeEdgeLabels, gaugeGeometry, limitText, type LimitLike } from '@/features/quality/lib/qualityDisplay';
 import { cn } from '@/lib/cn';
 
 export function LimitGauge({ item, value, bad }: { item: LimitLike; value: string | null; bad?: boolean }) {
   const g = gaugeGeometry(item, value);
   if (!g) return <span className="text-cap text-ink-3">기준이 없어 게이지를 그릴 수 없어요</span>;
   const shown = value?.trim() ?? '';
+  // 눈금 글자가 기준 전체를 말한다(단위, 한쪽만 있으면 이상·이하). 카드 아래 "기준 …" 줄을 따로 두지 않는다
+  const edge = gaugeEdgeLabels(item);
   return (
     <div className="px-5.5 pt-1 pb-4">
       <div className="relative h-2" role="img" aria-label={`기준 ${limitText(item)}${shown ? `, 측정값 ${shown}` : ''}`}>
         <div className="absolute inset-0 rounded-sm bg-surface-3" />
         <div className="absolute top-0 bottom-0 rounded-sm bg-[#bfe3ce]" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
-        {item.minValue !== null ? (
-          <span className="absolute top-2.5 -translate-x-1/2 text-2xs text-ink-3 tabular-nums" style={{ left: `${g.from}%` }}>
-            {trimNum(item.minValue)}
+        {edge.min !== null ? (
+          <span className="absolute top-2.5 -translate-x-1/2 text-2xs whitespace-nowrap text-ink-3 tabular-nums" style={{ left: `${g.from}%` }}>
+            {edge.min}
           </span>
         ) : null}
-        {item.maxValue !== null ? (
-          <span className="absolute top-2.5 -translate-x-1/2 text-2xs text-ink-3 tabular-nums" style={{ left: `${g.to}%` }}>
-            {trimNum(item.maxValue)}
+        {edge.max !== null ? (
+          <span className="absolute top-2.5 -translate-x-1/2 text-2xs whitespace-nowrap text-ink-3 tabular-nums" style={{ left: `${g.to}%` }}>
+            {edge.max}
           </span>
         ) : null}
         {g.mark !== null ? (
