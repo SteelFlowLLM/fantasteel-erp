@@ -2,13 +2,9 @@
 // 목록 조회는 directory.ts(directoryApi.listDepartments·listJobGrades·listRoles)를 쓴다.
 // 두 데이터 모드 모두 실제 서버를 부른다 (api/server/organization.ts). 권한(부서·권한 관리, 직급은 사원 관리)과 참조 확인은 서버가 한다.
 // - 부서장은 그 부서의 사용 중인 사원 1명 (REQ-ORG-002). 부서장은 역할이 아니다.
-// - 부서 정렬 순서·직급 코드는 ERD에 없어 서버에 보내지 않는다. 부서 코드는 등록 뒤 바꾸지 않는다.
+// - 부서 정렬 순서·직급 코드는 ERD에 없어 화면에 두지 않는다. 부서 코드는 등록 뒤 바꾸지 않는다.
 import type { Permission, PermissionLevel } from '@/codes';
-import { isServerDataSource } from '@/api/http';
 import { serverOrganizationApi } from '@/api/server/organization';
-
-/** 서버 모드: ERD·API 명세에 없는 화면 칸(부서 정렬 순서, 직급 코드, 최근 접속)을 숨기고 사원 등록에 비밀번호를 받는다 */
-export const isOrgServerMode = (): boolean => isServerDataSource();
 
 export const adminOrgKeys = {
   orgChart: () => ['departments', 'admin-org-chart'] as const,
@@ -20,7 +16,6 @@ export interface DepartmentCreateInput {
   departmentCode: string;
   departmentName: string;
   parentId: number | null;
-  sortOrder: number | string;
 }
 
 export interface DepartmentUpdateInput extends DepartmentCreateInput {
@@ -35,7 +30,6 @@ export interface DeleteInput {
 }
 
 export interface JobGradeCreateInput {
-  jobGradeCode: string;
   jobGradeName: string;
   sortOrder: number | string;
 }
