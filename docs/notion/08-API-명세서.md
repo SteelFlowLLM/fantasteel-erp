@@ -27,6 +27,21 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 | 동시 수정 방지 | 🟡 미정. `expectedVersion` 버전 충돌 검사(충돌 시 COM-001) 적용 대상은 팀 결정 필요 |
 | 단위 | 제품 수량은 정수(매/개), 원료·중량은 톤(t, 소수 3자리). 제품 톤은 저장하지 않고 매수 × 이론중량으로 계산, Decimal은 응답에서 문자열 (코드 컨벤션 2·5장) |
 
+## 메신저 실시간 이벤트 (WebSocket)
+
+REQ-MSG-002. socket.io namespace `/messenger`. 연결할 때 로그인 쿠키(`access_token`)로 사원을 확인하고, 실패하면 서버가 연결을 끊는다. 보내기·읽음 등 저장은 HTTP API로 하고, 서버는 저장(커밋)이 끝난 뒤 아래 이벤트를 보낸다. 소켓은 사원 채널(`employee:{id}`)에 들어간다. 자세한 규칙은 `docs/backend/messenger.md` (2026-10-07~08 추가, 문서에 없는 기능 포함)
+
+| 이벤트 | 방향 · 받는 사람 | 페이로드 |
+| --- | --- | --- |
+| `message:new` | 서버 → 방 멤버 전원 (보낸 사람의 다른 탭 포함) | 메시지 (`isMine`은 받는 사원 기준) |
+| `room:read` | 서버 → 읽은 본인 | `{ chatRoomId, lastReadMessageId, unreadCount }` |
+| `member:read` | 서버 → 읽은 사람을 뺀 방 멤버 | `{ chatRoomId, employeeId, lastReadMessageId }` (메시지별 안 읽은 사람 수 갱신) |
+| `room:updated` | 서버 → 방 멤버 전원 | `{ chatRoomId }` (방 생성·멤버 추가·이름 변경) |
+| `presence:snapshot` | 서버 → 막 연결한 소켓 | `{ onlineEmployeeIds }` |
+| `presence:changed` | 서버 → 메신저에 연결된 모든 사원 | `{ employeeId, online }` (첫 연결 = 접속, 마지막 연결 끊김 = 나감) |
+| `typing` | 화면 → 서버 | `{ chatRoomId }` (방 멤버가 아니면 무시, 화면은 3초에 한 번) |
+| `typing` | 서버 → 보낸 사람을 뺀 방 멤버 | `{ chatRoomId, employeeId, employeeName }` (화면은 6초 표시) |
+
 ## 색상 가이드
 
 - **Method:** GET 초록 · POST 파랑 · PUT 노랑 · PATCH 주황 · DELETE 빨강

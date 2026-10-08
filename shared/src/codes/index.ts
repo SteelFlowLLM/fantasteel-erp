@@ -348,6 +348,17 @@ export const CHAT_ROOM_TYPE_LABEL: Record<ChatRoomType, string> = {
   WORK: '업무방',
 };
 
+/** 메시지 유형 (REQ-MSG-002 (문서에 없는 추가 기능: 시스템 메시지, 2026-10-08 스키마 1차 #151)) */
+export const MESSAGE_TYPE = {
+  USER: 'USER',
+  SYSTEM: 'SYSTEM',
+} as const;
+export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE];
+export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
+  USER: '일반',
+  SYSTEM: '시스템',
+};
+
 /** LOT 상태 (REQ-LOT-001, REQ-INV-001) */
 export const LOT_STATUS = {
   AVAILABLE: 'AVAILABLE',

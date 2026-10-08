@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   MESSAGE_ATTACHMENT_MAX_BYTES,
+  MESSAGE_TYPE,
   NOTIFICATION_TYPE,
   type ChatMessagePage,
   type ChatMessageView,
@@ -580,7 +581,7 @@ describe('스키마 1차 (#151): 메시지 유형·중복 방지 제약', () => 
   it('시스템 메시지는 보낸 사람 없이 저장되고, 목록에서 "시스템"으로 보인다', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     await send(salesCookie, room.id, '사람 메시지');
-    await prisma.message.create({ data: { chatRoomId: room.id, messageType: 'SYSTEM', senderId: null, content: '서민지님이 들어왔어요' } });
+    await prisma.message.create({ data: { chatRoomId: room.id, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content: '서민지님이 들어왔어요' } });
 
     const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
     expect(page.body.data.items.map((m) => [m.isSystem, m.senderId, m.senderName])).toEqual([
@@ -593,8 +594,8 @@ describe('스키마 1차 (#151): 메시지 유형·중복 방지 제약', () => 
 
   it('USER는 보낸 사람이 꼭 있어야 하고, SYSTEM은 보낸 사람이 없어야 한다 (CHECK)', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
-    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: 'USER', senderId: null, content: 'x' } })).rejects.toThrow();
-    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: 'SYSTEM', senderId: salesId, content: 'x' } })).rejects.toThrow();
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: MESSAGE_TYPE.USER, senderId: null, content: 'x' } })).rejects.toThrow();
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: MESSAGE_TYPE.SYSTEM, senderId: salesId, content: 'x' } })).rejects.toThrow();
   });
 
   it('같은 사람이 같은 client_message_id로 두 번 저장할 수 없고, 다른 사람이면 된다 (부분 unique)', async () => {
