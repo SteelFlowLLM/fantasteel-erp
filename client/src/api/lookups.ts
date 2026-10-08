@@ -1,8 +1,10 @@
-// 기준정보 조회 (REQ-MST-001~009). 다른 화면의 선택 목록과 2단계 기준정보 화면이 함께 쓴다.
-// 등록·수정·삭제는 2단계에서 더한다.
+// 기준정보 조회 (REQ-MST-001~009). 다른 화면의 선택 목록(수주 등록·수주 목록·구매요청 등록·재고 강종 필터)이 쓴다.
+// NEXT_PUBLIC_DATA_SOURCE=server면 서버 기준정보를 읽어 id가 서버 id다 (api/server/lookups.ts). 등록·수정은 기준정보 화면(api/masterData.ts)이 맡는다.
 import type { ItemType, ProcessType, ProductItemType, RawMaterialType, UnitType, YardType } from '@/codes';
 import { mockQuery } from '@/api/client';
+import { isServerDataSource } from '@/api/http';
 import type { ItemListQuery, ProductSpecListQuery } from '@/api/queryKeys';
+import { serverLookupApi } from '@/api/server/lookups';
 import { specificConsumptionUnitOf, type SpecificConsumptionUnit } from '@/lib/units';
 import { calcHotRollingYieldRate } from '@/lib/weight';
 import type { ItemRow, MockTables } from '@/mock/schema';
@@ -185,26 +187,38 @@ const byCode = <T>(key: (row: T) => string) => (a: T, b: T) => key(a).localeComp
 
 export const lookupApi = {
   listCustomers: (): Promise<CustomerView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listCustomers()
+      : mockQuery((tables) =>
       tables.customer.map(({ id, customerCode, customerName }) => ({ id, customerCode, customerName })).sort(byCode((c) => c.customerCode)),
     ),
 
   listSuppliers: (): Promise<SupplierView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listSuppliers()
+      : mockQuery((tables) =>
       tables.supplier.map(({ id, supplierCode, supplierName }) => ({ id, supplierCode, supplierName })).sort(byCode((s) => s.supplierCode)),
     ),
 
   listYards: (): Promise<YardView[]> =>
-    mockQuery((tables) => tables.yard.map(({ id, yardCode, yardName, yardType }) => ({ id, yardCode, yardName, yardType })).sort(byCode((y) => y.yardCode))),
+    isServerDataSource()
+      ? serverLookupApi.listYards()
+      : mockQuery((tables) => tables.yard.map(({ id, yardCode, yardName, yardType }) => ({ id, yardCode, yardName, yardType })).sort(byCode((y) => y.yardCode))),
 
   listSteelGrades: (): Promise<SteelGradeView[]> =>
-    mockQuery((tables) => tables.steelGrade.map(({ id, steelGradeCode, steelGradeName, standardNo }) => ({ id, steelGradeCode, steelGradeName, standardNo }))),
+    isServerDataSource()
+      ? serverLookupApi.listSteelGrades()
+      : mockQuery((tables) => tables.steelGrade.map(({ id, steelGradeCode, steelGradeName, standardNo }) => ({ id, steelGradeCode, steelGradeName, standardNo }))),
 
   listItems: (query: ItemListQuery = {}): Promise<ItemView[]> =>
-    mockQuery((tables) => tables.item.filter((i) => !query.itemType || i.itemType === query.itemType).map((i) => toItemView(tables, i))),
+    isServerDataSource()
+      ? serverLookupApi.listItems(query)
+      : mockQuery((tables) => tables.item.filter((i) => !query.itemType || i.itemType === query.itemType).map((i) => toItemView(tables, i))),
 
   listProductSpecs: (query: ProductSpecListQuery = {}): Promise<ProductSpecView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listProductSpecs(query)
+      : mockQuery((tables) =>
       tables.item
         .filter(isProductItem)
         .filter((i) => !query.itemType || i.itemType === query.itemType)
@@ -213,7 +227,9 @@ export const lookupApi = {
     ),
 
   listSpecMappings: (): Promise<SpecMappingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listSpecMappings()
+      : mockQuery((tables) =>
       tables.specMapping.flatMap((m) => {
         const slab = tables.item.find((i) => i.id === m.slabItemId);
         const coil = tables.item.find((i) => i.id === m.coilItemId);
@@ -235,14 +251,18 @@ export const lookupApi = {
     ),
 
   listRoutings: (): Promise<RoutingView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listRoutings()
+      : mockQuery((tables) =>
       [...tables.routing]
         .sort((a, b) => a.itemType.localeCompare(b.itemType) || a.processSeq - b.processSeq)
         .map(({ id, itemType, processType, processSeq, plannedYieldRate }) => ({ id, itemType, processType, processSeq, plannedYieldRate })),
     ),
 
   listSpecificConsumptions: (): Promise<SpecificConsumptionView[]> =>
-    mockQuery((tables) =>
+    isServerDataSource()
+      ? serverLookupApi.listSpecificConsumptions()
+      : mockQuery((tables) =>
       tables.specificConsumption.flatMap((c) => {
         const item = tables.item.find((i) => i.id === c.itemId);
         if (!item?.rawMaterialType) return [];
@@ -263,7 +283,9 @@ export const lookupApi = {
     ),
 
   getProductionSetting: (): Promise<ProductionSettingView | null> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverLookupApi.getProductionSetting()
+      : mockQuery((tables) => {
       const setting = tables.productionSetting[0];
       return setting
         ? { id: setting.id, heatCapacityTon: setting.heatCapacityTon, deliveryRiskDays: setting.deliveryRiskDays, updatedAt: setting.updatedAt }

@@ -1,13 +1,13 @@
 // 검사 기준 화면 ↔ 서버 API (server/src/modules/quality/inspection-standard.*).
-// 화면의 강종 id는 계속 가짜 DB id라서 강종 코드로 바꿔 끼운다 (api/server/masterIds.ts).
+// 강종 id는 서버 id 그대로다 (강종 선택은 기준정보 화면과 같은 서버 강종 목록). 적용 규격 번호는 강종 목록에서 읽는다.
 // 서버에 아직 없는 것은 빈 값이다:
 // - 공통 기준(강종 없음): ERD steel_grade_id NOT NULL이라 서버에는 없다. 공통 기준 만들기는 입력 오류로 막는다.
 // 버전 이력·버전별 판정한 검사 수는 상세 응답(versions·inspectionCount)으로, 바로 앞 버전 항목은 그 버전 상세로 읽는다.
 // - 표시 순서 컬럼이 ERD에 없어 항목 순서는 서버가 준 순서(등록 순서)다.
-import type { InspectionStandardDeleteResult, InspectionStandardDetail, InspectionStandardListItem, PageResult } from '@fantasteel/shared';
+import type { InspectionStandardDeleteResult, InspectionStandardDetail, InspectionStandardListItem, PageResult, SteelGradeView } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { mockSteelGradeCodeById, mockSteelGradeIdOf, mockSteelGradeOf, serverSteelGradeIdOf } from '@/api/server/masterIds';
+import { seedSteelGradeOf } from '@/api/server/masterIds';
 import type {
   InspectionStandardDeleteView,
   InspectionStandardDetailView,
@@ -49,7 +49,7 @@ function toSummaryView(row: InspectionStandardListItem, latestVersionNo: number)
     inspectionStandardCode: row.inspectionStandardCode,
     version: row.versionNo,
     processType: row.processType,
-    steelGradeId: mockSteelGradeIdOf(row.steelGradeCode, row.steelGradeId),
+    steelGradeId: row.steelGradeId,
     steelGradeCode: row.steelGradeCode,
     itemCount: row.items.length,
     versionCount: latestVersionNo,
@@ -58,11 +58,20 @@ function toSummaryView(row: InspectionStandardListItem, latestVersionNo: number)
 }
 
 async function list(query: InspectionStandardListQuery = {}): Promise<InspectionStandardSummaryView[]> {
-  // 강종은 화면(가짜 DB) id라 서버 id 대신 코드로 거른다
-  const gradeCode = query.steelGradeId === undefined ? undefined : mockSteelGradeCodeById(query.steelGradeId);
-  if (gradeCode === null) return [];
   const rows = await allStandards({ processType: query.processType });
-  return rows.filter((r) => gradeCode === undefined || r.steelGradeCode === gradeCode).map((r) => toSummaryView(r, r.versionNo));
+  return rows.filter((r) => query.steelGradeId === undefined || r.steelGradeId === query.steelGradeId).map((r) => toSummaryView(r, r.versionNo));
+}
+
+/** 강종의 적용 규격 번호. 강종 목록(기준정보 조회 권한)을 못 읽으면 시드의 같은 코드에서 찾는다 */
+async function standardNoOf(steelGradeCode: string): Promise<string | null> {
+  try {
+    const grades = await serverRequest<SteelGradeView[]>('GET', '/steel-grades');
+    const found = grades.find((g) => g.steelGradeCode === steelGradeCode);
+    if (found) return found.standardNo;
+  } catch (e) {
+    if (!(e instanceof ApiError && e.code === 'COM-002')) throw e;
+  }
+  return seedSteelGradeOf(steelGradeCode)?.standardNo ?? null;
 }
 
 async function get(id: number): Promise<InspectionStandardDetailView | null> {
@@ -82,7 +91,7 @@ async function get(id: number): Promise<InspectionStandardDetailView | null> {
   return {
     ...toSummaryView(row, latest.versionNo),
     isCurrent: latest.inspectionStandardId === row.inspectionStandardId,
-    standardNo: mockSteelGradeOf(row.steelGradeCode)?.standardNo ?? null,
+    standardNo: await standardNoOf(row.steelGradeCode),
     items: row.items.map(toItemView),
     previousItems,
     versions: versions.map((v) => ({
@@ -109,14 +118,13 @@ const toServerItem = (item: InspectionStandardItemValues) => ({
   isRequired: item.isRequired,
 });
 
-/** 새 기준(버전 1). 입력 확인은 api/inspectionStandards.ts가 먼저 했다. steelGradeId는 화면 강종 id, null = 공통 기준 */
+/** 새 기준(버전 1). 입력 확인은 api/inspectionStandards.ts가 먼저 했다. steelGradeId는 서버 강종 id, null = 공통 기준 */
 async function create(input: { processType: InspectedProcessType; steelGradeId: number | null; items: readonly InspectionStandardItemValues[] }): Promise<number> {
   if (input.steelGradeId === null) {
     throw new InputError('서버에는 공통 기준이 없어요', { steelGradeId: '서버에는 공통 기준(모든 강종)이 없어요. 강종을 선택해 주세요' });
   }
-  const steelGradeId = await serverSteelGradeIdOf(input.steelGradeId, await allStandards());
   const created = await serverRequest<InspectionStandardDetail>('POST', '/inspection-standards', {
-    body: { processType: input.processType, steelGradeId, items: input.items.map(toServerItem) },
+    body: { processType: input.processType, steelGradeId: input.steelGradeId, items: input.items.map(toServerItem) },
   });
   return created.inspectionStandardId;
 }

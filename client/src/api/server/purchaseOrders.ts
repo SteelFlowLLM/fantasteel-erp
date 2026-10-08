@@ -1,15 +1,13 @@
 // 발주·입고 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 발주·발주 품목·입고·공급업체 id는 서버 id를 그대로 쓰고, 원료 id만 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
+// 발주·발주 품목·입고·공급업체·원료 id는 서버 id를 그대로 쓴다.
 import type { GoodsReceiptView as ServerGoodsReceiptView, PageResult, PurchaseOrderView as ServerPurchaseOrderView } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
 import type { GoodsReceiptInput, GoodsReceiptResult, GoodsReceiptView } from '@/api/goodsReceipts';
 import { serverRequest } from '@/api/http';
 import type { PurchaseOrderCreateInput, PurchaseOrderView, RequisitionPurchaseOrderLine } from '@/api/purchasing';
-import { mockItemOf } from '@/api/server/masterIds';
 
 const PAGE_SIZE = 100;
 
-const mockItemIdOf = (itemCode: string, serverItemId: number) => mockItemOf(itemCode)?.id ?? serverItemId;
 
 async function listAll<T>(path: string): Promise<T[]> {
   const rows: T[] = [];
@@ -45,7 +43,7 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
     items: po.items.map((i) => ({
       id: i.purchaseOrderItemId,
       purchaseRequisitionId: i.purchaseRequisitionId,
-      itemId: mockItemIdOf(i.itemCode, i.itemId),
+      itemId: i.itemId,
       itemCode: i.itemCode,
       itemName: i.itemName,
       purchaseRequisitionNo: i.purchaseRequisitionNo,
@@ -62,7 +60,7 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
 }
 
 function toReceiptView(g: ServerGoodsReceiptView, supplierNameOf: ReadonlyMap<number, string>): GoodsReceiptView {
-  return { ...g, itemId: mockItemIdOf(g.itemCode, g.itemId), supplierName: supplierNameOf.get(g.purchaseOrderId) ?? '' };
+  return { ...g, supplierName: supplierNameOf.get(g.purchaseOrderId) ?? '' };
 }
 
 /** 이미 만든 발주가 있으면 오류 문구에 덧붙인다 (서버는 공급업체마다 따로 거래라 앞의 발주는 남는다) */

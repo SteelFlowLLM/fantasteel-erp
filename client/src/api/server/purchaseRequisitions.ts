@@ -1,5 +1,5 @@
 // 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 구매요청·사원·부서 id는 서버 id를 그대로 쓰고(로그인 사원도 서버 id), 원료 id만 화면(가짜 DB) id로 맞춘다(api/server/masterIds.ts).
+// 구매요청·사원·부서·원료 id는 서버 id를 그대로 쓴다(로그인 사원도 서버 id, 원료 선택 목록도 서버, api/server/lookups.ts).
 // 서버에 없어 비워 두는 것:
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.
 // 승인권자·요청자 직급·등록 창 정보는 로그인 사원(GET /auth/me)과 조직도(GET /departments)에서 읽는다.
@@ -8,7 +8,6 @@ import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { ApprovalInput, RejectInput } from '@/api/approvals';
 import type { PurchaseOrderCandidateItem, RequisitionDetail, RequisitionFormContext, RequisitionInput, RequisitionPurchaseOrderLine, RequisitionResubmitInput, RequisitionView } from '@/api/purchasing';
-import { mockItemOf, serverItemIdOf } from '@/api/server/masterIds';
 import { serverRequisitionPurchaseOrderLines } from '@/api/server/purchaseOrders';
 import { serverMeAndDepartments } from '@/api/server/session';
 import { requisitionSourceOf } from '@/mock/services';
@@ -31,7 +30,7 @@ function toView(row: PurchaseRequisitionSummary | PurchaseRequisitionDetail): Re
     purchaseRequisitionNo: row.purchaseRequisitionNo,
     purchaseRequisitionStatus: row.purchaseRequisitionStatus,
     source: requisitionSourceOf(row),
-    itemId: mockItemOf(row.itemCode)?.id ?? row.itemId,
+    itemId: row.itemId,
     itemCode: row.itemCode,
     itemName: row.itemName,
     requestedTon: row.requestedTon,
@@ -98,10 +97,9 @@ export const serverPurchaseRequisitionApi = {
       .map((row) => ({ ...toView(row), supplierId: row.defaultSupplierId, supplierName: row.defaultSupplierName }))
       .sort((a, b) => a.id - b.id),
 
-  /** 근거 생산계획 id는 서버 모드 MRP(api/server/mrp.ts)가 준 서버 id라 그대로 보낸다 */
+  /** 원료·근거 생산계획 id는 서버 모드 선택 목록·MRP가 준 서버 id라 그대로 보낸다 */
   create: async (input: RequisitionInput): Promise<RequisitionView> => {
-    const itemId = await serverItemIdOf(input.itemId);
-    return toView(await serverRequest<PurchaseRequisitionDetail>('POST', '/purchase-requisitions', { body: { itemId, productionPlanId: input.productionPlanId ?? null, ...requestBody(input) } }));
+    return toView(await serverRequest<PurchaseRequisitionDetail>('POST', '/purchase-requisitions', { body: { itemId: input.itemId, productionPlanId: input.productionPlanId ?? null, ...requestBody(input) } }));
   },
 
   /** 서버는 상태(반려됨)로 동시 수정을 막아 expectedUpdatedAt은 보내지 않는다 */

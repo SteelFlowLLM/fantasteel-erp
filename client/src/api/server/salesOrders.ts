@@ -1,20 +1,25 @@
 // 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 고객사·규격 id는 서버 id 그대로다 (수주 등록의 선택 목록도 서버, api/server/lookups.ts).
 // 생산 연결 탭은 수주 상세의 계획 id로 생산계획 상세를 읽는다. 서버에 아직 없는 것(취소 창의 구매 진행 영향)은 빈 값이다.
 // 재생산 계획은 생산계획 어댑터, 이력 타임라인은 작업 로그 어댑터, 업무방은 메신저 어댑터가 맡는다.
 import type {
   CancelSalesOrderResult,
   CreateSalesOrderResult,
+  ItemView as ServerItemView,
   MillSheetSummary,
   PageResult,
+  ProductionSettingView,
   ProductStockWidget,
+  RoutingView,
   SalesOrderDetail as ServerSalesOrderDetail,
   SalesOrderItemFulfillment,
   SalesOrderReservationView,
   SalesOrderSummary as ServerSalesOrderSummary,
+  SpecificConsumptionView,
+  SpecMappingView,
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { mockCustomerIdOf, mockItemOf, serverCustomerIdOf, serverItemIdOf } from '@/api/server/masterIds';
 import { serverProductionPlanApi } from '@/api/server/production';
 import type {
   CreateSalesOrderInput,
@@ -26,24 +31,22 @@ import type {
   SalesOrderPreviewInputLine,
   SalesOrderPreviewLine,
 } from '@/api/salesOrders';
-import type { ProductItemType } from '@/codes';
+import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType } from '@/codes';
+import { planHeats, type HeatPlan } from '@/lib/heatPlanning';
 import { stockFirstSplit, progressOf } from '@/lib/inventoryMath';
-import { calcWeightTon } from '@/lib/weight';
-import { getMockDb } from '@/mock/db';
-import { planHeatsFor, productItemTypeOf, requirePositiveQty, theoreticalWeightOf } from '@/mock/services';
+import { calcHotRollingYieldRate, calcWeightTon } from '@/lib/weight';
+import { requirePositiveQty } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 읽는다 (수주가 100건을 넘으면 페이지를 더 읽는다) */
 const PAGE_SIZE = 100;
 
 const productType = (itemType: string): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
-/** 화면 규격 id (규격 코드로 찾는다). 화면에 없는 서버 규격이면 서버 id를 그대로 둔다 */
-const mockItemIdOf = (itemCode: string, serverItemId: number) => mockItemOf(itemCode)?.id ?? serverItemId;
 
 function toItemFulfillment(i: SalesOrderItemFulfillment, lineNo: number, plans: ServerSalesOrderDetail['productionPlans']): ItemFulfillment {
   return {
     salesOrderItemId: i.salesOrderItemId,
     lineNo,
-    itemId: mockItemIdOf(i.itemCode, i.itemId),
+    itemId: i.itemId,
     itemCode: i.itemCode,
     itemName: i.itemName,
     itemType: productType(i.itemType),
@@ -92,7 +95,7 @@ function toListRow(s: ServerSalesOrderSummary): SalesOrderListRow {
   return {
     id: s.id,
     salesOrderNo: s.salesOrderNo,
-    customerId: mockCustomerIdOf(s.customerName, s.customerId),
+    customerId: s.customerId,
     customerName: s.customerName,
     ownerEmployeeId: s.ownerEmployeeId,
     ownerName: s.ownerEmployeeName,
@@ -184,37 +187,97 @@ async function detail(salesOrderId: number): Promise<SalesOrderDetail> {
   };
 }
 
+/** 미리보기에 쓰는 서버 기준정보 (규격·라우팅·규격 매핑·배합 원단위·생산 설정값) */
+interface PreviewMaster {
+  items: ServerItemView[];
+  routings: RoutingView[];
+  mappings: SpecMappingView[];
+  consumptions: SpecificConsumptionView[];
+  setting: ProductionSettingView;
+}
+
+type ProductItem = ServerItemView & { itemType: ProductItemType; theoreticalWeightTon: string };
+const isProductItem = (item: ServerItemView | undefined): item is ProductItem =>
+  item !== undefined && (item.itemType === 'SLAB' || item.itemType === 'COIL') && item.theoreticalWeightTon !== null;
+
+/** 라우팅 계획 수율. 없으면 MST-001 (가짜 DB core routingYieldOf와 같은 문구) */
+function routingYield(master: PreviewMaster, itemType: ProductItemType, processType: ProcessType): string {
+  const rate = master.routings.find((r) => r.itemType === itemType && r.processType === processType)?.plannedYieldRate;
+  if (!rate) throw new ApiError('MST-001', `라우팅 계획 수율(${ITEM_TYPE_LABEL[itemType]} ${PROCESS_TYPE_LABEL[processType]})`);
+  return rate;
+}
+
+/** 배합 원단위 확인: 철광석·석탄·석회석(공통)과 강종의 합금철이 있어야 한다 (core assertConsumptionsReady와 같은 규칙) */
+function assertConsumptionsReady(master: PreviewMaster, item: ProductItem): void {
+  for (const material of master.items.filter((i) => i.itemType === 'RAW_MATERIAL' && i.rawMaterialType !== 'FERROALLOY')) {
+    if (!master.consumptions.some((c) => c.rawMaterialItemId === material.id && c.steelGradeId === null)) throw new ApiError('MST-001', `배합 원단위(${material.itemName})`);
+  }
+  if (!master.consumptions.some((c) => c.steelGradeId === item.steelGradeId && c.rawMaterialType === 'FERROALLOY')) {
+    throw new ApiError('MST-001', `합금철 원단위(${item.steelGradeCode ?? '강종'})`);
+  }
+}
+
+/** 부족분 히트 편성 (업무 프로세스 4.4): 서버 기준정보로 화면 공통 계산(planHeats)을 부른다 */
+function formationOf(master: PreviewMaster, item: ProductItem, shortageQty: number): HeatPlan {
+  routingYield(master, item.itemType, 'STEELMAKING');
+  const castingYieldRate = routingYield(master, item.itemType, 'CONTINUOUS_CASTING');
+  let slabWeightTon = item.theoreticalWeightTon;
+  let hotRollingYieldRate: string | null = null;
+  if (item.itemType === 'COIL') {
+    const slab = master.mappings.find((m) => m.coilItem.id === item.id)?.slabItem;
+    if (!slab) throw new ApiError('MST-001', `규격 매핑(${item.itemCode})`);
+    slabWeightTon = slab.theoreticalWeightTon;
+    hotRollingYieldRate = calcHotRollingYieldRate(item.theoreticalWeightTon, slab.theoreticalWeightTon);
+  }
+  assertConsumptionsReady(master, item);
+  return planHeats({
+    productType: item.itemType,
+    shortageQty,
+    theoreticalWeightTon: item.theoreticalWeightTon,
+    castingYieldRate,
+    hotRollingYieldRate,
+    heatCapacityTon: master.setting.heatCapacityTon,
+    slabTheoreticalWeightTon: slabWeightTon,
+  });
+}
+
 /**
- * 등록 미리보기 (저장 안 함). 업무 프로세스대로 화면에서 계산하되, 예약 가용은 서버 재고(제품 재고 위젯)를 쓴다.
- * 히트 편성은 화면의 기준정보(라우팅·수율·히트 용량)로 계산한다 — 서버 시드와 값이 같다. 실제 예약은 저장할 때 서버가 다시 계산한다.
+ * 등록 미리보기 (저장 안 함). 업무 프로세스대로 화면에서 계산하되, 규격·라우팅·규격 매핑·배합 원단위·히트 용량은 서버 기준정보,
+ * 예약 가용은 서버 재고(제품 재고 위젯)를 쓴다. 실제 예약·계획은 저장할 때 서버가 다시 계산한다.
  */
 async function preview(lines: readonly SalesOrderPreviewInputLine[]): Promise<SalesOrderPreviewLine[]> {
-  const tables = getMockDb().read((t) => t);
+  const [items, routings, mappings, consumptions, setting, stock] = await Promise.all([
+    serverRequest<ServerItemView[]>('GET', '/items'),
+    serverRequest<RoutingView[]>('GET', '/routings'),
+    serverRequest<SpecMappingView[]>('GET', '/spec-mappings'),
+    serverRequest<SpecificConsumptionView[]>('GET', '/specific-consumptions'),
+    serverRequest<ProductionSettingView>('GET', '/production-settings'),
+    serverRequest<ProductStockWidget>('GET', '/dashboard/widgets/product-stock'),
+  ]);
+  const master: PreviewMaster = { items, routings, mappings, consumptions, setting };
   const checked = lines.map((line, index) => {
-    const item = tables.item.find((i) => i.id === line.itemId);
-    if (!item || item.itemType === 'RAW_MATERIAL') throw new ApiError('SO-001', `${index + 1}번째 품목`);
+    const item = items.find((i) => i.id === line.itemId);
+    if (!isProductItem(item)) throw new ApiError('SO-001', `${index + 1}번째 품목`);
     return { item, orderedQty: requirePositiveQty(line.orderedQty, `${index + 1}번째 품목`) };
   });
-  const stock = await serverRequest<ProductStockWidget>('GET', '/dashboard/widgets/product-stock');
   const used = new Map<number, number>();
   return checked.map(({ item, orderedQty }) => {
-    const serverAvailable = stock.items.find((r) => r.itemCode === item.itemCode)?.availableQty ?? 0;
+    const serverAvailable = stock.items.find((r) => r.itemId === item.id)?.availableQty ?? 0;
     const availableQty = Math.max(0, serverAvailable - (used.get(item.id) ?? 0));
     const { reserveQty, shortageQty } = stockFirstSplit(orderedQty, availableQty);
     used.set(item.id, (used.get(item.id) ?? 0) + reserveQty);
-    const theoreticalWeightTon = theoreticalWeightOf(item);
     return {
       itemId: item.id,
       itemCode: item.itemCode,
       itemName: item.itemName,
-      itemType: productItemTypeOf(item),
+      itemType: item.itemType,
       orderedQty,
-      theoreticalWeightTon,
-      weightTon: calcWeightTon(orderedQty, theoreticalWeightTon),
+      theoreticalWeightTon: item.theoreticalWeightTon,
+      weightTon: calcWeightTon(orderedQty, item.theoreticalWeightTon),
       availableQty,
       reserveQty,
       shortageQty,
-      formation: shortageQty > 0 ? planHeatsFor(tables, item, shortageQty) : null,
+      formation: shortageQty > 0 ? formationOf(master, item, shortageQty) : null,
     };
   });
 }
@@ -242,8 +305,8 @@ const qtyForServer = (qty: number | string): unknown => (typeof qty === 'string'
 async function create(input: CreateSalesOrderInput): Promise<CreateSalesOrderResultView> {
   if (input.items.length === 0) throw new ApiError('SO-001', '품목을 하나 이상 넣어 주세요');
   const body = {
-    customerId: await serverCustomerIdOf(input.customerId),
-    items: await Promise.all(input.items.map(async (line) => ({ itemId: await serverItemIdOf(line.itemId), orderedQty: qtyForServer(line.orderedQty), dueDate: line.dueDate }))),
+    customerId: input.customerId,
+    items: input.items.map((line) => ({ itemId: line.itemId, orderedQty: qtyForServer(line.orderedQty), dueDate: line.dueDate })),
   };
   const bodyText = JSON.stringify(body);
   const result = await serverRequest<CreateSalesOrderResult>('POST', '/sales-orders', { body, headers: { 'Idempotency-Key': idempotencyKeyOf(bodyText) } });

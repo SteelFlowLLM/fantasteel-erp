@@ -42,7 +42,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 3. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
 
 - 연결 방식: 화면이 부르는 `api/*.ts` 함수가 출처(`isServerDataSource()`)에 따라 가짜 DB 또는 `api/server/*.ts` 어댑터를 부른다. 화면 컴포넌트는 되도록 그대로다. 화면별로 어떤 어댑터를 쓰는지는 아래 줄에 적는다.
-- 고객사·규격 id는 화면에서 계속 가짜 DB id를 쓰고, 서버와 주고받을 때 코드(고객사 코드·규격 코드)와 이름으로 바꾼다(`api/server/masterIds.ts`). 사원·부서 id는 로그인 사원(`useMe()`)과 같이 서버 id다. 화면 첫 코일 규격(2.3×1200×1,065,000)은 서버 시드(2.5×1200×980,000)에 없어 서버 모드에서 고를 수 없다.
+- 서버 모드에서 고객사·규격·강종·야드·사원·부서 id는 모두 서버 id다. 수주 등록·수주 목록·구매요청 등록·재고 강종 필터의 선택 목록(`api/lookups.ts`)은 서버 기준정보를 읽으므로(`api/server/lookups.ts`) 기준정보 화면에서 새로 만든 고객사·규격·원료도 고를 수 있다. 기준정보 조회 권한이 없는 물류는 이 선택 목록이 비고, 출하요청 등록 창의 고객사는 출하 가능 품목이 있는 고객사만 보인다. 응답에 없는 규격 표시값(유형·이론중량·강종·기본 야드)은 서버 규격 목록에서, 그 권한이 없으면 시드의 같은 코드에서 찾는다(`api/server/masterIds.ts`, 표시용).
 - 서버에 아직 없는 기능(취소 창의 구매 진행 영향)은 서버 모드에서 비어 있다. 수주 상세의 생산 연결 탭은 수주 상세의 계획(취소로 연결이 풀린 진행 계획은 취소 기록의 계획 번호)마다 `GET /production-plans/:id`를 읽는다(생산계획 조회 권한이 없으면 빈 목록). 재생산 계획 만들기는 불합격 관리·생산계획 화면과 같은 `POST /production-plans`(수주 품목 id)를 부른다.
 - 서버 모드에서는 사용자 메뉴에 '시드로 초기화'가 없다(가짜 DB만 되돌리는 메뉴). 서버 DB는 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
 - 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 서버 모드면 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. 가짜 DB에만 있는 값(여재 표시 시각, 배정 확정자)은 비어 있다.

@@ -1,128 +1,67 @@
-// 서버 모드에서 기준정보 id를 맞춘다.
-// 수주·출하 화면만 서버를 쓰고 나머지 화면(기준정보·재고·생산 …)은 아직 가짜 DB를 쓰므로, 화면에 보이는 고객사·규격 id는
-// 계속 가짜 DB id로 둔다. 서버에 보낼 때와 서버 응답을 받을 때 코드(고객사 코드·규격 코드)나 이름으로 바꿔 끼운다.
-// 사원 id는 서버 모드 로그인 사원이 서버 id라 바꾸지 않는다 (api/server/session.ts).
-// 가짜 DB 시드와 서버 시드는 코드가 같다 (다른 것: 화면 첫 코일 규격 2.3×1200×1,065,000 ↔ 서버 2.5×1200×980,000).
-import type { CustomerView, ItemView } from '@fantasteel/shared';
+// 서버 모드 기준정보 표시값 보조. 화면의 고객사·규격·강종·야드 id는 서버 id 그대로다 (선택 목록도 서버, api/server/lookups.ts).
+// 서버 응답에 없는 규격 표시값(유형·1매 이론중량·강종·기본 야드)만 규격 코드로 찾는다:
+// 서버 규격 목록(GET /items, 기준정보 조회 권한)을 먼저 보고, 권한이 없으면(물류) 가짜 DB 시드의 같은 코드로 채운다(시드 코드는 서버와 같다).
+// 여기서 찾은 값은 화면 표시용이다. id로 쓰지 않는다.
+import type { ItemView, YardView } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
+import type { ItemType } from '@/codes';
 import { getMockDb } from '@/mock/db';
-import type { ItemRow, MockTables, SteelGradeRow } from '@/mock/schema';
+import type { ItemRow, SteelGradeRow } from '@/mock/schema';
 
-let customersPromise: Promise<CustomerView[]> | null = null;
-let itemsPromise: Promise<ItemView[]> | null = null;
-
-/** 기준정보는 자주 바뀌지 않아 탭에 한 번만 읽는다. 실패하면 다음에 다시 읽는다 */
-function cached<T>(get: () => Promise<T[]>, read: () => Promise<T[]> | null, write: (p: Promise<T[]> | null) => void): Promise<T[]> {
-  const found = read();
-  if (found) return found;
-  const promise = get();
-  write(promise);
-  promise.catch(() => write(null));
-  return promise;
+/** 규격 표시값 */
+export interface ItemInfo {
+  itemType: ItemType;
+  itemName: string;
+  theoreticalWeightTon: string | null;
+  steelGradeCode: string | null;
+  /** 기본 야드: 서버 목록을 읽었으면 서버 야드 id, 시드에서 채웠으면 null (이름만) */
+  yardId: number | null;
+  yardName: string | null;
 }
 
-const serverCustomers = () =>
-  cached(
-    () => serverRequest<CustomerView[]>('GET', '/customers'),
-    () => customersPromise,
-    (p) => (customersPromise = p),
-  );
-
-const serverItems = () =>
-  cached(
-    () => serverRequest<ItemView[]>('GET', '/items'),
-    () => itemsPromise,
-    (p) => (itemsPromise = p),
-  );
-
-const readMock = <T>(reader: (tables: Readonly<MockTables>) => T): T => getMockDb().read(reader);
-
-// ── 화면(가짜 DB) id → 서버 id: 요청 보낼 때 ──────────────────
-
-export async function serverCustomerIdOf(mockCustomerId: number): Promise<number> {
-  const code = readMock((t) => t.customer.find((c) => c.id === mockCustomerId)?.customerCode);
-  const found = code ? (await serverCustomers()).find((c) => c.customerCode === code) : undefined;
-  if (!found) throw new ApiError('COM-003', '서버에 없는 고객사예요');
-  return found.id;
+/** 가짜 DB 시드의 같은 코드 규격 (서버 응답에 없는 표시값의 마지막 보조) */
+export function seedItemOf(itemCode: string): ItemRow | undefined {
+  return getMockDb().read((t) => t.item.find((i) => i.itemCode === itemCode));
 }
 
-export async function serverItemIdOf(mockItemId: number): Promise<number> {
-  const code = readMock((t) => t.item.find((i) => i.id === mockItemId)?.itemCode);
-  const found = code ? (await serverItems()).find((i) => i.itemCode === code) : undefined;
-  if (!found) throw new ApiError('SO-001', code ? `서버에 없는 규격이에요 (${code})` : null);
-  return found.id;
+/** 가짜 DB 시드의 같은 코드 강종 */
+export function seedSteelGradeOf(steelGradeCode: string): SteelGradeRow | undefined {
+  return getMockDb().read((t) => t.steelGrade.find((g) => g.steelGradeCode === steelGradeCode));
 }
 
-// ── 서버 응답 → 화면(가짜 DB) id: 응답 받을 때 (응답에 코드·이름이 있어 기준정보 권한이 없어도 된다) ─────
-
-/** 고객사: 서버 응답의 고객사 이름으로 찾는다. 없으면 서버 id를 그대로 둔다 */
-export function mockCustomerIdOf(customerName: string, serverCustomerId: number): number {
-  return readMock((t) => t.customer.find((c) => c.customerName === customerName)?.id) ?? serverCustomerId;
-}
-
-export function mockCustomerCodeOf(customerName: string): string {
-  return readMock((t) => t.customer.find((c) => c.customerName === customerName)?.customerCode) ?? '';
-}
-
-/** 규격: 서버 응답의 규격 코드로 찾는다 */
-export function mockItemOf(itemCode: string): ItemRow | undefined {
-  return readMock((t) => t.item.find((i) => i.itemCode === itemCode));
-}
-
-export function mockSteelGradeCodeOf(itemCode: string): string | null {
-  return readMock((t) => {
+function seedInfoOf(itemCode: string): ItemInfo | undefined {
+  return getMockDb().read((t) => {
     const item = t.item.find((i) => i.itemCode === itemCode);
-    return t.steelGrade.find((g) => g.id === item?.steelGradeId)?.steelGradeCode ?? null;
+    if (!item) return undefined;
+    return {
+      itemType: item.itemType,
+      itemName: item.itemName,
+      theoreticalWeightTon: item.theoreticalWeightTon,
+      steelGradeCode: t.steelGrade.find((g) => g.id === item.steelGradeId)?.steelGradeCode ?? null,
+      yardId: null,
+      yardName: t.yard.find((y) => y.id === item.defaultYardId)?.yardName ?? null,
+    };
   });
-}
-
-/** LOT 야드: LOT은 규격의 기본 야드에 생긴다 (REQ-MST-008). 서버 야드 id 대신 화면 규격의 기본 야드를 쓴다 */
-export function mockDefaultYardOf(itemCode: string): { yardId: number | null; yardName: string | null } {
-  return readMock((t) => {
-    const item = t.item.find((i) => i.itemCode === itemCode);
-    const yard = t.yard.find((y) => y.id === item?.defaultYardId);
-    return { yardId: yard?.id ?? null, yardName: yard?.yardName ?? null };
-  });
-}
-
-// ── 강종 (검사 기준 화면) ─────────────────────────────────
-
-/** 강종: 서버 응답의 강종 코드로 찾는다 */
-export function mockSteelGradeOf(steelGradeCode: string): SteelGradeRow | undefined {
-  return readMock((t) => t.steelGrade.find((g) => g.steelGradeCode === steelGradeCode));
-}
-
-export function mockSteelGradeIdOf(steelGradeCode: string, serverSteelGradeId: number): number {
-  return mockSteelGradeOf(steelGradeCode)?.id ?? serverSteelGradeId;
-}
-
-export function mockSteelGradeCodeById(mockSteelGradeId: number): string | null {
-  return readMock((t) => t.steelGrade.find((g) => g.id === mockSteelGradeId)?.steelGradeCode) ?? null;
 }
 
 /**
- * 화면 강종 id → 서버 강종 id. 서버에 강종 목록 API가 없어(기준정보 모듈 미완성) 이미 받은 행(검사 기준 목록)의 강종 코드·id에서 찾고,
- * 없으면 규격 목록(GET /items, 기준정보 조회 권한 필요)의 강종에서 찾는다. 둘 다 없으면 COM-003.
+ * 규격 코드 → 표시값. 한 번의 화면 조회 안에서 만들어 쓴다(서버에서 새로 등록한 규격도 바로 보이도록 캐시하지 않는다).
+ * 서버 목록에 없는 코드는 시드에서 찾는다.
  */
-export async function serverSteelGradeIdOf(mockSteelGradeId: number, known: readonly { steelGradeId: number; steelGradeCode: string }[]): Promise<number> {
-  const code = mockSteelGradeCodeById(mockSteelGradeId);
-  if (!code) throw new ApiError('COM-003', '강종');
-  const fromKnown = known.find((k) => k.steelGradeCode === code);
-  if (fromKnown) return fromKnown.steelGradeId;
+export async function itemInfoReader(): Promise<(itemCode: string) => ItemInfo | undefined> {
   let items: ItemView[] = [];
+  let yards: YardView[] = [];
   try {
-    items = await serverItems();
-  } catch (e) {
-    if (!(e instanceof ApiError && e.code === 'COM-002')) throw e;
+    [items, yards] = await Promise.all([serverRequest<ItemView[]>('GET', '/items'), serverRequest<YardView[]>('GET', '/yards')]);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.code === 'COM-002')) throw error;
   }
-  const fromItems = items.find((i) => i.steelGradeCode === code)?.steelGradeId;
-  if (fromItems) return fromItems;
-  throw new ApiError('COM-003', `서버에서 강종을 찾을 수 없어요 (${code})`);
-}
-
-/** 계정을 바꾸면 권한이 달라질 수 있어 기준정보 캐시를 비운다 (테스트용) */
-export function resetMasterIdCacheForTest(): void {
-  customersPromise = null;
-  itemsPromise = null;
+  const byCode = new Map(
+    items.map((i): [string, ItemInfo] => {
+      const yard = yards.find((y) => y.id === i.defaultYardId);
+      return [i.itemCode, { itemType: i.itemType, itemName: i.itemName, theoreticalWeightTon: i.theoreticalWeightTon, steelGradeCode: i.steelGradeCode, yardId: yard?.id ?? null, yardName: yard?.yardName ?? null }];
+    }),
+  );
+  return (itemCode) => byCode.get(itemCode) ?? seedInfoOf(itemCode);
 }

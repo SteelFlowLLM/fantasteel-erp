@@ -3,14 +3,9 @@ import type { AuthUser, DepartmentNode, ItemView, PurchaseRequisitionDetail, Pur
 import { afterEach, describe, expect, it } from 'vitest';
 import { approvalApi } from '@/api/approvals';
 import { purchaseRequisitionApi } from '@/api/purchasing';
-import { resetMasterIdCacheForTest } from '@/api/server/masterIds';
 import { fail, ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
-import { getMockDb } from '@/mock/db';
-import type { MockTables } from '@/mock/schema';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
-const read = <T>(reader: (tables: Readonly<MockTables>) => T): T => getMockDb().read(reader);
-const mockItemId = (itemCode: string) => read((t) => t.item.find((i) => i.itemCode === itemCode)?.id);
 
 const summary: PurchaseRequisitionSummary = {
   id: 901,
@@ -73,11 +68,10 @@ const withOrg = (user: AuthUser, respond: (c: ServerCall) => Response | undefine
 
 afterEach(() => {
   stopFakeServer();
-  resetMasterIdCacheForTest();
 });
 
 describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions.ts)', () => {
-  it('목록: 출처를 계산하고 원료 id는 화면 id로 맞추며, 요청자·부서 id와 발주번호·반려 일시는 그대로 둔다', async () => {
+  it('목록: 출처를 계산하고 원료·요청자·부서 id와 발주번호·반려 일시는 그대로 둔다', async () => {
     const rejected = { ...summary, id: 902, purchaseRequisitionStatus: 'REJECTED' as const, productionPlanId: null, actionDraftId: 5, rejectedAt: '2026-10-06T02:00:00.000Z' };
     useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/purchase-requisitions' ? ok(page([{ ...summary, purchaseOrderNo: 'PO-2610-0001' }, rejected])) : undefined));
     const rows = await purchaseRequisitionApi.list();
@@ -85,7 +79,7 @@ describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions
     expect(rows.map((r) => r.source)).toEqual(['MRP', 'MESSAGE']);
     expect(rows[0]).toMatchObject({
       id: 901,
-      itemId: mockItemId('SMN01'),
+      itemId: 41,
       requesterId: 77,
       departmentId: 55,
       purchaseOrderNo: 'PO-2610-0001',
@@ -132,21 +126,19 @@ describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions
     expect(await approvalApi.countWaiting(0)).toBe(0);
   });
 
-  it('등록: 원료 id는 서버 id로 바꾸고, 근거 계획 id는 서버 모드 MRP가 준 서버 id라 그대로 보낸다', async () => {
-    const items: Partial<ItemView>[] = [{ id: 41, itemCode: 'SMN01' }];
+  it('등록: 원료·근거 계획 id는 서버 모드 선택 목록·MRP가 준 서버 id라 그대로 보내고, 규격 목록을 읽지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
-      if (c.path === '/items') return ok(items);
       if (c.path === '/purchase-requisitions' && c.method === 'POST') return ok(detail);
       return undefined;
     });
-    await purchaseRequisitionApi.create({ itemId: mockItemId('SMN01') ?? 0, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: '  ', productionPlanId: 300 });
-    await purchaseRequisitionApi.create({ itemId: mockItemId('SMN01') ?? 0, requestedTon: '1', desiredReceiptDate: '2026-10-20', requestReason: '' });
+    await purchaseRequisitionApi.create({ itemId: 41, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: '  ', productionPlanId: 300 });
+    await purchaseRequisitionApi.create({ itemId: 41, requestedTon: '1', desiredReceiptDate: '2026-10-20', requestReason: '' });
 
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
       { itemId: 41, productionPlanId: 300, requestedTon: '2.5', desiredReceiptDate: '2026-10-20', requestReason: null },
       { itemId: 41, productionPlanId: null, requestedTon: '1', desiredReceiptDate: '2026-10-20', requestReason: null },
     ]);
-    expect(calls.some((c) => c.path === '/production-plans')).toBe(false);
+    expect(calls.some((c) => c.path === '/production-plans' || c.path === '/items')).toBe(false);
   });
 
   it('승인·반려·재요청은 해당 경로로 보내고 expectedUpdatedAt은 보내지 않는다', async () => {
