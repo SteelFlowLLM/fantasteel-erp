@@ -166,7 +166,7 @@ export class MessengerService {
         memberCount: employees.length,
         memberNames: others.map((e) => e.employeeName),
         counterpart: counterpart
-          ? { employeeName: counterpart.employeeName, departmentName: counterpart.department.departmentName, jobGradeName: counterpart.jobGrade.jobGradeName }
+          ? { employeeId: counterpart.id, employeeName: counterpart.employeeName, departmentName: counterpart.department.departmentName, jobGradeName: counterpart.jobGrade.jobGradeName }
           : null,
         lastMessage: last
           ? { senderName: lastSender?.employeeName ?? '-', isMine: last.senderId === me, preview: previewOf(last), createdAt: last.createdAt.toISOString() }
