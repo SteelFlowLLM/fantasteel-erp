@@ -15,7 +15,7 @@
 
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
-| 쓰기 | `task` | `task_title`, `task_description`, `assignee_id`, `due_date`(date), `task_status`(OPEN → DONE), `message_id`(메신저 메시지에서 등록, 스키마 2차) |
+| 쓰기 | `task` | `task_title`, `task_description`, `assignee_id`, `creator_id`(등록자, 2026-10-08), `due_date`(date), `task_status`(OPEN → DONE), `link_path`(관련 화면, 2026-10-08), `message_id`(메신저 메시지에서 등록, 스키마 2차) |
 | 쓰기 | `notification` | `notification_type`(NOTIFICATION_TYPE), `recipient_id`(**부서 알림은 발송 시 부서원별 행으로 펼침**), `notification_content`, `link_path`(ERP 화면 이동 경로), `message_id`, `business_event_id`, `read_at` |
 | 읽기 | `employee`, `department` | 담당자·부서원 |
 
@@ -23,7 +23,7 @@
 - `notification_message_recipient_key` — `(message_id, recipient_id) WHERE message_id IS NOT NULL`
 - `notification_business_event_recipient_key` — `(business_event_id, recipient_id) WHERE business_event_id IS NOT NULL`
 
-Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecipient`.
+Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.tasksAsCreator`, `Employee.notificationsAsRecipient`.
 
 ## 3. API
 
@@ -39,7 +39,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 ## 4. 업무 규칙
 
 **업무**(REQ-NTF-001)
-- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks`).
+- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN, 등록자(`creator_id`)는 로그인 사원. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks`).
 - 메시지에서 등록(메신저 16번, 문서에 없는 추가 기능): `messageId`를 주면 `task.message_id`에 남긴다. 메시지 없음 COM-003, 등록하는 사람이 그 방 멤버가 아님 COM-002, 삭제·시스템 메시지 COM-004. 응답 `messageId`·`linkPath`(`/messenger?room=&message=`, 없으면 null).
 - 완료: 담당자 본인만, OPEN에서만 DONE([06] TASK_STATUS, [04] 10장). 다른 사람이면 COM-002, 이미 완료면 COM-001.
 - 작업(공정 작업)과 다르다: 공정 작업은 상태값이 없고 실적의 시작·완료 시각으로 판단한다([04] 10장 "작업").
@@ -94,7 +94,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 | --- | --- |
 | 알림 유형 | TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT를 확정한다([06] 2장으로 옮김). 업무 지정·구매요청 승인 요청·결과 알림에 쓴다 |
 | 읽음 처리 API | [CSV]에 없지만 임시로 둔다: `POST notifications/:id/read`, `POST notifications/read-all`(컨벤션 5장 액션 URL, `chat-rooms/:id/read`와 같은 모양). 이미 읽은 알림의 읽은 시각은 바꾸지 않는다 |
-| 업무 목록 범위 | 내 담당 업무만(`assignee_id = 로그인 사원`). `task`에 등록자 칸이 없어 "내가 만든 업무"는 없다 |
+| 업무 목록 범위 | 지금은 내 담당 업무만(`assignee_id = 로그인 사원`). 2026-10-08 ERD에 등록자(`creator_id`)를 추가해 "내가 등록한 업무" 범위를 다음 작업에서 붙인다(기존 업무의 등록자는 담당자로 채움) |
 | 부서 알림 하위 부서 | 넣지 않는다. 그 부서에 소속된 재직 중 사원만 |
 | 업무 수정·담당자 변경 | API를 만들지 않는다. 화면은 서버 모드에서 숨긴다 |
 | 실시간 알림 | 지금은 만들지 않는다. 화면이 다시 읽을 때 반영된다 |

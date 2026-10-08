@@ -71,6 +71,7 @@ export class TaskService {
         taskTitle,
         taskDescription: dto.taskDescription?.trim() || null,
         assigneeId: dto.assigneeId,
+        creatorId: user.employeeId,
         dueDate,
         taskStatus: TASK_STATUS.OPEN,
         messageId: dto.messageId ?? null,

@@ -59,6 +59,8 @@ describe('POST /tasks (API-240)', () => {
     expect(body.data).toMatchObject({ taskTitle: '원료 입고 일정 확인', taskDescription: null, assigneeId: purchaseId, assigneeName: '정다은', dueDate: '2026-10-20', taskStatus: 'OPEN' });
     const sent = await prisma.notification.findMany({ where: { recipientId: purchaseId, notificationType: 'TASK_ASSIGNED' } });
     expect(sent.map((n) => [n.notificationContent, n.linkPath])).toEqual([['업무 지정 · 원료 입고 일정 확인', '/tasks']]);
+    // 등록자는 로그인 사원 (ERD task.creator_id, 2026-10-08)
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: body.data.id } })).creatorId).toBe(headId);
   });
 
   it('나에게 맡기는 업무는 알림이 없다', async () => {
