@@ -1,12 +1,13 @@
 // 수주 api (REQ-SO-001~006, REQ-INV-002~005, BP-SO-01·02, REQ-PRD-006 재생산, REQ-MSG-001 업무방).
 // 이 층은 권한 확인(requireActor)만 하고 업무 규칙·작업 로그·불변조건은 core 서비스(@/mock/services)가 맡는다.
 // NEXT_PUBLIC_DATA_SOURCE=server면 목록·상세·미리보기·등록·취소·이력은 실제 서버를 부른다 (api/server/salesOrders.ts, 이력은 api/server/businessEvents.ts).
-// 서버에 아직 없는 생산 연결·구매 영향·업무방·재생산은 서버 모드에서 비어 있거나 "연결 전" 오류다.
+// 업무방은 메신저 어댑터, 재생산 계획은 생산계획 어댑터(POST /production-plans)를 부른다. 서버에 아직 없는 생산 연결·구매 영향은 서버 모드에서 비어 있다.
 import { requireActor } from '@/api/actor';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
 import { serverMessengerApi } from '@/api/server/messenger';
+import { serverProductionPlanApi } from '@/api/server/production';
 import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import { PERMISSION, type Permission, type ProductItemType } from '@/codes';
 import { todayStr } from '@/lib/format';
@@ -242,9 +243,12 @@ export const salesOrderApi = {
   /** 재생산 계획 만들기 (REQ-PRD-006, 14.1-6): 여재로 먼저 채우고 그래도 남는 '추가 계획 필요'만 계획한다. 자동으로 만들지 않는다. */
   createReproduction: (input: { salesOrderItemId: number }) =>
     isServerDataSource()
-      ? Promise.reject<{ reservedFromSurplusQty: number; productionPlanId: number | null; productionPlanNo: string | null; shortageQty: number }>(
-          new Error('재생산 계획은 아직 서버와 연결되지 않았어요'),
-        )
+      ? serverProductionPlanApi.createReproduction(input).then(({ reservedFromSurplusQty, plan }) => ({
+          reservedFromSurplusQty,
+          productionPlanId: plan?.id ?? null,
+          productionPlanNo: plan?.productionPlanNo ?? null,
+          shortageQty: plan?.shortageQty ?? 0,
+        }))
       : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
       const soItem = tx.tables.salesOrderItem.find((i) => i.id === input.salesOrderItemId);
