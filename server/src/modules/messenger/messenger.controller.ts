@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Quer
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
@@ -46,6 +46,18 @@ export class MessengerController {
   @Get('chat-rooms/:id/messages')
   listMessages(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Query() query: ListMessagesQuery): Promise<ChatMessagePage> {
     return this.service.listMessages(user, id, query);
+  }
+
+  /** 방 안 메시지 검색 (명세에 없는 API, 편의 기능) */
+  @Get('chat-rooms/:id/messages/search')
+  searchMessages(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Query() query: SearchMessagesQuery): Promise<ChatMessagePage> {
+    return this.service.searchMessages(user, id, query);
+  }
+
+  /** 파일 모아보기: 첨부가 있는 메시지만 (명세에 없는 API, 편의 기능) */
+  @Get('chat-rooms/:id/attachments')
+  listAttachments(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Query() query: ListMessagesQuery): Promise<ChatMessagePage> {
+    return this.service.listAttachments(user, id, query);
   }
 
   @Post('chat-rooms/:id/messages')

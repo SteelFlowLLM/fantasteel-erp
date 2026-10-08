@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { type OnGatewayConnection, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { MESSENGER_EVENT, MESSENGER_SOCKET_NAMESPACE, type ChatMessageView, type ChatRoomReadEvent, type ChatRoomUpdatedEvent } from '@fantasteel/shared';
+import { MESSENGER_EVENT, MESSENGER_SOCKET_NAMESPACE, type ChatMemberReadEvent, type ChatMessageView, type ChatRoomReadEvent, type ChatRoomUpdatedEvent } from '@fantasteel/shared';
 import type { Server, Socket } from 'socket.io';
 import { AuthTokenService } from '../../common/auth/auth-token.service';
 import { AuthUserService } from '../../common/auth/auth-user.service';
@@ -45,6 +45,11 @@ export class MessengerGateway implements OnGatewayConnection {
   /** 내 다른 탭·기기의 안 읽은 수를 맞춘다 */
   emitRead(employeeId: number, event: ChatRoomReadEvent): void {
     this.emit(employeeId, MESSENGER_EVENT.ROOM_READ, event);
+  }
+
+  /** 다른 멤버의 메시지별 안 읽은 사람 수를 맞춘다 */
+  emitMemberRead(memberIds: readonly number[], event: ChatMemberReadEvent): void {
+    for (const employeeId of memberIds) this.emit(employeeId, MESSENGER_EVENT.MEMBER_READ, event);
   }
 
   /** 방이 생기거나 멤버가 바뀌면 목록을 다시 읽게 한다 */

@@ -23,7 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MessengerGateway } from './messenger.gateway';
 
 interface SocketRecord {
-  event: 'message:new' | 'room:read' | 'room:updated';
+  event: 'message:new' | 'room:read' | 'room:updated' | 'member:read';
   employeeId: number;
   payload: unknown;
 }
@@ -114,6 +114,9 @@ beforeAll(async () => {
     for (const employeeId of memberIds) socketRecords.push({ event: 'message:new', employeeId, payload: toView(employeeId) });
   };
   gateway.emitRead = (employeeId, payload) => socketRecords.push({ event: 'room:read', employeeId, payload });
+  gateway.emitMemberRead = (memberIds, payload) => {
+    for (const employeeId of memberIds) socketRecords.push({ event: 'member:read', employeeId, payload });
+  };
   gateway.emitRoomUpdated = (memberIds, payload) => {
     for (const employeeId of memberIds) socketRecords.push({ event: 'room:updated', employeeId, payload });
   };
@@ -235,9 +238,10 @@ describe('업무방', () => {
 
   it('수주당 1개: 다시 열면 같은 방에 새 멤버만 더하고, 상단 수주 요약은 조회 권한이 있는 멤버에게만 보인다', async () => {
     const salesOrder = await createSalesOrder('SO-2610-902');
-    const first = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [logisticsId], salesOrderId: salesOrder.id });
+    // 업무방 메시지는 멤버에게 알림을 만든다. 권예진(물류)은 task.spec이 알림 0건을 가정해서 생산 사원을 쓴다
+    const first = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId], salesOrderId: salesOrder.id });
     await send(salesCookie, first.id, '출하 일정 맞춰 주세요');
-    const again = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [logisticsId, purchaseId], salesOrderId: salesOrder.id });
+    const again = await createRoom(salesCookie, { chatRoomType: 'WORK', memberIds: [productionId, purchaseId], salesOrderId: salesOrder.id });
     expect(again).toEqual({ id: first.id, reused: true });
     expect(await prisma.chatRoomMember.count({ where: { chatRoomId: first.id } })).toBe(3);
 
@@ -435,5 +439,52 @@ describe('방 관리', () => {
     const direct = await createRoom(salesCookie, { chatRoomType: 'DIRECT', memberIds: [qualityId] });
     const directRename = await call('PATCH', `/chat-rooms/${direct.id}`, salesCookie, { chatRoomName: '안 됨' });
     expect([directRename.status, directRename.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+});
+
+describe('편의: 안 읽은 사람 수 · 파일 모아보기 · 검색', () => {
+  it('메시지마다 아직 안 읽은 멤버 수(보낸 사람 제외)를 붙이고, 누가 읽으면 다른 멤버에게 member:read를 보낸다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, purchaseId] });
+    const first = (await send(salesCookie, room.id, '첫째')).body.data;
+    const second = (await send(salesCookie, room.id, '둘째')).body.data;
+    expect(second.unreadMemberCount).toBe(2);
+    socketRecords.length = 0;
+
+    await call('POST', `/chat-rooms/${room.id}/read`, qualityCookie, { lastMessageId: first.id });
+    expect(recordsOf('member:read').map((r) => r.employeeId).sort()).toEqual([salesId, purchaseId].sort());
+    expect(recordsOf('member:read')[0].payload).toEqual({ chatRoomId: room.id, employeeId: qualityId, lastReadMessageId: first.id });
+
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+    expect(page.body.data.items.map((m) => [m.content, m.unreadMemberCount])).toEqual([
+      ['첫째', 1],
+      ['둘째', 2],
+    ]);
+  });
+
+  it('파일 모아보기는 첨부가 있는 메시지만 최신순, before로 더 보고, 멤버가 아니면 COM-002', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await upload(salesCookie, room.id, 'a.pdf', new Uint8Array([1]));
+    await send(salesCookie, room.id, '글만');
+    await upload(qualityCookie, room.id, 'b.xlsx', new Uint8Array([2]));
+    const files = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments?limit=1`, salesCookie);
+    expect(files.body.data.items.map((m) => m.attachmentName)).toEqual(['b.xlsx']);
+    expect(files.body.data.hasMore).toBe(true);
+    const older = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/attachments?before=${files.body.data.items[0].id}`, salesCookie);
+    expect(older.body.data).toMatchObject({ items: [expect.objectContaining({ attachmentName: 'a.pdf' })], hasMore: false });
+    const outsider = await call('GET', `/chat-rooms/${room.id}/attachments`, purchaseCookie);
+    expect(outsider.status).toBe(403);
+  });
+
+  it('검색은 이 방 본문에서 대소문자 없이 찾아 최신순으로, 빈 검색어는 COM-004', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const other = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    await send(salesCookie, room.id, 'SO-2610-001 출하 확인');
+    await send(qualityCookie, room.id, '검사 끝났어요');
+    await send(salesCookie, room.id, 'so-2610-001 납기 변경');
+    await send(salesCookie, other.id, 'SO-2610-001 다른 방');
+    const found = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('So-2610')}`, qualityCookie);
+    expect(found.body.data.items.map((m) => m.content)).toEqual(['so-2610-001 납기 변경', 'SO-2610-001 출하 확인']);
+    const blank = await call('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('  ')}`, qualityCookie);
+    expect([blank.status, blank.body.error?.code]).toEqual([400, 'COM-004']);
   });
 });

@@ -31,6 +31,8 @@ export function useMessengerSocket(): void {
     socket.on(MESSENGER_EVENT.MESSAGE_NEW, () => refreshMessenger(queryClient, true));
     socket.on(MESSENGER_EVENT.ROOM_READ, () => refreshMessenger(queryClient, false));
     socket.on(MESSENGER_EVENT.ROOM_UPDATED, () => refreshMessenger(queryClient, false));
+    // 다른 멤버가 읽으면 메시지별 안 읽은 사람 수가 바뀐다
+    socket.on(MESSENGER_EVENT.MEMBER_READ, () => refreshMessenger(queryClient, false));
     return () => {
       socket.removeAllListeners();
       socket.disconnect();

@@ -5,6 +5,7 @@ import {
   CHAT_ROOM_TYPE_LABEL,
   MESSAGE_ATTACHMENT_MAX_BYTES,
   MESSAGE_PAGE_SIZE,
+  MESSAGE_SEARCH_SIZE,
   NOTIFICATION_TYPE,
   PERMISSION,
   SALES_ORDER_ITEM_STATUS,
@@ -31,7 +32,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -100,7 +101,12 @@ function decodeFileName(name: string): string {
   return decoded.includes('\uFFFD') ? name : decoded;
 }
 
-function toMessageView(message: MessageWithSender, me: number): ChatMessageView {
+/** 메시지를 아직 읽지 않은 멤버 수: 보낸 사람을 빼고 읽음 위치가 이 메시지보다 앞인 멤버 */
+function unreadMemberCountOf(message: { id: number; senderId: number }, reads: readonly { employeeId: number; lastReadMessageId: number | null }[]): number {
+  return reads.filter((r) => r.employeeId !== message.senderId && (r.lastReadMessageId ?? 0) < message.id).length;
+}
+
+function toMessageView(message: MessageWithSender, me: number, unreadMemberCount: number): ChatMessageView {
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
@@ -111,6 +117,7 @@ function toMessageView(message: MessageWithSender, me: number): ChatMessageView 
     isMine: message.senderId === me,
     content: message.content,
     attachmentName: message.attachmentName,
+    unreadMemberCount,
     createdAt: message.createdAt.toISOString(),
   };
 }
@@ -335,13 +342,31 @@ export class MessengerService {
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
     const limit = query.limit ?? MESSAGE_PAGE_SIZE;
     const rows = await this.repository.findMessagesBefore(this.prisma, chatRoomId, query.before, limit + 1);
-    return {
-      items: rows
-        .slice(0, limit)
-        .reverse()
-        .map((m) => toMessageView(m, user.employeeId)),
-      hasMore: rows.length > limit,
-    };
+    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit).reverse(), rows.length > limit);
+  }
+
+  /** 파일 모아보기: 첨부가 있는 메시지만 최신순으로 (before로 더 보기) */
+  async listAttachments(user: AuthUser, chatRoomId: number, query: ListMessagesQuery): Promise<ChatMessagePage> {
+    await this.requireMember(this.prisma, chatRoomId, user.employeeId);
+    const limit = query.limit ?? MESSAGE_PAGE_SIZE;
+    const rows = await this.repository.findAttachmentMessagesBefore(this.prisma, chatRoomId, query.before, limit + 1);
+    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit), rows.length > limit);
+  }
+
+  /** 방 안 메시지 검색: 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시, before로 더 보기) */
+  async searchMessages(user: AuthUser, chatRoomId: number, query: SearchMessagesQuery): Promise<ChatMessagePage> {
+    const keyword = query.q.trim();
+    if (!keyword) throw new AppException('COM-004', '검색어를 넣어 주세요');
+    await this.requireMember(this.prisma, chatRoomId, user.employeeId);
+    const limit = query.limit ?? MESSAGE_SEARCH_SIZE;
+    const rows = await this.repository.searchMessages(this.prisma, chatRoomId, keyword, query.before, limit + 1);
+    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit), rows.length > limit);
+  }
+
+  /** 메시지 목록 응답: 멤버 읽음 위치를 한 번 읽어 메시지마다 안 읽은 사람 수를 붙인다 */
+  private async toPage(chatRoomId: number, me: number, rows: readonly MessageWithSender[], hasMore: boolean): Promise<ChatMessagePage> {
+    const reads = await this.repository.findMemberReads(this.prisma, chatRoomId);
+    return { items: rows.map((m) => toMessageView(m, me, unreadMemberCountOf(m, reads))), hasMore };
   }
 
   /** 글 메시지 보내기 (REQ-MSG-002). @멘션 대상은 mentionedEmployeeIds로 받는다 */
@@ -391,6 +416,8 @@ export class MessengerService {
       return { chatRoomId, lastReadMessageId, unreadCount: await this.repository.countUnread(tx, chatRoomId, me, lastReadMessageId) };
     });
     this.gateway.emitRead(me, result);
+    const others = (await this.repository.findMemberIds(this.prisma, chatRoomId)).map((m) => m.employeeId).filter((id) => id !== me);
+    this.gateway.emitMemberRead(others, { chatRoomId, employeeId: me, lastReadMessageId: result.lastReadMessageId });
     return result;
   }
 
@@ -413,8 +440,10 @@ export class MessengerService {
       await this.notifyForMessage(tx, room, created, members, mentionedEmployeeIds);
       return { message: created, memberIds: members };
     });
-    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId));
-    return toMessageView(message, me);
+    // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다
+    const unreadMemberCount = memberIds.length - 1;
+    this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount));
+    return toMessageView(message, me, unreadMemberCount);
   }
 
   private async notifyForMessage(tx: Tx, room: ChatRoom, message: MessageWithSender, memberIds: readonly number[], mentionedEmployeeIds: readonly number[]): Promise<void> {

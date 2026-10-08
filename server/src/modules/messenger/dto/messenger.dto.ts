@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, type ChatRoomType } from '@fantasteel/shared';
+import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_PAGE_SIZE_MAX, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
   @IsIn(Object.values(CHAT_ROOM_TYPE), { message: '채팅방 유형은 DIRECT, GROUP, WORK 중 하나여야 해요' })
@@ -78,4 +78,25 @@ export class RenameChatRoomDto {
   @IsString({ message: '방 이름은 글자여야 해요' })
   @MaxLength(CHAT_ROOM_NAME_MAX, { message: `방 이름은 ${CHAT_ROOM_NAME_MAX}자까지예요` })
   chatRoomName?: string | null;
+}
+
+export class SearchMessagesQuery {
+  /** 본문에 들어 있는 글자 (대소문자 무시) */
+  @IsString({ message: '검색어를 넣어 주세요' })
+  @MaxLength(MESSAGE_SEARCH_QUERY_MAX, { message: `검색어는 ${MESSAGE_SEARCH_QUERY_MAX}자까지예요` })
+  q!: string;
+
+  /** 이 메시지 id보다 오래된 결과 (더 보기) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'before는 메시지 id여야 해요' })
+  @Min(1)
+  before?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'limit는 정수여야 해요' })
+  @Min(1)
+  @Max(MESSAGE_PAGE_SIZE_MAX, { message: `limit는 ${MESSAGE_PAGE_SIZE_MAX}까지예요` })
+  limit?: number;
 }

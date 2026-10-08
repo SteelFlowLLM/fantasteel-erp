@@ -5,7 +5,7 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { MESSAGE_ATTACHMENT_MAX_BYTES } from '@fantasteel/shared';
+import { MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_SEARCH_SIZE } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
@@ -33,6 +33,8 @@ export const messengerKeys = {
   rooms: (employeeId: number) => ['chat-rooms', 'list', employeeId] as const,
   room: (employeeId: number, chatRoomId: number) => ['chat-rooms', 'detail', employeeId, chatRoomId] as const,
   messages: (employeeId: number, chatRoomId: number, limit: number) => ['chat-rooms', 'messages', employeeId, chatRoomId, limit] as const,
+  files: (employeeId: number, chatRoomId: number, limit: number) => ['chat-rooms', 'files', employeeId, chatRoomId, limit] as const,
+  search: (employeeId: number, chatRoomId: number, keyword: string) => ['chat-rooms', 'search', employeeId, chatRoomId, keyword] as const,
 };
 
 // ── 화면에 내보내는 모양 ─────────────────────────────────
@@ -143,6 +145,8 @@ export interface MessageView {
   mentionsMe: boolean;
   /** 본문의 업무 번호 중 실제로 있는 것 → 상세 화면 링크 (REQ-MSG-006) */
   erpLinks: ErpLink[];
+  /** 아직 안 읽은 멤버 수 (보낸 사람 제외). 0이면 모두 읽음 */
+  unreadMemberCount: number;
 }
 
 export interface MessagePage {
@@ -302,6 +306,7 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     createdAt: message.createdAt,
     mentionsMe: message.senderId !== actor.employee.id && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: erpLinksOf(tables, message.content),
+    unreadMemberCount: tables.chatRoomMember.filter((m) => m.chatRoomId === message.chatRoomId && m.employeeId !== message.senderId && (m.lastReadMessageId ?? 0) < message.id).length,
   };
 }
 
@@ -436,6 +441,28 @@ export const messengerApi = {
         items: all.slice(Math.max(0, all.length - limit)).map((m) => toMessageView(tables, m, actor, myTargets)),
         hasMore: all.length > limit,
       };
+    }),
+
+  /** 파일 모아보기: 첨부가 있는 메시지만 최신순으로 limit개 (방 멤버만) */
+  listFiles: ({ chatRoomId, limit }: { chatRoomId: number; limit: number }): Promise<MessagePage> =>
+    isServerDataSource() ? serverMessengerApi.listFiles({ chatRoomId, limit }) : mockQuery((tables) => {
+      const actor = requireActor(tables);
+      requireMemberRoom(tables, actor, chatRoomId);
+      const files = tables.message.filter((m) => m.chatRoomId === chatRoomId && m.fileName !== null).sort((a, b) => b.id - a.id);
+      const myTargets = myMentionTargets(tables, actor);
+      return { items: files.slice(0, limit).map((m) => toMessageView(tables, m, actor, myTargets)), hasMore: files.length > limit };
+    }),
+
+  /** 방 안 메시지 검색: 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시, 방 멤버만) */
+  searchMessages: ({ chatRoomId, keyword }: { chatRoomId: number; keyword: string }): Promise<MessagePage> =>
+    isServerDataSource() ? serverMessengerApi.searchMessages({ chatRoomId, keyword }) : mockQuery((tables) => {
+      const actor = requireActor(tables);
+      requireMemberRoom(tables, actor, chatRoomId);
+      const needle = keyword.trim().toLowerCase();
+      if (!needle) throw new InputError('검색어를 넣어 주세요');
+      const found = tables.message.filter((m) => m.chatRoomId === chatRoomId && (m.content ?? '').toLowerCase().includes(needle)).sort((a, b) => b.id - a.id);
+      const myTargets = myMentionTargets(tables, actor);
+      return { items: found.slice(0, MESSAGE_SEARCH_SIZE).map((m) => toMessageView(tables, m, actor, myTargets)), hasMore: found.length > MESSAGE_SEARCH_SIZE };
     }),
 
   /** 첨부 내려받기 (방 멤버만). 서버는 파일 이름을 응답 헤더로만 주고 다른 origin에서는 읽을 수 없어 화면이 넘긴다 */

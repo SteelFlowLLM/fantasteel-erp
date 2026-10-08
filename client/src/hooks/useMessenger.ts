@@ -42,6 +42,23 @@ export function useMarkRoomRead() {
   });
 }
 
+/** 파일 모아보기 (방 정보 칸). 최신순 limit개 */
+export function useChatFiles(chatRoomId: number, limit: number) {
+  const me = useMe();
+  return useQuery({ queryKey: messengerKeys.files(me.employeeId, chatRoomId, limit), queryFn: () => messengerApi.listFiles({ chatRoomId, limit }), placeholderData: keepPreviousData });
+}
+
+/** 방 안 메시지 검색. 검색어가 비면 부르지 않는다 */
+export function useChatSearch(chatRoomId: number, keyword: string) {
+  const me = useMe();
+  const trimmed = keyword.trim();
+  return useQuery({
+    queryKey: messengerKeys.search(me.employeeId, chatRoomId, trimmed),
+    queryFn: trimmed ? () => messengerApi.searchMessages({ chatRoomId, keyword: trimmed }) : skipToken,
+    retry: false,
+  });
+}
+
 /** 첨부 내려받기 (REQ-MSG-003). 방 멤버만 받을 수 있다 (api가 확인) */
 export function useMessageFileDownload() {
   return useMutation({
