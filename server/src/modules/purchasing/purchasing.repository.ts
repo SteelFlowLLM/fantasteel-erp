@@ -105,7 +105,7 @@ export class PurchasingRepository {
       actionDraftId: number | null;
     },
   ) {
-    return tx.purchaseRequisition.create({ data, include: requisitionInclude });
+    return tx.purchaseRequisition.create({ data });
   }
 
   countRequisitions(tx: Tx, filter: RequisitionFilter) {
@@ -118,6 +118,11 @@ export class PurchasingRepository {
 
   findRequisition(tx: Tx, id: number) {
     return tx.purchaseRequisition.findUnique({ where: { id }, include: requisitionInclude });
+  }
+
+  /** 승인·반려·재요청 트랜잭션용: 구매요청과 요청자 부서만 (관계를 여러 개 읽으면 트랜잭션 연결에 쿼리가 겹친다) */
+  findRequisitionForChange(tx: Tx, id: number) {
+    return tx.purchaseRequisition.findUnique({ where: { id }, include: { requester: { select: { departmentId: true } } } });
   }
 
   /** 상태가 from일 때만 바꾸는 조건부 UPDATE. 바뀐 건수(0 또는 1)를 돌려준다 */
@@ -141,7 +146,7 @@ export class PurchasingRepository {
   createPurchaseOrder(tx: Tx, data: { purchaseOrderNo: string; supplierId: number; items: { purchaseRequisitionId: number; itemId: number; orderedTon: Prisma.Decimal; expectedReceiptDate: Date }[] }) {
     return tx.purchaseOrder.create({
       data: { purchaseOrderNo: data.purchaseOrderNo, supplierId: data.supplierId, purchaseOrderItems: { create: data.items } },
-      include: purchaseOrderInclude,
+      select: { id: true, purchaseOrderNo: true, purchaseOrderStatus: true },
     });
   }
 
@@ -171,7 +176,7 @@ export class PurchasingRepository {
     return tx.$queryRawTyped(lockPurchaseOrderByItemId(purchaseOrderItemId));
   }
 
-  /** 입고할 발주 품목: 원료 코드·기본 야드와 같은 발주의 모든 품목 입고 기록(미입고량·발주 상태 계산용) */
+  /** 입고할 발주 품목과 같은 발주의 모든 품목 입고 기록(미입고량·발주 상태 계산용). 원료는 findReceiptItem으로 따로 읽는다 */
   findPurchaseOrderItemForReceipt(tx: Tx, id: number) {
     return tx.purchaseOrderItem.findUnique({
       where: { id },
@@ -179,12 +184,16 @@ export class PurchasingRepository {
         id: true,
         itemId: true,
         orderedTon: true,
-        item: { select: { itemCode: true, defaultYardId: true } },
         purchaseOrder: {
           select: { id: true, purchaseOrderNo: true, purchaseOrderStatus: true, purchaseOrderItems: { select: { id: true, orderedTon: true, goodsReceipts: { select: { receivedTon: true } } } } },
         },
       },
     });
+  }
+
+  /** 원료 LOT 번호·야드에 쓰는 원료 코드·기본 야드 */
+  findReceiptItem(tx: Tx, id: number) {
+    return tx.item.findUniqueOrThrow({ where: { id }, select: { itemCode: true, defaultYardId: true } });
   }
 
   createGoodsReceipt(tx: Tx, data: { goodsReceiptNo: string; purchaseOrderItemId: number; receivedTon: Prisma.Decimal; receivedDate: Date }) {

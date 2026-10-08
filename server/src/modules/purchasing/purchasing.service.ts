@@ -22,7 +22,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { seoulToday } from '../../common/time/seoul-date';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type PurchaseRequisition } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import type { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
@@ -31,6 +31,7 @@ import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, Rejec
 import { PurchasingRepository, type PurchaseOrderFilter, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
 type RequisitionRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findRequisition']>>>;
+type RequisitionChangeRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findRequisitionForChange']>>>;
 type PurchaseOrderRow = NonNullable<Awaited<ReturnType<PurchasingRepository['findPurchaseOrder']>>>;
 type GoodsReceiptRow = Awaited<ReturnType<PurchasingRepository['findGoodsReceipt']>>;
 
@@ -76,7 +77,7 @@ function parseDate(value: string, label: string): Date {
 }
 
 /** 작업 로그 before·after에 남기는 구매요청 값 */
-function snapshotOf(row: RequisitionRow) {
+function snapshotOf(row: PurchaseRequisition) {
   return {
     purchaseRequisitionNo: row.purchaseRequisitionNo,
     purchaseRequisitionStatus: row.purchaseRequisitionStatus,
@@ -115,6 +116,7 @@ async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
 /**
  * 구매요청 등록·조회 (REQ-PUR-001·002, BP-PUR-01, docs/backend/purchasing.md).
  * createRequisition은 message-action이 초안 확정 트랜잭션 안에서 부른다 (BP-ACT-01).
+ * 트랜잭션 안에서는 관계를 여러 개 읽지 않는다: Prisma가 한 연결에 쿼리를 겹쳐 보내 pg 경고가 난다. 응답 모양은 커밋 뒤에 읽는다.
  */
 @Injectable()
 export class PurchasingService {
@@ -159,15 +161,17 @@ export class PurchasingService {
 
   // ── 등록 (REQ-PUR-001) ────────────────────────────────
 
-  create(user: AuthUser, dto: CreatePurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
-    return retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createRequisition(tx, dto, user)));
+  async create(user: AuthUser, dto: CreatePurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
+    const created = await retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createRequisition(tx, dto, user)));
+    return this.requisitionView(created.id);
   }
 
   /**
    * 구매요청 1건(원료 1품목) 저장 → 바로 요청자 소속 부서장의 승인 대기(WAITING_APPROVAL, 임시 저장 없음) → 작업 로그.
    * 요청자·부서는 actor에서 가져온다. 부서장이 없으면 승인할 사람이 없으므로 PUR-001.
+   * 저장한 행(관계 없음)을 돌려준다. 화면 응답은 커밋 뒤에 읽는다.
    */
-  async createRequisition(tx: Tx, input: CreateRequisitionInput, actor: AuthUser, origin?: RequisitionOrigin): Promise<PurchaseRequisitionDetail> {
+  async createRequisition(tx: Tx, input: CreateRequisitionInput, actor: AuthUser, origin?: RequisitionOrigin): Promise<PurchaseRequisition> {
     const { requestedTon, desiredReceiptDate } = parseRequestValues(input);
     const item = await this.repository.findItem(tx, input.itemId);
     if (!item) throw new AppException('COM-003', '원료 품목을 찾을 수 없어요');
@@ -205,35 +209,35 @@ export class PurchasingService {
       messageId: origin?.messageId ?? null,
     });
     await this.notifyApprovalRequested(tx, headId, row, actor, event.id);
-    return this.toDetail(row);
+    return row;
   }
 
   // ── 승인·반려·재요청 (REQ-PUR-002, REQ-AUTH-004) ────────
 
-  approve(user: AuthUser, id: number): Promise<PurchaseRequisitionDetail> {
-    return retryOnNumberConflict(() =>
+  async approve(user: AuthUser, id: number): Promise<PurchaseRequisitionDetail> {
+    await retryOnNumberConflict(() =>
       this.prisma.$transaction(async (tx) => {
         const before = await this.mustFindForDecision(tx, user, id);
         await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.APPROVED, approverId: user.employeeId, approvedAt: new Date() });
         const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_APPROVED, null);
         await this.notifyApprovalResult(tx, after, '승인됨', eventId);
-        return this.detailOf(tx, after);
       }),
     );
+    return this.requisitionView(id);
   }
 
   async reject(user: AuthUser, id: number, dto: RejectPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
     const rejectReason = dto.rejectReason.trim();
     if (!rejectReason) throw new AppException('COM-004', '반려 사유를 입력해 주세요');
-    return retryOnNumberConflict(() =>
+    await retryOnNumberConflict(() =>
       this.prisma.$transaction(async (tx) => {
         const before = await this.mustFindForDecision(tx, user, id);
         await this.changeStatus(tx, before, PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.REJECTED, approverId: user.employeeId, rejectReason });
         const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_REJECTED, rejectReason);
         await this.notifyApprovalResult(tx, after, `반려됨 · ${rejectReason}`, eventId);
-        return this.detailOf(tx, after);
       }),
     );
+    return this.requisitionView(id);
   }
 
   /**
@@ -242,9 +246,9 @@ export class PurchasingService {
    */
   async resubmit(user: AuthUser, id: number, dto: ResubmitPurchaseRequisitionDto): Promise<PurchaseRequisitionDetail> {
     const { requestedTon, desiredReceiptDate } = parseRequestValues(dto);
-    return retryOnNumberConflict(() =>
+    await retryOnNumberConflict(() =>
       this.prisma.$transaction(async (tx) => {
-        const before = await this.mustFindRequisition(tx, id);
+        const before = await this.mustFindForChange(tx, id);
         if (before.requesterId !== user.employeeId) throw new AppException('COM-002', '요청자 본인만 재요청할 수 있어요');
         if (before.purchaseRequisitionStatus !== PURCHASE_REQUISITION_STATUS.REJECTED) throw new AppException('COM-001', '반려된 요청만 재요청할 수 있어요');
         const headId = await this.requireDepartmentHeadId(tx, before.requester.departmentId);
@@ -262,9 +266,9 @@ export class PurchasingService {
         // BUSINESS_EVENT_TYPE에 재요청이 없어(docs/backend/purchasing.md 8장) 등록 이벤트로 남기고 사유로 구분한다
         const { after, eventId } = await this.recordChange(tx, user, before, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, '반려 후 재요청');
         await this.notifyApprovalRequested(tx, headId, after, user, eventId);
-        return this.detailOf(tx, after);
       }),
     );
+    return this.requisitionView(id);
   }
 
   // ── 발주 조회 (REQ-PUR-003·004) ───────────────────────
@@ -299,15 +303,17 @@ export class PurchasingService {
       orderedTon: parseTon(line.orderedTon, '발주량(톤)'),
       expectedReceiptDate: line.expectedReceiptDate ? parseDate(line.expectedReceiptDate, '입고 예정일') : null,
     }));
-    return retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createPurchaseOrderInTx(tx, user, dto.supplierId, lines)));
+    const orderId = await retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createPurchaseOrderInTx(tx, user, dto.supplierId, lines)));
+    return this.purchaseOrderDetail(orderId);
   }
 
+  /** 발주 id를 돌려준다 */
   private async createPurchaseOrderInTx(
     tx: Tx,
     user: AuthUser,
     supplierId: number,
     lines: { purchaseRequisitionId: number; orderedTon: Prisma.Decimal; expectedReceiptDate: Date | null }[],
-  ): Promise<PurchaseOrderView> {
+  ): Promise<number> {
     if (!(await this.repository.findSupplier(tx, supplierId))) throw new AppException('COM-003', '공급업체를 찾을 수 없어요');
     const requisitions = await this.repository.findRequisitionsForOrder(tx, lines.map((l) => l.purchaseRequisitionId));
     const items = lines.map((line) => {
@@ -343,7 +349,7 @@ export class PurchasingService {
         items: items.map((i) => ({ purchaseRequisitionId: i.purchaseRequisitionId, purchaseRequisitionNo: i.pr.purchaseRequisitionNo, itemId: i.itemId, orderedTon: i.orderedTon.toFixed(3), expectedReceiptDate: dateOnly(i.expectedReceiptDate) })),
       },
     });
-    return this.toPurchaseOrderView(order, user.employeeName);
+    return order.id;
   }
 
   // ── 입고 (REQ-PUR-004, BP-PUR-02) ─────────────────────
@@ -368,13 +374,16 @@ export class PurchasingService {
     const receivedDate = parseDate(dto.receivedDate, '입고일');
     // 실제로 들어온 원료를 기록하는 일이라 미래 날짜는 받지 않는다
     if (dto.receivedDate > seoulToday()) throw new AppException('COM-004', '입고일은 오늘 이후로 할 수 없어요');
-    return retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.confirmGoodsReceiptInTx(tx, user, dto.purchaseOrderItemId, receivedTon, receivedDate)));
+    const receiptId = await retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.confirmGoodsReceiptInTx(tx, user, dto.purchaseOrderItemId, receivedTon, receivedDate)));
+    return this.toGoodsReceiptView(await this.repository.findGoodsReceipt(this.prisma, receiptId), user.employeeName);
   }
 
-  private async confirmGoodsReceiptInTx(tx: Tx, user: AuthUser, purchaseOrderItemId: number, receivedTon: Prisma.Decimal, receivedDate: Date): Promise<GoodsReceiptView> {
+  /** 입고 id를 돌려준다 */
+  private async confirmGoodsReceiptInTx(tx: Tx, user: AuthUser, purchaseOrderItemId: number, receivedTon: Prisma.Decimal, receivedDate: Date): Promise<number> {
     if ((await this.repository.lockPurchaseOrderByItemId(tx, purchaseOrderItemId)).length === 0) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
     const line = await this.repository.findPurchaseOrderItemForReceipt(tx, purchaseOrderItemId);
     if (!line) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
+    const item = await this.repository.findReceiptItem(tx, line.itemId);
     const order = line.purchaseOrder;
     const receivedOf = (l: (typeof order.purchaseOrderItems)[number]) => l.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), new Prisma.Decimal(0));
     const self = order.purchaseOrderItems.find((l) => l.id === line.id);
@@ -382,36 +391,50 @@ export class PurchasingService {
     const remaining = line.orderedTon.minus(receivedBefore);
     if (receivedTon.gt(remaining)) throw new AppException('PUR-003', `미입고량 ${remaining.toFixed(3)}t보다 많이 입고할 수 없어요`);
 
-    const receipt = await this.repository.createGoodsReceipt(tx, { goodsReceiptNo: await this.numbering.nextDocumentNumber(tx, 'GOODS_RECEIPT'), purchaseOrderItemId, receivedTon, receivedDate });
+    const goodsReceiptNo = await this.numbering.nextDocumentNumber(tx, 'GOODS_RECEIPT');
+    const receipt = await this.repository.createGoodsReceipt(tx, { goodsReceiptNo, purchaseOrderItemId, receivedTon, receivedDate });
     // LOT 번호 날짜는 입고일: 원료 FIFO가 입고일 기준이라 번호와 투입 순서를 맞춘다
     const lot = await this.repository.createRawMaterialLot(tx, {
-      lotNo: await this.numbering.nextLotNumber(tx, 'RAW_MATERIAL', line.item.itemCode, receivedDate),
+      lotNo: await this.numbering.nextLotNumber(tx, 'RAW_MATERIAL', item.itemCode, receivedDate),
       itemId: line.itemId,
       goodsReceiptId: receipt.id,
-      yardId: line.item.defaultYardId,
+      yardId: item.defaultYardId,
       ton: receivedTon,
     });
     const allReceived = order.purchaseOrderItems.every((l) => (l.id === line.id ? receivedBefore.plus(receivedTon) : receivedOf(l)).gte(l.orderedTon));
     const status = allReceived ? PURCHASE_ORDER_STATUS.RECEIVED : PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED;
     if (status !== order.purchaseOrderStatus) await this.repository.updatePurchaseOrderStatus(tx, order.id, status);
 
-    const view = this.toGoodsReceiptView(await this.repository.findGoodsReceipt(tx, receipt.id), user.employeeName);
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED,
       actor: user,
       target: { table: 'goods_receipt', id: receipt.id },
       lotIds: [lot.id],
       before: { purchaseOrderStatus: order.purchaseOrderStatus, receivedTon: receivedBefore.toFixed(3) },
-      after: { ...view, purchaseOrderStatus: status, cumulativeReceivedTon: receivedBefore.plus(receivedTon).toFixed(3) },
+      after: {
+        goodsReceiptNo,
+        purchaseOrderId: order.id,
+        purchaseOrderNo: order.purchaseOrderNo,
+        purchaseOrderItemId,
+        itemId: line.itemId,
+        itemCode: item.itemCode,
+        receivedTon: receivedTon.toFixed(3),
+        receivedDate: dateOnly(receivedDate),
+        lotId: lot.id,
+        lotNo: lot.lotNo,
+        yardId: item.defaultYardId,
+        purchaseOrderStatus: status,
+        cumulativeReceivedTon: receivedBefore.plus(receivedTon).toFixed(3),
+      },
     });
-    return view;
+    return receipt.id;
   }
 
   // ── 계산·모양 ─────────────────────────────────────────
 
   /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
-  private async mustFindForDecision(tx: Tx, user: AuthUser, id: number): Promise<RequisitionRow> {
-    const row = await this.mustFindRequisition(tx, id);
+  private async mustFindForDecision(tx: Tx, user: AuthUser, id: number): Promise<RequisitionChangeRow> {
+    const row = await this.mustFindForChange(tx, id);
     await this.requireDepartmentHeadId(tx, row.requester.departmentId);
     assertDepartmentHead(user, row.requester.departmentId);
     // 부서장 자기 요청의 승인 경로는 TBD(업무 프로세스 16장)이고 자동 승인은 금지라 우선 막는다
@@ -420,19 +443,20 @@ export class PurchasingService {
   }
 
   /** 상태가 그대로일 때만 바꾼다. 그사이 다른 사람이 처리했으면 0건이라 COM-001 (승인과 재요청이 겹쳐도 한쪽만 반영) */
-  private async changeStatus(tx: Tx, row: RequisitionRow, from: PurchaseRequisitionStatus, data: RequisitionStatusChange): Promise<void> {
+  private async changeStatus(tx: Tx, row: PurchaseRequisition, from: PurchaseRequisitionStatus, data: RequisitionStatusChange): Promise<void> {
     const status = row.purchaseRequisitionStatus as PurchaseRequisitionStatus;
     if (status !== from) throw new AppException('COM-001', ALREADY_DONE[status]);
     if ((await this.repository.updateRequisitionIfStatus(tx, row.id, from, data)) === 0) throw new AppException('COM-001', '다른 사람이 먼저 처리한 요청이에요. 다시 조회해 주세요');
   }
 
-  private async recordChange(tx: Tx, user: AuthUser, before: RequisitionRow, type: BusinessEventType, reason: string | null): Promise<{ after: RequisitionRow; eventId: number }> {
-    const after = await this.mustFindRequisition(tx, before.id);
+  private async recordChange(tx: Tx, user: AuthUser, before: PurchaseRequisition, type: BusinessEventType, reason: string | null): Promise<{ after: PurchaseRequisition; eventId: number }> {
+    const after = await this.mustFindForChange(tx, before.id);
+    const plan = after.productionPlanId === null ? null : await this.repository.findProductionPlan(tx, after.productionPlanId);
     const event = await this.businessEventRecorder.record(tx, {
       type,
       actor: user,
       target: { table: 'purchase_requisition', id: before.id },
-      salesOrderId: after.productionPlan?.salesOrderItem?.salesOrder.id ?? null,
+      salesOrderId: plan?.salesOrderItem?.salesOrderId ?? null,
       before: snapshotOf(before),
       after: snapshotOf(after),
       reason,
@@ -462,7 +486,7 @@ export class PurchasingService {
   }
 
   /** 승인·반려 → 요청자에게 결과 알림 */
-  private async notifyApprovalResult(tx: Tx, row: RequisitionRow, result: string, eventId: number): Promise<void> {
+  private async notifyApprovalResult(tx: Tx, row: PurchaseRequisition, result: string, eventId: number): Promise<void> {
     await this.notifications.notifyEmployees(tx, [row.requesterId], {
       notificationType: NOTIFICATION_TYPE.APPROVAL_RESULT,
       notificationContent: `구매요청 ${row.purchaseRequisitionNo} ${result}`,
@@ -485,6 +509,17 @@ export class PurchasingService {
     const row = await this.repository.findRequisition(tx, id);
     if (!row) throw new AppException('COM-003', '구매요청을 찾을 수 없어요');
     return row;
+  }
+
+  private async mustFindForChange(tx: Tx, id: number): Promise<RequisitionChangeRow> {
+    const row = await this.repository.findRequisitionForChange(tx, id);
+    if (!row) throw new AppException('COM-003', '구매요청을 찾을 수 없어요');
+    return row;
+  }
+
+  /** 커밋 뒤 응답 */
+  private async requisitionView(id: number): Promise<PurchaseRequisitionDetail> {
+    return this.detailOf(this.prisma, await this.mustFindRequisition(this.prisma, id));
   }
 
   /** 대상별 가장 최근 작업 로그의 사원·시각 (ERD에 칸이 없는 반려 일시·발주자·입고 확정자) */

@@ -161,7 +161,7 @@ describe('구매요청 등록 (REQ-PUR-001, BP-PUR-01)', () => {
     const { planId, salesOrderId } = await createPlan(true);
     const created = await createAs(purchaser, { productionPlanId: planId });
 
-    expect(created).toEqual(expect.objectContaining({ productionPlanId: planId, productionPlanNo: `T-PP-PUR-${seq}`, salesOrderId, salesOrderNo: `T-SO-PUR-${seq}` }));
+    expect(await purchasing.requisitionDetail(purchaser, created.id)).toEqual(expect.objectContaining({ productionPlanId: planId, productionPlanNo: `T-PP-PUR-${seq}`, salesOrderId, salesOrderNo: `T-SO-PUR-${seq}` }));
     const event = await prisma.businessEvent.findFirstOrThrow({ where: { targetType: 'purchase_requisition', targetId: created.id } });
     expect(event.salesOrderId).toBe(salesOrderId);
   });
