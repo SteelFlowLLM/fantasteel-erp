@@ -575,3 +575,36 @@ describe('ERP 링크 (REQ-MSG-006)', () => {
     expect(found.body.data.items[0].erpLinks).toHaveLength(1);
   });
 });
+
+describe('스키마 1차 (#151): 메시지 유형·중복 방지 제약', () => {
+  it('시스템 메시지는 보낸 사람 없이 저장되고, 목록에서 "시스템"으로 보인다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await send(salesCookie, room.id, '사람 메시지');
+    await prisma.message.create({ data: { chatRoomId: room.id, messageType: 'SYSTEM', senderId: null, content: '서민지님이 들어왔어요' } });
+
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
+    expect(page.body.data.items.map((m) => [m.isSystem, m.senderId, m.senderName])).toEqual([
+      [false, salesId, '박서영'],
+      [true, null, '시스템'],
+    ]);
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage).toMatchObject({ isSystem: true, senderName: '시스템', isMine: false });
+  });
+
+  it('USER는 보낸 사람이 꼭 있어야 하고, SYSTEM은 보낸 사람이 없어야 한다 (CHECK)', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: 'USER', senderId: null, content: 'x' } })).rejects.toThrow();
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, messageType: 'SYSTEM', senderId: salesId, content: 'x' } })).rejects.toThrow();
+  });
+
+  it('같은 사람이 같은 client_message_id로 두 번 저장할 수 없고, 다른 사람이면 된다 (부분 unique)', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const clientMessageId = '7f1d2c3e-0000-4000-8000-000000000001';
+    await prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: '한 번', clientMessageId } });
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: '두 번', clientMessageId } })).rejects.toThrow();
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, senderId: qualityId, content: '다른 사람', clientMessageId } })).resolves.toBeTruthy();
+    // client_message_id가 없으면 몇 번이든 된다
+    await prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: 'a' } });
+    await expect(prisma.message.create({ data: { chatRoomId: room.id, senderId: salesId, content: 'b' } })).resolves.toBeTruthy();
+  });
+});

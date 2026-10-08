@@ -25,7 +25,7 @@ export interface ChatRoomListItem {
   memberNames: string[];
   /** 1:1 상대 */
   counterpart: { employeeId: number; employeeName: string; departmentName: string; jobGradeName: string } | null;
-  lastMessage: { senderName: string; isMine: boolean; preview: string; createdAt: string } | null;
+  lastMessage: { senderName: string; isMine: boolean; isSystem: boolean; preview: string; createdAt: string } | null;
   unreadCount: number;
   /** 업무방의 수주 (수주 조회 권한이 있을 때만) */
   salesOrder: { id: number; salesOrderNo: string; customerName: string; dueDate: string | null } | null;
@@ -88,10 +88,13 @@ export interface ChatRoomDetail {
 export interface ChatMessageView {
   id: number;
   chatRoomId: number;
-  senderId: number;
+  /** 시스템 메시지(MESSAGE_TYPE SYSTEM)는 null */
+  senderId: number | null;
+  /** 시스템 메시지는 '시스템' */
   senderName: string;
-  senderDepartmentName: string;
-  senderJobGradeName: string;
+  senderDepartmentName: string | null;
+  senderJobGradeName: string | null;
+  isSystem: boolean;
   isMine: boolean;
   content: string | null;
   /** 첨부 파일 이름. 내려받기는 GET attachments/:메시지 id */

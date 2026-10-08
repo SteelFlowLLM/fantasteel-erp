@@ -7,7 +7,7 @@ import type { Tx } from '../../prisma/prisma.service';
 export interface ChatRoomStatsRow {
   chatRoomId: number;
   unreadCount: number;
-  lastMessage: { id: number; senderId: number; content: string | null; attachmentName: string | null; createdAt: Date } | null;
+  lastMessage: { id: number; senderId: number | null; content: string | null; attachmentName: string | null; createdAt: Date } | null;
 }
 
 const employeeInclude = { department: true, jobGrade: true } as const;

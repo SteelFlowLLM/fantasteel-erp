@@ -49,7 +49,7 @@ const listItemOf = (room: ServerRoomListItem): ChatRoomListItem => ({
   memberCount: room.memberCount,
   memberNames: room.memberNames,
   counterpart: room.counterpart,
-  lastMessage: room.lastMessage ? { ...room.lastMessage, isSystem: false } : null,
+  lastMessage: room.lastMessage,
   salesOrder: room.salesOrder,
   createdAt: room.createdAt,
 });
@@ -87,11 +87,12 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
-    senderId: message.senderId,
+    // 화면은 시스템 메시지의 보낸 사람을 가짜 DB와 같이 0으로 본다 (SYSTEM_SENDER_ID)
+    senderId: message.senderId ?? 0,
     senderName: message.senderName,
     senderDepartmentName: message.senderDepartmentName,
     senderJobGradeName: message.senderJobGradeName,
-    isSystem: false,
+    isSystem: message.isSystem,
     isMine: message.isMine,
     content: message.content,
     file: message.attachmentName ? { name: message.attachmentName, size: null, mimeType: null } : null,

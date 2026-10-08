@@ -106,9 +106,12 @@ function decodeFileName(name: string): string {
 }
 
 /** 메시지를 아직 읽지 않은 멤버 수: 보낸 사람을 빼고 읽음 위치가 이 메시지보다 앞인 멤버 */
-function unreadMemberCountOf(message: { id: number; senderId: number }, reads: readonly { employeeId: number; lastReadMessageId: number | null }[]): number {
+function unreadMemberCountOf(message: { id: number; senderId: number | null }, reads: readonly { employeeId: number; lastReadMessageId: number | null }[]): number {
   return reads.filter((r) => r.employeeId !== message.senderId && (r.lastReadMessageId ?? 0) < message.id).length;
 }
+
+/** 시스템 메시지(보낸 사원 없음)의 보낸 사람 표시 */
+const SYSTEM_SENDER_NAME = '시스템';
 
 /** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
 type ErpLinkResolver = (content: string | null) => ErpLink[];
@@ -118,9 +121,10 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
     id: message.id,
     chatRoomId: message.chatRoomId,
     senderId: message.senderId,
-    senderName: message.sender.employeeName,
-    senderDepartmentName: message.sender.department.departmentName,
-    senderJobGradeName: message.sender.jobGrade.jobGradeName,
+    senderName: message.sender?.employeeName ?? SYSTEM_SENDER_NAME,
+    senderDepartmentName: message.sender?.department.departmentName ?? null,
+    senderJobGradeName: message.sender?.jobGrade.jobGradeName ?? null,
+    isSystem: message.senderId === null,
     isMine: message.senderId === me,
     content: message.content,
     attachmentName: message.attachmentName,
@@ -177,7 +181,13 @@ export class MessengerService {
           ? { employeeId: counterpart.id, employeeName: counterpart.employeeName, departmentName: counterpart.department.departmentName, jobGradeName: counterpart.jobGrade.jobGradeName }
           : null,
         lastMessage: last
-          ? { senderName: lastSender?.employeeName ?? '-', isMine: last.senderId === me, preview: previewOf(last), createdAt: last.createdAt.toISOString() }
+          ? {
+              senderName: last.senderId === null ? SYSTEM_SENDER_NAME : (lastSender?.employeeName ?? '-'),
+              isMine: last.senderId === me,
+              isSystem: last.senderId === null,
+              preview: previewOf(last),
+              createdAt: last.createdAt.toISOString(),
+            }
           : null,
         unreadCount: stat?.unreadCount ?? 0,
         salesOrder:
@@ -488,7 +498,7 @@ export class MessengerService {
     const salesOrderNo = room.salesOrderId === null ? undefined : (await this.repository.findSalesOrderNos(tx, [room.salesOrderId]))[0]?.salesOrderNo;
     const roomLabel = roomLabelOf(room, salesOrderNo);
     const preview = shorten(previewOf(message));
-    const senderName = message.sender.employeeName;
+    const senderName = message.sender?.employeeName ?? SYSTEM_SENDER_NAME;
     // 알림을 누르면 그 메시지까지 이동한다
     const linkPath = `/messenger?room=${room.id}&message=${message.id}`;
     await this.notifications.notifyEmployees(tx, mentioned, {

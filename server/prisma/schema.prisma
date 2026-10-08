@@ -813,13 +813,19 @@ model ChatRoomMember {
   @@map("chat_room_member")
 }
 
+/// CHECK message_type = 'USER' → sender_id IS NOT NULL / CHECK message_type = 'SYSTEM' → sender_id IS NULL / 부분 unique (sender_id, client_message_id) WHERE client_message_id IS NOT NULL
 model Message {
   id Int @id @default(autoincrement())
   chatRoomId Int @map("chat_room_id")
-  senderId Int @map("sender_id")
+  messageType String @default("USER") @map("message_type") @db.VarChar /// MESSAGE_TYPE: USER, SYSTEM
+  senderId Int? @map("sender_id") /// SYSTEM이면 null
   content String?
   attachmentPath String? @map("attachment_path") @db.VarChar /// Storage 경로. 메시지 1건에 파일 1개
   attachmentName String? @map("attachment_name") @db.VarChar
+  clientMessageId String? @map("client_message_id") @db.VarChar(64) /// 화면이 만든 보내기 id(UUID). 재전송 중복 방지
+  parentMessageId Int? @map("parent_message_id") /// 답글 대상. 같은 방 메시지만(service)
+  editedAt DateTime? @map("edited_at") @db.Timestamptz(3) /// 본문을 마지막으로 고친 시각
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3) /// 삭제 표시. 행은 지우지 않음
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3) /// 발송 시각
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -827,11 +833,14 @@ model Message {
   notifications Notification[] @relation("NotificationMessage")
   chatRoomMembersAsLastReadMessage ChatRoomMember[] @relation("ChatRoomMemberLastReadMessage")
   chatRoom ChatRoom @relation("MessageChatRoom", fields: [chatRoomId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  sender Employee @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sender Employee? @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  parentMessage Message? @relation("MessageParentMessage", fields: [parentMessageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  messagesAsParentMessage Message[] @relation("MessageParentMessage")
   actionDrafts ActionDraft[] @relation("ActionDraftMessage")
 
-  @@index([chatRoomId])
+  @@index([chatRoomId, id])
   @@index([senderId])
+  @@index([parentMessageId])
   @@map("message")
 }
 
