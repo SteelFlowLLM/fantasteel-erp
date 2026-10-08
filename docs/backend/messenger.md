@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | 쓰기 | `chat_room` | `chat_room_type`(DIRECT·GROUP·WORK), `chat_room_name`, `sales_order_id`(업무방만). CHECK `chat_room_work_sales_order_check`: WORK면 `sales_order_id` 필수 |
 | 쓰기 | `chat_room_member` | `(chat_room_id, employee_id)` unique, `last_read_message_id`(안 읽은 수 계산 기준) |
-| 쓰기 | `message` | `chat_room_id`, `sender_id`, `content`, `attachment_path`·`attachment_name`(**메시지 1건에 파일 1개**, Storage 경로), `created_at`(발송 시각) |
+| 쓰기 | `message` | `chat_room_id`, `message_type`(USER·SYSTEM, 기본 USER), `sender_id`(SYSTEM이면 null), `content`, `attachment_path`·`attachment_name`(**메시지 1건에 파일 1개**, Storage 경로), `client_message_id`(재전송 중복 방지), `parent_message_id`(답글), `edited_at`·`deleted_at`(수정·삭제 표시), `created_at`(발송 시각). CHECK `message_type_sender_check`, 부분 unique `message_sender_client_message_id_key` — 스키마 1차(#151, 마이그레이션 `20261008013557_messenger_schema_1`) |
 | 읽기 | `employee`, `department`, `sales_order` | 멤버·업무방 상단 수주 정보 |
 
 Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.lastReadMessage`, `Message.sender`, `Employee.chatRoomMembers`·`messagesAsSender`.
