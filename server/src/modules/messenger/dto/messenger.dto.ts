@@ -133,3 +133,9 @@ export class EditMessageDto {
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content!: string;
 }
+
+export class PinMessageDto {
+  /** 이 방의 삭제되지 않은 일반 메시지 */
+  @IsInt({ message: 'messageId는 메시지 id여야 해요' })
+  messageId!: number;
+}

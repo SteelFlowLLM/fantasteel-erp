@@ -461,6 +461,8 @@ export type ChatRoomRow = Timestamps & {
   chatRoomName: string | null;
   salesOrderId: number | null;
   createdEmployeeId: number;
+  /** 방 위에 고정한 공지 메시지 (스키마 2차) */
+  pinnedMessageId?: number | null;
 };
 
 export type ChatRoomMemberRow = Timestamps & {

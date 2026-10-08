@@ -86,6 +86,16 @@ export interface ChatRoomDetail {
   salesOrder: WorkRoomSalesOrderView | null;
   unreadCount: number;
   lastReadMessageId: number | null;
+  /** 방 위에 고정한 공지 (삭제된 메시지면 null) */
+  pinnedMessage: ChatPinnedMessageView | null;
+}
+
+/** 공지로 고정한 메시지 요약 */
+export interface ChatPinnedMessageView {
+  id: number;
+  senderName: string;
+  preview: string;
+  createdAt: string;
 }
 
 export interface ChatMessageView {

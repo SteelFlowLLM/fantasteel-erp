@@ -42,6 +42,7 @@ const detail = (extra: Partial<ChatRoomDetail> = {}): ChatRoomDetail => ({
   salesOrder: null,
   unreadCount: 2,
   lastReadMessageId: 40,
+  pinnedMessage: null,
   ...extra,
 });
 
@@ -202,6 +203,22 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(reply.parent).toMatchObject({ id: 50, preview: '원본' });
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ content: '고친 글' });
     expect((calls.find((c) => c.path === '/chat-rooms/7/messages')?.body as { parentMessageId?: number }).parentMessageId).toBe(50);
+  });
+
+  it('공지 고정은 POST …/pin { messageId }, 내리기는 POST …/unpin, 방 정보의 pinnedMessage를 그대로 쓴다', async () => {
+    const pinned = { id: 50, senderName: '정다은', preview: '공지', createdAt: AT };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7/pin' || c.path === '/chat-rooms/7/unpin') return ok(detail({ pinnedMessage: c.path.endsWith('/pin') ? pinned : null }));
+      if (c.path === '/chat-rooms/7') return ok(detail({ pinnedMessage: pinned }));
+      return undefined;
+    });
+    await messengerApi.pinMessage({ chatRoomId: 7, messageId: 50 });
+    await messengerApi.unpinMessage(7);
+    expect((await messengerApi.getRoom(7)).pinnedMessage).toEqual(pinned);
+    expect(calls.slice(0, 2).map((c) => [c.path, c.body])).toEqual([
+      ['/chat-rooms/7/pin', { messageId: 50 }],
+      ['/chat-rooms/7/unpin', undefined],
+    ]);
   });
 
   it('읽음은 남은 안 읽은 수를, 서버 오류는 화면 오류로 돌려준다', async () => {

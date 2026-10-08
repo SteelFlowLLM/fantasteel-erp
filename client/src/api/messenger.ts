@@ -19,6 +19,7 @@ import { calcWeightTon } from '@/lib/weight';
 import { getMockFile, MockFileStorageFullError, MOCK_FILE_MAX_BYTES, putMockFile } from '@/mock/fileStorage';
 import type { ChatRoomRow, MessageRow, MockTables } from '@/mock/schema';
 import { SEED_FILES } from '@/mock/seeds/collab';
+import { postSystemMessage } from '@/mock/services/workRooms';
 import { insertRow, updateRow } from '@/mock/store';
 
 export { MESSAGE_CONTENT_MAX } from '@/api/messengerRules';
@@ -120,6 +121,8 @@ export interface ChatRoomDetailView {
   mentionTargets: MentionTarget[];
   /** 멤버를 초대할 수 있는지 (1:1 제외) */
   canInvite: boolean;
+  /** 방 위에 고정한 공지 (삭제된 메시지면 null) */
+  pinnedMessage: { id: number; senderName: string; preview: string; createdAt: string } | null;
 }
 
 export interface MessageFileView {
@@ -301,6 +304,14 @@ function erpLinksOf(tables: Readonly<MockTables>, content: string | null): ErpLi
   });
 }
 
+/** 고정 공지 요약 (서버와 같은 모양) */
+function pinnedViewOf(tables: Readonly<MockTables>, room: ChatRoomRow): ChatRoomDetailView['pinnedMessage'] {
+  const pinned = room.pinnedMessageId ? tables.message.find((m) => m.id === room.pinnedMessageId) : undefined;
+  if (!pinned || pinned.deletedAt) return null;
+  const preview = messagePreviewOf(pinned);
+  return { id: pinned.id, senderName: employeeOf(tables, pinned.senderId)?.employeeName ?? '시스템', preview: preview.length > 50 ? `${preview.slice(0, 50)}…` : preview, createdAt: pinned.createdAt };
+}
+
 /** 답글 원본 요약 (서버와 같은 모양) */
 function parentViewOf(tables: Readonly<MockTables>, message: MessageRow): MessageView['parent'] {
   const parent = message.parentMessageId ? tables.message.find((m) => m.id === message.parentMessageId) : undefined;
@@ -460,6 +471,7 @@ export const messengerApi = {
         lastReadMessageId: membership?.lastReadMessageId ?? null,
         mentionTargets: mentionTargetsOf(tables, room.id, me),
         canInvite: room.chatRoomType !== CHAT_ROOM_TYPE.DIRECT,
+        pinnedMessage: pinnedViewOf(tables, room),
       };
     }),
 
@@ -606,6 +618,28 @@ export const messengerApi = {
         }
       }
       return toMessageView(tx.tables, message, actor, myMentionTargets(tx.tables, actor));
+    }),
+
+  /** 공지로 고정 (방 멤버 누구나, 이 방의 삭제되지 않은 일반 메시지). 고정·해제는 시스템 메시지로 남긴다 */
+  pinMessage: ({ chatRoomId, messageId }: { chatRoomId: number; messageId: number }): Promise<void> =>
+    isServerDataSource() ? serverMessengerApi.pinMessage({ chatRoomId, messageId }) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const room = requireMemberRoom(tx.tables, actor, chatRoomId);
+      const message = tx.tables.message.find((m) => m.id === messageId);
+      if (!message || message.chatRoomId !== room.id) throw new ApiError('COM-003', '메시지');
+      if (message.deletedAt || !employeeOf(tx.tables, message.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지는 고정할 수 없어요');
+      updateRow(tx, 'chatRoom', room.id, { pinnedMessageId: message.id });
+      postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 메시지를 공지로 고정했어요`);
+    }),
+
+  /** 공지 내리기 */
+  unpinMessage: (chatRoomId: number): Promise<void> =>
+    isServerDataSource() ? serverMessengerApi.unpinMessage(chatRoomId) : mockMutation((tx) => {
+      const actor = requireActor(tx.tables);
+      const room = requireMemberRoom(tx.tables, actor, chatRoomId);
+      if (!room.pinnedMessageId) return;
+      updateRow(tx, 'chatRoom', room.id, { pinnedMessageId: null });
+      postSystemMessage(tx, room.id, `${actor.employee.employeeName}님이 공지를 내렸어요`);
     }),
 
   /** 내 메시지 고치기. 본문은 비울 수 없다(첨부가 있으면 비워도 됨). 삭제된 메시지는 못 고친다 */

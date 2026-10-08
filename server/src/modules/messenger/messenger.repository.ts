@@ -36,8 +36,16 @@ export class MessengerRepository {
   findRoomWithMembers(tx: Tx, id: number) {
     return tx.chatRoom.findUnique({
       where: { id },
-      include: { chatRoomMembers: { include: { employee: { include: employeeInclude } } } },
+      include: {
+        chatRoomMembers: { include: { employee: { include: employeeInclude } } },
+        pinnedMessage: { include: { sender: { select: { employeeName: true } } } },
+      },
     });
+  }
+
+  /** 공지 고정·해제 (null이면 해제) */
+  updatePinnedMessage(tx: Tx, chatRoomId: number, messageId: number | null) {
+    return tx.chatRoom.update({ where: { id: chatRoomId }, data: { pinnedMessageId: messageId } });
   }
 
   findRoom(tx: Tx, id: number) {

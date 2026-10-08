@@ -769,3 +769,47 @@ describe('11번: 메시지 수정·삭제·답글', () => {
     expect(toDeleted.body.error?.code).toBe('COM-004');
   });
 });
+
+describe('12번: 공지 고정', () => {
+  it('방 멤버가 일반 메시지를 공지로 고정·해제하면 방 정보에 보이고, 시스템 메시지와 room:updated를 보낸다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const first = (await send(qualityCookie, room.id, '내일 9시 회의합니다')).body.data;
+    const second = (await send(salesCookie, room.id, '자료는 공유 폴더에')).body.data;
+    socketRecords.length = 0;
+
+    const pinned = await call<ChatRoomDetail>('POST', `/chat-rooms/${room.id}/pin`, salesCookie, { messageId: first.id });
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.data.pinnedMessage).toMatchObject({ id: first.id, senderName: '서민지', preview: '내일 9시 회의합니다' });
+    expect(recordsOf('room:updated').map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
+    expect(recordsOf('message:new')[0].payload).toMatchObject({ isSystem: true, content: '박서영님이 메시지를 공지로 고정했어요' });
+
+    const replaced = await call<ChatRoomDetail>('POST', `/chat-rooms/${room.id}/pin`, qualityCookie, { messageId: second.id });
+    expect(replaced.body.data.pinnedMessage?.id).toBe(second.id);
+
+    // 고정한 메시지를 지우면 공지도 보이지 않는다
+    await call('DELETE', `/messages/${second.id}`, salesCookie);
+    expect((await call<ChatRoomDetail>('GET', `/chat-rooms/${room.id}`, qualityCookie)).body.data.pinnedMessage).toBeNull();
+
+    const unpinned = await call<ChatRoomDetail>('POST', `/chat-rooms/${room.id}/unpin`, qualityCookie);
+    expect(unpinned.body.data.pinnedMessage).toBeNull();
+    const messages = await prisma.message.findMany({ where: { chatRoomId: room.id, messageType: 'SYSTEM' }, orderBy: { id: 'asc' } });
+    expect(messages.map((m) => m.content)).toEqual(['박서영님이 메시지를 공지로 고정했어요', '서민지님이 메시지를 공지로 고정했어요', '서민지님이 공지를 내렸어요']);
+  });
+
+  it('다른 방·삭제된·시스템 메시지는 고정할 수 없고, 멤버가 아니면 COM-002', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const other = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const otherMessage = (await send(salesCookie, other.id, '다른 방')).body.data;
+    const system = await prisma.message.create({ data: { chatRoomId: room.id, messageType: 'SYSTEM', senderId: null, content: '안내' } });
+    const cases = await Promise.all([
+      call('POST', `/chat-rooms/${room.id}/pin`, salesCookie, { messageId: otherMessage.id }),
+      call('POST', `/chat-rooms/${room.id}/pin`, salesCookie, { messageId: system.id }),
+      call('POST', `/chat-rooms/${room.id}/pin`, purchaseCookie, { messageId: system.id }),
+    ]);
+    expect(cases.map((c) => [c.status, c.body.error?.code])).toEqual([
+      [404, 'COM-003'],
+      [400, 'COM-004'],
+      [403, 'COM-002'],
+    ]);
+  });
+});

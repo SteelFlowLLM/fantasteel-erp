@@ -103,6 +103,11 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 **중복 전송 방지** (#151 `client_message_id`)
 - 메시지 보내기·첨부 업로드에 `clientMessageId`(영문·숫자·-, 64자) 선택. 같은 사람이 같은 값으로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다(알림·소켓 다시 없음, 첨부는 파일도 다시 저장하지 않음). 다른 방에 같은 값이면 COM-004. 거의 동시에 두 번 들어와 부분 unique에 걸려도 먼저 저장된 메시지를 돌려준다.
 
+**공지 고정** (12번, 스키마 2차 `chat_room.pinned_message_id`, 명세에 없는 API)
+- `POST chat-rooms/:id/pin { messageId }` → 방 정보(`ChatRoomDetail`). 방 멤버 누구나, 이 방의 삭제되지 않은 일반 메시지 하나(새로 고정하면 바뀜). 다른 방 메시지 COM-003, 삭제·시스템 COM-004.
+- `POST chat-rooms/:id/unpin` → 방 정보. 고정이 없으면 그대로.
+- 고정·해제는 시스템 메시지(`…메시지를 공지로 고정했어요`·`…공지를 내렸어요`)와 `room:updated`. 방 정보 `pinnedMessage { id, senderName, preview, createdAt }`, 고정한 메시지가 삭제되면 null.
+
 **수정·삭제·답글** (2026-10-08, 스키마 1차 #151, 명세에 없는 API)
 - `PATCH messages/:id { content }`: 내 일반 메시지만(남의 것·시스템 COM-004, 비멤버 COM-002). 본문은 비울 수 없고 첨부가 있으면 비워도 된다. `edited_at`을 남기고 멤버에게 `message:updated`. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않았다(팀 결정 전).
 - `DELETE messages/:id`: 내 일반 메시지에 `deleted_at`만 표시한다(행·첨부 파일은 남김, 다시 지우면 그대로). 응답·목록은 본문·첨부를 비우고 `isDeleted: true`, 목록 미리보기는 '삭제된 메시지예요'. 안 읽은 수·검색·파일 모아보기·첨부 내려받기에서 빠진다. 멤버에게 `message:updated`.

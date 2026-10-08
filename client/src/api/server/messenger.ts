@@ -174,6 +174,7 @@ export const serverMessengerApi = {
       lastReadMessageId: room.lastReadMessageId,
       mentionTargets: mentionTargetsOf(room),
       canInvite: room.chatRoomType !== 'DIRECT',
+      pinnedMessage: room.pinnedMessage,
     };
   },
 
@@ -248,6 +249,14 @@ export const serverMessengerApi = {
 
   renameRoom: async ({ chatRoomId, chatRoomName }: { chatRoomId: number; chatRoomName: string | null }): Promise<RenameChatRoomResult> =>
     serverRequest<RenameChatRoomResult>('PATCH', `/chat-rooms/${chatRoomId}`, { body: { chatRoomName } }),
+
+  pinMessage: async ({ chatRoomId, messageId }: { chatRoomId: number; messageId: number }): Promise<void> => {
+    await serverRequest<ServerRoomDetail>('POST', `/chat-rooms/${chatRoomId}/pin`, { body: { messageId } });
+  },
+
+  unpinMessage: async (chatRoomId: number): Promise<void> => {
+    await serverRequest<ServerRoomDetail>('POST', `/chat-rooms/${chatRoomId}/unpin`);
+  },
 
   editMessage: async ({ messageId, content }: { messageId: number; content: string }): Promise<MessageView> => {
     const updated = await serverRequest<ServerMessageView>('PATCH', `/messages/${messageId}`, { body: { content } });

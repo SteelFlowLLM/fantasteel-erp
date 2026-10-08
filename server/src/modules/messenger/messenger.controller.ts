@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Po
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MESSAGE_ATTACHMENT_MAX_BYTES, type AuthUser, type ChatMessagePage, type ChatMessageView, type ChatRoomDetail, type ChatRoomListItem, type ChatRoomReadResult, type CreateChatRoomResult, type InviteChatMembersResult, type RenameChatRoomResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerService, type UploadedAttachment } from './messenger.service';
 
 /**
@@ -35,6 +35,20 @@ export class MessengerController {
   @Patch('chat-rooms/:id')
   renameRoom(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: RenameChatRoomDto): Promise<RenameChatRoomResult> {
     return this.service.renameRoom(user, id, dto);
+  }
+
+  /** 공지 고정 (명세에 없는 API, 12번) */
+  @Post('chat-rooms/:id/pin')
+  @HttpCode(200)
+  pinMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: PinMessageDto): Promise<ChatRoomDetail> {
+    return this.service.pinMessage(user, id, dto);
+  }
+
+  /** 공지 내리기 (명세에 없는 API, 12번) */
+  @Post('chat-rooms/:id/unpin')
+  @HttpCode(200)
+  unpinMessage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<ChatRoomDetail> {
+    return this.service.unpinMessage(user, id);
   }
 
   /** 멤버 초대 (명세에 없는 API, 방 관리). 1:1 방은 안 된다 */
