@@ -156,7 +156,7 @@ export function TaskFormModal({ task, source, onClose }: { task: TaskView | null
             <DateInput id={`${formId}-due`} value={dueDate} onChange={setDueDate} invalid={Boolean(fieldErrors.dueDate)} className="w-full" />
           </Field>
         </div>
-        {source ? <p className="text-cap text-ink-3">업무에서 이 메시지로 바로 갈 수 있어요.</p> : serverMode ? null : (
+        {source ? <p className="text-cap text-ink-3">업무에서 이 메시지로 바로 갈 수 있어요.</p> : (
           <Field
             label="연결 화면"
             htmlFor={`${formId}-link`}

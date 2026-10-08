@@ -9,7 +9,7 @@ import type {
   RoleView as ServerRoleView,
 } from '@fantasteel/shared';
 import type { EmployeeCreateInput, EmployeeSaved, EmployeeUpdateInput } from '@/api/adminEmployees';
-import type { DepartmentCreateInput, DepartmentUpdateInput, JobGradeCreateInput, OrgChartDepartmentView, RolePermissionsInput, SavedRef } from '@/api/adminOrganization';
+import type { DeleteInput, DepartmentCreateInput, DepartmentUpdateInput, JobGradeCreateInput, JobGradeUpdateInput, OrgChartDepartmentView, RolePermissionsInput, SavedRef } from '@/api/adminOrganization';
 import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api/directory';
 import { InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
@@ -126,10 +126,31 @@ async function updateDepartment(input: DepartmentUpdateInput): Promise<SavedRef>
   return savedDepartment(await serverRequest<ServerDepartmentView>('PATCH', `/departments/${input.id}`, { body: { departmentName, parentId, headEmployeeId } }));
 }
 
-async function createJobGrade(input: JobGradeCreateInput): Promise<SavedRef> {
+/** API-271. 하위 부서·소속 사원(퇴사자 포함)이 있으면 서버가 COM-004로 막는다 */
+async function deleteDepartment(input: DeleteInput): Promise<SavedRef> {
+  return savedDepartment(await serverRequest<ServerDepartmentView>('DELETE', `/departments/${input.id}`));
+}
+
+function sortOrderOf(input: JobGradeCreateInput): number {
   const sortOrder = String(input.sortOrder).trim();
   if (!/^-?\d+$/.test(sortOrder)) throw new InputError('표시 순서를 확인해 주세요', { sortOrder: '표시 순서는 정수로 입력해 주세요' });
-  const saved = await serverRequest<ServerJobGradeView>('POST', '/job-grades', { body: { jobGradeName: input.jobGradeName, sortOrder: Number(sortOrder) } });
+  return Number(sortOrder);
+}
+
+async function createJobGrade(input: JobGradeCreateInput): Promise<SavedRef> {
+  const saved = await serverRequest<ServerJobGradeView>('POST', '/job-grades', { body: { jobGradeName: input.jobGradeName, sortOrder: sortOrderOf(input) } });
+  return { id: saved.id, name: saved.jobGradeName };
+}
+
+/** API-272. 직급 코드는 ERD에 없어 보내지 않는다 */
+async function updateJobGrade(input: JobGradeUpdateInput): Promise<SavedRef> {
+  const saved = await serverRequest<ServerJobGradeView>('PATCH', `/job-grades/${input.id}`, { body: { jobGradeName: input.jobGradeName, sortOrder: sortOrderOf(input) } });
+  return { id: saved.id, name: saved.jobGradeName };
+}
+
+/** API-273. 쓰는 사원(퇴사자 포함)이 있으면 서버가 COM-004로 막는다 */
+async function deleteJobGrade(input: DeleteInput): Promise<SavedRef> {
+  const saved = await serverRequest<ServerJobGradeView>('DELETE', `/job-grades/${input.id}`);
   return { id: saved.id, name: saved.jobGradeName };
 }
 
@@ -149,6 +170,9 @@ export const serverOrganizationApi = {
   setEmployeeActive,
   createDepartment,
   updateDepartment,
+  deleteDepartment,
   createJobGrade,
+  updateJobGrade,
+  deleteJobGrade,
   replaceRolePermissions,
 };

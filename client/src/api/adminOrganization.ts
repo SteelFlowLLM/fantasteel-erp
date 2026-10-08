@@ -206,7 +206,7 @@ export const departmentAdminApi = {
 
   /** 부서 삭제: 소속 사원·하위 부서·구매요청·부서 알림이 없을 때만 */
   remove: (input: DeleteInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.deleteDepartment(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const department = requireRow(tx.tables, 'department', input.id, '부서');
       assertUnchanged(department.updatedAt, input.expectedUpdatedAt, '부서');
@@ -227,7 +227,7 @@ export const jobGradeAdminApi = {
     }),
 
   update: (input: JobGradeUpdateInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.updateJobGrade(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const jobGrade = requireRow(tx.tables, 'jobGrade', input.id, '직급');
       assertUnchanged(jobGrade.updatedAt, input.expectedUpdatedAt, '직급');
@@ -238,7 +238,7 @@ export const jobGradeAdminApi = {
 
   /** 직급 삭제: 이 직급의 사원이 없을 때만 */
   remove: (input: DeleteInput): Promise<SavedRef> =>
-    mockMutation((tx) => {
+    isServerDataSource() ? serverOrganizationApi.deleteJobGrade(input) : mockMutation((tx) => {
       requireActor(tx.tables, MANAGE);
       const jobGrade = requireRow(tx.tables, 'jobGrade', input.id, '직급');
       assertUnchanged(jobGrade.updatedAt, input.expectedUpdatedAt, '직급');

@@ -23,7 +23,7 @@ import { permissionNeedText } from '@/lib/permissions';
 
 export function JobGradeTab({ canEdit: canEditOrg }: { canEdit: boolean }) {
   const jobGrades = useJobGradeList();
-  // 서버 모드: 직급 등록은 API 명세대로 사원 관리 권한이고, 직급 코드·수정·삭제는 ERD·API에 없어 숨긴다
+  // 서버 모드: 직급 등록·수정·삭제는 API 명세대로 사원 관리 권한이고, 직급 코드는 ERD에 없어 숨긴다. 퇴사자가 쓰는 직급은 서버가 삭제를 막는다(API-273)
   const serverMode = isOrgServerMode();
   const canUseEmployeeManage = useCanUse(PERMISSION.EMPLOYEE_MANAGE);
   const canEdit = serverMode ? canUseEmployeeManage : canEditOrg;
@@ -58,11 +58,9 @@ export function JobGradeTab({ canEdit: canEditOrg }: { canEdit: boolean }) {
                     {serverMode ? null : <Th>직급 코드</Th>}
                     <Th>직급명</Th>
                     <Th align="right">사원 수</Th>
-                    {serverMode ? null : (
-                      <Th className="w-24">
-                        <span className="sr-only">관리</span>
-                      </Th>
-                    )}
+                    <Th className="w-24">
+                      <span className="sr-only">관리</span>
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -74,19 +72,17 @@ export function JobGradeTab({ canEdit: canEditOrg }: { canEdit: boolean }) {
                         {serverMode ? null : <Td className="font-mono text-xs">{g.jobGradeCode}</Td>}
                         <Td className="font-medium">{g.jobGradeName}</Td>
                         <Td align="right">{g.employeeCount}명</Td>
-                        {serverMode ? null : (
-                          <Td align="right">
-                            <IconButton icon="edit" label={`${g.jobGradeName} 수정`} size="sm" disabled={!canEdit} title={lockTitle} onClick={() => setEditing(g)} />
-                            <IconButton
-                              icon="trash"
-                              label={`${g.jobGradeName} 삭제`}
-                              size="sm"
-                              disabled={!canEdit || g.employeeCount > 0}
-                              title={deleteTitle}
-                              onClick={() => setDeleting(g)}
-                            />
-                          </Td>
-                        )}
+                        <Td align="right">
+                          <IconButton icon="edit" label={`${g.jobGradeName} 수정`} size="sm" disabled={!canEdit} title={lockTitle} onClick={() => setEditing(g)} />
+                          <IconButton
+                            icon="trash"
+                            label={`${g.jobGradeName} 삭제`}
+                            size="sm"
+                            disabled={!canEdit || g.employeeCount > 0}
+                            title={deleteTitle}
+                            onClick={() => setDeleting(g)}
+                          />
+                        </Td>
                       </tr>
                     );
                   })}
@@ -106,7 +102,7 @@ export function JobGradeTab({ canEdit: canEditOrg }: { canEdit: boolean }) {
           onCancel={() => setDeleting(null)}
           onConfirm={() => remove.mutate({ id: deleting.id, expectedUpdatedAt: deleting.updatedAt })}
         >
-          {deleting.jobGradeName}({deleting.jobGradeCode}) 직급을 지워요. 되돌릴 수 없어요.
+          {deleting.jobGradeCode ? `${deleting.jobGradeName}(${deleting.jobGradeCode})` : deleting.jobGradeName} 직급을 지워요. 되돌릴 수 없어요.
         </ConfirmDialog>
       ) : null}
     </Card>
