@@ -9,7 +9,7 @@ export interface ChatRoomStatsRow {
   unreadCount: number;
   muted: boolean;
   pinnedAt: Date | null;
-  lastMessage: { id: number; senderId: number | null; content: string | null; firstAttachmentName: string | null; attachmentCount: number; createdAt: Date; deletedAt: Date | null } | null;
+  lastMessage: { id: number; senderId: number | null; content: string | null; emoticonKey: string | null; firstAttachmentName: string | null; attachmentCount: number; createdAt: Date; deletedAt: Date | null } | null;
 }
 
 const employeeInclude = { department: true, jobGrade: true } as const;
@@ -81,6 +81,7 @@ export class MessengerRepository {
                 id: lastMessageId,
                 senderId: row.last_sender_id,
                 content: row.last_content,
+                emoticonKey: row.last_emoticon_key,
                 firstAttachmentName: row.last_first_attachment_name,
                 attachmentCount: row.last_attachment_count ?? 0,
                 createdAt: row.last_created_at,
@@ -266,7 +267,7 @@ export class MessengerRepository {
   /** 메시지와 첨부를 함께 만든다. 첨부는 받은 순서가 sort_order */
   createMessage(
     tx: Tx,
-    data: { chatRoomId: number; senderId: number; content: string | null; clientMessageId?: string | null; parentMessageId?: number | null },
+    data: { chatRoomId: number; senderId: number; content: string | null; emoticonKey?: string | null; clientMessageId?: string | null; parentMessageId?: number | null },
     attachments: readonly { filePath: string; fileName: string; fileSize: number }[] = [],
   ) {
     return tx.message.create({
@@ -276,7 +277,7 @@ export class MessengerRepository {
   }
 
   findMessage(tx: Tx, id: number) {
-    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, senderId: true, messageType: true, deletedAt: true, _count: { select: { messageAttachments: true } } } });
+    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, senderId: true, messageType: true, emoticonKey: true, deletedAt: true, _count: { select: { messageAttachments: true } } } });
   }
 
   /** 첨부 내려받기: 첨부와 그 메시지의 방·삭제 여부 */

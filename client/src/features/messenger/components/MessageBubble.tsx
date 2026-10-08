@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { messengerApi, type ChatRoomDetailView, type MessageView } from '@/api/messenger';
 import { Avatar } from '@/components/Avatar';
+import { EmoticonImage } from '@/features/messenger/components/Emoticon';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -88,6 +89,7 @@ export function MessageBubble({
       {message.isDeleted ? (
         <p className={cn('rounded-lg border border-dashed border-line px-3 py-2 text-sm text-ink-3 italic')}>삭제된 메시지예요</p>
       ) : null}
+      {message.emoticonKey ? <EmoticonImage emoticonKey={message.emoticonKey} /> : null}
       {segments.length > 0 ? (
         <p
           className={cn(

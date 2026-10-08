@@ -497,6 +497,8 @@ export type MessageRow = Timestamps & {
   mimeType: string | null;
   /** 첨부 여러 개 (서버 스키마 3차 message_attachment와 같은 뜻). 올린 순서 */
   files?: MessageFileValues[];
+  /** 이모티콘 키 (서버 스키마 4차 message.emoticon_key와 같은 뜻, shared MESSAGE_EMOTICONS) */
+  emoticonKey?: string | null;
   /** 답글 대상 (없으면 비움, #151 스키마 1차와 같은 뜻) */
   parentMessageId?: number | null;
   /** 본문을 고친 시각 */

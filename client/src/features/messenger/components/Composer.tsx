@@ -1,13 +1,15 @@
 'use client';
 
-// 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
+// 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지) 또는 이모티콘(18번), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
+// 이모티콘은 서버 첨부 API가 받지 않아 파일과 함께 고를 수 없다.
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
-import { MESSAGE_ATTACHMENT_MAX_COUNT } from '@fantasteel/shared';
+import { MESSAGE_ATTACHMENT_MAX_COUNT, type MessageEmoticonKey } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
 import { SoonButton, soonLabel } from '@/components/ComingSoon';
+import { EmoticonImage, EmoticonPicker, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { useMessageOutbox } from '@/hooks/useMessenger';
@@ -49,6 +51,7 @@ function mentionAt(text: string, caret: number): MentionState | null {
 export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: () => void }) {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [emoticon, setEmoticon] = useState<MessageEmoticonKey | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reading, setReading] = useState(false);
@@ -110,7 +113,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const submit = async () => {
     if (pending) return;
     const content = text.trim();
-    if (!content && files.length === 0) return;
+    if (!content && files.length === 0 && !emoticon) return;
     const tooBig = files.find((file) => file.size > MESSAGE_FILE_MAX_BYTES);
     if (tooBig) {
       toast.error(`파일은 ${FILE_LIMIT_TEXT}까지 보낼 수 있어요 (${tooBig.name})`);
@@ -128,10 +131,11 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         setReading(false);
       }
     }
-    send({ chatRoomId: room.id, content, files: payload, parentMessageId: replyTo?.id ?? null });
+    send({ chatRoomId: room.id, content, files: payload, emoticonKey: emoticon, parentMessageId: replyTo?.id ?? null });
     clearReply();
     setText('');
     setFiles([]);
+    setEmoticon(null);
     setMention(null);
     onSent();
   };
@@ -195,7 +199,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       {replyTo ? (
         <div className="flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-2 px-3 py-1.5 text-xs" aria-label="답장할 메시지">
           <span className="min-w-0 flex-1 truncate">
-            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.files[0]?.name ?? ''}</span>
+            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.files[0]?.name ?? (replyTo.emoticonKey ? `이모티콘 · ${emoticonLabelOf(replyTo.emoticonKey)}` : '')}</span>
           </span>
           <IconButton icon="x" label="답장 취소" size="sm" onClick={clearReply} />
         </div>
@@ -215,13 +219,19 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           ))}
         </div>
       ) : null}
+      {emoticon ? (
+        <div className="flex w-fit items-end gap-1 rounded-md border border-line bg-surface-2 p-1.5" aria-label={`보낼 이모티콘 ${emoticonLabelOf(emoticon)}`}>
+          <EmoticonImage emoticonKey={emoticon} scale={1} />
+          <IconButton icon="x" label="이모티콘 빼기" size="sm" onClick={() => setEmoticon(null)} />
+        </div>
+      ) : null}
       <textarea
         ref={textareaRef}
         value={text}
         rows={lines}
         maxLength={MESSAGE_CONTENT_MAX}
         aria-label="메시지 입력"
-        placeholder={files.length > 0 ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션'}
+        placeholder={files.length > 0 ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : emoticon ? '이모티콘과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션'}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onClick={(event) => updateMention(event.currentTarget.value, event.currentTarget.selectionStart)}
@@ -247,8 +257,16 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           icon="clip"
           label={`파일 첨부 (파일마다 ${FILE_LIMIT_TEXT}까지, ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지)`}
           title={`파일 첨부 (파일마다 ${FILE_LIMIT_TEXT}까지, ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지)`}
-          disabled={pending || files.length >= MESSAGE_ATTACHMENT_MAX_COUNT}
+          disabled={pending || files.length >= MESSAGE_ATTACHMENT_MAX_COUNT || emoticon !== null}
           onClick={() => fileInputRef.current?.click()}
+        />
+        <EmoticonPicker
+          disabled={pending || files.length > 0}
+          disabledReason="이모티콘은 파일과 함께 보낼 수 없어요"
+          onPick={(key) => {
+            setEmoticon(key);
+            requestAnimationFrame(() => textareaRef.current?.focus());
+          }}
         />
         <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startMention} disabled={pending}>
           @ 멘션
@@ -257,7 +275,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           @AI 호출
         </SoonButton>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
-        <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && files.length === 0)} onClick={() => void submit()}>
+        <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && files.length === 0 && !emoticon)} onClick={() => void submit()}>
           {reading ? '파일 읽는 중…' : '보내기'}
         </Button>
       </div>

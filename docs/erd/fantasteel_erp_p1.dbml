@@ -782,6 +782,7 @@ Table message {
   message_type varchar [not null, default: 'USER', note: 'MESSAGE_TYPE: USER, SYSTEM']
   sender_id int [ref: > employee.id, note: 'SYSTEM이면 null']
   content text
+  emoticon_key varchar(32) [note: '이모티콘 키 (스키마 4차). 허용 목록은 shared MESSAGE_EMOTICONS. 글·첨부와 함께 보낼 수 있음']
   client_message_id varchar(64) [note: '화면이 만든 보내기 id(UUID). 재전송 중복 방지']
   parent_message_id int [ref: > message.id, note: '답글 대상. 같은 방 메시지만(service)']
   edited_at timestamptz [note: '본문을 마지막으로 고친 시각']

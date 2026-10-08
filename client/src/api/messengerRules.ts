@@ -5,6 +5,7 @@
 // - @멘션 → MENTION 알림(사원 멘션은 개인, 부서 멘션은 부서 알림), 업무방 새 메시지 → 나머지 멤버에게 WORK_ROOM_MESSAGE 알림 (REQ-MSG-005)
 //   같은 메시지로 한 사람에게 알림이 두 번 가지 않게, 멘션 알림을 받은 사람은 업무방 알림에서 뺀다
 // - 방 알림을 끈 멤버(chat_room_member.muted, 14번)는 업무방 새 메시지 알림만 받지 않는다 (멘션은 받는다)
+import { emoticonPreview } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, CHAT_ROOM_TYPE_LABEL, NOTIFICATION_TYPE } from '@/codes';
 import { findMentions, previewText } from '@/features/messenger/lib/messageText';
 import type { ChatRoomRow, MessageFileValues, MessageRow, MockTables } from '@/mock/schema';
@@ -69,8 +70,15 @@ export function filePreviewOf(files: readonly { name: string }[]): string {
   return files.length > 1 ? `파일 · ${files[0].name} 외 ${files.length - 1}개` : `파일 · ${files[0].name}`;
 }
 
+/** 글이 없는 메시지의 미리보기: 이모티콘이면 '이모티콘 · 이름', 아니면 첨부 (서버와 같다) */
+export function nonTextPreviewOf(message: MessageRow): string {
+  return message.emoticonKey ? emoticonPreview(message.emoticonKey) : filePreviewOf(rowFilesOf(message));
+}
+
 export interface PostMessageValues {
   content: string | null;
+  /** 이모티콘 키 (18번). 허용 목록 확인은 부르는 쪽에서 한다 */
+  emoticonKey?: string | null;
   /** 첨부 (올린 순서). 시드는 파일 1개짜리 file로 넘겨도 된다 */
   files?: MessageFileValues[];
   file?: MessageFileValues | null;
@@ -93,6 +101,7 @@ export function postMessage(
     chatRoomId: room.id,
     senderId,
     content: values.content,
+    emoticonKey: values.emoticonKey ?? null,
     fileName: null,
     filePath: null,
     fileSize: null,
@@ -115,7 +124,7 @@ function notifyForMessage(tx: MockTx, room: ChatRoomRow, senderId: number, messa
   const sender = tx.tables.employee.find((e) => e.id === senderId);
   const senderName = sender?.employeeName ?? '시스템';
   const roomLabel = roomLabelOf(tx.tables, room);
-  const preview = message.content ? previewText(message.content) : filePreviewOf(rowFilesOf(message));
+  const preview = message.content ? previewText(message.content) : nonTextPreviewOf(message);
   // 알림을 누르면 그 메시지까지 이동한다 (서버와 같은 경로)
   const linkPath = `/messenger?room=${room.id}&message=${message.id}`;
   const notified = new Set<number>([senderId]);

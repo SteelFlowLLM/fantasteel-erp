@@ -5,13 +5,22 @@
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
 // - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
-import { DELETED_MESSAGE_TEXT, MESSAGE_ATTACHMENT_MAX_BYTES, MESSAGE_ATTACHMENT_MAX_COUNT, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_SIZE, type MessageReactionEmoji } from '@fantasteel/shared';
+import {
+  DELETED_MESSAGE_TEXT,
+  MESSAGE_ATTACHMENT_MAX_BYTES,
+  MESSAGE_ATTACHMENT_MAX_COUNT,
+  MESSAGE_REACTION_EMOJIS,
+  MESSAGE_SEARCH_SIZE,
+  isMessageEmoticonKey,
+  type MessageEmoticonKey,
+  type MessageReactionEmoji,
+} from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE, type ChatRoomType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { requireActor, type Actor } from '@/api/actor';
 import { ApiError, FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverMessengerApi } from '@/api/server/messenger';
-import { MESSAGE_CONTENT_MAX, filePreviewOf, memberIdsOf, rowFilesOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
+import { MESSAGE_CONTENT_MAX, memberIdsOf, nonTextPreviewOf, rowFilesOf, mentionTargetsOf, postMessage, unreadCountOf, type MentionTarget } from '@/api/messengerRules';
 import { optionalText, requireRow } from '@/api/validation';
 import { SCREEN, canOpenScreen } from '@/features/shell/screens';
 import { findErpNos, findMentions, type ErpLink } from '@/features/messenger/lib/messageText';
@@ -159,6 +168,8 @@ export interface MessageView {
   content: string | null;
   /** 첨부 (올린 순서, 여러 개 = 스키마 3차) */
   files: MessageFileView[];
+  /** 이모티콘 (스키마 4차, 18번). 없거나 삭제된 메시지는 null */
+  emoticonKey: MessageEmoticonKey | null;
   createdAt: string;
   /** 나(또는 내 부서)를 멘션했는지 */
   mentionsMe: boolean;
@@ -202,6 +213,8 @@ export interface SendMessageInput {
   content?: string | null;
   /** 첨부 (REQ-MSG-003). 스키마 3차부터 메시지 1건에 MESSAGE_ATTACHMENT_MAX_COUNT개까지 */
   files?: { name: string; size: number; mimeType: string; dataUrl: string }[];
+  /** 이모티콘 (18번). 글과 함께 보낼 수 있고, 파일과는 함께 보내지 않는다 (서버 첨부 API가 받지 않음) */
+  emoticonKey?: MessageEmoticonKey | null;
   /** 보내기 id. 다시 보낼 때 같은 값을 쓰면 서버가 두 번 저장하지 않는다 (서버 모드만, 가짜 DB는 네트워크 실패가 없어 쓰지 않는다) */
   clientMessageId?: string;
   /** 답글 대상 메시지 */
@@ -217,7 +230,7 @@ function lastMessageOf(tables: Readonly<MockTables>, chatRoomId: number): Messag
 function messagePreviewOf(message: MessageRow): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
   if (message.content) return message.content.replace(/\s+/g, ' ').trim();
-  return filePreviewOf(rowFilesOf(message));
+  return nonTextPreviewOf(message);
 }
 
 const employeeOf = (tables: Readonly<MockTables>, id: number | undefined) => tables.employee.find((e) => e.id === id);
@@ -357,6 +370,7 @@ function toMessageView(tables: Readonly<MockTables>, message: MessageRow, actor:
     isMine: message.senderId === actor.employee.id,
     content: deleted ? null : message.content,
     files: deleted ? [] : rowFilesOf(message).map((file, index) => ({ id: index + 1, name: file.name, size: file.size, mimeType: file.mimeType })),
+    emoticonKey: !deleted && message.emoticonKey && isMessageEmoticonKey(message.emoticonKey) ? message.emoticonKey : null,
     createdAt: message.createdAt,
     mentionsMe: !deleted && message.senderId !== actor.employee.id && message.content !== null && findMentions(message.content, myTargets).length > 0,
     erpLinks: deleted ? [] : erpLinksOf(tables, message.content),
@@ -619,9 +633,12 @@ export const messengerApi = {
       const room = requireMemberRoom(tx.tables, actor, input.chatRoomId);
       const content = (input.content ?? '').trim();
       const files = input.files ?? [];
+      const emoticonKey = input.emoticonKey ?? null;
       const errors = new FieldErrors();
       if (content.length > MESSAGE_CONTENT_MAX) errors.add('content', `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요`);
-      if (!content && files.length === 0) errors.add('content', '보낼 메시지나 파일을 넣어 주세요');
+      if (!content && files.length === 0 && !emoticonKey) errors.add('content', '보낼 메시지나 파일을 넣어 주세요');
+      if (emoticonKey && !isMessageEmoticonKey(emoticonKey)) errors.add('emoticonKey', '쓸 수 없는 이모티콘이에요');
+      if (emoticonKey && files.length > 0) errors.add('emoticonKey', '이모티콘은 파일과 함께 보낼 수 없어요');
       if (files.length > MESSAGE_ATTACHMENT_MAX_COUNT) errors.add('file', `파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
       for (const file of files) {
         if (!isValidFileName(file.name)) errors.add('file', '파일 이름은 255자까지예요');
@@ -639,6 +656,7 @@ export const messengerApi = {
       const message = postMessage(tx, room, actor.employee.id, {
         parentMessageId: input.parentMessageId ?? null,
         content: content || null,
+        emoticonKey,
         files: files.map((file) => ({ name: file.name, size: file.size, mimeType: (file.mimeType || 'application/octet-stream').slice(0, 100), path: '' })),
         pathOf,
       });
@@ -720,7 +738,7 @@ export const messengerApi = {
       const actor = requireActor(tx.tables);
       const message = requireOwnMessage(tx.tables, actor, messageId);
       const text = content.trim();
-      if (!text && rowFilesOf(message).length === 0) throw new InputError('입력한 내용을 확인해 주세요', { content: '고칠 메시지를 넣어 주세요' });
+      if (!text && rowFilesOf(message).length === 0 && !message.emoticonKey) throw new InputError('입력한 내용을 확인해 주세요', { content: '고칠 메시지를 넣어 주세요' });
       if (text.length > MESSAGE_CONTENT_MAX) throw new InputError('입력한 내용을 확인해 주세요', { content: `메시지는 ${MESSAGE_CONTENT_MAX.toLocaleString('en-US')}자까지 보낼 수 있어요` });
       const updated = updateRow(tx, 'message', message.id, { content: text || null, editedAt: tx.nowIso }) ?? message;
       return toMessageView(tx.tables, updated, actor, myMentionTargets(tx.tables, actor));

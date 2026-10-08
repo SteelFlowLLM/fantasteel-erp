@@ -3,15 +3,17 @@
 // 아직 저장되지 않은 내 메시지: 보내는 중(흐리게) · 전송 실패(이유 + 다시 보내기·삭제). 내 메시지처럼 오른쪽 말풍선.
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
+import { EmoticonImage } from '@/features/messenger/components/Emoticon';
 import { cn } from '@/lib/cn';
 import type { OutboxItem } from '@/stores/useOutboxStore';
 
 export function OutboxBubble({ item, onRetry, onDiscard }: { item: OutboxItem; onRetry: () => void; onDiscard: () => void }) {
   const failed = item.status === 'failed';
-  const { content, files = [] } = item.input;
+  const { content, files = [], emoticonKey } = item.input;
   return (
     <div className="flex justify-end px-5 pt-2 pb-1" aria-live="polite">
       <div className="flex max-w-[70%] min-w-0 flex-col items-end gap-1">
+        {emoticonKey ? <EmoticonImage emoticonKey={emoticonKey} className={failed ? undefined : 'opacity-60'} /> : null}
         {content ? (
           <p
             className={cn(

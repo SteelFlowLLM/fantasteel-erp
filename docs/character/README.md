@@ -3,7 +3,7 @@
 FantaSteel ERP의 AI 어시스턴트 옆에 붙일 캐릭터 "철강맨"의 도트(픽셀) 디자인입니다.
 원본 디자인 `steelman.png`(주황 안전모 + 흰 얼굴 + 고글)를 Aseprite로 도트화했습니다.
 
-- 디자인만 만들어 둔 상태입니다. 화면(`client/`)에는 아직 적용하지 않았습니다.
+- ①~④는 디자인만 만들어 둔 상태이고 화면(`client/`)에는 적용하지 않았습니다. ⑤ 이모티콘은 메신저에 적용했습니다.
 - 모든 `.aseprite` 파일은 Aseprite에서 열어 레이어·프레임·태그 단위로 고칠 수 있습니다.
 
 ## 진행 순서
@@ -14,6 +14,7 @@ FantaSteel ERP의 AI 어시스턴트 옆에 붙일 캐릭터 "철강맨"의 도�
 | ② | `steelman-pixel/sizes/` | 더 작고 통통하게 다시 그림. 12·16·20·24px × 고글 버전 / 눈 버전 |
 | ③ | `steelman-pixel/motion/` | **24px 눈 버전으로 확정.** 얼굴이 모찌처럼 말랑한 기분별 모션 8종 |
 | ④ | `steelman-pixel/assistant/` | AI 어시스턴트 대화 상황 15종 × 시안 2~3개(총 44개) + 버튼·아바타 아이콘 |
+| ⑤ | `steelman-emoticon/` | **메신저 이모티콘 8종** (64px, 움직임). 펫 철강맨(신형 작업복, 48px) 바탕 + 글자. 화면에 적용함 → [`steelman-emoticon/README.md`](steelman-emoticon/README.md) |
 
 ## 확정한 기본 디자인 (24px 눈 버전)
 

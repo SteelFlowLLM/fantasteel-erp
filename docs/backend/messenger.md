@@ -23,6 +23,7 @@
 | 쓰기 | `message_reaction` | 스키마 2차(#159). `(message_id, employee_id, emoji)` unique — 이모지 반응 |
 | 쓰기 | `message_attachment` | 스키마 3차(마이그레이션 `20261008040000_messenger_schema_3`). 메시지 1건에 파일 여러 개: `file_path`(Storage 경로), `file_name`, `file_size`(바이트, 3차 전 첨부는 null), `sort_order`(올린 순서). 옛 `message.attachment_path`·`attachment_name`은 이 표로 옮기고 지웠다 |
 | 추가 컬럼 | `chat_room.pinned_message_id`, `chat_room_member.muted`·`pinned_at`, `task.message_id` | 스키마 2차: 공지 고정, 방 알림 끄기·상단 고정, 메시지에서 업무 등록 |
+| 추가 컬럼 | `message.emoticon_key` varchar(32) | 스키마 4차(마이그레이션 `20261008040232_messenger_schema_4`): 이모티콘 키. 허용 목록은 shared `MESSAGE_EMOTICONS` |
 | 읽기 | `employee`, `department`, `sales_order` | 멤버·업무방 상단 수주 정보 |
 
 Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.lastReadMessage`, `Message.sender`, `Employee.chatRoomMembers`·`messagesAsSender`.
@@ -35,7 +36,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | POST | `chat-rooms` | 채팅방 생성 | 로그인만. 업무방은 연결 수주 조회 권한 확인 | 방 멤버·ERP 대상 조회 권한 모두 확인 |
 | GET | `chat-rooms/:id` | 채팅방 상세 | 방 멤버 | |
 | GET | `chat-rooms/:id/messages` | 메시지 목록 | 방 멤버 | 12.2의 `/messages`를 방 하위 경로로 둠. `?before=<메시지 id>&limit=` (기본 50, 최대 100) |
-| POST | `chat-rooms/:id/messages` | 메시지 전송 | 방 멤버 | 실시간 수신은 WebSocket Gateway |
+| POST | `chat-rooms/:id/messages` | 메시지 전송 | 방 멤버 | 실시간 수신은 WebSocket Gateway. `emoticonKey`(선택, 18번)를 주면 `content`는 비워도 된다 |
 | POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | multipart `files`(1~10개, 스키마 3차) + `content`(선택). 파일마다 10MB, 실행 파일 거부 |
 | GET | `attachments/:id` | 첨부 파일 다운로드 | 방 멤버 | `:id` = `message_attachment.id` (스키마 3차) |
 | POST | `chat-rooms/:id/read` | 읽음 위치 갱신 | 방 멤버 | |
@@ -129,6 +130,12 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS` 6개(👍 ✅ 👀 🙏 ❤️ 😂, 가정값)만, 아니면 COM-004.
 - 방 멤버만(COM-002), 삭제·시스템 메시지는 COM-004. 알림은 보내지 않고 멤버에게 `message:updated`.
 - 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
+
+**이모티콘** (18번, 스키마 4차 `message.emoticon_key`, 문서에 없는 추가 기능)
+- `POST chat-rooms/:id/messages { content, emoticonKey }`: 키는 shared `MESSAGE_EMOTICONS` 8개(철강맨 확인·넵넵·감사합니다·죄송합니다·결재 완료·최고·헉·퇴근)만, 아니면 COM-004. 글과 함께 보낼 수 있고, 글·이모티콘이 모두 없으면 COM-004. 첨부 API는 받지 않는다(화면도 파일과 함께 고르지 못하게 막음).
+- 응답 `emoticonKey`(없거나 삭제된 메시지는 null, 목록에서 뺀 키가 DB에 남아 있어도 null). 미리보기(목록·알림·답글·공지)는 글이 있으면 글, 없으면 `이모티콘 · 이름`.
+- 수정은 글만 바꾼다(이모티콘이 있으면 글을 비워도 됨). 검색은 본문만 보므로 이모티콘만 있는 메시지는 나오지 않는다.
+- 그림은 화면의 `client/public/emoticons/<키>.gif`·`.png`(64px, 화면에서 2배). 원본과 다시 만들기는 `docs/character/steelman-emoticon/`.
 
 **수정·삭제·답글** (2026-10-08, 스키마 1차 #151, 명세에 없는 API)
 - `PATCH messages/:id { content }`: 내 일반 메시지만(남의 것·시스템 COM-004, 비멤버 COM-002). 본문은 비울 수 없고 첨부가 있으면 비워도 된다. `edited_at`을 남기고 멤버에게 `message:updated`. 멘션 알림은 다시 보내지 않는다. 고칠 수 있는 시간 제한은 두지 않았다(팀 결정 전).

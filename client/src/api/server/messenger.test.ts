@@ -61,6 +61,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   isMine: false,
   content,
   attachments: [],
+  emoticonKey: null,
   unreadMemberCount: 0,
   erpLinks: [],
   editedAt: null,
@@ -164,6 +165,17 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ content: '@정다은 @품질부 @영업부 확인', mentionedEmployeeIds: [5, 13, 12] });
     await messengerApi.sendMessage({ chatRoomId: 7, content: '다시', clientMessageId: 'abc-1' });
     expect((calls.filter((c) => c.method === 'POST').at(-1)?.body as { clientMessageId?: string }).clientMessageId).toBe('abc-1');
+  });
+
+  it('이모티콘은 글 메시지 API에 emoticonKey로 보내고(글은 비워도 됨), 서버 emoticonKey를 그대로 쓴다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/chat-rooms/7/messages' && c.method === 'POST') return ok(message(52, null, { senderId: 3, isMine: true, emoticonKey: 'steelman-best' }));
+      return undefined;
+    });
+    const sent = await messengerApi.sendMessage({ chatRoomId: 7, emoticonKey: 'steelman-best' });
+    expect(sent).toMatchObject({ id: 52, content: null, emoticonKey: 'steelman-best' });
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ content: '', emoticonKey: 'steelman-best' });
   });
 
   it('파일은 첨부 API로 multipart files(여러 개)를 보내고(글은 content), 서버 첨부 id·크기를 그대로 쓴다', async () => {
