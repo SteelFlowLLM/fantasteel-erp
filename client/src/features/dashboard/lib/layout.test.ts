@@ -124,14 +124,14 @@ describe('위젯 배치', () => {
 });
 
 describe('역할별 기본 배치 (품질)', () => {
-  it('품질은 수주 충족 현황 대신 강종별 불합격률, 그 옆에 공정별 수율, Agent 위험 감지는 그 아래 전체 폭으로 낮게 둔다 (빈 칸 없음)', () => {
+  it('품질은 공정 흐름 아래 Agent 위험 감지(전체 폭, 낮게), 그 아래 수주 충족 현황 대신 강종별 불합격률과 공정별 수율 (빈 칸 없음)', () => {
     const quality = buildDefaultPlacements('QUALITY');
     expect(quality.some((p) => p.key === 'ORDER_FULFILLMENT')).toBe(false);
     expect(quality).toEqual([
       { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
-      { key: 'REJECT_RATE', x: 0, y: 3, w: 6, h: 4 },
-      { key: 'PROCESS_YIELD', x: 6, y: 3, w: 6, h: 4 },
-      { key: 'AGENT_RISK', x: 0, y: 7, w: 12, h: 2 },
+      { key: 'AGENT_RISK', x: 0, y: 3, w: 12, h: 2 },
+      { key: 'REJECT_RATE', x: 0, y: 5, w: 6, h: 4 },
+      { key: 'PROCESS_YIELD', x: 6, y: 5, w: 6, h: 4 },
       { key: 'RECENT_EVENTS', x: 0, y: 9, w: 6, h: 5 },
       { key: 'PRODUCT_STOCK', x: 6, y: 9, w: 6, h: 5 },
     ]);
