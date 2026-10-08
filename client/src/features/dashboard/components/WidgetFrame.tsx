@@ -41,7 +41,7 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, child
   return (
     <section
       aria-label={def.label}
-      className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface', def.soon ? 'border-ai-line' : 'border-line shadow-1')}
+      className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface', def.soon ? 'border-dashed border-ai-line' : 'border-line shadow-1')}
     >
       <header
         title={editing ? '끌어서 옮기기' : undefined}

@@ -93,14 +93,38 @@ describe('위젯 카드', () => {
     expect(quality).toContain('href="/inventories"');
   });
 
-  it('품질 담당: Agent 위험 감지(예시)는 유형을 눌러 바꿔 볼 수 있고 처음엔 불합격률 상승. 다른 역할은 누를 수 없는 원료 부족 예시', async () => {
+  it('품질 담당: Agent 위험 감지(예시)는 예시 숫자 없이 한 줄 안내와 감지 유형만. 다른 역할은 원료 부족 예시', async () => {
     const quality = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('AGENT_RISK') ?? '';
-    expect(quality).toContain('aria-label="위험 유형별 예시"');
-    expect(quality).toMatch(/aria-pressed="true"[^>]*>불합격률 상승</);
-    expect(quality).toContain('SM355A · 최근 30일');
+    expect(quality).toContain('AI Factory Agent(P2)가 연결되면');
+    expect(quality).toContain('불합격률 상승');
+    // 옆 강종별 불합격률(실제 값)과 헷갈리던 예시 숫자·대상은 보이지 않는다
+    expect(quality).not.toContain('5.6%');
+    expect(quality).not.toContain('SM355A · 최근 30일');
+    expect(quality).not.toContain('aria-pressed');
     const sales = (await renderWidgets(SEED_EMPLOYEE_NO.sales)).get('AGENT_RISK') ?? '';
     expect(sales).not.toContain('aria-pressed');
     expect(sales).toContain('실리코망가니즈');
+  });
+
+  it('공정 흐름 현황: 품질은 판정 대기를 내 업무로 크게 보이고 나머지 단계는 흐리게, 다른 역할은 그대로', async () => {
+    const quality = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('PROCESS_FLOW') ?? '';
+    expect(quality).toContain('내 업무');
+    expect(quality).toContain('text-[34px]');
+    expect(quality.match(/opacity-60/g)?.length).toBe(5);
+    const sales = (await renderWidgets(SEED_EMPLOYEE_NO.sales)).get('PROCESS_FLOW') ?? '';
+    expect(sales).not.toContain('내 업무');
+    expect(sales).not.toContain('opacity-60');
+  });
+
+  it('강종별 불합격률: 판정된 검사가 없는 강종은 막대 없이 한 줄에 이름만, 불합격 0건은 "불합격 없음"', async () => {
+    const html = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('REJECT_RATE') ?? '';
+    const data = await dashboardApi.widget('REJECT_RATE');
+    const notInspected = data.grades.filter((g) => g.inspectedCount === 0);
+    const noReject = data.grades.filter((g) => g.inspectedCount > 0 && g.failedCount === 0);
+    expect(html.includes('판정된 검사 없는 강종')).toBe(notInspected.length > 0);
+    for (const g of notInspected) expect(html).toContain(g.steelGradeCode);
+    expect(html).not.toContain('판정된 검사 없음');
+    expect(html.includes('불합격 없음')).toBe(noReject.length > 0);
   });
 
   it('대시보드 화면 틀: 인사·위젯 편집 버튼 (격자는 브라우저에서 너비를 잰 뒤 그린다)', async () => {

@@ -18,16 +18,25 @@ export interface WidgetPlacement {
 }
 
 /**
- * 역할별 기본 위젯 바꾸기: 그 역할이 볼 권한이 없는 기본 위젯 자리에, 같은 위치·크기로 그 역할이 볼 수 있는 후보 위젯을 넣는다.
- * 품질은 수주 충족 현황(수주 조회 권한 없음) 대신 강종별 불합격률을 본다.
+ * 역할별 기본 배치 (없으면 공통 기본 배치).
+ * 품질: 수주 충족 현황(수주 조회 권한 없음) 대신 강종별 불합격률을 두고, 그 옆에 공정별 수율을 둬 빈 칸을 없앤다.
+ * Agent 위험 감지(P2, 한 줄 안내)는 맨 아래 전체 폭으로 낮게 둔다.
  */
-const ROLE_DEFAULT_SWAPS: Partial<Record<RoleCode, Partial<Record<DashboardWidgetKey, DashboardWidgetKey>>>> = {
-  QUALITY: { ORDER_FULFILLMENT: 'REJECT_RATE' },
+const ROLE_DEFAULT_PLACEMENTS: Partial<Record<RoleCode, readonly WidgetPlacement[]>> = {
+  QUALITY: [
+    { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
+    { key: 'REJECT_RATE', x: 0, y: 3, w: 6, h: 4 },
+    { key: 'PROCESS_YIELD', x: 6, y: 3, w: 6, h: 4 },
+    { key: 'RECENT_EVENTS', x: 0, y: 7, w: 6, h: 5 },
+    { key: 'PRODUCT_STOCK', x: 6, y: 7, w: 6, h: 5 },
+    { key: 'AGENT_RISK', x: 0, y: 12, w: 12, h: 2 },
+  ],
 };
 
-/** 기본 배치: 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄. 역할을 주면 그 역할의 바꾸기를 적용한다 */
+/** 기본 배치: 역할 배치가 있으면 그것, 없으면 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄 */
 export function buildDefaultPlacements(roleCode?: RoleCode): WidgetPlacement[] {
-  const swaps = roleCode ? (ROLE_DEFAULT_SWAPS[roleCode] ?? {}) : {};
+  const rolePlacements = roleCode ? ROLE_DEFAULT_PLACEMENTS[roleCode] : undefined;
+  if (rolePlacements) return rolePlacements.map((p) => ({ ...p }));
   const out: WidgetPlacement[] = [];
   let x = 0;
   let rowTop = 0;
@@ -38,7 +47,7 @@ export function buildDefaultPlacements(roleCode?: RoleCode): WidgetPlacement[] {
       x = 0;
       rowHeight = 0;
     }
-    out.push({ key: swaps[def.key] ?? def.key, x, y: rowTop, w: def.defaultW, h: def.defaultH });
+    out.push({ key: def.key, x, y: rowTop, w: def.defaultW, h: def.defaultH });
     x += def.defaultW;
     rowHeight = Math.max(rowHeight, def.defaultH);
   }
