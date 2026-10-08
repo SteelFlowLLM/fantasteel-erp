@@ -93,7 +93,8 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
           </h2>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Button icon="trash" disabled={!canEdit} title={canEdit ? '이 기준의 모든 버전을 지워요' : STANDARD_LOCK_TEXT} onClick={() => setDeleting(true)}>
+          {/* 모든 버전이 지워지는 동작이라 자주 쓰는 "새 버전 만들기"와 같은 무게로 두지 않는다 (확인 창은 그대로) */}
+          <Button variant="danger-ghost" icon="trash" disabled={!canEdit} title={canEdit ? '이 기준의 모든 버전을 지워요' : STANDARD_LOCK_TEXT} onClick={() => setDeleting(true)}>
             기준 삭제
           </Button>
           {view.isCurrent ? (
@@ -221,13 +222,14 @@ function ItemRow({ item, index, changed, source, standardNo }: { item: Inspectio
       <Td align="right">{formatValue(item.minValue)}</Td>
       <Td align="right">{formatValue(item.maxValue)}</Td>
       <Td>{formatThicknessBand(item)}</Td>
-      <Td>{item.isRequired ? <Badge tone="ok">필수</Badge> : <Badge>선택</Badge>}</Td>
+      {/* 거의 모든 줄이 필수·KS라 배지로 칠하면 값보다 먼저 보인다: 흔한 값은 글자로, 다른 값(선택·가정값·바뀜)만 배지로 */}
+      <Td>{item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}</Td>
       <Td>
         <span className="inline-flex items-center gap-1">
           {source === 'KS' ? (
-            <Tag size="sm" tone="brand" title={standardNo ? `KS 값 (${standardNo}, 치수는 KS D 3500)` : 'KS 값'}>
+            <span className="text-cap text-ink-3" title={standardNo ? `KS 값 (${standardNo}, 치수는 KS D 3500)` : 'KS 값'}>
               KS
-            </Tag>
+            </span>
           ) : (
             <Tag size="sm" tone="outline" title="KS에 없어 정한 사내 가정값이에요">
               가정값
