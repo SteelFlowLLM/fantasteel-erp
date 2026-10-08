@@ -43,7 +43,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
+import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
 import { MessengerRepository } from './messenger.repository';
 
@@ -382,7 +382,47 @@ export class MessengerService implements OnModuleInit {
       salesOrder,
       unreadCount: await this.repository.countUnread(this.prisma, room.id, me, membership.lastReadMessageId),
       lastReadMessageId: membership.lastReadMessageId,
+      pinnedMessage:
+        room.pinnedMessage && room.pinnedMessage.deletedAt === null
+          ? {
+              id: room.pinnedMessage.id,
+              senderName: room.pinnedMessage.sender?.employeeName ?? SYSTEM_SENDER_NAME,
+              preview: shorten(previewOf(room.pinnedMessage)),
+              createdAt: room.pinnedMessage.createdAt.toISOString(),
+            }
+          : null,
     };
+  }
+
+  /**
+   * 공지 고정 (12번, 문서에 없는 추가 기능). 방 멤버 누구나 이 방의 삭제되지 않은 일반 메시지를 하나 고정한다(새로 고정하면 바뀐다).
+   * 고정·해제는 시스템 메시지로 남기고 멤버에게 room:updated를 보낸다.
+   */
+  async pinMessage(user: AuthUser, chatRoomId: number, dto: PinMessageDto): Promise<ChatRoomDetail> {
+    const notice = await this.prisma.$transaction(async (tx) => {
+      await this.requireMember(tx, chatRoomId, user.employeeId);
+      await this.requireReplyTarget(tx, chatRoomId, dto.messageId);
+      await this.repository.updatePinnedMessage(tx, chatRoomId, dto.messageId);
+      return this.repository.createSystemMessage(tx, chatRoomId, `${user.employeeName}님이 메시지를 공지로 고정했어요`);
+    });
+    await this.emitRoomUpdated(chatRoomId);
+    await this.emitNewMessage(notice);
+    return this.getRoom(user, chatRoomId);
+  }
+
+  /** 공지 내리기. 고정된 공지가 없으면 그대로 돌려준다 */
+  async unpinMessage(user: AuthUser, chatRoomId: number): Promise<ChatRoomDetail> {
+    const notice = await this.prisma.$transaction(async (tx) => {
+      const room = await this.requireMember(tx, chatRoomId, user.employeeId);
+      if (room.pinnedMessageId === null) return null;
+      await this.repository.updatePinnedMessage(tx, chatRoomId, null);
+      return this.repository.createSystemMessage(tx, chatRoomId, `${user.employeeName}님이 공지를 내렸어요`);
+    });
+    if (notice) {
+      await this.emitRoomUpdated(chatRoomId);
+      await this.emitNewMessage(notice);
+    }
+    return this.getRoom(user, chatRoomId);
   }
 
   /**

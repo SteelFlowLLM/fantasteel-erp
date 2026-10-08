@@ -11,7 +11,7 @@ import type { ComponentType } from 'react';
 import type { ChatRoomDetailView, MessageView } from '@/api/messenger';
 import type { SessionUser } from '@/api/session';
 import { PURCHASE_REQUISITION_DRAFT_ACTION } from '@/features/actionDrafts/components/PurchaseRequisitionDraftAction';
-import { DELETE_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, REPLY_MESSAGE_ACTION } from '@/features/messenger/components/MessageEditActions';
+import { DELETE_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, PIN_MESSAGE_ACTION, REPLY_MESSAGE_ACTION } from '@/features/messenger/components/MessageEditActions';
 
 export interface MessageActionProps {
   message: MessageView;
@@ -31,7 +31,7 @@ export interface MessageActionEntry {
 }
 
 /** 코드로 넣는 동작 (3단계가 이 배열에 더한다) */
-const MESSAGE_ACTIONS: MessageActionEntry[] = [REPLY_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, DELETE_MESSAGE_ACTION, PURCHASE_REQUISITION_DRAFT_ACTION];
+const MESSAGE_ACTIONS: MessageActionEntry[] = [REPLY_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, DELETE_MESSAGE_ACTION, PIN_MESSAGE_ACTION, PURCHASE_REQUISITION_DRAFT_ACTION];
 
 const registered: MessageActionEntry[] = [];
 

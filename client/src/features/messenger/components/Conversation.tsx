@@ -16,6 +16,7 @@ import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
 import { DeleteMessageDialog, EditMessageModal } from '@/features/messenger/components/MessageEditActions';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
+import { PinnedNotice } from '@/features/messenger/components/PinnedNotice';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
 import { PresenceDot, useIsOnline } from '@/features/messenger/components/Presence';
 import { RoomIcon } from '@/features/messenger/components/RoomIcon';
@@ -221,6 +222,7 @@ function RoomView({
           </div>
         </header>
         <WorkRoomPin room={room} />
+        <PinnedNotice room={room} onJump={onJump} />
         <div ref={feedRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto py-2">
           {messages.isPending ? <Spinner className="py-10" /> : null}
           {messages.error ? <StateView kind="error" title="메시지를 불러오지 못했어요" /> : null}

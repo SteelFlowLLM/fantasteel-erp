@@ -1,6 +1,6 @@
 'use client';
 
-// 메시지 메뉴의 기본 동작: 답장(모든 일반 메시지), 수정·삭제(내 메시지). 스키마 1차(#151)의 답글·수정·삭제 표시를 쓴다.
+// 메시지 메뉴의 기본 동작: 답장·공지로 고정(모든 일반 메시지), 수정·삭제(내 메시지). 스키마 1차(#151)의 답글·수정·삭제 표시를 쓴다.
 // 메뉴는 고르자마자 닫히므로 창은 대화 영역(Conversation)이 useMessageComposeStore를 보고 그린다.
 import { useState } from 'react';
 import { MESSAGE_CONTENT_MAX, messengerApi, type MessageView } from '@/api/messenger';
@@ -59,6 +59,17 @@ function DeleteAction({ message, closeMenu }: MessageActionProps) {
   );
 }
 
+function PinAction({ message, room, closeMenu }: MessageActionProps) {
+  const pin = useAction(messengerApi.pinMessage, { success: '공지로 고정했어요', onSuccess: closeMenu });
+  const already = room.pinnedMessage?.id === message.id;
+  return (
+    <MessageActionItem icon="pin" disabled={already || pin.isPending} aside={already ? '고정됨' : undefined} onClick={() => pin.mutate({ chatRoomId: room.id, messageId: message.id })}>
+      공지로 고정
+    </MessageActionItem>
+  );
+}
+
+export const PIN_MESSAGE_ACTION: MessageActionEntry = { key: 'pin', sortOrder: 4, isAvailable: isPlain, Component: PinAction };
 export const REPLY_MESSAGE_ACTION: MessageActionEntry = { key: 'reply', sortOrder: 1, isAvailable: isPlain, Component: ReplyAction };
 export const EDIT_MESSAGE_ACTION: MessageActionEntry = { key: 'edit', sortOrder: 2, isAvailable: (message) => isPlain(message) && message.isMine, Component: EditAction };
 export const DELETE_MESSAGE_ACTION: MessageActionEntry = { key: 'delete', sortOrder: 3, isAvailable: (message) => isPlain(message) && message.isMine, Component: DeleteAction };

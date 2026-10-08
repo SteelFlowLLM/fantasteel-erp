@@ -234,6 +234,21 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, content: 'x', parentMessageId: mine.id })).rejects.toBeInstanceOf(InputError);
   });
 
+  it('공지 고정·내리기: 방 정보에 보이고 시스템 메시지가 남으며, 지운 메시지는 공지에서 빠진다', async () => {
+    const roomId = await createGroup();
+    const notice = await messengerApi.sendMessage({ chatRoomId: roomId, content: '내일 9시 회의' });
+    await messengerApi.pinMessage({ chatRoomId: roomId, messageId: notice.id });
+    expect((await messengerApi.getRoom(roomId)).pinnedMessage).toMatchObject({ id: notice.id, preview: '내일 9시 회의', senderName: '박서영' });
+    await messengerApi.unpinMessage(roomId);
+    expect((await messengerApi.getRoom(roomId)).pinnedMessage).toBeNull();
+    const system = (await messengerApi.listMessages({ chatRoomId: roomId })).items.filter((m) => m.isSystem).map((m) => m.content);
+    expect(system).toEqual(['박서영님이 메시지를 공지로 고정했어요', '박서영님이 공지를 내렸어요']);
+
+    await messengerApi.pinMessage({ chatRoomId: roomId, messageId: notice.id });
+    await messengerApi.deleteMessage(notice.id);
+    expect((await messengerApi.getRoom(roomId)).pinnedMessage).toBeNull();
+  });
+
   it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
     const roomId = await createGroup();
     expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });
