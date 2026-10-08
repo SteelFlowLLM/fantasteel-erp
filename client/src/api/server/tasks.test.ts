@@ -17,6 +17,8 @@ const task = (id: number, dueDate: string, extra: Partial<ServerTaskView> = {}):
   taskStatus: 'OPEN',
   createdAt: AT,
   updatedAt: AT,
+  messageId: null,
+  linkPath: null,
   ...extra,
 });
 
@@ -55,6 +57,14 @@ describe('업무 서버 어댑터 (api/server/tasks.ts)', () => {
     const created = await taskApi.create({ title: ' 일정 확인 ', description: '', assigneeId: 70, dueDate: '2026-10-20', linkPath: '/mrp' });
     expect(calls[0].body).toEqual({ taskTitle: '일정 확인', taskDescription: null, assigneeId: 70, dueDate: '2026-10-20' });
     expect(created).toMatchObject({ id: 9, assignee: { id: 70, employeeName: '최준혁' } });
+  });
+
+  it('메시지에서 등록하면 messageId를 보내고, 서버가 준 원본 메시지 경로를 연결 화면으로 쓴다', async () => {
+    const link = '/messenger?room=3&message=40';
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/tasks' ? ok(task(9, '2026-10-20', { messageId: 40, linkPath: link })) : undefined));
+    const created = await taskApi.create({ title: '입고 확인', assigneeId: 70, dueDate: '2026-10-20', messageId: 40 });
+    expect(calls[0].body).toEqual({ taskTitle: '입고 확인', taskDescription: null, assigneeId: 70, dueDate: '2026-10-20', messageId: 40 });
+    expect(created.linkPath).toBe(link);
   });
 
   it('완료는 POST /tasks/:id/complete이고 expectedUpdatedAt은 보내지 않는다', async () => {

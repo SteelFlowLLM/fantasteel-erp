@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
-const taskInclude = { assignee: { select: { employeeName: true } } } as const;
+const taskInclude = { assignee: { select: { employeeName: true } }, message: { select: { chatRoomId: true } } } as const;
 
 export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
 
@@ -13,6 +13,14 @@ const whereOf = (assigneeId: number, taskStatus: string | undefined): Prisma.Tas
 export class TaskRepository {
   findEmployeeStatus(tx: Tx, id: number) {
     return tx.employee.findUnique({ where: { id }, select: { id: true, isActive: true } });
+  }
+
+  /** 메시지에서 업무 등록: 원본 메시지와 등록하는 사원이 그 방 멤버인지 */
+  findMessageForTask(tx: Tx, messageId: number, employeeId: number) {
+    return tx.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, messageType: true, deletedAt: true, chatRoom: { select: { chatRoomMembers: { where: { employeeId }, select: { employeeId: true } } } } },
+    });
   }
 
   createTask(tx: Tx, data: Prisma.TaskUncheckedCreateInput) {

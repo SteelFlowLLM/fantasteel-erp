@@ -19,6 +19,11 @@ export class CreateTaskDto {
 
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '마감일은 YYYY-MM-DD로 입력해 주세요' })
   dueDate!: string;
+
+  /** 메신저 메시지에서 등록할 때 원본 메시지 (16번, 명세에 없는 값). 그 방 멤버만, 삭제·시스템 메시지는 안 된다 */
+  @IsOptional()
+  @IsInt({ message: '메시지 id가 올바르지 않아요' })
+  messageId?: number;
 }
 
 export class ListTasksQuery {

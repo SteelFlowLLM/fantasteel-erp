@@ -38,4 +38,8 @@ export interface TaskView {
   taskStatus: TaskStatus;
   createdAt: string;
   updatedAt: string;
+  /** 메신저 메시지에서 등록한 업무의 원본 메시지 (16번, 없으면 null) */
+  messageId: number | null;
+  /** 원본 메시지로 가는 화면 경로 `/messenger?room=&message=` (없으면 null) */
+  linkPath: string | null;
 }

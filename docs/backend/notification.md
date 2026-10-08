@@ -15,7 +15,7 @@
 
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
-| 쓰기 | `task` | `task_title`, `task_description`, `assignee_id`, `due_date`(date), `task_status`(OPEN → DONE) |
+| 쓰기 | `task` | `task_title`, `task_description`, `assignee_id`, `due_date`(date), `task_status`(OPEN → DONE), `message_id`(메신저 메시지에서 등록, 스키마 2차) |
 | 쓰기 | `notification` | `notification_type`(NOTIFICATION_TYPE), `recipient_id`(**부서 알림은 발송 시 부서원별 행으로 펼침**), `notification_content`, `link_path`(ERP 화면 이동 경로), `message_id`, `business_event_id`, `read_at` |
 | 읽기 | `employee`, `department` | 담당자·부서원 |
 
@@ -30,7 +30,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
 | GET | `tasks` | 업무 목록 | 로그인만(업무·알림은 전 역할) | 상태는 TASK_STATUS. 내 담당 업무만(8장) |
-| POST | `tasks` | 업무 등록 | 로그인만 | |
+| POST | `tasks` | 업무 등록 | 로그인만 | 선택 `messageId`(메신저 16번, 명세에 없는 값) |
 | POST | `tasks/:id/complete` | 업무 완료 | 담당자 본인(service 확인) | OPEN → DONE |
 | GET | `notifications` | 알림 목록 | 본인 알림 | 알림 발송은 서버 내부 처리(API 없음), 유형은 NOTIFICATION_TYPE. 응답에 안 읽은 수(`unreadCount`) |
 | POST | `notifications/:id/read` | 알림 읽음 | 본인 알림 | [CSV]에 없는 임시 API(8장). 남의 알림 COM-002 |
@@ -40,6 +40,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.notificationsAsRecip
 
 **업무**(REQ-NTF-001)
 - 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks`).
+- 메시지에서 등록(메신저 16번, 문서에 없는 추가 기능): `messageId`를 주면 `task.message_id`에 남긴다. 메시지 없음 COM-003, 등록하는 사람이 그 방 멤버가 아님 COM-002, 삭제·시스템 메시지 COM-004. 응답 `messageId`·`linkPath`(`/messenger?room=&message=`, 없으면 null).
 - 완료: 담당자 본인만, OPEN에서만 DONE([06] TASK_STATUS, [04] 10장). 다른 사람이면 COM-002, 이미 완료면 COM-001.
 - 작업(공정 작업)과 다르다: 공정 작업은 상태값이 없고 실적의 시작·완료 시각으로 판단한다([04] 10장 "작업").
 

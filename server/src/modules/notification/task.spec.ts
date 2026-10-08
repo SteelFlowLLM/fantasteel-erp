@@ -109,3 +109,36 @@ describe('POST /tasks/:id/complete (API-241)', () => {
     expect((await call<PageResult<TaskView>>('GET', '/tasks?taskStatus=DONE', purchaseCookie)).body.data.items.map((t) => t.id)).toEqual([created.id]);
   });
 });
+
+describe('메시지에서 업무 등록 (16번, messageId)', () => {
+  async function roomWithMessage(): Promise<{ chatRoomId: number; messageId: number }> {
+    const room = await call<{ id: number }>('POST', '/chat-rooms', headCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const message = await call<{ id: number }>('POST', `/chat-rooms/${room.body.data.id}/messages`, headCookie, { content: '원료 입고 일정 확인 부탁해요' });
+    return { chatRoomId: room.body.data.id, messageId: message.body.data.id };
+  }
+
+  it('방 멤버가 메시지로 업무를 등록하면 원본 메시지가 남고 메신저로 가는 경로를 준다', async () => {
+    const { chatRoomId, messageId } = await roomWithMessage();
+    const created = await call<TaskView>('POST', '/tasks', headCookie, newTask({ taskTitle: '입고 일정 확인', messageId }));
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ messageId, linkPath: `/messenger?room=${chatRoomId}&message=${messageId}` });
+    const mine = await call<PageResult<TaskView>>('GET', '/tasks', purchaseCookie);
+    expect(mine.body.data.items.find((t) => t.id === created.body.data.id)?.linkPath).toBe(`/messenger?room=${chatRoomId}&message=${messageId}`);
+    const plain = await call<TaskView>('POST', '/tasks', headCookie, newTask({ taskTitle: '그냥 업무' }));
+    expect(plain.body.data).toMatchObject({ messageId: null, linkPath: null });
+  });
+
+  it('없는 메시지 COM-003, 방 멤버가 아니면 COM-002, 삭제된 메시지 COM-004 (업무가 남지 않는다)', async () => {
+    const { messageId } = await roomWithMessage();
+    const before = await prisma.task.count();
+    const missing = await call('POST', '/tasks', headCookie, newTask({ messageId: 999_999 }));
+    expect([missing.status, missing.body.error?.code]).toEqual([404, 'COM-003']);
+    const salesCookie = await login('2103003');
+    const outsider = await call('POST', '/tasks', salesCookie, newTask({ messageId }));
+    expect([outsider.status, outsider.body.error?.code]).toEqual([403, 'COM-002']);
+    await fetch(`${baseUrl}/messages/${messageId}`, { method: 'DELETE', headers: { cookie: headCookie } });
+    const deleted = await call('POST', '/tasks', headCookie, newTask({ messageId }));
+    expect([deleted.status, deleted.body.error?.code]).toEqual([400, 'COM-004']);
+    expect(await prisma.task.count()).toBe(before);
+  });
+});

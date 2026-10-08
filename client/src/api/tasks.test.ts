@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setActingEmployeeForTest } from '@/api/actor';
 import { InputError } from '@/api/client';
+import { messengerApi } from '@/api/messenger';
 import { taskApi } from '@/api/tasks';
 import { getMockDb } from '@/mock/db';
 import { updateRow } from '@/mock/store';
@@ -38,6 +39,21 @@ describe('업무 (REQ-NTF-001)', () => {
     expect(notice.title).toHaveLength(200);
     expect(notice.title.startsWith('업무 지정 · 가')).toBe(true);
     expect(notice.title.endsWith('…')).toBe(true);
+  });
+
+  it('메시지에서 등록하면 원본 메시지로 가는 연결 화면이 붙는다. 방 멤버가 아니면 COM-002, 삭제된 메시지는 입력 오류', async () => {
+    actAs(SEED_EMPLOYEE_NO.purchaseHead);
+    const purchaseId = employeeIdOf(SEED_EMPLOYEE_NO.purchase);
+    const room = await messengerApi.createRoom({ chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const message = await messengerApi.sendMessage({ chatRoomId: room.id, content: '입고 일정 확인 부탁해요' });
+    const task = await taskApi.create({ title: '입고 일정 확인', assigneeId: purchaseId, dueDate: '2026-10-20', linkPath: '/mrp', messageId: message.id });
+    expect(task.linkPath).toBe(`/messenger?room=${room.id}&message=${message.id}`);
+
+    actAs(SEED_EMPLOYEE_NO.sales);
+    await expect(taskApi.create({ title: '끼어들기', assigneeId: purchaseId, messageId: message.id })).rejects.toMatchObject({ code: 'COM-002' });
+    actAs(SEED_EMPLOYEE_NO.purchaseHead);
+    await messengerApi.deleteMessage(message.id);
+    await expect(taskApi.create({ title: '지운 글', assigneeId: purchaseId, messageId: message.id })).rejects.toBeInstanceOf(InputError);
   });
 
   it('나에게 맡기는 업무는 알림이 없다', async () => {

@@ -2,7 +2,8 @@
 // 사원 id는 서버 id다. 서버에 없어 비우는 것 (화면은 서버 모드에서 해당 기능을 숨긴다):
 // - 범위: 서버 목록은 내 담당 업무만이다 (notification.md 8장, 2026-10-07 결정)
 // - 요청자: task에 등록자 칸이 없어 담당자로 채운다 (화면은 둘이 같으면 요청자를 보이지 않는다)
-// - 연결 화면·완료 시각·수정: ERD 칸·API가 없다. 마감일은 서버에서 필수다
+// - 완료 시각·수정: ERD 칸·API가 없다. 마감일은 서버에서 필수다
+// - 연결 화면: 메신저 메시지에서 등록한 업무만 서버가 원본 메시지 경로를 준다 (16번). 직접 적는 연결 화면 칸은 없다
 import type { PageResult, TaskView as ServerTaskView } from '@fantasteel/shared';
 import { TASK_STATUS } from '@/codes';
 import { FieldErrors } from '@/api/errors';
@@ -32,7 +33,7 @@ function toView(row: ServerTaskView): TaskView {
     creator: assignee,
     dueDate: row.dueDate,
     taskStatus: row.taskStatus,
-    linkPath: null,
+    linkPath: row.linkPath,
     completedAt: null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -53,7 +54,13 @@ function bodyOf(input: TaskInput) {
   if (!input.dueDate) errors.add('dueDate', '마감일을 골라 주세요');
   errors.throwIfAny();
   // 위에서 비었으면 이미 던졌다
-  return { taskTitle, taskDescription: taskDescription || null, assigneeId: input.assigneeId ?? 0, dueDate: input.dueDate ?? '' };
+  return {
+    taskTitle,
+    taskDescription: taskDescription || null,
+    assigneeId: input.assigneeId ?? 0,
+    dueDate: input.dueDate ?? '',
+    ...(input.messageId ? { messageId: input.messageId } : {}),
+  };
 }
 
 export const serverTaskApi = {

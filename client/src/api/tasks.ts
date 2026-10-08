@@ -57,6 +57,8 @@ export interface TaskInput {
   assigneeId: number | null;
   dueDate?: string | null;
   linkPath?: string | null;
+  /** 메신저 메시지에서 등록할 때 원본 메시지 (16번). 연결 화면은 그 메시지로 정해진다 */
+  messageId?: number | null;
 }
 
 export interface TaskUpdateInput extends TaskInput {
@@ -114,6 +116,16 @@ function validateInput(tables: Readonly<MockTables>, input: TaskInput) {
   return { title: title ?? '', description, dueDate: dueDate ?? null, linkPath: linkText || null, assigneeId: assignee.id };
 }
 
+/** 메시지에서 업무 등록: 그 방 멤버만, 삭제·시스템 메시지는 안 된다. 연결 화면은 그 메시지 */
+function messageLinkOf(tables: Readonly<MockTables>, actor: Actor, messageId: number): string {
+  const message = requireRow(tables, 'message', messageId, '메시지');
+  if (!tables.chatRoomMember.some((m) => m.chatRoomId === message.chatRoomId && m.employeeId === actor.employee.id)) {
+    throw new ApiError('COM-002', '채팅방 멤버만 이 메시지로 업무를 등록할 수 있어요');
+  }
+  if (message.deletedAt || !tables.employee.some((e) => e.id === message.senderId)) throw new InputError('삭제된 메시지나 시스템 메시지로는 업무를 등록할 수 없어요');
+  return `/messenger?room=${message.chatRoomId}&message=${message.id}`;
+}
+
 function notifyAssignee(tx: MockTx, actor: Actor, task: TaskRow): void {
   if (task.assigneeId === actor.employee.id) return;
   createNotifications(tx, {
@@ -163,7 +175,9 @@ export const taskApi = {
     isServerDataSource() ? serverTaskApi.create(input) : mockMutation((tx) => {
       const actor = requireActor(tx.tables);
       const values = validateInput(tx.tables, input);
-      const task = insertRow(tx, 'task', { ...values, creatorId: actor.employee.id, taskStatus: TASK_STATUS.OPEN, completedAt: null });
+      const messageId = input.messageId ?? null;
+      const linkPath = messageId === null ? values.linkPath : messageLinkOf(tx.tables, actor, messageId);
+      const task = insertRow(tx, 'task', { ...values, linkPath, messageId, creatorId: actor.employee.id, taskStatus: TASK_STATUS.OPEN, completedAt: null });
       notifyAssignee(tx, actor, task);
       return toView(tx.tables, task, actor.employee.id);
     }),

@@ -14,7 +14,7 @@ import { Spinner, StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { Composer } from '@/features/messenger/components/Composer';
 import { MessageBubble } from '@/features/messenger/components/MessageBubble';
-import { DeleteMessageDialog, EditMessageModal } from '@/features/messenger/components/MessageEditActions';
+import { DeleteMessageDialog, EditMessageModal, taskSourceOf } from '@/features/messenger/components/MessageEditActions';
 import { OutboxBubble } from '@/features/messenger/components/OutboxBubble';
 import { PinnedNotice } from '@/features/messenger/components/PinnedNotice';
 import { RoomAside } from '@/features/messenger/components/RoomAside';
@@ -23,6 +23,7 @@ import { RoomIcon } from '@/features/messenger/components/RoomIcon';
 import { RoomSettingsButtons } from '@/features/messenger/components/RoomSettings';
 import { InviteModal, RenameRoomModal } from '@/features/messenger/components/RoomModals';
 import { WorkRoomPin } from '@/features/messenger/components/WorkRoomSalesOrder';
+import { TaskFormModal } from '@/features/tasks/components/TaskFormModal';
 import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { firstUnreadId, layoutMessages } from '@/features/messenger/lib/messageGroups';
 import { useMe } from '@/hooks/useMe';
@@ -85,6 +86,7 @@ function RoomView({
   const outbox = useMessageOutbox(room.id);
   const editing = useMessageComposeStore((state) => (state.editing?.chatRoomId === room.id ? state.editing : null));
   const deleting = useMessageComposeStore((state) => (state.deleting?.chatRoomId === room.id ? state.deleting : null));
+  const tasking = useMessageComposeStore((state) => (state.tasking?.chatRoomId === room.id ? state.tasking : null));
   const counterpartId = room.chatRoomType === 'DIRECT' ? (room.members.find((m) => !m.isMe)?.id ?? null) : null;
   const counterpartOnline = useIsOnline(counterpartId);
   const typing = typingText(useMessengerLiveStore((state) => state.typing[room.id] ?? NO_TYPING));
@@ -312,6 +314,7 @@ function RoomView({
       {renaming ? <RenameRoomModal room={room} onClose={() => setRenaming(false)} /> : null}
       {editing ? <EditMessageModal message={editing} onClose={() => useMessageComposeStore.getState().setEditing(null)} /> : null}
       {deleting ? <DeleteMessageDialog message={deleting} onClose={() => useMessageComposeStore.getState().setDeleting(null)} /> : null}
+      {tasking ? <TaskFormModal task={null} source={taskSourceOf(tasking)} onClose={() => useMessageComposeStore.getState().setTasking(null)} /> : null}
     </div>
   );
 }

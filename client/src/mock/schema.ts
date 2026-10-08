@@ -440,6 +440,8 @@ export type TaskRow = Timestamps & {
   taskStatus: TaskStatus;
   linkPath: string | null;
   completedAt: IsoDateTime | null;
+  /** 메신저 메시지에서 등록한 업무의 원본 메시지 (16번, 선택 값) */
+  messageId?: number | null;
 };
 
 export type NotificationRow = Timestamps & {

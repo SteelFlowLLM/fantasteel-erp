@@ -14,6 +14,7 @@ import { MessageActionItem } from '@/features/messenger/components/MessageAction
 import type { MessageActionEntry, MessageActionProps } from '@/features/messenger/messageActions';
 import { useAction } from '@/hooks/useAction';
 import { cn } from '@/lib/cn';
+import type { TaskSourceMessage } from '@/features/tasks/components/TaskFormModal';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 
 const isPlain = (message: MessageView) => !message.isSystem && !message.isDeleted;
@@ -95,6 +96,33 @@ function ReactionAction({ message, closeMenu }: MessageActionProps) {
   );
 }
 
+function TaskAction({ message, closeMenu }: MessageActionProps) {
+  return (
+    <MessageActionItem
+      icon="task"
+      onClick={() => {
+        useMessageComposeStore.getState().setTasking(message);
+        closeMenu();
+      }}
+    >
+      업무로 등록
+    </MessageActionItem>
+  );
+}
+
+const TASK_TITLE_FROM_MESSAGE_MAX = 50;
+
+/** 메시지로 업무 창을 미리 채운다: 제목 = 본문 첫 줄(50자, 가정값) 또는 파일 이름, 설명 = 본문과 보낸 사람 */
+export function taskSourceOf(message: MessageView): TaskSourceMessage {
+  const content = (message.content ?? '').trim();
+  const firstLine = content.split('\n')[0]?.trim() ?? '';
+  const base = firstLine || message.file?.name || '메시지 확인';
+  const title = base.length > TASK_TITLE_FROM_MESSAGE_MAX ? `${base.slice(0, TASK_TITLE_FROM_MESSAGE_MAX - 1)}…` : base;
+  const description = [content, `— ${message.senderName}님의 메시지에서 등록`].filter(Boolean).join('\n\n');
+  return { messageId: message.id, title, description };
+}
+
+export const TASK_MESSAGE_ACTION: MessageActionEntry = { key: 'task', sortOrder: 5, isAvailable: isPlain, Component: TaskAction };
 export const REACTION_MESSAGE_ACTION: MessageActionEntry = { key: 'reaction', sortOrder: 0, isAvailable: isPlain, Component: ReactionAction };
 export const PIN_MESSAGE_ACTION: MessageActionEntry = { key: 'pin', sortOrder: 4, isAvailable: isPlain, Component: PinAction };
 export const REPLY_MESSAGE_ACTION: MessageActionEntry = { key: 'reply', sortOrder: 1, isAvailable: isPlain, Component: ReplyAction };
