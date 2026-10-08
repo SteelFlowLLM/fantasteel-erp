@@ -4,7 +4,6 @@ import { InputError } from '@/api/client';
 import { inventoryApi } from '@/api/inventories';
 import { lotTraceApi } from '@/api/lotTrace';
 import { messengerApi } from '@/api/messenger';
-import { notificationApi } from '@/api/notifications';
 import { productionPlanApi } from '@/api/production';
 import { productionResultApi } from '@/api/productionResults';
 import { rollingApi } from '@/api/rolling';
@@ -20,6 +19,7 @@ import {
   itemIdOf,
   lotOf,
   lotsOfPlan,
+  mockNotificationsOf,
   planIdOf,
   readDb,
   salesOrderIdOf,
@@ -249,7 +249,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     // 멘션 받은 사람은 MENTION 한 번, 다른 멤버는 업무방 메시지 알림
     as('productionHead');
     expect(await messengerApi.countUnread(productionId)).toBe(unreadBefore + 1);
-    const mentions = (await notificationApi.list()).items.filter((n) => n.notificationType === 'MENTION');
+    const mentions = mockNotificationsOf('productionHead').filter((n) => n.notificationType === 'MENTION');
     expect(mentions).toHaveLength(1);
     expect(mentions[0].linkPath).toBe(`/messenger?room=${room.id}&message=${sent.id}`);
     const page = await messengerApi.listMessages({ chatRoomId: room.id });
@@ -258,7 +258,7 @@ describe('14.2 P1 코일·혼합·취소 (화면 api)', () => {
     expect(await messengerApi.getFile({ messageId: sent.id, fileId: 1, fileName: '' })).toEqual({ name: '일정.txt', mimeType: 'text/plain', dataUrl });
     expect(await messengerApi.markRead({ chatRoomId: room.id, lastMessageId: sent.id })).toBe(0);
     as('purchase');
-    expect((await notificationApi.list()).items.filter((n) => n.notificationType === 'WORK_ROOM_MESSAGE').map((n) => n.title)).toContain('SO-2609-003 다온건설 새 메시지');
+    expect(mockNotificationsOf('purchase').filter((n) => n.notificationType === 'WORK_ROOM_MESSAGE').map((n) => n.title)).toContain('SO-2609-003 다온건설 새 메시지');
     // ERP 링크를 눌러 수주 상세를 연다 (수주 화면 권한이 있으면 상세가 열린다)
     as('productionHead');
     expect((await salesOrderApi.detail(salesOrderId)).salesOrderNo).toBe('SO-2609-003');
