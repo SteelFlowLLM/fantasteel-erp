@@ -17,8 +17,8 @@ function StockBody({ data }: { data: ProductStockData }) {
           <div key={total.itemType} className="flex items-center gap-2.5" title={`재고 ${fmtTon(total.onHandTon)} · 가용 ${fmtTon(total.availableTon)}`}>
             <span className="min-w-11 flex-none whitespace-nowrap text-xs font-medium text-ink-2">{ITEM_TYPE_LABEL[total.itemType]}</span>
             <div className="min-w-0 flex-1">
-              {/* 너비는 실행 중에 정해지는 값이라 style로 준다 */}
-              <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3" style={{ width: pct(total.onHandQty, maxOnHand), minWidth: total.onHandQty ? 6 : 0 }}>
+              {/* 너비는 실행 중에 정해지는 값이라 style로 준다. 예약·가용 뒤 남는 몫(판정 대기·불합격·배정)은 바탕색으로 보인다: 품질이 볼 몫이라 회색 대신 노랑 */}
+              <div className="flex h-3.5 overflow-hidden rounded-xs bg-wait/35" style={{ width: pct(total.onHandQty, maxOnHand), minWidth: total.onHandQty ? 6 : 0 }}>
                 <span className="bg-chart-1" style={{ width: pct(total.reservedQty, total.onHandQty) }} />
                 <span className="bg-chart-3" style={{ width: pct(total.availableQty, total.onHandQty) }} />
               </div>
@@ -32,7 +32,7 @@ function StockBody({ data }: { data: ProductStockData }) {
         <div className="flex flex-wrap gap-3">
           <LegendItem colorClass="bg-chart-1" label="예약" />
           <LegendItem colorClass="bg-chart-3" label="가용" />
-          <LegendItem colorClass="bg-surface-3" label="판정 대기·불합격·배정" />
+          <LegendItem colorClass="bg-wait/35" label="판정 대기·불합격·배정" />
         </div>
       </div>
       {data.items.length === 0 ? (

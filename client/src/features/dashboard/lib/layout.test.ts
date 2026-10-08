@@ -124,14 +124,23 @@ describe('위젯 배치', () => {
 });
 
 describe('역할별 기본 배치 (품질)', () => {
-  it('품질은 수주 충족 현황 자리에 같은 위치·크기로 강종별 불합격률을 둔다', () => {
-    const common = buildDefaultPlacements();
+  it('품질은 수주 충족 현황 대신 강종별 불합격률, 그 옆에 공정별 수율, Agent 위험 감지는 맨 아래 전체 폭으로 낮게 둔다 (빈 칸 없음)', () => {
     const quality = buildDefaultPlacements('QUALITY');
-    const slot = common.find((p) => p.key === 'ORDER_FULFILLMENT');
     expect(quality.some((p) => p.key === 'ORDER_FULFILLMENT')).toBe(false);
-    expect(quality.find((p) => p.key === 'REJECT_RATE')).toEqual({ ...slot, key: 'REJECT_RATE' });
-    // 나머지 기본 위젯은 그대로
-    expect(quality.filter((p) => p.key !== 'REJECT_RATE')).toEqual(common.filter((p) => p.key !== 'ORDER_FULFILLMENT'));
+    expect(quality).toEqual([
+      { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
+      { key: 'REJECT_RATE', x: 0, y: 3, w: 6, h: 4 },
+      { key: 'PROCESS_YIELD', x: 6, y: 3, w: 6, h: 4 },
+      { key: 'RECENT_EVENTS', x: 0, y: 7, w: 6, h: 5 },
+      { key: 'PRODUCT_STOCK', x: 6, y: 7, w: 6, h: 5 },
+      { key: 'AGENT_RISK', x: 0, y: 12, w: 12, h: 2 },
+    ]);
+    // 줄마다 12칸을 다 채운다
+    const widthByRow = new Map<number, number>();
+    for (const p of quality) widthByRow.set(p.y, (widthByRow.get(p.y) ?? 0) + p.w);
+    expect([...widthByRow.values()].every((w) => w === 12)).toBe(true);
+    // 공통 기본 위젯 중 수주 충족 현황만 빠지고 나머지는 모두 있다
+    expect(quality.map((p) => p.key).sort()).toEqual([...buildDefaultPlacements().map((p) => p.key).filter((k) => k !== 'ORDER_FULFILLMENT'), 'REJECT_RATE'].sort());
   });
 
   it('다른 역할(영업 등)과 역할을 모를 때는 공통 기본 배치 그대로', () => {
