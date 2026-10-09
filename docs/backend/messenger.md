@@ -132,7 +132,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
 
 **이모티콘** (18번·19번, 스키마 4차 `message.emoticon_key`, 문서에 없는 추가 기능)
-- 묶음 2개, 37종: 철강맨 업무 18종(18번의 8종 확인·넵넵·감사합니다·죄송합니다·결재 완료·최고·헉·퇴근 + 19번 10종) · 철강맨 일상 19종(19번). 키·이름·묶음은 shared `MESSAGE_EMOTICONS`(항목마다 `set`), 묶음은 `MESSAGE_EMOTICON_SETS`(`steelman-work`·`steelman-daily`). 순서가 화면 고르기 창 순서다.
+- 묶음 3개, 68종: 철강맨 업무 29종(18번 8종 + 19번 10종 + 20번 11종) · 철강맨 일상 33종(19번 19종 + 20번 14종) · 철강맨 행사 6종(20번: 새해·설·추석·연말·생일·환영). 키·이름·묶음은 shared `MESSAGE_EMOTICONS`(항목마다 `set`), 묶음은 `MESSAGE_EMOTICON_SETS`(`steelman-work`·`steelman-daily`·`steelman-event`). 순서가 화면 고르기 창 순서다.
 - `POST chat-rooms/:id/messages { content, emoticonKey }`: 서버는 키가 `MESSAGE_EMOTICONS` 목록에 있는지만 본다(묶음은 보지 않음). 없으면 COM-004. 글과 함께 보낼 수 있고, 글·이모티콘이 모두 없으면 COM-004. 첨부 API는 받지 않는다(화면도 파일과 함께 고르지 못하게 막음). 이모티콘을 더해도 스키마는 그대로다(키는 varchar(32) 안).
 - 응답 `emoticonKey`(없거나 삭제된 메시지는 null, 목록에서 뺀 키가 DB에 남아 있어도 null). 미리보기(목록·알림·답글·공지)는 글이 있으면 글, 없으면 `이모티콘 · 이름`.
 - 수정은 글만 바꾼다(이모티콘이 있으면 글을 비워도 됨). 검색은 본문만 보므로 이모티콘만 있는 메시지는 나오지 않는다.

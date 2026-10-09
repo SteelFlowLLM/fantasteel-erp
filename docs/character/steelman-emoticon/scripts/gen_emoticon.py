@@ -1,6 +1,6 @@
 """철강맨 메신저 이모티콘 묶음 하나 (64px, 움직임) -> 레이어 PNG + Aseprite Lua.
 
-사용: python3 gen_emoticon.py <펫 원본 시트.png> <작업 폴더> <묶음: work|daily> <출력 .aseprite>
+사용: python3 gen_emoticon.py <펫 원본 시트.png> <작업 폴더> <묶음: work|daily|event> <출력 .aseprite>
   작업 폴더/frames/*.png, 작업 폴더/build.lua, 작업 폴더/tags.tsv(태그 · 키 · 글자)
 검토용: python3 gen_emoticon.py <펫 원본 시트.png> --review <묶음> <출력 .png>  (프레임을 한 장에 펼친 그림)
 캐릭터는 펫 철강맨(신형 작업복) 48px 시트를 쓰고, 64px 캔버스 위쪽에 글자를 얹는다. 그리기 도구는 emoticon_lib.py.
@@ -11,10 +11,11 @@ import sys
 from PIL import Image
 
 import set_daily
+import set_event
 import set_work
 from emoticon_lib import LAYERS, ORIGIN, SIZE, Canvas, Sheet, outline_text, place_props, render, to_lua
 
-SETS = {'work': set_work, 'daily': set_daily}
+SETS = {'work': set_work, 'daily': set_daily, 'event': set_event}
 
 
 def composite(e):

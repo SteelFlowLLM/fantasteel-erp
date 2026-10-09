@@ -1,7 +1,9 @@
 """묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난). 키는 shared MESSAGE_EMOTICONS와 같다."""
+from PIL import Image
+
 from emoticon_lib import (
-    emoticon, face, flatten, flip, fr, heat, helmet_off, molten_bottom, nod, prop, roller_img, silver,
-    stretch, sway, tint, wall_img,
+    emoticon, face, flatten, flip, fr, ghost, heat, helmet_off, molten_bottom, nod, pix, prop, ring_burst,
+    roller_img, silver, stretch, sway, tint, wall_img,
 )
 
 
@@ -230,4 +232,130 @@ def build(sh):
         drips = [('drip', 6 + (i * 5) % 8, 44), ('drip', 38 - (i * 3) % 6, 44)] if i else []
         frames.append(fr(img, 200 if i < 4 else 600, front=drips + ([('sweat', 36, 47 - round(48 * ratio) + 6)] if i > 1 else [])))
     E.append(emoticon('멘탈 녹는 중', 'steelman-melting', ['멘탈', '녹는 중'], 'O', frames))
+
+    # ── 3차 ────────────────────────────────────────────
+    think = [G(7, i) for i in range(4)]
+    grin = face(idle, eyes='happy', mouth='smile')
+
+    # 좋다 (🤙): 엄지·새끼손가락을 펴고 씨익
+    E.append(emoticon('좋다', 'steelman-shaka', '좋다', 'W', [
+        fr(idle, 150),
+        fr(grin, 120, front=[('shaka', 37, 19)]),
+        fr(grin, 120, front=[('shaka', 37, 17), ('spark_s', 46, 22)]),
+        fr(grin, 120, front=[('shaka', 37, 19)]),
+        fr(grin, 120, front=[('shaka', 37, 17), ('spark_l', 45, 20)]),
+        fr(grin, 500, front=[('shaka', 37, 18)]),
+    ]))
+
+    # 야르!: 만세 점프 + 노란 불티
+    E.append(emoticon('야르', 'steelman-yar', '야르!', 'Y', [
+        fr(happy[0], 90), fr(happy[1], 90),
+        fr(happy[2], 100, back=[('burst_at', 2, 0, 6, 'y', 'Y', 'O')]),
+        fr(happy[3], 100, back=[('burst_at', 0, -2, 9, 'y', 'Y', 'O'), ('burst_at', 34, 2, 6, 'y', 'Y', 'O')]),
+        fr(happy[4], 90, back=[('burst_at', 32, 0, 9, 'y', 'Y', 'O')]),
+        fr(happy[2], 100, back=[('burst_at', 14, -6, 7, 'y', 'Y', 'O')]),
+        fr(happy[5], 450, front=[('spark_l', 0, 10), ('spark_s', 44, 8)]),
+    ]))
+
+    # 할렐야루: 후광과 빛줄기 속에서 둥실
+    bliss = face(idle, eyes='closed', mouth='smile')
+    E.append(emoticon('할렐야루', 'steelman-hallelujah', '할렐야루', 'Y', [
+        fr(bliss, 180, back=[('img', 24 - 22, 24 - 22, ring_burst(20, 'Y', 'Y', 'O', rays=12, length=5, phase=i * 0.25))],
+           front=[('halo', 17, 2 - (i % 2) - (i % 3))], char_at=(0, -(i % 3)))
+        for i in range(6)
+    ]))
+
+    # 감다살: 별 눈 + 엄지 척 + 반짝
+    sharp = face(idle, eyes='star', mouth='open')
+    E.append(emoticon('감다살', 'steelman-sense', '감다살', 'Y', [
+        fr(idle, 140),
+        fr(sharp, 100, front=[('thumb', 36, 26), ('spark_l', 2, 14)]),
+        fr(sharp, 100, front=[('thumb', 36, 25), ('spark_s', 3, 15), ('spark_l', 44, 18)]),
+        fr(sharp, 100, front=[('thumb', 36, 26), ('spark_l', 0, 22)]),
+        fr(sharp, 500, front=[('thumb', 36, 25), ('spark_s', 44, 19), ('spark_s', 2, 16)]),
+    ]))
+
+    # 감다뒤: 고개를 천천히 갸웃, 물음표
+    blank_face = face(idle, eyes='dot', mouth='flat')
+    E.append(emoticon('감다뒤', 'steelman-no-sense', '감다뒤', 'W', [
+        fr(blank_face, 200),
+        fr(sway(blank_face, -1), 160),
+        fr(sway(blank_face, -2), 160, front=[('qmark', 38, 10)]),
+        fr(sway(blank_face, -3), 600, front=[('qmark', 38, 8)]),
+    ]))
+
+    # 중꺾마: 머리 위로 든 휜 철판이 팅 하고 다시 펴짐
+    E.append(emoticon('중꺾마', 'steelman-unbroken', '중꺾마', 'O', [
+        fr(fall0, 160, front=[('plate', 13, -1, 5)]),
+        fr(fall1, 120, front=[('plate', 13, -1, 3)]),
+        fr(fall0, 100, front=[('plate', 13, 0, 0), ('spark_l', 8, -2), ('spark_l', 34, -2)], shake=(1, 0)),
+        fr(happy[5], 500, front=[('plate', 13, 0, 0), ('spark_s', 46, 10), ('spark_s', 0, 12)]),
+    ]))
+
+    # 오히려 좋아: 비를 맞으면서도 엄지 척
+    happy_rain = face(idle, eyes='happy', mouth='open')
+    E.append(emoticon('오히려 좋아', 'steelman-even-better', '오히려 좋아', 'W', [
+        fr(happy_rain, 220, front=[('cloud', 17, 0), ('thumb', 36, 26)] + rain),
+        fr(happy_rain, 220, front=[('cloud', 17, 0), ('thumb', 36, 25)] + rain2),
+        fr(happy_rain, 220, front=[('cloud', 17, 0), ('thumb', 36, 26), ('spark_s', 45, 22)] + rain),
+        fr(happy_rain, 220, front=[('cloud', 17, 0), ('thumb', 36, 25)] + rain2),
+    ]))
+
+    # 얼죽아: 눈보라 속에서 덜덜 떨며 아이스 커피
+    shiver = tint(face(idle, eyes='squeeze', mouth='wave'), 'B', 0.3)
+    sipping = tint(face(idle, eyes='closed'), 'B', 0.2)
+    E.append(emoticon('얼죽아', 'steelman-iced', '얼죽아', 'B', [
+        fr(shiver, 90, front=[('ice_cup', 34, 27), ('snow', 2, 6), ('snow', 42, 14)], shake=(1, 0)),
+        fr(shiver, 90, front=[('ice_cup', 34, 27), ('snow', 4, 12), ('snow', 40, 20)], shake=(-1, 0)),
+        fr(shiver, 90, front=[('ice_cup', 34, 27), ('snow', 2, 18), ('snow', 44, 6)], shake=(1, 0)),
+        fr(shiver, 90, front=[('ice_cup', 34, 27), ('snow', 6, 24), ('snow', 42, 12)], shake=(-1, 0)),
+        fr(sipping, 600, front=[('ice_cup', 24, 18), ('snow', 2, 10), ('snow', 42, 18), ('spark_s', 12, 20)]),
+    ]))
+
+    # 불길하다…: 먹구름이 몰려오고 음표가 커짐
+    uneasy = face(idle, eyes='dot', mouth='flat')
+    E.append(emoticon('불길하다', 'steelman-ominous', '불길하다…', 'W', [
+        fr(uneasy, 280, back=[('cloud_dark', 36, 2)], front=[('note', 40, 22)]),
+        fr(uneasy, 280, back=[('cloud_dark', -6, 4), ('cloud_dark', 36, 2)], front=[('note', 41, 18), ('note', 0, 24)]),
+        fr(tint(uneasy, 'H', 0.12), 280, back=[('cloud_dark', -6, 4), ('cloud_dark', 36, 2), ('cloud_dark', 14, -2)],
+           front=[('note', 42, 14), ('note', 1, 20), ('sweat', 36, 20)]),
+        fr(tint(uneasy, 'H', 0.2), 600, back=[('cloud_dark', -6, 4), ('cloud_dark', 36, 2), ('cloud_dark', 14, -2)],
+           front=[('note', 43, 10), ('note', 2, 16), ('sweat', 36, 23)]),
+    ]))
+
+    # 겉과 속: 겉으로는 '넵!' 웃는 얼굴, 생각 풍선 속은 ㅠㅠ
+    fake = face(idle, eyes='happy', mouth='open')
+    E.append(emoticon('겉과 속', 'steelman-inner-voice', '넵!', 'W', [
+        fr(fake, 350),
+        fr(fake, 150, front=[('bubble', 30, 0)]),
+        fr(fake, 800, front=[('bubble', 30, 0, prop('tiny_cry'))]),
+    ]))
+
+    # 대충 답장: 누워서 폰 들고 'ㅇㅇ'
+    lying = idle.transpose(Image.ROTATE_90)
+    E.append(emoticon('대충 답장', 'steelman-lazy-reply', 'ㅇㅇ', 'W', [
+        fr(lying, 400, front=[('phone', 31, 12)], char_at=(-3, 6)),
+        fr(face(idle, eyes='closed').transpose(Image.ROTATE_90), 200, front=[('phone', 31, 12)], char_at=(-3, 6)),
+        fr(lying, 600, front=[('phone', 31, 11)], char_at=(-3, 6)),
+    ]))
+
+    # 넵병: 넵넵넵넵 무한 끄덕 → 빙글
+    nod_face = face(idle, eyes='happy')
+    frames = []
+    for _ in range(4):
+        frames += [fr(nod(nod_face, 3), 60), fr(idle, 60)]
+    frames += [fr(face(idle, eyes='swirl', mouth='wave'), 500, front=[('sweat', 38, 18)])]
+    E.append(emoticon('넵병', 'steelman-nep-nep', '넵넵넵넵', 'W', frames))
+
+    # 사무실 지박령: 다리 없는 창백한 유령이 책상 위를 둥둥
+    spook = ghost(face(idle, eyes='tired', mouth='o'))
+    E.append(emoticon('지박령', 'steelman-office-ghost', ['사무실', '지박령'], 'W', [
+        fr(spook, 200, char_at=(0, y)) for y in (0, -1, -2, -3, -2, -1)
+    ]))
+
+    # 점심 뭐 먹지: 생각하는 머리 위로 밥·면·김밥이 돌아감
+    menu = ['bowl', 'noodle', 'gimbap', 'bowl', 'noodle', 'gimbap']
+    E.append(emoticon('점심 뭐 먹지', 'steelman-lunch-menu', '점심 뭐 먹지', 'W', [
+        fr(think[i % 3], 240, front=[(menu[i], 36 if menu[i] != 'gimbap' else 38, 6)]) for i in range(6)
+    ] + [fr(think[3], 400, front=[('noodle', 36, 6), ('spark_s', 47, 4)])]))
     return E

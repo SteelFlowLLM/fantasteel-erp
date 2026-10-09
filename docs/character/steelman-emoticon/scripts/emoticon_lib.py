@@ -149,6 +149,119 @@ PROPS = {
     'snow': ["..b..", "b.b.b", ".bbb.", "b.b.b", "..b.."],
     'arrow': ["......NN.", "TTTTTTGGN", "......NN."],
     'drip': ["o", "O", "O"],
+    # ── 3차 소품 ──
+    'shaka': [
+        ".NN.........",
+        "NWWN........",
+        "NWWN........",
+        "NWWNNNNNN...",
+        "NWWWWWWWWN..",
+        "NWWNWNWNWN..",
+        "NWWWWWWWWNNN",
+        "NsWWWWWWWWWN",
+        ".NsWWWWWWNNN",
+        "..NssssssN..",
+        "...NNNNNN...",
+    ],
+    'halo': [
+        "...OOOOOOO...",
+        ".OOYYYYYYYOO.",
+        "OY.........YO",
+        ".OOYYYYYYYOO.",
+        "...OOOOOOO...",
+    ],
+    'cross': [
+        "NNNNNNNNNNN", "NWWWWWWWWWN", "NWWWEEEWWWN", "NWWWEEEWWWN", "NWEEEEEEEWN", "NWEEEEEEEWN",
+        "NWEEEEEEEWN", "NWWWEEEWWWN", "NWWWEEEWWWN", "NWWWWWWWWWN", "NNNNNNNNNNN",
+    ],
+    'calendar': [
+        ".N..N...N..N.", "NNNNNNNNNNNNN", "NRRRRRRRRRRRN", "NNNNNNNNNNNNN", "NWWWWWWWWWWWN", "NWgWgWgWgWgWN",
+        "NWWWWWWWWWWWN", "NWgWgWgWgWgWN", "NWWWWWWWWWWWN", "NWgWgWgWgWgWN", "NWWWWWWWWWWWN", "NNNNNNNNNNNNN",
+    ],
+    'circle_r': [".RRR.", "R...R", "R...R", "R...R", ".RRR."],
+    'bowl': [
+        "....NNNNNNN....",
+        "..NNWWWWWWWNN..",
+        ".NWWWWsWWWWWWN.",
+        "NNNNNNNNNNNNNNN",
+        "NTTTTTTTTTTTTTN",
+        "NTyTTTTTTTTTTTN",
+        ".NTTTTTTTTTTTN.",
+        "..NtttttttttN..",
+        "...NNNNNNNNN...",
+    ],
+    'noodle': [
+        "....NNNNNNN....",
+        "..NNYyYYyYYNN..",
+        ".NYYyYYYyYYYYN.",
+        "NNNNNNNNNNNNNNN",
+        "NRRRRRRRRRRRRRN",
+        "NRyRRRRRRRRRRRN",
+        ".NRRRRRRRRRRRN.",
+        "..NrrrrrrrrrN..",
+        "...NNNNNNNNN...",
+    ],
+    'gimbap': [".NNNNN.", "NKKKKKN", "NKWWWKN", "NKWOEKN", "NKWWWKN", "NKKKKKN", ".NNNNN."],
+    'spoon': [".NN.", "NssN", ".Ns.", ".Ns.", ".Ns.", "..N."],
+    'chair': [
+        "...NNNNNNNNN....", "...NKKKKKKKN....", "...NKHHHHHKN....", "...NKHHHHHKN....", "...NKHHHHHKN....",
+        "...NKKKKKKKN....", "...NNNNNNNNN....", ".NNNNNNNNNNNNN..", ".NKKKKKKKKKKKN..", ".NNNNNNNNNNNNN..",
+        ".......NN.......", ".......NN.......", "....NNNNNNNN....", "...N..N..N..N...",
+    ],
+    'briefcase': [
+        "...NNNN...", "...N..N...", "NNNNNNNNNN", "NTTTTTTTTN", "NTTTyyTTTN", "NttttttttN", "NTTTTTTTTN", "NNNNNNNNNN",
+    ],
+    'phone': ["NNNN", "NCCN", "NCCN", "NCCN", "NKKN", "NNNN"],
+    'pouch': [
+        "...NNN...", "..NYYYN..", "...NRN...", "..NRRRN..", ".NRRYRRN.", "NRRYYYRRN",
+        "NRRRYRRRN", "NRRRRRRrN", ".NrrrrrN.", "..NNNNN..",
+    ],
+    'tteokguk': [
+        "..NNNNNNNNN..",
+        ".NWWEWWWYWWN.",
+        "NNNNNNNNNNNNN",
+        "NbbbbbbbbbbbN",
+        ".NbBbbbbbbbN.",
+        "..NbbbbbbbN..",
+        "...NNNNNNN...",
+    ],
+    'songpyeon': [
+        "..NNN...NNN...NNN..",
+        ".NPPPN.NEEEN.NWWWN.",
+        "NPPPPPNEEEEENWWWWWN",
+        "NNNNNNNNNNNNNNNNNNN",
+        "NbbbbbbbbbbbbbbbbbN",
+        ".NNNNNNNNNNNNNNNNN.",
+    ],
+    'chair_l': [
+        ".....NNNNNNNNNNNN.....", ".....NKKKKKKKKKKN.....", ".....NKHHHHHHHHKN.....", ".....NKHHHHHHHHKN.....",
+        ".....NKHHHHHHHHKN.....", ".....NKHHHHHHHHKN.....", ".....NKKKKKKKKKKN.....", ".....NNNNNNNNNNNN.....",
+        "..NNNNNNNNNNNNNNNNNN..", "..NKKKKKKKKKKKKKKKKN..", "..NNNNNNNNNNNNNNNNNN..", "..........NN..........",
+        "..........NN..........", "..........NN..........", ".....NNNNNNNNNNNN.....", "....N....N..N....N....",
+    ],
+    'tiny_cry': ["NNN.NNN", ".N...N.", ".N...N.", ".B...B.", ".B...B."],
+    'cake': [
+        "...N...N...N...", "...R...B...R...", ".NNNNNNNNNNNNN.", "NPPPPPPPPPPPPPN", "NWPWWPWWPWWPWWN",
+        "NTTTTTTTTTTTTTN", "NTTTTTTTTTTTTTN", "NPPPPPPPPPPPPPN", "NTTTTTTTTTTTTTN", "NNNNNNNNNNNNNNN",
+    ],
+    'flames': ["...Y...Y...Y..."],
+    'flames2': ["...O...O...O..."],
+    'snowcap': [
+        "....NNNNNNNN....",
+        "..NNWWWWWWWWNN..",
+        ".NWWWWWWWWWWWWN.",
+        "NWWsWWWWWWWWsWWN",
+    ],
+    'cloud_dark': [
+        "...NNN.......", "..NHHHN.NN...", ".NHHHHHNHHN..", "NHHHHHHHHHHHN", "NHHHHHHHHHHHN", ".NNNNNNNNNNN.",
+    ],
+    'ice_cup': [
+        "....N..", "....N..", "...N...", ".NNNNN.", "NCCCCCN", "NNNNNNN",
+        ".NCWCN.", ".NTCTN.", ".NTTTN.", ".NTCTN.", ".NTTTN.", "..NNN..",
+    ],
+    'xsmall': ["R...R", ".R.R.", "..R..", ".R.R.", "R...R"],
+    'excl': ["N", "N", "N", ".", "N"],
+
     'grill': [
         ".NNNNNNNNNNNNNNNNNNNN.", "NHHHHHHHHHHHHHHHHHHHHN", "NHPwPwPHHPwPwPHHPwPwPN", "NHpPpPpHHpPpPpHHpPpPpN",
         "NHHHHHHHHHHHHHHHHHHHHN", ".NNNNNNNNNNNNNNNNNNNN.", "..NN..............NN..", "..NN..............NN..",
@@ -191,8 +304,8 @@ def xmark_img():
     return im
 
 
-def mark_img():
-    """결재 도장 자국: 두 줄 빨간 원 + 체크."""
+def mark_img(color='R'):
+    """결재 도장 자국: 원 + 체크 (기본 빨강, 합격은 초록)."""
     n = 17
     im = blank(n, n)
     c = (n - 1) / 2
@@ -200,10 +313,10 @@ def mark_img():
         for x in range(n):
             d = math.hypot(x - c, y - c)
             if 6.6 <= d <= 8.4:
-                im.putpixel((x, y), rgba('R'))
+                im.putpixel((x, y), rgba(color))
     for x, y in ((4, 8), (5, 9), (6, 10), (7, 11), (8, 10), (9, 9), (10, 8), (11, 7), (12, 6)):
         for dy in (0, 1):
-            im.putpixel((x, y + dy - 1), rgba('R'))
+            im.putpixel((x, y + dy - 1), rgba(color))
     return im
 
 
@@ -312,12 +425,84 @@ def arms_x():
     return im
 
 
+def thought_bubble(inner=None):
+    """생각 풍선 (17x13) + 아래로 작은 동그라미 둘. inner는 가운데 넣을 그림."""
+    def m(x, y):
+        return ((x - 8) / 8.3) ** 2 + ((y - 4.5) / 4.8) ** 2 <= 1
+    body = outlined(m, 17, 10, 'W')
+    im = blank(body.width, body.height + 6)
+    im.alpha_composite(body, (0, 0))
+    for (x, y) in ((4, 12), (5, 12), (4, 13), (5, 13)):
+        im.putpixel((x, y), rgba('W'))
+    for (x, y) in ((3, 12), (6, 12), (3, 13), (6, 13), (4, 11), (5, 11), (4, 14), (5, 14)):
+        im.putpixel((x, y), rgba('N'))
+    im.putpixel((2, 16), rgba('N'))
+    if inner is not None:
+        im.alpha_composite(inner, ((body.width - inner.width) // 2, (body.height - inner.height) // 2))
+    return im
+
+
+def plate_img(bend):
+    """철판 (20x4): bend칸만큼 가운데가 아래로 휨."""
+    w, h = 20, 4
+    im = blank(w + 2, h + bend + 2)
+    for x in range(w):
+        dy = round(bend * (1 - abs(x - (w - 1) / 2) / ((w - 1) / 2)))
+        for y in range(h):
+            im.putpixel((x + 1, y + 1 + dy), rgba('s' if y == 0 else 'G' if y < h - 1 else 'H'))
+        im.putpixel((x + 1, dy), rgba('N'))
+        im.putpixel((x + 1, h + 1 + dy), rgba('N'))
+    for y in range(h + 2):
+        im.putpixel((0, y), rgba('N'))
+        im.putpixel((w + 1, y), rgba('N'))
+    return im
+
+
+def moon_img():
+    def m(x, y):
+        return math.hypot(x - 6, y - 6) <= 6.2
+    im = outlined(m, 13, 13, 'Y')
+    for (x, y) in ((4, 5), (5, 5), (8, 8), (9, 8), (8, 9)):
+        im.putpixel((x + 1, y + 1), rgba('o'))
+    return im
+
+
+def confetti(seed, n=14, w=60, h=40):
+    """꽃가루: 정해진 seed로 흩어진 색종이 조각."""
+    import random
+    r = random.Random(seed)
+    im = blank(w, h)
+    for _ in range(n):
+        x, y = r.randrange(w - 2), r.randrange(h - 1)
+        c = r.choice('RYEBVP')
+        im.putpixel((x, y), rgba(c))
+        im.putpixel((x + 1, y), rgba(c))
+    return im
+
+
+def ghost(img, rows_keep=38):
+    """지박령: 다리 대신 물결 꼬리, 창백한 하늘색."""
+    pale = tint(img, 'C', 0.55)
+    out = blank()
+    out.alpha_composite(pale.crop((0, 0, CELL, rows_keep)), (0, 0))
+    for x in range(11, 37):
+        wave = (x // 3) % 2
+        for y in range(rows_keep, rows_keep + 3 + wave):
+            out.putpixel((x, y), rgba('C'))
+        out.putpixel((x, rows_keep + 3 + wave), rgba('N'))
+    for y in range(rows_keep - 4, rows_keep + 4):
+        out.putpixel((10, y), rgba('N'))
+        out.putpixel((37, y), rgba('N'))
+    return out
+
+
 def heat_glow(w, h):
     """달군 쇠 빛: 테두리만 주황."""
     return outlined(lambda x, y: True, w, h, 'O', line='Y')
 
 
 PROC = {
+    'bubble': thought_bubble, 'plate': plate_img, 'moon': moon_img, 'confetti': confetti,
     'mark': mark_img, 'xmark': xmark_img, 'coil': coil_img, 'sun': sun_img, 'roller': roller_img,
     'disc': roll_disc, 'wall': wall_img, 'arms_x': arms_x, 'burst_at': ring_burst,
 }

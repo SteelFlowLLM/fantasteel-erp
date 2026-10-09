@@ -190,4 +190,101 @@ def build(sh):
         fr(hit, 80, front=bar + [('img', -3, 23, hammer_down), ('burst_at', -11, 21, 10, 'y', 'Y', 'D')], shake=(-1, 0)),
         fr(up, 500, front=bar + [('img', 1, 8, hammer_up), ('spark_s', -2, 29)]),
     ]))
+
+    # ── 3차 ────────────────────────────────────────────
+    point = [G(6, i) for i in range(3)]
+
+    # 알잘딱깔센: 흩어진 서류가 날아와 딱 쌓임
+    fly = [[(-6, 6), (46, 2), (-4, 30)], [(4, 14), (42, 12), (6, 30)], [(24, 22), (38, 20), (22, 30)]]
+    stack = [('paper', 37, 26), ('paper', 38, 29), ('paper', 37, 32)]
+    E.append(emoticon('알잘딱깔센', 'steelman-neat', '알잘딱깔센', 'W', [
+        fr(idle, 140, front=[('paper', x, y) for x, y in fly[0]]),
+        fr(idle, 110, front=[('paper', x, y) for x, y in fly[1]]),
+        fr(face(idle, eyes='happy'), 110, front=[('paper', x, y) for x, y in fly[2]]),
+        fr(wave3, 120, front=stack + [('spark_l', 46, 20)]),
+        fr(wave3, 600, front=stack + [('spark_s', 47, 22), ('spark_s', 33, 22)]),
+    ]))
+
+    # 정중한 거절: 꾸벅 + 작은 X, 땀
+    E.append(emoticon('정중한 거절', 'steelman-decline', ['죄송하지만', '어렵겠습니다'], 'W', [
+        fr(idle, 160),
+        fr(nod(bow, 2), 90),
+        fr(nod(bow, 4, helmet_extra=1), 650, front=[('xsmall', 40, 14), ('sweat', 5, 20)]),
+        fr(nod(bow, 2), 100, front=[('xsmall', 40, 14)]),
+        fr(face(idle, eyes='happy', mouth='flat'), 450, front=[('xsmall', 40, 14), ('sweat', 5, 22)]),
+    ]))
+
+    # 안전제일: 안전모에 손을 얹고 초록 십자 반짝
+    E.append(emoticon('안전제일', 'steelman-safety-first', '안전제일', 'E', [
+        fr(idle, 150, back=[('cross', -7, 24)]),
+        fr(wave1, 120, back=[('cross', -7, 24)]),
+        fr(wave2, 140, back=[('cross', -7, 24)], front=[('spark_s', 30, 6)]),
+        fr(wave2, 140, back=[('cross', -7, 24)], front=[('spark_l', 29, 5)]),
+        fr(wave2, 500, back=[('cross', -7, 24)], front=[('spark_s', 30, 6), ('spark_s', -4, 20)]),
+    ]))
+
+    # 확인 좋아!: 팔을 쭉 뻗어 가리키며 반짝 (지적확인)
+    E.append(emoticon('확인 좋아', 'steelman-point-check', '확인 좋아!', 'O', [
+        fr(idle, 150),
+        fr(point[0], 100),
+        fr(point[1], 100),
+        fr(point[2], 120, front=[('spark_l', 45, 29)], shake=(1, 0)),
+        fr(point[2], 500, front=[('spark_s', 46, 30), ('spark_s', 44, 22)]),
+    ]))
+
+    # 합격!: 돋보기로 살피고 초록 도장 자국 + 점프
+    look = [('paper', 2, 27)]
+    E.append(emoticon('합격', 'steelman-pass', '합격!', 'E', [
+        fr(think[0], 150, front=look + [('magnifier', 1, 24)]),
+        fr(think[1], 150, front=look + [('magnifier', 5, 24)]),
+        fr(happy[2], 120, front=[('mark', 37, 26, 'E'), ('spark_l', 48, 18)]),
+        fr(happy[3], 120, front=[('mark', 37, 26, 'E')]),
+        fr(happy[5], 600, front=[('mark', 37, 26, 'E'), ('spark_s', 49, 20)]),
+    ]))
+
+    # 불합격: 돋보기로 살피다 빨간 X, 축 처짐
+    down = flatten(face(idle, eyes='tired', mouth='frown'), 0.93, 1.03)
+    E.append(emoticon('불합격', 'steelman-fail', '불합격', 'R', [
+        fr(think[0], 150, front=look + [('magnifier', 1, 24)]),
+        fr(think[1], 150, front=look + [('magnifier', 5, 24)]),
+        fr(face(idle, eyes='dot', mouth='o'), 120, front=[('xmark', 37, 26)], shake=(1, 0)),
+        fr(down, 600, front=[('xmark', 37, 26), ('sweat', 6, 22)]),
+    ]))
+
+    # 납기 준수!: 달력에 동그라미 + 신나는 점프
+    cal = [('calendar', -7, 22)]
+    E.append(emoticon('납기 준수', 'steelman-on-time', '납기 준수!', 'O', [
+        fr(idle, 150, back=cal),
+        fr(idle, 120, back=cal + [('circle_r', -3, 30)]),
+        fr(happy[1], 110, back=cal + [('circle_r', -3, 30)], front=[('spark_s', 44, 8)]),
+        fr(happy[2], 110, back=cal + [('circle_r', -3, 30)], front=[('spark_l', 44, 4)]),
+        fr(happy[4], 100, back=cal + [('circle_r', -3, 30)]),
+        fr(happy[5], 500, back=cal + [('circle_r', -3, 30)], front=[('spark_s', 45, 10)]),
+    ]))
+
+    # 점심 식사: 밥그릇 들고 냠냠 (상태 알림용)
+    chew_a = face(idle, eyes='happy', mouth='o')
+    chew_b = face(idle, eyes='happy', mouth='smile')
+    E.append(emoticon('점심 식사', 'steelman-lunch', '점심 식사', 'W', [
+        fr(chew_a if i % 2 else chew_b, 200, front=[('bowl', 16, 32), ('spoon', 27 if i % 2 else 31, 26 if i % 2 else 29)]) for i in range(6)
+    ]))
+
+    # 자리 비움: 걸어 나가고 빈 의자만
+    frames = [fr(walk[i % 6], 90, char_at=(i * 7, 0), back=[('chair_l', 13, 31)]) for i in range(7)]
+    frames += [fr(None, 500, back=[('chair_l', 13, 31)], front=[('ellipsis', 22, 22)]),
+               fr(None, 500, back=[('chair_l', 13, 31)])]
+    E.append(emoticon('자리 비움', 'steelman-away', '자리 비움', 'W', frames))
+
+    # 회의 중: 결재판 끼고 종종걸음, 말풍선 점점점
+    E.append(emoticon('회의 중', 'steelman-meeting', '회의 중', 'W', [
+        fr(walk[i % 6], 100, front=[('board', 33, 30)] + ([('ellipsis', 22, 2)] if i % 4 < 2 else []), cx=-1 if i % 2 else 0)
+        for i in range(12)
+    ]))
+
+    # 외근 중: 서류 가방 들고 바쁘게, 속도선·먼지
+    E.append(emoticon('외근 중', 'steelman-outside', '외근 중', 'W', [
+        fr(walk[i % 6], 80, back=[('speed', -6 - (i % 3) * 2, 24), ('speed_s', -2 - (i % 3) * 2, 34), ('dust_s', 6 - (i % 3) * 3, 43)],
+           front=[('briefcase', 35, 33)], cx=-1 if i % 2 else 0)
+        for i in range(12)
+    ]))
     return E

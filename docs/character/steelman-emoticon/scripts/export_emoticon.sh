@@ -1,7 +1,7 @@
 #!/bin/bash
 # 메신저 철강맨 이모티콘을 다시 만든다: ./export_emoticon.sh
 # Aseprite(Steam) CLI와 python3 + Pillow가 필요하다. 글자 글꼴은 macOS 기본(Apple SD Gothic Neo), 다른 OS는 EMOTICON_FONT로 바꾼다.
-# 결과: ../steelman_work_64.aseprite·steelman_daily_64.aseprite(묶음마다), ../gif·png·sheet, 그리고 화면이 쓰는 client/public/emoticons/<키>.gif·.png
+# 결과: ../steelman_work_64·daily_64·event_64.aseprite(묶음마다), ../gif·png·sheet, 그리고 화면이 쓰는 client/public/emoticons/<키>.gif·.png
 set -euo pipefail
 cd "$(dirname "$0")"
 A="${ASEPRITE:-$HOME/Library/Application Support/Steam/steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite}"
@@ -12,8 +12,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$OUT/gif" "$OUT/png" "$OUT/sheet" "$PUBLIC"
 
-# 묶음마다: work = 철강맨 업무, daily = 철강맨 일상
-for SET in work daily; do
+# 묶음마다: work = 철강맨 업무, daily = 철강맨 일상, event = 철강맨 행사
+for SET in work daily event; do
   ASE="$OUT/steelman_${SET}_64.aseprite"
   WORK="$TMP/$SET"
   mkdir -p "$WORK"
