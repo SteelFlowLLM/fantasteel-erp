@@ -14,7 +14,7 @@ FantaSteel ERP의 AI 어시스턴트 옆에 붙일 캐릭터 "철강맨"의 도�
 | ② | `steelman-pixel/sizes/` | 더 작고 통통하게 다시 그림. 12·16·20·24px × 고글 버전 / 눈 버전 |
 | ③ | `steelman-pixel/motion/` | **24px 눈 버전으로 확정.** 얼굴이 모찌처럼 말랑한 기분별 모션 8종 |
 | ④ | `steelman-pixel/assistant/` | AI 어시스턴트 대화 상황 15종 × 시안 2~3개(총 44개) + 버튼·아바타 아이콘 |
-| ⑤ | `steelman-emoticon/` | **메신저 이모티콘 8종** (64px, 움직임). 펫 철강맨(신형 작업복, 48px) 바탕 + 글자. 화면에 적용함 → [`steelman-emoticon/README.md`](steelman-emoticon/README.md) |
+| ⑤ | `steelman-emoticon/` | **메신저 이모티콘 68종** (64px, 움직임, 묶음: 철강맨 업무 29 · 철강맨 일상 33 · 철강맨 행사 6). 펫 철강맨(신형 작업복, 48px) 바탕 + 글자. 화면에 적용함 → [`steelman-emoticon/README.md`](steelman-emoticon/README.md) |
 
 ## 확정한 기본 디자인 (24px 눈 버전)
 

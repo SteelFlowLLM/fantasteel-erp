@@ -367,4 +367,11 @@ describe('이모티콘 (18번)', () => {
     // @ts-expect-error 목록에 없는 키
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-none' })).rejects.toBeInstanceOf(InputError);
   });
+
+  it('철강맨 일상 묶음(19번)의 이모티콘도 보낼 수 있고 미리보기는 "이모티콘 · 이름"이다', async () => {
+    const roomId = await createGroup();
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-yummy' });
+    expect(sent).toMatchObject({ content: null, emoticonKey: 'steelman-yummy' });
+    expect((await messengerApi.listRooms()).find((r) => r.id === roomId)?.lastMessagePreview).toBe('이모티콘 · 군침 싹');
+  });
 });
