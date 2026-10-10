@@ -20,9 +20,27 @@ PAL = {
     'e': '#2a8a5c',
 }
 LAYERS = ['뒤효과', '캐릭터', '앞효과', '글자']
-# 글자 글꼴: macOS 기본 한글 글꼴 굵게(index 6). 다른 OS는 EMOTICON_FONT=<ttf 경로>로 바꾼다
-FONT = os.environ.get('EMOTICON_FONT', '/System/Library/Fonts/AppleSDGothicNeo.ttc')
-FONT_INDEX = int(os.environ.get('EMOTICON_FONT_INDEX', '6'))
+# 글자 글꼴: 한글 도트 글꼴 Galmuri (OFL-1.1, ../fonts/). 도트가 깨끗하게 나오는 크기에서만 쓴다
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'fonts')
+TEXT_MAX_W = 60
+# (파일, 크기): 한 줄은 11 Bold → 넓으면 11 Condensed → 9, 두 줄은 9 → 넓으면 7
+ONE_LINE_FONTS = [('Galmuri11-Bold.ttf', 12), ('Galmuri11-Condensed.ttf', 12), ('Galmuri9.ttf', 10)]
+TWO_LINE_FONTS = [('Galmuri9.ttf', 10), ('Galmuri7.ttf', 8)]
+BIG_FONT = ('Galmuri14.ttf', 15)  # 그린 뒤 2배
+
+
+def galmuri(name, size):
+    return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
+
+
+def pick_font(lines):
+    """칸 폭(60px)에 들어가는 가장 큰 글꼴. 다 넘치면 가장 작은 것."""
+    d = ImageDraw.Draw(Image.new('L', (1, 1)))
+    for name, size in (ONE_LINE_FONTS if len(lines) == 1 else TWO_LINE_FONTS):
+        font = galmuri(name, size)
+        if max(d.textbbox((0, 0), t, font=font)[2] - d.textbbox((0, 0), t, font=font)[0] for t in lines) <= TEXT_MAX_W:
+            return font
+    return font
 
 
 def rgba(c):
@@ -633,23 +651,23 @@ def stretch(img, ratio):
     return out
 
 
-def big_text(text, color, size=26):
-    """'글자만 크게': 그림 칸에 크게 쓰는 글자 (네이비 2px 외곽선)."""
-    font = ImageFont.truetype(FONT, size, index=FONT_INDEX)
+def big_text(text, color):
+    """'글자만 크게': Galmuri14 15px에 1px 외곽선을 두른 뒤 정확히 2배로 키운다 (굵은 외곽선이 획 사이를 메우지 않게)."""
+    font = galmuri(*BIG_FONT)
     mask = Image.new('L', (SIZE, SIZE), 0)
     d = ImageDraw.Draw(mask)
     d.fontmode = '1'
     l, t, r, b = d.textbbox((0, 0), text, font=font)
-    d.text(((SIZE - (r - l)) // 2 - l, 4 - t), text, font=font, fill=255)
+    d.text((2 - l, 2 - t), text, font=font, fill=255)
     grown = Image.new('L', mask.size, 0)
-    for dx in (-2, -1, 0, 1, 2):
-        for dy in (-2, -1, 0, 1, 2):
-            if abs(dx) + abs(dy) <= 3:
-                grown.paste(255, (0, 0), mask.transform(mask.size, Image.AFFINE, (1, 0, -dx, 0, 1, -dy)))
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            grown.paste(255, (0, 0), mask.transform(mask.size, Image.AFFINE, (1, 0, -dx, 0, 1, -dy)))
     out = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
     out.paste(Image.new('RGBA', mask.size, rgba('N')), (0, 0), grown)
     out.paste(Image.new('RGBA', mask.size, rgba(color)), (0, 0), mask)
-    return out.crop(out.getbbox())
+    out = out.crop(out.getbbox())
+    return out.resize((out.width * 2, out.height * 2), Image.NEAREST)
 
 
 def glitch(img, seed):
@@ -946,9 +964,8 @@ def place_props(canvas, props, origin):
 
 
 def outline_text(lines, color, align):
-    """앤티에일리어싱 없는 굵은 글자 + 네이비 1px 외곽선 (도트처럼 보이게). 두 줄이면 10px로 줄여 안전모와 겹치지 않게."""
-    size = 12 if len(lines) == 1 else 10
-    font = ImageFont.truetype(FONT, size, index=FONT_INDEX)
+    """도트 글꼴 글자 + 네이비 1px 외곽선. 두 줄이면 작은 글꼴로 줄여 안전모와 겹치지 않게."""
+    font = pick_font(lines)
     mask = Image.new('L', (SIZE, 30), 0)
     d = ImageDraw.Draw(mask)
     d.fontmode = '1'

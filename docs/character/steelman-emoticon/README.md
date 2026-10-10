@@ -139,7 +139,8 @@
 
 ## 규격
 
-- 캔버스 64×64px, 투명 배경. 캐릭터는 48px 칸을 (8, 15)에 놓고, 위쪽에 12px 글자(네이비 1px 외곽선)를 얹습니다. 글자가 길면 두 줄(10px)로 쓰고 캐릭터를 2칸 내립니다.
+- 캔버스 64×64px, 투명 배경. 캐릭터는 48px 칸을 (8, 15)에 놓고, 위쪽에 글자(네이비 1px 외곽선)를 얹습니다. 글자가 길면 두 줄로 쓰고 캐릭터를 2칸 내립니다.
+- 글자 글꼴은 한글 도트 글꼴 [Galmuri](https://github.com/quiple/galmuri)(OFL-1.1, `fonts/`)이고, 도트가 깨끗하게 나오는 크기에서만 씁니다(24번, 2026-10-10). 한 줄은 Galmuri11 Bold 12px, 폭(60px)을 넘으면 Galmuri11 Condensed 12px → Galmuri9 10px. 두 줄은 Galmuri9 10px, 넘으면 Galmuri7 8px. 큰 글자(ㅇㅋ·ㄱㄱ·헐)는 Galmuri14 15px에 외곽선을 둘러 정확히 2배로 키움(Galmuri11 Bold는 '헐'처럼 획이 촘촘한 글자가 뭉개짐).
 - 화면은 2배(128px)로 `image-rendering: pixelated`로 보여 줍니다. 크기는 48(글자 없음)·64·128(64를 Scale2x) 시안을 비교해서 64로 정했습니다(2026-10-08).
 - 캐릭터: 노션 「디자인」 페이지의 펫 철강맨 신형 작업복 시트(`source/steelman_pet_sheet.png`, 칸 48px, 동작 17줄). 몸은 시트 프레임을 쓰고, 시트에 없는 것은 프레임을 바꿔 만들었습니다: 고개 숙이기·들썩임(머리만 옮김), 납작해지기·늘어나기(위·옆), 눈·입 바꾸기(하트·빙글·ㅠ·눈 굴리기 등 14가지), 색 바꾸기(빨개짐·파래짐·달아오름·은빛·쇳물), 안전모 벗기기.
 - 새로 그린 소품: 도장·도장 자국(체크/X), 크레인 갈고리, 엄지, 불꽃, 땀·눈물, 속도선·먼지, 돋보기·밀시트, 결재판, 경광등, 체크, 손바닥, 망치, 하트, 돈봉투, 시계, 체크리스트, 안경·선글라스, 밀짚모자·캐리어, 산타 모자, 고드름, 출고 상자, 스탠드, 폭죽, 음료 잔, 창문, 수레, 막대그래프, 쇳물 줄기, 조연 코일이·슬래브 냥이, 도시락, 아이스 라테, 번개, 먹구름·비, 음표, 코일, 김·화남 표시, 해, 철판 삼겹살, 눈송이, X 팔, 압연 롤, 물통, 철판 벽, 화살, 모루·달군 쇠, 큰 물음표, 하얀 깃발, 마이크, 외침 표시, 입에 모은 손.
@@ -153,6 +154,7 @@
 | `png/<키>.png` | 멈춘 그림 = 가장 오래 머무는 프레임 ('동작 줄이기'를 켠 사람에게 보임) |
 | `sheet/` | 묶음별 스프라이트 시트(한 줄에 이모티콘 하나) + 프레임 위치·재생 시간·태그 json |
 | `source/steelman_pet_sheet.png` | 바탕 캐릭터 시트 |
+| `fonts/` | 글자 글꼴 Galmuri11 Bold·Condensed, Galmuri9, Galmuri7, Galmuri14 (2.40.3, OFL-1.1 라이선스 `OFL.md`·`OFL-ko.md`). 글꼴을 고쳐 다시 배포하지 않고 그림을 만드는 데만 씀 |
 | `scripts/` | 다시 만들기: `emoticon_lib.py`(공통 그리기), `set_work.py`·`set_daily.py`·`set_event.py`(묶음 정의), `gen_emoticon.py`(묶음 → .aseprite), `export_emoticon.sh`(전부) |
 
 화면은 `client/public/emoticons/<키>.gif`·`.png` 사본을 씁니다.
@@ -163,7 +165,7 @@
 ./docs/character/steelman-emoticon/scripts/export_emoticon.sh
 ```
 
-`gen_emoticon.py`가 묶음마다 프레임을 레이어 PNG로 만들고 Aseprite Lua로 `.aseprite`를 만든 뒤, Aseprite CLI로 GIF·시트를 내보내고 `client/public/emoticons/`로 복사합니다. 그림을 고치면서 볼 때는 `python3 scripts/gen_emoticon.py source/steelman_pet_sheet.png --review work 검토.png`로 프레임을 한 장에 펼쳐 봅니다. 필요한 것: Aseprite(Steam판 경로 기본, `ASEPRITE`로 바꿀 수 있음), python3, Pillow. 글자 글꼴은 macOS 기본(Apple SD Gothic Neo 굵게)이고, 다른 OS는 `EMOTICON_FONT`(ttf 경로)·`EMOTICON_FONT_INDEX`로 바꿉니다.
+`gen_emoticon.py`가 묶음마다 프레임을 레이어 PNG로 만들고 Aseprite Lua로 `.aseprite`를 만든 뒤, Aseprite CLI로 GIF·시트를 내보내고 `client/public/emoticons/`로 복사합니다. 그림을 고치면서 볼 때는 `python3 scripts/gen_emoticon.py source/steelman_pet_sheet.png --review work 검토.png`로 프레임을 한 장에 펼쳐 봅니다. 필요한 것: Aseprite(Steam판 경로 기본, `ASEPRITE`로 바꿀 수 있음), python3, Pillow. 글자 글꼴은 저장소의 `fonts/`(Galmuri)를 쓰므로 OS와 관계없이 같은 그림이 나옵니다.
 
 Aseprite에서 `.aseprite`를 직접 고쳤다면 스크립트를 다시 돌리지 말고(덮어씀) Aseprite에서 GIF·PNG를 내보내 `gif/`·`png/`와 `client/public/emoticons/`에 넣습니다.
 
@@ -171,4 +173,4 @@ Aseprite에서 `.aseprite`를 직접 고쳤다면 스크립트를 다시 돌리�
 
 - 시트에 없는 표정·자세(빙글 눈, 눈물, 녹아내림 등)는 스크립트로 바꾼 것이라 시트 원본보다 단순합니다.
 - 확인!의 경례는 시트에 경례 자세가 없어 손 흔들기의 손을 안전모 챙 높이로 옮긴 것입니다(22번).
-- 글자는 도트 글꼴이 아니라 시스템 글꼴을 앤티에일리어싱 없이 쓴 것입니다.
+- Galmuri9·7은 굵게가 없어 두 줄 글자는 한 줄 글자보다 가늘고, 아주 긴 두 줄(새해·추석)은 8px까지 작아집니다.
