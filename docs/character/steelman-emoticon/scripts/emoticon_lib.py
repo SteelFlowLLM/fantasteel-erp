@@ -296,6 +296,59 @@ PROPS = {
     'mic': [".NNN.", "NKHKN", "NHKHN", "NKHKN", ".NNN.", "..N..", "..N..", "..N..", ".NNN."],
     'yell': ["..N", ".N.", "...", "NN.", "...", ".N.", "..N"],
     'cup_hands': ["NN......NN", "NWN....NWN", "NWN....NWN", ".NN....NN."],
+    # ── 5차 소품 ──
+    'envelope': [
+        "NNNNNNNNNNNNN", "NWWNWWWWWNWWN", "NWWWNWWWNWWWN", "NWWWWNNNWWWWN", "NEEEEEEEEEEEN", "NEEEeEEEeEEEN",
+        "NWWWWWWWWWWWN", "NNNNNNNNNNNNN",
+    ],
+    'clock': [
+        "...NNNNN...", "..NWWWWWN..", ".NWWWNWWWN.", "NWWWWNWWWWN", "NWWWWNWWWWN", "NWWWWNWWWWN",
+        "NWWWWNWWWWN", "NWWWWNWWWWN", ".NWWWWWWWN.", "..NWWWWWN..", "...NNNNN...",
+    ],
+    'checklist': [
+        "NNNNNNNNNN", "NWWWWWWWWN", "NgNWggggWN", "NWWWWWWWWN", "NgNWggggWN", "NWWWWWWWWN",
+        "NgNWggggWN", "NWWWWWWWWN", "NNNNNNNNNN",
+    ],
+    'tick': ["...E", "E.E.", ".E.."],
+    'glasses': ["NNNNNNN...NNNNNNN", "NCCCCWN...NCCCCWN", "NCCCCCNNNNNCCCCCN", "NNNNNNN...NNNNNNN"],
+    'sunglasses': ["NNNNNNN...NNNNNNN", "NKKKKWN...NKKKKWN", "NKKKKKNNNNNKKKKKN", ".NNNNN.....NNNNN."],
+    'straw_hat': [
+        ".......NNNNNNN.......", ".....NNYYYYYYYNN.....", "....NYYYYYYYYYYYN....", "....NRRRRRRRRRRRN....",
+        "NNNNNYYYYYYYYYYYNNNNN", "NYYYYYYYYYYYYYYYYYYYN", ".NNNNNNNNNNNNNNNNNNN.",
+    ],
+    'suitcase': [
+        "...NNNN...", "...N..N...", "NNNNNNNNNN", "NBBBBBBBbN", "NBBBBBBBbN", "NbbbbbbbbN",
+        "NBBBBBBBbN", "NBBBBBBBbN", "NNNNNNNNNN", ".N......N.",
+    ],
+    'santa_hat': [
+        "..................NN", ".................NWWN", "..........NNNNNNNWWN", ".......NNNRRRRRRNNN.",
+        ".....NNRRRRRRRRRRN..", "....NRRRRRRRRRRRRRN.", "..NNWWWWWWWWWWWWWWNN", ".NWWWWWWWWWWWWWWWWWWN", "..NNNNNNNNNNNNNNNNNN.",
+    ],
+    'icicle': ["NNNNNNNNNNNNN", "NCBNCBNCCNCBN", ".NC.NB.NC.NB.", ".N...N..N..N."],
+    'box_ship': [
+        "NNNNNNNNNNNNN", "NTTTTTyTTTTTN", "NTTTTTyTTTTTN", "NNNNNNNNNNNNN", "NTTTTTTTTTTTN", "NTTTTTTTTTEEN",
+        "NTTTTTTTTEETN", "NtttEtttEEtTN", "NTTTTEEEETTTN", "NTTTTTEETTTTN", "NtttttttttttN", "NNNNNNNNNNNNN",
+    ],
+    'lamp': [
+        "..NNNNN...", ".NYYYYYN..", "NYYYYYYYN.", "NNNNNNNNN.", "....NN....", "....NN....", "....NN....", "..NNNNNN..",
+    ],
+    'popper': [
+        "......NN", ".....NRN", "....NRYN", "...NRRN.", "..NYRN..", ".NRRN...", "NRYN....", "NNN.....",
+    ],
+    'glass': [".NNNNN.", "NWWWWWN", "NYYYYYN", "NYyYYYN", "NYYYYYN", ".NYYYN.", "..NYN..", "..NYN..", ".NNNNN."],
+    'window': [
+        "NNNNNNNNNNNNNNN", "NCCCCCCNCCCCCCN", "NCCWWCCNCCCCCCN", "NCWWWWCNCCCCCCN", "NCCCCCCNCCCCCCN", "NNNNNNNNNNNNNNN",
+        "NCCCCCCNCCCCCCN", "NCCCCCCNCCCCCCN", "NCCCCCCNCCCCCCN", "NNNNNNNNNNNNNNN",
+    ],
+    'blush': ["PP.......PP"],
+    'clap': [".N.N.N.", "NWNWNWN", "NWWWWWN", "NsWWWsN", ".NNNNN."],
+    'helmet_stripe': ["YYYYYYY"],
+    'salute': ["..NNN.", ".NWWWN", "NWWWWN", "NWWWsN", ".NssN.", "..NN.."],
+    'cart': [
+        "N..................", "N..................", "NNNNNNNNNNNNNNNNNNN", "NGGGGGGGGGGGGGGGGGN",
+        "NNNNNNNNNNNNNNNNNNN", "..NNN.........NNN..", ".NKHKN.......NKHKN.", "..NNN.........NNN..",
+    ],
+    'moon_s': [".NNN.", "NYYN.", "NYN..", "NYYN.", ".NNN."],
 }
 
 
@@ -578,6 +631,118 @@ def stretch(img, ratio):
     out = blank()
     out.alpha_composite(big.crop((0, h - CELL, CELL, h)) if h > CELL else big, (0, 0 if h > CELL else CELL - h))
     return out
+
+
+def big_text(text, color, size=26):
+    """'글자만 크게': 그림 칸에 크게 쓰는 글자 (네이비 2px 외곽선)."""
+    font = ImageFont.truetype(FONT, size, index=FONT_INDEX)
+    mask = Image.new('L', (SIZE, SIZE), 0)
+    d = ImageDraw.Draw(mask)
+    d.fontmode = '1'
+    l, t, r, b = d.textbbox((0, 0), text, font=font)
+    d.text(((SIZE - (r - l)) // 2 - l, 4 - t), text, font=font, fill=255)
+    grown = Image.new('L', mask.size, 0)
+    for dx in (-2, -1, 0, 1, 2):
+        for dy in (-2, -1, 0, 1, 2):
+            if abs(dx) + abs(dy) <= 3:
+                grown.paste(255, (0, 0), mask.transform(mask.size, Image.AFFINE, (1, 0, -dx, 0, 1, -dy)))
+    out = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
+    out.paste(Image.new('RGBA', mask.size, rgba('N')), (0, 0), grown)
+    out.paste(Image.new('RGBA', mask.size, rgba(color)), (0, 0), mask)
+    return out.crop(out.getbbox())
+
+
+def glitch(img, seed):
+    """오류: 두 띠를 옆으로 밀고 빨강·파랑으로 물들인다 (화면이 깨지듯)."""
+    import random
+    r = random.Random(seed)
+    rows = sorted(r.sample(range(4, 44), 4))
+    out = img.copy()
+    for (y0, y1) in ((rows[0], rows[1]), (rows[2], rows[3])):
+        band = tint(img.crop((0, y0, CELL, y1)), r.choice('Rb'), 0.5)
+        dx = r.choice((-3, -2, 2, 3))
+        out.paste(Image.new('RGBA', (CELL, y1 - y0), (0, 0, 0, 0)), (0, y0))
+        out.alpha_composite(band.crop((max(0, -dx), 0, CELL - max(0, dx), y1 - y0)), (max(0, dx), y0))
+    return out
+
+
+def bars_img(heights, colors='bEO'):
+    """막대그래프: 높이 목록 → 바닥에 붙은 막대들."""
+    h = max(heights) + 2
+    w = len(heights) * 6 + 1
+    im = blank(w, h + 1)
+    for i, bh in enumerate(heights):
+        if bh <= 0:
+            continue
+        bar = outlined(lambda x, y: True, 3, bh, colors[i % len(colors)])
+        im.alpha_composite(bar, (1 + i * 6, h + 1 - bar.height))
+    for x in range(w):
+        im.putpixel((x, h), rgba('N'))
+    return im
+
+
+def stream_img(length, phase=0):
+    """출선: 위에서 아래로 흘러내리는 쇳물 줄기 (폭 5)."""
+    im = blank(7, length)
+    for y in range(length):
+        for x in range(1, 6):
+            c = 'y' if x == 3 else 'Y' if (y + phase) % 4 < 2 else 'O'
+            im.putpixel((x, y), rgba(c))
+        im.putpixel((0, y), rgba('D'))
+        im.putpixel((6, y), rgba('D'))
+    return im
+
+
+def coil_dog(frame=0):
+    """조연 '코일이': 돌돌 말린 코일 몸에 귀·눈·다리·꼬리."""
+    body = coil_img(spin=frame * 0.8)
+    im = blank(30, 24)
+    im.alpha_composite(body, (6, 3))
+    ear = pix(["NN.", "NTN", "NTTN", ".NN."])
+    im.alpha_composite(ear, (6, 1))
+    im.alpha_composite(flip(ear), (19, 1))
+    for (x, y) in ((11, 10), (17, 10)):
+        im.putpixel((x, y), rgba('N'))
+        im.putpixel((x, y + 1), rgba('N'))
+    for x in (13, 14, 15):
+        im.putpixel((x, 14), rgba('N'))
+    im.putpixel((14, 13), rgba('K'))
+    legs = 1 if frame % 2 else 0
+    for lx in (9 + legs, 19 - legs):
+        for y in (21, 22):
+            im.putpixel((lx, y), rgba('N'))
+            im.putpixel((lx + 1, y), rgba('N'))
+    tail = [(26, 9), (27, 8), (28, 7)] if frame % 2 else [(26, 11), (27, 11), (28, 10)]
+    for p in tail:
+        im.putpixel(p, rgba('N'))
+    return im
+
+
+def slab_cat(k=1.0, eyes_open=True):
+    """조연 '슬래브 냥이': 납작한 회색 슬래브 몸에 귀·눈·꼬리. k만큼 옆으로 늘어난다."""
+    w = round(24 * k)
+    h = max(5, round(9 / k))
+    im = blank(w + 8, h + 10)
+    body = outlined(lambda x, y: True, w, h, 'G')
+    for x in range(1, w + 1):
+        body.putpixel((x, 1), rgba('s'))
+        body.putpixel((x, h), rgba('H'))
+    im.alpha_composite(body, (2, 8))
+    ear = pix(["..N.", ".NGN", "NGGN"])
+    im.alpha_composite(ear, (4, 6))
+    im.alpha_composite(ear, (11, 6))
+    ey = 8 + 1 + max(1, h // 3)
+    for x in (7, 12):
+        im.putpixel((x, ey), rgba('N'))
+        if eyes_open:
+            im.putpixel((x, ey + 1), rgba('N'))
+    im.putpixel((9, ey + 2), rgba('p'))
+    for i in range(5):
+        im.putpixel((w + 3 + min(i, 2), 8 + h - i), rgba('N'))
+    return im
+
+
+PROC.update({'bars': bars_img, 'stream': stream_img, 'dog': coil_dog, 'cat': slab_cat})
 
 
 def stretch_wide(img, k):

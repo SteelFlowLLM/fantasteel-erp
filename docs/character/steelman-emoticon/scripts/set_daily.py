@@ -1,9 +1,9 @@
-"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈). 키는 shared MESSAGE_EMOTICONS와 같다."""
+"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈), 5차 26종. 키는 shared MESSAGE_EMOTICONS와 같다."""
 from PIL import Image
 
 from emoticon_lib import (
     emoticon, face, flatten, flip, fr, ghost, heat, helmet_off, molten_bottom, nod, pix, prop, ring_burst,
-    roller_img, silver, stretch, sway, tint, wall_img, stretch_wide, CELL,
+    roller_img, silver, stretch, sway, tint, wall_img, stretch_wide, CELL, big_text, glitch, helmet_off, shift,
 )
 
 
@@ -418,5 +418,216 @@ def build(sh):
         fr(yoi, 80, char_at=(0, -2), front=[('spark_s', 44, 4)]),
         fr(flatten(yoi, 0.94, 1.04), 100, front=[('dust', 6, 43), ('dust', 36, 43)]),
         fr(yoi, 500, front=[('spark_s', 43, 6), ('spark_s', 3, 12)]),
+    ]))
+    # ── 5차 ────────────────────────────────────────────
+    # '네' 변형: 넵… (영혼 없음)
+    soulless = face(idle, eyes='dot', mouth='flat')
+    E.append(emoticon('넵…', 'steelman-nep-soulless', '넵…', 'g', [
+        fr(soulless, 300),
+        fr(tint(soulless, 'g', 0.3), 300),
+        fr(tint(soulless, 'g', 0.55), 300),
+        fr(tint(soulless, 'g', 0.75), 800),
+    ]))
+
+    # 네에~: 몸이 옆으로 늘어지는 대답
+    lazy = face(idle, eyes='closed', mouth='smile')
+    frames = []
+    for k, dur in ((1.0, 200), (1.12, 160), (1.24, 160), (1.34, 600), (1.12, 120)):
+        w = round(CELL * k)
+        frames.append(fr(stretch_wide(flatten(lazy, 1 / (k ** 0.5), 1.0), k), dur, char_at=((CELL - w) // 2, 0)))
+    E.append(emoticon('네에~', 'steelman-nee', '네에~', 'W', frames))
+
+    # 넹: 볼 빨개지며 고개 갸웃
+    cute = face(idle, eyes='happy', mouth='smile')
+    E.append(emoticon('넹', 'steelman-neng', '넹', 'P', [
+        fr(cute, 200),
+        fr(sway(cute, -1), 140, front=[('blush', 14, 26)]),
+        fr(sway(cute, -2), 600, front=[('blush', 13, 26), ('heart_s', 40, 10)]),
+        fr(sway(cute, -1), 140, front=[('blush', 14, 26)]),
+    ]))
+
+    # 글자만 크게: 큰 글자가 쿵 떨어지고 구석에 작은 철강맨
+    mini = idle.resize((24, 24), Image.NEAREST)
+
+    def big_word(tag, key, word, color):
+        t = big_text(word, color)
+        x = (CELL - t.width) // 2
+        E.append(emoticon(tag, key, '', color, [
+            fr(None, 120, front=[('img', x, -14, t), ('img', 30, 24, mini)]),
+            fr(None, 80, front=[('img', x, -2, t), ('img', 30, 24, mini)]),
+            fr(None, 80, front=[('img', x, 6, t), ('img', 30, 24, mini)], shake=(0, 1)),
+            fr(None, 700, front=[('img', x, 4, t), ('img', 30, 24, face(idle, eyes='happy').resize((24, 24), Image.NEAREST))]),
+        ], oy=15))
+    big_word('ㅇㅋ', 'steelman-okay', 'ㅇㅋ', 'E')
+    big_word('ㄱㄱ', 'steelman-gogo', 'ㄱㄱ', 'O')
+    big_word('헐', 'steelman-heol', '헐', 'W')
+
+    # 킹받네: 얼굴이 찌그러지고 부들부들
+    king = face(idle, eyes='angry', mouth='grit')
+    E.append(emoticon('킹받네', 'steelman-kingbat', '킹받네', 'R', [
+        fr(king, 90, front=[('anger', 36, 8)], shake=(1, 0)),
+        fr(flatten(king, 0.94, 1.06), 90, front=[('anger', 37, 10)], shake=(-1, 0)),
+        fr(king, 90, front=[('anger', 36, 8)], shake=(1, 0)),
+        fr(flatten(tint(king, 'R', 0.2), 0.92, 1.08), 90, front=[('anger', 37, 10), ('anger', 4, 12)], shake=(-1, 0)),
+        fr(tint(king, 'R', 0.2), 500, front=[('anger', 36, 8), ('anger', 4, 12)]),
+    ]))
+
+    # 정신 나감: 눈이 빙글, 안전모가 혼자 빙글빙글
+    dazed = face(idle, eyes='swirl', mouth='wave')
+    body, helmet = helmet_off(dazed)
+    spin = [helmet, flip(helmet)]
+    E.append(emoticon('정신 나감', 'steelman-out-of-mind', '정신 나감', 'V', [
+        fr(body, 110, front=[('img', dx, dy, spin[i % 2])]) for i, (dx, dy) in enumerate([(0, -6), (3, -8), (0, -10), (-3, -8), (0, -6), (3, -8), (0, -10), (-3, -8)])
+    ] + [fr(dazed, 400, front=[('spark_s', 40, 8)])]))
+
+    # 녹슬었다: 몸이 점점 갈색으로 녹슬며 축 처짐
+    rust = face(idle, eyes='tired', mouth='flat')
+    E.append(emoticon('녹슬었다', 'steelman-rusty', '녹슬었다', 'T', [
+        fr(rust, 250),
+        fr(tint(rust, 'T', 0.3), 250),
+        fr(flatten(tint(rust, 'T', 0.5), 0.96, 1.02), 250),
+        fr(flatten(tint(rust, 't', 0.55), 0.92, 1.04), 800, front=[('dust_s', 6, 42), ('dust_s', 38, 42)]),
+    ]))
+
+    # 오류: 화면 깨지듯 지지직
+    err = face(idle, eyes='x', mouth='wave')
+    E.append(emoticon('오류', 'steelman-error', '오류', 'R', [
+        fr(idle, 200),
+        fr(glitch(err, 1), 70, shake=(1, 0)),
+        fr(glitch(err, 2), 70, shake=(-1, 0)),
+        fr(glitch(err, 3), 70),
+        fr(err, 120),
+        fr(glitch(err, 4), 70, shake=(1, 0)),
+        fr(err, 500, front=[('excl', 40, 10)]),
+    ]))
+
+    # 짠!: 잔을 부딪침 (음료)
+    E.append(emoticon('짠', 'steelman-cheers', '짠!', 'Y', [
+        fr(face(idle, eyes='happy'), 160, front=[('glass', 32, 26), ('img', 48, 26, flip(prop('glass')))]),
+        fr(face(idle, eyes='happy'), 100, front=[('glass', 36, 22), ('img', 44, 22, flip(prop('glass')))]),
+        fr(face(idle, eyes='happy', mouth='open'), 120, front=[('glass', 38, 20), ('img', 42, 20, flip(prop('glass'))), ('spark_l', 38, 12)]),
+        fr(face(idle, eyes='happy', mouth='open'), 600, front=[('glass', 36, 22), ('img', 44, 22, flip(prop('glass'))), ('spark_s', 42, 14)]),
+    ]))
+
+    # 하이파이브: 반대쪽에서 손이 들어와 짝
+    E.append(emoticon('하이파이브', 'steelman-high-five', '하이파이브', 'O', [
+        fr(wave1, 160, front=[('palm', 56, 12)]),
+        fr(wave1, 100, front=[('palm', 48, 12)]),
+        fr(face(wave2, eyes='happy', mouth='open'), 100, front=[('palm', 42, 12), ('burst_at', 38, 6, 6, 'y', 'Y', 'O')], shake=(1, 0)),
+        fr(face(wave2, eyes='happy', mouth='open'), 600, front=[('palm', 44, 12), ('spark_s', 40, 4)]),
+    ]))
+
+    # 월급날: 돈봉투를 안고 빙글빙글
+    pay = face(idle, eyes='star', mouth='open')
+    E.append(emoticon('월급날', 'steelman-payday', '월급날', 'E', [
+        fr(pay if i % 2 == 0 else flip(pay), 140, front=[('envelope', 17, 30)], back=[('spark_s', 2 + (i * 9) % 40, 4 + (i * 5) % 14)])
+        for i in range(6)
+    ] + [fr(pay, 400, front=[('envelope', 17, 30), ('heart_s', 40, 10)])]))
+
+    # 칼퇴 각: 6시 정각, 잔상만 남기고 사라짐
+    ready = face(idle, eyes='angry', mouth='smile')
+    ghost_img = tint(ready, 'W', 0.6)
+    E.append(emoticon('칼퇴 각', 'steelman-leave-on-time', '칼퇴 각', 'O', [
+        fr(ready, 300, back=[('clock', 40, 0)], front=[('briefcase', 34, 32)]),
+        fr(ready, 300, back=[('clock', 40, 0)], front=[('briefcase', 34, 32), ('excl', 52, 2)]),
+        fr(ghost_img, 90, back=[('clock', 40, 0), ('speed', -6, 22), ('speed', -6, 32)]),
+        fr(None, 600, back=[('clock', 40, 0), ('dust', 18, 40), ('speed', 0, 28)]),
+    ]))
+
+    # 주말 순삭: 달력이 휙휙 넘어가고 멍
+    stunned = face(idle, eyes='dot', mouth='o')
+    E.append(emoticon('주말 순삭', 'steelman-weekend-gone', '주말 순삭', 'W', [
+        fr(idle, 160, back=[('calendar', 34, 2)]),
+        fr(idle, 80, back=[('calendar', 34, 2)], front=[('speed_s', 34, 6)]),
+        fr(stunned, 80, back=[('calendar', 34, 3)], front=[('speed_s', 36, 8)]),
+        fr(stunned, 80, back=[('calendar', 34, 2)], front=[('speed_s', 34, 6)]),
+        fr(stunned, 800, back=[('calendar', 34, 2)], front=[('sweat', 8, 20)]),
+    ]))
+
+    # 부럽다: 벽 뒤에서 반만 보며 눈 반짝
+    envy = face(idle, eyes='star', mouth='o')
+    E.append(emoticon('부럽다', 'steelman-envy', '부럽다', 'Y', [
+        fr(envy, 300, front=[('wall', 20, 4, 30, 44)], char_at=(-6, 0)),
+        fr(envy, 300, front=[('wall', 20, 4, 30, 44), ('spark_s', 8, 18)], char_at=(-5, 0)),
+        fr(envy, 300, front=[('wall', 20, 4, 30, 44), ('spark_l', 6, 16)], char_at=(-6, 0)),
+    ]))
+
+    # 엥?: 고개를 크게 갸웃 + 물음표
+    eh = face(idle, eyes='dot', mouth='o')
+    E.append(emoticon('엥', 'steelman-eh', '엥?', 'W', [
+        fr(eh, 150),
+        fr(sway(eh, 2), 120, front=[('qmark', 40, 10)]),
+        fr(sway(eh, 4), 700, front=[('qmark_l', 40, 4)]),
+    ]))
+
+    # 그만해: 손바닥 내밀며 천천히 도리도리
+    stop = face(idle, eyes='closed', mouth='frown')
+    E.append(emoticon('그만해', 'steelman-stop-it', '그만해', 'R', [
+        fr(sway(stop, h), 200, front=[('palm', 30, 20)]) for h in (-2, 0, 2, 0)
+    ] + [fr(stop, 500, front=[('palm', 30, 20)])]))
+
+    # 현타: 창밖을 멍하니, 눈이 점 두 개
+    blank_stare = tint(face(idle, eyes='dot', mouth='flat'), 'g', 0.2)
+    E.append(emoticon('현타', 'steelman-reality-check', '현타', 'g', [
+        fr(blank_stare, 500, back=[('window', 32, 0)]),
+        fr(blank_stare, 500, back=[('window', 32, 0)], front=[('ellipsis', 36, 14)]),
+        fr(tint(blank_stare, 'g', 0.25), 900, back=[('window', 32, 0)], front=[('ellipsis', 36, 14)]),
+    ]))
+
+    # 요들갑: 제자리에서 팔다리 파닥파닥 + 느낌표 3개
+    fuss = [face(happy[1], eyes='wide', mouth='open'), face(happy[3], eyes='wide', mouth='open')]
+    E.append(emoticon('요들갑', 'steelman-fuss', '요들갑', 'O', [
+        fr(fuss[i % 2], 80, front=[('excl', 2 + i % 2, 8), ('excl', 42, 6 + i % 2), ('excl', 46, 14)], shake=(1 if i % 2 else -1, 0))
+        for i in range(8)
+    ]))
+
+    # 진지 모드: 안경을 쓰면 렌즈가 번쩍
+    serious = face(idle, eyes='closed', mouth='flat')
+    E.append(emoticon('진지 모드', 'steelman-serious', '진지 모드', 'b', [
+        fr(serious, 200, front=[('glasses', 15, 12)]),
+        fr(serious, 120, front=[('glasses', 15, 18)]),
+        fr(serious, 120, front=[('glasses', 15, 22)]),
+        fr(serious, 100, front=[('glasses', 15, 22), ('spark_w', 18, 22), ('spark_w', 28, 22)]),
+        fr(serious, 600, front=[('glasses', 15, 22)]),
+    ]))
+
+    # 밥플릭스: 밥 먹으며 폰으로 영상
+    eat = face(idle, eyes='happy', mouth='o')
+    E.append(emoticon('밥플릭스', 'steelman-bobflix', '밥플릭스', 'R', [
+        fr(eat if i % 2 else idle, 260, front=[('bowl', 0, 32), ('phone', 38, 26), ('spoon', 14, 26 + (i % 2))]) for i in range(4)
+    ]))
+
+    # 플렉스: 선글라스 쓰고 돈봉투 흔들기
+    flex = face(wave2, mouth='smile')
+    E.append(emoticon('플렉스', 'steelman-flex', '플렉스', 'Y', [
+        fr(face(wave1, mouth='smile'), 140, front=[('sunglasses', 15, 21), ('envelope', 36, 6)]),
+        fr(flex, 140, front=[('sunglasses', 15, 21), ('envelope', 38, 4), ('spark_s', 2, 16)]),
+        fr(face(wave1, mouth='smile'), 140, front=[('sunglasses', 15, 21), ('envelope', 36, 6), ('spark_l', 2, 14)]),
+        fr(flex, 500, front=[('sunglasses', 15, 21), ('envelope', 38, 4), ('spark_s', 46, 18)]),
+    ]))
+
+    # 박수: 짝짝짝
+    clap = face(idle, eyes='happy', mouth='open')
+    E.append(emoticon('박수', 'steelman-clap', '박수', 'Y', [
+        fr(clap, 110, front=[('clap', 20, 32)] + ([('spark_s', 14, 28), ('spark_s', 30, 28)] if i % 2 else []), cx=-(i % 2))
+        for i in range(6)
+    ]))
+
+    # 조연 '코일이': 데굴데굴 굴러와 꼬리 살랑
+    E.append(emoticon('코일이', 'steelman-coil-dog', '코일이 멍!', 'W', [
+        fr(idle, 160, front=[('dog', 52, 22, 0)]),
+        fr(idle, 120, front=[('dog', 40, 22, 1)]),
+        fr(face(idle, eyes='happy'), 120, front=[('dog', 30, 22, 2)]),
+        fr(face(idle, eyes='happy', mouth='open'), 200, front=[('dog', 26, 22, 3), ('heart_s', 34, 14)]),
+        fr(face(idle, eyes='happy', mouth='open'), 200, front=[('dog', 26, 22, 4), ('heart_s', 36, 10)]),
+        fr(face(idle, eyes='happy'), 400, front=[('dog', 26, 22, 5)]),
+    ]))
+
+    # 조연 '슬래브 냥이': 납작하게 쭉 기지개
+    E.append(emoticon('슬래브 냥이', 'steelman-slab-cat', '냥이 기지개', 'W', [
+        fr(idle, 200, front=[('cat', 18, 26, 1.0)]),
+        fr(idle, 200, front=[('cat', 14, 27, 1.2)]),
+        fr(face(idle, eyes='happy'), 500, front=[('cat', 10, 28, 1.45, False)]),
+        fr(face(idle, eyes='happy'), 300, front=[('cat', 18, 26, 1.0), ('heart_s', 4, 16)]),
     ]))
     return E

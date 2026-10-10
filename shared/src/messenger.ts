@@ -13,7 +13,7 @@ export const MESSAGE_EMOTICON_SETS = [
 export type MessageEmoticonSetKey = (typeof MESSAGE_EMOTICON_SETS)[number]['key'];
 
 /**
- * 메신저 이모티콘 (18번·19번·20번·21번, 문서에 없는 추가 기능): 묶음 3개, 74종. key를 message.emoticon_key에 저장한다.
+ * 메신저 이모티콘 (18번~22번, 문서에 없는 추가 기능): 묶음 3개, 116종. key를 message.emoticon_key에 저장한다.
  * 순서가 고르기 창 순서다. 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
  */
 export const MESSAGE_EMOTICONS = [
@@ -46,6 +46,16 @@ export const MESSAGE_EMOTICONS = [
   { key: 'steelman-away', label: '자리 비움', set: 'steelman-work' },
   { key: 'steelman-meeting', label: '회의 중', set: 'steelman-work' },
   { key: 'steelman-outside', label: '외근 중', set: 'steelman-work' },
+  { key: 'steelman-nep', label: '넵!', set: 'steelman-work' },
+  { key: 'steelman-inspected', label: '점검 완료', set: 'steelman-work' },
+  { key: 'steelman-tbm', label: 'TBM 갑니다', set: 'steelman-work' },
+  { key: 'steelman-near-miss', label: '아차', set: 'steelman-work' },
+  { key: 'steelman-tapping', label: '출선', set: 'steelman-work' },
+  { key: 'steelman-praise', label: '칭찬해요', set: 'steelman-work' },
+  { key: 'steelman-shipped', label: '출고 확정', set: 'steelman-work' },
+  { key: 'steelman-goal', label: '월 목표 달성', set: 'steelman-work' },
+  { key: 'steelman-shipping', label: '출하 중', set: 'steelman-work' },
+  { key: 'steelman-overtime', label: '야근 중', set: 'steelman-work' },
   { key: 'steelman-panic', label: '멘붕', set: 'steelman-daily' },
   { key: 'steelman-lol', label: 'ㅋㅋㅋ', set: 'steelman-daily' },
   { key: 'steelman-love', label: '사랑해요', set: 'steelman-daily' },
@@ -85,12 +95,44 @@ export const MESSAGE_EMOTICONS = [
   { key: 'steelman-gg', label: '줴줴이야', set: 'steelman-daily' },
   { key: 'steelman-t-one', label: '티~원', set: 'steelman-daily' },
   { key: 'steelman-yoi', label: '요오오~이', set: 'steelman-daily' },
+  { key: 'steelman-nep-soulless', label: '영혼 없는 넵', set: 'steelman-daily' },
+  { key: 'steelman-nee', label: '네에', set: 'steelman-daily' },
+  { key: 'steelman-neng', label: '넹', set: 'steelman-daily' },
+  { key: 'steelman-okay', label: 'ㅇㅋ', set: 'steelman-daily' },
+  { key: 'steelman-gogo', label: 'ㄱㄱ', set: 'steelman-daily' },
+  { key: 'steelman-heol', label: '헐', set: 'steelman-daily' },
+  { key: 'steelman-kingbat', label: '킹받네', set: 'steelman-daily' },
+  { key: 'steelman-out-of-mind', label: '정신 나감', set: 'steelman-daily' },
+  { key: 'steelman-rusty', label: '녹슬었다', set: 'steelman-daily' },
+  { key: 'steelman-error', label: '오류', set: 'steelman-daily' },
+  { key: 'steelman-cheers', label: '짠', set: 'steelman-daily' },
+  { key: 'steelman-high-five', label: '하이파이브', set: 'steelman-daily' },
+  { key: 'steelman-payday', label: '월급날', set: 'steelman-daily' },
+  { key: 'steelman-leave-on-time', label: '칼퇴 각', set: 'steelman-daily' },
+  { key: 'steelman-weekend-gone', label: '주말 순삭', set: 'steelman-daily' },
+  { key: 'steelman-envy', label: '부럽다', set: 'steelman-daily' },
+  { key: 'steelman-eh', label: '엥', set: 'steelman-daily' },
+  { key: 'steelman-stop-it', label: '그만해', set: 'steelman-daily' },
+  { key: 'steelman-reality-check', label: '현타', set: 'steelman-daily' },
+  { key: 'steelman-fuss', label: '요들갑', set: 'steelman-daily' },
+  { key: 'steelman-serious', label: '진지 모드', set: 'steelman-daily' },
+  { key: 'steelman-bobflix', label: '밥플릭스', set: 'steelman-daily' },
+  { key: 'steelman-flex', label: '플렉스', set: 'steelman-daily' },
+  { key: 'steelman-clap', label: '박수', set: 'steelman-daily' },
+  { key: 'steelman-coil-dog', label: '코일이', set: 'steelman-daily' },
+  { key: 'steelman-slab-cat', label: '슬래브 냥이', set: 'steelman-daily' },
   { key: 'steelman-new-year', label: '새해 복 많이 받으세요', set: 'steelman-event' },
   { key: 'steelman-seollal', label: '즐거운 설', set: 'steelman-event' },
   { key: 'steelman-chuseok', label: '즐거운 추석', set: 'steelman-event' },
   { key: 'steelman-year-end', label: '올해도 수고했어요', set: 'steelman-event' },
   { key: 'steelman-birthday', label: '생일 축하해요', set: 'steelman-event' },
   { key: 'steelman-welcome', label: '환영합니다', set: 'steelman-event' },
+  { key: 'steelman-promotion', label: '승진 축하드려요', set: 'steelman-event' },
+  { key: 'steelman-christmas', label: '메리 크리스마스', set: 'steelman-event' },
+  { key: 'steelman-hot', label: '더워요', set: 'steelman-event' },
+  { key: 'steelman-cold', label: '추워요', set: 'steelman-event' },
+  { key: 'steelman-vacation', label: '휴가 갑니다', set: 'steelman-event' },
+  { key: 'steelman-congrats', label: '축하해요', set: 'steelman-event' },
 ] as const satisfies readonly { key: string; label: string; set: MessageEmoticonSetKey }[];
 export type MessageEmoticonKey = (typeof MESSAGE_EMOTICONS)[number]['key'];
 export const MESSAGE_EMOTICON_KEYS: readonly MessageEmoticonKey[] = MESSAGE_EMOTICONS.map((e) => e.key);
