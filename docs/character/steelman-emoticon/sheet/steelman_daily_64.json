@@ -1690,6 +1690,312 @@
     "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
     "sourceSize": { "w": 64, "h": 64 },
     "duration": 400
+   },
+   {
+    "filename": "steelman_daily_64 188.aseprite",
+    "frame": { "x": 0, "y": 2112, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 160
+   },
+   {
+    "filename": "steelman_daily_64 189.aseprite",
+    "frame": { "x": 64, "y": 2112, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_daily_64 190.aseprite",
+    "frame": { "x": 128, "y": 2112, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_daily_64 191.aseprite",
+    "frame": { "x": 192, "y": 2112, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_daily_64 192.aseprite",
+    "frame": { "x": 256, "y": 2112, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 700
+   },
+   {
+    "filename": "steelman_daily_64 193.aseprite",
+    "frame": { "x": 0, "y": 2176, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 200
+   },
+   {
+    "filename": "steelman_daily_64 194.aseprite",
+    "frame": { "x": 64, "y": 2176, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 300
+   },
+   {
+    "filename": "steelman_daily_64 195.aseprite",
+    "frame": { "x": 128, "y": 2176, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 300
+   },
+   {
+    "filename": "steelman_daily_64 196.aseprite",
+    "frame": { "x": 192, "y": 2176, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 250
+   },
+   {
+    "filename": "steelman_daily_64 197.aseprite",
+    "frame": { "x": 256, "y": 2176, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 700
+   },
+   {
+    "filename": "steelman_daily_64 198.aseprite",
+    "frame": { "x": 0, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 199.aseprite",
+    "frame": { "x": 64, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 200.aseprite",
+    "frame": { "x": 128, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 201.aseprite",
+    "frame": { "x": 192, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 202.aseprite",
+    "frame": { "x": 256, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 203.aseprite",
+    "frame": { "x": 320, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 70
+   },
+   {
+    "filename": "steelman_daily_64 204.aseprite",
+    "frame": { "x": 384, "y": 2240, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 450
+   },
+   {
+    "filename": "steelman_daily_64 205.aseprite",
+    "frame": { "x": 0, "y": 2304, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 150
+   },
+   {
+    "filename": "steelman_daily_64 206.aseprite",
+    "frame": { "x": 64, "y": 2304, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 150
+   },
+   {
+    "filename": "steelman_daily_64 207.aseprite",
+    "frame": { "x": 128, "y": 2304, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 150
+   },
+   {
+    "filename": "steelman_daily_64 208.aseprite",
+    "frame": { "x": 192, "y": 2304, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 150
+   },
+   {
+    "filename": "steelman_daily_64 209.aseprite",
+    "frame": { "x": 256, "y": 2304, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 500
+   },
+   {
+    "filename": "steelman_daily_64 210.aseprite",
+    "frame": { "x": 0, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 200
+   },
+   {
+    "filename": "steelman_daily_64 211.aseprite",
+    "frame": { "x": 64, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 110
+   },
+   {
+    "filename": "steelman_daily_64 212.aseprite",
+    "frame": { "x": 128, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 110
+   },
+   {
+    "filename": "steelman_daily_64 213.aseprite",
+    "frame": { "x": 192, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 110
+   },
+   {
+    "filename": "steelman_daily_64 214.aseprite",
+    "frame": { "x": 256, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 650
+   },
+   {
+    "filename": "steelman_daily_64 215.aseprite",
+    "frame": { "x": 320, "y": 2368, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 200
+   },
+   {
+    "filename": "steelman_daily_64 216.aseprite",
+    "frame": { "x": 0, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 110
+   },
+   {
+    "filename": "steelman_daily_64 217.aseprite",
+    "frame": { "x": 64, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_daily_64 218.aseprite",
+    "frame": { "x": 128, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 140
+   },
+   {
+    "filename": "steelman_daily_64 219.aseprite",
+    "frame": { "x": 192, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_daily_64 220.aseprite",
+    "frame": { "x": 256, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 100
+   },
+   {
+    "filename": "steelman_daily_64 221.aseprite",
+    "frame": { "x": 320, "y": 2432, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 500
    }
  ],
  "meta": {
@@ -1697,7 +2003,7 @@
   "version": "1.3.18.6-arm64",
   "image": "steelman_daily_64.png",
   "format": "RGBA8888",
-  "size": { "w": 576, "h": 2112 },
+  "size": { "w": 576, "h": 2496 },
   "scale": "1",
   "frameTags": [
    { "name": "멘붕", "from": 0, "to": 8, "direction": "forward", "color": "#000000ff" },
@@ -1732,7 +2038,13 @@
    { "name": "대충 답장", "from": 163, "to": 165, "direction": "forward", "color": "#000000ff" },
    { "name": "넵병", "from": 166, "to": 174, "direction": "forward", "color": "#000000ff" },
    { "name": "지박령", "from": 175, "to": 180, "direction": "forward", "color": "#000000ff" },
-   { "name": "점심 뭐 먹지", "from": 181, "to": 187, "direction": "forward", "color": "#000000ff" }
+   { "name": "점심 뭐 먹지", "from": 181, "to": 187, "direction": "forward", "color": "#000000ff" },
+   { "name": "예?", "from": 188, "to": 192, "direction": "forward", "color": "#000000ff" },
+   { "name": "엄", "from": 193, "to": 197, "direction": "forward", "color": "#000000ff" },
+   { "name": "아뇨아뇨아뇨", "from": 198, "to": 204, "direction": "forward", "color": "#000000ff" },
+   { "name": "줴줴이야", "from": 205, "to": 209, "direction": "forward", "color": "#000000ff" },
+   { "name": "티~원", "from": 210, "to": 215, "direction": "forward", "color": "#000000ff" },
+   { "name": "요오오~이", "from": 216, "to": 221, "direction": "forward", "color": "#000000ff" }
   ]
  }
 }

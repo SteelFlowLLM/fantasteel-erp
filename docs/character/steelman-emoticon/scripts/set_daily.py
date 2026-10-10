@@ -1,9 +1,9 @@
-"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난). 키는 shared MESSAGE_EMOTICONS와 같다."""
+"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈). 키는 shared MESSAGE_EMOTICONS와 같다."""
 from PIL import Image
 
 from emoticon_lib import (
     emoticon, face, flatten, flip, fr, ghost, heat, helmet_off, molten_bottom, nod, pix, prop, ring_burst,
-    roller_img, silver, stretch, sway, tint, wall_img,
+    roller_img, silver, stretch, sway, tint, wall_img, stretch_wide, CELL,
 )
 
 
@@ -358,4 +358,65 @@ def build(sh):
     E.append(emoticon('점심 뭐 먹지', 'steelman-lunch-menu', '점심 뭐 먹지', 'W', [
         fr(think[i % 3], 240, front=[(menu[i], 36 if menu[i] != 'gimbap' else 38, 6)]) for i in range(6)
     ] + [fr(think[3], 400, front=[('noodle', 36, 6), ('spark_s', 47, 4)])]))
+
+    # ── 4차: 요즘 말투 밈 (말 자체의 재미만 쓰고 사람을 놀리는 그림은 넣지 않는다) ──
+    # 예?: 눈이 동그래지며 고개를 내밀고, 큰 물음표가 쿵
+    huh = face(idle, eyes='wide', mouth='o')
+    E.append(emoticon('예?', 'steelman-huh', '예?', 'W', [
+        fr(idle, 160),
+        fr(huh, 80, front=[('qmark_l', 40, -2)]),
+        fr(stretch(huh, 1.04), 80, front=[('qmark_l', 40, 3)]),
+        fr(sway(huh, 1), 80, front=[('qmark_l', 40, 6)], shake=(0, 1)),
+        fr(sway(huh, 1), 700, front=[('qmark_l', 40, 5)]),
+    ]))
+
+    # 엄…: 눈만 좌우로 굴리며 멈칫, 땀 한 방울
+    um_l, um_r = face(idle, eyes='look_l', mouth='flat'), face(idle, eyes='look_r', mouth='flat')
+    E.append(emoticon('엄', 'steelman-um', '엄…', 'W', [
+        fr(idle, 200),
+        fr(um_l, 300),
+        fr(um_r, 300),
+        fr(um_l, 250),
+        fr(face(idle, eyes='dot', mouth='flat'), 700, front=[('sweat', 37, 19)]),
+    ]))
+
+    # 아뇨아뇨아뇨: 손을 빠르게 휘저으며 도리도리
+    nono = face(idle, eyes='squeeze', mouth='open')
+    seq = [(-2, 28), (2, 33), (-2, 28), (2, 33), (-2, 28), (2, 33)]
+    E.append(emoticon('아뇨아뇨아뇨', 'steelman-no-no', '아뇨아뇨아뇨', 'W', [
+        fr(sway(nono, h), 70, front=[('palm', x, 22), ('speed_s', x - 6 if h < 0 else x + 12, 26)]) for h, x in seq
+    ] + [fr(nono, 450, front=[('palm', 30, 22), ('sweat', 10, 18)])]))
+
+    # 줴줴이야: 두 손을 입에 모으고 외치며 하얀 깃발을 흔듦 (GG)
+    yell = face(idle, eyes='closed', mouth='big')
+    hands = ('cup_hands', 19, 26)
+    yells = [('img', 39, 20, flip(prop('yell'))), ('img', 43, 18, flip(prop('yell')))]
+    flag1, flag2 = ('img', 0, 20, flip(prop('flag_w'))), ('img', 0, 21, flip(prop('flag_w2')))
+    E.append(emoticon('줴줴이야', 'steelman-gg', '줴줴이야', 'W', [
+        fr(yell, 150, front=[flag1, hands]),
+        fr(yell, 150, front=[flag2, hands] + yells, cx=-1),
+        fr(yell, 150, front=[flag1, hands]),
+        fr(yell, 150, front=[flag2, hands] + yells, cx=-1),
+        fr(yell, 500, front=[flag1, hands] + yells),
+    ]))
+
+    # 티~원: 이름을 길게 늘여 부르듯 몸이 옆으로 쭉 늘어남, 마이크
+    call = face(idle, eyes='happy', mouth='o')
+    frames = [fr(face(idle, eyes='happy', mouth='smile'), 200, front=[('mic', 34, 26)])]
+    for k, dur in ((1.1, 110), (1.2, 110), (1.3, 110), (1.36, 650)):
+        w = round(CELL * k)
+        frames.append(fr(stretch_wide(call, k), dur, front=[('mic', 34 + (w - CELL) // 2, 26)], char_at=((CELL - w) // 2, 0)))
+    frames.append(fr(face(idle, eyes='happy', mouth='smile'), 200, front=[('mic', 34, 26), ('spark_s', 4, 14)]))
+    E.append(emoticon('티~원', 'steelman-t-one', '티~원', 'O', frames))
+
+    # 요오오~이: 한 팔 번쩍 들고 점프
+    yoi = face(wave1, eyes='happy', mouth='big')
+    E.append(emoticon('요오오~이', 'steelman-yoi', '요오오~이', 'Y', [
+        fr(flatten(yoi, 0.94, 1.04), 110),
+        fr(yoi, 80, char_at=(0, -2)),
+        fr(yoi, 140, char_at=(0, -4), front=[('spark_l', 42, 2), ('spark_s', 2, 10)]),
+        fr(yoi, 80, char_at=(0, -2), front=[('spark_s', 44, 4)]),
+        fr(flatten(yoi, 0.94, 1.04), 100, front=[('dust', 6, 43), ('dust', 36, 43)]),
+        fr(yoi, 500, front=[('spark_s', 43, 6), ('spark_s', 3, 12)]),
+    ]))
     return E

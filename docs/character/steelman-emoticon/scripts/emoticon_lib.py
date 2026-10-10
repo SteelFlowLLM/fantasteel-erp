@@ -280,6 +280,22 @@ PROPS = {
     'trophy': [
         "NNNNNNNNN", "NYYyYYYYN", "NYYyYYYDN", ".NYYYYDN.", "..NYYDN..", "...NDN...", "..NNNNN..", "..NDDDN..", "..NNNNN..",
     ],
+    # ── 4차 소품 ──
+    'qmark_l': [
+        ".NNNNN.", "NWWWWWN", "NWNNNWN", "NNN.NWN", "...NWWN", "..NWWN.", "..NWN..", "..NNN..", "..NNN..",
+        "..NWN..", "..NNN..",
+    ],
+    'flag_w': [
+        "NNNNNNNNN", "NWWWWWWWN", "NWWWWWWsN", "NWWWWWWWN", "NWWWWWsN.", "NNNNNNNN.",
+        "NT.......", "NT.......", "NT.......", "NT.......", "NT.......", "Nt.......", "NN.......",
+    ],
+    'flag_w2': [
+        "NNNNNNN..", "NWWWWWWNN", "NWWWWWWWN", "NWWWWWsWN", "NWWWWWWN.", "NNNNNNNN.",
+        "NT.......", "NT.......", "NT.......", "NT.......", "NT.......", "Nt.......", "NN.......",
+    ],
+    'mic': [".NNN.", "NKHKN", "NHKHN", "NKHKN", ".NNN.", "..N..", "..N..", "..N..", ".NNN."],
+    'yell': ["..N", ".N.", "...", "NN.", "...", ".N.", "..N"],
+    'cup_hands': ["NN......NN", "NWN....NWN", "NWN....NWN", ".NN....NN."],
 }
 
 
@@ -564,6 +580,12 @@ def stretch(img, ratio):
     return out
 
 
+def stretch_wide(img, k):
+    """바닥에 붙인 채 옆으로 늘어남. 칸보다 넓어지므로 char_at=((CELL - w) // 2, 0)으로 가운데에 놓는다."""
+    w = round(CELL * k)
+    return img.resize((w, CELL), Image.NEAREST)
+
+
 def shift(img, dx, dy):
     out = blank()
     out.paste(img, (dx, dy))
@@ -664,7 +686,11 @@ EYES = {
     'angry': ["N....", ".NN..", ".NNN.", ".NNN.", "....."],
     'tired': [".....", ".....", "NNNNN", ".NNN.", "....."],
     'cry': [".....", "NNNNN", "..N..", "..N..", "....."],
+    # 눈동자를 한쪽으로 굴림: 두 눈이 같은 쪽을 봐야 해서 좌우로 뒤집지 않는다
+    'look_l': [".....", "NN...", "NN...", "NN...", "....."],
+    'look_r': [".....", "...NN", "...NN", "...NN", "....."],
 }
+NO_MIRROR = {'look_l', 'look_r'}
 MOUTHS = {
     'smile': ["......", ".N..N.", "..NN.."],
     'open': [".NNNN.", ".NPPN.", "..NN.."],
@@ -701,7 +727,7 @@ def face(img, eyes=None, mouth=None, dy=0):
         erase(27, 22, 5, 5, 26)
         pattern = EYES[eyes]
         draw(pattern, *EYE_BOX['L'])
-        draw(pattern, *EYE_BOX['R'], mirror=True)
+        draw(pattern, *EYE_BOX['R'], mirror=eyes not in NO_MIRROR)
     if mouth:
         erase(21, 27, 6, 3 if mouth not in ('smile', 'flat') else 2, 20)
         draw(MOUTHS[mouth], *MOUTH_BOX)
