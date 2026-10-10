@@ -13,7 +13,7 @@ export const MESSAGE_EMOTICON_SETS = [
 export type MessageEmoticonSetKey = (typeof MESSAGE_EMOTICON_SETS)[number]['key'];
 
 /**
- * 메신저 이모티콘 (18번~22번, 문서에 없는 추가 기능): 묶음 3개, 116종. key를 message.emoticon_key에 저장한다.
+ * 메신저 이모티콘 (18번~22번·25번, 문서에 없는 추가 기능): 묶음 3개, 118종. key를 message.emoticon_key에 저장한다.
  * 순서가 고르기 창 순서다. 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
  */
 export const MESSAGE_EMOTICONS = [
@@ -56,6 +56,8 @@ export const MESSAGE_EMOTICONS = [
   { key: 'steelman-goal', label: '월 목표 달성', set: 'steelman-work' },
   { key: 'steelman-shipping', label: '출하 중', set: 'steelman-work' },
   { key: 'steelman-overtime', label: '야근 중', set: 'steelman-work' },
+  { key: 'steelman-back', label: '돌아왔어요', set: 'steelman-work' },
+  { key: 'steelman-here', label: '자리에 있어요', set: 'steelman-work' },
   { key: 'steelman-panic', label: '멘붕', set: 'steelman-daily' },
   { key: 'steelman-lol', label: 'ㅋㅋㅋ', set: 'steelman-daily' },
   { key: 'steelman-love', label: '사랑해요', set: 'steelman-daily' },

@@ -45,7 +45,7 @@ describe('이모티콘 목록 (18번~22번)', () => {
       expect(setKeys).toContain(set);
     }
     expect(MESSAGE_EMOTICON_SETS.map((s) => [s.label, MESSAGE_EMOTICONS.filter((e) => e.set === s.key).length])).toEqual([
-      ['철강맨 업무', 39],
+      ['철강맨 업무', 41],
       ['철강맨 일상', 65],
       ['철강맨 행사', 12],
     ]);
