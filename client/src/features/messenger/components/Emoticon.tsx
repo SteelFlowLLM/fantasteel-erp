@@ -1,6 +1,6 @@
 'use client';
 
-// 철강맨 이모티콘 (18번·19번, 문서에 없는 추가 기능). 64px 도트 그림을 정수배로 키워 흐려지지 않게 보여 준다.
+// 철강맨 이모티콘 (18번~21번, 문서에 없는 추가 기능). 64px 도트 그림을 정수배로 키워 흐려지지 않게 보여 준다.
 // 움직임은 GIF, '동작 줄이기'를 켠 사람에게는 멈춘 그림(PNG). 원본·다시 만들기는 docs/character/steelman-emoticon/
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { MESSAGE_EMOTICON_SETS, MESSAGE_EMOTICONS, type MessageEmoticonKey, type MessageEmoticonSetKey } from '@fantasteel/shared';
