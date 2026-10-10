@@ -11,6 +11,7 @@ import {
   MESSAGE_ATTACHMENT_MAX_COUNT,
   MESSAGE_REACTION_EMOJIS,
   MESSAGE_SEARCH_SIZE,
+  inlineEmoticonText,
   isMessageEmoticonKey,
   type MessageEmoticonKey,
   type MessageReactionEmoji,
@@ -229,7 +230,7 @@ function lastMessageOf(tables: Readonly<MockTables>, chatRoomId: number): Messag
 
 function messagePreviewOf(message: MessageRow): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
-  if (message.content) return message.content.replace(/\s+/g, ' ').trim();
+  if (message.content) return inlineEmoticonText(message.content).replace(/\s+/g, ' ').trim();
   return nonTextPreviewOf(message);
 }
 

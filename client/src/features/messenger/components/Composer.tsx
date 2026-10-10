@@ -1,16 +1,18 @@
 'use client';
 
 // 메시지 입력창: 글 + 파일 여러 개(REQ-MSG-003, 스키마 3차부터 MESSAGE_ATTACHMENT_MAX_COUNT개까지) 또는 이모티콘(18번·19번), @멘션 고르기(REQ-MSG-005). Enter 보내기 · Shift+Enter 줄바꿈.
-// 이모티콘은 서버 첨부 API가 받지 않아 파일과 함께 고를 수 없다. 최근 이모티콘은 고를 때가 아니라 보낼 때 쌓는다 (골랐다 빼면 최근이 아니다).
+// 이모티콘은 서버 첨부 API가 받지 않아 파일과 함께 고를 수 없다(글에 작게 넣는 것은 글이라 된다, 23번). 최근 이모티콘은 고를 때가 아니라 보낼 때 쌓는다 (골랐다 빼면 최근이 아니다).
+// 글자로 추천(23번): 글에 맞는 이모티콘을 입력창 위에 보인다. 이모티콘을 이미 골랐거나 파일이 있으면 숨기고, Esc로 닫으면 글을 고칠 때까지 숨긴다.
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
-import { MESSAGE_ATTACHMENT_MAX_COUNT, type MessageEmoticonKey } from '@fantasteel/shared';
+import { MESSAGE_ATTACHMENT_MAX_COUNT, inlineEmoticonKeys, inlineEmoticonText, inlineEmoticonToken, type MessageEmoticonKey } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
 import { SoonButton, soonLabel } from '@/components/ComingSoon';
-import { EmoticonImage, EmoticonPicker, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
+import { EmoticonImage, EmoticonPicker, EmoticonSuggestions, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { pushRecentEmoticon } from '@/features/messenger/lib/emoticonRecent';
+import { suggestEmoticons } from '@/features/messenger/lib/emoticonSuggest';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { useMe } from '@/hooks/useMe';
@@ -58,6 +60,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reading, setReading] = useState(false);
+  const [suggestDismissed, setSuggestDismissed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { send } = useMessageOutbox(room.id);
@@ -72,6 +75,33 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
     return room.mentionTargets.filter((target) => target.name.toLowerCase().includes(query)).slice(0, MAX_CANDIDATES);
   }, [mention, room.mentionTargets]);
 
+  const suggestions = useMemo<MessageEmoticonKey[]>(
+    () => (emoticon || files.length > 0 || mention || suggestDismissed ? [] : suggestEmoticons(text)),
+    [emoticon, files.length, mention, suggestDismissed, text],
+  );
+
+  const pickEmoticon = (key: MessageEmoticonKey) => {
+    setEmoticon(key);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  /** 글에 작게 넣기 (23번): 커서 자리(고른 글이 있으면 그 자리)에 ':키:'를 넣는다. 고르기 창에 있어 입력창 포커스는 옮기지 않는다 */
+  const insertInlineEmoticon = (key: MessageEmoticonKey) => {
+    const token = inlineEmoticonToken(key);
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? text.length;
+    const end = textarea?.selectionEnd ?? start;
+    const next = `${text.slice(0, start)}${token}${text.slice(end)}`;
+    if (next.length > MESSAGE_CONTENT_MAX) {
+      toast.error(`메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요`);
+      return;
+    }
+    setText(next);
+    const position = start + token.length;
+    // 값이 바뀌면 커서가 글 끝으로 가므로, 다음에 넣을 자리를 넣은 그림 바로 뒤로 되돌린다
+    requestAnimationFrame(() => textarea?.setSelectionRange(position, position));
+  };
+
   const updateMention = (value: string, caret: number) => {
     const next = mentionAt(value, caret);
     setMention(next);
@@ -80,6 +110,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
 
   const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setText(event.target.value);
+    setSuggestDismissed(false);
     // 입력 중 알림 (서버 모드만, 소켓 훅이 간격을 조절한다)
     if (event.target.value.trim()) useMessengerLiveStore.getState().sendTyping?.(room.id);
     updateMention(event.target.value, event.target.selectionStart);
@@ -135,12 +166,15 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       }
     }
     send({ chatRoomId: room.id, content, files: payload, emoticonKey: emoticon, parentMessageId: replyTo?.id ?? null });
+    // 글에 작게 넣은 것도 최근에 쌓는다. 큰 이모티콘을 나중에 쌓아 맨 앞에 둔다
+    for (const key of inlineEmoticonKeys(content)) pushRecentEmoticon(myId, key);
     if (emoticon) pushRecentEmoticon(myId, emoticon);
     clearReply();
     setText('');
     setFiles([]);
     setEmoticon(null);
     setMention(null);
+    setSuggestDismissed(false);
     onSent();
   };
 
@@ -164,6 +198,11 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           return;
         }
       }
+    }
+    if (event.key === 'Escape' && suggestions.length > 0) {
+      event.preventDefault();
+      setSuggestDismissed(true);
+      return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -203,7 +242,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       {replyTo ? (
         <div className="flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-2 px-3 py-1.5 text-xs" aria-label="답장할 메시지">
           <span className="min-w-0 flex-1 truncate">
-            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{replyTo.content ?? replyTo.files[0]?.name ?? (replyTo.emoticonKey ? `이모티콘 · ${emoticonLabelOf(replyTo.emoticonKey)}` : '')}</span>
+            <b className="font-semibold">{replyTo.senderName}</b>님에게 답장 · <span className="text-ink-3">{(replyTo.content ? inlineEmoticonText(replyTo.content) : null) ?? replyTo.files[0]?.name ?? (replyTo.emoticonKey ? `이모티콘 · ${emoticonLabelOf(replyTo.emoticonKey)}` : '')}</span>
           </span>
           <IconButton icon="x" label="답장 취소" size="sm" onClick={clearReply} />
         </div>
@@ -229,6 +268,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           <IconButton icon="x" label="이모티콘 빼기" size="sm" onClick={() => setEmoticon(null)} />
         </div>
       ) : null}
+      {suggestions.length > 0 ? <EmoticonSuggestions keys={suggestions} onPick={pickEmoticon} onDismiss={() => setSuggestDismissed(true)} /> : null}
       <textarea
         ref={textareaRef}
         value={text}
@@ -266,12 +306,10 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         />
         <EmoticonPicker
           employeeId={myId}
-          disabled={pending || files.length > 0}
-          disabledReason="이모티콘은 파일과 함께 보낼 수 없어요"
-          onPick={(key) => {
-            setEmoticon(key);
-            requestAnimationFrame(() => textareaRef.current?.focus());
-          }}
+          disabled={pending}
+          smallOnlyReason={files.length > 0 ? '파일과 함께는 글에 작게만 넣을 수 있어요' : undefined}
+          onPick={pickEmoticon}
+          onInsert={insertInlineEmoticon}
         />
         <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startMention} disabled={pending}>
           @ 멘션
