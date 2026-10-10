@@ -1,6 +1,6 @@
 #!/bin/bash
 # 메신저 철강맨 이모티콘을 다시 만든다: ./export_emoticon.sh
-# Aseprite(Steam) CLI와 python3 + Pillow가 필요하다. 글자 글꼴은 macOS 기본(Apple SD Gothic Neo), 다른 OS는 EMOTICON_FONT로 바꾼다.
+# Aseprite(Steam) CLI와 python3 + Pillow가 필요하다. 글자 글꼴은 저장소의 Galmuri(../fonts/)라 OS와 관계없이 같게 나온다.
 # 결과: ../steelman_work_64·daily_64·event_64.aseprite(묶음마다), ../gif·png·sheet, 그리고 화면이 쓰는 client/public/emoticons/<키>.gif·.png
 set -euo pipefail
 cd "$(dirname "$0")"
