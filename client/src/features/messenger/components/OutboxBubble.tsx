@@ -1,9 +1,10 @@
 'use client';
 
 // 아직 저장되지 않은 내 메시지: 보내는 중(흐리게) · 전송 실패(이유 + 다시 보내기·삭제). 내 메시지처럼 오른쪽 말풍선.
+import { splitInlineEmoticons } from '@fantasteel/shared';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
-import { EmoticonImage } from '@/features/messenger/components/Emoticon';
+import { EmoticonImage, InlineEmoticon } from '@/features/messenger/components/Emoticon';
 import { cn } from '@/lib/cn';
 import type { OutboxItem } from '@/stores/useOutboxStore';
 
@@ -21,7 +22,9 @@ export function OutboxBubble({ item, onRetry, onDiscard }: { item: OutboxItem; o
               failed ? 'border border-danger bg-surface text-ink' : 'bg-brand text-on-brand opacity-60',
             )}
           >
-            {content}
+            {splitInlineEmoticons(content).map((part, index) =>
+              part.kind === 'emoticon' ? <InlineEmoticon key={index} emoticonKey={part.key} /> : <span key={index}>{part.text}</span>,
+            )}
           </p>
         ) : null}
         {files.map((file, index) => (

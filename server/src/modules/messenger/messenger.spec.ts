@@ -875,6 +875,19 @@ describe('13번: 이모지 반응', () => {
     expect(page.body.data.items[0].reactions[0]).toMatchObject({ emoji: '👍', reactedByMe: true });
   });
 
+  it('23번 작은 철강맨 반응(sm:…)도 받고 이모지 뒤에 보이며, 목록에 없는 sm: 값은 COM-004', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const message = (await send(qualityCookie, room.id, '출하 끝났어요')).body.data;
+    await call('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: 'sm:thanks' });
+    const both = await call<ChatMessageView>('POST', `/messages/${message.id}/reactions`, qualityCookie, { emoji: '👍' });
+    expect(both.body.data.reactions).toEqual([
+      { emoji: '👍', count: 1, reactedByMe: true, employeeNames: ['서민지'] },
+      { emoji: 'sm:thanks', count: 1, reactedByMe: false, employeeNames: ['박서영'] },
+    ]);
+    const unknown = await call('POST', `/messages/${message.id}/reactions`, salesCookie, { emoji: 'sm:none' });
+    expect([unknown.status, unknown.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+
   it('허용 목록 밖 이모지는 COM-004, 삭제된 메시지·비멤버는 막는다', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     const message = (await send(salesCookie, room.id, '지울 글')).body.data;
@@ -1007,6 +1020,16 @@ describe('18번: 이모티콘', () => {
     expect(sent.body.data).toMatchObject({ content: null, emoticonKey: 'steelman-hot-rolling' });
     const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
     expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('이모티콘 · 열연 중');
+  });
+
+  it('23번 글 속 작은 이모티콘(:키:)은 본문 그대로 저장하고, 목록·답글·알림 미리보기는 (이름)으로 바꾼다. 모르는 키는 그대로', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const sent = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: ':steelman-ok: 확인했어요 :steelman-none:' });
+    expect(sent.body.data).toMatchObject({ content: ':steelman-ok: 확인했어요 :steelman-none:', emoticonKey: null });
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('(확인) 확인했어요 :steelman-none:');
+    const reply = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, qualityCookie, { content: '네', parentMessageId: sent.body.data.id });
+    expect(reply.body.data.parent?.preview).toBe('(확인) 확인했어요 :steelman-none:');
   });
 
   it('목록에 없는 이모티콘이나 글·이모티콘이 모두 없으면 COM-004', async () => {

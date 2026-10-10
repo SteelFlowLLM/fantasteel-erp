@@ -3,14 +3,14 @@
 // 메시지 메뉴의 기본 동작: 답장·공지로 고정(모든 일반 메시지), 수정·삭제(내 메시지). 스키마 1차(#151)의 답글·수정·삭제 표시를 쓴다.
 // 메뉴는 고르자마자 닫히므로 창은 대화 영역(Conversation)이 useMessageComposeStore를 보고 그린다.
 import { useState } from 'react';
-import { MESSAGE_REACTION_EMOJIS } from '@fantasteel/shared';
+import { MESSAGE_REACTION_EMOJIS, STEELMAN_REACTIONS, inlineEmoticonText, reactionEmoticonKey, reactionLabel, type MessageReactionEmoji } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, messengerApi, type MessageView } from '@/api/messenger';
 import { InputError } from '@/api/errors';
 import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Field } from '@/components/Field';
 import { Modal } from '@/components/Modal';
-import { emoticonLabelOf } from '@/features/messenger/components/Emoticon';
+import { ReactionGlyph, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { MessageActionItem } from '@/features/messenger/components/MessageActionItem';
 import type { MessageActionEntry, MessageActionProps } from '@/features/messenger/messageActions';
 import { useAction } from '@/hooks/useAction';
@@ -73,26 +73,37 @@ function PinAction({ message, room, closeMenu }: MessageActionProps) {
   );
 }
 
-/** 메뉴 맨 위 이모지 줄: 누르면 반응을 더하거나 뺀다 */
+/** 글자 이모지 줄 · 작은 철강맨 줄(23번) */
+const EMOJI_REACTIONS = MESSAGE_REACTION_EMOJIS.filter((value) => reactionEmoticonKey(value) === null);
+const STEELMAN_REACTION_VALUES: readonly MessageReactionEmoji[] = STEELMAN_REACTIONS.map((r) => r.value);
+
+/** 메뉴 맨 위 반응 줄: 이모지 한 줄, 작은 철강맨 한 줄. 누르면 반응을 더하거나 뺀다 */
 function ReactionAction({ message, closeMenu }: MessageActionProps) {
   const toggle = useAction(messengerApi.toggleReaction, { onSuccess: closeMenu });
   const mine = new Set(message.reactions.filter((r) => r.reactedByMe).map((r) => r.emoji));
-  return (
-    <div role="group" aria-label="반응 남기기" className="flex items-center justify-between gap-1 border-b border-line px-2 pb-1.5 pt-0.5">
-      {MESSAGE_REACTION_EMOJIS.map((emoji) => (
+  const row = (values: readonly MessageReactionEmoji[], label: string, steelman: boolean) => (
+    <div role="group" aria-label={label} className={cn('flex items-center gap-1', steelman ? 'justify-start' : 'justify-between')}>
+      {values.map((value) => (
         <button
-          key={emoji}
+          key={value}
           type="button"
           role="menuitem"
-          aria-pressed={mine.has(emoji)}
-          aria-label={`${emoji} 반응${mine.has(emoji) ? ' 취소' : ''}`}
+          aria-pressed={mine.has(value)}
+          aria-label={`${reactionLabel(value)} 반응${mine.has(value) ? ' 취소' : ''}`}
+          title={steelman ? reactionLabel(value) : undefined}
           disabled={toggle.isPending}
-          onClick={() => toggle.mutate({ messageId: message.id, emoji })}
-          className={cn('flex size-8 items-center justify-center rounded-sm text-base hover:bg-surface-2', mine.has(emoji) && 'bg-brand-tint')}
+          onClick={() => toggle.mutate({ messageId: message.id, emoji: value })}
+          className={cn('flex items-center justify-center rounded-sm text-base hover:bg-surface-2', steelman ? 'size-9' : 'size-8', mine.has(value) && 'bg-brand-tint')}
         >
-          {emoji}
+          <ReactionGlyph value={value} />
         </button>
       ))}
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-line px-2 pt-0.5 pb-1.5">
+      {row(EMOJI_REACTIONS, '반응 남기기', false)}
+      {row(STEELMAN_REACTION_VALUES, '철강맨 반응 남기기', true)}
     </div>
   );
 }
@@ -115,7 +126,8 @@ const TASK_TITLE_FROM_MESSAGE_MAX = 50;
 
 /** 메시지로 업무 창을 미리 채운다: 제목 = 본문 첫 줄(50자, 가정값) 또는 파일 이름·이모티콘 이름, 설명 = 본문과 보낸 사람 */
 export function taskSourceOf(message: MessageView): TaskSourceMessage {
-  const content = (message.content ?? '').trim();
+  // 작은 이모티콘 글(':steelman-ok:')은 업무 제목·설명에서 '(확인)'으로 읽히게 바꾼다
+  const content = inlineEmoticonText(message.content ?? '').trim();
   const firstLine = content.split('\n')[0]?.trim() ?? '';
   const base = firstLine || message.files[0]?.name || (message.emoticonKey ? `이모티콘 · ${emoticonLabelOf(message.emoticonKey)}` : '') || '메시지 확인';
   const title = base.length > TASK_TITLE_FROM_MESSAGE_MAX ? `${base.slice(0, TASK_TITLE_FROM_MESSAGE_MAX - 1)}…` : base;

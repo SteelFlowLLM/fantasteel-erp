@@ -1,7 +1,10 @@
 import type { ChatRoomType, ItemType, SalesOrderItemStatus } from './codes';
 
-/** 쓸 수 있는 반응 이모지 (가정값, 13번). DB에는 이 글자 그대로 저장한다 */
-export const MESSAGE_REACTION_EMOJIS = ['👍', '✅', '👀', '🙏', '❤️', '😂'] as const;
+/**
+ * 쓸 수 있는 반응 (가정값, 13번). DB에는 이 글자 그대로 저장한다 (message_reaction.emoji varchar(16)).
+ * 'sm:'로 시작하는 값은 작은 철강맨 반응(23번)이다. 그림은 messenger-emoticon.ts의 STEELMAN_REACTIONS
+ */
+export const MESSAGE_REACTION_EMOJIS = ['👍', '✅', '👀', '🙏', '❤️', '😂', 'sm:ok', 'sm:thanks', 'sm:lol', 'sm:love'] as const;
 export type MessageReactionEmoji = (typeof MESSAGE_REACTION_EMOJIS)[number];
 
 /** 이모티콘 묶음 (19번, 20번에 행사 추가). 고르기 창의 탭 순서 */
@@ -286,7 +289,7 @@ export interface ChatMessageView {
   isDeleted: boolean;
   /** 답글이면 원본 메시지 요약 */
   parent: ChatMessageParentView | null;
-  /** 이모지 반응 (MESSAGE_REACTION_EMOJIS 순서, 0명인 것은 뺀다) */
+  /** 이모지·철강맨 반응 (MESSAGE_REACTION_EMOJIS 순서, 0명인 것은 뺀다) */
   reactions: ChatMessageReactionView[];
   createdAt: string;
 }

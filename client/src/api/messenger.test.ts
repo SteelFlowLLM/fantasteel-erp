@@ -315,6 +315,18 @@ describe('메시지 · 읽음 · 멘션 (REQ-MSG-002~005)', () => {
     expect(undone.reactions).toEqual([{ emoji: '👍', count: 1, reactedByMe: false, employeeNames: ['박서영'] }]);
   });
 
+  it('작은 철강맨 반응(23번): sm: 값도 이모지처럼 더하고 빼며 이모지 뒤에 보인다', async () => {
+    const roomId = await createGroup();
+    const message = await messengerApi.sendMessage({ chatRoomId: roomId, content: '출하 끝' });
+    await messengerApi.toggleReaction({ messageId: message.id, emoji: 'sm:thanks' });
+    const both = await messengerApi.toggleReaction({ messageId: message.id, emoji: '👍' });
+    expect(both.reactions.map((r) => [r.emoji, r.count])).toEqual([
+      ['👍', 1],
+      ['sm:thanks', 1],
+    ]);
+    expect((await messengerApi.toggleReaction({ messageId: message.id, emoji: 'sm:thanks' })).reactions.map((r) => r.emoji)).toEqual(['👍']);
+  });
+
   it('그룹방 이름 바꾸기: 비우면 멤버 이름으로 보이고, 1:1은 입력 오류, 멤버가 아니면 COM-002', async () => {
     const roomId = await createGroup();
     expect(await messengerApi.renameRoom({ chatRoomId: roomId, chatRoomName: '  납기 대응  ' })).toMatchObject({ chatRoomName: '납기 대응', displayName: '납기 대응' });
@@ -366,6 +378,18 @@ describe('이모티콘 (18번)', () => {
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-ok', files: [file] })).rejects.toBeInstanceOf(InputError);
     // @ts-expect-error 목록에 없는 키
     await expect(messengerApi.sendMessage({ chatRoomId: roomId, emoticonKey: 'steelman-none' })).rejects.toBeInstanceOf(InputError);
+  });
+
+  it('글 속 작은 이모티콘(23번)은 본문 그대로 두고, 목록·업무방 알림·답글 미리보기는 (이름)으로 바꾼다', async () => {
+    const { roomId } = createWorkRoom([SEED_EMPLOYEE_NO.sales, SEED_EMPLOYEE_NO.quality]);
+    actAs(SEED_EMPLOYEE_NO.sales);
+    const sent = await messengerApi.sendMessage({ chatRoomId: roomId, content: ':steelman-ok: 확인했어요 :steelman-none:' });
+    expect(sent).toMatchObject({ content: ':steelman-ok: 확인했어요 :steelman-none:', emoticonKey: null });
+    expect((await messengerApi.listRooms()).find((r) => r.id === roomId)?.lastMessagePreview).toBe('(확인) 확인했어요 :steelman-none:');
+    expect(notificationsOf(employeeIdOf(SEED_EMPLOYEE_NO.quality)).at(-1)?.body).toContain('(확인) 확인했어요');
+    actAs(SEED_EMPLOYEE_NO.quality);
+    const reply = await messengerApi.sendMessage({ chatRoomId: roomId, content: '네', parentMessageId: sent.id });
+    expect(reply.parent?.preview).toBe('(확인) 확인했어요 :steelman-none:');
   });
 
   it('철강맨 일상 묶음(19번)의 이모티콘도 보낼 수 있고 미리보기는 "이모티콘 · 이름"이다', async () => {

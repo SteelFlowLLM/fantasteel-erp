@@ -127,7 +127,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 목록(`GET chat-rooms`)은 내가 고정한 방이 먼저, 그 안에서는 최근 대화 순. 목록·방 정보에 `muted`·`pinnedAt`.
 
 **이모지 반응** (13번, 스키마 2차 `message_reaction`, 명세에 없는 API)
-- `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS` 6개(👍 ✅ 👀 🙏 ❤️ 😂, 가정값)만, 아니면 COM-004.
+- `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS`(👍 ✅ 👀 🙏 ❤️ 😂 + 23번 작은 철강맨 `sm:ok`·`sm:thanks`·`sm:lol`·`sm:love`, 가정값)만, 아니면 COM-004. 철강맨 반응은 문서에 없는 추가 기능이고 값을 그대로 `message_reaction.emoji`(varchar(16))에 저장한다(스키마 그대로). 그림 키는 shared `STEELMAN_REACTIONS`·`reactionEmoticonKey`.
 - 방 멤버만(COM-002), 삭제·시스템 메시지는 COM-004. 알림은 보내지 않고 멤버에게 `message:updated`.
 - 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
 
@@ -136,6 +136,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - `POST chat-rooms/:id/messages { content, emoticonKey }`: 서버는 키가 `MESSAGE_EMOTICONS` 목록에 있는지만 본다(묶음은 보지 않음). 없으면 COM-004. 글과 함께 보낼 수 있고, 글·이모티콘이 모두 없으면 COM-004. 첨부 API는 받지 않는다(화면도 파일과 함께 고르지 못하게 막음). 이모티콘을 더해도 스키마는 그대로다(키는 varchar(32) 안).
 - 응답 `emoticonKey`(없거나 삭제된 메시지는 null, 목록에서 뺀 키가 DB에 남아 있어도 null). 미리보기(목록·알림·답글·공지)는 글이 있으면 글, 없으면 `이모티콘 · 이름`.
 - 수정은 글만 바꾼다(이모티콘이 있으면 글을 비워도 됨). 검색은 본문만 보므로 이모티콘만 있는 메시지는 나오지 않는다.
+- 글 속 작은 이모티콘 (23번, 문서에 없는 추가 기능): 본문에 `:키:`(예 `:steelman-ok:`)로 적으면 화면이 작은 그림으로 그린다. 서버는 본문을 그대로 저장·검색하고, 미리보기(목록·알림·답글·공지)만 `inlineEmoticonText`로 `(확인)`처럼 이름으로 바꾼다(모르는 키는 그대로). 글자로 추천 낱말(`MESSAGE_EMOTICON_KEYWORDS`)·즐겨찾기는 화면 기능이다(`docs/CLIENT-GUIDE.md`).
 - 그림은 화면의 `client/public/emoticons/<키>.gif`·`.png`(64px, 화면에서 2배). 원본과 다시 만들기는 `docs/character/steelman-emoticon/`. 최근 보낸 이모티콘은 화면이 브라우저에 둔다(서버 저장 없음, `docs/CLIENT-GUIDE.md`).
 
 **수정·삭제·답글** (2026-10-08, 스키마 1차 #151, 명세에 없는 API)
