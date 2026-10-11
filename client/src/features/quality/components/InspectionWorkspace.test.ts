@@ -11,16 +11,30 @@ import { MeContext } from '@/hooks/useMe';
 import type { InspectionQueueRow } from '@/mock/services';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: () => undefined, push: () => undefined }), useSearchParams: () => new URLSearchParams(), usePathname: () => '/quality/inspections' }));
+/** 주소의 ?lot= (테스트마다 바꾼다) */
+const address = vi.hoisted(() => ({ search: '' }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: () => undefined, push: () => undefined }),
+  useSearchParams: () => new URLSearchParams(address.search),
+  usePathname: () => '/quality/inspections',
+}));
 
-async function render(edit: (rows: InspectionQueueRow[]) => InspectionQueueRow[] = (rows) => rows): Promise<{ html: string; rows: InspectionQueueRow[] }> {
+async function render(
+  edit: (rows: InspectionQueueRow[]) => InspectionQueueRow[] = (rows) => rows,
+  search: () => string = () => '',
+): Promise<{ html: string; rows: InspectionQueueRow[] }> {
   const employeeId = actAs(SEED_EMPLOYEE_NO.quality);
   const me = await sessionApi.getSessionUser(employeeId);
   const rows = edit(await inspectionApi.queue());
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(inspectionKeys.queue(), rows);
-  const html = renderToString(createElement(QueryClientProvider, { client }, createElement(MeContext.Provider, { value: me }, createElement(InspectionWorkspace))));
-  return { html, rows };
+  address.search = search();
+  try {
+    const html = renderToString(createElement(QueryClientProvider, { client }, createElement(MeContext.Provider, { value: me }, createElement(InspectionWorkspace))));
+    return { html, rows };
+  } finally {
+    address.search = '';
+  }
 }
 
 /** 판정 결과 칩 묶음의 태그 */
@@ -52,7 +66,8 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     const { html, rows } = await render((all) => all.map((r) => ({ ...r, inspectionResult: 'PASS' as const })));
     expect(html).toContain('판정할 LOT이 없어요');
     expect(html).toContain(`판정 끝난 LOT 보기 (전체 <!-- -->${rows.length}<!-- -->)`);
-    expect(html).toContain('판정 대기 LOT 없음');
+    // 오른쪽이 크게 말하므로 왼쪽 목록은 같은 말을 되풀이하지 않는다
+    expect(html).not.toContain('판정 대기 LOT 없음');
     expect(html).not.toContain('검사 대상 LOT이 없어요');
     expect(html).not.toContain('LOT이 이 목록에 올라와요');
     // 탭에는 숫자가 하나도 없다
@@ -78,6 +93,31 @@ describe('검사 입력 목록 머리·빈 화면', () => {
       return slab ? [{ ...slab, heatResult: 'FAIL' as const, inspectionResult: 'PENDING' as const }] : [];
     });
     expect(html).toMatch(/text-danger[^>]*>· 상위 히트 <!-- -->불합격/);
+  });
+
+  it('목록에서 합격은 흐린 글자, 불합격·판정 대기만 색 배지. 밀시트가 발행된 LOT의 자물쇠는 마우스를 올리면 뜻이 보인다', async () => {
+    // 판정이 끝난 LOT을 주소로 열면 처음부터 전체를 보인다
+    let opened = 0;
+    const { html, rows } = await render((all) => {
+      const [a, b, c] = all;
+      opened = a.lotId;
+      return [
+        { ...a, inspectionResult: 'PASS' as const, locked: true },
+        { ...b, inspectionResult: 'FAIL' as const, locked: false },
+        { ...c, inspectionResult: 'PENDING' as const, locked: false },
+      ];
+    }, () => `lot=${opened}`);
+    const rowOf = (lotId: number) => {
+      const item = html.slice(html.indexOf(`href="/quality/inspections?lot=${lotId}"`));
+      return item.slice(0, item.indexOf('</a>'));
+    };
+    const [passRow, failRow, pendingRow] = rows.map((r) => rowOf(r.lotId));
+    expect(passRow).toContain('text-ink-3');
+    expect(passRow).not.toContain('bg-ok-bg');
+    expect(passRow).toContain('title="밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요"');
+    expect(failRow).toContain('bg-danger-bg');
+    expect(failRow).not.toContain('title="밀시트가 발행된');
+    expect(pendingRow).toContain('판정 대기');
   });
 
   it('검사 대상 LOT이 하나도 없으면 지금처럼 "검사 대상 LOT이 없어요"', async () => {
