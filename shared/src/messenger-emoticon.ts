@@ -93,6 +93,8 @@ export const MESSAGE_EMOTICON_KEYWORDS: Partial<Record<MessageEmoticonKey, reado
   'steelman-goal': ['목표 달성', '달성', '실적'],
   'steelman-shipping': ['출하', '배송'],
   'steelman-overtime': ['야근', '늦게까지'],
+  'steelman-back': ['돌아왔', '복귀', '다녀왔'],
+  'steelman-here': ['자리에 있', '자리 있', '착석'],
   'steelman-nep-soulless': ['넵…', '넵...'],
   'steelman-nee': ['네에', '네~'],
   'steelman-neng': ['넹', '네엥'],
