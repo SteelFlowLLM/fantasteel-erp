@@ -45,7 +45,10 @@ export function ApprovalScreen() {
         <QueryBoundary query={inbox} loadingLabel="승인 대기 구매요청을 불러오는 중…">
           {(data) =>
             data.length === 0 ? (
-              <EmptyNote>승인 대기 구매요청이 없어요</EmptyNote>
+              // 오른쪽이 "승인할 항목이 없어요"를 크게 보이므로 되풀이하지 않는다. 주소로 연 요청이 오른쪽에 떠 있을 때만 여기서 말한다
+              activeId !== null ? (
+                <EmptyNote>승인 대기 구매요청이 없어요</EmptyNote>
+              ) : null
             ) : (
               <>
                 {data.map((purchaseRequisition) => (
@@ -97,7 +100,14 @@ export function ApprovalScreen() {
             kind="empty"
             icon="approve"
             title="승인할 항목이 없어요"
-            text={`${me.headDepartmentNames.join(', ')} 부서장으로 지정돼 있어요. 부서원이 구매요청을 등록하면 여기에 올라와요`}
+            // 한 문단이면 끝의 "요" 한 글자만 다음 줄로 넘어가서, 두 문장을 줄로 나눈다
+            text={
+              <>
+                {me.headDepartmentNames.join(', ')} 부서장으로 지정돼 있어요.
+                <br />
+                부서원이 구매요청을 등록하면 여기에 올라와요.
+              </>
+            }
           />
         ) : null}
       </PageMain>
