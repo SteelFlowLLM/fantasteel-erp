@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
   BLOCKED_ATTACHMENT_EXTENSIONS,
   BUSINESS_EVENT_TYPE,
@@ -256,8 +256,9 @@ function toMessageView(message: MessageWithSender, me: number, unreadMemberCount
  * 알림은 메시지와 같은 tx에서 만들고, 소켓 발송은 커밋 뒤에 한다 (롤백된 메시지를 보내지 않도록).
  */
 @Injectable()
-export class MessengerService implements OnModuleInit {
+export class MessengerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MessengerService.name);
+  private readonly emitTimers = new Set<NodeJS.Timeout>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -273,6 +274,12 @@ export class MessengerService implements OnModuleInit {
     this.businessEvents.onRecorded((tx, event) => this.postWorkRoomNotice(tx, event));
   }
 
+  /** 롤백된 메시지는 재시도가 몇 초 이어지므로, 종료 뒤 닫힌 DB를 부르지 않게 남은 타이머를 지운다 */
+  onModuleDestroy(): void {
+    for (const timer of this.emitTimers) clearTimeout(timer);
+    this.emitTimers.clear();
+  }
+
   private async postWorkRoomNotice(tx: Tx, event: RecordedBusinessEvent): Promise<void> {
     if (event.salesOrderId === null || !WORK_ROOM_NOTICE_TYPES.has(event.type)) return;
     const room = await this.repository.findWorkRoomOf(tx, event.salesOrderId);
@@ -285,6 +292,7 @@ export class MessengerService implements OnModuleInit {
   /** 커밋된 메시지만 소켓으로 보낸다. 행이 끝까지 안 보이면(롤백) 보내지 않는다 */
   private emitWhenCommitted(messageId: number, attempt = 0): void {
     const timer = setTimeout(() => {
+      this.emitTimers.delete(timer);
       void (async () => {
         const message = await this.repository.findMessageWithSender(this.prisma, messageId);
         if (!message) {
@@ -294,6 +302,7 @@ export class MessengerService implements OnModuleInit {
         await this.emitNewMessage(message);
       })().catch((error: unknown) => this.logger.warn(`시스템 메시지 발송 실패 (메시지 ${messageId}): ${String(error)}`));
     }, EMIT_RETRY_DELAYS_MS[attempt]);
+    this.emitTimers.add(timer);
     // 서버 종료(테스트 포함)를 이 타이머가 붙잡지 않게 한다
     timer.unref();
   }
