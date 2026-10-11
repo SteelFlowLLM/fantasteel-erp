@@ -88,6 +88,7 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   const resultCount = (r: Exclude<ResultFilter, 'ALL'>) => byProcess.filter((row) => row.inspectionResult === r).length;
   // 판정 대기만 보는데 판정할 LOT이 없다 (판정이 끝난 LOT은 있다): 할 일이 없다는 좋은 상태로 보인다
   const noPending = rows.length > 0 && result === 'PENDING' && !needle && resultCount('PENDING') === 0;
+  const listHint = `${PROCESS_HINT[process]}\n탭 숫자 = 판정 대기 (없으면 숫자를 붙이지 않아요)`;
 
   return (
     <>
@@ -97,6 +98,10 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
             <div className="flex items-baseline gap-2">
               <b className="text-base font-semibold">검사 대상 LOT</b>
               <span className="text-cap text-ink-3">판정 대기 먼저 · 생산완료일 순</span>
+              {/* 공정별 검사 종류·탭 숫자 설명은 한 번 알면 되는 말이라 늘 두 줄을 차지하지 않게 마우스를 올리면 보인다 */}
+              <span role="img" aria-label={listHint} title={listHint} className="ml-auto inline-flex cursor-help self-center text-ink-3">
+                <Icon name="info" size="sm" />
+              </span>
             </div>
             {/* 탭 숫자는 판정 대기 수다. 아래 판정 결과 칩(모든 LOT 수)과 같은 "전체 0 / 전체 20"이 겹쳐 보이지 않게, 0이면 숫자를 붙이지 않는다 */}
             <Segmented
@@ -120,8 +125,6 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
               active={process}
               onChange={setProcess}
             />
-            <span className="text-cap text-ink-3">{PROCESS_HINT[process]}</span>
-            <span className="-mt-1.5 text-cap text-ink-3">탭 숫자 = 판정 대기 (없으면 숫자를 붙이지 않아요)</span>
             {/* 네 칩이 목록 칸(320px) 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 */}
             <div className="flex flex-nowrap gap-1" role="group" aria-label="판정 결과">
               {RESULT_FILTERS.map((r) =>

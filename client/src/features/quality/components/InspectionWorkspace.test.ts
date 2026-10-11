@@ -59,7 +59,9 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     const tabs = processGroupOf(html);
     expect(tabs).toContain(`title="판정 대기 ${pending}개"`);
     expect(tabs).not.toMatch(/>\s*0\s*</);
-    expect(html).toContain('탭 숫자 = 판정 대기');
+    // 설명은 늘 보이는 줄이 아니라 ⓘ에 마우스를 올리면 보인다
+    expect(html).toMatch(/title="[^"]*탭 숫자 = 판정 대기[^"]*"/);
+    expect(html.replace(/(title|aria-label)="[^"]*"/g, '')).not.toContain('탭 숫자 = 판정 대기');
   });
 
   it('판정할 LOT이 없으면(모두 판정 끝) "판정할 LOT이 없어요"와 판정 끝난 LOT 보기 버튼, 왼쪽 안내 상자는 빼고 한 줄', async () => {
