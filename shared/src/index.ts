@@ -20,3 +20,4 @@ export * from './mrp';
 export * from './mill-sheet-pdf';
 export * from './llm';
 export * from './messenger';
+export * from './messenger-emoticon';

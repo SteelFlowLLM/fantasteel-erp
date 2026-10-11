@@ -19,6 +19,7 @@ import {
   SALES_ORDER_ITEM_STATUS,
   calcWeightTon,
   emoticonPreview,
+  inlineEmoticonText,
   isMessageEmoticonKey,
   type AuthUser,
   type BusinessEventType,
@@ -114,7 +115,7 @@ function filePreview(firstName: string | null, count: number): string {
 
 function previewOf(message: { content: string | null; emoticonKey: string | null; deletedAt?: Date | null; messageAttachments: readonly { fileName: string }[] }): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
-  if (message.content) return message.content.replace(/\s+/g, ' ').trim();
+  if (message.content) return inlineEmoticonText(message.content).replace(/\s+/g, ' ').trim();
   if (message.emoticonKey) return emoticonPreview(message.emoticonKey);
   return filePreview(message.messageAttachments[0]?.fileName ?? null, message.messageAttachments.length);
 }
@@ -122,7 +123,7 @@ function previewOf(message: { content: string | null; emoticonKey: string | null
 /** 목록 SQL의 마지막 메시지 (첨부는 첫 이름과 개수만 온다) */
 function lastPreviewOf(last: { content: string | null; emoticonKey: string | null; deletedAt: Date | null; firstAttachmentName: string | null; attachmentCount: number }): string {
   if (last.deletedAt) return DELETED_MESSAGE_TEXT;
-  if (last.content) return last.content.replace(/\s+/g, ' ').trim();
+  if (last.content) return inlineEmoticonText(last.content).replace(/\s+/g, ' ').trim();
   if (last.emoticonKey) return emoticonPreview(last.emoticonKey);
   return filePreview(last.firstAttachmentName, last.attachmentCount);
 }
