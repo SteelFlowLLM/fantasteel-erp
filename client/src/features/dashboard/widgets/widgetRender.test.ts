@@ -93,10 +93,12 @@ describe('위젯 카드', () => {
     expect(quality).toContain('href="/inventories"');
   });
 
-  it('품질 담당: Agent 위험 감지(예시)는 예시 숫자 없이 한 줄 안내와 감지 유형만. 다른 역할은 원료 부족 예시', async () => {
+  it('품질 담당: Agent 위험 감지(예시)는 예시 숫자 없이 카드 머리 한 줄 안내만. 다른 역할은 원료 부족 예시', async () => {
     const quality = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('AGENT_RISK') ?? '';
     expect(quality).toContain('AI Factory Agent(P2)가 연결되면');
     expect(quality).toContain('불합격률 상승');
+    // 본문 없이 머리 안에 안내가 들어간다 (한 칸 높이 카드)
+    expect(quality.indexOf('AI Factory Agent(P2)가 연결되면')).toBeLessThan(quality.indexOf('</header>'));
     // 옆 강종별 불합격률(실제 값)과 헷갈리던 예시 숫자·대상은 보이지 않는다
     expect(quality).not.toContain('5.6%');
     expect(quality).not.toContain('SM355A · 최근 30일');
@@ -116,6 +118,26 @@ describe('위젯 카드', () => {
     expect(sales).not.toContain('opacity-60');
   });
 
+  it('공정 흐름 현황: 품질의 판정 대기가 0건이면 강조를 끄고(태그만 남김) 나머지 단계도 흐리게 하지 않는다', async () => {
+    const employeeId = actAs(SEED_EMPLOYEE_NO.quality);
+    const me = await sessionApi.getSessionUser(employeeId);
+    const data = await dashboardApi.widget('PROCESS_FLOW');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(dashboardKeys.widget('PROCESS_FLOW', employeeId), { ...data, inspections: { pendingCount: 0, heatCount: 0, slabCount: 0, coilCount: 0 } });
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(MeContext.Provider, { value: me }, createElement(WIDGET_COMPONENTS.PROCESS_FLOW, { editing: false, onRemove: () => undefined })),
+      ),
+    );
+    expect(html).toContain('내 업무');
+    expect(html).toContain('판정할 LOT 없음');
+    expect(html).not.toContain('text-[34px]');
+    expect(html).not.toContain('bg-run-bg shadow');
+    expect(html).not.toContain('opacity-60');
+  });
+
   it('강종별 불합격률: 판정된 검사가 없는 강종은 막대 없이 한 줄에 이름만, 불합격 0건은 "불합격 없음"', async () => {
     const html = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('REJECT_RATE') ?? '';
     const data = await dashboardApi.widget('REJECT_RATE');
@@ -125,6 +147,8 @@ describe('위젯 카드', () => {
     for (const g of notInspected) expect(html).toContain(g.steelGradeCode);
     expect(html).not.toContain('판정된 검사 없음');
     expect(html.includes('불합격 없음')).toBe(noReject.length > 0);
+    // 0%는 색칠한 막대 없이 글자만 (꽉 찬 막대가 100%로 읽혔다)
+    expect(html).not.toContain('bg-ok-bg');
   });
 
   it('대시보드 화면 틀: 인사·위젯 편집 버튼 (격자는 브라우저에서 너비를 잰 뒤 그린다)', async () => {

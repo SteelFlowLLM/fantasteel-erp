@@ -131,7 +131,11 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
           <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
             {noReject ? (
-              <div className="flex h-3.5 items-center overflow-hidden rounded-xs bg-ok-bg pl-2 text-2xs font-semibold text-ok">불합격 없음</div>
+              // 0%는 막대를 그리지 않고 글자만: 색칠한 막대는 꽉 찬 비율(100%)로 읽혔다
+              <span className="flex h-3.5 items-center gap-0.5 text-2xs font-semibold text-ok">
+                <Icon name="check" size="sm" />
+                불합격 없음
+              </span>
             ) : (
               <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
             )}

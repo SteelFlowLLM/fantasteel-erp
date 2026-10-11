@@ -50,13 +50,11 @@ const RAW_MATERIAL_EXAMPLE: AgentRiskExample = {
 
 /**
  * 역할별 한 줄 안내: 예시 숫자를 보이지 않는다. 품질은 옆 강종별 불합격률(실제 값)과 예시 숫자가 달라 헷갈렸다.
- * 품질 대시보드는 이 위젯을 맨 아래 낮은 칸에 둔다 (lib/layout.ts). 실제 감지 목록은 P2에서 이 자리를 쓴다
+ * 품질 대시보드는 이 위젯을 공정 흐름 바로 아래 한 칸 높이로 두고(lib/layout.ts) 안내를 카드 머리 한 줄에 넣는다.
+ * 감지 유형은 문장에 이미 있어 칩으로 따로 두지 않는다 (누를 수 있는 것처럼 보였다). 실제 감지 목록은 P2에서 이 자리를 쓴다
  */
-const AGENT_RISK_GUIDE_BY_ROLE: Partial<Record<RoleCode, { text: string; types: readonly AgentRiskType[] }>> = {
-  QUALITY: {
-    text: 'AI Factory Agent(P2)가 연결되면 불합격률 상승·합격 매수 부족·여재 장기 보유를 감지해 여기에 알려 줘요. AI는 상황만 설명하고, 원인 확인과 조치는 품질 담당이 해요.',
-    types: ['불합격률 상승', '합격 매수 부족', '여재 장기 보유'],
-  },
+const AGENT_RISK_GUIDE_BY_ROLE: Partial<Record<RoleCode, string>> = {
+  QUALITY: 'AI Factory Agent(P2)가 연결되면 불합격률 상승·합격 매수 부족·여재 장기 보유를 감지해 알려 줘요. 원인 확인과 조치는 품질 담당이 해요.',
 };
 
 export function AgentRiskWidget(props: WidgetProps) {
@@ -64,19 +62,10 @@ export function AgentRiskWidget(props: WidgetProps) {
   const guide = AGENT_RISK_GUIDE_BY_ROLE[me.roleCode];
   if (guide) {
     return (
-      <WidgetFrame widgetKey="AGENT_RISK" {...props} meta="예시">
-        <SoonArea dim={false}>
-          <div className="flex items-center gap-4">
-            <p className="min-w-0 flex-1 text-sm leading-normal text-ink-2">{guide.text}</p>
-            <div className="flex max-w-[280px] flex-wrap justify-end gap-1">
-              {guide.types.map((type) => (
-                <Badge key={type} tone="neutral" plain>
-                  {type}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        </SoonArea>
+      <WidgetFrame widgetKey="AGENT_RISK" {...props} inline>
+        <p className="truncate text-sm text-ink-2" title={guide}>
+          {guide}
+        </p>
       </WidgetFrame>
     );
   }

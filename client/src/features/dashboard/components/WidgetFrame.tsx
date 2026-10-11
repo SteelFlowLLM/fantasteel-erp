@@ -31,10 +31,12 @@ export interface WidgetFrameProps extends WidgetProps {
   meta?: string | null;
   /** 머리 오른쪽, 바로가기 앞에 둘 조작 (예: 보는 기준 전환). 편집 중에는 숨긴다 */
   actions?: ReactNode;
+  /** 본문 없이 children을 머리 한 줄(meta 자리)에 넣는다: 한 칸 높이 카드 */
+  inline?: boolean;
   children: ReactNode;
 }
 
-export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, children }: WidgetFrameProps) {
+export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, inline = false, children }: WidgetFrameProps) {
   const def = widgetDef(widgetKey);
   const me = useMe();
   const link = def.link && !editing && !def.soon && canOpenScreen(me, def.link.screen.access) ? def.link : null;
@@ -45,7 +47,12 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, child
     >
       <header
         title={editing ? '끌어서 옮기기' : undefined}
-        className={cn(DRAG_HANDLE_CLASS, 'flex h-11 min-w-0 flex-none items-center gap-2 border-b border-line pr-2 pl-4', editing && 'cursor-grab select-none active:cursor-grabbing')}
+        className={cn(
+          DRAG_HANDLE_CLASS,
+          'flex min-w-0 items-center gap-2 pr-2 pl-4',
+          inline ? 'min-h-11 flex-1' : 'h-11 flex-none border-b border-line',
+          editing && 'cursor-grab select-none active:cursor-grabbing',
+        )}
       >
         {editing ? <Icon name="grip" size="sm" className="flex-none text-ink-3" /> : null}
         {def.soon ? <AiMark size="sm" /> : null}
@@ -53,9 +60,13 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, child
           {def.label}
         </h2>
         {def.soon ? <ComingSoon grade="P2" /> : null}
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-3" title={meta ?? undefined}>
-          {meta}
-        </span>
+        {inline ? (
+          <div className="ml-1 min-w-0 flex-1">{children}</div>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs text-ink-3" title={meta ?? undefined}>
+            {meta}
+          </span>
+        )}
         <div className="flex flex-none items-center gap-1">
           {actions && !editing ? <div className={NO_DRAG_CLASS}>{actions}</div> : null}
           {link ? (
@@ -66,7 +77,7 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, child
           {editing ? <IconButton icon="x" size="sm" label={`${def.label} 위젯 제외`} title="위젯 제외" className={NO_DRAG_CLASS} onClick={() => onRemove(widgetKey)} /> : null}
         </div>
       </header>
-      <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto', editing && '[&_a]:pointer-events-none')}>{children}</div>
+      {inline ? null : <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto', editing && '[&_a]:pointer-events-none')}>{children}</div>}
     </section>
   );
 }
