@@ -56,6 +56,9 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
   const hasSavedValues = items.some((item) => item.measuredValue !== null);
   const editable = canEdit && !detail.locked && detail.standard !== null;
   const canSubmit = editable && items.length > 0 && invalidRows.length === 0 && dirtyRows.length > 0 && !register.isPending;
+  // 시연용 채우기는 채울 빈 칸이 있을 때만 보인다 (판정이 끝나 칸이 다 찬 LOT에서는 할 일이 없다)
+  const filled = fillTypicalValues(items, raw);
+  const canFill = items.some((item) => (filled[item.inspectionStandardItemId] ?? '') !== (raw[item.inspectionStandardItemId] ?? ''));
 
   const forecast =
     invalidRows.length > 0
@@ -84,18 +87,22 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
           title="측정값"
           meta={`항목 ${items.length}개 · 필수 ${items.filter((i) => i.isRequired).length}개`}
           actions={
-            <>
-              <Button
-                size="sm"
-                icon="edit"
-                disabled={!editable || items.length === 0}
-                title={canEdit ? '비어 있는 칸만 기준 안 값으로 채워요. 저장은 직접 눌러요' : permissionNeedText([PERMISSION.INSPECTION_REGISTER])}
-                onClick={() => setRaw((prev) => fillTypicalValues(items, prev))}
-              >
-                기준 안 값으로 채우기
-              </Button>
-              <span className="text-cap text-ink-3">시연용 도우미</span>
-            </>
+            canFill ? (
+              <>
+                {/* 점선 테두리: 업무 버튼이 아니라 시연용 도우미라는 것을 모양으로 구분한다 */}
+                <Button
+                  size="sm"
+                  icon="edit"
+                  className="border-dashed"
+                  disabled={!editable}
+                  title={canEdit ? '비어 있는 칸만 기준 안 값으로 채워요. 저장은 직접 눌러요' : permissionNeedText([PERMISSION.INSPECTION_REGISTER])}
+                  onClick={() => setRaw((prev) => fillTypicalValues(items, prev))}
+                >
+                  기준 안 값으로 채우기
+                </Button>
+                <span className="text-cap text-ink-3">시연용 도우미</span>
+              </>
+            ) : null
           }
         />
         <CardBody>
