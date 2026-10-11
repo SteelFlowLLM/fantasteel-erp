@@ -145,8 +145,8 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
       <PageMain>
         {activeId === null ? (
           rows.length === 0 ? (
-            // 불합격 LOT이 하나도 없으면 왼쪽 안내 상자 대신 여기서 이 화면이 무엇인지 함께 말한다
-            <StateView kind="empty" title="불합격 LOT이 없어요" text={REJECTED_GUIDE} />
+            // 불합격 LOT이 하나도 없으면 왼쪽 안내 상자 대신 여기서 이 화면이 무엇인지 함께 말한다 (가운데 정렬 두 줄이라 낱말 중간에서 끊기지 않게)
+            <StateView kind="empty" title="불합격 LOT이 없어요" text={<span className="break-keep">{REJECTED_GUIDE}</span>} />
           ) : (
             <StateView kind="empty" title="조건에 맞는 불합격 LOT이 없어요" text="상태·원인·검색어를 바꿔 보세요." />
           )
