@@ -15,7 +15,6 @@ import { appendPlacement, buildDefaultPlacements, compactPlacements, removePlace
 import { WidgetAddPanel } from '@/features/dashboard/WidgetAddPanel';
 import { useDashboardLayout } from '@/hooks/useDashboardLayout';
 import { useMe } from '@/hooks/useMe';
-import { fmtMDdow, todayStr } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
 export function DashboardScreen() {
@@ -56,13 +55,8 @@ export function DashboardScreen() {
     <>
       <PageMain className="gap-3.5">
         <div className="flex flex-none flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <b className="truncate text-lg font-semibold">{me.employeeName}님, 안녕하세요</b>
-            <span className="truncate text-cap text-ink-3">
-              {me.departmentName} · {me.roleName} · {todayStr().slice(0, 5)}
-              {fmtMDdow(new Date())}
-            </span>
-          </div>
+          {/* 소속·오늘 날짜는 상단 바(날짜·시각, 이름 아래 소속)에 이미 있어 인사만 둔다 */}
+          <b className="min-w-0 flex-1 truncate text-lg font-semibold">{me.employeeName}님, 안녕하세요</b>
           {!editing ? (
             <Button icon="widget" onClick={() => startEdit(true)}>
               위젯 편집
