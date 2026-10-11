@@ -42,6 +42,20 @@ describe('검사 기준 상세', () => {
     expect(table.match(/>필수</g)?.length).toBeGreaterThan(0);
   });
 
+  it('두께 구간마다 이어지는 같은 항목은 한 묶음: 코드·이름은 첫 줄에만, 묶음 안 줄 사이 선은 지운다', async () => {
+    let code = '';
+    const table = tableOf(
+      await render((d) => {
+        const [first, ...rest] = d.items;
+        code = first.inspectionItemCode;
+        const bands = [1, 2, 3].map((n) => ({ ...first, id: first.id * 100 + n, minValue: String(n) }));
+        return { ...d, items: [...bands, ...rest] };
+      }),
+    );
+    expect(table.split(`>${code}<`).length - 1).toBe(1);
+    expect(table.match(/\[&amp;&gt;td\]:border-b-transparent/g)?.length).toBe(2);
+  });
+
   it('기준 삭제는 테두리 없는 빨간 글자 버튼, 새 버전 만들기만 진한 버튼', async () => {
     const html = await render();
     const del = html.slice(html.lastIndexOf('<button', html.indexOf('기준 삭제')), html.indexOf('기준 삭제'));
