@@ -29,11 +29,11 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 ```
 
 - 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
-- 기본(서버 모드)은 처음 열면 사원번호·비밀번호 **로그인** 화면(`/login`)이 나온다(아래 서버 연결). 가짜 DB 모드(`NEXT_PUBLIC_DATA_SOURCE=mock`)는 **계정 선택** 화면이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 서버 모드는 사원번호·비밀번호 로그인이다(아래 서버 연결). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
+- 기본(서버 모드)은 처음 열면 사원번호·비밀번호 **로그인** 화면(`/login`)이 나온다(아래 서버 연결). 가짜 DB 모드(`NEXT_PUBLIC_DATA_SOURCE=mock`)는 **계정 선택** 화면이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
 - 가짜 DB 모드에서 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
-- 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버가 없어 다른 PC와는 공유되지 않는다.
+- 가짜 DB 모드의 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버를 거치지 않아 다른 PC와는 공유되지 않는다.
 
-### 서버 연결 (기본, 2026-10-08부터)
+### 서버 연결 (기본)
 
 수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)를 부른다. 데이터 출처 기본값은 서버이고(`api/http.ts`의 `dataSource()`: 비우거나 `mock`이 아니면 서버), 다른 기능(Message → ERP 초안·전역 검색 등)은 서버 모드에서도 가짜 DB를 쓴다. `NEXT_PUBLIC_DATA_SOURCE=mock`은 테스트용이다(`vitest.config.ts`가 지정, 서버 어댑터 테스트는 `useFakeServer`가 server로 바꾼다).
 

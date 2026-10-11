@@ -5,7 +5,7 @@
 지금 저장소에는 두 가지가 같이 있습니다.
 
 - **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. 기본은 **실제 서버(`server/`)를 부르고**, 서버에 아직 연결되지 않은 기능만 브라우저 안의 가짜 DB(mock)를 씁니다. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
-- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)). 새 화면은 아직 서버를 부르지 않습니다.
+- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)).
 - P2(AI)·EX 기능은 화면만 있고 "준비 중"으로 표시됩니다. AI·LLM 호출은 없습니다.
 
 ## 화면 실행 (서버·DB 필요 없음)
