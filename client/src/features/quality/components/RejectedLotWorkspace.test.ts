@@ -42,8 +42,16 @@ describe('불합격 관리 목록 머리', () => {
   });
 
   it('원인 칩은 줄바꿈 없이 한 줄이고 문구는 그대로', async () => {
-    const html = await render(() => []);
+    const html = await render((rows) => rows);
     expect(html).toMatch(/<div[^>]*flex-nowrap[^>]*aria-label="불합격 원인"|aria-label="불합격 원인"[^>]*flex-nowrap/);
+    expect(html).not.toMatch(/<div[^>]*hidden[^>]*aria-label="불합격 원인"/);
     for (const label of ['모든 원인', '검사 불합격', '불합격 히트의 하위 LOT']) expect(html).toContain(`>${label}<`);
+  });
+
+  it('불합격 LOT이 없으면 "없어요"는 오른쪽에 한 번만, 원인 칩은 숨기고 안내 상자 문구는 오른쪽 빈 화면으로', async () => {
+    const html = await render(() => []);
+    expect(html.match(/불합격 LOT이 없어요/g)?.length).toBe(1);
+    expect(html).toMatch(/<div[^>]*hidden[^>]*aria-label="불합격 원인"/);
+    expect(html.match(/검사 기준을 충족하지 못한 LOT/g)?.length).toBe(1);
   });
 });

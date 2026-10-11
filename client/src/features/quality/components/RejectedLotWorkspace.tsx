@@ -38,6 +38,7 @@ type ReasonFilter = 'ALL' | 'FAILED' | 'HEAT_FAILED';
 const statusOf = (row: RejectedLotListRow): Exclude<StatusFilter, 'ALL'> => row.dispositionStatus ?? 'NONE';
 const failedNames = (row: RejectedLotListRow): string => row.failedItems.map((f) => f.inspectionItemName).join(' · ');
 const rejectedHref = (lotId: number): string => `/quality/rejected?lot=${lotId}`;
+const REJECTED_GUIDE = '검사 기준을 충족하지 못한 LOT과 불합격 히트의 하위 LOT이에요. 예약·배정·출고 대상에서 빠져 있고, 여기서는 불합격 상태와 사유만 기록해요.';
 
 const TILES: readonly { key: Exclude<StatusFilter, 'ALL'>; label: string; className: string; onClassName: string }[] = [
   { key: 'NONE', label: '미지정', className: 'bg-surface-3 text-ink-2', onClassName: 'shadow-[inset_0_0_0_2px_var(--color-ink-2)]' },
@@ -113,8 +114,8 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
                 );
               })}
             </div>
-            {/* 세 칩이 목록 칸 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 (문구는 용어 사전 TRM-078 그대로) */}
-            <div className="flex flex-nowrap gap-1" role="group" aria-label="불합격 원인">
+            {/* 세 칩이 목록 칸 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 (문구는 용어 사전 TRM-078 그대로). 불합격 LOT이 없으면 거를 것이 없어 숨긴다 */}
+            <div className={cn('flex flex-nowrap gap-1', rows.length === 0 && 'hidden')} role="group" aria-label="불합격 원인">
               <Chip on={reason === 'ALL'} onClick={() => setReason('ALL')} className="px-2">
                 모든 원인
               </Chip>
@@ -132,14 +133,26 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
         {list.map((r) => (
           <RejectedItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
-        {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '불합격 LOT이 없어요' : '조건에 맞는 불합격 LOT이 없어요'}</EmptyNote> : null}
-        <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
-          검사 기준을 충족하지 못한 LOT과 불합격 히트의 하위 LOT이에요. 예약·배정·출고 대상에서 빠져 있고, 여기서는 불합격 상태와 사유만 기록해요.
-        </Banner>
+        {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 되풀이하지 않는다. 오른쪽에 주소로 연 LOT이 떠 있을 때만 여기서 말한다 */}
+        {list.length === 0 && activeId !== null ? <EmptyNote>{rows.length === 0 ? '불합격 LOT이 없어요' : '조건에 맞는 불합격 LOT이 없어요'}</EmptyNote> : null}
+        {rows.length > 0 ? (
+          <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
+            {REJECTED_GUIDE}
+          </Banner>
+        ) : null}
       </MasterPane>
 
       <PageMain>
-        {activeId === null ? <StateView kind="empty" title="불합격 LOT이 없어요" /> : <Detail key={activeId} lotId={activeId} />}
+        {activeId === null ? (
+          rows.length === 0 ? (
+            // 불합격 LOT이 하나도 없으면 왼쪽 안내 상자 대신 여기서 이 화면이 무엇인지 함께 말한다
+            <StateView kind="empty" title="불합격 LOT이 없어요" text={REJECTED_GUIDE} />
+          ) : (
+            <StateView kind="empty" title="조건에 맞는 불합격 LOT이 없어요" text="상태·원인·검색어를 바꿔 보세요." />
+          )
+        ) : (
+          <Detail key={activeId} lotId={activeId} />
+        )}
       </PageMain>
     </>
   );
