@@ -131,8 +131,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 방 멤버만(COM-002), 삭제·시스템 메시지는 COM-004. 알림은 보내지 않고 멤버에게 `message:updated`.
 - 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
 
-**이모티콘** (18번~22번, 스키마 4차 `message.emoticon_key`, 문서에 없는 추가 기능)
-- 묶음 3개, 116종: 철강맨 업무 39종(18번 8종 + 19번 10종 + 20번 11종 + 22번 10종) · 철강맨 일상 65종(19번 19종 + 20번 14종 + 21번 6종: 요즘 말투 밈 + 22번 26종) · 철강맨 행사 12종(20번: 새해·설·추석·연말·생일·환영 + 22번: 승진·크리스마스·더위·추위·휴가·축하). 키·이름·묶음은 shared `MESSAGE_EMOTICONS`(항목마다 `set`), 묶음은 `MESSAGE_EMOTICON_SETS`(`steelman-work`·`steelman-daily`·`steelman-event`). 순서가 화면 고르기 창 순서다.
+**이모티콘** (18번~22번·25번, 스키마 4차 `message.emoticon_key`, 문서에 없는 추가 기능)
+- 묶음 3개, 118종: 철강맨 업무 41종(18번 8종 + 19번 10종 + 20번 11종 + 22번 10종 + 25번 2종: 돌아왔어요·자리에 있어요) · 철강맨 일상 65종(19번 19종 + 20번 14종 + 21번 6종: 요즘 말투 밈 + 22번 26종) · 철강맨 행사 12종(20번: 새해·설·추석·연말·생일·환영 + 22번: 승진·크리스마스·더위·추위·휴가·축하). 키·이름·묶음은 shared `MESSAGE_EMOTICONS`(항목마다 `set`), 묶음은 `MESSAGE_EMOTICON_SETS`(`steelman-work`·`steelman-daily`·`steelman-event`). 순서가 화면 고르기 창 순서다.
 - `POST chat-rooms/:id/messages { content, emoticonKey }`: 서버는 키가 `MESSAGE_EMOTICONS` 목록에 있는지만 본다(묶음은 보지 않음). 없으면 COM-004. 글과 함께 보낼 수 있고, 글·이모티콘이 모두 없으면 COM-004. 첨부 API는 받지 않는다(화면도 파일과 함께 고르지 못하게 막음). 이모티콘을 더해도 스키마는 그대로다(키는 varchar(32) 안).
 - 응답 `emoticonKey`(없거나 삭제된 메시지는 null, 목록에서 뺀 키가 DB에 남아 있어도 null). 미리보기(목록·알림·답글·공지)는 글이 있으면 글, 없으면 `이모티콘 · 이름`.
 - 수정은 글만 바꾼다(이모티콘이 있으면 글을 비워도 됨). 검색은 본문만 보므로 이모티콘만 있는 메시지는 나오지 않는다.

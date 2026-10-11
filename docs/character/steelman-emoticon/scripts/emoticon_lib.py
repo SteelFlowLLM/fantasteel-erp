@@ -367,6 +367,13 @@ PROPS = {
         "NNNNNNNNNNNNNNNNNNN", "..NNN.........NNN..", ".NKHKN.......NKHKN.", "..NNN.........NNN..",
     ],
     'moon_s': [".NNN.", "NYYN.", "NYN..", "NYYN.", ".NNN."],
+    # ── 6차 소품 ──
+    'sheep': [
+        "..NNNN.......", ".NWWWWNNNN...", "NWWWWWWNssN..", "NWWWWWWNsNsN.", "NWWWWWWWNssN.", ".NWWWWWWNNN..",
+        "..NNNNNNN....", "..NN..NN.....",
+    ],
+    'goreum': ["NNNN", "NRRN", ".NRN", ".NRN", "NRRN", "NN.."],
+    'dot_on': [".NNN.", "NEEEN", "NELEN", "NEEEN", ".NNN."],
 }
 
 
@@ -761,6 +768,24 @@ def slab_cat(k=1.0, eyes_open=True):
 
 
 PROC.update({'bars': bars_img, 'stream': stream_img, 'dog': coil_dog, 'cat': slab_cat})
+
+
+def hanbok(img, jacket='P', pants='b'):
+    """한복: 작업복 윗도리(31~39줄)는 저고리 색으로, 바지(40~44줄)는 바지 색으로 (손·외곽선은 그대로)."""
+    def fn_for(color):
+        target = rgba(color)[:3]
+
+        def fn(r, g, b):
+            lum = (r + g + b) / 3
+            base = mix(target, (255, 255, 255), 0.25) if lum > 170 else target if lum > 90 else mix(target, (0, 0, 0), 0.25)
+            return base
+        return fn
+    out = img.copy()
+    top = recolor(img.crop((13, 31, 35, 40)), fn_for(jacket))
+    out.paste(top, (13, 31))
+    bottom = recolor(img.crop((13, 40, 35, 45)), fn_for(pants))
+    out.paste(bottom, (13, 40))
+    return out
 
 
 def stretch_wide(img, k):

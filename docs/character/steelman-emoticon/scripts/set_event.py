@@ -1,5 +1,5 @@
-"""묶음 '철강맨 행사' (steelman-event): 3차 6종 (명절·연말·생일·환영) + 5차 6종 (승진·크리스마스·더위·추위·휴가·축하). 키는 shared MESSAGE_EMOTICONS와 같다."""
-from emoticon_lib import emoticon, face, flatten, fr, molten_bottom, nod, tint
+"""묶음 '철강맨 행사' (steelman-event): 3차 6종 (명절·연말·생일·환영) + 5차 6종 (승진·크리스마스·더위·추위·휴가·축하). 6차에 새해를 한복·띠로 보강. 키는 shared MESSAGE_EMOTICONS와 같다."""
+from emoticon_lib import emoticon, face, flatten, fr, hanbok, molten_bottom, nod, tint
 
 
 def build(sh):
@@ -11,13 +11,20 @@ def build(sh):
 
     E = []
 
-    # 새해 복 많이 받으세요: 복주머니 들고 꾸벅 + 작은 불꽃놀이
+    # 새해 복 많이 받으세요: 한복 입고 절 + 그해 띠(2027 정미년 = 양) + 복주머니 + 작은 불꽃놀이 (6차 보강)
+    # 띠는 해마다 바꾼다: ZODIAC 소품만 바꿔 다시 만든다
+    ZODIAC = 'sheep'
+    han = hanbok(idle)
+    han_bow = hanbok(bow)
+    goreum = ('goreum', 22, 32)
     E.append(emoticon('새해', 'steelman-new-year', ['새해 복', '많이 받으세요'], 'R', [
-        fr(idle, 180, front=[('pouch', 19, 31)]),
-        fr(nod(bow, 2), 90, front=[('pouch', 19, 31)]),
-        fr(nod(bow, 4, helmet_extra=1), 600, front=[('pouch', 19, 30), ('burst_at', -7, 8, 5, 'W', 'R', 'r'), ('burst_at', 37, 6, 5, 'W', 'Y', 'O')]),
-        fr(nod(bow, 2), 90, front=[('pouch', 19, 31)]),
-        fr(bow, 450, front=[('pouch', 19, 31), ('spark_s', 44, 10), ('spark_s', 2, 12)]),
+        fr(han, 220, front=[goreum, ('pouch', 36, 31), (ZODIAC, -6, 34)]),
+        fr(nod(han_bow, 2), 100, front=[('pouch', 36, 31), (ZODIAC, -6, 34)]),
+        fr(nod(han_bow, 4, helmet_extra=1), 120, front=[('pouch', 36, 32), (ZODIAC, -6, 34)]),
+        fr(flatten(nod(han_bow, 6, helmet_extra=2), 0.94, 1.04), 700,
+           front=[('pouch', 36, 33), (ZODIAC, -6, 34), ('burst_at', -7, 4, 5, 'W', 'R', 'r'), ('burst_at', 37, 2, 5, 'W', 'Y', 'O')]),
+        fr(nod(han_bow, 2), 100, front=[('pouch', 36, 31), (ZODIAC, -6, 34)]),
+        fr(han_bow, 450, front=[goreum, ('pouch', 36, 31), (ZODIAC, -6, 33), ('spark_s', 44, 10), ('spark_s', 2, 12)]),
     ]))
 
     # 즐거운 설: 떡국 한 그릇 + 김

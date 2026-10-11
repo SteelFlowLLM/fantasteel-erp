@@ -1,4 +1,4 @@
-"""묶음 '철강맨 업무' (steelman-work): 1차 8종 + 2차 10종 + 3차 11종 + 5차 10종. 키는 shared MESSAGE_EMOTICONS와 같다."""
+"""묶음 '철강맨 업무' (steelman-work): 1차 8종 + 2차 10종 + 3차 11종 + 5차 10종 + 6차 2종. 키는 shared MESSAGE_EMOTICONS와 같다."""
 from PIL import Image
 
 from emoticon_lib import PROPS, blank, emoticon, face, flatten, flip, fr, heat, helmet_off, nod, prop, roll_disc, shift, stretch, tint
@@ -400,4 +400,20 @@ def build(sh):
         fr(nod(face(idle, eyes='closed', mouth='flat'), 4), 400, back=[('moon_s', 2, 2)], front=[('lamp', 34, 24), ('paper', 2, 31), ('z', 42, 6), ('z', 38, 12)]),
         fr(face(idle, eyes='wide', mouth='o'), 400, back=[('moon_s', 2, 2)], front=[('lamp', 34, 24), ('paper', 2, 31), ('excl', 40, 8)]),
     ]))
+    # ── 6차 ────────────────────────────────────────────
+    # 돌아왔어요: 종종걸음으로 들어와 손 흔들기 (상태 알림)
+    back = []
+    for i, x in enumerate((-34, -28, -22, -16, -10, -5, -1)):
+        back.append(fr(walk[i % 6], 80, back=[('speed_s', x - 8, 26), ('dust_s', x + 4, 43)], char_at=(x, 0), cx=-1 if i % 2 else 0))
+    E.append(emoticon('돌아왔어요', 'steelman-back', '돌아왔어요', 'E', back + [
+        fr(face(wave1, eyes='happy', mouth='open'), 160, front=[('dot_on', 40, 4)]),
+        fr(face(wave2, eyes='happy', mouth='open'), 160, front=[('dot_on', 40, 4), ('spark_s', 46, 12)]),
+        fr(face(wave1, eyes='happy', mouth='open'), 500, front=[('dot_on', 40, 4)]),
+    ]))
+
+    # 자리에 있어요: 의자 앞에서 손 들고, 초록 '접속' 점이 깜빡 (상태 알림)
+    here = [face(wave1, mouth='smile'), face(wave2, mouth='smile')]
+    E.append(emoticon('자리에 있어요', 'steelman-here', '자리에 있어요', 'E', [
+        fr(here[i % 2], 220, back=[('chair', 36, 30)], front=[('dot_on', 4, 6)] if i % 2 == 0 else []) for i in range(4)
+    ] + [fr(here[0], 500, back=[('chair', 36, 30)], front=[('dot_on', 4, 6), ('spark_s', 10, 4)])]))
     return E

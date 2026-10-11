@@ -2428,6 +2428,141 @@
     "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
     "sourceSize": { "w": 64, "h": 64 },
     "duration": 400
+   },
+   {
+    "filename": "steelman_work_64 270.aseprite",
+    "frame": { "x": 0, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 271.aseprite",
+    "frame": { "x": 64, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 272.aseprite",
+    "frame": { "x": 128, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 273.aseprite",
+    "frame": { "x": 192, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 274.aseprite",
+    "frame": { "x": 256, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 275.aseprite",
+    "frame": { "x": 320, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 276.aseprite",
+    "frame": { "x": 384, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 80
+   },
+   {
+    "filename": "steelman_work_64 277.aseprite",
+    "frame": { "x": 448, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 160
+   },
+   {
+    "filename": "steelman_work_64 278.aseprite",
+    "frame": { "x": 512, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 160
+   },
+   {
+    "filename": "steelman_work_64 279.aseprite",
+    "frame": { "x": 576, "y": 2496, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 500
+   },
+   {
+    "filename": "steelman_work_64 280.aseprite",
+    "frame": { "x": 0, "y": 2560, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 220
+   },
+   {
+    "filename": "steelman_work_64 281.aseprite",
+    "frame": { "x": 64, "y": 2560, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 220
+   },
+   {
+    "filename": "steelman_work_64 282.aseprite",
+    "frame": { "x": 128, "y": 2560, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 220
+   },
+   {
+    "filename": "steelman_work_64 283.aseprite",
+    "frame": { "x": 192, "y": 2560, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 220
+   },
+   {
+    "filename": "steelman_work_64 284.aseprite",
+    "frame": { "x": 256, "y": 2560, "w": 64, "h": 64 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 64, "h": 64 },
+    "sourceSize": { "w": 64, "h": 64 },
+    "duration": 500
    }
  ],
  "meta": {
@@ -2435,7 +2570,7 @@
   "version": "1.3.18.6-arm64",
   "image": "steelman_work_64.png",
   "format": "RGBA8888",
-  "size": { "w": 1152, "h": 2496 },
+  "size": { "w": 1152, "h": 2624 },
   "scale": "1",
   "frameTags": [
    { "name": "확인", "from": 0, "to": 5, "direction": "forward", "color": "#000000ff" },
@@ -2476,7 +2611,9 @@
    { "name": "출고 확정", "from": 249, "to": 252, "direction": "forward", "color": "#000000ff" },
    { "name": "월 목표", "from": 253, "to": 257, "direction": "forward", "color": "#000000ff" },
    { "name": "출하", "from": 258, "to": 265, "direction": "forward", "color": "#000000ff" },
-   { "name": "야근", "from": 266, "to": 269, "direction": "forward", "color": "#000000ff" }
+   { "name": "야근", "from": 266, "to": 269, "direction": "forward", "color": "#000000ff" },
+   { "name": "돌아왔어요", "from": 270, "to": 279, "direction": "forward", "color": "#000000ff" },
+   { "name": "자리에 있어요", "from": 280, "to": 284, "direction": "forward", "color": "#000000ff" }
   ]
  }
 }
