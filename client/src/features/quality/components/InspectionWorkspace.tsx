@@ -231,7 +231,7 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
     inspectionNameOf(row.processType),
     spec,
     row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음',
-    `생산완료일 ${fmtDate(row.producedDate)}`,
+    row.producedDate ? `생산완료일 ${fmtDate(row.producedDate)}` : null,
     row.inspectionResult !== 'PENDING' || row.inspectedAt ? `검사 ${fmtMDHM(row.inspectedAt)} · ${row.inspectorName ?? '—'}` : null,
     row.inspectionStandardCode ? `${row.inspectionStandardCode} v${row.inspectionStandardVersion ?? ''}` : null,
     heatResult ? `상위 히트 ${INSPECTION_RESULT_LABEL[heatResult]}` : null,
@@ -265,7 +265,8 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
       </div>
       <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText} data-pet-field="규격 · 생산일">
         <span className="min-w-0 truncate">
-          {spec} · 생산 {fmtMD(row.producedDate)}
+          {/* 히트는 생산완료일 칸이 없어(서버) "생산 -"로 보였다: 날짜가 있을 때만 붙인다 */}
+          {row.producedDate ? `${spec} · 생산 ${fmtMD(row.producedDate)}` : spec}
         </span>
         {/* 상위 히트가 합격이 아니면 판정에 영향을 주므로 잘리지 않게 따로 둔다 */}
         {heatResult ? (
