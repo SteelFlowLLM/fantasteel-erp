@@ -49,6 +49,9 @@ const PROCESS_HINT: Record<ProcessFilter, string> = {
 
 export const inspectionHref = (lotId: number): string => `/quality/inspections?lot=${lotId}`;
 
+/** 목록 자물쇠 설명 (상세 머리의 밀시트 안내와 같은 뜻) */
+const LOCKED_TEXT = '밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요';
+
 export function InspectionWorkspace() {
   const queue = useInspectionQueue();
   return (
@@ -140,8 +143,8 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
         {list.map((r) => (
           <QueueItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
-        {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : noPending ? '판정 대기 LOT 없음' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
-        {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 여기서는 되풀이하지 않는다 */}
+        {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 여기서는 되풀이하지 않는다. 오른쪽에 주소로 연 LOT이 떠 있을 때만 여기서 말한다 */}
+        {list.length === 0 && activeId !== null ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : noPending ? '판정 대기 LOT 없음' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
         {list.length > 0 ? (
           <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
             제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
@@ -227,9 +230,21 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
       <div className="flex items-center gap-1.5">
         <Icon name={lotIconOf(row.lotType)} size="sm" className={active ? 'text-brand' : 'text-ink-3'} />
         <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'}>{row.lotNo}</span>
-        {row.locked ? <Icon name="lock" size="sm" className="text-ink-3" /> : null}
+        {row.locked ? (
+          <span role="img" aria-label={LOCKED_TEXT} title={LOCKED_TEXT} className="inline-flex">
+            <Icon name="lock" size="sm" className="text-ink-3" />
+          </span>
+        ) : null}
         <span className="ml-auto">
-          <ResultBadge result={row.inspectionResult} />
+          {/* 합격은 흐린 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
+          {row.inspectionResult === 'PASS' ? (
+            <span className="inline-flex items-center gap-0.5 text-cap text-ink-3">
+              <Icon name="check" size="sm" />
+              {INSPECTION_RESULT_LABEL.PASS}
+            </span>
+          ) : (
+            <ResultBadge result={row.inspectionResult} />
+          )}
         </span>
       </div>
       <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText}>
