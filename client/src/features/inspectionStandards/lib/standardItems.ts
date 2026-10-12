@@ -161,3 +161,34 @@ export function findCurrentStandard<T extends StandardHeadLike>(standards: reado
   // 자동 판정(core currentStandardOf)과 같은 함수
   return pickCurrentStandard(standards, processType, steelGradeId);
 }
+
+export interface SharedColumnItem extends ThicknessBand {
+  minValue: string | null;
+  maxValue: string | null;
+  isRequired: boolean;
+}
+
+/** 모든 줄이 같은 값이라 표에서 접는 칸. true = 접는다 */
+export interface SharedColumns {
+  min: boolean;
+  max: boolean;
+  band: boolean;
+  required: boolean;
+  source: boolean;
+}
+
+/**
+ * 검사 기준 항목표에서 모든 줄이 같은 칸 (예: 제강 기준은 최소 없음·전체 두께·필수·KS가 6줄 모두 같다).
+ * 같은 칸은 표 위 한 줄 요약으로 옮겨 값(최대 등)이 먼저 읽히게 한다. 줄이 하나뿐이면 접지 않는다(비교할 줄이 없다).
+ * 근거 칸은 "바뀜" 표시도 함께 보이므로 이전 버전에서 바뀐 항목이 있으면 접지 않는다.
+ */
+export function findSharedColumns(items: readonly SharedColumnItem[], hasChangedItems: boolean): SharedColumns {
+  if (items.length < 2) return { min: false, max: false, band: false, required: false, source: false };
+  return {
+    min: items.every((item) => item.minValue === null),
+    max: items.every((item) => item.maxValue === null),
+    band: items.every((item) => formatThicknessBand(item) === '전체'),
+    required: items.every((item) => item.isRequired),
+    source: !hasChangedItems,
+  };
+}

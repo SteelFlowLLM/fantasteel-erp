@@ -10,6 +10,8 @@ import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Icon } from '@/components/Icon';
+import { IconButton } from '@/components/IconButton';
 import { KvList } from '@/components/KvList';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
@@ -22,10 +24,14 @@ import {
   buildStandardItemKey,
   getStandardValueSource,
   formatThicknessBand,
+  findSharedColumns,
+  type SharedColumns,
 } from '@/features/inspectionStandards/lib/standardItems';
 import { PROCESS_INSPECTION_TEXT, STANDARD_LOCK_TEXT } from '@/features/inspectionStandards/lib/standardText';
+import { PopItem, PopPanel } from '@/features/shell/PopPanel';
 import { useAction } from '@/hooks/useAction';
 import { useInspectionStandardDetail } from '@/hooks/useInspectionStandards';
+import { usePopover } from '@/hooks/usePopover';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtMD } from '@/lib/format';
 
@@ -69,7 +75,17 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
   const changed = view.previousItems ? findChangedItemKeys(view.items, view.previousItems) : new Set<string>();
   const removed = view.previousItems ? countRemovedItems(view.items, view.previousItems) : 0;
   const current = view.versions.find((v) => v.isCurrent);
+  // 모든 줄이 같은 칸은 표 위 한 줄로 접는다 (제강: 최소 없음·전체 두께·필수·KS가 모두 같아 최대만 다르다)
+  const shared = findSharedColumns(view.items, changed.size > 0);
+  const sharedText = [
+    shared.required ? '필수' : null,
+    shared.source ? (source === 'KS' ? 'KS 근거' : '사내 가정값') : null,
+    shared.band ? '모든 두께' : null,
+    shared.min ? '최소 없음' : null,
+    shared.max ? '최대 없음' : null,
+  ].filter((text): text is string => text !== null);
   const [deleting, setDeleting] = useState(false);
+  const more = usePopover<HTMLDivElement>();
   const remove = useAction(inspectionStandardApi.remove, {
     success: (result) => `${result.inspectionStandardCode} 검사 기준을 삭제했어요 (버전 ${result.deletedVersions.length}개)`,
     onSuccess: () => {
@@ -93,10 +109,6 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
           </h2>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {/* 모든 버전이 지워지는 동작이라 자주 쓰는 "새 버전 만들기"와 같은 무게로 두지 않는다 (확인 창은 그대로) */}
-          <Button variant="danger-ghost" icon="trash" disabled={!canEdit} title={canEdit ? '이 기준의 모든 버전을 지워요' : STANDARD_LOCK_TEXT} onClick={() => setDeleting(true)}>
-            기준 삭제
-          </Button>
           {view.isCurrent ? (
             <Button variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : STANDARD_LOCK_TEXT} onClick={() => onNewVersion(view)}>
               새 버전 만들기
@@ -106,6 +118,28 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
               지금 버전(v{current?.version ?? '-'}) 보기
             </Button>
           )}
+          {/* 모든 버전이 지워지는 동작이라 자주 쓰는 "새 버전 만들기" 옆에 두지 않고 더보기 메뉴 안에 둔다 (확인 창은 그대로) */}
+          <div ref={more.ref} className="relative">
+            <IconButton icon="more" label="기준 더보기" aria-haspopup="menu" aria-expanded={more.open} onClick={() => more.setOpen(!more.open)} />
+            {more.open ? (
+              <PopPanel label="기준 더보기" role="menu" placement="right-narrow">
+                <PopItem
+                  role="menuitem"
+                  centered
+                  className="text-danger"
+                  disabled={!canEdit}
+                  title={canEdit ? '이 기준의 모든 버전을 지워요' : STANDARD_LOCK_TEXT}
+                  onClick={() => {
+                    more.setOpen(false);
+                    setDeleting(true);
+                  }}
+                >
+                  <Icon name="trash" size="sm" />
+                  기준 삭제
+                </PopItem>
+              </PopPanel>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -136,6 +170,11 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
             title="검사 항목"
             meta={`${view.items.length}개${changed.size > 0 || removed > 0 ? ` · 이전 버전에서 바뀜 ${changed.size}개${removed > 0 ? ` · 빠짐 ${removed}개` : ''}` : ''}`}
           />
+          {sharedText.length > 0 ? (
+            <p className="border-b border-line px-4 py-2 text-cap text-ink-2" title={source === 'KS' && view.standardNo ? `KS 값 (${view.standardNo}, 치수는 KS D 3500)` : undefined}>
+              <b className="font-semibold">모든 항목 같음</b> · {sharedText.join(' · ')}
+            </p>
+          ) : null}
           <div className="overflow-auto">
             <Table>
               <thead>
@@ -144,11 +183,11 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                   <Th>항목 코드</Th>
                   <Th>항목명</Th>
                   <Th>단위</Th>
-                  <Th align="right">최소 (이상)</Th>
-                  <Th align="right">최대 (이하)</Th>
-                  <Th>적용 두께 구간 (mm)</Th>
-                  <Th>필수</Th>
-                  <Th>근거</Th>
+                  {shared.min ? null : <Th align="right">최소 (이상)</Th>}
+                  {shared.max ? null : <Th align="right">최대 (이하)</Th>}
+                  {shared.band ? null : <Th>적용 두께 구간 (mm)</Th>}
+                  {shared.required ? null : <Th>필수</Th>}
+                  {shared.source ? null : <Th>근거</Th>}
                 </tr>
               </thead>
               <tbody>
@@ -160,6 +199,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                     continued={view.items[index - 1]?.inspectionItemCode === item.inspectionItemCode}
                     continues={view.items[index + 1]?.inspectionItemCode === item.inspectionItemCode}
                     changed={changed.has(buildStandardItemKey(item))}
+                    shared={shared}
                     source={source}
                     standardNo={view.standardNo}
                   />
@@ -229,6 +269,8 @@ interface ItemRowProps {
   /** 바로 아래 줄도 같은 항목 */
   continues: boolean;
   changed: boolean;
+  /** 모든 줄이 같아 표 위 요약으로 옮긴 칸 (그리지 않는다) */
+  shared: SharedColumns;
   source: 'KS' | 'ASSUMED';
   standardNo: string | null;
 }
@@ -237,18 +279,19 @@ interface ItemRowProps {
  * 두께 구간마다 같은 항목이 이어지면(열연 항복강도 5줄 등) 한 묶음으로 보인다:
  * 코드·이름·단위는 묶음 첫 줄에만 쓰고, 묶음 안의 줄 사이 선은 지운다. 값과 두께 구간이 먼저 읽힌다.
  */
-function ItemRow({ item, index, continued, continues, changed, source, standardNo }: ItemRowProps) {
+function ItemRow({ item, index, continued, continues, changed, shared, source, standardNo }: ItemRowProps) {
   return (
     <tr className={cn(continues && '[&>td]:border-b-transparent')}>
       <Td className="tabular-nums text-ink-3">{index + 1}</Td>
       <Td className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
       <Td>{continued ? null : item.inspectionItemName}</Td>
       <Td className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
-      <Td align="right">{formatValue(item.minValue)}</Td>
-      <Td align="right">{formatValue(item.maxValue)}</Td>
-      <Td>{formatThicknessBand(item)}</Td>
+      {shared.min ? null : <Td align="right">{formatValue(item.minValue)}</Td>}
+      {shared.max ? null : <Td align="right">{formatValue(item.maxValue)}</Td>}
+      {shared.band ? null : <Td>{formatThicknessBand(item)}</Td>}
       {/* 거의 모든 줄이 필수·KS라 배지로 칠하면 값보다 먼저 보인다: 흔한 값은 글자로, 다른 값(선택·가정값·바뀜)만 배지로 */}
-      <Td>{item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}</Td>
+      {shared.required ? null : <Td>{item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}</Td>}
+      {shared.source ? null : (
       <Td>
         <span className="inline-flex items-center gap-1">
           {source === 'KS' ? (
@@ -267,6 +310,7 @@ function ItemRow({ item, index, continued, continues, changed, source, standardN
           ) : null}
         </span>
       </Td>
+      )}
     </tr>
   );
 }
