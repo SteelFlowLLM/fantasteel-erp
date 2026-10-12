@@ -51,12 +51,12 @@ export interface RequisitionOrigin {
 }
 
 const DEFAULT_PAGE_SIZE = 20;
-/** decimal(12,3): 정수 9자리·소수 3자리 */
-const TON_PATTERN = /^\d{1,9}(\.\d{1,3})?$/;
+/** decimal(12,3): 정수 9자리·소수 3자리 (Message → ERP 초안도 같은 규칙) */
+export const TON_PATTERN = /^\d{1,9}(\.\d{1,3})?$/;
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 const isRejected = (row: { purchaseRequisitionStatus: string }) => row.purchaseRequisitionStatus === PURCHASE_REQUISITION_STATUS.REJECTED;
-const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && dateOnly(new Date(`${s}T00:00:00.000Z`)) === s;
+export const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && dateOnly(new Date(`${s}T00:00:00.000Z`)) === s;
 
 /** 등록·재요청이 함께 쓰는 값 검사. Message → ERP 초안 payload는 DTO를 거치지 않아 여기서 본다 */
 function parseRequestValues(input: { requestedTon: string; desiredReceiptDate: string }): { requestedTon: Prisma.Decimal; desiredReceiptDate: Date } {

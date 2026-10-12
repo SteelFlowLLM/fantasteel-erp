@@ -11,12 +11,10 @@ import {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { isValidDate, TON_PATTERN } from '../purchasing/purchasing.service';
 import type { ListActionDraftsQuery } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
 
-/** decimal(12,3): 정수 9자리·소수 3자리 (purchasing과 같은 규칙) */
-const TON_PATTERN = /^\d{1,9}(\.\d{1,3})?$/;
-const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && new Date(`${s}T00:00:00.000Z`).toISOString().slice(0, 10) === s;
 const isPositiveTon = (s: string) => TON_PATTERN.test(s) && Number(s) > 0;
 
 type ItemBrief = Awaited<ReturnType<MessageActionRepository['findItems']>>[number];
@@ -64,9 +62,14 @@ export class MessageActionService {
     return this.toViews(this.prisma, rows);
   }
 
-  async get(id: number): Promise<ActionDraftView> {
+  /** 요청자 본인 또는 원본 메시지 방의 멤버만 본다 (다른 방 대화가 보이지 않게) */
+  async get(user: AuthUser, id: number): Promise<ActionDraftView> {
     const row = await this.repository.findDraft(this.prisma, id);
     if (!row) throw new AppException('COM-003', '초안을 찾을 수 없어요');
+    const isRequester = row.requesterId === user.employeeId;
+    if (!isRequester && !(row.message && (await this.repository.isRoomMember(this.prisma, row.message.chatRoomId, user.employeeId)))) {
+      throw new AppException('COM-002', '요청자나 원본 메시지 채팅방 멤버만 볼 수 있어요');
+    }
     const [view] = await this.toViews(this.prisma, [row]);
     return view;
   }

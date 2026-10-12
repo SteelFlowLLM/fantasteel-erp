@@ -70,7 +70,7 @@ afterAll(async () => {
 describe('초안 조회 (REQ-ACT-002)', () => {
   it('상세는 원본 메시지·요청자·고른 원료와 확정 전에 채울 칸을 보여 준다', async () => {
     const { message, draft } = await draftOf('철광석 120톤 다음 달 20일까지 필요해요', { itemId: oreId, requestedTon: '120.5' });
-    const view = await service.get(draft.id);
+    const view = await service.get(purchaser, draft.id);
     expect(view).toMatchObject({
       actionType: 'PURCHASE_REQUISITION_CREATE',
       draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
@@ -84,13 +84,19 @@ describe('초안 조회 (REQ-ACT-002)', () => {
       executionAttemptCount: 0,
     });
     expect(view.requesterDepartmentName).not.toBeNull();
-    expect(await codeOf(service.get(2_000_000_000))).toBe('COM-003');
+    expect(await codeOf(service.get(purchaser, 2_000_000_000))).toBe('COM-003');
   });
 
   it('원료가 아닌 품목·0 이하 톤·없는 날짜는 확정 전에 채울 칸으로 남는다', async () => {
     const slabId = (await prisma.item.findFirstOrThrow({ where: { itemType: 'SLAB' }, orderBy: { id: 'asc' } })).id;
     const { draft } = await draftOf('슬래브 주문?', { itemId: slabId, requestedTon: '0', desiredReceiptDate: '2026-02-30' });
-    expect((await service.get(draft.id)).unresolvedFields).toEqual(['원료 품목', '수량(톤)', '희망 입고일']);
+    expect((await service.get(purchaser, draft.id)).unresolvedFields).toEqual(['원료 품목', '수량(톤)', '희망 입고일']);
+  });
+
+  it('상세는 요청자 본인과 원본 메시지 방 멤버만 본다 (다른 방 대화가 새지 않게)', async () => {
+    const { draft } = await draftOf('철광석 단가 협의', {});
+    expect((await service.get(salesStaff, draft.id)).id).toBe(draft.id);
+    expect(await codeOf(service.get(logistics, draft.id))).toBe('COM-002');
   });
 
   it('목록은 내가 요청자인 초안, 채팅방 초안은 방 멤버만 본다 (최근 것 먼저)', async () => {
