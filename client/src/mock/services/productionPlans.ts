@@ -1,5 +1,6 @@
 // 생산계획·히트 편성·재생산 (REQ-PRD-001·002·006, BP-PRD-01, BP-QC-01, 업무 프로세스 4.4·4.5·10장).
 // 상태: PLANNED → IN_PROGRESS(첫 작업 실적) → COMPLETED(산출 완료), PLANNED에서만 CANCELLED. CONFIRMED 없음(PLAN 6-3).
+import type { PlanHeatView, PlanProgress, ProductionPlanView, ProductionResultView } from '@/api/production';
 import { ALLOCATION_PURPOSE_LABEL, PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
 import { planHeats, type HeatPlan } from '@/lib/heatPlanning';
@@ -132,45 +133,7 @@ export function createProductionPlan(tx: MockTx, actor: BusinessEventActor, inpu
 
 // ── 진행·잔여 목표 ────────────────────────────────────────
 
-export interface PlanProgress {
-  /** 편성한 히트 수 */
-  heatCount: number;
-  /** 제강 실적으로 만든 히트 수 */
-  heatsMadeQty: number;
-  /** 연주까지 끝난 히트 수 */
-  heatsCastQty: number;
-  /** 이 계획에서 나온 용선 톤 합계 */
-  hotMetalTon: string;
-  slabQty: number;
-  coilQty: number;
-  /** 코일 계획: 불합격(히트 불합격 포함)을 뺀 코일 = 합격 + 판정 대기. 불합격 코일은 '만든 코일'로 세지 않는다 (BP-QC-01) */
-  usableCoilQty: number;
-  /** 계획 품목(슬래브 계획 = 슬래브, 코일 계획 = 코일) 중 합격(히트 합격 포함) 매수 — 소진·출고 포함 */
-  passedQty: number;
-  /** 계획 품목 중 판정 대기 매수 (미소진) */
-  pendingQty: number;
-  /** 계획 품목 중 불합격·히트 불합격 매수 */
-  failedQty: number;
-  /** 코일 계획: 이 계획에 열연 배정(CONFIRMED)된 슬래브 매수 */
-  hotRollingAllocatedQty: number;
-  /** 코일 계획: 이 계획이 만든, 아직 열연할 수 있는 슬래브(적격·판정 대기, 미배정) */
-  ownRollableSlabQty: number;
-  /**
-   * 코일 계획: 그 슬래브 중 지금 열연 배정할 수 있는 몫 = 판정 대기 + min(적격 미배정, 슬래브 규격 예약 가용).
-   * 적격 슬래브는 예약 가용에 들어 있어 다른 수주가 재고 우선 예약으로 가져갈 수 있다 (REQ-INV-008).
-   */
-  ownAllocatableSlabQty: number;
-  /** 모든 히트를 연주까지 마쳤는지 */
-  allHeatsCast: boolean;
-  /** 산출 완료 (COMPLETED 조건). 코일 계획(수주 연결)은 불합격을 뺀 코일 ≥ 부족 매수 */
-  outputComplete: boolean;
-  /**
-   * 진행 계획 잔여 목표 매수 (4.5): 취소·수주 연결 없음 → 0. 아직 연주할 히트가 남았으면 부족 매수 − 합격 매수.
-   * 모두 연주했으면 그 값과 '아직 합격할 수 있는 매수' 중 작은 값. 아직 합격할 수 있는 매수 = 판정 대기
-   * + (코일 계획이 완료 전이면) 열연 배정 + 지금 배정할 수 있는 자기 슬래브. 완료된 계획은 더 열연하지 않으므로 판정 대기만.
-   */
-  remainingTargetQty: number;
-}
+export type { PlanHeatView, PlanProgress, ProductionPlanView, ProductionResultView };
 
 const isPassedProduct = (tables: Tables, lot: LotRow) => lot.isPassed === true && heatOf(tables, lot)?.isPassed === true;
 const isFailedProduct = (tables: Tables, lot: LotRow) => lot.isPassed === false || heatOf(tables, lot)?.isPassed === false;
@@ -358,73 +321,6 @@ export function createReproductionPlan(tx: MockTx, actor: PersonActor, input: { 
 }
 
 // ── 조회 ──────────────────────────────────────────────
-
-export interface PlanHeatView {
-  /** 편성 안의 순번 (1부터) */
-  seq: number;
-  heatLotId: number | null;
-  heatNo: string | null;
-  converterCode: string | null;
-  producedDate: string | null;
-  heatTon: string | null;
-  /** 히트 성분 판정: null = 아직 히트 없음 */
-  inspectionResult: 'PENDING' | 'PASS' | 'FAIL' | null;
-  castDone: boolean;
-  slabQty: number;
-}
-
-export interface ProductionResultView {
-  id: number;
-  processType: string;
-  blastFurnaceCode: string | null;
-  converterCode: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  inputTon: string | null;
-  outputTon: string | null;
-  outputQty: number | null;
-  lossQty: number | null;
-  sampleLossRate: string | null;
-  randomSeed: number | null;
-  isSimulated: boolean;
-  operatorName: string | null;
-  outputLotNos: string[];
-}
-
-export interface ProductionPlanView {
-  id: number;
-  productionPlanNo: string;
-  productionPlanStatus: ProductionPlanRow['productionPlanStatus'];
-  isReproduction: boolean;
-  isSurplusOnCompletion: boolean;
-  createdAt: string;
-  createdEmployeeName: string | null;
-  cancelledAt: string | null;
-  updatedAt: string;
-  item: { id: number; itemCode: string; itemName: string; itemType: ProductItemType; steelGradeCode: string | null; theoreticalWeightTon: string };
-  /** 연주할 슬래브 규격 (코일 계획 = 매핑된 슬래브) */
-  slabSpec: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string } | null;
-  salesOrder: { salesOrderId: number; salesOrderNo: string; salesOrderItemId: number; lineNo: number; customerName: string | null; dueDate: string; orderedQty: number } | null;
-  /** 편성표 (14.1-2: 히트 전체 톤과 수주 목표를 나눠 보인다) */
-  formation: {
-    shortageQty: number;
-    /** 수주 목표 = 부족 매수 × 1매 이론중량 */
-    targetWeightTon: string;
-    cumulativeYieldRate: string;
-    requiredSteelTon: string;
-    heatCount: number;
-    heatCapacityTon: string;
-    heatTon: string;
-    slabQtyPerHeat: number;
-    plannedSlabQty: number;
-    expectedSurplusSlabQty: number;
-  } | null;
-  progress: PlanProgress;
-  heats: PlanHeatView[];
-  results: ProductionResultView[];
-  /** PLANNED일 때만 취소 가능 */
-  canCancel: boolean;
-}
 
 function formationViewOf(tables: Tables, plan: ProductionPlanRow): ProductionPlanView['formation'] {
   try {
