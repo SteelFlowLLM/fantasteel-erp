@@ -16,7 +16,7 @@ import { EmptyNote } from '@/components/StateView';
 import { PERMISSION } from '@/codes';
 import { LimitGauge } from '@/features/quality/components/LimitGauge';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
-import { fillTypicalValues, limitText, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
+import { fillTypicalValues, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
 import { useRegisterInspection } from '@/hooks/useInspections';
 import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
@@ -149,17 +149,19 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                     }}
                   />
                   <LimitGauge item={item} value={preview.state === 'empty' ? null : text} bad={bad} />
-                  <div className="flex flex-wrap items-center gap-x-1.5 text-cap text-ink-3">
-                    <span>기준 {limitText(item)}</span>
-                    {band ? <span>· {band}</span> : null}
-                    {preview.state === 'fail' ? (
-                      <span className="ml-auto text-danger">
-                        {preview.side === 'below' ? '하한' : '상한'}보다 {preview.gap}
-                        {item.unit ? ` ${item.unit}` : ''} {preview.side === 'below' ? '낮아요' : '높아요'}
-                      </span>
-                    ) : null}
-                    {preview.state === 'invalid' ? <span className="ml-auto text-danger">숫자(소수 4자리까지)로 입력해 주세요</span> : null}
-                  </div>
+                  {/* 기준 값은 게이지 눈금에 있다. 이 줄은 두께 구간이나 입력 확인 문구가 있을 때만 */}
+                  {band || preview.state === 'fail' || preview.state === 'invalid' ? (
+                    <div className="flex flex-wrap items-center gap-x-1.5 text-cap text-ink-3">
+                      {band ? <span>{band}</span> : null}
+                      {preview.state === 'fail' ? (
+                        <span className="ml-auto text-danger">
+                          {preview.side === 'below' ? '하한' : '상한'}보다 {preview.gap}
+                          {item.unit ? ` ${item.unit}` : ''} {preview.side === 'below' ? '낮아요' : '높아요'}
+                        </span>
+                      ) : null}
+                      {preview.state === 'invalid' ? <span className="ml-auto text-danger">숫자(소수 4자리까지)로 입력해 주세요</span> : null}
+                    </div>
+                  ) : null}
                   {serverError ? (
                     <span role="alert" className="text-cap text-danger">
                       {serverError}
