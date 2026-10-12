@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { SCREEN, screenOfPath, SCREEN_KEY_BY_HREF } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
 
-const CHARACTERS = ['steelman', 'steelman_old', 'harin_office', 'poseokho', 'coil'];
+const CHARACTERS = ['steelman', 'steelman_old', 'harin_office', 'gocheol', 'poseokho', 'coil'];
 /** 영역별 화면 설명. 파일 하나가 window.FANTA_PET_GUIDE_PARTS에 한 묶음을 넣고, guide-merge.js가 기본 설명에 합친다. */
 const GUIDE_PARTS = ['terms', 'common', 'dashboard', 'sales', 'purchasing', 'production', 'logistics-admin'];
 const PET_FILES = [
