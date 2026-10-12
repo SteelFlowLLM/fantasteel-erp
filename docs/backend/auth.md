@@ -78,6 +78,7 @@ create(@Body() dto: CreateSalesOrderDto, @CurrentUser() user: AuthUser) {
 
 - 이미 있는 단위 테스트: `server/src/common/auth/auth.spec.ts`(권한 수준 비교, 부서장 확인, 쿠키 읽기). `npm run test:unit -w @fantasteel/server`.
 - [05] 11장 필수 대상은 아니다. 로그인 API를 바꾸면 성공·실패·퇴사 계정 3가지를 DB 테스트(`npm test -w @fantasteel/server -- auth`)로 확인한다.
+- DB 테스트: `server/src/modules/auth/login.spec.ts`(HTTP로 부른다). 성공(httpOnly 쿠키·`/auth/me`), 틀린 비밀번호·없는 사원번호는 같은 AUTH-001, 퇴사 계정 로그인 AUTH-001과 퇴사 전 쿠키 AUTH-002, 입력 형식 COM-004, 쿠키 없음 AUTH-002, 로그아웃 쿠키 삭제.
 - 시드 계정: 15명, 비밀번호 `fantasteel`(`SEED_PASSWORD`로 변경 가능). 예: 관리자 1503001, 영업 2103003, 영업부장 1608002, 구매 2207005, 구매부장 1702004.
 
 ## 8. 확인 필요 🟡
