@@ -1,0 +1,105 @@
+// Message → ERP 구매요청 초안 조회를 실제 DB(fs_pur)로 확인한다. 채팅방·메시지·초안은 데이터로 직접 넣는다.
+import { Test, type TestingModule } from '@nestjs/testing';
+import { DRAFT_STATUS, type AuthUser } from '@fantasteel/shared';
+import { AppModule } from '../../app.module';
+import { AuthUserService } from '../../common/auth/auth-user.service';
+import { AppException } from '../../common/errors/app.exception';
+import { PrismaService } from '../../prisma/prisma.service';
+import { MessageActionService } from './message-action.service';
+
+let moduleRef: TestingModule;
+let prisma: PrismaService;
+let service: MessageActionService;
+/** 구매 사원 정다은 (요청자) */
+let purchaser: AuthUser;
+/** 구매부장 최준혁 */
+let purchaseHead: AuthUser;
+/** 영업 사원 박서영 — 방 멤버 */
+let salesStaff: AuthUser;
+/** 물류 사원 권예진 — 방 멤버가 아니다 */
+let logistics: AuthUser;
+let roomId: number;
+let oreId: number;
+
+async function codeOf(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (e) {
+    if (e instanceof AppException) return e.code;
+    throw e;
+  }
+  throw new Error('오류가 나지 않았습니다');
+}
+
+/** 정다은이 보낸 메시지와 그 메시지의 초안 */
+async function draftOf(content: string, payload: Record<string, unknown>) {
+  const message = await prisma.message.create({ data: { chatRoomId: roomId, senderId: purchaser.employeeId, content } });
+  const draft = await prisma.actionDraft.create({
+    data: { actionType: 'PURCHASE_REQUISITION_CREATE', draftStatus: DRAFT_STATUS.WAITING_APPROVAL, payload: { sourceText: content, ...payload }, messageId: message.id, requesterId: purchaser.employeeId },
+  });
+  return { message, draft };
+}
+
+beforeAll(async () => {
+  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  await moduleRef.init();
+  prisma = moduleRef.get(PrismaService);
+  service = moduleRef.get(MessageActionService);
+  const authUsers = moduleRef.get(AuthUserService);
+  const load = async (employeeNo: string) => {
+    const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo } });
+    const user = await authUsers.load(employee.id);
+    if (!user) throw new Error(employeeNo);
+    return user;
+  };
+  purchaser = await load('2207005');
+  purchaseHead = await load('1702004');
+  salesStaff = await load('2103003');
+  logistics = await load('2304015');
+  const room = await prisma.chatRoom.create({
+    data: { chatRoomType: 'GROUP', chatRoomName: '원료 구매 협의', chatRoomMembers: { create: [purchaser, purchaseHead, salesStaff].map((u) => ({ employeeId: u.employeeId })) } },
+  });
+  roomId = room.id;
+  oreId = (await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } })).id;
+}, 60_000);
+
+afterAll(async () => {
+  await moduleRef?.close();
+});
+
+describe('초안 조회 (REQ-ACT-002)', () => {
+  it('상세는 원본 메시지·요청자·고른 원료와 확정 전에 채울 칸을 보여 준다', async () => {
+    const { message, draft } = await draftOf('철광석 120톤 다음 달 20일까지 필요해요', { itemId: oreId, requestedTon: '120.5' });
+    const view = await service.get(draft.id);
+    expect(view).toMatchObject({
+      actionType: 'PURCHASE_REQUISITION_CREATE',
+      draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
+      payload: { itemId: oreId, requestedTon: '120.5', desiredReceiptDate: null, requestReason: null, sourceText: message.content },
+      itemCode: 'ORE01',
+      requesterId: purchaser.employeeId,
+      requesterName: purchaser.employeeName,
+      message: { id: message.id, chatRoomId: roomId, chatRoomName: '원료 구매 협의', chatRoomType: 'GROUP', senderName: purchaser.employeeName },
+      unresolvedFields: ['희망 입고일'],
+      purchaseRequisition: null,
+      executionAttemptCount: 0,
+    });
+    expect(view.requesterDepartmentName).not.toBeNull();
+    expect(await codeOf(service.get(2_000_000_000))).toBe('COM-003');
+  });
+
+  it('원료가 아닌 품목·0 이하 톤·없는 날짜는 확정 전에 채울 칸으로 남는다', async () => {
+    const slabId = (await prisma.item.findFirstOrThrow({ where: { itemType: 'SLAB' }, orderBy: { id: 'asc' } })).id;
+    const { draft } = await draftOf('슬래브 주문?', { itemId: slabId, requestedTon: '0', desiredReceiptDate: '2026-02-30' });
+    expect((await service.get(draft.id)).unresolvedFields).toEqual(['원료 품목', '수량(톤)', '희망 입고일']);
+  });
+
+  it('목록은 내가 요청자인 초안, 채팅방 초안은 방 멤버만 본다 (최근 것 먼저)', async () => {
+    const { draft: older } = await draftOf('석탄 확인', {});
+    const { draft: newer } = await draftOf('석회석 확인', {});
+    const mine = (await service.list(purchaser, {})).map((d) => d.id);
+    expect(mine.indexOf(newer.id)).toBeLessThan(mine.indexOf(older.id));
+    expect((await service.list(purchaseHead, {})).map((d) => d.id)).not.toContain(newer.id);
+    expect((await service.list(salesStaff, { chatRoomId: roomId })).map((d) => d.id)).toEqual(expect.arrayContaining([older.id, newer.id]));
+    expect(await codeOf(service.list(logistics, { chatRoomId: roomId }))).toBe('COM-002');
+  });
+});
