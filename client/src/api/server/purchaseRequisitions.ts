@@ -93,7 +93,12 @@ export const serverPurchaseRequisitionApi = {
   formContext: async (): Promise<RequisitionFormContext> => {
     const { me, departments } = await serverMeAndDepartments();
     const department = departments.find((d) => d.id === me.departmentId);
-    return { requesterName: me.employeeName, departmentName: department?.departmentName ?? '-', headName: department?.headEmployeeName ?? null };
+    return {
+      requesterName: me.employeeName,
+      departmentName: department?.departmentName ?? '-',
+      headName: department?.headEmployeeName ?? null,
+      isDepartmentHead: me.headDepartmentIds.includes(me.departmentId),
+    };
   },
 
   /** 발주 후보: 서버에서 승인됨(APPROVED) = 아직 발주하지 않은 요청. 공급업체는 원료의 기본 공급업체 */

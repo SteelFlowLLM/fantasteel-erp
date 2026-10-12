@@ -59,7 +59,7 @@
 - 승인·반려는 WAITING_APPROVAL에서만. 요청자 사원을 조회해 `assertDepartmentHead(user, requester.departmentId)`(`common/auth/department-head.ts`). 부서에 부서장이 없으면 먼저 `PUR-001`.
 - 승인: APPROVED, `approver_id`, `approved_at`. 반려: REJECTED, `approver_id`, `reject_reason`(필수 권장).
 - 재요청: 요청자 본인만, REJECTED에서만. 수량·희망일·사유를 고쳐 WAITING_APPROVAL로([06] PURCHASE_REQUISITION_STATUS).
-- 자동 승인은 없다. 부서장 자기 요청·부재 시 경로는 TBD(16장).
+- 자동 승인은 없다. 부서장 본인 요청은 승인할 사람이 자기 자신뿐이라 등록·재요청 때 `PUR-001`로 거부한다(2026-10-12 결정). 부서장 부재(미지정)도 `PUR-001`. 다른 승인 경로는 TBD(16장).
 
 **발주**(REQ-PUR-003)
 - 요청 `{ supplierId, items: [{ purchaseRequisitionId, orderedTon, expectedReceiptDate }] }`. 공급업체 1곳당 1건에 여러 품목.
@@ -102,7 +102,7 @@
 | 읽힘 | mrp | 발주 품목·입고 합계(입고예정), 계획별 기존 구매요청 |
 | 읽힘 | production | 원료 LOT FIFO(`goods_receipt.received_date`) |
 | 호출 | organization(데이터) | 요청자 부서·부서장 |
-| 호출 | notification | `notifyEmployees(tx, …)` — 등록·재요청 → 부서장에게 APPROVAL_REQUESTED(`/approvals?pr={id}`), 승인·반려 → 요청자에게 APPROVAL_RESULT(`/purchase-requisitions?pr={id}`, 반려는 사유 포함). 작업 로그 id로 중복 방지, 부서장 자기 요청은 보내지 않음 |
+| 호출 | notification | `notifyEmployees(tx, …)` — 등록·재요청 → 부서장에게 APPROVAL_REQUESTED(`/approvals?pr={id}`), 승인·반려 → 요청자에게 APPROVAL_RESULT(`/purchase-requisitions?pr={id}`, 반려는 사유 포함). 작업 로그 id로 중복 방지 (부서장 본인 요청은 등록되지 않으므로 자기 자신에게 가는 알림은 없음) |
 
 `PurchasingService`를 `exports`에 넣는다.
 
@@ -125,7 +125,7 @@
 
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
-| 부서장 자기 요청·부재 | 구매부장(시드 1702004)이 직접 요청하면 승인권자가 자기 자신이다. 경로 TBD, 자동 승인 금지. 그때까지 승인 요청 알림은 보내지 않는다(2026-10-07 사용자 결정) | [04] 2장·16장 |
+| 부서장 자기 요청·부재 | 구매부장(시드 1702004)이 직접 요청하면 승인권자가 자기 자신이다. 자동 승인 금지. **2026-10-12 결정: 등록·재요청 때 `PUR-001`로 거부**(승인 대기에 영영 머물지 않게. 화면 등록 창도 미리 막는다). 상위 부서장 승인 같은 다른 경로는 TBD | [04] 2장·16장 |
 | 다른 역할 요청자 | Message → ERP로 영업·생산 사원이 요청자가 되면 그 부서장(예: 영업부장)이 승인하는데, 영업부장은 PR 조회 권한이 없다 → 조회 API를 "권한 또는 부서장"으로 열어야 한다. 요청자에게 `PURCHASE_REQUISITION_CREATE` USE가 필요한지도 미정(message-action.md 8장) | [권한표], [CSV] 목록 비고 |
 | 재요청 이벤트 | BUSINESS_EVENT_TYPE에 재요청이 없다 | [CSV] 재요청 비고, [06] |
 | 오류 코드 | 승인량 초과(`ordered_ton > requested_ton`), 잘못된 공급업체, 같은 계획 중복 요청, 상태 전이 위반(이미 승인된 요청 승인 등)에 쓸 코드가 없다 | [04] BP-PUR-01 예외, 9.3 |

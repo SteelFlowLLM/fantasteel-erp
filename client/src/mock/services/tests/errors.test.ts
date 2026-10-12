@@ -87,6 +87,13 @@ describe('구매 PUR-001·002·003, COM-002, 반려 후 재요청', () => {
     expectCode(() => createPurchaseRequisition(k.at(at), purchase, { itemId: k.itemId('ORE01'), requestedTon: '10', desiredReceiptDate: '2026-10-20' }), 'PUR-001');
   });
 
+  it('PUR-001 부서장 본인 요청은 승인할 사람이 없어 등록 불가 (자동 승인 금지, 서버와 같은 규칙)', () => {
+    const k = createKit();
+    const count = k.tables.purchaseRequisition.length;
+    expectCode(() => createPurchaseRequisition(k.at(at), k.actor('purchaseHead'), { itemId: k.itemId('ORE01'), requestedTon: '10', desiredReceiptDate: '2026-10-20' }), 'PUR-001');
+    expect(k.tables.purchaseRequisition).toHaveLength(count);
+  });
+
   it('PUR-002 승인 대기 요청은 발주 불가, 반려 → 요청자 수정·재요청 → 승인 → 발주', () => {
     const k = createKit();
     const waiting = k.tables.purchaseRequisition.find((p) => p.purchaseRequisitionStatus === 'WAITING_APPROVAL');

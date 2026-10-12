@@ -230,7 +230,9 @@ describe('구매요청 목록·상세 조회 범위 (REQ-PUR-001·002, REQ-AUTH-
   });
 
   it('approvable이면 권한과 상관없이 내가 승인할 요청만: 내 부서원의 승인 대기, 내 요청 제외', async () => {
-    const ownId = (await createAs(purchaseHead)).id;
+    // 부서장 본인 요청은 이제 등록되지 않는다(PUR-001). 그 전에 쌓인 요청이 승인함에 섞이지 않는지는 요청자만 바꿔 확인한다
+    const ownId = (await createAs(purchaser)).id;
+    await prisma.purchaseRequisition.update({ where: { id: ownId }, data: { requesterId: purchaseHead.employeeId } });
     const approvedId = (await createAs(purchaser)).id;
     await prisma.purchaseRequisition.update({ where: { id: approvedId }, data: { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.APPROVED } });
 

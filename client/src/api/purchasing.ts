@@ -112,6 +112,8 @@ export interface RequisitionFormContext {
   departmentName: string;
   /** 소속 부서의 부서장. 없으면 등록할 수 없다(PUR-001) */
   headName: string | null;
+  /** 요청자가 소속 부서의 부서장이면 승인할 사람이 없어 등록할 수 없다(PUR-001, 자동 승인 금지) */
+  isDepartmentHead: boolean;
 }
 
 export const purchaseRequisitionApi = {
