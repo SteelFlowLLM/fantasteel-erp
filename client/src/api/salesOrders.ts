@@ -4,6 +4,7 @@
 // 업무방은 메신저 어댑터, 생산 연결·재생산 계획은 생산계획 API를 쓴다. 서버에 아직 없는 구매 진행 영향은 서버 모드에서 비어 있다.
 import { requireActor } from '@/api/actor';
 import type { TimelineEvent } from '@/api/businessEvents';
+import type { ProductionPlanView } from '@/api/production';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
@@ -28,7 +29,6 @@ import {
   workRoomOfSalesOrder,
   type CancelPurchaseImpactLine,
   type CreateSalesOrderInput,
-  type ProductionPlanView,
   type SalesOrderDetail,
   type SalesOrderPreviewLine,
   type SalesOrderSummary,
@@ -41,13 +41,12 @@ export type {
   CancelPurchaseImpactLine,
   CreateSalesOrderInput,
   ItemFulfillment,
-  ProductionPlanView,
   SalesOrderCancellation,
   SalesOrderDetail,
   SalesOrderPreviewLine,
   SalesOrderSummary,
 } from '@/mock/services';
-export type { TimelineEvent };
+export type { ProductionPlanView, TimelineEvent };
 
 /** 수주 화면을 여는 권한 (screens.ts의 salesOrders와 같다): 수주 등록·취소 중 하나라도 조회 이상 */
 export const SALES_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL];

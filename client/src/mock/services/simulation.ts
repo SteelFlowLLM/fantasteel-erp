@@ -5,6 +5,7 @@
 // - 같은 난수 시드 → 같은 결과. 시드·손실률·손실 매수·is_simulated를 실적에 저장한다. 검사값은 넣지 않는다.
 // - 갓 연주한 슬래브는 판정 대기라 열연 배정을 할 수 없다 → 열연은 적격 슬래브가 있을 때만 (없으면 skippedRolling에 이유).
 // - 작업 시작만 한(완료 일시 없는) 실적이 있으면 실행하지 않는다. '작업 완료'로 먼저 마친다(productionResults.ts 진행 중 작업).
+import type { SimulationResult, SimulationStep } from '@/api/productionResults';
 import { decCmp, decSum } from '@/lib/decimal';
 import { hotMetalTonFor } from '@/lib/mrp';
 import { toSeoulDateString } from '@/lib/seoulDate';
@@ -20,24 +21,6 @@ export interface SimulationInput {
   randomSeed?: number | null;
   blastFurnaceCode?: string;
   converterCode?: string;
-}
-
-export interface SimulationStep {
-  processType: 'IRONMAKING' | 'STEELMAKING' | 'CONTINUOUS_CASTING' | 'HOT_ROLLING';
-  productionResultId: number;
-  outputLotNos: string[];
-  /** 연주: 계획 슬래브·샘플 손실률·손실 매수·실적 매수 */
-  plannedQty?: number;
-  sampleLossRate?: string;
-  lossQty?: number;
-  outputQty?: number;
-}
-
-export interface SimulationResult {
-  productionPlanId: number;
-  randomSeed: number;
-  steps: SimulationStep[];
-  skippedRolling: string | null;
 }
 
 const HOUR = 3_600_000;

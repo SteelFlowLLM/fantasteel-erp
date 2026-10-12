@@ -12,7 +12,7 @@ import { decSum } from '@/lib/decimal';
 import { sortFifo } from '@/lib/fifo';
 import { hotMetalTonFor } from '@/lib/mrp';
 import type { MockTables } from '@/mock/schema';
-import { withCustomerNames, type ProductionPlanListRow } from '@/api/production';
+import { withCustomerNames, type ProductionPlanListRow, type ProductionPlanView } from '@/api/production';
 import {
   findById,
   inputError,
@@ -31,11 +31,27 @@ import {
   startedHeatLotIdOf,
   startWork,
   userActor,
-  type ProductionPlanView,
-  type SimulationResult,
 } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
+
+export interface SimulationStep {
+  processType: 'IRONMAKING' | 'STEELMAKING' | 'CONTINUOUS_CASTING' | 'HOT_ROLLING';
+  productionResultId: number;
+  outputLotNos: string[];
+  /** 연주: 계획 슬래브·샘플 손실률·손실 매수·실적 매수 */
+  plannedQty?: number;
+  sampleLossRate?: string;
+  lossQty?: number;
+  outputQty?: number;
+}
+
+export interface SimulationResult {
+  productionPlanId: number;
+  randomSeed: number;
+  steps: SimulationStep[];
+  skippedRolling: string | null;
+}
 
 export const productionResultKeys = {
   all: ['production-results'] as const,
@@ -312,4 +328,3 @@ export const productionResultApi = {
     }),
 };
 
-export type { SimulationResult };

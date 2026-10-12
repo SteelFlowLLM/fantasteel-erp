@@ -800,11 +800,11 @@ export class InventoryService {
     return lot;
   }
 
-  /** 배정 목적별 권한: 출하 = 출하요청·배정 확정, 열연 = 열연 투입 배정 */
   private async yardNames(tx: Tx): Promise<Map<number, string>> {
     return new Map((await this.repository.findYards(tx)).map((y) => [y.id, y.yardName]));
   }
 
+  /** 배정 목적별 권한: 출하 = 출하요청·배정 확정, 열연 = 열연 투입 배정 */
   private assertPurposePermission(user: AuthUser, purpose: AllocationPurpose, level: PermissionLevel): void {
     const permission = purpose === ALLOCATION_PURPOSE.SHIPMENT ? PERMISSION.SHIPMENT_REQUEST_MANAGE : PERMISSION.HOT_ROLLING_ALLOCATE;
     if (!hasPermission(user, { permission, level })) throw new AppException('COM-002');

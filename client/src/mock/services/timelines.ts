@@ -1,13 +1,12 @@
 // 이력 재현 (REQ-LOG-003, BP-LOG-01 Decision Replay): 수주·LOT 단위 시간순 타임라인. 동률은 이벤트 id 순.
 // 작업 로그 화면(전체 필터·검색)은 다른 영역이 만든다. 이 파일은 수주 상세 '이력' 탭이 바로 쓸 읽기 모델이다.
-import { BUSINESS_EVENT_TYPE_LABEL, type ActorType, type BusinessEventType, type EventReasonCode } from '@/codes';
+import { BUSINESS_EVENT_TYPE_LABEL } from '@/codes';
 import type { TimelineEvent } from '@/api/businessEvents';
 import type { BusinessEventRow, JsonValue, MockTables } from '@/mock/schema';
 import { employeeNameOf, qtyUnitOfItem } from '@/mock/services/context';
 
 type Tables = Readonly<MockTables>;
 
-export type { TimelineEvent };
 
 const byTime = (a: BusinessEventRow, b: BusinessEventRow) => a.occurredAt.localeCompare(b.occurredAt) || a.id - b.id;
 

@@ -1,4 +1,4 @@
-// 서버 모드 선택 목록(api/server/lookups.ts)과 규격 표시값(api/server/masterIds.ts): 화면 id는 서버 id 그대로, 서버에서 새로 만든 고객사·규격도 고를 수 있다.
+// 서버 모드 선택 목록(api/server/lookups.ts): 화면 id는 서버 id 그대로, 서버에서 새로 만든 고객사·규격도 고를 수 있다.
 // 출하요청 등록 창의 고객사·품목도 서버 id로 고르고 보낸다 (api/server/shipmentRequests.ts).
 import { afterEach, describe, expect, it } from 'vitest';
 import { lookupApi } from '@/api/lookups';

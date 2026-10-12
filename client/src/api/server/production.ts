@@ -21,6 +21,7 @@ import type {
   RawMaterialStock,
   RegisteredResult,
   SimulateInput,
+  SimulationResult,
   SteelmakingResultInput,
   StartWorkInput,
   WorkContext,
@@ -28,7 +29,6 @@ import type {
 import type { ChangeRollingInput, ConfirmRollingInput, HotRollingResultInput, RollingDetail, RollingPlanListRow } from '@/api/rolling';
 import type { InspectionResult, ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
-import type { SimulationResult } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 끝까지 읽는다 */
 const PAGE_SIZE = 100;

@@ -163,6 +163,14 @@ describe('수주 등록 서버 모드: 규격·고객사 id는 서버 id, 미리
     await expect(salesOrderApi.preview([{ itemId: 999, orderedQty: 1 }])).rejects.toMatchObject({ code: 'SO-001' });
   });
 
+  it('미리보기: 매수가 1 이상 정수가 아니면 SO-002 (화면 입력 규칙과 같다)', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, respond());
+    for (const orderedQty of ['1.5', '0', '-1', 'abc']) {
+      await expect(salesOrderApi.preview([{ itemId: 301, orderedQty }])).rejects.toMatchObject({ code: 'SO-002' });
+    }
+    await expect(salesOrderApi.preview([{ itemId: 301, orderedQty: ' 6 ' }])).resolves.toHaveLength(1);
+  });
+
   it('등록: 고른 서버 고객사·규격 id를 그대로 보내고 기준정보를 다시 읽지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) =>
       c.method === 'POST' && c.path === '/sales-orders'
