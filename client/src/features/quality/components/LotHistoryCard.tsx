@@ -1,6 +1,7 @@
 // 이 LOT의 작업 로그 (business_event_lot 기준, 최근 것부터). 검사 등록·판정은 바뀐 측정값의 전·후를 함께 보인다 (REQ-QC-003).
 // '작업 로그' 링크는 이 LOT의 이력 재현(/business-events?lotId=)으로 간다 (REQ-LOG-003).
 import Link from 'next/link';
+import type { TimelineEvent } from '@/api/businessEvents';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { EmptyNote } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
@@ -8,7 +9,6 @@ import { Timeline, type TimelineTone } from '@/components/Timeline';
 import { INSPECTION_RESULT_LABEL } from '@/codes';
 import { inspectionResultOfSnapshot, measuredValueChanges, trimNum, UNKNOWN_ITEM_NAME } from '@/features/quality/lib/qualityDisplay';
 import { fmtMDHM } from '@/lib/format';
-import type { TimelineEvent } from '@/mock/services';
 
 const toneOf = (event: TimelineEvent): TimelineTone => {
   switch (event.businessEventType) {

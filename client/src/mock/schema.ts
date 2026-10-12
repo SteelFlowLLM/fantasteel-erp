@@ -34,12 +34,12 @@ import type {
   UnitType,
   YardType,
 } from '@/codes';
+import type { JsonPrimitive, JsonValue } from '@/lib/json';
 
 export type DecimalString = string;
 export type DateString = string;
 export type IsoDateTime = string;
-export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type { JsonPrimitive, JsonValue };
 
 type Timestamps = { createdAt: IsoDateTime; updatedAt: IsoDateTime };
 
