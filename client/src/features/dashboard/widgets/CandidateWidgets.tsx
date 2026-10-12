@@ -120,8 +120,20 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
   const inspected = data.grades.filter((g) => g.inspectedCount > 0);
   const notInspected = data.grades.filter((g) => g.inspectedCount === 0);
   const isPass = mode === 'pass';
+  // 기간 전체 요약을 맨 위에 크게 둔다: 불합격이 없으면 막대가 하나도 없어 위젯이 비어 보였다
+  const totalInspected = inspected.reduce((sum, g) => sum + g.inspectedCount, 0);
+  const totalFailed = inspected.reduce((sum, g) => sum + g.failedCount, 0);
+  const total = rateOf({ inspectedCount: totalInspected, failedCount: totalFailed, rejectRate: totalInspected > 0 ? totalFailed / totalInspected : null }, mode);
+  const totalTone = !isPass && totalFailed > 0 ? 'danger' : undefined;
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
+      {inspected.length > 0 ? (
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-b border-line pb-2.5">
+          <Figure label="판정한 검사" value={fmtInt(totalInspected)} unit="건" />
+          <Figure label={isPass ? '합격' : '불합격'} value={fmtInt(total.count)} unit="건" tone={totalTone} />
+          <Figure label={isPass ? '합격률' : '불합격률'} value={fmtPct(total.rate, 1)} tone={totalTone} />
+        </div>
+      ) : null}
       {inspected.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
         const { rate, count } = rateOf(g, mode);

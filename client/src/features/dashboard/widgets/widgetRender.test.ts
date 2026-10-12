@@ -10,6 +10,7 @@ import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
 import { isSoonWidget, widgetDef } from '@/features/dashboard/widgetCatalog';
 import { WIDGET_COMPONENTS } from '@/features/dashboard/widgets/widgetRegistry';
 import { MeContext } from '@/hooks/useMe';
+import { fmtPct } from '@/lib/format';
 import { getMockDb } from '@/mock/db';
 import { seedTxAt } from '@/mock/seeds';
 import { seedDashboard } from '@/mock/seeds/dashboard';
@@ -149,6 +150,18 @@ describe('위젯 카드', () => {
     expect(html.includes('불합격 없음')).toBe(noReject.length > 0);
     // 0%는 색칠한 막대 없이 글자만 (꽉 찬 막대가 100%로 읽혔다)
     expect(html).not.toContain('bg-ok-bg');
+  });
+
+  it('강종별 불합격률: 맨 위에 기간 전체 판정 건수·불합격 건수·불합격률을 크게 보인다', async () => {
+    const html = (await renderWidgets(SEED_EMPLOYEE_NO.quality)).get('REJECT_RATE') ?? '';
+    const data = await dashboardApi.widget('REJECT_RATE');
+    const inspected = data.grades.reduce((sum, g) => sum + g.inspectedCount, 0);
+    const failed = data.grades.reduce((sum, g) => sum + g.failedCount, 0);
+    expect(inspected).toBeGreaterThan(0);
+    expect(html).toContain('판정한 검사');
+    expect(html).toContain(`>${inspected}<small`);
+    expect(html).toContain(`>${failed}<small`);
+    expect(html).toContain(fmtPct(failed / inspected, 1));
   });
 
   it('대시보드 화면 틀: 인사·위젯 편집 버튼 (격자는 브라우저에서 너비를 잰 뒤 그린다)', async () => {

@@ -130,10 +130,10 @@ describe('역할별 기본 배치 (품질)', () => {
     expect(quality).toEqual([
       { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
       { key: 'AGENT_RISK', x: 0, y: 3, w: 12, h: 1 },
-      { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 4 },
-      { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 4 },
-      { key: 'RECENT_EVENTS', x: 0, y: 8, w: 6, h: 5 },
-      { key: 'PRODUCT_STOCK', x: 6, y: 8, w: 6, h: 5 },
+      { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 5 },
+      { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 5 },
+      { key: 'RECENT_EVENTS', x: 0, y: 9, w: 6, h: 5 },
+      { key: 'PRODUCT_STOCK', x: 6, y: 9, w: 6, h: 5 },
     ]);
     // 줄마다 12칸을 다 채운다
     const widthByRow = new Map<number, number>();
