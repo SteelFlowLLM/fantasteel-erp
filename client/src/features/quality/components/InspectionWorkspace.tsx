@@ -11,7 +11,6 @@ import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody } from '@/components/Card';
 import { Chip } from '@/components/Chip';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
@@ -19,6 +18,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
+import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
@@ -317,11 +317,8 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 불합격 관리
               </ButtonLink>
             ) : null}
-            {/* 과거 사례(EX)는 준비 중: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-004).
-                동작하는 LOT 추적과 같은 무게로 보이지 않게 테두리 없는 흐린 버튼으로 둔다 (링크라 ghost의 enabled:hover가 안 먹어 hover를 따로 준다) */}
-            <ButtonLink href="/past-cases" icon="search" variant="ghost" className="text-ink-3 hover:bg-surface-3 hover:text-ink-2">
-              비슷한 사례 찾기 <ComingSoon grade="EX" />
-            </ButtonLink>
+            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-004) */}
+            <ComingSoonMenu items={[{ label: '비슷한 사례 찾기' }]} />
           </>
         }
       />

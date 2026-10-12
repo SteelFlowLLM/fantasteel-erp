@@ -11,13 +11,13 @@ import { Banner } from '@/components/Banner';
 import { ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { DISPOSITION_STATUS_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, SALES_ORDER_ITEM_STATUS_LABEL, type DispositionStatus } from '@/codes';
+import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
 import { DispositionForm } from '@/features/quality/components/DispositionForm';
 import { ImpactCard } from '@/features/quality/components/ImpactCard';
 import { InspectionValuesTable } from '@/features/quality/components/InspectionValuesTable';
@@ -366,14 +366,8 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
             <ButtonLink href={lotTraceHref(row.lotNo, 'forward')} icon="trace">
               LOT 추적 (영향 범위)
             </ButtonLink>
-            {/* 과거 사례(EX)는 준비 중: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-002) */}
-            <ButtonLink href="/past-cases" icon="search">
-              사례로 등록 <ComingSoon grade="EX" />
-            </ButtonLink>
-            {/* 과거 사례(EX)는 준비 중: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-004) */}
-            <ButtonLink href="/past-cases" icon="search">
-              비슷한 사례 찾기 <ComingSoon grade="EX" />
-            </ButtonLink>
+            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-002 사례로 등록, REQ-CASE-004 비슷한 사례 찾기) */}
+            <ComingSoonMenu items={[{ label: '사례로 등록' }, { label: '비슷한 사례 찾기' }]} />
           </>
         }
       />
