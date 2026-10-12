@@ -23,7 +23,7 @@ import { FormationCard } from '@/features/production/components/FormationCard';
 import { MasterListItem, Row } from '@/features/production/components/MasterList';
 import { PlanFlags, PlanStatusBadge, ProductTypeTag } from '@/features/production/components/PlanBadges';
 import { PlanLotsCard } from '@/features/production/components/PlanLotsCard';
-import { CancelPlanModal, ReproductionModal } from '@/features/production/components/PlanModals';
+import { CancelPlanModal, ConfirmHeatPlanModal, ReproductionModal } from '@/features/production/components/PlanModals';
 import { ResultsTable } from '@/features/production/components/ResultsTable';
 import { countResultsByProcess, isOverdue, processStepItems } from '@/features/production/lib/productionDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -152,13 +152,15 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
 
 export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
   const canPlan = useCanUse(PERMISSION.PRODUCTION_PLAN_CONFIRM);
-  const [modal, setModal] = useState<'cancel' | 'reproduce' | null>(null);
+  const [modal, setModal] = useState<'cancel' | 'reproduce' | 'heat' | null>(null);
   const unit = PRODUCT_QTY_UNIT[plan.item.itemType];
   const so = plan.salesOrder;
   const status = plan.productionPlanStatus;
   const open = status === 'PLANNED' || status === 'IN_PROGRESS';
   const repro = plan.reproduction;
   const showRepro = repro !== null && repro.canReproduce && repro.additionalPlanQty > 0;
+  const formation = plan.formation;
+  const heatChanged = status === 'PLANNED' && formation !== null && formation.recalculatedHeatCount !== formation.heatCount;
   const steps = processStepItems({
     itemType: plan.item.itemType,
     productionPlanStatus: status,
@@ -250,6 +252,19 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
               {unit}로 채울 수 있어요. 재생산 계획은 만들지 않아요.
             </>
           )}
+        </Banner>
+      ) : null}
+      {heatChanged && formation ? (
+        <Banner
+          tone="wait"
+          actions={
+            <Button size="sm" icon="check" disabled={!canPlan} title={canPlan ? undefined : needText} onClick={() => setModal('heat')}>
+              히트 편성 확정
+            </Button>
+          }
+        >
+          <b>{`히트 ${formation.heatCount}개 → ${formation.recalculatedHeatCount}개`}</b>{' '}
+          — 기준정보가 바뀌어 지금 기준으로 다시 계산한 히트 수가 저장된 편성과 달라요. 작업을 시작하기 전이라 편성을 다시 확정할 수 있어요.
         </Banner>
       ) : null}
       {status === 'CANCELLED' ? <Banner>{fmtDateTime(plan.cancelledAt)}에 취소된 계획이에요.</Banner> : null}
@@ -390,6 +405,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
 
       {modal === 'cancel' ? <CancelPlanModal planId={plan.id} planNo={plan.productionPlanNo} updatedAt={plan.updatedAt} onClose={() => setModal(null)} /> : null}
       {modal === 'reproduce' && repro ? <ReproductionModal check={repro} itemType={plan.item.itemType} onClose={() => setModal(null)} /> : null}
+      {modal === 'heat' ? <ConfirmHeatPlanModal plan={plan} onClose={() => setModal(null)} /> : null}
     </>
   );
 }
