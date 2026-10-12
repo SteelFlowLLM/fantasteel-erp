@@ -154,6 +154,13 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
         {list.length > 0 ? (
           <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
             제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
+            {/* 자물쇠는 마우스를 올려야 뜻이 보여서, 목록에 있을 때만 여기서 한 번 알려 준다 */}
+            {list.some((r) => r.locked) ? (
+              <>
+                {' '}
+                <Icon name="lock" size="sm" className="inline align-[-2px] text-ink-3" /> 표시는 밀시트가 발행돼 측정값을 고칠 수 없는 LOT이에요.
+              </>
+            ) : null}
           </Banner>
         ) : null}
       </MasterPane>
@@ -247,7 +254,8 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           {/* 합격은 흐린 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
           {row.inspectionResult === 'PASS' ? (
             <span className="inline-flex items-center gap-0.5 text-cap text-ink-3">
-              <Icon name="check" size="sm" />
+              {/* 글자는 흐리게 두되 체크만 상세의 합격 배지와 같은 초록으로: 합격 색이 화면마다 달라 보이지 않게 */}
+              <Icon name="check" size="sm" className="text-ok" />
               {INSPECTION_RESULT_LABEL.PASS}
             </span>
           ) : (
