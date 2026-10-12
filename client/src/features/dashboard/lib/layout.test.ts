@@ -58,11 +58,11 @@ describe('위젯 목록', () => {
 });
 
 describe('위젯 배치', () => {
-  it('기본 배치: 공정 흐름 한 줄 → 6칸씩 두 개씩', () => {
+  it('기본 배치: 공정 흐름 한 줄 → 수주 충족 8칸·Agent 4칸 → 6칸씩 두 개씩', () => {
     expect(buildDefaultPlacements()).toEqual([
       { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
-      { key: 'ORDER_FULFILLMENT', x: 0, y: 3, w: 6, h: 5 },
-      { key: 'AGENT_RISK', x: 6, y: 3, w: 6, h: 5 },
+      { key: 'ORDER_FULFILLMENT', x: 0, y: 3, w: 8, h: 5 },
+      { key: 'AGENT_RISK', x: 8, y: 3, w: 4, h: 5 },
       { key: 'RECENT_EVENTS', x: 0, y: 8, w: 6, h: 5 },
       { key: 'PRODUCT_STOCK', x: 6, y: 8, w: 6, h: 5 },
       { key: 'PROCESS_YIELD', x: 0, y: 13, w: 6, h: 4 },
