@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { InputError } from '@/api/client';
 import type { InspectionDetail, InspectionFormItem, RegisterInspectionOutcome } from '@/api/inspections';
-import { Badge } from '@/components/Badge';
+import { Badge, type BadgeTone } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Icon } from '@/components/Icon';
@@ -22,11 +22,20 @@ import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
 
 function ItemBadge({ item, preview, dirty }: { item: InspectionFormItem; preview: ValuePreview; dirty: boolean }) {
-  if (item.minValue === null && item.maxValue === null) return <Badge tone="wait">기준 없음</Badge>;
+  if (item.minValue === null && item.maxValue === null) return <TermBadge term="기준 없음" tone="wait" />;
   if (!dirty && item.isPassed !== null) return <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />;
-  if (preview.state === 'empty') return <Badge>{item.isRequired ? '미입력' : '선택'}</Badge>;
-  if (preview.state === 'invalid') return <Badge tone="wait">숫자 확인</Badge>;
-  return <Badge tone={preview.state === 'pass' ? 'ok' : 'danger'}>미리보기 {preview.state === 'pass' ? '합격' : '불합격'}</Badge>;
+  if (preview.state === 'empty') return <TermBadge term={item.isRequired ? '미입력' : '선택'} />;
+  if (preview.state === 'invalid') return <TermBadge term="숫자 확인" tone="wait" />;
+  return <TermBadge term={`미리보기 ${preview.state === 'pass' ? '합격' : '불합격'}`} tone={preview.state === 'pass' ? 'ok' : 'danger'} />;
+}
+
+/** 배지 글자 = 화면 도우미 펫 용어 키 (inline-flex 감싸개라 배지 모양은 그대로) */
+function TermBadge({ term, tone }: { term: string; tone?: BadgeTone }) {
+  return (
+    <span className="inline-flex" data-pet-term={term}>
+      <Badge tone={tone}>{term}</Badge>
+    </span>
+  );
 }
 
 export interface InspectionFormProps {
@@ -81,7 +90,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
 
   return (
     <>
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:inspections.form">
         <CardHead
           title="측정값"
           meta={`항목 ${items.length}개 · 필수 ${items.filter((i) => i.isRequired).length}개`}
@@ -99,7 +108,9 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                 >
                   기준 안 값으로 채우기
                 </Button>
-                <span className="text-cap text-ink-3">시연용 도우미</span>
+                <span className="text-cap text-ink-3" data-pet-term="시연용 도우미">
+                  시연용 도우미
+                </span>
               </>
             ) : null
           }
@@ -120,7 +131,12 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
               const band = thicknessBandText(item.minThicknessMm, item.maxThicknessMm);
               const serverError = serverErrors[`values.${item.inspectionStandardItemId}`];
               return (
-                <div key={item.inspectionStandardItemId} className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}>
+                <div
+                  key={item.inspectionStandardItemId}
+                  data-pet-item="qualityInspectionValue"
+                  data-pet-item-title={item.inspectionItemName}
+                  className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}
+                >
                   <div className="flex items-center gap-1.5">
                     <label htmlFor={id} className="text-sm font-semibold text-ink">
                       {item.inspectionItemName}
@@ -132,8 +148,10 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                         <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
                       )}
                     </label>
-                    <span className="font-mono text-2xs text-ink-3">{item.inspectionItemCode}</span>
-                    <span className="ml-auto">
+                    <span className="font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
+                      {item.inspectionItemCode}
+                    </span>
+                    <span className="ml-auto" data-pet-field="판정">
                       <ItemBadge item={item} preview={preview} dirty={dirty} />
                     </span>
                   </div>
@@ -143,6 +161,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                     inputMode="decimal"
                     autoComplete="off"
                     suffix={item.unit ?? undefined}
+                    data-pet-field="측정값"
                     value={text}
                     disabled={!editable}
                     invalid={bad || preview.state === 'invalid' || Boolean(serverError)}
@@ -158,7 +177,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   {/* 기준 값은 게이지 눈금에 있다. 이 줄은 두께 구간이나 입력 확인 문구가 있을 때만 */}
                   {band || preview.state === 'fail' || preview.state === 'invalid' ? (
                     <div className="flex flex-wrap items-center gap-x-1.5 text-cap text-ink-3">
-                      {band ? <span>{band}</span> : null}
+                      {band ? <span data-pet-field="적용 두께 구간">{band}</span> : null}
                       {preview.state === 'fail' ? (
                         <span className="ml-auto text-danger">
                           {preview.side === 'below' ? '하한' : '상한'}보다 {preview.gap}
@@ -180,12 +199,18 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
         </CardBody>
       </Card>
 
-      <section aria-label="검사 저장" className="sticky bottom-0 z-[1] flex flex-none items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
+      <section aria-label="검사 저장" data-pet-target="card:inspections.save" data-pet-perch="" className="sticky bottom-0 z-[1] flex flex-none items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-cap text-ink-3">미리보기 (저장하면 시스템이 판정해요)</span>
+          <span className="text-cap text-ink-3" data-pet-term="미리보기">
+            미리보기 (저장하면 시스템이 판정해요)
+          </span>
           <b className="text-base font-semibold">
             입력 {enteredRows.length}/{items.length}
-            {hasSavedValues ? <span className="ml-2 text-xs font-normal text-ink-3">바꾼 항목 {dirtyRows.length}개</span> : null}
+            {hasSavedValues ? (
+              <span className="ml-2 text-xs font-normal text-ink-3" data-pet-term="바꾼 항목">
+                바꾼 항목 {dirtyRows.length}개
+              </span>
+            ) : null}
           </b>
           <span className={cn('text-cap', forecast.tone)}>{forecast.text}</span>
         </div>

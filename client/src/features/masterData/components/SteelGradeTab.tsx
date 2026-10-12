@@ -25,7 +25,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
   const grades = useMasterSteelGrades();
   const [editing, setEditing] = useState<MasterSteelGradeView | 'new' | null>(null);
   return (
-    <Card>
+    <Card petKey="card:masterData.grades">
       <CardHead
         title="강종"
         meta={grades.data ? `${grades.data.length}종` : undefined}
@@ -52,7 +52,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                 </thead>
                 <tbody>
                   {rows.map((g) => (
-                    <tr key={g.id}>
+                    <tr key={g.id} data-pet-item="steelGrade" data-pet-item-title={g.steelGradeCode}>
                       <Td className="font-semibold">{g.steelGradeCode}</Td>
                       <Td>{g.steelGradeName}</Td>
                       <Td>{g.standardNo ?? <span className="text-ink-3">적용 규격 번호 없음</span>}</Td>

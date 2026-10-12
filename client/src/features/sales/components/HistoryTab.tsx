@@ -9,7 +9,7 @@ import { businessEventsHref } from '@/features/sales/components/SalesOrderParts'
 
 export function HistoryTab({ salesOrderId }: { salesOrderId: number }) {
   return (
-    <Card>
+    <Card petKey="card:salesOrders.history">
       <CardHead
         title="이력"
         meta="시간순 · 이 수주에 남은 작업 로그"

@@ -62,7 +62,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
   };
 
   return (
-    <Card>
+    <Card petKey="card:masterData.routing">
       <CardHead title={title} meta={`공정 ${steps.length}개`} />
       <Table>
         <thead>
@@ -79,7 +79,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
             const processError = fieldErrors.errorOf(`steps.${index}.processType`);
             const preview = RATE.test(step.plannedYieldRate.trim()) ? formatYieldPercent(step.plannedYieldRate.trim()) : null;
             return (
-              <tr key={step.processType}>
+              <tr key={step.processType} data-pet-item="routing" data-pet-item-title={`${title} · ${PROCESS_TYPE_LABEL[step.processType]}`}>
                 <Td className="tabular-nums">{index + 1}</Td>
                 <Td>
                   <span className="flex flex-col">

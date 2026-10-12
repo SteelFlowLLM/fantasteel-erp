@@ -88,7 +88,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
+      <Card petKey="card:salesOrders.fulfillment">
         <div className="overflow-auto">
           <Table>
             <thead>
@@ -116,7 +116,13 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 const itemUnit = qtyUnitOf([item.itemType]);
                 const cancelled = item.salesOrderItemStatus === 'CANCELLED';
                 return (
-                  <tr key={item.salesOrderItemId} data-muted={cancelled} data-risk={item.isDueRisk}>
+                  <tr
+                    key={item.salesOrderItemId}
+                    data-pet-item="salesOrderItem"
+                    data-pet-item-title={`품목 ${item.lineNo} ${item.itemName}`}
+                    data-muted={cancelled}
+                    data-risk={item.isDueRisk}
+                  >
                     <Td className="max-w-[260px]">
                       <span className="flex flex-col gap-1 py-1.5">
                         <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
@@ -221,14 +227,19 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
       ))}
 
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
-        <Card>
+        <Card petKey="card:salesOrders.shipping">
           <CardHead title="출하 준비" meta="출하요청·밀시트" actions={<ShipmentRequestButton summary={detail} />} />
           <CardBody>
             <ul className="flex flex-col gap-1 text-sm">
               {live.map((item) => (
-                <li key={item.salesOrderItemId} className="flex items-center gap-2">
+                <li
+                  key={item.salesOrderItemId}
+                  data-pet-item="salesOrderItem"
+                  data-pet-item-title={`품목 ${item.lineNo} ${item.itemName}`}
+                  className="flex items-center gap-2"
+                >
                   <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
-                  <span className="ml-auto text-cap text-ink-2 tabular-nums">
+                  <span data-pet-field="출하 가능" className="ml-auto text-cap text-ink-2 tabular-nums">
                     {item.activeReservedQty > 0 ? `예약 ${item.activeReservedQty}${qtyUnitOf([item.itemType])} 출하 가능` : '확보된 매수 없음'}
                   </span>
                 </li>
@@ -249,7 +260,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 </thead>
                 <tbody>
                   {detail.shipmentRequests.map((request) => (
-                    <tr key={request.id}>
+                    <tr key={request.id} data-pet-item="shipmentRequest" data-pet-item-title={request.shipmentRequestNo}>
                       <Td>
                         <Link href={`/shipment-requests/${request.id}`} className="font-mono text-xs font-medium text-run hover:underline">
                           {request.shipmentRequestNo}
@@ -273,9 +284,17 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             )}
             {detail.millSheets.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="text-ink-3">밀시트</span>
+                <span data-pet-term="밀시트" className="text-ink-3">
+                  밀시트
+                </span>
                 {detail.millSheets.map((sheet) => (
-                  <Link key={sheet.id} href={`/mill-sheets?id=${sheet.id}`} className="font-mono font-medium text-run hover:underline">
+                  <Link
+                    key={sheet.id}
+                    href={`/mill-sheets?id=${sheet.id}`}
+                    data-pet-item="millSheet"
+                    data-pet-item-title={sheet.millSheetNo}
+                    className="font-mono font-medium text-run hover:underline"
+                  >
                     {sheet.millSheetNo}
                   </Link>
                 ))}
@@ -283,7 +302,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             ) : null}
           </CardBody>
         </Card>
-        <Card>
+        <Card petKey="card:salesOrders.workRoom">
           <CardHead title="업무방" />
           <CardBody>
             <p className="text-sm leading-normal text-ink-2">
@@ -301,13 +320,20 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
       </div>
 
       {detail.items.some((i) => i.plans.length > 0) ? (
-        <Card>
+        <Card petKey="card:salesOrders.plans">
           <CardHead title="품목별 생산계획" meta="자세한 편성은 생산 연결 탭" />
           <CardBody>
             {detail.items.map((item) =>
               item.plans.map((plan) => (
-                <div key={plan.productionPlanId} className="flex items-center gap-2 text-xs">
-                  <span className="text-ink-3">품목 {item.lineNo}</span>
+                <div
+                  key={plan.productionPlanId}
+                  data-pet-item="productionPlan"
+                  data-pet-item-title={plan.productionPlanNo}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <span data-pet-field="품목" className="text-ink-3">
+                    품목 {item.lineNo}
+                  </span>
                   <PlanLink productionPlanId={plan.productionPlanId} productionPlanNo={plan.productionPlanNo} />
                   <span className="text-ink-2">
                     부족 {plan.shortageQty} · 잔여 목표 {plan.remainingTargetQty} · 히트 {plan.heatCount}

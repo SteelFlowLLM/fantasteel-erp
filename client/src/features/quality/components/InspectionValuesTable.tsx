@@ -26,7 +26,7 @@ export function InspectionValuesTable({ items }: { items: readonly InspectionFor
             const bad = item.isPassed === false;
             const band = thicknessBandText(item.minThicknessMm, item.maxThicknessMm);
             return (
-              <tr key={item.inspectionStandardItemId} data-risk={bad || undefined}>
+              <tr key={item.inspectionStandardItemId} data-risk={bad || undefined} data-pet-item="qualityInspectionValue" data-pet-item-title={item.inspectionItemName}>
                 <Td className={bad ? 'font-semibold' : undefined}>
                   {item.inspectionItemName}
                   {item.isRequired ? null : <span className="ml-1.5 text-cap text-ink-3">선택</span>}
@@ -38,7 +38,15 @@ export function InspectionValuesTable({ items }: { items: readonly InspectionFor
                 <Td align="right" className={bad ? 'font-semibold text-danger' : undefined}>
                   {item.measuredValue === null ? '—' : `${trimNum(item.measuredValue)}${item.unit ? ` ${item.unit}` : ''}`}
                 </Td>
-                <Td>{item.isPassed === null ? <Badge>미입력</Badge> : <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />}</Td>
+                <Td>
+                  {item.isPassed === null ? (
+                    <span className="inline-flex" data-pet-term="미입력">
+                      <Badge>미입력</Badge>
+                    </span>
+                  ) : (
+                    <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />
+                  )}
+                </Td>
                 <Td>
                   <MiniGauge item={item} value={item.measuredValue} bad={bad} />
                 </Td>

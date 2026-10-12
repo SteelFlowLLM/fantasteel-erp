@@ -41,30 +41,52 @@ const CLOSED_GROUP_TITLE = `${PRODUCTION_PLAN_STATUS_LABEL.COMPLETED} · ${PRODU
 
 function RollingPlanRow({ row, active, onPick }: { row: RollingPlanListRow; active: boolean; onPick: () => void }) {
   return (
-    <MasterListItem active={active} onPick={onPick}>
+    <MasterListItem active={active} onPick={onPick} petItem="productionPlan" petTitle={row.productionPlanNo}>
       <Row>
-        <span className="font-mono text-mono font-semibold">{row.productionPlanNo}</span>
+        <span className="font-mono text-mono font-semibold" data-pet-field="계획번호">
+          {row.productionPlanNo}
+        </span>
         {!row.rollable && isOpenStatus(row.productionPlanStatus) ? (
-          <Badge tone="outline" title="수주 연결이 없어 열연하지 않아요">
-            수주 연결 없음
-          </Badge>
+          <span className="inline-flex" data-pet-term="수주 연결 없음">
+            <Badge tone="outline" title="수주 연결이 없어 열연하지 않아요">
+              수주 연결 없음
+            </Badge>
+          </span>
         ) : null}
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-field="상태">
           <PlanStatusBadge status={row.productionPlanStatus} />
         </span>
       </Row>
       <Row className="text-xs">
-        {row.salesOrderNo ? <span className="font-mono">{row.salesOrderNo}</span> : <span className="text-ink-3">수주 연결 없음</span>}
-        <span className="ml-auto whitespace-nowrap tabular-nums">
+        {row.salesOrderNo ? (
+          <span className="font-mono" data-pet-field="수주번호">
+            {row.salesOrderNo}
+          </span>
+        ) : (
+          <span className="text-ink-3" data-pet-field="수주">
+            수주 연결 없음
+          </span>
+        )}
+        <span className="ml-auto whitespace-nowrap tabular-nums" data-pet-field="코일 완료/부족 · 배정">
           코일 {row.rolledQty}/{row.shortageQty}
           {row.failedCoilQty > 0 ? ` · 불합격 ${row.failedCoilQty}` : ''} · 배정 {row.allocatedQty}
         </span>
       </Row>
       <Row className="text-cap text-ink-3">
-        <span className="truncate font-mono">{row.coilItemCode}</span>
-        {row.dueDate ? <span className="ml-auto whitespace-nowrap">납기 {fmtMD(row.dueDate)}</span> : null}
+        <span className="truncate font-mono" data-pet-field="코일 규격">
+          {row.coilItemCode}
+        </span>
+        {row.dueDate ? (
+          <span className="ml-auto whitespace-nowrap" data-pet-field="납기">
+            납기 {fmtMD(row.dueDate)}
+          </span>
+        ) : null}
       </Row>
-      {row.rollable && row.neededQty > 0 ? <Row className="text-cap font-semibold text-wait">슬래브 {row.neededQty}매 더 배정해야 해요</Row> : null}
+      {row.rollable && row.neededQty > 0 ? (
+        <Row className="text-cap font-semibold text-wait">
+          <span data-pet-field="더 필요한 슬래브">슬래브 {row.neededQty}매 더 배정해야 해요</span>
+        </Row>
+      ) : null}
     </MasterListItem>
   );
 }
@@ -75,6 +97,7 @@ function RollingPlanList({ rows, selectedId, onPick }: { rows: readonly RollingP
   const closed = rows.filter((r) => !isOpenStatus(r.productionPlanStatus));
   return (
     <MasterPane
+      petKey="card:hotRolling.list"
       head={
         <>
           <div className="flex items-baseline gap-2">
@@ -82,10 +105,10 @@ function RollingPlanList({ rows, selectedId, onPick }: { rows: readonly RollingP
             <span className="text-xs text-ink-3">코일 계획</span>
           </div>
           <div className="flex gap-1.5">
-            <Chip on={!showAll} onClick={() => setShowAll(false)}>
+            <Chip on={!showAll} onClick={() => setShowAll(false)} data-pet-term={OPEN_GROUP_TITLE}>
               {OPEN_GROUP_TITLE} <b>{open.length}</b>
             </Chip>
-            <Chip on={showAll} onClick={() => setShowAll(true)}>
+            <Chip on={showAll} onClick={() => setShowAll(true)} data-pet-term="전체 코일 계획">
               전체 코일 계획 <b>{rows.length}</b>
             </Chip>
           </div>
@@ -118,10 +141,10 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
   const needText = permissionNeedText([PERMISSION.HOT_ROLLING_ALLOCATE]);
   const pool = plan.slabPool;
   return (
-    <Card>
+    <Card petKey="card:hotRolling.candidates">
       <CardHead
         title="FIFO 추천 슬래브"
-        meta={`${plan.slabItem.itemCode} · 생산완료일 → LOT 번호 순 · 추천은 저장하지 않아요`}
+        meta={<span data-pet-term="FIFO 순서">{`${plan.slabItem.itemCode} · 생산완료일 → LOT 번호 순 · 추천은 저장하지 않아요`}</span>}
         actions={
           <Button size="sm" variant="ghost" icon="refresh" onClick={() => setSelected(detail.recommendedLotIds)} disabled={detail.recommendedLotIds.length === 0}>
             추천대로 고르기
@@ -129,19 +152,19 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
         }
       />
       <div className="flex flex-wrap gap-x-4 gap-y-1 border-b border-line bg-surface-2 px-4 py-2 text-xs text-ink-2">
-        <span>
+        <span data-pet-term="미소진 합격">
           미소진 합격 <b className="tabular-nums">{pool.eligibleQty}매</b>
         </span>
-        <span>
+        <span data-pet-term="판매 예약">
           − 판매 예약 <b className="tabular-nums">{pool.activeReservedQty}매</b>
         </span>
-        <span>
+        <span data-pet-term="열연 배정">
           − 열연 배정 <b className="tabular-nums">{pool.hotRollingConfirmedQty}매</b>
         </span>
-        <span>
+        <span data-pet-term="예약 가용">
           = 예약 가용 <b className="tabular-nums">{Math.max(0, pool.availableQty)}매</b>
         </span>
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-term="지금 배정할 수 있는 매수">
           지금 배정할 수 있는 매수 <b className="tabular-nums text-ink">{limit}매</b> = min(더 필요한 {plan.neededQty}매, 예약 가용)
         </span>
       </div>
@@ -171,7 +194,7 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
                   const checked = selected.includes(c.lotId);
                   const disabled = !canAllocate || limit === 0 || (!checked && selected.length >= limit);
                   return (
-                    <tr key={c.lotId} data-selected={checked ? true : undefined}>
+                    <tr key={c.lotId} data-selected={checked ? true : undefined} data-pet-item="lot" data-pet-item-title={c.lotNo}>
                       <Td>
                         <input type="checkbox" checked={checked} disabled={disabled && !checked} onChange={() => toggle(c.lotId)} aria-label={`${c.lotNo} 선택`} />
                       </Td>
@@ -181,8 +204,32 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
                       <Td>{c.producedDate}</Td>
                       <Td>{c.yardName ?? '-'}</Td>
                       <Td className="font-mono text-mono">{c.sourcePlanNo ?? '-'}</Td>
-                      <Td>{c.isOwnPlan ? <span className="text-ink-2">이 계획 생산분</span> : c.surplusAt ? <Badge tone="outline">여재</Badge> : <span className="text-ink-3">미배정 합격</span>}</Td>
-                      <Td>{c.isRecommended ? <Badge tone="run">FIFO 추천</Badge> : <span className="text-cap text-ink-3">후보</span>}</Td>
+                      <Td>
+                        {c.isOwnPlan ? (
+                          <span className="text-ink-2" data-pet-term="이 계획 생산분">
+                            이 계획 생산분
+                          </span>
+                        ) : c.surplusAt ? (
+                          <span className="inline-flex" data-pet-term="여재">
+                            <Badge tone="outline">여재</Badge>
+                          </span>
+                        ) : (
+                          <span className="text-ink-3" data-pet-term="미배정 합격">
+                            미배정 합격
+                          </span>
+                        )}
+                      </Td>
+                      <Td>
+                        {c.isRecommended ? (
+                          <span className="inline-flex" data-pet-term="FIFO 추천">
+                            <Badge tone="run">FIFO 추천</Badge>
+                          </span>
+                        ) : (
+                          <span className="text-cap text-ink-3" data-pet-term="후보">
+                            후보
+                          </span>
+                        )}
+                      </Td>
                     </tr>
                   );
                 })}
@@ -192,7 +239,7 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
         )}
       </CardBody>
       <CardFoot>
-        <span className="text-xs text-ink-2">
+        <span className="text-xs text-ink-2" data-pet-term="선택 매수 · 이론중량">
           선택 {selected.length}매 · 이론중량 {fmtTon(calcWeightTon(selected.length, plan.slabItem.theoreticalWeightTon))} (계산값)
           {selected.length > 0 && !followsRecommendation ? ' · 추천과 다르게 골랐어요 (작업 로그에 추천·선택 LOT이 함께 남아요)' : ''}
         </span>
@@ -223,7 +270,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
   const allocNeed = permissionNeedText([PERMISSION.HOT_ROLLING_ALLOCATE]);
   const rollNeed = permissionNeedText([PERMISSION.PRODUCTION_RESULT_CONFIRM]);
   return (
-    <Card>
+    <Card petKey="card:hotRolling.allocations">
       <CardHead
         title="확정 배정"
         meta={`열연 투입 대기 ${plan.allocatedQty}매`}
@@ -257,7 +304,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
             </thead>
             <tbody>
               {plan.allocations.map((a) => (
-                <tr key={a.allocationId}>
+                <tr key={a.allocationId} data-pet-item="allocation" data-pet-item-title={a.lotNo}>
                   <Td className="font-mono text-mono">{a.lotNo}</Td>
                   <Td className="font-mono text-mono text-ink-2">{a.heatNo ?? '-'}</Td>
                   <Td>{a.producedDate}</Td>
@@ -288,7 +335,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
 
 function CoilsCard({ detail }: { detail: RollingDetail }) {
   return (
-    <Card>
+    <Card petKey="card:hotRolling.coils">
       <CardHead title="열연 실적 · 코일" meta={`코일 ${detail.coils.length}개${detail.plan.failedCoilQty > 0 ? ` (불합격 ${detail.plan.failedCoilQty}개)` : ''} · 슬래브 1매 = 코일 1개`} />
       <CardBody flush>
         <ResultsTable results={detail.results} emptyText="아직 등록된 열연 실적이 없어요" />
@@ -306,7 +353,7 @@ function CoilsCard({ detail }: { detail: RollingDetail }) {
               </thead>
               <tbody>
                 {detail.coils.map((c) => (
-                  <tr key={c.lotId}>
+                  <tr key={c.lotId} data-pet-item="lot" data-pet-item-title={c.lotNo}>
                     <Td>
                       <Link href={`/lots/trace?lot=${encodeURIComponent(c.lotNo)}`} className="font-mono text-mono text-run hover:underline">
                         {c.lotNo}
@@ -388,14 +435,17 @@ export function RollingBody({ detail }: { detail: RollingDetail }) {
         </Banner>
       ) : null}
 
-      <StatBar>
+      <StatBar petKey="card:hotRolling.summary">
         <Kpi flat label="코일 규격" value={<span className="font-mono text-base">{plan.coilItem.itemCode}</span>} sub={plan.dueDate ? `납기 ${fmtDate(plan.dueDate)}` : undefined} />
         <Kpi flat label="소재 슬래브 (규격 매핑)" value={<span className="font-mono text-base">{plan.slabItem.itemCode}</span>} sub={`1매 ${fmtTon(plan.slabItem.theoreticalWeightTon)} → 코일 ${fmtTon(plan.coilItem.theoreticalWeightTon)}`} />
         <Kpi flat label="열연 완료 / 부족 매수" value={`${plan.rolledQty}/${plan.shortageQty}`} unit="개" sub={plan.failedCoilQty > 0 ? `불합격 코일 ${plan.failedCoilQty}개 제외` : undefined} />
         <Kpi flat label="배정 확정" value={plan.allocatedQty} unit="매" sub="열연 투입 대기" />
         <Kpi flat label="더 필요한 슬래브" value={plan.neededQty} unit="매" sub="부족 − 코일 − 배정" />
       </StatBar>
-      <Steps items={steps} className="overflow-x-auto px-1" />
+      {/* Steps는 공유 컴포넌트라 단계마다 속성을 달 수 없어, 묶음 전체를 '열연 단계' 용어로 설명한다 */}
+      <div data-pet-term="열연 단계">
+        <Steps items={steps} className="overflow-x-auto px-1" />
+      </div>
 
       <CandidatesCard key={detail.recommendedLotIds.join(',')} detail={detail} canAllocate={canAllocate} />
       <AllocationsCard detail={detail} canAllocate={canAllocate} canRoll={canRoll} />

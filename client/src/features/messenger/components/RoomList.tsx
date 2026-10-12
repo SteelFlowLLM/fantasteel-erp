@@ -48,7 +48,7 @@ export function RoomList({ rooms, activeId, onSelect, onNew }: { rooms: ChatRoom
   const grouped = filter === 'all' && !keyword.trim();
 
   return (
-    <section className="flex min-h-0 w-80 flex-none flex-col border-r border-line bg-surface" aria-label="채팅방 목록">
+    <section data-pet-target="card:messenger.rooms" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col border-r border-line bg-surface" aria-label="채팅방 목록">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
         <div className="flex items-center gap-2">
           <b className="text-lg font-semibold">채팅방</b>
@@ -87,7 +87,7 @@ export function RoomList({ rooms, activeId, onSelect, onNew }: { rooms: ChatRoom
             if (group.length === 0) return null;
             return (
               <div key={type}>
-                <div className="sticky top-0 z-[1] bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">
+                <div data-pet-term={CHAT_ROOM_TYPE_LABEL[type]} className="sticky top-0 z-[1] bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">
                   {CHAT_ROOM_TYPE_LABEL[type]} {group.length}
                 </div>
                 {group.map((room) => (
@@ -109,7 +109,7 @@ function PinnedGroup({ rooms, activeId, onSelect }: { rooms: ChatRoomListItem[];
   if (rooms.length === 0) return null;
   return (
     <div>
-      <div className="sticky top-0 z-[1] flex items-center gap-1 bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">
+      <div data-pet-term="고정" className="sticky top-0 z-[1] flex items-center gap-1 bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-3">
         <Icon name="pin" size="sm" />
         고정 {rooms.length}
       </div>
@@ -127,6 +127,8 @@ function RoomRow({ room, active, showType, onSelect }: { room: ChatRoomListItem;
     <button
       type="button"
       aria-current={active ? 'true' : undefined}
+      data-pet-item="chatRoom"
+      data-pet-item-title={room.displayName}
       onClick={() => onSelect(room.id)}
       className={cn('flex w-full gap-2.5 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2', active && 'bg-brand-tint hover:bg-brand-tint-hover')}
     >
@@ -144,14 +146,16 @@ function RoomRow({ room, active, showType, onSelect }: { room: ChatRoomListItem;
           ) : null}
           {room.pinnedAt ? <RowMark icon="pin" label="고정됨" /> : null}
           {room.muted ? <RowMark icon="bell" label="알림 꺼짐" className="opacity-50" /> : null}
-          <time className="ml-auto flex-none text-cap text-ink-3">{formatShortTime(last?.createdAt ?? room.createdAt)}</time>
+          <time data-pet-field="마지막 대화" className="ml-auto flex-none text-cap text-ink-3">{formatShortTime(last?.createdAt ?? room.createdAt)}</time>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{lastLine}</span>
+          <span data-pet-field="마지막 메시지" className="min-w-0 flex-1 truncate text-xs text-ink-3">
+            {lastLine}
+          </span>
           <CountBadge count={room.unreadCount} placement="inline" tone={room.muted ? 'muted' : 'danger'} />
         </span>
         {room.salesOrder ? (
-          <span className="truncate text-cap text-ink-3">
+          <span data-pet-field="업무방 수주" className="truncate text-cap text-ink-3">
             {room.salesOrder.customerName}
             {room.salesOrder.dueDate ? ` · 납기 ${fmtMD(room.salesOrder.dueDate)}` : ''} · 멤버 {room.memberCount}
           </span>

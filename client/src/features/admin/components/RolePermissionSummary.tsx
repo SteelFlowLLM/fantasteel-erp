@@ -9,10 +9,12 @@ export function RolePermissionSummary({ permissions }: { permissions: readonly {
   return (
     <div className="flex flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="min-w-12 flex-none whitespace-nowrap text-xs text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}</span>
+        <span className="min-w-12 flex-none whitespace-nowrap text-xs text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}>
+          {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}
+        </span>
         {use.length > 0 ? (
           use.map((permission) => (
-            <span key={permission} className="inline-flex items-center gap-1 text-ok">
+            <span key={permission} className="inline-flex items-center gap-1 text-ok" data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
               <Icon name="check" size="sm" />
               <span className="text-ink">{PERMISSION_LABEL[permission]}</span>
             </span>
@@ -22,10 +24,12 @@ export function RolePermissionSummary({ permissions }: { permissions: readonly {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="min-w-12 flex-none whitespace-nowrap text-xs text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}</span>
+        <span className="min-w-12 flex-none whitespace-nowrap text-xs text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}>
+          {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}
+        </span>
         {view.length > 0 ? (
           view.map((permission) => (
-            <span key={permission} className="inline-flex items-center gap-1 text-run">
+            <span key={permission} className="inline-flex items-center gap-1 text-run" data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
               <Icon name="eye" size="sm" />
               <span className="text-ink-2">{PERMISSION_LABEL[permission]}</span>
             </span>
@@ -36,7 +40,9 @@ export function RolePermissionSummary({ permissions }: { permissions: readonly {
       </div>
       {none.length > 0 ? (
         <div className="flex items-center gap-x-3 text-ink-3">
-          <span className="min-w-12 flex-none whitespace-nowrap text-xs">권한 없음</span>
+          <span className="min-w-12 flex-none whitespace-nowrap text-xs" data-pet-term="권한 없음">
+            권한 없음
+          </span>
           <span className="inline-flex items-center gap-1 text-cap">
             <Icon name="lock" size="sm" />
             {none

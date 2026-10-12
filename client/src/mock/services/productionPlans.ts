@@ -299,6 +299,20 @@ export function markLeftoverSlabsAsSurplus(tx: MockTx, plan: ProductionPlanRow):
   });
 }
 
+/**
+ * 히트 편성 확정 (REQ-PRD-002, 서버 API-204와 같은 규칙): 시작 전(PLANNED) 계획의 편성을 지금 기준정보로 다시 계산해 저장한다.
+ * 기준정보가 모자라면 MST-001. 공통 코드에 확정 이벤트가 없어 작업 로그는 남기지 않는다(서버와 같다).
+ */
+export function confirmHeatPlan(tx: MockTx, input: { productionPlanId: number; expectedUpdatedAt?: string | null }): ProductionPlanRow {
+  const plan = mustGet(tx.tables, 'productionPlan', input.productionPlanId, '생산계획');
+  assertNotChanged(plan.updatedAt, input.expectedUpdatedAt, '생산계획');
+  if (plan.productionPlanStatus !== 'PLANNED') inputError('productionPlanId', '작업을 시작한 계획은 히트 편성을 바꿀 수 없어요');
+  const formation = planHeatsFor(tx.tables, mustGet(tx.tables, 'item', plan.itemId, '규격'), plan.shortageQty);
+  const values = { heatCount: formation.heatCount, cumulativeYieldRate: formation.cumulativeYieldRate, requiredSteelTon: formation.requiredSteelTon };
+  if (values.heatCount === plan.heatCount && values.cumulativeYieldRate === plan.cumulativeYieldRate && values.requiredSteelTon === plan.requiredSteelTon) return plan;
+  return updateRow(tx, 'productionPlan', plan.id, values) ?? plan;
+}
+
 /** 생산 담당의 계획 취소: PLANNED일 때만 (10장). 열연 배정은 해제한다. */
 export function cancelProductionPlan(tx: MockTx, actor: PersonActor, input: { productionPlanId: number; reasonText?: string | null; expectedUpdatedAt?: string | null }): ProductionPlanRow {
   const plan = mustGet(tx.tables, 'productionPlan', input.productionPlanId, '생산계획');
@@ -413,6 +427,8 @@ export interface ProductionPlanView {
     cumulativeYieldRate: string;
     requiredSteelTon: string;
     heatCount: number;
+    /** 지금 기준정보로 다시 계산한 히트 수. 저장된 heatCount와 다르면 계획 상태에서 '히트 편성 확정'으로 저장한다 */
+    recalculatedHeatCount: number;
     heatCapacityTon: string;
     heatTon: string;
     slabQtyPerHeat: number;
@@ -436,6 +452,7 @@ function formationViewOf(tables: Tables, plan: ProductionPlanRow): ProductionPla
       cumulativeYieldRate: plan.cumulativeYieldRate,
       requiredSteelTon: plan.requiredSteelTon,
       heatCount: plan.heatCount,
+      recalculatedHeatCount: f.heatCount,
       heatCapacityTon: f.heatCapacityTon,
       heatTon: decMul(f.heatCapacityTon, plan.heatCount),
       slabQtyPerHeat: f.slabQtyPerHeat,

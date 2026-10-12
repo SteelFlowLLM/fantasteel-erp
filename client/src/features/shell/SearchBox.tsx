@@ -22,7 +22,7 @@ export function SearchBox() {
   };
 
   return (
-    <div ref={popover.ref} className="relative w-[min(460px,32vw)] min-w-[200px]">
+    <div ref={popover.ref} data-pet-target="topbar:search" className="relative w-[min(460px,32vw)] min-w-[200px]">
       <label className="flex h-[34px] items-center gap-2 rounded-sm border border-line-strong bg-surface-2 px-2.5 text-ink-3 focus-within:border-run focus-within:shadow-[0_0_0_2px_var(--color-run-bg)]">
         <Icon name="search" />
         <input

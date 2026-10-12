@@ -4,7 +4,7 @@
 // '사용 안 함' 토글 없이 삭제만 둔다. 쓰는 곳이 있으면 삭제를 거부한다 (PLAN 5장, 컨벤션 7-2).
 // 야드 수정 창은 그 야드의 실제 야드 유형을 보여 준다 (옛 화면의 '항상 원료 야드' 표시 버그 수정, 보고서 5).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { YARD_TYPE, YARD_TYPE_LABEL, type YardType } from '@/codes';
 import { masterDataApi } from '@/api/masterData';
 import { Button } from '@/components/Button';
@@ -23,11 +23,13 @@ import { useMasterCustomers, useMasterSuppliers, useMasterYards } from '@/hooks/
 
 // 화면 안에서 세 목록을 고르는 값 (주소 &sub=)
 type ListKind = 'customers' | 'suppliers' | 'yards';
-const KINDS: readonly { key: ListKind; label: string }[] = [
-  { key: 'customers', label: '고객사' },
-  { key: 'suppliers', label: '공급업체' },
-  { key: 'yards', label: '야드' },
+const KINDS: readonly { key: ListKind; label: ReactNode }[] = [
+  { key: 'customers', label: <span data-pet-term="고객사">고객사</span> },
+  { key: 'suppliers', label: <span data-pet-term="공급업체">공급업체</span> },
+  { key: 'yards', label: <span data-pet-term="야드">야드</span> },
 ];
+/** 화면 도우미 펫의 항목 종류 (ERD 이름) */
+const PET_ITEM: Record<ListKind, 'customer' | 'supplier' | 'yard'> = { customers: 'customer', suppliers: 'supplier', yards: 'yard' };
 const isListKind = (value: string | null): value is ListKind => KINDS.some((k) => k.key === value);
 
 /** 세 대상을 같은 표로 그리기 위한 화면 행 (저장할 때는 ERD 이름의 입력으로 바꾼다) */
@@ -132,7 +134,7 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<CodeNameRow | 'new' | null>(null);
   return (
-    <Card>
+    <Card petKey="card:masterData.partners">
       <CardHead
         title={text.what}
         meta={query.data ? `${query.data.length}곳` : undefined}
@@ -162,7 +164,7 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
                 </thead>
                 <tbody>
                   {shown.map((row) => (
-                    <tr key={row.id}>
+                    <tr key={row.id} data-pet-item={PET_ITEM[kind]} data-pet-item-title={row.code}>
                       <Td className="font-mono text-mono">{row.code}</Td>
                       <Td>{row.name}</Td>
                       {kind === 'yards' ? <Td>{row.yardType ? YARD_TYPE_LABEL[row.yardType] : '-'}</Td> : null}

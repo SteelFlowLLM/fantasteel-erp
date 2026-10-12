@@ -113,12 +113,14 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
         }
       />
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:purchaseRequisitions.draftFlow">
         <div className="flex flex-wrap items-center gap-4 px-4 py-3">
           <Steps items={buildDraftFlowSteps(status)} className="min-w-[320px] flex-1" />
           <span aria-hidden="true" className="hidden h-6 w-px bg-line md:block" />
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="text-cap text-ink-3">{status === 'WAITING_APPROVAL' || status === 'AI_GENERATED' ? '다음' : '경로'}</span>
+            <span data-pet-term={status === 'WAITING_APPROVAL' || status === 'AI_GENERATED' ? '다음' : '경로'} className="text-cap text-ink-3">
+              {status === 'WAITING_APPROVAL' || status === 'AI_GENERATED' ? '다음' : '경로'}
+            </span>
             <Avatar name={name} size="sm" />
             {name} 확정
             <Icon name="chevron-right" size="sm" className="text-ink-3" />
@@ -142,18 +144,20 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
             </ButtonLink>
           }
         >
-          <b>
-            구매요청{' '}
-            <Link href={`/purchase-requisitions/${purchaseRequisition.id}`} className="font-mono underline">
-              {purchaseRequisition.purchaseRequisitionNo}
-            </Link>
-            {withEulReul(purchaseRequisition.purchaseRequisitionNo).slice(purchaseRequisition.purchaseRequisitionNo.length)} 만들었어요
-          </b>{' '}
-          <Badge tone={purchaseRequisitionStatusView.tone}>{purchaseRequisitionStatusView.label}</Badge>
-          <div>
-            {purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL'
-              ? '이제 부서장 승인을 기다려요. 초안 확정과 구매요청 승인은 따로예요.'
-              : '초안 확정은 끝났어요. 구매요청의 진행 상태는 구매요청 화면에서 볼 수 있어요.'}
+          <div data-pet-item="purchaseRequisition" data-pet-item-title={purchaseRequisition.purchaseRequisitionNo}>
+            <b>
+              구매요청{' '}
+              <Link href={`/purchase-requisitions/${purchaseRequisition.id}`} className="font-mono underline">
+                {purchaseRequisition.purchaseRequisitionNo}
+              </Link>
+              {withEulReul(purchaseRequisition.purchaseRequisitionNo).slice(purchaseRequisition.purchaseRequisitionNo.length)} 만들었어요
+            </b>{' '}
+            <Badge tone={purchaseRequisitionStatusView.tone}>{purchaseRequisitionStatusView.label}</Badge>
+            <div>
+              {purchaseRequisition.purchaseRequisitionStatus === 'WAITING_APPROVAL'
+                ? '이제 부서장 승인을 기다려요. 초안 확정과 구매요청 승인은 따로예요.'
+                : '초안 확정은 끝났어요. 구매요청의 진행 상태는 구매요청 화면에서 볼 수 있어요.'}
+            </div>
           </div>
         </Banner>
       ) : null}

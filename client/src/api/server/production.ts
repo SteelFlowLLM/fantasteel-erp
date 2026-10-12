@@ -15,7 +15,7 @@ import type {
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { seedItemOf } from '@/api/server/masterIds';
-import type { CancelPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ReproductionCheck, ReproductionResult } from '@/api/production';
+import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
   IronmakingResultInput,
@@ -174,6 +174,7 @@ function toPlanView(d: ServerPlanDetail): ProductionPlanView {
           cumulativeYieldRate: f.cumulativeYieldRate,
           requiredSteelTon: f.requiredMoltenSteelTon,
           heatCount: d.heatCount,
+          recalculatedHeatCount: f.heatCount,
           heatCapacityTon: f.heatCapacityTon,
           heatTon: decMul(f.heatCapacityTon, d.heatCount),
           slabQtyPerHeat: f.slabQtyPerHeat,
@@ -255,6 +256,16 @@ export const serverProductionPlanApi = {
     const reason = input.reasonText?.trim() ? input.reasonText.trim().slice(0, 200) : undefined;
     const d = await serverRequest<ServerPlanDetail>('POST', `/production-plans/${input.productionPlanId}/cancel`, { body: { reason } });
     return { id: d.id, productionPlanNo: d.productionPlanNo };
+  },
+
+  /** 서버에는 낙관적 잠금이 없어 화면을 연 뒤 바뀌었는지 먼저 확인한다 (COM-001) */
+  confirmHeatPlan: async (input: ConfirmHeatPlanInput): Promise<{ id: number; productionPlanNo: string; heatCount: number }> => {
+    if (input.expectedUpdatedAt) {
+      const current = await planDetail(input.productionPlanId);
+      if (current.updatedAt !== input.expectedUpdatedAt) throw new ApiError('COM-001');
+    }
+    const d = await serverRequest<ServerPlanDetail>('POST', `/production-plans/${input.productionPlanId}/confirm`);
+    return { id: d.id, productionPlanNo: d.productionPlanNo, heatCount: d.heatCount };
   },
 
   createReproduction: async (input: { salesOrderItemId: number }): Promise<ReproductionResult> => {

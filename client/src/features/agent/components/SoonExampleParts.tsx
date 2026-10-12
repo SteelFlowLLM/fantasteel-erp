@@ -26,6 +26,7 @@ export function AiCard({
   icon,
   className,
   bodyClassName,
+  petKey,
   children,
 }: {
   title: ReactNode;
@@ -35,10 +36,12 @@ export function AiCard({
   icon?: IconName;
   className?: string;
   bodyClassName?: string;
+  /** 화면 도우미 펫 설명 키 (Card와 같이 윗면은 펫이 올라가는 면) */
+  petKey?: string;
   children: ReactNode;
 }) {
   return (
-    <section className={cn('flex min-h-0 min-w-0 flex-col rounded-md border border-ai-line bg-surface shadow-1', className)}>
+    <section data-pet-perch="" data-pet-target={petKey} className={cn('flex min-h-0 min-w-0 flex-col rounded-md border border-ai-line bg-surface shadow-1', className)}>
       <header className="flex h-11 flex-none items-center gap-2 rounded-t-md border-b border-ai-line bg-ai-bg px-4">
         {icon ? <Icon name={icon} className="text-ai-strong" /> : <AiMark size="sm" />}
         <h2 className="text-base font-semibold text-ai-strong">{title}</h2>
@@ -130,7 +133,9 @@ export function LockHint({ icon = 'lock', className, children }: { icon?: IconNa
 export function Figure({ label, value, unit, danger }: { label: ReactNode; value: ReactNode; unit?: string; danger?: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface-2 px-3 py-2">
-      <span className="text-cap text-ink-3">{label}</span>
+      <span data-pet-term={typeof label === 'string' ? label : undefined} className="text-cap text-ink-3">
+        {label}
+      </span>
       <b className={cn('text-xl font-semibold tabular-nums', danger ? 'text-danger' : 'text-ink')}>
         {value}
         {unit ? <small className="ml-0.5 text-xs font-medium text-ink-3">{unit}</small> : null}
@@ -144,10 +149,26 @@ export function DaySeparator({ children }: { children: ReactNode }) {
   return <div className="px-4 pt-2.5 pb-1 text-cap font-semibold text-ink-3">{children}</div>;
 }
 
-/** 목록 칸의 한 줄 (옛 hl-mitem). active면 선택 표시. */
-export function MasterItem({ active, muted, className, children }: { active?: boolean; muted?: boolean; className?: string; children: ReactNode }) {
+/** 목록 칸의 한 줄 (옛 hl-mitem). active면 선택 표시. petItem·petTitle은 화면 도우미 펫이 읽는 항목 종류(용어 사전 변수명)와 제목. */
+export function MasterItem({
+  active,
+  muted,
+  petItem,
+  petTitle,
+  className,
+  children,
+}: {
+  active?: boolean;
+  muted?: boolean;
+  petItem?: string;
+  petTitle?: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <div
+      data-pet-item={petItem}
+      data-pet-item-title={petTitle}
       className={cn(
         'flex flex-col gap-1 border-b border-line px-4 py-2.5',
         active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',

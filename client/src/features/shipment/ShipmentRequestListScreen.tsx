@@ -92,12 +92,12 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip on={status === null} onClick={() => setStatus(null)}>
+      <div data-pet-target="card:shipmentRequests.filter" className="flex flex-wrap items-center gap-2">
+        <Chip data-pet-term="전체" on={status === null} onClick={() => setStatus(null)}>
           전체 <b>{rows.length}</b>
         </Chip>
         {STATUSES.map((s) => (
-          <Chip key={s} on={status === s} onClick={() => setStatus(s)}>
+          <Chip key={s} data-pet-term={SHIPMENT_REQUEST_STATUS_LABEL[s]} on={status === s} onClick={() => setStatus(s)}>
             {SHIPMENT_REQUEST_STATUS_LABEL[s]} <b>{rows.filter((r) => r.shipmentRequestStatus === s).length}</b>
           </Chip>
         ))}
@@ -110,7 +110,9 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
             </option>
           ))}
         </Select>
-        <span className="text-xs text-ink-3">출하 요청일</span>
+        <span data-pet-term="출하 요청일" className="text-xs text-ink-3">
+          출하 요청일
+        </span>
         <DateInput value={from} onChange={setFrom} ariaLabel="출하 요청일 시작" className="w-[130px]" />
         <span className="text-ink-3">~</span>
         <DateInput value={to} onChange={setTo} ariaLabel="출하 요청일 끝" className="w-[130px]" />
@@ -123,7 +125,7 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
           aria-label="검색"
         />
       </div>
-      <Card>
+      <Card petKey="card:shipmentRequests.list">
         <CardHead title="출하요청 목록" meta={`${filtered.length}/${rows.length}건 · 최신순`} />
         {rows.length === 0 ? (
           <EmptyNote>아직 등록된 출하요청이 없어요.</EmptyNote>
@@ -151,7 +153,13 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                 {filtered.map((r) => {
                   const unit = qtyUnitOf(r.itemTypes);
                   return (
-                    <tr key={r.id} className="cursor-pointer" onClick={() => router.push(`/shipment-requests/${r.id}`)}>
+                    <tr
+                      key={r.id}
+                      data-pet-item="shipmentRequest"
+                      data-pet-item-title={r.shipmentRequestNo}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/shipment-requests/${r.id}`)}
+                    >
                       <Td className="font-semibold">
                         <ShipmentRequestLink id={r.id} no={r.shipmentRequestNo} />
                       </Td>
