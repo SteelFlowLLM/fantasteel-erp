@@ -1,5 +1,5 @@
 // 검사 저장 뒤 "다음 판정 대기 LOT" 고르기. 한 히트의 슬래브를 연달아 검사하는 흐름을 끊지 않게 같은 히트를 먼저 고른다.
-import type { InspectionQueueRow } from '@/mock/services';
+import type { InspectionQueueRow } from '@/api/inspections';
 
 type QueueLot = Pick<InspectionQueueRow, 'lotId' | 'lotType' | 'heatLotId'>;
 

@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
+import type { InspectionDetail, InspectionQueueRow, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -32,7 +32,6 @@ import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDate, fmtMD, fmtMDHM } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
-import type { InspectionQueueRow } from '@/mock/services';
 
 type ProcessFilter = 'ALL' | Extract<ProcessType, 'STEELMAKING' | 'CONTINUOUS_CASTING' | 'HOT_ROLLING'>;
 type ResultFilter = 'ALL' | 'PENDING' | 'PASS' | 'FAIL';

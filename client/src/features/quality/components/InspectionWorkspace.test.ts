@@ -4,11 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { inspectionApi, inspectionKeys } from '@/api/inspections';
+import { inspectionApi, inspectionKeys, type InspectionQueueRow } from '@/api/inspections';
 import { sessionApi } from '@/api/session';
 import { InspectionWorkspace } from '@/features/quality/components/InspectionWorkspace';
 import { MeContext } from '@/hooks/useMe';
-import type { InspectionQueueRow } from '@/mock/services';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 /** 주소의 ?lot= (테스트마다 바꾼다) */

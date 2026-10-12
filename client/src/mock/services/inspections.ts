@@ -3,6 +3,7 @@
 // - 같은 검사 행을 고치고 전후 값을 작업 로그(INSPECTION_REGISTERED before/after)에 남긴다. 밀시트에 들어간 LOT은 고칠 수 없다.
 // - 합격으로 적격이 되면 원래 수주 품목의 미확보 안에서 자동 예약(SYSTEM). 예약하지 못한 합격 슬래브는 여재로 표시.
 // - 불합격(히트 불합격이면 하위 슬래브·코일 전체)은 배정 RELEASED(QUALITY_FAILURE)와 규격 풀 재조정.
+import type { InspectionFormItem, InspectionFormView, InspectionQueueRow, RegisterInspectionInput } from '@/api/inspections';
 import { DISPOSITION_STATUS, PRODUCT_QTY_UNIT, type DispositionStatus } from '@/codes';
 import { isQualityExcluded } from '@/lib/eligibility';
 import { pickFifo } from '@/lib/fifo';
@@ -82,14 +83,6 @@ const inspectionSnapshot = (tables: Tables, row: QualityInspectionRow | undefine
         })),
       }
     : null;
-
-export interface RegisterInspectionInput {
-  lotId: number;
-  /** 입력한 항목 값. 빈 값(null·'')은 지운다. 넘기지 않은 항목은 그대로 둔다. */
-  values: readonly { inspectionStandardItemId: number; measuredValue: string | null }[];
-  /** 화면을 연 시점의 quality_inspection.updatedAt (없으면 확인 안 함) */
-  expectedUpdatedAt?: string | null;
-}
 
 export interface RegisterInspectionResult {
   inspection: QualityInspectionRow;
@@ -297,31 +290,7 @@ export function setDisposition(
 // ── 조회 ──────────────────────────────────────────────
 
 export type InspectionStatus = 'PENDING' | 'PASS' | 'FAIL';
-
-export interface InspectionQueueRow {
-  lotId: number;
-  lotNo: string;
-  lotType: LotRow['lotType'];
-  lotStatus: LotRow['lotStatus'];
-  processType: string;
-  itemId: number | null;
-  itemCode: string | null;
-  itemName: string | null;
-  steelGradeCode: string | null;
-  thicknessMm: string | null;
-  producedDate: string;
-  heatLotId: number | null;
-  heatNo: string | null;
-  heatResult: InspectionStatus | null;
-  productionPlanNo: string | null;
-  qualityInspectionId: number | null;
-  inspectionResult: InspectionStatus;
-  inspectionStandardCode: string | null;
-  inspectionStandardVersion: number | null;
-  inspectedAt: string | null;
-  inspectorName: string | null;
-  locked: boolean;
-}
+export type { InspectionFormItem, InspectionFormView, InspectionQueueRow, RegisterInspectionInput };
 
 const resultOfLot = (lot: LotRow | undefined): InspectionStatus | null => (!lot ? null : lot.isPassed === true ? 'PASS' : lot.isPassed === false ? 'FAIL' : 'PENDING');
 
@@ -362,36 +331,6 @@ export function inspectionQueue(tables: Tables): InspectionQueueRow[] {
   const pending = rows.filter((r) => r.inspectionResult === 'PENDING').sort((a, b) => a.producedDate.localeCompare(b.producedDate) || a.lotNo.localeCompare(b.lotNo));
   const judged = rows.filter((r) => r.inspectionResult !== 'PENDING').sort((a, b) => (b.inspectedAt ?? '').localeCompare(a.inspectedAt ?? '') || b.lotId - a.lotId);
   return [...pending, ...judged];
-}
-
-export interface InspectionFormItem {
-  inspectionStandardItemId: number;
-  inspectionItemCode: string;
-  inspectionItemName: string;
-  unit: string | null;
-  minValue: string | null;
-  maxValue: string | null;
-  minThicknessMm: string | null;
-  maxThicknessMm: string | null;
-  isRequired: boolean;
-  sortOrder: number;
-  measuredValue: string | null;
-  isPassed: boolean | null;
-}
-
-export interface InspectionFormView {
-  lot: InspectionQueueRow;
-  qualityInspectionId: number | null;
-  /** 이 검사 행의 수정 시각 (registerInspection의 expectedUpdatedAt) */
-  updatedAt: string | null;
-  inspectionResult: InspectionStatus;
-  /** 판정에 쓰는(쓴) 기준 버전. 값을 넣은 적이 없으면 현재 버전 */
-  standard: { id: number; inspectionStandardCode: string; version: number; isCurrent: boolean } | null;
-  currentStandard: { id: number; inspectionStandardCode: string; version: number } | null;
-  /** 두께 구간(초과~이하)으로 거른 적용 항목 (샤르피는 SM 강종·6mm 초과 코일만) */
-  items: InspectionFormItem[];
-  locked: boolean;
-  lockedMillSheetNos: string[];
 }
 
 export function inspectionFormOf(tables: Tables, lotId: number): InspectionFormView {

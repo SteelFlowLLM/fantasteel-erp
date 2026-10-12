@@ -3,14 +3,13 @@
 // - 서버 사유는 'STOCK_FIRST: 문장' 한 줄이라 앞이 사유 코드(9.3)면 코드와 문장으로 나눈다.
 // - 응답에 없는 값: 주체의 부서·직급, 원본 메시지의 채팅방(메신저 링크), 출하요청 품목 대상의 출하요청 id. 비워 둔다.
 import type { BusinessEventView as ServerEvent, LotDetail, PageResult, SalesOrderDetail, SalesOrderSummary } from '@fantasteel/shared';
-import type { BusinessEventFilter, BusinessEventPage, BusinessEventSubject, BusinessEventView, SalesOrderOption } from '@/api/businessEvents';
+import type { BusinessEventFilter, BusinessEventPage, BusinessEventSubject, BusinessEventView, SalesOrderOption, TimelineEvent } from '@/api/businessEvents';
 import type { RecentEventsData } from '@/api/dashboard';
 import { serverRequest } from '@/api/http';
 import { allPages, orEmpty } from '@/api/server/inspections';
 import { isEventReasonCode, type EventReasonCode } from '@/codes';
 import { targetHref, targetTableLabel } from '@/features/businessEvents/lib/eventTargets';
-import type { DbTableName, JsonValue } from '@/mock/schema';
-import type { TimelineEvent } from '@/mock/services';
+import type { JsonValue } from '@/lib/json';
 
 /** 서버 최대 페이지 크기 */
 const PAGE_SIZE = 100;
@@ -101,7 +100,7 @@ export function toEventView(e: ServerEvent): BusinessEventView {
         ? { employeeId: e.actorEmployeeId, employeeName: e.actorEmployeeName ?? '', employeeNo: e.actorEmployeeNo ?? '', departmentName: '', jobGradeName: '' }
         : null,
     // 서버 대상은 ERD 테이블명이다
-    targetType: e.targetType as DbTableName,
+    targetType: e.targetType,
     targetTypeLabel: targetTableLabel(e.targetType),
     targetId: e.targetId,
     targetNo,

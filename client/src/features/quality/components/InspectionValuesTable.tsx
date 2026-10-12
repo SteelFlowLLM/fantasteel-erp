@@ -1,11 +1,11 @@
 // 저장된 검사값 표 (읽기 전용): 항목 · 기준 · 측정값 · 판정 · 기준 안 위치. 불합격 항목은 붉게 강조한다.
+import type { InspectionFormItem } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
 import { MiniGauge } from '@/features/quality/components/LimitGauge';
 import { limitText, thicknessBandText, trimNum } from '@/features/quality/lib/qualityDisplay';
-import type { InspectionFormItem } from '@/mock/services';
 
 export function InspectionValuesTable({ items }: { items: readonly InspectionFormItem[] }) {
   if (items.length === 0) return <EmptyNote>검사값이 없어요</EmptyNote>;

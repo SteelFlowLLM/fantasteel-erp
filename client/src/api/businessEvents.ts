@@ -9,9 +9,10 @@ import { requireActor } from '@/api/actor';
 import { ApiError, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
-import { targetHref, targetTableLabel } from '@/features/businessEvents/lib/eventTargets';
+import { targetHref, targetTableLabel, type TargetFilterTable } from '@/features/businessEvents/lib/eventTargets';
+import type { JsonValue } from '@/lib/json';
 import { toSeoulDateString } from '@/lib/seoulDate';
-import type { BusinessEventRow, DbTableName, IsoDateTime, JsonValue, MockTables } from '@/mock/schema';
+import type { BusinessEventRow, IsoDateTime, MockTables } from '@/mock/schema';
 import { eventTargetTextOf } from '@/mock/services';
 import { findRow } from '@/mock/store';
 
@@ -22,7 +23,7 @@ export interface BusinessEventFilter {
   lotId?: number;
   businessEventType?: BusinessEventType;
   actorType?: ActorType;
-  targetType?: DbTableName;
+  targetType?: TargetFilterTable;
   /** YYYY-MM-DD (Asia/Seoul, 포함) */
   from?: string;
   /** YYYY-MM-DD (Asia/Seoul, 포함) */
@@ -52,7 +53,8 @@ export interface BusinessEventView {
   businessEventTypeLabel: string;
   actorType: ActorType;
   actor: EventActorView | null;
-  targetType: DbTableName;
+  /** 대상 테이블 DB명 (ERD) */
+  targetType: string;
   targetTypeLabel: string;
   targetId: number;
   targetNo: string | null;
@@ -73,6 +75,31 @@ export interface BusinessEventView {
   messageHref: string | null;
   occurredAt: IsoDateTime;
   lots: EventLotView[];
+}
+
+/** 수주·LOT 단위 이력 타임라인 한 건 (REQ-LOG-003) */
+export interface TimelineEvent {
+  id: number;
+  eventNo: string;
+  businessEventType: BusinessEventType;
+  businessEventTypeLabel: string;
+  actorType: ActorType;
+  /** 사용자면 사원 이름, 시스템이면 '시스템' */
+  actorName: string;
+  targetType: string;
+  targetId: number;
+  targetNo: string | null;
+  /** 화면에 보일 대상: 대상 번호, 없으면 이벤트가 가진 값으로 만든 이름 (eventTargetTextOf) */
+  targetText: string;
+  salesOrderId: number | null;
+  reasonCode: EventReasonCode | null;
+  reasonText: string | null;
+  beforeData: JsonValue | null;
+  afterData: JsonValue | null;
+  messageId: number | null;
+  actionDraftId: number | null;
+  occurredAt: string;
+  lotNos: string[];
 }
 
 export interface BusinessEventSubject {

@@ -14,7 +14,8 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ReproductionCheck, ReproductionResult } from '@/api/production';
+import { seedItemOf } from '@/api/server/masterIds';
+import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ProductionPlanView, ProductionResultView, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
   IronmakingResultInput,
@@ -28,7 +29,7 @@ import type {
 import type { ChangeRollingInput, ConfirmRollingInput, HotRollingResultInput, RollingDetail, RollingPlanListRow } from '@/api/rolling';
 import type { InspectionResult, ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
-import type { ProductionPlanView, ProductionResultView, SimulationResult } from '@/mock/services';
+import type { SimulationResult } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 끝까지 읽는다 */
 const PAGE_SIZE = 100;

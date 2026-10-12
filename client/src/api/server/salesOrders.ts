@@ -32,10 +32,10 @@ import type {
   SalesOrderPreviewLine,
 } from '@/api/salesOrders';
 import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType } from '@/codes';
+import { parseOrderedQty } from '@/features/sales/lib/salesOrderForm';
 import { planHeats, type HeatPlan } from '@/lib/heatPlanning';
 import { stockFirstSplit, progressOf } from '@/lib/inventoryMath';
 import { calcHotRollingYieldRate, calcWeightTon } from '@/lib/weight';
-import { requirePositiveQty } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 읽는다 (수주가 100건을 넘으면 페이지를 더 읽는다) */
 const PAGE_SIZE = 100;
@@ -258,7 +258,9 @@ async function preview(lines: readonly SalesOrderPreviewInputLine[]): Promise<Sa
   const checked = lines.map((line, index) => {
     const item = items.find((i) => i.id === line.itemId);
     if (!isProductItem(item)) throw new ApiError('SO-001', `${index + 1}번째 품목`);
-    return { item, orderedQty: requirePositiveQty(line.orderedQty, `${index + 1}번째 품목`) };
+    const orderedQty = parseOrderedQty(String(line.orderedQty).trim());
+    if (orderedQty === null) throw new ApiError('SO-002', `${index + 1}번째 품목`);
+    return { item, orderedQty };
   });
   const used = new Map<number, number>();
   return checked.map(({ item, orderedQty }) => {
