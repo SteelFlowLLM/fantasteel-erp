@@ -89,20 +89,32 @@ function stagesOf(data: ProcessFlowData): Stage[] {
 function FlowBody({ data }: { data: ProcessFlowData }) {
   const me = useMe();
   const myStage = MY_STAGE[me.roleCode];
+  const stages = stagesOf(data);
+  // 내 업무가 0건이면 강조를 끈다: 할 일이 없을 때 가장 눈에 띄면, 할 일이 생겼을 때 차이가 느껴지지 않는다
+  const mine = stages.find((stage) => stage.key === myStage);
+  const highlight = mine !== undefined && !(mine.emptyText !== undefined && mine.total === 0);
   return (
     <div className="flex min-h-full items-stretch gap-1.5 px-4 py-3">
-      {stagesOf(data).map((stage, index) => {
+      {stages.map((stage, index) => {
         const isMine = stage.key === myStage;
-        const isEmptyMine = isMine && stage.emptyText !== undefined && stage.total === 0;
+        const isStrong = isMine && highlight;
+        const isEmptyMine = isMine && !highlight;
         const inner = (
           <>
             <span className="flex min-w-0 items-center gap-1">
-              <span className={cn('truncate text-xs font-semibold', isMine ? 'text-run' : 'text-ink')} title={stage.label}>
+              <span className={cn('truncate text-xs font-semibold', isStrong ? 'text-run' : 'text-ink')} title={stage.label}>
                 {stage.label}
               </span>
               {isMine ? (
-                // 칸 배경이 run-bg라 같은 색 태그(Tag tone="run")는 묻힌다: 진한 바탕에 흰 글자로
-                <span className="inline-flex min-h-4 flex-none items-center rounded-full bg-run px-1.5 text-2xs font-semibold whitespace-nowrap text-white">내 업무</span>
+                // 강조 칸은 배경이 run-bg라 같은 색 태그는 묻힌다: 진한 바탕에 흰 글자로. 0건이면 흰 칸이라 옅은 태그로 둔다
+                <span
+                  className={cn(
+                    'inline-flex min-h-4 flex-none items-center rounded-full px-1.5 text-2xs font-semibold whitespace-nowrap',
+                    isStrong ? 'bg-run text-white' : 'bg-run-bg text-run',
+                  )}
+                >
+                  내 업무
+                </span>
               ) : null}
             </span>
             {stage.value === null ? (
@@ -111,7 +123,7 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 권한 없음
               </span>
             ) : (
-              <span className={cn('font-bold whitespace-nowrap tabular-nums', isMine ? 'text-[34px] leading-none text-run' : 'text-2xl text-ink')}>{stage.value}</span>
+              <span className={cn('font-bold whitespace-nowrap tabular-nums', isStrong ? 'text-[34px] leading-none text-run' : 'text-2xl text-ink')}>{stage.value}</span>
             )}
             {stage.value !== null && stage.detail ? (
               <span className="truncate text-cap font-medium text-ink-2" title={isEmptyMine ? `${stage.emptyText} · ${stage.detail}` : stage.detail}>
@@ -131,9 +143,9 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
         const boxClass = cn(
           'flex min-w-[104px] flex-col justify-center gap-1 rounded-md border px-3 py-2',
           // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식). 내 업무 칸은 조금 넓게
-          isMine ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]' : 'flex-1 border-line-strong bg-surface',
-          // 내 업무가 있으면 나머지 단계는 흐리게 (숫자·바로가기는 그대로, 올리면 또렷하게)
-          myStage && !isMine && 'opacity-60 hover:opacity-100',
+          isStrong ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]' : 'flex-1 border-line-strong bg-surface',
+          // 내 업무를 강조할 때만 나머지 단계를 흐리게 (숫자·바로가기는 그대로, 올리면 또렷하게)
+          highlight && !isMine && 'opacity-60 hover:opacity-100',
         );
         const canOpen = stage.value !== null && canOpenScreen(me, stage.screen.access);
         return (
