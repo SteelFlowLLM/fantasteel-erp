@@ -135,6 +135,13 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     const fromSales = await send(salesStaff, '원료가 모자라요');
     expect(await codeOf(service.create(purchaser, fromSales.id))).toBe('COM-002');
   });
+
+  it('시스템 메시지·삭제된 메시지에서는 만들 수 없다 (COM-004)', async () => {
+    const system = await prisma.message.create({ data: { chatRoomId: roomId, messageType: 'SYSTEM', content: '업무방을 열었어요' } });
+    expect(await codeOf(service.create(purchaser, system.id))).toBe('COM-004');
+    const deleted = await prisma.message.create({ data: { chatRoomId: roomId, senderId: purchaser.employeeId, content: '지운 글', deletedAt: new Date() } });
+    expect(await codeOf(service.create(purchaser, deleted.id))).toBe('COM-004');
+  });
 });
 
 describe('초안 수정 (REQ-ACT-002)', () => {
@@ -145,14 +152,19 @@ describe('초안 수정 (REQ-ACT-002)', () => {
 
     expect(await codeOf(service.update(purchaseHead, id, { requestedTon: '50' }))).toBe('COM-002');
     expect(await codeOf(service.update(purchaser, id, { itemId: slabId }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, id, { itemId: 2_000_000_000 }))).toBe('COM-003');
     expect(await codeOf(service.update(purchaser, id, { requestedTon: '-1' }))).toBe('COM-004');
     expect(await codeOf(service.update(purchaser, id, { desiredReceiptDate: '2026-02-30' }))).toBe('COM-004');
 
     const partial = await service.update(purchaser, id, { itemId: oreId, requestedTon: '50.5' });
-    expect(partial).toMatchObject({ itemCode: 'ORE01', payload: { itemId: oreId, requestedTon: '50.5' }, unresolvedFields: ['희망 입고일'] });
+    // 톤은 소수 3자리로 맞춰 저장한다
+    expect(partial).toMatchObject({ itemCode: 'ORE01', payload: { itemId: oreId, requestedTon: '50.500' }, unresolvedFields: ['희망 입고일'] });
     expect(await codeOf(service.update(purchaser, id, { desiredReceiptDate: '2026-11-20', expectedUpdatedAt: '2000-01-01T00:00:00.000Z' }))).toBe('COM-001');
     const filled = await service.update(purchaser, id, { desiredReceiptDate: '2026-11-20', expectedUpdatedAt: partial.updatedAt });
     expect(filled.unresolvedFields).toEqual([]);
     expect((await service.update(purchaser, id, { requestedTon: null })).unresolvedFields).toEqual(['수량(톤)']);
+
+    await prisma.actionDraft.update({ where: { id }, data: { draftStatus: DRAFT_STATUS.REJECTED } });
+    expect(await codeOf(service.update(purchaser, id, { requestedTon: '10' }))).toBe('COM-004');
   });
 });

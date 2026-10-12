@@ -19,7 +19,7 @@ import { AuthUserService } from '../../common/auth/auth-user.service';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { isValidDate, TON_PATTERN } from '../purchasing/purchasing.service';
 import type { ListActionDraftsQuery, UpdateActionDraftDto } from './dto/action-draft.dto';
@@ -91,7 +91,6 @@ export class MessageActionService {
         target: { table: 'action_draft', id: draft.id },
         salesOrderId: message.chatRoom.salesOrderId,
         after: { draftStatus: draft.draftStatus, actionType, requesterId: draft.requesterId, payload: payload as unknown as Prisma.InputJsonValue },
-        reason: 'AI 자동 추출 준비 중 — 요청자가 직접 입력',
         actionDraftId: draft.id,
         messageId: message.id,
       });
@@ -129,14 +128,15 @@ export class MessageActionService {
       if (dto.itemId !== undefined) {
         if (dto.itemId !== null) {
           const [item] = await this.repository.findItems(tx, [dto.itemId]);
-          if (!item || item.itemType !== ITEM_TYPE.RAW_MATERIAL) throw new AppException('COM-004', '원료 품목을 골라 주세요');
+          if (!item) throw new AppException('COM-003', '원료 품목을 찾을 수 없어요');
+          if (item.itemType !== ITEM_TYPE.RAW_MATERIAL) throw new AppException('COM-004', '원료 품목을 골라 주세요');
         }
         next.itemId = dto.itemId;
       }
       if (dto.requestedTon !== undefined) {
         const text = dto.requestedTon?.trim() ?? '';
         if (text && !isPositiveTon(text)) throw new AppException('COM-004', '수량(톤)은 0보다 큰 숫자로, 소수 3자리까지 입력해 주세요');
-        next.requestedTon = text || null;
+        next.requestedTon = text ? new Prisma.Decimal(text).toFixed(3) : null;
       }
       if (dto.desiredReceiptDate !== undefined) {
         const text = dto.desiredReceiptDate?.trim() ?? '';
@@ -144,8 +144,11 @@ export class MessageActionService {
         next.desiredReceiptDate = text || null;
       }
       if (dto.requestReason !== undefined) next.requestReason = dto.requestReason?.trim() || null;
-      return this.repository.updateDraft(tx, draft.id, { payload: next as unknown as Prisma.InputJsonValue, draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
+      const changed = await this.repository.updateDraftIfUnchanged(tx, draft.id, draft.updatedAt, { payload: next as unknown as Prisma.InputJsonValue, draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
+      if (!changed) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+      return this.repository.findDraft(tx, draft.id);
     });
+    if (!row) throw new AppException('COM-003', '초안을 찾을 수 없어요');
     const [view] = await this.toViews(this.prisma, [row]);
     return view;
   }
@@ -154,8 +157,8 @@ export class MessageActionService {
   private async requesterDraft(tx: Tx, user: AuthUser, id: number, expectedUpdatedAt: string | null | undefined): Promise<DraftRow> {
     const draft = await this.repository.findDraft(tx, id);
     if (!draft) throw new AppException('COM-003', '초안을 찾을 수 없어요');
-    if (expectedUpdatedAt && draft.updatedAt.toISOString() !== expectedUpdatedAt) throw new AppException('COM-001');
     if (draft.requesterId !== user.employeeId) throw new AppException('COM-002', '요청자만 확인·확정할 수 있어요');
+    if (expectedUpdatedAt && draft.updatedAt.toISOString() !== expectedUpdatedAt) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
     if (draft.draftStatus !== DRAFT_STATUS.AI_GENERATED && draft.draftStatus !== DRAFT_STATUS.WAITING_APPROVAL) throw new AppException('COM-004', '이 상태의 초안은 바꿀 수 없어요');
     return draft;
   }

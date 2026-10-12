@@ -61,6 +61,12 @@ export class MessageActionRepository {
     return tx.actionDraft.update({ where: { id }, data, select: draftSelect });
   }
 
+  /** 읽은 뒤 아무도 고치지 않았을 때만 바꾼다. 바꿨으면 true */
+  async updateDraftIfUnchanged(tx: Tx, id: number, readUpdatedAt: Date, data: Prisma.ActionDraftUpdateManyMutationInput): Promise<boolean> {
+    const { count } = await tx.actionDraft.updateMany({ where: { id, updatedAt: readUpdatedAt }, data });
+    return count === 1;
+  }
+
   findDraft(tx: Tx, id: number) {
     return tx.actionDraft.findUnique({ where: { id }, select: draftSelect });
   }

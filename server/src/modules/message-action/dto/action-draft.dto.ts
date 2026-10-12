@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsInt, IsISO8601, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 /** GET action-drafts: chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 요청자인 초안 */
 export class ListActionDraftsQuery {
@@ -31,6 +31,6 @@ export class UpdateActionDraftDto {
 
   /** 화면을 연 시점의 updatedAt. 그 사이 바뀌었으면 COM-001 */
   @IsOptional()
-  @IsString()
+  @IsISO8601({ strict: true }, { message: 'expectedUpdatedAt은 ISO 8601 시각이어야 해요' })
   expectedUpdatedAt?: string | null;
 }
