@@ -1,4 +1,4 @@
-// FantaSteel 로고: 화면 도우미 펫 철강맨(public/pet/characters/steelman_new.js idle 0번 프레임)의 안전모·얼굴을 도트 그대로 옮겼다.
+// FantaSteel 로고: 화면 도우미 펫 철강맨(public/pet/characters/steelman.js idle 0번 프레임)의 안전모·얼굴을 도트 그대로 옮겼다.
 // 도트는 정수 배율에서만 칸이 고르게 보여서 크기 대신 배율(scale)을 받는다. 1배 = 33×24px.
 const WIDTH = 33;
 const HEIGHT = 24;
