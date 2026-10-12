@@ -693,6 +693,9 @@
 .fp-root.fp-mouse .fp-hit:focus-visible{box-shadow:none}
 .fp-root.fp-mouse .fp-card:focus-visible,.fp-root.fp-mouse .fp-pill:focus-visible,.fp-root.fp-mouse .fp-x:focus-visible,.fp-root.fp-mouse .fp-btn:focus-visible{outline:none}
 .fp-shadow{position:absolute;left:0;top:0;z-index:2;border-radius:50%;background:rgba(18,24,32,.2);will-change:transform,opacity}
+.fp-beam{position:absolute;left:0;top:0;z-index:3;pointer-events:none;transform-origin:0 50%;background:linear-gradient(to bottom,#2c3646 0 var(--fl),#a7b6c8 var(--fl) calc(var(--fl) + 1px),#cfd9e4 calc(var(--fl) + 1px) calc(100% - var(--fl) - 1px),#7e8fa6 calc(100% - var(--fl) - 1px) calc(100% - var(--fl)),#2c3646 calc(100% - var(--fl)) 100%)}
+.fp-beam::before{content:'';position:absolute;left:0;right:0;top:var(--fl);bottom:var(--fl);background:repeating-linear-gradient(to right,transparent 0 calc(var(--st) - 2px),#5d6d84 calc(var(--st) - 2px) var(--st))}
+.fp-beam-cap{position:absolute;right:calc(var(--fl) * -1);top:50%;width:calc(var(--fl) * 3);height:calc(100% + var(--fl) * 2);transform:translateY(-50%);background:linear-gradient(to right,#ffcc33 0 34%,#2c3646 34% 66%,#ffcc33 66%);box-shadow:0 0 0 1px #2c3646}
 .fp-flash{position:absolute;z-index:1;border:2px solid var(--fp-accent);border-radius:8px;box-shadow:0 0 0 4px var(--fp-accent-soft),0 0 18px 2px var(--fp-accent-shadow);animation:fp-flash .6s ease-in-out 3}
 .fp-flash--steady{animation:fp-flash 1.8s ease-in-out infinite}
 @keyframes fp-flash{0%,100%{opacity:1}50%{opacity:.4}}
@@ -2365,7 +2368,85 @@
       it.f.style.width = `${r.width + pad * 2}px`;
       it.f.style.height = `${r.height + pad * 2}px`;
     }
+    // ── H빔 지시봉: 손끝에서 가리키는 요소까지 강철 H빔을 뻗는다 (가까우면 손으로만 가리킨다) ──
+    let beam = null;
+    function handPoint(toward) {
+      const b = petBox();
+      const right = toward >= S.x;
+      return { x: right ? b.right - 2 * S.scale : b.left + 2 * S.scale, y: b.top + (b.bottom - b.top) * 0.55 };
+    }
+    function beamGeom(el) {
+      const r = el.getBoundingClientRect();
+      const hp = handPoint((r.left + r.right) / 2);
+      const tx = clamp(hp.x, r.left + 3, r.right - 3);
+      const ty = clamp(hp.y, r.top + 3, r.bottom - 3);
+      const dx = tx - hp.x;
+      const dy = ty - hp.y;
+      return { x: hp.x, y: hp.y, len: Math.max(0, Math.hypot(dx, dy) - 3), ang: Math.atan2(dy, dx) };
+    }
+    /** 요소가 손에서 이만큼 멀 때만 빔을 뻗는다 */
+    const BEAM_MIN = 26;
+    function showBeam(el) {
+      hideBeam(true);
+      if (!el || !el.isConnected || S.mode !== 'ground') return null;
+      const g = beamGeom(el);
+      if (g.len < BEAM_MIN) return null;
+      const th = Math.max(6, Math.round(4 * S.scale));
+      const node = h('div', { class: 'fp-beam' }, h('div', { class: 'fp-beam-cap' }));
+      node.style.height = `${th}px`;
+      node.style.setProperty('--fl', `${Math.max(2, Math.round(th / 4))}px`);
+      node.style.setProperty('--st', `${Math.max(8, Math.round(th * 1.5))}px`);
+      root.appendChild(node);
+      beam = { el, node, th, t0: now(), out: false, tOut: 0 };
+      faceTo(el);
+      placeBeam(now());
+      return beam;
+    }
+    function hideBeam(instant) {
+      if (!beam) return;
+      if (instant || reduced) {
+        beam.node.remove();
+        beam = null;
+        return;
+      }
+      if (!beam.out) {
+        beam.out = true;
+        beam.tOut = now();
+      }
+    }
+    function placeBeam(t) {
+      if (!beam) return;
+      if (!beam.el.isConnected || S.mode !== 'ground') {
+        hideBeam(true);
+        return;
+      }
+      const g = beamGeom(beam.el);
+      let k = reduced ? 1 : Math.min(1, (t - beam.t0) / 240);
+      if (beam.out) {
+        k = Math.max(0, 1 - (t - beam.tOut) / 160);
+        if (k <= 0) {
+          beam.node.remove();
+          beam = null;
+          return;
+        }
+      }
+      // 처음엔 빠르게 뻗고 끝에서 천천히 멈춘다
+      const e = k >= 1 ? 1 : 1 - Math.pow(1 - k, 3);
+      const n = beam.node;
+      n.style.width = `${Math.max(1, Math.round(g.len * e))}px`;
+      n.style.transform = `translate(${Math.round(g.x)}px, ${Math.round(g.y - beam.th / 2)}px) rotate(${g.ang}rad)`;
+    }
+    /** 말풍선이 떠 있는 동안 빔으로 가리키고, 닫히면 접는다 */
+    async function withBeam(el, fn) {
+      const b = showBeam(el);
+      try {
+        return await fn();
+      } finally {
+        if (b && beam === b) hideBeam(false);
+      }
+    }
     function updateFlashes(t) {
+      placeBeam(t);
       for (let i = flashes.length - 1; i >= 0; i--) {
         const it = flashes[i];
         if (t > it.until || !it.el.isConnected) {
@@ -3056,6 +3137,42 @@
     }
 
     // ── 요소 쪽으로 가기 (안내·대화의 '그 화면 알려줘') ──
+    /**
+     * 공중에 떠 있는 버튼처럼 올라설 수 없는 요소: 펫이 그 요소를 가리지 않으면서 손이 가장 가까워지는 자리.
+     * 바닥과 보이는 윗면(레일 탭 제외)마다 요소 왼쪽·오른쪽 옆 자리를 재 보고 가장 가까운 곳을 고른다
+     */
+    function standSpotFor(el) {
+      const r = el.getBoundingClientRect();
+      const box = petBox();
+      const pw = box.right - box.left;
+      const ph = box.bottom - box.top;
+      const cx = (r.left + r.right) / 2;
+      const [fl, fr] = floorRange();
+      const cands = [{ type: 'floor', el: null, top: floorY(), left: fl, right: fr, narrow: false }];
+      for (const p of listPerches(true)) {
+        if (p.col || p.el === el || el.contains(p.el)) continue;
+        cands.push({ type: 'perch', el: p.el, top: p.top, left: p.left, right: p.right, narrow: p.narrow });
+      }
+      let best = null;
+      const gapX = pw / 2 + 10;
+      for (const c of cands) {
+        const xs = c.narrow ? [c.left] : [r.left - gapX, r.right + gapX, cx];
+        for (const want of xs) {
+          const x = clamp(want, c.left, Math.max(c.left, c.right));
+          const body = { left: x - pw / 2, right: x + pw / 2, top: c.top - ph, bottom: c.top };
+          // 펫 몸이 요소를 가리면 그 자리는 쓰지 않는다
+          if (body.right > r.left - 2 && body.left < r.right + 2 && body.bottom > r.top - 2 && body.top < r.bottom + 2) continue;
+          const hx = x < cx ? body.right : body.left;
+          const hy = c.top - ph * 0.55;
+          const dx = Math.max(r.left - hx, 0, hx - r.right);
+          const dy = Math.max(r.top - hy, 0, hy - r.bottom);
+          // 바닥에서 멀리 가리키기보다 가까운 윗면으로 오르는 편을 고르되, 오르는 수고도 조금 친다
+          const cost = Math.hypot(dx, dy) + (c.type === 'perch' ? 24 : 0) + Math.abs(x - S.x) * 0.02;
+          if (!best || cost < best.cost) best = { c, x, cost };
+        }
+      }
+      return best;
+    }
     async function goToEl(el, tok) {
       if (!el || !el.isConnected) return false;
       if (S.mode === 'hidden') show(true);
@@ -3089,9 +3206,17 @@
           S.x = clamp(S.x, s.left + 10, Math.max(s.left + 10, s.right - 10));
           landOn({ type: 'perch', el, off: S.x - r.left }, r.top, true);
         } else {
-          const [mn, mx] = floorRange();
-          S.x = clamp(besideX(el), mn, mx);
-          landOn({ type: 'floor' }, floorY(), true);
+          // 공중의 요소: 움직임 없이 가장 가까운 설 자리로 바로 옮긴다
+          const spot = standSpotFor(el);
+          if (spot && spot.c.type === 'perch' && spot.c.el.isConnected) {
+            const pr = spot.c.el.getBoundingClientRect();
+            S.x = spot.x;
+            landOn({ type: 'perch', el: spot.c.el, off: spot.x - pr.left }, pr.top, true);
+          } else {
+            const [mn, mx] = floorRange();
+            S.x = clamp(spot ? spot.x : besideX(el), mn, mx);
+            landOn({ type: 'floor' }, floorY(), true);
+          }
         }
         faceTo(el);
         return true;
@@ -3118,8 +3243,26 @@
           await waitLanding();
         }
       } else {
+        // 공중의 요소: 가장 가까이 설 수 있는 윗면이 있으면 거기로 올라가 그 요소 옆에 선다 (가리키는 건 H빔이 한다)
+        const spot = standSpotFor(el);
+        if (spot && spot.c.type === 'perch' && spot.c.el.isConnected) {
+          const onIt = S.surface && S.surface.type === 'perch' && S.surface.el === spot.c.el;
+          if (!onIt) {
+            const ok = await goToEl(spot.c.el, tok);
+            if (!ok || tok !== S.seq || !el.isConnected) return false;
+          }
+          if (S.base === 'sit') setBase('idle');
+          const [sl, sr] = surfaceRange();
+          if (Math.abs(clamp(spot.x, sl, sr) - S.x) > 6) {
+            const ok = await walkTo(clamp(spot.x, sl, sr), { run: true });
+            if (!ok || tok !== S.seq) return false;
+          }
+          if (!el.isConnected) return false;
+          faceTo(el);
+          return tok === S.seq;
+        }
         const [mn, mx] = floorRange();
-        const goal = clamp(besideX(el), mn, mx);
+        const goal = clamp(spot ? spot.x : besideX(el), mn, mx);
         if (S.surface && S.surface.type === 'perch') {
           // 바닥으로: 레일 탭이면 타고 내려오고, 위젯이면 뛰어내린다
           const down = planPath(null);
@@ -3134,7 +3277,7 @@
           }
           if (tok !== S.seq || !el.isConnected) return false;
         }
-        const ok = await walkTo(clamp(besideX(el), mn, mx), { run: true });
+        const ok = await walkTo(goal, { run: true });
         if (!ok || tok !== S.seq) return false;
       }
       if (!el.isConnected) return false;
@@ -3152,6 +3295,7 @@
         const ok = await goToEl(el, tok);
         if (ok && tok === S.seq) {
           flash(el, 2000);
+          if (showBeam(el)) later(() => hideBeam(false), 2400);
           if (speechAnimFor(el) === 'point') {
             player.set('point', true);
             later(() => {
@@ -3176,7 +3320,7 @@
         if (!ok || tok !== S.seq || !el.isConnected) return;
         flash(el, 2200);
         const info = targetInfo(key, el);
-        if (info) await sayInfo(info, tok, el);
+        if (info) await withBeam(el, () => sayInfo(info, tok, el));
       } finally {
         end(tok);
       }
@@ -3230,6 +3374,8 @@
         if (!last || spec.kind === 'main') actions.push({ label: '건너뛰기', value: 'skip' });
         if (el) actions.push(navAction(el));
         actions.push({ label: last ? (spec.kind === 'main' ? '끝' : '확인') : '다음', value: 'next', primary: true });
+        if (el && ok) showBeam(el);
+        else hideBeam(false);
         const res = await showBubble(st.text, {
           title: (st.target ? targetTitle(st.target) : null) || screenTitle,
           step: `${i + 1}/${items.length}`,
@@ -3246,6 +3392,7 @@
         if (res !== 'next') break;
         if (last) finished = true;
       }
+      hideBeam(false);
       // 다른 안내가 이어받았으면(그 안내의 강조를 지우지 않게) 손대지 않는다
       if (S.tour && S.tour.tok === tok) {
         S.tour = null;
@@ -4950,6 +5097,12 @@
         // read:<레코드 번호> — 그 항목을 읽은 결과(말풍선 없이)
         const el = findItemByCode(name.slice(5));
         return el ? readItem(el) : null;
+      }
+      if (typeof name === 'string' && name.startsWith('spot:')) {
+        // spot:<target 키> — 공중의 요소를 가리키러 설 자리 (면 키 · x · 비용)
+        const el = findTarget(name.slice(5));
+        const sp = el ? standSpotFor(el) : null;
+        return sp ? { surface: sp.c.type === 'floor' ? 'floor' : perchKey(sp.c.el) || 'perch', x: Math.round(sp.x), cost: Math.round(sp.cost) } : null;
       }
       switch (name) {
         case 'item': {
