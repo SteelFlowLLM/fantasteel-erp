@@ -159,6 +159,8 @@ describe('위젯 카드', () => {
     );
     expect(markup).toContain(`${me.employeeName}님, 안녕하세요`);
     expect(markup).toContain('위젯 편집');
+    // 소속·날짜는 상단 바에 있어 인사 줄에 되풀이하지 않는다
+    expect(markup).not.toContain(`${me.departmentName} · ${me.roleName}`);
   });
 
   it('편집 중: 제외 버튼이 있고 바로가기 링크는 숨긴다', async () => {
