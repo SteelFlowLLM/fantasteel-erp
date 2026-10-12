@@ -36,8 +36,8 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
         <Table compact className="min-w-[700px] [&_td]:px-1.5 [&_th]:sticky [&_th]:top-0 [&_th]:z-[1] [&_th]:px-1.5">
           <thead>
             <tr>
-              <Th>수주 번호</Th>
-              <Th>고객사</Th>
+              <Th align="center">수주 번호</Th>
+              <Th align="center">고객사</Th>
               <Th>품목</Th>
               <Th align="right">수주</Th>
               <Th align="right" title="진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)">
@@ -62,12 +62,12 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
                 <tr key={item.salesOrderItemId} data-risk={item.isDueRisk || undefined} data-pet-item="salesOrder" data-pet-item-title={so.salesOrderNo}>
                   {index === 0 ? (
                     <>
-                      <Td rowSpan={so.items.length} className="align-top font-mono text-xs font-medium" data-pet-field="수주 번호">
+                      <Td rowSpan={so.items.length} align="center" className="align-middle font-mono text-xs font-medium" data-pet-field="수주 번호">
                         <Link href={`/sales-orders/${so.salesOrderId}`} className="text-run hover:underline">
                           {so.salesOrderNo}
                         </Link>
                       </Td>
-                      <Td rowSpan={so.items.length} className="max-w-24 truncate align-top" title={so.customerName} data-pet-field="고객사">
+                      <Td rowSpan={so.items.length} align="center" className="max-w-24 truncate align-middle" title={so.customerName} data-pet-field="고객사">
                         {so.customerName}
                       </Td>
                     </>
