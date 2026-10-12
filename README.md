@@ -4,26 +4,25 @@
 
 지금 저장소에는 두 가지가 같이 있습니다.
 
-- **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. **서버·DB 없이 브라우저 안의 가짜 DB(mock)만으로 동작하는 화면 전용 클라이언트**입니다. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
-- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)). 새 화면은 아직 서버를 부르지 않습니다.
+- **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. 기본은 **실제 서버(`server/`)를 부르고**, 서버에 아직 연결되지 않은 기능만 브라우저 안의 가짜 DB(mock)를 씁니다. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
+- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)).
 - P2(AI)·EX 기능은 화면만 있고 "준비 중"으로 표시됩니다. AI·LLM 호출은 없습니다.
 
-## 화면 실행 (서버·DB 필요 없음)
+## 화면 실행
 
 필요: Node.js 22.18 이상. 명령은 모두 이 폴더(저장소 맨 위)에서 실행합니다.
 
 ```bash
 npm install
-npm run dev -w @fantasteel/client
+npm run dev        # DB(54322) · shared · 서버(8787) · 화면(5173)
 ```
 
 브라우저에서 http://localhost:5173 을 엽니다(포트는 `client/package.json`의 `dev` 스크립트 `next dev -p 5173`).
 
-- 처음 열면 **계정 선택** 화면(`/login`)이 나옵니다. 사원 계정을 누르면 바로 들어갑니다. 사원번호·비밀번호를 입력하는 로그인 화면은 **일부러 미뤄 두었습니다**(SPEC 5장 결정 1). 계정은 탭마다 따로 기억합니다(`sessionStorage`).
-- 데이터는 이 브라우저의 `localStorage`에 저장되고, 같은 브라우저의 다른 탭에도 바로 반영됩니다(`BroadcastChannel`). 서버가 없으니 다른 PC와는 공유되지 않습니다.
-- 데이터를 처음 상태로 되돌리려면 화면 오른쪽 위 사용자 메뉴에서 **'시드로 초기화'**를 누릅니다.
-- `npm install`은 설치 뒤 shared 빌드와 Prisma Client 생성도 자동으로 합니다(서버용 단계라 화면에는 쓰이지 않습니다).
-- 루트의 `npm run dev`는 예전처럼 DB·shared·서버·화면을 함께 띄웁니다. 새 화면만 보려면 위의 client 전용 명령이면 충분합니다.
+- 처음 열면 **로그인** 화면(`/login`)이 나옵니다. 시드 사원번호(`docs/backend/seed.md`)와 비밀번호 `fantasteel`로 들어갑니다.
+- 화면 데이터는 서버 DB에 있습니다. 처음 상태로 되돌리려면 `npm run db:reset`, 화면에 볼 거래 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`.
+- `npm install`은 설치 뒤 shared 빌드와 Prisma Client 생성도 자동으로 합니다.
+- `client/.env.local`에 `NEXT_PUBLIC_DATA_SOURCE=mock`을 두면 서버 없이 브라우저 안 가짜 DB로 띄웁니다(테스트가 쓰는 모드, `docs/CLIENT-GUIDE.md`).
 
 ### 점검·빌드
 
@@ -39,7 +38,7 @@ npm run test -w @fantasteel/client
 npm run build -w @fantasteel/client
 ```
 
-테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다. 시연 시나리오(업무 프로세스 14.1·14.2)와 14.3 필수 검증은 `client/src/api/scenario/`의 테스트가 화면 api 함수로 끝까지 돌립니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
+테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다(`vitest.config.ts`가 데이터 출처를 mock으로 둡니다). 시연 시나리오(업무 프로세스 14.1·14.2)와 14.3 필수 검증은 `client/src/api/scenario/`의 테스트가 화면 api 함수로 끝까지 돌립니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
 
 ### 화면 폴더 구조 (`client/src/`)
 

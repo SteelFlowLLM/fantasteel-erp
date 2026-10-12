@@ -12,7 +12,7 @@ describe('dashboardRefetchInterval', () => {
     expect(DASHBOARD_REFRESH_MS).toBe(30_000);
   });
 
-  it('가짜 DB 모드(기본)는 다시 읽지 않는다', () => {
+  it('가짜 DB 모드는 다시 읽지 않는다', () => {
     vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', 'mock');
     expect(dashboardRefetchInterval()).toBe(false);
   });

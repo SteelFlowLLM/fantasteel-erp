@@ -2,7 +2,7 @@
 // 계산(재고·합격·예약·가용재고·미배정 합격·여재)은 핵심 서비스 `@/mock/services`의 재고 조회를 그대로 쓰고,
 // 여기서는 화면에 필요한 기준정보(치수·기본 야드·단위·톤)와 배정 여부·검사 결과 표시 기준(`features/inventory/lib/inventoryRules`)을 덧붙인다.
 // 재고 화면은 로그인한 모든 사원이 본다(screens.ts EVERYONE) → 조회마다 요청 사원만 확인한다(없거나 사용 안 함이면 COM-002).
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/inventories.ts). 여재 탭은 서버 계산이 없어 비어 있다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/inventories.ts). 여재 탭은 서버 계산이 없어 비어 있다.
 import { PRODUCT_QTY_UNIT, type AllocationPurpose, type LotStatus, type LotType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { mockQuery } from '@/api/client';

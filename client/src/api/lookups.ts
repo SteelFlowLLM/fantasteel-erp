@@ -1,5 +1,5 @@
 // 기준정보 조회 (REQ-MST-001~009). 다른 화면의 선택 목록(수주 등록·수주 목록·구매요청 등록·재고 강종 필터)이 쓴다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 서버 기준정보를 읽어 id가 서버 id다 (api/server/lookups.ts). 등록·수정은 기준정보 화면(api/masterData.ts)이 맡는다.
+// 서버 모드(기본)면 서버 기준정보를 읽어 id가 서버 id다 (api/server/lookups.ts). 등록·수정은 기준정보 화면(api/masterData.ts)이 맡는다.
 import type { ItemType, ProcessType, ProductItemType, RawMaterialType, UnitType, YardType } from '@/codes';
 import { mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';

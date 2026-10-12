@@ -1,7 +1,7 @@
 // 출고 확정 API (REQ-SHP-002·003, REQ-INV-005, REQ-SO-005, BP-SHP-01).
 // 별도 출고 테이블·번호가 없다: 출하요청의 issued_at·issued_employee_id와 상태 ISSUED로 남는다.
 // 재검증·전환·밀시트 발행·작업 로그는 core 서비스(confirmGoodsIssue)가 한 트랜잭션에서 한다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/goodsIssues.ts). 출하요청·LOT id는 서버 id다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/goodsIssues.ts). 출하요청·LOT id는 서버 id다.
 import { PERMISSION, type InspectionResult, type LotStatus, type ShipmentRequestStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';

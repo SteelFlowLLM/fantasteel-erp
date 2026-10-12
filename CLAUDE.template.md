@@ -46,7 +46,7 @@ npm run db:reset                             # 개발 DB 초기화 (데이터 �
 
 ## 화면 (`client/`)
 
-`docs/CLIENT-GUIDE.md`를 따른다. 지금 화면은 브라우저 안 가짜 DB(`client/src/mock/`)로 동작하고 서버와 연결되어 있지 않다. 연결은 `client/src/api/` 함수만 바꾸는 방식으로 한다.
+`docs/CLIENT-GUIDE.md`를 따른다. 화면 기본 데이터 출처는 실제 서버다(`client/src/api/server/`). 서버에 아직 연결되지 않은 기능만 브라우저 안 가짜 DB(`client/src/mock/`)를 쓰고, 테스트는 가짜 DB 위에서 돈다. 연결은 `client/src/api/` 함수만 바꾸는 방식으로 한다.
 
 ## 코드 공통
 

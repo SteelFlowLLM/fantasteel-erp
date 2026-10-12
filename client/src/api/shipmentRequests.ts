@@ -1,6 +1,6 @@
 // 출하요청·출하 배정 API (REQ-SHP-001, REQ-INV-006·007·009, BP-SHP-01).
 // 규칙·작업 로그는 core 서비스(@/mock/services)가 맡는다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 덧붙임만 한다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/shipmentRequests.ts).
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/shipmentRequests.ts).
 import { PERMISSION, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';

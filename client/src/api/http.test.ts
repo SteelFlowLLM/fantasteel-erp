@@ -34,11 +34,18 @@ const actAs = (employeeNo: string) => {
 };
 
 beforeEach(() => resetServerSessionForTest());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('서버 호출 계층 (api/http.ts)', () => {
-  it('기본 데이터 출처는 가짜 DB다', () => {
+  it('기본 데이터 출처는 서버이고, mock이라고 적었을 때만 가짜 DB다 (테스트는 vitest.config.ts가 mock으로 둔다)', () => {
     expect(dataSource()).toBe('mock');
+    for (const [value, expected] of [['', 'server'], ['server', 'server'], ['mock', 'mock']] as const) {
+      vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', value);
+      expect(dataSource()).toBe(expected);
+    }
   });
 
   it('로그인하면 그 사원으로 요청하고, 로그인 실패는 서버 문구 그대로 보인다', async () => {

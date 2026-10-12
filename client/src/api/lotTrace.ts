@@ -2,7 +2,7 @@
 // - 시작점: LOT 번호 또는 출하요청 번호 (PLAN 6장: '출하번호' → '출하요청 번호').
 // - LOT 관계는 lot_relation의 부모·자식 id로만 따라간다(LOT 번호를 해석하지 않음). 출하는 배정(SHIPMENT, CONFIRMED·CONSUMED)으로 잇는다.
 // - LOT 추적은 모든 사원이 여는 화면이라(screens.ts) 로그인한 사용 중 사원인지만 확인한다.
-// - NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/lotTrace.ts). LOT·출하요청 id는 서버 id다.
+// - 서버 모드(기본)면 실제 서버를 부른다 (api/server/lotTrace.ts). LOT·출하요청 id는 서버 id다.
 import type {
   AllocationPurpose,
   AllocationStatus,
