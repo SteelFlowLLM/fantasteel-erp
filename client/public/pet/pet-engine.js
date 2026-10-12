@@ -3666,6 +3666,26 @@
         end(tok);
       }
     }
+    /** 화면에서 찾은 요소(버튼 등)로 가서 가리키고 무엇인지 말한다. 공중에 있으면 가까운 면에 서서 H빔으로 */
+    async function pointAtEl(el, label) {
+      closeChat();
+      S.noHoverUntil = now() + 1500;
+      if (!el || !el.isConnected) return;
+      const tok = begin();
+      S.flow = tok;
+      try {
+        const ok = await goToEl(el, tok);
+        if (!ok || tok !== S.seq || !el.isConnected) return;
+        flash(el, 2200);
+        const key = el.getAttribute('data-pet-target');
+        const info = key ? targetInfo(key, el) : null;
+        await withBeam(el, () =>
+          info ? sayInfo(info, tok, el) : showBubble(`여기 '${label}' 있어요!`, { anim: speechAnimFor(el), closable: true, anchor: el, actions: [{ label: '확인', value: 'ok', primary: true }] }),
+        );
+      } finally {
+        end(tok);
+      }
+    }
     async function showMe(key) {
       closeChat();
       S.noHoverUntil = now() + 1500;
@@ -4066,6 +4086,53 @@
       }
       return lines;
     }
+    // ── 지금 화면에서 찾기: '지금 화면에서 정보 수정 어디 있어?' → 이 화면의 '정보 수정' 버튼을 먼저 가리킨다 ──
+    const HERE_RE = /(지금|현재|이)\s*(화면|페이지|창)|여기서|여기에|이\s*안에서/;
+    const WHERE_RE = /(어디|어딨|위치|찾아|눌러|누르|버튼|메뉴|탭)/;
+    // 질문에서 떼어 낼 말(낱말 통째로)과 낱말 끝 조사
+    const FIND_STOP_WORDS = new Set(['지금', '현재', '이', '화면', '화면에서', '화면에', '페이지', '페이지에서', '창', '창에서', '여기', '여기서', '여기에', '어디', '어디야', '어디에', '어디에요', '어디예요', '어딨어', '어딨어요', '어디있어', '어디있어요', '있어', '있어요', '있나요', '있니', '있지', '위치', '찾아', '찾아줘', '알려줘', '알려', '줘', '가리켜줘', '가리켜', '보여줘', '눌러야', '해', '누르면', '돼', '버튼', '메뉴', '탭', '기능', '좀', '요']);
+    const FIND_TAIL = /(에서는|에서|에는|에|은|는|이|가|을|를|은요|는요)$/;
+    const pageNorm = (t) => String(t || '').toLowerCase().replace(/[\s·:：()\[\]{}'"‘’“”,.!?…]/g, '');
+    /** 질문에서 찾을 이름만 남긴다: '지금 화면에서 정보 수정 어디있어' → '정보수정' */
+    function findCore(q) {
+      const out = [];
+      // 띄어 쓰지 않은 질문('지금화면에서 정보수정어디있어')도 되도록 지시어·물음 말은 문장째로 먼저 지운다
+      const t = String(q || '')
+        .replace(/(지금|현재|이)\s*(화면|페이지|창)(에서는|에서|에는|에)?/g, ' ')
+        .replace(/여기(서|에)?/g, ' ')
+        .replace(/(어디\s*에?\s*있(어|나|니|지|을까)?요?|어딨어요?|어디(야|예요|에요|에)?|위치|찾아\s*줘|알려\s*줘|가리켜\s*줘|보여\s*줘|버튼|메뉴)/g, ' ');
+      for (let w of t.replace(/[?!.,~]/g, ' ').split(/\s+/)) {
+        if (!w || FIND_STOP_WORDS.has(w)) continue;
+        if (w.length > 2) w = w.replace(FIND_TAIL, '');
+        if (w && !FIND_STOP_WORDS.has(w)) out.push(w);
+      }
+      return pageNorm(out.join(''));
+    }
+    const PAGE_SEL = 'button,a[href],[role="button"],[role="tab"],[role="menuitem"],summary,[data-pet-target],[data-pet-term],h1,h2,h3,label';
+    /** 이 화면에 보이는 요소 가운데 이름이 질문과 가장 잘 맞는 것. 레일 메뉴·펫 창은 빼고, 누를 수 있는 것을 먼저 */
+    function findOnPage(core) {
+      if (!core || core.length < 2) return null;
+      let best = null;
+      for (const el of doc.querySelectorAll(PAGE_SEL)) {
+        if (root.contains(el) || climbColumnOf(el) || el.closest('[data-pet-ignore],[aria-hidden="true"]')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > H() || r.right < 0 || r.left > W()) continue;
+        const raw = el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '';
+        const name = pageNorm(raw);
+        if (!name || name.length > 40) continue;
+        let sc = 0;
+        if (name === core) sc = 100;
+        else if (name.indexOf(core) >= 0) sc = 60 - Math.min(30, name.length - core.length);
+        // 화면 이름이 질문의 일부일 때는 대부분을 덮어야 한다('정보'가 '정보수정'에 걸리지 않게)
+        else if (core.indexOf(name) >= 0 && name.length >= Math.max(2, core.length * 0.7)) sc = 40 + name.length;
+        if (!sc) continue;
+        if (el.matches('button,a[href],[role="button"],[role="tab"],[role="menuitem"]')) sc += 15;
+        if (el.closest('main')) sc += 5;
+        // 바깥 요소(카드 전체)보다 안쪽 요소(버튼)를 고른다
+        if (!best || sc > best.sc || (sc === best.sc && best.el.contains(el))) best = { el, sc, label: String(raw).replace(/\s+/g, ' ').trim().slice(0, 30) };
+      }
+      return best;
+    }
     function answerFor(input) {
       const fm = matchFaq(input);
       if (fm && fm.score >= 100) return { text: fm.f.a, target: fm.f.target || null, alt: altTarget(input, fm.f.target) };
@@ -4075,6 +4142,19 @@
         if (el) return { item: el, code };
       }
       const q = String(input || '');
+      const here = HERE_RE.test(q);
+      if (here || WHERE_RE.test(q)) {
+        const hit = findOnPage(findCore(q));
+        // '지금 화면에서'라고 했으면 조금만 맞아도, 아니면 이름이 거의 같을 때만 화면 요소를 먼저 가리킨다
+        if (hit && (here ? hit.sc >= 40 : hit.sc >= 85)) return { pageEl: hit.el, label: hit.label };
+        if (here && !hit) {
+          // 이 화면에 없으면 그렇게 말하고, 다른 화면의 기능 설명이 맞으면 그 화면으로 안내한다 (데이터 행을 대신 읽지는 않는다)
+          const rest = answerFor(q.replace(HERE_RE, ' '));
+          const miss = '이 화면에서는 찾지 못했어요.';
+          if (rest.text && !rest.item && !rest.items && !rest.summary && !rest.pageEl && !rest.suggest) return Object.assign({}, rest, { text: `${miss} ${rest.text}`, here: true });
+          return { text: `${miss} 위쪽 통합 검색이나 왼쪽 메뉴에서 찾아보세요.`, target: 'topbar:search' };
+        }
+      }
       // '선택한 거 알려줘' '지금 보는 계획' → 고른 항목
       if (/(선택|고른|열린|열려\s*있는|지금\s*보는|보고\s*있는|이거|이것)/.test(q)) {
         const sel = selectedItem();
@@ -4259,7 +4339,17 @@
           if (player.name === 'talk') player.set(S.base);
         }, 1000);
       }
-      if (ans.item) itemReply(ans.item, ans.code);
+      if (ans.pageEl) {
+        const el = ans.pageEl;
+        const key = el.getAttribute('data-pet-target');
+        const info = key ? targetInfo(key, el) : null;
+        const line = info && info.short ? `지금 화면에 있어요. '${ans.label}' · ${info.short}` : `지금 화면에 있어요. '${ans.label}'이에요.`;
+        addMsg('pet', line, [actBtn('가리켜 줘 →', () => pointAtEl(el.isConnected ? el : null, ans.label))]);
+        // '어디 있어'에 대한 답이니 말만 하지 않고 바로 가서 가리킨다
+        later(() => {
+          if (chat.el && el.isConnected) pointAtEl(el, ans.label);
+        }, reduced ? 200 : 900);
+      } else if (ans.item) itemReply(ans.item, ans.code);
       else if (ans.summary) {
         addMsg('pet', '이 화면에 보이는 데이터예요. 궁금한 항목은 번호나 이름으로 물어보세요.', [fieldList(ans.summary)]);
       } else if (ans.items) {
