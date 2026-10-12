@@ -5,7 +5,7 @@ import type { IconName } from '@/components/Icon';
 import { decCmp, decSub } from '@/lib/decimal';
 import { trimNum } from '@/lib/format';
 import { judgeValue, typicalPassValue } from '@/lib/inspectionJudgment';
-import type { JsonValue } from '@/mock/schema';
+import type { JsonValue } from '@/lib/json';
 
 /** 측정값 형식: 정수 8자리·소수 4자리까지, 음수 허용 (quality_inspection_value.measured_value, 가짜 서버 checkDecimal과 같은 규칙) */
 export const MEASURED_VALUE_PATTERN = /^-?\d{1,8}(\.\d{1,4})?$/;

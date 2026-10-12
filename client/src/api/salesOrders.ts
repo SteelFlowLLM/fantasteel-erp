@@ -3,6 +3,7 @@
 // 서버 모드(기본)면 목록·상세·미리보기·등록·취소·이력은 실제 서버를 부른다 (api/server/salesOrders.ts, 이력은 api/server/businessEvents.ts).
 // 업무방은 메신저 어댑터, 생산 연결·재생산 계획은 생산계획 API를 쓴다. 서버에 아직 없는 구매 진행 영향은 서버 모드에서 비어 있다.
 import { requireActor } from '@/api/actor';
+import type { TimelineEvent } from '@/api/businessEvents';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
@@ -31,7 +32,6 @@ import {
   type SalesOrderDetail,
   type SalesOrderPreviewLine,
   type SalesOrderSummary,
-  type TimelineEvent,
 } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;
@@ -46,8 +46,8 @@ export type {
   SalesOrderDetail,
   SalesOrderPreviewLine,
   SalesOrderSummary,
-  TimelineEvent,
 } from '@/mock/services';
+export type { TimelineEvent };
 
 /** 수주 화면을 여는 권한 (screens.ts의 salesOrders와 같다): 수주 등록·취소 중 하나라도 조회 이상 */
 export const SALES_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL];
