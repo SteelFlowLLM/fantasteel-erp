@@ -77,6 +77,8 @@ export function RoomSearch({ chatRoomId, onJump }: { chatRoomId: number; onJump:
               <li key={message.id}>
                 <button
                   type="button"
+                  data-pet-item="message"
+                  data-pet-item-title={`${message.senderName} · ${whenOf(message)}`}
                   onClick={() => onJump(message.id)}
                   title="대화에서 이 메시지로 이동"
                   className="flex w-full flex-col gap-0.5 rounded-sm bg-surface-2 px-2.5 py-2 text-left text-xs hover:bg-surface-3"
@@ -111,7 +113,7 @@ export function RoomFiles({ chatRoomId }: { chatRoomId: number }) {
         message.files.map((file) => {
         const name = file.name;
         return (
-          <li key={`${message.id}-${file.id}`} className="flex items-center gap-2 text-xs">
+          <li key={`${message.id}-${file.id}`} data-pet-item="message" data-pet-item-title={name} className="flex items-center gap-2 text-xs">
             <Icon name="clip" size="sm" className="flex-none text-ink-3" />
             <span className="flex min-w-0 flex-col">
               <span className="truncate font-medium" title={name}>

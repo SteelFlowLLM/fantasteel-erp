@@ -20,6 +20,7 @@ export function Steps({ items, className }: { items: readonly StepItem[]; classN
         <Fragment key={step.key}>
           <li
             aria-label={`${step.label} ${STATE_LABEL[step.state]}`}
+            data-pet-term={step.label}
             className={cn(
               'flex items-center gap-1.5 whitespace-nowrap text-xs font-medium',
               step.state === 'done' && 'text-ok',

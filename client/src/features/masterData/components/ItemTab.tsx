@@ -33,13 +33,13 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
   const [typeFilter, setTypeFilter] = useState('');
   const [editing, setEditing] = useState<MasterRawMaterialView | 'new' | null>(null);
   return (
-    <Card>
+    <Card petKey="card:masterData.rawMaterials">
       <CardHead
         title="원료"
         meta={materials.data ? `${materials.data.length}개 · 원료 코드는 LOT 번호(RM-원료코드-…)에 쓰여요` : undefined}
         actions={
           <>
-            <Select aria-label="원료 유형" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-32">
+            <Select aria-label="원료 유형" data-pet-term="원료 유형" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-32">
               <option value="">원료 유형 전체</option>
               {Object.values(RAW_MATERIAL_TYPE).map((t) => (
                 <option key={t} value={t}>
@@ -72,7 +72,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
                 </thead>
                 <tbody>
                   {shown.map((m) => (
-                    <tr key={m.id}>
+                    <tr key={m.id} data-pet-item="rawMaterial" data-pet-item-title={m.itemCode}>
                       <Td className="font-mono text-mono">{m.itemCode}</Td>
                       <Td>{m.itemName}</Td>
                       <Td>{RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType]}</Td>
@@ -212,7 +212,7 @@ function RawMaterialModal({ material, onClose }: { material: MasterRawMaterialVi
 function ProductItemCard({ onGoTab }: { onGoTab: (tab: MasterTabKey) => void }) {
   const specs = useMasterProductSpecs();
   return (
-    <Card>
+    <Card petKey="card:masterData.productItems">
       <CardHead
         title="제품 품목 (슬래브·코일)"
         meta={specs.data ? `${specs.data.length}개 · 품목 코드 = 규격 코드` : undefined}
@@ -239,7 +239,7 @@ function ProductItemCard({ onGoTab }: { onGoTab: (tab: MasterTabKey) => void }) 
                 </thead>
                 <tbody>
                   {rows.map((s) => (
-                    <tr key={s.id}>
+                    <tr key={s.id} data-pet-item="item" data-pet-item-title={s.itemCode}>
                       <Td className="font-mono text-mono">{s.itemCode}</Td>
                       <Td>{s.itemName}</Td>
                       <Td>{ITEM_TYPE_LABEL[s.itemType]}</Td>

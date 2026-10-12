@@ -11,7 +11,9 @@ import { fmtTon } from '@/lib/format';
 function Figure({ label, value, unit, strong }: { label: string; value: string | number; unit?: string; strong?: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-cap text-ink-3">{label}</span>
+      <span className="text-cap text-ink-3" data-pet-term={label}>
+        {label}
+      </span>
       <b className={strong ? 'text-2xl font-semibold tabular-nums' : 'text-lg font-semibold tabular-nums'}>
         {value}
         {unit ? <small className="ml-0.5 text-xs font-medium text-ink-3">{unit}</small> : null}
@@ -25,7 +27,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
   const unit = PRODUCT_QTY_UNIT[plan.item.itemType];
   if (!f) {
     return (
-      <Card>
+      <Card petKey="card:productionPlans.formation">
         <CardHead title="히트 편성" />
         <CardBody>
           <Banner tone="danger">기준정보(라우팅 수율·규격 매핑·배합 원단위·히트 용량)가 모자라 편성표를 계산하지 못했어요. 기준정보 준비 상태를 확인해 주세요.</Banner>
@@ -50,7 +52,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
     { label: '예상 슬래브 여재', value: `${f.expectedSurplusSlabQty}매`, rule: 'max(0, 계획 슬래브 − 부족 매수) · 여재는 가용재고에 들어가요' },
   ];
   return (
-    <Card>
+    <Card petKey="card:productionPlans.formation">
       <CardHead title="히트 편성" meta={`수주 등록 때 계산 · ${plan.item.steelGradeCode ?? ''} 강종 기준`} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 border-b border-line px-4 py-3">
         <Figure label="부족 매수" value={f.shortageQty} unit={unit} strong />
@@ -63,8 +65,11 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
         <Figure label="예상 슬래브 여재" value={f.expectedSurplusSlabQty} unit="매" />
       </div>
       <div className="flex flex-col gap-2 border-b border-line px-4 py-3">
-        <Steps items={steps} className="overflow-x-auto" />
-        <span className="text-cap text-ink-3">
+        {/* Steps는 공유 컴포넌트라 단계마다 속성을 달 수 없어, 묶음 전체를 '공정 단계' 용어로 설명한다 */}
+        <div data-pet-term="공정 단계">
+          <Steps items={steps} className="overflow-x-auto" />
+        </div>
+        <span className="text-cap text-ink-3" data-pet-term="수주 목표와 예상 여재">
           히트 전체 {fmtTon(f.heatTon)} 가운데 수주 목표는 {fmtTon(f.targetWeightTon)}이에요. 남는 쇳물은 슬래브로 만들어 예상 여재 {f.expectedSurplusSlabQty}매로 남아요.
         </span>
       </div>
@@ -80,7 +85,9 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
           <tbody>
             {rows.map((row) => (
               <tr key={row.label}>
-                <Td className="font-medium">{row.label}</Td>
+                <Td className="font-medium" data-pet-term={row.label}>
+                  {row.label}
+                </Td>
                 <Td align="right" className="font-semibold">
                   {row.value}
                 </Td>

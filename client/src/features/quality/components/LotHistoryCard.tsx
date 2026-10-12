@@ -55,16 +55,19 @@ export function LotHistoryCard({
   events,
   itemNames,
   limit = 8,
+  petKey,
 }: {
   lotId: number;
   events: readonly TimelineEvent[];
   /** 검사 항목 코드 → 검사 항목명 (api가 작업 로그에서 모은 것) */
   itemNames: Readonly<Record<string, string>>;
   limit?: number;
+  /** 화면 도우미 펫 설명 키 (검사 입력·불합격 관리가 따로 준다) */
+  petKey?: string;
 }) {
   const recent = [...events].reverse().slice(0, limit);
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey={petKey}>
       <CardHead
         title="이력"
         meta={`이 LOT의 작업 로그 ${events.length}건`}
@@ -83,13 +86,22 @@ export function LotHistoryCard({
               key: event.id,
               tone: toneOf(event),
               time: `${fmtMDHM(event.occurredAt)} · ${event.eventNo}`,
+              // Timeline은 공유 컴포넌트라 기록 한 줄의 제목 칸에 화면 도우미 펫 항목 속성(data-pet-item)을 단다
               title: (
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <Tag size="sm" tone={event.actorType === 'SYSTEM' ? 'run' : 'outline'}>
-                    {event.actorName}
-                  </Tag>
-                  <b className="font-semibold">{event.businessEventTypeLabel}</b>
-                  {event.targetNo ? <span className="font-mono text-cap text-ink-3">{event.targetNo}</span> : null}
+                <span className="flex flex-wrap items-center gap-1.5" data-pet-item="businessEvent" data-pet-item-title={event.eventNo}>
+                  <span className="inline-flex" data-pet-field="주체">
+                    <Tag size="sm" tone={event.actorType === 'SYSTEM' ? 'run' : 'outline'}>
+                      {event.actorName}
+                    </Tag>
+                  </span>
+                  <b className="font-semibold" data-pet-field="작업">
+                    {event.businessEventTypeLabel}
+                  </b>
+                  {event.targetNo ? (
+                    <span className="font-mono text-cap text-ink-3" data-pet-field="대상">
+                      {event.targetNo}
+                    </span>
+                  ) : null}
                 </span>
               ),
               body: (

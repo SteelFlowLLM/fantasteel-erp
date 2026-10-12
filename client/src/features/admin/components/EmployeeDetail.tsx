@@ -50,17 +50,21 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
 
   return (
     <>
-      <div className="flex flex-none items-center gap-3">
+      <div data-pet-target="card:employees.header" className="flex flex-none items-center gap-3">
         <Avatar name={employee.employeeName} size="lg" tone={employee.isActive ? 'brand' : 'neutral'} />
         <div className="flex min-w-0 flex-col">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">{employee.employeeName}</h1>
-            <Tag tone="brand">{ROLE_LABEL[employee.roleCode]}</Tag>
-            <ActiveBadge isActive={employee.isActive} />
+            <span data-pet-field="역할">
+              <Tag tone="brand">{ROLE_LABEL[employee.roleCode]}</Tag>
+            </span>
+            <span data-pet-field="사용 여부">
+              <ActiveBadge isActive={employee.isActive} />
+            </span>
             {isHead ? <HeadTag departmentNames={headOf.map((d) => d.departmentName)} /> : null}
             {isMe ? <Tag>나</Tag> : null}
           </div>
-          <span className="text-cap text-ink-3">
+          <span className="text-cap text-ink-3" data-pet-field="부서 · 직급 · 사원번호">
             {employee.departmentName} · {employee.jobGradeName} · 사원번호 {employee.employeeNo}
           </span>
         </div>
@@ -99,7 +103,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
       )}
 
       <div className="grid flex-none grid-cols-2 gap-4">
-        <Card>
+        <Card petKey="card:employees.info">
           <CardHead title="사원 정보" />
           <CardBody>
             <KvList
@@ -115,7 +119,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
             />
           </CardBody>
         </Card>
-        <Card>
+        <Card petKey="card:employees.rolePermissions">
           <CardHead title="역할 권한" meta={`${ROLE_LABEL[employee.roleCode]} 역할`} />
           <CardBody className="gap-2">
             {role ? <RolePermissionSummary permissions={role.permissions} /> : <span className="text-cap text-ink-3">역할 정보를 불러오는 중…</span>}
@@ -128,7 +132,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
         </Card>
       </div>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:employees.departmentHead">
         <CardHead
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -141,9 +145,9 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           {isHead ? (
             <div className="flex flex-wrap gap-1.5">
               {headOf.map((d) => (
-                <Tag key={d.id} tone="outline">
-                  {d.departmentName} 부서장
-                </Tag>
+                <span key={d.id} data-pet-item="department" data-pet-item-title={d.departmentName}>
+                  <Tag tone="outline">{d.departmentName} 부서장</Tag>
+                </span>
               ))}
             </div>
           ) : (

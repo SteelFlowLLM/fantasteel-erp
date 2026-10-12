@@ -69,7 +69,7 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
   if (readiness.ready) {
     return (
       <Banner tone="ok" actions={refresh} className="flex-none items-center">
-        <b>기준정보 준비 완료</b> <span className="opacity-80">· 생산·MRP 계산에 필요한 계획 수율·배합 원단위·규격 매핑·검사 기준이 모두 있어요</span>
+        <b data-pet-term="준비 상태">기준정보 준비 완료</b> <span className="opacity-80">· 생산·MRP 계산에 필요한 계획 수율·배합 원단위·규격 매핑·검사 기준이 모두 있어요</span>
       </Banner>
     );
   }
@@ -79,7 +79,7 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
     <Banner tone="danger" actions={refresh} className="flex-none">
       <div className="flex flex-col gap-1.5">
         <div>
-          <b>기준정보 준비가 덜 됐어요 ({readiness.problems.length}건)</b>{' '}
+          <b data-pet-term="준비 상태">기준정보 준비가 덜 됐어요 ({readiness.problems.length}건)</b>{' '}
           <span className="opacity-80">
             {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다(무엇이 빠졌는지는 아래 칩이 말한다). docs/rework/areas/master.md 검토 반영 */}
             · 아래를 채워야 생산·MRP 계산이 돼요 <span className="font-mono text-cap">MST-001</span>
@@ -91,11 +91,11 @@ export function ReadinessBanner({ onGoTab }: { onGoTab: (tab: MasterTabKey) => v
             return (
               <li key={problem.key} className="flex items-center gap-2">
                 {area.tab ? (
-                  <button type="button" className={CHIP} onClick={() => area.tab && onGoTab(area.tab)} title={`${area.label} 탭으로 이동`}>
+                  <button type="button" className={CHIP} onClick={() => area.tab && onGoTab(area.tab)} title={`${area.label} 탭으로 이동`} data-pet-term={area.label}>
                     {area.label}
                   </button>
                 ) : (
-                  <Link href={buildStandardHref(problem)} className={CHIP} title="품질의 검사 기준 화면으로 이동">
+                  <Link href={buildStandardHref(problem)} className={CHIP} title="품질의 검사 기준 화면으로 이동" data-pet-term={area.label}>
                     {area.label}
                   </Link>
                 )}

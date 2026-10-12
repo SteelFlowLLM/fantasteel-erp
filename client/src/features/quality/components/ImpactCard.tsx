@@ -22,12 +22,22 @@ function PlanChip({ plan }: { plan: LinkedPlan }) {
   return (
     <Link
       href={`/production/plans?plan=${plan.productionPlanId}`}
+      data-pet-item="productionPlan"
+      data-pet-item-title={plan.productionPlanNo}
       className="inline-flex h-7 items-center gap-1.5 rounded-[14px] border border-line-strong bg-surface px-2.5 text-xs font-medium text-run hover:bg-surface-2"
     >
       <span className="font-mono">{plan.productionPlanNo}</span>
-      {plan.isReproduction ? <Tag size="sm" tone="run">재생산</Tag> : null}
+      {plan.isReproduction ? (
+        <span className="inline-flex" data-pet-field="구분">
+          <Tag size="sm" tone="run">
+            재생산
+          </Tag>
+        </span>
+      ) : null}
       <span className="text-ink-2">
-        {PRODUCTION_PLAN_STATUS_LABEL[plan.productionPlanStatus]} · 부족 {plan.shortageQty}매
+        <span data-pet-field="상태">{PRODUCTION_PLAN_STATUS_LABEL[plan.productionPlanStatus]}</span>
+        {' · '}
+        <span data-pet-field="부족 매수">부족 {plan.shortageQty}매</span>
       </span>
     </Link>
   );
@@ -42,17 +52,19 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
   const [confirming, setConfirming] = useState(false);
 
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:rejectedLots.impact">
       <CardHead title="영향과 자동 처리" meta="불합격 판정 때 시스템이 처리한 것" />
       <CardBody>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Tag tone="run">시스템</Tag>
-          <span className="inline-flex h-[26px] items-center gap-1.5 rounded-[13px] border border-line-strong bg-surface px-2.5 text-xs text-ink-2">
+          <span className="inline-flex" data-pet-term="시스템">
+            <Tag tone="run">시스템</Tag>
+          </span>
+          <span className="inline-flex h-[26px] items-center gap-1.5 rounded-[13px] border border-line-strong bg-surface px-2.5 text-xs text-ink-2" data-pet-term="예약·배정·출고 대상에서 제외">
             <Icon name="lock" size="sm" />
             예약·배정·출고 대상에서 제외
           </span>
           {row.lotType === 'HEAT' ? (
-            <span className="inline-flex h-[26px] items-center gap-1.5 rounded-[13px] border border-line-strong bg-surface px-2.5 text-xs text-ink-2">
+            <span className="inline-flex h-[26px] items-center gap-1.5 rounded-[13px] border border-line-strong bg-surface px-2.5 text-xs text-ink-2" data-pet-term="하위 슬래브·코일 사용 불가">
               <Icon name="link" size="sm" />
               하위 슬래브·코일 사용 불가
             </span>
@@ -61,7 +73,7 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
 
         {soItem && shortage ? (
           <div className="flex flex-col gap-2">
-            <span className="text-cap text-ink-3">
+            <span className="text-cap text-ink-3" data-pet-term="영향받는 수주 품목">
               영향받는 수주 품목 {soItem.salesOrderNo} 품목 {soItem.lineNo} · {soItem.itemCode}
             </span>
             <KvList

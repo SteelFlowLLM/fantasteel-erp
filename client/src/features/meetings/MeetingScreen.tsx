@@ -103,7 +103,9 @@ function SummaryBody() {
   return (
     <>
       <div className="flex flex-col gap-1">
-        <span className="text-cap font-semibold text-ai-strong">요약</span>
+        <span data-pet-term="요약" className="text-cap font-semibold text-ai-strong">
+          요약
+        </span>
         <ol className="flex flex-col gap-0.5 text-sm leading-normal">
           {SUMMARY.map((line, index) => (
             <li key={line}>
@@ -113,7 +115,9 @@ function SummaryBody() {
         </ol>
       </div>
       <div className="flex flex-col gap-1">
-        <span className="text-cap font-semibold text-ai-strong">결정사항 {DECISIONS.length}</span>
+        <span data-pet-term="결정사항" className="text-cap font-semibold text-ai-strong">
+          결정사항 {DECISIONS.length}
+        </span>
         <ul className="flex flex-col gap-1 text-sm leading-normal">
           {DECISIONS.map((decision) => (
             <li key={decision.text} className="flex items-start gap-1.5">
@@ -131,7 +135,7 @@ function SummaryBody() {
 function ListDesign() {
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      <section aria-label="회의 목록" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
+      <section aria-label="회의 목록" data-pet-target="card:meetings.list" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
         <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
           <div className="flex items-center gap-2">
             <b className="text-base font-semibold">회의 4건</b>
@@ -147,7 +151,7 @@ function ListDesign() {
             <div key={group.day}>
               <DaySeparator>{group.day}</DaySeparator>
               {group.items.map((meeting) => (
-                <MasterItem key={meeting.key} active={meeting.key === 'weekly'}>
+                <MasterItem key={meeting.key} active={meeting.key === 'weekly'} petItem="meetingMinutes" petTitle={meeting.title}>
                   <b className="text-sm font-semibold">{meeting.title}</b>
                   <span className="text-cap text-ink-3 tabular-nums">{meeting.meta}</span>
                   <span className="text-cap text-ink-2">{meeting.sub}</span>
@@ -187,7 +191,7 @@ function ListDesign() {
           </CardBody>
         </Card>
         <div className="grid min-h-0 flex-none grid-cols-2 gap-3.5">
-          <Card>
+          <Card petKey="card:meetings.transcript">
             <TranscriptCardHead meta={`발언 ${TRANSCRIPT.length} · 사람이 말한 그대로`} />
             <div className="flex flex-col py-1.5">
               {TRANSCRIPT.slice(0, 6).map((line) => (
@@ -196,7 +200,7 @@ function ListDesign() {
               <span className="px-3.5 pt-1 text-cap text-ink-3">… 이후 발언 2개 · 38:02까지</span>
             </div>
           </Card>
-          <AiCard title="AI 요약" meta="초안 · 확인 전">
+          <AiCard title="AI 요약" meta="초안 · 확인 전" petKey="card:meetings.summary">
             <SummaryBody />
             <OriginLine icon="task">
               할 일 {EXTRACTED_TASKS.length} (담당·마감 확인 필요 {EXTRACTED_TASKS.length - readyTaskCount}) · 구매 관련 1 → 구매요청 초안으로 보낼 수 있어요
@@ -232,7 +236,7 @@ function NewDesign() {
         }
       />
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px] gap-4">
-        <Card>
+        <Card petKey="card:meetings.input">
           <div role="tablist" aria-label="입력 방식" className="flex flex-none gap-1 border-b border-line px-3">
             {INPUT_TABS.map((tab) => (
               <span
@@ -312,7 +316,7 @@ function NewDesign() {
 function ResultDesign() {
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      <Card className="w-80 flex-none">
+      <Card className="w-80 flex-none" petKey="card:meetings.transcript">
         <TranscriptCardHead meta={`발언 ${TRANSCRIPT.length} · ${SELECTED_MEETING_MINUTES.duration}`} />
         <div className="border-b border-line px-3.5 py-2">
           <Input type="search" leadingIcon="search" placeholder="전체 기록 검색" aria-label="전체 기록 검색" disabled />
@@ -344,12 +348,12 @@ function ResultDesign() {
           }
         />
 
-        <AiCard title="AI 요약" meta={`초안 · 확인 전 · ${SELECTED_MEETING_MINUTES.meetingDate} ${SELECTED_MEETING_MINUTES.time} · ${ATTENDEES.length}명`} className="flex-none">
+        <AiCard title="AI 요약" meta={`초안 · 확인 전 · ${SELECTED_MEETING_MINUTES.meetingDate} ${SELECTED_MEETING_MINUTES.time} · ${ATTENDEES.length}명`} className="flex-none" petKey="card:meetings.summary">
           <SummaryBody />
         </AiCard>
 
         <div className="grid min-h-0 flex-none grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-3.5">
-          <Card>
+          <Card petKey="card:meetings.tasks">
             <CardHead title={`할 일 ${EXTRACTED_TASKS.length}`} meta="담당·마감을 확인한 항목만 업무로 등록" />
             <CardBody flush>
               <Table>
@@ -367,7 +371,7 @@ function ResultDesign() {
                   {EXTRACTED_TASKS.map((task) => {
                     const ready = isTaskReady(task);
                     return (
-                      <tr key={task.key} data-risk={!ready || undefined}>
+                      <tr key={task.key} data-pet-item="task" data-pet-item-title={task.title} data-risk={!ready || undefined}>
                         <Td align="center">
                           <input type="checkbox" checked={ready} disabled readOnly aria-label="업무로 등록" />
                         </Td>

@@ -40,7 +40,9 @@ export function LotListTab({ lotType, lotStatus, onLotTypeChange, onLotStatusCha
       <div className="flex flex-none flex-wrap items-center gap-3">
         <Segmented ariaLabel="LOT 유형" items={TYPE_ITEMS} active={lotType || 'ALL'} onChange={(key) => onLotTypeChange(key === 'ALL' ? '' : key)} />
         <label className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-ink-2">상태</span>
+          <span data-pet-term="LOT 상태" className="text-xs font-medium text-ink-2">
+            상태
+          </span>
           <Select aria-label="LOT 상태" className="w-[120px]" value={lotStatus} onChange={(e) => onLotStatusChange(e.target.value as LotStatusFilter)}>
             <option value="">전체</option>
             {Object.values(LOT_STATUS).map((s) => (
@@ -64,7 +66,7 @@ export function LotListTab({ lotType, lotStatus, onLotTypeChange, onLotStatusCha
         {(data) => {
           const rows = data.filter((r) => matchesLotNo(r.lotNo, search));
           return (
-            <Card className="min-h-0 flex-1">
+            <Card petKey="card:inventories.lots" className="min-h-0 flex-1">
               <CardHead title="LOT" meta={`${fmtInt(rows.length)}건 · 생산완료일 최근 순`} />
               <div className="min-h-0 flex-1 overflow-auto">
                 <Table compact>
@@ -118,7 +120,7 @@ function LotRow({ row }: { row: LotListView }) {
   const quality = qualityDisplayOf(row.inspectionResult);
   const isProduct = row.lotType === 'SLAB' || row.lotType === 'COIL';
   return (
-    <tr data-muted={row.lotStatus !== 'AVAILABLE' || undefined}>
+    <tr data-pet-item="lot" data-pet-item-title={row.lotNo} data-muted={row.lotStatus !== 'AVAILABLE' || undefined}>
       <Td>
         <LotNoLink lotNo={row.lotNo} />
       </Td>
@@ -148,9 +150,11 @@ function LotRow({ row }: { row: LotListView }) {
           <span className="inline-flex items-center gap-1 text-ink-2">
             {allocationLabelOf(null)}
             {row.isSurplus ? (
-              <Badge tone="neutral" plain title={row.surplusAt ? `여재 전환 ${fmtDate(row.surplusAt)}` : undefined}>
-                여재
-              </Badge>
+              <span data-pet-term="여재" className="contents">
+                <Badge tone="neutral" plain title={row.surplusAt ? `여재 전환 ${fmtDate(row.surplusAt)}` : undefined}>
+                  여재
+                </Badge>
+              </span>
             ) : null}
           </span>
         ) : (

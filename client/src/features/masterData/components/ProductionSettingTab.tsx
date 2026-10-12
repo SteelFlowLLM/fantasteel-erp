@@ -33,11 +33,11 @@ function SettingForm({ setting, canEdit }: { setting: MasterProductionSettingVie
   const dirty = heat.trim() !== initialHeat || days.trim() !== initialDays;
 
   return (
-    <Card className="max-w-[640px]">
+    <Card className="max-w-[640px]" petKey="card:masterData.settings">
       {/* 서버 응답에는 수정 시각이 없다 */}
       <CardHead title="생산 설정값" meta={isMasterServerMode() ? undefined : setting ? `마지막 저장 ${fmtDateTime(setting.updatedAt)}` : '아직 저장한 값이 없어요'} />
       <div className="grid grid-cols-2 gap-4 p-4">
-        <Field label="히트 용량" required hint="용강 기준 전로 1히트의 용량이에요 · 히트 수 계산에 써요 (초기 250 t)" error={fieldErrors.errorOf('heatCapacityTon')}>
+        <Field label={<span data-pet-term="히트 용량">히트 용량</span>} required hint="용강 기준 전로 1히트의 용량이에요 · 히트 수 계산에 써요 (초기 250 t)" error={fieldErrors.errorOf('heatCapacityTon')}>
           <Input
             numeric
             inputMode="decimal"
@@ -51,7 +51,7 @@ function SettingForm({ setting, canEdit }: { setting: MasterProductionSettingVie
             }}
           />
         </Field>
-        <Field label="납기 위험 기준일" required hint="납기까지 남은 일수가 이 값 이하이고 출하 매수가 수주 매수보다 적으면 납기 위험이에요 (초기 3일)" error={fieldErrors.errorOf('deliveryRiskDays')}>
+        <Field label={<span data-pet-term="납기 위험 기준일">납기 위험 기준일</span>} required hint="납기까지 남은 일수가 이 값 이하이고 출하 매수가 수주 매수보다 적으면 납기 위험이에요 (초기 3일)" error={fieldErrors.errorOf('deliveryRiskDays')}>
           <Input
             numeric
             inputMode="numeric"

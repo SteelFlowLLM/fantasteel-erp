@@ -10,7 +10,8 @@ const SERIES = [
 
 const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0}%`;
 
-export function DailyBars({ points }: { points: readonly DailyProductPoint[] }) {
+/** petItem: 화면 도우미 펫이 하루 막대를 읽을 때 쓰는 항목 종류 (출하 실적 = goodsIssue, 생산량 = lot) */
+export function DailyBars({ points, petItem }: { points: readonly DailyProductPoint[]; petItem?: string }) {
   const max = Math.max(1, ...points.map((p) => p.slabQty + p.coilQty));
   // 날짜 글자는 너무 촘촘하지 않게 몇 칸마다 하나씩
   const step = Math.max(1, Math.ceil(points.length / 6));
@@ -23,7 +24,13 @@ export function DailyBars({ points }: { points: readonly DailyProductPoint[] }) 
       >
         <span className="absolute top-0.5 left-0 bg-surface pr-1 text-cap text-ink-3 tabular-nums">{max}</span>
         {points.map((p) => (
-          <div key={p.date} className="flex h-full min-w-0 flex-1 items-end hover:bg-surface-2" title={`${p.date} · 슬래브 ${p.slabQty}매 · 코일 ${p.coilQty}개 · ${fmtTon(p.ton)}`}>
+          <div
+            key={p.date}
+            data-pet-item={petItem}
+            data-pet-item-title={petItem ? p.date : undefined}
+            className="flex h-full min-w-0 flex-1 items-end hover:bg-surface-2"
+            title={`${p.date} · 슬래브 ${p.slabQty}매 · 코일 ${p.coilQty}개 · ${fmtTon(p.ton)}`}
+          >
             {/* 높이는 실행 중에 정해지는 값이라 style로 준다 */}
             <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-xs" style={{ height: pct(p.slabQty + p.coilQty, max) }}>
               {SERIES.map((s) => (p[s.key] > 0 ? <span key={s.key} className={s.colorClass} style={{ flex: p[s.key], minHeight: 1 }} /> : null))}

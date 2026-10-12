@@ -58,7 +58,7 @@ export function DashboardScreen() {
           {/* 소속·오늘 날짜는 상단 바(날짜·시각, 이름 아래 소속)에 이미 있어 인사만 둔다 */}
           <b className="min-w-0 flex-1 truncate text-lg font-semibold">{me.employeeName}님, 안녕하세요</b>
           {!editing ? (
-            <Button icon="widget" onClick={() => startEdit(true)}>
+            <Button icon="widget" data-pet-target="card:dashboard.edit" onClick={() => startEdit(true)}>
               위젯 편집
             </Button>
           ) : null}

@@ -24,14 +24,22 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
   const unit = qtyUnitOf([plan.item.itemType]);
   const f = plan.formation;
   return (
-    <Card>
+    <Card petKey="card:salesOrders.production">
       <CardHead
         title={<PlanLink productionPlanId={plan.id} productionPlanNo={plan.productionPlanNo} />}
         meta={link.lineNo !== null ? `품목 ${link.lineNo} · ${plan.item.itemName}` : `${plan.item.itemName} · 수주 연결 해제`}
         actions={
           <span className="flex items-center gap-1">
-            {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
-            {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
+            {plan.isReproduction ? (
+              <span data-pet-term="재생산" className="contents">
+                <Tag tone="outline">재생산</Tag>
+              </span>
+            ) : null}
+            {plan.isSurplusOnCompletion ? (
+              <span data-pet-term="완료 후 여재" className="contents">
+                <Tag tone="outline">완료 후 여재</Tag>
+              </span>
+            ) : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
             {plan.productionPlanStatus === 'CANCELLED' ? null : (
               <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
@@ -60,28 +68,32 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
         ) : (
           <EmptyNote className="py-2">편성표를 계산할 수 없어요 (계획 수율·배합 원단위·규격 매핑 확인 필요)</EmptyNote>
         )}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-ink-2 tabular-nums">
-          <span>
+        <div
+          data-pet-item="productionPlan"
+          data-pet-item-title={plan.productionPlanNo}
+          className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-ink-2 tabular-nums"
+        >
+          <span data-pet-term="제강">
             제강 {plan.progress.heatsMadeQty}/{plan.progress.heatCount} 히트
           </span>
-          <span>
+          <span data-pet-term="연주">
             연주 {plan.progress.heatsCastQty}/{plan.progress.heatCount} 히트
           </span>
-          <span>슬래브 {plan.progress.slabQty}매</span>
-          {plan.item.itemType === 'COIL' ? <span>코일 {plan.progress.coilQty}개</span> : null}
-          <span className="text-ok">
+          <span data-pet-term="슬래브">슬래브 {plan.progress.slabQty}매</span>
+          {plan.item.itemType === 'COIL' ? <span data-pet-term="코일">코일 {plan.progress.coilQty}개</span> : null}
+          <span data-pet-term="합격" className="text-ok">
             합격 {plan.progress.passedQty}
             {unit}
           </span>
-          <span className="text-wait">
+          <span data-pet-term="판정 대기" className="text-wait">
             판정 대기 {plan.progress.pendingQty}
             {unit}
           </span>
-          <span className="text-danger">
+          <span data-pet-term="불합격" className="text-danger">
             불합격 {plan.progress.failedQty}
             {unit}
           </span>
-          <b className="font-semibold text-ink">
+          <b data-pet-term="잔여 목표" className="font-semibold text-ink">
             잔여 목표 {plan.progress.remainingTargetQty}
             {unit}
           </b>
@@ -101,7 +113,7 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
           </thead>
           <tbody>
             {plan.heats.map((heat) => (
-              <tr key={heat.seq}>
+              <tr key={heat.seq} data-pet-item="heat" data-pet-item-title={heat.heatNo ?? `순번 ${heat.seq}`}>
                 <Td align="right" className="tabular-nums">
                   {heat.seq}
                 </Td>

@@ -34,9 +34,12 @@ export function ApprovalScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:approvals.inbox"
         head={
           <div className="flex items-center gap-2">
-            <b className="text-base font-semibold">승인 대기</b>
+            <b data-pet-term="승인 대기" className="text-base font-semibold">
+              승인 대기
+            </b>
             <span className="text-xs text-ink-3">{rows.length}건</span>
             <span className="ml-auto text-cap text-ink-3">{me.headDepartmentNames.join(', ')} 부서장</span>
           </div>
@@ -52,16 +55,27 @@ export function ApprovalScreen() {
             ) : (
               <>
                 {data.map((purchaseRequisition) => (
-                  <MasterItem key={purchaseRequisition.id} selected={purchaseRequisition.id === activeId} onClick={() => url.set({ pr: purchaseRequisition.id })}>
+                  <MasterItem
+                    key={purchaseRequisition.id}
+                    selected={purchaseRequisition.id === activeId}
+                    onClick={() => url.set({ pr: purchaseRequisition.id })}
+                    petItem="purchaseRequisition"
+                    petItemTitle={purchaseRequisition.purchaseRequisitionNo}
+                  >
                     <span className="flex items-center gap-2">
                       <b className="font-mono text-sm font-semibold">{purchaseRequisition.purchaseRequisitionNo}</b>
                       <RequisitionStatusBadge status={purchaseRequisition.purchaseRequisitionStatus} />
-                      <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
+                      <span data-pet-field="희망 입고일" className="ml-auto text-cap text-ink-3">
+                        {purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}
+                      </span>
                     </span>
                     <span className="text-sm text-ink">
-                      {purchaseRequisition.itemName} <span className="text-ink-3">· {fmtTon(purchaseRequisition.requestedTon)}</span>
+                      {purchaseRequisition.itemName}{' '}
+                      <span data-pet-field="수량(톤)" className="text-ink-3">
+                        · {fmtTon(purchaseRequisition.requestedTon)}
+                      </span>
                     </span>
-                    <span className="flex items-center gap-1.5 text-cap text-ink-3">
+                    <span data-pet-field="요청자" className="flex items-center gap-1.5 text-cap text-ink-3">
                       {purchaseRequisition.requesterName ?? '-'} · {purchaseRequisition.departmentName ?? '-'} · 등록 {fmtMDHM(purchaseRequisition.createdAt)}
                       <RequisitionSourceTag source={purchaseRequisition.source} />
                     </span>

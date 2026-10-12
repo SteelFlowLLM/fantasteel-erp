@@ -12,7 +12,7 @@ export function HeadTag({ departmentNames, size = 'md' }: { departmentNames?: re
   const title = departmentNames && departmentNames.length > 0 ? `${departmentNames.join('·')} 부서장 · 구매요청 승인권자` : '부서장 · 구매요청 승인권자';
   return (
     <Tag tone="outline" size={size} title={title}>
-      부서장
+      <span data-pet-term="부서장">부서장</span>
     </Tag>
   );
 }

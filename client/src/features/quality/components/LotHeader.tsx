@@ -60,11 +60,13 @@ export function InfoGrid({ items }: { items: readonly { label: ReactNode; value:
   );
 }
 
-/** 목록 칸의 한 줄 (옛 hl-mitem). 고른 줄은 왼쪽에 막대를 그린다. */
-export function MasterItemLink({ href, active, children }: { href: string; active: boolean; children: ReactNode }) {
+/** 목록 칸의 한 줄 (옛 hl-mitem). 고른 줄은 왼쪽에 막대를 그린다. petItem·petTitle은 화면 도우미 펫이 읽는 레코드 종류·제목 (data-pet-item) */
+export function MasterItemLink({ href, active, petItem, petTitle, children }: { href: string; active: boolean; petItem?: string; petTitle?: string; children: ReactNode }) {
   return (
     <Link
       href={href}
+      data-pet-item={petItem}
+      data-pet-item-title={petTitle}
       aria-current={active ? 'true' : undefined}
       className={
         active
