@@ -14,7 +14,6 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { seedItemOf } from '@/api/server/masterIds';
 import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ProductionPlanView, ProductionResultView, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
