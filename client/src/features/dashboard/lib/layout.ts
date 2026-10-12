@@ -21,15 +21,16 @@ export interface WidgetPlacement {
  * 역할별 기본 배치 (없으면 공통 기본 배치).
  * 품질: 수주 충족 현황(수주 조회 권한 없음) 대신 강종별 불합격률을 두고, 그 옆에 공정별 수율을 둬 빈 칸을 없앤다.
  * Agent 위험 감지(P2, 한 줄 안내)는 공정 흐름 바로 아래에 전체 폭, 한 칸 높이(카드 머리 한 줄)로 둔다.
+ * 불합격률은 맨 위 기간 요약 숫자가 들어가 한 칸 높이고(판정된 강종이 3개여도 아래 설명이 잘리지 않게), 옆 공정별 수율도 같은 높이로 맞춘다.
  */
 const ROLE_DEFAULT_PLACEMENTS: Partial<Record<RoleCode, readonly WidgetPlacement[]>> = {
   QUALITY: [
     { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
     { key: 'AGENT_RISK', x: 0, y: 3, w: 12, h: 1 },
-    { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 4 },
-    { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 4 },
-    { key: 'RECENT_EVENTS', x: 0, y: 8, w: 6, h: 5 },
-    { key: 'PRODUCT_STOCK', x: 6, y: 8, w: 6, h: 5 },
+    { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 5 },
+    { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 5 },
+    { key: 'RECENT_EVENTS', x: 0, y: 9, w: 6, h: 5 },
+    { key: 'PRODUCT_STOCK', x: 6, y: 9, w: 6, h: 5 },
   ],
 };
 
