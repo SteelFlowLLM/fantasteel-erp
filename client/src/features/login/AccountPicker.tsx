@@ -85,7 +85,7 @@ export function AccountPicker() {
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
       <section aria-label="FantaSteel 소개" className="flex w-[min(760px,52vw)] flex-none flex-col gap-7 overflow-hidden bg-nav-dark px-15 pt-11 pb-10 text-white">
         <div className="flex items-center gap-3">
-          <Logo size={36} />
+          <Logo scale={2} />
           <span className="flex flex-col gap-0.5">
             <span className="text-lg leading-snug font-bold tracking-[0.08em]">FANTASTEEL</span>
             <span className="text-xs text-nav-ink">철강 제조 AI 협업 ERP</span>

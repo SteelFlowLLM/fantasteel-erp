@@ -17,28 +17,36 @@ function EventsBody({ data }: { data: RecentEventsData }) {
         const summaries = [...new Set(group.map((row) => [row.targetNo, row.reasonText].filter(Boolean).join(' · ')).filter(Boolean))];
         const timeTitle = group.length > 1 ? `${fmtDateTime(oldest.occurredAt)} ~ ${fmtDateTime(event.occurredAt)}` : `${fmtDateTime(event.occurredAt)} · ${relTime(event.occurredAt)}`;
         return (
-          <li key={event.id} className="flex h-[33px] min-w-0 flex-none items-center gap-1.5 border-b border-line last:border-b-0">
-            <time className="min-w-[68px] flex-none whitespace-nowrap text-cap text-ink-3 tabular-nums" dateTime={event.occurredAt} title={timeTitle}>
+          <li
+            key={event.id}
+            data-pet-item="businessEvent"
+            data-pet-item-title={event.businessEventTypeLabel}
+            className="flex h-[33px] min-w-0 flex-none items-center gap-1.5 border-b border-line last:border-b-0"
+          >
+            <time className="min-w-[68px] flex-none whitespace-nowrap text-cap text-ink-3 tabular-nums" dateTime={event.occurredAt} title={timeTitle} data-pet-field="시각">
               {fmtMDHM(event.occurredAt)}
             </time>
             <span
               className={cn('max-w-[72px] flex-none truncate rounded-xs px-1.5 text-cap leading-relaxed font-medium', event.actorType === 'SYSTEM' ? 'bg-surface-3 text-ink-2' : 'bg-run-bg text-run')}
               title={event.actorName}
+              data-pet-field="주체"
             >
               {event.actorName}
             </span>
-            <span className="flex-none text-xs font-semibold">{event.businessEventTypeLabel}</span>
+            <span className="flex-none text-xs font-semibold" data-pet-field="유형">
+              {event.businessEventTypeLabel}
+            </span>
             {group.length > 1 ? (
               <span className="flex-none text-cap font-semibold text-ink-3 tabular-nums" title={`같은 작업 ${group.length}건을 한 줄로 묶었어요`}>
                 ×{group.length}
               </span>
             ) : null}
             {event.isAiAssisted ? (
-              <span className="flex-none rounded-xs bg-ai-bg px-1.5 text-cap leading-relaxed font-medium text-ai-strong" title="AI 어시스턴트 초안으로 확정한 작업">
+              <span className="flex-none rounded-xs bg-ai-bg px-1.5 text-cap leading-relaxed font-medium text-ai-strong" title="AI 어시스턴트 초안으로 확정한 작업" data-pet-field="구분">
                 AI 경유
               </span>
             ) : null}
-            <span className="min-w-0 flex-1 truncate font-mono text-cap text-ink-2" title={summaries.join('\n')}>
+            <span className="min-w-0 flex-1 truncate font-mono text-cap text-ink-2" data-pet-field="대상 · 사유" title={summaries.join('\n')}>
               {summaries.join(' · ')}
             </span>
           </li>

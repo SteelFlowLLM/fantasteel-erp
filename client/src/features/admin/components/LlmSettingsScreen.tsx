@@ -67,14 +67,21 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
       <div className="flex min-w-0 flex-col gap-4">
-        <Card>
-          <CardHead title="서버 연결" meta={<ConnectionBadge result={result} pending={connection.isPending} />} />
+        <Card petKey="card:llmSettings.connection">
+          <CardHead
+            title="서버 연결"
+            meta={
+              <span data-pet-field="연결 상태">
+                <ConnectionBadge result={result} pending={connection.isPending} />
+              </span>
+            }
+          />
           <CardBody>
-            <Field label="서버 주소" required hint={`LM Studio 기본값 ${LLM_DEFAULT_BASE_URL} · OpenAI 호환 주소(…/v1)`}>
+            <Field label={<span data-pet-term="서버 주소">서버 주소</span>} required hint={`LM Studio 기본값 ${LLM_DEFAULT_BASE_URL} · OpenAI 호환 주소(…/v1)`}>
               <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} disabled={!canEdit} placeholder={LLM_DEFAULT_BASE_URL} spellCheck={false} />
             </Field>
             <Field
-              label="API 키"
+              label={<span data-pet-term="API 키">API 키</span>}
               hint={
                 saved.hasApiKey && !clearApiKey
                   ? '저장된 키가 있어요. 바꿀 때만 입력해요'
@@ -112,7 +119,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
           </CardBody>
           <CardFoot>
             {result?.connected ? (
-              <span className="text-xs text-ink-3">
+              <span className="text-xs text-ink-3" data-pet-term="응답 시간">
                 모델 {result.models.length}개 · {result.latencyMs}ms
               </span>
             ) : null}
@@ -122,10 +129,10 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
           </CardFoot>
         </Card>
 
-        <Card>
+        <Card petKey="card:llmSettings.model">
           <CardHead title="모델" meta={saved.model ? `저장된 모델 ${saved.model}` : '아직 고르지 않았어요'} />
           <CardBody>
-            <Field label="사용할 모델" hint="연결 확인으로 받은 목록에서 골라요. LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요">
+            <Field label={<span data-pet-term="사용할 모델">사용할 모델</span>} hint="연결 확인으로 받은 목록에서 골라요. LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요">
               <Select value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit || !result?.connected}>
                 <option value="">모델을 골라 주세요</option>
                 {modelOptions(result, model).map((option) => (
@@ -164,7 +171,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
         </Card>
       </div>
 
-      <Card>
+      <Card petKey="card:llmSettings.setup">
         <CardHead title="LM Studio 준비" />
         <CardBody className="text-sm leading-relaxed text-ink-2">
           <ol className="flex list-decimal flex-col gap-1.5 pl-4">

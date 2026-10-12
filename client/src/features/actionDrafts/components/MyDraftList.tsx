@@ -32,6 +32,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
   return (
     <MasterPane
       className="hidden lg:flex"
+      petKey="card:purchaseRequisitions.myDrafts"
       head={
         <>
           <div className="flex items-baseline gap-2">
@@ -39,11 +40,11 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
             <span className="text-xs text-ink-3">{counts.ALL}건</span>
           </div>
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="초안 상태">
-            <Chip on={filter === 'ALL'} onClick={() => setFilter('ALL')}>
+            <Chip on={filter === 'ALL'} onClick={() => setFilter('ALL')} data-pet-term="전체">
               전체 <b>{counts.ALL}</b>
             </Chip>
             {STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => (
-              <Chip key={status} on={filter === status} onClick={() => setFilter(status)}>
+              <Chip key={status} on={filter === status} onClick={() => setFilter(status)} data-pet-term={DRAFT_STATUS_LABEL[status]}>
                 {DRAFT_STATUS_LABEL[status]} <b>{counts[status]}</b>
               </Chip>
             ))}
@@ -69,6 +70,8 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
                   <Link
                     href={`/action-drafts/${draft.id}`}
                     aria-current={draft.id === activeId ? 'page' : undefined}
+                    data-pet-item="actionDraft"
+                    data-pet-item-title={`초안 #${draft.id}`}
                     className={cn(
                       'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2',
                       draft.id === activeId && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
@@ -76,17 +79,29 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
                   >
                     <span className="flex items-center gap-2">
                       <b className="text-sm font-semibold">초안 #{draft.id}</b>
-                      <span className="truncate text-cap text-ink-3">{draft.actionTypeLabel}</span>
+                      <span data-pet-field="업무 유형" className="truncate text-cap text-ink-3">
+                        {draft.actionTypeLabel}
+                      </span>
                       <Badge tone={DRAFT_STATUS_TONE[draft.draftStatus]} className="ml-auto">
                         {DRAFT_STATUS_LABEL[draft.draftStatus]}
                       </Badge>
                     </span>
-                    <span className="truncate text-xs text-ink-2">“{draft.messageContent ?? '원본 메시지 없음'}”</span>
+                    <span data-pet-field="원본 메시지" className="truncate text-xs text-ink-2">
+                      “{draft.messageContent ?? '원본 메시지 없음'}”
+                    </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                      <span className="truncate">{draft.chatRoomName ?? '채팅방'}</span>
+                      <span data-pet-field="채팅방" className="truncate">
+                        {draft.chatRoomName ?? '채팅방'}
+                      </span>
                       <span aria-hidden="true">·</span>
-                      <span className="flex-none">{relTime(draft.createdAt)}</span>
-                      {draft.purchaseRequisitionNo ? <span className="ml-auto flex-none font-mono text-ink-2">{draft.purchaseRequisitionNo}</span> : null}
+                      <span data-pet-field="생성" className="flex-none">
+                        {relTime(draft.createdAt)}
+                      </span>
+                      {draft.purchaseRequisitionNo ? (
+                        <span data-pet-field="구매요청" className="ml-auto flex-none font-mono text-ink-2">
+                          {draft.purchaseRequisitionNo}
+                        </span>
+                      ) : null}
                     </span>
                   </Link>
                 </li>

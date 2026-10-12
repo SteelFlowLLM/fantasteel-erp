@@ -86,6 +86,7 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
   return (
     <>
       <MasterPane
+        petKey="card:rejectedLots.list"
         head={
           <>
             <div className="flex items-baseline gap-2">
@@ -100,6 +101,7 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
                     key={tile.key}
                     type="button"
                     aria-pressed={status === tile.key}
+                    data-pet-term={tile.label}
                     onClick={() => setStatus(status === tile.key ? 'ALL' : tile.key)}
                     className={cn(
                       'flex flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left',
@@ -116,13 +118,13 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
             </div>
             {/* 세 칩이 목록 칸 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 (문구는 용어 사전 TRM-078 그대로). 불합격 LOT이 없으면 거를 것이 없어 숨긴다 */}
             <div className={cn('flex flex-nowrap gap-1', rows.length === 0 && 'hidden')} role="group" aria-label="불합격 원인">
-              <Chip on={reason === 'ALL'} onClick={() => setReason('ALL')} className="px-2">
+              <Chip on={reason === 'ALL'} onClick={() => setReason('ALL')} className="px-2" data-pet-term="모든 원인">
                 모든 원인
               </Chip>
-              <Chip on={reason === 'FAILED'} onClick={() => setReason('FAILED')} className="px-2">
+              <Chip on={reason === 'FAILED'} onClick={() => setReason('FAILED')} className="px-2" data-pet-term="검사 불합격">
                 검사 불합격
               </Chip>
-              <Chip on={reason === 'HEAT_FAILED'} onClick={() => setReason('HEAT_FAILED')} className="px-2">
+              <Chip on={reason === 'HEAT_FAILED'} onClick={() => setReason('HEAT_FAILED')} className="px-2" data-pet-term="불합격 히트의 하위 LOT">
                 불합격 히트의 하위 LOT
               </Chip>
             </div>
@@ -162,30 +164,36 @@ function RejectedItem({ row, active }: { row: RejectedLotListRow; active: boolea
   const names = failedNames(row);
   const need = row.salesOrderItem?.shortage.reproductionNeedQty ?? 0;
   return (
-    <MasterItemLink href={rejectedHref(row.lotId)} active={active}>
+    <MasterItemLink href={rejectedHref(row.lotId)} active={active} petItem="lot" petTitle={row.lotNo}>
       <div className="flex items-center gap-1.5">
         <Icon name={lotIconOf(row.lotType)} size="sm" className={active ? 'text-brand' : 'text-ink-3'} />
-        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'}>{row.lotNo}</span>
-        <span className="ml-auto">
+        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'} data-pet-field="LOT 번호">
+          {row.lotNo}
+        </span>
+        <span className="ml-auto" data-pet-field="불합격 상태">
           <DispositionBadge status={row.dispositionStatus} />
         </span>
       </div>
-      <span className="text-cap text-ink-3">
+      <span className="text-cap text-ink-3" data-pet-field="유형 · 강종 · 규격">
         {LOT_TYPE_LABEL[row.lotType]} · {row.steelGradeCode ?? '—'}
         {row.itemCode ? ` ${row.itemCode}` : ''}
       </span>
       <div className="flex min-w-0 items-center gap-1.5 text-xs">
-        <RejectReasonBadge reason={row.reason} />
-        <span className="min-w-0 truncate text-danger" title={names}>
+        <span className="inline-flex" data-pet-field="불합격 원인">
+          <RejectReasonBadge reason={row.reason} />
+        </span>
+        <span className="min-w-0 truncate text-danger" title={names} data-pet-field="불합격 항목">
           {row.reason === 'HEAT_FAILED' ? `${row.heatNo ?? '히트'} ${names || '성분'}` : names || '기준 밖'}
         </span>
       </div>
       <div className="flex items-center gap-1.5 text-cap text-ink-3">
-        <span className="min-w-0 truncate">{row.salesOrderItem ? `${row.salesOrderItem.salesOrderNo} 품목 ${row.salesOrderItem.lineNo}` : '연결 수주 없음'}</span>
+        <span className="min-w-0 truncate" data-pet-field="영향받는 수주 품목">
+          {row.salesOrderItem ? `${row.salesOrderItem.salesOrderNo} 품목 ${row.salesOrderItem.lineNo}` : '연결 수주 없음'}
+        </span>
         {need > 0 ? (
-          <Badge tone="danger" className="ml-auto">
-            재생산 필요 {need}매
-          </Badge>
+          <span className="ml-auto inline-flex" data-pet-field="재생산 필요" data-pet-term="재생산 필요">
+            <Badge tone="danger">재생산 필요 {need}매</Badge>
+          </span>
         ) : null}
       </div>
     </MasterItemLink>
@@ -255,7 +263,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
         }
       />
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:rejectedLots.lotInfo">
         <CardBody className="px-4 py-3">
           <InfoGrid
             items={[
@@ -324,10 +332,14 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
 
       <div className="grid flex-none grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-4">
-          <Card className="flex-none">
+          <Card className="flex-none" petKey="card:rejectedLots.evidence">
             <CardHead
               title="검사값"
-              meta={evidence ? `${evidence.standard ? `${evidence.standard.inspectionStandardCode} 버전 ${evidence.standard.version} · ` : ''}불합격 ${failedCount}/${evidence.items.length}개` : '검사 기록 없음'}
+              meta={
+                <span data-pet-term="판정에 쓴 검사 기준">
+                  {evidence ? `${evidence.standard ? `${evidence.standard.inspectionStandardCode} 버전 ${evidence.standard.version} · ` : ''}불합격 ${failedCount}/${evidence.items.length}개` : '검사 기록 없음'}
+                </span>
+              }
               actions={evidence ? <ResultBadge result={evidence.inspectionResult} /> : null}
             />
             {!own && evidence ? (
@@ -340,7 +352,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
               <div className="flex flex-col items-start gap-1 rounded-b-md border-t border-line bg-surface-2 px-4 py-2.5">
                 <span className="text-cap text-ink-3">불합격 항목</span>
                 {row.failedItems.map((f) => (
-                  <span key={f.inspectionItemCode} className="text-xs text-danger">
+                  <span key={f.inspectionItemCode} className="text-xs text-danger" data-pet-item="qualityInspectionValue" data-pet-item-title={f.inspectionItemName}>
                     {f.inspectionItemName} {trimNum(f.measuredValue)}
                     {f.unit ? ` ${f.unit}` : ''} (기준 {limitText(f)})
                   </span>
@@ -352,7 +364,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <ImpactCard detail={detail} />
-          <LotHistoryCard lotId={row.lotId} events={detail.history} itemNames={detail.inspectionItemNames} />
+          <LotHistoryCard petKey="card:rejectedLots.history" lotId={row.lotId} events={detail.history} itemNames={detail.inspectionItemNames} />
         </div>
       </div>
     </>

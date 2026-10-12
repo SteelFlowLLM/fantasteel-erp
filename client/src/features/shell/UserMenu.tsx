@@ -43,7 +43,7 @@ export function UserMenu() {
   };
 
   return (
-    <div ref={popover.ref} className="relative">
+    <div ref={popover.ref} data-pet-target="topbar:profile" className="relative">
       <button
         type="button"
         aria-label={`사원 메뉴 · ${me.employeeName}`}

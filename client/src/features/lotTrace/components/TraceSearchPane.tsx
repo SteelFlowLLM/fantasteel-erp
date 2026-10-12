@@ -31,10 +31,12 @@ export interface TraceSearchPaneProps {
   onDirection: (direction: TraceDirection) => void;
 }
 
-function ListButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function ListButton({ active, onClick, petItem, petTitle, children }: { active: boolean; onClick: () => void; petItem: string; petTitle: string; children: ReactNode }) {
   return (
     <button
       type="button"
+      data-pet-item={petItem}
+      data-pet-item-title={petTitle}
       onClick={onClick}
       aria-current={active ? 'true' : undefined}
       className={cn(
@@ -49,7 +51,7 @@ function ListButton({ active, onClick, children }: { active: boolean; onClick: (
 
 function LotItem({ lot, active, onPick, showSummary }: { lot: LotListItem; active: boolean; onPick: (lotNo: string) => void; showSummary: boolean }) {
   return (
-    <ListButton active={active} onClick={() => onPick(lot.lotNo)}>
+    <ListButton active={active} onClick={() => onPick(lot.lotNo)} petItem="lot" petTitle={lot.lotNo}>
       <span className="flex min-w-0 items-center gap-1.5">
         <LotTypeIcon type={lot.lotType} />
         <span className={cn('truncate font-mono text-mono', active && 'font-semibold')}>{lot.lotNo}</span>
@@ -65,7 +67,7 @@ function LotItem({ lot, active, onPick, showSummary }: { lot: LotListItem; activ
 
 function ShipmentItem({ hit, active, onPick }: { hit: ShipmentRequestHit; active: boolean; onPick: (no: string) => void }) {
   return (
-    <ListButton active={active} onClick={() => onPick(hit.shipmentRequestNo)}>
+    <ListButton active={active} onClick={() => onPick(hit.shipmentRequestNo)} petItem="shipmentRequest" petTitle={hit.shipmentRequestNo}>
       <span className="flex min-w-0 items-center gap-1.5">
         <Icon name="truck" size="sm" />
         <span className={cn('truncate font-mono text-mono', active && 'font-semibold')}>{hit.shipmentRequestNo}</span>
@@ -113,6 +115,7 @@ export function TraceSearchPane({ activeLotNo, activeShipmentRequestNo, directio
 
   return (
     <MasterPane
+      petKey="card:lotTrace.search"
       className="max-[1100px]:w-64"
       head={
         <>
@@ -123,6 +126,7 @@ export function TraceSearchPane({ activeLotNo, activeShipmentRequestNo, directio
                 key={d}
                 type="button"
                 role="radio"
+                data-pet-term={TRACE_DIRECTION_LABEL[d]}
                 aria-checked={direction === d}
                 disabled={!canChangeDirection}
                 title={d === 'backward' ? '코일 → 원료' : '원료·히트 → 출하요청'}
@@ -159,7 +163,7 @@ export function TraceSearchPane({ activeLotNo, activeShipmentRequestNo, directio
           {!searching ? (
             <div role="group" aria-label="LOT 종류" className="flex flex-wrap gap-1">
               {TYPE_FILTERS.map((type) => (
-                <Chip key={type || 'all'} on={lotType === type} className="h-6 px-2" onClick={() => setLotType(type)}>
+                <Chip key={type || 'all'} on={lotType === type} data-pet-term={type ? LOT_TYPE_LABEL[type] : 'LOT 종류'} className="h-6 px-2" onClick={() => setLotType(type)}>
                   {type ? LOT_TYPE_LABEL[type] : '전체'}
                 </Chip>
               ))}
@@ -170,7 +174,7 @@ export function TraceSearchPane({ activeLotNo, activeShipmentRequestNo, directio
     >
       {searching ? (
         <>
-          <div className="px-4 pt-2.5 pb-1.5 text-cap text-ink-3">검색 결과</div>
+          <div data-pet-term="검색 결과" className="px-4 pt-2.5 pb-1.5 text-cap text-ink-3">검색 결과</div>
           {lotHits.isFetching || shipmentHits.isFetching || term !== keyword.trim() ? (
             <div className="px-4 py-2">
               <Spinner label="찾는 중…" />
@@ -190,7 +194,7 @@ export function TraceSearchPane({ activeLotNo, activeShipmentRequestNo, directio
         <QueryBoundary query={recent}>
           {(data) => (
             <>
-              <div className="px-4 pt-2.5 pb-1.5 text-cap text-ink-3">
+              <div data-pet-term="최근 LOT" className="px-4 pt-2.5 pb-1.5 text-cap text-ink-3">
                 최근 LOT · 전체 {fmtInt(data.total)}개 중 {fmtInt(data.items.length)}개
               </div>
               {data.items.map((lot) => (

@@ -102,6 +102,9 @@ export const SCREEN = {
 
 export const SCREENS: readonly ScreenDef[] = Object.values(SCREEN);
 
+/** 주소 → SCREEN 키. 화면 도우미 펫이 레일 메뉴와 지금 화면을 설명 키로 찾을 때 쓴다. */
+export const SCREEN_KEY_BY_HREF: ReadonlyMap<string, string> = new Map(Object.entries(SCREEN).map(([key, def]) => [def.href, key]));
+
 export interface AccessUser {
   permissions: PermissionMap;
   headDepartmentIds: readonly number[];

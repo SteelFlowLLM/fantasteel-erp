@@ -40,17 +40,25 @@ function DepartmentBlock({ department }: { department: OrgChartDepartmentView })
   const isRoot = department.depth === 0;
   return (
     <div className={cn('flex flex-col', !isRoot && 'border-t border-line')}>
-      <header className={cn('flex items-center gap-2 px-4', isRoot ? 'h-11 border-b border-line' : 'h-10 bg-surface-2')}>
+      <header
+        className={cn('flex items-center gap-2 px-4', isRoot ? 'h-11 border-b border-line' : 'h-10 bg-surface-2')}
+        data-pet-item="department"
+        data-pet-item-title={department.departmentName}
+      >
         {isRoot ? null : <span className="text-ink-3">└</span>}
         <h3 className={cn('font-semibold', isRoot ? 'text-base' : 'text-sm')}>{department.departmentName}</h3>
-        <span className="font-mono text-cap text-ink-3">{department.departmentCode}</span>
-        <span className="text-cap text-ink-2">{department.members.length}명</span>
+        <span className="font-mono text-cap text-ink-3" data-pet-field="부서 코드">
+          {department.departmentCode}
+        </span>
+        <span className="text-cap text-ink-2" data-pet-field="인원">
+          {department.members.length}명
+        </span>
         {department.children.length > 0 ? (
-          <span className="text-cap text-ink-3">
+          <span className="text-cap text-ink-3" data-pet-field="하위 부서">
             · 하위 부서 {department.children.length}개 · 전체 {department.totalMemberCount}명
           </span>
         ) : null}
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-field="부서장">
           {department.head ? (
             <Badge tone="run" plain>
               부서장 {department.head.employeeName} {department.head.jobGradeName}
@@ -63,14 +71,21 @@ function DepartmentBlock({ department }: { department: OrgChartDepartmentView })
       {department.members.length > 0 ? (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2 px-4 py-3">
           {department.members.map((member) => (
-            <li key={member.id} className="flex items-center gap-2 rounded-sm border border-line px-2.5 py-2">
+            <li
+              key={member.id}
+              className="flex items-center gap-2 rounded-sm border border-line px-2.5 py-2"
+              data-pet-item="employee"
+              data-pet-item-title={member.employeeName}
+            >
               <Avatar name={member.employeeName} size="md" tone={member.isHead ? 'brand' : 'neutral'} />
               <span className="flex min-w-0 flex-col">
                 <span className="flex items-center gap-1.5">
                   <b className="text-sm font-semibold">{member.employeeName}</b>
                   {member.isHead ? <HeadTag size="sm" departmentNames={[department.departmentName]} /> : null}
                 </span>
-                <span className="text-cap text-ink-3">{member.jobGradeName}</span>
+                <span className="text-cap text-ink-3" data-pet-field="직급">
+                  {member.jobGradeName}
+                </span>
               </span>
             </li>
           ))}

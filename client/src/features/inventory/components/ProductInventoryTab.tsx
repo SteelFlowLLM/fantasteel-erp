@@ -48,7 +48,7 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
           const types = (['SLAB', 'COIL'] as const).filter((t) => !itemType || itemType === t);
           return (
             <>
-              <StatBar className="flex-none">
+              <StatBar petKey="card:inventories.productSummary" className="flex-none">
                 {types.map((t) => {
                   const total = productTotalsOf(rows, t);
                   const unit = PRODUCT_QTY_UNIT[t];
@@ -57,7 +57,7 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
                       key={t}
                       flat
                       icon={t === 'COIL' ? 'coil' : 'slab'}
-                      label={`${ITEM_TYPE_LABEL[t]} 가용재고 · 규격 ${total.specCount}개`}
+                      label={<span data-pet-term={`${ITEM_TYPE_LABEL[t]} 가용재고`}>{`${ITEM_TYPE_LABEL[t]} 가용재고 · 규격 ${total.specCount}개`}</span>}
                       value={fmtInt(total.availableQty)}
                       unit={unit}
                       sub={`합격 ${fmtInt(total.passedQty)}${unit} − 예약 ${fmtInt(total.reservedQty)}${unit} − 열연 배정 ${fmtInt(total.hotRollingAllocatedQty)}${unit} · 재고 ${fmtInt(total.onHandQty)}${unit}`}
@@ -65,7 +65,7 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
                   );
                 })}
               </StatBar>
-              <Card className="flex-none overflow-x-auto">
+              <Card petKey="card:inventories.products" className="flex-none overflow-x-auto">
                 <Table>
                   <thead>
                     <tr>
@@ -137,7 +137,7 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
 function ProductRow({ row }: { row: ProductInventoryView }) {
   const unit = row.qtyUnit;
   return (
-    <tr data-muted={isEmptyProductRow(row) || undefined}>
+    <tr data-pet-item="inventory" data-pet-item-title={row.itemCode} data-muted={isEmptyProductRow(row) || undefined}>
       <Td className="font-mono text-mono">{row.itemCode}</Td>
       <Td>
         <span className="inline-flex items-center gap-1">

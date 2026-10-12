@@ -49,6 +49,8 @@ export function MasterItem({
   onDoubleClick,
   title,
   label,
+  petItem,
+  petItemTitle,
   children,
 }: {
   selected: boolean;
@@ -57,11 +59,16 @@ export function MasterItem({
   title?: string;
   /** 단추 이름 (화면 낭독기용). 안의 글자가 여러 칸으로 나뉘어 있으면 한 줄 요약을 준다 */
   label?: string;
+  /** 화면 도우미 펫이 읽는 항목 종류(용어 사전 변수명)와 제목(레코드 번호) */
+  petItem?: string;
+  petItemTitle?: string;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
+      data-pet-item={petItem}
+      data-pet-item-title={petItemTitle}
       aria-pressed={selected}
       aria-label={label}
       title={title}
@@ -81,7 +88,7 @@ export function MasterItem({
 export function MasterGroupTitle({ title, meta, actions }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 border-b border-line bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-2">
-      <span>{title}</span>
+      <span data-pet-term={typeof title === 'string' ? title : undefined}>{title}</span>
       {meta !== undefined ? <span className="font-medium text-ink-3">{meta}</span> : null}
       {actions ? <span className="ml-auto flex items-center gap-1">{actions}</span> : null}
     </div>

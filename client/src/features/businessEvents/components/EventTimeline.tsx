@@ -40,20 +40,22 @@ export function EventLegend() {
   const dot = (tone: keyof typeof EVENT_TONE_DOT) => <span className={cn('size-3 rounded-full border-2', EVENT_TONE_DOT[tone])} />;
   return (
     <span className="inline-flex flex-wrap items-center gap-3 text-xs">
-      <span className="text-cap text-ink-3">범례</span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term="범례" className="text-cap text-ink-3">
+        범례
+      </span>
+      <span data-pet-term={ACTOR_TYPE_LABEL.USER} className="inline-flex items-center gap-1">
         {dot('run')}
         {ACTOR_TYPE_LABEL.USER}
       </span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term={ACTOR_TYPE_LABEL.SYSTEM} className="inline-flex items-center gap-1">
         {dot('neutral')}
         {ACTOR_TYPE_LABEL.SYSTEM}
       </span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term={INSPECTION_RESULT_LABEL.FAIL} className="inline-flex items-center gap-1">
         {dot('danger')}
         {INSPECTION_RESULT_LABEL.FAIL}
       </span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term="AI 경유" className="inline-flex items-center gap-1">
         AI 경유 <ComingSoon grade="P2" />
       </span>
     </span>

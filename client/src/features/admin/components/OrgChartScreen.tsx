@@ -21,7 +21,10 @@ export function OrgChartScreen() {
         }
         title="조직도"
       />
-      <OrgChartTab />
+      {/* 조직도 탭은 관리 화면도 같이 써서, 공통 조직도 화면의 펫 설명 키는 여기서 감싸 단다 */}
+      <div data-pet-target="card:orgChart.tree" className="flex flex-1 flex-col gap-3">
+        <OrgChartTab />
+      </div>
     </PageMain>
   );
 }

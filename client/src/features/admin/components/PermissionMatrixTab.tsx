@@ -95,7 +95,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                 내 역할({ROLE_LABEL[myRole.roleCode]})의 부서·권한 관리 사용 권한이 빠져요. 저장하면 이 화면에서 권한을 더 바꿀 수 없어요.
               </Banner>
             ) : null}
-            <Card className="flex-none">
+            <Card className="flex-none" petKey="card:organization.permissions">
               <CardHead
                 title="역할별 권한"
                 meta={`역할 ${list.length} × 권한 ${ROWS.reduce((sum, row) => sum + row.permissions.length, 0)}`}
@@ -103,13 +103,17 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                   <span className="flex items-center gap-3 text-cap text-ink-3">
                     <span className="inline-flex items-center gap-1 text-ok">
                       <Icon name="check" size="sm" />
-                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} = 입력·변경·확정</span>
+                      <span className="text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}>
+                        {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} = 입력·변경·확정
+                      </span>
                     </span>
                     <span className="inline-flex items-center gap-1 text-run">
                       <Icon name="eye" size="sm" />
-                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} = 보기만</span>
+                      <span className="text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}>
+                        {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} = 보기만
+                      </span>
                     </span>
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1" data-pet-term="저장 전 변경">
                       <span className="size-3 rounded-xs bg-wait-bg shadow-[inset_0_0_0_1px_var(--color-wait)]" />
                       저장 전 변경
                     </span>
@@ -127,7 +131,9 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                         return (
                           <Th key={role.id} align="center" className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
                             <span className="flex flex-col items-center py-1 leading-snug">
-                              <b className="text-xs font-semibold text-ink">{ROLE_LABEL[role.roleCode]}</b>
+                              <b className="text-xs font-semibold text-ink" data-pet-term={ROLE_LABEL[role.roleCode]}>
+                                {ROLE_LABEL[role.roleCode]}
+                              </b>
                               <span className="text-2xs text-ink-3">{levelCountText(counts)}</span>
                             </span>
                           </Th>
@@ -139,7 +145,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                     {ROWS.map((group) => (
                       <Fragment key={group.area}>
                         {group.permissions.map((permission, index) => (
-                          <tr key={permission}>
+                          <tr key={permission} data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
                             {index === 0 ? (
                               <Td rowSpan={group.permissions.length} className="align-top pt-2 text-xs font-semibold text-ink-2">
                                 {group.area}
@@ -158,6 +164,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                                     disabled={!canEdit || savingRoleId === role.id}
                                     title={changed ? `저장된 값은 ${levelLabelOf(saved[permission] ?? null)}이에요` : undefined}
                                     aria-label={`${ROLE_LABEL[role.roleCode]} · ${PERMISSION_LABEL[permission]}: ${label}`}
+                                    data-pet-term={label}
                                     onClick={() => toggle(role, permission)}
                                     className={cn(
                                       'inline-flex h-6 min-w-14 items-center justify-center gap-1 rounded-xs px-1.5 text-xs font-medium enabled:hover:bg-surface-3 disabled:cursor-default',

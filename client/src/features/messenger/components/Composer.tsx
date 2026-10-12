@@ -213,7 +213,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const lines = Math.min(MAX_LINES, Math.max(1, text.split('\n').length));
 
   return (
-    <div className="relative flex flex-none flex-col gap-2 border-t border-line bg-surface px-5 py-3">
+    <div data-pet-target="card:messenger.composer" className="relative flex flex-none flex-col gap-2 border-t border-line bg-surface px-5 py-3">
       {mention ? (
         <div role="listbox" aria-label="멘션할 멤버" className="absolute bottom-full left-5 z-30 mb-1 flex w-72 flex-col overflow-hidden rounded-md border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-ink-disabled" aria-disabled="true">

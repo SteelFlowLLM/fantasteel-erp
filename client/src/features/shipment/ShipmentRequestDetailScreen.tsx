@@ -113,7 +113,12 @@ function DetailBody({ detail }: { detail: ShipmentRequestDetailView }) {
           <SalesOrderLink key={salesOrderId} salesOrderId={salesOrderId} salesOrderNo={salesOrderNo} />
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-6 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
+      <div
+        data-pet-target="card:shipmentRequests.summary"
+        data-pet-perch=""
+        data-pet-item="shipmentRequest"
+        data-pet-item-title={detail.shipmentRequestNo}
+        className="flex flex-wrap items-center gap-6 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
         <KvList
           columns={3}
           className="flex-1"

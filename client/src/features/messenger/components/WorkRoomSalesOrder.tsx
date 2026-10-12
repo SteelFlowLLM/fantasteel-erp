@@ -33,23 +33,23 @@ export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
   }
   const salesOrder = room.salesOrder;
   return (
-    <div className="flex flex-none flex-col gap-1.5 border-b border-line bg-brand-tint/50 px-5 py-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+    <div data-pet-target="card:messenger.workRoom" className="flex flex-none flex-col gap-1.5 border-b border-line bg-brand-tint/50 px-5 py-2">
+      <div data-pet-item="salesOrder" data-pet-item-title={salesOrder.salesOrderNo} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
         <Icon name="clipboard" size="sm" className="text-brand" />
         <Link href={salesOrder.linkPath} className="font-mono text-sm font-semibold text-brand hover:underline">
           {salesOrder.salesOrderNo}
         </Link>
-        <span>{salesOrder.customerName}</span>
+        <span data-pet-field="고객사">{salesOrder.customerName}</span>
         {salesOrder.dueDate ? (
           <>
             <span className="text-ink-3">·</span>
-            <span>
+            <span data-pet-field="납기">
               납기 {salesOrder.dueDate} ({dLabel(salesOrder.dueDate)})
             </span>
           </>
         ) : null}
         <span className="text-ink-3">·</span>
-        <span>{formatShippedSummary(salesOrder.items)}</span>
+        <span data-pet-field="출하 진행">{formatShippedSummary(salesOrder.items)}</span>
         {salesOrder.cancelledAt ? <SalesOrderStatusBadge status="CANCELLED" /> : null}
         <span className="ml-auto flex items-center gap-1">
           {salesOrder.items.length > 0 ? (
@@ -70,11 +70,15 @@ export function WorkRoomPin({ room }: { room: ChatRoomDetailView }) {
 function SalesOrderItemLine({ item }: { item: WorkRoomSalesOrderItemView }) {
   const qty = formatItemQty(item);
   return (
-    <div className="flex flex-wrap items-center gap-x-2 text-xs text-ink-2">
-      <span className="font-mono text-ink-3">{item.lineNo}</span>
-      <span>{ITEM_TYPE_LABEL[item.itemType]}</span>
-      <span className="font-mono">{item.itemCode}</span>
-      <span>
+    <div data-pet-item="salesOrderItem" data-pet-item-title={item.itemCode} className="flex flex-wrap items-center gap-x-2 text-xs text-ink-2">
+      <span data-pet-field="품목 번호" className="font-mono text-ink-3">
+        {item.lineNo}
+      </span>
+      <span data-pet-field="품목 유형">{ITEM_TYPE_LABEL[item.itemType]}</span>
+      <span data-pet-field="품목 코드" className="font-mono">
+        {item.itemCode}
+      </span>
+      <span data-pet-field="수량">
         · {qty.ordered}{item.orderedTon ? ` (${fmtTon(item.orderedTon)})` : ''} · 출고 {qty.shipped}
       </span>
       <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
@@ -88,7 +92,7 @@ export function WorkRoomSummary({ room }: { room: ChatRoomDetailView }) {
   if (!salesOrder) return <p className="text-xs text-ink-3">{salesOrderStateNote(room)}</p>;
   return (
     <div className="flex flex-col gap-2.5">
-      <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1.5 text-xs">
+      <dl data-pet-item="salesOrder" data-pet-item-title={salesOrder.salesOrderNo} className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1.5 text-xs">
         <dt className="text-ink-3">수주번호</dt>
         <dd>
           <Link href={salesOrder.linkPath} className="font-mono font-semibold text-brand hover:underline">
@@ -108,17 +112,32 @@ export function WorkRoomSummary({ room }: { room: ChatRoomDetailView }) {
         {salesOrder.items.map((item) => {
           const qty = formatItemQty(item);
           return (
-          <li key={item.id} className="flex flex-col gap-0.5 rounded-sm border border-line bg-surface-2 px-2.5 py-2 text-xs">
+          <li
+            key={item.id}
+            data-pet-item="salesOrderItem"
+            data-pet-item-title={item.itemCode}
+            className="flex flex-col gap-0.5 rounded-sm border border-line bg-surface-2 px-2.5 py-2 text-xs"
+          >
             <span className="flex items-center gap-1.5">
-              <span className="font-mono text-ink-3">{item.lineNo}</span>
-              <b className="font-semibold">{ITEM_TYPE_LABEL[item.itemType]}</b>
-              {item.steelGradeCode ? <span className="text-ink-2">{item.steelGradeCode}</span> : null}
+              <span data-pet-field="품목 번호" className="font-mono text-ink-3">
+                {item.lineNo}
+              </span>
+              <b data-pet-field="품목 유형" className="font-semibold">
+                {ITEM_TYPE_LABEL[item.itemType]}
+              </b>
+              {item.steelGradeCode ? (
+                <span data-pet-field="강종" className="text-ink-2">
+                  {item.steelGradeCode}
+                </span>
+              ) : null}
               <span className="ml-auto">
                 <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
               </span>
             </span>
-            <span className="font-mono text-ink-2">{item.itemCode}</span>
-            <span className="text-ink-3">
+            <span data-pet-field="품목 코드" className="font-mono text-ink-2">
+              {item.itemCode}
+            </span>
+            <span data-pet-field="수량" className="text-ink-3">
               수주 {qty.ordered}{item.orderedTon ? ` · ${fmtTon(item.orderedTon)}` : ''} · 출고 {qty.shipped} · 납기 {item.dueDate}
             </span>
           </li>
