@@ -51,7 +51,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
   ];
   return (
     <Card>
-      <CardHead title="히트 편성" meta={`수주 등록 때 계산 · ${plan.item.steelGradeCode ?? ''} 강종 기준`} />
+      <CardHead title="히트 편성" meta={`수주 등록 때 계산 (계획 상태에서 다시 확정 가능) · ${plan.item.steelGradeCode ?? ''} 강종 기준`} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 border-b border-line px-4 py-3">
         <Figure label="부족 매수" value={f.shortageQty} unit={unit} strong />
         <Figure label="수주 목표" value={fmtTon(f.targetWeightTon)} />
