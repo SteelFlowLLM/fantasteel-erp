@@ -10,7 +10,7 @@ import { isErrorCode } from '@/codes';
 
 export type DataSource = 'mock' | 'server';
 
-/** 화면 데이터 출처. 비우거나 mock 말고 다른 값이면 서버. 서버에 연결되지 않은 기능(Message → ERP 초안·전역 검색 등)은 서버 모드에서도 가짜 DB를 쓴다 (docs/CLIENT-GUIDE.md 서버 연결 절) */
+/** 화면 데이터 출처. 비우거나 mock 말고 다른 값이면 서버. 서버에 연결되지 않은 기능(Message → ERP 초안 등)은 서버 모드에서도 가짜 DB를 쓴다 (docs/CLIENT-GUIDE.md 서버 연결 절) */
 export function dataSource(): DataSource {
   return process.env.NEXT_PUBLIC_DATA_SOURCE === 'mock' ? 'mock' : 'server';
 }

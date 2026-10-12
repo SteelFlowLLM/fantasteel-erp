@@ -166,6 +166,9 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
     const page = await service.list(logistics, { customerId: customerB, page: 1, size: 20 });
     expect(page.items.map((r) => r.id)).toContain(created.id);
     expect(page.items.every((r) => r.customerId === customerB)).toBe(true);
+    // 번호 일부(대소문자 무시)로 찾는다 (상단 통합 검색)
+    const byNo = await service.list(logistics, { shipmentRequestNo: created.shipmentRequestNo.slice(3).toLowerCase(), page: 1, size: 20 });
+    expect(byNo.items.map((r) => r.id)).toEqual([created.id]);
     await expect(service.findOne(logistics, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
 
     await expect(service.list(production, { page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
