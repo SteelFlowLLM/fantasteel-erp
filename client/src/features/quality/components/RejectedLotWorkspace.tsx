@@ -446,7 +446,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
               title="검사값"
               meta={
                 <span data-pet-term="판정에 쓴 검사 기준">
-                  {evidence ? `${evidence.standard ? `${evidence.standard.inspectionStandardCode} 버전 ${evidence.standard.version} · ` : ''}불합격 ${failedCount}/${evidence.items.length}개` : '검사 기록 없음'}
+                  {evidence ? `${evidence.standard ? `${evidence.standard.inspectionStandardCode} v${evidence.standard.version} · ` : ''}불합격 ${failedCount}/${evidence.items.length}개` : '검사 기록 없음'}
                 </span>
               }
               actions={evidence ? <ResultBadge result={evidence.inspectionResult} /> : null}

@@ -342,9 +342,9 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 value: data.standard ? (
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono">{data.standard.inspectionStandardCode}</span>
-                    <span>버전 {data.standard.version}</span>
+                    <span className="font-mono">{`v${data.standard.version}`}</span>
                     {data.standard.isCurrent ? null : (
-                      <Badge tone="outline" title={`현재 버전 ${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
+                      <Badge tone="outline" title={`현재 버전 v${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
                         <span data-pet-term="현재 버전 아님">현재 버전 아님</span>
                       </Badge>
                     )}
