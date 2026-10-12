@@ -36,7 +36,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
   const canSubmit = canEdit && choice !== null && reason.trim().length > 0 && !save.isPending;
 
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:rejectedLots.disposition">
       <CardHead
         title="불합격 상태 지정"
         meta={
@@ -53,7 +53,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
       >
         <CardBody>
           {row.dispositionStatus ? (
-            <div className="flex flex-col gap-0.5 text-cap text-ink-3">
+            <div className="flex flex-col gap-0.5 text-cap text-ink-3" data-pet-term="지정 · 사유">
               <span>지정 {row.dispositionAt === null && isServerPendingValue() ? <PendingValue label="시각 준비 중" /> : fmtDateTime(row.dispositionAt)}</span>
               <span className="text-xs text-ink-2">사유: {row.dispositionReason ?? '—'}</span>
             </div>
@@ -81,7 +81,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
           </div>
           {fieldErrors.dispositionStatus ? <span className="text-cap text-danger">{fieldErrors.dispositionStatus}</span> : null}
 
-          <Field label="사유" required htmlFor="disposition-reason" error={fieldErrors.dispositionReason} hint={`${reason.length}/${MAX_REASON}자 · 사유를 적어야 지정할 수 있어요`}>
+          <Field label={<span data-pet-term="사유">사유</span>} required htmlFor="disposition-reason" error={fieldErrors.dispositionReason} hint={`${reason.length}/${MAX_REASON}자 · 사유를 적어야 지정할 수 있어요`}>
             <Textarea
               id="disposition-reason"
               rows={3}

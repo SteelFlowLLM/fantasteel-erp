@@ -108,13 +108,14 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
   return (
     <>
       <MasterPane
+        petKey="card:shipmentRequestNew.picker"
         head={
           <>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold">출하 가능 수주</h2>
               <span className="text-xs text-ink-3">같은 고객사만 묶어요</span>
             </div>
-            <Field label="고객사" required htmlFor="sr-customer">
+            <Field label={<span data-pet-term="고객사">고객사</span>} required htmlFor="sr-customer">
               <Select id="sr-customer" value={customerId ?? ''} onChange={(e) => pickCustomer(e.target.value)}>
                 <option value="">고객사를 골라 주세요</option>
                 {customers.map((c) => (
@@ -150,12 +151,19 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
                         const unitLabel = PRODUCT_QTY_UNIT[row.itemType];
                         const checked = qtyTexts.has(row.salesOrderItemId);
                         return (
-                          <label key={row.salesOrderItemId} className="flex cursor-pointer items-start gap-2.5 px-4 py-2 hover:bg-surface-2">
+                          <label
+                            key={row.salesOrderItemId}
+                            data-pet-item="salesOrderItem"
+                            data-pet-item-title={`${row.salesOrderNo} #${row.lineNo}`}
+                            className="flex cursor-pointer items-start gap-2.5 px-4 py-2 hover:bg-surface-2"
+                          >
                             <input type="checkbox" className="mt-1" checked={checked} onChange={() => toggle(row)} />
                             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                               <span className="flex items-center gap-1.5">
                                 <ItemTypeTag itemType={row.itemType} />
-                                <span className="truncate font-mono text-mono">{row.itemCode}</span>
+                                <span data-pet-field="규격" className="truncate font-mono text-mono">
+                                  {row.itemCode}
+                                </span>
                               </span>
                               <span className="text-xs text-ink-3">
                                 품목 {row.lineNo} · 납기 {fmtMD(row.dueDate)} · 출하 가능 {row.shippableQty}
@@ -201,13 +209,13 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
             </>
           }
         />
-        <StatBar>
+        <StatBar petKey="card:shipmentRequestNew.totals">
           <Kpi flat label="묶은 품목" value={selected.length} unit="품목" sub={`수주 ${new Set(selected.map((r) => r.salesOrderId)).size}건`} />
           <Kpi flat label="출하 매수" value={totalQty} unit={unit} />
           <Kpi flat label="이론중량 (계산값)" value={fmtTon(totalTon).replace(' t', '')} unit="t" sub="매수 × 1매 이론중량 · 등록할 때 다시 계산해요" />
           <Kpi flat label="출하 요청일" value={requestedShipDate ? fmtMD(requestedShipDate) : '-'} sub={earliestDue ? `가장 이른 납기 ${earliestDue}` : '품목을 고르면 납기가 보여요'} />
         </StatBar>
-        <Card>
+        <Card petKey="card:shipmentRequestNew.selected">
           <CardHead title="선택한 품목" meta={selected.length ? `${selected.length}품목` : undefined} />
           {selected.length === 0 ? (
             <EmptyNote>{customerId === null ? '왼쪽에서 고객사를 고르고 출하할 품목을 체크해 주세요.' : '왼쪽 목록에서 출하할 품목을 체크해 주세요.'}</EmptyNote>
@@ -236,7 +244,12 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
                     const error = errorOf(row);
                     const unitLabel = PRODUCT_QTY_UNIT[row.itemType];
                     return (
-                      <tr key={row.salesOrderItemId} data-risk={error !== null}>
+                      <tr
+                        key={row.salesOrderItemId}
+                        data-pet-item="shipmentRequestItem"
+                        data-pet-item-title={`${row.salesOrderNo} #${row.lineNo}`}
+                        data-risk={error !== null}
+                      >
                         <Td>
                           <SalesOrderLink salesOrderId={row.salesOrderId} salesOrderNo={row.salesOrderNo} lineNo={row.lineNo} />
                         </Td>
@@ -294,13 +307,13 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
           )}
           <p className="border-t border-line px-4 py-2.5 text-cap text-ink-3">부분 출하는 출하요청을 나눠서 해요. 예: 10매 중 4매를 먼저 요청하고, 나머지 6매는 다음 출하요청으로 해요.</p>
         </Card>
-        <Card>
+        <Card petKey="card:shipmentRequestNew.requestInfo">
           <CardHead title="요청 정보" meta="출하요청 번호는 등록할 때 정해져요" />
           <CardBody className="grid grid-cols-2 gap-4">
-            <Field label="출하 요청일" required htmlFor="sr-date" error={dateError} hint="출고는 물류가 확정해요">
+            <Field label={<span data-pet-term="출하 요청일">출하 요청일</span>} required htmlFor="sr-date" error={dateError} hint="출고는 물류가 확정해요">
               <DateInput id="sr-date" value={requestedShipDate} onChange={setRequestedShipDate} invalid={dateError !== null} ariaLabel="출하 요청일" />
             </Field>
-            <Field label="요청자">
+            <Field label={<span data-pet-term="요청자">요청자</span>}>
               <Input readOnly value={`${me.employeeName} · ${me.departmentName}`} aria-label="요청자" />
             </Field>
           </CardBody>

@@ -72,6 +72,7 @@ function QueuePane({ query, selectedId, initialFilter }: { query: ReturnType<typ
   const readyRows = rows.filter((r) => r.shipmentRequestStatus === 'ALLOCATED');
   return (
     <MasterPane
+      petKey="card:goodsIssues.queue"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -81,7 +82,7 @@ function QueuePane({ query, selectedId, initialFilter }: { query: ReturnType<typ
           <Input leadingIcon="search" placeholder="출하요청 번호·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="출하요청 검색" />
           <div className="flex gap-1.5">
             {QUEUE_FILTERS.map((f) => (
-              <Chip key={f} on={active === f} onClick={() => setFilter(f)}>
+              <Chip key={f} on={active === f} onClick={() => setFilter(f)} data-pet-term={SHIPMENT_REQUEST_STATUS_LABEL[f]}>
                 {SHIPMENT_REQUEST_STATUS_LABEL[f]} <b>{rows.filter((r) => r.shipmentRequestStatus === f).length}</b>
               </Chip>
             ))}
@@ -126,21 +127,25 @@ function QueueItem({ row, selected }: { row: GoodsIssueQueueRow; selected: boole
       <Link
         href={`/goods-issues?request=${row.shipmentRequestId}`}
         aria-current={selected ? 'page' : undefined}
+        data-pet-item="goodsIssue"
+        data-pet-item-title={row.shipmentRequestNo}
         className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover')}
       >
         <span className="flex items-center gap-2">
           <span className="font-mono text-mono font-semibold">{row.shipmentRequestNo}</span>
-          <span className="ml-auto">
+          <span className="ml-auto" data-pet-field="상태">
             <ShipmentRequestStatusBadge status={row.shipmentRequestStatus} />
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-sm">
-          <span className="truncate">{row.customerName}</span>
-          <span className="ml-auto text-xs text-ink-2">
+          <span className="truncate" data-pet-field="고객사">
+            {row.customerName}
+          </span>
+          <span className="ml-auto text-xs text-ink-2" data-pet-field="수량 · 이론중량">
             {row.totalRequestQty} · {fmtTon(row.totalWeightTon)}
           </span>
         </span>
-        <span className="text-cap text-ink-3">
+        <span className="text-cap text-ink-3" data-pet-field={row.shipmentRequestStatus === 'ISSUED' ? '출고' : '배정'}>
           {row.shipmentRequestStatus === 'ISSUED'
             ? `출고 ${fmtMDHM(row.issuedAt)} · ${row.issuedEmployeeName ?? '-'}`
             : `배정 ${row.totalAllocatedQty}/${row.totalRequestQty} · 출하 요청일 ${fmtMD(row.requestedShipDate)}`}
@@ -224,7 +229,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
           </>
         }
       />
-      <div className="rounded-md border border-line bg-surface px-4 py-3 shadow-1">
+      <div data-pet-perch="" data-pet-target="card:goodsIssues.summary" className="rounded-md border border-line bg-surface px-4 py-3 shadow-1">
         <KvList
           columns={3}
           items={[
@@ -277,7 +282,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
         </Banner>
       ) : null}
 
-      <Card>
+      <Card petKey="card:goodsIssues.lots">
         <CardHead
           title={issued ? '출고한 LOT' : '배정 LOT 출고 확인'}
           actions={issued ? <Badge>{lots.length} LOT</Badge> : blockedLots.length > 0 ? <Badge tone="danger">출고 불가 LOT {blockedLots.length}</Badge> : <Badge tone="ok">{confirmedLots.length} LOT</Badge>}
@@ -305,7 +310,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
               {view.lines.map((line) => {
                 if (line.lots.length === 0) {
                   return (
-                    <tr key={line.shipmentRequestItemId}>
+                    <tr key={line.shipmentRequestItemId} data-pet-item="shipmentRequestItem" data-pet-item-title={line.itemCode}>
                       <Td>
                         <span className="flex items-center gap-1.5">
                           <ItemTypeTag itemType={line.itemType} />
@@ -322,7 +327,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
                   );
                 }
                 return line.lots.map((lot, index) => (
-                  <tr key={lot.allocationId} data-risk={!issued && lot.eligibility !== 'ELIGIBLE'}>
+                  <tr key={lot.allocationId} data-risk={!issued && lot.eligibility !== 'ELIGIBLE'} data-pet-item="allocation" data-pet-item-title={lot.lotNo}>
                     {index === 0 ? (
                       <>
                         <Td rowSpan={line.lots.length} className="align-top">
@@ -375,7 +380,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
 
       {!issued && !cancelled ? (
         <div className="grid grid-cols-2 gap-4">
-          <Card>
+          <Card petKey="card:goodsIssues.checks">
             <CardHead title="출고 전 확인" />
             <CardBody className="gap-2 text-sm">
               <CheckRow ok={confirmedLots.length === view.totalRequestQty} label="배정 확정" value={`${confirmedLots.length}/${view.totalRequestQty}`} />
@@ -384,7 +389,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
               <p className="text-cap text-ink-3">확정할 때 품질·배정·재고를 다시 확인해요. 하나라도 맞지 않으면 아무것도 출고되지 않아요.</p>
             </CardBody>
           </Card>
-          <Card>
+          <Card petKey="card:goodsIssues.effects">
             <CardHead title="확정하면 바뀌는 것" />
             <CardBody className="gap-1.5 text-sm">
               <span>· 배정 {confirmedLots.length}건 → 소진, LOT → 출고</span>
@@ -403,7 +408,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
 
       {issued ? <IssueResult view={view} /> : null}
 
-      <div className="flex items-center gap-3 rounded-md border border-line bg-surface-2 px-4 py-2.5">
+      <div data-pet-perch="" data-pet-target="card:goodsIssues.confirm" className="flex items-center gap-3 rounded-md border border-line bg-surface-2 px-4 py-2.5">
         {issued ? (
           <span className="text-sm text-ink-2">
             출고 {fmtDateTime(view.issuedAt)} · 담당 {view.issuedEmployeeName ?? '-'}
@@ -438,17 +443,21 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
 
 function CheckRow({ ok, label, value }: { ok: boolean; label: string; value: string }) {
   return (
-    <span className="flex items-center gap-2">
+    <span className="flex items-center gap-2" data-pet-item="allocation" data-pet-item-title={label}>
       <span className={cn('inline-block size-2 rounded-full', ok ? 'bg-ok' : 'bg-danger')} aria-hidden="true" />
-      <span className="flex-1">{label}</span>
-      <b className={cn('tabular-nums', ok ? 'text-ok' : 'text-danger')}>{value}</b>
+      <span className="flex-1" data-pet-term={label}>
+        {label}
+      </span>
+      <b className={cn('tabular-nums', ok ? 'text-ok' : 'text-danger')} data-pet-field={label}>
+        {value}
+      </b>
     </span>
   );
 }
 
 function IssueResult({ view }: { view: GoodsIssueView }) {
   return (
-    <Card>
+    <Card petKey="card:goodsIssues.result">
       <CardHead title="출고 결과" meta={`${RESERVATION_STATUS_LABEL.CONVERTED} ${view.totalRequestQty} · ${fmtTon(view.totalWeightTon)}`} />
       <div className="overflow-auto">
         <Table compact>
@@ -467,7 +476,7 @@ function IssueResult({ view }: { view: GoodsIssueView }) {
             {view.lines.map((line) => {
               const unit = PRODUCT_QTY_UNIT[line.itemType];
               return (
-                <tr key={line.shipmentRequestItemId}>
+                <tr key={line.shipmentRequestItemId} data-pet-item="salesOrderItem" data-pet-item-title={`${line.salesOrderNo} · ${line.itemCode}`}>
                   <Td>
                     <SalesOrderLink salesOrderId={line.salesOrderId} salesOrderNo={line.salesOrderNo} lineNo={line.salesOrderLineNo} />
                   </Td>
@@ -495,9 +504,11 @@ function IssueResult({ view }: { view: GoodsIssueView }) {
         </Table>
       </div>
       <CardFoot>
-        <span className="text-xs text-ink-2">발행된 밀시트</span>
+        <span className="text-xs text-ink-2" data-pet-term="발행된 밀시트">
+          발행된 밀시트
+        </span>
         {view.millSheets.map((m) => (
-          <span key={m.id} className="flex items-center gap-1.5">
+          <span key={m.id} className="flex items-center gap-1.5" data-pet-item="millSheet" data-pet-item-title={m.millSheetNo}>
             <MillSheetLink id={m.id} no={m.millSheetNo} />
             <PdfBadge pdfPath={m.pdfPath} />
           </span>

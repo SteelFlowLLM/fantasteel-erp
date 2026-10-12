@@ -34,7 +34,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
   const mappings = useMasterSpecMappings();
   const [adding, setAdding] = useState(false);
   return (
-    <Card>
+    <Card petKey="card:masterData.mapping">
       <CardHead
         title="슬래브 → 코일 규격 매핑"
         meta={mappings.data ? `${mappings.data.length}건 · 코일 1개 이론중량 ≤ 슬래브 1매 이론중량` : undefined}
@@ -63,7 +63,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                 </thead>
                 <tbody>
                   {rows.map((m) => (
-                    <tr key={m.id}>
+                    <tr key={m.id} data-pet-item="specMapping" data-pet-item-title={`${m.slab.itemCode} → ${m.coil.itemCode}`}>
                       <Td>{m.steelGradeCode}</Td>
                       <Td>
                         <SpecCell spec={m.slab} />

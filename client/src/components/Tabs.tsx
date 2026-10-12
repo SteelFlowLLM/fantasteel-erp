@@ -26,6 +26,7 @@ export function Tabs<K extends string>({ items, active, onChange, ariaLabel, cla
           type="button"
           role="tab"
           aria-selected={item.key === active}
+          data-pet-term={typeof item.label === 'string' ? item.label : undefined}
           onClick={() => onChange(item.key)}
           className="-mb-px inline-flex h-[38px] items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-medium text-ink-2 aria-selected:border-brand aria-selected:font-semibold aria-selected:text-brand"
         >
@@ -55,6 +56,7 @@ export function Segmented<K extends string>({ items, active, onChange, ariaLabel
           key={item.key}
           type="button"
           aria-pressed={item.key === active}
+          data-pet-term={typeof item.label === 'string' ? item.label : undefined}
           onClick={() => onChange(item.key)}
           className="h-[26px] rounded-[3px] px-2.5 text-xs font-medium text-ink-2 aria-pressed:bg-surface aria-pressed:text-ink aria-pressed:shadow-[0_1px_2px_rgba(18,24,32,0.12)]"
         >

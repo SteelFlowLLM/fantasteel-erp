@@ -44,32 +44,59 @@ const PROCESS_NOTE: Record<ProcessType, string> = {
 const OPEN_WORK_TEXT = "진행 중인 작업이 있어요. 아래 표의 '작업 완료'로 마쳐야 다음 실적을 등록할 수 있어요";
 const SIMULATION_OPEN_WORK_TEXT = "작업 시작만 한 실적을 '작업 완료'로 마친 뒤 시뮬레이션해요";
 
+/** 화면 도우미 펫 설명 키 (public/pet/guide/production.js) */
+const PROCESS_PET_KEY: Record<ProcessType, string> = {
+  IRONMAKING: 'card:productionResults.ironmaking',
+  STEELMAKING: 'card:productionResults.steelmaking',
+  CONTINUOUS_CASTING: 'card:productionResults.casting',
+  HOT_ROLLING: 'card:productionResults.rolling',
+};
+
 function WorkPlanRow({ plan, active, onPick }: { plan: ProductionPlanListRow; active: boolean; onPick: () => void }) {
   return (
-    <MasterListItem active={active} onPick={onPick}>
+    <MasterListItem active={active} onPick={onPick} petItem="productionPlan" petTitle={plan.productionPlanNo}>
       <Row>
-        <span className="font-mono text-mono font-semibold">{plan.productionPlanNo}</span>
+        <span className="font-mono text-mono font-semibold" data-pet-field="계획번호">
+          {plan.productionPlanNo}
+        </span>
         <ProductTypeTag itemType={plan.itemType} />
         <PlanFlags isReproduction={plan.isReproduction} isSurplusOnCompletion={plan.isSurplusOnCompletion} />
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-field="상태">
           <PlanStatusBadge status={plan.productionPlanStatus} />
         </span>
       </Row>
       <Row className="text-xs">
         {plan.salesOrderNo ? (
           <span className="min-w-0 truncate">
-            <span className="font-mono">{plan.salesOrderNo}</span>
-            {plan.customerName ? <span className="text-ink-2"> · {plan.customerName}</span> : null}
+            <span className="font-mono" data-pet-field="수주번호">
+              {plan.salesOrderNo}
+            </span>
+            {plan.customerName ? (
+              <span className="text-ink-2">
+                {' · '}
+                <span data-pet-field="고객사">{plan.customerName}</span>
+              </span>
+            ) : null}
           </span>
         ) : (
-          <span className="text-ink-3">수주 연결 없음</span>
+          <span className="text-ink-3" data-pet-field="수주">
+            수주 연결 없음
+          </span>
         )}
         <span className="ml-auto whitespace-nowrap tabular-nums text-ink-2">
-          제강 {plan.heatsMadeQty}/{plan.heatCount} · 연주 {plan.heatsCastQty}/{plan.heatCount}
+          <span data-pet-field="제강 진행">
+            제강 {plan.heatsMadeQty}/{plan.heatCount}
+          </span>
+          {' · '}
+          <span data-pet-field="연주 진행">
+            연주 {plan.heatsCastQty}/{plan.heatCount}
+          </span>
         </span>
       </Row>
       <Row className="text-cap text-ink-3">
-        <span className="truncate font-mono">{plan.itemCode}</span>
+        <span className="truncate font-mono" data-pet-field="규격">
+          {plan.itemCode}
+        </span>
       </Row>
     </MasterListItem>
   );
@@ -90,6 +117,7 @@ function WorkPlanList({ plans, selectedId, onPick }: { plans: readonly Productio
   const openCount = plans.filter((p) => p.productionPlanStatus !== 'COMPLETED').length;
   return (
     <MasterPane
+      petKey="card:productionResults.list"
       head={
         <>
           <div className="flex items-baseline gap-2">
@@ -98,10 +126,10 @@ function WorkPlanList({ plans, selectedId, onPick }: { plans: readonly Productio
           </div>
           <Input leadingIcon="search" placeholder="계획·수주번호·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="계획 검색" />
           <div className="flex gap-1.5">
-            <Chip on={!showDone} onClick={() => setShowDone(false)}>
+            <Chip on={!showDone} onClick={() => setShowDone(false)} data-pet-term="입력할 계획">
               입력할 계획 <b>{openCount}</b>
             </Chip>
-            <Chip on={showDone} onClick={() => setShowDone(true)}>
+            <Chip on={showDone} onClick={() => setShowDone(true)} data-pet-term="완료 포함">
               완료 포함 <b>{plans.length}</b>
             </Chip>
           </div>
@@ -158,7 +186,7 @@ function ProcessSection({
           : `${results.length}건 · 용선 ${fmtTon(plan.progress.hotMetalTon)}`;
   const workProcess = process as WorkProcess;
   return (
-    <Card>
+    <Card petKey={PROCESS_PET_KEY[process]}>
       <CardHead
         title={PROCESS_TYPE_LABEL[process]}
         meta={meta}
@@ -192,7 +220,7 @@ function ProcessSection({
           )
         }
       />
-      <div className="border-b border-line bg-surface-2 px-4 py-1.5 text-cap text-ink-3">
+      <div className="border-b border-line bg-surface-2 px-4 py-1.5 text-cap text-ink-3" data-pet-term={`${PROCESS_TYPE_LABEL[process]} 계산`}>
         {PROCESS_NOTE[process]}
         {blockedReason && ctx.isOpen && !isRolling ? ` · ${blockedReason}` : ''}
         {open && ctx.isOpen && !isRolling ? <span className="font-semibold text-wait">{` · ${OPEN_WORK_TEXT}`}</span> : null}
@@ -285,14 +313,17 @@ export function WorkBody({ ctx }: { ctx: WorkContext }) {
       {plan.productionPlanStatus === 'CANCELLED' ? <Banner>취소된 계획이에요.</Banner> : null}
       {plan.isSurplusOnCompletion ? <Banner tone="wait">수주 취소로 연결이 끊긴 계획이에요. 이 계획에서 나오는 합격 슬래브는 여재로 남아요.</Banner> : null}
 
-      <StatBar>
+      <StatBar petKey="card:productionResults.summary">
         <Kpi flat label="생산 규격" value={<span className="font-mono text-base">{plan.item.itemCode}</span>} sub={plan.slabSpec && plan.item.itemType === 'COIL' ? `연주 ${plan.slabSpec.itemCode}` : undefined} />
         <Kpi flat label="부족 매수" value={plan.formation?.shortageQty ?? '-'} unit={unit} sub={so ? `${so.salesOrderNo} · ${so.customerName ?? ''}` : '수주 연결 없음'} />
         <Kpi flat label="히트 (제강/편성)" value={`${plan.progress.heatsMadeQty}/${plan.progress.heatCount}`} sub={plan.formation ? `히트 톤 ${fmtTon(plan.formation.heatTon)}` : undefined} />
         <Kpi flat label="슬래브" value={plan.progress.slabQty} unit="매" sub={`연주 ${plan.progress.heatsCastQty}/${plan.progress.heatCount}히트`} />
         <Kpi flat label="합격 / 판정 대기" value={`${plan.progress.passedQty} / ${plan.progress.pendingQty}`} unit={unit} sub={`불합격 ${plan.progress.failedQty}${unit}`} />
       </StatBar>
-      <Steps items={steps} className="overflow-x-auto px-1" />
+      {/* Steps는 공유 컴포넌트라 단계마다 속성을 달 수 없어, 묶음 전체를 '공정 단계' 용어로 설명한다 */}
+      <div data-pet-term="공정 단계">
+        <Steps items={steps} className="overflow-x-auto px-1" />
+      </div>
 
       {planProcesses(plan.item.itemType).map((process) => (
         <ProcessSection key={process} ctx={ctx} process={process} canWork={canWork} onOpen={setForm} />

@@ -74,7 +74,9 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
     <div ref={canvasRef} className="relative flex-none" style={{ width: layout.width, height: layout.height }}>
       {layout.heads.map((h) => (
         <div key={h.column} className="absolute top-0 flex items-baseline gap-1.5 text-xs" style={{ left: h.x, width: NODE_W, height: HEAD_H - 8 }}>
-          <b className="text-sm font-semibold">{h.title}</b>
+          <b data-pet-term={h.title} className="text-sm font-semibold">
+            {h.title}
+          </b>
           <span className="text-cap text-ink-3">{h.count}</span>
         </div>
       ))}
@@ -102,6 +104,7 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
       {layout.periodLabels.map((p) => (
         <div
           key={p.key}
+          data-pet-term={LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED}
           className="absolute z-[2] flex flex-col gap-px rounded-xs border border-dashed border-[#6e829a] bg-surface px-1.5 py-1 text-2xs text-ink-2"
           style={{ left: p.x, top: p.y, width: p.w }}
           title="원료가 이 기간에 용선에 쓰였을 수 있다는 뜻이에요. 실제 투입량이 아니에요"
@@ -130,6 +133,8 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
               key={n.key}
               type="button"
               aria-pressed={on}
+              data-pet-item="shipmentRequest"
+              data-pet-item-title={s.shipmentRequestNo}
               onClick={() => onSelect(n.key)}
               style={style}
               className={cn(NODE_BASE, on ? 'border-run bg-[#f6f9ff] shadow-[0_0_0_2px_var(--color-run)]' : 'border-line')}
@@ -142,8 +147,10 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
                 </span>
               </span>
               <span className="truncate font-mono text-mono font-semibold">{s.shipmentRequestNo}</span>
-              <span className="truncate text-cap text-ink-3">{s.customerName}</span>
-              <span className="truncate text-cap text-ink-3">
+              <span data-pet-field="고객사" className="truncate text-cap text-ink-3">
+                {s.customerName}
+              </span>
+              <span data-pet-field="수주 · 배정 LOT" className="truncate text-cap text-ink-3">
                 {s.salesOrders.map((so) => so.salesOrderNo).join(', ')} · LOT {s.lotIds.length}
                 {s.issuedAt ? ` · ${fmtDate(s.issuedAt)}` : ''}
                 {s.millSheets.length ? ` · 밀시트 ${s.millSheets.length}` : ''}
@@ -160,6 +167,8 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
             type="button"
             aria-pressed={on}
             data-start={lot.isStart ? 'true' : undefined}
+            data-pet-item="lot"
+            data-pet-item-title={lot.lotNo}
             onClick={() => onSelect(n.key)}
             style={style}
             className={cn(

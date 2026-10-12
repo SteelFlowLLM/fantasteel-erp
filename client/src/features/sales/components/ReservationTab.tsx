@@ -11,7 +11,7 @@ import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
   const itemOf = (soItemId: number) => detail.items.find((i) => i.salesOrderItemId === soItemId);
   return (
-    <Card>
+    <Card petKey="card:salesOrders.reservation">
       {detail.reservations.length === 0 ? (
         <EmptyNote className="py-8">예약이 없어요</EmptyNote>
       ) : (
@@ -35,7 +35,7 @@ export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
                 const item = itemOf(r.salesOrderItemId);
                 const unit = item ? qtyUnitOf([item.itemType]) : '매';
                 return (
-                  <tr key={r.id} data-muted={r.reservationStatus === 'RELEASED'}>
+                  <tr key={r.id} data-pet-item="reservation" data-pet-item-title={`품목 ${r.lineNo} ${r.itemCode}`} data-muted={r.reservationStatus === 'RELEASED'}>
                     <Td>품목 {r.lineNo}</Td>
                     <Td className="font-mono text-xs">{r.itemCode}</Td>
                     <Td>

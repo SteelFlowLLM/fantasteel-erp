@@ -13,18 +13,22 @@ export interface KpiProps {
   /** StatBar 안에서처럼 테두리 없이 */
   flat?: boolean;
   className?: string;
+  /** 화면 도우미 펫이 이 숫자를 설명할 때 쓰는 키 */
+  petKey?: string;
 }
 
-export function Kpi({ label, value, unit, sub, icon, flat, className }: KpiProps) {
+export function Kpi({ label, value, unit, sub, icon, flat, className, petKey }: KpiProps) {
   return (
     <div
+      data-pet-perch={flat ? undefined : ''}
+      data-pet-target={petKey}
       className={cn(
         'flex min-w-0 flex-col gap-1.5 px-4 py-3.5',
         flat ? 'rounded-none border-0 bg-transparent' : 'rounded-md border border-line bg-surface shadow-1',
         className,
       )}
     >
-      <span className="flex items-center gap-1.5 text-xs font-medium text-ink-2">
+      <span data-pet-term={typeof label === 'string' ? label : undefined} className="flex items-center gap-1.5 text-xs font-medium text-ink-2">
         {icon ? <Icon name={icon} size="sm" /> : null}
         {label}
       </span>
@@ -38,9 +42,9 @@ export function Kpi({ label, value, unit, sub, icon, flat, className }: KpiProps
 }
 
 /** Kpi를 한 줄로 묶는다. 안의 Kpi에는 flat을 준다. */
-export function StatBar({ className, children }: { className?: string; children: ReactNode }) {
+export function StatBar({ className, petKey, children }: { className?: string; petKey?: string; children: ReactNode }) {
   return (
-    <div className={cn('flex rounded-md border border-line bg-surface shadow-1 [&>*]:flex-1 [&>*+*]:border-l [&>*+*]:border-line', className)}>
+    <div data-pet-perch="" data-pet-target={petKey} className={cn('flex rounded-md border border-line bg-surface shadow-1 [&>*]:flex-1 [&>*+*]:border-l [&>*+*]:border-line', className)}>
       {children}
     </div>
   );

@@ -2,7 +2,7 @@
 
 // 제품 규격 (REQ-MST-003): 강종 × 두께 × 폭 × 길이, 1매 이론중량(소수 3자리), 규격 코드 SL-/CL-강종-두께x폭x길이.
 // 같은 조합은 화면에서 먼저 막고, 쓰인 규격은 치수·이론중량을 잠근다(MST-002). 쓰이지 않은 규격만 지운다.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
 import { isMasterServerMode, masterDataApi, type MasterProductSpecView } from '@/api/masterData';
 import { Badge } from '@/components/Badge';
@@ -24,10 +24,10 @@ import { fmtDims, fmtTon } from '@/lib/format';
 import { calcTheoreticalWeightTon, compareDecimal } from '@/lib/weight';
 
 type TypeFilter = 'ALL' | ProductItemType;
-const TYPE_FILTERS: readonly { key: TypeFilter; label: string }[] = [
-  { key: 'ALL', label: '전체' },
-  { key: 'SLAB', label: ITEM_TYPE_LABEL.SLAB },
-  { key: 'COIL', label: ITEM_TYPE_LABEL.COIL },
+const TYPE_FILTERS: readonly { key: TypeFilter; label: ReactNode }[] = [
+  { key: 'ALL', label: <span data-pet-term="전체">전체</span> },
+  { key: 'SLAB', label: <span data-pet-term={ITEM_TYPE_LABEL.SLAB}>{ITEM_TYPE_LABEL.SLAB}</span> },
+  { key: 'COIL', label: <span data-pet-term={ITEM_TYPE_LABEL.COIL}>{ITEM_TYPE_LABEL.COIL}</span> },
 ];
 
 export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab: (tab: MasterTabKey) => void }) {
@@ -40,14 +40,14 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const showUsage = !isMasterServerMode();
 
   return (
-    <Card>
+    <Card petKey="card:masterData.specs">
       <CardHead
         title="제품 규격"
         meta={specs.data ? `${specs.data.length}개` : undefined}
         actions={
           <>
             <Segmented ariaLabel="품목 유형" items={TYPE_FILTERS} active={typeFilter} onChange={setTypeFilter} />
-            <Select aria-label="강종" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="w-32">
+            <Select aria-label="강종" data-pet-term="강종" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="w-32">
               <option value="">강종 전체</option>
               {(grades.data ?? []).map((g) => (
                 <option key={g.id} value={g.id}>
@@ -84,7 +84,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                   </thead>
                   <tbody>
                     {shown.map((spec) => (
-                      <tr key={spec.id}>
+                      <tr key={spec.id} data-pet-item="productSpec" data-pet-item-title={spec.itemCode}>
                         <Td className="font-mono text-mono">{spec.itemCode}</Td>
                         <Td>{ITEM_TYPE_LABEL[spec.itemType]}</Td>
                         <Td>{spec.steelGradeCode}</Td>

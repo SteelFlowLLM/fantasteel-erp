@@ -93,13 +93,16 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   return (
     <>
       <MasterPane
+        petKey="card:inspections.queue"
         head={
           <>
             <div className="flex items-baseline gap-2">
               <b className="text-base font-semibold">검사 대상 LOT</b>
-              <span className="text-cap text-ink-3">판정 대기 먼저 · 생산완료일 순</span>
+              <span className="text-cap text-ink-3" data-pet-term="판정 대기 먼저 · 생산완료일 순">
+                판정 대기 먼저 · 생산완료일 순
+              </span>
               {/* 공정별 검사 종류·탭 숫자 설명은 한 번 알면 되는 말이라 늘 두 줄을 차지하지 않게 마우스를 올리면 보인다 */}
-              <span role="img" aria-label={listHint} title={listHint} className="ml-auto inline-flex cursor-help self-center text-ink-3">
+              <span role="img" aria-label={listHint} title={listHint} data-pet-term="공정별 검사" className="ml-auto inline-flex cursor-help self-center text-ink-3">
                 <Icon name="info" size="sm" />
               </span>
             </div>
@@ -108,17 +111,18 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
               ariaLabel="공정별 보기"
               items={PROCESS_FILTERS.map((p) => {
                 const name = p === 'ALL' ? '전체' : PROCESS_TYPE_LABEL[p];
+                const term = p === 'ALL' ? '공정 전체' : PROCESS_TYPE_LABEL[p];
                 const count = processCount(p);
                 return {
                   key: p,
                   label:
                     count > 0 ? (
-                      <span className="inline-flex items-center gap-1" title={`판정 대기 ${count}개`}>
+                      <span className="inline-flex items-center gap-1" title={`판정 대기 ${count}개`} data-pet-term={term}>
                         {name}
                         <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-run px-1 text-2xs font-semibold text-white tabular-nums">{count}</span>
                       </span>
                     ) : (
-                      name
+                      <span data-pet-term={term}>{name}</span>
                     ),
                 };
               })}
@@ -129,11 +133,11 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
             <div className="flex flex-nowrap gap-1" role="group" aria-label="판정 결과">
               {RESULT_FILTERS.map((r) =>
                 r === 'ALL' ? (
-                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="px-2">
+                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="px-2" data-pet-term="판정 결과 전체">
                     전체 <b>{byProcess.length}</b>
                   </Chip>
                 ) : (
-                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="px-2">
+                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="px-2" data-pet-term={INSPECTION_RESULT_LABEL[r]}>
                     {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
                   </Chip>
                 ),
@@ -229,16 +233,18 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
     .filter((part): part is string => part !== null)
     .join(' · ');
   return (
-    <MasterItemLink href={inspectionHref(row.lotId)} active={active}>
+    <MasterItemLink href={inspectionHref(row.lotId)} active={active} petItem="qualityInspection" petTitle={row.lotNo}>
       <div className="flex items-center gap-1.5">
         <Icon name={lotIconOf(row.lotType)} size="sm" className={active ? 'text-brand' : 'text-ink-3'} />
-        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'}>{row.lotNo}</span>
+        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'} data-pet-field="LOT 번호">
+          {row.lotNo}
+        </span>
         {row.locked ? (
-          <span role="img" aria-label={LOCKED_TEXT} title={LOCKED_TEXT} className="inline-flex">
+          <span role="img" aria-label={LOCKED_TEXT} title={LOCKED_TEXT} data-pet-term="밀시트 발행 · 수정 불가" className="inline-flex">
             <Icon name="lock" size="sm" className="text-ink-3" />
           </span>
         ) : null}
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-field="판정 결과">
           {/* 합격은 흐린 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
           {row.inspectionResult === 'PASS' ? (
             <span className="inline-flex items-center gap-0.5 text-cap text-ink-3">
@@ -250,7 +256,7 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           )}
         </span>
       </div>
-      <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText}>
+      <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText} data-pet-field="규격 · 생산일">
         <span className="min-w-0 truncate">
           {spec} · 생산 {fmtMD(row.producedDate)}
         </span>
@@ -297,7 +303,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
             <ResultBadge result={data.inspectionResult} />
             {data.locked ? (
               <Badge tone="outline" title={`밀시트 ${data.lockedMillSheetNos.join(', ')}`}>
-                밀시트 발행 · 수정 불가
+                <span data-pet-term="밀시트 발행 · 수정 불가">밀시트 발행 · 수정 불가</span>
               </Badge>
             ) : null}
           </>
@@ -321,7 +327,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
         }
       />
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:inspections.lotInfo">
         <CardBody className="px-4 py-3">
           <InfoGrid
             items={[
@@ -335,7 +341,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                     <span>버전 {data.standard.version}</span>
                     {data.standard.isCurrent ? null : (
                       <Badge tone="outline" title={`현재 버전 ${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
-                        현재 버전 아님
+                        <span data-pet-term="현재 버전 아님">현재 버전 아님</span>
                       </Badge>
                     )}
                   </span>
@@ -404,7 +410,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       <InspectionForm key={`${lot.lotId}-${data.updatedAt ?? 'new'}-${data.standard?.id ?? 0}`} detail={data} canEdit={canEdit} onSaved={onSaved} />
 
-      <LotHistoryCard lotId={lot.lotId} events={data.history} itemNames={data.inspectionItemNames} />
+      <LotHistoryCard petKey="card:inspections.history" lotId={lot.lotId} events={data.history} itemNames={data.inspectionItemNames} />
     </>
   );
 }
@@ -443,13 +449,15 @@ function OutcomeCard({
   const pass = outcome.inspectionResult === 'PASS';
   const fail = outcome.inspectionResult === 'FAIL';
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:inspections.outcome">
       <div className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-[#115c38]' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-[#8e231e]' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-[#7a3d00]'}>
             <Icon name={pass ? 'check-circle' : fail ? 'x-circle' : 'clock'} size="lg" />
             <div className="flex flex-col">
-              <span className="text-cap opacity-80">시스템 판정</span>
+              <span className="text-cap opacity-80" data-pet-term="시스템 판정">
+                시스템 판정
+              </span>
               <b className="text-lg font-semibold">{INSPECTION_RESULT_LABEL[outcome.inspectionResult]}</b>
             </div>
           </div>

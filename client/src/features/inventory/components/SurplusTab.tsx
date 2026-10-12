@@ -33,7 +33,7 @@ export function SurplusTab({ steelGrade, onSteelGradeChange }: SurplusTabProps) 
               <Banner tone="run" className="flex-none">
                 여재는 수주에 쓰이지 않고 남은 미배정 합격 슬래브예요. <b>여재는 가용재고에 포함돼요</b> — 새 수주가 먼저 예약하고, 코일 계획의 열연 투입에도 쓸 수 있어요. 여재로 수주를 예약하면 그만큼 여재에서 빠져요.
               </Banner>
-              <Card className="flex-none overflow-x-auto">
+              <Card petKey="card:inventories.surplus" className="flex-none overflow-x-auto">
                 <CardHead title="규격별 여재" meta={`${surplusSpecCount}개 규격 · ${fmtInt(total)}매`} />
                 <Table compact>
                   <thead>
@@ -62,7 +62,7 @@ export function SurplusTab({ steelGrade, onSteelGradeChange }: SurplusTabProps) 
                   </thead>
                   <tbody>
                     {specs.map((s) => (
-                      <tr key={s.itemId} data-muted={s.surplusQty === 0 || undefined}>
+                      <tr key={s.itemId} data-pet-item="inventory" data-pet-item-title={s.itemCode} data-muted={s.surplusQty === 0 || undefined}>
                         <Td className="font-mono text-mono">{s.itemCode}</Td>
                         <Td className="font-mono text-mono">{s.steelGradeCode ?? '—'}</Td>
                         <Td align="right">
@@ -98,7 +98,7 @@ export function SurplusTab({ steelGrade, onSteelGradeChange }: SurplusTabProps) 
                   </TableCaption>
                 </CardFoot>
               </Card>
-              <Card className="flex-none overflow-x-auto">
+              <Card petKey="card:inventories.surplusLots" className="flex-none overflow-x-auto">
                 <CardHead title="여재 슬래브" meta={`${fmtInt(lots.length)}매 · 생산완료일 오래된 순 (선입선출 순)`} />
                 <Table compact>
                   <thead>
@@ -116,7 +116,7 @@ export function SurplusTab({ steelGrade, onSteelGradeChange }: SurplusTabProps) 
                   </thead>
                   <tbody>
                     {lots.map((lot) => (
-                      <tr key={lot.lotId}>
+                      <tr key={lot.lotId} data-pet-item="lot" data-pet-item-title={lot.lotNo}>
                         <Td>
                           <LotNoLink lotNo={lot.lotNo} />
                         </Td>

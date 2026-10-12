@@ -14,7 +14,13 @@ function StockBody({ data }: { data: ProductStockData }) {
     <div className="flex flex-col gap-2.5 py-3">
       <div className="flex flex-col gap-2 px-4">
         {data.totals.map((total) => (
-          <div key={total.itemType} className="flex items-center gap-2.5" title={`재고 ${fmtTon(total.onHandTon)} · 가용 ${fmtTon(total.availableTon)}`}>
+          <div
+            key={total.itemType}
+            data-pet-item="inventory"
+            data-pet-item-title={ITEM_TYPE_LABEL[total.itemType]}
+            className="flex items-center gap-2.5"
+            title={`재고 ${fmtTon(total.onHandTon)} · 가용 ${fmtTon(total.availableTon)}`}
+          >
             <span className="min-w-11 flex-none whitespace-nowrap text-xs font-medium text-ink-2">{ITEM_TYPE_LABEL[total.itemType]}</span>
             <div className="min-w-0 flex-1">
               {/* 너비는 실행 중에 정해지는 값이라 style로 준다. 예약·가용 뒤 남는 몫(판정 대기·불합격·배정)은 바탕색으로 보인다: 품질이 볼 몫이라 회색 대신 노랑 */}
@@ -24,7 +30,7 @@ function StockBody({ data }: { data: ProductStockData }) {
               </div>
             </div>
             <span className="flex-none text-xs tabular-nums">
-              가용 <b>{fmtInt(total.availableQty)}</b> / 재고 <b>{fmtInt(total.onHandQty)}</b>
+              가용 <b data-pet-field="가용">{fmtInt(total.availableQty)}</b> / 재고 <b data-pet-field="재고">{fmtInt(total.onHandQty)}</b>
               {PRODUCT_QTY_UNIT[total.itemType]}
             </span>
           </div>
@@ -52,7 +58,7 @@ function StockBody({ data }: { data: ProductStockData }) {
           </thead>
           <tbody>
             {data.items.map((item) => (
-              <tr key={item.itemId}>
+              <tr key={item.itemId} data-pet-item="inventory" data-pet-item-title={item.itemCode}>
                 <Td className="max-w-56 truncate font-mono text-xs" title={item.itemCode}>
                   {item.itemCode}
                 </Td>

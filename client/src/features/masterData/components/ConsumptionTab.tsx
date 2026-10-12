@@ -105,7 +105,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
 
   return (
     <>
-      <Card>
+      <Card petKey="card:masterData.consumption">
         <CardHead title="공통 원단위" meta="t/t (용선 1t당) · 철광석·석탄·석회석은 강종과 상관없는 공통값이에요" />
         <Table>
           <thead>
@@ -118,7 +118,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
           </thead>
           <tbody>
             {common.map((m) => (
-              <tr key={m.id}>
+              <tr key={m.id} data-pet-item="specificConsumption" data-pet-item-title={m.itemCode}>
                 <Td className="font-mono text-mono">{m.itemCode}</Td>
                 <Td>{m.itemName}</Td>
                 <Td>{RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType]}</Td>
@@ -131,7 +131,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
         </Table>
         {common.length === 0 ? <EmptyNote>철광석·석탄·석회석 원료가 없어요. 품목 탭에서 원료를 추가해 주세요</EmptyNote> : null}
       </Card>
-      <Card>
+      <Card petKey="card:masterData.ferroalloy">
         <CardHead title="합금철 원단위 (강종별)" meta="kg/t (용강 1t당)" />
         <div className="overflow-auto">
           <Table>
@@ -148,7 +148,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
             </thead>
             <tbody>
               {ferroalloys.map((m) => (
-                <tr key={m.id}>
+                <tr key={m.id} data-pet-item="specificConsumption" data-pet-item-title={m.itemCode}>
                   <Td className="font-mono text-mono">{m.itemCode}</Td>
                   <Td>{m.itemName}</Td>
                   {data.grades.map((g) => (

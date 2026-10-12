@@ -26,7 +26,7 @@ export function MessengerMenu({ employeeId }: { employeeId: number }) {
   };
 
   return (
-    <div ref={popover.ref} className="relative">
+    <div ref={popover.ref} data-pet-target="messenger" className="relative">
       <IconButton
         icon="chat"
         iconSize="lg"
