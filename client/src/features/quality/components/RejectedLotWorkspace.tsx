@@ -36,6 +36,35 @@ type StatusFilter = 'ALL' | 'NONE' | DispositionStatus;
 type ReasonFilter = 'ALL' | 'FAILED' | 'HEAT_FAILED';
 
 const statusOf = (row: RejectedLotListRow): Exclude<StatusFilter, 'ALL'> => row.dispositionStatus ?? 'NONE';
+
+/** 목록 한 칸: LOT 한 줄, 또는 불합격 히트와 그 하위 LOT 묶음 (히트가 거름에서 빠졌으면 heat = null) */
+type ListEntry = { kind: 'row'; row: RejectedLotListRow } | { kind: 'heat'; heatNo: string; heat: RejectedLotListRow | null; children: RejectedLotListRow[] };
+
+/**
+ * 같은 히트에서 나온 하위 LOT을 히트 아래로 묶는다. 하위 LOT은 원인(히트 성분)·영향 수주가 히트와 같아서
+ * 줄마다 같은 글자와 "재생산 필요 N매"가 되풀이되던 것을 히트 줄 한 번으로 줄인다. 목록 순서는 그대로 둔다.
+ */
+function groupByHeat(list: readonly RejectedLotListRow[]): ListEntry[] {
+  const childrenOf = new Map<string, RejectedLotListRow[]>();
+  for (const r of list) {
+    if (r.reason === 'HEAT_FAILED' && r.heatNo) childrenOf.set(r.heatNo, [...(childrenOf.get(r.heatNo) ?? []), r]);
+  }
+  const heatsInList = new Set(list.filter((r) => r.lotType === 'HEAT').map((r) => r.lotNo));
+  const placed = new Set<string>();
+  const out: ListEntry[] = [];
+  for (const r of list) {
+    if (r.reason === 'HEAT_FAILED' && r.heatNo) {
+      // 히트가 목록에 있으면 히트 줄 아래에서 그린다. 없으면(원인 거름 등) 히트 번호 머리로 한 번만 묶는다
+      if (heatsInList.has(r.heatNo) || placed.has(r.heatNo)) continue;
+      placed.add(r.heatNo);
+      out.push({ kind: 'heat', heatNo: r.heatNo, heat: null, children: childrenOf.get(r.heatNo) ?? [] });
+      continue;
+    }
+    const children = r.lotType === 'HEAT' ? (childrenOf.get(r.lotNo) ?? []) : [];
+    out.push(children.length > 0 ? { kind: 'heat', heatNo: r.lotNo, heat: r, children } : { kind: 'row', row: r });
+  }
+  return out;
+}
 const failedNames = (row: RejectedLotListRow): string => row.failedItems.map((f) => f.inspectionItemName).join(' · ');
 const rejectedHref = (lotId: number): string => `/quality/rejected?lot=${lotId}`;
 const REJECTED_GUIDE = '검사 기준을 충족하지 못한 LOT과 불합격 히트의 하위 LOT이에요. 예약·배정·출고 대상에서 빠져 있고, 여기서는 불합격 상태와 사유만 기록해요.';
@@ -67,6 +96,15 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
   const [status, setStatus] = useState<StatusFilter>('ALL');
   const [reason, setReason] = useState<ReasonFilter>('ALL');
   const [keyword, setKeyword] = useState('');
+  /** 사람이 펼친 히트 묶음. 고른 LOT이 들어 있는 묶음은 따로 펼치지 않아도 열린다 */
+  const [openHeats, setOpenHeats] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleHeat = (heatNo: string) =>
+    setOpenHeats((current) => {
+      const next = new Set(current);
+      if (next.has(heatNo)) next.delete(heatNo);
+      else next.add(heatNo);
+      return next;
+    });
 
   const needle = keyword.trim().toUpperCase();
   const list = rows.filter(
@@ -132,9 +170,20 @@ function Workspace({ rows }: { rows: RejectedLotListRow[] }) {
           </>
         }
       >
-        {list.map((r) => (
-          <RejectedItem key={r.lotId} row={r} active={r.lotId === activeId} />
-        ))}
+        {groupByHeat(list).map((entry) =>
+          entry.kind === 'row' ? (
+            <RejectedItem key={entry.row.lotId} row={entry.row} active={entry.row.lotId === activeId} />
+          ) : (
+            <HeatGroup
+              key={`heat-${entry.heatNo}`}
+              entry={entry}
+              activeId={activeId}
+              // 히트가 거름에서 빠진 묶음은 하위 LOT이 곧 찾던 대상이라 처음부터 연다
+              open={entry.heat === null || openHeats.has(entry.heatNo) || entry.children.some((c) => c.lotId === activeId)}
+              onToggle={() => toggleHeat(entry.heatNo)}
+            />
+          ),
+        )}
         {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 되풀이하지 않는다. 오른쪽에 주소로 연 LOT이 떠 있을 때만 여기서 말한다 */}
         {list.length === 0 && activeId !== null ? <EmptyNote>{rows.length === 0 ? '불합격 LOT이 없어요' : '조건에 맞는 불합격 LOT이 없어요'}</EmptyNote> : null}
         {rows.length > 0 ? (
@@ -196,6 +245,72 @@ function RejectedItem({ row, active }: { row: RejectedLotListRow; active: boolea
           </span>
         ) : null}
       </div>
+    </MasterItemLink>
+  );
+}
+
+/** 불합격 히트와 하위 LOT 묶음: 원인·영향은 히트 줄에서 한 번만 보이고, 하위 LOT은 펼쳐서 번호·규격·상태만 본다 */
+function HeatGroup({
+  entry,
+  activeId,
+  open,
+  onToggle,
+}: {
+  entry: Extract<ListEntry, { kind: 'heat' }>;
+  activeId: number | null;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { heat, heatNo, children } = entry;
+  const headNeed = children[0]?.salesOrderItem?.shortage.reproductionNeedQty ?? 0;
+  return (
+    <>
+      {heat ? <RejectedItem row={heat} active={heat.lotId === activeId} /> : null}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex w-full items-center gap-1.5 border-b border-line bg-surface-2 py-1.5 pr-4 pl-8 text-left text-cap text-ink-2 hover:bg-surface-3"
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size="sm" className="text-ink-3" />
+        {heat ? (
+          <span>
+            하위 LOT <b className="font-semibold">{`${children.length}개`}</b> <span className="text-ink-3">· 같은 히트 성분 불합격</span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate">
+            히트 <span className="font-mono">{heatNo}</span>의 하위 LOT <b className="font-semibold">{`${children.length}개`}</b>
+          </span>
+        )}
+        {/* 히트 줄이 거름에서 빠졌으면 영향(재생산 필요)을 묶음 머리에서 한 번 보인다 */}
+        {!heat && headNeed > 0 ? (
+          <span className="ml-auto inline-flex flex-none" data-pet-term="재생산 필요">
+            <Badge tone="danger">{`재생산 필요 ${headNeed}매`}</Badge>
+          </span>
+        ) : null}
+      </button>
+      {open ? children.map((c) => <HeatChildItem key={c.lotId} row={c} active={c.lotId === activeId} />) : null}
+    </>
+  );
+}
+
+/** 하위 LOT 한 줄: 원인·영향 수주는 히트 줄과 같아서 되풀이하지 않는다 */
+function HeatChildItem({ row, active }: { row: RejectedLotListRow; active: boolean }) {
+  return (
+    <MasterItemLink href={rejectedHref(row.lotId)} active={active} petItem="lot" petTitle={row.lotNo} className="gap-0.5 py-2 pl-8">
+      <div className="flex items-center gap-1.5">
+        <Icon name={lotIconOf(row.lotType)} size="sm" className={active ? 'text-brand' : 'text-ink-3'} />
+        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'} data-pet-field="LOT 번호">
+          {row.lotNo}
+        </span>
+        <span className="ml-auto" data-pet-field="불합격 상태">
+          <DispositionBadge status={row.dispositionStatus} />
+        </span>
+      </div>
+      <span className="truncate text-cap text-ink-3" data-pet-field="유형 · 강종 · 규격">
+        {LOT_TYPE_LABEL[row.lotType]} · {row.steelGradeCode ?? '—'}
+        {row.itemCode ? ` ${row.itemCode}` : ''}
+      </span>
     </MasterItemLink>
   );
 }
