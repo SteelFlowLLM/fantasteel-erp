@@ -39,10 +39,10 @@
     surprised: { row: 12, frames: 2, ms: 150, loop: false },
     sit: { row: 13, frames: 2, ms: 500, loop: true },
   };
-  // 걷기·가리키기·점프만 오른쪽을 보고 그려져 있다. 나머지(정면)는 뒤집으면 글자·무늬가 거꾸로 된다.
-  const FLIP_ANIMS = new Set(['walk', 'point', 'jump']);
+  // 걷기·가리키기·점프·날기만 오른쪽을 보고 그려져 있다. 나머지(정면)는 뒤집으면 글자·무늬가 거꾸로 된다.
+  const FLIP_ANIMS = new Set(['walk', 'point', 'jump', 'fly']);
   // 캐릭터 팩에 동작이 빠져 있을 때 대신 쓸 동작
-  const ANIM_FALLBACK = { blink: 'idle', walk: 'idle', talk: 'idle', happy: 'wave', wave: 'idle', point: 'talk', think: 'idle', drag: 'fall', fall: 'idle', land: 'idle', sleep: 'idle', surprised: 'idle', sit: 'idle', climb: 'fall', ledge: 'land', jump: 'fall' };
+  const ANIM_FALLBACK = { blink: 'idle', walk: 'idle', talk: 'idle', happy: 'wave', wave: 'idle', point: 'talk', think: 'idle', drag: 'fall', fall: 'idle', land: 'idle', sleep: 'idle', surprised: 'idle', sit: 'idle', climb: 'fall', ledge: 'land', jump: 'fall', fly: 'hover', hover: 'fall' };
 
   const GRAVITY = 2600;
   const FLOOR_GAP = 6;
@@ -330,6 +330,7 @@
       sleep: ['조금만 쉴게요… zZ'],
       wake: ['앗, 깼어요!'],
       swap: ['새 모습이에요!'],
+      suitup: [], // 비면 '슈트 장착 완료! <이름> 출동!'
       climb: ['영차, 영차!', '한 칸씩 올라가요.'],
       jump: ['폴짝!', '건너가요~'],
     },
@@ -444,7 +445,9 @@
       anims[name] = { row: Number(a.row), frames: Math.max(1, Number(a.frames) | 0), ms: a.ms, loop: !!a.loop };
     }
     if (!anims.idle) return null;
-    return { id: String(p.id), name: String(p.name || p.id), desc: String(p.desc || ''), cell, anchor, accent: p.accent || '#e07028', sheet: p.sheet, anims, _img: null, _bbox: null, _broken: false, _loading: null };
+    // movement 'fly': 면 사이를 사다리·점프 대신 날아서 옮긴다
+    const movement = p.movement === 'fly' ? 'fly' : 'walk';
+    return { id: String(p.id), name: String(p.name || p.id), desc: String(p.desc || ''), cell, anchor, accent: p.accent || '#e07028', sheet: p.sheet, anims, movement, _img: null, _bbox: null, _broken: false, _loading: null };
   }
 
   function collectPacks(list) {
@@ -541,7 +544,8 @@
     }
     resolve(name) {
       const a = this.pack ? this.pack.anims : {};
-      let n = name;
+      // 나는 캐릭터는 걷지 않으므로 걷기 그림 자리에 떠 있기를 쓴다
+      let n = name === 'walk' && this.pack && this.pack.movement === 'fly' ? 'hover' : name;
       for (let i = 0; i < 6 && !a[n]; i++) n = ANIM_FALLBACK[n] || 'idle';
       return a[n] ? n : 'idle';
     }
@@ -693,6 +697,9 @@
 .fp-root.fp-mouse .fp-hit:focus-visible{box-shadow:none}
 .fp-root.fp-mouse .fp-card:focus-visible,.fp-root.fp-mouse .fp-pill:focus-visible,.fp-root.fp-mouse .fp-x:focus-visible,.fp-root.fp-mouse .fp-btn:focus-visible{outline:none}
 .fp-shadow{position:absolute;left:0;top:0;z-index:2;border-radius:50%;background:rgba(18,24,32,.2);will-change:transform,opacity}
+.fp-beam{position:absolute;left:0;top:0;z-index:3;pointer-events:none;transform-origin:0 50%;background:linear-gradient(to bottom,#2c3646 0 var(--fl),#a7b6c8 var(--fl) calc(var(--fl) + 1px),#cfd9e4 calc(var(--fl) + 1px) calc(100% - var(--fl) - 1px),#7e8fa6 calc(100% - var(--fl) - 1px) calc(100% - var(--fl)),#2c3646 calc(100% - var(--fl)) 100%)}
+.fp-beam::before{content:'';position:absolute;left:0;right:0;top:var(--fl);bottom:var(--fl);background:repeating-linear-gradient(to right,transparent 0 calc(var(--st) - 2px),#5d6d84 calc(var(--st) - 2px) var(--st))}
+.fp-beam-cap{position:absolute;right:calc(var(--fl) * -1);top:50%;width:calc(var(--fl) * 3);height:calc(100% + var(--fl) * 2);transform:translateY(-50%);background:linear-gradient(to right,#ffcc33 0 34%,#2c3646 34% 66%,#ffcc33 66%);box-shadow:0 0 0 1px #2c3646}
 .fp-flash{position:absolute;z-index:1;border:2px solid var(--fp-accent);border-radius:8px;box-shadow:0 0 0 4px var(--fp-accent-soft),0 0 18px 2px var(--fp-accent-shadow);animation:fp-flash .6s ease-in-out 3}
 .fp-flash--steady{animation:fp-flash 1.8s ease-in-out infinite}
 @keyframes fp-flash{0%,100%{opacity:1}50%{opacity:.4}}
@@ -700,6 +707,16 @@
 .fp-ladder{position:absolute;left:0;top:0;z-index:2;pointer-events:none;will-change:transform}
 .fp-ladder canvas{display:block;width:100%;height:100%;image-rendering:crisp-edges;image-rendering:pixelated}
 .fp-spark{position:absolute;z-index:3;width:4px;height:4px;background:#ffd34d;box-shadow:0 0 0 1px #c47a12}
+.fp-dust{position:absolute;z-index:2;pointer-events:none}
+.fp-crate{position:absolute;left:0;top:0;z-index:2;pointer-events:none;transform-origin:50% 100%}
+.fp-crate canvas{position:absolute;top:0;width:50%;height:100%;image-rendering:crisp-edges;image-rendering:pixelated}
+.fp-crate-l{left:0;transform-origin:0 100%}
+.fp-crate-r{right:0;transform-origin:100% 100%}
+.fp-crate-glow{position:absolute;left:50%;bottom:8%;width:0;height:80%;transform:translateX(-50%);background:radial-gradient(closest-side,#fff3c4,#ffb347 45%,rgba(255,120,40,0));opacity:0}
+.fp-plate{position:absolute;left:0;top:0;z-index:3;display:none;pointer-events:none}
+.fp-suit-flash{position:absolute;left:0;top:0;z-index:3;pointer-events:none;border-radius:40%;background:#fff;opacity:0}
+.fp-visor{position:absolute;left:0;top:0;z-index:3;pointer-events:none;border-radius:2px;background:#c9f8ff;box-shadow:0 0 6px 3px #3fe0ff;opacity:0}
+.fp-flame{position:absolute;left:0;top:0;z-index:2;display:none;pointer-events:none;transform-origin:50% 0;border-radius:0 0 45% 45%;background:linear-gradient(to bottom,#fffbe6 0 20%,#ffe066 20% 42%,#ff9a2e 42% 70%,#e2412b 70%)}
 .fp-bubble{position:absolute;left:0;top:0;z-index:4;display:none;pointer-events:auto;width:max-content;max-width:min(252px,calc(100vw - 16px));min-width:92px;padding:8px 12px 9px;background:var(--fp-surface);color:var(--fp-ink);border:2px solid var(--fp-accent);border-radius:10px;box-shadow:3px 3px 0 var(--fp-accent-shadow);font-size:13px;line-height:19px;cursor:default}
 .fp-bubble::before,.fp-bubble::after{content:'';position:absolute;width:0;height:0;border-style:solid}
 .fp-bubble[data-side=top]::before{left:calc(var(--fp-tail-x,50%) - 8px);bottom:-11px;border-width:10px 8px 0;border-color:var(--fp-accent) transparent transparent}
@@ -940,7 +957,7 @@
       y: 0,
       vx: 0,
       vy: 0,
-      mode: 'boot', // boot | ground | air | jump | drag | hidden
+      mode: 'boot', // boot | ground | air | jump | climb | fly | suit | drag | hidden
       surface: null, // { type: 'floor' } | { type: 'perch', el, off }
       facing: -1,
       base: 'idle', // 한 번 재생하는 동작이 끝나면 돌아갈 동작 (idle · sit · sleep)
@@ -980,6 +997,12 @@
       lastTs: 0,
       destroyed: false,
       climb: null,
+      fly: null, // 날아가는 중 { target, phase, … }
+      brake: false, // 나는 캐릭터가 떨어지다 바닥 가까이에서 추진기로 속도를 줄이는 중
+      forceFly: false, // 개발 확인용: 날기 동작이 없는 캐릭터도 날아서 옮긴다
+      suit: null, // 슈트 장착 장면 (mode 'suit')
+      suitSkipT: -1e9,
+      suitFrom: null, // 장착 전 캐릭터 (debug 'suitup' 다시 보기용)
       passThrough: false,
       noHoverUntil: 0,
       flow: -1,
@@ -1361,6 +1384,22 @@
           resolve(true);
           return;
         }
+        if (flyer() && !reduced) {
+          // 나는 캐릭터는 같은 면 안에서도 걷지 않고 낮게 떠서 미끄러지듯 날아간다
+          const [mn, mx] = surfaceRange();
+          const gx = op.allowOff ? x : clamp(x, mn, mx);
+          if (Math.abs(gx - S.x) < 6) {
+            S.x = gx;
+            if (surfaceAlive()) S.surface.off = S.x - S.surface.el.getBoundingClientRect().left;
+            savePos();
+            resolve(true);
+            return;
+          }
+          if (surfaceAlive()) flyTo({ type: 'perch', el: S.surface.el, off: gx - S.surface.el.getBoundingClientRect().left }, undefined, { low: true }).then(resolve);
+          else if (S.surface && S.surface.type === 'floor') flyTo({ type: 'floor', x: gx }, undefined, { low: true }).then(resolve);
+          else resolve(false);
+          return;
+        }
         const k = S.size / 96;
         // run: 사용자가 시킨 이동(빠르게), trot: 혼자 먼 곳에 갈 때(조금 빠르게), 그 밖: 산책
         const speed = op.run ? Math.max(230 * k, dist / 1.6) : op.trot ? clamp(dist / 4, 44 * k, 120 * k) : 44 * k;
@@ -1402,6 +1441,7 @@
         return;
       }
       S.passThrough = false;
+      S.brake = false;
       S.mode = 'ground';
       S.surface = surface;
       S.y = y;
@@ -1418,6 +1458,8 @@
       }
       if (quiet) player.set(S.base, true);
       else player.set('land', true, () => player.set(S.base));
+      // 나는 캐릭터는 내려앉을 때 발밑 흙먼지로 '바닥에 닿았다'를 보인다
+      if (!quiet && flyer()) dust(S.x, y);
       savePos();
       flushLanding(true);
     }
@@ -1470,6 +1512,199 @@
       j.resolve(false);
     }
 
+    // ── 날기 (movement: 'fly' 캐릭터): 웅크림 → 이륙(hover) → 곡선 비행(fly) → 내려옴(hover) → 착지(land + 흙먼지) ──
+    function flyer() {
+      return S.forceFly || (!!S.pack && S.pack.movement === 'fly');
+    }
+    /** 내려앉을 자리. 목표 면이 화면 이동으로 빠졌으면 null (스크롤·창 크기가 바뀌어도 따라가게 매 프레임 다시 잰다) */
+    function flyEnd(target) {
+      if (target.type === 'perch') {
+        if (!target.el.isConnected) return null;
+        const r = target.el.getBoundingClientRect();
+        if (r.width === 0) return null;
+        const s = perchSurface(target.el, r);
+        return { x: clamp(r.left + target.off, s.left, Math.max(s.left, s.right)), y: r.top, r };
+      }
+      const [mn, mx] = floorRange();
+      return { x: clamp(target.x, mn, mx), y: floorY(), r: null };
+    }
+    /**
+     * target: { type: 'floor', x } | { type: 'perch', el, off }. 내려앉으면 true, 그만두거나 놓치면 false.
+     * opt.low: 같은 면 안의 이동. 웅크리지 않고 조금만 떠서 짧게 미끄러진 뒤 조용히 내려앉는다
+     */
+    function flyTo(target, tok, opt) {
+      const low = !!(opt && opt.low);
+      return new Promise((resolve) => {
+        finishWalk(false);
+        if (S.mode !== 'ground' || (tok !== undefined && tok !== S.seq)) {
+          resolve(false);
+          return;
+        }
+        const e = flyEnd(target);
+        if (!e) {
+          resolve(false);
+          return;
+        }
+        const k = S.size / 96;
+        S.fly = { target, resolve, low, phase: 'crouch', t: 0, x0: S.x, y0: S.y, sx: S.x, sy: S.y, T: 0.6, D: low ? 0.12 : 0.3, crouchT: low ? 0 : 0.12, upT: low ? 0.1 : 0.22, rise: (low ? 11 : 34) * k, hoverH: (low ? 11 : 28) * k, vx: 0, checkT: 0 };
+        S.mode = 'fly';
+        S.surface = null;
+        S.base = 'idle';
+        S.sleeping = false;
+        S.passThrough = false;
+        S.brake = false;
+        S.vx = 0;
+        S.vy = 0;
+        if (Math.abs(e.x - S.x) > 2) S.facing = Math.sign(e.x - S.x);
+        // 웅크림: 점프 0번(웅크림)이나 착지 0번 그림, 둘 다 없으면 몸을 납작하게 누른다
+        if (low) player.set('hover', true);
+        else if (player.resolve('jump') === 'jump') player.holdFrame('jump', 0);
+        else if (player.resolve('land') === 'land') player.holdFrame('land', 0);
+        else {
+          player.set('idle', true);
+          S.squash = 1;
+        }
+      });
+    }
+    /** 날기를 그만둔다. fall이면 그 자리에서 떨어지고, 아니면(끌기·숨기기) 부른 쪽이 상태를 정한다 */
+    function abortFly(fall) {
+      const f = S.fly;
+      if (!f) return;
+      S.fly = null;
+      player.hold = -1;
+      if (fall && S.mode === 'fly') {
+        S.mode = 'air';
+        S.surface = null;
+        S.vx = clamp(f.vx * 0.5, -400, 400);
+        S.vy = 0;
+        player.set('fall', true);
+      }
+      f.resolve(false);
+    }
+    function flyUpdate(dt, t) {
+      const f = S.fly;
+      if (!f) {
+        S.mode = 'air';
+        return;
+      }
+      const e = flyEnd(f.target);
+      // 목표 면이 사라졌거나 스크롤로 잘리거나 가려지면 그 자리에서 떨어진다
+      if (!e) {
+        abortFly(true);
+        return;
+      }
+      if (f.target.type === 'perch' && t - f.checkT > 250) {
+        f.checkT = t;
+        if (!perchVisible(f.target.el, e.r)) {
+          abortFly(true);
+          return;
+        }
+      }
+      const prevX = S.x;
+      // 머리가 화면 위로 나가지 않게 막되, 화면 맨 위 면(레일 탭)에서 뜨거나 내려앉을 때는 그 높이까지는 쓴다
+      const top = Math.min(minFootY(), e.y, f.y0);
+      const k = S.size / 96;
+      f.t += dt;
+      if (f.phase === 'crouch') {
+        if (f.t < f.crouchT) return;
+        f.phase = 'up';
+        f.t = 0;
+        player.hold = -1;
+        player.set('hover', true);
+      }
+      if (f.phase === 'up') {
+        const q = Math.min(1, f.t / f.upT);
+        S.x = f.x0;
+        S.y = Math.max(top, f.y0 - f.rise * (1 - (1 - q) * (1 - q)));
+        if (q >= 1) {
+          f.phase = 'cruise';
+          f.t = 0;
+          f.sx = S.x;
+          f.sy = S.y;
+          const dist = Math.hypot(e.x - S.x, Math.max(top, e.y - f.hoverH) - S.y);
+          f.T = f.low ? clamp(dist / 900, 0.25, 0.6) : clamp(dist / 750, 0.4, 1.2);
+          player.set('fly', true);
+        }
+      } else if (f.phase === 'cruise') {
+        // 이륙 지점 → 목표 위 지점을 잇는 2차 베지어. 끝점을 매 프레임 다시 재므로 목표가 움직여도 따라간다
+        const ex = e.x;
+        const ey = Math.max(top, e.y - f.hoverH);
+        const q = Math.min(1, f.t / f.T);
+        const u = q < 0.5 ? 2 * q * q : 1 - Math.pow(-2 * q + 2, 2) / 2;
+        const d = Math.hypot(ex - f.sx, ey - f.sy);
+        const cx = (f.sx + ex) / 2;
+        const cy = Math.max(top, Math.min(f.sy, ey) - (f.low ? clamp(d * 0.05, 2 * k, 12 * k) : clamp(d * 0.18, 16 * k, 110 * k)));
+        const a = 1 - u;
+        S.x = a * a * f.sx + 2 * a * u * cx + u * u * ex;
+        S.y = Math.max(top, a * a * f.sy + 2 * a * u * cy + u * u * ey);
+        if (Math.abs(S.x - prevX) > 0.3) S.facing = S.x > prevX ? 1 : -1;
+        if (player.name !== player.resolve('fly')) player.set('fly', true);
+        if (q >= 1) {
+          f.phase = 'down';
+          f.t = 0;
+          player.set('hover', true);
+        }
+      } else {
+        const q = Math.min(1, f.t / f.D);
+        const y0 = Math.max(top, e.y - f.hoverH);
+        S.x = e.x;
+        S.y = y0 + (e.y - y0) * (1 - (1 - q) * (1 - q));
+        if (q >= 1) {
+          S.fly = null;
+          player.hold = -1;
+          if (f.target.type === 'perch' && !perchVisible(f.target.el, e.r, e.x)) {
+            S.mode = 'air';
+            S.vx = 0;
+            S.vy = 0;
+            player.set('fall', true);
+            f.resolve(false);
+            return;
+          }
+          landOn(f.target.type === 'perch' ? { type: 'perch', el: f.target.el, off: 0 } : { type: 'floor' }, e.y, f.low);
+          if (f.low) dust(S.x, e.y, 0.5);
+          f.resolve(true);
+          return;
+        }
+      }
+      if (dt > 0) f.vx = (S.x - prevX) / dt;
+    }
+    /** 날아가 내려앉고, 그 면에 섰는지까지 본다. 움직임 줄이기면 펑 하고 바로 옮긴다 */
+    async function flyAndLand(target, tok, opt) {
+      const op = opt || {};
+      if (S.mode !== 'ground' || tok !== S.seq) return false;
+      if (reduced) {
+        const e = flyEnd(target);
+        if (!e) return false;
+        const c = petCenter();
+        puff(c.x, c.y);
+        S.base = 'idle';
+        S.x = e.x;
+        landOn(target.type === 'perch' ? { type: 'perch', el: target.el, off: 0 } : { type: 'floor' }, e.y, true);
+      } else {
+        const ok = await flyTo(target, tok);
+        if (!ok || tok !== S.seq) return false;
+        if (S.mode !== 'ground') {
+          const landed = await waitLanding();
+          if (!landed || tok !== S.seq) return false;
+        }
+      }
+      const onIt = target.type === 'floor' ? !!S.surface && S.surface.type === 'floor' : !!S.surface && S.surface.el === target.el;
+      if (!onIt) return false;
+      if (op.sitAfter) {
+        const sf = curSurfaceInfo();
+        if (sf && sf.narrow) setBase('sit');
+      }
+      return true;
+    }
+    /** 그 면에 내려앉을 자리: x에 가장 가까운 곳(좁은 면은 가운데). random이면 아무 데나 */
+    function perchTarget(el, x, random) {
+      const r = el.getBoundingClientRect();
+      const s = perchSurface(el, r);
+      const hi = Math.max(s.left, s.right);
+      const lx = s.narrow ? s.left : random ? rand(s.left, hi) : clamp(x, Math.min(s.left + 10, hi), Math.max(Math.min(s.left + 10, hi), s.right - 10));
+      return { type: 'perch', el, off: lx - r.left };
+    }
+
     function groundUpdate(dt, t) {
       const surf = S.surface;
       let r = null;
@@ -1519,6 +1754,17 @@
     function airUpdate(dt) {
       const prevY = S.y;
       S.vy = Math.min(S.vy + GRAVITY * dt, 2400);
+      // 나는 캐릭터는 떨어지다 받아 줄 면 가까이에서 추진기를 켜 천천히 내려앉는다
+      S.brake = false;
+      if (S.vy > 0 && flyer() && !reduced) {
+        const k = S.size / 96;
+        const below = S.passThrough ? floorY() : groundBelow(S.x, S.y);
+        if (below - S.y < 44 * k) {
+          S.brake = true;
+          const slow = 150 * k;
+          if (S.vy > slow) S.vy += (slow - S.vy) * Math.min(1, dt * 16);
+        }
+      }
       S.vx *= Math.pow(0.5, dt);
       S.x += S.vx * dt;
       S.y += S.vy * dt;
@@ -1550,7 +1796,9 @@
           return;
         }
       }
-      if (player.name !== 'fall') player.set('fall');
+      if (S.brake) {
+        if (player.name !== player.resolve('hover')) player.set('hover');
+      } else if (player.name !== 'fall') player.set('fall');
     }
 
     function jumpUpdate(dt) {
@@ -2013,6 +2261,13 @@
     /** 길을 따라간다. 하나라도 어긋나면(끌기·다른 행동·다른 면에 착지) false */
     async function followPath(path, tok, opt) {
       const op = opt || {};
+      if (flyer() && path.length) {
+        // 나는 캐릭터는 사다리·점프를 하나씩 밟지 않고 마지막 면으로 곧장 날아간다
+        const e = path[path.length - 1];
+        if (tok !== S.seq || S.mode !== 'ground') return false;
+        if (e.to.type === 'perch' && !e.to.el.isConnected) return false;
+        return flyAndLand(jumpTargetOf(e), tok, { sitAfter: op.sitAfter });
+      }
       for (let i = 0; i < path.length; i++) {
         const e = path[i];
         if (tok !== S.seq || S.mode !== 'ground') return false;
@@ -2076,6 +2331,8 @@
         if (op.sitAfter && sf.narrow) setBase('sit');
         return true;
       }
+      // 나는 캐릭터는 길 찾기 없이 그 면(레일 탭이면 탭 윗면)으로 곧장 날아간다
+      if (flyer()) return flyAndLand(perchTarget(el, S.x), tok, { sitAfter: op.sitAfter });
       const path = planPath(el);
       if (!path) return false;
       return followPath(path, tok, op);
@@ -2365,7 +2622,85 @@
       it.f.style.width = `${r.width + pad * 2}px`;
       it.f.style.height = `${r.height + pad * 2}px`;
     }
+    // ── H빔 지시봉: 손끝에서 가리키는 요소까지 강철 H빔을 뻗는다 (가까우면 손으로만 가리킨다) ──
+    let beam = null;
+    function handPoint(toward) {
+      const b = petBox();
+      const right = toward >= S.x;
+      return { x: right ? b.right - 2 * S.scale : b.left + 2 * S.scale, y: b.top + (b.bottom - b.top) * 0.55 };
+    }
+    function beamGeom(el) {
+      const r = el.getBoundingClientRect();
+      const hp = handPoint((r.left + r.right) / 2);
+      const tx = clamp(hp.x, r.left + 3, r.right - 3);
+      const ty = clamp(hp.y, r.top + 3, r.bottom - 3);
+      const dx = tx - hp.x;
+      const dy = ty - hp.y;
+      return { x: hp.x, y: hp.y, len: Math.max(0, Math.hypot(dx, dy) - 3), ang: Math.atan2(dy, dx) };
+    }
+    /** 요소가 손에서 이만큼 멀 때만 빔을 뻗는다 */
+    const BEAM_MIN = 26;
+    function showBeam(el) {
+      hideBeam(true);
+      if (!el || !el.isConnected || S.mode !== 'ground') return null;
+      const g = beamGeom(el);
+      if (g.len < BEAM_MIN) return null;
+      const th = Math.max(6, Math.round(4 * S.scale));
+      const node = h('div', { class: 'fp-beam' }, h('div', { class: 'fp-beam-cap' }));
+      node.style.height = `${th}px`;
+      node.style.setProperty('--fl', `${Math.max(2, Math.round(th / 4))}px`);
+      node.style.setProperty('--st', `${Math.max(8, Math.round(th * 1.5))}px`);
+      root.appendChild(node);
+      beam = { el, node, th, t0: now(), out: false, tOut: 0 };
+      faceTo(el);
+      placeBeam(now());
+      return beam;
+    }
+    function hideBeam(instant) {
+      if (!beam) return;
+      if (instant || reduced) {
+        beam.node.remove();
+        beam = null;
+        return;
+      }
+      if (!beam.out) {
+        beam.out = true;
+        beam.tOut = now();
+      }
+    }
+    function placeBeam(t) {
+      if (!beam) return;
+      if (!beam.el.isConnected || S.mode !== 'ground') {
+        hideBeam(true);
+        return;
+      }
+      const g = beamGeom(beam.el);
+      let k = reduced ? 1 : Math.min(1, (t - beam.t0) / 240);
+      if (beam.out) {
+        k = Math.max(0, 1 - (t - beam.tOut) / 160);
+        if (k <= 0) {
+          beam.node.remove();
+          beam = null;
+          return;
+        }
+      }
+      // 처음엔 빠르게 뻗고 끝에서 천천히 멈춘다
+      const e = k >= 1 ? 1 : 1 - Math.pow(1 - k, 3);
+      const n = beam.node;
+      n.style.width = `${Math.max(1, Math.round(g.len * e))}px`;
+      n.style.transform = `translate(${Math.round(g.x)}px, ${Math.round(g.y - beam.th / 2)}px) rotate(${g.ang}rad)`;
+    }
+    /** 말풍선이 떠 있는 동안 빔으로 가리키고, 닫히면 접는다 */
+    async function withBeam(el, fn) {
+      const b = showBeam(el);
+      try {
+        return await fn();
+      } finally {
+        if (b && beam === b) hideBeam(false);
+      }
+    }
     function updateFlashes(t) {
+      placeBeam(t);
       for (let i = flashes.length - 1; i >= 0; i--) {
         const it = flashes[i];
         if (t > it.until || !it.el.isConnected) {
@@ -2409,6 +2744,81 @@
           { duration: 480 + Math.random() * 240, easing: 'cubic-bezier(.2,.7,.3,1)' },
         );
         an.onfinish = () => p.remove();
+      }
+    }
+    // ── 착지 흙먼지: 발 양옆으로 낮게 퍼지며 사라지는 회갈색 알갱이 ──
+    const DUST_COLORS = ['#a08b74', '#8a7764', '#b9a78f', '#776a5c'];
+    function dust(x, y, size) {
+      if (reduced) return;
+      const m = size || 1;
+      const s = S.scale * Math.sqrt(m);
+      const n = Math.max(3, Math.round((6 + Math.random() * 5) * Math.min(1.4, m)));
+      for (let i = 0; i < n; i++) {
+        const dir = i % 2 ? 1 : -1;
+        const sz = Math.max(2, Math.round(rand(1.2, 2.4) * s));
+        const p = h('div', { class: 'fp-dust' });
+        p.style.width = `${sz}px`;
+        p.style.height = `${sz}px`;
+        p.style.background = DUST_COLORS[i % DUST_COLORS.length];
+        p.style.left = `${x + dir * rand(2, 9) * s - sz / 2}px`;
+        p.style.top = `${y - sz}px`;
+        root.appendChild(p);
+        if (!p.animate) {
+          later(() => p.remove(), 420);
+          continue;
+        }
+        const dx = dir * rand(9, 24) * s;
+        const dy = -rand(1, 5) * s;
+        const an = p.animate(
+          [
+            { transform: 'translate(0,0) scale(1)', opacity: 0.95 },
+            { transform: `translate(${(dx * 0.7).toFixed(1)}px,${dy.toFixed(1)}px) scale(.85)`, opacity: 0.7, offset: 0.5 },
+            { transform: `translate(${dx.toFixed(1)}px,${(dy * 0.5).toFixed(1)}px) scale(.45)`, opacity: 0 },
+          ],
+          { duration: rand(340, 460), easing: 'cubic-bezier(.2,.7,.3,1)' },
+        );
+        an.onfinish = () => p.remove();
+      }
+    }
+
+    // ── 추진기 불꽃 대체: 날기·떠 있기 그림이 없는 캐릭터가 날 때 손·발 자리에 엔진이 불꽃을 그린다 ──
+    const flames = [];
+    function updateFlames() {
+      const f = S.fly;
+      const on = !reduced && ((S.mode === 'fly' && f && f.phase !== 'crouch') || (S.mode === 'air' && S.brake)) && player.name !== 'fly' && player.name !== 'hover';
+      if (!on) {
+        for (const el of flames) el.style.display = 'none';
+        return;
+      }
+      if (!flames.length) {
+        for (let i = 0; i < 4; i++) {
+          const el = h('div', { class: 'fp-flame', 'aria-hidden': 'true' });
+          root.appendChild(el);
+          flames.push(el);
+        }
+      }
+      const b = petBox();
+      const w = b.right - b.left;
+      const hy = b.top + (b.bottom - b.top) * 0.62;
+      const s = S.scale;
+      // 앞으로 날 때는 불꽃이 뒤아래로, 떠 있을 때는 곧장 아래로
+      const ang = S.mode === 'fly' && f.phase === 'cruise' ? (S.facing > 0 ? 55 : -55) : 0;
+      const spots = [
+        [b.left + w * 0.12, hy, 0.7],
+        [b.right - w * 0.12, hy, 0.7],
+        [S.x - w * 0.18, b.bottom - s, 1],
+        [S.x + w * 0.18, b.bottom - s, 1],
+      ];
+      for (let i = 0; i < 4; i++) {
+        const [x, y, m] = spots[i];
+        const el = flames[i];
+        const fw = Math.max(3, 3 * s * m);
+        const fl = rand(4, 8.5) * s * m;
+        el.style.display = 'block';
+        el.style.width = `${fw.toFixed(1)}px`;
+        el.style.height = `${fl.toFixed(1)}px`;
+        el.style.opacity = rand(0.78, 1).toFixed(2);
+        el.style.transform = `translate(${(x - fw / 2).toFixed(1)}px,${y.toFixed(1)}px) rotate(${ang}deg)`;
       }
     }
     function petCenter() {
@@ -2488,7 +2898,7 @@
     }
     /** 마우스를 올려 설명할 수 없는 때 (기능 설명·항목 읽기·용어 설명이 같은 간격을 쓴다) */
     function hoverBlocked(key, t) {
-      if (!S.explain || S.mode === 'hidden' || S.mode === 'drag' || S.mode === 'boot' || S.booting || S.tour || chat.el || S.menu || S.picker || S.press) return true;
+      if (!S.explain || S.suit || S.mode === 'hidden' || S.mode === 'drag' || S.mode === 'boot' || S.booting || S.tour || chat.el || S.menu || S.picker || S.press) return true;
       // 안내·'그 화면 알려줘' 같은 사용자가 시킨 흐름은 마우스가 지나가도 끊지 않는다
       if (t < S.noHoverUntil || S.flow === S.seq) return true;
       const data = /^(item|term):/.test(key || '');
@@ -2498,7 +2908,7 @@
     }
     /** 간격 때문에만 막혔으면 얼마 뒤 다시 볼지(ms). 0이면 다른 이유로 막혔거나 막히지 않았다 */
     function hoverRetryIn(kind, t) {
-      if (!S.explain || S.mode === 'hidden' || S.mode === 'drag' || S.booting || S.tour || chat.el || S.menu || S.picker || S.press) return 0;
+      if (!S.explain || S.suit || S.mode === 'hidden' || S.mode === 'drag' || S.booting || S.tour || chat.el || S.menu || S.picker || S.press) return 0;
       if (bubble.visible && bubble.sticky) return 0;
       const gap = kind === 'target' ? ANY_EXPLAIN_GAP : ITEM_EXPLAIN_GAP;
       let w = Math.max(S.noHoverUntil - t, S.lastExplain.t + gap - t);
@@ -2519,6 +2929,11 @@
       finishWalk(false);
       if (S.sleeping) wake(true);
       try {
+        // 날던 중이면 내려앉은 뒤에 간다 (공중에서 말하면 말풍선이 따라 날아다닌다)
+        if (S.mode === 'fly') {
+          const landed = await waitLanding();
+          if (!landed || tok !== S.seq) return;
+        }
         const railTab = el.hasAttribute('data-pet-perch') && !!climbColumnOf(el);
         if (S.roam && !reduced && railTab) {
           // 레일 탭은 레일을 타고 그 탭까지 올라가 앉아서 설명한다
@@ -2874,6 +3289,10 @@
      * 이미 그 면이면 걸어가고, 아니면 펑 하고 옮겨 간다(사다리로 오르면 너무 오래 걸려 무엇을 읽는지 놓친다)
      */
     async function approachData(el, tok) {
+      if (S.mode === 'fly' && !reduced) {
+        const landed = await waitLanding();
+        if (!landed || tok !== S.seq) return false;
+      }
       if (!S.roam || reduced || S.mode !== 'ground') return approachEl(el, tok);
       const r = el.getBoundingClientRect();
       const above = perchAbove(el);
@@ -2894,6 +3313,14 @@
           if (!ok || tok !== S.seq) return false;
         }
         return tok === S.seq && el.isConnected;
+      }
+      if (flyer()) {
+        // 나는 캐릭터는 펑 하고 사라지는 대신 날아간다 (아주 가까우면 펑이 더 빠르다)
+        const pr = p.el.getBoundingClientRect();
+        if (Math.hypot(gx - S.x, pr.top - S.y) > 60) {
+          const ok = await flyAndLand({ type: 'perch', el: p.el, off: gx - pr.left }, tok);
+          return ok && tok === S.seq && el.isConnected;
+        }
       }
       const from = petCenter();
       puff(from.x, from.y);
@@ -3056,10 +3483,46 @@
     }
 
     // ── 요소 쪽으로 가기 (안내·대화의 '그 화면 알려줘') ──
+    /**
+     * 공중에 떠 있는 버튼처럼 올라설 수 없는 요소: 펫이 그 요소를 가리지 않으면서 손이 가장 가까워지는 자리.
+     * 바닥과 보이는 윗면(레일 탭 제외)마다 요소 왼쪽·오른쪽 옆 자리를 재 보고 가장 가까운 곳을 고른다
+     */
+    function standSpotFor(el) {
+      const r = el.getBoundingClientRect();
+      const box = petBox();
+      const pw = box.right - box.left;
+      const ph = box.bottom - box.top;
+      const cx = (r.left + r.right) / 2;
+      const [fl, fr] = floorRange();
+      const cands = [{ type: 'floor', el: null, top: floorY(), left: fl, right: fr, narrow: false }];
+      for (const p of listPerches(true)) {
+        if (p.col || p.el === el || el.contains(p.el)) continue;
+        cands.push({ type: 'perch', el: p.el, top: p.top, left: p.left, right: p.right, narrow: p.narrow });
+      }
+      let best = null;
+      const gapX = pw / 2 + 10;
+      for (const c of cands) {
+        const xs = c.narrow ? [c.left] : [r.left - gapX, r.right + gapX, cx];
+        for (const want of xs) {
+          const x = clamp(want, c.left, Math.max(c.left, c.right));
+          const body = { left: x - pw / 2, right: x + pw / 2, top: c.top - ph, bottom: c.top };
+          // 펫 몸이 요소를 가리면 그 자리는 쓰지 않는다
+          if (body.right > r.left - 2 && body.left < r.right + 2 && body.bottom > r.top - 2 && body.top < r.bottom + 2) continue;
+          const hx = x < cx ? body.right : body.left;
+          const hy = c.top - ph * 0.55;
+          const dx = Math.max(r.left - hx, 0, hx - r.right);
+          const dy = Math.max(r.top - hy, 0, hy - r.bottom);
+          // 바닥에서 멀리 가리키기보다 가까운 윗면으로 오르는 편을 고르되, 오르는 수고도 조금 친다
+          const cost = Math.hypot(dx, dy) + (c.type === 'perch' ? 24 : 0) + Math.abs(x - S.x) * 0.02;
+          if (!best || cost < best.cost) best = { c, x, cost };
+        }
+      }
+      return best;
+    }
     async function goToEl(el, tok) {
       if (!el || !el.isConnected) return false;
       if (S.mode === 'hidden') show(true);
-      if (S.mode === 'air' || S.mode === 'jump' || S.mode === 'boot' || S.mode === 'climb') {
+      if (S.mode === 'air' || S.mode === 'jump' || S.mode === 'boot' || S.mode === 'climb' || S.mode === 'fly') {
         const ok = await waitLanding();
         if (!ok) return false;
       }
@@ -3089,14 +3552,28 @@
           S.x = clamp(S.x, s.left + 10, Math.max(s.left + 10, s.right - 10));
           landOn({ type: 'perch', el, off: S.x - r.left }, r.top, true);
         } else {
-          const [mn, mx] = floorRange();
-          S.x = clamp(besideX(el), mn, mx);
-          landOn({ type: 'floor' }, floorY(), true);
+          // 공중의 요소: 움직임 없이 가장 가까운 설 자리로 바로 옮긴다
+          const spot = standSpotFor(el);
+          if (spot && spot.c.type === 'perch' && spot.c.el.isConnected) {
+            const pr = spot.c.el.getBoundingClientRect();
+            S.x = spot.x;
+            landOn({ type: 'perch', el: spot.c.el, off: spot.x - pr.left }, pr.top, true);
+          } else {
+            const [mn, mx] = floorRange();
+            S.x = clamp(spot ? spot.x : besideX(el), mn, mx);
+            landOn({ type: 'floor' }, floorY(), true);
+          }
         }
         faceTo(el);
         return true;
       }
-      if (isPerch) {
+      if (isPerch && flyer()) {
+        // 나는 캐릭터: 사다리·레일·점프 대신 그 면으로 곧장 날아간다
+        if (!(S.surface && S.surface.type === 'perch' && S.surface.el === el)) {
+          const ok = await flyAndLand(perchTarget(el, S.x), tok, { sitAfter: true });
+          if (!ok || tok !== S.seq) return false;
+        }
+      } else if (isPerch) {
         // 길 찾기: 바닥 → 짧은 사다리 여러 번 / 레일 타기 / 점프
         const path = S.surface && S.surface.el === el ? [] : planPath(el);
         if (path) {
@@ -3118,9 +3595,33 @@
           await waitLanding();
         }
       } else {
+        // 공중의 요소: 가장 가까이 설 수 있는 윗면이 있으면 거기로 올라가 그 요소 옆에 선다 (가리키는 건 H빔이 한다)
+        const spot = standSpotFor(el);
+        if (spot && spot.c.type === 'perch' && spot.c.el.isConnected) {
+          const onIt = S.surface && S.surface.type === 'perch' && S.surface.el === spot.c.el;
+          if (!onIt) {
+            // 나는 캐릭터는 그 요소 옆 설 자리에 바로 내려앉는다
+            const pr = spot.c.el.getBoundingClientRect();
+            const ok = flyer() ? await flyAndLand({ type: 'perch', el: spot.c.el, off: spot.x - pr.left }, tok) : await goToEl(spot.c.el, tok);
+            if (!ok || tok !== S.seq || !el.isConnected) return false;
+          }
+          if (S.base === 'sit') setBase('idle');
+          const [sl, sr] = surfaceRange();
+          if (Math.abs(clamp(spot.x, sl, sr) - S.x) > 6) {
+            const ok = await walkTo(clamp(spot.x, sl, sr), { run: true });
+            if (!ok || tok !== S.seq) return false;
+          }
+          if (!el.isConnected) return false;
+          faceTo(el);
+          return tok === S.seq;
+        }
         const [mn, mx] = floorRange();
-        const goal = clamp(besideX(el), mn, mx);
-        if (S.surface && S.surface.type === 'perch') {
+        const goal = clamp(spot ? spot.x : besideX(el), mn, mx);
+        if (S.surface && S.surface.type === 'perch' && flyer()) {
+          // 나는 캐릭터는 그 요소 옆 바닥 자리로 곧장 날아 내려간다
+          const ok = await flyAndLand({ type: 'floor', x: goal }, tok);
+          if (!ok || tok !== S.seq || !el.isConnected) return false;
+        } else if (S.surface && S.surface.type === 'perch') {
           // 바닥으로: 레일 탭이면 타고 내려오고, 위젯이면 뛰어내린다
           const down = planPath(null);
           if (down && down.length) {
@@ -3134,7 +3635,7 @@
           }
           if (tok !== S.seq || !el.isConnected) return false;
         }
-        const ok = await walkTo(clamp(besideX(el), mn, mx), { run: true });
+        const ok = await walkTo(goal, { run: true });
         if (!ok || tok !== S.seq) return false;
       }
       if (!el.isConnected) return false;
@@ -3152,6 +3653,7 @@
         const ok = await goToEl(el, tok);
         if (ok && tok === S.seq) {
           flash(el, 2000);
+          if (showBeam(el)) later(() => hideBeam(false), 2400);
           if (speechAnimFor(el) === 'point') {
             player.set('point', true);
             later(() => {
@@ -3176,7 +3678,7 @@
         if (!ok || tok !== S.seq || !el.isConnected) return;
         flash(el, 2200);
         const info = targetInfo(key, el);
-        if (info) await sayInfo(info, tok, el);
+        if (info) await withBeam(el, () => sayInfo(info, tok, el));
       } finally {
         end(tok);
       }
@@ -3230,6 +3732,8 @@
         if (!last || spec.kind === 'main') actions.push({ label: '건너뛰기', value: 'skip' });
         if (el) actions.push(navAction(el));
         actions.push({ label: last ? (spec.kind === 'main' ? '끝' : '확인') : '다음', value: 'next', primary: true });
+        if (el && ok) showBeam(el);
+        else hideBeam(false);
         const res = await showBubble(st.text, {
           title: (st.target ? targetTitle(st.target) : null) || screenTitle,
           step: `${i + 1}/${items.length}`,
@@ -3246,6 +3750,7 @@
         if (res !== 'next') break;
         if (last) finished = true;
       }
+      hideBeam(false);
       // 다른 안내가 이어받았으면(그 안내의 강조를 지우지 않게) 손대지 않는다
       if (S.tour && S.tour.tok === tok) {
         S.tour = null;
@@ -4126,18 +4631,36 @@
       else if (S.mode === 'drag') player.set('drag', true);
       else if (S.mode === 'air' || S.mode === 'jump') player.set('fall', true);
       else if (S.mode === 'climb') player.set('climb', true);
+      else if (S.mode === 'fly') player.set(S.fly && S.fly.phase === 'cruise' ? 'fly' : 'hover', true);
       const av = accentVars(p.accent);
       for (const k of Object.keys(av)) root.style.setProperty(k, av[k]);
       layoutPet();
       tabPlayer.setPack(p);
       layoutTab();
     }
-    async function setCharacter(id, fx) {
+    async function setCharacter(id, fx, opt) {
       const p = packs.find((q) => q.id === id);
       if (!p) return false;
       await loadPack(p);
       if (p._broken) return false;
+      if (S.suit) finishSuit(false);
+      // 걷는 캐릭터 → 나는 캐릭터는 슈트 장착 장면, 그 반대는 갑옷 판이 튀어 나가며 바뀐다 (opt.transform === false면 예전처럼 펑)
+      const cur = S.pack;
+      const suitFx = fx && !reduced && !!cur && cur !== p && !(isObj(opt) && opt.transform === false);
+      if (suitFx && p.movement === 'fly' && cur.movement !== 'fly') {
+        if (S.mode === 'air' || S.mode === 'jump' || S.mode === 'fly') await waitLanding();
+        if (S.pack === cur && startSuitUp(p)) {
+          store.set('char', p.id);
+          return true;
+        }
+      }
       const visible = S.mode !== 'hidden' && S.mode !== 'boot';
+      if (suitFx && visible && cur.movement === 'fly' && p.movement !== 'fly') {
+        suitOff(p);
+        store.set('char', p.id);
+        react('swap');
+        return true;
+      }
       if (fx && visible) {
         const c = petCenter();
         puff(c.x, c.y);
@@ -4149,6 +4672,377 @@
         react('swap');
       }
       return true;
+    }
+
+    // ── 슈트 장착: 녹슨 상자가 떨어지고(좁은 면이면 발밑에서 솟고), 올라서면 상자가 열리며 갑옷 판이 다리 → 몸통 → 팔 → 헬멧 순으로 붙는다 ──
+    const SUIT = { main: '#b4501f', oxide: '#8a3c22', ochre: '#e08a3c', crease: '#4a1c12', light: '#e9b47c', scrape: '#959aa1' };
+    // [몸 상자 안 가로 비율, 세로 비율, 너비, 높이(셀 px), 색, 사다리꼴]
+    const SUIT_PLATES = [
+      [0.36, 0.93, 6, 4, 'oxide', 0],
+      [0.64, 0.93, 6, 4, 'oxide', 0],
+      [0.36, 0.82, 5, 4, 'main', 1],
+      [0.64, 0.82, 5, 4, 'main', 1],
+      [0.5, 0.66, 10, 5, 'main', 0],
+      [0.38, 0.55, 6, 4, 'ochre', 1],
+      [0.62, 0.55, 6, 4, 'ochre', 1],
+      [0.1, 0.6, 4, 6, 'oxide', 0],
+      [0.9, 0.6, 4, 6, 'oxide', 0],
+      [0.3, 0.24, 5, 5, 'oxide', 0],
+      [0.7, 0.24, 5, 5, 'oxide', 0],
+      [0.5, 0.1, 12, 4, 'main', 1],
+    ];
+    // 장면 시각(초)
+    const ST = { drop: 0.38, hop0: 0.62, hop1: 1.02, rise0: 0.25, rise1: 0.75, open0: 1.1, open1: 1.34, pl0: 1.3, plStep: 0.055, plFly: 0.2, flash: 2.14, swap: 2.2, fold0: 2.26, fold1: 2.46, desc0: 2.4, desc1: 2.62 };
+    let crateSheet = null;
+    function crateCanvas() {
+      if (crateSheet) return crateSheet;
+      const cv = doc.createElement('canvas');
+      cv.width = 28;
+      cv.height = 18;
+      const g = cv.getContext('2d');
+      const px = (x, y, w, hh, c) => {
+        g.fillStyle = c;
+        g.fillRect(x, y, w, hh);
+      };
+      px(0, 0, 28, 18, SUIT.crease);
+      px(1, 1, 26, 16, SUIT.main);
+      px(1, 1, 26, 3, SUIT.ochre);
+      px(1, 4, 26, 1, SUIT.crease);
+      px(1, 14, 26, 3, SUIT.oxide);
+      px(24, 5, 3, 9, SUIT.oxide);
+      for (let y = 10; y <= 12; y++) for (let x = 2; x <= 25; x++) px(x, y, 1, 1, ((x + y) >> 1) % 2 ? '#ffcc33' : '#2a1a14');
+      for (const [x, y] of [[2, 6], [25, 6], [2, 15], [25, 15], [7, 2], [20, 2]]) px(x, y, 1, 1, SUIT.light);
+      px(5, 7, 3, 1, SUIT.scrape);
+      px(19, 15, 2, 1, SUIT.scrape);
+      // 가운데 이음매: 안에서 달아오른 빛이 새어 나온다
+      px(13, 1, 2, 16, SUIT.crease);
+      px(13, 5, 2, 8, '#ffb347');
+      px(13, 7, 2, 4, '#fff1c2');
+      crateSheet = cv;
+      return cv;
+    }
+    function crateHalf(sx, cls) {
+      const c = h('canvas', { class: cls, 'aria-hidden': 'true' });
+      c.width = 14;
+      c.height = 18;
+      c.getContext('2d').drawImage(crateCanvas(), sx, 0, 14, 18, 0, 0, 14, 18);
+      return c;
+    }
+    function makePlate(spec, sc, i) {
+      const [, , w, hh, col, trap] = spec;
+      const c = SUIT[col];
+      const hi = col === 'ochre' ? SUIT.light : SUIT.ochre;
+      const el = h('div', { class: 'fp-plate', 'aria-hidden': 'true' });
+      el.style.width = `${(w * sc).toFixed(1)}px`;
+      el.style.height = `${(hh * sc).toFixed(1)}px`;
+      el.style.border = `${Math.max(1, Math.round(sc / 2))}px solid ${SUIT.crease}`;
+      el.style.background = i % 3 === 0 ? `linear-gradient(to bottom,${hi} 0 28%,${c} 28% 60%,${SUIT.scrape} 60% 70%,${c} 70%)` : `linear-gradient(to bottom,${hi} 0 28%,${c} 28%)`;
+      if (trap) el.style.clipPath = 'polygon(14% 0,86% 0,100% 100%,0 100%)';
+      return el;
+    }
+    function sparks(x, y, n) {
+      if (reduced) return;
+      const k = S.size / 96;
+      for (let i = 0; i < n; i++) {
+        const sp = h('div', { class: 'fp-spark' });
+        sp.style.left = `${x - 2}px`;
+        sp.style.top = `${y - 2}px`;
+        root.appendChild(sp);
+        if (!sp.animate) {
+          later(() => sp.remove(), 300);
+          continue;
+        }
+        const a = rand(0, Math.PI * 2);
+        const d = rand(6, 15) * k;
+        const an = sp.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${(Math.cos(a) * d).toFixed(1)}px,${(Math.sin(a) * d).toFixed(1)}px) scale(.3)`, opacity: 0 }], { duration: 260, easing: 'ease-out' });
+        an.onfinish = () => sp.remove();
+      }
+    }
+    /** 장면 기준: 서 있던 면의 지금 윗면 높이와 시작 뒤 가로로 움직인 만큼(스크롤 따라가기). 면이 사라졌으면 null */
+    function suitBase(su) {
+      if (su.surf.type !== 'perch') return { top: floorY(), dx: 0 };
+      if (!su.surf.el.isConnected) return null;
+      const r = su.surf.el.getBoundingClientRect();
+      if (r.width === 0) return null;
+      return { top: r.top, dx: r.left - su.L0 };
+    }
+    function startSuitUp(p) {
+      if (reduced || S.mode !== 'ground' || !S.surface || (S.surface.type === 'perch' && !surfaceAlive())) return false;
+      const tok = begin();
+      S.flow = tok;
+      finishWalk(false);
+      hideBeam(true);
+      S.sleeping = false;
+      S.base = 'idle';
+      const sc = S.scale;
+      const k = S.size / 96;
+      const cw = 28 * sc;
+      const ch = 18 * sc;
+      const surf = S.surface;
+      const L0 = surf.type === 'perch' ? surf.el.getBoundingClientRect().left : 0;
+      const top = surf.type === 'perch' ? surf.el.getBoundingClientRect().top : floorY();
+      const [mn, mx] = surfaceRange();
+      const gap = halfW() + cw / 2 + 2 * sc;
+      let cx = null;
+      const f0 = S.facing || 1;
+      for (const d of [f0, -f0]) {
+        const x = S.x + d * gap;
+        if (x >= mn && x <= mx) {
+          cx = x;
+          break;
+        }
+      }
+      // 옆에 둘 자리가 없으면(레일 탭 같은 좁은 면) 상자가 발밑에서 솟아 펫을 들어 올린다
+      const rise = cx === null;
+      if (rise) cx = S.x;
+      else S.facing = Math.sign(cx - S.x) || S.facing;
+      const glow = h('div', { class: 'fp-crate-glow' });
+      const lc = crateHalf(0, 'fp-crate-l');
+      const rc = crateHalf(14, 'fp-crate-r');
+      const crate = h('div', { class: 'fp-crate', 'aria-hidden': 'true' }, glow, lc, rc);
+      crate.style.width = `${cw}px`;
+      crate.style.height = `${ch}px`;
+      crate.style.visibility = 'hidden';
+      const plates = SUIT_PLATES.map((spec, i) => ({ spec, el: makePlate(spec, sc, i), spin: rand(-220, 220), done: false }));
+      const flashEl = h('div', { class: 'fp-suit-flash', 'aria-hidden': 'true' });
+      const visor = h('div', { class: 'fp-visor', 'aria-hidden': 'true' });
+      root.appendChild(crate);
+      plates.forEach((pl) => root.appendChild(pl.el));
+      root.append(flashEl, visor);
+      S.suit = { tok, to: p, t: 0, surf, L0, x0: S.x, cx, cw, ch, k, sc, rise, dropH: Math.max(0, Math.min(260 * k, top - ch - 4)), crate, lc, rc, glow, plates, flashEl, visor, els: [crate, flashEl, visor].concat(plates.map((pl) => pl.el)), ev: {} };
+      S.suitFrom = S.pack ? S.pack.id : null;
+      S.mode = 'suit';
+      S.vx = 0;
+      S.vy = 0;
+      suitTick(0);
+      return true;
+    }
+    function suitTick(dt) {
+      const su = S.suit;
+      if (!su) {
+        S.mode = 'air';
+        return;
+      }
+      su.t += dt;
+      const t = su.t;
+      const b0 = suitBase(su);
+      if (!b0) {
+        finishSuit(false);
+        return;
+      }
+      const { top, dx } = b0;
+      const { k, ch, cw, ev } = su;
+      const cx = su.cx + dx;
+      const x0 = su.x0 + dx;
+      const once = (name, fn) => {
+        if (!ev[name]) {
+          ev[name] = true;
+          fn();
+        }
+      };
+      // 상자: 떨어지기(또는 솟기) → 쿵 → 열림 → 닫히며 가라앉기
+      let cy = top;
+      let sy = 1;
+      if (!su.rise) {
+        if (t < ST.drop) {
+          const q = t / ST.drop;
+          cy = top - (1 - q * q) * su.dropH;
+        } else if (t < ST.drop + 0.12) sy = 1 - 0.15 * Math.sin(((t - ST.drop) / 0.12) * Math.PI);
+        if (t >= ST.drop) {
+          once('thud', () => {
+            dust(cx, top, 1.3);
+            S.facing = Math.sign(cx - S.x) || S.facing;
+            player.set('surprised', true);
+          });
+        }
+      } else {
+        const q = clamp((t - ST.rise0) / (ST.rise1 - ST.rise0), 0, 1);
+        // 살짝 넘쳤다 돌아오는 솟음
+        sy = q <= 0 ? 0 : 1 + 2.70158 * Math.pow(q - 1, 3) + 1.70158 * Math.pow(q - 1, 2);
+        if (t >= ST.rise0) {
+          once('thud', () => {
+            dust(cx, top, 1.3);
+            player.set('surprised', true);
+          });
+        }
+      }
+      const openQ = clamp((t - ST.open0) / (ST.open1 - ST.open0), 0, 1);
+      const foldQ = clamp((t - ST.fold0) / (ST.fold1 - ST.fold0), 0, 1);
+      const open = openQ * (1 - clamp(foldQ * 2, 0, 1));
+      sy *= 1 - clamp(foldQ * 2 - 1, 0, 1);
+      if (foldQ >= 1) {
+        once('vanish', () => {
+          dust(cx, top, 1);
+          su.crate.style.display = 'none';
+        });
+      }
+      su.crate.style.visibility = sy > 0.01 ? '' : 'hidden';
+      su.crate.style.transform = `translate(${(cx - cw / 2).toFixed(1)}px,${(cy - ch).toFixed(1)}px) scale(1,${sy.toFixed(3)})`;
+      su.lc.style.transform = `translateX(${(-open * cw * 0.16).toFixed(1)}px) rotate(${(-open * 40).toFixed(1)}deg)`;
+      su.rc.style.transform = `translateX(${(open * cw * 0.16).toFixed(1)}px) rotate(${(open * 40).toFixed(1)}deg)`;
+      su.glow.style.width = `${(open * 74).toFixed(1)}%`;
+      su.glow.style.opacity = open.toFixed(2);
+      // 펫: 상자 위로 뛰어오름 → 열리는 상자 안으로 내려앉음 → (갈아입은 뒤) 떠올랐다가 내려앉기
+      const onT = su.rise ? ST.rise1 : ST.hop1;
+      let px = cx;
+      let py = top;
+      if (t < ST.swap) {
+        if (su.rise) py = top - ch * sy;
+        else if (t < ST.hop0) {
+          px = x0;
+          py = top;
+        } else if (t < ST.hop1) {
+          const q = (t - ST.hop0) / (ST.hop1 - ST.hop0);
+          const H = 30 * k + ch * 0.3;
+          px = x0 + (cx - x0) * q;
+          py = top - ch * q - 4 * H * q * (1 - q);
+          if (player.resolve('jump') === 'jump') {
+            const fr = q < 0.14 ? 1 : q < 0.5 ? 2 : q < 0.82 ? 3 : 4;
+            if (player.name !== 'jump' || player.frame !== fr) player.holdFrame('jump', fr);
+          } else if (player.name !== player.resolve('fall')) player.set('fall', true);
+        } else py = top - ch;
+        if (t >= onT) {
+          once('onCrate', () => {
+            player.hold = -1;
+            player.set('land', true, () => {
+              if (S.suit === su) player.set('idle', true);
+            });
+            S.squash = 0.8;
+          });
+          if (t >= ST.open0) py = top - ch * (1 - 0.6 * openQ);
+        }
+      } else {
+        const yIn = top - ch * 0.4;
+        const yUp = top - ch - 6 * k;
+        if (t < ST.desc0) {
+          const q = clamp((t - ST.swap) / (ST.desc0 - ST.swap), 0, 1);
+          py = yIn + (yUp - yIn) * (1 - (1 - q) * (1 - q));
+        } else {
+          const q = clamp((t - ST.desc0) / (ST.desc1 - ST.desc0), 0, 1);
+          py = yUp + (top - yUp) * (1 - (1 - q) * (1 - q));
+        }
+      }
+      S.x = px;
+      S.y = py;
+      // 갑옷 판: 상자 안에서 튀어 올라 몸의 제자리로 날아가 철컥 붙는다
+      const b = petBox();
+      const bw = b.right - b.left;
+      const bh = b.bottom - b.top;
+      const sy0 = top - ch * 0.45;
+      su.plates.forEach((pl, i) => {
+        const launch = ST.pl0 + i * ST.plStep;
+        if (t < launch || t >= ST.swap) {
+          pl.el.style.display = 'none';
+          return;
+        }
+        const q = clamp((t - launch) / ST.plFly, 0, 1);
+        const e = 1 - (1 - q) * (1 - q);
+        const tx = b.left + pl.spec[0] * bw;
+        const ty = b.top + pl.spec[1] * bh;
+        const x = cx + (tx - cx) * e;
+        const y = sy0 + (ty - sy0) * e - Math.sin(Math.PI * q) * 26 * k;
+        const w = pl.spec[2] * su.sc;
+        const hh = pl.spec[3] * su.sc;
+        pl.el.style.display = 'block';
+        pl.el.style.transform = `translate(${(x - w / 2).toFixed(1)}px,${(y - hh / 2).toFixed(1)}px) rotate(${(pl.spin * (1 - q)).toFixed(1)}deg)`;
+        if (q >= 1 && !pl.done) {
+          pl.done = true;
+          sparks(tx, ty, 3);
+          S.squash = Math.max(S.squash, 0.45);
+        }
+      });
+      // 바이저가 하늘빛으로 켜지고 하얗게 번쩍인 순간 모습이 바뀐다
+      const vq = t < ST.flash - 0.08 || t >= ST.flash + 0.3 ? 0 : Math.sin(((t - ST.flash + 0.08) / 0.38) * Math.PI);
+      su.visor.style.opacity = vq.toFixed(2);
+      su.visor.style.width = `${(bw * 0.42).toFixed(1)}px`;
+      su.visor.style.height = `${Math.max(2, 3 * su.sc).toFixed(1)}px`;
+      su.visor.style.transform = `translate(${(S.x - bw * 0.21).toFixed(1)}px,${(b.top + bh * 0.28).toFixed(1)}px)`;
+      const fq = t < ST.flash || t >= ST.flash + 0.32 ? 0 : t < ST.flash + 0.08 ? (t - ST.flash) / 0.08 : 1 - (t - ST.flash - 0.08) / 0.24;
+      su.flashEl.style.opacity = (fq * 0.95).toFixed(2);
+      su.flashEl.style.width = `${(bw + 8).toFixed(1)}px`;
+      su.flashEl.style.height = `${(bh + 8).toFixed(1)}px`;
+      su.flashEl.style.transform = `translate(${(b.left - 4).toFixed(1)}px,${(b.top - 4).toFixed(1)}px)`;
+      if (t >= ST.swap) {
+        once('swap', () => {
+          applyPack(su.to);
+          player.set('hover', true);
+          S.squash = 0;
+        });
+      }
+      if (t >= ST.desc1) {
+        landOn(su.surf.type === 'perch' ? { type: 'perch', el: su.surf.el, off: 0 } : { type: 'floor' }, top);
+        finishSuit(true);
+      }
+    }
+    /** 장면을 끝낸다(다 봤거나·건너뛰었거나·다른 일로 끊겼거나). say면 장착 완료 한마디 */
+    function finishSuit(say) {
+      const su = S.suit;
+      if (!su) return;
+      S.suit = null;
+      su.els.forEach((el) => el.remove());
+      if (S.pack !== su.to) applyPack(su.to);
+      S.squash = 0;
+      if (S.mode === 'suit') {
+        const b0 = suitBase(su);
+        if (!b0) {
+          S.mode = 'air';
+          S.surface = null;
+          S.vx = 0;
+          S.vy = 0;
+          player.set('fall', true);
+        } else {
+          S.x = su.cx + b0.dx;
+          landOn(su.surf.type === 'perch' ? { type: 'perch', el: su.surf.el, off: 0 } : { type: 'floor' }, b0.top, !say);
+        }
+      }
+      if (say && !(bubble.visible && (bubble.sticky || bubble.hasActions))) {
+        const line = pick(guide.reactions.suitup);
+        showBubble(line ? fill(line) : `슈트 장착 완료! ${su.to.name} 출동!`);
+      }
+      end(su.tok);
+    }
+    /** 나는 캐릭터에서 다른 캐릭터로: 하얗게 번쩍이며 갑옷 판이 사방으로 튀어 떨어진다 */
+    function suitOff(p) {
+      const b = petBox();
+      const bw = b.right - b.left;
+      const bh = b.bottom - b.top;
+      const sc = S.scale;
+      const k = S.size / 96;
+      const fl = h('div', { class: 'fp-suit-flash', 'aria-hidden': 'true' });
+      fl.style.width = `${(bw + 8).toFixed(1)}px`;
+      fl.style.height = `${(bh + 8).toFixed(1)}px`;
+      fl.style.transform = `translate(${(b.left - 4).toFixed(1)}px,${(b.top - 4).toFixed(1)}px)`;
+      root.appendChild(fl);
+      if (fl.animate) fl.animate([{ opacity: 0.95 }, { opacity: 0 }], { duration: 280, easing: 'ease-out' }).onfinish = () => fl.remove();
+      else later(() => fl.remove(), 280);
+      SUIT_PLATES.forEach((spec, i) => {
+        const el = makePlate(spec, sc, i);
+        const w = spec[2] * sc;
+        const hh = spec[3] * sc;
+        const tx = b.left + spec[0] * bw - w / 2;
+        const ty = b.top + spec[1] * bh - hh / 2;
+        el.style.display = 'block';
+        el.style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px)`;
+        root.appendChild(el);
+        if (!el.animate) {
+          later(() => el.remove(), 700);
+          return;
+        }
+        const dir = spec[0] < 0.5 ? -1 : spec[0] > 0.5 ? 1 : Math.random() < 0.5 ? -1 : 1;
+        const ox = dir * rand(20, 60) * k;
+        const spin = rand(-260, 260);
+        const an = el.animate(
+          [
+            { transform: `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px) rotate(0deg)`, opacity: 1 },
+            { transform: `translate(${(tx + ox * 0.5).toFixed(1)}px,${(ty - rand(18, 36) * k).toFixed(1)}px) rotate(${(spin * 0.5).toFixed(0)}deg)`, opacity: 1, offset: 0.35 },
+            { transform: `translate(${(tx + ox).toFixed(1)}px,${(ty + rand(30, 90) * k).toFixed(1)}px) rotate(${spin.toFixed(0)}deg)`, opacity: 0 },
+          ],
+          { duration: rand(560, 760), easing: 'cubic-bezier(.3,.6,.6,1)' },
+        );
+        an.onfinish = () => el.remove();
+      });
+      applyPack(p);
+      if (S.mode === 'ground' && S.base === 'idle') player.set('surprised', true, () => player.set('happy', true, () => player.set(S.base)));
     }
 
     // ── 숨기기 ──
@@ -4170,6 +5064,7 @@
       finishWalk(false);
       cancelJump();
       abortClimb(true);
+      abortFly(false);
       hideHint();
       if (!silent && S.mode !== 'boot') {
         const c = petCenter();
@@ -4177,6 +5072,8 @@
       }
       flushLanding(false);
       S.mode = 'hidden';
+      S.brake = false;
+      updateFlames();
       S.press = null;
       root.classList.remove('fp-dragging');
       petEl.style.display = 'none';
@@ -4310,6 +5207,7 @@
       finishWalk(false);
       cancelJump();
       abortClimb(true);
+      abortFly(false);
       closeMenu(true);
       closeChat();
       hideHint();
@@ -4317,6 +5215,7 @@
       if (S.sleeping) S.sleeping = false;
       flushLanding(false);
       S.passThrough = false;
+      S.brake = false;
       S.mode = 'drag';
       S.surface = null;
       S.base = 'idle';
@@ -4359,6 +5258,8 @@
     on(hit, 'pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (S.mode === 'hidden' || S.mode === 'boot') return;
+      // 장면을 건너뛴 그 누름은 대화창 열기·끌기로 쓰지 않는다
+      if (now() - S.suitSkipT < 400) return;
       S.lastInput = now();
       const t = now();
       S.press = { id: e.pointerId, sx: e.clientX, sy: e.clientY, type: e.pointerType, dragging: false, samples: [{ t, x: e.clientX, y: e.clientY }], longTimer: 0, offX: S.x - e.clientX, offY: S.y - e.clientY, menuOpened: false };
@@ -4452,6 +5353,11 @@
         S.lastInput = now();
         if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) root.classList.remove('fp-mouse');
         if (e.key === 'Escape') {
+          if (S.suit) {
+            finishSuit(true);
+            e.stopPropagation();
+            return;
+          }
           if (closeTopmost()) e.stopPropagation();
           return;
         }
@@ -4484,6 +5390,11 @@
       (e) => {
         S.lastInput = now();
         root.classList.add('fp-mouse');
+        // 슈트 장착 장면은 아무 데나 눌러 건너뛴다
+        if (S.suit) {
+          S.suitSkipT = now();
+          finishSuit(true);
+        }
         const t = e.target;
         if (S.menu && !S.menu.contains(t)) closeMenu(true);
         if (chat.el && !chat.el.contains(t) && !hit.contains(t)) closeChat();
@@ -4574,11 +5485,15 @@
     function lookAround(tok) {
       return (async () => {
         if (S.base !== 'idle' || S.mode !== 'ground') return;
+        // 나는 캐릭터는 걷기 그림을 멈춰 세우는 대신 제자리에서 살짝 떠서 두리번거린다
+        const fly = flyer();
+        const look = player.resolve('walk');
         for (const f of [-1, 1]) {
           S.facing = f;
-          player.holdFrame('walk', 0);
+          if (!fly) player.holdFrame('walk', 0);
+          else if (player.name !== look) player.set('walk', true);
           if (!(await wait(650, tok))) {
-            if (player.hold >= 0 && player.name === 'walk' && !S.walk && S.mode === 'ground') player.set(S.base, true);
+            if ((player.hold >= 0 || fly) && player.name === look && !S.walk && S.mode === 'ground') player.set(S.base, true);
             return;
           }
         }
@@ -4605,6 +5520,8 @@
       const dir = S.x - r.left < r.right - S.x ? -1 : 1;
       const edgeX = dir < 0 ? r.left - 26 : r.right + 26;
       if (edgeX < 12 || edgeX > W() - 12) return wander();
+      // 나는 캐릭터는 가장자리에서 뛰어내리지 않고 그 너머 바닥으로 날아 내려간다
+      if (flyer()) return flyAndLand({ type: 'floor', x: edgeX + dir * rand(20, 90) }, tok);
       await walkTo(edgeX, { allowOff: true });
       if (tok === S.seq) await waitLanding();
     }
@@ -4620,6 +5537,30 @@
       const cands = nodes.filter((n) => n !== cur && n.type === 'perch');
       if (!cands.length) return wander();
       const weight = (n) => (n.col ? 0.8 : n.narrow ? 0.7 : 1.2) / (1 + Math.abs(n.top - S.y) / 500 + Math.abs((n.left + n.right) / 2 - S.x) / 900);
+      if (flyer()) {
+        // 나는 캐릭터는 길(사다리 수)을 따지지 않고 고른 면으로 날아간다
+        let total = 0;
+        for (const n of cands) total += weight(n);
+        let r = Math.random() * total;
+        let target = cands[0];
+        for (const n of cands) {
+          r -= weight(n);
+          if (r <= 0) {
+            target = n;
+            break;
+          }
+        }
+        const ok = await flyAndLand(perchTarget(target.el, S.x, true), tok, { sitAfter: true });
+        if (ok && tok === S.seq) {
+          const sf = curSurfaceInfo();
+          if (sf && sf.narrow) {
+            setBase('sit');
+            await wait(rand(8000, 16000), tok);
+            if (tok === S.seq && S.base === 'sit') setBase('idle');
+          }
+        }
+        return 'long';
+      }
       for (let tries = 0; tries < 4; tries++) {
         let total = 0;
         for (const n of cands) total += weight(n);
@@ -4662,11 +5603,13 @@
         : nodes.filter((n) => n !== cur && n.type === 'perch' && !n.col && Math.abs(n.top - cur.top) <= JUMP_DY && xGap(cur, n) <= 140 && !(n.el.contains(cur.el) || (cur.el && cur.el.contains(n.el))));
       if (!cands.length) return travelRandom(tok);
       const target = pick(cands);
+      if (flyer()) return flyAndLand(perchTarget(target.el, S.x, true), tok, { sitAfter: !!cur.col });
       const path = planPath(target.el);
       if (!path || !path.length || path.length > 2) return;
       await followPath(path, tok, { sitAfter: !!cur.col });
     }
     async function goDown(tok) {
+      if (flyer()) return flyAndLand({ type: 'floor', x: S.x + rand(-160, 160) }, tok);
       const path = planPath(null);
       if (path && path.length) await followPath(path, tok);
     }
@@ -4869,6 +5812,8 @@
       dt = Math.min(dt, 0.05);
       const t = now();
       invalidateCache();
+      // 다른 일(끌기·숨기기·새 흐름)이 장면을 끊었으면 상자·판을 치우고 바뀐 모습으로 둔다
+      if (S.suit && (S.suit.tok !== S.seq || S.mode !== 'suit')) finishSuit(false);
       // 설명하던 요소가 화면 이동으로 빠졌으면 그 말풍선은 닫는다
       if (bubble.visible && bubble.anchor && !bubble.anchor.isConnected) closeBubble('gone');
       if (S.mode === 'hidden') {
@@ -4882,11 +5827,15 @@
       else if (S.mode === 'climb') climbUpdate(dt, t);
       else if (S.mode === 'air') airUpdate(dt);
       else if (S.mode === 'jump') jumpUpdate(dt);
+      else if (S.mode === 'fly') flyUpdate(dt, t);
+      else if (S.mode === 'suit') suitTick(dt);
       let target = 0;
       if (S.mode === 'drag') {
         S.dragVx = S.dragVx * 0.8 + ((S.x - S.prevX) / Math.max(dt, 0.001)) * 0.2;
         target = clamp(S.dragVx * 0.03, -32, 32) + Math.sin(t / 170) * 3;
       } else if (S.mode === 'air') target = clamp(S.vx * 0.012, -14, 14);
+      // 날기 그림은 이미 앞으로 기울어 있으니, 그 그림이 없을 때만 몸을 날아가는 쪽으로 기울인다
+      else if (S.mode === 'fly' && S.fly && player.name !== 'fly') target = clamp(S.fly.vx * 0.012, -14, 14);
       if (reduced) {
         S.rot = 0;
         S.rotV = 0;
@@ -4906,6 +5855,7 @@
       brain(t);
       player.update(dt * 1000);
       render();
+      updateFlames();
       positionBubble();
       positionChat();
       positionHint(t);
@@ -4950,6 +5900,12 @@
         // read:<레코드 번호> — 그 항목을 읽은 결과(말풍선 없이)
         const el = findItemByCode(name.slice(5));
         return el ? readItem(el) : null;
+      }
+      if (typeof name === 'string' && name.startsWith('spot:')) {
+        // spot:<target 키> — 공중의 요소를 가리키러 설 자리 (면 키 · x · 비용)
+        const el = findTarget(name.slice(5));
+        const sp = el ? standSpotFor(el) : null;
+        return sp ? { surface: sp.c.type === 'floor' ? 'floor' : perchKey(sp.c.el) || 'perch', x: Math.round(sp.x), cost: Math.round(sp.cost) } : null;
       }
       switch (name) {
         case 'item': {
@@ -5021,6 +5977,7 @@
           const p = ps[0];
           if (!p) break;
           begin();
+          abortFly(false);
           S.x = clamp(p.left + (p.right - p.left) * 0.7, p.left, p.right);
           landOn({ type: 'perch', el: p.el, off: S.x - p.el.getBoundingClientRect().left }, p.top, true);
           if (name === 'sit') setBase('sit');
@@ -5029,6 +5986,7 @@
         }
         case 'drag':
           begin();
+          abortFly(false);
           S.mode = 'drag';
           S.surface = null;
           S.x -= 140;
@@ -5046,6 +6004,26 @@
           S.restUntil = Infinity;
           walkTo(S.x - 300);
           break;
+        case 'suitup': {
+          // 슈트 장착 장면 다시 보기: 지금 나는 캐릭터면 장착 전 캐릭터로 조용히 되돌린 뒤 다시 장착한다
+          const flyPack = S.pack && S.pack.movement === 'fly' ? S.pack : packs.find((q) => q.movement === 'fly' && !q._broken);
+          if (!flyPack) return false;
+          return (async () => {
+            if (S.pack.movement === 'fly') {
+              const base = packs.find((q) => q.id === S.suitFrom && q.movement !== 'fly') || packs.find((q) => q.movement !== 'fly' && !q._broken);
+              if (!base) return false;
+              await loadPack(base);
+              if (base._broken) return false;
+              if (S.suit) finishSuit(false);
+              applyPack(base);
+            }
+            return setCharacter(flyPack.id, true);
+          })();
+        }
+        case 'fly':
+          // 날기 동작이 없는 캐릭터도 날아서 옮기게 켜고 끈다 (불꽃 대체 확인용)
+          S.forceFly = !S.forceFly;
+          return flyer();
         default:
           break;
       }
@@ -5098,7 +6076,8 @@
       show: () => whenReady(() => show()),
       hide: () => whenReady(() => hide()),
       toggle: () => whenReady(() => toggleHidden()),
-      setCharacter: (id) => whenReady(() => setCharacter(id, true)),
+      // opt.transform === false: 슈트 장착 장면 없이 바로 바꾼다
+      setCharacter: (id, opt) => whenReady(() => setCharacter(id, true, opt)),
       goTo: (key) => whenReady(() => goTo(key)),
       explain: (key) => whenReady(() => {
         const el = findTarget(key);
@@ -5123,7 +6102,7 @@
       setSize: (k) => whenReady(() => setSize(k)),
       debug: (name) => whenReady(() => debugState(name)),
       characters: () => packs.map((p) => ({ id: p.id, name: p.name, desc: p.desc })),
-      state: () => ({ mode: S.mode, character: S.pack ? S.pack.id : null, size: S.sizeKey, roaming: S.roam, explain: S.explain, hidden: S.mode === 'hidden', usingGuide: guide.real, x: Math.round(S.x), y: Math.round(S.y), anim: player.name, surface: S.surface ? (S.surface.type === 'perch' ? perchKey(S.surface.el) || 'perch' : 'floor') : null, climb: S.climb ? S.climb.kind : null, ladders: root.querySelectorAll('.fp-ladder').length, screen: S.screen, tour: S.tour ? S.tour.kind : null, pendingScreen: S.pending ? S.pending.key : null, perches: S.pack ? listPerches(false).length : 0 }),
+      state: () => ({ mode: S.mode, character: S.pack ? S.pack.id : null, size: S.sizeKey, roaming: S.roam, explain: S.explain, hidden: S.mode === 'hidden', usingGuide: guide.real, x: Math.round(S.x), y: Math.round(S.y), anim: player.name, surface: S.surface ? (S.surface.type === 'perch' ? perchKey(S.surface.el) || 'perch' : 'floor') : null, climb: S.climb ? S.climb.kind : null, flying: S.mode === 'fly', suiting: !!S.suit, ladders: root.querySelectorAll('.fp-ladder').length, screen: S.screen, tour: S.tour ? S.tour.kind : null, pendingScreen: S.pending ? S.pending.key : null, perches: S.pack ? listPerches(false).length : 0 }),
     };
   }
 
@@ -5160,7 +6139,7 @@
     show: () => (inst ? inst.show() : none()),
     hide: () => (inst ? inst.hide() : none()),
     toggle: () => (inst ? inst.toggle() : none()),
-    setCharacter: (id) => (inst ? inst.setCharacter(id) : none()),
+    setCharacter: (id, opt) => (inst ? inst.setCharacter(id, opt) : none()),
     goTo: (key) => (inst ? inst.goTo(key) : none()),
     explain: (key) => (inst ? inst.explain(key) : none()),
     startTour: () => (inst ? inst.startTour() : none()),
@@ -5171,7 +6150,7 @@
     setRoaming: (v) => (inst ? inst.setRoaming(v) : none()),
     setExplain: (v) => (inst ? inst.setExplain(v) : none()),
     setSize: (k) => (inst ? inst.setSize(k) : none()),
-    /** 개발 확인용: 'ask:<질문>' | 'read:<번호>' | 'item' | 'term' | 'menu' | 'chat' |'chat-miss' | 'picker' | 'make' | 'hidden' | 'explain' | 'more' | 'tour' | 'sleep' | 'perch' | 'sit' | 'drag' | 'hint' | 'walk' */
+    /** 개발 확인용: 'ask:<질문>' | 'read:<번호>' | 'item' | 'term' | 'menu' | 'chat' |'chat-miss' | 'picker' | 'make' | 'hidden' | 'explain' | 'more' | 'tour' | 'sleep' | 'perch' | 'sit' | 'drag' | 'hint' | 'walk' | 'fly' | 'suitup' */
     debug: (name) => (inst ? inst.debug(name) : none()),
     characters: () => (inst ? inst.characters() : []),
     state: () => (inst ? inst.state() : null),
