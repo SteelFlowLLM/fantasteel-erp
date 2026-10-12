@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageDays, bucketByDate, countRatio, dueLabel, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
+import { ageDays, bucketByDate, countRatio, dueLabel, groupRepeatedEvents, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
 
 describe('대시보드 집계 계산', () => {
   it('비율: 소수 4자리, 분모 0이면 null', () => {
@@ -48,5 +48,26 @@ describe('대시보드 집계 계산', () => {
     ).toBe('0.9500');
     expect(weightedPlannedYield([{ inputTon: '100.000', plannedYieldRate: null }])).toBeNull();
     expect(weightedPlannedYield([])).toBeNull();
+  });
+});
+
+describe('최근 작업 로그 묶음', () => {
+  const row = (id: number, actorName: string, businessEventTypeLabel: string, isAiAssisted = false) => ({ id, actorType: 'USER' as const, actorName, businessEventTypeLabel, isAiAssisted });
+
+  it('바로 이어진 같은 주체·같은 작업만 묶고, 순서는 그대로 둔다', () => {
+    const groups = groupRepeatedEvents([
+      row(9, '신현우', '밀시트 발행'),
+      row(8, '신현우', '예약 전환'),
+      row(7, '신현우', '예약 전환'),
+      row(6, '신현우', '예약 전환'),
+      row(5, '박서영', '예약 전환'),
+      row(4, '신현우', '예약 전환'),
+    ]);
+    expect(groups.map((g) => g.map((r) => r.id))).toEqual([[9], [8, 7, 6], [5], [4]]);
+  });
+
+  it('AI 경유 여부가 다르면 따로 둔다', () => {
+    expect(groupRepeatedEvents([row(2, '신현우', '출고 확정', true), row(1, '신현우', '출고 확정')])).toHaveLength(2);
+    expect(groupRepeatedEvents([])).toEqual([]);
   });
 });

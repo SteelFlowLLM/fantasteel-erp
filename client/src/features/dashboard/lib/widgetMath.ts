@@ -1,6 +1,7 @@
 // 대시보드 위젯 집계 계산 (순수 함수, REQ-DSH-001·002).
 // 업무 규칙(가용·충족 현황·납기 위험·MRP 순소요·수율 계산식)은 core 서비스와 lib가 계산한다. 여기서는 위젯이 그 값을 묶는 방법만 둔다:
-// 비율(분모 0이면 없음), 최근 N일 기간과 날짜별 묶음, 보유 일수, 가중 평균 계획 수율.
+// 비율(분모 0이면 없음), 최근 N일 기간과 날짜별 묶음, 보유 일수, 가중 평균 계획 수율, 이어진 같은 작업 로그 묶음.
+import type { RecentEventRow } from '@/api/dashboard';
 import { decCmp, decDiv, decMul, decSum, RATE_DIGITS, TON_DIGITS, type DecimalInput } from '@/lib/decimal';
 import { addDays, daysBetween } from '@/lib/salesOrderStatus';
 
@@ -64,4 +65,26 @@ export function weightedPlannedYield(parts: readonly YieldPart[]): string | null
     6,
   );
   return ratioText(planned, input);
+}
+
+type EventGroupKey = Pick<RecentEventRow, 'actorType' | 'actorName' | 'businessEventTypeLabel' | 'isAiAssisted'>;
+
+/**
+ * 최근 작업 로그에서 바로 이어진(최신순) 같은 주체·같은 작업을 한 묶음으로 둔다 (예: 예약 전환 4건 → 한 줄 ×4).
+ * 사이에 다른 작업이 끼면 따로 묶는다: 순서를 바꾸지 않아야 최신순이 그대로 읽힌다.
+ */
+export function groupRepeatedEvents<T extends EventGroupKey>(rows: readonly T[]): T[][] {
+  const groups: T[][] = [];
+  for (const row of rows) {
+    const last = groups.at(-1)?.[0];
+    const same =
+      last !== undefined &&
+      last.actorType === row.actorType &&
+      last.actorName === row.actorName &&
+      last.businessEventTypeLabel === row.businessEventTypeLabel &&
+      last.isAiAssisted === row.isAiAssisted;
+    if (same) groups[groups.length - 1].push(row);
+    else groups.push([row]);
+  }
+  return groups;
 }
