@@ -344,10 +344,15 @@ describe('출하요청 (REQ-SHP-001)', () => {
     const soItem = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId } });
     const shippableOf = async () => (await shipments.listShippable(customerA)).find((i) => i.salesOrderItemId === soItem.id)?.shippableQty ?? 0;
     expect(await shippableOf()).toBe(6);
+    // 화면이 톤을 계산하고 강종을 보이도록 규격 값을 함께 준다 (기준정보 조회 권한이 없는 물류도)
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: itemId }, include: { steelGrade: true } });
+    const spec = { itemType: 'SLAB', theoreticalWeightTon: item.theoreticalWeightTon?.toFixed(3), steelGradeCode: item.steelGrade?.steelGradeCode ?? null };
+    expect((await shipments.listShippable(customerA)).find((i) => i.salesOrderItemId === soItem.id)).toMatchObject(spec);
 
     const first = await shipments.create(sales, { customerId: customerA, shipDate: '2026-10-10', items: [{ salesOrderItemId: soItem.id, requestQty: 4 }] });
     expect(first).toMatchObject({ shipmentRequestStatus: 'REQUESTED', shipDate: '2026-10-10', totalRequestQty: 4, items: [expect.objectContaining({ unallocatedQty: 4 })] });
     expect(first.shipmentRequestNo).toMatch(/^DR-\d{4}-\d{4}$/);
+    expect(first.items[0]).toMatchObject(spec);
     expect(await shippableOf()).toBe(2);
     expect(await codeOf(shipments.create(sales, { customerId: customerA, items: [{ salesOrderItemId: soItem.id, requestQty: 3 }] }))).toBe('SHP-002');
     expect(await codeOf(shipments.create(sales, { customerId: customerB, items: [{ salesOrderItemId: soItem.id, requestQty: 1 }] }))).toBe('COM-004');
@@ -381,15 +386,19 @@ describe('LOT 배정 (REQ-INV-006·009)', () => {
     const itemId = await nextSlabItemId();
     const newer = await addSlabs(itemId, 1, { producedDate: '2026-09-20' });
     const older = await addSlabs(itemId, 2, { producedDate: '2026-09-05' });
-    const { salesOrderId, requestItemId } = await requestFor(itemId, 2);
+    const { salesOrderId, request, requestItemId } = await requestFor(itemId, 2);
+    const yard = await prisma.yard.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    await prisma.lot.update({ where: { id: older[0].id }, data: { yardId: yard.id } });
 
     const before = await prisma.allocation.count();
     const recommendation = await inventory.recommendAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: requestItemId });
-    expect(recommendation.candidates.map((c) => [c.lotNo, c.isRecommended])).toEqual([
-      [older[0].lotNo, true],
-      [older[1].lotNo, true],
-      [newer[0].lotNo, false],
+    expect(recommendation.candidates.map((c) => [c.lotNo, c.isRecommended, c.yardName])).toEqual([
+      [older[0].lotNo, true, yard.yardName],
+      [older[1].lotNo, true, null],
+      [newer[0].lotNo, false, null],
     ]);
+    const [listed] = await inventory.listShipmentCandidates(sales, request.id);
+    expect(listed.candidates.map((c) => c.yardName)).toEqual([yard.yardName, null, null]);
     expect(await prisma.allocation.count()).toBe(before);
     const event = await prisma.businessEvent.findFirstOrThrow({ where: { salesOrderId, businessEventType: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED }, include: { businessEventLots: true } });
     expect(event.businessEventLots.map((l) => l.lotId).sort()).toEqual([older[0].id, older[1].id].sort());
@@ -405,6 +414,13 @@ describe('LOT 배정 (REQ-INV-006·009)', () => {
     const [second] = await inventory.confirmAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: requestItemId, lotIds: [lots[1].id] });
     const allocated = await shipments.findOne(sales, request.id);
     expect(allocated).toMatchObject({ shipmentRequestStatus: 'ALLOCATED', items: [expect.objectContaining({ unallocatedQty: 0 })] });
+    const yard = await prisma.yard.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    await prisma.lot.update({ where: { id: lots[1].id }, data: { yardId: yard.id } });
+    const views = await inventory.listAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestId: request.id });
+    expect(views.map((v) => [v.lotId, v.yardName])).toEqual([
+      [lots[0].id, null],
+      [lots[1].id, yard.yardName],
+    ]);
     expect(allocated.items[0].allocations).toHaveLength(2);
     expect(await codeOf(inventory.confirmAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: requestItemId, lotIds: [lots[2].id] }))).toBe('INV-001');
 

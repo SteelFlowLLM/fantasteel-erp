@@ -27,6 +27,9 @@ const request = (over: Partial<ShipmentRequestDetail> = {}): ShipmentRequestDeta
       itemId: 61,
       itemCode: 'CL-SS275-8x1500',
       itemName: '열연코일 SS275 8x1500',
+      itemType: 'COIL',
+      theoreticalWeightTon: '20.000',
+      steelGradeCode: 'SS275',
       requestQty: 2,
       unallocatedQty: 0,
       allocations: [

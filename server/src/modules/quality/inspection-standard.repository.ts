@@ -13,7 +13,7 @@ const standardWithItemsSelect = {
   versionNo: true,
   processType: true,
   createdAt: true,
-  steelGrade: { select: { id: true, steelGradeCode: true } },
+  steelGrade: { select: { id: true, steelGradeCode: true, standardNo: true } },
   // ERD에 표시 순서 컬럼이 없어 등록 순서(id)로 보여 준다
   inspectionStandardItems: {
     orderBy: { id: 'asc' },

@@ -40,6 +40,7 @@
 - 다른 초안 행(`/api/…`): `GET shipment-requests/shippable`(출하 가능 품목 조회), `PATCH shipment-requests/:id/cancel`. 취소는 [05] 5장에 따라 POST.
 - "또는" 권한은 데코레이터 없이 service에서 `hasPermission`으로 확인한다.
 - 배정 추천·확정·해제는 inventory 모듈 `allocations/*`(purpose = SHIPMENT).
+- 출하요청 상세의 품목과 출하 가능 품목은 규격의 유형·1매 이론중량·강종(`itemType`·`theoreticalWeightTon`·`steelGradeCode`)을 함께 준다. 화면이 요청 톤(매수 × 이론중량)을 계산하는데, 물류는 기준정보 조회 권한이 없어 규격 목록을 읽지 못한다.
 - [권한표]: 영업 SHIPMENT_REQUEST_MANAGE USE·GOODS_ISSUE_CONFIRM·MILL_SHEET_READ VIEW / 물류 GOODS_ISSUE_CONFIRM·MILL_SHEET_READ USE·SHIPMENT_REQUEST_MANAGE VIEW / 품질 출고·밀시트 VIEW / 관리자 VIEW.
 
 ## 4. 업무 규칙

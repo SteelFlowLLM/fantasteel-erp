@@ -30,8 +30,8 @@ function useServer(respond: (call: Call) => Response) {
 }
 
 const page = (items: InspectionStandardListItem[]) => ok({ items, page: 1, size: 100, total: items.length });
-/** 강종 목록 (적용 규격 번호) */
-const grades = () => ok([{ id: 902, steelGradeCode: 'SM355A', steelGradeName: 'SM355A', standardNo: 'KS D 3515:2018' }]);
+/** 상세 응답의 강종 적용 규격 번호 */
+const standardNo = 'KS D 3515:2018';
 
 function serverStandard(overrides: Partial<InspectionStandardListItem> = {}): InspectionStandardListItem {
   return {
@@ -128,10 +128,10 @@ describe('검사 기준 서버 모드: 조회', () => {
       { inspectionStandardId: 501, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 2, inspectionCount: 3 },
       { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
     ];
-    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), inspectionCount: 3, versions }) : c.path === '/steel-grades' ? grades() : fail(404, 'COM-003', '없음')));
+    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), standardNo, inspectionCount: 3, versions }) : fail(404, 'COM-003', '없음')));
     const detail = await inspectionStandardApi.get(501);
     // 목록을 다시 읽지 않는다 (버전 1이라 앞 버전도 없다). 적용 규격 번호는 강종 목록에서
-    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501', '/steel-grades']);
+    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501']);
     expect(detail).toMatchObject({
       id: 501,
       version: 1,
@@ -159,9 +159,8 @@ describe('검사 기준 서버 모드: 조회', () => {
       { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
     ];
     useServer((c) => {
-      if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), inspectionCount: 0, versions });
-      if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), inspectionCount: 3, versions });
-      if (c.path === '/steel-grades') return grades();
+      if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), standardNo, inspectionCount: 0, versions });
+      if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), standardNo, inspectionCount: 3, versions });
       return fail(404, 'COM-003', '없음');
     });
     const detail = await inspectionStandardApi.get(520);

@@ -157,7 +157,7 @@
 | Method | Path | 권한 | 내용 |
 | --- | --- | --- | --- |
 | GET | `production-plans` | PLAN VIEW | 목록. 필터 `productionPlanStatus`·`itemType`·`salesOrderId`·`isReproduction`, 페이징 |
-| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단 |
+| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단. 목록·상세는 계획 규격의 1매 이론중량(`theoreticalWeightTon`, 편성을 계산할 수 없어도 보인다), 편성표는 슬래브 규격 이름(`slabItemName`)을 함께 준다 |
 | POST | `production-plans` | PLAN USE | 재생산 계획 `{ salesOrderItemId }` |
 | POST | `production-plans/:id/heat-preview` | PLAN USE | 편성 계산(저장 안 함) |
 | POST | `production-plans/:id/confirm` | PLAN USE | PLANNED에서 히트 수를 지금 기준정보로 다시 계산해 저장. 이벤트 없음(06에 없음) |
