@@ -39,7 +39,7 @@ import { fmtDate, fmtDateTime, fmtDims, fmtTon, trimNum } from '@/lib/format';
 
 function RelatedLotRow({ lot, direction }: { lot: RelatedLot; direction: TraceDirection }) {
   return (
-    <li className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+    <li data-pet-item="lot" data-pet-item-title={lot.lotNo} className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
       <LinkId href={lotTraceHref(lot.lotNo, direction)}>{lot.lotNo}</LinkId>
       <Tag>{lot.rawMaterialType === 'FERROALLOY' ? RAW_MATERIAL_TYPE_LABEL.FERROALLOY : LOT_TYPE_LABEL[lot.lotType]}</Tag>
       {lot.lotRelationEvidence === 'PERIOD_BASED' ? (
@@ -59,7 +59,7 @@ function RelatedLotRow({ lot, direction }: { lot: RelatedLot; direction: TraceDi
 function InspectionBlock({ inspection, lotId }: { inspection: LotInspectionView; lotId: number }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="overflow-hidden rounded-sm border border-line">
+    <div data-pet-item="qualityInspection" data-pet-item-title={`${PROCESS_TYPE_LABEL[inspection.processType]} 품질검사`} className="overflow-hidden rounded-sm border border-line">
       <button
         type="button"
         aria-expanded={open}
@@ -69,11 +69,11 @@ function InspectionBlock({ inspection, lotId }: { inspection: LotInspectionView;
         <Tag>{PROCESS_TYPE_LABEL[inspection.processType]}</Tag>
         <InspectionBadge result={inspection.inspectionResult} />
         {inspection.inspectionStandardCode ? (
-          <span className="truncate font-mono text-cap text-ink-3" title="판정에 쓴 검사 기준">
+          <span data-pet-field="검사 기준" className="truncate font-mono text-cap text-ink-3" title="판정에 쓴 검사 기준">
             {inspection.inspectionStandardCode} v{inspection.standardVersion}
           </span>
         ) : null}
-        <span className="ml-auto text-cap text-ink-3 tabular-nums">{fmtDateTime(inspection.inspectedAt)}</span>
+        <span data-pet-field="검사 시각" className="ml-auto text-cap text-ink-3 tabular-nums">{fmtDateTime(inspection.inspectedAt)}</span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" />
       </button>
       {open ? (
@@ -96,7 +96,7 @@ function InspectionBlock({ inspection, lotId }: { inspection: LotInspectionView;
               </thead>
               <tbody>
                 {inspection.values.map((v) => (
-                  <tr key={v.id} data-risk={v.isPassed === false || undefined}>
+                  <tr key={v.id} data-pet-item="qualityInspectionValue" data-pet-item-title={v.inspectionItemName} data-risk={v.isPassed === false || undefined}>
                     <Td className="px-2">{v.inspectionItemName}</Td>
                     <Td className="px-2 text-ink-3">
                       {trimNum(v.minValue) || '-'} ~ {trimNum(v.maxValue) || '-'}
@@ -171,7 +171,9 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
   return (
     <>
       <div className="flex min-h-0 flex-col gap-3.5 overflow-auto px-4 py-3">
-        <KvList items={rows} />
+        <div data-pet-item="lot" data-pet-item-title={lot.lotNo}>
+          <KvList items={rows} />
+        </div>
         {lot.disposition ? (
           <PanelSection title="불합격 상태">
             <KvList
@@ -187,7 +189,12 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
           <PanelSection title="배정" meta={`${lot.allocations.length}건`}>
             <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
               {lot.allocations.map((a) => (
-                <li key={a.id} className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+                <li
+                  key={a.id}
+                  data-pet-item="allocation"
+                  data-pet-item-title={a.shipmentRequest?.shipmentRequestNo ?? a.productionPlan?.productionPlanNo ?? a.salesOrder?.salesOrderNo ?? ALLOCATION_PURPOSE_LABEL[a.allocationPurpose]}
+                  className="flex min-w-0 flex-wrap items-center gap-2 text-xs"
+                >
                   <Tag>{ALLOCATION_PURPOSE_LABEL[a.allocationPurpose]}</Tag>
                   <AllocationStatusBadge status={a.allocationStatus} />
                   {a.salesOrder ? (
@@ -197,7 +204,7 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
                   ) : null}
                   {a.shipmentRequest ? <LinkId href={`/shipment-requests/${a.shipmentRequest.id}`}>{a.shipmentRequest.shipmentRequestNo}</LinkId> : null}
                   {a.productionPlan ? <LinkId href={`/production/plans?plan=${a.productionPlan.id}`}>{a.productionPlan.productionPlanNo}</LinkId> : null}
-                  <span className="ml-auto text-cap text-ink-3 tabular-nums">{fmtDateTime(a.confirmedAt)}</span>
+                  <span data-pet-field="확정 시각" className="ml-auto text-cap text-ink-3 tabular-nums">{fmtDateTime(a.confirmedAt)}</span>
                 </li>
               ))}
             </ul>
@@ -206,37 +213,38 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
         {lot.shipments.length ? (
           <PanelSection title="출하·밀시트">
             {lot.shipments.map((s) => (
-              <KvList
-                key={s.shipmentRequestId}
-                items={[
-                  {
-                    label: '출하요청',
-                    value: (
-                      <span className="inline-flex items-center gap-2">
-                        <LinkId href={`/shipment-requests/${s.shipmentRequestId}`}>{s.shipmentRequestNo}</LinkId>
-                        <ShipmentStatusBadge status={s.shipmentRequestStatus} />
-                      </span>
-                    ),
-                  },
-                  { label: '출고 일시', value: <span className="tabular-nums">{s.issuedAt ? fmtDateTime(s.issuedAt) : '출고 전'}</span> },
-                  { label: '수주', value: s.salesOrder ? <LinkId href={`/sales-orders/${s.salesOrder.salesOrderId}`}>{s.salesOrder.salesOrderNo}</LinkId> : '-' },
-                  { label: '고객사', value: s.customerName },
-                  {
-                    label: '밀시트',
-                    value: s.millSheets.length ? (
-                      <span className="inline-flex flex-wrap gap-2">
-                        {s.millSheets.map((m) => (
-                          <LinkId key={m.id} href={`/mill-sheets?id=${m.id}`}>
-                            {m.millSheetNo}
-                          </LinkId>
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="text-ink-3">발행 전</span>
-                    ),
-                  },
-                ]}
-              />
+              <div key={s.shipmentRequestId} data-pet-item="shipmentRequest" data-pet-item-title={s.shipmentRequestNo}>
+                <KvList
+                  items={[
+                    {
+                      label: '출하요청',
+                      value: (
+                        <span className="inline-flex items-center gap-2">
+                          <LinkId href={`/shipment-requests/${s.shipmentRequestId}`}>{s.shipmentRequestNo}</LinkId>
+                          <ShipmentStatusBadge status={s.shipmentRequestStatus} />
+                        </span>
+                      ),
+                    },
+                    { label: '출고 일시', value: <span className="tabular-nums">{s.issuedAt ? fmtDateTime(s.issuedAt) : '출고 전'}</span> },
+                    { label: '수주', value: s.salesOrder ? <LinkId href={`/sales-orders/${s.salesOrder.salesOrderId}`}>{s.salesOrder.salesOrderNo}</LinkId> : '-' },
+                    { label: '고객사', value: s.customerName },
+                    {
+                      label: '밀시트',
+                      value: s.millSheets.length ? (
+                        <span className="inline-flex flex-wrap gap-2">
+                          {s.millSheets.map((m) => (
+                            <LinkId key={m.id} href={`/mill-sheets?id=${m.id}`}>
+                              {m.millSheetNo}
+                            </LinkId>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="text-ink-3">발행 전</span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
             ))}
           </PanelSection>
         ) : null}
@@ -244,7 +252,7 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
           <PanelSection title="바로 연결된 LOT" meta={`위 ${lot.parents.length} · 아래 ${lot.children.length}`}>
             {lot.parents.length ? (
               <>
-                <span className="text-cap text-ink-3">위 (상위)</span>
+                <span data-pet-term="위 (상위)" className="text-cap text-ink-3">위 (상위)</span>
                 <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                   {lot.parents.map((p) => (
                     <RelatedLotRow key={p.relationId} lot={p} direction={direction} />
@@ -254,7 +262,7 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
             ) : null}
             {lot.children.length ? (
               <>
-                <span className="text-cap text-ink-3">아래 (하위)</span>
+                <span data-pet-term="아래 (하위)" className="text-cap text-ink-3">아래 (하위)</span>
                 <ul className="m-0 flex max-h-[180px] list-none flex-col gap-1.5 overflow-auto p-0">
                   {lot.children.map((c) => (
                     <RelatedLotRow key={c.relationId} lot={c} direction={direction} />
@@ -289,7 +297,7 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
 export function LotDetailPanel({ lotId, direction, onReroot, header }: { lotId: number; direction: TraceDirection; onReroot: (lotNo: string) => void; header?: ReactNode }) {
   const query = useLotDetail(lotId);
   return (
-    <Card className="min-h-0 flex-[1_1_auto]">
+    <Card className="min-h-0 flex-[1_1_auto]" petKey="card:lotTrace.detail">
       <CardHead
         title="LOT 상세"
         actions={

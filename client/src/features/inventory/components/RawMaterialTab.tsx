@@ -22,7 +22,7 @@ export function RawMaterialTab() {
         const selected = data.find((r) => r.itemId === selectedId) ?? data[0] ?? null;
         return (
           <>
-            <Card className="flex-none overflow-x-auto">
+            <Card petKey="card:inventories.raw" className="flex-none overflow-x-auto">
               <CardHead title="원료별 재고" meta={`${data.length}종 · 줄을 누르면 아래에 원료 LOT이 보여요`} />
               <Table>
                 <thead>
@@ -44,6 +44,8 @@ export function RawMaterialTab() {
                   {data.map((r) => (
                     <tr
                       key={r.itemId}
+                      data-pet-item="rawMaterial"
+                      data-pet-item-title={r.itemName}
                       data-selected={selected?.itemId === r.itemId || undefined}
                       className="cursor-pointer"
                       onClick={() => setSelectedId(r.itemId)}
@@ -88,7 +90,7 @@ export function RawMaterialTab() {
 
 function RawMaterialLots({ row }: { row: RawMaterialInventoryView }) {
   return (
-    <Card className="flex-none overflow-x-auto">
+    <Card petKey="card:inventories.rawLots" className="flex-none overflow-x-auto">
       <CardHead title={`${row.itemName} LOT`} meta={`${row.lots.length}건 · 입고일 오래된 순 (선입선출 순)`} />
       <Table compact>
         <thead>
@@ -105,7 +107,7 @@ function RawMaterialLots({ row }: { row: RawMaterialInventoryView }) {
         </thead>
         <tbody>
           {row.lots.map((lot) => (
-            <tr key={lot.lotId} data-muted={lot.lotStatus !== 'AVAILABLE' || undefined}>
+            <tr key={lot.lotId} data-pet-item="lot" data-pet-item-title={lot.lotNo} data-muted={lot.lotStatus !== 'AVAILABLE' || undefined}>
               <Td>
                 <LotNoLink lotNo={lot.lotNo} />
               </Td>

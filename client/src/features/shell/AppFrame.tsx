@@ -3,6 +3,7 @@
 // B안 셸 틀: 어두운 아이콘 레일 + 상단 바 + 본문(+ 넓은 AI 패널)
 import { useCallback, useState, type ReactNode } from 'react';
 import { AiPanel } from '@/features/shell/AiPanel';
+import { PetMount } from '@/features/shell/PetMount';
 import { Rail } from '@/features/shell/Rail';
 import { RouteGuard } from '@/features/shell/RouteGuard';
 import { ShellTitleContext, type ShellTitle } from '@/features/shell/ShellTitleContext';
@@ -28,6 +29,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
           {aiPanelOpen ? <AiPanel /> : null}
         </div>
       </div>
+      <PetMount />
     </div>
   );
 }

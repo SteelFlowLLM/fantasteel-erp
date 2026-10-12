@@ -59,21 +59,27 @@ export function MasterDataScreen() {
         {canEdit ? null : <ReadOnlyHint className="ml-auto" permissions={[PERMISSION.MASTER_MANAGE]} />}
       </div>
       {/* 준비 상태는 서버 API가 없어 서버 모드에서 숨긴다 */}
-      {isMasterServerMode() ? null : <ReadinessBanner onGoTab={goTab} />}
-      <Tabs
-        ariaLabel="기준정보 영역"
-        items={TABS.map((t) => ({
-          key: t.key,
-          label: (
-            <>
-              <Icon name={t.icon} size="sm" />
-              {t.label}
-            </>
-          ),
-        }))}
-        active={tab}
-        onChange={goTab}
-      />
+      {isMasterServerMode() ? null : (
+        <div data-pet-target="card:masterData.readiness" className="flex-none">
+          <ReadinessBanner onGoTab={goTab} />
+        </div>
+      )}
+      <div data-pet-target="card:masterData.tabs" className="flex-none">
+        <Tabs
+          ariaLabel="기준정보 영역"
+          items={TABS.map((t) => ({
+            key: t.key,
+            label: (
+              <>
+                <Icon name={t.icon} size="sm" />
+                <span data-pet-term={t.label}>{t.label}</span>
+              </>
+            ),
+          }))}
+          active={tab}
+          onChange={goTab}
+        />
+      </div>
       <div className="flex min-h-0 flex-col gap-4">
         {tab === 'specs' ? <ProductSpecTab canEdit={canEdit} onGoTab={goTab} /> : null}
         {tab === 'mapping' ? <SpecMappingTab canEdit={canEdit} /> : null}

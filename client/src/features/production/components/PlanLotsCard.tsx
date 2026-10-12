@@ -37,12 +37,12 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
   const rows = lots.filter((l) => l.lotType === type);
   const visible = showAll ? rows : rows.slice(0, SHOW_LIMIT);
   return (
-    <Card>
+    <Card petKey="card:productionPlans.lots">
       <CardHead
         title="생산 LOT"
         meta={`${lots.length}개`}
         actions={TYPES.map((t) => (
-          <Chip key={t} on={t === type} onClick={() => setPicked(t)} disabled={!present.includes(t)}>
+          <Chip key={t} on={t === type} onClick={() => setPicked(t)} disabled={!present.includes(t)} data-pet-term={`${LOT_TYPE_LABEL[t]} LOT`}>
             {LOT_TYPE_LABEL[t]} <b>{lots.filter((l) => l.lotType === t).length}</b>
           </Chip>
         ))}
@@ -66,7 +66,7 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
               </thead>
               <tbody>
                 {visible.map((lot) => (
-                  <tr key={lot.id} data-risk={lot.quality === 'FAIL' || lot.quality === 'HEAT_FAILED' ? true : undefined}>
+                  <tr key={lot.id} data-risk={lot.quality === 'FAIL' || lot.quality === 'HEAT_FAILED' ? true : undefined} data-pet-item="lot" data-pet-item-title={lot.lotNo}>
                     <Td>
                       <Link href={`/lots/trace?lot=${encodeURIComponent(lot.lotNo)}`} className="font-mono text-mono text-run hover:underline">
                         {lot.lotNo}

@@ -20,11 +20,16 @@ const MAX_LOT_LINKS = 12;
 
 export function ActorChip({ event }: { event: BusinessEventView }) {
   if (event.actorType === 'SYSTEM' || !event.actor) {
-    return <span className="inline-flex min-h-5 flex-none items-center rounded-xs bg-surface-3 px-1.5 text-xs font-semibold text-ink-2">{ACTOR_TYPE_LABEL.SYSTEM}</span>;
+    return (
+      <span data-pet-field="주체" className="inline-flex min-h-5 flex-none items-center rounded-xs bg-surface-3 px-1.5 text-xs font-semibold text-ink-2">
+        {ACTOR_TYPE_LABEL.SYSTEM}
+      </span>
+    );
   }
   const a = event.actor;
   return (
     <span
+      data-pet-field="주체"
       className="inline-flex min-h-5 flex-none items-center gap-1 rounded-xs bg-run-bg px-1.5 text-xs font-semibold text-run"
       title={`${a.employeeName} · ${a.departmentName} ${a.jobGradeName} (${a.employeeNo})`}
     >
@@ -89,7 +94,11 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
   const tone = eventTone(event);
   const detailId = `event-detail-${event.id}`;
   return (
-    <li className="relative grid grid-cols-[18px_minmax(0,1fr)] gap-x-2.5 pb-1.5 before:absolute before:top-3.5 before:bottom-0 before:left-2 before:w-0.5 before:bg-line before:content-[''] last:before:hidden">
+    <li
+      data-pet-item="businessEvent"
+      data-pet-item-title={event.eventNo}
+      className="relative grid grid-cols-[18px_minmax(0,1fr)] gap-x-2.5 pb-1.5 before:absolute before:top-3.5 before:bottom-0 before:left-2 before:w-0.5 before:bg-line before:content-[''] last:before:hidden"
+    >
       <span className={cn('relative z-[1] mt-[5px] size-[18px] rounded-full border-2', open && 'mt-[9px]', EVENT_TONE_DOT[tone])} />
       <div className={cn('min-w-0', open && 'overflow-hidden rounded-md border border-[#b9cbdd] bg-surface')}>
         <div
@@ -111,29 +120,33 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
             open && 'min-h-9 rounded-none bg-brand-tint px-2 hover:bg-brand-tint-hover',
           )}
         >
-          <time className="w-[38px] flex-none text-xs text-ink-3 tabular-nums" dateTime={event.occurredAt}>
+          <time data-pet-field="일시" className="w-[38px] flex-none text-xs text-ink-3 tabular-nums" dateTime={event.occurredAt}>
             {fmtHM(event.occurredAt)}
           </time>
           <ActorChip event={event} />
-          <b className="flex-none font-semibold">{event.businessEventTypeLabel}</b>
-          <span className="flex max-w-[45%] min-w-0 flex-none items-center gap-1.5 truncate">
+          <b data-pet-field="유형" className="flex-none font-semibold">
+            {event.businessEventTypeLabel}
+          </b>
+          <span data-pet-field="대상" className="flex max-w-[45%] min-w-0 flex-none items-center gap-1.5 truncate">
             {/* 유형과 대상 이름이 같으면(예: 예약 · 예약) 대상 이름은 한 번만 */}
             {event.targetTypeLabel !== event.businessEventTypeLabel ? <span className="text-xs text-ink-3">{event.targetTypeLabel}</span> : null}
             <TargetLink event={event} />
           </span>
           {event.reasonText ? (
-            <span className="min-w-0 flex-1 truncate text-xs text-ink-2" title={event.reasonText}>
+            <span data-pet-field="사유" className="min-w-0 flex-1 truncate text-xs text-ink-2" title={event.reasonText}>
               {event.reasonText}
             </span>
           ) : null}
-          <span className="ml-auto flex-none font-mono text-cap text-ink-3">{event.eventNo}</span>
+          <span data-pet-field="작업 로그 번호" className="ml-auto flex-none font-mono text-cap text-ink-3">
+            {event.eventNo}
+          </span>
           <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" className="flex-none text-ink-3" />
         </div>
         {open ? (
           <div id={detailId}>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)] border-t border-[#d5e0ea] max-[1100px]:grid-cols-1">
               <div className="flex min-w-0 flex-col gap-1.5 border-r border-line px-3 py-2.5 max-[1100px]:border-r-0 max-[1100px]:border-b">
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-ink-2">
+                <span data-pet-term="당시 기록" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-2">
                   <Icon name="history" size="sm" className="text-brand" /> 당시 기록
                 </span>
                 <Kv
@@ -171,7 +184,9 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
                 />
               </div>
               <div className="flex min-w-0 flex-col gap-1.5 border-r border-line px-3 py-2.5 max-[1100px]:border-r-0 max-[1100px]:border-b">
-                <span className="text-xs font-semibold text-ink-2">사유·근거</span>
+                <span data-pet-term="사유·근거" className="text-xs font-semibold text-ink-2">
+                  사유·근거
+                </span>
                 {event.reasonCode || event.reasonText || event.messageId || event.actionDraftId ? (
                   <Kv
                     items={[
@@ -212,12 +227,16 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
                 )}
               </div>
               <div className="flex min-w-0 flex-col gap-1.5 px-3 py-2.5">
-                <span className="text-xs font-semibold text-ink-2">변경 전 → 변경 후</span>
+                <span data-pet-term="변경 전 → 변경 후" className="text-xs font-semibold text-ink-2">
+                  변경 전 → 변경 후
+                </span>
                 <DiffTable event={event} />
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2.5 border-t border-line bg-surface-2 px-3 py-2 text-xs">
-              <span className="text-cap text-ink-3">관련 LOT</span>
+              <span data-pet-term="관련 LOT" className="text-cap text-ink-3">
+                관련 LOT
+              </span>
               {lots.map((lot) => (
                 <LinkId key={lot.id} href={lotTraceHref(lot.lotNo)} title={LOT_TYPE_LABEL[lot.lotType]}>
                   {lot.lotNo}

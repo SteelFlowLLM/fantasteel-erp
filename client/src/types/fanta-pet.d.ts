@@ -1,0 +1,38 @@
+// 화면 도우미 펫 엔진(public/pet/pet-engine.js)이 window에 두는 것
+interface FantaPetMountOptions {
+  characters?: unknown[];
+  guide?: unknown;
+  defaultCharacter?: string;
+  character?: string | null;
+  storageKey?: string;
+  firstVisit?: boolean;
+  hint?: string | false;
+  zIndex?: number;
+  container?: HTMLElement;
+  /** 인사에 쓰는 로그인 사원 */
+  user?: { name: string; gradeName: string; departmentName: string; roleCode: string };
+  /** 처음 붙을 때의 화면(SCREEN 키) */
+  screen?: string | null;
+  /** SCREEN 키 → 주소 */
+  screenHrefs?: Record<string, string>;
+  /** '이 화면으로 가기'를 누르면 부른다 */
+  navigate?: (href: string) => void;
+}
+interface FantaPetApi {
+  mount(options?: FantaPetMountOptions): FantaPetApi;
+  destroy(): void;
+  say(text: string): Promise<string>;
+  show(): Promise<unknown>;
+  hide(): Promise<unknown>;
+  setCharacter(id: string): Promise<boolean>;
+  goTo(targetKey: string): Promise<boolean>;
+  explain(targetKey: string): Promise<boolean>;
+  startTour(): Promise<boolean>;
+  /** 화면이 바뀌면 부른다(SCREEN 키, 모르는 화면이면 null). 처음 온 화면이면 그 화면 안내를 한다. */
+  setScreen?(screenKey: string | null): void;
+  /** 그 화면(기본: 지금 화면)의 안내를 다시 한다 */
+  startScreenTour?(screenKey?: string): Promise<boolean>;
+}
+interface Window {
+  FantaPet?: FantaPetApi;
+}

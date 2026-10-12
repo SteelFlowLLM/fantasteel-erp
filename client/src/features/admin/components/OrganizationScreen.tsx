@@ -67,29 +67,31 @@ export function OrganizationScreen() {
           ) : null}
         </div>
       </div>
-      <Tabs
-        ariaLabel="부서·직급·권한"
-        active={tab}
-        onChange={changeTab}
-        items={[
-          { key: 'departments', label: '부서', count: departments.data?.length },
-          { key: 'job-grades', label: '직급', count: jobGrades.data?.length },
-          {
-            key: 'permissions',
-            label: (
-              <>
-                권한
-                {changeCount > 0 ? (
-                  <Badge tone="wait" plain>
-                    변경 {changeCount}
-                  </Badge>
-                ) : null}
-              </>
-            ),
-          },
-          { key: 'org-chart', label: '조직도' },
-        ]}
-      />
+      <div data-pet-target="card:organization.tabs" className="flex-none">
+        <Tabs
+          ariaLabel="부서·직급·권한"
+          active={tab}
+          onChange={changeTab}
+          items={[
+            { key: 'departments', label: <span data-pet-term="부서">부서</span>, count: departments.data?.length },
+            { key: 'job-grades', label: <span data-pet-term="직급">직급</span>, count: jobGrades.data?.length },
+            {
+              key: 'permissions',
+              label: (
+                <>
+                  <span data-pet-term="권한">권한</span>
+                  {changeCount > 0 ? (
+                    <Badge tone="wait" plain>
+                      변경 {changeCount}
+                    </Badge>
+                  ) : null}
+                </>
+              ),
+            },
+            { key: 'org-chart', label: <span data-pet-term="조직도">조직도</span> },
+          ]}
+        />
+      </div>
       {tab === 'departments' ? <DepartmentTab canEdit={canEdit} /> : null}
       {tab === 'job-grades' ? <JobGradeTab /> : null}
       {tab === 'permissions' ? <PermissionMatrixTab canEdit={canEdit} draft={draft} onDraftChange={setDraft} highlightRole={highlightRole} /> : null}

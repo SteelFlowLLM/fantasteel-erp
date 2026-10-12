@@ -140,7 +140,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         {detail.itemName} · <b className="font-semibold tabular-nums">{fmtTon(detail.requestedTon)}</b> · {detail.requesterName ?? '-'} · {fmtDateTime(detail.createdAt)} 등록
       </p>
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.progress">
         <CardBody className="gap-2">
           <Steps items={stepsOf(detail)} />
           <span className="text-xs text-ink-2">{stageText(detail)}</span>
@@ -149,11 +149,11 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
 
       {status === 'REJECTED' ? (
         <Banner tone="danger">
-          <b>반려 사유</b> · {detail.rejectReason ?? '사유가 기록되지 않았어요'}
+          <b data-pet-term="반려 사유">반려 사유</b> · {detail.rejectReason ?? '사유가 기록되지 않았어요'}
         </Banner>
       ) : null}
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.detail">
         <CardHead title="요청 내용" meta={REQUISITION_SOURCE_LABEL[detail.source]} />
         <CardBody>
           <KvList
@@ -188,17 +188,19 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         </CardBody>
       </Card>
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.source">
         <CardHead title="출처" meta={REQUISITION_SOURCE_LABEL[detail.source]} />
         <CardBody>
           {detail.source === 'MESSAGE' ? (
             detail.sourceDraft?.message ? (
-              <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 px-3.5 py-3">
-                <span className="text-cap text-ink-3">
+              <div data-pet-item="message" data-pet-item-title={`초안 #${detail.sourceDraft.id} 원본 메시지`} className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 px-3.5 py-3">
+                <span data-pet-field="채팅방" className="text-cap text-ink-3">
                   {detail.sourceDraft.message.chatRoomName ?? '채팅방'} · {detail.sourceDraft.message.senderName ?? '-'} · {fmtDateTime(detail.sourceDraft.message.createdAt)}
                 </span>
-                <p className="text-sm whitespace-pre-wrap text-ink">“{detail.sourceDraft.message.content ?? ''}”</p>
-                <span className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
+                <p data-pet-field="메시지" className="text-sm whitespace-pre-wrap text-ink">
+                  “{detail.sourceDraft.message.content ?? ''}”
+                </p>
+                <span data-pet-field="초안" className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
                   Message → ERP 초안 #{detail.sourceDraft.id} · 요청자 확정 {fmtDateTime(detail.sourceDraft.confirmedAt)}
                   <Link className="text-run hover:underline" href={`/messenger?room=${detail.sourceDraft.message.chatRoomId}`}>
                     채팅방으로 이동
@@ -227,7 +229,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
       </Card>
 
       {canSeeOrders ? (
-        <Card>
+        <Card petKey="card:purchaseRequisitions.purchaseOrders">
           <CardHead title="연결 발주" meta={detail.purchaseOrderLines.length > 0 ? `입고 ${fmtTon(receivedTotal)} / 발주 ${fmtTon(orderedTotal)}` : undefined} />
           <CardBody flush>
             {detail.purchaseOrderLines.length === 0 ? (
@@ -248,7 +250,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 </thead>
                 <tbody>
                   {detail.purchaseOrderLines.map((line) => (
-                    <tr key={line.purchaseOrderId}>
+                    <tr key={line.purchaseOrderId} data-pet-item="purchaseOrder" data-pet-item-title={line.purchaseOrderNo}>
                       <Td>
                         {canOpenPurchaseOrders ? (
                           <Link className="font-mono text-run hover:underline" href={`/purchase-orders?po=${line.purchaseOrderId}`}>
@@ -278,7 +280,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         </Card>
       ) : null}
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.decision">
         <CardHead title="처리" />
         <CardBody>
           {detail.canApprove ? (
@@ -287,7 +289,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 {detail.departmentName} 부서장으로 승인권자예요 · 요청자 {detail.requesterName ?? '-'} · 등록 {fmtDateTime(detail.createdAt)}
               </span>
               {rejecting ? (
-                <Field label="반려 사유 (요청자에게 전달돼요)" required htmlFor={`reject-${detail.id}`} error={rejectError} hint={`${rejectReason.length} / 500자`}>
+                <Field label={<span data-pet-term="반려 사유">반려 사유 (요청자에게 전달돼요)</span>} required htmlFor={`reject-${detail.id}`} error={rejectError} hint={`${rejectReason.length} / 500자`}>
                   <Textarea id={`reject-${detail.id}`} rows={3} maxLength={500} value={rejectReason} invalid={Boolean(rejectError)} onChange={(event) => setRejectReason(event.target.value)} />
                 </Field>
               ) : null}

@@ -39,14 +39,14 @@ function CategoryBadge({ category }: { category: CaseCategory }) {
 
 function ResultList() {
   return (
-    <section aria-label="검색 결과 목록" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
+    <section aria-label="검색 결과 목록" data-pet-target="card:pastCases.results" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
         <Input type="search" leadingIcon="search" defaultValue={EXAMPLE_QUERY} aria-label="검색어" disabled />
         <div className="flex flex-wrap gap-1.5">
-          <Chip on>
+          <Chip on data-pet-term="기간">
             기간 90일 <Icon name="chevron-down" size="sm" />
           </Chip>
-          <Chip>
+          <Chip data-pet-term="구분">
             구분 전체 <Icon name="chevron-down" size="sm" />
           </Chip>
         </div>
@@ -54,7 +54,7 @@ function ResultList() {
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {PAST_CASES.map((item) => (
-          <MasterItem key={item.caseNo} active={item.caseNo === SELECTED_CASE.caseNo}>
+          <MasterItem key={item.caseNo} active={item.caseNo === SELECTED_CASE.caseNo} petItem="pastCase" petTitle={item.caseNo}>
             <div className="flex items-center gap-2">
               <span className="text-cap text-ink-3 tabular-nums">{item.occurredDate}</span>
               <span className="truncate font-mono text-xs">{item.lotNos[0]}</span>
@@ -115,6 +115,7 @@ function CaseDetail() {
           </span>
         }
         className="flex-none"
+        petKey="card:pastCases.summary"
       >
         <p className="text-base leading-normal">
           &ldquo;{EXAMPLE_QUERY}&rdquo;와 비슷한 사례 {PAST_CASES.length}건을 찾았어요. 성분 불합격은 합금철 투입량 편차나 온도 측정 오차가 원인인
@@ -127,7 +128,7 @@ function CaseDetail() {
       </AiCard>
 
       <div className="grid min-h-0 flex-none grid-cols-[1.1fr_1fr] gap-3.5">
-        <Card>
+        <Card petKey="card:pastCases.history">
           <CardHead title="사례 작업 로그" meta={`${lotNo} · ${SELECTED_CASE_HISTORY.length}건`} />
           <CardBody className="pb-1">
             <Timeline
@@ -153,32 +154,40 @@ function CaseDetail() {
           </div>
         </Card>
 
-        <Card>
+        <Card petKey="card:pastCases.detail">
           <CardHead title="이 사례" meta={`작성 품질 담당 · ${SELECTED_CASE.occurredDate}`} />
           <CardBody>
-            <KvList
-              items={[
-                { label: '구분', value: CASE_CATEGORY_LABEL[SELECTED_CASE.caseCategory] },
-                { label: '관련 LOT', value: <span className="font-mono text-sm">{SELECTED_CASE.lotNos.join(', ')}</span> },
-                { label: '관련 설비', value: SELECTED_CASE.equipmentText },
-                { label: '발생일', value: SELECTED_CASE.occurredDate },
-              ]}
-            />
+            <div data-pet-item="pastCase" data-pet-item-title={SELECTED_CASE.caseNo}>
+              <KvList
+                items={[
+                  { label: '구분', value: CASE_CATEGORY_LABEL[SELECTED_CASE.caseCategory] },
+                  { label: '관련 LOT', value: <span className="font-mono text-sm">{SELECTED_CASE.lotNos.join(', ')}</span> },
+                  { label: '관련 설비', value: SELECTED_CASE.equipmentText },
+                  { label: '발생일', value: SELECTED_CASE.occurredDate },
+                ]}
+              />
+            </div>
             <div className="flex flex-col gap-1.5 border-t border-line pt-3 text-xs leading-relaxed text-ink-2">
               <p>
-                <b className="font-semibold text-ink">현상</b> {SELECTED_CASE.phenomenon}
+                <b data-pet-term="현상" className="font-semibold text-ink">
+                  현상
+                </b> {SELECTED_CASE.phenomenon}
               </p>
               <p>
-                <b className="font-semibold text-ink">원인</b> {SELECTED_CASE.cause}
+                <b data-pet-term="원인" className="font-semibold text-ink">
+                  원인
+                </b> {SELECTED_CASE.cause}
               </p>
               <p>
-                <b className="font-semibold text-ink">조치</b> {SELECTED_CASE.actionTaken}
+                <b data-pet-term="조치" className="font-semibold text-ink">
+                  조치
+                </b> {SELECTED_CASE.actionTaken}
               </p>
             </div>
             <div className="flex flex-col gap-1.5 border-t border-line pt-3">
               <span className="text-xs font-semibold">같은 구분의 다른 사례</span>
               {others.map((item) => (
-                <span key={item.caseNo} className="flex items-center gap-1.5 text-xs text-ink-2">
+                <span key={item.caseNo} data-pet-item="pastCase" data-pet-item-title={item.caseNo} className="flex items-center gap-1.5 text-xs text-ink-2">
                   <Icon name="link" size="sm" className="text-ink-3" />
                   <span className="font-mono">{item.caseNo}</span>
                   <span className="truncate">{item.title}</span>

@@ -37,6 +37,21 @@ describe('생산 화면 렌더', () => {
     expect(readOnly).toContain('조회만 할 수 있어요');
   });
 
+  it('생산계획 상세: 계획 상태에서 다시 계산한 히트 수가 다를 때만 히트 편성 확정 띠', async () => {
+    actAs(SEED_EMPLOYEE_NO.productionHead);
+    const plan = await productionPlanApi.detail(planIdOf('PP-2609-0005'));
+    const formation = plan.formation;
+    if (!formation) throw new Error('편성표 없음');
+    const same = await render(SEED_EMPLOYEE_NO.productionHead, createElement(PlanDetailBody, { plan: { ...plan, productionPlanStatus: 'PLANNED' } }));
+    expect(same).not.toContain('히트 편성 확정');
+    const changed = { ...plan, productionPlanStatus: 'PLANNED' as const, formation: { ...formation, recalculatedHeatCount: formation.heatCount + 1 } };
+    const html = await render(SEED_EMPLOYEE_NO.productionHead, createElement(PlanDetailBody, { plan: changed }));
+    expect(html).toContain('히트 편성 확정');
+    expect(html).toContain(`히트 ${formation.heatCount}개 → ${formation.heatCount + 1}개`);
+    const started = await render(SEED_EMPLOYEE_NO.productionHead, createElement(PlanDetailBody, { plan: { ...changed, productionPlanStatus: 'IN_PROGRESS' } }));
+    expect(started).not.toContain('히트 편성 확정');
+  });
+
   it('작업 실적: 공정별 묶음과 연주 대기 히트, 품질(조회만)은 읽기 전용', async () => {
     actAs(SEED_EMPLOYEE_NO.productionHead);
     const ctx = await productionResultApi.work(planIdOf('PP-2609-0004'));

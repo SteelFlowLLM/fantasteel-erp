@@ -47,7 +47,7 @@ import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 function DetectionList() {
   const selectedKey = AGENT_DETECTIONS[0]?.key;
   return (
-    <section aria-label="감지 목록" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
+    <section aria-label="감지 목록" data-pet-target="card:agent.detections" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
         <div className="flex items-center gap-2">
           <Icon name="radar" className="text-ai" />
@@ -59,7 +59,7 @@ function DetectionList() {
             전체 <b>{AGENT_DETECTIONS.length}</b>
           </Chip>
           {AGENT_DETECTIONS.map((detection) => (
-            <Chip key={detection.key}>
+            <Chip key={detection.key} data-pet-term={AGENT_RISK_NAME[detection.riskCode]}>
               {AGENT_RISK_NAME[detection.riskCode]} <b>1</b>
             </Chip>
           ))}
@@ -71,7 +71,7 @@ function DetectionList() {
           return (
             <MasterItem key={detection.key} active={detection.key === selectedKey}>
               <div className="flex items-center gap-2">
-                <b className="text-sm font-semibold">
+                <b data-pet-term={AGENT_RISK_NAME[detection.riskCode]} className="text-sm font-semibold">
                   {index + 1}. {AGENT_RISK_NAME[detection.riskCode]}
                 </b>
                 <Tag size="sm" tone="outline">
@@ -103,7 +103,9 @@ function DetectionList() {
           <span className="text-cap text-ink-3">{AGENT_RESOLVED_EXAMPLE.note}</span>
         </MasterItem>
         <div className="flex flex-col gap-2 px-4 py-3.5">
-          <span className="text-cap font-semibold text-ink-3">감지 트리거 · 규칙과 대응</span>
+          <span data-pet-term="감지 트리거" className="text-cap font-semibold text-ink-3">
+            감지 트리거 · 규칙과 대응
+          </span>
           <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
             {AGENT_RULES.map((rule) => (
               <Fragment key={rule.riskCode}>
@@ -133,39 +135,46 @@ function CandidateCard() {
       meta="규칙으로 생성 · Action Draft"
       actions={<Badge tone="wait">{DRAFT_STATUS_LABEL[RAW_SHORTAGE_CANDIDATE.draftStatus]}</Badge>}
       className="flex-none"
+      petKey="card:agent.candidate"
     >
       <div className="grid grid-cols-[1.1fr_1fr] gap-4">
-        <KvList
-          items={[
-            {
-              label: '원료',
-              value: (
-                <>
-                  {RAW_SHORTAGE_CANDIDATE.rawMaterial} <span className="font-mono text-xs text-ink-3">{RAW_SHORTAGE_CANDIDATE.rawMaterialCode}</span>
-                </>
-              ),
-            },
-            { label: '수량', value: `${RAW_SHORTAGE_CANDIDATE.requiredTon} t` },
-            { label: '희망 입고일', value: RAW_SHORTAGE_CANDIDATE.desiredReceiptDate },
-            { label: '확정', value: `구매 부서원 (${confirmPermission} ${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} 권한)` },
-            { label: '요청자', value: '확정한 사람' },
-            { label: '최종 승인', value: '요청자 소속 부서장' },
-          ]}
-        />
+        <div data-pet-item="actionDraft" data-pet-item-title={`대응 후보 1 · ${ACTION_TYPE_LABEL[RAW_SHORTAGE_CANDIDATE.actionType]}`}>
+          <KvList
+            items={[
+              {
+                label: '원료',
+                value: (
+                  <>
+                    {RAW_SHORTAGE_CANDIDATE.rawMaterial} <span className="font-mono text-xs text-ink-3">{RAW_SHORTAGE_CANDIDATE.rawMaterialCode}</span>
+                  </>
+                ),
+              },
+              { label: '수량', value: `${RAW_SHORTAGE_CANDIDATE.requiredTon} t` },
+              { label: '희망 입고일', value: RAW_SHORTAGE_CANDIDATE.desiredReceiptDate },
+              { label: '확정', value: `구매 부서원 (${confirmPermission} ${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} 권한)` },
+              { label: '요청자', value: '확정한 사람' },
+              { label: '최종 승인', value: '요청자 소속 부서장' },
+            ]}
+          />
+        </div>
         <div className="flex flex-col gap-2">
           <OriginLine icon="radar">Agent 감지 10-01 06:00 · 원료 부족 · 부족량 1,200 t 기준</OriginLine>
           <OriginLine icon="info">같은 대상의 미처리 초안이 있으면 새로 만들지 않아요.</OriginLine>
         </div>
       </div>
       <div className="flex items-center gap-3 rounded-sm bg-surface-2 px-3 py-2.5">
-        <span className="flex-none text-cap text-ink-3">처리 순서</span>
+        <span data-pet-term="처리 순서" className="flex-none text-cap text-ink-3">
+          처리 순서
+        </span>
         <Steps
           className="flex-1"
           items={CANDIDATE_FLOW.map((label, index) => ({ key: label, label, state: index === 0 ? 'run' : 'todo' }))}
         />
       </div>
       <div className="flex items-center gap-3">
-        <span className="flex-none text-cap text-ink-3">초안 상태</span>
+        <span data-pet-term="초안 상태" className="flex-none text-cap text-ink-3">
+          초안 상태
+        </span>
         <Steps
           items={DRAFT_FLOW.map((status) => ({
             key: status,
@@ -218,7 +227,7 @@ function DetectionDetail() {
         <b>AI는 상황 설명만 해요.</b> 대응 후보는 규칙이 만들고, 담당 부서원이 후보별로 확정해요.
       </AiBrief>
 
-      <AiCard title="상황 설명" meta="AI가 작성 · 데이터 변경 없음" className="flex-none">
+      <AiCard title="상황 설명" meta="AI가 작성 · 데이터 변경 없음" className="flex-none" petKey="card:agent.situation">
         <p className="text-base leading-normal">
           <b className="font-semibold">철광석 1,200 t 부족 예상</b> — 생산계획{' '}
           <span className="font-mono text-sm">{EXAMPLE_NO.rawShortagePlans.join(' · ')}</span>의 소요량이 원료 잔량과 입고예정을 합친 양보다 많아요.
@@ -250,7 +259,7 @@ function DetectionDetail() {
         </span>
       </div>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:agent.history">
         <CardHead title="감지 이력" meta={`이 감지의 작업 로그 · 다음 단계 포함 ${AGENT_HISTORY.length}건`} />
         <CardBody className="pb-1">
           <Timeline

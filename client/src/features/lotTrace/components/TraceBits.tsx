@@ -63,7 +63,9 @@ export function PanelSection({ title, meta, children }: { title: ReactNode; meta
   return (
     <section className="flex min-w-0 flex-col gap-1.5 border-t border-line pt-2.5">
       <div className="flex items-center gap-2 text-sm">
-        <b className="font-semibold">{title}</b>
+        <b data-pet-term={typeof title === 'string' ? title : undefined} className="font-semibold">
+          {title}
+        </b>
         {meta ? <span className="ml-auto text-cap text-ink-3">{meta}</span> : null}
       </div>
       {children}

@@ -25,7 +25,12 @@ function YieldBody({ data }: { data: ProcessYieldData }) {
               ? `실적 ${p.resultCount}건 · 용선 ${fmtTon(p.outputTon)} · 계획 수율을 쓰지 않아요`
               : `실적 ${p.resultCount}건 · 투입 ${fmtTon(p.inputTon)} → 산출 ${fmtTon(p.outputTon)} · 계획 ${fmtPct(planned, 1)}${p.qtyAttainmentRate ? ` · 계획 대비 매수 ${fmtPct(rate(p.qtyAttainmentRate))}` : ''}`;
         return (
-          <div key={p.processType} className="grid grid-cols-[48px_minmax(0,1fr)_max-content] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div
+            key={p.processType}
+            data-pet-item="productionResult"
+            data-pet-item-title={label}
+            className="grid grid-cols-[48px_minmax(0,1fr)_max-content] items-center gap-x-2.5 gap-y-0.5 text-xs"
+          >
             <b className="font-semibold">{label}</b>
             <div className="relative" title={`실적 수율 ${fmtPct(actual, 1)} · 계획 수율 ${fmtPct(planned, 1)}`}>
               <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">
@@ -33,8 +38,8 @@ function YieldBody({ data }: { data: ProcessYieldData }) {
               </div>
               {planned !== null ? <i className="absolute -top-[3px] -bottom-[3px] -ml-px w-0.5 rounded-[1px] bg-ink" style={{ left: `${Math.min(100, planned * 100)}%` }} /> : null}
             </div>
-            <b className={cn('text-right font-semibold tabular-nums', below && 'text-wait')}>{fmtPct(actual, 1)}</b>
-            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3" title={sub}>
+            <b className={cn('text-right font-semibold tabular-nums', below && 'text-wait')} data-pet-field="실적 수율">{fmtPct(actual, 1)}</b>
+            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3" title={sub} data-pet-field="세부">
               {sub}
             </span>
           </div>

@@ -198,13 +198,13 @@ function RoomView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
+      <section data-pet-target="card:messenger.thread" data-pet-perch="" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
         <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
           <span className="relative flex-none">
             <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
             <PresenceDot employeeId={counterpartId} />
           </span>
-          <div className="flex min-w-0 flex-col">
+          <div data-pet-item="chatRoom" data-pet-item-title={room.displayName} className="flex min-w-0 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
             <span className="truncate text-cap text-ink-3">
               {buildRoomCaption(room)}

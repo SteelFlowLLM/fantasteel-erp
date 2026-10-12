@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCT_QTY_UNIT } from '@/codes';
 import { InputError } from '@/api/client';
 import { lotQualityOf, productionPlanApi } from '@/api/production';
-import { eventsOf, planIdOf, planOf } from '@/api/productionTestKit';
+import { masterDataApi } from '@/api/masterData';
+import { eventsOf, planIdOf, planOf, readDb } from '@/api/productionTestKit';
 import { checkInvariants } from '@/mock/services';
 import { getMockDb } from '@/mock/db';
 import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
@@ -110,5 +111,54 @@ describe('생산계획 취소 (PLANNED일 때만, 10장)', () => {
     actAs(SEED_EMPLOYEE_NO.purchase);
     await expect(productionPlanApi.cancel({ productionPlanId: planId })).rejects.toMatchObject({ code: 'COM-002' });
     expect(planOf(planId).productionPlanStatus).toBe('PLANNED');
+  });
+});
+
+describe('히트 편성 확정 (REQ-PRD-002: 계획 상태에서 기준정보가 바뀌었을 때)', () => {
+  async function newPlannedPlan(): Promise<number> {
+    actAs(SEED_EMPLOYEE_NO.productionHead);
+    const pp5 = await productionPlanApi.detail(planIdOf('PP-2609-0005'));
+    const result = await productionPlanApi.createReproduction({ salesOrderItemId: pp5.salesOrder?.salesOrderItemId ?? 0 });
+    return result.plan?.id ?? 0;
+  }
+
+  async function changeHeatCapacity(heatCapacityTon: string): Promise<void> {
+    actAs(SEED_EMPLOYEE_NO.admin);
+    const setting = await masterDataApi.getProductionSetting();
+    await masterDataApi.saveProductionSetting({ heatCapacityTon, deliveryRiskDays: setting?.deliveryRiskDays ?? 0, expectedUpdatedAt: setting?.updatedAt ?? null });
+  }
+
+  it('히트 용량이 바뀌면 다시 계산한 히트 수가 달라지고, 확정하면 저장된다 (작업 로그는 남기지 않는다)', async () => {
+    const planId = await newPlannedPlan();
+    const before = await productionPlanApi.detail(planId);
+    expect(before.formation?.recalculatedHeatCount).toBe(before.formation?.heatCount);
+
+    await changeHeatCapacity('50');
+    actAs(SEED_EMPLOYEE_NO.productionHead);
+    const changed = await productionPlanApi.detail(planId);
+    const saved = changed.formation?.heatCount ?? 0;
+    const recalculated = changed.formation?.recalculatedHeatCount ?? 0;
+    expect(recalculated).toBeGreaterThan(saved);
+
+    const eventCount = readDb((t) => t.businessEvent.length);
+    const result = await productionPlanApi.confirmHeatPlan({ productionPlanId: planId, expectedUpdatedAt: changed.updatedAt });
+    expect(result).toMatchObject({ id: planId, heatCount: recalculated });
+    const after = await productionPlanApi.detail(planId);
+    expect(after.formation).toMatchObject({ heatCount: recalculated, recalculatedHeatCount: recalculated });
+    expect(after.heats).toHaveLength(recalculated);
+    expect(readDb((t) => t.businessEvent.length)).toBe(eventCount);
+    expect(getMockDb().read((t) => checkInvariants(t))).toEqual([]);
+  });
+
+  it('작업을 시작한 계획은 거부, 화면을 연 뒤 바뀌었으면 COM-001, 사용 권한이 없으면 COM-002', async () => {
+    const planId = await newPlannedPlan();
+    const savedHeatCount = planOf(planId).heatCount;
+    await changeHeatCapacity('50');
+    actAs(SEED_EMPLOYEE_NO.productionHead);
+    await expect(productionPlanApi.confirmHeatPlan({ productionPlanId: planIdOf('PP-2609-0004') })).rejects.toBeInstanceOf(InputError);
+    await expect(productionPlanApi.confirmHeatPlan({ productionPlanId: planId, expectedUpdatedAt: '2000-01-01T00:00:00.000Z' })).rejects.toMatchObject({ code: 'COM-001' });
+    actAs(SEED_EMPLOYEE_NO.sales);
+    await expect(productionPlanApi.confirmHeatPlan({ productionPlanId: planId })).rejects.toMatchObject({ code: 'COM-002' });
+    expect(planOf(planId).heatCount).toBe(savedHeatCount);
   });
 });

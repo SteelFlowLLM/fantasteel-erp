@@ -36,7 +36,7 @@ export function NotificationMenu({ employeeId }: { employeeId: number }) {
   };
 
   return (
-    <div ref={popover.ref} className="relative">
+    <div ref={popover.ref} data-pet-target="topbar:notifications" className="relative">
       <IconButton
         icon="bell"
         iconSize="lg"

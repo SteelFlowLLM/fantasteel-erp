@@ -26,12 +26,18 @@ function ioText(r: ProductionResultView): { input: string; output: string } {
   }
 }
 
+/** 화면 도우미 펫이 읽는 실적 제목: 실적 번호가 없어 만든 첫 LOT 번호를 쓰고, 아직 없으면 공정·시작 일시 */
+function resultTitle(r: ProductionResultView): string {
+  const process = PROCESS_TYPE_LABEL[r.processType as ProcessType] ?? r.processType;
+  return r.outputLotNos[0] ? `${process} ${r.outputLotNos[0]}` : `${process} ${fmtMDHM(r.startedAt)} 시작`;
+}
+
 export function LotLinks({ lotNos, max = 3 }: { lotNos: readonly string[]; max?: number }) {
   if (lotNos.length === 0) return <span className="text-ink-3">-</span>;
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       {lotNos.slice(0, max).map((no) => (
-        <Link key={no} href={traceHref(no)} className="font-mono text-mono text-run hover:underline">
+        <Link key={no} href={traceHref(no)} className="font-mono text-mono text-run hover:underline" data-pet-item="lot" data-pet-item-title={no}>
           {no}
         </Link>
       ))}
@@ -72,10 +78,18 @@ export function ResultsTable({ results, showProcess, emptyText, action }: Result
           {results.map((r) => {
             const io = ioText(r);
             return (
-              <tr key={r.id}>
+              <tr key={r.id} data-pet-item="productionResult" data-pet-item-title={resultTitle(r)}>
                 {showProcess ? <Td className="font-medium">{PROCESS_TYPE_LABEL[r.processType as ProcessType] ?? r.processType}</Td> : null}
                 <Td>{fmtMDHM(r.startedAt)}</Td>
-                <Td>{r.completedAt ? fmtMDHM(r.completedAt) : <Badge tone="run">진행 중</Badge>}</Td>
+                <Td>
+                  {r.completedAt ? (
+                    fmtMDHM(r.completedAt)
+                  ) : (
+                    <span className="inline-flex" data-pet-term="진행 중">
+                      <Badge tone="run">진행 중</Badge>
+                    </span>
+                  )}
+                </Td>
                 <Td className="font-mono text-mono">{r.blastFurnaceCode ?? r.converterCode ?? '-'}</Td>
                 <Td align="right">{io.input}</Td>
                 <Td align="right" className="font-medium">

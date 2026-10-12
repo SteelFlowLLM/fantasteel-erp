@@ -21,6 +21,8 @@ interface PickerOption {
 
 interface PickerShellProps {
   icon: IconName;
+  /** 화면 도우미 펫이 읽을 항목 종류 (용어 사전 변수명) */
+  petItem: 'salesOrder' | 'lot';
   ariaLabel: string;
   placeholder: string;
   widthClass: string;
@@ -33,11 +35,15 @@ interface PickerShellProps {
   onClear: () => void;
 }
 
-function PickerShell({ icon, ariaLabel, placeholder, widthClass, selectedLabel, keyword, onKeyword, options, loading, onPick, onClear }: PickerShellProps) {
+function PickerShell({ icon, petItem, ariaLabel, placeholder, widthClass, selectedLabel, keyword, onKeyword, options, loading, onPick, onClear }: PickerShellProps) {
   const popover = usePopover<HTMLDivElement>();
   if (selectedLabel !== null) {
     return (
-      <span className={cn('inline-flex h-8 items-center gap-1.5 rounded-sm border border-brand bg-brand-tint pr-1 pl-2.5 text-sm text-brand', widthClass)}>
+      <span
+        data-pet-item={petItem}
+        data-pet-item-title={selectedLabel}
+        className={cn('inline-flex h-8 items-center gap-1.5 rounded-sm border border-brand bg-brand-tint pr-1 pl-2.5 text-sm text-brand', widthClass)}
+      >
         <Icon name={icon} size="sm" />
         <span className="min-w-0 flex-1 truncate font-mono text-mono font-semibold">{selectedLabel}</span>
         <IconButton icon="x" label={`${ariaLabel} 지우기`} size="sm" className="size-6" onClick={onClear} />
@@ -53,6 +59,8 @@ function PickerShell({ icon, ariaLabel, placeholder, widthClass, selectedLabel, 
         key={option.key}
         role="option"
         aria-selected="false"
+        data-pet-item={petItem}
+        data-pet-item-title={option.label}
         centered
         onClick={() => {
           popover.setOpen(false);
@@ -93,6 +101,7 @@ export function SalesOrderPicker({ salesOrderId, salesOrderNo, onPick, onClear }
   return (
     <PickerShell
       icon="clipboard"
+      petItem="salesOrder"
       ariaLabel="수주번호"
       placeholder="수주번호"
       widthClass="w-[200px]"
@@ -117,6 +126,7 @@ export function LotPicker({ lotId, lotNo, onPick, onClear }: { lotId: number | u
   return (
     <PickerShell
       icon="trace"
+      petItem="lot"
       ariaLabel="LOT 번호"
       placeholder="LOT 번호"
       widthClass="w-[230px]"

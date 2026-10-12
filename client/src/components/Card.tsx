@@ -2,8 +2,20 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <section className={cn('flex min-h-0 min-w-0 flex-col rounded-md border border-line bg-surface shadow-1', className)}>{children}</section>;
+export interface CardProps {
+  className?: string;
+  /** 화면 도우미 펫이 이 카드를 설명할 때 쓰는 키 (public/pet/guide/의 'card:<화면 키>.<이름>') */
+  petKey?: string;
+  children: ReactNode;
+}
+
+// 카드 윗면은 화면 도우미 펫이 올라가 걷고 앉는 면이다(data-pet-perch)
+export function Card({ className, petKey, children }: CardProps) {
+  return (
+    <section data-pet-perch="" data-pet-target={petKey} className={cn('flex min-h-0 min-w-0 flex-col rounded-md border border-line bg-surface shadow-1', className)}>
+      {children}
+    </section>
+  );
 }
 
 export interface CardHeadProps {

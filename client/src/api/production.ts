@@ -1,6 +1,6 @@
 // 생산계획 API (REQ-PRD-001·002·006, BP-PRD-01, BP-QC-01 재생산, 업무 프로세스 4.4·4.5·10장).
 // 계획은 수주 등록 때 core 서비스가 히트 편성까지 계산해 만든다. 이 화면은 편성표·진행·LOT을 보여 주고,
-// 생산 담당은 PLANNED 계획 취소와 재생산 계획 만들기를 한다 (PRODUCTION_PLAN_CONFIRM 사용 권한).
+// 생산 담당은 PLANNED 계획의 히트 편성 확정·취소와 재생산 계획 만들기를 한다 (PRODUCTION_PLAN_CONFIRM 사용 권한).
 // 규칙·작업 로그는 core 서비스(@/mock/services)가 처리한다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 조회만 한다.
 // 서버 모드(기본)면 실제 서버를 부른다 (api/server/production.ts).
 import { PERMISSION, type AllocationPurpose, type InspectionResult, type LotStatus, type LotType, type ProductItemType, type ProductionPlanStatus, type SalesOrderItemStatus } from '@/codes';
@@ -12,6 +12,7 @@ import type { LotRow, MockTables, ProductionPlanRow, SalesOrderItemRow } from '@
 import {
   cancelProductionPlan,
   confirmedAllocationOf,
+  confirmHeatPlan,
   createReproductionPlan,
   employeeNameOf,
   findById,
@@ -267,6 +268,8 @@ export interface ProductionPlanView {
     cumulativeYieldRate: string;
     requiredSteelTon: string;
     heatCount: number;
+    /** 지금 기준정보로 다시 계산한 히트 수. 저장된 heatCount와 다르면 계획 상태에서 '히트 편성 확정'으로 저장한다 */
+    recalculatedHeatCount: number;
     heatCapacityTon: string;
     heatTon: string;
     slabQtyPerHeat: number;
@@ -321,6 +324,12 @@ export interface CancelPlanInput {
   expectedUpdatedAt?: string | null;
 }
 
+export interface ConfirmHeatPlanInput {
+  productionPlanId: number;
+  /** 화면을 연 시점의 updatedAt (다른 탭에서 바뀌었으면 COM-001) */
+  expectedUpdatedAt?: string | null;
+}
+
 export interface ReproductionResult {
   /** 여재(예약 가용)로 먼저 예약한 매수 */
   reservedFromSurplusQty: number;
@@ -359,6 +368,16 @@ export const productionPlanApi = {
         expectedUpdatedAt: input.expectedUpdatedAt ?? null,
       });
       return { id: plan.id, productionPlanNo: plan.productionPlanNo };
+    }),
+
+  /** 히트 편성 확정 (REQ-PRD-002): 계획 상태에서 기준정보가 바뀌었으면 지금 기준으로 다시 계산한 히트 수를 저장한다 */
+  confirmHeatPlan: (input: ConfirmHeatPlanInput): Promise<{ id: number; productionPlanNo: string; heatCount: number }> =>
+    isServerDataSource()
+      ? serverProductionPlanApi.confirmHeatPlan(input)
+      : mockMutation((tx) => {
+      requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_PLAN_CONFIRM] });
+      const plan = confirmHeatPlan(tx, { productionPlanId: input.productionPlanId, expectedUpdatedAt: input.expectedUpdatedAt ?? null });
+      return { id: plan.id, productionPlanNo: plan.productionPlanNo, heatCount: plan.heatCount };
     }),
 
   /**
