@@ -1,5 +1,5 @@
 // 구매요청·부서장 승인·발주·입고 (REQ-PUR-001~004, REQ-AUTH-004, REQ-LOT-003·004, BP-PUR-01·02, 업무 프로세스 10장).
-// - 구매요청: 1건 = 원료 1품목(ERD). 등록 = 바로 WAITING_APPROVAL (임시 저장 없음). 요청자 소속 부서에 부서장이 없으면 PUR-001. 부서장에게 APPROVAL_REQUESTED 알림.
+// - 구매요청: 1건 = 원료 1품목(ERD). 등록 = 바로 WAITING_APPROVAL (임시 저장 없음). 요청자 소속 부서에 부서장이 없거나 요청자가 그 부서장이면 PUR-001. 부서장에게 APPROVAL_REQUESTED 알림.
 //   반려되면 요청자가 수량·희망 입고일·근거를 고쳐 다시 요청(→ WAITING_APPROVAL). 승인·반려는 요청자 소속 부서의 부서장만 (아니면 COM-002), 결과는 요청자에게 APPROVAL_RESULT.
 //   MRP에서 만든 요청은 production_plan_id를 연결하고 같은 계획·원료로 진행 중인 구매요청을 두 번 만들지 않는다.
 // - 발주: 공급업체 1곳당 발주 1건(서버와 같은 모양), 승인된 구매요청만(아니면 PUR-002), 원료의 기본 공급업체로만. 발주하면 구매요청 ORDERED.
@@ -99,6 +99,8 @@ function headOfRequesterDepartment(tables: Tables, requesterId: number): { depar
   const requester = mustGet(tables, 'employee', requesterId, '요청자');
   const department = mustGet(tables, 'department', requester.departmentId, '부서');
   if (department.headEmployeeId === null || !tables.employee.some((e) => e.id === department.headEmployeeId && e.isActive)) throw new ApiError('PUR-001', department.departmentName);
+  // 부서장 본인 요청은 승인할 사람이 자기 자신뿐이다. 자동 승인 금지라 등록·재요청 때 거부한다 (서버와 같은 규칙, 2026-10-12)
+  if (department.headEmployeeId === requesterId) throw new ApiError('PUR-001', '부서장 본인 요청은 승인할 사람이 없어 받을 수 없어요. 부서원이 요청해 주세요');
   return { departmentId: department.id, headEmployeeId: department.headEmployeeId };
 }
 

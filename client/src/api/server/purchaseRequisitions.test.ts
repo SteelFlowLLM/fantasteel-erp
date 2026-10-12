@@ -112,7 +112,12 @@ describe('구매요청·승인 서버 어댑터 (api/server/purchaseRequisitions
 
   it('등록 창: 요청자·소속 부서·부서장 이름은 로그인 사원과 조직도에서 읽는다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchase, withOrg(authUser(77, []), () => undefined));
-    expect(await purchaseRequisitionApi.formContext()).toEqual({ requesterName: '정다은', departmentName: '구매부', headName: '최준혁' });
+    expect(await purchaseRequisitionApi.formContext()).toEqual({ requesterName: '정다은', departmentName: '구매부', headName: '최준혁', isDepartmentHead: false });
+    stopFakeServer();
+
+    // 부서장 본인은 승인할 사람이 없어 등록할 수 없다 (PUR-001)
+    useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, withOrg(authUser(70, [55]), () => undefined));
+    expect(await purchaseRequisitionApi.formContext()).toMatchObject({ isDepartmentHead: true });
   });
 
   it('승인함은 approvable=true로 묻고 먼저 온 것부터, 배지는 total을 쓰며 부서장이 아니면 0', async () => {

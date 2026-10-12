@@ -72,9 +72,10 @@ describe('구매요청 알림', () => {
     ]);
   });
 
-  it('부서장이 직접 낸 요청은 승인 요청 알림을 자기 자신에게 보내지 않는다', async () => {
-    const created = await request(purchaseHead);
-    expect(await notificationsOf(created.id)).toEqual([]);
+  it('부서장이 직접 내려는 요청은 PUR-001로 거부되어 알림도 남지 않는다', async () => {
+    const before = await prisma.notification.count({ where: { notificationType: 'APPROVAL_REQUESTED', recipientId: purchaseHead.employeeId } });
+    await expect(request(purchaseHead)).rejects.toMatchObject({ code: 'PUR-001' });
+    expect(await prisma.notification.count({ where: { notificationType: 'APPROVAL_REQUESTED', recipientId: purchaseHead.employeeId } })).toBe(before);
   });
 
   it('승인이 실패해 롤백되면 결과 알림도 남지 않는다', async () => {
