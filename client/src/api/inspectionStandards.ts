@@ -18,7 +18,6 @@ import {
   createInspectionStandardVersion,
   deleteInspectionStandard,
   type InspectionStandardDeleteResult,
-  type InspectionStandardItemValues,
 } from '@/mock/services/inspectionStandards';
 
 export const inspectionStandardKeys = {
@@ -26,6 +25,19 @@ export const inspectionStandardKeys = {
   list: (query: InspectionStandardListQuery = {}) => ['inspection-standards', 'list', query] as const,
   detail: (id: number) => ['inspection-standards', 'detail', id] as const,
 };
+
+/** 확인을 마친 검사 항목 (decimal은 문자열) */
+export interface InspectionStandardItemValues {
+  inspectionItemCode: string;
+  inspectionItemName: string;
+  unit: string | null;
+  minValue: string | null;
+  maxValue: string | null;
+  minThicknessMm: string | null;
+  maxThicknessMm: string | null;
+  isRequired: boolean;
+  sortOrder: number;
+}
 
 export interface InspectionStandardListQuery {
   processType?: InspectedProcessType;

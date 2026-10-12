@@ -5,7 +5,7 @@ import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverInspectionApi } from '@/api/server/inspections';
-import { PERMISSION, type InspectionResult, type SalesOrderItemStatus } from '@/codes';
+import { PERMISSION, type InspectionResult, type LotStatus, type LotType, type SalesOrderItemStatus } from '@/codes';
 import { inspectionItemCodesOfHistory } from '@/features/quality/lib/qualityDisplay';
 import type { MockTables } from '@/mock/schema';
 import {
@@ -16,10 +16,7 @@ import {
   lotTimeline,
   registerInspection,
   userActor,
-  type InspectionFormView,
-  type InspectionQueueRow,
   type ItemShortage,
-  type RegisterInspectionInput,
   type TimelineEvent,
 } from '@/mock/services';
 
@@ -36,6 +33,69 @@ export const inspectionKeys = {
   queue: () => ['quality-inspections', 'queue'] as const,
   detail: (lotId: number) => ['quality-inspections', 'detail', lotId] as const,
 };
+
+export interface InspectionQueueRow {
+  lotId: number;
+  lotNo: string;
+  lotType: LotType;
+  lotStatus: LotStatus;
+  processType: string;
+  itemId: number | null;
+  itemCode: string | null;
+  itemName: string | null;
+  steelGradeCode: string | null;
+  thicknessMm: string | null;
+  producedDate: string;
+  heatLotId: number | null;
+  heatNo: string | null;
+  heatResult: InspectionResult | null;
+  productionPlanNo: string | null;
+  qualityInspectionId: number | null;
+  inspectionResult: InspectionResult;
+  inspectionStandardCode: string | null;
+  inspectionStandardVersion: number | null;
+  inspectedAt: string | null;
+  inspectorName: string | null;
+  locked: boolean;
+}
+
+export interface InspectionFormItem {
+  inspectionStandardItemId: number;
+  inspectionItemCode: string;
+  inspectionItemName: string;
+  unit: string | null;
+  minValue: string | null;
+  maxValue: string | null;
+  minThicknessMm: string | null;
+  maxThicknessMm: string | null;
+  isRequired: boolean;
+  sortOrder: number;
+  measuredValue: string | null;
+  isPassed: boolean | null;
+}
+
+export interface InspectionFormView {
+  lot: InspectionQueueRow;
+  qualityInspectionId: number | null;
+  /** 이 검사 행의 수정 시각 (registerInspection의 expectedUpdatedAt) */
+  updatedAt: string | null;
+  inspectionResult: InspectionResult;
+  /** 판정에 쓰는(쓴) 기준 버전. 값을 넣은 적이 없으면 현재 버전 */
+  standard: { id: number; inspectionStandardCode: string; version: number; isCurrent: boolean } | null;
+  currentStandard: { id: number; inspectionStandardCode: string; version: number } | null;
+  /** 두께 구간(초과~이하)으로 거른 적용 항목 (샤르피는 SM 강종·6mm 초과 코일만) */
+  items: InspectionFormItem[];
+  locked: boolean;
+  lockedMillSheetNos: string[];
+}
+
+export interface RegisterInspectionInput {
+  lotId: number;
+  /** 입력한 항목 값. 빈 값(null·'')은 지운다. 넘기지 않은 항목은 그대로 둔다. */
+  values: readonly { inspectionStandardItemId: number; measuredValue: string | null }[];
+  /** 화면을 연 시점의 quality_inspection.updatedAt (없으면 확인 안 함) */
+  expectedUpdatedAt?: string | null;
+}
 
 /** 검사 대상 LOT이 만들어진 계획의 수주 품목과 그 부족 (4.5). 재생산 필요 = 14.1-6 */
 export interface LinkedSalesOrderItem {

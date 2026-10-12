@@ -6,6 +6,7 @@
 // - 입력 확인(항목 형식·두께 구간 겹침)은 api/inspectionStandards.ts가 먼저 하고, 이 서비스는 버전 규칙과 참조만 확인한다.
 // 순환 참조를 피하려고 오류는 @/api/errors에서 가져온다 (docs/rework/areas/cross-cutting.md 9장).
 import { ApiError, InputError } from '@/api/errors';
+import type { InspectionStandardItemValues } from '@/api/inspectionStandards';
 import { PROCESS_TYPE_LABEL } from '@/codes';
 import {
   canHaveCommonStandard,
@@ -18,18 +19,7 @@ import { withIGa } from '@/lib/josa';
 import type { InspectionStandardRow } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 
-/** 확인을 마친 검사 항목 (decimal은 문자열) */
-export interface InspectionStandardItemValues {
-  inspectionItemCode: string;
-  inspectionItemName: string;
-  unit: string | null;
-  minValue: string | null;
-  maxValue: string | null;
-  minThicknessMm: string | null;
-  maxThicknessMm: string | null;
-  isRequired: boolean;
-  sortOrder: number;
-}
+export type { InspectionStandardItemValues };
 
 export type CreateInspectionStandardVersionInput =
   | {
