@@ -59,6 +59,27 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     expect(processGroupOf(html)).not.toContain('title="판정 대기');
   });
 
+  it('목록 한 줄은 두 줄(LOT·판정 / 규격·생산일)이고, 계획·검사 일시·기준은 마우스를 올리면 보인다', async () => {
+    const { html, rows } = await render();
+    const first = rows.find((r) => r.inspectionResult === 'PENDING');
+    if (!first) throw new Error('판정 대기 LOT이 시드에 없어요');
+    const item = html.slice(html.indexOf(`href="/quality/inspections?lot=${first.lotId}"`));
+    const row = item.slice(0, item.indexOf('</a>'));
+    const visible = row.replace(/title="[^"]*"/g, '');
+    expect(visible).toContain('생산 ');
+    expect(visible).not.toContain('계획 ');
+    expect(visible).not.toContain('생산완료일');
+    expect(row).toMatch(/title="[^"]*생산완료일[^"]*"/);
+  });
+
+  it('상위 히트가 합격이 아니면 두 번째 줄 끝에 잘리지 않게 따로 보인다', async () => {
+    const { html } = await render((all) => {
+      const slab = all.find((r) => r.lotType !== 'HEAT');
+      return slab ? [{ ...slab, heatResult: 'FAIL' as const, inspectionResult: 'PENDING' as const }] : [];
+    });
+    expect(html).toMatch(/text-danger[^>]*>· 상위 히트 <!-- -->불합격/);
+  });
+
   it('검사 대상 LOT이 하나도 없으면 지금처럼 "검사 대상 LOT이 없어요"', async () => {
     const { html } = await render(() => []);
     expect(html).toContain('검사 대상 LOT이 없어요');

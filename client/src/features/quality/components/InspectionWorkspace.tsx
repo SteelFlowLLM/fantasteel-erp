@@ -29,7 +29,8 @@ import { inspectionNameOf, lotIconOf } from '@/features/quality/lib/qualityDispl
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useInspectionDetail, useInspectionQueue } from '@/hooks/useInspections';
 import { useCanUse } from '@/hooks/usePermission';
-import { fmtDate, fmtMDHM } from '@/lib/format';
+import { cn } from '@/lib/cn';
+import { fmtDate, fmtMD, fmtMDHM } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
 import type { InspectionQueueRow } from '@/mock/services';
 
@@ -202,9 +203,25 @@ function NoPendingView({ doneCount, onShowAll }: { doneCount: number; onShowAll:
   );
 }
 
+/**
+ * 목록 한 줄은 두 줄로: LOT · 판정 / 규격(히트는 강종) · 생산일 (+ 상위 히트가 합격이 아니면 그 판정).
+ * 검사 종류는 앞 아이콘(히트·슬래브·코일)으로 알 수 있고, 계획·검사 일시·담당·기준 버전은 LOT을 고르면 오른쪽 상세 머리에 있다.
+ * 마우스를 올리면 뺀 내용까지 한 번에 보인다. 한 화면에 보이는 LOT이 늘어 판정할 LOT을 찾는 스크롤이 줄어든다.
+ */
 function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }) {
-  const heatNote =
-    row.lotType !== 'HEAT' && row.heatResult !== null && row.heatResult !== 'PASS' ? ` · 상위 히트 ${INSPECTION_RESULT_LABEL[row.heatResult]}` : '';
+  const heatResult = row.lotType !== 'HEAT' && row.heatResult !== null && row.heatResult !== 'PASS' ? row.heatResult : null;
+  const spec = row.itemCode ?? row.steelGradeCode ?? '—';
+  const fullText = [
+    inspectionNameOf(row.processType),
+    spec,
+    row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음',
+    `생산완료일 ${fmtDate(row.producedDate)}`,
+    row.inspectionResult !== 'PENDING' || row.inspectedAt ? `검사 ${fmtMDHM(row.inspectedAt)} · ${row.inspectorName ?? '—'}` : null,
+    row.inspectionStandardCode ? `${row.inspectionStandardCode} v${row.inspectionStandardVersion ?? ''}` : null,
+    heatResult ? `상위 히트 ${INSPECTION_RESULT_LABEL[heatResult]}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
   return (
     <MasterItemLink href={inspectionHref(row.lotId)} active={active}>
       <div className="flex items-center gap-1.5">
@@ -215,20 +232,15 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           <ResultBadge result={row.inspectionResult} />
         </span>
       </div>
-      {/* 검사 이름에 LOT 유형이 들어 있다(예: 슬래브 표면·치수 검사). 규격 코드에 강종이 있어 히트만 강종을 쓴다 */}
-      <span className="truncate text-cap text-ink-3" title={row.itemCode ?? undefined}>
-        {inspectionNameOf(row.processType)} · {row.itemCode ?? row.steelGradeCode ?? '—'}
-      </span>
-      <span className="text-cap text-ink-3">
-        {row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음'} · 생산완료일 {fmtDate(row.producedDate)}
-        {heatNote}
-      </span>
-      {row.inspectionResult !== 'PENDING' || row.inspectedAt ? (
-        <span className="text-cap text-ink-3">
-          검사 {fmtMDHM(row.inspectedAt)} · {row.inspectorName ?? '—'}
-          {row.inspectionStandardCode ? ` · ${row.inspectionStandardCode} v${row.inspectionStandardVersion ?? ''}` : ''}
+      <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText}>
+        <span className="min-w-0 truncate">
+          {spec} · 생산 {fmtMD(row.producedDate)}
         </span>
-      ) : null}
+        {/* 상위 히트가 합격이 아니면 판정에 영향을 주므로 잘리지 않게 따로 둔다 */}
+        {heatResult ? (
+          <span className={cn('flex-none font-medium', heatResult === 'FAIL' ? 'text-danger' : 'text-wait')}>· 상위 히트 {INSPECTION_RESULT_LABEL[heatResult]}</span>
+        ) : null}
+      </span>
     </MasterItemLink>
   );
 }
