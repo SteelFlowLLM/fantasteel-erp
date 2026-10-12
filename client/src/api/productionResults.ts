@@ -2,7 +2,7 @@
 // 화면 이름은 '작업 실적'(용어 사전 TRM-047, PLAN 6-1). 작업 상태값은 없다: started_at / completed_at (null = 진행 중).
 // 변경은 모두 PRODUCTION_RESULT_CONFIRM 사용 권한. LOT 채번·FIFO 차감·LOT 관계·작업 로그·계획 상태·진행 중 작업 확인은 core 서비스가 처리한다.
 // 열연 실적은 열연 투입 배정 화면(api/rolling.ts)에서 등록한다 (한 곳에서만).
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/production.ts).
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/production.ts).
 import { INSPECTION_RESULT, PERMISSION, type InspectionResult, type ProcessType, type RawMaterialType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';

@@ -3,7 +3,7 @@
 // - 방 멤버만 방·메시지·첨부를 본다(BP-MSG-01 구현 제안 "방 멤버 권한", "첨부파일에도 방 접근 권한"). 아니면 COM-002.
 // - 업무방 상단 수주 요약은 수주 화면을 열 수 있는 사원에게만 보인다("ERP 대상 조회 권한").
 // - 실시간(REQ-MSG-002)은 가짜 DB의 탭 동기화(BroadcastChannel)로 흉내 낸다: 다른 탭이 보낸 메시지가 오면 조회가 다시 불린다.
-// - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
+// - 서버 모드(기본)는 api/server/messenger.ts가 서버를 부르고, 실시간은 소켓(hooks/useMessengerSocket.ts)이 조회를 다시 부른다.
 // - 메시지·채팅방에 맞는 작업 로그 유형(BUSINESS_EVENT_TYPE)이 없어 작업 로그는 남기지 않는다.
 import {
   DELETED_MESSAGE_TEXT,

@@ -2,7 +2,7 @@
 // - 코일 계획 → 대응 슬래브 규격·필요 매수. FIFO 추천(생산완료일 → LOT 번호)은 저장하지 않고 확정 때 작업 로그로 남긴다(core).
 // - 판매 ACTIVE 예약 몫은 침범하지 않는다(예약 가용 안에서만). '귀속' 단계는 없다.
 // - 배정 확정·변경·해제 = HOT_ROLLING_ALLOCATE 사용 권한. 열연 실적(슬래브 소비 → 코일) = PRODUCTION_RESULT_CONFIRM 사용 권한.
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/production.ts).
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/production.ts).
 import { PERMISSION, type LotStatus, type ProductionPlanStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';

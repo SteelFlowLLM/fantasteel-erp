@@ -1,7 +1,7 @@
 // 밀시트 API (REQ-SHP-003·004, BP-SHP-01 문서 보존).
 // 밀시트는 출고 확정 때 core 서비스가 만든다(출하요청 × 수주 1장, 발행 시점 스냅샷). 화면은 스냅샷만으로 그린다.
 // 'PDF 생성' = 브라우저 인쇄 → 성공하면 pdf_path를 남긴다 (생성 여부 = pdf_path 유무).
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/millSheets.ts). 밀시트·출하요청·수주 id는 서버 id다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/millSheets.ts). 밀시트·출하요청·수주 id는 서버 id다.
 import { PERMISSION, type ProductItemType } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';

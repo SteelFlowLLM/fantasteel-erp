@@ -3,7 +3,7 @@
 // - 없는 대상 id는 COM-003, 화면을 연 뒤 다른 곳에서 바뀌었으면 COM-001, 쓰인 규격의 치수·이론중량 변경은 MST-002.
 // - 중복·형식·참조 중 삭제처럼 9.3에 코드가 없는 거부는 InputError(입력칸별 안내)다.
 // - 기준정보 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
-// - 서버 모드(NEXT_PUBLIC_DATA_SOURCE=server) 조회·변경은 api/server/masterData.ts가 서버를 부른다.
+// - 서버 모드(기본) 조회·변경은 api/server/masterData.ts가 서버를 부른다.
 import {
   ITEM_TYPE_LABEL,
   ITEM_TYPE_UNIT_TYPE,

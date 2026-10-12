@@ -3,7 +3,7 @@
 // - 이력 재현: 수주(business_event.sales_order_id) 또는 LOT(business_event_lot) 단위, 오래된 순, 같은 시각이면 id 순.
 // - 전체 작업 로그는 최신순. 필터: 유형(29개), 주체(사용자·시스템), 대상(테이블), 기간(Asia/Seoul 날짜, 시작·끝 포함).
 // - 작업 로그는 모든 사원이 여는 화면이라(screens.ts) 로그인한 사용 중 사원인지만 확인한다.
-// - NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/businessEvents.ts).
+// - 서버 모드(기본)면 실제 서버를 부른다 (api/server/businessEvents.ts).
 import { BUSINESS_EVENT_TYPE_LABEL, type ActorType, type BusinessEventType, type EventReasonCode, type LotType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { ApiError, mockQuery } from '@/api/client';

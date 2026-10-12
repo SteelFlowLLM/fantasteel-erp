@@ -3,7 +3,7 @@
 // - 고치는 대신 새 버전을 만든다(mock/services/inspectionStandards.ts). 이전 버전은 읽기 전용으로 남는다.
 // - 삭제는 코드 단위(모든 버전)이고, 어느 버전이든 검사가 판정에 썼으면 거부한다 (서버와 같은 규칙).
 // - 검사 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/inspectionStandards.ts). 입력 확인은 두 모드 모두 이 파일에서 먼저 한다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/inspectionStandards.ts). 입력 확인은 두 모드 모두 이 파일에서 먼저 한다.
 import { PERMISSION, type ProcessType } from '@/codes';
 import { requireActor } from '@/api/actor';
 import { FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';

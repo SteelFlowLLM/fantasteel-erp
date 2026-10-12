@@ -1,6 +1,6 @@
 // 검사 입력 API (REQ-QC-001·003, REQ-INV-004·007, BP-QC-01, 14.1 4~6단계).
 // 권한은 이 층이 먼저 확인하고(requireActor), 판정·자동 예약·여재·히트 불합격 연쇄·작업 로그는 핵심 서비스(registerInspection)가 한다.
-// NEXT_PUBLIC_DATA_SOURCE=server면 실제 서버를 부른다 (api/server/inspections.ts). 권한·판정·재고 반영은 서버가 한다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/inspections.ts). 권한·판정·재고 반영은 서버가 한다.
 import { requireActor } from '@/api/actor';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
