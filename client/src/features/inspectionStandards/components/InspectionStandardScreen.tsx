@@ -5,7 +5,6 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { PERMISSION, PROCESS_TYPE_LABEL } from '@/codes';
-import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Select } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
@@ -104,34 +103,47 @@ export function InspectionStandardScreen() {
             standards.length === 0 ? (
               <EmptyNote>{processType || steelGradeId ? '조건에 맞는 검사 기준이 없어요' : '등록된 검사 기준이 없어요'}</EmptyNote>
             ) : (
+              // 공정별로 묶는다: 머리에 공정이 있으니 줄마다 공정 이름을 되풀이하지 않는다.
+              // 목록은 지금 버전만 보여 주므로 "지금" 태그는 빼고 버전 번호만 회색으로 (2 이상이면 조금 진하게)
               <ul className="flex flex-col">
-                {standards.map((s) => {
-                  const active = s.id === selectedId;
-                  return (
-                    <li key={s.id}>
-                      <button
-                        type="button"
-                        aria-current={active || undefined}
-                        onClick={() => navigate({ process: processType, grade: steelGradeId, id: s.id })}
-                        className={cn(
-                          'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
-                          active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="font-mono text-mono font-semibold">{s.inspectionStandardCode}</span>
-                          <Badge tone="ok" plain className="ml-auto">
-                            지금 v{s.version}
-                          </Badge>
-                        </span>
-                        <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                          <span className="font-medium text-ink-2">{PROCESS_TYPE_LABEL[s.processType]}</span>·<span>{s.steelGradeCode ?? '공통 (모든 강종)'}</span>·
-                          <span>항목 {s.itemCount}개</span>
-                          {s.versionCount > 1 ? <span>· 버전 {s.versionCount}개</span> : null}
-                        </span>
-                      </button>
-                    </li>
-                  );
+                {INSPECTED_PROCESS_TYPES.flatMap((p) => {
+                  const group = standards.filter((s) => s.processType === p);
+                  if (group.length === 0) return [];
+                  return [
+                    <li key={`head-${p}`} className="border-b border-line bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-2">
+                      {PROCESS_TYPE_LABEL[p]} · {PROCESS_INSPECTION_TEXT[p]} <span className="font-normal text-ink-3">{group.length}</span>
+                    </li>,
+                    ...group.map((s) => {
+                      const active = s.id === selectedId;
+                      return (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            aria-current={active || undefined}
+                            onClick={() => navigate({ process: processType, grade: steelGradeId, id: s.id })}
+                            className={cn(
+                              'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
+                              active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
+                            )}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono text-mono font-semibold">{s.inspectionStandardCode}</span>
+                              <span
+                                className={cn('ml-auto font-mono text-cap', s.version > 1 ? 'font-semibold text-ink-2' : 'text-ink-3')}
+                                title={`지금 버전 v${s.version}`}
+                              >
+                                v{s.version}
+                              </span>
+                            </span>
+                            <span className="flex items-center gap-1.5 text-cap text-ink-3">
+                              <span>{s.steelGradeCode ?? '공통 (모든 강종)'}</span>·<span>항목 {s.itemCount}개</span>
+                              {s.versionCount > 1 ? <span>· 버전 {s.versionCount}개</span> : null}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    }),
+                  ];
                 })}
               </ul>
             )
