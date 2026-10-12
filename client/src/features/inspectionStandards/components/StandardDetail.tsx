@@ -153,7 +153,16 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
               </thead>
               <tbody>
                 {view.items.map((item, index) => (
-                  <ItemRow key={item.id} item={item} index={index} changed={changed.has(buildStandardItemKey(item))} source={source} standardNo={view.standardNo} />
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    continued={view.items[index - 1]?.inspectionItemCode === item.inspectionItemCode}
+                    continues={view.items[index + 1]?.inspectionItemCode === item.inspectionItemCode}
+                    changed={changed.has(buildStandardItemKey(item))}
+                    source={source}
+                    standardNo={view.standardNo}
+                  />
                 ))}
               </tbody>
             </Table>
@@ -212,13 +221,29 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
   );
 }
 
-function ItemRow({ item, index, changed, source, standardNo }: { item: InspectionStandardItemView; index: number; changed: boolean; source: 'KS' | 'ASSUMED'; standardNo: string | null }) {
+interface ItemRowProps {
+  item: InspectionStandardItemView;
+  index: number;
+  /** 바로 위 줄과 같은 항목 (두께 구간만 다름) */
+  continued: boolean;
+  /** 바로 아래 줄도 같은 항목 */
+  continues: boolean;
+  changed: boolean;
+  source: 'KS' | 'ASSUMED';
+  standardNo: string | null;
+}
+
+/**
+ * 두께 구간마다 같은 항목이 이어지면(열연 항복강도 5줄 등) 한 묶음으로 보인다:
+ * 코드·이름·단위는 묶음 첫 줄에만 쓰고, 묶음 안의 줄 사이 선은 지운다. 값과 두께 구간이 먼저 읽힌다.
+ */
+function ItemRow({ item, index, continued, continues, changed, source, standardNo }: ItemRowProps) {
   return (
-    <tr>
+    <tr className={cn(continues && '[&>td]:border-b-transparent')}>
       <Td className="tabular-nums text-ink-3">{index + 1}</Td>
-      <Td className="font-mono text-mono">{item.inspectionItemCode}</Td>
-      <Td>{item.inspectionItemName}</Td>
-      <Td className="text-ink-2">{item.unit ?? '—'}</Td>
+      <Td className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
+      <Td>{continued ? null : item.inspectionItemName}</Td>
+      <Td className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
       <Td align="right">{formatValue(item.minValue)}</Td>
       <Td align="right">{formatValue(item.maxValue)}</Td>
       <Td>{formatThicknessBand(item)}</Td>
