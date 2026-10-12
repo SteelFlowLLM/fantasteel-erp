@@ -26,7 +26,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산 |
+| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산. `salesOrderNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
 | POST | `sales-orders` | 수주 등록 | `SALES_ORDER_CREATE` USE | 품목별 `itemId`·`orderedQty`만. SO-001·SO-002·INV-001. 하나의 트랜잭션 |
 | GET | `sales-orders/:id` | 수주 상세 | `SALES_ORDER_CREATE` VIEW | 톤 = 매수 × 이론중량(서버 계산) |
 | POST | `sales-orders/:id/cancel` | 수주 취소 | `SALES_ORDER_CANCEL` USE | SO-003·SO-004 |

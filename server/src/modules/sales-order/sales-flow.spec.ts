@@ -242,6 +242,9 @@ describe('수주 조회 (REQ-SO-004·005)', () => {
     expect(fulfillment.items[0]).toMatchObject({ shippedQty: 4, activeReservedQty: 6 });
     const list = await salesOrders.list({ page: 1, size: 100 });
     expect(list.items.find((s) => s.id === salesOrderId)).toMatchObject({ salesOrderStatus: 'PARTIALLY_SHIPPED', totalShippedQty: 4 });
+    // 수주번호 일부(대소문자 무시)로 찾는다 (상단 통합 검색)
+    const byNo = await salesOrders.list({ salesOrderNo: detail.salesOrderNo.slice(3).toLowerCase(), page: 1, size: 100 });
+    expect(byNo).toMatchObject({ total: 1, items: [expect.objectContaining({ id: salesOrderId })] });
     const reservations = await salesOrders.reservations(salesOrderId);
     expect(reservations.map((r) => [r.reservationStatus, r.reservedQty])).toEqual([
       ['ACTIVE', 6],

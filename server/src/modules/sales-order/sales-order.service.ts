@@ -99,7 +99,9 @@ export class SalesOrderService {
   async list(query: ListSalesOrdersQuery): Promise<PageResult<SalesOrderSummary>> {
     const page = query.page ?? 1;
     const size = query.size ?? DEFAULT_PAGE_SIZE;
-    const [total, rows] = await Promise.all([this.repository.countSalesOrders(this.prisma), this.repository.findSalesOrders(this.prisma, { skip: (page - 1) * size, take: size })]);
+    // 수주번호 일부로 찾는다 (상단 통합 검색)
+    const where: Prisma.SalesOrderWhereInput = query.salesOrderNo ? { salesOrderNo: { contains: query.salesOrderNo.trim(), mode: 'insensitive' } } : {};
+    const [total, rows] = await Promise.all([this.repository.countSalesOrders(this.prisma, where), this.repository.findSalesOrders(this.prisma, { skip: (page - 1) * size, take: size }, where)]);
     const ctx = await this.readContext(this.prisma, rows);
     return { items: rows.map((row) => this.toSummary(row, ctx)), page, size, total };
   }

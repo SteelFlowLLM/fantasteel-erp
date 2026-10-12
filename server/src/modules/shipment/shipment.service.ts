@@ -117,6 +117,7 @@ export class ShipmentService {
     const where: Prisma.ShipmentRequestWhereInput = {
       ...(query.shipmentRequestStatus ? { shipmentRequestStatus: query.shipmentRequestStatus } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.shipmentRequestNo ? { shipmentRequestNo: { contains: query.shipmentRequestNo.trim(), mode: 'insensitive' as const } } : {}),
     };
     const [rows, total] = await Promise.all([
       this.repository.findMany(this.prisma, where, (query.page - 1) * query.size, query.size),
