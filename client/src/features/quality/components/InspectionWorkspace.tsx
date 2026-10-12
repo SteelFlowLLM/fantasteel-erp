@@ -11,7 +11,6 @@ import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody } from '@/components/Card';
 import { Chip } from '@/components/Chip';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
@@ -19,6 +18,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
+import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
@@ -154,6 +154,13 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
         {list.length > 0 ? (
           <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
             제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
+            {/* 자물쇠는 마우스를 올려야 뜻이 보여서, 목록에 있을 때만 여기서 한 번 알려 준다 */}
+            {list.some((r) => r.locked) ? (
+              <>
+                {' '}
+                <Icon name="lock" size="sm" className="inline align-[-2px] text-ink-3" /> 표시는 밀시트가 발행돼 측정값을 고칠 수 없는 LOT이에요.
+              </>
+            ) : null}
           </Banner>
         ) : null}
       </MasterPane>
@@ -224,7 +231,7 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
     inspectionNameOf(row.processType),
     spec,
     row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음',
-    `생산완료일 ${fmtDate(row.producedDate)}`,
+    row.producedDate ? `생산완료일 ${fmtDate(row.producedDate)}` : null,
     row.inspectionResult !== 'PENDING' || row.inspectedAt ? `검사 ${fmtMDHM(row.inspectedAt)} · ${row.inspectorName ?? '—'}` : null,
     row.inspectionStandardCode ? `${row.inspectionStandardCode} v${row.inspectionStandardVersion ?? ''}` : null,
     heatResult ? `상위 히트 ${INSPECTION_RESULT_LABEL[heatResult]}` : null,
@@ -247,7 +254,8 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           {/* 합격은 흐린 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
           {row.inspectionResult === 'PASS' ? (
             <span className="inline-flex items-center gap-0.5 text-cap text-ink-3">
-              <Icon name="check" size="sm" />
+              {/* 글자는 흐리게 두되 체크만 상세의 합격 배지와 같은 초록으로: 합격 색이 화면마다 달라 보이지 않게 */}
+              <Icon name="check" size="sm" className="text-ok" />
               {INSPECTION_RESULT_LABEL.PASS}
             </span>
           ) : (
@@ -257,7 +265,8 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
       </div>
       <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText} data-pet-field="규격 · 생산일">
         <span className="min-w-0 truncate">
-          {spec} · 생산 {fmtMD(row.producedDate)}
+          {/* 히트는 생산완료일 칸이 없어(서버) "생산 -"로 보였다: 날짜가 있을 때만 붙인다 */}
+          {row.producedDate ? `${spec} · 생산 ${fmtMD(row.producedDate)}` : spec}
         </span>
         {/* 상위 히트가 합격이 아니면 판정에 영향을 주므로 잘리지 않게 따로 둔다 */}
         {heatResult ? (
@@ -317,11 +326,8 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 불합격 관리
               </ButtonLink>
             ) : null}
-            {/* 과거 사례(EX)는 준비 중: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-004).
-                동작하는 LOT 추적과 같은 무게로 보이지 않게 테두리 없는 흐린 버튼으로 둔다 (링크라 ghost의 enabled:hover가 안 먹어 hover를 따로 준다) */}
-            <ButtonLink href="/past-cases" icon="search" variant="ghost" className="text-ink-3 hover:bg-surface-3 hover:text-ink-2">
-              비슷한 사례 찾기 <ComingSoon grade="EX" />
-            </ButtonLink>
+            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-004) */}
+            <ComingSoonMenu items={[{ label: '비슷한 사례 찾기' }]} />
           </>
         }
       />
@@ -337,9 +343,9 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 value: data.standard ? (
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono">{data.standard.inspectionStandardCode}</span>
-                    <span>버전 {data.standard.version}</span>
+                    <span className="font-mono">{`v${data.standard.version}`}</span>
                     {data.standard.isCurrent ? null : (
-                      <Badge tone="outline" title={`현재 버전 ${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
+                      <Badge tone="outline" title={`현재 버전 v${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
                         <span data-pet-term="현재 버전 아님">현재 버전 아님</span>
                       </Badge>
                     )}

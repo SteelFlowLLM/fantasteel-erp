@@ -1,7 +1,7 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
 // 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
 // 연결 수주·부족은 LOT의 생산계획 상세(GET /production-plans/:id, 품질은 조회 권한 있음)에서 읽는다.
-// 서버에 아직 없는 것(판정 뒤 자동 예약·여재 결과)은 빈 값이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
+// 판정 뒤 자동 예약·여재 매수는 서버 응답의 재고 반영 결과(stockSync)로 채우고, 서버에 없는 여재 LOT 번호만 빈 목록이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,

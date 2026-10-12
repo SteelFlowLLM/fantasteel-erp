@@ -172,7 +172,8 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
         </ConfirmDialog>
       ) : null}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_280px] items-start gap-4">
+      {/* 좁은 화면(1366·1280 발표 화면 등)에서는 오른쪽 280px 칸 때문에 표 오른쪽(최대·적용 두께 구간)이 잘렸다: 1400px 미만이면 기준 정보·버전을 표 아래로 내린다 */}
+      <div className="grid grid-cols-1 items-start gap-4 min-[1400px]:grid-cols-[minmax(0,1fr)_280px]">
         <Card petKey="card:inspectionStandards.items">
           <CardHead
             title="검사 항목"
@@ -222,7 +223,7 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
           </p>
         </Card>
 
-        <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 items-start gap-4 min-[1400px]:flex min-[1400px]:flex-col min-[1400px]:items-stretch">
           <Card petKey="card:inspectionStandards.info">
             <CardHead title="기준 정보" />
             <div className="p-4">

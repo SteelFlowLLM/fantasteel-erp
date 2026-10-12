@@ -4,7 +4,6 @@
 import { useState } from 'react';
 import { InputError } from '@/api/client';
 import type { RejectedLotListRow } from '@/api/dispositions';
-import { isServerPendingValue } from '@/api/inspections';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -12,7 +11,6 @@ import { Field } from '@/components/Field';
 import { Textarea } from '@/components/Input';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { DISPOSITION_STATUS, DISPOSITION_STATUS_LABEL, PERMISSION, type DispositionStatus } from '@/codes';
-import { PendingValue } from '@/features/quality/components/PendingValue';
 import { DispositionBadge } from '@/features/quality/components/QualityBadges';
 import { useSetDisposition } from '@/hooks/useDispositions';
 import { cn } from '@/lib/cn';
@@ -28,7 +26,17 @@ const HELP: Record<DispositionStatus, string> = {
 /** lot.disposition_reason 길이 (ERD varchar(500)) */
 const MAX_REASON = 500;
 
-export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; canEdit: boolean }) {
+export function DispositionForm({
+  row,
+  canEdit,
+  dispositionAt,
+}: {
+  row: RejectedLotListRow;
+  canEdit: boolean;
+  /** 지정 시각. 서버 응답에 없으면 화면이 작업 로그(불합격 상태 지정)에서 찾아 넘긴다 */
+  dispositionAt?: string | null;
+}) {
+  const setAt = dispositionAt ?? row.dispositionAt;
   const [choice, setChoice] = useState<DispositionStatus | null>(row.dispositionStatus);
   const [reason, setReason] = useState('');
   const save = useSetDisposition(() => setReason(''));
@@ -54,14 +62,16 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
         <CardBody>
           {row.dispositionStatus ? (
             <div className="flex flex-col gap-0.5 text-cap text-ink-3" data-pet-term="지정 · 사유">
-              <span>지정 {row.dispositionAt === null && isServerPendingValue() ? <PendingValue label="시각 준비 중" /> : fmtDateTime(row.dispositionAt)}</span>
+              {/* 시각을 모르면(작업 로그도 없으면) "준비 중" 대신 줄을 뺀다 */}
+              {setAt ? <span>지정 {fmtDateTime(setAt)}</span> : null}
               <span className="text-xs text-ink-2">사유: {row.dispositionReason ?? '—'}</span>
             </div>
           ) : (
             <span className="text-cap text-ink-3">아직 불합격 상태를 지정하지 않았어요</span>
           )}
 
-          <div role="radiogroup" aria-label="불합격 상태" className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+          {/* 세 가지를 한 줄에 나란히: 폭에 따라 칸 수가 바뀌면 폐기만 다음 줄에 혼자 떨어졌다 */}
+          <div role="radiogroup" aria-label="불합격 상태" className="grid grid-cols-3 gap-2">
             {CHOICES.map((status) => (
               <label
                 key={status}
@@ -72,7 +82,8 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
                 )}
               >
                 <input type="radio" name="disposition" value={status} checked={choice === status} disabled={!canEdit} onChange={() => setChoice(status)} className="mt-0.5" />
-                <span className="flex flex-col gap-1">
+                {/* items-start: 배지가 칸 폭만큼 늘어나 막대처럼 보이지 않게 글자 폭만 차지한다 */}
+                <span className="flex min-w-0 flex-col items-start gap-1">
                   <DispositionBadge status={status} />
                   <span className="text-cap text-ink-3">{HELP[status]}</span>
                 </span>
