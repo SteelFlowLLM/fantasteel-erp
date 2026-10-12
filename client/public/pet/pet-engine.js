@@ -862,7 +862,9 @@
       options || {},
     );
     const store = makeStore(o.storageKey);
-    const reduced = typeof global.matchMedia === 'function' && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const prefersReduced = typeof global.matchMedia === 'function' && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 동작 스킵하기(메뉴)가 켜져 있으면 기기의 '움직임 줄이기'처럼 걷기·오르기·날기 없이 바로 옮긴다
+    let reduced = prefersReduced || !!store.get('skip');
     const packs = collectPacks(o.characters || global.FANTA_PET_CHARACTERS);
     if (!packs.length) packs.push(normalizePack(buildFallbackCharacter()));
     const guide = buildGuide(o.guide !== null && o.guide !== undefined ? o.guide : global.FANTA_PET_GUIDE);
@@ -976,7 +978,8 @@
       nextBlink: now() + 3000,
       nextIdleTalk: now() + rand(55000, 90000),
       sleeping: false,
-      roam: store.has('roam') ? !!store.get('roam') : !reduced,
+      // 돌아다니기는 늘 켜 둔다 (메뉴에서 끄는 칸을 없앴다). 동작 스킵하기가 켜져 있으면 혼자 돌아다니지는 않는다
+      roam: true,
       explain: store.has('explain') ? !!store.get('explain') : true,
       press: null,
       lastClickT: -1e9,
@@ -2935,7 +2938,12 @@
           if (!landed || tok !== S.seq) return;
         }
         const railTab = el.hasAttribute('data-pet-perch') && !!climbColumnOf(el);
-        if (S.roam && !reduced && railTab) {
+        if (reduced && S.mode === 'ground' && !(S.surface && S.surface.el === el)) {
+          // 동작 스킵: 걷거나 오르지 않고 그 요소 곁(레일 탭이면 탭 위)으로 바로 옮긴다
+          const ok = await goToEl(el, tok);
+          if (tok !== S.seq) return;
+          if (!ok && S.mode !== 'ground') return;
+        } else if (S.roam && !reduced && railTab) {
           // 레일 탭은 레일을 타고 그 탭까지 올라가 앉아서 설명한다
           if (S.mode !== 'ground' && S.mode !== 'hidden') {
             const landed = await waitLanding();
@@ -3261,6 +3269,7 @@
     }
     /** 펫이 서 있는 면 위에서만 그 요소 옆으로 걸어간다 (레일·사다리는 타지 않는다) */
     async function approachEl(el, tok) {
+      if (reduced && S.mode === 'ground') return goToEl(el, tok);
       if (S.roam && S.mode === 'ground' && !reduced) {
         const [mn, mx] = surfaceRange();
         const goal = clamp(besideX(el), mn, mx);
@@ -4528,7 +4537,6 @@
         openChat();
       }, h('span', { class: 'fp-kbd', text: 'Enter' }));
       toggle('info', '기능 설명', S.explain, setExplain, '마우스를 올리면 설명');
-      toggle('walk', '돌아다니기', S.roam, setRoaming, reduced ? '움직임 줄이기 설정이 켜져 있어요' : null);
       item('flag', '안내 다시 보기', () => {
         closeMenu();
         startTour();
@@ -4544,6 +4552,7 @@
         closeMenu();
         openPicker(false);
       });
+      toggle('walk', '동작 스킵하기', reduced, setSkip, prefersReduced ? '기기의 움직임 줄이기가 켜져 있어요' : '켜면 걷거나 날지 않고 바로 옮겨요');
       const seg = h('div', { class: 'fp-seg', role: 'group', 'aria-label': '크기' });
       for (const k of Object.keys(SIZES)) {
         seg.append(
@@ -5760,7 +5769,7 @@
       // 어떤 흐름이 rest()를 빠뜨려도 멈춰 있지 않게
       if (S.restUntil === Infinity && t - S.seqT > 45000 && !bubble.visible) rest(2000, 5000);
       if (t < S.restUntil) return;
-      if (S.roam) runAction(pickRoam());
+      if (S.roam && !reduced) runAction(pickRoam());
       else {
         S.restUntil = t + rand(22000, 42000);
         const tok = S.seq;
@@ -5773,6 +5782,16 @@
       S.roam = !!v;
       store.set('roam', S.roam);
       if (!S.roam) {
+        begin();
+        finishWalk(false);
+        rest();
+      } else rest(1500, 3500);
+    }
+    function setSkip(v) {
+      store.set('skip', !!v);
+      reduced = prefersReduced || !!v;
+      if (reduced) {
+        // 하던 이동은 그 자리에서 멈추고, 쉬었다가 다시 (혼자 돌아다니기는 하지 않는다)
         begin();
         finishWalk(false);
         rest();
