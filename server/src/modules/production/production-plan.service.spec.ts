@@ -61,7 +61,7 @@ describe('생산계획 조회 (API-200·201)', () => {
   it('14.1 슬래브 4매: 히트 1개, 250t, 필요 용선 277.778t, 히트당 10매 → 예상 여재 6매', async () => {
     const plan = await planFor('SL-SS275-250x1200x10000', 4);
     const detail = await production.getPlanDetail(plan.id);
-    expect(detail).toMatchObject({ productionPlanStatus: 'PLANNED', shortageQty: 4, heatCount: 1, itemType: 'SLAB', canCancel: true, canConfirm: true });
+    expect(detail).toMatchObject({ productionPlanStatus: 'PLANNED', shortageQty: 4, heatCount: 1, itemType: 'SLAB', theoreticalWeightTon: '23.550', canCancel: true, canConfirm: true });
     expect(detail.salesOrderNo).toMatch(/^SO-\d{4}-\d{3}$/);
     expect(detail.formation).toMatchObject({
       targetTon: '94.200',
@@ -83,7 +83,7 @@ describe('생산계획 조회 (API-200·201)', () => {
     const plan = await planFor('CL-SM355A-4.5x1500x544000', 6);
     const formation = await production.previewHeatPlan(plan.id);
     const slab = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SM355A-250x1500x10000' } });
-    expect(formation.slabItemId).toBe(slab.id);
+    expect(formation).toMatchObject({ slabItemId: slab.id, slabItemName: slab.itemName });
     expect(formation.hotRollingYieldRate).not.toBeNull();
     expect(Number(formation.cumulativeYieldRate)).toBeLessThan(0.98);
     expect(formation.plannedSlabQty).toBe(formation.slabQtyPerHeat * formation.heatCount);

@@ -32,7 +32,7 @@ const detailSelect = {
           salesOrderId: true,
           itemId: true,
           salesOrder: { select: { salesOrderNo: true } },
-          item: { select: { itemCode: true, itemName: true } },
+          item: { select: { itemCode: true, itemName: true, itemType: true, theoreticalWeightTon: true, steelGrade: { select: { steelGradeCode: true } } } },
         },
       },
       allocations: {
@@ -210,7 +210,7 @@ export class ShipmentRepository {
         orderedQty: true,
         dueDate: true,
         salesOrder: { select: { salesOrderNo: true, customerId: true, customer: { select: { customerName: true } } } },
-        item: { select: { itemCode: true, itemName: true, itemType: true } },
+        item: { select: { itemCode: true, itemName: true, itemType: true, theoreticalWeightTon: true, steelGrade: { select: { steelGradeCode: true } } } },
       },
       orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
     });

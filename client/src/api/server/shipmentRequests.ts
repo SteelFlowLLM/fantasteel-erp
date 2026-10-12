@@ -1,7 +1,7 @@
 // 출하요청·출하 배정 화면 ↔ 서버 API (server/src/modules/shipment, inventory의 allocations).
 // 화면은 줄마다 수주 품목 정보(줄 번호·수주 매수·납기)와 LOT 정보(히트·야드)를 같이 보여 주므로,
 // 출하요청 상세 + 수주 상세 + 배정 후보(작업 로그 없는 조회)를 합쳐 화면 모양을 만든다.
-// 고객사·규격·야드 id는 서버 id 그대로다. 응답에 없는 규격 표시값(유형·이론중량·강종·기본 야드)은 규격 코드로 찾는다(api/server/masterIds.ts).
+// 고객사·규격·야드 id는 서버 id 그대로다. 규격 표시값(유형·이론중량·강종)과 LOT 야드 이름은 서버 응답에 있다(기준정보 조회 권한이 없는 물류도 보인다).
 import type {
   AllocationRecommendation,
   AllocationView,
@@ -16,7 +16,6 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { itemInfoReader, type ItemInfo } from '@/api/server/masterIds';
 import type {
   CreateShipmentRequestForm,
   ShipmentLineDetail,
@@ -31,9 +30,7 @@ import { calcWeightTon, sumTon } from '@/lib/weight';
 
 const PAGE_SIZE = 100;
 const productType = (itemType: string): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
-/** 규격 코드 → 표시값 (한 번의 조회 안에서 만든다) */
-type InfoOf = (itemCode: string) => ItemInfo | undefined;
-const weightOf = (info: InfoOf, itemCode: string) => info(itemCode)?.theoreticalWeightTon ?? '0.000';
+const weightOf = (item: { theoreticalWeightTon: string | null }) => item.theoreticalWeightTon ?? '0.000';
 
 /** 권한이 없어서 못 읽는 보조 정보(밀시트·배정 후보)는 빈 값으로 둔다 */
 async function orEmpty<T>(read: () => Promise<T>, empty: T): Promise<T> {
@@ -76,7 +73,7 @@ async function allPages<T>(path: string, query: Record<string, string | number |
 
 const millSheetsOfAll = () => orEmpty(() => allPages<MillSheetSummary>('/mill-sheets'), []);
 
-function summaryOf(s: ServerShipmentRequestSummary, d: ServerShipmentRequestDetail, info: InfoOf) {
+function summaryOf(s: ServerShipmentRequestSummary, d: ServerShipmentRequestDetail) {
   const allocatedQty = (i: ServerShipmentRequestDetail['items'][number]) => i.allocations.length;
   return {
     id: s.id,
@@ -96,19 +93,19 @@ function summaryOf(s: ServerShipmentRequestSummary, d: ServerShipmentRequestDeta
     totalRequestQty: s.totalRequestQty,
     totalAllocatedQty: d.items.reduce((sum, i) => sum + allocatedQty(i), 0),
     waitingAllocationQty: s.shipmentRequestStatus === 'CANCELLED' ? 0 : d.items.reduce((sum, i) => sum + Math.max(0, i.requestQty - allocatedQty(i)), 0),
-    totalWeightTon: sumTon(d.items.map((i) => calcWeightTon(i.requestQty, weightOf(info, i.itemCode)))),
+    totalWeightTon: sumTon(d.items.map((i) => calcWeightTon(i.requestQty, weightOf(i)))),
   };
 }
 
 async function list(): Promise<ShipmentListRow[]> {
-  const [summaries, millSheets, info] = await Promise.all([allPages<ServerShipmentRequestSummary>('/shipment-requests'), millSheetsOfAll(), itemInfoReader()]);
+  const [summaries, millSheets] = await Promise.all([allPages<ServerShipmentRequestSummary>('/shipment-requests'), millSheetsOfAll()]);
   const details = await Promise.all(summaries.map((s) => serverRequest<ServerShipmentRequestDetail>('GET', `/shipment-requests/${s.id}`)));
   return summaries.map((s, index) => {
     const d = details[index];
     return {
-      ...summaryOf(s, d, info),
+      ...summaryOf(s, d),
       itemCodes: [...new Set(d.items.map((i) => i.itemCode))],
-      itemTypes: [...new Set(d.items.map((i) => productType(info(i.itemCode)?.itemType ?? 'SLAB')))],
+      itemTypes: [...new Set(d.items.map((i) => productType(i.itemType)))],
       salesOrderIds: [...new Set(d.items.map((i) => i.salesOrderId))],
       salesOrders: [...new Map(d.items.map((i) => [i.salesOrderId, i.salesOrderNo])).entries()].map(([salesOrderId, salesOrderNo]) => ({ salesOrderId, salesOrderNo })),
       millSheets: millSheets.filter((m) => m.shipmentRequestId === s.id).map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
@@ -116,30 +113,27 @@ async function list(): Promise<ShipmentListRow[]> {
   });
 }
 
-/** LOT은 규격의 기본 야드에 생긴다 (REQ-MST-008) */
-function lotOption(lot: { lotId: number; lotNo: string; producedDate: string | null; heatNo: string | null }, item: ItemInfo | undefined): ShipmentLotOption {
-  return { lotId: lot.lotId, lotNo: lot.lotNo, producedDate: lot.producedDate ?? '', heatNo: lot.heatNo, yardId: item?.yardId ?? null, yardName: item?.yardName ?? null };
+function lotOption(lot: { lotId: number; lotNo: string; producedDate: string | null; heatNo: string | null; yardId: number | null; yardName: string | null }): ShipmentLotOption {
+  return { lotId: lot.lotId, lotNo: lot.lotNo, producedDate: lot.producedDate ?? '', heatNo: lot.heatNo, yardId: lot.yardId, yardName: lot.yardName };
 }
 
 async function detail(id: number): Promise<ShipmentRequestDetailView> {
   const d = await serverRequest<ServerShipmentRequestDetail>('GET', `/shipment-requests/${id}`);
   const editable = d.shipmentRequestStatus === 'REQUESTED' || d.shipmentRequestStatus === 'ALLOCATED';
-  const [lines, allocations, candidates, millSheets, info] = await Promise.all([
+  const [lines, allocations, candidates, millSheets] = await Promise.all([
     salesOrderLines(d.items.map((i) => i.salesOrderId)),
     orEmpty(() => serverRequest<AllocationView[]>('GET', '/allocations', { query: { allocationPurpose: 'SHIPMENT', shipmentRequestId: id } }), []),
     editable ? orEmpty(() => serverRequest<ShipmentAllocationCandidates[]>('GET', '/allocations/recommendations', { query: { allocationPurpose: 'SHIPMENT', shipmentRequestId: id } }), []) : Promise.resolve([]),
     orEmpty(() => allPages<MillSheetSummary>('/mill-sheets', { shipmentRequestId: id }), []),
-    itemInfoReader(),
   ]);
   const allocationById = new Map(allocations.map((a) => [a.id, a]));
   return {
-    ...summaryOf(d, d, info),
+    ...summaryOf(d, d),
     editable,
     millSheets: millSheets.map((m) => ({ id: m.id, millSheetNo: m.millSheetNo, salesOrderId: m.salesOrderId, issuedAt: m.issuedAt, pdfPath: m.pdfPath })),
     lines: d.items.map((i, index): ShipmentLineDetail => {
       const soLine = lines.get(i.salesOrderItemId);
-      const item = info(i.itemCode);
-      const theoreticalWeightTon = weightOf(info, i.itemCode);
+      const theoreticalWeightTon = weightOf(i);
       const rec = candidates.find((c) => c.shipmentRequestItemId === i.id);
       return {
         shipmentRequestItemId: i.id,
@@ -151,13 +145,13 @@ async function detail(id: number): Promise<ShipmentRequestDetailView> {
         itemId: i.itemId,
         itemCode: i.itemCode,
         itemName: i.itemName,
-        itemType: productType(item?.itemType ?? 'SLAB'),
+        itemType: productType(i.itemType),
         theoreticalWeightTon,
         requestQty: i.requestQty,
         requestTon: calcWeightTon(i.requestQty, theoreticalWeightTon),
         allocatedQty: i.allocations.length,
         waitingAllocationQty: Math.max(0, i.requestQty - i.allocations.length),
-        steelGradeCode: item?.steelGradeCode ?? null,
+        steelGradeCode: i.steelGradeCode,
         orderedQty: soLine?.orderedQty ?? 0,
         shippedQty: soLine?.shippedQty ?? 0,
         dueDate: soLine?.dueDate ?? '',
@@ -169,8 +163,8 @@ async function detail(id: number): Promise<ShipmentRequestDetailView> {
             lotNo: a.lotNo,
             producedDate: full?.producedDate ?? '',
             heatNo: full?.heatNo ?? null,
-            yardId: item?.yardId ?? null,
-            yardName: item?.yardName ?? null,
+            yardId: full?.yardId ?? null,
+            yardName: full?.yardName ?? null,
             allocationId: a.allocationId,
             allocationStatus: a.allocationStatus,
             confirmedAt: full?.createdAt ?? '',
@@ -178,8 +172,8 @@ async function detail(id: number): Promise<ShipmentRequestDetailView> {
             confirmedEmployeeName: null,
           };
         }),
-        recommendedLots: (rec?.candidates ?? []).filter((c) => c.isRecommended).map((c) => lotOption(c, item)),
-        candidateLots: (rec?.candidates ?? []).map((c) => lotOption(c, item)),
+        recommendedLots: (rec?.candidates ?? []).filter((c) => c.isRecommended).map(lotOption),
+        candidateLots: (rec?.candidates ?? []).map(lotOption),
       };
     }),
   };
@@ -205,8 +199,7 @@ async function shippableCustomers(): Promise<ShippableCustomer[]> {
 }
 
 async function shippableItems(customerId: number): Promise<(ShippableItem & { steelGradeCode: string | null })[]> {
-  const [all, info] = await Promise.all([shippableAll(), itemInfoReader()]);
-  const items = all.filter((i) => i.customerId === customerId);
+  const items = (await shippableAll()).filter((i) => i.customerId === customerId);
   const lines = await salesOrderLines(items.map((i) => i.salesOrderId));
   return items.map((i) => ({
     salesOrderItemId: i.salesOrderItemId,
@@ -217,14 +210,14 @@ async function shippableItems(customerId: number): Promise<(ShippableItem & { st
     itemCode: i.itemCode,
     itemName: i.itemName,
     itemType: productType(i.itemType),
-    theoreticalWeightTon: weightOf(info, i.itemCode),
+    theoreticalWeightTon: weightOf(i),
     orderedQty: i.orderedQty,
     shippedQty: lines.get(i.salesOrderItemId)?.shippedQty ?? 0,
     dueDate: i.dueDate,
     activeReservedQty: i.activeReservedQty,
     openRequestQty: i.pendingRequestQty,
     shippableQty: i.shippableQty,
-    steelGradeCode: info(i.itemCode)?.steelGradeCode ?? null,
+    steelGradeCode: i.steelGradeCode,
   }));
 }
 

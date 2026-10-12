@@ -106,6 +106,7 @@ export class InspectionStandardService {
     }));
     return {
       ...toInspectionStandardListItem(standard),
+      standardNo: standard.steelGrade.standardNo,
       inspectionCount: versions.find((v) => v.inspectionStandardId === standard.id)?.inspectionCount ?? 0,
       versions,
     };

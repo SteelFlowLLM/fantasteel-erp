@@ -153,6 +153,8 @@ export class ShipmentService {
           itemCode: i.item.itemCode,
           itemName: i.item.itemName,
           itemType: i.item.itemType as ItemType,
+          theoreticalWeightTon: i.item.theoreticalWeightTon?.toFixed(3) ?? null,
+          steelGradeCode: i.item.steelGrade?.steelGradeCode ?? null,
           orderedQty: i.orderedQty,
           dueDate: i.dueDate.toISOString().slice(0, 10),
           activeReservedQty,

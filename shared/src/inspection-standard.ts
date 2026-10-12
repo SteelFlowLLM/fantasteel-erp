@@ -48,6 +48,8 @@ export interface InspectionStandardVersionBrief {
  * 화면의 버전 이력·판정한 검사 수를 위해 versions·inspectionCount를 같이 준다 (API-120 명세에 없어 문서 반영 필요)
  */
 export interface InspectionStandardDetail extends InspectionStandardListItem {
+  /** 강종의 KS 규격 번호 (밀시트 표시) */
+  standardNo: string;
   /** 이 버전으로 판정한 검사 수 */
   inspectionCount: number;
   /** 같은 기준 코드의 모든 버전 (버전 번호 순) */

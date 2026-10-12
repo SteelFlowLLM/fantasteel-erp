@@ -34,6 +34,7 @@ export function toPlanSummary(p: PlanSummaryRow, progress?: PlanProgress, requir
     itemName: p.item.itemName,
     itemType: p.item.itemType as ItemType,
     steelGradeCode: p.item.steelGrade?.steelGradeCode ?? null,
+    theoreticalWeightTon: p.item.theoreticalWeightTon?.toFixed(3) ?? null,
     shortageQty: p.shortageQty,
     heatCount: p.heatCount,
     salesOrderId: soItem?.salesOrder.id ?? null,

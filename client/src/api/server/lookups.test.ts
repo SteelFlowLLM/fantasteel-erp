@@ -2,7 +2,6 @@
 // 출하요청 등록 창의 고객사·품목도 서버 id로 고르고 보낸다 (api/server/shipmentRequests.ts).
 import { afterEach, describe, expect, it } from 'vitest';
 import { lookupApi } from '@/api/lookups';
-import { itemInfoReader } from '@/api/server/masterIds';
 import { fail, ok, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
 import { shipmentRequestApi } from '@/api/shipmentRequests';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
@@ -80,22 +79,9 @@ describe('선택 목록 서버 모드 (api/server/lookups.ts)', () => {
   });
 });
 
-describe('규격 표시값 (api/server/masterIds.ts itemInfoReader)', () => {
-  it('서버 규격 목록을 먼저 보고(서버 야드 id), 권한이 없으면 시드의 같은 코드로 이름만 채운다(야드 id 없음)', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.sales, master);
-    expect((await itemInfoReader())(slabNew.itemCode)).toEqual({ itemType: 'SLAB', itemName: 'SM355C 슬래브', theoreticalWeightTon: '29.438', steelGradeCode: 'SM355C', yardId: 7, yardName: '슬래브 1야드' });
-    stopFakeServer();
-
-    useFakeServer(SEED_EMPLOYEE_NO.logistics, denied);
-    const info = await itemInfoReader();
-    expect(info('SL-SS275-250x1200x10000')).toMatchObject({ itemType: 'SLAB', steelGradeCode: 'SS275', yardId: null });
-    expect(info(slabNew.itemCode)).toBeUndefined();
-  });
-});
-
 describe('출하요청 등록 창 서버 모드: 고객사·품목 id는 서버 id', () => {
   const shippable = [
-    { salesOrderId: 9, salesOrderNo: 'SO-2610-0009', salesOrderItemId: 72, customerId: 52, customerName: '새고객', itemId: 301, itemCode: slabNew.itemCode, itemName: slabNew.itemName, itemType: 'SLAB', orderedQty: 5, dueDate: '2026-11-30', activeReservedQty: 5, pendingRequestQty: 0, shippableQty: 5 },
+    { salesOrderId: 9, salesOrderNo: 'SO-2610-0009', salesOrderItemId: 72, customerId: 52, customerName: '새고객', itemId: 301, itemCode: slabNew.itemCode, itemName: slabNew.itemName, itemType: 'SLAB', theoreticalWeightTon: '29.438', steelGradeCode: 'SM355C', orderedQty: 5, dueDate: '2026-11-30', activeReservedQty: 5, pendingRequestQty: 0, shippableQty: 5 },
   ];
   const salesOrder = { items: [{ salesOrderItemId: 72, orderedQty: 5, shippedQty: 0, dueDate: '2026-11-30', salesOrderItemStatus: 'OPEN' }] };
   const respond = (c: ServerCall) => (c.path === '/shipment-requests/shippable' ? ok(shippable) : c.path === '/sales-orders/9' ? ok(salesOrder) : master(c));

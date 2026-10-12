@@ -84,6 +84,8 @@ export function heatNoOfLot(lot: LotWithParents): string | null {
 
 const salesOrderIdOf = (a: AllocationRow) => a.shipmentRequestItem?.salesOrderItem.salesOrderId ?? a.productionPlan?.salesOrderItem?.salesOrderId ?? null;
 
+const yardNameOf = (names: ReadonlyMap<number, string>, yardId: number | null) => (yardId === null ? null : (names.get(yardId) ?? null));
+
 export function toAllocationView(a: AllocationRow): AllocationView {
   return {
     id: a.id,
@@ -95,6 +97,7 @@ export function toAllocationView(a: AllocationRow): AllocationView {
     lotStatus: a.lot.lotStatus as LotStatus,
     heatNo: heatNoOfLot(a.lot),
     yardId: a.lot.yardId,
+    yardName: a.lot.yard?.yardName ?? null,
     shipmentRequestItemId: a.shipmentRequestItemId,
     productionPlanId: a.productionPlanId,
     createdAt: a.createdAt.toISOString(),
@@ -421,7 +424,7 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
       const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
-      const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
+      const [lots, yardNames] = await Promise.all([this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId), this.yardNames(tx)]);
       if (unallocatedQty > 0 && lots.length === 0) throw new AppException('INV-001', '배정할 수 있는 합격 LOT이 없어요');
       const candidates: AllocationCandidate[] = lots.map((lot, index) => ({
         lotId: lot.id,
@@ -429,6 +432,7 @@ export class InventoryService {
         producedDate: dateOnly(lot.produced_date),
         heatNo: lot.heat_no,
         yardId: lot.yard_id,
+        yardName: yardNameOf(yardNames, lot.yard_id),
         isRecommended: index < unallocatedQty,
       }));
       const recommended = candidates.filter((c) => c.isRecommended);
@@ -453,7 +457,7 @@ export class InventoryService {
   async listShipmentCandidates(user: AuthUser, shipmentRequestId: number): Promise<ShipmentAllocationCandidates[]> {
     this.assertPurposePermission(user, ALLOCATION_PURPOSE.SHIPMENT, 'VIEW');
     const tx = this.prisma;
-    const items = await this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId);
+    const [items, yardNames] = await Promise.all([this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId), this.yardNames(tx)]);
     const lotsByItem = new Map<number, Awaited<ReturnType<InventoryRepository['findAllocatableLots']>>>();
     const taken = new Set<number>();
     const result: ShipmentAllocationCandidates[] = [];
@@ -473,7 +477,7 @@ export class InventoryService {
         requestQty: line.requestQty,
         allocatedQty,
         unallocatedQty,
-        candidates: lots.map((l) => ({ lotId: l.id, lotNo: l.lot_no, producedDate: dateOnly(l.produced_date), heatNo: l.heat_no, yardId: l.yard_id, isRecommended: recommendedIds.has(l.id) })),
+        candidates: lots.map((l) => ({ lotId: l.id, lotNo: l.lot_no, producedDate: dateOnly(l.produced_date), heatNo: l.heat_no, yardId: l.yard_id, yardName: yardNameOf(yardNames, l.yard_id), isRecommended: recommendedIds.has(l.id) })),
       });
     }
     return result;
@@ -797,6 +801,10 @@ export class InventoryService {
   }
 
   /** 배정 목적별 권한: 출하 = 출하요청·배정 확정, 열연 = 열연 투입 배정 */
+  private async yardNames(tx: Tx): Promise<Map<number, string>> {
+    return new Map((await this.repository.findYards(tx)).map((y) => [y.id, y.yardName]));
+  }
+
   private assertPurposePermission(user: AuthUser, purpose: AllocationPurpose, level: PermissionLevel): void {
     const permission = purpose === ALLOCATION_PURPOSE.SHIPMENT ? PERMISSION.SHIPMENT_REQUEST_MANAGE : PERMISSION.HOT_ROLLING_ALLOCATE;
     if (!hasPermission(user, { permission, level })) throw new AppException('COM-002');

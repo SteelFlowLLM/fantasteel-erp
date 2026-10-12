@@ -56,7 +56,7 @@ export interface HeatPlanBasis {
   hotRollingYieldRate: Prisma.Decimal | null;
   heatCapacityTon: Prisma.Decimal;
   /** 연주할 슬래브 규격: 슬래브 계획은 자기, 코일 계획은 매핑된 슬래브 */
-  slabItem: { id: number; itemCode: string; theoreticalWeightTon: Prisma.Decimal };
+  slabItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: Prisma.Decimal };
 }
 
 /**
@@ -85,12 +85,12 @@ export class ProductionService {
     const steelmakingYieldRate = yieldOf(PROCESS_TYPE.STEELMAKING);
     if (!castingYieldRate || !steelmakingYieldRate) throw new AppException('MST-001', '제강·연주 계획 수율이 없어요');
     let hotRollingYieldRate: Prisma.Decimal | null = null;
-    let slabItem = { id: item.id, itemCode: item.itemCode, theoreticalWeightTon: item.theoreticalWeightTon };
+    let slabItem = { id: item.id, itemCode: item.itemCode, itemName: item.itemName, theoreticalWeightTon: item.theoreticalWeightTon };
     if (itemType === ITEM_TYPE.COIL) {
       const mapped = item.specMappingAsCoilItem?.slabItem;
       if (!mapped?.theoreticalWeightTon) throw new AppException('MST-001', '코일 규격에 대응하는 슬래브 규격 매핑이 없어요');
       hotRollingYieldRate = hotRollingYieldRateOf(item.theoreticalWeightTon, mapped.theoreticalWeightTon);
-      slabItem = { id: mapped.id, itemCode: mapped.itemCode, theoreticalWeightTon: mapped.theoreticalWeightTon };
+      slabItem = { id: mapped.id, itemCode: mapped.itemCode, itemName: mapped.itemName, theoreticalWeightTon: mapped.theoreticalWeightTon };
     }
     const setting = await this.repository.findProductionSetting(tx);
     if (!setting) throw new AppException('MST-001', '히트 용량 설정값이 없어요');
@@ -144,6 +144,7 @@ export class ProductionService {
       requiredHotMetalTon: heat.requiredHotMetalTon,
       slabItemId: basis.slabItem.id,
       slabItemCode: basis.slabItem.itemCode,
+      slabItemName: basis.slabItem.itemName,
       slabTheoreticalWeightTon: basis.slabItem.theoreticalWeightTon.toFixed(3),
       slabQtyPerHeat,
       ...plannedSlabQtyOf({ slabQtyPerHeat, heatCount: heat.heatCount, shortageQty: plan.shortageQty }),
