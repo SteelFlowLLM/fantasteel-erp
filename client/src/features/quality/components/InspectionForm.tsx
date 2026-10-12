@@ -5,7 +5,7 @@
 // 이미 값이 있는 검사는 같은 기록을 고친다(바꾼 항목만 보낸다). 밀시트가 발행된 LOT은 잠긴다.
 import { useState } from 'react';
 import { InputError } from '@/api/client';
-import type { InspectionDetail, RegisterInspectionOutcome } from '@/api/inspections';
+import type { InspectionDetail, InspectionFormItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -20,7 +20,6 @@ import { fillTypicalValues, previewOf, sameMeasuredValue, thicknessBandText, tri
 import { useRegisterInspection } from '@/hooks/useInspections';
 import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
-import type { InspectionFormItem } from '@/mock/services';
 
 function ItemBadge({ item, preview, dirty }: { item: InspectionFormItem; preview: ValuePreview; dirty: boolean }) {
   if (item.minValue === null && item.maxValue === null) return <Badge tone="wait">기준 없음</Badge>;

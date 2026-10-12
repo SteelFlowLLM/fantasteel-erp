@@ -11,12 +11,12 @@ import { seedSteelGradeOf } from '@/api/server/masterIds';
 import type {
   InspectionStandardDeleteView,
   InspectionStandardDetailView,
+  InspectionStandardItemValues,
   InspectionStandardItemView,
   InspectionStandardListQuery,
   InspectionStandardSummaryView,
 } from '@/api/inspectionStandards';
 import type { InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
-import type { InspectionStandardItemValues } from '@/mock/services/inspectionStandards';
 
 const PAGE_SIZE = 100;
 

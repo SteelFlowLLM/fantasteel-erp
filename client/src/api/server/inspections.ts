@@ -18,9 +18,8 @@ import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { inspectionItemNamesOf, serverBusinessEventApi } from '@/api/server/businessEvents';
 import type { LinkedPlan } from '@/api/dispositions';
-import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
+import type { InspectionDetail, InspectionFormView, InspectionQueueRow, LinkedSalesOrderItem, RegisterInspectionInput, RegisterInspectionOutcome } from '@/api/inspections';
 import { appliesToThickness } from '@/lib/inspectionJudgment';
-import type { InspectionFormView, InspectionQueueRow, RegisterInspectionInput } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 끝까지 읽는다 */
 const PAGE_SIZE = 100;
