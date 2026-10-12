@@ -42,7 +42,8 @@ function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemName
       ) : null}
       {changes.slice(0, 6).map((c) => (
         <span key={c.inspectionItemCode} className="tabular-nums">
-          {itemNames[c.inspectionItemCode] ?? UNKNOWN_ITEM_NAME} {c.before === null ? '—' : trimNum(c.before)} → {c.after === null ? '—' : trimNum(c.after)}
+          {/* 처음 넣은 값은 이전 값이 없어 "— → 0.06"처럼 보였다: 그때는 값만, 고친 값이면 이전 → 이후 */}
+          {`${itemNames[c.inspectionItemCode] ?? UNKNOWN_ITEM_NAME} ${c.before === null ? '' : `${trimNum(c.before)} → `}${c.after === null ? '—' : trimNum(c.after)}`}
         </span>
       ))}
       {changes.length > 6 ? <span>그 밖에 {changes.length - 6}개 항목</span> : null}
