@@ -59,4 +59,14 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
     expect(await searchApi.search('S')).toEqual([]);
     expect(calls).toEqual([]);
   });
+
+  it('번호 조건보다 긴 글(31자 이상)은 수주·출하요청 목록을 부르지 않고 LOT만 찾는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
+      if (c.path === '/auth/me') return ok(me({ SALES_ORDER_CREATE: 'USE', SHIPMENT_REQUEST_MANAGE: 'USE' }));
+      if (c.path === '/lots') return ok(lots);
+      return undefined;
+    });
+    expect(await searchApi.search('X'.repeat(31))).toHaveLength(1);
+    expect(calls.map((c) => c.path).sort()).toEqual(['/auth/me', '/lots']);
+  });
 });

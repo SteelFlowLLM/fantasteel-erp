@@ -19,8 +19,6 @@ import { withIGa } from '@/lib/josa';
 import type { InspectionStandardRow } from '@/mock/schema';
 import { insertRow, updateRow, type MockTx } from '@/mock/store';
 
-export type { InspectionStandardItemValues };
-
 export type CreateInspectionStandardVersionInput =
   | {
       /** 지금 버전(화면이 보고 고친 버전)의 id. 그사이 다른 곳에서 새 버전이 생겼으면 COM-001 */

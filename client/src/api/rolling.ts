@@ -8,7 +8,7 @@ import { mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
 import { isServerDataSource } from '@/api/http';
 import { serverRollingApi } from '@/api/server/production';
-import { lotQualityOf, type LotQuality } from '@/api/production';
+import { lotQualityOf, type LotQuality, type ProductionResultView } from '@/api/production';
 import { sortFifo } from '@/lib/fifo';
 import type { MockTables } from '@/mock/schema';
 import {
@@ -25,7 +25,6 @@ import {
   rollingRecommendation,
   unallocatedEligibleLotsOf,
   userActor,
-  type ProductionResultView,
   type RollingAllocationView,
   type RollingPlanView,
 } from '@/mock/services';

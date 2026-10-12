@@ -1,7 +1,7 @@
 // 생산계획 API (REQ-PRD-001·002·006, BP-PRD-01, BP-QC-01 재생산, 업무 프로세스 4.4·4.5·10장).
 // 계획은 수주 등록 때 core 서비스가 히트 편성까지 계산해 만든다. 이 화면은 편성표·진행·LOT을 보여 주고,
 // 생산 담당은 PLANNED 계획의 히트 편성 확정·취소와 재생산 계획 만들기를 한다 (PRODUCTION_PLAN_CONFIRM 사용 권한).
-// 규칙·작업 로그는 core 서비스(@/mock/services)가 처리한다. 이 파일은 권한 확인(requireActor) + 서비스 호출 + 화면용 조회만 한다.
+// 규칙·작업 로그는 core 서비스(@/mock/services)가 처리한다. 이 파일은 화면 응답 타입, 권한 확인(requireActor) + 서비스 호출 + 화면용 조회를 둔다.
 // 서버 모드(기본)면 실제 서버를 부른다 (api/server/production.ts).
 import { PERMISSION, type AllocationPurpose, type InspectionResult, type LotStatus, type LotType, type ProductItemType, type ProductionPlanStatus, type SalesOrderItemStatus } from '@/codes';
 import { mockMutation, mockQuery } from '@/api/client';

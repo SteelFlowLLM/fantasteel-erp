@@ -2,8 +2,9 @@
 // 불합격 LOT(히트 포함)과 불합격 히트의 하위 LOT에 불합격 상태(보류·격하·폐기)와 사유를 기록한다. 후속 처리(재판정·재작업·폐기 처리)는 없다.
 // 재생산 계획은 사람이 만든다(자동 없음): 생산계획·히트 편성 사용 권한으로 핵심 서비스 createReproductionPlan을 부른다.
 // 서버 모드(기본)면 목록·상세·상태 지정·재생산 계획은 실제 서버를 부른다 (api/server/dispositions.ts).
-import { historyWithItemNames, linkedSalesOrderItemOf, type LinkedSalesOrderItem } from '@/api/inspections';
+import { historyWithItemNames, linkedSalesOrderItemOf, type InspectionFormView, type LinkedSalesOrderItem } from '@/api/inspections';
 import { requireActor } from '@/api/actor';
+import type { TimelineEvent } from '@/api/businessEvents';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverDispositionApi } from '@/api/server/dispositions';
@@ -15,9 +16,7 @@ import {
   rejectedLots,
   setDisposition,
   userActor,
-  type InspectionFormView,
   type RejectedLotRow,
-  type TimelineEvent,
 } from '@/mock/services';
 
 export const dispositionKeys = {

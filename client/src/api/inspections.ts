@@ -2,6 +2,7 @@
 // 권한은 이 층이 먼저 확인하고(requireActor), 판정·자동 예약·여재·히트 불합격 연쇄·작업 로그는 핵심 서비스(registerInspection)가 한다.
 // 서버 모드(기본)면 실제 서버를 부른다 (api/server/inspections.ts). 권한·판정·재고 반영은 서버가 한다.
 import { requireActor } from '@/api/actor';
+import type { TimelineEvent } from '@/api/businessEvents';
 import { mockMutation, mockQuery } from '@/api/client';
 import { isServerDataSource } from '@/api/http';
 import { serverInspectionApi } from '@/api/server/inspections';
@@ -17,7 +18,6 @@ import {
   registerInspection,
   userActor,
   type ItemShortage,
-  type TimelineEvent,
 } from '@/mock/services';
 
 type Tables = Readonly<MockTables>;

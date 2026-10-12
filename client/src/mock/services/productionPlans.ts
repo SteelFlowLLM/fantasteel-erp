@@ -133,8 +133,6 @@ export function createProductionPlan(tx: MockTx, actor: BusinessEventActor, inpu
 
 // ── 진행·잔여 목표 ────────────────────────────────────────
 
-export type { PlanHeatView, PlanProgress, ProductionPlanView, ProductionResultView };
-
 const isPassedProduct = (tables: Tables, lot: LotRow) => lot.isPassed === true && heatOf(tables, lot)?.isPassed === true;
 const isFailedProduct = (tables: Tables, lot: LotRow) => lot.isPassed === false || heatOf(tables, lot)?.isPassed === false;
 

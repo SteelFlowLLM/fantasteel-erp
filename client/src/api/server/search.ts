@@ -8,14 +8,17 @@ import { lotTraceHref } from '@/features/businessEvents/lib/eventTargets';
 import { SCREEN, canOpenScreen } from '@/features/shell/screens';
 
 const empty = { items: [], page: 1, size: 0, total: 0 };
+/** 수주·출하요청 번호 조건의 최대 길이(서버 DTO). 더 긴 글은 그 번호일 수 없어 묻지 않는다(400이 LOT 결과까지 지우지 않게) */
+const NUMBER_FILTER_MAX = 30;
 
 export async function serverSearchCandidates(term: string, limit: number): Promise<SearchCandidate[]> {
   const page = (query: Record<string, string>) => ({ query: { ...query, page: 1, size: limit } });
+  const byNumber = term.length <= NUMBER_FILTER_MAX;
   const [me, salesOrders, lots, shipmentRequests] = await Promise.all([
     serverRequest<AuthUser>('GET', '/auth/me'),
-    orEmpty(() => serverRequest<PageResult<SalesOrderSummary>>('GET', '/sales-orders', page({ salesOrderNo: term })), empty),
+    byNumber ? orEmpty(() => serverRequest<PageResult<SalesOrderSummary>>('GET', '/sales-orders', page({ salesOrderNo: term })), empty) : empty,
     orEmpty(() => serverRequest<PageResult<LotSummary>>('GET', '/lots', page({ lotNo: term })), empty),
-    orEmpty(() => serverRequest<PageResult<ShipmentRequestSummary>>('GET', '/shipment-requests', page({ shipmentRequestNo: term })), empty),
+    byNumber ? orEmpty(() => serverRequest<PageResult<ShipmentRequestSummary>>('GET', '/shipment-requests', page({ shipmentRequestNo: term })), empty) : empty,
   ]);
   const canOpenSalesOrder = canOpenScreen(me, SCREEN.salesOrders.access);
   const canOpenShipmentRequest = canOpenScreen(me, SCREEN.shipmentRequests.access);

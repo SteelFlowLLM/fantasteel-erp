@@ -290,7 +290,6 @@ export function setDisposition(
 // ── 조회 ──────────────────────────────────────────────
 
 export type InspectionStatus = 'PENDING' | 'PASS' | 'FAIL';
-export type { InspectionFormItem, InspectionFormView, InspectionQueueRow, RegisterInspectionInput };
 
 const resultOfLot = (lot: LotRow | undefined): InspectionStatus | null => (!lot ? null : lot.isPassed === true ? 'PASS' : lot.isPassed === false ? 'FAIL' : 'PENDING');
 
