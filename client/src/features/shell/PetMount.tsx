@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { SCREEN, screenOfPath, SCREEN_KEY_BY_HREF } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
 
-const CHARACTERS = ['steelman_new', 'steelman_old', 'steelman', 'harin_vest', 'harin_office', 'poseokho', 'furnace', 'coil', 'ladle'];
+const CHARACTERS = ['steelman', 'steelman_old', 'harin_office', 'poseokho', 'coil'];
 /** 영역별 화면 설명. 파일 하나가 window.FANTA_PET_GUIDE_PARTS에 한 묶음을 넣고, guide-merge.js가 기본 설명에 합친다. */
 const GUIDE_PARTS = ['terms', 'common', 'dashboard', 'sales', 'purchasing', 'production', 'logistics-admin'];
 const PET_FILES = [
@@ -58,7 +58,7 @@ export function PetMount() {
     void Promise.all(PET_FILES.map(loadScript)).then(() => {
       if (!alive || !window.FantaPet) return;
       window.FantaPet.mount({
-        defaultCharacter: 'steelman_new',
+        defaultCharacter: 'steelman',
         storageKey: `fantapet:${me.employeeId}`,
         zIndex: 50,
         user: { name: me.employeeName, gradeName: me.jobGradeName, departmentName: me.departmentName, roleCode: me.roleCode },
