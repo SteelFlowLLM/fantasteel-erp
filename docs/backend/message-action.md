@@ -127,3 +127,20 @@ confirm(draftId, actor):
 | 목록 범위 | "확정 주체 본인"만 보는지, 초안을 만든 멤버도 보는지 | [CSV] |
 | payload 이름 | 12.3 예시(`rawMaterialId`, `requiredTon`, `requesterId`)와 ERD 컬럼(`item_id`, `requested_ton`, `requester_id`)이 다르다. 이 문서는 ERD 이름을 권장 | [04] 12.3, [ERD] |
 | 확정 후 부서장 알림 | 13.4 `notify(departmentHeadOf(actor))`에 쓸 알림 유형(APPROVAL_REQUESTED)이 제안 상태 | [06] 3장 |
+
+## 9. 구현 기준 (2026-10-12)
+
+8장의 확인 필요 항목 중 생성·조회·수정에 쓰는 값이다. 화면(가짜 DB)이 쓰던 규칙과 같다.
+
+| 항목 | 정한 값 |
+| --- | --- |
+| 권한 | 3장대로 기능 권한 데코레이터 없이 service가 확인한다. 생성은 방 멤버, 수정·확정·반려는 요청자 본인, 목록은 요청자 본인(방 목록은 방 멤버), 상세는 요청자 본인 또는 원본 메시지 방 멤버. 아니면 COM-002. 다른 방 대화가 초안 상세로 새지 않게 상세도 막는다 |
+| 요청자 권한 | 메시지 작성자가 사용 중이고 구매요청 등록 USE 권한이 있어야 초안을 만든다(아니면 COM-002). 확정할 수 없는 초안이 확인 대기에 영영 남지 않게 한다 |
+| 만들 수 있는 메시지 | 사원이 보낸 일반 메시지(USER, 삭제 안 됨)만. 아니면 COM-004 |
+| 생성 직후 상태 | AI_GENERATED로 만들고 DRAFT_CREATED를 남긴 뒤 같은 트랜잭션에서 WAITING_APPROVAL로 바꾼다 |
+| 중복 생성 응답 | 같은 메시지·유형에 미처리 초안이 있으면 그 초안을 돌려준다(`{ id, created: false }`) |
+| 목록 범위 | `GET action-drafts`는 내가 요청자인 초안(API-252). 메시지 메뉴의 '초안 보기'를 위해 `GET action-drafts?chatRoomId=`로 그 방 메시지의 초안도 준다(방 멤버만, 아니면 COM-002). 최근 것 먼저 |
+| payload 이름 | ERD 이름 `itemId`·`requestedTon`·`desiredReceiptDate`, 선택 입력 `requestReason`, 원본 글 복사 `sourceText` |
+| 수정 | 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. 보내지 않은 칸은 그대로, null이면 비운다. 원료가 아닌 품목·0 이하 톤·없는 날짜는 COM-004, `expectedUpdatedAt`이 다르면 COM-001. 맞는 작업 로그 유형이 없어 수정은 로그를 남기지 않는다 |
+| 상대 날짜 | AI 추출이 없어 요청자가 날짜를 직접 넣으므로 바꾸지 않는다 |
+| 미확정 칸 | 응답의 `unresolvedFields`: 원료 품목·수량(톤)·희망 입고일 중 비었거나 맞지 않는 칸 |

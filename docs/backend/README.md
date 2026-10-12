@@ -19,7 +19,7 @@
 | dashboard | [dashboard.md](dashboard.md) | 대시보드 위젯 조회(P3) | |
 | notification | [notification.md](notification.md) | 업무·알림 | |
 | messenger | [messenger.md](messenger.md) | 채팅방·메시지·첨부·읽음·실시간 | |
-| message-action | [message-action.md](message-action.md) | Message → ERP 구매요청 초안 | |
+| message-action | [message-action.md](message-action.md) | Message → ERP 구매요청 초안 | 정건희 |
 
 시드 내용과 테스트 계정: [seed.md](seed.md). 담당 칸은 역할 분담이 정해지면 채운다 (기획안: 역할 분담 TBD).
 
