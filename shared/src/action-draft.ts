@@ -14,6 +14,12 @@ export interface PurchaseRequisitionDraftPayload {
   sourceText: string | null;
 }
 
+/** POST messages/:id/action-drafts. 같은 메시지에 미처리 초안이 있으면 그 초안을 돌려준다(created: false) */
+export interface ActionDraftCreateResult {
+  id: number;
+  created: boolean;
+}
+
 export interface ActionDraftMessageView {
   id: number;
   chatRoomId: number;
