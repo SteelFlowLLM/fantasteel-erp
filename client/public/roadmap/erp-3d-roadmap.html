@@ -40,17 +40,10 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 .label.up{opacity:.6;border-color:#3b475b}
 .label.up .n{background:#3b475b;color:#cfd7e3}
-.label.aux{font-weight:500;font-size:11.5px}
-.label.soon{border-style:dashed;color:#c3ccd9}
 .label.active{background:var(--c);color:#0b0f15;opacity:1;border-style:solid;font-weight:600}
 .label.active .n{background:#0b0f15;color:var(--c)}
 .compact .label:not(.active){padding:3px}
 .compact .label:not(.active) .t{display:none}
-.zone{
-  position:absolute;left:0;top:0;white-space:nowrap;font-size:11.5px;font-weight:600;color:var(--muted);
-  letter-spacing:.02em;will-change:transform;
-}
-.compact .zone{display:none}
 .tok{
   position:absolute;left:0;top:0;margin-top:-4px;padding:1px 8px;border-radius:6px;background:var(--accent);color:#170b04;
   font-size:11px;font-weight:700;white-space:nowrap;will-change:transform;
@@ -246,7 +239,6 @@ const ROLES = {
   LOGISTICS:  { name: '물류',   color: '#b99aff' },
   COMMON:     { name: '공통',   color: '#f08fb4' },
 };
-const SOON = '#8b9bb3';     // P2·P3·EX (준비 중) 표시 색
 
 /* P1 업무 흐름 — 업무 프로세스 정의서 3장(전체 프로세스)·6장(P1 업무 상세) 순서 */
 const STAGES = [
@@ -368,67 +360,29 @@ const STAGES = [
     next: '품질 문제가 생기면 영향받은 코일과 출하를 바로 찾고, 판단 근거를 사후에 검토합니다.' },
 ];
 
-/* 협업·AI 지원 기능 — 등급순 (P1 → P2 → P3 → EX) */
-const AUX = [
-  { grade: 'P1', bp: 'BP-MSG-01', menu: '메신저 · 업무·알림', h: 2.5,
-    short: '메신저·알림', title: '업무·알림·메신저',
-    summary: '1:1·그룹·업무방에서 대화하고, 멘션과 새 메시지를 알림으로 받아 관련 ERP 화면으로 이동합니다.',
-    features: ['1:1·그룹·업무방 생성 (멤버는 조직 정보에서 선택)', '업무방 상단에 수주 요약', '첨부 업로드·다운로드', '읽음 위치와 안 읽은 수', '멘션·부서 알림, 업무(할 일) 등록·완료'],
-    link: '전 단계에서 사용합니다. 업무방 메시지가 Message → ERP의 입력이 됩니다.' },
-  { grade: 'P1', bp: 'BP-ACT-01', menu: '메신저 (업무방)', h: 2.4,
-    short: 'Message → ERP', title: 'Message → ERP 구매요청',
-    summary: '업무방 메시지에서 AI가 구매요청 내용을 추출해 Action Draft를 만들고, 요청자가 확정하면 실제 구매요청이 생성됩니다.',
-    features: ['원료 품목·수량(톤)·희망 입고일 추출', 'AI_GENERATED → WAITING_APPROVAL → APPROVED → EXECUTED', '요청자가 확인·수정·확정, 반려하면 REJECTED', '생성된 구매요청은 별도로 부서장 승인', 'P2: 출하요청·수주 등록 등 업무 유형 확장 (BP-ACT-02)'],
-    link: '구매요청·부서장 승인·발주(6) 단계로 이어집니다.', to: 5 },
-  { grade: 'P2', bp: 'BP-AGT-01', menu: 'Agent (준비 중)', h: 2.4,
-    short: 'AI Factory Agent', title: 'AI Factory Agent',
-    summary: '규칙으로 위험을 감지하고 대응 후보를 만듭니다. 담당 부서원이 후보별로 확정해야 실행됩니다.',
-    features: ['원료 부족 → 구매요청 초안 (조달 자동화)', '합격 매수 부족 → 재생산 계획 초안', '납기 위험(기준일 초기 3일) → 담당자 알림', '여재 장기 보유 → 대기 수주 배정 추천', '강종별 불합격률 상승 → 품질 부서 알림'],
-    link: 'MRP(5)·품질검사(12)·출하요청(13) 단계의 판단을 돕습니다. AI는 상황 설명만 하고 후보를 정하지 않습니다.' },
-  { grade: 'P2', bp: 'BP-VOC-01', menu: '회의록 (준비 중)', h: 2.6,
-    short: 'Voice2ERP', title: 'Voice2ERP·회의록',
-    summary: '회의 음성을 텍스트로 바꾸고 결정사항·담당자·마감일을 추출해 업무로 등록합니다.',
-    features: ['회의 음성 등록·STT 전체 텍스트', 'AI 요약·결정사항·담당자·마감일 추출', '사용자 확인 후 등록', '구매 항목은 구매요청 초안으로', '그 외는 업무·알림의 할 일로'],
-    link: '구매 항목은 Message → ERP와 같은 초안 흐름을 거쳐 구매요청(6)으로 이어집니다.', to: 5 },
-  { grade: 'P2', bp: 'BP-AST-01', menu: '모든 화면의 AI 패널 · 채팅 @AI', h: 2.7,
-    short: 'AI 어시스턴트', title: 'AI 어시스턴트',
-    summary: '모든 화면의 오른쪽 패널이나 채팅의 @AI로 용어·절차를 묻고, 데이터를 조회하고, 업무 초안을 받습니다.',
-    features: ['업무 지식: 용어 사전·업무 매뉴얼을 출처와 함께 설명', '데이터 조회: 사용자 권한 범위 안에서', '업무 초안을 실행 카드로 제시, 사용자가 확정', '숫자는 DB 조회 결과로만 답변', 'AI는 업무 데이터를 직접 바꾸지 않음'],
-    link: '전 단계에서 사용합니다. AI 초안으로 확정한 작업은 작업 로그에 AI 경유로 표시됩니다.' },
-  { grade: 'P3', bp: 'BP-DSH-01', menu: '대시보드 (준비 중)', h: 2.5,
-    short: '대시보드', title: '대시보드',
-    summary: '로그인하면 권한 범위의 집계를 위젯으로 보여 주고, 위젯 구성을 저장합니다.',
-    features: ['공정 흐름', '수주 충족', 'Agent 위험 감지', '최근 작업 로그', '제품 재고·공정별 수율', '위젯 추가·제외 저장'],
-    link: '전 단계의 실적을 모아 보여 줍니다. 추이 집계에는 시계열 시드 데이터가 필요합니다.' },
-  { grade: 'EX', bp: 'BP-CASE-01', menu: '사례 검색 (준비 중)', h: 2.4,
-    short: '과거 사례', title: '과거 사례 등록·검색',
-    summary: '불합격 처리 후 사례로 등록해 두고, 비슷한 문제가 생기면 AI 요약과 함께 찾아봅니다.',
-    features: ['불합격 처리 후 "사례로 등록" → AI가 초안 작성', '품질 담당이 확인·저장', '한국어 전문검색(ngram)', 'AI 요약과 사례 번호 연결', '설비는 텍스트로만 기록'],
-    link: '품질검사(12)의 불합격 관리에서 등록하고, AI 어시스턴트로 검색합니다.', to: 11 },
-];
-
 const OTHER_MENUS = ['재고 (전 역할)', '조직도 (조회 전용)', '승인함 (부서장)'];
 const EXCLUDED = '견적, 운송 정보, 설비·생산능력 관리, 실중량 계량, 원료 입고 검사, 재고생산, 인사·급여';
 
-/* 도로 위 각 단계의 위치 (x, z) */
+/* 도로 위 각 단계의 위치 (x, z). 광장 타원(중심 (0,-8), 반지름 x 35 · z 30)을 고르게 채우도록
+   가장 넓은 가운데 줄에 6개, 위·아래 줄에 5개를 둔다. 가장자리에서 2.5 이상 띄운다 */
+const LS = 1.4;                    // 로드맵 배율: 받침·모형·도로 폭·철강맨을 함께 키운다
 const NODES = [
-  [-17.5,-12],[-10.5,-12],[-3.5,-12],[3.5,-12],[10.5,-12],[17.5,-12],
-  [10.5,0],[3.5,0],[-3.5,0],[-10.5,0],
-  [-17.5,12],[-10.5,12],[-3.5,12],[3.5,12],[10.5,12],[17.5,12],
+  [-18.4,-20],[-9.2,-20],[0,-20],[9.2,-20],[18.4,-20],
+  [23,-5],[13.8,-5],[4.6,-5],[-4.6,-5],[-13.8,-5],[-23,-5],
+  [-18.4,10],[-9.2,10],[0,10],[9.2,10],[18.4,10],
 ];
-const STATION_DZ = -4.2;           // 도로에서 스테이션까지의 거리
-const AUX_Z = -28.4, AUX_X0 = -18.6, AUX_DX = 6.2, AUX_LANE_Z = -25.5;
-const N = STAGES.length, ITEMS = [...STAGES, ...AUX], T = ITEMS.length;
+const STATION_DZ = -4.2 * LS;      // 도로에서 스테이션까지의 거리
+const N = STAGES.length, ITEMS = STAGES;   // ITEMS: 모형 덮어쓰기(build.mjs)가 모형 높이를 적어 넣는 이름
 const pad = n => String(n).padStart(2, '0');
 const $ = s => document.querySelector(s);
-const colorOf = i => i < N ? ROLES[STAGES[i].role].color : (ITEMS[i].grade === 'P1' ? ROLES.COMMON.color : SOON);
-const tagOf = i => i < N ? pad(i + 1) : ITEMS[i].grade;
+const colorOf = i => ROLES[STAGES[i].role].color;
+const tagOf = i => pad(i + 1);
 
 /* =====================================================================
    2. UI (패널 · 타임라인) — 3D와 독립적으로 동작
    ===================================================================== */
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let current = -1;            // -1 = 전체 보기, 0..N-1 = 업무 흐름, N.. = 지원 기능
+let current = -1;            // -1 = 전체 보기, 0..N-1 = 업무 흐름 단계
 let playing = false, playTimer = 0;
 let view = null;             // 3D 뷰 API (초기화 실패 시 null)
 
@@ -439,10 +393,10 @@ stepsEl.innerHTML = STAGES.map((s, i) =>
   `<li><button data-i="${i}" style="--c:${colorOf(i)}" aria-label="${i + 1}단계 ${s.title}" title="${pad(i + 1)} ${s.title}">${i + 1}</button></li>`).join('');
 labelsEl.innerHTML = ITEMS.map((s, i) =>
   `<div class="label" data-i="${i}" style="--c:${colorOf(i)}"><span class="n">${tagOf(i)}</span><span class="t">${s.short}</span></div>`).join('')
-  + '<div class="zone">협업·AI 지원 기능 · 등급순 →</div><div class="tok"></div>';
+  + '<div class="tok"></div>';
 const stepBtns = [...stepsEl.querySelectorAll('button')];
 const labelEls = [...labelsEl.querySelectorAll('.label')];
-const zoneEl = labelsEl.querySelector('.zone'), tokEl = labelsEl.querySelector('.tok');
+const tokEl = labelsEl.querySelector('.tok');
 
 function renderPanel() {
   if (current < 0) {
@@ -452,21 +406,17 @@ function renderPanel() {
         ? `<button data-i="${i}" style="--c:${colorOf(i)}"><b>${pad(i + 1)}</b>${s.title}<em>${s.who}</em></button>` : '').join('');
       return `<li><div class="ph">${g}</div><div class="st">${items}</div></li>`;
     }).join('');
-    const aux = AUX.map((s, k) =>
-      `<button data-i="${N + k}" style="--c:${colorOf(N + k)}"><b>${s.grade}</b>${s.title}${s.grade === 'P1' ? '' : '<em>준비 중</em>'}</button>`).join('');
     panel.innerHTML = `
       <p class="eyebrow">전체 로드맵</p>
       <h2>수주에서 밀시트까지, P1 ${N}단계</h2>
       <p class="lead">프로젝트 설계 문서의 기능과 순서를 그대로 옮긴 업무 흐름입니다. 합격 재고를 먼저 예약하고 부족 매수만 생산하며, 코일번호 하나로 원료까지 추적합니다. 단계를 누르면 해당 3D 모델로 이동합니다.</p>
       <ol class="phases">${groups}</ol>
-      <h3>협업·AI 지원 기능 (등급순)</h3>
-      <div class="phases" style="margin-top:0"><div class="st">${aux}</div></div>
       <h3>그 밖의 메뉴</h3>
       <div class="chips">${OTHER_MENUS.map(s => `<span>${s}</span>`).join('')}</div>
       <h3>범위 제외</h3>
       <p class="box">${EXCLUDED}</p>
       <p class="hint">로드맵 시점: 드래그 회전 · 휠 확대/축소 · 우클릭 드래그 이동 · ← → 단계 이동 · Space 재생<br>자유 시점: 드래그 둘러보기 · WASD·방향키 이동 · Q/E 아래·위 · 휠 앞뒤 · 우클릭 드래그 평행 이동 · Shift 빠르게<br>V 시점 바꾸기 · Esc 전체 보기</p>`;
-  } else if (current < N) {
+  } else {
     const s = STAGES[current], nx = STAGES[current + 1];
     panel.innerHTML = `
       <div style="--c:${colorOf(current)}">
@@ -487,28 +437,12 @@ function renderPanel() {
           ? `<button class="nextbtn" data-i="${current + 1}"><span>다음 · ${pad(current + 2)} ${nx.title}</span><span>→</span></button>`
           : `<button class="nextbtn" data-i="-1"><span>전체 로드맵 다시 보기</span><span>↺</span></button>`}
       </div>`;
-  } else {
-    const s = ITEMS[current];
-    panel.innerHTML = `
-      <div style="--c:${colorOf(current)}">
-        <p class="eyebrow"><i></i>협업·AI 지원 기능${s.grade === 'P1' ? '' : ' · 준비 중'}</p>
-        <h2><span class="num">${s.grade}</span>${s.title}</h2>
-        <div class="tags"><span class="g">${s.grade}</span><span>${s.bp}</span><span>메뉴: ${s.menu}</span></div>
-        <p class="lead">${s.summary}</p>
-        <h3>주요 기능</h3>
-        <ul class="feat">${s.features.map(f => `<li>${f}</li>`).join('')}</ul>
-        <h3>업무 흐름과의 연결</h3>
-        <p class="box">${s.link}</p>
-        ${s.to !== undefined
-          ? `<button class="nextbtn" data-i="${s.to}"><span>${pad(s.to + 1)} ${STAGES[s.to].title} 보기</span><span>→</span></button>` : ''}
-        <button class="nextbtn" data-i="-1"><span>전체 로드맵 보기</span><span>↺</span></button>
-      </div>`;
   }
   panel.scrollTop = 0;
 }
 
 function renderState() {
-  const flow = current >= 0 && current < N;
+  const flow = current >= 0;
   stepBtns.forEach((b, i) => {
     b.className = !flow ? '' : i < current ? 'done' : i === current ? 'active' : 'up';
     if (i === current) { b.setAttribute('aria-current', 'step'); b.scrollIntoView({ block: 'nearest', inline: 'center' }); }
@@ -516,23 +450,21 @@ function renderState() {
   });
   labelEls.forEach((l, i) => {
     let c = 'label';
-    if (i >= N) c += ' aux' + (ITEMS[i].grade === 'P1' ? '' : ' soon');
     if (i === current) c += ' active';
-    else if (flow && i < N && i > current) c += ' up';
+    else if (flow && i > current) c += ' up';
     l.className = c;
   });
 }
 
 function select(i, fromPlay) {
-  current = Math.max(-1, Math.min(T - 1, i));
+  current = Math.max(-1, Math.min(N - 1, i));
   if (!fromPlay) setPlaying(false);
   renderPanel(); renderState();
   if (view) view.goTo(current);
 }
 function step(d) {
   if (current < 0) { if (d > 0) select(0); return; }
-  if (current < N) select(Math.max(0, Math.min(N - 1, current + d)));
-  else select(Math.max(N, Math.min(T - 1, current + d)));
+  select(Math.max(0, Math.min(N - 1, current + d)));
 }
 
 function setPlaying(on) {
@@ -1207,61 +1139,6 @@ function steelman(b, pose) {                     // 픽셀 한 칸을 작은 상
   return n * SM_PX;                              // 키
 }
 
-const AUX_MODELS = [
-  // 업무·알림·메신저 — 말풍선
-  b => {
-    b.box(1.7, 1.0, .3, K.blue, -.3, 2.05, 0); b.box(.3, .3, .3, K.blue, -.85, 1.52, 0, { rz: PI/4 });
-    for (const x of [-.75, -.3, .15]) b.add(gSphere(.1, 12, 8), K.paper, x, 2.05, .17);
-    b.box(1.4, .85, .3, K.paper, .5, .9, .5, { s: .05 }); b.box(.26, .26, .3, K.paper, 1.0, .45, .5, { rz: PI/4, s: .05 });
-  },
-  // Message → ERP — 말풍선 → 구매요청서
-  b => {
-    b.cyl(.04, .04, 1.2, K.dark, -1.2, .6, 0, { seg: 8 });
-    b.box(1.1, .75, .25, K.blue, -1.2, 1.55, 0); b.box(.24, .24, .25, K.blue, -1.5, 1.14, 0, { rz: PI/4 });
-    b.box(.5, .1, .1, K.gold, -.22, 1.55, 0, { e: .6 }); b.cyl(0, .19, .34, K.gold, .2, 1.55, 0, { rz: -PI/2, e: .6, seg: 14 });
-    b.push().move(1.15, 1.25, 0).rx(-.15); sheet(b, 1.2, 1.7, { head: RC('PURCHASE') }); b.pop();
-    b.box(.1, 1.2, .1, K.dark, 1.15, .55, -.45, { rx: .35 });
-  },
-  // AI Factory Agent — 감시 로봇 + 경고
-  b => {
-    b.box(1.0, .6, .7, '#56627a', 0, .3, 0); b.box(1.3, 1.0, 1.0, '#8fa6c9', 0, 1.2, 0, { s: .4 });
-    for (const x of [-.3, .3]) b.cyl(.14, .14, .04, K.cyan, x, 1.3, .52, { rx: PI/2, e: 1, seg: 16 });
-    b.box(.5, .06, .03, K.board, 0, .95, .51);
-    b.cyl(.03, .03, .4, K.steel, 0, 1.9, 0, { seg: 8 }); b.add(gSphere(.09, 12, 8), K.red, 0, 2.15, 0, { e: .8 });
-    b.cyl(0, .5, .8, K.gold, 1.45, .4, .6, { seg: 3, e: .25 });
-  },
-  // Voice2ERP — 마이크 + 회의록
-  b => {
-    b.cyl(.55, .6, .12, K.dark, 0, .06, 0); b.cyl(.06, .06, 1.1, K.steel, 0, .67, 0, { seg: 10 });
-    b.add(gTorus(.5, .05, 28, 8), K.steel, 0, 1.75, 0);
-    b.cyl(.34, .34, .7, K.steelL, 0, 1.95, 0, { s: .7 });
-    b.add(gSphere(.34), K.steelL, 0, 2.3, 0, { s: .7 }); b.add(gSphere(.34), K.steelL, 0, 1.6, 0, { s: .7 });
-    b.cyl(.35, .35, .05, K.dark, 0, 2.1, 0); b.cyl(.35, .35, .05, K.dark, 0, 1.9, 0);
-    b.push().move(1.25, .6, .5).rx(-.5); sheet(b, .8, 1.0, { lines: 3 }); b.pop();
-  },
-  // AI 어시스턴트 — 화면 옆 패널 + 반짝임
-  b => {
-    b.box(1.4, 2.2, .12, K.board, .3, 1.25, 0);
-    b.box(.9, .3, .04, K.blue, .15, 1.95, .08); b.box(.9, .3, .04, K.paper, .5, 1.5, .08); b.box(.7, .3, .04, K.blue, .05, 1.05, .08);
-    b.box(1.1, .22, .04, '#3d4d6a', .3, .45, .08);
-    b.cyl(0, .28, .45, K.cyan, -1.1, 2.02, .3, { seg: 4, e: 1 }); b.cyl(.28, 0, .45, K.cyan, -1.1, 1.57, .3, { seg: 4, e: 1 });
-    b.cyl(0, .15, .25, K.cyan, -1.5, 1.2, .5, { seg: 4, e: 1 }); b.cyl(.15, 0, .25, K.cyan, -1.5, .95, .5, { seg: 4, e: 1 });
-  },
-  // 대시보드 — 위젯 화면
-  b => {
-    b.cyl(.5, .55, .1, K.dark, 0, .05, 0); b.box(.14, .7, .14, K.dark, 0, .4, 0);
-    b.box(2.5, 1.6, .12, K.board, 0, 1.5, 0);
-    ['SALES', 'PRODUCTION', 'QUALITY'].forEach((r, k) => b.box(.68, .45, .03, RC(r), -.8 + k*.8, 1.95, .075, { e: .15 }));
-    ['PURCHASE', 'LOGISTICS', 'ADMIN'].forEach((r, k) => b.box(.68, .7, .03, RC(r), -.8 + k*.8, 1.25, .075, { e: .15 }));
-  },
-  // 과거 사례 — 보관 상자 + 돋보기
-  b => {
-    b.box(1.5, .4, 1.0, '#6b7a94', -.2, .2, 0); b.box(1.4, .4, 1.0, '#8793a8', -.15, .6, 0, { ry: .1 }); b.box(1.3, .4, 1.0, '#a9b4c6', -.25, 1.0, 0, { ry: -.08 });
-    for (let k = 0; k < 3; k++) b.box(.5, .16, .02, K.paper, -.2, .2 + k*.4, .52);
-    magnifier(b, 1.05, 1.8, .45, .42);
-  },
-];
-
 /* =====================================================================
    5. 씬 구성 + 렌더러
    ===================================================================== */
@@ -1450,11 +1327,14 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
     for (let x = r[0] + sp / 2; x < r[1]; x += sp) for (let z = r[2] + sp / 2; z < r[3]; z += sp) {
       const px = x + (rnd() - .5) * sp * .8, pz = z + (rnd() - .5) * sp * .8;
       if (rnd() < skipP || (skip && skip(px, pz))) continue;
-      mute = cut(px, pz); plant(px, pz, 0, sc, mix); mute = false;
+      mute = cut(px, pz) || OPEN(px, pz); plant(px, pz, 0, sc, mix); mute = false;
     }
   }
+  // 광장과 조행관 사이(북쪽 경사 녹지 + 북쪽 도로~조행관 앞 띠)는 나무를 모두 걷어 잔디만 둔다 (사용자 요청).
+  // 울타리처럼 늘어선 낮은 관목 줄만 남긴다. 걷은 나무도 mute로 난수는 똑같이 뽑아 다른 곳 배치가 그대로다
+  const OPEN = (x, z) => inR(NORTH, x, z) || inR([-51, 44, -107, -92], x, z);
 
-  /* ---- 1. 광장 북쪽 경사 녹지: 낮은 둔덕 + 나무 무리 + 순환도로를 따라 회양목 줄 ---- */
+  /* ---- 1. 광장 북쪽 경사 녹지: 낮은 둔덕 + 순환도로를 따라 회양목 줄 ---- */
   const ringD = (x, z) => (Math.sqrt((x / 42) ** 2 + ((z + 8) / 37) ** 2) - 1) * 39;   // 순환도로 바깥 대략 거리
   const mound = (x, z) => 2.6 * sstep(1, 16, ringD(x, z)) * sstep(1, 9, -92 - z) * sstep(1, 7, 44 - x) * sstep(1, 8, diagD(x, z) - 3.5) - .05;
   {
@@ -1467,7 +1347,8 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
     b.add({ p, n, i: idx }, LAWN, 0, 0, 0, { s: .02 });
   }
   const gy = (x, z) => max(0, mound(x, z));
-  // 나무 무리 (위성사진의 짙은 수관 덩어리 위치 기준)
+  // 나무 무리·둘레 관목·북쪽 도로 향나무 줄: 걷어냄 (OPEN)
+  mute = true;
   const GROVES = [[-47, -60, 6, .55], [-36, -77, 7, .4], [-22, -57, 5, .2], [-12, -78, 7, .6], [2, -60, 5, .3],
     [13, -80, 7, .45], [25, -60, 5, .2], [34, -78, 5, .7], [-27, -88, 4, .5], [-4, -90, 4, .4], [20, -90, 4, .6]];
   for (const [cx, cz, rr, coni] of GROVES) {
@@ -1483,14 +1364,17 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
     const g = pick(GROVES), a = rnd() * 2 * PI, d = g[2] + 1.5 + rnd() * 3, x = g[0] + cos(a) * d, z = g[1] + sin(a) * d;
     if (!blocked(x, z, 1.6)) shrub(x, gy(x, z), z, 1 + rnd() * .5, 1.1 + rnd() * .6);
   }
+  mute = false;
   for (let t = .2; t < PI - .2; t += .045) {                         // 순환도로 바깥 가장자리를 따라
     const x = 46.5 * cos(t), z = -8 - 41.5 * sin(t);
     if (z < -44 && !blocked(x, z, 1.4)) shrub(x, gy(x, z), z, .9 + rnd() * .3, .9 + rnd() * .4);
   }
+  mute = true;
   for (let x = -40; x < 40; x += 3.2) {                              // 북쪽 동서 도로 남쪽 향나무 줄
     const z = -88.5 + (rnd() - .5) * .8;
     if (!blocked(x, z, 1.8)) conifer(x, gy(x, z), z, 4.5 + rnd() * 1.5, 1.1 + rnd() * .3, pick(CONI));
   }
+  mute = false;
 
   /* ---- 2. 남서쪽 축구장 ---- */
   {
@@ -1540,19 +1424,21 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
 
   /* ---- 4. 길가 녹지 (로드뷰 ref/road_west·road_northeast): 향나무·소나무 줄, 둥근 관목 줄, 단풍 몇 그루 ---- */
   function juniper(x, y, z, h, r) {                                // 가이즈카향나무: 불꽃 모양으로 빽빽한 짙은 덩어리
-    b.add(gLathe([[r * .7, 0], [r, h * .25], [r * .82, h * .55], [r * .42, h * .82], [0, h]], 7, true), pick(CONI), x, y - .1, z, { ...LEAF, ry: rnd() * 6.3 });
+    put(gLathe([[r * .7, 0], [r, h * .25], [r * .82, h * .55], [r * .42, h * .82], [0, h]], 7, true), pick(CONI), x, y - .1, z, { ...LEAF, ry: rnd() * 6.3 });
   }
   const hedge = (x, z) => {                                         // 길가 둥근 관목 (가끔 붉은 철쭉)
     const r = .8 + rnd() * .25, h = .9 + rnd() * .35;
     b.add(blob(r, h, 6), rnd() < .12 ? pick(MAPLE) : pick(SHRUB), x, gy(x, z) - .05, z, { ...LEAF, ry: rnd() * 6.3 });
   };
-  // 동쪽 도로 서쪽 가 (광장 북쪽 녹지 동쪽 끝): 관목 줄 + 그 뒤 향나무 덩어리, 세 그루마다 단풍
+  // 동쪽 도로 서쪽 가 (광장 북쪽 녹지 동쪽 끝): 관목 줄 + 그 뒤 향나무 덩어리, 세 그루마다 단풍 (향나무·단풍은 OPEN이라 걷어냄)
   for (let z = -86; z < -51; z += 1.7) if (!blocked(42.3, z, .9)) hedge(42.3, z);
   for (let z = -84, k = 0; z < -53; z += 4.6, k++) {
     const x = 39.2 + (rnd() - .5) * .8;
     if (blocked(x, z, 2)) continue;
+    mute = OPEN(x, z);
     if (k % 3 === 2) broad(x - .8, gy(x - .8, z), z, 6.5 + rnd(), 2.6, pick(MAPLE));
     else juniper(x, gy(x, z), z, 6 + rnd() * 2, 2 + rnd() * .4);
+    mute = false;
   }
   // 동쪽 도로 동쪽 가 (본관 북쪽 잔디): 낮은 생울타리 + 키 큰 소나무 줄 + 단풍 두 그루
   for (let z = -90; z < -61; z += 1.5) hedge(52.4, z);
@@ -1563,9 +1449,12 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
     const x = 46.5 * cos(t), z = -8 - 41.5 * sin(t);
     if (!blocked(x, z, 1.4)) hedge(x, z);
   }
-  for (let t = .35; t < PI + .85; t += .2) {
+  for (let t = .35; t < PI + .85; t += .2) {                        // 북쪽 반원(OPEN)의 향나무는 걷어냄
     const x = 50.5 * cos(t), z = -8 - 45.5 * sin(t);
-    if (!blocked(x, z, 2.2)) conifer(x, gy(x, z), z, 5 + rnd() * 1.6, 1.3 + rnd() * .3, pick(CONI));
+    if (blocked(x, z, 2.2)) continue;
+    mute = OPEN(x, z);
+    conifer(x, gy(x, z), z, 5 + rnd() * 1.6, 1.3 + rnd() * .3, pick(CONI));
+    mute = false;
   }
 });
 /* 도로·주차장·길가 시설: 광장 순환도로, 진입로, 동·북쪽 도로, 주차장 4곳, 횡단보도, 가로등, 국기 게양대 */
@@ -3356,11 +3245,22 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
     const a = PI * .62 + k / 10 * PI * .76;              // 정면 반대쪽(-z) 반원
     b.add(gSphere(.95, 8, 5), HEDGE, Math.sin(a) * 6.6, F + .7, Math.cos(a) * 6.6, { s: .03 });
   }
-  for (const [x, z] of [[-3.4, 3.4], [3.4, 3.4], [-3.4, -3.4], [3.4, -3.4]]) {
+  for (const [x, z] of [[-4.3, 4.3], [4.3, 4.3], [-4.3, -4.3], [4.3, -4.3]]) {
     b.box(.5, .14, .5, '#2a2e34', x, F + .07, z, { s: .2 });
     b.add(gCyl(.18, .18, .03, 10), '#ffe2a8', x, F + .155, z, { e: 1, s: 0 });
   }
 
+  /* ---- 마당 앞 화강석 표석: 로드맵 쪽에서 이름이 바로 읽히게 ---- */
+  b.box(6.2, 1.25, .6, GR2, 0, F + .625, 6.45, { s: .2 });
+  b.box(6.4, .1, .7, GRL, 0, F + 1.3, 6.45, { s: .25 });
+  {
+    let g = gText('정영수 차장님', .9, { px: 56 });
+    if (g.w > 5.6) g = gText('정영수 차장님', .9 * 5.6 / g.w, { px: 56 });
+    b.add(g, GOLD, 0, F + .22, 6.755, { e: .85, s: 0 });
+  }
+
+  const K = 1.12;                                       // 받침·명판·인물은 1.12배로 키운다 (마당 크기는 순환도로와 동쪽 도로 사이가 한계라 그대로)
+  b.push().move(0, F * (1 - K), 0).scale(K);            // 키워도 받침 바닥이 마당 윗면(F)에 붙게
   /* ---- 화강석 받침: 두 단 디딤, 받침 몸체, 갓돌, 청동 바닥판 ---- */
   b.box(6.6, .35, 6.6, GR2, 0, F + .175, 0, { s: .15 });
   b.box(5.6, .35, 5.6, GR, 0, F + .525, 0, { s: .18 });
@@ -3383,16 +3283,7 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
   line('교육생을 향한 헌신에 감사드립니다', .26, F + 2.4, 40);
   line('교육생 일동', .24, F + 1.82, 36);
 
-  /* ---- 마당 앞 화강석 표석: 로드맵 쪽에서 이름이 바로 읽히게 ---- */
-  b.box(6.2, 1.25, .6, GR2, 0, F + .625, 6.45, { s: .2 });
-  b.box(6.4, .1, .7, GRL, 0, F + 1.3, 6.45, { s: .25 });
-  {
-    let g = gText('정영수 차장님', .9, { px: 56 });
-    if (g.w > 5.6) g = gText('정영수 차장님', .9 * 5.6 / g.w, { px: 56 });
-    b.add(g, GOLD, 0, F + .22, 6.755, { e: .85, s: 0 });
-  }
-
-  /* ---- 청동 인물: 구운 메시를 6.5배(키 약 11.7)로 얹고 꼭짓점마다 구운 청동색을 넣는다 ---- */
+  /* ---- 청동 인물: 구운 메시를 8.5배로 얹고 꼭짓점마다 구운 청동색을 넣는다 ---- */
   for (const FIG of [].concat(CAMPUS_ANIM.tributeFigure || [])) {   // 얼굴(곱게)과 몸(보통)을 따로 구운 메시 여러 개
     const dec = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0)).buffer;
     const qp = new Uint16Array(dec(FIG.p)), qn = new Int8Array(dec(FIG.n)), qc = new Uint8Array(dec(FIG.c));
@@ -3405,11 +3296,12 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
       const l = Math.hypot(x, y, z); n[v * 3] = x / l; n[v * 3 + 1] = y / l; n[v * 3 + 2] = z / l;
     }
     const base = b.v.length / 13;
-    b.push().move(0, F + 5.15, 0).scale(6.5);
+    b.push().move(0, F + 5.15, 0).scale(8.5 / K);      // 인물 키 약 15.3 (받침과 합쳐 21 남짓)
     b.add({ p, n, i: qi }, '#ffffff', 0, 0, 0, { s: .55 });
     b.pop();
     for (let v = 0; v < N; v++) for (let a = 0; a < 3; a++) b.v[(base + v) * 13 + 6 + a] = Math.pow(qc[v * 3 + a] / 255, 2.2);
   }
+  b.pop();
   b.pop();
 });
 /* 01 로그인·조직·권한 · 02 기준정보 · 03 수주·재고 우선 예약 — 출입 보안 로비, 규격 견본실과 측정대, 영업 사무실과 재고 야드 정밀 미니어처 */
@@ -8376,20 +8268,31 @@ function createView(stage, canvas) {
   const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
   if (!gl) throw new Error('WebGL2 unavailable');
 
-  /* ---- path: straight runs joined by two half-circle turns ---- */
+  /* ---- path: 곧은 길 세 줄을 U자 회전 두 번으로 잇는다 ---- */
   const path = (() => {
-    const S = [], step = .15;
+    const P = [], S = [], step = .15 * LS;
     const line = (x0, z0, x1, z1) => {
-      const L = hypot(x1 - x0, z1 - z0), n = round(L / step);
-      for (let k = 0; k < n; k++) { const t = k / n; S.push({ x: x0 + (x1-x0)*t, z: z0 + (z1-z0)*t, tx: (x1-x0)/L, tz: (z1-z0)/L }); }
+      const n = Math.ceil(hypot(x1 - x0, z1 - z0) / .05);
+      for (let k = 0; k < n; k++) P.push([x0 + (x1 - x0) * k / n, z0 + (z1 - z0) * k / n]);
     };
-    const arc = (cx, cz, r, a0, a1) => {
-      const n = round(abs(a1 - a0) * r / step), sg = Math.sign(a1 - a0);
-      for (let k = 0; k < n; k++) { const a = a0 + (a1 - a0) * k / n; S.push({ x: cx + r*cos(a), z: cz + r*sin(a), tx: -sin(a)*sg, tz: cos(a)*sg }); }
+    // 3차 베지어 U자: (x0,z0)에서 h 쪽(+ 동, - 서)으로 나가 (x1,z1)로 돌아온다. 위·아래 줄 길이가 달라 반원 대신 쓴다
+    const turn = (x0, z0, x1, z1, h) => {
+      for (let k = 0; k < 240; k++) {
+        const t = k / 240, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+        P.push([a * x0 + b * (x0 + h) + c * (x1 + h) + d * x1, (a + b) * z0 + (c + d) * z1]);
+      }
     };
-    line(-22.5, -12, 19, -12); arc(19, -6, 6, -PI/2, PI/2);
-    line(19, 0, -19, 0);       arc(-19, 6, 6, -PI/2, -1.5*PI);
-    line(-19, 12, 22.5, 12);   S.push({ x: 22.5, z: 12, tx: 1, tz: 0 });
+    line(-23.9, -20, 19.5, -20); turn(19.5, -20, 24.1, -5, 9);     // 동쪽 회전은 가운데 줄 첫 받침(06)을 감싸고 돈다
+    line(24.1, -5, -24.1, -5);   turn(-24.1, -5, -19.5, 10, -7);
+    line(-19.5, 10, 21.4, 10);   P.push([21.4, 10]);
+    // 같은 간격으로 다시 찍는다: 철강맨 빠르기와 화살표 간격이 곧은 길·회전에서 같게
+    for (let k = 0, acc = 0, next = 0; k < P.length - 1; k++) {
+      const [x0, z0] = P[k], [x1, z1] = P[k + 1], L = hypot(x1 - x0, z1 - z0);
+      if (!L) continue;
+      for (; next <= acc + L; next += step) { const f = (next - acc) / L; S.push({ x: x0 + (x1 - x0) * f, z: z0 + (z1 - z0) * f, tx: (x1 - x0) / L, tz: (z1 - z0) / L }); }
+      acc += L;
+    }
+    S.push({ x: 21.4, z: 10, tx: 1, tz: 0 });
     return S;
   })();
   const nodeIdx = NODES.map(([x, z]) => {
@@ -8425,48 +8328,33 @@ function createView(stage, canvas) {
     MODEL_STATS[key] = (b.v.length - v0) / 13;
   }
   W.add({ p: [-500,-.05,-500, 500,-.05,-500, 500,-.05,500, -500,-.05,500], n: [0,1,0,0,1,0,0,1,0,0,1,0], i: [0,1,2,0,2,3] }, '#121816', 0, 0, 0, { s: 0 });
-  W.add(ribbon(1.6, .03), '#2b3545', 0, 0, 0, { s: .05 });
-  W.add(ribbon(.07, .04, .8), '#7d6a2a', 0, 0, 0, { s: 0 });
-  W.add(ribbon(.07, .04, -.8), '#7d6a2a', 0, 0, 0, { s: 0 });
+  W.add(ribbon(1.6 * LS, .03), '#2b3545', 0, 0, 0, { s: .05 });
+  W.add(ribbon(.07 * LS, .04, .8 * LS), '#7d6a2a', 0, 0, 0, { s: 0 });
+  W.add(ribbon(.07 * LS, .04, -.8 * LS), '#7d6a2a', 0, 0, 0, { s: 0 });
   campus(W);
   const chev = { p: [.34,0,0, -.22,0,-.3, -.06,0,0, -.22,0,.3], n: [0,1,0,0,1,0,0,1,0,0,1,0], i: [0,1,2,0,2,3] };
   for (let k = 14; k < path.length - 8; k += 17) {
     if (nodeIdx.some(q => abs(q - k) < 9)) continue;
     const s = path[k];
-    W.add(chev, '#66758d', s.x, .05, s.z, { ry: Math.atan2(-s.tz, s.tx), s: 0 });
+    W.push().move(s.x, .05, s.z).scale(LS).add(chev, '#66758d', 0, 0, 0, { ry: Math.atan2(-s.tz, s.tx), s: 0 }).pop();
   }
-  // 지원 기능 차선
-  W.box(AUX_DX * (AUX.length - 1) + 6, .04, .5, '#232c3a', 0, .03, AUX_LANE_Z, { s: 0 });
-  for (let k = 0; k < AUX.length - 1; k++)
-    W.add(chev, '#4a586e', AUX_X0 + (k + .5) * AUX_DX, .06, AUX_LANE_Z, { s: 0 });
 
+  // 받침·모형은 LS배로 키운다. 들여 쓴 블록 = push·pop 사이 (모형 줄은 build.mjs가 그대로 찾아 바꾼다)
   const stations = ITEMS.map((it, i) => {
-    const main = i < N, col = colorOf(i);
-    let nx, nz, cx, cz, r0;
-    if (main) { [nx, nz] = NODES[i]; cx = nx; cz = nz + STATION_DZ; }
-    else { cx = nx = AUX_X0 + (i - N) * AUX_DX; cz = AUX_Z; nz = AUX_LANE_Z; }
-    if (main) {
-      W.cyl(.62, .62, .07, col, nx, .065, nz, { e: .35, seg: 32 });
-      W.box(.6, .05, .85, '#2b3545', nx, .035, nz - 1.125);
-      r0 = W.i.length;
-      W.push().move(cx, 0, cz);
+    const col = colorOf(i), [nx, nz] = NODES[i], cx = nx, cz = nz + STATION_DZ;
+    W.push().move(nx, 0, nz).scale(LS); {
+      W.cyl(.62, .62, .07, col, 0, .065, 0, { e: .35, seg: 32 });
+      W.box(.6, .05, .85, '#2b3545', 0, .035, -1.125);
+    } W.pop();
+    const r0 = W.i.length;
+    W.push().move(cx, 0, cz).scale(LS); {
       W.cyl(2.6, 2.75, .3, '#202a39', 0, .15, 0, { seg: 48, s: .1 });
       W.cyl(2.38, 2.38, .02, '#2c384b', 0, .305, 0, { seg: 48, s: .1 });
       W.move(0, .3, 0);
       runModel(W, i, MODELS[i]);
-      W.pop();
-    } else {
-      W.cyl(.36, .36, .06, col, nx, .07, nz, { e: it.grade === 'P1' ? .35 : .1, seg: 24 });
-      W.box(.36, .04, .75, '#232c3a', nx, .03, nz - .55, { s: 0 });
-      r0 = W.i.length;
-      W.push().move(cx, 0, cz);
-      W.cyl(1.9, 2.0, .24, '#1c2532', 0, .12, 0, { seg: 40, s: .1 });
-      W.cyl(1.72, 1.72, .02, '#273244', 0, .245, 0, { seg: 40, s: .1 });
-      W.move(0, .24, 0).scale(.78);
-      runModel(W, i, AUX_MODELS[i - N]);
-      W.pop();
-    }
-    return { main, nx, nz, cx, cz, r0, r1: W.i.length, tint: lin(col), label: [cx, it.h + (main ? .62 : .5), cz], lift: main ? 0 : ((i - N) % 2) * 1.5 };
+    } W.pop();
+    // M: 받침 아래 가운데를 원점으로 LS배 한 좌표계 (받침 고리·공정 애니메이션이 같이 쓴다)
+    return { nx, nz, cx, cz, r0, r1: W.i.length, tint: lin(col), label: [cx, (it.h + .62) * LS, cz], M: M4.mul(M4.trans(cx, 0, cz), M4.scale(LS, LS, LS)) };
   });
 
   const G = new Builder();    // grid (lines)
@@ -8636,7 +8524,7 @@ precision mediump float; void main(){}`;
   let goal = null, width = 1, height = 1, dpr = 1, vp = IDENT, eye = [0, 0, 1];
   // 자유 시점도 같은 cam 표현을 쓴다: 둘러볼 때는 눈을 고정하고 t를 돌리고, 날 때는 눈과 t를 같이 옮긴다 → eyeOf·goal 비행·rayPick이 그대로 동작
   // fk = 로드맵(0)↔자유(1) 섞는 정도. cam.dist에 묶인 안개·철강맨 크기·라벨 높이를 모드를 바꿀 때 튀지 않게 넘긴다
-  let free = false, fk = 0, wl = 0, ksNow = 1, farNow = 0;     // wl: 휠·핀치로 남은 앞뒤 이동량 (로그 단위, + 앞)
+  let free = false, fk = 0, wl = 0, ksNow = 1;     // wl: 휠·핀치로 남은 앞뒤 이동량 (로그 단위, + 앞)
   const vel = [0, 0, 0], keys = new Set();
   const eyeOf = c => [c.t[0] + c.dist*cos(c.pitch)*sin(c.yaw), c.t[1] + c.dist*sin(c.pitch), c.t[2] + c.dist*cos(c.pitch)*cos(c.yaw)];
   const fwdOf = c => [-cos(c.pitch)*sin(c.yaw), -sin(c.pitch), -cos(c.pitch)*cos(c.yaw)];
@@ -8655,17 +8543,17 @@ precision mediump float; void main(){}`;
   }
   function goalFor(i) {
     if (i < 0) {
-      const c = { t: [0, 0, -8], yaw: 0, pitch: .86 };
-      const pts = [[-25.9,0,6], [-23.6,0,10.8], [-23.6,0,1.2], [25.9,0,-6], [23.6,0,-1.2], [23.6,0,-10.8],
-        [-23,0,-12], [23,0,13], [-20.4,0,13.2], [20.4,0,13.2], [-20.4,5.4,-16.2], [20.4,5.4,-16.2],
-        [-20.4,5.2,7.8], [20.4,5.2,7.8], [-21,0,AUX_Z - 2.2], [21,0,AUX_Z - 2.2], [-20.5,5.2,AUX_Z], [20.5,5.2,AUX_Z], [AUX_X0 - 13,0,AUX_LANE_Z]];
+      // 전체 보기: 길 양쪽 가장자리와 받침 좌우 끝·이름표 높이가 모두 화면 안에 드는 거리
+      const c = { t: [0, 0, -8], yaw: 0, pitch: .86 }, pts = [];
+      for (let k = 0; k < path.length; k += 10) { const p = path[k]; pts.push([p.x - p.tz * LS, 0, p.z + p.tx * LS], [p.x + p.tz * LS, 0, p.z - p.tx * LS]); }
+      stations.forEach((s, k) => pts.push([s.cx - 2.9 * LS, 0, s.cz], [s.cx + 2.9 * LS, 0, s.cz], [s.cx, (ITEMS[k].h + 1.8) * LS, s.cz]));
       return { ...c, dist: fit(c, pts, 30) };
     }
-    const s = stations[i], r = s.main ? 3 : 2.3, pts = [];
-    const c = { t: [s.cx, s.main ? 1.3 : 1.0, s.cz + (s.main ? 1.4 : 1.0)], yaw: .42, pitch: .5 };
-    for (const x of [-r, r]) for (const z of [-r, r]) for (const y of [0, ITEMS[i].h + (s.main ? 1.6 : 1.3)]) pts.push([s.cx + x, y, s.cz + z]);
-    pts.push([s.nx - 1.6, 0, s.nz + (s.main ? 1 : .5)], [s.nx + 1.6, 0, s.nz + (s.main ? 1 : .5)]);
-    return { ...c, dist: fit(c, pts, s.main ? 11 : 8.5) };
+    const s = stations[i], r = 3 * LS, pts = [];
+    const c = { t: [s.cx, 1.3 * LS, s.cz + 1.4 * LS], yaw: .42, pitch: .5 };
+    for (const x of [-r, r]) for (const z of [-r, r]) for (const y of [0, (ITEMS[i].h + 1.6) * LS]) pts.push([s.cx + x, y, s.cz + z]);
+    pts.push([s.nx - 1.6 * LS, 0, s.nz + LS], [s.nx + 1.6 * LS, 0, s.nz + LS]);
+    return { ...c, dist: fit(c, pts, 11 * LS) };
   }
 
   /* ---- progress along the road ---- */
@@ -8680,8 +8568,8 @@ precision mediump float; void main(){}`;
     let best = -1, bt = 1e9;
     stations.forEach((s, i) => {
       if (fade[i] < .5) return;                    // 투명해진 모형은 건너뛴다: 그 너머의 고른 모형을 눌러도 앞 모형이 잡히지 않게
-      const oc = [s.cx - e[0], (s.main ? 1.5 : 1.1) - e[1], s.cz - e[2]], tca = dot(oc, d), d2 = dot(oc, oc) - tca*tca;
-      if (tca > 0 && d2 < (s.main ? 8.4 : 4.6) && tca < bt) { bt = tca; best = i; }
+      const oc = [s.cx - e[0], 1.5 * LS - e[1], s.cz - e[2]], tca = dot(oc, d), d2 = dot(oc, oc) - tca*tca;
+      if (tca > 0 && d2 < 8.4 * LS * LS && tca < bt) { bt = tca; best = i; }
     });
     return best;
   }
@@ -8794,17 +8682,17 @@ precision mediump float; void main(){}`;
 
   /* ---- frame ---- */
   const U = main.U, pl = new Float32Array(NL * 4), plc = new Float32Array(NL * 3);
-  const st = k => stations[k];
+  const near = (k, x, y, z) => [stations[k].cx + x * LS, y * LS, stations[k].cz + z * LS];   // 스테이션 받침 아래 가운데 기준 → 월드
   const lights = [
-    { p: [st(7).cx, 1.1, st(7).cz + 1.5], r: 7.5, c: [2.6, 1.0, .25] },          // 제선
-    { p: [st(8).cx + .6, 2.9, st(8).cz + .9], r: 6.5, c: [2.2, .85, .2] },       // 제강
-    { p: [st(9).cx + .8, 1.2, st(9).cz + .9], r: 6.5, c: [2.2, .85, .2] },       // 연주
-    { p: [st(10).cx - 1.2, 1.5, st(10).cz + .9], r: 6.5, c: [2.2, .85, .2] },    // 열연
-    { p: [29.5, 9, -34.5], r: 19, c: [1.5, 1.32, 1.05] },                       // 헌정 동상 투광
+    { p: near(7, 0, 1.1, 1.5), r: 7.5 * LS, c: [2.6, 1.0, .25] },               // 제선
+    { p: near(8, .6, 2.9, .9), r: 6.5 * LS, c: [2.2, .85, .2] },                // 제강
+    { p: near(9, .8, 1.2, .9), r: 6.5 * LS, c: [2.2, .85, .2] },                // 연주
+    { p: near(10, -1.2, 1.5, .9), r: 6.5 * LS, c: [2.2, .85, .2] },             // 열연
+    { p: [28.5, 13, -33.5], r: 26, c: [1.55, 1.36, 1.08] },                     // 헌정 동상 투광
     { p: [0, 1, 0], r: 6, c: [2.4, .9, .22] },                                   // 진행 표시
   ];
   lights.forEach((l, k) => plc.set(l.c, k * 3));
-  const DIM = [.035, .045, .06], AUX_K = .745, ZONE = [AUX_X0 - 3.6, .1, AUX_LANE_Z];
+  const DIM = [.035, .045, .06];
   let tPrev = performance.now(), trav = [0, 0, 0], tokNow = -1, tokT0 = 0, tokTop = [0, 0, 0];
 
   function drawMesh(m, model, tint, emis, count, first) {
@@ -8813,12 +8701,12 @@ precision mediump float; void main(){}`;
   }
   /* ---- 고른 단계에 집중: 다른 모형은 어둡게, 화면에서 고른 모형 앞을 가리는 모형은 잠시 투명하게 ---- */
   const GHOST = .14, DIMK = .32;
-  const fade = new Float32Array(T).fill(1), dimk = new Float32Array(T).fill(1), occ = new Uint8Array(T);
+  const fade = new Float32Array(N).fill(1), dimk = new Float32Array(N).fill(1), occ = new Uint8Array(N);
   const ptint = stations.map(() => [1, 1, 1]);          // 스테이션별 색 배율 (공정 애니메이션 부품도 같이 쓴다)
   let pass = 0, passK = -1, procT = 0;                  // 공정 애니메이션: pass 0 = 불투명 모형 것만, 1 = 지금 그리는 투명 모형(passK) 것만
   const procOn = k => pass === 0 ? fade[k] > .995 : k === passK;
-  const occT = new Float32Array(T);                     // 가림이 이어진 시간: 단계를 옮기는 순간 직전 모형이 잠깐 앞에 걸려 번쩍이지 않게
-  const sizeOf = i => ({ R: stations[i].main ? 2.5 : 1.75, top: (stations[i].main ? .3 : .24) + ITEMS[i].h });
+  const occT = new Float32Array(N);                     // 가림이 이어진 시간: 단계를 옮기는 순간 직전 모형이 잠깐 앞에 걸려 번쩍이지 않게
+  const sizeOf = i => ({ R: 2.5 * LS, top: (.3 + ITEMS[i].h) * LS });
   function blocks(i, p, k) {                            // 눈 → 점 p 선분이 스테이션 i의 원기둥(반지름 R·k, 높이 0..top)을 지나는가
     const s = stations[i], { R, top } = sizeOf(i), r = R * k;
     const dx = p[0] - eye[0], dz = p[2] - eye[2], fx = eye[0] - s.cx, fz = eye[2] - s.cz;
@@ -8833,25 +8721,25 @@ precision mediump float; void main(){}`;
     occ.fill(0);
     if (selected >= 0) {
       // 고른 모형 위의 점 11개(가운데 기둥 3 + 둘레 8)로 눈에서 선을 그어, 그 선을 막는 다른 모형을 투명하게 한다
-      const s = stations[selected], { R, top } = sizeOf(selected), y0 = s.main ? .3 : .24, pts = [];
+      const s = stations[selected], { R, top } = sizeOf(selected), y0 = .3 * LS, pts = [];
       for (const f of [.2, .55, .9]) pts.push([s.cx, y0 + (top - y0) * f, s.cz]);
       for (let k = 0; k < 8; k++) pts.push([s.cx + cos(k * PI / 4) * R * .7, y0 + (top - y0) * .4, s.cz + sin(k * PI / 4) * R * .7]);
       const fw = norm([cam.t[0] - eye[0], cam.t[1] - eye[1], cam.t[2] - eye[2]]);
       const depth = j => (stations[j].cx - eye[0]) * fw[0] + (sizeOf(j).top / 2 - eye[1]) * fw[1] + (stations[j].cz - eye[2]) * fw[2];
       const ds = depth(selected);
-      for (let i = 0; i < T; i++) {
+      for (let i = 0; i < N; i++) {
         if (i === selected) continue;
         const ghost = fade[i] < .9, k = ghost ? .95 : .85;      // 이미 투명해진 모형은 조금 넉넉하게 봐서 경계에서 깜빡이지 않게
         // 고른 모형보다 한 줄 이상 앞(카메라 쪽)에 있으면서 화면에 보이는 모형도 투명하게: 직접 가리지 않아도 화면 아래를 크게 차지해 시선을 빼앗는다
-        const di = depth(i), q = di > .5 && di < ds - (ghost ? 4 : 5) ? project(vp, [stations[i].cx, sizeOf(i).top / 2, stations[i].cz]) : null;
+        const di = depth(i), q = di > .5 && di < ds - (ghost ? 4 : 5) * LS ? project(vp, [stations[i].cx, sizeOf(i).top / 2, stations[i].cz]) : null;
         if (q && abs(q[0]) < 1.15 && q[1] > -1.3 && q[1] < 1.1) { occ[i] = 1; continue; }
         let n = 0;
         for (const p of pts) if (blocks(i, p, k) && ++n >= (ghost ? 1 : 2)) { occ[i] = 1; break; }
       }
     }
-    for (let i = 0; i < T; i++) occT[i] = occ[i] ? occT[i] + max(0, dt) : 0;
+    for (let i = 0; i < N; i++) occT[i] = occ[i] ? occT[i] + max(0, dt) : 0;
     const a = reduceMotion ? 1 : 1 - exp(-max(0, dt) * 7);      // 첫 프레임은 dt가 음수일 수 있다
-    for (let i = 0; i < T; i++) {
+    for (let i = 0; i < N; i++) {
       const fg = occ[i] && (occT[i] > .15 || fade[i] < .9) ? GHOST : 1, dg = selected < 0 || i === selected ? 1 : DIMK;
       fade[i] += (fg - fade[i]) * a; dimk[i] += (dg - dimk[i]) * a;
       fade[i] = min(1, max(GHOST, fade[i])); dimk[i] = min(1, max(DIMK, dimk[i]));
@@ -8864,7 +8752,7 @@ precision mediump float; void main(){}`;
   }
   function drawGhosts() {                               // 깊이만 먼저 그려 가장 앞면만 한 번 섞는다 → 투명 모형 안쪽 면이 겹쳐 지저분해지지 않게
     const order = [];
-    for (let i = 0; i < T; i++) if (fade[i] <= .995) order.push(i);
+    for (let i = 0; i < N; i++) if (fade[i] <= .995) order.push(i);
     if (!order.length) return;
     order.sort((p, q) => hypot(stations[q].cx - eye[0], stations[q].cz - eye[2]) - hypot(stations[p].cx - eye[0], stations[p].cz - eye[2]));
     gl.depthFunc(gl.LEQUAL);
@@ -8882,7 +8770,7 @@ precision mediump float; void main(){}`;
   }
   /* ---- 공정 애니메이션: 08 제선 · 09 제강 · 11 열연 (10 연주는 셰이더 흐름 무늬) ---- */
   const WH = [1, 1, 1], frac = x => x - floor(x), ease = x => x * x * (3 - 2 * x), c01 = x => min(1, max(0, x));
-  const at = (k, x, y, z) => M4.trans(stations[k].cx + x, .3 + y, stations[k].cz + z);   // 스테이션 받침 윗면 기준 좌표
+  const at = (k, x, y, z) => M4.mul(stations[k].M, M4.trans(x, .3 + y, z));   // 스테이션 받침 윗면 기준 좌표 (LS배)
   const RING_RD = { a: 38.75, b: 33.75 };                // 순환도로 가운데 선 (광장 타원 바깥)
   function drawCampus(t) {                              // 배경의 움직임: 광장 순환도로를 반시계 방향으로 도는 차
     mCars.forEach((m, k) => {
@@ -8956,13 +8844,13 @@ precision mediump float; void main(){}`;
     const ta = animT !== null ? animT : t;       // 공정 애니메이션용 시각
     const pulse = reduceMotion ? 1 : 1 + sin(ta * 3.1) * .16 + sin(ta * 7.3) * .05;
     gl.uniform1f(U.uGlow, pulse); gl.uniform1f(U.uTime, reduceMotion ? 0 : ta % 1000);
-    lights[NL - 1].p = [trav[0], 1, trav[2]];
+    lights[NL - 1].p = [trav[0], LS, trav[2]];
     lights.forEach((l, k) => pl.set([l.p[0], l.p[1], l.p[2], l.r], k * 4));
     gl.uniform4fv(U.uPL, pl);
     gl.uniform3fv(U.uPLCol, plc.map((v, k) => v * (k < 12 ? pulse : 1)));
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shTex); gl.uniform1i(U.uShadow, 0);
 
-    const ONE = [1, 1, 1], flow = selected >= 0 && selected < N;
+    const ONE = [1, 1, 1], flow = selected >= 0;
     gl.uniform1f(U.uFlat, 2); drawMesh(mSky, fk ? M4.trans(eye[0] * fk, 0, eye[2] * fk) : IDENT, ONE, 0); gl.uniform1f(U.uFlat, 0);   // 자유 시점: 하늘이 눈을 따라온다 (멀리 날아도 하늘 밖으로 안 나감)
     updateFocus(dt);
     for (const [a, n] of BASE) drawMesh(mWorld, IDENT, ONE, 0, n, a);
@@ -8971,14 +8859,9 @@ precision mediump float; void main(){}`;
     drawMesh(mProg, IDENT, ONE, 0, floor(prog) * 6);
     stations.forEach((s, i) => {
       const active = i === selected, beat = reduceMotion ? 1.3 : 1.25 + sin(t * 4) * .45;
-      if (s.main) {
-        const on = !flow || i <= selected;
-        const dk = dimk[i];                                  // 고른 단계가 있으면 다른 받침 고리도 같이 어둡게
-        drawMesh(mRing, M4.trans(s.cx, .31, s.cz), on ? s.tint.map(v => v * dk) : DIM, active ? beat : on ? .5 * dk : 0);
-      } else {
-        const m = M4.mul(M4.trans(s.cx, .25, s.cz), M4.scale(AUX_K, AUX_K, AUX_K));
-        drawMesh(mRing, m, s.tint.map(v => v * dimk[i]), active ? beat : (ITEMS[i].grade === 'P1' ? .45 : .08) * dimk[i]);
-      }
+      const on = !flow || i <= selected;
+      const dk = dimk[i];                                    // 고른 단계가 있으면 다른 받침 고리도 같이 어둡게
+      drawMesh(mRing, M4.mul(s.M, M4.trans(0, .31, 0)), on ? s.tint.map(v => v * dk) : DIM, active ? beat : on ? .5 * dk : 0);
     });
     // 이동 표식: 철강맨이 방금 지나온 단계의 데이터 모형을 머리에 이고 간다. 다음 단계에 닿으면 그 단계의 결과물로 바뀐다
     let ti = 0; for (let k = 0; k < N; k++) if (nodeIdx[k] <= prog + .5) ti = k;
@@ -8986,10 +8869,10 @@ precision mediump float; void main(){}`;
     let pose = 0;
     if (!reduceMotion) { let u = t % 2.59; for (const [p, d] of SM_SEQ) { if (u < d) { pose = p; break; } u -= d; } }
     const mh = hypot(eye[0] - trav[0], eye[2] - trav[2]);                                    // 자유 시점: cam.dist 대신 철강맨까지의 실제 거리·올려다본 각
-    const ks = ksNow = mix(min(2, max(1, cam.dist / 26)), min(2, max(1, hypot(mh, eye[1]) / 30))), tk = ks * .8 * (reduceMotion ? 1 : .3 + .7 * ease(c01((t - tokT0) / .35)));
-    const face = Math.atan2(eye[0] - trav[0], eye[2] - trav[2]), tilt = mix(cam.pitch, Math.atan2(eye[1] - .16, mh)) * .55;      // 늘 화면 쪽을 보고, 내려다볼수록 살짝 눕는다
-    const stand = M4.mul(M4.mul(M4.trans(trav[0], .16, trav[2]), M4.rotY(face)), M4.rotX(-tilt));
-    drawMesh(mTrav, M4.trans(trav[0], 0, trav[2]), ONE, 0);
+    const ks = ksNow = LS * mix(min(2, max(1, cam.dist / (26 * LS))), min(2, max(1, hypot(mh, eye[1]) / (30 * LS)))), tk = ks * .8 * (reduceMotion ? 1 : .3 + .7 * ease(c01((t - tokT0) / .35)));
+    const face = Math.atan2(eye[0] - trav[0], eye[2] - trav[2]), tilt = mix(cam.pitch, Math.atan2(eye[1] - .16 * LS, mh)) * .55;      // 늘 화면 쪽을 보고, 내려다볼수록 살짝 눕는다
+    const stand = M4.mul(M4.mul(M4.trans(trav[0], .16 * LS, trav[2]), M4.rotY(face)), M4.rotX(-tilt));
+    drawMesh(mTrav, M4.mul(M4.trans(trav[0], 0, trav[2]), M4.scale(LS, LS, LS)), ONE, 0);
     gl.uniform1f(U.uFlat, 1); drawMesh(mMan[pose], M4.mul(stand, M4.scale(ks, ks, ks)), ONE, 0); gl.uniform1f(U.uFlat, 0);
     const spin = TOK_FLAT.has(ti) ? (reduceMotion ? 0 : sin(t * 1.1) * .45) : reduceMotion ? .6 : t * .9;
     const tm = M4.mul(M4.mul(M4.mul(stand, M4.trans(0, SM_TOP[pose] * ks + (TOK_BOT[ti] + .03) * tk, 0)), M4.rotX(tilt)), M4.rotY(spin));
@@ -9007,10 +8890,7 @@ precision mediump float; void main(){}`;
       el.style.visibility = 'visible';
       el.style.transform = `translate(${((q[0] * .5 + .5) * width).toFixed(1)}px,${ly.toFixed(1)}px) translate(${shift})`;
     };
-    // 멀리서 볼 때만 지원 기능 라벨을 두 줄로 엇갈림 (자유 시점은 지원 기능 줄·안내 글까지의 실제 거리로)
-    const far = farNow = mix(min(1, max(0, (cam.dist - 26) / 18)), min(1, max(0, (hypot(eye[0], eye[1], eye[2] - AUX_Z) - 32) / 22)));
-    stations.forEach((s, i) => place(labelEls[i], [s.label[0], s.label[1] + s.lift * far, s.label[2]], '-50%,-100%'));
-    if (mix(cam.dist, hypot(eye[0] - ZONE[0], eye[1], eye[2] - ZONE[2])) < 30 && selected < N) zoneEl.style.visibility = 'hidden'; else place(zoneEl, ZONE, '-100%,-50%');
+    stations.forEach((s, i) => place(labelEls[i], s.label, '-50%,-100%'));
     place(tokEl, tokTop, '-50%,-100%');
   }
   function loop(now) { render(now); requestAnimationFrame(loop); }
@@ -9046,7 +8926,7 @@ precision mediump float; void main(){}`;
       }
       if (now || reduceMotion) fk = on ? 1 : 0;
     },
-    state() { return { moving: !!goal, tok: tokNow, tokAt: project(vp, tokTop), manAt: project(vp, [trav[0], .16 + .65 * ksNow, trav[2]]), free, fk, eye: eye.slice(), cam: { t: cam.t.slice(), yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist } }; },
+    state() { return { moving: !!goal, tok: tokNow, tokAt: project(vp, tokTop), manAt: project(vp, [trav[0], .16 * LS + .65 * ksNow, trav[2]]), free, fk, eye: eye.slice(), cam: { t: cam.t.slice(), yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist } }; },
     savePNG() {
       render(performance.now());
       const c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
@@ -9057,7 +8937,7 @@ precision mediump float; void main(){}`;
       x.fillStyle = '#97a4b8'; x.font = `400 ${12.5 * s}px ${font}`; x.fillText('수주생산(MTO) · 원료 입고 → 제선 → 제강 → 연주 → 열연 → 출하', 18 * s, 52 * s);
       x.font = `600 ${12 * s}px ${font}`;
       stations.forEach((stn, i) => {
-        const q = project(vp, [stn.label[0], stn.label[1] + stn.lift * farNow, stn.label[2]]); if (!q) return;
+        const q = project(vp, stn.label); if (!q) return;
         const col = colorOf(i), text = `${tagOf(i)}  ${ITEMS[i].short}`;
         const w = x.measureText(text).width + 20 * s, h = 24 * s, cx = (q[0] * .5 + .5) * c.width, cy = (.5 - q[1] * .5) * c.height - h / 2;
         const act = i === selected;
@@ -9073,8 +8953,6 @@ precision mediump float; void main(){}`;
         x.beginPath(); if (x.roundRect) x.roundRect(cx - w / 2, cy - h / 2, w, h, 6 * s); else x.rect(cx - w / 2, cy - h / 2, w, h);
         x.fillStyle = '#ff7a3d'; x.fill(); x.fillStyle = '#170b04'; x.fillText(text, cx - w / 2 + 8 * s, cy + s);
       }
-      const zq = project(vp, ZONE);
-      if (zq) { x.fillStyle = '#97a4b8'; x.font = `600 ${11.5 * s}px ${font}`; x.textAlign = 'right'; x.fillText('협업·AI 지원 기능 · 등급순 →', (zq[0] * .5 + .5) * c.width, (.5 - zq[1] * .5) * c.height); x.textAlign = 'left'; }
       c.toBlob(b => {
         const a = document.createElement('a'); a.href = URL.createObjectURL(b);
         a.download = '철강제조ERP_로드맵' + (selected >= 0 ? `_${tagOf(selected)}_${ITEMS[selected].short.replace(/[^\w가-힣]+/g, '')}` : '_전체') + '.png';
