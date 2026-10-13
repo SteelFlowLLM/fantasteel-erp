@@ -510,7 +510,9 @@ function IssueResult({ view }: { view: GoodsIssueView }) {
         {view.millSheets.map((m) => (
           <span key={m.id} className="flex items-center gap-1.5" data-pet-item="millSheet" data-pet-item-title={m.millSheetNo}>
             <MillSheetLink id={m.id} no={m.millSheetNo} />
-            <PdfBadge pdfPath={m.pdfPath} />
+            <span className="inline-flex" data-pet-field="PDF">
+              <PdfBadge pdfPath={m.pdfPath} />
+            </span>
           </span>
         ))}
         <span className="ml-auto text-cap text-ink-3">밀시트는 발행 시점 값을 스냅샷으로 저장해요.</span>

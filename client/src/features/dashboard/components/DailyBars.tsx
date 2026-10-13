@@ -28,6 +28,7 @@ export function DailyBars({ points, petItem }: { points: readonly DailyProductPo
             key={p.date}
             data-pet-item={petItem}
             data-pet-item-title={petItem ? p.date : undefined}
+            data-pet-item-tip={petItem ? (petItem === 'goodsIssue' ? '그날 출고 확정한 슬래브·코일 매수와 톤이에요.' : '그날 만든 슬래브·코일 매수와 톤이에요.') : undefined}
             className="flex h-full min-w-0 flex-1 items-end hover:bg-surface-2"
             title={`${p.date} · 슬래브 ${p.slabQty}매 · 코일 ${p.coilQty}개 · ${fmtTon(p.ton)}`}
           >

@@ -7,7 +7,7 @@ import { millSheetPdfFileName } from '@fantasteel/shared';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
+import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, SHIPMENT_REQUEST_STATUS_LABEL, type ProductItemType } from '@/codes';
 import type { MillSheetDetailView, MillSheetListRow } from '@/api/millSheets';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -95,8 +95,18 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
             <ul>
               {groups.map((group) => (
                 <li key={group[0].shipmentRequestId}>
-                  <div className="bg-surface-2 px-4 py-1.5 text-cap text-ink-3" data-pet-item="goodsIssue" data-pet-item-title={group[0].shipmentRequestNo}>
-                    {fmtMDHM(group[0].issuedAt)} 출고 · <span className="font-mono">{group[0].shipmentRequestNo}</span>
+                  <div className="flex items-center gap-1 bg-surface-2 px-4 py-1.5 text-cap text-ink-3" data-pet-item="goodsIssue" data-pet-item-title={group[0].shipmentRequestNo}>
+                    <span className="flex-none" data-pet-field="출고 일시">
+                      {fmtMDHM(group[0].issuedAt)}
+                    </span>
+                    <span className="flex-none">{SHIPMENT_REQUEST_STATUS_LABEL.ISSUED} ·</span>
+                    <span className="flex-none font-mono">{group[0].shipmentRequestNo}</span>
+                    <span className="ml-auto min-w-0 truncate" data-pet-field="고객사">
+                      {group[0].customerName}
+                    </span>
+                    <span className="flex-none" data-pet-field="밀시트">
+                      {group.length}장
+                    </span>
                   </div>
                   <ul>
                     {group.map((row) => (
@@ -236,7 +246,7 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
       </div>
       <MillSheetPaper snapshot={s} />
       <MillSheetPrintPortal>
-        <MillSheetPaper snapshot={s} />
+        <MillSheetPaper snapshot={s} forPrint />
       </MillSheetPrintPortal>
     </>
   );

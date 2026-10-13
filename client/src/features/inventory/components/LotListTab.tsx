@@ -150,11 +150,9 @@ function LotRow({ row }: { row: LotListView }) {
           <span className="inline-flex items-center gap-1 text-ink-2">
             {allocationLabelOf(null)}
             {row.isSurplus ? (
-              <span data-pet-term="여재" className="contents">
-                <Badge tone="neutral" plain title={row.surplusAt ? `여재 전환 ${fmtDate(row.surplusAt)}` : undefined}>
-                  여재
-                </Badge>
-              </span>
+              <Badge tone="neutral" plain title={row.surplusAt ? `여재 전환 ${fmtDate(row.surplusAt)}` : undefined}>
+                여재
+              </Badge>
             ) : null}
           </span>
         ) : (

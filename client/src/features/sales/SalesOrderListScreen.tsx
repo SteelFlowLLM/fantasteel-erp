@@ -266,11 +266,7 @@ export function SalesOrderListScreen() {
                             <span className="inline-flex items-center gap-1">
                               <SalesOrderStatusBadge status={row.status} />
                               {row.isDueRisk ? <DueRiskBadge /> : null}
-                              {row.hasReproductionNeed ? (
-                                <span data-pet-term="재생산 필요" className="contents">
-                                  <Tag tone="outline">재생산 필요</Tag>
-                                </span>
-                              ) : null}
+                              {row.hasReproductionNeed ? <Tag tone="outline">재생산 필요</Tag> : null}
                             </span>
                           </Td>
                           <Td>

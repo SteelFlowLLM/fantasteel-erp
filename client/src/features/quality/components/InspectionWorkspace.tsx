@@ -425,7 +425,11 @@ function SalesOrderLink({ item }: { item: LinkedSalesOrderItem | null }) {
       <span className="text-cap text-ink-3">
         품목 {item.lineNo} · {item.customerName}
       </span>
-      {item.shortage.reproductionNeedQty > 0 ? <Badge tone="danger">재생산 필요 {item.shortage.reproductionNeedQty}매</Badge> : null}
+      {item.shortage.reproductionNeedQty > 0 ? (
+        <span className="inline-flex" data-pet-term="재생산 필요">
+          <Badge tone="danger">재생산 필요 {item.shortage.reproductionNeedQty}매</Badge>
+        </span>
+      ) : null}
     </span>
   );
 }

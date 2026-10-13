@@ -32,12 +32,13 @@ function resultTitle(r: ProductionResultView): string {
   return r.outputLotNos[0] ? `${process} ${r.outputLotNos[0]}` : `${process} ${fmtMDHM(r.startedAt)} 시작`;
 }
 
+/** 만든 LOT 링크. 링크마다 펫 항목(data-pet-item)을 달지 않는다: 번호뿐이라 읽을 값이 없고, 감싼 실적 행이 공정·일시·투입·산출과 함께 이 번호를 읽어 준다 */
 export function LotLinks({ lotNos, max = 3 }: { lotNos: readonly string[]; max?: number }) {
   if (lotNos.length === 0) return <span className="text-ink-3">-</span>;
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       {lotNos.slice(0, max).map((no) => (
-        <Link key={no} href={traceHref(no)} className="font-mono text-mono text-run hover:underline" data-pet-item="lot" data-pet-item-title={no}>
+        <Link key={no} href={traceHref(no)} className="font-mono text-mono text-run hover:underline">
           {no}
         </Link>
       ))}

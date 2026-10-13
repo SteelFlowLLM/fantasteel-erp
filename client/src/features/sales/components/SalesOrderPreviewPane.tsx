@@ -103,11 +103,7 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                         <span className="text-ink-2">
                           품목 {plan.lineNo} · 부족 {plan.shortageQty} · 잔여 목표 {plan.remainingTargetQty} · 히트 {plan.heatCount}
                         </span>
-                        {plan.isReproduction ? (
-                          <span data-pet-term="재생산" className="contents">
-                            <Tag tone="outline">재생산</Tag>
-                          </span>
-                        ) : null}
+                        {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
                         <span className="ml-auto">
                           <PlanStatusBadge status={plan.productionPlanStatus} />
                         </span>

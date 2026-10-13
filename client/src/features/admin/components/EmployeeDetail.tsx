@@ -145,7 +145,8 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           {isHead ? (
             <div className="flex flex-wrap gap-1.5">
               {headOf.map((d) => (
-                <span key={d.id} data-pet-item="department" data-pet-item-title={d.departmentName}>
+                // 꼬리표 글자가 부서명뿐이라 항목으로 읽으면 읽을 값이 없다 → '부서장' 용어 설명을 단다
+                <span key={d.id} data-pet-term="부서장">
                   <Tag tone="outline">{d.departmentName} 부서장</Tag>
                 </span>
               ))}

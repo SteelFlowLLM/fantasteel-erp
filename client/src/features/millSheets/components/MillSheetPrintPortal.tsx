@@ -22,7 +22,8 @@ export function MillSheetPrintPortal({ children }: { children: ReactNode }) {
   return (
     <>
       <style>{PRINT_CSS}</style>
-      {target ? createPortal(<div id={ROOT_ID}>{children}</div>, target) : null}
+      {/* 화면 도우미 펫은 이 숨은 사본 안의 항목·용어를 쓰지 않는다 */}
+      {target ? createPortal(<div id={ROOT_ID} data-pet-ignore="">{children}</div>, target) : null}
     </>
   );
 }
