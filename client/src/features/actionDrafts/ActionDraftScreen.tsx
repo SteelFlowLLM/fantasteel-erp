@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL } from '@/codes';
 import type { DraftDetailView } from '@/api/actionDrafts';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';

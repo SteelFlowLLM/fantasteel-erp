@@ -1,4 +1,4 @@
-// 조직 관리 화면 ↔ 서버 API (server/src/modules/organization). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 조직 관리 화면 ↔ 서버 API (server/src/modules/organization). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 사원·부서·직급·역할 id는 서버 id를 그대로 쓴다. ERD에 없는 칸(직급 코드·부서 정렬 순서·최근 접속)은 빈 값으로 둔다.
 import type {
   DepartmentNode,

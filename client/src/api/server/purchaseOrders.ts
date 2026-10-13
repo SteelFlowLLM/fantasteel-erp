@@ -1,4 +1,4 @@
-// 발주·입고 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 발주·입고 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 발주·발주 품목·입고·공급업체·원료 id는 서버 id를 그대로 쓴다.
 import type { GoodsReceiptView as ServerGoodsReceiptView, PageResult, PurchaseOrderView as ServerPurchaseOrderView } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';

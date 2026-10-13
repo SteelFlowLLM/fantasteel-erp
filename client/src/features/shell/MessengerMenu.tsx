@@ -1,7 +1,7 @@
 'use client';
 
 // 상단 메신저 버튼 (SPEC 4장 1번): 누르면 최근 채팅방 드롭다운. 항목·메신저 열기는 왼쪽 메뉴 '메신저' 화면으로 간다.
-// 숫자는 가짜 DB 변경(이 탭·다른 탭)마다 다시 읽어 실시간으로 바뀐다 (REQ-MSG-002·004).
+// 숫자는 메신저 소켓 알림(hooks/useMessengerSocket.ts)마다 다시 읽어 실시간으로 바뀐다 (REQ-MSG-002·004).
 import { useRouter } from 'next/navigation';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import { CountBadge } from '@/components/Badge';

@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
 import { jobGradeAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { JobGradeView } from '@/api/directory';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';

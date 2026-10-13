@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, FieldErrors, InputError } from '@/api/client';
+import { ApiError, FieldErrors, InputError } from '@/api/errors';
 import { assertUnchanged, decimalText, nonNegativeInteger, optionalDate, optionalText, requiredText } from '@/api/validation';
 
 const errorsOf = (run: (errors: FieldErrors) => void): Readonly<Record<string, string>> => {

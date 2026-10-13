@@ -1,6 +1,6 @@
 'use client';
 
-// 접속 상태 점·문구 (서버 모드). 소켓에 연결되지 않았거나 가짜 DB 모드면 아무것도 그리지 않는다 (알 수 없는 상태를 '접속 안 함'으로 보이지 않게).
+// 접속 상태 점·문구. 소켓에 연결되지 않았으면 아무것도 그리지 않는다 (알 수 없는 상태를 '접속 안 함'으로 보이지 않게).
 import { cn } from '@/lib/cn';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
 

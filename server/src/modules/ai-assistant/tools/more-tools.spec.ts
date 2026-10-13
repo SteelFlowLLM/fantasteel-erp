@@ -69,6 +69,27 @@ const plan = (id: number, productionPlanNo: string, salesOrderNo: string | null)
 const plans = [plan(1, 'PP-2610-0001', 'SO-2610-001'), plan(2, 'PP-2610-0002', 'SO-2610-002')];
 const planService = { listPlans: async () => page(plans) } as unknown as ProductionService;
 
+const result: ProductionResultView = {
+  id: 9,
+  productionPlanId: 2,
+  productionPlanNo: 'PP-2610-0002',
+  processType: 'STEELMAKING',
+  blastFurnaceCode: null,
+  converterCode: 'BOF1',
+  startedAt: '2026-10-13T05:00:00.000Z',
+  completedAt: '2026-10-13T05:30:00.000Z',
+  simulatedLossRate: null,
+  inputs: [],
+  outputs: [{ lotId: 1, lotNo: 'HT-BOF1-261013-001', lotType: 'HEAT', itemCode: null, initialTon: '250.000' }],
+  inputTon: '277.778',
+  outputQty: 1,
+  outputTon: '250.000',
+  startedHeatLotId: null,
+  operatorName: '강민석',
+  isSimulated: true,
+  simulation: null,
+};
+
 describe('생산계획·작업 실적 도구', () => {
   it('생산계획: 번호·수주번호 일부로 거르고 히트 진행을 한글 이름으로', async () => {
     const output = await productionPlanTool(planService).run({ keyword: 'so-2610-002' }, PRODUCTION);
@@ -77,26 +98,6 @@ describe('생산계획·작업 실적 도구', () => {
 
   it('작업 실적: 생산계획 번호를 id로 바꿔 부르고, 없는 번호는 인자 오류', async () => {
     const queries: unknown[] = [];
-    const result: ProductionResultView = {
-      id: 9,
-      productionPlanId: 2,
-      productionPlanNo: 'PP-2610-0002',
-      processType: 'STEELMAKING',
-      blastFurnaceCode: null,
-      converterCode: 'BOF1',
-      startedAt: '2026-10-13T05:00:00.000Z',
-      completedAt: '2026-10-13T05:30:00.000Z',
-      simulatedLossRate: null,
-      inputs: [],
-      outputs: [{ lotId: 1, lotNo: 'HT-BOF1-261013-001', lotType: 'HEAT', itemCode: null, initialTon: '250.000' }],
-      inputTon: '277.778',
-      outputQty: 1,
-      outputTon: '250.000',
-      startedHeatLotId: null,
-      operatorName: '강민석',
-      isSimulated: true,
-      simulation: null,
-    };
     const tool = productionResultTool(planService, {
       listResults: async (query: unknown) => {
         queries.push(query);
@@ -107,9 +108,22 @@ describe('생산계획·작업 실적 도구', () => {
     const output = await tool.run({ productionPlanNo: 'PP-2610-0002', processType: 'STEELMAKING' }, PRODUCTION);
     expect(queries[0]).toMatchObject({ productionPlanId: 2, processType: 'STEELMAKING' });
     expect(output.label).toBe('작업 실적 · PP-2610-0002 · 제강');
+    expect((output.data as { 안내: string }).안내).toContain('제선 실적은 생산계획에 묶이지 않아');
     expect(output.data).toMatchObject({ '최신 작업 실적': [{ 공정: '제강', 설비: 'BOF1', 시작: '2026-10-13 14:00', '산출 LOT': ['HT-BOF1-261013-001'] }] });
     await expect(tool.run({ productionPlanNo: 'PP-2610-9999' }, PRODUCTION)).rejects.toBeInstanceOf(ToolArgumentError);
     expect(JSON.stringify(output)).not.toContain('공정 실적');
+  });
+
+  it('작업 실적: 산출 LOT은 앞 5개만 보내고 생략한 수를 함께 준다', async () => {
+    const outputs = Array.from({ length: 8 }, (_, i) => ({ lotId: i + 1, lotNo: `SL-261013-00${i + 1}`, lotType: 'SLAB', itemCode: null, initialTon: '29.438' }));
+    const cast = { ...result, processType: 'CONTINUOUS_CASTING', converterCode: null, outputs, outputQty: 8 } as ProductionResultView;
+    const tool = productionResultTool(planService, { listResults: async () => page([cast]) } as unknown as ProductionResultService);
+
+    const output = await tool.run({}, PRODUCTION);
+    const row = (output.data as { '최신 작업 실적': Record<string, unknown>[] })['최신 작업 실적'][0];
+    expect(row['산출 LOT']).toHaveLength(5);
+    expect(row).toMatchObject({ '산출 LOT 수': 8, '생략한 산출 LOT 수': 3 });
+    expect(output.data).not.toHaveProperty('안내');
   });
 });
 

@@ -1,5 +1,4 @@
-// AI 어시스턴트 (REQ-AST, API-262·263). LLM 연결 설정(api/llm.ts)처럼 가짜 DB 모드에서도 늘 실제 서버를 부른다:
-// LLM은 서버가 LM Studio를 불러야 쓸 수 있어 브라우저 안 가짜 DB로 흉내 낼 수 없다.
+// AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
 import type { AiAssistantMessageInput, AiAssistantReplyView, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
 import { serverRequest } from '@/api/http';
 

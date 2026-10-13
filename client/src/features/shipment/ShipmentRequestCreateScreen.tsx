@@ -5,7 +5,7 @@
 // 저장하면 바로 배정 화면으로 가서 FIFO 추천을 연다 (SHP-001 "요청 시 배정 추천").
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { ShippableCustomer } from '@/api/shipmentRequests';
 import { PERMISSION, PRODUCT_QTY_UNIT, RESERVATION_STATUS_LABEL } from '@/codes';
 import { Banner } from '@/components/Banner';

@@ -4,7 +4,7 @@
 // 시작일 전 계획은 밀린 소요(isBeforePeriod)로 함께 보인다. 응답 모양은 서버(shared MrpRequirementsView)를 따른다.
 // 두 데이터 모드 모두 서버가 계산한다(api/server/mrp.ts). 조회 권한은 서버가 확인한다(COM-002).
 import type { MrpRequirementsView } from '@fantasteel/shared';
-import { FieldErrors } from '@/api/client';
+import { FieldErrors } from '@/api/errors';
 import { serverMrpRequirements } from '@/api/server/mrp';
 
 export type { MrpMaterialView, MrpPlanView, MrpRequirementsView, MrpRequisitionLineView } from '@fantasteel/shared';

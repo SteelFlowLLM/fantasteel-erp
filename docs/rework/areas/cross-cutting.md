@@ -69,7 +69,7 @@ create: (input: CustomerInput) =>
 
 - 모든 테스트 전에 요청 사원을 비운다(`test/setup.ts`). 2026-10-13부터 화면 테스트는 가짜 DB 모드로 돌지 않는다: api 함수는 가짜 서버 응답(`useFakeServer`)으로, 화면 그리기는 고정 데이터(`features/<영역>/testing/`, `test/sessionUsers.ts`)로 시험한다.
 - `actAs(SEED_EMPLOYEE_NO.admin)` — 그 사원으로 요청(시드 사원번호 상수: admin·salesHead·sales·purchaseHead·purchase·productionHead·steelmakingHead·steelmaking·qualityHead·quality·logisticsHead·logistics). (2026-10-13 `employeeIdOf`·`departmentIdOf`는 가짜 DB를 읽어 지웠다.)
-- 오류 확인 예: `await expect(customerApi.create(input)).rejects.toMatchObject({ code: 'COM-002' })`, 입력 오류는 `rejects.toBeInstanceOf(InputError)` + `fieldErrors`. 예시는 `api/actor.test.ts`, `api/validation.test.ts`.
+- 오류 확인 예: 서버 어댑터 테스트에서 `useFakeServer`가 `fail(403, 'COM-002', …)`을 돌려주게 하고 `rejects.toMatchObject({ code: 'COM-002' })`, 입력 오류는 `rejects.toBeInstanceOf(InputError)` + `fieldErrors`. 예시는 `api/server/*.test.ts`, `api/validation.test.ts`.
 
 ## 7. 영역 작업자가 알아 둘 것
 

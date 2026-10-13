@@ -5,7 +5,7 @@
 // 비고 없음(ERD에 칸 없음). 톤은 매수 × 1매 이론중량 계산값이고 저장하지 않는다.
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { ProductSpecView } from '@/api/lookups';
 import { salesOrderApi, type SalesOrderPreviewLine } from '@/api/salesOrders';
 import { ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';

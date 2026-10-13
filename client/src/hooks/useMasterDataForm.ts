@@ -1,6 +1,6 @@
 // 입력 창의 입력칸 오류: 저장이 InputError로 거부되면 칸별 안내를 보관한다 (api/errors.ts InputError.fieldErrors).
 import { useCallback, useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 
 export interface FieldErrorState {
   errors: Readonly<Record<string, string>>;

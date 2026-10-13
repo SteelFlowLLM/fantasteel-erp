@@ -1,5 +1,5 @@
 // 위젯 배치 (SPEC 4장 3번, REQ-DSH-002): 12칸 격자의 위치·크기, 기본 배치, 추가·제외, 사원별 저장(브라우저 localStorage).
-// 배치는 화면 설정이라 가짜 DB가 아니라 이 브라우저에 사원마다 저장한다 (ERD에 배치 테이블이 없다).
+// 배치는 화면 설정이라 서버가 아니라 이 브라우저에 사원마다 저장한다 (ERD에 배치 테이블이 없다).
 import { verticalCompactor, type LayoutItem } from 'react-grid-layout';
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import type { RoleCode } from '@/codes';

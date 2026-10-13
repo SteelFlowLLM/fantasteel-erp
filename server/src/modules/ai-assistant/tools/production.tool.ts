@@ -70,7 +70,13 @@ export function productionResultTool(plans: ProductionService, results: Producti
       const page = await results.listResults({ productionPlanId, processType, page: 1, size: 15 });
       return {
         label: `작업 실적${productionPlanNo ? ` · ${productionPlanNo}` : ''}${processType ? ` · ${PROCESS_TYPE_LABEL[processType]}` : ''}`,
-        data: { '작업 실적 수': page.total, '최신 작업 실적': page.items.map(resultRow), '생략 건수': Math.max(0, page.total - page.items.length) },
+        data: {
+          '작업 실적 수': page.total,
+          '최신 작업 실적': page.items.map(resultRow),
+          '생략 건수': Math.max(0, page.total - page.items.length),
+          // 제선 실적은 생산계획 없이 남는다(ERD). 알리지 않으면 모델이 "제선 실적이 아직 없다"고 답한다
+          ...(productionPlanNo ? { 안내: '제선 실적은 생산계획에 묶이지 않아 생산계획 번호로 거르면 나오지 않아요. 제선 실적은 생산계획 번호 없이 조회해요.' } : {}),
+        },
       };
     },
   };
@@ -119,7 +125,9 @@ function resultRow(r: ProductionResultView) {
     '산출 톤': r.outputTon,
     작업자: r.operatorName,
     시뮬레이션: r.isSimulated,
+    // 앞 5개만 보낸다. 생략 수를 따로 주지 않으면 모델이 "-01 ~ -05"처럼 범위로 써서 5개뿐인 것처럼 읽힌다
     '산출 LOT': r.outputs.slice(0, 5).map((lot) => lot.lotNo),
     '산출 LOT 수': r.outputs.length,
+    '생략한 산출 LOT 수': Math.max(0, r.outputs.length - 5),
   };
 }

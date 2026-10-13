@@ -2,7 +2,7 @@
 
 // 불합격 상태 지정 (REQ-QC-004, TRM-079): 보류 / 격하 / 폐기 + 사유. 상태와 사유만 기록하고 후속 처리는 하지 않는다.
 import { useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { RejectedLotListRow } from '@/api/dispositions';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
