@@ -284,6 +284,21 @@ describe('구매·입고·출하·밀시트 도구', () => {
     expect(calls[0]).toEqual([logistics, { shipmentRequestStatus: undefined, shipmentRequestNo: 'SR-2610', page: 1, size: 15 }]);
     expect(output.data).toMatchObject({ 출하요청: [{ '출하요청 번호': 'SR-2610-0001', '요청 매수': 2, '출고 확정 시각': null }] });
   });
+
+  it('출하요청: 고객사 이름은 100건을 읽어 거르고, 건수는 거른 뒤의 수', async () => {
+    const queries: unknown[] = [];
+    const request = (id: number, customerName: string): ShipmentRequestSummary => ({ id, shipmentRequestNo: `SR-2610-000${id}`, customerId: id, customerName, shipDate: '2026-10-20', shipmentRequestStatus: 'REQUESTED', totalRequestQty: 2, issuedAt: null, createdAt: '', updatedAt: '' });
+    const tool = shipmentRequestTool({
+      list: async (_u: AuthUser, query: unknown) => {
+        queries.push(query);
+        return page([request(1, '가람중공업'), request(2, '누리조선')]);
+      },
+    } as unknown as ShipmentService);
+    const output = await tool.run({ customerName: '가람' }, user(ROLE.LOGISTICS, { SHIPMENT_REQUEST_MANAGE: 'USE' }));
+    expect(queries[0]).toMatchObject({ page: 1, size: 100 });
+    expect(output.label).toBe('출하요청 · 가람');
+    expect(output.data).toMatchObject({ '출하요청 수': 1, 출하요청: [{ '출하요청 번호': 'SR-2610-0001' }], '생략 줄 수': 0 });
+  });
 });
 
 describe('도구 모음: service가 확인하는 권한', () => {
