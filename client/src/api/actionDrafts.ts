@@ -11,7 +11,6 @@ import { permissionMapOf } from '@/api/orgViews';
 import { canUse } from '@/lib/permissions';
 import type { MockTables } from '@/mock/schema';
 import {
-  ACTION_TYPE_REGISTRY,
   actionDraftView,
   confirmDraft,
   createDraftFromMessage,
@@ -22,7 +21,6 @@ import {
   userActor,
   type ActionDraftView,
   type ActionExecution,
-  type ActionTypeDefinition,
   type DraftExecutionOutcome,
   type PurchaseRequisitionDraftPayload,
 } from '@/mock/services';
@@ -93,19 +91,6 @@ export interface DraftRequesterCheck {
   blockReason: string | null;
 }
 
-/** 업무 유형 등록부 표시 (REQ-ACT-004 · ACT-005 P2 준비 중) */
-export interface ActionTypeCatalogEntry {
-  actionType: ActionType;
-  label: string;
-  grade: 'P1' | 'P2';
-  /** 실행 핸들러가 있는 유형 (P1 구매요청 생성만) */
-  active: boolean;
-  /** 추출 스키마 (TRM-095 · REQ-ACT-001): 구매요청 = 원료 품목 · 수량(톤) · 희망 입고일 · 요청자. 준비 중 유형은 빈 목록 */
-  schemaFieldLabels: string[];
-  /** 추출 스키마 밖의 선택 입력 (요청 근거 — drafts.md 5장 가정값) */
-  optionalInputLabels: string[];
-}
-
 export interface DraftConfirmResult {
   draft: DraftDetailView;
   executed: boolean;
@@ -167,30 +152,6 @@ function buildConfirmResult(tables: Tables, outcome: DraftExecutionOutcome, empl
     errorMessage: outcome.errorMessage,
   };
 }
-
-/** 요청자는 payload 칸이 아니라 초안의 requester_id(= 메시지 작성자, 바꿀 수 없음)로 둔다 */
-const REQUESTER_FIELD_LABEL = '요청자';
-
-/** 등록부 입력 칸 중 추출 스키마(TRM-095)에 들지 않는 선택 입력 */
-const NON_SCHEMA_FIELD_KEYS: ReadonlySet<keyof PurchaseRequisitionDraftPayload> = new Set(['requestReason']);
-
-function buildCatalogEntry(definition: ActionTypeDefinition): ActionTypeCatalogEntry {
-  const active = definition.execute !== null;
-  const schemaFields = definition.fields.filter((field) => !NON_SCHEMA_FIELD_KEYS.has(field.key));
-  const optionalInputs = definition.fields.filter((field) => NON_SCHEMA_FIELD_KEYS.has(field.key));
-  return {
-    actionType: definition.actionType,
-    label: definition.label,
-    grade: definition.grade,
-    active,
-    // 준비 중(P2) 유형은 아직 추출 스키마가 정해지지 않았다
-    schemaFieldLabels: active ? [...schemaFields.map((field) => field.label), REQUESTER_FIELD_LABEL] : [],
-    optionalInputLabels: optionalInputs.map((field) => field.label),
-  };
-}
-
-/** 업무 유형 등록부를 화면용으로 (P1 구매요청 생성만 실행 가능, 나머지는 준비 중) */
-export const ACTION_TYPE_CATALOG: readonly ActionTypeCatalogEntry[] = Object.values(ACTION_TYPE_REGISTRY).map(buildCatalogEntry);
 
 /**
  * 요청자(= 메시지 작성자, BP-ACT-01)가 초안을 확정할 수 없는 까닭. 수정·확정·반려는 요청자만 하므로(REQ-ACT-002·003)
