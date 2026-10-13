@@ -336,7 +336,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (화면 api)', () => {
     expect(draft).toMatchObject({ draftStatus: 'WAITING_APPROVAL', actionType: 'PURCHASE_REQUISITION_CREATE', requesterId: idOf('purchase') });
     expect((await actionDraftApi.createFromMessage({ messageId: message.id })).created).toBe(false);
     await expect(actionDraftApi.confirm({ actionDraftId: draft.id })).rejects.toMatchObject({ code: 'ACT-001' });
-    draft = await actionDraftApi.update({ actionDraftId: draft.id, payload: { itemId: itemIdOf('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
+    draft = await actionDraftApi.update({ actionDraftId: draft.id, payload: { itemId: itemIdOf('SMN01'), requestedTon: '20', desiredReceiptDate: '2026-10-20' } });
     as('salesHead'); // 요청자가 아니면 확정할 수 없다
     await expect(actionDraftApi.confirm({ actionDraftId: draft.id })).rejects.toMatchObject({ code: 'COM-002' });
     as('purchase');

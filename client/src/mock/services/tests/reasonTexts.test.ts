@@ -138,7 +138,7 @@ describe('사유 코드에는 사람이 읽을 사유가 함께 남는다 (9.3)'
     if (!message) throw new Error('시드 메시지 없음');
     const requester = k.actor('purchase');
     const { draft } = createDraftFromMessage(k.at('2026-10-02T09:00:00+09:00'), requester, { messageId: message.id });
-    updateDraft(k.at('2026-10-02T09:01:00+09:00'), requester, { actionDraftId: draft.id, payload: { itemId: k.itemId('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
+    updateDraft(k.at('2026-10-02T09:01:00+09:00'), requester, { actionDraftId: draft.id, payload: { itemId: k.itemId('SMN01'), requestedTon: '20', desiredReceiptDate: '2026-10-20' } });
     confirmDraft(k.at('2026-10-02T09:02:00+09:00'), requester, { actionDraftId: draft.id });
     const draftLabel = `초안 #${draft.id}`;
     expect(eventsOf(k, 'DRAFT_CONFIRMED').at(-1)).toMatchObject({

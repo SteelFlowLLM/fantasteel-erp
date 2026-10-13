@@ -77,14 +77,14 @@ export function getConfirmFailureTitle(code: string | null): string {
 
 export interface DraftForm {
   itemId: number | null;
-  requiredTon: string;
+  requestedTon: string;
   desiredReceiptDate: string;
   requestReason: string;
 }
 
 export interface DraftPayloadLike {
   itemId: number | null;
-  requiredTon: string | null;
+  requestedTon: string | null;
   desiredReceiptDate: string | null;
   requestReason: string | null;
 }
@@ -97,21 +97,21 @@ export function formatTonInput(value: string | null): string {
 
 export const buildDraftForm = (payload: DraftPayloadLike): DraftForm => ({
   itemId: payload.itemId,
-  requiredTon: formatTonInput(payload.requiredTon),
+  requestedTon: formatTonInput(payload.requestedTon),
   desiredReceiptDate: payload.desiredReceiptDate ?? '',
   requestReason: payload.requestReason ?? '',
 });
 
 export const isSameDraftForm = (a: DraftForm, b: DraftForm): boolean =>
   a.itemId === b.itemId &&
-  a.requiredTon.trim() === b.requiredTon.trim() &&
+  a.requestedTon.trim() === b.requestedTon.trim() &&
   a.desiredReceiptDate.trim() === b.desiredReceiptDate.trim() &&
   a.requestReason.trim() === b.requestReason.trim();
 
 /** 저장할 값 (빈칸은 null = 미확정) */
 export const buildDraftPayload = (form: DraftForm): DraftPayloadLike => ({
   itemId: form.itemId,
-  requiredTon: form.requiredTon.trim() || null,
+  requestedTon: form.requestedTon.trim() || null,
   desiredReceiptDate: form.desiredReceiptDate.trim() || null,
   requestReason: form.requestReason.trim() || null,
 });
@@ -119,7 +119,7 @@ export const buildDraftPayload = (form: DraftForm): DraftPayloadLike => ({
 /** 폼 칸 이름 → 초안 필드 표시명 (core 등록부의 label과 같다) */
 export const DRAFT_FIELD_LABEL = {
   itemId: '원료 품목',
-  requiredTon: '수량(톤)',
+  requestedTon: '수량(톤)',
   desiredReceiptDate: '희망 입고일',
   requestReason: '요청 근거',
 } as const satisfies Record<keyof DraftForm, string>;
