@@ -12,7 +12,7 @@ const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, 
 function StockBody({ data }: { data: ProductStockData }) {
   return (
     <div className="flex flex-col gap-2.5 py-3">
-      <div className="flex flex-col gap-2 px-4">
+      <div className="flex flex-col gap-2 px-4 pb-1.5">
         {data.totals.map((total) => (
           <div
             key={total.itemType}
