@@ -2,7 +2,7 @@
 import { PRODUCT_QTY_UNIT, ITEM_TYPE_LABEL } from '@/codes';
 import type { ProductStockData } from '@/api/dashboard';
 import { Table, Td, Th } from '@/components/Table';
-import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { cn } from '@/lib/cn';
 import { fmtInt, fmtTon } from '@/lib/format';
@@ -12,7 +12,7 @@ const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, 
 function StockBody({ data }: { data: ProductStockData }) {
   return (
     <div className="flex flex-col gap-2.5 py-3">
-      <div className="flex flex-col gap-2 px-4">
+      <div className="flex flex-col gap-2 px-4 pb-3.5">
         {data.totals.map((total) => (
           <div
             key={total.itemType}
@@ -35,22 +35,27 @@ function StockBody({ data }: { data: ProductStockData }) {
             </span>
           </div>
         ))}
-        <div className="flex flex-wrap gap-3">
-          <LegendItem colorClass="bg-chart-1" label="가용" />
-          <LegendItem colorClass="bg-chart-4" label="재고" />
-        </div>
       </div>
       {data.items.length === 0 ? (
         <WidgetEmpty>재고가 있는 규격이 없어요</WidgetEmpty>
       ) : (
-        <Table compact className="border-t border-line [&_td]:px-2 [&_th]:px-2">
+        // 칸 너비를 고정(규격 40% · 숫자 네 칸 15%씩)하고 모든 칸을 가운데 정렬한다: 숫자 칸이 오른쪽 끝에 몰려 카드 가장자리에 붙지 않게.
+        // 좌우 여백을 칸마다 같게(8px) 둬야 글자가 칸 가운데에 정확히 온다
+        <Table compact className="table-fixed border-t border-line [&_td]:px-2 [&_th]:px-2">
+          <colgroup>
+            <col className="w-[40%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+          </colgroup>
           <thead>
             <tr>
-              <Th>규격</Th>
-              <Th align="right">재고</Th>
-              <Th align="right">합격</Th>
-              <Th align="right">예약</Th>
-              <Th align="right" title="가용 = 합격 − 예약 − 열연 배정">
+              <Th align="center">규격</Th>
+              <Th align="center">재고</Th>
+              <Th align="center">합격</Th>
+              <Th align="center">예약</Th>
+              <Th align="center" title="가용 = 합격 − 예약 − 열연 배정">
                 가용
               </Th>
             </tr>
@@ -58,16 +63,16 @@ function StockBody({ data }: { data: ProductStockData }) {
           <tbody>
             {data.items.map((item) => (
               <tr key={item.itemId} data-pet-item="inventory" data-pet-item-title={item.itemCode}>
-                <Td className="max-w-56 truncate font-mono text-xs" title={item.itemCode}>
+                <Td align="center" className="truncate font-mono text-xs" title={item.itemCode}>
                   {item.itemCode}
                 </Td>
-                <Td align="right" title={fmtTon(item.onHandTon)}>
+                <Td align="center" title={fmtTon(item.onHandTon)}>
                   {fmtInt(item.onHandQty)}
                   <small className="ml-0.5 text-ink-3">{PRODUCT_QTY_UNIT[item.itemType]}</small>
                 </Td>
-                <Td align="right">{fmtInt(item.passedQty)}</Td>
-                <Td align="right">{fmtInt(item.reservedQty)}</Td>
-                <Td align="right" title={fmtTon(item.availableTon)}>
+                <Td align="center">{fmtInt(item.passedQty)}</Td>
+                <Td align="center">{fmtInt(item.reservedQty)}</Td>
+                <Td align="center" title={fmtTon(item.availableTon)}>
                   <b className={item.availableQty > 0 ? 'font-semibold' : 'font-normal text-ink-3'}>{fmtInt(item.availableQty)}</b>
                 </Td>
               </tr>
