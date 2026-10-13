@@ -1,14 +1,14 @@
 // 초안 화면 오른쪽: 원본 메시지 · 확정하면 · 초안 업무 유형(추출 스키마·실행 핸들러 등록부, REQ-ACT-004 · ACT-005 P2)
 import Link from 'next/link';
 import { DRAFT_STATUS_LABEL, PURCHASE_REQUISITION_STATUS_LABEL } from '@/codes';
-import { ACTION_TYPE_CATALOG, type DraftDetailView } from '@/api/actionDrafts';
+import type { DraftDetailView } from '@/api/actionDrafts';
 import { Avatar } from '@/components/Avatar';
 import { Badge } from '@/components/Badge';
 import { ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
-import { DRAFT_STATUS_TONE } from '@/features/actionDrafts/lib/draftDisplay';
+import { ACTION_TYPE_CATALOG, DRAFT_STATUS_TONE } from '@/features/actionDrafts/lib/draftDisplay';
 import { fmtDateTime } from '@/lib/format';
 import { PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
