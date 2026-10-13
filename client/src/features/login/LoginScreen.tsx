@@ -49,7 +49,7 @@ export function LoginScreen() {
   const hydrated = useSessionStore((state) => state.hydrated);
   const employeeId = useSessionStore((state) => state.employeeId);
 
-  // 이미 계정을 골랐으면(또는 방금 골랐으면) 가려던 화면으로 보낸다
+  // 이미 로그인했으면(또는 방금 로그인했으면) 가려던 화면으로 보낸다
   useEffect(() => {
     if (hydrated && employeeId !== null) router.replace(next);
   }, [hydrated, employeeId, next, router]);
@@ -131,7 +131,7 @@ export function LoginScreen() {
 
       <section aria-label="로그인" className="flex min-w-0 flex-1 flex-col overflow-auto bg-surface">
         <div className="flex flex-1 justify-center px-6 py-6">
-          {/* 세로 가운데. 계정 목록이 화면보다 길면 my-auto가 0이 되어 위부터 스크롤된다 */}
+          {/* 세로 가운데. 내용이 화면보다 길면 my-auto가 0이 되어 위부터 스크롤된다 */}
           <div className="my-auto flex w-[400px] max-w-full flex-col gap-4">
             <div className="flex flex-col gap-1">
               <h2 className="text-3xl font-semibold">로그인</h2>

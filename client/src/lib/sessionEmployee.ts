@@ -1,5 +1,5 @@
-// 이 탭에서 고른 계정의 사원 id와 사원번호 (탭마다 따로, sessionStorage — PLAN 2장).
-// 화면 상태(useSessionStore)와 가짜 API의 요청 사원 확인(api/actor.ts)이 함께 쓴다.
+// 이 탭에 로그인한 사원의 id와 사원번호 (탭마다 따로, sessionStorage — PLAN 2장).
+// 화면 상태(useSessionStore)와 서버 요청의 사원 확인(api/actor.ts)이 함께 쓴다.
 // 사원 id는 서버 id다.
 
 export const SESSION_EMPLOYEE_KEY = 'fantasteel.session.employee-id';

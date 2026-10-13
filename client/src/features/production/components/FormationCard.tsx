@@ -30,7 +30,7 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
       <Card petKey="card:productionPlans.formation">
         <CardHead title="히트 편성" />
         <CardBody>
-          <Banner tone="danger">기준정보(라우팅 수율·규격 매핑·배합 원단위·히트 용량)가 모자라 편성표를 계산하지 못했어요. 기준정보 준비 상태를 확인해 주세요.</Banner>
+          <Banner tone="danger">기준정보(라우팅 수율·규격 매핑·배합 원단위·히트 용량)가 모자라 편성표를 계산하지 못했어요. 기준정보 화면의 라우팅·규격 매핑·배합 원단위·생산 설정값 탭을 확인해 주세요.</Banner>
         </CardBody>
       </Card>
     );

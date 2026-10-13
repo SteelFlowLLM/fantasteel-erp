@@ -1,6 +1,6 @@
 'use client';
 
-// 기준정보 (REQ-MST-001~009, BP-MST-01). 위에 준비 상태 띠, 아래 영역별 탭(주소 ?tab=).
+// 기준정보 (REQ-MST-001~009, BP-MST-01). 영역별 탭(주소 ?tab=).
 // 성분 규격은 강종 화면이 아니라 품질의 검사 기준(제강)에서 버전으로 관리한다 (REQ-MST-002, TRM-020).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';

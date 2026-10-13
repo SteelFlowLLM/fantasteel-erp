@@ -8,7 +8,6 @@ import { ITEM_TYPE_LABEL, PROCESS_TYPE, PROCESS_TYPE_LABEL, type ProcessType } f
 import { masterDataApi, type MasterRoutingView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
-import { IconButton } from '@/components/IconButton';
 import { Input, Select } from '@/components/Input';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';

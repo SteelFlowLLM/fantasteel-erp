@@ -1,7 +1,7 @@
 'use client';
 
 // 규격 매핑 (REQ-MST-004): 슬래브 규격마다 대응 코일 규격 1개, 코일 1개 이론중량 ≤ 슬래브 1매 이론중량,
-// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 매핑 수정은 없고, 쓰인 규격의 매핑은 지울 수 없다.
+// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 매핑 수정·삭제 API는 없다.
 import { useState } from 'react';
 import { masterDataApi, type MasterProductSpecView, type SpecBrief } from '@/api/masterData';
 import { Banner } from '@/components/Banner';
@@ -13,7 +13,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSpecMappings, useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -56,7 +56,6 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                     <Th>코일 규격</Th>
                     <Th align="right">코일 1개</Th>
                     <Th align="right">열연 계획 수율</Th>
-                    <Th aria-label="삭제" />
                   </tr>
                 </thead>
                 <tbody>
@@ -73,9 +72,6 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                       <Td align="right">{fmtTon(m.coil.theoreticalWeightTon)}</Td>
                       <Td align="right" className="font-semibold">
                         {formatYieldPercent(m.hotRollingPlannedYieldRate)}
-                      </Td>
-                      <Td align="right">
-                        <RowActions canEdit={canEdit} />
                       </Td>
                     </tr>
                   ))}

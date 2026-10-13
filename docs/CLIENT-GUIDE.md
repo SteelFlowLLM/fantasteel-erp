@@ -109,7 +109,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
 ## 6. P2·EX 처리 (준비 중)
 
 - P2(AI Factory Agent, Voice2ERP 회의록, @AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널이다.
-- **AI 어시스턴트 패널**(`features/shell/AiPanel.tsx`, 2026-10-13~): 실제로 답한다. `api/aiAssistant.ts`가 서버 `POST /ai-assistant/messages`·`GET /ai-assistant/suggested-questions`(API-262·263, `docs/backend/ai-assistant.md`)를 부르고, LLM 연결 설정(`api/llm.ts`)처럼 가짜 DB 모드에서도 늘 서버를 부른다(서버 로그인이 없는 가짜 DB 모드에서는 추천 질문·답이 실패로 보인다).
+- **AI 어시스턴트 패널**(`features/shell/AiPanel.tsx`, 2026-10-13~): 실제로 답한다. `api/aiAssistant.ts`가 서버 `POST /ai-assistant/messages`·`GET /ai-assistant/suggested-questions`(API-262·263, `docs/backend/ai-assistant.md`)를 부른다(LLM 연결 설정은 `api/llm.ts`).
   - 용어 사전과 서버 조회 도구(재고·수주·LOT 추적·작업 로그, 사용자 권한 범위)로 답하고 출처를 붙인다: 용어 사전은 `용어 사전 · 예약 (TRM-056)`, 조회 데이터는 `조회 데이터 · 재고 · SS275`. 나머지 조회·실행 카드·사례 검색은 다음 단계라 안내 문구로만 밝힌다.
   - 대화는 서버에 저장하지 않는다(요구사항 21장 미결정). `stores/useAiChatStore.ts`가 이 탭 메모리에 두고, 답을 받은 최근 대화 10개를 질문과 함께 보낸다. 패널을 닫아도 남고, 새로고침하거나 다른 사원으로 들어오면 비운다. 답을 기다리는 동안 패널을 닫아도 답은 대화에 들어간다(`hooks/useAiAssistant.ts`가 훅 옵션 콜백으로 넣음).
   - 보고 있는 화면(REQ-AST-007): 경로 + 쿼리(열어 둔 문서 id), 화면 제목, 위젯 맥락(`useShellStore.aiContext`의 label)을 함께 보낸다.

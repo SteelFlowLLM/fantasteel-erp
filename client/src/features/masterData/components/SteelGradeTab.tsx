@@ -14,7 +14,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
-import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot } from '@/features/masterData/components/MasterParts';
+import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, TableFoot } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -47,7 +47,6 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                     <Th>적용 규격</Th>
                     <Th align="right">제품 규격</Th>
                     <Th>성분 규격 (제강 검사 기준)</Th>
-                    <Th aria-label="수정·삭제" />
                   </tr>
                 </thead>
                 <tbody>
@@ -71,9 +70,6 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                             제강 검사 기준 없음 · 검사 기준에서 만들기
                           </Link>
                         )}
-                      </Td>
-                      <Td align="right">
-                        <RowActions canEdit={canEdit} />
                       </Td>
                     </tr>
                   ))}

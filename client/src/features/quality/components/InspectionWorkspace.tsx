@@ -393,7 +393,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       {data.standard === null ? (
         <Banner tone="danger" actions={<ButtonLink href="/quality/standards" size="sm">검사 기준</ButtonLink>}>
-          {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다 (기준정보 준비 상태 띠와 같음, docs/rework/areas/master.md 4번) */}
+          {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다 (docs/rework/areas/master.md 4번) */}
           <b>{PROCESS_TYPE_LABEL[lot.processType as ProcessType] ?? ''} {lot.steelGradeCode ?? ''} 검사 기준이 없어 판정할 수 없어요</b> <span className="font-mono text-cap">MST-001</span> · 품질 담당이 검사 기준을 등록해야 해요.
         </Banner>
       ) : null}

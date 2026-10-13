@@ -1,7 +1,7 @@
 'use client';
 
 // 업무 탭: 범위(내 업무·내가 만든 업무·전체) + 진행/완료 두 열 (업무 상태 OPEN 진행 → DONE 완료, 업무 프로세스 10장)
-// 내 담당 업무만이고 수정 API가 없어 범위 선택·수정 버튼을 숨긴다 (api/server/tasks.ts).
+// 범위는 서버 GET /tasks?scope=로 거르고, 고치기는 등록자·담당자만 한다 (api/server/tasks.ts).
 import { useEffect, useRef, useState } from 'react';
 import { TASK_STATUS, TASK_STATUS_LABEL, type TaskStatus } from '@/codes';
 import { taskApi, type TaskScope, type TaskView } from '@/api/tasks';
