@@ -15,6 +15,38 @@ export interface ChatMessage {
   content: string;
 }
 
+/** 모델이 부를 수 있는 함수 (OpenAI 호환 tools). parameters는 JSON Schema */
+export interface LlmToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface LlmToolCall {
+  id: string;
+  name: string;
+  /** 모델이 만든 JSON 문자열 그대로. 형식이 틀릴 수 있어 부르는 쪽이 검증한다 */
+  arguments: string;
+}
+
+/** 도구를 쓰는 대화: 모델의 도구 호출과 그 결과(tool)가 끼어든다 */
+export type LlmToolMessage =
+  | ChatMessage
+  | { role: 'assistant'; content: string | null; toolCalls: LlmToolCall[] }
+  | { role: 'tool'; toolCallId: string; content: string };
+
+export interface LlmToolReply {
+  content: string;
+  /** 비어 있으면 모델이 답을 끝낸 것 */
+  toolCalls: LlmToolCall[];
+}
+
+interface WireToolCall {
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 /** 화면에 그대로 보일 연결 실패 이유 */
 export class LlmRequestError extends Error {}
 
@@ -66,6 +98,30 @@ export class LlmClient {
     return body.choices?.[0]?.message?.content?.trim() ?? '';
   }
 
+  /**
+   * 도구를 함께 넘기는 대화 (AI 어시스턴트 데이터 조회). 모델이 도구를 고르면 toolCalls로 돌려주고, 실행은 부르는 쪽이 한다.
+   * tools가 비면 도구 없이 답만 받는다(도구 호출 횟수를 다 쓴 뒤 마지막 답).
+   */
+  async chatWithTools(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
+    const body = await this.request<{ choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] } }[] }>(
+      endpoint,
+      'POST',
+      '/chat/completions',
+      {
+        model,
+        messages: messages.map(toWireMessage),
+        stream: false,
+        ...(tools.length ? { tools: tools.map((tool) => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {}),
+      },
+      CHAT_TIMEOUT_MS,
+    );
+    const message = body.choices?.[0]?.message;
+    const toolCalls = (message?.tool_calls ?? [])
+      .filter((call) => call.function?.name)
+      .map((call, index) => ({ id: call.id || `call-${index}`, name: call.function?.name ?? '', arguments: call.function?.arguments ?? '{}' }));
+    return { content: message?.content?.trim() ?? '', toolCalls };
+  }
+
   private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number): Promise<T> {
     const url = `${normalizeBaseUrl(endpoint.baseUrl)}${path}`;
     let res: Response;
@@ -93,6 +149,18 @@ export class LlmClient {
       throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
     }
   }
+}
+
+function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
+  if (message.role === 'tool') return { role: 'tool', tool_call_id: message.toolCallId, content: message.content };
+  if (message.role === 'assistant' && 'toolCalls' in message) {
+    return {
+      role: 'assistant',
+      content: message.content,
+      tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+    };
+  }
+  return { role: message.role, content: message.content };
 }
 
 /** 끝의 / 를 떼어 경로를 붙일 수 있게 한다 */

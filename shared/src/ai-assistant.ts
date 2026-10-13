@@ -1,4 +1,4 @@
-// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 2단계: 업무 지식(용어 사전)만 답하고 데이터 조회·실행 카드는 아직 없다.
+// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답한다. 실행 카드는 아직 없다.
 import type { Role } from './codes';
 
 /** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
@@ -24,14 +24,14 @@ export interface AiAssistantMessageInput {
   history?: AiAssistantTurn[];
 }
 
-/** 답의 출처 종류 (REQ-AST-009). 지금은 용어 사전만, 업무 매뉴얼·조회 데이터·사례 번호는 다음 단계 */
-export type AiAssistantSourceKind = 'GLOSSARY';
+/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 조회 데이터. 업무 매뉴얼·사례 번호는 다음 단계 */
+export type AiAssistantSourceKind = 'GLOSSARY' | 'DATA';
 
 export interface AiAssistantSource {
   kind: AiAssistantSourceKind;
-  /** 용어 사전이면 용어 ID (TRM-056) */
+  /** 용어 사전이면 용어 ID (TRM-056), 조회 데이터면 도구 이름 (get_inventory) */
   id: string;
-  /** 용어 사전이면 한글명 (예약) */
+  /** 용어 사전이면 한글명 (예약), 조회 데이터면 조회 대상 (재고 · SS275) */
   label: string;
 }
 

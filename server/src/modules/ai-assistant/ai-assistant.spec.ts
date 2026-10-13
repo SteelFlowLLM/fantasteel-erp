@@ -1,9 +1,10 @@
 import { ROLE, type AuthUser } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import type { ChatMessage, LlmClient, LlmEndpoint } from '../llm/llm.client';
+import type { LlmClient, LlmEndpoint, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
-import { AiAssistantService } from './ai-assistant.service';
+import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
+import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
@@ -78,6 +79,9 @@ describe('프롬프트 (REQ-AST-007·009)', () => {
     const system = messages[0];
     expect(system.role).toBe('system');
     expect(system.content).toContain('지어내지 말고');
+    // 지시문이 반말이면 작은 모델이 답에도 반말을 섞는다 (실제 모델 확인)
+    expect(system.content).not.toMatch(/너는|어시스턴트야/);
+    expect(system.content).toContain('직접 계산하지 않고');
     expect(system.content).toContain('김영업 · 역할 영업');
     expect(system.content).toContain('수주 관리 (/sales-orders?id=3)');
     expect(system.content).toContain('[TRM-056] 예약 (Reservation)');
@@ -108,34 +112,81 @@ describe('AiAssistantService', () => {
     headDepartmentIds: [],
     permissions: {},
   };
+  const TOOL: LlmToolDefinition = { name: 'get_inventory', description: '재고', parameters: { type: 'object' } };
+  const answer = (content: string): LlmToolReply => ({ content, toolCalls: [] });
+  const callTool = (id: string): LlmToolReply => ({ content: '', toolCalls: [{ id, name: 'get_inventory', arguments: '{"keyword":"SS275"}' }] });
 
-  function setup(settings: Partial<LlmSettings>, reply: (messages: ChatMessage[]) => Promise<string>) {
+  interface LlmCall {
+    messages: LlmToolMessage[];
+    tools: LlmToolDefinition[];
+  }
+
+  function setup(settings: Partial<LlmSettings>, replies: (call: LlmCall, index: number) => Promise<LlmToolReply>, toolResult?: ToolRunResult) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
-    const calls: ChatMessage[][] = [];
+    const calls: LlmCall[] = [];
     const client = {
-      chat: async (_endpoint: LlmEndpoint, _model: string, messages: ChatMessage[]) => {
-        calls.push(messages);
-        return reply(messages);
+      chatWithTools: async (_endpoint: LlmEndpoint, _model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]) => {
+        const call = { messages: [...messages], tools };
+        calls.push(call);
+        return replies(call, calls.length - 1);
       },
     } as unknown as LlmClient;
-    return { service: new AiAssistantService(store, client), calls };
+    const runs: string[] = [];
+    const toolbox = {
+      definitions: () => [TOOL],
+      run: async (_user: AuthUser, call: { name: string; arguments: string }) => {
+        runs.push(`${call.name} ${call.arguments}`);
+        return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
+      },
+    } as unknown as AssistantToolbox;
+    return { service: new AiAssistantService(store, client, toolbox), calls, runs };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
-    const { service, calls } = setup({}, async () => '예약은 합격 재고의 매수를 확보하는 거예요 [TRM-056].');
+    const { service, calls } = setup({}, async () => answer('예약은 합격 재고의 매수를 확보하는 거예요 [TRM-056].'));
     const reply = await service.ask(user, { question: '예약이 뭐야?' });
     expect(reply).toMatchObject({ answer: '예약은 합격 재고의 매수를 확보하는 거예요.', sources: [{ id: 'TRM-056' }], model: 'test-model' });
-    expect(calls[0][0].content).toContain('[TRM-056]');
+    expect(calls[0].messages[0].content).toContain('[TRM-056]');
+    expect(calls[0].tools).toEqual([TOOL]);
+  });
+
+  it('모델이 도구를 고르면 실행 결과를 넘겨 다시 묻고, 조회 출처를 앞에 붙인다 (REQ-AST-004·009)', async () => {
+    const { service, calls, runs } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('SS275 코일 가용재고는 12매예요.')));
+    const reply = await service.ask(user, { question: 'SS275 코일 재고 몇 매야?' });
+
+    expect(runs).toEqual(['get_inventory {"keyword":"SS275"}']);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].messages.slice(-2)).toEqual([
+      { role: 'assistant', content: null, toolCalls: [{ id: 'c1', name: 'get_inventory', arguments: '{"keyword":"SS275"}' }] },
+      { role: 'tool', toolCallId: 'c1', content: '{"제품":[]}' },
+    ]);
+    expect(reply.answer).toBe('SS275 코일 가용재고는 12매예요.');
+    expect(reply.sources[0]).toEqual({ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' });
+  });
+
+  it('조회에 실패한 도구(권한 없음 등)는 출처로 남기지 않는다', async () => {
+    const { service } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('수주 조회 권한이 없어요.')), { content: '{"오류":"권한 없음"}', source: null });
+    const reply = await service.ask(user, { question: '이 수주 진행 상황 알려줘' });
+    expect(reply.sources.filter((s) => s.kind === 'DATA')).toEqual([]);
+  });
+
+  it(`도구 호출은 ${MAX_TOOL_ROUNDS}번까지, 그 뒤에는 도구 없이 답하게 하고 그래도 부르면 멈춘다`, async () => {
+    const { service, calls, runs } = setup({}, async (_call, index) => callTool(`c${index}`));
+    const reply = await service.ask(user, { question: 'SS275 재고' });
+    expect(runs).toHaveLength(MAX_TOOL_ROUNDS);
+    expect(calls).toHaveLength(MAX_TOOL_ROUNDS + 1);
+    expect(calls.at(-1)?.tools).toEqual([]);
+    expect(reply.answer).toBe(EMPTY_ANSWER);
   });
 
   it('용어 없이 이어 물으면 앞 질문의 용어를 참고 자료로 쓴다', async () => {
-    const { service, calls } = setup({}, async () => '네');
+    const { service, calls } = setup({}, async () => answer('네'));
     await service.ask(user, { question: '그럼 그건 언제 풀려?', history: [{ role: 'user', content: '배정이 뭐야?' }, { role: 'assistant', content: '…' }] });
-    expect(calls[0][0].content).toContain('[TRM-060] 배정');
+    expect(calls[0].messages[0].content).toContain('[TRM-060] 배정');
   });
 
   it('모델을 고르지 않았으면 LLM을 부르지 않고 COM-999(503)', async () => {
-    const { service, calls } = setup({ model: null }, async () => '');
+    const { service, calls } = setup({ model: null }, async () => answer(''));
     await expect(service.ask(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'COM-999', status: 503 });
     expect(calls).toHaveLength(0);
   });
@@ -155,7 +206,7 @@ describe('AiAssistantService', () => {
   });
 
   it('추천 질문은 로그인 사원의 역할 기준', () => {
-    const { service } = setup({}, async () => '');
+    const { service } = setup({}, async () => answer(''));
     const view = service.suggestedQuestions({ ...user, roleCode: ROLE.QUALITY });
     expect(view.roleCode).toBe('QUALITY');
     expect(view.roleQuestions).toContain('비슷한 사례 찾아줘');
