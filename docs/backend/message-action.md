@@ -55,7 +55,9 @@
 ```
 confirm(draftId, actor):
   require(actor == draft.requester)                                  // 아니면 COM-002
-  require(draft.status == WAITING_APPROVAL and noUnresolvedFields)   // 아니면 ACT-001
+  require(draft.status in (AI_GENERATED, WAITING_APPROVAL))           // 아니면 COM-004
+  require(noUnresolvedFields)                                        // 아니면 ACT-001
+  require(purchasing.canRequest(actor))                              // 승인권자 없음 → PUR-001 (9장)
   validatePayloadAgainstCurrentMaster()                              // 원료 품목·톤 > 0·날짜
   draft.status = APPROVED, confirmed_at = now
   pr = purchasing.createRequisition(tx, payload, actor, { actionDraftId, messageId })  // WAITING_APPROVAL
@@ -139,6 +141,7 @@ confirm(draftId, actor):
 | --- | --- |
 | 권한 | 3장대로 기능 권한 데코레이터 없이 service가 확인한다. 생성은 방 멤버, 수정·확정·반려는 요청자 본인, 목록은 요청자 본인(방 목록은 방 멤버), 상세는 요청자 본인 또는 원본 메시지 방 멤버. 아니면 COM-002. 다른 방 대화가 초안 상세로 새지 않게 상세도 막는다 |
 | 요청자 권한 | 메시지 작성자가 사용 중이고 구매요청 등록 USE 권한이 있어야 초안을 만든다(아니면 COM-002). 확정할 수 없는 초안이 확인 대기에 영영 남지 않게 한다 |
+| 승인권자 | 요청자에게 구매요청 승인권자(소속 부서의 부서장, 본인이 아님)가 없으면 생성과 확정을 PUR-001로 막는다(`purchasing.assertCanRequest`, 구매요청 등록과 같은 규칙). 확정 전에 막아 APPROVED에서 실행이 늘 실패하는 초안이 생기지 않게 한다 |
 | 만들 수 있는 메시지 | 사원이 보낸 일반 메시지(USER, 삭제 안 됨)만. 아니면 COM-004 |
 | 생성 직후 상태 | AI_GENERATED로 만들고 DRAFT_CREATED를 남긴 뒤 같은 트랜잭션에서 WAITING_APPROVAL로 바꾼다 |
 | 중복 생성 응답 | 같은 메시지·유형에 미처리 초안이 있으면 그 초안을 돌려준다(`{ id, created: false }`) |

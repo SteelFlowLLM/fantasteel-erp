@@ -198,12 +198,13 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
     expect(await prisma.purchaseRequisition.count({ where: { actionDraftId: draft.id } })).toBe(0);
   });
 
-  it('실행이 실패하면(부서장 없음 PUR-001) APPROVED로 남고 실패 코드·횟수를 남긴다. 다시 실행하면 만든다', async () => {
+  it('확정한 뒤 실행이 실패하면(부서장 없음 PUR-001) APPROVED로 남고 실패 코드·횟수를 남긴다. 다시 실행하면 만든다', async () => {
     const { draft } = await draftOf('철광석 10톤', { itemId: oreId, requestedTon: '10.000', desiredReceiptDate: '2026-11-20' });
+    await prisma.actionDraft.update({ where: { id: draft.id }, data: { draftStatus: DRAFT_STATUS.APPROVED, confirmedAt: new Date() } });
     const department = await prisma.department.findUniqueOrThrow({ where: { id: purchaser.departmentId } });
     await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: null } });
     try {
-      expect(await service.confirm(purchaser, draft.id, {})).toMatchObject({
+      expect(await service.execute(purchaser, draft.id)).toMatchObject({
         executed: false,
         errorCode: 'PUR-001',
         draft: { draftStatus: DRAFT_STATUS.APPROVED, executionErrorCode: 'PUR-001', executionAttemptCount: 1, purchaseRequisition: null },
@@ -215,6 +216,21 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
       executed: true,
       draft: { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: 2 },
     });
+  });
+
+  it('승인권자가 없는 요청자(부서장 본인)는 초안을 만들 수 없고, 확정 전에 승인권자가 없어지면 확정을 막아 확인 대기에 남긴다 (PUR-001)', async () => {
+    const fromHead = await send(purchaseHead, '석탄 확인 부탁');
+    expect(await codeOf(service.create(purchaser, fromHead.id))).toBe('PUR-001');
+
+    const { draft } = await draftOf('철광석 5톤', { itemId: oreId, requestedTon: '5.000', desiredReceiptDate: '2026-11-20' });
+    const department = await prisma.department.findUniqueOrThrow({ where: { id: purchaser.departmentId } });
+    await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: null } });
+    try {
+      expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('PUR-001');
+    } finally {
+      await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: department.headEmployeeId } });
+    }
+    expect((await service.get(purchaser, draft.id)).draftStatus).toBe(DRAFT_STATUS.WAITING_APPROVAL);
   });
 
   it('요청자가 사유를 적어 반려하면 REJECTED로 끝나고 작업 로그에 사유가 남는다', async () => {

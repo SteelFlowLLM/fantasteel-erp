@@ -94,7 +94,8 @@ export class MessageActionService {
       if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
       if (!(await this.repository.isRoomMember(tx, message.chatRoomId, user.employeeId))) throw new AppException('COM-002', '채팅방 멤버만 초안을 만들 수 있어요');
       if (message.messageType !== MESSAGE_TYPE.USER || message.senderId === null || message.deletedAt) throw new AppException('COM-004', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
-      await this.assertRequesterCanConfirm(message.senderId);
+      const requester = await this.requesterWhoCanConfirm(message.senderId);
+      await this.purchasing.assertCanRequest(tx, requester);
 
       const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
       const open = await this.repository.findOpenDraft(tx, message.id, actionType);
@@ -177,6 +178,8 @@ export class MessageActionService {
       const [item] = payload.itemId === null ? [] : await this.repository.findItems(tx, [payload.itemId]);
       const unresolved = unresolvedFieldsOf(payload, item);
       if (unresolved.length > 0) throw new AppException('ACT-001', `채워야 할 칸: ${unresolved.join(', ')}`);
+      // 승인권자가 없으면(부서장 없음·부서장 본인) 실행이 늘 실패해 APPROVED에 갇히므로 확정 전에 막는다
+      await this.purchasing.assertCanRequest(tx, user);
       await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.APPROVED, confirmedAt: new Date() });
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
@@ -271,12 +274,13 @@ export class MessageActionService {
   }
 
   /** 요청자가 사용 중이고 구매요청 등록 사용 권한이 있어야 확정(= 구매요청 생성)할 수 있다 */
-  private async assertRequesterCanConfirm(requesterId: number): Promise<void> {
+  private async requesterWhoCanConfirm(requesterId: number): Promise<AuthUser> {
     const requester = await this.authUsers.load(requesterId);
     if (!requester) throw new AppException('COM-002', '요청자(메시지 작성자)가 사용 중인 사원이 아니라 초안을 만들 수 없어요');
     if (!hasPermission(requester, { permission: PERMISSION.PURCHASE_REQUISITION_CREATE, level: 'USE' })) {
       throw new AppException('COM-002', '요청자(메시지 작성자)에게 구매요청 등록 권한이 없어 초안을 만들 수 없어요');
     }
+    return requester;
   }
 
   private async toViews(tx: Tx, rows: DraftRow[]): Promise<ActionDraftView[]> {
