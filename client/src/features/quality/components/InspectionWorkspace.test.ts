@@ -4,11 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { inspectionApi, inspectionKeys, type InspectionQueueRow } from '@/api/inspections';
-import { sessionApi } from '@/api/session';
+import { inspectionKeys, type InspectionQueueRow } from '@/api/inspections';
 import { InspectionWorkspace } from '@/features/quality/components/InspectionWorkspace';
+import { QUEUE_ROWS } from '@/features/quality/testing/qualityFixtures';
 import { MeContext } from '@/hooks/useMe';
-import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import { sessionUserOf } from '@/test/sessionUsers';
 
 /** 주소의 ?lot= (테스트마다 바꾼다) */
 const address = vi.hoisted(() => ({ search: '' }));
@@ -22,9 +23,8 @@ async function render(
   edit: (rows: InspectionQueueRow[]) => InspectionQueueRow[] = (rows) => rows,
   search: () => string = () => '',
 ): Promise<{ html: string; rows: InspectionQueueRow[] }> {
-  const employeeId = actAs(SEED_EMPLOYEE_NO.quality);
-  const me = await sessionApi.getSessionUser(employeeId);
-  const rows = edit(await inspectionApi.queue());
+  const me = sessionUserOf(SEED_EMPLOYEE_NO.quality);
+  const rows = edit([...QUEUE_ROWS]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(inspectionKeys.queue(), rows);
   address.search = search();
@@ -78,7 +78,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
   it('목록 한 줄은 두 줄(LOT·판정 / 규격·생산일)이고, 계획·검사 일시·기준은 마우스를 올리면 보인다', async () => {
     const { html, rows } = await render();
     const first = rows.find((r) => r.inspectionResult === 'PENDING');
-    if (!first) throw new Error('판정 대기 LOT이 시드에 없어요');
+    if (!first) throw new Error('판정 대기 LOT이 고정 데이터에 없어요');
     const item = html.slice(html.indexOf(`href="/quality/inspections?lot=${first.lotId}"`));
     const row = item.slice(0, item.indexOf('</a>'));
     const visible = row.replace(/title="[^"]*"/g, '');

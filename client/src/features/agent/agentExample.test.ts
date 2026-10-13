@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { ACTION_TYPE_GRADE, ACTOR_TYPE, DRAFT_STATUS, DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
-import { SEED_ROLE_PERMISSIONS } from '@/mock/seed';
 import {
   AGENT_DETECTIONS,
   AGENT_HISTORY,
@@ -16,6 +15,7 @@ import {
 } from '@/features/agent/agentExample';
 import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 import { collectTexts, findForbiddenWords, findMalformedNumbers } from '@/features/agent/lib/exampleTextCheck';
+import { rolePermissionsOf } from '@/test/sessionUsers';
 
 const ALL_EXAMPLE = { AGENT_DETECTIONS, AGENT_HISTORY, AGENT_RESOLVED_EXAMPLE, AGENT_RULES, CANDIDATE_FLOW, EXAMPLE_NO };
 
@@ -34,7 +34,7 @@ describe('AI Factory Agent 예시 (BP-AGT-01)', () => {
     expect(agentRuleOf('GOOD_QTY_SHORTAGE').confirmPermission).toBe(PERMISSION.PRODUCTION_PLAN_CONFIRM);
     for (const rule of AGENT_RULES) expect(Boolean(rule.actionType)).toBe(Boolean(rule.confirmPermission));
     // 구매요청 등록 권한은 구매 역할만 사용(USE)한다 = 확정하는 사람은 부서장이 아니라 담당 부서원
-    expect(SEED_ROLE_PERMISSIONS.PURCHASE.use).toContain(PERMISSION.PURCHASE_REQUISITION_CREATE);
+    expect(rolePermissionsOf('PURCHASE')[PERMISSION.PURCHASE_REQUISITION_CREATE]).toBe('USE');
   });
 
   it('구매요청 생성은 P1 유형이고, 재생산 계획 생성은 P2 제안 유형이다', () => {

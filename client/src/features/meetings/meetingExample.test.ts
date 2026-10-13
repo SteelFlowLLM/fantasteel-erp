@@ -13,12 +13,12 @@ import {
   TRANSCRIPT,
   isTaskReady,
 } from '@/features/meetings/meetingExample';
-import { SEED_EMPLOYEES } from '@/mock/seed';
+import { SEED_ACCOUNTS } from '@/test/sessionUsers';
 
 describe('Voice2ERP 회의록 예시 (BP-VOC-01)', () => {
   it('참석자·작성자·요청자는 시드 사원이고, 역할 표시가 맞다', () => {
     for (const attendee of ATTENDEES) {
-      const employee = SEED_EMPLOYEES.find((item) => item.employeeName === attendee.employeeName);
+      const employee = SEED_ACCOUNTS.find((item) => item.employeeName === attendee.employeeName);
       expect(employee).toBeDefined();
       expect(attendee.roleCode).toBe(employee?.roleCode);
       expect(Object.keys(ROLE_LABEL)).toContain(attendee.roleCode);
