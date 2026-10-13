@@ -65,6 +65,7 @@ export function inventoryTool(inventory: InventoryService): AssistantTool {
                   강종: r.steelGradeCode,
                   '여재 매수': r.surplusQty,
                   '여재 LOT': r.lots.slice(0, 5).map((lot) => `${lot.lotNo}${lot.producedDate ? ` (생산 ${lot.producedDate})` : ''}`),
+                  '생략한 여재 LOT 수': Math.max(0, r.lots.length - 5),
                 })),
                 '여재 생략 줄 수': surplus.omitted,
               }
