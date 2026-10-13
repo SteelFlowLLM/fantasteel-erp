@@ -7,6 +7,7 @@ import {
   MESSAGE_TYPE,
   PERMISSION,
   type ActionDraftCreateResult,
+  type ActionDraftExecutionResult,
   type ActionDraftView,
   type ActionType,
   type AuthUser,
@@ -21,8 +22,8 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
-import { isValidDate, TON_PATTERN } from '../purchasing/purchasing.service';
-import type { ListActionDraftsQuery, UpdateActionDraftDto } from './dto/action-draft.dto';
+import { isValidDate, PurchasingService, retryOnNumberConflict, TON_PATTERN } from '../purchasing/purchasing.service';
+import type { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
 
 const isPositiveTon = (s: string) => TON_PATTERN.test(s) && Number(s) > 0;
@@ -53,6 +54,21 @@ export function unresolvedFieldsOf(payload: PurchaseRequisitionDraftPayload, ite
   return missing;
 }
 
+/** 확정 전(수정·확정·반려할 수 있는) 상태 */
+const EDITABLE_STATUSES: readonly string[] = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL];
+
+type DraftHandler = (purchasing: PurchasingService, tx: Tx, draft: DraftRow, actor: AuthUser) => Promise<{ id: number; no: string }>;
+
+/** 업무 유형 등록부 (REQ-ACT-004, 업무 프로세스 12.3): 유형별 실행 핸들러. P1은 구매요청 생성 하나이고 나머지 유형은 준비 중이다 */
+const ACTION_HANDLERS: Partial<Record<ActionType, DraftHandler>> = {
+  [ACTION_TYPE.PURCHASE_REQUISITION_CREATE]: async (purchasing, tx, draft, actor) => {
+    const p = payloadOf(draft.payload);
+    const input = { itemId: p.itemId ?? 0, requestedTon: p.requestedTon ?? '', desiredReceiptDate: p.desiredReceiptDate ?? '', requestReason: p.requestReason };
+    const requisition = await purchasing.createRequisition(tx, input, actor, { actionDraftId: draft.id, messageId: draft.messageId });
+    return { id: requisition.id, no: requisition.purchaseRequisitionNo };
+  },
+};
+
 /**
  * Message → ERP 구매요청 초안 (REQ-ACT-001~004, BP-ACT-01, docs/backend/message-action.md).
  * 요청자(확정 주체) = 메시지 작성자. AI 추출은 아직 없어(SPEC 5장) 요청자가 값을 직접 채운다.
@@ -64,6 +80,7 @@ export class MessageActionService {
     private readonly repository: MessageActionRepository,
     private readonly authUsers: AuthUserService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly purchasing: PurchasingService,
   ) {}
 
   /**
@@ -77,7 +94,8 @@ export class MessageActionService {
       if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
       if (!(await this.repository.isRoomMember(tx, message.chatRoomId, user.employeeId))) throw new AppException('COM-002', '채팅방 멤버만 초안을 만들 수 있어요');
       if (message.messageType !== MESSAGE_TYPE.USER || message.senderId === null || message.deletedAt) throw new AppException('COM-004', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
-      await this.assertRequesterCanConfirm(message.senderId);
+      const requester = await this.requesterWhoCanConfirm(message.senderId);
+      await this.purchasing.assertCanRequest(tx, requester);
 
       const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
       const open = await this.repository.findOpenDraft(tx, message.id, actionType);
@@ -144,8 +162,7 @@ export class MessageActionService {
         next.desiredReceiptDate = text || null;
       }
       if (dto.requestReason !== undefined) next.requestReason = dto.requestReason?.trim() || null;
-      const changed = await this.repository.updateDraftIfUnchanged(tx, draft.id, draft.updatedAt, { payload: next as unknown as Prisma.InputJsonValue, draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
-      if (!changed) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+      await this.changeDraft(tx, draft, { payload: next as unknown as Prisma.InputJsonValue, draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
       return this.repository.findDraft(tx, draft.id);
     });
     if (!row) throw new AppException('COM-003', '초안을 찾을 수 없어요');
@@ -153,23 +170,117 @@ export class MessageActionService {
     return view;
   }
 
-  /** 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL) 초안만 바꿀 수 있다 */
-  private async requesterDraft(tx: Tx, user: AuthUser, id: number, expectedUpdatedAt: string | null | undefined): Promise<DraftRow> {
+  /** 요청자 확정 (업무 프로세스 13.4): 필수값(ACT-001)을 확인해 APPROVED·DRAFT_CONFIRMED를 남기고 바로 실행한다 */
+  async confirm(user: AuthUser, id: number, dto: ConfirmActionDraftDto): Promise<ActionDraftExecutionResult> {
+    await this.prisma.$transaction(async (tx) => {
+      const draft = await this.requesterDraft(tx, user, id, dto.expectedUpdatedAt);
+      const payload = payloadOf(draft.payload);
+      const [item] = payload.itemId === null ? [] : await this.repository.findItems(tx, [payload.itemId]);
+      const unresolved = unresolvedFieldsOf(payload, item);
+      if (unresolved.length > 0) throw new AppException('ACT-001', `채워야 할 칸: ${unresolved.join(', ')}`);
+      // 승인권자가 없으면(부서장 없음·부서장 본인) 실행이 늘 실패해 APPROVED에 갇히므로 확정 전에 막는다
+      await this.purchasing.assertCanRequest(tx, user);
+      await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.APPROVED, confirmedAt: new Date() });
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
+        actor: user,
+        target: { table: 'action_draft', id: draft.id },
+        salesOrderId: draft.message?.chatRoom.salesOrderId ?? null,
+        before: { draftStatus: draft.draftStatus },
+        after: { draftStatus: DRAFT_STATUS.APPROVED, payload: payload as unknown as Prisma.InputJsonValue },
+        reason: `DRAFT_CONFIRMED: 요청자 확정 (${item?.itemCode} ${payload.requestedTon}t, 희망 입고일 ${payload.desiredReceiptDate})`,
+        actionDraftId: draft.id,
+        messageId: draft.messageId,
+      });
+    });
+    return this.execute(user, id);
+  }
+
+  /**
+   * 승인(APPROVED)된 초안을 등록부의 핸들러로 실행한다. 핸들러가 실패하면 실행 트랜잭션은 롤백되므로,
+   * 실패 코드·시도 횟수는 별도 트랜잭션으로 남기고 APPROVED 그대로 둔다(같은 API로 다시 실행한다).
+   */
+  async execute(user: AuthUser, id: number): Promise<ActionDraftExecutionResult> {
+    const draft = await this.requesterDraft(this.prisma, user, id, null, [DRAFT_STATUS.APPROVED]);
+    const handler = ACTION_HANDLERS[draft.actionType as ActionType];
+    if (!handler) throw new AppException('COM-004', '준비 중인 업무 유형이에요');
+    let failure: AppException | null = null;
+    try {
+      await retryOnNumberConflict(() =>
+        this.prisma.$transaction(async (tx) => {
+          const target = await handler(this.purchasing, tx, draft, user);
+          await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: { increment: 1 } });
+          await this.businessEventRecorder.record(tx, {
+            type: BUSINESS_EVENT_TYPE.DRAFT_EXECUTED,
+            actor: user,
+            target: { table: 'action_draft', id: draft.id },
+            salesOrderId: draft.message?.chatRoom.salesOrderId ?? null,
+            before: { draftStatus: DRAFT_STATUS.APPROVED },
+            after: { draftStatus: DRAFT_STATUS.EXECUTED, purchaseRequisitionId: target.id, purchaseRequisitionNo: target.no },
+            actionDraftId: draft.id,
+            messageId: draft.messageId,
+          });
+        }),
+      );
+    } catch (e) {
+      // 같은 초안을 동시에 실행한 경합(COM-001)은 실행 실패가 아니다
+      if (!(e instanceof AppException) || e.code === 'COM-001') throw e;
+      failure = e;
+      // 그 사이 다른 요청이 실행을 끝냈으면 그 결과를 덮어쓰지 않는다
+      await this.repository.updateDraftIfUnchanged(this.prisma, draft.id, draft.updatedAt, { executionErrorCode: e.code, executionAttemptCount: { increment: 1 } });
+    }
+    return { draft: await this.get(user, id), executed: failure === null, errorCode: failure?.code ?? null, errorMessage: failure?.message ?? null };
+  }
+
+  /** 요청자 반려 (확정 전만, 사유 필수) → REJECTED */
+  async reject(user: AuthUser, id: number, dto: RejectActionDraftDto): Promise<ActionDraftView> {
+    await this.prisma.$transaction(async (tx) => {
+      const draft = await this.requesterDraft(tx, user, id, dto.expectedUpdatedAt);
+      const rejectReason = dto.rejectReason.trim();
+      if (!rejectReason) throw new AppException('COM-004', '반려 사유를 입력해 주세요');
+      await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.REJECTED, rejectReason });
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.DRAFT_REJECTED,
+        actor: user,
+        target: { table: 'action_draft', id: draft.id },
+        salesOrderId: draft.message?.chatRoom.salesOrderId ?? null,
+        before: { draftStatus: draft.draftStatus },
+        after: { draftStatus: DRAFT_STATUS.REJECTED },
+        reason: rejectReason,
+        actionDraftId: draft.id,
+        messageId: draft.messageId,
+      });
+    });
+    return this.get(user, id);
+  }
+
+  /** 읽은 뒤 아무도 고치지 않았을 때만 바꾼다 (동시 요청이 앞 요청을 덮어쓰지 않게) */
+  private async changeDraft(tx: Tx, draft: DraftRow, data: Prisma.ActionDraftUpdateManyMutationInput): Promise<void> {
+    if (!(await this.repository.updateDraftIfUnchanged(tx, draft.id, draft.updatedAt, data))) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+  }
+
+  /**
+   * 요청자 본인이고 구매요청 등록 사용 권한이 있어야 고치고 확정·반려할 수 있다(실행은 사용자 권한을 거친다, BP-ACT-01).
+   * 기본은 확정 전(AI_GENERATED·WAITING_APPROVAL) 초안만
+   */
+  private async requesterDraft(tx: Tx, user: AuthUser, id: number, expectedUpdatedAt: string | null | undefined, allowed: readonly string[] = EDITABLE_STATUSES): Promise<DraftRow> {
     const draft = await this.repository.findDraft(tx, id);
     if (!draft) throw new AppException('COM-003', '초안을 찾을 수 없어요');
     if (draft.requesterId !== user.employeeId) throw new AppException('COM-002', '요청자만 확인·확정할 수 있어요');
-    if (expectedUpdatedAt && draft.updatedAt.toISOString() !== expectedUpdatedAt) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
-    if (draft.draftStatus !== DRAFT_STATUS.AI_GENERATED && draft.draftStatus !== DRAFT_STATUS.WAITING_APPROVAL) throw new AppException('COM-004', '이 상태의 초안은 바꿀 수 없어요');
+    if (!hasPermission(user, { permission: PERMISSION.PURCHASE_REQUISITION_CREATE, level: 'USE' })) throw new AppException('COM-002', '구매요청 등록 권한이 있어야 초안을 확인·확정할 수 있어요');
+    if (expectedUpdatedAt && new Date(expectedUpdatedAt).getTime() !== draft.updatedAt.getTime()) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+    if (!allowed.includes(draft.draftStatus)) throw new AppException('COM-004', '이 상태의 초안은 바꿀 수 없어요');
     return draft;
   }
 
   /** 요청자가 사용 중이고 구매요청 등록 사용 권한이 있어야 확정(= 구매요청 생성)할 수 있다 */
-  private async assertRequesterCanConfirm(requesterId: number): Promise<void> {
+  private async requesterWhoCanConfirm(requesterId: number): Promise<AuthUser> {
     const requester = await this.authUsers.load(requesterId);
     if (!requester) throw new AppException('COM-002', '요청자(메시지 작성자)가 사용 중인 사원이 아니라 초안을 만들 수 없어요');
     if (!hasPermission(requester, { permission: PERMISSION.PURCHASE_REQUISITION_CREATE, level: 'USE' })) {
       throw new AppException('COM-002', '요청자(메시지 작성자)에게 구매요청 등록 권한이 없어 초안을 만들 수 없어요');
     }
+    return requester;
   }
 
   private async toViews(tx: Tx, rows: DraftRow[]): Promise<ActionDraftView[]> {

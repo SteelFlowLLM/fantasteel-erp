@@ -100,9 +100,9 @@ const ALREADY_DONE: Record<PurchaseRequisitionStatus, string> = {
   ORDERED: '이미 발주된 요청이에요',
 };
 
-/** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(구매요청·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 */
+/** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(구매요청·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 (Message → ERP 초안 실행도 같은 이유로 쓴다) */
 const NUMBER_CONFLICT_ATTEMPTS = 3;
-async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
+export async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await work();
@@ -115,7 +115,7 @@ async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
 
 /**
  * 구매요청 등록·조회 (REQ-PUR-001·002, BP-PUR-01, docs/backend/purchasing.md).
- * createRequisition은 message-action이 초안 확정 트랜잭션 안에서 부른다 (BP-ACT-01).
+ * createRequisition은 message-action이 초안 실행 트랜잭션 안에서 부른다 (BP-ACT-01).
  * 트랜잭션 안에서는 관계를 여러 개 읽지 않는다: Prisma가 한 연결에 쿼리를 겹쳐 보내 pg 경고가 난다. 응답 모양은 커밋 뒤에 읽는다.
  */
 @Injectable()
@@ -469,6 +469,11 @@ export class PurchasingService {
     const department = await this.repository.findDepartmentHead(tx, departmentId);
     if (!department?.headEmployeeId) throw new AppException('PUR-001');
     return department.headEmployeeId;
+  }
+
+  /** 이 사원이 구매요청을 낼 수 있는지(승인권자가 있는지)만 확인한다. Message → ERP 초안이 확정 전에 부른다 */
+  async assertCanRequest(tx: Tx, actor: AuthUser): Promise<void> {
+    await this.requireApproverId(tx, actor.departmentId, actor.employeeId);
   }
 
   /**
