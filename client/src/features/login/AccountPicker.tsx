@@ -61,7 +61,7 @@ export function AccountPicker() {
     if (hydrated && employeeId !== null) router.replace(next);
   }, [hydrated, employeeId, next, router]);
 
-  // 3D 로드맵은 정점 59만 개짜리 WebGL이라 로그인 화면이 열릴 때마다 돌리지 않는다. 그림을 먼저 보이고 누르면 켠다
+  // 3D 로드맵은 정점 65만 개가 넘는 WebGL(파일 2.6MB)이라 로그인 화면이 열릴 때마다 돌리지 않는다. 그림을 먼저 보이고 누르면 켠다
   const [roadmapOn, setRoadmapOn] = useState(false);
   // 화면이 붙기 전에 iframe이 먼저 다 열렸을 수도 있어서 onLoad 대신 지금 상태도 확인한다
   const roadmapRef = useRef<HTMLIFrameElement>(null);
@@ -90,7 +90,7 @@ export function AccountPicker() {
             <br />한 흐름으로 일해요.
           </h1>
         </div>
-        {/* 노션 「로드맵」 페이지에 올린 3D 기능 로드맵과 같은 파일(public/roadmap). 자체 WebGL·조작 UI를 가진 한 장짜리 페이지라 iframe으로 따로 띄운다 */}
+        {/* 노션 「로드맵」 페이지의 3D 기능 로드맵에 헌정 동상을 더한 파일(public/roadmap). 자체 WebGL·조작 UI를 가진 한 장짜리 페이지라 iframe으로 따로 띄운다 */}
         {roadmapOn ? (
           <iframe
             ref={roadmapRef}
