@@ -124,7 +124,8 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
             </span>
           </p>
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+          {/* 280px씩 채우면 1440 화면에서 3칸이라 항목 4개(슬래브 표면·치수 등)가 3 + 1로 남는다: 넓은 화면에서 4개·7개 이상이면 4칸 (5·6개는 3칸) */}
+          <div className={cn('grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3', (rows.length === 4 || rows.length >= 7) && 'min-[1400px]:grid-cols-4')}>
             {rows.map(({ item, text, preview, dirty }) => {
               const id = `qi-${item.inspectionStandardItemId}`;
               const bad = preview.state === 'fail';
