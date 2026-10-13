@@ -1,6 +1,6 @@
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, TRACE_DIRECTION, type LotSummary, type TraceDirection } from '@fantasteel/shared';
 import type { LotService } from '../../lot/lot.service';
-import { limitRows, optionalEnum, requiredString, ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { limitRows, OPEN_ACCESS, optionalEnum, requiredString, ToolArgumentError, type AssistantTool } from './assistant-tool';
 
 /** 추적 결과에서 넘기는 LOT 수 (코일 하나의 역추적은 보통 이보다 적다) */
 const NODE_LIMIT = 30;
@@ -10,7 +10,7 @@ const DIRECTIONS = Object.values(TRACE_DIRECTION) as TraceDirection[];
 /** LOT 정·역추적 (GET /lots·/lots/:id/trace, 로그인한 전 역할) */
 export function lotTraceTool(lots: LotService): AssistantTool {
   return {
-    permission: null,
+    access: OPEN_ACCESS,
     definition: {
       name: 'trace_lot',
       description:

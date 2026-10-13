@@ -12,7 +12,7 @@ export function LimitGauge({ item, value, bad }: { item: LimitLike; value: strin
     <div className="px-5.5 pt-1 pb-4">
       <div className="relative h-2" role="img" aria-label={`기준 ${limitText(item)}${shown ? `, 측정값 ${shown}` : ''}`}>
         <div className="absolute inset-0 rounded-sm bg-surface-3" />
-        <div className="absolute top-0 bottom-0 rounded-sm bg-[#bfe3ce]" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
+        <div className="absolute top-0 bottom-0 rounded-sm bg-ok-band" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
         {edge.min !== null ? (
           <span className="absolute top-2.5 -translate-x-1/2 text-2xs whitespace-nowrap text-ink-3 tabular-nums" style={{ left: `${g.from}%` }}>
             {edge.min}
@@ -37,7 +37,7 @@ export function MiniGauge({ item, value, bad }: { item: LimitLike; value: string
   if (!g) return <span className="text-cap text-ink-3">—</span>;
   return (
     <div className="relative h-2 w-[132px] rounded-sm bg-surface-3" aria-hidden="true">
-      <div className="absolute top-0 bottom-0 rounded-sm bg-[#bfe3ce]" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
+      <div className="absolute top-0 bottom-0 rounded-sm bg-ok-band" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
       {g.mark !== null ? <div className={cn('absolute -top-[3px] -ml-0.5 h-3.5 w-1 rounded-xs', bad ? 'bg-danger' : 'bg-ink')} style={{ left: `${g.mark}%` }} /> : null}
     </div>
   );

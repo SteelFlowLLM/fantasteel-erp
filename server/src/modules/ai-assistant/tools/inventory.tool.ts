@@ -1,13 +1,13 @@
 import { ITEM_TYPE_LABEL } from '@fantasteel/shared';
 import type { InventoryService } from '../../inventory/inventory.service';
-import { limitRows, looseIncludes, optionalEnum, optionalString, type AssistantTool } from './assistant-tool';
+import { limitRows, looseIncludes, OPEN_ACCESS, optionalEnum, optionalString, type AssistantTool } from './assistant-tool';
 
 const CATEGORIES = ['PRODUCT', 'RAW_MATERIAL', 'SURPLUS'] as const;
 
 /** 재고 (GET /inventories, 로그인한 전 역할) */
 export function inventoryTool(inventory: InventoryService): AssistantTool {
   return {
-    permission: null,
+    access: OPEN_ACCESS,
     definition: {
       name: 'get_inventory',
       description:

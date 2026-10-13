@@ -2,12 +2,12 @@ import { BUSINESS_EVENT_SORT, type BusinessEventView } from '@fantasteel/shared'
 import type { BusinessEventService } from '../../business-event/business-event.service';
 import type { LotService } from '../../lot/lot.service';
 import type { SalesOrderService } from '../../sales-order/sales-order.service';
-import { optionalDate, optionalString, seoulDateTimeText, TOOL_ROW_LIMIT, ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { OPEN_ACCESS, optionalDate, optionalString, seoulDateTimeText, TOOL_ROW_LIMIT, ToolArgumentError, type AssistantTool } from './assistant-tool';
 
 /** 작업 로그 (GET /business-events, 로그인한 전 역할). 최신순 */
 export function businessEventTool(events: BusinessEventService, salesOrders: SalesOrderService, lots: LotService): AssistantTool {
   return {
-    permission: null,
+    access: OPEN_ACCESS,
     definition: {
       name: 'get_business_events',
       description:

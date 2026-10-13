@@ -35,6 +35,15 @@
   --color-wait-bg: #fdf0df;
   --color-run: #1f5fcc;
   --color-run-bg: #e6eefc;
+  /* 상태 색 바탕(-bg) 위 글자는 상태 색보다 한 단계 진하게: 옅은 바탕에서 글자가 흐려 보이지 않게 */
+  --color-ok-ink: #115c38;
+  --color-danger-ink: #8e231e;
+  --color-wait-ink: #7a3d00;
+  /* 기준 밖 값: 칸 테두리와 바탕 (빨간 테두리보다 옅게, 칸이 여럿이어도 화면이 빨갛게 덮이지 않게) */
+  --color-danger-line: #e3a7a2;
+  --color-danger-field: #fff9f8;
+  /* 게이지의 합격 범위 띠 */
+  --color-ok-band: #bfe3ce;
   --color-ai: #5b3fc4;
   --color-ai-strong: #452fa0;
   --color-ai-bg: #f3f0fd;

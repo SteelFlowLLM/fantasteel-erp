@@ -461,7 +461,7 @@ function OutcomeCard({
     <Card className="flex-none" petKey="card:inspections.outcome">
       <div className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
-          <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-[#115c38]' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-[#8e231e]' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-[#7a3d00]'}>
+          <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-ok-ink' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-danger-ink' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-wait-ink'}>
             <Icon name={pass ? 'check-circle' : fail ? 'x-circle' : 'clock'} size="lg" />
             <div className="flex flex-col">
               <span className="text-cap opacity-80" data-pet-term="시스템 판정">

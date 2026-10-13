@@ -1,4 +1,4 @@
-import type { Permission } from '@fantasteel/shared';
+import type { AuthUser, Permission } from '@fantasteel/shared';
 import type { LlmToolDefinition } from '../../llm/llm.client';
 
 /**
@@ -7,10 +7,18 @@ import type { LlmToolDefinition } from '../../llm/llm.client';
  */
 export interface AssistantTool {
   definition: LlmToolDefinition;
-  /** 조회에 필요한 권한(VIEW 이상). 같은 데이터를 보여 주는 API의 권한과 같게 둔다. null이면 로그인한 전 역할 */
-  permission: Permission | null;
-  run(args: Record<string, unknown>): Promise<ToolOutput>;
+  /**
+   * 조회 권한. 같은 데이터를 보여 주는 API와 같게 둔다.
+   * - TOOLBOX: 도구 모음이 먼저 확인한다(permissions 중 하나라도 VIEW 이상). permissions가 비면 로그인한 전 역할
+   * - SERVICE: "VIEW 또는 부서장"처럼 데코레이터로 못 쓰는 권한이라 service가 사용자로 확인하고 COM-002를 던진다.
+   *   permissions·note는 막혔을 때 담당 역할 안내에만 쓴다
+   */
+  access: { checkedBy: 'TOOLBOX' | 'SERVICE'; permissions: readonly Permission[]; note?: string };
+  run(args: Record<string, unknown>, user: AuthUser): Promise<ToolOutput>;
 }
+
+/** 로그인한 전 역할이 보는 데이터 */
+export const OPEN_ACCESS: AssistantTool['access'] = { checkedBy: 'TOOLBOX', permissions: [] };
 
 export interface ToolOutput {
   /** 답 아래 출처 줄에 보일 이름 (예: 재고 · SS275) */
