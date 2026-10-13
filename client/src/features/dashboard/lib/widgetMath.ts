@@ -1,5 +1,5 @@
 // 대시보드 위젯 집계 계산 (순수 함수, REQ-DSH-001·002).
-// 업무 규칙(가용·충족 현황·납기 위험·MRP 순소요·수율 계산식)은 core 서비스와 lib가 계산한다. 여기서는 위젯이 그 값을 묶는 방법만 둔다:
+// 업무 규칙(가용·충족 현황·납기 위험·MRP 순소요·수율 계산식)은 서버가 계산한다. 여기서는 위젯이 그 값을 묶는 방법만 둔다:
 // 비율(분모 0이면 없음), 최근 N일 기간과 날짜별 묶음, 보유 일수, 가중 평균 계획 수율, 이어진 같은 작업 로그 묶음.
 import type { RecentEventRow } from '@/api/dashboard';
 import { decCmp, decDiv, decMul, decSum, RATE_DIGITS, TON_DIGITS, type DecimalInput } from '@/lib/decimal';

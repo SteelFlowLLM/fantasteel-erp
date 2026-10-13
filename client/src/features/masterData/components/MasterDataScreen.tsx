@@ -1,10 +1,9 @@
 'use client';
 
-// 기준정보 (REQ-MST-001~009, BP-MST-01). 위에 준비 상태 띠, 아래 영역별 탭(주소 ?tab=).
+// 기준정보 (REQ-MST-001~009, BP-MST-01). 영역별 탭(주소 ?tab=).
 // 성분 규격은 강종 화면이 아니라 품질의 검사 기준(제강)에서 버전으로 관리한다 (REQ-MST-002, TRM-020).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
-import { isMasterServerMode } from '@/api/masterData';
 import { PERMISSION } from '@/codes';
 import { Icon, type IconName } from '@/components/Icon';
 import { PageMain } from '@/components/Page';
@@ -16,7 +15,6 @@ import { isMasterTabKey, type MasterTabKey } from '@/features/masterData/compone
 import { CustomerSupplierYardTab } from '@/features/masterData/components/CustomerSupplierYardTab';
 import { ProductionSettingTab } from '@/features/masterData/components/ProductionSettingTab';
 import { ProductSpecTab } from '@/features/masterData/components/ProductSpecTab';
-import { ReadinessBanner } from '@/features/masterData/components/ReadinessBanner';
 import { RoutingTab } from '@/features/masterData/components/RoutingTab';
 import { SpecMappingTab } from '@/features/masterData/components/SpecMappingTab';
 import { SteelGradeTab } from '@/features/masterData/components/SteelGradeTab';
@@ -58,12 +56,6 @@ export function MasterDataScreen() {
         </div>
         {canEdit ? null : <ReadOnlyHint className="ml-auto" permissions={[PERMISSION.MASTER_MANAGE]} />}
       </div>
-      {/* 준비 상태는 서버 API가 없어 서버 모드에서 숨긴다 */}
-      {isMasterServerMode() ? null : (
-        <div data-pet-target="card:masterData.readiness" className="flex-none">
-          <ReadinessBanner onGoTab={goTab} />
-        </div>
-      )}
       <div data-pet-target="card:masterData.tabs" className="flex-none">
         <Tabs
           ariaLabel="기준정보 영역"

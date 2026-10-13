@@ -1,7 +1,7 @@
 'use client';
 
 // 검사 기준 (REQ-QC-002, 품질 메뉴, 검사 기준 관리 INSPECTION_STANDARD_MANAGE). 왼쪽 지금 버전 목록 | 오른쪽 버전 상세.
-// 주소: ?process=공정&grade=강종 id(목록 거르기, 기준정보 강종·준비 상태 띠에서 넘어옴) · ?id=버전 id(고른 버전)
+// 주소: ?process=공정&grade=강종 id(목록 거르기, 기준정보 강종 탭에서 넘어옴) · ?id=버전 id(고른 버전)
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useState, type ReactNode } from 'react';
 import { PERMISSION, PROCESS_TYPE_LABEL } from '@/codes';

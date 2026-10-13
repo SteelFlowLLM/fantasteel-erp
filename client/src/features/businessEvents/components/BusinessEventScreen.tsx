@@ -16,7 +16,7 @@ import {
   type ActorType,
   type BusinessEventType,
 } from '@/codes';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { BusinessEventFilter } from '@/api/businessEvents';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardFoot, CardHead } from '@/components/Card';

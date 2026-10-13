@@ -44,7 +44,7 @@ function listRowOf(row: RejectedLotListItem, linked: LinkedOfPlan): RejectedLotL
     lotStatus: row.lotStatus,
     itemCode: row.itemCode,
     itemName: row.itemName,
-    // 히트는 생산완료일이 없다. 가짜 DB처럼 빈 문자열로 둔다
+    // 히트는 생산완료일이 없다. 화면은 빈 문자열로 둔다
     producedDate: row.producedDate ?? '',
     productionPlanNo: row.productionPlanNo,
     productionPlanId: row.productionPlanId,

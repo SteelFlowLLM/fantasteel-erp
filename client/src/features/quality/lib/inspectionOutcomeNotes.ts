@@ -9,7 +9,7 @@ type OutcomeCounts = Pick<
 
 /**
  * 판정과 판정 뒤 재고 반영 결과로 안내 문구를 만든다.
- * 서버 모드는 여재 LOT 번호 없이 매수만 오므로(stockSync) 번호는 있을 때만 붙인다.
+ * 서버는 여재 LOT 번호 없이 매수만 주므로(stockSync) 번호는 있을 때만 붙인다.
  */
 export function inspectionOutcomeNotes(outcome: OutcomeCounts, lotType: LotType, heatPending: boolean): string[] {
   const notes: string[] = [];

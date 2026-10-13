@@ -1,5 +1,5 @@
 // 최근 보낸 이모티콘 (19번, 문서에 없는 추가 기능): 고르기 창 '최근' 탭. 사원별로 이 브라우저 localStorage에 둔다.
-// 화면 편의 기능이라 서버·가짜 DB에 두지 않는다 (ERD에 테이블이 없다). 읽거나 쓰지 못하면 빈 목록으로 둔다.
+// 화면 편의 기능이라 서버에 두지 않는다 (ERD에 테이블이 없다). 읽거나 쓰지 못하면 빈 목록으로 둔다.
 import { isMessageEmoticonKey, type MessageEmoticonKey } from '@fantasteel/shared';
 
 /** 최근 탭에 두는 최대 개수 (4칸 × 4줄) */

@@ -3,7 +3,7 @@
 // 상단 알림 버튼 (SPEC 4장 1번): 누르면 최근 알림 드롭다운. 전체 보기는 왼쪽 메뉴 '업무·알림' 화면으로 간다.
 // 항목을 누르면 알림함과 같이 읽음으로 바꾸고 연결된 화면(notification.link_path, 예: /approvals?pr=…)으로 간다.
 // 연결된 화면이 없는 알림은 알림 탭에서 그 알림을 강조해 보여 준다.
-// 숫자는 가짜 DB 변경(이 탭·다른 탭)마다 다시 읽어 실시간으로 바뀐다.
+// 숫자는 메신저 소켓 알림(hooks/useMessengerSocket.ts)과 변경 뒤 무효화로 다시 읽는다.
 import { useRouter } from 'next/navigation';
 import { notificationApi, type NotificationPreview } from '@/api/notifications';
 import { NOTIFICATION_TYPE_LABEL } from '@/codes';

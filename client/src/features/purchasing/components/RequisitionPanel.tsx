@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { PERMISSION } from '@/codes';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { RequisitionDetail } from '@/api/purchasing';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';

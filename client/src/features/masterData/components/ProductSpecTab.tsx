@@ -1,11 +1,10 @@
 'use client';
 
 // 제품 규격 (REQ-MST-003): 강종 × 두께 × 폭 × 길이, 1매 이론중량(소수 3자리), 규격 코드 SL-/CL-강종-두께x폭x길이.
-// 같은 조합은 화면에서 먼저 막고, 쓰인 규격은 치수·이론중량을 잠근다(MST-002). 쓰이지 않은 규격만 지운다.
+// 같은 조합은 화면에서 먼저 막고, 쓰인 규격의 치수·이론중량 수정은 서버가 거부한다(MST-002). 규격 삭제 API는 없다.
 import { useMemo, useState, type ReactNode } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
-import { isMasterServerMode, masterDataApi, type MasterProductSpecView } from '@/api/masterData';
-import { Badge } from '@/components/Badge';
+import { masterDataApi, type MasterProductSpecView } from '@/api/masterData';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
@@ -36,8 +35,6 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
   const [gradeFilter, setGradeFilter] = useState('');
   const [editing, setEditing] = useState<MasterProductSpecView | 'new' | null>(null);
-  // 서버는 사용 여부를 주지 않는다. 쓰인 규격의 치수 수정은 저장할 때 MST-002로 안내된다
-  const showUsage = !isMasterServerMode();
 
   return (
     <Card petKey="card:masterData.specs">
@@ -78,7 +75,6 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                       <Th>기본 야드</Th>
                       <Th>대응 규격</Th>
                       <Th align="right">열연 계획 수율</Th>
-                      {showUsage ? <Th>사용 이력</Th> : null}
                       <Th aria-label="수정·삭제" />
                     </tr>
                   </thead>
@@ -101,22 +97,10 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                           )}
                         </Td>
                         <Td align="right">{formatYieldPercent(spec.hotRollingPlannedYieldRate)}</Td>
-                        {showUsage ? (
-                          <Td>
-                            {spec.isUsed ? (
-                              <Badge tone="run" title={`${spec.usageText ?? ''}에 쓰였어요`}>
-                                사용됨
-                              </Badge>
-                            ) : (
-                              <Badge tone="neutral">미사용</Badge>
-                            )}
-                          </Td>
-                        ) : null}
                         <Td align="right">
                           <RowActions
                             canEdit={canEdit}
                             onEdit={() => setEditing(spec)}
-                            remove={{ what: `규격 ${spec.itemCode}`, run: () => masterDataApi.deleteProductSpec(spec.id), success: '규격을 삭제했어요', blockedReason: spec.referenceText }}
                           />
                         </Td>
                       </tr>

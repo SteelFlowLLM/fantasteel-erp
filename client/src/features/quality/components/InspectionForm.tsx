@@ -4,7 +4,7 @@
 // 입력하는 동안은 미리보기만 보이고, 판정은 저장할 때 시스템이 한다. 필수 항목이 비면 판정 대기로 저장된다.
 // 이미 값이 있는 검사는 같은 기록을 고친다(바꾼 항목만 보낸다). 밀시트가 발행된 LOT은 잠긴다.
 import { useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { InspectionDetail, InspectionFormItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge, type BadgeTone } from '@/components/Badge';
 import { Button } from '@/components/Button';

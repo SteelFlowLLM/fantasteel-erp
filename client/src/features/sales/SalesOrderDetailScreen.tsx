@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { SalesOrderDetail } from '@/api/salesOrders';
 import { ERROR_MESSAGE, PERMISSION } from '@/codes';
 import { Banner } from '@/components/Banner';

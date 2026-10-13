@@ -1,4 +1,4 @@
-// 업무 화면 ↔ 서버 API (server/src/modules/notification, API-239~241·274). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 업무 화면 ↔ 서버 API (server/src/modules/notification, API-239~241·274). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 사원 id는 서버 id다. 고치기는 등록자·담당자, 완료는 담당자만이라(서버 규칙) 로그인 사원(/auth/me)과 비교해 버튼을 정한다.
 // 서버에 없어 비우는 것: 완료 시각(ERD 칸 없음). 마감일은 서버에서 필수다.
 import type { AuthUser, PageResult, TaskView as ServerTaskView } from '@fantasteel/shared';

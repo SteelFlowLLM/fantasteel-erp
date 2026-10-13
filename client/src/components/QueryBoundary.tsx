@@ -1,6 +1,6 @@
 // 조회 결과의 불러오는 중·오류를 처리하고, 성공하면 children(data)을 그린다. 권한 없음(COM-002)은 잠금 상태로 보인다.
 import type { ReactNode } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 

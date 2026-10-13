@@ -1,5 +1,5 @@
 // 품질 화면 그리기 테스트의 고정 데이터: 검사 입력 목록 줄, 검사 폼(판정 끝, 잠기지 않음), 불합격 관리 목록 줄.
-// 가짜 DB 시드를 읽지 않는다. 번호·이름은 화면 글자를 확인할 만큼만 실제 모양을 따른다.
+// 번호·이름은 화면 글자를 확인할 만큼만 실제 모양을 따른다.
 import type { RejectedLotListRow } from '@/api/dispositions';
 import type { InspectionDetail, InspectionFormItem, InspectionQueueRow, LinkedSalesOrderItem } from '@/api/inspections';
 

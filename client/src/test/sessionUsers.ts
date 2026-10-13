@@ -1,5 +1,5 @@
 // 화면 그리기 테스트의 로그인 사원: 서버 시드 테스트 계정(docs/backend/seed.md)과 역할별 권한(역할별 메뉴 v2 3장 표, server/prisma/seed.ts).
-// 가짜 DB를 읽지 않고 화면에 넣을 SessionUser를 만든다. 사원·부서 id는 테스트 안에서만 쓰는 번호다.
+// 화면에 넣을 SessionUser를 만든다. 사원·부서 id는 테스트 안에서만 쓰는 번호다.
 import type { SessionUser } from '@/api/session';
 import { PERMISSION, ROLE_LABEL, type Permission, type PermissionLevel, type RoleCode } from '@/codes';
 import type { PermissionMap } from '@/lib/permissions';

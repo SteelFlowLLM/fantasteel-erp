@@ -94,7 +94,7 @@ export function typicalPassValue(item: Pick<JudgmentStandardItem, 'minValue' | '
 
 /**
  * 공정·강종에 쓰는 지금 버전의 검사 기준: 강종 전용 지금 버전 → 없으면 공통 기준(강종 없음).
- * 검사 자동 판정(core)과 검사 기준 화면·기준정보 준비 상태가 모두 이 함수 하나를 쓴다.
+ * 검사 기준 화면이 이 함수를 쓴다.
  */
 export function pickCurrentStandard<T extends { processType: ProcessType; steelGradeId: number | null; isCurrent: boolean }>(
   standards: readonly T[],

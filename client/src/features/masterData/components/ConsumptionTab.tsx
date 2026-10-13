@@ -3,8 +3,8 @@
 // 배합 원단위 (REQ-MST-006): 용선 1t당 철광석·석탄·석회석(공통, t/t), 용강 1t당 강종별 합금철(kg/t).
 // 단위는 원료 유형으로 정한다(합금철 kg/t, 그 밖 t/t — PLAN 4장). 바뀐 칸을 한 번에 저장한다(하나라도 틀리면 아무것도 저장하지 않음).
 import { useState } from 'react';
-import { RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { isMasterServerMode, masterDataApi, type MasterRawMaterialView, type MasterSpecificConsumptionView, type MasterSteelGradeView, type SpecificConsumptionChange } from '@/api/masterData';
+import { RAW_MATERIAL_TYPE_LABEL, type RawMaterialType } from '@/codes';
+import { masterDataApi, type MasterRawMaterialView, type MasterSpecificConsumptionView, type MasterSteelGradeView, type SpecificConsumptionChange } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Input } from '@/components/Input';
@@ -12,11 +12,13 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { MASTER_LOCK_TEXT, TableFoot } from '@/features/masterData/components/MasterParts';
-import { HOT_METAL_RAW_MATERIAL_TYPES } from '@/features/masterData/lib/readiness';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterRawMaterials, useMasterSpecificConsumptions, useMasterSteelGrades } from '@/hooks/useMasterData';
 import { compareDecimal } from '@/lib/weight';
+
+/** 용선 1t당 공통 원단위가 있어야 하는 원료 유형 (REQ-MST-006) */
+const HOT_METAL_RAW_MATERIAL_TYPES = ['IRON_ORE', 'COAL', 'LIMESTONE'] as const satisfies readonly RawMaterialType[];
 
 interface Loaded {
   materials: MasterRawMaterialView[];
@@ -167,9 +169,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
         <TableFoot className="flex items-center gap-3 rounded-md border-t-0">
           <span className="min-w-0 flex-1">
             {changes.length > 0
-              ? isMasterServerMode()
-                ? `변경 ${changes.length}건 · 서버에는 원단위 삭제 API가 없어 칸을 비울 수 없어요`
-                : `변경 ${changes.length}건 · 칸을 비우고 저장하면 그 원단위를 지워요 (지우면 준비 상태에 누락으로 나와요)`
+              ? `변경 ${changes.length}건 · 서버에는 원단위 삭제 API가 없어 칸을 비울 수 없어요`
               : '값을 고치고 저장해요 · 0보다 커야 해요 · 비어 있으면 미설정이에요 · 제품 규격이 없는 강종은 비워 둬도 돼요'}
           </span>
           <Button

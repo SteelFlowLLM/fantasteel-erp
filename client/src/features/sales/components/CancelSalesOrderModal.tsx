@@ -4,7 +4,7 @@
 // 취소 사유(cancel_reason)는 필수, 200자. 비고 없음.
 // 구매 진행 영향(BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"): 취소·연결 해제될 계획에 연결된 구매요청·발주를 보여 주기만 한다.
 import { useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import { salesOrderApi, type SalesOrderDetail } from '@/api/salesOrders';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';

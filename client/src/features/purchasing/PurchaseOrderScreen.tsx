@@ -215,7 +215,7 @@ export function PurchaseOrderForm({
 
   const allItems = groups.flatMap((g) => g.items);
   const chosen = allItems.filter((i) => selected.has(i.id));
-  // 공급업체 1곳당 발주 1건. 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(서버·가짜 DB 같은 규칙).
+  // 공급업체 1곳당 발주 1건. 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(서버 규칙).
   const planned = plannedPurchaseOrders(chosen, expectedReceiptDate);
   const orders = groupBySupplier(chosen).flatMap((group) =>
     group.supplierId === null

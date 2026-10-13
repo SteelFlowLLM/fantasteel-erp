@@ -5,7 +5,6 @@
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
-import { isServerDataSource } from '@/api/http';
 import { MESSAGE_PAGE_SIZE, type ChatRoomDetailView } from '@/api/messenger';
 import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
@@ -294,12 +293,10 @@ function RoomView({
             </Button>
           </div>
         ) : null}
-        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 (서버 모드만) */}
-        {isServerDataSource() ? (
-          <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
-            {typing}
-          </div>
-        ) : null}
+        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 */}
+        <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
+          {typing}
+        </div>
         <Composer
           room={room}
           onSent={() => {

@@ -1,5 +1,5 @@
 // 검사 기준 화면 그리기 테스트의 고정 데이터: 공정마다 기준 하나인 목록과 제강 기준 상세(SS275 히트 성분, KS 상한).
-// 가짜 DB 시드를 읽지 않는다. 값은 서버 시드의 검사 기준 v1 모양을 따른다(docs/backend/seed.md).
+// 값은 서버 시드의 검사 기준 v1 모양을 따른다(docs/backend/seed.md).
 import type { InspectionStandardDetailView, InspectionStandardItemView, InspectionStandardSummaryView } from '@/api/inspectionStandards';
 
 const summary = (id: number, processType: InspectionStandardSummaryView['processType'], suffix: string, version: number, itemCount: number): InspectionStandardSummaryView => ({

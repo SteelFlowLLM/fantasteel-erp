@@ -1,8 +1,7 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
-// 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
+// 숫자는 모두 api/dashboard.ts가 서버에서 읽은 값이다.
 import Link from 'next/link';
 import { useState } from 'react';
-import { isServerDataSource } from '@/api/http';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -422,9 +421,7 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
       </div>
       <span className="text-cap text-ink-3">
         {/* 서버에는 여재 전환 시각이 없어 생산완료일부터 센다 (inventory.md 8-1) */}
-        {isServerDataSource()
-          ? '여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터'
-          : '여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (재고 화면 여재와 같은 값) · 보유 일수 = 여재로 바뀐 날부터'}
+        여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터
       </span>
     </div>
   );

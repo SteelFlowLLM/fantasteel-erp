@@ -111,7 +111,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setText(event.target.value);
     setSuggestDismissed(false);
-    // 입력 중 알림 (서버 모드만, 소켓 훅이 간격을 조절한다)
+    // 입력 중 알림 (소켓 훅이 간격을 조절한다)
     if (event.target.value.trim()) useMessengerLiveStore.getState().sendTyping?.(room.id);
     updateMention(event.target.value, event.target.selectionStart);
   };

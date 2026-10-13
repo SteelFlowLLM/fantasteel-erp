@@ -1,5 +1,4 @@
 // 서버 모드 로그인 사원: 사원번호·비밀번호 로그인, 사원 정보·권한은 GET /auth/me (사원·부서 id는 서버 id).
-// 가짜 DB만 쓰는 화면의 요청 사원은 세션 사원번호로 가짜 DB 사원을 찾는다.
 import type { AuthUser, DepartmentNode } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ApiError } from '@/api/errors';
@@ -10,7 +9,7 @@ import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const AT = '2026-10-07T00:00:00.000Z';
 
-// 서버 id는 가짜 DB id와 다르게 잡는다
+// 서버 id는 탭에 남은 id와 다르게 잡는다
 const authUser: AuthUser = {
   employeeId: 904,
   employeeNo: SEED_EMPLOYEE_NO.purchaseHead,
