@@ -188,22 +188,24 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
               <b className="font-semibold">모든 항목 같음</b> · {sharedText.join(' · ')}
             </p>
           ) : null}
+          {/* 열 수가 적은 기준은 표가 넓게 늘어나 왼쪽·오른쪽 정렬이면 이름과 값이 멀어진다: 칸 가운데에 모아 읽히게 */}
           <div className="overflow-auto">
             <Table>
               <thead>
                 <tr>
-                  <Th className="w-12">순서</Th>
-                  <Th>항목 코드</Th>
-                  <Th>항목명</Th>
-                  <Th>단위</Th>
-                  {shared.min ? null : <Th align="right">최소 (이상)</Th>}
-                  {shared.max ? null : <Th align="right">최대 (이하)</Th>}
-                  {shared.band ? null : <Th>적용 두께 구간 (mm)</Th>}
-                  {shared.required ? null : <Th>필수</Th>}
-                  {shared.source ? null : <Th>근거</Th>}
+                  <Th align="center" className="w-12">순서</Th>
+                  <Th align="center">항목 코드</Th>
+                  <Th align="center">항목명</Th>
+                  <Th align="center">단위</Th>
+                  {shared.min ? null : <Th align="center">최소 (이상)</Th>}
+                  {shared.max ? null : <Th align="center">최대 (이하)</Th>}
+                  {shared.band ? null : <Th align="center">적용 두께 구간 (mm)</Th>}
+                  {shared.required ? null : <Th align="center">필수</Th>}
+                  {shared.source ? null : <Th align="center">근거</Th>}
                 </tr>
               </thead>
-              <tbody>
+              {/* 기본 줄 높이(36px)는 항목이 적은 기준에서 카드 아래가 휑하다: 모든 기준의 줄을 조금 높인다 (빈칸을 덧대지 않는다) */}
+              <tbody className="[&_td]:h-11">
                 {view.items.map((item, index) => (
                   <ItemRow
                     key={item.id}
@@ -306,23 +308,23 @@ interface ItemRowProps {
 function ItemRow({ item, index, continued, continues, changed, shared, source, standardNo }: ItemRowProps) {
   return (
     <tr className={cn(continues && '[&>td]:border-b-transparent')} data-pet-item="inspectionStandardItem" data-pet-item-title={`${item.inspectionItemCode} ${item.inspectionItemName}`}>
-      <Td className="tabular-nums text-ink-3">{index + 1}</Td>
-      <Td className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
-      <Td>{continued ? null : item.inspectionItemName}</Td>
-      <Td className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
-      {shared.min ? null : <Td align="right">{formatValue(item.minValue)}</Td>}
-      {shared.max ? null : <Td align="right">{formatValue(item.maxValue)}</Td>}
-      {shared.band ? null : <Td>{formatThicknessBand(item)}</Td>}
+      <Td align="center" className="tabular-nums text-ink-3">{index + 1}</Td>
+      <Td align="center" className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
+      <Td align="center">{continued ? null : item.inspectionItemName}</Td>
+      <Td align="center" className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
+      {shared.min ? null : <Td align="center">{formatValue(item.minValue)}</Td>}
+      {shared.max ? null : <Td align="center">{formatValue(item.maxValue)}</Td>}
+      {shared.band ? null : <Td align="center">{formatThicknessBand(item)}</Td>}
       {/* 거의 모든 줄이 필수·KS라 배지로 칠하면 값보다 먼저 보인다: 흔한 값은 글자로, 다른 값(선택·가정값·바뀜)만 배지로 */}
       {shared.required ? null : (
-        <Td>
+        <Td align="center">
           <span className="inline-flex" data-pet-term={item.isRequired ? '필수' : '선택'}>
             {item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}
           </span>
         </Td>
       )}
       {shared.source ? null : (
-      <Td>
+      <Td align="center">
         <span className="inline-flex items-center gap-1">
           {source === 'KS' ? (
             <span className="text-cap text-ink-3" title={standardNo ? `KS 값 (${standardNo}, 치수는 KS D 3500)` : 'KS 값'} data-pet-term="KS">
