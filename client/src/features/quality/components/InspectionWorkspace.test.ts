@@ -96,7 +96,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     expect(html).toMatch(/text-danger[^>]*>· 상위 히트 <!-- -->불합격/);
   });
 
-  it('목록에서 합격은 흐린 글자, 불합격·판정 대기만 색 배지. 밀시트가 발행된 LOT의 자물쇠는 마우스를 올리면 뜻이 보인다', async () => {
+  it('목록에서 합격은 배지 없이 기본 글자색, 불합격·판정 대기만 색 배지. 밀시트가 발행된 LOT의 자물쇠는 마우스를 올리면 뜻이 보인다', async () => {
     // 판정이 끝난 LOT을 주소로 열면 처음부터 전체를 보인다
     let opened = 0;
     const { html, rows } = await render((all) => {
@@ -113,7 +113,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
       return item.slice(0, item.indexOf('</a>'));
     };
     const [passRow, failRow, pendingRow] = rows.map((r) => rowOf(r.lotId));
-    expect(passRow).toContain('text-ink-3');
+    expect(passRow).toMatch(/text-cap text-ink"/);
     expect(passRow).not.toContain('bg-ok-bg');
     expect(passRow).toContain('title="밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요"');
     expect(failRow).toContain('bg-danger-bg');
