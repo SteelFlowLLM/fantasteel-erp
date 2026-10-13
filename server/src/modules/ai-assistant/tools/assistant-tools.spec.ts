@@ -14,7 +14,13 @@ import type { PrismaService } from '../../../prisma/prisma.service';
 import type { BusinessEventService } from '../../business-event/business-event.service';
 import type { InventoryService } from '../../inventory/inventory.service';
 import type { LotService } from '../../lot/lot.service';
+import type { ProductionResultService } from '../../production/production-result.service';
+import type { ProductionService } from '../../production/production.service';
+import type { PurchasingService } from '../../purchasing/purchasing.service';
+import type { QualityService } from '../../quality/quality.service';
+import type { RejectedLotService } from '../../quality/rejected-lot.service';
 import type { SalesOrderService } from '../../sales-order/sales-order.service';
+import type { ShipmentService } from '../../shipment/shipment.service';
 import type { AiAssistantRepository } from '../ai-assistant.repository';
 import { daysUntil, ToolArgumentError } from './assistant-tool';
 import { AssistantToolbox, MAX_TOOL_RESULT_LENGTH } from './assistant-toolbox';
@@ -24,6 +30,7 @@ import { lotTraceTool } from './lot-trace.tool';
 import { salesOrderTool } from './sales-order.tool';
 
 const page = <T>(items: T[], total = items.length): PageResult<T> => ({ items, page: 1, size: 20, total });
+const SALES_USER: AuthUser = { employeeId: 3, employeeNo: '2103003', employeeName: '박서영', roleCode: ROLE.SALES, departmentId: 1, jobGradeId: 1, headDepartmentIds: [], permissions: { SALES_ORDER_CREATE: 'USE' } };
 
 const overview: InventoryOverview = {
   products: [
@@ -41,7 +48,7 @@ describe('재고 도구 (get_inventory)', () => {
   const tool = inventoryTool({ listInventories: async () => overview } as unknown as InventoryService);
 
   it('규격·이름·강종 일부로 거르고 한글 이름으로 돌려준다 (띄어쓰기·대소문자 무시)', async () => {
-    const output = await tool.run({ keyword: 'ss 275' });
+    const output = await tool.run({ keyword: 'ss 275' }, SALES_USER);
     expect(output.label).toBe('재고 · ss 275');
     expect(output.data).toMatchObject({
       제품: [{ 규격: 'C-SS275-2.0', 품목유형: '코일', '합격 재고 매수': 20, '예약 매수': 6, '가용재고 매수': 14, '가용재고 톤': '280.000' }],
@@ -51,13 +58,13 @@ describe('재고 도구 (get_inventory)', () => {
   });
 
   it('category로 한 갈래만, 여재는 여재 매수가 있는 규격만', async () => {
-    const output = await tool.run({ category: 'SURPLUS' });
+    const output = await tool.run({ category: 'SURPLUS' }, SALES_USER);
     expect(Object.keys(output.data as object)).toEqual(['여재', '여재 생략 줄 수']);
     expect((output.data as { 여재: unknown[] }).여재).toEqual([{ 규격: 'S-SM355A-250', 품목: 'SM355A 슬래브 250', 강종: 'SM355A', '여재 매수': 2, '여재 LOT': ['SBOF1-260929-015-01 (생산 2026-09-29)'] }]);
   });
 
   it('없는 category는 인자 오류', async () => {
-    await expect(tool.run({ category: 'ALL' })).rejects.toBeInstanceOf(ToolArgumentError);
+    await expect(tool.run({ category: 'ALL' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
   });
 });
 
@@ -99,17 +106,17 @@ describe('수주 도구 (get_sales_orders)', () => {
   beforeEach(() => fulfillmentIds.splice(0));
 
   it('수주 등록 조회 권한이 필요하다 (GET /sales-orders와 같음)', () => {
-    expect(tool.permission).toBe('SALES_ORDER_CREATE');
+    expect(tool.access).toEqual({ checkedBy: 'TOOLBOX', permissions: ['SALES_ORDER_CREATE'] });
   });
 
   it('납기 위험만 고를 수 있고 진행률은 %로', async () => {
-    const output = await tool.run({ dueRiskOnly: true });
+    const output = await tool.run({ dueRiskOnly: true }, SALES_USER);
     expect(output.label).toBe('수주 · 납기 위험');
     expect(output.data).toMatchObject({ 수주: [{ 수주번호: 'SO-2610-001', 진행률: '50%', '납기 위험': true, 상태: '부분출하', '가장 이른 납기까지 남은 일수': 2 }] });
   });
 
   it('건수는 거른 뒤의 수만 준다 (거르기 전 전체 수를 모델이 납기 위험 건수로 말한 적이 있다)', async () => {
-    const output = await tool.run({ dueRiskOnly: true });
+    const output = await tool.run({ dueRiskOnly: true }, SALES_USER);
     expect(output.data).toMatchObject({ '납기 위험 수주 수': 1 });
     expect(Object.keys(output.data as object)).toEqual(['납기 위험 수주 수', '수주', '생략 줄 수']);
   });
@@ -122,15 +129,15 @@ describe('수주 도구 (get_sales_orders)', () => {
   });
 
   it('수주번호가 정확히 맞으면(여러 개가 일부 맞아도) 그 수주의 충족 현황을 준다', async () => {
-    const output = await tool.run({ salesOrderNo: 'so-2610-002' });
+    const output = await tool.run({ salesOrderNo: 'so-2610-002' }, SALES_USER);
     expect(fulfillmentIds).toEqual([2]);
     expect(output.label).toBe('수주 충족 현황 · SO-2610-002');
   });
 
   it('보고 있는 화면의 수주 id로 바로 찾고, 없는 id는 인자 오류', async () => {
-    await tool.run({ salesOrderId: 3 });
+    await tool.run({ salesOrderId: 3 }, SALES_USER);
     expect(fulfillmentIds).toEqual([3]);
-    await expect(tool.run({ salesOrderId: 99 })).rejects.toThrow('수주 id 99가 없어요');
+    await expect(tool.run({ salesOrderId: 99 }, SALES_USER)).rejects.toThrow('수주 id 99가 없어요');
   });
 });
 
@@ -148,7 +155,7 @@ describe('LOT 추적 도구 (trace_lot)', () => {
   } as unknown as LotService);
 
   it('정확한 LOT 번호면 추적하고 한글 이름으로 돌려준다', async () => {
-    const output = await tool.run({ lotNo: 'CBOF1-260929-015-02', direction: 'backward' });
+    const output = await tool.run({ lotNo: 'CBOF1-260929-015-02', direction: 'backward' }, SALES_USER);
     expect(traced.at(-1)).toEqual([2, 'backward']);
     expect(output.label).toBe('LOT 역추적 · CBOF1-260929-015-02');
     expect(output.data).toMatchObject({ 'LOT 관계': [{ 단계: 0, 'LOT 번호': 'CBOF1-260929-015-02', 유형: '코일', '검사 판정': '합격' }] });
@@ -156,11 +163,11 @@ describe('LOT 추적 도구 (trace_lot)', () => {
 
   it('앞부분이 여러 LOT에 맞으면 추적하지 않고 후보를 준다, 없으면 인자 오류', async () => {
     const before = traced.length;
-    const output = await tool.run({ lotNo: 'CBOF1-260929' });
+    const output = await tool.run({ lotNo: 'CBOF1-260929' }, SALES_USER);
     expect(traced).toHaveLength(before);
     expect(output.data).toMatchObject({ 후보: ['CBOF1-260929-015-01', 'CBOF1-260929-015-02'] });
-    await expect(tool.run({ lotNo: 'HT-X' })).rejects.toBeInstanceOf(ToolArgumentError);
-    await expect(tool.run({})).rejects.toThrow('lotNo가 필요해요');
+    await expect(tool.run({ lotNo: 'HT-X' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
+    await expect(tool.run({}, SALES_USER)).rejects.toThrow('lotNo가 필요해요');
   });
 });
 
@@ -200,16 +207,16 @@ describe('작업 로그 도구 (get_business_events)', () => {
   );
 
   it('수주번호·LOT 번호를 id로 바꿔 최신순으로 읽고, 시각은 서울 기준', async () => {
-    const output = await tool.run({ salesOrderNo: 'SO-2610-007', lotNo: 'HT-BOF1-260929-015', from: '2026-10-01' });
+    const output = await tool.run({ salesOrderNo: 'SO-2610-007', lotNo: 'HT-BOF1-260929-015', from: '2026-10-01' }, SALES_USER);
     expect(queries.at(-1)).toMatchObject({ salesOrderId: 7, lotId: 8, from: '2026-10-01', sort: 'desc', page: 1 });
     expect(output.data).toMatchObject({ '전체 건수': 40, '최신순 작업 로그': [{ 시각: '2026-10-01 09:30', 유형: '수주 등록', 주체: '박서영' }] });
     expect(JSON.stringify(output.data)).not.toContain('secret');
   });
 
   it('없는 번호·뒤바뀐 기간은 인자 오류', async () => {
-    await expect(tool.run({ salesOrderNo: 'SO-2610-999' })).rejects.toBeInstanceOf(ToolArgumentError);
-    await expect(tool.run({ from: '2026-10-05', to: '2026-10-01' })).rejects.toBeInstanceOf(ToolArgumentError);
-    await expect(tool.run({ from: '10/01' })).rejects.toBeInstanceOf(ToolArgumentError);
+    await expect(tool.run({ salesOrderNo: 'SO-2610-999' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
+    await expect(tool.run({ from: '2026-10-05', to: '2026-10-01' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
+    await expect(tool.run({ from: '10/01' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
   });
 });
 
@@ -219,7 +226,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
   let salesOrderCalls = 0;
   const toolbox = new AssistantToolbox(
     {} as PrismaService,
-    { findRoleCodesWithPermission: async () => [ROLE.SALES, ROLE.ADMIN] } as unknown as AiAssistantRepository,
+    { findRoleCodesWithAnyPermission: async () => [ROLE.SALES, ROLE.ADMIN] } as unknown as AiAssistantRepository,
     { listInventories: () => inventory() } as unknown as InventoryService,
     {
       list: async () => {
@@ -229,6 +236,12 @@ describe('도구 모음 (권한·실패 처리)', () => {
     } as unknown as SalesOrderService,
     {} as LotService,
     {} as BusinessEventService,
+    {} as ProductionService,
+    {} as ProductionResultService,
+    {} as QualityService,
+    {} as RejectedLotService,
+    {} as PurchasingService,
+    {} as ShipmentService,
   );
   const run = (name: string, args: string, permissions: AuthUser['permissions'] = {}) => toolbox.run(user(permissions), { id: 'c1', name, arguments: args });
 
@@ -237,8 +250,22 @@ describe('도구 모음 (권한·실패 처리)', () => {
     salesOrderCalls = 0;
   });
 
-  it('모델에 도구 4개를 알린다', () => {
-    expect(toolbox.definitions().map((d) => d.name)).toEqual(['get_inventory', 'get_sales_orders', 'trace_lot', 'get_business_events']);
+  it('모델에 조회 도구 13개를 알린다 (REQ-AST-004 조회 대상 전부)', () => {
+    expect(toolbox.definitions().map((d) => d.name)).toEqual([
+      'get_inventory',
+      'get_sales_orders',
+      'get_production_plans',
+      'get_production_results',
+      'trace_lot',
+      'get_quality_inspections',
+      'get_rejected_lots',
+      'get_purchase_requisitions',
+      'get_purchase_orders',
+      'get_goods_receipts',
+      'get_shipment_requests',
+      'get_mill_sheets',
+      'get_business_events',
+    ]);
   });
 
   it('권한 밖이면 조회하지 않고 조회할 수 있는 역할을 알려 준다 (REQ-AST-009)', async () => {

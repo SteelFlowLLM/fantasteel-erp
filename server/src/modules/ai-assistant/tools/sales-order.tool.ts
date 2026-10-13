@@ -13,7 +13,7 @@ const SCAN_SIZE = 100;
  */
 export function salesOrderTool(salesOrders: SalesOrderService, today: () => string = seoulToday): AssistantTool {
   return {
-    permission: PERMISSION.SALES_ORDER_CREATE,
+    access: { checkedBy: 'TOOLBOX', permissions: [PERMISSION.SALES_ORDER_CREATE] },
     definition: {
       name: 'get_sales_orders',
       description:

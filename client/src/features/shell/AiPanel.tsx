@@ -1,7 +1,7 @@
 'use client';
 
 // AI 어시스턴트 패널 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
-// 용어 사전과 데이터 조회(재고·수주·LOT 추적·작업 로그)로 답한다. 실행 카드(AST-005)·사례 검색(AST-006)은 다음 단계라 준비 중으로 둔다.
+// 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부)로 답한다. 실행 카드(AST-005)·사례 검색(AST-006)은 다음 단계라 준비 중으로 둔다.
 import type { AiAssistantScreenContext, AiAssistantSource } from '@fantasteel/shared';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -147,7 +147,7 @@ function Welcome({ roleLabel, contextQuestion, disabled, onAsk }: { roleLabel: s
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주 진행·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. 자료에 없는 내용은 확인할 수 없다고 답해요. 생산·검사·구매·출하 조회와 실행 카드는 준비 중이에요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. 자료에 없는 내용은 확인할 수 없다고 답해요. 실행 카드와 과거 사례 검색은 준비 중이에요.
       </p>
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
