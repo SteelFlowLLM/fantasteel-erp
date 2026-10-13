@@ -1,8 +1,10 @@
 // 대시보드 위젯 중 이미 있는 서버 API를 모아 화면에서 묶는 3개(납기 위험·강종별 불합격률·생산량)를 본다.
 import { afterEach, describe, expect, it } from 'vitest';
+import { DASHBOARD_WIDGET_VIEW, dashboardApi } from '@/api/dashboard';
 import { serverDashboardApi, serverDashboardSourceApi } from '@/api/server/dashboard';
 import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { trendWindow } from '@/features/dashboard/lib/widgetMath';
+import { permissionNeedText } from '@/lib/permissions';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const WINDOW = trendWindow('2026-10-07', 30);
@@ -90,5 +92,35 @@ describe('대시보드 서버 묶음 위젯 (api/server/dashboard.ts)', () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/dashboard/widgets/surplus-age' ? ok(data) : undefined));
     expect(await serverDashboardApi.surplusAge()).toEqual(data);
     expect(calls.map((c) => c.path)).toEqual(['/dashboard/widgets/surplus-age']);
+  });
+
+  it('납기 위험: 납기가 지난 품목은 지연으로 표시하고, 납기 → 수주 번호 → 줄 번호 순으로 보인다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, (c) =>
+      c.path === '/dashboard/widgets/order-fulfillment'
+        ? ok({
+            today: '2026-10-07',
+            deliveryRiskDays: 3,
+            salesOrders: [
+              { salesOrderId: 3, salesOrderNo: 'SO-2610-003', customerName: '한빛조선', items: [fulfillmentItem(31, {}), fulfillmentItem(32, { dueDate: '2026-10-05', daysToDue: -2 })] },
+              { salesOrderId: 1, salesOrderNo: 'SO-2610-001', customerName: '대양건설', items: [fulfillmentItem(11, {}), fulfillmentItem(12, {})] },
+            ],
+          })
+        : undefined,
+    );
+    const { items } = await serverDashboardSourceApi.deliveryRisk();
+    expect(items.map((i) => [i.salesOrderItemId, i.lineNo, i.isOverdue])).toEqual([
+      [32, 2, true],
+      [11, 1, false],
+      [12, 2, false],
+      [31, 1, false],
+    ]);
+  });
+
+  it('납기 위험·강종별 불합격률·생산량은 로그인 사원(/auth/me)의 조회 권한을 보고, 없으면 데이터를 읽지 않고 COM-002', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => (c.path === '/auth/me' ? ok({ employeeId: 900, employeeNo: '9999001', employeeName: '서버 사원', departmentId: 1, jobGradeId: 1, roleCode: 'PURCHASE', headDepartmentIds: [], permissions: {} }) : undefined));
+    for (const key of ['DELIVERY_RISK', 'REJECT_RATE', 'PRODUCTION_VOLUME'] as const) {
+      await expect(dashboardApi.widget(key)).rejects.toMatchObject({ code: 'COM-002', detail: permissionNeedText(DASHBOARD_WIDGET_VIEW[key], 'VIEW') });
+    }
+    expect(calls.map((c) => c.path)).toEqual(['/auth/me', '/auth/me', '/auth/me']);
   });
 });

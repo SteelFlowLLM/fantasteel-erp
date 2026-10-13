@@ -69,4 +69,18 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
     expect(await searchApi.search('X'.repeat(31))).toHaveLength(1);
     expect(calls.map((c) => c.path).sort()).toEqual(['/auth/me', '/lots']);
   });
+
+  it('목록은 보이지만 그 화면을 열 권한이 없으면 수주는 작업 로그, 출하요청은 LOT 추적으로 연결한다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.quality, (c: ServerCall) => {
+      if (c.path === '/auth/me') return ok(me({}));
+      if (c.path === '/sales-orders') return ok(page([{ id: 11, salesOrderNo: 'SO-2610-001' }]));
+      if (c.path === '/lots') return ok(page([]));
+      if (c.path === '/shipment-requests') return ok(shipmentRequests);
+      return undefined;
+    });
+    expect((await searchApi.search('2610')).map((h) => [h.kind, h.href])).toEqual([
+      ['SALES_ORDER', '/business-events?salesOrderId=11'],
+      ['SHIPMENT_REQUEST', '/lots/trace?shipmentRequestNo=DR-2610-0001'],
+    ]);
+  });
 });
