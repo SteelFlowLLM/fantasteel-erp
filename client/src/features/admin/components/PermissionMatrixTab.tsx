@@ -129,7 +129,8 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                       {list.map((role) => {
                         const counts = countLevels(levelsOf(role.permissions));
                         return (
-                          <Th key={role.id} align="center" className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
+                          // 머리글 글자에 '사용 N · 조회 M'이 붙어도 펫은 역할 이름으로 설명·열 이름을 잡는다
+                          <Th key={role.id} align="center" data-pet-term={ROLE_LABEL[role.roleCode]} className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
                             <span className="flex flex-col items-center py-1 leading-snug">
                               <b className="text-xs font-semibold text-ink" data-pet-term={ROLE_LABEL[role.roleCode]}>
                                 {ROLE_LABEL[role.roleCode]}

@@ -371,9 +371,10 @@
   const normTerm = (s) => String(s === null || s === undefined ? '' : s).toLowerCase().replace(/[\s▲▼△▽↑↓⇅↕*:：]/g, '');
   // '중량(t)' '매수 (매)'처럼 끝에 붙은 단위·괄호는 떼고도 한 번 더 찾는다
   // '안 읽음 0' '업무방 3'처럼 끝에 붙은 건수도 뗀다
-  // 단계 표시의 진행 숫자('제강 1/1', '히트 편성 · 1히트')도 뗀다
+  // 단계 표시의 진행 숫자('제강 1/1', '히트 편성 · 1히트')와 앞 번호('1 · 기본 정보')도 뗀다
   const bareTerm = (s) =>
     String(s || '')
+      .replace(/^\s*\d+\s*[·.)]\s*/, '')
       .replace(/\s*[(（][^()（）]*[)）]\s*$/, '')
       .replace(/\s*·\s*[\d,]+\s*\S*$/, '')
       .replace(/\s+[\d,]+\s*\/\s*[\d,]+$/, '')
@@ -721,6 +722,8 @@
 .fp-bubble::before,.fp-bubble::after{content:'';position:absolute;width:0;height:0;border-style:solid}
 .fp-bubble[data-side=top]::before{left:calc(var(--fp-tail-x,50%) - 8px);bottom:-11px;border-width:10px 8px 0;border-color:var(--fp-accent) transparent transparent}
 .fp-bubble[data-side=top]::after{left:calc(var(--fp-tail-x,50%) - 5px);bottom:-6px;border-width:7px 5px 0;border-color:var(--fp-surface) transparent transparent}
+.fp-bubble[data-side=bottom]::before{left:calc(var(--fp-tail-x,50%) - 8px);top:-11px;border-width:0 8px 10px;border-color:transparent transparent var(--fp-accent)}
+.fp-bubble[data-side=bottom]::after{left:calc(var(--fp-tail-x,50%) - 5px);top:-6px;border-width:0 5px 7px;border-color:transparent transparent var(--fp-surface)}
 .fp-bubble[data-side=left]::before{right:-11px;top:var(--fp-tail-y,14px);border-width:8px 0 8px 10px;border-color:transparent transparent transparent var(--fp-accent)}
 .fp-bubble[data-side=left]::after{right:-6px;top:calc(var(--fp-tail-y,14px) + 3px);border-width:5px 0 5px 7px;border-color:transparent transparent transparent var(--fp-surface)}
 .fp-bubble[data-side=right]::before{left:-11px;top:var(--fp-tail-y,14px);border-width:8px 10px 8px 0;border-color:transparent var(--fp-accent) transparent transparent}
@@ -2535,12 +2538,51 @@
         S.lastSpeech = now();
       });
     }
+    /**
+     * 설명하는 요소가 펫에서 멀면(펫이 바닥에 있고 요소는 화면 위쪽 등) 말풍선을 펫 대신 그 요소 바로 아래(없으면 위)에 붙인다.
+     * 그래야 무엇을 설명하는지 말풍선과 강조 테두리가 한자리에 보인다
+     */
+    function anchorSpot(bw, bh) {
+      const el = bubble.anchor;
+      if (!el || !el.isConnected) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > H()) return null;
+      const box = petBox();
+      const gapX = Math.max(0, r.left - box.right, box.left - r.right);
+      const gapY = Math.max(0, r.top - box.bottom, box.top - r.bottom);
+      if (Math.hypot(gapX, gapY) < 140) return null;
+      const vw = W();
+      const vh = H();
+      // 큰 카드는 머리(윗부분) 근처에 붙여 카드 가운데를 덮지 않게 한다
+      const refBottom = Math.min(r.bottom, r.top + 72);
+      let y;
+      let side;
+      if (refBottom + 12 + bh <= vh - 8) {
+        y = refBottom + 12;
+        side = 'bottom';
+      } else if (r.top - 12 - bh >= 8) {
+        y = r.top - 12 - bh;
+        side = 'top';
+      } else return null;
+      const ax = clamp((r.left + r.right) / 2, r.left + 16, r.right - 16);
+      const x = clamp(Math.min(ax - 28, r.left + 24), 8, Math.max(8, vw - bw - 8));
+      return { x, y, side, tx: clamp(ax - x, 14, bw - 14) };
+    }
     function positionBubble() {
       if (!bubble.visible) return;
       const vw = W();
       const vh = H();
       const bw = bubble.w;
       const bh = bubble.h;
+      const near = anchorSpot(bw, bh);
+      if (near) {
+        if (bubbleEl.dataset.side !== near.side) bubbleEl.dataset.side = near.side;
+        bubbleEl.style.left = `${Math.round(near.x)}px`;
+        bubbleEl.style.top = `${Math.round(near.y)}px`;
+        bubbleEl.style.setProperty('--fp-tail-x', `${Math.round(near.tx)}px`);
+        bubbleEl.style.transformOrigin = `${Math.round(near.tx)}px ${near.side === 'bottom' ? '0' : '100%'}`;
+        return;
+      }
       const box = petBox();
       const cx = (box.left + box.right) / 2;
       let side = 'top';
@@ -2717,7 +2759,10 @@
       S.spot = flash(el, 0, true);
     }
     function clearSpotlight() {
-      if (S.spot) S.spot.until = 0;
+      if (S.spot) {
+        S.spot.until = 0;
+        if (S.spot.f) S.spot.f.remove();
+      }
       S.spot = null;
     }
 
@@ -3230,8 +3275,9 @@
       else if (el.tagName === 'TR' && !el.querySelector('[data-pet-field]')) fields = tableFields(el, title);
       if (!fields || !fields.length) fields = parts ? fields || [] : boxFields(el, title, name);
       // 상태 한마디: 배지·태그 글자와 똑같은 상태 이름 → 없으면 항목 글자에 들어 있는 가장 긴 상태 이름('승인'보다 '승인 대기')
-      let tip = '';
-      if (isObj(cfg.status)) {
+      // 요소가 직접 한마디를 주면(data-pet-item-tip) 그것을 쓴다. 같은 종류라도 놓인 곳(대시보드 막대 등)마다 할 말이 다르다
+      let tip = (el.getAttribute('data-pet-item-tip') || '').trim();
+      if (!tip && isObj(cfg.status)) {
         const keys = Object.keys(cfg.status).filter((k) => k && typeof cfg.status[k] === 'string');
         let best = '';
         const badges = el.querySelectorAll('[data-pet-term],[data-status],[class*="badge"],[class*="Badge"],[class*="tag"],[class*="Tag"]');
@@ -3720,8 +3766,36 @@
       const t = key ? guide.targets[key] : null;
       return isObj(t) && t.title ? t.title : null;
     }
+    /**
+     * 화면 안내 단계: 설명 파일의 단계 가운데 이 화면에 있는 것 + 설명 파일에 없지만 이 화면에 보이는 카드·위젯(역할마다 다른 대시보드 위젯,
+     * 선택해야 나타나는 상세 카드 등)을 모두 넣고, 화면에 보이는 순서(위→아래, 왼쪽→오른쪽)로 돈다
+     */
+    function screenSteps(listed) {
+      const seen = new Set();
+      const out = [];
+      const add = (target, text) => {
+        if (!target || seen.has(target)) return;
+        const el = findTarget(target);
+        if (!el || climbColumnOf(el)) return;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return;
+        seen.add(target);
+        out.push({ target, text, top: r.top + (el.closest('main') ? el.closest('main').scrollTop : 0), left: r.left });
+      };
+      listed.forEach((st) => add(st.target, st.text));
+      for (const el of doc.querySelectorAll('[data-pet-target^="card:"],[data-pet-target^="widget:"]')) {
+        if (root.contains(el) || el.closest('[role="dialog"],[aria-modal="true"],[data-pet-ignore]')) continue;
+        const key = el.getAttribute('data-pet-target');
+        if (seen.has(key)) continue;
+        const info = targetInfo(key, el);
+        if (!info || !info.short) continue;
+        add(key, info.short);
+      }
+      out.sort((a, b) => (Math.abs(a.top - b.top) > 24 ? a.top - b.top : a.left - b.left));
+      return out.map(({ target, text }) => ({ target, text }));
+    }
     async function runTour(spec) {
-      const steps = spec.steps.filter((st) => findTarget(st.target));
+      const steps = spec.kind === 'screen' ? screenSteps(spec.steps) : spec.steps.filter((st) => findTarget(st.target));
       const items = spec.intro.map((text) => ({ text, target: null })).concat(steps);
       if (S.mode === 'hidden') show(true);
       closePanels();
@@ -4123,17 +4197,32 @@
       if (!core || core.length < 2) return null;
       let best = null;
       for (const el of doc.querySelectorAll(PAGE_SEL)) {
-        if (root.contains(el) || climbColumnOf(el) || el.closest('[data-pet-ignore],[aria-hidden="true"]')) continue;
+        if (root.contains(el) || climbColumnOf(el) || el.closest('[data-pet-ignore]')) continue;
+        // 보조기기용으로 숨긴 영역(준비 중 예시 등)은 화면에 보이는 펫 카드만 찾는다
+        if (el.closest('[aria-hidden="true"]') && !el.hasAttribute('data-pet-target')) continue;
         const r = el.getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > H() || r.right < 0 || r.left > W()) continue;
-        const raw = el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '';
-        const name = pageNorm(raw);
-        if (!name || name.length > 40) continue;
+        // 이름 후보: 화면에 보이는 글자(버튼·제목) + 펫 설명 파일의 카드 이름(카드 글자는 길어서 화면 글자로는 못 찾는다)
+        const raws = [];
+        const key = el.getAttribute('data-pet-target');
+        const tt = key ? targetTitle(key) : null;
+        if (tt) raws.push(tt);
+        raws.push(el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '');
         let sc = 0;
-        if (name === core) sc = 100;
-        else if (name.indexOf(core) >= 0) sc = 60 - Math.min(30, name.length - core.length);
-        // 화면 이름이 질문의 일부일 때는 대부분을 덮어야 한다('정보'가 '정보수정'에 걸리지 않게)
-        else if (core.indexOf(name) >= 0 && name.length >= Math.max(2, core.length * 0.7)) sc = 40 + name.length;
+        let raw = '';
+        for (const cand of raws) {
+          const name = pageNorm(cand);
+          if (!name || name.length > 40) continue;
+          let c = 0;
+          if (name === core) c = 100;
+          else if (name.indexOf(core) >= 0) c = 60 - Math.min(30, name.length - core.length);
+          // 화면 이름이 질문의 일부일 때는 대부분을 덮어야 한다('정보'가 '정보수정'에 걸리지 않게)
+          else if (core.indexOf(name) >= 0 && name.length >= Math.max(2, core.length * 0.7)) c = 40 + name.length;
+          if (c > sc) {
+            sc = c;
+            raw = cand;
+          }
+        }
         if (!sc) continue;
         if (el.matches('button,a[href],[role="button"],[role="tab"],[role="menuitem"]')) sc += 15;
         if (el.closest('main')) sc += 5;
@@ -6009,6 +6098,19 @@
         // read:<레코드 번호> — 그 항목을 읽은 결과(말풍선 없이)
         const el = findItemByCode(name.slice(5));
         return el ? readItem(el) : null;
+      }
+      if (name === 'readall') {
+        // readall — 화면에 보이는 항목을 종류마다 앞의 3개씩 읽은 결과 (점검용)
+        const per = {};
+        const out = [];
+        for (const el of visibleItems()) {
+          const kind = el.getAttribute('data-pet-item') || '';
+          per[kind] = (per[kind] || 0) + 1;
+          if (per[kind] > 3) continue;
+          const r = readItem(el);
+          out.push({ kind, title: r.title, head: r.head, fields: r.fields, tip: r.tip });
+        }
+        return out;
       }
       if (typeof name === 'string' && name.startsWith('spot:')) {
         // spot:<target 키> — 공중의 요소를 가리키러 설 자리 (면 키 · x · 비용)
