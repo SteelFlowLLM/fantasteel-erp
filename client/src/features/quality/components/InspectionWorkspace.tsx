@@ -128,15 +128,15 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
               active={process}
               onChange={setProcess}
             />
-            {/* 네 칩이 목록 칸(320px) 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 */}
-            <div className="flex flex-nowrap gap-1" role="group" aria-label="판정 결과">
+            {/* 건수가 세 자리면 네 칩이 목록 칸(320px)을 넘어 마지막 칩이 잘린다: 같은 폭 4칸에 가운데 정렬로 넣는다 */}
+            <div className="grid grid-cols-4 gap-1" role="group" aria-label="판정 결과">
               {RESULT_FILTERS.map((r) =>
                 r === 'ALL' ? (
-                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="px-2" data-pet-term="판정 결과 전체">
+                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="min-w-0 justify-center gap-1 px-1!" data-pet-term="판정 결과 전체">
                     전체 <b>{byProcess.length}</b>
                   </Chip>
                 ) : (
-                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="px-2" data-pet-term={INSPECTION_RESULT_LABEL[r]}>
+                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="min-w-0 justify-center gap-1 px-1!" data-pet-term={INSPECTION_RESULT_LABEL[r]}>
                     {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
                   </Chip>
                 ),
