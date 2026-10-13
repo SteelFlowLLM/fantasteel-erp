@@ -38,7 +38,7 @@ npm run test -w @fantasteel/client
 npm run build -w @fantasteel/client
 ```
 
-테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다(`vitest.config.ts`가 데이터 출처를 mock으로 둡니다). 시연 시나리오(업무 프로세스 14.1·14.2)와 14.3 필수 검증은 `client/src/api/scenario/`의 테스트가 화면 api 함수로 끝까지 돌립니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
+테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다(`vitest.config.ts`가 데이터 출처를 mock으로 둡니다). 시연 시나리오(업무 프로세스 14.1)의 핵심 흐름은 서버 DB 테스트(`server/src/modules/sales-order/order-flow.spec.ts`)가 수주부터 출고·밀시트·추적·Message → ERP까지 잇고, 단계별 규칙(14.2·14.3)은 각 서버 모듈 테스트가 확인합니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
 
 ### 화면 폴더 구조 (`client/src/`)
 
