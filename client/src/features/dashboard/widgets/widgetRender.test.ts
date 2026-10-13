@@ -137,6 +137,10 @@ describe('위젯 카드', () => {
     expect(html).not.toContain('text-[34px]');
     expect(html).not.toContain('bg-run-bg shadow');
     expect(html).not.toContain('opacity-60');
+    // 그래도 내 업무 칸은 테두리·바탕을 옅게 물들여 다른 단계와 구분한다 (그 칸 하나만)
+    const inspectionBox = html.split('</a>').find((part) => part.includes('판정 대기')) ?? '';
+    expect(inspectionBox).toContain('border-run/40 bg-run-bg/50');
+    expect(html.match(/bg-run-bg\/50/g)?.length).toBe(1);
   });
 
   it('강종별 불합격률: 판정된 검사가 없는 강종은 막대 없이 한 줄에 이름만, 불합격 0건은 "불합격 없음"', async () => {
