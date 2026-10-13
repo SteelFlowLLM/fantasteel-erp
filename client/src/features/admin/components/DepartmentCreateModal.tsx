@@ -3,7 +3,7 @@
 // 부서 만들기 창. 부서장은 소속 사원이 생긴 뒤 부서 탭에서 지정한다 (부서장 = 그 부서 사원).
 import { useState } from 'react';
 import { departmentAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { DepartmentView } from '@/api/directory';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';

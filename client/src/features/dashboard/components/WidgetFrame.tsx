@@ -2,7 +2,7 @@
 // 본문은 카드 안에서 스크롤한다(SPEC 4장 3번). 편집 중에는 본문 링크가 눌리지 않는다.
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import type { Permission } from '@/codes';
 import { Button } from '@/components/Button';

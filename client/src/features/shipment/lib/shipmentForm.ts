@@ -1,4 +1,4 @@
-// 출하요청 화면 계산 (순수 함수, Vitest). 규칙의 최종 판단은 core 서비스가 다시 한다.
+// 출하요청 화면 계산 (순수 함수, Vitest). 규칙의 최종 판단은 서버가 다시 한다.
 import { ERROR_MESSAGE, PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { calcWeightTon, sumTon } from '@/lib/weight';
 

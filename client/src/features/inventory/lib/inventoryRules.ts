@@ -1,5 +1,4 @@
 // 재고 화면의 배정 여부·검사 결과 규칙 (순수 함수).
-// - 여재(TRM-048) 고르기는 core 재고 조회가 하도록 `@/lib/surplus`로 옮겼다(재고 화면·대시보드가 같은 숫자를 쓴다).
 // - 배정 여부: REQ-INV-006 ALLOCATION_STATUS (CONFIRMED / CONSUMED = 출고 확정·열연 투입 / RELEASED).
 // - 검사 결과: 06 LOT_STATUS "품질은 INSPECTION_RESULT, 배정 여부는 allocation으로 따로 본다".
 import type { AllocationPurpose, AllocationStatus } from '@/codes';

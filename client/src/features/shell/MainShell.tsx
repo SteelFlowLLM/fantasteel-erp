@@ -1,11 +1,11 @@
 'use client';
 
-// (main) 화면의 입구: 이 탭에서 고른 계정이 없으면 계정 선택 화면으로 보내고, 있으면 사원 정보를 읽어 셸을 그린다.
-// 서버 모드에서 세션이 끊기면(만료·로그아웃·다른 탭의 다른 계정 로그인) 안내하고 로그인 화면으로 보낸다.
+// (main) 화면의 입구: 이 탭에 로그인한 사원이 없으면 로그인 화면으로 보내고, 있으면 사원 정보를 읽어 셸을 그린다.
+// 세션이 끊기면(만료·로그아웃·다른 탭의 다른 계정 로그인) 안내하고 로그인 화면으로 보낸다.
 import { useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
-import { ApiError } from '@/api/client';
-import { isServerDataSource, onServerSessionLost } from '@/api/http';
+import { ApiError } from '@/api/errors';
+import { onServerSessionLost } from '@/api/http';
 import { Button } from '@/components/Button';
 import { FullScreenState } from '@/components/StateView';
 import { AppFrame } from '@/features/shell/AppFrame';
@@ -36,7 +36,6 @@ export function MainShell({ children }: { children: ReactNode }) {
   }, [sessionRejected, signOut]);
 
   useEffect(() => {
-    if (!isServerDataSource()) return;
     return onServerSessionLost((message) => {
       // 여러 요청이 함께 실패해도 한 번만 안내한다
       if (useSessionStore.getState().employeeId === null) return;

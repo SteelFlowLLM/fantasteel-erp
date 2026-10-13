@@ -4,7 +4,7 @@ import { inspectionOutcomeNotes } from './inspectionOutcomeNotes';
 const none = { autoReservedQty: 0, surplusQty: 0, surplusLotNos: [], excludedLotQty: 0, releasedAllocationCount: 0, releasedReservationQty: 0 };
 
 describe('검사 저장 뒤 안내 문구', () => {
-  it('합격: 자동 예약 매수와 여재 매수를 알린다. 서버 모드처럼 여재 LOT 번호가 없으면 매수만', () => {
+  it('합격: 자동 예약 매수와 여재 매수를 알린다. 여재 LOT 번호가 없으면(서버) 매수만', () => {
     const notes = inspectionOutcomeNotes({ ...none, inspectionResult: 'PASS', autoReservedQty: 2, surplusQty: 1 }, 'HEAT', false);
     expect(notes).toEqual([
       '원래 수주 품목에 2매를 자동 예약했어요',
@@ -13,7 +13,7 @@ describe('검사 저장 뒤 안내 문구', () => {
     ]);
   });
 
-  it('합격: 가짜 DB처럼 여재 LOT 번호를 알면 괄호로 붙인다', () => {
+  it('합격: 여재 LOT 번호를 알면 괄호로 붙인다', () => {
     const notes = inspectionOutcomeNotes({ ...none, inspectionResult: 'PASS', surplusQty: 2, surplusLotNos: ['HT-A-01', 'HT-A-02'] }, 'SLAB', false);
     expect(notes).toEqual(['수주에 필요한 매수를 넘는 2매는 여재가 됐어요 (HT-A-01, HT-A-02)']);
   });

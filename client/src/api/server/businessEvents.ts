@@ -45,7 +45,7 @@ const numberField = (e: ServerEvent, key: string): number | null => {
   return typeof value === 'number' ? value : null;
 };
 
-/** 대상 테이블별로 기록 데이터에서 찾을 번호 (가짜 DB의 target_no와 같은 번호) */
+/** 대상 테이블별로 기록 데이터에서 찾을 번호 */
 const TARGET_NO_FIELDS: Partial<Record<string, string[]>> = {
   sales_order: ['salesOrderNo'],
   production_plan: ['productionPlanNo'],
@@ -70,7 +70,7 @@ function targetNoOf(e: ServerEvent): string | null {
   return null;
 }
 
-/** 번호가 없는 대상의 화면 이름 (가짜 DB eventTargetTextOf와 같은 규칙: 초안은 "초안 #id", 예약은 수주 번호) */
+/** 번호가 없는 대상의 화면 이름 (초안은 "초안 #id", 예약은 수주 번호) */
 function targetTextOf(e: ServerEvent, targetNo: string | null): string {
   if (targetNo) return targetNo;
   if (e.targetType === 'action_draft') return `초안 #${e.targetId}`;

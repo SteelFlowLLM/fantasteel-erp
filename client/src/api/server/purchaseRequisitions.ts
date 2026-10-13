@@ -1,4 +1,4 @@
-// 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 구매요청·사원·부서·원료 id는 서버 id를 그대로 쓴다(로그인 사원도 서버 id, 원료 선택 목록도 서버, api/server/lookups.ts).
 // 서버에 없어 비워 두는 것:
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.

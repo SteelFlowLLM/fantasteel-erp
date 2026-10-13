@@ -1,5 +1,5 @@
-// 기준정보 화면 ↔ 서버 API (server/src/modules/master-data, API-165~188). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 강종·품목·야드 id는 서버 id를 그대로 쓴다. ERD·API에 없는 값(사용 여부·참조 문구·수정 시각)은 비워 두고 화면이 서버 모드에서 숨긴다.
+// 기준정보 화면 ↔ 서버 API (server/src/modules/master-data, API-165~188). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
+// 강종·품목·야드 id는 서버 id를 그대로 쓴다. ERD·API에 없는 값(사용 여부·참조 문구·수정 시각)은 비워 두고 화면이 숨긴다.
 import type {
   CustomerView,
   InspectionStandardListItem,

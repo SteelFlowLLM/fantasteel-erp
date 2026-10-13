@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
 import { departmentAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { DepartmentView, EmployeeView } from '@/api/directory';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';

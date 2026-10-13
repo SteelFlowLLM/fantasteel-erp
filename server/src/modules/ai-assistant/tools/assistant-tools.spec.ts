@@ -60,7 +60,7 @@ describe('재고 도구 (get_inventory)', () => {
   it('category로 한 갈래만, 여재는 여재 매수가 있는 규격만', async () => {
     const output = await tool.run({ category: 'SURPLUS' }, SALES_USER);
     expect(Object.keys(output.data as object)).toEqual(['여재', '여재 생략 줄 수']);
-    expect((output.data as { 여재: unknown[] }).여재).toEqual([{ 규격: 'S-SM355A-250', 품목: 'SM355A 슬래브 250', 강종: 'SM355A', '여재 매수': 2, '여재 LOT': ['SBOF1-260929-015-01 (생산 2026-09-29)'] }]);
+    expect((output.data as { 여재: unknown[] }).여재).toEqual([{ 규격: 'S-SM355A-250', 품목: 'SM355A 슬래브 250', 강종: 'SM355A', '여재 매수': 2, '여재 LOT': ['SBOF1-260929-015-01 (생산 2026-09-29)'], '생략한 여재 LOT 수': 0 }]);
   });
 
   it('없는 category는 인자 오류', async () => {

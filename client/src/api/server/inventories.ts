@@ -94,7 +94,7 @@ function detailReader() {
   };
 }
 
-/** 생산완료일(원료는 입고일) 최근 순 → LOT 번호 (가짜 DB lotList와 같은 순서) */
+/** 생산완료일(원료는 입고일) 최근 순 → LOT 번호 */
 const byProducedDesc = (a: LotListView, b: LotListView) => b.producedDate.localeCompare(a.producedDate) || a.lotNo.localeCompare(b.lotNo);
 
 async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
@@ -142,7 +142,7 @@ async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
   return rows.sort(byProducedDesc);
 }
 
-/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계 (가짜 DB와 같은 기준). 권한이 없으면(구매·관리자 외) 0 */
+/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
 async function scheduledReceiptTonByItem(): Promise<Map<number, string[]>> {
   const purchaseOrders = await orEmpty(() => allPages<PurchaseOrderView>('/purchase-orders'), []);
   const byItem = new Map<number, string[]>();

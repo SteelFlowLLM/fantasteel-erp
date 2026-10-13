@@ -9,7 +9,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { MrpPeriod, MrpRequirementsView, MrpRequisitionLineView } from '@/api/mrp';
 import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';

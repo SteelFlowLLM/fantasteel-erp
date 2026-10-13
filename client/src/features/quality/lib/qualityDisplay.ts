@@ -1,5 +1,5 @@
 // 검사 입력·불합격 관리 화면의 순수 계산: 기준 문구, 입력 중 미리보기, 게이지 위치, '기준 안 값으로 채우기', 수정 전후 비교.
-// 판정 자체는 2단계 판정 함수(lib/inspectionJudgment)를 그대로 쓴다. 저장할 때의 판정은 가짜 서버(registerInspection)가 한다 (REQ-QC-003).
+// 판정 자체는 2단계 판정 함수(lib/inspectionJudgment)를 그대로 쓴다. 저장할 때의 판정은 서버가 한다 (REQ-QC-003).
 import type { LotType, ProcessType } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { decCmp, decSub } from '@/lib/decimal';

@@ -4,7 +4,7 @@
 // 성분 규격(C·Si·Mn·P·S …)은 여기서 고치지 않는다. 제강 검사 기준의 항목이 곧 성분 규격이다(TRM-020) → 품질의 검사 기준으로 연결한다.
 import Link from 'next/link';
 import { useState } from 'react';
-import { isMasterServerMode, masterDataApi, type MasterSteelGradeView } from '@/api/masterData';
+import { masterDataApi } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -14,7 +14,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
-import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot } from '@/features/masterData/components/MasterParts';
+import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, TableFoot } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -23,14 +23,14 @@ const buildSteelmakingHref = (steelGradeId: number) => `/quality/standards?proce
 
 export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
   const grades = useMasterSteelGrades();
-  const [editing, setEditing] = useState<MasterSteelGradeView | 'new' | null>(null);
+  const [adding, setAdding] = useState(false);
   return (
     <Card petKey="card:masterData.grades">
       <CardHead
         title="강종"
         meta={grades.data ? `${grades.data.length}종` : undefined}
         actions={
-          <Button size="sm" variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : MASTER_LOCK_TEXT} onClick={() => setEditing('new')}>
+          <Button size="sm" variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : MASTER_LOCK_TEXT} onClick={() => setAdding(true)}>
             강종 추가
           </Button>
         }
@@ -47,7 +47,6 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                     <Th>적용 규격</Th>
                     <Th align="right">제품 규격</Th>
                     <Th>성분 규격 (제강 검사 기준)</Th>
-                    <Th aria-label="수정·삭제" />
                   </tr>
                 </thead>
                 <tbody>
@@ -72,13 +71,6 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                           </Link>
                         )}
                       </Td>
-                      <Td align="right">
-                        <RowActions
-                          canEdit={canEdit}
-                          onEdit={isMasterServerMode() ? undefined : () => setEditing(g)}
-                          remove={{ what: `강종 ${g.steelGradeCode}`, run: () => masterDataApi.deleteSteelGrade(g.id), success: '강종을 삭제했어요', blockedReason: g.referenceText }}
-                        />
-                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -92,35 +84,29 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
           </>
         )}
       </QueryBoundary>
-      {editing ? <SteelGradeModal grade={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {adding ? <SteelGradeModal onClose={() => setAdding(false)} /> : null}
     </Card>
   );
 }
 
-function SteelGradeModal({ grade, onClose }: { grade: MasterSteelGradeView | null; onClose: () => void }) {
+/** 강종 추가 (강종 수정 API는 없다, master-data.md 8-1) */
+function SteelGradeModal({ onClose }: { onClose: () => void }) {
   const fieldErrors = useMasterDataFieldErrors();
-  const [code, setCode] = useState(grade?.steelGradeCode ?? '');
-  const [name, setName] = useState(grade?.steelGradeName ?? '');
-  const [standardNo, setStandardNo] = useState(grade?.standardNo ?? '');
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
-  const create = useAction(masterDataApi.createSteelGrade, { ...options, success: '강종을 추가했어요' });
-  const update = useAction(masterDataApi.updateSteelGrade, { ...options, success: '강종을 저장했어요' });
-
-  const submit = () => {
-    if (grade) update.mutate({ id: grade.id, steelGradeName: name, standardNo, expectedUpdatedAt: grade.updatedAt });
-    else create.mutate({ steelGradeCode: code, steelGradeName: name, standardNo });
-  };
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [standardNo, setStandardNo] = useState('');
+  const create = useAction(masterDataApi.createSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 추가했어요' });
+  const submit = () => create.mutate({ steelGradeCode: code, steelGradeName: name, standardNo });
   return (
     <Modal
-      title={grade ? `강종 수정 · ${grade.steelGradeCode}` : '강종 추가'}
+      title="강종 추가"
       onClose={onClose}
       width={460}
-      footer={<ModalFooter pending={create.isPending || update.isPending} submitLabel={grade ? '저장' : '추가'} onCancel={onClose} onSubmit={submit} />}
+      footer={<ModalFooter pending={create.isPending} submitLabel="추가" onCancel={onClose} onSubmit={submit} />}
     >
-      <Field label="강종 코드" required hint={grade ? '강종 코드는 바꿀 수 없어요' : '영문 대문자·숫자·하이픈 (예: SM355A)'} error={fieldErrors.errorOf('steelGradeCode')}>
+      <Field label="강종 코드" required hint="영문 대문자·숫자·하이픈 (예: SM355A)" error={fieldErrors.errorOf('steelGradeCode')}>
         <Input
           value={code}
-          readOnly={grade !== null}
           maxLength={20}
           placeholder="SM355A"
           invalid={fieldErrors.errorOf('steelGradeCode') !== null}

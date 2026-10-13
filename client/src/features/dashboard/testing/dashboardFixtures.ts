@@ -1,5 +1,5 @@
 // 대시보드 위젯 그리기 테스트의 고정 데이터: 위젯 12개의 화면 모델(준비 중 P2 위젯 2개는 데이터가 없다).
-// 가짜 DB 시드를 읽지 않는다. 기준일 2026-10-13. 목록은 몇 줄만, 추이 위젯은 최근 30일 중 실적이 있는 날만 둔다.
+// 기준일 2026-10-13. 목록은 몇 줄만, 추이 위젯은 최근 30일 중 실적이 있는 날만 둔다.
 import type { DashboardWidgetDataMap } from '@/api/dashboard';
 
 export const WIDGET_DATA: DashboardWidgetDataMap = {

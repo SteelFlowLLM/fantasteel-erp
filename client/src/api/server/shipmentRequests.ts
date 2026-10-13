@@ -225,7 +225,7 @@ async function shippableItems(customerId: number): Promise<(ShippableItem & { st
 const qtyForServer = (qty: string): unknown => (/^\d+$/.test(qty.trim()) ? Number(qty.trim()) : qty);
 
 /**
- * 출하요청 등록. 가짜 DB처럼 등록하면서 품목마다 FIFO 추천을 작업 로그로 남긴다(POST allocations/recommend).
+ * 출하요청 등록. 등록하면서 품목마다 FIFO 추천을 작업 로그로 남긴다(POST allocations/recommend).
  * 추천할 합격 LOT이 없으면(INV-001) 추천 로그만 건너뛴다.
  */
 async function create(form: CreateShipmentRequestForm): Promise<{ id: number; shipmentRequestNo: string; recommendation: never[] }> {

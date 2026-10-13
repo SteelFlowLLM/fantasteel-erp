@@ -63,7 +63,7 @@
 | `get_sales_orders` | `SalesOrderService.list`·`fulfillment` (GET sales-orders, /:id/fulfillment) | 수주 등록 VIEW | `salesOrderNo`, `salesOrderId`(화면 주소), `dueRiskOnly`. 한 수주로 좁혀지면 품목별 충족 현황. 건수는 거른 뒤의 수만, 납기까지 남은 일수는 서버가 서울 날짜로 계산해 넣는다 |
 | `trace_lot` | `LotService.list`·`trace` (GET lots, /:id/trace) | 없음(전 역할) | `lotNo`(번호·앞부분), `direction`. 앞부분이 여러 LOT에 맞으면 후보만 |
 | `get_production_plans` | `ProductionService.listPlans` (GET production-plans) | 생산계획 확정 VIEW | `status`, `keyword`(계획·수주번호·규격 일부). 히트 수, 제강·연주 마친 히트 수, 합격·남은 목표 매수 |
-| `get_production_results` | `ProductionResultService.listResults` (GET production-results) | 작업 실적 확정 VIEW | `productionPlanNo`(→ id), `processType`. 최신 15건, 산출 LOT 5개까지 |
+| `get_production_results` | `ProductionResultService.listResults` (GET production-results) | 작업 실적 확정 VIEW | `productionPlanNo`(→ id), `processType`. 최신 15건, 산출 LOT 5개까지(생략한 수를 함께 줌). 계획 번호로 거르면 제선 실적이 빠진다는 안내를 붙임(제선은 `production_plan_id` null) |
 | `get_quality_inspections` | `QualityService.listQualityInspections` (GET quality-inspections) | 검사 등록 VIEW | `status`(pending·done), `result`(PASS·FAIL), `lotNo`. 상위 히트 판정 포함 |
 | `get_rejected_lots` | `RejectedLotService.listRejectedLots` (GET lots/rejected) | SERVICE: 불합격 처리 또는 검사 등록 VIEW | 없음. 불합격 상태·사유, 기준을 벗어난 항목만 |
 | `get_purchase_requisitions` | `PurchasingService.listRequisitions` (GET purchase-requisitions) | SERVICE: 구매요청 등록 VIEW 또는 부서장 | `status`, `keyword`(번호·원료) |

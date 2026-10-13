@@ -7,7 +7,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION } from '@/codes';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { GoodsReceiptResult, GoodsReceiptView, ReceiptLine } from '@/api/goodsReceipts';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';

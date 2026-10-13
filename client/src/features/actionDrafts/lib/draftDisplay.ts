@@ -59,7 +59,7 @@ export interface DraftExecutionFailure {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** 확정 뒤 구매요청을 만들지 못했을 때 core가 남긴 실행 결과 (attempts·errorCode·message). 성공했거나 없으면 null. */
+/** 확정 뒤 구매요청을 만들지 못했을 때 서버가 남긴 실행 결과 (attempts·errorCode·message). 성공했거나 없으면 null. */
 export function getExecutionFailure(executionResult: unknown): DraftExecutionFailure | null {
   if (!isRecord(executionResult) || typeof executionResult.message !== 'string' || executionResult.targetId) return null;
   return {

@@ -1,8 +1,8 @@
-// 제품 재고 (REQ-DSH-001): 슬래브·코일 합계 막대(예약·가용) + 규격별 재고·합격·예약·가용 (재고 화면과 같은 값, 4.2).
+// 제품 재고 (REQ-DSH-001): 슬래브·코일 합계 막대(재고 중 가용) + 규격별 재고·합격·예약·가용 (재고 화면과 같은 값, 4.2).
 import { PRODUCT_QTY_UNIT, ITEM_TYPE_LABEL } from '@/codes';
 import type { ProductStockData } from '@/api/dashboard';
 import { Table, Td, Th } from '@/components/Table';
-import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { cn } from '@/lib/cn';
 import { fmtInt, fmtTon } from '@/lib/format';
@@ -12,7 +12,7 @@ const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, 
 function StockBody({ data }: { data: ProductStockData }) {
   return (
     <div className="flex flex-col gap-2.5 py-3">
-      <div className="flex flex-col gap-2 px-4">
+      <div className="flex flex-col gap-2 px-4 pb-3.5">
         {data.totals.map((total) => (
           <div
             key={total.itemType}
@@ -23,38 +23,39 @@ function StockBody({ data }: { data: ProductStockData }) {
           >
             <span className="min-w-11 flex-none whitespace-nowrap text-xs font-medium text-ink-2">{ITEM_TYPE_LABEL[total.itemType]}</span>
             <div className="min-w-0 flex-1">
-              {/* 막대 하나 = 그 제품의 재고 전체. 슬래브(매)와 코일(개)은 단위가 달라 한 눈금으로 길이를 견주지 않는다.
-                  너비는 실행 중에 정해지는 값이라 style로 준다. 예약·가용 뒤 남는 몫(판정 대기·불합격·배정)은 바탕색으로 보인다: 품질이 볼 몫이라 회색 대신 노랑 */}
-              <div className={cn('flex h-3.5 overflow-hidden rounded-xs', total.onHandQty > 0 ? 'bg-wait/35' : 'bg-surface-3')}>
-                <span className="bg-chart-1" style={{ width: pct(total.reservedQty, total.onHandQty) }} />
-                <span className="bg-chart-3" style={{ width: pct(total.availableQty, total.onHandQty) }} />
+              {/* 막대 = 옆 숫자 "가용 / 재고": 막대 전체가 그 제품의 재고, 채운 몫이 가용이다.
+                  슬래브(매)와 코일(개)은 단위가 달라 한 눈금으로 길이를 견주지 않는다. 너비는 실행 중에 정해지는 값이라 style로 준다 */}
+              <div className={cn('flex h-3.5 overflow-hidden rounded-xs', total.onHandQty > 0 ? 'bg-chart-4' : 'bg-surface-3')}>
+                <span className="bg-chart-1" style={{ width: pct(total.availableQty, total.onHandQty) }} />
               </div>
             </div>
-            {/* 막대에 보이는 몫(예약·가용)을 숫자로도 같이 보인다: 가용이 0인데 막대가 차 있으면 예약 몫이다 */}
             <span className="flex-none text-xs tabular-nums">
-              예약 <b data-pet-field="예약">{fmtInt(total.reservedQty)}</b> · 가용 <b data-pet-field="가용">{fmtInt(total.availableQty)}</b> / 재고{' '}
-              <b data-pet-field="재고">{fmtInt(total.onHandQty)}</b>
+              가용 <b data-pet-field="가용">{fmtInt(total.availableQty)}</b> / 재고 <b data-pet-field="재고">{fmtInt(total.onHandQty)}</b>
               {PRODUCT_QTY_UNIT[total.itemType]}
             </span>
           </div>
         ))}
-        <div className="flex flex-wrap gap-3">
-          <LegendItem colorClass="bg-chart-1" label="예약" />
-          <LegendItem colorClass="bg-chart-3" label="가용" />
-          <LegendItem colorClass="bg-wait/35" label="판정 대기·불합격·배정" />
-        </div>
       </div>
       {data.items.length === 0 ? (
         <WidgetEmpty>재고가 있는 규격이 없어요</WidgetEmpty>
       ) : (
-        <Table compact className="border-t border-line [&_td]:px-2 [&_th]:px-2">
+        // 칸 너비를 고정(규격 40% · 숫자 네 칸 15%씩)하고 모든 칸을 가운데 정렬한다: 숫자 칸이 오른쪽 끝에 몰려 카드 가장자리에 붙지 않게.
+        // 좌우 여백을 칸마다 같게(8px) 둬야 글자가 칸 가운데에 정확히 온다
+        <Table compact className="table-fixed border-t border-line [&_td]:px-2 [&_th]:px-2">
+          <colgroup>
+            <col className="w-[40%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+          </colgroup>
           <thead>
             <tr>
-              <Th>규격</Th>
-              <Th align="right">재고</Th>
-              <Th align="right">합격</Th>
-              <Th align="right">예약</Th>
-              <Th align="right" title="가용 = 합격 − 예약 − 열연 배정">
+              <Th align="center">규격</Th>
+              <Th align="center">재고</Th>
+              <Th align="center">합격</Th>
+              <Th align="center">예약</Th>
+              <Th align="center" title="가용 = 합격 − 예약 − 열연 배정">
                 가용
               </Th>
             </tr>
@@ -62,16 +63,16 @@ function StockBody({ data }: { data: ProductStockData }) {
           <tbody>
             {data.items.map((item) => (
               <tr key={item.itemId} data-pet-item="inventory" data-pet-item-title={item.itemCode}>
-                <Td className="max-w-56 truncate font-mono text-xs" title={item.itemCode}>
+                <Td align="center" className="truncate font-mono text-xs" title={item.itemCode}>
                   {item.itemCode}
                 </Td>
-                <Td align="right" title={fmtTon(item.onHandTon)}>
+                <Td align="center" title={fmtTon(item.onHandTon)}>
                   {fmtInt(item.onHandQty)}
                   <small className="ml-0.5 text-ink-3">{PRODUCT_QTY_UNIT[item.itemType]}</small>
                 </Td>
-                <Td align="right">{fmtInt(item.passedQty)}</Td>
-                <Td align="right">{fmtInt(item.reservedQty)}</Td>
-                <Td align="right" title={fmtTon(item.availableTon)}>
+                <Td align="center">{fmtInt(item.passedQty)}</Td>
+                <Td align="center">{fmtInt(item.reservedQty)}</Td>
+                <Td align="center" title={fmtTon(item.availableTon)}>
                   <b className={item.availableQty > 0 ? 'font-semibold' : 'font-normal text-ink-3'}>{fmtInt(item.availableQty)}</b>
                 </Td>
               </tr>

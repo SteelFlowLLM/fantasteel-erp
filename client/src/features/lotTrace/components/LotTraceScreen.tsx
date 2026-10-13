@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { LOT_RELATION_EVIDENCE_LABEL, LOT_TYPE_LABEL, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { LotTraceInput, LotTraceView } from '@/api/lotTrace';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardFoot, CardHead } from '@/components/Card';
