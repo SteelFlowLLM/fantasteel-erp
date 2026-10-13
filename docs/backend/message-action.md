@@ -62,7 +62,7 @@ confirm(draftId, actor):
   draft.status = EXECUTED
 ```
 
-- 모두 한 트랜잭션. 생성된 구매요청은 별도로 요청자 소속 부서장 승인을 거친다(REQ-ACT-003 "두 승인의 구분"). 부서장이 없으면 핸들러가 `PUR-001`.
+- 확정(APPROVED·DRAFT_CONFIRMED)과 실행(구매요청 생성·EXECUTED)은 트랜잭션을 나눈다. 실행이 실패하면 실패 코드·시도 횟수를 남기고 APPROVED로 둔다(9장). 생성된 구매요청은 별도로 요청자 소속 부서장 승인을 거친다(REQ-ACT-003 "두 승인의 구분"). 부서장이 없으면 핸들러가 `PUR-001`.
 - 중복 실행은 상태 검사 + `purchase_requisition.action_draft_id` unique로 막는다.
 
 **반려**: 요청자만, 확정 전만. `reject_reason` 저장, REJECTED로 끝([06] DRAFT_STATUS).
@@ -94,7 +94,7 @@ confirm(draftId, actor):
 | 상대 | 관계 |
 | --- | --- |
 | messenger | 원본 메시지 조회·방 멤버 확인 |
-| purchasing | 실행 핸들러 `createRequisition(tx, …)` — 같은 tx |
+| purchasing | 실행 핸들러 `createRequisition(tx, …)` — 실행 트랜잭션 안에서 부른다. 채번 경합은 `retryOnNumberConflict`로 다시 시도한다 |
 | master-data | 원료 품목 검증 |
 | notification | 부서장 승인 요청 알림 🟡(유형 미확정) |
 

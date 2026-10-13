@@ -22,7 +22,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
-import { isValidDate, PurchasingService, TON_PATTERN } from '../purchasing/purchasing.service';
+import { isValidDate, PurchasingService, retryOnNumberConflict, TON_PATTERN } from '../purchasing/purchasing.service';
 import type { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
 
@@ -203,25 +203,28 @@ export class MessageActionService {
     if (!handler) throw new AppException('COM-004', '준비 중인 업무 유형이에요');
     let failure: AppException | null = null;
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const target = await handler(this.purchasing, tx, draft, user);
-        await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: { increment: 1 } });
-        await this.businessEventRecorder.record(tx, {
-          type: BUSINESS_EVENT_TYPE.DRAFT_EXECUTED,
-          actor: user,
-          target: { table: 'action_draft', id: draft.id },
-          salesOrderId: draft.message?.chatRoom.salesOrderId ?? null,
-          before: { draftStatus: DRAFT_STATUS.APPROVED },
-          after: { draftStatus: DRAFT_STATUS.EXECUTED, purchaseRequisitionId: target.id, purchaseRequisitionNo: target.no },
-          actionDraftId: draft.id,
-          messageId: draft.messageId,
-        });
-      });
+      await retryOnNumberConflict(() =>
+        this.prisma.$transaction(async (tx) => {
+          const target = await handler(this.purchasing, tx, draft, user);
+          await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: { increment: 1 } });
+          await this.businessEventRecorder.record(tx, {
+            type: BUSINESS_EVENT_TYPE.DRAFT_EXECUTED,
+            actor: user,
+            target: { table: 'action_draft', id: draft.id },
+            salesOrderId: draft.message?.chatRoom.salesOrderId ?? null,
+            before: { draftStatus: DRAFT_STATUS.APPROVED },
+            after: { draftStatus: DRAFT_STATUS.EXECUTED, purchaseRequisitionId: target.id, purchaseRequisitionNo: target.no },
+            actionDraftId: draft.id,
+            messageId: draft.messageId,
+          });
+        }),
+      );
     } catch (e) {
       // 같은 초안을 동시에 실행한 경합(COM-001)은 실행 실패가 아니다
       if (!(e instanceof AppException) || e.code === 'COM-001') throw e;
       failure = e;
-      await this.repository.updateDraft(this.prisma, draft.id, { executionErrorCode: e.code, executionAttemptCount: { increment: 1 } });
+      // 그 사이 다른 요청이 실행을 끝냈으면 그 결과를 덮어쓰지 않는다
+      await this.repository.updateDraftIfUnchanged(this.prisma, draft.id, draft.updatedAt, { executionErrorCode: e.code, executionAttemptCount: { increment: 1 } });
     }
     return { draft: await this.get(user, id), executed: failure === null, errorCode: failure?.code ?? null, errorMessage: failure?.message ?? null };
   }
