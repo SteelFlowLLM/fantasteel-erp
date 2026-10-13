@@ -2,7 +2,7 @@
 import { PRODUCT_QTY_UNIT, ITEM_TYPE_LABEL } from '@/codes';
 import type { ProductStockData } from '@/api/dashboard';
 import { Table, Td, Th } from '@/components/Table';
-import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
 import { cn } from '@/lib/cn';
 import { fmtInt, fmtTon } from '@/lib/format';
@@ -35,10 +35,6 @@ function StockBody({ data }: { data: ProductStockData }) {
             </span>
           </div>
         ))}
-        <div className="flex flex-wrap gap-3">
-          <LegendItem colorClass="bg-chart-1" label="가용" />
-          <LegendItem colorClass="bg-chart-4" label="재고" />
-        </div>
       </div>
       {data.items.length === 0 ? (
         <WidgetEmpty>재고가 있는 규격이 없어요</WidgetEmpty>
