@@ -10,12 +10,12 @@ import { readSessionEmployeeId, readSessionEmployeeNo } from '@/lib/sessionEmplo
 import { getMockDb } from '@/mock/db';
 import type { EmployeeRow, MockTables } from '@/mock/schema';
 
-/** undefined = 이 탭의 세션을 쓴다. 테스트에서만 바꾼다. 테스트는 가짜 DB 사원 id로 정한다. */
-let testActingEmployeeId: number | null | undefined;
+/** undefined = 이 탭의 세션을 쓴다. 테스트에서만 바꾼다. 테스트는 사원번호로 정한다(서버 로그인과 같은 값). */
+let testActingEmployeeNo: string | null | undefined;
 
 /** 테스트에서 '이 사원이 요청했다'를 흉내 낸다. undefined를 넘기면 세션으로 돌아간다. */
-export function setActingEmployeeForTest(employeeId: number | null | undefined): void {
-  testActingEmployeeId = employeeId;
+export function setActingEmployeeNoForTest(employeeNo: string | null | undefined): void {
+  testActingEmployeeNo = employeeNo;
 }
 
 /** 사원번호가 같은 가짜 DB 사원 id. 서버에서 새로 등록한 사원은 가짜 DB에 없어 null */
@@ -26,15 +26,13 @@ export function mockEmployeeIdByNo(employeeNo: string | null): number | null {
 
 /** 요청한 사원의 가짜 DB id (없으면 null). 서버 모드의 세션 id는 서버 id라 사원번호로 찾는다 */
 export function actingEmployeeId(): number | null {
-  if (testActingEmployeeId !== undefined) return testActingEmployeeId;
+  if (testActingEmployeeNo !== undefined) return mockEmployeeIdByNo(testActingEmployeeNo);
   return isServerDataSource() ? mockEmployeeIdByNo(readSessionEmployeeNo()) : readSessionEmployeeId();
 }
 
 /** 요청한 사원의 사원번호 (서버 로그인용, 없으면 null) */
 export function actingEmployeeNo(): string | null {
-  if (testActingEmployeeId === undefined) return readSessionEmployeeNo();
-  const employeeId = testActingEmployeeId;
-  return employeeId === null ? null : (getMockDb().read((tables) => tables.employee.find((e) => e.id === employeeId)?.employeeNo) ?? null);
+  return testActingEmployeeNo !== undefined ? testActingEmployeeNo : readSessionEmployeeNo();
 }
 
 export interface Actor {

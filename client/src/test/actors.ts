@@ -1,6 +1,5 @@
-// 테스트용: 시드 사원번호로 '이 사원이 요청했다'를 흉내 낸다 (seed-assumptions.md 1-4).
-import { setActingEmployeeForTest } from '@/api/actor';
-import { getMockDb } from '@/mock/db';
+// 테스트용: 서버 시드 사원번호(docs/backend/seed.md)로 '이 사원이 요청했다'를 흉내 낸다.
+import { setActingEmployeeNoForTest } from '@/api/actor';
 
 export const SEED_EMPLOYEE_NO = {
   /** 이현정 · 경영지원부 부서장 · 관리자 */
@@ -29,21 +28,7 @@ export const SEED_EMPLOYEE_NO = {
   logistics: '2304015',
 } as const;
 
-export function employeeIdOf(employeeNo: string): number {
-  const employee = getMockDb().read((tables) => tables.employee.find((e) => e.employeeNo === employeeNo));
-  if (!employee) throw new Error(`시드 사원이 없어요: ${employeeNo}`);
-  return employee.id;
-}
-
-/** 이 사원으로 요청한다. id를 돌려준다. */
-export function actAs(employeeNo: string): number {
-  const id = employeeIdOf(employeeNo);
-  setActingEmployeeForTest(id);
-  return id;
-}
-
-export function departmentIdOf(departmentCode: string): number {
-  const department = getMockDb().read((tables) => tables.department.find((d) => d.departmentCode === departmentCode));
-  if (!department) throw new Error(`시드 부서가 없어요: ${departmentCode}`);
-  return department.id;
+/** 이 사원으로 요청한다 */
+export function actAs(employeeNo: string): void {
+  setActingEmployeeNoForTest(employeeNo);
 }
