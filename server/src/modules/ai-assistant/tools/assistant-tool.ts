@@ -71,6 +71,11 @@ export function optionalEnum<T extends string>(args: Record<string, unknown>, ke
   return value as T;
 }
 
+/** 도구 설명에 상태 코드를 "코드(표시명)"으로 적는다. 코드만 적으면 모델이 표시명을 지어내 답에 영문 코드와 함께 쓴다 */
+export function codeLabelList<T extends string>(labels: Record<T, string>): string {
+  return (Object.entries(labels) as [string, string][]).map(([code, label]) => `${code}(${label})`).join(', ');
+}
+
 export function optionalDate(args: Record<string, unknown>, key: string): string | undefined {
   const value = optionalString(args, key, 10);
   if (value === undefined) return undefined;

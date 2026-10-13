@@ -1,5 +1,6 @@
 import {
   ROLE,
+  SHIPMENT_REQUEST_STATUS_LABEL,
   type AuthUser,
   type GoodsReceiptView,
   type MillSheetSummary,
@@ -21,7 +22,7 @@ import type { QualityService } from '../../quality/quality.service';
 import type { RejectedLotService } from '../../quality/rejected-lot.service';
 import type { ShipmentService } from '../../shipment/shipment.service';
 import type { AiAssistantRepository } from '../ai-assistant.repository';
-import { ToolArgumentError } from './assistant-tool';
+import { codeLabelList, ToolArgumentError } from './assistant-tool';
 import { AssistantToolbox, type AssistantToolServices } from './assistant-toolbox';
 import { productionPlanTool, productionResultTool } from './production.tool';
 import { goodsReceiptTool, purchaseOrderTool, purchaseRequisitionTool } from './purchasing.tool';
@@ -332,5 +333,14 @@ describe('도구 모음: service가 확인하는 권한', () => {
   it('도구 모음이 확인하는 권한은 하나도 없으면 service를 부르지 않는다', async () => {
     const result = await toolbox.run(user(ROLE.SALES), { id: 'c1', name: 'get_production_plans', arguments: '{}' });
     expect(JSON.parse(result.content).오류).toBe('권한 없음');
+  });
+});
+
+describe('상태 코드 설명', () => {
+  it('상태 코드를 공통 코드 표시명과 함께 적는다 (코드만 적으면 모델이 표시명을 지어낸다)', () => {
+    expect(codeLabelList(SHIPMENT_REQUEST_STATUS_LABEL)).toBe('REQUESTED(배정 대기), ALLOCATED(배정 확정), ISSUED(출고 완료), CANCELLED(취소)');
+    const shipment = shipmentRequestTool({} as ShipmentService).definition;
+    const properties = shipment.parameters.properties as Record<string, { description: string }>;
+    expect(properties.status.description).toContain('REQUESTED(배정 대기)');
   });
 });

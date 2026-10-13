@@ -11,7 +11,7 @@ import {
   type PurchaseRequisitionSummary,
 } from '@fantasteel/shared';
 import type { PurchasingService } from '../../purchasing/purchasing.service';
-import { limitRows, looseIncludes, optionalEnum, optionalString, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
 
 /** 번호·원료로 거를 때 한 번에 읽는 수 (API 상한 100) */
 const SCAN_SIZE = 100;
@@ -24,11 +24,11 @@ export function purchaseRequisitionTool(purchasing: PurchasingService): Assistan
     access: { checkedBy: 'SERVICE', permissions: [PERMISSION.PURCHASE_REQUISITION_CREATE], note: '부서장은 자기 부서 사원의 구매요청을 볼 수 있어요' },
     definition: {
       name: 'get_purchase_requisitions',
-      description: `구매요청(원료·요청 톤·희망 입고일·요청자·승인·반려한 부서장·발주 번호)을 조회한다. status: ${REQUISITION_STATUSES.join(', ')}. "승인 대기 구매요청"을 물으면 status=WAITING_APPROVAL.`,
+      description: '구매요청(원료·요청 톤·희망 입고일·요청자·승인·반려한 부서장·발주 번호)을 조회한다. "승인 대기 구매요청"을 물으면 status=WAITING_APPROVAL.',
       parameters: {
         type: 'object',
         properties: {
-          status: { type: 'string', enum: REQUISITION_STATUSES, description: '구매요청 상태' },
+          status: { type: 'string', enum: REQUISITION_STATUSES, description: `구매요청 상태: ${codeLabelList(PURCHASE_REQUISITION_STATUS_LABEL)}` },
           keyword: { type: 'string', description: '구매요청 번호·원료 코드·원료 이름 일부' },
         },
       },
@@ -53,11 +53,11 @@ export function purchaseOrderTool(purchasing: PurchasingService): AssistantTool 
     access: { checkedBy: 'TOOLBOX', permissions: [PERMISSION.PURCHASE_ORDER_CONFIRM] },
     definition: {
       name: 'get_purchase_orders',
-      description: `발주와 입고예정을 조회한다. 발주 품목별 발주 톤·입고예정일·입고 톤·미입고 톤(= 입고예정)을 준다. status: ${ORDER_STATUSES.join(', ')}. "입고예정"을 물으면 쓴다.`,
+      description: '발주와 입고예정을 조회한다. 발주 품목별 발주 톤·입고예정일·입고 톤·미입고 톤(= 입고예정)을 준다. "입고예정"을 물으면 쓴다.',
       parameters: {
         type: 'object',
         properties: {
-          status: { type: 'string', enum: ORDER_STATUSES, description: '발주 상태' },
+          status: { type: 'string', enum: ORDER_STATUSES, description: `발주 상태: ${codeLabelList(PURCHASE_ORDER_STATUS_LABEL)}` },
           keyword: { type: 'string', description: '발주 번호·공급업체·원료 코드·원료 이름 일부' },
         },
       },

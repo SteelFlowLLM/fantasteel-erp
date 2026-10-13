@@ -7,7 +7,7 @@ import {
   type ShipmentRequestSummary,
 } from '@fantasteel/shared';
 import type { ShipmentService } from '../../shipment/shipment.service';
-import { limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
 
 /** 번호로 거를 때 한 번에 읽는 수 (API 상한 100) */
 const SCAN_SIZE = 100;
@@ -19,11 +19,11 @@ export function shipmentRequestTool(shipments: ShipmentService): AssistantTool {
     access: { checkedBy: 'SERVICE', permissions: [PERMISSION.SHIPMENT_REQUEST_MANAGE, PERMISSION.GOODS_ISSUE_CONFIRM] },
     definition: {
       name: 'get_shipment_requests',
-      description: `출하요청(고객사·출하 예정일·상태·요청 매수·출고 확정 시각)을 조회한다. status: ${REQUEST_STATUSES.join(', ')}. 출하요청 번호 일부로 거른다.`,
+      description: '출하요청(고객사·출하 예정일·상태·요청 매수·출고 확정 시각)을 조회한다. 출하요청 번호 일부로 거른다.',
       parameters: {
         type: 'object',
         properties: {
-          status: { type: 'string', enum: REQUEST_STATUSES, description: '출하요청 상태' },
+          status: { type: 'string', enum: REQUEST_STATUSES, description: `출하요청 상태: ${codeLabelList(SHIPMENT_REQUEST_STATUS_LABEL)}` },
           shipmentRequestNo: { type: 'string', description: '출하요청 번호 일부' },
         },
       },
