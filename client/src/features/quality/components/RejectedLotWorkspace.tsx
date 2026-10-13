@@ -475,8 +475,12 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                 <span className="text-cap text-ink-3">불합격 항목</span>
                 {row.failedItems.map((f) => (
                   <span key={f.inspectionItemCode} className="text-xs text-danger" data-pet-item="qualityInspectionValue" data-pet-item-title={f.inspectionItemName}>
-                    {f.inspectionItemName} {trimNum(f.measuredValue)}
-                    {f.unit ? ` ${f.unit}` : ''} (기준 {limitText(f)})
+                    {f.inspectionItemName}{' '}
+                    <span data-pet-field="측정값">
+                      {trimNum(f.measuredValue)}
+                      {f.unit ? ` ${f.unit}` : ''}
+                    </span>{' '}
+                    (기준 <span data-pet-field="기준">{limitText(f)}</span>)
                   </span>
                 ))}
               </div>

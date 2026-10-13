@@ -286,11 +286,7 @@ export function SalesOrderCreateScreen() {
                 2 품목
               </b>
               <Tag>{lines.length}행</Tag>
-              {new Set(itemTypes).size > 1 ? (
-                <span data-pet-term="코일·슬래브 혼합" className="contents">
-                  <Tag tone="run">코일·슬래브 혼합</Tag>
-                </span>
-              ) : null}
+              {new Set(itemTypes).size > 1 ? <Tag tone="run">코일·슬래브 혼합</Tag> : null}
             </div>
             {serverFieldErrors.items ? <span className="text-cap text-danger">{serverFieldErrors.items}</span> : null}
             <ol className="flex flex-col gap-2">
@@ -437,9 +433,7 @@ export function SalesOrderCreateScreen() {
             </Table>
           </div>
           <div className="flex items-center gap-2 border-t border-line bg-surface-2 px-4 py-2.5 text-cap text-ink-2">
-            <span data-pet-term="시스템" className="contents">
-              <Tag>시스템</Tag>
-            </span>
+            <Tag>시스템</Tag>
             저장하면 합격한 가용재고를 매수 단위로 먼저 예약하고(부분 예약 허용), 부족 매수만 품목 라우팅대로 생산계획을 만들어요.
           </div>
         </Card>

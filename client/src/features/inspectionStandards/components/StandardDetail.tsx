@@ -180,7 +180,11 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
             meta={`${view.items.length}개${changed.size > 0 || removed > 0 ? ` · 이전 버전에서 바뀜 ${changed.size}개${removed > 0 ? ` · 빠짐 ${removed}개` : ''}` : ''}`}
           />
           {sharedText.length > 0 ? (
-            <p className="border-b border-line px-4 py-2 text-cap text-ink-2" title={source === 'KS' && view.standardNo ? `KS 값 (${view.standardNo}, 치수는 KS D 3500)` : undefined}>
+            <p
+              className="border-b border-line px-4 py-2 text-cap text-ink-2"
+              title={source === 'KS' && view.standardNo ? `KS 값 (${view.standardNo}, 치수는 KS D 3500)` : undefined}
+              data-pet-term="모든 항목 같음"
+            >
               <b className="font-semibold">모든 항목 같음</b> · {sharedText.join(' · ')}
             </p>
           ) : null}

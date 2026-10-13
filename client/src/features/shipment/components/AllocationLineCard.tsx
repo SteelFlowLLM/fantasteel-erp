@@ -190,9 +190,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
       {mode.kind !== 'closed' ? (
         <div className="flex flex-col gap-2.5 border-t border-line bg-surface-2 px-4 py-3">
           <div className="flex items-center gap-2 text-xs text-ink-2">
-            <span data-pet-term="FIFO 추천" className="contents">
-              <Badge tone="run">FIFO 추천</Badge>
-            </span>
+            <Badge tone="run">FIFO 추천</Badge>
             {mode.kind === 'change' ? (
               <span>
                 <b className="font-mono">{mode.lotNo}</b> 대신 배정할 LOT을 1개 골라 주세요.
@@ -354,15 +352,11 @@ function CandidateRow({
       <Td>{lot.yardName ?? '-'}</Td>
       <Td>
         {recommended ? (
-          <span data-pet-term="추천" className="contents">
-            <Badge tone="run">추천</Badge>
-          </span>
+          <Badge tone="run">추천</Badge>
         ) : (
-          <span data-pet-term="대안" className="contents">
-            <Tag tone="outline" size="sm">
-              대안
-            </Tag>
-          </span>
+          <Tag tone="outline" size="sm">
+            대안
+          </Tag>
         )}
       </Td>
     </tr>
