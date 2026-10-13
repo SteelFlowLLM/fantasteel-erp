@@ -12,7 +12,7 @@ const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, 
 function StockBody({ data }: { data: ProductStockData }) {
   return (
     <div className="flex flex-col gap-2.5 py-3">
-      <div className="flex flex-col gap-2 px-4 pb-1.5">
+      <div className="flex flex-col gap-2 px-4 pb-3.5">
         {data.totals.map((total) => (
           <div
             key={total.itemType}
@@ -39,7 +39,11 @@ function StockBody({ data }: { data: ProductStockData }) {
       {data.items.length === 0 ? (
         <WidgetEmpty>재고가 있는 규격이 없어요</WidgetEmpty>
       ) : (
-        <Table compact className="border-t border-line [&_td]:px-2 [&_th]:px-2">
+        // 칸 사이는 좁게(8px) 두되 양 끝 칸은 위 막대 줄과 같은 16px 안쪽에서 끝나게: 끝 칸이 카드 가장자리에 붙어 넘쳐 보이지 않게
+        <Table
+          compact
+          className="border-t border-line [&_td]:px-2 [&_th]:px-2 [&_td:first-child]:pl-4 [&_th:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:last-child]:pr-4"
+        >
           <thead>
             <tr>
               <Th>규격</Th>
