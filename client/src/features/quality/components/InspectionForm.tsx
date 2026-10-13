@@ -137,21 +137,24 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   data-pet-item-title={item.inspectionItemName}
                   className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}
                 >
-                  <div className="flex items-center gap-1.5">
-                    <label htmlFor={id} className="text-sm font-semibold text-ink">
-                      {item.inspectionItemName}
-                      {item.isRequired ? (
-                        <span className="ml-0.5 text-danger" title="필수">
-                          *
-                        </span>
-                      ) : (
-                        <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
-                      )}
-                    </label>
-                    <span className="font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
-                      {item.inspectionItemCode}
+                  {/* 영문 코드를 이름 옆에 두면 판정 배지가 길어질 때 이름이 두 줄로 깨진다: 코드는 이름 아래 작은 줄로 */}
+                  <div className="flex items-start gap-1.5">
+                    <span className="flex min-w-0 flex-col">
+                      <label htmlFor={id} className="truncate text-sm font-semibold text-ink" title={item.inspectionItemName}>
+                        {item.inspectionItemName}
+                        {item.isRequired ? (
+                          <span className="ml-0.5 text-danger" title="필수">
+                            *
+                          </span>
+                        ) : (
+                          <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
+                        )}
+                      </label>
+                      <span className="truncate font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
+                        {item.inspectionItemCode}
+                      </span>
                     </span>
-                    <span className="ml-auto" data-pet-field="판정">
+                    <span className="ml-auto flex-none" data-pet-field="판정">
                       <ItemBadge item={item} preview={preview} dirty={dirty} />
                     </span>
                   </div>
