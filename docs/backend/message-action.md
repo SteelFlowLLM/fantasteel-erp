@@ -34,6 +34,7 @@
 | PATCH | `action-drafts/:id` | 초안 수정 | 확정 주체 본인 | |
 | POST | `action-drafts/:id/confirm` | 초안 확정·실행 | 구매요청 초안은 요청자 | 필수값 미확정 시 ACT-001. `actionDraftId`로 중복 실행 차단 |
 | POST | `action-drafts/:id/reject` | 초안 반려 | 확정 주체 본인 | |
+| POST ➕ | `action-drafts/:id/execute` | 확정했지만 실행에 실패한 초안 다시 실행 | 확정 주체 본인 | 명세에 없음(9장) |
 
 기능 권한 데코레이터 대신 service에서 "방 멤버"·"`requester_id` = 로그인 사원"을 확인하고 아니면 `COM-002`.
 
@@ -128,11 +129,11 @@ confirm(draftId, actor):
 | payload 이름 | 12.3 예시(`rawMaterialId`, `requiredTon`, `requesterId`)와 ERD 컬럼(`item_id`, `requested_ton`, `requester_id`)이 다르다. 이 문서는 ERD 이름을 권장 | [04] 12.3, [ERD] |
 | 확정 후 부서장 알림 | 13.4 `notify(departmentHeadOf(actor))`에 쓸 알림 유형(APPROVAL_REQUESTED)이 제안 상태 | [06] 3장 |
 
-요청자 권한·생성 직후 상태·중복 생성 응답·목록 범위·payload 이름은 9장에서 정했다. 실행 실패 기록·요청 고유키·확정 후 알림은 확정 단계에서 정한다.
+이 표의 항목은 모두 9장에서 정했다.
 
 ## 9. 구현 기준 (2026-10-12)
 
-8장의 확인 필요 항목 중 생성·조회·수정에 쓰는 값을 정했다.
+8장의 확인 필요 항목과 생성·조회·수정·확정·실행·반려 규칙을 정했다.
 
 | 항목 | 정한 값 |
 | --- | --- |
@@ -146,3 +147,10 @@ confirm(draftId, actor):
 | 수정 | 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. 보내지 않은 칸은 그대로, null이면 비운다. 원료가 아닌 품목·0 이하 톤·없는 날짜는 COM-004, `expectedUpdatedAt`이 다르면 COM-001. 맞는 작업 로그 유형이 없어 수정은 로그를 남기지 않는다 |
 | 상대 날짜 | AI 추출이 없어 요청자가 날짜를 직접 넣으므로 바꾸지 않는다 |
 | 미확정 칸 | 응답의 `unresolvedFields`: 원료 품목·수량(톤)·희망 입고일 중 비었거나 맞지 않는 칸 |
+| 확정 권한 | 요청자 본인이고 구매요청 등록 USE 권한이 있어야 수정·확정·반려한다(실행은 사용자 권한을 거친다, BP-ACT-01). 아니면 COM-002 |
+| 확정·실행 | `POST action-drafts/:id/confirm`: 미확정 칸이 있으면 ACT-001. APPROVED·`confirmed_at`·DRAFT_CONFIRMED(사유 `DRAFT_CONFIRMED: …`)를 한 트랜잭션에 남기고, 다음 트랜잭션에서 등록부 핸들러(`purchasing.createRequisition`, 요청자 = 로그인 요청자)로 구매요청을 만든 뒤 EXECUTED·DRAFT_EXECUTED(`after`에 구매요청 id·번호)를 남긴다. 응답은 `{ draft, executed, errorCode, errorMessage }` |
+| 실행 실패 기록 | 핸들러가 실패하면(예: 부서장 없음 PUR-001) 실행 트랜잭션은 롤백되고, 별도 트랜잭션으로 `execution_error_code`·`execution_attempt_count`를 남긴다. 상태는 APPROVED 그대로다. 성공하면 오류 코드를 비우고 시도 횟수를 하나 올린다 |
+| 다시 실행 | 명세에 없는 `POST action-drafts/:id/execute`: APPROVED 초안을 같은 핸들러로 다시 실행한다(화면의 '다시 실행') |
+| 중복 실행 | 상태 확인 + 읽은 `updatedAt` 조건 갱신 + `purchase_requisition.action_draft_id` unique로 막는다. 요청 고유키 저장소는 쓰지 않는다 |
+| 반려 | `POST action-drafts/:id/reject { rejectReason }`: 요청자만, 확정 전만, 사유 필수(500자). REJECTED·DRAFT_REJECTED(사유 = 반려 사유) |
+| 확정 후 부서장 알림 | 구매요청을 만드는 purchasing이 같은 트랜잭션에서 보낸다(구매요청 승인 요청 알림과 같다) |

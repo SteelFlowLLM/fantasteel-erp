@@ -56,3 +56,15 @@ export interface ActionDraftView {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * POST action-drafts/:id/confirm·execute. 확정한 뒤 실행(구매요청 생성)에 실패하면 승인(APPROVED)으로 남고,
+ * 실패 코드·시도 횟수가 초안에 남아 다시 실행할 수 있다.
+ */
+export interface ActionDraftExecutionResult {
+  draft: ActionDraftView;
+  executed: boolean;
+  /** 실행에 실패한 오류 코드와 문구. 성공하면 null */
+  errorCode: string | null;
+  errorMessage: string | null;
+}

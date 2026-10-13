@@ -168,3 +168,61 @@ describe('초안 수정 (REQ-ACT-002)', () => {
     expect(await codeOf(service.update(purchaser, id, { requestedTon: '10' }))).toBe('COM-004');
   });
 });
+
+describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 13.4)', () => {
+  it('요청자가 확정하면 승인 대기 구매요청을 만들고 EXECUTED로 끝난다. 다시 확정·실행해도 구매요청은 1건', async () => {
+    const { draft } = await draftOf('철광석 30톤', { itemId: oreId, requestedTon: '30.000', desiredReceiptDate: '2026-11-20' });
+    expect(await codeOf(service.confirm(purchaseHead, draft.id, {}))).toBe('COM-002');
+
+    const result = await service.confirm(purchaser, draft.id, {});
+    expect(result).toMatchObject({
+      executed: true,
+      errorCode: null,
+      draft: { draftStatus: DRAFT_STATUS.EXECUTED, executionAttemptCount: 1, purchaseRequisition: { purchaseRequisitionStatus: 'WAITING_APPROVAL' } },
+    });
+    const requisition = await prisma.purchaseRequisition.findUniqueOrThrow({ where: { actionDraftId: draft.id } });
+    expect(requisition).toMatchObject({ itemId: oreId, requesterId: purchaser.employeeId });
+    expect(requisition.requestedTon.toFixed(3)).toBe('30.000');
+    const events = await prisma.businessEvent.findMany({ where: { actionDraftId: draft.id }, orderBy: { id: 'asc' } });
+    expect(events.map((e) => e.businessEventType)).toEqual([BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, BUSINESS_EVENT_TYPE.DRAFT_EXECUTED]);
+
+    expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('COM-004');
+    expect(await codeOf(service.execute(purchaser, draft.id))).toBe('COM-004');
+    expect(await prisma.purchaseRequisition.count({ where: { actionDraftId: draft.id } })).toBe(1);
+  });
+
+  it('필수값이 비면 ACT-001이고 확인 대기에 남는다 (구매요청 없음)', async () => {
+    const { draft } = await draftOf('철광석 좀', { itemId: oreId });
+    expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('ACT-001');
+    expect((await service.get(purchaser, draft.id)).draftStatus).toBe(DRAFT_STATUS.WAITING_APPROVAL);
+    expect(await prisma.purchaseRequisition.count({ where: { actionDraftId: draft.id } })).toBe(0);
+  });
+
+  it('실행이 실패하면(부서장 없음 PUR-001) APPROVED로 남고 실패 코드·횟수를 남긴다. 다시 실행하면 만든다', async () => {
+    const { draft } = await draftOf('철광석 10톤', { itemId: oreId, requestedTon: '10.000', desiredReceiptDate: '2026-11-20' });
+    const department = await prisma.department.findUniqueOrThrow({ where: { id: purchaser.departmentId } });
+    await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: null } });
+    try {
+      expect(await service.confirm(purchaser, draft.id, {})).toMatchObject({
+        executed: false,
+        errorCode: 'PUR-001',
+        draft: { draftStatus: DRAFT_STATUS.APPROVED, executionErrorCode: 'PUR-001', executionAttemptCount: 1, purchaseRequisition: null },
+      });
+    } finally {
+      await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: department.headEmployeeId } });
+    }
+    expect(await service.execute(purchaser, draft.id)).toMatchObject({
+      executed: true,
+      draft: { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: 2 },
+    });
+  });
+
+  it('요청자가 사유를 적어 반려하면 REJECTED로 끝나고 작업 로그에 사유가 남는다', async () => {
+    const { draft } = await draftOf('합금철 필요?', {});
+    expect(await codeOf(service.reject(purchaser, draft.id, { rejectReason: '  ' }))).toBe('COM-004');
+    expect(await service.reject(purchaser, draft.id, { rejectReason: '이미 발주했어요' })).toMatchObject({ draftStatus: DRAFT_STATUS.REJECTED, rejectReason: '이미 발주했어요' });
+    const event = await prisma.businessEvent.findFirstOrThrow({ where: { actionDraftId: draft.id, businessEventType: BUSINESS_EVENT_TYPE.DRAFT_REJECTED } });
+    expect(event.reason).toBe('이미 발주했어요');
+    expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('COM-004');
+  });
+});
