@@ -115,7 +115,8 @@ test/            Vitest 준비 (setup.ts, actors.ts, masterSeed.ts)
 - 라벨·코드·오류 메시지는 `@/codes`에서만 가져온다(화면에 영어 코드 원문을 쓰지 않는다). 업무 번호·LOT 번호는 `codes/numbering.ts`의 채번 함수로만 만든다.
 - 모든 변경 함수(`api/`)는 맨 먼저 `requireActor`로 요청 사원의 USE 권한을 확인하고(없으면 COM-002), 9.3 오류 코드로 검증하고, `mockMutation` 안에서 mock DB를 바꾸며 작업 로그(BUSINESS_EVENT_TYPE, 주체 USER 또는 SYSTEM, 변경 전후, 사유 코드는 허용된 값만)를 같은 트랜잭션에서 남긴다. 화면에서도 권한이 없으면 버튼을 숨기거나 끈다.
 - 변경 뒤 영향받는 모든 화면이 갱신되게 쿼리를 무효화한다(`api/queryKeys.ts`). 다른 탭은 `BroadcastChannel` 동기화(`hooks/useMockDataSync.ts`)가 갱신한다.
-- 업무 계산은 순수 함수(`lib/` 또는 `features/<영역>/lib/`)로 두고 Vitest 테스트를 붙인다. api 함수는 mock DB 위에서 정상 흐름과 9.3 오류 경우를 시험한다(`*.test.ts`).
+- 업무 계산은 순수 함수(`lib/` 또는 `features/<영역>/lib/`)로 두고 Vitest 테스트를 붙인다. api 함수는 서버 어댑터 테스트(`api/server/*.test.ts`, `useFakeServer`)로 서버 경로·요청 본문·응답 변환과, 서버를 부르기 전 화면 쪽 입력 확인을 시험한다. 업무 규칙과 9.3 오류는 서버 DB 테스트(`server/src/modules/**/*.spec.ts`)가 확인한다.
+- 가짜 DB 걷어내기(2026-10-13~): 가짜 DB 위에서 돌던 api 테스트(`api/*.test.ts`)는 영역마다 먼저 지운다. 그 테스트가 확인하던 규칙 중 서버 모드에서도 도는 화면 쪽 확인은 서버 어댑터 테스트로 옮기고, 나머지는 서버 DB 테스트가 이미 확인하거나 가짜 DB에만 있는 동작이다. 남은 가짜 DB 분기(`mockQuery`·`mockMutation`)와 `mock/`은 모든 영역의 테스트를 정리한 뒤 한꺼번에 지운다. 그때까지 가짜 DB 분기는 고치지 않는다.
 - 스타일은 Tailwind 유틸리티와 B안 토큰. 목록|상세 구조, 상태 배지 색, 빈·로딩·오류 상태(`StateView`, `QueryBoundary`)를 다른 화면과 같게 맞춘다.
 - 날짜 입력은 `DateInput`, 수량은 정수, 톤은 문자열 소수 3자리(`lib/decimal.ts`).
 
