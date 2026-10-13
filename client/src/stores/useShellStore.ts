@@ -14,6 +14,9 @@ interface ShellState {
   aiPanelOpen: boolean;
   /** 위젯 등에서 맥락을 들고 열었을 때만 있다. 상단 버튼으로 열거나 닫으면 지운다 */
   aiContext: AiContext | null;
+  /** 크게 펼치기 (REQ-AST-001): 본문 전체 너비로 대화를 본다. 닫으면 되돌린다 */
+  aiPanelExpanded: boolean;
+  toggleAiPanelExpanded: () => void;
   toggleAiPanel: () => void;
   openAiPanel: (context: AiContext) => void;
   closeAiPanel: () => void;
@@ -26,9 +29,11 @@ interface ShellState {
 export const useShellStore = create<ShellState>((set) => ({
   aiPanelOpen: false,
   aiContext: null,
-  toggleAiPanel: () => set((state) => ({ aiPanelOpen: !state.aiPanelOpen, aiContext: null })),
+  aiPanelExpanded: false,
+  toggleAiPanelExpanded: () => set((state) => ({ aiPanelExpanded: !state.aiPanelExpanded })),
+  toggleAiPanel: () => set((state) => ({ aiPanelOpen: !state.aiPanelOpen, aiContext: null, aiPanelExpanded: false })),
   openAiPanel: (context) => set({ aiPanelOpen: true, aiContext: context }),
-  closeAiPanel: () => set({ aiPanelOpen: false, aiContext: null }),
+  closeAiPanel: () => set({ aiPanelOpen: false, aiContext: null, aiPanelExpanded: false }),
   fontSize: 'normal',
   hydrateFontSize: () => set({ fontSize: readFontSize() }),
   setFontSize: (fontSize) => {

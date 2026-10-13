@@ -4,7 +4,7 @@ import { useShellStore } from '@/stores/useShellStore';
 
 const context = { label: '강종별 불합격률 · SM355A · 최근 30일', question: 'SM355A 최근 30일 불합격 원인 알려줘' };
 
-beforeEach(() => useShellStore.setState({ aiPanelOpen: false, aiContext: null }));
+beforeEach(() => useShellStore.setState({ aiPanelOpen: false, aiContext: null, aiPanelExpanded: false }));
 
 describe('AI 패널 맥락', () => {
   it('맥락을 들고 열면 패널이 열리고 맥락이 남는다', () => {
@@ -23,5 +23,16 @@ describe('AI 패널 맥락', () => {
     useShellStore.getState().closeAiPanel();
     useShellStore.getState().toggleAiPanel();
     expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiContext: null });
+  });
+});
+
+describe('AI 패널 크게 펼치기 (REQ-AST-001)', () => {
+  it('펼쳤다 줄일 수 있고, 닫으면 다음에는 작게 열린다', () => {
+    useShellStore.getState().toggleAiPanel();
+    useShellStore.getState().toggleAiPanelExpanded();
+    expect(useShellStore.getState().aiPanelExpanded).toBe(true);
+    useShellStore.getState().closeAiPanel();
+    useShellStore.getState().toggleAiPanel();
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiPanelExpanded: false });
   });
 });
