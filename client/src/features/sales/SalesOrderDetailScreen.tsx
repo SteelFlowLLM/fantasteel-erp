@@ -187,11 +187,7 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
           </span>
           <SalesOrderStatusBadge status={detail.status} />
           {detail.isDueRisk ? <DueRiskBadge /> : null}
-          {detail.hasReproductionNeed ? (
-            <span data-pet-term="재생산 필요" className="contents">
-              <Tag tone="outline">재생산 필요</Tag>
-            </span>
-          ) : null}
+          {detail.hasReproductionNeed ? <Tag tone="outline">재생산 필요</Tag> : null}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <WorkRoomButton salesOrderId={detail.id} salesOrderNo={detail.salesOrderNo} hasRoom={detail.workRoomId !== null} cancelled={detail.status === 'CANCELLED'} />
             <ButtonLink size="sm" icon="history" href={businessEventsHref(detail.id)}>
@@ -202,7 +198,7 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
-          <span data-pet-term="가장 이른 납기" className="contents">
+          <span data-pet-term="가장 이른 납기" className="inline-flex">
             <Tag>
               가장 이른 납기 <DueText dueDate={detail.earliestDueDate} risk={detail.isDueRisk} done={done} />
             </Tag>

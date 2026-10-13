@@ -312,7 +312,7 @@ describe('14.1 P1 슬래브 수주 전체 흐름', () => {
     expect(draft).toMatchObject({ requesterId: requester.employeeId, draftStatus: 'WAITING_APPROVAL', actionType: 'PURCHASE_REQUISITION_CREATE', messageId: message.id });
     expect(createDraftFromMessage(k.at('2026-10-09T09:01:00+09:00'), requester, { messageId: message.id }).created).toBe(false);
     expectCode(() => confirmDraft(k.at('2026-10-09T09:02:00+09:00'), requester, { actionDraftId: draft.id }), 'ACT-001');
-    updateDraft(k.at('2026-10-09T09:03:00+09:00'), requester, { actionDraftId: draft.id, payload: { itemId: k.itemId('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
+    updateDraft(k.at('2026-10-09T09:03:00+09:00'), requester, { actionDraftId: draft.id, payload: { itemId: k.itemId('SMN01'), requestedTon: '20', desiredReceiptDate: '2026-10-20' } });
     expectCode(() => confirmDraft(k.at('2026-10-09T09:04:00+09:00'), k.actor('salesHead'), { actionDraftId: draft.id }), 'COM-002');
     const outcome = confirmDraft(k.at('2026-10-09T09:05:00+09:00'), requester, { actionDraftId: draft.id });
     expect(outcome.executed).toBe(true);

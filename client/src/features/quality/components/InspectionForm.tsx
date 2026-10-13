@@ -124,7 +124,8 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
             </span>
           </p>
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+          {/* 280px씩 채우면 1440 화면에서 3칸이라 항목 4개(슬래브 표면·치수 등)가 3 + 1로 남는다: 넓은 화면에서 4개·7개 이상이면 4칸 (5·6개는 3칸) */}
+          <div className={cn('grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3', (rows.length === 4 || rows.length >= 7) && 'min-[1400px]:grid-cols-4')}>
             {rows.map(({ item, text, preview, dirty }) => {
               const id = `qi-${item.inspectionStandardItemId}`;
               const bad = preview.state === 'fail';
@@ -137,21 +138,24 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   data-pet-item-title={item.inspectionItemName}
                   className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}
                 >
-                  <div className="flex items-center gap-1.5">
-                    <label htmlFor={id} className="text-sm font-semibold text-ink">
-                      {item.inspectionItemName}
-                      {item.isRequired ? (
-                        <span className="ml-0.5 text-danger" title="필수">
-                          *
-                        </span>
-                      ) : (
-                        <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
-                      )}
-                    </label>
-                    <span className="font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
-                      {item.inspectionItemCode}
+                  {/* 영문 코드를 이름 옆에 두면 판정 배지가 길어질 때 이름이 두 줄로 깨진다: 코드는 이름 아래 작은 줄로 */}
+                  <div className="flex items-start gap-1.5">
+                    <span className="flex min-w-0 flex-col">
+                      <label htmlFor={id} className="truncate text-sm font-semibold text-ink" title={item.inspectionItemName}>
+                        {item.inspectionItemName}
+                        {item.isRequired ? (
+                          <span className="ml-0.5 text-danger" title="필수">
+                            *
+                          </span>
+                        ) : (
+                          <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
+                        )}
+                      </label>
+                      <span className="truncate font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
+                        {item.inspectionItemCode}
+                      </span>
                     </span>
-                    <span className="ml-auto" data-pet-field="판정">
+                    <span className="ml-auto flex-none" data-pet-field="판정">
                       <ItemBadge item={item} preview={preview} dirty={dirty} />
                     </span>
                   </div>

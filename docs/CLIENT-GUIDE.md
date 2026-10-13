@@ -35,7 +35,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 
 ### 서버 연결 (기본)
 
-수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)를 부른다. 데이터 출처 기본값은 서버이고(`api/http.ts`의 `dataSource()`: 비우거나 `mock`이 아니면 서버), 상단 통합 검색도 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 결과에서 빠진다). 다른 기능(Message → ERP 초안 등)은 서버 모드에서도 가짜 DB를 쓴다. `NEXT_PUBLIC_DATA_SOURCE=mock`은 테스트용이다(`vitest.config.ts`가 지정, 서버 어댑터 테스트는 `useFakeServer`가 server로 바꾼다).
+수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)를 부른다. 데이터 출처 기본값은 서버이고(`api/http.ts`의 `dataSource()`: 비우거나 `mock`이 아니면 서버), 상단 통합 검색도 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 결과에서 빠진다). Message → ERP 구매요청 초안(`api/actionDrafts.ts` → `api/server/actionDrafts.ts`)도 서버를 부르므로, 서버 모드에서 가짜 DB를 쓰는 화면은 없다. `NEXT_PUBLIC_DATA_SOURCE=mock`은 테스트용이다(`vitest.config.ts`가 지정, 서버 어댑터 테스트는 `useFakeServer`가 server로 바꾼다).
 
 1. `npm run dev`로 DB·서버·화면을 띄운다. `client/.env.local`은 없어도 된다(있으면 `NEXT_PUBLIC_DATA_SOURCE`를 비우거나 `server`로, 바꾼 뒤에는 화면 서버를 다시 띄운다).
 2. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
@@ -70,7 +70,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 - 방 설정(두 모드 공통): 대화 머리의 핀 버튼 = 목록 위 고정(목록 맨 위 '고정' 묶음), 종 버튼 = 알림 끄기, 나가기 버튼 = 방 나가기(1:1 제외, 확인 창 뒤 목록으로 돌아감)(`RoomSettings.tsx`). 알림을 끈 방은 목록에 흐린 종 표시, 안 읽은 수 배지가 회색이고 레일·상단 메신저 배지 합계에서 빠진다(멘션 알림은 받는다). 가짜 DB는 `ChatRoomMemberRow.muted`·`pinnedAt`(선택 값)에 둔다.
 - 공지(두 모드 공통): 메시지 메뉴 [공지로 고정] → 대화 위 노란 공지 줄(`PinnedNotice.tsx`). 줄을 누르면 그 메시지로 이동, [x]로 내린다.
 - 메시지 보내기(두 모드 공통): 누르면 입력창을 비우고 대화에 '보내는 중' 말풍선을 바로 띄운다(`stores/useOutboxStore.ts`, `hooks/useMessenger.ts`의 `useMessageOutbox`). 저장되면 조회를 다시 읽고 말풍선을 지우며, 실패하면 이유와 [다시 보내기]·[삭제]가 있는 '전송 실패' 말풍선으로 남는다. 보관함은 브라우저 메모리라 새로고침하면 사라진다. 메시지마다 보내기 id(`clientMessageId`, UUID)를 붙여 서버 모드에서 다시 보내도 두 번 저장되지 않는다.
-- 아직 가짜 DB만 쓰는 화면(Message → ERP 초안 등)은 로그인 사원의 사원번호로 가짜 DB 사원을 찾아 쓴다(`api/actor.ts`). 서버에서 새로 등록한 사원은 가짜 DB에 없어 이 화면들을 쓸 수 없다.
+- Message → ERP 초안: 초안 값의 수량 칸은 서버·ERD와 같은 `requestedTon`이다. 서버에 없는 실행 실패 결과는 실패 코드·시도 횟수로, 실행·반려 시각은 그 상태가 된 마지막 변경 시각으로 보인다. 만들 수 없는 메시지(요청자 권한·승인권자 없음)는 미리 막지 않고 만들 때 서버 오류(COM-002·PUR-001)를 보인다.
 
 ## 3. 폴더 (`client/src/`)
 
@@ -121,7 +121,12 @@ test/            Vitest 준비 (setup.ts, actors.ts, masterSeed.ts)
 
 ## 6. P2·EX 처리 (준비 중)
 
-- P2(AI Factory Agent, Voice2ERP 회의록, AI 어시스턴트·@AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. AI·LLM 호출도 없다.
+- P2(AI Factory Agent, Voice2ERP 회의록, @AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널이다.
+- **AI 어시스턴트 패널**(`features/shell/AiPanel.tsx`, 2026-10-13~): 실제로 답한다. `api/aiAssistant.ts`가 서버 `POST /ai-assistant/messages`·`GET /ai-assistant/suggested-questions`(API-262·263, `docs/backend/ai-assistant.md`)를 부르고, LLM 연결 설정(`api/llm.ts`)처럼 가짜 DB 모드에서도 늘 서버를 부른다(서버 로그인이 없는 가짜 DB 모드에서는 추천 질문·답이 실패로 보인다).
+  - 지금은 용어 사전으로만 답하고 출처(용어 ID)를 붙인다. 데이터 조회·실행 카드·사례 검색은 다음 단계라 안내 문구로만 밝힌다.
+  - 대화는 서버에 저장하지 않는다(요구사항 21장 미결정). `stores/useAiChatStore.ts`가 이 탭 메모리에 두고, 답을 받은 최근 대화 10개를 질문과 함께 보낸다. 패널을 닫아도 남고, 새로고침하거나 다른 사원으로 들어오면 비운다. 답을 기다리는 동안 패널을 닫아도 답은 대화에 들어간다(`hooks/useAiAssistant.ts`가 훅 옵션 콜백으로 넣음).
+  - 보고 있는 화면(REQ-AST-007): 경로 + 쿼리(열어 둔 문서 id), 화면 제목, 위젯 맥락(`useShellStore.aiContext`의 label)을 함께 보낸다.
+  - 크게 펼치기(REQ-AST-001): `useShellStore.aiPanelExpanded`. 본문 전체 너비로 펼치고, 닫으면 되돌린다. Enter 보내기·Shift+Enter 줄바꿈(한글 조합 중 Enter는 보내지 않음).
   - 버튼: `<SoonButton>` / 작은 표시: `<ComingSoon grade="P2" />` / 영역: `<ComingSoonArea grade="P2" title="…">예시 내용</ComingSoonArea>`. 모두 `components/ComingSoon.tsx`.
   - 예시 내용은 `features/agent/agentExample.ts`, `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다. 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
 - 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).

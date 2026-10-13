@@ -113,11 +113,11 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 {stage.label}
               </span>
               {isMine ? (
-                // 강조 칸은 배경이 run-bg라 같은 색 태그는 묻힌다: 진한 바탕에 흰 글자로. 0건이면 흰 칸이라 옅은 태그로 둔다
+                // 강조 칸은 배경이 run-bg라 같은 색 태그는 묻힌다: 진한 바탕에 흰 글자로. 0건이면 옅게 물든 칸이라 흰 바탕 태그로 둔다
                 <span
                   className={cn(
                     'inline-flex min-h-4 flex-none items-center rounded-full px-1.5 text-2xs font-semibold whitespace-nowrap',
-                    isStrong ? 'bg-run text-white' : 'bg-run-bg text-run',
+                    isStrong ? 'bg-run text-white' : 'bg-surface text-run ring-1 ring-run/30',
                   )}
                 >
                   내 업무
@@ -152,7 +152,12 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
         const boxClass = cn(
           'flex min-w-[104px] flex-col justify-center gap-1 rounded-md border px-3 py-2',
           // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식). 내 업무 칸은 조금 넓게
-          isStrong ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]' : 'flex-1 border-line-strong bg-surface',
+          isStrong
+            ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]'
+            : // 0건이어도 내 업무 칸은 태그만으로는 다른 단계와 구분이 안 된다: 크기·글자는 그대로 두고 테두리와 바탕만 옅게 물들인다
+              isEmptyMine
+              ? 'flex-1 border-run/40 bg-run-bg/50'
+              : 'flex-1 border-line-strong bg-surface',
           // 내 업무를 강조할 때만 나머지 단계를 흐리게 (숫자·바로가기는 그대로, 올리면 또렷하게)
           highlight && !isMine && 'opacity-60 hover:opacity-100',
         );
@@ -161,7 +166,7 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
           <Fragment key={stage.key}>
             {index > 0 ? <Icon name="chevron-right" size="sm" className="flex-none self-center text-ink-2" /> : null}
             {canOpen ? (
-              <Link href={stage.screen.href} data-pet-perch={`stage:${stage.key}`} data-pet-item={stage.petItem} data-pet-item-title={stage.label} className={cn(boxClass, 'text-ink no-underline hover:border-run hover:bg-surface')}>
+              <Link href={stage.screen.href} data-pet-perch={`stage:${stage.key}`} data-pet-item={stage.petItem} data-pet-item-title={stage.label} className={cn(boxClass, 'text-ink no-underline hover:border-run', !isMine && 'hover:bg-surface')}>
                 {inner}
               </Link>
             ) : (

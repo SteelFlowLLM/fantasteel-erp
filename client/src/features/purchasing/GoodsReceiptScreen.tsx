@@ -343,10 +343,14 @@ function ReceiptWork({
         <Card petKey="card:goodsReceipts.lot">
           <CardHead title="원료 LOT" meta="확정할 때 생성" />
           <CardBody>
-            <span data-pet-item="lot" data-pet-item-title={rawMaterialLotNoPattern(line.itemCode)} className="font-mono text-base font-semibold">
-              {rawMaterialLotNoPattern(line.itemCode)}
-            </span>
-            <span className="text-cap leading-normal text-ink-3">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일) · 입고 1건마다 LOT 1개 · 잔량 = 입고 톤</span>
+            {/* 펫이 LOT 번호만 읽지 않게 번호 규칙 줄까지 한 항목으로 묶는다 (CardBody와 같은 간격이라 모양은 그대로) */}
+            <div data-pet-item="lot" data-pet-item-title={rawMaterialLotNoPattern(line.itemCode)} className="flex flex-col gap-3">
+              <span className="font-mono text-base font-semibold">{rawMaterialLotNoPattern(line.itemCode)}</span>
+              <span className="text-cap leading-normal text-ink-3">
+                <span data-pet-field="번호 매김">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일)</span> · <span data-pet-field="생성 단위">입고 1건마다 LOT 1개</span> ·{' '}
+                <span data-pet-field="잔량">잔량 = 입고 톤</span>
+              </span>
+            </div>
           </CardBody>
         </Card>
       </div>

@@ -3,7 +3,7 @@
 // 계정 선택 (옛 LoginPage의 B안 디자인). 가짜 DB 모드는 계정 선택(SPEC 5장 결정 1), 서버 모드는 사원번호·비밀번호 로그인(LoginForm).
 // 들어가면 이 탭의 sessionStorage에 사원 id를 두고 대시보드(또는 원래 가려던 화면)로 간다.
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isServerDataSource } from '@/api/http';
 import { ROLE, ROLE_LABEL } from '@/codes';
 import { Icon, type IconName } from '@/components/Icon';
@@ -21,51 +21,31 @@ const FEATURES: readonly { icon: IconName; title: string; text: string }[] = [
   { icon: 'trace', title: '원료부터 코일까지 LOT 추적', text: '원료 → 용선 → 히트 → 슬래브 → 코일 정·역추적' },
 ];
 
-/** 소개 그림 (옛 로그인 화면 SVG 그대로) */
-const ILLUSTRATION_BARS: readonly (readonly [number, number, number, string])[] = [
-  [300, 186, 48, '#23507F'],
-  [330, 162, 72, '#5B86B5'],
-  [360, 176, 58, '#23507F'],
-  [390, 146, 88, '#5B86B5'],
-  [420, 168, 66, '#23507F'],
-  [450, 154, 80, '#5B86B5'],
-  [480, 190, 44, '#23507F'],
-  [510, 158, 76, '#5B86B5'],
-  [540, 172, 62, '#23507F'],
-  [570, 150, 84, '#5B86B5'],
-  [600, 182, 52, '#23507F'],
-];
+/**
+ * 로드맵 페이지는 폭이 좁으면 3D 화면 56% + 설명 카드 44%로 나뉘어, 로그인 화면 칸에서는 3D가 몇 줄 높이밖에 안 된다.
+ * 노션에 올린 파일을 그대로 두려고 파일은 고치지 않고, 같은 출처 iframe에 설명 카드를 숨기는 스타일만 덧붙인다.
+ * 3D 캔버스는 창 크기 변경 때 다시 재므로 resize를 한 번 보낸다.
+ */
+const ROADMAP_SRC = '/roadmap/erp-3d-roadmap.html';
+const ROADMAP_STYLE_ID = 'login-roadmap-fit';
+/** 로드맵의 기본 시점을 조작 UI 없이 찍어 둔 그림. 노션 로드맵을 고치면 함께 다시 찍는다 */
+const ROADMAP_PREVIEW = '/roadmap/erp-3d-roadmap-preview.webp';
+
+function fitRoadmapToStage(frame: HTMLIFrameElement) {
+  const doc = frame.contentDocument;
+  // 아직 불러오는 중이면(head가 비어 있을 수 있다) load 이벤트 때 다시 불린다
+  if (!doc || doc.readyState !== 'complete' || !doc.URL.endsWith(ROADMAP_SRC) || doc.getElementById(ROADMAP_STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = ROADMAP_STYLE_ID;
+  style.textContent = 'body{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}#panel{display:none!important}';
+  doc.head.append(style);
+  frame.contentWindow?.dispatchEvent(new Event('resize'));
+}
 
 /** 다른 사이트로 나가지 않도록 같은 앱 안의 경로만 받는다 */
 function safeNext(next: string | null): string {
   if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/dashboard';
   return next;
-}
-
-function Illustration() {
-  return (
-    <svg viewBox="0 0 640 250" aria-hidden="true" className="block w-full max-w-[640px] flex-none">
-      <rect x="0" y="40" width="260" height="210" fill="#223040" />
-      <rect x="20" y="64" width="220" height="24" rx="2" fill="#23507F" />
-      <rect x="20" y="94" width="220" height="24" rx="2" fill="#23507F" />
-      <rect x="20" y="124" width="220" height="24" rx="2" fill="#5B86B5" />
-      <rect x="20" y="154" width="176" height="24" rx="2" fill="#23507F" />
-      <rect x="20" y="184" width="120" height="24" rx="2" fill="#5B86B5" />
-      <rect x="20" y="214" width="64" height="24" rx="2" fill="#23507F" />
-      <rect x="280" y="0" width="150" height="104" fill="#223040" />
-      <rect x="296" y="16" width="118" height="32" rx="2" fill="#5B86B5" />
-      <rect x="296" y="56" width="118" height="32" rx="2" fill="#23507F" />
-      <rect x="446" y="0" width="194" height="104" fill="#23507F" />
-      <rect x="462" y="18" width="160" height="12" rx="2" fill="#223040" />
-      <rect x="462" y="38" width="112" height="12" rx="2" fill="#223040" />
-      <rect x="462" y="58" width="136" height="12" rx="2" fill="#223040" />
-      <rect x="280" y="120" width="360" height="130" fill="#223040" />
-      {ILLUSTRATION_BARS.map(([x, y, height, color]) => (
-        <rect key={x} x={x} y={y} width="18" height={height} rx="2" fill={color} />
-      ))}
-      <rect x="280" y="110" width="96" height="3" fill="#E0762E" />
-    </svg>
-  );
 }
 
 export function AccountPicker() {
@@ -80,6 +60,19 @@ export function AccountPicker() {
   useEffect(() => {
     if (hydrated && employeeId !== null) router.replace(next);
   }, [hydrated, employeeId, next, router]);
+
+  // 3D 로드맵은 정점 59만 개짜리 WebGL이라 로그인 화면이 열릴 때마다 돌리지 않는다. 그림을 먼저 보이고 누르면 켠다
+  const [roadmapOn, setRoadmapOn] = useState(false);
+  // 화면이 붙기 전에 iframe이 먼저 다 열렸을 수도 있어서 onLoad 대신 지금 상태도 확인한다
+  const roadmapRef = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const frame = roadmapRef.current;
+    if (!roadmapOn || !frame) return;
+    const fit = () => fitRoadmapToStage(frame);
+    fit();
+    frame.addEventListener('load', fit);
+    return () => frame.removeEventListener('load', fit);
+  }, [roadmapOn]);
 
   return (
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
@@ -96,11 +89,38 @@ export function AccountPicker() {
             수주에서 출하까지,
             <br />한 흐름으로 일해요.
           </h1>
-          <p className="max-w-[560px] text-base leading-relaxed text-nav-ink">
-            영업·구매·생산·품질·물류가 같은 수주와 LOT를 보고 일해요. 재고는 시스템이 먼저 예약하고, LOT 배정은 시스템이 추천한 뒤 담당자가 확정해요.
-          </p>
         </div>
-        <Illustration />
+        {/* 노션 「로드맵」 페이지에 올린 3D 기능 로드맵과 같은 파일(public/roadmap). 자체 WebGL·조작 UI를 가진 한 장짜리 페이지라 iframe으로 따로 띄운다 */}
+        {roadmapOn ? (
+          <iframe
+            ref={roadmapRef}
+            src={ROADMAP_SRC}
+            title="철강제조 ERP 3D 기능 로드맵"
+            className="block min-h-[280px] w-full flex-1 rounded-md border-0 bg-nav-dark-2"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setRoadmapOn(true)}
+            className="group relative block min-h-[280px] w-full flex-1 overflow-hidden rounded-md bg-nav-dark-2 text-left"
+          >
+            <img
+              src={ROADMAP_PREVIEW}
+              alt=""
+              className="absolute inset-0 size-full object-cover motion-safe:transition-transform motion-safe:duration-300 group-hover:scale-[1.02]"
+            />
+            <span className="absolute inset-x-0 top-0 flex flex-col gap-0.5 bg-linear-to-b from-nav-dark/90 to-transparent px-4 pt-3 pb-10">
+              <b className="text-base font-semibold">철강제조 ERP 기능 로드맵</b>
+              <span className="text-xs text-nav-ink">수주에서 밀시트까지, P1 16단계</span>
+            </span>
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex h-10 flex-none items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-nav-dark shadow-lg group-hover:bg-brand-tint">
+                <Icon name="eye" />
+                3D로 돌려 보기
+              </span>
+            </span>
+          </button>
+        )}
         <ul className="mt-auto flex flex-col gap-3.5 border-t border-nav-dark-2 pt-5.5">
           {FEATURES.map((feature) => (
             <li key={feature.title} className="flex items-center gap-3.5">

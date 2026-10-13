@@ -42,9 +42,9 @@ const resultGroupOf = (html: string) => html.match(/<div[^>]*role="group"[^>]*ar
 const processGroupOf = (html: string) => html.slice(html.indexOf('aria-label="공정별 보기"'), html.indexOf('aria-label="판정 결과"'));
 
 describe('검사 입력 목록 머리·빈 화면', () => {
-  it('판정 결과 칩은 줄바꿈 없이 한 줄이고, 순서는 전체 · 합격 · 불합격 · 판정 대기', async () => {
+  it('판정 결과 칩은 같은 폭 4칸 한 줄이고(세 자리 건수도 잘리지 않게), 순서는 전체 · 합격 · 불합격 · 판정 대기', async () => {
     const { html } = await render();
-    expect(resultGroupOf(html)).toContain('flex-nowrap');
+    expect(resultGroupOf(html)).toContain('grid grid-cols-4');
     const group = html.slice(html.indexOf('aria-label="판정 결과"'));
     const order = ['>전체 ', '>합격', '>불합격', '>판정 대기'].map((label) => group.indexOf(label));
     expect(order.every((i) => i > 0)).toBe(true);

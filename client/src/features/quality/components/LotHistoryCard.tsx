@@ -36,7 +36,8 @@ function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemName
     <div className="flex flex-col gap-0.5 text-cap text-ink-2">
       {after ? (
         <span>
-          판정 {before && before !== after ? `${INSPECTION_RESULT_LABEL[before]} → ` : ''}
+          {/* 칸 이름 "판정"과 값 "판정 대기"가 붙으면 "판정 판정 대기"로 읽힌다: 쌍점으로 나눈다 */}
+          <span className="text-ink-3">판정 결과:</span> {before && before !== after ? `${INSPECTION_RESULT_LABEL[before]} → ` : ''}
           <b className="font-semibold">{INSPECTION_RESULT_LABEL[after]}</b>
         </span>
       ) : null}
@@ -91,8 +92,9 @@ export function LotHistoryCard({
               title: (
                 <span className="flex flex-wrap items-center gap-1.5" data-pet-item="businessEvent" data-pet-item-title={event.eventNo}>
                   <span className="inline-flex" data-pet-field="주체">
+                    {/* Tag는 글자만 받으면 그 글자를 펫 용어(data-pet-term)로 단다. 사람 이름은 용어가 아니라 이 기록의 값이라 요소로 감싸 넘긴다 */}
                     <Tag size="sm" tone={event.actorType === 'SYSTEM' ? 'run' : 'outline'}>
-                      {event.actorName}
+                      <span>{event.actorName}</span>
                     </Tag>
                   </span>
                   <b className="font-semibold" data-pet-field="작업">

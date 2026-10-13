@@ -100,7 +100,8 @@ function InspectionMatrix({ headLabel, kind, rows, emptyText }: { headLabel: str
   );
 }
 
-export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot }) {
+/** forPrint = 인쇄 전용 사본. 평소엔 display:none이라 크기가 0인 사본에 펫 설명 키를 달면 펫이 엉뚱한 곳을 가리킨다 */
+export function MillSheetPaper({ snapshot: s, forPrint = false }: { snapshot: MillSheetSnapshot; forPrint?: boolean }) {
   const lotRows = lotRowsOf(s.items);
   const hasCoil = lotRows.some((r) => r.lot.lotType === 'COIL');
   const unit = (() => {
@@ -112,8 +113,8 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
   return (
     <article
       aria-label={`밀시트 ${s.millSheetNo}`}
-      data-pet-perch=""
-      data-pet-target="card:millSheets.paper"
+      data-pet-perch={forPrint ? undefined : ''}
+      data-pet-target={forPrint ? undefined : 'card:millSheets.paper'}
       className="mx-auto flex w-full max-w-[1000px] flex-none flex-col gap-4 rounded-sm border border-line bg-white p-8 text-ink shadow-1 print:max-w-none print:border-0 print:p-0 print:shadow-none"
     >
       <header className="flex items-start gap-4 border-b-2 border-ink pb-3">

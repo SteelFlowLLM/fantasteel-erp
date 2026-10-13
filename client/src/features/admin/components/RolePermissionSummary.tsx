@@ -1,4 +1,5 @@
 // 역할 권한 요약: 사용 권한 · 조회 권한 · 권한 없음 (PERMISSION_LEVEL)
+// 권한 하나하나에 숨은 '권한 수준' 값을 둔다: 화면 도우미 펫이 항목을 읽을 때(이름만으로는 읽을 값이 없다)와 화면 낭독기가 쓴다.
 import { PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL, PERMISSIONS, type Permission, type PermissionLevel } from '@/codes';
 import { Icon } from '@/components/Icon';
 
@@ -17,6 +18,9 @@ export function RolePermissionSummary({ permissions }: { permissions: readonly {
             <span key={permission} className="inline-flex items-center gap-1 text-ok" data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
               <Icon name="check" size="sm" />
               <span className="text-ink">{PERMISSION_LABEL[permission]}</span>
+              <span className="sr-only" data-pet-field="권한 수준">
+                {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}
+              </span>
             </span>
           ))
         ) : (
@@ -32,6 +36,9 @@ export function RolePermissionSummary({ permissions }: { permissions: readonly {
             <span key={permission} className="inline-flex items-center gap-1 text-run" data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
               <Icon name="eye" size="sm" />
               <span className="text-ink-2">{PERMISSION_LABEL[permission]}</span>
+              <span className="sr-only" data-pet-field="권한 수준">
+                {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}
+              </span>
             </span>
           ))
         ) : (

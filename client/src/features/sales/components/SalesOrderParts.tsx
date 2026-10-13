@@ -30,11 +30,9 @@ export function SalesOrderStatusBadge({ status }: { status: SalesOrderItemStatus
 /** 납기 위험 (공통 코드 비고: 계산 표시값, 납기 위험 기준일은 생산 설정값) */
 export function DueRiskBadge() {
   return (
-    <span data-pet-term="납기 위험" className="contents">
-      <Badge tone="danger" title="납기까지 남은 날이 납기 위험 기준일 이하인데 아직 출하가 끝나지 않았어요">
-        납기 위험
-      </Badge>
-    </span>
+    <Badge tone="danger" title="납기까지 남은 날이 납기 위험 기준일 이하인데 아직 출하가 끝나지 않았어요">
+      납기 위험
+    </Badge>
   );
 }
 

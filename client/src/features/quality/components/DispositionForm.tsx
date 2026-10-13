@@ -4,7 +4,6 @@
 import { useState } from 'react';
 import { InputError } from '@/api/client';
 import type { RejectedLotListRow } from '@/api/dispositions';
-import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -60,15 +59,14 @@ export function DispositionForm({
         }}
       >
         <CardBody>
+          {/* 지정 전에는 카드 머리의 "현재 미지정"이 같은 말이라 따로 줄을 두지 않는다 */}
           {row.dispositionStatus ? (
             <div className="flex flex-col gap-0.5 text-cap text-ink-3" data-pet-term="지정 · 사유">
               {/* 시각을 모르면(작업 로그도 없으면) "준비 중" 대신 줄을 뺀다 */}
               {setAt ? <span>지정 {fmtDateTime(setAt)}</span> : null}
               <span className="text-xs text-ink-2">사유: {row.dispositionReason ?? '—'}</span>
             </div>
-          ) : (
-            <span className="text-cap text-ink-3">아직 불합격 상태를 지정하지 않았어요</span>
-          )}
+          ) : null}
 
           {/* 세 가지를 한 줄에 나란히: 폭에 따라 칸 수가 바뀌면 폐기만 다음 줄에 혼자 떨어졌다 */}
           <div role="radiogroup" aria-label="불합격 상태" className="grid grid-cols-3 gap-2">
@@ -112,9 +110,8 @@ export function DispositionForm({
             </Button>
           </div>
 
-          <Banner className="text-xs leading-snug">
-            불합격 상태와 사유만 기록해요. 격하 재판정·재작업·폐기 재고 처리는 하지 않아요. 불합격 LOT은 이미 예약·배정·출고 대상에서 빠져 있어요. 지정·변경 내역은 작업 로그에 남아요.
-          </Banner>
+          {/* 예약·배정·출고에서 빠진다는 말은 왼쪽 목록 안내에 있어 여기서는 한 줄로 줄인다 */}
+          <p className="m-0 text-cap text-ink-3">상태와 사유만 기록해요 · 재판정·재작업·폐기 처리는 하지 않아요 · 기록은 작업 로그에 남아요</p>
         </CardBody>
       </form>
     </Card>
