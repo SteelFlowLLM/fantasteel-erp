@@ -425,14 +425,20 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
               {
                 label: '영향받는 수주 품목',
                 value: soItem ? (
-                  <span>
-                    <Link href={`/sales-orders/${soItem.salesOrderId}`} className="font-mono text-run hover:underline">
-                      {soItem.salesOrderNo}
-                    </Link>{' '}
-                    품목 {soItem.lineNo}{' '}
-                    <span className="text-cap text-ink-3">
-                      {soItem.customerName} · 납기 {fmtDate(soItem.dueDate)} {dLabel(soItem.dueDate)} · 수주 매수 {soItem.orderedQty}매 ·{' '}
-                      {SALES_ORDER_ITEM_STATUS_LABEL[soItem.salesOrderItemStatus]}
+                  // 한 덩어리로 두면 칸이 좁을 때 날짜 중간("2026-" / "10-12")에서 줄이 바뀐다: 두 줄로 나누고 조각마다 줄바꿈을 막는다
+                  <span className="flex flex-col">
+                    <span>
+                      <Link href={`/sales-orders/${soItem.salesOrderId}`} className="font-mono text-run hover:underline">
+                        {soItem.salesOrderNo}
+                      </Link>{' '}
+                      품목 {soItem.lineNo} · {soItem.customerName}
+                    </span>
+                    <span className="text-cap font-normal text-ink-3" title={`납기 ${fmtDate(soItem.dueDate)} · 수주 매수 ${soItem.orderedQty}매`}>
+                      <span className="whitespace-nowrap">
+                        납기 {fmtDate(soItem.dueDate).slice(5)} ({dLabel(soItem.dueDate)})
+                      </span>{' '}
+                      · <span className="whitespace-nowrap">{soItem.orderedQty}매</span> ·{' '}
+                      <span className="whitespace-nowrap">{SALES_ORDER_ITEM_STATUS_LABEL[soItem.salesOrderItemStatus]}</span>
                     </span>
                   </span>
                 ) : (
