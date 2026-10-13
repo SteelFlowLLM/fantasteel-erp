@@ -69,7 +69,7 @@
 | `get_purchase_requisitions` | `PurchasingService.listRequisitions` (GET purchase-requisitions) | SERVICE: 구매요청 등록 VIEW 또는 부서장 | `status`, `keyword`(번호·원료) |
 | `get_purchase_orders` | `PurchasingService.listPurchaseOrders` (GET purchase-orders) | 발주 확정 VIEW | `status`, `keyword`(번호·공급업체·원료). 품목별 입고예정일·미입고 톤(= 입고예정) |
 | `get_goods_receipts` | `PurchasingService.listGoodsReceipts` (GET goods-receipts) | 입고 확정 VIEW | `keyword`(입고·발주 번호·원료). 거를 말이 없으면 최신 15건 |
-| `get_shipment_requests` | `ShipmentService.list` (GET shipment-requests) | SERVICE: 출하요청 관리 또는 출고 확정 VIEW | `status`, `shipmentRequestNo` |
+| `get_shipment_requests` | `ShipmentService.list` (GET shipment-requests) | SERVICE: 출하요청 관리 또는 출고 확정 VIEW | `status`, `shipmentRequestNo`, `customerName`(API는 고객사 id만 받아 100건을 읽어 이름으로 거름) |
 | `get_mill_sheets` | `ShipmentService.listMillSheets` (GET mill-sheets) | 밀시트 조회 VIEW | `keyword`(밀시트·출하요청·수주번호) |
 | `get_business_events` | `BusinessEventService.list` (GET business-events) | 없음(전 역할) | `salesOrderNo`, `lotNo`, `from`·`to`. 최신순 15건, 변경 전·후 원본은 넘기지 않음 |
 
@@ -79,7 +79,7 @@
 - 용어·절차는 참고 자료(찾은 용어)만 근거로 하고, 쓴 문장 끝에 `[TRM-056]`을 붙인다.
 - 모든 문장을 해요체로 답한다. 지시문을 반말로 쓰면 작은 모델이 답에 반말을 섞어서 지시문도 해요체로 쓴다.
 - 업무 데이터는 반드시 도구로 조회하고, 숫자는 도구 결과에 있는 값만 단위(매·톤·건·일)와 함께 말한다. 날짜 차이·합계·비율은 직접 계산하지 않고, 결과에 없는 평가·권고는 덧붙이지 않는다. 알맞은 도구가 없는 데이터는 아직 조회할 수 없다고 답한다.
-- 실제 모델(qwen3.8-flash-next) 확인에서 나온 문제와 처리: 거르기 전 전체 건수를 결과에 넣으면 그 수를 답으로 말함 → 거른 뒤 수만 넣음 / 납기까지 기간을 짐작함 → 남은 일수를 결과에 넣음 / 반말이 섞임 → 지시문 해요체.
+- 실제 모델(qwen3.8-flash-next) 확인에서 나온 문제와 처리: 거르기 전 전체 건수를 결과에 넣으면 그 수를 답으로 말함 → 거른 뒤 수만 넣음 / 납기까지 기간을 짐작함 → 남은 일수를 결과에 넣음 / 반말이 섞임 → 지시문 해요체 / 도구 설명에 상태 코드만 적으니 표시명을 지어내 영문 코드와 함께 씀 → `codeLabelList`로 "코드(표시명)"을 적고, 영문 코드를 답에 쓰지 않는 규칙을 넣음. / 도구로 못 하는 조회(고객사로 거르기)를 제안함 → 도구에 있는 조건으로만 제안하게 하고 고객사 거르기를 더함 / 참고 자료에 없는 상태 뜻을 "참고로"로 덧붙임 → 덧붙임도 금지.
 - 권한 없음이면 데이터를 말하지 않고 조회할 수 있는 역할을 안내한다.
 - 자료·도구 결과에 없는 내용은 확인할 수 없다고 답한다. 등록·확정·승인 요청은 직접 할 수 없다고 답한다. 사용 금지 동의어 대신 한글명을 쓴다.
 - "이 수주"처럼 화면을 가리키면 화면 주소에서 번호·id를 찾고, 없으면 되묻는다.

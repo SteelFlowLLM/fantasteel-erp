@@ -82,6 +82,11 @@ describe('프롬프트 (REQ-AST-007·009)', () => {
     // 지시문이 반말이면 작은 모델이 답에도 반말을 섞는다 (실제 모델 확인)
     expect(system.content).not.toMatch(/너는|어시스턴트야/);
     expect(system.content).toContain('직접 계산하지 않고');
+    // 상태 표시명을 지어내 영문 코드와 함께 쓰던 일이 있었다 (실제 모델 확인)
+    expect(system.content).toContain('영문 코드 값(예: REQUESTED)은 답에 쓰지 않아요');
+    // 도구로 못 하는 조회를 제안하고, 참고 자료에 없는 상태 뜻을 덧붙이던 일이 있었다 (실제 모델 확인)
+    expect(system.content).toContain('도구에 있는 조건으로만 제안해요');
+    expect(system.content).toContain('"참고로" 같은 덧붙임으로도 설명하지 않아요');
     expect(system.content).toContain('김영업 · 역할 영업');
     expect(system.content).toContain('수주 관리 (/sales-orders?id=3)');
     expect(system.content).toContain('[TRM-056] 예약 (Reservation)');

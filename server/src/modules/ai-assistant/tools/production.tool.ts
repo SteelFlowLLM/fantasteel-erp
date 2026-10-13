@@ -11,7 +11,7 @@ import {
 } from '@fantasteel/shared';
 import type { ProductionResultService } from '../../production/production-result.service';
 import type { ProductionService } from '../../production/production.service';
-import { limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, ToolArgumentError, type AssistantTool } from './assistant-tool';
 
 /** 번호로 거를 때 한 번에 읽는 계획 수 (API 상한 100) */
 const SCAN_SIZE = 100;
@@ -29,7 +29,7 @@ export function productionPlanTool(plans: ProductionService): AssistantTool {
       parameters: {
         type: 'object',
         properties: {
-          status: { type: 'string', enum: PLAN_STATUSES, description: '계획 상태' },
+          status: { type: 'string', enum: PLAN_STATUSES, description: `계획 상태: ${codeLabelList(PRODUCTION_PLAN_STATUS_LABEL)}` },
           keyword: { type: 'string', description: '생산계획 번호·수주번호·규격 일부 (예: PP-2610-0001, SO-2610-001)' },
         },
       },
@@ -59,7 +59,7 @@ export function productionResultTool(plans: ProductionService, results: Producti
         type: 'object',
         properties: {
           productionPlanNo: { type: 'string', description: '생산계획 번호 (정확히, 예: PP-2610-0001)' },
-          processType: { type: 'string', enum: PROCESS_TYPES, description: 'IRONMAKING 제선, STEELMAKING 제강, CONTINUOUS_CASTING 연주, HOT_ROLLING 열연' },
+          processType: { type: 'string', enum: PROCESS_TYPES, description: `공정: ${codeLabelList(PROCESS_TYPE_LABEL)}` },
         },
       },
     },
