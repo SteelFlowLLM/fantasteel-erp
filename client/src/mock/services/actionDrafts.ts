@@ -6,6 +6,7 @@
 //   구매요청을 만들면(action_draft_id) EXECUTED. 그 구매요청은 따로 부서장 승인을 거친다.
 //   실행이 실패하면 상태를 바꾸지 않고 execution_result에 에러 코드·시도 횟수를 남긴다(APPROVED 유지, 다시 실행 가능).
 // - 반려하면 REJECTED로 끝난다. 같은 초안을 두 번 실행하지 않는다.
+import type { PurchaseRequisitionDraftPayload as DraftPayloadView } from '@fantasteel/shared';
 import { ACTION_TYPE_GRADE, ACTION_TYPE_LABEL, type ActionType, type DraftStatus, type ErrorCode } from '@/codes';
 import { ApiError, InputError } from '@/api/errors';
 import { decCmp, isDecimalText } from '@/lib/decimal';
@@ -19,15 +20,8 @@ import { postSystemMessage } from '@/mock/services/workRooms';
 
 type Tables = Readonly<MockTables>;
 
-/** 구매요청 초안 추출 스키마 (REQ-ACT-001: 원료 품목, 수량(톤), 희망 입고일, 요청자 — 요청자는 draft.requester_id) */
-export type PurchaseRequisitionDraftPayload = {
-  itemId: number | null;
-  requiredTon: string | null;
-  desiredReceiptDate: string | null;
-  requestReason: string | null;
-  /** 원본 메시지 글 (참고용 복사) */
-  sourceText: string | null;
-};
+/** 구매요청 초안 값 (서버와 같은 모양). jsonb(JsonValue)에 넣으려면 interface가 아닌 타입 별칭이어야 한다 */
+export type PurchaseRequisitionDraftPayload = Pick<DraftPayloadView, keyof DraftPayloadView>;
 
 export interface ActionDraftField {
   key: keyof PurchaseRequisitionDraftPayload;
@@ -52,7 +46,7 @@ export interface ActionTypeDefinition {
 
 const PURCHASE_REQUISITION_FIELDS: readonly ActionDraftField[] = [
   { key: 'itemId', label: '원료 품목', required: true },
-  { key: 'requiredTon', label: '수량(톤)', required: true },
+  { key: 'requestedTon', label: '수량(톤)', required: true },
   { key: 'desiredReceiptDate', label: '희망 입고일', required: true },
   { key: 'requestReason', label: '요청 근거', required: false },
 ];
@@ -62,7 +56,7 @@ function executePurchaseRequisition(tx: MockTx, actor: PersonActor, draft: Actio
   const message = findById(tx.tables, 'message', draft.messageId);
   const purchaseRequisition = createPurchaseRequisition(tx, actor, {
     itemId: payload.itemId ?? 0,
-    requestedTon: payload.requiredTon ?? '0',
+    requestedTon: payload.requestedTon ?? '0',
     desiredReceiptDate: payload.desiredReceiptDate,
     requestReason: payload.requestReason ?? (message?.content ? `메시지: ${message.content}`.slice(0, 500) : null),
     actionDraftId: draft.id,
@@ -95,7 +89,7 @@ export function draftPayloadOf(draft: ActionDraftRow): PurchaseRequisitionDraftP
   const str = (v: JsonValue | undefined) => (typeof v === 'string' && v.trim() !== '' ? v : null);
   return {
     itemId: typeof p.itemId === 'number' ? p.itemId : null,
-    requiredTon: str(p.requiredTon),
+    requestedTon: str(p.requestedTon),
     desiredReceiptDate: str(p.desiredReceiptDate),
     requestReason: str(p.requestReason),
     sourceText: str(p.sourceText),
@@ -110,7 +104,7 @@ export function unresolvedDraftFields(tables: Tables, draft: ActionDraftRow): st
   const missing: string[] = [];
   const item = findById(tables, 'item', p.itemId);
   if (!item || item.itemType !== 'RAW_MATERIAL') missing.push('원료 품목');
-  if (!p.requiredTon || !isDecimalText(p.requiredTon) || decCmp(p.requiredTon, 0) <= 0 || !/^\d{1,9}(\.\d{1,3})?$/.test(p.requiredTon)) missing.push('수량(톤)');
+  if (!p.requestedTon || !isDecimalText(p.requestedTon) || decCmp(p.requestedTon, 0) <= 0 || !/^\d{1,9}(\.\d{1,3})?$/.test(p.requestedTon)) missing.push('수량(톤)');
   if (!p.desiredReceiptDate || !isDateText(p.desiredReceiptDate)) missing.push('희망 입고일');
   return missing;
 }
@@ -135,7 +129,7 @@ export function createDraftFromMessage(tx: MockTx, actor: PersonActor, input: { 
   if (!tx.tables.employee.some((e) => e.id === message.senderId)) inputError('messageId', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
   const existing = tx.tables.actionDraft.find((d) => d.messageId === message.id && d.actionType === actionType && d.draftStatus !== 'REJECTED');
   if (existing) return { draft: existing, created: false };
-  const payload: PurchaseRequisitionDraftPayload = { itemId: null, requiredTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content };
+  const payload: PurchaseRequisitionDraftPayload = { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content };
   const draft = insertRow(tx, 'actionDraft', {
     actionType,
     draftStatus: 'AI_GENERATED',
@@ -189,10 +183,10 @@ export function updateDraft(
     }
     next.itemId = input.payload.itemId;
   }
-  if (input.payload.requiredTon !== undefined) {
-    const text = (input.payload.requiredTon ?? '').trim();
-    if (text && !/^\d{1,9}(\.\d{1,3})?$/.test(text)) errors.add('requiredTon', '수량(톤)은 소수 3자리까지 숫자로 입력해 주세요');
-    next.requiredTon = text || null;
+  if (input.payload.requestedTon !== undefined) {
+    const text = (input.payload.requestedTon ?? '').trim();
+    if (text && !/^\d{1,9}(\.\d{1,3})?$/.test(text)) errors.add('requestedTon', '수량(톤)은 소수 3자리까지 숫자로 입력해 주세요');
+    next.requestedTon = text || null;
   }
   if (input.payload.desiredReceiptDate !== undefined) {
     const text = (input.payload.desiredReceiptDate ?? '').trim();
@@ -270,7 +264,7 @@ export function confirmDraft(tx: MockTx, actor: PersonActor, input: { actionDraf
     beforeData: draftSnapshot(draft),
     afterData: draftSnapshot(approved),
     reasonCode: 'DRAFT_CONFIRMED',
-    reasonText: `요청자가 ${withEulReul(`초안 #${draft.id}`)} 확인·확정 (${itemName} ${payload.requiredTon ?? '-'}t, 희망 입고일 ${payload.desiredReceiptDate ?? '-'})`,
+    reasonText: `요청자가 ${withEulReul(`초안 #${draft.id}`)} 확인·확정 (${itemName} ${payload.requestedTon ?? '-'}t, 희망 입고일 ${payload.desiredReceiptDate ?? '-'})`,
     actionDraftId: draft.id,
     messageId: draft.messageId,
   });

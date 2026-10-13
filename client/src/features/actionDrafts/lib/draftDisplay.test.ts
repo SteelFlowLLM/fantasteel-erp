@@ -39,29 +39,29 @@ describe('실행 결과 읽기', () => {
 });
 
 describe('입력 폼', () => {
-  const payload = { itemId: 3, requiredTon: '20.000', desiredReceiptDate: '2026-10-20', requestReason: null };
+  const payload = { itemId: 3, requestedTon: '20.000', desiredReceiptDate: '2026-10-20', requestReason: null };
 
   it('저장된 톤은 끝자리 0을 지워 보이고, 빈칸은 null로 저장한다', () => {
     expect(formatTonInput('20.000')).toBe('20');
     expect(formatTonInput('1.500')).toBe('1.5');
     expect(formatTonInput(null)).toBe('');
     const form = buildDraftForm(payload);
-    expect(form).toEqual({ itemId: 3, requiredTon: '20', desiredReceiptDate: '2026-10-20', requestReason: '' });
-    expect(buildDraftPayload({ ...form, requiredTon: ' ', requestReason: ' 10월 생산분 ' })).toEqual({
+    expect(form).toEqual({ itemId: 3, requestedTon: '20', desiredReceiptDate: '2026-10-20', requestReason: '' });
+    expect(buildDraftPayload({ ...form, requestedTon: ' ', requestReason: ' 10월 생산분 ' })).toEqual({
       itemId: 3,
-      requiredTon: null,
+      requestedTon: null,
       desiredReceiptDate: '2026-10-20',
       requestReason: '10월 생산분',
     });
-    expect(isSameDraftForm(form, { ...form, requiredTon: '20 ' })).toBe(true);
+    expect(isSameDraftForm(form, { ...form, requestedTon: '20 ' })).toBe(true);
     expect(isSameDraftForm(form, { ...form, itemId: null })).toBe(false);
   });
 
   it('미확정 표시는 저장된 값 기준이고, 고치는 중인 칸은 뺀다', () => {
-    const saved = buildDraftForm({ itemId: null, requiredTon: null, desiredReceiptDate: null, requestReason: null });
+    const saved = buildDraftForm({ itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null });
     const unresolved = ['원료 품목', '수량(톤)', '희망 입고일'];
     expect(isFieldUnresolved('itemId', unresolved, saved, saved)).toBe(true);
-    expect(isFieldUnresolved('requiredTon', unresolved, { ...saved, requiredTon: '20' }, saved)).toBe(false);
+    expect(isFieldUnresolved('requestedTon', unresolved, { ...saved, requestedTon: '20' }, saved)).toBe(false);
     expect(isFieldUnresolved('requestReason', unresolved, saved, saved)).toBe(false);
   });
 });

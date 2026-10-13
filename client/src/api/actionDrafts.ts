@@ -1,9 +1,12 @@
 // Message → ERP 구매요청 초안 api (REQ-ACT-001~004, BP-ACT-01, 13.4).
 // 규칙(요청자만 확정·ACT-001·업무 유형 등록부 실행·중복 실행 방지·작업 로그)은 core 서비스(mock/services/actionDrafts.ts)가 한다.
 // 이 파일은 권한 확인(requireActor) → core 호출 → 화면용 모양만 맡는다.
+// 서버 모드(기본)면 실제 서버를 부른다 (api/server/actionDrafts.ts). 요청자·방 멤버·권한·필수값·실행은 서버가 확인한다.
 import { CHAT_ROOM_TYPE_LABEL, PERMISSION, type ActionType, type DraftStatus } from '@/codes';
 import { ApiError, mockMutation, mockQuery } from '@/api/client';
 import { requireActor } from '@/api/actor';
+import { isServerDataSource } from '@/api/http';
+import { serverActionDraftApi } from '@/api/server/actionDrafts';
 import { permissionMapOf } from '@/api/orgViews';
 import { canUse } from '@/lib/permissions';
 import type { MockTables } from '@/mock/schema';
@@ -209,21 +212,27 @@ function findRequesterBlockReason(tables: Tables, requesterId: number): string |
 export const actionDraftApi = {
   /** 초안 상세 (구매요청 조회 이상) */
   get: (actionDraftId: number): Promise<DraftDetailView> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverActionDraftApi.get(actionDraftId)
+      : mockQuery((tables) => {
       const actor = requireActor(tables, { view: DRAFT_PERMISSION });
       return buildDetailView(tables, actionDraftId, actor.employee.id);
     }),
 
   /** 내가 요청자인 초안 (최근 것 먼저) */
   listMine: (): Promise<DraftListItemView[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverActionDraftApi.listMine()
+      : mockQuery((tables) => {
       const actor = requireActor(tables, { view: DRAFT_PERMISSION });
       return listActionDrafts(tables, { requesterId: actor.employee.id }).map((view) => buildListItem(tables, view));
     }),
 
   /** 이 채팅방 메시지에 달린 초안 (방 멤버만, 반려된 초안 포함) */
   listOfRoom: (chatRoomId: number): Promise<RoomDraftView[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverActionDraftApi.listOfRoom(chatRoomId)
+      : mockQuery((tables) => {
       const actor = requireActor(tables, { view: DRAFT_PERMISSION });
       if (!tables.chatRoomMember.some((m) => m.chatRoomId === chatRoomId && m.employeeId === actor.employee.id)) {
         throw new ApiError('COM-002', '채팅방 멤버만 볼 수 있어요');
@@ -237,7 +246,9 @@ export const actionDraftApi = {
 
   /** 이 메시지로 초안을 만들 수 있는지 — 요청자(메시지 작성자)가 확정할 수 있어야 한다 (방 멤버만) */
   checkRequester: (messageId: number): Promise<DraftRequesterCheck> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverActionDraftApi.checkRequester()
+      : mockQuery((tables) => {
       const actor = requireActor(tables, { view: DRAFT_PERMISSION });
       const message = tables.message.find((m) => m.id === messageId);
       if (!message) throw new ApiError('COM-003', `메시지 ${messageId}`);
@@ -252,7 +263,9 @@ export const actionDraftApi = {
    * 요청자(메시지 작성자)가 확정할 수 없으면 COM-002 (findRequesterBlockReason).
    */
   createFromMessage: (input: { messageId: number }): Promise<{ id: number; created: boolean }> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverActionDraftApi.createFromMessage(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: DRAFT_PERMISSION });
       const message = tx.tables.message.find((m) => m.id === input.messageId); // 없으면 core가 COM-003
       const blockReason = message ? findRequesterBlockReason(tx.tables, message.senderId) : null;
@@ -266,7 +279,9 @@ export const actionDraftApi = {
 
   /** 요청자가 값을 고쳐 저장 (확인 대기일 때만) */
   update: (input: { actionDraftId: number; payload: DraftPayloadInput; expectedUpdatedAt?: string | null }): Promise<DraftDetailView> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverActionDraftApi.update(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: DRAFT_PERMISSION });
       updateDraft(tx, userActor(actor.employee.id), input);
       return buildDetailView(tx.tables, input.actionDraftId, actor.employee.id);
@@ -274,7 +289,9 @@ export const actionDraftApi = {
 
   /** 요청자 확정 → 등록부 핸들러로 구매요청 생성 (ACT-001 · REQ-ACT-002) */
   confirm: (input: { actionDraftId: number; expectedUpdatedAt?: string | null }): Promise<DraftConfirmResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverActionDraftApi.confirm(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: DRAFT_PERMISSION });
       const outcome = confirmDraft(tx, userActor(actor.employee.id), input);
       return buildConfirmResult(tx.tables, outcome, actor.employee.id);
@@ -282,7 +299,9 @@ export const actionDraftApi = {
 
   /** 확정했지만 구매요청을 만들지 못한 초안을 다시 실행 (중복 실행은 core가 막는다) */
   execute: (input: { actionDraftId: number }): Promise<DraftConfirmResult> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverActionDraftApi.execute(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: DRAFT_PERMISSION });
       const outcome = executeDraft(tx, userActor(actor.employee.id), input);
       return buildConfirmResult(tx.tables, outcome, actor.employee.id);
@@ -290,7 +309,9 @@ export const actionDraftApi = {
 
   /** 요청자 반려 (사유 필수) → REJECTED */
   reject: (input: { actionDraftId: number; rejectReason: string; expectedUpdatedAt?: string | null }): Promise<DraftDetailView> =>
-    mockMutation((tx) => {
+    isServerDataSource()
+      ? serverActionDraftApi.reject(input)
+      : mockMutation((tx) => {
       const actor = requireActor(tx.tables, { use: DRAFT_PERMISSION });
       rejectDraft(tx, userActor(actor.employee.id), input);
       return buildDetailView(tx.tables, input.actionDraftId, actor.employee.id);
@@ -298,7 +319,9 @@ export const actionDraftApi = {
 
   /** 원료 품목 고르기 (기준정보에 등록된 원료) */
   listRawMaterials: (): Promise<DraftItemOption[]> =>
-    mockQuery((tables) => {
+    isServerDataSource()
+      ? serverActionDraftApi.listRawMaterials()
+      : mockQuery((tables) => {
       requireActor(tables, { view: DRAFT_PERMISSION });
       return tables.item
         .filter((item) => item.itemType === 'RAW_MATERIAL')

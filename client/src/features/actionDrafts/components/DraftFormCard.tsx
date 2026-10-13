@@ -203,26 +203,26 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                   : '기준정보에 등록된 원료'}
               </Td>
             </tr>
-            <tr data-risk={isUnresolved('requiredTon') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requiredTon', true)}</Td>
+            <tr data-risk={isUnresolved('requestedTon') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requestedTon', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <Input
-                    aria-label={DRAFT_FIELD_LABEL.requiredTon}
+                    aria-label={DRAFT_FIELD_LABEL.requestedTon}
                     numeric
                     suffix="t"
                     inputMode="decimal"
                     placeholder="0.000"
                     className="w-44"
-                    value={form.requiredTon}
-                    invalid={Boolean(getFieldError('requiredTon'))}
+                    value={form.requestedTon}
+                    invalid={Boolean(getFieldError('requestedTon'))}
                     disabled={pending}
-                    onChange={(event) => setField('requiredTon', event.target.value)}
+                    onChange={(event) => setField('requestedTon', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requiredTon ? fmtTon(draft.payload.requiredTon) : null)
+                  renderReadValue(draft.payload.requestedTon ? fmtTon(draft.payload.requestedTon) : null)
                 )}
-                {renderFieldError('requiredTon')}
+                {renderFieldError('requestedTon')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>0보다 큰 톤 · 소수 3자리까지</Td>
             </tr>

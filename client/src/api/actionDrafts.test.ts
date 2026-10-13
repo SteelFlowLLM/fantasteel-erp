@@ -31,7 +31,7 @@ async function createDemoDraft() {
 }
 
 async function fillDemoDraft(id: number) {
-  return actionDraftApi.update({ actionDraftId: id, payload: { itemId: getItemId('SMN01'), requiredTon: '20', desiredReceiptDate: '2026-10-20' } });
+  return actionDraftApi.update({ actionDraftId: id, payload: { itemId: getItemId('SMN01'), requestedTon: '20', desiredReceiptDate: '2026-10-20' } });
 }
 
 describe('Message → ERP 초안 만들기 (REQ-ACT-001)', () => {
@@ -140,11 +140,11 @@ describe('초안 확인·확정 (REQ-ACT-002·003, BP-ACT-01, 14.1 10단계)', (
     const draft = await createDemoDraft();
     await expect(actionDraftApi.confirm({ actionDraftId: draft.id })).rejects.toMatchObject({ code: 'ACT-001', detail: '원료 품목, 수량(톤), 희망 입고일' });
 
-    const wrong = actionDraftApi.update({ actionDraftId: draft.id, payload: { requiredTon: '1.2345', desiredReceiptDate: '10월 20일' } });
+    const wrong = actionDraftApi.update({ actionDraftId: draft.id, payload: { requestedTon: '1.2345', desiredReceiptDate: '10월 20일' } });
     await expect(wrong).rejects.toBeInstanceOf(InputError);
-    await expect(wrong).rejects.toMatchObject({ fieldErrors: { requiredTon: expect.any(String), desiredReceiptDate: expect.any(String) } });
+    await expect(wrong).rejects.toMatchObject({ fieldErrors: { requestedTon: expect.any(String), desiredReceiptDate: expect.any(String) } });
 
-    await actionDraftApi.update({ actionDraftId: draft.id, payload: { requiredTon: '20' } });
+    await actionDraftApi.update({ actionDraftId: draft.id, payload: { requestedTon: '20' } });
     await expect(actionDraftApi.confirm({ actionDraftId: draft.id })).rejects.toMatchObject({ code: 'ACT-001', detail: '원료 품목, 희망 입고일' });
     expect((await actionDraftApi.get(draft.id)).draftStatus).toBe('WAITING_APPROVAL');
   });
