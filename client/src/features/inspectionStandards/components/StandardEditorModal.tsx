@@ -60,11 +60,14 @@ const buildEmptyItem = (key: number): DraftItem => ({
 });
 
 type TextField = Exclude<keyof InspectionStandardItemInput, 'isRequired'>;
+/** 예시 안내 글은 고정폭 글꼴이면 자간이 벌어지고, 진하면 이미 넣은 값처럼 보인다: 일반 글꼴에 더 흐린 색으로 */
+const EXAMPLE_PLACEHOLDER = 'placeholder:font-sans placeholder:text-ink-disabled';
+
 const COLUMNS: readonly { field: TextField; label: string; width: string; numeric?: boolean; mono?: boolean; placeholder?: string }[] = [
   // 코드·이름은 TENSILE_STRENGTH·'샤르피 흡수 에너지(20°C)'가 잘리지 않을 만큼 넓히고, 숫자 칸은 줄여 표가 창 안에 들어가게 한다 (오른쪽 버튼이 잘렸다)
-  { field: 'inspectionItemCode', label: '항목 코드', width: 'w-44', mono: true, placeholder: 'TENSILE_STRENGTH' },
-  { field: 'inspectionItemName', label: '항목명', width: 'w-44', placeholder: '인장강도' },
-  { field: 'unit', label: '단위', width: 'w-20', placeholder: 'N/mm²' },
+  { field: 'inspectionItemCode', label: '항목 코드', width: 'w-44', mono: true, placeholder: '예: TENSILE_STRENGTH' },
+  { field: 'inspectionItemName', label: '항목명', width: 'w-44', placeholder: '예: 인장강도' },
+  { field: 'unit', label: '단위', width: 'w-20', placeholder: '예: %' },
   { field: 'minValue', label: '최소 (이상)', width: 'w-20', numeric: true },
   { field: 'maxValue', label: '최대 (이하)', width: 'w-20', numeric: true },
   { field: 'minThicknessMm', label: '두께 초과', width: 'w-16', numeric: true },
@@ -201,7 +204,7 @@ export function StandardEditorModal({ target, onClose, onSaved }: { target: Stan
             </Select>
           </Field>
           <Field label="검사 기준 코드" hint="QS-강종-공정으로 만들어요 · 버전 1">
-            <Input value={previewCode ?? ''} readOnly placeholder="공정·강종을 고르면 정해져요" className="font-mono" />
+            <Input value={previewCode ?? ''} readOnly placeholder="공정·강종을 고르면 정해져요" className="font-mono placeholder:font-sans" />
           </Field>
         </div>
       )}
@@ -246,7 +249,7 @@ export function StandardEditorModal({ target, onClose, onSaved }: { target: Stan
                           inputMode={c.numeric ? 'decimal' : undefined}
                           placeholder={c.placeholder}
                           title={item[c.field] || undefined}
-                          className={cn(c.mono && 'font-mono', isChanged(item, c.field) && CHANGED_MARK)}
+                          className={cn(c.mono && 'font-mono', EXAMPLE_PLACEHOLDER, isChanged(item, c.field) && CHANGED_MARK)}
                           invalid={error !== null}
                           onChange={(e) => update(index, { [c.field]: e.target.value })}
                         />

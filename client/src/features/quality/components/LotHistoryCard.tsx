@@ -36,7 +36,8 @@ function InspectionChange({ event, itemNames }: { event: TimelineEvent; itemName
     <div className="flex flex-col gap-0.5 text-cap text-ink-2">
       {after ? (
         <span>
-          판정 {before && before !== after ? `${INSPECTION_RESULT_LABEL[before]} → ` : ''}
+          {/* 칸 이름 "판정"과 값 "판정 대기"가 붙으면 "판정 판정 대기"로 읽힌다: 쌍점으로 나눈다 */}
+          <span className="text-ink-3">판정 결과:</span> {before && before !== after ? `${INSPECTION_RESULT_LABEL[before]} → ` : ''}
           <b className="font-semibold">{INSPECTION_RESULT_LABEL[after]}</b>
         </span>
       ) : null}
