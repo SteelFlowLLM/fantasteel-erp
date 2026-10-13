@@ -4,12 +4,12 @@ import type { ProductStockData } from '@/api/dashboard';
 import { Table, Td, Th } from '@/components/Table';
 import { LegendItem, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { useDashboardWidget, useDashboardWidgetAccess } from '@/hooks/useDashboardWidget';
+import { cn } from '@/lib/cn';
 import { fmtInt, fmtTon } from '@/lib/format';
 
 const pct = (part: number, whole: number): string => `${whole > 0 ? Math.max(0, Math.min(100, (part / whole) * 100)) : 0}%`;
 
 function StockBody({ data }: { data: ProductStockData }) {
-  const maxOnHand = Math.max(1, ...data.totals.map((t) => t.onHandQty));
   return (
     <div className="flex flex-col gap-2.5 py-3">
       <div className="flex flex-col gap-2 px-4">
@@ -23,14 +23,17 @@ function StockBody({ data }: { data: ProductStockData }) {
           >
             <span className="min-w-11 flex-none whitespace-nowrap text-xs font-medium text-ink-2">{ITEM_TYPE_LABEL[total.itemType]}</span>
             <div className="min-w-0 flex-1">
-              {/* 너비는 실행 중에 정해지는 값이라 style로 준다. 예약·가용 뒤 남는 몫(판정 대기·불합격·배정)은 바탕색으로 보인다: 품질이 볼 몫이라 회색 대신 노랑 */}
-              <div className="flex h-3.5 overflow-hidden rounded-xs bg-wait/35" style={{ width: pct(total.onHandQty, maxOnHand), minWidth: total.onHandQty ? 6 : 0 }}>
+              {/* 막대 하나 = 그 제품의 재고 전체. 슬래브(매)와 코일(개)은 단위가 달라 한 눈금으로 길이를 견주지 않는다.
+                  너비는 실행 중에 정해지는 값이라 style로 준다. 예약·가용 뒤 남는 몫(판정 대기·불합격·배정)은 바탕색으로 보인다: 품질이 볼 몫이라 회색 대신 노랑 */}
+              <div className={cn('flex h-3.5 overflow-hidden rounded-xs', total.onHandQty > 0 ? 'bg-wait/35' : 'bg-surface-3')}>
                 <span className="bg-chart-1" style={{ width: pct(total.reservedQty, total.onHandQty) }} />
                 <span className="bg-chart-3" style={{ width: pct(total.availableQty, total.onHandQty) }} />
               </div>
             </div>
+            {/* 막대에 보이는 몫(예약·가용)을 숫자로도 같이 보인다: 가용이 0인데 막대가 차 있으면 예약 몫이다 */}
             <span className="flex-none text-xs tabular-nums">
-              가용 <b data-pet-field="가용">{fmtInt(total.availableQty)}</b> / 재고 <b data-pet-field="재고">{fmtInt(total.onHandQty)}</b>
+              예약 <b data-pet-field="예약">{fmtInt(total.reservedQty)}</b> · 가용 <b data-pet-field="가용">{fmtInt(total.availableQty)}</b> / 재고{' '}
+              <b data-pet-field="재고">{fmtInt(total.onHandQty)}</b>
               {PRODUCT_QTY_UNIT[total.itemType]}
             </span>
           </div>
