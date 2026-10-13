@@ -1,4 +1,4 @@
-// 실제 서버(server/) 호출. 기본 데이터 출처다. NEXT_PUBLIC_DATA_SOURCE=mock이면 브라우저 안 가짜 DB를 쓴다(테스트가 쓰는 값, vitest.config.ts).
+// 실제 서버(server/) 호출. 기본 데이터 출처다. NEXT_PUBLIC_DATA_SOURCE=mock이면 브라우저 안 가짜 DB를 쓴다.
 // 화면은 이 파일을 직접 부르지 않는다: 각 api/<영역>.ts 함수가 데이터 출처에 따라 가짜 DB 또는 이 파일을 부른다.
 //
 // 서버 모드 로그인은 사원번호·비밀번호다 (REQ-AUTH-001, 2026-10-07 사용자 결정. 가짜 DB 모드는 계정 선택 그대로).

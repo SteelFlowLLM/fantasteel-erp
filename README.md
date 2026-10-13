@@ -22,7 +22,7 @@ npm run dev        # DB(54322) · shared · 서버(8787) · 화면(5173)
 - 처음 열면 **로그인** 화면(`/login`)이 나옵니다. 시드 사원번호(`docs/backend/seed.md`)와 비밀번호 `fantasteel`로 들어갑니다.
 - 화면 데이터는 서버 DB에 있습니다. 처음 상태로 되돌리려면 `npm run db:reset`, 화면에 볼 거래 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`.
 - `npm install`은 설치 뒤 shared 빌드와 Prisma Client 생성도 자동으로 합니다.
-- `client/.env.local`에 `NEXT_PUBLIC_DATA_SOURCE=mock`을 두면 서버 없이 브라우저 안 가짜 DB로 띄웁니다(테스트가 쓰는 모드, `docs/CLIENT-GUIDE.md`).
+- `client/.env.local`에 `NEXT_PUBLIC_DATA_SOURCE=mock`을 두면 서버 없이 브라우저 안 가짜 DB로 띄웁니다(`docs/CLIENT-GUIDE.md`).
 
 ### 점검·빌드
 
@@ -38,7 +38,7 @@ npm run test -w @fantasteel/client
 npm run build -w @fantasteel/client
 ```
 
-테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다(`vitest.config.ts`가 데이터 출처를 mock으로 둡니다). 시연 시나리오(업무 프로세스 14.1)의 핵심 흐름은 서버 DB 테스트(`server/src/modules/sales-order/order-flow.spec.ts`)가 수주부터 출고·밀시트·추적·Message → ERP까지 잇고, 단계별 규칙(14.2·14.3)은 각 서버 모듈 테스트가 확인합니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
+화면 테스트는 Vitest이고 서버·DB 없이 돌아갑니다. api 함수는 가짜 서버 응답(`useFakeServer`)으로, 화면 그리기는 고정 데이터로 시험합니다. 시연 시나리오(업무 프로세스 14.1)의 핵심 흐름은 서버 DB 테스트(`server/src/modules/sales-order/order-flow.spec.ts`)가 수주부터 출고·밀시트·추적·Message → ERP까지 잇고, 단계별 규칙(14.2·14.3)은 각 서버 모듈 테스트가 확인합니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
 
 ### 화면 폴더 구조 (`client/src/`)
 
