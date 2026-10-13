@@ -1195,6 +1195,7 @@ CAMPUS_PARTS.push(function campusNature(b, H) {
       const dx = x - kx, dz = z - kz, c = cos(a), s = sin(a);
       if (abs(dx * c - dz * s) < hl + m * .5 && abs(dx * s + dz * c) < hd + m * .5) return true;
     }
+    if (Math.hypot(x - 31.7, z + 48.6) < 12.3 + m) return true;  // 헌정 동상 원형 마당 (parts/tribute_statue.js, 사본에만 있지만 관목이 마당 밑에 묻히지 않게)
     const ex = x / (42 + m), ez = (z + 8) / (37 + m);              // 광장 + 순환도로
     if (ex * ex + ez * ez < 1) return true;
     return inNWP(x, z, m) || diagD(x, z) < 3.25 + m;
@@ -3231,35 +3232,35 @@ CAMPUS_ANIM.tributeFigure = [{"nv":29990,"nt":60000,"lo":[-0.09653629326957175,1
    인물은 tribute/build_figure.mjs가 SDF로 깎아 구운 메시(CAMPUS_ANIM.tributeFigure)를 그대로 얹는다 */
 CAMPUS_PARTS.push(function campusTribute(b, H) {
   const { PI, gCyl, gSphere, gFlatRing, gText } = H;
-  const SX = 36, SZ = -40;                               // 순환도로와 동쪽 도로 사이 아스팔트 갈림길 가운데
+  const SX = 31.7, SZ = -48.6, R = 12;                  // 순환도로 바깥 연석과 동쪽 도로에 함께 맞닿는 가장 큰 원 (북쪽 나무를 걷어 낸 자리까지 쓴다)
   const face = Math.atan2(0 - SX, -8 - SZ);              // 로드맵 광장 가운데를 본다 (로컬 +z = 정면)
   const F = .12;                                         // 원형 마당 윗면
   const GR = '#6f747b', GR2 = '#555a61', GRL = '#868b92', BR2 = '#4a4030', GOLD = '#f0d690', HEDGE = '#1f3a2a';
 
   /* ---- 원형 화강석 마당 (갈림길 아스팔트를 덮는다), 테두리 띠, 동상 뒤 반원 회양목, 바닥 투광등 ---- */
-  b.add(gCyl(7.6, 7.6, F, 48), '#2b2f35', SX, F / 2, SZ, { s: .12 });
-  b.add(gFlatRing(7.1, 7.1, 7.6, 7.6, 64), '#4a4f57', SX, F + .005, SZ, { s: .1 });
-  b.add(gFlatRing(4.9, 4.9, 5.05, 5.05, 48), '#4a4f57', SX, F + .005, SZ, { s: .1 });
+  b.add(gCyl(R, R, F, 72), '#2b2f35', SX, F / 2, SZ, { s: .12 });
+  b.add(gFlatRing(R - .6, R - .6, R, R, 96), '#4a4f57', SX, F + .005, SZ, { s: .1 });
+  b.add(gFlatRing(9.4, 9.4, 9.6, 9.6, 72), '#4a4f57', SX, F + .005, SZ, { s: .1 });
   b.push().move(SX, 0, SZ).ry(face);
-  for (let k = 0; k <= 10; k++) {
-    const a = PI * .62 + k / 10 * PI * .76;              // 정면 반대쪽(-z) 반원
-    b.add(gSphere(.95, 8, 5), HEDGE, Math.sin(a) * 6.6, F + .7, Math.cos(a) * 6.6, { s: .03 });
+  for (let k = 0; k <= 16; k++) {
+    const a = PI * .62 + k / 16 * PI * .76;              // 정면 반대쪽(-z) 반원
+    b.add(gSphere(1.15, 8, 5), HEDGE, Math.sin(a) * (R - 1.4), F + .85, Math.cos(a) * (R - 1.4), { s: .03 });
   }
-  for (const [x, z] of [[-4.3, 4.3], [4.3, 4.3], [-4.3, -4.3], [4.3, -4.3]]) {
+  for (const [x, z] of [[-7.6, 7.6], [7.6, 7.6], [-7.6, -7.6], [7.6, -7.6]]) {
     b.box(.5, .14, .5, '#2a2e34', x, F + .07, z, { s: .2 });
     b.add(gCyl(.18, .18, .03, 10), '#ffe2a8', x, F + .155, z, { e: 1, s: 0 });
   }
 
   /* ---- 마당 앞 화강석 표석: 로드맵 쪽에서 이름이 바로 읽히게 ---- */
-  b.box(6.2, 1.25, .6, GR2, 0, F + .625, 6.45, { s: .2 });
-  b.box(6.4, .1, .7, GRL, 0, F + 1.3, 6.45, { s: .25 });
+  b.box(9.4, 1.8, .8, GR2, 0, F + .9, R - 1.5, { s: .2 });
+  b.box(9.7, .14, .95, GRL, 0, F + 1.87, R - 1.5, { s: .25 });
   {
-    let g = gText('정영수 차장님', .9, { px: 56 });
-    if (g.w > 5.6) g = gText('정영수 차장님', .9 * 5.6 / g.w, { px: 56 });
-    b.add(g, GOLD, 0, F + .22, 6.755, { e: .85, s: 0 });
+    let g = gText('정영수 차장님', 1.35, { px: 64 });
+    if (g.w > 8.6) g = gText('정영수 차장님', 1.35 * 8.6 / g.w, { px: 64 });
+    b.add(g, GOLD, 0, F + .3, R - 1.5 + .41, { e: .85, s: 0 });
   }
 
-  const K = 1.12;                                       // 받침·명판·인물은 1.12배로 키운다 (마당 크기는 순환도로와 동쪽 도로 사이가 한계라 그대로)
+  const K = 2;                                          // 받침·명판·인물을 두 배로: 받침 디딤이 마당 지름의 절반 남짓을 채운다
   b.push().move(0, F * (1 - K), 0).scale(K);            // 키워도 받침 바닥이 마당 윗면(F)에 붙게
   /* ---- 화강석 받침: 두 단 디딤, 받침 몸체, 갓돌, 청동 바닥판 ---- */
   b.box(6.6, .35, 6.6, GR2, 0, F + .175, 0, { s: .15 });
@@ -3283,7 +3284,7 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
   line('교육생을 향한 헌신에 감사드립니다', .26, F + 2.4, 40);
   line('교육생 일동', .24, F + 1.82, 36);
 
-  /* ---- 청동 인물: 구운 메시를 8.5배로 얹고 꼭짓점마다 구운 청동색을 넣는다 ---- */
+  /* ---- 청동 인물: 구운 메시를 16배로 얹고 꼭짓점마다 구운 청동색을 넣는다 ---- */
   for (const FIG of [].concat(CAMPUS_ANIM.tributeFigure || [])) {   // 얼굴(곱게)과 몸(보통)을 따로 구운 메시 여러 개
     const dec = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0)).buffer;
     const qp = new Uint16Array(dec(FIG.p)), qn = new Int8Array(dec(FIG.n)), qc = new Uint8Array(dec(FIG.c));
@@ -3296,7 +3297,7 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
       const l = Math.hypot(x, y, z); n[v * 3] = x / l; n[v * 3 + 1] = y / l; n[v * 3 + 2] = z / l;
     }
     const base = b.v.length / 13;
-    b.push().move(0, F + 5.15, 0).scale(8.5 / K);      // 인물 키 약 15.3 (받침과 합쳐 21 남짓)
+    b.push().move(0, F + 5.15, 0).scale(16 / K);       // 인물 키 약 29 (받침 약 10과 합쳐 39 남짓)
     b.add({ p, n, i: qi }, '#ffffff', 0, 0, 0, { s: .55 });
     b.pop();
     for (let v = 0; v < N; v++) for (let a = 0; a < 3; a++) b.v[(base + v) * 13 + 6 + a] = Math.pow(qc[v * 3 + a] / 255, 2.2);
@@ -8688,7 +8689,7 @@ precision mediump float; void main(){}`;
     { p: near(8, .6, 2.9, .9), r: 6.5 * LS, c: [2.2, .85, .2] },                // 제강
     { p: near(9, .8, 1.2, .9), r: 6.5 * LS, c: [2.2, .85, .2] },                // 연주
     { p: near(10, -1.2, 1.5, .9), r: 6.5 * LS, c: [2.2, .85, .2] },             // 열연
-    { p: [28.5, 13, -33.5], r: 26, c: [1.55, 1.36, 1.08] },                     // 헌정 동상 투광
+    { p: [21.5, 26, -35.5], r: 44, c: [1.6, 1.4, 1.1] },                        // 헌정 동상 투광
     { p: [0, 1, 0], r: 6, c: [2.4, .9, .22] },                                   // 진행 표시
   ];
   lights.forEach((l, k) => plc.set(l.c, k * 3));
