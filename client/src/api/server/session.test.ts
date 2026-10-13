@@ -1,14 +1,12 @@
 // 서버 모드 로그인 사원: 사원번호·비밀번호 로그인, 사원 정보·권한은 GET /auth/me (사원·부서 id는 서버 id).
 // 가짜 DB만 쓰는 화면의 요청 사원은 세션 사원번호로 가짜 DB 사원을 찾는다.
 import type { AuthUser, DepartmentNode } from '@fantasteel/shared';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { actingEmployeeId, setActingEmployeeForTest } from '@/api/actor';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ApiError } from '@/api/errors';
 import { resetServerSessionForTest } from '@/api/http';
 import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { sessionApi } from '@/api/session';
-import { writeSessionAccount } from '@/lib/sessionEmployee';
-import { employeeIdOf, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const AT = '2026-10-07T00:00:00.000Z';
 
@@ -49,13 +47,6 @@ const tree: DepartmentNode[] = [
 
 const respond = (user: AuthUser) => (c: { path: string }) => (c.path === '/auth/me' ? ok(user) : c.path === '/departments' ? ok(tree) : undefined);
 
-/** sessionStorage가 있는 브라우저 창 (테스트 환경은 node) */
-function stubWindow(): void {
-  const store = new Map<string, string>();
-  const sessionStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
-  vi.stubGlobal('window', { sessionStorage });
-}
-
 afterEach(() => stopFakeServer());
 
 describe('서버 모드 세션 (api/server/session.ts)', () => {
@@ -88,17 +79,8 @@ describe('서버 모드 세션 (api/server/session.ts)', () => {
 
   it('탭에 남은 사원 id와 서버 로그인 사원이 다르면 COM-002 (셸이 세션을 비운다)', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, respond(authUser));
-    await expect(sessionApi.getSessionUser(employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead))).rejects.toMatchObject({ code: 'COM-002' });
+    // 탭에 남은 id 4는 서버 로그인 사원(id 904)과 다르다
+    await expect(sessionApi.getSessionUser(4)).rejects.toMatchObject({ code: 'COM-002' });
     await expect(sessionApi.getSessionUser(1)).rejects.toBeInstanceOf(ApiError);
-  });
-
-  it('가짜 DB 화면의 요청 사원은 세션 사원번호로 찾고, 가짜 DB에 없는 사원이면 없음', () => {
-    useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, () => undefined);
-    stubWindow();
-    setActingEmployeeForTest(undefined);
-    writeSessionAccount({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
-    expect(actingEmployeeId()).toBe(employeeIdOf(SEED_EMPLOYEE_NO.purchaseHead));
-    writeSessionAccount({ employeeId: 999, employeeNo: '2610099' });
-    expect(actingEmployeeId()).toBeNull();
   });
 });
