@@ -200,7 +200,8 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                   {shared.source ? null : <Th align="center">근거</Th>}
                 </tr>
               </thead>
-              <tbody>
+              {/* 항목이 적은 기준(제강 성분 6개 등)은 카드가 짧아 아래가 휑하다: 줄 높이만 조금 늘린다 (빈칸을 덧대지 않는다) */}
+              <tbody className={cn(view.items.length <= 8 && '[&_td]:h-12')}>
                 {view.items.map((item, index) => (
                   <ItemRow
                     key={item.id}
