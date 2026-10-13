@@ -136,7 +136,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   key={item.inspectionStandardItemId}
                   data-pet-item="qualityInspectionValue"
                   data-pet-item-title={item.inspectionItemName}
-                  className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}
+                  className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-danger-line bg-danger-field' : 'border-line')}
                 >
                   {/* 영문 코드를 이름 옆에 두면 판정 배지가 길어질 때 이름이 두 줄로 깨진다: 코드는 이름 아래 작은 줄로 */}
                   <div className="flex items-start gap-1.5">
