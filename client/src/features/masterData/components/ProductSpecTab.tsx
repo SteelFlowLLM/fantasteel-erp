@@ -4,7 +4,7 @@
 // 같은 조합은 화면에서 먼저 막고, 쓰인 규격은 치수·이론중량을 잠근다(MST-002). 쓰이지 않은 규격만 지운다.
 import { useMemo, useState, type ReactNode } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
-import { isMasterServerMode, masterDataApi, type MasterProductSpecView } from '@/api/masterData';
+import { masterDataApi, type MasterProductSpecView } from '@/api/masterData';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -37,7 +37,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const [gradeFilter, setGradeFilter] = useState('');
   const [editing, setEditing] = useState<MasterProductSpecView | 'new' | null>(null);
   // 서버는 사용 여부를 주지 않는다. 쓰인 규격의 치수 수정은 저장할 때 MST-002로 안내된다
-  const showUsage = !isMasterServerMode();
+  const showUsage = false;
 
   return (
     <Card petKey="card:masterData.specs">
@@ -116,7 +116,6 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                           <RowActions
                             canEdit={canEdit}
                             onEdit={() => setEditing(spec)}
-                            remove={{ what: `규격 ${spec.itemCode}`, run: () => masterDataApi.deleteProductSpec(spec.id), success: '규격을 삭제했어요', blockedReason: spec.referenceText }}
                           />
                         </Td>
                       </tr>

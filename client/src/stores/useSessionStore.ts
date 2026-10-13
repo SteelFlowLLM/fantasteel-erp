@@ -7,7 +7,7 @@ interface SessionState {
   /** sessionStorage를 읽었는지 (서버 렌더링 중에는 false) */
   hydrated: boolean;
   employeeId: number | null;
-  /** 사용자가 직접 나간 경우(계정 바꾸기). 이때는 계정 선택 뒤 원래 화면으로 돌아가지 않는다. */
+  /** 사용자가 직접 나간 경우(로그아웃). 이때는 다시 로그인한 뒤 원래 화면으로 돌아가지 않는다. */
   signedOut: boolean;
   hydrate: () => void;
   signIn: (account: SessionAccount) => void;

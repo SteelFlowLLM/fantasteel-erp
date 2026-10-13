@@ -4,7 +4,7 @@
 // 업무방은 수주 1건에 1개씩 수주 상세에서 연다.
 import { useState } from 'react';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import { CHAT_ROOM_NAME_MAX, messengerApi, type ChatRoomDetailView } from '@/api/messenger';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';

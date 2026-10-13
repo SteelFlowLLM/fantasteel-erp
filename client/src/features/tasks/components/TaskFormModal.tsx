@@ -4,7 +4,7 @@
 // 마감일은 서버에서 필수다 (api/server/tasks.ts).
 import { useId, useMemo, useState } from 'react';
 import type { OrgChartDepartmentView } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import { TASK_DESCRIPTION_MAX, TASK_TITLE_MAX, taskApi, type TaskView } from '@/api/tasks';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';

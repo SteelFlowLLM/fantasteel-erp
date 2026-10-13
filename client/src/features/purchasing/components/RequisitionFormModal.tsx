@@ -4,7 +4,7 @@
 // 임시 저장·'작성 중'은 없다(공통 코드 정의서). 반려된 요청은 요청자가 고쳐 다시 요청한다(10장 REJECTED → WAITING_APPROVAL).
 // 입력: 원료 1품목 · 수량(톤, 소수 3자리) (ERD: 구매요청 1건 = 원료 1품목), 희망 입고일, 요청 근거. 요청자·부서는 자동(요청한 사원·요청 시점 소속).
 import { useState, type ReactNode } from 'react';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { RequisitionView } from '@/api/purchasing';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';

@@ -1,5 +1,5 @@
 // 출고 확정 화면 ↔ 서버 API (server/src/modules/shipment, lot). 출고 확정은 POST shipment-requests/:id/issue.
-// 서버에는 출고 전 재검증만 하는 API가 없어서, 화면에 보일 ready·problems는 출하요청·수주·LOT 상세로 가짜 DB와 같은 규칙을 계산한다.
+// 서버에는 출고 전 재검증만 하는 API가 없어서, 화면에 보일 ready·problems는 출하요청·수주·LOT 상세로 출고 확정과 같은 규칙을 계산한다.
 // 이 값은 보여 주기만 하고, 확정할 때 서버가 같은 규칙을 다시 확인한다(INV-001·INV-002·INV-004·SHP-002·COM-001).
 // 품질 역할은 수주 조회 권한이 없어 이론중량·품목 유형을 규격 목록(GET /items)에서 읽고, 수주 매수·출하 매수는 비운다.
 import type {
@@ -101,7 +101,7 @@ class Reader {
 const eligibilityOf = ({ lot, heatInspectionResult }: LotFacts) =>
   productEligibility({ lotStatus: lot.lotStatus, isPassed: passedOf(lot.inspectionResult) }, lot.heat ? { isPassed: passedOf(heatInspectionResult) } : null);
 
-/** 가짜 DB goodsIssueCheck와 같은 순서·규칙 (출고 확정 전 재검증) */
+/** 출고 확정 전 재검증 (서버 출고 확정과 같은 순서·규칙) */
 function checkOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>, lots: Map<number, LotFacts>): { ready: boolean; problems: GoodsIssueProblem[] } {
   if (detail.shipmentRequestStatus === 'ISSUED') return { ready: false, problems: [] };
   const problems: GoodsIssueProblem[] = [];
@@ -203,7 +203,7 @@ async function detail(shipmentRequestId: number): Promise<GoodsIssueView> {
 
 const QUEUE_RANK: Record<string, number> = { ALLOCATED: 0, REQUESTED: 1 };
 
-/** 가짜 DB goodsIssueQueue와 같은 순서: 배정 확정 → 배정 대기 → 출고 완료, 그 안에서 출하 요청일 → 최근 등록 */
+/** 목록 순서: 배정 확정 → 배정 대기 → 출고 완료, 그 안에서 출하 요청일 → 최근 등록 */
 async function queue(): Promise<GoodsIssueQueueRow[]> {
   const reader = new Reader();
   const summaries = (await allPages<ShipmentRequestSummary>('/shipment-requests')).filter((s) => s.shipmentRequestStatus !== 'CANCELLED');

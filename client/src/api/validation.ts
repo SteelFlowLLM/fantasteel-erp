@@ -2,17 +2,9 @@
 // - 참조 대상이 없으면 COM-003 (컨벤션 7-2 "요청으로 받은 ID는 반드시 조회해서 확인")
 // - 화면을 연 뒤 다른 곳(다른 탭)에서 바뀌었으면 COM-001 (검토 이후 데이터 변경)
 // - 그 밖의 입력 오류는 InputError(입력칸별 안내)
-import { ApiError, type FieldErrors } from '@/api/client';
+import { ApiError, type FieldErrors } from '@/api/errors';
 import { withEulReul, withEunNeun, withIGa } from '@/lib/josa';
 import { compareDecimal } from '@/lib/weight';
-import type { MockTables, RowOf, TableName } from '@/mock/schema';
-
-/** 요청으로 받은 id의 행을 찾는다. 없으면 COM-003. */
-export function requireRow<K extends TableName>(tables: Readonly<MockTables>, table: K, id: number | null | undefined, what?: string): RowOf<K> {
-  const row = id === null || id === undefined ? undefined : (tables[table] as RowOf<K>[]).find((r) => r.id === id);
-  if (!row) throw new ApiError('COM-003', what ?? null);
-  return row;
-}
 
 /** 화면이 본 수정 시각과 지금 수정 시각이 다르면 COM-001 */
 export function assertUnchanged(currentUpdatedAt: string, expectedUpdatedAt: string | null | undefined, what?: string): void {

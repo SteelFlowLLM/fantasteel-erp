@@ -1,4 +1,4 @@
-// 생산 화면(생산계획·작업 실적·열연 투입 배정)이 함께 쓰는 표시 계산. 업무 규칙은 core 서비스가 계산하고, 여기서는 보여 주는 모양만 정한다.
+// 생산 화면(생산계획·작업 실적·열연 투입 배정)이 함께 쓰는 표시 계산. 업무 규칙은 서버가 계산하고, 여기서는 보여 주는 모양만 정한다.
 import { PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType, type ProductionPlanStatus } from '@/codes';
 import type { StepItem, StepState } from '@/components/Steps';
 import { actualLossRateOf } from '@/lib/simulationLoss';

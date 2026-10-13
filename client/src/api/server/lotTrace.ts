@@ -40,7 +40,7 @@ const MAX_PAGE_SIZE = 100;
 const normalize = (text: string) => text.trim().toUpperCase();
 const isProduct = (lotType: string) => lotType === 'SLAB' || lotType === 'COIL';
 
-/** 목록·노드 한 줄 요약: 원료명 / 고로 / 전로 · 강종 / 강종 · 규격 (가짜 DB lotSummary와 같은 규칙) */
+/** 목록·노드 한 줄 요약: 원료명 / 고로 / 전로 · 강종 / 강종 · 규격 */
 function summaryOf(lot: Pick<LotSummary, 'lotType' | 'itemCode' | 'itemName' | 'steelGradeCode'> & { blastFurnaceCode?: string | null; converterCode?: string | null }): string {
   switch (lot.lotType) {
     case 'RAW_MATERIAL':

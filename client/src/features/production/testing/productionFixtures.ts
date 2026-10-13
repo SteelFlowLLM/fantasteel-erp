@@ -1,5 +1,5 @@
 // 생산 화면 그리기 테스트의 고정 데이터: 생산계획 상세(슬래브 수주 완료 계획, 재생산 필요), 작업 실적(연주 대기 히트가 있는 진행 계획), 열연 투입 배정(코일 계획).
-// 가짜 DB 시드를 읽지 않는다. 화면 모델 모양 그대로 두고, 화면이 그리는 글자(번호·코드)를 테스트가 확인한다.
+// 화면 모델 모양 그대로 두고, 화면이 그리는 글자(번호·코드)를 테스트가 확인한다.
 import type { ProductionPlanDetail } from '@/api/production';
 import type { WorkContext } from '@/api/productionResults';
 import type { RollingDetail } from '@/api/rolling';

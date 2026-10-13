@@ -1,7 +1,7 @@
 'use client';
 
 // 고객사·공급업체 (REQ-MST-007), 야드 (REQ-MST-008: 원료·슬래브·코일 야드, 야드 안 위치는 관리하지 않음).
-// '사용 안 함' 토글 없이 삭제만 둔다. 쓰는 곳이 있으면 삭제를 거부한다 (PLAN 5장, 컨벤션 7-2).
+// '사용 안 함' 토글은 두지 않는다(PLAN 5장, 컨벤션 7-2). 기준정보 삭제 API는 없다(master-data.md 8-1).
 // 야드 수정 창은 그 야드의 실제 야드 유형을 보여 준다 (옛 화면의 '항상 원료 야드' 표시 버그 수정, 보고서 5).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -107,29 +107,28 @@ export function CustomerSupplierYardTab({ canEdit }: { canEdit: boolean }) {
 function CustomerList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterCustomers();
   const rows = query.data?.map((c): CodeNameRow => ({ id: c.id, code: c.customerCode, name: c.customerName, yardType: null, referenceText: c.referenceText, updatedAt: c.updatedAt }));
-  return <CodeNameTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteCustomer} />;
+  return <CodeNameTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 function SupplierList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterSuppliers();
   const rows = query.data?.map((s): CodeNameRow => ({ id: s.id, code: s.supplierCode, name: s.supplierName, yardType: null, referenceText: s.referenceText, updatedAt: s.updatedAt }));
-  return <CodeNameTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteSupplier} />;
+  return <CodeNameTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 function YardList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterYards();
   const rows = query.data?.map((y): CodeNameRow => ({ id: y.id, code: y.yardCode, name: y.yardName, yardType: y.yardType, referenceText: y.referenceText, updatedAt: y.updatedAt }));
-  return <CodeNameTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteYard} />;
+  return <CodeNameTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 interface CodeNameTableProps {
   kind: ListKind;
   canEdit: boolean;
   query: { data: CodeNameRow[] | undefined; isPending: boolean; error: unknown; refetch: () => unknown };
-  remove: (id: number) => Promise<number>;
 }
 
-function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
+function CodeNameTable({ kind, canEdit, query }: CodeNameTableProps) {
   const text = KIND_TEXT[kind];
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<CodeNameRow | 'new' | null>(null);
@@ -172,7 +171,6 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(row)}
-                          remove={{ what: `${text.what} ${row.name}`, run: () => remove(row.id), success: `${text.what}를 삭제했어요`, blockedReason: row.referenceText }}
                         />
                       </Td>
                     </tr>
