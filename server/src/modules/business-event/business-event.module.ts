@@ -7,5 +7,7 @@ import { BusinessEventService } from './business-event.service';
 @Module({
   controllers: [BusinessEventController],
   providers: [BusinessEventService, BusinessEventRepository],
+  // AI 어시스턴트 작업 로그 조회 도구가 쓴다
+  exports: [BusinessEventService],
 })
 export class BusinessEventModule {}
