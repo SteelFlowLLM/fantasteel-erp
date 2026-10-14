@@ -63,12 +63,12 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     expect(html.replace(/(title|aria-label)="[^"]*"/g, '')).not.toContain('탭 숫자 = 판정 대기');
   });
 
-  it('판정할 LOT이 없으면(모두 판정 끝) "판정할 LOT이 없어요"와 판정 끝난 LOT 보기 버튼, 왼쪽 안내 상자는 빼고 한 줄', async () => {
+  it('판정할 LOT이 없으면(모두 판정 끝) "판정할 LOT이 없어요"와 판정 끝난 LOT 보기 버튼, 왼쪽은 안내 상자 없이 한 줄', async () => {
     const { html, rows } = await render((all) => all.map((r) => ({ ...r, inspectionResult: 'PASS' as const })));
     expect(html).toContain('판정할 LOT이 없어요');
     expect(html).toContain(`판정 끝난 LOT 보기 (전체 <!-- -->${rows.length}<!-- -->)`);
-    // 오른쪽이 크게 말하므로 왼쪽 목록은 같은 말을 되풀이하지 않는다
-    expect(html).not.toContain('판정 대기 LOT 없음');
+    // 왼쪽 목록이 빈 흰 칸으로 보이지 않게 한 줄은 둔다 (긴 안내는 오른쪽)
+    expect(html).toContain('판정 대기 LOT이 없어요');
     expect(html).not.toContain('검사 대상 LOT이 없어요');
     expect(html).not.toContain('LOT이 이 목록에 올라와요');
     // 탭에는 숫자가 하나도 없다

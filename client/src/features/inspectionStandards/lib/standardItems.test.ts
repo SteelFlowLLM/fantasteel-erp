@@ -30,7 +30,7 @@ describe('적용 두께 구간 (초과 ~ 이하, REQ-QC-002)', () => {
     expect(formatThicknessBand(buildBand(null, null))).toBe('전체');
     expect(formatThicknessBand(buildBand('6.00', null))).toBe('6 초과');
     expect(formatThicknessBand(buildBand(null, '16.00'))).toBe('16 이하');
-    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 40 이하');
+    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 ~ 40 이하');
   });
 
   it('경계값: 하한과 같으면 밖, 상한과 같으면 안', () => {

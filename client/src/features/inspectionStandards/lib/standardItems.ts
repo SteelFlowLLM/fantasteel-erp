@@ -37,11 +37,11 @@ export interface ThicknessBand {
 
 const trimZeros = (value: string) => (value.includes('.') ? value.replace(/\.?0+$/, '') : value);
 
-/** 적용 두께 구간 표시: '전체' · '6 초과' · '16 이하' · '16 초과 40 이하' (mm) */
+/** 적용 두께 구간 표시: '전체' · '6 초과' · '16 이하' · '16 초과 ~ 40 이하' (mm). 검사 입력 화면(thicknessBandText)과 같은 글 */
 export function formatThicknessBand(band: ThicknessBand): string {
   const min = band.minThicknessMm ? trimZeros(band.minThicknessMm) : null;
   const max = band.maxThicknessMm ? trimZeros(band.maxThicknessMm) : null;
-  if (min && max) return `${min} 초과 ${max} 이하`;
+  if (min && max) return `${min} 초과 ~ ${max} 이하`;
   if (min) return `${min} 초과`;
   if (max) return `${max} 이하`;
   return '전체';
