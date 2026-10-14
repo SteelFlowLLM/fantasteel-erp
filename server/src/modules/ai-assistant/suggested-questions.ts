@@ -14,4 +14,4 @@ export const ROLE_SUGGESTED_QUESTIONS: Record<Role, readonly string[]> = {
 };
 
 /** 처음 쓰는 사용자용 신입 가이드 질문 (REQ-AST-008) */
-export const FIRST_TIME_QUESTIONS: readonly string[] = ['예약과 배정은 뭐가 달라?', '여재가 뭐야?', '출하요청이 뭐야?'];
+export const FIRST_TIME_QUESTIONS: readonly string[] = ['예약과 배정은 뭐가 달라?', '여재가 뭐야?', '수주부터 출하까지 순서 알려줘'];

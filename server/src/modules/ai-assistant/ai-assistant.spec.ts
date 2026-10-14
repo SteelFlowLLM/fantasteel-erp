@@ -9,6 +9,8 @@ import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
 import { GLOSSARY_SEARCH_LIMIT, searchGlossary } from './knowledge/glossary.search';
+import { PROCESS_STEPS } from './knowledge/process.generated';
+import { findProcessSteps, PROCESS_MATCH_LIMIT } from './knowledge/process.search';
 
 const termOf = (id: string) => {
   const term = GLOSSARY_TERMS.find((t) => t.id === id);
@@ -217,5 +219,56 @@ describe('AiAssistantService', () => {
     expect(view.roleCode).toBe('QUALITY');
     expect(view.roleQuestions).toContain('비슷한 사례 찾아줘');
     expect(view.firstTimeQuestions).toContain('예약과 배정은 뭐가 달라?');
+  });
+});
+
+describe('업무 프로세스 자료 (수주~출하 순서)', () => {
+  it('순서·흐름을 묻는 질문에만 업무 프로세스 표를 넘긴다', () => {
+    expect(findProcessSteps('수주부터 출하까지 순서 알려줘').map((s) => s.id)).toEqual(expect.arrayContaining(['BP-SO-01', 'BP-SHP-01']));
+    expect(findProcessSteps('예약이 뭐야?')).toEqual([]);
+  });
+
+  it('업무 하나의 진행 방법을 물으면 이름이 맞는 업무만 정상 흐름과 함께 넘긴다', () => {
+    const purchase = findProcessSteps('구매요청은 어떻게 등록해?');
+    expect(purchase.map((s) => s.id)).toContain('BP-PUR-01');
+    expect(purchase.length).toBeLessThanOrEqual(PROCESS_MATCH_LIMIT);
+    expect(purchase.find((s) => s.id === 'BP-PUR-01')?.normalFlow).toContain('부서장 승인');
+    expect(findProcessSteps('출고 확정은 어떻게 해?').map((s) => s.id)).toContain('BP-SHP-01');
+  });
+
+  it('전체 순서나 맞는 업무가 없는 진행 방법 질문은 표 전체를 정상 흐름 없이 넘긴다', () => {
+    for (const question of ['수주부터 출하까지 순서 알려줘', '부서장은 어떻게 지정해?']) {
+      const steps = findProcessSteps(question);
+      expect(steps).toHaveLength(PROCESS_STEPS.length);
+      expect(steps.every((s) => s.normalFlow === null)).toBe(true);
+    }
+  });
+
+  it('프롬프트에 업무 프로세스 자료와 업무 ID 인용 규칙을 넣는다', () => {
+    const steps = findProcessSteps('순서 알려줘');
+    const [system] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], processSteps: steps, history: [], question: '순서 알려줘' });
+    expect(system.content).toContain('[업무 프로세스 자료]');
+    expect(system.content).toContain('[BP-SO-01] 수주 등록·예약·계획');
+    expect(system.content).toContain('그 업무 ID를 붙이고');
+    expect(system.content).toContain('출고 전환');
+    const [detail] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], processSteps: findProcessSteps('출고 확정은 어떻게 해?'), history: [], question: '출고 확정은 어떻게 해?' });
+    expect(detail.content).toContain('정상 흐름: 출하요청 → 예약중 예약·출하 가능 잔량 확인');
+    expect(detail.content).toContain('배정 소진·재고 소진·예약 출고 전환');
+    const [draft] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], processSteps: findProcessSteps('구매요청은 어떻게 등록해?'), history: [], question: '구매요청은 어떻게 등록해?' });
+    expect(draft.content).not.toMatch(/WAITING_APPROVAL|AI_GENERATED|EXECUTED/);
+    expect(draft.content).toContain('확인 대기');
+    expect(system.content).not.toMatch(/→ CONVERTED/);
+    const [withoutSteps] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], history: [], question: '예약이 뭐야?' });
+    expect(withoutSteps.content).not.toContain('[BP-SO-01] 수주 등록·예약·계획');
+  });
+
+  it('[BP-…] 표시를 지우고 넘긴 자료 안의 업무만 PROCESS 출처로 둔다', () => {
+    const steps = findProcessSteps('순서');
+    const parsed = parseAssistantAnswer('먼저 수주를 등록해요 [BP-SO-01]. 그다음 출하해요 [BP-SHP-01, BP-XXX-99].', [], steps);
+    expect(parsed.answer).toBe('먼저 수주를 등록해요. 그다음 출하해요.');
+    expect(parsed.sources).toEqual([
+      { kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' },
+      { kind: 'PROCESS', id: 'BP-SHP-01', label: '출하·출고·밀시트' },
+    ]);
   });
 });
