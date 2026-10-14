@@ -1,9 +1,10 @@
-// 기준정보 서버 어댑터 (변경): 화면 입력을 서버 요청(API-166~188)으로 바꾸고, 서버에 없는 삭제는 입력칸 오류로 막는지 본다.
+// 기준정보 서버 어댑터 (변경): 화면 입력을 서버 요청(API-166~188, 삭제 API-275~279)으로 바꾸는지 본다.
 import type { RoutingView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/errors';
 import { masterDataApi } from '@/api/masterData';
-import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
+import { fail, ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
+import { errorMessageOf } from '@/stores/useToastStore';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 const routings: RoutingView[] = [
@@ -68,6 +69,24 @@ describe('기준정보 서버 어댑터 변경 (api/server/masterData.ts)', () =
     expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
       ['PATCH', '/customers/41', { customerName: '한빛조선(주)' }],
       ['PATCH', '/production-settings', { heatCapacityTon: '260', deliveryRiskDays: 5 }],
+    ]);
+  });
+
+  it('삭제는 DELETE /{기준정보}/:id, 쓰는 곳이 있으면 서버 문구(COM-004 · 쓰는 곳 이름)를 그대로 토스트에 보인다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/customers/9' ? fail(400, 'COM-004', '쓰는 곳이 있어 삭제할 수 없어요: 수주') : ok({ id: 1 })));
+    await masterDataApi.deleteItem(3);
+    await masterDataApi.deleteSteelGrade(4);
+    await masterDataApi.deleteSupplier(5);
+    await masterDataApi.deleteYard(6);
+    const refused = await masterDataApi.deleteCustomer(9).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(InputError);
+    expect(errorMessageOf(refused)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 수주');
+    expect(calls.map((c) => [c.method, c.path])).toEqual([
+      ['DELETE', '/items/3'],
+      ['DELETE', '/steel-grades/4'],
+      ['DELETE', '/suppliers/5'],
+      ['DELETE', '/yards/6'],
+      ['DELETE', '/customers/9'],
     ]);
   });
 });

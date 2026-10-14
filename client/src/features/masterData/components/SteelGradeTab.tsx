@@ -14,7 +14,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
-import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, TableFoot } from '@/features/masterData/components/MasterParts';
+import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -24,6 +24,7 @@ const buildSteelmakingHref = (steelGradeId: number) => `/quality/standards?proce
 export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
   const grades = useMasterSteelGrades();
   const [adding, setAdding] = useState(false);
+  const deletion = useMasterDelete();
   return (
     <Card petKey="card:masterData.grades">
       <CardHead
@@ -47,6 +48,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                     <Th>적용 규격</Th>
                     <Th align="right">제품 규격</Th>
                     <Th>성분 규격 (제강 검사 기준)</Th>
+                    <Th aria-label="삭제" />
                   </tr>
                 </thead>
                 <tbody>
@@ -71,6 +73,12 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                           </Link>
                         )}
                       </Td>
+                      <Td align="right">
+                        <RowActions
+                          canEdit={canEdit}
+                          onDelete={() => deletion.open({ id: g.id, name: g.steelGradeCode, object: '강종을', remove: masterDataApi.deleteSteelGrade })}
+                        />
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -85,6 +93,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
         )}
       </QueryBoundary>
       {adding ? <SteelGradeModal onClose={() => setAdding(false)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }

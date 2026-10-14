@@ -338,6 +338,11 @@ const updateRawMaterial = async (input: RawMaterialUpdateInput) =>
     defaultSupplierId: input.defaultSupplierId,
   });
 
+/** API-275~279. 쓰는 곳이 있으면 서버가 COM-004와 쓰는 곳 이름으로 막는다. 지운 행은 화면이 다시 불러온다 */
+async function removeAt(path: string): Promise<void> {
+  await serverRequest<unknown>('DELETE', path);
+}
+
 async function saveProductionSetting(input: ProductionSettingInput): Promise<number> {
   const days = Number(String(input.deliveryRiskDays).trim());
   if (!Number.isInteger(days) || days < 0) throw new InputError('납기 위험 기준일을 확인해 주세요', { deliveryRiskDays: '납기 위험 기준일은 0 이상의 정수예요' });
@@ -360,4 +365,9 @@ export const serverMasterDataWriteApi = {
   createYard: (input: YardInput) => idOf('POST', '/yards', { ...input, yardType: input.yardType ?? undefined }),
   updateYard: (input: YardUpdateInput) => idOf('PATCH', `/yards/${input.id}`, { yardName: input.yardName }),
   saveProductionSetting,
+  deleteItem: (id: number) => removeAt(`/items/${id}`),
+  deleteSteelGrade: (id: number) => removeAt(`/steel-grades/${id}`),
+  deleteCustomer: (id: number) => removeAt(`/customers/${id}`),
+  deleteSupplier: (id: number) => removeAt(`/suppliers/${id}`),
+  deleteYard: (id: number) => removeAt(`/yards/${id}`),
 };

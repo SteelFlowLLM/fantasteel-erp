@@ -14,7 +14,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterRawMaterials, useMasterSuppliers, useMasterYards } from '@/hooks/useMasterData';
@@ -32,6 +32,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
   const materials = useMasterRawMaterials();
   const [typeFilter, setTypeFilter] = useState('');
   const [editing, setEditing] = useState<MasterRawMaterialView | 'new' | null>(null);
+  const deletion = useMasterDelete();
   return (
     <Card petKey="card:masterData.rawMaterials">
       <CardHead
@@ -83,6 +84,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(m)}
+                          onDelete={() => deletion.open({ id: m.id, name: m.itemCode, object: '원료를', remove: masterDataApi.deleteItem })}
                         />
                       </Td>
                     </tr>
@@ -98,6 +100,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
         }}
       </QueryBoundary>
       {editing ? <RawMaterialModal material={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }

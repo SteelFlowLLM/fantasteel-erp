@@ -1,7 +1,7 @@
 'use client';
 
 // 고객사·공급업체 (REQ-MST-007), 야드 (REQ-MST-008: 원료·슬래브·코일 야드, 야드 안 위치는 관리하지 않음).
-// '사용 안 함' 토글은 두지 않는다(PLAN 5장, 컨벤션 7-2). 기준정보 삭제 API는 없다(master-data.md 8-1).
+// '사용 안 함' 토글은 두지 않고 삭제만 둔다(PLAN 5장, 컨벤션 7-2). 쓰는 곳이 있으면 서버가 막는다(API-277~279).
 // 야드 수정 창은 그 야드의 실제 야드 유형을 보여 준다 (옛 화면의 '항상 원료 야드' 표시 버그 수정, 보고서 5).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -16,7 +16,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterCustomers, useMasterSuppliers, useMasterYards } from '@/hooks/useMasterData';
@@ -128,10 +128,17 @@ interface CodeNameTableProps {
   query: { data: CodeNameRow[] | undefined; isPending: boolean; error: unknown; refetch: () => unknown };
 }
 
+const REMOVE: Record<ListKind, (id: number) => Promise<void>> = {
+  customers: masterDataApi.deleteCustomer,
+  suppliers: masterDataApi.deleteSupplier,
+  yards: masterDataApi.deleteYard,
+};
+
 function CodeNameTable({ kind, canEdit, query }: CodeNameTableProps) {
   const text = KIND_TEXT[kind];
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<CodeNameRow | 'new' | null>(null);
+  const deletion = useMasterDelete();
   return (
     <Card petKey="card:masterData.partners">
       <CardHead
@@ -171,6 +178,7 @@ function CodeNameTable({ kind, canEdit, query }: CodeNameTableProps) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(row)}
+                          onDelete={() => deletion.open({ id: row.id, name: row.code, object: `${text.what}를`, remove: REMOVE[kind] })}
                         />
                       </Td>
                     </tr>
@@ -184,6 +192,7 @@ function CodeNameTable({ kind, canEdit, query }: CodeNameTableProps) {
         }}
       </QueryBoundary>
       {editing ? <CodeNameModal kind={kind} row={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }
