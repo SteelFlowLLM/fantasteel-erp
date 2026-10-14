@@ -1,6 +1,6 @@
 // (main) 화면 목록과 여는 조건. 왼쪽 레일과 화면 잠금(RouteGuard)이 같은 표를 쓴다.
 // 권한이 있는 화면: 조회(VIEW) 이상이면 열리고, 사용(USE)이 없으면 읽기 전용이다. 등록 화면은 사용 권한이 있어야 열린다.
-// 승인함은 부서장만(REQ-AUTH-004), 대시보드·LOT 추적·작업 로그·업무·알림·메신저·재고는 모든 사원이 연다.
+// 승인함은 부서장만(REQ-AUTH-004), 대시보드·LOT 추적·작업 로그·업무·알림·메신저(Message → ERP 초안 포함)·재고는 모든 사원이 연다.
 import { PERMISSION, type Permission, type PermissionArea } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { canUse, canView, isDepartmentHead, type PermissionMap } from '@/lib/permissions';
@@ -61,7 +61,7 @@ export const SCREEN = {
     icon: 'cart',
     access: view(PERMISSION.PURCHASE_REQUISITION_CREATE),
     area: '구매',
-    match: ['/purchase-requisitions/', '/action-drafts/'],
+    match: ['/purchase-requisitions/'],
   }),
   purchaseOrders: screen({ href: '/purchase-orders', label: '발주', icon: 'building', access: view(PERMISSION.PURCHASE_ORDER_CONFIRM), area: '구매' }),
   goodsReceipts: screen({ href: '/goods-receipts', label: '입고', icon: 'box', access: view(PERMISSION.GOODS_RECEIPT_CONFIRM), area: '구매' }),
@@ -94,7 +94,8 @@ export const SCREEN = {
   lotTrace: screen({ href: '/lots/trace', label: 'LOT 추적', icon: 'trace', access: EVERYONE }),
   businessEvents: screen({ href: '/business-events', label: '작업 로그', icon: 'history', access: EVERYONE }),
   tasks: screen({ href: '/tasks', label: '업무·알림', icon: 'task', access: EVERYONE, badge: 'notifications' }),
-  messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat' }),
+  // Message → ERP 초안은 메신저에서 만들고 연다. 볼 수 있는지(요청자·원본 방 멤버)는 서버가 확인한다 (API-253)
+  messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE, soon: 'P2' }),
   meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE, soon: 'P2' }),
   pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE, soon: 'EX' }),
