@@ -44,6 +44,10 @@ export class BusinessEventRepository {
     return tx.salesOrder.findMany({ where: { id: { in: ids } }, select: { id: true, salesOrderNo: true } });
   }
 
+  findMessages(tx: Tx, ids: number[]) {
+    return tx.message.findMany({ where: { id: { in: ids } }, select: { id: true, chatRoomId: true } });
+  }
+
   findEventLots(tx: Tx, businessEventIds: number[]) {
     return tx.businessEventLot.findMany({ where: { businessEventId: { in: businessEventIds } }, select: { businessEventId: true, lotId: true }, orderBy: { id: 'asc' } });
   }

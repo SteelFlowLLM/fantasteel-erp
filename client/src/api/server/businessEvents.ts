@@ -123,8 +123,8 @@ export function toEventView(e: ServerEvent): BusinessEventView {
     isAiAssisted: e.isAiAssisted,
     actionDraftId: e.actionDraftId,
     messageId: e.messageId,
-    // 원본 메시지의 채팅방이 응답에 없어 메신저로 이동할 수 없다
-    messageHref: null,
+    // 알림의 메시지 링크와 같은 모양 (메신저가 그 방을 열고 메시지까지 내려간다)
+    messageHref: e.messageId !== null && e.chatRoomId !== null ? `/messenger?room=${e.chatRoomId}&message=${e.messageId}` : null,
     occurredAt: e.occurredAt,
     lots: [...e.lots].sort((a, b) => a.lotNo.localeCompare(b.lotNo)).map((l) => ({ id: l.lotId, lotNo: l.lotNo, lotType: l.lotType })),
   };

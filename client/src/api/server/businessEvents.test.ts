@@ -27,6 +27,7 @@ const event = (id: number, over: Partial<ServerEvent> = {}): ServerEvent => ({
   isAiAssisted: false,
   actionDraftId: null,
   messageId: null,
+  chatRoomId: null,
   occurredAt: '2026-10-07T01:00:00.000Z',
   lots: [],
   ...over,
@@ -69,7 +70,7 @@ const inspected = event(4, {
   lots: [{ lotId: 11, lotNo: 'HT-01-01', lotType: 'SLAB' }],
 });
 const resultEvent = event(5, { businessEventType: 'PRODUCTION_RESULT_REGISTERED', targetType: 'production_result', targetId: 3, afterData: { productionPlanId: 7, outputLotNo: 'HM-01' } });
-const draft = event(6, { businessEventType: 'DRAFT_CREATED', targetType: 'action_draft', targetId: 5, afterData: null, messageId: 77, salesOrderId: null, salesOrderNo: null });
+const draft = event(6, { businessEventType: 'DRAFT_CREATED', targetType: 'action_draft', targetId: 5, afterData: null, messageId: 77, chatRoomId: 40, salesOrderId: null, salesOrderNo: null });
 
 /** GET /business-events: sort·page·size를 지키는 가짜 서버 */
 function respondEvents(call: ServerCall, rows: readonly ServerEvent[]) {
@@ -111,7 +112,7 @@ describe('작업 로그 서버 어댑터 (api/server/businessEvents.ts)', () => 
     ]);
     expect(byId.get(4)).toMatchObject({ targetNo: 'HT-01-01', targetHref: '/quality/inspections?lot=11', salesOrderNo: null });
     expect(byId.get(5)).toMatchObject({ targetNo: 'HM-01', targetHref: '/production/results?plan=7' });
-    expect(byId.get(6)).toMatchObject({ targetNo: null, targetText: '초안 #5', targetHref: '/action-drafts/5', messageId: 77, messageHref: null });
+    expect(byId.get(6)).toMatchObject({ targetNo: null, targetText: '초안 #5', targetHref: '/action-drafts/5', messageId: 77, messageHref: '/messenger?room=40&message=77' });
   });
 
   it('더 보기: 서버 한 쪽 최대 100건이라 limit만큼 나눠 읽는다', async () => {
