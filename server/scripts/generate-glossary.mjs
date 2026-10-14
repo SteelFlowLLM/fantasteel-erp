@@ -80,6 +80,17 @@ for (const line of processDoc.split('\n')) {
   steps.push({ id, name, actor, flow, output });
 }
 if (!steps.length) throw new Error('업무 프로세스를 하나도 읽지 못함');
+
+// 6장 업무별 '정상 흐름' 줄. 없는 업무(수주 취소·LOT 추적 등)는 null. 구현 제안인 'P1 정상 흐름 (구현 제안)'은 읽지 않는다
+const normalFlows = new Map();
+let currentId = null;
+for (const line of processDoc.split('\n')) {
+  const heading = line.match(/^### (BP-[A-Z]+-\d{2}) /);
+  if (heading) currentId = heading[1];
+  const flow = line.match(/^\*\*정상 흐름\*\*: (.+)$/);
+  if (currentId && flow) normalFlows.set(currentId, cleanFlow(flow[1]));
+}
+for (const step of steps) step.normalFlow = normalFlows.get(step.id) ?? null;
 if (new Set(steps.map((s) => s.id)).size !== steps.length) throw new Error('업무 ID가 겹침');
 
 writeFileSync(
@@ -125,4 +136,13 @@ function listOf(cell) {
   }
   items.push(current);
   return items.map((v) => v.trim()).filter((v) => v && v !== '-');
+}
+
+/** 답에 쓸 문장이라 코드 표기(`…`)와 요구사항 번호 괄호는 뗀다 */
+function cleanFlow(text) {
+  return text
+    .replace(/`/g, '')
+    .replace(/\s*\(REQ-[^)]*\)/g, '')
+    .replace(/\.$/, '')
+    .trim();
 }

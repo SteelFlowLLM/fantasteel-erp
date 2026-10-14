@@ -10,4 +10,6 @@ export interface ProcessStep {
   flow: string;
   /** 결과물 */
   output: string;
+  /** 6장 업무별 '정상 흐름' 줄(더 자세함). 없는 업무는 null */
+  normalFlow: string | null;
 }

@@ -1,4 +1,4 @@
-import { RESERVATION_STATUS_LABEL, type AiAssistantScreenContext, type AiAssistantTurn, type ReservationStatus } from '@fantasteel/shared';
+import { ALLOCATION_STATUS_LABEL, DRAFT_STATUS_LABEL, RESERVATION_STATUS_LABEL, type AiAssistantScreenContext, type AiAssistantTurn } from '@fantasteel/shared';
 import type { ChatMessage } from '../llm/llm.client';
 import type { GlossaryTerm } from './knowledge/glossary.types';
 import type { ProcessStep } from './knowledge/process.types';
@@ -37,7 +37,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '4. 날짜 차이·합계·비율은 직접 계산하지 않고 결과에 있는 값(예: 납기까지 남은 일수, 진행률)을 그대로 말해요. 결과에 없는 평가나 권고(예: "확인이 필요해 보여요", "서둘러야 해요", "거의 없는 상태예요", "부족해 보여요")는 덧붙이지 않고 수치만 말해요.',
     '5. 알맞은 조회 도구가 없는 데이터는 "아직 조회할 수 없어요"라고 답해요. "비슷한 사례 찾아줘"처럼 과거 사례를 묻는 질문은 사례 자료가 아직 없어서 확인할 수 없다고 답하고 되묻지 않아요. 다시 조회하자고 제안할 때는 도구에 있는 조건으로만 제안해요.',
     '6. 도구 결과가 "권한 없음"이면 데이터를 말하지 않고, 결과에 있는 조회할 수 있는 역할을 안내해요. 도구 결과가 "오류"면 그 이유를 짧게 알려요.',
-    '7. [업무 프로세스 자료]가 있으면 업무 순서·흐름은 그 자료에 적힌 흐름만 근거로, 질문이 묻는 범위의 업무만 자료의 순서대로 짧게 이어서 설명해요. 쓴 문장 끝에는 [BP-SO-01]처럼 그 업무 ID를 붙이고, 자료에 없는 단계는 덧붙이지 않아요.',
+    '7. [업무 프로세스 자료]가 있으면 업무 순서·흐름은 그 자료에 적힌 흐름만 근거로, 질문이 묻는 범위의 업무만 자료의 순서대로 짧게 이어서 설명해요. 업무 하나를 물었고 정상 흐름이 있으면 그 단계들을 순서대로 풀어서 설명해요. 쓴 문장 끝에는 [BP-SO-01]처럼 그 업무 ID를 붙이고, 자료에 없는 단계는 덧붙이지 않아요.',
     '8. 참고 자료와 도구 결과에 없는 내용은 지어내지 말고 "확인할 수 없어요"라고 답해요.',
     '9. 당신은 업무 데이터를 바꾸지 못해요. 등록·확정·승인을 해 달라고 하면 직접 할 수 없다고 답해요.',
     '10. 참고 자료의 "사용 금지 동의어"는 쓰지 않고 한글명으로 말해요. 상태는 결과에 있는 한글 표시명으로 말하고, 영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고 뜻만 한글로 말해요.',
@@ -74,12 +74,13 @@ function screenText(screen: AiAssistantScreenContext | null): string {
   return [`${screen.title} (${screen.path})`, screen.label ? `맥락: ${screen.label}` : null].filter(Boolean).join('\n');
 }
 
-/** 표에 적힌 예약 상태 영문 코드는 모델이 답에 그대로 옮기므로 공통 코드 표시명으로 바꿔 넘긴다 */
-const withReservationLabels = (text: string): string =>
-  text.replace(/(ACTIVE|CONVERTED|RELEASED)/g, (code) => RESERVATION_STATUS_LABEL[code as ReservationStatus]);
+/** 표에 적힌 예약·배정·초안 상태 영문 코드는 모델이 답에 그대로 옮기므로 공통 코드 표시명으로 바꿔 넘긴다 */
+const STATUS_CODE_LABEL: Record<string, string> = { ...DRAFT_STATUS_LABEL, ...ALLOCATION_STATUS_LABEL, ...RESERVATION_STATUS_LABEL };
+const withStatusLabels = (text: string): string => text.replace(/[A-Z][A-Z_]{4,}/g, (code) => STATUS_CODE_LABEL[code] ?? code);
 
 function processText(step: ProcessStep): string {
-  return withReservationLabels(`[${step.id}] ${step.name} (주체: ${step.actor}) 흐름: ${step.flow} / 결과물: ${step.output}`);
+  const detail = step.normalFlow ? ` / 정상 흐름: ${step.normalFlow}` : '';
+  return withStatusLabels(`[${step.id}] ${step.name} (주체: ${step.actor}) 핵심 흐름: ${step.flow}${detail} / 결과물: ${step.output}`);
 }
 
 function referenceText(term: GlossaryTerm): string {
