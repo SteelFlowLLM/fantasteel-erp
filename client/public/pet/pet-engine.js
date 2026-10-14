@@ -2565,7 +2565,8 @@
      * 설명하는 요소가 펫에서 멀면(펫이 바닥에 있고 요소는 화면 위쪽 등) 말풍선을 펫 대신 그 요소 바로 아래(없으면 위)에 붙인다.
      * 그래야 무엇을 설명하는지 말풍선과 강조 테두리가 한자리에 보인다
      */
-    function anchorSpot(bw, bh) {
+    /** force: 펫이 가까이 있어도 칸에 붙인다 (펫 곁에 두면 칸을 덮을 때) */
+    function anchorSpot(bw, bh, force) {
       const el = bubble.anchor;
       if (!el || !el.isConnected) return null;
       const r = visibleRect(el);
@@ -2573,7 +2574,7 @@
       const box = petBox();
       const gapX = Math.max(0, r.left - box.right, box.left - r.right);
       const gapY = Math.max(0, r.top - box.bottom, box.top - r.bottom);
-      if (Math.hypot(gapX, gapY) < 140) return null;
+      if (!force && Math.hypot(gapX, gapY) < 140) return null;
       const vw = W();
       const vh = H();
       // 큰 카드는 머리(윗부분) 근처에 붙여 카드 가운데를 덮지 않게 한다
@@ -2606,13 +2607,16 @@
       const vh = H();
       const bw = bubble.w;
       const bh = bubble.h;
-      const near = anchorSpot(bw, bh);
-      if (near) {
+      const placeNear = (near) => {
         if (bubbleEl.dataset.side !== near.side) bubbleEl.dataset.side = near.side;
         bubbleEl.style.left = uiPx(near.x);
         bubbleEl.style.top = uiPx(near.y);
         bubbleEl.style.setProperty('--fp-tail-x', uiPx(near.tx));
         bubbleEl.style.transformOrigin = `${uiPx(near.tx)} ${near.side === 'bottom' ? '0' : '100%'}`;
+      };
+      const near = anchorSpot(bw, bh);
+      if (near) {
+        placeNear(near);
         return;
       }
       const box = petBox();
@@ -2632,6 +2636,17 @@
           x = Math.min(vw - bw - 8, box.right + 14);
         }
         y = clamp(box.top, 8, Math.max(8, vh - bh - 8));
+      }
+      // 펫이 설명하는 칸 바로 곁에 서 있으면(예: 상단 바 오른쪽 끝 프로필) 펫 곁 말풍선이 그 칸을 덮는다 → 칸 아래(안 되면 위)에 붙인다
+      const a = bubble.anchor && bubble.anchor.isConnected ? visibleRect(bubble.anchor) : null;
+      if (a && a.width > 0 && a.height > 0) {
+        const ix = Math.max(0, Math.min(x + bw, a.right) - Math.max(x, a.left));
+        const iy = Math.max(0, Math.min(y + bh, a.bottom) - Math.max(y, a.top));
+        const alt = ix * iy > a.width * a.height * 0.2 ? anchorSpot(bw, bh, true) : null;
+        if (alt) {
+          placeNear(alt);
+          return;
+        }
       }
       if (bubbleEl.dataset.side !== side) bubbleEl.dataset.side = side;
       bubbleEl.style.left = uiPx(x);
