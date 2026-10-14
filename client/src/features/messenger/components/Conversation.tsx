@@ -198,7 +198,7 @@ function RoomView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section data-pet-target="card:messenger.thread" data-pet-perch="" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
+      <section data-pet-perch="" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
         <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
           <span className="relative flex-none">
             <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
@@ -228,7 +228,8 @@ function RoomView({
         </header>
         <WorkRoomPin room={room} />
         <PinnedNotice room={room} onJump={onJump} />
-        <div ref={feedRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto py-2">
+        {/* 펫 강조 테두리가 방 머리·업무방 수주·입력칸(각자 설명 대상)까지 묶지 않게 메시지 목록에만 설명 키를 단다 */}
+        <div ref={feedRef} onScroll={onScroll} data-pet-target="card:messenger.thread" className="relative min-h-0 flex-1 overflow-auto bg-surface py-2">
           {messages.isPending ? <Spinner className="py-10" /> : null}
           {messages.error ? <StateView kind="error" title="메시지를 불러오지 못했어요" /> : null}
           {messages.data ? (

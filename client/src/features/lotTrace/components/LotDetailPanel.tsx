@@ -297,7 +297,8 @@ function LotBody({ lot, direction, onReroot }: { lot: LotDetailView; direction: 
 export function LotDetailPanel({ lotId, direction, onReroot, header }: { lotId: number; direction: TraceDirection; onReroot: (lotNo: string) => void; header?: ReactNode }) {
   const query = useLotDetail(lotId);
   return (
-    <Card className="min-h-0 flex-[1_1_auto]" petKey="card:lotTrace.detail">
+    // 글자를 키우면 영향 요약 아래 남는 높이가 머리·LOT 번호·아래 버튼보다 작아져 버튼이 카드 밖으로 삐져나오므로, 그만큼은 줄지 않게 하고 오른쪽 칸을 스크롤한다
+    <Card className="min-h-[240px] flex-[1_1_auto]" petKey="card:lotTrace.detail">
       <CardHead
         title="LOT 상세"
         actions={

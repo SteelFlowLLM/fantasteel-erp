@@ -303,7 +303,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         onBlur={() => setMention(null)}
         className="w-full resize-none rounded-sm border border-line-strong bg-surface px-3 py-2 text-sm leading-normal outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--color-brand-tint)]"
       />
-      <div className="flex items-center gap-1.5">
+      {/* 글자를 키우면 대화 칸이 좁아져 보내기 버튼이 칸 밖으로 밀려나므로 줄을 넘겨 놓는다 */}
+      <div className="flex flex-wrap items-center gap-1.5">
         <input
           ref={fileInputRef}
           type="file"

@@ -150,7 +150,8 @@ function CaseDetail() {
           </CardBody>
           <div className="mt-auto flex flex-col gap-2 border-t border-line px-4 py-3">
             <span className="text-cap text-ink-3">사례가 쌓이는 순서</span>
-            <Steps items={CASE_REGISTER_STEPS.map((label) => ({ key: label, label, state: 'done' as const }))} />
+            {/* 글자를 키우면 단계 줄이 카드보다 길어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+            <Steps items={CASE_REGISTER_STEPS.map((label) => ({ key: label, label, state: 'done' as const }))} className="overflow-x-auto" />
           </div>
         </Card>
 
