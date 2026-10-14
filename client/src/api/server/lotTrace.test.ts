@@ -62,7 +62,7 @@ function lotsByPrefix(call: ServerCall, all: readonly { lotNo: string }[]) {
 afterEach(() => stopFakeServer());
 
 describe('LOT 추적 서버 어댑터 (api/server/lotTrace.ts)', () => {
-  it('LOT 검색: 서버 앞부분 검색, 정확히 같은 번호가 맨 앞, 한 줄 요약은 가짜 DB와 같은 규칙', async () => {
+  it('LOT 검색: 서버 앞부분 검색, 정확히 같은 번호가 맨 앞, 한 줄 요약 규칙', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.steelmaking, (c) =>
       c.path === '/lots' ? ok(page([slab1, heat, summary(1, 'ORE-1', 'RAW_MATERIAL', { itemCode: 'ORE01', itemName: '철광석' })], 3)) : undefined,
     );

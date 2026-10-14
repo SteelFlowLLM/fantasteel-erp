@@ -6,6 +6,7 @@ import {
   inspectionItemCodesOfHistory,
   inspectionResultOfSnapshot,
   limitText,
+  measuredCardsPerRow,
   measuredValueChanges,
   previewOf,
   sameMeasuredValue,
@@ -32,7 +33,8 @@ describe('기준 문구', () => {
 
   it('두께 구간은 초과~이하로 보인다', () => {
     expect(thicknessBandText('6', '16')).toBe('두께 6 초과 ~ 16 이하 mm');
-    expect(thicknessBandText('6', null)).toBe('두께 6 mm 초과');
+    expect(thicknessBandText('6', null)).toBe('두께 6 초과 mm');
+    expect(thicknessBandText(null, '16')).toBe('두께 16 이하 mm');
     expect(thicknessBandText(null, null)).toBeNull();
   });
 });
@@ -122,5 +124,12 @@ describe('작업 로그의 검사 항목 코드', () => {
       { businessEventType: 'DISPOSITION_SET', beforeData: values(['C']), afterData: null },
     ]);
     expect(codes.sort()).toEqual(['SURFACE_DEFECT_DEPTH', 'THICKNESS_DEV', 'WIDTH_DEV']);
+  });
+});
+
+describe('측정값 카드 한 줄 개수 (넓은 화면)', () => {
+  it('마지막 줄이 더 꽉 차는 쪽(3 또는 4)을 고른다', () => {
+    // 히트 성분 5개는 3 + 2, 슬래브 4개는 한 줄, 코일 6개는 3 + 3, 열연 16개는 4줄
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 9, 16].map(measuredCardsPerRow)).toEqual([1, 2, 3, 4, 3, 3, 4, 4, 3, 4]);
   });
 });

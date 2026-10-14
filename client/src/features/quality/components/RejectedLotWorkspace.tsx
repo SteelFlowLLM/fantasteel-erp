@@ -26,7 +26,6 @@ import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { DispositionBadge, RejectReasonBadge, ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, limitText, lotIconOf, trimNum } from '@/features/quality/lib/qualityDisplay';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useRejectedLotDetail, useRejectedLots } from '@/hooks/useDispositions';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -324,7 +323,7 @@ function HeatChildItem({ row, active }: { row: RejectedLotListRow; active: boole
 
 function Detail({ lotId }: { lotId: number }) {
   const detail = useRejectedLotDetail(lotId);
-  useShellTitle(detail.data?.row.lotNo, detail.data ? '불합격 관리' : undefined);
+  // 상단 바는 화면 이름(불합격 관리) 그대로 둔다: LOT 번호로 바꾸면 바로 아래 LOT 머리와 같은 번호가 크게 두 번 보였다
   return (
     <QueryBoundary query={detail} loadingLabel="불합격 LOT을 불러오는 중…">
       {(data) =>
@@ -391,8 +390,9 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                 ) : (
                   <span>
                     상위 히트{' '}
+                    {/* 히트 LOT id는 근거 검사(evidence)에만 있다. 없으면 lot=0으로 가서 목록 첫 LOT이 열렸으니, 그때는 히트 번호로 LOT 추적을 연다 (검사 입력의 상위 히트 링크와 같음) */}
                     {row.heatNo ? (
-                      <Link href={rejectedHref(evidence?.lot.lotId ?? 0)} className="font-mono text-run hover:underline">
+                      <Link href={evidence ? rejectedHref(evidence.lot.lotId) : lotTraceHref(row.heatNo)} className="font-mono text-run hover:underline">
                         {row.heatNo}
                       </Link>
                     ) : null}{' '}
@@ -445,7 +445,8 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                   <span className="text-ink-3">없음 · 연결된 수주 품목이 없어요</span>
                 ),
               },
-              { label: '생산완료일', value: fmtDate(row.producedDate) },
+              // 히트에는 생산완료일 칸이 없다(서버). "-"만 보이던 칸을 뺀다
+              ...(row.lotType !== 'HEAT' ? [{ label: '생산완료일', value: fmtDate(row.producedDate) }] : []),
               { label: 'LOT 상태', value: LOT_STATUS_LABEL[row.lotStatus] },
             ]}
           />
@@ -475,8 +476,12 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                 <span className="text-cap text-ink-3">불합격 항목</span>
                 {row.failedItems.map((f) => (
                   <span key={f.inspectionItemCode} className="text-xs text-danger" data-pet-item="qualityInspectionValue" data-pet-item-title={f.inspectionItemName}>
-                    {f.inspectionItemName} {trimNum(f.measuredValue)}
-                    {f.unit ? ` ${f.unit}` : ''} (기준 {limitText(f)})
+                    {f.inspectionItemName}{' '}
+                    <span data-pet-field="측정값">
+                      {trimNum(f.measuredValue)}
+                      {f.unit ? ` ${f.unit}` : ''}
+                    </span>{' '}
+                    (기준 <span data-pet-field="기준">{limitText(f)}</span>)
                   </span>
                 ))}
               </div>

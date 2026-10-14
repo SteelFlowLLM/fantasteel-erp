@@ -152,6 +152,57 @@ export function emoticonPreview(key: string): string {
   return found ? `이모티콘 · ${found.label}` : '이모티콘';
 }
 
+/** 사내 채팅 @AI 호출 (REQ-AST-002) */
+export const AI_MENTION = '@AI';
+/** AI 답의 보낸 사람 표시 */
+export const AI_SENDER_NAME = 'AI 어시스턴트';
+/**
+ * ERD의 message에는 AI 보낸 사람이 없다(USER는 사원 필수, SYSTEM은 보낸 사람 없음). 그래서 AI 답은 시스템 메시지로 저장하고
+ * 본문 맨 앞의 이 표시로 구분한다. 응답(ChatMessageView)에서는 표시를 떼고 isAi로 알린다.
+ */
+export const AI_REPLY_PREFIX = '[AI 어시스턴트] ';
+/** AI 답 접두어의 공통 앞부분 (조회 도구를 쓴 답은 '[AI 어시스턴트:get_inventory] ') */
+export const AI_REPLY_MARK = '[AI 어시스턴트';
+/** 입력 중 표시에서 AI의 사원 id (화면이 보낸 사원 없는 메시지의 senderId로 쓰는 0과 같다) */
+export const AI_TYPING_EMPLOYEE_ID = 0;
+
+const AI_REPLY_HEAD = /^\[AI 어시스턴트(?::([a-z_]+(?:,[a-z_]+)*))?\] /;
+
+/**
+ * AI 답 본문을 저장 모양으로 만든다. 조회 도구(데이터)를 쓴 답은 쓴 도구 이름을 접두어에 함께 적어,
+ * 그 데이터를 볼 권한이 있는 멤버에게만 보이게 하는 데 쓴다 (message에 따로 칸이 없다).
+ */
+export function aiReplyContent(text: string, dataTools: readonly string[] = []): string {
+  return `${dataTools.length > 0 ? `${AI_REPLY_MARK}:${dataTools.join(',')}] ` : AI_REPLY_PREFIX}${text}`;
+}
+
+/** 저장된 본문이 AI 답이면 글과 쓴 조회 도구 이름, 아니면 null */
+export function parseAiReply(content: string | null): { text: string; dataTools: string[] } | null {
+  const head = content === null ? null : AI_REPLY_HEAD.exec(content);
+  return head && content !== null ? { text: content.slice(head[0].length), dataTools: head[1] ? head[1].split(',') : [] } : null;
+}
+
+/** '@AI' 뒤에 영문·숫자가 이어지지 않는 호출만 (@AI야·@AI, 는 호출, @AIR는 아님) */
+const AI_MENTION_PATTERN = /(^|\s)@AI(?![A-Za-z0-9_])/i;
+
+export function mentionsAi(content: string): boolean {
+  return AI_MENTION_PATTERN.test(content);
+}
+
+/** @AI 표시를 뺀 질문 */
+export function aiQuestionOf(content: string): string {
+  return content
+    .replace(new RegExp(AI_MENTION_PATTERN.source, 'gi'), '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[,:;]\s*/, '');
+}
+
+/** 저장된 본문이 AI 답이면 표시를 뗀 글, 아니면 null */
+export function aiReplyTextOf(content: string | null): string | null {
+  return parseAiReply(content)?.text ?? null;
+}
+
 /** 삭제된 메시지 자리에 보이는 문구 */
 export const DELETED_MESSAGE_TEXT = '삭제된 메시지예요';
 
@@ -275,6 +326,8 @@ export interface ChatMessageView {
   senderDepartmentName: string | null;
   senderJobGradeName: string | null;
   isSystem: boolean;
+  /** @AI 호출에 대한 AI 답 (isSystem도 true). 보낸 사람은 AI_SENDER_NAME, 본문은 표시를 뗀 글 */
+  isAi: boolean;
   isMine: boolean;
   content: string | null;
   /** 첨부 파일 (올린 순서, 스키마 3차). 내려받기는 GET attachments/:첨부 id. 삭제된 메시지는 빈 배열 */

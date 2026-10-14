@@ -4,7 +4,7 @@
 
 지금 저장소에는 두 가지가 같이 있습니다.
 
-- **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. 기본은 **실제 서버(`server/`)를 부르고**, 서버에 아직 연결되지 않은 기능만 브라우저 안의 가짜 DB(mock)를 씁니다. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
+- **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. 모든 화면이 **실제 서버(`server/`)를 부릅니다**. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
 - **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)).
 - P2(AI)·EX 기능은 화면만 있고 "준비 중"으로 표시됩니다. AI·LLM 호출은 없습니다.
 
@@ -22,7 +22,6 @@ npm run dev        # DB(54322) · shared · 서버(8787) · 화면(5173)
 - 처음 열면 **로그인** 화면(`/login`)이 나옵니다. 시드 사원번호(`docs/backend/seed.md`)와 비밀번호 `fantasteel`로 들어갑니다.
 - 화면 데이터는 서버 DB에 있습니다. 처음 상태로 되돌리려면 `npm run db:reset`, 화면에 볼 거래 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`.
 - `npm install`은 설치 뒤 shared 빌드와 Prisma Client 생성도 자동으로 합니다.
-- `client/.env.local`에 `NEXT_PUBLIC_DATA_SOURCE=mock`을 두면 서버 없이 브라우저 안 가짜 DB로 띄웁니다(테스트가 쓰는 모드, `docs/CLIENT-GUIDE.md`).
 
 ### 점검·빌드
 
@@ -38,21 +37,20 @@ npm run test -w @fantasteel/client
 npm run build -w @fantasteel/client
 ```
 
-테스트는 Vitest이고 서버·DB 없이 가짜 DB 위에서 돌아갑니다(`vitest.config.ts`가 데이터 출처를 mock으로 둡니다). 시연 시나리오(업무 프로세스 14.1·14.2)와 14.3 필수 검증은 `client/src/api/scenario/`의 테스트가 화면 api 함수로 끝까지 돌립니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
+화면 테스트는 Vitest이고 서버·DB 없이 돌아갑니다. api 함수는 가짜 서버 응답(`useFakeServer`)으로, 화면 그리기는 고정 데이터로 시험합니다. 시연 시나리오(업무 프로세스 14.1)의 핵심 흐름은 서버 DB 테스트(`server/src/modules/sales-order/order-flow.spec.ts`)가 수주부터 출고·밀시트·추적·Message → ERP까지 잇고, 단계별 규칙(14.2·14.3)은 각 서버 모듈 테스트가 확인합니다. 빌드한 결과를 띄우려면 `npm run start -w @fantasteel/client`(같은 5173 포트).
 
 ### 화면 폴더 구조 (`client/src/`)
 
 | 폴더 | 내용 |
 |---|---|
-| `app/` | Next.js 경로. `app/(main)/<주소>/page.tsx`가 화면 진입점, `app/login/`이 계정 선택 |
+| `app/` | Next.js 경로. `app/(main)/<주소>/page.tsx`가 화면 진입점, `app/login/`이 로그인 |
 | `features/<영역>/` | 영역별 화면과 부품 (sales, production, quality, purchasing, shipment, inventory, lotTrace, businessEvents, tasks, messenger, dashboard, admin, masterData, inspectionStandards, actionDrafts, millSheets, shell …) |
 | `components/` | 공용 화면 부품 (Button, Table, Modal, Badge, QueryBoundary, StateView, ComingSoon …) |
-| `api/` | 화면이 데이터를 읽고 쓰는 유일한 길. 권한 확인(COM-002)·검증·작업 로그를 거쳐 가짜 DB를 바꾼다 |
+| `api/` | 화면이 데이터를 읽고 쓰는 유일한 길. `<영역>.ts`(화면 모양) → `server/<영역>.ts`(서버 어댑터) → `http.ts`(서버 호출) |
 | `hooks/` | api 함수를 감싼 커스텀 훅 (TanStack Query) |
 | `codes/` | **공통 코드**(공통 코드 정의서의 값·표시명), 업무 프로세스 9.3 오류 코드, 업무 번호·LOT 번호 채번 규칙(`numbering.ts`) |
-| `mock/` | **브라우저 안 가짜 DB**: `schema.ts`(테이블), `store.ts`·`db.ts`(저장·탭 동기화), `seed.ts`(조직·기준정보 시드), `seeds/`(거래·협업 시드), `services/`(업무 규칙 서비스), `businessEvents.ts`(작업 로그 기록) |
 | `lib/` | 순수 계산 함수 (이론중량, FIFO, MRP, 검사 판정, 소수 계산 …) |
-| `stores/` | Zustand — 계정·토스트·셸 UI 상태만 |
+| `stores/` | Zustand — 로그인 사원·토스트·셸 UI 상태만 |
 | `styles/`, `test/` | 전역 스타일, 테스트 준비 |
 
 ### 문서

@@ -92,12 +92,13 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
-    // 화면은 시스템 메시지의 보낸 사람을 가짜 DB와 같이 0으로 본다 (SYSTEM_SENDER_ID)
+    // 화면은 시스템 메시지의 보낸 사람을 0으로 본다 (SYSTEM_SENDER_ID)
     senderId: message.senderId ?? 0,
     senderName: message.senderName,
     senderDepartmentName: message.senderDepartmentName,
     senderJobGradeName: message.senderJobGradeName,
     isSystem: message.isSystem,
+    isAi: message.isAi,
     isMine: message.isMine,
     content: message.content,
     files: message.attachments.map((a) => ({ id: a.id, name: a.fileName, size: a.fileSize, mimeType: null })),

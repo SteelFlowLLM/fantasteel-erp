@@ -13,7 +13,10 @@ import {
   type ItemType,
   type PageResult,
   type ProductionPlanStatus,
+  type PurchaseOrderStatus,
+  type PurchaseRequisitionStatus,
   type SalesOrderCancelBlock,
+  type SalesOrderCancelPurchaseImpactLine,
   type SalesOrderCancellation,
   type SalesOrderDetail,
   type SalesOrderFulfillment,
@@ -30,7 +33,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
-import { ProductionService } from '../production/production.service';
+import { ProductionService, salesOrderCancelEffectOf } from '../production/production.service';
 import type { CancelSalesOrderDto, CreateSalesOrderDto, ListSalesOrdersQuery } from './dto/sales-order.dto';
 import { calcItemFulfillment, planRemainingTargetQty, progressOf, salesOrderStatusOf } from './fulfillment.calculator';
 import { IdempotencyStore } from './idempotency.store';
@@ -38,6 +41,13 @@ import { SalesOrderRepository } from './sales-order.repository';
 
 type SalesOrderRow = NonNullable<Awaited<ReturnType<SalesOrderRepository['findSalesOrder']>>>;
 type SalesOrderItemRow = SalesOrderRow['salesOrderItems'][number];
+
+/**
+ * 수주를 취소하면 처리할 품목: 진행중·부분출하. 이미 취소된 품목과 전량 출고된 품목은 그대로 둔다 (BP-SO-02 예외, 2026-10-14 잔량 취소).
+ * 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다.
+ */
+const cancellableItemsOf = (row: SalesOrderRow): SalesOrderItemRow[] =>
+  row.salesOrderItems.filter((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.OPEN || i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED);
 
 /** 생산 설정값이 없을 때 쓰는 납기 위험 기준일 (REQ-MST-009 초기값) */
 const DEFAULT_DELIVERY_RISK_DAYS = 3;
@@ -154,6 +164,36 @@ export class SalesOrderService {
     return this.inventory.listReservations(this.prisma, row.salesOrderItems.map((i) => i.id));
   }
 
+  /**
+   * 수주 취소 창의 구매 진행 영향 (BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"): 지금 취소하면 취소·연결 해제될
+   * 생산계획에 연결된 구매요청과 발주. 수주 취소는 구매요청·발주를 바꾸지 않아 보여 주기만 한다. 구매요청 번호 순.
+   */
+  async cancelPurchaseImpact(id: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+    const row = await this.mustFind(this.prisma, id);
+    const requisitions = await this.repository.findRequisitionsOfPlans(this.prisma, cancellableItemsOf(row).map((i) => i.id));
+    return requisitions.flatMap((pr) => {
+      const plan = pr.productionPlan;
+      const planEffect = plan ? salesOrderCancelEffectOf(plan.productionPlanStatus) : null;
+      if (!plan || !planEffect) return [];
+      const purchaseOrder = pr.purchaseOrderItem?.purchaseOrder ?? null;
+      return [
+        {
+          purchaseRequisitionId: pr.id,
+          purchaseRequisitionNo: pr.purchaseRequisitionNo,
+          purchaseRequisitionStatus: pr.purchaseRequisitionStatus as PurchaseRequisitionStatus,
+          itemName: pr.item.itemName,
+          requestedTon: pr.requestedTon.toFixed(3),
+          productionPlanId: plan.id,
+          productionPlanNo: plan.productionPlanNo,
+          planEffect,
+          purchaseOrderId: purchaseOrder?.id ?? null,
+          purchaseOrderNo: purchaseOrder?.purchaseOrderNo ?? null,
+          purchaseOrderStatus: (purchaseOrder?.purchaseOrderStatus ?? null) as PurchaseOrderStatus | null,
+        },
+      ];
+    });
+  }
+
   /** 진행 중 수주의 충족 현황 (대시보드 수주 충족 현황·공정 흐름 현황이 쓴다). 취소 품목은 뺀다 */
   async openSalesOrderFulfillments(tx: Tx): Promise<{ today: string; deliveryRiskDays: number; salesOrders: (SalesOrderSummary & { fulfillments: SalesOrderItemFulfillment[] })[] }> {
     const rows = await this.repository.findOpenSalesOrders(tx);
@@ -240,8 +280,9 @@ export class SalesOrderService {
   // ── 취소 (BP-SO-02, REQ-SO-006) ────────────────────────
 
   /**
-   * 수주 취소: 출고된 매수가 있으면 SO-003, 진행 중 출하요청이 있으면 SO-004.
-   * 통과하면 품목마다 ACTIVE 예약 해제 → 시작 전 계획 취소·진행중 계획 연결 해제(여재) → 품목 CANCELLED. 출고 완료분은 되돌리지 않는다.
+   * 수주 취소: 전량 출고된 수주는 SO-003, 진행 중 출하요청이 있으면 SO-004.
+   * 통과하면 진행중·부분출하 품목마다 ACTIVE 예약 해제 → 시작 전 계획 취소·진행중 계획 연결 해제(여재) → 품목 CANCELLED.
+   * 출고 완료분은 되돌리지 않는다: 부분출하 품목은 출고 매수를 남긴 채 잔량만 취소하고, 전량 출고된 품목은 그대로 둔다 (BP-SO-02 예외).
    */
   cancel(user: AuthUser, id: number, dto: CancelSalesOrderDto): Promise<CancelSalesOrderResult> {
     return this.prisma.$transaction(async (tx) => {
@@ -258,7 +299,7 @@ export class SalesOrderService {
       const releasedReservations: SalesOrderCancellation['releasedReservations'] = [];
       const cancelledPlanNos: string[] = [];
       const unlinkedPlanNos: string[] = [];
-      const live = row.salesOrderItems.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
+      const live = cancellableItemsOf(row);
       for (const soItem of [...live].sort((a, b) => a.itemId - b.itemId || a.id - b.id)) {
         const releasedQty = await this.inventory.releaseForSalesOrderItem(tx, { salesOrderId: row.id, salesOrderItemId: soItem.id, itemId: soItem.itemId, actor: user, reason });
         releasedReservations.push({ salesOrderItemId: soItem.id, releasedQty });
@@ -361,7 +402,10 @@ export class SalesOrderService {
   private toSummary(row: SalesOrderRow, ctx: ReadContext): SalesOrderSummary {
     const items = row.salesOrderItems.map((i) => this.toFulfillment(i, ctx));
     const live = items.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
-    const measured = live.length > 0 ? live : items;
+    const salesOrderStatus = salesOrderStatusOf(items.map((i) => i.salesOrderItemStatus));
+    // 진행률은 진행 중이면 취소 품목을 빼고 센다. 취소로 끝난 수주는 모든 품목으로 세서(부분 출고 뒤 잔량 취소면 출고 ÷ 전체 주문)
+    // 헤더가 취소인데 남은 출하완료 품목만으로 100%가 되지 않게 한다
+    const measured = salesOrderStatus === SALES_ORDER_ITEM_STATUS.CANCELLED || live.length === 0 ? items : live;
     return {
       id: row.id,
       salesOrderNo: row.salesOrderNo,
@@ -369,7 +413,7 @@ export class SalesOrderService {
       customerName: row.customer.customerName,
       ownerEmployeeId: row.ownerEmployeeId,
       ownerEmployeeName: row.ownerEmployee.employeeName,
-      salesOrderStatus: salesOrderStatusOf(items.map((i) => i.salesOrderItemStatus)),
+      salesOrderStatus,
       itemCount: items.length,
       totalOrderedQty: items.reduce((sum, i) => sum + i.orderedQty, 0),
       totalOrderedTon: sumTon(items.map((i) => i.orderedTon)),
@@ -396,9 +440,11 @@ export class SalesOrderService {
     };
   }
 
+  /** 취소할 품목이 없을 때: 하나라도 취소됐으면 이미 취소한 수주(부분 출고 뒤 잔량 취소 포함), 모두 출고됐으면 SO-003 */
   private cancelBlockOf(row: SalesOrderRow, requests: readonly { shipmentRequestStatus: string }[]): SalesOrderCancelBlock {
-    if (row.salesOrderItems.every((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED)) return 'CANCELLED';
-    if (row.salesOrderItems.some((i) => i.reservations.some((r) => r.reservationStatus === RESERVATION_STATUS.CONVERTED))) return 'SO-003';
+    if (cancellableItemsOf(row).length === 0) {
+      return row.salesOrderItems.some((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED) ? 'CANCELLED' : 'SO-003';
+    }
     if (requests.some((r) => OPEN_SHIPMENT_STATUSES.includes(r.shipmentRequestStatus))) return 'SO-004';
     return null;
   }

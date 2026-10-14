@@ -1,4 +1,4 @@
-// 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 고객사·규격 id는 서버 id 그대로다 (수주 등록의 선택 목록도 서버, api/server/lookups.ts).
 // 생산 연결 탭은 수주 상세의 계획 id로 생산계획 상세를 읽는다. 서버에 아직 없는 것(취소 창의 구매 진행 영향)은 빈 값이다.
 // 재생산 계획은 생산계획 어댑터, 이력 타임라인은 작업 로그 어댑터, 업무방은 메신저 어댑터가 맡는다.
@@ -11,6 +11,7 @@ import type {
   ProductionSettingView,
   ProductStockWidget,
   RoutingView,
+  SalesOrderCancelPurchaseImpactLine,
   SalesOrderDetail as ServerSalesOrderDetail,
   SalesOrderItemFulfillment,
   SalesOrderReservationView,
@@ -200,7 +201,7 @@ type ProductItem = ServerItemView & { itemType: ProductItemType; theoreticalWeig
 const isProductItem = (item: ServerItemView | undefined): item is ProductItem =>
   item !== undefined && (item.itemType === 'SLAB' || item.itemType === 'COIL') && item.theoreticalWeightTon !== null;
 
-/** 라우팅 계획 수율. 없으면 MST-001 (가짜 DB core routingYieldOf와 같은 문구) */
+/** 라우팅 계획 수율. 없으면 MST-001 */
 function routingYield(master: PreviewMaster, itemType: ProductItemType, processType: ProcessType): string {
   const rate = master.routings.find((r) => r.itemType === itemType && r.processType === processType)?.plannedYieldRate;
   if (!rate) throw new ApiError('MST-001', `라우팅 계획 수율(${ITEM_TYPE_LABEL[itemType]} ${PROCESS_TYPE_LABEL[processType]})`);
@@ -327,6 +328,11 @@ async function cancel(input: { salesOrderId: number; cancelReason: string }): Pr
   return { salesOrderId: result.salesOrderId, salesOrderNo: result.salesOrderNo };
 }
 
+/** 수주 취소 창의 구매 진행 영향 (서버가 계획 상태로 취소·연결 해제를 가른다) */
+function cancelPurchaseImpact(salesOrderId: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+  return serverRequest<SalesOrderCancelPurchaseImpactLine[]>('GET', `/sales-orders/${salesOrderId}/cancel-purchase-impact`);
+}
+
 /**
  * 생산 연결 탭: 수주 품목에 연결된 계획과, 수주 취소로 연결이 풀린 진행 계획(취소 기록의 계획 번호)의 생산계획 상세.
  * 생산계획 조회 권한이 없으면(물류) 빈 목록이다.
@@ -351,4 +357,4 @@ async function productionLinks(salesOrderId: number): Promise<SalesOrderPlanLink
   }
 }
 
-export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel };
+export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel, cancelPurchaseImpact };

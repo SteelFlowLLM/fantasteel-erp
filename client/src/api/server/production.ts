@@ -1,6 +1,6 @@
-// 생산 화면(생산계획·작업 실적·열연 투입) ↔ 서버 API (server/src/modules/production). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 생산 화면(생산계획·작업 실적·열연 투입) ↔ 서버 API (server/src/modules/production). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 생산계획·LOT·실적·배정·규격 id는 서버 id를 그대로 쓴다.
-// LOT 추적·검사 입력도 서버 모드라 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
+// LOT 추적·검사 입력도 서버를 쓰므로 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
 import type {
   HotRollingDetail as ServerHotRollingDetail,
   PageResult,

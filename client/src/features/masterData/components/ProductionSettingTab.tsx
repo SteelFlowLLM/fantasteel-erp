@@ -2,7 +2,7 @@
 
 // 생산 설정값 (REQ-MST-009): 히트 용량(초기 250t, 용강 기준), 납기 위험 기준일(초기 3일). 단일 행.
 import { useState } from 'react';
-import { isMasterServerMode, masterDataApi, type MasterProductionSettingView } from '@/api/masterData';
+import { masterDataApi, type MasterProductionSettingView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -12,7 +12,6 @@ import { MASTER_LOCK_TEXT, TableFoot } from '@/features/masterData/components/Ma
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductionSetting } from '@/hooks/useMasterData';
-import { fmtDateTime } from '@/lib/format';
 
 export function ProductionSettingTab({ canEdit }: { canEdit: boolean }) {
   const setting = useMasterProductionSetting();
@@ -35,7 +34,7 @@ function SettingForm({ setting, canEdit }: { setting: MasterProductionSettingVie
   return (
     <Card className="max-w-[640px]" petKey="card:masterData.settings">
       {/* 서버 응답에는 수정 시각이 없다 */}
-      <CardHead title="생산 설정값" meta={isMasterServerMode() ? undefined : setting ? `마지막 저장 ${fmtDateTime(setting.updatedAt)}` : '아직 저장한 값이 없어요'} />
+      <CardHead title="생산 설정값" meta={undefined} />
       <div className="grid grid-cols-2 gap-4 p-4">
         <Field label={<span data-pet-term="히트 용량">히트 용량</span>} required hint="용강 기준 전로 1히트의 용량이에요 · 히트 수 계산에 써요 (초기 250 t)" error={fieldErrors.errorOf('heatCapacityTon')}>
           <Input

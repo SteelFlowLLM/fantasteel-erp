@@ -42,6 +42,16 @@ export interface Shortage {
   additionalPlanQty: number;
 }
 
+/** 수주 품목의 부족 (4.5): 부족 + 예약·진행 계획·예약 가용·재생산 필요 */
+export interface ItemShortage extends Shortage {
+  activeReservedQty: number;
+  openPlanRemainingQty: number;
+  /** 같은 규격의 예약 가용(여재 포함) */
+  reservationAvailableQty: number;
+  /** 재생산 필요 매수 = max(0, 추가 계획 필요 − 예약 가용) (14.1-6) */
+  reproductionNeedQty: number;
+}
+
 /** 수주 부족 (업무 프로세스 4.5). 단계를 더해 수주보다 큰 "충족 매수"를 만들지 않는다. */
 export function shortageOf(input: ShortageInput): Shortage {
   const unshippedQty = Math.max(0, input.orderedQty - input.shippedQty);

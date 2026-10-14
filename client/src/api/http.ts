@@ -1,21 +1,11 @@
-// 실제 서버(server/) 호출. 기본 데이터 출처다. NEXT_PUBLIC_DATA_SOURCE=mock이면 브라우저 안 가짜 DB를 쓴다(테스트가 쓰는 값, vitest.config.ts).
-// 화면은 이 파일을 직접 부르지 않는다: 각 api/<영역>.ts 함수가 데이터 출처에 따라 가짜 DB 또는 이 파일을 부른다.
+// 실제 서버(server/) 호출. 화면은 이 파일을 직접 부르지 않는다: 각 api/<영역>.ts 함수가 서버 어댑터(api/server/)를 거쳐 부른다.
 //
-// 서버 모드 로그인은 사원번호·비밀번호다 (REQ-AUTH-001, 2026-10-07 사용자 결정. 가짜 DB 모드는 계정 선택 그대로).
+// 로그인은 사원번호·비밀번호다 (REQ-AUTH-001, 2026-10-07 사용자 결정).
 // 로그인 쿠키(JWT)는 브라우저의 모든 탭이 같이 쓰므로 한 브라우저에서는 한 계정만 쓸 수 있다.
 import type { ApiResponse, AuthUser } from '@fantasteel/shared';
 import { actingEmployeeNo } from '@/api/actor';
 import { ApiError, InputError } from '@/api/errors';
 import { isErrorCode } from '@/codes';
-
-export type DataSource = 'mock' | 'server';
-
-/** 화면 데이터 출처. 비우거나 mock 말고 다른 값이면 서버. 서버 모드에서는 모든 화면이 서버를 부른다 (docs/CLIENT-GUIDE.md 서버 연결 절) */
-export function dataSource(): DataSource {
-  return process.env.NEXT_PUBLIC_DATA_SOURCE === 'mock' ? 'mock' : 'server';
-}
-
-export const isServerDataSource = (): boolean => dataSource() === 'server';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8787/api/v1').replace(/\/$/, '');
 

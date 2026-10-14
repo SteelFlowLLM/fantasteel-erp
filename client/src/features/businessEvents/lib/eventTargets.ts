@@ -28,7 +28,7 @@ export const TARGET_TABLE_LABEL: Partial<Record<string, string>> = {
   department: '부서',
 };
 
-/** 대상 필터에 보이는 테이블: 29개 이벤트가 기록되는 업무 테이블 (REQ-LOG-002) */
+/** 대상 필터에 보이는 테이블: 31개 이벤트가 기록되는 업무 테이블 (REQ-LOG-002) */
 export const TARGET_FILTER_TABLES = [
   'sales_order',
   'sales_order_item',

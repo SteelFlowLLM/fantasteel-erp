@@ -8,6 +8,13 @@ const SUPPLIER_SELECT = { id: true, supplierCode: true, supplierName: true } as 
 const YARD_SELECT = { id: true, yardCode: true, yardName: true, yardType: true } as const;
 const SPEC_SELECT = { id: true, itemCode: true, steelGradeId: true, thicknessMm: true, widthMm: true, lengthMm: true, theoreticalWeightTon: true } as const;
 
+/** 수가 0보다 큰 곳의 이름. 같은 tx에서 동시에 쿼리하지 않도록 차례로 센다 */
+async function usagesOf(checks: readonly (readonly [string, () => Promise<number>])[]): Promise<string[]> {
+  const names: string[] = [];
+  for (const [name, count] of checks) if ((await count()) > 0) names.push(name);
+  return names;
+}
+
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
  * 집계·3개 이상 JOIN·잠금(FOR UPDATE)은 prisma/sql/*.sql(TypedSQL)로 만들고 tx.$queryRawTyped(...)로 부른다.
@@ -204,6 +211,75 @@ export class MasterDataRepository {
 
   updateYard(tx: Tx, id: number, yardName: string) {
     return tx.yard.update({ where: { id }, data: { yardName }, select: YARD_SELECT });
+  }
+
+  // ── 삭제 ([05] 7-2: 참조가 없을 때만). 쓰는 곳 이름을 돌려준다 (없으면 빈 배열) ──
+
+  customerUsages(tx: Tx, customerId: number) {
+    return usagesOf([
+      ['수주', () => tx.salesOrder.count({ where: { customerId } })],
+      ['출하요청', () => tx.shipmentRequest.count({ where: { customerId } })],
+    ]);
+  }
+
+  supplierUsages(tx: Tx, supplierId: number) {
+    return usagesOf([
+      ['원료 기본 공급업체', () => tx.item.count({ where: { defaultSupplierId: supplierId } })],
+      ['발주', () => tx.purchaseOrder.count({ where: { supplierId } })],
+    ]);
+  }
+
+  yardUsages(tx: Tx, yardId: number) {
+    return usagesOf([
+      ['품목 기본 야드', () => tx.item.count({ where: { defaultYardId: yardId } })],
+      ['LOT', () => tx.lot.count({ where: { yardId } })],
+    ]);
+  }
+
+  steelGradeUsages(tx: Tx, steelGradeId: number) {
+    return usagesOf([
+      ['품목', () => tx.item.count({ where: { steelGradeId } })],
+      ['배합 원단위', () => tx.specificConsumption.count({ where: { steelGradeId } })],
+      ['검사 기준', () => tx.inspectionStandard.count({ where: { steelGradeId } })],
+      ['LOT', () => tx.lot.count({ where: { steelGradeId } })],
+    ]);
+  }
+
+  /** 재고 행은 inventory 모듈이 필요할 때 만들어서 수량이 있을 때만 쓰는 곳으로 본다 (isSpecUsed와 같은 기준) */
+  itemUsages(tx: Tx, itemId: number) {
+    return usagesOf([
+      ['규격 매핑', () => tx.specMapping.count({ where: { OR: [{ slabItemId: itemId }, { coilItemId: itemId }] } })],
+      ['배합 원단위', () => tx.specificConsumption.count({ where: { rawMaterialItemId: itemId } })],
+      ['수주', () => tx.salesOrderItem.count({ where: { itemId } })],
+      ['재고', () => tx.inventory.count({ where: { itemId, OR: [{ onHandQty: { gt: 0 } }, { reservedQty: { gt: 0 } }, { rollingAllocatedQty: { gt: 0 } }] } })],
+      ['예약', () => tx.reservation.count({ where: { itemId } })],
+      ['생산계획', () => tx.productionPlan.count({ where: { itemId } })],
+      ['LOT', () => tx.lot.count({ where: { itemId } })],
+      ['구매요청', () => tx.purchaseRequisition.count({ where: { itemId } })],
+      ['발주', () => tx.purchaseOrderItem.count({ where: { itemId } })],
+    ]);
+  }
+
+  deleteCustomer(tx: Tx, id: number) {
+    return tx.customer.delete({ where: { id }, select: CUSTOMER_SELECT });
+  }
+
+  deleteSupplier(tx: Tx, id: number) {
+    return tx.supplier.delete({ where: { id }, select: SUPPLIER_SELECT });
+  }
+
+  deleteYard(tx: Tx, id: number) {
+    return tx.yard.delete({ where: { id }, select: YARD_SELECT });
+  }
+
+  deleteSteelGrade(tx: Tx, id: number) {
+    return tx.steelGrade.delete({ where: { id }, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
+  }
+
+  /** 수량이 모두 0인 재고 행(쓰는 곳 확인을 지난 뒤라 0만 남는다)도 함께 지운다 */
+  async deleteItem(tx: Tx, id: number): Promise<void> {
+    await tx.inventory.deleteMany({ where: { itemId: id } });
+    await tx.item.delete({ where: { id } });
   }
 
   updateProductionSetting(tx: Tx, id: number, data: { heatCapacityTon?: string; deliveryRiskDays?: number }) {

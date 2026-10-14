@@ -124,7 +124,7 @@ describe('위젯 배치', () => {
 });
 
 describe('역할별 기본 배치 (품질)', () => {
-  it('품질은 공정 흐름 아래 Agent 위험 감지(전체 폭, 한 칸 높이), 그 아래 수주 충족 현황 대신 강종별 불합격률과 공정별 수율 (빈 칸 없음)', () => {
+  it('품질은 공정 흐름 바로 아래 수주 충족 현황 대신 강종별 불합격률과 공정별 수율, Agent 위험 감지(전체 폭, 한 칸 높이)는 맨 아래 (빈 칸 없음)', () => {
     const quality = buildDefaultPlacements('QUALITY');
     expect(quality.some((p) => p.key === 'ORDER_FULFILLMENT')).toBe(false);
     expect(quality).toEqual([

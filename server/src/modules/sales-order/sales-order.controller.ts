@@ -5,6 +5,7 @@ import {
   type CancelSalesOrderResult,
   type CreateSalesOrderResult,
   type PageResult,
+  type SalesOrderCancelPurchaseImpactLine,
   type SalesOrderDetail,
   type SalesOrderFulfillment,
   type SalesOrderReservationView,
@@ -51,6 +52,12 @@ export class SalesOrderController {
   @RequirePermission(PERMISSION.SALES_ORDER_CREATE, 'VIEW')
   reservations(@Param('id', ParseIntPipe) id: number): Promise<SalesOrderReservationView[]> {
     return this.service.reservations(id);
+  }
+
+  @Get('sales-orders/:id/cancel-purchase-impact')
+  @RequirePermission(PERMISSION.SALES_ORDER_CANCEL, 'VIEW')
+  cancelPurchaseImpact(@Param('id', ParseIntPipe) id: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+    return this.service.cancelPurchaseImpact(id);
   }
 
   @Post('sales-orders/:id/cancel')

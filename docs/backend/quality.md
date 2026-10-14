@@ -122,5 +122,5 @@
 | SM355 Ceq 두께 | 히트 판정에 50mm 이하 값만 쓴다(제품 두께를 모름) | `seed.ts` 주석, [07] 8-1 |
 | 연주 검사 기준 | 슬래브 표면·치수 min/max는 사내 가정값 | [07] 10장, `SPEC.md` 6장 |
 | 히트 미판정 연주 | 진행은 허용, 미합격 하위 제품 사용 차단(16장 제안) | [04] 16장 |
-| `/lots/rejected` 경로 | lot 모듈의 `GET lots/:id`와 충돌 가능(lot.md 8장) | `app.module.ts` |
+| ~~`/lots/rejected` 경로~~ ✅ 해결 | 명세 경로 하나로 둔다(2026-10-06 결정). `app.module.ts`에서 QualityModule을 LotModule보다 먼저 등록해 `lots/:id`보다 먼저 잡힌다. `rejected-lot.routes.spec.ts`가 확인 | `app.module.ts`, `rejected-lot.controller.ts` |
 | 측정값 수정 이벤트 | 수정 전용 이벤트 유형이 없다. INSPECTION_REGISTERED에 before/after로 남길지 확인 | [06] BUSINESS_EVENT_TYPE |

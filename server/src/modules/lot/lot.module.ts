@@ -7,5 +7,7 @@ import { LotService } from './lot.service';
 @Module({
   controllers: [LotController],
   providers: [LotService, LotRepository],
+  // AI 어시스턴트 LOT 추적 조회 도구가 쓴다
+  exports: [LotService],
 })
 export class LotModule {}

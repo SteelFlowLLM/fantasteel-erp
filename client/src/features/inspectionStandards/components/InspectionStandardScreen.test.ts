@@ -4,18 +4,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { inspectionStandardApi, inspectionStandardKeys } from '@/api/inspectionStandards';
-import { sessionApi } from '@/api/session';
+import { inspectionStandardKeys } from '@/api/inspectionStandards';
 import { InspectionStandardScreen } from '@/features/inspectionStandards/components/InspectionStandardScreen';
+import { STANDARD_SUMMARIES } from '@/features/inspectionStandards/testing/standardFixtures';
 import { MeContext } from '@/hooks/useMe';
-import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import { sessionUserOf } from '@/test/sessionUsers';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: () => undefined, push: () => undefined }), useSearchParams: () => new URLSearchParams(), usePathname: () => '/quality/standards' }));
 
-async function render(): Promise<{ html: string; codes: { code: string; process: string }[] }> {
-  const employeeId = actAs(SEED_EMPLOYEE_NO.quality);
-  const me = await sessionApi.getSessionUser(employeeId);
-  const standards = await inspectionStandardApi.list();
+function render(): { html: string; codes: { code: string; process: string }[] } {
+  const me = sessionUserOf(SEED_EMPLOYEE_NO.quality);
+  const standards = STANDARD_SUMMARIES;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(inspectionStandardKeys.list({}), standards);
   // React가 글자 조각 사이에 넣는 <!-- -->는 빼고 본다
@@ -24,11 +24,11 @@ async function render(): Promise<{ html: string; codes: { code: string; process:
 }
 
 describe('검사 기준 목록', () => {
-  it('공정별 머리(제강 → 연주 → 열연) 아래에 그 공정의 기준이 온다', async () => {
-    const { html, codes } = await render();
+  it('공정별 머리(제강 → 연주 → 열연) 아래에 그 공정의 기준이 온다', () => {
+    const { html, codes } = render();
     const heads = ['제강 · 히트 성분', '연주 · 슬래브 표면·치수', '열연 · 코일 치수·기계적 성질'].map((h) => html.indexOf(`>${h}`));
     const present = heads.filter((i) => i >= 0);
-    expect(present.length).toBeGreaterThan(1);
+    expect(present).toHaveLength(3);
     expect([...present].sort((a, b) => a - b)).toEqual(present);
     // 기준 코드는 자기 공정 머리 뒤, 다음 공정 머리 앞
     const order = ['STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING'];
@@ -41,8 +41,8 @@ describe('검사 기준 목록', () => {
     }
   });
 
-  it('줄마다 "지금 vN" 태그 대신 회색 vN, 공정 이름은 되풀이하지 않는다', async () => {
-    const { html } = await render();
+  it('줄마다 "지금 vN" 태그 대신 회색 vN, 공정 이름은 되풀이하지 않는다', () => {
+    const { html } = render();
     const list = html.slice(html.indexOf('<ul'), html.indexOf('</ul>'));
     expect(list).not.toContain('지금 v');
     expect(list).toMatch(/title="지금 버전 v\d+"[^>]*>v\d+</);

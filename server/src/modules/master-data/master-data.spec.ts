@@ -5,6 +5,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import type {
+  CustomerView,
   ItemView,
   ProductionSettingView,
   RoutingView,
@@ -53,8 +54,9 @@ beforeAll(async () => {
   logisticsCookie = await login('1610014');
 }, 60_000);
 
-async function send<T>(method: 'POST' | 'PATCH', path: string, payload: unknown, cookie = adminCookie) {
-  const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, payload: unknown, cookie = adminCookie) {
+  const body = payload === undefined ? undefined : JSON.stringify(payload);
+  const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string; message: string } } };
 }
 
@@ -374,5 +376,56 @@ describe('고객사·공급업체·야드 등록·수정 (API-179·180·182·183
     expect((await send<YardView>('PATCH', `/yards/${body.data.id}`, { yardName: '코일 2야드(동)' })).body.data).toMatchObject({ yardName: '코일 2야드(동)', yardType: 'COIL' });
     expect((await send('PATCH', `/yards/${body.data.id}`, { yardName: '코일', yardType: 'SLAB' })).body.error?.code).toBe('COM-004');
     expect((await send('PATCH', '/yards/999999', { yardName: '없음' })).body.error?.code).toBe('COM-003');
+  });
+});
+
+describe('기준정보 삭제 ([05] 7-2: 쓰는 곳이 없을 때만)', () => {
+  const del = <T>(path: string, cookie = adminCookie) => send<T>('DELETE', path, undefined, cookie);
+
+  it('쓰는 곳이 없으면 지우고 지운 행을 돌려준다. 다시 지우면 COM-003, 조회 권한뿐이면 COM-002', async () => {
+    const customer = (await send<CustomerView>('POST', '/customers', { customerCode: 'CUS-DEL', customerName: '삭제 고객' })).body.data;
+    expect((await del(`/customers/${customer.id}`, productionCookie)).body.error?.code).toBe('COM-002');
+    const deleted = await del<CustomerView>(`/customers/${customer.id}`);
+    expect([deleted.status, deleted.body.data]).toEqual([200, customer]);
+    expect((await del(`/customers/${customer.id}`)).body.error?.code).toBe('COM-003');
+
+    const supplier = (await send<SupplierView>('POST', '/suppliers', { supplierCode: 'SUP-DEL', supplierName: '삭제 공급' })).body.data;
+    expect((await del<SupplierView>(`/suppliers/${supplier.id}`)).body.data).toEqual(supplier);
+    expect((await get<SupplierView[]>('/suppliers')).body.data.some((s) => s.id === supplier.id)).toBe(false);
+  });
+
+  it('강종·야드는 품목이 쓰는 동안 지울 수 없고, 품목(수량 0인 재고 행 포함)을 지우면 지울 수 있다', async () => {
+    const grade = (await send<SteelGradeView>('POST', '/steel-grades', { steelGradeCode: 'DEL-01', steelGradeName: '삭제 강종', standardNo: 'KS D 0001' })).body.data;
+    const yard = (await send<YardView>('POST', '/yards', { yardCode: 'YD-DEL', yardName: '삭제 야드', yardType: 'SLAB' })).body.data;
+    const item = (await send<ItemView>('POST', '/items', { itemType: 'SLAB', steelGradeId: grade.id, thicknessMm: '200', widthMm: '1000', lengthMm: '8000', defaultYardId: yard.id })).body.data;
+    expect((await del(`/steel-grades/${grade.id}`)).body.error).toMatchObject({ code: 'COM-004', message: '쓰는 곳이 있어 삭제할 수 없어요: 품목' });
+    expect((await del(`/yards/${yard.id}`)).body.error).toMatchObject({ code: 'COM-004', message: '쓰는 곳이 있어 삭제할 수 없어요: 품목 기본 야드' });
+
+    // 재고 행은 inventory 모듈이 필요할 때 만든다. 수량이 0이면 쓰는 곳으로 보지 않고 품목과 함께 지운다
+    const prisma = app.get(PrismaService);
+    await prisma.inventory.create({ data: { itemId: item.id } });
+    expect((await del<ItemView>(`/items/${item.id}`)).body.data).toMatchObject({ id: item.id, itemCode: item.itemCode });
+    expect(await prisma.inventory.count({ where: { itemId: item.id } })).toBe(0);
+    expect((await del<SteelGradeView>(`/steel-grades/${grade.id}`)).body.data).toEqual(grade);
+    expect((await del<YardView>(`/yards/${yard.id}`)).body.data).toEqual(yard);
+  });
+
+  it('쓰는 곳이 있으면 COM-004와 쓰는 곳 이름 (시드 기준정보, 수주가 있는 고객사)', async () => {
+    const items = (await get<ItemView[]>('/items')).body.data;
+    const idOf = (itemCode: string) => items.find((i) => i.itemCode === itemCode)?.id;
+    const grade = (await get<SteelGradeView[]>('/steel-grades')).body.data.find((g) => g.steelGradeCode === 'SS275');
+    const supplier = (await get<SupplierView[]>('/suppliers')).body.data.find((s) => s.supplierCode === 'SUP-01');
+    const reasonOf = async (path: string) => (await del(path)).body.error?.message;
+    // 시드에는 이 규격의 시연 수주·계획도 있다
+    expect(await reasonOf(`/items/${idOf('SL-SS275-250x1200x10000')}`)).toMatch(/^쓰는 곳이 있어 삭제할 수 없어요: 규격 매핑·수주/);
+    expect(await reasonOf(`/items/${idOf('ORE01')}`)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 배합 원단위');
+    expect(await reasonOf(`/steel-grades/${grade?.id}`)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 품목·배합 원단위·검사 기준');
+    expect(await reasonOf(`/suppliers/${supplier?.id}`)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 원료 기본 공급업체');
+
+    const prisma = app.get(PrismaService);
+    const customer = await prisma.customer.create({ data: { customerCode: 'CUS-USED', customerName: '수주 고객' } });
+    const owner = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2103003' } });
+    await prisma.salesOrder.create({ data: { salesOrderNo: 'T-SO-DEL-1', customerId: customer.id, ownerEmployeeId: owner.id } });
+    expect(await reasonOf(`/customers/${customer.id}`)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 수주');
   });
 });

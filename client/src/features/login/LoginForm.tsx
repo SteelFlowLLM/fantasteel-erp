@@ -1,6 +1,6 @@
 'use client';
 
-// 서버 모드 로그인: 사원번호·비밀번호 (REQ-AUTH-001, API-152). 계정 잠김·비밀번호 재설정은 두지 않는다 (SPEC 5장 결정 4).
+// 로그인: 사원번호·비밀번호 (REQ-AUTH-001, API-152). 계정 잠김·비밀번호 재설정은 두지 않는다 (SPEC 5장 결정 4).
 // 이미 로그인된 브라우저에서 새 탭을 열면 쿠키의 사원으로 바로 들어간다. 직접 나갔거나 세션이 끊긴 뒤에는 다시 입력한다.
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { sessionApi } from '@/api/session';

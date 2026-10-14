@@ -233,12 +233,15 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
     expect((await service.get(purchaser, draft.id)).draftStatus).toBe(DRAFT_STATUS.WAITING_APPROVAL);
   });
 
-  it('요청자가 사유를 적어 반려하면 REJECTED로 끝나고 작업 로그에 사유가 남는다', async () => {
-    const { draft } = await draftOf('합금철 필요?', {});
+  it('요청자가 사유를 적어 반려하면 REJECTED로 끝나고 작업 로그에 사유가 남는다. 같은 메시지로 새 초안을 다시 만들 수 있다 (14.3 ACT-001~003)', async () => {
+    const { message, draft } = await draftOf('합금철 필요?', {});
     expect(await codeOf(service.reject(purchaser, draft.id, { rejectReason: '  ' }))).toBe('COM-004');
     expect(await service.reject(purchaser, draft.id, { rejectReason: '이미 발주했어요' })).toMatchObject({ draftStatus: DRAFT_STATUS.REJECTED, rejectReason: '이미 발주했어요' });
     const event = await prisma.businessEvent.findFirstOrThrow({ where: { actionDraftId: draft.id, businessEventType: BUSINESS_EVENT_TYPE.DRAFT_REJECTED } });
     expect(event.reason).toBe('이미 발주했어요');
     expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('COM-004');
+    const again = await service.create(purchaser, message.id);
+    expect(again.created).toBe(true);
+    expect(again.id).not.toBe(draft.id);
   });
 });

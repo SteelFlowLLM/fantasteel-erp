@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
 import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardFoot } from '@/components/Card';

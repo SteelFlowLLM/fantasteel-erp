@@ -30,16 +30,8 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
         meta={link.lineNo !== null ? `품목 ${link.lineNo} · ${plan.item.itemName}` : `${plan.item.itemName} · 수주 연결 해제`}
         actions={
           <span className="flex items-center gap-1">
-            {plan.isReproduction ? (
-              <span data-pet-term="재생산" className="contents">
-                <Tag tone="outline">재생산</Tag>
-              </span>
-            ) : null}
-            {plan.isSurplusOnCompletion ? (
-              <span data-pet-term="완료 후 여재" className="contents">
-                <Tag tone="outline">완료 후 여재</Tag>
-              </span>
-            ) : null}
+            {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
+            {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
             {plan.productionPlanStatus === 'CANCELLED' ? null : (
               <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">

@@ -55,7 +55,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.tasksAsCreator`, `Em
 | 함수 | 내용 |
 | --- | --- |
 | `notifyEmployees(tx, { type, recipientIds, content, linkPath, messageId?, businessEventId? })` | 개인 알림. `createMany({ skipDuplicates: true })`로 부분 unique 중복을 건너뛴다 |
-| `notifyDepartment(tx, departmentId, {...})` | 부서 알림. 그 부서의 재직 중 사원별 행으로 펼친다([ERD] Note, REQ-ORG-004). 하위 부서는 넣지 않는다(8장) |
+| `notifyDepartment(tx, departmentId, {...})` | 부서 알림. 그 부서의 재직 중 사원별 행으로 펼친다([ERD] Note, REQ-ORG-004). 하위 부서는 넣지 않는다(8장). P1에서는 부르는 곳이 없다(8장 "부서 알림 쓰는 곳") |
 
 - 유형 값은 [06] NOTIFICATION_TYPE: MENTION·WORK_ROOM_MESSAGE·TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT(뒤의 셋은 2026-10-07 확정). `link_path`는 프론트 화면 경로(REQ-MSG-006 "ERP 화면 이동").
 - 알림은 본 거래와 같은 tx에서 저장한다(본 거래가 롤백되면 알림도 없어야 한다).
@@ -100,6 +100,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.tasksAsCreator`, `Em
 | 읽음 처리 API | [CSV]에 없지만 임시로 둔다: `POST notifications/:id/read`, `POST notifications/read-all`(컨벤션 5장 액션 URL, `chat-rooms/:id/read`와 같은 모양). 이미 읽은 알림의 읽은 시각은 바꾸지 않는다 |
 | 업무 목록 범위 | 2026-10-08 변경: ERD에 등록자(`creator_id`)를 추가하고 `scope`(mine·created·all)를 붙였다. 기존 업무의 등록자는 담당자로 채웠다 |
 | 부서 알림 하위 부서 | 넣지 않는다. 그 부서에 소속된 재직 중 사원만 |
+| 부서 알림 쓰는 곳 | 2026-10-14 결정: P1의 부서 단위 알림(REQ-NTF-002, [04] BP-MSG-01 "멘션·업무방 새 메시지를 개인·부서 알림으로 전달")은 메신저 부서 멘션으로 채운다. @부서는 그 부서의 **방 멤버**에게 MENTION을 보낸다(messenger.md 알림 연동). 방 밖 부서원에게는 보내지 않는다(방 멤버가 아니면 메시지를 열 수 없다). 부서 전원에게 보내는 `notifyDepartment`는 P2 Agent의 품질 부서 알림(REQ-AGT-004, [04] QUALITY_RATE_RISE)에 쓴다 |
 | 업무 수정·담당자 변경 | 2026-10-08 변경: [CSV]에 API-274를 추가하고 만들었다(등록자·담당자, OPEN만) |
 | 실시간 알림 | 지금은 만들지 않는다. 화면이 다시 읽을 때 반영된다 |
 

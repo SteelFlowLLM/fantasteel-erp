@@ -235,7 +235,8 @@ describe('수주 조회 (REQ-SO-004·005)', () => {
     await prisma.salesOrderItem.update({ where: { id: soItem.id }, data: { salesOrderItemStatus: 'PARTIALLY_SHIPPED' } });
 
     detail = await salesOrders.detail(salesOrderId);
-    expect(detail).toMatchObject({ salesOrderStatus: 'PARTIALLY_SHIPPED', totalShippedQty: 4, progress: { qty: 4, denominatorQty: 10, ratio: 0.4 }, cancelBlock: 'SO-003' });
+    // 부분 출고 뒤에도 잔량은 취소할 수 있다 (BP-SO-02 예외)
+    expect(detail).toMatchObject({ salesOrderStatus: 'PARTIALLY_SHIPPED', totalShippedQty: 4, progress: { qty: 4, denominatorQty: 10, ratio: 0.4 }, cancelBlock: null });
     expect(detail.items[0]).toMatchObject({ shippedQty: 4, unshippedQty: 6, activeReservedQty: 6, passedQty: 10 });
 
     const fulfillment = await salesOrders.fulfillment(salesOrderId);
@@ -324,18 +325,109 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02)', () => {
     expect(released.businessEventLots.map((l) => l.lotId)).toEqual([slab.id]);
   });
 
-  it('출고된 매수가 있으면 SO-003, 진행 중 출하요청이 있으면 SO-004', async () => {
+  it('전량 출고된 수주는 SO-003, 진행 중 출하요청이 있으면 SO-004', async () => {
     const itemId = await nextSlabItemId();
     await addSlabs(itemId, 4);
     const shipped = await createSalesOrder(itemId, 2);
     const soItem = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId: shipped.salesOrderId } });
+    // 출고 확정(물류 담당)이 하는 일을 DB에서 직접 바꾼다: 전량 CONVERTED, 품목 출하완료
     await prisma.reservation.updateMany({ where: { salesOrderItemId: soItem.id }, data: { reservationStatus: 'CONVERTED' } });
+    await prisma.salesOrderItem.update({ where: { id: soItem.id }, data: { salesOrderItemStatus: 'SHIPPED' } });
+    expect((await salesOrders.detail(shipped.salesOrderId)).cancelBlock).toBe('SO-003');
     expect(await codeOf(salesOrders.cancel(sales, shipped.salesOrderId, { reason: '취소' }))).toBe('SO-003');
 
     const requested = await createSalesOrder(itemId, 2);
     const requestedItem = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId: requested.salesOrderId } });
     await shipments.create(sales, { customerId: customerA, items: [{ salesOrderItemId: requestedItem.id, requestQty: 1 }] });
     expect(await codeOf(salesOrders.cancel(sales, requested.salesOrderId, { reason: '취소' }))).toBe('SO-004');
+  });
+
+  it('부분 출고 뒤 취소: 출고분은 그대로 두고 잔량만 취소, 전량 출고된 품목은 그대로. 다시 취소하면 COM-001 (BP-SO-02 예외)', async () => {
+    const partItemId = await nextSlabItemId();
+    const fullItemId = await nextSlabItemId();
+    await addSlabs(partItemId, 6);
+    await addSlabs(fullItemId, 2);
+    const created = await salesOrders.create(sales, {
+      customerId: customerA,
+      items: [
+        { itemId: partItemId, orderedQty: 10, dueDate: DUE },
+        { itemId: fullItemId, orderedQty: 2, dueDate: DUE },
+      ],
+    });
+    const [part, full] = created.items;
+    expect([part.reservedQty, part.shortageQty, full.reservedQty]).toEqual([6, 4, 2]);
+
+    // 부분 품목 4매·전량 품목 2매를 실제로 배정·출고 확정한다
+    const request = await shipments.create(sales, { customerId: customerA, items: [{ salesOrderItemId: part.salesOrderItemId, requestQty: 4 }, { salesOrderItemId: full.salesOrderItemId, requestQty: 2 }] });
+    for (const line of request.items) {
+      const recommendation = await inventory.recommendAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: line.id });
+      await inventory.confirmAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: line.id, lotIds: recommendation.candidates.filter((c) => c.isRecommended).map((c) => c.lotId) });
+    }
+    await shipments.issue(logistics, request.id);
+    expect(await salesOrders.detail(created.salesOrderId)).toMatchObject({ salesOrderStatus: 'PARTIALLY_SHIPPED', cancelBlock: null });
+
+    const result = await salesOrders.cancel(sales, created.salesOrderId, { reason: '잔량 취소' });
+    expect(result.cancellation).toMatchObject({ releasedReservations: [{ salesOrderItemId: part.salesOrderItemId, releasedQty: 2 }], cancelledPlanNos: [part.productionPlanNo], unlinkedPlanNos: [] });
+    const detail = await salesOrders.detail(created.salesOrderId);
+    expect(detail.items.map((i) => [i.salesOrderItemId, i.salesOrderItemStatus, i.shippedQty, i.activeReservedQty])).toEqual([
+      [part.salesOrderItemId, 'CANCELLED', 4, 0],
+      [full.salesOrderItemId, 'SHIPPED', 2, 0],
+    ]);
+    // 진행할 품목이 없고 취소 품목이 있으니 헤더는 취소(출하완료 품목이 섞여도), 이미 취소된 수주라 취소 버튼은 막힌다
+    expect(detail).toMatchObject({ salesOrderStatus: 'CANCELLED', totalShippedQty: 6, cancelBlock: 'CANCELLED', cancellation: { reason: '잔량 취소' } });
+    // 취소로 끝난 수주의 진행률은 모든 품목으로 센다: 출고 6 ÷ 주문 12 (남은 출하완료 품목만으로 100%가 되지 않게)
+    expect(detail.progress).toMatchObject({ qty: 6, denominatorQty: 12, ratio: 0.5 });
+    // 출고 기록(CONVERTED 예약)과 출고한 재고는 그대로, 남은 예약만 풀린다
+    expect(await prisma.reservation.findMany({ where: { salesOrderItemId: part.salesOrderItemId }, orderBy: { id: 'asc' } })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ reservationStatus: 'CONVERTED', reservedQty: 4 }), expect.objectContaining({ reservationStatus: 'RELEASED' })]),
+    );
+    expect(await inventoryOf(partItemId)).toMatchObject({ onHandQty: 2, reservedQty: 0 });
+    expect(await codeOf(salesOrders.cancel(sales, created.salesOrderId, { reason: '다시' }))).toBe('COM-001');
+  });
+
+  it('취소 창의 구매 진행 영향: 취소될 계획·연결이 풀릴 계획의 구매요청과 발주만, 구매요청 번호 순. 취소 뒤에는 없다 (BP-PRD-01)', async () => {
+    const itemIds = [await nextSlabItemId(), await nextSlabItemId(), await nextSlabItemId(), await nextSlabItemId()];
+    const created = await salesOrders.create(sales, { customerId: customerA, items: itemIds.map((itemId) => ({ itemId, orderedQty: 2, dueDate: DUE })) });
+    const [planned, inProgress, completed, ofCancelledItem] = await Promise.all(created.items.map((i) => prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: i.productionPlanNo ?? '' } })));
+    await prisma.productionPlan.update({ where: { id: inProgress.id }, data: { productionPlanStatus: 'IN_PROGRESS' } });
+    await prisma.productionPlan.update({ where: { id: completed.id }, data: { productionPlanStatus: 'COMPLETED' } });
+    // 이미 취소된 품목은 수주 취소가 다시 처리하지 않으므로 그 계획의 구매요청도 영향에서 뺀다
+    await prisma.salesOrderItem.update({ where: { id: created.items[3].salesOrderItemId }, data: { salesOrderItemStatus: 'CANCELLED' } });
+    // 구매 쪽 상태는 구매 테스트가 확인하므로 구매요청·발주를 DB에 직접 넣는다
+    const ore = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } });
+    const requester = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } });
+    const requisition = (no: string, productionPlanId: number, purchaseRequisitionStatus: string) =>
+      prisma.purchaseRequisition.create({ data: { purchaseRequisitionNo: no, itemId: ore.id, requestedTon: '444.444', desiredReceiptDate: new Date(`${DUE}T00:00:00Z`), requesterId: requester.id, productionPlanId, purchaseRequisitionStatus } });
+    const ordered = await requisition('T-PR-IMPACT-1', inProgress.id, 'ORDERED');
+    const waiting = await requisition('T-PR-IMPACT-2', planned.id, 'WAITING_APPROVAL');
+    await requisition('T-PR-IMPACT-3', completed.id, 'ORDERED');
+    await requisition('T-PR-IMPACT-4', ofCancelledItem.id, 'WAITING_APPROVAL');
+    const purchaseOrder = await prisma.purchaseOrder.create({
+      data: { purchaseOrderNo: 'T-PO-IMPACT-1', supplierId: ore.defaultSupplierId ?? 0, purchaseOrderItems: { create: [{ purchaseRequisitionId: ordered.id, itemId: ore.id, orderedTon: '444.444' }] } },
+    });
+
+    expect(await salesOrders.cancelPurchaseImpact(created.salesOrderId)).toEqual([
+      {
+        purchaseRequisitionId: ordered.id,
+        purchaseRequisitionNo: 'T-PR-IMPACT-1',
+        purchaseRequisitionStatus: 'ORDERED',
+        itemName: ore.itemName,
+        requestedTon: '444.444',
+        productionPlanId: inProgress.id,
+        productionPlanNo: inProgress.productionPlanNo,
+        planEffect: 'UNLINK',
+        purchaseOrderId: purchaseOrder.id,
+        purchaseOrderNo: 'T-PO-IMPACT-1',
+        purchaseOrderStatus: 'CONFIRMED',
+      },
+      expect.objectContaining({ purchaseRequisitionId: waiting.id, purchaseRequisitionStatus: 'WAITING_APPROVAL', productionPlanId: planned.id, planEffect: 'CANCEL', purchaseOrderId: null, purchaseOrderNo: null, purchaseOrderStatus: null }),
+    ]);
+    expect(await codeOf(salesOrders.cancelPurchaseImpact(999_999))).toBe('COM-003');
+
+    // 수주 취소는 구매요청·발주를 바꾸지 않는다
+    await salesOrders.cancel(sales, created.salesOrderId, { reason: '고객 취소' });
+    expect(await salesOrders.cancelPurchaseImpact(created.salesOrderId)).toEqual([]);
+    expect(await prisma.purchaseRequisition.findUniqueOrThrow({ where: { id: waiting.id } })).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', productionPlanId: planned.id });
   });
 });
 
@@ -364,6 +456,31 @@ describe('출하요청 (REQ-SHP-001)', () => {
     expect(cancelled.shipmentRequestStatus).toBe('CANCELLED');
     expect(await shippableOf()).toBe(6);
     expect(await codeOf(shipments.cancel(sales, first.id))).toBe('COM-001');
+  });
+
+  it('출하요청 취소는 배정이 없어도 수주마다 작업 로그(SHIPMENT_REQUEST_CANCELLED)를 남긴다 (REQ-LOG-002)', async () => {
+    const itemId = await nextSlabItemId();
+    await addSlabs(itemId, 3);
+    const a = await createSalesOrder(itemId, 2);
+    const b = await createSalesOrder(itemId, 1);
+    const items = await prisma.salesOrderItem.findMany({ where: { salesOrderId: { in: [a.salesOrderId, b.salesOrderId] } }, orderBy: { id: 'asc' } });
+    const request = await shipments.create(sales, { customerId: customerA, items: items.map((i) => ({ salesOrderItemId: i.id, requestQty: i.orderedQty })) });
+
+    await shipments.cancel(sales, request.id);
+    const cancelledEvents = () =>
+      prisma.businessEvent.findMany({ where: { targetType: 'shipment_request', targetId: request.id, businessEventType: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CANCELLED }, orderBy: { salesOrderId: 'asc' } });
+    const events = await cancelledEvents();
+    expect(events.map((e) => [e.salesOrderId, e.actorEmployeeId])).toEqual([
+      [a.salesOrderId, sales.employeeId],
+      [b.salesOrderId, sales.employeeId],
+    ]);
+    expect(events[0]).toMatchObject({
+      beforeData: { shipmentRequestStatus: 'REQUESTED' },
+      afterData: { shipmentRequestNo: request.shipmentRequestNo, shipmentRequestStatus: 'CANCELLED', items: [{ salesOrderItemId: items[0].id, requestQty: 2 }] },
+    });
+    // 이미 취소된 요청을 다시 취소하면 COM-001이고 작업 로그도 늘지 않는다
+    expect(await codeOf(shipments.cancel(sales, request.id))).toBe('COM-001');
+    expect(await cancelledEvents()).toHaveLength(2);
   });
 
   it('출고 확정된 출하요청 취소 → SHP-003', async () => {

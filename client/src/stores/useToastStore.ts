@@ -1,6 +1,6 @@
 // 화면 아래 가운데에 잠깐 뜨는 안내 (옛 stores/toast.ts를 옮김).
 import { create } from 'zustand';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 
 export type ToastKind = 'info' | 'ok' | 'error';
 

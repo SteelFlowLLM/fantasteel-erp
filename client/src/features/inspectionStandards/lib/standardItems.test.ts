@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pickCurrentStandard } from '@/lib/inspectionJudgment';
 import {
-  canChooseCommonStandard,
   canHaveCommonStandard,
   findChangedItemKeys,
   findCurrentStandard,
@@ -31,7 +30,7 @@ describe('적용 두께 구간 (초과 ~ 이하, REQ-QC-002)', () => {
     expect(formatThicknessBand(buildBand(null, null))).toBe('전체');
     expect(formatThicknessBand(buildBand('6.00', null))).toBe('6 초과');
     expect(formatThicknessBand(buildBand(null, '16.00'))).toBe('16 이하');
-    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 40 이하');
+    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 ~ 40 이하');
   });
 
   it('경계값: 하한과 같으면 밖, 상한과 같으면 안', () => {
@@ -97,16 +96,10 @@ describe('지금 버전 찾기', () => {
     ];
     expect(findCurrentStandard(standards, 'STEELMAKING', 7)?.id).toBe(2);
     expect(findCurrentStandard(standards, 'STEELMAKING', 8)).toBeUndefined();
-    // 자동 판정(core)이 쓰는 함수도 같은 결과
+    // lib/inspectionJudgment의 pickCurrentStandard도 같은 결과
     expect(pickCurrentStandard(standards, 'STEELMAKING', 8)).toBeUndefined();
     expect(canHaveCommonStandard('STEELMAKING')).toBe(false);
     expect(canHaveCommonStandard('CONTINUOUS_CASTING')).toBe(true);
-    // 새 기준 창의 '공통 (모든 강종)' 선택지: 가짜 DB 모드는 제강 말고 보이고, 서버 모드(ERD steel_grade_id NOT NULL)는 늘 숨긴다
-    expect(canChooseCommonStandard('', false)).toBe(true);
-    expect(canChooseCommonStandard('HOT_ROLLING', false)).toBe(true);
-    expect(canChooseCommonStandard('STEELMAKING', false)).toBe(false);
-    expect(canChooseCommonStandard('', true)).toBe(false);
-    expect(canChooseCommonStandard('HOT_ROLLING', true)).toBe(false);
     expect(canHaveCommonStandard('HOT_ROLLING')).toBe(true);
   });
 });

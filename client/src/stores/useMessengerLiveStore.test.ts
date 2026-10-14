@@ -42,5 +42,8 @@ describe('메신저 실시간 상태 (useMessengerLiveStore)', () => {
     expect(typingText([member(5, '정다은')])).toBe('정다은님이 입력 중…');
     expect(typingText([member(5, '정다은'), member(13, '서민지')])).toBe('정다은님, 서민지님이 입력 중…');
     expect(typingText([member(5, '정다은'), member(13, '서민지'), member(12, '오지훈')])).toBe('정다은님 외 2명이 입력 중…');
+    // AI(사원 id 0)는 '님' 없이
+    expect(typingText([member(0, 'AI 어시스턴트')])).toBe('AI 어시스턴트가 답을 쓰는 중…');
+    expect(typingText([member(5, '정다은'), member(0, 'AI 어시스턴트')])).toBe('정다은님, AI 어시스턴트가 입력 중…');
   });
 });

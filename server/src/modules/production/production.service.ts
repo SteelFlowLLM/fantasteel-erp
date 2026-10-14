@@ -14,6 +14,7 @@ import {
   type ProductionPlanSummary,
   type ReproductionCheck,
   type ReproductionResult,
+  type SalesOrderCancelPlanEffect,
   type SalesOrderItemStatus,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -43,6 +44,13 @@ const planSnapshot = (p: { id: number; productionPlanNo: string; salesOrderItemI
 });
 
 const rate = (v: Prisma.Decimal) => v.toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP).toFixed(4);
+
+/** 수주를 취소하면 이 상태의 계획은: 시작 전 = 취소, 진행중 = 수주 연결 해제, 완료·취소 = 그대로(null). 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다 */
+export function salesOrderCancelEffectOf(productionPlanStatus: string): SalesOrderCancelPlanEffect | null {
+  if (productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED) return 'CANCEL';
+  if (productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS) return 'UNLINK';
+  return null;
+}
 
 /** 히트 편성에 쓰는 기준정보 (라우팅 수율·규격 매핑·히트 용량). 하나라도 없으면 MST-001 */
 export interface HeatPlanBasis {
@@ -183,7 +191,8 @@ export class ProductionService {
     const unlinkedPlanNos: string[] = [];
     const allocationReason = `ORDER_CANCELLED: 수주 ${input.salesOrderNo} 취소로 열연 배정 해제`;
     for (const plan of await this.repository.findPlansOfSalesOrderItem(tx, input.salesOrderItemId)) {
-      if (plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED) {
+      const effect = salesOrderCancelEffectOf(plan.productionPlanStatus);
+      if (effect === 'CANCEL') {
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
         const cancelled = await this.repository.updatePlan(tx, plan.id, { productionPlanStatus: PRODUCTION_PLAN_STATUS.CANCELLED });
         await this.businessEventRecorder.record(tx, {
@@ -196,7 +205,7 @@ export class ProductionService {
           reason: `ORDER_CANCELLED: 수주 ${input.salesOrderNo} 취소로 시작 전 계획 취소`,
         });
         cancelledPlanNos.push(plan.productionPlanNo);
-      } else if (plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS) {
+      } else if (effect === 'UNLINK') {
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
         const unlinked = await this.repository.updatePlan(tx, plan.id, { salesOrderItemId: null });
         await this.businessEventRecorder.record(tx, {
@@ -306,9 +315,9 @@ export class ProductionService {
 
   /**
    * 히트 편성 확정 (API-204): 시작 전(PLANNED) 계획의 히트 수를 지금 기준정보로 다시 계산해 저장한다.
-   * 계획 상태 "편성 확정"은 두지 않고(SPEC 5장), 공통 코드에 확정 이벤트가 없어 작업 로그는 남기지 않는다.
+   * 계획 상태 "편성 확정"은 두지 않는다(SPEC 5장). 히트 수가 그대로여도 누가 확정했는지 작업 로그(HEAT_PLAN_CONFIRMED)를 남긴다.
    */
-  async confirmHeatPlan(id: number): Promise<ProductionPlanDetail> {
+  async confirmHeatPlan(user: AuthUser, id: number): Promise<ProductionPlanDetail> {
     await this.prisma.$transaction(async (tx) => {
       const locked = await this.repository.lockPlan(tx, id);
       if (!locked) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
@@ -317,6 +326,15 @@ export class ProductionService {
       if (!plan) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
       const formation = await this.heatFormationOf(tx, plan);
       if (formation.heatCount !== plan.heatCount) await this.repository.updatePlan(tx, id, { heatCount: formation.heatCount });
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.HEAT_PLAN_CONFIRMED,
+        actor: user,
+        target: { table: 'production_plan', id },
+        salesOrderId: plan.salesOrderItem?.salesOrder.id ?? null,
+        before: planSnapshot(plan),
+        after: { ...planSnapshot(plan), heatCount: formation.heatCount, heatTon: formation.heatTon, requiredMoltenSteelTon: formation.requiredMoltenSteelTon },
+        reason: `생산계획 ${plan.productionPlanNo} 히트 편성 확정 (히트 ${plan.heatCount}개 → ${formation.heatCount}개)`,
+      });
     });
     return this.getPlanDetail(id);
   }

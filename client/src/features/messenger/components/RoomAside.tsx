@@ -4,7 +4,6 @@ import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import type { ChatRoomDetailView } from '@/api/messenger';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Tag } from '@/components/Tag';
 import { WorkRoomSummary } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { PresenceDot } from '@/features/messenger/components/Presence';
@@ -100,8 +99,8 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
           ))}
           <li className="flex items-center gap-2 text-sm text-ink-3">
             <span className="flex size-[22px] items-center justify-center rounded-full bg-ai-bg text-[10px] font-semibold text-ai-strong">AI</span>
-            AI 어시스턴트 (@AI 호출)
-            <ComingSoon grade="P2" className="ml-auto" />
+            AI 어시스턴트
+            <span className="ml-auto text-cap">@AI 로 호출</span>
           </li>
         </ul>
         {room.chatRoomType === 'DIRECT' ? <p className="text-cap text-ink-3">1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요</p> : null}

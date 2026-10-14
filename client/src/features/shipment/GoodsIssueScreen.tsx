@@ -1,11 +1,11 @@
 'use client';
 // 출고 확정 (REQ-SHP-002·003, REQ-INV-005, REQ-SO-005, BP-SHP-01 14.1-8, 보고서 1 A-8).
 // C 반영: 별도 출고 번호·'최근 출고' 목록 없음 → 출하요청(출고 완료)으로 보인다. 상태 문구는 공통 코드 그대로.
-// 확정은 출하요청 단위. core가 품질·배정·재고·잔량을 다시 확인하고(INV-002·INV-001·INV-004·SHP-002), 예약 CONVERTED·배정 CONSUMED·LOT 출고·밀시트를 한 번에 처리한다.
+// 확정은 출하요청 단위. 서버가 품질·배정·재고·잔량을 다시 확인하고(INV-002·INV-001·INV-004·SHP-002), 예약 CONVERTED·배정 CONSUMED·LOT 출고·밀시트를 한 번에 처리한다.
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { GoodsIssueQueueRow, GoodsIssueView } from '@/api/goodsIssues';
 import { ERROR_MESSAGE, LOT_STATUS_LABEL, PERMISSION, PRODUCT_QTY_UNIT, RESERVATION_STATUS_LABEL, SHIPMENT_REQUEST_STATUS_LABEL, type ShipmentRequestStatus } from '@/codes';
 import { Banner } from '@/components/Banner';
@@ -510,7 +510,9 @@ function IssueResult({ view }: { view: GoodsIssueView }) {
         {view.millSheets.map((m) => (
           <span key={m.id} className="flex items-center gap-1.5" data-pet-item="millSheet" data-pet-item-title={m.millSheetNo}>
             <MillSheetLink id={m.id} no={m.millSheetNo} />
-            <PdfBadge pdfPath={m.pdfPath} />
+            <span className="inline-flex" data-pet-field="PDF">
+              <PdfBadge pdfPath={m.pdfPath} />
+            </span>
           </span>
         ))}
         <span className="ml-auto text-cap text-ink-3">밀시트는 발행 시점 값을 스냅샷으로 저장해요.</span>

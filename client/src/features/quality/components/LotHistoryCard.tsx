@@ -92,8 +92,9 @@ export function LotHistoryCard({
               title: (
                 <span className="flex flex-wrap items-center gap-1.5" data-pet-item="businessEvent" data-pet-item-title={event.eventNo}>
                   <span className="inline-flex" data-pet-field="주체">
+                    {/* Tag는 글자만 받으면 그 글자를 펫 용어(data-pet-term)로 단다. 사람 이름은 용어가 아니라 이 기록의 값이라 요소로 감싸 넘긴다 */}
                     <Tag size="sm" tone={event.actorType === 'SYSTEM' ? 'run' : 'outline'}>
-                      {event.actorName}
+                      <span>{event.actorName}</span>
                     </Tag>
                   </span>
                   <b className="font-semibold" data-pet-field="작업">

@@ -98,7 +98,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
         >
           <b>사용 안 함 상태의 사원이에요</b>
           <br />
-          계정 선택·조직도·담당자 목록에서 빠지고 업무를 할 수 없어요.
+          로그인할 수 없고 조직도·담당자 목록에서 빠져요.
         </Banner>
       )}
 
@@ -145,7 +145,8 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           {isHead ? (
             <div className="flex flex-wrap gap-1.5">
               {headOf.map((d) => (
-                <span key={d.id} data-pet-item="department" data-pet-item-title={d.departmentName}>
+                // 꼬리표 글자가 부서명뿐이라 항목으로 읽으면 읽을 값이 없다 → '부서장' 용어 설명을 단다
+                <span key={d.id} data-pet-term="부서장">
                   <Tag tone="outline">{d.departmentName} 부서장</Tag>
                 </span>
               ))}
@@ -167,7 +168,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           onConfirm={() => deactivate.mutate({ id: employee.id, expectedUpdatedAt: employee.updatedAt })}
         >
           <p>
-            {employee.employeeName}({employee.employeeNo}) 사원은 계정 선택·조직도·담당자 목록에서 빠지고 업무를 할 수 없어요. 나중에 다시 사용으로 돌릴 수 있어요.
+            {employee.employeeName}({employee.employeeNo}) 사원은 로그인할 수 없고 조직도·담당자 목록에서 빠져요. 나중에 다시 사용으로 돌릴 수 있어요.
           </p>
           {isMe ? <p className="mt-2 font-semibold text-danger">내 계정이에요. 바꾸면 바로 이 화면에서 더 일할 수 없어요.</p> : null}
         </ConfirmDialog>

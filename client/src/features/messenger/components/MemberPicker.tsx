@@ -26,7 +26,7 @@ function collectMemberIds(node: OrgChartNode): number[] {
   return [...node.members.map((m) => m.id), ...node.children.flatMap(collectMemberIds)];
 }
 
-/** 검색용: 조직도의 모든 사원과 소속 부서 이름 (서버 모드에서도 조직도만 읽을 수 있다) */
+/** 검색용: 조직도의 모든 사원과 소속 부서 이름 (조직도만 읽을 수 있다) */
 function flattenMembers(nodes: readonly OrgChartNode[]): { id: number; employeeNo: string; employeeName: string; jobGradeName: string; departmentName: string }[] {
   return nodes.flatMap((node) => [
     ...node.members.map((m) => ({ id: m.id, employeeNo: m.employeeNo, employeeName: m.employeeName, jobGradeName: m.jobGradeName, departmentName: node.departmentName })),

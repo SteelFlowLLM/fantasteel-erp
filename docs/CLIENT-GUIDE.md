@@ -1,11 +1,11 @@
 # 화면 작업 안내 (v2 client)
 
-v2 화면(`client/`)은 **기본으로 실제 서버(`server/`)를 부르는 클라이언트**다. 서버에 아직 연결되지 않은 기능과 테스트는 브라우저 안의 가짜 DB(mock)를 쓴다(아래 서버 연결 절). Next.js(App Router) + TypeScript(strict) + Tailwind + TanStack Query + Zustand로 만들었고, B안 디자인(어두운 아이콘 레일 + 목록|상세)을 쓴다. 이 문서는 화면을 고치거나 더하는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다.
+v2 화면(`client/`)은 **실제 서버(`server/`)를 부르는 클라이언트**다. Next.js(App Router) + TypeScript(strict) + Tailwind + TanStack Query + Zustand로 만들었고, B안 디자인(어두운 아이콘 레일 + 목록|상세)을 쓴다. 이 문서는 화면을 고치거나 더하는 사람(에이전트)이 같은 규칙으로 작업하기 위한 안내다.
 
 ## 1. 기준 (우선순위 순)
 
 1. 6개 설계 문서 — `docs/notion/01`~`06` (기획안, 요구사항 정의서, 용어 사전, 업무 프로세스 정의서, 코드 컨벤션, 공통 코드 정의서). 검사 기준 숫자만 `docs/notion/07-KS-규격-정리.md`와 `docs/rework/ks-values.md`.
-2. `docs/rework/erd-final.txt` — 화면이 보이고 받는 필드와 mock 행 이름(컬럼 이름의 camelCase)을 정할 때만.
+2. `docs/rework/erd-final.txt` — 화면이 보이고 받는 필드 이름(컬럼 이름의 camelCase)을 정할 때만.
 3. `SPEC.md`, `docs/rework/PLAN.md` — 범위와 결정. PLAN 4장 = 정확한 공통 코드, 5장 = 승인된 처리, 6장 = 문서끼리 어긋날 때의 기본값, 7장 = 화면별 변경.
 4. `docs/rework/areas/` — 영역별 노트(색인: [areas/README.md](rework/areas/README.md)). 화면·api 함수·요구사항 대응·가정값이 있다.
 5. 문서에 없는 값은 **가정값**이다. 임의로 넣지 말고 `docs/rework/seed-assumptions.md`에 행을 더해 근거를 남긴다.
@@ -29,99 +29,92 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 ```
 
 - 포트는 `client/package.json`의 `dev`·`start` 스크립트(`-p 5173`)가 정한다. 루트 `package.json`의 스크립트는 바꾸지 않는다.
-- 기본(서버 모드)은 처음 열면 사원번호·비밀번호 **로그인** 화면(`/login`)이 나온다(아래 서버 연결). 가짜 DB 모드(`NEXT_PUBLIC_DATA_SOURCE=mock`)는 **계정 선택** 화면이 나온다. 사원 계정을 누르면 그 사원으로 들어간다. 가짜 DB 모드의 사원번호·비밀번호 로그인은 **일부러 미뤘다**(SPEC 5장 결정 1). 계정은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다. 계정은 상단 사용자 메뉴에서 바꾼다.
-- 가짜 DB 모드에서 사용자 메뉴의 **'시드로 초기화'**는 이 브라우저의 가짜 데이터를 시드 상태로 되돌린다(다른 탭에도 알려진다).
-- 가짜 DB 모드의 데이터는 `localStorage`(`fantasteel.mock-db.v6`)에 저장되고 다른 탭과 `BroadcastChannel`로 맞춘다. 서버를 거치지 않아 다른 PC와는 공유되지 않는다.
+- 처음 열면 사원번호·비밀번호 **로그인** 화면(`/login`)이 나온다(아래 서버 연결). 로그인한 사원은 탭마다 `sessionStorage`(`fantasteel.session.employee-id`·`employee-no`)에 둔다.
 
-### 서버 연결 (기본)
+### 서버 연결
 
-수주·출하요청·출하 배정 화면, 대시보드의 영업 위젯 3개(공정 흐름 현황·수주 충족 현황·제품 재고), 생산 화면 3개(생산계획·작업 실적·열연 투입), 구매 화면 5개(구매요청·승인함·발주·입고·MRP)와 대시보드 구매 위젯 2개(원료 잔량 대비 소요·구매 진행), 출고 확정·밀시트·LOT 추적·재고·작업 로그 화면, 대시보드 최근 작업 로그 위젯, 조직 관리 화면 2개(사원·부서·직급·권한)와 조직도, 업무·알림 화면(업무 탭·알림함)과 상단 알림·레일 알림 배지, 메신저 화면·업무방과 상단 메신저·레일 메신저 배지는 실제 서버(`server/`)를 부른다. 데이터 출처 기본값은 서버이고(`api/http.ts`의 `dataSource()`: 비우거나 `mock`이 아니면 서버), 상단 통합 검색도 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 결과에서 빠진다). Message → ERP 구매요청 초안(`api/actionDrafts.ts` → `api/server/actionDrafts.ts`)도 서버를 부르므로, 서버 모드에서 가짜 DB를 쓰는 화면은 없다. `NEXT_PUBLIC_DATA_SOURCE=mock`은 테스트용이다(`vitest.config.ts`가 지정, 서버 어댑터 테스트는 `useFakeServer`가 server로 바꾼다).
+모든 화면이 실제 서버(`server/`)를 부른다. 상단 통합 검색은 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 부르지 않아 결과에서 빠지고, 결과가 없으면 그 이유를 한 줄로 안내한다). 2026-10-13에 브라우저 안 가짜 DB(`client/src/mock/`)와 가짜 DB 모드의 계정 선택 화면을 지웠다.
 
-1. `npm run dev`로 DB·서버·화면을 띄운다. `client/.env.local`은 없어도 된다(있으면 `NEXT_PUBLIC_DATA_SOURCE`를 비우거나 `server`로, 바꾼 뒤에는 화면 서버를 다시 띄운다).
-2. 서버 모드의 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
+1. `npm run dev`로 DB·서버·화면을 띄운다. 서버 주소는 `NEXT_PUBLIC_API_BASE_URL`(기본 `http://localhost:8787/api/v1`)이다.
+2. 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
 
-- 연결 방식: 화면이 부르는 `api/*.ts` 함수가 출처(`isServerDataSource()`)에 따라 가짜 DB 또는 `api/server/*.ts` 어댑터를 부른다. 화면 컴포넌트는 되도록 그대로다. 화면별로 어떤 어댑터를 쓰는지는 아래 줄에 적는다.
-- 서버 모드에서 고객사·규격·강종·야드·사원·부서 id는 모두 서버 id다. 수주 등록·수주 목록·구매요청 등록·재고 강종 필터의 선택 목록(`api/lookups.ts`)은 서버 기준정보를 읽으므로(`api/server/lookups.ts`) 기준정보 화면에서 새로 만든 고객사·규격·원료도 고를 수 있다. 기준정보 조회 권한이 없는 물류는 이 선택 목록이 비고, 출하요청 등록 창의 고객사는 출하 가능 품목이 있는 고객사만 보인다. 규격 표시값(유형·1매 이론중량·강종·KS 규격 번호)과 LOT 야드 이름은 출하요청·출하 가능 품목·배정·생산계획·검사 기준 응답이 함께 주므로, 기준정보 조회 권한이 없는 사원도 톤·강종·야드가 보인다.
-- 서버에 아직 없는 기능(취소 창의 구매 진행 영향)은 서버 모드에서 비어 있다. 수주 상세의 생산 연결 탭은 수주 상세의 계획(취소로 연결이 풀린 진행 계획은 취소 기록의 계획 번호)마다 `GET /production-plans/:id`를 읽는다(생산계획 조회 권한이 없으면 빈 목록). 재생산 계획 만들기는 불합격 관리·생산계획 화면과 같은 `POST /production-plans`(수주 품목 id)를 부른다.
-- 서버 모드에서는 사용자 메뉴에 '시드로 초기화'가 없다(가짜 DB만 되돌리는 메뉴). 서버 DB는 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
-- 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 서버 모드면 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. 생산계획 상세의 '히트 편성 확정'은 `POST /production-plans/:id/confirm`을 부른다. 상세 응답의 편성(지금 기준정보로 다시 계산한 히트 수)이 저장된 히트 수와 다른 계획 상태일 때만 띠가 보인다. 가짜 DB에만 있는 값(여재 표시 시각, 배정 확정자)은 비어 있다.
-- 구매 화면: `api/purchasing.ts`·`api/approvals.ts`·`api/goodsReceipts.ts`·`api/mrp.ts`가 `api/server/purchaseRequisitions.ts`·`purchaseOrders.ts`·`mrp.ts`를 부른다. 구매요청·발주·입고·생산계획·사원·부서·원료 id는 모두 서버 id다. 상세의 승인 가능 여부·요청자 직급·부서장 이름과 등록 창의 요청자·부서·부서장은 로그인 사원과 조직도로 판단한다. 반려 일시·발주자·입고 확정자는 서버가 작업 로그에서 읽어 준다. Message → ERP 원본 초안은 서버 조회가 없어 비어 있다. 구매 화면 5개(MRP 포함)는 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다. 가짜 DB 시험은 core 서비스를 직접 부른다(`scenarioKit`의 `asPurchaseCore`·`mockMrp`·`stockRawMaterials`). 결과를 보려면 생산계획이 있어야 해서 `seed:demo`가 필요하다.
+- 연결 방식: 화면이 부르는 `api/*.ts` 함수가 `api/server/*.ts` 어댑터를 부른다. 화면별로 어떤 어댑터를 쓰는지는 아래 줄에 적는다.
+- 고객사·규격·강종·야드·사원·부서 id는 모두 서버 id다. 수주 등록·수주 목록·구매요청 등록·재고 강종 필터의 선택 목록(`api/lookups.ts`)은 서버 기준정보를 읽으므로(`api/server/lookups.ts`) 기준정보 화면에서 새로 만든 고객사·규격·원료도 고를 수 있다. 기준정보 조회 권한이 없는 물류는 이 선택 목록이 비고, 출하요청 등록 창의 고객사는 출하 가능 품목이 있는 고객사만 보인다. 규격 표시값(유형·1매 이론중량·강종·KS 규격 번호)과 LOT 야드 이름은 출하요청·출하 가능 품목·배정·생산계획·검사 기준 응답이 함께 주므로, 기준정보 조회 권한이 없는 사원도 톤·강종·야드가 보인다.
+- 취소 창의 구매 진행 영향은 `GET /sales-orders/:id/cancel-purchase-impact`를 부른다(2026-10-14). 수주 상세의 생산 연결 탭은 수주 상세의 계획(취소로 연결이 풀린 진행 계획은 취소 기록의 계획 번호)마다 `GET /production-plans/:id`를 읽는다(생산계획 조회 권한이 없으면 빈 목록). 재생산 계획 만들기는 불합격 관리·생산계획 화면과 같은 `POST /production-plans`(수주 품목 id)를 부른다.
+- 처음 상태로 되돌리려면 `npm run db:reset`. 생산 화면에 볼 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`(docs/backend/seed.md).
+- 생산 화면: `api/production.ts`·`api/productionResults.ts`·`api/rolling.ts`가 `api/server/production.ts`를 부른다. 생산계획·LOT·실적·배정 id는 서버 id다. 검사 입력도 같은 LOT id를 써서 생산 화면의 검사 링크가 맞는다. 생산계획 상세의 '히트 편성 확정'은 `POST /production-plans/:id/confirm`을 부른다. 상세 응답의 편성(지금 기준정보로 다시 계산한 히트 수)이 저장된 히트 수와 다른 계획 상태일 때만 띠가 보인다. 서버 응답에 없는 값(여재 표시 시각, 배정 확정자)은 비어 있다.
+- 구매 화면: `api/purchasing.ts`·`api/approvals.ts`·`api/goodsReceipts.ts`·`api/mrp.ts`가 `api/server/purchaseRequisitions.ts`·`purchaseOrders.ts`·`mrp.ts`를 부른다. 구매요청·발주·입고·생산계획·사원·부서·원료 id는 모두 서버 id다. 상세의 승인 가능 여부·요청자 직급·부서장 이름과 등록 창의 요청자·부서·부서장은 로그인 사원과 조직도로 판단한다. 반려 일시·발주자·입고 확정자는 서버가 작업 로그에서 읽어 준다. Message → ERP 원본 초안은 서버 조회가 없어 비어 있다. 결과를 보려면 생산계획이 있어야 해서 `seed:demo`가 필요하다.
 - 출고 확정 화면: `api/goodsIssues.ts`가 `api/server/goodsIssues.ts`를 부른다. 출하요청·LOT id는 서버 id다. 서버에 출고 전 확인 API가 없어 "출고 전 확인"은 출하요청·수주·LOT 상세로 화면에서 계산해 보이고, 확정할 때 서버가 다시 확인한다. 품질 사원은 수주 조회 권한이 없어 수주 매수·출하 매수가 비어 있다. 요청자는 ERD에 컬럼이 없어 비어 있다.
 - 밀시트 화면: `api/millSheets.ts`가 `api/server/millSheets.ts`를 부른다. 서버 스냅샷만으로 그리고, 수주 줄 번호는 스냅샷에 없어 수주 상세의 품목 순서로 매긴다(수주 조회 권한이 없는 품질은 밀시트 안 순서). 'PDF 생성'은 브라우저에서 내려받은 뒤 서버도 같은 스냅샷으로 PDF를 만들어 저장한다(`POST mill-sheets/:id/pdf`).
 - LOT 추적 화면: `api/lotTrace.ts`가 `api/server/lotTrace.ts`를 부른다. 화면 주소의 LOT 번호로 서버 LOT id를 찾아 추적하므로 생산·검사·출고 화면의 LOT 링크가 맞는다. 출하요청 번호로 시작하는 추적은 그 출하요청의 배정 LOT마다 역추적해 합친다(출하요청 조회 권한이 없는 구매·생산은 권한 없음). LOT 번호 검색은 앞부분 일치다. 서버 응답에 없는 값(공급업체, LOT의 생산계획, 배정 확정 시각·수주, 소진·출고·여재 시각)은 비어 있다.
 - 재고 화면: `api/inventories.ts`가 `api/server/inventories.ts`를 부른다. 서버 재고의 `onHandQty`는 합격 재고라 화면의 합격 매수로 보이고, 재고 매수는 재고 상태 LOT 수로 센다(판정 대기에 상위 히트만 불합격인 LOT도 섞인다). LOT 목록은 제품·히트 LOT 상세로 히트·배정·처리 상태를 채운다. 원료 입고일·입고 번호(입고 조회 권한)와 입고예정(발주 조회 권한)은 권한이 있을 때만 보인다. 여재 탭은 서버 재고 응답의 `surplus`(대시보드 여재 위젯과 같은 계산, inventory.md 8-1)를 쓰고, 여재 전환 시각과 LOT 목록의 여재 표시는 비어 있다.
 - 작업 로그: `api/businessEvents.ts`(작업 로그 화면), 수주 상세 이력(`api/salesOrders.ts`), 검사·불합격 LOT 이력(`api/server/inspections.ts`·`dispositions.ts`), 대시보드 최근 작업 로그(`api/dashboard.ts`)가 `api/server/businessEvents.ts`로 `GET /business-events`를 부른다. 대상 번호는 기록 데이터(변경 후·전)의 번호로 보이고, 주체의 부서·직급과 원본 메시지 링크는 서버 응답에 없어 비어 있다.
-- 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. 사원 관리(`api/adminEmployees.ts`), 부서·직급·역할 권한·관리 조직도(`api/adminOrganization.ts`), 조직 조회(`api/directory.ts`의 관리 화면용 조회·조직도)는 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다. ERD에 없는 기능(부서 정렬 순서, 직급 코드, 최근 접속)은 화면에 없고, 사원 등록은 비밀번호를 받는다. 사원번호·부서 코드 형식(가정값, `features/admin/lib/orgRules.ts`)은 서버에 검사가 없어 서버 어댑터가 먼저 확인한다. 부서 삭제·직급 수정·직급 삭제는 서버 API(API-271·272·273, 2026-10-08)를 쓰고, 퇴사자가 남은 부서·직급은 서버가 삭제를 막는다. 메신저·업무방의 멤버 선택은 서버 조직도(`GET /departments`)를 쓴다(`directoryApi.getOrgChart`).
-- 업무·알림: `api/tasks.ts`·`api/notifications.ts`가 `api/server/tasks.ts`·`notifications.ts`를 부른다. 업무 범위(내 담당·내가 만든 업무·전체)는 서버 `GET /tasks?scope=`로 거르고, 업무 추가·고치기의 담당자는 조직도(`GET /departments`)에서 고른다. 고치기(`PATCH /tasks/:id`, API-274)는 등록자·담당자, 완료는 담당자만 할 수 있고(로그인 사원은 `GET /auth/me`), 연결 화면은 `/`로 시작하는 경로만 받는다. 마감일은 필수다(2026-10-08, `task.creator_id`·`link_path` 추가). 업무(`api/tasks.ts`)와 알림(`api/notifications.ts`)은 가짜 DB 분기가 없어 가짜 DB 모드에서도 서버를 부른다(가짜 DB 시험은 알림 행을 직접 읽는다, `scenarioKit`의 `mockNotificationsOf`). 알림은 내용 한 줄이라 제목 자리에 보이고 부서 표시가 없다. 읽음·모두 읽음은 서버 임시 API(`POST notifications/:id/read`·`read-all`)를 쓴다. 알림은 서버가 본 거래 안에서 보낸다(업무 지정, 구매요청 승인 요청·결과). 멘션·업무방 메시지 알림은 서버가 메시지와 함께 만든다.
-- 기준정보 화면: `api/masterData.ts`가 `api/server/masterData.ts`를 부른다(API-165~188). 강종·품목·야드 id는 서버 id다. ERD·API 명세에 없는 기능(준비 상태, 모든 삭제, 강종 수정, 사용 여부·참조 표시, 라우팅 공정 빼기·순서 바꾸기, 원단위 비우기)은 서버 모드에서 숨기거나 막는다. 쓰인 규격의 치수 수정은 저장할 때 서버가 MST-002로 거부한다. 원단위·라우팅은 일괄 저장 API가 없어 칸마다 차례로 보낸다(중간에 실패하면 앞 칸만 저장된다).
+- 조직 관리 화면: `api/directory.ts`(관리 화면용 조회)·`api/adminEmployees.ts`·`api/adminOrganization.ts`가 `api/server/organization.ts`를 부른다. 사원·부서·직급·역할 id는 서버 id다. ERD에 없는 기능(부서 정렬 순서, 직급 코드, 최근 접속)은 화면에 없고, 사원 등록은 비밀번호를 받는다. 사원번호·부서 코드 형식(가정값, `features/admin/lib/orgRules.ts`)은 서버에 검사가 없어 서버 어댑터가 먼저 확인한다. 부서 삭제·직급 수정·직급 삭제는 서버 API(API-271·272·273, 2026-10-08)를 쓰고, 퇴사자가 남은 부서·직급은 서버가 삭제를 막는다. 메신저·업무방의 멤버 선택은 서버 조직도(`GET /departments`)를 쓴다(`directoryApi.getOrgChart`).
+- 업무·알림: `api/tasks.ts`·`api/notifications.ts`가 `api/server/tasks.ts`·`notifications.ts`를 부른다. 업무 범위(내 담당·내가 만든 업무·전체)는 서버 `GET /tasks?scope=`로 거르고, 업무 추가·고치기의 담당자는 조직도(`GET /departments`)에서 고른다. 고치기(`PATCH /tasks/:id`, API-274)는 등록자·담당자, 완료는 담당자만 할 수 있고(로그인 사원은 `GET /auth/me`), 연결 화면은 `/`로 시작하는 경로만 받는다. 마감일은 필수다(2026-10-08, `task.creator_id`·`link_path` 추가). 알림은 내용 한 줄이라 제목 자리에 보이고 부서 표시가 없다. 읽음·모두 읽음은 서버 임시 API(`POST notifications/:id/read`·`read-all`)를 쓴다. 알림은 서버가 본 거래 안에서 보낸다(업무 지정, 구매요청 승인 요청·결과). 멘션·업무방 메시지 알림은 서버가 메시지와 함께 만든다.
+- 기준정보 화면: `api/masterData.ts`가 `api/server/masterData.ts`를 부른다(API-165~188). 강종·품목·야드 id는 서버 id다. 고객사·공급업체·야드·강종·품목(원료·제품 규격)은 행의 삭제 버튼으로 지우고, 쓰는 곳이 있으면 서버가 COM-004와 쓰는 곳 이름으로 막아 토스트로 보인다(API-275~279, 2026-10-14). ERD·API 명세에 없는 기능(준비 상태, 강종 수정, 사용 여부·참조 표시, 규격 매핑·라우팅·원단위 삭제, 라우팅 공정 빼기·순서 바꾸기, 원단위 비우기)은 두지 않는다. 쓰인 규격의 치수 수정은 저장할 때 서버가 MST-002로 거부한다. 원단위·라우팅은 일괄 저장 API가 없어 칸마다 차례로 보낸다(중간에 실패하면 앞 칸만 저장된다).
 - 대시보드 위젯: 납기 위험 수주는 수주 충족 위젯 API, 강종별 불합격률은 검사 목록과 강종, 생산량은 LOT 목록과 품목 이론중량을 화면에서 묶는다. 출하 실적은 `GET /dashboard/widgets/shipment-result`(출고 확정 시각 기준), 공정별 수율은 `GET /dashboard/widgets/process-yield`(완료 실적의 Σ산출 ÷ Σ투입, 투입량 가중 계획 수율)다. 추이 기간은 오늘 포함 최근 30일(가정값). 연주 계획 대비 매수는 서버에 손실 매수가 없어 비어 있다. 여재 보유 기간은 `GET /dashboard/widgets/surplus-age`(미배정 합격 슬래브 − 예약 매수, 생산완료일부터 보유 일수, inventory.md 8-1)다. 진행 중인 코일 수주용으로 만든 슬래브는 여재에서 뺀다. 화면에서 묶는 위젯(원료 잔량 대비 소요·구매 진행·납기 위험·불합격률·생산량)의 권한은 서버 로그인 사원(`/auth/me`)의 역할 권한으로 본다.
 - 로그인 쿠키는 브라우저의 모든 탭이 함께 쓴다. 그래서 한 브라우저에서는 한 계정만 쓴다(승인 시연은 시크릿 창이나 다른 브라우저로). 이미 로그인된 브라우저에서 새 탭을 열면 그 사원으로 바로 들어간다. 다른 탭에서 다른 계정으로 로그인하거나 로그아웃하면, 또는 쿠키가 만료(401)되면 안내하고 로그인 화면으로 보낸다(`api/http.ts`의 `onServerSessionLost`).
-- 메신저: `api/messenger.ts`와 수주 화면의 업무방(`api/salesOrders.ts`의 `workRoom`·`openWorkRoom`)이 `api/server/messenger.ts`를 부른다. 채팅방·메시지·사원 id는 서버 id다(`useMe().employeeId`). 실시간은 셸이 소켓(`hooks/useMessengerSocket.ts`, namespace `/messenger`, 로그인 쿠키로 인증)에 붙어 `message:new`·`room:read`·`room:updated`를 받으면 메신저 조회를 다시 부르고, 연결이 끊겼다 다시 붙으면 놓친 메시지를 읽으려고 메신저 조회를 모두 다시 부른다. 본문의 @이름·@부서는 방 멤버 사원 id로 바꿔 서버에 보낸다(부서 멘션 = 그 부서의 방 멤버). 첨부는 한 번에 10개까지(가정값) 파일마다 10MB까지, 실행 파일은 막힌다. 서버에 없는 값(방 만든 사람, 첨부 형식, 스키마 3차 전 첨부의 크기)은 비어 있다. 시스템 메시지(업무방 열림·초대·이름 변경·수주 진행 알림)는 서버가 만들어 가운데 회색 줄로 보인다. 본문 업무 번호 링크는 서버가 실제로 있는 문서만 준다(`erpLinks`). 멤버 초대(`POST /chat-rooms/:id/members`)와 그룹방 이름 바꾸기(`PATCH /chat-rooms/:id`, 방 정보 칸의 [이름 바꾸기])는 두 모드 모두 된다. 업무방은 내가 멤버인 방만 수주 화면에서 찾는다(수주 화면의 '업무방' 버튼은 서버 모드에서 늘 '업무방 열기'로 보이고, 열면 있는 방을 돌려준다).
-- 편의(두 모드 공통): 메시지 옆에 아직 안 읽은 멤버 수(보낸 사람 제외)를 보이고, 방 정보 칸에 대화 검색(본문, 대소문자 무시, 최신순)과 파일 모아보기(첨부만, 최신순)가 있다. 서버 모드는 다른 멤버가 읽으면 소켓 `member:read`로 수가 바로 줄어든다. 검색 결과를 누르거나 알림(`/messenger?room=&message=`)으로 들어오면 그 메시지까지 이전 메시지를 더 불러와 가운데로 스크롤하고 잠깐 강조한 뒤 주소에서 `message`를 지운다(`MessengerScreen`·`Conversation`).
-- 여러 파일 첨부(두 모드 공통, 스키마 3차): 입력창 클립 버튼으로 여러 개를 고르고(더 골라도 쌓인다, 10개까지), 파일마다 [x]로 뺀다. 한 메시지로 보내고 말풍선에 파일이 올린 순서대로 보인다. 화면의 파일은 `MessageView.files`(`id` = 서버 첨부 id, 가짜 DB는 메시지 안 순번), 내려받기는 `getFile({ messageId, fileId })`. 가짜 DB는 `MessageRow.files`(선택 값)에 두고, 옛 파일 1개 칸(`fileName` 등)도 계속 읽는다.
-- 이모티콘(두 모드 공통, 18번~22번·25번, 스키마 4차): 입력창 [이모티콘]으로 고르기 창을 열어 하나를 고르면 입력창 위에 미리 보이고, 글과 함께(선택) 보낸다. 고르기 창 탭은 `최근` · `철강맨 업무`(41종) · `철강맨 일상`(65종) · `철강맨 행사`(12종)이고(묶음은 shared `MESSAGE_EMOTICON_SETS`, 이모티콘은 `MESSAGE_EMOTICONS`의 `set`), 열 때 최근 보낸 것이 있으면 `최근`, 없으면 첫 묶음을 보여 준다. 4칸 격자가 세로로 스크롤되고, 멈춘 그림을 보여 주다 올리거나 포커스한 것만 움직이며, 그림은 보일 때 불러온다(`loading="lazy"`). 최근 보낸 이모티콘은 사원마다 이 브라우저 localStorage `fantasteel.emoticon-recent.v1.<사원 id>`에 16개까지(최근 것이 앞, 보낼 때 쌓음, 목록에서 뺀 키는 버림, `features/messenger/lib/emoticonRecent.ts`). 파일과는 함께 고를 수 없다(서버 첨부 API가 받지 않음). 그림은 `public/emoticons/<키>.gif`(64px를 2배, `image-rendering: pixelated`), '동작 줄이기'를 켜면 멈춘 그림 `.png`(`features/messenger/components/Emoticon.tsx`). 화면 값은 `MessageView.emoticonKey`, 가짜 DB는 `MessageRow.emoticonKey`(선택 값).
-- 이모티콘 화면 기능(두 모드 공통, 23번, 문서에 없는 추가 기능, 스키마 그대로): ① 글자로 추천 — 입력창 글(40자까지, 가정값)에 shared `MESSAGE_EMOTICON_KEYWORDS`(가정값) 낱말이 있으면 입력창 위에 6개까지(가정값) 추천하고, 누르면 고르기 창에서 고른 것과 같다. 이모티콘을 골랐거나 파일이 있으면 숨기고, Esc·[x]로 닫으면 글을 고칠 때까지 숨긴다(`features/messenger/lib/emoticonSuggest.ts`). ② 즐겨찾기 — 고르기 창 칸의 별(올리거나 포커스하면 보임)로 더하고 빼며, 있으면 맨 앞에 `즐겨찾기` 탭이 생긴다(탭 순서 `즐겨찾기` · `최근` · 묶음, 열 때 내용이 있는 첫 탭). localStorage `fantasteel.emoticon-favorite.v1.<사원 id>`에 24개까지(가정값, 더한 순서, 목록에서 뺀 키는 버림, `lib/emoticonFavorite.ts`). ③ 다시 보기 — 말풍선 이모티콘을 누르면 처음부터 다시 틀고 2.5초(가정값) 동안 1.5배(원본 3배)로 키운다('동작 줄이기'면 멈춘 그림만 커짐). ④ 철강맨 반응 — 반응 줄 아래에 작은 철강맨 4개(`sm:ok`·`sm:thanks`·`sm:lol`·`sm:love`, 가정값)가 있고 칩·고르기 줄에 멈춘 그림 32px로 보인다(shared `STEELMAN_REACTIONS`·`reactionEmoticonKey`). ⑤ 작은 이모티콘 — 고르기 창 아래 [글에 작게 넣기]를 켜고 고르면 커서 자리에 `:steelman-ok:` 같은 글이 들어가고(창은 열린 채로 여러 개), 말풍선에서는 멈춘 그림 32px로 글줄 안에 보인다(모르는 키는 글 그대로). 파일을 고른 때도 작게는 넣을 수 있다. 보내면 넣은 것도 최근에 쌓는다. 미리보기(목록·알림·답글·공지·답장 줄·업무 등록 제목)는 `(확인)`처럼 이름으로 바꾼다(shared `inlineEmoticonText`, 서버·가짜 DB 같음). 검색은 본문 그대로 찾는다.
-- 그림 첨부 미리보기(두 모드 공통): png·jpg·jpeg·gif·webp·bmp는 말풍선에 작은 그림으로 보이고 누르면 크게 본다(`features/messenger/lib/attachment.ts`). ERD에 형식 컬럼이 없어 확장자로 판단하고, 서버는 늘 octet-stream으로 보내서 화면이 확장자로 형식을 붙인다. SVG는 스크립트가 들어갈 수 있어 미리보지 않는다.
-- 업무방 멤버 추천(두 모드 공통): 업무방 열기 창 위에 담당 영업과 생산부·물류부 부서장을 추천으로 보이고 [추천 N명 더하기]로 한 번에 고른다(`features/sales/lib/workRoomSuggest.ts`). 미리 고르지는 않는다. 부서는 시드 부서 코드(PRD·LOG, 가정값)로 찾는다.
-- 접속 상태·입력 중(서버 모드만): 1:1 목록·방 머리·멤버 아바타에 접속 점(초록 = 접속 중), 1:1 머리에 '접속 중/접속 안 함', 입력창 위에 'OO님이 입력 중…'. 소켓으로만 오는 잠깐의 상태라 `stores/useMessengerLiveStore.ts`에 두고, 소켓이 끊기면 접속 표시를 숨긴다(알 수 없음). 가짜 DB 모드에서는 표시하지 않는다.
-- 수정·삭제·답글(두 모드 공통): 말풍선 메뉴에 답장(모든 일반 메시지)·수정·삭제(내 메시지)가 기본으로 있다(`features/messenger/components/MessageEditActions.tsx`, 메뉴 등록부 맨 앞). 답장은 입력창 위에 원본 줄이 생기고, 답글 말풍선 위 원본을 누르면 그 메시지로 이동한다. 고친 메시지는 '수정됨', 지운 메시지는 '삭제된 메시지예요'로 남는다. 고른 메시지는 `stores/useMessageComposeStore.ts`에 둔다.
-- 이모지 반응(두 모드 공통): 메시지 메뉴 맨 위 이모지 줄(`ReactionAction`)에서 고르고, 말풍선 아래 반응 칩을 눌러도 더하거나 뺀다. 칩에 마우스를 올리면 누른 사람이 보인다. 가짜 DB는 반응을 메시지 행(`MessageRow.reactions`)에 둔다(새 표를 만들면 저장된 가짜 DB가 지워져서).
-- 메시지에서 업무 등록(두 모드 공통): 메시지 메뉴 [업무로 등록] → 업무 창(`TaskFormModal`의 `source`)에 제목(본문 첫 줄 50자, 가정값)·설명(본문 + 보낸 사람)을 미리 채운다. 만든 업무의 연결 화면은 그 메시지(`/messenger?room=&message=`)라 업무 카드에서 바로 돌아간다. 서버 모드도 메시지에서 만든 업무는 연결 화면이 보인다.
-- 방 설정(두 모드 공통): 대화 머리의 핀 버튼 = 목록 위 고정(목록 맨 위 '고정' 묶음), 종 버튼 = 알림 끄기, 나가기 버튼 = 방 나가기(1:1 제외, 확인 창 뒤 목록으로 돌아감)(`RoomSettings.tsx`). 알림을 끈 방은 목록에 흐린 종 표시, 안 읽은 수 배지가 회색이고 레일·상단 메신저 배지 합계에서 빠진다(멘션 알림은 받는다). 가짜 DB는 `ChatRoomMemberRow.muted`·`pinnedAt`(선택 값)에 둔다.
-- 공지(두 모드 공통): 메시지 메뉴 [공지로 고정] → 대화 위 노란 공지 줄(`PinnedNotice.tsx`). 줄을 누르면 그 메시지로 이동, [x]로 내린다.
-- 메시지 보내기(두 모드 공통): 누르면 입력창을 비우고 대화에 '보내는 중' 말풍선을 바로 띄운다(`stores/useOutboxStore.ts`, `hooks/useMessenger.ts`의 `useMessageOutbox`). 저장되면 조회를 다시 읽고 말풍선을 지우며, 실패하면 이유와 [다시 보내기]·[삭제]가 있는 '전송 실패' 말풍선으로 남는다. 보관함은 브라우저 메모리라 새로고침하면 사라진다. 메시지마다 보내기 id(`clientMessageId`, UUID)를 붙여 서버 모드에서 다시 보내도 두 번 저장되지 않는다.
+- 메신저: `api/messenger.ts`와 수주 화면의 업무방(`api/salesOrders.ts`의 `workRoom`·`openWorkRoom`)이 `api/server/messenger.ts`를 부른다. 채팅방·메시지·사원 id는 서버 id다(`useMe().employeeId`). 실시간은 셸이 소켓(`hooks/useMessengerSocket.ts`, namespace `/messenger`, 로그인 쿠키로 인증)에 붙어 `message:new`·`room:read`·`room:updated`를 받으면 메신저 조회를 다시 부르고, 연결이 끊겼다 다시 붙으면 놓친 메시지를 읽으려고 메신저 조회를 모두 다시 부른다. 본문의 @이름·@부서는 방 멤버 사원 id로 바꿔 서버에 보낸다(부서 멘션 = 그 부서의 방 멤버). 첨부는 한 번에 10개까지(가정값) 파일마다 10MB까지, 실행 파일은 막힌다. 서버에 없는 값(방 만든 사람, 첨부 형식, 스키마 3차 전 첨부의 크기)은 비어 있다. 시스템 메시지(업무방 열림·초대·이름 변경·수주 진행 알림)는 서버가 만들어 가운데 회색 줄로 보인다. 본문 업무 번호 링크는 서버가 실제로 있는 문서만 준다(`erpLinks`). 멤버 초대(`POST /chat-rooms/:id/members`)와 그룹방 이름 바꾸기(`PATCH /chat-rooms/:id`, 방 정보 칸의 [이름 바꾸기])도 된다. 업무방은 내가 멤버인 방만 수주 화면에서 찾는다(수주 화면의 '업무방' 버튼은 늘 '업무방 열기'로 보이고, 열면 있는 방을 돌려준다).
+- 편의: 메시지 옆에 아직 안 읽은 멤버 수(보낸 사람 제외)를 보이고, 방 정보 칸에 대화 검색(본문, 대소문자 무시, 최신순)과 파일 모아보기(첨부만, 최신순)가 있다. 다른 멤버가 읽으면 소켓 `member:read`로 수가 바로 줄어든다. 검색 결과를 누르거나 알림(`/messenger?room=&message=`)으로 들어오면 그 메시지까지 이전 메시지를 더 불러와 가운데로 스크롤하고 잠깐 강조한 뒤 주소에서 `message`를 지운다(`MessengerScreen`·`Conversation`).
+- 여러 파일 첨부(스키마 3차): 입력창 클립 버튼으로 여러 개를 고르고(더 골라도 쌓인다, 10개까지), 파일마다 [x]로 뺀다. 한 메시지로 보내고 말풍선에 파일이 올린 순서대로 보인다. 화면의 파일은 `MessageView.files`(`id` = 서버 첨부 id), 내려받기는 `getFile({ messageId, fileId })`.
+- 이모티콘(18번~22번·25번, 스키마 4차): 입력창 [이모티콘]으로 고르기 창을 열어 하나를 고르면 입력창 위에 미리 보이고, 글과 함께(선택) 보낸다. 고르기 창 탭은 `최근` · `철강맨 업무`(41종) · `철강맨 일상`(65종) · `철강맨 행사`(12종)이고(묶음은 shared `MESSAGE_EMOTICON_SETS`, 이모티콘은 `MESSAGE_EMOTICONS`의 `set`), 열 때 최근 보낸 것이 있으면 `최근`, 없으면 첫 묶음을 보여 준다. 4칸 격자가 세로로 스크롤되고, 멈춘 그림을 보여 주다 올리거나 포커스한 것만 움직이며, 그림은 보일 때 불러온다(`loading="lazy"`). 최근 보낸 이모티콘은 사원마다 이 브라우저 localStorage `fantasteel.emoticon-recent.v1.<사원 id>`에 16개까지(최근 것이 앞, 보낼 때 쌓음, 목록에서 뺀 키는 버림, `features/messenger/lib/emoticonRecent.ts`). 파일과는 함께 고를 수 없다(서버 첨부 API가 받지 않음). 그림은 `public/emoticons/<키>.gif`(64px를 2배, `image-rendering: pixelated`), '동작 줄이기'를 켜면 멈춘 그림 `.png`(`features/messenger/components/Emoticon.tsx`). 화면 값은 `MessageView.emoticonKey`.
+- 이모티콘 화면 기능(23번, 문서에 없는 추가 기능, 스키마 그대로): ① 글자로 추천 — 입력창 글(40자까지, 가정값)에 shared `MESSAGE_EMOTICON_KEYWORDS`(가정값) 낱말이 있으면 입력창 위에 6개까지(가정값) 추천하고, 누르면 고르기 창에서 고른 것과 같다. 이모티콘을 골랐거나 파일이 있으면 숨기고, Esc·[x]로 닫으면 글을 고칠 때까지 숨긴다(`features/messenger/lib/emoticonSuggest.ts`). ② 즐겨찾기 — 고르기 창 칸의 별(올리거나 포커스하면 보임)로 더하고 빼며, 있으면 맨 앞에 `즐겨찾기` 탭이 생긴다(탭 순서 `즐겨찾기` · `최근` · 묶음, 열 때 내용이 있는 첫 탭). localStorage `fantasteel.emoticon-favorite.v1.<사원 id>`에 24개까지(가정값, 더한 순서, 목록에서 뺀 키는 버림, `lib/emoticonFavorite.ts`). ③ 다시 보기 — 말풍선 이모티콘을 누르면 처음부터 다시 틀고 2.5초(가정값) 동안 1.5배(원본 3배)로 키운다('동작 줄이기'면 멈춘 그림만 커짐). ④ 철강맨 반응 — 반응 줄 아래에 작은 철강맨 4개(`sm:ok`·`sm:thanks`·`sm:lol`·`sm:love`, 가정값)가 있고 칩·고르기 줄에 멈춘 그림 32px로 보인다(shared `STEELMAN_REACTIONS`·`reactionEmoticonKey`). ⑤ 작은 이모티콘 — 고르기 창 아래 [글에 작게 넣기]를 켜고 고르면 커서 자리에 `:steelman-ok:` 같은 글이 들어가고(창은 열린 채로 여러 개), 말풍선에서는 멈춘 그림 32px로 글줄 안에 보인다(모르는 키는 글 그대로). 파일을 고른 때도 작게는 넣을 수 있다. 보내면 넣은 것도 최근에 쌓는다. 미리보기(목록·알림·답글·공지·답장 줄·업무 등록 제목)는 `(확인)`처럼 이름으로 바꾼다(shared `inlineEmoticonText`). 검색은 본문 그대로 찾는다.
+- 그림 첨부 미리보기: png·jpg·jpeg·gif·webp·bmp는 말풍선에 작은 그림으로 보이고 누르면 크게 본다(`features/messenger/lib/attachment.ts`). ERD에 형식 컬럼이 없어 확장자로 판단하고, 서버는 늘 octet-stream으로 보내서 화면이 확장자로 형식을 붙인다. SVG는 스크립트가 들어갈 수 있어 미리보지 않는다.
+- 업무방 멤버 추천: 업무방 열기 창 위에 담당 영업과 생산부·물류부 부서장을 추천으로 보이고 [추천 N명 더하기]로 한 번에 고른다(`features/sales/lib/workRoomSuggest.ts`). 미리 고르지는 않는다. 부서는 시드 부서 코드(PRD·LOG, 가정값)로 찾는다.
+- 접속 상태·입력 중: 1:1 목록·방 머리·멤버 아바타에 접속 점(초록 = 접속 중), 1:1 머리에 '접속 중/접속 안 함', 입력창 위에 'OO님이 입력 중…'. 소켓으로만 오는 잠깐의 상태라 `stores/useMessengerLiveStore.ts`에 두고, 소켓이 끊기면 접속 표시를 숨긴다(알 수 없음).
+- 수정·삭제·답글: 말풍선 메뉴에 답장(모든 일반 메시지)·수정·삭제(내 메시지)가 기본으로 있다(`features/messenger/components/MessageEditActions.tsx`, 메뉴 등록부 맨 앞). 답장은 입력창 위에 원본 줄이 생기고, 답글 말풍선 위 원본을 누르면 그 메시지로 이동한다. 고친 메시지는 '수정됨', 지운 메시지는 '삭제된 메시지예요'로 남는다. 고른 메시지는 `stores/useMessageComposeStore.ts`에 둔다.
+- 이모지 반응: 메시지 메뉴 맨 위 이모지 줄(`ReactionAction`)에서 고르고, 말풍선 아래 반응 칩을 눌러도 더하거나 뺀다. 칩에 마우스를 올리면 누른 사람이 보인다.
+- 메시지에서 업무 등록: 메시지 메뉴 [업무로 등록] → 업무 창(`TaskFormModal`의 `source`)에 제목(본문 첫 줄 50자, 가정값)·설명(본문 + 보낸 사람)을 미리 채운다. 만든 업무의 연결 화면은 그 메시지(`/messenger?room=&message=`)라 업무 카드에서 바로 돌아간다.
+- 방 설정: 대화 머리의 핀 버튼 = 목록 위 고정(목록 맨 위 '고정' 묶음), 종 버튼 = 알림 끄기, 나가기 버튼 = 방 나가기(1:1 제외, 확인 창 뒤 목록으로 돌아감)(`RoomSettings.tsx`). 알림을 끈 방은 목록에 흐린 종 표시, 안 읽은 수 배지가 회색이고 레일·상단 메신저 배지 합계에서 빠진다(멘션 알림은 받는다).
+- 공지: 메시지 메뉴 [공지로 고정] → 대화 위 노란 공지 줄(`PinnedNotice.tsx`). 줄을 누르면 그 메시지로 이동, [x]로 내린다.
+- 메시지 보내기: 누르면 입력창을 비우고 대화에 '보내는 중' 말풍선을 바로 띄운다(`stores/useOutboxStore.ts`, `hooks/useMessenger.ts`의 `useMessageOutbox`). 저장되면 조회를 다시 읽고 말풍선을 지우며, 실패하면 이유와 [다시 보내기]·[삭제]가 있는 '전송 실패' 말풍선으로 남는다. 보관함은 브라우저 메모리라 새로고침하면 사라진다. 메시지마다 보내기 id(`clientMessageId`, UUID)를 붙여 다시 보내도 두 번 저장되지 않는다.
 - Message → ERP 초안: 초안 값의 수량 칸은 서버·ERD와 같은 `requestedTon`이다. 서버에 없는 실행 실패 결과는 실패 코드·시도 횟수로, 실행·반려 시각은 그 상태가 된 마지막 변경 시각으로 보인다. 만들 수 없는 메시지(요청자 권한·승인권자 없음)는 미리 막지 않고 만들 때 서버 오류(COM-002·PUR-001)를 보인다.
 
 ## 3. 폴더 (`client/src/`)
 
 ```
-app/            Next.js 경로. (main)/<주소>/page.tsx = 화면 진입점, login/page.tsx = 계정 선택(서버 모드는 로그인)
+app/            Next.js 경로. (main)/<주소>/page.tsx = 화면 진입점, login/page.tsx = 로그인
 features/<영역>/  화면과 영역 전용 부품·lib (sales, production, quality, purchasing, shipment, inventory, lotTrace,
                  businessEvents, tasks, messenger, dashboard, admin, masterData, inspectionStandards, actionDrafts,
                  millSheets, agent, meetings, pastCases, login, shell …)
 features/shell/  셸: 레일(Rail.tsx), 상단 바, 화면 접근표(screens.ts), 경로 제목(routeTitles.ts), AI 패널
 components/      공용 부품: Button, Input, Field, Modal, Table, Tabs, Badge, Banner, Card, Timeline, Toaster,
                  QueryBoundary, StateView(EmptyNote), ComingSoon(ComingSoonArea·SoonButton) …
-api/             화면이 데이터를 읽고 쓰는 길. <영역>.ts 함수 + client.ts(mockQuery·mockMutation), actor.ts(requireActor),
+api/             화면이 데이터를 읽고 쓰는 길. <영역>.ts 함수(화면 모양 타입) → server/<영역>.ts 어댑터 → http.ts(서버 호출),
                  errors.ts(ApiError), queryKeys.ts, queryClient.ts
-hooks/           api 함수를 감싼 훅 (useQuery 래퍼, useAction, usePermission, useMockDataSync …)
+hooks/           api 함수를 감싼 훅 (useQuery 래퍼, useAction, usePermission, useSessionHydration …)
 codes/           공통 코드(공통 코드 정의서의 값·표시명), 9.3 오류 코드(errors.ts), 번호 채번 규칙(numbering.ts)
-mock/            가짜 DB (4장)
 lib/             순수 계산 함수 (weight, fifo, mrp, inspectionJudgment, decimal, seoulDate …)와 Vitest 테스트
 stores/          Zustand: useSessionStore, useShellStore, useToastStore (화면·세션 상태만)
 styles/          globals.css, icons.css
-test/            Vitest 준비 (setup.ts, actors.ts, masterSeed.ts)
+test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sessionUsers.ts 로그인 사원 고정 데이터)
 ```
 
-## 4. 가짜 DB와 시드 (`client/src/mock/`)
+## 4. 가짜 DB (지움)
 
-| 파일·폴더 | 내용 |
-|---|---|
-| `schema.ts` | 테이블(행 타입)과 ERD 이름 |
-| `store.ts`, `db.ts` | 저장(`localStorage`)·탭 동기화·`MOCK_DB_VERSION`(시드를 바꾸면 올린다), 이 탭의 DB 인스턴스와 `resetToSeed` |
-| `seed.ts` | 조직·기준정보 시드 (부서·직급·역할·사원·권한·강종·품목·규격·라우팅·배합 원단위 …) |
-| `seeds/` | 거래·협업 시드. `index.ts`의 `AREA_SEEDERS` 순서: `inspectionStandards` → `core`(수주·생산·구매·출하·밀시트, 14.1 시작 재고) → `collab`(업무·채팅방) → `dashboard`(8~9월 끝난 거래) |
-| `services/` | **업무 규칙 서비스**(예약·FIFO 배정·히트 편성·실적·검사 판정·MRP·구매·출하·밀시트·초안 …). 영역 화면은 이 규칙을 다시 만들지 않고 부른다. API 문서는 `docs/rework/areas/core-domain.md` |
-| `businessEvents.ts` | 작업 로그 기록기 (수정·삭제 함수 없음) |
-| `sequence.ts`, `fileStorage.ts` | 업무 번호 순번 발급, 첨부 파일 저장소(파일 1개 512KB) |
-
-- 시드는 서비스 함수를 그대로 불러 만들고, 날짜·난수 시드가 고정이라 매번 같은 결과가 나온다. 값 목록과 근거는 `docs/rework/seed-assumptions.md`.
-- 시드를 바꾸는 법: 영역 시드 파일을 `mock/seeds/`에 두고 `seeds/index.ts`의 `AREA_SEEDERS`에 한 줄 등록한다(거래 시드 뒤에 실행해야 하면 뒤에). 바꾼 뒤 `MOCK_DB_VERSION`을 올린다.
+2026-10-13에 브라우저 안 가짜 DB(`client/src/mock/`)와 그 시드를 지웠다. 화면 데이터는 서버 DB에 있고, 시드는 `docs/backend/seed.md`를 본다.
 
 ## 5. 코드 규칙 (코드 컨벤션)
 
 - TypeScript strict, `any` 금지, `console.*` 금지, `@/` alias(`../../` 금지). 함수형 컴포넌트는 named export(Next 경로 파일만 default export), 컴포넌트 파일은 PascalCase, 훅은 `use*.ts`. 변수명 `order`만 쓰지 않는다(`salesOrder`, `purchaseOrder`).
-- 데이터 접근은 `api/*.ts` 함수 + 커스텀 훅(TanStack Query)으로만. 컴포넌트에서 mock DB를 직접 읽지 않는다. Zustand에는 서버 데이터를 복사하지 않는다.
+- 데이터 접근은 `api/*.ts` 함수 + 커스텀 훅(TanStack Query)으로만. 컴포넌트에서 서버를 직접 부르지 않는다. Zustand에는 서버 데이터를 복사하지 않는다.
 - 라벨·코드·오류 메시지는 `@/codes`에서만 가져온다(화면에 영어 코드 원문을 쓰지 않는다). 업무 번호·LOT 번호는 `codes/numbering.ts`의 채번 함수로만 만든다.
-- 모든 변경 함수(`api/`)는 맨 먼저 `requireActor`로 요청 사원의 USE 권한을 확인하고(없으면 COM-002), 9.3 오류 코드로 검증하고, `mockMutation` 안에서 mock DB를 바꾸며 작업 로그(BUSINESS_EVENT_TYPE, 주체 USER 또는 SYSTEM, 변경 전후, 사유 코드는 허용된 값만)를 같은 트랜잭션에서 남긴다. 화면에서도 권한이 없으면 버튼을 숨기거나 끈다.
-- 변경 뒤 영향받는 모든 화면이 갱신되게 쿼리를 무효화한다(`api/queryKeys.ts`). 다른 탭은 `BroadcastChannel` 동기화(`hooks/useMockDataSync.ts`)가 갱신한다.
-- 업무 계산은 순수 함수(`lib/` 또는 `features/<영역>/lib/`)로 두고 Vitest 테스트를 붙인다. api 함수는 mock DB 위에서 정상 흐름과 9.3 오류 경우를 시험한다(`*.test.ts`).
+- 권한 재확인(BP-AUTH-01, 없으면 COM-002)·9.3 오류 검증·작업 로그는 서버가 본 거래와 같은 트랜잭션에서 한다. 화면에서도 권한이 없으면 버튼을 숨기거나 끈다.
+- 변경 뒤 영향받는 모든 화면이 갱신되게 쿼리를 무효화한다(`api/queryKeys.ts`). 메신저·알림은 소켓(`hooks/useMessengerSocket.ts`)이, 대시보드는 30초마다 다시 읽는다.
+- 업무 계산은 순수 함수(`lib/` 또는 `features/<영역>/lib/`)로 두고 Vitest 테스트를 붙인다. api 함수는 서버 어댑터 테스트(`api/server/*.test.ts`, `useFakeServer`)로 서버 경로·요청 본문·응답 변환과, 서버를 부르기 전 화면 쪽 입력 확인을 시험한다. 업무 규칙과 9.3 오류는 서버 DB 테스트(`server/src/modules/**/*.spec.ts`)가 확인한다.
+- 가짜 DB 걷어내기(2026-10-13): 가짜 DB 위에서 돌던 api 테스트를 지우고, 서버를 부르기 전 화면 쪽 확인은 서버 어댑터 테스트로 옮겼다. 화면 그리기 테스트는 영역의 고정 데이터(`features/<영역>/testing/`)와 `test/sessionUsers.ts`의 로그인 사원을 쓴다.
 - 스타일은 Tailwind 유틸리티와 B안 토큰. 목록|상세 구조, 상태 배지 색, 빈·로딩·오류 상태(`StateView`, `QueryBoundary`)를 다른 화면과 같게 맞춘다.
 - 날짜 입력은 `DateInput`, 수량은 정수, 톤은 문자열 소수 3자리(`lib/decimal.ts`).
 
 ## 6. P2·EX 처리 (준비 중)
 
-- P2(AI Factory Agent, Voice2ERP 회의록, AI 어시스턴트·@AI, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. AI·LLM 호출도 없다.
+- P2(AI Factory Agent, Voice2ERP 회의록, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널과 사내 채팅 @AI다.
+- **사내 채팅 @AI**(`features/messenger/components/Composer.tsx`, `MessageBubble.tsx`, 2026-10-14~): 입력창에서 `@`를 치면 후보 맨 위에 `@AI`가 나오고(`@AI 호출` 버튼은 커서 자리에 `@AI `를 넣는다), `@AI`가 든 글을 보내면 서버가 답을 방에 남긴다(`docs/backend/messenger.md` '@AI 호출'). 새 API 함수는 없다. 메시지 목록·소켓의 `isAi: true` 메시지(`isSystem`도 true)를 시스템 알림 띠가 아니라 `AI 어시스턴트` 이름의 왼쪽 말풍선으로 그린다(줄바꿈 유지, 업무 번호 링크). 답은 보낸 뒤 몇 초~수십 초 걸리고, 그동안 '입력 중' 자리에 `AI 어시스턴트가 답을 쓰는 중…`이 보인다(`useMessengerLiveStore`, AI는 사원 id 0). 조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 없는 멤버에게는 서버가 보내지 않는다.
+- **AI 어시스턴트 패널**(`features/shell/AiPanel.tsx`, 2026-10-13~): 실제로 답한다. `api/aiAssistant.ts`가 서버 `POST /ai-assistant/messages`·`GET /ai-assistant/suggested-questions`(API-262·263, `docs/backend/ai-assistant.md`)를 부른다(LLM 연결 설정은 `api/llm.ts`).
+  - 용어 사전과 서버 조회 도구(재고·수주·생산계획·작업 실적·LOT 추적·검사·불합격·구매요청·발주·입고·출하요청·밀시트·작업 로그, 사용자 권한 범위)로 답하고 출처를 붙인다: 용어 사전은 `용어 사전 · 예약 (TRM-056)`, 조회 데이터는 `조회 데이터 · 재고 · SS275`. 실행 카드·사례 검색은 다음 단계라 안내 문구로만 밝힌다.
+  - 대화는 서버에 저장하지 않는다(요구사항 21장 미결정). `stores/useAiChatStore.ts`가 이 탭 메모리에 두고, 답을 받은 최근 대화 10개를 질문과 함께 보낸다. 패널을 닫아도 남고, 새로고침하거나 다른 사원으로 들어오면 비운다. 답을 기다리는 동안 패널을 닫아도 답은 대화에 들어간다(`hooks/useAiAssistant.ts`가 훅 옵션 콜백으로 넣음).
+  - 보고 있는 화면(REQ-AST-007): 경로 + 쿼리(열어 둔 문서 id), 화면 제목, 위젯 맥락(`useShellStore.aiContext`의 label)을 함께 보낸다.
+  - 크게 펼치기(REQ-AST-001): `useShellStore.aiPanelExpanded`. 본문 전체 너비로 펼치고, 닫으면 되돌린다. Enter 보내기·Shift+Enter 줄바꿈(한글 조합 중 Enter는 보내지 않음).
   - 버튼: `<SoonButton>` / 작은 표시: `<ComingSoon grade="P2" />` / 영역: `<ComingSoonArea grade="P2" title="…">예시 내용</ComingSoonArea>`. 모두 `components/ComingSoon.tsx`.
   - 예시 내용은 `features/agent/agentExample.ts`, `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다. 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
 - 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).

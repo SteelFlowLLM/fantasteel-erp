@@ -50,7 +50,7 @@ const RAW_MATERIAL_EXAMPLE: AgentRiskExample = {
 
 /**
  * 역할별 한 줄 안내: 예시 숫자를 보이지 않는다. 품질은 옆 강종별 불합격률(실제 값)과 예시 숫자가 달라 헷갈렸다.
- * 품질 대시보드는 이 위젯을 공정 흐름 바로 아래 한 칸 높이로 두고(lib/layout.ts) 안내를 카드 머리 한 줄에 넣는다.
+ * 품질 대시보드는 이 위젯을 맨 아래 한 칸 높이로 두고(lib/layout.ts) 안내를 카드 머리 한 줄에 넣는다.
  * 감지 유형은 문장에 이미 있어 칩으로 따로 두지 않는다 (누를 수 있는 것처럼 보였다). 실제 감지 목록은 P2에서 이 자리를 쓴다
  */
 const AGENT_RISK_GUIDE_BY_ROLE: Partial<Record<RoleCode, string>> = {

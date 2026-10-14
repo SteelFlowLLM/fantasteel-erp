@@ -24,5 +24,7 @@ import { RejectedLotService } from './rejected-lot.service';
     RejectedLotService,
     RejectedLotRepository,
   ],
+  // AI 어시스턴트 검사 결과·불합격 LOT 조회 도구가 쓴다
+  exports: [QualityService, RejectedLotService],
 })
 export class QualityModule {}

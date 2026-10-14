@@ -1,10 +1,11 @@
 'use client';
 
-// 수주 취소 창 (REQ-SO-006, BP-SO-02). 출고분이 있으면 SO-003, 진행 중 출하요청이 있으면 SO-004로 서버가 막는다(9.3).
+// 수주 취소 창 (REQ-SO-006, BP-SO-02). 전량 출고된 수주는 SO-003, 진행 중 출하요청이 있으면 SO-004로 서버가 막는다(9.3).
+// 부분 출고 뒤에는 잔량만 취소한다: 출고 매수와 전량 출고 품목은 그대로 남는다(BP-SO-02 예외, 2026-10-14).
 // 취소 사유(cancel_reason)는 필수, 200자. 비고 없음.
 // 구매 진행 영향(BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"): 취소·연결 해제될 계획에 연결된 구매요청·발주를 보여 주기만 한다.
 import { useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import { salesOrderApi, type SalesOrderDetail } from '@/api/salesOrders';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -16,11 +17,11 @@ import { PurchaseOrderStatusBadge, RequisitionStatusBadge } from '@/features/pur
 import { useAction } from '@/hooks/useAction';
 import { useSalesOrderCancelPurchaseImpact } from '@/hooks/useSalesOrders';
 import { fmtTon } from '@/lib/format';
-import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
+import { cancelPreviewOf, qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 const CANCEL_REASON_MAX = 200;
 
-/** 취소·연결 해제될 생산계획에 연결된 구매요청(purchase_requisition_item.production_plan_id)과 발주. 표시만 한다 */
+/** 취소·연결 해제될 생산계획에 연결된 구매요청(purchase_requisition.production_plan_id)과 발주. 표시만 한다 */
 function PurchaseImpact({ salesOrderId }: { salesOrderId: number }) {
   const impact = useSalesOrderCancelPurchaseImpact(salesOrderId);
   return (
@@ -38,7 +39,7 @@ function PurchaseImpact({ salesOrderId }: { salesOrderId: number }) {
                     <span className="font-mono text-xs font-medium">{line.purchaseRequisitionNo}</span>
                     <RequisitionStatusBadge status={line.purchaseRequisitionStatus} />
                     <span className="text-ink-2">
-                      {line.itemName} {fmtTon(line.requiredTon)}
+                      {line.itemName} {fmtTon(line.requestedTon)}
                     </span>
                     <span className="text-cap text-ink-3">
                       · 생산계획 <span className="font-mono">{line.productionPlanNo}</span> {line.planEffect === 'CANCEL' ? '취소' : '수주 연결 해제'}
@@ -73,10 +74,9 @@ export function CancelSalesOrderModal({ detail, onClose }: { detail: SalesOrderD
   });
 
   const unit = qtyUnitOf(detail.itemTypes);
-  const plans = detail.items.flatMap((i) => i.plans);
-  const plannedCount = plans.filter((p) => p.productionPlanStatus === 'PLANNED').length;
-  const inProgressCount = plans.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length;
-  const activeReservedQty = detail.items.reduce((sum, i) => sum + i.activeReservedQty, 0);
+  const { activeReservedQty, plannedCount, inProgressCount, keptShippedQty, shippedItemCount } = cancelPreviewOf(detail.items);
+  const shippedQty = detail.items.reduce((sum, i) => sum + i.shippedQty, 0);
+  const qtyText = (qty: number) => `${qty.toLocaleString('en-US')}${unit}`;
 
   const submit = () => {
     const text = reason.trim();
@@ -105,8 +105,15 @@ export function CancelSalesOrderModal({ detail, onClose }: { detail: SalesOrderD
       }
     >
       <Banner tone="danger">
-        <b>{detail.customerName}</b> · {detail.totalOrderedQty.toLocaleString('en-US')}
-        {unit} 수주를 취소해요. 취소하면 되돌릴 수 없어요.
+        {shippedQty > 0 ? (
+          <>
+            <b>{detail.customerName}</b> · 출고된 {qtyText(shippedQty)}는 그대로 두고 남은 잔량만 취소해요. 취소하면 되돌릴 수 없어요.
+          </>
+        ) : (
+          <>
+            <b>{detail.customerName}</b> · {qtyText(detail.totalOrderedQty)} 수주를 취소해요. 취소하면 되돌릴 수 없어요.
+          </>
+        )}
       </Banner>
       <div className="flex flex-col gap-2">
         <b className="text-sm font-semibold">취소하면 이렇게 돼요</b>
@@ -132,7 +139,15 @@ export function CancelSalesOrderModal({ detail, onClose }: { detail: SalesOrderD
             </li>
           ) : null}
           {activeReservedQty === 0 && plannedCount === 0 && inProgressCount === 0 ? <li>해제할 예약이나 취소·연결 해제할 생산계획은 없어요.</li> : null}
-          <li>모든 품목이 &lsquo;취소&rsquo; 상태가 되고, 작업 로그에 사유와 함께 남아요.</li>
+          {shippedQty > 0 ? (
+            <li>
+              진행중·부분출하 품목이 &lsquo;취소&rsquo; 상태가 돼요.
+              {keptShippedQty > 0 ? <> 이미 출고된 <b className="text-ink">{qtyText(keptShippedQty)}</b>는 출고 기록·밀시트와 함께 그대로 남아요.</> : null}
+              {shippedItemCount > 0 ? <> 전량 출고된 품목 {shippedItemCount}개는 출하완료로 그대로 둬요.</> : null} 작업 로그에 사유와 함께 남아요.
+            </li>
+          ) : (
+            <li>모든 품목이 &lsquo;취소&rsquo; 상태가 되고, 작업 로그에 사유와 함께 남아요.</li>
+          )}
         </ol>
       </div>
       <PurchaseImpact salesOrderId={detail.id} />

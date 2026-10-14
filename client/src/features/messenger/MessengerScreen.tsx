@@ -2,7 +2,7 @@
 
 // 메신저 /messenger[?room=<id>[&message=<id>]] (REQ-MSG-001~006, BP-MSG-01): 채팅방 목록 | 대화 | 방 정보
 // message가 있으면 그 메시지까지 스크롤해 잠깐 강조한다 (알림·검색 결과에서 이동). 이동한 뒤에는 주소에서 지운다.
-// 다른 탭에서 보낸 메시지는 가짜 DB의 탭 동기화로 바로 보인다 (REQ-MSG-002).
+// 다른 사원이 보낸 메시지는 소켓(hooks/useMessengerSocket.ts)으로 바로 보인다 (REQ-MSG-002).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/Button';

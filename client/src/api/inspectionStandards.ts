@@ -1,24 +1,22 @@
 // 검사 기준 조회·버전 만들기·삭제 (REQ-QC-002, REQ-MST-002 성분 규격 = 제강 검사 기준, TRM-110·075).
-// - 품질 담당이 관리한다: 변경은 검사 기준 관리(INSPECTION_STANDARD_MANAGE) 사용 권한을 다시 확인한다 (없으면 COM-002).
-// - 고치는 대신 새 버전을 만든다(mock/services/inspectionStandards.ts). 이전 버전은 읽기 전용으로 남는다.
+// - 품질 담당이 관리한다: 변경은 검사 기준 관리(INSPECTION_STANDARD_MANAGE) 사용 권한이 있어야 한다 (서버가 확인, 없으면 COM-002).
+// - 고치는 대신 새 버전을 만든다. 이전 버전은 읽기 전용으로 남는다.
 // - 삭제는 코드 단위(모든 버전)이고, 어느 버전이든 검사가 판정에 썼으면 거부한다 (서버와 같은 규칙).
-// - 검사 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
-// 서버 모드(기본)면 실제 서버를 부른다 (api/server/inspectionStandards.ts). 입력 확인은 두 모드 모두 이 파일에서 먼저 한다.
-import { PERMISSION, type ProcessType } from '@/codes';
-import { requireActor } from '@/api/actor';
-import { FieldErrors, InputError, mockMutation, mockQuery } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
+// - 검사 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
+// 서버를 부른다 (api/server/inspectionStandards.ts). 입력 확인은 서버를 부르기 전에 이 파일에서 먼저 한다.
+import { type ProcessType } from '@/codes';
+import { FieldErrors, InputError } from '@/api/errors';
 import { serverInspectionStandardApi } from '@/api/server/inspectionStandards';
 import { decimalText, optionalText, requiredText } from '@/api/validation';
 import { canHaveCommonStandard, findOverlappingItems, isInspectedProcess, type InspectedProcessType } from '@/features/inspectionStandards/lib/standardItems';
 import { withEunNeun } from '@/lib/josa';
 import { compareDecimal, formatDecimal } from '@/lib/weight';
-import type { InspectionStandardItemRow, InspectionStandardRow, MockTables } from '@/mock/schema';
-import {
-  createInspectionStandardVersion,
-  deleteInspectionStandard,
-  type InspectionStandardDeleteResult,
-} from '@/mock/services/inspectionStandards';
+
+/** 검사 기준 삭제 결과: 지운 기준 코드와 그 코드의 모든 버전 번호 */
+export interface InspectionStandardDeleteResult {
+  inspectionStandardCode: string;
+  deletedVersions: number[];
+}
 
 export const inspectionStandardKeys = {
   all: ['inspection-standards'] as const,
@@ -174,43 +172,6 @@ export function readStandardItems(items: readonly InspectionStandardItemInput[])
   return valid;
 }
 
-const buildItemView = (row: InspectionStandardItemRow): InspectionStandardItemView => ({
-  id: row.id,
-  inspectionItemCode: row.inspectionItemCode,
-  inspectionItemName: row.inspectionItemName,
-  unit: row.unit,
-  minValue: row.minValue,
-  maxValue: row.maxValue,
-  minThicknessMm: row.minThicknessMm,
-  maxThicknessMm: row.maxThicknessMm,
-  isRequired: row.isRequired,
-  sortOrder: row.sortOrder,
-});
-
-const listStandardItems = (tables: Readonly<MockTables>, standardId: number) =>
-  tables.inspectionStandardItem
-    .filter((i) => i.inspectionStandardId === standardId)
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
-    .map(buildItemView);
-
-const PROCESS_ORDER: readonly ProcessType[] = ['STEELMAKING', 'CONTINUOUS_CASTING', 'HOT_ROLLING'];
-
-function buildSummaryView(tables: Readonly<MockTables>, row: InspectionStandardRow): InspectionStandardSummaryView {
-  return {
-    id: row.id,
-    inspectionStandardCode: row.inspectionStandardCode,
-    version: row.version,
-    processType: row.processType,
-    steelGradeId: row.steelGradeId,
-    steelGradeCode: tables.steelGrade.find((g) => g.id === row.steelGradeId)?.steelGradeCode ?? null,
-    itemCount: tables.inspectionStandardItem.filter((i) => i.inspectionStandardId === row.id).length,
-    versionCount: tables.inspectionStandard.filter((s) => s.inspectionStandardCode === row.inspectionStandardCode).length,
-    createdAt: row.createdAt,
-  };
-}
-
-const MANAGE_RULE = { use: [PERMISSION.INSPECTION_STANDARD_MANAGE] } as const;
-
 /** 새 기준의 공정·강종 확인. 강종 null = 공통 기준 */
 function readCreateTarget(input: InspectionStandardCreateInput): { processType: InspectedProcessType; steelGradeId: number | null } {
   const errors = new FieldErrors();
@@ -227,83 +188,23 @@ function readCreateTarget(input: InspectionStandardCreateInput): { processType: 
 
 export const inspectionStandardApi = {
   /** 지금 버전 목록 (공정 순서 → 공통 기준 먼저 → 강종 코드) */
-  list: (query: InspectionStandardListQuery = {}): Promise<InspectionStandardSummaryView[]> =>
-    isServerDataSource()
-      ? serverInspectionStandardApi.list(query)
-      : mockQuery((tables) =>
-          tables.inspectionStandard
-            .filter((s) => s.isCurrent)
-            .filter((s) => !query.processType || s.processType === query.processType)
-            .filter((s) => query.steelGradeId === undefined || s.steelGradeId === query.steelGradeId || (s.steelGradeId === null && canHaveCommonStandard(s.processType)))
-            .map((s) => buildSummaryView(tables, s))
-            .sort(
-              (a, b) =>
-                PROCESS_ORDER.indexOf(a.processType) - PROCESS_ORDER.indexOf(b.processType) ||
-                (a.steelGradeCode === null ? -1 : b.steelGradeCode === null ? 1 : a.steelGradeCode.localeCompare(b.steelGradeCode)),
-            ),
-        ),
+  list: (query: InspectionStandardListQuery = {}): Promise<InspectionStandardSummaryView[]> => serverInspectionStandardApi.list(query),
 
   /** 한 버전의 상세 (이전 버전이면 읽기 전용으로 보인다). 없으면 null. */
-  get: (id: number): Promise<InspectionStandardDetailView | null> =>
-    isServerDataSource()
-      ? serverInspectionStandardApi.get(id)
-      : mockQuery((tables) => {
-          const row = tables.inspectionStandard.find((s) => s.id === id);
-          if (!row) return null;
-          const siblings = tables.inspectionStandard.filter((s) => s.inspectionStandardCode === row.inspectionStandardCode).sort((a, b) => b.version - a.version);
-          const previous = siblings.find((s) => s.version < row.version) ?? null;
-          const current = siblings.find((s) => s.isCurrent) ?? siblings[0];
-          const countInspections = (standardId: number) => tables.qualityInspection.filter((q) => q.inspectionStandardId === standardId).length;
-          return {
-            ...buildSummaryView(tables, row),
-            isCurrent: row.isCurrent,
-            standardNo: tables.steelGrade.find((g) => g.id === row.steelGradeId)?.standardNo ?? null,
-            items: listStandardItems(tables, row.id),
-            previousItems: previous ? listStandardItems(tables, previous.id) : null,
-            versions: siblings.map((s) => ({
-              id: s.id,
-              version: s.version,
-              isCurrent: s.isCurrent,
-              createdAt: s.createdAt,
-              itemCount: tables.inspectionStandardItem.filter((i) => i.inspectionStandardId === s.id).length,
-              inspectionCount: countInspections(s.id),
-            })),
-            currentId: current?.id ?? row.id,
-            inspectionCount: countInspections(row.id),
-          };
-        }),
+  get: (id: number): Promise<InspectionStandardDetailView | null> => serverInspectionStandardApi.get(id),
 
   /** 지금 버전을 바탕으로 새 버전을 만든다. 새 버전 id를 돌려준다. */
   createVersion: async (input: InspectionStandardVersionInput): Promise<number> => {
-    // 서버 모드: 권한은 서버가 확인한다 (COM-002)
-    if (isServerDataSource()) return serverInspectionStandardApi.createVersion({ baseStandardId: input.baseStandardId, items: readStandardItems(input.items) });
-    return mockMutation((tx) => {
-      requireActor(tx.tables, MANAGE_RULE);
-      const items = readStandardItems(input.items);
-      return createInspectionStandardVersion(tx, { baseStandardId: input.baseStandardId, items }).id;
-    });
+    // 권한은 서버가 확인한다 (COM-002)
+    return serverInspectionStandardApi.createVersion({ baseStandardId: input.baseStandardId, items: readStandardItems(input.items) });
   },
 
   /** 새 검사 기준(공정 × 강종)을 버전 1로 만든다. 새 기준 id를 돌려준다. */
   create: async (input: InspectionStandardCreateInput): Promise<number> => {
-    if (isServerDataSource()) {
-      const target = readCreateTarget(input);
-      return serverInspectionStandardApi.create({ ...target, items: readStandardItems(input.items) });
-    }
-    return mockMutation((tx) => {
-      requireActor(tx.tables, MANAGE_RULE);
-      const target = readCreateTarget(input);
-      const items = readStandardItems(input.items);
-      return createInspectionStandardVersion(tx, { baseStandardId: null, ...target, items }).id;
-    });
+    const target = readCreateTarget(input);
+    return serverInspectionStandardApi.create({ ...target, items: readStandardItems(input.items) });
   },
 
   /** 기준 삭제: 이 버전과 같은 코드의 모든 버전을 지운다. 검사가 판정에 쓴 기준이면 입력 오류로 거부한다. */
-  remove: (id: number): Promise<InspectionStandardDeleteView> =>
-    isServerDataSource()
-      ? serverInspectionStandardApi.remove(id)
-      : mockMutation((tx) => {
-          requireActor(tx.tables, MANAGE_RULE);
-          return deleteInspectionStandard(tx, id);
-        }),
+  remove: (id: number): Promise<InspectionStandardDeleteView> => serverInspectionStandardApi.remove(id),
 };

@@ -1,14 +1,12 @@
 // 통합 검색 (상단 바, PLAN 5장에서 남기기로 함): 수주번호·LOT 번호·출하요청 번호를 찾아 해당 화면으로 보낸다.
 // - 정확히 같은 번호가 맨 앞, 그다음 수주 → LOT → 출하요청 순. 최대 10건.
-// - 서버 모드(기본)는 목록 API로 찾는다(api/server/search.ts). 조회 권한이 없는 수주·출하요청은 나오지 않는다.
-// - 가짜 DB 모드는 이동할 화면을 열 수 없는 사원(조회 권한 없음)에게 모든 사원이 여는 화면으로 보낸다:
+// - 목록 API로 찾는다(api/server/search.ts). 조회 권한이 없는 수주·출하요청은 나오지 않는다.
+// - 목록은 보이지만 이동할 화면을 열 수 없는 사원에게는 모든 사원이 여는 화면으로 보낸다:
 //   수주 → 작업 로그의 수주 이력 재현, 출하요청 → 출하요청 번호로 LOT 추적.
-import { requireActor } from '@/api/actor';
-import { mockQuery } from '@/api/client';
-import { isServerDataSource } from '@/api/http';
 import { serverSearchCandidates } from '@/api/server/search';
-import { lotTraceHref } from '@/features/businessEvents/lib/eventTargets';
-import { SCREEN, canOpenScreen } from '@/features/shell/screens';
+
+/** 수주·출하요청 목록을 찾을 수 있는 권한 (검색창 안내 문구도 같은 조건을 쓴다) */
+export { canListSalesOrders, canListShipmentRequests } from '@/api/server/search';
 
 export type SearchHitKind = 'SALES_ORDER' | 'LOT' | 'SHIPMENT_REQUEST';
 
@@ -49,28 +47,6 @@ function rankHits(term: string, candidates: readonly SearchCandidate[]): SearchH
 export const searchApi = {
   search: async (keyword: string): Promise<SearchHit[]> => {
     const term = keyword.trim().toUpperCase();
-    if (isServerDataSource()) return term.length < SEARCH_MIN_LENGTH ? [] : rankHits(term, await serverSearchCandidates(term, SEARCH_LIMIT));
-    return mockQuery((tables) => {
-      const actor = requireActor(tables);
-      if (term.length < SEARCH_MIN_LENGTH) return [];
-      const canOpenSalesOrder = canOpenScreen(actor, SCREEN.salesOrders.access);
-      const canOpenShipmentRequest = canOpenScreen(actor, SCREEN.shipmentRequests.access);
-      const candidates: SearchCandidate[] = [
-        ...tables.salesOrder
-          .filter((so) => so.salesOrderNo.toUpperCase().includes(term))
-          .map((so): SearchCandidate => ({ kind: 'SALES_ORDER', label: so.salesOrderNo, href: canOpenSalesOrder ? `/sales-orders/${so.id}` : `/business-events?salesOrderId=${so.id}` })),
-        ...tables.lot.filter((lot) => lot.lotNo.toUpperCase().includes(term)).map((lot): SearchCandidate => ({ kind: 'LOT', label: lot.lotNo, href: lotTraceHref(lot.lotNo) })),
-        ...tables.shipmentRequest
-          .filter((r) => r.shipmentRequestNo.toUpperCase().includes(term))
-          .map(
-            (r): SearchCandidate => ({
-              kind: 'SHIPMENT_REQUEST',
-              label: r.shipmentRequestNo,
-              href: canOpenShipmentRequest ? `/shipment-requests/${r.id}` : `/lots/trace?shipmentRequestNo=${encodeURIComponent(r.shipmentRequestNo)}`,
-            }),
-          ),
-      ];
-      return rankHits(term, candidates);
-    });
+    return term.length < SEARCH_MIN_LENGTH ? [] : rankHits(term, await serverSearchCandidates(term, SEARCH_LIMIT));
   },
 };

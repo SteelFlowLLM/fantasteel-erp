@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { ROLE_LABEL } from '@/codes';
 import { employeeAdminApi } from '@/api/adminEmployees';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api/directory';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -35,7 +35,7 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
   const [opened] = useState(() => openEmployeeForm(target));
   const initial = opened.values;
   const [form, setForm] = useState<EmployeeFormValues>(initial);
-  // 비밀번호는 서버 모드 등록에서만 받는다 (API-156). 가짜 DB에는 비밀번호가 없다.
+  // 비밀번호는 등록할 때만 받는다 (API-156)
   const askPassword = !isEdit;
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});

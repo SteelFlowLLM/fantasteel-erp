@@ -127,7 +127,16 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
     expect(row).toMatchObject({ theoreticalWeightTon: '23.550', onHandTon: '94.200', passedTon: '23.550', reservedTon: '23.550', availableTon: '0.000', thicknessMm: '250.00', qtyUnit: '매', defaultYardName: null });
   });
 
-  it('제품: 규격 목록 권한이 없으면(물류) 이론중량을 합격 톤 ÷ 합격 매수로 구하고 치수는 비운다', async () => {
+  it('제품: 규격 목록 권한이 없으면(물류) 치수는 규격 코드에서 읽고 1매 이론중량은 치수로 구한다 (재고 0인 규격도 0.000 t가 아님)', async () => {
+    const coilSpec = { itemId: 6, itemCode: 'CL-SS275-2.5x1200x980000', itemName: 'SS275 코일', steelGradeCode: 'SS275' };
+    const emptyCoil = { ...coilSpec, itemType: 'COIL', onHandQty: 0, reservedQty: 0, rollingAllocatedQty: 0, availableQty: 0, onHandTon: '0.000', availableTon: '0.000', unallocatedPassedQty: 0 };
+    useFakeServer(SEED_EMPLOYEE_NO.logistics, (c) => respond(c, { '/items': denied, '/inventories': () => ok({ ...overview, products: [emptyCoil] }) }));
+    const [row] = await inventoryApi.listProducts();
+    // 2.5 × 1200 × 980000 × 7.85 ÷ 10^9 = 23.079
+    expect(row).toMatchObject({ itemCode: 'CL-SS275-2.5x1200x980000', theoreticalWeightTon: '23.079', thicknessMm: '2.5', widthMm: '1200', lengthMm: '980000', onHandTon: '0.000' });
+  });
+
+  it('제품: 규격 목록 권한이 없고 코드 형식도 다르면 이론중량을 합격 톤 ÷ 합격 매수로 구하고 치수는 비운다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.logistics, (c) => respond(c, { '/items': denied }));
     const [row] = await inventoryApi.listProducts();
     expect(row).toMatchObject({ theoreticalWeightTon: '23.550', onHandTon: '94.200', thicknessMm: null, widthMm: null, lengthMm: null });

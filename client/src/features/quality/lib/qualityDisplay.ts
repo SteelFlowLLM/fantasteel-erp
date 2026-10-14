@@ -1,5 +1,5 @@
 // 검사 입력·불합격 관리 화면의 순수 계산: 기준 문구, 입력 중 미리보기, 게이지 위치, '기준 안 값으로 채우기', 수정 전후 비교.
-// 판정 자체는 2단계 판정 함수(lib/inspectionJudgment)를 그대로 쓴다. 저장할 때의 판정은 가짜 서버(registerInspection)가 한다 (REQ-QC-003).
+// 판정 자체는 2단계 판정 함수(lib/inspectionJudgment)를 그대로 쓴다. 저장할 때의 판정은 서버가 한다 (REQ-QC-003).
 import type { LotType, ProcessType } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { decCmp, decSub } from '@/lib/decimal';
@@ -56,13 +56,16 @@ export function gaugeEdgeLabels(item: LimitLike): { min: string | null; max: str
   };
 }
 
-/** 적용 두께 구간 문구 (초과~이하). 구간이 없으면 null */
+/**
+ * 적용 두께 구간 문구 (초과~이하). 구간이 없으면 null.
+ * 가운데 글은 검사 기준 화면 표(formatThicknessBand)와 같게 두고, 표 머리처럼 단위를 알려 줄 칸이 없어 끝에 mm를 붙인다
+ */
 export function thicknessBandText(minThicknessMm: string | null, maxThicknessMm: string | null): string | null {
   const lo = trimNum(minThicknessMm);
   const hi = trimNum(maxThicknessMm);
   if (lo && hi) return `두께 ${lo} 초과 ~ ${hi} 이하 mm`;
-  if (lo) return `두께 ${lo} mm 초과`;
-  if (hi) return `두께 ${hi} mm 이하`;
+  if (lo) return `두께 ${lo} 초과 mm`;
+  if (hi) return `두께 ${hi} 이하 mm`;
   return null;
 }
 
@@ -73,6 +76,17 @@ export type ValuePreview =
   | { state: 'fail'; side: 'below' | 'above'; gap: string };
 
 /** 입력 중 미리보기: 형식 확인 뒤 판정 함수(judgeValue, 경계 포함)로 본다. 벗어나면 얼마나 벗어났는지(gap)도 준다. */
+/**
+ * 넓은 화면에서 측정값 카드를 한 줄에 몇 개 놓을지 (3 또는 4). 마지막 줄이 더 꽉 차는 쪽을 고르고, 같으면 줄이 적은 4.
+ * 예: 4 → 4 · 5 → 3(3 + 2) · 6 → 3 · 7 → 4(4 + 3) · 9 → 3(3 + 3 + 3) · 16 → 4. 3개 이하는 한 줄
+ */
+export function measuredCardsPerRow(count: number): number {
+  if (count <= 3) return Math.max(count, 1);
+  // 마지막 줄이 찬 비율 (꽉 차면 1)
+  const filled = (perRow: number) => (count % perRow || perRow) / perRow;
+  return filled(3) > filled(4) ? 3 : 4;
+}
+
 export function previewOf(raw: string, item: LimitLike): ValuePreview {
   const text = raw.trim();
   if (text === '') return { state: 'empty' };

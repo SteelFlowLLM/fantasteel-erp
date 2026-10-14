@@ -10,7 +10,7 @@ export interface ErrorDefinition {
 export const ERROR_CODE = {
   'SO-001': { message: '등록되지 않은 규격입니다', status: 400 },
   'SO-002': { message: '수량은 1 이상의 정수로 입력해 주세요', status: 400 },
-  'SO-003': { message: '출고된 매수가 있는 수주는 취소할 수 없습니다', status: 409 },
+  'SO-003': { message: '전량 출고된 수주는 취소할 수 없습니다', status: 409 },
   'SO-004': { message: '진행 중인 출하요청을 먼저 취소해 주세요', status: 409 },
   'MST-001': { message: '수율·배합·규격 매핑·검사 기준 누락', status: 400 },
   'MST-002': { message: '사용된 규격은 치수·이론중량을 수정할 수 없습니다', status: 409 },
