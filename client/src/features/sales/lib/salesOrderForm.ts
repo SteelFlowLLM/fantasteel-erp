@@ -95,6 +95,31 @@ export function filterSalesOrders<T extends FilterableSalesOrder>(rows: readonly
 export const activeFilterCount = (filter: SalesOrderFilter): number =>
   [filter.status !== 'ALL', filter.customerId !== null, filter.itemType !== 'ALL', filter.riskOnly].filter(Boolean).length;
 
+/** 수주 취소 창 미리보기 (BP-SO-02 예외): 진행중·부분출하 품목만 취소하고 출고 매수와 전량 출고 품목은 그대로 둔다 (서버 cancellableItemsOf와 같은 기준) */
+export interface CancelPreview {
+  activeReservedQty: number;
+  plannedCount: number;
+  inProgressCount: number;
+  /** 취소할 품목에서 이미 출고돼 그대로 남는 매수 */
+  keptShippedQty: number;
+  /** 전량 출고돼 그대로 두는 품목 수 */
+  shippedItemCount: number;
+}
+
+export function cancelPreviewOf(
+  items: readonly { salesOrderItemStatus: SalesOrderItemStatus; activeReservedQty: number; shippedQty: number; plans: readonly { productionPlanStatus: string }[] }[],
+): CancelPreview {
+  const targets = items.filter((i) => i.salesOrderItemStatus === 'OPEN' || i.salesOrderItemStatus === 'PARTIALLY_SHIPPED');
+  const plans = targets.flatMap((i) => i.plans);
+  return {
+    activeReservedQty: targets.reduce((sum, i) => sum + i.activeReservedQty, 0),
+    plannedCount: plans.filter((p) => p.productionPlanStatus === 'PLANNED').length,
+    inProgressCount: plans.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length,
+    keptShippedQty: targets.reduce((sum, i) => sum + i.shippedQty, 0),
+    shippedItemCount: items.filter((i) => i.salesOrderItemStatus === 'SHIPPED').length,
+  };
+}
+
 export interface CancellationEffects {
   releasedReserved: readonly { itemType: ProductItemType; qty: number }[];
   cancelledPlanNos: readonly string[];
