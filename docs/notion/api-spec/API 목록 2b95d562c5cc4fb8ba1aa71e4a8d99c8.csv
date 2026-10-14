@@ -79,8 +79,10 @@ PUT,역할별 권한 변경,/api/v1/roles/:id/permissions,인증·조직,P1,초�
 GET,품목·규격 목록 조회,/api/v1/items,기준정보,P1,초안,12.2 명시. 수주 등록 화면의 규격 선택에도 사용. 톤은 문자열로 응답 (컨벤션 5장)
 POST,품목·규격 등록,/api/v1/items,기준정보,P1,초안,"12.2 명시. 강종·두께·폭·길이 조합 중복 금지, 참조 없으면 COM-003"
 PATCH,품목·규격 수정,/api/v1/items/:id,기준정보,P1,초안,도출: 컨벤션 5장. 사용된 규격의 치수·이론중량 수정 시 MST-002
+DELETE,품목·규격 삭제,/api/v1/items/:id,기준정보,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 규격 매핑·배합 원단위·수주·재고(수량 > 0)·예약·생산계획·LOT·구매요청·발주가 쓰면 거부. 수량이 0인 재고 행은 함께 지운다 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)"
 GET,강종 목록 조회,/api/v1/steel-grades,기준정보,P1,초안,도출: 용어 사전 steel_grade. 시드 6종 (공통코드 STEEL_GRADE)
 POST,강종 등록,/api/v1/steel-grades,기준정보,P1,초안,도출. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리 (TRM-020)
+DELETE,강종 삭제,/api/v1/steel-grades/:id,기준정보,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목·배합 원단위·검사 기준·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)"
 GET,규격 매핑 조회,/api/v1/spec-mappings,기준정보,P1,초안,12.2 명시
 POST,규격 매핑 등록,/api/v1/spec-mappings,기준정보,P1,초안,12.2 명시. 대응 코일 중복·중량 초과 차단 (BP-MST-01)
 GET,라우팅 조회,/api/v1/routings,기준정보,P1,초안,12.2 명시
@@ -92,12 +94,15 @@ PATCH,배합 원단위 수정,/api/v1/specific-consumptions/:id,기준정보,P1,
 GET,고객사 목록 조회,/api/v1/customers,기준정보,P1,초안,도출: 용어 사전 customer. 수주 등록 화면에서도 사용
 POST,고객사 등록,/api/v1/customers,기준정보,P1,초안,도출: 컨벤션 5장
 PATCH,고객사 수정,/api/v1/customers/:id,기준정보,P1,초안,도출: 컨벤션 5장
+DELETE,고객사 삭제,/api/v1/customers/:id,기준정보,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 수주·출하요청이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)"
 GET,공급업체 목록 조회,/api/v1/suppliers,기준정보,P1,초안,도출: 용어 사전 supplier. 발주 화면에서도 사용
 POST,공급업체 등록,/api/v1/suppliers,기준정보,P1,초안,도출: 컨벤션 5장. 품목별 기본 공급업체는 품목 수정에서 지정
 PATCH,공급업체 수정,/api/v1/suppliers/:id,기준정보,P1,초안,도출: 컨벤션 5장
+DELETE,공급업체 삭제,/api/v1/suppliers/:id,기준정보,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 원료 기본 공급업체·발주가 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)"
 GET,야드 목록 조회,/api/v1/yards,기준정보,P1,초안,"도출: 용어 사전 yard, 공통코드 YARD_TYPE"
 POST,야드 등록,/api/v1/yards,기준정보,P1,초안,도출: 컨벤션 5장
 PATCH,야드 수정,/api/v1/yards/:id,기준정보,P1,초안,도출: 컨벤션 5장
+DELETE,야드 삭제,/api/v1/yards/:id,기준정보,P1,초안,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목 기본 야드·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)"
 GET,생산 설정값 조회,/api/v1/production-settings,기준정보,P1,초안,도출. production_setting은 업무 프로세스 11장 구현 제안(용어 사전 미등록)
 PATCH,생산 설정값 변경,/api/v1/production-settings,기준정보,P1,초안,도출. 단건 설정 리소스라 :id 없음
 GET,수주 목록 조회,/api/v1/sales-orders,수주,P1,초안,도출: 컨벤션 5장. 헤더 상태는 저장하지 않고 계산 (공통코드 SALES_ORDER_ITEM_STATUS)
