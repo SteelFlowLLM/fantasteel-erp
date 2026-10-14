@@ -138,10 +138,10 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   data-pet-item-title={item.inspectionItemName}
                   className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-danger-line bg-danger-field' : 'border-line')}
                 >
-                  {/* 영문 코드를 이름 옆에 두면 판정 배지가 길어질 때 이름이 두 줄로 깨진다: 코드는 이름 아래 작은 줄로 */}
+                  {/* 영문 항목 코드는 값을 넣는 사람에게 필요 없는 말이라 카드마다 한 줄을 쓰지 않고 이름에 마우스를 올리면 보인다 */}
                   <div className="flex items-start gap-1.5">
                     <span className="flex min-w-0 flex-col">
-                      <label htmlFor={id} className="truncate text-sm font-semibold text-ink" title={item.inspectionItemName}>
+                      <label htmlFor={id} className="truncate text-sm font-semibold text-ink" title={item.inspectionItemName.includes(`(${item.inspectionItemCode})`) ? item.inspectionItemName : `${item.inspectionItemName} (${item.inspectionItemCode})`}>
                         {item.inspectionItemName}
                         {item.isRequired ? (
                           <span className="ml-0.5 text-danger" title="필수">
@@ -151,9 +151,6 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                           <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
                         )}
                       </label>
-                      <span className="truncate font-mono text-2xs text-ink-3" data-pet-field="항목 코드">
-                        {item.inspectionItemCode}
-                      </span>
                     </span>
                     <span className="ml-auto flex-none" data-pet-field="판정">
                       <ItemBadge item={item} preview={preview} dirty={dirty} />
