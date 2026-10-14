@@ -33,12 +33,19 @@ const RECEIPTS: { itemCode: string; tons: [string, string] }[] = [
   { itemCode: 'SMN01', tons: ['20.000', '20.000'] },
 ];
 
-/** 수주 3건 (업무 프로세스 14.1 슬래브, 14.2 코일, 그리고 시작 전 계획) */
+/** 수주 4건 (업무 프로세스 14.1 슬래브, 14.2 코일, 시작 전 계획, 히트 성분 불합격 시연) */
 const ORDERS = [
   { key: 'slab', itemCode: 'SL-SS275-250x1200x10000', orderedQty: 10, dueInDays: 14 },
   { key: 'coil', itemCode: 'CL-SM355A-4.5x1500x544000', orderedQty: 6, dueInDays: 21 },
   { key: 'planned', itemCode: 'SL-SM355B-220x1400x9500', orderedQty: 8, dueInDays: 28 },
+  { key: 'heatFail', itemCode: 'SL-SS275-250x1200x10000', orderedQty: 3, dueInDays: 35 },
 ] as const;
+
+/**
+ * 히트 성분 불합격 시연 (가정값, docs/backend/seed.md): 수주 4 계획의 히트를 인(P) 0.058%로 판정한다(SS275 기준 0.05% 이하).
+ * 하위 슬래브는 검사하지 않아도 "불합격 히트의 하위 LOT"(TRM-078)으로 불합격 관리에 묶여 나온다
+ */
+const FAILED_HEAT_VALUES: Record<string, string> = { P: '0.0580' };
 
 /**
  * 불합격 관리 시연용 슬래브 검사 (가정값, docs/backend/seed.md). 슬래브 계획의 앞 슬래브부터 차례로 쓴다.
@@ -98,6 +105,8 @@ async function main() {
     logger.log(`슬래브 계획 시뮬레이션: ${slab.steps.map((s) => s.processType).join(' → ')} (${slab.productionPlanStatus})`);
     const coil = await simulation.simulate(producer, planIds.coil, { randomSeed: 20261007 });
     logger.log(`코일 계획 시뮬레이션: ${coil.steps.map((s) => s.processType).join(' → ')} (${coil.productionPlanStatus})`);
+    const heatFail = await simulation.simulate(producer, planIds.heatFail, { randomSeed: 20261008 });
+    logger.log(`히트 불합격 시연 계획 시뮬레이션: ${heatFail.steps.map((s) => s.processType).join(' → ')} (${heatFail.productionPlanStatus})`);
 
     const coilLots = await prisma.lot.findMany({ where: { productionResult: { productionPlanId: planIds.coil }, lotType: { in: [LOT_TYPE.HEAT, LOT_TYPE.SLAB] } }, orderBy: { id: 'asc' } });
     const quality = app.get(QualityService);
@@ -118,7 +127,13 @@ async function main() {
       }
       logger.log(`슬래브 ${lot.lotNo} 검사 불합격 (${Object.entries(sample.values).map(([code, value]) => `${code} ${value}`).join(', ')})${sample.disposition ? ` → 처리 상태 ${sample.disposition.dispositionStatus}` : ''}`);
     }
-    logger.log('완료: 슬래브 계획(히트·슬래브 8매 판정 대기, 슬래브 2매 불합격), 코일 계획(열연 투입 대기), 시작 전 계획 1건');
+
+    // 히트 연쇄 불합격 시연: 수주 4 계획의 히트만 성분 불합격으로 판정한다 (슬래브는 판정 대기로 둔다)
+    const failedHeat = await prisma.lot.findFirstOrThrow({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.HEAT }, orderBy: { id: 'asc' } });
+    await quality.registerQualityInspection({ lotId: failedHeat.id, values: await passingValues(prisma, failedHeat.id, FAILED_HEAT_VALUES) }, inspector);
+    const childSlabs = await prisma.lot.count({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.SLAB } });
+    logger.log(`히트 ${failedHeat.lotNo} 성분 불합격 (P 0.0580) → 하위 슬래브 ${childSlabs}매 연쇄 불합격`);
+    logger.log('완료: 슬래브 계획(히트·슬래브 8매 판정 대기, 슬래브 2매 불합격), 코일 계획(열연 투입 대기), 시작 전 계획 1건, 히트 불합격 계획(히트 + 하위 슬래브)');
   } finally {
     await app.close();
   }
