@@ -140,11 +140,12 @@ async function millSheetsOf(salesOrderId: number): Promise<SalesOrderDetail['mil
   }
 }
 
-async function detail(salesOrderId: number): Promise<SalesOrderDetail> {
+/** withMillSheets = 밀시트 조회 권한이 있어 밀시트 목록을 부를지. 권한 없이 부르면 수주 상세를 열 때마다 403이 났다 */
+async function detail(salesOrderId: number, withMillSheets = true): Promise<SalesOrderDetail> {
   const [d, reservations, millSheets] = await Promise.all([
     serverRequest<ServerSalesOrderDetail>('GET', `/sales-orders/${salesOrderId}`),
     serverRequest<SalesOrderReservationView[]>('GET', `/sales-orders/${salesOrderId}/reservations`),
-    millSheetsOf(salesOrderId),
+    withMillSheets ? millSheetsOf(salesOrderId) : [],
   ]);
   const lineNoOf = (salesOrderItemId: number) => d.items.findIndex((i) => i.salesOrderItemId === salesOrderItemId) + 1;
   const { itemLines: _lines, ...listRow } = toListRow(d);

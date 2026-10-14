@@ -269,6 +269,8 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
   const [rolling, setRolling] = useState(false);
   const allocNeed = permissionNeedText([PERMISSION.HOT_ROLLING_ALLOCATE]);
   const rollNeed = permissionNeedText([PERMISSION.PRODUCTION_RESULT_CONFIRM]);
+  // 서버 응답에 배정 확정자가 없어(ERD에 칸 없음) 늘 '-'만 보이던 칸: 이름이 하나라도 있을 때만 보인다
+  const showConfirmer = plan.allocations.some((a) => a.confirmedEmployeeName);
   return (
     <Card petKey="card:hotRolling.allocations">
       <CardHead
@@ -298,7 +300,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
                 <Th>히트</Th>
                 <Th>생산완료일</Th>
                 <Th>배정 확정</Th>
-                <Th>확정자</Th>
+                {showConfirmer ? <Th>확정자</Th> : null}
                 <Th align="right">작업</Th>
               </tr>
             </thead>
@@ -309,7 +311,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
                   <Td className="font-mono text-mono text-ink-2">{a.heatNo ?? '-'}</Td>
                   <Td>{a.producedDate}</Td>
                   <Td>{fmtDateTime(a.confirmedAt)}</Td>
-                  <Td>{a.confirmedEmployeeName ?? '-'}</Td>
+                  {showConfirmer ? <Td>{a.confirmedEmployeeName ?? '-'}</Td> : null}
                   <Td align="right">
                     <span className="inline-flex gap-1">
                       <Button size="sm" disabled={!canAllocate} title={canAllocate ? '해제와 새 배정을 한 번에 해요 (사유 필수)' : allocNeed} onClick={() => setChanging(a)}>

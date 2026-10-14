@@ -21,7 +21,7 @@ import { MillSheetLink, SalesOrderLink, ShipmentRequestLink, ShipmentRequestStat
 import { qtyUnitOf } from '@/features/shipment/lib/shipmentForm';
 import { useCanUse } from '@/hooks/usePermission';
 import { useShipmentRequestList } from '@/hooks/useShipmentRequests';
-import { fmtMDdow, fmtMDHM, fmtTon } from '@/lib/format';
+import { fmtActorAt, fmtMDdow, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const STATUSES = Object.values(SHIPMENT_REQUEST_STATUS);
@@ -183,7 +183,7 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                       <Td align="right">{fmtTon(r.totalWeightTon)}</Td>
                       <Td align="right">{r.shipmentRequestStatus === 'CANCELLED' ? '-' : `${r.totalAllocatedQty} / ${r.totalRequestQty}`}</Td>
                       <Td className="text-xs text-ink-2">
-                        {r.requesterName ?? '-'} · {fmtMDHM(r.createdAt)}
+                        {fmtActorAt(r.requesterName, r.createdAt)}
                       </Td>
                       <Td>
                         <NextStep row={r} />

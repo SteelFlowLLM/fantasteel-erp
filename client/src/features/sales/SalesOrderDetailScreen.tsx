@@ -18,7 +18,6 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Tabs } from '@/components/Tabs';
 import { Tag } from '@/components/Tag';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useCanUse } from '@/hooks/usePermission';
 import { useSalesOrderDetail, useSalesOrderList, useSalesOrderProductionLinks, useSalesOrderTimeline } from '@/hooks/useSalesOrders';
 import { fmtDateTime, fmtTon } from '@/lib/format';
@@ -173,7 +172,7 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
   const canCancel = useCanUse(PERMISSION.SALES_ORDER_CANCEL);
   const production = useSalesOrderProductionLinks(detail.id);
   const timeline = useSalesOrderTimeline(detail.id);
-  useShellTitle(detail.salesOrderNo, detail.customerName);
+  // 상단 바는 화면 이름(수주) 그대로 둔다: 번호로 바꾸면 바로 아래 머리와 같은 번호가 크게 두 번 보였다 (품질 화면과 같은 규칙)
 
   const done = detail.status === 'SHIPPED' || detail.status === 'CANCELLED';
   const cancelBlockCode = detail.cancelBlock === 'SO-003' || detail.cancelBlock === 'SO-004' ? detail.cancelBlock : null;

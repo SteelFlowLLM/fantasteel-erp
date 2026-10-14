@@ -20,7 +20,7 @@ import { Tag } from '@/components/Tag';
 import { AllocationStatusBadge, ItemTypeTag, SalesOrderItemStatusBadge, SalesOrderLink, TraceLink } from '@/features/shipment/components/ShipmentBadges';
 import { allocationLineSyncKey, isSameAsRecommendation, panelAfterRefresh, toggleLot, type AllocationPanel } from '@/features/shipment/lib/shipmentForm';
 import { useChangeShipmentAllocation, useConfirmShipmentAllocations, useReleaseShipmentAllocation } from '@/hooks/useShipmentRequests';
-import { fmtMDHM, fmtTon } from '@/lib/format';
+import { fmtActorAt, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const REASON_MAX = 500;
@@ -156,7 +156,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
                     <Td>{a.producedDate}</Td>
                     <Td>{a.yardName ?? '-'}</Td>
                     <Td className="text-xs text-ink-2">
-                      {a.confirmedEmployeeName ?? '-'} · {fmtMDHM(a.confirmedAt)}
+                      {fmtActorAt(a.confirmedEmployeeName, a.confirmedAt)}
                     </Td>
                     <Td>
                       <AllocationStatusBadge status={a.allocationStatus} />

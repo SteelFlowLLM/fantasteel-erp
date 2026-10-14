@@ -44,6 +44,11 @@ export function fmtHM(value: DateInputValue): string {
 /** 09-30 14:05 */
 export const fmtMDHM = (value: DateInputValue): string => (toDate(value) ? `${fmtMD(value)} ${fmtHM(value)}` : '-');
 
+/**
+ * 누가 · 언제 (10-14 14:13). 이름이 없으면 시각만 보인다: 출하요청 요청자·배정 확정자처럼 ERD에 칸이 없어 비는 이름을 "- · 10-14 14:13"로 보이면 고장처럼 보였다
+ */
+export const fmtActorAt = (name: string | null | undefined, at: DateInputValue): string => (name ? `${name} · ${fmtMDHM(at)}` : fmtMDHM(at));
+
 /** 2026-09-30 14:05 */
 export const fmtDateTime = (value: DateInputValue): string => (toDate(value) ? `${fmtDate(value)} ${fmtHM(value)}` : '-');
 

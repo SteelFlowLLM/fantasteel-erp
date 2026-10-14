@@ -20,7 +20,6 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import {
   InspectionResultBadge,
   ItemTypeTag,
@@ -34,7 +33,7 @@ import {
 import { useConfirmGoodsIssue, useGoodsIssueDetail, useGoodsIssueQueue } from '@/hooks/useGoodsIssues';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
-import { fmtDateTime, fmtMD, fmtMDHM, fmtTon, todayStr } from '@/lib/format';
+import { fmtActorAt, fmtDateTime, fmtMD, fmtMDHM, fmtTon, todayStr } from '@/lib/format';
 import { LOT_STATUS_TONE } from '@/lib/statusTone';
 import { sumTon } from '@/lib/weight';
 import { permissionNeedText } from '@/lib/permissions';
@@ -185,7 +184,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
     if (params.get('request') !== String(view.id)) router.replace(`/goods-issues?request=${view.id}`, { scroll: false });
     confirm.mutate({ shipmentRequestId: view.id, expectedUpdatedAt: view.updatedAt });
   };
-  useShellTitle(`출고 확정 · ${view.shipmentRequestNo}`, view.customerName);
+  // 상단 바는 화면 이름(출고 확정) 그대로 둔다: 번호로 바꾸면 바로 아래 머리와 같은 번호가 크게 두 번 보였다 (품질 화면과 같은 규칙)
 
   const issued = view.shipmentRequestStatus === 'ISSUED';
   const cancelled = view.shipmentRequestStatus === 'CANCELLED';
@@ -233,7 +232,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
         <KvList
           columns={3}
           items={[
-            { label: '요청', value: `${view.requesterName ?? '-'} · ${fmtMDHM(view.createdAt)}` },
+            { label: '요청', value: fmtActorAt(view.requesterName, view.createdAt) },
             { label: '출하 요청일', value: view.requestedShipDate },
             {
               label: '수주',
