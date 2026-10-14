@@ -224,10 +224,7 @@ async function shippableItems(customerId: number): Promise<(ShippableItem & { st
 /** 요청 매수: 숫자만 쓴 글자는 숫자로 보내고, 그 밖은 그대로 보내 서버가 입력 오류로 거부하게 한다 */
 const qtyForServer = (qty: string): unknown => (/^\d+$/.test(qty.trim()) ? Number(qty.trim()) : qty);
 
-/**
- * 출하요청 등록. 등록하면서 품목마다 FIFO 추천을 작업 로그로 남긴다(POST allocations/recommend).
- * 추천할 합격 LOT이 없으면(INV-001) 추천 로그만 건너뛴다.
- */
+/** 출하요청 등록. FIFO 추천 로그는 배정을 확정할 때 남긴다(confirmAllocations) */
 async function create(form: CreateShipmentRequestForm): Promise<{ id: number; shipmentRequestNo: string; recommendation: never[] }> {
   const created = await serverRequest<ServerShipmentRequestDetail>('POST', '/shipment-requests', {
     body: {
@@ -236,21 +233,19 @@ async function create(form: CreateShipmentRequestForm): Promise<{ id: number; sh
       items: form.items.map((i) => ({ salesOrderItemId: i.salesOrderItemId, requestQty: qtyForServer(i.requestQty) })),
     },
   });
-  for (const item of created.items) {
-    try {
-      await serverRequest<AllocationRecommendation>('POST', '/allocations/recommend', { body: { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: item.id } });
-    } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'INV-001')) throw e;
-    }
-  }
   return { id: created.id, shipmentRequestNo: created.shipmentRequestNo, recommendation: [] };
 }
 
-/** 배정 확정: 품목마다 POST allocations (품목 단위로 한 트랜잭션. 앞 품목이 확정된 뒤 뒤 품목이 실패하면 앞 품목 배정은 남는다) */
+/**
+ * 배정 확정: 품목마다 FIFO 추천을 작업 로그로 남기고(POST allocations/recommend) 고른 LOT을 확정한다(POST allocations).
+ * 업무 프로세스 13.2 "추천 내용도 확정 시점에 로그로 남김"이라 배정을 풀고 다시 확정할 때도 그때의 추천이 남는다(열연 배정 확정과 같다).
+ * 품목 단위로 한 트랜잭션이라 앞 품목이 확정된 뒤 뒤 품목이 실패하면 앞 품목 배정은 남는다.
+ */
 async function confirmAllocations(input: { shipmentRequestId: number; lines: { shipmentRequestItemId: number; lotIds: number[] }[] }) {
   let confirmedQty = 0;
   for (const line of input.lines) {
     if (line.lotIds.length === 0) continue;
+    await serverRequest<AllocationRecommendation>('POST', '/allocations/recommend', { body: { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: line.shipmentRequestItemId } });
     const created = await serverRequest<AllocationView[]>('POST', '/allocations', { body: { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: line.shipmentRequestItemId, lotIds: line.lotIds } });
     confirmedQty += created.length;
   }
