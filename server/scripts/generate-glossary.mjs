@@ -1,6 +1,7 @@
 // 용어 사전(docs/notion/03-용어-사전.md) 표와 업무 프로세스 정의서(04) 6.0 '한눈에 보기' 표를 읽어 AI 어시스턴트 업무 지식(REQ-AST-003)으로 쓸 파일을 만든다.
 // 서버가 실행 중에 docs/를 읽지 않게(배포 폴더에는 docs/가 없다) 공통 코드처럼 미리 만들어 커밋한다.
-// 두 문서 중 하나가 바뀌면 다시 실행한다: npm run glossary -w @fantasteel/server
+// 업무 매뉴얼 초안(docs/manual/업무-매뉴얼-초안.md)도 읽어 화면 절차 답변(REQ-AST-003)의 근거 파일을 만든다.
+// 세 문서 중 하나가 바뀌면 다시 실행한다: npm run glossary -w @fantasteel/server
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,6 +107,67 @@ writeFileSync(
   'utf8',
 );
 process.stdout.write(`업무 프로세스 ${steps.length}개 → ${processOutPath}\n`);
+
+const manualDocPath = join(root, '..', 'docs', 'manual', '업무-매뉴얼-초안.md');
+const manualOutPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'manual.generated.ts');
+const manualDoc = readFileSync(manualDocPath, 'utf8').replace(/\r\n/g, '\n');
+const processIds = new Set(steps.map((s) => s.id));
+const guides = [];
+let guide = null;
+for (const line of manualDoc.split('\n')) {
+  const heading = line.match(/^## \d+\. (.+) \((BP-[A-Z]+-\d{2})\)$/);
+  if (heading) {
+    guide = { id: heading[2].replace(/^BP-/, 'MAN-'), processId: heading[2], name: heading[1].replace(/\s*[—-]\s*/g, '·'), lines: [] };
+    guides.push(guide);
+    continue;
+  }
+  if (line.startsWith('## ') || line === '---') {
+    guide = null;
+    continue;
+  }
+  if (guide) guide.lines.push(line);
+}
+if (!guides.length) throw new Error('업무 매뉴얼을 하나도 읽지 못함');
+const manualGuides = guides.map(({ id, processId, name, lines }) => {
+  if (!processIds.has(processId)) throw new Error(`매뉴얼 업무 ID가 업무 프로세스 표에 없음: ${processId}`);
+  return { id, processId, name, text: manualText(lines) };
+});
+if (new Set(manualGuides.map((g) => g.id)).size !== manualGuides.length) throw new Error('매뉴얼 ID가 겹침');
+writeFileSync(
+  manualOutPath,
+  [
+    '// 이 파일은 scripts/generate-glossary.mjs가 업무 매뉴얼 초안(docs/manual/업무-매뉴얼-초안.md)에서 만든다. 손으로 고치지 않는다.',
+    '// 바꾸는 순서: 매뉴얼 수정 → npm run glossary -w @fantasteel/server',
+    "import type { ManualGuide } from './manual.types';",
+    '',
+    `export const MANUAL_GUIDES: readonly ManualGuide[] = ${JSON.stringify(manualGuides, null, 2)};`,
+    '',
+  ].join('\n'),
+  'utf8',
+);
+process.stdout.write(`업무 매뉴얼 ${manualGuides.length}개 → ${manualOutPath}\n`);
+
+/** 매뉴얼 한 업무의 본문을 모델에 넘길 글로: 표는 한 줄씩, 근거 파일·검수 메모(> 줄)·마크다운 꾸밈은 뗀다 */
+function manualText(lines) {
+  const out = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('>') || line.startsWith('근거 파일')) continue;
+    if (line.startsWith('|')) {
+      const cells = cellsOf(line);
+      if (cells.every((c) => /^-+$/.test(c)) || ['항목', '보이는 것', '코드'].includes(cells[0])) continue;
+      out.push(cells.length === 2 ? `${cells[0]}: ${cells[1]}` : cells.join(' / '));
+      continue;
+    }
+    out.push(raw.replace(/\s+$/, ''));
+  }
+  return out
+    .join('\n')
+    .replace(/\*\*|`/g, '')
+    .replace(/ 🟡[^\n]*/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
 
 function cellsOf(line) {
   return line.split('|').slice(1, -1).map((c) => c.trim());

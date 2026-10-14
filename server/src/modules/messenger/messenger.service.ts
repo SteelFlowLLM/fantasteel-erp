@@ -216,7 +216,7 @@ const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000];
 const SYSTEM_SENDER_NAME = '시스템';
 
 /** AI 답의 출처 줄에 쓰는 종류 이름 */
-const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', DATA: '조회 데이터' };
+const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', DATA: '조회 데이터' };
 
 /** @AI 호출에 함께 넘기는 직전 대화 수 (AI 어시스턴트 서버가 쓰는 수와 같게) */
 const AI_HISTORY_MESSAGES = 10;
