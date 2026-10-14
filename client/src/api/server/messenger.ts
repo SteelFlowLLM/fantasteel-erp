@@ -98,6 +98,7 @@ function toMessageView(message: ServerMessageView, myTargets: readonly MentionTa
     senderDepartmentName: message.senderDepartmentName,
     senderJobGradeName: message.senderJobGradeName,
     isSystem: message.isSystem,
+    isAi: message.isAi,
     isMine: message.isMine,
     content: message.content,
     files: message.attachments.map((a) => ({ id: a.id, name: a.fileName, size: a.fileSize, mimeType: null })),

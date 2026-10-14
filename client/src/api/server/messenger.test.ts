@@ -58,6 +58,7 @@ const message = (id: number, content: string | null, extra: Partial<ChatMessageV
   senderDepartmentName: '구매부',
   senderJobGradeName: '사원',
   isSystem: false,
+  isAi: false,
   isMine: false,
   content,
   attachments: [],

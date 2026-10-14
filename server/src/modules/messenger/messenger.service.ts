@@ -1,5 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
+  AI_REPLY_PREFIX,
+  AI_SENDER_NAME,
   BLOCKED_ATTACHMENT_EXTENSIONS,
   BUSINESS_EVENT_TYPE,
   BUSINESS_EVENT_TYPE_LABEL,
@@ -21,6 +23,12 @@ import {
   emoticonPreview,
   inlineEmoticonText,
   isMessageEmoticonKey,
+  aiQuestionOf,
+  aiReplyTextOf,
+  mentionsAi,
+  type AiAssistantReplyView,
+  type AiAssistantSourceKind,
+  type AiAssistantTurn,
   type AuthUser,
   type BusinessEventType,
   type ChatMemberView,
@@ -51,6 +59,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
 import { NotificationService } from '../notification/notification.service';
 import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UpdateChatRoomSettingsDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
@@ -115,7 +124,7 @@ function filePreview(firstName: string | null, count: number): string {
 
 function previewOf(message: { content: string | null; emoticonKey: string | null; deletedAt?: Date | null; messageAttachments: readonly { fileName: string }[] }): string {
   if (message.deletedAt) return DELETED_MESSAGE_TEXT;
-  if (message.content) return inlineEmoticonText(message.content).replace(/\s+/g, ' ').trim();
+  if (message.content) return inlineEmoticonText(aiReplyTextOf(message.content) ?? message.content).replace(/\s+/g, ' ').trim();
   if (message.emoticonKey) return emoticonPreview(message.emoticonKey);
   return filePreview(message.messageAttachments[0]?.fileName ?? null, message.messageAttachments.length);
 }
@@ -123,7 +132,7 @@ function previewOf(message: { content: string | null; emoticonKey: string | null
 /** 목록 SQL의 마지막 메시지 (첨부는 첫 이름과 개수만 온다) */
 function lastPreviewOf(last: { content: string | null; emoticonKey: string | null; deletedAt: Date | null; firstAttachmentName: string | null; attachmentCount: number }): string {
   if (last.deletedAt) return DELETED_MESSAGE_TEXT;
-  if (last.content) return inlineEmoticonText(last.content).replace(/\s+/g, ' ').trim();
+  if (last.content) return inlineEmoticonText(aiReplyTextOf(last.content) ?? last.content).replace(/\s+/g, ' ').trim();
   if (last.emoticonKey) return emoticonPreview(last.emoticonKey);
   return filePreview(last.firstAttachmentName, last.attachmentCount);
 }
@@ -200,6 +209,20 @@ const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000];
 /** 시스템 메시지(보낸 사원 없음)의 보낸 사람 표시 */
 const SYSTEM_SENDER_NAME = '시스템';
 
+/** AI 답의 출처 줄에 쓰는 종류 이름 */
+const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', DATA: '조회 데이터' };
+
+/** @AI 호출에 함께 넘기는 직전 대화 수 (AI 어시스턴트 서버가 쓰는 수와 같게) */
+const AI_HISTORY_MESSAGES = 10;
+/** AI 어시스턴트 질문 최대 길이 (API-262 규칙) */
+const AI_QUESTION_MAX = 1000;
+
+/** AI 답 본문: 누구 질문인지, 답, 출처 */
+function aiReplyContentOf(askerName: string, reply: AiAssistantReplyView): string {
+  const sources = reply.sources.map((s) => `${AI_SOURCE_KIND_LABEL[s.kind]} · ${s.label}`);
+  return `${AI_REPLY_PREFIX}${askerName}님의 질문에 답해요\n\n${reply.answer}${sources.length ? `\n\n출처: ${sources.join(' / ')}` : ''}`;
+}
+
 /** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
 type ErpLinkResolver = (content: string | null) => ErpLink[];
 
@@ -227,17 +250,19 @@ function parentOf(message: MessageWithSender): ChatMessageParentView | null {
 
 function toMessageView(message: MessageWithSender, me: number, unreadMemberCount: number, erpLinksOf: ErpLinkResolver): ChatMessageView {
   const deleted = message.deletedAt !== null;
+  const aiText = deleted ? null : aiReplyTextOf(message.content);
   return {
     id: message.id,
     chatRoomId: message.chatRoomId,
     senderId: message.senderId,
-    senderName: message.sender?.employeeName ?? SYSTEM_SENDER_NAME,
+    senderName: message.sender?.employeeName ?? (aiText === null ? SYSTEM_SENDER_NAME : AI_SENDER_NAME),
     senderDepartmentName: message.sender?.department.departmentName ?? null,
     senderJobGradeName: message.sender?.jobGrade.jobGradeName ?? null,
     isSystem: message.senderId === null,
+    isAi: aiText !== null,
     isMine: message.senderId === me,
     // 삭제된 메시지는 본문·첨부를 내보내지 않는다 (행은 남김)
-    content: deleted ? null : message.content,
+    content: deleted ? null : (aiText ?? message.content),
     attachments: deleted ? [] : message.messageAttachments.map((a) => ({ id: a.id, fileName: a.fileName, fileSize: a.fileSize })),
     // 목록에서 뺀 키가 DB에 남아 있으면 화면이 그릴 수 없으므로 null
     emoticonKey: !deleted && message.emoticonKey && isMessageEmoticonKey(message.emoticonKey) ? message.emoticonKey : null,
@@ -267,6 +292,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     private readonly storage: StorageService,
     private readonly gateway: MessengerGateway,
     private readonly businessEvents: BusinessEventRecorder,
+    private readonly aiAssistant: AiAssistantService,
   ) {}
 
   /** 수주 작업 로그가 기록되면 같은 tx에서 그 수주의 업무방에 진행 알림을 남긴다 (다른 모듈 코드를 고치지 않으려고 기록기에 건다) */
@@ -350,7 +376,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
           : null,
         lastMessage: last
           ? {
-              senderName: last.senderId === null ? SYSTEM_SENDER_NAME : (lastSender?.employeeName ?? '-'),
+              senderName: last.senderId === null ? (aiReplyTextOf(last.content) === null ? SYSTEM_SENDER_NAME : AI_SENDER_NAME) : (lastSender?.employeeName ?? '-'),
               isMine: last.senderId === me,
               isSystem: last.senderId === null,
               preview: lastPreviewOf(last),
@@ -846,7 +872,55 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     const unreadMemberCount = memberIds.length - 1;
     const erpLinksOf = await this.erpLinkResolver([message.content]);
     this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
+    // 재전송 중복은 위에서 먼저 돌려보내므로, 새로 저장한 메시지만 AI를 부른다
+    if (message.content && mentionsAi(message.content)) this.answerAiInBackground(user, message.chatRoomId, message.id, message.content);
     return toMessageView(message, me, unreadMemberCount, erpLinksOf);
+  }
+
+  /** @AI 호출 (REQ-AST-002): 보낸 메시지의 응답은 기다리지 않고 AI 답을 나중에 방에 남긴다 */
+  private answerAiInBackground(user: AuthUser, chatRoomId: number, messageId: number, content: string): void {
+    void this.postAiReply(user, chatRoomId, messageId, content).catch((error: unknown) => this.logger.warn(`@AI 답 저장·발송 실패 (메시지 ${messageId}): ${String(error)}`));
+  }
+
+  /**
+   * 묻는 사람의 권한으로 AI 어시스턴트에게 묻고(조회 도구도 그 사람 권한), 답을 시스템 메시지로 남긴다.
+   * 답은 방 멤버 모두에게 보이므로 본문 첫 줄에 누구 질문인지 적는다. 실패하면 이유를 같은 방식으로 알린다.
+   */
+  private async postAiReply(user: AuthUser, chatRoomId: number, messageId: number, content: string): Promise<void> {
+    const question = aiQuestionOf(content).slice(0, AI_QUESTION_MAX);
+    let text: string;
+    if (!question) {
+      text = `${AI_REPLY_PREFIX}@AI 뒤에 묻고 싶은 내용을 적어 주세요`;
+    } else {
+      try {
+        const reply = await this.aiAssistant.ask(user, { question, screen: await this.aiScreenOf(chatRoomId), history: await this.aiHistoryOf(chatRoomId, messageId) });
+        text = aiReplyContentOf(user.employeeName, reply);
+      } catch (error) {
+        if (!(error instanceof AppException)) this.logger.error(`@AI 답 만들기 실패 (메시지 ${messageId}): ${String(error)}`);
+        text = `${AI_REPLY_PREFIX}${user.employeeName}님의 질문에 답하지 못했어요. ${error instanceof AppException ? error.message : '잠시 뒤 다시 물어봐 주세요'}`;
+      }
+    }
+    const saved = await this.prisma.$transaction((tx) => this.repository.createSystemMessage(tx, chatRoomId, text));
+    await this.emitNewMessage(saved);
+  }
+
+  /** AI가 '이 수주'를 알아듣도록 업무방이면 연결 수주 번호를 맥락에 준다 */
+  private async aiScreenOf(chatRoomId: number): Promise<{ path: string; title: string; label: string | null }> {
+    const room = await this.repository.findRoom(this.prisma, chatRoomId);
+    const salesOrderNo = room?.salesOrderId == null ? undefined : (await this.repository.findSalesOrderNos(this.prisma, [room.salesOrderId]))[0]?.salesOrderNo;
+    return { path: `/messenger?room=${chatRoomId}`, title: '사내 채팅', label: salesOrderNo ? `수주 ${salesOrderNo} 업무방` : null };
+  }
+
+  /** 질문 직전 대화 (오래된 순). 사람 말은 이름을 붙여 user로, AI 답은 assistant로. 삭제·일반 시스템 메시지·글 없는 메시지는 뺀다 */
+  private async aiHistoryOf(chatRoomId: number, beforeMessageId: number): Promise<AiAssistantTurn[]> {
+    const recent = await this.repository.findMessagesBefore(this.prisma, chatRoomId, beforeMessageId, AI_HISTORY_MESSAGES);
+    return recent.reverse().flatMap((message): AiAssistantTurn[] => {
+      if (message.deletedAt || !message.content) return [];
+      const aiText = aiReplyTextOf(message.content);
+      if (aiText !== null) return [{ role: 'assistant', content: aiText }];
+      if (message.sender === null) return [];
+      return [{ role: 'user', content: `${message.sender.employeeName}: ${message.content}` }];
+    });
   }
 
   private saveMessage(

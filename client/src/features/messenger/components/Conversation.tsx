@@ -4,6 +4,7 @@
 // 새 메시지 구분선: 방을 연 순간의 읽음 위치 뒤 첫 남의 메시지 위. 열자마자 읽음 처리돼도 남기고, 내가 보내면 지운다.
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AI_MENTION } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import { MESSAGE_PAGE_SIZE, type ChatRoomDetailView } from '@/api/messenger';
 import { Button } from '@/components/Button';
@@ -108,7 +109,7 @@ function RoomView({
   const newDividerId = readBaseline === null ? null : firstUnreadId(items, readBaseline);
   const layout = useMemo(() => layoutMessages(items, newDividerId), [items, newDividerId]);
 
-  const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
+  const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), AI_MENTION.slice(1), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
   const myNames = useMemo(() => [me.employeeName, me.departmentName], [me.employeeName, me.departmentName]);
 
   const scrollToBottom = useCallback(() => {

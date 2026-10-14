@@ -11,7 +11,7 @@
 | --- | --- |
 | REQ | REQ-MSG-001~006, REQ-ORG-004(멤버 선택) |
 | BP | BP-MSG-01 업무·알림·메신저([04] 6장) |
-| 등급 | P1 (@AI 호출 REQ-AST-002는 P2, 만들지 않음) |
+| 등급 | P1. @AI 호출(REQ-AST-002, P2)은 아래 '@AI 호출'에 있다 |
 
 ## 2. 테이블
 
@@ -105,6 +105,15 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 유형: SALES_ORDER_CANCELLED, PRODUCTION_PLAN_CREATED·CANCELLED, REPRODUCTION_PLAN_CREATED, PRODUCTION_STARTED, PRODUCTION_RESULT_REGISTERED, SHIPMENT_REQUEST_CREATED, ALLOCATION_CONFIRMED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED. 예약·배정 추천처럼 자주 바뀌는 내부 단계는 넣지 않는다.
 - 본 거래의 tx는 다른 모듈이 열어 커밋 시점을 모르므로, 소켓은 행이 보일 때까지 100·300·1000·3000ms 간격으로 확인한 뒤 보낸다(끝까지 없으면 롤백으로 보고 보내지 않음). 서버를 여러 대로 늘리면 바꿔야 한다.
 - 이 처리가 실패하면 본 거래도 롤백된다(같은 tx). 조회 1번 + 저장 1번이라 실패할 일은 적다.
+
+**@AI 호출** (REQ-AST-002, BP-AST-01. 스키마 변경 없음)
+- 글 메시지 본문에 `@AI`(뒤에 영문·숫자가 이어지지 않을 때, 대소문자 무시. shared `mentionsAi`)가 있으면 메시지를 먼저 저장해 평소처럼 돌려주고, **응답을 기다리지 않고** AI 어시스턴트(`AiAssistantService.ask`, `docs/backend/ai-assistant.md`)를 부른다. 재전송 중복(`clientMessageId`)은 새로 저장한 메시지가 아니라서 부르지 않는다. 첨부 메시지의 글에 `@AI`가 있어도 같다(파일은 AI에 넘기지 않는다).
+- 질문 = 본문에서 `@AI`를 뺀 글(1000자까지). 질문이 비면 AI를 부르지 않고 "@AI 뒤에 묻고 싶은 내용을 적어 주세요"만 남긴다. 같이 넘기는 맥락: 직전 메시지 10개(사람 말은 `이름: 글`로 user, AI 답은 assistant, 삭제·일반 시스템 메시지·글 없는 메시지는 제외)와 화면 `{ path: '/messenger?room={방 id}', title: '사내 채팅', label: 업무방이면 '수주 {번호} 업무방' }`.
+- **권한**: AI는 **물은 사람의 권한**으로 조회 도구를 실행한다. 그런데 답은 방 멤버 전원에게 보이므로, 방 멤버 중 그 데이터를 볼 권한이 없는 사람에게도 답이 보인다 🟡. 그래서 본문 첫 줄에 `{이름}님의 질문에 답해요`를 적어 누구 질문인지 밝힌다.
+- **저장**: ERD `message`에는 AI 보낸 사람이 없다(USER는 사원 필수, SYSTEM은 보낸 사람 없음). 그래서 AI 답은 **시스템 메시지**(`sender_id` null)로 저장하고 본문 맨 앞의 `[AI 어시스턴트] `(shared `AI_REPLY_PREFIX`)로 구분한다. 응답 `ChatMessageView`는 표시를 떼고 `isAi: true`·`senderName: 'AI 어시스턴트'`(`isSystem`도 true)로 준다. 목록 미리보기·마지막 메시지 보낸 사람도 같다. 안 읽은 수·알림에는 들어가지 않는다(시스템 메시지 규칙). 스키마에 AI 보낸 사람(예: `message_type = AI`)을 두면 이 접두어 표시는 없앨 수 있다 🟡.
+- 본문 구성: `{접두어}{이름}님의 질문에 답해요` + 빈 줄 + 답 + (출처가 있으면) 빈 줄 + `출처: 용어 사전 · 예약 / 조회 데이터 · 재고 · SS275`. 답 속 업무 번호(SO-·PR-·DR-)는 일반 메시지처럼 링크가 된다.
+- 실패(모델 미설정·LLM 연결 실패·시간 초과 등)는 `{이름}님의 질문에 답하지 못했어요. {이유}`를 같은 방식으로 남긴다. 답 저장 뒤 멤버에게 `message:new`.
+- 작업 로그: 남기지 않는다(조회·설명만, 업무 데이터 변경 없음). 서버가 여러 대이거나 재시작되면 진행 중이던 답은 사라진다(작업 큐 없음).
 
 **중복 전송 방지** (#151 `client_message_id`)
 - 메시지 보내기·첨부 업로드에 `clientMessageId`(영문·숫자·-, 64자) 선택. 같은 사람이 같은 값으로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다(알림·소켓 다시 없음, 첨부는 파일도 다시 저장하지 않음). 다른 방에 같은 값이면 COM-004. 거의 동시에 두 번 들어와 부분 unique에 걸려도 먼저 저장된 메시지를 돌려준다.

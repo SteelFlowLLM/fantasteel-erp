@@ -18,5 +18,6 @@ import { AssistantToolbox } from './tools/assistant-toolbox';
   imports: [LlmModule, InventoryModule, SalesOrderModule, ProductionModule, LotModule, QualityModule, PurchasingModule, ShipmentModule, BusinessEventModule],
   controllers: [AiAssistantController],
   providers: [AiAssistantService, AiAssistantRepository, AssistantToolbox],
+  exports: [AiAssistantService],
 })
 export class AiAssistantModule {}
