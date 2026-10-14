@@ -1,6 +1,6 @@
 // 검사 입력·불합격 관리 화면의 순수 계산: 기준 문구, 입력 중 미리보기, 게이지 위치, '기준 안 값으로 채우기', 수정 전후 비교.
 // 판정 자체는 2단계 판정 함수(lib/inspectionJudgment)를 그대로 쓴다. 저장할 때의 판정은 서버가 한다 (REQ-QC-003).
-import type { LotType, ProcessType } from '@/codes';
+import { PRODUCT_QTY_UNIT, type LotType, type ProcessType, type ProductItemType } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { decCmp, decSub } from '@/lib/decimal';
 import { trimNum } from '@/lib/format';
@@ -202,3 +202,10 @@ export function inspectionResultOfSnapshot(snapshot: JsonValue | null): 'PENDING
   const result = asRecord(snapshot)?.inspectionResult;
   return result === 'PENDING' || result === 'PASS' || result === 'FAIL' ? result : null;
 }
+
+/** 수주 품목의 매수 단위 (슬래브 매 · 코일 개). 연결 수주가 없으면 매 */
+export const qtyUnitOfItem = (item: { itemType: ProductItemType } | null | undefined): string => (item ? PRODUCT_QTY_UNIT[item.itemType] : PRODUCT_QTY_UNIT.SLAB);
+
+/** 검사한 LOT의 매수 단위: 슬래브 매 · 코일 개. 히트는 하위 제품이 정해지지 않아 연결 수주 품목을 따른다 */
+export const qtyUnitOfLot = (lotType: LotType, item: { itemType: ProductItemType } | null | undefined): string =>
+  lotType === 'COIL' ? PRODUCT_QTY_UNIT.COIL : lotType === 'SLAB' ? PRODUCT_QTY_UNIT.SLAB : qtyUnitOfItem(item);

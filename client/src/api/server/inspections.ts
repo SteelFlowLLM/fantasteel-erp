@@ -78,6 +78,8 @@ export async function linkedOfPlan(productionPlanId: number | null): Promise<Lin
       lineNo: r.lineNo,
       customerName: plan.customerName ?? '',
       itemCode: plan.itemCode,
+      // 계획 품목이 곧 수주 품목이다 (원료 계획은 없다)
+      itemType: plan.itemType === 'COIL' ? 'COIL' : 'SLAB',
       orderedQty: r.orderedQty,
       dueDate: plan.dueDate ?? '',
       salesOrderItemStatus: r.salesOrderItemStatus,

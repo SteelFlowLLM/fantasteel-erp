@@ -25,7 +25,7 @@ import { inspectionHref } from '@/features/quality/components/InspectionWorkspac
 import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { DispositionBadge, RejectReasonBadge, ResultBadge } from '@/features/quality/components/QualityBadges';
-import { inspectionNameOf, limitText, lotIconOf, trimNum } from '@/features/quality/lib/qualityDisplay';
+import { inspectionNameOf, limitText, lotIconOf, qtyUnitOfItem, trimNum } from '@/features/quality/lib/qualityDisplay';
 import { useRejectedLotDetail, useRejectedLots } from '@/hooks/useDispositions';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -247,7 +247,10 @@ function RejectedItem({ row, active }: { row: RejectedLotListRow; active: boolea
         </span>
         {need > 0 ? (
           <span className="ml-auto inline-flex" data-pet-field="재생산 필요" data-pet-term="재생산 필요">
-            <Badge tone="danger">재생산 필요 {need}매</Badge>
+            <Badge tone="danger">
+              재생산 필요 {need}
+              {qtyUnitOfItem(row.salesOrderItem)}
+            </Badge>
           </span>
         ) : null}
       </div>
@@ -291,7 +294,7 @@ function HeatGroup({
         {/* 히트 줄이 거름에서 빠졌으면 영향(재생산 필요)을 묶음 머리에서 한 번 보인다 */}
         {!heat && headNeed > 0 ? (
           <span className="ml-auto inline-flex flex-none" data-pet-term="재생산 필요">
-            <Badge tone="danger">{`재생산 필요 ${headNeed}매`}</Badge>
+            <Badge tone="danger">{`재생산 필요 ${headNeed}${qtyUnitOfItem(children[0]?.salesOrderItem)}`}</Badge>
           </span>
         ) : null}
       </button>
@@ -433,11 +436,14 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                       </Link>{' '}
                       품목 {soItem.lineNo} · {soItem.customerName}
                     </span>
-                    <span className="text-cap font-normal text-ink-3" title={`납기 ${fmtDate(soItem.dueDate)} · 수주 매수 ${soItem.orderedQty}매`}>
+                    <span className="text-cap font-normal text-ink-3" title={`납기 ${fmtDate(soItem.dueDate)} · 수주 매수 ${soItem.orderedQty}${qtyUnitOfItem(soItem)}`}>
                       <span className="whitespace-nowrap">
                         납기 {fmtDate(soItem.dueDate).slice(5)} ({dLabel(soItem.dueDate)})
                       </span>{' '}
-                      · <span className="whitespace-nowrap">{soItem.orderedQty}매</span> ·{' '}
+                      · <span className="whitespace-nowrap">
+                        {soItem.orderedQty}
+                        {qtyUnitOfItem(soItem)}
+                      </span> ·{' '}
                       <span className="whitespace-nowrap">{SALES_ORDER_ITEM_STATUS_LABEL[soItem.salesOrderItemStatus]}</span>
                     </span>
                   </span>

@@ -128,10 +128,10 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
           </p>
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
           {/* 좁은 화면은 280px씩 채운다. 넓은 화면(1400px~)은 한 줄 개수를 항목 수에 맞춰 3·4개 중 마지막 줄이 더 차는 쪽으로 고르고(measuredCardsPerRow),
-              그래도 덜 찬 마지막 줄은 카드를 늘려 줄 끝까지 채운다: 히트 성분 5개가 3 + 2로 놓여 오른쪽 아래가 비어 보였다.
+              어느 폭이든 덜 찬 마지막 줄은 카드를 늘려 줄 끝까지 채운다: 히트 성분 5개가 3 + 2(넓은 화면)·2 + 2 + 1(1280px)로 놓여 오른쪽 아래가 비어 보였다.
               한 줄 폭 = (100% − 사이 간격) ÷ 개수. 반올림으로 줄이 넘치지 않게 0.5px 덜 잡는다 */}
           <div
-            className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 min-[1400px]:flex min-[1400px]:flex-wrap"
+            className="flex flex-wrap gap-3"
             style={{ '--qi-per-row': measuredCardsPerRow(rows.length) } as CSSProperties}
           >
             {rows.map(({ item, text, preview, dirty }, index) => {
@@ -147,7 +147,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   data-pet-item="qualityInspectionValue"
                   data-pet-item-title={item.inspectionItemName}
                   className={cn(
-                    'flex min-w-0 flex-col gap-1.5 rounded-md border p-3 min-[1400px]:grow min-[1400px]:basis-[calc((100%-(var(--qi-per-row)-1)*0.75rem)/var(--qi-per-row)-0.5px)]',
+                    'flex min-w-0 grow basis-[280px] flex-col gap-1.5 rounded-md border p-3 min-[1400px]:basis-[calc((100%-(var(--qi-per-row)-1)*0.75rem)/var(--qi-per-row)-0.5px)]',
                     bad ? 'border-danger-line bg-danger-field' : 'border-line',
                   )}
                 >

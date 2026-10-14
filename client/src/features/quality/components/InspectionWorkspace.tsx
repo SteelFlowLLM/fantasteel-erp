@@ -26,7 +26,7 @@ import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/
 import { inspectionOutcomeNotes } from '@/features/quality/lib/inspectionOutcomeNotes';
 import { pickNextPendingLot } from '@/features/quality/lib/nextPendingLot';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
-import { inspectionNameOf, lotIconOf } from '@/features/quality/lib/qualityDisplay';
+import { inspectionNameOf, lotIconOf, qtyUnitOfItem, qtyUnitOfLot } from '@/features/quality/lib/qualityDisplay';
 import { useInspectionDetail, useInspectionQueue } from '@/hooks/useInspections';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -473,7 +473,10 @@ function SalesOrderLink({ item }: { item: LinkedSalesOrderItem | null }) {
       </span>
       {item.shortage.reproductionNeedQty > 0 ? (
         <span className="inline-flex" data-pet-term="재생산 필요">
-          <Badge tone="danger">재생산 필요 {item.shortage.reproductionNeedQty}매</Badge>
+          <Badge tone="danger">
+            재생산 필요 {item.shortage.reproductionNeedQty}
+            {qtyUnitOfItem(item)}
+          </Badge>
         </span>
       ) : null}
     </span>
@@ -495,7 +498,9 @@ function OutcomeCard({
   onNext: () => void;
 }) {
   const shortage = outcome.salesOrderItem?.shortage ?? null;
-  const notes = inspectionOutcomeNotes(outcome, lotType, heatPending);
+  const unit = qtyUnitOfLot(lotType, outcome.salesOrderItem);
+  const itemUnit = qtyUnitOfItem(outcome.salesOrderItem);
+  const notes = inspectionOutcomeNotes(outcome, lotType, heatPending, unit);
   const pass = outcome.inspectionResult === 'PASS';
   const fail = outcome.inspectionResult === 'FAIL';
   return (
@@ -517,8 +522,12 @@ function OutcomeCard({
             ))}
             {shortage && outcome.salesOrderItem ? (
               <li>
-                수주 {outcome.salesOrderItem.salesOrderNo} 품목 {outcome.salesOrderItem.lineNo}: 미확보 {shortage.unsecuredQty}매 · 진행 계획 잔여 {shortage.openPlanRemainingQty}매
-                {shortage.reproductionNeedQty > 0 ? <b className="ml-1 font-semibold text-danger">· 재생산 필요 {shortage.reproductionNeedQty}매</b> : null}
+                수주 {outcome.salesOrderItem.salesOrderNo} 품목 {outcome.salesOrderItem.lineNo}: 미확보 {shortage.unsecuredQty}
+                {itemUnit} · 진행 계획 잔여 {shortage.openPlanRemainingQty}
+                {itemUnit}
+                {shortage.reproductionNeedQty > 0 ? <b className="ml-1 font-semibold text-danger">· 재생산 필요 {shortage.reproductionNeedQty}
+                    {itemUnit}
+                  </b> : null}
               </li>
             ) : null}
           </ul>

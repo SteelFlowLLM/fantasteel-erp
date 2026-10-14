@@ -94,6 +94,7 @@ const salesOrderItem = (reproductionNeedQty: number): LinkedSalesOrderItem => ({
   lineNo: 1,
   customerName: '한빛조선',
   itemCode: 'SL-SS275-250x1200x10000',
+  itemType: 'SLAB',
   orderedQty: 10,
   dueDate: '2026-10-30',
   salesOrderItemStatus: 'OPEN',
