@@ -94,11 +94,8 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             <thead>
               <tr>
                 <Th>품목</Th>
-                <Th align="right">수주 매수</Th>
-                <Th align="right" title="매수 × 1매 이론중량 계산값">
-                  톤 (계산값)
-                </Th>
-                <Th>납기</Th>
+                {/* 수주 매수·톤·납기를 한 칸 두 줄로: 열 10개면 1440px에서도 표가 넘쳐 출하·미확보·추가 계획 필요가 오른쪽으로 잘렸다 */}
+                <Th title="수주 매수 · 톤(매수 × 1매 이론중량 계산값) · 납기">수주 · 납기</Th>
                 <Th title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 ÷ 미출하 매수`}>예약 ÷ 미출하</Th>
                 <Th title="진행중·완료 생산계획의 잔여 목표 ÷ 수주 매수">생산중 ÷ 수주</Th>
                 <Th title="이 품목 몫으로 확보한 합격 제품(예약 + 출하) ÷ 수주 매수">검사합격 ÷ 수주</Th>
@@ -123,7 +120,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                     data-muted={cancelled}
                     data-risk={item.isDueRisk}
                   >
-                    <Td className="max-w-[260px]">
+                    <Td className="max-w-[240px]">
                       <span className="flex flex-col gap-1 py-1.5">
                         <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
                         <span className="flex items-center gap-1">
@@ -133,27 +130,29 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                         </span>
                       </span>
                     </Td>
-                    <Td align="right" className="tabular-nums">
-                      {item.orderedQty}
-                      <small className="ml-px text-cap text-ink-3">{itemUnit}</small>
-                    </Td>
-                    <Td align="right" className="tabular-nums">
-                      {fmtTon(item.orderedTon)}
+                    <Td>
+                      <span className="flex flex-col gap-0.5 whitespace-nowrap">
+                        <span className="tabular-nums">
+                          {item.orderedQty}
+                          <small className="ml-px text-cap text-ink-3">{itemUnit}</small>
+                          <span className="text-cap text-ink-3"> · {fmtTon(item.orderedTon)}</span>
+                        </span>
+                        <span className="text-xs">
+                          <DueText dueDate={item.dueDate} risk={item.isDueRisk} done={cancelled || item.salesOrderItemStatus === 'SHIPPED'} />
+                        </span>
+                      </span>
                     </Td>
                     <Td>
-                      <DueText dueDate={item.dueDate} risk={item.isDueRisk} done={cancelled || item.salesOrderItemStatus === 'SHIPPED'} />
+                      <MeasureBar label="예약" unit={itemUnit} tone="brand" measure={item.measures.reserved} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="예약" unit={itemUnit} tone="brand" measure={item.measures.reserved} />
+                      <MeasureBar label="생산중" unit={itemUnit} tone="muted" measure={item.measures.inProduction} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="생산중" unit={itemUnit} tone="muted" measure={item.measures.inProduction} />
+                      <MeasureBar label="검사합격" unit={itemUnit} tone="ok" measure={item.measures.passed} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="검사합격" unit={itemUnit} tone="ok" measure={item.measures.passed} />
-                    </Td>
-                    <Td>
-                      <MeasureBar label="출하" unit={itemUnit} tone="run" measure={item.measures.shipped} />
+                      <MeasureBar label="출하" unit={itemUnit} tone="run" measure={item.measures.shipped} compact />
                     </Td>
                     <Td align="right" className="tabular-nums">
                       {cancelled ? '-' : `${item.shortage.unsecuredQty}${itemUnit}`}
@@ -168,14 +167,11 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             <tfoot>
               <tr>
                 <Td>합계</Td>
-                <Td align="right" className="tabular-nums">
+                <Td className="whitespace-nowrap tabular-nums">
                   {detail.totalOrderedQty}
                   {unit}
+                  <span className="text-cap font-normal text-ink-3"> · {fmtTon(sumTon(detail.items.map((i) => i.orderedTon)))}</span>
                 </Td>
-                <Td align="right" className="tabular-nums">
-                  {fmtTon(sumTon(detail.items.map((i) => i.orderedTon)))}
-                </Td>
-                <Td />
                 <Td className="tabular-nums">
                   {sum((i) => i.activeReservedQty)} / {sum((i) => i.shortage.unshippedQty)}
                   {unit}

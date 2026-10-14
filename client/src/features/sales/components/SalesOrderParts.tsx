@@ -93,12 +93,24 @@ export type MeasureTone = keyof typeof MEASURE_FILL;
 
 /**
  * 충족 지표 하나: 막대 + "n / 분모" (업무 프로세스 4.5: 분모를 늘 함께 보이고 지표를 더하지 않는다).
- * 분모가 0이면 막대 대신 '-'.
+ * 분모가 0이면 막대 대신 '-'. compact = 지표 네 칸이 나란한 충족 현황 표처럼 좁게 (최소 폭 118 → 92px)
  */
-export function MeasureBar({ measure, unit, tone = 'run', label }: { measure: ProgressMeasure; unit: string; tone?: MeasureTone; label: string }) {
+export function MeasureBar({
+  measure,
+  unit,
+  tone = 'run',
+  label,
+  compact = false,
+}: {
+  measure: ProgressMeasure;
+  unit: string;
+  tone?: MeasureTone;
+  label: string;
+  compact?: boolean;
+}) {
   const percent = percentOf(measure);
   return (
-    <div className="flex min-w-[118px] flex-col gap-1" title={`${label} ${measureText(measure, unit)}`}>
+    <div className={cn('flex flex-col gap-1', compact ? 'min-w-[92px]' : 'min-w-[118px]')} title={`${label} ${measureText(measure, unit)}`}>
       <span className="flex items-baseline justify-between gap-2 text-xs tabular-nums">
         <b className="font-semibold">{measure.qty.toLocaleString('en-US')}</b>
         <span className="text-cap text-ink-3">
