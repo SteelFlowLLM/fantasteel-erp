@@ -90,56 +90,59 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             {unit}
           </b>
         </div>
-        <Table compact>
-          <thead>
-            <tr>
-              <Th align="right">순번</Th>
-              <Th>히트 번호</Th>
-              <Th>전로</Th>
-              <Th>생산일</Th>
-              <Th align="right">히트 톤</Th>
-              <Th>성분 판정</Th>
-              <Th>연주</Th>
-              <Th align="right">슬래브</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {plan.heats.map((heat) => (
-              <tr key={heat.seq} data-pet-item="heat" data-pet-item-title={heat.heatNo ?? `순번 ${heat.seq}`}>
-                <Td align="right" className="tabular-nums">
-                  {heat.seq}
-                </Td>
-                <Td>
-                  {heat.heatNo ? (
-                    <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
-                      {heat.heatNo}
-                    </Link>
-                  ) : (
-                    <span className="text-cap text-ink-3">제강 전</span>
-                  )}
-                </Td>
-                <Td className="font-mono text-xs">{heat.converterCode ?? '-'}</Td>
-                <Td className="tabular-nums">{heat.producedDate ? fmtDate(heat.producedDate) : '-'}</Td>
-                <Td align="right" className="tabular-nums">
-                  {heat.heatTon ? fmtTon(heat.heatTon) : '-'}
-                </Td>
-                <Td>
-                  {heat.inspectionResult ? (
-                    <Badge tone={INSPECTION_RESULT_TONE[heat.inspectionResult]}>
-                      {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
-                    </Badge>
-                  ) : (
-                    '-'
-                  )}
-                </Td>
-                <Td>{heat.castDone ? <Badge tone="ok">완료</Badge> : <span className="text-cap text-ink-3">전</span>}</Td>
-                <Td align="right" className="tabular-nums">
-                  {heat.slabQty}매
-                </Td>
+        {/* 글자를 키워 표가 카드보다 넓어지면 카드 밖으로 삐져나오지 않고 카드 안에서 옆으로 스크롤한다 */}
+        <div className="overflow-x-auto">
+          <Table compact>
+            <thead>
+              <tr>
+                <Th align="right">순번</Th>
+                <Th>히트 번호</Th>
+                <Th>전로</Th>
+                <Th>생산일</Th>
+                <Th align="right">히트 톤</Th>
+                <Th>성분 판정</Th>
+                <Th>연주</Th>
+                <Th align="right">슬래브</Th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {plan.heats.map((heat) => (
+                <tr key={heat.seq} data-pet-item="heat" data-pet-item-title={heat.heatNo ?? `순번 ${heat.seq}`}>
+                  <Td align="right" className="tabular-nums">
+                    {heat.seq}
+                  </Td>
+                  <Td>
+                    {heat.heatNo ? (
+                      <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
+                        {heat.heatNo}
+                      </Link>
+                    ) : (
+                      <span className="text-cap text-ink-3">제강 전</span>
+                    )}
+                  </Td>
+                  <Td className="font-mono text-xs">{heat.converterCode ?? '-'}</Td>
+                  <Td className="tabular-nums">{heat.producedDate ? fmtDate(heat.producedDate) : '-'}</Td>
+                  <Td align="right" className="tabular-nums">
+                    {heat.heatTon ? fmtTon(heat.heatTon) : '-'}
+                  </Td>
+                  <Td>
+                    {heat.inspectionResult ? (
+                      <Badge tone={INSPECTION_RESULT_TONE[heat.inspectionResult]}>
+                        {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
+                      </Badge>
+                    ) : (
+                      '-'
+                    )}
+                  </Td>
+                  <Td>{heat.castDone ? <Badge tone="ok">완료</Badge> : <span className="text-cap text-ink-3">전</span>}</Td>
+                  <Td align="right" className="tabular-nums">
+                    {heat.slabQty}매
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </CardBody>
     </Card>
   );

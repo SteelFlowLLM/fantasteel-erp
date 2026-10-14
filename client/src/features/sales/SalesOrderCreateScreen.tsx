@@ -366,7 +366,8 @@ export function SalesOrderCreateScreen() {
           />
         </div>
 
-        <Card petKey="card:salesOrderNew.preview">
+        {/* flex-none: 글자를 키워 칸이 모자라도 카드가 내용보다 작게 눌려 글이 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤) */}
+        <Card className="flex-none" petKey="card:salesOrderNew.preview">
           <CardHead title="품목별 예약 미리보기" meta="매수 기준 · 저장 전" />
           {preview.error ? (
             <div className="px-4 py-3">
@@ -438,7 +439,7 @@ export function SalesOrderCreateScreen() {
           </div>
         </Card>
 
-        <Card petKey="card:salesOrderNew.afterSave">
+        <Card className="flex-none" petKey="card:salesOrderNew.afterSave">
           <CardHead title="저장하면 이렇게 돼요" />
           <CardBody>
             <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-ink-2">

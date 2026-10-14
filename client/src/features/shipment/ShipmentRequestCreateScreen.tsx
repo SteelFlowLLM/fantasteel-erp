@@ -215,7 +215,8 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
           <Kpi flat label="이론중량 (계산값)" value={fmtTon(totalTon).replace(' t', '')} unit="t" sub="매수 × 1매 이론중량 · 등록할 때 다시 계산해요" />
           <Kpi flat label="출하 요청일" value={requestedShipDate ? fmtMD(requestedShipDate) : '-'} sub={earliestDue ? `가장 이른 납기 ${earliestDue}` : '품목을 고르면 납기가 보여요'} />
         </StatBar>
-        <Card petKey="card:shipmentRequestNew.selected">
+        {/* flex-none: 글자를 키워 칸이 모자라도 카드가 내용보다 작게 눌려 안내 글이 잘리지 않게 한다 (화면 전체가 스크롤) */}
+        <Card className="flex-none" petKey="card:shipmentRequestNew.selected">
           <CardHead title="선택한 품목" meta={selected.length ? `${selected.length}품목` : undefined} />
           {selected.length === 0 ? (
             <EmptyNote>{customerId === null ? '왼쪽에서 고객사를 고르고 출하할 품목을 체크해 주세요.' : '왼쪽 목록에서 출하할 품목을 체크해 주세요.'}</EmptyNote>
@@ -307,7 +308,7 @@ function CreateForm({ customers }: { customers: ShippableCustomer[] }) {
           )}
           <p className="border-t border-line px-4 py-2.5 text-cap text-ink-3">부분 출하는 출하요청을 나눠서 해요. 예: 10매 중 4매를 먼저 요청하고, 나머지 6매는 다음 출하요청으로 해요.</p>
         </Card>
-        <Card petKey="card:shipmentRequestNew.requestInfo">
+        <Card className="flex-none" petKey="card:shipmentRequestNew.requestInfo">
           <CardHead title="요청 정보" meta="출하요청 번호는 등록할 때 정해져요" />
           <CardBody className="grid grid-cols-2 gap-4">
             <Field label={<span data-pet-term="출하 요청일">출하 요청일</span>} required htmlFor="sr-date" error={dateError} hint="출고는 물류가 확정해요">
