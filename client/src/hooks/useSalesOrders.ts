@@ -1,15 +1,19 @@
 // 수주 조회 훅 (목록·상세·생산 연결·이력·등록 미리보기·업무방 요약·취소 창의 구매 진행 영향)
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { salesOrderApi, salesOrderKeys, type SalesOrderPreviewInputLine } from '@/api/salesOrders';
+import { PERMISSION } from '@/codes';
+import { useCanView } from '@/hooks/usePermission';
 
 export function useSalesOrderList() {
   return useQuery({ queryKey: salesOrderKeys.list(), queryFn: salesOrderApi.list });
 }
 
 export function useSalesOrderDetail(salesOrderId: number | null) {
+  // 밀시트 목록은 밀시트 조회 권한이 있을 때만 부른다 (생산·품질 등은 수주는 보지만 밀시트는 못 본다)
+  const withMillSheets = useCanView(PERMISSION.MILL_SHEET_READ);
   return useQuery({
-    queryKey: salesOrderKeys.detail(salesOrderId ?? 0),
-    queryFn: () => salesOrderApi.detail(salesOrderId ?? 0),
+    queryKey: [...salesOrderKeys.detail(salesOrderId ?? 0), withMillSheets],
+    queryFn: () => salesOrderApi.detail(salesOrderId ?? 0, withMillSheets),
     enabled: salesOrderId !== null,
   });
 }

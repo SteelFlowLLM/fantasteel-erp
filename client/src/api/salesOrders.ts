@@ -191,7 +191,7 @@ export const salesOrderApi = {
   list: (): Promise<SalesOrderListRow[]> => serverSalesOrderApi.listAll(),
 
   /** 수주 상세: 품목별 충족 현황(SO-004, 분모 포함), 예약, 출하요청, 밀시트, 취소 가능 여부 */
-  detail: (salesOrderId: number): Promise<SalesOrderDetail> => serverSalesOrderApi.detail(salesOrderId),
+  detail: (salesOrderId: number, withMillSheets = true): Promise<SalesOrderDetail> => serverSalesOrderApi.detail(salesOrderId, withMillSheets),
 
   /** 생산 연결: 연결 계획의 편성표·편성 히트 */
   productionLinks: (salesOrderId: number): Promise<SalesOrderPlanLink[]> => serverSalesOrderApi.productionLinks(salesOrderId),

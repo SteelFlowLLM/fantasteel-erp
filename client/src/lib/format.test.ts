@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { trimNum } from '@/lib/format';
+import { fmtActorAt, trimNum } from '@/lib/format';
 
 describe('trimNum: 소수 끝의 0 지우기 (측정값·검사 기준 표시)', () => {
   it('시드 값("0.180", "10.000")과 입력한 값("0.18", "10")이 같은 글자가 된다', () => {
@@ -24,5 +24,13 @@ describe('trimNum: 소수 끝의 0 지우기 (측정값·검사 기준 표시)',
     expect(trimNum(null)).toBe('');
     expect(trimNum(undefined)).toBe('');
     expect(trimNum('')).toBe('');
+  });
+});
+
+describe('fmtActorAt: 누가 · 언제', () => {
+  it('이름이 있으면 "이름 · 월-일 시:분", 없으면 시각만 (빈 이름을 "-"로 보이지 않는다)', () => {
+    // 2026-10-14 14:13 (서울) = 05:13 UTC
+    expect(fmtActorAt('박서영', '2026-10-14T05:13:00Z')).toBe('박서영 · 10-14 14:13');
+    expect(fmtActorAt(null, '2026-10-14T05:13:00Z')).toBe('10-14 14:13');
   });
 });

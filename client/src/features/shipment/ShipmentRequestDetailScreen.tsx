@@ -15,14 +15,13 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { StateView } from '@/components/StateView';
 import { Steps, type StepItem } from '@/components/Steps';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import { AllocationLineCard } from '@/features/shipment/components/AllocationLineCard';
 import { MillSheetLink, SalesOrderLink, ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
 import { ShipmentRequestMaster } from '@/features/shipment/components/ShipmentRequestMaster';
 import { qtyUnitOf } from '@/features/shipment/lib/shipmentForm';
 import { useCanUse } from '@/hooks/usePermission';
 import { useCancelShipmentRequest, useConfirmShipmentAllocations, useShipmentRequestDetail } from '@/hooks/useShipmentRequests';
-import { fmtDateTime, fmtMDHM, fmtTon } from '@/lib/format';
+import { fmtActorAt, fmtDateTime, fmtTon } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 import { permissionNeedText } from '@/lib/permissions';
 
@@ -62,7 +61,7 @@ function DetailBody({ detail }: { detail: ShipmentRequestDetailView }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const cancel = useCancelShipmentRequest(() => setCancelOpen(false));
   const confirmAll = useConfirmShipmentAllocations();
-  useShellTitle(`${detail.shipmentRequestNo} 배정`, detail.customerName);
+  // 상단 바는 화면 이름(출하요청) 그대로 둔다: 번호로 바꾸면 바로 아래 머리와 같은 번호가 크게 두 번 보였다 (품질 화면과 같은 규칙)
 
   const unit = qtyUnitOf(detail.lines.map((l) => l.itemType));
   const salesOrders = [...new Map(detail.lines.map((l) => [l.salesOrderId, l.salesOrderNo])).entries()];
@@ -123,7 +122,7 @@ function DetailBody({ detail }: { detail: ShipmentRequestDetailView }) {
           columns={3}
           className="flex-1"
           items={[
-            { label: '요청', value: `${detail.requesterName ?? '-'} · ${fmtMDHM(detail.createdAt)}` },
+            { label: '요청', value: fmtActorAt(detail.requesterName, detail.createdAt) },
             { label: '출하 요청일', value: detail.requestedShipDate },
             { label: '배정 매수', value: `${detail.totalAllocatedQty} / ${detail.totalRequestQty}${unit}` },
             { label: '고객사', value: detail.customerName },
