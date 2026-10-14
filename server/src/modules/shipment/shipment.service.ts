@@ -117,6 +117,7 @@ export class ShipmentService {
     const where: Prisma.ShipmentRequestWhereInput = {
       ...(query.shipmentRequestStatus ? { shipmentRequestStatus: query.shipmentRequestStatus } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.shipmentRequestNo ? { shipmentRequestNo: { contains: query.shipmentRequestNo.trim(), mode: 'insensitive' as const } } : {}),
     };
     const [rows, total] = await Promise.all([
       this.repository.findMany(this.prisma, where, (query.page - 1) * query.size, query.size),
@@ -152,6 +153,8 @@ export class ShipmentService {
           itemCode: i.item.itemCode,
           itemName: i.item.itemName,
           itemType: i.item.itemType as ItemType,
+          theoreticalWeightTon: i.item.theoreticalWeightTon?.toFixed(3) ?? null,
+          steelGradeCode: i.item.steelGrade?.steelGradeCode ?? null,
           orderedQty: i.orderedQty,
           dueDate: i.dueDate.toISOString().slice(0, 10),
           activeReservedQty,
@@ -170,9 +173,31 @@ export class ShipmentService {
       if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.ISSUED) throw new AppException('SHP-003');
       // 이미 취소된 요청의 재취소용 코드가 정의서 9.3에 없다 (shipment.md 8장)
       if (locked.shipment_request_status === SHIPMENT_REQUEST_STATUS.CANCELLED) throw new AppException('COM-001', '이미 취소된 출하요청이에요');
-      // 출하요청 취소용 작업 로그 유형은 공통 코드에 없다(shipment.md 8장 🟡). 배정 해제는 ALLOCATION_RELEASED로 남는다
+      const request = await this.repository.findDetail(tx, id);
+      if (!request) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
+      // 배정 해제는 배정마다 ALLOCATION_RELEASED로 남는다
       await this.inventory.releaseShipmentAllocationsOfRequest(tx, { shipmentRequestId: id, actor: user, reason: `출하요청 ${locked.shipment_request_no} 취소로 배정 해제` });
       await this.repository.updateStatus(tx, id, SHIPMENT_REQUEST_STATUS.CANCELLED);
+
+      // business_event.sales_order_id가 하나라서 등록과 같이 수주마다 한 건씩 남긴다 (수주 타임라인 REQ-LOG-003)
+      const salesOrderIds = [...new Set(request.shipmentRequestItems.map((i) => i.salesOrderItem.salesOrderId))];
+      for (const salesOrderId of salesOrderIds) {
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CANCELLED,
+          actor: user,
+          target: { table: 'shipment_request', id },
+          salesOrderId,
+          before: { shipmentRequestStatus: locked.shipment_request_status },
+          after: {
+            shipmentRequestNo: locked.shipment_request_no,
+            shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.CANCELLED,
+            items: request.shipmentRequestItems
+              .filter((i) => i.salesOrderItem.salesOrderId === salesOrderId)
+              .map((i) => ({ salesOrderItemId: i.salesOrderItemId, requestQty: i.requestQty })),
+          },
+          reason: `출하요청 ${locked.shipment_request_no} 취소`,
+        });
+      }
     });
     return this.findOne(user, id);
   }

@@ -12,7 +12,7 @@ import { PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { currentAllocationOf, heatInspectionResult, productInspectionResult } from '@/features/inventory/lib/inventoryRules';
 import { decDiv, decSum } from '@/lib/decimal';
 import { productEligibility } from '@/lib/eligibility';
-import { calcWeightTon } from '@/lib/weight';
+import { calcTheoreticalWeightTon, calcWeightTon } from '@/lib/weight';
 
 const productType = (itemType: string): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
 const isProduct = (lotType: string) => lotType === 'SLAB' || lotType === 'COIL';
@@ -25,14 +25,29 @@ const readItems = async () => new Map((await orEmpty(() => serverRequest<ItemVie
 const readReceipts = async () =>
   new Map((await orEmpty(() => allPages<GoodsReceiptView>('/goods-receipts'), [])).flatMap((r) => (r.lotId === null ? [] : [[r.lotId, r] as const])));
 
+/** 규격 코드 = 유형-강종-두께x폭x길이 (REQ-MST-003). 형식이 다르면 null */
+const SPEC_CODE = /^(?:SL|CL)-[^-]+-(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/;
+function sizeFromSpecCode(itemCode: string): { thicknessMm: string; widthMm: string; lengthMm: string } | null {
+  const match = SPEC_CODE.exec(itemCode);
+  return match ? { thicknessMm: match[1], widthMm: match[2], lengthMm: match[3] } : null;
+}
+
 async function listProducts(): Promise<ProductInventoryView[]> {
   const [overview, items, availableLots] = await Promise.all([readOverview(), readItems(), allPages<LotSummary>('/lots', { lotStatus: 'AVAILABLE' })]);
   const lotsByItem = new Map<number, LotSummary[]>();
   for (const lot of availableLots) if (lot.itemId !== null && isProduct(lot.lotType)) lotsByItem.set(lot.itemId, [...(lotsByItem.get(lot.itemId) ?? []), lot]);
   return overview.products.map((row) => {
     const item = items.get(row.itemId);
-    // 규격 목록을 못 읽으면 합격 톤 ÷ 합격 매수로 1매 이론중량을 구한다
-    const theoreticalWeightTon = item?.theoreticalWeightTon ?? (row.onHandQty > 0 ? decDiv(row.onHandTon, row.onHandQty) : '0.000');
+    // 규격 목록을 못 읽으면(물류) 치수는 규격 코드에서 읽고 1매 이론중량은 같은 식으로 구한다.
+    // 합격 톤 ÷ 합격 매수로 구하면 재고 0인 규격이 0.000 t로 보였다. 코드 형식이 다를 때만 그 방식으로 되돌아간다
+    const size = item ? { thicknessMm: item.thicknessMm, widthMm: item.widthMm, lengthMm: item.lengthMm } : sizeFromSpecCode(row.itemCode);
+    const theoreticalWeightTon =
+      item?.theoreticalWeightTon ??
+      (size?.thicknessMm && size.widthMm && size.lengthMm
+        ? calcTheoreticalWeightTon(size.thicknessMm, size.widthMm, size.lengthMm)
+        : row.onHandQty > 0
+          ? decDiv(row.onHandTon, row.onHandQty)
+          : '0.000');
     const lots = lotsByItem.get(row.itemId) ?? [];
     const onHandQty = Math.max(lots.length, row.onHandQty);
     const failedQty = lots.filter((l) => l.inspectionResult === 'FAIL').length;
@@ -56,9 +71,9 @@ async function listProducts(): Promise<ProductInventoryView[]> {
       onHandTon: calcWeightTon(onHandQty, theoreticalWeightTon),
       passedTon: row.onHandTon,
       availableTon: row.availableTon,
-      thicknessMm: item?.thicknessMm ?? null,
-      widthMm: item?.widthMm ?? null,
-      lengthMm: item?.lengthMm ?? null,
+      thicknessMm: size?.thicknessMm ?? null,
+      widthMm: size?.widthMm ?? null,
+      lengthMm: size?.lengthMm ?? null,
       defaultYardName: null,
       qtyUnit: PRODUCT_QTY_UNIT[itemType],
       reservedTon: calcWeightTon(row.reservedQty, theoreticalWeightTon),
@@ -79,7 +94,7 @@ function detailReader() {
   };
 }
 
-/** 생산완료일(원료는 입고일) 최근 순 → LOT 번호 (가짜 DB lotList와 같은 순서) */
+/** 생산완료일(원료는 입고일) 최근 순 → LOT 번호 */
 const byProducedDesc = (a: LotListView, b: LotListView) => b.producedDate.localeCompare(a.producedDate) || a.lotNo.localeCompare(b.lotNo);
 
 async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
@@ -127,7 +142,7 @@ async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
   return rows.sort(byProducedDesc);
 }
 
-/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계 (가짜 DB와 같은 기준). 권한이 없으면(구매·관리자 외) 0 */
+/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
 async function scheduledReceiptTonByItem(): Promise<Map<number, string[]>> {
   const purchaseOrders = await orEmpty(() => allPages<PurchaseOrderView>('/purchase-orders'), []);
   const byItem = new Map<number, string[]>();

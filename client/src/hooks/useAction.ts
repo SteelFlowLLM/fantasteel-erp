@@ -1,6 +1,6 @@
 // 변경 요청 공통 훅: 실패하면 오류를 토스트로 보이고, 성공하면 조회를 무효화하고 안내한다 (옛 hooks/useApi.ts).
 // const save = useAction(salesOrderApi.create, { success: '수주를 등록했어요' });
-// 가짜 DB는 한 번의 변경이 여러 화면(수주·재고·LOT·알림 배지 …)에 걸치므로, 성공하면 모든 조회를 무효화한다.
+// 한 번의 변경이 여러 화면(수주·재고·LOT·알림 배지 …)에 걸치므로, 성공하면 모든 조회를 무효화한다.
 import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { toast } from '@/stores/useToastStore';
 

@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
 import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardFoot } from '@/components/Card';
@@ -123,14 +123,16 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
 
   const renderLabel = (field: keyof DraftForm, required: boolean) => (
     <span className="flex flex-wrap items-center gap-1.5">
-      <span>
+      <span data-pet-term={DRAFT_FIELD_LABEL[field]}>
         {DRAFT_FIELD_LABEL[field]}
         {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </span>
       {isUnresolved(field) ? (
-        <Badge tone="wait" plain>
-          미확정
-        </Badge>
+        <span data-pet-term="미확정">
+          <Badge tone="wait" plain>
+            미확정
+          </Badge>
+        </span>
       ) : null}
     </span>
   );
@@ -146,7 +148,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
   const cell = 'h-auto py-2.5 whitespace-normal align-middle';
 
   return (
-    <Card className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
+    <Card petKey="card:purchaseRequisitions.draftForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 입력하고 확정해 주세요' : '초안 내용'}</h2>
         <span className="flex items-center gap-1.5 rounded-sm border border-dashed border-line-strong bg-surface-2 px-2 py-1 text-cap text-ink-3">
@@ -201,26 +203,26 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                   : '기준정보에 등록된 원료'}
               </Td>
             </tr>
-            <tr data-risk={isUnresolved('requiredTon') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requiredTon', true)}</Td>
+            <tr data-risk={isUnresolved('requestedTon') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requestedTon', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <Input
-                    aria-label={DRAFT_FIELD_LABEL.requiredTon}
+                    aria-label={DRAFT_FIELD_LABEL.requestedTon}
                     numeric
                     suffix="t"
                     inputMode="decimal"
                     placeholder="0.000"
                     className="w-44"
-                    value={form.requiredTon}
-                    invalid={Boolean(getFieldError('requiredTon'))}
+                    value={form.requestedTon}
+                    invalid={Boolean(getFieldError('requestedTon'))}
                     disabled={pending}
-                    onChange={(event) => setField('requiredTon', event.target.value)}
+                    onChange={(event) => setField('requestedTon', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requiredTon ? fmtTon(draft.payload.requiredTon) : null)
+                  renderReadValue(draft.payload.requestedTon ? fmtTon(draft.payload.requestedTon) : null)
                 )}
-                {renderFieldError('requiredTon')}
+                {renderFieldError('requestedTon')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>0보다 큰 톤 · 소수 3자리까지</Td>
             </tr>
@@ -244,7 +246,9 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
               <Td className={cn(cell, 'text-cap text-ink-3')}>YYYY-MM-DD 날짜</Td>
             </tr>
             <tr>
-              <Td className={cn(cell, 'text-ink-2')}>요청자</Td>
+              <Td className={cn(cell, 'text-ink-2')}>
+                <span data-pet-term="요청자">요청자</span>
+              </Td>
               <Td className={cell}>
                 <span className="text-sm text-ink">
                   {draft.requester.employeeName}

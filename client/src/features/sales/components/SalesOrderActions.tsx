@@ -65,25 +65,25 @@ export function FulfillmentMeasures({ item, compact }: { item: ItemFulfillment; 
   return (
     <div className={compact ? 'grid grid-cols-2 gap-x-3 gap-y-2' : 'grid grid-cols-4 gap-3'}>
       <div className="flex flex-col gap-0.5">
-        <span className="text-cap text-ink-3" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 ÷ 미출하 매수`}>
+        <span data-pet-term="예약 ÷ 미출하" className="text-cap text-ink-3" title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 ÷ 미출하 매수`}>
           예약 <span className="text-ink-3">÷ 미출하</span>
         </span>
         <MeasureBar label="예약" unit={unit} tone="brand" measure={item.measures.reserved} />
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="text-cap text-ink-3" title="진행중·완료 생산계획의 잔여 목표 ÷ 수주 매수">
+        <span data-pet-term="생산중 ÷ 수주" className="text-cap text-ink-3" title="진행중·완료 생산계획의 잔여 목표 ÷ 수주 매수">
           생산중 <span className="text-ink-3">÷ 수주</span>
         </span>
         <MeasureBar label="생산중" unit={unit} tone="muted" measure={item.measures.inProduction} />
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="text-cap text-ink-3" title="이 품목 몫으로 확보한 합격 제품(예약 + 출하) ÷ 수주 매수">
+        <span data-pet-term="검사합격 ÷ 수주" className="text-cap text-ink-3" title="이 품목 몫으로 확보한 합격 제품(예약 + 출하) ÷ 수주 매수">
           검사합격 <span className="text-ink-3">÷ 수주</span>
         </span>
         <MeasureBar label="검사합격" unit={unit} tone="ok" measure={item.measures.passed} />
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="text-cap text-ink-3" title="출고 확정 매수 ÷ 수주 매수">
+        <span data-pet-term="출하 ÷ 수주" className="text-cap text-ink-3" title="출고 확정 매수 ÷ 수주 매수">
           출하 <span className="text-ink-3">÷ 수주</span>
         </span>
         <MeasureBar label="출하" unit={unit} tone="run" measure={item.measures.shipped} />

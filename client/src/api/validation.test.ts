@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, FieldErrors, InputError } from '@/api/client';
-import { assertUnchanged, decimalText, nonNegativeInteger, optionalDate, optionalText, requiredText, requireRow } from '@/api/validation';
-import { createSeedTables } from '@/mock/seed';
+import { ApiError, FieldErrors, InputError } from '@/api/errors';
+import { assertUnchanged, decimalText, nonNegativeInteger, optionalDate, optionalText, requiredText } from '@/api/validation';
 
 const errorsOf = (run: (errors: FieldErrors) => void): Readonly<Record<string, string>> => {
   const errors = new FieldErrors();
@@ -49,15 +48,7 @@ describe('입력 확인 도우미', () => {
     expect(errorsOf((e) => optionalDate(e, 'd', '2026-02-30', '마감일'))).toEqual({ d: '마감일은 YYYY-MM-DD 형식의 날짜로 입력해 주세요' });
   });
 
-  it('없는 참조는 COM-003, 화면을 연 뒤 바뀐 행은 COM-001', () => {
-    const tables = createSeedTables();
-    expect(requireRow(tables, 'department', 1).departmentCode).toBe('SAL');
-    expect(() => requireRow(tables, 'department', 999)).toThrow(ApiError);
-    try {
-      requireRow(tables, 'yard', null);
-    } catch (error) {
-      expect(error instanceof ApiError && error.code).toBe('COM-003');
-    }
+  it('화면을 연 뒤 바뀐 행은 COM-001', () => {
     expect(() => assertUnchanged('2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')).not.toThrow();
     expect(() => assertUnchanged('2026-10-01T00:00:00.000Z', undefined)).not.toThrow();
     try {

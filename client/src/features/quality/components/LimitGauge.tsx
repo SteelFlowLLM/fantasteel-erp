@@ -6,20 +6,21 @@ export function LimitGauge({ item, value, bad }: { item: LimitLike; value: strin
   const g = gaugeGeometry(item, value);
   if (!g) return <span className="text-cap text-ink-3">기준이 없어 게이지를 그릴 수 없어요</span>;
   const shown = value?.trim() ?? '';
-  // 눈금 글자가 기준 전체를 말한다(단위, 한쪽만 있으면 이상·이하). 카드 아래 "기준 …" 줄을 따로 두지 않는다
+  // 눈금 글자가 기준 전체를 말한다(단위, 한쪽만 있으면 이상·이하). 카드 아래 "기준 …" 줄을 따로 두지 않는다.
+  // 판정의 잣대라 카드에서 가장 작은 글씨가 되지 않게 12px·진한 회색으로 둔다 (글줄 16px이 들어가게 아래 여백 20px)
   const edge = gaugeEdgeLabels(item);
   return (
-    <div className="px-5.5 pt-1 pb-4">
+    <div className="px-5.5 pt-1 pb-5">
       <div className="relative h-2" role="img" aria-label={`기준 ${limitText(item)}${shown ? `, 측정값 ${shown}` : ''}`}>
         <div className="absolute inset-0 rounded-sm bg-surface-3" />
-        <div className="absolute top-0 bottom-0 rounded-sm bg-[#bfe3ce]" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
+        <div className="absolute top-0 bottom-0 rounded-sm bg-ok-band" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
         {edge.min !== null ? (
-          <span className="absolute top-2.5 -translate-x-1/2 text-2xs whitespace-nowrap text-ink-3 tabular-nums" style={{ left: `${g.from}%` }}>
+          <span className="absolute top-2.5 -translate-x-1/2 text-xs font-medium whitespace-nowrap text-ink-2 tabular-nums" style={{ left: `${g.from}%` }}>
             {edge.min}
           </span>
         ) : null}
         {edge.max !== null ? (
-          <span className="absolute top-2.5 -translate-x-1/2 text-2xs whitespace-nowrap text-ink-3 tabular-nums" style={{ left: `${g.to}%` }}>
+          <span className="absolute top-2.5 -translate-x-1/2 text-xs font-medium whitespace-nowrap text-ink-2 tabular-nums" style={{ left: `${g.to}%` }}>
             {edge.max}
           </span>
         ) : null}
@@ -37,7 +38,7 @@ export function MiniGauge({ item, value, bad }: { item: LimitLike; value: string
   if (!g) return <span className="text-cap text-ink-3">—</span>;
   return (
     <div className="relative h-2 w-[132px] rounded-sm bg-surface-3" aria-hidden="true">
-      <div className="absolute top-0 bottom-0 rounded-sm bg-[#bfe3ce]" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
+      <div className="absolute top-0 bottom-0 rounded-sm bg-ok-band" style={{ left: `${g.from}%`, width: `${Math.max(0, g.to - g.from)}%` }} />
       {g.mark !== null ? <div className={cn('absolute -top-[3px] -ml-0.5 h-3.5 w-1 rounded-xs', bad ? 'bg-danger' : 'bg-ink')} style={{ left: `${g.mark}%` }} /> : null}
     </div>
   );

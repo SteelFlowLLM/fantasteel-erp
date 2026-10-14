@@ -23,7 +23,7 @@ import { FormationCard } from '@/features/production/components/FormationCard';
 import { MasterListItem, Row } from '@/features/production/components/MasterList';
 import { PlanFlags, PlanStatusBadge, ProductTypeTag } from '@/features/production/components/PlanBadges';
 import { PlanLotsCard } from '@/features/production/components/PlanLotsCard';
-import { CancelPlanModal, ReproductionModal } from '@/features/production/components/PlanModals';
+import { CancelPlanModal, ConfirmHeatPlanModal, ReproductionModal } from '@/features/production/components/PlanModals';
 import { ResultsTable } from '@/features/production/components/ResultsTable';
 import { countResultsByProcess, isOverdue, processStepItems } from '@/features/production/lib/productionDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -41,42 +41,58 @@ function PlanListRow({ plan, active, onPick }: { plan: ProductionPlanListRow; ac
   const d = plan.dueDate ? dLabel(plan.dueDate) : '';
   const open = plan.productionPlanStatus === 'PLANNED' || plan.productionPlanStatus === 'IN_PROGRESS';
   return (
-    <MasterListItem active={active} onPick={onPick}>
+    <MasterListItem active={active} onPick={onPick} petItem="productionPlan" petTitle={plan.productionPlanNo}>
       <Row>
-        <span className="font-mono text-mono font-semibold text-ink">{plan.productionPlanNo}</span>
+        <span className="font-mono text-mono font-semibold text-ink" data-pet-field="계획번호">
+          {plan.productionPlanNo}
+        </span>
         <ProductTypeTag itemType={plan.itemType} />
         <PlanFlags isReproduction={plan.isReproduction} isSurplusOnCompletion={plan.isSurplusOnCompletion} />
-        <span className="ml-auto">
+        <span className="ml-auto" data-pet-field="상태">
           <PlanStatusBadge status={plan.productionPlanStatus} />
         </span>
       </Row>
       <Row className="text-xs">
         {plan.salesOrderNo ? (
           <span className="min-w-0 truncate">
-            <span className="font-mono">{plan.salesOrderNo}</span>
-            {plan.customerName ? <span className="text-ink-2"> · {plan.customerName}</span> : null}
+            <span className="font-mono" data-pet-field="수주번호">
+              {plan.salesOrderNo}
+            </span>
+            {plan.customerName ? (
+              <span className="text-ink-2">
+                {' · '}
+                <span data-pet-field="고객사">{plan.customerName}</span>
+              </span>
+            ) : null}
           </span>
         ) : (
-          <span className="text-ink-3">수주 연결 없음</span>
+          <span className="text-ink-3" data-pet-field="수주">
+            수주 연결 없음
+          </span>
         )}
-        <b className="ml-auto whitespace-nowrap tabular-nums">
+        <b className="ml-auto whitespace-nowrap tabular-nums" data-pet-field="부족 매수">
           부족 {plan.shortageQty}
           {unit}
         </b>
       </Row>
       <Row className="text-cap text-ink-3">
-        <span className="truncate font-mono">{plan.itemCode}</span>
-        <span className="ml-auto whitespace-nowrap">
+        <span className="truncate font-mono" data-pet-field="규격">
+          {plan.itemCode}
+        </span>
+        <span className="ml-auto whitespace-nowrap" data-pet-field="연주 진행">
           히트 {plan.heatsCastQty}/{plan.heatCount} 연주
         </span>
       </Row>
       {plan.dueDate ? (
         <Row className="text-cap text-ink-3">
-          <span className={isOverdue(d, plan.productionPlanStatus) ? 'font-semibold text-danger' : undefined}>
+          <span className={isOverdue(d, plan.productionPlanStatus) ? 'font-semibold text-danger' : undefined} data-pet-field="납기">
             납기 {fmtMD(plan.dueDate)}
             {open ? ` · ${d}` : ''}
           </span>
-          <span className="ml-auto">합격 {plan.passedQty}{unit}</span>
+          <span className="ml-auto" data-pet-field="합격">
+            합격 {plan.passedQty}
+            {unit}
+          </span>
         </Row>
       ) : null}
     </MasterListItem>
@@ -98,6 +114,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
   }, [plans, keyword, status, type]);
   return (
     <MasterPane
+      petKey="card:productionPlans.list"
       head={
         <>
           <div className="flex items-baseline gap-2">
@@ -106,7 +123,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
           </div>
           <Input leadingIcon="search" placeholder="계획·수주번호·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="생산계획 검색" />
           <div className="flex items-center gap-1.5">
-            <Select value={status} onChange={(e) => setStatus(e.target.value as ProductionPlanStatus | '')} aria-label="상태" className="w-28">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as ProductionPlanStatus | '')} aria-label="상태" className="w-28" data-pet-term="상태 전체">
               <option value="">상태 전체</option>
               {Object.values(PRODUCTION_PLAN_STATUS).map((s) => (
                 <option key={s} value={s}>
@@ -115,7 +132,7 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
               ))}
             </Select>
             {(['ALL', 'SLAB', 'COIL'] as const).map((t) => (
-              <Chip key={t} on={type === t} onClick={() => setType(t)}>
+              <Chip key={t} on={type === t} onClick={() => setType(t)} data-pet-term="제품 유형">
                 {t === 'ALL' ? '전체' : ITEM_TYPE_LABEL[t]}
               </Chip>
             ))}
@@ -135,13 +152,15 @@ function PlanList({ plans, selectedId, onPick }: { plans: readonly ProductionPla
 
 export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
   const canPlan = useCanUse(PERMISSION.PRODUCTION_PLAN_CONFIRM);
-  const [modal, setModal] = useState<'cancel' | 'reproduce' | null>(null);
+  const [modal, setModal] = useState<'cancel' | 'reproduce' | 'heat' | null>(null);
   const unit = PRODUCT_QTY_UNIT[plan.item.itemType];
   const so = plan.salesOrder;
   const status = plan.productionPlanStatus;
   const open = status === 'PLANNED' || status === 'IN_PROGRESS';
   const repro = plan.reproduction;
   const showRepro = repro !== null && repro.canReproduce && repro.additionalPlanQty > 0;
+  const formation = plan.formation;
+  const heatChanged = status === 'PLANNED' && formation !== null && formation.recalculatedHeatCount !== formation.heatCount;
   const steps = processStepItems({
     itemType: plan.item.itemType,
     productionPlanStatus: status,
@@ -235,6 +254,19 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
           )}
         </Banner>
       ) : null}
+      {heatChanged && formation ? (
+        <Banner
+          tone="wait"
+          actions={
+            <Button size="sm" icon="check" disabled={!canPlan} title={canPlan ? undefined : needText} onClick={() => setModal('heat')}>
+              히트 편성 확정
+            </Button>
+          }
+        >
+          <b>{`히트 ${formation.heatCount}개 → ${formation.recalculatedHeatCount}개`}</b>{' '}
+          — 기준정보가 바뀌어 지금 기준으로 다시 계산한 히트 수가 저장된 편성과 달라요. 작업을 시작하기 전이라 편성을 다시 확정할 수 있어요.
+        </Banner>
+      ) : null}
       {status === 'CANCELLED' ? <Banner>{fmtDateTime(plan.cancelledAt)}에 취소된 계획이에요.</Banner> : null}
       {plan.isSurplusOnCompletion ? (
         <Banner tone="wait">
@@ -247,7 +279,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
         <div className="flex min-w-0 flex-col gap-4">
           <FormationCard plan={plan} steps={steps} />
 
-          <Card>
+          <Card petKey="card:productionPlans.heats">
             <CardHead title="히트" meta={`편성 ${plan.progress.heatCount}개 · 제강 ${plan.progress.heatsMadeQty}개 · 연주 ${plan.progress.heatsCastQty}개`} />
             <CardBody flush>
               <Table compact>
@@ -264,7 +296,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
                 </thead>
                 <tbody>
                   {plan.heats.map((h) => (
-                    <tr key={h.seq} data-muted={h.heatLotId === null ? true : undefined}>
+                    <tr key={h.seq} data-muted={h.heatLotId === null ? true : undefined} data-pet-item="heat" data-pet-item-title={h.heatNo ?? `순번 ${h.seq} (제강 전)`}>
                       <Td>{h.seq}</Td>
                       <Td className="font-mono text-mono">{h.heatNo ?? '제강 전'}</Td>
                       <Td className="font-mono text-mono">{h.converterCode ?? '-'}</Td>
@@ -285,7 +317,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
             </CardBody>
           </Card>
 
-          <Card>
+          <Card petKey="card:productionPlans.results">
             <CardHead
               title="작업 실적"
               meta="제선 → 제강 → 연주 → 열연"
@@ -306,7 +338,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <Card>
+          <Card petKey="card:productionPlans.salesOrder">
             <CardHead title="연결된 수주 품목" />
             <CardBody>
               {so ? (
@@ -347,8 +379,8 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHead title="진행" meta={`분모 = 부족 매수 ${plan.formation?.shortageQty ?? 0}${unit}`} />
+          <Card petKey="card:productionPlans.progress">
+            <CardHead title="진행" meta={<span data-pet-term="분모">{`분모 = 부족 매수 ${plan.formation?.shortageQty ?? 0}${unit}`}</span>} />
             <CardBody>
               <KvList
                 items={[
@@ -373,6 +405,7 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
 
       {modal === 'cancel' ? <CancelPlanModal planId={plan.id} planNo={plan.productionPlanNo} updatedAt={plan.updatedAt} onClose={() => setModal(null)} /> : null}
       {modal === 'reproduce' && repro ? <ReproductionModal check={repro} itemType={plan.item.itemType} onClose={() => setModal(null)} /> : null}
+      {modal === 'heat' ? <ConfirmHeatPlanModal plan={plan} onClose={() => setModal(null)} /> : null}
     </>
   );
 }

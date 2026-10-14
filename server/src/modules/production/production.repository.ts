@@ -16,7 +16,7 @@ export const planSummarySelect = {
   salesOrderItemId: true,
   createdAt: true,
   updatedAt: true,
-  item: { select: { itemCode: true, itemName: true, itemType: true, steelGrade: { select: { steelGradeCode: true } } } },
+  item: { select: { itemCode: true, itemName: true, itemType: true, theoreticalWeightTon: true, steelGrade: { select: { steelGradeCode: true } } } },
   salesOrderItem: {
     select: {
       id: true,

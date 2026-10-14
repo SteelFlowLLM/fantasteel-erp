@@ -17,6 +17,8 @@ interface Stage {
   key: string;
   label: string;
   screen: ScreenDef;
+  /** 화면 도우미 펫이 이 칸을 읽을 때 쓰는 항목 종류 (용어 사전 변수명) */
+  petItem: string;
   /** null = 볼 권한 없음 */
   value: ReactNode | null;
   detail?: string;
@@ -41,11 +43,12 @@ const MY_STAGE: Partial<Record<RoleCode, Stage['key']>> = {
 function stagesOf(data: ProcessFlowData): Stage[] {
   const { salesOrders, productionPlans, inspections, inventories, shipmentRequests, goodsIssues } = data;
   return [
-    { key: 'salesOrders', label: '진행 중 수주', screen: SCREEN.salesOrders, value: salesOrders && count(salesOrders.openCount, '건'), detail: salesOrders ? `납기 위험 ${salesOrders.dueRiskCount}건` : undefined },
+    { key: 'salesOrders', label: '진행 중 수주', screen: SCREEN.salesOrders, petItem: 'salesOrder', value: salesOrders && count(salesOrders.openCount, '건'), detail: salesOrders ? `납기 위험 ${salesOrders.dueRiskCount}건` : undefined },
     {
       key: 'productionPlans',
       label: '생산계획',
       screen: SCREEN.productionPlans,
+      petItem: 'productionPlan',
       value: productionPlans && count(productionPlans.plannedCount + productionPlans.inProgressCount, '건'),
       detail: productionPlans ? `계획 ${productionPlans.plannedCount} · 진행중 ${productionPlans.inProgressCount}` : undefined,
     },
@@ -53,6 +56,7 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       key: 'inspections',
       label: '판정 대기',
       screen: SCREEN.inspections,
+      petItem: 'inspection',
       value: inspections && count(inspections.pendingCount, 'LOT'),
       detail: inspections ? `히트 ${inspections.heatCount} · 슬래브 ${inspections.slabCount} · 코일 ${inspections.coilCount}` : undefined,
       emptyText: '판정할 LOT 없음',
@@ -62,6 +66,7 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       key: 'inventories',
       label: '제품 가용재고',
       screen: SCREEN.inventories,
+      petItem: 'inventory',
       value: (
         <>
           {count(inventories.slabAvailableQty, '매')} <span className="text-ink-2">·</span> {count(inventories.coilAvailableQty, '개')}
@@ -73,6 +78,7 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       key: 'shipmentRequests',
       label: '출하요청',
       screen: SCREEN.shipmentRequests,
+      petItem: 'shipmentRequest',
       value: shipmentRequests && count(shipmentRequests.requestedCount + shipmentRequests.allocatedCount, '건'),
       detail: shipmentRequests ? `배정 대기 ${shipmentRequests.requestedCount} · 배정 확정 ${shipmentRequests.allocatedCount}` : undefined,
     },
@@ -80,6 +86,7 @@ function stagesOf(data: ProcessFlowData): Stage[] {
       key: 'goodsIssues',
       label: '오늘 출고 확정',
       screen: SCREEN.goodsIssues,
+      petItem: 'goodsIssue',
       value: goodsIssues && count(goodsIssues.issuedRequestCount, '건'),
       detail: goodsIssues ? `LOT ${goodsIssues.issuedLotCount}개` : undefined,
     },
@@ -106,11 +113,11 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 {stage.label}
               </span>
               {isMine ? (
-                // 강조 칸은 배경이 run-bg라 같은 색 태그는 묻힌다: 진한 바탕에 흰 글자로. 0건이면 흰 칸이라 옅은 태그로 둔다
+                // 강조 칸은 배경이 run-bg라 같은 색 태그는 묻힌다: 진한 바탕에 흰 글자로. 0건이면 옅게 물든 칸이라 흰 바탕 태그로 둔다
                 <span
                   className={cn(
                     'inline-flex min-h-4 flex-none items-center rounded-full px-1.5 text-2xs font-semibold whitespace-nowrap',
-                    isStrong ? 'bg-run text-white' : 'bg-run-bg text-run',
+                    isStrong ? 'bg-run text-white' : 'bg-surface text-run ring-1 ring-run/30',
                   )}
                 >
                   내 업무
@@ -123,10 +130,12 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
                 권한 없음
               </span>
             ) : (
-              <span className={cn('font-bold whitespace-nowrap tabular-nums', isStrong ? 'text-[34px] leading-none text-run' : 'text-2xl text-ink')}>{stage.value}</span>
+              <span className={cn('font-bold whitespace-nowrap tabular-nums', isStrong ? 'text-[34px] leading-none text-run' : 'text-2xl text-ink')} data-pet-field={stage.label}>
+                {stage.value}
+              </span>
             )}
             {stage.value !== null && stage.detail ? (
-              <span className="truncate text-cap font-medium text-ink-2" title={isEmptyMine ? `${stage.emptyText} · ${stage.detail}` : stage.detail}>
+              <span className="truncate text-cap font-medium text-ink-2" title={isEmptyMine ? `${stage.emptyText} · ${stage.detail}` : stage.detail} data-pet-field="세부">
                 {/* 0건이면 내역도 모두 0이라 할 일이 없다는 말만 둔다 (내역은 마우스를 올리면 보인다) */}
                 {isEmptyMine ? (
                   <span className="font-semibold text-ok">
@@ -143,7 +152,12 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
         const boxClass = cn(
           'flex min-w-[104px] flex-col justify-center gap-1 rounded-md border px-3 py-2',
           // 테두리를 굵게 하면 칸 크기가 달라지므로 바깥 그림자로 강조한다 (입력칸 포커스와 같은 방식). 내 업무 칸은 조금 넓게
-          isStrong ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]' : 'flex-1 border-line-strong bg-surface',
+          isStrong
+            ? 'flex-[1.35] border-run bg-run-bg shadow-[0_0_0_1px_var(--color-run),0_0_0_5px_var(--color-run-bg)]'
+            : // 0건이어도 내 업무 칸은 태그만으로는 다른 단계와 구분이 안 된다: 크기·글자는 그대로 두고 테두리와 바탕만 옅게 물들인다
+              isEmptyMine
+              ? 'flex-1 border-run/40 bg-run-bg/50'
+              : 'flex-1 border-line-strong bg-surface',
           // 내 업무를 강조할 때만 나머지 단계를 흐리게 (숫자·바로가기는 그대로, 올리면 또렷하게)
           highlight && !isMine && 'opacity-60 hover:opacity-100',
         );
@@ -152,11 +166,11 @@ function FlowBody({ data }: { data: ProcessFlowData }) {
           <Fragment key={stage.key}>
             {index > 0 ? <Icon name="chevron-right" size="sm" className="flex-none self-center text-ink-2" /> : null}
             {canOpen ? (
-              <Link href={stage.screen.href} className={cn(boxClass, 'text-ink no-underline hover:border-run hover:bg-surface')}>
+              <Link href={stage.screen.href} data-pet-perch={`stage:${stage.key}`} data-pet-item={stage.petItem} data-pet-item-title={stage.label} className={cn(boxClass, 'text-ink no-underline hover:border-run', !isMine && 'hover:bg-surface')}>
                 {inner}
               </Link>
             ) : (
-              <div className={boxClass} title={stage.value !== null ? `${stage.screen.label} 화면을 열 권한이 없어요` : undefined}>
+              <div data-pet-perch={`stage:${stage.key}`} data-pet-item={stage.petItem} data-pet-item-title={stage.label} className={boxClass} title={stage.value !== null ? `${stage.screen.label} 화면을 열 권한이 없어요` : undefined}>
                 {inner}
               </div>
             )}

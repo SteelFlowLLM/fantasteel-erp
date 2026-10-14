@@ -1,8 +1,7 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
-// 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
+// 숫자는 모두 api/dashboard.ts가 서버에서 읽은 값이다.
 import Link from 'next/link';
 import { useState } from 'react';
-import { isServerDataSource } from '@/api/http';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -50,7 +49,7 @@ function RawMaterialBody({ data }: { data: RawMaterialBalanceData }) {
             const short = decCmp(m.netTon, 0) > 0;
             const gross = Number(m.grossTon);
             return (
-              <tr key={m.itemId} data-risk={short || undefined}>
+              <tr key={m.itemId} data-risk={short || undefined} data-pet-item="rawMaterial" data-pet-item-title={m.itemName}>
                 <Td className="max-w-36 truncate" title={`${m.itemName} (${m.itemCode})`}>
                   <b className="font-semibold">{m.itemName}</b> <span className="font-mono text-cap text-ink-3">{m.itemCode}</span>
                 </Td>
@@ -120,15 +119,32 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
   const inspected = data.grades.filter((g) => g.inspectedCount > 0);
   const notInspected = data.grades.filter((g) => g.inspectedCount === 0);
   const isPass = mode === 'pass';
+  // 기간 전체 요약을 맨 위에 크게 둔다: 불합격이 없으면 막대가 하나도 없어 위젯이 비어 보였다
+  const totalInspected = inspected.reduce((sum, g) => sum + g.inspectedCount, 0);
+  const totalFailed = inspected.reduce((sum, g) => sum + g.failedCount, 0);
+  const total = rateOf({ inspectedCount: totalInspected, failedCount: totalFailed, rejectRate: totalInspected > 0 ? totalFailed / totalInspected : null }, mode);
+  const totalTone = !isPass && totalFailed > 0 ? 'danger' : undefined;
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
+      {inspected.length > 0 ? (
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-b border-line pb-2.5">
+          <Figure label="판정한 검사" value={fmtInt(totalInspected)} unit="건" />
+          <Figure label={isPass ? '합격' : '불합격'} value={fmtInt(total.count)} unit="건" tone={totalTone} />
+          <Figure label={isPass ? '합격률' : '불합격률'} value={fmtPct(total.rate, 1)} tone={totalTone} />
+        </div>
+      ) : null}
       {inspected.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
         const { rate, count } = rateOf(g, mode);
         const noReject = !isPass && g.failedCount === 0;
         // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
-          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div
+            key={g.steelGradeId}
+            data-pet-item="steelGrade"
+            data-pet-item-title={g.steelGradeCode}
+            className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs"
+          >
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
             {noReject ? (
               // 0%는 막대를 그리지 않고 글자만: 색칠한 막대는 꽉 찬 비율(100%)로 읽혔다
@@ -140,12 +156,14 @@ function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }
               <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
             )}
             <span className="text-right tabular-nums">
-              <b className={cn('font-semibold', noReject ? 'text-ok' : rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)}>{fmtPct(rate, 1)}</b>{' '}
-              <span className="text-cap text-ink-3">
+              <b className={cn('font-semibold', noReject ? 'text-ok' : rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)} data-pet-field={isPass ? '합격률' : '불합격률'}>
+                {fmtPct(rate, 1)}
+              </b>{' '}
+              <span className="text-cap text-ink-3" data-pet-field={isPass ? '합격 / 판정' : '불합격 / 판정'}>
                 {count}/{g.inspectedCount}건
               </span>
             </span>
-            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
+            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3" data-pet-field="공정별">
               {byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ')}
             </span>
           </div>
@@ -204,7 +222,7 @@ function DeliveryRiskBody({ data }: { data: DeliveryRiskData }) {
       </thead>
       <tbody>
         {data.items.map((item) => (
-          <tr key={item.salesOrderItemId} data-risk={item.isOverdue || undefined}>
+          <tr key={item.salesOrderItemId} data-risk={item.isOverdue || undefined} data-pet-item="salesOrder" data-pet-item-title={item.salesOrderNo}>
             <Td className="font-mono text-xs font-medium">
               <Link href={`/sales-orders/${item.salesOrderId}`} className="text-run hover:underline">
                 {item.salesOrderNo}
@@ -293,15 +311,22 @@ function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
             </span>
           </div>
           {open.purchaseOrders.map((po) => (
-            <div key={po.purchaseOrderId} className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs">
-              <Link href={`/purchase-orders?po=${po.purchaseOrderId}`} className="flex-none font-mono font-medium text-run hover:underline">
+            <div
+              key={po.purchaseOrderId}
+              data-pet-item="purchaseOrder"
+              data-pet-item-title={po.purchaseOrderNo}
+              className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs"
+            >
+              <Link href={`/purchase-orders?po=${po.purchaseOrderId}`} className="flex-none font-mono font-medium text-run hover:underline" data-pet-field="발주 번호">
                 {po.purchaseOrderNo}
               </Link>
-              <span className="min-w-0 truncate text-ink-2" title={`${po.supplierName} · ${po.lineCount}개 품목`}>
+              <span className="min-w-0 truncate text-ink-2" title={`${po.supplierName} · ${po.lineCount}개 품목`} data-pet-field="공급업체">
                 {po.supplierName}
               </span>
-              <span className="ml-auto flex-none tabular-nums">{fmtTon(po.scheduledReceiptTon)}</span>
-              <span className="min-w-16 flex-none whitespace-nowrap text-right text-cap text-ink-3 tabular-nums">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
+              <span className="ml-auto flex-none tabular-nums" data-pet-field="입고예정">
+                {fmtTon(po.scheduledReceiptTon)}
+              </span>
+              <span className="min-w-16 flex-none whitespace-nowrap text-right text-cap text-ink-3 tabular-nums" data-pet-field="입고 예정일">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
             </div>
           ))}
           {open.purchaseOrders.length === 0 ? <WidgetEmpty>입고가 남은 발주가 없어요</WidgetEmpty> : null}
@@ -340,7 +365,7 @@ function ShipmentResultBody({ data }: { data: ShipmentResultData }) {
         <Figure label="코일" value={fmtInt(data.totalCoilQty)} unit="개" />
         <Figure label="출고 중량" value={fmtTon(data.totalTon)} />
       </div>
-      <DailyBars points={data.series} />
+      <DailyBars points={data.series} petItem="goodsIssue" />
       {data.totalSlabQty + data.totalCoilQty === 0 ? <WidgetEmpty>최근 {data.days}일 동안 출고가 없어요</WidgetEmpty> : null}
     </div>
   );
@@ -371,22 +396,32 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
       </div>
       <div className="flex flex-col border-t border-line">
         {data.items.map((item) => (
-          <div key={item.itemId} className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs" title={`${item.itemCode} · ${fmtTon(item.surplusTon)} · ${item.oldestSinceDate}부터`}>
-            <span className="min-w-0 flex-1 truncate font-mono">{item.itemCode}</span>
-            <span className="flex-none tabular-nums">{item.surplusQty}매</span>
+          <div
+            key={item.itemId}
+            data-pet-item="inventory"
+            data-pet-item-title={item.itemCode}
+            className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs"
+            title={`${item.itemCode} · ${fmtTon(item.surplusTon)} · ${item.oldestSinceDate}부터`}
+          >
+            <span className="min-w-0 flex-1 truncate font-mono" data-pet-field="규격">
+              {item.itemCode}
+            </span>
+            <span className="flex-none tabular-nums" data-pet-field="여재">
+              {item.surplusQty}매
+            </span>
             <div className="h-1.5 w-16 flex-none overflow-hidden rounded-[3px] bg-surface-3">
               <span className="block h-full bg-[#c9731a]" style={{ width: pct(item.maxAgeDays, maxAge) }} />
             </div>
-            <b className="min-w-10 flex-none whitespace-nowrap text-right font-semibold tabular-nums">{item.maxAgeDays}일</b>
+            <b className="min-w-10 flex-none whitespace-nowrap text-right font-semibold tabular-nums" data-pet-field="보유 일수">
+              {item.maxAgeDays}일
+            </b>
           </div>
         ))}
         {data.items.length === 0 ? <WidgetEmpty>여재 슬래브가 없어요</WidgetEmpty> : null}
       </div>
       <span className="text-cap text-ink-3">
         {/* 서버에는 여재 전환 시각이 없어 생산완료일부터 센다 (inventory.md 8-1) */}
-        {isServerDataSource()
-          ? '여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터'
-          : '여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (재고 화면 여재와 같은 값) · 보유 일수 = 여재로 바뀐 날부터'}
+        여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터
       </span>
     </div>
   );
@@ -414,7 +449,7 @@ function ProductionVolumeBody({ data }: { data: ProductionVolumeData }) {
         <Figure label="코일" value={fmtInt(data.totalCoilQty)} unit="개" />
         <Figure label="생산 중량" value={fmtTon(data.totalTon)} />
       </div>
-      <DailyBars points={data.series} />
+      <DailyBars points={data.series} petItem="lot" />
       {data.totalSlabQty + data.totalCoilQty === 0 ? <WidgetEmpty>최근 {data.days}일 동안 생산이 없어요</WidgetEmpty> : null}
     </div>
   );

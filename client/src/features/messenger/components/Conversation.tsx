@@ -4,8 +4,8 @@
 // 새 메시지 구분선: 방을 연 순간의 읽음 위치 뒤 첫 남의 메시지 위. 열자마자 읽음 처리돼도 남기고, 내가 보내면 지운다.
 // 읽음 처리(REQ-MSG-004): 창을 보고 있고 맨 아래까지 봤을 때 남이 보낸 마지막 메시지까지 읽은 것으로 한다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AI_MENTION } from '@fantasteel/shared';
 import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
-import { isServerDataSource } from '@/api/http';
 import { MESSAGE_PAGE_SIZE, type ChatRoomDetailView } from '@/api/messenger';
 import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
@@ -109,7 +109,7 @@ function RoomView({
   const newDividerId = readBaseline === null ? null : firstUnreadId(items, readBaseline);
   const layout = useMemo(() => layoutMessages(items, newDividerId), [items, newDividerId]);
 
-  const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
+  const mentionNames = useMemo(() => [...room.mentionTargets.map((t) => t.name), AI_MENTION.slice(1), me.employeeName, me.departmentName], [room.mentionTargets, me.employeeName, me.departmentName]);
   const myNames = useMemo(() => [me.employeeName, me.departmentName], [me.employeeName, me.departmentName]);
 
   const scrollToBottom = useCallback(() => {
@@ -198,13 +198,13 @@ function RoomView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
+      <section data-pet-target="card:messenger.thread" data-pet-perch="" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
         <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
           <span className="relative flex-none">
             <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
             <PresenceDot employeeId={counterpartId} />
           </span>
-          <div className="flex min-w-0 flex-col">
+          <div data-pet-item="chatRoom" data-pet-item-title={room.displayName} className="flex min-w-0 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
             <span className="truncate text-cap text-ink-3">
               {buildRoomCaption(room)}
@@ -294,12 +294,10 @@ function RoomView({
             </Button>
           </div>
         ) : null}
-        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 (서버 모드만) */}
-        {isServerDataSource() ? (
-          <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
-            {typing}
-          </div>
-        ) : null}
+        {/* 입력 중 줄은 높이를 미리 잡아 두어 표시가 생겨도 대화가 밀리지 않게 한다 */}
+        <div className="h-5 flex-none px-5 text-cap text-ink-3" aria-live="polite">
+          {typing}
+        </div>
         <Composer
           room={room}
           onSent={() => {

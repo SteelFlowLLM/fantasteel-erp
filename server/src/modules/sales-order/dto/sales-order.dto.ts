@@ -36,6 +36,12 @@ export class CancelSalesOrderDto {
 }
 
 export class ListSalesOrdersQuery {
+  /** 수주번호 일부 (대소문자 무시) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(30, { message: '수주번호는 30자까지 입력해 주세요' })
+  salesOrderNo?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

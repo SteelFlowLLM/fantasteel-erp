@@ -30,6 +30,7 @@ export function Badge({ tone = 'neutral', plain, title, className, children }: B
   return (
     <span
       title={title}
+      data-pet-term={typeof children === 'string' ? children : undefined}
       className={cn(
         'inline-flex min-h-5 items-center gap-[5px] whitespace-nowrap rounded-xs px-[7px] text-xs font-semibold',
         TONE[tone],

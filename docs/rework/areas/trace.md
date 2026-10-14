@@ -2,7 +2,7 @@
 
 - 2026-10-01, 병렬 작업(worktree) 영역. 근거: stage5.md 4~6번, 요구사항 REQ-LOT-005·REQ-LOG-001~003, 업무 프로세스 BP-LOT-01·BP-LOG-01·12.2(GET /lots/:id/trace?direction=, GET /business-events?salesOrderId=)·9.1(EV-), 용어 사전 TRM-068·072·073·074·084·086·116, 보고서 4 A-3·A-4·C, 보고서 6 A-1(통합 검색), PLAN 5장·6장·7장.
 - 세 화면 모두 **조회 전용**이다. 변경 함수가 없으므로 이 영역이 새로 남기는 작업 로그도 없다.
-- 거래 데이터(lot·lot_relation·business_event·business_event_lot 등)는 core-domain이 병렬로 만든다. 이 worktree에는 거래 시드가 없어서 화면은 빈 상태로 보이고, 테스트는 테스트 전용 고정 데이터(`features/lotTrace/testing/traceFixture.ts`)로 돌린다. **이 영역의 시드는 없다**(등록할 것 없음).
+- 거래 데이터(lot·lot_relation·business_event·business_event_lot 등)는 core-domain이 병렬로 만든다. 이 worktree에는 거래 시드가 없어서 화면은 빈 상태로 보이고, 테스트는 테스트 전용 고정 데이터(`features/lotTrace/testing/traceFixture.ts`, 2026-10-13 가짜 DB 테스트와 함께 지움)로 돌렸다. **이 영역의 시드는 없다**(등록할 것 없음).
 
 ## 1. 화면·주소
 

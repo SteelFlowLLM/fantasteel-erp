@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { SalesOrderDetail } from '@/api/salesOrders';
 import { ERROR_MESSAGE, PERMISSION } from '@/codes';
 import { Banner } from '@/components/Banner';
@@ -59,6 +59,7 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
         : '등록된 수주가 없어요';
   return (
     <MasterPane
+      petKey="card:salesOrders.master"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -81,13 +82,13 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
             aria-label="수주 검색"
           />
           <div className="flex gap-1.5">
-            <Chip on={chip === 'ALL'} onClick={() => setChip('ALL')}>
+            <Chip data-pet-term="전체" on={chip === 'ALL'} onClick={() => setChip('ALL')}>
               전체
             </Chip>
-            <Chip on={chip === 'OPEN'} onClick={() => setChip('OPEN')}>
+            <Chip data-pet-term="진행중" on={chip === 'OPEN'} onClick={() => setChip('OPEN')}>
               진행중
             </Chip>
-            <Chip on={chip === 'RISK'} onClick={() => setChip('RISK')}>
+            <Chip data-pet-term="납기 위험" on={chip === 'RISK'} onClick={() => setChip('RISK')}>
               납기 위험
             </Chip>
           </div>
@@ -106,6 +107,8 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
                     <Link
                       href={`/sales-orders/${row.id}`}
                       aria-current={row.id === currentId ? 'page' : undefined}
+                      data-pet-item="salesOrder"
+                      data-pet-item-title={row.salesOrderNo}
                       className="flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2 aria-[current=page]:bg-brand-tint aria-[current=page]:hover:bg-brand-tint-hover"
                     >
                       <span className="flex items-center gap-1.5">
@@ -113,8 +116,12 @@ function SalesOrderMaster({ currentId }: { currentId: number | null }) {
                         <span className="ml-auto">{row.isDueRisk ? <DueRiskBadge /> : <SalesOrderStatusBadge status={row.status} />}</span>
                       </span>
                       <span className="truncate text-xs text-ink-2">
-                        {row.customerName} · {row.totalOrderedQty}
-                        {unit} · {fmtTon(row.totalOrderedTon)}
+                        <span data-pet-field="고객사">{row.customerName}</span> ·{' '}
+                        <span data-pet-field="수주 매수">
+                          {row.totalOrderedQty}
+                          {unit}
+                        </span>{' '}
+                        · <span data-pet-field="톤 (계산값)">{fmtTon(row.totalOrderedTon)}</span>
                       </span>
                       <span className="text-cap text-ink-3">
                         납기 <DueText dueDate={row.earliestDueDate} risk={row.isDueRisk} done={row.status === 'SHIPPED' || row.status === 'CANCELLED'} />
@@ -170,12 +177,16 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
   const done = detail.status === 'SHIPPED' || detail.status === 'CANCELLED';
   const cancelBlockCode = detail.cancelBlock === 'SO-003' || detail.cancelBlock === 'SO-004' ? detail.cancelBlock : null;
+  // 부분 출고 뒤 잔량을 취소한 수주는 출고분이 남는다 (BP-SO-02 예외)
+  const shippedTotal = detail.items.reduce((sum, i) => sum + i.shippedQty, 0);
   return (
     <>
-      <div className="flex flex-none flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div data-pet-target="card:salesOrders.header" className="flex flex-none flex-col gap-2">
+        <div data-pet-item="salesOrder" data-pet-item-title={detail.salesOrderNo} className="flex flex-wrap items-center gap-2">
           <h1 className="font-mono text-2xl font-semibold">{detail.salesOrderNo}</h1>
-          <span className="text-lg font-medium">{detail.customerName}</span>
+          <span data-pet-field="고객사" className="text-lg font-medium">
+            {detail.customerName}
+          </span>
           <SalesOrderStatusBadge status={detail.status} />
           {detail.isDueRisk ? <DueRiskBadge /> : null}
           {detail.hasReproductionNeed ? <Tag tone="outline">재생산 필요</Tag> : null}
@@ -189,14 +200,16 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
-          <Tag>
-            가장 이른 납기 <DueText dueDate={detail.earliestDueDate} risk={detail.isDueRisk} done={done} />
-          </Tag>
+          <span data-pet-term="가장 이른 납기" className="inline-flex">
+            <Tag>
+              가장 이른 납기 <DueText dueDate={detail.earliestDueDate} risk={detail.isDueRisk} done={done} />
+            </Tag>
+          </span>
           <span>
             등록 {fmtDateTime(detail.createdAt)} · 담당 {detail.ownerName ?? '-'}
           </span>
           {canCancel && cancelBlockCode ? (
-            <span className="text-danger">
+            <span data-pet-term="취소 불가" className="text-danger">
               취소 불가 · {ERROR_MESSAGE[cancelBlockCode]} ({cancelBlockCode})
             </span>
           ) : null}
@@ -206,25 +219,28 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
       {detail.cancelledAt ? (
         <Banner tone="danger">
-          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'}
+          <b>{shippedTotal > 0 ? '잔량을 취소한 수주예요' : '취소된 수주예요'}</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'}
+          {shippedTotal > 0 ? ` · 출고된 ${shippedTotal.toLocaleString('en-US')}${qtyUnitOf(detail.itemTypes)}는 그대로예요` : null}
           {detail.cancellation ? ` · ${cancellationEffectsText(detail.cancellation)}` : null}
         </Banner>
       ) : null}
 
-      <div className="flex flex-none items-end gap-3">
+      <div data-pet-target="card:salesOrders.tabs" className="flex flex-none items-end gap-3">
         <Tabs<DetailTab>
           ariaLabel="수주 상세"
           className="flex-1"
           active={tab}
           onChange={setTab}
           items={[
-            { key: 'fulfillment', label: '충족 현황' },
-            { key: 'production', label: '생산 연결', count: production.data?.length },
-            { key: 'reservations', label: '예약', count: detail.reservations.length },
-            { key: 'history', label: '이력', count: timeline.data?.length },
+            { key: 'fulfillment', label: <span data-pet-term="충족 현황">충족 현황</span> },
+            { key: 'production', label: <span data-pet-term="생산 연결">생산 연결</span>, count: production.data?.length },
+            { key: 'reservations', label: <span data-pet-term="예약">예약</span>, count: detail.reservations.length },
+            { key: 'history', label: <span data-pet-term="이력">이력</span>, count: timeline.data?.length },
           ]}
         />
-        <span className="pb-2 text-cap text-ink-3">매수 기준 (슬래브 매 · 코일 개) · 톤은 계산값</span>
+        <span data-pet-term="매수 기준" className="pb-2 text-cap text-ink-3">
+          매수 기준 (슬래브 매 · 코일 개) · 톤은 계산값
+        </span>
       </div>
 
       {tab === 'fulfillment' ? <FulfillmentTab detail={detail} /> : null}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACTION_TYPE_CATALOG,
   getConfirmFailureTitle,
   countByDraftStatus,
   buildDraftFlowSteps,
@@ -39,29 +40,29 @@ describe('실행 결과 읽기', () => {
 });
 
 describe('입력 폼', () => {
-  const payload = { itemId: 3, requiredTon: '20.000', desiredReceiptDate: '2026-10-20', requestReason: null };
+  const payload = { itemId: 3, requestedTon: '20.000', desiredReceiptDate: '2026-10-20', requestReason: null };
 
   it('저장된 톤은 끝자리 0을 지워 보이고, 빈칸은 null로 저장한다', () => {
     expect(formatTonInput('20.000')).toBe('20');
     expect(formatTonInput('1.500')).toBe('1.5');
     expect(formatTonInput(null)).toBe('');
     const form = buildDraftForm(payload);
-    expect(form).toEqual({ itemId: 3, requiredTon: '20', desiredReceiptDate: '2026-10-20', requestReason: '' });
-    expect(buildDraftPayload({ ...form, requiredTon: ' ', requestReason: ' 10월 생산분 ' })).toEqual({
+    expect(form).toEqual({ itemId: 3, requestedTon: '20', desiredReceiptDate: '2026-10-20', requestReason: '' });
+    expect(buildDraftPayload({ ...form, requestedTon: ' ', requestReason: ' 10월 생산분 ' })).toEqual({
       itemId: 3,
-      requiredTon: null,
+      requestedTon: null,
       desiredReceiptDate: '2026-10-20',
       requestReason: '10월 생산분',
     });
-    expect(isSameDraftForm(form, { ...form, requiredTon: '20 ' })).toBe(true);
+    expect(isSameDraftForm(form, { ...form, requestedTon: '20 ' })).toBe(true);
     expect(isSameDraftForm(form, { ...form, itemId: null })).toBe(false);
   });
 
   it('미확정 표시는 저장된 값 기준이고, 고치는 중인 칸은 뺀다', () => {
-    const saved = buildDraftForm({ itemId: null, requiredTon: null, desiredReceiptDate: null, requestReason: null });
+    const saved = buildDraftForm({ itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null });
     const unresolved = ['원료 품목', '수량(톤)', '희망 입고일'];
     expect(isFieldUnresolved('itemId', unresolved, saved, saved)).toBe(true);
-    expect(isFieldUnresolved('requiredTon', unresolved, { ...saved, requiredTon: '20' }, saved)).toBe(false);
+    expect(isFieldUnresolved('requestedTon', unresolved, { ...saved, requestedTon: '20' }, saved)).toBe(false);
     expect(isFieldUnresolved('requestReason', unresolved, saved, saved)).toBe(false);
   });
 });
@@ -76,5 +77,20 @@ describe('표시', () => {
     });
     expect(getRequisitionStatusDisplay('WAITING_APPROVAL')).toEqual({ label: '승인 대기', tone: 'wait' });
     expect(getRequisitionStatusDisplay('ORDERED')).toEqual({ label: '발주 완료', tone: 'ok' });
+  });
+});
+
+describe('초안 업무 유형 등록부 (REQ-ACT-004)', () => {
+  it('구매요청 생성만 실행할 수 있고, 추출 스키마는 원료 품목·수량(톤)·희망 입고일·요청자, 요청 근거는 스키마 밖 선택 입력이다', () => {
+    const active = ACTION_TYPE_CATALOG.filter((entry) => entry.active);
+    expect(active.map((entry) => entry.actionType)).toEqual(['PURCHASE_REQUISITION_CREATE']);
+    expect(active[0].schemaFieldLabels).toEqual(['원료 품목', '수량(톤)', '희망 입고일', '요청자']);
+    expect(active[0].optionalInputLabels).toEqual(['요청 근거']);
+  });
+
+  it('나머지 유형은 모두 P2 준비 중이고 추출 스키마가 없다', () => {
+    const inactive = ACTION_TYPE_CATALOG.filter((entry) => !entry.active);
+    expect(inactive).toHaveLength(5);
+    expect(inactive.every((entry) => entry.grade === 'P2' && entry.schemaFieldLabels.length === 0)).toBe(true);
   });
 });

@@ -4,7 +4,7 @@
 // 임시 저장·'작성 중'은 없다(공통 코드 정의서). 반려된 요청은 요청자가 고쳐 다시 요청한다(10장 REJECTED → WAITING_APPROVAL).
 // 입력: 원료 1품목 · 수량(톤, 소수 3자리) (ERD: 구매요청 1건 = 원료 1품목), 희망 입고일, 요청 근거. 요청자·부서는 자동(요청한 사원·요청 시점 소속).
 import { useState, type ReactNode } from 'react';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { RequisitionView } from '@/api/purchasing';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -104,6 +104,9 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
   const material = materialRows.find((m) => m.id === values.itemId);
   const lineError = [fieldErrors.itemId, fieldErrors.requestedTon].filter(Boolean).join(' · ');
   const noHead = context.data !== undefined && headName === null;
+  // 부서장 본인 요청은 승인할 사람이 자기 자신뿐이라 서버가 PUR-001로 받지 않는다 (자동 승인 금지)
+  const selfHead = context.data?.isDepartmentHead === true;
+  const blocked = noHead || selfHead;
 
   return (
     <Modal
@@ -114,15 +117,17 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
         <>
           <span className="mr-auto text-cap text-ink-3">
             {context.data
-              ? headName
-                ? `${mode === 'resubmit' ? '다시 요청하면' : '등록하면'} 바로 승인 대기가 되고 ${context.data.departmentName} 부서장 ${headName}님에게 승인 요청이 가요`
-                : `${context.data.departmentName}에 부서장이 없어 승인 요청을 보낼 수 없어요`
+              ? selfHead
+                ? `${context.data.departmentName} 부서장 본인은 승인할 사람이 없어 요청할 수 없어요`
+                : headName
+                  ? `${mode === 'resubmit' ? '다시 요청하면' : '등록하면'} 바로 승인 대기가 되고 ${context.data.departmentName} 부서장 ${headName}님에게 승인 요청이 가요`
+                  : `${context.data.departmentName}에 부서장이 없어 승인 요청을 보낼 수 없어요`
               : null}
           </span>
           <Button onClick={onClose} disabled={pending}>
             취소
           </Button>
-          <Button variant="primary" onClick={submit} disabled={pending || materials.isPending}>
+          <Button variant="primary" onClick={submit} disabled={pending || materials.isPending || blocked}>
             {pending ? '처리하는 중…' : mode === 'resubmit' ? '다시 요청' : '등록'}
           </Button>
         </>
@@ -136,6 +141,9 @@ export function RequisitionFormModal({ mode, initial, requisition, notice, onClo
           </Banner>
         ) : null}
         {noHead ? <Banner tone="danger">소속 부서에 승인권자(부서장)가 지정되지 않아 등록할 수 없어요 (PUR-001). 관리자에게 부서장 지정을 요청해 주세요.</Banner> : null}
+        {selfHead ? (
+          <Banner tone="danger">부서장 본인 요청은 승인할 사람이 없어 등록할 수 없어요 (PUR-001, 자동 승인 금지). 부서원이 요청하면 승인함에서 승인해 주세요.</Banner>
+        ) : null}
         {failure ? <Banner tone="danger">{failure}</Banner> : null}
         {materials.error ? <Banner tone="danger">원료 목록을 불러오지 못했어요 · {errorMessageOf(materials.error)}</Banner> : null}
 

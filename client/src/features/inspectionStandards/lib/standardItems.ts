@@ -37,11 +37,11 @@ export interface ThicknessBand {
 
 const trimZeros = (value: string) => (value.includes('.') ? value.replace(/\.?0+$/, '') : value);
 
-/** 적용 두께 구간 표시: '전체' · '6 초과' · '16 이하' · '16 초과 40 이하' (mm) */
+/** 적용 두께 구간 표시: '전체' · '6 초과' · '16 이하' · '16 초과 ~ 40 이하' (mm). 검사 입력 화면(thicknessBandText)과 같은 글 */
 export function formatThicknessBand(band: ThicknessBand): string {
   const min = band.minThicknessMm ? trimZeros(band.minThicknessMm) : null;
   const max = band.maxThicknessMm ? trimZeros(band.maxThicknessMm) : null;
-  if (min && max) return `${min} 초과 ${max} 이하`;
+  if (min && max) return `${min} 초과 ~ ${max} 이하`;
   if (min) return `${min} 초과`;
   if (max) return `${max} 이하`;
   return '전체';
@@ -146,19 +146,10 @@ export function canHaveCommonStandard(processType: ProcessType): boolean {
   return processType !== 'STEELMAKING';
 }
 
-/**
- * 새 기준 창에서 '공통 (모든 강종)'을 고를 수 있는지. 공정을 아직 안 골랐으면 고를 수 있게 둔다.
- * 서버 모드는 고를 수 없다: 서버 ERD는 inspection_standard.steel_grade_id가 NOT NULL이라 강종 없는 기준을 저장할 수 없다.
- */
-export function canChooseCommonStandard(processType: ProcessType | '', serverMode: boolean): boolean {
-  if (serverMode) return false;
-  return processType === '' || canHaveCommonStandard(processType);
-}
-
 /** 공정·강종에 쓰는 지금 버전: 강종 전용 기준이 먼저, 없으면 공통 기준(강종 없음). 제강은 강종 전용 기준만 본다. */
 export function findCurrentStandard<T extends StandardHeadLike>(standards: readonly T[], processType: ProcessType, steelGradeId: number): T | undefined {
   if (!canHaveCommonStandard(processType)) return standards.find((s) => s.isCurrent && s.processType === processType && s.steelGradeId === steelGradeId);
-  // 자동 판정(core currentStandardOf)과 같은 함수
+  // 강종 전용 → 공통 기준 순서는 lib/inspectionJudgment와 같다
   return pickCurrentStandard(standards, processType, steelGradeId);
 }
 

@@ -16,6 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ProductionSimulationService } from '../modules/production/production-simulation.service';
 import { isItemApplicable } from '../modules/quality/inspection-judge';
 import { QualityService } from '../modules/quality/quality.service';
+import { RejectedLotService } from '../modules/quality/rejected-lot.service';
 import { SalesOrderService } from '../modules/sales-order/sales-order.service';
 
 const logger = new Logger('SeedProductionDemo');
@@ -32,12 +33,28 @@ const RECEIPTS: { itemCode: string; tons: [string, string] }[] = [
   { itemCode: 'SMN01', tons: ['20.000', '20.000'] },
 ];
 
-/** 수주 3건 (업무 프로세스 14.1 슬래브, 14.2 코일, 그리고 시작 전 계획) */
+/** 수주 4건 (업무 프로세스 14.1 슬래브, 14.2 코일, 시작 전 계획, 히트 성분 불합격 시연) */
 const ORDERS = [
   { key: 'slab', itemCode: 'SL-SS275-250x1200x10000', orderedQty: 10, dueInDays: 14 },
   { key: 'coil', itemCode: 'CL-SM355A-4.5x1500x544000', orderedQty: 6, dueInDays: 21 },
   { key: 'planned', itemCode: 'SL-SM355B-220x1400x9500', orderedQty: 8, dueInDays: 28 },
+  { key: 'heatFail', itemCode: 'SL-SS275-250x1200x10000', orderedQty: 3, dueInDays: 35 },
 ] as const;
+
+/**
+ * 히트 성분 불합격 시연 (가정값, docs/backend/seed.md): 수주 4 계획의 히트를 인(P) 0.058%로 판정한다(SS275 기준 0.05% 이하).
+ * 하위 슬래브는 검사하지 않아도 "불합격 히트의 하위 LOT"(TRM-078)으로 불합격 관리에 묶여 나온다
+ */
+const FAILED_HEAT_VALUES: Record<string, string> = { P: '0.0580' };
+
+/**
+ * 불합격 관리 시연용 슬래브 검사 (가정값, docs/backend/seed.md). 슬래브 계획의 앞 슬래브부터 차례로 쓴다.
+ * 연주 기준(사내 가정값): 표면 결함 깊이 0~2mm, 두께 편차 ±5mm. 나머지 항목은 기준 안 값.
+ */
+const REJECTED_SLABS: { values: Record<string, string>; disposition?: { dispositionStatus: 'HOLD'; dispositionReason: string } }[] = [
+  { values: { SURFACE_DEFECT_DEPTH: '2.6000' }, disposition: { dispositionStatus: 'HOLD', dispositionReason: '표면 결함 깊이 재측정 전까지 보류 (시연용 시드)' } },
+  { values: { THICKNESS_DEV: '6.2000' } },
+];
 
 const INSPECTED_PROCESS: Record<string, ProcessType> = {
   [LOT_TYPE.HEAT]: PROCESS_TYPE.STEELMAKING,
@@ -88,12 +105,35 @@ async function main() {
     logger.log(`슬래브 계획 시뮬레이션: ${slab.steps.map((s) => s.processType).join(' → ')} (${slab.productionPlanStatus})`);
     const coil = await simulation.simulate(producer, planIds.coil, { randomSeed: 20261007 });
     logger.log(`코일 계획 시뮬레이션: ${coil.steps.map((s) => s.processType).join(' → ')} (${coil.productionPlanStatus})`);
+    const heatFail = await simulation.simulate(producer, planIds.heatFail, { randomSeed: 20261008 });
+    logger.log(`히트 불합격 시연 계획 시뮬레이션: ${heatFail.steps.map((s) => s.processType).join(' → ')} (${heatFail.productionPlanStatus})`);
 
     const coilLots = await prisma.lot.findMany({ where: { productionResult: { productionPlanId: planIds.coil }, lotType: { in: [LOT_TYPE.HEAT, LOT_TYPE.SLAB] } }, orderBy: { id: 'asc' } });
     const quality = app.get(QualityService);
     for (const lot of coilLots) await quality.registerQualityInspection({ lotId: lot.id, values: await passingValues(prisma, lot.id) }, inspector);
     logger.log(`코일 계획 히트·슬래브 ${coilLots.length}건 검사 합격 → 열연 투입 화면에서 배정할 수 있어요`);
-    logger.log('완료: 슬래브 계획(검사 대기), 코일 계획(열연 투입 대기), 시작 전 계획 1건');
+
+    // 불합격 관리 시연: 슬래브 계획의 슬래브 2매만 검사 불합격 (히트·나머지 슬래브는 판정 대기로 둔다).
+    // 히트를 불합격시키면 하위 슬래브 10매가 모두 연쇄 불합격돼 판정 대기 흐름을 보일 수 없다
+    const slabLots = await prisma.lot.findMany({ where: { productionResult: { productionPlanId: planIds.slab }, lotType: LOT_TYPE.SLAB }, orderBy: { id: 'asc' }, take: REJECTED_SLABS.length });
+    const rejected = app.get(RejectedLotService);
+    for (const [index, sample] of REJECTED_SLABS.entries()) {
+      const lot = slabLots[index];
+      if (!lot) throw new Error(`슬래브 계획에 불합격 시연용 슬래브(${index + 1}번째)가 없습니다`);
+      await quality.registerQualityInspection({ lotId: lot.id, values: await passingValues(prisma, lot.id, sample.values) }, inspector);
+      if (sample.disposition) {
+        const { updatedAt } = await prisma.lot.findUniqueOrThrow({ where: { id: lot.id }, select: { updatedAt: true } });
+        await rejected.setLotDisposition(lot.id, { ...sample.disposition, expectedUpdatedAt: updatedAt.toISOString() }, inspector);
+      }
+      logger.log(`슬래브 ${lot.lotNo} 검사 불합격 (${Object.entries(sample.values).map(([code, value]) => `${code} ${value}`).join(', ')})${sample.disposition ? ` → 처리 상태 ${sample.disposition.dispositionStatus}` : ''}`);
+    }
+
+    // 히트 연쇄 불합격 시연: 수주 4 계획의 히트만 성분 불합격으로 판정한다 (슬래브는 판정 대기로 둔다)
+    const failedHeat = await prisma.lot.findFirstOrThrow({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.HEAT }, orderBy: { id: 'asc' } });
+    await quality.registerQualityInspection({ lotId: failedHeat.id, values: await passingValues(prisma, failedHeat.id, FAILED_HEAT_VALUES) }, inspector);
+    const childSlabs = await prisma.lot.count({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.SLAB } });
+    logger.log(`히트 ${failedHeat.lotNo} 성분 불합격 (P 0.0580) → 하위 슬래브 ${childSlabs}매 연쇄 불합격`);
+    logger.log('완료: 슬래브 계획(히트·슬래브 8매 판정 대기, 슬래브 2매 불합격), 코일 계획(열연 투입 대기), 시작 전 계획 1건, 히트 불합격 계획(히트 + 하위 슬래브)');
   } finally {
     await app.close();
   }
@@ -146,8 +186,11 @@ async function receiveRawMaterials(prisma: PrismaService, numbering: NumberingSe
   }
 }
 
-/** 그 LOT에 적용되는 최신 검사 기준 항목마다 기준 범위 안의 값 (최소·최대 가운데, 한쪽만 있으면 그 안쪽) */
-async function passingValues(prisma: PrismaService, lotId: number) {
+/**
+ * 그 LOT에 적용되는 최신 검사 기준 항목마다 기준 범위 안의 값 (최소·최대 가운데, 한쪽만 있으면 그 안쪽).
+ * overrides에 항목 코드가 있으면 그 값을 쓴다 (불합격 시연용 기준 밖 값)
+ */
+async function passingValues(prisma: PrismaService, lotId: number, overrides: Record<string, string> = {}) {
   const lot = await prisma.lot.findUniqueOrThrow({ where: { id: lotId }, select: { lotType: true, steelGradeId: true, item: { select: { steelGradeId: true, thicknessMm: true } } } });
   const steelGradeId = lot.lotType === LOT_TYPE.HEAT ? lot.steelGradeId : (lot.item?.steelGradeId ?? null);
   const standard = await prisma.inspectionStandard.findFirstOrThrow({
@@ -158,6 +201,8 @@ async function passingValues(prisma: PrismaService, lotId: number) {
   return standard.inspectionStandardItems
     .filter((item) => isItemApplicable(item, lot.item?.thicknessMm ?? null))
     .map((item) => {
+      const override = overrides[item.inspectionItemCode];
+      if (override !== undefined) return { inspectionStandardItemId: item.id, measuredValue: override };
       const min = item.minValue;
       const max = item.maxValue;
       const value = min && max ? min.add(max).div(2) : max ? max.mul(new Prisma.Decimal('0.8')) : min ? min.mul(new Prisma.Decimal('1.1')) : new Prisma.Decimal(0);

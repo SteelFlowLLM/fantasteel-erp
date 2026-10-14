@@ -60,7 +60,9 @@ function RadioRow({ name, checked, onChange, children }: { name: string; checked
 function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <fieldset className="flex flex-col gap-0.5 border-b border-line px-3 py-3">
-      <legend className="mb-1 px-1.5 text-cap font-semibold text-ink-3">{title}</legend>
+      <legend data-pet-term={title} className="mb-1 px-1.5 text-cap font-semibold text-ink-3">
+        {title}
+      </legend>
       {children}
     </fieldset>
   );
@@ -113,7 +115,7 @@ export function SalesOrderListScreen() {
 
   return (
     <>
-      <section aria-label="수주 필터" className="flex min-h-0 w-60 flex-none flex-col border-r border-line bg-surface">
+      <section aria-label="수주 필터" data-pet-target="card:salesOrders.filter" className="flex min-h-0 w-60 flex-none flex-col border-r border-line bg-surface">
         <div className="flex flex-none items-center gap-2 border-b border-line px-4 pt-3.5 pb-2.5">
           <b className="text-sm font-semibold">필터</b>
           {applied > 0 ? <Tag tone="run">적용 {applied}</Tag> : null}
@@ -133,7 +135,7 @@ export function SalesOrderListScreen() {
             ))}
             <label className="mt-1 flex h-7 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-sm font-medium text-danger hover:bg-danger-bg">
               <input type="checkbox" className="size-3.5" checked={filter.riskOnly} onChange={(event) => update({ riskOnly: event.target.checked })} />
-              납기 위험만
+              <span data-pet-term="납기 위험만">납기 위험만</span>
             </label>
           </FilterGroup>
           <FilterGroup title="고객사">
@@ -163,7 +165,7 @@ export function SalesOrderListScreen() {
       </section>
 
       <PageMain className="min-w-[560px]">
-        <div className="flex flex-none flex-wrap items-center gap-2">
+        <div data-pet-target="card:salesOrders.toolbar" className="flex flex-none flex-wrap items-center gap-2">
           <Input
             leadingIcon="search"
             className="w-64"
@@ -200,7 +202,7 @@ export function SalesOrderListScreen() {
 
         <QueryBoundary query={list} loadingLabel="수주를 불러오는 중…">
           {(all) => (
-            <div className="flex min-h-0 flex-col rounded-md border border-line bg-surface shadow-1">
+            <div data-pet-target="card:salesOrders.list" data-pet-perch="" className="flex min-h-0 flex-col rounded-md border border-line bg-surface shadow-1">
               <div className="min-h-0 overflow-auto">
                 <Table>
                   <thead>
@@ -225,6 +227,8 @@ export function SalesOrderListScreen() {
                       return (
                         <tr
                           key={row.id}
+                          data-pet-item="salesOrder"
+                          data-pet-item-title={row.salesOrderNo}
                           data-selected={selected?.id === row.id}
                           data-muted={row.status === 'CANCELLED'}
                           className="cursor-pointer"

@@ -83,23 +83,31 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
   const shortage = Math.max(0, waiting - line.candidateLots.length);
 
   return (
-    <Card>
+    <Card petKey="card:shipmentRequests.allocation">
       <CardHead
         title={
-          <span className="flex items-center gap-2">
+          <span data-pet-term="품목" className="flex items-center gap-2">
             품목 {line.lineNo}
             <ItemTypeTag itemType={line.itemType} />
             <span className="font-mono text-mono font-medium">{line.itemCode}</span>
           </span>
         }
         meta={
-          <span className="flex items-center gap-1.5">
-            <SalesOrderLink salesOrderId={line.salesOrderId} salesOrderNo={line.salesOrderNo} lineNo={line.salesOrderLineNo} />
+          <span
+            data-pet-item="shipmentRequestItem"
+            data-pet-item-title={`품목 ${line.lineNo} ${line.itemCode}`}
+            className="flex items-center gap-1.5"
+          >
+            <span data-pet-field="수주 품목" className="contents">
+              <SalesOrderLink salesOrderId={line.salesOrderId} salesOrderNo={line.salesOrderNo} lineNo={line.salesOrderLineNo} />
+            </span>
             <span>
               · 요청 {line.requestQty}
               {unit} · {fmtTon(line.requestTon)}
             </span>
-            <SalesOrderItemStatusBadge status={line.salesOrderItemStatus} />
+            <span data-pet-field="수주 품목 상태" className="contents">
+              <SalesOrderItemStatusBadge status={line.salesOrderItemStatus} />
+            </span>
           </span>
         }
         actions={
@@ -139,7 +147,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
               {line.allocations.map((a, index) => {
                 const changing = mode.kind === 'change' && mode.allocationId === a.allocationId;
                 return (
-                  <tr key={a.allocationId} data-selected={changing}>
+                  <tr key={a.allocationId} data-pet-item="allocation" data-pet-item-title={a.lotNo} data-selected={changing}>
                     <Td align="center">{index + 1}</Td>
                     <Td>
                       <TraceLink no={a.lotNo} />
@@ -239,7 +247,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
             </div>
           )}
           {mode.kind === 'change' ? (
-            <Field label="변경 사유" required htmlFor={`reason-${line.shipmentRequestItemId}`} error={reasonError} hint="작업 로그에 남아요">
+            <Field label={<span data-pet-term="변경 사유">변경 사유</span>} required htmlFor={`reason-${line.shipmentRequestItemId}`} error={reasonError} hint="작업 로그에 남아요">
               <Textarea id={`reason-${line.shipmentRequestItemId}`} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 야드 작업 순서" />
             </Field>
           ) : null}
@@ -333,7 +341,7 @@ function CandidateRow({
   name: string;
 }) {
   return (
-    <tr data-selected={checked} className="cursor-pointer" onClick={onToggle}>
+    <tr data-pet-item="lot" data-pet-item-title={lot.lotNo} data-selected={checked} className="cursor-pointer" onClick={onToggle}>
       <Td align="center">
         <input type={kind} name={name} checked={checked} onChange={onToggle} onClick={(e) => e.stopPropagation()} aria-label={`${lot.lotNo} 선택`} />
       </Td>

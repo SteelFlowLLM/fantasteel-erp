@@ -5,7 +5,7 @@
 // - 제품 품목(슬래브·코일): 품목 코드 = 규격 코드, 단위 유형 매수, 기본 야드. 공급업체는 지정하지 않는다(TRM-029). 추가·수정은 제품 규격 탭에서.
 import { useState } from 'react';
 import { ITEM_TYPE_LABEL, RAW_MATERIAL_TYPE, RAW_MATERIAL_TYPE_LABEL, UNIT_TYPE_LABEL, type RawMaterialType } from '@/codes';
-import { isMasterServerMode, masterDataApi, type MasterRawMaterialView } from '@/api/masterData';
+import { masterDataApi, type MasterRawMaterialView } from '@/api/masterData';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -14,7 +14,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterRawMaterials, useMasterSuppliers, useMasterYards } from '@/hooks/useMasterData';
@@ -32,14 +32,15 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
   const materials = useMasterRawMaterials();
   const [typeFilter, setTypeFilter] = useState('');
   const [editing, setEditing] = useState<MasterRawMaterialView | 'new' | null>(null);
+  const deletion = useMasterDelete();
   return (
-    <Card>
+    <Card petKey="card:masterData.rawMaterials">
       <CardHead
         title="원료"
         meta={materials.data ? `${materials.data.length}개 · 원료 코드는 LOT 번호(RM-원료코드-…)에 쓰여요` : undefined}
         actions={
           <>
-            <Select aria-label="원료 유형" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-32">
+            <Select aria-label="원료 유형" data-pet-term="원료 유형" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-32">
               <option value="">원료 유형 전체</option>
               {Object.values(RAW_MATERIAL_TYPE).map((t) => (
                 <option key={t} value={t}>
@@ -72,7 +73,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
                 </thead>
                 <tbody>
                   {shown.map((m) => (
-                    <tr key={m.id}>
+                    <tr key={m.id} data-pet-item="rawMaterial" data-pet-item-title={m.itemCode}>
                       <Td className="font-mono text-mono">{m.itemCode}</Td>
                       <Td>{m.itemName}</Td>
                       <Td>{RAW_MATERIAL_TYPE_LABEL[m.rawMaterialType]}</Td>
@@ -83,7 +84,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(m)}
-                          remove={{ what: `원료 ${m.itemCode}`, run: () => masterDataApi.deleteRawMaterial(m.id), success: '원료를 삭제했어요', blockedReason: m.referenceText }}
+                          onDelete={() => deletion.open({ id: m.id, name: m.itemCode, object: '원료를', remove: masterDataApi.deleteItem })}
                         />
                       </Td>
                     </tr>
@@ -92,13 +93,14 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
               </Table>
               {shown.length === 0 ? <EmptyNote>조건에 맞는 원료가 없어요</EmptyNote> : null}
               <TableFoot>
-                원료 코드·원료 유형은 만든 뒤 바꿀 수 없어요{isMasterServerMode() ? '' : ' · 기본 공급업체를 비우면 준비 상태에 누락으로 나와요'} · 원료 재고는 원료 LOT 잔량 합계라 재고 화면에서 봐요
+                원료 코드·원료 유형은 만든 뒤 바꿀 수 없어요 · 원료 재고는 원료 LOT 잔량 합계라 재고 화면에서 봐요
               </TableFoot>
             </>
           );
         }}
       </QueryBoundary>
       {editing ? <RawMaterialModal material={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }
@@ -176,8 +178,7 @@ function RawMaterialModal({ material, onClose }: { material: MasterRawMaterialVi
           }}
         />
       </Field>
-      {/* 준비 상태는 서버 API가 없어 서버 모드에서 안내하지 않는다 */}
-      <Field label="기본 공급업체" hint={isMasterServerMode() ? '품목별 1곳' : '품목별 1곳. 비우면 준비 상태에 누락으로 나와요'}>
+      <Field label="기본 공급업체" hint="품목별 1곳">
         <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
           <option value="">지정 안 함</option>
           {(suppliers.data ?? []).map((s) => (
@@ -212,7 +213,7 @@ function RawMaterialModal({ material, onClose }: { material: MasterRawMaterialVi
 function ProductItemCard({ onGoTab }: { onGoTab: (tab: MasterTabKey) => void }) {
   const specs = useMasterProductSpecs();
   return (
-    <Card>
+    <Card petKey="card:masterData.productItems">
       <CardHead
         title="제품 품목 (슬래브·코일)"
         meta={specs.data ? `${specs.data.length}개 · 품목 코드 = 규격 코드` : undefined}
@@ -239,7 +240,7 @@ function ProductItemCard({ onGoTab }: { onGoTab: (tab: MasterTabKey) => void }) 
                 </thead>
                 <tbody>
                   {rows.map((s) => (
-                    <tr key={s.id}>
+                    <tr key={s.id} data-pet-item="item" data-pet-item-title={s.itemCode}>
                       <Td className="font-mono text-mono">{s.itemCode}</Td>
                       <Td>{s.itemName}</Td>
                       <Td>{ITEM_TYPE_LABEL[s.itemType]}</Td>

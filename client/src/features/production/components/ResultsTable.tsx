@@ -26,6 +26,13 @@ function ioText(r: ProductionResultView): { input: string; output: string } {
   }
 }
 
+/** 화면 도우미 펫이 읽는 실적 제목: 실적 번호가 없어 만든 첫 LOT 번호를 쓰고, 아직 없으면 공정·시작 일시 */
+function resultTitle(r: ProductionResultView): string {
+  const process = PROCESS_TYPE_LABEL[r.processType as ProcessType] ?? r.processType;
+  return r.outputLotNos[0] ? `${process} ${r.outputLotNos[0]}` : `${process} ${fmtMDHM(r.startedAt)} 시작`;
+}
+
+/** 만든 LOT 링크. 링크마다 펫 항목(data-pet-item)을 달지 않는다: 번호뿐이라 읽을 값이 없고, 감싼 실적 행이 공정·일시·투입·산출과 함께 이 번호를 읽어 준다 */
 export function LotLinks({ lotNos, max = 3 }: { lotNos: readonly string[]; max?: number }) {
   if (lotNos.length === 0) return <span className="text-ink-3">-</span>;
   return (
@@ -72,10 +79,18 @@ export function ResultsTable({ results, showProcess, emptyText, action }: Result
           {results.map((r) => {
             const io = ioText(r);
             return (
-              <tr key={r.id}>
+              <tr key={r.id} data-pet-item="productionResult" data-pet-item-title={resultTitle(r)}>
                 {showProcess ? <Td className="font-medium">{PROCESS_TYPE_LABEL[r.processType as ProcessType] ?? r.processType}</Td> : null}
                 <Td>{fmtMDHM(r.startedAt)}</Td>
-                <Td>{r.completedAt ? fmtMDHM(r.completedAt) : <Badge tone="run">진행 중</Badge>}</Td>
+                <Td>
+                  {r.completedAt ? (
+                    fmtMDHM(r.completedAt)
+                  ) : (
+                    <span className="inline-flex" data-pet-term="진행 중">
+                      <Badge tone="run">진행 중</Badge>
+                    </span>
+                  )}
+                </Td>
                 <Td className="font-mono text-mono">{r.blastFurnaceCode ?? r.converterCode ?? '-'}</Td>
                 <Td align="right">{io.input}</Td>
                 <Td align="right" className="font-medium">

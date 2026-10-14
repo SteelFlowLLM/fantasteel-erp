@@ -90,6 +90,25 @@ describe('수주 서버 어댑터 (api/server/salesOrders.ts)', () => {
     expect(await salesOrderApi.productionLinks(9)).toEqual([]);
   });
 
+  it('취소 창의 구매 진행 영향: GET /sales-orders/:id/cancel-purchase-impact 응답을 그대로 돌려준다', async () => {
+    const line = {
+      purchaseRequisitionId: 5,
+      purchaseRequisitionNo: 'PR-2610-0005',
+      purchaseRequisitionStatus: 'ORDERED',
+      itemName: '철광석',
+      requestedTon: '444.444',
+      productionPlanId: 81,
+      productionPlanNo: 'PP-2610-0081',
+      planEffect: 'UNLINK',
+      purchaseOrderId: 3,
+      purchaseOrderNo: 'PO-2610-0003',
+      purchaseOrderStatus: 'CONFIRMED',
+    };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/sales-orders/9/cancel-purchase-impact' ? ok([line]) : undefined));
+    expect(await salesOrderApi.cancelPurchaseImpact(9)).toEqual([line]);
+    expect(calls.map((c) => [c.method, c.path])).toEqual([['GET', '/sales-orders/9/cancel-purchase-impact']]);
+  });
+
   it('재생산 계획: 수주 품목 id로 POST /production-plans를 부르고 여재 예약 매수·새 계획을 돌려준다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
       c.method === 'POST' && c.path === '/production-plans' ? ok({ reservedFromSurplusQty: 1, plan: { id: 42, productionPlanNo: 'PP-2610-0042', shortageQty: 3 } }) : undefined,
@@ -163,6 +182,14 @@ describe('수주 등록 서버 모드: 규격·고객사 id는 서버 id, 미리
     await expect(salesOrderApi.preview([{ itemId: 999, orderedQty: 1 }])).rejects.toMatchObject({ code: 'SO-001' });
   });
 
+  it('미리보기: 매수가 1 이상 정수가 아니면 SO-002 (화면 입력 규칙과 같다)', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, respond());
+    for (const orderedQty of ['1.5', '0', '-1', 'abc']) {
+      await expect(salesOrderApi.preview([{ itemId: 301, orderedQty }])).rejects.toMatchObject({ code: 'SO-002' });
+    }
+    await expect(salesOrderApi.preview([{ itemId: 301, orderedQty: ' 6 ' }])).resolves.toHaveLength(1);
+  });
+
   it('등록: 고른 서버 고객사·규격 id를 그대로 보내고 기준정보를 다시 읽지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) =>
       c.method === 'POST' && c.path === '/sales-orders'
@@ -172,5 +199,83 @@ describe('수주 등록 서버 모드: 규격·고객사 id는 서버 id, 미리
     await salesOrderApi.create({ customerId: 52, items: [{ itemId: 301, orderedQty: 6, dueDate: '2026-11-30' }] });
     expect(calls.map((c) => [c.method, c.path])).toEqual([['POST', '/sales-orders']]);
     expect(calls[0].body).toEqual({ customerId: 52, items: [{ itemId: 301, orderedQty: 6, dueDate: '2026-11-30' }] });
+  });
+  it('미리보기: 같은 규격 두 줄은 앞 줄이 예약 가용을 먼저 쓴다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, respond());
+    const lines = await salesOrderApi.preview([
+      { itemId: 301, orderedQty: 3 },
+      { itemId: 301, orderedQty: 3 },
+    ]);
+    expect(lines.map((l) => [l.availableQty, l.reserveQty, l.shortageQty])).toEqual([
+      [2, 2, 1],
+      [0, 0, 3],
+    ]);
+  });
+
+  it('등록: 숫자만 쓴 매수는 숫자로, 그 밖은 그대로 보내 서버가 거부하게 하고, 품목이 없으면 서버를 부르지 않고 SO-001', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, () => ok({ salesOrderId: 9, salesOrderNo: 'SO-2610-0009', items: [], totalReservedQty: 0, totalShortageQty: 0 }));
+    await salesOrderApi.create({ customerId: 52, items: [{ itemId: 301, orderedQty: ' 3 ', dueDate: '2026-11-30' }, { itemId: 302, orderedQty: '3매', dueDate: '2026-11-30' }] });
+    expect((calls[0].body as { items: { orderedQty: unknown }[] }).items.map((i) => i.orderedQty)).toEqual([3, '3매']);
+    await expect(salesOrderApi.create({ customerId: 52, items: [] })).rejects.toMatchObject({ code: 'SO-001' });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('수주 상세 서버 모드: 충족 지표 분모와 취소 내역', () => {
+  const item = (salesOrderItemId: number, itemType: string, over: Record<string, unknown> = {}) => ({
+    salesOrderItemId,
+    itemId: 301,
+    itemCode: 'SL-SM355C-250x1500x10000',
+    itemName: 'SM355C 슬래브',
+    itemType,
+    theoreticalWeightTon: '29.438',
+    orderedQty: 10,
+    orderedTon: '294.380',
+    dueDate: '2026-11-30',
+    salesOrderItemStatus: 'OPEN',
+    isDueRisk: false,
+    shippedQty: 0,
+    activeReservedQty: 4,
+    passedQty: 2,
+    inProductionQty: 5,
+    plannedQty: 6,
+    unshippedQty: 10,
+    unsecuredQty: 6,
+    additionalPlanQty: 0,
+    openPlanRemainingQty: 6,
+    reservationAvailableQty: 0,
+    reproductionNeedQty: 0,
+    progress: { qty: 0, denominatorQty: 10, ratio: 0 },
+    ...over,
+  });
+  const order = {
+    id: 9,
+    salesOrderNo: 'SO-2610-0009',
+    customerId: 52,
+    customerName: '새고객',
+    salesOrderStatus: 'CANCELLED',
+    items: [item(71, 'SLAB'), item(72, 'COIL', { orderedQty: 3, unshippedQty: 0, activeReservedQty: 0 })],
+    productionPlans: [],
+    shipmentRequests: [],
+    cancelBlock: null,
+    cancellation: { cancelledAt: '2026-10-13T02:00:00.000Z', reason: '고객 요청', releasedReservations: [{ salesOrderItemId: 72, releasedQty: 3 }], cancelledPlanNos: ['PP-2610-0081'], unlinkedPlanNos: [] },
+  };
+
+  it('예약 몫의 분모는 미출하 매수(없으면 비율 없음), 생산중·합격 몫의 분모는 수주 매수이고, 해제한 예약은 품목 줄 번호·유형으로 보인다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
+      if (c.path === '/sales-orders/9') return ok(order);
+      if (c.path === '/sales-orders/9/reservations') return ok([]);
+      if (c.path === '/mill-sheets') return fail(403, 'COM-002', '권한이 없어요');
+      return undefined;
+    });
+    const detail = await salesOrderApi.detail(9);
+    expect(detail.items[0].measures).toMatchObject({
+      reserved: { qty: 4, denominatorQty: 10, ratio: 0.4 },
+      inProduction: { qty: 5, denominatorQty: 10, ratio: 0.5 },
+      passed: { qty: 2, denominatorQty: 10, ratio: 0.2 },
+    });
+    expect(detail.items[1].measures.reserved).toEqual({ qty: 0, denominatorQty: 0, ratio: null });
+    expect(detail).toMatchObject({ cancelledAt: '2026-10-13T02:00:00.000Z', cancelReason: '고객 요청', millSheets: [] });
+    expect(detail.cancellation).toEqual({ releasedReserved: [{ lineNo: 2, itemType: 'COIL', qty: 3 }], cancelledPlanNos: ['PP-2610-0081'], unlinkedPlanNos: [] });
   });
 });

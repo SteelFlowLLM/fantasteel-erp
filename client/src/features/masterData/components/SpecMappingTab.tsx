@@ -1,10 +1,9 @@
 'use client';
 
 // 규격 매핑 (REQ-MST-004): 슬래브 규격마다 대응 코일 규격 1개, 코일 1개 이론중량 ≤ 슬래브 1매 이론중량,
-// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 매핑 수정은 없고, 쓰인 규격의 매핑은 지울 수 없다.
+// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 매핑 수정·삭제 API는 없다.
 import { useState } from 'react';
-import { isMasterServerMode, masterDataApi, type MasterProductSpecView, type SpecBrief } from '@/api/masterData';
-import { Badge } from '@/components/Badge';
+import { masterDataApi, type MasterProductSpecView, type SpecBrief } from '@/api/masterData';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
@@ -14,7 +13,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSpecMappings, useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -34,7 +33,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
   const mappings = useMasterSpecMappings();
   const [adding, setAdding] = useState(false);
   return (
-    <Card>
+    <Card petKey="card:masterData.mapping">
       <CardHead
         title="슬래브 → 코일 규격 매핑"
         meta={mappings.data ? `${mappings.data.length}건 · 코일 1개 이론중량 ≤ 슬래브 1매 이론중량` : undefined}
@@ -57,13 +56,11 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                     <Th>코일 규격</Th>
                     <Th align="right">코일 1개</Th>
                     <Th align="right">열연 계획 수율</Th>
-                    {isMasterServerMode() ? null : <Th>사용 이력</Th>}
-                    <Th aria-label="삭제" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((m) => (
-                    <tr key={m.id}>
+                    <tr key={m.id} data-pet-item="specMapping" data-pet-item-title={`${m.slab.itemCode} → ${m.coil.itemCode}`}>
                       <Td>{m.steelGradeCode}</Td>
                       <Td>
                         <SpecCell spec={m.slab} />
@@ -75,18 +72,6 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                       <Td align="right">{fmtTon(m.coil.theoreticalWeightTon)}</Td>
                       <Td align="right" className="font-semibold">
                         {formatYieldPercent(m.hotRollingPlannedYieldRate)}
-                      </Td>
-                      {isMasterServerMode() ? null : <Td>{m.isUsed ? <Badge tone="run">사용됨</Badge> : <Badge>미사용</Badge>}</Td>}
-                      <Td align="right">
-                        <RowActions
-                          canEdit={canEdit}
-                          remove={{
-                            what: `${m.slab.itemCode} → ${m.coil.itemCode} 매핑`,
-                            run: () => masterDataApi.deleteSpecMapping(m.id),
-                            success: '매핑을 삭제했어요',
-                            blockedReason: m.isUsed ? '수주·재고·LOT에 쓰인 규격' : null,
-                          }}
-                        />
                       </Td>
                     </tr>
                   ))}

@@ -7,7 +7,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION } from '@/codes';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { GoodsReceiptResult, GoodsReceiptView, ReceiptLine } from '@/api/goodsReceipts';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -69,6 +69,7 @@ export function GoodsReceiptScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:goodsReceipts.list"
         head={
           <>
             <div className="flex items-center gap-2">
@@ -82,10 +83,10 @@ export function GoodsReceiptScreen() {
             </div>
             <Input leadingIcon="search" placeholder="발주번호·원료·공급업체 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label="입고예정 검색" />
             <div className="flex gap-1.5">
-              <Chip on={tab === 'open'} onClick={() => setTab('open')}>
+              <Chip on={tab === 'open'} onClick={() => setTab('open')} data-pet-term="입고예정">
                 입고예정 <b>{openLines.length}</b>
               </Chip>
-              <Chip on={tab === 'all'} onClick={() => setTab('all')}>
+              <Chip on={tab === 'all'} onClick={() => setTab('all')} data-pet-term="전체">
                 전체 <b>{allLines.length}</b>
               </Chip>
             </div>
@@ -107,19 +108,23 @@ export function GoodsReceiptScreen() {
                       selected={line.purchaseOrderItemId === active?.purchaseOrderItemId}
                       label={receiptRowLabel(line)}
                       onClick={() => url.set({ item: line.purchaseOrderItemId, po: null })}
+                      petItem="purchaseOrderItem"
+                      petItemTitle={`${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? line.itemName}`}
                     >
                       <span className="flex items-center gap-2">
                         <b className="font-mono text-sm font-semibold">
                           {line.purchaseOrderNo} <span className="text-cap font-medium text-ink-3">{line.purchaseRequisitionNo}</span>
                         </b>
                         <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
-                        <span className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>{line.expectedReceiptDate ? `입고 예정 ${fmtMD(line.expectedReceiptDate)}` : ''}</span>
+                        <span data-pet-field="입고 예정일" className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>
+                          {line.expectedReceiptDate ? `입고 예정 ${fmtMD(line.expectedReceiptDate)}` : ''}
+                        </span>
                       </span>
-                      <span className="text-sm text-ink">
+                      <span data-pet-field="원료 · 공급업체" className="text-sm text-ink">
                         {line.itemName} <span className="text-ink-3">· {line.supplierName}</span>
                       </span>
                       <span className="flex items-center gap-2 text-cap text-ink-3">
-                        <span className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
+                        <span data-pet-field="입고예정" className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
                         <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={line.isFullyReceived ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
                       </span>
                     </MasterItem>
@@ -137,12 +142,19 @@ export function GoodsReceiptScreen() {
             ) : (
               <ul>
                 {data.slice(0, RECENT_COUNT).map((receipt) => (
-                  <li key={receipt.id} className="flex flex-col gap-0.5 border-b border-line px-4 py-2 text-cap text-ink-3">
+                  <li
+                    key={receipt.id}
+                    data-pet-item="goodsReceipt"
+                    data-pet-item-title={receipt.goodsReceiptNo}
+                    className="flex flex-col gap-0.5 border-b border-line px-4 py-2 text-cap text-ink-3"
+                  >
                     <span className="flex items-center gap-2 text-sm text-ink">
                       <b className="font-mono font-semibold">{receipt.goodsReceiptNo}</b>
-                      <span className="ml-auto tabular-nums">{fmtTon(receipt.receivedTon)}</span>
+                      <span data-pet-field="입고 톤" className="ml-auto tabular-nums">
+                        {fmtTon(receipt.receivedTon)}
+                      </span>
                     </span>
-                    <span>
+                    <span data-pet-field="원료 · 공급업체 · 입고일">
                       {receipt.itemName} · {receipt.supplierName} · {fmtDate(receipt.receivedDate)}
                     </span>
                     {receipt.lotNo ? (
@@ -261,7 +273,7 @@ function ReceiptWork({
         {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span> · {line.supplierName} · 입고 예정 {line.expectedReceiptDate ? fmtDate(line.expectedReceiptDate) : '-'} · 구매요청{' '}
         <span className="font-mono">{line.purchaseRequisitionNo ?? '-'}</span>
       </p>
-      <StatBar>
+      <StatBar petKey="card:goodsReceipts.summary">
         <Kpi flat label="발주" value={fmtNum(line.orderedTon, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(line.receivedTon, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(line.receivedTon, line.orderedTon))}%`} />
         <Kpi flat label="입고예정" value={fmtNum(line.remainingTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
@@ -269,17 +281,19 @@ function ReceiptWork({
 
       {done ? (
         <Banner tone="ok">
-          <b>입고 확정 완료</b> · {done.goodsReceiptNo} · 원료 LOT{' '}
-          <Link className="font-mono font-semibold underline" href={lotHref(done.lotNo)}>
-            {done.lotNo}
-          </Link>{' '}
-          · {line.itemName} {fmtTon(done.receivedTon)} · {done.yardName ?? '야드 미지정'} · 잔량 {fmtTon(done.receivedTon)} · 발주 품목 입고 누계 {fmtTon(done.lineReceivedTon)} · 입고예정{' '}
-          {fmtTon(done.lineRemainingTon)}
+          <span data-pet-item="goodsReceipt" data-pet-item-title={done.goodsReceiptNo}>
+            <b>입고 확정 완료</b> · {done.goodsReceiptNo} · 원료 LOT{' '}
+            <Link className="font-mono font-semibold underline" href={lotHref(done.lotNo)}>
+              {done.lotNo}
+            </Link>{' '}
+            · {line.itemName} {fmtTon(done.receivedTon)} · {done.yardName ?? '야드 미지정'} · 잔량 {fmtTon(done.receivedTon)} · 발주 품목 입고 누계 {fmtTon(done.lineReceivedTon)} · 입고예정{' '}
+            {fmtTon(done.lineRemainingTon)}
+          </span>
         </Banner>
       ) : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-4">
-        <Card>
+        <Card petKey="card:goodsReceipts.form">
           <CardHead title="입고 등록" meta="등록하면 바로 확정돼요" />
           {line.isFullyReceived ? (
             <CardBody>
@@ -289,7 +303,7 @@ function ReceiptWork({
             <>
               <CardBody className="flex-row flex-wrap items-start gap-4">
                 {failure ? <Banner tone="danger" className="w-full">{failure}</Banner> : null}
-                <Field label="입고 톤" required htmlFor="gr-ton" error={fieldErrors.receivedTon ?? null} hint="미입고량 이하 · 소수 3자리까지">
+                <Field label={<span data-pet-term="입고 톤">입고 톤</span>} required htmlFor="gr-ton" error={fieldErrors.receivedTon ?? null} hint="미입고량 이하 · 소수 3자리까지">
                   <Input
                     id="gr-ton"
                     className="w-[160px]"
@@ -303,10 +317,10 @@ function ReceiptWork({
                     onChange={(event) => setReceivedTon(event.target.value)}
                   />
                 </Field>
-                <Field label="입고일" required htmlFor="gr-date" error={fieldErrors.receivedDate ?? null} hint="오늘까지 · 원료 LOT 번호의 날짜가 돼요">
+                <Field label={<span data-pet-term="입고일">입고일</span>} required htmlFor="gr-date" error={fieldErrors.receivedDate ?? null} hint="오늘까지 · 원료 LOT 번호의 날짜가 돼요">
                   <DateInput id="gr-date" value={receivedDate} onChange={setReceivedDate} invalid={Boolean(fieldErrors.receivedDate)} disabled={!canReceive} />
                 </Field>
-                <Field label="야드" hint="원료의 기본 야드로 자동 지정돼요">
+                <Field label={<span data-pet-term="야드">야드</span>} hint="원료의 기본 야드로 자동 지정돼요">
                   <span className="flex h-8 items-center text-sm font-medium">{line.defaultYardName ?? '-'}</span>
                 </Field>
               </CardBody>
@@ -326,24 +340,30 @@ function ReceiptWork({
             </>
           )}
         </Card>
-        <Card>
+        <Card petKey="card:goodsReceipts.lot">
           <CardHead title="원료 LOT" meta="확정할 때 생성" />
           <CardBody>
-            <span className="font-mono text-base font-semibold">{rawMaterialLotNoPattern(line.itemCode)}</span>
-            <span className="text-cap leading-normal text-ink-3">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일) · 입고 1건마다 LOT 1개 · 잔량 = 입고 톤</span>
+            {/* 펫이 LOT 번호만 읽지 않게 번호 규칙 줄까지 한 항목으로 묶는다 (CardBody와 같은 간격이라 모양은 그대로) */}
+            <div data-pet-item="lot" data-pet-item-title={rawMaterialLotNoPattern(line.itemCode)} className="flex flex-col gap-3">
+              <span className="font-mono text-base font-semibold">{rawMaterialLotNoPattern(line.itemCode)}</span>
+              <span className="text-cap leading-normal text-ink-3">
+                <span data-pet-field="번호 매김">번호는 입고를 확정할 때 매겨요 (YYMMDD = 입고일)</span> · <span data-pet-field="생성 단위">입고 1건마다 LOT 1개</span> ·{' '}
+                <span data-pet-field="잔량">잔량 = 입고 톤</span>
+              </span>
+            </div>
           </CardBody>
         </Card>
       </div>
 
-      <Card>
+      <Card petKey="card:goodsReceipts.history">
         <CardHead
           title="입고 내역"
           actions={
             <Segmented<HistoryScope>
               ariaLabel="입고 내역 범위"
               items={[
-                { key: 'line', label: '이 발주 품목' },
-                { key: 'all', label: '전체' },
+                { key: 'line', label: <span data-pet-term="이 발주 품목">이 발주 품목</span> },
+                { key: 'all', label: <span data-pet-term="전체">전체</span> },
               ]}
               active={scope}
               onChange={setScope}
@@ -369,7 +389,7 @@ function ReceiptWork({
               </thead>
               <tbody>
                 {history.map((receipt) => (
-                  <tr key={receipt.id} data-selected={done?.goodsReceiptId === receipt.id}>
+                  <tr key={receipt.id} data-selected={done?.goodsReceiptId === receipt.id} data-pet-item="goodsReceipt" data-pet-item-title={receipt.goodsReceiptNo}>
                     <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
                     <Td className="font-mono">{receipt.purchaseOrderNo}</Td>
                     <Td>{receipt.itemName}</Td>

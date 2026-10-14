@@ -5,20 +5,21 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
+import type { InspectionDetail, InspectionQueueRow, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody } from '@/components/Card';
 import { Chip } from '@/components/Chip';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
+import { IconButton } from '@/components/IconButton';
 import { Input } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
+import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
@@ -26,13 +27,11 @@ import { inspectionOutcomeNotes } from '@/features/quality/lib/inspectionOutcome
 import { pickNextPendingLot } from '@/features/quality/lib/nextPendingLot';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, lotIconOf } from '@/features/quality/lib/qualityDisplay';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useInspectionDetail, useInspectionQueue } from '@/hooks/useInspections';
-import { useCanUse } from '@/hooks/usePermission';
+import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDate, fmtMD, fmtMDHM } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
-import type { InspectionQueueRow } from '@/mock/services';
 
 type ProcessFilter = 'ALL' | Extract<ProcessType, 'STEELMAKING' | 'CONTINUOUS_CASTING' | 'HOT_ROLLING'>;
 type ResultFilter = 'ALL' | 'PENDING' | 'PASS' | 'FAIL';
@@ -70,6 +69,8 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   // 처음에는 판정 대기만. 주소로 판정이 끝난 LOT을 열었으면 전체를 보인다.
   const [result, setResult] = useState<ResultFilter>(() => (paramRow && paramRow.inspectionResult !== 'PENDING' ? 'ALL' : 'PENDING'));
   const [keyword, setKeyword] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchShown = searchOpen || keyword !== '';
   /** 방금 저장한 결과 (LOT별). 판정 뒤 처리를 보여 준다. */
   const [outcome, setOutcome] = useState<RegisterInspectionOutcome | null>(null);
   const byProcess = rows.filter((r) => process === 'ALL' || r.processType === process);
@@ -93,13 +94,31 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
   return (
     <>
       <MasterPane
+        petKey="card:inspections.queue"
         head={
           <>
             <div className="flex items-baseline gap-2">
               <b className="text-base font-semibold">검사 대상 LOT</b>
-              <span className="text-cap text-ink-3">판정 대기 먼저 · 생산완료일 순</span>
+              <span className="text-cap text-ink-3" data-pet-term="판정 대기 먼저 · 생산완료일 순">
+                판정 대기 먼저 · 생산완료일 순
+              </span>
+              {/* 검색창은 늘 한 줄을 차지하지 않게 돋보기를 누르면 연다(공정 탭·판정 칩·검색 세 줄이 목록을 약 140px 줄였다). 검색어가 있으면 열린 채로 둔다 */}
+              <IconButton
+                icon="search"
+                label="LOT 번호 검색"
+                size="sm"
+                aria-expanded={searchShown}
+                aria-controls="inspection-queue-search"
+                className={cn('-my-1 ml-auto self-center', searchShown && 'bg-brand-tint text-brand')}
+                onClick={() => {
+                  if (searchShown) {
+                    setKeyword('');
+                    setSearchOpen(false);
+                  } else setSearchOpen(true);
+                }}
+              />
               {/* 공정별 검사 종류·탭 숫자 설명은 한 번 알면 되는 말이라 늘 두 줄을 차지하지 않게 마우스를 올리면 보인다 */}
-              <span role="img" aria-label={listHint} title={listHint} className="ml-auto inline-flex cursor-help self-center text-ink-3">
+              <span role="img" aria-label={listHint} title={listHint} data-pet-term="공정별 검사" className="inline-flex cursor-help self-center text-ink-3">
                 <Icon name="info" size="sm" />
               </span>
             </div>
@@ -108,49 +127,73 @@ function Workspace({ rows }: { rows: InspectionQueueRow[] }) {
               ariaLabel="공정별 보기"
               items={PROCESS_FILTERS.map((p) => {
                 const name = p === 'ALL' ? '전체' : PROCESS_TYPE_LABEL[p];
+                const term = p === 'ALL' ? '공정 전체' : PROCESS_TYPE_LABEL[p];
                 const count = processCount(p);
                 return {
                   key: p,
                   label:
                     count > 0 ? (
-                      <span className="inline-flex items-center gap-1" title={`판정 대기 ${count}개`}>
+                      <span className="inline-flex items-center gap-1" title={`판정 대기 ${count}개`} data-pet-term={term}>
                         {name}
                         <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-run px-1 text-2xs font-semibold text-white tabular-nums">{count}</span>
                       </span>
                     ) : (
-                      name
+                      <span data-pet-term={term}>{name}</span>
                     ),
                 };
               })}
               active={process}
               onChange={setProcess}
             />
-            {/* 네 칩이 목록 칸(320px) 안에 한 줄로 들어가게 간격·좌우 여백만 줄인다 */}
-            <div className="flex flex-nowrap gap-1" role="group" aria-label="판정 결과">
+            {/* 건수가 세 자리면 네 칩이 목록 칸(320px)을 넘어 마지막 칩이 잘린다: 같은 폭 4칸에 가운데 정렬로 넣는다 */}
+            <div className="grid grid-cols-4 gap-1" role="group" aria-label="판정 결과">
               {RESULT_FILTERS.map((r) =>
                 r === 'ALL' ? (
-                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="px-2">
+                  <Chip key={r} on={result === 'ALL'} onClick={() => setResult('ALL')} className="min-w-0 justify-center gap-1 px-1!" data-pet-term="판정 결과 전체">
                     전체 <b>{byProcess.length}</b>
                   </Chip>
                 ) : (
-                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="px-2">
+                  <Chip key={r} on={result === r} onClick={() => setResult(result === r ? 'ALL' : r)} className="min-w-0 justify-center gap-1 px-1!" data-pet-term={INSPECTION_RESULT_LABEL[r]}>
                     {INSPECTION_RESULT_LABEL[r]} <b>{resultCount(r)}</b>
                   </Chip>
                 ),
               )}
             </div>
-            <Input type="search" leadingIcon="search" placeholder="LOT 번호 검색" aria-label="LOT 번호 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+            {searchShown ? (
+              <Input
+                id="inspection-queue-search"
+                type="search"
+                leadingIcon="search"
+                placeholder="LOT 번호 검색"
+                aria-label="LOT 번호 검색"
+                autoFocus={searchOpen}
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Escape') return;
+                  setKeyword('');
+                  setSearchOpen(false);
+                }}
+              />
+            ) : null}
           </>
         }
       >
         {list.map((r) => (
           <QueueItem key={r.lotId} row={r} active={r.lotId === activeId} />
         ))}
-        {/* 목록이 비면 오른쪽이 같은 안내를 크게 보이므로 여기서는 되풀이하지 않는다. 오른쪽에 주소로 연 LOT이 떠 있을 때만 여기서 말한다 */}
-        {list.length === 0 && activeId !== null ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : noPending ? '판정 대기 LOT 없음' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
+        {/* 목록이 비면 왼쪽에도 한 줄을 둔다: 오른쪽에만 안내가 있으면 판정 대기가 0건일 때(처음 화면) 왼쪽 칸 전체가 고장 난 듯 빈 흰 칸으로 보였다 */}
+        {list.length === 0 ? <EmptyNote>{rows.length === 0 ? '검사 대상 LOT이 없어요' : noPending ? '판정 대기 LOT이 없어요' : '조건에 맞는 LOT이 없어요'}</EmptyNote> : null}
         {list.length > 0 ? (
           <Banner className="mx-4 my-3.5 text-xs leading-snug" icon="info">
             제강·연주·열연 실적이 저장되면 LOT이 이 목록에 올라와요. 상위 히트가 판정 대기여도 슬래브·코일은 먼저 검사할 수 있어요.
+            {/* 자물쇠는 마우스를 올려야 뜻이 보여서, 목록에 있을 때만 여기서 한 번 알려 준다 */}
+            {list.some((r) => r.locked) ? (
+              <>
+                {' '}
+                <Icon name="lock" size="sm" className="inline align-[-2px] text-ink-3" /> 표시는 밀시트가 발행돼 측정값을 고칠 수 없는 LOT이에요.
+              </>
+            ) : null}
           </Banner>
         ) : null}
       </MasterPane>
@@ -221,7 +264,7 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
     inspectionNameOf(row.processType),
     spec,
     row.productionPlanNo ? `계획 ${row.productionPlanNo}` : '계획 없음',
-    `생산완료일 ${fmtDate(row.producedDate)}`,
+    row.producedDate ? `생산완료일 ${fmtDate(row.producedDate)}` : null,
     row.inspectionResult !== 'PENDING' || row.inspectedAt ? `검사 ${fmtMDHM(row.inspectedAt)} · ${row.inspectorName ?? '—'}` : null,
     row.inspectionStandardCode ? `${row.inspectionStandardCode} v${row.inspectionStandardVersion ?? ''}` : null,
     heatResult ? `상위 히트 ${INSPECTION_RESULT_LABEL[heatResult]}` : null,
@@ -229,20 +272,23 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
     .filter((part): part is string => part !== null)
     .join(' · ');
   return (
-    <MasterItemLink href={inspectionHref(row.lotId)} active={active}>
+    <MasterItemLink href={inspectionHref(row.lotId)} active={active} petItem="qualityInspection" petTitle={row.lotNo}>
       <div className="flex items-center gap-1.5">
         <Icon name={lotIconOf(row.lotType)} size="sm" className={active ? 'text-brand' : 'text-ink-3'} />
-        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'}>{row.lotNo}</span>
+        <span className={active ? 'font-mono text-mono font-semibold' : 'font-mono text-mono'} data-pet-field="LOT 번호">
+          {row.lotNo}
+        </span>
         {row.locked ? (
-          <span role="img" aria-label={LOCKED_TEXT} title={LOCKED_TEXT} className="inline-flex">
+          <span role="img" aria-label={LOCKED_TEXT} title={LOCKED_TEXT} data-pet-term="밀시트 발행 · 수정 불가" className="inline-flex">
             <Icon name="lock" size="sm" className="text-ink-3" />
           </span>
         ) : null}
-        <span className="ml-auto">
-          {/* 합격은 흐린 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
+        <span className="ml-auto" data-pet-field="판정 결과">
+          {/* 합격은 배지 없이 체크 + 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
           {row.inspectionResult === 'PASS' ? (
-            <span className="inline-flex items-center gap-0.5 text-cap text-ink-3">
-              <Icon name="check" size="sm" />
+            <span className="inline-flex items-center gap-0.5 text-cap text-ink">
+              {/* 글자는 잘 읽히게 기본 글자색, 체크만 상세의 합격 배지와 같은 초록으로: 합격 색이 화면마다 달라 보이지 않게 */}
+              <Icon name="check" size="sm" className="text-ok" />
               {INSPECTION_RESULT_LABEL.PASS}
             </span>
           ) : (
@@ -250,9 +296,10 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           )}
         </span>
       </div>
-      <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText}>
+      <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText} data-pet-field="규격 · 생산일">
         <span className="min-w-0 truncate">
-          {spec} · 생산 {fmtMD(row.producedDate)}
+          {/* 히트는 생산완료일 칸이 없어(서버) "생산 -"로 보였다: 날짜가 있을 때만 붙인다 */}
+          {row.producedDate ? `${spec} · 생산 ${fmtMD(row.producedDate)}` : spec}
         </span>
         {/* 상위 히트가 합격이 아니면 판정에 영향을 주므로 잘리지 않게 따로 둔다 */}
         {heatResult ? (
@@ -273,7 +320,7 @@ interface DetailProps {
 
 function Detail({ lotId, outcome, onSaved, nextPending, onNext }: DetailProps) {
   const detail = useInspectionDetail(lotId);
-  useShellTitle(detail.data?.lot.lotNo, detail.data ? '검사 입력' : undefined);
+  // 상단 바는 화면 이름(검사 입력) 그대로 둔다: LOT 번호로 바꾸면 바로 아래 LOT 머리와 같은 번호가 크게 두 번 보였다
   return (
     <QueryBoundary query={detail} loadingLabel="검사 기록을 불러오는 중…">
       {(data) => <DetailBody data={data} outcome={outcome} onSaved={onSaved} nextPending={nextPending} onNext={onNext} />}
@@ -283,6 +330,7 @@ function Detail({ lotId, outcome, onSaved, nextPending, onNext }: DetailProps) {
 
 function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<DetailProps, 'lotId'> & { data: InspectionDetail }) {
   const canEdit = useCanUse(PERMISSION.INSPECTION_REGISTER);
+  const canViewStandard = useCanView(PERMISSION.INSPECTION_STANDARD_MANAGE);
   const { lot } = data;
   const typeName = LOT_TYPE_LABEL[lot.lotType];
 
@@ -297,7 +345,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
             <ResultBadge result={data.inspectionResult} />
             {data.locked ? (
               <Badge tone="outline" title={`밀시트 ${data.lockedMillSheetNos.join(', ')}`}>
-                밀시트 발행 · 수정 불가
+                <span data-pet-term="밀시트 발행 · 수정 불가">밀시트 발행 · 수정 불가</span>
               </Badge>
             ) : null}
           </>
@@ -312,16 +360,13 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 불합격 관리
               </ButtonLink>
             ) : null}
-            {/* 과거 사례(EX)는 준비 중: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-004).
-                동작하는 LOT 추적과 같은 무게로 보이지 않게 테두리 없는 흐린 버튼으로 둔다 (링크라 ghost의 enabled:hover가 안 먹어 hover를 따로 준다) */}
-            <ButtonLink href="/past-cases" icon="search" variant="ghost" className="text-ink-3 hover:bg-surface-3 hover:text-ink-2">
-              비슷한 사례 찾기 <ComingSoon grade="EX" />
-            </ButtonLink>
+            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-004) */}
+            <ComingSoonMenu items={[{ label: '비슷한 사례 찾기' }]} />
           </>
         }
       />
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:inspections.lotInfo">
         <CardBody className="px-4 py-3">
           <InfoGrid
             items={[
@@ -331,11 +376,17 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 label: '검사 기준',
                 value: data.standard ? (
                   <span className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono">{data.standard.inspectionStandardCode}</span>
-                    <span>버전 {data.standard.version}</span>
+                    {/* 생산계획·수주처럼 눌러서 판정에 쓴 버전의 항목·min/max를 본다. 검사 기준 화면을 볼 수 없는 역할에는 글자로만 둔다 */}
+                    {canViewStandard ? (
+                      <Link href={`/quality/standards?id=${data.standard.id}`} className="font-mono text-run hover:underline">
+                        {`${data.standard.inspectionStandardCode} v${data.standard.version}`}
+                      </Link>
+                    ) : (
+                      <span className="font-mono">{`${data.standard.inspectionStandardCode} v${data.standard.version}`}</span>
+                    )}
                     {data.standard.isCurrent ? null : (
-                      <Badge tone="outline" title={`현재 버전 ${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
-                        현재 버전 아님
+                      <Badge tone="outline" title={`현재 버전 v${data.currentStandard?.version ?? '—'} · 값을 넣은 검사는 판정에 쓴 버전으로 계속 판정해요`}>
+                        <span data-pet-term="현재 버전 아님">현재 버전 아님</span>
                       </Badge>
                     )}
                   </span>
@@ -344,7 +395,8 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 ),
               },
               { label: 'LOT 상태', value: LOT_STATUS_LABEL[lot.lotStatus] },
-              { label: '생산완료일', value: fmtDate(lot.producedDate) },
+              // 히트에는 생산완료일 칸이 없다(서버). "-"만 보이던 칸을 뺀다
+              ...(lot.lotType !== 'HEAT' ? [{ label: '생산완료일', value: fmtDate(lot.producedDate) }] : []),
               ...(lot.lotType !== 'HEAT'
                 ? [
                     {
@@ -382,7 +434,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       {data.standard === null ? (
         <Banner tone="danger" actions={<ButtonLink href="/quality/standards" size="sm">검사 기준</ButtonLink>}>
-          {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다 (기준정보 준비 상태 띠와 같음, docs/rework/areas/master.md 4번) */}
+          {/* 9.3 MST-001 문구의 '배합'은 용어 사전 TRM-027 금지어라 문구는 싣지 않고 코드만 보인다 (docs/rework/areas/master.md 4번) */}
           <b>{PROCESS_TYPE_LABEL[lot.processType as ProcessType] ?? ''} {lot.steelGradeCode ?? ''} 검사 기준이 없어 판정할 수 없어요</b> <span className="font-mono text-cap">MST-001</span> · 품질 담당이 검사 기준을 등록해야 해요.
         </Banner>
       ) : null}
@@ -404,7 +456,7 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
 
       <InspectionForm key={`${lot.lotId}-${data.updatedAt ?? 'new'}-${data.standard?.id ?? 0}`} detail={data} canEdit={canEdit} onSaved={onSaved} />
 
-      <LotHistoryCard lotId={lot.lotId} events={data.history} itemNames={data.inspectionItemNames} />
+      <LotHistoryCard petKey="card:inspections.history" lotId={lot.lotId} events={data.history} itemNames={data.inspectionItemNames} />
     </>
   );
 }
@@ -419,7 +471,11 @@ function SalesOrderLink({ item }: { item: LinkedSalesOrderItem | null }) {
       <span className="text-cap text-ink-3">
         품목 {item.lineNo} · {item.customerName}
       </span>
-      {item.shortage.reproductionNeedQty > 0 ? <Badge tone="danger">재생산 필요 {item.shortage.reproductionNeedQty}매</Badge> : null}
+      {item.shortage.reproductionNeedQty > 0 ? (
+        <span className="inline-flex" data-pet-term="재생산 필요">
+          <Badge tone="danger">재생산 필요 {item.shortage.reproductionNeedQty}매</Badge>
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -443,13 +499,15 @@ function OutcomeCard({
   const pass = outcome.inspectionResult === 'PASS';
   const fail = outcome.inspectionResult === 'FAIL';
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:inspections.outcome">
       <div className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
-          <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-[#115c38]' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-[#8e231e]' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-[#7a3d00]'}>
+          <div className={pass ? 'flex items-center gap-3 rounded-md bg-ok-bg px-3 py-2 text-ok-ink' : fail ? 'flex items-center gap-3 rounded-md bg-danger-bg px-3 py-2 text-danger-ink' : 'flex items-center gap-3 rounded-md bg-wait-bg px-3 py-2 text-wait-ink'}>
             <Icon name={pass ? 'check-circle' : fail ? 'x-circle' : 'clock'} size="lg" />
             <div className="flex flex-col">
-              <span className="text-cap opacity-80">시스템 판정</span>
+              <span className="text-cap opacity-80" data-pet-term="시스템 판정">
+                시스템 판정
+              </span>
               <b className="text-lg font-semibold">{INSPECTION_RESULT_LABEL[outcome.inspectionResult]}</b>
             </div>
           </div>

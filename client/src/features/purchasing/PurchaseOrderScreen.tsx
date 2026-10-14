@@ -64,6 +64,7 @@ export function PurchaseOrderScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:purchaseOrders.list"
         head={
           <>
             <div className="flex items-center gap-2">
@@ -74,11 +75,11 @@ export function PurchaseOrderScreen() {
               </ButtonLink>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              <Chip on={status === null} onClick={() => setStatus(null)}>
+              <Chip on={status === null} onClick={() => setStatus(null)} data-pet-term="전체">
                 전체 <b>{purchaseOrderRows.length}</b>
               </Chip>
               {STATUS_FILTERS.map((value) => (
-                <Chip key={value} on={status === value} onClick={() => setStatus(status === value ? null : value)}>
+                <Chip key={value} on={status === value} onClick={() => setStatus(status === value ? null : value)} data-pet-term={PURCHASE_ORDER_STATUS_LABEL[value]}>
                   {PURCHASE_ORDER_STATUS_LABEL[value]} <b>{purchaseOrderRows.filter((po) => po.purchaseOrderStatus === value).length}</b>
                 </Chip>
               ))}
@@ -99,12 +100,16 @@ export function PurchaseOrderScreen() {
                     key={supplierKey(group.supplierId)}
                     selected={writing && activeSupplier === supplierKey(group.supplierId)}
                     onClick={() => url.set({ supplier: supplierKey(group.supplierId), po: null, pr: null })}
+                    petItem="supplier"
+                    petItemTitle={group.supplierName ?? '기본 공급업체 없음'}
                   >
                     <span className="flex items-center gap-2">
                       <b className="text-sm font-semibold">{group.supplierName ?? '기본 공급업체 없음'}</b>
-                      <span className="ml-auto text-cap text-ink-3">발주 대기 {group.items.length}</span>
+                      <span data-pet-field="발주 대기" className="ml-auto text-cap text-ink-3">
+                        발주 대기 {group.items.length}
+                      </span>
                     </span>
-                    <span className="flex items-center gap-1.5 text-cap text-ink-3">
+                    <span data-pet-field="원료 · 요청 톤" className="flex items-center gap-1.5 text-cap text-ink-3">
                       {summarizeItemNames(group.items)} · {fmtTon(decSum(group.items.map((i) => i.requestedTon)))}
                     </span>
                   </MasterItem>
@@ -124,17 +129,25 @@ export function PurchaseOrderScreen() {
                   const ordered = purchaseOrderOrderedTon(po);
                   const received = purchaseOrderReceivedTon(po);
                   return (
-                    <MasterItem key={po.id} selected={po.id === selectedPoId} onClick={() => url.set({ po: po.id, pr: null, supplier: null })}>
+                    <MasterItem
+                      key={po.id}
+                      selected={po.id === selectedPoId}
+                      onClick={() => url.set({ po: po.id, pr: null, supplier: null })}
+                      petItem="purchaseOrder"
+                      petItemTitle={po.purchaseOrderNo}
+                    >
                       <span className="flex items-center gap-2">
                         <b className="font-mono text-sm font-semibold">{po.purchaseOrderNo}</b>
                         <PurchaseOrderStatusBadge status={po.purchaseOrderStatus} />
-                        <span className="ml-auto text-cap text-ink-3">{nextExpectedDate(po) ? `입고 예정 ${fmtMD(nextExpectedDate(po) ?? '')}` : ''}</span>
+                        <span data-pet-field="입고 예정일" className="ml-auto text-cap text-ink-3">
+                          {nextExpectedDate(po) ? `입고 예정 ${fmtMD(nextExpectedDate(po) ?? '')}` : ''}
+                        </span>
                       </span>
-                      <span className="text-sm text-ink">
+                      <span data-pet-field="공급업체" className="text-sm text-ink">
                         {po.supplierName} <span className="text-ink-3">· {summarizeItemNames(po.items)}</span>
                       </span>
                       <span className="flex items-center gap-2 text-cap text-ink-3">
-                        <span className="whitespace-nowrap">
+                        <span data-pet-field="입고 / 발주" className="whitespace-nowrap">
                           입고 {fmtTon(received)} / {fmtTon(ordered)}
                         </span>
                         <Progress value={ratioPercent(received, ordered)} tone={po.purchaseOrderStatus === 'RECEIVED' ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
@@ -202,7 +215,7 @@ export function PurchaseOrderForm({
 
   const allItems = groups.flatMap((g) => g.items);
   const chosen = allItems.filter((i) => selected.has(i.id));
-  // 공급업체 1곳당 발주 1건. 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(서버·가짜 DB 같은 규칙).
+  // 공급업체 1곳당 발주 1건. 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(서버 규칙).
   const planned = plannedPurchaseOrders(chosen, expectedReceiptDate);
   const orders = groupBySupplier(chosen).flatMap((group) =>
     group.supplierId === null
@@ -228,13 +241,13 @@ export function PurchaseOrderForm({
         const groupIds = group.items.map((i) => i.id);
         const allOn = selectable && groupIds.every((id) => selected.has(id));
         return (
-          <Card key={supplierKey(group.supplierId)}>
+          <Card key={supplierKey(group.supplierId)} petKey="card:purchaseOrders.supplierGroup">
             <CardHead
               title={group.supplierName ?? '기본 공급업체 없음'}
               meta={`승인된 구매요청 ${group.items.length}건 · 미발주 ${fmtTon(decSum(group.items.map((i) => i.requestedTon)))}`}
               actions={
                 selectable ? (
-                  <label className="flex items-center gap-1.5 text-xs text-ink-2">
+                  <label data-pet-term="전체 선택" className="flex items-center gap-1.5 text-xs text-ink-2">
                     <input
                       type="checkbox"
                       aria-label={`${group.supplierName ?? '공급업체'} 품목 전체 선택`}
@@ -261,7 +274,7 @@ export function PurchaseOrderForm({
                 </thead>
                 <tbody>
                   {group.items.map((item) => (
-                    <tr key={item.id} data-selected={selected.has(item.id)}>
+                    <tr key={item.id} data-selected={selected.has(item.id)} data-pet-item="purchaseRequisition" data-pet-item-title={item.purchaseRequisitionNo}>
                       <Td>
                         <input
                           type="checkbox"
@@ -292,19 +305,26 @@ export function PurchaseOrderForm({
           </Card>
         );
       })}
-      <Card>
+      <Card petKey="card:purchaseOrders.confirm">
         <CardHead title="발주 확정" meta={`${chosen.length} / ${allItems.length}개 품목 선택`} />
         <CardBody className="flex-row flex-wrap items-start gap-6">
-          <Field label="입고 예정일" htmlFor="po-expected-date" hint="고른 품목 모두에 들어가요. 비우면 품목마다 구매요청의 희망 입고일이 들어가요">
+          <Field label={<span data-pet-term="입고 예정일">입고 예정일</span>} htmlFor="po-expected-date" hint="고른 품목 모두에 들어가요. 비우면 품목마다 구매요청의 희망 입고일이 들어가요">
             <DateInput id="po-expected-date" value={expectedReceiptDate} onChange={setExpectedReceiptDate} />
           </Field>
           <div className="flex flex-col gap-1 text-sm">
-            <span className="text-xs font-medium text-ink-2">만들어질 발주</span>
+            <span data-pet-term="만들어질 발주" className="text-xs font-medium text-ink-2">
+              만들어질 발주
+            </span>
             <b className="font-semibold">
               {planned.length}건 · 공급업체 {planned.length}곳 · 합계 {fmtTon(decSum(chosen.map((i) => i.requestedTon)))}
             </b>
             {planned.map((purchaseOrder) => (
-              <span key={purchaseOrder.supplierId} className="text-cap text-ink-2">
+              <span
+                key={purchaseOrder.supplierId}
+                data-pet-item="purchaseOrder"
+                data-pet-item-title={`만들어질 발주 · ${purchaseOrder.supplierName ?? '-'}`}
+                className="text-cap text-ink-2"
+              >
                 {purchaseOrder.supplierName ?? '-'} · 입고 예정 {purchaseOrder.expectedReceiptDate ? fmtDate(purchaseOrder.expectedReceiptDate) : '없음'} · 품목 {purchaseOrder.itemCount}개 · {fmtTon(purchaseOrder.totalTon)}
               </span>
             ))}
@@ -356,12 +376,12 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
       <p className="-mt-2 text-sm text-ink-2">
         {po.supplierName} · 발주 확정 {fmtDateTime(po.createdAt)} · 품목 {po.items.length}개 · 발주 {po.orderedEmployeeName ?? '-'}
       </p>
-      <StatBar>
+      <StatBar petKey="card:purchaseOrders.summary">
         <Kpi flat label="발주" value={fmtNum(ordered, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(received, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(received, ordered))}%`} />
         <Kpi flat label="입고예정" value={fmtNum(remaining, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
       </StatBar>
-      <Card>
+      <Card petKey="card:purchaseOrders.items">
         <CardHead title="발주 품목" />
         <CardBody flush>
           <Table>
@@ -379,7 +399,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
             </thead>
             <tbody>
               {po.items.map((line) => (
-                <tr key={line.id}>
+                <tr key={line.id} data-pet-item="purchaseOrderItem" data-pet-item-title={`${po.purchaseOrderNo} ${line.purchaseRequisitionNo ?? line.itemName}`}>
                   <Td>
                     {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
                   </Td>
@@ -420,7 +440,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
           </Table>
         </CardBody>
       </Card>
-      <Card>
+      <Card petKey="card:purchaseOrders.receipts">
         <CardHead
           title="입고 내역"
           meta="입고를 확정하면 원료 LOT이 만들어져요"
@@ -448,7 +468,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
               </thead>
               <tbody>
                 {receipts.map((receipt) => (
-                  <tr key={receipt.id}>
+                  <tr key={receipt.id} data-pet-item="goodsReceipt" data-pet-item-title={receipt.goodsReceiptNo}>
                     <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
                     <Td>
                       {receipt.itemName} <span className="font-mono text-cap text-ink-3">{receipt.purchaseRequisitionNo}</span>

@@ -28,7 +28,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | |
+| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
 | POST | `shipment-requests` | 출하요청 등록 | `SHIPMENT_REQUEST_MANAGE` USE | 출하 가능 매수 초과 시 SHP-002 |
 | GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |
@@ -40,6 +40,7 @@
 - 다른 초안 행(`/api/…`): `GET shipment-requests/shippable`(출하 가능 품목 조회), `PATCH shipment-requests/:id/cancel`. 취소는 [05] 5장에 따라 POST.
 - "또는" 권한은 데코레이터 없이 service에서 `hasPermission`으로 확인한다.
 - 배정 추천·확정·해제는 inventory 모듈 `allocations/*`(purpose = SHIPMENT).
+- 출하요청 상세의 품목과 출하 가능 품목은 규격의 유형·1매 이론중량·강종(`itemType`·`theoreticalWeightTon`·`steelGradeCode`)을 함께 준다. 화면이 요청 톤(매수 × 이론중량)을 계산하는데, 물류는 기준정보 조회 권한이 없어 규격 목록을 읽지 못한다.
 - [권한표]: 영업 SHIPMENT_REQUEST_MANAGE USE·GOODS_ISSUE_CONFIRM·MILL_SHEET_READ VIEW / 물류 GOODS_ISSUE_CONFIRM·MILL_SHEET_READ USE·SHIPMENT_REQUEST_MANAGE VIEW / 품질 출고·밀시트 VIEW / 관리자 VIEW.
 
 ## 4. 업무 규칙
@@ -51,7 +52,7 @@
 
 **배정 → 상태**: inventory가 출하 배정을 확정·해제할 때 `refreshAllocationStatus(tx, shipmentRequestId)`(이 모듈 export)를 부른다. 모든 품목 미배정 = 0이면 ALLOCATED, 아니면 REQUESTED([06] SHIPMENT_REQUEST_STATUS).
 
-**출하요청 취소**: REQUESTED·ALLOCATED만. ISSUED면 `SHP-003`. CONFIRMED 배정을 모두 해제(inventory) 후 CANCELLED.
+**출하요청 취소**: REQUESTED·ALLOCATED만. ISSUED면 `SHP-003`. CONFIRMED 배정을 모두 해제(inventory) 후 CANCELLED. 배정이 없어도 SHIPMENT_REQUEST_CANCELLED를 수주마다 한 건씩 남긴다(2026-10-14 공통 코드 추가).
 
 **출고 확정**([04] 13.3, REQ-SHP-002)
 
@@ -82,6 +83,7 @@
 | 이벤트 | 기록 | actor | target | salesOrderId | lotIds |
 | --- | --- | --- | --- | --- | --- |
 | SHIPMENT_REQUEST_CREATED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 🟡 | - |
+| SHIPMENT_REQUEST_CANCELLED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 | - |
 | GOODS_ISSUE_CONFIRMED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 🟡 | 출고 LOT 전부 |
 | MILL_SHEET_ISSUED | 이 모듈 | USER | `mill_sheet` | 채움 | 그 밀시트의 LOT |
 | RESERVATION_CONVERTED | inventory | USER | `reservation` | 채움 | 출고 LOT |
@@ -125,7 +127,6 @@
 | 부분 출고 단위 | [04] 10장은 출하요청 상태를 ISSUED 하나로 끝내므로 부분 출하는 출하요청을 나눠야 한다. 한 요청 안에서 일부 품목만 출고하는 경우는 정의 없음 | [04] 10장·13.3 |
 | 출고 전 ALLOCATED 필요 여부 | **구현:** 요청 품목마다 CONFIRMED 배정이 요청 매수만큼 있어야 하고(상태 컬럼이 아니라 배정 수로 본다), 모자라면 INV-001. 한 요청 안에서 일부 품목만 출고하는 경우는 지원하지 않는다(요청 전체를 출고) | [04] 13.3, [06] |
 | 이벤트 단위 | 여러 수주를 묶은 출하요청의 SHIPMENT_REQUEST_CREATED·GOODS_ISSUE_CONFIRMED를 수주별로 나눌지 | [ERD] business_event.sales_order_id |
-| 취소 이벤트 | 출하요청 취소용 BUSINESS_EVENT_TYPE이 없다 | [06] |
 | 오류 코드 | 고객사 불일치, 상태 전이 위반(이미 취소·출고)용 코드가 없다 | [04] 9.3 |
 | 중복 출고 방지 | **구현:** 출하요청 행을 잠근 뒤 상태(ISSUED)를 보고 이미 출고했으면 COM-001. Idempotency-Key 저장소는 아직 없다 | [CSV], 08 공통 규약 |
 | PDF 받기 | `POST mill-sheets/:id/pdf`가 파일을 돌려줄지 경로만 줄지, 다운로드 GET이 필요한지 [CSV]에 없다 | [CSV] |

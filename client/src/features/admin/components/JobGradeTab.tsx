@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
 import { jobGradeAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { JobGradeView } from '@/api/directory';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
@@ -31,7 +31,7 @@ export function JobGradeTab() {
   const lockTitle = canEdit ? undefined : permissionNeedText([PERMISSION.EMPLOYEE_MANAGE]);
 
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:organization.jobGrades">
       <CardHead
         title="직급"
         meta="표시 순서가 작은 직급이 조직도에서 먼저 나와요"
@@ -64,7 +64,7 @@ export function JobGradeTab() {
                   {list.map((g) => {
                     const deleteTitle = lockTitle ?? (g.employeeCount > 0 ? `이 직급의 사원이 ${g.employeeCount}명 있어 삭제할 수 없어요` : undefined);
                     return (
-                      <tr key={g.id}>
+                      <tr key={g.id} data-pet-item="jobGrade" data-pet-item-title={g.jobGradeName}>
                         <Td align="right">{g.sortOrder}</Td>
                         <Td className="font-medium">{g.jobGradeName}</Td>
                         <Td align="right">{g.employeeCount}명</Td>

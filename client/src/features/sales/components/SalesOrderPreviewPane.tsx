@@ -29,7 +29,7 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
   const timeline = useSalesOrderTimeline(salesOrderId);
 
   return (
-    <aside aria-label="선택한 수주 미리보기" className="flex w-[400px] flex-none flex-col overflow-auto border-l border-line bg-surface">
+    <aside aria-label="선택한 수주 미리보기" data-pet-target="card:salesOrders.preview" className="flex w-[400px] flex-none flex-col overflow-auto border-l border-line bg-surface">
       {salesOrderId === null ? (
         <EmptyNote className="py-10">미리 볼 수주가 없어요</EmptyNote>
       ) : (
@@ -40,7 +40,7 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
             const done = so.status === 'SHIPPED' || so.status === 'CANCELLED';
             return (
               <div className="flex flex-col">
-                <header className="flex flex-col gap-1.5 border-b border-line px-4 py-3.5">
+                <header data-pet-item="salesOrder" data-pet-item-title={so.salesOrderNo} className="flex flex-col gap-1.5 border-b border-line px-4 py-3.5">
                   <div className="flex items-center gap-2">
                     <Link href={`/sales-orders/${so.id}`} className="font-mono text-base font-semibold hover:underline">
                       {so.salesOrderNo}
@@ -48,7 +48,9 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                     <SalesOrderStatusBadge status={so.status} />
                     {so.isDueRisk ? <DueRiskBadge /> : null}
                   </div>
-                  <span className="text-sm font-medium">{so.customerName}</span>
+                  <span data-pet-field="고객사" className="text-sm font-medium">
+                    {so.customerName}
+                  </span>
                   <span className="text-cap text-ink-3">
                     등록 {fmtMDHM(so.createdAt)} · 담당 {so.ownerName ?? '-'} · 납기 <DueText dueDate={so.earliestDueDate} risk={so.isDueRisk} done={done} />
                   </span>
@@ -64,14 +66,19 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                 <section className="flex flex-col gap-3 border-b border-line px-4 py-3.5">
                   <SectionTitle meta="분모를 지표마다 따로 보여요">품목별 충족</SectionTitle>
                   {so.items.map((item) => (
-                    <div key={item.salesOrderItemId} className="flex flex-col gap-1.5">
+                    <div
+                      key={item.salesOrderItemId}
+                      data-pet-item="salesOrderItem"
+                      data-pet-item-title={`품목 ${item.lineNo} ${item.itemName}`}
+                      className="flex flex-col gap-1.5"
+                    >
                       <div className="flex items-center gap-1.5">
                         <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
                         <span className="ml-auto text-cap text-ink-3 tabular-nums">납기 {fmtDate(item.dueDate)}</span>
                       </div>
                       <FulfillmentMeasures item={item} compact />
                       {item.shortage.reproductionNeedQty > 0 ? (
-                        <span className="text-cap font-semibold text-danger">
+                        <span data-pet-term="재생산 필요" className="text-cap font-semibold text-danger">
                           재생산 필요 {item.shortage.reproductionNeedQty}
                           {qtyUnitOf([item.itemType])} · 상세에서 만들 수 있어요
                         </span>
@@ -86,7 +93,12 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
                     <EmptyNote className="py-2">연결된 생산계획이 없어요 · 재고로 모두 예약됐거나 부족 매수가 없어요</EmptyNote>
                   ) : (
                     plans.map((plan) => (
-                      <div key={plan.productionPlanId} className="flex items-center gap-2 text-xs">
+                      <div
+                        key={plan.productionPlanId}
+                        data-pet-item="productionPlan"
+                        data-pet-item-title={plan.productionPlanNo}
+                        className="flex items-center gap-2 text-xs"
+                      >
                         <PlanLink productionPlanId={plan.productionPlanId} productionPlanNo={plan.productionPlanNo} />
                         <span className="text-ink-2">
                           품목 {plan.lineNo} · 부족 {plan.shortageQty} · 잔여 목표 {plan.remainingTargetQty} · 히트 {plan.heatCount}

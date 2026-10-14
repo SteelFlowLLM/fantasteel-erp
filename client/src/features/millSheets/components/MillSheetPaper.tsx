@@ -17,10 +17,13 @@ const resultClass = (result: string | undefined) => (result === 'PASS' ? 'text-o
 
 const TABLE = 'w-full border-collapse border border-line-strong text-xs tabular-nums [&_td]:h-7 [&_td]:border-b [&_td]:border-line [&_td]:px-2.5 [&_th]:h-7 [&_th]:border-b [&_th]:border-line-strong [&_th]:bg-surface-2 [&_th]:px-2.5 [&_th]:font-medium [&_th]:text-ink-2 [&_th]:whitespace-nowrap';
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** term = 화면 도우미 펫이 설명할 용어(제목에 번호·공정이 붙어도 같은 설명을 쓴다) */
+function Section({ title, term, children }: { title: string; term: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1.5 break-inside-avoid">
-      <b className="text-sm">{title}</b>
+      <b className="text-sm" data-pet-term={term}>
+        {title}
+      </b>
       <div className="overflow-x-auto print:overflow-visible">{children}</div>
     </section>
   );
@@ -28,12 +31,14 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 interface MatrixRow {
   key: string;
+  /** 화면 도우미 펫이 이 행을 읽을 때 쓰는 제목 (히트 번호·LOT 번호) */
+  title: string;
   head: ReactNode;
   inspection: MillSheetInspectionSnapshot | null;
 }
 
 /** 검사 항목(열) × 대상(행). 기준이 같은 행끼리 묶고, 묶음마다 첫 행에 그 묶음의 기준(경계 포함)을 둔다. */
-function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; rows: MatrixRow[]; emptyText: string }) {
+function InspectionMatrix({ headLabel, kind, rows, emptyText }: { headLabel: string; kind: 'heat' | 'inspection'; rows: MatrixRow[]; emptyText: string }) {
   const columns = inspectionColumns(rows.map((r) => r.inspection));
   const groups = inspectionRangeGroups(rows);
   return (
@@ -55,7 +60,7 @@ function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; r
         {groups.map((group) => (
           <Fragment key={group.key}>
             {Object.keys(group.ranges).length > 0 ? (
-              <tr>
+              <tr data-pet-item="inspectionStandard" data-pet-item-title={group.standard}>
                 <td className="text-ink-3">기준</td>
                 {columns.map((c) => (
                   <td key={c.inspectionItemCode} className="text-right text-ink-3">
@@ -67,7 +72,7 @@ function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; r
               </tr>
             ) : null}
             {group.rows.map((row) => (
-              <tr key={row.key}>
+              <tr key={row.key} data-pet-item={kind} data-pet-item-title={row.title}>
                 <td>{row.head}</td>
                 {columns.map((c) => {
                   const v = row.inspection?.values.find((x) => x.inspectionItemCode === c.inspectionItemCode);
@@ -95,7 +100,8 @@ function InspectionMatrix({ headLabel, rows, emptyText }: { headLabel: string; r
   );
 }
 
-export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot }) {
+/** forPrint = 인쇄 전용 사본. 평소엔 display:none이라 크기가 0인 사본에 펫 설명 키를 달면 펫이 엉뚱한 곳을 가리킨다 */
+export function MillSheetPaper({ snapshot: s, forPrint = false }: { snapshot: MillSheetSnapshot; forPrint?: boolean }) {
   const lotRows = lotRowsOf(s.items);
   const hasCoil = lotRows.some((r) => r.lot.lotType === 'COIL');
   const unit = (() => {
@@ -107,6 +113,8 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
   return (
     <article
       aria-label={`밀시트 ${s.millSheetNo}`}
+      data-pet-perch={forPrint ? undefined : ''}
+      data-pet-target={forPrint ? undefined : 'card:millSheets.paper'}
       className="mx-auto flex w-full max-w-[1000px] flex-none flex-col gap-4 rounded-sm border border-line bg-white p-8 text-ink shadow-1 print:max-w-none print:border-0 print:p-0 print:shadow-none"
     >
       <header className="flex items-start gap-4 border-b-2 border-ink pb-3">
@@ -156,7 +164,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
         <dd className="tabular-nums">{fmtTon(s.totalWeightTon)}</dd>
       </dl>
 
-      <Section title="품목">
+      <Section title="품목" term="품목">
         <table className={TABLE}>
           <thead>
             <tr>
@@ -172,7 +180,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
           </thead>
           <tbody>
             {s.items.map((item) => (
-              <tr key={item.salesOrderItemId}>
+              <tr key={item.salesOrderItemId} data-pet-item="salesOrderItem" data-pet-item-title={item.itemCode}>
                 <td className="text-center">#{item.lineNo}</td>
                 <td>{itemTypeLabel(item.itemType)}</td>
                 <td className="font-mono">{item.itemCode}</td>
@@ -195,7 +203,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
         </table>
       </Section>
 
-      <Section title="1. 제품 LOT">
+      <Section title="1. 제품 LOT" term="제품 LOT">
         <table className={TABLE}>
           <thead>
             <tr>
@@ -210,7 +218,7 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
           </thead>
           <tbody>
             {lotRows.map((row) => (
-              <tr key={row.lot.lotId}>
+              <tr key={row.lot.lotId} data-pet-item="lot" data-pet-item-title={row.lot.lotNo}>
                 <td className="text-center">{row.no}</td>
                 <td>#{row.lineNo}</td>
                 <td className="font-mono">{row.lot.lotNo}</td>
@@ -242,25 +250,28 @@ export function MillSheetPaper({ snapshot: s }: { snapshot: MillSheetSnapshot })
         </table>
       </Section>
 
-      <Section title="2. 화학성분 (히트 성분 검사)">
+      <Section title="2. 화학성분 (히트 성분 검사)" term="화학성분">
         <InspectionMatrix
           headLabel="히트"
-          rows={s.heats.map((h) => ({ key: String(h.heatLotId), head: <span className="font-mono">{h.heatNo}</span>, inspection: h.inspection }))}
+          kind="heat"
+          rows={s.heats.map((h) => ({ key: String(h.heatLotId), title: h.heatNo, head: <span className="font-mono">{h.heatNo}</span>, inspection: h.inspection }))}
           emptyText="히트 성분 검사값이 없어요"
         />
       </Section>
 
       {groups.length === 0 ? (
-        <Section title="3. 제품 검사">
-          <InspectionMatrix headLabel="No" rows={[]} emptyText="제품 검사값이 없어요" />
+        <Section title="3. 제품 검사" term="제품 검사">
+          <InspectionMatrix headLabel="No" kind="inspection" rows={[]} emptyText="제품 검사값이 없어요" />
         </Section>
       ) : (
         groups.map((group, index) => (
-          <Section key={group.processType} title={`3${groups.length > 1 ? `-${index + 1}` : ''}. 제품 검사 (${processLabel(group.processType)})`}>
+          <Section key={group.processType} title={`3${groups.length > 1 ? `-${index + 1}` : ''}. 제품 검사 (${processLabel(group.processType)})`} term="제품 검사">
             <InspectionMatrix
               headLabel="No · LOT"
+              kind="inspection"
               rows={group.rows.map((r) => ({
                 key: String(r.lot.lotId),
+                title: r.lot.lotNo,
                 head: (
                   <span>
                     {r.no} <span className="font-mono text-ink-3">{r.lot.lotNo}</span>

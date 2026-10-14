@@ -1,6 +1,6 @@
-// 생산 화면(생산계획·작업 실적·열연 투입) ↔ 서버 API (server/src/modules/production). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 생산계획·LOT·실적·배정·규격 id는 서버 id를 그대로 쓴다. 응답에 없는 규격 이론중량·이름만 시드의 같은 코드로 채운다(api/server/masterIds.ts).
-// LOT 추적·검사 입력도 서버 모드라 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
+// 생산 화면(생산계획·작업 실적·열연 투입) ↔ 서버 API (server/src/modules/production). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
+// 생산계획·LOT·실적·배정·규격 id는 서버 id를 그대로 쓴다.
+// LOT 추적·검사 입력도 서버를 쓰므로 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
 import type {
   HotRollingDetail as ServerHotRollingDetail,
   PageResult,
@@ -14,14 +14,14 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import { seedItemOf } from '@/api/server/masterIds';
-import type { CancelPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ReproductionCheck, ReproductionResult } from '@/api/production';
+import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ProductionPlanView, ProductionResultView, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
   IronmakingResultInput,
   RawMaterialStock,
   RegisteredResult,
   SimulateInput,
+  SimulationResult,
   SteelmakingResultInput,
   StartWorkInput,
   WorkContext,
@@ -29,7 +29,6 @@ import type {
 import type { ChangeRollingInput, ConfirmRollingInput, HotRollingResultInput, RollingDetail, RollingPlanListRow } from '@/api/rolling';
 import type { InspectionResult, ProductItemType } from '@/codes';
 import { decMul, decSum } from '@/lib/decimal';
-import type { ProductionPlanView, ProductionResultView, SimulationResult } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 끝까지 읽는다 */
 const PAGE_SIZE = 100;
@@ -131,7 +130,6 @@ function toPlanLotRow(lot: PlanLot, heatDates: Map<number, string>): PlanLotRow 
 
 function toPlanView(d: ServerPlanDetail): ProductionPlanView {
   const f = d.formation;
-  const slabSeed = f ? seedItemOf(f.slabItemCode) : undefined;
   // 용선 톤: 이 계획 히트에 투입한 용선 (제선 실적은 계획에 묶이지 않는다)
   const hotMetalTons = d.results.filter((r) => r.processType === 'STEELMAKING').flatMap((r) => r.inputs.filter((i) => i.lotType === 'HOT_METAL' && i.inputTon !== null).map((i) => i.inputTon ?? '0'));
   const plannedSlabQty = f ? f.slabQtyPerHeat * d.heatCount : 0;
@@ -151,9 +149,9 @@ function toPlanView(d: ServerPlanDetail): ProductionPlanView {
       itemName: d.itemName,
       itemType: productType(d.itemType),
       steelGradeCode: d.steelGradeCode,
-      theoreticalWeightTon: f?.theoreticalWeightTon ?? seedItemOf(d.itemCode)?.theoreticalWeightTon ?? '0.000',
+      theoreticalWeightTon: f?.theoreticalWeightTon ?? d.theoreticalWeightTon ?? '0.000',
     },
-    slabSpec: f ? { id: f.slabItemId, itemCode: f.slabItemCode, itemName: slabSeed?.itemName ?? f.slabItemCode, theoreticalWeightTon: f.slabTheoreticalWeightTon } : null,
+    slabSpec: f ? { id: f.slabItemId, itemCode: f.slabItemCode, itemName: f.slabItemName, theoreticalWeightTon: f.slabTheoreticalWeightTon } : null,
     salesOrder:
       d.salesOrderId !== null && d.salesOrderNo !== null && d.salesOrderItemId !== null
         ? {
@@ -174,6 +172,7 @@ function toPlanView(d: ServerPlanDetail): ProductionPlanView {
           cumulativeYieldRate: f.cumulativeYieldRate,
           requiredSteelTon: f.requiredMoltenSteelTon,
           heatCount: d.heatCount,
+          recalculatedHeatCount: f.heatCount,
           heatCapacityTon: f.heatCapacityTon,
           heatTon: decMul(f.heatCapacityTon, d.heatCount),
           slabQtyPerHeat: f.slabQtyPerHeat,
@@ -255,6 +254,16 @@ export const serverProductionPlanApi = {
     const reason = input.reasonText?.trim() ? input.reasonText.trim().slice(0, 200) : undefined;
     const d = await serverRequest<ServerPlanDetail>('POST', `/production-plans/${input.productionPlanId}/cancel`, { body: { reason } });
     return { id: d.id, productionPlanNo: d.productionPlanNo };
+  },
+
+  /** 서버에는 낙관적 잠금이 없어 화면을 연 뒤 바뀌었는지 먼저 확인한다 (COM-001) */
+  confirmHeatPlan: async (input: ConfirmHeatPlanInput): Promise<{ id: number; productionPlanNo: string; heatCount: number }> => {
+    if (input.expectedUpdatedAt) {
+      const current = await planDetail(input.productionPlanId);
+      if (current.updatedAt !== input.expectedUpdatedAt) throw new ApiError('COM-001');
+    }
+    const d = await serverRequest<ServerPlanDetail>('POST', `/production-plans/${input.productionPlanId}/confirm`);
+    return { id: d.id, productionPlanNo: d.productionPlanNo, heatCount: d.heatCount };
   },
 
   createReproduction: async (input: { salesOrderItemId: number }): Promise<ReproductionResult> => {

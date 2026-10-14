@@ -4,18 +4,19 @@ import { CHAT_ROOM_TYPE_LABEL } from '@/codes';
 import type { ChatRoomDetailView } from '@/api/messenger';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Tag } from '@/components/Tag';
 import { WorkRoomSummary } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { PresenceDot } from '@/features/messenger/components/Presence';
 import { RoomFiles, RoomSearch } from '@/features/messenger/components/RoomAsideTools';
 import { fmtDate } from '@/lib/format';
 
-function Section({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
+function Section({ title, term, actions, children }: { title: ReactNode; term?: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5 border-b border-line px-4 py-3.5">
       <div className="flex items-center gap-2">
-        <b className="text-sm font-semibold">{title}</b>
+        <b data-pet-term={term ?? (typeof title === 'string' ? title : undefined)} className="text-sm font-semibold">
+          {title}
+        </b>
         {actions ? <span className="ml-auto">{actions}</span> : null}
       </div>
       {children}
@@ -25,7 +26,12 @@ function Section({ title, actions, children }: { title: ReactNode; actions?: Rea
 
 export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void; onJump: (messageId: number) => void }) {
   return (
-    <aside className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex" aria-label="방 정보">
+    <aside
+      data-pet-target="card:messenger.aside"
+      data-pet-perch=""
+      className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex"
+      aria-label="방 정보"
+    >
       <Section title="대화 검색">
         <RoomSearch chatRoomId={room.id} onJump={onJump} />
       </Section>
@@ -49,7 +55,7 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
             </span>
           }
         >
-          <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1.5 text-xs">
+          <dl data-pet-item="chatRoom" data-pet-item-title={room.displayName} className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1.5 text-xs">
             <dt className="text-ink-3">이름</dt>
             <dd>{room.displayName}</dd>
             <dt className="text-ink-3">개설일</dt>
@@ -61,6 +67,7 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
       )}
       <Section
         title={`멤버 ${room.members.length}`}
+        term="멤버"
         actions={
           room.canInvite ? (
             <Button size="sm" variant="ghost" icon="plus" onClick={onInvite}>
@@ -71,7 +78,7 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
       >
         <ul className="flex flex-col gap-2">
           {room.members.map((member) => (
-            <li key={member.id} className="flex items-center gap-2 text-sm">
+            <li key={member.id} data-pet-item="chatRoomMember" data-pet-item-title={member.employeeName} className="flex items-center gap-2 text-sm">
               <span className="relative flex-none">
                 <Avatar name={member.employeeName} size="sm" tone={member.isMe ? 'brand' : 'neutral'} />
                 {member.isMe ? null : <PresenceDot employeeId={member.id} />}
@@ -92,8 +99,8 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
           ))}
           <li className="flex items-center gap-2 text-sm text-ink-3">
             <span className="flex size-[22px] items-center justify-center rounded-full bg-ai-bg text-[10px] font-semibold text-ai-strong">AI</span>
-            AI 어시스턴트 (@AI 호출)
-            <ComingSoon grade="P2" className="ml-auto" />
+            AI 어시스턴트
+            <span className="ml-auto text-cap">@AI 로 호출</span>
           </li>
         </ul>
         {room.chatRoomType === 'DIRECT' ? <p className="text-cap text-ink-3">1:1 채팅방에는 멤버를 추가할 수 없어요. 그룹 채팅방을 새로 만들어 주세요</p> : null}

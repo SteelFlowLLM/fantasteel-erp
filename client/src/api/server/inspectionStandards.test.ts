@@ -30,8 +30,8 @@ function useServer(respond: (call: Call) => Response) {
 }
 
 const page = (items: InspectionStandardListItem[]) => ok({ items, page: 1, size: 100, total: items.length });
-/** 강종 목록 (적용 규격 번호) */
-const grades = () => ok([{ id: 902, steelGradeCode: 'SM355A', steelGradeName: 'SM355A', standardNo: 'KS D 3515:2018' }]);
+/** 상세 응답의 강종 적용 규격 번호 */
+const standardNo = 'KS D 3515:2018';
 
 function serverStandard(overrides: Partial<InspectionStandardListItem> = {}): InspectionStandardListItem {
   return {
@@ -83,7 +83,6 @@ const buildItem = (overrides: Partial<InspectionStandardItemInput> = {}): Inspec
 });
 
 beforeEach(() => {
-  vi.stubEnv('NEXT_PUBLIC_DATA_SOURCE', 'server');
   actAs(SEED_EMPLOYEE_NO.quality);
   resetServerSessionForTest(SEED_EMPLOYEE_NO.quality);
 });
@@ -128,10 +127,10 @@ describe('검사 기준 서버 모드: 조회', () => {
       { inspectionStandardId: 501, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 2, inspectionCount: 3 },
       { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
     ];
-    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), inspectionCount: 3, versions }) : c.path === '/steel-grades' ? grades() : fail(404, 'COM-003', '없음')));
+    useServer((c) => (c.path === '/inspection-standards/501' ? ok({ ...serverStandard(), standardNo, inspectionCount: 3, versions }) : fail(404, 'COM-003', '없음')));
     const detail = await inspectionStandardApi.get(501);
     // 목록을 다시 읽지 않는다 (버전 1이라 앞 버전도 없다). 적용 규격 번호는 강종 목록에서
-    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501', '/steel-grades']);
+    expect(calls.map((c) => c.path)).toEqual(['/inspection-standards/501']);
     expect(detail).toMatchObject({
       id: 501,
       version: 1,
@@ -159,9 +158,8 @@ describe('검사 기준 서버 모드: 조회', () => {
       { inspectionStandardId: 520, versionNo: 2, createdAt: '2026-10-01T00:00:00.000Z', itemCount: 0, inspectionCount: 0 },
     ];
     useServer((c) => {
-      if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), inspectionCount: 0, versions });
-      if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), inspectionCount: 3, versions });
-      if (c.path === '/steel-grades') return grades();
+      if (c.path === '/inspection-standards/520') return ok({ ...serverStandard({ inspectionStandardId: 520, versionNo: 2, items: [] }), standardNo, inspectionCount: 0, versions });
+      if (c.path === '/inspection-standards/501') return ok({ ...serverStandard(), standardNo, inspectionCount: 3, versions });
       return fail(404, 'COM-003', '없음');
     });
     const detail = await inspectionStandardApi.get(520);
@@ -209,6 +207,45 @@ describe('검사 기준 서버 모드: 변경', () => {
     expect(common).toBeInstanceOf(InputError);
     expect((common as InputError).fieldErrors.steelGradeId).toContain('공통 기준');
     await expect(inspectionStandardApi.createVersion({ baseStandardId: 501, items: [] })).rejects.toBeInstanceOf(InputError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('강종·공정을 고르지 않았거나 제선·제강 공통 기준이면 서버를 부르지 않고 칸에 안내한다', async () => {
+    useServer(() => page([]));
+    const fieldErrorsOf = async (input: Parameters<typeof inspectionStandardApi.create>[0]) => ((await inspectionStandardApi.create(input).catch((e: unknown) => e)) as InputError).fieldErrors;
+    expect(await fieldErrorsOf({ processType: 'HOT_ROLLING', steelGradeId: null, items: [buildItem()] })).toMatchObject({ steelGradeId: '강종을 선택해 주세요' });
+    expect(Object.keys(await fieldErrorsOf({ processType: null, steelGradeId: null, items: [buildItem()] })).sort()).toEqual(['processType', 'steelGradeId']);
+    expect(Object.keys(await fieldErrorsOf({ processType: 'IRONMAKING', steelGradeId: 9, items: [buildItem()] }))).toContain('processType');
+    const steelmaking = await fieldErrorsOf({ processType: 'STEELMAKING', steelGradeId: 'COMMON', items: [buildItem({ inspectionItemCode: 'C', inspectionItemName: '탄소', unit: '%', minValue: '', maxValue: '0.2', maxThicknessMm: '' })] });
+    expect(steelmaking.steelGradeId).toContain('강종별로');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('항목 입력을 확인한다: 최소·최대 중 하나, 최소 ≤ 최대, 두께 구간(초과 < 이하), 코드·이름, 같은 항목의 구간 겹침 (서버 호출 없음)', async () => {
+    useServer(() => page([]));
+    const error = (await inspectionStandardApi
+      .create({
+        processType: 'HOT_ROLLING',
+        steelGradeId: 9,
+        items: [
+          buildItem({ minValue: '', maxValue: '' }),
+          buildItem({ inspectionItemCode: 'TENSILE_STRENGTH', inspectionItemName: '인장강도', minValue: '630', maxValue: '490', maxThicknessMm: '' }),
+          buildItem({ inspectionItemCode: 'ELONGATION', inspectionItemName: '연신율', minValue: '17', minThicknessMm: '16', maxThicknessMm: '5' }),
+          buildItem({ inspectionItemCode: '1C', inspectionItemName: '' }),
+        ],
+      })
+      .catch((e: unknown) => e)) as InputError;
+    expect(error.fieldErrors).toMatchObject({
+      'items.0.minValue': '최소·최대 중 하나는 입력해 주세요',
+      'items.1.maxValue': '최소값이 최대값보다 클 수 없어요',
+      'items.2.maxThicknessMm': '두께 상한(이하)은 하한(초과)보다 커야 해요',
+      'items.3.inspectionItemCode': '영문으로 시작하고 영문·숫자·밑줄만 써요 (예: C, TENSILE_STRENGTH)',
+      'items.3.inspectionItemName': '항목명을 입력해 주세요',
+    });
+    const overlap = (await inspectionStandardApi
+      .create({ processType: 'HOT_ROLLING', steelGradeId: 9, items: [buildItem(), buildItem({ minValue: '345', minThicknessMm: '10', maxThicknessMm: '40' })] })
+      .catch((e: unknown) => e)) as InputError;
+    expect(overlap.fieldErrors['items.1.minThicknessMm']).toBe('1행과 같은 항목 코드인데 두께 구간이 겹쳐요');
     expect(calls).toHaveLength(0);
   });
 

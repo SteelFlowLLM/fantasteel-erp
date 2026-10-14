@@ -1,10 +1,9 @@
 // 서버 호출 계층: 사원번호·비밀번호 로그인·로그아웃, 세션 끊김(401·다른 탭 로그인) 알림, 오류 코드 변환.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setActingEmployeeForTest } from '@/api/actor';
+import { setActingEmployeeNoForTest } from '@/api/actor';
 import { ApiError, InputError } from '@/api/errors';
-import { dataSource, onServerSessionLost, resetServerSessionForTest, serverLogin, serverLogout, serverRequest } from '@/api/http';
-import { getMockDb } from '@/mock/db';
-import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import { onServerSessionLost, resetServerSessionForTest, serverLogin, serverLogout, serverRequest } from '@/api/http';
+import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
 
 interface Call {
   method: string;
@@ -28,19 +27,13 @@ function useServer(respond: (call: Call) => Response) {
   });
 }
 
-const actAs = (employeeNo: string) => {
-  const id = getMockDb().read((t) => t.employee.find((e) => e.employeeNo === employeeNo)?.id);
-  setActingEmployeeForTest(id ?? null);
-};
-
 beforeEach(() => resetServerSessionForTest());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('서버 호출 계층 (api/http.ts)', () => {
-  it('기본 데이터 출처는 가짜 DB다', () => {
-    expect(dataSource()).toBe('mock');
-  });
-
   it('로그인하면 그 사원으로 요청하고, 로그인 실패는 서버 문구 그대로 보인다', async () => {
     actAs(SEED_EMPLOYEE_NO.sales);
     useServer((c) => {
@@ -105,7 +98,7 @@ describe('서버 호출 계층 (api/http.ts)', () => {
   });
 
   it('로그인하지 않았으면 서버를 부르지 않고 COM-002', async () => {
-    setActingEmployeeForTest(null);
+    setActingEmployeeNoForTest(null);
     useServer(() => ok(null));
     await expect(serverRequest('GET', '/x')).rejects.toMatchObject({ code: 'COM-002' });
     expect(calls).toHaveLength(0);

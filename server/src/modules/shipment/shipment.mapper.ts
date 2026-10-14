@@ -2,6 +2,7 @@ import {
   ALLOCATION_STATUS,
   LOT_TYPE,
   type AllocationStatus,
+  type ItemType,
   type MillSheetDetail,
   type MillSheetSnapshot,
   type MillSheetSummary,
@@ -54,6 +55,9 @@ export function toShipmentRequestDetail(row: ShipmentRequestDetailRow): Shipment
         itemId: i.salesOrderItem.itemId,
         itemCode: i.salesOrderItem.item.itemCode,
         itemName: i.salesOrderItem.item.itemName,
+        itemType: i.salesOrderItem.item.itemType as ItemType,
+        theoreticalWeightTon: i.salesOrderItem.item.theoreticalWeightTon?.toFixed(3) ?? null,
+        steelGradeCode: i.salesOrderItem.item.steelGrade?.steelGradeCode ?? null,
         requestQty: i.requestQty,
         unallocatedQty: Math.max(0, i.requestQty - confirmed),
         allocations: i.allocations.map((a) => ({

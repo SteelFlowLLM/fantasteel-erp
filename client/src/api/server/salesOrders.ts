@@ -1,4 +1,4 @@
-// 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 수주 화면 ↔ 서버 API (server/src/modules/sales-order). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 고객사·규격 id는 서버 id 그대로다 (수주 등록의 선택 목록도 서버, api/server/lookups.ts).
 // 생산 연결 탭은 수주 상세의 계획 id로 생산계획 상세를 읽는다. 서버에 아직 없는 것(취소 창의 구매 진행 영향)은 빈 값이다.
 // 재생산 계획은 생산계획 어댑터, 이력 타임라인은 작업 로그 어댑터, 업무방은 메신저 어댑터가 맡는다.
@@ -11,6 +11,7 @@ import type {
   ProductionSettingView,
   ProductStockWidget,
   RoutingView,
+  SalesOrderCancelPurchaseImpactLine,
   SalesOrderDetail as ServerSalesOrderDetail,
   SalesOrderItemFulfillment,
   SalesOrderReservationView,
@@ -32,10 +33,10 @@ import type {
   SalesOrderPreviewLine,
 } from '@/api/salesOrders';
 import { ITEM_TYPE_LABEL, PROCESS_TYPE_LABEL, type ProcessType, type ProductItemType } from '@/codes';
+import { parseOrderedQty } from '@/features/sales/lib/salesOrderForm';
 import { planHeats, type HeatPlan } from '@/lib/heatPlanning';
 import { stockFirstSplit, progressOf } from '@/lib/inventoryMath';
 import { calcHotRollingYieldRate, calcWeightTon } from '@/lib/weight';
-import { requirePositiveQty } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 읽는다 (수주가 100건을 넘으면 페이지를 더 읽는다) */
 const PAGE_SIZE = 100;
@@ -200,7 +201,7 @@ type ProductItem = ServerItemView & { itemType: ProductItemType; theoreticalWeig
 const isProductItem = (item: ServerItemView | undefined): item is ProductItem =>
   item !== undefined && (item.itemType === 'SLAB' || item.itemType === 'COIL') && item.theoreticalWeightTon !== null;
 
-/** 라우팅 계획 수율. 없으면 MST-001 (가짜 DB core routingYieldOf와 같은 문구) */
+/** 라우팅 계획 수율. 없으면 MST-001 */
 function routingYield(master: PreviewMaster, itemType: ProductItemType, processType: ProcessType): string {
   const rate = master.routings.find((r) => r.itemType === itemType && r.processType === processType)?.plannedYieldRate;
   if (!rate) throw new ApiError('MST-001', `라우팅 계획 수율(${ITEM_TYPE_LABEL[itemType]} ${PROCESS_TYPE_LABEL[processType]})`);
@@ -258,7 +259,9 @@ async function preview(lines: readonly SalesOrderPreviewInputLine[]): Promise<Sa
   const checked = lines.map((line, index) => {
     const item = items.find((i) => i.id === line.itemId);
     if (!isProductItem(item)) throw new ApiError('SO-001', `${index + 1}번째 품목`);
-    return { item, orderedQty: requirePositiveQty(line.orderedQty, `${index + 1}번째 품목`) };
+    const orderedQty = parseOrderedQty(String(line.orderedQty).trim());
+    if (orderedQty === null) throw new ApiError('SO-002', `${index + 1}번째 품목`);
+    return { item, orderedQty };
   });
   const used = new Map<number, number>();
   return checked.map(({ item, orderedQty }) => {
@@ -325,6 +328,11 @@ async function cancel(input: { salesOrderId: number; cancelReason: string }): Pr
   return { salesOrderId: result.salesOrderId, salesOrderNo: result.salesOrderNo };
 }
 
+/** 수주 취소 창의 구매 진행 영향 (서버가 계획 상태로 취소·연결 해제를 가른다) */
+function cancelPurchaseImpact(salesOrderId: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+  return serverRequest<SalesOrderCancelPurchaseImpactLine[]>('GET', `/sales-orders/${salesOrderId}/cancel-purchase-impact`);
+}
+
 /**
  * 생산 연결 탭: 수주 품목에 연결된 계획과, 수주 취소로 연결이 풀린 진행 계획(취소 기록의 계획 번호)의 생산계획 상세.
  * 생산계획 조회 권한이 없으면(물류) 빈 목록이다.
@@ -349,4 +357,4 @@ async function productionLinks(salesOrderId: number): Promise<SalesOrderPlanLink
   }
 }
 
-export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel };
+export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel, cancelPurchaseImpact };

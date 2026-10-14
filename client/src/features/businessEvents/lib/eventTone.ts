@@ -1,7 +1,7 @@
 // 작업 로그 점 색 한 곳에서 정한다 (보고서 4 A-4 "화면마다 다른 색" 통일).
 // 사용자 = 파랑, 시스템 = 회색, 불합격(검사 등록·판정의 불합격, 불합격 처리 상태 지정) = 빨강.
 import type { ActorType, BusinessEventType } from '@/codes';
-import type { JsonValue } from '@/mock/schema';
+import type { JsonValue } from '@/lib/json';
 
 export type EventTone = 'run' | 'neutral' | 'danger';
 

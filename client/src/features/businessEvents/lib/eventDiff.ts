@@ -23,7 +23,7 @@ import {
   SHIPMENT_REQUEST_STATUS_LABEL,
 } from '@/codes';
 import { fmtDateTime, trimNum } from '@/lib/format';
-import type { JsonValue } from '@/mock/schema';
+import type { JsonValue } from '@/lib/json';
 
 export interface DiffRow {
   /** 점으로 이은 경로 (예: inventory.onHandQty, values.C.measuredValue) */

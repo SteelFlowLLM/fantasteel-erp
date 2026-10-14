@@ -20,6 +20,7 @@ const allocationInclude = {
       lotNo: true,
       itemId: true,
       yardId: true,
+      yard: { select: { yardName: true } },
       producedDate: true,
       lotStatus: true,
       // 상위 히트 번호 표시용: 슬래브 → 히트, 코일 → 슬래브 → 히트
@@ -219,6 +220,11 @@ export class InventoryRepository {
 
   findAllocatableLots(tx: Tx, itemId: number) {
     return tx.$queryRawTyped(findAllocatableLots(itemId));
+  }
+
+  /** 배정 후보(TypedSQL)에 붙일 야드 이름 */
+  findYards(tx: Tx) {
+    return tx.yard.findMany({ select: { id: true, yardName: true } });
   }
 
   // ── 여재 (inventory.md 8-1) ───────────────────────────

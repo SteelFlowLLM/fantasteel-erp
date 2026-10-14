@@ -61,7 +61,7 @@ describe('생산계획 조회 (API-200·201)', () => {
   it('14.1 슬래브 4매: 히트 1개, 250t, 필요 용선 277.778t, 히트당 10매 → 예상 여재 6매', async () => {
     const plan = await planFor('SL-SS275-250x1200x10000', 4);
     const detail = await production.getPlanDetail(plan.id);
-    expect(detail).toMatchObject({ productionPlanStatus: 'PLANNED', shortageQty: 4, heatCount: 1, itemType: 'SLAB', canCancel: true, canConfirm: true });
+    expect(detail).toMatchObject({ productionPlanStatus: 'PLANNED', shortageQty: 4, heatCount: 1, itemType: 'SLAB', theoreticalWeightTon: '23.550', canCancel: true, canConfirm: true });
     expect(detail.salesOrderNo).toMatch(/^SO-\d{4}-\d{3}$/);
     expect(detail.formation).toMatchObject({
       targetTon: '94.200',
@@ -83,7 +83,7 @@ describe('생산계획 조회 (API-200·201)', () => {
     const plan = await planFor('CL-SM355A-4.5x1500x544000', 6);
     const formation = await production.previewHeatPlan(plan.id);
     const slab = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SM355A-250x1500x10000' } });
-    expect(formation.slabItemId).toBe(slab.id);
+    expect(formation).toMatchObject({ slabItemId: slab.id, slabItemName: slab.itemName });
     expect(formation.hotRollingYieldRate).not.toBeNull();
     expect(Number(formation.cumulativeYieldRate)).toBeLessThan(0.98);
     expect(formation.plannedSlabQty).toBe(formation.slabQtyPerHeat * formation.heatCount);
@@ -103,7 +103,7 @@ describe('생산계획 조회 (API-200·201)', () => {
 });
 
 describe('히트 편성 확정 (API-204)', () => {
-  it('히트 용량 설정이 바뀌면 다시 계산해 저장한다. 작업 로그는 남기지 않는다', async () => {
+  it('히트 용량 설정이 바뀌면 다시 계산해 저장하고, 확정한 사람과 전후 히트 수를 작업 로그(HEAT_PLAN_CONFIRMED)에 남긴다', async () => {
     const plan = await planFor('SL-SS275-250x1200x10000', 8);
     const setting = await prisma.productionSetting.findFirstOrThrow();
     const eventsBefore = await prisma.businessEvent.count({ where: { targetType: 'production_plan', targetId: plan.id } });
@@ -112,19 +112,27 @@ describe('히트 편성 확정 (API-204)', () => {
       const preview = await production.previewHeatPlan(plan.id);
       // 8 × 23.550 = 188.4 ÷ 0.98 = 192.245 → 100t 히트 2개
       expect(preview).toMatchObject({ heatCount: 2, savedHeatCount: 1 });
-      const confirmed = await production.confirmHeatPlan(plan.id);
+      const confirmed = await production.confirmHeatPlan(producer, plan.id);
       expect(confirmed.heatCount).toBe(2);
       expect(confirmed.formation?.savedHeatCount).toBe(2);
     } finally {
       await prisma.productionSetting.update({ where: { id: setting.id }, data: { heatCapacityTon: setting.heatCapacityTon } });
     }
-    expect(await prisma.businessEvent.count({ where: { targetType: 'production_plan', targetId: plan.id } })).toBe(eventsBefore);
+    const events = await prisma.businessEvent.findMany({ where: { targetType: 'production_plan', targetId: plan.id }, orderBy: { id: 'asc' } });
+    expect(events).toHaveLength(eventsBefore + 1);
+    expect(events.at(-1)).toMatchObject({
+      businessEventType: BUSINESS_EVENT_TYPE.HEAT_PLAN_CONFIRMED,
+      actorEmployeeId: producer.employeeId,
+      beforeData: expect.objectContaining({ heatCount: 1 }),
+      afterData: expect.objectContaining({ heatCount: 2 }),
+    });
+    expect(events.at(-1)?.salesOrderId).not.toBeNull();
   });
 
   it('진행중 계획은 확정할 수 없다 (COM-001)', async () => {
     const plan = await planFor('SL-SS275-250x1200x10000', 1);
     await prisma.productionPlan.update({ where: { id: plan.id }, data: { productionPlanStatus: 'IN_PROGRESS' } });
-    expect(await codeOf(production.confirmHeatPlan(plan.id))).toBe('COM-001');
+    expect(await codeOf(production.confirmHeatPlan(producer, plan.id))).toBe('COM-001');
   });
 });
 

@@ -58,6 +58,34 @@ export function MessageBubble({
     return !screen || canOpenScreen(me, screen.access);
   };
 
+  // AI 답은 시스템 알림 띠가 아니라 AI 어시스턴트가 보낸 말풍선으로 보인다 (긴 답이라 줄바꿈 유지)
+  if (message.isAi) {
+    return (
+      <div className={cn('flex gap-2.5 px-5 pb-1', isGroupStart ? 'pt-2' : 'pt-0.5')}>
+        <span className="w-7 flex-none">
+          <Avatar name="AI" tone="neutral" />
+        </span>
+        <div className="flex max-w-[70%] min-w-0 flex-col gap-1">
+          <b className="text-sm font-semibold">{message.senderName}</b>
+          <div className="flex min-w-0 items-end gap-1.5">
+            <p className="max-w-full rounded-lg rounded-tl-xs border border-line bg-surface-2 px-3 py-2 text-sm leading-normal break-words whitespace-pre-wrap text-ink">
+              {splitMessageText(message.content ?? '', { mentionNames: [], myNames: [], links: message.erpLinks }).map((segment, index) =>
+                segment.kind === 'link' && canOpen(segment.href) ? (
+                  <Link key={index} href={segment.href} className="font-mono font-semibold text-brand underline-offset-2 hover:underline">
+                    {segment.text}
+                  </Link>
+                ) : (
+                  <span key={index}>{segment.text}</span>
+                ),
+              )}
+            </p>
+            <time className="flex-none pb-0.5 text-cap text-ink-3">{fmtHM(message.createdAt)}</time>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (message.isSystem) {
     return (
       <div className="flex justify-center px-5 py-1.5">

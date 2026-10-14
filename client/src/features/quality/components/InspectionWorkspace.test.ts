@@ -4,12 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { inspectionApi, inspectionKeys } from '@/api/inspections';
-import { sessionApi } from '@/api/session';
+import { inspectionKeys, type InspectionQueueRow } from '@/api/inspections';
 import { InspectionWorkspace } from '@/features/quality/components/InspectionWorkspace';
+import { QUEUE_ROWS } from '@/features/quality/testing/qualityFixtures';
 import { MeContext } from '@/hooks/useMe';
-import type { InspectionQueueRow } from '@/mock/services';
-import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import { sessionUserOf } from '@/test/sessionUsers';
 
 /** 주소의 ?lot= (테스트마다 바꾼다) */
 const address = vi.hoisted(() => ({ search: '' }));
@@ -23,9 +23,8 @@ async function render(
   edit: (rows: InspectionQueueRow[]) => InspectionQueueRow[] = (rows) => rows,
   search: () => string = () => '',
 ): Promise<{ html: string; rows: InspectionQueueRow[] }> {
-  const employeeId = actAs(SEED_EMPLOYEE_NO.quality);
-  const me = await sessionApi.getSessionUser(employeeId);
-  const rows = edit(await inspectionApi.queue());
+  const me = sessionUserOf(SEED_EMPLOYEE_NO.quality);
+  const rows = edit([...QUEUE_ROWS]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(inspectionKeys.queue(), rows);
   address.search = search();
@@ -43,9 +42,9 @@ const resultGroupOf = (html: string) => html.match(/<div[^>]*role="group"[^>]*ar
 const processGroupOf = (html: string) => html.slice(html.indexOf('aria-label="공정별 보기"'), html.indexOf('aria-label="판정 결과"'));
 
 describe('검사 입력 목록 머리·빈 화면', () => {
-  it('판정 결과 칩은 줄바꿈 없이 한 줄이고, 순서는 전체 · 합격 · 불합격 · 판정 대기', async () => {
+  it('판정 결과 칩은 같은 폭 4칸 한 줄이고(세 자리 건수도 잘리지 않게), 순서는 전체 · 합격 · 불합격 · 판정 대기', async () => {
     const { html } = await render();
-    expect(resultGroupOf(html)).toContain('flex-nowrap');
+    expect(resultGroupOf(html)).toContain('grid grid-cols-4');
     const group = html.slice(html.indexOf('aria-label="판정 결과"'));
     const order = ['>전체 ', '>합격', '>불합격', '>판정 대기'].map((label) => group.indexOf(label));
     expect(order.every((i) => i > 0)).toBe(true);
@@ -64,12 +63,12 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     expect(html.replace(/(title|aria-label)="[^"]*"/g, '')).not.toContain('탭 숫자 = 판정 대기');
   });
 
-  it('판정할 LOT이 없으면(모두 판정 끝) "판정할 LOT이 없어요"와 판정 끝난 LOT 보기 버튼, 왼쪽 안내 상자는 빼고 한 줄', async () => {
+  it('판정할 LOT이 없으면(모두 판정 끝) "판정할 LOT이 없어요"와 판정 끝난 LOT 보기 버튼, 왼쪽은 안내 상자 없이 한 줄', async () => {
     const { html, rows } = await render((all) => all.map((r) => ({ ...r, inspectionResult: 'PASS' as const })));
     expect(html).toContain('판정할 LOT이 없어요');
     expect(html).toContain(`판정 끝난 LOT 보기 (전체 <!-- -->${rows.length}<!-- -->)`);
-    // 오른쪽이 크게 말하므로 왼쪽 목록은 같은 말을 되풀이하지 않는다
-    expect(html).not.toContain('판정 대기 LOT 없음');
+    // 왼쪽 목록이 빈 흰 칸으로 보이지 않게 한 줄은 둔다 (긴 안내는 오른쪽)
+    expect(html).toContain('판정 대기 LOT이 없어요');
     expect(html).not.toContain('검사 대상 LOT이 없어요');
     expect(html).not.toContain('LOT이 이 목록에 올라와요');
     // 탭에는 숫자가 하나도 없다
@@ -79,7 +78,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
   it('목록 한 줄은 두 줄(LOT·판정 / 규격·생산일)이고, 계획·검사 일시·기준은 마우스를 올리면 보인다', async () => {
     const { html, rows } = await render();
     const first = rows.find((r) => r.inspectionResult === 'PENDING');
-    if (!first) throw new Error('판정 대기 LOT이 시드에 없어요');
+    if (!first) throw new Error('판정 대기 LOT이 고정 데이터에 없어요');
     const item = html.slice(html.indexOf(`href="/quality/inspections?lot=${first.lotId}"`));
     const row = item.slice(0, item.indexOf('</a>'));
     const visible = row.replace(/title="[^"]*"/g, '');
@@ -97,7 +96,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
     expect(html).toMatch(/text-danger[^>]*>· 상위 히트 <!-- -->불합격/);
   });
 
-  it('목록에서 합격은 흐린 글자, 불합격·판정 대기만 색 배지. 밀시트가 발행된 LOT의 자물쇠는 마우스를 올리면 뜻이 보인다', async () => {
+  it('목록에서 합격은 배지 없이 기본 글자색, 불합격·판정 대기만 색 배지. 밀시트가 발행된 LOT의 자물쇠는 마우스를 올리면 뜻이 보인다', async () => {
     // 판정이 끝난 LOT을 주소로 열면 처음부터 전체를 보인다
     let opened = 0;
     const { html, rows } = await render((all) => {
@@ -114,7 +113,7 @@ describe('검사 입력 목록 머리·빈 화면', () => {
       return item.slice(0, item.indexOf('</a>'));
     };
     const [passRow, failRow, pendingRow] = rows.map((r) => rowOf(r.lotId));
-    expect(passRow).toContain('text-ink-3');
+    expect(passRow).toMatch(/text-cap text-ink"/);
     expect(passRow).not.toContain('bg-ok-bg');
     expect(passRow).toContain('title="밀시트가 발행된 LOT이라 측정값을 고칠 수 없어요"');
     expect(failRow).toContain('bg-danger-bg');

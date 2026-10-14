@@ -1,4 +1,4 @@
-// 조직 서버 어댑터: 관리 화면 조회·변경은 서버(employees·departments·job-grades·roles), 멤버 선택용 조회는 서버 모드에서도 가짜 DB.
+// 조직 서버 어댑터: 관리 화면 조회·변경은 서버(employees·departments·job-grades·roles).
 import type { DepartmentNode, EmployeeView, JobGradeView, RoleView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { employeeAdminApi } from '@/api/adminEmployees';

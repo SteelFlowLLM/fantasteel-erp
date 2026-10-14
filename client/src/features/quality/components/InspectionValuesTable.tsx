@@ -1,11 +1,11 @@
 // 저장된 검사값 표 (읽기 전용): 항목 · 기준 · 측정값 · 판정 · 기준 안 위치. 불합격 항목은 붉게 강조한다.
+import type { InspectionFormItem } from '@/api/inspections';
 import { Badge } from '@/components/Badge';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
 import { MiniGauge } from '@/features/quality/components/LimitGauge';
 import { limitText, thicknessBandText, trimNum } from '@/features/quality/lib/qualityDisplay';
-import type { InspectionFormItem } from '@/mock/services';
 
 export function InspectionValuesTable({ items }: { items: readonly InspectionFormItem[] }) {
   if (items.length === 0) return <EmptyNote>검사값이 없어요</EmptyNote>;
@@ -26,7 +26,7 @@ export function InspectionValuesTable({ items }: { items: readonly InspectionFor
             const bad = item.isPassed === false;
             const band = thicknessBandText(item.minThicknessMm, item.maxThicknessMm);
             return (
-              <tr key={item.inspectionStandardItemId} data-risk={bad || undefined}>
+              <tr key={item.inspectionStandardItemId} data-risk={bad || undefined} data-pet-item="qualityInspectionValue" data-pet-item-title={item.inspectionItemName}>
                 <Td className={bad ? 'font-semibold' : undefined}>
                   {item.inspectionItemName}
                   {item.isRequired ? null : <span className="ml-1.5 text-cap text-ink-3">선택</span>}
@@ -38,7 +38,15 @@ export function InspectionValuesTable({ items }: { items: readonly InspectionFor
                 <Td align="right" className={bad ? 'font-semibold text-danger' : undefined}>
                   {item.measuredValue === null ? '—' : `${trimNum(item.measuredValue)}${item.unit ? ` ${item.unit}` : ''}`}
                 </Td>
-                <Td>{item.isPassed === null ? <Badge>미입력</Badge> : <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />}</Td>
+                <Td>
+                  {item.isPassed === null ? (
+                    <span className="inline-flex" data-pet-term="미입력">
+                      <Badge>미입력</Badge>
+                    </span>
+                  ) : (
+                    <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />
+                  )}
+                </Td>
                 <Td>
                   <MiniGauge item={item} value={item.measuredValue} bad={bad} />
                 </Td>

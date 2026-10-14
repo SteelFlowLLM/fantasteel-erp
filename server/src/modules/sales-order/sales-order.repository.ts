@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_STATUS, BUSINESS_EVENT_TYPE, SALES_ORDER_ITEM_STATUS, type SalesOrderItemStatus } from '@fantasteel/shared';
 import { countPassedProductsByPlan, lockSalesOrderItemsForShipment } from '../../generated/prisma/sql';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 목록·상세·충족 현황이 함께 쓰는 읽기 모양: 품목 + 예약(상태·매수) + 연결 계획 */
@@ -46,12 +47,12 @@ export class SalesOrderRepository {
     });
   }
 
-  countSalesOrders(tx: Tx) {
-    return tx.salesOrder.count();
+  countSalesOrders(tx: Tx, where: Prisma.SalesOrderWhereInput = {}) {
+    return tx.salesOrder.count({ where });
   }
 
-  findSalesOrders(tx: Tx, page: { skip: number; take: number }) {
-    return tx.salesOrder.findMany({ include: salesOrderInclude, orderBy: { id: 'desc' }, skip: page.skip, take: page.take });
+  findSalesOrders(tx: Tx, page: { skip: number; take: number }, where: Prisma.SalesOrderWhereInput = {}) {
+    return tx.salesOrder.findMany({ where, include: salesOrderInclude, orderBy: { id: 'desc' }, skip: page.skip, take: page.take });
   }
 
   /** 진행 중(진행중·부분출하 품목이 있는) 수주 */
@@ -82,6 +83,23 @@ export class SalesOrderRepository {
         },
       },
       orderBy: { id: 'asc' },
+    });
+  }
+
+  /** 이 수주 품목들의 생산계획에 연결된 구매요청과 그 발주 (취소 창의 구매 진행 영향). 계획 상태는 서비스가 거른다 */
+  findRequisitionsOfPlans(tx: Tx, salesOrderItemIds: number[]) {
+    return tx.purchaseRequisition.findMany({
+      where: { productionPlan: { salesOrderItemId: { in: salesOrderItemIds } } },
+      select: {
+        id: true,
+        purchaseRequisitionNo: true,
+        purchaseRequisitionStatus: true,
+        requestedTon: true,
+        item: { select: { itemName: true } },
+        productionPlan: { select: { id: true, productionPlanNo: true, productionPlanStatus: true } },
+        purchaseOrderItem: { select: { purchaseOrder: { select: { id: true, purchaseOrderNo: true, purchaseOrderStatus: true } } } },
+      },
+      orderBy: { purchaseRequisitionNo: 'asc' },
     });
   }
 

@@ -1,5 +1,5 @@
 // 구매 화면 표시용 순수 함수 (MRP 기간 기본값, 품목 요약, 공급업체 묶음, 진행률, 톤 입력 초기값).
-// 업무 규칙(순소요·승인·발주·입고)은 core 서비스가 한다. 여기는 화면에 보이는 값만 만든다.
+// 업무 규칙(순소요·승인·발주·입고)은 서버가 한다. 여기는 화면에 보이는 값만 만든다.
 import { PURCHASE_ORDER_STATUS_LABEL, RAW_MATERIAL_TYPE } from '@/codes';
 import { decCmp, decDiv, decIsPositive, decSum } from '@/lib/decimal';
 import { fmtMD, fmtTon } from '@/lib/format';

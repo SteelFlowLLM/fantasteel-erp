@@ -9,7 +9,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { MrpPeriod, MrpRequirementsView, MrpRequisitionLineView } from '@/api/mrp';
 import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
@@ -81,15 +81,15 @@ export function MrpScreen() {
         }
       />
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:mrp.period">
         <CardBody className="flex-row flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1.5 text-xs font-medium text-ink-2">
-            필요일 기간 시작
+            <span data-pet-term="필요일 기간 시작">필요일 기간 시작</span>
             <DateInput value={period.from} onChange={(value) => value && setPeriod((current) => ({ ...current, from: value }))} invalid={Boolean(periodErrors.from)} ariaLabel="필요일 기간 시작" />
           </label>
           <span className="pb-2 text-ink-3">~</span>
           <label className="flex flex-col gap-1.5 text-xs font-medium text-ink-2">
-            필요일 기간 끝
+            <span data-pet-term="필요일 기간 끝">필요일 기간 끝</span>
             <DateInput value={period.to} onChange={(value) => value && setPeriod((current) => ({ ...current, to: value }))} invalid={Boolean(periodErrors.to)} ariaLabel="필요일 기간 끝" />
           </label>
           <Button size="sm" className="mb-0.5" onClick={() => setPeriod(defaultMrpPeriod(today))}>
@@ -151,7 +151,7 @@ function MrpResult({
 
   return (
     <>
-      <StatBar>
+      <StatBar petKey="card:mrp.summary">
         <Kpi flat label="남은 히트" value={fmtInt(totalHeats)} unit="히트" sub={`생산계획 ${mrp.plans.length}건 · 히트 용량 ${fmtTon(mrp.heatCapacityTon)}`} />
         <Kpi flat label="히트 톤" value={fmtNum(totalHeatTon, 3)} unit="t" sub="합금철 소요의 기준" />
         <Kpi flat label="필요 용선" value={fmtNum(totalHotMetal, 3)} unit="t" sub="히트 톤 ÷ 제강 수율" />
@@ -164,7 +164,7 @@ function MrpResult({
         />
       </StatBar>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:mrp.materials">
         <CardHead
           title="원료·합금철 소요량"
           meta={`${mrp.from} ~ ${mrp.to}`}
@@ -172,8 +172,8 @@ function MrpResult({
             <Segmented<MaterialFilter>
               ariaLabel="원료 보기"
               items={[
-                { key: 'all', label: `전체 ${mrp.materials.length}` },
-                { key: 'net', label: `순소요만 ${shortMaterials.length}` },
+                { key: 'all', label: <span data-pet-term="전체">전체 {mrp.materials.length}</span> },
+                { key: 'net', label: <span data-pet-term="순소요만">순소요만 {shortMaterials.length}</span> },
               ]}
               active={filter}
               onChange={onFilter}
@@ -208,7 +208,7 @@ function MrpResult({
                   const lines = linesByMaterial.get(m.itemId) ?? [];
                   const requested = lines.filter((l) => l.existingPurchaseRequisitionNo !== null);
                   return (
-                    <tr key={m.itemId} data-risk={isShort}>
+                    <tr key={m.itemId} data-risk={isShort} data-pet-item="rawMaterial" data-pet-item-title={`${m.itemName} ${m.itemCode}`}>
                       <Td className="font-mono">{m.itemCode}</Td>
                       <Td>{m.itemName}</Td>
                       <Td className="text-ink-2">
@@ -251,7 +251,7 @@ function MrpResult({
         </CardFoot>
       </Card>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:mrp.requisitionLines">
         <CardHead title="구매요청 만들 순소요" meta="계획·원료마다 한 번만 만들어요" />
         <CardBody flush>
           {mrp.requisitionLines.length === 0 ? (
@@ -269,7 +269,12 @@ function MrpResult({
               </thead>
               <tbody>
                 {mrp.requisitionLines.map((line) => (
-                  <tr key={`${line.productionPlanId}-${line.itemId}`} data-muted={line.existingPurchaseRequisitionNo !== null}>
+                  <tr
+                    key={`${line.productionPlanId}-${line.itemId}`}
+                    data-muted={line.existingPurchaseRequisitionNo !== null}
+                    data-pet-item="rawMaterial"
+                    data-pet-item-title={`${line.productionPlanNo} · ${line.itemName}`}
+                  >
                     <Td className="font-mono">{line.productionPlanNo}</Td>
                     <Td>
                       {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
@@ -305,7 +310,7 @@ function MrpResult({
         </CardBody>
       </Card>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:mrp.plans">
         <CardHead
           title="근거 생산계획"
           meta={`${mrp.plans.length}건`}
@@ -337,7 +342,7 @@ function MrpResult({
                 {mrp.plans.map((plan) => {
                   const short = plan.materials.filter((m) => decCmp(m.netRequirementTon, 0) > 0);
                   return (
-                    <tr key={plan.productionPlanId}>
+                    <tr key={plan.productionPlanId} data-pet-item="productionPlan" data-pet-item-title={plan.productionPlanNo}>
                       <Td className="font-mono">{plan.productionPlanNo}</Td>
                       <Td>
                         <PlanStatusBadge status={plan.productionPlanStatus} />
@@ -383,14 +388,20 @@ function MrpResult({
 
 /** 칸 아래 작은 글씨: 원료 전체 합계 (칸의 숫자는 이 계획들이 쓰는 몫) */
 function TotalNote({ ton }: { ton: string }) {
-  return <span className="block text-cap leading-normal text-ink-3">전체 {fmtTon(ton)}</span>;
+  return (
+    <span data-pet-term="전체" className="block text-cap leading-normal text-ink-3">
+      전체 {fmtTon(ton)}
+    </span>
+  );
 }
 
 /** 필요일이 기간 시작 전인 미생산 계획(밀린 소요): 기간 안 계획보다 먼저 잔량·입고예정을 쓴다 */
 function BeforePeriodBadge() {
   return (
-    <Badge tone="wait" className="ml-1.5" title="필요일이 기간 시작 전인데 아직 남은 히트가 있는 계획이에요. 기간 안 계획보다 먼저 원료 LOT 잔량·입고예정을 써요">
-      기간 전
-    </Badge>
+    <span data-pet-term="기간 전">
+      <Badge tone="wait" className="ml-1.5" title="필요일이 기간 시작 전인데 아직 남은 히트가 있는 계획이에요. 기간 안 계획보다 먼저 원료 LOT 잔량·입고예정을 써요">
+        기간 전
+      </Badge>
+    </span>
   );
 }

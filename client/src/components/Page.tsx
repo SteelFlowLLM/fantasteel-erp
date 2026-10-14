@@ -10,9 +10,9 @@ export function PageMain({ flush, className, children }: { flush?: boolean; clas
 }
 
 /** 왼쪽 목록 칸 (320px) */
-export function MasterPane({ head, className, children }: { head?: ReactNode; className?: string; children: ReactNode }) {
+export function MasterPane({ head, className, petKey, children }: { head?: ReactNode; className?: string; petKey?: string; children: ReactNode }) {
   return (
-    <section className={cn('flex min-h-0 w-80 flex-none flex-col border-r border-line bg-surface', className)}>
+    <section data-pet-target={petKey} className={cn('flex min-h-0 w-80 flex-none flex-col border-r border-line bg-surface', className)}>
       {head ? <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">{head}</div> : null}
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
     </section>

@@ -60,7 +60,7 @@
 **생산계획**
 
 - 수주 등록 tx 안에서 sales-order가 `createPlanForShortage(tx, salesOrderItem, shortageQty, actor)`를 부른다. `item_id` = 수주 품목 규격, `heat_count`는 위 계산값(컬럼이 not null), PLANNED.
-- `heat-preview`: 계산만. `confirm`: 다시 계산해 `heat_count` 저장. 상태 "편성 확정"은 두지 않는다(SPEC.md 5장 기본값).
+- `heat-preview`: 계산만. `confirm`: 다시 계산해 `heat_count` 저장하고 HEAT_PLAN_CONFIRMED(전후 히트 수)를 남긴다. 상태 "편성 확정"은 두지 않는다(SPEC.md 5장 기본값).
 - 취소: PLANNED만 → CANCELLED, 이 계획의 CONFIRMED 열연 배정 해제(inventory). 첫 실적 등록 후(IN_PROGRESS)는 취소 불가([06] PRODUCTION_PLAN_STATUS).
 - 수주 취소 연동: PLANNED는 취소, IN_PROGRESS는 `sales_order_item_id = null`(여재 전환, SURPLUS_CONVERTED). 조업 중 물량은 연주·검사 후 적격 슬래브 여재가 된다(BP-SO-02 여재 전환 해석).
 - 재생산(REQ-PRD-006): 수주 품목의 `추가 계획 필요 매수 = max(0, 현재 미확보 − 진행 계획 잔여 목표)`([04] 4.5)가 0보다 클 때만 `is_reproduction = true` 계획 생성. 여재로도 부족하고 진행 계획도 없을 때만 만든다(14.1-6).
@@ -101,6 +101,7 @@
 | --- | --- | --- | --- | --- |
 | PRODUCTION_PLAN_CREATED | USER(수주 등록자) | `production_plan` | 연결 시 채움 | - |
 | PRODUCTION_PLAN_CANCELLED | USER | `production_plan` | 채움 | - |
+| HEAT_PLAN_CONFIRMED | USER | `production_plan` | 채움 | - |
 | REPRODUCTION_PLAN_CREATED | USER | `production_plan` | 채움 | - |
 | SURPLUS_CONVERTED | USER(수주 취소자) | `production_plan` | 채움(해제 전 수주) | - |
 | PRODUCTION_STARTED | USER | `production_result` | 계획 연결 시 | - |
@@ -138,7 +139,7 @@
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
 | 작업 시작 분리 | v1 행은 `POST production-results` 하나, 초안 행은 시작(POST)·완료(PATCH `:id/complete`)로 나눴다. ERD(`completed_at` null = 작업 중)와 PRODUCTION_STARTED 이벤트는 분리를 뒷받침한다 | [CSV], [ERD], [06] |
-| 히트 편성 확정의 의미 | `heat_count`가 생성 때 이미 not null로 저장된다. confirm이 무엇을 바꾸는지(재계산 저장만?), 이벤트가 없음 | [ERD], [06] BUSINESS_EVENT_TYPE |
+| 히트 편성 확정의 의미 | `heat_count`가 생성 때 이미 not null로 저장된다. confirm이 무엇을 바꾸는지(재계산 저장만?). 이벤트는 HEAT_PLAN_CONFIRMED로 해결(2026-10-14) | [ERD], [06] BUSINESS_EVENT_TYPE |
 | 계획 슬래브 매수 | 시뮬레이션 손실식·연주 상한에 쓰는 "계획 슬래브 매수"의 정의가 없다(부족 매수? 히트 톤 × 연주 수율 ÷ 슬래브 중량?) | [04] 8장, BP-PRD-02 예외 |
 | 히트 LOT `initial_ton` | 히트 톤(용량) vs 투입 용선 × 제강 수율 | [ERD] lot.initial_ton |
 | 계획 COMPLETED 조건 | 언제 완료로 바꾸는지 정의 없음 | [06] PRODUCTION_PLAN_STATUS |
@@ -157,7 +158,7 @@
 | Method | Path | 권한 | 내용 |
 | --- | --- | --- | --- |
 | GET | `production-plans` | PLAN VIEW | 목록. 필터 `productionPlanStatus`·`itemType`·`salesOrderId`·`isReproduction`, 페이징 |
-| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단 |
+| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단. 목록·상세는 계획 규격의 1매 이론중량(`theoreticalWeightTon`, 편성을 계산할 수 없어도 보인다), 편성표는 슬래브 규격 이름(`slabItemName`)을 함께 준다 |
 | POST | `production-plans` | PLAN USE | 재생산 계획 `{ salesOrderItemId }` |
 | POST | `production-plans/:id/heat-preview` | PLAN USE | 편성 계산(저장 안 함) |
 | POST | `production-plans/:id/confirm` | PLAN USE | PLANNED에서 히트 수를 지금 기준정보로 다시 계산해 저장. 이벤트 없음(06에 없음) |

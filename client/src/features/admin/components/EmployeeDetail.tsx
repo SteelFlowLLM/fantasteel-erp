@@ -50,17 +50,21 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
 
   return (
     <>
-      <div className="flex flex-none items-center gap-3">
+      <div data-pet-target="card:employees.header" className="flex flex-none items-center gap-3">
         <Avatar name={employee.employeeName} size="lg" tone={employee.isActive ? 'brand' : 'neutral'} />
         <div className="flex min-w-0 flex-col">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">{employee.employeeName}</h1>
-            <Tag tone="brand">{ROLE_LABEL[employee.roleCode]}</Tag>
-            <ActiveBadge isActive={employee.isActive} />
+            <span data-pet-field="역할">
+              <Tag tone="brand">{ROLE_LABEL[employee.roleCode]}</Tag>
+            </span>
+            <span data-pet-field="사용 여부">
+              <ActiveBadge isActive={employee.isActive} />
+            </span>
             {isHead ? <HeadTag departmentNames={headOf.map((d) => d.departmentName)} /> : null}
             {isMe ? <Tag>나</Tag> : null}
           </div>
-          <span className="text-cap text-ink-3">
+          <span className="text-cap text-ink-3" data-pet-field="부서 · 직급 · 사원번호">
             {employee.departmentName} · {employee.jobGradeName} · 사원번호 {employee.employeeNo}
           </span>
         </div>
@@ -94,12 +98,12 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
         >
           <b>사용 안 함 상태의 사원이에요</b>
           <br />
-          계정 선택·조직도·담당자 목록에서 빠지고 업무를 할 수 없어요.
+          로그인할 수 없고 조직도·담당자 목록에서 빠져요.
         </Banner>
       )}
 
       <div className="grid flex-none grid-cols-2 gap-4">
-        <Card>
+        <Card petKey="card:employees.info">
           <CardHead title="사원 정보" />
           <CardBody>
             <KvList
@@ -115,7 +119,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
             />
           </CardBody>
         </Card>
-        <Card>
+        <Card petKey="card:employees.rolePermissions">
           <CardHead title="역할 권한" meta={`${ROLE_LABEL[employee.roleCode]} 역할`} />
           <CardBody className="gap-2">
             {role ? <RolePermissionSummary permissions={role.permissions} /> : <span className="text-cap text-ink-3">역할 정보를 불러오는 중…</span>}
@@ -128,7 +132,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
         </Card>
       </div>
 
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:employees.departmentHead">
         <CardHead
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -141,9 +145,10 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           {isHead ? (
             <div className="flex flex-wrap gap-1.5">
               {headOf.map((d) => (
-                <Tag key={d.id} tone="outline">
-                  {d.departmentName} 부서장
-                </Tag>
+                // 꼬리표 글자가 부서명뿐이라 항목으로 읽으면 읽을 값이 없다 → '부서장' 용어 설명을 단다
+                <span key={d.id} data-pet-term="부서장">
+                  <Tag tone="outline">{d.departmentName} 부서장</Tag>
+                </span>
               ))}
             </div>
           ) : (
@@ -163,7 +168,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
           onConfirm={() => deactivate.mutate({ id: employee.id, expectedUpdatedAt: employee.updatedAt })}
         >
           <p>
-            {employee.employeeName}({employee.employeeNo}) 사원은 계정 선택·조직도·담당자 목록에서 빠지고 업무를 할 수 없어요. 나중에 다시 사용으로 돌릴 수 있어요.
+            {employee.employeeName}({employee.employeeNo}) 사원은 로그인할 수 없고 조직도·담당자 목록에서 빠져요. 나중에 다시 사용으로 돌릴 수 있어요.
           </p>
           {isMe ? <p className="mt-2 font-semibold text-danger">내 계정이에요. 바꾸면 바로 이 화면에서 더 일할 수 없어요.</p> : null}
         </ConfirmDialog>

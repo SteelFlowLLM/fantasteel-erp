@@ -99,11 +99,10 @@ describe('구매요청 승인·반려 (REQ-PUR-002, REQ-AUTH-004)', () => {
     expect(await codeOf(purchasing.reject(salesHead, id, { rejectReason: '사유' }))).toBe('COM-002');
   });
 
-  it('부서장 본인 요청은 승인·반려할 수 없다 (경로 TBD, 자동 승인 금지)', async () => {
-    const { id } = await request(purchaseHead);
-
-    expect(await codeOf(purchasing.approve(purchaseHead, id))).toBe('COM-002');
-    expect(await codeOf(purchasing.reject(purchaseHead, id, { rejectReason: '사유' }))).toBe('COM-002');
+  it('부서장 본인은 구매요청을 등록할 수 없다 (승인할 사람이 없어 PUR-001, 자동 승인 금지)', async () => {
+    const before = await prisma.purchaseRequisition.count({ where: { requesterId: purchaseHead.employeeId } });
+    expect(await codeOf(request(purchaseHead))).toBe('PUR-001');
+    expect(await prisma.purchaseRequisition.count({ where: { requesterId: purchaseHead.employeeId } })).toBe(before);
   });
 
   it('승인 대기가 아니면 COM-001 (이미 승인·반려된 요청)', async () => {

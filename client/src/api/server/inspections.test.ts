@@ -53,6 +53,7 @@ const standard31: InspectionStandardDetail = {
   steelGradeCode: 'SS275',
   createdAt: '2026-10-01T00:00:00.000Z',
   items: [standardItem(1, 'YIELD', null, null), standardItem(2, 'CHARPY', '6.00', null), standardItem(3, 'THIN_ONLY', null, '6.00')],
+  standardNo: 'KS D 3503:2026',
   inspectionCount: 0,
   versions: [
     { inspectionStandardId: 30, versionNo: 1, createdAt: '2026-09-01T00:00:00.000Z', itemCount: 1, inspectionCount: 1 },

@@ -140,17 +140,23 @@ export function ActorChip({ event }: { event: Pick<TimelineEvent, 'actorType' | 
 /** 작업 로그 한 줄 (목록 미리보기·상세 옆 칸): 시각·주체·유형·대상, 아래에 사람이 읽을 사유 */
 export function EventLine({ event }: { event: TimelineEvent }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs">
+    <div data-pet-item="businessEvent" data-pet-item-title={event.businessEventTypeLabel} className="flex min-w-0 flex-col gap-0.5 text-xs">
       <div className="flex min-w-0 items-center gap-1.5">
-        <time className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">{fmtMDHM(event.occurredAt)}</time>
-        <ActorChip event={event} />
-        <span className="flex-none font-medium">{event.businessEventTypeLabel}</span>
-        <span className="min-w-0 truncate text-ink-2" title={event.targetText}>
+        <time data-pet-field="시각" className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">
+          {fmtMDHM(event.occurredAt)}
+        </time>
+        <span data-pet-field="주체" className="contents">
+          <ActorChip event={event} />
+        </span>
+        <span data-pet-field="유형" className="flex-none font-medium">
+          {event.businessEventTypeLabel}
+        </span>
+        <span data-pet-field="대상" className="min-w-0 truncate text-ink-2" title={event.targetText}>
           {event.targetText}
         </span>
       </div>
       {event.reasonText ? (
-        <span className="truncate pl-[76px] text-cap text-ink-3" title={event.reasonText}>
+        <span data-pet-field="사유" className="truncate pl-[76px] text-cap text-ink-3" title={event.reasonText}>
           {event.reasonText}
         </span>
       ) : null}
@@ -161,7 +167,9 @@ export function EventLine({ event }: { event: TimelineEvent }) {
 export function SectionTitle({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <h3 className="text-sm font-semibold">{children}</h3>
+      <h3 data-pet-term={typeof children === 'string' ? children : undefined} className="text-sm font-semibold">
+        {children}
+      </h3>
       {meta ? <span className="text-cap text-ink-3">{meta}</span> : null}
     </div>
   );

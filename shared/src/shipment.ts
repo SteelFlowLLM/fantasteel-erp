@@ -31,6 +31,10 @@ export interface ShipmentRequestItemDetail {
   itemId: number;
   itemCode: string;
   itemName: string;
+  itemType: ItemType;
+  /** 1매 이론중량 (톤, 소수 3자리). 화면이 요청 톤 = 매수 × 이론중량을 계산한다 */
+  theoreticalWeightTon: string | null;
+  steelGradeCode: string | null;
   requestQty: number;
   /** 미배정 매수 = 요청 매수 − CONFIRMED 배정 수 (TRM-115). 0보다 크면 배정 대기 */
   unallocatedQty: number;
@@ -169,6 +173,9 @@ export interface ShippableSalesOrderItem {
   itemCode: string;
   itemName: string;
   itemType: ItemType;
+  /** 1매 이론중량 (톤, 소수 3자리). 화면이 요청 톤 = 매수 × 이론중량을 계산한다 */
+  theoreticalWeightTon: string | null;
+  steelGradeCode: string | null;
   orderedQty: number;
   dueDate: string;
   /** ACTIVE 예약 매수 */
@@ -191,6 +198,7 @@ export interface AllocationView {
   /** 상위 히트 번호 (슬래브는 부모 히트, 코일은 슬래브를 거친 히트) */
   heatNo: string | null;
   yardId: number | null;
+  yardName: string | null;
   shipmentRequestItemId: number | null;
   productionPlanId: number | null;
   createdAt: string;
@@ -204,6 +212,7 @@ export interface AllocationCandidate {
   producedDate: string | null;
   heatNo: string | null;
   yardId: number | null;
+  yardName: string | null;
   /** 앞에서부터 미배정 매수만큼 추천 */
   isRecommended: boolean;
 }

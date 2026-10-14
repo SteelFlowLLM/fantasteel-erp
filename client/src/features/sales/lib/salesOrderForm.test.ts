@@ -4,6 +4,7 @@ import { progressOf } from '@/lib/inventoryMath';
 import {
   activeFilterCount,
   cancellationEffectsText,
+  cancelPreviewOf,
   draftLineErrors,
   EMPTY_FILTER,
   filterSalesOrders,
@@ -87,6 +88,30 @@ describe('목록 거르기', () => {
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '나래' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-004']);
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '2609-003' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-003']);
     expect(activeFilterCount({ ...EMPTY_FILTER, riskOnly: true, customerId: 2, keyword: 'x' })).toBe(2);
+  });
+});
+
+describe('수주 취소 창 미리보기 (BP-SO-02 예외: 부분 출고 뒤 잔량만 취소)', () => {
+  const plan = (productionPlanStatus: string) => ({ productionPlanStatus });
+  it('진행중·부분출하 품목의 예약·계획만 세고, 출고 매수와 전량 출고 품목은 그대로 남는다고 센다', () => {
+    expect(
+      cancelPreviewOf([
+        { salesOrderItemStatus: 'PARTIALLY_SHIPPED', activeReservedQty: 2, shippedQty: 4, plans: [plan('PLANNED')] },
+        { salesOrderItemStatus: 'SHIPPED', activeReservedQty: 0, shippedQty: 2, plans: [plan('IN_PROGRESS')] },
+        { salesOrderItemStatus: 'OPEN', activeReservedQty: 3, shippedQty: 0, plans: [plan('IN_PROGRESS'), plan('COMPLETED')] },
+        { salesOrderItemStatus: 'CANCELLED', activeReservedQty: 0, shippedQty: 1, plans: [plan('PLANNED')] },
+      ]),
+    ).toEqual({ activeReservedQty: 5, plannedCount: 1, inProgressCount: 1, keptShippedQty: 4, shippedItemCount: 1 });
+  });
+
+  it('출고가 없으면 전부 취소 대상이고 남는 출고분이 없다', () => {
+    expect(cancelPreviewOf([{ salesOrderItemStatus: 'OPEN', activeReservedQty: 6, shippedQty: 0, plans: [plan('PLANNED')] }])).toEqual({
+      activeReservedQty: 6,
+      plannedCount: 1,
+      inProgressCount: 0,
+      keptShippedQty: 0,
+      shippedItemCount: 0,
+    });
   });
 });
 

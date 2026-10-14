@@ -4,15 +4,9 @@ import { activeNavHref, buildNavigation, type NavEntry } from '@/features/shell/
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { canOpenScreen, screenOfPath, type AccessUser } from '@/features/shell/screens';
 import type { PermissionMap } from '@/lib/permissions';
-import { SEED_ROLE_PERMISSIONS } from '@/mock/seed';
+import { rolePermissionsOf } from '@/test/sessionUsers';
 
-function permissionsOf(roleCode: RoleCode): PermissionMap {
-  const { use, view } = SEED_ROLE_PERMISSIONS[roleCode];
-  const map: PermissionMap = {};
-  for (const p of view) map[p] = 'VIEW';
-  for (const p of use) map[p] = 'USE';
-  return map;
-}
+const permissionsOf = (roleCode: RoleCode): PermissionMap => rolePermissionsOf(roleCode);
 
 const hrefs = (entries: NavEntry[]) => entries.flatMap((e) => (e.kind === 'item' ? [e.href] : []));
 
@@ -35,12 +29,12 @@ describe('buildNavigation', () => {
     expect(nav.slice(-8)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/agent', '/meetings', '/past-cases']);
   });
 
-  it('다른 영역의 조회 권한 화면은 구분선 뒤에 영역 순서로 붙는다 (seed-assumptions 2-2 표)', () => {
-    expect(otherAreaHrefs(navOf('SALES'))).toEqual(['/production/plans', '/goods-issues', '/mill-sheets']);
-    expect(otherAreaHrefs(navOf('PURCHASE'))).toEqual(['/production/plans']);
-    expect(otherAreaHrefs(navOf('PRODUCTION'))).toEqual(['/sales-orders', '/mrp', '/purchase-requisitions', '/quality/inspections']);
-    expect(otherAreaHrefs(navOf('QUALITY'))).toEqual(['/production/results', '/mill-sheets']);
-    expect(otherAreaHrefs(navOf('LOGISTICS'))).toEqual(['/shipment-requests']);
+  it('다른 영역의 조회 권한 화면은 구분선 뒤에 영역 순서로 붙는다 (역할별 메뉴 v2 3장 표)', () => {
+    expect(otherAreaHrefs(navOf('SALES'))).toEqual(['/production/plans', '/goods-issues', '/mill-sheets', '/admin/master-data']);
+    expect(otherAreaHrefs(navOf('PURCHASE'))).toEqual(['/production/plans', '/admin/master-data']);
+    expect(otherAreaHrefs(navOf('PRODUCTION'))).toEqual(['/sales-orders', '/mrp', '/purchase-requisitions', '/quality/inspections', '/quality/standards', '/admin/master-data']);
+    expect(otherAreaHrefs(navOf('QUALITY'))).toEqual(['/production/plans', '/production/results', '/goods-issues', '/mill-sheets', '/admin/master-data']);
+    expect(otherAreaHrefs(navOf('LOGISTICS'))).toEqual(['/sales-orders', '/shipment-requests', '/goods-receipts']);
   });
 
   it('관리자: 사원 · 부서·직급·권한 · 기준정보 · AI 연결, 그 뒤에 조회 권한으로 여는 14개 화면과 재고', () => {
@@ -72,6 +66,7 @@ describe('buildNavigation', () => {
     const permissions: PermissionMap = { ...permissionsOf('PURCHASE') };
     delete permissions.PURCHASE_ORDER_CONFIRM;
     delete permissions.PRODUCTION_PLAN_CONFIRM;
+    delete permissions.MASTER_MANAGE;
     const nav = buildNavigation({ roleCode: 'PURCHASE', permissions, headDepartmentIds: [] });
     expect(hrefs(nav)).toContain('/mrp');
     expect(hrefs(nav)).not.toContain('/purchase-orders');
@@ -100,8 +95,9 @@ describe('화면 잠금 (screens.ts)', () => {
   };
 
   it('권한이 없는 화면은 잠기고, 조회 권한만 있어도 열린다', () => {
-    expect(open(sales, '/admin/master-data')).toBe(false);
-    expect(open(admin, '/admin/master-data')).toBe(true);
+    expect(open(sales, '/admin/employees')).toBe(false);
+    expect(open(admin, '/admin/employees')).toBe(true);
+    expect(open(sales, '/admin/master-data')).toBe(true);
     expect(open(sales, '/mill-sheets')).toBe(true);
     expect(open(sales, '/quality/standards')).toBe(false);
   });

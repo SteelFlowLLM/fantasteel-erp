@@ -7,7 +7,7 @@ import { millSheetPdfFileName } from '@fantasteel/shared';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
+import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, SHIPMENT_REQUEST_STATUS_LABEL, type ProductItemType } from '@/codes';
 import type { MillSheetDetailView, MillSheetListRow } from '@/api/millSheets';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -66,6 +66,7 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
   const groups = [...new Set(visible.map((r) => r.shipmentRequestId))].map((id) => visible.filter((r) => r.shipmentRequestId === id));
   return (
     <MasterPane
+      petKey="card:millSheets.list"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -75,7 +76,7 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
           <Input leadingIcon="search" placeholder="밀시트·수주·고객사·규격·히트 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="밀시트 검색" />
           <div className="flex gap-1.5">
             {TYPE_FILTERS.map((f) => (
-              <Chip key={f} on={filter === f} onClick={() => setFilter(f)}>
+              <Chip key={f} on={filter === f} onClick={() => setFilter(f)} data-pet-term={f === 'ALL' ? '전체' : ITEM_TYPE_LABEL[f]}>
                 {f === 'ALL' ? '전체' : ITEM_TYPE_LABEL[f]}
                 <b>{f === 'ALL' ? rows.length : rows.filter((r) => r.itemTypes.includes(f)).length}</b>
               </Chip>
@@ -94,8 +95,18 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
             <ul>
               {groups.map((group) => (
                 <li key={group[0].shipmentRequestId}>
-                  <div className="bg-surface-2 px-4 py-1.5 text-cap text-ink-3">
-                    {fmtMDHM(group[0].issuedAt)} 출고 · <span className="font-mono">{group[0].shipmentRequestNo}</span>
+                  <div className="flex items-center gap-1 bg-surface-2 px-4 py-1.5 text-cap text-ink-3" data-pet-item="goodsIssue" data-pet-item-title={group[0].shipmentRequestNo}>
+                    <span className="flex-none" data-pet-field="출고 일시">
+                      {fmtMDHM(group[0].issuedAt)}
+                    </span>
+                    <span className="flex-none">{SHIPMENT_REQUEST_STATUS_LABEL.ISSUED} ·</span>
+                    <span className="flex-none font-mono">{group[0].shipmentRequestNo}</span>
+                    <span className="ml-auto min-w-0 truncate" data-pet-field="고객사">
+                      {group[0].customerName}
+                    </span>
+                    <span className="flex-none" data-pet-field="밀시트">
+                      {group.length}장
+                    </span>
                   </div>
                   <ul>
                     {group.map((row) => (
@@ -119,23 +130,31 @@ function ListItem({ row, selected }: { row: MillSheetListRow; selected: boolean 
       <Link
         href={`/mill-sheets?id=${row.id}`}
         aria-current={selected ? 'page' : undefined}
+        data-pet-item="millSheet"
+        data-pet-item-title={row.millSheetNo}
         className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover')}
       >
         <span className="flex items-center gap-2">
           <span className="font-mono text-mono font-semibold">{row.millSheetNo}</span>
-          <span className="ml-auto">
+          <span className="ml-auto" data-pet-field="PDF">
             <PdfBadge pdfPath={row.pdfPath} />
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-sm">
-          <span className="truncate">{row.customerName}</span>
-          <span className="font-mono text-cap text-ink-3">{row.salesOrderNo}</span>
+          <span className="truncate" data-pet-field="고객사">
+            {row.customerName}
+          </span>
+          <span className="font-mono text-cap text-ink-3" data-pet-field="수주">
+            {row.salesOrderNo}
+          </span>
         </span>
-        <span className="text-xs text-ink-2">
+        <span className="text-xs text-ink-2" data-pet-field="품목 · 수량 · 이론중량">
           {row.itemTypes.map((t) => ITEM_TYPE_LABEL[t]).join('·')} {row.itemCodes[0]}
           {row.itemCodes.length > 1 ? ` 외 ${row.itemCodes.length - 1}` : ''} · {row.totalQty} · {fmtTon(row.totalWeightTon)}
         </span>
-        <span className="text-cap text-ink-3">발행 {fmtDate(row.issuedAt)}</span>
+        <span className="text-cap text-ink-3" data-pet-field="발행일">
+          발행 {fmtDate(row.issuedAt)}
+        </span>
       </Link>
     </li>
   );
@@ -193,13 +212,13 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
               <ButtonLink href={`/lots/trace?shipmentRequestNo=${encodeURIComponent(s.shipmentRequest.shipmentRequestNo)}`} variant="ghost" icon="trace">
                 LOT 추적
               </ButtonLink>
-              <Button variant="primary" icon="print" disabled={!canPrint || mark.isPending || generating} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
+              <Button data-pet-target="card:millSheets.pdf" variant="primary" icon="print" disabled={!canPrint || mark.isPending || generating} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
                 {mark.isPending || generating ? 'PDF 만드는 중…' : detail.pdfPath ? 'PDF 다시 내려받기' : 'PDF 생성'}
               </Button>
             </>
           }
         />
-        <div className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
+        <div data-pet-target="card:millSheets.links" className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
           <span className="font-medium text-ink">{s.customer.customerName}</span>
           <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
           <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />
@@ -227,7 +246,7 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
       </div>
       <MillSheetPaper snapshot={s} />
       <MillSheetPrintPortal>
-        <MillSheetPaper snapshot={s} />
+        <MillSheetPaper snapshot={s} forPrint />
       </MillSheetPrintPortal>
     </>
   );

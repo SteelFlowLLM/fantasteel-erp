@@ -2,7 +2,7 @@
 // 본문은 카드 안에서 스크롤한다(SPEC 4장 3번). 편집 중에는 본문 링크가 눌리지 않는다.
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import type { Permission } from '@/codes';
 import { Button } from '@/components/Button';
@@ -43,6 +43,8 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, inlin
   return (
     <section
       aria-label={def.label}
+      data-pet-target={`widget:${widgetKey}`}
+      data-pet-perch=""
       className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface', def.soon ? 'border-dashed border-ai-line' : 'border-line shadow-1')}
     >
       <header
@@ -133,7 +135,7 @@ export function WidgetEmpty({ children }: { children: ReactNode }) {
 /** 범례 한 칸 */
 export function LegendItem({ colorClass, label }: { colorClass: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-cap text-ink-2">
+    <span className="inline-flex items-center gap-1.5 text-cap text-ink-2" data-pet-term={label}>
       <i className={cn('inline-block size-2 rounded-xs', colorClass)} aria-hidden="true" />
       {label}
     </span>
@@ -144,7 +146,9 @@ export function LegendItem({ colorClass, label }: { colorClass: string; label: s
 export function Figure({ label, value, unit, tone }: { label: string; value: ReactNode; unit?: string; tone?: 'danger' | 'muted' }) {
   return (
     <div className="flex min-w-14 flex-col gap-0.5">
-      <span className="truncate text-cap text-ink-3">{label}</span>
+      <span className="truncate text-cap text-ink-3" data-pet-term={label}>
+        {label}
+      </span>
       <b className={cn('text-xl font-semibold tabular-nums', tone === 'danger' && 'text-danger', tone === 'muted' && 'text-ink-3')}>
         {value}
         {unit ? <small className="ml-0.5 text-xs font-medium text-ink-3">{unit}</small> : null}

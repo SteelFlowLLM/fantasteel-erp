@@ -1,7 +1,7 @@
-// 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
-// 서버 모드에서 LOT은 서버에만 있으므로 LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
+// 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
+// LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
 // 연결 수주·부족은 LOT의 생산계획 상세(GET /production-plans/:id, 품질은 조회 권한 있음)에서 읽는다.
-// 서버에 아직 없는 것(판정 뒤 자동 예약·여재 결과)은 빈 값이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
+// 판정 뒤 자동 예약·여재 매수는 서버 응답의 재고 반영 결과(stockSync)로 채우고, 서버에 없는 여재 LOT 번호만 빈 목록이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
 import type {
   InspectedLotSummary,
   InspectionStandardDetail,
@@ -18,9 +18,8 @@ import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { inspectionItemNamesOf, serverBusinessEventApi } from '@/api/server/businessEvents';
 import type { LinkedPlan } from '@/api/dispositions';
-import type { InspectionDetail, LinkedSalesOrderItem, RegisterInspectionOutcome } from '@/api/inspections';
+import type { InspectionDetail, InspectionFormView, InspectionQueueRow, LinkedSalesOrderItem, RegisterInspectionInput, RegisterInspectionOutcome } from '@/api/inspections';
 import { appliesToThickness } from '@/lib/inspectionJudgment';
-import type { InspectionFormView, InspectionQueueRow, RegisterInspectionInput } from '@/mock/services';
 
 /** 목록은 화면이 한 번에 다 보여 주고 거르므로 서버 최대 페이지 크기로 끝까지 읽는다 */
 const PAGE_SIZE = 100;
@@ -114,7 +113,7 @@ function queueRowOf(row: InspectedRow, inspectorName: string | null = null, lock
     itemId: row.itemId,
     itemCode: row.itemCode,
     itemName: row.itemName,
-    // 히트는 생산완료일이 없다. 가짜 DB처럼 빈 문자열로 둔다
+    // 히트는 생산완료일이 없다. 화면은 빈 문자열로 둔다
     producedDate: row.producedDate ?? '',
     productionPlanNo: row.productionPlanNo,
     processType: row.processType,
@@ -122,7 +121,7 @@ function queueRowOf(row: InspectedRow, inspectorName: string | null = null, lock
     thicknessMm: row.thicknessMm,
     heatLotId: row.heatLotId,
     heatNo: row.heatLotNo,
-    // 서버는 상위 히트에 검사 행이 없으면 null을 준다. 가짜 DB처럼 판정 대기로 본다
+    // 서버는 상위 히트에 검사 행이 없으면 null을 준다. 판정 대기로 본다
     heatResult: row.heatLotId === null ? null : (row.heatInspectionResult ?? 'PENDING'),
     qualityInspectionId: row.qualityInspectionId,
     inspectionResult: row.inspectionResult ?? 'PENDING',
@@ -274,7 +273,7 @@ async function register(input: RegisterInspectionInput): Promise<RegisterInspect
     const filled = values.filter((v) => v.measuredValue !== null);
     saved = await serverRequest<QualityInspectionSaveResult>('POST', '/quality-inspections', { body: { lotId: input.lotId, values: filled } });
   } else {
-    // 가짜 DB처럼 화면을 연 시각이 없으면 동시 수정 확인을 하지 않는다 (지금 값을 그대로 보낸다)
+    // 화면을 연 시각이 없으면 동시 수정 확인을 하지 않는다 (지금 값을 그대로 보낸다)
     const expectedUpdatedAt = input.expectedUpdatedAt ?? (await serverRequest<QualityInspectionDetail>('GET', `/quality-inspections/${row.qualityInspectionId}`)).updatedAt;
     saved = await serverRequest<QualityInspectionSaveResult>('PATCH', `/quality-inspections/${row.qualityInspectionId}`, { body: { expectedUpdatedAt, values } });
   }

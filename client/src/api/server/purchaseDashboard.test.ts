@@ -136,7 +136,7 @@ describe('대시보드 구매 위젯 서버 모드', () => {
     await expect(dashboardApi.widget('PURCHASE_PROGRESS')).rejects.toMatchObject({ code: 'COM-002' });
   });
 
-  it('권한은 가짜 DB가 아니라 서버 역할 권한을 따른다: 서버에서 물류 역할에 구매요청 조회를 주면 보이고, 구매 역할에서 빼면 COM-002', async () => {
+  it('권한은 서버 역할 권한을 따른다: 서버에서 물류 역할에 구매요청 조회를 주면 보이고, 구매 역할에서 빼면 COM-002', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.logistics, respondAs(me({ PURCHASE_REQUISITION_CREATE: 'VIEW' })));
     expect((await dashboardApi.widget('RAW_MATERIAL_BALANCE')).materials).toHaveLength(1);
     stopFakeServer();

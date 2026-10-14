@@ -203,7 +203,8 @@ describe('검사 기준 상세 조회 (API-120, REQ-QC-002)', () => {
       where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
     });
     const detail = await service.getInspectionStandard(seed.id);
-    expect(detail).toMatchObject({ processType: 'STEELMAKING', steelGradeCode: 'SM355A' });
+    const grade = await prisma.steelGrade.findUniqueOrThrow({ where: { steelGradeCode: 'SM355A' } });
+    expect(detail).toMatchObject({ processType: 'STEELMAKING', steelGradeCode: 'SM355A', standardNo: grade.standardNo });
     expect(detail.items.map((i) => i.inspectionItemCode)).toEqual(['C', 'SI', 'MN', 'P', 'S', 'CEQ']);
   });
 

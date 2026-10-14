@@ -14,6 +14,8 @@ export interface ProductionPlanSummary {
   itemName: string;
   itemType: ItemType;
   steelGradeCode: string | null;
+  /** 계획 규격 1매 이론중량 (편성을 계산할 수 없어도 보인다) */
+  theoreticalWeightTon: string | null;
   /** 부족 매수 (TRM-041). 코일 계획은 코일 개수 */
   shortageQty: number;
   heatCount: number;
@@ -64,6 +66,7 @@ export interface HeatFormation {
   /** 연주할 슬래브 규격 (코일 계획은 매핑된 슬래브) */
   slabItemId: number;
   slabItemCode: string;
+  slabItemName: string;
   slabTheoreticalWeightTon: string;
   /** floor(히트 용량 × 연주 수율 ÷ 슬래브 1매 이론중량) */
   slabQtyPerHeat: number;

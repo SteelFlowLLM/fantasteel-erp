@@ -374,11 +374,13 @@ async function seedMasterData() {
     else await prisma.specificConsumption.create({ data: { rawMaterialItemId, steelGradeId: steelGrade, consumptionRate: c.consumptionRate } });
   }
 
-  // 생산 설정값은 1행만 둔다 (REQ-MST-009 초기값)
+  return steelGradeId;
+}
+
+/** 생산 설정값은 1행만 둔다 (REQ-MST-009 초기값). 등록 API가 없어 조직만 넣을 때도 넣는다. 이미 있으면 화면에서 고친 값을 그대로 둔다 */
+async function seedProductionSetting() {
   const setting = await prisma.productionSetting.findFirst();
   if (!setting) await prisma.productionSetting.create({ data: { heatCapacityTon: '250.000', deliveryRiskDays: 3 } });
-
-  return steelGradeId;
 }
 
 async function seedInspectionStandards(steelGradeId: Map<string, number>) {
@@ -413,11 +415,12 @@ async function seedInspectionStandards(steelGradeId: Map<string, number>) {
   for (const grade of SPEC_GRADES) await add(grade, 'HOT_ROLLING', must(HOT_ROLLING_ITEMS[grade], grade));
 }
 
-/** --organization-only: 조직(직급·역할·권한·부서·사원)만 넣는다. 공용 DB는 기준정보를 화면에서 등록한다 (2026-10-08 결정) */
+/** --organization-only: 조직(직급·역할·권한·부서·사원)과 생산 설정값만 넣는다. 공용 DB는 기준정보를 화면에서 등록한다 (2026-10-08 결정) */
 const organizationOnly = process.argv.includes('--organization-only');
 
 async function main() {
   await seedOrganization();
+  await seedProductionSetting();
   if (!organizationOnly) {
     const steelGradeId = await seedMasterData();
     await seedInspectionStandards(steelGradeId);
@@ -429,6 +432,7 @@ async function main() {
     specMapping: await prisma.specMapping.count(),
     inspectionStandard: await prisma.inspectionStandard.count(),
     inspectionStandardItem: await prisma.inspectionStandardItem.count(),
+    productionSetting: await prisma.productionSetting.count(),
   };
   process.stdout.write(`[seed] ${JSON.stringify(counts)}\n`);
 }

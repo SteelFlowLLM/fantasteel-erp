@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { PERMISSION } from '@/codes';
 import { departmentAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { DepartmentView, EmployeeView } from '@/api/directory';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
@@ -41,7 +41,7 @@ export function DepartmentTab({ canEdit }: { canEdit: boolean }) {
           const selected = list.find((d) => d.id === selectedId) ?? list[0];
           return (
             <div className="grid min-h-0 flex-none grid-cols-[360px_minmax(0,1fr)] items-start gap-4">
-              <Card>
+              <Card petKey="card:organization.departmentTree">
                 <CardHead
                   title="부서 계층"
                   meta={`${list.length}개`}
@@ -59,6 +59,8 @@ export function DepartmentTab({ canEdit }: { canEdit: boolean }) {
                         <button
                           type="button"
                           aria-current={isSelected || undefined}
+                          data-pet-item="department"
+                          data-pet-item-title={d.departmentName}
                           onClick={() => setSelectedId(d.id)}
                           className={cn(
                             'flex w-full flex-col gap-0.5 py-2 pr-4 text-left',
@@ -69,10 +71,14 @@ export function DepartmentTab({ canEdit }: { canEdit: boolean }) {
                           <span className="flex w-full items-center gap-2">
                             {d.depth > 0 ? <span className="text-ink-3">└</span> : null}
                             <b className="text-sm font-semibold">{d.departmentName}</b>
-                            <span className="font-mono text-cap text-ink-3">{d.departmentCode}</span>
-                            <span className="ml-auto text-cap text-ink-2 tabular-nums">{d.memberCount}명</span>
+                            <span className="font-mono text-cap text-ink-3" data-pet-field="부서 코드">
+                              {d.departmentCode}
+                            </span>
+                            <span className="ml-auto text-cap text-ink-2 tabular-nums" data-pet-field="인원">
+                              {d.memberCount}명
+                            </span>
                           </span>
-                          <span className={cn('text-cap', d.depth > 0 && 'pl-4', d.headEmployeeName ? 'text-ink-3' : 'text-wait')}>
+                          <span className={cn('text-cap', d.depth > 0 && 'pl-4', d.headEmployeeName ? 'text-ink-3' : 'text-wait')} data-pet-field="부서장">
                             {d.headEmployeeName ? `부서장 ${d.headEmployeeName}` : '부서장 없음'}
                           </span>
                         </button>
@@ -172,7 +178,7 @@ function DepartmentEditor({
   };
 
   return (
-    <Card>
+    <Card petKey="card:organization.departmentEditor">
       <CardHead
         title={department.departmentName}
         meta={
@@ -188,7 +194,7 @@ function DepartmentEditor({
       <CardBody>
         <div className="grid grid-cols-2 gap-3.5">
           <Field
-            label="부서 코드"
+            label={<span data-pet-term="부서 코드">부서 코드</span>}
             required
             error={errors.departmentCode}
             hint="부서 코드는 바꿀 수 없어요"
@@ -204,10 +210,10 @@ function DepartmentEditor({
               invalid={Boolean(errors.departmentCode)}
             />
           </Field>
-          <Field label="부서명" required error={errors.departmentName} htmlFor="department-name">
+          <Field label={<span data-pet-term="부서명">부서명</span>} required error={errors.departmentName} htmlFor="department-name">
             <Input id="department-name" maxLength={50} disabled={!canEdit} value={form.departmentName} invalid={Boolean(errors.departmentName)} onChange={(e) => set('departmentName', e.target.value)} />
           </Field>
-          <Field label="상위 부서" error={errors.parentId} hint="자기 자신이나 하위 부서는 상위 부서로 지정할 수 없어요" htmlFor="department-parent">
+          <Field label={<span data-pet-term="상위 부서">상위 부서</span>} error={errors.parentId} hint="자기 자신이나 하위 부서는 상위 부서로 지정할 수 없어요" htmlFor="department-parent">
             <Select
               id="department-parent"
               disabled={!canEdit}
@@ -225,7 +231,7 @@ function DepartmentEditor({
             </Select>
           </Field>
           <Field
-            label="부서장 (승인권자)"
+            label={<span data-pet-term="부서장 (승인권자)">부서장 (승인권자)</span>}
             error={errors.headEmployeeId}
             hint={headCandidates.length > 0 ? '이 부서의 사용 중인 사원 중에서 1명을 골라요' : '이 부서에 사용 중인 사원이 없어요. 사원 화면에서 먼저 이 부서로 등록해 주세요'}
             htmlFor="department-head"

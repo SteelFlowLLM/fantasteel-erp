@@ -1,7 +1,7 @@
 // 공용 DB(Supabase)에 마이그레이션을 반영하는 명령. DB 담당자만, develop에 머지된 마이그레이션만 반영한다 (SERVER-GUIDE 8장).
 //   npm run db:deploy -w @fantasteel/server             ← 마이그레이션 반영 + TypedSQL 생성
 //   npm run db:deploy -w @fantasteel/server -- --seed   ← 처음 한 번: 사원이 없는 빈 DB면 시드도 넣는다
-//   npm run db:deploy -w @fantasteel/server -- --seed --organization-only   ← 시드 중 조직(사원)만
+//   npm run db:deploy -w @fantasteel/server -- --seed --organization-only   ← 시드 중 조직(사원)과 생산 설정값만
 import { execSync } from 'node:child_process';
 import pg from 'pg';
 import { databaseUrl, describeDatabase, migrateUrl } from './db-target.mjs';

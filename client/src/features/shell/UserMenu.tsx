@@ -1,17 +1,14 @@
 'use client';
 
-// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 계정 바꾸기(서버 모드는 로그아웃), 시드로 초기화(가짜 DB 모드만)
-import { useEffect, useState } from 'react';
-import { isServerDataSource } from '@/api/http';
+// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 로그아웃
+import { useEffect } from 'react';
 import { sessionApi } from '@/api/session';
 import { ROLE_LABEL } from '@/codes';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
 import { Tag } from '@/components/Tag';
 import { PopHead, PopItem, PopPanel } from '@/features/shell/PopPanel';
 import { useMe } from '@/hooks/useMe';
 import { usePopover } from '@/hooks/usePopover';
-import { useResetToSeed } from '@/hooks/useResetToSeed';
 import { cn } from '@/lib/cn';
 import { FONT_SIZES, FONT_SIZE_LABEL } from '@/lib/fontSize';
 import { isDepartmentHead } from '@/lib/permissions';
@@ -26,8 +23,6 @@ export function UserMenu() {
   const fontSize = useShellStore((state) => state.fontSize);
   const setFontSize = useShellStore((state) => state.setFontSize);
   const hydrateFontSize = useShellStore((state) => state.hydrateFontSize);
-  const [confirmingReset, setConfirmingReset] = useState(false);
-  const reset = useResetToSeed(() => setConfirmingReset(false));
   const isHead = isDepartmentHead(me);
   const headTitle = isHead ? `${me.headDepartmentNames.join('·')} 부서장 · 구매요청 승인권자` : undefined;
 
@@ -38,12 +33,12 @@ export function UserMenu() {
   const switchAccount = () => {
     popover.setOpen(false);
     closeAiPanel();
-    // (main) 레이아웃이 세션이 비면 로그인(계정 선택) 화면으로 보낸다. 서버 쿠키를 지우지 못해도 이 탭은 나간다
+    // (main) 레이아웃이 세션이 비면 로그인 화면으로 보낸다. 서버 쿠키를 지우지 못해도 이 탭은 나간다
     void sessionApi.logout().finally(signOut);
   };
 
   return (
-    <div ref={popover.ref} className="relative">
+    <div ref={popover.ref} data-pet-target="topbar:profile" className="relative">
       <button
         type="button"
         aria-label={`사원 메뉴 · ${me.employeeName}`}
@@ -105,37 +100,10 @@ export function UserMenu() {
             </div>
           </div>
           <PopItem role="menuitem" centered onClick={switchAccount}>
-            <Icon name={isServerDataSource() ? 'logout' : 'users'} className="text-ink-3" />
-            {isServerDataSource() ? '로그아웃' : '계정 바꾸기'}
+            <Icon name="logout" className="text-ink-3" />
+            로그아웃
           </PopItem>
-          {/* 가짜 DB만 되돌리는 메뉴라 서버 모드에서는 숨긴다 (서버 DB는 npm run db:reset) */}
-          {isServerDataSource() ? null : (
-            <PopItem
-              role="menuitem"
-              centered
-              onClick={() => {
-                popover.setOpen(false);
-                setConfirmingReset(true);
-              }}
-            >
-              <Icon name="refresh" className="text-ink-3" />
-              시드로 초기화
-            </PopItem>
-          )}
         </PopPanel>
-      ) : null}
-      {confirmingReset ? (
-        <ConfirmDialog
-          title="시드로 초기화"
-          confirmLabel="초기화"
-          tone="danger"
-          pending={reset.isPending}
-          onConfirm={() => reset.mutate()}
-          onCancel={() => setConfirmingReset(false)}
-        >
-          이 브라우저의 가짜 데이터를 처음 시드 상태로 되돌려요. 등록한 수주·구매요청 같은 데이터가 모두 지워지고, 열려 있는 다른 탭에도 바로
-          반영돼요. 되돌릴 수 없어요.
-        </ConfirmDialog>
       ) : null}
     </div>
   );

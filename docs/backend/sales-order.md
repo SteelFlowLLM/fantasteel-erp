@@ -26,12 +26,13 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산 |
+| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산. `salesOrderNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
 | POST | `sales-orders` | 수주 등록 | `SALES_ORDER_CREATE` USE | 품목별 `itemId`·`orderedQty`만. SO-001·SO-002·INV-001. 하나의 트랜잭션 |
 | GET | `sales-orders/:id` | 수주 상세 | `SALES_ORDER_CREATE` VIEW | 톤 = 매수 × 이론중량(서버 계산) |
 | POST | `sales-orders/:id/cancel` | 수주 취소 | `SALES_ORDER_CANCEL` USE | SO-003·SO-004 |
 | GET | `sales-orders/:id/fulfillment` | 수주 충족 현황 | `SALES_ORDER_CREATE` VIEW | 단계별 중복 없는 집계(4.5) |
 | GET | `sales-orders/:id/reservations` | 수주 예약 조회 | `SALES_ORDER_CREATE` VIEW | [CSV] 도메인은 "재고·배정". 이 모듈 경로에 두고 조회는 inventory 서비스를 부른다 |
+| GET | `sales-orders/:id/cancel-purchase-impact` | 수주 취소의 구매 진행 영향 | `SALES_ORDER_CANCEL` VIEW | API 명세서에 없음. [04] BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"를 위해 더했다(2026-10-14). 아래 4장 |
 
 다른 초안 행: `PATCH /api/sales-orders/:id/cancel`(2행 중복). [05] 5장 "상태 변경은 `POST /:id/동작`"에 따라 POST로 만든다.
 [권한표]: 영업 USE, 생산·물류·관리자는 `SALES_ORDER_CREATE` VIEW. 취소는 영업만 USE(관리자 VIEW).
@@ -61,13 +62,15 @@
 ```
 
 - 생산중·검사합격·예약은 같은 제품의 다른 단계일 수 있으므로 더해서 주문보다 큰 "충족 매수"로 보이지 않는다. 지표의 포함 관계와 진행률 분모를 응답에 명시한다(4.5 구현 제안).
-- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(전부 CANCELLED면 취소, 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하 등).
+- 수주 진행률(출하 ÷ 주문)은 진행 중이면 취소 품목을 빼고, 헤더가 취소인 수주는 모든 품목으로 센다. 부분 출고 뒤 잔량 취소 수주는 출고 ÷ 전체 주문(예: 6 ÷ 12)이 되고, 남은 출하완료 품목만으로 100%가 되지 않는다(2026-10-14).
+- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(진행중·부분출하 품목이 없고 CANCELLED가 있으면 취소, 남은 품목이 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하).
 
 **취소**(BP-SO-02, 9.3)
 
-1. 출고된 매수가 있으면(CONVERTED 예약 존재) `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
+1. 취소할 품목(진행중·부분출하)이 없으면: 하나라도 취소된 품목이 있으면 이미 취소한 수주(`COM-001`, 부분 출고 뒤 잔량 취소 포함), 모두 출하완료면 `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
 2. 한 트랜잭션에서: 품목 CANCELLED → ACTIVE 예약 RELEASED와 `reserved_qty − ACTIVE 합계`(inventory) → PLANNED 생산계획 CANCELLED(production) → IN_PROGRESS 계획은 `sales_order_item_id = null`로 해제해 산출물을 여재로(production, [ERD] 설계 결정) → 그 계획들의 CONFIRMED 열연 배정 해제(inventory).
-3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외).
+3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외). 2026-10-14 결정: 부분 출고 뒤에도 취소할 수 있고 잔량만 취소한다. 2번은 진행중·부분출하 품목만 하고(`cancellableItemsOf`), 부분출하 품목은 CANCELLED가 되어도 출고 매수(CONVERTED 예약)는 충족 현황에 남는다. 전량 출고된 품목은 그대로 둔다. 헤더 상태는 진행할 품목이 남지 않았으므로 취소다(전량 출고 품목이 섞여도, 2026-10-14 사용자 결정).
+4. 구매 진행 영향(취소 창): 지금 취소하면 취소(PLANNED)·연결 해제(IN_PROGRESS)될 계획에 `purchase_requisition.production_plan_id`로 연결된 구매요청(상태 무관)과 그 발주를 구매요청 번호 순으로 보여 준다. 계획 상태로 취소·해제를 가르는 규칙은 2번과 같은 함수(production의 `salesOrderCancelEffectOf`)를 쓴다. 수주 취소는 구매요청·발주를 바꾸지 않는다.
 
 ## 5. 오류 코드·작업 로그
 
@@ -75,7 +78,7 @@
 | --- | --- |
 | SO-001 | 등록되지 않은 규격(없음·제품 아님) |
 | SO-002 | 수량이 1 이상 정수가 아님(소수·0·음수·누락) |
-| SO-003 (409) | 출고된 매수가 있는 수주 취소 |
+| SO-003 (409) | 전량 출고된 수주 취소 |
 | SO-004 (409) | 진행 중인 출하요청이 있는 수주 취소 |
 | INV-001 | 예약 조건부 UPDATE 경합(아래 8장) |
 | MST-001 | 생산계획 생성 시 수율·매핑 누락(production이 던짐) |
@@ -120,7 +123,9 @@
 | 부분 출고 | 품목 PARTIALLY_SHIPPED, 헤더 부분출하 (REQ-SO-005, shipment와 함께) |
 | 생산 시작 전 취소 | 계획 CANCELLED, 예약 RELEASED (14.2) |
 | 연주 진행 중 취소 | 계획의 수주 연결 해제, 완료 후 여재 (14.2) |
-| 출고 후 취소 / 출하요청 진행 중 취소 | SO-003 / SO-004 |
+| 전량 출고 후 취소 / 출하요청 진행 중 취소 | SO-003 / SO-004 |
+| 부분 출고 뒤 취소 | 출고분 유지·잔량만 취소(남은 예약 RELEASED, 계획 취소), 전량 출고 품목 그대로, 다시 취소하면 COM-001 (BP-SO-02 예외) |
+| 취소 창의 구매 진행 영향 | 시작 전·진행중 계획의 구매요청·발주만, 취소 뒤에는 빈 목록 (BP-PRD-01) |
 
 실행: `npm test -w @fantasteel/server -- sales-order`(묶음 DB `fs_sales`, inventory·shipment와 같은 DB).
 
@@ -132,7 +137,7 @@
 | 진행률 계산식 | 화면마다 다르다(출하 ÷ 주문 vs (예약+검사합격+출하) ÷ 주문). 하나로 정해야 한다 | [CSV] 수주 충족 현황 비고 |
 | 등록 시 INV-001 | 부분 예약을 허용하므로 가용 부족은 오류가 아니다. 조건부 UPDATE가 경합으로 0행이면 가용을 다시 읽어 재시도할지, INV-001로 실패시킬지 정해야 한다 | [CSV] 수주 등록 비고, [ERD] Project Note |
 | 진행 계획 잔여 목표 매수 | 4.5 식에 쓰지만 계산 방법(계획 부족 매수 − 이미 자동 예약된 매수 등)이 정의돼 있지 않다 | [04] 4.5 |
-| 부분 출고 후 잔량 취소 | TBD. 지금 규칙(SO-003)은 출고가 하나라도 있으면 전체 취소를 막는다 | [04] 16장, 9.3 |
+| ~~부분 출고 후 잔량 취소~~ | 결정(2026-10-14): 잔량만 취소, 품목 CANCELLED, SO-003은 전량 출고만 (4장 취소 3번) | [04] 16장, 9.3 |
 | 열연 시작 후 수주 취소 | TBD(미열연은 슬래브 여재, 열연 후 코일은 별도 결정) | [04] 16장 |
 | 이미 취소된 수주 재취소 | 상태 전이 위반용 오류 코드가 9.3에 없다 | [04] 9.3 |
 | 취소 사유 | `sales_order`에 사유 컬럼이 없다. 작업 로그 `reason`에만 남긴다 | [ERD] |

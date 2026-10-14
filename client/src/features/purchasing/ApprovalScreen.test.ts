@@ -4,16 +4,16 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { approvalKeys } from '@/api/approvals';
-import { sessionApi } from '@/api/session';
 import { ApprovalScreen } from '@/features/purchasing/ApprovalScreen';
 import { MeContext } from '@/hooks/useMe';
-import { actAs, SEED_EMPLOYEE_NO } from '@/test/actors';
+import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import { sessionUserOf } from '@/test/sessionUsers';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: () => undefined, push: () => undefined }), useSearchParams: () => new URLSearchParams(), usePathname: () => '/approvals' }));
 
 describe('승인함 빈 화면', () => {
-  it('승인 대기가 없으면 "없어요"는 오른쪽에 한 번만, 안내는 두 문장을 줄로 나눈다', async () => {
-    const me = await sessionApi.getSessionUser(actAs(SEED_EMPLOYEE_NO.qualityHead));
+  it('승인 대기가 없으면 "없어요"는 오른쪽에 한 번만, 안내는 두 문장을 줄로 나눈다', () => {
+    const me = sessionUserOf(SEED_EMPLOYEE_NO.qualityHead);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(approvalKeys.inbox(), []);
     const html = renderToString(createElement(QueryClientProvider, { client }, createElement(MeContext.Provider, { value: me }, createElement(ApprovalScreen))));

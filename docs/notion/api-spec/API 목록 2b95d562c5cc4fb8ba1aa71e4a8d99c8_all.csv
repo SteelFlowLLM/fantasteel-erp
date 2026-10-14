@@ -15,7 +15,7 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 생산계획 취소,API-94,PATCH,/api/production-plans/:id/cancel,,PRODUCTION_PLAN_CONFIRM (USE),,생산·MRP,P1,첫 실적 등록 후(IN_PROGRESS)에는 취소 불가,"PLANNED 상태의 생산계획을 CANCELLED로 변경 (REQ-PRD-001, REQ-SO-006)",AUTHENTICATED,초안
 생산계획 상세 조회,API-92,GET,/api/production-plans/:id,,PRODUCTION_PLAN_CONFIRM (VIEW 이상),,생산·MRP,P1,,생산계획 1건의 연결 수주 품목·부족 매수·히트 편성·공정 진행 현황 조회 (REQ-PRD-001),AUTHENTICATED,초안
 수주 예약 내역 조회,API-110,GET,/api/sales-orders/:id/reservations,,SALES_ORDER_CREATE (VIEW 이상),,수주,P1,,"수주 품목별 예약 매수와 상태(ACTIVE·CONVERTED·RELEASED) 조회 (REQ-SO-003, REQ-INV-002)",AUTHENTICATED,초안
-수주 취소,API-111,PATCH,/api/sales-orders/:id/cancel,,SALES_ORDER_CANCEL (USE),,수주,P1,"출고된 매수가 있으면 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부",수주를 취소하고 예약을 RELEASED로 해제. 생산 중 물량은 여재로 전환 (REQ-SO-006),AUTHENTICATED,초안
+수주 취소,API-111,PATCH,/api/sales-orders/:id/cancel,,SALES_ORDER_CANCEL (USE),,수주,P1,"전량 출고된 수주는 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부. 부분 출고 뒤에는 잔량만 취소 (2026-10-14)",수주를 취소하고 예약을 RELEASED로 해제. 생산 중 물량은 여재로 전환 (REQ-SO-006),AUTHENTICATED,초안
 수주 충족 현황 조회,API-109,GET,/api/sales-orders/:id/fulfillment,,SALES_ORDER_CREATE (VIEW 이상),,수주,P1,진행률 계산식이 화면마다 다름(출하 ÷ 주문 vs (예약+검사합격+출하) ÷ 주문). 하나로 정해야 함,수주 품목별 예약 / 생산중 / 검사합격 / 출하 매수와 진행률 조회 (REQ-SO-004),AUTHENTICATED,초안
 수주 목록 조회,API-106,GET,/api/sales-orders,,SALES_ORDER_CREATE (VIEW 이상),,수주,P1,헤더 상태는 저장하지 않고 품목 상태에서 계산,수주 목록을 상태·고객사·납기·품목 유형별로 조회. 수주 헤더 상태(부분출하·출하완료 등) 포함 (REQ-SO-005),AUTHENTICATED,초안
 수주 상세 조회,API-107,GET,/api/sales-orders/:id,,SALES_ORDER_CREATE (VIEW 이상),,수주,P1,,"수주 1건의 고객사·담당·품목별 규격·주문 매수·납기·품목 상태 조회 (REQ-SO-001, REQ-SO-005)",AUTHENTICATED,초안
@@ -36,7 +36,7 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 검사 대기·검사 목록 조회,API-125,GET,/api/v1/quality-inspections,BP-QC-01,INSPECTION_REGISTER (VIEW 이상),,품질,P1,12.2절에 없는 제안 API,"검사 대기 LOT(status=pending, 기본) 또는 등록된 검사(status=done)를 공정(제강·연주·열연)·LOT별로 조회 (REQ-QC-001)",AUTHENTICATED,초안
 출하요청 상세 조회,API-134,GET,/api/shipment-requests/:id,,SHIPMENT_REQUEST_MANAGE (VIEW 이상),,출하·밀시트,P1,,출하요청 1건의 품목별 요청 매수·배정 LOT·진행 단계 조회 (REQ-SHP-001),AUTHENTICATED,초안
 수주 예약 내역 조회,API-130,GET,/api/sales-orders/:id/reservations,,SALES_ORDER_CREATE (VIEW 이상),,수주,P1,,"수주 품목별 예약 매수와 상태(ACTIVE·CONVERTED·RELEASED) 조회 (REQ-SO-003, REQ-INV-002)",AUTHENTICATED,초안
-수주 취소,API-131,PATCH,/api/sales-orders/:id/cancel,,SALES_ORDER_CANCEL (USE),,수주,P1,"출고된 매수가 있으면 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부",수주를 취소하고 예약을 RELEASED로 해제. 생산 중 물량은 여재로 전환 (REQ-SO-006),AUTHENTICATED,초안
+수주 취소,API-131,PATCH,/api/sales-orders/:id/cancel,,SALES_ORDER_CANCEL (USE),,수주,P1,"전량 출고된 수주는 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부. 부분 출고 뒤에는 잔량만 취소 (2026-10-14)",수주를 취소하고 예약을 RELEASED로 해제. 생산 중 물량은 여재로 전환 (REQ-SO-006),AUTHENTICATED,초안
 출하 LOT 배정 확정,API-138,POST,/api/allocations,,SHIPMENT_REQUEST_MANAGE (USE),,재고·배정,P1,,추천된 LOT을 담당자가 확정해 배정 생성(CONFIRMED) (REQ-INV-006),AUTHENTICATED,초안
 출하요청 목록 조회,API-133,GET,/api/shipment-requests,,SHIPMENT_REQUEST_MANAGE (VIEW 이상),,출하·밀시트,P1,,출하요청 목록을 상태(배정 대기·배정 확정·출고 완료·취소)·고객사·출하 요청일별로 조회 (REQ-SHP-001),AUTHENTICATED,초안
 출하요청 등록,API-135,POST,/api/shipment-requests,,SHIPMENT_REQUEST_MANAGE (USE),,출하·밀시트,P1,같은 고객사 품목만 묶음. 출하 가능 매수를 넘으면 SHP-002로 거부,여러 수주 품목을 묶어 출하요청 등록 (REQ-SHP-001),AUTHENTICATED,초안
@@ -85,8 +85,10 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 규격 매핑 등록,API-171,POST,/api/v1/spec-mappings,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,12.2 명시. 대응 코일 중복·중량 초과 차단 (BP-MST-01),슬래브 규격 1개에 코일 규격 1개 연결. 코일 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004),AUTHENTICATED,초안
 품목·규격 등록,API-166,POST,/api/v1/items,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"12.2 명시. 강종·두께·폭·길이 조합 중복 금지, 참조 없으면 COM-003","원료(원료 코드·원료 유형) 또는 슬래브·코일 규격(강종×두께×폭×길이) 등록, 1매 이론중량 계산·저장(소수 3자리) (REQ-MST-001·003)",AUTHENTICATED,초안
 고객사 수정,API-180,PATCH,/api/v1/customers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,고객사 정보 수정 (REQ-MST-007),AUTHENTICATED,초안
+고객사 삭제,API-277,DELETE,/api/v1/customers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 수주·출하요청이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 고객사 삭제 (REQ-MST-007),AUTHENTICATED,초안
 고객사 등록,API-179,POST,/api/v1/customers,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,고객사 등록 (REQ-MST-007),AUTHENTICATED,초안
 야드 수정,API-186,PATCH,/api/v1/yards/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,야드 정보 수정 (REQ-MST-008),AUTHENTICATED,초안
+야드 삭제,API-279,DELETE,/api/v1/yards/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목 기본 야드·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 야드 삭제 (REQ-MST-008),AUTHENTICATED,초안
 야드 등록,API-185,POST,/api/v1/yards,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,야드 등록 (REQ-MST-008),AUTHENTICATED,초안
 라우팅 수정,API-174,PATCH,/api/v1/routings/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,공정 변경을 데이터 수정만으로 반영 (REQ-MST-005),AUTHENTICATED,초안
 공급업체 등록,API-182,POST,/api/v1/suppliers,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장. 품목별 기본 공급업체는 품목 수정에서 지정,공급업체 등록 (REQ-MST-007),AUTHENTICATED,초안
@@ -94,10 +96,13 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 배합 원단위 수정,API-177,PATCH,/api/v1/specific-consumptions/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,배합 원단위 값 수정 (REQ-MST-006),AUTHENTICATED,초안
 배합 원단위 등록,API-176,POST,/api/v1/specific-consumptions,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,12.2 명시,원료·합금철 배합 원단위 등록 (REQ-MST-006),AUTHENTICATED,초안
 공급업체 수정,API-183,PATCH,/api/v1/suppliers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,공급업체 정보 수정 (REQ-MST-007),AUTHENTICATED,초안
+공급업체 삭제,API-278,DELETE,/api/v1/suppliers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 원료 기본 공급업체·발주가 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 공급업체 삭제 (REQ-MST-007),AUTHENTICATED,초안
 품목·규격 수정,API-167,PATCH,/api/v1/items/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장. 사용된 규격의 치수·이론중량 수정 시 MST-002,"품목별 기본 공급업체·기본 야드 지정, 미사용 규격의 오타 수정 (REQ-MST-003·007·008)",AUTHENTICATED,초안
+품목·규격 삭제,API-275,DELETE,/api/v1/items/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 규격 매핑·배합 원단위·수주·재고(수량 > 0)·예약·생산계획·LOT·구매요청·발주가 쓰면 거부. 수량이 0인 재고 행은 함께 지운다 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 품목·규격 삭제 (REQ-MST-001·003),AUTHENTICATED,초안
 생산 설정값 변경,API-188,PATCH,/api/v1/production-settings,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출. 단건 설정 리소스라 :id 없음,히트 용량·납기 위험 기준일 변경 (REQ-MST-009),AUTHENTICATED,초안
 야드 목록 조회,API-184,GET,/api/v1/yards,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,"도출: 용어 사전 yard, 공통코드 YARD_TYPE",원료·슬래브·코일 야드 목록. 야드 내 위치는 관리하지 않음 (REQ-MST-008),AUTHENTICATED,초안
 강종 등록,API-169,POST,/api/v1/steel-grades,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리 (TRM-020),강종과 적용 규격 번호 등록. SM355는 등급별 별도 강종 (REQ-MST-002),AUTHENTICATED,초안
+강종 삭제,API-276,DELETE,/api/v1/steel-grades/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목·배합 원단위·검사 기준·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 강종 삭제 (REQ-MST-002),AUTHENTICATED,초안
 규격 매핑 조회,API-170,GET,/api/v1/spec-mappings,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,12.2 명시,슬래브 규격별 대응 코일 규격과 열연 계획 수율(계산값) (REQ-MST-004),AUTHENTICATED,초안
 라우팅 조회,API-172,GET,/api/v1/routings,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,12.2 명시,품목 유형(코일·슬래브)별 공정 순서와 계획 수율 (REQ-MST-005),AUTHENTICATED,초안
 배정 조회,API-199,GET,/api/v1/allocations,"BP-INV-01, BP-SHP-01",SHIPMENT_REQUEST_MANAGE (VIEW) 또는 HOT_ROLLING_ALLOCATE (VIEW),,재고·배정,P1,도출: 컨벤션 5장,출하요청·생산계획별 배정 LOT과 상태. 미배정 매수 확인 (REQ-INV-006),AUTHENTICATED,초안

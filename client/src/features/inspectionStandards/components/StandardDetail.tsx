@@ -105,7 +105,15 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
           <h2 className="flex items-center gap-2 text-2xl font-semibold">
             <span className="font-mono">{view.inspectionStandardCode}</span>
             <Tag tone="outline">v{view.version}</Tag>
-            {view.isCurrent ? <Badge tone="ok">지금 버전</Badge> : <Badge tone="neutral">이전 버전 · 읽기 전용</Badge>}
+            {view.isCurrent ? (
+              <span className="inline-flex" data-pet-term="지금 버전">
+                <Badge tone="ok">지금 버전</Badge>
+              </span>
+            ) : (
+              <span className="inline-flex" data-pet-term="이전 버전 · 읽기 전용">
+                <Badge tone="neutral">이전 버전 · 읽기 전용</Badge>
+              </span>
+            )}
           </h2>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -164,33 +172,40 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
         </ConfirmDialog>
       ) : null}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_280px] items-start gap-4">
-        <Card>
+      {/* 오른쪽 280px 칸이 붙으면 표 칸이 좁아져 열이 많은 기준(열연 16항목: 최소·최대·적용 두께 구간)에 가로 스크롤이 생겼다(1440px에서도). 1600px 미만이면 기준 정보·버전을 표 아래로 내린다 */}
+      <div className="grid grid-cols-1 items-start gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_280px]">
+        <Card petKey="card:inspectionStandards.items">
           <CardHead
             title="검사 항목"
             meta={`${view.items.length}개${changed.size > 0 || removed > 0 ? ` · 이전 버전에서 바뀜 ${changed.size}개${removed > 0 ? ` · 빠짐 ${removed}개` : ''}` : ''}`}
           />
           {sharedText.length > 0 ? (
-            <p className="border-b border-line px-4 py-2 text-cap text-ink-2" title={source === 'KS' && view.standardNo ? `KS 값 (${view.standardNo}, 치수는 KS D 3500)` : undefined}>
+            <p
+              className="border-b border-line px-4 py-2 text-cap text-ink-2"
+              title={source === 'KS' && view.standardNo ? `KS 값 (${view.standardNo}, 치수는 KS D 3500)` : undefined}
+              data-pet-term="모든 항목 같음"
+            >
               <b className="font-semibold">모든 항목 같음</b> · {sharedText.join(' · ')}
             </p>
           ) : null}
+          {/* 열 수가 적은 기준은 표가 넓게 늘어나 왼쪽·오른쪽 정렬이면 이름과 값이 멀어진다: 칸 가운데에 모아 읽히게 */}
           <div className="overflow-auto">
             <Table>
               <thead>
                 <tr>
-                  <Th className="w-12">순서</Th>
-                  <Th>항목 코드</Th>
-                  <Th>항목명</Th>
-                  <Th>단위</Th>
-                  {shared.min ? null : <Th align="right">최소 (이상)</Th>}
-                  {shared.max ? null : <Th align="right">최대 (이하)</Th>}
-                  {shared.band ? null : <Th>적용 두께 구간 (mm)</Th>}
-                  {shared.required ? null : <Th>필수</Th>}
-                  {shared.source ? null : <Th>근거</Th>}
+                  <Th align="center" className="w-12">순서</Th>
+                  <Th align="center">항목 코드</Th>
+                  <Th align="center">항목명</Th>
+                  <Th align="center">단위</Th>
+                  {shared.min ? null : <Th align="center">최소 (이상)</Th>}
+                  {shared.max ? null : <Th align="center">최대 (이하)</Th>}
+                  {shared.band ? null : <Th align="center">적용 두께 구간 (mm)</Th>}
+                  {shared.required ? null : <Th align="center">필수</Th>}
+                  {shared.source ? null : <Th align="center">근거</Th>}
                 </tr>
               </thead>
-              <tbody>
+              {/* 기본 줄 높이(36px)는 항목이 적은 기준에서 카드 아래가 휑하다: 모든 기준의 줄을 조금 높인다 (빈칸을 덧대지 않는다) */}
+              <tbody className="[&_td]:h-11">
                 {view.items.map((item, index) => (
                   <ItemRow
                     key={item.id}
@@ -208,14 +223,14 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
             </Table>
             {view.items.length === 0 ? <EmptyNote>검사 항목이 없어요</EmptyNote> : null}
           </div>
-          <p className="border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-normal text-ink-3">
+          <p className="border-t border-line bg-surface-2 px-4 py-2.5 text-cap leading-normal text-ink-3" data-pet-term="판정 규칙">
             최소·최대는 경계값을 포함해 판정해요(이상·이하) · 적용 두께 구간은 &lsquo;초과 ~ 이하&rsquo;로 고르고, 비어 있으면 모든 두께에 적용해요 · 필수 항목 값이 없거나 기준이
             없으면 판정 대기로 남아요 · 바꾸면 새 버전이 생기고 이전 버전은 그대로 남아요
           </p>
         </Card>
 
-        <div className="flex flex-col gap-4">
-          <Card>
+        <div className="grid grid-cols-2 items-start gap-4 min-[1600px]:flex min-[1600px]:flex-col min-[1600px]:items-stretch">
+          <Card petKey="card:inspectionStandards.info">
             <CardHead title="기준 정보" />
             <div className="p-4">
               <KvList
@@ -228,9 +243,13 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                 ]}
               />
             </div>
-            {process ? <p className="border-t border-line px-4 py-2.5 text-cap leading-normal text-ink-2">{PROCESS_NOTE[process]}</p> : null}
+            {process ? (
+              <p className="border-t border-line px-4 py-2.5 text-cap leading-normal text-ink-2" data-pet-term={`${PROCESS_TYPE_LABEL[process]} 기준 안내`}>
+                {PROCESS_NOTE[process]}
+              </p>
+            ) : null}
           </Card>
-          <Card>
+          <Card petKey="card:inspectionStandards.versions">
             <CardHead title="버전" meta={`${view.versions.length}개`} />
             <ul className="flex flex-col">
               {view.versions.map((v) => (
@@ -238,17 +257,24 @@ function DetailBody({ view, canEdit, onSelectVersion, onNewVersion, onDeleted }:
                   <button
                     type="button"
                     aria-current={v.id === view.id || undefined}
+                    data-pet-item="inspectionStandard"
+                    data-pet-item-title={`${view.inspectionStandardCode} v${v.version}`}
                     onClick={() => onSelectVersion(v.id)}
                     className={cn('flex w-full items-center gap-2 border-b border-line px-4 py-2 text-left text-sm last:border-b-0 hover:bg-surface-2', v.id === view.id && 'bg-brand-tint hover:bg-brand-tint-hover')}
                   >
-                    <span className="font-mono font-semibold">v{v.version}</span>
+                    <span className="font-mono font-semibold" data-pet-field="버전">
+                      v{v.version}
+                    </span>
                     <span className="text-cap text-ink-3">
-                      {fmtMD(v.createdAt)} · 항목 {v.itemCount}개 · 검사 {v.inspectionCount}건
+                      <span data-pet-field="버전 생성">{fmtMD(v.createdAt)}</span> · <span data-pet-field="항목 수">항목 {v.itemCount}개</span> ·{' '}
+                      <span data-pet-field="판정한 검사">검사 {v.inspectionCount}건</span>
                     </span>
                     {v.isCurrent ? (
-                      <Badge tone="ok" plain className="ml-auto">
-                        지금
-                      </Badge>
+                      <span className="ml-auto inline-flex" data-pet-term="지금">
+                        <Badge tone="ok" plain>
+                          지금
+                        </Badge>
+                      </span>
                     ) : null}
                   </button>
                 </li>
@@ -281,32 +307,42 @@ interface ItemRowProps {
  */
 function ItemRow({ item, index, continued, continues, changed, shared, source, standardNo }: ItemRowProps) {
   return (
-    <tr className={cn(continues && '[&>td]:border-b-transparent')}>
-      <Td className="tabular-nums text-ink-3">{index + 1}</Td>
-      <Td className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
-      <Td>{continued ? null : item.inspectionItemName}</Td>
-      <Td className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
-      {shared.min ? null : <Td align="right">{formatValue(item.minValue)}</Td>}
-      {shared.max ? null : <Td align="right">{formatValue(item.maxValue)}</Td>}
-      {shared.band ? null : <Td>{formatThicknessBand(item)}</Td>}
+    <tr className={cn(continues && '[&>td]:border-b-transparent')} data-pet-item="inspectionStandardItem" data-pet-item-title={`${item.inspectionItemCode} ${item.inspectionItemName}`}>
+      <Td align="center" className="tabular-nums text-ink-3">{index + 1}</Td>
+      <Td align="center" className="font-mono text-mono">{continued ? null : item.inspectionItemCode}</Td>
+      <Td align="center">{continued ? null : item.inspectionItemName}</Td>
+      <Td align="center" className="text-ink-2">{continued ? null : (item.unit ?? '—')}</Td>
+      {shared.min ? null : <Td align="center">{formatValue(item.minValue)}</Td>}
+      {shared.max ? null : <Td align="center">{formatValue(item.maxValue)}</Td>}
+      {shared.band ? null : <Td align="center">{formatThicknessBand(item)}</Td>}
       {/* 거의 모든 줄이 필수·KS라 배지로 칠하면 값보다 먼저 보인다: 흔한 값은 글자로, 다른 값(선택·가정값·바뀜)만 배지로 */}
-      {shared.required ? null : <Td>{item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}</Td>}
+      {shared.required ? null : (
+        <Td align="center">
+          <span className="inline-flex" data-pet-term={item.isRequired ? '필수' : '선택'}>
+            {item.isRequired ? <span className="text-ink-2">필수</span> : <Badge>선택</Badge>}
+          </span>
+        </Td>
+      )}
       {shared.source ? null : (
-      <Td>
+      <Td align="center">
         <span className="inline-flex items-center gap-1">
           {source === 'KS' ? (
-            <span className="text-cap text-ink-3" title={standardNo ? `KS 값 (${standardNo}, 치수는 KS D 3500)` : 'KS 값'}>
+            <span className="text-cap text-ink-3" title={standardNo ? `KS 값 (${standardNo}, 치수는 KS D 3500)` : 'KS 값'} data-pet-term="KS">
               KS
             </span>
           ) : (
-            <Tag size="sm" tone="outline" title="KS에 없어 정한 사내 가정값이에요">
-              가정값
-            </Tag>
+            <span className="inline-flex" data-pet-term="가정값">
+              <Tag size="sm" tone="outline" title="KS에 없어 정한 사내 가정값이에요">
+                가정값
+              </Tag>
+            </span>
           )}
           {changed ? (
-            <Tag size="sm" tone="run" title="이전 버전에서 새로 생기거나 값이 바뀐 항목이에요">
-              바뀜
-            </Tag>
+            <span className="inline-flex" data-pet-term="바뀜">
+              <Tag size="sm" tone="run" title="이전 버전에서 새로 생기거나 값이 바뀐 항목이에요">
+                바뀜
+              </Tag>
+            </span>
           ) : null}
         </span>
       </Td>

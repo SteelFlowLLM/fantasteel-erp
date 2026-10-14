@@ -50,7 +50,7 @@ const YIELD_SCALE = 4;
 
 /**
  * 업무 로직·트랜잭션·데이터에 따른 권한 검사 (컨벤션 6장).
- * BUSINESS_EVENT_TYPE([06])에 기준정보 이벤트가 없어 작업 로그는 남기지 않는다 (master-data.md 5장).
+ * BUSINESS_EVENT_TYPE([06])에 기준정보 이벤트가 없어 작업 로그는 남기지 않는다 (master-data.md 5장). 삭제도 같다.
  * 9.3에 코드가 없는 거부(중복·중량 초과·야드 유형 등)는 COM-004에 문구를 붙인다 (master-data.md 8장 임시 결정).
  */
 @Injectable()
@@ -422,6 +422,57 @@ export class MasterDataService {
     });
     return this.getProductionSetting();
   }
+
+  // ── 삭제 ([05] 7-2: 참조가 없을 때만, 쓰는 곳이 있으면 COM-004. 조직 삭제와 같은 방식) ──
+
+  async deleteCustomer(id: number): Promise<CustomerView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findCustomer(tx, { id }))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
+      assertUnused(await this.repository.customerUsages(tx, id));
+      return this.repository.deleteCustomer(tx, id);
+    });
+  }
+
+  async deleteSupplier(id: number): Promise<SupplierView> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertSupplier(tx, id);
+      assertUnused(await this.repository.supplierUsages(tx, id));
+      return this.repository.deleteSupplier(tx, id);
+    });
+  }
+
+  async deleteYard(id: number): Promise<YardView> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findYard(tx, id))) throw new AppException('COM-003', '야드를 찾을 수 없어요');
+      assertUnused(await this.repository.yardUsages(tx, id));
+      return this.repository.deleteYard(tx, id);
+    });
+    return toYardView(row);
+  }
+
+  async deleteSteelGrade(id: number): Promise<SteelGradeView> {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.repository.findSteelGrade(tx, id))) throw new AppException('COM-003', '강종을 찾을 수 없어요');
+      assertUnused(await this.repository.steelGradeUsages(tx, id));
+      return this.repository.deleteSteelGrade(tx, id);
+    });
+  }
+
+  /** 지운 품목을 돌려준다 (지운 뒤에는 읽을 수 없어 먼저 읽는다) */
+  async deleteItem(id: number): Promise<ItemView> {
+    return this.prisma.$transaction(async (tx) => {
+      const [row] = await this.repository.findItems(tx, { id });
+      if (!row) throw new AppException('COM-003', '품목을 찾을 수 없어요');
+      assertUnused(await this.repository.itemUsages(tx, id));
+      await this.repository.deleteItem(tx, id);
+      return toItemView(row);
+    });
+  }
+}
+
+/** 쓰는 곳이 있으면 지우지 않는다 ([05] 7-2). 어디서 쓰는지 함께 알려 준다 */
+function assertUnused(usages: readonly string[]): void {
+  if (usages.length > 0) throw new AppException('COM-004', `쓰는 곳이 있어 삭제할 수 없어요: ${usages.join('·')}`);
 }
 
 /** 0 < 계획 수율 ≤ 1. 열연(규격 매핑에서 계산)·제선(4.4 계산식에 쓰지 않음)은 null (REQ-MST-005, master-data.md 8-1) */

@@ -1,9 +1,8 @@
 // 검사 입력 조회·변경 훅 (화면은 이 훅으로만 검사 API에 접근한다, 컨벤션 9장)
 import { useQuery } from '@tanstack/react-query';
-import { inspectionApi, inspectionKeys, type RegisterInspectionOutcome } from '@/api/inspections';
+import { inspectionApi, inspectionKeys, type RegisterInspectionInput, type RegisterInspectionOutcome } from '@/api/inspections';
 import { INSPECTION_RESULT_LABEL } from '@/codes';
 import { useAction } from '@/hooks/useAction';
-import type { RegisterInspectionInput } from '@/mock/services';
 
 export function useInspectionQueue() {
   return useQuery({ queryKey: inspectionKeys.queue(), queryFn: inspectionApi.queue });

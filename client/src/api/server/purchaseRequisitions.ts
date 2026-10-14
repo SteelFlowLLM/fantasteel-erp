@@ -1,4 +1,4 @@
-// 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양(가짜 DB와 같은 타입)으로 바꾼다.
+// 구매요청·승인 화면 ↔ 서버 API (server/src/modules/purchasing). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 구매요청·사원·부서·원료 id는 서버 id를 그대로 쓴다(로그인 사원도 서버 id, 원료 선택 목록도 서버, api/server/lookups.ts).
 // 서버에 없어 비워 두는 것:
 // - 출처 초안(sourceDraft): Message → ERP 초안 조회가 서버에 없다.
@@ -93,7 +93,12 @@ export const serverPurchaseRequisitionApi = {
   formContext: async (): Promise<RequisitionFormContext> => {
     const { me, departments } = await serverMeAndDepartments();
     const department = departments.find((d) => d.id === me.departmentId);
-    return { requesterName: me.employeeName, departmentName: department?.departmentName ?? '-', headName: department?.headEmployeeName ?? null };
+    return {
+      requesterName: me.employeeName,
+      departmentName: department?.departmentName ?? '-',
+      headName: department?.headEmployeeName ?? null,
+      isDepartmentHead: me.headDepartmentIds.includes(me.departmentId),
+    };
   },
 
   /** 발주 후보: 서버에서 승인됨(APPROVED) = 아직 발주하지 않은 요청. 공급업체는 원료의 기본 공급업체 */
