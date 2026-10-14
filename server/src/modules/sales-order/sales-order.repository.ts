@@ -86,6 +86,23 @@ export class SalesOrderRepository {
     });
   }
 
+  /** 이 수주 품목들의 생산계획에 연결된 구매요청과 그 발주 (취소 창의 구매 진행 영향). 계획 상태는 서비스가 거른다 */
+  findRequisitionsOfPlans(tx: Tx, salesOrderItemIds: number[]) {
+    return tx.purchaseRequisition.findMany({
+      where: { productionPlan: { salesOrderItemId: { in: salesOrderItemIds } } },
+      select: {
+        id: true,
+        purchaseRequisitionNo: true,
+        purchaseRequisitionStatus: true,
+        requestedTon: true,
+        item: { select: { itemName: true } },
+        productionPlan: { select: { id: true, productionPlanNo: true, productionPlanStatus: true } },
+        purchaseOrderItem: { select: { purchaseOrder: { select: { id: true, purchaseOrderNo: true, purchaseOrderStatus: true } } } },
+      },
+      orderBy: { purchaseRequisitionNo: 'asc' },
+    });
+  }
+
   countPassedProductsByPlan(tx: Tx, productionPlanIds: number[]) {
     return tx.$queryRawTyped(countPassedProductsByPlan(productionPlanIds));
   }

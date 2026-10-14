@@ -32,6 +32,7 @@
 | POST | `sales-orders/:id/cancel` | 수주 취소 | `SALES_ORDER_CANCEL` USE | SO-003·SO-004 |
 | GET | `sales-orders/:id/fulfillment` | 수주 충족 현황 | `SALES_ORDER_CREATE` VIEW | 단계별 중복 없는 집계(4.5) |
 | GET | `sales-orders/:id/reservations` | 수주 예약 조회 | `SALES_ORDER_CREATE` VIEW | [CSV] 도메인은 "재고·배정". 이 모듈 경로에 두고 조회는 inventory 서비스를 부른다 |
+| GET | `sales-orders/:id/cancel-purchase-impact` | 수주 취소의 구매 진행 영향 | `SALES_ORDER_CANCEL` VIEW | API 명세서에 없음. [04] BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"를 위해 더했다(2026-10-14). 아래 4장 |
 
 다른 초안 행: `PATCH /api/sales-orders/:id/cancel`(2행 중복). [05] 5장 "상태 변경은 `POST /:id/동작`"에 따라 POST로 만든다.
 [권한표]: 영업 USE, 생산·물류·관리자는 `SALES_ORDER_CREATE` VIEW. 취소는 영업만 USE(관리자 VIEW).
@@ -68,6 +69,7 @@
 1. 출고된 매수가 있으면(CONVERTED 예약 존재) `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
 2. 한 트랜잭션에서: 품목 CANCELLED → ACTIVE 예약 RELEASED와 `reserved_qty − ACTIVE 합계`(inventory) → PLANNED 생산계획 CANCELLED(production) → IN_PROGRESS 계획은 `sales_order_item_id = null`로 해제해 산출물을 여재로(production, [ERD] 설계 결정) → 그 계획들의 CONFIRMED 열연 배정 해제(inventory).
 3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외).
+4. 구매 진행 영향(취소 창): 지금 취소하면 취소(PLANNED)·연결 해제(IN_PROGRESS)될 계획에 `purchase_requisition.production_plan_id`로 연결된 구매요청(상태 무관)과 그 발주를 구매요청 번호 순으로 보여 준다. 계획 상태로 취소·해제를 가르는 규칙은 2번과 같은 함수(production의 `salesOrderCancelEffectOf`)를 쓴다. 수주 취소는 구매요청·발주를 바꾸지 않는다.
 
 ## 5. 오류 코드·작업 로그
 
@@ -121,6 +123,7 @@
 | 생산 시작 전 취소 | 계획 CANCELLED, 예약 RELEASED (14.2) |
 | 연주 진행 중 취소 | 계획의 수주 연결 해제, 완료 후 여재 (14.2) |
 | 출고 후 취소 / 출하요청 진행 중 취소 | SO-003 / SO-004 |
+| 취소 창의 구매 진행 영향 | 시작 전·진행중 계획의 구매요청·발주만, 취소 뒤에는 빈 목록 (BP-PRD-01) |
 
 실행: `npm test -w @fantasteel/server -- sales-order`(묶음 DB `fs_sales`, inventory·shipment와 같은 DB).
 

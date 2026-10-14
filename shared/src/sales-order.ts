@@ -1,5 +1,5 @@
 // 수주 API 응답 타입 (docs/backend/sales-order.md). 톤은 소수 3자리 문자열, 매수는 정수.
-import type { ItemType, ProductionPlanStatus, ReservationStatus, SalesOrderItemStatus, ShipmentRequestStatus } from './codes';
+import type { ItemType, ProductionPlanStatus, PurchaseOrderStatus, PurchaseRequisitionStatus, ReservationStatus, SalesOrderItemStatus, ShipmentRequestStatus } from './codes';
 
 /** 진행률 같은 지표: 값과 분모를 함께 준다 (업무 프로세스 4.5 — 단계를 더해 주문보다 큰 값으로 보이지 않게) */
 export interface ProgressMeasure {
@@ -174,4 +174,26 @@ export interface CancelSalesOrderResult {
   salesOrderId: number;
   salesOrderNo: string;
   cancellation: SalesOrderCancellation;
+}
+
+/** 수주를 취소하면 생산계획이: CANCEL 시작 전 계획 취소 · UNLINK 진행중 계획의 수주 연결 해제(산출물은 여재) */
+export type SalesOrderCancelPlanEffect = 'CANCEL' | 'UNLINK';
+
+/**
+ * 수주 취소 창의 구매 진행 영향 한 줄 (BP-PRD-01): 취소·연결 해제될 생산계획에 연결된 구매요청과 그 발주.
+ * 수주 취소는 구매요청·발주를 바꾸지 않아 보여 주기만 한다.
+ */
+export interface SalesOrderCancelPurchaseImpactLine {
+  purchaseRequisitionId: number;
+  purchaseRequisitionNo: string;
+  purchaseRequisitionStatus: PurchaseRequisitionStatus;
+  itemName: string;
+  requestedTon: string;
+  productionPlanId: number;
+  productionPlanNo: string;
+  planEffect: SalesOrderCancelPlanEffect;
+  /** 발주했으면 그 발주 (구매요청 1건 = 발주 품목 1행) */
+  purchaseOrderId: number | null;
+  purchaseOrderNo: string | null;
+  purchaseOrderStatus: PurchaseOrderStatus | null;
 }

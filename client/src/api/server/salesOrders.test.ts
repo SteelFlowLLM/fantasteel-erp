@@ -90,6 +90,25 @@ describe('수주 서버 어댑터 (api/server/salesOrders.ts)', () => {
     expect(await salesOrderApi.productionLinks(9)).toEqual([]);
   });
 
+  it('취소 창의 구매 진행 영향: GET /sales-orders/:id/cancel-purchase-impact 응답을 그대로 돌려준다', async () => {
+    const line = {
+      purchaseRequisitionId: 5,
+      purchaseRequisitionNo: 'PR-2610-0005',
+      purchaseRequisitionStatus: 'ORDERED',
+      itemName: '철광석',
+      requestedTon: '444.444',
+      productionPlanId: 81,
+      productionPlanNo: 'PP-2610-0081',
+      planEffect: 'UNLINK',
+      purchaseOrderId: 3,
+      purchaseOrderNo: 'PO-2610-0003',
+      purchaseOrderStatus: 'CONFIRMED',
+    };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/sales-orders/9/cancel-purchase-impact' ? ok([line]) : undefined));
+    expect(await salesOrderApi.cancelPurchaseImpact(9)).toEqual([line]);
+    expect(calls.map((c) => [c.method, c.path])).toEqual([['GET', '/sales-orders/9/cancel-purchase-impact']]);
+  });
+
   it('재생산 계획: 수주 품목 id로 POST /production-plans를 부르고 여재 예약 매수·새 계획을 돌려준다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
       c.method === 'POST' && c.path === '/production-plans' ? ok({ reservedFromSurplusQty: 1, plan: { id: 42, productionPlanNo: 'PP-2610-0042', shortageQty: 3 } }) : undefined,

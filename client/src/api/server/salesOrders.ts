@@ -11,6 +11,7 @@ import type {
   ProductionSettingView,
   ProductStockWidget,
   RoutingView,
+  SalesOrderCancelPurchaseImpactLine,
   SalesOrderDetail as ServerSalesOrderDetail,
   SalesOrderItemFulfillment,
   SalesOrderReservationView,
@@ -327,6 +328,11 @@ async function cancel(input: { salesOrderId: number; cancelReason: string }): Pr
   return { salesOrderId: result.salesOrderId, salesOrderNo: result.salesOrderNo };
 }
 
+/** 수주 취소 창의 구매 진행 영향 (서버가 계획 상태로 취소·연결 해제를 가른다) */
+function cancelPurchaseImpact(salesOrderId: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+  return serverRequest<SalesOrderCancelPurchaseImpactLine[]>('GET', `/sales-orders/${salesOrderId}/cancel-purchase-impact`);
+}
+
 /**
  * 생산 연결 탭: 수주 품목에 연결된 계획과, 수주 취소로 연결이 풀린 진행 계획(취소 기록의 계획 번호)의 생산계획 상세.
  * 생산계획 조회 권한이 없으면(물류) 빈 목록이다.
@@ -351,4 +357,4 @@ async function productionLinks(salesOrderId: number): Promise<SalesOrderPlanLink
   }
 }
 
-export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel };
+export const serverSalesOrderApi = { listAll, detail, productionLinks, preview, create, cancel, cancelPurchaseImpact };
