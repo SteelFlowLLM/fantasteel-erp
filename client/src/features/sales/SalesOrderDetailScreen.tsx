@@ -177,6 +177,8 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
   const done = detail.status === 'SHIPPED' || detail.status === 'CANCELLED';
   const cancelBlockCode = detail.cancelBlock === 'SO-003' || detail.cancelBlock === 'SO-004' ? detail.cancelBlock : null;
+  // 부분 출고 뒤 잔량을 취소한 수주는 출고분이 남는다 (BP-SO-02 예외)
+  const shippedTotal = detail.items.reduce((sum, i) => sum + i.shippedQty, 0);
   return (
     <>
       <div data-pet-target="card:salesOrders.header" className="flex flex-none flex-col gap-2">
@@ -217,7 +219,8 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
 
       {detail.cancelledAt ? (
         <Banner tone="danger">
-          <b>취소된 수주예요</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'}
+          <b>{shippedTotal > 0 ? '잔량을 취소한 수주예요' : '취소된 수주예요'}</b> · {fmtDateTime(detail.cancelledAt)} · 사유: {detail.cancelReason ?? '-'}
+          {shippedTotal > 0 ? ` · 출고된 ${shippedTotal.toLocaleString('en-US')}${qtyUnitOf(detail.itemTypes)}는 그대로예요` : null}
           {detail.cancellation ? ` · ${cancellationEffectsText(detail.cancellation)}` : null}
         </Banner>
       ) : null}
