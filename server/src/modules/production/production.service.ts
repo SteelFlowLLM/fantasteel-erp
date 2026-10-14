@@ -14,6 +14,7 @@ import {
   type ProductionPlanSummary,
   type ReproductionCheck,
   type ReproductionResult,
+  type SalesOrderCancelPlanEffect,
   type SalesOrderItemStatus,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
@@ -43,6 +44,13 @@ const planSnapshot = (p: { id: number; productionPlanNo: string; salesOrderItemI
 });
 
 const rate = (v: Prisma.Decimal) => v.toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP).toFixed(4);
+
+/** 수주를 취소하면 이 상태의 계획은: 시작 전 = 취소, 진행중 = 수주 연결 해제, 완료·취소 = 그대로(null). 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다 */
+export function salesOrderCancelEffectOf(productionPlanStatus: string): SalesOrderCancelPlanEffect | null {
+  if (productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED) return 'CANCEL';
+  if (productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS) return 'UNLINK';
+  return null;
+}
 
 /** 히트 편성에 쓰는 기준정보 (라우팅 수율·규격 매핑·히트 용량). 하나라도 없으면 MST-001 */
 export interface HeatPlanBasis {
@@ -183,7 +191,8 @@ export class ProductionService {
     const unlinkedPlanNos: string[] = [];
     const allocationReason = `ORDER_CANCELLED: 수주 ${input.salesOrderNo} 취소로 열연 배정 해제`;
     for (const plan of await this.repository.findPlansOfSalesOrderItem(tx, input.salesOrderItemId)) {
-      if (plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED) {
+      const effect = salesOrderCancelEffectOf(plan.productionPlanStatus);
+      if (effect === 'CANCEL') {
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
         const cancelled = await this.repository.updatePlan(tx, plan.id, { productionPlanStatus: PRODUCTION_PLAN_STATUS.CANCELLED });
         await this.businessEventRecorder.record(tx, {
@@ -196,7 +205,7 @@ export class ProductionService {
           reason: `ORDER_CANCELLED: 수주 ${input.salesOrderNo} 취소로 시작 전 계획 취소`,
         });
         cancelledPlanNos.push(plan.productionPlanNo);
-      } else if (plan.productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS) {
+      } else if (effect === 'UNLINK') {
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
         const unlinked = await this.repository.updatePlan(tx, plan.id, { salesOrderItemId: null });
         await this.businessEventRecorder.record(tx, {

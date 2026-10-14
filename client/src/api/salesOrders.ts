@@ -1,6 +1,7 @@
 // 수주 api (REQ-SO-001~006, REQ-INV-002~005, BP-SO-01·02, REQ-PRD-006 재생산, REQ-MSG-001 업무방).
 // 목록·상세·미리보기·등록·취소·이력은 서버를 부른다 (api/server/salesOrders.ts, 이력은 api/server/businessEvents.ts).
-// 업무방은 메신저 어댑터, 생산 연결·재생산 계획은 생산계획 API를 쓴다. 서버에 아직 없는 구매 진행 영향은 비어 있다.
+// 업무방은 메신저 어댑터, 생산 연결·재생산 계획은 생산계획 API를 쓴다. 취소 창의 구매 진행 영향도 서버를 부른다.
+import type { SalesOrderCancelPurchaseImpactLine } from '@fantasteel/shared';
 import type { TimelineEvent } from '@/api/businessEvents';
 import type { ProductionPlanView } from '@/api/production';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
@@ -12,8 +13,6 @@ import {
   type Permission,
   type ProductionPlanStatus,
   type ProductItemType,
-  type PurchaseOrderStatus,
-  type PurchaseRequisitionStatus,
   type ReservationStatus,
   type SalesOrderItemStatus,
 } from '@/codes';
@@ -136,22 +135,8 @@ export interface CreateSalesOrderInput {
   items: readonly SalesOrderLineInput[];
 }
 
-/** 수주 취소 창의 구매 진행 영향 한 줄: 취소·연결 해제될 생산계획에 연결된 구매요청 품목 (표시만, 바꾸지 않는다) */
-export interface CancelPurchaseImpactLine {
-  purchaseRequisitionId: number;
-  purchaseRequisitionNo: string;
-  purchaseRequisitionStatus: PurchaseRequisitionStatus;
-  itemName: string;
-  requiredTon: string;
-  productionPlanId: number;
-  productionPlanNo: string;
-  /** 수주를 취소하면 이 계획이: CANCEL 시작 전 계획 취소 · UNLINK 진행중 계획의 수주 연결 해제 */
-  planEffect: 'CANCEL' | 'UNLINK';
-  /** 발주했으면 그 발주 (purchase_order_item.purchase_requisition_item_id) */
-  purchaseOrderId: number | null;
-  purchaseOrderNo: string | null;
-  purchaseOrderStatus: PurchaseOrderStatus | null;
-}
+/** 수주 취소 창의 구매 진행 영향 한 줄: 취소·연결 해제될 생산계획에 연결된 구매요청과 발주 (서버와 같은 모양, 표시만 한다) */
+export type CancelPurchaseImpactLine = SalesOrderCancelPurchaseImpactLine;
 
 /** 수주 화면을 여는 권한 (screens.ts의 salesOrders와 같다): 수주 등록·취소 중 하나라도 조회 이상 */
 export const SALES_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL];
@@ -224,7 +209,7 @@ export const salesOrderApi = {
    * 수주 취소 창의 구매 진행 영향 (04 BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"):
    * 취소·연결 해제될 생산계획에 연결된 구매요청 품목과 발주. 보여 주기만 하고 아무것도 바꾸지 않는다.
    */
-  cancelPurchaseImpact: (salesOrderId: number): Promise<CancelPurchaseImpactLine[]> => Promise.resolve([]),
+  cancelPurchaseImpact: (salesOrderId: number): Promise<CancelPurchaseImpactLine[]> => serverSalesOrderApi.cancelPurchaseImpact(salesOrderId),
 
   /** 수주 취소 (REQ-SO-006, BP-SO-02): 출고분 있으면 SO-003, 진행 중 출하요청 있으면 SO-004 */
   cancel: (input: { salesOrderId: number; cancelReason: string; expectedUpdatedAt?: string | null }) => serverSalesOrderApi.cancel(input),

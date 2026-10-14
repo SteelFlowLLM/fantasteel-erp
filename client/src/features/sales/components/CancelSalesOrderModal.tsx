@@ -20,7 +20,7 @@ import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 const CANCEL_REASON_MAX = 200;
 
-/** 취소·연결 해제될 생산계획에 연결된 구매요청(purchase_requisition_item.production_plan_id)과 발주. 표시만 한다 */
+/** 취소·연결 해제될 생산계획에 연결된 구매요청(purchase_requisition.production_plan_id)과 발주. 표시만 한다 */
 function PurchaseImpact({ salesOrderId }: { salesOrderId: number }) {
   const impact = useSalesOrderCancelPurchaseImpact(salesOrderId);
   return (
@@ -38,7 +38,7 @@ function PurchaseImpact({ salesOrderId }: { salesOrderId: number }) {
                     <span className="font-mono text-xs font-medium">{line.purchaseRequisitionNo}</span>
                     <RequisitionStatusBadge status={line.purchaseRequisitionStatus} />
                     <span className="text-ink-2">
-                      {line.itemName} {fmtTon(line.requiredTon)}
+                      {line.itemName} {fmtTon(line.requestedTon)}
                     </span>
                     <span className="text-cap text-ink-3">
                       · 생산계획 <span className="font-mono">{line.productionPlanNo}</span> {line.planEffect === 'CANCEL' ? '취소' : '수주 연결 해제'}

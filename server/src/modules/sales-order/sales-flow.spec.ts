@@ -337,6 +337,48 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02)', () => {
     await shipments.create(sales, { customerId: customerA, items: [{ salesOrderItemId: requestedItem.id, requestQty: 1 }] });
     expect(await codeOf(salesOrders.cancel(sales, requested.salesOrderId, { reason: '취소' }))).toBe('SO-004');
   });
+
+  it('취소 창의 구매 진행 영향: 취소될 계획·연결이 풀릴 계획의 구매요청과 발주만, 구매요청 번호 순. 취소 뒤에는 없다 (BP-PRD-01)', async () => {
+    const itemIds = [await nextSlabItemId(), await nextSlabItemId(), await nextSlabItemId()];
+    const created = await salesOrders.create(sales, { customerId: customerA, items: itemIds.map((itemId) => ({ itemId, orderedQty: 2, dueDate: DUE })) });
+    const [planned, inProgress, completed] = await Promise.all(created.items.map((i) => prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: i.productionPlanNo ?? '' } })));
+    await prisma.productionPlan.update({ where: { id: inProgress.id }, data: { productionPlanStatus: 'IN_PROGRESS' } });
+    await prisma.productionPlan.update({ where: { id: completed.id }, data: { productionPlanStatus: 'COMPLETED' } });
+    // 구매 쪽 상태는 구매 테스트가 확인하므로 구매요청·발주를 DB에 직접 넣는다
+    const ore = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } });
+    const requester = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } });
+    const requisition = (no: string, productionPlanId: number, purchaseRequisitionStatus: string) =>
+      prisma.purchaseRequisition.create({ data: { purchaseRequisitionNo: no, itemId: ore.id, requestedTon: '444.444', desiredReceiptDate: new Date(`${DUE}T00:00:00Z`), requesterId: requester.id, productionPlanId, purchaseRequisitionStatus } });
+    const ordered = await requisition('T-PR-IMPACT-1', inProgress.id, 'ORDERED');
+    const waiting = await requisition('T-PR-IMPACT-2', planned.id, 'WAITING_APPROVAL');
+    await requisition('T-PR-IMPACT-3', completed.id, 'ORDERED');
+    const purchaseOrder = await prisma.purchaseOrder.create({
+      data: { purchaseOrderNo: 'T-PO-IMPACT-1', supplierId: ore.defaultSupplierId ?? 0, purchaseOrderItems: { create: [{ purchaseRequisitionId: ordered.id, itemId: ore.id, orderedTon: '444.444' }] } },
+    });
+
+    expect(await salesOrders.cancelPurchaseImpact(created.salesOrderId)).toEqual([
+      {
+        purchaseRequisitionId: ordered.id,
+        purchaseRequisitionNo: 'T-PR-IMPACT-1',
+        purchaseRequisitionStatus: 'ORDERED',
+        itemName: ore.itemName,
+        requestedTon: '444.444',
+        productionPlanId: inProgress.id,
+        productionPlanNo: inProgress.productionPlanNo,
+        planEffect: 'UNLINK',
+        purchaseOrderId: purchaseOrder.id,
+        purchaseOrderNo: 'T-PO-IMPACT-1',
+        purchaseOrderStatus: 'CONFIRMED',
+      },
+      expect.objectContaining({ purchaseRequisitionId: waiting.id, purchaseRequisitionStatus: 'WAITING_APPROVAL', productionPlanId: planned.id, planEffect: 'CANCEL', purchaseOrderId: null, purchaseOrderNo: null, purchaseOrderStatus: null }),
+    ]);
+    expect(await codeOf(salesOrders.cancelPurchaseImpact(999_999))).toBe('COM-003');
+
+    // 수주 취소는 구매요청·발주를 바꾸지 않는다
+    await salesOrders.cancel(sales, created.salesOrderId, { reason: '고객 취소' });
+    expect(await salesOrders.cancelPurchaseImpact(created.salesOrderId)).toEqual([]);
+    expect(await prisma.purchaseRequisition.findUniqueOrThrow({ where: { id: waiting.id } })).toMatchObject({ purchaseRequisitionStatus: 'WAITING_APPROVAL', productionPlanId: planned.id });
+  });
 });
 
 describe('출하요청 (REQ-SHP-001)', () => {

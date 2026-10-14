@@ -13,7 +13,10 @@ import {
   type ItemType,
   type PageResult,
   type ProductionPlanStatus,
+  type PurchaseOrderStatus,
+  type PurchaseRequisitionStatus,
   type SalesOrderCancelBlock,
+  type SalesOrderCancelPurchaseImpactLine,
   type SalesOrderCancellation,
   type SalesOrderDetail,
   type SalesOrderFulfillment,
@@ -30,7 +33,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
-import { ProductionService } from '../production/production.service';
+import { ProductionService, salesOrderCancelEffectOf } from '../production/production.service';
 import type { CancelSalesOrderDto, CreateSalesOrderDto, ListSalesOrdersQuery } from './dto/sales-order.dto';
 import { calcItemFulfillment, planRemainingTargetQty, progressOf, salesOrderStatusOf } from './fulfillment.calculator';
 import { IdempotencyStore } from './idempotency.store';
@@ -152,6 +155,36 @@ export class SalesOrderService {
   async reservations(id: number): Promise<SalesOrderReservationView[]> {
     const row = await this.mustFind(this.prisma, id);
     return this.inventory.listReservations(this.prisma, row.salesOrderItems.map((i) => i.id));
+  }
+
+  /**
+   * 수주 취소 창의 구매 진행 영향 (BP-PRD-01 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"): 지금 취소하면 취소·연결 해제될
+   * 생산계획에 연결된 구매요청과 발주. 수주 취소는 구매요청·발주를 바꾸지 않아 보여 주기만 한다. 구매요청 번호 순.
+   */
+  async cancelPurchaseImpact(id: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
+    const row = await this.mustFind(this.prisma, id);
+    const requisitions = await this.repository.findRequisitionsOfPlans(this.prisma, row.salesOrderItems.map((i) => i.id));
+    return requisitions.flatMap((pr) => {
+      const plan = pr.productionPlan;
+      const planEffect = plan ? salesOrderCancelEffectOf(plan.productionPlanStatus) : null;
+      if (!plan || !planEffect) return [];
+      const purchaseOrder = pr.purchaseOrderItem?.purchaseOrder ?? null;
+      return [
+        {
+          purchaseRequisitionId: pr.id,
+          purchaseRequisitionNo: pr.purchaseRequisitionNo,
+          purchaseRequisitionStatus: pr.purchaseRequisitionStatus as PurchaseRequisitionStatus,
+          itemName: pr.item.itemName,
+          requestedTon: pr.requestedTon.toFixed(3),
+          productionPlanId: plan.id,
+          productionPlanNo: plan.productionPlanNo,
+          planEffect,
+          purchaseOrderId: purchaseOrder?.id ?? null,
+          purchaseOrderNo: purchaseOrder?.purchaseOrderNo ?? null,
+          purchaseOrderStatus: (purchaseOrder?.purchaseOrderStatus ?? null) as PurchaseOrderStatus | null,
+        },
+      ];
+    });
   }
 
   /** 진행 중 수주의 충족 현황 (대시보드 수주 충족 현황·공정 흐름 현황이 쓴다). 취소 품목은 뺀다 */
