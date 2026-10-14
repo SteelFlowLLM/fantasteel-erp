@@ -685,6 +685,7 @@
 --fp-ink:var(--color-ink,#121820);--fp-ink-2:var(--color-ink-2,#3f4a57);--fp-ink-3:var(--color-ink-3,#5e6977);--fp-surface:var(--color-surface,#fff);--fp-surface-2:var(--color-surface-2,#f7f8fa);--fp-surface-3:var(--color-surface-3,#eef1f4);--fp-line:var(--color-line,#dde2e7);--fp-line-strong:var(--color-line-strong,#c3cbd4);--fp-brand:var(--color-brand,#173a5e);--fp-brand-hover:var(--color-brand-hover,#0f2b47);--fp-brand-tint:var(--color-brand-tint,#e7eef5);--fp-run:var(--color-run,#1f5fcc);--fp-ok:var(--color-ok,#17794a);--fp-ok-bg:var(--color-ok-bg,#e4f3ea);
 --fp-accent:#e07028;--fp-accent-ink:#9a4a17;--fp-accent-soft:#fbe9dc;--fp-accent-shadow:#f2c09c}
 .fp-root *,.fp-root *::before,.fp-root *::after{box-sizing:border-box}
+.fp-bubble,.fp-hint,.fp-chat,.fp-menu{zoom:var(--fp-uiz,1)}
 .fp-root button,.fp-root input{font:inherit;color:inherit;margin:0;letter-spacing:normal}
 .fp-root :focus-visible{outline:2px solid var(--fp-run);outline-offset:2px}
 .fp-sr{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
@@ -718,7 +719,7 @@
 .fp-suit-flash{position:absolute;left:0;top:0;z-index:3;pointer-events:none;border-radius:40%;background:#fff;opacity:0}
 .fp-visor{position:absolute;left:0;top:0;z-index:3;pointer-events:none;border-radius:2px;background:#c9f8ff;box-shadow:0 0 6px 3px #3fe0ff;opacity:0}
 .fp-flame{position:absolute;left:0;top:0;z-index:2;display:none;pointer-events:none;transform-origin:50% 0;border-radius:0 0 45% 45%;background:linear-gradient(to bottom,#fffbe6 0 20%,#ffe066 20% 42%,#ff9a2e 42% 70%,#e2412b 70%)}
-.fp-bubble{position:absolute;left:0;top:0;z-index:4;display:none;pointer-events:auto;width:max-content;max-width:min(252px,calc(100vw - 16px));min-width:92px;padding:8px 12px 9px;background:var(--fp-surface);color:var(--fp-ink);border:2px solid var(--fp-accent);border-radius:10px;box-shadow:3px 3px 0 var(--fp-accent-shadow);font-size:13px;line-height:19px;cursor:default}
+.fp-bubble{position:absolute;left:0;top:0;z-index:4;display:none;pointer-events:auto;width:max-content;max-width:min(252px,calc(100vw / var(--fp-uiz,1) - 16px));min-width:92px;padding:8px 12px 9px;background:var(--fp-surface);color:var(--fp-ink);border:2px solid var(--fp-accent);border-radius:10px;box-shadow:3px 3px 0 var(--fp-accent-shadow);font-size:13px;line-height:19px;cursor:default}
 .fp-bubble::before,.fp-bubble::after{content:'';position:absolute;width:0;height:0;border-style:solid}
 .fp-bubble[data-side=top]::before{left:calc(var(--fp-tail-x,50%) - 8px);bottom:-11px;border-width:10px 8px 0;border-color:var(--fp-accent) transparent transparent}
 .fp-bubble[data-side=top]::after{left:calc(var(--fp-tail-x,50%) - 5px);bottom:-6px;border-width:7px 5px 0;border-color:var(--fp-surface) transparent transparent}
@@ -735,7 +736,7 @@
 .fp-b-text{position:relative;margin:0;word-break:keep-all;overflow-wrap:anywhere}
 .fp-b-ghost{visibility:hidden}
 .fp-b-typed{position:absolute;left:0;top:0;right:0}
-.fp-bubble--data{max-width:min(300px,calc(100vw - 16px))}
+.fp-bubble--data{max-width:min(300px,calc(100vw / var(--fp-uiz,1) - 16px))}
 .fp-b-fields{display:grid;grid-template-columns:auto minmax(0,1fr);gap:1px 8px;margin:3px 0 4px;font-size:12px;line-height:17px}
 .fp-b-fields dt{margin:0;color:var(--fp-ink-3);white-space:nowrap}
 .fp-b-fields dd{margin:0;color:var(--fp-ink);font-weight:600;word-break:keep-all;overflow-wrap:anywhere}
@@ -756,7 +757,7 @@
 .fp-hint::after{content:'';position:absolute;top:50%;margin-top:-5px;border:5px solid transparent}
 .fp-hint[data-side=left]::after{right:-10px;border-left-color:var(--fp-ink)}
 .fp-hint[data-side=right]::after{left:-10px;border-right-color:var(--fp-ink)}
-.fp-chat{position:absolute;left:0;top:0;z-index:5;pointer-events:auto;width:300px;max-height:calc(100vh - 16px);display:flex;flex-direction:column;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:8px;box-shadow:4px 4px 0 rgba(18,24,32,.16),0 12px 32px rgba(18,24,32,.14);overflow:hidden}
+.fp-chat{position:absolute;left:0;top:0;z-index:5;pointer-events:auto;width:300px;max-height:calc(100vh / var(--fp-uiz,1) - 16px);display:flex;flex-direction:column;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:8px;box-shadow:4px 4px 0 rgba(18,24,32,.16),0 12px 32px rgba(18,24,32,.14);overflow:hidden}
 .fp-chat-head{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 8px;background:var(--fp-surface-2);border-bottom:2px solid var(--fp-line)}
 .fp-chat-ava{flex:none;width:34px;height:34px;border-radius:6px;background:var(--fp-accent-soft);overflow:hidden;position:relative}
 .fp-chat-ava canvas{position:absolute;image-rendering:pixelated}
@@ -949,6 +950,29 @@
     const tabTip = h('div', { class: 'fp-tab-tip', 'aria-hidden': 'true' });
     root.append(shadowEl, petEl, bubbleEl, hintEl, tabEl, tabTip);
     (o.container || doc.body).appendChild(root);
+
+    // 앱이 <html>에 zoom을 걸면(글자 크기 크게·아주 크게) 그 안에서 getBoundingClientRect·clientX 같은 화면 좌표를 px로 다시 쓰면 한 번 더 확대된다.
+    // 그래서 펫 칸은 반대 비율로 되돌려 화면 좌표와 칸 안 px를 같게 두고, 글자가 있는 말풍선·안내·대화창·메뉴만 그 비율로 다시 키운다(--fp-uiz).
+    // 다시 키운 칸은 offsetWidth가 키우기 전 값이고 left·top도 그 비율만큼 커지므로, 화면 px로 잴 때는 uiz()를 곱하고 놓을 때는 나눈다.
+    let ctxZoom = 1;
+    const uiz = () => ctxZoom;
+    function readCtxZoom() {
+      let z = 1;
+      for (let n = root.parentElement; n; n = n.parentElement) {
+        const v = Number.parseFloat(global.getComputedStyle(n).zoom);
+        if (Number.isFinite(v) && v > 0) z *= v;
+      }
+      return z;
+    }
+    function syncZoom() {
+      const z = readCtxZoom();
+      if (Math.abs(z - ctxZoom) < 1e-4) return false;
+      ctxZoom = z;
+      root.style.zoom = z === 1 ? '' : String(1 / z);
+      root.style.setProperty('--fp-uiz', String(z));
+      return true;
+    }
+    syncZoom();
 
     const player = new Player(canvas);
     const tabPlayer = new Player(tabCanvas);
@@ -2497,8 +2521,7 @@
         }
         bubbleEl.style.display = 'block';
         bubble.visible = true;
-        bubble.w = bubbleEl.offsetWidth;
-        bubble.h = bubbleEl.offsetHeight;
+        measureBubble();
         positionBubble();
         if (!reduced && bubbleEl.animate) bubbleEl.animate([{ transform: 'scale(.86)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 160, easing: 'cubic-bezier(.3,1.4,.6,1)' });
         const anim = op.anim || 'talk';
@@ -2545,7 +2568,7 @@
     function anchorSpot(bw, bh) {
       const el = bubble.anchor;
       if (!el || !el.isConnected) return null;
-      const r = el.getBoundingClientRect();
+      const r = visibleRect(el);
       if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > H()) return null;
       const box = petBox();
       const gapX = Math.max(0, r.left - box.right, box.left - r.right);
@@ -2568,6 +2591,15 @@
       const x = clamp(Math.min(ax - 28, r.left + 24), 8, Math.max(8, vw - bw - 8));
       return { x, y, side, tx: clamp(ax - x, 14, bw - 14) };
     }
+    /** 말풍선 크기를 화면 px로 잰다 (말풍선은 글자 크기 비율로 다시 키운 칸) */
+    function measureBubble() {
+      bubble.w = bubbleEl.offsetWidth * uiz();
+      bubble.h = bubbleEl.offsetHeight * uiz();
+    }
+    /** 화면 px 값을 다시 키운 칸(말풍선·안내·대화창·메뉴) 안의 px 문자열로 */
+    function uiPx(v) {
+      return `${Math.round(v / uiz())}px`;
+    }
     function positionBubble() {
       if (!bubble.visible) return;
       const vw = W();
@@ -2577,10 +2609,10 @@
       const near = anchorSpot(bw, bh);
       if (near) {
         if (bubbleEl.dataset.side !== near.side) bubbleEl.dataset.side = near.side;
-        bubbleEl.style.left = `${Math.round(near.x)}px`;
-        bubbleEl.style.top = `${Math.round(near.y)}px`;
-        bubbleEl.style.setProperty('--fp-tail-x', `${Math.round(near.tx)}px`);
-        bubbleEl.style.transformOrigin = `${Math.round(near.tx)}px ${near.side === 'bottom' ? '0' : '100%'}`;
+        bubbleEl.style.left = uiPx(near.x);
+        bubbleEl.style.top = uiPx(near.y);
+        bubbleEl.style.setProperty('--fp-tail-x', uiPx(near.tx));
+        bubbleEl.style.transformOrigin = `${uiPx(near.tx)} ${near.side === 'bottom' ? '0' : '100%'}`;
         return;
       }
       const box = petBox();
@@ -2602,16 +2634,16 @@
         y = clamp(box.top, 8, Math.max(8, vh - bh - 8));
       }
       if (bubbleEl.dataset.side !== side) bubbleEl.dataset.side = side;
-      bubbleEl.style.left = `${Math.round(x)}px`;
-      bubbleEl.style.top = `${Math.round(y)}px`;
+      bubbleEl.style.left = uiPx(x);
+      bubbleEl.style.top = uiPx(y);
       if (side === 'top') {
         const tx = clamp(cx - x, 14, bw - 14);
-        bubbleEl.style.setProperty('--fp-tail-x', `${Math.round(tx)}px`);
-        bubbleEl.style.transformOrigin = `${Math.round(tx)}px 100%`;
+        bubbleEl.style.setProperty('--fp-tail-x', uiPx(tx));
+        bubbleEl.style.transformOrigin = `${uiPx(tx)} 100%`;
       } else {
         const ty = clamp((box.top + box.bottom) / 2 - y - 8, 8, Math.max(8, bh - 24));
-        bubbleEl.style.setProperty('--fp-tail-y', `${Math.round(ty)}px`);
-        bubbleEl.style.transformOrigin = side === 'left' ? `100% ${Math.round(ty)}px` : `0 ${Math.round(ty)}px`;
+        bubbleEl.style.setProperty('--fp-tail-y', uiPx(ty));
+        bubbleEl.style.transformOrigin = side === 'left' ? `100% ${uiPx(ty)}` : `0 ${uiPx(ty)}`;
       }
     }
     function react(kind) {
@@ -2639,14 +2671,14 @@
         return;
       }
       const box = petBox();
-      const hw = hintEl.offsetWidth;
-      const hh = hintEl.offsetHeight;
+      const hw = hintEl.offsetWidth * uiz();
+      const hh = hintEl.offsetHeight * uiz();
       const leftSide = (box.left + box.right) / 2 > W() / 2;
       const x = leftSide ? box.left - 12 - hw : box.right + 12;
       const y = clamp(box.top + (box.bottom - box.top) * 0.28 - hh / 2, 8, H() - hh - 8);
       hintEl.dataset.side = leftSide ? 'left' : 'right';
-      hintEl.style.left = `${Math.round(clamp(x, 8, W() - hw - 8))}px`;
-      hintEl.style.top = `${Math.round(y)}px`;
+      hintEl.style.left = uiPx(clamp(x, 8, W() - hw - 8));
+      hintEl.style.top = uiPx(y);
     }
 
     // ── 강조 (반짝) ──
@@ -2654,14 +2686,49 @@
     function flash(el, ms, steady) {
       const f = h('div', { class: `fp-flash${steady ? ' fp-flash--steady' : ''}` });
       root.appendChild(f);
-      const item = { el, f, until: steady ? Infinity : now() + (ms || 1900) };
+      const item = { el, f, clips: clipBoxesOf(el), until: steady ? Infinity : now() + (ms || 1900) };
       flashes.push(item);
       placeFlash(item);
       return item;
     }
+    /** 요소를 잘라 보이게 하는 조상(overflow가 visible이 아닌 스크롤 칸 등). 화면에 고정된 칸에서 멈춘다 */
+    function clipBoxesOf(el) {
+      const out = [];
+      for (let n = el.parentElement; n && n !== doc.body && n !== doc.documentElement; n = n.parentElement) {
+        const cs = global.getComputedStyle(n);
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') out.push(n);
+        if (cs.position === 'fixed') break;
+      }
+      return out;
+    }
+    /**
+     * 요소에서 지금 화면에 보이는 부분. 스크롤 칸 안에서 잘렸거나 화면 밖으로 나간 부분까지 테두리를 그리면
+     * 테두리가 보이는 칸과 어긋나므로(긴 필터 칸, 글자 크기를 키워 화면을 넘친 칸) 잘린 만큼 줄인다.
+     */
+    function visibleRect(el, clips) {
+      const r = el.getBoundingClientRect();
+      let left = r.left;
+      let top = r.top;
+      let right = r.right;
+      let bottom = r.bottom;
+      for (const c of clips || clipBoxesOf(el)) {
+        if (!c.isConnected) continue;
+        const cr = c.getBoundingClientRect();
+        left = Math.max(left, cr.left);
+        top = Math.max(top, cr.top);
+        right = Math.min(right, cr.right);
+        bottom = Math.min(bottom, cr.bottom);
+      }
+      left = Math.max(left, 0);
+      top = Math.max(top, 0);
+      right = Math.min(right, W());
+      bottom = Math.min(bottom, H());
+      return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    }
     function placeFlash(it) {
-      const r = it.el.getBoundingClientRect();
+      const r = visibleRect(it.el, it.clips);
       const pad = 3;
+      it.f.style.display = r.width > 0 && r.height > 0 ? '' : 'none';
       it.f.style.left = `${r.left - pad}px`;
       it.f.style.top = `${r.top - pad}px`;
       it.f.style.width = `${r.width + pad * 2}px`;
@@ -4511,10 +4578,10 @@
       chat.el = el;
       addMsg('pet', `${pick(guide.greeting) || '안녕하세요!'}${guide.real ? '' : ' (설명 파일이 없어 간단한 안내만 해요)'}`);
       renderChips(defaultChips());
-      chat.h = el.offsetHeight;
+      chat.h = el.offsetHeight * uiz();
       if (typeof ResizeObserver === 'function') {
         chat.ro = new ResizeObserver(() => {
-          if (chat.el) chat.h = chat.el.offsetHeight;
+          if (chat.el) chat.h = chat.el.offsetHeight * uiz();
         });
         chat.ro.observe(el);
       }
@@ -4550,8 +4617,8 @@
       if (!chat.el) return;
       const vw = W();
       const vh = H();
-      const cw = Math.min(300, vw - 16);
-      if (chat.el.style.width !== `${cw}px`) chat.el.style.width = `${cw}px`;
+      const cw = Math.min(300 * uiz(), vw - 16);
+      if (chat.el.style.width !== uiPx(cw)) chat.el.style.width = uiPx(cw);
       const ch = Math.min(chat.h || 360, vh - 16);
       const box = petBox();
       const preferLeft = (box.left + box.right) / 2 > vw / 2;
@@ -4569,8 +4636,8 @@
         y = box.top - 10 - ch;
         if (y < 8) y = box.bottom + 10 + ch <= vh - 8 ? box.bottom + 10 : 8;
       }
-      chat.el.style.left = `${Math.round(x)}px`;
-      chat.el.style.top = `${Math.round(y)}px`;
+      chat.el.style.left = uiPx(x);
+      chat.el.style.top = uiPx(y);
     }
     function placeAvatar(cv, boxPx, mul) {
       const p = S.pack;
@@ -4681,14 +4748,14 @@
       });
       root.appendChild(m);
       S.menu = m;
-      const mw = m.offsetWidth;
-      const mh = m.offsetHeight;
+      const mw = m.offsetWidth * uiz();
+      const mh = m.offsetHeight * uiz();
       let mx = x;
       let my = y;
       if (mx + mw > W() - 8) mx = x - mw;
       if (my + mh > H() - 8) my = y - mh;
-      m.style.left = `${Math.round(clamp(mx, 8, Math.max(8, W() - mw - 8)))}px`;
-      m.style.top = `${Math.round(clamp(my, 8, Math.max(8, H() - mh - 8)))}px`;
+      m.style.left = uiPx(clamp(mx, 8, Math.max(8, W() - mw - 8)));
+      m.style.top = uiPx(clamp(my, 8, Math.max(8, H() - mh - 8)));
       if (!reduced && m.animate) m.animate([{ transform: 'scale(.96)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 110, easing: 'ease-out' });
       const first = m.querySelector('button');
       if (first) first.focus({ preventScroll: true });
@@ -5600,6 +5667,24 @@
     on(global, 'resize', () => {
       if (S.mode === 'hidden') layoutTab();
     });
+    // 글자 크기를 바꾸면 <html>의 zoom이 바뀐다: 펫 칸 비율을 다시 맞추고 떠 있는 말풍선·대화창을 다시 놓는다
+    if (typeof MutationObserver === 'function') {
+      const zoomWatch = new MutationObserver(() => {
+        if (!syncZoom()) return;
+        if (bubble.visible) {
+          measureBubble();
+          positionBubble();
+        }
+        if (chat.el) {
+          chat.h = chat.el.offsetHeight * uiz();
+          positionChat();
+        }
+        if (S.menu) closeMenu(true);
+      });
+      zoomWatch.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-font-size', 'style', 'class'] });
+      if (doc.body) zoomWatch.observe(doc.body, { attributes: true, attributeFilter: ['style', 'class'] });
+      offs.push(() => zoomWatch.disconnect());
+    }
     // 기능 설명: data-pet-target 위에 0.6초 머물면.
     // 말풍선이 사라지거나 펫이 비켜서 커서 밑 요소가 바뀐 것은 '올린' 것이 아니므로, 실제로 움직였을 때만 센다.
     function armHover() {
@@ -6117,6 +6202,21 @@
         const el = findTarget(name.slice(5));
         const sp = el ? standSpotFor(el) : null;
         return sp ? { surface: sp.c.type === 'floor' ? 'floor' : perchKey(sp.c.el) || 'perch', x: Math.round(sp.x), cost: Math.round(sp.cost) } : null;
+      }
+      if (name === 'frame') {
+        // frame — 지금 강조 중인 요소·강조 테두리·말풍선의 화면 위치 (글자 크기별로 테두리가 칸에 맞는지 점검)
+        const rr = (r) => ({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+        const live = (it) => it && it.el && it.el.isConnected && it.f && it.f.isConnected;
+        return {
+          zoom: uiz(),
+          viewport: { w: W(), h: H() },
+          frames: flashes.filter(live).map((it) => {
+            const v = visibleRect(it.el, it.clips);
+            return { target: it.el.getAttribute('data-pet-target'), steady: it.until === Infinity, el: rr(it.el.getBoundingClientRect()), visible: rr(v), frame: rr(it.f.getBoundingClientRect()) };
+          }),
+          bubble: bubble.visible ? { ...rr(bubbleEl.getBoundingClientRect()), step: (bubbleEl.querySelector('.fp-b-step') || {}).textContent || null, title: (bubbleEl.querySelector('.fp-b-title') || {}).textContent || null } : null,
+          tour: S.tour ? S.tour.kind : null,
+        };
       }
       switch (name) {
         case 'item': {
