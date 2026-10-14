@@ -24,14 +24,14 @@ export interface AiAssistantMessageInput {
   history?: AiAssistantTurn[];
 }
 
-/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 조회 데이터. 업무 매뉴얼·사례 번호는 다음 단계 */
-export type AiAssistantSourceKind = 'GLOSSARY' | 'DATA';
+/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 조회 데이터. 업무 매뉴얼·사례 번호는 다음 단계 */
+export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'DATA';
 
 export interface AiAssistantSource {
   kind: AiAssistantSourceKind;
-  /** 용어 사전이면 용어 ID (TRM-056), 조회 데이터면 도구 이름 (get_inventory) */
+  /** 용어 사전이면 용어 ID (TRM-056), 업무 프로세스면 업무 ID (BP-SO-01), 조회 데이터면 도구 이름 (get_inventory) */
   id: string;
-  /** 용어 사전이면 한글명 (예약), 조회 데이터면 조회 대상 (재고 · SS275) */
+  /** 용어 사전이면 한글명 (예약), 업무 프로세스면 업무 이름 (수주 등록·예약·계획), 조회 데이터면 조회 대상 (재고 · SS275) */
   label: string;
 }
 

@@ -14,6 +14,7 @@ import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
+import { findProcessSteps } from './knowledge/process.search';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox } from './tools/assistant-toolbox';
 
@@ -52,12 +53,14 @@ export class AiAssistantService {
 
     const history = recentHistory(input.history ?? []);
     const references = this.referencesFor(input.question, history);
+    const processSteps = findProcessSteps(input.question);
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
       today: seoulToday(),
       screen: input.screen ?? null,
       references,
+      processSteps,
       history,
       question: input.question,
     });
@@ -76,7 +79,7 @@ export class AiAssistantService {
       reply = await this.call(settings, model, messages, round < MAX_TOOL_ROUNDS ? tools : []);
     }
 
-    const parsed = parseAssistantAnswer(reply.content, references);
+    const parsed = parseAssistantAnswer(reply.content, references, processSteps);
     return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started };
   }
 

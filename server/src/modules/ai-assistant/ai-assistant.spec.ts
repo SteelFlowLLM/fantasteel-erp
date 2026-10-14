@@ -9,6 +9,7 @@ import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
 import { GLOSSARY_SEARCH_LIMIT, searchGlossary } from './knowledge/glossary.search';
+import { findProcessSteps } from './knowledge/process.search';
 
 const termOf = (id: string) => {
   const term = GLOSSARY_TERMS.find((t) => t.id === id);
@@ -217,5 +218,34 @@ describe('AiAssistantService', () => {
     expect(view.roleCode).toBe('QUALITY');
     expect(view.roleQuestions).toContain('비슷한 사례 찾아줘');
     expect(view.firstTimeQuestions).toContain('예약과 배정은 뭐가 달라?');
+  });
+});
+
+describe('업무 프로세스 자료 (수주~출하 순서)', () => {
+  it('순서·흐름을 묻는 질문에만 업무 프로세스 표를 넘긴다', () => {
+    expect(findProcessSteps('수주부터 출하까지 순서 알려줘').map((s) => s.id)).toEqual(expect.arrayContaining(['BP-SO-01', 'BP-SHP-01']));
+    expect(findProcessSteps('예약이 뭐야?')).toEqual([]);
+  });
+
+  it('프롬프트에 업무 프로세스 자료와 업무 ID 인용 규칙을 넣는다', () => {
+    const steps = findProcessSteps('순서 알려줘');
+    const [system] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], processSteps: steps, history: [], question: '순서 알려줘' });
+    expect(system.content).toContain('[업무 프로세스 자료]');
+    expect(system.content).toContain('[BP-SO-01] 수주 등록·예약·계획');
+    expect(system.content).toContain('그 업무 ID를 붙이고');
+    expect(system.content).toContain('출고 전환');
+    expect(system.content).not.toMatch(/→ CONVERTED/);
+    const [withoutSteps] = buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-13', screen: null, references: [], history: [], question: '예약이 뭐야?' });
+    expect(withoutSteps.content).not.toContain('[BP-SO-01] 수주 등록·예약·계획');
+  });
+
+  it('[BP-…] 표시를 지우고 넘긴 자료 안의 업무만 PROCESS 출처로 둔다', () => {
+    const steps = findProcessSteps('순서');
+    const parsed = parseAssistantAnswer('먼저 수주를 등록해요 [BP-SO-01]. 그다음 출하해요 [BP-SHP-01, BP-XXX-99].', [], steps);
+    expect(parsed.answer).toBe('먼저 수주를 등록해요. 그다음 출하해요.');
+    expect(parsed.sources).toEqual([
+      { kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' },
+      { kind: 'PROCESS', id: 'BP-SHP-01', label: '출하·출고·밀시트' },
+    ]);
   });
 });
