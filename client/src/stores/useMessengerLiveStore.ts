@@ -1,6 +1,6 @@
 // 메신저 실시간 상태: 접속 중인 사원, 방별 입력 중인 사원. 서버 데이터가 아니라 소켓으로만 오는 잠깐의 상태라 스토어에 둔다.
 import { create } from 'zustand';
-import { TYPING_SHOW_MS } from '@fantasteel/shared';
+import { AI_TYPING_EMPLOYEE_ID, TYPING_SHOW_MS } from '@fantasteel/shared';
 
 export interface TypingMember {
   employeeId: number;
@@ -67,7 +67,9 @@ export const useMessengerLiveStore = create<MessengerLiveState>((set) => ({
 /** 방에서 입력 중인 사람 문구. 없으면 null */
 export function typingText(members: readonly TypingMember[]): string | null {
   if (members.length === 0) return null;
-  if (members.length === 1) return `${members[0].employeeName}님이 입력 중…`;
-  if (members.length === 2) return `${members[0].employeeName}님, ${members[1].employeeName}님이 입력 중…`;
-  return `${members[0].employeeName}님 외 ${members.length - 1}명이 입력 중…`;
+  // AI는 '님'을 붙이지 않는다 (@AI 답을 만드는 중, REQ-AST-002)
+  const nameOf = (member: TypingMember) => (member.employeeId === AI_TYPING_EMPLOYEE_ID ? member.employeeName : `${member.employeeName}님`);
+  if (members.length === 1) return members[0].employeeId === AI_TYPING_EMPLOYEE_ID ? `${members[0].employeeName}가 답을 쓰는 중…` : `${nameOf(members[0])}이 입력 중…`;
+  if (members.length === 2) return `${nameOf(members[0])}, ${nameOf(members[1])}${members[1].employeeId === AI_TYPING_EMPLOYEE_ID ? '가' : '이'} 입력 중…`;
+  return `${nameOf(members[0])} 외 ${members.length - 1}명이 입력 중…`;
 }
