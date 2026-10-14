@@ -47,7 +47,8 @@ export function UserMenu() {
         onClick={() => popover.setOpen(!popover.open)}
         className="ml-2 flex h-10 items-center gap-2 border-l border-line pr-2 pl-3 text-left hover:bg-surface-2"
       >
-        <span className="flex flex-col leading-tight">
+        {/* 글자 크기를 키우면 상단 바가 좁아져 이름이 한 자씩 끊기므로 줄바꿈하지 않는다 (옆 검색칸이 줄어든다) */}
+        <span className="flex flex-col leading-tight whitespace-nowrap">
           <span className="flex items-center gap-1.5">
             <b className="text-sm font-semibold">{me.employeeName}</b>
             {isHead ? (
