@@ -50,8 +50,9 @@ export function GoodsReceiptScreen() {
   const today = todayStr();
   const canReceive = useCanUse(PERMISSION.GOODS_RECEIPT_CONFIRM);
   const canSeeOrders = useCanView(PERMISSION.PURCHASE_ORDER_CONFIRM);
-  const lines = useReceiptLines();
-  const receipts = useGoodsReceiptList();
+  // 입고예정은 발주 목록(GET /purchase-orders, 발주 확정 조회 권한)에서 만든다. 입고만 조회하는 역할(물류)은 부르면 403이라 부르지 않는다
+  const lines = useReceiptLines(canSeeOrders);
+  const receipts = useGoodsReceiptList(true, canSeeOrders);
   const [tab, setTab] = useState<LineTab>('open');
   const [keyword, setKeyword] = useState('');
 
@@ -74,66 +75,74 @@ export function GoodsReceiptScreen() {
           <>
             <div className="flex items-center gap-2">
               <b className="text-base font-semibold">입고예정</b>
-              <span className="text-xs text-ink-3">{openLines.length}건</span>
+              {canSeeOrders ? <span className="text-xs text-ink-3">{openLines.length}건</span> : null}
               {canSeeOrders ? (
                 <ButtonLink href="/purchase-orders" size="sm" icon="building" className="ml-auto">
                   발주
                 </ButtonLink>
               ) : null}
             </div>
-            <Input leadingIcon="search" placeholder="발주번호·원료·공급업체 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label="입고예정 검색" />
-            <div className="flex gap-1.5">
-              <Chip on={tab === 'open'} onClick={() => setTab('open')} data-pet-term="입고예정">
-                입고예정 <b>{openLines.length}</b>
-              </Chip>
-              <Chip on={tab === 'all'} onClick={() => setTab('all')} data-pet-term="전체">
-                전체 <b>{allLines.length}</b>
-              </Chip>
-            </div>
+            {canSeeOrders ? (
+              <>
+                <Input leadingIcon="search" placeholder="발주번호·원료·공급업체 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label="입고예정 검색" />
+                <div className="flex gap-1.5">
+                  <Chip on={tab === 'open'} onClick={() => setTab('open')} data-pet-term="입고예정">
+                    입고예정 <b>{openLines.length}</b>
+                  </Chip>
+                  <Chip on={tab === 'all'} onClick={() => setTab('all')} data-pet-term="전체">
+                    전체 <b>{allLines.length}</b>
+                  </Chip>
+                </div>
+              </>
+            ) : null}
             {canReceive ? null : <ReadOnlyHint permissions={[PERMISSION.GOODS_RECEIPT_CONFIRM]} />}
           </>
         }
       >
-        <QueryBoundary query={lines} loadingLabel="입고예정을 불러오는 중…">
-          {() =>
-            shown.length === 0 ? (
-              <EmptyNote>{tab === 'open' ? '입고예정인 발주가 없어요' : '발주가 없어요'}</EmptyNote>
-            ) : (
-              <>
-                {shown.map((line) => {
-                  const overdue = isOverdue(line.expectedReceiptDate, today, line.remainingTon);
-                  return (
-                    <MasterItem
-                      key={line.purchaseOrderItemId}
-                      selected={line.purchaseOrderItemId === active?.purchaseOrderItemId}
-                      label={receiptRowLabel(line)}
-                      onClick={() => url.set({ item: line.purchaseOrderItemId, po: null })}
-                      petItem="purchaseOrderItem"
-                      petItemTitle={`${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? line.itemName}`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <b className="font-mono text-sm font-semibold">
-                          {line.purchaseOrderNo} <span className="text-cap font-medium text-ink-3">{line.purchaseRequisitionNo}</span>
-                        </b>
-                        <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
-                        <span data-pet-field="입고 예정일" className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>
-                          {line.expectedReceiptDate ? `입고 예정 ${fmtMD(line.expectedReceiptDate)}` : ''}
+        {canSeeOrders ? (
+          <QueryBoundary query={lines} loadingLabel="입고예정을 불러오는 중…">
+            {() =>
+              shown.length === 0 ? (
+                <EmptyNote>{tab === 'open' ? '입고예정인 발주가 없어요' : '발주가 없어요'}</EmptyNote>
+              ) : (
+                <>
+                  {shown.map((line) => {
+                    const overdue = isOverdue(line.expectedReceiptDate, today, line.remainingTon);
+                    return (
+                      <MasterItem
+                        key={line.purchaseOrderItemId}
+                        selected={line.purchaseOrderItemId === active?.purchaseOrderItemId}
+                        label={receiptRowLabel(line)}
+                        onClick={() => url.set({ item: line.purchaseOrderItemId, po: null })}
+                        petItem="purchaseOrderItem"
+                        petItemTitle={`${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? line.itemName}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <b className="font-mono text-sm font-semibold">
+                            {line.purchaseOrderNo} <span className="text-cap font-medium text-ink-3">{line.purchaseRequisitionNo}</span>
+                          </b>
+                          <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
+                          <span data-pet-field="입고 예정일" className={cn('ml-auto text-cap', overdue ? 'font-semibold text-danger' : 'text-ink-3')}>
+                            {line.expectedReceiptDate ? `입고 예정 ${fmtMD(line.expectedReceiptDate)}` : ''}
+                          </span>
                         </span>
-                      </span>
-                      <span data-pet-field="원료 · 공급업체" className="text-sm text-ink">
-                        {line.itemName} <span className="text-ink-3">· {line.supplierName}</span>
-                      </span>
-                      <span className="flex items-center gap-2 text-cap text-ink-3">
-                        <span data-pet-field="입고예정" className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
-                        <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={line.isFullyReceived ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
-                      </span>
-                    </MasterItem>
-                  );
-                })}
-              </>
-            )
-          }
-        </QueryBoundary>
+                        <span data-pet-field="원료 · 공급업체" className="text-sm text-ink">
+                          {line.itemName} <span className="text-ink-3">· {line.supplierName}</span>
+                        </span>
+                        <span className="flex items-center gap-2 text-cap text-ink-3">
+                          <span data-pet-field="입고예정" className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
+                          <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={line.isFullyReceived ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
+                        </span>
+                      </MasterItem>
+                    );
+                  })}
+                </>
+              )
+            }
+          </QueryBoundary>
+        ) : (
+          <EmptyNote>입고예정은 발주 조회 권한이 있어야 보여요 · 아래 최근 입고에서 입고 내역과 원료 LOT을 볼 수 있어요</EmptyNote>
+        )}
         <MasterGroupTitle title="최근 입고" />
         <QueryBoundary query={receipts} loadingLabel="입고 내역을 불러오는 중…">
           {(data) =>
@@ -155,7 +164,7 @@ export function GoodsReceiptScreen() {
                       </span>
                     </span>
                     <span data-pet-field="원료 · 공급업체 · 입고일">
-                      {receipt.itemName} · {receipt.supplierName} · {fmtDate(receipt.receivedDate)}
+                      {[receipt.itemName, receipt.supplierName, fmtDate(receipt.receivedDate)].filter(Boolean).join(' · ')}
                     </span>
                     {receipt.lotNo ? (
                       <Link className="font-mono text-run hover:underline" href={lotHref(receipt.lotNo)}>
@@ -180,6 +189,8 @@ export function GoodsReceiptScreen() {
             canSeeOrders={canSeeOrders}
             onPin={() => url.set({ item: active.purchaseOrderItemId, po: null })}
           />
+        ) : !canSeeOrders ? (
+          <StateView kind="empty" icon="box" title="입고 내역을 보는 화면이에요" text="입고예정·입고 확정은 구매 담당이 해요. 왼쪽 최근 입고에서 원료 LOT을 누르면 LOT 추적으로 볼 수 있어요" />
         ) : lines.data ? (
           <StateView
             kind="empty"

@@ -97,9 +97,12 @@ export const serverPurchaseOrderApi = {
 };
 
 export const serverGoodsReceiptApi = {
-  /** 입고 내역 (최근 것부터). 공급업체 이름은 발주 목록에서 채운다 */
-  list: async (): Promise<GoodsReceiptView[]> => {
-    const [receipts, orders] = await Promise.all([allReceipts(), orEmpty(allOrders())]);
+  /**
+   * 입고 내역 (최근 것부터). 공급업체 이름은 발주 목록에서 채운다.
+   * 발주 조회 권한이 없는 사원(물류)은 발주 목록을 부르지 않는다(403) — 공급업체 이름은 비어 있다
+   */
+  list: async (withSupplierNames = true): Promise<GoodsReceiptView[]> => {
+    const [receipts, orders] = await Promise.all([allReceipts(), withSupplierNames ? orEmpty(allOrders()) : []]);
     const supplierNameOf = new Map(orders.map((po) => [po.id, po.supplierName]));
     return receipts.map((g) => toReceiptView(g, supplierNameOf)).sort((a, b) => b.id - a.id);
   },

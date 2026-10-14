@@ -7,8 +7,8 @@ export function useReceiptLines(enabled = true) {
   return useQuery({ queryKey: goodsReceiptKeys.lines(), queryFn: goodsReceiptApi.lines, enabled });
 }
 
-export function useGoodsReceiptList(enabled = true) {
-  return useQuery({ queryKey: goodsReceiptKeys.list(), queryFn: goodsReceiptApi.list, enabled });
+export function useGoodsReceiptList(enabled = true, withSupplierNames = true) {
+  return useQuery({ queryKey: goodsReceiptKeys.list(withSupplierNames), queryFn: () => goodsReceiptApi.list(withSupplierNames), enabled });
 }
 
 /** 입고 확정. 입력 오류는 입력칸 아래에 보이므로 토스트를 띄우지 않는다. */
