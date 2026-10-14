@@ -96,7 +96,7 @@ confirm(draftId, actor):
 | 상대 | 관계 |
 | --- | --- |
 | messenger | 원본 메시지 조회·방 멤버 확인 |
-| purchasing | 실행 핸들러 `createRequisition(tx, …)` — 실행 트랜잭션 안에서 부른다. 채번 경합은 `retryOnNumberConflict`로 다시 시도한다 |
+| purchasing | 실행 핸들러 `createRequisition(tx, …)` — 실행 트랜잭션 안에서 부른다. unique 위반(P2002)이 나면 `retryOnNumberConflict`로 다시 시도한다(번호는 채번 잠금으로 겹치지 않는다) |
 | master-data | 원료 품목 검증 |
 | notification | 부서장 승인 요청 알림 🟡(유형 미확정) |
 

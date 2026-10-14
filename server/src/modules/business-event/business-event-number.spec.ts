@@ -28,13 +28,16 @@ describe('작업 로그 번호 채번 (동시 거래)', () => {
   });
 
   it('앞 거래가 커밋하기 전에 뒤 거래가 기록해도 두 거래 모두 저장되고 번호가 이어진다', async () => {
-    // 앞 거래는 기록한 뒤 잠시 커밋하지 않는다. 뒤 거래는 그 사이에 같은 앞부분의 최댓값을 읽는다
+    // 앞 거래는 기록을 마쳤다고 알린 뒤 잠시 커밋하지 않는다. 뒤 거래는 그 알림을 받고 시작해 같은 앞부분의 최댓값을 읽는다
+    let recorded!: () => void;
+    const firstRecorded = new Promise<void>((resolve) => (recorded = resolve));
     const first = prisma.$transaction(async (tx) => {
       const event = await record(tx);
+      recorded();
       await sleep(400);
       return event;
     });
-    await sleep(100);
+    await firstRecorded;
     const second = prisma.$transaction((tx) => record(tx));
 
     const [a, b] = await Promise.all([first, second]);

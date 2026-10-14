@@ -66,7 +66,7 @@ interface ReadContext {
   today: string;
 }
 
-/** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(수주·계획·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 */
+/** 동시에 같은 행을 만들어 unique 위반(P2002)이 나면 트랜잭션 전체를 다시 한다. 번호(수주·계획·작업 로그)는 NumberingService가 앞부분을 잠가 겹치지 않는다 */
 const NUMBER_CONFLICT_ATTEMPTS = 3;
 /**
  * 등록·취소는 품목마다 예약·계획·작업 로그(번호 채번 포함) 쿼리가 수십 번 돈다. Prisma 기본 제한(5초)은

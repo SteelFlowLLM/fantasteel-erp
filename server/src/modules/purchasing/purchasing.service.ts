@@ -100,7 +100,10 @@ const ALREADY_DONE: Record<PurchaseRequisitionStatus, string> = {
   ORDERED: '이미 발주된 요청이에요',
 };
 
-/** 채번은 "최댓값 + 1"이라 동시에 저장하면 번호(구매요청·작업 로그)가 겹쳐 unique 위반이 난다. 트랜잭션 전체를 다시 하면 새 번호를 받는다 (Message → ERP 초안 실행도 같은 이유로 쓴다) */
+/**
+ * 동시에 같은 행을 만들어 unique 위반(P2002)이 나면 트랜잭션 전체를 다시 해서 앞 거래가 커밋한 결과를 보고 판단하게 한다
+ * (Message → ERP 초안 실행도 쓴다). 번호(구매요청·작업 로그)는 NumberingService가 앞부분을 잠가 겹치지 않는다.
+ */
 const NUMBER_CONFLICT_ATTEMPTS = 3;
 export async function retryOnNumberConflict<T>(work: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
