@@ -3,7 +3,7 @@
 // 측정값 입력·수정 폼 (REQ-QC-003, BP-QC-01). 항목은 판정에 쓰는 기준 버전에서 두께 구간(초과~이하)으로 거른 것이다.
 // 입력하는 동안은 미리보기만 보이고, 판정은 저장할 때 시스템이 한다. 필수 항목이 비면 판정 대기로 저장된다.
 // 이미 값이 있는 검사는 같은 기록을 고친다(바꾼 항목만 보낸다). 밀시트가 발행된 LOT은 잠긴다.
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { InputError } from '@/api/errors';
 import type { InspectionDetail, InspectionFormItem, RegisterInspectionOutcome } from '@/api/inspections';
 import { Badge, type BadgeTone } from '@/components/Badge';
@@ -16,7 +16,7 @@ import { EmptyNote } from '@/components/StateView';
 import { PERMISSION } from '@/codes';
 import { LimitGauge } from '@/features/quality/components/LimitGauge';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
-import { fillTypicalValues, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
+import { fillTypicalValues, measuredCardsPerRow, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
 import { useRegisterInspection } from '@/hooks/useInspections';
 import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
@@ -127,8 +127,13 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
             </span>
           </p>
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
-          {/* 280px씩 채우면 1440 화면에서 3칸이라 항목 4개(슬래브 표면·치수 등)가 3 + 1로 남는다: 넓은 화면에서 4개·7개 이상이면 4칸 (5·6개는 3칸) */}
-          <div className={cn('grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3', (rows.length === 4 || rows.length >= 7) && 'min-[1400px]:grid-cols-4')}>
+          {/* 좁은 화면은 280px씩 채운다. 넓은 화면(1400px~)은 한 줄 개수를 항목 수에 맞춰 3·4개 중 마지막 줄이 더 차는 쪽으로 고르고(measuredCardsPerRow),
+              그래도 덜 찬 마지막 줄은 카드를 늘려 줄 끝까지 채운다: 히트 성분 5개가 3 + 2로 놓여 오른쪽 아래가 비어 보였다.
+              한 줄 폭 = (100% − 사이 간격) ÷ 개수. 반올림으로 줄이 넘치지 않게 0.5px 덜 잡는다 */}
+          <div
+            className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 min-[1400px]:flex min-[1400px]:flex-wrap"
+            style={{ '--qi-per-row': measuredCardsPerRow(rows.length) } as CSSProperties}
+          >
             {rows.map(({ item, text, preview, dirty }, index) => {
               const id = `qi-${item.inspectionStandardItemId}`;
               const next = rows[index + 1];
@@ -141,7 +146,10 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                   key={item.inspectionStandardItemId}
                   data-pet-item="qualityInspectionValue"
                   data-pet-item-title={item.inspectionItemName}
-                  className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-danger-line bg-danger-field' : 'border-line')}
+                  className={cn(
+                    'flex min-w-0 flex-col gap-1.5 rounded-md border p-3 min-[1400px]:grow min-[1400px]:basis-[calc((100%-(var(--qi-per-row)-1)*0.75rem)/var(--qi-per-row)-0.5px)]',
+                    bad ? 'border-danger-line bg-danger-field' : 'border-line',
+                  )}
                 >
                   {/* 영문 항목 코드는 값을 넣는 사람에게 필요 없는 말이라 카드마다 한 줄을 쓰지 않고 이름에 마우스를 올리면 보인다 */}
                   <div className="flex items-start gap-1.5">

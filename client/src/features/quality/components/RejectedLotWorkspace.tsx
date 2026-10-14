@@ -26,7 +26,6 @@ import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { DispositionBadge, RejectReasonBadge, ResultBadge } from '@/features/quality/components/QualityBadges';
 import { inspectionNameOf, limitText, lotIconOf, trimNum } from '@/features/quality/lib/qualityDisplay';
-import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useRejectedLotDetail, useRejectedLots } from '@/hooks/useDispositions';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -324,7 +323,7 @@ function HeatChildItem({ row, active }: { row: RejectedLotListRow; active: boole
 
 function Detail({ lotId }: { lotId: number }) {
   const detail = useRejectedLotDetail(lotId);
-  useShellTitle(detail.data?.row.lotNo, detail.data ? '불합격 관리' : undefined);
+  // 상단 바는 화면 이름(불합격 관리) 그대로 둔다: LOT 번호로 바꾸면 바로 아래 LOT 머리와 같은 번호가 크게 두 번 보였다
   return (
     <QueryBoundary query={detail} loadingLabel="불합격 LOT을 불러오는 중…">
       {(data) =>
@@ -446,7 +445,8 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                   <span className="text-ink-3">없음 · 연결된 수주 품목이 없어요</span>
                 ),
               },
-              { label: '생산완료일', value: fmtDate(row.producedDate) },
+              // 히트에는 생산완료일 칸이 없다(서버). "-"만 보이던 칸을 뺀다
+              ...(row.lotType !== 'HEAT' ? [{ label: '생산완료일', value: fmtDate(row.producedDate) }] : []),
               { label: 'LOT 상태', value: LOT_STATUS_LABEL[row.lotStatus] },
             ]}
           />
