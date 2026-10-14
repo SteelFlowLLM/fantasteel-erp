@@ -2,13 +2,15 @@
 // 방 멤버 확인·업무방 권한까지 보려고 HTTP로 부른다. 사원은 시드(seed.md), 수주는 테스트에서 직접 만든다.
 // 소켓은 게이트웨이의 발송 함수를 기록용으로 바꿔 "커밋 뒤 누구에게 무엇을 보냈는지"를 본다.
 import type { INestApplication } from '@nestjs/common';
-import { ValidationPipe } from '@nestjs/common';
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  AI_REPLY_PREFIX,
+  AI_SENDER_NAME,
   MESSAGE_ATTACHMENT_MAX_BYTES,
   MESSAGE_ATTACHMENT_MAX_COUNT,
   MESSAGE_TYPE,
@@ -24,8 +26,10 @@ import {
 } from '@fantasteel/shared';
 import type { AuthUser } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
+import { AppException } from '../../common/errors/app.exception';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
 import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
 
@@ -1039,5 +1043,84 @@ describe('18번: 이모티콘', () => {
     expect([unknown.status, unknown.body.error?.code]).toEqual([400, 'COM-004']);
     expect([empty.status, empty.body.error?.code]).toEqual([400, 'COM-004']);
     expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(0);
+  });
+});
+
+describe('@AI 호출 (REQ-AST-002)', () => {
+  const askSpy = () => jest.spyOn(app.get(AiAssistantService), 'ask');
+
+  /** AI 답은 응답 뒤에 저장되므로 나타날 때까지 기다린다 */
+  async function aiRepliesOf(chatRoomId: number, count: number) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const rows = await prisma.message.findMany({ where: { chatRoomId, messageType: MESSAGE_TYPE.SYSTEM, content: { startsWith: AI_REPLY_PREFIX } }, orderBy: { id: 'asc' } });
+      if (rows.length >= count) return rows;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('AI 답이 저장되지 않았어요');
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('@AI가 든 메시지는 먼저 저장해 돌려주고, 묻는 사람 권한으로 물은 답을 시스템 메시지로 남겨 멤버에게 보낸다', async () => {
+    const ask = askSpy().mockResolvedValue({ answer: '예약은 재고를 수주에 묶어 두는 것이에요.', sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }], model: 'test-model', latencyMs: 1 });
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await send(qualityCookie, room.id, '예약이 뭐였죠?');
+
+    const sent = await send(salesCookie, room.id, '@AI 예약이 뭐야?');
+    expect(sent.status).toBe(201);
+    expect(sent.body.data).toMatchObject({ content: '@AI 예약이 뭐야?', isAi: false });
+
+    const [reply] = await aiRepliesOf(room.id, 1);
+    expect(ask).toHaveBeenCalledTimes(1);
+    const [user, input] = ask.mock.calls[0];
+    expect(user.employeeId).toBe(salesId);
+    expect(input).toMatchObject({ question: '예약이 뭐야?', screen: { title: '사내 채팅', label: null } });
+    expect(input.history).toEqual([{ role: 'user', content: '서민지: 예약이 뭐였죠?' }]);
+
+    const delivered = socketRecords.filter((r) => r.event === 'message:new' && (r.payload as ChatMessageView).id === reply.id);
+    expect(delivered.map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
+    expect(delivered[0].payload).toMatchObject({
+      isAi: true,
+      isSystem: true,
+      senderId: null,
+      senderName: AI_SENDER_NAME,
+      content: '박서영님의 질문에 답해요\n\n예약은 재고를 수주에 묶어 두는 것이에요.\n\n출처: 용어 사전 · 예약',
+    });
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, qualityCookie);
+    expect(page.body.data.items.at(-1)).toMatchObject({ isAi: true, senderName: AI_SENDER_NAME });
+    const list = await call<ChatRoomListItem[]>('GET', '/chat-rooms', qualityCookie);
+    expect(list.body.data.find((r) => r.id === room.id)?.lastMessage).toMatchObject({ senderName: AI_SENDER_NAME, preview: expect.stringMatching(/^박서영님의 질문에 답해요 예약은/) });
+  });
+
+  it('질문이 없거나 @AI가 아닌 글(@AIR)은 AI를 부르지 않는다 (질문이 없으면 안내만)', async () => {
+    const ask = askSpy();
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await send(salesCookie, room.id, '@AIR 부서 회의');
+    await send(salesCookie, room.id, '@AI');
+    const [reply] = await aiRepliesOf(room.id, 1);
+    expect(ask).not.toHaveBeenCalled();
+    expect(reply.content).toBe(`${AI_REPLY_PREFIX}@AI 뒤에 묻고 싶은 내용을 적어 주세요`);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id, messageType: MESSAGE_TYPE.SYSTEM } })).toBe(1);
+  });
+
+  it('AI가 답하지 못하면(LLM 연결 실패 등) 이유를 같은 방식으로 방에 알린다', async () => {
+    askSpy().mockRejectedValue(new AppException('COM-999', 'AI 모델이 아직 정해지지 않았어요', HttpStatus.SERVICE_UNAVAILABLE));
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    await send(salesCookie, room.id, '@AI 재고 알려줘');
+    const [reply] = await aiRepliesOf(room.id, 1);
+    expect(reply.content).toBe(`${AI_REPLY_PREFIX}박서영님의 질문에 답하지 못했어요. AI 모델이 아직 정해지지 않았어요`);
+  });
+
+  it('같은 보내기 id로 다시 보내면(재전송) AI를 다시 부르지 않는다', async () => {
+    const ask = askSpy().mockResolvedValue({ answer: '답이에요', sources: [], model: 'test-model', latencyMs: 1 });
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const body = { content: '@AI 안녕', clientMessageId: 'ai-resend-1' };
+    await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, body);
+    await aiRepliesOf(room.id, 1);
+    const again = await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, body);
+    expect(again.status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id, content: { startsWith: AI_REPLY_PREFIX } } })).toBe(1);
   });
 });

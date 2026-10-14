@@ -147,6 +147,8 @@ export interface MessageView {
   senderDepartmentName: string | null;
   senderJobGradeName: string | null;
   isSystem: boolean;
+  /** @AI 호출에 대한 AI 답 (isSystem도 true, REQ-AST-002) */
+  isAi: boolean;
   isMine: boolean;
   content: string | null;
   /** 첨부 (올린 순서, 여러 개 = 스키마 3차) */

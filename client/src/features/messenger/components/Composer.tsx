@@ -5,11 +5,10 @@
 // 글자로 추천(23번): 글에 맞는 이모티콘을 입력창 위에 보인다. 이모티콘을 이미 골랐거나 파일이 있으면 숨기고, Esc로 닫으면 글을 고칠 때까지 숨긴다.
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
-import { MESSAGE_ATTACHMENT_MAX_COUNT, inlineEmoticonKeys, inlineEmoticonText, inlineEmoticonToken, type MessageEmoticonKey } from '@fantasteel/shared';
+import { AI_MENTION, AI_SENDER_NAME, MESSAGE_ATTACHMENT_MAX_COUNT, inlineEmoticonKeys, inlineEmoticonText, inlineEmoticonToken, type MessageEmoticonKey } from '@fantasteel/shared';
 import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
-import { SoonButton, soonLabel } from '@/components/ComingSoon';
 import { EmoticonImage, EmoticonPicker, EmoticonSuggestions, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { pushRecentEmoticon } from '@/features/messenger/lib/emoticonRecent';
 import { suggestEmoticons } from '@/features/messenger/lib/emoticonSuggest';
@@ -26,6 +25,9 @@ import { toast } from '@/stores/useToastStore';
 const MAX_LINES = 6;
 const MAX_CANDIDATES = 8;
 const FILE_LIMIT_TEXT = MESSAGE_FILE_MAX_BYTES >= 1024 * 1024 ? `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024 / 1024)}MB` : `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
+
+/** 멘션 후보: 방 멤버·부서, 그리고 AI 어시스턴트(@AI, REQ-AST-002) */
+type MentionCandidate = MentionTarget | { kind: 'ai' };
 
 interface MentionState {
   /** '@' 자리 */
@@ -69,10 +71,11 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const clearReply = () => useMessageComposeStore.getState().setReplyTo(null);
   const pending = reading;
 
-  const candidates = useMemo<MentionTarget[]>(() => {
+  const candidates = useMemo<MentionCandidate[]>(() => {
     if (!mention) return [];
     const query = mention.query.toLowerCase();
-    return room.mentionTargets.filter((target) => target.name.toLowerCase().includes(query)).slice(0, MAX_CANDIDATES);
+    const ai: MentionCandidate[] = 'ai'.startsWith(query) || AI_SENDER_NAME.startsWith(query) ? [{ kind: 'ai' }] : [];
+    return [...ai, ...room.mentionTargets.filter((target) => target.name.toLowerCase().includes(query))].slice(0, MAX_CANDIDATES);
   }, [mention, room.mentionTargets]);
 
   const suggestions = useMemo<MessageEmoticonKey[]>(
@@ -116,13 +119,14 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
     updateMention(event.target.value, event.target.selectionStart);
   };
 
-  const insertMention = (target: MentionTarget) => {
+  const insertMention = (target: MentionCandidate) => {
     if (!mention) return;
+    const name = target.kind === 'ai' ? AI_MENTION.slice(1) : target.name;
     const caret = textareaRef.current?.selectionStart ?? text.length;
-    const next = `${text.slice(0, mention.start)}@${target.name} ${text.slice(caret)}`;
+    const next = `${text.slice(0, mention.start)}@${name} ${text.slice(caret)}`;
     setText(next);
     setMention(null);
-    const position = mention.start + target.name.length + 2;
+    const position = mention.start + name.length + 2;
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(position, position);
@@ -138,6 +142,26 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
     setText(next);
     setMention({ start: position - 1, query: '' });
     setActiveIndex(0);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(position, position);
+    });
+  };
+
+  /** [@AI 호출]: 커서 자리에 '@AI '를 넣고 질문을 이어 쓰게 한다 */
+  const callAi = () => {
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? text.length;
+    const needsSpace = caret > 0 && !/\s/.test(text[caret - 1] ?? '');
+    const inserted = `${needsSpace ? ' ' : ''}${AI_MENTION} `;
+    const next = `${text.slice(0, caret)}${inserted}${text.slice(caret)}`;
+    if (next.length > MESSAGE_CONTENT_MAX) {
+      toast.error(`메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요`);
+      return;
+    }
+    setText(next);
+    setMention(null);
+    const position = caret + inserted.length;
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(position, position);
@@ -216,13 +240,10 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
     <div data-pet-target="card:messenger.composer" className="relative flex flex-none flex-col gap-2 border-t border-line bg-surface px-5 py-3">
       {mention ? (
         <div role="listbox" aria-label="멘션할 멤버" className="absolute bottom-full left-5 z-30 mb-1 flex w-72 flex-col overflow-hidden rounded-md border border-line bg-surface py-1 shadow-pop">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-ink-disabled" aria-disabled="true">
-            <b className="font-semibold">@AI 호출</b> · AI 어시스턴트에게 묻기 · {soonLabel('P2')}
-          </div>
           {candidates.length === 0 ? <div className="px-3 py-2 text-xs text-ink-3">일치하는 멤버가 없어요</div> : null}
           {candidates.map((target, index) => (
             <button
-              key={`${target.kind}-${target.id}`}
+              key={target.kind === 'ai' ? 'ai' : `${target.kind}-${target.id}`}
               type="button"
               role="option"
               aria-selected={index === activeIndex}
@@ -233,8 +254,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
               className={cn('flex items-center gap-2 px-3 py-1.5 text-left text-sm', index === activeIndex ? 'bg-brand-tint hover:bg-brand-tint-hover' : 'hover:bg-surface-2')}
             >
               <Icon name={target.kind === 'department' ? 'users' : 'user'} size="sm" className="text-ink-3" />
-              {target.name}
-              <span className="ml-auto text-cap text-ink-3">{target.kind === 'department' ? '부서 알림' : '멤버'}</span>
+              {target.kind === 'ai' ? AI_MENTION : target.name}
+              <span className="ml-auto text-cap text-ink-3">{target.kind === 'ai' ? 'AI 어시스턴트에게 묻기' : target.kind === 'department' ? '부서 알림' : '멤버'}</span>
             </button>
           ))}
         </div>
@@ -275,7 +296,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         rows={lines}
         maxLength={MESSAGE_CONTENT_MAX}
         aria-label="메시지 입력"
-        placeholder={files.length > 0 ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : emoticon ? '이모티콘과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션'}
+        placeholder={files.length > 0 ? '파일과 같이 보낼 말을 적어 주세요 (선택)' : emoticon ? '이모티콘과 같이 보낼 말을 적어 주세요 (선택)' : '메시지 입력 · @ 로 멤버 멘션, @AI 로 AI에게 묻기'}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onClick={(event) => updateMention(event.currentTarget.value, event.currentTarget.selectionStart)}
@@ -314,9 +335,9 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startMention} disabled={pending}>
           @ 멘션
         </Button>
-        <SoonButton size="sm" variant="ghost">
+        <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={callAi} disabled={pending} title="AI 어시스턴트에게 묻기. 답은 방 모두에게 보여요">
           @AI 호출
-        </SoonButton>
+        </Button>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
         <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && files.length === 0 && !emoticon)} onClick={() => void submit()}>
           {reading ? '파일 읽는 중…' : '보내기'}
