@@ -83,12 +83,12 @@ npm run build -w @fantasteel/client
 
 DB만 따로 띄우려면 `npm run db`. 테스트 계정은 [docs/backend/seed.md](docs/backend/seed.md) (비밀번호 `fantasteel`).
 
-### Supabase로 옮길 때
+### 공용 DB(Supabase)를 쓸 때
 
-`server/.env`의 두 값만 바꿉니다 (`server/.env.example` 참고).
+`server/.env`의 두 값만 바꿉니다 (`server/.env.example` 참고, 자세한 규칙은 [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md) 8장).
 
 - `DATABASE_URL` — Transaction pooler(6543) + `?pgbouncer=true`
-- `DIRECT_URL` — Direct 연결 또는 Session pooler(5432)
+- `DIRECT_URL` — Session pooler(5432). Direct 주소(`db.<ref>.supabase.co`)는 IPv6 전용이라 쓰지 않습니다
 
-그다음 `cd server && npx prisma migrate deploy && npx tsx prisma/seed.ts`.
+접속 주소는 비공개 채널로 받고 커밋·채팅·PR에 붙이지 않습니다. 공용 DB에 마이그레이션·시드를 반영하는 일은 DB 담당자만 `npm run db:deploy -w @fantasteel/server`로 합니다 (각자 `prisma migrate deploy`·시드를 돌리지 않습니다).
 첨부·밀시트 PDF는 지금 `server/storage/` 폴더에 저장합니다. Supabase Storage로 옮기려면 `server/src/common/storage/storage.service.ts`만 바꾸면 됩니다.
