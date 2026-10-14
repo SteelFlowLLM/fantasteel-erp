@@ -218,7 +218,8 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
             </>
           }
         />
-        <div data-pet-target="card:millSheets.links" className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
+        {/* self-start: 줄 너비를 글자만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
+        <div data-pet-target="card:millSheets.links" className="-mt-2 flex flex-wrap items-center gap-2 self-start text-sm text-ink-2">
           <span className="font-medium text-ink">{s.customer.customerName}</span>
           <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
           <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />

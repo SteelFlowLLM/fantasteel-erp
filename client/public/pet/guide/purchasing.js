@@ -237,6 +237,17 @@
       req: ['REQ-ACT-002', 'REQ-PUR-002'],
       soon: null
     },
+    'card:purchaseRequisitions.draftActionType': {
+      title: '초안 업무 유형',
+      short: '메시지로 만들 수 있는 초안의 종류예요',
+      lines: [
+        '업무 유형마다 추출 스키마와 실행 핸들러를 등록해 유형을 늘려요.',
+        '지금은 구매요청 생성만 쓸 수 있어요.',
+        '출하요청·수주 등록 같은 다른 유형은 준비 중(P2)이에요.'
+      ],
+      req: ['REQ-ACT-004', 'REQ-ACT-005'],
+      soon: null
+    },
 
     // ── 발주 ──
     'card:purchaseOrders.list': {

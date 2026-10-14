@@ -10,10 +10,10 @@
       intro: ['출고 확정 화면이에요. 배정이 끝난 출하요청을 골라 내보내요.', '확정은 물류가 하고, 영업·품질·관리자는 조회만 해요.'],
       tour: [
         { target: 'card:goodsIssues.queue', text: '왼쪽에 출고를 기다리는 출하요청이 있어요.' },
-        { target: 'card:goodsIssues.lots', text: '배정된 LOT과 검사 결과를 하나씩 확인해요.' },
+        { target: 'card:goodsIssues.lots', text: '배정된 LOT과 검사 결과를 확인해요. 출고 뒤엔 내보낸 LOT이 보여요.' },
         { target: 'card:goodsIssues.checks', text: '배정·검사 합격·재고, 세 가지가 모두 초록이어야 해요.' },
         { target: 'card:goodsIssues.result', text: '출고 결과와 발행된 밀시트가 여기 보여요.' },
-        { target: 'card:goodsIssues.confirm', text: '준비되면 출고 확정! 두 번 눌러도 한 번만 출고돼요.' }
+        { target: 'card:goodsIssues.confirm', text: '준비되면 출고 확정! 출고 뒤엔 밀시트 보기로 바뀌어요.' }
       ]
     },
     millSheets: {
@@ -40,7 +40,8 @@
         { target: 'card:organization.departmentTree', text: '부서 계층이에요. 부서장이 없는 부서는 표시돼요.' },
         { target: 'card:organization.departmentEditor', text: '상위 부서와 부서장(승인권자)을 여기서 정해요.' },
         { target: 'card:organization.jobGrades', text: '표시 순서가 작은 직급이 조직도에서 먼저 나와요.' },
-        { target: 'card:organization.permissions', text: '칸을 누르면 사용 → 조회 → 없음으로 바뀌어요.' }
+        { target: 'card:organization.permissions', text: '칸을 누르면 사용 → 조회 → 없음으로 바뀌어요.' },
+        { target: 'card:organization.orgChart', text: '부서별 인원과 부서장을 한눈에 봐요.' }
       ]
     },
     masterData: {
@@ -53,7 +54,7 @@
         { target: 'card:masterData.routing', text: '공정 순서와 계획 수율이에요.' },
         { target: 'card:masterData.consumption', text: '용선 1t당 원료 투입량이에요. MRP가 써요.' },
         { target: 'card:masterData.rawMaterials', text: '원료 코드는 원료 LOT 번호에도 쓰여요.' },
-        { target: 'card:masterData.partners', text: '고객사·공급업체·야드를 골라 관리해요.' },
+        { target: 'card:masterData.partners', text: '위 버튼으로 고른 고객사·공급업체·야드 목록이에요.' },
         { target: 'card:masterData.settings', text: '히트 용량과 납기 위험 기준일을 바꿔요.' }
       ]
     },
@@ -315,6 +316,17 @@
         '구매요청 승인은 여기 없어요. 부서장이 승인해요.'
       ],
       req: ['REQ-AUTH-003', 'REQ-AUTH-004'],
+      soon: null
+    },
+    'card:organization.orgChart': {
+      title: '조직도',
+      short: '부서별 인원과 부서장을 한눈에 봐요',
+      lines: [
+        '사용 중인 사원만 보여요.',
+        '부서 안에서는 직급 순서 → 사원번호 순이에요.',
+        '부서장을 바꾸려면 부서 탭에서 해요.'
+      ],
+      req: ['REQ-ORG-003', 'REQ-ORG-002'],
       soon: null
     },
 

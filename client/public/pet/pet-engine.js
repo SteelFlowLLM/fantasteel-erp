@@ -5671,6 +5671,8 @@
     if (typeof MutationObserver === 'function') {
       const zoomWatch = new MutationObserver(() => {
         if (!syncZoom()) return;
+        // 화면이 숨어 있어 프레임이 멈춘 동안에도 강조 테두리가 바로 새 배치를 따라가게 한다
+        for (const it of flashes) if (it.el.isConnected) placeFlash(it);
         if (bubble.visible) {
           measureBubble();
           positionBubble();

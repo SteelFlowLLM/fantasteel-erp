@@ -98,7 +98,7 @@ export function ConfirmGuideCard({ draft }: { draft: DraftDetailView }) {
 /** 초안 업무 유형 등록부: 유형마다 추출 스키마 + 실행 핸들러. 지금은 구매요청 생성만 쓸 수 있다. */
 export function ActionTypeCard({ current }: { current: DraftDetailView['actionType'] }) {
   return (
-    <Card>
+    <Card petKey="card:purchaseRequisitions.draftActionType">
       <CardHead title="초안 업무 유형" />
       <CardBody flush>
         <ul className="flex flex-col">

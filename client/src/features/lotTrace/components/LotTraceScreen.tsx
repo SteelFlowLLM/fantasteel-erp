@@ -166,7 +166,7 @@ function TraceBody({ trace, onReroot }: { trace: LotTraceView; onReroot: (lotNo:
     <>
       <TraceHead trace={trace} />
       {isEmptyShipment && trace.start.kind === 'SHIPMENT_REQUEST' ? (
-        <Card>
+        <Card petKey="card:lotTrace.shipment">
           <CardHead title="출하요청" />
           <div className="flex flex-col gap-3 px-4 py-3">
             <ShipmentSummary shipment={trace.start.shipment} />

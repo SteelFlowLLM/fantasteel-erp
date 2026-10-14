@@ -21,7 +21,8 @@ const FILL = 'bg-(--org) text-on-brand';
 const TINT = 'bg-[color-mix(in_oklab,var(--org)_10%,white)]';
 const TINT_STRONG = 'bg-[color-mix(in_oklab,var(--org)_18%,white)] text-(--org)';
 
-export function OrgChartTab() {
+/** petKey: 펫 설명 대상 키. 안내 배너는 빼고 부서 트리 카드에만 단다 (공통 조직도 화면에서만 넘긴다) */
+export function OrgChartTab({ petKey }: { petKey?: string }) {
   const chart = useAdminOrgChart();
   return (
     <>
@@ -31,7 +32,7 @@ export function OrgChartTab() {
           departments.length === 0 ? (
             <StateView kind="empty" title="등록된 부서가 없어요" />
           ) : (
-            <Card className="flex-none overflow-x-auto">
+            <Card className="flex-none overflow-x-auto" petKey={petKey}>
               <OrgTree departments={byRegistration(departments)} />
             </Card>
           )
