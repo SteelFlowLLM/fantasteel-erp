@@ -42,8 +42,12 @@ import { SalesOrderRepository } from './sales-order.repository';
 type SalesOrderRow = NonNullable<Awaited<ReturnType<SalesOrderRepository['findSalesOrder']>>>;
 type SalesOrderItemRow = SalesOrderRow['salesOrderItems'][number];
 
-/** 수주를 취소하면 처리할 품목 (이미 취소된 품목 제외). 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다 */
-const cancellableItemsOf = (row: SalesOrderRow): SalesOrderItemRow[] => row.salesOrderItems.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
+/**
+ * 수주를 취소하면 처리할 품목: 진행중·부분출하. 이미 취소된 품목과 전량 출고된 품목은 그대로 둔다 (BP-SO-02 예외, 2026-10-14 잔량 취소).
+ * 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다.
+ */
+const cancellableItemsOf = (row: SalesOrderRow): SalesOrderItemRow[] =>
+  row.salesOrderItems.filter((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.OPEN || i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED);
 
 /** 생산 설정값이 없을 때 쓰는 납기 위험 기준일 (REQ-MST-009 초기값) */
 const DEFAULT_DELIVERY_RISK_DAYS = 3;
@@ -276,8 +280,9 @@ export class SalesOrderService {
   // ── 취소 (BP-SO-02, REQ-SO-006) ────────────────────────
 
   /**
-   * 수주 취소: 출고된 매수가 있으면 SO-003, 진행 중 출하요청이 있으면 SO-004.
-   * 통과하면 품목마다 ACTIVE 예약 해제 → 시작 전 계획 취소·진행중 계획 연결 해제(여재) → 품목 CANCELLED. 출고 완료분은 되돌리지 않는다.
+   * 수주 취소: 전량 출고된 수주는 SO-003, 진행 중 출하요청이 있으면 SO-004.
+   * 통과하면 진행중·부분출하 품목마다 ACTIVE 예약 해제 → 시작 전 계획 취소·진행중 계획 연결 해제(여재) → 품목 CANCELLED.
+   * 출고 완료분은 되돌리지 않는다: 부분출하 품목은 출고 매수를 남긴 채 잔량만 취소하고, 전량 출고된 품목은 그대로 둔다 (BP-SO-02 예외).
    */
   cancel(user: AuthUser, id: number, dto: CancelSalesOrderDto): Promise<CancelSalesOrderResult> {
     return this.prisma.$transaction(async (tx) => {
@@ -432,9 +437,11 @@ export class SalesOrderService {
     };
   }
 
+  /** 취소할 품목이 없을 때: 하나라도 취소됐으면 이미 취소한 수주(부분 출고 뒤 잔량 취소 포함), 모두 출고됐으면 SO-003 */
   private cancelBlockOf(row: SalesOrderRow, requests: readonly { shipmentRequestStatus: string }[]): SalesOrderCancelBlock {
-    if (row.salesOrderItems.every((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED)) return 'CANCELLED';
-    if (row.salesOrderItems.some((i) => i.reservations.some((r) => r.reservationStatus === RESERVATION_STATUS.CONVERTED))) return 'SO-003';
+    if (cancellableItemsOf(row).length === 0) {
+      return row.salesOrderItems.some((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED) ? 'CANCELLED' : 'SO-003';
+    }
     if (requests.some((r) => OPEN_SHIPMENT_STATUSES.includes(r.shipmentRequestStatus))) return 'SO-004';
     return null;
   }

@@ -132,7 +132,7 @@ export interface SalesOrderCancellation {
   unlinkedPlanNos: string[];
 }
 
-/** 취소를 막는 사유. null = 취소 가능, CANCELLED = 이미 취소됨 */
+/** 취소를 막는 사유. null = 취소 가능, CANCELLED = 이미 취소됨(부분 출고 뒤 잔량 취소 포함), SO-003 = 전량 출고, SO-004 = 진행 중 출하요청 */
 export type SalesOrderCancelBlock = 'SO-003' | 'SO-004' | 'CANCELLED' | null;
 
 export interface SalesOrderDetail extends Omit<SalesOrderSummary, 'items'> {
