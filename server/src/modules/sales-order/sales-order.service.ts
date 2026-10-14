@@ -42,6 +42,9 @@ import { SalesOrderRepository } from './sales-order.repository';
 type SalesOrderRow = NonNullable<Awaited<ReturnType<SalesOrderRepository['findSalesOrder']>>>;
 type SalesOrderItemRow = SalesOrderRow['salesOrderItems'][number];
 
+/** 수주를 취소하면 처리할 품목 (이미 취소된 품목 제외). 수주 취소와 취소 창의 구매 진행 영향이 같이 쓴다 */
+const cancellableItemsOf = (row: SalesOrderRow): SalesOrderItemRow[] => row.salesOrderItems.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
+
 /** 생산 설정값이 없을 때 쓰는 납기 위험 기준일 (REQ-MST-009 초기값) */
 const DEFAULT_DELIVERY_RISK_DAYS = 3;
 const DEFAULT_PAGE_SIZE = 20;
@@ -163,7 +166,7 @@ export class SalesOrderService {
    */
   async cancelPurchaseImpact(id: number): Promise<SalesOrderCancelPurchaseImpactLine[]> {
     const row = await this.mustFind(this.prisma, id);
-    const requisitions = await this.repository.findRequisitionsOfPlans(this.prisma, row.salesOrderItems.map((i) => i.id));
+    const requisitions = await this.repository.findRequisitionsOfPlans(this.prisma, cancellableItemsOf(row).map((i) => i.id));
     return requisitions.flatMap((pr) => {
       const plan = pr.productionPlan;
       const planEffect = plan ? salesOrderCancelEffectOf(plan.productionPlanStatus) : null;
@@ -291,7 +294,7 @@ export class SalesOrderService {
       const releasedReservations: SalesOrderCancellation['releasedReservations'] = [];
       const cancelledPlanNos: string[] = [];
       const unlinkedPlanNos: string[] = [];
-      const live = row.salesOrderItems.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
+      const live = cancellableItemsOf(row);
       for (const soItem of [...live].sort((a, b) => a.itemId - b.itemId || a.id - b.id)) {
         const releasedQty = await this.inventory.releaseForSalesOrderItem(tx, { salesOrderId: row.id, salesOrderItemId: soItem.id, itemId: soItem.itemId, actor: user, reason });
         releasedReservations.push({ salesOrderItemId: soItem.id, releasedQty });
