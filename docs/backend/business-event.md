@@ -62,18 +62,18 @@ await this.businessEventRecorder.record(tx, {
 - 사유는 [04] 9.3 제안 코드(STOCK_FIRST, FIFO_RECOMMENDATION, ORDER_SHORTAGE, ORDER_CANCELLED, QUALITY_FAILURE, SURPLUS_CONVERSION, ALLOCATION_CHANGE, DRAFT_CONFIRMED)와 사람이 읽을 문장을 함께 쓴다.
 - Message → ERP로 생긴 기록은 `actionDraftId`·`messageId`를 채운다(REQ-LOG-001 "원본 메시지·Action Draft 연결"). `isAiAssisted`는 AI 초안 확정일 때만 true(REQ-AST-010, P2).
 
-**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE 29개)
+**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE 31개)
 
 | 유형 | 기록 모듈 | target | salesOrderId | lotIds |
 | --- | --- | --- | --- | --- |
 | SALES_ORDER_CREATED·CANCELLED | sales-order | `sales_order` | ● | |
-| PRODUCTION_PLAN_CREATED·CANCELLED, REPRODUCTION_PLAN_CREATED, SURPLUS_CONVERTED | production | `production_plan` | 연결 시 ● | |
+| PRODUCTION_PLAN_CREATED·CANCELLED, HEAT_PLAN_CONFIRMED, REPRODUCTION_PLAN_CREATED, SURPLUS_CONVERTED | production | `production_plan` | 연결 시 ● | |
 | PRODUCTION_STARTED, PRODUCTION_RESULT_REGISTERED | production | `production_result` | 연결 시 ● | 투입·산출 LOT |
 | INSPECTION_REGISTERED, DISPOSITION_SET | quality | `quality_inspection` / `lot` | 연결 시 ● | 대상 LOT |
 | RESERVATION_CREATED·CONVERTED·RELEASED | inventory | `reservation` | ● | 자동 예약·출고 시 LOT |
 | ALLOCATION_RECOMMENDED·CONFIRMED·CHANGED·RELEASED | inventory | `allocation` 등 | 있으면 ● | 배정 LOT |
 | PURCHASE_REQUISITION_CREATED·APPROVED·REJECTED, PURCHASE_ORDER_CREATED, GOODS_RECEIPT_CONFIRMED | purchasing | 각 테이블 | 계획이 수주에 연결되면 | 입고 원료 LOT |
-| SHIPMENT_REQUEST_CREATED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED | shipment | 각 테이블 | ● | 출고 LOT |
+| SHIPMENT_REQUEST_CREATED·CANCELLED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED | shipment | 각 테이블 | ● | 출고 LOT |
 | DRAFT_CREATED·CONFIRMED·REJECTED·EXECUTED | message-action | `action_draft` | | |
 
 자동 예약은 RESERVATION_CREATED + SYSTEM, 불합격 판정은 INSPECTION_REGISTERED의 판정 결과로 구분한다([06]).
@@ -110,6 +110,6 @@ await this.businessEventRecorder.record(tx, {
 | 이벤트 번호 경합 | 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → **본 거래 전체가 COM-001로 실패**한다. 업무 tx가 많을수록 자주 생긴다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음) |
 | 하루 999건 한도 | EV 순번은 3자리(NNN)라 하루 1,000번째 이벤트에서 채번 함수가 Error를 던져 COM-999가 된다. 실적 시뮬레이션·시연 시드가 하루에 많은 이벤트를 만들 수 있다 | [04] 9.1, `number-format.ts` `seq` |
 | `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다. **구현:** REQ-LOG-003 "LOT 단위"를 위해 넣었다(4장 조회 구현 메모) | [04] 12.2, REQ-LOG-003 |
-| 빠진 이벤트 유형 | 구매요청 재요청, 출하요청 취소, 검사 측정값 수정, 히트 편성 확정에 맞는 유형이 없다. 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
+| 빠진 이벤트 유형 | 구매요청 재요청, 검사 측정값 수정에 맞는 유형이 없다(출하요청 취소·히트 편성 확정은 2026-10-14 추가). 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
 | 여러 수주를 묶은 이벤트 | `sales_order_id`가 하나라 출하요청 이벤트를 수주별로 나눠 기록해야 한다(shipment.md 8장) | [ERD] |
 | 조회 범위 | 작업 로그가 전 역할에 열려 있다. 권한 밖 데이터(예: 구매 금액이 생기면)를 거를지 | [CSV] 권한 |

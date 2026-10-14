@@ -62,8 +62,8 @@ export class ProductionController {
   @Post('production-plans/:id/confirm')
   @HttpCode(200)
   @RequirePermission(PERMISSION.PRODUCTION_PLAN_CONFIRM, 'USE')
-  confirmHeatPlan(@Param('id', planId()) id: number): Promise<ProductionPlanDetail> {
-    return this.service.confirmHeatPlan(id);
+  confirmHeatPlan(@CurrentUser() user: AuthUser, @Param('id', planId()) id: number): Promise<ProductionPlanDetail> {
+    return this.service.confirmHeatPlan(user, id);
   }
 
   /** 생산계획 취소 (API-205): 계획(PLANNED) 상태에서만 */

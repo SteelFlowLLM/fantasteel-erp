@@ -1,7 +1,7 @@
 // 기준정보 화면의 조회·변경 (REQ-MST-001~009, BP-MST-01). 다른 화면의 선택 목록은 api/lookups.ts를 쓴다.
 // - 변경 권한(MASTER_MANAGE, 없으면 COM-002), 없는 대상(COM-003), 화면을 연 뒤 바뀜(COM-001), 쓰인 규격의 치수·이론중량 변경(MST-002)은 서버가 확인한다.
 // - 중복·형식처럼 9.3에 코드가 없는 거부는 InputError(입력칸별 안내)다.
-// - 기준정보 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
+// - 기준정보 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
 // - 조회·변경은 api/server/masterData.ts가 서버를 부른다.
 import {
   type ProcessType,
