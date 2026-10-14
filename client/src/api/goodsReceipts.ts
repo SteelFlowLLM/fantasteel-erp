@@ -10,7 +10,7 @@ import { decCmp } from '@/lib/decimal';
 
 export const goodsReceiptKeys = {
   all: ['goods-receipts'] as const,
-  list: () => ['goods-receipts', 'list'] as const,
+  list: (withSupplierNames = true) => ['goods-receipts', 'list', withSupplierNames] as const,
   lines: () => ['goods-receipts', 'purchase-order-lines'] as const,
 };
 
@@ -117,8 +117,8 @@ export const goodsReceiptApi = {
   /** 모든 발주 품목 (미입고량이 남은 것 먼저, 입고 예정일 순) */
   lines: async (): Promise<ReceiptLine[]> => receiptLinesOf(await serverPurchaseOrderApi.list(), await serverMasterDataApi.rawMaterialYardNames()),
 
-  /** 입고 내역 (최근 것부터) */
-  list: (): Promise<GoodsReceiptView[]> => serverGoodsReceiptApi.list(),
+  /** 입고 내역 (최근 것부터). withSupplierNames = 발주 조회 권한이 있어 공급업체 이름을 채울지 */
+  list: (withSupplierNames = true): Promise<GoodsReceiptView[]> => serverGoodsReceiptApi.list(withSupplierNames),
 
   /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
   receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> => serverGoodsReceiptApi.receive(input),
