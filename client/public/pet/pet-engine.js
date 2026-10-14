@@ -3659,7 +3659,10 @@
         const at = probe(px, py);
         return !!at && at !== el && !el.contains(at) && !root.contains(at) && !at.contains(el);
       })();
-      if (covered) {
+      // 윗변만 보이고 대부분이 화면·스크롤 칸 아래로 잘려 있어도 스크롤한다 (잘린 채 테두리를 그리면 칸 일부만 감싼다)
+      const shown = visibleRect(el);
+      const mostlyHidden = r.height > 0 && shown.height / Math.min(r.height, H()) < 0.6;
+      if (covered || mostlyHidden) {
         scrollToSee(el, r);
         if (!(await wait(reduced ? 60 : 520, tok))) return false;
         if (!el.isConnected) return false;
@@ -3847,7 +3850,11 @@
         const r = el.getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0) return;
         seen.add(target);
-        out.push({ target, text, top: r.top + (el.closest('main') ? el.closest('main').scrollTop : 0), left: r.left });
+        // 문서 기준 위치로 줄 세운다: 스크롤해 둔 채 안내를 시작해도 위로 지나간 칸이 먼저 나오지 않게 모든 스크롤 칸의 스크롤 양을 더한다.
+        // scrollTop은 확대 전 값이라 화면 px(r.top)와 맞추려고 글자 크기 비율을 곱한다
+        let scrolled = global.scrollY || 0;
+        for (let n = el.parentElement; n; n = n.parentElement) scrolled += n.scrollTop * uiz();
+        out.push({ target, text, top: r.top + scrolled, left: r.left });
       };
       listed.forEach((st) => add(st.target, st.text));
       for (const el of doc.querySelectorAll('[data-pet-target^="card:"],[data-pet-target^="widget:"]')) {
@@ -3896,7 +3903,8 @@
             if (last) finished = true;
             continue;
           }
-          if (ok) spotlight(el);
+          // 가는 길에 펫이 떨어져 곁에 못 갔어도(ok=false) 강조는 이 단계의 칸으로 옮긴다 (앞 단계 테두리가 남지 않게)
+          spotlight(el);
         }
         const actions = [];
         if (!last || spec.kind === 'main') actions.push({ label: '건너뛰기', value: 'skip' });

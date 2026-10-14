@@ -38,14 +38,20 @@ export function PlanLotsCard({ lots }: { lots: readonly PlanLotRow[] }) {
   const visible = showAll ? rows : rows.slice(0, SHOW_LIMIT);
   return (
     <Card petKey="card:productionPlans.lots">
+      {/* 글자 크기를 키워 칸이 좁아지면 LOT 종류 칩이 카드 밖으로 나가므로 다음 줄로 내린다 */}
       <CardHead
+        className="h-auto min-h-11 flex-wrap py-1.5"
         title="생산 LOT"
         meta={`${lots.length}개`}
-        actions={TYPES.map((t) => (
-          <Chip key={t} on={t === type} onClick={() => setPicked(t)} disabled={!present.includes(t)} data-pet-term={`${LOT_TYPE_LABEL[t]} LOT`}>
-            {LOT_TYPE_LABEL[t]} <b>{lots.filter((l) => l.lotType === t).length}</b>
-          </Chip>
-        ))}
+        actions={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {TYPES.map((t) => (
+              <Chip key={t} on={t === type} onClick={() => setPicked(t)} disabled={!present.includes(t)} data-pet-term={`${LOT_TYPE_LABEL[t]} LOT`}>
+                {LOT_TYPE_LABEL[t]} <b>{lots.filter((l) => l.lotType === t).length}</b>
+              </Chip>
+            ))}
+          </div>
+        }
       />
       <CardBody flush>
         {rows.length === 0 ? (
