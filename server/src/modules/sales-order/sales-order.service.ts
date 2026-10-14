@@ -402,7 +402,10 @@ export class SalesOrderService {
   private toSummary(row: SalesOrderRow, ctx: ReadContext): SalesOrderSummary {
     const items = row.salesOrderItems.map((i) => this.toFulfillment(i, ctx));
     const live = items.filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED);
-    const measured = live.length > 0 ? live : items;
+    const salesOrderStatus = salesOrderStatusOf(items.map((i) => i.salesOrderItemStatus));
+    // 진행률은 진행 중이면 취소 품목을 빼고 센다. 취소로 끝난 수주는 모든 품목으로 세서(부분 출고 뒤 잔량 취소면 출고 ÷ 전체 주문)
+    // 헤더가 취소인데 남은 출하완료 품목만으로 100%가 되지 않게 한다
+    const measured = salesOrderStatus === SALES_ORDER_ITEM_STATUS.CANCELLED || live.length === 0 ? items : live;
     return {
       id: row.id,
       salesOrderNo: row.salesOrderNo,
@@ -410,7 +413,7 @@ export class SalesOrderService {
       customerName: row.customer.customerName,
       ownerEmployeeId: row.ownerEmployeeId,
       ownerEmployeeName: row.ownerEmployee.employeeName,
-      salesOrderStatus: salesOrderStatusOf(items.map((i) => i.salesOrderItemStatus)),
+      salesOrderStatus,
       itemCount: items.length,
       totalOrderedQty: items.reduce((sum, i) => sum + i.orderedQty, 0),
       totalOrderedTon: sumTon(items.map((i) => i.orderedTon)),
