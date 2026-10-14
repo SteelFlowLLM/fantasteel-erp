@@ -391,8 +391,9 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
                 ) : (
                   <span>
                     상위 히트{' '}
+                    {/* 히트 LOT id는 근거 검사(evidence)에만 있다. 없으면 lot=0으로 가서 목록 첫 LOT이 열렸으니, 그때는 히트 번호로 LOT 추적을 연다 (검사 입력의 상위 히트 링크와 같음) */}
                     {row.heatNo ? (
-                      <Link href={rejectedHref(evidence?.lot.lotId ?? 0)} className="font-mono text-run hover:underline">
+                      <Link href={evidence ? rejectedHref(evidence.lot.lotId) : lotTraceHref(row.heatNo)} className="font-mono text-run hover:underline">
                         {row.heatNo}
                       </Link>
                     ) : null}{' '}

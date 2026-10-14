@@ -38,6 +38,9 @@ function TermBadge({ term, tone }: { term: string; tone?: BadgeTone }) {
   );
 }
 
+/** 측정값 마지막 칸에서 Enter를 누르면 옮겨 갈 저장 버튼 */
+const SUBMIT_ID = 'inspection-submit';
+
 export interface InspectionFormProps {
   detail: InspectionDetail;
   canEdit: boolean;
@@ -126,8 +129,10 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
           {/* 280px씩 채우면 1440 화면에서 3칸이라 항목 4개(슬래브 표면·치수 등)가 3 + 1로 남는다: 넓은 화면에서 4개·7개 이상이면 4칸 (5·6개는 3칸) */}
           <div className={cn('grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3', (rows.length === 4 || rows.length >= 7) && 'min-[1400px]:grid-cols-4')}>
-            {rows.map(({ item, text, preview, dirty }) => {
+            {rows.map(({ item, text, preview, dirty }, index) => {
               const id = `qi-${item.inspectionStandardItemId}`;
+              const next = rows[index + 1];
+              const nextId = next ? `qi-${next.item.inspectionStandardItemId}` : SUBMIT_ID;
               const bad = preview.state === 'fail';
               const band = thicknessBandText(item.minThicknessMm, item.maxThicknessMm);
               const serverError = serverErrors[`values.${item.inspectionStandardItemId}`];
@@ -171,7 +176,11 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                       setRaw((prev) => ({ ...prev, [item.inspectionStandardItemId]: value }));
                     }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') submit();
+                      // Enter는 저장이 아니라 다음 칸으로: 값 하나만 넣고 습관처럼 누르면 판정 대기 기록과 작업 로그가 남았다.
+                      // 마지막 칸에서는 저장 버튼으로 옮겨, 저장은 한 번 더 누르는 동작이 되게 한다
+                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                      event.preventDefault();
+                      document.getElementById(nextId)?.focus();
                     }}
                   />
                   <LimitGauge item={item} value={preview.state === 'empty' ? null : text} bad={bad} />
@@ -225,7 +234,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
               되돌리기
             </Button>
           ) : null}
-          <Button variant="primary" icon="check" disabled={!canSubmit} title={canEdit ? undefined : permissionNeedText([PERMISSION.INSPECTION_REGISTER])} onClick={submit}>
+          <Button id={SUBMIT_ID} variant="primary" icon="check" disabled={!canSubmit} title={canEdit ? undefined : permissionNeedText([PERMISSION.INSPECTION_REGISTER])} onClick={submit}>
             {register.isPending ? '저장하는 중…' : hasSavedValues ? '측정값 수정' : '검사 등록'}
           </Button>
         </div>
