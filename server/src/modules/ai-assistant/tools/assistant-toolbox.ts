@@ -99,6 +99,19 @@ export class AssistantToolbox {
     return [...this.tools.values()].map((tool) => tool.definition);
   }
 
+  /**
+   * 이 사용자가 이 도구들이 보여 주는 데이터를 모두 볼 수 있는지 (채팅에 남은 AI 답을 멤버마다 보일지 정할 때).
+   * 필요 권한 중 하나라도 VIEW 이상이면 된다. service가 따로 확인하는 조건(예: 구매요청의 부서장)은 여기서 알 수 없어
+   * 권한만 본다 — 못 보는 쪽으로 기운다. 모르는 도구는 볼 수 없다고 본다.
+   */
+  canViewAll(user: AuthUser, toolNames: readonly string[]): boolean {
+    return toolNames.every((name) => {
+      const permissions = this.tools.get(name)?.access.permissions;
+      if (!permissions) return false;
+      return permissions.length === 0 || permissions.some((permission) => hasPermission(user, { permission, level: 'VIEW' }));
+    });
+  }
+
   async run(user: AuthUser, call: LlmToolCall): Promise<ToolRunResult> {
     const tool = this.tools.get(call.name);
     if (!tool) return failure(`없는 도구예요: ${call.name}`);

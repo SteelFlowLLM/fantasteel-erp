@@ -24,8 +24,13 @@ import {
   inlineEmoticonText,
   isMessageEmoticonKey,
   aiQuestionOf,
+  aiReplyContent,
   aiReplyTextOf,
   mentionsAi,
+  parseAiReply,
+  AI_TYPING_EMPLOYEE_ID,
+  TYPING_SEND_INTERVAL_MS,
+  type TypingEvent,
   type AiAssistantReplyView,
   type AiAssistantSourceKind,
   type AiAssistantTurn,
@@ -54,6 +59,7 @@ import {
   type WorkRoomSalesOrderView,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { AuthUserService } from '../../common/auth/auth-user.service';
 import { BusinessEventRecorder, type RecordedBusinessEvent } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { StorageService } from '../../common/storage/storage.service';
@@ -220,8 +226,12 @@ const AI_QUESTION_MAX = 1000;
 /** AI 답 본문: 누구 질문인지, 답, 출처 */
 function aiReplyContentOf(askerName: string, reply: AiAssistantReplyView): string {
   const sources = reply.sources.map((s) => `${AI_SOURCE_KIND_LABEL[s.kind]} · ${s.label}`);
-  return `${AI_REPLY_PREFIX}${askerName}님의 질문에 답해요\n\n${reply.answer}${sources.length ? `\n\n출처: ${sources.join(' / ')}` : ''}`;
+  const dataTools = reply.sources.filter((s) => s.kind === 'DATA').map((s) => s.id);
+  return aiReplyContent(`${askerName}님의 질문에 답해요\n\n${reply.answer}${sources.length ? `\n\n출처: ${sources.join(' / ')}` : ''}`, dataTools);
 }
+
+/** 조회 데이터로 답한 AI 답을 볼 수 없는 멤버의 목록 미리보기 */
+const HIDDEN_AI_REPLY_PREVIEW = 'AI 어시스턴트가 답했어요';
 
 /** 업무 번호 → 링크. 메시지 여러 건의 번호를 모아 종류별로 한 번씩만 찾는다 */
 type ErpLinkResolver = (content: string | null) => ErpLink[];
@@ -293,7 +303,21 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     private readonly gateway: MessengerGateway,
     private readonly businessEvents: BusinessEventRecorder,
     private readonly aiAssistant: AiAssistantService,
+    private readonly authUsers: AuthUserService,
   ) {}
+
+  /** 조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 있는 멤버에게만 보인다. 다른 메시지는 모두에게 */
+  private canSee(viewer: AuthUser, content: string | null): boolean {
+    const dataTools = parseAiReply(content)?.dataTools ?? [];
+    return dataTools.length === 0 || this.aiAssistant.canViewData(viewer, dataTools);
+  }
+
+  /** 소켓으로 보낼 때 같은 기준으로 멤버를 거른다 (사원을 읽지 못하면 보내지 않는다) */
+  private async membersWhoCanSee(content: string | null, memberIds: readonly number[]): Promise<number[]> {
+    if ((parseAiReply(content)?.dataTools ?? []).length === 0) return [...memberIds];
+    const users = await Promise.all(memberIds.map((id) => this.authUsers.load(id)));
+    return users.flatMap((viewer) => (viewer && this.canSee(viewer, content) ? [viewer.employeeId] : []));
+  }
 
   /** 수주 작업 로그가 기록되면 같은 tx에서 그 수주의 업무방에 진행 알림을 남긴다 (다른 모듈 코드를 고치지 않으려고 기록기에 건다) */
   onModuleInit(): void {
@@ -335,7 +359,8 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
 
   /** 방 멤버 전원에게 새 메시지를 보낸다 (안 읽은 사람 수·ERP 링크 포함) */
   private async emitNewMessage(message: MessageWithSender): Promise<void> {
-    const memberIds = (await this.repository.findMemberIds(this.prisma, message.chatRoomId)).map((m) => m.employeeId);
+    const allMemberIds = (await this.repository.findMemberIds(this.prisma, message.chatRoomId)).map((m) => m.employeeId);
+    const memberIds = await this.membersWhoCanSee(message.content, allMemberIds);
     const reads = await this.repository.findMemberReads(this.prisma, message.chatRoomId);
     const erpLinksOf = await this.erpLinkResolver([message.content]);
     const unread = unreadMemberCountOf(message, reads);
@@ -379,7 +404,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
               senderName: last.senderId === null ? (aiReplyTextOf(last.content) === null ? SYSTEM_SENDER_NAME : AI_SENDER_NAME) : (lastSender?.employeeName ?? '-'),
               isMine: last.senderId === me,
               isSystem: last.senderId === null,
-              preview: lastPreviewOf(last),
+              preview: last.senderId === null && !this.canSee(user, last.content) ? HIDDEN_AI_REPLY_PREVIEW : lastPreviewOf(last),
               createdAt: last.createdAt.toISOString(),
             }
           : null,
@@ -644,7 +669,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
     const limit = query.limit ?? MESSAGE_PAGE_SIZE;
     const rows = await this.repository.findMessagesBefore(this.prisma, chatRoomId, query.before, limit + 1);
-    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit).reverse(), rows.length > limit);
+    return this.toPage(chatRoomId, user, rows.slice(0, limit).reverse(), rows.length > limit);
   }
 
   /** 파일 모아보기: 첨부가 있는 메시지만 최신순으로 (before로 더 보기) */
@@ -652,7 +677,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
     const limit = query.limit ?? MESSAGE_PAGE_SIZE;
     const rows = await this.repository.findAttachmentMessagesBefore(this.prisma, chatRoomId, query.before, limit + 1);
-    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit), rows.length > limit);
+    return this.toPage(chatRoomId, user, rows.slice(0, limit), rows.length > limit);
   }
 
   /** 방 안 메시지 검색: 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시, before로 더 보기) */
@@ -662,14 +687,15 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
     const limit = query.limit ?? MESSAGE_SEARCH_SIZE;
     const rows = await this.repository.searchMessages(this.prisma, chatRoomId, keyword, query.before, limit + 1);
-    return this.toPage(chatRoomId, user.employeeId, rows.slice(0, limit), rows.length > limit);
+    return this.toPage(chatRoomId, user, rows.slice(0, limit), rows.length > limit);
   }
 
-  /** 메시지 목록 응답: 멤버 읽음 위치를 한 번 읽어 메시지마다 안 읽은 사람 수를 붙인다 */
-  private async toPage(chatRoomId: number, me: number, rows: readonly MessageWithSender[], hasMore: boolean): Promise<ChatMessagePage> {
+  /** 메시지 목록 응답: 멤버 읽음 위치를 한 번 읽어 메시지마다 안 읽은 사람 수를 붙인다. 볼 권한이 없는 AI 답은 뺀다 */
+  private async toPage(chatRoomId: number, viewer: AuthUser, allRows: readonly MessageWithSender[], hasMore: boolean): Promise<ChatMessagePage> {
+    const rows = allRows.filter((m) => this.canSee(viewer, m.content));
     const reads = await this.repository.findMemberReads(this.prisma, chatRoomId);
     const erpLinksOf = await this.erpLinkResolver(rows.map((m) => m.content));
-    return { items: rows.map((m) => toMessageView(m, me, unreadMemberCountOf(m, reads), erpLinksOf)), hasMore };
+    return { items: rows.map((m) => toMessageView(m, viewer.employeeId, unreadMemberCountOf(m, reads), erpLinksOf)), hasMore };
   }
 
   /** 본문들의 업무 번호를 모아 실제로 있는 문서만 링크로 바꾸는 함수를 만든다 (REQ-MSG-006) */
@@ -892,16 +918,34 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     if (!question) {
       text = `${AI_REPLY_PREFIX}@AI 뒤에 묻고 싶은 내용을 적어 주세요`;
     } else {
+      const stopTyping = this.startAiTyping(chatRoomId);
       try {
-        const reply = await this.aiAssistant.ask(user, { question, screen: await this.aiScreenOf(chatRoomId), history: await this.aiHistoryOf(chatRoomId, messageId) });
+        const reply = await this.aiAssistant.ask(user, { question, screen: await this.aiScreenOf(chatRoomId), history: await this.aiHistoryOf(user, chatRoomId, messageId) });
         text = aiReplyContentOf(user.employeeName, reply);
       } catch (error) {
         if (!(error instanceof AppException)) this.logger.error(`@AI 답 만들기 실패 (메시지 ${messageId}): ${String(error)}`);
         text = `${AI_REPLY_PREFIX}${user.employeeName}님의 질문에 답하지 못했어요. ${error instanceof AppException ? error.message : '잠시 뒤 다시 물어봐 주세요'}`;
+      } finally {
+        stopTyping();
       }
     }
     const saved = await this.prisma.$transaction((tx) => this.repository.createSystemMessage(tx, chatRoomId, text));
     await this.emitNewMessage(saved);
+  }
+
+  /** AI가 답을 만드는 동안 방 멤버에게 '입력 중'을 보낸다. 화면은 몇 초 뒤 표시를 지우므로 같은 간격으로 계속 보내고, 돌려주는 함수로 멈춘다 */
+  private startAiTyping(chatRoomId: number): () => void {
+    const event: TypingEvent = { chatRoomId, employeeId: AI_TYPING_EMPLOYEE_ID, employeeName: AI_SENDER_NAME };
+    const send = () => {
+      void this.repository
+        .findMemberIds(this.prisma, chatRoomId)
+        .then((members) => this.gateway.emitTyping(members.map((m) => m.employeeId), event))
+        .catch((error: unknown) => this.logger.warn(`AI 입력 중 발송 실패 (방 ${chatRoomId}): ${String(error)}`));
+    };
+    send();
+    const timer = setInterval(send, TYPING_SEND_INTERVAL_MS);
+    timer.unref();
+    return () => clearInterval(timer);
   }
 
   /** AI가 '이 수주'를 알아듣도록 업무방이면 연결 수주 번호를 맥락에 준다 */
@@ -912,10 +956,11 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 질문 직전 대화 (오래된 순). 사람 말은 이름을 붙여 user로, AI 답은 assistant로. 삭제·일반 시스템 메시지·글 없는 메시지는 뺀다 */
-  private async aiHistoryOf(chatRoomId: number, beforeMessageId: number): Promise<AiAssistantTurn[]> {
+  private async aiHistoryOf(asker: AuthUser, chatRoomId: number, beforeMessageId: number): Promise<AiAssistantTurn[]> {
     const recent = await this.repository.findMessagesBefore(this.prisma, chatRoomId, beforeMessageId, AI_HISTORY_MESSAGES);
     return recent.reverse().flatMap((message): AiAssistantTurn[] => {
-      if (message.deletedAt || !message.content) return [];
+      // 묻는 사람이 볼 수 없는 AI 답은 맥락에도 넣지 않는다 (그 데이터가 질문자에게 새지 않게)
+      if (message.deletedAt || !message.content || !this.canSee(asker, message.content)) return [];
       const aiText = aiReplyTextOf(message.content);
       if (aiText !== null) return [{ role: 'assistant', content: aiText }];
       if (message.sender === null) return [];

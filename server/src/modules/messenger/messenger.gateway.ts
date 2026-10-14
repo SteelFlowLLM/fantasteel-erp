@@ -82,6 +82,11 @@ export class MessengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     for (const employeeId of others) this.emit(employeeId, MESSENGER_EVENT.TYPING, event);
   }
 
+  /** 입력 중 표시를 멤버에게 보낸다 (사람은 handleTyping, AI 답을 만드는 동안은 service가 부른다) */
+  emitTyping(memberIds: readonly number[], event: TypingEvent): void {
+    for (const employeeId of memberIds) this.emit(employeeId, MESSENGER_EVENT.TYPING, event);
+  }
+
   /** 멤버마다 isMine이 달라서 사원별로 보낸다 */
   emitMessage(memberIds: readonly number[], toView: (employeeId: number) => ChatMessageView): void {
     for (const employeeId of memberIds) this.emit(employeeId, MESSENGER_EVENT.MESSAGE_NEW, toView(employeeId));

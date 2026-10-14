@@ -5,7 +5,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { io } from 'socket.io-client';
-import { MESSENGER_EVENT, MESSENGER_SOCKET_NAMESPACE, TYPING_SEND_INTERVAL_MS, type PresenceChangedEvent, type PresenceSnapshotEvent, type TypingEvent } from '@fantasteel/shared';
+import { AI_TYPING_EMPLOYEE_ID, MESSENGER_EVENT, MESSENGER_SOCKET_NAMESPACE, TYPING_SEND_INTERVAL_MS, type PresenceChangedEvent, type PresenceSnapshotEvent, type TypingEvent } from '@fantasteel/shared';
 import { serverOrigin } from '@/api/http';
 import { messengerKeys } from '@/api/messenger';
 import { useMe } from '@/hooks/useMe';
@@ -35,9 +35,10 @@ export function useMessengerSocket(): void {
       connectedBefore = true;
     });
     socket.on('disconnect', () => live.setConnected(false));
-    socket.on(MESSENGER_EVENT.MESSAGE_NEW, (message: { chatRoomId: number; senderId: number }) => {
-      // 메시지가 오면 그 사람의 입력 중 표시는 끝난 것이다
-      live.clearTyping(message.chatRoomId, message.senderId);
+    socket.on(MESSENGER_EVENT.MESSAGE_NEW, (message: { chatRoomId: number; senderId: number | null; isAi: boolean }) => {
+      // 메시지가 오면 그 사람의 입력 중 표시는 끝난 것이다. AI 답은 보낸 사원이 없어 AI 자리로 지운다
+      const typer = message.isAi ? AI_TYPING_EMPLOYEE_ID : message.senderId;
+      if (typer !== null) live.clearTyping(message.chatRoomId, typer);
       refreshMessenger(queryClient, true);
     });
     socket.on(MESSENGER_EVENT.MESSAGE_UPDATED, () => refreshMessenger(queryClient, false));

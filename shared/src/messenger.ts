@@ -161,6 +161,26 @@ export const AI_SENDER_NAME = 'AI 어시스턴트';
  * 본문 맨 앞의 이 표시로 구분한다. 응답(ChatMessageView)에서는 표시를 떼고 isAi로 알린다.
  */
 export const AI_REPLY_PREFIX = '[AI 어시스턴트] ';
+/** AI 답 접두어의 공통 앞부분 (조회 도구를 쓴 답은 '[AI 어시스턴트:get_inventory] ') */
+export const AI_REPLY_MARK = '[AI 어시스턴트';
+/** 입력 중 표시에서 AI의 사원 id (화면이 보낸 사원 없는 메시지의 senderId로 쓰는 0과 같다) */
+export const AI_TYPING_EMPLOYEE_ID = 0;
+
+const AI_REPLY_HEAD = /^\[AI 어시스턴트(?::([a-z_]+(?:,[a-z_]+)*))?\] /;
+
+/**
+ * AI 답 본문을 저장 모양으로 만든다. 조회 도구(데이터)를 쓴 답은 쓴 도구 이름을 접두어에 함께 적어,
+ * 그 데이터를 볼 권한이 있는 멤버에게만 보이게 하는 데 쓴다 (message에 따로 칸이 없다).
+ */
+export function aiReplyContent(text: string, dataTools: readonly string[] = []): string {
+  return `${dataTools.length > 0 ? `${AI_REPLY_MARK}:${dataTools.join(',')}] ` : AI_REPLY_PREFIX}${text}`;
+}
+
+/** 저장된 본문이 AI 답이면 글과 쓴 조회 도구 이름, 아니면 null */
+export function parseAiReply(content: string | null): { text: string; dataTools: string[] } | null {
+  const head = content === null ? null : AI_REPLY_HEAD.exec(content);
+  return head && content !== null ? { text: content.slice(head[0].length), dataTools: head[1] ? head[1].split(',') : [] } : null;
+}
 
 /** '@AI' 뒤에 영문·숫자가 이어지지 않는 호출만 (@AI야·@AI, 는 호출, @AIR는 아님) */
 const AI_MENTION_PATTERN = /(^|\s)@AI(?![A-Za-z0-9_])/i;
@@ -180,7 +200,7 @@ export function aiQuestionOf(content: string): string {
 
 /** 저장된 본문이 AI 답이면 표시를 뗀 글, 아니면 null */
 export function aiReplyTextOf(content: string | null): string | null {
-  return content?.startsWith(AI_REPLY_PREFIX) ? content.slice(AI_REPLY_PREFIX.length) : null;
+  return parseAiReply(content)?.text ?? null;
 }
 
 /** 삭제된 메시지 자리에 보이는 문구 */

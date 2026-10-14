@@ -46,6 +46,11 @@ export class AiAssistantService {
     };
   }
 
+  /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
+  canViewData(user: AuthUser, toolNames: readonly string[]): boolean {
+    return this.toolbox.canViewAll(user, toolNames);
+  }
+
   async ask(user: AuthUser, input: AiAssistantMessageInput): Promise<AiAssistantReplyView> {
     const settings = await this.settingsStore.read();
     if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
