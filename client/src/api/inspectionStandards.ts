@@ -2,7 +2,7 @@
 // - 품질 담당이 관리한다: 변경은 검사 기준 관리(INSPECTION_STANDARD_MANAGE) 사용 권한이 있어야 한다 (서버가 확인, 없으면 COM-002).
 // - 고치는 대신 새 버전을 만든다. 이전 버전은 읽기 전용으로 남는다.
 // - 삭제는 코드 단위(모든 버전)이고, 어느 버전이든 검사가 판정에 썼으면 거부한다 (서버와 같은 규칙).
-// - 검사 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드 29개 안에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
+// - 검사 기준 변경에 맞는 BUSINESS_EVENT_TYPE이 공통 코드에 없어 작업 로그는 남기지 않는다 (docs/rework/areas/master.md).
 // 서버를 부른다 (api/server/inspectionStandards.ts). 입력 확인은 서버를 부르기 전에 이 파일에서 먼저 한다.
 import { type ProcessType } from '@/codes';
 import { FieldErrors, InputError } from '@/api/errors';

@@ -306,9 +306,9 @@ export class ProductionService {
 
   /**
    * 히트 편성 확정 (API-204): 시작 전(PLANNED) 계획의 히트 수를 지금 기준정보로 다시 계산해 저장한다.
-   * 계획 상태 "편성 확정"은 두지 않고(SPEC 5장), 공통 코드에 확정 이벤트가 없어 작업 로그는 남기지 않는다.
+   * 계획 상태 "편성 확정"은 두지 않는다(SPEC 5장). 히트 수가 그대로여도 누가 확정했는지 작업 로그(HEAT_PLAN_CONFIRMED)를 남긴다.
    */
-  async confirmHeatPlan(id: number): Promise<ProductionPlanDetail> {
+  async confirmHeatPlan(user: AuthUser, id: number): Promise<ProductionPlanDetail> {
     await this.prisma.$transaction(async (tx) => {
       const locked = await this.repository.lockPlan(tx, id);
       if (!locked) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
@@ -317,6 +317,15 @@ export class ProductionService {
       if (!plan) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
       const formation = await this.heatFormationOf(tx, plan);
       if (formation.heatCount !== plan.heatCount) await this.repository.updatePlan(tx, id, { heatCount: formation.heatCount });
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.HEAT_PLAN_CONFIRMED,
+        actor: user,
+        target: { table: 'production_plan', id },
+        salesOrderId: plan.salesOrderItem?.salesOrder.id ?? null,
+        before: planSnapshot(plan),
+        after: { ...planSnapshot(plan), heatCount: formation.heatCount, heatTon: formation.heatTon, requiredMoltenSteelTon: formation.requiredMoltenSteelTon },
+        reason: `생산계획 ${plan.productionPlanNo} 히트 편성 확정 (히트 ${plan.heatCount}개 → ${formation.heatCount}개)`,
+      });
     });
     return this.getPlanDetail(id);
   }

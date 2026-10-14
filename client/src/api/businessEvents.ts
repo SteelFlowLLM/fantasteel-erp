@@ -1,7 +1,7 @@
 // 작업 로그 조회와 이력 재현 (REQ-LOG-001~003, BP-LOG-01, 업무 프로세스 12.2 GET /business-events?salesOrderId=).
 // - 기록은 서버가 각 업무 변경과 같은 트랜잭션에서 남긴다. 여기는 읽기만 한다(수정·삭제 없음).
 // - 이력 재현: 수주(business_event.sales_order_id) 또는 LOT(business_event_lot) 단위, 오래된 순, 같은 시각이면 id 순.
-// - 전체 작업 로그는 최신순. 필터: 유형(29개), 주체(사용자·시스템), 대상(테이블), 기간(Asia/Seoul 날짜, 시작·끝 포함).
+// - 전체 작업 로그는 최신순. 필터: 유형(31개), 주체(사용자·시스템), 대상(테이블), 기간(Asia/Seoul 날짜, 시작·끝 포함).
 // - 작업 로그는 모든 사원이 여는 화면이다(screens.ts). 서버를 부른다 (api/server/businessEvents.ts).
 import { type ActorType, type BusinessEventType, type EventReasonCode, type LotType } from '@/codes';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';

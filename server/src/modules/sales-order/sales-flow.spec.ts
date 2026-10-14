@@ -366,6 +366,31 @@ describe('출하요청 (REQ-SHP-001)', () => {
     expect(await codeOf(shipments.cancel(sales, first.id))).toBe('COM-001');
   });
 
+  it('출하요청 취소는 배정이 없어도 수주마다 작업 로그(SHIPMENT_REQUEST_CANCELLED)를 남긴다 (REQ-LOG-002)', async () => {
+    const itemId = await nextSlabItemId();
+    await addSlabs(itemId, 3);
+    const a = await createSalesOrder(itemId, 2);
+    const b = await createSalesOrder(itemId, 1);
+    const items = await prisma.salesOrderItem.findMany({ where: { salesOrderId: { in: [a.salesOrderId, b.salesOrderId] } }, orderBy: { id: 'asc' } });
+    const request = await shipments.create(sales, { customerId: customerA, items: items.map((i) => ({ salesOrderItemId: i.id, requestQty: i.orderedQty })) });
+
+    await shipments.cancel(sales, request.id);
+    const cancelledEvents = () =>
+      prisma.businessEvent.findMany({ where: { targetType: 'shipment_request', targetId: request.id, businessEventType: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CANCELLED }, orderBy: { salesOrderId: 'asc' } });
+    const events = await cancelledEvents();
+    expect(events.map((e) => [e.salesOrderId, e.actorEmployeeId])).toEqual([
+      [a.salesOrderId, sales.employeeId],
+      [b.salesOrderId, sales.employeeId],
+    ]);
+    expect(events[0]).toMatchObject({
+      beforeData: { shipmentRequestStatus: 'REQUESTED' },
+      afterData: { shipmentRequestNo: request.shipmentRequestNo, shipmentRequestStatus: 'CANCELLED', items: [{ salesOrderItemId: items[0].id, requestQty: 2 }] },
+    });
+    // 이미 취소된 요청을 다시 취소하면 COM-001이고 작업 로그도 늘지 않는다
+    expect(await codeOf(shipments.cancel(sales, request.id))).toBe('COM-001');
+    expect(await cancelledEvents()).toHaveLength(2);
+  });
+
   it('출고 확정된 출하요청 취소 → SHP-003', async () => {
     const itemId = await nextSlabItemId();
     await addSlabs(itemId, 1);
