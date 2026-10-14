@@ -9,6 +9,8 @@ import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
 import { GLOSSARY_SEARCH_LIMIT, searchGlossary } from './knowledge/glossary.search';
+import { MANUAL_GUIDES } from './knowledge/manual.generated';
+import { findManualGuides, MANUAL_MATCH_LIMIT } from './knowledge/manual.search';
 import { PROCESS_STEPS } from './knowledge/process.generated';
 import { findProcessSteps, PROCESS_MATCH_LIMIT } from './knowledge/process.search';
 
@@ -270,5 +272,46 @@ describe('업무 프로세스 자료 (수주~출하 순서)', () => {
       { kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' },
       { kind: 'PROCESS', id: 'BP-SHP-01', label: '출하·출고·밀시트' },
     ]);
+  });
+});
+
+describe('업무 매뉴얼 자료 (화면 절차)', () => {
+  const build = (question: string) =>
+    buildAssistantMessages({ employeeName: '김영업', roleLabel: '영업', today: '2026-10-14', screen: null, references: [], manualGuides: findManualGuides(question), history: [], question })[0].content;
+
+  it('매뉴얼은 초안의 네 업무를 업무 프로세스 ID와 짝지어 읽는다', () => {
+    expect(MANUAL_GUIDES.map((g) => g.processId)).toEqual(['BP-SO-01', 'BP-PUR-01', 'BP-QC-01', 'BP-SHP-01']);
+    expect(MANUAL_GUIDES.every((g) => PROCESS_STEPS.some((s) => s.id === g.processId))).toBe(true);
+    expect(MANUAL_GUIDES.every((g) => !g.text.includes('근거 파일') && !g.text.includes('🟡') && !g.text.includes('**'))).toBe(true);
+  });
+
+  it('화면 절차를 묻고 업무 이름이 들어 있을 때만 그 업무 매뉴얼을 넘긴다', () => {
+    expect(findManualGuides('구매요청은 어떻게 등록해?').map((g) => g.id)).toEqual(['MAN-PUR-01']);
+    expect(findManualGuides('출고 확정은 어디서 눌러?').map((g) => g.id)).toEqual(['MAN-SHP-01']);
+    expect(findManualGuides('수주 등록 화면에서 뭘 입력해?').map((g) => g.id)).toEqual(['MAN-SO-01']);
+    expect(findManualGuides('검사 결과는 어떻게 입력해?').map((g) => g.id)).toEqual(['MAN-QC-01']);
+    expect(findManualGuides('수주 출고 검사는 어떻게 해?').length).toBeLessThanOrEqual(MANUAL_MATCH_LIMIT);
+  });
+
+  it('절차를 묻지 않거나 맞는 업무가 없으면 매뉴얼을 넘기지 않는다', () => {
+    expect(findManualGuides('수주부터 출하까지 순서 알려줘')).toEqual([]);
+    expect(findManualGuides('예약이 뭐야?')).toEqual([]);
+    expect(findManualGuides('부서장은 어떻게 지정해?')).toEqual([]);
+  });
+
+  it('프롬프트에 매뉴얼 자료와 인용 규칙을 넣고, 없을 때는 넣지 않는다', () => {
+    const withGuide = build('구매요청은 어떻게 등록해?');
+    expect(withGuide).toContain('[업무 매뉴얼 자료]');
+    expect(withGuide).toContain('[MAN-PUR-01] 구매요청 등록 화면 절차');
+    expect(withGuide).toContain('구매요청 등록');
+    expect(withGuide).toContain('그 매뉴얼 ID를 붙여요');
+    expect(build('예약이 뭐야?')).not.toContain('[MAN-PUR-01]');
+  });
+
+  it('[MAN-…] 표시를 지우고 넘긴 매뉴얼만 MANUAL 출처로 둔다', () => {
+    const guides = findManualGuides('출고 확정은 어떻게 해?');
+    const parsed = parseAssistantAnswer('출고 확정 버튼을 눌러요 [MAN-SHP-01, MAN-XXX-99].', [], [], guides);
+    expect(parsed.answer).toBe('출고 확정 버튼을 눌러요.');
+    expect(parsed.sources).toEqual([{ kind: 'MANUAL', id: 'MAN-SHP-01', label: '출고 확정' }]);
   });
 });

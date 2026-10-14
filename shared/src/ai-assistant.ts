@@ -24,8 +24,8 @@ export interface AiAssistantMessageInput {
   history?: AiAssistantTurn[];
 }
 
-/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 조회 데이터. 업무 매뉴얼·사례 번호는 다음 단계 */
-export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'DATA';
+/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), 조회 데이터. 사례 번호는 다음 단계 */
+export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'DATA';
 
 export interface AiAssistantSource {
   kind: AiAssistantSourceKind;
