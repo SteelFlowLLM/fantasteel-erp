@@ -1,7 +1,7 @@
 'use client';
 
 // 제품 규격 (REQ-MST-003): 강종 × 두께 × 폭 × 길이, 1매 이론중량(소수 3자리), 규격 코드 SL-/CL-강종-두께x폭x길이.
-// 같은 조합은 화면에서 먼저 막고, 쓰인 규격의 치수·이론중량 수정은 서버가 거부한다(MST-002). 규격 삭제 API는 없다.
+// 같은 조합은 화면에서 먼저 막고, 쓰인 규격의 치수·이론중량 수정은 서버가 거부한다(MST-002). 삭제는 쓰는 곳이 없을 때만 서버가 허용한다(API-275).
 import { useMemo, useState, type ReactNode } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
 import { masterDataApi, type MasterProductSpecView } from '@/api/masterData';
@@ -15,7 +15,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
-import { ButtonGroupField, CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { ButtonGroupField, CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, useMasterDelete, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSteelGrades, useMasterYards } from '@/hooks/useMasterData';
@@ -35,6 +35,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
   const [gradeFilter, setGradeFilter] = useState('');
   const [editing, setEditing] = useState<MasterProductSpecView | 'new' | null>(null);
+  const deletion = useMasterDelete();
 
   return (
     <Card petKey="card:masterData.specs">
@@ -101,6 +102,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                           <RowActions
                             canEdit={canEdit}
                             onEdit={() => setEditing(spec)}
+                            onDelete={() => deletion.open({ id: spec.id, name: spec.itemCode, object: '규격을', remove: masterDataApi.deleteItem })}
                           />
                         </Td>
                       </tr>
@@ -114,6 +116,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                 치수·이론중량을 바꿀 수 없어요(다른 치수는 새 규격으로 추가) · 쓰이지 않고 매핑도 없는 규격만 지울 수 있어요
               </TableFoot>
               {editing ? <ProductSpecModal spec={editing === 'new' ? null : editing} specs={rows} onClose={() => setEditing(null)} /> : null}
+              {deletion.dialog}
             </>
           );
         }}

@@ -330,5 +330,12 @@ export const masterDataApi = {
   getProductionSetting: (): Promise<MasterProductionSettingView | null> => serverMasterDataApi.getProductionSetting(),
 
   saveProductionSetting: (input: ProductionSettingInput): Promise<number> => serverMasterDataWriteApi.saveProductionSetting(input),
+
+  /** 기준정보 삭제 (API-275~279, [05] 7-2): 쓰는 곳이 있으면 서버가 COM-004와 쓰는 곳 이름으로 막는다. 품목은 원료·제품 규격 모두 */
+  deleteItem: (id: number): Promise<void> => serverMasterDataWriteApi.deleteItem(id),
+  deleteSteelGrade: (id: number): Promise<void> => serverMasterDataWriteApi.deleteSteelGrade(id),
+  deleteCustomer: (id: number): Promise<void> => serverMasterDataWriteApi.deleteCustomer(id),
+  deleteSupplier: (id: number): Promise<void> => serverMasterDataWriteApi.deleteSupplier(id),
+  deleteYard: (id: number): Promise<void> => serverMasterDataWriteApi.deleteYard(id),
 };
 
