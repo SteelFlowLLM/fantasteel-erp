@@ -1,8 +1,9 @@
-// 통합 검색 서버 모드: 수주·LOT·출하요청 목록 API를 번호로 찾아 정렬한다. 조회 권한이 없는 목록은 결과에서 빠진다.
+// 통합 검색 서버 모드: 수주·LOT·출하요청 목록 API를 번호로 찾아 정렬한다. 조회 권한이 없는 목록은 부르지 않아 결과에서 빠진다.
 import type { AuthUser } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fail, ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
-import { searchApi } from '@/api/search';
+import { canListSalesOrders, canListShipmentRequests, searchApi } from '@/api/search';
+import { emptyHint } from '@/features/shell/SearchBox';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 afterEach(() => stopFakeServer());
@@ -47,7 +48,7 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
     expect(calls.find((c) => c.path === '/shipment-requests')?.query).toMatchObject({ shipmentRequestNo: 'SO-2610-0010' });
   });
 
-  it('조회 권한이 없는 목록(403)은 빼고 나머지만 보인다. 두 글자보다 짧으면 서버를 부르지 않는다', async () => {
+  it('조회 권한이 없는 목록은 부르지 않고(글자마다 403이 나지 않게) 나머지만 보인다. 두 글자보다 짧으면 서버를 부르지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.quality, (c: ServerCall) => {
       if (c.path === '/auth/me') return ok(me({}));
       if (c.path === '/lots') return ok(lots);
@@ -55,6 +56,7 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
       return undefined;
     });
     expect((await searchApi.search('2610')).map((h) => h.kind)).toEqual(['LOT']);
+    expect(calls.map((c) => c.path).sort()).toEqual(['/auth/me', '/lots']);
     calls.length = 0;
     expect(await searchApi.search('S')).toEqual([]);
     expect(calls).toEqual([]);
@@ -70,17 +72,26 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
     expect(calls.map((c) => c.path).sort()).toEqual(['/auth/me', '/lots']);
   });
 
-  it('목록은 보이지만 그 화면을 열 권한이 없으면 수주는 작업 로그, 출하요청은 LOT 추적으로 연결한다', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.quality, (c: ServerCall) => {
-      if (c.path === '/auth/me') return ok(me({}));
-      if (c.path === '/sales-orders') return ok(page([{ id: 11, salesOrderNo: 'SO-2610-001' }]));
+  it('출하요청 목록은 보이지만(출고 확정 권한) 출하요청 화면을 열 권한이 없으면 LOT 추적으로 연결한다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.logistics, (c: ServerCall) => {
+      if (c.path === '/auth/me') return ok(me({ GOODS_ISSUE_CONFIRM: 'USE' }));
       if (c.path === '/lots') return ok(page([]));
       if (c.path === '/shipment-requests') return ok(shipmentRequests);
       return undefined;
     });
-    expect((await searchApi.search('2610')).map((h) => [h.kind, h.href])).toEqual([
-      ['SALES_ORDER', '/business-events?salesOrderId=11'],
-      ['SHIPMENT_REQUEST', '/lots/trace?shipmentRequestNo=DR-2610-0001'],
-    ]);
+    expect((await searchApi.search('2610')).map((h) => [h.kind, h.href])).toEqual([['SHIPMENT_REQUEST', '/lots/trace?shipmentRequestNo=DR-2610-0001']]);
+  });
+
+  it('목록 권한은 서버 조건과 같다: 수주 = 수주 등록 조회, 출하요청 = 출하요청 관리 또는 출고 확정 조회', () => {
+    expect(canListSalesOrders(me({ SALES_ORDER_CREATE: 'VIEW' }))).toBe(true);
+    expect(canListSalesOrders(me({ SALES_ORDER_CANCEL: 'USE' }))).toBe(false);
+    expect(canListShipmentRequests(me({ GOODS_ISSUE_CONFIRM: 'VIEW' }))).toBe(true);
+    expect(canListShipmentRequests(me({ INSPECTION_REGISTER: 'USE' }))).toBe(false);
+  });
+
+  it('결과가 없을 때 안내: LOT은 앞에서부터, 권한이 없어 빠진 종류를 말한다', () => {
+    expect(emptyHint(me({}))).toBe('LOT 번호는 앞에서부터 입력해 주세요 · 수주·출하요청 번호는 조회 권한이 있어야 찾을 수 있어요');
+    expect(emptyHint(me({ GOODS_ISSUE_CONFIRM: 'USE' }))).toBe('LOT 번호는 앞에서부터 입력해 주세요 · 수주 번호는 조회 권한이 있어야 찾을 수 있어요');
+    expect(emptyHint(me({ SALES_ORDER_CREATE: 'USE', SHIPMENT_REQUEST_MANAGE: 'USE' }))).toBe('LOT 번호는 앞에서부터 입력해 주세요');
   });
 });

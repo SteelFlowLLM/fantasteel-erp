@@ -33,7 +33,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 
 ### 서버 연결
 
-모든 화면이 실제 서버(`server/`)를 부른다. 상단 통합 검색은 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 결과에서 빠진다). 2026-10-13에 브라우저 안 가짜 DB(`client/src/mock/`)와 가짜 DB 모드의 계정 선택 화면을 지웠다.
+모든 화면이 실제 서버(`server/`)를 부른다. 상단 통합 검색은 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 부르지 않아 결과에서 빠지고, 결과가 없으면 그 이유를 한 줄로 안내한다). 2026-10-13에 브라우저 안 가짜 DB(`client/src/mock/`)와 가짜 DB 모드의 계정 선택 화면을 지웠다.
 
 1. `npm run dev`로 DB·서버·화면을 띄운다. 서버 주소는 `NEXT_PUBLIC_API_BASE_URL`(기본 `http://localhost:8787/api/v1`)이다.
 2. 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
