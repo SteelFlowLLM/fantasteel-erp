@@ -167,6 +167,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 
 **알림 연동**(REQ-MSG-005): 메시지 저장 tx 안에서 notification 서비스를 부른다. 멘션 대상은 본문을 해석하지 않고 요청의 `mentionedEmployeeIds`(사원 id 배열)로 받는다(2026-10-07 결정).
 - 멘션된 멤버 → MENTION. 업무방의 새 메시지 → 보낸 사람을 뺀 멤버에게 WORK_ROOM_MESSAGE. 방 멤버가 아닌 사원·나 자신 멘션은 무시한다. 첨부 메시지는 멘션을 받지 않는다(업무방 알림만).
+- 부서 멘션(@부서): 화면이 그 부서의 방 멤버(나 제외) 사원 id로 펼쳐 `mentionedEmployeeIds`로 보낸다. 방 밖 부서원에게는 보내지 않는다. P1의 부서 단위 알림(REQ-NTF-002)은 이것으로 채운다(2026-10-14 결정, notification.md 8장 "부서 알림 쓰는 곳").
 - 문구: MENTION `{보낸 사람}님이 멘션했어요 · {방 이름} · {미리보기}`, WORK_ROOM_MESSAGE `{방 이름} 새 메시지 · {보낸 사람}: {미리보기}`. 미리보기는 50자(가정값), 1:1 방 이름은 '1:1 채팅'. `link_path`는 아래 줄 참고.
 - 부분 unique `(message_id, recipient_id)` 때문에 한 메시지로 한 사람에게 알림은 1건뿐이다 → 업무방에서 멘션된 사람은 MENTION 1건만 만든다.
 - `link_path`는 `/messenger?room={방 id}&message={메시지 id}` — 알림을 누르면 그 메시지까지 이동해 강조한다. 업무방은 방 상단에서 수주 화면으로 이동한다(REQ-MSG-006).
