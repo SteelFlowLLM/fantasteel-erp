@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { ACTOR_TYPE, BUSINESS_EVENT_SORT, BUSINESS_EVENT_TYPE, BUSINESS_EVENT_TYPE_LABEL, LOT_TYPE, PROCESS_TYPE } from '@fantasteel/shared';
+import { ACTOR_TYPE, BUSINESS_EVENT_SORT, BUSINESS_EVENT_TYPE, BUSINESS_EVENT_TYPE_LABEL, CHAT_ROOM_TYPE, LOT_TYPE, PROCESS_TYPE } from '@fantasteel/shared';
 import { CommonModule } from '../../common/common.module';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { PrismaModule } from '../../prisma/prisma.module';
@@ -125,6 +125,26 @@ describe('BusinessEventService 작업 로그 조회 (API-238, REQ-LOG-003)', () 
     expect((await list({ businessEventType: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED })).items.map((e) => e.id)).toEqual([ev.inspected]);
     expect((await list({ actorType: ACTOR_TYPE.SYSTEM })).items.map((e) => e.id)).toEqual([ev.reserved]);
     expect((await list({ targetType: 'lot' })).items.map((e) => e.id)).toEqual([ev.lastMinute]);
+  });
+
+  it('원본 메시지가 있으면 그 메시지의 채팅방 id를 준다 (작업 로그 → 메신저 이동)', async () => {
+    const room = await prisma.chatRoom.create({ data: { chatRoomType: CHAT_ROOM_TYPE.GROUP, chatRoomName: `${P}방` } });
+    const message = await prisma.message.create({ data: { chatRoomId: room.id, senderId: employee.id, content: '철광석 20톤 필요해요' } });
+    seq += 1;
+    const row = await prisma.businessEvent.create({
+      data: {
+        businessEventNo: `${P}EV-${seq}`,
+        businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
+        actorType: ACTOR_TYPE.USER,
+        actorEmployeeId: employee.id,
+        targetType: 'action_draft',
+        targetId: 1,
+        messageId: message.id,
+        createdAt: new Date('2020-03-10T00:00:00.000Z'),
+      },
+    });
+    expect((await list({ from: '2020-03-10', to: '2020-03-10' })).items).toEqual([expect.objectContaining({ id: row.id, messageId: message.id, chatRoomId: room.id })]);
+    expect((await list({ salesOrderId })).items.map((e) => e.chatRoomId)).toEqual([null, null, null]);
   });
 
   it('기간은 서울 날짜로 시작·끝을 포함한다', async () => {

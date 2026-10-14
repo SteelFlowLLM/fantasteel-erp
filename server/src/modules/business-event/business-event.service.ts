@@ -64,14 +64,16 @@ export class BusinessEventService {
   private async toViews(rows: BusinessEventRow[]): Promise<BusinessEventView[]> {
     if (rows.length === 0) return [];
     const unique = (values: (number | null)[]) => [...new Set(values.filter((v): v is number => v !== null))];
-    const [employees, salesOrders, eventLots] = await Promise.all([
+    const [employees, salesOrders, messages, eventLots] = await Promise.all([
       this.repository.findEmployees(this.prisma, unique(rows.map((r) => r.actorEmployeeId))),
       this.repository.findSalesOrders(this.prisma, unique(rows.map((r) => r.salesOrderId))),
+      this.repository.findMessages(this.prisma, unique(rows.map((r) => r.messageId))),
       this.repository.findEventLots(this.prisma, rows.map((r) => r.id)),
     ]);
     const lots = new Map((await this.repository.findLots(this.prisma, unique(eventLots.map((l) => l.lotId)))).map((l) => [l.id, l]));
     const employeeById = new Map(employees.map((e) => [e.id, e]));
     const salesOrderNoById = new Map(salesOrders.map((s) => [s.id, s.salesOrderNo]));
+    const chatRoomIdByMessage = new Map(messages.map((m) => [m.id, m.chatRoomId]));
     const lotsByEvent = new Map<number, BusinessEventLotView[]>();
     for (const link of eventLots) {
       const lot = lots.get(link.lotId);
@@ -100,6 +102,7 @@ export class BusinessEventService {
         isAiAssisted: row.isAiAssisted,
         actionDraftId: row.actionDraftId,
         messageId: row.messageId,
+        chatRoomId: row.messageId === null ? null : (chatRoomIdByMessage.get(row.messageId) ?? null),
         occurredAt: row.createdAt.toISOString(),
         lots: lotsByEvent.get(row.id) ?? [],
       };

@@ -40,6 +40,8 @@ export interface BusinessEventView {
   isAiAssisted: boolean;
   actionDraftId: number | null;
   messageId: number | null;
+  /** 원본 메시지(messageId)의 채팅방 (message.chat_room_id). 화면이 메신저의 그 메시지로 이동할 때 쓴다 */
+  chatRoomId: number | null;
   /** 발생 시각 (created_at) */
   occurredAt: string;
   lots: BusinessEventLotView[];
