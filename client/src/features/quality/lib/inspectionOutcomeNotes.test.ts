@@ -35,4 +35,9 @@ describe('검사 저장 뒤 안내 문구', () => {
   it('판정 대기: 필수 항목이 비었다고 알린다', () => {
     expect(inspectionOutcomeNotes({ ...none, inspectionResult: 'PENDING' }, 'COIL', false)).toEqual(['필수 항목이 비어 있어 판정 대기로 저장했어요']);
   });
+
+  it('코일은 매수 단위를 개로 쓴다 (슬래브 매 · 코일 개)', () => {
+    const notes = inspectionOutcomeNotes({ ...none, inspectionResult: 'PASS', autoReservedQty: 1, surplusQty: 2 }, 'COIL', false, '개');
+    expect(notes).toEqual(['원래 수주 품목에 1개를 자동 예약했어요', '수주에 필요한 매수를 넘는 2개는 여재가 됐어요']);
+  });
 });

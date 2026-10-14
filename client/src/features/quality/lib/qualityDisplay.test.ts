@@ -7,6 +7,8 @@ import {
   inspectionResultOfSnapshot,
   limitText,
   measuredCardsPerRow,
+  qtyUnitOfItem,
+  qtyUnitOfLot,
   measuredValueChanges,
   previewOf,
   sameMeasuredValue,
@@ -131,5 +133,16 @@ describe('측정값 카드 한 줄 개수 (넓은 화면)', () => {
   it('마지막 줄이 더 꽉 차는 쪽(3 또는 4)을 고른다', () => {
     // 히트 성분 5개는 3 + 2, 슬래브 4개는 한 줄, 코일 6개는 3 + 3, 열연 16개는 4줄
     expect([1, 2, 3, 4, 5, 6, 7, 8, 9, 16].map(measuredCardsPerRow)).toEqual([1, 2, 3, 4, 3, 3, 4, 4, 3, 4]);
+  });
+});
+
+describe('매수 단위 (슬래브 매 · 코일 개)', () => {
+  it('수주 품목·LOT 종류로 단위를 고른다. 히트는 연결 수주 품목을 따른다', () => {
+    expect(qtyUnitOfItem({ itemType: 'COIL' })).toBe('개');
+    expect(qtyUnitOfItem({ itemType: 'SLAB' })).toBe('매');
+    expect(qtyUnitOfItem(null)).toBe('매');
+    expect(qtyUnitOfLot('COIL', null)).toBe('개');
+    expect(qtyUnitOfLot('SLAB', { itemType: 'COIL' })).toBe('매');
+    expect(qtyUnitOfLot('HEAT', { itemType: 'COIL' })).toBe('개');
   });
 });

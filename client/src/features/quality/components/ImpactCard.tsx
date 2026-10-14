@@ -14,11 +14,12 @@ import { KvList } from '@/components/KvList';
 import { Tag } from '@/components/Tag';
 import { PERMISSION, PRODUCTION_PLAN_STATUS_LABEL } from '@/codes';
 import { lotTraceHref } from '@/features/quality/components/LotHeader';
+import { qtyUnitOfItem } from '@/features/quality/lib/qualityDisplay';
 import { useCreateReproductionPlan } from '@/hooks/useDispositions';
 import { useCanUse } from '@/hooks/usePermission';
 import { permissionNeedText } from '@/lib/permissions';
 
-function PlanChip({ plan }: { plan: LinkedPlan }) {
+function PlanChip({ plan, unit }: { plan: LinkedPlan; unit: string }) {
   return (
     <Link
       href={`/production/plans?plan=${plan.productionPlanId}`}
@@ -37,7 +38,7 @@ function PlanChip({ plan }: { plan: LinkedPlan }) {
       <span className="text-ink-2">
         <span data-pet-field="상태">{PRODUCTION_PLAN_STATUS_LABEL[plan.productionPlanStatus]}</span>
         {' · '}
-        <span data-pet-field="부족 매수">부족 {plan.shortageQty}매</span>
+        <span data-pet-field="부족 매수">부족 {plan.shortageQty}{unit}</span>
       </span>
     </Link>
   );
@@ -47,6 +48,8 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
   const { row, plans } = detail;
   const soItem = row.salesOrderItem;
   const shortage = soItem?.shortage ?? null;
+  // 매수 단위는 수주 품목을 따른다 (슬래브 매 · 코일 개)
+  const unit = qtyUnitOfItem(soItem);
   const canPlan = useCanUse(PERMISSION.PRODUCTION_PLAN_CONFIRM);
   const reproduce = useCreateReproductionPlan();
   const [confirming, setConfirming] = useState(false);
@@ -78,21 +81,21 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
             </span>
             <KvList
               items={[
-                { label: '미출하', value: `${shortage.unshippedQty}매` },
-                { label: '예약', value: `${shortage.activeReservedQty}매` },
-                { label: '미확보', value: `${shortage.unsecuredQty}매` },
-                { label: '진행 계획 잔여 목표', value: `${shortage.openPlanRemainingQty}매` },
-                { label: '같은 규격 예약 가용 (여재 포함)', value: `${shortage.reservationAvailableQty}매` },
+                { label: '미출하', value: `${shortage.unshippedQty}${unit}` },
+                { label: '예약', value: `${shortage.activeReservedQty}${unit}` },
+                { label: '미확보', value: `${shortage.unsecuredQty}${unit}` },
+                { label: '진행 계획 잔여 목표', value: `${shortage.openPlanRemainingQty}${unit}` },
+                { label: '같은 규격 예약 가용 (여재 포함)', value: `${shortage.reservationAvailableQty}${unit}` },
                 {
                   label: '재생산 필요',
-                  value: shortage.reproductionNeedQty > 0 ? <b className="font-semibold text-danger">{shortage.reproductionNeedQty}매</b> : '없음',
+                  value: shortage.reproductionNeedQty > 0 ? <b className="font-semibold text-danger">{shortage.reproductionNeedQty}{unit}</b> : '없음',
                 },
               ]}
             />
             {plans.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {plans.map((plan) => (
-                  <PlanChip key={plan.productionPlanId} plan={plan} />
+                  <PlanChip key={plan.productionPlanId} plan={plan} unit={unit} />
                 ))}
               </div>
             ) : null}
@@ -112,10 +115,10 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
                   </Button>
                 }
               >
-                <b>재생산 필요 {shortage.reproductionNeedQty}매</b> · 여재와 진행 중인 계획으로도 부족해요. 생산 담당이 재생산 계획을 만들어요.
+                <b>재생산 필요 {shortage.reproductionNeedQty}{unit}</b> · 여재와 진행 중인 계획으로도 부족해요. 생산 담당이 재생산 계획을 만들어요.
               </Banner>
             ) : shortage.additionalPlanQty > 0 ? (
-              <span className="text-cap text-ink-3">같은 규격 예약 가용(여재 포함) {shortage.reservationAvailableQty}매로 부족분을 채울 수 있어 재생산이 필요 없어요.</span>
+              <span className="text-cap text-ink-3">같은 규격 예약 가용(여재 포함) {shortage.reservationAvailableQty}{unit}로 부족분을 채울 수 있어 재생산이 필요 없어요.</span>
             ) : (
               <span className="text-cap text-ink-3">예약과 진행 중인 계획으로 수주 매수를 채울 수 있어 재생산할 매수가 없어요.</span>
             )}
@@ -141,7 +144,7 @@ export function ImpactCard({ detail }: { detail: RejectedLotDetail }) {
             reproduce.mutate({ salesOrderItemId: soItem.salesOrderItemId }, { onSettled: () => setConfirming(false) })
           }
         >
-          수주 {soItem.salesOrderNo} 품목 {soItem.lineNo}의 부족분으로 재생산 계획을 만들어요. 같은 규격 여재가 있으면 먼저 예약하고, 그래도 남는 {shortage.reproductionNeedQty}매만 계획해요.
+          수주 {soItem.salesOrderNo} 품목 {soItem.lineNo}의 부족분으로 재생산 계획을 만들어요. 같은 규격 여재가 있으면 먼저 예약하고, 그래도 남는 {shortage.reproductionNeedQty}{unit}만 계획해요.
         </ConfirmDialog>
       ) : null}
     </Card>

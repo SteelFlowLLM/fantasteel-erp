@@ -2,7 +2,7 @@
 // 서버를 부른다 (api/server/inspections.ts). 권한·판정·자동 예약·여재·히트 불합격 연쇄·재고 반영·작업 로그는 서버가 한다.
 import type { TimelineEvent } from '@/api/businessEvents';
 import { serverInspectionApi } from '@/api/server/inspections';
-import { type InspectionResult, type LotStatus, type LotType, type SalesOrderItemStatus } from '@/codes';
+import { type InspectionResult, type LotStatus, type LotType, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import type { ItemShortage } from '@/lib/inventoryMath';
 
 export const inspectionKeys = {
@@ -82,6 +82,8 @@ export interface LinkedSalesOrderItem {
   lineNo: number;
   customerName: string;
   itemCode: string;
+  /** 수주 품목의 제품 유형. 매수 단위(슬래브 매 · 코일 개)를 정한다 */
+  itemType: ProductItemType;
   orderedQty: number;
   dueDate: string;
   salesOrderItemStatus: SalesOrderItemStatus;
