@@ -282,7 +282,7 @@ function IssueBody({ view }: { view: GoodsIssueView }) {
         </Banner>
       ) : null}
 
-      <Card petKey="card:goodsIssues.lots">
+      <Card className="flex-none" petKey="card:goodsIssues.lots">
         <CardHead
           title={issued ? '출고한 LOT' : '배정 LOT 출고 확인'}
           actions={issued ? <Badge>{lots.length} LOT</Badge> : blockedLots.length > 0 ? <Badge tone="danger">출고 불가 LOT {blockedLots.length}</Badge> : <Badge tone="ok">{confirmedLots.length} LOT</Badge>}
@@ -457,7 +457,7 @@ function CheckRow({ ok, label, value }: { ok: boolean; label: string; value: str
 
 function IssueResult({ view }: { view: GoodsIssueView }) {
   return (
-    <Card petKey="card:goodsIssues.result">
+    <Card className="flex-none" petKey="card:goodsIssues.result">
       <CardHead title="출고 결과" meta={`${RESERVATION_STATUS_LABEL.CONVERTED} ${view.totalRequestQty} · ${fmtTon(view.totalWeightTon)}`} />
       <div className="overflow-auto">
         <Table compact>

@@ -34,7 +34,7 @@ function RawMaterialCard({ canEdit }: { canEdit: boolean }) {
   const [editing, setEditing] = useState<MasterRawMaterialView | 'new' | null>(null);
   const deletion = useMasterDelete();
   return (
-    <Card petKey="card:masterData.rawMaterials">
+    <Card className="flex-none" petKey="card:masterData.rawMaterials">
       <CardHead
         title="원료"
         meta={materials.data ? `${materials.data.length}개 · 원료 코드는 LOT 번호(RM-원료코드-…)에 쓰여요` : undefined}

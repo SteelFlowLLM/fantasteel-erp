@@ -218,12 +218,14 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
             </>
           }
         />
-        {/* self-start: 줄 너비를 글자만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
-        <div data-pet-target="card:millSheets.links" className="-mt-2 flex flex-wrap items-center gap-2 self-start text-sm text-ink-2">
-          <span className="font-medium text-ink">{s.customer.customerName}</span>
-          <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
-          <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />
-          <span className="text-ink-3">· 발행 {fmtDateTime(detail.issuedAt)}</span>
+        <div className="-mt-2 flex flex-wrap items-center gap-2 self-start text-sm text-ink-2">
+          {/* 펫 강조 테두리는 고객사·수주·출하요청 묶음에만 단다: 글자를 키워 PDF 경로가 다음 줄로 넘어가면 줄이 화면 너비만큼 늘어나 테두리가 오른쪽 빈 곳까지 커진다 */}
+          <span data-pet-target="card:millSheets.links" className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-ink">{s.customer.customerName}</span>
+            <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
+            <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />
+            <span className="text-ink-3">· 발행 {fmtDateTime(detail.issuedAt)}</span>
+          </span>
           {detail.pdfPath ? <span className="font-mono text-cap text-ink-3">· {detail.pdfPath}</span> : null}
         </div>
         {printFailed ? (
