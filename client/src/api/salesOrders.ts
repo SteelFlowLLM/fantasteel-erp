@@ -211,7 +211,7 @@ export const salesOrderApi = {
    */
   cancelPurchaseImpact: (salesOrderId: number): Promise<CancelPurchaseImpactLine[]> => serverSalesOrderApi.cancelPurchaseImpact(salesOrderId),
 
-  /** 수주 취소 (REQ-SO-006, BP-SO-02): 출고분 있으면 SO-003, 진행 중 출하요청 있으면 SO-004 */
+  /** 수주 취소 (REQ-SO-006, BP-SO-02): 전량 출고된 수주는 SO-003, 진행 중 출하요청 있으면 SO-004. 부분 출고 뒤에는 잔량만 취소 */
   cancel: (input: { salesOrderId: number; cancelReason: string; expectedUpdatedAt?: string | null }) => serverSalesOrderApi.cancel(input),
 
   /** 이 수주의 업무방 (없으면 null)과 지금 멤버 */
