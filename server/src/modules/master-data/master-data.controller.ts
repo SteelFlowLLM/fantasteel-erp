@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   PERMISSION,
   type CustomerView,
@@ -52,6 +52,13 @@ export class MasterDataController {
     return this.service.updateItem(id, dto);
   }
 
+  /** 품목·규격 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  @Delete('items/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteItem(@Param('id', ParseIntPipe) id: number): Promise<ItemView> {
+    return this.service.deleteItem(id);
+  }
+
   /** API-168 강종 목록 */
   @Get('steel-grades')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
@@ -64,6 +71,13 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   createSteelGrade(@Body() dto: CreateSteelGradeDto): Promise<SteelGradeView> {
     return this.service.createSteelGrade(dto);
+  }
+
+  /** 강종 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  @Delete('steel-grades/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteSteelGrade(@Param('id', ParseIntPipe) id: number): Promise<SteelGradeView> {
+    return this.service.deleteSteelGrade(id);
   }
 
   /** API-170 규격 매핑 (열연 계획 수율은 계산값) */
@@ -143,6 +157,13 @@ export class MasterDataController {
     return this.service.updateCustomer(id, dto);
   }
 
+  /** 고객사 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  @Delete('customers/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteCustomer(@Param('id', ParseIntPipe) id: number): Promise<CustomerView> {
+    return this.service.deleteCustomer(id);
+  }
+
   /** API-181 공급업체 목록 (발주 화면에도 사용) */
   @Get('suppliers')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
@@ -164,6 +185,13 @@ export class MasterDataController {
     return this.service.updateSupplier(id, dto);
   }
 
+  /** 공급업체 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  @Delete('suppliers/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteSupplier(@Param('id', ParseIntPipe) id: number): Promise<SupplierView> {
+    return this.service.deleteSupplier(id);
+  }
+
   /** API-184 야드 목록 */
   @Get('yards')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'VIEW')
@@ -183,6 +211,13 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   updateYard(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateYardDto): Promise<YardView> {
     return this.service.updateYard(id, dto);
+  }
+
+  /** 야드 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  @Delete('yards/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteYard(@Param('id', ParseIntPipe) id: number): Promise<YardView> {
+    return this.service.deleteYard(id);
   }
 
   /** API-187 생산 설정값 (단건 리소스라 :id 없음) */
