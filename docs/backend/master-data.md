@@ -48,7 +48,7 @@
 | GET·POST | `yards` · PATCH `yards/:id` | 야드 | VIEW / USE | YARD_TYPE |
 | GET | `production-settings` | 생산 설정값 조회 | `MASTER_MANAGE` VIEW | 단건 리소스라 `:id` 없음 |
 | PATCH | `production-settings` | 생산 설정값 변경 | `MASTER_MANAGE` USE | |
-| DELETE | `customers/:id` · `suppliers/:id` · `yards/:id` · `steel-grades/:id` · `items/:id` | 기준정보 삭제 | `MASTER_MANAGE` USE | API 명세서에 없음. SPEC 5장 결정 4·[05] 7-2 "참조가 없을 때만 삭제"를 위해 더했다(2026-10-14). 아래 4장 |
+| DELETE | `customers/:id` · `suppliers/:id` · `yards/:id` · `steel-grades/:id` · `items/:id` | 기준정보 삭제 | `MASTER_MANAGE` USE | API-275~279(2026-10-14 명세서에 추가). SPEC 5장 결정 4·[05] 7-2 "참조가 없을 때만 삭제". 아래 4장 |
 
 [권한표]: 관리자 USE, 영업·구매·생산·품질 VIEW, **물류는 권한 없음**. 물류 화면에 품목명이 필요하면 shipment 모듈 응답에 넣어 준다.
 
@@ -119,7 +119,7 @@
 | 매핑 강종 일치 | 슬래브·코일 규격의 강종이 같아야 한다는 규칙은 문서에 명시돼 있지 않다 | [02] REQ-MST-004 |
 | 제선 수율 | 시드는 IRONMAKING 수율을 null로 둔다. 4.4 계산식은 제강·연주·열연 수율만 쓴다. 라우팅 검증에서 null 허용 공정을 열연·제선 둘로 볼지 확인 | `seed.ts` ROUTINGS, [04] 4.4 |
 | 기본 야드 유형 | 품목 유형과 야드 유형(RAW_MATERIAL·SLAB·COIL)이 같아야 하는지 규칙이 없다 | [02] REQ-MST-008 |
-| 삭제 API | [05] 7-2는 "참조가 없을 때만 삭제"를 허용하지만 [CSV]에 DELETE가 없다. 2026-10-14 사용자 결정으로 고객사·공급업체·야드·강종·품목만 만들었다(4장). 규격 매핑·라우팅·배합 원단위는 FK 참조가 없어 "진행 중 계획이 쓰는지" 기준을 정해야 한다 | [05] 7-2, [CSV], SPEC 5장 |
+| 삭제 API | [05] 7-2는 "참조가 없을 때만 삭제"를 허용하지만 [CSV]에 DELETE가 없었다. 2026-10-14 사용자 결정으로 [CSV]에 API-275~279를 더하고 고객사·공급업체·야드·강종·품목만 만들었다(4장). 규격 매핑·라우팅·배합 원단위는 FK 참조가 없어 "진행 중 계획이 쓰는지" 기준을 정해야 한다 | [05] 7-2, [CSV], SPEC 5장 |
 
 ### 8-1. 임시 결정 (2026-10-07, 서버 API 구현)
 

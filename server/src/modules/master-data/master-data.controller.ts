@@ -52,7 +52,7 @@ export class MasterDataController {
     return this.service.updateItem(id, dto);
   }
 
-  /** 품목·규격 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  /** API-275 품목·규격 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('items/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   deleteItem(@Param('id', ParseIntPipe) id: number): Promise<ItemView> {
@@ -73,7 +73,7 @@ export class MasterDataController {
     return this.service.createSteelGrade(dto);
   }
 
-  /** 강종 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  /** API-276 강종 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('steel-grades/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   deleteSteelGrade(@Param('id', ParseIntPipe) id: number): Promise<SteelGradeView> {
@@ -157,7 +157,7 @@ export class MasterDataController {
     return this.service.updateCustomer(id, dto);
   }
 
-  /** 고객사 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  /** API-277 고객사 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('customers/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   deleteCustomer(@Param('id', ParseIntPipe) id: number): Promise<CustomerView> {
@@ -185,7 +185,7 @@ export class MasterDataController {
     return this.service.updateSupplier(id, dto);
   }
 
-  /** 공급업체 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  /** API-278 공급업체 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('suppliers/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   deleteSupplier(@Param('id', ParseIntPipe) id: number): Promise<SupplierView> {
@@ -213,7 +213,7 @@ export class MasterDataController {
     return this.service.updateYard(id, dto);
   }
 
-  /** 야드 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2. API 명세서에 없음) */
+  /** API-279 야드 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('yards/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   deleteYard(@Param('id', ParseIntPipe) id: number): Promise<YardView> {

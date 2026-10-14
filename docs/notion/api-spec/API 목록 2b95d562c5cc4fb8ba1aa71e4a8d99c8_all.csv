@@ -85,8 +85,10 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 규격 매핑 등록,API-171,POST,/api/v1/spec-mappings,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,12.2 명시. 대응 코일 중복·중량 초과 차단 (BP-MST-01),슬래브 규격 1개에 코일 규격 1개 연결. 코일 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004),AUTHENTICATED,초안
 품목·규격 등록,API-166,POST,/api/v1/items,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"12.2 명시. 강종·두께·폭·길이 조합 중복 금지, 참조 없으면 COM-003","원료(원료 코드·원료 유형) 또는 슬래브·코일 규격(강종×두께×폭×길이) 등록, 1매 이론중량 계산·저장(소수 3자리) (REQ-MST-001·003)",AUTHENTICATED,초안
 고객사 수정,API-180,PATCH,/api/v1/customers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,고객사 정보 수정 (REQ-MST-007),AUTHENTICATED,초안
+고객사 삭제,API-277,DELETE,/api/v1/customers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 수주·출하요청이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 고객사 삭제 (REQ-MST-007),AUTHENTICATED,초안
 고객사 등록,API-179,POST,/api/v1/customers,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,고객사 등록 (REQ-MST-007),AUTHENTICATED,초안
 야드 수정,API-186,PATCH,/api/v1/yards/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,야드 정보 수정 (REQ-MST-008),AUTHENTICATED,초안
+야드 삭제,API-279,DELETE,/api/v1/yards/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목 기본 야드·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 야드 삭제 (REQ-MST-008),AUTHENTICATED,초안
 야드 등록,API-185,POST,/api/v1/yards,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,야드 등록 (REQ-MST-008),AUTHENTICATED,초안
 라우팅 수정,API-174,PATCH,/api/v1/routings/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,공정 변경을 데이터 수정만으로 반영 (REQ-MST-005),AUTHENTICATED,초안
 공급업체 등록,API-182,POST,/api/v1/suppliers,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장. 품목별 기본 공급업체는 품목 수정에서 지정,공급업체 등록 (REQ-MST-007),AUTHENTICATED,초안
@@ -94,10 +96,13 @@ MRP 소요량 계산 조회,API-104,GET,/api/mrp,,PURCHASE_REQUISITION_CREATE (V
 배합 원단위 수정,API-177,PATCH,/api/v1/specific-consumptions/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,배합 원단위 값 수정 (REQ-MST-006),AUTHENTICATED,초안
 배합 원단위 등록,API-176,POST,/api/v1/specific-consumptions,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,12.2 명시,원료·합금철 배합 원단위 등록 (REQ-MST-006),AUTHENTICATED,초안
 공급업체 수정,API-183,PATCH,/api/v1/suppliers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장,공급업체 정보 수정 (REQ-MST-007),AUTHENTICATED,초안
+공급업체 삭제,API-278,DELETE,/api/v1/suppliers/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 원료 기본 공급업체·발주가 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 공급업체 삭제 (REQ-MST-007),AUTHENTICATED,초안
 품목·규격 수정,API-167,PATCH,/api/v1/items/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출: 컨벤션 5장. 사용된 규격의 치수·이론중량 수정 시 MST-002,"품목별 기본 공급업체·기본 야드 지정, 미사용 규격의 오타 수정 (REQ-MST-003·007·008)",AUTHENTICATED,초안
+품목·규격 삭제,API-275,DELETE,/api/v1/items/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 규격 매핑·배합 원단위·수주·재고(수량 > 0)·예약·생산계획·LOT·구매요청·발주가 쓰면 거부. 수량이 0인 재고 행은 함께 지운다 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 품목·규격 삭제 (REQ-MST-001·003),AUTHENTICATED,초안
 생산 설정값 변경,API-188,PATCH,/api/v1/production-settings,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출. 단건 설정 리소스라 :id 없음,히트 용량·납기 위험 기준일 변경 (REQ-MST-009),AUTHENTICATED,초안
 야드 목록 조회,API-184,GET,/api/v1/yards,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,"도출: 용어 사전 yard, 공통코드 YARD_TYPE",원료·슬래브·코일 야드 목록. 야드 내 위치는 관리하지 않음 (REQ-MST-008),AUTHENTICATED,초안
 강종 등록,API-169,POST,/api/v1/steel-grades,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,도출. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리 (TRM-020),강종과 적용 규격 번호 등록. SM355는 등급별 별도 강종 (REQ-MST-002),AUTHENTICATED,초안
+강종 삭제,API-276,DELETE,/api/v1/steel-grades/:id,BP-MST-01,MASTER_MANAGE (USE),,기준정보,P1,"도출: 컨벤션 7-2 기준정보 삭제 규칙·SPEC 5장 결정 4. 품목·배합 원단위·검사 기준·LOT이 쓰면 거부 (COM-004, 쓰는 곳 이름을 알려 준다) (2026-10-14 추가)",쓰는 곳이 없는 강종 삭제 (REQ-MST-002),AUTHENTICATED,초안
 규격 매핑 조회,API-170,GET,/api/v1/spec-mappings,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,12.2 명시,슬래브 규격별 대응 코일 규격과 열연 계획 수율(계산값) (REQ-MST-004),AUTHENTICATED,초안
 라우팅 조회,API-172,GET,/api/v1/routings,BP-MST-01,MASTER_MANAGE (VIEW),,기준정보,P1,12.2 명시,품목 유형(코일·슬래브)별 공정 순서와 계획 수율 (REQ-MST-005),AUTHENTICATED,초안
 배정 조회,API-199,GET,/api/v1/allocations,"BP-INV-01, BP-SHP-01",SHIPMENT_REQUEST_MANAGE (VIEW) 또는 HOT_ROLLING_ALLOCATE (VIEW),,재고·배정,P1,도출: 컨벤션 5장,출하요청·생산계획별 배정 LOT과 상태. 미배정 매수 확인 (REQ-INV-006),AUTHENTICATED,초안
