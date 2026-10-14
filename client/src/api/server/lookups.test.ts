@@ -109,5 +109,7 @@ describe('출하요청 등록 창 서버 모드: 고객사·품목 id는 서버 
     await shipmentRequestApi.create({ customerId: 52, requestedShipDate: '2026-11-20', items: [{ salesOrderItemId: 72, requestQty: '2' }] });
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ customerId: 52, shipDate: '2026-11-20', items: [{ salesOrderItemId: 72, requestQty: 2 }] });
     expect(calls.some((c) => c.path === '/customers' || c.path === '/shipment-requests/shippable')).toBe(false);
+    // 추천 로그는 등록 때가 아니라 배정 확정 때 남긴다 (업무 프로세스 13.2)
+    expect(calls.some((c) => c.path === '/allocations/recommend')).toBe(false);
   });
 });

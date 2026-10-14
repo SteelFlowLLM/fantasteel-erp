@@ -75,15 +75,19 @@ describe('출하요청 서버 어댑터', () => {
     expect(calls.some((c) => c.path === '/allocations/recommendations')).toBe(false);
   });
 
-  it('배정 확정: 고른 LOT이 있는 품목만 POST하고, 확정 매수와 다시 읽은 상태를 돌려준다', async () => {
+  it('배정 확정: 고른 LOT이 있는 품목만 추천을 로그로 남기고 POST하고, 확정 매수와 다시 읽은 상태를 돌려준다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
+      if (c.method === 'POST' && c.path === '/allocations/recommend') return ok({ allocationPurpose: 'SHIPMENT', shipmentRequestItemId: 701, itemId: 1, unallocatedQty: 2, candidates: [] });
       if (c.method === 'POST' && c.path === '/allocations') return ok([allocationView, { ...allocationView, id: 802, lotId: 502 }]);
       if (c.path === '/shipment-requests/1') return ok(request(1, 'ALLOCATED'));
       return undefined;
     });
     const result = await shipmentRequestApi.confirmAllocations({ shipmentRequestId: 1, lines: [{ shipmentRequestItemId: 701, lotIds: [501, 502] }, { shipmentRequestItemId: 702, lotIds: [] }] });
     expect(result).toEqual({ confirmedQty: 2, shipmentRequestStatus: 'ALLOCATED' });
-    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ allocationPurpose: 'SHIPMENT', shipmentRequestItemId: 701, lotIds: [501, 502] }]);
+    expect(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body])).toEqual([
+      ['/allocations/recommend', { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: 701 }],
+      ['/allocations', { allocationPurpose: 'SHIPMENT', shipmentRequestItemId: 701, lotIds: [501, 502] }],
+    ]);
   });
 
   it('목록: 요청 톤 합계, 취소된 요청은 배정 대기 0', async () => {

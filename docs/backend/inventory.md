@@ -93,7 +93,7 @@ RETURNING id;
 | 정렬(FIFO) | `produced_date` 오름차순, 동률은 `lot_no`(16장 제안) | 같음 |
 | 확정 시 재고 | 변화 없음(예약 안에서 배정) | 조건부 UPDATE `rolling +1`(가용 ≥ 1) |
 
-- 추천: 저장하지 않고 ALLOCATION_RECOMMENDED만 기록(`lotIds` = 추천 LOT, 사유 FIFO_RECOMMENDATION).
+- 추천: 저장하지 않고 ALLOCATION_RECOMMENDED만 기록(`lotIds` = 추천 LOT, 사유 FIFO_RECOMMENDATION). 화면은 출하·열연 배정을 확정할 때마다 먼저 추천 API를 불러 그때의 추천을 남긴다([04] 13.2 "추천 내용도 이 시점에 로그로 남김"). 배정을 풀고 다시 확정해도 추천 로그가 빠지지 않는다. 배정 화면을 열 때 보이는 후보·추천(`GET allocations/recommendations`)은 로그를 남기지 않는다.
 - 확정 재검증: 적격 아님 `INV-002`, 이미 CONFIRMED `INV-003`(부분 unique가 최종 방어), CONSUMED·SHIPPED `INV-004`. 같은 슬래브를 판매·열연에 동시에 배정할 수 없다.
 - 출하 배정 후 출하요청의 모든 품목 미배정 = 0이면 출하요청 ALLOCATED(shipment 함수 호출).
 - 해제: CONFIRMED → RELEASED(HOT_ROLLING이면 `rolling −1`). CONSUMED면 `INV-004`. 변경 = 기존 해제 + 새 확정을 같은 tx에서 → ALLOCATION_CHANGED.
