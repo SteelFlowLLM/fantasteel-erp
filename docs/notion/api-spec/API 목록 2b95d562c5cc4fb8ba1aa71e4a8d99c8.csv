@@ -19,7 +19,7 @@ GET,수주 상세 조회,/api/sales-orders/:id,수주,P1,초안,
 POST,수주 등록,/api/sales-orders,수주,P1,초안,중복 저장 방지(Idempotency-Key) 적용 대상 후보. 등록과 같은 트랜잭션에서 예약·생산계획 생성
 GET,수주 충족 현황 조회,/api/sales-orders/:id/fulfillment,수주,P1,초안,진행률 계산식이 화면마다 다름(출하 ÷ 주문 vs (예약+검사합격+출하) ÷ 주문). 하나로 정해야 함
 GET,수주 예약 내역 조회,/api/sales-orders/:id/reservations,수주,P1,초안,
-PATCH,수주 취소,/api/sales-orders/:id/cancel,수주,P1,초안,"출고된 매수가 있으면 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부"
+PATCH,수주 취소,/api/sales-orders/:id/cancel,수주,P1,초안,"전량 출고된 수주는 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부. 부분 출고 뒤에는 잔량만 취소 (2026-10-14)"
 POST,출고 확정,/api/shipment-requests/:id/issue,물류,P1,초안,검사 미합격 LOT은 출고 차단(INV-002). Idempotency-Key 적용 후보
 GET,밀시트 목록 조회,/api/mill-sheets,물류,P1,초안,"업무 프로세스 정의서 12.2절에 없는 신규 제안. 쿼리 예: shipmentRequestId, salesOrderId"
 GET,밀시트 상세 조회,/api/mill-sheets/:id,물류,P1,초안,현재 값이 아니라 저장된 스냅샷을 반환
@@ -39,7 +39,7 @@ GET,수주 상세 조회,/api/sales-orders/:id,수주,P1,초안,
 POST,수주 등록,/api/sales-orders,수주,P1,초안,중복 저장 방지(Idempotency-Key) 적용 대상 후보. 등록과 같은 트랜잭션에서 예약·생산계획 생성
 GET,수주 충족 현황 조회,/api/sales-orders/:id/fulfillment,수주,P1,초안,진행률 계산식이 화면마다 다름(출하 ÷ 주문 vs (예약+검사합격+출하) ÷ 주문). 하나로 정해야 함
 GET,수주 예약 내역 조회,/api/sales-orders/:id/reservations,수주,P1,초안,
-PATCH,수주 취소,/api/sales-orders/:id/cancel,수주,P1,초안,"출고된 매수가 있으면 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부"
+PATCH,수주 취소,/api/sales-orders/:id/cancel,수주,P1,초안,"전량 출고된 수주는 SO-003, 진행 중인 출하요청이 있으면 SO-004로 거부. 부분 출고 뒤에는 잔량만 취소 (2026-10-14)"
 GET,출하 가능 품목 조회,/api/shipment-requests/shippable,출하·밀시트,P1,초안,
 GET,출하요청 목록 조회,/api/shipment-requests,출하·밀시트,P1,초안,
 GET,출하요청 상세 조회,/api/shipment-requests/:id,출하·밀시트,P1,초안,
