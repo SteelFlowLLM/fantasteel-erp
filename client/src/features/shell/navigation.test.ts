@@ -102,6 +102,11 @@ describe('화면 잠금 (screens.ts)', () => {
     expect(open(sales, '/quality/standards')).toBe(false);
   });
 
+  it('Message → ERP 초안 화면은 구매요청 권한이 없어도 열린다 (볼 수 있는지는 서버가 요청자·방 멤버로 확인)', () => {
+    expect(open(sales, '/purchase-requisitions/3')).toBe(false);
+    expect(open(sales, '/action-drafts/3')).toBe(true);
+  });
+
   it('등록 화면은 사용 권한이 있어야 열린다', () => {
     expect(open(sales, '/sales-orders/new')).toBe(true);
     expect(open(admin, '/sales-orders/new')).toBe(false);
