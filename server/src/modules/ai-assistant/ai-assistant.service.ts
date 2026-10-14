@@ -71,7 +71,7 @@ export class AiAssistantService {
       for (const call of reply.toolCalls) {
         const result = await this.toolbox.run(user, call);
         messages.push({ role: 'tool', toolCallId: call.id, content: result.content });
-        if (result.source && !dataSources.some((s) => s.label === result.source?.label)) dataSources.push(result.source);
+        if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
       }
       reply = await this.call(settings, model, messages, round < MAX_TOOL_ROUNDS ? tools : []);
     }
