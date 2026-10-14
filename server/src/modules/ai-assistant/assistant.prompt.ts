@@ -1,6 +1,7 @@
 import { ALLOCATION_STATUS_LABEL, DRAFT_STATUS_LABEL, RESERVATION_STATUS_LABEL, type AiAssistantScreenContext, type AiAssistantTurn } from '@fantasteel/shared';
 import type { ChatMessage } from '../llm/llm.client';
 import type { GlossaryTerm } from './knowledge/glossary.types';
+import type { ManualGuide } from './knowledge/manual.types';
 import type { ProcessStep } from './knowledge/process.types';
 
 /** 지난 대화는 최근 것만 보낸다. 작은 로컬 모델의 문맥 길이를 넘지 않게 한다 */
@@ -16,6 +17,8 @@ export interface AssistantPromptInput {
   references: readonly GlossaryTerm[];
   /** 업무 순서·흐름을 묻는 질문일 때만 */
   processSteps?: readonly ProcessStep[];
+  /** 화면에서 어디를 눌러 하는지 묻는 질문일 때만 */
+  manualGuides?: readonly ManualGuide[];
   history: readonly AiAssistantTurn[];
   question: string;
 }
@@ -42,6 +45,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '9. 당신은 업무 데이터를 바꾸지 못해요. 등록·확정·승인을 해 달라고 하면 직접 할 수 없다고 답해요.',
     '10. 참고 자료의 "사용 금지 동의어"는 쓰지 않고 한글명으로 말해요. 상태는 결과에 있는 한글 표시명으로 말하고, 영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고 뜻만 한글로 말해요.',
     '11. "이 수주"처럼 화면을 가리키면 [보고 있는 화면]의 주소에서 번호·id를 찾아 도구에 넘겨요. 없으면 어떤 것인지 되물어요.',
+    '12. [업무 매뉴얼 자료]가 있으면 화면에서 어디를 눌러 하는지는 그 자료의 절차만 근거로, 순서대로 풀어서 설명해요. 메뉴·버튼·칸 이름은 자료에 적힌 글자 그대로 쓰고, 쓴 문장 끝에는 [MAN-SO-01]처럼 그 매뉴얼 ID를 붙여요. 자료에 없는 화면 조작은 확인할 수 없다고 답하고, 직접 눌러 줄 수는 없어요. 매뉴얼은 검수 전 초안이라 화면과 다를 수 있다고 한 번 덧붙여요.',
     '',
     '[사용자]',
     `${input.employeeName} · 역할 ${input.roleLabel}`,
@@ -53,6 +57,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '[참고 자료]',
     input.references.length ? input.references.map(referenceText).join('\n\n') : '(질문에 맞는 용어를 찾지 못했어요)',
     ...(input.processSteps?.length ? ['', '[업무 프로세스 자료]', ...input.processSteps.map(processText)] : []),
+    ...(input.manualGuides?.length ? ['', '[업무 매뉴얼 자료]', ...input.manualGuides.map(manualText)] : []),
   ].join('\n');
 
   return [
@@ -81,6 +86,11 @@ const withStatusLabels = (text: string): string => text.replace(/[A-Z][A-Z_]{4,}
 function processText(step: ProcessStep): string {
   const detail = step.normalFlow ? ` / 정상 흐름: ${step.normalFlow}` : '';
   return withStatusLabels(`[${step.id}] ${step.name} (주체: ${step.actor}) 핵심 흐름: ${step.flow}${detail} / 결과물: ${step.output}`);
+}
+
+function manualText(guide: ManualGuide): string {
+  return withStatusLabels(`[${guide.id}] ${guide.name} 화면 절차
+${guide.text}`);
 }
 
 function referenceText(term: GlossaryTerm): string {
