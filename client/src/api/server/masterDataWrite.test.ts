@@ -32,7 +32,7 @@ describe('기준정보 서버 어댑터 변경 (api/server/masterData.ts)', () =
     expect(calls).toEqual([]);
   });
 
-  it('라우팅 저장: 바뀐 수율은 PATCH, 새 공정은 맨 뒤 순서로 POST, 공정 빼기는 막는다', async () => {
+  it('라우팅 저장: 바뀐 수율은 PATCH, 새 공정은 화면 순서 번호로 POST, 공정 빼기는 막는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/routings' && c.method === 'GET' ? ok(routings) : ok({ id: 9 })));
     await masterDataApi.saveRouting({
       itemType: 'SLAB',
@@ -47,6 +47,25 @@ describe('기준정보 서버 어댑터 변경 (api/server/masterData.ts)', () =
       ['POST', '/routings', { itemType: 'SLAB', processType: 'CONTINUOUS_CASTING', sequenceNo: 3, plannedYieldRate: '0.98' }],
     ]);
     await expect(masterDataApi.saveRouting({ itemType: 'SLAB', steps: [{ processType: 'STEELMAKING', plannedYieldRate: '0.9' }] })).rejects.toBeInstanceOf(InputError);
+  });
+
+  it('라우팅 순서 바꾸기: 옮길 공정을 빈 번호로 비켜 둔 뒤 화면 순서대로 1부터 놓고, 새 공정은 그 자리에 POST', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/routings' && c.method === 'GET' ? ok(routings) : ok({ id: 9 })));
+    await masterDataApi.saveRouting({
+      itemType: 'SLAB',
+      steps: [
+        { processType: 'STEELMAKING', plannedYieldRate: '0.9' },
+        { processType: 'CONTINUOUS_CASTING', plannedYieldRate: '0.98' },
+        { processType: 'IRONMAKING', plannedYieldRate: null },
+      ],
+    });
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+      ['PATCH', '/routings/2', { sequenceNo: 4 }],
+      ['PATCH', '/routings/1', { sequenceNo: 5 }],
+      ['PATCH', '/routings/2', { sequenceNo: 1 }],
+      ['POST', '/routings', { itemType: 'SLAB', processType: 'CONTINUOUS_CASTING', sequenceNo: 2, plannedYieldRate: '0.98' }],
+      ['PATCH', '/routings/1', { sequenceNo: 3 }],
+    ]);
   });
 
   it('원단위 저장: 있는 칸은 PATCH, 없는 칸은 POST, 비운 칸은 입력칸 오류', async () => {

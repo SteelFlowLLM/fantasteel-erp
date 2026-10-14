@@ -288,19 +288,29 @@ async function createSteelGrade(input: SteelGradeInput): Promise<number> {
   return idOf('POST', '/steel-grades', { steelGradeCode: input.steelGradeCode, steelGradeName: input.steelGradeName, standardNo: input.standardNo });
 }
 
-/** 서버에는 라우팅 삭제 API가 없어 공정 빼기·순서 바꾸기는 막고, 수율 수정(PATCH)과 맨 뒤 공정 추가(POST)만 보낸다 */
+/**
+ * 화면 순서대로 공정 순서를 1부터 다시 매긴다: 있는 공정은 PATCH(순서·수율), 새 공정은 POST.
+ * 서버에는 라우팅 삭제 API가 없어 공정 빼기는 막는다.
+ * (품목 유형, 순서)가 unique라 자리를 옮길 공정은 먼저 지금 쓰는 번호보다 큰 빈 번호로 비켜 둔 뒤 제자리에 놓는다.
+ */
 async function saveRouting(input: RoutingSaveInput): Promise<number> {
   const current = (await serverRequest<RoutingView[]>('GET', '/routings')).filter((r) => r.itemType === input.itemType).sort((a, b) => a.sequenceNo - b.sequenceNo);
-  const kept = input.steps.filter((s) => current.some((r) => r.processType === s.processType));
-  if (kept.length !== current.length || kept.some((s, i) => s.processType !== current[i].processType)) {
-    throw new InputError('서버에는 공정을 빼거나 순서를 바꾸는 API가 없어요');
+  if (current.some((r) => !input.steps.some((s) => s.processType === r.processType))) {
+    throw new InputError('라우팅 삭제 API가 없어 공정을 뺄 수 없어요');
   }
-  let nextSeq = (current.at(-1)?.sequenceNo ?? 0) + 1;
-  for (const step of input.steps) {
-    const row = current.find((r) => r.processType === step.processType);
-    if (!row) await serverRequest('POST', '/routings', { body: { itemType: input.itemType, processType: step.processType, sequenceNo: nextSeq++, plannedYieldRate: step.plannedYieldRate } });
-    else if ((row.plannedYieldRate ?? null) !== step.plannedYieldRate && !(row.plannedYieldRate && step.plannedYieldRate && compareDecimal(row.plannedYieldRate, step.plannedYieldRate) === 0)) {
-      await serverRequest('PATCH', `/routings/${row.id}`, { body: { plannedYieldRate: step.plannedYieldRate } });
+  const targets = input.steps.map((step, index) => ({ step, sequenceNo: index + 1, row: current.find((r) => r.processType === step.processType) }));
+  const moving = targets.filter((t) => t.row && t.row.sequenceNo !== t.sequenceNo);
+  const spare = Math.max(input.steps.length, ...current.map((r) => r.sequenceNo)) + 1;
+  for (const [i, t] of moving.entries()) await serverRequest('PATCH', `/routings/${t.row?.id}`, { body: { sequenceNo: spare + i } });
+  for (const { step, sequenceNo, row } of targets) {
+    if (!row) {
+      await serverRequest('POST', '/routings', { body: { itemType: input.itemType, processType: step.processType, sequenceNo, plannedYieldRate: step.plannedYieldRate } });
+      continue;
+    }
+    const rateChanged = (row.plannedYieldRate ?? null) !== step.plannedYieldRate && !(row.plannedYieldRate && step.plannedYieldRate && compareDecimal(row.plannedYieldRate, step.plannedYieldRate) === 0);
+    const moved = row.sequenceNo !== sequenceNo;
+    if (moved || rateChanged) {
+      await serverRequest('PATCH', `/routings/${row.id}`, { body: { ...(moved ? { sequenceNo } : {}), ...(rateChanged ? { plannedYieldRate: step.plannedYieldRate } : {}) } });
     }
   }
   return input.steps.length;
