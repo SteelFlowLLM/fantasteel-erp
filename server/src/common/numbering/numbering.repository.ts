@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { lockNumberPrefix } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 import type { DatedLotKind, DocumentNumberKind } from './number-format';
 
@@ -34,5 +35,10 @@ export class NumberingRepository {
 
   countMillSheets(tx: Tx, shipmentRequestId: number): Promise<number> {
     return tx.millSheet.count({ where: { shipmentRequestId } });
+  }
+
+  /** 같은 앞부분의 채번을 트랜잭션이 끝날 때까지 한 줄로 세운다 (advisory lock, 커밋·롤백 때 풀린다) */
+  async lockPrefix(tx: Tx, prefix: string): Promise<void> {
+    await tx.$queryRawTyped(lockNumberPrefix(prefix));
   }
 }

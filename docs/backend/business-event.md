@@ -99,6 +99,7 @@ await this.businessEventRecorder.record(tx, {
 - 같은 수주의 이벤트가 시간순·id순으로 나온다(REQ-LOG-003).
 - `lotId` 필터가 `business_event_lot`으로 동작한다.
 - recorder: 본 거래가 롤백되면 이벤트도 남지 않는다, `before`·`after`에 `passwordHash`가 없다.
+- 채번: 앞 거래가 커밋하기 전에 뒤 거래가 기록해도 두 거래 모두 저장되고 번호가 이어진다(`business-event-number.spec.ts`).
 - [04] 14.1-10: 수주 타임라인, 메시지 구매요청 초안·요청자 확정·부서장 승인 로그 확인.
 
 실행: `npm test -w @fantasteel/server -- business-event`(묶음 DB `fs_log`).
@@ -107,7 +108,7 @@ await this.businessEventRecorder.record(tx, {
 
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
-| 이벤트 번호 경합 | 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → **본 거래 전체가 COM-001로 실패**한다. 업무 tx가 많을수록 자주 생긴다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음) |
+| 이벤트 번호 경합 | **해결(2026-10-14):** 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 예전에는 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → 본 거래 전체가 COM-001로 실패했다. 지금은 최댓값을 읽기 전에 그 앞부분을 트랜잭션 끝까지 잠가(`lockNumberPrefix.sql`, advisory lock) 뒤 거래가 앞 거래의 커밋을 기다린 뒤 다음 번호를 받는다. 다른 업무 번호·LOT 번호도 같다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음), `business-event-number.spec.ts` |
 | 하루 999건 한도 | EV 순번은 3자리(NNN)라 하루 1,000번째 이벤트에서 채번 함수가 Error를 던져 COM-999가 된다. 실적 시뮬레이션·시연 시드가 하루에 많은 이벤트를 만들 수 있다 | [04] 9.1, `number-format.ts` `seq` |
 | `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다. **구현:** REQ-LOG-003 "LOT 단위"를 위해 넣었다(4장 조회 구현 메모) | [04] 12.2, REQ-LOG-003 |
 | 빠진 이벤트 유형 | 구매요청 재요청, 검사 측정값 수정에 맞는 유형이 없다(출하요청 취소·히트 편성 확정은 2026-10-14 추가). 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
