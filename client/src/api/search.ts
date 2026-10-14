@@ -5,6 +5,9 @@
 //   수주 → 작업 로그의 수주 이력 재현, 출하요청 → 출하요청 번호로 LOT 추적.
 import { serverSearchCandidates } from '@/api/server/search';
 
+/** 수주·출하요청 목록을 찾을 수 있는 권한 (검색창 안내 문구도 같은 조건을 쓴다) */
+export { canListSalesOrders, canListShipmentRequests } from '@/api/server/search';
+
 export type SearchHitKind = 'SALES_ORDER' | 'LOT' | 'SHIPMENT_REQUEST';
 
 export const SEARCH_HIT_KIND_LABEL: Record<SearchHitKind, string> = {
