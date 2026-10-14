@@ -95,7 +95,9 @@ describe('수주 헤더 상태 (품목 상태에서 계산)', () => {
     [['OPEN', 'PARTIALLY_SHIPPED'], 'PARTIALLY_SHIPPED'],
     [['SHIPPED', 'OPEN'], 'PARTIALLY_SHIPPED'],
     [['SHIPPED', 'SHIPPED'], 'SHIPPED'],
-    [['SHIPPED', 'CANCELLED'], 'SHIPPED'],
+    // 부분 출고 뒤 잔량 취소: 진행할 품목이 없고 취소 품목이 있으면 출하완료 품목이 섞여도 취소 (BP-SO-02 예외)
+    [['SHIPPED', 'CANCELLED'], 'CANCELLED'],
+    [['OPEN', 'CANCELLED'], 'OPEN'],
     [['CANCELLED', 'CANCELLED'], 'CANCELLED'],
   ] as const)('%j → %s', (statuses, expected) => {
     expect(salesOrderStatusOf(statuses)).toBe(expected);

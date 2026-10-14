@@ -62,13 +62,13 @@
 ```
 
 - 생산중·검사합격·예약은 같은 제품의 다른 단계일 수 있으므로 더해서 주문보다 큰 "충족 매수"로 보이지 않는다. 지표의 포함 관계와 진행률 분모를 응답에 명시한다(4.5 구현 제안).
-- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(전부 CANCELLED면 취소, 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하 등).
+- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(진행중·부분출하 품목이 없고 CANCELLED가 있으면 취소, 남은 품목이 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하).
 
 **취소**(BP-SO-02, 9.3)
 
 1. 취소할 품목(진행중·부분출하)이 없으면: 하나라도 취소된 품목이 있으면 이미 취소한 수주(`COM-001`, 부분 출고 뒤 잔량 취소 포함), 모두 출하완료면 `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
 2. 한 트랜잭션에서: 품목 CANCELLED → ACTIVE 예약 RELEASED와 `reserved_qty − ACTIVE 합계`(inventory) → PLANNED 생산계획 CANCELLED(production) → IN_PROGRESS 계획은 `sales_order_item_id = null`로 해제해 산출물을 여재로(production, [ERD] 설계 결정) → 그 계획들의 CONFIRMED 열연 배정 해제(inventory).
-3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외). 2026-10-14 결정: 부분 출고 뒤에도 취소할 수 있고 잔량만 취소한다. 2번은 진행중·부분출하 품목만 하고(`cancellableItemsOf`), 부분출하 품목은 CANCELLED가 되어도 출고 매수(CONVERTED 예약)는 충족 현황에 남는다. 전량 출고된 품목은 그대로 둔다. 헤더 상태는 지금 규칙대로 취소 품목을 빼고 계산한다(전량 출고 품목 + 잔량 취소 품목 = 출하완료, 잔량 취소 품목만 = 취소).
+3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외). 2026-10-14 결정: 부분 출고 뒤에도 취소할 수 있고 잔량만 취소한다. 2번은 진행중·부분출하 품목만 하고(`cancellableItemsOf`), 부분출하 품목은 CANCELLED가 되어도 출고 매수(CONVERTED 예약)는 충족 현황에 남는다. 전량 출고된 품목은 그대로 둔다. 헤더 상태는 진행할 품목이 남지 않았으므로 취소다(전량 출고 품목이 섞여도, 2026-10-14 사용자 결정).
 4. 구매 진행 영향(취소 창): 지금 취소하면 취소(PLANNED)·연결 해제(IN_PROGRESS)될 계획에 `purchase_requisition.production_plan_id`로 연결된 구매요청(상태 무관)과 그 발주를 구매요청 번호 순으로 보여 준다. 계획 상태로 취소·해제를 가르는 규칙은 2번과 같은 함수(production의 `salesOrderCancelEffectOf`)를 쓴다. 수주 취소는 구매요청·발주를 바꾸지 않는다.
 
 ## 5. 오류 코드·작업 로그

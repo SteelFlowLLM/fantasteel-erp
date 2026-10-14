@@ -44,10 +44,14 @@ export function isDueRisk(input: { dueDate: string; today: string; deliveryRiskD
   return daysBetween(input.today, input.dueDate) <= input.deliveryRiskDays;
 }
 
-/** 수주 헤더 상태 (저장하지 않음): 전부 취소면 취소, 남은 품목이 전부 출하완료면 출하완료, 출하가 하나라도 있으면 부분출하 */
+/**
+ * 수주 헤더 상태 (저장하지 않음): 진행할 품목(진행중·부분출하)이 없고 취소 품목이 있으면 취소 — 부분 출고 뒤 잔량 취소로
+ * 출하완료 품목이 섞여도 취소다(2026-10-14 결정, BP-SO-02 예외). 남은 품목이 전부 출하완료면 출하완료, 출하가 하나라도 있으면 부분출하
+ */
 export function salesOrderStatusOf(itemStatuses: readonly SalesOrderItemStatus[]): SalesOrderItemStatus {
   const live = itemStatuses.filter((s) => s !== SALES_ORDER_ITEM_STATUS.CANCELLED);
-  if (itemStatuses.length > 0 && live.length === 0) return SALES_ORDER_ITEM_STATUS.CANCELLED;
+  const hasOpen = itemStatuses.some((s) => s === SALES_ORDER_ITEM_STATUS.OPEN || s === SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED);
+  if (!hasOpen && live.length < itemStatuses.length) return SALES_ORDER_ITEM_STATUS.CANCELLED;
   if (live.length > 0 && live.every((s) => s === SALES_ORDER_ITEM_STATUS.SHIPPED)) return SALES_ORDER_ITEM_STATUS.SHIPPED;
   if (live.some((s) => s === SALES_ORDER_ITEM_STATUS.SHIPPED || s === SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED)) return SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED;
   return SALES_ORDER_ITEM_STATUS.OPEN;

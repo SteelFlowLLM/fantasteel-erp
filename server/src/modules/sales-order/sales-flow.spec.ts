@@ -373,8 +373,8 @@ describe('수주 취소 (REQ-SO-006, BP-SO-02)', () => {
       [part.salesOrderItemId, 'CANCELLED', 4, 0],
       [full.salesOrderItemId, 'SHIPPED', 2, 0],
     ]);
-    // 헤더 상태는 취소 품목을 빼고 계산한다. 이미 취소한 수주라 취소 버튼은 막힌다
-    expect(detail).toMatchObject({ salesOrderStatus: 'SHIPPED', totalShippedQty: 6, cancelBlock: 'CANCELLED', cancellation: { reason: '잔량 취소' } });
+    // 진행할 품목이 없고 취소 품목이 있으니 헤더는 취소(출하완료 품목이 섞여도), 이미 취소된 수주라 취소 버튼은 막힌다
+    expect(detail).toMatchObject({ salesOrderStatus: 'CANCELLED', totalShippedQty: 6, cancelBlock: 'CANCELLED', cancellation: { reason: '잔량 취소' } });
     // 출고 기록(CONVERTED 예약)과 출고한 재고는 그대로, 남은 예약만 풀린다
     expect(await prisma.reservation.findMany({ where: { salesOrderItemId: part.salesOrderItemId }, orderBy: { id: 'asc' } })).toEqual(
       expect.arrayContaining([expect.objectContaining({ reservationStatus: 'CONVERTED', reservedQty: 4 }), expect.objectContaining({ reservationStatus: 'RELEASED' })]),
