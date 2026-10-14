@@ -17,7 +17,6 @@ import { type SpecificConsumptionUnit } from '@/lib/units';
 
 export const masterDataKeys = {
   all: ['master-data'] as const,
-  readiness: () => ['master-data', 'readiness'] as const,
   productSpecs: () => ['master-data', 'product-specs'] as const,
   specMappings: () => ['master-data', 'spec-mappings'] as const,
   steelGrades: () => ['master-data', 'steel-grades'] as const,
