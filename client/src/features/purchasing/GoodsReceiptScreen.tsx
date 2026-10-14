@@ -370,7 +370,8 @@ function ReceiptWork({
             />
           }
         />
-        <CardBody flush>
+        {/* 글자를 키우면 표가 오른쪽 칸보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+        <CardBody flush className="overflow-x-auto">
           {history.length === 0 ? (
             <EmptyNote>{scope === 'line' ? '이 발주 품목의 입고가 아직 없어요' : '입고 내역이 없어요'}</EmptyNote>
           ) : (

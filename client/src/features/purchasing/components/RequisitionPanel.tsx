@@ -231,7 +231,8 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
       {canSeeOrders ? (
         <Card petKey="card:purchaseRequisitions.purchaseOrders">
           <CardHead title="연결 발주" meta={detail.purchaseOrderLines.length > 0 ? `입고 ${fmtTon(receivedTotal)} / 발주 ${fmtTon(orderedTotal)}` : undefined} />
-          <CardBody flush>
+          {/* 글자를 키우면 표가 오른쪽 칸(목록 옆)보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+          <CardBody flush className="overflow-x-auto">
             {detail.purchaseOrderLines.length === 0 ? (
               <EmptyNote>{status === 'APPROVED' ? '아직 발주하지 않았어요. 구매 담당이 발주 화면에서 발주해요' : '승인된 뒤에 발주할 수 있어요'}</EmptyNote>
             ) : (
