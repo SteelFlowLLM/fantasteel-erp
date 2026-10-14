@@ -38,7 +38,11 @@ function PlanChip({ plan, unit }: { plan: LinkedPlan; unit: string }) {
       <span className="text-ink-2">
         <span data-pet-field="상태">{PRODUCTION_PLAN_STATUS_LABEL[plan.productionPlanStatus]}</span>
         {' · '}
-        <span data-pet-field="부족 매수">부족 {plan.shortageQty}{unit}</span>
+        {/* 계획을 만들 때 정한 부족 매수(이 계획의 생산 목표)라 출고·재생산 뒤에도 그대로다. 지금 모자란 매수(위 미확보)와 헷갈리지 않게 '계획'을 붙이고 뜻은 마우스를 올리면 보인다 */}
+        <span data-pet-field="부족 매수" title={`계획 부족 매수: 이 생산계획을 만들 때 정한 생산 목표 ${plan.shortageQty}${unit}. 지금 수주에 모자란 매수는 위의 미확보예요`}>
+          계획 부족 {plan.shortageQty}
+          {unit}
+        </span>
       </span>
     </Link>
   );
