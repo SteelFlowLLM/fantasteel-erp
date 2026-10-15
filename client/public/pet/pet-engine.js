@@ -784,6 +784,16 @@
 .fp-send:hover{background:var(--fp-brand-hover)}
 .fp-chat-foot{display:flex;align-items:center;gap:6px;padding:5px 10px 6px;background:var(--fp-surface-2);border-top:1px solid var(--fp-line);font-size:11px;color:var(--fp-ink-3)}
 .fp-chat-foot i{width:6px;height:6px;flex:none;background:var(--fp-line-strong)}
+.fp-chat-foot[data-ai=true]{color:var(--fp-ok);font-weight:600}
+.fp-chat-foot[data-ai=true] i{background:var(--fp-ok)}
+.fp-ai-switch{margin-left:auto;display:inline-flex;flex:none;border:1px solid var(--fp-line-strong);border-radius:4px;overflow:hidden;background:var(--fp-surface)}
+.fp-ai-switch button{height:20px;min-width:34px;padding:0 7px;border:0;background:transparent;color:var(--fp-ink-3);font-size:10.5px;font-weight:700;letter-spacing:.02em;cursor:pointer}
+.fp-ai-switch button+button{border-left:1px solid var(--fp-line-strong)}
+.fp-ai-switch button:hover{background:var(--fp-surface-3);color:var(--fp-ink)}
+.fp-ai-switch button[aria-pressed=true][data-v=on]{background:var(--fp-ok);color:#fff}
+.fp-ai-switch button[aria-pressed=true][data-v=off]{background:var(--fp-ink-3);color:#fff}
+.fp-msg--ai{white-space:pre-wrap}
+.fp-msg-src{margin-top:6px;font-size:11px;line-height:15px;color:var(--fp-ink-3);white-space:normal}
 .fp-menu{position:absolute;left:0;top:0;z-index:6;pointer-events:auto;width:228px;padding:4px;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:6px;box-shadow:4px 4px 0 rgba(18,24,32,.18),0 10px 28px rgba(18,24,32,.12)}
 .fp-menu-head{display:flex;align-items:center;gap:8px;padding:4px 6px 8px;margin-bottom:4px;border-bottom:2px dotted var(--fp-line-strong)}
 .fp-menu-ava{flex:none;width:28px;height:28px;border-radius:5px;background:var(--fp-accent-soft);overflow:hidden;position:relative}
@@ -862,6 +872,7 @@
         screen: null, // 지금 화면(SCREEN 키)
         navigate: null, // (href) => void — '이 화면으로 가기'. 없으면 링크를 누른다
         screenHrefs: null, // { <SCREEN 키>: 주소 } — 다른 화면의 카드를 물으면 그 화면으로 데려갈 때 쓴다
+        askAi: null, // (question, history) => Promise<{ text, sources? }> — 있으면 대화 창에 AI 연결 ON·OFF가 생긴다
       },
       options || {},
     );
@@ -1008,6 +1019,8 @@
       // 돌아다니기는 늘 켜 둔다 (메뉴에서 끄는 칸을 없앴다). 동작 스킵하기가 켜져 있으면 혼자 돌아다니지는 않는다
       roam: true,
       explain: store.has('explain') ? !!store.get('explain') : true,
+      // AI 연결은 사용자가 켤 때만: 꺼 두면 서버를 부르지 않고 정해진 답변으로 답한다
+      ai: !!store.get('ai'),
       press: null,
       lastClickT: -1e9,
       clickTimer: 0,
@@ -4079,7 +4092,8 @@
     }
 
     // ── 대화창 ──
-    const chat = { el: null, log: null, chips: null, input: null, h: 0, ro: null, asked: new Set() };
+    // gen: 창을 열 때마다 바뀐다. 창을 닫았다 다시 연 뒤에 도착한 이전 AI 답은 버린다. turns: 이 창에서 AI와 주고받은 말
+    const chat = { el: null, log: null, chips: null, input: null, foot: null, h: 0, ro: null, asked: new Set(), busy: false, gen: 0, turns: [] };
     const norm = (s) => String(s || '').toLowerCase().replace(/[\s?!.,~·'"()[\]{}:;/\\-]/g, '');
     function bigrams(s) {
       const out = new Set();
@@ -4508,8 +4522,46 @@
       }
       addMsg('pet', line, [info.fields.length ? fieldList(info.fields) : null, ...acts]);
     }
+    function talkBack() {
+      if (S.mode === 'ground' && S.base === 'idle') {
+        player.set('talk', true);
+        later(() => {
+          if (player.name === 'talk') player.set(S.base);
+        }, 1000);
+      }
+    }
+    const aiOn = () => S.ai && typeof o.askAi === 'function';
+    /** AI 연결(ON)이면 AI 어시스턴트(서버)가 답한다. 이 창에서 앞서 주고받은 말을 함께 보내 '그거'를 알아듣게 한다 */
+    async function askAi(text, typing) {
+      const gen = chat.gen;
+      chat.busy = true;
+      let reply = null;
+      let failure = '';
+      try {
+        reply = await o.askAi(text, chat.turns.slice(-10));
+      } catch (e) {
+        failure = e && e.message ? String(e.message) : '';
+      }
+      if (gen !== chat.gen || !chat.el) return;
+      chat.busy = false;
+      typing.remove();
+      talkBack();
+      if (!reply || typeof reply.text !== 'string' || !reply.text.trim()) {
+        const why = failure ? failure.replace(/[.。]?\s*$/, '.') : '잠시 뒤 다시 물어봐 주세요.';
+        addMsg('pet', `AI가 답하지 못했어요. ${why} 아래에서 OFF로 바꾸면 정해진 답변으로 답해요.`);
+        return;
+      }
+      chat.turns.push({ role: 'user', content: text }, { role: 'assistant', content: reply.text });
+      // 서버 답은 {name} 같은 자리 표시를 채우지 않고 그대로 보인다
+      const m = h('div', { class: 'fp-msg fp-msg--pet fp-msg--ai' }, reply.text);
+      const sources = arr(reply.sources).filter((s) => typeof s === 'string' && s);
+      if (sources.length) m.append(h('div', { class: 'fp-msg-src', text: `출처 · ${sources.join(', ')}` }));
+      chat.log.append(m);
+      chat.log.scrollTop = chat.log.scrollHeight;
+      renderChips(defaultChips());
+    }
     async function ask(q) {
-      if (!chat.el) return;
+      if (!chat.el || chat.busy) return;
       const text = String(q || '').trim();
       if (!text) return;
       chat.asked.add(text);
@@ -4517,16 +4569,15 @@
       const typing = addMsg('pet', '•••');
       typing.classList.add('fp-msg--typing');
       if (S.mode === 'ground' && S.base === 'idle') player.set('think', true);
+      if (aiOn()) {
+        await askAi(text, typing);
+        return;
+      }
       await wait(reduced ? 120 : 650);
       if (!chat.el) return;
       typing.remove();
       const ans = answerFor(text);
-      if (S.mode === 'ground' && S.base === 'idle') {
-        player.set('talk', true);
-        later(() => {
-          if (player.name === 'talk') player.set(S.base);
-        }, 1000);
-      }
+      talkBack();
       if (ans.pageEl) {
         const el = ans.pageEl;
         const key = el.getAttribute('data-pet-target');
@@ -4556,6 +4607,29 @@
       if (ans.suggest) renderChips(ans.suggest, '이런 질문은 어때요?');
       else renderChips(defaultChips());
     }
+    /** 대화 창 아래 줄: 연결 상태 + AI 연결 ON·OFF. askAi 옵션이 없으면 상태만 보인다 */
+    function renderChatFoot() {
+      if (!chat.foot) return;
+      const on = aiOn();
+      chat.foot.textContent = '';
+      chat.foot.setAttribute('data-ai', String(on));
+      chat.foot.append(h('i', { 'aria-hidden': 'true' }), on ? 'AI 연결됨' : 'AI 연결 전 · 정해진 답변');
+      if (typeof o.askAi === 'function') {
+        const opt = (v, label) =>
+          h('button', { type: 'button', 'data-v': v, 'aria-pressed': String(on === (v === 'on')), text: label, onclick: () => setAi(v === 'on') });
+        chat.foot.append(h('div', { class: 'fp-ai-switch', role: 'group', 'aria-label': 'AI 연결' }, opt('on', 'ON'), opt('off', 'OFF')));
+      }
+      // AI 어시스턴트는 긴 질문도 받는다(서버 상한 1000자). 정해진 답변은 짧은 질문만 알아듣는다
+      if (chat.input) chat.input.maxLength = on ? 1000 : 80;
+    }
+    function setAi(v) {
+      S.ai = !!v;
+      store.set('ai', S.ai);
+      renderChatFoot();
+      // 줄을 다시 그려 누른 버튼이 사라지므로 새로 눌린 쪽에 초점을 옮긴다
+      const pressed = chat.foot && chat.foot.querySelector(`.fp-ai-switch [data-v=${S.ai ? 'on' : 'off'}]`);
+      if (pressed) pressed.focus({ preventScroll: true });
+    }
     function openChat() {
       if (chat.el) return;
       if (S.mode === 'hidden') show(true);
@@ -4580,6 +4654,7 @@
           class: 'fp-chat-form',
           onsubmit: (e) => {
             e.preventDefault();
+            if (chat.busy) return; // AI 답을 기다리는 동안 적은 질문은 지우지 않고 남겨 둔다
             const v = chat.input.value;
             chat.input.value = '';
             ask(v);
@@ -4595,10 +4670,14 @@
         chat.log,
         chat.chips,
         form,
-        h('div', { class: 'fp-chat-foot' }, h('i', { 'aria-hidden': 'true' }), 'AI 연결 전 · 정해진 답변'),
+        (chat.foot = h('div', { class: 'fp-chat-foot' })),
       );
       root.appendChild(el);
       chat.el = el;
+      chat.gen += 1;
+      chat.busy = false;
+      chat.turns = [];
+      renderChatFoot();
       addMsg('pet', `${pick(guide.greeting) || '안녕하세요!'}${guide.real ? '' : ' (설명 파일이 없어 간단한 안내만 해요)'}`);
       renderChips(defaultChips());
       chat.h = el.offsetHeight * uiz();
@@ -4629,6 +4708,7 @@
       chat.log = null;
       chat.chips = null;
       chat.input = null;
+      chat.foot = null;
       if (hadFocus) hit.focus({ preventScroll: true });
       rest();
     }

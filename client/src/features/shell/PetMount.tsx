@@ -4,8 +4,12 @@
 // 엔진은 data-pet-target·data-pet-perch·data-pet-climb 속성만 보고 움직이므로, 화면마다 할 일은 속성을 다는 것뿐이다.
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
+import { aiAssistantApi } from '@/api/aiAssistant';
+import { sourceText } from '@/features/shell/AiPanel';
+import { routeTitleOf } from '@/features/shell/routeTitles';
 import { SCREEN, screenOfPath, SCREEN_KEY_BY_HREF } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
+import { errorMessageOf } from '@/stores/useToastStore';
 
 const CHARACTERS = ['steelman', 'steelman_old', 'harin_office', 'gocheol', 'poseokho', 'coil'];
 /** 영역별 화면 설명. 파일 하나가 window.FANTA_PET_GUIDE_PARTS에 한 묶음을 넣고, guide-merge.js가 기본 설명에 합친다. */
@@ -44,6 +48,21 @@ function screenKeyOf(pathname: string): string | null {
   return screen ? (SCREEN_KEY_BY_HREF.get(screen.href) ?? null) : null;
 }
 
+/** 펫 대화 창의 AI 연결(ON): AI 어시스턴트 패널과 같은 API에 지금 화면을 함께 보낸다 (REQ-AST-007). 대화 기록은 펫 창 것만 쓴다 */
+const askAi: NonNullable<FantaPetMountOptions['askAi']> = async (question, history) => {
+  const { pathname, search } = window.location;
+  try {
+    const reply = await aiAssistantApi.ask({
+      question,
+      screen: { path: `${pathname}${search}`, title: routeTitleOf(pathname).title || '대시보드', label: null },
+      history,
+    });
+    return { text: reply.answer, sources: reply.sources.map(sourceText) };
+  } catch (error) {
+    throw new Error(errorMessageOf(error));
+  }
+};
+
 export function PetMount() {
   const me = useMe();
   const router = useRouter();
@@ -65,6 +84,7 @@ export function PetMount() {
         screen: screenRef.current,
         screenHrefs: SCREEN_HREFS,
         navigate: (href: string) => routerRef.current.push(href),
+        askAi,
       });
     });
     return () => {

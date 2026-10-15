@@ -17,6 +17,8 @@ interface FantaPetMountOptions {
   screenHrefs?: Record<string, string>;
   /** '이 화면으로 가기'를 누르면 부른다 */
   navigate?: (href: string) => void;
+  /** 있으면 대화 창에 AI 연결 ON·OFF가 생기고, ON일 때 질문을 이 함수로 보낸다. 실패하면 Error(이유)를 던진다 */
+  askAi?: (question: string, history: { role: 'user' | 'assistant'; content: string }[]) => Promise<{ text: string; sources: string[] }>;
 }
 interface FantaPetApi {
   mount(options?: FantaPetMountOptions): FantaPetApi;
