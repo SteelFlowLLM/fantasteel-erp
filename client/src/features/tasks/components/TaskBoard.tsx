@@ -17,6 +17,7 @@ import { TaskFormModal } from '@/features/tasks/components/TaskFormModal';
 import { taskDueStateOf, taskDueText } from '@/features/tasks/lib/taskDue';
 import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { useTaskList } from '@/hooks/useTasks';
 import { cn } from '@/lib/cn';
 
@@ -111,6 +112,8 @@ function TaskCard({ task, today, focused, onEdit, onComplete }: { task: TaskView
   const state = taskDueStateOf(task, today);
   const done = state === 'done';
   const canComplete = task.canComplete ?? task.canEdit;
+  const canOpen = useCanOpenHref();
+  const linkPath = task.linkPath && canOpen(task.linkPath) ? task.linkPath : null;
   const nameOf = (person: TaskView['assignee']) => `${person.employeeName}${person.id === myId ? ' (나)' : ''}`;
 
   useEffect(() => {
@@ -140,15 +143,15 @@ function TaskCard({ task, today, focused, onEdit, onComplete }: { task: TaskView
         {task.creator.id !== task.assignee.id ? <span data-pet-field="요청자">· 요청 {nameOf(task.creator)}</span> : null}
         <span data-pet-field="마감일" className={cn('ml-auto font-medium', state === 'overdue' && 'text-danger', state === 'today' && 'text-wait')}>{taskDueText(task, today)}</span>
       </div>
-      {(canComplete && !done) || task.linkPath ? (
+      {(canComplete && !done) || linkPath ? (
         <div className="flex items-center gap-1.5">
           {canComplete && !done ? (
             <Button size="sm" icon="check" onClick={onComplete}>
               완료
             </Button>
           ) : null}
-          {task.linkPath ? (
-            <ButtonLink href={task.linkPath} size="sm" variant="ghost" className="ml-auto">
+          {linkPath ? (
+            <ButtonLink href={linkPath} size="sm" variant="ghost" className="ml-auto">
               화면 열기 →
             </ButtonLink>
           ) : null}

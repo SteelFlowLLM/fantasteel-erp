@@ -1733,7 +1733,7 @@ export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
     "abbreviation": null,
     "variableName": "draftStatus",
     "definition": "Action Draft의 진행 상태",
-    "businessRule": "AI_GENERATED → WAITING_APPROVAL → APPROVED → EXECUTED, 반려 시 REJECTED. 모든 초안 유형 공통이고 확정 주체만 다름(구매요청 초안: 요청자 / 실행 카드: 사용자 / Agent 대응 후보: 담당 부서원)",
+    "businessRule": "AI_GENERATED → WAITING_APPROVAL → APPROVED → EXECUTED, 반려 시 REJECTED. 모든 초안 유형 공통이고 확정 주체만 다름(구매요청 초안: 요청자 / 메시지 확장 유형: 초안을 만든 사원 / 실행 카드: 사용자 / Agent 대응 후보: 담당 부서원)",
     "relatedTerms": [
       "Action Draft"
     ],

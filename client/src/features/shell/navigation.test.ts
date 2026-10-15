@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PERMISSIONS, type Permission, type PermissionLevel, type RoleCode } from '@/codes';
 import { activeNavHref, buildNavigation, type NavEntry } from '@/features/shell/navigation';
 import { routeTitleOf } from '@/features/shell/routeTitles';
-import { canOpenScreen, screenOfPath, type AccessUser } from '@/features/shell/screens';
+import { canOpenHref, canOpenScreen, screenOfPath, type AccessUser } from '@/features/shell/screens';
 import type { PermissionMap } from '@/lib/permissions';
 import { rolePermissionsOf } from '@/test/sessionUsers';
 
@@ -29,12 +29,14 @@ describe('buildNavigation', () => {
     expect(nav.slice(-9)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/meetings', '/schedule', '/agent', '/past-cases']);
   });
 
-  it('다른 영역의 조회 권한 화면은 구분선 뒤에 영역 순서로 붙는다 (역할별 메뉴 v2 3장 표)', () => {
-    expect(otherAreaHrefs(navOf('SALES'))).toEqual(['/production/plans', '/goods-issues', '/mill-sheets', '/admin/master-data']);
-    expect(otherAreaHrefs(navOf('PURCHASE'))).toEqual(['/production/plans', '/admin/master-data']);
-    expect(otherAreaHrefs(navOf('PRODUCTION'))).toEqual(['/sales-orders', '/mrp', '/purchase-requisitions', '/quality/inspections', '/quality/standards', '/admin/master-data']);
-    expect(otherAreaHrefs(navOf('QUALITY'))).toEqual(['/production/plans', '/production/results', '/goods-issues', '/mill-sheets', '/admin/master-data']);
-    expect(otherAreaHrefs(navOf('LOGISTICS'))).toEqual(['/sales-orders', '/shipment-requests', '/goods-receipts']);
+  it('업무 조회는 모든 역할: 다른 영역 업무 화면이 모두 구분선 뒤에 영역 순서로 붙고, 관리 화면은 기준정보만 (역할별 메뉴 v2 3장 표)', () => {
+    const business = ['/sales-orders', '/shipment-requests', '/mrp', '/purchase-requisitions', '/purchase-orders', '/goods-receipts', '/production/plans', '/production/results', '/production/rolling', '/quality/inspections', '/quality/rejected', '/quality/standards', '/goods-issues', '/mill-sheets', '/admin/master-data'];
+    const without = (...own: string[]) => business.filter((href) => !own.includes(href));
+    expect(otherAreaHrefs(navOf('SALES'))).toEqual(without('/sales-orders', '/shipment-requests'));
+    expect(otherAreaHrefs(navOf('PURCHASE'))).toEqual(without('/mrp', '/purchase-requisitions', '/purchase-orders', '/goods-receipts'));
+    expect(otherAreaHrefs(navOf('PRODUCTION'))).toEqual(without('/production/plans', '/production/results', '/production/rolling'));
+    expect(otherAreaHrefs(navOf('QUALITY'))).toEqual(without('/quality/inspections', '/quality/rejected', '/quality/standards'));
+    expect(otherAreaHrefs(navOf('LOGISTICS'))).toEqual(without('/goods-issues', '/mill-sheets'));
   });
 
   it('관리자: 사원 · 부서·직급·권한 · 기준정보 · AI 연결, 그 뒤에 조회 권한으로 여는 14개 화면과 재고', () => {
@@ -63,10 +65,8 @@ describe('buildNavigation', () => {
   });
 
   it('권한이 없으면 그 메뉴를 숨기고, 다른 영역 권한이 없으면 구분선도 없다', () => {
-    const permissions: PermissionMap = { ...permissionsOf('PURCHASE') };
-    delete permissions.PURCHASE_ORDER_CONFIRM;
-    delete permissions.PRODUCTION_PLAN_CONFIRM;
-    delete permissions.MASTER_MANAGE;
+    // 관리자가 부서·권한 화면에서 구매의 다른 권한을 모두 뺀 경우
+    const permissions: PermissionMap = { PURCHASE_REQUISITION_CREATE: 'USE', GOODS_RECEIPT_CONFIRM: 'USE' };
     const nav = buildNavigation({ roleCode: 'PURCHASE', permissions, headDepartmentIds: [] });
     expect(hrefs(nav)).toContain('/mrp');
     expect(hrefs(nav)).not.toContain('/purchase-orders');
@@ -85,6 +85,8 @@ describe('buildNavigation', () => {
 
 describe('화면 잠금 (screens.ts)', () => {
   const sales: AccessUser = { permissions: permissionsOf('SALES'), headDepartmentIds: [] };
+  /** 관리자가 다른 영역 조회 권한을 뺀 영업 사원 */
+  const salesOnly: AccessUser = { permissions: { SALES_ORDER_CREATE: 'USE', SALES_ORDER_CANCEL: 'USE', SHIPMENT_REQUEST_MANAGE: 'USE' }, headDepartmentIds: [] };
   const admin: AccessUser = {
     permissions: { ...Object.fromEntries(PERMISSIONS.map((p: Permission): [Permission, PermissionLevel] => [p, 'VIEW'])), ...permissionsOf('ADMIN') },
     headDepartmentIds: [],
@@ -99,12 +101,20 @@ describe('화면 잠금 (screens.ts)', () => {
     expect(open(admin, '/admin/employees')).toBe(true);
     expect(open(sales, '/admin/master-data')).toBe(true);
     expect(open(sales, '/mill-sheets')).toBe(true);
-    expect(open(sales, '/quality/standards')).toBe(false);
+    expect(open(sales, '/quality/standards')).toBe(true);
+    expect(open(salesOnly, '/quality/standards')).toBe(false);
+  });
+
+  it('주소로 열 수 있는지 본다: 쿼리는 떼고 보고, 표에 없는 주소는 막지 않는다', () => {
+    expect(canOpenHref(sales, '/production/plans?plan=3')).toBe(true);
+    expect(canOpenHref(salesOnly, '/production/plans?plan=3')).toBe(false);
+    expect(canOpenHref(salesOnly, '/lots/trace?lot=HT-BOF1-261001-001')).toBe(true);
+    expect(canOpenHref(salesOnly, '/unknown')).toBe(true);
   });
 
   it('Message → ERP 초안 화면은 구매요청 권한이 없어도 열린다 (볼 수 있는지는 서버가 요청자·방 멤버로 확인)', () => {
-    expect(open(sales, '/purchase-requisitions/3')).toBe(false);
-    expect(open(sales, '/action-drafts/3')).toBe(true);
+    expect(open(salesOnly, '/purchase-requisitions/3')).toBe(false);
+    expect(open(salesOnly, '/action-drafts/3')).toBe(true);
   });
 
   it('등록 화면은 사용 권한이 있어야 열린다', () => {

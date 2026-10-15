@@ -2,6 +2,7 @@
 import type { ComponentType } from 'react';
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import type { WidgetProps } from '@/features/dashboard/components/WidgetFrame';
+import { AgentRiskWidget } from '@/features/dashboard/widgets/AgentRiskWidget';
 import {
   DeliveryRiskWidget,
   ProductionVolumeWidget,
@@ -16,7 +17,7 @@ import { ProcessFlowWidget } from '@/features/dashboard/widgets/ProcessFlowWidge
 import { ProcessYieldWidget } from '@/features/dashboard/widgets/ProcessYieldWidget';
 import { ProductStockWidget } from '@/features/dashboard/widgets/ProductStockWidget';
 import { RecentEventsWidget } from '@/features/dashboard/widgets/RecentEventsWidget';
-import { AgentRiskWidget, AiUsageWidget } from '@/features/dashboard/widgets/SoonWidgets';
+import { AiUsageWidget } from '@/features/dashboard/widgets/SoonWidgets';
 
 export const WIDGET_COMPONENTS: Record<DashboardWidgetKey, ComponentType<WidgetProps>> = {
   PROCESS_FLOW: ProcessFlowWidget,

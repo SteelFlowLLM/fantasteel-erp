@@ -149,7 +149,7 @@ describe('LOT 추적 서버 어댑터 (api/server/lotTrace.ts)', () => {
       if (c.path === '/mill-sheets') return ok(page([{ id: 7, millSheetNo: 'MS-2610-0001-1', salesOrderId: 1 }]));
       if (c.path === '/lots/11/trace') return ok(backward(slab1, 11));
       if (c.path === '/lots/12/trace') return ok(backward(slab2, 12));
-      // 물류는 규격 목록 권한이 없다 → 이론중량은 비운다
+      // 규격 목록 권한이 없으면(관리자가 뺀 경우) 이론중량은 비운다
       if (c.path === '/items') return fail(403, 'COM-002', '권한이 없습니다');
       return undefined;
     });

@@ -23,7 +23,7 @@ export interface WidgetDef {
   link?: { screen: ScreenDef; label: string };
 }
 
-const SOON_KEYS: readonly SoonWidgetKey[] = ['AGENT_RISK', 'AI_USAGE'];
+const SOON_KEYS: readonly SoonWidgetKey[] = ['AI_USAGE'];
 export const isSoonWidget = (key: DashboardWidgetKey): key is SoonWidgetKey => (SOON_KEYS as readonly string[]).includes(key);
 
 type WidgetSpec = Omit<WidgetDef, 'key' | 'soon'>;
@@ -59,6 +59,7 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
     defaultH: 5,
     minW: 3,
     minH: 3,
+    link: { screen: SCREEN.agent, label: 'Agent' },
   },
   RECENT_EVENTS: {
     label: '최근 작업 로그',
@@ -173,7 +174,7 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
   AI_USAGE: {
     label: 'AI 활용 현황',
     isDefault: false,
-    description: 'AI 어시스턴트·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
+    description: '철강맨AI·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
     icon: 'wave',
     defaultW: 6,
     defaultH: 4,

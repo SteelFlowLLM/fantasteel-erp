@@ -32,12 +32,16 @@ export function salesOrderTool(salesOrders: SalesOrderService, today: () => stri
       const salesOrderId = optionalPositiveInt(args, 'salesOrderId');
       const dueRiskOnly = optionalBoolean(args, 'dueRiskOnly') ?? false;
 
-      if (salesOrderId !== undefined) return detailOutput(await fulfillmentOf(salesOrders, salesOrderId), today());
+      if (salesOrderId !== undefined) {
+        const found = await fulfillmentOf(salesOrders, salesOrderId);
+        return detailOutput(found, await salesOrders.detail(salesOrderId), today());
+      }
 
       const page = await salesOrders.list({ salesOrderNo, page: 1, size: SCAN_SIZE });
       const rows = dueRiskOnly ? page.items.filter((s) => s.isDueRisk) : page.items;
       const exact = salesOrderNo ? rows.find((s) => s.salesOrderNo.toLowerCase() === salesOrderNo.toLowerCase()) : undefined;
-      if (exact || (salesOrderNo && rows.length === 1)) return detailOutput(await fulfillmentOf(salesOrders, (exact ?? rows[0]).id), today());
+      const one = exact ?? (salesOrderNo && rows.length === 1 ? rows[0] : undefined);
+      if (one) return detailOutput(await fulfillmentOf(salesOrders, one.id), one, today());
 
       const limited = limitRows(rows);
       const unscanned = Math.max(0, page.total - page.items.length);
@@ -83,11 +87,14 @@ function summaryRow(s: SalesOrderSummary, today: string) {
   };
 }
 
-function detailOutput(f: SalesOrderFulfillment, today: string) {
+/** 고객사·담당은 충족 현황에 없어 목록 행(상세)에서 채운다: 'SO-2610-004 담당 누구야?'에 수주 한 건만 찾았을 때도 답하게 */
+function detailOutput(f: SalesOrderFulfillment, s: Pick<SalesOrderSummary, 'customerName' | 'ownerEmployeeName'>, today: string) {
   return {
     label: `수주 충족 현황 · ${f.salesOrderNo}`,
     data: {
       수주번호: f.salesOrderNo,
+      고객사: s.customerName,
+      담당: s.ownerEmployeeName,
       상태: SALES_ORDER_ITEM_STATUS_LABEL[f.salesOrderStatus],
       진행률: percentText(f.progress.ratio),
       품목: f.items.map((i) => ({

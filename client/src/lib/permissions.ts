@@ -4,7 +4,7 @@ import { PERMISSION_LABEL, PERMISSION_LEVEL_LABEL, type Permission, type Permiss
 
 export type PermissionMap = Partial<Record<Permission, PermissionLevel>>;
 
-interface WithPermissions {
+export interface WithPermissions {
   permissions: PermissionMap;
 }
 

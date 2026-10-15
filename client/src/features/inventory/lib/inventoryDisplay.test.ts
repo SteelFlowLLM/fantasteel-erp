@@ -5,9 +5,38 @@ import {
   isEmptyProductRow,
   lotStatusTone,
   matchesLotNo,
+  nextUnitWeightSort,
   productTotalsOf,
   qualityDisplayOf,
+  sortByUnitWeight,
 } from '@/features/inventory/lib/inventoryDisplay';
+
+describe('1매 이론중량 정렬 (재고 제품 탭 머리글)', () => {
+  const rows = [
+    { itemCode: 'A', theoreticalWeightTon: '9.420' },
+    { itemCode: 'B', theoreticalWeightTon: '23.550' },
+    { itemCode: 'C', theoreticalWeightTon: '9.420' },
+    { itemCode: 'D', theoreticalWeightTon: '10.000' },
+  ];
+  const codes = (list: { itemCode: string }[]) => list.map((r) => r.itemCode);
+
+  it('무거운 순·가벼운 순. 소수 문자열을 숫자로 비교한다 (글자 순이면 9.420이 23.550보다 뒤)', () => {
+    expect(codes(sortByUnitWeight(rows, 'desc'))).toEqual(['B', 'D', 'A', 'C']);
+    expect(codes(sortByUnitWeight(rows, 'asc'))).toEqual(['A', 'C', 'D', 'B']);
+  });
+
+  it('정렬 전(null)은 원래 순서이고 원래 배열은 바꾸지 않는다', () => {
+    expect(codes(sortByUnitWeight(rows, null))).toEqual(['A', 'B', 'C', 'D']);
+    sortByUnitWeight(rows, 'desc');
+    expect(codes(rows)).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('누를 때마다 처음엔 무거운 순, 그다음 가벼운 순과 번갈아', () => {
+    expect(nextUnitWeightSort(null)).toBe('desc');
+    expect(nextUnitWeightSort('desc')).toBe('asc');
+    expect(nextUnitWeightSort('asc')).toBe('desc');
+  });
+});
 
 describe('품질 결과 표시 (공통 코드 INSPECTION_RESULT 표시명)', () => {
   it('합격, 판정 대기, 불합격, 히트 불합격 = 불합격(히트)', () => {

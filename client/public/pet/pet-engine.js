@@ -12,7 +12,8 @@
  *   data-pet-item="<종류>"  레코드 하나(표 행·목록 항목·상자). 마우스를 올리면 데이터를 읽어 준다 (data-pet-item-title · 안의 data-pet-field="<이름>")
  *   data-pet-term="<용어>"  라벨. th·dt와 함께 용어집(guide.glossary)에 있으면 설명한다 (없으면 바깥 항목·기능이 이어받는다)
  *
- * 실제 앱에서는 화면을 옮겨 다니므로 mount 옵션 screen·navigate와 setScreen(키)로 지금 화면을 알려 준다.
+ * 실제 앱에서는 화면을 옮겨 다니므로 mount 옵션 screen·navigate와 setScreen(키, 잠김)으로 지금 화면을 알려 준다.
+ * 잠김(열 권한 없음)이면 화면 안내가 안쪽 기능 대신 누가 쓰는 곳인지만 말한다 (설명 파일의 screens.<키>.locked).
  */
 (function (global) {
   'use strict';
@@ -142,6 +143,7 @@
     chat: ['0111110', '1000001', '1010101', '1000001', '0111110', '0110000', '0100000'],
     info: ['0001000', '0000000', '0011000', '0001000', '0001000', '0001000', '0011100'],
     walk: ['0110000', '0110000', '0000110', '0110110', '0110000', '0000110', '0000110'],
+    skip: ['1001000', '1101100', '1111110', '1111111', '1111110', '1101100', '1001000'],
     flag: ['1111100', '1111110', '1111100', '1000000', '1000000', '1000000', '1000000'],
     swap: ['0000100', '1111110', '0000100', '0010000', '0111111', '0010000', '0000000'],
     size: ['1110111', '1000001', '1000001', '0000000', '1000001', '1000001', '1110111'],
@@ -418,7 +420,10 @@
     }
     return best;
   }
-  /** 화면별 안내 { <SCREEN 키>: { intro: string | string[], tour: [{ target, text }] } }. 쓸 내용이 없는 항목은 버린다 */
+  /**
+   * 화면별 안내 { <SCREEN 키>: { intro: string | string[], tour: [{ target, text }], locked: string | string[] } }. 쓸 내용이 없는 항목은 버린다.
+   * locked는 열 권한이 없어 잠긴 화면에서 intro 대신 할 말이다 (누가 쓰는 곳인지·무엇을 하는 곳인지만).
+   */
   function buildScreens(v) {
     const out = {};
     if (!isObj(v)) return out;
@@ -428,8 +433,9 @@
       if (!key || !isObj(sc)) continue;
       const intro = (typeof sc.intro === 'string' ? [sc.intro] : arr(sc.intro)).filter(text);
       const tour = arr(sc.tour).filter((st) => isObj(st) && text(st.target) && text(st.text));
-      if (!intro.length && !tour.length) continue;
-      out[key] = { intro, tour };
+      const locked = (typeof sc.locked === 'string' ? [sc.locked] : arr(sc.locked)).filter(text);
+      if (!intro.length && !tour.length && !locked.length) continue;
+      out[key] = { intro, tour, locked };
     }
     return out;
   }
@@ -733,6 +739,9 @@
 .fp-b-title{font-size:12px;font-weight:700;color:var(--fp-accent-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fp-b-tag{flex:none;font-size:10.5px;line-height:15px;font-weight:600;padding:0 5px;border-radius:3px;background:var(--fp-surface-3);color:var(--fp-ink-3)}
 .fp-b-step{flex:none;margin-left:auto;padding-left:10px;font-size:11px;color:var(--fp-ink-3);font-variant-numeric:tabular-nums}
+.fp-bubble .fp-b-back{flex:none;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:18px;padding:0 0 2px;border:1px solid var(--fp-line);border-radius:4px;background:var(--fp-surface);color:var(--fp-ink-2);font-size:15px;line-height:1;font-weight:700;cursor:pointer}
+.fp-b-back:hover{background:var(--fp-accent-soft);border-color:var(--fp-accent);color:var(--fp-accent-ink)}
+.fp-b-back+.fp-b-step{margin-left:0;padding-left:2px}
 .fp-b-text{position:relative;margin:0;word-break:keep-all;overflow-wrap:anywhere}
 .fp-b-ghost{visibility:hidden}
 .fp-b-typed{position:absolute;left:0;top:0;right:0}
@@ -780,10 +789,23 @@
 .fp-chat-form input{flex:1;min-width:0;height:32px;padding:0 10px;border:1px solid var(--fp-line-strong);border-radius:4px;background:var(--fp-surface-2);font-size:13px;outline:none}
 .fp-chat-form input:focus{border-color:var(--fp-run);box-shadow:0 0 0 2px rgba(31,95,204,.14);background:var(--fp-surface)}
 .fp-chat-form input::placeholder{color:var(--fp-ink-3)}
-.fp-send{flex:none;height:32px;padding:0 12px;border:1px solid var(--fp-brand);border-radius:4px;background:var(--fp-brand);color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+.fp-send{flex:none;height:32px;padding:0 12px;border:1px solid var(--fp-brand);border-radius:4px;background:var(--fp-brand);font-size:13px;font-weight:600;cursor:pointer}
+/* '.fp-root button{color:inherit}'(앱 글자색으로 맞춤)보다 구체적이어야 남색 바탕 위 글자가 흰색으로 남는다 */
+.fp-root .fp-send{color:#fff}
 .fp-send:hover{background:var(--fp-brand-hover)}
 .fp-chat-foot{display:flex;align-items:center;gap:6px;padding:5px 10px 6px;background:var(--fp-surface-2);border-top:1px solid var(--fp-line);font-size:11px;color:var(--fp-ink-3)}
 .fp-chat-foot i{width:6px;height:6px;flex:none;background:var(--fp-line-strong)}
+.fp-chat-foot[data-ai=true]{color:var(--fp-ok);font-weight:600}
+.fp-chat-foot[data-ai=true] i{background:var(--fp-ok)}
+.fp-ai-switch{margin-left:auto;display:inline-flex;flex:none;border:1px solid var(--fp-line-strong);border-radius:4px;overflow:hidden;background:var(--fp-surface)}
+.fp-ai-switch button{height:20px;min-width:34px;padding:0 7px;border:0;background:transparent;color:var(--fp-ink-3);font-size:10.5px;font-weight:700;letter-spacing:.02em;cursor:pointer}
+.fp-ai-switch button+button{border-left:1px solid var(--fp-line-strong)}
+.fp-ai-switch button:hover{background:var(--fp-surface-3);color:var(--fp-ink)}
+.fp-ai-switch button[aria-pressed=true][data-v=on]{background:var(--fp-ok);color:#fff}
+.fp-ai-switch button[aria-pressed=true][data-v=off]{background:var(--fp-ink-3);color:#fff}
+.fp-msg--ai{white-space:pre-wrap}
+.fp-msg-note{align-self:stretch;padding:0 4px;font-size:11px;line-height:15px;color:var(--fp-ink-3);text-align:center;word-break:keep-all;overflow-wrap:anywhere}
+.fp-msg-src{margin-top:6px;font-size:11px;line-height:15px;color:var(--fp-ink-3);white-space:normal}
 .fp-menu{position:absolute;left:0;top:0;z-index:6;pointer-events:auto;width:228px;padding:4px;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:6px;box-shadow:4px 4px 0 rgba(18,24,32,.18),0 10px 28px rgba(18,24,32,.12)}
 .fp-menu-head{display:flex;align-items:center;gap:8px;padding:4px 6px 8px;margin-bottom:4px;border-bottom:2px dotted var(--fp-line-strong)}
 .fp-menu-ava{flex:none;width:28px;height:28px;border-radius:5px;background:var(--fp-accent-soft);overflow:hidden;position:relative}
@@ -793,7 +815,7 @@
 .fp-mi{display:flex;align-items:center;gap:9px;width:100%;min-height:32px;padding:0 8px;border:0;border-radius:4px;background:transparent;font-size:13px;color:var(--fp-ink);text-align:left;cursor:pointer}
 .fp-mi:hover,.fp-mi:focus-visible{background:var(--fp-brand-tint);outline:none}
 .fp-mi .fp-ic{color:var(--fp-accent-ink)}
-.fp-mi-sub{display:block;font-size:10.5px;line-height:13px;color:var(--fp-ink-3)}
+.fp-mi-sub{display:block;font-size:10.5px;line-height:13px;color:var(--fp-ink-3);word-break:keep-all}
 .fp-mi-text{display:flex;flex-direction:column;min-width:0;padding:5px 0}
 .fp-state{margin-left:auto;flex:none;font-size:11px;font-weight:700;line-height:18px;padding:0 6px;border-radius:3px;background:var(--fp-surface-3);color:var(--fp-ink-3)}
 .fp-state[data-on=true]{background:var(--fp-ok-bg);color:var(--fp-ok)}
@@ -855,13 +877,16 @@
         storageKey: 'fantapet',
         container: doc.body,
         firstVisit: true,
+        startHidden: false, // true면 사원이 꺼내기 전까지 숨겨 두고 화면 가장자리 탭만 보인다 (숨기거나 꺼낸 선택은 기억해 그대로 따른다)
         hint: '끌어서 옮기기 · 우클릭 메뉴',
         zIndex: 2147482000,
         props: null,
         user: null, // { name, gradeName, departmentName, roleCode } — 인사·{name}{grade}{dept} 자리에 쓴다
         screen: null, // 지금 화면(SCREEN 키)
+        screenLocked: false, // 지금 화면을 열 권한이 없다(잠금 화면). 안쪽 기능 대신 어떤 화면인지만 알려 준다
         navigate: null, // (href) => void — '이 화면으로 가기'. 없으면 링크를 누른다
         screenHrefs: null, // { <SCREEN 키>: 주소 } — 다른 화면의 카드를 물으면 그 화면으로 데려갈 때 쓴다
+        askAi: null, // (question, history) => Promise<{ text, sources? }> — 있으면 대화 창에 AI 연결 ON·OFF가 생긴다
       },
       options || {},
     );
@@ -1005,9 +1030,11 @@
       nextBlink: now() + 3000,
       nextIdleTalk: now() + rand(55000, 90000),
       sleeping: false,
-      // 돌아다니기는 늘 켜 둔다 (메뉴에서 끄는 칸을 없앴다). 동작 스킵하기가 켜져 있으면 혼자 돌아다니지는 않는다
-      roam: true,
+      // 돌아다니기(메뉴, 사원별 기억, 처음엔 켜짐): 끄면 가만히 둬도 혼자 돌아다니지 않는다. 동작 스킵하기가 켜져 있어도 혼자 돌아다니지 않는다
+      roam: store.has('roam') ? !!store.get('roam') : true,
       explain: store.has('explain') ? !!store.get('explain') : true,
+      // AI 연결은 사용자가 켤 때만: 꺼 두면 서버를 부르지 않고 정해진 답변으로 답한다
+      ai: !!store.get('ai'),
       press: null,
       lastClickT: -1e9,
       clickTimer: 0,
@@ -1022,6 +1049,7 @@
       hoverTimer: 0,
       landWaiters: [],
       perchCheckT: 0,
+      avoidCheckT: 0,
       hintUntil: 0,
       raf: 0,
       lastTs: 0,
@@ -1039,6 +1067,7 @@
       lastMoveT: -1e9,
       hoverArmed: false,
       screen: typeof o.screen === 'string' && o.screen ? o.screen : null, // 지금 화면(SCREEN 키)
+      screenLocked: !!o.screenLocked, // 지금 화면을 열 권한이 없다(잠금 화면)
       pending: null, // 화면을 옮긴 뒤 한가해지면 할 안내 { key, since, nextCheck }
       afterNav: null, // 대화창에서 '그 화면으로 가기'로 옮긴 뒤 가리킬 카드 { key, screen, t0, seenAt, nextCheck }
       hoverCand: null, // 마우스가 머문 것 { el, kind: 'target' | 'item' | 'term', term }
@@ -1057,9 +1086,27 @@
       const a = S.pack.anchor;
       return Math.max(a.x - b.left, b.right - a.x) * S.scale;
     }
+    /**
+     * 펫이 서지 않을 칸(data-pet-avoid, 예: 오른쪽에 열린 철강맨AI 패널)이 화면 가장자리에 붙어 있으면 바닥 범위에서 그만큼 뺀다.
+     * 화면을 거의 다 덮는 칸(크게 펼친 패널)은 피할 곳이 없으니 빼지 않는다.
+     */
+    function avoidEdges() {
+      let left = 0;
+      let right = W();
+      for (const el of doc.querySelectorAll('[data-pet-avoid]')) {
+        if (root.contains(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height < H() * 0.5) continue;
+        if (r.right >= W() - 2 && r.left > W() * 0.25) right = Math.min(right, r.left);
+        else if (r.left <= 2 && r.right < W() * 0.75) left = Math.max(left, r.right);
+      }
+      return [left, right];
+    }
     function floorRange() {
       const hw = halfW() + 2;
-      return [SIDE_GAP + hw, Math.max(SIDE_GAP + hw, W() - SIDE_GAP - hw)];
+      const [l, r] = avoidEdges();
+      const mn = l + SIDE_GAP + hw;
+      return [mn, Math.max(mn, r - SIDE_GAP - hw)];
     }
     function minFootY() {
       return (S.pack.anchor.y - bbox().top) * S.scale + 4;
@@ -1755,6 +1802,18 @@
         S.x = r.left + surf.off;
       } else {
         S.y = floorY();
+        // 가장자리 칸(data-pet-avoid, 예: 철강맨AI 패널)이 열리면 그 밑(보내기 버튼 위)에 서 있지 않게 비켜선다
+        if (!S.walk && t - S.avoidCheckT > 300) {
+          S.avoidCheckT = t;
+          const [mn, mx] = floorRange();
+          if (S.x > mx + 1 || S.x < mn - 1) {
+            const gx = clamp(S.x, mn, mx);
+            if (reduced) {
+              S.x = gx;
+              savePos();
+            } else walkTo(gx, { run: true });
+          }
+        }
       }
       const w = S.walk;
       if (w) {
@@ -2474,8 +2533,23 @@
         bubble.anchor = op.anchor && op.anchor.nodeType === 1 ? op.anchor : null;
         bubbleEl.textContent = '';
         if (title || op.tag || op.step) {
+          // back: 여러 단계 안내에서 단계 번호(1/8) 왼쪽에 ‹ 를 두어 앞 단계로 되돌아간다 ('prev'로 끝남)
+          const back = op.back
+            ? h('button', {
+                type: 'button',
+                class: 'fp-b-back',
+                'aria-label': '이전 단계',
+                title: '이전 단계',
+                text: '‹',
+                onclick: (ev) => {
+                  ev.stopPropagation();
+                  S.noHoverUntil = now() + 1500;
+                  closeBubble('prev');
+                },
+              })
+            : null;
           bubbleEl.append(
-            h('div', { class: 'fp-b-head' }, title ? h('span', { class: 'fp-b-title', text: title }) : null, op.tag ? h('span', { class: 'fp-b-tag', text: op.tag }) : null, op.step ? h('span', { class: 'fp-b-step', text: op.step }) : null),
+            h('div', { class: 'fp-b-head' }, title ? h('span', { class: 'fp-b-title', text: title }) : null, op.tag ? h('span', { class: 'fp-b-tag', text: op.tag }) : null, back, op.step ? h('span', { class: 'fp-b-step', text: op.step }) : null),
           );
         }
         bubbleEl.classList.toggle('fp-bubble--data', fields.length > 0);
@@ -2621,19 +2695,23 @@
       }
       const box = petBox();
       const cx = (box.left + box.right) / 2;
+      // 펫 곁 말풍선도 가장자리 칸(data-pet-avoid, 철강맨AI 패널) 안으로 넘어가지 않게 그 경계 안에서 놓는다
+      const [al, ar] = avoidEdges();
+      const lo = al + 8;
+      const hi = ar - 8;
       let side = 'top';
       let x;
       let y = box.top - bh - 12;
-      if (y >= 8) x = clamp(cx - bw / 2, 8, Math.max(8, vw - bw - 8));
+      if (y >= 8) x = clamp(cx - bw / 2, lo, Math.max(lo, hi - bw));
       else {
-        const leftSpace = box.left - 14;
-        const rightSpace = vw - box.right - 14;
+        const leftSpace = box.left - 14 - al;
+        const rightSpace = ar - box.right - 14;
         if (leftSpace >= bw + 8 || leftSpace > rightSpace) {
           side = 'left';
-          x = Math.max(8, box.left - 14 - bw);
+          x = Math.max(lo, box.left - 14 - bw);
         } else {
           side = 'right';
-          x = Math.min(vw - bw - 8, box.right + 14);
+          x = Math.min(hi - bw, box.right + 14);
         }
         y = clamp(box.top, 8, Math.max(8, vh - bh - 8));
       }
@@ -3014,6 +3092,7 @@
           title: info.title,
           tag,
           step: info.lines.length > 1 ? `${i + 1}/${info.lines.length}` : null,
+          back: i > 0,
           note: last && info.req.length ? info.req.join(' · ') : null,
           closable: true,
           anchor: el,
@@ -3023,7 +3102,12 @@
           goNav(navHrefOf(el));
           return;
         }
-        if (tok !== S.seq || (!last && r !== 'next')) return;
+        if (tok !== S.seq) return;
+        if (r === 'prev') {
+          i -= 2;
+          continue;
+        }
+        if (!last && r !== 'next') return;
       }
     }
     /** 마우스를 올려 설명할 수 없는 때 (기능 설명·항목 읽기·용어 설명이 같은 간격을 쓴다) */
@@ -3494,6 +3578,7 @@
         const r = await showBubble(info.more[i], {
           title: info.head,
           step: info.more.length > 1 ? `${i + 1}/${info.more.length}` : null,
+          back: i > 0,
           closable: true,
           anchor: el,
           actions: last ? [openTargetOf(el) ? { label: '열기', value: 'open' } : null, Object.assign({ primary: true }, ok)] : [ok, { label: '다음', value: 'next', primary: true }],
@@ -3502,7 +3587,12 @@
           openItem(el);
           return;
         }
-        if (tok !== S.seq || (!last && r !== 'next')) return;
+        if (tok !== S.seq) return;
+        if (r === 'prev') {
+          i -= 2;
+          continue;
+        }
+        if (!last && r !== 'next') return;
       }
     }
     async function readItemEl(el, fromHover) {
@@ -3899,8 +3989,11 @@
       S.tour = { tok, kind: spec.kind, key: spec.key || null };
       hideHint();
       const screenTitle = spec.kind === 'screen' ? targetTitle(spec.key) : null;
+      const tag = spec.tag || null;
       let finished = false;
       let nav = null;
+      // 보여 준 단계 번호를 쌓아 두고, 말풍선의 ‹(이전 단계)로 하나씩 되돌아간다 (찾지 못해 건너뛴 단계는 쌓지 않는다)
+      const shown = [];
       for (let i = 0; i < items.length; i++) {
         const st = items[i];
         const last = i === items.length - 1;
@@ -3920,7 +4013,7 @@
           }
           // 가는 길에 펫이 떨어져 곁에 못 갔어도(ok=false) 강조는 이 단계의 칸으로 옮긴다 (앞 단계 테두리가 남지 않게)
           spotlight(el);
-        }
+        } else clearSpotlight(); // 소개 문장 단계: ‹로 되돌아왔을 때 앞 칸 테두리가 남지 않게
         const actions = [];
         if (!last || spec.kind === 'main') actions.push({ label: '건너뛰기', value: 'skip' });
         if (el) actions.push(navAction(el));
@@ -3929,18 +4022,25 @@
         else hideBeam(false);
         const res = await showBubble(st.text, {
           title: (st.target ? targetTitle(st.target) : null) || screenTitle,
+          tag,
           step: `${i + 1}/${items.length}`,
+          back: shown.length > 0,
           sticky: true,
           closable: true,
           anchor: el,
           anim: el && ok ? speechAnimFor(el) : 'talk',
           actions,
         });
+        if (res === 'prev' && shown.length) {
+          i = shown.pop() - 1;
+          continue;
+        }
         if (res === 'nav') {
           nav = navHrefOf(el);
           break;
         }
         if (res !== 'next') break;
+        shown.push(i);
         if (last) finished = true;
       }
       hideBeam(false);
@@ -3959,7 +4059,7 @@
           goNav(nav);
           return false;
         }
-        if (spec.kind === 'main') showBubble(finished ? '안내 끝! 궁금하면 저를 눌러 주세요.' : '안내는 우클릭 메뉴에서 다시 볼 수 있어요.');
+        if (spec.kind === 'main') showBubble(finished ? '안내 끝! 궁금하면 저를 눌러 주세요.' : '화면마다 우클릭 메뉴의 "이 화면 안내"로 다시 볼 수 있어요.');
         else if (!finished) showBubble('이 화면 안내는 우클릭 메뉴의 "이 화면 안내"로 다시 볼 수 있어요.');
         showHint();
         end(tok);
@@ -3968,6 +4068,21 @@
     }
     function startTour() {
       return runTour({ kind: 'main', key: null, intro: [], steps: guide.tour });
+    }
+    const LOCKED_TAIL = '열 권한이 없어서 안쪽은 못 보여 드려요. 권한은 관리자가 정해요.';
+    /**
+     * 열 권한이 없는 화면(잠금)에서 할 말. 쓰지도 못하는 기능을 설명하지 않고, 누가 쓰는 곳인지·무엇을 하는 곳인지만 알려 준다.
+     * 설명 파일에 locked가 없으면 화면 이름과 한 줄 설명(short)으로 만든다.
+     */
+    function lockedIntro(key) {
+      const sc = key ? guide.screens[key] : null;
+      if (sc && sc.locked.length) return sc.locked.concat(LOCKED_TAIL);
+      const t = key ? guide.targets[key] : null;
+      const title = isObj(t) && t.title ? t.title : null;
+      const short = isObj(t) && t.short ? String(t.short).replace(/[.。]+$/, '') : null;
+      if (title && short) return [`${title} 화면이에요. ${short}.`, LOCKED_TAIL];
+      if (title) return [`${title} 화면이에요.`, LOCKED_TAIL];
+      return [LOCKED_TAIL];
     }
     /** 화면 안내. auto는 화면을 옮겨 처음 왔을 때(안내할 게 없으면 조용히 넘어간다) */
     function startScreenTour(key, auto) {
@@ -3978,6 +4093,8 @@
         return Promise.resolve(false);
       }
       store.set(`seen:${k}`, true);
+      // 잠긴 화면은 카드도 없고 쓸 수도 없으니 어떤 화면인지만 말하고 끝낸다
+      if (S.screenLocked) return runTour({ kind: 'screen', key: k, intro: lockedIntro(k), steps: [], tag: '권한 없음' });
       // 저절로 시작할 때 소개 문장도 없고 가리킬 곳도 하나 없으면(권한으로 안 보이는 화면 등) 조용히 넘어간다
       if (auto && !sc.intro.length && !sc.tour.some((st) => findTarget(st.target))) return Promise.resolve(false);
       return runTour({ kind: 'screen', key: k, intro: sc.intro, steps: sc.tour });
@@ -3997,8 +4114,9 @@
       if (guide.screens[key] && !store.get(`seen:${key}`)) return 'screen';
       return null;
     }
-    function setScreen(key) {
+    function setScreen(key, locked) {
       const k = typeof key === 'string' && key ? key : null;
+      S.screenLocked = !!locked; // 같은 화면이라도 권한 확인이 늦게 끝나면 잠금 여부가 바뀔 수 있다
       if (k === S.screen) return;
       S.screen = k;
       // 하던 화면 안내는 조용히 끝낸다 (처음 안내는 레일·상단 바 중심이라 이어 간다)
@@ -4079,7 +4197,8 @@
     }
 
     // ── 대화창 ──
-    const chat = { el: null, log: null, chips: null, input: null, h: 0, ro: null, asked: new Set() };
+    // gen: 창을 열 때마다 바뀐다. 창을 닫았다 다시 연 뒤에 도착한 이전 AI 답은 버린다. turns: 이 창에서 AI와 주고받은 말
+    const chat = { el: null, log: null, chips: null, input: null, foot: null, h: 0, ro: null, asked: new Set(), busy: false, gen: 0, turns: [] };
     const norm = (s) => String(s || '').toLowerCase().replace(/[\s?!.,~·'"()[\]{}:;/\\-]/g, '');
     function bigrams(s) {
       const out = new Set();
@@ -4105,7 +4224,8 @@
       for (const f of guide.faq) {
         let score = 0;
         const q = norm(f.q);
-        if (q === n) score += 100;
+        // match(정규식)는 문장이 달라도 같은 질문으로 본다: FAQ 문장과 똑같이 물은 것처럼 확실한 답이 된다
+        if (q === n || (f.match instanceof RegExp && f.match.test(String(input)))) score += 100;
         else if (n.length >= 2 && q.includes(n)) score += 3;
         for (const k of arr(f.keywords)) {
           const nk = norm(k);
@@ -4321,24 +4441,31 @@
       }
       return best;
     }
+    /**
+     * 정해진 답변. sure: 틀릴 일이 거의 없는 답(FAQ와 거의 같은 질문, 지금 화면을 보고 하는 답)이다.
+     * AI 연결(ON)이면 sure인 답만 여기서 하고 나머지는 AI에 묻는다: 어설프게 맞은 답이 AI로 갈 질문을 가로채지 않게.
+     */
     function answerFor(input) {
       const fm = matchFaq(input);
-      if (fm && fm.score >= 100) return { text: fm.f.a, target: fm.f.target || null, alt: altTarget(input, fm.f.target) };
+      if (fm && fm.score >= 100) return { text: fm.f.a, target: fm.f.target || null, alt: altTarget(input, fm.f.target), sure: true };
       const code = codeIn(String(input || '').toUpperCase());
       if (code) {
         const el = findItemByCode(code);
-        if (el) return { item: el, code };
+        // 'SO-2610-004 담당 누구야?'처럼 사람을 물으면 화면 행에는 담당 칸이 없을 수 있어 AI 연결(ON)이면 AI가 조회해 답하게 한다
+        if (el) return { item: el, code, sure: !/(누구|누가|담당|요청자|승인자|이름)/.test(String(input || '')) };
       }
       const q = String(input || '');
       const here = HERE_RE.test(q);
       if (here || WHERE_RE.test(q)) {
         const hit = findOnPage(findCore(q));
         // '지금 화면에서'라고 했으면 조금만 맞아도, 아니면 이름이 거의 같을 때만 화면 요소를 먼저 가리킨다
-        if (hit && (here ? hit.sc >= 40 : hit.sc >= 85)) return { pageEl: hit.el, label: hit.label };
+        if (hit && (here ? hit.sc >= 40 : hit.sc >= 85)) return { pageEl: hit.el, label: hit.label, sure: true };
         if (here && !hit) {
           // 이 화면에 없으면 그렇게 말하고, 다른 화면의 기능 설명이 맞으면 그 화면으로 안내한다 (데이터 행을 대신 읽지는 않는다)
           const rest = answerFor(q.replace(HERE_RE, ' '));
           const miss = '이 화면에서는 찾지 못했어요.';
+          // '이 화면 요약해 줘'는 찾을 이름이 아니라 화면 데이터 요약을 묻는 말이다
+          if (rest.summary) return Object.assign({}, rest, { sure: true });
           if (rest.text && !rest.item && !rest.items && !rest.summary && !rest.pageEl && !rest.suggest) return Object.assign({}, rest, { text: `${miss} ${rest.text}`, here: true });
           return { text: `${miss} 위쪽 통합 검색이나 왼쪽 메뉴에서 찾아보세요.`, target: 'topbar:search' };
         }
@@ -4346,13 +4473,13 @@
       // '선택한 거 알려줘' '지금 보는 계획' → 고른 항목
       if (/(선택|고른|열린|열려\s*있는|지금\s*보는|보고\s*있는|이거|이것)/.test(q)) {
         const sel = selectedItem();
-        if (sel) return { item: sel, code: sel.getAttribute('data-pet-item-title') || '' };
-        if (/(선택|고른|열린)/.test(q)) return { text: '지금 고른 항목이 없어요. 목록에서 하나를 누른 뒤 다시 물어봐 주세요. 행에 마우스를 올려도 읽어 드려요.' };
+        if (sel) return { item: sel, code: sel.getAttribute('data-pet-item-title') || '', sure: true };
+        if (/(선택|고른|열린)/.test(q)) return { text: '지금 고른 항목이 없어요. 목록에서 하나를 누른 뒤 다시 물어봐 주세요. 행에 마우스를 올려도 읽어 드려요.', sure: true };
       }
-      // '이 화면 요약' '몇 건이야' → 화면 데이터 요약
+      // '이 화면 요약' '몇 건이야' → 화면 데이터 요약. '검사 대기 LOT 몇 개야'처럼 화면을 말하지 않은 수량 질문은 AI가 조회하는 편이 맞다
       if (/(요약|정리해|몇\s*(건|개|매)|얼마나\s*있|뭐가\s*있|무슨\s*데이터|데이터\s*알려)/.test(q)) {
         const sum = screenSummary();
-        if (sum) return { summary: sum };
+        if (sum) return { summary: sum, sure: here || /화면/.test(q) };
       }
       const tm = matchTarget(input, false);
       const gm = matchGlossary(input);
@@ -4483,7 +4610,7 @@
       if (!chat.chips) return;
       chat.chips.textContent = '';
       if (label) chat.chips.append(h('span', { class: 'fp-chips-label', text: label }));
-      for (const f of list) chat.chips.append(h('button', { type: 'button', class: 'fp-chip', text: f.q, title: f.q, onclick: () => ask(f.q) }));
+      for (const f of list) chat.chips.append(h('button', { type: 'button', class: 'fp-chip', text: f.q, title: f.q, onclick: () => ask(f.q, true) }));
     }
     function addMsg(who, text, extra) {
       const m = h('div', { class: `fp-msg fp-msg--${who}` }, who === 'pet' ? fill(text) : text);
@@ -4508,8 +4635,49 @@
       }
       addMsg('pet', line, [info.fields.length ? fieldList(info.fields) : null, ...acts]);
     }
-    async function ask(q) {
-      if (!chat.el) return;
+    function talkBack() {
+      if (S.mode === 'ground' && S.base === 'idle') {
+        player.set('talk', true);
+        later(() => {
+          if (player.name === 'talk') player.set(S.base);
+        }, 1000);
+      }
+    }
+    const aiOn = () => S.ai && typeof o.askAi === 'function';
+    /** AI 연결(ON)이면 AI 어시스턴트(서버)가 답한다. 이 창에서 앞서 주고받은 말을 함께 보내 '그거'를 알아듣게 한다 */
+    async function askAi(text, typing) {
+      const gen = chat.gen;
+      chat.busy = true;
+      let reply = null;
+      let failure = '';
+      try {
+        reply = await o.askAi(text, chat.turns.slice(-10));
+      } catch (e) {
+        failure = e && e.message ? String(e.message) : '';
+      }
+      if (gen !== chat.gen || !chat.el) return;
+      chat.busy = false;
+      typing.remove();
+      talkBack();
+      if (!reply || typeof reply.text !== 'string' || !reply.text.trim()) {
+        // AI가 실패해도 질문이 빈손으로 끝나지 않게 정해진 답변으로 대신 답한다. ON은 그대로 두어 다음 질문은 다시 AI에 묻는다
+        const why = failure ? failure.replace(/[.。]?\s*$/, '.') : '';
+        chat.log.append(h('div', { class: 'fp-msg-note', text: `AI가 답하지 못해서 정해진 답변으로 알려 드려요.${why ? ` ${why}` : ''}` }));
+        ruleReply(text);
+        return;
+      }
+      chat.turns.push({ role: 'user', content: text }, { role: 'assistant', content: reply.text });
+      // 서버 답은 {name} 같은 자리 표시를 채우지 않고 그대로 보인다
+      const m = h('div', { class: 'fp-msg fp-msg--pet fp-msg--ai' }, reply.text);
+      const sources = arr(reply.sources).filter((s) => typeof s === 'string' && s);
+      if (sources.length) m.append(h('div', { class: 'fp-msg-src', text: `출처 · ${sources.join(', ')}` }));
+      chat.log.append(m);
+      chat.log.scrollTop = chat.log.scrollHeight;
+      renderChips(defaultChips());
+    }
+    /** fromChip: 펫이 내놓은 질문 칩. 펫이 답을 알고 내놓은 질문이라 AI 연결(ON)이어도 정해진 답변으로 바로 답한다 */
+    async function ask(q, fromChip = false) {
+      if (!chat.el || chat.busy) return;
       const text = String(q || '').trim();
       if (!text) return;
       chat.asked.add(text);
@@ -4517,16 +4685,19 @@
       const typing = addMsg('pet', '•••');
       typing.classList.add('fp-msg--typing');
       if (S.mode === 'ground' && S.base === 'idle') player.set('think', true);
+      const ans = answerFor(text);
+      if (aiOn() && !ans.sure && !fromChip) {
+        await askAi(text, typing);
+        return;
+      }
       await wait(reduced ? 120 : 650);
       if (!chat.el) return;
       typing.remove();
-      const ans = answerFor(text);
-      if (S.mode === 'ground' && S.base === 'idle') {
-        player.set('talk', true);
-        later(() => {
-          if (player.name === 'talk') player.set(S.base);
-        }, 1000);
-      }
+      talkBack();
+      ruleReply(text, ans);
+    }
+    /** 정해진 답변: 설명 파일(FAQ·용어)과 지금 화면을 읽어 답한다 */
+    function ruleReply(text, ans = answerFor(text)) {
       if (ans.pageEl) {
         const el = ans.pageEl;
         const key = el.getAttribute('data-pet-target');
@@ -4556,6 +4727,29 @@
       if (ans.suggest) renderChips(ans.suggest, '이런 질문은 어때요?');
       else renderChips(defaultChips());
     }
+    /** 대화 창 아래 줄: 연결 상태 + AI 연결 ON·OFF. askAi 옵션이 없으면 상태만 보인다 */
+    function renderChatFoot() {
+      if (!chat.foot) return;
+      const on = aiOn();
+      chat.foot.textContent = '';
+      chat.foot.setAttribute('data-ai', String(on));
+      chat.foot.append(h('i', { 'aria-hidden': 'true' }), on ? 'AI 연결됨' : 'AI 연결 전 · 정해진 답변');
+      if (typeof o.askAi === 'function') {
+        const opt = (v, label) =>
+          h('button', { type: 'button', 'data-v': v, 'aria-pressed': String(on === (v === 'on')), text: label, onclick: () => setAi(v === 'on') });
+        chat.foot.append(h('div', { class: 'fp-ai-switch', role: 'group', 'aria-label': 'AI 연결' }, opt('on', 'ON'), opt('off', 'OFF')));
+      }
+      // AI 어시스턴트는 긴 질문도 받는다(서버 상한 1000자). 정해진 답변은 짧은 질문만 알아듣는다
+      if (chat.input) chat.input.maxLength = on ? 1000 : 80;
+    }
+    function setAi(v) {
+      S.ai = !!v;
+      store.set('ai', S.ai);
+      renderChatFoot();
+      // 줄을 다시 그려 누른 버튼이 사라지므로 새로 눌린 쪽에 초점을 옮긴다
+      const pressed = chat.foot && chat.foot.querySelector(`.fp-ai-switch [data-v=${S.ai ? 'on' : 'off'}]`);
+      if (pressed) pressed.focus({ preventScroll: true });
+    }
     function openChat() {
       if (chat.el) return;
       if (S.mode === 'hidden') show(true);
@@ -4580,6 +4774,7 @@
           class: 'fp-chat-form',
           onsubmit: (e) => {
             e.preventDefault();
+            if (chat.busy) return; // AI 답을 기다리는 동안 적은 질문은 지우지 않고 남겨 둔다
             const v = chat.input.value;
             chat.input.value = '';
             ask(v);
@@ -4595,10 +4790,14 @@
         chat.log,
         chat.chips,
         form,
-        h('div', { class: 'fp-chat-foot' }, h('i', { 'aria-hidden': 'true' }), 'AI 연결 전 · 정해진 답변'),
+        (chat.foot = h('div', { class: 'fp-chat-foot' })),
       );
       root.appendChild(el);
       chat.el = el;
+      chat.gen += 1;
+      chat.busy = false;
+      chat.turns = [];
+      renderChatFoot();
       addMsg('pet', `${pick(guide.greeting) || '안녕하세요!'}${guide.real ? '' : ' (설명 파일이 없어 간단한 안내만 해요)'}`);
       renderChips(defaultChips());
       chat.h = el.offsetHeight * uiz();
@@ -4629,6 +4828,7 @@
       chat.log = null;
       chat.chips = null;
       chat.input = null;
+      chat.foot = null;
       if (hadFocus) hit.focus({ preventScroll: true });
       rest();
     }
@@ -4716,10 +4916,7 @@
         openChat();
       }, h('span', { class: 'fp-kbd', text: 'Enter' }));
       toggle('info', '기능 설명', S.explain, setExplain, '마우스를 올리면 설명');
-      item('flag', '안내 다시 보기', () => {
-        closeMenu();
-        startTour();
-      });
+      toggle('walk', '돌아다니기', S.roam, setRoaming, '가만히 둬도 혼자 화면을 돌아다녀요');
       if (S.screen && guide.screens[S.screen]) {
         const key = S.screen;
         item('screen', '이 화면 안내', () => {
@@ -4731,7 +4928,7 @@
         closeMenu();
         openPicker(false);
       });
-      toggle('walk', '동작 스킵하기', reduced, setSkip, prefersReduced ? '기기의 움직임 줄이기가 켜져 있어요' : '켜면 걷거나 날지 않고 바로 옮겨요');
+      toggle('skip', '동작 스킵하기', reduced, setSkip, prefersReduced ? '기기의 움직임 줄이기가 켜져 있어요' : '켜면 걷거나 날지 않고 바로 옮겨요');
       const seg = h('div', { class: 'fp-seg', role: 'group', 'aria-label': '크기' });
       for (const k of Object.keys(SIZES)) {
         seg.append(
@@ -6018,7 +6215,10 @@
     function placeInitial() {
       const visited = !!store.get('visited');
       const [mn, mx] = floorRange();
-      if (visited && store.get('hidden')) {
+      // 숨김: 사원이 숨기거나 꺼낸 선택(hidden)을 따르고, 고른 적이 없으면 앱 기본값(o.startHidden)을 따른다
+      const startHidden = store.has('hidden') ? !!store.get('hidden') : !!o.startHidden;
+      if (startHidden) {
+        if (!visited) store.set('visited', true);
         S.x = mx;
         S.y = floorY();
         S.mode = 'ground';
@@ -6423,8 +6623,8 @@
       startTour: () => whenReady(() => startTour()),
       startScreenTour: (key) => whenReady(() => startScreenTour(key, false)),
       // 준비 전에도 바로 기억한다 (안내는 준비된 뒤 한가할 때 돈다)
-      setScreen: (key) => {
-        if (!S.destroyed) setScreen(key);
+      setScreen: (key, locked) => {
+        if (!S.destroyed) setScreen(key, locked);
       },
       openChat: () => whenReady(() => openChat()),
       closeChat: () => whenReady(() => closeChat()),
@@ -6446,6 +6646,7 @@
   let inst = null;
   // 붙기 전(또는 떼었다 다시 붙는 사이)에 받은 화면. 다음 mount에 screen 옵션이 없으면 이것을 쓴다
   let lastScreen;
+  let lastScreenLocked = false;
   const none = () => Promise.resolve(false);
   const api = {
     version: VERSION,
@@ -6454,15 +6655,24 @@
       if (inst) inst.destroy();
       inst = null;
       const opts = Object.assign({}, options || {});
-      if (opts.screen === undefined && lastScreen !== undefined) opts.screen = lastScreen;
-      else if (opts.screen !== undefined) lastScreen = opts.screen;
+      if (opts.screen === undefined && lastScreen !== undefined) {
+        opts.screen = lastScreen;
+        if (opts.screenLocked === undefined) opts.screenLocked = lastScreenLocked;
+      } else if (opts.screen !== undefined) {
+        lastScreen = opts.screen;
+        lastScreenLocked = !!opts.screenLocked;
+      }
       inst = createPet(opts);
       return api;
     },
-    /** 화면이 바뀌면 부른다(SCREEN 키, 모르는 화면이면 null). 처음 온 화면이면 한가할 때 그 화면 안내를 한다 */
-    setScreen(key) {
+    /**
+     * 화면이 바뀌면 부른다(SCREEN 키, 모르는 화면이면 null). 처음 온 화면이면 한가할 때 그 화면 안내를 한다.
+     * locked는 그 화면을 열 권한이 없을 때(잠금 화면) true — 안내가 어떤 화면인지만 말한다.
+     */
+    setScreen(key, locked) {
       lastScreen = typeof key === 'string' && key ? key : null;
-      if (inst) inst.setScreen(lastScreen);
+      lastScreenLocked = !!locked;
+      if (inst) inst.setScreen(lastScreen, lastScreenLocked);
     },
     startScreenTour: (key) => (inst ? inst.startScreenTour(key) : none()),
     destroy() {

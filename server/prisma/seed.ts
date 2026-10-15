@@ -75,23 +75,23 @@ const EMPLOYEES: { employeeNo: string; employeeName: string; department: Departm
  */
 const ROLE_ORDER: Role[] = ['SALES', 'PURCHASE', 'PRODUCTION', 'QUALITY', 'LOGISTICS', 'ADMIN'];
 const ROLE_PERMISSION_TABLE: [Permission, string][] = [
-  [PERMISSION.SALES_ORDER_CREATE, '● _ ○ _ ○ ○'],
-  [PERMISSION.SALES_ORDER_CANCEL, '● _ _ _ _ ○'],
-  [PERMISSION.SHIPMENT_REQUEST_MANAGE, '● _ _ _ ○ ○'],
-  [PERMISSION.PURCHASE_REQUISITION_CREATE, '_ ● ○ _ _ ○'],
-  [PERMISSION.PURCHASE_ORDER_CONFIRM, '_ ● _ _ _ ○'],
-  [PERMISSION.GOODS_RECEIPT_CONFIRM, '_ ● _ _ ○ ○'],
-  [PERMISSION.PRODUCTION_PLAN_CONFIRM, '○ ○ ● ○ _ ○'],
-  [PERMISSION.PRODUCTION_RESULT_CONFIRM, '_ _ ● ○ _ ○'],
-  [PERMISSION.HOT_ROLLING_ALLOCATE, '_ _ ● _ _ ○'],
-  [PERMISSION.INSPECTION_REGISTER, '_ _ ○ ● _ ○'],
-  [PERMISSION.INSPECTION_STANDARD_MANAGE, '_ _ ○ ● _ ○'],
-  [PERMISSION.DISPOSITION_SET, '_ _ _ ● _ ○'],
-  [PERMISSION.GOODS_ISSUE_CONFIRM, '○ _ _ ○ ● ○'],
-  [PERMISSION.MILL_SHEET_READ, '○ _ _ ○ ● ○'],
+  [PERMISSION.SALES_ORDER_CREATE, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.SALES_ORDER_CANCEL, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.SHIPMENT_REQUEST_MANAGE, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.PURCHASE_REQUISITION_CREATE, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.PURCHASE_ORDER_CONFIRM, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.GOODS_RECEIPT_CONFIRM, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.PRODUCTION_PLAN_CONFIRM, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.PRODUCTION_RESULT_CONFIRM, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.HOT_ROLLING_ALLOCATE, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.INSPECTION_REGISTER, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.INSPECTION_STANDARD_MANAGE, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.DISPOSITION_SET, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.GOODS_ISSUE_CONFIRM, '○ ○ ○ ○ ● ○'],
+  [PERMISSION.MILL_SHEET_READ, '○ ○ ○ ○ ● ○'],
   [PERMISSION.EMPLOYEE_MANAGE, '_ _ _ _ _ ●'],
   [PERMISSION.ORG_MANAGE, '_ _ _ _ _ ●'],
-  [PERMISSION.MASTER_MANAGE, '○ ○ ○ ○ _ ●'],
+  [PERMISSION.MASTER_MANAGE, '○ ○ ○ ○ ○ ●'],
 ];
 
 // ── 기준정보 ─────────────────────────────────────────────

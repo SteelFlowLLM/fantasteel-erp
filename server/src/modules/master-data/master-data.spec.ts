@@ -24,7 +24,7 @@ let baseUrl: string;
 let adminCookie: string;
 /** 생산부장 강민석 — 기준정보 조회만 */
 let productionCookie: string;
-/** 물류부장 신현우 — 기준정보 권한 없음 */
+/** 물류부장 신현우 — 기준정보 조회만. 권한이 없는 경우는 테스트 동안 역할 권한을 빼서 본다 */
 let logisticsCookie: string;
 
 async function login(employeeNo: string, password = process.env.SEED_PASSWORD ?? 'fantasteel'): Promise<string> {
@@ -64,6 +64,20 @@ afterAll(async () => {
   await app?.close();
 });
 
+/**
+ * 관리자가 부서·권한 화면에서 역할 권한을 뺀 상태를 만든다. 업무 조회는 기본으로 모든 역할에 있어서다(역할별 메뉴 v2 3장).
+ * 가드가 요청마다 권한을 DB에서 읽으므로 바로 반영된다. 돌려놓는 함수를 돌려준다.
+ */
+async function revokeRolePermission(roleCode: string, permission: string): Promise<() => Promise<void>> {
+  const prisma = app.get(PrismaService);
+  const role = await prisma.role.findUniqueOrThrow({ where: { roleCode } });
+  const row = await prisma.rolePermission.findUniqueOrThrow({ where: { roleId_permission: { roleId: role.id, permission } } });
+  await prisma.rolePermission.delete({ where: { id: row.id } });
+  return async () => {
+    await prisma.rolePermission.create({ data: { roleId: role.id, permission, permissionLevel: row.permissionLevel } });
+  };
+}
+
 describe('기준정보 조회 권한', () => {
   const paths = ['/items', '/steel-grades', '/spec-mappings', '/routings', '/specific-consumptions', '/customers', '/suppliers', '/yards', '/production-settings'];
 
@@ -73,10 +87,22 @@ describe('기준정보 조회 권한', () => {
     expect(body.success).toBe(true);
   });
 
-  it.each(paths)('%s: 기준정보 권한이 없으면 COM-002', async (path) => {
-    const { status, body } = await get(path, logisticsCookie);
-    expect(status).toBe(403);
-    expect(body.error?.code).toBe('COM-002');
+  it.each(paths)('%s: 업무 조회는 모든 역할이라 물류도 읽는다', async (path) => {
+    expect((await get(path, logisticsCookie)).status).toBe(200);
+  });
+
+  describe('관리자가 물류의 기준정보 권한을 빼면', () => {
+    let restore: () => Promise<void> = async () => undefined;
+    beforeAll(async () => {
+      restore = await revokeRolePermission('LOGISTICS', 'MASTER_MANAGE');
+    });
+    afterAll(async () => restore());
+
+    it.each(paths)('%s: COM-002', async (path) => {
+      const { status, body } = await get(path, logisticsCookie);
+      expect(status).toBe(403);
+      expect(body.error?.code).toBe('COM-002');
+    });
   });
 });
 

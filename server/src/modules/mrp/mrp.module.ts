@@ -7,5 +7,7 @@ import { MrpService } from './mrp.service';
 @Module({
   controllers: [MrpController],
   providers: [MrpService, MrpRepository],
+  // factory-agent의 원료 부족 규칙이 같은 계산을 쓴다 (REQ-AGT-002)
+  exports: [MrpService],
 })
 export class MrpModule {}

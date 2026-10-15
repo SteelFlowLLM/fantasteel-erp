@@ -26,7 +26,7 @@ const MAX_LINES = 6;
 const MAX_CANDIDATES = 8;
 const FILE_LIMIT_TEXT = MESSAGE_FILE_MAX_BYTES >= 1024 * 1024 ? `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024 / 1024)}MB` : `${Math.round(MESSAGE_FILE_MAX_BYTES / 1024)}KB`;
 
-/** 멘션 후보: 방 멤버·부서, 그리고 AI 어시스턴트(@AI, REQ-AST-002) */
+/** 멘션 후보: 방 멤버·부서, 그리고 철강맨AI(@AI, REQ-AST-002) */
 type MentionCandidate = MentionTarget | { kind: 'ai' };
 
 interface MentionState {
@@ -255,7 +255,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
             >
               <Icon name={target.kind === 'department' ? 'users' : 'user'} size="sm" className="text-ink-3" />
               {target.kind === 'ai' ? AI_MENTION : target.name}
-              <span className="ml-auto text-cap text-ink-3">{target.kind === 'ai' ? 'AI 어시스턴트에게 묻기' : target.kind === 'department' ? '부서 알림' : '멤버'}</span>
+              <span className="ml-auto text-cap text-ink-3">{target.kind === 'ai' ? '철강맨AI에게 묻기' : target.kind === 'department' ? '부서 알림' : '멤버'}</span>
             </button>
           ))}
         </div>
@@ -336,7 +336,7 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startMention} disabled={pending}>
           @ 멘션
         </Button>
-        <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={callAi} disabled={pending} title="AI 어시스턴트에게 묻기. 답은 방 모두에게 보여요">
+        <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={callAi} disabled={pending} title="철강맨AI에게 묻기. 답은 방 모두에게 보여요">
           @AI 호출
         </Button>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>

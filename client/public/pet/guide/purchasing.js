@@ -7,6 +7,7 @@
   screens: {
     mrp: {
       intro: ['{name} {grade}님, 여기는 MRP예요. 생산계획에 필요한 원료를 계산하고 모자란 만큼 구매요청해요.'],
+      locked: '구매가 쓰고 생산이 조회하는 화면이에요. 생산계획에 필요한 원료 소요량을 계산해요.',
       tour: [
         { target: 'card:mrp.period', text: '필요일 기간을 바꾸면 바로 다시 계산해요. 결과는 저장하지 않아요.' },
         { target: 'card:mrp.summary', text: '남은 히트·히트 톤·필요 용선과 모자란 원료 종 수예요.' },
@@ -17,6 +18,7 @@
     },
     purchaseRequisitions: {
       intro: ['구매요청을 등록하고 부서장 승인까지 진행을 봐요. 메시지로 만든 초안도 여기서 확정해요.'],
+      locked: '구매 담당이 쓰는 화면이에요. 원료 구매요청을 등록하고 부서장 승인까지 진행을 봐요.',
       tour: [
         { target: 'card:purchaseRequisitions.list', text: '상태·출처 칩으로 골라 보고, 위 버튼으로 새로 등록해요.' },
         { target: 'card:purchaseRequisitions.progress', text: '등록 → 부서장 승인 → 발주 중 지금 단계예요.' },
@@ -29,6 +31,7 @@
     },
     purchaseOrders: {
       intro: ['승인된 구매요청을 공급업체별로 묶어 발주해요. 발주하면 바로 확정돼요.'],
+      locked: '구매 담당이 쓰는 화면이에요. 승인된 구매요청을 공급업체별로 묶어 발주해요.',
       tour: [
         { target: 'card:purchaseOrders.list', text: '위는 발주 대기 묶음, 아래는 발주 내역이에요.' },
         { target: 'card:purchaseOrders.supplierGroup', text: '공급업체마다 발주할 구매요청을 골라요.' },
@@ -39,6 +42,7 @@
     },
     goodsReceipts: {
       intro: ['{name} {grade}님, 발주한 원료를 받아 입고 확정해요. 확정하면 원료 LOT이 생겨요.'],
+      locked: '구매 담당이 쓰는 화면이에요. 발주한 원료를 받아 입고 확정해요.',
       tour: [
         { target: 'card:goodsReceipts.list', text: '미입고량이 남은 발주 품목을 골라요.' },
         { target: 'card:goodsReceipts.summary', text: '발주·입고 누계·입고예정 톤이에요. 나눠 받아도 돼요.' },

@@ -38,7 +38,7 @@
 | POST | `production-plans/:id/simulate-results` | 실적 시뮬레이션 | `PRODUCTION_RESULT_CONFIRM` USE | 난수 시드·손실률 저장 |
 
 다른 초안 행(경로 `/api/…`): `POST production-plans`(생성, "수동 생성 필요한지 확인"), `PATCH :id/cancel`, `GET·POST :id/heat-plan`, `POST production-plans/reproduction`, `GET production-results/:id`, `POST production-results`(작업 시작) + `PATCH production-results/:id/complete`(완료·실적 등록), `POST :id/simulation`, 열연 후보·배정(`:id/hot-rolling/*`, inventory.md 3장).
-[권한표]: 생산 USE, 영업·구매·품질·관리자는 계획 VIEW, 품질·관리자는 실적 VIEW.
+[권한표]: 생산 USE, 나머지 역할은 계획·실적·열연 투입 배정 VIEW(2026-10-15 업무 조회는 모든 역할).
 
 ## 4. 업무 규칙·계산
 

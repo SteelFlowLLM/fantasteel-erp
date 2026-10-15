@@ -26,3 +26,4 @@ export * from './messenger-emoticon';
 export * from './action-draft';
 export * from './meeting-minutes';
 export * from './schedule-event';
+export * from './factory-agent';

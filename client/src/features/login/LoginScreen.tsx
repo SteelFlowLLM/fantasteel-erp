@@ -3,7 +3,7 @@
 // 로그인 화면 (옛 LoginPage의 B안 디자인): 사원번호·비밀번호 로그인(LoginForm, REQ-AUTH-001).
 // 들어가면 이 탭의 sessionStorage에 사원 id를 두고 대시보드(또는 원래 가려던 화면)로 간다.
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '@/components/Icon';
 import { LoginForm } from '@/features/login/LoginForm';
 import { Logo } from '@/features/shell/Logo';
@@ -24,15 +24,45 @@ const ROADMAP_SRC = '/roadmap/erp-3d-roadmap.html';
 const ROADMAP_STYLE_ID = 'login-roadmap-fit';
 /** 로드맵의 기본 시점을 조작 UI 없이 찍어 둔 그림. 노션 로드맵을 고치면 함께 다시 찍는다 */
 const ROADMAP_PREVIEW = '/roadmap/erp-3d-roadmap-preview.webp';
+const ROADMAP_FULLSCREEN_ID = 'login-roadmap-fullscreen';
+// 로드맵 조작 단추(.ctrl svg, 12×12 채움)와 같은 꼴로 그린 전체화면 켜기·끄기 아이콘
+const ICON_MAXIMIZE = 'M1 1h4v1.6H2.6V5H1zM7 1h4v4H9.4V2.6H7zM1 7h1.6v2.4H5V11H1zM9.4 7H11v4H7V9.4h2.4z';
+const ICON_MINIMIZE = 'M3.4 1H5v4H1V3.4h2.4zM7 1h1.6v2.4H11V5H7zM1 7h4v4H3.4V8.6H1zM7 7h4v1.6H8.6V11H7z';
 
-function fitRoadmapToStage(frame: HTMLIFrameElement) {
+/**
+ * 전체화면 단추는 로드맵 아래 조작 줄의 PNG 단추 옆에 끼워 넣는다.
+ * 로그인 칸 위에 따로 띄우면 좁은 칸에서 조작 줄·시점 단추와 겹친다.
+ */
+function placeFullscreenButton(doc: Document, fullscreen: boolean, onToggle: () => void) {
+  const save = doc.getElementById('btnSave');
+  if (!save) return;
+  let button = doc.getElementById(ROADMAP_FULLSCREEN_ID) as HTMLButtonElement | null;
+  if (!button) {
+    button = doc.createElement('button');
+    button.id = ROADMAP_FULLSCREEN_ID;
+    save.after(button);
+  }
+  const label = fullscreen ? '전체화면 끄기' : '전체화면';
+  button.setAttribute('aria-label', fullscreen ? '로드맵 전체화면 끄기' : '로드맵 전체화면으로 보기');
+  button.title = fullscreen ? '전체화면 끄기 (Esc)' : '전체화면으로 보기';
+  button.innerHTML = `<svg viewBox="0 0 12 12"><path d="${fullscreen ? ICON_MINIMIZE : ICON_MAXIMIZE}"/></svg><span class="txt">${label}</span>`;
+  button.onclick = onToggle;
+}
+
+function fitRoadmapToStage(frame: HTMLIFrameElement, fullscreen: boolean, onToggle: () => void) {
   const doc = frame.contentDocument;
   // 아직 불러오는 중이면(head가 비어 있을 수 있다) load 이벤트 때 다시 불린다
-  if (!doc || doc.readyState !== 'complete' || !doc.URL.endsWith(ROADMAP_SRC) || doc.getElementById(ROADMAP_STYLE_ID)) return;
-  const style = doc.createElement('style');
-  style.id = ROADMAP_STYLE_ID;
-  style.textContent = 'body{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}#panel{display:none!important}';
-  doc.head.append(style);
+  if (!doc || doc.readyState !== 'complete' || !doc.URL.endsWith(ROADMAP_SRC)) return;
+  let style = doc.getElementById(ROADMAP_STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = doc.createElement('style');
+    style.id = ROADMAP_STYLE_ID;
+    style.textContent = 'body{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}#panel{display:none!important}';
+    doc.head.append(style);
+  }
+  // 전체화면에서는 자리가 넉넉하니 원래 배치(3D + 설명 카드)로 되돌린다
+  style.disabled = fullscreen;
+  placeFullscreenButton(doc, fullscreen, onToggle);
   frame.contentWindow?.dispatchEvent(new Event('resize'));
 }
 
@@ -58,14 +88,31 @@ export function LoginScreen() {
   const [roadmapOn, setRoadmapOn] = useState(false);
   // 화면이 붙기 전에 iframe이 먼저 다 열렸을 수도 있어서 onLoad 대신 지금 상태도 확인한다
   const roadmapRef = useRef<HTMLIFrameElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  // 전체화면은 iframe이 아니라 바깥 칸에 건다: iframe 안 단추로 켜고 끄며, 미리보기 그림에서 바로 켜도 같은 칸이 커진다
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    setRoadmapOn(true); // 전체화면은 미리보기 그림이 아니라 3D로 본다
+    // 브라우저가 거절하면(권한·사용자 동작 밖) 그대로 둔다
+    void stageRef.current?.requestFullscreen().catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
   useEffect(() => {
     const frame = roadmapRef.current;
     if (!roadmapOn || !frame) return;
-    const fit = () => fitRoadmapToStage(frame);
+    const fit = () => fitRoadmapToStage(frame, fullscreen, toggleFullscreen);
     fit();
     frame.addEventListener('load', fit);
     return () => frame.removeEventListener('load', fit);
-  }, [roadmapOn]);
+  }, [roadmapOn, fullscreen, toggleFullscreen]);
 
   return (
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
@@ -84,36 +131,50 @@ export function LoginScreen() {
           </h1>
         </div>
         {/* 노션 「로드맵」 페이지의 3D 기능 로드맵에 헌정 동상을 더한 파일(public/roadmap). 자체 WebGL·조작 UI를 가진 한 장짜리 페이지라 iframe으로 따로 띄운다 */}
-        {roadmapOn ? (
-          <iframe
-            ref={roadmapRef}
-            src={ROADMAP_SRC}
-            title="철강제조 ERP 3D 기능 로드맵"
-            className="block min-h-[280px] w-full flex-1 rounded-md border-0 bg-nav-dark-2"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setRoadmapOn(true)}
-            className="group relative block min-h-[280px] w-full flex-1 overflow-hidden rounded-md bg-nav-dark-2 text-left"
-          >
-            <img
-              src={ROADMAP_PREVIEW}
-              alt=""
-              className="absolute inset-0 size-full object-cover motion-safe:transition-transform motion-safe:duration-300 group-hover:scale-[1.02]"
+        <div ref={stageRef} className="relative min-h-[280px] w-full flex-1 overflow-hidden rounded-md bg-nav-dark-2">
+          {roadmapOn ? (
+            <iframe
+              ref={roadmapRef}
+              src={ROADMAP_SRC}
+              title="철강제조 ERP 3D 기능 로드맵"
+              className="block size-full border-0"
             />
-            <span className="absolute inset-x-0 top-0 flex flex-col gap-0.5 bg-linear-to-b from-nav-dark/90 to-transparent px-4 pt-3 pb-10">
-              <b className="text-base font-semibold">철강제조 ERP 기능 로드맵</b>
-              <span className="text-xs text-nav-ink">수주에서 밀시트까지, P1 16단계</span>
-            </span>
-            <span className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex h-10 flex-none items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-nav-dark shadow-lg group-hover:bg-brand-tint">
-                <Icon name="eye" />
-                3D로 돌려 보기
+          ) : (
+            <button
+              type="button"
+              onClick={() => setRoadmapOn(true)}
+              className="group relative block size-full overflow-hidden text-left"
+            >
+              <img
+                src={ROADMAP_PREVIEW}
+                alt=""
+                className="absolute inset-0 size-full object-cover motion-safe:transition-transform motion-safe:duration-300 group-hover:scale-[1.02]"
+              />
+              <span className="absolute inset-x-0 top-0 flex flex-col gap-0.5 bg-linear-to-b from-nav-dark/90 to-transparent px-4 pt-3 pb-10">
+                <b className="text-base font-semibold">철강제조 ERP 기능 로드맵</b>
+                <span className="text-xs text-nav-ink">수주에서 밀시트까지, P1 16단계</span>
               </span>
-            </span>
-          </button>
-        )}
+              <span className="absolute inset-0 flex items-center justify-center">
+                <span className="inline-flex h-10 flex-none items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-nav-dark shadow-lg group-hover:bg-brand-tint">
+                  <Icon name="eye" />
+                  3D로 돌려 보기
+                </span>
+              </span>
+            </button>
+          )}
+          {/* 3D를 켠 뒤에는 로드맵 조작 줄 안의 단추를 쓴다(placeFullscreenButton) */}
+          {!roadmapOn && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title="전체화면으로 보기"
+              aria-label="로드맵 전체화면으로 보기"
+              className="absolute right-3 bottom-3 inline-flex size-9 items-center justify-center rounded-md bg-nav-dark/75 text-white hover:bg-nav-dark"
+            >
+              <Icon name="maximize" />
+            </button>
+          )}
+        </div>
         <ul className="mt-auto flex flex-col gap-3.5 border-t border-nav-dark-2 pt-5.5">
           {FEATURES.map((feature) => (
             <li key={feature.title} className="flex items-center gap-3.5">

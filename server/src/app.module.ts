@@ -8,6 +8,7 @@ import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { FactoryAgentModule } from './modules/factory-agent/factory-agent.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { SttModule } from './modules/stt/stt.module';
@@ -27,7 +28,7 @@ import { SalesOrderModule } from './modules/sales-order/sales-order.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { PrismaModule } from './prisma/prisma.module';
 
-// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(factory-agent, voice-erp, past-case)은 그 단계에서 추가한다.
+// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(voice-erp, past-case)은 그 단계에서 추가한다.
 @Module({
   imports: [
     PrismaModule,
@@ -54,6 +55,7 @@ import { PrismaModule } from './prisma/prisma.module';
     LlmModule,
     SttModule,
     AiAssistantModule,
+    FactoryAgentModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

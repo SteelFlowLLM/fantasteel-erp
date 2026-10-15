@@ -13,6 +13,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { useSalesOrderProductionLinks } from '@/hooks/useSalesOrders';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
 import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
@@ -23,6 +24,8 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
   const { plan } = link;
   const unit = qtyUnitOf([plan.item.itemType]);
   const f = plan.formation;
+  const canOpen = useCanOpenHref();
+  const resultsHref = `/production/results?plan=${plan.id}`;
   return (
     <Card petKey="card:salesOrders.production">
       <CardHead
@@ -33,8 +36,8 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
             {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
-            {plan.productionPlanStatus === 'CANCELLED' ? null : (
-              <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
+            {plan.productionPlanStatus === 'CANCELLED' || !canOpen(resultsHref) ? null : (
+              <ButtonLink href={resultsHref} size="sm" icon="factory">
                 작업 실적
               </ButtonLink>
             )}

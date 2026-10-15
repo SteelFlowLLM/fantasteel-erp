@@ -48,6 +48,11 @@
   --color-ai-strong: #452fa0;
   --color-ai-bg: #f3f0fd;
   --color-ai-line: #cfc5f5;
+  /* 철강맨AI(AI 어시스턴트 패널·상단 바 버튼): 화면 도우미 펫 철강맨 말풍선과 같은 색 (public/pet/pet-engine.js의 --fp-accent 계열) */
+  --color-steelman: #e07028;
+  --color-steelman-ink: #9a4a17;
+  --color-steelman-soft: #fbe9dc;
+  --color-steelman-shadow: #f2c09c;
   --color-chart-1: #23507f;
   --color-chart-2: #5b86b5;
   --color-chart-3: #9db6d1;

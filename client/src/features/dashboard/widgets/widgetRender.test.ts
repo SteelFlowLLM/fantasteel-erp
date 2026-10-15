@@ -12,11 +12,12 @@ import { WIDGET_COMPONENTS } from '@/features/dashboard/widgets/widgetRegistry';
 import { MeContext } from '@/hooks/useMe';
 import { fmtPct } from '@/lib/format';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
+import type { PermissionMap } from '@/lib/permissions';
 import { sessionUserOf } from '@/test/sessionUsers';
 
-/** 모든 위젯에 데이터를 넣어 두어도 권한이 없는 위젯은 로그인 사원 권한으로 잠긴다 */
-function renderWidgets(employeeNo: string, editing = false): Map<string, string> {
-  const me = sessionUserOf(employeeNo);
+/** 모든 위젯에 데이터를 넣어 두어도 권한이 없는 위젯은 로그인 사원 권한으로 잠긴다. permissions를 주면 역할 기본 권한 대신 쓴다 */
+function renderWidgets(employeeNo: string, editing = false, permissions?: PermissionMap): Map<string, string> {
+  const me = { ...sessionUserOf(employeeNo), ...(permissions ? { permissions } : {}) };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   for (const key of DASHBOARD_WIDGET_KEYS) {
     if (isSoonWidget(key)) continue;
@@ -32,7 +33,7 @@ function renderWidgets(employeeNo: string, editing = false): Map<string, string>
 }
 
 describe('위젯 카드', () => {
-  it('관리자: 14개 모두 제목과 본문이 그려지고, P2 2개는 준비 중', () => {
+  it('관리자: 14개 모두 제목과 본문이 그려지고, P2 1개(AI 활용 현황)는 준비 중', () => {
     const html = renderWidgets(SEED_EMPLOYEE_NO.admin);
     for (const key of DASHBOARD_WIDGET_KEYS) {
       const markup = html.get(key) ?? '';
@@ -44,19 +45,21 @@ describe('위젯 카드', () => {
     expect(html.get('ORDER_FULFILLMENT')).toContain('SO-2609-004');
     expect(html.get('ORDER_FULFILLMENT')).toContain('검사합격');
     expect(html.get('PROCESS_FLOW')).toContain('진행 중 수주');
-    expect(html.get('AGENT_RISK')).toContain('담당 부서원이 확정');
+    expect(html.get('AGENT_RISK')).toContain('확정 대기 후보');
+    expect(html.get('AGENT_RISK')).toContain('PP-2610-0003');
     expect(html.get('SHIPMENT_RESULT')).toContain('슬래브(매)');
   });
 
-  it('구매 담당: 수주·수율·출하 실적 위젯은 잠금, 공정 흐름은 모든 단계 건수가 보인다. 물류는 출하 실적이 보인다', () => {
+  it('구매 담당: 업무 조회는 모든 역할이라 수주·수율·출하 실적 위젯이 보이고, 그 조회 권한을 빼면 잠긴다', () => {
     const html = renderWidgets(SEED_EMPLOYEE_NO.purchase);
-    expect(html.get('ORDER_FULFILLMENT')).toContain('이 위젯을 볼 권한이 없어요');
-    expect(html.get('ORDER_FULFILLMENT')).toContain('수주 등록·수주 취소 조회 권한이 필요해요');
-    expect(html.get('PROCESS_YIELD')).toContain('이 위젯을 볼 권한이 없어요');
-    expect(html.get('SHIPMENT_RESULT')).toContain('이 위젯을 볼 권한이 없어요');
-    expect(html.get('PROCESS_FLOW')).not.toContain('권한 없음');
+    for (const key of ['ORDER_FULFILLMENT', 'PROCESS_YIELD', 'SHIPMENT_RESULT']) expect(html.get(key)).not.toContain('이 위젯을 볼 권한이 없어요');
     expect(html.get('PRODUCT_STOCK')).toContain('SL-SS275-250x1200x10000');
-    expect(renderWidgets(SEED_EMPLOYEE_NO.logistics).get('SHIPMENT_RESULT')).not.toContain('이 위젯을 볼 권한이 없어요');
+    const limited = renderWidgets(SEED_EMPLOYEE_NO.purchase, false, { PURCHASE_REQUISITION_CREATE: 'USE' });
+    expect(limited.get('ORDER_FULFILLMENT')).toContain('이 위젯을 볼 권한이 없어요');
+    expect(limited.get('ORDER_FULFILLMENT')).toContain('수주 등록·수주 취소 조회 권한이 필요해요');
+    expect(limited.get('PROCESS_YIELD')).toContain('이 위젯을 볼 권한이 없어요');
+    expect(limited.get('SHIPMENT_RESULT')).toContain('이 위젯을 볼 권한이 없어요');
+    expect(limited.get('PROCESS_FLOW')).not.toContain('권한 없음');
   });
 
   it('품질 담당: 공정 흐름의 판정 대기 칸을 "내 업무"로 강조하고 검사 입력으로 연결한다. 다른 역할은 강조 없음', () => {
@@ -71,8 +74,10 @@ describe('위젯 카드', () => {
     expect(sales).not.toContain('내 업무');
   });
 
-  it('품질 담당: 열 권한이 없는 단계(수주·출하요청)도 건수는 보이고, 누를 수 없으며 안내만 띄운다', () => {
-    const quality = (renderWidgets(SEED_EMPLOYEE_NO.quality)).get('PROCESS_FLOW') ?? '';
+  it('공정 흐름: 열 권한이 없는 단계(수주·출하요청)도 건수는 보이고, 누를 수 없으며 안내만 띄운다', () => {
+    expect(renderWidgets(SEED_EMPLOYEE_NO.quality).get('PROCESS_FLOW')).toContain('href="/sales-orders"');
+    const qualityOnly: PermissionMap = { INSPECTION_REGISTER: 'USE', DISPOSITION_SET: 'USE', INSPECTION_STANDARD_MANAGE: 'USE' };
+    const quality = renderWidgets(SEED_EMPLOYEE_NO.quality, false, qualityOnly).get('PROCESS_FLOW') ?? '';
     expect(quality).not.toContain('권한 없음');
     expect(quality).toContain('납기 위험');
     expect(quality).toContain('배정 대기');
@@ -83,19 +88,18 @@ describe('위젯 카드', () => {
     expect(quality).toContain('href="/inventories"');
   });
 
-  it('품질 담당: Agent 위험 감지(예시)는 예시 숫자 없이 카드 머리 한 줄 안내만. 다른 역할은 원료 부족 예시', () => {
-    const quality = (renderWidgets(SEED_EMPLOYEE_NO.quality)).get('AGENT_RISK') ?? '';
-    expect(quality).toContain('AI Factory Agent(P2)가 연결되면');
-    expect(quality).toContain('불합격률 상승');
-    // 본문 없이 머리 안에 안내가 들어간다 (한 칸 높이 카드)
-    expect(quality.indexOf('AI Factory Agent(P2)가 연결되면')).toBeLessThan(quality.indexOf('</header>'));
-    // 옆 강종별 불합격률(실제 값)과 헷갈리던 예시 숫자·대상은 보이지 않는다
-    expect(quality).not.toContain('5.6%');
-    expect(quality).not.toContain('SM355A · 최근 30일');
-    expect(quality).not.toContain('aria-pressed');
-    const sales = (renderWidgets(SEED_EMPLOYEE_NO.sales)).get('AGENT_RISK') ?? '';
-    expect(sales).not.toContain('aria-pressed');
-    expect(sales).toContain('실리코망가니즈');
+  it('Agent 위험 감지: 품질은 카드 머리 한 줄에 확정 대기 건수만, 다른 역할은 건수·유형별·최근 후보와 Agent 화면 바로가기', () => {
+    const quality = renderWidgets(SEED_EMPLOYEE_NO.quality).get('AGENT_RISK') ?? '';
+    expect(quality).toContain('확정 대기 2건');
+    expect(quality).toContain('원료 부족 1');
+    // 본문 없이 머리 안에 한 줄이 들어간다 (한 칸 높이 카드)
+    expect(quality.indexOf('확정 대기 2건')).toBeLessThan(quality.indexOf('</header>'));
+    expect(quality).not.toContain('준비 중');
+    const sales = renderWidgets(SEED_EMPLOYEE_NO.sales).get('AGENT_RISK') ?? '';
+    expect(sales).toContain('확정 대기 후보');
+    expect(sales).toContain('합격 매수 부족 1');
+    expect(sales).toContain('href="/agent"');
+    expect(sales).not.toContain('준비 중');
   });
 
   it('공정 흐름 현황: 품질은 판정 대기를 내 업무로 크게 보이고 나머지 단계는 흐리게, 다른 역할은 그대로', () => {

@@ -25,6 +25,7 @@ import { TRACE_DIRECTION_LABEL, isTraceDirection, type TraceDirection } from '@/
 import { isAlloyNode, layoutTrace, lotKey, shipKey } from '@/features/lotTrace/lib/traceLayout';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useLotTrace } from '@/hooks/useLotTrace';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { fmtInt } from '@/lib/format';
 
 export function LotTraceScreen() {
@@ -97,6 +98,7 @@ export function LotTraceScreen() {
 
 function TraceHead({ trace }: { trace: LotTraceView }) {
   const start = trace.start;
+  const canOpen = useCanOpenHref();
   const crumb = (
     <>
       <Link href="/dashboard" className="text-ink-3 hover:underline">
@@ -124,9 +126,11 @@ function TraceHead({ trace }: { trace: LotTraceView }) {
           </span>
         }
         actions={
-          <ButtonLink icon="truck" href={`/shipment-requests/${s.shipmentRequestId}`}>
-            출하요청 상세
-          </ButtonLink>
+          canOpen(`/shipment-requests/${s.shipmentRequestId}`) ? (
+            <ButtonLink icon="truck" href={`/shipment-requests/${s.shipmentRequestId}`}>
+              출하요청 상세
+            </ButtonLink>
+          ) : undefined
         }
       />
     );

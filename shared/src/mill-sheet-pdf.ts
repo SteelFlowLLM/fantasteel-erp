@@ -39,7 +39,24 @@ const LINE = '#bbbbbb';
 type Column = { header: string; width: number; align?: 'left' | 'right' | 'center' };
 
 const dash = (v: string | null | undefined) => (v === null || v === undefined || v === '' ? '-' : v);
-const dateTime = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+
+// 스냅샷 시각은 UTC ISO 문자열이라, 화면처럼 서울 시각으로 바꿔 찍는다 (코드 컨벤션 5장)
+const seoulDateTimeFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const dateTime = (iso: string) => {
+  const part = Object.fromEntries(seoulDateTimeFormat.formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+  return `${part.year}-${part.month}-${part.day} ${part.hour}:${part.minute}`;
+};
+
+/** 항목명에 이미 코드가 들어 있으면(예: 규소(Si)) 코드를 다시 붙이지 않는다 */
+const itemLabel = (name: string, code: string) => (name.toUpperCase().includes(`(${code.toUpperCase()})`) ? name : `${name} (${code})`);
 
 /** 남은 높이가 모자라면 새 쪽 */
 function ensureSpace(doc: PdfDocLike, height: number) {
@@ -91,7 +108,7 @@ function inspectionTable(doc: PdfDocLike, title: string, inspection: MillSheetIn
       { header: '판정', width: CONTENT_WIDTH - 465, align: 'center' },
     ],
     inspection.values.map((v) => [
-      `${v.inspectionItemName} (${v.inspectionItemCode})`,
+      itemLabel(v.inspectionItemName, v.inspectionItemCode),
       dash(v.unit),
       dash(v.minValue),
       dash(v.maxValue),
@@ -115,7 +132,7 @@ export function drawMillSheet(doc: PdfDocLike, s: MillSheetSnapshot): void {
     ['출하요청 번호', s.shipmentRequest.shipmentRequestNo],
     ['출하 예정일', dash(s.shipmentRequest.shipDate)],
     ['출고 확정', `${dash(s.shipmentRequest.issuedEmployeeName)} · ${s.shipmentRequest.issuedAt ? dateTime(s.shipmentRequest.issuedAt) : '-'}`],
-    ['총 수량·중량', `${s.totalQty}매 · ${formatTon(s.totalWeightTon)} t`],
+    ['총 수량·중량', `${s.totalQty}매 · ${formatTon(s.totalWeightTon)}`],
   ];
   const top = doc.y;
   info.forEach(([label, value], index) => {
@@ -132,7 +149,7 @@ export function drawMillSheet(doc: PdfDocLike, s: MillSheetSnapshot): void {
       .fontSize(8)
       .fillColor(GRAY)
       .text(
-        `강종 ${dash(item.steelGradeCode)} · 규격 ${dash(item.standardNo)} · 치수 ${dash(item.thicknessMm)} × ${dash(item.widthMm)} × ${dash(item.lengthMm)} mm · 1매 ${formatTon(item.theoreticalWeightTon)} t · 출고 ${item.qty}매 ${formatTon(item.totalWeightTon)} t`,
+        `강종 ${dash(item.steelGradeCode)} · 규격 ${dash(item.standardNo)} · 치수 ${dash(item.thicknessMm)} × ${dash(item.widthMm)} × ${dash(item.lengthMm)} mm · 1매 ${formatTon(item.theoreticalWeightTon)} · 출고 ${item.qty}매 ${formatTon(item.totalWeightTon)}`,
         PAGE_MARGIN,
         doc.y,
         { width: CONTENT_WIDTH },

@@ -101,6 +101,7 @@ describe('수주 도구 (get_sales_orders)', () => {
       if (!found) throw new AppException('COM-003');
       return fulfillment(id, found.salesOrderNo);
     },
+    detail: async (id: number) => orders.find((o) => o.id === id),
   } as unknown as SalesOrderService, () => '2026-10-13');
 
   beforeEach(() => fulfillmentIds.splice(0));
@@ -132,6 +133,13 @@ describe('수주 도구 (get_sales_orders)', () => {
     const output = await tool.run({ salesOrderNo: 'so-2610-002' }, SALES_USER);
     expect(fulfillmentIds).toEqual([2]);
     expect(output.label).toBe('수주 충족 현황 · SO-2610-002');
+  });
+
+  it('한 건의 충족 현황에도 고객사·담당을 준다 (SO-… 담당 누구야?에 답하게)', async () => {
+    const byNo = await tool.run({ salesOrderNo: 'SO-2610-002' }, SALES_USER);
+    expect(byNo.data).toMatchObject({ 수주번호: 'SO-2610-002', 고객사: '한빛건설', 담당: '박서영' });
+    const byId = await tool.run({ salesOrderId: 1 }, SALES_USER);
+    expect(byId.data).toMatchObject({ 수주번호: 'SO-2610-001', 고객사: '한빛건설', 담당: '박서영' });
   });
 
   it('보고 있는 화면의 수주 id로 바로 찾고, 없는 id는 인자 오류', async () => {

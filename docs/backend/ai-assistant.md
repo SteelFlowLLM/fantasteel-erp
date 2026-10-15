@@ -68,7 +68,7 @@
 | 도구 | 감싸는 service | 권한 (API와 같음) | 인자 |
 | --- | --- | --- | --- |
 | `get_inventory` | `InventoryService.listInventories` (GET inventories) | 없음(전 역할) | `keyword`(규격·품목·강종 일부), `category`(PRODUCT·RAW_MATERIAL·SURPLUS) |
-| `get_sales_orders` | `SalesOrderService.list`·`fulfillment` (GET sales-orders, /:id/fulfillment) | 수주 등록 VIEW | `salesOrderNo`, `salesOrderId`(화면 주소), `dueRiskOnly`. 한 수주로 좁혀지면 품목별 충족 현황. 건수는 거른 뒤의 수만, 납기까지 남은 일수는 서버가 서울 날짜로 계산해 넣는다 |
+| `get_sales_orders` | `SalesOrderService.list`·`fulfillment` (GET sales-orders, /:id/fulfillment) | 수주 등록 VIEW | `salesOrderNo`, `salesOrderId`(화면 주소), `dueRiskOnly`. 한 수주로 좁혀지면 품목별 충족 현황(고객사·담당 포함, 충족 현황에는 없어 목록 행·상세에서 채운다). 건수는 거른 뒤의 수만, 납기까지 남은 일수는 서버가 서울 날짜로 계산해 넣는다 |
 | `trace_lot` | `LotService.list`·`trace` (GET lots, /:id/trace) | 없음(전 역할) | `lotNo`(번호·앞부분), `direction`. 앞부분이 여러 LOT에 맞으면 후보만 |
 | `get_production_plans` | `ProductionService.listPlans` (GET production-plans) | 생산계획 확정 VIEW | `status`, `keyword`(계획·수주번호·규격 일부). 히트 수, 제강·연주 마친 히트 수, 합격·남은 목표 매수 |
 | `get_production_results` | `ProductionResultService.listResults` (GET production-results) | 작업 실적 확정 VIEW | `productionPlanNo`(→ id), `processType`. 최신 15건, 산출 LOT 5개까지(생략한 수를 함께 줌). 계획 번호로 거르면 제선 실적이 빠진다는 안내를 붙임(제선은 `production_plan_id` null) |
@@ -132,7 +132,7 @@
 DB·LLM 없이 가짜 객체로 돈다.
 - `ai-assistant.spec.ts`: 업무 매뉴얼 자료(업무 프로세스 ID 짝, 절차를 물을 때만·이름이 맞을 때만 넘김, 프롬프트 규칙·`[MAN-…]` 출처 추출), 용어 검색, 출처 추출, 프롬프트, 서비스(도구 호출 → 결과 전달 → 다시 묻기, 조회 출처를 앞에, 실패 도구는 출처 아님, 도구 호출 4번 상한, 이어 묻기, 모델 미설정·연결 실패 503), 업무 프로세스 자료(순서·진행 방법 질문에만 넘김, 업무 이름으로 거르기·정상 흐름, 프롬프트의 업무 ID 인용 규칙·상태 표시명, `[BP-…]` 출처 추출).
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
-- `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황, LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
+- `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
 실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 

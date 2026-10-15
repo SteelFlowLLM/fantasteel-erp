@@ -43,7 +43,7 @@
 | POST | `goods-receipts` | 입고 확정 | `GOODS_RECEIPT_CONFIRM` USE | 등록이 곧 확정. 미입고량 초과 시 PUR-003 |
 
 - "또는 부서장"인 조회 API는 데코레이터 하나로 표현할 수 없다. 데코레이터 없이 service에서 `hasPermission(user, {permission: 'PURCHASE_REQUISITION_CREATE', level: 'VIEW'}) || user.headDepartmentIds.length > 0`로 확인하고, 부서장은 자기 부서원의 요청만 보이게 거른다.
-- [권한표]: 구매 USE(3종), 생산 PR VIEW, 물류 입고 VIEW, 관리자 VIEW. 승인 권한 코드는 없다(REQ-AUTH-004).
+- [권한표]: 구매 USE(3종), 나머지 역할은 3종 모두 VIEW(2026-10-15 업무 조회는 모든 역할). 승인 권한 코드는 없다(REQ-AUTH-004).
 - ERD에 칸이 없는 값은 작업 로그(가장 최근 이벤트)에서 읽어 응답에 넣는다: 구매요청 `rejectedAt`(REJECTED일 때 `PURCHASE_REQUISITION_REJECTED` 시각), 발주 `orderedEmployeeName`(`PURCHASE_ORDER_CREATED` 사원), 입고 `confirmedEmployeeName`(`GOODS_RECEIPT_CONFIRMED` 사원).
 - [CSV]에 같은 경로 행이 두 벌(12.2 명시 행 + 긴 비고 행) 있다. 내용은 같고 비고만 다르다.
 
@@ -126,7 +126,7 @@
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
 | 부서장 자기 요청·부재 | 구매부장(시드 1702004)이 직접 요청하면 승인권자가 자기 자신이다. 자동 승인 금지. **2026-10-12 결정: 등록·재요청 때 `PUR-001`로 거부**(승인 대기에 영영 머물지 않게. 화면 등록 창도 미리 막는다). 상위 부서장 승인 같은 다른 경로는 TBD | [04] 2장·16장 |
-| 다른 역할 요청자 | Message → ERP로 영업·생산 사원이 요청자가 되면 그 부서장(예: 영업부장)이 승인하는데, 영업부장은 PR 조회 권한이 없다 → 조회 API를 "권한 또는 부서장"으로 열어야 한다. 요청자에게 `PURCHASE_REQUISITION_CREATE` USE가 필요한지도 미정(message-action.md 8장) | [권한표], [CSV] 목록 비고 |
+| 다른 역할 요청자 | Message → ERP로 영업·생산 사원이 요청자가 되면 그 부서장(예: 영업부장)이 승인하는데, 영업부장은 PR 조회 권한이 없었다 → 조회 API를 "권한 또는 부서장"으로 열었다. 2026-10-15부터 업무 조회는 모든 역할이라 기본 권한으로는 부서장도 조회 권한이 있고, 이 규칙은 관리자가 조회 권한을 뺀 경우에 쓰인다. 요청자에게 `PURCHASE_REQUISITION_CREATE` USE가 필요한지도 미정(message-action.md 8장) | [권한표], [CSV] 목록 비고 |
 | 재요청 이벤트 | BUSINESS_EVENT_TYPE에 재요청이 없다 | [CSV] 재요청 비고, [06] |
 | 오류 코드 | 승인량 초과(`ordered_ton > requested_ton`), 잘못된 공급업체, 같은 계획 중복 요청, 상태 전이 위반(이미 승인된 요청 승인 등)에 쓸 코드가 없다 | [04] BP-PUR-01 예외, 9.3 |
 | "잘못된 공급업체" | 품목 기본 공급업체와 다른 공급업체로 발주하는 것을 막는지, 기본값만 제안하는지 | [04] BP-PUR-01, REQ-MST-007 |

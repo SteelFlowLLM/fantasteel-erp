@@ -8,6 +8,7 @@ import { Tag } from '@/components/Tag';
 import { WorkRoomSummary } from '@/features/messenger/components/WorkRoomSalesOrder';
 import { PresenceDot } from '@/features/messenger/components/Presence';
 import { RoomFiles, RoomSearch } from '@/features/messenger/components/RoomAsideTools';
+import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { fmtDate } from '@/lib/format';
 
 function Section({ title, term, actions, children }: { title: ReactNode; term?: string; actions?: ReactNode; children: ReactNode }) {
@@ -26,10 +27,11 @@ function Section({ title, term, actions, children }: { title: ReactNode; term?: 
 
 export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoomDetailView; onInvite: () => void; onRename: () => void; onJump: (messageId: number) => void }) {
   return (
+    // 좁으면 좁히고, 그래도 모자라면 숨긴다. 창 px(xl:)이 아니라 메신저 칸의 실제 폭을 본다 — 글자를 키우면 창은 넓어도 쓸 수 있는 폭이 좁다 (MessengerScreen의 @container)
     <aside
       data-pet-target="card:messenger.aside"
       data-pet-perch=""
-      className="hidden min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface xl:flex"
+      className="flex min-h-0 w-[300px] flex-none flex-col overflow-auto border-l border-line bg-surface @max-[1200px]:w-[260px] @max-[1040px]:hidden"
       aria-label="방 정보"
     >
       <Section title="대화 검색">
@@ -98,8 +100,8 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
             </li>
           ))}
           <li className="flex items-center gap-2 text-sm text-ink-3">
-            <span className="flex size-[22px] items-center justify-center rounded-full bg-ai-bg text-[10px] font-semibold text-ai-strong">AI</span>
-            AI 어시스턴트
+            <SteelmanAiMark framed size="sm" />
+            철강맨AI
             <span className="ml-auto text-cap">@AI 로 호출</span>
           </li>
         </ul>
