@@ -172,10 +172,11 @@ confirm(draftId, actor):
 | 이름 → id | 원료·규격(품목 코드·이름), 고객사 이름, 수주번호·출하요청 번호를 서버가 기준정보·업무 데이터와 맞춘다. 하나로 정해지지 않으면 비워 두어 미확정 칸으로 보인다 |
 | 날짜 | 상대 날짜는 메시지 작성일(Asia/Seoul) 기준 절대 날짜로 바꾸고, 서버가 YYYY-MM-DD를 다시 검증한다 |
 | 배정 LOT | ALLOCATION_CONFIRM의 `lotIds`는 AI가 아니라 출하 배정 추천(inventory)으로 채운다 |
-| 결과 연결 | 구매요청은 `purchase_requisition.action_draft_id`. 나머지는 핸들러가 남기는 업무 작업 로그(SALES_ORDER_CREATED 등)의 `action_draft_id`와 DRAFT_EXECUTED `after`(결과 테이블·id·번호). ERD는 바꾸지 않는다 |
+| 같은 메시지·유형 | 미처리 초안은 메시지·유형마다 1건이다(ERD 부분 unique, 9장 중복 생성 응답). 다른 사원이 만든 미처리 초안이 있으면 새로 만들지 않고 그 초안을 돌려준다(`created: false`). 화면은 "○○님이 만든 초안이 이미 있어요"를 보여 준다. 방 멤버라 상세는 볼 수 있지만 고치고 확정·반려하는 것은 만든 사원만 한다. 그 초안이 실행되거나 반려되면 다시 만들 수 있다 |
+| 결과 연결 | 구매요청은 `purchase_requisition.action_draft_id`. 나머지는 핸들러가 남기는 업무 작업 로그(SALES_ORDER_CREATED 등)의 `action_draft_id`와 DRAFT_EXECUTED `after`(결과 테이블·id·번호). ERD는 바꾸지 않는다(ERD `action_draft` Note의 "생성된 업무 테이블의 action_draft_id로 연결"은 구매요청에만 해당한다) |
 | 중복 실행 | 지금처럼 상태 확인 + `updatedAt` 조건부 갱신. 실행 트랜잭션 안에서 초안을 EXECUTED로 바꾸므로 동시에 두 번 실행하면 한쪽이 COM-001로 롤백된다 |
 | AI 경유 | 생성 때 AI가 채운 칸이 있던 초안을 확정·실행하면 DRAFT_CONFIRMED·DRAFT_EXECUTED와 핸들러 작업 로그에 `is_ai_assisted = true`(REQ-AST-010) |
-| 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order `createInTx`는 있고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
+| 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order는 tx를 받는 `createInTx`가 있지만 `private`이라 공개로 바꾸고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
 | 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
 
 구현 순서: 등록부 일반화(REQ-ACT-004) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
