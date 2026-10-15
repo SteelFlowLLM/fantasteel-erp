@@ -142,6 +142,21 @@ const lotSalesOrderSelect = {
 
 const failedHeat = { lotType: LOT_TYPE.HEAT, qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.FAIL } } };
 
+/** 검사 대기 LOT: 검사 행이 없거나 PENDING. 검사 입력 대기 목록과 대시보드 판정 대기가 같은 조건을 쓴다 */
+export const pendingInspectionLotWhere = {
+  OR: [{ qualityInspection: { is: null } }, { qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.PENDING } } }],
+  // 상위 히트가 불합격이면 검사할 필요가 없다 (불합격 히트의 하위 LOT은 이미 불합격, TRM-078)
+  NOT: {
+    lotRelationsAsChildLot: {
+      some: {
+        parentLot: {
+          OR: [failedHeat, { lotType: LOT_TYPE.SLAB, lotRelationsAsChildLot: { some: { parentLot: failedHeat } } }],
+        },
+      },
+    },
+  },
+} satisfies Prisma.LotWhereInput;
+
 @Injectable()
 export class QualityRepository {
   /** 검사 대기·검사 목록 (API-125). 정렬: 대기는 먼저 생긴 LOT부터, 판정 끝은 최근 검사부터 */
@@ -322,24 +337,7 @@ export class QualityRepository {
   private buildListWhere(filter: QualityInspectionListFilter): Prisma.LotWhereInput {
     const conditions: Prisma.LotWhereInput[] = [{ lotType: { in: filter.lotTypes } }];
     if (filter.isPending) {
-      conditions.push({
-        OR: [
-          { qualityInspection: { is: null } },
-          { qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.PENDING } } },
-        ],
-      });
-      // 상위 히트가 불합격이면 검사할 필요가 없다 (불합격 히트의 하위 LOT은 이미 불합격, TRM-078)
-      conditions.push({
-        NOT: {
-          lotRelationsAsChildLot: {
-            some: {
-              parentLot: {
-                OR: [failedHeat, { lotType: LOT_TYPE.SLAB, lotRelationsAsChildLot: { some: { parentLot: failedHeat } } }],
-              },
-            },
-          },
-        },
-      });
+      conditions.push(pendingInspectionLotWhere);
     } else {
       conditions.push({ qualityInspection: { is: { inspectionResult: { in: filter.inspectionResults } } } });
     }
