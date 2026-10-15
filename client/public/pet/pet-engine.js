@@ -142,6 +142,7 @@
     chat: ['0111110', '1000001', '1010101', '1000001', '0111110', '0110000', '0100000'],
     info: ['0001000', '0000000', '0011000', '0001000', '0001000', '0001000', '0011100'],
     walk: ['0110000', '0110000', '0000110', '0110110', '0110000', '0000110', '0000110'],
+    skip: ['1001000', '1101100', '1111110', '1111111', '1111110', '1101100', '1001000'],
     flag: ['1111100', '1111110', '1111100', '1000000', '1000000', '1000000', '1000000'],
     swap: ['0000100', '1111110', '0000100', '0010000', '0111111', '0010000', '0000000'],
     size: ['1110111', '1000001', '1000001', '0000000', '1000001', '1000001', '1110111'],
@@ -733,6 +734,9 @@
 .fp-b-title{font-size:12px;font-weight:700;color:var(--fp-accent-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fp-b-tag{flex:none;font-size:10.5px;line-height:15px;font-weight:600;padding:0 5px;border-radius:3px;background:var(--fp-surface-3);color:var(--fp-ink-3)}
 .fp-b-step{flex:none;margin-left:auto;padding-left:10px;font-size:11px;color:var(--fp-ink-3);font-variant-numeric:tabular-nums}
+.fp-bubble .fp-b-back{flex:none;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:18px;padding:0 0 2px;border:1px solid var(--fp-line);border-radius:4px;background:var(--fp-surface);color:var(--fp-ink-2);font-size:15px;line-height:1;font-weight:700;cursor:pointer}
+.fp-b-back:hover{background:var(--fp-accent-soft);border-color:var(--fp-accent);color:var(--fp-accent-ink)}
+.fp-b-back+.fp-b-step{margin-left:0;padding-left:2px}
 .fp-b-text{position:relative;margin:0;word-break:keep-all;overflow-wrap:anywhere}
 .fp-b-ghost{visibility:hidden}
 .fp-b-typed{position:absolute;left:0;top:0;right:0}
@@ -1005,8 +1009,8 @@
       nextBlink: now() + 3000,
       nextIdleTalk: now() + rand(55000, 90000),
       sleeping: false,
-      // 돌아다니기는 늘 켜 둔다 (메뉴에서 끄는 칸을 없앴다). 동작 스킵하기가 켜져 있으면 혼자 돌아다니지는 않는다
-      roam: true,
+      // 돌아다니기(메뉴, 사원별 기억, 처음엔 켜짐): 끄면 가만히 둬도 혼자 돌아다니지 않는다. 동작 스킵하기가 켜져 있어도 혼자 돌아다니지 않는다
+      roam: store.has('roam') ? !!store.get('roam') : true,
       explain: store.has('explain') ? !!store.get('explain') : true,
       press: null,
       lastClickT: -1e9,
@@ -2474,8 +2478,23 @@
         bubble.anchor = op.anchor && op.anchor.nodeType === 1 ? op.anchor : null;
         bubbleEl.textContent = '';
         if (title || op.tag || op.step) {
+          // back: 여러 단계 안내에서 단계 번호(1/8) 왼쪽에 ‹ 를 두어 앞 단계로 되돌아간다 ('prev'로 끝남)
+          const back = op.back
+            ? h('button', {
+                type: 'button',
+                class: 'fp-b-back',
+                'aria-label': '이전 단계',
+                title: '이전 단계',
+                text: '‹',
+                onclick: (ev) => {
+                  ev.stopPropagation();
+                  S.noHoverUntil = now() + 1500;
+                  closeBubble('prev');
+                },
+              })
+            : null;
           bubbleEl.append(
-            h('div', { class: 'fp-b-head' }, title ? h('span', { class: 'fp-b-title', text: title }) : null, op.tag ? h('span', { class: 'fp-b-tag', text: op.tag }) : null, op.step ? h('span', { class: 'fp-b-step', text: op.step }) : null),
+            h('div', { class: 'fp-b-head' }, title ? h('span', { class: 'fp-b-title', text: title }) : null, op.tag ? h('span', { class: 'fp-b-tag', text: op.tag }) : null, back, op.step ? h('span', { class: 'fp-b-step', text: op.step }) : null),
           );
         }
         bubbleEl.classList.toggle('fp-bubble--data', fields.length > 0);
@@ -3014,6 +3033,7 @@
           title: info.title,
           tag,
           step: info.lines.length > 1 ? `${i + 1}/${info.lines.length}` : null,
+          back: i > 0,
           note: last && info.req.length ? info.req.join(' · ') : null,
           closable: true,
           anchor: el,
@@ -3023,7 +3043,12 @@
           goNav(navHrefOf(el));
           return;
         }
-        if (tok !== S.seq || (!last && r !== 'next')) return;
+        if (tok !== S.seq) return;
+        if (r === 'prev') {
+          i -= 2;
+          continue;
+        }
+        if (!last && r !== 'next') return;
       }
     }
     /** 마우스를 올려 설명할 수 없는 때 (기능 설명·항목 읽기·용어 설명이 같은 간격을 쓴다) */
@@ -3494,6 +3519,7 @@
         const r = await showBubble(info.more[i], {
           title: info.head,
           step: info.more.length > 1 ? `${i + 1}/${info.more.length}` : null,
+          back: i > 0,
           closable: true,
           anchor: el,
           actions: last ? [openTargetOf(el) ? { label: '열기', value: 'open' } : null, Object.assign({ primary: true }, ok)] : [ok, { label: '다음', value: 'next', primary: true }],
@@ -3502,7 +3528,12 @@
           openItem(el);
           return;
         }
-        if (tok !== S.seq || (!last && r !== 'next')) return;
+        if (tok !== S.seq) return;
+        if (r === 'prev') {
+          i -= 2;
+          continue;
+        }
+        if (!last && r !== 'next') return;
       }
     }
     async function readItemEl(el, fromHover) {
@@ -3901,6 +3932,8 @@
       const screenTitle = spec.kind === 'screen' ? targetTitle(spec.key) : null;
       let finished = false;
       let nav = null;
+      // 보여 준 단계 번호를 쌓아 두고, 말풍선의 ‹(이전 단계)로 하나씩 되돌아간다 (찾지 못해 건너뛴 단계는 쌓지 않는다)
+      const shown = [];
       for (let i = 0; i < items.length; i++) {
         const st = items[i];
         const last = i === items.length - 1;
@@ -3920,7 +3953,7 @@
           }
           // 가는 길에 펫이 떨어져 곁에 못 갔어도(ok=false) 강조는 이 단계의 칸으로 옮긴다 (앞 단계 테두리가 남지 않게)
           spotlight(el);
-        }
+        } else clearSpotlight(); // 소개 문장 단계: ‹로 되돌아왔을 때 앞 칸 테두리가 남지 않게
         const actions = [];
         if (!last || spec.kind === 'main') actions.push({ label: '건너뛰기', value: 'skip' });
         if (el) actions.push(navAction(el));
@@ -3930,17 +3963,23 @@
         const res = await showBubble(st.text, {
           title: (st.target ? targetTitle(st.target) : null) || screenTitle,
           step: `${i + 1}/${items.length}`,
+          back: shown.length > 0,
           sticky: true,
           closable: true,
           anchor: el,
           anim: el && ok ? speechAnimFor(el) : 'talk',
           actions,
         });
+        if (res === 'prev' && shown.length) {
+          i = shown.pop() - 1;
+          continue;
+        }
         if (res === 'nav') {
           nav = navHrefOf(el);
           break;
         }
         if (res !== 'next') break;
+        shown.push(i);
         if (last) finished = true;
       }
       hideBeam(false);
@@ -3959,7 +3998,7 @@
           goNav(nav);
           return false;
         }
-        if (spec.kind === 'main') showBubble(finished ? '안내 끝! 궁금하면 저를 눌러 주세요.' : '안내는 우클릭 메뉴에서 다시 볼 수 있어요.');
+        if (spec.kind === 'main') showBubble(finished ? '안내 끝! 궁금하면 저를 눌러 주세요.' : '화면마다 우클릭 메뉴의 "이 화면 안내"로 다시 볼 수 있어요.');
         else if (!finished) showBubble('이 화면 안내는 우클릭 메뉴의 "이 화면 안내"로 다시 볼 수 있어요.');
         showHint();
         end(tok);
@@ -4716,10 +4755,7 @@
         openChat();
       }, h('span', { class: 'fp-kbd', text: 'Enter' }));
       toggle('info', '기능 설명', S.explain, setExplain, '마우스를 올리면 설명');
-      item('flag', '안내 다시 보기', () => {
-        closeMenu();
-        startTour();
-      });
+      toggle('walk', '돌아다니기', S.roam, setRoaming, '가만히 둬도 혼자 화면을 돌아다녀요');
       if (S.screen && guide.screens[S.screen]) {
         const key = S.screen;
         item('screen', '이 화면 안내', () => {
@@ -4731,7 +4767,7 @@
         closeMenu();
         openPicker(false);
       });
-      toggle('walk', '동작 스킵하기', reduced, setSkip, prefersReduced ? '기기의 움직임 줄이기가 켜져 있어요' : '켜면 걷거나 날지 않고 바로 옮겨요');
+      toggle('skip', '동작 스킵하기', reduced, setSkip, prefersReduced ? '기기의 움직임 줄이기가 켜져 있어요' : '켜면 걷거나 날지 않고 바로 옮겨요');
       const seg = h('div', { class: 'fp-seg', role: 'group', 'aria-label': '크기' });
       for (const k of Object.keys(SIZES)) {
         seg.append(
