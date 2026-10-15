@@ -30,6 +30,7 @@ const draftSelect = {
       chatRoom: { select: { chatRoomName: true, chatRoomType: true, salesOrderId: true } },
     },
   },
+  meetingMinutes: { select: { id: true, meetingMinutesTitle: true } },
   purchaseRequisition: { select: { id: true, purchaseRequisitionNo: true, purchaseRequisitionStatus: true } },
 } satisfies Prisma.ActionDraftSelect;
 
@@ -53,7 +54,7 @@ export class MessageActionRepository {
     return tx.actionDraft.findFirst({ where: { messageId, actionType, draftStatus: { in: OPEN_DRAFT_STATUSES } }, select: { id: true } });
   }
 
-  createDraft(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue; messageId: number; requesterId: number }) {
+  createDraft(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue; messageId?: number; meetingMinutesId?: number; requesterId: number }) {
     return tx.actionDraft.create({ data, select: draftSelect });
   }
 

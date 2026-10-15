@@ -22,6 +22,7 @@ const view = (overrides: Partial<ActionDraftView> = {}): ActionDraftView => ({
   requesterDepartmentName: '구매부',
   requesterJobGradeName: '사원',
   message: { id: 900, chatRoomId: 70, chatRoomName: null, chatRoomType: 'DIRECT', senderName: '정다은', content: '실리코망가니즈 20톤 부탁해요', createdAt: '2026-10-13T00:00:00.000Z' },
+  meetingMinutes: null,
   unresolvedFields: [],
   result: null,
   executionErrorCode: null,

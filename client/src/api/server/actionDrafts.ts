@@ -38,6 +38,7 @@ function toDetail(v: ActionDraftView, employeeId: number): DraftDetailView {
     requesterId: v.requesterId ?? 0,
     requesterName: v.requesterName,
     message: message ? { id: message.id, chatRoomId: message.chatRoomId, chatRoomName: message.chatRoomName, senderName: message.senderName, content: message.content, createdAt: message.createdAt } : null,
+    meetingMinutes: v.meetingMinutes,
     unresolvedFields: v.unresolvedFields,
     purchaseRequisition: purchaseRequisitionOf(v),
     executionResult: executionResultOf(v),

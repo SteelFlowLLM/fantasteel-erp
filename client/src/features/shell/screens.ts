@@ -97,7 +97,8 @@ export const SCREEN = {
   // Message → ERP 초안은 메신저에서 만들고 연다. 볼 수 있는지(요청자·원본 방 멤버)는 서버가 확인한다 (API-253)
   messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE }),
-  meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE, soon: 'P2' }),
+  meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
+  schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),
   pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE, soon: 'EX' }),
 } as const satisfies Record<string, ScreenDef>;
 

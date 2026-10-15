@@ -284,16 +284,8 @@ function QueueItem({ row, active }: { row: InspectionQueueRow; active: boolean }
           </span>
         ) : null}
         <span className="ml-auto" data-pet-field="판정 결과">
-          {/* 합격은 배지 없이 체크 + 글자로: 목록 대부분이 합격이라 같은 색 배지가 줄마다 되풀이되면 불합격·판정 대기가 묻힌다 */}
-          {row.inspectionResult === 'PASS' ? (
-            <span className="inline-flex items-center gap-0.5 text-cap text-ink">
-              {/* 글자는 잘 읽히게 기본 글자색, 체크만 상세의 합격 배지와 같은 초록으로: 합격 색이 화면마다 달라 보이지 않게 */}
-              <Icon name="check" size="sm" className="text-ok" />
-              {INSPECTION_RESULT_LABEL.PASS}
-            </span>
-          ) : (
-            <ResultBadge result={row.inspectionResult} />
-          )}
+          {/* 합격도 불합격·판정 대기와 같은 색 배지로: 세 판정이 같은 모양이어야 한눈에 견줘 읽힌다 */}
+          <ResultBadge result={row.inspectionResult} />
         </span>
       </div>
       <span className="flex min-w-0 gap-1 text-cap text-ink-3" title={fullText} data-pet-field="규격 · 생산일">

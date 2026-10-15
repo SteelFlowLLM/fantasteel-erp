@@ -13,5 +13,7 @@ import { MessageActionService } from './message-action.service';
   imports: [PurchasingModule, FactoryAgentModule],
   controllers: [MessageActionController],
   providers: [MessageActionService, MessageActionRepository, ActionTypeRegistry, PurchaseRequisitionAction],
+  // 회의록 확정이 같은 트랜잭션에서 구매요청 초안을 만든다
+  exports: [MessageActionService],
 })
 export class MessageActionModule {}

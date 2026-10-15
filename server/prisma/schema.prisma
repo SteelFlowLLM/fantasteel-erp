@@ -40,6 +40,10 @@ model Employee {
   businessEventsAsActorEmployee BusinessEvent[] @relation("BusinessEventActorEmployee")
   tasksAsAssignee Task[] @relation("TaskAssignee")
   tasksAsCreator Task[] @relation("TaskCreator")
+  scheduleEventsAsCreator ScheduleEvent[] @relation("ScheduleEventCreator")
+  meetingMinutesAsCreator MeetingMinutes[] @relation("MeetingMinutesCreator")
+  meetingAttendees MeetingAttendee[] @relation("MeetingAttendeeEmployee")
+  scheduleEventAttendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEmployee")
   notificationsAsRecipient Notification[] @relation("NotificationRecipient")
   chatRoomMembers ChatRoomMember[] @relation("ChatRoomMemberEmployee")
   messagesAsSender Message[] @relation("MessageSender")
@@ -751,17 +755,100 @@ model Task {
   taskStatus String @default("OPEN") @map("task_status") @db.VarChar /// TASK_STATUS
   linkPath String? @map("link_path") @db.VarChar /// 관련 ERP 화면 이동 경로 (2026-10-08)
   messageId Int? @map("message_id") /// 메시지에서 등록한 업무의 원본 메시지 (스키마 2차)
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 등록한 업무의 원본 회의록 (2026-10-15)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   assignee Employee @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   creator Employee @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   message Message? @relation("TaskMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("TaskMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([assigneeId])
   @@index([creatorId])
   @@index([messageId])
+  @@index([meetingMinutesId])
   @@map("task")
+}
+
+/// Voice2ERP 회의록 (REQ-VOC-001~004, 2026-10-15). 원본 음성은 저장하지 않는다
+model MeetingMinutes {
+  id Int @id @default(autoincrement())
+  meetingMinutesTitle String @map("meeting_minutes_title") @db.VarChar
+  meetingDate DateTime @map("meeting_date") @db.Date
+  meetingMinutesStatus String @map("meeting_minutes_status") @db.VarChar /// MEETING_MINUTES_STATUS (CHECK)
+  transcript String? /// STT 전체 기록 (원본 전사). AI 요약과 구분한다
+  transcriptSegments Json? @map("transcript_segments") @db.JsonB /// 전사 구간 [{start, end, text}]. AI 분석의 근거 발언 번호가 가리킨다
+  summary String? /// AI 요약 (검토 후 확정본)
+  analysisResult Json? @map("analysis_result") @db.JsonB /// AI 분석 결과·검토 중 수정본
+  failureReason String? @map("failure_reason") @db.VarChar /// 전사·분석 실패 사유 (FAILED일 때)
+  creatorId Int @map("creator_id") /// 회의록 작성자. 후보 항목을 허가하는 사람
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3) /// 확정 시각. 확정 후 수정·재분석 불가
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  creator Employee @relation("MeetingMinutesCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attendees MeetingAttendee[] @relation("MeetingAttendeeMeetingMinutes")
+  tasks Task[] @relation("TaskMeetingMinutes")
+  scheduleEvents ScheduleEvent[] @relation("ScheduleEventMeetingMinutes")
+  actionDrafts ActionDraft[] @relation("ActionDraftMeetingMinutes")
+
+  @@index([creatorId])
+  @@index([meetingDate])
+  @@map("meeting_minutes")
+}
+
+model MeetingAttendee {
+  id Int @id @default(autoincrement())
+  meetingMinutesId Int @map("meeting_minutes_id")
+  employeeId Int @map("employee_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  meetingMinutes MeetingMinutes @relation("MeetingAttendeeMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  employee Employee @relation("MeetingAttendeeEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([meetingMinutesId, employeeId])
+  @@index([employeeId])
+  @@map("meeting_attendee")
+}
+
+/// 시각이 있는 일정 (2026-10-10). 마감일만 있는 할 일은 task에 둔다. end_at > start_at은 마이그레이션 CHECK
+model ScheduleEvent {
+  id Int @id @default(autoincrement())
+  scheduleEventTitle String @map("schedule_event_title") @db.VarChar
+  scheduleEventDescription String? @map("schedule_event_description")
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  endAt DateTime @map("end_at") @db.Timestamptz(3) /// start_at보다 뒤 (CHECK)
+  creatorId Int @map("creator_id") /// 일정을 등록한 사원. Voice2ERP 제안은 회의록 작성자가 허가해야 저장
+  linkPath String? @map("link_path") @db.VarChar /// 관련 ERP 화면 이동 경로
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 등록한 일정의 원본 회의록
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  creator Employee @relation("ScheduleEventCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("ScheduleEventMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEvent")
+
+  @@index([creatorId])
+  @@index([startAt])
+  @@index([meetingMinutesId])
+  @@map("schedule_event")
+}
+
+model ScheduleEventAttendee {
+  id Int @id @default(autoincrement())
+  scheduleEventId Int @map("schedule_event_id")
+  employeeId Int @map("employee_id") /// 이 사원의 캘린더에 표시·알림. 등록자도 참석하면 행을 둔다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  scheduleEvent ScheduleEvent @relation("ScheduleEventAttendeeEvent", fields: [scheduleEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  employee Employee @relation("ScheduleEventAttendeeEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scheduleEventId, employeeId])
+  @@index([employeeId])
+  @@map("schedule_event_attendee")
 }
 
 /// / 부분 unique (중복 알림 방지) / - (message_id, recipient_id) WHERE message_id IS NOT NULL / - (business_event_id, recipient_id) WHERE business_event_id IS NOT NULL /
@@ -901,7 +988,8 @@ model ActionDraft {
   draftStatus String @default("AI_GENERATED") @map("draft_status") @db.VarChar /// DRAFT_STATUS
   payload Json @db.JsonB /// 추출 스키마 값
   messageId Int? @map("message_id") /// 추출 원본
-  requesterId Int? @map("requester_id") /// 확정 주체. 구매요청 초안은 메시지 작성자
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 추출한 초안의 원본 (2026-10-15)
+  requesterId Int? @map("requester_id") /// 확정 주체. 구매요청 초안은 메시지 작성자, 회의록 초안은 회의록 작성자
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3)
   rejectReason String? @map("reject_reason") @db.VarChar
   executionErrorCode String? @map("execution_error_code") @db.VarChar /// 핸들러 실행 실패. 상태는 추가하지 않음
@@ -912,9 +1000,11 @@ model ActionDraft {
   purchaseRequisition PurchaseRequisition? @relation("PurchaseRequisitionActionDraft")
   businessEvents BusinessEvent[] @relation("BusinessEventActionDraft")
   message Message? @relation("ActionDraftMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("ActionDraftMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   requester Employee? @relation("ActionDraftRequester", fields: [requesterId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([messageId])
+  @@index([meetingMinutesId])
   @@index([requesterId])
   @@map("action_draft")
 }
