@@ -157,6 +157,12 @@ describe('validateAnalysis', () => {
       expect(run([purchase({ itemName: '철광석' })])?.candidates[0].purchase?.itemId).toBe(10);
     });
 
+    it('이름과 코드를 붙여 쓴 말에서도 품목이 하나로 정해지면 찾는다', () => {
+      expect(run([purchase({ itemName: '철광석 ORE01' })])?.candidates[0].purchase?.itemId).toBe(10);
+      expect(run([purchase({ itemName: 'ALY02 페로실리콘' })])?.candidates[0].purchase?.itemId).toBe(12);
+      expect(run([purchase({ itemName: '철광석 ALY01' })])?.candidates[0].purchase?.itemId).toBeNull();
+    });
+
     it('여러 품목에 걸치거나 없는 품목이면 null + 확인 필요 (모델이 준 id는 무시)', () => {
       for (const itemName of ['페로', 'Cu', null, '', 'x']) {
         const c = run([purchase({ itemName, itemId: 12 })])?.candidates[0];

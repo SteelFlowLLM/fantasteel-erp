@@ -132,7 +132,11 @@ function matchItem(name: string, items: AnalysisContext['rawMaterials']): number
   if (exact.length === 1) return exact[0].itemId;
   if (exact.length > 1 || q.length < 2) return null;
   const partial = items.filter((i) => i.itemName.toLowerCase().includes(q));
-  return partial.length === 1 ? partial[0].itemId : null;
+  if (partial.length === 1) return partial[0].itemId;
+  // 모델이 "철광석 ORE01"처럼 이름과 코드를 붙여 말한 그대로 적는 경우: 말 안에 든 코드·품목명이 하나뿐이면 그 품목
+  const words = q.split(/[\s()/,·]+/).filter((w) => w.length >= 2);
+  const mentioned = items.filter((i) => words.includes(i.itemCode.toLowerCase()) || words.includes(i.itemName.trim().toLowerCase()));
+  return mentioned.length === 1 ? mentioned[0].itemId : null;
 }
 
 export function quantityOf(v: unknown): string | null {
