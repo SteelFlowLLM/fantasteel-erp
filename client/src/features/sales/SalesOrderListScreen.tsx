@@ -114,7 +114,9 @@ export function SalesOrderListScreen() {
   };
 
   return (
-    <>
+    // 글자 크기를 키우면 화면 전체가 zoom으로 커져 쓸 수 있는 폭이 줄어든다. 미디어 쿼리는 zoom을 모르니(창 px 그대로)
+    // 이 줄의 실제 폭을 재는 컨테이너 쿼리로 미리보기 칸을 좁히고, 그래도 모자라면 숨겨 창 밖으로 잘리지 않게 한다.
+    <div className="@container flex min-h-0 min-w-0 flex-1">
       <section aria-label="수주 필터" data-pet-target="card:salesOrders.filter" className="flex min-h-0 w-60 flex-none flex-col border-r border-line bg-surface">
         <div className="flex flex-none items-center gap-2 border-b border-line px-4 pt-3.5 pb-2.5">
           <b className="text-sm font-semibold">필터</b>
@@ -164,7 +166,7 @@ export function SalesOrderListScreen() {
         </div>
       </section>
 
-      <PageMain className="min-w-[560px]">
+      <PageMain className="min-w-[560px] @max-[1200px]:min-w-[480px] @max-[760px]:min-w-0">
         <div data-pet-target="card:salesOrders.toolbar" className="flex flex-none flex-wrap items-center gap-2">
           <Input
             leadingIcon="search"
@@ -307,6 +309,6 @@ export function SalesOrderListScreen() {
       </PageMain>
 
       <SalesOrderPreviewPane salesOrderId={selected?.id ?? null} />
-    </>
+    </div>
   );
 }

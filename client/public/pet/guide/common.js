@@ -18,6 +18,7 @@
     },
     approvals: {
       intro: ['부서원이 올린 구매요청을 승인하거나 반려하는 곳이에요.'],
+      locked: '부서장만 보는 화면이에요. 부서원이 올린 구매요청을 승인·반려해요.',
       tour: [
         { target: 'card:approvals.inbox', text: '승인 대기 구매요청이 모여요. 하나를 골라 봐요.' },
         { target: 'card:purchaseRequisitions.detail', text: '원료·톤·희망 입고일과 요청자를 확인해요.' },

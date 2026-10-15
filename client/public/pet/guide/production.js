@@ -95,6 +95,7 @@
   screens: {
     productionPlans: {
       intro: ['수주 부족분으로 만든 생산계획이에요. 계획을 고르면 히트 편성과 진행이 보여요.'],
+      locked: '생산이 쓰는 화면이에요. 수주 부족분으로 만들어진 생산계획과 히트 편성을 봐요.',
       tour: [
         { target: 'card:productionPlans.list', text: '계획은 수주 등록 때 자동으로 생겨요. 상태·제품으로 걸러 봐요.' },
         { target: 'card:productionPlans.formation', text: '부족 매수에서 히트 수까지, 계산 과정을 줄마다 보여 줘요.' },
@@ -105,6 +106,7 @@
     },
     productionResults: {
       intro: ['{name} {grade}님, 여기서 제선·제강·연주 작업 실적을 남겨요. 열연 실적은 열연 투입 배정 화면에서 해요.'],
+      locked: '생산 담당이 쓰는 화면이에요. 제선·제강·연주 작업 실적을 등록해요.',
       tour: [
         { target: 'card:productionResults.list', text: '진행중 계획이 맨 위예요. 실적을 넣을 계획을 골라요.' },
         { target: 'card:productionResults.summary', text: '부족 매수와 히트·슬래브·합격 숫자를 한 줄로 봐요.' },
@@ -115,6 +117,7 @@
     },
     hotRolling: {
       intro: ['코일 계획에 필요한 만큼만 슬래브를 골라 열연에 넣는 곳이에요.'],
+      locked: '생산 담당이 쓰는 화면이에요. 코일 계획에 필요한 슬래브를 열연에 넣어요.',
       tour: [
         { target: 'card:hotRolling.list', text: '코일 계획 목록이에요. 더 배정해야 할 매수가 노랗게 떠요.' },
         { target: 'card:hotRolling.summary', text: '열연 완료·배정 확정·더 필요한 슬래브를 한눈에 봐요.' },
@@ -125,6 +128,7 @@
     },
     inspections: {
       intro: ['{name} {grade}님, 판정 대기 LOT에 측정값을 넣는 곳이에요. 저장하면 시스템이 판정해요.'],
+      locked: '품질 담당이 쓰는 화면이에요. 측정값을 넣으면 시스템이 합격·불합격을 판정해요.',
       tour: [
         { target: 'card:inspections.queue', text: '판정 대기 LOT이 먼저 보여요. 공정·판정 결과로 걸러요.' },
         { target: 'card:inspections.lotInfo', text: '강종·규격, 판정에 쓸 검사 기준 버전과 상위 히트를 봐요.' },
@@ -135,6 +139,7 @@
     },
     rejectedLots: {
       intro: ['불합격 LOT에 보류·격하·폐기 중 하나와 사유를 남기는 곳이에요.'],
+      locked: '품질 담당이 쓰는 화면이에요. 불합격 LOT에 처리 상태와 사유를 남겨요.',
       tour: [
         { target: 'card:rejectedLots.list', text: '불합격 상태별 칸을 누르면 그 LOT만 걸러져요.' },
         { target: 'card:rejectedLots.evidence', text: '불합격 근거가 된 검사값이에요. 기준 밖 항목을 확인해요.' },
@@ -144,6 +149,7 @@
     },
     inspectionStandards: {
       intro: ['공정·강종별 검사 항목과 min/max를 버전으로 관리해요.'],
+      locked: '품질 담당이 관리하는 화면이에요. 공정·강종별 검사 항목과 min/max를 봐요.',
       tour: [
         { target: 'card:inspectionStandards.list', text: '지금 버전 목록이에요. 공정·강종으로 걸러 봐요.' },
         { target: 'card:inspectionStandards.items', text: '검사 항목과 min/max예요. KS 값인지 가정값인지도 보여요.' },

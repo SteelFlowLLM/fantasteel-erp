@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { aiAssistantApi } from '@/api/aiAssistant';
 import { sourceText } from '@/features/shell/AiPanel';
 import { routeTitleOf } from '@/features/shell/routeTitles';
-import { SCREEN, screenOfPath, SCREEN_KEY_BY_HREF } from '@/features/shell/screens';
+import { canOpenScreen, SCREEN, screenOfPath, SCREEN_KEY_BY_HREF, type AccessUser } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
 import { errorMessageOf } from '@/stores/useToastStore';
 
@@ -48,6 +48,12 @@ function screenKeyOf(pathname: string): string | null {
   return screen ? (SCREEN_KEY_BY_HREF.get(screen.href) ?? null) : null;
 }
 
+/** 지금 화면이 잠겨 있는지 (RouteGuard와 같은 표를 본다). 잠겼으면 펫이 쓸 수 없는 기능 대신 어떤 화면인지만 설명한다 */
+function screenLockedOf(pathname: string, user: AccessUser): boolean {
+  const screen = screenOfPath(pathname);
+  return screen !== null && !canOpenScreen(user, screen.access);
+}
+
 /** 펫 대화 창의 AI 연결(ON): AI 어시스턴트 패널과 같은 API에 지금 화면을 함께 보낸다 (REQ-AST-007). 대화 기록은 펫 창 것만 쓴다 */
 const askAi: NonNullable<FantaPetMountOptions['askAi']> = async (question, history) => {
   const { pathname, search } = window.location;
@@ -71,6 +77,8 @@ export function PetMount() {
   routerRef.current = router;
   const screenRef = useRef<string | null>(null);
   screenRef.current = screenKeyOf(pathname);
+  const lockedRef = useRef(false);
+  lockedRef.current = screenLockedOf(pathname, me);
 
   useEffect(() => {
     let alive = true;
@@ -84,6 +92,7 @@ export function PetMount() {
         zIndex: 50,
         user: { name: me.employeeName, gradeName: me.jobGradeName, departmentName: me.departmentName, roleCode: me.roleCode },
         screen: screenRef.current,
+        screenLocked: lockedRef.current,
         screenHrefs: SCREEN_HREFS,
         navigate: (href: string) => routerRef.current.push(href),
         askAi,
@@ -96,9 +105,10 @@ export function PetMount() {
   }, [me.employeeId, me.employeeName, me.jobGradeName, me.departmentName, me.roleCode]);
 
   const screenKey = screenKeyOf(pathname);
+  const screenLocked = screenLockedOf(pathname, me);
   useEffect(() => {
-    window.FantaPet?.setScreen?.(screenKey);
-  }, [screenKey]);
+    window.FantaPet?.setScreen?.(screenKey, screenLocked);
+  }, [screenKey, screenLocked]);
 
   return null;
 }

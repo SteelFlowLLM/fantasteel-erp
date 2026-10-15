@@ -8,6 +8,7 @@
   screens: {
     goodsIssues: {
       intro: ['출고 확정 화면이에요. 배정이 끝난 출하요청을 골라 내보내요.', '확정은 물류가 하고, 영업·품질·관리자는 조회만 해요.'],
+      locked: '물류가 쓰는 화면이에요. 배정이 끝난 출하요청을 출고 확정해요.',
       tour: [
         { target: 'card:goodsIssues.queue', text: '왼쪽에 출고를 기다리는 출하요청이 있어요.' },
         { target: 'card:goodsIssues.lots', text: '배정된 LOT과 검사 결과를 확인해요. 출고 뒤엔 내보낸 LOT이 보여요.' },
@@ -18,6 +19,7 @@
     },
     millSheets: {
       intro: ['밀시트 화면이에요. 출고 확정 때 자동으로 만들어진 밀시트를 봐요.'],
+      locked: '물류가 보는 화면이에요. 출고한 제품의 밀시트를 보고 출력해요.',
       tour: [
         { target: 'card:millSheets.list', text: '출고한 출하요청별로 밀시트가 묶여 있어요.' },
         { target: 'card:millSheets.pdf', text: 'PDF 생성을 누르면 파일로 내려받아요.' },
@@ -26,6 +28,7 @@
     },
     employees: {
       intro: ['사원 화면이에요. 사원을 등록하고 부서·직급·역할을 정해요.', '관리자만 바꿀 수 있어요.'],
+      locked: '관리자가 쓰는 화면이에요. 사원을 등록하고 부서·직급·역할을 정해요.',
       tour: [
         { target: 'card:employees.list', text: '이름·사원번호로 찾고 역할·부서로 걸러요.' },
         { target: 'card:employees.header', text: '정보 수정과 사용 안 함은 여기서 해요.' },
@@ -35,6 +38,7 @@
     },
     organization: {
       intro: ['부서·직급·권한 화면이에요. 조직과 역할별 권한을 관리해요.'],
+      locked: '관리자가 쓰는 화면이에요. 부서·부서장, 직급, 역할별 권한을 관리해요.',
       tour: [
         { target: 'card:organization.tabs', text: '탭은 부서 · 직급 · 권한 · 조직도예요.' },
         { target: 'card:organization.departmentTree', text: '부서 계층이에요. 부서장이 없는 부서는 표시돼요.' },
@@ -46,6 +50,7 @@
     },
     masterData: {
       intro: ['기준정보 화면이에요. 규격·강종·라우팅 같은 기준 데이터를 관리해요.', '관리자가 바꾸고, 영업·구매·생산·품질은 조회만 해요.'],
+      locked: '관리자가 관리하는 화면이에요. 규격·강종·라우팅 같은 기준 데이터를 봐요.',
       tour: [
         { target: 'card:masterData.tabs', text: '탭 8개로 영역을 나눠 관리해요.' },
         { target: 'card:masterData.specs', text: '규격마다 1매 이론중량이 소수 3자리로 정해져요.' },
@@ -60,6 +65,7 @@
     },
     llmSettings: {
       intro: ['AI 연결 화면이에요. LM Studio 서버에 연결하고 모델을 골라요.'],
+      locked: '관리자가 쓰는 화면이에요. AI(LM Studio) 서버에 연결하고 쓸 모델을 골라요.',
       tour: [
         { target: 'card:llmSettings.connection', text: '서버 주소를 넣고 연결 확인을 눌러요.' },
         { target: 'card:llmSettings.model', text: '받은 목록에서 모델을 골라 저장하고 응답을 확인해요.' },

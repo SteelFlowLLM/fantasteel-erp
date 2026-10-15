@@ -12,7 +12,8 @@
  *   data-pet-item="<종류>"  레코드 하나(표 행·목록 항목·상자). 마우스를 올리면 데이터를 읽어 준다 (data-pet-item-title · 안의 data-pet-field="<이름>")
  *   data-pet-term="<용어>"  라벨. th·dt와 함께 용어집(guide.glossary)에 있으면 설명한다 (없으면 바깥 항목·기능이 이어받는다)
  *
- * 실제 앱에서는 화면을 옮겨 다니므로 mount 옵션 screen·navigate와 setScreen(키)로 지금 화면을 알려 준다.
+ * 실제 앱에서는 화면을 옮겨 다니므로 mount 옵션 screen·navigate와 setScreen(키, 잠김)으로 지금 화면을 알려 준다.
+ * 잠김(열 권한 없음)이면 화면 안내가 안쪽 기능 대신 누가 쓰는 곳인지만 말한다 (설명 파일의 screens.<키>.locked).
  */
 (function (global) {
   'use strict';
@@ -419,7 +420,10 @@
     }
     return best;
   }
-  /** 화면별 안내 { <SCREEN 키>: { intro: string | string[], tour: [{ target, text }] } }. 쓸 내용이 없는 항목은 버린다 */
+  /**
+   * 화면별 안내 { <SCREEN 키>: { intro: string | string[], tour: [{ target, text }], locked: string | string[] } }. 쓸 내용이 없는 항목은 버린다.
+   * locked는 열 권한이 없어 잠긴 화면에서 intro 대신 할 말이다 (누가 쓰는 곳인지·무엇을 하는 곳인지만).
+   */
   function buildScreens(v) {
     const out = {};
     if (!isObj(v)) return out;
@@ -429,8 +433,9 @@
       if (!key || !isObj(sc)) continue;
       const intro = (typeof sc.intro === 'string' ? [sc.intro] : arr(sc.intro)).filter(text);
       const tour = arr(sc.tour).filter((st) => isObj(st) && text(st.target) && text(st.text));
-      if (!intro.length && !tour.length) continue;
-      out[key] = { intro, tour };
+      const locked = (typeof sc.locked === 'string' ? [sc.locked] : arr(sc.locked)).filter(text);
+      if (!intro.length && !tour.length && !locked.length) continue;
+      out[key] = { intro, tour, locked };
     }
     return out;
   }
@@ -876,6 +881,7 @@
         props: null,
         user: null, // { name, gradeName, departmentName, roleCode } — 인사·{name}{grade}{dept} 자리에 쓴다
         screen: null, // 지금 화면(SCREEN 키)
+        screenLocked: false, // 지금 화면을 열 권한이 없다(잠금 화면). 안쪽 기능 대신 어떤 화면인지만 알려 준다
         navigate: null, // (href) => void — '이 화면으로 가기'. 없으면 링크를 누른다
         screenHrefs: null, // { <SCREEN 키>: 주소 } — 다른 화면의 카드를 물으면 그 화면으로 데려갈 때 쓴다
         askAi: null, // (question, history) => Promise<{ text, sources? }> — 있으면 대화 창에 AI 연결 ON·OFF가 생긴다
@@ -1059,6 +1065,7 @@
       lastMoveT: -1e9,
       hoverArmed: false,
       screen: typeof o.screen === 'string' && o.screen ? o.screen : null, // 지금 화면(SCREEN 키)
+      screenLocked: !!o.screenLocked, // 지금 화면을 열 권한이 없다(잠금 화면)
       pending: null, // 화면을 옮긴 뒤 한가해지면 할 안내 { key, since, nextCheck }
       afterNav: null, // 대화창에서 '그 화면으로 가기'로 옮긴 뒤 가리킬 카드 { key, screen, t0, seenAt, nextCheck }
       hoverCand: null, // 마우스가 머문 것 { el, kind: 'target' | 'item' | 'term', term }
@@ -3980,6 +3987,7 @@
       S.tour = { tok, kind: spec.kind, key: spec.key || null };
       hideHint();
       const screenTitle = spec.kind === 'screen' ? targetTitle(spec.key) : null;
+      const tag = spec.tag || null;
       let finished = false;
       let nav = null;
       // 보여 준 단계 번호를 쌓아 두고, 말풍선의 ‹(이전 단계)로 하나씩 되돌아간다 (찾지 못해 건너뛴 단계는 쌓지 않는다)
@@ -4012,6 +4020,7 @@
         else hideBeam(false);
         const res = await showBubble(st.text, {
           title: (st.target ? targetTitle(st.target) : null) || screenTitle,
+          tag,
           step: `${i + 1}/${items.length}`,
           back: shown.length > 0,
           sticky: true,
@@ -4058,6 +4067,21 @@
     function startTour() {
       return runTour({ kind: 'main', key: null, intro: [], steps: guide.tour });
     }
+    const LOCKED_TAIL = '열 권한이 없어서 안쪽은 못 보여 드려요. 권한은 관리자가 정해요.';
+    /**
+     * 열 권한이 없는 화면(잠금)에서 할 말. 쓰지도 못하는 기능을 설명하지 않고, 누가 쓰는 곳인지·무엇을 하는 곳인지만 알려 준다.
+     * 설명 파일에 locked가 없으면 화면 이름과 한 줄 설명(short)으로 만든다.
+     */
+    function lockedIntro(key) {
+      const sc = key ? guide.screens[key] : null;
+      if (sc && sc.locked.length) return sc.locked.concat(LOCKED_TAIL);
+      const t = key ? guide.targets[key] : null;
+      const title = isObj(t) && t.title ? t.title : null;
+      const short = isObj(t) && t.short ? String(t.short).replace(/[.。]+$/, '') : null;
+      if (title && short) return [`${title} 화면이에요. ${short}.`, LOCKED_TAIL];
+      if (title) return [`${title} 화면이에요.`, LOCKED_TAIL];
+      return [LOCKED_TAIL];
+    }
     /** 화면 안내. auto는 화면을 옮겨 처음 왔을 때(안내할 게 없으면 조용히 넘어간다) */
     function startScreenTour(key, auto) {
       const k = typeof key === 'string' && key ? key : S.screen;
@@ -4067,6 +4091,8 @@
         return Promise.resolve(false);
       }
       store.set(`seen:${k}`, true);
+      // 잠긴 화면은 카드도 없고 쓸 수도 없으니 어떤 화면인지만 말하고 끝낸다
+      if (S.screenLocked) return runTour({ kind: 'screen', key: k, intro: lockedIntro(k), steps: [], tag: '권한 없음' });
       // 저절로 시작할 때 소개 문장도 없고 가리킬 곳도 하나 없으면(권한으로 안 보이는 화면 등) 조용히 넘어간다
       if (auto && !sc.intro.length && !sc.tour.some((st) => findTarget(st.target))) return Promise.resolve(false);
       return runTour({ kind: 'screen', key: k, intro: sc.intro, steps: sc.tour });
@@ -4086,8 +4112,9 @@
       if (guide.screens[key] && !store.get(`seen:${key}`)) return 'screen';
       return null;
     }
-    function setScreen(key) {
+    function setScreen(key, locked) {
       const k = typeof key === 'string' && key ? key : null;
+      S.screenLocked = !!locked; // 같은 화면이라도 권한 확인이 늦게 끝나면 잠금 여부가 바뀔 수 있다
       if (k === S.screen) return;
       S.screen = k;
       // 하던 화면 안내는 조용히 끝낸다 (처음 안내는 레일·상단 바 중심이라 이어 간다)
@@ -6592,8 +6619,8 @@
       startTour: () => whenReady(() => startTour()),
       startScreenTour: (key) => whenReady(() => startScreenTour(key, false)),
       // 준비 전에도 바로 기억한다 (안내는 준비된 뒤 한가할 때 돈다)
-      setScreen: (key) => {
-        if (!S.destroyed) setScreen(key);
+      setScreen: (key, locked) => {
+        if (!S.destroyed) setScreen(key, locked);
       },
       openChat: () => whenReady(() => openChat()),
       closeChat: () => whenReady(() => closeChat()),
@@ -6615,6 +6642,7 @@
   let inst = null;
   // 붙기 전(또는 떼었다 다시 붙는 사이)에 받은 화면. 다음 mount에 screen 옵션이 없으면 이것을 쓴다
   let lastScreen;
+  let lastScreenLocked = false;
   const none = () => Promise.resolve(false);
   const api = {
     version: VERSION,
@@ -6623,15 +6651,24 @@
       if (inst) inst.destroy();
       inst = null;
       const opts = Object.assign({}, options || {});
-      if (opts.screen === undefined && lastScreen !== undefined) opts.screen = lastScreen;
-      else if (opts.screen !== undefined) lastScreen = opts.screen;
+      if (opts.screen === undefined && lastScreen !== undefined) {
+        opts.screen = lastScreen;
+        if (opts.screenLocked === undefined) opts.screenLocked = lastScreenLocked;
+      } else if (opts.screen !== undefined) {
+        lastScreen = opts.screen;
+        lastScreenLocked = !!opts.screenLocked;
+      }
       inst = createPet(opts);
       return api;
     },
-    /** 화면이 바뀌면 부른다(SCREEN 키, 모르는 화면이면 null). 처음 온 화면이면 한가할 때 그 화면 안내를 한다 */
-    setScreen(key) {
+    /**
+     * 화면이 바뀌면 부른다(SCREEN 키, 모르는 화면이면 null). 처음 온 화면이면 한가할 때 그 화면 안내를 한다.
+     * locked는 그 화면을 열 권한이 없을 때(잠금 화면) true — 안내가 어떤 화면인지만 말한다.
+     */
+    setScreen(key, locked) {
       lastScreen = typeof key === 'string' && key ? key : null;
-      if (inst) inst.setScreen(lastScreen);
+      lastScreenLocked = !!locked;
+      if (inst) inst.setScreen(lastScreen, lastScreenLocked);
     },
     startScreenTour: (key) => (inst ? inst.startScreenTour(key) : none()),
     destroy() {
