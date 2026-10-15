@@ -4375,24 +4375,30 @@
       }
       return best;
     }
+    /**
+     * 정해진 답변. sure: 틀릴 일이 거의 없는 답(FAQ와 거의 같은 질문, 지금 화면을 보고 하는 답)이다.
+     * AI 연결(ON)이면 sure인 답만 여기서 하고 나머지는 AI에 묻는다: 어설프게 맞은 답이 AI로 갈 질문을 가로채지 않게.
+     */
     function answerFor(input) {
       const fm = matchFaq(input);
-      if (fm && fm.score >= 100) return { text: fm.f.a, target: fm.f.target || null, alt: altTarget(input, fm.f.target) };
+      if (fm && fm.score >= 100) return { text: fm.f.a, target: fm.f.target || null, alt: altTarget(input, fm.f.target), sure: true };
       const code = codeIn(String(input || '').toUpperCase());
       if (code) {
         const el = findItemByCode(code);
-        if (el) return { item: el, code };
+        if (el) return { item: el, code, sure: true };
       }
       const q = String(input || '');
       const here = HERE_RE.test(q);
       if (here || WHERE_RE.test(q)) {
         const hit = findOnPage(findCore(q));
         // '지금 화면에서'라고 했으면 조금만 맞아도, 아니면 이름이 거의 같을 때만 화면 요소를 먼저 가리킨다
-        if (hit && (here ? hit.sc >= 40 : hit.sc >= 85)) return { pageEl: hit.el, label: hit.label };
+        if (hit && (here ? hit.sc >= 40 : hit.sc >= 85)) return { pageEl: hit.el, label: hit.label, sure: true };
         if (here && !hit) {
           // 이 화면에 없으면 그렇게 말하고, 다른 화면의 기능 설명이 맞으면 그 화면으로 안내한다 (데이터 행을 대신 읽지는 않는다)
           const rest = answerFor(q.replace(HERE_RE, ' '));
           const miss = '이 화면에서는 찾지 못했어요.';
+          // '이 화면 요약해 줘'는 찾을 이름이 아니라 화면 데이터 요약을 묻는 말이다
+          if (rest.summary) return Object.assign({}, rest, { sure: true });
           if (rest.text && !rest.item && !rest.items && !rest.summary && !rest.pageEl && !rest.suggest) return Object.assign({}, rest, { text: `${miss} ${rest.text}`, here: true });
           return { text: `${miss} 위쪽 통합 검색이나 왼쪽 메뉴에서 찾아보세요.`, target: 'topbar:search' };
         }
@@ -4400,13 +4406,13 @@
       // '선택한 거 알려줘' '지금 보는 계획' → 고른 항목
       if (/(선택|고른|열린|열려\s*있는|지금\s*보는|보고\s*있는|이거|이것)/.test(q)) {
         const sel = selectedItem();
-        if (sel) return { item: sel, code: sel.getAttribute('data-pet-item-title') || '' };
-        if (/(선택|고른|열린)/.test(q)) return { text: '지금 고른 항목이 없어요. 목록에서 하나를 누른 뒤 다시 물어봐 주세요. 행에 마우스를 올려도 읽어 드려요.' };
+        if (sel) return { item: sel, code: sel.getAttribute('data-pet-item-title') || '', sure: true };
+        if (/(선택|고른|열린)/.test(q)) return { text: '지금 고른 항목이 없어요. 목록에서 하나를 누른 뒤 다시 물어봐 주세요. 행에 마우스를 올려도 읽어 드려요.', sure: true };
       }
-      // '이 화면 요약' '몇 건이야' → 화면 데이터 요약
+      // '이 화면 요약' '몇 건이야' → 화면 데이터 요약. '검사 대기 LOT 몇 개야'처럼 화면을 말하지 않은 수량 질문은 AI가 조회하는 편이 맞다
       if (/(요약|정리해|몇\s*(건|개|매)|얼마나\s*있|뭐가\s*있|무슨\s*데이터|데이터\s*알려)/.test(q)) {
         const sum = screenSummary();
-        if (sum) return { summary: sum };
+        if (sum) return { summary: sum, sure: here || /화면/.test(q) };
       }
       const tm = matchTarget(input, false);
       const gm = matchGlossary(input);
@@ -4611,7 +4617,8 @@
       const typing = addMsg('pet', '•••');
       typing.classList.add('fp-msg--typing');
       if (S.mode === 'ground' && S.base === 'idle') player.set('think', true);
-      if (aiOn()) {
+      const ans = answerFor(text);
+      if (aiOn() && !ans.sure) {
         await askAi(text, typing);
         return;
       }
@@ -4619,11 +4626,10 @@
       if (!chat.el) return;
       typing.remove();
       talkBack();
-      ruleReply(text);
+      ruleReply(text, ans);
     }
     /** 정해진 답변: 설명 파일(FAQ·용어)과 지금 화면을 읽어 답한다 */
-    function ruleReply(text) {
-      const ans = answerFor(text);
+    function ruleReply(text, ans = answerFor(text)) {
       if (ans.pageEl) {
         const el = ans.pageEl;
         const key = el.getAttribute('data-pet-target');
