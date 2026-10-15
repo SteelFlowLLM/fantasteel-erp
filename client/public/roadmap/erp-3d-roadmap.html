@@ -3305,6 +3305,211 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
   b.pop();
   b.pop();
 });
+/* 두 번째 헌정 동상: 분홍 털뭉치 마스코트(보라 SKRR 모자·하트 안경·스마트폰). 광장 북서쪽 잔디밭, 청동상보다 작게.
+   실제 캠퍼스에는 없다. 발표용 사본에만 넣는다 (EXTRA=...,tribute_skrr) */
+CAMPUS_PARTS.push(function campusTributeSkrr(b, H) {
+  const { PI, sin, cos, hypot, gCyl, gSphere, gFlatRing, gExtrude, gText } = H;
+  const SX = -20, SZ = -69, R = 7;                       // 로드맵 광장과 북쪽 도로 사이 잔디밭 가운데
+  const face = Math.atan2(0 - SX, -8 - SZ);              // 로드맵 광장 가운데를 본다 (로컬 +z = 정면)
+  const F = .12;                                         // 원형 마당 윗면
+  const PINK = '#c77aa5', PINK2 = '#b56893', PINK3 = '#d58cb5', CAP = '#5d4cc9', CAP2 = '#8a7ee6', VIO = '#8f80ec';
+  const GR = '#6f747b', GR2 = '#555a61', GRL = '#868b92', GOLD = '#f0d690', HEDGE = '#1f3a2a';
+  const FE = .04;                                        // 털·모자 은은한 발광: 밤에 까맣게 묻히지 않게
+
+  // 곡선을 따라가는 관 (안경테·입). ref = 관 단면을 잡는 기준 축
+  const tube = (pts, r, rs, closed, ref = [0, 0, 1]) => {
+    const p = [], n = [], i = [], L = pts.length;
+    for (let k = 0; k < L; k++) {
+      const a = pts[closed ? (k - 1 + L) % L : Math.max(k - 1, 0)], c = pts[closed ? (k + 1) % L : Math.min(k + 1, L - 1)];
+      let tx = c[0] - a[0], ty = c[1] - a[1], tz = c[2] - a[2]; const tl = hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      let nx = ref[1] * tz - ref[2] * ty, ny = ref[2] * tx - ref[0] * tz, nz = ref[0] * ty - ref[1] * tx;
+      const nl = hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+      for (let v = 0; v <= rs; v++) {
+        const t = v / rs * 2 * PI, cv = cos(t), sv = sin(t);
+        const ox = nx * cv + bx * sv, oy = ny * cv + by * sv, oz = nz * cv + bz * sv;
+        p.push(pts[k][0] + ox * r, pts[k][1] + oy * r, pts[k][2] + oz * r); n.push(ox, oy, oz);
+      }
+    }
+    const segs = closed ? L : L - 1;
+    for (let k = 0; k < segs; k++) for (let v = 0; v < rs; v++) {
+      const q0 = k * (rs + 1) + v, q1 = ((k + 1) % L) * (rs + 1) + v;
+      i.push(q0, q1, q0 + 1, q0 + 1, q1, q1 + 1);
+    }
+    return { p, n, i };
+  };
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+  /* ---- 원형 화강석 마당, 테두리, 뒤쪽 반원 관목, 바닥 투광등 ---- */
+  b.add(gCyl(R, R, F, 56), '#2b2f35', SX, F / 2, SZ, { s: .12 });
+  b.add(gFlatRing(R - .45, R - .45, R, R, 64), '#4a4f57', SX, F + .005, SZ, { s: .1 });
+  b.push().move(SX, 0, SZ).ry(face);
+  for (let k = 0; k <= 8; k++) {
+    const a = PI * .66 + k / 8 * PI * .68;               // 정면 반대쪽(-z) 반원
+    b.add(gSphere(.85, 8, 5), HEDGE, sin(a) * (R - 1.1), F + .6, cos(a) * (R - 1.1), { s: .03 });
+  }
+  for (const a of [-.55, 0, .55]) {
+    const x = sin(a) * 5.6, z = cos(a) * 5.6;
+    b.box(.4, .12, .4, '#2a2e34', x, F + .06, z, { s: .2 });
+    b.add(gCyl(.14, .14, .03, 10), '#ffe2a8', x, F + .135, z, { e: 1, s: 0 });
+  }
+
+  /* ---- 낮은 원통 받침: 디딤, 몸통, 보라 띠, 갓돌 + 정면 명판 ---- */
+  b.add(gCyl(4.6, 4.6, .35, 40), GR2, 0, F + .175, 0, { s: .15 });
+  b.add(gCyl(4.05, 4.05, 1.6, 40), GR, 0, F + 1.15, 0, { s: .2, e: .03 });
+  b.add(gCyl(4.08, 4.08, .12, 40), CAP, 0, F + 1.72, 0, { s: .4, e: .1 });
+  b.add(gCyl(4.35, 4.35, .25, 40), GRL, 0, F + 2.075, 0, { s: .28 });
+  b.box(2.5, .8, .35, '#3a3348', 0, F + 1.0, 4.05, { s: .4 });
+  {
+    const g = gText('SKRR', .52, { px: 48 });
+    b.add(g, GOLD, 0, F + .74, 4.235, { e: .85, s: 0 });
+  }
+
+  /* ---- 인물: 로컬 단위로 만들고 FS배 (발바닥 = 받침 윗면) ---- */
+  const FS = 1.15;
+  b.push().move(0, F + 2.2, 0).scale(FS);
+  // 몸과 머리가 한 덩어리인 둥근 콩 모양
+  const PROF = [[0, 0], [2.2, 0], [2.7, .35], [2.95, 1.0], [3.05, 1.9], [2.98, 2.9], [2.82, 3.7], [2.6, 4.4], [2.3, 5.05], [1.85, 5.65], [1.2, 6.1], [0, 6.35]];
+  const rAt = y => {
+    for (let k = 0; k < PROF.length - 1; k++) {
+      const [r0, y0] = PROF[k], [r1, y1] = PROF[k + 1];
+      if (y <= y1) return r0 + (r1 - r0) * (y - y0) / ((y1 - y0) || 1);
+    }
+    return 0;
+  };
+  b.add(H.gLathe(PROF, 32, true), PINK, 0, 0, 0, { s: .05, e: FE });
+  // 털뭉치: 색별로 한 도형에 모은다. 법선을 바깥쪽으로 기울여 뭉치 사이가 까맣게 패여 보이지 않게(윤곽만 보송하게)
+  const TS = gSphere(1, 6, 3), FUR = {};
+  const tuft = (col, cx, cy, cz, ox, oy, oz, s) => {
+    const g = FUR[col] || (FUR[col] = { p: [], n: [], i: [] }), base = g.p.length / 3, ol = hypot(ox, oy, oz) || 1;
+    for (let q = 0; q < TS.p.length; q += 3) {
+      const vx = TS.p[q], vy = TS.p[q + 1], vz = TS.p[q + 2];
+      g.p.push(cx + vx * s, cy + vy * s, cz + vz * s);
+      const nx = vx * .38 + ox / ol * .62, ny = vy * .38 + oy / ol * .62, nz = vz * .38 + oz / ol * .62, nl = hypot(nx, ny, nz) || 1;
+      g.n.push(nx / nl, ny / nl, nz / nl);
+    }
+    for (const q of TS.i) g.i.push(base + q);
+  };
+  // 털: 겉면에 작은 털뭉치를 촘촘히 (얼굴은 비워 둔다)
+  const NF = 340, GA = PI * (3 - Math.sqrt(5));
+  for (let k = 0; k < NF; k++) {
+    const y = .25 + (k + .5) / NF * 4.75, a = k * GA, r = rAt(y);
+    let da = Math.atan2(sin(a), cos(a));
+    if (Math.abs(da) < .95 && y > 2.55 && y < 4.8) continue;
+    const s = .28 + rnd() * .09, rr = r - .17, dy = (rAt(y - .1) - rAt(y + .1)) / .2;
+    tuft(k % 7 === 0 ? PINK2 : k % 2 ? PINK3 : PINK, sin(a) * rr, y, cos(a) * rr, sin(a), dy, cos(a), s);
+  }
+  // 얼굴 둘레 털은 더 잘게 (얼굴 윤곽이 보송하게)
+  for (let k = 0; k < 26; k++) {
+    const t = k / 26 * 2 * PI, a = sin(t) * 1.02, y = 3.65 + cos(t) * 1.15, r = rAt(y) - .05;
+    if (y > 4.75) continue;
+    tuft(k % 2 ? PINK3 : PINK, sin(a) * r, y, cos(a) * r, sin(a), 0, cos(a), .2);
+  }
+  // 발: 앞쪽 아래 납작한 두 발
+  for (const sx of [-1, 1]) b.add(gSphere(.62, 10, 6), PINK3, sx * 1.05, .22, 2.25, { s: .05, e: FE });
+
+  // 눈: 넓게 벌어진 검은 구슬 + 작은 반짝임
+  const EY = 3.95;
+  for (const sx of [-1, 1]) {
+    const x = sx * 1.15, r = rAt(EY), z = Math.sqrt(r * r - x * x) - .08;
+    b.add(gSphere(.3, 12, 8), '#0c0b10', x, EY, z, { s: .9 });
+    b.add(gSphere(.07, 6, 4), '#ffffff', x - .09, EY + .11, z + .25, { e: .9, s: 0 });
+  }
+  // 입: 아래로 휜 웃는 선
+  {
+    const pts = [];
+    for (let k = 0; k <= 14; k++) {
+      const x = -.72 + k / 14 * 1.44, y = 3.38 - .32 * (1 - (x / .72) ** 2), r = rAt(y);
+      pts.push([x, y, Math.sqrt(r * r - x * x) + .01]);
+    }
+    b.add(tube(pts, .08, 6, false), '#0c0b10', 0, 0, 0, { s: .5 });
+  }
+
+  // 하트 안경: 눈 앞에 두 하트 테 + 다리 + 코받침 연결
+  {
+    const heart = [];
+    for (let k = 0; k < 44; k++) {
+      const t = k / 44 * 2 * PI;
+      const hx = 16 * sin(t) ** 3, hy = 13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t);
+      heart.push([hx * .046, (hy + 2.5) * .046, 0]);
+    }
+    const HG = tube(heart, .085, 6, true);
+    for (const sx of [-1, 1]) {
+      const a = sx * .44, rr = 3.1;
+      b.add(HG, VIO, sin(a) * rr, 3.98, cos(a) * rr, { ry: a * .75, s: .55, e: .08 });
+      const ox = sin(a) * rr + sx * .78 * cos(a * .75), oz = cos(a) * rr - .78 * sin(Math.abs(a) * .75);
+      b.add(tube([[ox, 4.25, oz], [sx * 2.55, 4.38, 1.3], [sx * 2.75, 4.45, .2]], .07, 5, false, [0, 1, 0]), VIO, 0, 0, 0, { s: .55, e: .08 });
+    }
+    b.add(tube([[-.62, 4.3, 3.04], [0, 4.4, 3.1], [.62, 4.3, 3.04]], .075, 5, false), VIO, 0, 0, 0, { s: .55, e: .08 });
+  }
+
+  // 모자: 둥근 크라운 + 앞챙(밝은 보라로 반투명 느낌) + 꼭지 단추 + 앞면 SKRR
+  const CY = 4.7, CA = 2.65, CB = 1.8;
+  {
+    const prof = [[0, -.02]];
+    for (let k = 0; k <= 10; k++) { const t = k / 10 * PI / 2; prof.push([CA * cos(t) + (k === 0 ? .02 : 0), CB * sin(t)]); }
+    prof[1] = [CA + .03, 0];
+    prof.push([0, CB]);
+    b.add(H.gLathe(prof, 32, true), CAP, 0, CY, 0, { s: .35, e: FE });
+    b.add(gSphere(.24, 10, 6), CAP2, 0, CY + CB - .02, 0, { s: .4, e: FE });
+    // 크라운 이음선
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * 2 * PI + PI / 6, pts = [];
+      for (let j = 0; j <= 8; j++) { const t = j / 8 * PI / 2 * .93; pts.push([sin(a) * (CA + .02) * cos(t), CY + CB * sin(t) + .01, cos(a) * (CA + .02) * cos(t)]); }
+      b.add(tube(pts, .035, 4, false, [cos(a), 0, -sin(a)]), '#5847bd', 0, 0, 0, { s: .3, e: FE });
+    }
+    // 앞챙: 볼록한 반타원판을 눕혀 조금 앞으로 숙인다
+    const brim = [];
+    for (let k = 0; k <= 16; k++) { const t = -.5 + k / 16 * (PI + 1); brim.push([2.5 * cos(t), .8 + 3.3 * sin(t)]); }
+    b.push().move(0, CY + .22, 0).rx(-.2);
+    b.add(gExtrude(brim, .12), CAP2, 0, 0, 0, { rx: PI / 2, s: .8, e: .1 });
+    b.pop();
+    // SKRR: 글자를 하나씩 크라운 곡면에 붙인다
+    const letters = 'SKRR'.split('').map(ch => gText(ch, .6, { px: 48 }));
+    const gap = .06, tot = letters.reduce((s, g) => s + g.w, 0) + gap * 3, my = .98;   // 글자 가운데 높이(크라운 바닥 기준)
+    const rr = CA * Math.sqrt(1 - (my / CB) ** 2) + .03, tilt = Math.atan(CA * my / (CB * CB * Math.sqrt(1 - (my / CB) ** 2)));
+    let u = -tot / 2;
+    for (const g of letters) {
+      const th = (u + g.w / 2) / rr;
+      b.push().move(sin(th) * rr, CY + my, cos(th) * rr).ry(th).rx(-tilt);
+      b.add(g, '#2c2075', 0, -.3, 0, { s: .2 });
+      b.pop();
+      u += g.w + gap;
+    }
+  }
+
+  // 팔과 앞발: 오른쪽(보는 사람 기준) 몸 옆에서 나와 폰 아랫부분을 쥔다
+  {
+    const arm = [[2.75, 2.35, .7, .62], [2.6, 2.0, 1.5, .6], [2.25, 1.8, 2.3, .58], [1.85, 1.8, 2.95, .55]];
+    for (const [x, y, z, s] of arm) {
+      b.add(gSphere(s, 10, 6), PINK, x, y, z, { s: .04, e: FE });
+      for (let k = 0; k < 5; k++) {
+        const a = rnd() * 2 * PI, c = rnd() * 2 - 1, q = Math.sqrt(1 - c * c);
+        tuft(k % 2 ? PINK3 : PINK, x + q * cos(a) * s * .8, y + c * s * .8, z + q * sin(a) * s * .8, q * cos(a), c, q * sin(a), .24);
+      }
+    }
+    // 반대쪽 팔은 몸 옆에 붙인 작은 털 뭉치
+    b.add(gSphere(.6, 10, 6), PINK, -2.8, 1.9, 1.0, { s: .04, e: FE });
+    b.add(gSphere(.45, 8, 5), PINK3, -2.5, 1.55, 1.7, { s: .04, e: FE });
+  }
+  // 스마트폰: 뒷면이 앞(보는 쪽)을 향하고 왼쪽 위에 렌즈 두 개
+  b.push().move(1.4, 2.75, 3.35).ry(-.22).rx(-.1);
+  b.box(1.0, 1.85, .17, '#7563dc', 0, 0, 0, { s: .45, e: .1 });
+  b.box(.9, 1.75, .02, '#1a1d2b', 0, 0, -.09, { s: .6, e: .15 });                      // 화면 (몸 쪽)
+  b.box(.44, .62, .06, '#2b2638', -.2, .5, .11, { s: .5 });
+  for (const ly of [.68, .32]) {
+    b.add(gCyl(.13, .13, .07, 14), '#0a0a0f', -.2, ly, .15, { rx: PI / 2, s: .9 });
+    b.add(H.gTorus(.13, .025, 14, 4), '#a7a3b8', -.2, ly, .185, { s: .8 });
+  }
+  b.pop();
+  // 폰을 쥔 앞발 (폰 아래 오른쪽을 감싼다)
+  b.add(gSphere(.5, 10, 6), PINK3, 1.75, 1.95, 3.25, { s: .04, e: FE });
+  for (const [x, y] of [[1.15, 1.95], [1.4, 2.25], [1.65, 2.55]]) b.add(gSphere(.17, 8, 5), PINK3, x + .45, y, 3.55, { s: .04, e: FE });
+  for (const col in FUR) b.add(FUR[col], col, 0, 0, 0, { s: .03, e: FE });
+  b.pop();
+  b.pop();
+});
 /* 01 로그인·조직·권한 · 02 기준정보 · 03 수주·재고 우선 예약 — 출입 보안 로비, 규격 견본실과 측정대, 영업 사무실과 재고 야드 정밀 미니어처 */
 
 // 색 밝기 조절: 넓은 면을 한 색으로 두지 않으려고 장마다 명도를 조금씩 바꾼다
