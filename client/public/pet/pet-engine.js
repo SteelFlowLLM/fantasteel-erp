@@ -797,7 +797,7 @@
 .fp-mi{display:flex;align-items:center;gap:9px;width:100%;min-height:32px;padding:0 8px;border:0;border-radius:4px;background:transparent;font-size:13px;color:var(--fp-ink);text-align:left;cursor:pointer}
 .fp-mi:hover,.fp-mi:focus-visible{background:var(--fp-brand-tint);outline:none}
 .fp-mi .fp-ic{color:var(--fp-accent-ink)}
-.fp-mi-sub{display:block;font-size:10.5px;line-height:13px;color:var(--fp-ink-3)}
+.fp-mi-sub{display:block;font-size:10.5px;line-height:13px;color:var(--fp-ink-3);word-break:keep-all}
 .fp-mi-text{display:flex;flex-direction:column;min-width:0;padding:5px 0}
 .fp-state{margin-left:auto;flex:none;font-size:11px;font-weight:700;line-height:18px;padding:0 6px;border-radius:3px;background:var(--fp-surface-3);color:var(--fp-ink-3)}
 .fp-state[data-on=true]{background:var(--fp-ok-bg);color:var(--fp-ok)}
