@@ -1,4 +1,5 @@
 // 제품 탭 (REQ-INV-001·003·007, 4.2): 규격별 재고 매수 · 합격 · 판정 대기 · 불합격 · 예약 · 열연 배정 · 가용재고 · 톤
+import { useState } from 'react';
 import { ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import type { ProductInventoryView } from '@/api/inventories';
 import { Card, CardFoot } from '@/components/Card';
@@ -9,8 +10,9 @@ import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { Qty, SteelGradeSelect, TableCaption } from '@/features/inventory/components/InventoryParts';
-import { isEmptyProductRow, productTotalsOf } from '@/features/inventory/lib/inventoryDisplay';
+import { isEmptyProductRow, nextUnitWeightSort, productTotalsOf, sortByUnitWeight, type UnitWeightSort } from '@/features/inventory/lib/inventoryDisplay';
 import { useProductInventory } from '@/hooks/useInventories';
+import { cn } from '@/lib/cn';
 import { fmtDims, fmtInt, fmtTon } from '@/lib/format';
 
 export type ProductTypeFilter = ProductItemType | '';
@@ -30,6 +32,7 @@ export interface ProductInventoryTabProps {
 
 export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, onSteelGradeChange }: ProductInventoryTabProps) {
   const query = useProductInventory();
+  const [weightSort, setWeightSort] = useState<UnitWeightSort>(null);
   return (
     <>
       <div className="flex flex-none flex-wrap items-center gap-3">
@@ -44,7 +47,8 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
       </div>
       <QueryBoundary query={query} loadingLabel="재고를 불러오는 중…">
         {(data) => {
-          const rows = data.filter((r) => (!itemType || r.itemType === itemType) && (!steelGrade || r.steelGradeCode === steelGrade));
+          const filtered = data.filter((r) => (!itemType || r.itemType === itemType) && (!steelGrade || r.steelGradeCode === steelGrade));
+          const rows = sortByUnitWeight(filtered, weightSort);
           const types = (['SLAB', 'COIL'] as const).filter((t) => !itemType || itemType === t);
           return (
             <>
@@ -73,8 +77,16 @@ export function ProductInventoryTab({ itemType, steelGrade, onItemTypeChange, on
                       <Th>유형</Th>
                       <Th>강종</Th>
                       <Th>치수 (두께 × 폭 × 길이 mm)</Th>
-                      <Th align="right" title="1매 이론중량">
-                        1매 이론중량
+                      <Th align="right" aria-sort={weightSort === 'desc' ? 'descending' : weightSort === 'asc' ? 'ascending' : 'none'}>
+                        <button
+                          type="button"
+                          onClick={() => setWeightSort(nextUnitWeightSort(weightSort))}
+                          title={weightSort === 'desc' ? '무거운 순이에요 · 누르면 가벼운 순' : weightSort === 'asc' ? '가벼운 순이에요 · 누르면 무거운 순' : '누르면 무거운 순으로 정렬해요'}
+                          className={cn('inline-flex items-center gap-1 hover:text-ink', weightSort && 'text-ink')}
+                        >
+                          1매 이론중량
+                          <Icon name={weightSort === 'desc' ? 'chevron-down' : weightSort === 'asc' ? 'chevron-up' : 'sort'} size="sm" className={weightSort ? 'text-brand' : 'text-ink-3'} />
+                        </button>
                       </Th>
                       <Th align="right" title="투입·출고되지 않은 LOT 매수 (판정 대기·불합격 포함)">
                         재고
