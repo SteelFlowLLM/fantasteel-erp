@@ -15,5 +15,7 @@ import { MeetingMinutesService } from './meeting-minutes.service';
   imports: [SttModule, LlmModule, NotificationModule, MessageActionModule],
   controllers: [MeetingMinutesController],
   providers: [MeetingMinutesService, MeetingMinutesRepository, MeetingTranscriptionRunner, MeetingAnalysisRunner, MeetingCandidateContextService],
+  // AI 어시스턴트가 회의 질문에 쓰려고 상세 읽기(get)만 부른다
+  exports: [MeetingMinutesService],
 })
 export class MeetingMinutesModule {}

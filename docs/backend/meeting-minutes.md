@@ -119,6 +119,11 @@
 - **AI 분석 프롬프트**: 구간에 `speakerName`이 있으면 `[n] 이름: 글`, 이름표만 있으면 `[n] 화자1: 글`, 화자가 없으면 지금처럼 `[n] 글`. "화자1"은 사람 이름이 아니라는 규칙을 시스템 프롬프트에 넣었다. 검증기는 원문 구간 글로 근거·담당자를 맞춘다(이름 매칭은 참석자 이름 기준 그대로). 이름을 연결한 뒤에는 **다시 정리**해야 반영된다.
 - 전사 요청 제한 시간은 60분(느린 엔진 대비), 연결 확인은 30초.
 
+### 회의 질문하기 (Voice2ERP 묶음 3, 문서에 없는 기능)
+- 회의록 상세의 "이 회의에 대해 묻기" 카드가 `POST ai-assistant/messages`에 `meetingMinutesId`를 담아 보낸다. 서버는 [ai-assistant.md](ai-assistant.md) '회의 질문'대로 이 모듈의 `MeetingMinutesService.get`(읽기 전용, 모듈이 export)으로 회의를 읽어 시스템 지시에 넣는다. 이 모듈에 새 API·테이블은 없다.
+- 로그인한 누구나(전 역할이 상세를 열 수 있으므로) 묻는다. 회의 내용 블록은 30,000자까지이고 넘으면 전사만 앞에서부터 자른다. 대화는 서버에 저장하지 않는다(요구사항 21장 미결정).
+- 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
+
 ## 5. 오류 코드
 
 🟡 VOC-는 정의서 9.3에 없다. `shared/src/errors.ts`에 두었고 팀 확인 후 정의서에 올린다.
@@ -142,6 +147,8 @@ VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회
 `meeting-minutes.spec.ts` (묶음 `fs_collab`): 만들기(줄 나누기·참석자·중복), 빈 기록·없는 참석자·없는 날짜 거절, 목록 순서·필터·쪽, 상세·404. 음성: `SttClient`·`SttSettingsStore`를 가짜로 바꿔 즉시 TRANSCRIBING 응답 → TRANSCRIBED 구간 저장, 구간 없을 때 전체 글, STT 실패 → FAILED 이유, 이미 상태가 바뀐 행 덮어쓰지 않음, 한 번에 하나 실행, 시작 복구, 잘못된 입력 거절.
 
 `meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 4만 자 초과 400, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `llm/llm.client.spec.ts`.
+
+`ai-assistant/meeting-ask.spec.ts` (묶음 `fs_collab`)와 `assistant-meeting.context.unit.spec.ts`(DB 없음): 회의 질문 맥락(번호·화자·잘림·전사 속 지시 문장은 데이터), 시스템 지시에 회의 내용이 들어가는지, 없는 회의록 `VOC-001`.
 
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
 

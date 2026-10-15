@@ -20,6 +20,8 @@ export interface AiAssistantScreenContext {
 export interface AiAssistantMessageInput {
   question: string;
   screen?: AiAssistantScreenContext;
+  /** 회의록 상세에서 묻는 질문이면 그 회의록 id. 서버가 회의 내용을 읽어 질문의 맥락으로 쓴다 (Voice2ERP 회의 질문하기) */
+  meetingMinutesId?: number;
   /** 오래된 것부터. 서버는 최근 몇 개만 쓴다 */
   history?: AiAssistantTurn[];
 }

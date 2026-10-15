@@ -14,12 +14,14 @@ import { KvList } from '@/components/KvList';
 import { PageHead } from '@/components/Page';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { MeetingSpeakerCard } from '@/features/meetings/components/MeetingSpeakerCard';
+import { MeetingAskCard } from '@/features/meetings/components/MeetingAskCard';
 import { MeetingAnalysisPanel } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { MeetingStatusBadge } from '@/features/meetings/components/MeetingStatusBadge';
 import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
+import { canAskAboutMeeting } from '@/lib/meetingAsk';
 import { fmtClock } from '@/lib/meetingAudio';
 import { SPEAKER_TONE_CLASSES, canLinkSpeakers, speakerBadge, speakerOrder } from '@/lib/meetingSpeakers';
 
@@ -129,6 +131,7 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
         <div className="flex min-w-0 flex-col gap-3.5">
           {canLinkSpeakers(minutes, me.employeeId) ? <MeetingSpeakerCard key={minutes.updatedAt} minutes={minutes} /> : null}
           <MeetingAnalysisPanel minutes={minutes} onJump={jumpToSegment} />
+          {canAskAboutMeeting(minutes) ? <MeetingAskCard key={minutes.id} minutes={minutes} onJump={jumpToSegment} /> : null}
         </div>
       </div>
     </>

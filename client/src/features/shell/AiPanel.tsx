@@ -20,14 +20,14 @@ import { useShellStore } from '@/stores/useShellStore';
 const MAX_QUESTION_LENGTH = 1000;
 
 /** 답에 붙는 출처 종류 (REQ-AST-009) */
-const SOURCE_ICON: Record<AiAssistantSource['kind'], IconName> = { GLOSSARY: 'book', PROCESS: 'book', MANUAL: 'book', DATA: 'database' };
+export const SOURCE_ICON: Record<AiAssistantSource['kind'], IconName> = { GLOSSARY: 'book', PROCESS: 'book', MANUAL: 'book', DATA: 'database' };
 const SOURCE_LABEL: Record<AiAssistantSource['kind'], string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', DATA: '조회 데이터' };
 
 /** 용어 사전·업무 프로세스는 ID를 함께 보이고, 조회 데이터의 id는 도구 이름(영문)이라 보이지 않는다 */
-const sourceText = (source: AiAssistantSource): string =>
+export const sourceText = (source: AiAssistantSource): string =>
   `${SOURCE_LABEL[source.kind]} · ${source.label}${source.kind === 'DATA' ? '' : ` (${source.id})`}`;
 
-const QUESTION_CHIP =
+export const QUESTION_CHIP =
   'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-ai-line bg-ai-bg px-2.5 py-1 text-left text-xs leading-snug font-medium text-ai-strong hover:border-ai disabled:cursor-not-allowed disabled:opacity-60';
 
 export function AiPanel() {

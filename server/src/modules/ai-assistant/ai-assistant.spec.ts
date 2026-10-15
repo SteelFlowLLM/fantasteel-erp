@@ -3,6 +3,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { LlmClient, LlmEndpoint, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
+import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
@@ -142,6 +143,7 @@ describe('AiAssistantService', () => {
       },
     } as unknown as LlmClient;
     const runs: string[] = [];
+    const meetingMinutes = {} as unknown as MeetingMinutesService;
     const toolbox = {
       definitions: () => [TOOL],
       run: async (_user: AuthUser, call: { name: string; arguments: string }) => {
@@ -149,7 +151,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox), calls, runs };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes), calls, runs };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
