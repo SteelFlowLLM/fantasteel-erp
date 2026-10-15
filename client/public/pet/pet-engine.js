@@ -784,7 +784,9 @@
 .fp-chat-form input{flex:1;min-width:0;height:32px;padding:0 10px;border:1px solid var(--fp-line-strong);border-radius:4px;background:var(--fp-surface-2);font-size:13px;outline:none}
 .fp-chat-form input:focus{border-color:var(--fp-run);box-shadow:0 0 0 2px rgba(31,95,204,.14);background:var(--fp-surface)}
 .fp-chat-form input::placeholder{color:var(--fp-ink-3)}
-.fp-send{flex:none;height:32px;padding:0 12px;border:1px solid var(--fp-brand);border-radius:4px;background:var(--fp-brand);color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+.fp-send{flex:none;height:32px;padding:0 12px;border:1px solid var(--fp-brand);border-radius:4px;background:var(--fp-brand);font-size:13px;font-weight:600;cursor:pointer}
+/* '.fp-root button{color:inherit}'(앱 글자색으로 맞춤)보다 구체적이어야 남색 바탕 위 글자가 흰색으로 남는다 */
+.fp-root .fp-send{color:#fff}
 .fp-send:hover{background:var(--fp-brand-hover)}
 .fp-chat-foot{display:flex;align-items:center;gap:6px;padding:5px 10px 6px;background:var(--fp-surface-2);border-top:1px solid var(--fp-line);font-size:11px;color:var(--fp-ink-3)}
 .fp-chat-foot i{width:6px;height:6px;flex:none;background:var(--fp-line-strong)}
