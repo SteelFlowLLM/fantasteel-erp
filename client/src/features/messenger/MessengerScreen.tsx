@@ -33,8 +33,9 @@ export function MessengerScreen() {
   const openRoom = (id: number) => router.replace(`${pathname}?room=${id}`);
   const jumpToMessage = (roomId: number, messageId: number) => router.replace(`${pathname}?room=${roomId}&message=${messageId}`);
 
+  // 글자 크기(html zoom)를 키우면 창 px 미디어 쿼리는 실제로 쓸 수 있는 폭을 모른다. 방 정보 칸은 이 칸의 폭(컨테이너 쿼리)으로 켠다
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <div className="@container flex min-h-0 min-w-0 flex-1">
       {rooms.data ? (
         <RoomList rooms={list} activeId={chatRoomId} onSelect={openRoom} onNew={() => setCreating(true)} />
       ) : (
