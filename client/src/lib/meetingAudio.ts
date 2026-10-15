@@ -1,5 +1,5 @@
 // 회의 음성 입력 도우미: 녹음 형식 고르기, 시간 표시, 올릴 파일 확인.
-import { MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
+import { hasMeetingAudioExtension, MEETING_AUDIO_EXTENSIONS, MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
 import { fmtBytes } from '@/lib/format';
 
 /** 앞에 있을수록 먼저 쓴다. Safari는 webm을 못 녹음해 mp4로 내려간다 */
@@ -25,9 +25,13 @@ export function recordingFileName(mimeType: string): string {
   return mimeType.includes('mp4') ? '회의-녹음.m4a' : '회의-녹음.webm';
 }
 
-/** 서버가 받는 형식(audio/* 또는 video/webm)이고 크기가 맞는지. 문제가 있으면 한국어 문구 */
-export function audioFileProblem(file: { type: string; size: number }): string | null {
-  const accepted = file.type.startsWith('audio/') || file.type === 'video/webm';
+/** 파일 선택창에 거는 형식: MIME을 못 알아내는 브라우저를 위해 확장자도 함께 건다 */
+export const MEETING_AUDIO_ACCEPT = ['audio/*', 'video/webm', 'video/mp4', ...MEETING_AUDIO_EXTENSIONS.map((ext) => `.${ext}`)].join(',');
+
+/** 서버가 받는 형식이고 크기가 맞는지 (서버 isMeetingAudio와 같은 규칙). 문제가 있으면 한국어 문구 */
+export function audioFileProblem(file: { type: string; size: number; name?: string }): string | null {
+  const unknownType = file.type === '' || file.type === 'application/octet-stream';
+  const accepted = file.type.startsWith('audio/') || file.type === 'video/webm' || file.type === 'video/mp4' || (unknownType && hasMeetingAudioExtension(file.name ?? ''));
   if (!accepted) return '오디오 파일만 올릴 수 있어요';
   if (file.size === 0) return '음성이 비어 있어요';
   if (file.size > MEETING_AUDIO_MAX_BYTES) return `음성 파일은 ${fmtBytes(MEETING_AUDIO_MAX_BYTES)}까지 올릴 수 있어요 (지금 ${fmtBytes(file.size)})`;

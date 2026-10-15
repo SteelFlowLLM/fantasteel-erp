@@ -137,6 +137,22 @@ export class MeetingMinutesRepository {
     });
   }
 
+  /**
+   * 화자 연결: 확정 전이고 전사가 있는 상태에서, 내가 읽은 뒤 아무도 고치지 않았을 때만 구간을 바꾼다. 아니면 0건.
+   * 전사 중(TRANSCRIBING)·분석 중(ANALYZING)에는 결과가 덮어써지므로 허용하지 않는다.
+   */
+  saveSegments(tx: Tx, id: number, readUpdatedAt: Date, transcriptSegments: Prisma.InputJsonArray) {
+    return tx.meetingMinutes.updateMany({
+      where: {
+        id,
+        updatedAt: readUpdatedAt,
+        transcript: { not: null },
+        meetingMinutesStatus: { in: [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED] },
+      },
+      data: { transcriptSegments },
+    });
+  }
+
   /** REVIEW → CONFIRMED. 두 번 눌러도 한 번만 0건이 아니다 */
   confirm(tx: Tx, id: number, confirmedAt: Date) {
     return tx.meetingMinutes.updateMany({

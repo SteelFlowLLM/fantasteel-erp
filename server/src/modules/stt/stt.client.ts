@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 
-/** 긴 회의 녹음은 CPU로 돌리면 실시간보다 오래 걸릴 수 있다 */
-const TRANSCRIBE_TIMEOUT_MS = 15 * 60_000;
+/** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
+const SIDECAR_MODELS = new Set(['whisper-pyannote', 'vibevoice']);
+const TRANSCRIBE_TIMEOUT_MS = 60 * 60_000;
 const CONNECTION_TEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MODEL = 'whisper-1';
 
@@ -17,6 +18,8 @@ export interface SttTranscribeInput {
   /** whisper.cpp는 무시한다. 비우면 OpenAI 호환 기본 이름을 보낸다 */
   model: string | null;
   language?: string;
+  /** 화자 분리 서버(tools/voice-sidecar)에만 보낸다. OpenAI는 모르는 칸을 거절할 수 있다 */
+  speakerCount?: number;
 }
 
 export interface SttSegment {
@@ -24,6 +27,8 @@ export interface SttSegment {
   start: number | null;
   end: number | null;
   text: string;
+  /** 화자 분리를 하는 서버(tools/voice-sidecar)만 준다. 없으면 null */
+  speaker?: string | null;
 }
 
 export interface SttTranscript {
@@ -49,6 +54,7 @@ export class SttClient {
     form.append('language', input.language ?? 'ko');
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
+    if (input.speakerCount && SIDECAR_MODELS.has(input.model ?? '')) form.append('num_speakers', String(input.speakerCount));
 
     let res: Response;
     try {
@@ -120,9 +126,11 @@ export function parseTranscript(body: unknown): SttTranscript {
     if (typeof raw !== 'object' || raw === null) continue;
     const segment = raw as Record<string, unknown>;
     const segmentText = typeof segment.text === 'string' ? segment.text.trim() : '';
-    if (segmentText) segments.push({ start: asNumber(segment.start), end: asNumber(segment.end), text: segmentText });
+    if (!segmentText) continue;
+    const speaker = typeof segment.speaker === 'string' && segment.speaker.trim() !== '' ? segment.speaker.trim() : null;
+    segments.push({ start: asNumber(segment.start), end: asNumber(segment.end), text: segmentText, speaker });
   }
-  if (segments.length === 0 && text) segments.push({ start: null, end: null, text });
+  if (segments.length === 0 && text) segments.push({ start: null, end: null, text, speaker: null });
   const lastEnd = segments.length ? segments[segments.length - 1].end : null;
   return {
     text: text || segments.map((s) => s.text).join(' '),

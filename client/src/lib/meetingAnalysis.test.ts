@@ -9,6 +9,7 @@ const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
   meetingMinutesStatus: 'TRANSCRIBED',
   transcript: '글',
   transcriptSegments: [],
+  speakers: [],
   summary: null,
   analysisResult: null,
   failureReason: null,

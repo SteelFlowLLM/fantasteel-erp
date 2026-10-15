@@ -18,7 +18,7 @@ import { AttendeePicker } from '@/features/meetings/components/AttendeePicker';
 import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
 import { fmtBytes, todayStr } from '@/lib/format';
-import { audioFileProblem } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem } from '@/lib/meetingAudio';
 
 type InputMode = 'record' | 'file' | 'text';
 const MODE_TABS = [
@@ -132,11 +132,11 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
                 {mode === 'record' ? (
                   <AudioRecorder disabled={!notified || pending} file={audioFile} onChange={setAudioFile} />
                 ) : (
-                  <Field label="음성 파일" required error={fieldErrors.file ?? fileProblem} hint="오디오 파일, 100MB까지">
+                  <Field label="음성 파일" required error={fieldErrors.file ?? fileProblem} hint="오디오 파일, 500MB까지 (m4a·mp3·wav·webm·aac·ogg·mp4·flac)">
                     <div className="flex flex-col gap-1.5">
                       <input
                         type="file"
-                        accept="audio/*,video/webm"
+                        accept={MEETING_AUDIO_ACCEPT}
                         disabled={!notified || pending}
                         aria-label="음성 파일"
                         onChange={(event) => {

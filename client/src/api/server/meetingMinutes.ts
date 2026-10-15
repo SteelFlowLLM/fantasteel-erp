@@ -1,6 +1,6 @@
 // 회의록 화면 ↔ 서버 API (server/src/modules/meeting-minutes, API-258·259, docs/backend/meeting-minutes.md).
 // 서버가 막는 입력(빈 제목·기록, 참석자 없음, 길이)은 미리 입력칸 오류로 보인다. 없는 참석자·날짜 형식은 서버 문구를 그대로 보인다.
-import { MEETING_SUMMARY_MAX, type MeetingCandidateUpdateInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
+import { MEETING_SUMMARY_MAX, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
 import { FieldErrors } from '@/api/errors';
 import { serverRequest, serverUpload } from '@/api/http';
 import { MEETING_AUDIO_MAX_BYTES, MEETING_LIST_PAGE_SIZE, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, type MeetingMinutesAudioInput, type MeetingMinutesListQuery } from '@/api/meetingMinutes';
@@ -29,7 +29,7 @@ function audioFormOf(input: MeetingMinutesAudioInput): FormData {
   const errors = new FieldErrors();
   const common = commonFields(input, errors);
   if (input.file.size === 0) errors.add('file', '음성이 비어 있어요');
-  else if (input.file.size > MEETING_AUDIO_MAX_BYTES) errors.add('file', '음성 파일은 100MB까지 올릴 수 있어요');
+  else if (input.file.size > MEETING_AUDIO_MAX_BYTES) errors.add('file', `음성 파일은 ${MEETING_AUDIO_MAX_BYTES / (1024 * 1024)}MB까지 올릴 수 있어요`);
   errors.throwIfAny();
   const form = new FormData();
   form.append('meetingMinutesTitle', common.meetingMinutesTitle);
@@ -61,6 +61,10 @@ export const serverMeetingMinutesApi = {
     errors.throwIfAny();
     return serverRequest<MeetingMinutesView>('PATCH', `/meeting-minutes/${id}/summary`, { body: { summary } });
   },
+
+  /** 화자 이름표를 참석자에게 연결한다 (값이 null이면 '모름'). 작성자만, 확정 전에만 */
+  updateSpeakers: (id: number, input: MeetingSpeakerMappingInput): Promise<MeetingMinutesView> =>
+    serverRequest<MeetingMinutesView>('PATCH', `/meeting-minutes/${id}/speakers`, { body: input }),
 
   /** API-261. 허가한 후보를 한 번에 등록하고 회의록을 확정한다 */
   register: (id: number): Promise<MeetingRegisterResult> => serverRequest<MeetingRegisterResult>('POST', `/meeting-minutes/${id}/register`),

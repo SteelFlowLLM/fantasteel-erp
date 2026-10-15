@@ -1,4 +1,4 @@
-import type { MeetingAnalysis, MeetingCandidate, TranscriptSegment } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingCandidate, MeetingSpeakerSummary, TranscriptSegment } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -9,8 +9,31 @@ export function readSegments(value: Prisma.JsonValue | null): TranscriptSegment[
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry) || typeof entry.text !== 'string') return [];
-    return [{ start: typeof entry.start === 'number' ? entry.start : null, end: typeof entry.end === 'number' ? entry.end : null, text: entry.text }];
+    const segment: TranscriptSegment = { start: typeof entry.start === 'number' ? entry.start : null, end: typeof entry.end === 'number' ? entry.end : null, text: entry.text };
+    // 화자 칸은 화자 분리를 한 전사에만 있다: 없는 전사의 응답 모양을 그대로 둔다
+    if (typeof entry.speaker === 'string') {
+      segment.speaker = entry.speaker;
+      segment.speakerEmployeeId = typeof entry.speakerEmployeeId === 'number' ? entry.speakerEmployeeId : null;
+      segment.speakerName = typeof entry.speakerName === 'string' ? entry.speakerName : null;
+    }
+    return [segment];
   });
+}
+
+/** 구간의 화자 이름표를 처음 나온 순서로 모아 사원 연결·발언 수·첫 두 발언을 계산한다 */
+export function summarizeSpeakers(segments: TranscriptSegment[]): MeetingSpeakerSummary[] {
+  const byLabel = new Map<string, MeetingSpeakerSummary>();
+  for (const s of segments) {
+    if (!s.speaker) continue;
+    let entry = byLabel.get(s.speaker);
+    if (!entry) {
+      entry = { label: s.speaker, employeeId: s.speakerEmployeeId ?? null, employeeName: s.speakerName ?? null, segmentCount: 0, firstTexts: [] };
+      byLabel.set(s.speaker, entry);
+    }
+    entry.segmentCount += 1;
+    if (entry.firstTexts.length < 2) entry.firstTexts.push(s.text);
+  }
+  return [...byLabel.values()];
 }
 
 function isCandidate(v: unknown): v is MeetingCandidate {

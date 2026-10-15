@@ -9,12 +9,48 @@ export interface TranscriptSegment {
   start: number | null;
   end: number | null;
   text: string;
+  /** 화자 분리 엔진이 붙인 이름표('SPEAKER_1' …). 화자를 구분하지 못한 전사는 null */
+  speaker?: string | null;
+  /** 작성자가 화자를 연결한 사원. 연결하지 않았거나 '모름'이면 null */
+  speakerEmployeeId?: number | null;
+  speakerName?: string | null;
+}
+
+/** 화자 이름표 하나의 요약 (화자 연결 화면용). 상세 응답에 서버가 계산해 담는다 */
+export interface MeetingSpeakerSummary {
+  label: string;
+  employeeId: number | null;
+  employeeName: string | null;
+  segmentCount: number;
+  /** 그 화자의 처음 두 발언 */
+  firstTexts: string[];
+}
+
+/** PATCH meeting-minutes/:id/speakers. 값이 null이면 '모름'. 보내지 않은 이름표는 그대로 둔다 */
+export interface MeetingSpeakerMappingInput {
+  mapping: Record<string, number | null>;
 }
 
 export const MEETING_TITLE_MAX = 200;
 export const MEETING_TRANSCRIPT_MAX = 100000;
 /** 음성 파일 한 개의 최대 크기 (녹음·파일 올리기 공통) */
-export const MEETING_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
+export const MEETING_AUDIO_MAX_BYTES = 500 * 1024 * 1024;
+/** MIME 형식이 비었거나 application/octet-stream일 때 확장자로 오디오를 알아본다 */
+export const MEETING_AUDIO_EXTENSIONS = ['m4a', 'mp3', 'wav', 'webm', 'aac', 'ogg', 'mp4', 'flac'] as const;
+
+/** 파일 이름 확장자가 허용 목록에 있는지 */
+export function hasMeetingAudioExtension(fileName: string): boolean {
+  const dot = fileName.lastIndexOf('.');
+  if (dot < 0) return false;
+  const ext = fileName.slice(dot + 1).toLowerCase();
+  return (MEETING_AUDIO_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/** 화자 이름표 'SPEAKER_3' → '화자 3'. 다른 모양이면 그대로 */
+export function speakerLabelText(label: string): string {
+  const match = /^SPEAKER_(\d+)$/.exec(label);
+  return match ? `화자 ${match[1]}` : label;
+}
 
 /** POST meeting-minutes (API-258). 글로 넣은 전사는 STT를 건너뛰고 TRANSCRIBED로 시작한다 */
 export interface MeetingMinutesCreateInput {
@@ -53,6 +89,8 @@ export interface MeetingMinutesView {
   meetingMinutesStatus: MeetingMinutesStatus;
   transcript: string | null;
   transcriptSegments: TranscriptSegment[];
+  /** 전사 구간에 화자 이름표가 있을 때만 값이 있다 (없으면 빈 배열). 이름표는 처음 나온 순서 */
+  speakers: MeetingSpeakerSummary[];
   summary: string | null;
   /** AI 분석 결과(API-260). 서버가 검증한 후보만 담고, 읽을 수 없는 모양이면 null */
   analysisResult: MeetingAnalysis | null;

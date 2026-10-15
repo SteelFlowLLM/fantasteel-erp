@@ -15,6 +15,8 @@ export interface TranscriptionJob {
   audio: Buffer | null;
   fileName: string;
   mimeType: string;
+  /** 참석자 수. 화자 분리 엔진에 화자 수로 알려 준다 */
+  speakerCount?: number;
 }
 
 /**
@@ -61,13 +63,13 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap {
       const audio = job.audio;
       if (!audio) return;
       const settings = await this.sttSettings.read();
-      const result = await this.sttClient.transcribe(settings, { audio, fileName: job.fileName, mimeType: job.mimeType, model: settings.model });
+      const result = await this.sttClient.transcribe(settings, { audio, fileName: job.fileName, mimeType: job.mimeType, model: settings.model, speakerCount: job.speakerCount });
       const segments = result.segments.filter((s) => s.text.trim() !== '');
       const transcript = segments.length > 0 ? segments.map((s) => s.text.trim()).join('\n') : result.text.trim();
       const data: Prisma.MeetingMinutesUncheckedUpdateManyInput = {
         meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBED,
         transcript,
-        transcriptSegments: segments.map((s) => ({ start: s.start, end: s.end, text: s.text.trim() })),
+        transcriptSegments: segments.map((s) => ({ start: s.start, end: s.end, text: s.text.trim(), ...(s.speaker ? { speaker: s.speaker } : {}) })),
         failureReason: null,
       };
       await this.finish(job.meetingMinutesId, data);

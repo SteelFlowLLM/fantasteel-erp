@@ -443,6 +443,7 @@ export function MeetingAnalysisPanel({ minutes, onJump }: { minutes: MeetingMinu
             ) : (
               <p className="text-sm text-ink-2">회의록을 만든 사람({minutes.creator.name})이 AI로 정리할 수 있어요.</p>
             )}
+            {availability.ok && minutes.speakers.length > 0 ? <p className="text-cap text-ai-strong">화자를 연결하면 AI가 누가 말했는지 알고 정리해요</p> : null}
             <p className="text-cap text-ink-3">원본 전사는 AI가 고치지 않아요. AI가 만든 내용은 &quot;AI 정리&quot; 표시가 붙어요.</p>
           </>
         )}

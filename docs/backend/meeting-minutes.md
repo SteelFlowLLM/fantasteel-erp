@@ -27,6 +27,7 @@
 | POST | `meeting-minutes/audio` | 🟡 회의록 만들기(음성, multipart) | 로그인한 전 역할 |
 | POST | `meeting-minutes/:id/analyze` | API-260 AI 정리(다시 정리 포함) | **작성자만** |
 | PATCH | `meeting-minutes/:id/candidates/:key` | API-261 후보 고치기·허가·제외 | **작성자만**, `REVIEW`만 |
+| PATCH | `meeting-minutes/:id/speakers` | 🟡 화자 이름표 → 참석자 연결 (Voice2ERP 묶음 1) | **작성자만**, `TRANSCRIBED`·`REVIEW`·전사가 남은 `FAILED` |
 | PATCH | `meeting-minutes/:id/summary` | 🟡 AI 요약 고치기 | **작성자만**, `REVIEW`만 |
 | POST | `meeting-minutes/:id/register` | API-261 확정하고 등록 | **작성자만**, `REVIEW`만 |
 | GET | `meeting-minutes` | API-259 목록 | 전 역할 |
@@ -45,10 +46,10 @@
 
 **음성으로 만들기** (`POST meeting-minutes/audio`, 2026-10-15 결정)
 - 명세의 API-258은 JSON 한 개다. 음성은 multipart라 본문 형식이 달라 경로를 `/meeting-minutes/audio`로 나눴다.
-- multipart: `file`(audio/* 또는 video/webm, 100MB 이하, `FileInterceptor` limits), 글 칸 `meetingMinutesTitle`, `meetingDate`, `attendeeIds`(JSON 배열 문자열 `"[2,3]"`). 제목·회의일·참석자 검증과 한 트랜잭션 저장은 글 만들기와 같은 코드(`createRecord`)를 쓴다. 파일이 없거나 오디오가 아니면 `COM-004`.
+- multipart: `file`(audio/*·video/webm·video/mp4, 또는 MIME이 비었거나 `application/octet-stream`이면 확장자 m4a·mp3·wav·webm·aac·ogg·mp4·flac, **500MB** 이하 = 공통 상수 `MEETING_AUDIO_MAX_BYTES`, `FileInterceptor` limits), 글 칸 `meetingMinutesTitle`, `meetingDate`, `attendeeIds`(JSON 배열 문자열 `"[2,3]"`). 제목·회의일·참석자 검증과 한 트랜잭션 저장은 글 만들기와 같은 코드(`createRecord`)를 쓴다. 파일이 없거나 오디오가 아니면 `COM-004`.
 - 상태 `TRANSCRIBING`, `transcript`·`transcript_segments` null로 만들어 상세를 **전사를 기다리지 않고** 바로 돌려준다(201). 화면은 2초마다 상세를 다시 읽어 상태가 바뀔 때까지 기다린다.
 - **백그라운드 전사** (`MeetingTranscriptionRunner`): 응답 뒤 서버 프로세스 안에서 STT 설정(`SttSettingsStore`)을 읽고 `SttClient.transcribe`를 부른다. 작업은 줄을 세워 **한 번에 하나**만 돈다(whisper 서버 하나를 겹쳐 부르지 않는다).
-  - 성공: `transcript` = 구간 글을 `\n`으로 이은 것(구간이 없으면 전체 글), `transcript_segments` = `[{start, end, text}]`(초 단위 유지), 상태 `TRANSCRIBED`, `failure_reason` null.
+  - 성공: `transcript` = 구간 글을 `\n`으로 이은 것(구간이 없으면 전체 글), `transcript_segments` = `[{start, end, text, speaker?}]`(초 단위 유지; `speaker`는 화자 분리를 하는 STT 서버만 준다), 상태 `TRANSCRIBED`, `failure_reason` null.
   - 실패: 상태 `FAILED`, `failure_reason` = `SttRequestError` 문구 또는 `전사 중 오류가 났어요`.
   - 결과 반영은 `updateMany where status = TRANSCRIBING`이다. 그 사이 다른 상태가 됐으면 버린다. 로그에는 음성·전사 내용을 남기지 않는다.
 - **원본 음성은 저장하지 않는다** (BP-VOC-01): 업로드 버퍼는 메모리에만 있고 디스크·DB에 쓰지 않으며, 작업이 끝나면 참조를 놓는다.
@@ -89,6 +90,14 @@
 - 🟡 알림은 모두 `business_event_id`를 null로 보낸다. `notification`의 부분 unique(`business_event_id`, `recipient_id`) 때문에, 한 작업 로그에 한 사람이 여러 알림(업무 지정 + 회의록 공유)을 받을 수 없어서다.
 - 확정된 뒤에는 분석(`analyze`)·후보 고치기·요약·등록이 모두 `VOC-004`.
 
+### 화자 분리·연결 (Voice2ERP 묶음 1, 문서에 없는 기능)
+- `transcript_segments`(jsonb 배열)의 구간에 `speaker`('SPEAKER_1' …, 처음 나온 순서)가 붙을 수 있다. STT 사이드카(`tools/voice-sidecar/`, [stt.md](stt.md))가 줄 때만 있고, 글로 넣은 회의록과 일반 whisper 전사는 칸이 없다. 스키마는 바꾸지 않았다.
+- **화자 연결** `PATCH meeting-minutes/:id/speakers` body `{ mapping: { "SPEAKER_1": employeeId | null, … } }`. 작성자만(`VOC-003`), `TRANSCRIBED`·`REVIEW`·전사(`transcript`)가 남은 `FAILED`만(그 밖은 `VOC-004`; 확정 뒤에는 못 바꾼다), 사원은 **이 회의의 참석자**여야 한다(`VOC-002`). 이 회의록에 없는 이름표·정수가 아닌 값·`mapping` 없음은 `COM-004`/400.
+- 연결은 각 구간에 `speakerEmployeeId`·`speakerName`을 적어 저장한다(분석 결과가 아직 없을 수 있어 `analysis_result`에는 두지 않는다). 이름표 → 사원 표는 구간에서 다시 만들 수 있다. `null`은 '모름'(두 칸을 null로 되돌림), 보내지 않은 이름표는 그대로. `updatedAt` 조건부 `updateMany`라 동시에 고쳐도 한쪽이 사라지지 않는다(`COM-001`).
+- 상세 응답: `transcriptSegments[].speaker/speakerEmployeeId/speakerName`과 파생 값 `speakers: [{ label, employeeId, employeeName, segmentCount, firstTexts(첫 2개 발언) }]`(화자 칸이 없는 전사는 빈 배열).
+- **AI 분석 프롬프트**: 구간에 `speakerName`이 있으면 `[n] 이름: 글`, 이름표만 있으면 `[n] 화자1: 글`, 화자가 없으면 지금처럼 `[n] 글`. "화자1"은 사람 이름이 아니라는 규칙을 시스템 프롬프트에 넣었다. 검증기는 원문 구간 글로 근거·담당자를 맞춘다(이름 매칭은 참석자 이름 기준 그대로). 이름을 연결한 뒤에는 **다시 정리**해야 반영된다.
+- 전사 요청 제한 시간은 60분(느린 엔진 대비), 연결 확인은 30초.
+
 ## 5. 오류 코드
 
 🟡 VOC-는 정의서 9.3에 없다. `shared/src/errors.ts`에 두었고 팀 확인 후 정의서에 올린다.
@@ -103,7 +112,7 @@
 | VOC-006 | 이 후보는 아직 허가할 수 없어요 (모자란 칸은 문구에 담는다) | 400 |
 | VOC-007 | 허가 또는 제외하지 않은 후보가 남아 있어요 | 409 |
 
-VOC-003·004는 확인·등록에서 문구를 바꿔 쓴다(`회의록 작성자만 후보를 확인하고 등록할 수 있어요`, `검토 대기 상태의 회의록만 …`).
+VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회의록 작성자만 후보를 확인하고 등록할 수 있어요`, `검토 대기 상태의 회의록만 …`).
 
 입력 형식 오류(빈 제목·기록, 참석자 없음, 길이 초과, 없는 날짜)는 `COM-004`(400).
 
@@ -114,3 +123,5 @@ VOC-003·004는 확인·등록에서 문구를 바꿔 쓴다(`회의록 작성�
 `meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 4만 자 초과 400, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `llm/llm.client.spec.ts`.
 
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
+
+`meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정.

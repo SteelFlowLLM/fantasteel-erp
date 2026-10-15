@@ -15,6 +15,7 @@ import {
   type MeetingMinutesStatus,
   type MeetingMinutesView,
   type Role,
+  type TranscriptSegment,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
@@ -23,10 +24,11 @@ import { NotificationService } from '../notification/notification.service';
 import { TaskService } from '../notification/task.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
-import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
-import { readAnalysis, readSegments } from './meeting-minutes.json';
+import { isMeetingAudio } from './meeting-audio';
+import { readAnalysis, readSegments, summarizeSpeakers } from './meeting-minutes.json';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 
@@ -39,10 +41,6 @@ export interface UploadedMeetingAudio {
   buffer: Buffer;
 }
 
-/** 브라우저 녹음은 video/webm으로 오는 경우가 있다 */
-function isAudio(mimeType: string): boolean {
-  return mimeType.startsWith('audio/') || mimeType === 'video/webm';
-}
 
 /** multer는 파일 이름을 latin1로 읽어서 한글이 깨진다 */
 function decodeFileName(name: string): string {
@@ -113,6 +111,7 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
     meetingMinutesStatus: row.meetingMinutesStatus as MeetingMinutesStatus,
     transcript: row.transcript,
     transcriptSegments: readSegments(row.transcriptSegments),
+    speakers: summarizeSpeakers(readSegments(row.transcriptSegments)),
     summary: row.summary,
     analysisResult: readAnalysis(row.analysisResult),
     failureReason: row.failureReason,
@@ -163,13 +162,15 @@ export class MeetingMinutesService {
    */
   async createFromAudio(user: AuthUser, dto: CreateMeetingMinutesAudioDto, file: UploadedMeetingAudio | undefined): Promise<MeetingMinutesView> {
     if (!file) throw new AppException('COM-004', '음성 파일을 골라 주세요 (file 필드)');
-    if (!isAudio(file.mimetype)) throw new AppException('COM-004', '오디오 파일만 올릴 수 있어요');
+    const fileName = decodeFileName(file.originalname);
+    if (!isMeetingAudio(file.mimetype, fileName)) throw new AppException('COM-004', '오디오 파일만 올릴 수 있어요');
+    const attendeeIds = parseAttendeeIds(dto.attendeeIds);
     const id = await this.createRecord(
       user,
-      { meetingMinutesTitle: dto.meetingMinutesTitle, meetingDate: dto.meetingDate, attendeeIds: parseAttendeeIds(dto.attendeeIds) },
+      { meetingMinutesTitle: dto.meetingMinutesTitle, meetingDate: dto.meetingDate, attendeeIds },
       { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING, transcript: null, transcriptSegments: Prisma.DbNull },
     );
-    void this.runner.enqueue({ meetingMinutesId: id, audio: file.buffer, fileName: decodeFileName(file.originalname), mimeType: file.mimetype });
+    void this.runner.enqueue({ meetingMinutesId: id, audio: file.buffer, fileName, mimeType: file.mimetype || 'application/octet-stream', speakerCount: new Set(attendeeIds).size });
     return this.get(id);
   }
 
@@ -208,6 +209,44 @@ export class MeetingMinutesService {
     const { count } = await this.repository.startAnalysis(this.prisma, id);
     if (count === 0) throw new AppException('VOC-004');
     void this.analysisRunner.enqueue({ meetingMinutesId: id });
+    return this.get(id);
+  }
+
+  /**
+   * 화자 이름표(SPEAKER_n)를 회의 참석자에게 연결한다 (Voice2ERP 묶음 1). 연결은 각 구간에 speakerEmployeeId·speakerName으로 적어 두므로
+   * 이름표 → 사원 표는 구간에서 다시 만들 수 있다. 보내지 않은 이름표는 그대로 두고, 값이 null이면 '모름'으로 되돌린다.
+   * AI 정리 전에 하는 것이 목적이라 TRANSCRIBED·REVIEW·전사가 남은 FAILED에서 할 수 있다 (정리를 다시 해야 이름이 반영된다).
+   */
+  async updateSpeakers(user: AuthUser, id: number, dto: UpdateMeetingSpeakersDto): Promise<MeetingMinutesView> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    if (row.creator.id !== user.employeeId) throw new AppException('VOC-003', '회의록 작성자만 화자를 연결할 수 있어요');
+    const segments = readSegments(row.transcriptSegments);
+    const allowed: string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
+    if (!allowed.includes(row.meetingMinutesStatus) || row.transcript === null) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
+
+    const labels = new Set(segments.flatMap((s) => (s.speaker ? [s.speaker] : [])));
+    const entries = Object.entries(dto.mapping);
+    if (entries.some(([, employeeId]) => employeeId !== null && !Number.isInteger(employeeId))) throw new AppException('COM-004', '화자에 연결할 사원 id가 올바르지 않아요');
+    const unknown = entries.filter(([label]) => !labels.has(label)).map(([label]) => label);
+    if (unknown.length > 0) throw new AppException('COM-004', `이 회의록에 없는 화자예요 (${unknown.join(', ')})`);
+    const attendeeNames = new Map(row.attendees.map((a) => [a.employeeId, a.employee.employeeName]));
+    for (const [label, employeeId] of entries) {
+      if (employeeId !== null && !attendeeNames.has(employeeId)) throw new AppException('VOC-002', `${label}에 고른 사원은 이 회의의 참석자가 아니에요 (사원 id ${employeeId})`);
+    }
+
+    const mapping = new Map(entries);
+    const updated: TranscriptSegment[] = segments.map((s) => {
+      if (!s.speaker || !mapping.has(s.speaker)) return s;
+      const employeeId = mapping.get(s.speaker) ?? null;
+      return { ...s, speakerEmployeeId: employeeId, speakerName: employeeId === null ? null : (attendeeNames.get(employeeId) ?? null) };
+    });
+    const { count } = await this.repository.saveSegments(this.prisma, id, row.updatedAt, updated as unknown as Prisma.InputJsonArray);
+    if (count === 0) {
+      const current = await this.repository.findDetail(this.prisma, id);
+      if (current && !allowed.includes(current.meetingMinutesStatus)) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
+      throw new AppException('COM-001', '그 사이 다른 곳에서 회의록을 고쳤어요. 새로 불러와 주세요');
+    }
     return this.get(id);
   }
 

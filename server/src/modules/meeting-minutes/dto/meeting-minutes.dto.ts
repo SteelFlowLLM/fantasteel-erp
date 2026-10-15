@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -136,4 +136,10 @@ export class UpdateMeetingSummaryDto {
     message: `요약은 ${MEETING_SUMMARY_MAX}자까지 쓸 수 있어요`,
   })
   summary!: string;
+}
+
+/** PATCH meeting-minutes/:id/speakers. 값(사원 id 또는 null)의 모양은 service가 본다: 키가 임의라 class-validator로 표현하기 어렵다 */
+export class UpdateMeetingSpeakersDto {
+  @IsObject({ message: '화자 연결 정보가 올바르지 않아요' })
+  mapping!: Record<string, number | null>;
 }

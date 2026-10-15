@@ -13,14 +13,20 @@ import { Icon } from '@/components/Icon';
 import { KvList } from '@/components/KvList';
 import { PageHead } from '@/components/Page';
 import { EmptyNote, StateView } from '@/components/StateView';
+import { MeetingSpeakerCard } from '@/features/meetings/components/MeetingSpeakerCard';
 import { MeetingAnalysisPanel } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { MeetingStatusBadge } from '@/features/meetings/components/MeetingStatusBadge';
 import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
+import { useMe } from '@/hooks/useMe';
+import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
 import { fmtClock } from '@/lib/meetingAudio';
+import { SPEAKER_TONE_CLASSES, canLinkSpeakers, speakerBadge, speakerOrder } from '@/lib/meetingSpeakers';
 
 function Body({ minutes }: { minutes: MeetingMinutesView }) {
+  const me = useMe();
   const [highlighted, setHighlighted] = useState<number | null>(null);
+  const order = speakerOrder(minutes.transcriptSegments);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -98,7 +104,8 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
           {minutes.transcriptSegments.length === 0 ? (
             <EmptyNote>{minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.TRANSCRIBING ? '글로 바꾸는 중이에요' : '전사된 발언이 없어요'}</EmptyNote>
           ) : (
-            <ol className="flex flex-col py-1.5">
+            // 긴 회의(수백 발언)가 화자 연결·AI 분석 카드를 화면 아래로 밀어내지 않게 전사는 안에서 스크롤한다
+            <ol className="flex max-h-[60vh] flex-col overflow-y-auto py-1.5">
               {minutes.transcriptSegments.map((segment, index) => (
                 <li
                   key={index}
@@ -108,6 +115,10 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
                   <span className="text-right font-mono text-cap text-ink-3">{index + 1}</span>
                   <span className="break-words whitespace-pre-wrap">
                     {segment.start !== null ? <span className="mr-1.5 font-mono text-cap text-ink-3 tabular-nums">[{fmtClock(segment.start)}]</span> : null}
+                    {(() => {
+                      const badge = speakerBadge(segment, order);
+                      return badge ? <span className={cn('mr-1.5 inline-flex h-5 items-center rounded-xs px-1.5 align-middle text-cap font-semibold', SPEAKER_TONE_CLASSES[badge.toneIndex])}>{badge.text}</span> : null;
+                    })()}
                     {segment.text}
                   </span>
                 </li>
@@ -115,7 +126,10 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
             </ol>
           )}
         </Card>
-        <MeetingAnalysisPanel minutes={minutes} onJump={jumpToSegment} />
+        <div className="flex min-w-0 flex-col gap-3.5">
+          {canLinkSpeakers(minutes, me.employeeId) ? <MeetingSpeakerCard key={minutes.updatedAt} minutes={minutes} /> : null}
+          <MeetingAnalysisPanel minutes={minutes} onJump={jumpToSegment} />
+        </div>
       </div>
     </>
   );

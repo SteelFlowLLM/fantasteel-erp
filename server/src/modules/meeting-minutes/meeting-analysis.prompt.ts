@@ -1,3 +1,5 @@
+import type { TranscriptSegment } from '@fantasteel/shared';
+
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
 
 /** 'YYYY-MM-DD' → '2026-10-15 (목요일)' */
@@ -21,10 +23,21 @@ export const ANALYSIS_SYSTEM_PROMPT = `당신은 철강 제조사 ERP의 회의�
 - 모든 항목은 근거가 된 발언 번호를 evidence에 담습니다. 번호는 전사 앞의 [번호]입니다. 근거를 댈 수 없으면 그 항목을 만들지 마세요.
 - 이름·날짜·수량을 지어내지 마세요. 말하지 않았거나 분명하지 않으면 null로 둡니다.
 - assigneeName은 사람 이름이 말로 나오거나, 그 일을 하겠다고 한 화자가 "이름:" 머리말로 분명할 때만 적습니다. 직급은 빼고 이름만 적습니다.
+- "화자1:"처럼 번호만 있는 머리말은 누구인지 모르는 화자라는 표시일 뿐 사람 이름이 아닙니다. 이름으로 적지 마세요.
 - "다음 주 화요일" 같은 상대 날짜는 아래 회의일(요일 포함, Asia/Seoul)을 기준으로 계산합니다. 날짜는 YYYY-MM-DD, 시각은 YYYY-MM-DDTHH:mm(현지 시각) 형식입니다. 계산이 불확실하면 null.
 - sourceText에는 날짜·시각을 말한 원래 표현을 전사에서 그대로 옮겨 적습니다. 없으면 null.
 - relatedSalesOrderNo는 전사에 SO-로 시작하는 수주번호가 나올 때 그대로 적습니다.
 - 해당하지 않는 항목은 null 또는 빈 배열로 둡니다.`;
+
+/** 전사 구간 하나를 모델에 보여 줄 글로. 사원이 연결됐으면 "이름: 글", 이름표만 있으면 "화자1: 글", 화자가 없으면 글 그대로 */
+export function segmentPromptText(segment: TranscriptSegment): string {
+  if (segment.speakerName) return `${segment.speakerName}: ${segment.text}`;
+  if (segment.speaker) {
+    const number = /^SPEAKER_(\d+)$/.exec(segment.speaker)?.[1];
+    return `${number ? `화자${number}` : segment.speaker}: ${segment.text}`;
+  }
+  return segment.text;
+}
 
 /** 사용자 메시지: 회의일·참석자·번호 붙은 전사. 전사 번호는 화면과 같이 1부터 센다 */
 export function buildAnalysisUserMessage(input: { meetingDate: string; attendees: { employeeName: string; departmentName: string; roleLabel: string }[]; segments: string[] }): string {

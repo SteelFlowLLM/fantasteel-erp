@@ -4,7 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage } from './meeting-analysis.prompt';
+import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, segmentPromptText } from './meeting-analysis.prompt';
 import { collectSalesOrderNos, validateAnalysis } from './meeting-analysis.validator';
 import { readSegments } from './meeting-minutes.json';
 import { MeetingMinutesRepository } from './meeting-minutes.repository';
@@ -85,7 +85,8 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     const settings = await this.llmSettings.read();
     if (!settings.model) throw new LlmRequestError(NO_MODEL_REASON);
 
-    const segments = readSegments(row.transcriptSegments).map((s) => s.text);
+    const transcriptSegments = readSegments(row.transcriptSegments);
+    const segments = transcriptSegments.map((s) => s.text);
     const meetingDate = row.meetingDate.toISOString().slice(0, 10);
     const attendees = row.attendees.map((a) => ({
       employeeId: a.employeeId,
@@ -98,7 +99,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
       settings.model,
       [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
-        { role: 'user', content: buildAnalysisUserMessage({ meetingDate, attendees, segments }) },
+        { role: 'user', content: buildAnalysisUserMessage({ meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) }) },
       ],
       ANALYSIS_JSON_SCHEMA,
       { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS },

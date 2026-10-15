@@ -18,8 +18,8 @@ describe('parseTranscript', () => {
     expect(result).toEqual({
       text: '안녕하세요 방문합시다',
       segments: [
-        { start: 0, end: 2.4, text: '안녕하세요' },
-        { start: 3, end: 12.5, text: '방문합시다' },
+        { start: 0, end: 2.4, text: '안녕하세요', speaker: null },
+        { start: 3, end: 12.5, text: '방문합시다', speaker: null },
       ],
       durationSec: 12.5,
     });
@@ -32,12 +32,25 @@ describe('parseTranscript', () => {
       text: '네',
       segments: [{ id: 0, seek: 0, start: 0.5, end: 1.5, text: '네', tokens: [1, 2], temperature: 0, avg_logprob: -0.1, no_speech_prob: 0.01 }],
     });
-    expect(result.segments).toEqual([{ start: 0.5, end: 1.5, text: '네' }]);
+    expect(result.segments).toEqual([{ start: 0.5, end: 1.5, text: '네', speaker: null }]);
     expect(result.durationSec).toBe(1.5);
   });
 
   it('단순 json: 구간 하나(시간 없음)로 만든다', () => {
-    expect(parseTranscript({ text: ' 안녕 ' })).toEqual({ text: '안녕', segments: [{ start: null, end: null, text: '안녕' }], durationSec: null });
+    expect(parseTranscript({ text: ' 안녕 ' })).toEqual({ text: '안녕', segments: [{ start: null, end: null, text: '안녕', speaker: null }], durationSec: null });
+  });
+
+  it('화자 분리 서버(사이드카): speaker 문자열은 남기고 비었거나 문자열이 아니면 null', () => {
+    const result = parseTranscript({
+      text: '네 알겠습니다',
+      duration: 6,
+      segments: [
+        { start: 0, end: 2, text: '네', speaker: 'SPEAKER_1' },
+        { start: 2, end: 4, text: '알겠습니다', speaker: ' ' },
+        { start: 4, end: 6, text: '좋아요', speaker: 3 },
+      ],
+    });
+    expect(result.segments.map((s) => s.speaker)).toEqual(['SPEAKER_1', null, null]);
   });
 
   it('빈 응답: 글도 구간도 없다', () => {
@@ -92,6 +105,15 @@ describe('SttClient.transcribe', () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect((init.body as FormData).get('model')).toBe('whisper-1');
     expect(init.headers).toEqual({});
+  });
+
+  it('화자 수는 화자 분리 서버 모델일 때만 보낸다 (OpenAI는 모르는 칸을 거절할 수 있다)', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ text: '' }), { status: 200 }));
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote', speakerCount: 6 });
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', speakerCount: 6 });
+    const bodyOf = (call: number) => (fetchMock.mock.calls[call][1] as RequestInit).body as FormData;
+    expect(bodyOf(0).get('num_speakers')).toBe('6');
+    expect(bodyOf(1).get('num_speakers')).toBeNull();
   });
 
   it('401은 API 키 안내, 네트워크 실패는 서버 켜짐 안내', async () => {

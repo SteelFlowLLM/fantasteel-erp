@@ -15,6 +15,7 @@ const view: MeetingMinutesView = {
   meetingMinutesStatus: 'TRANSCRIBED',
   transcript: '김영업: 방문합시다',
   transcriptSegments: [{ start: null, end: null, text: '김영업: 방문합시다' }],
+  speakers: [],
   summary: null,
   analysisResult: null,
   failureReason: null,
@@ -90,6 +91,21 @@ describe('회의록 서버 모드 (api/server/meetingMinutes.ts)', () => {
 });
 
 describe('회의록 AI 정리 (API-260)', () => {
+  it('화자 연결: 이름표 → 사원 id(모름은 null)를 PATCH speakers로 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'PATCH' && c.path === '/meeting-minutes/3/speakers' ? ok(view) : undefined));
+    await meetingMinutesApi.updateSpeakers(3, { mapping: { SPEAKER_1: 5, SPEAKER_2: null } });
+    expect(calls[0].body).toEqual({ mapping: { SPEAKER_1: 5, SPEAKER_2: null } });
+  });
+
+  it('음성 올리기: 500MB를 넘으면 서버를 부르기 전에 입력칸 오류', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, () => undefined);
+    const big = new File(['x'], '큰.wav', { type: 'audio/wav' });
+    Object.defineProperty(big, 'size', { value: 500 * 1024 * 1024 + 1 });
+    const error = await meetingMinutesAudioApi.create({ meetingMinutesTitle: '회의', meetingDate: '2026-10-15', attendeeIds: [5], file: big }).catch((e: unknown) => e);
+    expect((error as InputError).fieldErrors).toEqual({ file: '음성 파일은 500MB까지 올릴 수 있어요' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('작성자가 POST analyze를 부르면 분석 중 상세가 돌아온다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes/3/analyze' ? ok({ ...view, meetingMinutesStatus: 'ANALYZING' }) : undefined));
     const started = await meetingMinutesApi.analyze(3);

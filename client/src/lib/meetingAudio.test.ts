@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { audioFileProblem, fmtClock, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem, fmtClock, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
 
 describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
   it('녹음 형식: webm/opus 먼저, 없으면 mp4, 둘 다 없으면 기본값', () => {
@@ -20,12 +20,22 @@ describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
     expect(recordingFileName('audio/mp4')).toBe('회의-녹음.m4a');
   });
 
-  it('올릴 파일: 오디오·video/webm만, 비었거나 100MB를 넘으면 거절', () => {
+  it('올릴 파일: 오디오·video/webm만, 비었거나 500MB를 넘으면 거절', () => {
     expect(audioFileProblem({ type: 'audio/mpeg', size: 1000 })).toBeNull();
     expect(audioFileProblem({ type: 'video/webm', size: 1000 })).toBeNull();
     expect(audioFileProblem({ type: 'image/png', size: 1000 })).toBe('오디오 파일만 올릴 수 있어요');
     expect(audioFileProblem({ type: 'audio/wav', size: 0 })).toBe('음성이 비어 있어요');
-    expect(audioFileProblem({ type: 'audio/wav', size: 100 * 1024 * 1024 + 1 })).toContain('100.0 MB');
+    expect(audioFileProblem({ type: 'audio/wav', size: 500 * 1024 * 1024 + 1 })).toContain('500.0 MB');
+    expect(audioFileProblem({ type: 'audio/wav', size: 500 * 1024 * 1024 })).toBeNull();
+  });
+
+  it('올릴 파일: MIME이 비었거나 octet-stream이면 확장자로 알아본다', () => {
+    expect(audioFileProblem({ type: '', size: 1000, name: '회의.m4a' })).toBeNull();
+    expect(audioFileProblem({ type: 'application/octet-stream', size: 1000, name: '회의.FLAC' })).toBeNull();
+    expect(audioFileProblem({ type: 'application/octet-stream', size: 1000, name: '문서.pdf' })).toBe('오디오 파일만 올릴 수 있어요');
+    expect(audioFileProblem({ type: 'text/plain', size: 1000, name: 'a.mp3' })).toBe('오디오 파일만 올릴 수 있어요');
+    expect(MEETING_AUDIO_ACCEPT).toContain('.m4a');
+    expect(MEETING_AUDIO_ACCEPT).toContain('audio/*');
   });
 
   it('마이크 오류 안내', () => {

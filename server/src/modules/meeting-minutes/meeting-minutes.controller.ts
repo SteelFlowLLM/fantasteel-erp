@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Quer
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
 
 /**
@@ -49,6 +49,12 @@ export class MeetingMinutesController {
   @Patch(':id/summary')
   updateSummary(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateMeetingSummaryDto): Promise<MeetingMinutesView> {
     return this.service.updateSummary(user, id, dto);
+  }
+
+  /** 화자 이름표를 회의 참석자에게 연결한다 (Voice2ERP 묶음 1). 작성자만 */
+  @Patch(':id/speakers')
+  updateSpeakers(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateMeetingSpeakersDto): Promise<MeetingMinutesView> {
+    return this.service.updateSpeakers(user, id, dto);
   }
 
   /** API-261. 허가한 후보를 등록하고 회의록을 확정한다 */
