@@ -4578,7 +4578,7 @@
       if (!chat.chips) return;
       chat.chips.textContent = '';
       if (label) chat.chips.append(h('span', { class: 'fp-chips-label', text: label }));
-      for (const f of list) chat.chips.append(h('button', { type: 'button', class: 'fp-chip', text: f.q, title: f.q, onclick: () => ask(f.q) }));
+      for (const f of list) chat.chips.append(h('button', { type: 'button', class: 'fp-chip', text: f.q, title: f.q, onclick: () => ask(f.q, true) }));
     }
     function addMsg(who, text, extra) {
       const m = h('div', { class: `fp-msg fp-msg--${who}` }, who === 'pet' ? fill(text) : text);
@@ -4643,7 +4643,8 @@
       chat.log.scrollTop = chat.log.scrollHeight;
       renderChips(defaultChips());
     }
-    async function ask(q) {
+    /** fromChip: 펫이 내놓은 질문 칩. 펫이 답을 알고 내놓은 질문이라 AI 연결(ON)이어도 정해진 답변으로 바로 답한다 */
+    async function ask(q, fromChip = false) {
       if (!chat.el || chat.busy) return;
       const text = String(q || '').trim();
       if (!text) return;
@@ -4653,7 +4654,7 @@
       typing.classList.add('fp-msg--typing');
       if (S.mode === 'ground' && S.base === 'idle') player.set('think', true);
       const ans = answerFor(text);
-      if (aiOn() && !ans.sure) {
+      if (aiOn() && !ans.sure && !fromChip) {
         await askAi(text, typing);
         return;
       }
