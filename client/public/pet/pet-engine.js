@@ -4195,7 +4195,8 @@
       for (const f of guide.faq) {
         let score = 0;
         const q = norm(f.q);
-        if (q === n) score += 100;
+        // match(정규식)는 문장이 달라도 같은 질문으로 본다: FAQ 문장과 똑같이 물은 것처럼 확실한 답이 된다
+        if (q === n || (f.match instanceof RegExp && f.match.test(String(input)))) score += 100;
         else if (n.length >= 2 && q.includes(n)) score += 3;
         for (const k of arr(f.keywords)) {
           const nk = norm(k);
@@ -4421,7 +4422,8 @@
       const code = codeIn(String(input || '').toUpperCase());
       if (code) {
         const el = findItemByCode(code);
-        if (el) return { item: el, code, sure: true };
+        // 'SO-2610-004 담당 누구야?'처럼 사람을 물으면 화면 행에는 담당 칸이 없을 수 있어 AI 연결(ON)이면 AI가 조회해 답하게 한다
+        if (el) return { item: el, code, sure: !/(누구|누가|담당|요청자|승인자|이름)/.test(String(input || '')) };
       }
       const q = String(input || '');
       const here = HERE_RE.test(q);
