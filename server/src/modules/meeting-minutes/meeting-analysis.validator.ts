@@ -39,16 +39,16 @@ const KINDS: readonly MeetingCandidateKind[] = ['TASK', 'EVENT', 'PURCHASE'];
 const TITLE_MAX = 200;
 const TEXT_MAX = 1000;
 const SUMMARY_MAX = 3000;
-const LIST_MAX = 30;
+export const LIST_MAX = 30;
 const RANGE_DAYS = 365;
 const DAY_MS = 86_400_000;
 const SALES_ORDER_NO = /^SO-\d{4,8}-\d{3,}$/;
 
-type Json = Record<string, unknown>;
+export type Json = Record<string, unknown>;
 
-const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
+export const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-function text(v: unknown, max: number): string | null {
+export function text(v: unknown, max: number): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
   return t === '' ? null : t.slice(0, max);
@@ -146,7 +146,7 @@ export function quantityOf(v: unknown): string | null {
   return Number(fixed) > 0 ? fixed : null;
 }
 
-const squash = (s: string) => s.replace(/\s+/g, '');
+export const squash = (s: string) => s.replace(/\s+/g, '');
 
 /** 수주번호 후보를 모아 DB에서 확인할 수 있게 한다 */
 export function collectSalesOrderNos(raw: unknown): string[] {
@@ -159,7 +159,8 @@ export function collectSalesOrderNos(raw: unknown): string[] {
   return [...nos];
 }
 
-function toCandidate(item: Json, ctx: AnalysisContext): Omit<MeetingCandidate, 'key'> | null {
+/** 모델이 낸 항목 하나를 검증해 후보로 (키는 부르는 쪽이 붙인다). 근거가 없거나 모양이 틀리면 null */
+export function toCandidate(item: Json, ctx: AnalysisContext): Omit<MeetingCandidate, 'key'> | null {
   const kind = KINDS.find((k) => k === item.kind);
   const title = text(item.title, TITLE_MAX);
   const evidence = evidenceOf(item.evidence, ctx.segments.length);
@@ -242,6 +243,7 @@ function toCandidate(item: Json, ctx: AnalysisContext): Omit<MeetingCandidate, '
     relatedSalesOrderNo: salesOrderId === null ? null : orderNo,
     salesOrderId,
     issues,
+    context: [],
     decision: 'PENDING',
   };
 }

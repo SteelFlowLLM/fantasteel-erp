@@ -1,11 +1,13 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type Role } from '@fantasteel/shared';
+import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type MeetingCandidate, type MeetingReviewResult, type Role } from '@fantasteel/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, segmentPromptText } from './meeting-analysis.prompt';
-import { collectSalesOrderNos, validateAnalysis } from './meeting-analysis.validator';
+import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, buildReviewUserMessage, REVIEW_JSON_SCHEMA, REVIEW_SYSTEM_PROMPT, segmentPromptText, type ReviewCandidateLine } from './meeting-analysis.prompt';
+import { collectSalesOrderNos, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
+import { MeetingCandidateContextService } from './meeting-candidate.context';
+import { mergeReview, reviewItemsOf } from './meeting-review';
 import { readSegments } from './meeting-minutes.json';
 import { MeetingMinutesRepository } from './meeting-minutes.repository';
 
@@ -16,6 +18,7 @@ const BAD_SHAPE_REASON = 'AI 응답 형식이 올바르지 않아요';
 /** 로컬 모델이 긴 전사를 읽고 쓰는 시간을 넉넉히 준다 */
 const ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const ANALYSIS_MAX_TOKENS = 8000;
+const REVIEW_ERROR_REASON = 'AI 2차 검토 중 오류가 났어요';
 
 export interface AnalysisJob {
   meetingMinutesId: number;
@@ -36,6 +39,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     private readonly repository: MeetingMinutesRepository,
     private readonly llmClient: LlmClient,
     private readonly llmSettings: LlmSettingsStore,
+    private readonly contexts: MeetingCandidateContextService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -94,31 +98,76 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
       departmentName: a.employee.department.departmentName,
       roleLabel: ROLE_LABEL[a.employee.role.roleCode as Role] ?? a.employee.role.roleCode,
     }));
+    const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    const promptInput = { meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) };
+    const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS };
     const raw = await this.llmClient.chatJson(
-      { baseUrl: settings.baseUrl, apiKey: settings.apiKey },
+      endpoint,
       settings.model,
       [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
-        { role: 'user', content: buildAnalysisUserMessage({ meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) }) },
+        { role: 'user', content: buildAnalysisUserMessage(promptInput) },
       ],
       ANALYSIS_JSON_SCHEMA,
-      { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS },
+      options,
     );
 
-    const orderNos = collectSalesOrderNos(raw);
-    const [rawMaterials, orders] = await Promise.all([
-      this.repository.findRawMaterials(this.prisma),
-      orderNos.length > 0 ? this.repository.findSalesOrdersByNo(this.prisma, orderNos) : Promise.resolve([]),
-    ]);
-    const validated = validateAnalysis(raw, {
+    const rawMaterials = await this.repository.findRawMaterials(this.prisma);
+    const ctx: Omit<AnalysisContext, 'salesOrders'> = {
       meetingDate,
       segments,
       attendees,
       rawMaterials: rawMaterials.map((i) => ({ itemId: i.id, itemName: i.itemName, itemCode: i.itemCode })),
-      salesOrders: new Map(orders.map((o) => [o.salesOrderNo, o.id])),
-    });
+    };
+    const validated = validateAnalysis(raw, { ...ctx, salesOrders: await this.salesOrdersIn(raw) });
     if (!validated) throw new LlmRequestError(BAD_SHAPE_REASON);
-    return { ...validated, model: settings.model, analyzedAt: new Date().toISOString() };
+
+    // 2차 검토는 덤이다: 실패해도 1차 결과를 그대로 낸다
+    const reviewed = await this.review(endpoint, settings.model, promptInput, validated.candidates, ctx);
+    const candidates = await this.withContext(reviewed.candidates);
+    return { ...validated, candidates, review: reviewed.review, model: settings.model, analyzedAt: new Date().toISOString() };
+  }
+
+  private async salesOrdersIn(raw: unknown): Promise<Map<string, number>> {
+    const orderNos = collectSalesOrderNos(raw);
+    const orders = orderNos.length > 0 ? await this.repository.findSalesOrdersByNo(this.prisma, orderNos) : [];
+    return new Map(orders.map((o) => [o.salesOrderNo, o.id]));
+  }
+
+  /** 두 번째 LLM 호출: 1차 후보와 전사를 다시 맞춰 빠진 것·의심스러운 것을 찾는다. 어떤 실패도 던지지 않고 review.ok=false로 남긴다 */
+  private async review(
+    endpoint: { baseUrl: string; apiKey: string | null },
+    model: string,
+    promptInput: Parameters<typeof buildAnalysisUserMessage>[0],
+    first: MeetingCandidate[],
+    ctx: Omit<AnalysisContext, 'salesOrders'>,
+  ): Promise<{ candidates: MeetingCandidate[]; review: MeetingReviewResult }> {
+    try {
+      const raw = await this.llmClient.chatJson(
+        endpoint,
+        model,
+        [
+          { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+          { role: 'user', content: buildReviewUserMessage({ ...promptInput, candidates: first.map(reviewLine) }) },
+        ],
+        REVIEW_JSON_SCHEMA,
+        { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS },
+      );
+      return mergeReview(first, raw, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(raw)) });
+    } catch (error) {
+      this.logger.warn(`2차 검토 실패: ${error instanceof LlmRequestError ? error.message : error instanceof Error ? error.name : 'unknown'}`);
+      return { candidates: first, review: { ok: false, error: error instanceof LlmRequestError ? error.message : REVIEW_ERROR_REASON } };
+    }
+  }
+
+  /** ERP 현황은 덤이다: 읽기에 실패해도 후보는 현황 없이 낸다 */
+  private async withContext(candidates: MeetingCandidate[]): Promise<MeetingCandidate[]> {
+    try {
+      return await this.contexts.applyAll(this.prisma, candidates);
+    } catch (error) {
+      this.logger.warn(`후보 현황 계산 실패: ${error instanceof Error ? error.name : 'unknown'}`);
+      return candidates;
+    }
   }
 
   private async finish(id: number, data: Prisma.MeetingMinutesUncheckedUpdateManyInput): Promise<void> {
@@ -126,3 +175,12 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     if (count === 0) this.logger.warn(`회의록 ${id}는 더 이상 분석 중이 아니라 결과를 버렸어요`);
   }
 }
+
+const reviewLine = (c: MeetingCandidate): ReviewCandidateLine => ({
+  key: c.key,
+  kind: c.kind,
+  title: c.title,
+  assigneeName: c.assigneeName,
+  when: c.dueDate ?? c.startAt ?? c.purchase?.desiredReceiptDate ?? null,
+  evidence: c.evidence.map((i) => i + 1),
+});

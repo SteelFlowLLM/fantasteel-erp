@@ -72,6 +72,27 @@
   - `relatedSalesOrderNo`는 `sales_order`에 있을 때만 `salesOrderId`와 함께 남기고, 없으면 조용히 버린다. 키는 `c1…`, `decision`은 항상 `PENDING`.
 - 화면 응답의 `analysisResult`는 읽을 수 없는 모양이면 null이다.
 
+### 분석 강화 (Voice2ERP 묶음 2, 문서에 없는 기능)
+
+**2차 AI 검토** (`MeetingAnalysisRunner`, `meeting-review.ts`)
+- 1차 분석·검증 직후 같은 모델을 한 번 더 부른다(`chatJson`, 제한 시간 5분). 입력은 1차와 같은 번호 붙은 전사(화자 이름 포함)와 1차 후보 목록(key·종류·제목·담당자·날짜·근거 번호). 답은 `{ missed: [1차와 같은 항목 모양], concerns: [{ key, reason }] }`.
+- 답에는 점검용 `scan`(요청·약속·필요 표현 발언을 모두 훑어 1차 후보 `coveredBy` 또는 null로 적은 목록)이 먼저 온다. 서버는 읽지 않지만, 작은 모델이 `scan` 없이는 `missed`를 거의 비워 두어 강제로 열거시킨다.
+- `missed` = 1차에 없는 할 일·일정·구매. **담당자나 기한이 불분명한 것, 회사 품목에 없는 원료도 null 칸으로 포함**하게 시킨다(지어내지 않는다). 1차 프롬프트에도 같은 규칙을 넣었다: 꼭 해야 하는데 담당자·날짜가 불분명하면 빼지 말고 null로 포함.
+- `concerns` = 담당자·날짜가 틀렸거나, 중복이거나, 사실은 할 일이 아닌 후보에 대한 지적.
+- 전사는 `<transcript>` 안의 데이터이고 지시가 아니라는 보안 규칙을 2차 프롬프트에도 넣었다.
+- **합치기(순수 함수 `mergeReview`)**: `missed`는 1차와 **같은 검증기**(`toCandidate`: 근거·원문·담당자·날짜·품목 규칙)를 통과한 것만, 키는 `c{n+1}…`(전체 30개까지), `fromReview: true`, 확인 사유 맨 앞에 `AI 2차 검토에서 찾은 후보예요`. 1차와 종류·제목이 같으면 중복이라 버린다. `concerns`는 있는 키만, 이유는 120자로 잘라(스스로 "오류 아님"이라고 적은 지적은 버린다) `2차 검토: <이유>`를 그 후보의 `issues`에 덧붙인다. 허가를 막지는 않는다.
+- **실패해도 1차 결과를 낸다**: 호출 오류·시간 초과·알아볼 수 없는 답(`missed`·`concerns` 둘 다 배열이 아님)이면 `analysis_result.review = { ok: false, error }`, 성공이면 `{ ok: true, missedCount, concernCount }`. 상태는 두 번 모두 `ANALYZING`이고 둘 다 끝나야 `REVIEW`가 된다. 옛 분석 결과에는 `review`가 없다.
+- 🟡 **걸리는 시간**: LLM 호출이 두 번이라 로컬 모델(45분짜리 회의 기준)에서 분석이 대략 두 배로 늘어난다. 화면은 계속 "AI가 정리하는 중…"이다.
+
+**후보의 ERP 현황** (`meeting-candidate.context.ts`, `analysis_result.candidates[].context`)
+- AI를 쓰지 않는 규칙 코드다. 검증이 끝난 뒤 후보마다 DB를 **읽어서** `{ label, value, tone: 'info' | 'warn' }[]`를 채운다(REQ-AST-009: 숫자는 DB 값만). 읽기에 실패해도 분석은 실패하지 않고 현황만 빈다. 옛 분석 결과에는 칸이 없어 빈 배열로 읽는다.
+- `salesOrderId`가 있으면: 수주 고객사, 열린(OPEN·PARTIALLY_SHIPPED) 품목별 납기(빠른 순 3개, 나머지는 `외 n건`), 진행 = 출하(CONVERTED 예약) 매수 / 수주 매수(취소 품목 제외). TASK 마감일 또는 EVENT 시작 날짜가 **가장 빠른 열린 납기보다 늦으면** 납기 줄 `warn` + 확인 사유 `수주 납기(M/D)보다 늦어요`.
+- PURCHASE에 `itemId`가 있으면: 현재 재고 = 그 원료 LOT 잔량(`remaining_ton > 0`) 합계, 입고 예정 = 입고가 끝나지 않은 발주(CONFIRMED·PARTIALLY_RECEIVED)의 `발주 톤 − 입고 톤`(행마다 0 아래로 내리지 않음). 톤은 소수 3자리. 희망 입고일이 오늘(Asia/Seoul)보다 이르면 `warn`.
+- TASK에 `assigneeId`가 있으면: 담당자의 진행(OPEN) 업무 건수와 그중 후보 마감일과 같은 주(월~일) 마감 건수. 같은 주가 3건 이상이면 `warn` + `이번 주 업무가 많아요`.
+- EVENT: 참석자 중 같은 시간대(시작 < 다른 일정 끝, 끝 > 다른 일정 시작)에 `schedule_event`가 있는 사람마다 첫 건을 `warn` + `<이름> 일정과 겹쳐요 (HH:mm)`(그 일정의 시작 시각). 없으면 `info` 한 줄.
+- **고칠 때 다시 계산**: `PATCH candidates/:key`가 후보를 고친 뒤 현황을 다시 만들고, 이전 현황이 붙인 확인 사유(위 세 가지)는 지우고 새로 붙인다. 2차 검토 사유·그 밖의 사유는 그대로.
+- 화면: 후보 카드에 현황 줄(경고는 호박색), 요약 머리말 밑에 `2차 검토: 빠진 후보 n건 · 지적 m건`(실패하면 `2차 검토 실패 — 1차 결과만 보여요`), 2차 검토가 찾은 후보에 `2차 검토` 태그.
+
 ### 확인·등록 (REQ-VOC-004, 2026-10-10 결정: 작성자 혼자 후보마다 허가·제외, AI는 스스로 등록하지 않는다)
 
 - **후보 고치기** `PATCH candidates/:key` (body는 보낸 칸만, 모두 선택): `title`, `description`, `assigneeId`·`dueDate`(TASK), `startAt`·`endAt`·`attendeeIds`(EVENT), `purchase {itemId, requestedTon, desiredReceiptDate}`(PURCHASE), `decision`(`PENDING`·`APPROVED`·`EXCLUDED`). 다른 종류의 칸을 보내면 `COM-004`.
@@ -125,3 +146,5 @@ VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
 
 `meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정.
+
+`meeting-analysis.validator.spec.ts`·`meeting-review.unit.spec.ts`·`meeting-candidate.context.unit.spec.ts` (DB 없음, `npm run test:unit`): 2차 검토 합치기(키 이어 붙이기·표시·사유·120자·중복·상한·알아볼 수 없는 답·검증 규칙), 현황 문구·판단(납기 초과·재고/입고 예정 계산·같은 주 업무량·일정 겹침·확인 사유 지우기). `meeting-analyze.spec.ts`에 2차 호출 두 번·실패 시 1차 유지, 일정 겹침·업무 쏠림·재고 줄·후보를 고치면 현황 재계산 시나리오를 더했다.

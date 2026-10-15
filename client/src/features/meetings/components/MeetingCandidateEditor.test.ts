@@ -6,7 +6,7 @@ import { changesOf } from '@/features/meetings/components/MeetingCandidateEditor
 const base: MeetingCandidate = {
   key: 'c1', kind: 'EVENT', title: '방문', description: null, evidence: [0], sourceText: null, assigneeId: null, assigneeName: null, dueDate: null,
   startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00', endAssumed: true, attendeeIds: [1, 2], purchase: null, itemName: null,
-  relatedSalesOrderNo: null, salesOrderId: null, issues: ['끝 시각은 말이 없어 1시간으로 가정했어요'], decision: 'PENDING',
+  relatedSalesOrderNo: null, salesOrderId: null, issues: ['끝 시각은 말이 없어 1시간으로 가정했어요'], context: [], decision: 'PENDING',
 };
 
 const same = {

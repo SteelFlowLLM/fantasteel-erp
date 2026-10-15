@@ -4,6 +4,7 @@ import { MeetingMinutesRepository } from './meeting-minutes.repository';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { LlmModule } from '../llm/llm.module';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
+import { MeetingCandidateContextService } from './meeting-candidate.context';
 import { MessageActionModule } from '../message-action/message-action.module';
 import { NotificationModule } from '../notification/notification.module';
 import { SttModule } from '../stt/stt.module';
@@ -13,6 +14,6 @@ import { MeetingMinutesService } from './meeting-minutes.service';
 @Module({
   imports: [SttModule, LlmModule, NotificationModule, MessageActionModule],
   controllers: [MeetingMinutesController],
-  providers: [MeetingMinutesService, MeetingMinutesRepository, MeetingTranscriptionRunner, MeetingAnalysisRunner],
+  providers: [MeetingMinutesService, MeetingMinutesRepository, MeetingTranscriptionRunner, MeetingAnalysisRunner, MeetingCandidateContextService],
 })
 export class MeetingMinutesModule {}

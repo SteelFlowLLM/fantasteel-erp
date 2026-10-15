@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingCandidate, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -67,4 +67,16 @@ export function approvalBlocker(c: MeetingCandidate): string | null {
 export function registerPreview(candidates: readonly MeetingCandidate[]): { label: string; titles: string[] }[] {
   const lines = KIND_ORDER.map((kind) => ({ label: `${CANDIDATE_KIND_LABEL[kind]} ${candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').length}건`, titles: candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').map((c) => c.title) }));
   return lines.filter((line) => line.titles.length > 0);
+}
+
+/** 후보 옆 ERP 현황 줄. 현황을 계산하기 전의 옛 분석 결과에는 칸이 없어 빈 배열로 읽는다 */
+export function contextLinesOf(c: MeetingCandidate): MeetingCandidateContextLine[] {
+  const raw: unknown = c.context;
+  return Array.isArray(raw) ? raw.filter((l): l is MeetingCandidateContextLine => typeof l?.label === 'string' && typeof l?.value === 'string').map((l) => ({ ...l, tone: l.tone === 'warn' ? 'warn' : 'info' })) : [];
+}
+
+/** AI 요약 머리말 밑 한 줄. 2차 검토를 하지 않은 옛 분석 결과는 null(안 보인다) */
+export function reviewSummaryText(review: MeetingAnalysis['review']): string | null {
+  if (!review) return null;
+  return review.ok ? `2차 검토: 빠진 후보 ${review.missedCount}건 · 지적 ${review.concernCount}건` : '2차 검토 실패 — 1차 결과만 보여요';
 }

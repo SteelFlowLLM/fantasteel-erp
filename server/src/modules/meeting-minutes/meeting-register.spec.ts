@@ -56,6 +56,7 @@ const base = (key: string, kind: MeetingCandidate['kind'], overrides: Partial<Me
   relatedSalesOrderNo: null,
   salesOrderId: null,
   issues: [],
+  context: [],
   decision: 'PENDING',
   ...overrides,
 });

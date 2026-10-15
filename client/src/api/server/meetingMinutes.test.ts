@@ -120,7 +120,7 @@ describe('회의록 AI 정리 (API-260)', () => {
       candidates: [{
         key: 'c1', kind: 'EVENT', title: '동해철강 방문', description: null, evidence: [0], sourceText: '다음 주 화요일 2시', assigneeId: null, assigneeName: null, dueDate: null,
         startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00', endAssumed: true, attendeeIds: [5], purchase: null, itemName: null, relatedSalesOrderNo: null,
-        salesOrderId: null, issues: ['끝 시각은 말이 없어 1시간으로 가정했어요'], decision: 'PENDING',
+        salesOrderId: null, issues: ['끝 시각은 말이 없어 1시간으로 가정했어요'], context: [], decision: 'PENDING',
       }],
       model: 'm',
       analyzedAt: '2026-10-15T01:00:00.000Z',

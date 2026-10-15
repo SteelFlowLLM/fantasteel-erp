@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analyzeAvailability, approvalBlocker, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview } from '@/lib/meetingAnalysis';
+import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -23,7 +23,7 @@ const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
 
 const candidate = (kind: MeetingCandidate['kind'], key: string): MeetingCandidate => ({
   key, kind, title: key, description: null, evidence: [0], sourceText: null, assigneeId: null, assigneeName: null, dueDate: null, startAt: null, endAt: null,
-  endAssumed: false, attendeeIds: [], purchase: null, itemName: null, relatedSalesOrderNo: null, salesOrderId: null, issues: [], decision: 'PENDING',
+  endAssumed: false, attendeeIds: [], purchase: null, itemName: null, relatedSalesOrderNo: null, salesOrderId: null, issues: [], context: [], decision: 'PENDING',
 });
 
 describe('analyzeAvailability', () => {
@@ -81,5 +81,32 @@ describe('허가·제외 계산', () => {
       { label: '할 일 1건', titles: ['견적 정리'] },
       { label: '일정 1건', titles: ['방문'] },
     ]);
+  });
+});
+
+describe('contextLinesOf', () => {
+  it('서버가 준 현황 줄을 그대로 읽는다', () => {
+    const lines = [{ label: '현재 재고', value: '12.500 톤', tone: 'info' as const }, { label: '일정 겹침', value: '최준혁 · 14:30~15:30 회의', tone: 'warn' as const }];
+    expect(contextLinesOf({ ...candidate('PURCHASE', 'c1'), context: lines })).toEqual(lines);
+  });
+
+  it('옛 분석 결과(칸 없음)·모양이 틀린 값은 빈 배열이나 걸러낸 줄로 읽는다', () => {
+    const old = { ...candidate('TASK', 'c1') } as Partial<MeetingCandidate>;
+    delete old.context;
+    expect(contextLinesOf(old as MeetingCandidate)).toEqual([]);
+    expect(contextLinesOf({ ...candidate('TASK', 'c1'), context: 'x' as unknown as MeetingCandidate['context'] })).toEqual([]);
+    const messy = [null, { label: 1 }, { label: '업무', value: '3건', tone: 'bogus' }] as unknown as MeetingCandidate['context'];
+    expect(contextLinesOf({ ...candidate('TASK', 'c1'), context: messy })).toEqual([{ label: '업무', value: '3건', tone: 'info' }]);
+  });
+});
+
+describe('reviewSummaryText', () => {
+  it('성공하면 빠진 후보·지적 건수, 실패하면 1차 결과만 보인다고 알린다', () => {
+    expect(reviewSummaryText({ ok: true, missedCount: 2, concernCount: 0 })).toBe('2차 검토: 빠진 후보 2건 · 지적 0건');
+    expect(reviewSummaryText({ ok: false, error: '시간 초과' })).toBe('2차 검토 실패 — 1차 결과만 보여요');
+  });
+
+  it('2차 검토를 하지 않은 옛 결과는 아무것도 보이지 않는다', () => {
+    expect(reviewSummaryText(undefined)).toBeNull();
   });
 });

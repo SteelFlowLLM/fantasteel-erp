@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ITEM_TYPE, MEETING_MINUTES_STATUS } from '@fantasteel/shared';
-import type { Prisma } from '../../generated/prisma/client';
+import { ITEM_TYPE, LOT_TYPE, MEETING_MINUTES_STATUS, PURCHASE_ORDER_STATUS, RESERVATION_STATUS, SALES_ORDER_ITEM_STATUS, TASK_STATUS } from '@fantasteel/shared';
+import type { SalesOrderContextInput } from './meeting-candidate.context';
+import { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
 const listSelect = {
@@ -119,6 +120,69 @@ export class MeetingMinutesRepository {
     return tx.item.findMany({
       where: { id: { in: ids }, itemType: ITEM_TYPE.RAW_MATERIAL },
       select: { id: true },
+    });
+  }
+
+  /** 후보 옆 현황용(읽기): 수주 고객사와 품목별 납기·수주 매수·출하(CONVERTED 예약) 매수. 없으면 null */
+  async findSalesOrderContext(tx: Tx, salesOrderId: number): Promise<SalesOrderContextInput | null> {
+    const order = await tx.salesOrder.findUnique({
+      where: { id: salesOrderId },
+      select: {
+        customer: { select: { customerName: true } },
+        salesOrderItems: {
+          orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+          select: {
+            orderedQty: true,
+            dueDate: true,
+            salesOrderItemStatus: true,
+            item: { select: { itemName: true } },
+            reservations: { where: { reservationStatus: RESERVATION_STATUS.CONVERTED }, select: { reservedQty: true } },
+          },
+        },
+      },
+    });
+    if (!order) return null;
+    return {
+      customerName: order.customer.customerName,
+      items: order.salesOrderItems
+        .filter((i) => i.salesOrderItemStatus !== SALES_ORDER_ITEM_STATUS.CANCELLED)
+        .map((i) => ({
+          itemName: i.item.itemName,
+          orderedQty: i.orderedQty,
+          shippedQty: i.reservations.reduce((sum, r) => sum + r.reservedQty, 0),
+          dueDate: i.dueDate.toISOString().slice(0, 10),
+          open: i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.OPEN || i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED,
+        })),
+    };
+  }
+
+  /** 원료 재고 톤: 그 품목 LOT 잔량 합계 (읽기, 소수 3자리 문자열) */
+  async sumRawMaterialOnHandTon(tx: Tx, itemId: number): Promise<string> {
+    const sum = await tx.lot.aggregate({ where: { lotType: LOT_TYPE.RAW_MATERIAL, itemId, remainingTon: { gt: 0 } }, _sum: { remainingTon: true } });
+    return (sum._sum.remainingTon ?? new Prisma.Decimal(0)).toFixed(3);
+  }
+
+  /** 아직 입고가 끝나지 않은 발주의 품목 행: 발주 톤과 입고 톤들 (읽기) */
+  async findOpenPurchaseOrderItems(tx: Tx, itemId: number): Promise<{ orderedTon: string; receivedTons: string[] }[]> {
+    const rows = await tx.purchaseOrderItem.findMany({
+      where: { itemId, purchaseOrder: { purchaseOrderStatus: { in: [PURCHASE_ORDER_STATUS.CONFIRMED, PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED] } } },
+      select: { orderedTon: true, goodsReceipts: { select: { receivedTon: true } } },
+    });
+    return rows.map((r) => ({ orderedTon: r.orderedTon.toFixed(3), receivedTons: r.goodsReceipts.map((g) => g.receivedTon.toFixed(3)) }));
+  }
+
+  /** 담당자의 진행 중(OPEN) 업무 마감일들 (읽기) */
+  async findOpenTaskDueDates(tx: Tx, assigneeId: number): Promise<string[]> {
+    const rows = await tx.task.findMany({ where: { assigneeId, taskStatus: TASK_STATUS.OPEN }, select: { dueDate: true } });
+    return rows.map((r) => r.dueDate.toISOString().slice(0, 10));
+  }
+
+  /** 그 시간대와 겹치는 일정 중 참석자가 한 명이라도 있는 것 (읽기). 맞닿기만 한 일정은 겹치지 않는다 */
+  findOverlappingEvents(tx: Tx, employeeIds: number[], startAt: Date, endAt: Date) {
+    return tx.scheduleEvent.findMany({
+      where: { startAt: { lt: endAt }, endAt: { gt: startAt }, attendees: { some: { employeeId: { in: employeeIds } } } },
+      orderBy: { startAt: 'asc' },
+      select: { scheduleEventTitle: true, startAt: true, endAt: true, attendees: { select: { employeeId: true, employee: { select: { employeeName: true } } } } },
     });
   }
 

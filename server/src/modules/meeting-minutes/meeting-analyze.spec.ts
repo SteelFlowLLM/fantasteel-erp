@@ -31,7 +31,7 @@ async function login(employeeNo: string): Promise<string> {
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'POST', path: string, cookie: string, payload?: unknown) {
+async function call<T>(method: 'GET' | 'POST' | 'PATCH', path: string, cookie: string, payload?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: { cookie, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -56,7 +56,13 @@ beforeAll(async () => {
   headId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1702004' } })).id;
 }, 60_000);
 
+const createdTaskIds: number[] = [];
+const createdEventIds: number[] = [];
+
 afterAll(async () => {
+  await prisma?.scheduleEventAttendee.deleteMany({ where: { scheduleEventId: { in: createdEventIds } } });
+  await prisma?.scheduleEvent.deleteMany({ where: { id: { in: createdEventIds } } });
+  await prisma?.task.deleteMany({ where: { id: { in: createdTaskIds } } });
   await prisma?.meetingAttendee.deleteMany({ where: { meetingMinutesId: { gt: startId } } });
   await prisma?.meetingMinutes.deleteMany({ where: { id: { gt: startId } } });
   await app?.close();
@@ -227,5 +233,102 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
     expect(await runner.recoverInterrupted()).toBeGreaterThanOrEqual(1);
     expect(await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: stuck.id } })).toMatchObject({ meetingMinutesStatus: 'FAILED', failureReason: ANALYSIS_INTERRUPTED_REASON });
     expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: review.id } })).meetingMinutesStatus).toBe('REVIEW');
+  });
+  describe('2차 검토와 ERP 현황 (Voice2ERP 묶음 2)', () => {
+    const reviewAnswer = {
+      missed: [{ kind: 'TASK', title: '동해철강 방문 결과 보고', evidence: [1], assigneeName: null, dueDate: null }, { kind: 'TASK', title: '근거 없음', evidence: [] }],
+      concerns: [{ key: 'c1', reason: '시각이 오후 2시가 맞는지 확인이 필요해요' }, { key: 'c99', reason: '없는 후보' }],
+    };
+
+    it('1차 뒤에 2차 LLM 호출을 한 번 더 하고, 빠진 후보를 이어 붙이고 지적을 확인 사유로 남긴다', async () => {
+      llmClient.chatJson.mockResolvedValueOnce(modelAnswer).mockResolvedValueOnce(reviewAnswer);
+      const id = await newMinutes();
+      await call('POST', `/meeting-minutes/${id}/analyze`, purchaseCookie);
+      await runner.drain();
+
+      expect(llmClient.chatJson).toHaveBeenCalledTimes(2);
+      const reviewMessages = llmClient.chatJson.mock.calls[1][2] as { role: string; content: string }[];
+      expect(reviewMessages[1].content).toContain('<transcript>\n[1] 정다은:');
+      expect(reviewMessages[1].content).toContain('1차 후보 목록:\n- c1 [EVENT] 동해철강 방문');
+      const { body } = await call<MeetingMinutesView>('GET', `/meeting-minutes/${id}`, purchaseCookie);
+      const analysis = body.data.analysisResult;
+      expect(body.data.meetingMinutesStatus).toBe('REVIEW');
+      expect(analysis?.review).toEqual({ ok: true, missedCount: 1, concernCount: 1 });
+      expect(analysis?.candidates.map((c) => c.key)).toEqual(['c1', 'c2', 'c3', 'c4']);
+      expect(analysis?.candidates[0].issues).toContain('2차 검토: 시각이 오후 2시가 맞는지 확인이 필요해요');
+      expect(analysis?.candidates[3]).toMatchObject({ title: '동해철강 방문 결과 보고', fromReview: true, assigneeId: null, dueDate: null });
+      expect(analysis?.candidates[3].issues[0]).toBe('AI 2차 검토에서 찾은 후보예요');
+    });
+
+    it('2차 호출이 실패하거나 알아볼 수 없는 답을 주면 1차 결과를 그대로 두고 review를 실패로 남긴다', async () => {
+      llmClient.chatJson.mockResolvedValueOnce(modelAnswer).mockRejectedValueOnce(new LlmRequestError('AI 서버에 연결하지 못했어요'));
+      const id = await newMinutes();
+      await call('POST', `/meeting-minutes/${id}/analyze`, purchaseCookie);
+      await runner.drain();
+      let analysis = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${id}`, purchaseCookie)).body.data;
+      expect(analysis.meetingMinutesStatus).toBe('REVIEW');
+      expect(analysis.analysisResult?.review).toEqual({ ok: false, error: 'AI 서버에 연결하지 못했어요' });
+      expect(analysis.analysisResult?.candidates).toHaveLength(3);
+
+      llmClient.chatJson.mockResolvedValueOnce(modelAnswer).mockResolvedValueOnce('쓰레기');
+      await call('POST', `/meeting-minutes/${id}/analyze`, purchaseCookie);
+      await runner.drain();
+      analysis = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${id}`, purchaseCookie)).body.data;
+      expect(analysis.analysisResult?.review).toEqual({ ok: false, error: 'AI 2차 검토 응답 형식이 올바르지 않아요' });
+      expect(analysis.analysisResult?.candidates).toHaveLength(3);
+    });
+
+    it('후보마다 DB에서 읽은 현황이 붙고, 후보를 고치면 다시 계산한다', async () => {
+      const task = (dueDate: string) => prisma.task.create({ data: { taskTitle: '현황 시험', assigneeId: purchaseId, creatorId: headId, dueDate: new Date(`${dueDate}T00:00:00.000Z`) } });
+      for (const due of ['2026-10-19', '2026-10-21', '2026-10-23']) createdTaskIds.push((await task(due)).id);
+      const busy = await prisma.scheduleEvent.create({
+        data: {
+          scheduleEventTitle: '품질 회의',
+          startAt: new Date('2026-10-20T14:30:00+09:00'),
+          endAt: new Date('2026-10-20T15:30:00+09:00'),
+          creatorId: purchaseId,
+          attendees: { create: [{ employeeId: headId }] },
+        },
+      });
+      createdEventIds.push(busy.id);
+
+      llmClient.chatJson.mockResolvedValueOnce({
+        ...modelAnswer,
+        items: [
+          ...modelAnswer.items.slice(0, 2),
+          { kind: 'TASK', title: '출하 준비', evidence: [1], assigneeName: '정다은', dueDate: '2026-10-22' },
+          { kind: 'PURCHASE', title: '과거 입고', evidence: [2], itemName: '실리코망가니즈', quantityTon: 5, dueDate: '2026-10-05' },
+        ],
+      });
+      const id = await newMinutes({ meetingDate: '2026-10-01' });
+      await call('POST', `/meeting-minutes/${id}/analyze`, purchaseCookie);
+      await runner.drain();
+      const analysis = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${id}`, purchaseCookie)).body.data.analysisResult;
+      const [event, purchase, workTask, pastPurchase] = analysis?.candidates ?? [];
+
+      expect(event.context).toEqual([{ label: '일정 겹침', value: '최준혁 · 14:30~15:30 품질 회의', tone: 'warn' }]);
+      expect(event.issues).toContain('최준혁 일정과 겹쳐요 (14:30)');
+
+      const smn = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SMN01' } });
+      const onHand = await prisma.lot.aggregate({ where: { lotType: 'RAW_MATERIAL', itemId: smn.id, remainingTon: { gt: 0 } }, _sum: { remainingTon: true } });
+      expect(purchase.context.map((l) => l.label)).toEqual(['현재 재고', '입고 예정']);
+      expect(purchase.context[0].value).toBe(`${Number(onHand._sum.remainingTon ?? 0).toFixed(3)} 톤`);
+
+      const open = await prisma.task.count({ where: { assigneeId: purchaseId, taskStatus: 'OPEN' } });
+      const inWeek = (from: string, to: string) => prisma.task.count({ where: { assigneeId: purchaseId, taskStatus: 'OPEN', dueDate: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } } });
+      const thisWeek = await inWeek('2026-10-19', '2026-10-25');
+      expect(thisWeek).toBeGreaterThanOrEqual(3);
+      expect(workTask.context).toEqual([{ label: '담당자 업무', value: `진행 중 ${open}건 (그중 같은 주 마감 ${thisWeek}건)`, tone: 'warn' }]);
+      expect(workTask.issues).toContain('이번 주 업무가 많아요');
+      expect(pastPurchase.context.find((l) => l.label === '희망 입고일')).toMatchObject({ tone: 'warn' });
+
+      // 마감일을 다음 주로 옮기면 쏠림 경고가 사라진다
+      const edit = await call<MeetingMinutesView>('PATCH', `/meeting-minutes/${id}/candidates/${workTask.key}`, purchaseCookie, { dueDate: '2026-11-10' });
+      expect(edit.status).toBe(200);
+      const edited = edit.body.data.analysisResult?.candidates.find((c) => c.key === workTask.key);
+      const nextWeek = await inWeek('2026-11-09', '2026-11-15');
+      expect(edited?.context[0]).toMatchObject({ tone: nextWeek >= 3 ? 'warn' : 'info', value: `진행 중 ${open}건 (그중 같은 주 마감 ${nextWeek}건)` });
+      expect(edited?.issues.includes('이번 주 업무가 많아요')).toBe(nextWeek >= 3);
+    });
   });
 });

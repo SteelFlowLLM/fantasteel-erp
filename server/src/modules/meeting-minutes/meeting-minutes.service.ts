@@ -25,6 +25,7 @@ import { TaskService } from '../notification/task.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
 import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import { MeetingCandidateContextService } from './meeting-candidate.context';
 import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { isMeetingAudio } from './meeting-audio';
@@ -142,6 +143,7 @@ export class MeetingMinutesService {
     private readonly tasks: TaskService,
     private readonly notifications: NotificationService,
     private readonly messageActions: MessageActionService,
+    private readonly contexts: MeetingCandidateContextService,
     private readonly businessEventRecorder: BusinessEventRecorder,
   ) {}
 
@@ -260,7 +262,8 @@ export class MeetingMinutesService {
     if (index < 0) throw new AppException('COM-003', '후보를 찾을 수 없어요');
     await this.requireReferences(this.prisma, dto);
 
-    const edited = applyCandidateEdit(analysis.candidates[index], dto, dateOnly(row.meetingDate));
+    // 담당자·날짜·품목을 고치면 ERP 현황과 그에 따른 경고도 달라지므로 고칠 때마다 다시 계산한다
+    const edited = await this.contexts.apply(this.prisma, applyCandidateEdit(analysis.candidates[index], dto, dateOnly(row.meetingDate)));
     if (dto.decision !== undefined) {
       if (dto.decision === 'APPROVED') {
         const missing = missingFieldsOf(edited);

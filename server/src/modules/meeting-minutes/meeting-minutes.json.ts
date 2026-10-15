@@ -1,4 +1,4 @@
-import type { MeetingAnalysis, MeetingCandidate, MeetingSpeakerSummary, TranscriptSegment } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingCandidate, MeetingCandidateContextLine, MeetingReviewResult, MeetingSpeakerSummary, TranscriptSegment } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -36,7 +36,7 @@ export function summarizeSpeakers(segments: TranscriptSegment[]): MeetingSpeaker
   return [...byLabel.values()];
 }
 
-function isCandidate(v: unknown): v is MeetingCandidate {
+function isCandidate(v: unknown): v is Omit<MeetingCandidate, 'context'> {
   return (
     isObject(v) &&
     typeof v.key === 'string' &&
@@ -49,13 +49,28 @@ function isCandidate(v: unknown): v is MeetingCandidate {
   );
 }
 
+/** 현황 줄을 읽는다. 옛 분석 결과에는 칸이 없고, 모양이 다른 줄은 버린다 */
+function readContext(value: unknown): MeetingCandidateContextLine[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((l: unknown) => (isObject(l) && typeof l.label === 'string' && typeof l.value === 'string' ? [{ label: l.label, value: l.value, tone: l.tone === 'warn' ? ('warn' as const) : ('info' as const) }] : []));
+}
+
+function readReview(value: unknown): MeetingReviewResult | undefined {
+  if (!isObject(value)) return undefined;
+  if (value.ok === true && typeof value.missedCount === 'number' && typeof value.concernCount === 'number') return { ok: true, missedCount: value.missedCount, concernCount: value.concernCount };
+  if (value.ok === false) return { ok: false, error: typeof value.error === 'string' ? value.error : '' };
+  return undefined;
+}
+
 /** DB의 분석 결과 JSON을 읽는다. 서버가 쓴 값이지만 모양이 다르면 null (화면이 깨지지 않게) */
 export function readAnalysis(value: Prisma.JsonValue | null): MeetingAnalysis | null {
   if (!isObject(value) || typeof value.summary !== 'string' || !Array.isArray(value.decisions) || !Array.isArray(value.candidates)) return null;
+  const review = readReview(value.review);
   return {
     summary: value.summary,
     decisions: value.decisions.flatMap((d) => (isObject(d) && typeof d.text === 'string' && isNumbers(d.evidence) ? [{ text: d.text, evidence: d.evidence }] : [])),
-    candidates: value.candidates.flatMap((c: unknown) => (isCandidate(c) ? [c] : [])),
+    candidates: value.candidates.flatMap((c: unknown) => (isCandidate(c) ? [{ ...c, context: readContext((c as { context?: unknown }).context) }] : [])),
+    ...(review ? { review } : {}),
     model: typeof value.model === 'string' ? value.model : '',
     analyzedAt: typeof value.analyzedAt === 'string' ? value.analyzedAt : '',
   };

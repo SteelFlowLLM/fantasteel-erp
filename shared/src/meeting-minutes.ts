@@ -108,6 +108,14 @@ export type MeetingMinutesPage = PageResult<MeetingMinutesListItem>;
 export const MEETING_ANALYSIS_MAX_CHARS = 40000;
 
 export type MeetingCandidateKind = 'TASK' | 'EVENT' | 'PURCHASE';
+
+/** 후보 옆에 보이는 ERP 현황 한 줄. 값은 서버가 DB에서 읽어 글로 만든 것이다 (REQ-AST-009) */
+export interface MeetingCandidateContextLine {
+  label: string;
+  value: string;
+  /** warn은 사람이 눈여겨볼 점 (납기 초과·겹치는 일정·업무 쏠림 등) */
+  tone: 'info' | 'warn';
+}
 export type MeetingCandidateDecision = 'PENDING' | 'APPROVED' | 'EXCLUDED';
 
 /**
@@ -141,6 +149,10 @@ export interface MeetingCandidate {
   salesOrderId: number | null;
   /** 사람이 확인해야 하는 이유 */
   issues: string[];
+  /** 수주·재고·업무·일정 현황. 분석할 때와 후보를 고칠 때 서버가 다시 계산한다. 옛 분석 결과에는 없어 빈 배열로 읽는다 */
+  context: MeetingCandidateContextLine[];
+  /** AI 2차 검토가 새로 찾은 후보 */
+  fromReview?: boolean;
   decision: MeetingCandidateDecision;
   /** 확정 때 만들어진 결과. 확정 전에는 없다 */
   registered?: MeetingCandidateRegistered | null;
@@ -159,10 +171,15 @@ export interface MeetingDecision {
   evidence: number[];
 }
 
+/** AI 2차 검토 결과. 실패해도 1차 결과는 그대로 남는다 */
+export type MeetingReviewResult = { ok: true; missedCount: number; concernCount: number } | { ok: false; error: string };
+
 export interface MeetingAnalysis {
   summary: string;
   decisions: MeetingDecision[];
   candidates: MeetingCandidate[];
+  /** 2차 검토를 하지 않은 옛 분석 결과에는 없다 */
+  review?: MeetingReviewResult;
   model: string;
   analyzedAt: string;
 }

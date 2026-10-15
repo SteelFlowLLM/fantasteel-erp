@@ -2,7 +2,7 @@
 
 // 회의록 AI 분석 카드 (REQ-VOC-003·004, BP-VOC-01). AI가 정리한 내용은 "AI 정리" 표시로 원본 전사와 구분한다.
 // 작성자만 후보마다 고치고 허가·제외하며, 남은 후보가 없을 때 "확정하고 등록"으로 업무·일정·구매요청 초안을 만든다. AI는 스스로 등록하지 않는다.
-import { ITEM_TYPE, MEETING_MINUTES_STATUS, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateDecision, type MeetingCandidateUpdateInput, type MeetingMinutesView } from '@fantasteel/shared';
+import { ITEM_TYPE, MEETING_MINUTES_STATUS, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateDecision, type MeetingCandidateUpdateInput, type MeetingMinutesView } from '@fantasteel/shared';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { meetingMinutesApi } from '@/api/meetingMinutes';
@@ -20,7 +20,7 @@ import { useItemList } from '@/hooks/useLookups';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
-import { analyzeAvailability, approvalBlocker, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview } from '@/lib/meetingAnalysis';
+import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 function AiLabel() {
   return (
@@ -104,6 +104,24 @@ function fields(c: MeetingCandidate, names: Names): React.ReactNode {
   );
 }
 
+/** 서버가 DB에서 읽어 만든 ERP 현황. 눈여겨볼 점(warn)은 경고색으로 */
+function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <ul aria-label="ERP 현황" className="flex flex-col gap-0.5 rounded-xs bg-surface px-2 py-1.5 text-xs">
+      {lines.map((line, index) => (
+        <li key={`${line.label}-${index}`} className={cn('grid grid-cols-[84px_minmax(0,1fr)] gap-x-2', line.tone === 'warn' ? 'text-[#7a3d00]' : 'text-ink-2')}>
+          <span className={line.tone === 'warn' ? 'font-medium' : 'text-ink-3'}>
+            {line.tone === 'warn' ? <span aria-hidden>⚠ </span> : null}
+            {line.label}
+          </span>
+          <span className="min-w-0 break-words">{line.value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** 확정 때 만들어진 결과로 가는 링크. 일정은 아직 화면이 없어 시각을 글로 보인다 */
 function RegisteredNote({ candidate }: { candidate: MeetingCandidate }) {
   const registered = candidate.registered;
@@ -159,6 +177,11 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
         <Badge tone="outline">{KIND_BADGE[candidate.kind]}</Badge>
         <b className={cn('min-w-0 break-words text-sm', excluded && 'line-through')}>{candidate.title}</b>
         <span className="ml-auto flex items-center gap-1">
+          {candidate.fromReview ? (
+            <Badge tone="ai" plain title="1차 정리에서 빠졌다가 AI 2차 검토가 찾은 후보예요">
+              2차 검토
+            </Badge>
+          ) : null}
           <AiLabel />
           <DecisionBadge decision={candidate.decision} confirmed={confirmed} />
         </span>
@@ -179,6 +202,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
           </div>
         </>
       )}
+      {!excluded && !confirmed ? <ContextLines lines={contextLinesOf(candidate)} /> : null}
       {candidate.issues.length > 0 && !excluded && !confirmed ? (
         <ul className="flex flex-col gap-0.5 rounded-xs bg-wait-bg px-2 py-1.5 text-xs text-[#7a3d00]">
           {candidate.issues.map((issue) => (
@@ -236,6 +260,7 @@ function SummaryBlock({ analysis, minutes, editable }: { analysis: MeetingAnalys
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const save = useAction((summary: string) => meetingMinutesApi.updateSummary(minutes.id, summary), { onSuccess: () => setEditing(false) });
+  const reviewLine = reviewSummaryText(analysis.review);
   return (
     <section className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5">
@@ -258,6 +283,7 @@ function SummaryBlock({ analysis, minutes, editable }: { analysis: MeetingAnalys
           </Button>
         ) : null}
       </div>
+      {reviewLine ? <p className={cn('text-cap', analysis.review?.ok === false ? 'text-danger' : 'text-ink-3')}>{reviewLine}</p> : null}
       {editing ? (
         <div className="flex flex-col gap-1.5">
           <Textarea aria-label="요약" rows={5} value={text} maxLength={3000} onChange={(e) => setText(e.target.value)} />
