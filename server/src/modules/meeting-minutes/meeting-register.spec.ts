@@ -282,6 +282,7 @@ describe('확정하고 등록 (POST register, API-261)', () => {
         .map((n) => n.recipientId)
         .sort(),
     ).toEqual([head.employeeId, sales.employeeId].sort());
+    expect(mine(NOTIFICATION_TYPE.SCHEDULE_EVENT_ASSIGNED).filter((n) => n.notificationContent.startsWith('일정 등록 · 동해철강 방문')).every((n) => n.linkPath === '/schedule?week=2026-10-19')).toBe(true);
     const shared = mine(NOTIFICATION_TYPE.MEETING_MINUTES_SHARED).filter((n) => n.linkPath === `/meetings?id=${id}`);
     expect(shared.map((n) => n.recipientId).sort()).toEqual([head.employeeId, sales.employeeId].sort());
     expect(shared.every((n) => n.notificationContent === '회의록 공유 · 확인 시험 회의')).toBe(true);

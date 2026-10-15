@@ -14,6 +14,7 @@ import { SttModule } from './modules/stt/stt.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
 import { MeetingMinutesModule } from './modules/meeting-minutes/meeting-minutes.module';
+import { ScheduleEventModule } from './modules/schedule-event/schedule-event.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
 import { MessengerModule } from './modules/messenger/messenger.module';
 import { MrpModule } from './modules/mrp/mrp.module';
@@ -48,6 +49,7 @@ import { PrismaModule } from './prisma/prisma.module';
     MessengerModule,
     MessageActionModule,
     MeetingMinutesModule,
+    ScheduleEventModule,
     DashboardModule,
     LlmModule,
     SttModule,

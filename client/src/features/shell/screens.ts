@@ -98,6 +98,7 @@ export const SCREEN = {
   messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE, soon: 'P2' }),
   meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
+  schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),
   pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE, soon: 'EX' }),
 } as const satisfies Record<string, ScreenDef>;
 

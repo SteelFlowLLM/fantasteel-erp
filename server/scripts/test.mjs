@@ -13,7 +13,7 @@ const groups = [
   ['fs_sales', ['src/modules/sales-order', 'src/modules/inventory', 'src/modules/shipment', 'src/modules/dashboard']],
   ['fs_prod', ['src/modules/production', 'src/modules/mrp', 'src/modules/quality']],
   ['fs_pur', ['src/modules/purchasing', 'src/modules/message-action']],
-  ['fs_collab', ['src/modules/messenger', 'src/modules/stt', 'src/modules/notification', 'src/modules/ai-assistant', 'src/modules/meeting-minutes']],
+  ['fs_collab', ['src/modules/messenger', 'src/modules/stt', 'src/modules/notification', 'src/modules/ai-assistant', 'src/modules/meeting-minutes', 'src/modules/schedule-event']],
   ['fs_log', ['src/modules/lot', 'src/modules/business-event']],
 ];
 const only = process.argv.slice(2).filter((a) => a !== '--unit');

@@ -81,7 +81,7 @@
 - **확정하고 등록** `POST register` → `{ meetingMinutes, taskIds, scheduleEventIds, actionDraftIds, excludedKeys }`. 남은(PENDING) 후보가 있으면 `VOC-007`, 허가 후보가 비었으면 `VOC-006`. 허가 0건이어도 확정은 된다. 아래를 **한 트랜잭션**으로 한다(하나라도 실패하면 전부 취소, 상태는 `REVIEW` 그대로):
   1. `WHERE status = REVIEW`인 조건부 UPDATE로 `CONFIRMED` + `confirmed_at`. 0건이면 `VOC-004`(더블 클릭 방지). 이어서 담당자·참석자·원료가 아직 유효한지 다시 본다.
   2. 허가 TASK → `task` (`creator` = 작성자, 상태 `OPEN`, `link_path` `/meetings?id=<id>`, `meeting_minutes_id`, 설명 = 후보 설명 + `근거 발언: "…" / "…"`). `TaskService.createInTx`(`POST /tasks`와 같은 경로)가 담당자에게 `TASK_ASSIGNED`(`업무 지정 · 제목`, 본인 제외)를 보낸다.
-  3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`).
+  3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`, 알림 링크 `/schedule?week=<일정이 속한 주 월요일>`).
   4. 허가 PURCHASE → `MessageActionService.createFromMeeting`: `action_draft`(`PURCHASE_REQUISITION_CREATE`, `meeting_minutes_id`, `message_id` null, 요청자 = 작성자) + `DRAFT_CREATED`(AI 보조, `action_draft_id`) → `WAITING_APPROVAL`. 작성자에게 구매요청 등록 권한이 없거나 승인권자가 없으면(`PUR-001`) 그 오류로 전체가 취소된다: 이때는 구매요청 후보를 제외하거나 구매 담당자가 확정해야 한다. 이후 기존 초안 흐름(확인 → 구매요청 → 부서장 승인)을 그대로 탄다. 초안 응답에 `meetingMinutes {id, title}`이 추가됐다(메시지 초안이면 null).
   5. `MEETING_MINUTES_CONFIRMED`(행위자 작성자, 대상 `meeting_minutes`, AI 보조, after = `taskIds`·`scheduleEventIds`·`actionDraftIds`·`excludedKeys`).
   6. 참석자 전원(작성자 제외)에게 `MEETING_MINUTES_SHARED`(`회의록 공유 · 제목`).

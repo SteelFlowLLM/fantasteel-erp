@@ -25,3 +25,4 @@ export * from './messenger';
 export * from './messenger-emoticon';
 export * from './action-draft';
 export * from './meeting-minutes';
+export * from './schedule-event';
