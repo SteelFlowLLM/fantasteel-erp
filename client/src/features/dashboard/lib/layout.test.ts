@@ -49,7 +49,7 @@ describe('위젯 목록', () => {
       '생산량',
       'AI 활용 현황',
     ]);
-    expect(WIDGETS.filter((w) => w.soon).map((w) => w.key)).toEqual(['AGENT_RISK', 'AI_USAGE']);
+    expect(WIDGETS.filter((w) => w.soon).map((w) => w.key)).toEqual(['AI_USAGE']);
     for (const w of WIDGETS) {
       expect(w.minW).toBeLessThanOrEqual(w.defaultW);
       expect(w.minH).toBeLessThanOrEqual(w.defaultH);

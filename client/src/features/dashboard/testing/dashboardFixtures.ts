@@ -312,6 +312,17 @@ export const WIDGET_DATA: DashboardWidgetDataMap = {
     totalTon: '689.070',
     series: [{ date: '2026-09-16', slabQty: 12, coilQty: 0, ton: '275.628' }, { date: '2026-09-25', slabQty: 8, coilQty: 0, ton: '183.752' }, { date: '2026-09-29', slabQty: 10, coilQty: 0, ton: '229.690' }],
   },
+  AGENT_RISK: {
+    openCount: 2,
+    byRisk: [
+      { riskType: 'RAW_SHORTAGE', count: 1 },
+      { riskType: 'GOOD_QTY_SHORTAGE', count: 1 },
+    ],
+    items: [
+      { id: 12, riskType: 'RAW_SHORTAGE', summary: 'ORE01 철광석: 생산계획 PP-2610-0003 소요가 잔량·입고예정보다 444.444t 부족', draftStatus: 'WAITING_APPROVAL' },
+      { id: 11, riskType: 'GOOD_QTY_SHORTAGE', summary: '수주 SO-2610-001 1번 품목: 합격 매수가 부족해 4매 추가 계획이 필요', draftStatus: 'WAITING_APPROVAL' },
+    ],
+  },
   SURPLUS_AGE: {
     today: '2026-10-13',
     totalQty: 6,
