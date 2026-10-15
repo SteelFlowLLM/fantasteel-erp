@@ -46,7 +46,7 @@
 1. 메시지가 있고 로그인 사원이 그 방 멤버인지 확인(messenger 서비스).
 2. `requester_id` = 메시지 `sender_id`(AI·생성자가 지정하지 않음, BP-ACT-01). `message_id` 연결.
 3. 같은 메시지에 미처리 초안이 있으면 새로 만들지 않는다(부분 unique). 기존 초안을 돌려줄지 오류로 할지는 8장 🟡.
-4. 상태: [04] 10장 흐름대로 AI_GENERATED로 만들고 요청자 확인 대기 WAITING_APPROVAL로 넘긴다. AI가 없으므로 payload는 비어 있을 수 있다.
+4. 상태: [04] 10장 흐름대로 AI_GENERATED로 만들고 요청자 확인 대기 WAITING_APPROVAL로 넘긴다. AI가 없으므로 payload는 비어 있을 수 있다(10장에서 바뀜: LLM이 칸을 채우고, 없거나 실패하면 비어 있다).
 
 **수정**(PATCH): 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. 원료 마스터 매핑·단위(TON)·날짜를 검증하고, 상대 날짜는 메시지 작성일 기준 절대 날짜로 바꾼다(BP-ACT-01 예외). 모호·누락 값은 미확정 필드로 두고 실행하지 않는다.
 
@@ -79,7 +79,7 @@ confirm(draftId, actor):
 | COM-002 | 방 멤버가 아님, 요청자가 아닌 사람의 수정·확정·반려 |
 | COM-003 | 메시지·초안·원료 품목 없음 |
 | PUR-001 | (핸들러) 요청자 부서의 부서장 미지정 |
-| COM-001 | 같은 메시지로 동시에 초안을 만들 때(부분 unique 위반, P2002). 차례로 만들면 기존 초안을 돌려준다(9장) |
+| COM-001 | 같은 메시지로 동시에 초안을 만들 때(부분 unique 위반, P2002). 차례로 만들면 기존 초안을 돌려준다(9장). 10장 AI 추출부터는 P2002가 나면 다시 확인해 먼저 만든 초안을 돌려준다 |
 
 | 이벤트 | actor | target | 기타 |
 | --- | --- | --- | --- |
@@ -89,7 +89,7 @@ confirm(draftId, actor):
 | DRAFT_EXECUTED | USER(요청자) | `action_draft` | `after`에 만든 업무 `resultTable`·`resultId`·`resultNo` (2026-10-15부터, 그 전 기록은 `purchaseRequisitionId`·`purchaseRequisitionNo`) |
 | DRAFT_REJECTED | USER(요청자) | `action_draft` | `reason` = 반려 사유 |
 
-`isAiAssisted`: P1은 AI 추출이 없으므로 false. AI 실행 카드 확정(REQ-AST-010)은 P2.
+`isAiAssisted`: P1은 AI 추출이 없으므로 false(10장에서 바뀜: AI가 채운 칸이 있던 초안의 DRAFT_CONFIRMED·핸들러 로그·DRAFT_EXECUTED는 true). AI 실행 카드 확정(REQ-AST-010)은 P2.
 
 ## 6. 다른 모듈과의 경계
 
@@ -146,9 +146,9 @@ confirm(draftId, actor):
 | 생성 직후 상태 | AI_GENERATED로 만들고 DRAFT_CREATED를 남긴 뒤 같은 트랜잭션에서 WAITING_APPROVAL로 바꾼다 |
 | 중복 생성 응답 | 같은 메시지·유형에 미처리 초안이 있으면 그 초안을 돌려준다(`{ id, created: false }`) |
 | 목록 범위 | `GET action-drafts`는 내가 요청자인 초안(API-252). 메시지 메뉴의 '초안 보기'를 위해 `GET action-drafts?chatRoomId=`로 그 방 메시지의 초안도 준다(방 멤버만, 아니면 COM-002). 최근 것 먼저 |
-| payload 이름 | ERD 이름 `itemId`·`requestedTon`·`desiredReceiptDate`, 선택 입력 `requestReason`, 원본 글 복사 `sourceText` |
+| payload 이름 | ERD 이름 `itemId`·`requestedTon`·`desiredReceiptDate`, 선택 입력 `requestReason`, 원본 글 복사 `sourceText`, AI가 채운 칸 `aiFilledFields`(10장) |
 | 수정 | 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. `payload`의 보내지 않은 칸은 그대로, null이면 비운다. 원료가 아닌 품목·0 이하 톤·없는 날짜·그 유형에 없는 칸은 COM-004, `expectedUpdatedAt`이 다르면 COM-001. 맞는 작업 로그 유형이 없어 수정은 로그를 남기지 않는다 |
-| 상대 날짜 | AI 추출이 없어 요청자가 날짜를 직접 넣으므로 바꾸지 않는다 |
+| 상대 날짜 | AI 추출이 없어 요청자가 날짜를 직접 넣으므로 바꾸지 않는다(10장에서 바뀜: LLM이 메시지 작성일 기준으로 바꾸고 서버가 다시 검증한다) |
 | 미확정 칸 | 응답의 `unresolvedFields`: 원료 품목·수량(톤)·희망 입고일 중 비었거나 맞지 않는 칸 |
 | 확정 권한 | 요청자 본인이고 구매요청 등록 USE 권한이 있어야 수정·확정·반려한다(실행은 사용자 권한을 거친다, BP-ACT-01). 아니면 COM-002 |
 | 확정·실행 | `POST action-drafts/:id/confirm`: 미확정 칸이 있으면 ACT-001. APPROVED·`confirmed_at`·DRAFT_CONFIRMED(사유 `DRAFT_CONFIRMED: …`)를 한 트랜잭션에 남기고, 다음 트랜잭션에서 등록부 핸들러(`purchasing.createRequisition`, 요청자 = 로그인 요청자)로 구매요청을 만든 뒤 EXECUTED·DRAFT_EXECUTED(`after`에 구매요청 id·번호)를 남긴다. 응답은 `{ draft, executed, errorCode, errorMessage }` |
@@ -179,8 +179,13 @@ confirm(draftId, actor):
 | 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order는 tx를 받는 `createInTx`가 있지만 `private`이라 공개로 바꾸고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
 | 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
 
-구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
+구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출(2026-10-15 완료) → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
 
+- AI 추출 구현: `DraftExtractor`가 llm 모듈에 저장된 모델로 메시지 글, 작성일(요일 포함), 유형 정의의 칸 설명(`extractionGuide`, 구매요청은 원료 코드·이름 목록)을 보내 JSON 하나를 받는다. 제한 시간은 30초다.
+  - 유형 정의 `fromExtraction`이 값을 다시 확인해 맞는 칸만 채운다. 구매요청은 원료(코드나 이름이 정확히 1건), 톤(0 초과, 소수 3자리까지), 희망 입고일(실제 있는 YYYY-MM-DD)을 본다.
+  - 채운 칸 이름은 payload `aiFilledFields`에 남긴다. 수정 요청으로 바꿀 수 없고, 사람이 값을 고쳐도 지우지 않는다(AI 경유 근거).
+  - LLM을 부르기 전에 방 멤버·확정 주체·미처리 초안을 확인한다(미처리 초안이 있으면 부르지 않는다). 저장 트랜잭션에서 같은 확인을 다시 한다.
+  - DRAFT_CREATED는 AI 경유로 남기지 않는다(위 표의 AI 경유는 확정·핸들러·실행 로그).
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
 - `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
 - AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.

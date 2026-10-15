@@ -48,6 +48,8 @@ export interface CreateRequisitionInput {
 export interface RequisitionOrigin {
   actionDraftId: number;
   messageId: number | null;
+  /** AI가 채운 초안에서 만들었으면 작업 로그를 AI 경유로 (REQ-AST-010) */
+  isAiAssisted?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -210,6 +212,7 @@ export class PurchasingService {
       reason: row.requestReason,
       actionDraftId: origin?.actionDraftId ?? null,
       messageId: origin?.messageId ?? null,
+      isAiAssisted: origin?.isAiAssisted,
     });
     await this.notifyApprovalRequested(tx, headId, row, actor, event.id);
     return row;

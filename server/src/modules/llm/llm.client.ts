@@ -106,13 +106,14 @@ export class LlmClient {
     }
   }
 
-  async chat(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], maxTokens?: number): Promise<string> {
+  /** timeoutMs: 사용자가 답을 기다리는 짧은 작업(Message → ERP 추출)은 기본 120초보다 짧게 준다 */
+  async chat(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], maxTokens?: number, timeoutMs = CHAT_TIMEOUT_MS): Promise<string> {
     const body = await this.request<{ choices?: { message?: { content?: string | null } }[] }>(
       endpoint,
       'POST',
       '/chat/completions',
       { model, messages, stream: false, ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }) },
-      CHAT_TIMEOUT_MS,
+      timeoutMs,
     );
     return body.choices?.[0]?.message?.content?.trim() ?? '';
   }

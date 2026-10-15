@@ -21,8 +21,9 @@ import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { retryOnNumberConflict } from '../purchasing/purchasing.service';
-import type { ActionDefinition } from './action-types/action-definition';
+import { isAiAssisted, type ActionDefinition } from './action-types/action-definition';
 import { ActionTypeRegistry } from './action-types/action-type.registry';
+import { DraftExtractor } from './draft-extractor';
 import type { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
 
@@ -37,7 +38,7 @@ const itemIdOf = (payload: object): number | null => ('itemId' in payload && typ
 /**
  * Message → ERP 초안 (REQ-ACT-001~005, BP-ACT-01·02, docs/backend/message-action.md).
  * 유형마다 다른 칸·검증·확정 주체·실행은 업무 유형 등록부(ActionTypeRegistry)의 정의가 맡고, 이 서비스는 상태 흐름과 작업 로그를 맡는다.
- * AI 추출은 아직 없어(SPEC 5장) 확정 주체가 값을 직접 채운다.
+ * 만들 때 LLM이 칸을 채우고(DraftExtractor, SPEC 5장 결정 2), LLM이 없거나 실패하면 확정 주체가 값을 직접 채운다.
  */
 @Injectable()
 export class MessageActionService {
@@ -47,27 +48,28 @@ export class MessageActionService {
     private readonly authUsers: AuthUserService,
     private readonly businessEventRecorder: BusinessEventRecorder,
     private readonly registry: ActionTypeRegistry,
+    private readonly extractor: DraftExtractor,
   ) {}
 
   /**
    * 메시지에서 초안을 만든다. 만드는 사람은 그 방 멤버여야 한다.
    * 확정 주체(구매요청은 메시지 작성자, 확장 유형은 만든 사원)가 확정할 수 없으면 초안이 확인 대기에 영영 남으므로 만들지 않는다.
    * 같은 메시지·유형에 미처리 초안이 있으면 새로 만들지 않고 그 초안을 돌려준다.
+   * AI 추출(모듈 문서 10장)은 느려서 트랜잭션 밖에서 부른다. 헛호출을 막으려고 먼저 확인하고, 저장할 때 같은 확인을 다시 한다.
    */
   async create(user: AuthUser, messageId: number, actionType: ActionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE): Promise<ActionDraftCreateResult> {
     const definition = this.registry.get(actionType);
-    return this.prisma.$transaction(async (tx) => {
-      const message = await this.repository.findMessage(tx, messageId);
-      if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
-      if (!(await this.repository.isRoomMember(tx, message.chatRoomId, user.employeeId))) throw new AppException('COM-002', '채팅방 멤버만 초안을 만들 수 있어요');
-      if (message.messageType !== MESSAGE_TYPE.USER || message.senderId === null || message.deletedAt) throw new AppException('COM-004', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
-      const requester = definition.confirmer === 'MESSAGE_SENDER' ? await this.senderWhoCanConfirm(definition, message.senderId) : this.creatorWhoCanConfirm(definition, user);
-      await definition.assertCanExecute(tx, requester);
+    const checked = await this.creatable(this.prisma, user, messageId, definition);
+    if (checked.open) return { id: checked.open.id, created: false };
+    const content = checked.message.content?.trim();
+    const extracted = content ? await this.extractor.extract(() => definition.extractionGuide(this.prisma), content, checked.message.createdAt) : null;
 
-      const open = await this.repository.findOpenDraft(tx, message.id, definition.actionType);
+    // 그 사이 같은 메시지·유형 초안이 생겨 부분 unique에 걸리면 다시 확인해 그 초안을 돌려준다
+    return retryOnNumberConflict(() => this.prisma.$transaction(async (tx) => {
+      const { message, requester, open } = await this.creatable(tx, user, messageId, definition);
       if (open) return { id: open.id, created: false };
 
-      const payload = definition.empty(message.content);
+      const payload = extracted ? await definition.fromExtraction(tx, extracted, message.content) : definition.empty(message.content);
       const draft = await this.repository.createDraft(tx, { actionType: definition.actionType, payload: toJson(payload), messageId: message.id, requesterId: requester.employeeId });
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
@@ -78,10 +80,21 @@ export class MessageActionService {
         actionDraftId: draft.id,
         messageId: message.id,
       });
-      // AI 추출이 없으므로 생성(AI_GENERATED) 직후 확정 주체 확인 대기로 넘긴다 (업무 프로세스 10장 흐름)
+      // AI가 채운 값도 확정 주체가 확인해야 하므로 생성(AI_GENERATED) 직후 확인 대기로 넘긴다 (업무 프로세스 10장 흐름)
       await this.repository.updateDraft(tx, draft.id, { draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
       return { id: draft.id, created: true };
-    });
+    }));
+  }
+
+  /** 초안을 만들 수 있는 메시지인지와 확정 주체를 확인하고, 같은 메시지·유형의 미처리 초안을 찾는다 */
+  private async creatable(tx: Tx, user: AuthUser, messageId: number, definition: ActionDefinition) {
+    const message = await this.repository.findMessage(tx, messageId);
+    if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
+    if (!(await this.repository.isRoomMember(tx, message.chatRoomId, user.employeeId))) throw new AppException('COM-002', '채팅방 멤버만 초안을 만들 수 있어요');
+    if (message.messageType !== MESSAGE_TYPE.USER || message.senderId === null || message.deletedAt) throw new AppException('COM-004', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
+    const requester = definition.confirmer === 'MESSAGE_SENDER' ? await this.senderWhoCanConfirm(definition, message.senderId) : this.creatorWhoCanConfirm(definition, user);
+    await definition.assertCanExecute(tx, requester);
+    return { message, requester, open: await this.repository.findOpenDraft(tx, message.id, definition.actionType) };
   }
 
   /** 회의록 작성자가 구매요청 초안의 요청자가 될 수 있는지. 허가할 때 미리 막아 확정 단계에서 전체가 취소되지 않게 한다 */
@@ -180,6 +193,7 @@ export class MessageActionService {
         reason: await definition.confirmReason(tx, payload),
         actionDraftId: draft.id,
         messageId: draft.messageId,
+        isAiAssisted: isAiAssisted(payload),
       });
     });
     return this.execute(user, id);
@@ -206,6 +220,7 @@ export class MessageActionService {
             after: { draftStatus: DRAFT_STATUS.EXECUTED, resultTable: result.table, resultId: result.id, resultNo: result.no },
             actionDraftId: draft.id,
             messageId: draft.messageId,
+            isAiAssisted: isAiAssisted(definition.parse(draft.payload)),
           });
         }),
       );

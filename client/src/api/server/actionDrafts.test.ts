@@ -13,7 +13,7 @@ const view = (overrides: Partial<ActionDraftView> = {}): ActionDraftView => ({
   id: 31,
   actionType: 'PURCHASE_REQUISITION_CREATE',
   draftStatus: 'WAITING_APPROVAL',
-  payload: { itemId: 41, requestedTon: '20.000', desiredReceiptDate: '2026-11-20', requestReason: null, sourceText: '실리코망가니즈 20톤 부탁해요' },
+  payload: { itemId: 41, requestedTon: '20.000', desiredReceiptDate: '2026-11-20', requestReason: null, sourceText: '실리코망가니즈 20톤 부탁해요', aiFilledFields: [] },
   itemCode: 'SMN01',
   itemName: '실리코망가니즈',
   itemDefaultSupplierName: '한빛합금',
