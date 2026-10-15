@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MEETING_MINUTES_STATUS } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -63,5 +64,18 @@ export class MeetingMinutesRepository {
   /** 회의일 최신순, 같은 날은 나중에 만든 것이 위 */
   findList(tx: Tx, where: Prisma.MeetingMinutesWhereInput, page: { skip: number; take: number }) {
     return tx.meetingMinutes.findMany({ where, select: listSelect, orderBy: [{ meetingDate: 'desc' }, { id: 'desc' }], ...page });
+  }
+
+  /** 아직 TRANSCRIBING인 행만 바꾼다. 그 사이 다른 상태가 됐으면 0건 */
+  finishTranscription(tx: Tx, id: number, data: Prisma.MeetingMinutesUncheckedUpdateManyInput) {
+    return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING }, data });
+  }
+
+  /** 서버가 꺼지면서 음성을 잃은 전사 중 행을 모두 실패로 */
+  failAllTranscribing(tx: Tx, failureReason: string) {
+    return tx.meetingMinutes.updateMany({
+      where: { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING },
+      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason },
+    });
   }
 }

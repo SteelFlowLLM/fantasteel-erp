@@ -12,6 +12,8 @@ export interface TranscriptSegment {
 
 export const MEETING_TITLE_MAX = 200;
 export const MEETING_TRANSCRIPT_MAX = 100000;
+/** 음성 파일 한 개의 최대 크기 (녹음·파일 올리기 공통) */
+export const MEETING_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 
 /** POST meeting-minutes (API-258). 글로 넣은 전사는 STT를 건너뛰고 TRANSCRIBED로 시작한다 */
 export interface MeetingMinutesCreateInput {

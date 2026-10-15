@@ -26,6 +26,23 @@ export class CreateMeetingMinutesDto {
   transcript!: string;
 }
 
+/**
+ * POST meeting-minutes/audio. multipart의 글 칸은 모두 문자열로 온다: attendeeIds는 JSON 배열 문자열("[2,3]")이고
+ * 서버(service)가 풀어서 text 만들기와 같은 검증을 한다.
+ */
+export class CreateMeetingMinutesAudioDto {
+  @IsString({ message: '제목을 입력해 주세요' })
+  @IsNotEmpty({ message: '제목을 입력해 주세요' })
+  @MaxLength(MEETING_TITLE_MAX, { message: `제목은 ${MEETING_TITLE_MAX}자까지 쓸 수 있어요` })
+  meetingMinutesTitle!: string;
+
+  @Matches(DATE_PATTERN, { message: '회의일은 YYYY-MM-DD로 입력해 주세요' })
+  meetingDate!: string;
+
+  @IsString({ message: '참석자를 골라 주세요' })
+  attendeeIds!: string;
+}
+
 /** GET meeting-minutes (API-259 목록) */
 export class ListMeetingMinutesQuery {
   @IsOptional()

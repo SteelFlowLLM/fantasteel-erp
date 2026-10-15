@@ -1,7 +1,7 @@
 'use client';
 
 // 회의록 상세: 정보, 원본 전사(번호 붙은 발언), AI 분석 자리. 원본 전사와 AI 요약은 따로 둔다 (BP-VOC-01).
-import { MEETING_MINUTES_STATUS_LABEL } from '@fantasteel/shared';
+import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL } from '@fantasteel/shared';
 import { ROLE_LABEL } from '@/codes';
 import type { MeetingMinutesView } from '@/api/meetingMinutes';
 import { Avatar } from '@/components/Avatar';
@@ -15,12 +15,30 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { MeetingStatusBadge } from '@/features/meetings/components/MeetingStatusBadge';
 import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
 import { fmtDateTime } from '@/lib/format';
+import { fmtClock } from '@/lib/meetingAudio';
 
 function Body({ minutes }: { minutes: MeetingMinutesView }) {
   return (
     <>
       <PageHead crumb={<>회의록<Icon name="chevron-right" size="sm" />{minutes.meetingDate}</>} title={minutes.meetingMinutesTitle} actions={<MeetingStatusBadge status={minutes.meetingMinutesStatus} />} />
-      {minutes.failureReason ? <Banner tone="danger">{minutes.failureReason}</Banner> : null}
+      {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.TRANSCRIBING ? (
+        <Banner tone="run" icon="clock">
+          <b>음성을 글로 바꾸는 중…</b> 길이에 따라 몇 분 걸릴 수 있어요. 이 화면은 끝나면 저절로 바뀌어요.
+        </Banner>
+      ) : null}
+      {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.ANALYZING ? (
+        <Banner tone="run" icon="clock">
+          <b>AI가 내용을 정리하는 중…</b> 끝나면 저절로 바뀌어요.
+        </Banner>
+      ) : null}
+      {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED ? (
+        <Banner tone="danger">
+          <b>{minutes.failureReason ?? '전사하지 못했어요'}</b>
+          <div className="mt-0.5 text-cap">음성을 다시 올려서 새 회의록으로 만들어 주세요. 원본 음성은 저장하지 않아 이 회의록에서 다시 돌릴 수 없어요.</div>
+        </Banner>
+      ) : minutes.failureReason ? (
+        <Banner tone="danger">{minutes.failureReason}</Banner>
+      ) : null}
       <Card className="flex-none">
         <CardBody className="gap-3">
           <KvList
@@ -57,13 +75,16 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
             meta={`발언 ${minutes.transcriptSegments.length} · 사람이 말한 그대로`}
           />
           {minutes.transcriptSegments.length === 0 ? (
-            <EmptyNote>전사된 발언이 없어요</EmptyNote>
+            <EmptyNote>{minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.TRANSCRIBING ? '글로 바꾸는 중이에요' : '전사된 발언이 없어요'}</EmptyNote>
           ) : (
             <ol className="flex flex-col py-1.5">
               {minutes.transcriptSegments.map((segment, index) => (
                 <li key={index} className="grid grid-cols-[32px_minmax(0,1fr)] gap-x-2 px-3.5 py-1.5 text-sm leading-snug">
                   <span className="text-right font-mono text-cap text-ink-3">{index + 1}</span>
-                  <span className="break-words whitespace-pre-wrap">{segment.text}</span>
+                  <span className="break-words whitespace-pre-wrap">
+                    {segment.start !== null ? <span className="mr-1.5 font-mono text-cap text-ink-3 tabular-nums">[{fmtClock(segment.start)}]</span> : null}
+                    {segment.text}
+                  </span>
                 </li>
               ))}
             </ol>

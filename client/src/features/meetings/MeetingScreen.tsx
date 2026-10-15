@@ -1,7 +1,7 @@
 'use client';
 
-// Voice2ERP 회의록 /meetings[?id=<회의록 id>|?new=1] (REQ-VOC-002, BP-VOC-01). 이 단계는 글로 붙여 넣은 전사의 저장·목록·상세다.
-// STT(음성 입력)와 AI 분석은 아직 없다. 목록은 서버 쪽으로 거르고 쪽을 넘긴다 (api/server/meetingMinutes.ts).
+// Voice2ERP 회의록 /meetings[?id=<회의록 id>|?new=1] (REQ-VOC-002, BP-VOC-01). 글로 붙여 넣은 전사와 음성(녹음·파일)의 저장·목록·상세다.
+// 음성은 서버가 백그라운드로 전사한다. AI 분석은 아직 없다. 목록은 서버 쪽으로 거르고 쪽을 넘긴다 (api/server/meetingMinutes.ts).
 import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL, type MeetingMinutesStatus } from '@fantasteel/shared';
 import { useState } from 'react';
 import type { MeetingMinutesListItem, MeetingMinutesView } from '@/api/meetingMinutes';
@@ -132,7 +132,7 @@ export function MeetingScreen() {
             kind="empty"
             icon="mic"
             title="회의록을 골라 주세요"
-            text="왼쪽 목록에서 회의록을 고르거나 새 회의록을 만들어 주세요. 지금은 글로 붙여 넣은 회의 기록을 저장해요."
+            text="왼쪽 목록에서 회의록을 고르거나 새 회의록을 만들어 주세요. 녹음하거나 음성 파일을 올리거나 글로 붙여 넣을 수 있어요."
             actions={
               <Button variant="primary" icon="plus" onClick={() => set({ new: 1, id: null })}>
                 새 회의록

@@ -2,7 +2,7 @@
 import type { MeetingMinutesPage, MeetingMinutesView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/errors';
-import { meetingMinutesApi } from '@/api/meetingMinutes';
+import { meetingMinutesApi, meetingMinutesAudioApi } from '@/api/meetingMinutes';
 import { ok, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
@@ -59,5 +59,32 @@ describe('회의록 서버 모드 (api/server/meetingMinutes.ts)', () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path === '/meeting-minutes/3' ? ok(view) : undefined));
     expect((await meetingMinutesApi.get(3)).transcriptSegments).toHaveLength(1);
     expect(calls[0].method).toBe('GET');
+  });
+
+  it('음성 올리기: multipart에 글 칸과 file을 담고 참석자는 JSON 배열 문자열로 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path === '/meeting-minutes/audio' ? ok({ ...view, meetingMinutesStatus: 'TRANSCRIBING' }) : undefined));
+    const created = await meetingMinutesAudioApi.create({
+      meetingMinutesTitle: '  음성 회의 ',
+      meetingDate: '2026-10-15',
+      attendeeIds: [5, 5, 6],
+      file: new File(['abc'], '회의.webm', { type: 'audio/webm' }),
+    });
+    expect(created.meetingMinutesStatus).toBe('TRANSCRIBING');
+    expect(calls[0].method).toBe('POST');
+    const form = calls[0].body as FormData;
+    expect(form.get('meetingMinutesTitle')).toBe('음성 회의');
+    expect(form.get('meetingDate')).toBe('2026-10-15');
+    expect(form.get('attendeeIds')).toBe('[5,6]');
+    const file = form.get('file') as File;
+    expect(file.name).toBe('회의.webm');
+    expect(file.size).toBe(3);
+  });
+
+  it('음성 올리기: 제목·참석자가 비었거나 파일이 비면 서버를 부르기 전에 입력칸 오류로 알린다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, () => undefined);
+    const error = await meetingMinutesAudioApi.create({ meetingMinutesTitle: ' ', meetingDate: '2026-10-15', attendeeIds: [], file: new File([], 'a.webm', { type: 'audio/webm' }) }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InputError);
+    expect((error as InputError).fieldErrors).toEqual({ meetingMinutesTitle: '제목을 입력해 주세요', attendeeIds: '참석자를 1명 이상 골라 주세요', file: '음성이 비어 있어요' });
+    expect(calls).toHaveLength(0);
   });
 });
