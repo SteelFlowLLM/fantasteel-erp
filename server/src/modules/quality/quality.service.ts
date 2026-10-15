@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   LOT_TYPE,
@@ -14,6 +14,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { FactoryAgentService } from '../factory-agent/factory-agent.service';
 import { InventoryService, type EligibilitySyncResult } from '../inventory/inventory.service';
 import { JUDGED_INSPECTION_RESULTS, type ListQualityInspectionsDto } from './dto/list-quality-inspections.dto';
 import type { QualityInspectionValueInput, RegisterQualityInspectionDto } from './dto/register-quality-inspection.dto';
@@ -112,6 +113,8 @@ export class QualityService {
     private readonly repository: QualityRepository,
     private readonly businessEventRecorder: BusinessEventRecorder,
     private readonly inventory: InventoryService,
+    // 직접 만드는 단위 테스트에서는 없어도 된다 (감지만 건너뛴다)
+    @Optional() private readonly factoryAgent?: FactoryAgentService,
   ) {}
 
   /**
@@ -161,6 +164,13 @@ export class QualityService {
    * LOT당 1건. 그 공정·강종의 최신 기준 버전으로 판정하고 버전을 남긴다. 작업 로그는 같은 tx에서 남긴다.
    */
   async registerQualityInspection(dto: RegisterQualityInspectionDto, user: AuthUser): Promise<QualityInspectionSaveResult> {
+    const saved = await this.registerInspectionInTx(dto, user);
+    // 이벤트 트리거 (REQ-AGT-001): 합격 매수 부족을 본다. 커밋 뒤에 부르고, 감지가 실패해도 검사 등록은 그대로다
+    await this.factoryAgent?.onInspectionRegistered(dto.lotId);
+    return saved;
+  }
+
+  private async registerInspectionInTx(dto: RegisterQualityInspectionDto, user: AuthUser): Promise<QualityInspectionSaveResult> {
     return this.prisma.$transaction(async (tx) => {
       const lot = await this.repository.findLotForRegistration(tx, dto.lotId);
       if (!lot) throw new AppException('COM-003', 'LOT을 찾을 수 없어요');

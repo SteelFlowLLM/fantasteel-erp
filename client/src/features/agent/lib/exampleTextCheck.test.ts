@@ -34,7 +34,6 @@ function screenSourceOf(relativePath: string): string {
 
 describe('준비 중 화면 파일의 문구', () => {
   const screens = [
-    'features/agent/AgentScreen.tsx',
     'features/agent/components/SoonExampleParts.tsx',
     'features/meetings/MeetingScreen.tsx',
     'features/pastCases/PastCaseScreen.tsx',

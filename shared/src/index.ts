@@ -23,3 +23,4 @@ export * from './ai-assistant';
 export * from './messenger';
 export * from './messenger-emoticon';
 export * from './action-draft';
+export * from './factory-agent';
