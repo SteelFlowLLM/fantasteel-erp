@@ -151,7 +151,7 @@ export const CASE_REGISTER_STEPS: readonly string[] = ['불합격 판정', '처�
 
 /** 과거 사례를 찾는 곳 (REQ-CASE-004) */
 export const CASE_CALL_SITES: readonly { key: string; place: string; how: string }[] = [
-  { key: 'panel', place: 'AI 어시스턴트 패널', how: '모든 화면 오른쪽 패널에서 질문해요' },
+  { key: 'panel', place: '철강맨AI 패널', how: '모든 화면 오른쪽 패널에서 질문해요' },
   { key: 'chat', place: '사내 채팅 @AI', how: '메신저에서 @AI로 같은 AI를 불러요' },
   { key: 'quality', place: '품질 관리 [비슷한 사례 찾기]', how: '불합격 관리에서 누르면 AI 패널이 열리고 질문이 자동으로 들어가요' },
 ];

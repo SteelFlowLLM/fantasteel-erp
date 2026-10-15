@@ -99,7 +99,7 @@ export function RoomAside({ room, onInvite, onRename, onJump }: { room: ChatRoom
           ))}
           <li className="flex items-center gap-2 text-sm text-ink-3">
             <span className="flex size-[22px] items-center justify-center rounded-full bg-ai-bg text-[10px] font-semibold text-ai-strong">AI</span>
-            AI 어시스턴트
+            철강맨AI
             <span className="ml-auto text-cap">@AI 로 호출</span>
           </li>
         </ul>

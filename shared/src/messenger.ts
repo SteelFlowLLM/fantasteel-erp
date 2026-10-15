@@ -154,8 +154,8 @@ export function emoticonPreview(key: string): string {
 
 /** 사내 채팅 @AI 호출 (REQ-AST-002) */
 export const AI_MENTION = '@AI';
-/** AI 답의 보낸 사람 표시 */
-export const AI_SENDER_NAME = 'AI 어시스턴트';
+/** AI 답의 보낸 사람 표시. 화면 도우미 철강맨과 같은 캐릭터로 보이게 '철강맨AI'로 부른다 (저장 표시 AI_REPLY_PREFIX는 이미 쌓인 답을 알아봐야 해서 그대로) */
+export const AI_SENDER_NAME = '철강맨AI';
 /**
  * ERD의 message에는 AI 보낸 사람이 없다(USER는 사원 필수, SYSTEM은 보낸 사람 없음). 그래서 AI 답은 시스템 메시지로 저장하고
  * 본문 맨 앞의 이 표시로 구분한다. 응답(ChatMessageView)에서는 표시를 떼고 isAi로 알린다.

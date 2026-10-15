@@ -42,7 +42,7 @@ function EventsBody({ data }: { data: RecentEventsData }) {
               </span>
             ) : null}
             {event.isAiAssisted ? (
-              <span className="flex-none rounded-xs bg-ai-bg px-1.5 text-cap leading-relaxed font-medium text-ai-strong" title="AI 어시스턴트 초안으로 확정한 작업" data-pet-field="구분">
+              <span className="flex-none rounded-xs bg-ai-bg px-1.5 text-cap leading-relaxed font-medium text-ai-strong" title="철강맨AI 초안으로 확정한 작업" data-pet-field="구분">
                 AI 경유
               </span>
             ) : null}

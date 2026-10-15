@@ -110,7 +110,7 @@ export function AiUsageWidget(props: WidgetProps) {
     <WidgetFrame widgetKey="AI_USAGE" {...props}>
       <SoonArea>
         <div className="flex flex-wrap gap-x-5 gap-y-2">
-          <Figure label="AI 어시스턴트 질문" value="—" unit="건" tone="muted" />
+          <Figure label="철강맨AI 질문" value="—" unit="건" tone="muted" />
           <Figure label="업무 초안" value="—" unit="건" tone="muted" />
           <Figure label="Agent 감지" value="—" unit="건" tone="muted" />
         </div>

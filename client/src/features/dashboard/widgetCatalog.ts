@@ -173,7 +173,7 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
   AI_USAGE: {
     label: 'AI 활용 현황',
     isDefault: false,
-    description: 'AI 어시스턴트·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
+    description: '철강맨AI·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
     icon: 'wave',
     defaultW: 6,
     defaultH: 4,

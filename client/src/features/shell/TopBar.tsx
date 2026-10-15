@@ -1,13 +1,13 @@
 'use client';
 
-// B안 상단 바 (52px): 제목과 "{영역} · MM-DD (요일) HH:mm", 통합 검색, AI 어시스턴트 버튼, 알림·메신저, 사용자 메뉴
+// B안 상단 바 (52px): 제목과 "{영역} · MM-DD (요일) HH:mm", 통합 검색, 철강맨AI 버튼, 알림·메신저, 사용자 메뉴
 import { usePathname } from 'next/navigation';
-import { AiMark } from '@/components/ComingSoon';
 import { MessengerMenu } from '@/features/shell/MessengerMenu';
 import { NotificationMenu } from '@/features/shell/NotificationMenu';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { SearchBox } from '@/features/shell/SearchBox';
 import type { ShellTitle } from '@/features/shell/ShellTitleContext';
+import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { UserMenu } from '@/features/shell/UserMenu';
 import { useClock } from '@/hooks/useClock';
 import { useMe } from '@/hooks/useMe';
@@ -37,13 +37,13 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"
-          aria-label="AI 어시스턴트 열기 (준비 중, P2)"
+          aria-label="철강맨AI 열기 (준비 중, P2)"
           aria-expanded={aiPanelOpen}
           onClick={toggleAiPanel}
-          className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-2xl border border-ai-line bg-ai-bg pr-2.5 pl-1.5 text-xs font-semibold whitespace-nowrap text-ai-strong hover:bg-[#e9e3fb]"
+          className="mr-1 inline-flex h-8 flex-none items-center gap-1.5 rounded-2xl border border-steelman-shadow bg-steelman-soft pr-3 pl-1.5 text-sm font-semibold whitespace-nowrap text-steelman-ink hover:bg-[#f8dcc8]"
         >
-          <AiMark size="sm" />
-          AI 어시스턴트
+          <SteelmanAiMark />
+          철강맨AI
         </button>
         <NotificationMenu employeeId={me.employeeId} />
         <MessengerMenu employeeId={me.employeeId} />
