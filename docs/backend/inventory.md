@@ -49,7 +49,7 @@
 | GET | `allocations` | 배정 조회 | 목적별 VIEW ↓ | |
 
 - 목적별 권한: SHIPMENT = `SHIPMENT_REQUEST_MANAGE`(영업 USE, 물류·관리자 VIEW), HOT_ROLLING = `HOT_ROLLING_ALLOCATE`(생산 USE, 관리자 VIEW). 데코레이터 하나로 OR 조건을 표현할 수 없으므로 데코레이터 없이 service에서 `hasPermission(user, { permission, level })`(`common/auth/auth.guard.ts` export)로 확인하고 아니면 `COM-002`.
-- 배정(`AllocationView`)과 배정 후보(`AllocationCandidate`)는 LOT 야드의 이름(`yardName`)을 함께 준다. 물류는 기준정보 조회 권한이 없어 야드 목록을 읽지 못한다. 후보는 TypedSQL로 읽으므로 야드 이름은 service가 야드 목록으로 붙인다.
+- 배정(`AllocationView`)과 배정 후보(`AllocationCandidate`)는 LOT 야드의 이름(`yardName`)을 함께 준다. 기준정보 조회 권한이 없는 사원도 야드 이름을 보게 하기 위해서다. 후보는 TypedSQL로 읽으므로 야드 이름은 service가 야드 목록으로 붙인다.
 - 다른 초안 행: `GET /api/allocations/recommendations`, `PATCH /api/allocations/:id`(변경), `PATCH /api/allocations/:id/release`, 생산 쪽 `GET /api/production-plans/:id/hot-rolling/candidates`·`POST …/hot-rolling/allocations`. [CSV] 비고가 "같은 API를 쓸지 생산 쪽과 맞춰야 함"이라 했다. 이 문서는 12.2 명시 경로(`allocations/*`, `purpose` 구분)를 기준으로 한다 🟡.
 
 ## 4. 업무 규칙·계산

@@ -17,6 +17,7 @@ import { formatDayLabel } from '@/features/messenger/lib/dayLabel';
 import { NOTIFICATION_TYPE_TONE } from '@/features/tasks/lib/notificationTone';
 import { useAction } from '@/hooks/useAction';
 import { useNotificationList } from '@/hooks/useNotifications';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDate, fmtHM, fmtMDHM } from '@/lib/format';
 
@@ -40,9 +41,10 @@ export function NotificationInbox({ focusId }: { focusId: number | null }) {
     if (searching) setLimit((current) => current + NOTIFICATION_PAGE_SIZE);
   }, [searching]);
 
+  const canOpen = useCanOpenHref();
   const openNotification = (notification: NotificationView) => {
     const go = () => {
-      if (notification.linkPath) router.push(notification.linkPath);
+      if (notification.linkPath && canOpen(notification.linkPath)) router.push(notification.linkPath);
     };
     if (notification.isRead) go();
     else markRead.mutate(notification.id, { onSuccess: go });
@@ -119,6 +121,8 @@ export function NotificationInbox({ focusId }: { focusId: number | null }) {
 
 function NotificationRow({ notification, focused, onOpen }: { notification: NotificationView; focused: boolean; onOpen: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const canOpen = useCanOpenHref();
+  const linkPath = notification.linkPath && canOpen(notification.linkPath) ? notification.linkPath : null;
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'center' });
   }, [focused]);
@@ -159,8 +163,8 @@ function NotificationRow({ notification, focused, onOpen }: { notification: Noti
         </div>
         {notification.body ? <p data-pet-field="내용" className="text-sm break-words text-ink-2">{notification.body}</p> : null}
         <div className="flex items-center gap-2 text-cap text-ink-3">
-          <span className={notification.linkPath ? 'font-medium text-brand' : undefined}>
-            {notification.linkPath ? '연결된 화면 열기 →' : '연결된 화면이 없는 알림이에요'}
+          <span className={linkPath ? 'font-medium text-brand' : undefined}>
+            {linkPath ? '연결된 화면 열기 →' : '연결된 화면이 없는 알림이에요'}
           </span>
           <span data-pet-field="읽음" className="ml-auto">{notification.isRead ? `읽음 ${fmtMDHM(notification.readAt)}` : '누르면 읽음으로 바뀌어요'}</span>
         </div>

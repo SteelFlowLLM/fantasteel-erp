@@ -13,6 +13,7 @@ import { IconButton } from '@/components/IconButton';
 import { PopFoot, PopHead, PopItem, PopList, PopNote, PopPanel } from '@/features/shell/PopPanel';
 import { NOTIFICATION_TYPE_TONE } from '@/features/tasks/lib/notificationTone';
 import { useAction } from '@/hooks/useAction';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { usePopover } from '@/hooks/usePopover';
 import { useRecentNotifications, useUnreadNotificationCount } from '@/hooks/useShellCounts';
 import { relTime } from '@/lib/format';
@@ -24,13 +25,14 @@ export function NotificationMenu({ employeeId }: { employeeId: number }) {
   const recent = useRecentNotifications(employeeId, popover.open);
 
   const markRead = useAction(notificationApi.markRead);
+  const canOpen = useCanOpenHref();
 
   const go = (href: string) => {
     popover.setOpen(false);
     router.push(href);
   };
   const openNotification = (notification: NotificationPreview) => {
-    const href = notification.linkPath ?? `/tasks?tab=notifications&notification=${notification.id}`;
+    const href = notification.linkPath && canOpen(notification.linkPath) ? notification.linkPath : `/tasks?tab=notifications&notification=${notification.id}`;
     if (notification.isRead) go(href);
     else markRead.mutate(notification.id, { onSuccess: () => go(href) });
   };

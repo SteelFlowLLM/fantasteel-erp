@@ -15,11 +15,11 @@ let purchasing: PurchasingService;
 let purchaser: AuthUser;
 /** 구매부장 최준혁 */
 let purchaseHead: AuthUser;
-/** 영업 사원 박서영 — 구매요청 권한 없음 (Message → ERP로 요청자가 될 수 있다) */
+/** 영업 사원 박서영 — 구매요청 조회만 (Message → ERP로 요청자가 될 수 있다) */
 let salesStaff: AuthUser;
-/** 영업부장 김도윤 — 구매요청 권한 없음, 영업부 부서장 */
+/** 영업부장 김도윤 — 구매요청 조회만, 영업부 부서장 */
 let salesHead: AuthUser;
-/** 물류 사원 권예진 — 구매요청 권한 없음, 부서장 아님 */
+/** 물류 사원 권예진 — 구매요청 조회만, 부서장 아님 */
 let logistics: AuthUser;
 let oreId: number;
 let coalId: number;
@@ -27,6 +27,13 @@ let slabId: number;
 let seq = 0;
 
 const DESIRED = '2026-11-20';
+
+/** 관리자가 구매요청 조회 권한을 뺀 사원 (업무 조회는 기본으로 모든 역할, 역할별 메뉴 v2 3장) */
+function withoutRequisitionView(user: AuthUser): AuthUser {
+  const permissions = { ...user.permissions };
+  delete permissions.PURCHASE_REQUISITION_CREATE;
+  return { ...user, permissions };
+}
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {
   try {
@@ -200,14 +207,15 @@ describe('구매요청 목록·상세 조회 범위 (REQ-PUR-001·002, REQ-AUTH-
     salesRequisitionId = (await createAs(salesStaff)).id;
   });
 
-  it('권한(VIEW)이 있으면 모든 부서의 요청이 보인다', async () => {
-    const ids = (await purchasing.listRequisitions(purchaser, { size: 100 })).items.map((r) => r.id);
-
-    expect(ids).toEqual(expect.arrayContaining([purchaseRequisitionId, salesRequisitionId]));
+  it('권한(VIEW)이 있으면 모든 부서의 요청이 보인다 (업무 조회는 모든 역할이라 물류·영업부장도)', async () => {
+    for (const user of [purchaser, logistics, salesHead]) {
+      const ids = (await purchasing.listRequisitions(user, { size: 100 })).items.map((r) => r.id);
+      expect(ids).toEqual(expect.arrayContaining([purchaseRequisitionId, salesRequisitionId]));
+    }
   });
 
   it('권한 없는 부서장은 자기 부서원의 요청만 본다', async () => {
-    const result = await purchasing.listRequisitions(salesHead, { size: 100 });
+    const result = await purchasing.listRequisitions(withoutRequisitionView(salesHead), { size: 100 });
 
     expect(result.items.map((r) => r.id)).toContain(salesRequisitionId);
     expect(result.items.every((r) => r.departmentId === salesHead.departmentId)).toBe(true);
@@ -215,14 +223,14 @@ describe('구매요청 목록·상세 조회 범위 (REQ-PUR-001·002, REQ-AUTH-
   });
 
   it('권한도 없고 부서장도 아니면 COM-002', async () => {
-    expect(await codeOf(purchasing.listRequisitions(logistics, {}))).toBe('COM-002');
-    expect(await codeOf(purchasing.requisitionDetail(logistics, purchaseRequisitionId))).toBe('COM-002');
+    expect(await codeOf(purchasing.listRequisitions(withoutRequisitionView(logistics), {}))).toBe('COM-002');
+    expect(await codeOf(purchasing.requisitionDetail(withoutRequisitionView(logistics), purchaseRequisitionId))).toBe('COM-002');
   });
 
   it('상세는 권한(VIEW) 또는 그 요청의 승인권자만', async () => {
     await expect(purchasing.requisitionDetail(purchaseHead, salesRequisitionId)).resolves.toEqual(expect.objectContaining({ id: salesRequisitionId }));
-    await expect(purchasing.requisitionDetail(salesHead, salesRequisitionId)).resolves.toEqual(expect.objectContaining({ departmentName: '영업부' }));
-    expect(await codeOf(purchasing.requisitionDetail(salesHead, purchaseRequisitionId))).toBe('COM-002');
+    await expect(purchasing.requisitionDetail(withoutRequisitionView(salesHead), salesRequisitionId)).resolves.toEqual(expect.objectContaining({ departmentName: '영업부' }));
+    expect(await codeOf(purchasing.requisitionDetail(withoutRequisitionView(salesHead), purchaseRequisitionId))).toBe('COM-002');
   });
 
   it('없는 구매요청은 COM-003', async () => {

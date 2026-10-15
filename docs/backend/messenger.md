@@ -48,7 +48,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | PATCH | `chat-rooms/:id/settings` | 내 방 설정 | 방 멤버 | **명세에 없음** (14번). `{ muted?, pinned? }` → `{ chatRoomId, muted, pinnedAt }` |
 
 - "방 멤버" 검사는 기능 권한 코드가 아니라 service에서 `chat_room_member`를 조회해 확인하고, 아니면 `COM-002`.
-- 업무방의 "연결 수주 조회 권한"은 `hasPermission(user, { permission: 'SALES_ORDER_CREATE', level: 'VIEW' })`로 확인한다(`common/auth/auth.guard.ts`). [권한표]상 영업·생산·물류·관리자만 통과한다 🟡.
+- 업무방의 "연결 수주 조회 권한"은 `hasPermission(user, { permission: 'SALES_ORDER_CREATE', level: 'VIEW' })`로 확인한다(`common/auth/auth.guard.ts`). 2026-10-15부터 업무 조회는 모든 역할이라([권한표] 3장) 기본 권한으로는 모든 사원이 통과한다. 관리자가 권한을 빼면 업무방을 만들 수 없고 방 상단 수주 정보는 'denied'로 가린다.
 
 ## 4. 업무 규칙
 
@@ -215,7 +215,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | ~~첨부 다운로드 id~~ | 해결(스키마 3차): `attachments/:id`의 id = `message_attachment.id` | [ERD], [CSV] |
 | ~~첨부 업로드 모양~~ | 결정(2026-10-07): 업로드하면 바로 메시지 1건 생성 | [CSV] |
 | 파일 형식·용량 제한 | 구현 단계에서 정함(아직 없음) | [02] REQ-MSG-003 |
-| 업무방 권한 | 구매·품질 역할은 `SALES_ORDER_CREATE` VIEW가 없어 업무방을 만들 수 없다. 멤버로 초대받은 경우 방 상단 수주 정보를 보여도 되는지도 미정 | [CSV] 채팅방 생성 비고, [권한표] |
+| ~~업무방 권한~~ | 해결(2026-10-15): 업무 조회를 모든 역할에 줘서 모든 사원이 업무방을 만들고 방 상단 수주 정보를 본다. 수주 조회 권한을 뺀 사원만 만들 수 없고 수주 정보가 가려진다 | [CSV] 채팅방 생성 비고, [권한표] |
 | ~~DIRECT 중복~~ | 결정(2026-10-07): 기존 방을 돌려준다 | [02] REQ-MSG-001 |
 | 멤버 추가·나가기 | 멤버 추가는 `POST chat-rooms/:id/members`로 추가함(2026-10-07). 나가기는 아직 없다(ERD `left_at` 여부 결정 필요) | [CSV] |
 | ~~소켓 이벤트 이름~~ | 결정(2026-10-07): `message:new`, `room:read`, `room:updated`. 페이로드는 소켓 PR에서 정한다 | [05] 6장 |

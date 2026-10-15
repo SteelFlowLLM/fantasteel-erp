@@ -37,6 +37,17 @@ afterAll(async () => {
   await app?.close();
 });
 
+/** 관리자가 부서·권한 화면에서 역할 권한을 뺀 상태를 만든다(업무 조회는 기본으로 모든 역할, 역할별 메뉴 v2 3장). 돌려놓는 함수를 돌려준다 */
+async function revokeRolePermission(roleCode: string, permission: string): Promise<() => Promise<void>> {
+  const prisma = app.get(PrismaService);
+  const role = await prisma.role.findUniqueOrThrow({ where: { roleCode } });
+  const row = await prisma.rolePermission.findUniqueOrThrow({ where: { roleId_permission: { roleId: role.id, permission } } });
+  await prisma.rolePermission.delete({ where: { id: row.id } });
+  return async () => {
+    await prisma.rolePermission.create({ data: { roleId: role.id, permission, permissionLevel: row.permissionLevel } });
+  };
+}
+
 describe('GET dashboard/widgets/shipment-result', () => {
   it('출고 확정 권한이 있으면 오늘 포함 최근 30일을 하루 단위로 준다', async () => {
     const { status, body } = await get<ShipmentResultWidget>('/dashboard/widgets/shipment-result', await login('1610014'));
@@ -48,9 +59,15 @@ describe('GET dashboard/widgets/shipment-result', () => {
     expect(body.data.totalTon).toMatch(/^\d+\.\d{3}$/);
   });
 
-  it('출고 확정 권한이 없으면 COM-002', async () => {
-    const { body } = await get('/dashboard/widgets/shipment-result', await login('1709007'));
-    expect(body.error?.code).toBe('COM-002');
+  it('출고 확정 조회 권한이 없으면 COM-002 (업무 조회는 모든 역할이라 생산도 보고, 관리자가 빼면 막힌다)', async () => {
+    const production = await login('1709007');
+    expect((await get('/dashboard/widgets/shipment-result', production)).status).toBe(200);
+    const restore = await revokeRolePermission('PRODUCTION', 'GOODS_ISSUE_CONFIRM');
+    try {
+      expect((await get('/dashboard/widgets/shipment-result', production)).body.error?.code).toBe('COM-002');
+    } finally {
+      await restore();
+    }
   });
 });
 
@@ -66,9 +83,15 @@ describe('GET dashboard/widgets/process-yield', () => {
     expect(body.data.processes[0]).toMatchObject({ actualYieldRate: null, plannedYieldRate: null });
   });
 
-  it('작업 실적 조회 권한이 없으면 COM-002', async () => {
-    const { body } = await get('/dashboard/widgets/process-yield', await login('1610014'));
-    expect(body.error?.code).toBe('COM-002');
+  it('작업 실적 조회 권한이 없으면 COM-002 (업무 조회는 모든 역할이라 물류도 보고, 관리자가 빼면 막힌다)', async () => {
+    const logistics = await login('1610014');
+    expect((await get('/dashboard/widgets/process-yield', logistics)).status).toBe(200);
+    const restore = await revokeRolePermission('LOGISTICS', 'PRODUCTION_RESULT_CONFIRM');
+    try {
+      expect((await get('/dashboard/widgets/process-yield', logistics)).body.error?.code).toBe('COM-002');
+    } finally {
+      await restore();
+    }
   });
 });
 

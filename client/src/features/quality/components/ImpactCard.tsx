@@ -2,7 +2,6 @@
 
 // 불합격 LOT의 영향과 시스템이 같이 처리한 것 + 영향받는 수주 품목의 부족과 재생산 (BP-QC-01, 4.5, REQ-PRD-006, 14.1-6).
 // 재생산은 자동으로 만들지 않는다. 여재와 진행 중인 계획으로도 부족할 때만 '재생산 필요 N매'와 만들기 버튼을 보인다(생산계획·히트 편성 사용 권한).
-import Link from 'next/link';
 import { useState } from 'react';
 import type { LinkedPlan, RejectedLotDetail } from '@/api/dispositions';
 import { Banner } from '@/components/Banner';
@@ -16,16 +15,18 @@ import { PERMISSION, PRODUCTION_PLAN_STATUS_LABEL } from '@/codes';
 import { lotTraceHref } from '@/features/quality/components/LotHeader';
 import { qtyUnitOfItem } from '@/features/quality/lib/qualityDisplay';
 import { useCreateReproductionPlan } from '@/hooks/useDispositions';
+import { ScreenLink } from '@/features/shell/ScreenLink';
 import { useCanUse } from '@/hooks/usePermission';
 import { permissionNeedText } from '@/lib/permissions';
 
 function PlanChip({ plan, unit }: { plan: LinkedPlan; unit: string }) {
   return (
-    <Link
+    <ScreenLink
       href={`/production/plans?plan=${plan.productionPlanId}`}
       data-pet-item="productionPlan"
       data-pet-item-title={plan.productionPlanNo}
       className="inline-flex h-7 items-center gap-1.5 rounded-[14px] border border-line-strong bg-surface px-2.5 text-xs font-medium text-run hover:bg-surface-2"
+      textClassName="inline-flex h-7 items-center gap-1.5 rounded-[14px] border border-line-strong bg-surface px-2.5 text-xs font-medium"
     >
       <span className="font-mono">{plan.productionPlanNo}</span>
       {plan.isReproduction ? (
@@ -44,7 +45,7 @@ function PlanChip({ plan, unit }: { plan: LinkedPlan; unit: string }) {
           {unit}
         </span>
       </span>
-    </Link>
+    </ScreenLink>
   );
 }
 

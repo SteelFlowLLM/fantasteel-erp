@@ -25,6 +25,7 @@ import { MyDraftList } from '@/features/actionDrafts/components/MyDraftList';
 import { getConfirmFailureTitle, DRAFT_STATUS_TONE, buildDraftFlowSteps, getExecutionFailure, getRequisitionStatusDisplay } from '@/features/actionDrafts/lib/draftDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useActionDraft } from '@/hooks/useActionDrafts';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { fmtMDHM } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 
@@ -37,6 +38,7 @@ export function ActionDraftScreen() {
   const params = useParams<{ id: string }>();
   const id = parseDraftId(params.id);
   const draft = useActionDraft(id);
+  const canOpen = useCanOpenHref();
   const notFound = id === null || (draft.error instanceof ApiError && draft.error.code === 'COM-003');
 
   return (
@@ -49,9 +51,11 @@ export function ActionDraftScreen() {
             title="초안을 찾을 수 없어요"
             text="지워졌거나 잘못된 주소예요. 왼쪽 내 초안이나 메신저 메시지에서 다시 열어 주세요."
             actions={
-              <ButtonLink href="/purchase-requisitions" size="sm" icon="cart">
-                구매요청 목록
-              </ButtonLink>
+              canOpen('/purchase-requisitions') ? (
+                <ButtonLink href="/purchase-requisitions" size="sm" icon="cart">
+                  구매요청 목록
+                </ButtonLink>
+              ) : undefined
             }
           />
         ) : (

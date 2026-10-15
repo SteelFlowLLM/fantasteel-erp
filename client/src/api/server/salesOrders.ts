@@ -336,7 +336,7 @@ function cancelPurchaseImpact(salesOrderId: number): Promise<SalesOrderCancelPur
 
 /**
  * 생산 연결 탭: 수주 품목에 연결된 계획과, 수주 취소로 연결이 풀린 진행 계획(취소 기록의 계획 번호)의 생산계획 상세.
- * 생산계획 조회 권한이 없으면(물류) 빈 목록이다.
+ * 생산계획 조회 권한이 없으면 빈 목록이다.
  */
 async function productionLinks(salesOrderId: number): Promise<SalesOrderPlanLink[]> {
   const d = await serverRequest<ServerSalesOrderDetail>('GET', `/sales-orders/${salesOrderId}`);
