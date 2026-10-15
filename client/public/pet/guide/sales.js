@@ -11,6 +11,7 @@
         '{name} {grade}님, 여기는 수주 화면이에요. 충족 현황과 납기를 챙겨요.',
         '수주를 고르면 예약·생산·출하가 얼마나 됐는지 보여요.'
       ],
+      locked: '영업이 쓰는 화면이에요. 수주 목록과 품목별 충족 현황·납기 위험을 봐요.',
       tour: [
         { target: 'card:salesOrders.filter', text: '상태·고객사·품목 유형으로 수주를 걸러요.' },
         { target: 'card:salesOrders.toolbar', text: '수주번호·고객사로 찾고, 여기서 수주를 등록해요.' },
@@ -25,6 +26,7 @@
     },
     salesOrderNew: {
       intro: ['고객사와 품목을 넣으면 재고 예약과 부족 매수를 미리 보여 줘요.'],
+      locked: '영업이 수주를 등록하는 화면이에요. 고객사와 규격·매수·납기를 넣어요.',
       tour: [
         { target: 'card:salesOrderNew.basic', text: '먼저 고객사를 골라요. 담당은 나로 정해져요.' },
         { target: 'card:salesOrderNew.items', text: '품목마다 규격·매수·납기를 넣어요. 매수는 정수!' },
@@ -38,6 +40,7 @@
         '출하요청을 보고 LOT 배정을 확정하는 화면이에요.',
         '배정이 끝나면 물류가 출고를 확정해요.'
       ],
+      locked: '영업이 쓰는 화면이에요. 출하요청 목록과 LOT 배정 상태를 봐요.',
       tour: [
         { target: 'card:shipmentRequests.filter', text: '상태 칩과 고객사·요청일로 걸러요.' },
         { target: 'card:shipmentRequests.list', text: '다음 칸을 보면 이어서 할 일이 보여요.' },
@@ -48,6 +51,7 @@
     },
     shipmentRequestNew: {
       intro: ['같은 고객사의 수주 품목을 묶어 출하요청해요.'],
+      locked: '영업이 출하요청을 등록하는 화면이에요. 같은 고객사의 수주 품목을 골라 묶어요.',
       tour: [
         { target: 'card:shipmentRequestNew.picker', text: '고객사를 고르고 출하할 품목을 체크해요.' },
         { target: 'card:shipmentRequestNew.totals', text: '묶은 품목·출하 매수·이론중량 합계예요.' },

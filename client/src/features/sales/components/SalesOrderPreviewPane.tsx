@@ -29,7 +29,12 @@ export function SalesOrderPreviewPane({ salesOrderId }: { salesOrderId: number |
   const timeline = useSalesOrderTimeline(salesOrderId);
 
   return (
-    <aside aria-label="선택한 수주 미리보기" data-pet-target="card:salesOrders.preview" className="flex w-[400px] flex-none flex-col overflow-auto border-l border-line bg-surface">
+    // 좁으면 좁히고, 그래도 모자라면 숨긴다 (기준은 SalesOrderListScreen의 @container 폭). 숨어도 수주번호를 누르면 상세로 간다
+    <aside
+      aria-label="선택한 수주 미리보기"
+      data-pet-target="card:salesOrders.preview"
+      className="flex w-[400px] flex-none flex-col overflow-auto border-l border-line bg-surface @max-[1200px]:w-[320px] @max-[1040px]:hidden"
+    >
       {salesOrderId === null ? (
         <EmptyNote className="py-10">미리 볼 수주가 없어요</EmptyNote>
       ) : (

@@ -1,5 +1,6 @@
 /* 영역별 화면 설명(public/pet/guide/<영역>.js → window.FANTA_PET_GUIDE_PARTS)을 기본 설명(window.FANTA_PET_GUIDE)에 합친다.
- * 묶음 하나: { area, screens: { <SCREEN 키>: { intro, tour: [{ target, text }] } }, targets: { <키>: {...} }, faq: [...], idle: [...],
+ * 묶음 하나: { area, screens: { <SCREEN 키>: { intro, tour: [{ target, text }], locked } }, targets: { <키>: {...} }, faq: [...], idle: [...],
+ *   (locked = 열 권한이 없어 잠긴 화면에서 intro 대신 할 말. 누가 쓰는 곳인지·무엇을 하는 곳인지만 적는다)
  *   glossary: { <범위 키>: { <용어>: 설명 } }, items: { <항목 종류>: { name, tips, status } } }
  * 같은 키는 나중 묶음이 이긴다. 엔진보다 먼저 불러야 한다. */
 (function (global) {
