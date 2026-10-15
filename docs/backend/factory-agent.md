@@ -22,7 +22,7 @@
 
 - 알림형(DUE_RISK·QUALITY_RATE_RISE)은 후보를 만들지 않는다. 안 읽은 같은 알림이 있으면 다시 보내지 않는다(읽으면 다음 감지에서 다시 알린다). 작업 로그 유형이 없어 알림형은 작업 로그를 남기지 않는다.
 - 배정 추천(ALLOCATION_CONFIRM 유형)은 실행 핸들러가 없다. 확정은 "추천 확인" 기록이고(EXECUTED, 결과 없음), 실제 예약·배정은 재고·출하요청 화면에서 한다.
-- 화면: `/agent` (`client/src/features/agent/AgentScreen.tsx`). 대응 후보 목록·상황 설명·확정·반려.
+- 화면: `/agent` (`client/src/features/agent/AgentScreen.tsx`)의 대응 후보 목록·상황 설명·확정·반려, 대시보드 Agent 위험 감지 위젯(확정 대기 건수·유형별·최근 후보).
 
 ## 3. 구조
 
@@ -67,4 +67,34 @@
 
 ## 7. 테스트
 
-`npm test -w @fantasteel/server -- factory-agent` (묶음 DB `fs_prod`, 묶음 전체가 같이 돈다). 규칙 단위 테스트는 `agent-rules.spec.ts`·`agent-alert-rules.spec.ts`(DB 없음), 알림형 DB 테스트는 `factory-agent-alerts.spec.ts`. 여재 추천의 DB 테스트는 아직 없다(규칙 단위 테스트만).
+`npm test -w @fantasteel/server -- factory-agent` (묶음 DB `fs_prod`, 묶음 전체가 같이 돈다). 규칙 단위 테스트는 `agent-rules.spec.ts`·`agent-alert-rules.spec.ts`(DB 없음), 알림형 DB 테스트는 `factory-agent-alerts.spec.ts`. 여재 추천의 DB 테스트는 `factory-agent-surplus.spec.ts`.
+
+## 8. 공통 코드 정의서 추가 요청안 (2026-10-15)
+
+`docs/notion/06-공통-코드-정의서.md`는 읽기 전용이고 `shared/src/codes/index.ts`는 정의서에서 생성하는 파일이라 이 작업에서 직접 고치지 않았다. 정의서 담당자가 아래를 올리면 코드는 바로 바꿀 수 있다.
+
+**NOTIFICATION_TYPE (알림 유형) — 근거 REQ-AGT-004, REQ-NTF-002**
+
+| 값 | 표시명 | 쓰는 곳 |
+| --- | --- | --- |
+| DUE_RISK | 납기 위험 | 수주 담당 영업에게 보내는 납기 위험 알림 |
+| QUALITY_RATE_RISE | 불합격률 상승 | 품질 부서원에게 보내는 알림 |
+| AGENT_CANDIDATE | 대응 후보 | (선택) 대응 후보가 생겼을 때 담당 부서원에게 보내는 알림. 지금은 보내지 않는다 |
+
+**AGENT_RISK_TYPE (Agent 위험 유형) — 근거 BP-AGT-01 "위험 코드 제안"**
+
+| 값 | 표시명 |
+| --- | --- |
+| RAW_SHORTAGE | 원료 부족 |
+| GOOD_QTY_SHORTAGE | 합격 매수 부족 |
+| DUE_RISK | 납기 위험 |
+| AGED_SURPLUS | 여재 장기 보유 |
+| QUALITY_RATE_RISE | 불합격률 상승 |
+
+정의서 반영 뒤 코드에서 할 일:
+1. `npm run codes -w @fantasteel/shared`로 코드를 다시 만든다.
+2. `shared/src/factory-agent.ts`의 `AGENT_RISK_TYPE`·`AGENT_RISK_TYPE_LABEL`을 지우고 codes 것을 쓴다.
+3. `factory-agent.service.ts`의 `ALERT_NOTIFICATION_TYPE`(지금 `TASK_ASSIGNED`)을 위험별 유형(DUE_RISK·QUALITY_RATE_RISE)으로 바꾼다. 클라이언트 알림 목록의 유형 배지(`NOTIFICATION_TYPE_TONE`)에도 두 값을 더한다.
+4. 알림형 작업 로그가 필요하면 정의서 2장 BUSINESS_EVENT_TYPE로 옮겨 둔 `AGENT_RISK_DETECTED`(Agent 위험 감지, 정의서 3장에 P2로 예약돼 있음)를 쓴다.
+
+기준값(원료 부족 조회 기간·스케줄 주기·여재 보유일·불합격률)과 여재 추천(추천만 함)은 6장의 현재 값 그대로 둔다.

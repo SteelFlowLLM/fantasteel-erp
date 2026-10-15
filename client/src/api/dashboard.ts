@@ -3,10 +3,11 @@
 //   업무 계산식(가용·검사합격·납기 위험·순소요)을 다시 만들지 않는다. 묶는 방법은 features/dashboard/lib/widgetMath.ts.
 // - 위젯마다 그 데이터를 보여 주는 화면과 같은 조회 권한을 요구한다(로그인 사원 /auth/me 권한 → 없으면 COM-002, 화면은 잠금 표시).
 // - 위젯 키는 화면 상수다 (공통 코드 그룹이 아니다).
-import type { AuthUser } from '@fantasteel/shared';
+import type { AgentCandidateView, AgentRiskType, AuthUser } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { PurchaseOrderView, RequisitionView } from '@/api/purchasing';
+import { serverAgentCandidateApi } from '@/api/server/agentCandidates';
 import { serverBusinessEventApi } from '@/api/server/businessEvents';
 import { serverDashboardApi, serverDashboardSourceApi } from '@/api/server/dashboard';
 import { serverMrpRequirements } from '@/api/server/mrp';
@@ -16,6 +17,7 @@ import {
   PERMISSION,
   PURCHASE_REQUISITION_STATUS,
   type ActorType,
+  type DraftStatus,
   type Permission,
   type ProcessType,
   type ProductItemType,
@@ -50,7 +52,7 @@ export const DASHBOARD_WIDGET_KEYS = [
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGET_KEYS)[number];
 
 /** P2(2등급 AI) 위젯: 데이터 없이 '준비 중' 디자인만 (BP-DSH-01 "P2 미구현 시 Agent 영역은 비활성") */
-export type SoonWidgetKey = 'AGENT_RISK' | 'AI_USAGE';
+export type SoonWidgetKey = 'AI_USAGE';
 export type DataWidgetKey = Exclude<DashboardWidgetKey, SoonWidgetKey>;
 
 const SALES_ORDER_VIEW = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL] as const;
@@ -67,6 +69,8 @@ export const DASHBOARD_WIDGET_VIEW: Record<DataWidgetKey, readonly Permission[]>
   RECENT_EVENTS: [],
   /** 재고 화면은 모든 사원이 연다 */
   PRODUCT_STOCK: [],
+  /** 대응 후보 목록은 서버가 후보 업무의 조회 권한으로 걸러 준다. Agent 화면은 모든 사원이 연다 */
+  AGENT_RISK: [],
   PROCESS_YIELD: [PERMISSION.PRODUCTION_RESULT_CONFIRM],
   RAW_MATERIAL_BALANCE: [PERMISSION.PURCHASE_REQUISITION_CREATE],
   REJECT_RATE: [PERMISSION.INSPECTION_REGISTER],
@@ -434,7 +438,28 @@ export interface SurplusAgeData {
 
 // ── 묶음 ────────────────────────────────────────────────
 
+/** Agent 위험 감지 위젯 (REQ-AGT-005·006): 확정 대기 후보 수와 위험 유형별 건수, 최근 후보 */
+export interface AgentRiskData {
+  openCount: number;
+  byRisk: { riskType: AgentRiskType; count: number }[];
+  items: { id: number; riskType: AgentRiskType; summary: string; draftStatus: DraftStatus }[];
+}
+
+const AGENT_RISK_ITEM_LIMIT = 3;
+
+/** 서버가 준 대응 후보(권한으로 걸러진 목록, 최근 것 먼저)를 위젯 모양으로 줄인다. 확정 전·확정했지만 실행 전 후보만 센다 */
+export function agentRiskDataOf(candidates: readonly AgentCandidateView[]): AgentRiskData {
+  const open = candidates.filter((c) => c.draftStatus === 'AI_GENERATED' || c.draftStatus === 'WAITING_APPROVAL' || c.draftStatus === 'APPROVED');
+  const riskTypes = [...new Set(open.map((c) => c.riskType))];
+  return {
+    openCount: open.length,
+    byRisk: riskTypes.map((riskType) => ({ riskType, count: open.filter((c) => c.riskType === riskType).length })),
+    items: open.slice(0, AGENT_RISK_ITEM_LIMIT).map((c) => ({ id: c.id, riskType: c.riskType, summary: c.summary, draftStatus: c.draftStatus })),
+  };
+}
+
 export interface DashboardWidgetDataMap {
+  AGENT_RISK: AgentRiskData;
   PROCESS_FLOW: ProcessFlowData;
   ORDER_FULFILLMENT: OrderFulfillmentData;
   RECENT_EVENTS: RecentEventsData;
@@ -463,11 +488,12 @@ function fromServer<T>(key: DataWidgetKey, read: () => Promise<T>): () => Promis
 }
 const serverTrendWindow = () => trendWindow(todayOf(), DASHBOARD_TREND_DAYS);
 
-/** 위젯마다 서버를 읽는 함수 (AGENT_RISK·AI_USAGE는 P2라 데이터가 없다) */
+/** 위젯마다 서버를 읽는 함수 (AI_USAGE는 P2라 데이터가 없다) */
 const SERVER_READERS: { [K in DataWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
   PROCESS_FLOW: serverDashboardApi.processFlow,
   ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
   PRODUCT_STOCK: serverDashboardApi.productStock,
+  AGENT_RISK: async () => agentRiskDataOf(await serverAgentCandidateApi.list()),
   RAW_MATERIAL_BALANCE: readRawMaterialBalanceFromServer,
   PURCHASE_PROGRESS: readPurchaseProgressFromServer,
   RECENT_EVENTS: () => serverBusinessEventApi.recentEvents(DASHBOARD_RECENT_EVENT_LIMIT),
