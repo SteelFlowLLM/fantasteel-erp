@@ -71,8 +71,9 @@ export class MessageActionRepository {
     return tx.actionDraft.findUnique({ where: { id }, select: draftSelect });
   }
 
+  /** 메시지에서 만든 초안만 (Agent 대응 후보는 factory-agent가 다룬다) */
   findDrafts(tx: Tx, where: Prisma.ActionDraftWhereInput) {
-    return tx.actionDraft.findMany({ where, orderBy: { id: 'desc' }, select: draftSelect });
+    return tx.actionDraft.findMany({ where: { ...where, messageId: { not: null } }, orderBy: { id: 'desc' }, select: draftSelect });
   }
 
   findItems(tx: Tx, ids: number[]) {

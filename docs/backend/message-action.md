@@ -31,7 +31,7 @@
 | POST | `messages/:id/action-drafts` | 메시지에서 구매요청 초안 생성 | 방 멤버 | 요청자는 메시지 작성자(AI가 지정하지 않음). 유형은 ACTION_TYPE. 확장 유형은 요청 본문 `actionType`(10장) |
 | GET | `action-drafts` | 초안 목록 | 확정 주체 본인 | 상태는 DRAFT_STATUS |
 | GET | `action-drafts/:id` | 초안 상세 | 확정 주체 본인 | |
-| PATCH | `action-drafts/:id` | 초안 수정 | 확정 주체 본인 | |
+| PATCH | `action-drafts/:id` | 초안 수정 | 확정 주체 본인 | 본문 `{ payload, expectedUpdatedAt }`. `payload` 칸은 유형 정의가 검증한다(2026-10-15) |
 | POST | `action-drafts/:id/confirm` | 초안 확정·실행 | 구매요청 초안은 요청자 | 필수값 미확정 시 ACT-001. `actionDraftId`로 중복 실행 차단 |
 | POST | `action-drafts/:id/reject` | 초안 반려 | 확정 주체 본인 | |
 | POST ➕ | `action-drafts/:id/execute` | 확정했지만 실행에 실패한 초안 다시 실행 | 확정 주체 본인 | 명세에 없음(9장) |
@@ -69,7 +69,7 @@ confirm(draftId, actor):
 
 **반려**: 요청자만, 확정 전만. `reject_reason` 저장, REJECTED로 끝([06] DRAFT_STATUS).
 
-**업무 유형 등록 구조**(REQ-ACT-004, 12.3): 유형별로 `{ type, schema(검증기), confirmer, handler }`를 등록하는 레지스트리를 둔다. P1은 `PURCHASE_REQUISITION_CREATE` 1종(`confirmer: REQUESTER`, `handler: purchasing.createRequisition`). 실행 핸들러는 해당 모듈 담당자(purchasing)가 구현한다(BP-ACT-01). AI에 DB 쓰기 권한을 주지 않고, 실행은 사용자 권한과 업무 검증을 거친다.
+**업무 유형 등록 구조**(REQ-ACT-004, 12.3): 유형별로 `{ type, schema(검증기), confirmer, handler }`를 등록하는 레지스트리를 둔다. 구현은 `action-types/`: 유형 정의 `ActionDefinition`(payload 읽기·빈 값·수정 칸 검증·미확정 칸·실행 가능 확인·확정 사유·실행·결과)과 등록부 `ActionTypeRegistry`. 서비스는 상태 흐름·작업 로그만 맡는다. 등록부에 없는 유형으로 만들면 COM-004. 지금은 `PURCHASE_REQUISITION_CREATE` 1종(`confirmer: MESSAGE_SENDER`, `handler: purchasing.createRequisition`). 실행 핸들러는 해당 모듈 담당자(purchasing)가 구현한다(BP-ACT-01). AI에 DB 쓰기 권한을 주지 않고, 실행은 사용자 권한과 업무 검증을 거친다.
 
 ## 5. 오류 코드·작업 로그
 
@@ -86,7 +86,7 @@ confirm(draftId, actor):
 | DRAFT_CREATED | USER(생성한 멤버) | `action_draft` | `actionDraftId`, `messageId` |
 | DRAFT_CONFIRMED | USER(요청자) | `action_draft` | 사유 DRAFT_CONFIRMED |
 | PURCHASE_REQUISITION_CREATED | USER(요청자) | `purchase_requisition` | purchasing이 기록, `actionDraftId`·`messageId` |
-| DRAFT_EXECUTED | USER(요청자) | `action_draft` | `after`에 생성된 구매요청 id |
+| DRAFT_EXECUTED | USER(요청자) | `action_draft` | `after`에 만든 업무 `resultTable`·`resultId`·`resultNo` (2026-10-15부터, 그 전 기록은 `purchaseRequisitionId`·`purchaseRequisitionNo`) |
 | DRAFT_REJECTED | USER(요청자) | `action_draft` | `reason` = 반려 사유 |
 
 `isAiAssisted`: P1은 AI 추출이 없으므로 false. AI 실행 카드 확정(REQ-AST-010)은 P2.
@@ -147,7 +147,7 @@ confirm(draftId, actor):
 | 중복 생성 응답 | 같은 메시지·유형에 미처리 초안이 있으면 그 초안을 돌려준다(`{ id, created: false }`) |
 | 목록 범위 | `GET action-drafts`는 내가 요청자인 초안(API-252). 메시지 메뉴의 '초안 보기'를 위해 `GET action-drafts?chatRoomId=`로 그 방 메시지의 초안도 준다(방 멤버만, 아니면 COM-002). 최근 것 먼저 |
 | payload 이름 | ERD 이름 `itemId`·`requestedTon`·`desiredReceiptDate`, 선택 입력 `requestReason`, 원본 글 복사 `sourceText` |
-| 수정 | 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. 보내지 않은 칸은 그대로, null이면 비운다. 원료가 아닌 품목·0 이하 톤·없는 날짜는 COM-004, `expectedUpdatedAt`이 다르면 COM-001. 맞는 작업 로그 유형이 없어 수정은 로그를 남기지 않는다 |
+| 수정 | 요청자만, 확정 전(AI_GENERATED·WAITING_APPROVAL)만. `payload`의 보내지 않은 칸은 그대로, null이면 비운다. 원료가 아닌 품목·0 이하 톤·없는 날짜·그 유형에 없는 칸은 COM-004, `expectedUpdatedAt`이 다르면 COM-001. 맞는 작업 로그 유형이 없어 수정은 로그를 남기지 않는다 |
 | 상대 날짜 | AI 추출이 없어 요청자가 날짜를 직접 넣으므로 바꾸지 않는다 |
 | 미확정 칸 | 응답의 `unresolvedFields`: 원료 품목·수량(톤)·희망 입고일 중 비었거나 맞지 않는 칸 |
 | 확정 권한 | 요청자 본인이고 구매요청 등록 USE 권한이 있어야 수정·확정·반려한다(실행은 사용자 권한을 거친다, BP-ACT-01). 아니면 COM-002 |
@@ -179,4 +179,8 @@ confirm(draftId, actor):
 | 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order는 tx를 받는 `createInTx`가 있지만 `private`이라 공개로 바꾸고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
 | 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
 
-구현 순서: 등록부 일반화(REQ-ACT-004) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
+구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
+
+- 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
+- `GET action-drafts`(내 초안)는 메시지에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
+- AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.

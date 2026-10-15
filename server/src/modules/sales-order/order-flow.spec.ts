@@ -160,11 +160,11 @@ describe('14.1 P1 슬래브 수주 전체 흐름 (핵심)', () => {
     const drafts = moduleRef.get(MessageActionService);
     const { id } = await drafts.create(users.purchase, message.id);
     const smn = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SMN01' } });
-    await drafts.update(users.purchase, id, { itemId: smn.id, requestedTon: '20', desiredReceiptDate: '2026-12-20' });
+    await drafts.update(users.purchase, id, { payload: { itemId: smn.id, requestedTon: '20', desiredReceiptDate: '2026-12-20' } });
     const outcome = await drafts.confirm(users.purchase, id, {});
-    expect(outcome).toMatchObject({ executed: true, draft: { draftStatus: 'EXECUTED', purchaseRequisition: { purchaseRequisitionStatus: 'WAITING_APPROVAL' } } });
+    expect(outcome).toMatchObject({ executed: true, draft: { draftStatus: 'EXECUTED', result: { table: 'purchase_requisition', status: 'WAITING_APPROVAL' } } });
 
-    const requisitionId = outcome.draft.purchaseRequisition?.id ?? 0;
+    const requisitionId = outcome.draft.result?.id ?? 0;
     expect(await moduleRef.get(PurchasingService).approve(users.purchaseHead, requisitionId)).toMatchObject({ purchaseRequisitionStatus: 'APPROVED' });
     const events = await prisma.businessEvent.findMany({ where: { actionDraftId: id }, orderBy: { id: 'asc' } });
     expect(events.map((e) => e.businessEventType)).toEqual([
