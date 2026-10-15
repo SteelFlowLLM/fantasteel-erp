@@ -1,16 +1,17 @@
 'use client';
 
-// AI 어시스턴트 패널 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
+// 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부)로 답한다. 실행 카드(AST-005)·사례 검색(AST-006)은 다음 단계라 준비 중으로 둔다.
+// 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import type { AiAssistantScreenContext, AiAssistantSource } from '@fantasteel/shared';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { AiMark } from '@/components/ComingSoon';
 import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
 import { routeTitleOf } from '@/features/shell/routeTitles';
+import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useMe } from '@/hooks/useMe';
 import { useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
@@ -27,8 +28,17 @@ const SOURCE_LABEL: Record<AiAssistantSource['kind'], string> = { GLOSSARY: '용
 export const sourceText = (source: AiAssistantSource): string =>
   `${SOURCE_LABEL[source.kind]} · ${source.label}${source.kind === 'DATA' ? '' : ` (${source.id})`}`;
 
+/** 펫 대화창의 추천 질문 칩(.fp-chip)과 같은 모양. 질문이 길 수 있어 한 줄로 자르지 않고 줄을 바꾼다 */
 const QUESTION_CHIP =
-  'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-ai-line bg-ai-bg px-2.5 py-1 text-left text-xs leading-snug font-medium text-ai-strong hover:border-ai disabled:cursor-not-allowed disabled:opacity-60';
+  'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-line-strong bg-surface px-2.5 py-1 text-left text-xs leading-snug font-medium text-ink-2 enabled:hover:border-steelman enabled:hover:text-steelman-ink disabled:cursor-not-allowed disabled:opacity-60';
+
+/** 펫 말풍선(.fp-bubble)처럼 아바타 쪽으로 꼬리를 낸다: 바깥 삼각형이 테두리, 안쪽 삼각형이 바탕색으로 테두리 틈을 메운다 */
+const TAIL_SHAPE =
+  'relative before:absolute before:top-2 before:-left-[11px] before:border-y-8 before:border-r-10 before:border-l-0 before:border-y-transparent ' +
+  'after:absolute after:top-[11px] after:-left-[6px] after:border-y-5 after:border-r-7 after:border-l-0 after:border-y-transparent';
+const ANSWER_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-steelman bg-surface shadow-[3px_3px_0_var(--color-steelman-shadow)] before:border-r-steelman after:border-r-surface`;
+const FAILURE_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-danger bg-surface shadow-[3px_3px_0_var(--color-danger-line)] before:border-r-danger after:border-r-surface`;
+const THINKING_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-steelman-shadow bg-steelman-soft before:border-r-steelman-shadow after:border-r-steelman-soft`;
 
 export function AiPanel() {
   const me = useMe();
@@ -83,15 +93,20 @@ export function AiPanel() {
 
   return (
     <aside
-      aria-label="AI 어시스턴트"
-      className={`absolute inset-y-0 right-0 z-10 flex min-h-0 flex-col border-l border-ai-line bg-surface shadow-pop ${expanded ? 'w-full' : 'w-[min(620px,46vw)]'}`}
+      aria-label="철강맨AI"
+      // 펫이 패널 밑(보내기 버튼 위)에 서 있지 않게 비켜서게 한다 (pet-engine.js avoidEdges)
+      data-pet-avoid=""
+      className={`absolute inset-y-0 right-0 z-10 flex min-h-0 flex-col border-l-2 border-ink bg-surface shadow-[-4px_0_0_rgba(18,24,32,0.16),var(--shadow-pop)] ${expanded ? 'w-full' : 'w-[min(620px,46vw)]'}`}
     >
-      <div className="flex h-12 flex-none items-center gap-1 border-b border-ai-line bg-ai-bg pr-2 pl-3.5">
-        <AiMark />
-        <b className="ml-1 text-base font-semibold text-ai-strong">AI 어시스턴트</b>
-        <IconButton icon="refresh" label="새 대화" size="sm" tone="ai" className="ml-auto" disabled={!entries.length || pending} onClick={clear} />
-        <IconButton icon={expanded ? 'minimize' : 'maximize'} label={expanded ? '작게 보기' : '크게 펼치기'} size="sm" tone="ai" onClick={toggleExpanded} />
-        <IconButton icon="x" label="패널 닫기" size="sm" tone="ai" onClick={close} />
+      <div className="flex min-h-12 flex-none items-center gap-1 border-b-2 border-line bg-surface-2 py-1.5 pr-2 pl-3">
+        <SteelmanAiMark framed />
+        <div className="ml-1 flex min-w-0 flex-col">
+          <b className="text-base leading-tight font-bold">철강맨AI</b>
+          <small className="truncate text-cap text-ink-3">화면 도우미 철강맨이 답해요</small>
+        </div>
+        <IconButton icon="refresh" label="새 대화" size="sm" className="ml-auto" disabled={!entries.length || pending} onClick={clear} />
+        <IconButton icon={expanded ? 'minimize' : 'maximize'} label={expanded ? '작게 보기' : '크게 펼치기'} size="sm" onClick={toggleExpanded} />
+        <IconButton icon="x" label="패널 닫기" size="sm" onClick={close} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -114,26 +129,26 @@ export function AiPanel() {
           </span>
           <span className="flex-none text-ink-3">(질문과 함께 보내요)</span>
         </span>
-        <div className="flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-ai">
+        <div className="flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
           <textarea
             rows={2}
             value={draft}
             maxLength={MAX_QUESTION_LENGTH}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="AI에게 묻기 — 예: 여재가 뭐야?"
-            aria-label="AI에게 질문"
+            placeholder="철강맨AI에게 묻기 — 예: 여재가 뭐야?"
+            aria-label="철강맨AI에게 질문"
             className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-snug outline-none"
           />
           <div className="flex items-center gap-1 px-1.5 pt-1 pb-1.5">
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
-            <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || pending} aria-label="보내기" onClick={() => send(draft)} />
+            <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || pending} aria-label="보내기" onClick={() => send(draft)} />
           </div>
         </div>
       </div>
       <div className="flex flex-none items-center gap-1.5 border-t border-line px-4 py-2 text-cap text-ink-3">
         <Icon name="lock" size="sm" />
-        AI는 조회와 초안만 만들어요 · 반영은 사람이 확정 · 내 권한({roleLabel}) 범위
+        철강맨AI는 조회와 초안만 만들어요 · 반영은 사람이 확정 · 내 권한({roleLabel}) 범위
       </div>
     </aside>
   );
@@ -180,18 +195,18 @@ function QuestionChips({ questions, disabled, onAsk }: { questions: readonly str
 
 function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled: boolean; onRetry: (failureId: string, question: string) => void }) {
   if (entry.role === 'user') {
-    return <div className="max-w-[85%] self-end rounded-md rounded-br-xs bg-brand-tint px-3 py-2 text-sm whitespace-pre-wrap text-ink">{entry.content}</div>;
+    return <div className="max-w-[85%] self-end rounded-lg rounded-br-xs bg-brand-tint px-3 py-2 text-sm break-keep whitespace-pre-wrap wrap-anywhere text-brand">{entry.content}</div>;
   }
   if (entry.role === 'failure') {
     return (
-      <div className="flex gap-2">
-        <AiMark size="sm" className="mt-0.5" />
-        <div role="alert" className="flex min-w-0 flex-1 flex-col gap-2 rounded-md border border-danger bg-danger-bg px-3 py-2.5 text-sm">
+      <div className="flex gap-3">
+        <SteelmanAiMark framed />
+        <div role="alert" className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 text-sm ${FAILURE_BUBBLE}`}>
           <span className="inline-flex items-center gap-1.5 font-semibold text-danger">
             <Icon name="alert" size="sm" />
             답을 받지 못했어요
           </span>
-          <p className="leading-normal text-ink-2">{entry.content}</p>
+          <p className="leading-normal break-keep wrap-anywhere text-ink-2">{entry.content}</p>
           <Button size="sm" icon="refresh" className="self-start" disabled={disabled} onClick={() => onRetry(entry.id, entry.question)}>
             다시 묻기
           </Button>
@@ -200,10 +215,10 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
     );
   }
   return (
-    <div className="flex gap-2">
-      <AiMark size="sm" className="mt-0.5" />
-      <div className="flex min-w-0 flex-1 flex-col gap-2 rounded-md border border-ai-line bg-surface px-3 py-2.5">
-        <p className="text-sm leading-normal whitespace-pre-wrap">{entry.content}</p>
+    <div className="flex gap-3">
+      <SteelmanAiMark framed />
+      <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
+        <p className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{entry.content}</p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
           <span className="font-semibold text-ink-2">출처</span>
           {entry.sources.length ? (
@@ -224,9 +239,9 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
 
 function Thinking() {
   return (
-    <div className="flex gap-2" aria-live="polite">
-      <AiMark size="sm" className="mt-0.5" />
-      <div className="rounded-md border border-ai-line bg-ai-bg px-3 py-2 text-sm text-ai-strong">답을 만들고 있어요…</div>
+    <div className="flex gap-3" aria-live="polite">
+      <SteelmanAiMark framed />
+      <div className={`px-3 py-2 text-sm text-steelman-ink ${THINKING_BUBBLE}`}>답을 만들고 있어요…</div>
     </div>
   );
 }

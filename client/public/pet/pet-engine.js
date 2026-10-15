@@ -1040,6 +1040,7 @@
       hoverTimer: 0,
       landWaiters: [],
       perchCheckT: 0,
+      avoidCheckT: 0,
       hintUntil: 0,
       raf: 0,
       lastTs: 0,
@@ -1075,9 +1076,27 @@
       const a = S.pack.anchor;
       return Math.max(a.x - b.left, b.right - a.x) * S.scale;
     }
+    /**
+     * 펫이 서지 않을 칸(data-pet-avoid, 예: 오른쪽에 열린 철강맨AI 패널)이 화면 가장자리에 붙어 있으면 바닥 범위에서 그만큼 뺀다.
+     * 화면을 거의 다 덮는 칸(크게 펼친 패널)은 피할 곳이 없으니 빼지 않는다.
+     */
+    function avoidEdges() {
+      let left = 0;
+      let right = W();
+      for (const el of doc.querySelectorAll('[data-pet-avoid]')) {
+        if (root.contains(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height < H() * 0.5) continue;
+        if (r.right >= W() - 2 && r.left > W() * 0.25) right = Math.min(right, r.left);
+        else if (r.left <= 2 && r.right < W() * 0.75) left = Math.max(left, r.right);
+      }
+      return [left, right];
+    }
     function floorRange() {
       const hw = halfW() + 2;
-      return [SIDE_GAP + hw, Math.max(SIDE_GAP + hw, W() - SIDE_GAP - hw)];
+      const [l, r] = avoidEdges();
+      const mn = l + SIDE_GAP + hw;
+      return [mn, Math.max(mn, r - SIDE_GAP - hw)];
     }
     function minFootY() {
       return (S.pack.anchor.y - bbox().top) * S.scale + 4;
@@ -1773,6 +1792,18 @@
         S.x = r.left + surf.off;
       } else {
         S.y = floorY();
+        // 가장자리 칸(data-pet-avoid, 예: 철강맨AI 패널)이 열리면 그 밑(보내기 버튼 위)에 서 있지 않게 비켜선다
+        if (!S.walk && t - S.avoidCheckT > 300) {
+          S.avoidCheckT = t;
+          const [mn, mx] = floorRange();
+          if (S.x > mx + 1 || S.x < mn - 1) {
+            const gx = clamp(S.x, mn, mx);
+            if (reduced) {
+              S.x = gx;
+              savePos();
+            } else walkTo(gx, { run: true });
+          }
+        }
       }
       const w = S.walk;
       if (w) {
@@ -2654,19 +2685,23 @@
       }
       const box = petBox();
       const cx = (box.left + box.right) / 2;
+      // 펫 곁 말풍선도 가장자리 칸(data-pet-avoid, 철강맨AI 패널) 안으로 넘어가지 않게 그 경계 안에서 놓는다
+      const [al, ar] = avoidEdges();
+      const lo = al + 8;
+      const hi = ar - 8;
       let side = 'top';
       let x;
       let y = box.top - bh - 12;
-      if (y >= 8) x = clamp(cx - bw / 2, 8, Math.max(8, vw - bw - 8));
+      if (y >= 8) x = clamp(cx - bw / 2, lo, Math.max(lo, hi - bw));
       else {
-        const leftSpace = box.left - 14;
-        const rightSpace = vw - box.right - 14;
+        const leftSpace = box.left - 14 - al;
+        const rightSpace = ar - box.right - 14;
         if (leftSpace >= bw + 8 || leftSpace > rightSpace) {
           side = 'left';
-          x = Math.max(8, box.left - 14 - bw);
+          x = Math.max(lo, box.left - 14 - bw);
         } else {
           side = 'right';
-          x = Math.min(vw - bw - 8, box.right + 14);
+          x = Math.min(hi - bw, box.right + 14);
         }
         y = clamp(box.top, 8, Math.max(8, vh - bh - 8));
       }
