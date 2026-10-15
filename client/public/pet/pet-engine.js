@@ -870,6 +870,7 @@
         storageKey: 'fantapet',
         container: doc.body,
         firstVisit: true,
+        startHidden: false, // true면 사원이 꺼내기 전까지 숨겨 두고 화면 가장자리 탭만 보인다 (숨기거나 꺼낸 선택은 기억해 그대로 따른다)
         hint: '끌어서 옮기기 · 우클릭 메뉴',
         zIndex: 2147482000,
         props: null,
@@ -6176,7 +6177,10 @@
     function placeInitial() {
       const visited = !!store.get('visited');
       const [mn, mx] = floorRange();
-      if (visited && store.get('hidden')) {
+      // 숨김: 사원이 숨기거나 꺼낸 선택(hidden)을 따르고, 고른 적이 없으면 앱 기본값(o.startHidden)을 따른다
+      const startHidden = store.has('hidden') ? !!store.get('hidden') : !!o.startHidden;
+      if (startHidden) {
+        if (!visited) store.set('visited', true);
         S.x = mx;
         S.y = floorY();
         S.mode = 'ground';

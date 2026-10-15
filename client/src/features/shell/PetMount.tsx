@@ -78,6 +78,8 @@ export function PetMount() {
       if (!alive || !window.FantaPet) return;
       window.FantaPet.mount({
         defaultCharacter: 'steelman',
+        // 기본은 숨김: 처음엔 화면 가장자리 탭만 보이고, 사원이 꺼내면 그 선택을 사원별로 기억한다
+        startHidden: true,
         storageKey: `fantapet:${me.employeeId}`,
         zIndex: 50,
         user: { name: me.employeeName, gradeName: me.jobGradeName, departmentName: me.departmentName, roleCode: me.roleCode },
