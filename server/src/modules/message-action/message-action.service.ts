@@ -23,6 +23,7 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { retryOnNumberConflict } from '../purchasing/purchasing.service';
 import { isAiAssisted, type ActionDefinition } from './action-types/action-definition';
 import { ActionTypeRegistry } from './action-types/action-type.registry';
+import { filledExtractedFields } from './action-types/purchase-requisition.action';
 import { DraftExtractor } from './draft-extractor';
 import type { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
@@ -113,9 +114,11 @@ export class MessageActionService {
   async createFromMeeting(tx: Tx, requester: AuthUser, meetingMinutesId: number, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
     await this.assertCanRequestFromMeeting(tx, requester);
     const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
+    // 회의록 후보는 AI가 회의에서 뽑은 값이라 채워진 칸을 AI가 채운 칸으로 남겨 확정·실행 로그도 AI 경유로 한다 (모듈 문서 10장)
+    const stored = { ...payload, aiFilledFields: filledExtractedFields(payload) };
     const draft = await this.repository.createDraft(tx, {
       actionType,
-      payload: toJson(payload),
+      payload: toJson(stored),
       meetingMinutesId,
       requesterId: requester.employeeId,
     });
@@ -129,7 +132,7 @@ export class MessageActionService {
         actionType,
         requesterId: requester.employeeId,
         meetingMinutesId,
-        payload: toJson(payload),
+        payload: toJson(stored),
       },
       isAiAssisted: true,
       actionDraftId: draft.id,

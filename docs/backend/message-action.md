@@ -185,7 +185,8 @@ confirm(draftId, actor):
   - 유형 정의 `fromExtraction`이 값을 다시 확인해 맞는 칸만 채운다. 구매요청은 원료(코드나 이름이 정확히 1건), 톤(0 초과, 소수 3자리까지), 희망 입고일(실제 있는 YYYY-MM-DD)을 본다.
   - 채운 칸 이름은 payload `aiFilledFields`에 남긴다. 수정 요청으로 바꿀 수 없고, 사람이 값을 고쳐도 지우지 않는다(AI 경유 근거).
   - LLM을 부르기 전에 방 멤버·확정 주체·미처리 초안을 확인한다(미처리 초안이 있으면 부르지 않는다). 저장 트랜잭션에서 같은 확인을 다시 한다.
-  - DRAFT_CREATED는 AI 경유로 남기지 않는다(위 표의 AI 경유는 확정·핸들러·실행 로그).
+  - 메시지 초안의 DRAFT_CREATED는 AI 경유로 남기지 않는다(위 표의 AI 경유는 확정·핸들러·실행 로그).
+  - 회의록(VOC-004)에서 만든 구매요청 초안은 AI가 회의에서 뽑은 값이라 채워진 칸을 `aiFilledFields`로 남긴다. 생성부터 확정·실행까지 모두 AI 경유다.
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
 - `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
 - AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.

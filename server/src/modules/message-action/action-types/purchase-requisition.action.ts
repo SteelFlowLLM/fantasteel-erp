@@ -10,6 +10,11 @@ import { isAiAssisted, type ActionDefinition } from './action-definition';
 
 const REQUEST_REASON_MAX = 500;
 const PATCH_FIELDS = new Set(['itemId', 'requestedTon', 'desiredReceiptDate', 'requestReason']);
+/** AI가 채우는 칸 (추출 스키마 REQ-ACT-001) */
+const EXTRACTED_FIELDS = ['itemId', 'requestedTon', 'desiredReceiptDate'] as const;
+
+/** 값이 들어 있는 추출 칸 이름 (AI가 채운 칸으로 남길 때) */
+export const filledExtractedFields = (p: PurchaseRequisitionDraftPayload): string[] => EXTRACTED_FIELDS.filter((field) => p[field] !== null);
 
 const isPositiveTon = (s: string) => TON_PATTERN.test(s) && Number(s) > 0;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -100,10 +105,8 @@ export class PurchaseRequisitionAction implements ActionDefinition<PurchaseRequi
       requestedTon: tonOf(extracted.requestedTon),
       desiredReceiptDate: isValidDate(date) ? date : null,
     };
-    const aiFilledFields = Object.entries(values)
-      .filter(([, value]) => value !== null)
-      .map(([field]) => field);
-    return { ...this.empty(sourceText), ...values, aiFilledFields };
+    const payload = { ...this.empty(sourceText), ...values };
+    return { ...payload, aiFilledFields: filledExtractedFields(payload) };
   }
 
   async applyPatch(tx: Tx, current: PurchaseRequisitionDraftPayload, patch: Record<string, unknown>): Promise<PurchaseRequisitionDraftPayload> {

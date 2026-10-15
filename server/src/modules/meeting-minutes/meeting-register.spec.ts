@@ -257,7 +257,7 @@ describe('확정하고 등록 (POST register, API-261)', () => {
       requesterId: author.employeeId,
       message: null,
       meetingMinutes: { id, title: '확인 시험 회의' },
-      payload: { itemId: oreId, requestedTon: '20.000', desiredReceiptDate: '2026-10-31', requestReason: '규소 부족', sourceText: '근거 글' },
+      payload: { itemId: oreId, requestedTon: '20.000', desiredReceiptDate: '2026-10-31', requestReason: '규소 부족', sourceText: '근거 글', aiFilledFields: ['itemId', 'requestedTon', 'desiredReceiptDate'] },
       unresolvedFields: [],
     });
     expect((await messageActions.list(author, {})).map((d) => d.id)).toContain(draft.id);
@@ -356,5 +356,13 @@ describe('확정하고 등록 (POST register, API-261)', () => {
     expect(requisition).toMatchObject({ itemId: oreId, requesterId: author.employeeId });
     expect(requisition.requestedTon.toFixed(3)).toBe('12.500');
     expect(requisition.desiredReceiptDate.toISOString().slice(0, 10)).toBe('2026-11-10');
+    // AI가 회의에서 뽑은 초안이라 생성부터 실행까지 모두 AI 경유다 (REQ-AST-010)
+    const events = await prisma.businessEvent.findMany({ where: { actionDraftId: draftId }, orderBy: { id: 'asc' } });
+    expect(events.map((e) => [e.businessEventType, e.isAiAssisted])).toEqual([
+      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, true],
+      [BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, true],
+      [BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, true],
+      [BUSINESS_EVENT_TYPE.DRAFT_EXECUTED, true],
+    ]);
   });
 });
