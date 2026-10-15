@@ -21,6 +21,7 @@ import { SHIPMENT_REQUEST_STATUS_TONE } from '@/lib/statusTone';
 import { sumTon } from '@/lib/weight';
 import { ShipmentRequestButton, WorkRoomButton } from '@/features/sales/components/SalesOrderActions';
 import { DueRiskBadge, DueText, ItemLabel, MeasureBar, PlanLink, SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
+import { ScreenLink } from '@/features/shell/ScreenLink';
 import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 const isShipmentRequestStatus = (value: string): value is ShipmentRequestStatus => value in SHIPMENT_REQUEST_STATUS_LABEL;
@@ -258,9 +259,9 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                   {detail.shipmentRequests.map((request) => (
                     <tr key={request.id} data-pet-item="shipmentRequest" data-pet-item-title={request.shipmentRequestNo}>
                       <Td>
-                        <Link href={`/shipment-requests/${request.id}`} className="font-mono text-xs font-medium text-run hover:underline">
+                        <ScreenLink href={`/shipment-requests/${request.id}`} className="font-mono text-xs font-medium text-run hover:underline" textClassName="font-mono text-xs font-medium">
                           {request.shipmentRequestNo}
-                        </Link>
+                        </ScreenLink>
                       </Td>
                       <Td>
                         <Badge tone={isShipmentRequestStatus(request.shipmentRequestStatus) ? SHIPMENT_REQUEST_STATUS_TONE[request.shipmentRequestStatus] : 'neutral'}>

@@ -123,6 +123,12 @@ export function canOpenScreen(user: AccessUser, access: ScreenAccess): boolean {
   }
 }
 
+/** 이 주소(쿼리 포함 가능)의 화면을 열 수 있는지. 표에 없는 주소는 막지 않는다(RouteGuard와 같다) */
+export function canOpenHref(user: AccessUser, href: string): boolean {
+  const screen = screenOfPath(href.split(/[?#]/)[0]);
+  return !screen || canOpenScreen(user, screen.access);
+}
+
 /** 주소가 가리키는 화면 (가장 길게 맞는 것). '/sales-orders/new'는 '등록'이 '수주'보다 길게 맞는다. */
 export function screenOfPath(pathname: string, screens: readonly ScreenDef[] = SCREENS): ScreenDef | null {
   let best: ScreenDef | null = null;

@@ -33,7 +33,7 @@
 | GET | `mrp/requirements` | MRP 소요량 조회 | `PURCHASE_REQUISITION_CREATE` VIEW | 12.2 명시 `?from=&to=`. 저장 없이 계산 조회, [05] 5장 예외 경로. 권한은 공통코드 "구매요청 등록·MRP" |
 
 - 다른 초안 행: `GET /api/mrp`("여재는 가용재고에 포함, 원료 안전재고 없음"). [05] 5장 예시가 `GET /api/v1/mrp/requirements`이므로 이 경로로 만든다.
-- [권한표]: 구매 USE, 생산·관리자 VIEW(2026-10-02에 생산을 USE → VIEW로 되돌림). 메뉴는 구매만.
+- [권한표]: 구매 USE, 나머지 역할은 VIEW(2026-10-02에 생산을 USE → VIEW로 되돌림, 2026-10-15 업무 조회는 모든 역할). 구매의 역할 메뉴이고, 다른 역할에는 왼쪽 메뉴 "다른 영역" 묶음에 조회용으로 보인다.
 - 컨트롤러: `@Get('mrp/requirements') @RequirePermission(PERMISSION.PURCHASE_REQUISITION_CREATE, 'VIEW')`.
 
 ## 4. 계산 ([04] 4.4 그대로)

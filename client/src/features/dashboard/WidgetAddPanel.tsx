@@ -1,4 +1,5 @@
 // '위젯 추가' 옆 패널 (REQ-DSH-002): 아직 놓지 않은 위젯을 골라 맨 아래에 기본 크기로 추가한다.
+// 볼 권한이 없는 위젯은 목록에 넣지 않는다 (잠긴 카드를 늘리지 않게, 역할별 메뉴 v2 3장).
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import { Button } from '@/components/Button';
 import { ComingSoon } from '@/components/ComingSoon';
@@ -7,18 +8,22 @@ import { IconButton } from '@/components/IconButton';
 import { EmptyNote } from '@/components/StateView';
 import type { WidgetPlacement } from '@/features/dashboard/lib/layout';
 import { WIDGETS } from '@/features/dashboard/widgetCatalog';
+import { canViewWidget } from '@/hooks/useDashboardWidget';
+import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 
 export function WidgetAddPanel({ placements, onAdd, onClose }: { placements: readonly WidgetPlacement[]; onAdd: (key: DashboardWidgetKey) => void; onClose: () => void }) {
+  const me = useMe();
   const placed = new Set<string>(placements.map((p) => p.key));
-  const available = WIDGETS.filter((w) => !placed.has(w.key));
+  const viewable = WIDGETS.filter((w) => canViewWidget(me, w.key));
+  const available = viewable.filter((w) => !placed.has(w.key));
   return (
     <aside aria-label="위젯 추가" className="flex min-h-0 w-[340px] flex-none flex-col border-l border-line bg-surface max-[1100px]:w-[290px]">
       <div className="flex h-14 flex-none items-center gap-2 border-b border-line pr-3 pl-4">
         <Icon name="widget" />
         <b className="text-md font-semibold">위젯 추가</b>
         <span className="text-cap text-ink-3">
-          {WIDGETS.length}개 중 {WIDGETS.length - available.length}개 표시
+          {viewable.length}개 중 {viewable.length - available.length}개 표시
         </span>
         <IconButton icon="x" size="sm" label="위젯 추가 닫기" className="ml-auto" onClick={onClose} />
       </div>

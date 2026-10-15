@@ -35,7 +35,7 @@
 | GET | `sales-orders/:id/cancel-purchase-impact` | 수주 취소의 구매 진행 영향 | `SALES_ORDER_CANCEL` VIEW | API 명세서에 없음. [04] BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"를 위해 더했다(2026-10-14). 아래 4장 |
 
 다른 초안 행: `PATCH /api/sales-orders/:id/cancel`(2행 중복). [05] 5장 "상태 변경은 `POST /:id/동작`"에 따라 POST로 만든다.
-[권한표]: 영업 USE, 생산·물류·관리자는 `SALES_ORDER_CREATE` VIEW. 취소는 영업만 USE(관리자 VIEW).
+[권한표]: 영업 USE, 나머지 역할은 `SALES_ORDER_CREATE`·`SALES_ORDER_CANCEL` VIEW(2026-10-15 업무 조회는 모든 역할). 등록·취소는 영업만 한다.
 
 ## 4. 업무 규칙·계산
 

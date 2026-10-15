@@ -159,7 +159,7 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
     expect(rejected?.reason).toMatchObject({ code: 'SHP-002' });
   });
 
-  it('목록·상세는 영업·물류가 볼 수 있고, 권한이 없으면 COM-002', async () => {
+  it('목록·상세는 출하요청·출고 확정 조회 권한으로 보고(업무 조회는 모든 역할), 권한이 없으면 COM-002', async () => {
     const a = await salesOrderItem(customerB, 3);
     const created = await service.create(sales, { customerId: customerB, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 3 }] });
 
@@ -171,8 +171,11 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
     expect(byNo.items.map((r) => r.id)).toEqual([created.id]);
     await expect(service.findOne(logistics, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
 
-    await expect(service.list(production, { page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
-    await expect(service.findOne(production, created.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service.findOne(production, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
+    // 관리자가 생산의 출하요청·출고 확정 조회 권한을 뺀 경우
+    const withoutShipmentView: AuthUser = { ...production, permissions: { PRODUCTION_PLAN_CONFIRM: 'USE' } };
+    await expect(service.list(withoutShipmentView, { page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service.findOne(withoutShipmentView, created.id)).rejects.toMatchObject({ code: 'COM-002' });
     await expect(service.findOne(logistics, 999999)).rejects.toMatchObject({ code: 'COM-003' });
   });
 

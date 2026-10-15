@@ -151,6 +151,16 @@ afterAll(async () => {
   else process.env.STORAGE_DIR = originalStorage;
 });
 
+/** 관리자가 부서·권한 화면에서 역할 권한을 뺀 상태를 만든다(업무 조회는 기본으로 모든 역할, 역할별 메뉴 v2 3장). 돌려놓는 함수를 돌려준다 */
+async function revokeRolePermission(roleCode: string, permission: string): Promise<() => Promise<void>> {
+  const role = await prisma.role.findUniqueOrThrow({ where: { roleCode } });
+  const row = await prisma.rolePermission.findUniqueOrThrow({ where: { roleId_permission: { roleId: role.id, permission } } });
+  await prisma.rolePermission.delete({ where: { id: row.id } });
+  return async () => {
+    await prisma.rolePermission.create({ data: { roleId: role.id, permission, permissionLevel: row.permissionLevel } });
+  };
+}
+
 beforeEach(() => {
   socketRecords.length = 0;
   typingRecords.length = 0;
@@ -255,7 +265,8 @@ describe('메시지와 안 읽은 수', () => {
 describe('업무방', () => {
   it('수주 조회 권한이 없으면 열 수 없고, 수주가 없으면 COM-003', async () => {
     const salesOrder = await createSalesOrder('SO-2610-901');
-    const denied = await call('POST', '/chat-rooms', purchaseCookie, { chatRoomType: 'WORK', memberIds: [], salesOrderId: salesOrder.id });
+    const restore = await revokeRolePermission('PURCHASE', 'SALES_ORDER_CREATE');
+    const denied = await call('POST', '/chat-rooms', purchaseCookie, { chatRoomType: 'WORK', memberIds: [], salesOrderId: salesOrder.id }).finally(restore);
     const missing = await call('POST', '/chat-rooms', salesCookie, { chatRoomType: 'WORK', memberIds: [], salesOrderId: 999_999 });
     const noSalesOrder = await call('POST', '/chat-rooms', salesCookie, { chatRoomType: 'WORK', memberIds: [] });
     expect([denied.status, denied.body.error?.code]).toEqual([403, 'COM-002']);
@@ -280,11 +291,19 @@ describe('업무방', () => {
     });
     expect(sales.body.data.salesOrder?.items).toHaveLength(2);
 
-    // 나중에 들어온 멤버는 이전 메시지를 읽은 것으로 시작하고, 수주 조회 권한이 없어 요약을 못 본다
+    // 나중에 들어온 멤버는 이전 메시지를 읽은 것으로 시작한다. 업무 조회는 모든 역할이라 구매도 요약을 본다
     const purchase = await call<ChatRoomDetail>('GET', `/chat-rooms/${first.id}`, purchaseCookie);
-    expect(purchase.body.data).toMatchObject({ salesOrderState: 'denied', salesOrder: null, unreadCount: 0 });
-    const purchaseList = await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie);
-    expect(purchaseList.body.data.find((r) => r.id === first.id)?.salesOrder).toBeNull();
+    expect(purchase.body.data).toMatchObject({ salesOrderState: 'ok', unreadCount: 0 });
+    // 관리자가 수주 조회 권한을 빼면 요약을 못 본다
+    const restore = await revokeRolePermission('PURCHASE', 'SALES_ORDER_CREATE');
+    try {
+      const denied = await call<ChatRoomDetail>('GET', `/chat-rooms/${first.id}`, purchaseCookie);
+      expect(denied.body.data).toMatchObject({ salesOrderState: 'denied', salesOrder: null });
+      const purchaseList = await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie);
+      expect(purchaseList.body.data.find((r) => r.id === first.id)?.salesOrder).toBeNull();
+    } finally {
+      await restore();
+    }
   });
 });
 
@@ -1121,37 +1140,42 @@ describe('@AI 호출 (REQ-AST-002)', () => {
   });
 
   it('조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 있는 멤버에게만 보낸다 (소켓·목록·방 목록 미리보기·이어 묻는 맥락)', async () => {
-    // 정다은(구매)은 수주 조회 권한이 없다. 박서영(영업)이 수주 조회 도구로 답을 받는다
-    const ask = askSpy().mockResolvedValue({
-      answer: 'SO-2610-001은 납기가 11월 20일이에요.',
-      sources: [{ kind: 'DATA', id: 'get_sales_orders', label: '수주 · SO-2610-001' }],
-      model: 'test-model',
-      latencyMs: 1,
-    });
-    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
-    await send(salesCookie, room.id, '@AI SO-2610-001 납기 알려줘');
-    const [reply] = await aiRepliesOf(room.id, 1);
+    // 관리자가 정다은(구매)의 수주 조회 권한을 뺀 경우. 박서영(영업)이 수주 조회 도구로 답을 받는다
+    const restore = await revokeRolePermission('PURCHASE', 'SALES_ORDER_CREATE');
+    try {
+      const ask = askSpy().mockResolvedValue({
+        answer: 'SO-2610-001은 납기가 11월 20일이에요.',
+        sources: [{ kind: 'DATA', id: 'get_sales_orders', label: '수주 · SO-2610-001' }],
+        model: 'test-model',
+        latencyMs: 1,
+      });
+      const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+      await send(salesCookie, room.id, '@AI SO-2610-001 납기 알려줘');
+      const [reply] = await aiRepliesOf(room.id, 1);
 
-    expect(reply.content?.startsWith('[AI 어시스턴트:get_sales_orders] ')).toBe(true);
-    const delivered = socketRecords.filter((r) => r.event === 'message:new' && (r.payload as ChatMessageView).id === reply.id);
-    expect(delivered.map((r) => r.employeeId)).toEqual([salesId]);
-    expect(delivered[0].payload).toMatchObject({ isAi: true, content: expect.stringContaining('납기가 11월 20일') });
+      expect(reply.content?.startsWith('[AI 어시스턴트:get_sales_orders] ')).toBe(true);
+      const delivered = socketRecords.filter((r) => r.event === 'message:new' && (r.payload as ChatMessageView).id === reply.id);
+      expect(delivered.map((r) => r.employeeId)).toEqual([salesId]);
+      expect(delivered[0].payload).toMatchObject({ isAi: true, content: expect.stringContaining('납기가 11월 20일') });
 
-    const salesPage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
-    const purchasePage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, purchaseCookie);
-    expect(salesPage.body.data.items.at(-1)).toMatchObject({ isAi: true });
-    expect(purchasePage.body.data.items.map((m) => m.isAi)).toEqual([false]);
-    const purchaseSearch = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('납기')}`, purchaseCookie);
-    expect(purchaseSearch.body.data.items.map((m) => m.isAi)).toEqual([false]);
-    const purchaseRooms = await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie);
-    expect(purchaseRooms.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('AI 어시스턴트가 답했어요');
+      const salesPage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+      const purchasePage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, purchaseCookie);
+      expect(salesPage.body.data.items.at(-1)).toMatchObject({ isAi: true });
+      expect(purchasePage.body.data.items.map((m) => m.isAi)).toEqual([false]);
+      const purchaseSearch = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages/search?q=${encodeURIComponent('납기')}`, purchaseCookie);
+      expect(purchaseSearch.body.data.items.map((m) => m.isAi)).toEqual([false]);
+      const purchaseRooms = await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie);
+      expect(purchaseRooms.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('AI 어시스턴트가 답했어요');
 
-    // 정다은이 이어 물어도 박서영에게만 보인 답은 맥락으로 넘어가지 않는다
-    ask.mockResolvedValue({ answer: '확인할 수 없어요', sources: [], model: 'test-model', latencyMs: 1 });
-    await send(purchaseCookie, room.id, '@AI 방금 뭐라고 했어?');
-    await aiRepliesOf(room.id, 2);
-    const history = ask.mock.calls[1][1].history ?? [];
-    expect(history.some((turn) => turn.content.includes('납기가 11월 20일'))).toBe(false);
+      // 정다은이 이어 물어도 박서영에게만 보인 답은 맥락으로 넘어가지 않는다
+      ask.mockResolvedValue({ answer: '확인할 수 없어요', sources: [], model: 'test-model', latencyMs: 1 });
+      await send(purchaseCookie, room.id, '@AI 방금 뭐라고 했어?');
+      await aiRepliesOf(room.id, 2);
+      const history = ask.mock.calls[1][1].history ?? [];
+      expect(history.some((turn) => turn.content.includes('납기가 11월 20일'))).toBe(false);
+    } finally {
+      await restore();
+    }
   });
 
   it('AI가 답을 만드는 동안 방 멤버에게 입력 중(AI 표시)을 보낸다', async () => {

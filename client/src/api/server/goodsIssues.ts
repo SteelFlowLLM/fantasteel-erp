@@ -1,7 +1,7 @@
 // 출고 확정 화면 ↔ 서버 API (server/src/modules/shipment, lot). 출고 확정은 POST shipment-requests/:id/issue.
 // 서버에는 출고 전 재검증만 하는 API가 없어서, 화면에 보일 ready·problems는 출하요청·수주·LOT 상세로 출고 확정과 같은 규칙을 계산한다.
 // 이 값은 보여 주기만 하고, 확정할 때 서버가 같은 규칙을 다시 확인한다(INV-001·INV-002·INV-004·SHP-002·COM-001).
-// 품질 역할은 수주 조회 권한이 없어 이론중량·품목 유형을 규격 목록(GET /items)에서 읽고, 수주 매수·출하 매수는 비운다.
+// 수주 조회 권한이 없는 사원이면 이론중량·품목 유형을 규격 목록(GET /items)에서 읽고, 수주 매수·출하 매수는 비운다.
 import type {
   InspectionResult,
   ItemView,

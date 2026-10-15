@@ -1,5 +1,4 @@
 // 수주 화면(목록·등록·상세)이 함께 쓰는 작은 부품. 색·모양은 B안 그대로, 이름·표시명은 공통 코드 정의서·용어 사전대로.
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
   ACTOR_TYPE_LABEL,
@@ -20,6 +19,7 @@ import type { ProgressMeasure } from '@/lib/inventoryMath';
 import { PRODUCTION_PLAN_STATUS_TONE, SALES_ORDER_ITEM_STATUS_TONE } from '@/lib/statusTone';
 import type { TimelineEvent } from '@/api/salesOrders';
 import { measureText, percentOf } from '@/features/sales/lib/salesOrderForm';
+import { ScreenLink } from '@/features/shell/ScreenLink';
 
 export const SALES_ORDER_STATUS_KEYS: readonly SalesOrderItemStatus[] = ['OPEN', 'PARTIALLY_SHIPPED', 'SHIPPED', 'CANCELLED'];
 
@@ -189,9 +189,9 @@ export function SectionTitle({ children, meta }: { children: ReactNode; meta?: R
 
 export function PlanLink({ productionPlanId, productionPlanNo }: { productionPlanId: number; productionPlanNo: string }) {
   return (
-    <Link href={`/production/plans?plan=${productionPlanId}`} className="font-mono text-xs font-medium text-run hover:underline">
+    <ScreenLink href={`/production/plans?plan=${productionPlanId}`} className="font-mono text-xs font-medium text-run hover:underline" textClassName="font-mono text-xs font-medium">
       {productionPlanNo}
-    </Link>
+    </ScreenLink>
   );
 }
 
