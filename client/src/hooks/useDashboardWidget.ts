@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi, dashboardKeys, DASHBOARD_REFRESH_MS, DASHBOARD_WIDGET_VIEW, type DashboardWidgetKey, type DataWidgetKey } from '@/api/dashboard';
 import type { Permission } from '@/codes';
+import { isSoonWidget } from '@/features/dashboard/widgetCatalog';
 import { useMe } from '@/hooks/useMe';
 import { canView, type WithPermissions } from '@/lib/permissions';
 
@@ -14,7 +15,7 @@ export interface WidgetAccess {
 
 /** 이 위젯을 볼 수 있는지. 준비 중 위젯은 데이터가 없어 모든 사원 */
 export function canViewWidget(user: WithPermissions, key: DashboardWidgetKey): boolean {
-  const permissions = key in DASHBOARD_WIDGET_VIEW ? DASHBOARD_WIDGET_VIEW[key as DataWidgetKey] : [];
+  const permissions = isSoonWidget(key) ? [] : DASHBOARD_WIDGET_VIEW[key];
   return permissions.length === 0 || canView(user, ...permissions);
 }
 

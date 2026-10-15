@@ -37,7 +37,7 @@
 
 다른 초안 행(`/api/v1`, 긴 비고): `GET quality-inspections/:id`, `GET inspection-standards/:id`, `POST inspection-standards/:id/versions`(새 버전), `GET lots/rejected`(권한 DISPOSITION_SET 또는 INSPECTION_REGISTER VIEW, 대안 경로 `quality-inspections/rejected-lots`). "또는" 권한은 service에서 `hasPermission`으로 확인한다.
 검사 기준 상세(`GET inspection-standards/:id`)는 강종의 KS 규격 번호(`standardNo`)를 함께 준다. 강종 목록은 기준정보 조회 권한이 있어야 읽을 수 있어서다.
-[권한표]: 품질 USE(3종), 생산은 INSPECTION_REGISTER·INSPECTION_STANDARD_MANAGE VIEW, 관리자 VIEW.
+[권한표]: 품질 USE(3종), 나머지 역할은 3종 모두 VIEW(2026-10-15 업무 조회는 모든 역할).
 
 ## 4. 업무 규칙·판정
 

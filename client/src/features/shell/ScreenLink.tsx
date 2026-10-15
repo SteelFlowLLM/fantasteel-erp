@@ -11,7 +11,15 @@ type ScreenLinkProps = ComponentProps<typeof Link> & {
 
 export function ScreenLink({ href, textClassName, children, ...rest }: ScreenLinkProps) {
   const canOpen = useCanOpenHref();
-  if (!canOpen(href)) return <span className={textClassName}>{children}</span>;
+  if (!canOpen(href)) {
+    // 화면 도우미 펫이 칸을 찾는 data-pet-* 표시는 글자에도 남긴다
+    const dataAttributes = Object.fromEntries(Object.entries(rest).filter(([key]) => key.startsWith('data-')));
+    return (
+      <span className={textClassName} {...dataAttributes}>
+        {children}
+      </span>
+    );
+  }
   return (
     <Link href={href} {...rest}>
       {children}

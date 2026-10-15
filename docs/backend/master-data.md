@@ -50,7 +50,7 @@
 | PATCH | `production-settings` | 생산 설정값 변경 | `MASTER_MANAGE` USE | |
 | DELETE | `customers/:id` · `suppliers/:id` · `yards/:id` · `steel-grades/:id` · `items/:id` | 기준정보 삭제 | `MASTER_MANAGE` USE | API-275~279(2026-10-14 명세서에 추가). SPEC 5장 결정 4·[05] 7-2 "참조가 없을 때만 삭제". 아래 4장 |
 
-[권한표]: 관리자 USE, 영업·구매·생산·품질 VIEW, **물류는 권한 없음**. 물류 화면에 품목명이 필요하면 shipment 모듈 응답에 넣어 준다.
+[권한표]: 관리자 USE, 나머지 역할은 모두 VIEW(2026-10-15 업무 조회는 모든 역할, 그 전에는 물류에 권한이 없었다). 관리자가 기준정보 조회 권한을 뺀 사원도 품목명을 보도록 출하 화면에 필요한 품목 값은 shipment 모듈 응답에 넣어 준다.
 
 ## 4. 업무 규칙·계산
 
