@@ -793,6 +793,7 @@
 .fp-ai-switch button[aria-pressed=true][data-v=on]{background:var(--fp-ok);color:#fff}
 .fp-ai-switch button[aria-pressed=true][data-v=off]{background:var(--fp-ink-3);color:#fff}
 .fp-msg--ai{white-space:pre-wrap}
+.fp-msg-note{align-self:stretch;padding:0 4px;font-size:11px;line-height:15px;color:var(--fp-ink-3);text-align:center;word-break:keep-all;overflow-wrap:anywhere}
 .fp-msg-src{margin-top:6px;font-size:11px;line-height:15px;color:var(--fp-ink-3);white-space:normal}
 .fp-menu{position:absolute;left:0;top:0;z-index:6;pointer-events:auto;width:228px;padding:4px;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:6px;box-shadow:4px 4px 0 rgba(18,24,32,.18),0 10px 28px rgba(18,24,32,.12)}
 .fp-menu-head{display:flex;align-items:center;gap:8px;padding:4px 6px 8px;margin-bottom:4px;border-bottom:2px dotted var(--fp-line-strong)}
@@ -4547,8 +4548,10 @@
       typing.remove();
       talkBack();
       if (!reply || typeof reply.text !== 'string' || !reply.text.trim()) {
-        const why = failure ? failure.replace(/[.。]?\s*$/, '.') : '잠시 뒤 다시 물어봐 주세요.';
-        addMsg('pet', `AI가 답하지 못했어요. ${why} 아래에서 OFF로 바꾸면 정해진 답변으로 답해요.`);
+        // AI가 실패해도 질문이 빈손으로 끝나지 않게 정해진 답변으로 대신 답한다. ON은 그대로 두어 다음 질문은 다시 AI에 묻는다
+        const why = failure ? failure.replace(/[.。]?\s*$/, '.') : '';
+        chat.log.append(h('div', { class: 'fp-msg-note', text: `AI가 답하지 못해서 정해진 답변으로 알려 드려요.${why ? ` ${why}` : ''}` }));
+        ruleReply(text);
         return;
       }
       chat.turns.push({ role: 'user', content: text }, { role: 'assistant', content: reply.text });
@@ -4576,8 +4579,12 @@
       await wait(reduced ? 120 : 650);
       if (!chat.el) return;
       typing.remove();
-      const ans = answerFor(text);
       talkBack();
+      ruleReply(text);
+    }
+    /** 정해진 답변: 설명 파일(FAQ·용어)과 지금 화면을 읽어 답한다 */
+    function ruleReply(text) {
+      const ans = answerFor(text);
       if (ans.pageEl) {
         const el = ans.pageEl;
         const key = el.getAttribute('data-pet-target');
