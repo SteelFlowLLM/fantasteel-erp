@@ -1,0 +1,3 @@
+# 다시 만들 수 있고 커서 올리지 않는다 (tools/synth.py)
+*.wav
+result*.json

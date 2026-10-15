@@ -8,12 +8,13 @@
 |---|---|---|
 | `script.txt` | 이 폴더 | 45분 분량 회의 대본. 305줄, 한 줄에 한 발언 `이름: 발언`. 참석자 6명은 시드 사원 이름 그대로 |
 | `answer-key.md` | 이 폴더 | 정답표. 기대 후보(할 일 7·일정 3·구매 2), 모호한 항목 3, 목록에 없는 원료 1, 뽑으면 안 되는 것(장난성 지시문·잡담), 결정 4·미결정 1, 줄 번호 |
-| 합성 음성 41분 | 만든 사람 Mac `~/voice-test/meeting.m4a` (+ `.wav`) | macOS 기본 한국어 음성 6개로 대본을 읽힌 것 |
-| 고품질 합성 음성 34분 | `~/voice-test/natural/meeting.m4a` (+ `.wav`) | 고급(Premium·Enhanced) 음성으로 읽힌 것. 실제 회의에 더 가깝다 |
-| 화자 정답 시간표 | `~/voice-test/truth.tsv`, `~/voice-test/natural/truth.tsv` | 몇 초부터 몇 초까지 누가 말했는지 (`start end speaker line`) |
-| 만들기·채점 스크립트 | `~/voice-test/synth.py`, `compare.py`, `score.py` | 음성 합성, 두 화자 분리 엔진 비교, 화자 정확도·글자 오류율 계산 |
+| 합성 음성 41분 | `audio/basic/meeting.m4a` | macOS 기본 한국어 음성 6개로 대본을 읽힌 것 (14MB) |
+| 고품질 합성 음성 34분 | `audio/premium/meeting.m4a` | 고급(Premium·Enhanced) 음성으로 읽힌 것. 실제 회의에 더 가깝다 (12MB) |
+| 화자 정답 시간표 | `audio/basic/truth.tsv`, `audio/premium/truth.tsv` | 몇 초부터 몇 초까지 누가 말했는지 (`start end speaker line`) |
+| 음성 만들기 | `tools/synth.py` | `python tools/synth.py basic` 또는 `premium`. 음성·정답 시간표를 다시 만든다 (약 5분) |
+| 채점 | `tools/score.py` | `python tools/score.py <결과.json>` → 화자 정확도·찾은 화자 수·글자 오류율. 결과 파일은 정답 시간표와 같은 폴더에 둔다 |
 
-음성 파일은 크고 다시 만들 수 있어 저장소에 넣지 않는다. 필요하면 만든 사람에게 받거나 `synth.py`로 다시 만든다. macOS 한국어 음성은 전체 이름으로 불러야 한다 (`'Reed (한국어(한국))'`. `Reed`만 쓰면 영어 음성이 골라져 빈 소리가 난다).
+`.wav`는 크고 다시 만들 수 있어 올리지 않는다 (`audio/.gitignore`). macOS 한국어 음성은 전체 이름으로 불러야 한다 (`'Reed (한국어(한국))'`. `Reed`만 쓰면 영어 음성이 골라져 빈 소리가 난다).
 
 ## 2. 무엇을 시험하나
 
@@ -50,14 +51,15 @@
 ### C. 음성 → 글 · 화자 분리 (음성 엔진을 바꿨을 때)
 
 1. 관리 › AI 연결 › 음성 인식에 엔진 주소와 모델을 넣는다 (화자 분리는 `tools/voice-sidecar` 실행 후 `http://127.0.0.1:8001/v1`, 모델 `whisper-pyannote` 또는 `vibevoice`).
-2. 새 회의록 › **파일 올리기**로 `meeting.m4a`를 올리고 참석자 6명을 고른다 (참석자 수가 화자 수 힌트로 쓰인다).
+2. 새 회의록 › **파일 올리기**로 `audio/basic/meeting.m4a` 또는 `audio/premium/meeting.m4a`를 올리고 참석자 6명을 고른다 (참석자 수가 화자 수 힌트로 쓰인다).
 3. 전사가 끝나면 화자 연결 카드에서 각 화자의 첫 발언으로 사람을 맞혀 본다.
+4. 채점: 상세 응답(`GET /api/v1/meeting-minutes/:id`의 `data`)을 `audio/<basic|premium>/result.json`으로 저장하고 `python tools/score.py audio/premium/result.json`. 화면에서 올린 고품질 34분 회의는 화자 91.1%·6명·글자 오류 4.0%였다.
 
 | 항목 | 보는 것 | 기준값 whisper.cpp + pyannote (합성 41분 / 고품질 34분) |
 |---|---|---|
-| 화자 정확도 | 발언 줄 중 화자가 맞은 비율 (`score.py`) | 86.9% / 92.1% (참석자 수 힌트 사용) |
+| 화자 정확도 | 발언 줄 중 화자가 맞은 비율 (`tools/score.py`) | 86.9% / 92.1% (참석자 수 힌트 사용) |
 | 찾은 화자 수 | 실제 6명 | 6 / 6 |
-| 글자 오류율 | 대본과 다른 글자 비율 (`score.py`). "두 시"↔"2시" 같은 표기 차이도 오류로 셈 | 6.8% / 3.7% |
+| 글자 오류율 | 대본과 다른 글자 비율 (`tools/score.py`). "두 시"↔"2시" 같은 표기 차이도 오류로 셈 | 6.8% / 3.7% |
 | 처리 시간 | 올린 뒤 전사 완료까지 | 약 2분 / 약 1분 15초 |
 | 비교: VibeVoice-ASR 4bit | 같은 항목 | 화자 88.9% / 58.4%, 글자 오류 13.6% / 5.6%, 약 7분 |
 
