@@ -398,6 +398,25 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   DONE: '완료',
 };
 
+/** 회의록 상태 (REQ-VOC-001~004, BP-VOC-01 (문서에 없는 상태값: 2026-10-15 Voice2ERP 스키마)) */
+export const MEETING_MINUTES_STATUS = {
+  TRANSCRIBING: 'TRANSCRIBING',
+  TRANSCRIBED: 'TRANSCRIBED',
+  ANALYZING: 'ANALYZING',
+  REVIEW: 'REVIEW',
+  CONFIRMED: 'CONFIRMED',
+  FAILED: 'FAILED',
+} as const;
+export type MeetingMinutesStatus = (typeof MEETING_MINUTES_STATUS)[keyof typeof MEETING_MINUTES_STATUS];
+export const MEETING_MINUTES_STATUS_LABEL: Record<MeetingMinutesStatus, string> = {
+  TRANSCRIBING: '전사 중',
+  TRANSCRIBED: '전사 완료',
+  ANALYZING: '분석 중',
+  REVIEW: '검토 대기',
+  CONFIRMED: '확정',
+  FAILED: '실패',
+};
+
 /** 알림 유형 (REQ-MSG-005) */
 export const NOTIFICATION_TYPE = {
   MENTION: 'MENTION',
@@ -405,6 +424,8 @@ export const NOTIFICATION_TYPE = {
   TASK_ASSIGNED: 'TASK_ASSIGNED',
   APPROVAL_REQUESTED: 'APPROVAL_REQUESTED',
   APPROVAL_RESULT: 'APPROVAL_RESULT',
+  MEETING_MINUTES_SHARED: 'MEETING_MINUTES_SHARED',
+  SCHEDULE_EVENT_ASSIGNED: 'SCHEDULE_EVENT_ASSIGNED',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -413,6 +434,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   TASK_ASSIGNED: '업무 지정',
   APPROVAL_REQUESTED: '승인 요청',
   APPROVAL_RESULT: '승인 결과',
+  MEETING_MINUTES_SHARED: '회의록 공유',
+  SCHEDULE_EVENT_ASSIGNED: '일정 등록',
 };
 
 /** 작업 로그 이벤트 유형 (REQ-LOG-002) */
@@ -448,6 +471,7 @@ export const BUSINESS_EVENT_TYPE = {
   DRAFT_CONFIRMED: 'DRAFT_CONFIRMED',
   DRAFT_REJECTED: 'DRAFT_REJECTED',
   DRAFT_EXECUTED: 'DRAFT_EXECUTED',
+  MEETING_MINUTES_CONFIRMED: 'MEETING_MINUTES_CONFIRMED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -482,4 +506,5 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   DRAFT_CONFIRMED: '초안 확정',
   DRAFT_REJECTED: '초안 반려',
   DRAFT_EXECUTED: '초안 실행(ERP 반영)',
+  MEETING_MINUTES_CONFIRMED: '회의록 확정',
 };
