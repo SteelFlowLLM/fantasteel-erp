@@ -11,8 +11,11 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FactoryAgentModule } from './modules/factory-agent/factory-agent.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LlmModule } from './modules/llm/llm.module';
+import { SttModule } from './modules/stt/stt.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
+import { MeetingMinutesModule } from './modules/meeting-minutes/meeting-minutes.module';
+import { ScheduleEventModule } from './modules/schedule-event/schedule-event.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
 import { MessengerModule } from './modules/messenger/messenger.module';
 import { MrpModule } from './modules/mrp/mrp.module';
@@ -46,8 +49,11 @@ import { PrismaModule } from './prisma/prisma.module';
     NotificationModule,
     MessengerModule,
     MessageActionModule,
+    MeetingMinutesModule,
+    ScheduleEventModule,
     DashboardModule,
     LlmModule,
+    SttModule,
     AiAssistantModule,
     FactoryAgentModule,
   ],

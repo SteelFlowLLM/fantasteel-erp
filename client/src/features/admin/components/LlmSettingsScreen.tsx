@@ -1,6 +1,7 @@
 'use client';
 
 // AI 연결 /admin/llm (문서에 없는 기능, 2026-10-07 추가): LM Studio 서버 연결 확인 · 모델 선택 · 응답 확인.
+// 같은 화면 아래에 음성 인식(STT) 카드가 있다 (Voice2ERP 1단계).
 // 나중에 외부 LLM을 쓸 때는 주소와 API 키만 바꾼다 (둘 다 OpenAI 호환 API).
 // 설정 전용 권한 코드가 없어 부서·권한 관리(ORG_MANAGE) 권한으로 연다(가정). 사용 권한이 없으면 조회만 한다.
 import { useEffect, useState } from 'react';
@@ -19,6 +20,7 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { useAction } from '@/hooks/useAction';
 import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/useLlm';
 import { useCanUse } from '@/hooks/usePermission';
+import { SttSettingsCard } from './SttSettingsCard';
 
 export function LlmSettingsScreen() {
   const canEdit = useCanUse(PERMISSION.ORG_MANAGE);
@@ -29,13 +31,16 @@ export function LlmSettingsScreen() {
       <div className="flex flex-none items-end gap-4">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-2xl font-semibold">AI 연결</h1>
-          <span className="text-cap text-ink-3">LM Studio 서버에 연결하고 AI 기능이 쓸 모델을 골라요</span>
+          <span className="text-cap text-ink-3">LM Studio 서버에 연결해 AI 기능이 쓸 모델을 고르고, 음성 인식(Whisper) 서버도 연결해요</span>
         </div>
         <div className="ml-auto flex items-center gap-2">{canEdit ? null : <ReadOnlyHint permissions={[PERMISSION.ORG_MANAGE]} />}</div>
       </div>
       <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
         {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
       </QueryBoundary>
+      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
+        <SttSettingsCard canEdit={canEdit} />
+      </div>
     </PageMain>
   );
 }

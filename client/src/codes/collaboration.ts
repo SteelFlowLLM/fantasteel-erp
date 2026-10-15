@@ -72,6 +72,8 @@ export const NOTIFICATION_TYPE = {
   TASK_ASSIGNED: 'TASK_ASSIGNED',
   APPROVAL_REQUESTED: 'APPROVAL_REQUESTED',
   APPROVAL_RESULT: 'APPROVAL_RESULT',
+  MEETING_MINUTES_SHARED: 'MEETING_MINUTES_SHARED',
+  SCHEDULE_EVENT_ASSIGNED: 'SCHEDULE_EVENT_ASSIGNED',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -80,6 +82,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   TASK_ASSIGNED: '업무 지정',
   APPROVAL_REQUESTED: '승인 요청',
   APPROVAL_RESULT: '승인 결과',
+  MEETING_MINUTES_SHARED: '회의록 공유',
+  SCHEDULE_EVENT_ASSIGNED: '일정 등록',
 };
 
 /** 🟡 제안 값 (EX 과거 사례) */

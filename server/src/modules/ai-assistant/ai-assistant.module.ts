@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BusinessEventModule } from '../business-event/business-event.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { LlmModule } from '../llm/llm.module';
+import { MeetingMinutesModule } from '../meeting-minutes/meeting-minutes.module';
 import { LotModule } from '../lot/lot.module';
 import { ProductionModule } from '../production/production.module';
 import { PurchasingModule } from '../purchasing/purchasing.module';
@@ -15,7 +16,7 @@ import { AssistantToolbox } from './tools/assistant-toolbox';
 
 /** AI 어시스턴트 (REQ-AST, docs/backend/ai-assistant.md). 조회 도구는 각 모듈의 조회 service를 쓴다 */
 @Module({
-  imports: [LlmModule, InventoryModule, SalesOrderModule, ProductionModule, LotModule, QualityModule, PurchasingModule, ShipmentModule, BusinessEventModule],
+  imports: [LlmModule, InventoryModule, SalesOrderModule, ProductionModule, LotModule, QualityModule, PurchasingModule, ShipmentModule, BusinessEventModule, MeetingMinutesModule],
   controllers: [AiAssistantController],
   providers: [AiAssistantService, AiAssistantRepository, AssistantToolbox],
   exports: [AiAssistantService],

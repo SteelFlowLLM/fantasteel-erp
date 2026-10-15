@@ -2,7 +2,7 @@
 // 로컬 PostgreSQL(npm run db)이 떠 있어야 한다. 개발용 DB(fantasteel)는 건드리지 않는다.
 //   npm test                       ← 전체
 //   npm test -- sales-order        ← 경로에 이 이름이 들어간 묶음만
-//   npm run test:unit              ← DB 없이 src/common 단위 테스트만
+//   npm run test:unit              ← DB 없이 src/common·stt·llm·회의 분석 검증 단위 테스트만
 import { execSync, spawnSync } from 'node:child_process';
 import pg from 'pg';
 
@@ -13,7 +13,7 @@ const groups = [
   ['fs_sales', ['src/modules/sales-order', 'src/modules/inventory', 'src/modules/shipment', 'src/modules/dashboard']],
   ['fs_prod', ['src/modules/production', 'src/modules/mrp', 'src/modules/quality', 'src/modules/factory-agent']],
   ['fs_pur', ['src/modules/purchasing', 'src/modules/message-action']],
-  ['fs_collab', ['src/modules/messenger', 'src/modules/notification', 'src/modules/ai-assistant']],
+  ['fs_collab', ['src/modules/messenger', 'src/modules/stt', 'src/modules/notification', 'src/modules/ai-assistant', 'src/modules/meeting-minutes', 'src/modules/schedule-event']],
   ['fs_log', ['src/modules/lot', 'src/modules/business-event']],
 ];
 const only = process.argv.slice(2).filter((a) => a !== '--unit');
@@ -23,7 +23,7 @@ const shell = process.platform === 'win32';
 const nodeOptions = [process.env.NODE_OPTIONS, '--experimental-vm-modules'].filter(Boolean).join(' ');
 
 if (process.argv.includes('--unit')) {
-  const r = spawnSync('npx', ['jest', 'src/common'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
+  const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt', 'src/modules/llm', 'meeting-analysis.validator', 'meeting-speaker.unit', 'meeting-review.unit', 'meeting-candidate.context.unit', 'assistant-meeting.context.unit'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
   process.exit(r.status ?? 1);
 }
 

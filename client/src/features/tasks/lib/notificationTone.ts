@@ -8,4 +8,6 @@ export const NOTIFICATION_TYPE_TONE: Record<NotificationType, BadgeTone> = {
   TASK_ASSIGNED: 'neutral',
   APPROVAL_REQUESTED: 'wait',
   APPROVAL_RESULT: 'ok',
+  MEETING_MINUTES_SHARED: 'neutral',
+  SCHEDULE_EVENT_ASSIGNED: 'neutral',
 };

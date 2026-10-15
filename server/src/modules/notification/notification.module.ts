@@ -11,7 +11,7 @@ import { TaskService } from './task.service';
   imports: [OrganizationModule],
   controllers: [NotificationController],
   providers: [NotificationService, NotificationRepository, TaskService, TaskRepository],
-  // 다른 모듈(구매·메신저 등)이 본 거래 tx에서 notifyEmployees·notifyDepartment를 부른다
-  exports: [NotificationService],
+  // 다른 모듈(구매·메신저 등)이 본 거래 tx에서 notifyEmployees·notifyDepartment를 부르고, 회의록 확정이 TaskService.createInTx를 부른다
+  exports: [NotificationService, TaskService],
 })
 export class NotificationModule {}

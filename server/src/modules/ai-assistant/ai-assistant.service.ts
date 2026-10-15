@@ -11,6 +11,8 @@ import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmClient, LlmRequestError, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
+import { buildMeetingContext } from './assistant-meeting.context';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
@@ -37,6 +39,7 @@ export class AiAssistantService {
     private readonly settingsStore: LlmSettingsStore,
     private readonly llm: LlmClient,
     private readonly toolbox: AssistantToolbox,
+    private readonly meetingMinutes: MeetingMinutesService,
   ) {}
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
@@ -57,6 +60,8 @@ export class AiAssistantService {
     if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
     const model = settings.model;
 
+    // 없는 회의록이면 VOC-001(404). 회의록은 전 역할이 볼 수 있어 따로 권한을 보지 않는다
+    const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId));
     const history = recentHistory(input.history ?? []);
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
@@ -66,6 +71,7 @@ export class AiAssistantService {
       roleLabel: ROLE_LABEL[user.roleCode],
       today: seoulToday(),
       screen: input.screen ?? null,
+      meetingContext,
       references,
       processSteps,
       manualGuides,
