@@ -95,7 +95,7 @@ export function OrganizationScreen() {
       {tab === 'departments' ? <DepartmentTab canEdit={canEdit} /> : null}
       {tab === 'job-grades' ? <JobGradeTab /> : null}
       {tab === 'permissions' ? <PermissionMatrixTab canEdit={canEdit} draft={draft} onDraftChange={setDraft} highlightRole={highlightRole} /> : null}
-      {tab === 'org-chart' ? <OrgChartTab /> : null}
+      {tab === 'org-chart' ? <OrgChartTab petKey="card:organization.orgChart" /> : null}
     </PageMain>
   );
 }

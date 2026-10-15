@@ -224,7 +224,8 @@ function DetailBody({ detail }: { detail: SalesOrderDetail }) {
         </Banner>
       ) : null}
 
-      <div data-pet-target="card:salesOrders.tabs" className="flex flex-none items-end gap-3">
+      {/* self-start: 줄 너비를 탭·안내 글자만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
+      <div data-pet-target="card:salesOrders.tabs" className="flex flex-none items-end gap-3 self-start">
         <Tabs<DetailTab>
           ariaLabel="수주 상세"
           className="flex-1"

@@ -92,7 +92,8 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
 
   return (
     <>
-      <div data-pet-target="card:shipmentRequests.filter" className="flex flex-wrap items-center gap-2">
+      {/* self-start: 줄 너비를 필터 칸만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
+      <div data-pet-target="card:shipmentRequests.filter" className="flex flex-wrap items-center gap-2 self-start">
         <Chip data-pet-term="전체" on={status === null} onClick={() => setStatus(null)}>
           전체 <b>{rows.length}</b>
         </Chip>

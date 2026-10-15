@@ -124,7 +124,7 @@
       ]
     },
     inspections: {
-      intro: ['{name} {grade}님, 판정 대기 LOT부터 측정값을 넣어 볼까요? 저장하면 시스템이 판정해요.'],
+      intro: ['{name} {grade}님, 판정 대기 LOT에 측정값을 넣는 곳이에요. 저장하면 시스템이 판정해요.'],
       tour: [
         { target: 'card:inspections.queue', text: '판정 대기 LOT이 먼저 보여요. 공정·판정 결과로 걸러요.' },
         { target: 'card:inspections.lotInfo', text: '강종·규격, 판정에 쓸 검사 기준 버전과 상위 히트를 봐요.' },

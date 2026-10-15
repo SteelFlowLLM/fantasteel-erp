@@ -107,7 +107,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
 
   return (
     <>
-      <Card petKey="card:masterData.consumption">
+      <Card className="flex-none" petKey="card:masterData.consumption">
         <CardHead title="공통 원단위" meta="t/t (용선 1t당) · 철광석·석탄·석회석은 강종과 상관없는 공통값이에요" />
         <Table>
           <thead>
@@ -133,7 +133,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
         </Table>
         {common.length === 0 ? <EmptyNote>철광석·석탄·석회석 원료가 없어요. 품목 탭에서 원료를 추가해 주세요</EmptyNote> : null}
       </Card>
-      <Card petKey="card:masterData.ferroalloy">
+      <Card className="flex-none" petKey="card:masterData.ferroalloy">
         <CardHead title="합금철 원단위 (강종별)" meta="kg/t (용강 1t당)" />
         <div className="overflow-auto">
           <Table>
@@ -165,7 +165,7 @@ function ConsumptionEditor({ data, canEdit }: { data: Loaded; canEdit: boolean }
           {ferroalloys.length === 0 ? <EmptyNote>합금철 원료가 없어요. 품목 탭에서 원료를 추가해 주세요</EmptyNote> : null}
         </div>
       </Card>
-      <Card>
+      <Card className="flex-none">
         <TableFoot className="flex items-center gap-3 rounded-md border-t-0">
           <span className="min-w-0 flex-1">
             {changes.length > 0

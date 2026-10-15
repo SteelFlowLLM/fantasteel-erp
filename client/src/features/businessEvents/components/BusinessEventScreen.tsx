@@ -130,31 +130,35 @@ export function BusinessEventScreen() {
       />
       <span className="-mt-2 text-cap text-ink-3">작업 로그는 기록만 남고 고치거나 지울 수 없어요</span>
 
-      <div data-pet-target="card:businessEvents.subject" className="flex flex-none flex-wrap items-center gap-2">
-        <SalesOrderPicker
-          salesOrderId={filter.salesOrderId}
-          salesOrderNo={salesOrderNo}
-          onPick={(id) => patch({ salesOrderId: String(id) })}
-          onClear={() => patch({ salesOrderId: null })}
-        />
-        <LotPicker lotId={filter.lotId} lotNo={lotNo} onPick={(id) => patch({ lotId: String(id) })} onClear={() => patch({ lotId: null })} />
-        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
-        <span data-pet-term="주체" className="text-xs font-medium text-ink-2">
-          주체
-        </span>
-        <Chip on={!filter.actorType} data-pet-term="주체" onClick={() => patch({ actorType: null })}>
-          전체
-        </Chip>
-        {[ACTOR_TYPE.USER, ACTOR_TYPE.SYSTEM].map((actor) => (
-          <Chip key={actor} on={filter.actorType === actor} data-pet-term={ACTOR_TYPE_LABEL[actor]} onClick={() => patch({ actorType: actor })}>
-            {ACTOR_TYPE_LABEL[actor]}
+      <div className="flex flex-none flex-wrap items-center gap-2">
+        {/* 펫 강조 테두리가 오른쪽 빈자리·조건 초기화까지 넓게 그려지지 않게, 고르는 칸만 따로 묶어 설명 키를 단다 */}
+        <div data-pet-target="card:businessEvents.subject" className="flex min-w-0 flex-wrap items-center gap-2">
+          <SalesOrderPicker
+            salesOrderId={filter.salesOrderId}
+            salesOrderNo={salesOrderNo}
+            onPick={(id) => patch({ salesOrderId: String(id) })}
+            onClear={() => patch({ salesOrderId: null })}
+          />
+          <LotPicker lotId={filter.lotId} lotNo={lotNo} onPick={(id) => patch({ lotId: String(id) })} onClear={() => patch({ lotId: null })} />
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+          <span data-pet-term="주체" className="text-xs font-medium text-ink-2">
+            주체
+          </span>
+          <Chip on={!filter.actorType} data-pet-term="주체" onClick={() => patch({ actorType: null })}>
+            전체
           </Chip>
-        ))}
+          {[ACTOR_TYPE.USER, ACTOR_TYPE.SYSTEM].map((actor) => (
+            <Chip key={actor} on={filter.actorType === actor} data-pet-term={ACTOR_TYPE_LABEL[actor]} onClick={() => patch({ actorType: actor })}>
+              {ACTOR_TYPE_LABEL[actor]}
+            </Chip>
+          ))}
+        </div>
         <Button size="sm" variant="ghost" icon="refresh" className="ml-auto" disabled={!anyFilter} onClick={() => router.replace(pathname)}>
           조건 초기화
         </Button>
       </div>
-      <div data-pet-target="card:businessEvents.filters" className="flex flex-none flex-wrap items-center gap-2">
+      {/* 오른쪽이 비는 줄이라 내용 너비만큼만 차지하게 해 펫 강조 테두리가 칸에 맞는다 */}
+      <div data-pet-target="card:businessEvents.filters" className="flex max-w-full flex-none flex-wrap items-center gap-2 self-start">
         <Select className="w-[200px]" aria-label="작업 로그 유형" data-pet-term="유형" value={filter.businessEventType ?? ''} onChange={(e) => patch({ eventType: e.target.value || null })}>
           <option value="">유형: 전체</option>
           {BUSINESS_EVENT_AREAS.map((area) => (

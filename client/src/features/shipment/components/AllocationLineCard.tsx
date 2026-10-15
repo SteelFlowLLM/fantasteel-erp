@@ -82,8 +82,9 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
   const reasonError = mode.kind === 'change' && reason.trim().length > REASON_MAX ? `${REASON_MAX}자 이하로 입력해 주세요` : null;
   const shortage = Math.max(0, waiting - line.candidateLots.length);
 
+  // flex-none: 품목 카드가 여럿이거나 글자를 키워도 카드가 화면 높이로 눌려 표가 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤)
   return (
-    <Card petKey="card:shipmentRequests.allocation">
+    <Card className="flex-none" petKey="card:shipmentRequests.allocation">
       <CardHead
         title={
           <span data-pet-term="품목" className="flex items-center gap-2">

@@ -40,7 +40,7 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
           aria-label="AI 어시스턴트 열기 (준비 중, P2)"
           aria-expanded={aiPanelOpen}
           onClick={toggleAiPanel}
-          className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-2xl border border-ai-line bg-ai-bg pr-2.5 pl-1.5 text-xs font-semibold text-ai-strong hover:bg-[#e9e3fb]"
+          className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-2xl border border-ai-line bg-ai-bg pr-2.5 pl-1.5 text-xs font-semibold whitespace-nowrap text-ai-strong hover:bg-[#e9e3fb]"
         >
           <AiMark size="sm" />
           AI 어시스턴트

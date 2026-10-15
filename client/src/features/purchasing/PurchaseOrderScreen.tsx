@@ -259,7 +259,8 @@ export function PurchaseOrderForm({
                 ) : null
               }
             />
-            <CardBody flush>
+            {/* 글자를 키우면 표가 오른쪽 칸보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+            <CardBody flush className="overflow-x-auto">
               {selectable ? null : <Banner tone="wait" className="m-3">이 원료들은 기본 공급업체가 지정되지 않아 발주할 수 없어요. 기준정보에서 원료의 기본 공급업체를 지정해 주세요.</Banner>}
               <Table>
                 <thead>
@@ -383,7 +384,8 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
       </StatBar>
       <Card petKey="card:purchaseOrders.items">
         <CardHead title="발주 품목" />
-        <CardBody flush>
+        {/* 글자를 키우면 표가 오른쪽 칸보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 (아래 표들도 같은 이유) */}
+        <CardBody flush className="overflow-x-auto">
           <Table>
             <thead>
               <tr>
@@ -452,7 +454,7 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
             ) : null
           }
         />
-        <CardBody flush>
+        <CardBody flush className="overflow-x-auto">
           {receipts.length === 0 ? (
             <EmptyNote>아직 입고가 없어요</EmptyNote>
           ) : (

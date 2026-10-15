@@ -141,7 +141,7 @@ function CandidatesCard({ detail, canAllocate }: { detail: RollingDetail; canAll
   const needText = permissionNeedText([PERMISSION.HOT_ROLLING_ALLOCATE]);
   const pool = plan.slabPool;
   return (
-    <Card petKey="card:hotRolling.candidates">
+    <Card className="flex-none" petKey="card:hotRolling.candidates">
       <CardHead
         title="FIFO 추천 슬래브"
         meta={<span data-pet-term="FIFO 순서">{`${plan.slabItem.itemCode} · 생산완료일 → LOT 번호 순 · 추천은 저장하지 않아요`}</span>}
@@ -272,7 +272,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
   // 서버 응답에 배정 확정자가 없어(ERD에 칸 없음) 늘 '-'만 보이던 칸: 이름이 하나라도 있을 때만 보인다
   const showConfirmer = plan.allocations.some((a) => a.confirmedEmployeeName);
   return (
-    <Card petKey="card:hotRolling.allocations">
+    <Card className="flex-none" petKey="card:hotRolling.allocations">
       <CardHead
         title="확정 배정"
         meta={`열연 투입 대기 ${plan.allocatedQty}매`}
@@ -337,7 +337,7 @@ function AllocationsCard({ detail, canAllocate, canRoll }: { detail: RollingDeta
 
 function CoilsCard({ detail }: { detail: RollingDetail }) {
   return (
-    <Card petKey="card:hotRolling.coils">
+    <Card className="flex-none" petKey="card:hotRolling.coils">
       <CardHead title="열연 실적 · 코일" meta={`코일 ${detail.coils.length}개${detail.plan.failedCoilQty > 0 ? ` (불합격 ${detail.plan.failedCoilQty}개)` : ''} · 슬래브 1매 = 코일 1개`} />
       <CardBody flush>
         <ResultsTable results={detail.results} emptyText="아직 등록된 열연 실적이 없어요" />

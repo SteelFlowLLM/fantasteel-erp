@@ -10,8 +10,9 @@ import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
   const itemOf = (soItemId: number) => detail.items.find((i) => i.salesOrderItemId === soItemId);
+  // flex-none: 예약이 많아도 카드가 화면 높이로 눌려 표가 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤)
   return (
-    <Card petKey="card:salesOrders.reservation">
+    <Card className="flex-none" petKey="card:salesOrders.reservation">
       {detail.reservations.length === 0 ? (
         <EmptyNote className="py-8">예약이 없어요</EmptyNote>
       ) : (

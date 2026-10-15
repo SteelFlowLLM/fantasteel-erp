@@ -14,8 +14,8 @@
       tour: [
         { target: 'card:salesOrders.filter', text: '상태·고객사·품목 유형으로 수주를 걸러요.' },
         { target: 'card:salesOrders.toolbar', text: '수주번호·고객사로 찾고, 여기서 수주를 등록해요.' },
-        { target: 'card:salesOrders.list', text: '막대는 검사합격 ÷ 수주 매수예요. 줄을 눌러 봐요.' },
-        { target: 'card:salesOrders.preview', text: '고른 수주의 충족·생산 연결·최근 기록이에요.' },
+        { target: 'card:salesOrders.list', text: '막대는 검사합격 ÷ 수주 매수예요. 줄을 누르면 오른쪽에 보여요.' },
+        { target: 'card:salesOrders.preview', text: '오른쪽 칸은 목록에서 고른 수주의 충족·생산 연결·최근 기록이에요.' },
         { target: 'card:salesOrders.master', text: '왼쪽에서 다른 수주로 바로 넘어가요.' },
         { target: 'card:salesOrders.header', text: '업무방·출하요청·수주 취소 버튼이 여기 있어요.' },
         { target: 'card:salesOrders.tabs', text: '충족 현황·생산 연결·예약·이력 탭으로 나눠 봐요.' },

@@ -166,8 +166,9 @@ function CandidateCard() {
         <span data-pet-term="처리 순서" className="flex-none text-cap text-ink-3">
           처리 순서
         </span>
+        {/* 글자를 키우면 단계 줄이 카드보다 길어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
         <Steps
-          className="flex-1"
+          className="min-w-0 flex-1 overflow-x-auto"
           items={CANDIDATE_FLOW.map((label, index) => ({ key: label, label, state: index === 0 ? 'run' : 'todo' }))}
         />
       </div>

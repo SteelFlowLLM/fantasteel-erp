@@ -74,28 +74,31 @@ export function FormationCard({ plan, steps }: { plan: ProductionPlanDetail; ste
         </span>
       </div>
       <CardBody flush>
-        <Table compact>
-          <thead>
-            <tr>
-              <Th>항목</Th>
-              <Th align="right">값</Th>
-              <Th>계산</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.label}>
-                <Td className="font-medium" data-pet-term={row.label}>
-                  {row.label}
-                </Td>
-                <Td align="right" className="font-semibold">
-                  {row.value}
-                </Td>
-                <Td className="whitespace-normal text-xs text-ink-3">{row.rule}</Td>
+        {/* 글자 크기를 키우면 계산 칸이 카드보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 옆으로 넘긴다 */}
+        <div className="overflow-x-auto">
+          <Table compact>
+            <thead>
+              <tr>
+                <Th>항목</Th>
+                <Th align="right">값</Th>
+                <Th>계산</Th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.label}>
+                  <Td className="font-medium" data-pet-term={row.label}>
+                    {row.label}
+                  </Td>
+                  <Td align="right" className="font-semibold">
+                    {row.value}
+                  </Td>
+                  <Td className="whitespace-normal text-xs text-ink-3">{row.rule}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </CardBody>
     </Card>
   );

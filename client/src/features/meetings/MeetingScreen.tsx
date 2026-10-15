@@ -254,7 +254,8 @@ function NewDesign() {
             ))}
             <span className="ml-auto self-center text-cap text-ink-3">회의 음성으로 기록해요 · 입력 방식은 구현 단계에서 정해요</span>
           </div>
-          <CardBody className="flex-1 gap-4 px-6 py-5">
+          {/* 글자를 키우면 카드 높이보다 내용이 길어져 아래 버튼 줄 밖으로 삐져나오므로 카드 안에서 스크롤한다 */}
+          <CardBody className="flex-1 gap-4 overflow-auto px-6 py-5">
             <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-line-strong bg-surface-2 px-6 py-6 text-center">
               <span className="inline-flex size-11 items-center justify-center rounded-full bg-brand-tint text-brand">
                 <Icon name="upload" size="lg" />
@@ -355,7 +356,8 @@ function ResultDesign() {
         <div className="grid min-h-0 flex-none grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-3.5">
           <Card petKey="card:meetings.tasks">
             <CardHead title={`할 일 ${EXTRACTED_TASKS.length}`} meta="담당·마감을 확인한 항목만 업무로 등록" />
-            <CardBody flush>
+            {/* 글자를 키우면 표가 카드보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+            <CardBody flush className="overflow-x-auto">
               <Table>
                 <thead>
                   <tr>

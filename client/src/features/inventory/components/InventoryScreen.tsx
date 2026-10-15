@@ -23,7 +23,8 @@ export function InventoryScreen() {
   const [params, update] = useInventoryParams();
   return (
     <PageMain className="gap-3 px-5 py-4">
-      <div data-pet-target="card:inventories.tabs" className="flex flex-none items-end gap-3">
+      {/* self-start: 줄 너비를 탭·버튼만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
+      <div data-pet-target="card:inventories.tabs" className="flex flex-none items-end gap-3 self-start">
         <Tabs ariaLabel="재고 구분" items={TAB_ITEMS} active={params.tab} onChange={(tab) => update({ tab })} className="flex-1" />
         <span data-pet-term="조회 전용" className="pb-2.5 text-cap text-ink-3">
           조회 전용 · 예약·출고·검사·작업 실적이 반영되면 바로 바뀌어요

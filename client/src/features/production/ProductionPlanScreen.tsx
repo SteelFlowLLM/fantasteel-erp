@@ -282,38 +282,41 @@ export function PlanDetailBody({ plan }: { plan: ProductionPlanDetail }) {
           <Card petKey="card:productionPlans.heats">
             <CardHead title="히트" meta={`편성 ${plan.progress.heatCount}개 · 제강 ${plan.progress.heatsMadeQty}개 · 연주 ${plan.progress.heatsCastQty}개`} />
             <CardBody flush>
-              <Table compact>
-                <thead>
-                  <tr>
-                    <Th>순번</Th>
-                    <Th>히트</Th>
-                    <Th>전로</Th>
-                    <Th align="right">히트 톤</Th>
-                    <Th>성분 판정</Th>
-                    <Th>연주</Th>
-                    <Th align="right">슬래브</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plan.heats.map((h) => (
-                    <tr key={h.seq} data-muted={h.heatLotId === null ? true : undefined} data-pet-item="heat" data-pet-item-title={h.heatNo ?? `순번 ${h.seq} (제강 전)`}>
-                      <Td>{h.seq}</Td>
-                      <Td className="font-mono text-mono">{h.heatNo ?? '제강 전'}</Td>
-                      <Td className="font-mono text-mono">{h.converterCode ?? '-'}</Td>
-                      <Td align="right">{fmtTon(h.heatTon)}</Td>
-                      <Td>
-                        {h.inspectionResult === null ? (
-                          '-'
-                        ) : (
-                          <Badge tone={INSPECTION_RESULT_TONE[h.inspectionResult]}>{INSPECTION_RESULT_LABEL[h.inspectionResult]}</Badge>
-                        )}
-                      </Td>
-                      <Td>{h.heatLotId === null ? '-' : h.castDone ? '완료' : '연주 전'}</Td>
-                      <Td align="right">{h.slabQty > 0 ? `${h.slabQty}매` : '-'}</Td>
+              {/* 글자 크기를 키우면 표가 카드보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 옆으로 넘긴다 */}
+              <div className="overflow-x-auto">
+                <Table compact>
+                  <thead>
+                    <tr>
+                      <Th>순번</Th>
+                      <Th>히트</Th>
+                      <Th>전로</Th>
+                      <Th align="right">히트 톤</Th>
+                      <Th>성분 판정</Th>
+                      <Th>연주</Th>
+                      <Th align="right">슬래브</Th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
+                  </thead>
+                  <tbody>
+                    {plan.heats.map((h) => (
+                      <tr key={h.seq} data-muted={h.heatLotId === null ? true : undefined} data-pet-item="heat" data-pet-item-title={h.heatNo ?? `순번 ${h.seq} (제강 전)`}>
+                        <Td>{h.seq}</Td>
+                        <Td className="font-mono text-mono">{h.heatNo ?? '제강 전'}</Td>
+                        <Td className="font-mono text-mono">{h.converterCode ?? '-'}</Td>
+                        <Td align="right">{fmtTon(h.heatTon)}</Td>
+                        <Td>
+                          {h.inspectionResult === null ? (
+                            '-'
+                          ) : (
+                            <Badge tone={INSPECTION_RESULT_TONE[h.inspectionResult]}>{INSPECTION_RESULT_LABEL[h.inspectionResult]}</Badge>
+                          )}
+                        </Td>
+                        <Td>{h.heatLotId === null ? '-' : h.castDone ? '완료' : '연주 전'}</Td>
+                        <Td align="right">{h.slabQty > 0 ? `${h.slabQty}매` : '-'}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
             </CardBody>
           </Card>
 

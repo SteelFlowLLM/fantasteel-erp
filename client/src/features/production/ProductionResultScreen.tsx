@@ -186,7 +186,7 @@ function ProcessSection({
           : `${results.length}건 · 용선 ${fmtTon(plan.progress.hotMetalTon)}`;
   const workProcess = process as WorkProcess;
   return (
-    <Card petKey={PROCESS_PET_KEY[process]}>
+    <Card className="flex-none" petKey={PROCESS_PET_KEY[process]}>
       <CardHead
         title={PROCESS_TYPE_LABEL[process]}
         meta={meta}
