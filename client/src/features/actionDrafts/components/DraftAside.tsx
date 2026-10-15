@@ -16,7 +16,7 @@ export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
   const message = draft.message;
   return (
     <Card petKey="card:purchaseRequisitions.draftMessage">
-      <CardHead title="원본 메시지" />
+      <CardHead title={draft.meetingMinutes ? "원본 회의록" : "원본 메시지"} />
       <CardBody className="gap-2.5 px-3.5 py-3">
         {message ? (
           <div data-pet-item="message" data-pet-item-title={`초안 #${draft.id} 원본 메시지`} className="flex flex-col gap-1.5 rounded-md border border-line bg-surface-2 px-3 py-2.5">
@@ -42,13 +42,24 @@ export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
               원본 메시지로 이동
             </ButtonLink>
           </div>
+        ) : draft.meetingMinutes ? (
+          <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface-2 px-3 py-2.5">
+            <span className="flex items-center gap-1.5 text-cap text-ink-3">
+              <Icon name="mic" size="sm" />
+              회의록에서 만든 초안
+            </span>
+            <b className="text-sm break-words">{draft.meetingMinutes.title}</b>
+            <ButtonLink href={`/meetings?id=${draft.meetingMinutes.id}`} size="sm" icon="mic" className="self-start">
+              회의록으로 이동
+            </ButtonLink>
+          </div>
         ) : (
           <div className="flex items-center gap-2 rounded-md border border-dashed border-line-strong px-3 py-2.5 text-sm text-ink-3">
             <Icon name="info" size="sm" />
             원본 메시지를 불러올 수 없어요
           </div>
         )}
-        <span className="text-cap text-ink-3">메시지를 보면서 왼쪽 값을 직접 입력해 주세요.</span>
+        <span className="text-cap text-ink-3">{draft.meetingMinutes ? '회의에서 허가한 값이에요. 확인하고 고칠 값이 있으면 왼쪽에서 고쳐 주세요.' : '메시지를 보면서 왼쪽 값을 직접 입력해 주세요.'}</span>
       </CardBody>
     </Card>
   );

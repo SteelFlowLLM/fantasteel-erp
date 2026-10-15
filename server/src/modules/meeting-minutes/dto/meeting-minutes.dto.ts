@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { MEETING_MINUTES_STATUS, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -66,4 +66,74 @@ export class ListMeetingMinutesQuery {
   @Min(1)
   @Max(100)
   size?: number;
+}
+
+/** PATCH meeting-minutes/:id/candidates/:key 의 구매요청 칸. 값의 뜻(원료 여부·날짜 범위)은 service가 검증한다 */
+export class MeetingCandidatePurchaseDto {
+  @IsOptional()
+  @IsInt({ message: '원료 품목이 올바르지 않아요' })
+  itemId?: number;
+
+  @IsOptional()
+  @IsString({ message: '수량(톤)이 올바르지 않아요' })
+  requestedTon?: string;
+
+  @IsOptional()
+  @IsString({ message: '희망 입고일이 올바르지 않아요' })
+  desiredReceiptDate?: string;
+}
+
+/** PATCH meeting-minutes/:id/candidates/:key. 보낸 칸만 바꾼다 */
+export class UpdateMeetingCandidateDto {
+  @IsOptional()
+  @IsString({ message: '제목이 올바르지 않아요' })
+  @MaxLength(200, { message: '제목은 200자까지 쓸 수 있어요' })
+  title?: string;
+
+  @IsOptional()
+  @IsString({ message: '설명이 올바르지 않아요' })
+  @MaxLength(1000, { message: '설명은 1000자까지 쓸 수 있어요' })
+  description?: string | null;
+
+  @IsOptional()
+  @IsInt({ message: '담당자가 올바르지 않아요' })
+  assigneeId?: number;
+
+  @IsOptional()
+  @Matches(DATE_PATTERN, { message: '마감일은 YYYY-MM-DD로 입력해 주세요' })
+  dueDate?: string;
+
+  @IsOptional()
+  @IsString({ message: '시작 시각이 올바르지 않아요' })
+  startAt?: string;
+
+  @IsOptional()
+  @IsString({ message: '끝 시각이 올바르지 않아요' })
+  endAt?: string;
+
+  @IsOptional()
+  @IsArray({ message: '참석자를 골라 주세요' })
+  @ArrayMaxSize(100, { message: '참석자는 100명까지 고를 수 있어요' })
+  @IsInt({ each: true, message: '참석자 id가 올바르지 않아요' })
+  attendeeIds?: number[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MeetingCandidatePurchaseDto)
+  purchase?: MeetingCandidatePurchaseDto;
+
+  @IsOptional()
+  @IsIn(['PENDING', 'APPROVED', 'EXCLUDED'], {
+    message: '허가 상태가 올바르지 않아요',
+  })
+  decision?: 'PENDING' | 'APPROVED' | 'EXCLUDED';
+}
+
+/** PATCH meeting-minutes/:id/summary */
+export class UpdateMeetingSummaryDto {
+  @IsString({ message: '요약을 입력해 주세요' })
+  @MaxLength(MEETING_SUMMARY_MAX, {
+    message: `요약은 ${MEETING_SUMMARY_MAX}자까지 쓸 수 있어요`,
+  })
+  summary!: string;
 }

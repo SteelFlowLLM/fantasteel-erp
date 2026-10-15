@@ -1,18 +1,30 @@
 import { Injectable } from '@nestjs/common';
 import {
+  BUSINESS_EVENT_TYPE,
   MEETING_ANALYSIS_MAX_CHARS,
   MEETING_MINUTES_STATUS,
+  missingFieldsOf,
+  NOTIFICATION_TYPE,
   type AuthUser,
+  type MeetingAnalysis,
+  type MeetingCandidate,
+  type MeetingCandidateRegistered,
+  type MeetingRegisterResult,
   type MeetingMinutesListItem,
   type MeetingMinutesPage,
   type MeetingMinutesStatus,
   type MeetingMinutesView,
   type Role,
 } from '@fantasteel/shared';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
-import { PrismaService } from '../../prisma/prisma.service';
+import { MessageActionService } from '../message-action/message-action.service';
+import { NotificationService } from '../notification/notification.service';
+import { TaskService } from '../notification/task.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
-import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery } from './dto/meeting-minutes.dto';
+import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
@@ -49,6 +61,11 @@ function parseAttendeeIds(value: string): number[] {
     throw new AppException('COM-004', '참석자를 1명 이상 골라 주세요');
   }
   return parsed as number[];
+}
+
+/** 알림 문구용 `M/D HH:mm` (+09:00 ISO에서 그대로 읽는다) */
+function shortSeoulTime(iso: string): string {
+  return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))} ${iso.slice(11, 16)}`;
 }
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
@@ -116,6 +133,10 @@ export class MeetingMinutesService {
     private readonly repository: MeetingMinutesRepository,
     private readonly runner: MeetingTranscriptionRunner,
     private readonly analysisRunner: MeetingAnalysisRunner,
+    private readonly tasks: TaskService,
+    private readonly notifications: NotificationService,
+    private readonly messageActions: MessageActionService,
+    private readonly businessEventRecorder: BusinessEventRecorder,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -181,6 +202,215 @@ export class MeetingMinutesService {
     if (count === 0) throw new AppException('VOC-004');
     void this.analysisRunner.enqueue({ meetingMinutesId: id });
     return this.get(id);
+  }
+
+  /**
+   * API-261 확인 단계. 작성자만 후보를 고치고 허가·제외한다 (REQ-VOC-004). AI는 어떤 것도 스스로 등록하지 않는다.
+   * 허가(APPROVED)는 그 종류의 필수 칸이 모두 찬 후보만 된다. 남은 경고(끝 시각 가정·마감일 당일)는 막지 않는다: 작성자가 확인했다는 뜻이다.
+   */
+  async updateCandidate(user: AuthUser, id: number, key: string, dto: UpdateMeetingCandidateDto): Promise<MeetingMinutesView> {
+    const { row, analysis } = await this.loadForReview(user, id);
+    const index = analysis.candidates.findIndex((c) => c.key === key);
+    if (index < 0) throw new AppException('COM-003', '후보를 찾을 수 없어요');
+    await this.requireReferences(this.prisma, dto);
+
+    const edited = applyCandidateEdit(analysis.candidates[index], dto, dateOnly(row.meetingDate));
+    if (dto.decision !== undefined) {
+      if (dto.decision === 'APPROVED') {
+        const missing = missingFieldsOf(edited);
+        if (missing.length > 0) throw new AppException('VOC-006', `${missing.join(', ')}을(를) 채워야 허가할 수 있어요`);
+        if (edited.kind === 'PURCHASE') await this.messageActions.assertCanRequestFromMeeting(this.prisma, user);
+      }
+      edited.decision = dto.decision;
+    }
+    const candidates = analysis.candidates.map((c, i) => (i === index ? edited : c));
+    await this.saveReviewEdit(id, row.updatedAt, { ...analysis, candidates });
+    return this.get(id);
+  }
+
+  /** 검토 중에 AI 요약을 작성자가 고친다. 요약 칸과 분석 결과 안의 요약을 같이 바꾼다 */
+  async updateSummary(user: AuthUser, id: number, dto: UpdateMeetingSummaryDto): Promise<MeetingMinutesView> {
+    const { row, analysis } = await this.loadForReview(user, id);
+    const summary = dto.summary.trim();
+    await this.saveReviewEdit(id, row.updatedAt, { ...analysis, summary }, summary);
+    return this.get(id);
+  }
+
+  /**
+   * API-261. 허가한 후보를 한 트랜잭션으로 등록하고 회의록을 확정한다 (REQ-VOC-004).
+   * 업무·일정·구매요청 초안·작업 로그·알림이 모두 같이 커밋되거나 모두 취소된다. 허가·제외하지 않은 후보가 있으면 하지 않는다.
+   */
+  async register(user: AuthUser, id: number): Promise<MeetingRegisterResult> {
+    const { row, analysis } = await this.loadForReview(user, id);
+    const pending = analysis.candidates.filter((c) => c.decision === 'PENDING');
+    if (pending.length > 0) throw new AppException('VOC-007', `허가 또는 제외하지 않은 후보가 ${pending.length}건 남아 있어요 (${pending.map((c) => c.title).join(', ')})`);
+    const approved = analysis.candidates.filter((c) => c.decision === 'APPROVED');
+    for (const c of approved) {
+      const missing = missingFieldsOf(c);
+      if (missing.length > 0) throw new AppException('VOC-006', `"${c.title}"의 ${missing.join(', ')}을(를) 채워야 등록할 수 있어요`);
+    }
+    const segments = readSegments(row.transcriptSegments);
+    const attendeeIds = row.attendees.map((a) => a.employeeId);
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const { count } = await this.repository.confirm(tx, id, new Date());
+      if (count === 0) throw new AppException('VOC-004', '이미 확정됐거나 검토 중이 아니에요');
+      // 허가한 뒤 퇴사했거나 지워진 사원·품목이 없는지 한 번 더 본다
+      await this.requireReferences(tx, {
+        attendeeIds: [...new Set(approved.flatMap((c) => [...c.attendeeIds, ...(c.assigneeId === null ? [] : [c.assigneeId])]))],
+      });
+      await this.requireItems(
+        tx,
+        approved.flatMap((c) => (c.purchase?.itemId == null ? [] : [c.purchase.itemId])),
+      );
+
+      const link = `/meetings?id=${id}`;
+      const taskIds: number[] = [];
+      const scheduleEventIds: number[] = [];
+      const actionDraftIds: number[] = [];
+      const registered = new Map<string, MeetingCandidateRegistered>();
+
+      for (const c of approved) {
+        if (c.kind === 'TASK' && c.assigneeId !== null && c.dueDate !== null) {
+          const evidence = c.evidence.map((i) => segments[i]?.text).filter((t): t is string => t !== undefined);
+          const quote = evidence.length > 0 ? `근거 발언: ${evidence.map((t) => `"${t}"`).join(' / ')}` : null;
+          const taskId = await this.tasks.createInTx(tx, user.employeeId, {
+            taskTitle: c.title,
+            taskDescription: [c.description, quote].filter((t): t is string => t !== null).join('\n\n') || null,
+            assigneeId: c.assigneeId,
+            dueDate: new Date(`${c.dueDate}T00:00:00.000Z`),
+            meetingMinutesId: id,
+            linkPath: link,
+          });
+          taskIds.push(taskId);
+          registered.set(c.key, { type: 'task', id: taskId });
+        } else if (c.kind === 'EVENT' && c.startAt !== null && c.endAt !== null) {
+          const event = await this.repository.createScheduleEvent(
+            tx,
+            {
+              scheduleEventTitle: c.title,
+              scheduleEventDescription: c.description,
+              startAt: new Date(c.startAt),
+              endAt: new Date(c.endAt),
+              creatorId: user.employeeId,
+              linkPath: link,
+              meetingMinutesId: id,
+            },
+            c.attendeeIds,
+          );
+          scheduleEventIds.push(event.id);
+          registered.set(c.key, { type: 'schedule_event', id: event.id });
+          await this.notifications.notifyEmployees(
+            tx,
+            c.attendeeIds.filter((employeeId) => employeeId !== user.employeeId),
+            {
+              notificationType: NOTIFICATION_TYPE.SCHEDULE_EVENT_ASSIGNED,
+              notificationContent: `일정 등록 · ${c.title} · ${shortSeoulTime(c.startAt)}`,
+              linkPath: link,
+            },
+          );
+        } else if (c.kind === 'PURCHASE' && c.purchase !== null) {
+          const draftId = await this.messageActions.createFromMeeting(
+            tx,
+            user,
+            id,
+            {
+              ...c.purchase,
+              requestReason: c.purchase.requestReason ?? c.title,
+            },
+            c.salesOrderId,
+          );
+          actionDraftIds.push(draftId);
+          registered.set(c.key, { type: 'action_draft', id: draftId });
+        }
+      }
+
+      const excludedKeys = analysis.candidates.filter((c) => c.decision === 'EXCLUDED').map((c) => c.key);
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.MEETING_MINUTES_CONFIRMED,
+        actor: user,
+        target: { table: 'meeting_minutes', id },
+        before: { meetingMinutesStatus: MEETING_MINUTES_STATUS.REVIEW },
+        after: {
+          meetingMinutesStatus: MEETING_MINUTES_STATUS.CONFIRMED,
+          taskIds,
+          scheduleEventIds,
+          actionDraftIds,
+          excludedKeys,
+        },
+        isAiAssisted: true,
+      });
+      // 알림은 작업 로그 id를 달지 않는다: (작업 로그, 받는 사람)이 유일해서 한 사람에게 여러 알림을 보낼 수 없다
+      await this.notifications.notifyEmployees(
+        tx,
+        attendeeIds.filter((employeeId) => employeeId !== user.employeeId),
+        {
+          notificationType: NOTIFICATION_TYPE.MEETING_MINUTES_SHARED,
+          notificationContent: `회의록 공유 · ${row.meetingMinutesTitle}`,
+          linkPath: link,
+        },
+      );
+
+      const withResults: MeetingAnalysis = {
+        ...analysis,
+        candidates: analysis.candidates.map((c) => ({
+          ...c,
+          registered: registered.get(c.key) ?? null,
+        })),
+      };
+      await this.repository.saveAnalysisResult(tx, id, withResults as unknown as Prisma.InputJsonObject);
+      return { taskIds, scheduleEventIds, actionDraftIds, excludedKeys };
+    });
+    return { meetingMinutes: await this.get(id), ...created };
+  }
+
+  /** 작성자의 검토 중(REVIEW) 회의록과 그 분석 결과. 고치기·등록이 같은 확인을 한다 */
+  private async loadForReview(user: AuthUser, id: number): Promise<{ row: MeetingMinutesDetailRow; analysis: MeetingAnalysis }> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    if (row.creator.id !== user.employeeId) throw new AppException('VOC-003', '회의록 작성자만 후보를 확인하고 등록할 수 있어요');
+    if (row.meetingMinutesStatus !== MEETING_MINUTES_STATUS.REVIEW) throw new AppException('VOC-004', '검토 대기 상태의 회의록만 확인하고 등록할 수 있어요');
+    const analysis = readAnalysis(row.analysisResult);
+    if (!analysis) throw new AppException('VOC-004', 'AI 정리 결과를 읽을 수 없어요. 다시 정리해 주세요');
+    return { row, analysis };
+  }
+
+  private async saveReviewEdit(id: number, readUpdatedAt: Date, analysis: MeetingAnalysis, summary?: string): Promise<void> {
+    const { count } = await this.repository.saveReviewEdit(this.prisma, id, readUpdatedAt, {
+      analysisResult: analysis as unknown as Prisma.InputJsonObject,
+      summary,
+    });
+    if (count > 0) return;
+    // 상태가 바뀌었는지(확정·재정리), 같은 회의록을 동시에 고쳤는지 가려서 알려 준다
+    const current = await this.repository.findDetail(this.prisma, id);
+    if (current?.meetingMinutesStatus !== MEETING_MINUTES_STATUS.REVIEW) throw new AppException('VOC-004', '검토 대기 상태의 회의록만 확인하고 등록할 수 있어요');
+    throw new AppException('COM-001', '그 사이 다른 곳에서 회의록을 고쳤어요. 새로 불러와 주세요');
+  }
+
+  /** 담당자·참석자는 사용 중인 사원(회의 참석자가 아니어도 된다), 품목은 원료여야 한다 */
+  private async requireReferences(
+    tx: Tx,
+    input: {
+      assigneeId?: number;
+      attendeeIds?: number[];
+      purchase?: { itemId?: number };
+    },
+  ): Promise<void> {
+    const employeeIds = employeeIdsIn(input);
+    if (employeeIds.length > 0) {
+      const found = new Set((await this.repository.findActiveEmployeeIds(tx, employeeIds)).map((e) => e.id));
+      const missing = employeeIds.filter((employeeId) => !found.has(employeeId));
+      if (missing.length > 0) throw new AppException('VOC-002', `고른 사원을 찾을 수 없거나 퇴사했어요 (사원 id ${missing.join(', ')})`);
+    }
+    if (input.purchase?.itemId !== undefined) await this.requireItems(tx, [input.purchase.itemId]);
+  }
+
+  private async requireItems(tx: Tx, itemIds: number[]): Promise<void> {
+    const unique = [...new Set(itemIds)];
+    if (unique.length === 0) return;
+    const found = new Set((await this.repository.findRawMaterialIds(tx, unique)).map((i) => i.id));
+    const missing = unique.filter((itemId) => !found.has(itemId));
+    if (missing.length > 0) throw new AppException('COM-004', `원료 품목을 찾을 수 없어요 (품목 id ${missing.join(', ')})`);
   }
 
   /** API-259 목록 */

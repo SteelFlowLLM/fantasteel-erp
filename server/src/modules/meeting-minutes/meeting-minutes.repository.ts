@@ -113,4 +113,59 @@ export class MeetingMinutesRepository {
   findSalesOrdersByNo(tx: Tx, salesOrderNos: string[]) {
     return tx.salesOrder.findMany({ where: { salesOrderNo: { in: salesOrderNos } }, select: { id: true, salesOrderNo: true } });
   }
+
+  /** 원료 품목 id만 (후보 수정·확정 때 품목이 실제 원료인지 확인) */
+  findRawMaterialIds(tx: Tx, ids: number[]) {
+    return tx.item.findMany({
+      where: { id: { in: ids }, itemType: ITEM_TYPE.RAW_MATERIAL },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * 검토 중(REVIEW)이고 내가 읽은 뒤 아무도 고치지 않았을 때만 분석 결과를 바꾼다. 아니면 0건.
+   * 두 요청이 같은 JSON을 읽고 각자 덮어써 한쪽 수정이 사라지지 않게 updatedAt을 조건에 건다.
+   */
+  saveReviewEdit(tx: Tx, id: number, readUpdatedAt: Date, data: { analysisResult: Prisma.InputJsonObject; summary?: string }) {
+    return tx.meetingMinutes.updateMany({
+      where: {
+        id,
+        meetingMinutesStatus: MEETING_MINUTES_STATUS.REVIEW,
+        updatedAt: readUpdatedAt,
+      },
+      data,
+    });
+  }
+
+  /** REVIEW → CONFIRMED. 두 번 눌러도 한 번만 0건이 아니다 */
+  confirm(tx: Tx, id: number, confirmedAt: Date) {
+    return tx.meetingMinutes.updateMany({
+      where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.REVIEW },
+      data: {
+        meetingMinutesStatus: MEETING_MINUTES_STATUS.CONFIRMED,
+        confirmedAt,
+      },
+    });
+  }
+
+  /** 확정 직후 각 후보가 만든 결과를 분석 결과에 적는다 */
+  saveAnalysisResult(tx: Tx, id: number, analysisResult: Prisma.InputJsonObject) {
+    return tx.meetingMinutes.update({
+      where: { id },
+      data: { analysisResult },
+      select: { id: true },
+    });
+  }
+
+  createScheduleEvent(tx: Tx, data: Omit<Prisma.ScheduleEventUncheckedCreateInput, 'attendees'>, attendeeIds: number[]) {
+    return tx.scheduleEvent.create({
+      data: {
+        ...data,
+        attendees: {
+          create: attendeeIds.map((employeeId) => ({ employeeId })),
+        },
+      },
+      select: { id: true },
+    });
+  }
 }

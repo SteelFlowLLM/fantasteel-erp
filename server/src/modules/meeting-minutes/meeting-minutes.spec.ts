@@ -141,7 +141,7 @@ describe('GET /meeting-minutes (API-259)', () => {
   });
 
   it('상태로 거르고, 잘못된 상태값은 거절한다', async () => {
-    const none = await call<MeetingMinutesPage>('GET', '/meeting-minutes?meetingMinutesStatus=CONFIRMED', purchaseCookie);
+    const none = await call<MeetingMinutesPage>('GET', `/meeting-minutes?meetingMinutesStatus=CONFIRMED&keyword=${encodeURIComponent('목록 확인')}`, purchaseCookie);
     expect(none.body.data.items).toHaveLength(0);
     expect((await call('GET', '/meeting-minutes?meetingMinutesStatus=NOPE', purchaseCookie)).status).toBe(400);
   });

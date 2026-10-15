@@ -26,6 +26,9 @@
 | POST | `meeting-minutes` | API-258 회의록 만들기(글로 붙여 넣기, JSON) | 로그인한 전 역할 |
 | POST | `meeting-minutes/audio` | 🟡 회의록 만들기(음성, multipart) | 로그인한 전 역할 |
 | POST | `meeting-minutes/:id/analyze` | API-260 AI 정리(다시 정리 포함) | **작성자만** |
+| PATCH | `meeting-minutes/:id/candidates/:key` | API-261 후보 고치기·허가·제외 | **작성자만**, `REVIEW`만 |
+| PATCH | `meeting-minutes/:id/summary` | 🟡 AI 요약 고치기 | **작성자만**, `REVIEW`만 |
+| POST | `meeting-minutes/:id/register` | API-261 확정하고 등록 | **작성자만**, `REVIEW`만 |
 | GET | `meeting-minutes` | API-259 목록 | 전 역할 |
 | GET | `meeting-minutes/:id` | API-259 상세 | 전 역할 |
 
@@ -68,6 +71,24 @@
   - `relatedSalesOrderNo`는 `sales_order`에 있을 때만 `salesOrderId`와 함께 남기고, 없으면 조용히 버린다. 키는 `c1…`, `decision`은 항상 `PENDING`.
 - 화면 응답의 `analysisResult`는 읽을 수 없는 모양이면 null이다.
 
+### 확인·등록 (REQ-VOC-004, 2026-10-10 결정: 작성자 혼자 후보마다 허가·제외, AI는 스스로 등록하지 않는다)
+
+- **후보 고치기** `PATCH candidates/:key` (body는 보낸 칸만, 모두 선택): `title`, `description`, `assigneeId`·`dueDate`(TASK), `startAt`·`endAt`·`attendeeIds`(EVENT), `purchase {itemId, requestedTon, desiredReceiptDate}`(PURCHASE), `decision`(`PENDING`·`APPROVED`·`EXCLUDED`). 다른 종류의 칸을 보내면 `COM-004`.
+  - 검증은 분석과 같다: 날짜는 회의일부터 1년 안, 시각은 서울 `YYYY-MM-DDTHH:mm`(또는 `+09:00` ISO)이고 `endAt > startAt`, 톤은 0보다 크고 소수 3자리까지, `itemId`는 `RAW_MATERIAL`, 담당자·참석자는 **재직 중인 아무 사원**(회의 참석자가 아니어도 된다, 없으면 `VOC-002`).
+  - 직접 정한 칸은 AI가 붙인 확인 사유(`issues`)를 지운다: 담당자 → 담당자, 마감일 → 마감일·당일 경고, 끝 시각 → 가정 경고(`endAssumed` false), 참석자, 시작 시각, 원료·수량·희망 입고일. 끝 시각을 가정한 일정은 시작만 옮기면 끝도 1시간 뒤로 따라간다.
+  - **허가(`APPROVED`)** 는 필수 칸이 찬 후보만: TASK 제목·담당자·마감일 / EVENT 제목·시작·끝(시작보다 뒤)·참석자 1명 이상 / PURCHASE 원료·수량·희망 입고일. 모자라면 `VOC-006`(모자란 칸 이름을 문구에 담는다). 남은 경고(끝 시각 가정, 마감일 당일)는 막지 않는다: 허가가 곧 확인했다는 뜻이다.
+  - 저장은 `WHERE status = REVIEW AND updated_at = 읽은 값`인 조건부 UPDATE다. 상태가 바뀌었으면 `VOC-004`, 같은 회의록을 동시에 고쳤으면 `COM-001`. `summary`도 같다(`summary` 칸과 `analysis_result.summary`를 같이 바꾼다).
+- **확정하고 등록** `POST register` → `{ meetingMinutes, taskIds, scheduleEventIds, actionDraftIds, excludedKeys }`. 남은(PENDING) 후보가 있으면 `VOC-007`, 허가 후보가 비었으면 `VOC-006`. 허가 0건이어도 확정은 된다. 아래를 **한 트랜잭션**으로 한다(하나라도 실패하면 전부 취소, 상태는 `REVIEW` 그대로):
+  1. `WHERE status = REVIEW`인 조건부 UPDATE로 `CONFIRMED` + `confirmed_at`. 0건이면 `VOC-004`(더블 클릭 방지). 이어서 담당자·참석자·원료가 아직 유효한지 다시 본다.
+  2. 허가 TASK → `task` (`creator` = 작성자, 상태 `OPEN`, `link_path` `/meetings?id=<id>`, `meeting_minutes_id`, 설명 = 후보 설명 + `근거 발언: "…" / "…"`). `TaskService.createInTx`(`POST /tasks`와 같은 경로)가 담당자에게 `TASK_ASSIGNED`(`업무 지정 · 제목`, 본인 제외)를 보낸다.
+  3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`).
+  4. 허가 PURCHASE → `MessageActionService.createFromMeeting`: `action_draft`(`PURCHASE_REQUISITION_CREATE`, `meeting_minutes_id`, `message_id` null, 요청자 = 작성자) + `DRAFT_CREATED`(AI 보조, `action_draft_id`) → `WAITING_APPROVAL`. 작성자에게 구매요청 등록 권한이 없거나 승인권자가 없으면(`PUR-001`) 그 오류로 전체가 취소된다: 이때는 구매요청 후보를 제외하거나 구매 담당자가 확정해야 한다. 이후 기존 초안 흐름(확인 → 구매요청 → 부서장 승인)을 그대로 탄다. 초안 응답에 `meetingMinutes {id, title}`이 추가됐다(메시지 초안이면 null).
+  5. `MEETING_MINUTES_CONFIRMED`(행위자 작성자, 대상 `meeting_minutes`, AI 보조, after = `taskIds`·`scheduleEventIds`·`actionDraftIds`·`excludedKeys`).
+  6. 참석자 전원(작성자 제외)에게 `MEETING_MINUTES_SHARED`(`회의록 공유 · 제목`).
+  7. 허가 후보마다 결과를 `analysis_result.candidates[].registered = {type: task|schedule_event|action_draft, id}`로 적는다.
+- 🟡 알림은 모두 `business_event_id`를 null로 보낸다. `notification`의 부분 unique(`business_event_id`, `recipient_id`) 때문에, 한 작업 로그에 한 사람이 여러 알림(업무 지정 + 회의록 공유)을 받을 수 없어서다.
+- 확정된 뒤에는 분석(`analyze`)·후보 고치기·요약·등록이 모두 `VOC-004`.
+
 ## 5. 오류 코드
 
 🟡 VOC-는 정의서 9.3에 없다. `shared/src/errors.ts`에 두었고 팀 확인 후 정의서에 올린다.
@@ -79,6 +100,10 @@
 | VOC-003 | 회의록 작성자만 AI 정리를 할 수 있어요 | 403 |
 | VOC-004 | 지금 상태에서는 AI 정리를 할 수 없어요 | 409 |
 | VOC-005 | 회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하) | 400 |
+| VOC-006 | 이 후보는 아직 허가할 수 없어요 (모자란 칸은 문구에 담는다) | 400 |
+| VOC-007 | 허가 또는 제외하지 않은 후보가 남아 있어요 | 409 |
+
+VOC-003·004는 확인·등록에서 문구를 바꿔 쓴다(`회의록 작성자만 후보를 확인하고 등록할 수 있어요`, `검토 대기 상태의 회의록만 …`).
 
 입력 형식 오류(빈 제목·기록, 참석자 없음, 길이 초과, 없는 날짜)는 `COM-004`(400).
 
@@ -87,3 +112,5 @@
 `meeting-minutes.spec.ts` (묶음 `fs_collab`): 만들기(줄 나누기·참석자·중복), 빈 기록·없는 참석자·없는 날짜 거절, 목록 순서·필터·쪽, 상세·404. 음성: `SttClient`·`SttSettingsStore`를 가짜로 바꿔 즉시 TRANSCRIBING 응답 → TRANSCRIBED 구간 저장, 구간 없을 때 전체 글, STT 실패 → FAILED 이유, 이미 상태가 바뀐 행 덮어쓰지 않음, 한 번에 하나 실행, 시작 복구, 잘못된 입력 거절.
 
 `meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 4만 자 초과 400, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `llm/llm.client.spec.ts`.
+
+`meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.

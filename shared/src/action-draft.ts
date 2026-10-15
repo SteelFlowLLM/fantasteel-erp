@@ -45,6 +45,8 @@ export interface ActionDraftView {
   requesterDepartmentName: string | null;
   requesterJobGradeName: string | null;
   message: ActionDraftMessageView | null;
+  /** 회의록에서 만든 초안이면 그 회의록 (메시지 초안이면 null) */
+  meetingMinutes: { id: number; title: string } | null;
   /** 확정 전에 채워야 할 필수 칸 (표시명). 비면 확정할 수 있다 */
   unresolvedFields: string[];
   purchaseRequisition: { id: number; purchaseRequisitionNo: string; purchaseRequisitionStatus: PurchaseRequisitionStatus } | null;

@@ -69,22 +69,54 @@ export class TaskService {
       const assignee = await this.repository.findEmployeeStatus(tx, dto.assigneeId);
       if (!assignee?.isActive) throw new AppException('COM-003', '담당자를 찾을 수 없어요');
       if (dto.messageId !== undefined) await this.requireSourceMessage(tx, user, dto.messageId);
-      const task = await this.repository.createTask(tx, {
+      return this.createInTx(tx, user.employeeId, {
         taskTitle,
         taskDescription: dto.taskDescription?.trim() || null,
         assigneeId: dto.assigneeId,
-        creatorId: user.employeeId,
         dueDate,
-        taskStatus: TASK_STATUS.OPEN,
         messageId: dto.messageId ?? null,
         linkPath: dto.linkPath ?? null,
       });
-      if (dto.assigneeId !== user.employeeId) {
-        await this.notifications.notifyEmployees(tx, [dto.assigneeId], { notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: `업무 지정 · ${taskTitle}`, linkPath: '/tasks' });
-      }
-      return task.id;
     });
     return this.view(id);
+  }
+
+  /**
+   * 업무 한 건과 담당자 알림(본인 제외)을 호출자의 tx에 만든다. 담당자 확인은 부르는 쪽이 한다.
+   * 회의록 확정이 같은 트랜잭션에서 쓴다 (REQ-VOC-004).
+   */
+  async createInTx(
+    tx: Tx,
+    creatorId: number,
+    input: {
+      taskTitle: string;
+      taskDescription: string | null;
+      assigneeId: number;
+      dueDate: Date;
+      messageId?: number | null;
+      meetingMinutesId?: number | null;
+      linkPath?: string | null;
+    },
+  ): Promise<number> {
+    const task = await this.repository.createTask(tx, {
+      taskTitle: input.taskTitle,
+      taskDescription: input.taskDescription,
+      assigneeId: input.assigneeId,
+      creatorId,
+      dueDate: input.dueDate,
+      taskStatus: TASK_STATUS.OPEN,
+      messageId: input.messageId ?? null,
+      meetingMinutesId: input.meetingMinutesId ?? null,
+      linkPath: input.linkPath ?? null,
+    });
+    if (input.assigneeId !== creatorId) {
+      await this.notifications.notifyEmployees(tx, [input.assigneeId], {
+        notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED,
+        notificationContent: `업무 지정 · ${input.taskTitle}`,
+        linkPath: '/tasks',
+      });
+    }
+    return task.id;
   }
 
   /**

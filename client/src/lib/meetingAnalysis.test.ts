@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analyzeAvailability, evidenceLabel, formatSchedule, groupCandidates } from '@/lib/meetingAnalysis';
+import { analyzeAvailability, approvalBlocker, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -55,5 +55,30 @@ describe('후보 표시 계산', () => {
 
   it('발언 번호는 1부터', () => {
     expect(evidenceLabel(0)).toBe('#1');
+  });
+});
+
+describe('허가·제외 계산', () => {
+  const task = (over: Partial<MeetingCandidate> = {}) => ({ ...candidate('TASK', 'c1'), assigneeId: 7, dueDate: '2026-10-22', ...over });
+
+  it('허가·제외·남음 수를 센다', () => {
+    const list = [task({ decision: 'APPROVED' }), task({ key: 'c2', decision: 'EXCLUDED' }), task({ key: 'c3' }), task({ key: 'c4' })];
+    expect(decisionCounts(list)).toEqual({ approved: 1, excluded: 1, pending: 2 });
+  });
+
+  it('허가를 막는 이유는 서버 규칙과 같다 (종류별 필수 칸)', () => {
+    expect(approvalBlocker(task())).toBeNull();
+    expect(approvalBlocker(task({ assigneeId: null }))).toBe('담당자을(를) 채워야 허가할 수 있어요');
+    expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T14:00:00+09:00', attendeeIds: [1] })).toContain('끝 시각');
+    expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00' })).toContain('참석자');
+    expect(approvalBlocker(candidate('PURCHASE', 'c1'))).toBe('원료 품목, 수량(톤), 희망 입고일을(를) 채워야 허가할 수 있어요');
+  });
+
+  it('확정 확인창에는 허가한 후보만 종류별로 보인다', () => {
+    const list = [task({ title: '견적 정리', decision: 'APPROVED' }), task({ key: 'c2', title: '제외', decision: 'EXCLUDED' }), { ...candidate('EVENT', 'c3'), title: '방문', decision: 'APPROVED' as const }];
+    expect(registerPreview(list)).toEqual([
+      { label: '할 일 1건', titles: ['견적 정리'] },
+      { label: '일정 1건', titles: ['방문'] },
+    ]);
   });
 });

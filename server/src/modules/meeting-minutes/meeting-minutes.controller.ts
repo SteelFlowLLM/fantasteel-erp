@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery } from './dto/meeting-minutes.dto';
+import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
 
 /**
@@ -37,6 +37,25 @@ export class MeetingMinutesController {
   @Post(':id/analyze')
   analyze(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingMinutesView> {
     return this.service.analyze(user, id);
+  }
+
+  /** API-261 확인 단계. 작성자가 후보를 고치고 허가·제외한다 */
+  @Patch(':id/candidates/:key')
+  updateCandidate(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Param('key') key: string, @Body() dto: UpdateMeetingCandidateDto): Promise<MeetingMinutesView> {
+    return this.service.updateCandidate(user, id, key, dto);
+  }
+
+  /** 검토 중 AI 요약을 작성자가 고친다 */
+  @Patch(':id/summary')
+  updateSummary(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateMeetingSummaryDto): Promise<MeetingMinutesView> {
+    return this.service.updateSummary(user, id, dto);
+  }
+
+  /** API-261. 허가한 후보를 등록하고 회의록을 확정한다 */
+  @Post(':id/register')
+  @HttpCode(200)
+  register(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingRegisterResult> {
+    return this.service.register(user, id);
   }
 
   /** API-259 목록 */

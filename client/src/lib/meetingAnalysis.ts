@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, type MeetingCandidate, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingCandidate, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -42,3 +42,29 @@ export function formatSchedule(startAt: string | null, endAt: string | null): st
 
 /** 발언 번호 칩 글자: 화면의 번호는 1부터 센다 */
 export const evidenceLabel = (index: number): string => `#${index + 1}`;
+
+export interface DecisionCounts {
+  approved: number;
+  excluded: number;
+  pending: number;
+}
+
+export function decisionCounts(candidates: readonly MeetingCandidate[]): DecisionCounts {
+  return {
+    approved: candidates.filter((c) => c.decision === 'APPROVED').length,
+    excluded: candidates.filter((c) => c.decision === 'EXCLUDED').length,
+    pending: candidates.filter((c) => c.decision === 'PENDING').length,
+  };
+}
+
+/** 허가 버튼을 막는 이유(서버 규칙과 같다). 허가할 수 있으면 null */
+export function approvalBlocker(c: MeetingCandidate): string | null {
+  const missing = missingFieldsOf(c);
+  return missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 허가할 수 있어요` : null;
+}
+
+/** 확정 확인창에 보일 줄: 종류별 허가 건수와 제목, 제외 건수 */
+export function registerPreview(candidates: readonly MeetingCandidate[]): { label: string; titles: string[] }[] {
+  const lines = KIND_ORDER.map((kind) => ({ label: `${CANDIDATE_KIND_LABEL[kind]} ${candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').length}건`, titles: candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').map((c) => c.title) }));
+  return lines.filter((line) => line.titles.length > 0);
+}

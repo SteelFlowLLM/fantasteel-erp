@@ -70,7 +70,7 @@ function inRange(date: string, meetingDate: string): boolean {
   return diff >= 0 && diff <= RANGE_DAYS;
 }
 
-function validDate(v: unknown, meetingDate: string): string | null {
+export function validDate(v: unknown, meetingDate: string): string | null {
   const date = parseDate(v);
   return date !== null && inRange(date, meetingDate) ? date : null;
 }
@@ -92,7 +92,15 @@ function parseDateTime(v: unknown, meetingDate: string): LocalDateTime | null {
   return { date, hour, minute };
 }
 
+
 const isoOf = (t: LocalDateTime) => `${t.date}T${pad(t.hour)}:${pad(t.minute)}:00+09:00`;
+
+/** 사람이 고친 시각: `YYYY-MM-DDTHH:mm`(서울) 또는 +09:00 ISO를 +09:00 ISO로 맞춘다. 범위 밖·다른 시간대는 null */
+export function normalizeDateTime(v: unknown, meetingDate: string): string | null {
+  if (typeof v !== 'string') return null;
+  const parsed = parseDateTime(v.trim().replace(/\+09:00$/, ''), meetingDate);
+  return parsed === null ? null : isoOf(parsed);
+}
 
 function plusOneHour(t: LocalDateTime): LocalDateTime {
   const d = new Date(Date.parse(`${t.date}T${pad(t.hour)}:${pad(t.minute)}:00.000Z`) + 3_600_000);
@@ -127,7 +135,7 @@ function matchItem(name: string, items: AnalysisContext['rawMaterials']): number
   return partial.length === 1 ? partial[0].itemId : null;
 }
 
-function quantityOf(v: unknown): string | null {
+export function quantityOf(v: unknown): string | null {
   const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN;
   if (!Number.isFinite(n) || n <= 0) return null;
   const fixed = n.toFixed(3);

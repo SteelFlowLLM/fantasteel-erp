@@ -6,9 +6,9 @@ import type { OrgChartDepartmentView } from '@/api/adminOrganization';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 
-type MemberGroup = { departmentName: string; members: { id: number; employeeName: string; jobGradeName: string }[] };
+export type MemberGroup = { departmentName: string; members: { id: number; employeeName: string; jobGradeName: string }[] };
 
-const groupsOfChart = (nodes: readonly OrgChartDepartmentView[]): MemberGroup[] =>
+export const groupsOfChart = (nodes: readonly OrgChartDepartmentView[]): MemberGroup[] =>
   nodes.flatMap((node) => [{ departmentName: node.departmentName, members: node.members }, ...groupsOfChart(node.children)]).filter((group) => group.members.length > 0);
 
 export function AttendeePicker({ selected, myId, invalid, onChange }: { selected: readonly number[]; myId: number; invalid?: boolean; onChange: (ids: number[]) => void }) {

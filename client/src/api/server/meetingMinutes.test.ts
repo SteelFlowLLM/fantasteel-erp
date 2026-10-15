@@ -1,5 +1,5 @@
 // 회의록 서버 모드: 목록 조회 조건, 만들기 요청 본문(정리한 값), 입력 확인 오류.
-import type { MeetingAnalysis, MeetingMinutesPage, MeetingMinutesView } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingMinutesPage, MeetingMinutesView, MeetingRegisterResult } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/errors';
 import { meetingMinutesApi, meetingMinutesAudioApi } from '@/api/meetingMinutes';
@@ -113,5 +113,34 @@ describe('회의록 AI 정리 (API-260)', () => {
     const got = await meetingMinutesApi.get(3);
     expect(got.analysisResult?.candidates[0]).toMatchObject({ kind: 'EVENT', endAssumed: true, evidence: [0] });
     expect(got.analysisResult?.decisions[0].text).toBe('방문한다');
+  });
+});
+
+describe('회의록 확인·등록 (API-261)', () => {
+  it('후보 고치기: PATCH로 보낸 칸만 보내고 키는 주소에 담는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'PATCH' && c.path === '/meeting-minutes/3/candidates/c2' ? ok({ ...view, meetingMinutesStatus: 'REVIEW' }) : undefined));
+    const updated = await meetingMinutesApi.updateCandidate(3, 'c2', { endAt: '2026-10-20T16:30', decision: 'APPROVED' });
+    expect(updated.meetingMinutesStatus).toBe('REVIEW');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual({ endAt: '2026-10-20T16:30', decision: 'APPROVED' });
+  });
+
+  it('요약 고치기: PATCH summary로 보내고, 3000자를 넘기면 서버를 부르기 전에 입력칸 오류로 알린다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'PATCH' && c.path === '/meeting-minutes/3/summary' ? ok(view) : undefined));
+    await meetingMinutesApi.updateSummary(3, '고친 요약');
+    expect(calls[0].body).toEqual({ summary: '고친 요약' });
+    const error = await meetingMinutesApi.updateSummary(3, 'a'.repeat(3001)).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InputError);
+    expect((error as InputError).fieldErrors).toEqual({ summary: '요약은 3000자까지 쓸 수 있어요' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('확정하고 등록: POST register가 만든 행의 id를 돌려준다', async () => {
+    const result: MeetingRegisterResult = { meetingMinutes: { ...view, meetingMinutesStatus: 'CONFIRMED' }, taskIds: [11], scheduleEventIds: [4], actionDraftIds: [9], excludedKeys: ['c4'] };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes/3/register' ? ok(result) : undefined));
+    const registered = await meetingMinutesApi.register(3);
+    expect(registered).toMatchObject({ taskIds: [11], scheduleEventIds: [4], actionDraftIds: [9], excludedKeys: ['c4'] });
+    expect(registered.meetingMinutes.meetingMinutesStatus).toBe('CONFIRMED');
+    expect(calls).toHaveLength(1);
   });
 });

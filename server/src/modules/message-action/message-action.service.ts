@@ -118,6 +118,48 @@ export class MessageActionService {
     });
   }
 
+  /**
+   * 회의록 확정 트랜잭션 안에서 구매요청 초안을 만든다 (REQ-VOC-004). 만드는 사람 = 회의록 작성자 = 요청자.
+   * 사람이 허가한 후보만 부르므로 AI_GENERATED는 거치지 않고 바로 요청자 확인 대기로 둔다. 요청자가 나중에 확정할 수 없는 초안은 만들지 않는다.
+   */
+  /** 회의록 작성자가 구매요청 초안의 요청자가 될 수 있는지. 허가할 때 미리 막아 확정 단계에서 전체가 취소되지 않게 한다 */
+  async assertCanRequestFromMeeting(tx: Tx, requester: AuthUser): Promise<void> {
+    if (!hasPermission(requester, { permission: PERMISSION.PURCHASE_REQUISITION_CREATE, level: 'USE' })) {
+      throw new AppException('COM-002', '구매요청 등록 권한이 없어 구매요청 초안을 만들 수 없어요. 구매요청 후보는 제외하거나 구매 담당자가 확정해 주세요');
+    }
+    await this.purchasing.assertCanRequest(tx, requester);
+  }
+
+  async createFromMeeting(tx: Tx, requester: AuthUser, meetingMinutesId: number, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
+    await this.assertCanRequestFromMeeting(tx, requester);
+    const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
+    const draft = await this.repository.createDraft(tx, {
+      actionType,
+      payload: payload as unknown as Prisma.InputJsonValue,
+      meetingMinutesId,
+      requesterId: requester.employeeId,
+    });
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
+      actor: requester,
+      target: { table: 'action_draft', id: draft.id },
+      salesOrderId,
+      after: {
+        draftStatus: draft.draftStatus,
+        actionType,
+        requesterId: requester.employeeId,
+        meetingMinutesId,
+        payload: payload as unknown as Prisma.InputJsonValue,
+      },
+      isAiAssisted: true,
+      actionDraftId: draft.id,
+    });
+    await this.repository.updateDraft(tx, draft.id, {
+      draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
+    });
+    return draft.id;
+  }
+
   /** chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 요청자인 초안. 최근 것 먼저 */
   async list(user: AuthUser, query: ListActionDraftsQuery): Promise<ActionDraftView[]> {
     const chatRoomId = query.chatRoomId;
@@ -314,6 +356,7 @@ export class MessageActionService {
               createdAt: message.createdAt.toISOString(),
             }
           : null,
+        meetingMinutes: r.meetingMinutes ? { id: r.meetingMinutes.id, title: r.meetingMinutes.meetingMinutesTitle } : null,
         unresolvedFields: unresolvedFieldsOf(payload, item),
         purchaseRequisition: r.purchaseRequisition
           ? { ...r.purchaseRequisition, purchaseRequisitionStatus: r.purchaseRequisition.purchaseRequisitionStatus as PurchaseRequisitionStatus }

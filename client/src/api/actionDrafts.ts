@@ -19,6 +19,8 @@ export interface ActionDraftView {
   requesterId: number;
   requesterName: string | null;
   message: { id: number; chatRoomId: number; chatRoomName: string | null; senderName: string | null; content: string | null; createdAt: string } | null;
+  /** 회의록에서 만든 초안이면 그 회의록 (REQ-VOC-004) */
+  meetingMinutes: { id: number; title: string } | null;
   /** 확정 전 채워야 할 칸 */
   unresolvedFields: string[];
   purchaseRequisition: { id: number; purchaseRequisitionNo: string; purchaseRequisitionStatus: string } | null;
