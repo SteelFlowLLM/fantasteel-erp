@@ -7,10 +7,10 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-ACT-001~004 (REQ-ACT-005 확장 유형은 P2, 만들지 않음) |
-| BP | BP-ACT-01 Message → ERP 구매요청([04] 6장), 10장 Action Draft 상태, 12.3 업무 유형 등록 예시, 13.4 의사코드 |
-| 등급 | P1 |
-| AI | SPEC.md 5장 결정: **AI 추출은 나중에 넣는다.** 지금은 요청자가 초안 값을 직접 입력하고, 메시지 → 초안 → 확정 → 구매요청 → 부서장 승인 흐름을 만든다. LLM 호출을 넣지 않는다 |
+| REQ | REQ-ACT-001~004. REQ-ACT-005 확장 유형(P2)은 2026-10-15 결정으로 만든다(10장) |
+| BP | BP-ACT-01 Message → ERP 구매요청([04] 6장), BP-ACT-02 업무 유형 확장([04] 7장), 10장 Action Draft 상태, 12.3 업무 유형 등록 예시·유형 표, 13.4 의사코드 |
+| 등급 | P1 (확장 유형은 P2) |
+| AI | 2026-10-15 결정(SPEC.md 5장 결정 2): 초안을 만들 때 LLM이 메시지에서 고른 유형의 칸을 채운다(10장). LLM이 없거나 실패하면 지금처럼 요청자가 직접 입력한다. 아래 1~9장은 AI 추출 전의 구매요청 구현 기준이다 |
 
 ## 2. 테이블
 
@@ -28,7 +28,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| POST | `messages/:id/action-drafts` | 메시지에서 구매요청 초안 생성 | 방 멤버 | 요청자는 메시지 작성자(AI가 지정하지 않음). 유형은 ACTION_TYPE |
+| POST | `messages/:id/action-drafts` | 메시지에서 구매요청 초안 생성 | 방 멤버 | 요청자는 메시지 작성자(AI가 지정하지 않음). 유형은 ACTION_TYPE. 확장 유형은 요청 본문 `actionType`(10장) |
 | GET | `action-drafts` | 초안 목록 | 확정 주체 본인 | 상태는 DRAFT_STATUS |
 | GET | `action-drafts/:id` | 초안 상세 | 확정 주체 본인 | |
 | PATCH | `action-drafts/:id` | 초안 수정 | 확정 주체 본인 | |
@@ -157,3 +157,25 @@ confirm(draftId, actor):
 | 중복 실행 | 상태 확인 + 읽은 `updatedAt` 조건 갱신 + `purchase_requisition.action_draft_id` unique로 막는다. 요청 고유키 저장소는 쓰지 않는다 |
 | 반려 | `POST action-drafts/:id/reject { rejectReason }`: 요청자만, 확정 전만, 사유 필수(500자). REJECTED·DRAFT_REJECTED(사유 = 반려 사유) |
 | 확정 후 부서장 알림 | 구매요청을 만드는 purchasing이 같은 트랜잭션에서 보낸다(구매요청 승인 요청 알림과 같다) |
+
+## 10. 확장 유형과 AI 추출 (2026-10-15 결정)
+
+근거: [04] BP-ACT-02·12.3 유형 표, [02] REQ-ACT-003·005, [06] ACTION_TYPE, `SPEC.md` 5장 결정 2. 구매요청은 1~9장 규칙을 그대로 쓰고, 아래는 모든 유형에 더하는 규칙이다.
+
+| 항목 | 정한 값 |
+| --- | --- |
+| 유형 | 구매요청 생성(P1)·수주 등록·출하요청 생성·배정 확정·재생산 계획 생성. 생산계획 생성은 메시지에서 만들지 않는다(일반 계획은 수주 등록 때 자동 생성) |
+| 생성 요청 | `POST messages/:id/action-drafts { actionType? }`. 없으면 PURCHASE_REQUISITION_CREATE(지금 화면이 그대로 동작) |
+| 확정 주체 | 구매요청 = 메시지 작성자(9장). 확장 유형 = 초안을 만든 사원(`requester_id`). 만들 때와 수정·확정·반려할 때 그 유형의 사용 권한([04] 12.3 표)을 확인하고, 없으면 COM-002 |
+| 유형 고르기 | 사람이 메시지 메뉴에서 고른다. 화면은 확정할 수 있는 유형만 보여 준다. AI는 유형을 고르지 않는다 |
+| AI 추출 | 생성 때 llm 모듈로 메시지 본문·작성 시각을 보내 고른 유형의 칸을 JSON으로 받는다. LLM 호출은 DB 트랜잭션 밖에서 한다. 모델 미설정·연결 실패·형식 오류면 빈 칸으로 만든다(초안 생성은 실패하지 않는다) |
+| 이름 → id | 원료·규격(품목 코드·이름), 고객사 이름, 수주번호·출하요청 번호를 서버가 기준정보·업무 데이터와 맞춘다. 하나로 정해지지 않으면 비워 두어 미확정 칸으로 보인다 |
+| 날짜 | 상대 날짜는 메시지 작성일(Asia/Seoul) 기준 절대 날짜로 바꾸고, 서버가 YYYY-MM-DD를 다시 검증한다 |
+| 배정 LOT | ALLOCATION_CONFIRM의 `lotIds`는 AI가 아니라 출하 배정 추천(inventory)으로 채운다 |
+| 결과 연결 | 구매요청은 `purchase_requisition.action_draft_id`. 나머지는 핸들러가 남기는 업무 작업 로그(SALES_ORDER_CREATED 등)의 `action_draft_id`와 DRAFT_EXECUTED `after`(결과 테이블·id·번호). ERD는 바꾸지 않는다 |
+| 중복 실행 | 지금처럼 상태 확인 + `updatedAt` 조건부 갱신. 실행 트랜잭션 안에서 초안을 EXECUTED로 바꾸므로 동시에 두 번 실행하면 한쪽이 COM-001로 롤백된다 |
+| AI 경유 | 생성 때 AI가 채운 칸이 있던 초안을 확정·실행하면 DRAFT_CONFIRMED·DRAFT_EXECUTED와 핸들러 작업 로그에 `is_ai_assisted = true`(REQ-AST-010) |
+| 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order `createInTx`는 있고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
+| 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
+
+구현 순서: 등록부 일반화(REQ-ACT-004) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
