@@ -33,7 +33,7 @@ function renderWidgets(employeeNo: string, editing = false, permissions?: Permis
 }
 
 describe('위젯 카드', () => {
-  it('관리자: 14개 모두 제목과 본문이 그려지고, P2 2개는 준비 중', () => {
+  it('관리자: 14개 모두 제목과 본문이 그려지고, P2 1개(AI 활용 현황)는 준비 중', () => {
     const html = renderWidgets(SEED_EMPLOYEE_NO.admin);
     for (const key of DASHBOARD_WIDGET_KEYS) {
       const markup = html.get(key) ?? '';
@@ -45,7 +45,8 @@ describe('위젯 카드', () => {
     expect(html.get('ORDER_FULFILLMENT')).toContain('SO-2609-004');
     expect(html.get('ORDER_FULFILLMENT')).toContain('검사합격');
     expect(html.get('PROCESS_FLOW')).toContain('진행 중 수주');
-    expect(html.get('AGENT_RISK')).toContain('담당 부서원이 확정');
+    expect(html.get('AGENT_RISK')).toContain('확정 대기 후보');
+    expect(html.get('AGENT_RISK')).toContain('PP-2610-0003');
     expect(html.get('SHIPMENT_RESULT')).toContain('슬래브(매)');
   });
 
@@ -87,19 +88,18 @@ describe('위젯 카드', () => {
     expect(quality).toContain('href="/inventories"');
   });
 
-  it('품질 담당: Agent 위험 감지(예시)는 예시 숫자 없이 카드 머리 한 줄 안내만. 다른 역할은 원료 부족 예시', () => {
-    const quality = (renderWidgets(SEED_EMPLOYEE_NO.quality)).get('AGENT_RISK') ?? '';
-    expect(quality).toContain('AI Factory Agent(P2)가 연결되면');
-    expect(quality).toContain('불합격률 상승');
-    // 본문 없이 머리 안에 안내가 들어간다 (한 칸 높이 카드)
-    expect(quality.indexOf('AI Factory Agent(P2)가 연결되면')).toBeLessThan(quality.indexOf('</header>'));
-    // 옆 강종별 불합격률(실제 값)과 헷갈리던 예시 숫자·대상은 보이지 않는다
-    expect(quality).not.toContain('5.6%');
-    expect(quality).not.toContain('SM355A · 최근 30일');
-    expect(quality).not.toContain('aria-pressed');
-    const sales = (renderWidgets(SEED_EMPLOYEE_NO.sales)).get('AGENT_RISK') ?? '';
-    expect(sales).not.toContain('aria-pressed');
-    expect(sales).toContain('실리코망가니즈');
+  it('Agent 위험 감지: 품질은 카드 머리 한 줄에 확정 대기 건수만, 다른 역할은 건수·유형별·최근 후보와 Agent 화면 바로가기', () => {
+    const quality = renderWidgets(SEED_EMPLOYEE_NO.quality).get('AGENT_RISK') ?? '';
+    expect(quality).toContain('확정 대기 2건');
+    expect(quality).toContain('원료 부족 1');
+    // 본문 없이 머리 안에 한 줄이 들어간다 (한 칸 높이 카드)
+    expect(quality.indexOf('확정 대기 2건')).toBeLessThan(quality.indexOf('</header>'));
+    expect(quality).not.toContain('준비 중');
+    const sales = renderWidgets(SEED_EMPLOYEE_NO.sales).get('AGENT_RISK') ?? '';
+    expect(sales).toContain('확정 대기 후보');
+    expect(sales).toContain('합격 매수 부족 1');
+    expect(sales).toContain('href="/agent"');
+    expect(sales).not.toContain('준비 중');
   });
 
   it('공정 흐름 현황: 품질은 판정 대기를 내 업무로 크게 보이고 나머지 단계는 흐리게, 다른 역할은 그대로', () => {
