@@ -3305,7 +3305,8 @@ CAMPUS_PARTS.push(function campusTribute(b, H) {
   b.pop();
   b.pop();
 });
-/* 두 번째 헌정 동상: 분홍 털뭉치 마스코트(보라 SKRR 모자·하트 안경·스마트폰). 광장 북서쪽 잔디밭, 청동상보다 작게.
+/* 두 번째 헌정 동상: 윤동희 강사님. 실존 인물 대신 강사님이 직접 만든 캐릭터(분홍 털뭉치, 보라 SKRR 모자·하트 안경·스마트폰)로 세웠다.
+   광장 북서쪽 잔디밭, 청동상보다 작게.
    실제 캠퍼스에는 없다. 발표용 사본에만 넣는다 (EXTRA=...,tribute_skrr) */
 CAMPUS_PARTS.push(function campusTributeSkrr(b, H) {
   const { PI, sin, cos, hypot, gCyl, gSphere, gFlatRing, gExtrude, gText } = H;
@@ -3360,10 +3361,12 @@ CAMPUS_PARTS.push(function campusTributeSkrr(b, H) {
   b.add(gCyl(4.05, 4.05, 1.6, 40), GR, 0, F + 1.15, 0, { s: .2, e: .03 });
   b.add(gCyl(4.08, 4.08, .12, 40), CAP, 0, F + 1.72, 0, { s: .4, e: .1 });
   b.add(gCyl(4.35, 4.35, .25, 40), GRL, 0, F + 2.075, 0, { s: .28 });
-  b.box(2.5, .8, .35, '#3a3348', 0, F + 1.0, 4.05, { s: .4 });
+  // 판을 깊게 두어 넓힌 양 끝도 원통 몸통에 묻힌다 (몸통 반지름 4.05, 판 끝 x ±1.9에서 몸통 면 z ≈ 3.58)
+  b.box(3.8, .9, .8, '#3a3348', 0, F + 1.0, 3.95, { s: .4 });
   {
-    const g = gText('SKRR', .52, { px: 48 });
-    b.add(g, GOLD, 0, F + .74, 4.235, { e: .85, s: 0 });
+    let g = gText('윤동희 강사님', .5, { px: 64 });
+    if (g.w > 3.4) g = gText('윤동희 강사님', .5 * 3.4 / g.w, { px: 64 });
+    b.add(g, GOLD, 0, F + .74, 4.36, { e: .85, s: 0 });
   }
 
   /* ---- 인물: 로컬 단위로 만들고 FS배 (발바닥 = 받침 윗면) ---- */
