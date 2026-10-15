@@ -114,16 +114,25 @@ describe('공정 흐름 판정 대기 수 (검사 입력 대기 목록과 같은
     const before = await repository.countPendingInspectionLots(prisma);
     const standard = await prisma.inspectionStandard.findFirstOrThrow({ orderBy: { id: 'asc' } });
     const inspector = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
-    const lotOf = (lotNo: string, lotType: string) => prisma.lot.create({ data: { lotNo, lotType } });
+    const slabItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SS275-250x1200x10000' } });
+    const coilItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SS275-2.5x1200x980000' } });
+    // 실적·계획 없이 LOT만 만든다 (inventory-list.spec.ts와 같은 방식)
+    const resultOf = async (processType: string) =>
+      (await prisma.productionResult.create({ data: { processType, converterCode: processType === 'STEELMAKING' ? 'BOF1' : null, startedAt: new Date(), completedAt: new Date() } })).id;
+    const [steelmaking, casting, rolling] = [await resultOf('STEELMAKING'), await resultOf('CONTINUOUS_CASTING'), await resultOf('HOT_ROLLING')];
+    const producedDate = new Date('2026-10-02T00:00:00.000Z');
+    const heatOf = (lotNo: string) => prisma.lot.create({ data: { lotNo, lotType: 'HEAT', steelGradeId: slabItem.steelGradeId, productionResultId: steelmaking } });
+    const slabOf = (lotNo: string) => prisma.lot.create({ data: { lotNo, lotType: 'SLAB', itemId: slabItem.id, productionResultId: casting, producedDate } });
+    const coilOf = (lotNo: string) => prisma.lot.create({ data: { lotNo, lotType: 'COIL', itemId: coilItem.id, productionResultId: rolling, producedDate } });
     const link = (parentLotId: number, childLotId: number) => prisma.lotRelation.create({ data: { parentLotId, childLotId, lotRelationEvidence: 'ACTUAL_INPUT' } });
 
-    const failedHeat = await lotOf('HT-DSH-FAIL', 'HEAT');
+    const failedHeat = await heatOf('HT-DSH-FAIL');
     await prisma.qualityInspection.create({ data: { lotId: failedHeat.id, inspectionStandardId: standard.id, inspectionResult: 'FAIL', inspectorEmployeeId: inspector.id, inspectedAt: new Date() } });
-    const failedSlab = await lotOf('HT-DSH-FAIL-01', 'SLAB');
+    const failedSlab = await slabOf('HT-DSH-FAIL-01');
     await link(failedHeat.id, failedSlab.id);
-    await link(failedSlab.id, (await lotOf('CDSH-FAIL-01', 'COIL')).id);
-    const waitingHeat = await lotOf('HT-DSH-WAIT', 'HEAT');
-    await link(waitingHeat.id, (await lotOf('HT-DSH-WAIT-01', 'SLAB')).id);
+    await link(failedSlab.id, (await coilOf('CDSH-FAIL-01')).id);
+    const waitingHeat = await heatOf('HT-DSH-WAIT');
+    await link(waitingHeat.id, (await slabOf('HT-DSH-WAIT-01')).id);
 
     expect(await repository.countPendingInspectionLots(prisma)).toEqual({ heat: before.heat + 1, slab: before.slab + 1, coil: before.coil });
   });
