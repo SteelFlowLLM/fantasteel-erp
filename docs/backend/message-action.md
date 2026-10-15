@@ -182,5 +182,5 @@ confirm(draftId, actor):
 구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출 → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
 
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
-- `GET action-drafts`(내 초안)는 메시지에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
+- `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
 - AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.

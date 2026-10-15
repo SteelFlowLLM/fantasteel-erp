@@ -351,7 +351,7 @@ describe('확정하고 등록 (POST register, API-261)', () => {
     const [draftId] = actionDraftIds;
     expect(await codeOf(messageActions.confirm(head, draftId, {}))).toBe('COM-002');
     const result = await messageActions.confirm(author, draftId, {});
-    expect(result).toMatchObject({ executed: true, errorCode: null, draft: { draftStatus: DRAFT_STATUS.EXECUTED, meetingMinutes: { id }, purchaseRequisition: { purchaseRequisitionStatus: 'WAITING_APPROVAL' } } });
+    expect(result).toMatchObject({ executed: true, errorCode: null, draft: { draftStatus: DRAFT_STATUS.EXECUTED, meetingMinutes: { id }, result: { table: 'purchase_requisition', status: 'WAITING_APPROVAL' } } });
     const requisition = await prisma.purchaseRequisition.findUniqueOrThrow({ where: { actionDraftId: draftId } });
     expect(requisition).toMatchObject({ itemId: oreId, requesterId: author.employeeId });
     expect(requisition.requestedTon.toFixed(3)).toBe('12.500');
