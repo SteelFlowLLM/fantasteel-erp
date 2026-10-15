@@ -4422,7 +4422,8 @@
       const code = codeIn(String(input || '').toUpperCase());
       if (code) {
         const el = findItemByCode(code);
-        if (el) return { item: el, code, sure: true };
+        // 'SO-2610-004 담당 누구야?'처럼 사람을 물으면 화면 행에는 담당 칸이 없을 수 있어 AI 연결(ON)이면 AI가 조회해 답하게 한다
+        if (el) return { item: el, code, sure: !/(누구|누가|담당|요청자|승인자|이름)/.test(String(input || '')) };
       }
       const q = String(input || '');
       const here = HERE_RE.test(q);
