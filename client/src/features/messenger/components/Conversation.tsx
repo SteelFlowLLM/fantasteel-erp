@@ -199,12 +199,13 @@ function RoomView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <section data-pet-perch="" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`${room.displayName} 대화`}>
-        <header className="flex flex-none items-center gap-2.5 border-b border-line px-5 py-3">
+        {/* 글자를 키우면 머리 줄이 좁아져 오른쪽 버튼이 칸 밖으로 밀려나므로 줄을 넘겨 놓는다 (입력칸과 같다) */}
+        <header className="flex flex-none flex-wrap items-center gap-2.5 border-b border-line px-5 py-3">
           <span className="relative flex-none">
             <RoomIcon chatRoomType={room.chatRoomType} name={room.displayName} size="lg" />
             <PresenceDot employeeId={counterpartId} />
           </span>
-          <div data-pet-item="chatRoom" data-pet-item-title={room.displayName} className="flex min-w-0 flex-col">
+          <div data-pet-item="chatRoom" data-pet-item-title={room.displayName} className="flex min-w-0 flex-1 flex-col">
             <b className="truncate text-lg font-semibold">{room.displayName}</b>
             <span className="truncate text-cap text-ink-3">
               {buildRoomCaption(room)}
@@ -223,7 +224,8 @@ function RoomView({
               </Button>
             ) : null}
             <RoomSettingsButtons room={room} onLeft={onLeft} />
-            <IconButton icon="panel" label={asideOpen ? '방 정보 닫기' : '방 정보 열기'} aria-pressed={asideOpen} onClick={onToggleAside} />
+            {/* 방 정보 칸을 띄울 수 없을 만큼 좁으면 토글도 숨긴다 (RoomAside와 같은 기준) */}
+            <IconButton icon="panel" label={asideOpen ? '방 정보 닫기' : '방 정보 열기'} aria-pressed={asideOpen} className="@max-[1040px]:hidden" onClick={onToggleAside} />
           </div>
         </header>
         <WorkRoomPin room={room} />
