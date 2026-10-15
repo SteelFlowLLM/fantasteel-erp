@@ -62,7 +62,7 @@ function AgentBoard({ candidates }: { candidates: AgentCandidateView[] }) {
     <div className="flex min-h-0 min-w-0 flex-1 gap-4">
       <CandidateList candidates={candidates} visible={visible} risk={risk} onRisk={setRisk} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
-        {selected ? <CandidateDetail key={selected.id} candidate={selected} /> : <EmptyDetail hasAny={candidates.length > 0} />}
+        {selected ? <CandidateDetail key={selected.id} candidate={selected} onSelect={setSelectedId} /> : <EmptyDetail hasAny={candidates.length > 0} />}
         <RuleCard />
       </div>
     </div>
@@ -141,7 +141,7 @@ function EmptyDetail({ hasAny }: { hasAny: boolean }) {
   );
 }
 
-function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
+function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateView; onSelect: (id: number) => void }) {
   const [explain, setExplain] = useState<AgentExplainView | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -150,7 +150,10 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
   const confirmable = isConfirmable(candidate);
   const explainAction = useAction(agentCandidateApi.explain, { onSuccess: setExplain });
   const confirmAction = useAction(agentCandidateApi.confirm, {
+    success: (result) => (result.executed ? executedMessageOf(result.draft) : '확정했지만 실행하지 못했어요'),
     onSuccess: (result) => {
+      // 확정하면 목록 순서가 바뀌므로, 방금 처리한 후보를 계속 보여 결과(만들어진 업무)를 확인할 수 있게 한다
+      onSelect(candidate.id);
       setFailure(result.executed ? null : `${result.errorMessage ?? '실행하지 못했어요'}${result.errorCode ? ` (${result.errorCode})` : ''}`);
     },
   });
@@ -229,9 +232,16 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
         </div>
       </AiCard>
 
-      {rejecting ? <RejectModal candidate={candidate} onClose={() => setRejecting(false)} /> : null}
+      {rejecting ? <RejectModal candidate={candidate} onSelect={onSelect} onClose={() => setRejecting(false)} /> : null}
     </>
   );
+}
+
+/** 확정한 뒤 안내 문구: 만들어진 업무 번호를 보인다 */
+function executedMessageOf(draft: AgentCandidateView): string {
+  if (draft.result?.kind === 'PURCHASE_REQUISITION') return `구매요청 ${draft.result.no}을 만들었어요. 부서장 승인을 기다려요`;
+  if (draft.result?.kind === 'PRODUCTION_PLAN') return `재생산 계획 ${draft.result.no}을 만들었어요`;
+  return '추천을 확인했어요. 재고·출하요청 화면에서 이어서 처리해 주세요';
 }
 
 function CandidateBody({ candidate }: { candidate: AgentCandidateView }) {
@@ -303,9 +313,15 @@ function ResultLink({ candidate }: { candidate: AgentCandidateView }) {
   return null;
 }
 
-function RejectModal({ candidate, onClose }: { candidate: AgentCandidateView; onClose: () => void }) {
+function RejectModal({ candidate, onSelect, onClose }: { candidate: AgentCandidateView; onSelect: (id: number) => void; onClose: () => void }) {
   const [reason, setReason] = useState('');
-  const reject = useAction(agentCandidateApi.reject, { success: '대응 후보를 반려했어요', onSuccess: onClose });
+  const reject = useAction(agentCandidateApi.reject, {
+    success: '대응 후보를 반려했어요',
+    onSuccess: () => {
+      onSelect(candidate.id);
+      onClose();
+    },
+  });
   const trimmed = reason.trim();
   return (
     <Modal
