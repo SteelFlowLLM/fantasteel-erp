@@ -26,7 +26,7 @@ describe('buildNavigation', () => {
     const nav = hrefs(navOf('SALES'));
     expect(nav.slice(0, 5)).toEqual(['/dashboard', '/sales-orders', '/sales-orders/new', '/shipment-requests', '/inventories']);
     expect(nav).not.toContain('/approvals');
-    expect(nav.slice(-8)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/agent', '/meetings', '/past-cases']);
+    expect(nav.slice(-8)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/meetings', '/agent', '/past-cases']);
   });
 
   it('다른 영역의 조회 권한 화면은 구분선 뒤에 영역 순서로 붙는다 (역할별 메뉴 v2 3장 표)', () => {

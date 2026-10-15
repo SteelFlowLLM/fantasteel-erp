@@ -22,6 +22,9 @@ export const ERROR_CODE = {
   'PUR-002': { message: '승인 전 발주 불가', status: 409 },
   'PUR-003': { message: '발주 미입고량 초과', status: 409 },
   'ACT-001': { message: '초안 필수값 미확정', status: 400 },
+  // 🟡 VOC-는 정의서 9.3에 없다 (Voice2ERP, 2026-10-15). 팀 확인 후 정의서에 올린다.
+  'VOC-001': { message: '회의록을 찾을 수 없습니다', status: 404 },
+  'VOC-002': { message: '참석자로 고른 사원을 찾을 수 없습니다', status: 404 },
   'SHP-001': { message: '밀시트 PDF 생성 실패(스냅샷은 있음)', status: 500 },
   'SHP-002': { message: '출하 가능 매수를 넘었습니다', status: 409 },
   'SHP-003': { message: '출고 확정된 출하요청은 취소할 수 없습니다', status: 409 },

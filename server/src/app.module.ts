@@ -12,6 +12,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
+import { MeetingMinutesModule } from './modules/meeting-minutes/meeting-minutes.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
 import { MessengerModule } from './modules/messenger/messenger.module';
 import { MrpModule } from './modules/mrp/mrp.module';
@@ -45,6 +46,7 @@ import { PrismaModule } from './prisma/prisma.module';
     NotificationModule,
     MessengerModule,
     MessageActionModule,
+    MeetingMinutesModule,
     DashboardModule,
     LlmModule,
     AiAssistantModule,
