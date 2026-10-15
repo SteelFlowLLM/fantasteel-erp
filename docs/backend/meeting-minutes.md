@@ -7,9 +7,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-001 STT, -003 AI 분석, -004 업무 등록은 다음 단계 |
+| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-003 AI 분석(이번 단계). REQ-VOC-004 업무 등록은 다음 단계 |
 | BP | BP-VOC-01 ([04]). 원본 전사와 AI 요약을 따로 둔다 |
-| 이번 단계 | 글로 붙여 넣은 전사 + **음성(녹음·파일) → 백그라운드 전사(STT)** (Voice2ERP 3단계). AI 분석 호출은 없다 |
+| 이번 단계 | 글·음성 전사(Voice2ERP 2~3단계) + **AI 분석(4단계)**: 전사 → 요약·결정사항·**등록 후보**. 후보는 아직 아무것도 등록하지 않는다(승인·등록은 5단계) |
 
 ## 2. 테이블
 
@@ -25,6 +25,7 @@
 | --- | --- | --- | --- |
 | POST | `meeting-minutes` | API-258 회의록 만들기(글로 붙여 넣기, JSON) | 로그인한 전 역할 |
 | POST | `meeting-minutes/audio` | 🟡 회의록 만들기(음성, multipart) | 로그인한 전 역할 |
+| POST | `meeting-minutes/:id/analyze` | API-260 AI 정리(다시 정리 포함) | **작성자만** |
 | GET | `meeting-minutes` | API-259 목록 | 전 역할 |
 | GET | `meeting-minutes/:id` | API-259 상세 | 전 역할 |
 
@@ -54,6 +55,19 @@
 
 **상세** 원본 전사(`transcript`, `transcriptSegments`)와 AI 요약(`summary`, `analysisResult`)을 별개 칸으로 돌려준다. 없으면 `VOC-001`(404).
 
+**AI 분석** (`POST meeting-minutes/:id/analyze`, `MeetingAnalysisRunner`, `meeting-analysis.{prompt,validator}.ts`)
+- 작성자(`creator_id`)만 할 수 있다(`VOC-003` 403). 전사가 있는 `TRANSCRIBED`·`REVIEW`(다시 정리: 이전 분석을 새 결과로 바꾼다)·`FAILED`만 허용, 그 밖(`TRANSCRIBING`·`ANALYZING`·`CONFIRMED`, 전사 없는 `FAILED`)은 `VOC-004` 409. 전사가 40,000자를 넘으면 `VOC-005` 400(나눠 분석하는 방식은 나중). 상태는 `UPDATE … WHERE status IN (…)` 조건부로 `ANALYZING`(`failure_reason` 지움)으로 바꾸고 상세를 바로 돌려준다(두 번 눌러도 한 번만 시작). 분석은 응답 뒤 runner가 **한 번에 하나**씩 한다.
+- 성공: 상태 `REVIEW`, `analysis_result`(shared `MeetingAnalysis`), `summary` 복사. 실패: `FAILED` + 한국어 이유(`LlmRequestError` 문구, 아니면 `AI 정리 중 오류가 났어요. 다시 정리해 주세요`). 결과 반영은 `WHERE status = ANALYZING`이라 그 사이 상태가 바뀌었으면 버린다. 시작할 때 `ANALYZING`으로 남은 행은 `FAILED`(`서버가 다시 시작돼 분석이 중단됐어요. 다시 정리해 주세요`). `business_event`는 남기지 않는다.
+- LLM 호출: `LlmClient.chatJson` (JSON 스키마 강제, `temperature 0`, 제한 시간 5분). 400이면 형식 강제 없이 한 번 더 부르고, `<think>`·코드 울타리를 벗기며, content가 비면 `reasoning_content`를 읽는다. 모델·주소는 AI 연결 설정(`LlmSettingsStore`)이다.
+- **프롬프트 주입 대응** (REQ-AST-005·009): ① 전사는 `<transcript>` 안의 **데이터**이고 지시가 아니라고 시스템 프롬프트에 못 박는다. ② 모델은 DB에 쓰지 못하고 JSON 제안만 낸다. ③ 서버가 모든 후보를 규칙으로 검증하고(아래), 사원 id·품목 id·수주 id·톤은 모델 값을 믿지 않고 DB 매칭·파싱으로만 정한다. ④ 근거 없는 항목은 버리고, 애매한 담당자·날짜는 지어내지 않고 `issues`(확인 필요)로 표시한다. ⑤ 이 단계는 등록하지 않으므로 오작동해도 후보 목록이 틀릴 뿐 데이터는 바뀌지 않는다.
+- **검증 규칙** (순수 함수 `validateAnalysis`, 발언 번호는 모델이 1부터 센 값 → `evidence`는 0부터의 위치):
+  - 근거(`evidence`)가 범위 밖·정수 아님을 빼고 비면 후보·결정사항을 버린다. `kind`가 TASK/EVENT/PURCHASE가 아니거나 제목이 없으면 버린다(제목 200자). `sourceText`(말한 표현)는 근거 발언에 실제로 있을 때만 남긴다.
+  - 담당자: 참석자 `employee_name`과 정확히 일치하는 1명이면 `assigneeId`(직급을 붙인 "박서영 대리"는 첫 낱말이 정확히 일치할 때만). 아니면 null + `담당자를 참석자에서 찾지 못했어요`. EVENT 참석자는 말한 이름과 일치한 사람, 없으면 회의 참석자 전원 + `일정 참석자를 확인해 주세요`.
+  - 마감일·희망 입고일: 있는 날짜이고 회의일 이상 +365일 이하만, 아니면 null + 확인 필요. 일정 시작: 같은 범위의 `YYYY-MM-DDTHH:mm` → `+09:00` ISO. 끝이 없거나 시작 이하면 시작 + 1시간, `endAssumed` true + 이슈.
+  - 구매요청: `item_type = RAW_MATERIAL`에서 이름·코드 정확 일치(대소문자 무시), 아니면 이름이 하나의 품목에만 포함될 때. 톤은 양수만 소수 3자리 문자열. `requestReason` = 제목, `sourceText` = 근거 발언 글. 못 찾으면 null + `원료 품목을 확인해 주세요`·`수량(톤)을 확인해 주세요`.
+  - `relatedSalesOrderNo`는 `sales_order`에 있을 때만 `salesOrderId`와 함께 남기고, 없으면 조용히 버린다. 키는 `c1…`, `decision`은 항상 `PENDING`.
+- 화면 응답의 `analysisResult`는 읽을 수 없는 모양이면 null이다.
+
 ## 5. 오류 코드
 
 🟡 VOC-는 정의서 9.3에 없다. `shared/src/errors.ts`에 두었고 팀 확인 후 정의서에 올린다.
@@ -62,9 +76,14 @@
 | --- | --- | --- |
 | VOC-001 | 회의록을 찾을 수 없습니다 | 404 |
 | VOC-002 | 참석자로 고른 사원을 찾을 수 없습니다 | 404 |
+| VOC-003 | 회의록 작성자만 AI 정리를 할 수 있어요 | 403 |
+| VOC-004 | 지금 상태에서는 AI 정리를 할 수 없어요 | 409 |
+| VOC-005 | 회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하) | 400 |
 
 입력 형식 오류(빈 제목·기록, 참석자 없음, 길이 초과, 없는 날짜)는 `COM-004`(400).
 
 ## 6. 테스트
 
 `meeting-minutes.spec.ts` (묶음 `fs_collab`): 만들기(줄 나누기·참석자·중복), 빈 기록·없는 참석자·없는 날짜 거절, 목록 순서·필터·쪽, 상세·404. 음성: `SttClient`·`SttSettingsStore`를 가짜로 바꿔 즉시 TRANSCRIBING 응답 → TRANSCRIBED 구간 저장, 구간 없을 때 전체 글, STT 실패 → FAILED 이유, 이미 상태가 바뀐 행 덮어쓰지 않음, 한 번에 하나 실행, 시작 복구, 잘못된 입력 거절.
+
+`meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 4만 자 초과 400, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `llm/llm.client.spec.ts`.

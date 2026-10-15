@@ -48,7 +48,26 @@ interface WireToolCall {
 }
 
 /** 화면에 그대로 보일 연결 실패 이유 */
-export class LlmRequestError extends Error {}
+export class LlmRequestError extends Error {
+  constructor(
+    message: string,
+    /** LLM 서버가 돌려준 HTTP 상태. 연결 실패·시간 초과면 없다 */
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+/** JSON 형식을 강제해 답을 받는 호출의 옵션 */
+export interface LlmJsonSchema {
+  name: string;
+  schema: Record<string, unknown>;
+}
+
+export interface LlmJsonOptions {
+  timeoutMs: number;
+  maxTokens?: number;
+}
 
 /**
  * OpenAI 호환 API 호출 (LM Studio 로컬 서버·LM Link, 나중에 API 키를 쓰는 외부 LLM).
@@ -99,6 +118,31 @@ export class LlmClient {
   }
 
   /**
+   * JSON 스키마로 답 모양을 강제해 받는다 (회의록 AI 분석). 모델이 쓴 값은 믿을 수 없으므로 `unknown`으로 돌려주고 부르는 쪽이 검증한다.
+   * 서버가 response_format을 지원하지 않아 400을 주면 형식 강제 없이 한 번 더 부른다(프롬프트가 JSON만 달라고 요구한다).
+   */
+  async chatJson(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<unknown> {
+    const base = { model, messages, stream: false, temperature: 0, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) };
+    type Reply = { choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[] };
+    let body: Reply;
+    try {
+      body = await this.request<Reply>(
+        endpoint,
+        'POST',
+        '/chat/completions',
+        { ...base, response_format: { type: 'json_schema', json_schema: { name: format.name, strict: true, schema: format.schema } } },
+        options.timeoutMs,
+      );
+    } catch (error) {
+      if (!(error instanceof LlmRequestError) || error.status !== 400) throw error;
+      body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs);
+    }
+    const message = body.choices?.[0]?.message;
+    // LM Studio의 추론 모델은 형식을 강제해도 JSON을 content가 아니라 reasoning_content에 담아 content를 비우기도 한다
+    return parseJsonContent(message?.content?.trim() ? message.content : (message?.reasoning_content ?? ''));
+  }
+
+  /**
    * 도구를 함께 넘기는 대화 (AI 어시스턴트 데이터 조회). 모델이 도구를 고르면 toolCalls로 돌려주고, 실행은 부르는 쪽이 한다.
    * tools가 비면 도구 없이 답만 받는다(도구 호출 횟수를 다 쓴 뒤 마지막 답).
    */
@@ -142,7 +186,7 @@ export class LlmClient {
       throw new LlmRequestError(`${url}에 연결할 수 없어요. LM Studio의 Developer 탭에서 서버를 켰는지, 주소가 맞는지 확인해 주세요`);
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
-    if (!res.ok) throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`);
+    if (!res.ok) throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`, res.status);
     try {
       return (await res.json()) as T;
     } catch {
@@ -161,6 +205,18 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
     };
   }
   return { role: message.role, content: message.content };
+}
+
+/** 추론 모델의 <think> 블록과 ```json 울타리를 벗기고 JSON으로 읽는다 */
+export function parseJsonContent(content: string): unknown {
+  let text = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  if (fenced) text = fenced[1].trim();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new LlmRequestError('AI 응답을 JSON으로 읽지 못했어요');
+  }
 }
 
 /** 끝의 / 를 떼어 경로를 붙일 수 있게 한다 */

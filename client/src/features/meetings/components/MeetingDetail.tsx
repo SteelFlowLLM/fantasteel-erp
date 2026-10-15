@@ -1,6 +1,7 @@
 'use client';
 
-// 회의록 상세: 정보, 원본 전사(번호 붙은 발언), AI 분석 자리. 원본 전사와 AI 요약은 따로 둔다 (BP-VOC-01).
+// 회의록 상세: 정보, 원본 전사(번호 붙은 발언), AI 분석. 원본 전사와 AI 요약은 따로 둔다 (BP-VOC-01).
+import { useEffect, useRef, useState } from 'react';
 import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL } from '@fantasteel/shared';
 import { ROLE_LABEL } from '@/codes';
 import type { MeetingMinutesView } from '@/api/meetingMinutes';
@@ -12,12 +13,27 @@ import { Icon } from '@/components/Icon';
 import { KvList } from '@/components/KvList';
 import { PageHead } from '@/components/Page';
 import { EmptyNote, StateView } from '@/components/StateView';
+import { MeetingAnalysisPanel } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { MeetingStatusBadge } from '@/features/meetings/components/MeetingStatusBadge';
 import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
 import { fmtDateTime } from '@/lib/format';
 import { fmtClock } from '@/lib/meetingAudio';
 
 function Body({ minutes }: { minutes: MeetingMinutesView }) {
+  const [highlighted, setHighlighted] = useState<number | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  /** AI가 근거로 댄 발언으로 스크롤하고 잠깐 강조한다 */
+  const jumpToSegment = (index: number) => {
+    document.getElementById(`segment-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlighted(index);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setHighlighted(null), 2500);
+  };
+
+  // 분석에 실패했어도 전사가 있으면 음성을 다시 올릴 필요 없이 다시 정리하면 된다
+  const failedAfterTranscript = minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED && !!minutes.transcript;
   return (
     <>
       <PageHead crumb={<>회의록<Icon name="chevron-right" size="sm" />{minutes.meetingDate}</>} title={minutes.meetingMinutesTitle} actions={<MeetingStatusBadge status={minutes.meetingMinutesStatus} />} />
@@ -31,7 +47,12 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
           <b>AI가 내용을 정리하는 중…</b> 끝나면 저절로 바뀌어요.
         </Banner>
       ) : null}
-      {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED ? (
+      {failedAfterTranscript ? (
+        <Banner tone="danger">
+          <b>{minutes.failureReason ?? 'AI 정리에 실패했어요'}</b>
+          <div className="mt-0.5 text-cap">전사는 그대로 있어요. 오른쪽 AI 분석에서 &quot;다시 정리&quot;를 누르면 다시 시도해요.</div>
+        </Banner>
+      ) : minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED ? (
         <Banner tone="danger">
           <b>{minutes.failureReason ?? '전사하지 못했어요'}</b>
           <div className="mt-0.5 text-cap">음성을 다시 올려서 새 회의록으로 만들어 주세요. 원본 음성은 저장하지 않아 이 회의록에서 다시 돌릴 수 없어요.</div>
@@ -79,7 +100,11 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
           ) : (
             <ol className="flex flex-col py-1.5">
               {minutes.transcriptSegments.map((segment, index) => (
-                <li key={index} className="grid grid-cols-[32px_minmax(0,1fr)] gap-x-2 px-3.5 py-1.5 text-sm leading-snug">
+                <li
+                  key={index}
+                  id={`segment-${index}`}
+                  className={`grid grid-cols-[32px_minmax(0,1fr)] gap-x-2 px-3.5 py-1.5 text-sm leading-snug transition-colors ${highlighted === index ? 'bg-ai-bg ring-1 ring-ai ring-inset' : ''}`}
+                >
                   <span className="text-right font-mono text-cap text-ink-3">{index + 1}</span>
                   <span className="break-words whitespace-pre-wrap">
                     {segment.start !== null ? <span className="mr-1.5 font-mono text-cap text-ink-3 tabular-nums">[{fmtClock(segment.start)}]</span> : null}
@@ -90,13 +115,7 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
             </ol>
           )}
         </Card>
-        <Card>
-          <CardHead title="AI 분석" meta="요약·결정사항·할 일" />
-          <CardBody>
-            <p className="text-sm text-ink-2">AI 분석 — 다음 단계에서 연결해요.</p>
-            <p className="text-cap text-ink-3">연결되면 원본 전사를 바탕으로 요약·결정사항·할 일 초안을 만들고, 확인한 뒤에만 등록해요. 원본 전사는 AI가 고치지 않아요.</p>
-          </CardBody>
-        </Card>
+        <MeetingAnalysisPanel minutes={minutes} onJump={jumpToSegment} />
       </div>
     </>
   );

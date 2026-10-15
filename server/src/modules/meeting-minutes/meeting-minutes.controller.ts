@@ -7,7 +7,7 @@ import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minu
 
 /**
  * 라우팅·DTO 검증·권한만 둔다. 업무 로직 금지 (컨벤션 6장).
- * 경로는 API 명세서(API-258·259)와 docs/backend/meeting-minutes.md. 회의록은 전 역할이라 권한 코드 없이 로그인만 본다.
+ * 경로는 API 명세서(API-258·259·260)와 docs/backend/meeting-minutes.md. 회의록은 전 역할이라 권한 코드 없이 로그인만 본다.
  */
 @Controller('meeting-minutes')
 export class MeetingMinutesController {
@@ -31,6 +31,12 @@ export class MeetingMinutesController {
     @UploadedFile() file: UploadedMeetingAudio | undefined,
   ): Promise<MeetingMinutesView> {
     return this.service.createFromAudio(user, dto, file);
+  }
+
+  /** API-260. 작성자가 AI 정리를 시킨다. 바로 ANALYZING 상세를 돌려주고 분석은 백그라운드로 돈다 */
+  @Post(':id/analyze')
+  analyze(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingMinutesView> {
+    return this.service.analyze(user, id);
   }
 
   /** API-259 목록 */

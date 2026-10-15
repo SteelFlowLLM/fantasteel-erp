@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MEETING_MINUTES_STATUS } from '@fantasteel/shared';
+import { ITEM_TYPE, MEETING_MINUTES_STATUS } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -77,5 +77,40 @@ export class MeetingMinutesRepository {
       where: { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING },
       data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason },
     });
+  }
+
+  /** AI 정리를 시작한다: 전사가 있고 정리할 수 있는 상태일 때만 ANALYZING으로. 아니면 0건 */
+  startAnalysis(tx: Tx, id: number) {
+    return tx.meetingMinutes.updateMany({
+      where: {
+        id,
+        transcript: { not: null },
+        meetingMinutesStatus: { in: [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED] },
+      },
+      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING, failureReason: null },
+    });
+  }
+
+  /** 아직 ANALYZING인 행만 바꾼다 */
+  finishAnalysis(tx: Tx, id: number, data: Prisma.MeetingMinutesUncheckedUpdateManyInput) {
+    return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING }, data });
+  }
+
+  /** 서버가 꺼지면서 중단된 분석 중 행을 모두 실패로 */
+  failAllAnalyzing(tx: Tx, failureReason: string) {
+    return tx.meetingMinutes.updateMany({
+      where: { meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING },
+      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason },
+    });
+  }
+
+  /** 원료 품목만. 구매요청 후보의 품목 매칭용 (읽기) */
+  findRawMaterials(tx: Tx) {
+    return tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true, itemName: true, itemCode: true }, orderBy: { id: 'asc' } });
+  }
+
+  /** 수주번호로 수주 id (읽기) */
+  findSalesOrdersByNo(tx: Tx, salesOrderNos: string[]) {
+    return tx.salesOrder.findMany({ where: { salesOrderNo: { in: salesOrderNos } }, select: { id: true, salesOrderNo: true } });
   }
 }

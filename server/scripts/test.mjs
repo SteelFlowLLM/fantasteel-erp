@@ -2,7 +2,7 @@
 // 로컬 PostgreSQL(npm run db)이 떠 있어야 한다. 개발용 DB(fantasteel)는 건드리지 않는다.
 //   npm test                       ← 전체
 //   npm test -- sales-order        ← 경로에 이 이름이 들어간 묶음만
-//   npm run test:unit              ← DB 없이 src/common·src/modules/stt 단위 테스트만
+//   npm run test:unit              ← DB 없이 src/common·stt·llm·회의 분석 검증 단위 테스트만
 import { execSync, spawnSync } from 'node:child_process';
 import pg from 'pg';
 
@@ -23,7 +23,7 @@ const shell = process.platform === 'win32';
 const nodeOptions = [process.env.NODE_OPTIONS, '--experimental-vm-modules'].filter(Boolean).join(' ');
 
 if (process.argv.includes('--unit')) {
-  const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
+  const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt', 'src/modules/llm', 'meeting-analysis.validator'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
   process.exit(r.status ?? 1);
 }
 

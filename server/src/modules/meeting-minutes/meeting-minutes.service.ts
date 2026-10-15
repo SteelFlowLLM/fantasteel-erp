@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  MEETING_ANALYSIS_MAX_CHARS,
   MEETING_MINUTES_STATUS,
   type AuthUser,
   type MeetingMinutesListItem,
@@ -7,12 +8,13 @@ import {
   type MeetingMinutesStatus,
   type MeetingMinutesView,
   type Role,
-  type TranscriptSegment,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
 import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery } from './dto/meeting-minutes.dto';
+import { MeetingAnalysisRunner } from './meeting-analysis.runner';
+import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 
@@ -66,15 +68,6 @@ function splitSegments(transcript: string): Prisma.InputJsonArray {
     .map((text) => ({ start: null, end: null, text }));
 }
 
-/** DB의 JSON을 구간 배열로 읽는다. 모양이 다르면 빈 배열 */
-function readSegments(value: Prisma.JsonValue | null): TranscriptSegment[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry) || typeof entry.text !== 'string') return [];
-    return [{ start: typeof entry.start === 'number' ? entry.start : null, end: typeof entry.end === 'number' ? entry.end : null, text: entry.text }];
-  });
-}
-
 function toListItem(row: MeetingMinutesListRow): MeetingMinutesListItem {
   return {
     id: row.id,
@@ -97,7 +90,7 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
     transcript: row.transcript,
     transcriptSegments: readSegments(row.transcriptSegments),
     summary: row.summary,
-    analysisResult: row.analysisResult,
+    analysisResult: readAnalysis(row.analysisResult),
     failureReason: row.failureReason,
     creator: { id: row.creator.id, name: row.creator.employeeName },
     attendees: row.attendees.map((a) => ({
@@ -113,7 +106,7 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
 }
 
 /**
- * 회의록 (REQ-VOC-002, BP-VOC-01). 이 단계는 글로 붙여 넣은 전사만 받는다: STT·AI 분석은 아직 없다.
+ * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다(등록은 다음 단계).
  * 작업 로그는 남기지 않는다 (REQ-LOG-002 이벤트에 회의록 생성이 없다). 전 역할이 쓰므로 권한 코드 없이 로그인만 본다.
  */
 @Injectable()
@@ -122,6 +115,7 @@ export class MeetingMinutesService {
     private readonly prisma: PrismaService,
     private readonly repository: MeetingMinutesRepository,
     private readonly runner: MeetingTranscriptionRunner,
+    private readonly analysisRunner: MeetingAnalysisRunner,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -171,6 +165,22 @@ export class MeetingMinutesService {
       await this.repository.createAttendees(tx, created.id, attendeeIds);
       return created.id;
     });
+  }
+
+  /**
+   * API-260. 작성자가 AI 정리를 시킨다. 조건부로 ANALYZING으로 바꾸고 바로 돌려주며, 분석은 응답 뒤 runner가 한다.
+   * 전사가 있는 TRANSCRIBED·REVIEW(다시 정리)·FAILED만 허용한다. 두 번 눌러도 한 번만 시작되게 UPDATE 조건에 상태를 건다.
+   */
+  async analyze(user: AuthUser, id: number): Promise<MeetingMinutesView> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    if (row.creator.id !== user.employeeId) throw new AppException('VOC-003');
+    if (row.transcript === null || row.transcript.trim() === '') throw new AppException('VOC-004');
+    if (row.transcript.length > MEETING_ANALYSIS_MAX_CHARS) throw new AppException('VOC-005');
+    const { count } = await this.repository.startAnalysis(this.prisma, id);
+    if (count === 0) throw new AppException('VOC-004');
+    void this.analysisRunner.enqueue({ meetingMinutesId: id });
+    return this.get(id);
   }
 
   /** API-259 목록 */

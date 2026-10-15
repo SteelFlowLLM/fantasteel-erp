@@ -1,5 +1,6 @@
 // 회의록 API 응답·입력 타입 (docs/backend/meeting-minutes.md, API-258·259).
 import type { PageResult } from './api';
+import type { PurchaseRequisitionDraftPayload } from './action-draft';
 import type { MeetingMinutesStatus, Role } from './codes';
 
 /** 원본 전사 구간. 글로 넣은 회의록은 시간이 없어 start·end가 null이다. 배열 위치가 발언 번호다 */
@@ -53,8 +54,8 @@ export interface MeetingMinutesView {
   transcript: string | null;
   transcriptSegments: TranscriptSegment[];
   summary: string | null;
-  /** AI 분석 결과·검토 중 수정본. 모양은 AI 분석 단계에서 정한다 */
-  analysisResult: unknown;
+  /** AI 분석 결과(API-260). 서버가 검증한 후보만 담고, 읽을 수 없는 모양이면 null */
+  analysisResult: MeetingAnalysis | null;
   failureReason: string | null;
   creator: { id: number; name: string };
   attendees: MeetingAttendeeView[];
@@ -64,3 +65,56 @@ export interface MeetingMinutesView {
 }
 
 export type MeetingMinutesPage = PageResult<MeetingMinutesListItem>;
+
+/** AI 분석에 보낼 수 있는 전사의 최대 글자 수 (긴 회의는 나눠 분석하는 방식이 생길 때까지 거절한다) */
+export const MEETING_ANALYSIS_MAX_CHARS = 40000;
+
+export type MeetingCandidateKind = 'TASK' | 'EVENT' | 'PURCHASE';
+export type MeetingCandidateDecision = 'PENDING' | 'APPROVED' | 'EXCLUDED';
+
+/**
+ * AI가 제안한 등록 후보. 모델은 제안만 하고, 사원·품목·수주 번호와 날짜는 서버가 DB·규칙으로 검증해 채운다.
+ * evidence는 transcriptSegments의 0부터 시작하는 위치다.
+ */
+export interface MeetingCandidate {
+  /** 'c1', 'c2' … 출력 순서 */
+  key: string;
+  kind: MeetingCandidateKind;
+  title: string;
+  description: string | null;
+  evidence: number[];
+  /** 시각·날짜를 말한 원문 (예: "다음 주 화요일 2시") */
+  sourceText: string | null;
+  assigneeId: number | null;
+  /** 말한 담당자 이름 그대로 */
+  assigneeName: string | null;
+  /** TASK 마감일 YYYY-MM-DD */
+  dueDate: string | null;
+  /** EVENT 시작·끝: +09:00 ISO */
+  startAt: string | null;
+  endAt: string | null;
+  endAssumed: boolean;
+  attendeeIds: number[];
+  /** PURCHASE 구매요청 초안 값 */
+  purchase: PurchaseRequisitionDraftPayload | null;
+  /** 말한 품목 이름 그대로 */
+  itemName: string | null;
+  relatedSalesOrderNo: string | null;
+  salesOrderId: number | null;
+  /** 사람이 확인해야 하는 이유 */
+  issues: string[];
+  decision: MeetingCandidateDecision;
+}
+
+export interface MeetingDecision {
+  text: string;
+  evidence: number[];
+}
+
+export interface MeetingAnalysis {
+  summary: string;
+  decisions: MeetingDecision[];
+  candidates: MeetingCandidate[];
+  model: string;
+  analyzedAt: string;
+}

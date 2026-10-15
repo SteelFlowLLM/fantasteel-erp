@@ -48,6 +48,9 @@ export const serverMeetingMinutesApi = {
 
   get: (id: number): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('GET', `/meeting-minutes/${id}`),
 
+  /** API-260. 바로 ANALYZING 상세가 돌아오고, 분석은 서버가 백그라운드로 한다 */
+  analyze: (id: number): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('POST', `/meeting-minutes/${id}/analyze`),
+
   // async: 입력 오류도 다른 서버 오류처럼 거절된 약속으로 돌려준다
   create: async (input: MeetingMinutesCreateInput): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('POST', '/meeting-minutes', { body: bodyOf(input) }),
 

@@ -25,6 +25,9 @@ export const ERROR_CODE = {
   // 🟡 VOC-는 정의서 9.3에 없다 (Voice2ERP, 2026-10-15). 팀 확인 후 정의서에 올린다.
   'VOC-001': { message: '회의록을 찾을 수 없습니다', status: 404 },
   'VOC-002': { message: '참석자로 고른 사원을 찾을 수 없습니다', status: 404 },
+  'VOC-003': { message: '회의록 작성자만 AI 정리를 할 수 있어요', status: 403 },
+  'VOC-004': { message: '지금 상태에서는 AI 정리를 할 수 없어요', status: 409 },
+  'VOC-005': { message: '회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하)', status: 400 },
   'SHP-001': { message: '밀시트 PDF 생성 실패(스냅샷은 있음)', status: 500 },
   'SHP-002': { message: '출하 가능 매수를 넘었습니다', status: 409 },
   'SHP-003': { message: '출고 확정된 출하요청은 취소할 수 없습니다', status: 409 },

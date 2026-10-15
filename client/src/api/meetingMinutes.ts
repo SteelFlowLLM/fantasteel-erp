@@ -1,10 +1,11 @@
 // 회의록 api (REQ-VOC-002, BP-VOC-01). 서버를 부른다 (api/server/meetingMinutes.ts).
-// 글로 붙여 넣은 전사는 바로 저장하고, 음성(녹음·파일)은 올리면 서버가 백그라운드로 글로 바꾼다 (AI 분석은 아직 없다).
+// 글로 붙여 넣은 전사는 바로 저장하고, 음성(녹음·파일)은 올리면 서버가 백그라운드로 글로 바꾼다.
+// 작성자가 AI 정리를 시키면 서버가 요약·결정사항·등록 후보를 만든다 (API-260). 후보는 서버가 검증한 값이고, 등록은 다음 단계다.
 import type { MeetingMinutesCreateInput, MeetingMinutesPage, MeetingMinutesStatus, MeetingMinutesView } from '@fantasteel/shared';
 import { serverMeetingMinutesApi } from '@/api/server/meetingMinutes';
 
-export type { MeetingMinutesCreateInput, MeetingMinutesListItem, MeetingMinutesPage, MeetingMinutesView, TranscriptSegment } from '@fantasteel/shared';
-export { MEETING_AUDIO_MAX_BYTES, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
+export type { MeetingAnalysis, MeetingCandidate, MeetingCandidateKind, MeetingDecision, MeetingMinutesCreateInput, MeetingMinutesListItem, MeetingMinutesPage, MeetingMinutesView, TranscriptSegment } from '@fantasteel/shared';
+export { MEETING_ANALYSIS_MAX_CHARS, MEETING_AUDIO_MAX_BYTES, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 /** 음성으로 만들기. file은 녹음(Blob을 File로 감싼 것)이거나 고른 파일 */
 export interface MeetingMinutesAudioInput {
@@ -35,6 +36,9 @@ export const meetingMinutesApi = {
 
   /** 글로 붙여 넣은 전사로 만든다. 서버가 전사 완료 상태로 시작한다 */
   create: (input: MeetingMinutesCreateInput): Promise<MeetingMinutesView> => serverMeetingMinutesApi.create(input),
+
+  /** AI로 정리하기(다시 정리 포함). 작성자만 할 수 있고, 돌아온 회의록은 분석 중(ANALYZING)이다 */
+  analyze: (id: number): Promise<MeetingMinutesView> => serverMeetingMinutesApi.analyze(id),
 };
 
 export const meetingMinutesAudioApi = {

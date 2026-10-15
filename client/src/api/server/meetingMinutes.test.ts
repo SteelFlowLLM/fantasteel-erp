@@ -1,5 +1,5 @@
 // 회의록 서버 모드: 목록 조회 조건, 만들기 요청 본문(정리한 값), 입력 확인 오류.
-import type { MeetingMinutesPage, MeetingMinutesView } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingMinutesPage, MeetingMinutesView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/errors';
 import { meetingMinutesApi, meetingMinutesAudioApi } from '@/api/meetingMinutes';
@@ -86,5 +86,32 @@ describe('회의록 서버 모드 (api/server/meetingMinutes.ts)', () => {
     expect(error).toBeInstanceOf(InputError);
     expect((error as InputError).fieldErrors).toEqual({ meetingMinutesTitle: '제목을 입력해 주세요', attendeeIds: '참석자를 1명 이상 골라 주세요', file: '음성이 비어 있어요' });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('회의록 AI 정리 (API-260)', () => {
+  it('작성자가 POST analyze를 부르면 분석 중 상세가 돌아온다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes/3/analyze' ? ok({ ...view, meetingMinutesStatus: 'ANALYZING' }) : undefined));
+    const started = await meetingMinutesApi.analyze(3);
+    expect(started.meetingMinutesStatus).toBe('ANALYZING');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('상세의 analysisResult는 후보를 타입대로 담아 돌려준다', async () => {
+    const analysis: MeetingAnalysis = {
+      summary: '요약',
+      decisions: [{ text: '방문한다', evidence: [0] }],
+      candidates: [{
+        key: 'c1', kind: 'EVENT', title: '동해철강 방문', description: null, evidence: [0], sourceText: '다음 주 화요일 2시', assigneeId: null, assigneeName: null, dueDate: null,
+        startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00', endAssumed: true, attendeeIds: [5], purchase: null, itemName: null, relatedSalesOrderNo: null,
+        salesOrderId: null, issues: ['끝 시각은 말이 없어 1시간으로 가정했어요'], decision: 'PENDING',
+      }],
+      model: 'm',
+      analyzedAt: '2026-10-15T01:00:00.000Z',
+    };
+    useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path === '/meeting-minutes/3' ? ok({ ...view, meetingMinutesStatus: 'REVIEW', summary: '요약', analysisResult: analysis }) : undefined));
+    const got = await meetingMinutesApi.get(3);
+    expect(got.analysisResult?.candidates[0]).toMatchObject({ kind: 'EVENT', endAssumed: true, evidence: [0] });
+    expect(got.analysisResult?.decisions[0].text).toBe('방문한다');
   });
 });
