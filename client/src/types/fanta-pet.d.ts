@@ -6,6 +6,8 @@ interface FantaPetMountOptions {
   character?: string | null;
   storageKey?: string;
   firstVisit?: boolean;
+  /** 사원이 꺼내기 전까지 숨겨 둔다 (숨기거나 꺼낸 선택은 사원별로 기억) */
+  startHidden?: boolean;
   hint?: string | false;
   zIndex?: number;
   container?: HTMLElement;

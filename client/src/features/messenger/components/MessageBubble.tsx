@@ -14,6 +14,7 @@ import { Modal } from '@/components/Modal';
 import { messageActionsFor } from '@/features/messenger/messageActions';
 import { splitMessageText, type ErpLink } from '@/features/messenger/lib/messageText';
 import { canOpenScreen, screenOfPath } from '@/features/shell/screens';
+import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
 import { useImagePreview, useMessageFileDownload } from '@/hooks/useMessenger';
@@ -58,13 +59,11 @@ export function MessageBubble({
     return !screen || canOpenScreen(me, screen.access);
   };
 
-  // AI 답은 시스템 알림 띠가 아니라 AI 어시스턴트가 보낸 말풍선으로 보인다 (긴 답이라 줄바꿈 유지)
+  // AI 답은 시스템 알림 띠가 아니라 철강맨AI가 보낸 말풍선으로 보인다 (긴 답이라 줄바꿈 유지, 얼굴도 화면 도우미 철강맨)
   if (message.isAi) {
     return (
       <div className={cn('flex gap-2.5 px-5 pb-1', isGroupStart ? 'pt-2' : 'pt-0.5')}>
-        <span className="w-7 flex-none">
-          <Avatar name="AI" tone="neutral" />
-        </span>
+        <SteelmanAiMark framed size="sm" />
         <div className="flex max-w-[70%] min-w-0 flex-col gap-1">
           <b className="text-sm font-semibold">{message.senderName}</b>
           <div className="flex min-w-0 items-end gap-1.5">
