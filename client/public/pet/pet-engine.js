@@ -4195,7 +4195,8 @@
       for (const f of guide.faq) {
         let score = 0;
         const q = norm(f.q);
-        if (q === n) score += 100;
+        // match(정규식)는 문장이 달라도 같은 질문으로 본다: FAQ 문장과 똑같이 물은 것처럼 확실한 답이 된다
+        if (q === n || (f.match instanceof RegExp && f.match.test(String(input)))) score += 100;
         else if (n.length >= 2 && q.includes(n)) score += 3;
         for (const k of arr(f.keywords)) {
           const nk = norm(k);
