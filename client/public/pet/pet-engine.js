@@ -686,6 +686,8 @@
   }
 
   // ── 스타일 ────────────────────────────────────────────
+  // 말 걸기 창 너비(px). CSS와 창 위치 계산(positionChat)이 같이 쓴다
+  const CHAT_WIDTH = 360;
   const CSS = `
 .fp-root{position:fixed;inset:0;pointer-events:none;font-family:var(--fp-font,'IBM Plex Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif);font-size:13px;line-height:1.45;color:var(--fp-ink);-webkit-font-smoothing:antialiased;text-align:left;
 --fp-ink:var(--color-ink,#121820);--fp-ink-2:var(--color-ink-2,#3f4a57);--fp-ink-3:var(--color-ink-3,#5e6977);--fp-surface:var(--color-surface,#fff);--fp-surface-2:var(--color-surface-2,#f7f8fa);--fp-surface-3:var(--color-surface-3,#eef1f4);--fp-line:var(--color-line,#dde2e7);--fp-line-strong:var(--color-line-strong,#c3cbd4);--fp-brand:var(--color-brand,#173a5e);--fp-brand-hover:var(--color-brand-hover,#0f2b47);--fp-brand-tint:var(--color-brand-tint,#e7eef5);--fp-run:var(--color-run,#1f5fcc);--fp-ok:var(--color-ok,#17794a);--fp-ok-bg:var(--color-ok-bg,#e4f3ea);
@@ -766,14 +768,14 @@
 .fp-hint::after{content:'';position:absolute;top:50%;margin-top:-5px;border:5px solid transparent}
 .fp-hint[data-side=left]::after{right:-10px;border-left-color:var(--fp-ink)}
 .fp-hint[data-side=right]::after{left:-10px;border-right-color:var(--fp-ink)}
-.fp-chat{position:absolute;left:0;top:0;z-index:5;pointer-events:auto;width:300px;max-height:calc(100vh / var(--fp-uiz,1) - 16px);display:flex;flex-direction:column;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:8px;box-shadow:4px 4px 0 rgba(18,24,32,.16),0 12px 32px rgba(18,24,32,.14);overflow:hidden}
+.fp-chat{position:absolute;left:0;top:0;z-index:5;pointer-events:auto;width:${CHAT_WIDTH}px;max-height:calc(100vh / var(--fp-uiz,1) - 16px);display:flex;flex-direction:column;background:var(--fp-surface);border:2px solid var(--fp-ink);border-radius:8px;box-shadow:4px 4px 0 rgba(18,24,32,.16),0 12px 32px rgba(18,24,32,.14);overflow:hidden}
 .fp-chat-head{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 8px;background:var(--fp-surface-2);border-bottom:2px solid var(--fp-line)}
 .fp-chat-ava{flex:none;width:34px;height:34px;border-radius:6px;background:var(--fp-accent-soft);overflow:hidden;position:relative}
 .fp-chat-ava canvas{position:absolute;image-rendering:pixelated}
 .fp-chat-who{display:flex;flex-direction:column;min-width:0;flex:1;line-height:16px}
 .fp-chat-who b{font-size:13px;font-weight:700}
 .fp-chat-who small{font-size:11px;color:var(--fp-ink-3)}
-.fp-chat-log{flex:1 1 auto;min-height:96px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+.fp-chat-log{flex:1 1 auto;min-height:140px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
 .fp-msg{max-width:88%;padding:7px 10px;border-radius:8px;font-size:13px;line-height:19px;word-break:keep-all;overflow-wrap:anywhere}
 .fp-msg--pet{align-self:flex-start;background:var(--fp-surface-2);border:1px solid var(--fp-line);border-bottom-left-radius:2px}
 .fp-msg--me{align-self:flex-end;background:var(--fp-brand-tint);color:var(--fp-brand);border-bottom-right-radius:2px}
@@ -4840,7 +4842,7 @@
       if (!chat.el) return;
       const vw = W();
       const vh = H();
-      const cw = Math.min(300 * uiz(), vw - 16);
+      const cw = Math.min(CHAT_WIDTH * uiz(), vw - 16);
       if (chat.el.style.width !== uiPx(cw)) chat.el.style.width = uiPx(cw);
       const ch = Math.min(chat.h || 360, vh - 16);
       const box = petBox();
