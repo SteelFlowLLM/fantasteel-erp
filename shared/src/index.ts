@@ -19,6 +19,7 @@ export * from './business-event';
 export * from './mrp';
 export * from './mill-sheet-pdf';
 export * from './llm';
+export * from './stt';
 export * from './ai-assistant';
 export * from './messenger';
 export * from './messenger-emoticon';

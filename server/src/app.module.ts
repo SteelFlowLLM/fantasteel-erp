@@ -10,6 +10,7 @@ import { BusinessEventModule } from './modules/business-event/business-event.mod
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LlmModule } from './modules/llm/llm.module';
+import { SttModule } from './modules/stt/stt.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
 import { MeetingMinutesModule } from './modules/meeting-minutes/meeting-minutes.module';
@@ -49,6 +50,7 @@ import { PrismaModule } from './prisma/prisma.module';
     MeetingMinutesModule,
     DashboardModule,
     LlmModule,
+    SttModule,
     AiAssistantModule,
   ],
   providers: [
