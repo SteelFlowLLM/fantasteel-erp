@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, LOT_TYPE } from '@fantasteel/shared';
 import type { Tx } from '../../prisma/prisma.service';
+import { pendingInspectionLotWhere } from '../quality/quality.repository';
 
 /** 대시보드는 읽기만 한다. 여러 모듈의 테이블을 단계별로 센다 */
 @Injectable()
@@ -9,15 +10,9 @@ export class DashboardRepository {
     return tx.productionPlan.groupBy({ by: ['productionPlanStatus'], _count: { _all: true } });
   }
 
-  /** 판정 대기: 검사 행이 없거나 판정 대기(PENDING)인 히트·슬래브·코일 */
+  /** 판정 대기 히트·슬래브·코일. 검사 입력 화면의 대기 목록과 같은 조건이라 불합격 히트의 하위 LOT은 세지 않는다 */
   async countPendingInspectionLots(tx: Tx) {
-    const countOf = (lotType: string) =>
-      tx.lot.count({
-        where: {
-          lotType,
-          OR: [{ qualityInspection: { is: null } }, { qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.PENDING } } }],
-        },
-      });
+    const countOf = (lotType: string) => tx.lot.count({ where: { lotType, ...pendingInspectionLotWhere } });
     const [heat, slab, coil] = await Promise.all([countOf(LOT_TYPE.HEAT), countOf(LOT_TYPE.SLAB), countOf(LOT_TYPE.COIL)]);
     return { heat, slab, coil };
   }

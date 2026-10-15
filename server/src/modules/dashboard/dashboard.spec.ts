@@ -10,6 +10,7 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ProductionSimulationService } from '../production/production-simulation.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
+import { DashboardRepository } from './dashboard.repository';
 
 let app: INestApplication;
 let baseUrl: string;
@@ -103,6 +104,28 @@ describe('GET dashboard/widgets/surplus-age', () => {
     expect(body.data.totalQty).toBe(body.data.items.reduce((s, r) => s + r.surplusQty, 0));
     expect(body.data.totalTon).toMatch(/^\d+\.\d{3}$/);
     for (const row of body.data.items) expect(row.surplusQty).toBeGreaterThan(0);
+  });
+});
+
+describe('공정 흐름 판정 대기 수 (검사 입력 대기 목록과 같은 조건)', () => {
+  it('불합격 히트의 하위 슬래브·코일은 세지 않고, 판정 대기 히트의 하위 슬래브는 센다', async () => {
+    const prisma = app.get(PrismaService);
+    const repository = app.get(DashboardRepository);
+    const before = await repository.countPendingInspectionLots(prisma);
+    const standard = await prisma.inspectionStandard.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    const inspector = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
+    const lotOf = (lotNo: string, lotType: string) => prisma.lot.create({ data: { lotNo, lotType } });
+    const link = (parentLotId: number, childLotId: number) => prisma.lotRelation.create({ data: { parentLotId, childLotId, lotRelationEvidence: 'ACTUAL_INPUT' } });
+
+    const failedHeat = await lotOf('HT-DSH-FAIL', 'HEAT');
+    await prisma.qualityInspection.create({ data: { lotId: failedHeat.id, inspectionStandardId: standard.id, inspectionResult: 'FAIL', inspectorEmployeeId: inspector.id, inspectedAt: new Date() } });
+    const failedSlab = await lotOf('HT-DSH-FAIL-01', 'SLAB');
+    await link(failedHeat.id, failedSlab.id);
+    await link(failedSlab.id, (await lotOf('CDSH-FAIL-01', 'COIL')).id);
+    const waitingHeat = await lotOf('HT-DSH-WAIT', 'HEAT');
+    await link(waitingHeat.id, (await lotOf('HT-DSH-WAIT-01', 'SLAB')).id);
+
+    expect(await repository.countPendingInspectionLots(prisma)).toEqual({ heat: before.heat + 1, slab: before.slab + 1, coil: before.coil });
   });
 });
 
