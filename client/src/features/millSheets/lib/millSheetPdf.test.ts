@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { millSheetPdfFileName } from '@fantasteel/shared';
+import { drawMillSheet, millSheetPdfFileName, type PdfDocLike } from '@fantasteel/shared';
 import type { MillSheetInspectionSnapshot, MillSheetSnapshot } from '@/api/millSheets';
 import { buildMillSheetPdf, toPdfSnapshot } from './millSheetPdf';
 
@@ -98,5 +98,54 @@ describe('밀시트 PDF 직접 생성 (REQ-SHP-004)', () => {
 
   it('저장 이름은 서버와 같은 양식이다', () => {
     expect(millSheetPdfFileName(toPdfSnapshot(sample()))).toBe('MS-2610-0028-1_나래조선_20261006.pdf');
+  });
+});
+
+/** 그린 글자만 모으는 가짜 문서 (글꼴 없이 내용만 본다) */
+function drawnTexts(snapshot: MillSheetSnapshot): string[] {
+  const texts: string[] = [];
+  const doc: PdfDocLike = {
+    y: 0,
+    fontSize: () => doc,
+    fillColor: () => doc,
+    strokeColor: () => doc,
+    lineWidth: () => doc,
+    moveDown: () => doc,
+    moveTo: () => doc,
+    lineTo: () => doc,
+    stroke: () => doc,
+    addPage: () => doc,
+    text: (value: string) => {
+      texts.push(value);
+      return doc;
+    },
+  };
+  drawMillSheet(doc, toPdfSnapshot(snapshot));
+  return texts;
+}
+
+describe('밀시트 PDF 내용 (drawMillSheet)', () => {
+  it('출고 확정·검사 시각을 서울 시각으로 찍는다 (스냅샷은 UTC)', () => {
+    const texts = drawnTexts(sample(1));
+    expect(texts).toContain('박물류 · 2026-10-06 14:30');
+    expect(texts.some((t) => t.includes('판정 PASS · 2026-10-02 12:00'))).toBe(true);
+    expect(texts.some((t) => t.includes('05:30') || t.includes('03:00'))).toBe(false);
+  });
+
+  it('톤 단위는 한 번만 붙인다', () => {
+    const texts = drawnTexts(sample(1));
+    expect(texts).toContain('1매 · 88.314 t');
+    expect(texts.some((t) => t.includes('1매 29.438 t · 출고 1매 88.314 t'))).toBe(true);
+    expect(texts.some((t) => /\bt t\b/.test(t))).toBe(false);
+  });
+
+  it('항목명에 코드가 이미 들어 있으면 코드를 다시 붙이지 않는다', () => {
+    const snapshot = sample(1);
+    const heatInspection = snapshot.heats[0].inspection!;
+    snapshot.heats[0].inspection = { ...heatInspection, values: [{ ...heatInspection.values[0], inspectionItemName: '규소(Si)', inspectionItemCode: 'SI' }, heatInspection.values[1]] };
+    const texts = drawnTexts(snapshot);
+    expect(texts).toContain('규소(Si)');
+    expect(texts).not.toContain('규소(Si) (SI)');
+    expect(texts).toContain('규소 (SI)');
   });
 });
