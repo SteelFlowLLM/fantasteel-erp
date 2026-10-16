@@ -3,6 +3,7 @@
 import type {
   AiActionCard,
   AiActionCardExecuteResult,
+  AiAssistantImageInput,
   AiAssistantReplyView,
   AiAssistantSource,
   AiAssistantStreamEvent,
@@ -52,11 +53,12 @@ export interface AiChatLive {
 }
 
 export type AiChatEntry =
-  | { id: string; role: 'user'; content: string }
+  /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (지난 대화로 서버에 보내지 않는다) */
+  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[] }
   /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드 */
   | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[] }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
-  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel };
+  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[] };
 
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
@@ -130,6 +132,14 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
   };
 }
 
+/** 실패 줄: 다시 물을 때 같은 생각 정도·사진으로 묻도록 질문 때의 값을 담는다 */
+function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: string, question: string, reason: string): AiChatEntry {
+  const asked = state.entries.find((entry) => entry.id === questionId);
+  const images = asked?.role === 'user' ? asked.images : undefined;
+  const reasoning = state.live?.reasoning;
+  return { id: newAiChatId(), role: 'failure', content: reason, question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}) };
+}
+
 interface AiChatState {
   /** 이 대화의 사원. 다른 사원으로 들어오면 대화를 비운다 */
   ownerEmployeeId: number | null;
@@ -139,8 +149,8 @@ interface AiChatState {
   /** 답을 기다리는 동안의 진행 상황 (생각·조회·받은 답 글) */
   live: AiChatLive | null;
   claim: (employeeId: number) => void;
-  /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다) */
-  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel) => void;
+  /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다), images: 질문과 함께 보내는 사진 */
+  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[]) => void;
   addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
   /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
@@ -162,8 +172,12 @@ export const useAiChatStore = create<AiChatState>((set) => ({
   live: null,
   claim: (employeeId) =>
     set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, entries: [], pendingId: null, live: null })),
-  addQuestion: (id, question, reasoning) =>
-    set((state) => ({ entries: [...state.entries, { id, role: 'user', content: question }], pendingId: id, live: emptyAiChatLive(reasoning ?? null) })),
+  addQuestion: (id, question, reasoning, images) =>
+    set((state) => ({
+      entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}) }],
+      pendingId: id,
+      live: emptyAiChatLive(reasoning ?? null),
+    })),
   // 그사이 대화를 비웠거나 사원이 바뀌었으면 늦게 온 답은 버린다
   addAnswer: (questionId, answer, sources, cards = []) =>
     set((state) =>
@@ -183,7 +197,7 @@ export const useAiChatStore = create<AiChatState>((set) => ({
     set((state) =>
       state.pendingId === questionId
         ? {
-            entries: [...state.entries, { id: newAiChatId(), role: 'failure', content: reason, question, ...(state.live?.reasoning ? { reasoning: state.live.reasoning } : {}) }],
+            entries: [...state.entries, failureEntry(state, questionId, question, reason)],
             pendingId: null,
             live: null,
           }
@@ -197,12 +211,7 @@ export const useAiChatStore = create<AiChatState>((set) => ({
       }
       if (event.type === 'error') {
         const question = state.entries.find((entry) => entry.id === questionId)?.content ?? '';
-        const reasoning = state.live.reasoning;
-        return {
-          entries: [...state.entries, { id: newAiChatId(), role: 'failure', content: event.message, question, ...(reasoning ? { reasoning } : {}) }],
-          pendingId: null,
-          live: null,
-        };
+        return { entries: [...state.entries, failureEntry(state, questionId, question, event.message)], pendingId: null, live: null };
       }
       return { live: reduceAiChatLive(state.live, event, now) };
     }),

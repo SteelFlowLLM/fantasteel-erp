@@ -1,7 +1,9 @@
 import { ROLE, type AuthUser } from '@fantasteel/shared';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
 import type { AiAssistantStreamEvent } from '@fantasteel/shared';
-import type { LlmClient, LlmEndpoint, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
+import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
 import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
@@ -12,6 +14,7 @@ import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
+import { AskAiAssistantDto } from './dto/ai-assistant.dto';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
 import { GLOSSARY_SEARCH_LIMIT, searchGlossary } from './knowledge/glossary.search';
 import { MANUAL_GUIDES } from './knowledge/manual.generated';
@@ -141,10 +144,21 @@ describe('AiAssistantService', () => {
     streamed: boolean;
   }
 
-  function setup(settings: Partial<LlmSettings>, replies: (call: LlmCall, index: number) => Promise<LlmToolReply>, toolResult?: ToolRunResult) {
+  function setup(
+    settings: Partial<LlmSettings>,
+    replies: (call: LlmCall, index: number) => Promise<LlmToolReply>,
+    toolResult?: ToolRunResult,
+    capabilities: LlmModelCapabilities = { vision: true, reasoning: true },
+  ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
+    // 모델 정보를 몇 번 물었는지 (사진 없는 질문은 묻지 않아야 한다)
+    const capabilityAsks: string[] = [];
     const client = {
+      modelCapabilities: async (_endpoint: LlmEndpoint, model: string) => {
+        capabilityAsks.push(model);
+        return capabilities;
+      },
       chatWithTools: async (_endpoint: LlmEndpoint, _model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[], profile: LlmProfile) => {
         const call = { messages: [...messages], tools, profile, streamed: false };
         calls.push(call);
@@ -177,7 +191,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService), calls, runs, definitionOptions };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -414,6 +428,77 @@ describe('AiAssistantService', () => {
     });
   });
 
+  describe('사진 (images)', () => {
+    const IMAGE = { mediaType: 'image/png', dataBase64: 'iVBORw0KGgo=' } as const;
+    const HISTORY = [
+      { role: 'user', content: '지난 질문' },
+      { role: 'assistant', content: '지난 답' },
+    ] as const;
+
+    it('사진을 볼 수 있는 모델이면 마지막 질문 메시지에만 사진을 붙인다 (지난 대화에는 남기지 않는다)', async () => {
+      const streamed = setup({}, async () => answer('네'));
+      await (await streamed.service.prepare(user, { question: '이 사진 뭐야?', history: [...HISTORY], images: [IMAGE] })).run(() => undefined);
+      const plain = setup({}, async () => answer('네'));
+      await plain.service.ask(user, { question: '이 사진 뭐야?', history: [...HISTORY], images: [IMAGE] });
+
+      for (const { messages } of [streamed.calls[0], plain.calls[0]]) {
+        expect(messages.at(-1)).toEqual({ role: 'user', content: '이 사진 뭐야?', images: [IMAGE] });
+        expect(messages.slice(0, -1).some((m) => 'images' in m)).toBe(false);
+        expect(messages.some((m) => m.content === '지난 질문')).toBe(true);
+      }
+      expect(streamed.calls[0].streamed).toBe(true);
+      expect(plain.calls[0].streamed).toBe(false);
+    });
+
+    it('설정된 모델 이름으로 모델 정보를 묻는다', async () => {
+      const { service, capabilityAsks } = setup({ model: 'vision-model' }, async () => answer('네'));
+      await service.ask(user, { question: '이 사진 뭐야?', images: [IMAGE] });
+      expect(capabilityAsks).toEqual(['vision-model']);
+    });
+
+    it('사진을 못 보는 모델(vision false)이면 COM-004(400)로 막고 LLM을 부르지 않는다', async () => {
+      const { service, calls } = setup({}, async () => answer('네'), undefined, { vision: false, reasoning: false });
+      await expect(service.prepare(user, { question: '이 사진 뭐야?', images: [IMAGE] })).rejects.toMatchObject({ code: 'COM-004', status: 400 });
+      await expect(service.ask(user, { question: '이 사진 뭐야?', images: [IMAGE] })).rejects.toMatchObject({ code: 'COM-004', status: 400 });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('알 수 없는 모델(vision null)이면 막지 않고 사진을 보낸다', async () => {
+      const { service, calls } = setup({}, async () => answer('네'), undefined, { vision: null, reasoning: null });
+      await service.ask(user, { question: '이 사진 뭐야?', images: [IMAGE] });
+      expect(calls[0].messages.at(-1)).toMatchObject({ role: 'user', images: [IMAGE] });
+    });
+
+    it('사진이 없거나 빈 배열이면 모델 정보를 묻지 않고 질문 메시지에 images도 없다', async () => {
+      const { service, calls, capabilityAsks } = setup({}, async () => answer('네'), undefined, { vision: false, reasoning: false });
+      await service.ask(user, { question: '예약이 뭐야?' });
+      await service.ask(user, { question: '예약이 뭐야?', images: [] });
+      expect(capabilityAsks).toHaveLength(0);
+      expect(calls).toHaveLength(2);
+      expect(calls.every((c) => !c.messages.some((m) => 'images' in m))).toBe(true);
+    });
+
+    it('도구를 부른 뒤 다시 보내는 호출에도 같은 질문 메시지(사진 포함)가 이어진다', async () => {
+      const { service, calls } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('네')));
+      await service.ask(user, { question: '이 사진 속 코일 재고는?', images: [IMAGE] });
+      expect(calls).toHaveLength(2);
+      expect(calls[1].messages.filter((m) => 'images' in m)).toHaveLength(1);
+    });
+  });
+
+  describe('모델이 할 수 있는 것 (capabilities)', () => {
+    it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
+      const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false });
+    });
+
+    it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
+      const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null });
+      expect(capabilityAsks).toHaveLength(0);
+    });
+  });
+
   it('추천 질문은 로그인 사원의 역할 기준', () => {
     const { service } = setup({}, async () => answer(''));
     const view = service.suggestedQuestions({ ...user, roleCode: ROLE.QUALITY });
@@ -520,5 +605,29 @@ describe('업무 매뉴얼 자료 (화면 절차)', () => {
     const parsed = parseAssistantAnswer('출고 확정 버튼을 눌러요 [MAN-SHP-01, MAN-XXX-99].', [], [], guides);
     expect(parsed.answer).toBe('출고 확정 버튼을 눌러요.');
     expect(parsed.sources).toEqual([{ kind: 'MANUAL', id: 'MAN-SHP-01', label: '출고 확정' }]);
+  });
+});
+
+describe('AskAiAssistantDto 사진 검증', () => {
+  const errorsOf = async (images: unknown) => validate(plainToInstance(AskAiAssistantDto, { question: '이 사진 뭐야?', images }));
+  const IMAGE = { mediaType: 'image/png', dataBase64: 'iVBORw0KGgo=' };
+
+  it('한 장 4장까지, 허용한 형식의 base64는 통과한다', async () => {
+    expect(await errorsOf([IMAGE])).toHaveLength(0);
+    expect(await errorsOf(Array.from({ length: 4 }, () => IMAGE))).toHaveLength(0);
+    expect(await errorsOf([{ mediaType: 'image/jpeg', dataBase64: 'AAAA' }, { mediaType: 'image/webp', dataBase64: 'UklGRg==' }])).toHaveLength(0);
+  });
+
+  it('5장, 허용하지 않는 형식, base64가 아닌 데이터는 막는다', async () => {
+    expect(await errorsOf(Array.from({ length: 5 }, () => IMAGE))).not.toHaveLength(0);
+    expect(await errorsOf([{ mediaType: 'image/gif', dataBase64: 'R0lGODlh' }])).not.toHaveLength(0);
+    expect(await errorsOf([{ mediaType: 'image/png', dataBase64: 'data:image/png;base64,iVBORw0KGgo=' }])).not.toHaveLength(0);
+  });
+
+  it('한 장이 2MB를 넘는 길이(base64)면 막고, 상한 길이까지는 통과한다', async () => {
+    // base64는 3바이트를 4글자에 담는다: 2_000_000바이트 → ceil(2_000_000/3)*4글자
+    const limit = Math.ceil(2_000_000 / 3) * 4;
+    expect(await errorsOf([{ mediaType: 'image/png', dataBase64: 'A'.repeat(limit) }])).toHaveLength(0);
+    expect(await errorsOf([{ mediaType: 'image/png', dataBase64: 'A'.repeat(limit + 4) }])).not.toHaveLength(0);
   });
 });

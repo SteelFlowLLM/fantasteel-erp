@@ -13,6 +13,7 @@
     "@fantasteel/shared": "*",
     "@tailwindcss/postcss": "^4.3.3",
     "@tanstack/react-query": "^5.104.0",
+    "html-to-image": "1.11.13",
     "next": "^16.3.8",
     "pdfkit": "^0.20.2",
     "postcss": "^8.5.28",

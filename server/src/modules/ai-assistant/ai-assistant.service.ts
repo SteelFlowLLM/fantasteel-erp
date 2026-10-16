@@ -4,6 +4,7 @@ import {
   type AiActionCard,
   type AiActionCardExecuteResult,
   type AiAssistantMessageInput,
+  type AiAssistantCapabilitiesView,
   type AiAssistantReplyView,
   type AiAssistantStreamEvent,
   type AiAssistantSource,
@@ -37,6 +38,8 @@ export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'don
 export interface PreparedAsk {
   run(emit?: AssistantEmit, signal?: AbortSignal): Promise<AiAssistantReplyView>;
 }
+
+const NO_VISION = '지금 모델은 사진을 볼 수 없어요. 사진을 빼고 물어보거나, 관리자에게 사진을 보는 모델을 요청해 주세요';
 
 const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자에게 LLM 연결 설정을 요청해 주세요';
 
@@ -82,6 +85,14 @@ export class AiAssistantService {
       firstTimeQuestions: [...FIRST_TIME_QUESTIONS],
       actionCardExamples: actionCardExamplesFor(user),
     };
+  }
+
+  /** 지금 설정된 모델이 사진·생각 정도를 지원하는지 (화면이 버튼을 켜고 끈다) */
+  async capabilities(): Promise<AiAssistantCapabilitiesView> {
+    const settings = await this.settingsStore.read();
+    if (!settings.model) return { model: null, vision: null, reasoning: null };
+    const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
+    return { model: settings.model, ...caps };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
@@ -130,6 +141,12 @@ export class AiAssistantService {
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    if (input.images?.length) {
+      // 사진을 못 보는 모델은 사진을 무시하고 답을 지어내므로 보내기 전에 막는다. 모르면(외부 LLM) 보낸다
+      if ((await this.llm.modelCapabilities(endpoint, model)).vision === false) throw new AppException('COM-004', NO_VISION, HttpStatus.BAD_REQUEST);
+      const question = messages.length - 1;
+      messages[question] = { role: 'user', content: input.question, images: input.images };
+    }
 
     return {
       run: async (emit, signal) => {

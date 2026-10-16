@@ -20,7 +20,8 @@ export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-viewport w-viewport overflow-hidden bg-bg">
       <Rail />
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* 철강맨AI의 화면 캡처 영역 (lib/aiCapture.ts): 레일을 뺀 상단 바와 본문 */}
+      <div data-ai-capture="" className="flex min-w-0 flex-1 flex-col">
         <TopBar custom={custom} />
         <div className="relative flex min-h-0 flex-1">
           <ShellTitleContext.Provider value={setTitle}>

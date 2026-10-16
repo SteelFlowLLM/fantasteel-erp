@@ -53,6 +53,13 @@ describe('aiAssistantApi.askStream', () => {
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ question: '재고', reasoning: 'low' });
   });
 
+  it('사진은 본문에 그대로 담아 보낸다', async () => {
+    const calls = stubStream([new TextEncoder().encode('{"type":"done","reply":{"answer":"끝"}}\n')]);
+    login();
+    await aiAssistantApi.askStream({ question: '이 화면', images: [{ mediaType: 'image/jpeg', dataBase64: 'QUJD' }] }, () => undefined);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ question: '이 화면', images: [{ mediaType: 'image/jpeg', dataBase64: 'QUJD' }] });
+  });
+
   it('스트림 전에 실패하면 일반 API처럼 오류 응답을 화면 오류로 바꾼다', async () => {
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ success: false, error: { code: 'COM-999', message: '모델이 설정되지 않았어요' } }), { status: 503, headers: { 'content-type': 'application/json' } }));
     login();
@@ -81,5 +88,18 @@ describe('aiAssistantApi.askStream', () => {
       },
       (error: unknown) => expect(isAbortError(error)).toBe(true),
     );
+  });
+});
+
+describe('aiAssistantApi.getCapabilities', () => {
+  it('모델이 할 수 있는 것을 읽어 온다 (알 수 없는 항목은 null)', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ success: true, data: { model: 'qwen-vl', vision: true, reasoning: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    login();
+    await expect(aiAssistantApi.getCapabilities()).resolves.toEqual({ model: 'qwen-vl', vision: true, reasoning: null });
+    expect(calls[0]).toMatch(/\/ai-assistant\/capabilities$/);
   });
 });
