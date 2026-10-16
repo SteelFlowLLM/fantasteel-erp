@@ -5,6 +5,7 @@
 import type { ApiResponse, AuthUser } from '@fantasteel/shared';
 import { actingEmployeeNo } from '@/api/actor';
 import { ApiError, InputError } from '@/api/errors';
+import { createLineSplitter } from '@/api/lineSplitter';
 import { isErrorCode } from '@/codes';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8787/api/v1').replace(/\/$/, '');
@@ -74,15 +75,23 @@ function toClientError(error: ServerError): Error {
   return new Error(error.message);
 }
 
-async function send(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Response> {
+/** fetch를 AbortController로 멈췄을 때의 오류인지. 연결 실패와 달리 사용자가 멈춘 것이라 화면이 따로 다룬다 */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+async function send(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<Response> {
   try {
     return await fetch(`${API_BASE_URL}${path}`, {
       method,
       credentials: 'include',
       headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
-  } catch {
+  } catch (error) {
+    // 멈춘 것을 '서버에 연결할 수 없어요'로 바꾸면 호출한 쪽이 멈춤과 실패를 가리지 못한다
+    if (signal?.aborted || isAbortError(error)) throw error;
     throw new Error(`서버(${API_BASE_URL})에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요`);
   }
 }
@@ -123,38 +132,81 @@ export interface ServerRequestOptions {
   headers?: Record<string, string>;
 }
 
+/** 로그인한 사원이 이 탭의 사원과 같은지 확인한다 (서버 쿠키는 브라우저의 모든 탭이 같이 쓴다) */
+function requireLogin(): void {
+  const employeeNo = actingEmployeeNo();
+  if (!employeeNo) throw new ApiError('COM-002', '로그인해 주세요');
+  const loggedIn = readLoggedIn();
+  if (loggedIn !== employeeNo) throw sessionLost(otherLoginMessage(loggedIn));
+}
+
+/** 401이면 세션이 끊긴 것으로 본다 */
+function failIfSessionExpired(res: Response): void {
+  if (res.status !== 401) return;
+  writeLoggedIn(null);
+  throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
+}
+
 /** 서버 API 호출. 성공 응답의 data를 돌려주고, 실패는 화면 오류(ApiError·InputError)로 던진다 */
 export async function serverRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, options: ServerRequestOptions = {}): Promise<T> {
   const query = Object.entries(options.query ?? {}).filter((entry): entry is [string, string | number] => entry[1] !== undefined);
   const url = query.length ? `${path}?${new URLSearchParams(query.map(([k, v]) => [k, String(v)])).toString()}` : path;
-  const employeeNo = actingEmployeeNo();
-  if (!employeeNo) throw new ApiError('COM-002', '로그인해 주세요');
-  const loggedIn = readLoggedIn();
-  if (loggedIn !== employeeNo) throw sessionLost(otherLoginMessage(loggedIn));
+  requireLogin();
   const res = await send(method, url, options.body, options.headers);
-  if (res.status === 401) {
-    writeLoggedIn(null);
-    throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
-  }
+  failIfSessionExpired(res);
   return readBody<T>(res);
+}
+
+export interface ServerStreamOptions {
+  body?: unknown;
+  /** 멈추면 fetch가 끊겨 서버도 하던 일을 그만둔다 */
+  signal?: AbortSignal;
+  /** 줄 하나(빈 줄 제외)가 완성될 때마다 */
+  onLine: (line: string) => void;
+}
+
+/**
+ * 줄 단위(NDJSON) 스트림 응답을 읽는다. 스트림이 시작되기 전의 실패(입력 오류·모델 미설정·로그인 끊김)는
+ * 다른 API와 같은 오류 응답이라 serverRequest와 똑같이 화면 오류로 던진다.
+ * 멈추면 AbortError가 그대로 던져진다 (isAbortError).
+ */
+export async function serverStream(method: 'GET' | 'POST', path: string, options: ServerStreamOptions): Promise<void> {
+  requireLogin();
+  const res = await send(method, path, options.body, { accept: 'application/x-ndjson' }, options.signal);
+  failIfSessionExpired(res);
+  if (!res.ok) await readBody<never>(res);
+  if (!res.ok || !res.body) throw new Error(`서버 응답을 읽을 수 없어요 (HTTP ${res.status})`);
+
+  const reader = res.body.getReader();
+  const splitter = createLineSplitter(options.onLine);
+  try {
+    for (;;) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (options.signal?.aborted || isAbortError(error)) throw error;
+        throw new Error('서버와의 연결이 끊겼어요. 다시 시도해 주세요');
+      }
+      if (chunk.done) break;
+      splitter.push(chunk.value);
+    }
+    splitter.end();
+  } finally {
+    reader.cancel().catch(() => undefined);
+  }
 }
 
 /** 로그인 확인을 거쳐 fetch한다. 401이면 세션이 끊긴 것으로 본다 (serverRequest와 같은 규칙, 본문은 그대로 넘긴다) */
 async function sendRaw(method: 'GET' | 'POST', path: string, body?: BodyInit): Promise<Response> {
-  const employeeNo = actingEmployeeNo();
-  if (!employeeNo) throw new ApiError('COM-002', '로그인해 주세요');
-  const loggedIn = readLoggedIn();
-  if (loggedIn !== employeeNo) throw sessionLost(otherLoginMessage(loggedIn));
+  requireLogin();
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, { method, credentials: 'include', body });
   } catch {
     throw new Error(`서버(${API_BASE_URL})에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요`);
   }
-  if (res.status === 401) {
-    writeLoggedIn(null);
-    throw sessionLost('로그인 시간이 지났어요. 다시 로그인해 주세요');
-  }
+  failIfSessionExpired(res);
   return res;
 }
 

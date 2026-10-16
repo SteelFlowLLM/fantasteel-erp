@@ -1,5 +1,5 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
-import { LlmClient, LlmJsonParseError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
+import { createThinkSplitter, LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
 const endpoint = { baseUrl: 'http://llm.test/v1/', apiKey: null };
@@ -155,4 +155,88 @@ describe('LlmClient 기능별 샘플링·생각 설정', () => {
     expect(reasoningEffortFor('medium', null)).toBeNull();
     expect(reasoningEffortFor(null, ['off', 'on'])).toBeNull();
   });
+});
+
+/** OpenAI 호환 스트리밍 응답: data: 줄을 여러 조각으로 나눠 보낸다 (조각 경계가 줄·글자 중간에 걸리게) */
+function streamResponse(deltas: Record<string, unknown>[], chunkSize = 7): Response {
+  const text = deltas.map((delta) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`).join('') + 'data: [DONE]\n\n';
+  const bytes = new TextEncoder().encode(text);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let at = 0; at < bytes.length; at += chunkSize) controller.enqueue(bytes.slice(at, at + chunkSize));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+describe('LlmClient.streamWithTools', () => {
+  const messages = [{ role: 'user' as const, content: 'x' }];
+  const collect = () => {
+    const seen = { thinking: '', answer: '' };
+    return { seen, handlers: { onThinking: (t: string) => (seen.thinking += t), onAnswer: (t: string) => (seen.answer += t) } };
+  };
+
+  it('stream: true로 부르고 생각 글·답 글을 오는 대로 넘긴다', async () => {
+    fetchMock.mockResolvedValueOnce(streamResponse([{ role: 'assistant' }, { reasoning_content: '재고를 ' }, { reasoning_content: '보자' }, { content: '가용 재고는 ' }, { content: '120톤이에요' }]));
+    const { seen, handlers } = collect();
+    const reply = await new LlmClient().streamWithTools(endpoint, 'm', messages, [], LLM_PROFILE.ASSISTANT, handlers);
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ stream: true, temperature: 1 });
+    expect(seen).toEqual({ thinking: '재고를 보자', answer: '가용 재고는 120톤이에요' });
+    expect(reply).toEqual({ content: '가용 재고는 120톤이에요', toolCalls: [], reasoning: '재고를 보자', reasoningApplied: false });
+  });
+
+  it('조각으로 나뉘어 온 도구 호출을 이어 붙인다', async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'get_inventory', arguments: '' } }] },
+        { tool_calls: [{ index: 0, function: { arguments: '{"item' } }] },
+        { tool_calls: [{ index: 0, function: { arguments: 'Code":"SS275"}' } }] },
+        { tool_calls: [{ index: 1, id: 'c2', function: { name: 'get_sales_orders', arguments: '{}' } }] },
+      ]),
+    );
+    const reply = await new LlmClient().streamWithTools(endpoint, 'm', messages, [{ name: 'get_inventory', description: 'd', parameters: {} }], LLM_PROFILE.ASSISTANT, collect().handlers);
+    expect(reply.toolCalls).toEqual([
+      { id: 'c1', name: 'get_inventory', arguments: '{"itemCode":"SS275"}' },
+      { id: 'c2', name: 'get_sales_orders', arguments: '{}' },
+    ]);
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ tool_choice: 'auto' });
+  });
+
+  it('답 글 안의 <think> 블록은 조각이 태그를 잘라도 생각 글로 넘긴다', async () => {
+    fetchMock.mockResolvedValueOnce(streamResponse([{ content: '<thi' }, { content: 'nk>음… 생각</th' }, { content: 'ink>답' }, { content: '이에요' }], 3));
+    const { seen, handlers } = collect();
+    await new LlmClient().streamWithTools(endpoint, 'm', messages, [], LLM_PROFILE.ASSISTANT, handlers);
+    expect(seen).toEqual({ thinking: '음… 생각', answer: '답이에요' });
+  });
+
+  it('부른 쪽이 끊으면 LlmAbortedError를 던진다', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      controller.abort();
+      throw init.signal?.reason ?? new Error('aborted');
+    });
+    await expect(new LlmClient().streamWithTools(endpoint, 'm', messages, [], LLM_PROFILE.ASSISTANT, collect().handlers, controller.signal)).rejects.toBeInstanceOf(LlmAbortedError);
+  });
+
+  it('스트림 안의 오류 조각은 LlmRequestError로 던진다', async () => {
+    const body = new TextEncoder().encode('data: {"error":{"message":"model crashed"}}\n\n');
+    fetchMock.mockResolvedValueOnce(new Response(body, { status: 200 }));
+    await expect(new LlmClient().streamWithTools(endpoint, 'm', messages, [], LLM_PROFILE.ASSISTANT, collect().handlers)).rejects.toThrow('model crashed');
+  });
+});
+
+describe('createThinkSplitter', () => {
+  const run = (pieces: string[]) => {
+    const seen = { thinking: '', answer: '' };
+    const splitter = createThinkSplitter({ onThinking: (t) => (seen.thinking += t), onAnswer: (t) => (seen.answer += t) });
+    pieces.forEach((piece) => splitter.push(piece));
+    splitter.flush();
+    return seen;
+  };
+
+  it('태그가 없으면 모두 답이다', () => expect(run(['a<b', 'c>d'])).toEqual({ thinking: '', answer: 'a<bc>d' }));
+  it('글자 하나씩 와도 나눈다', () => expect(run([...'<think>x</think>y'])).toEqual({ thinking: 'x', answer: 'y' }));
+  it('닫히지 않은 생각은 끝까지 생각 글이다', () => expect(run(['<think>길게', ' 생각 중'])).toEqual({ thinking: '길게 생각 중', answer: '' }));
+  it('여는 태그 없는 닫는 태그는 지운다', () => expect(run(['생각</thi', 'nk>답'])).toEqual({ thinking: '', answer: '생각답' }));
 });

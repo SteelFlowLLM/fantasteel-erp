@@ -44,3 +44,12 @@ export const LLM_PROFILE = {
   /** 과거 사례 초안 (JSON) */
   PAST_CASE_DRAFT: { sampling: EXTRACTION, reasoning: 'low' },
 } as const satisfies Record<string, LlmProfile>;
+
+/**
+ * AI 어시스턴트에서 사용자가 고른 생각 정도. 고르지 않으면 기능 기본값.
+ * 생각을 끄면 비생각 샘플링 값을 쓴다 (Qwen 권장: 모드마다 값이 다르다).
+ */
+export function assistantProfile(reasoning: LlmReasoning | undefined): LlmProfile {
+  if (reasoning === undefined) return LLM_PROFILE.ASSISTANT;
+  return { sampling: reasoning === 'off' ? NON_THINKING : THINKING, reasoning };
+}
