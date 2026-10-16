@@ -21,6 +21,7 @@ import { MessengerModule } from './modules/messenger/messenger.module';
 import { MrpModule } from './modules/mrp/mrp.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { OrganizationModule } from './modules/organization/organization.module';
+import { PastCaseModule } from './modules/past-case/past-case.module';
 import { ProductionModule } from './modules/production/production.module';
 import { PurchasingModule } from './modules/purchasing/purchasing.module';
 import { QualityModule } from './modules/quality/quality.module';
@@ -28,7 +29,8 @@ import { SalesOrderModule } from './modules/sales-order/sales-order.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { PrismaModule } from './prisma/prisma.module';
 
-// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(voice-erp, past-case)은 그 단계에서 추가한다.
+// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(voice-erp)은 그 단계에서 추가한다.
+// past-case(EX)는 사례 DB 없이 예시 사례 + 저장소 파일로 먼저 넣었다 (2026-10-16).
 @Module({
   imports: [
     PrismaModule,
@@ -54,6 +56,7 @@ import { PrismaModule } from './prisma/prisma.module';
     DashboardModule,
     LlmModule,
     SttModule,
+    PastCaseModule,
     AiAssistantModule,
     FactoryAgentModule,
   ],
