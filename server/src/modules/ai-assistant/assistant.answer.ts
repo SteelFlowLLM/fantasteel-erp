@@ -53,7 +53,9 @@ export function parseAssistantAnswer(raw: string, references: readonly GlossaryT
 
 /** 추론 모델(LM Studio의 qwen·deepseek 등)이 답 앞에 붙이는 <think> 부분은 보이지 않는다 */
 function withoutThinking(raw: string): string {
-  const closed = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Gemma 4 계열의 <|channel>thought … <channel|> 생각 표시도 <think>와 같이 다룬다
+  const normalized = raw.split('<channel|>').join('</think>').split('<|channel>thought').join('').split('<|channel>').join('');
+  const closed = normalized.replace(/<think>[\s\S]*?<\/think>/gi, '');
   const danglingEnd = closed.lastIndexOf('</think>');
   const text = (danglingEnd >= 0 ? closed.slice(danglingEnd + '</think>'.length) : closed).trim();
   // 생각하다 길이 제한에 걸려 끝나지 않은 답
