@@ -1,8 +1,8 @@
 'use client';
 
-// 외부 연결 /admin/integrations (문서에 없는 기능, 이슈 #358): 회사 Notion 계정 연결과 회의록을 둘 상위 페이지.
+// 외부 연결 /admin/integrations (문서에 없는 기능, 이슈 #358·#361): 회사 Notion 계정 연결과 회의록을 둘 상위 페이지, 회사 Google Drive 연결과 녹음 폴더.
 // 회사 계정 하나를 모든 사원이 함께 쓴다. 설정 전용 권한 코드가 없어 AI 연결 화면처럼 ORG_MANAGE로 연다(가정). 사용 권한이 없으면 조회만 한다.
-// OAuth 허용이 끝나면 서버가 브라우저를 ?integration=notion&result=connected|error&message=… 로 돌려보낸다.
+// OAuth 허용이 끝나면 서버가 브라우저를 ?integration=notion|google-drive&result=connected|error&message=… 로 돌려보낸다.
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PERMISSION } from '@/codes';
@@ -12,6 +12,7 @@ import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { GoogleDriveCard } from '@/features/admin/components/GoogleDriveCard';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { KvList } from '@/components/KvList';
@@ -21,7 +22,7 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { useAction } from '@/hooks/useAction';
 import { useIntegrationTest, useIntegrations } from '@/hooks/useIntegrations';
 import { useCanUse } from '@/hooks/usePermission';
-import { INTEGRATION_STATUS_LABEL, INTEGRATION_STATUS_TONE, notionPageLink, parseIntegrationCallback, withoutCallbackParams } from '@/lib/integrations';
+import { INTEGRATION_STATUS_LABEL, INTEGRATION_STATUS_TONE, integrationCallbackToast, integrationCardKind, notionPageLink, parseIntegrationCallback, withoutCallbackParams } from '@/lib/integrations';
 import { fmtDateTime } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
@@ -42,9 +43,16 @@ export function IntegrationsScreen() {
       <QueryBoundary query={integrations} loadingLabel="외부 연결을 불러오는 중">
         {(items) => (
           <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-2">
-            {items.map((item) => (
-              <IntegrationCard key={`${item.providerKey}|${item.settings.parentPageId ?? ''}`} connection={item} canEdit={canEdit} />
-            ))}
+            {items.map((item) => {
+              const kind = integrationCardKind(item);
+              if (kind === 'google-drive') {
+                // 저장한 값이 바뀌면 카드를 새로 그려 입력칸을 저장된 값으로 맞춘다
+                const draftKey = `${item.settings.folderId ?? ''}|${item.oauthClient?.clientId ?? ''}|${item.oauthClient?.clientSecretSet ? 1 : 0}`;
+                return <GoogleDriveCard key={`${item.providerKey}|${draftKey}`} connection={item} canEdit={canEdit} />;
+              }
+              if (kind === 'notion') return <NotionCard key={`${item.providerKey}|${item.settings.parentPageId ?? ''}`} connection={item} canEdit={canEdit} />;
+              return null;
+            })}
           </div>
         )}
       </QueryBoundary>
@@ -64,14 +72,15 @@ function useCallbackNotice() {
     const notice = parseIntegrationCallback(params);
     if (!notice) return;
     handled.current = true;
-    if (notice.result === 'connected') toast.ok('Notion을 연결했어요');
-    else toast.error(notice.message ?? '연결하지 못했어요. 처음부터 다시 시도해 주세요');
+    const { tone, text } = integrationCallbackToast(notice);
+    if (tone === 'ok') toast.ok(text);
+    else toast.error(text);
     const rest = withoutCallbackParams(params.toString());
     router.replace(rest ? `${pathname}?${rest}` : pathname, { scroll: false });
   }, [params, pathname, router]);
 }
 
-function IntegrationCard({ connection, canEdit }: { connection: IntegrationConnectionView; canEdit: boolean }) {
+function NotionCard({ connection, canEdit }: { connection: IntegrationConnectionView; canEdit: boolean }) {
   const savedPageId = connection.settings.parentPageId ?? null;
   const savedLink = savedPageId ? notionPageLink(savedPageId) : '';
   const [parentPage, setParentPage] = useState(savedLink);

@@ -1,6 +1,6 @@
 // 회의록 화면 ↔ 서버 API (server/src/modules/meeting-minutes, API-258·259, docs/backend/meeting-minutes.md).
 // 서버가 막는 입력(빈 제목·기록, 참석자 없음, 길이)은 미리 입력칸 오류로 보인다. 없는 참석자·날짜 형식은 서버 문구를 그대로 보인다.
-import { MEETING_SUMMARY_MAX, type MeetingNotionExportResult, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
+import { MEETING_SUMMARY_MAX, type MeetingMinutesFromDriveInput, type MeetingNotionExportResult, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
 import { FieldErrors } from '@/api/errors';
 import { serverRequest, serverUpload } from '@/api/http';
 import { MEETING_AUDIO_MAX_BYTES, MEETING_LIST_PAGE_SIZE, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, type MeetingMinutesAudioInput, type MeetingMinutesListQuery } from '@/api/meetingMinutes';
@@ -74,6 +74,15 @@ export const serverMeetingMinutesApi = {
 
   // async: 입력 오류도 다른 서버 오류처럼 거절된 약속으로 돌려준다
   create: async (input: MeetingMinutesCreateInput): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('POST', '/meeting-minutes', { body: bodyOf(input) }),
+
+  /** 이슈 #361. JSON이라 참석자는 숫자 배열 그대로 보낸다 (음성 올리기의 JSON 문자열과 다르다) */
+  createFromDrive: async (input: MeetingMinutesFromDriveInput): Promise<MeetingMinutesView> => {
+    const errors = new FieldErrors();
+    const common = commonFields(input, errors);
+    if (!input.driveFileId) errors.add('driveFileId', 'Drive에서 녹음을 골라 주세요');
+    errors.throwIfAny();
+    return serverRequest<MeetingMinutesView>('POST', '/meeting-minutes/audio/from-drive', { body: { ...common, driveFileId: input.driveFileId } });
+  },
 
   createFromAudio: async (input: MeetingMinutesAudioInput): Promise<MeetingMinutesView> => serverUpload<MeetingMinutesView>('/meeting-minutes/audio', audioFormOf(input)),
 };
