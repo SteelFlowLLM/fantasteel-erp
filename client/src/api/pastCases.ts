@@ -1,4 +1,4 @@
-// 과거 사례 (EX, API-267~270, docs/backend/past-case.md). 서버가 예시 사례와 등록 사례(저장소 파일)를 합쳐 준다.
+// 과거 사례 (EX, API-267~270, docs/backend/past-case.md). 서버가 예시 사례와 등록 사례(DB past_case)를 합쳐 준다.
 import type { CreatePastCaseInput, PastCaseDraftView, PastCaseSearchInput, PastCaseView } from '@fantasteel/shared';
 import { serverRequest } from '@/api/http';
 

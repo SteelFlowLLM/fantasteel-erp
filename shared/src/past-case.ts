@@ -1,6 +1,6 @@
 // 과거 사례 (EX, REQ-CASE-001~005, BP-CASE-01, API-267~270, 용어 사전 TRM-108).
-// 기준 ERD에 past_case 테이블이 없어(2026-10-16 결정) 서버는 예시 사례와 저장소 폴더 JSON 파일(등록 사례)을 합쳐 쓴다.
-// 항목 이름은 docs/rework/erd-final.txt의 past_case 열을 따른다. 검색 규칙은 서버(검색 API·AI 도구)와 화면이 함께 쓴다.
+// 서버는 예시 사례(아래 PAST_CASE_EXAMPLES)와 등록 사례(ERD past_case·past_case_lot)를 합쳐 쓴다.
+// 항목 이름은 ERD past_case 열을 따른다. 검색 규칙은 서버(검색 API·AI 도구)와 화면이 함께 쓴다.
 
 /** 🟡 공통 코드 정의서 3장 제안 코드 CASE_CATEGORY (EX). 팀 확정 전이라 codes/에 없다 */
 export const PAST_CASE_CATEGORY = { QUALITY: 'QUALITY', EQUIPMENT: 'EQUIPMENT' } as const;
@@ -78,7 +78,7 @@ export interface CreatePastCaseInput {
   lotIds: number[];
 }
 
-// ── 검색 (REQ-CASE-003: 핵심어를 뽑아 한국어 부분 일치로 찾는다. ngram 전문검색은 사례 DB가 생기면) ──
+// ── 검색 (REQ-CASE-003: 핵심어를 뽑아 한국어 부분 일치로 찾는다. ngram 전문검색 인덱스는 구현 시 정한다) ──
 
 /** 질문마다 붙는 말이라 검색어로 쓰면 모든 사례에 걸리거나 아무것에도 안 걸린다 */
 const STOP_WORDS = new Set(['과거', '사례', '비슷한', '찾아줘', '찾아', '알려줘', '요약해', '요약해줘', '관련', '원인', '조치', '현상']);

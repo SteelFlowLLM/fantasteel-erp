@@ -110,7 +110,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
 ## 6. P2·EX 처리 (준비 중)
 
 - P2(AI Factory Agent, Voice2ERP 회의록, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널과 사내 채팅 @AI, 과거 사례 검색이다.
-- **과거 사례**(`/past-cases`, `features/pastCases/`, `api/pastCases.ts`, 2026-10-16~, 서버 `docs/backend/past-case.md`): 기준 ERD에 `past_case` 테이블이 없어 서버가 예시 사례 5건(실제 사례 아님, `isExample`)과 등록 사례(저장소 JSON 파일)를 합쳐 준다.
+- **과거 사례**(`/past-cases`, `features/pastCases/`, `api/pastCases.ts`, 2026-10-16~, 서버 `docs/backend/past-case.md`): 서버가 예시 사례 5건(실제 사례 아님, `isExample`)과 등록 사례(DB `past_case`)를 합쳐 준다.
   - 검색(API-267): 검색어(0.3초 늦춰 보냄)·구분(품질·설비)·최근 90일. 규칙은 shared `caseKeywords`·`searchPastCases`(서버와 같음). 예시 사례에는 `예시` 배지.
   - 검색 결과 요약: 결과 사례의 원인·조치를 바로 보이고, **AI로 요약**을 누르면 철강맨AI(API-262)가 `search_past_cases` 도구로 요약한다. 수십 초 걸리고 실패하면 이유만 보인다.
   - 사례로 등록(API-269·270): 불합격 관리 더보기(`quality/components/PastCaseMenu.tsx`) → `PastCaseRegisterModal`. 창을 열면 AI 초안을 받고(최대 1분), AI가 실패하면 서버가 검사 결과 초안과 이유를 준다. 품질 담당이 고쳐 저장하면 과거 사례 화면에서 그 사례(`?q=CASE-NNNN`)를 연다. 불합격 처리 상태 지정(DISPOSITION_SET) 사용 권한이 없으면 메뉴가 막힌다.

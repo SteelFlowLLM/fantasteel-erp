@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
 const INSPECTION_SELECT = {
@@ -24,9 +25,43 @@ const LOT_SELECT = {
   qualityInspection: { select: INSPECTION_SELECT },
 } as const;
 
-/** 과거 사례 초안·등록에 쓰는 LOT 조회 (조회만) */
+const CASE_SELECT = {
+  id: true,
+  caseNo: true,
+  caseCategory: true,
+  title: true,
+  phenomenon: true,
+  cause: true,
+  actionTaken: true,
+  equipmentText: true,
+  occurredDate: true,
+  createdAt: true,
+  createdEmployee: { select: { employeeName: true } },
+  pastCaseLots: { orderBy: { id: 'asc' }, select: { lot: { select: { id: true, lotNo: true } } } },
+} as const;
+
+export type PastCaseRow = Prisma.PastCaseGetPayload<{ select: typeof CASE_SELECT }>;
+
+/** 등록 사례(past_case·past_case_lot)와 초안·등록에 쓰는 LOT 조회 */
 @Injectable()
 export class PastCaseRepository {
+  /** 등록 사례 전부 (예시 사례는 shared PAST_CASE_EXAMPLES) */
+  findCases(tx: Tx): Promise<PastCaseRow[]> {
+    return tx.pastCase.findMany({ select: CASE_SELECT, orderBy: { id: 'asc' } });
+  }
+
+  findCase(tx: Tx, id: number): Promise<PastCaseRow | null> {
+    return tx.pastCase.findUnique({ where: { id }, select: CASE_SELECT });
+  }
+
+  createCase(tx: Tx, data: Omit<Prisma.PastCaseUncheckedCreateInput, 'pastCaseLots'>, lotIds: readonly number[]) {
+    return tx.pastCase.create({ data: { ...data, pastCaseLots: { create: lotIds.map((lotId) => ({ lotId })) } }, select: { id: true } });
+  }
+
+  updateCaseNo(tx: Tx, id: number, caseNo: string) {
+    return tx.pastCase.update({ where: { id }, data: { caseNo }, select: { id: true } });
+  }
+
   findLot(tx: Tx, lotId: number) {
     return tx.lot.findUnique({ where: { id: lotId }, select: LOT_SELECT });
   }
