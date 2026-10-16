@@ -14,8 +14,7 @@ import { seoulDateOnly } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { SimulateResultsDto } from './dto/simulation.dto';
-import { roundTon } from './fifo.calculator';
-import { slabQtyFromHeat } from './heat-plan.calculator';
+import { hotMetalTonPerHeat, slabQtyFromHeat } from './heat-plan.calculator';
 import { HotRollingService } from './hot-rolling.service';
 import { ProductionResultRepository } from './production-result.repository';
 import { ProductionResultService, type SimulationMark, type WorkOutputs } from './production-result.service';
@@ -67,7 +66,7 @@ export class ProductionSimulationService {
         // 1. 할 일: 만든 히트 중 연주 전 히트를 먼저, 그다음 모자란 히트마다 (용선이 모자라면 제선) → 제강 → 연주
         const heats = await this.resultRepository.findHeatsOfPlan(tx, productionPlanId);
         const steps: PlannedStep[] = heats.filter((h) => h._count.lotRelationsAsParentLot === 0).map((h) => ({ processType: PROCESS_TYPE.CONTINUOUS_CASTING, heatLotId: h.id }));
-        const hotMetalPerHeat = roundTon(basis.heatCapacityTon.div(basis.steelmakingYieldRate));
+        const hotMetalPerHeat = hotMetalTonPerHeat(basis.heatCapacityTon, basis.steelmakingYieldRate);
         let hotMetal = (await this.resultRepository.findAvailableHotMetalLots(tx)).reduce((sum, l) => sum.add(l.remainingTon ?? '0'), new Prisma.Decimal(0));
         for (let n = heats.length; n < plan.heatCount; n++) {
           if (hotMetal.lt(hotMetalPerHeat)) {
@@ -78,8 +77,16 @@ export class ProductionSimulationService {
           steps.push({ processType: PROCESS_TYPE.STEELMAKING }, { processType: PROCESS_TYPE.CONTINUOUS_CASTING });
         }
         const rolls = basis.itemType === ITEM_TYPE.COIL && plan.salesOrderItemId !== null;
+        // 같은 고로·전로의 작업과 겹치지 않고 투입할 용선·히트·슬래브가 먼저 끝나 있도록, 마지막 관련 실적 뒤에 놓는다
         const todayStart = new Date(seoulDateOnly(now).getTime() - 9 * 3_600_000);
-        const slots = layoutSteps([...steps.map((s) => SIMULATION_HOURS[s.processType]), ...(rolls ? [SIMULATION_HOURS.HOT_ROLLING] : [])], now, todayStart);
+        const last = await this.resultRepository.findLastCompletedAt(tx, {
+          blastFurnaceCode: SIMULATION_BLAST_FURNACE,
+          converterCode: SIMULATION_CONVERTER,
+          productionPlanId,
+          rollingSlabItemId: rolls ? basis.slabItem.id : null,
+        });
+        const earliest = new Date(Math.max(todayStart.getTime(), last?.completedAt?.getTime() ?? 0));
+        const slots = layoutSteps([...steps.map((s) => SIMULATION_HOURS[s.processType]), ...(rolls ? [SIMULATION_HOURS.HOT_ROLLING] : [])], now, earliest);
 
         // 2. 실행
         const done: SimulationStep[] = [];

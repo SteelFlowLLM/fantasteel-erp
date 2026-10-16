@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ItemType, ProductionPlanStatus } from '@fantasteel/shared';
+import type { ItemType, ProcessType, ProductionPlanStatus } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { lockProductionPlan, lockSalesOrderItemForReproduction } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
@@ -105,6 +105,11 @@ export class ProductionRepository {
 
   findRoutings(tx: Tx, itemType: ItemType) {
     return tx.routing.findMany({ where: { itemType }, orderBy: { sequenceNo: 'asc' } });
+  }
+
+  /** 한 공정의 라우팅 (슬래브·코일 유형마다 한 행) */
+  findRoutingsOfProcess(tx: Tx, processType: ProcessType) {
+    return tx.routing.findMany({ where: { processType }, orderBy: { itemType: 'asc' } });
   }
 
   findProductionSetting(tx: Tx) {

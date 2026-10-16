@@ -32,7 +32,7 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import type { CompleteProductionResultDto, ListProductionResultsDto, RegisterProductionResultDto } from './dto/production-result.dto';
 import { consumptionTon, planFifoDeduction, roundTon, type FifoTake } from './fifo.calculator';
-import { slabQtyFromHeat } from './heat-plan.calculator';
+import { hotMetalTonPerHeat, slabQtyFromHeat } from './heat-plan.calculator';
 import { planProgressOf } from './production-plan.mapper';
 import { startedHeatLotIdOf, toResultView } from './production-result.mapper';
 import { ProductionResultRepository } from './production-result.repository';
@@ -151,7 +151,7 @@ export class ProductionResultService {
       castingYieldRate: basis.castingYieldRate.toFixed(4),
       steelmakingYieldRate: basis.steelmakingYieldRate.toFixed(4),
       heatCapacityTon: ton3(basis.heatCapacityTon),
-      hotMetalTonPerHeat: ton3(roundTon(basis.heatCapacityTon.div(basis.steelmakingYieldRate))),
+      hotMetalTonPerHeat: ton3(hotMetalTonPerHeat(basis.heatCapacityTon, basis.steelmakingYieldRate)),
       slabItemId: basis.slabItem.id,
       slabItemCode: basis.slabItem.itemCode,
       slabTheoreticalWeightTon: ton3(basis.slabItem.theoreticalWeightTon),
@@ -228,7 +228,7 @@ export class ProductionResultService {
     let heatLotId: number | null = null;
     if (processType === PROCESS_TYPE.CONTINUOUS_CASTING && ctx) {
       if (input.heatLotId === undefined) throw new AppException('COM-004', '연주할 히트를 골라 주세요');
-      heatLotId = (await this.loadCastableHeat(tx, ctx, input.heatLotId)).id;
+      heatLotId = (await this.loadCastableHeat(tx, ctx, input.heatLotId, input.startedAt)).id;
     }
 
     const result = await this.repository.createResult(tx, {
@@ -240,6 +240,7 @@ export class ProductionResultService {
       startedAt: input.startedAt,
       completedAt: null,
     });
+    await this.assertEquipmentFree(tx, result, null);
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.PRODUCTION_STARTED,
       actor,
@@ -268,6 +269,7 @@ export class ProductionResultService {
     if (result.completedAt !== null) throw new AppException('COM-001', '이미 완료한 작업 실적이에요');
     const processType = result.processType as ProcessType;
     if (input.completedAt < result.startedAt) throw new AppException('COM-004', '작업 완료 일시가 작업 시작 일시보다 빨라요');
+    await this.assertEquipmentFree(tx, result, input.completedAt);
 
     const startEvent = await this.repository.findResultEvents(tx, [resultId]);
     const planId = result.productionPlanId ?? this.planIdOfStart(startEvent);
@@ -277,7 +279,7 @@ export class ProductionResultService {
     let done: { inputLotIds: number[]; outputLotIds: number[]; after: Record<string, unknown> };
     switch (processType) {
       case PROCESS_TYPE.IRONMAKING:
-        done = await this.completeIronmaking(tx, resultId, result.blastFurnaceCode ?? '', window, input);
+        done = await this.completeIronmaking(tx, resultId, result.blastFurnaceCode ?? '', ctx, window, input);
         break;
       case PROCESS_TYPE.STEELMAKING:
         done = await this.completeSteelmaking(tx, resultId, result.converterCode ?? '', this.required(ctx), window, input);
@@ -319,9 +321,10 @@ export class ProductionResultService {
   // ── 공정별 완료 ──────────────────────────────────────
 
   /** 제선: 원료별 투입량 = 용선량 × 원단위(t/t)를 입고일 FIFO로 차감 → 용선 LOT, 원료→용선 기간 기반 관계 */
-  private async completeIronmaking(tx: Tx, resultId: number, blastFurnaceCode: string, window: { startedAt: Date; completedAt: Date }, input: WorkOutputs) {
+  private async completeIronmaking(tx: Tx, resultId: number, blastFurnaceCode: string, ctx: PlanContext | null, window: { startedAt: Date; completedAt: Date }, input: WorkOutputs) {
     if (!input.hotMetalTon || new Prisma.Decimal(input.hotMetalTon).lte(0)) throw new AppException('COM-004', '용선량(t)을 0보다 크게 입력해 주세요');
     const hotMetalTon = roundTon(new Prisma.Decimal(input.hotMetalTon));
+    await this.assertWithinHeat(tx, '용선량', hotMetalTon, ctx?.basis ?? null);
     const consumptions = (await this.repository.findConsumptions(tx, null)).filter((c) => c.steelGradeId === null && c.rawMaterialItem.rawMaterialType !== RAW_MATERIAL_TYPE.FERROALLOY);
     if (consumptions.length === 0) throw new AppException('MST-001', '제선 원료 원단위가 없어요');
     const needs = consumptions.map((c) => ({ item: c.rawMaterialItem, ton: consumptionTon(hotMetalTon, c.consumptionRate, false) }));
@@ -350,15 +353,17 @@ export class ProductionResultService {
     if (heats.length >= ctx.plan.heatCount) throw new AppException('COM-001', `편성한 히트 ${ctx.plan.heatCount}개를 모두 만들었어요`);
     if (ctx.basis.steelGradeId === null) throw new AppException('MST-001', '계획 규격의 강종이 없어요');
     const inputHotMetalTon = roundTon(new Prisma.Decimal(input.inputHotMetalTon));
+    await this.assertWithinHeat(tx, '투입 용선량', inputHotMetalTon, ctx.basis);
     const heatTon = roundTon(inputHotMetalTon.mul(ctx.basis.steelmakingYieldRate));
 
     const ferroalloys = (await this.repository.findConsumptions(tx, ctx.basis.steelGradeId)).filter((c) => c.steelGradeId === ctx.basis.steelGradeId);
     if (ferroalloys.length === 0) throw new AppException('MST-001', '이 강종의 합금철 원단위가 없어요');
 
     // 용선과 합금철을 모두 확인한 뒤 모자라면 한꺼번에 알린다
-    const hotMetalLots = await this.repository.lockHotMetalLots(tx, window.completedAt);
+    // 작업 시작 전에 제선을 마친 용선만 투입한다
+    const hotMetalLots = await this.repository.lockHotMetalLots(tx, window.startedAt);
     const hotMetalPlan = planFifoDeduction(hotMetalLots.map((l) => ({ id: l.id, lotNo: l.lot_no, remainingTon: l.remaining_ton ?? '0' })), inputHotMetalTon);
-    const shortages = hotMetalPlan.shortageTon.gt(0) ? [`용선 ${ton3(hotMetalPlan.shortageTon)}t`] : [];
+    const shortages = hotMetalPlan.shortageTon.gt(0) ? [`용선 ${ton3(hotMetalPlan.shortageTon)}t(작업 시작 전에 만든 용선 기준)`] : [];
     const ferroNeeds = ferroalloys.map((c) => ({ item: c.rawMaterialItem, ton: consumptionTon(heatTon, c.consumptionRate, true) }));
     const ferroTakes = await this.deductRawMaterials(tx, ferroNeeds, window.completedAt, shortages);
     await this.applyTakes(tx, hotMetalPlan.takes);
@@ -388,7 +393,7 @@ export class ProductionResultService {
   private async completeCasting(tx: Tx, resultId: number, ctx: PlanContext, window: { startedAt: Date; completedAt: Date }, input: WorkOutputs) {
     if (input.heatLotId === undefined) throw new AppException('COM-004', '연주할 히트를 골라 주세요');
     if (input.slabQty === undefined) throw new AppException('COM-004', '슬래브 생산 매수를 입력해 주세요');
-    const heat = await this.loadCastableHeat(tx, ctx, input.heatLotId);
+    const heat = await this.loadCastableHeat(tx, ctx, input.heatLotId, window.startedAt);
     const maxQty = slabQtyFromHeat(heat.initialTon ?? '0', ctx.basis.castingYieldRate, ctx.basis.slabItem.theoreticalWeightTon);
     if (input.slabQty > maxQty) throw new AppException('COM-004', `히트 ${heat.lotNo}에서 나올 수 있는 슬래브는 최대 ${maxQty}매예요`);
 
@@ -439,6 +444,8 @@ export class ProductionResultService {
     }
     if (chosen.length === 0) throw new AppException('COM-004', '열연할 확정 배정이 없어요. 열연 투입에서 슬래브를 먼저 배정해 주세요');
     chosen.sort((a, b) => a.lotId - b.lotId);
+    const notYetCast = await this.repository.findLotsMadeAfter(tx, chosen.map((a) => a.lotId), window.startedAt);
+    if (notYetCast.length > 0) throw new AppException('COM-004', `열연 시작 일시가 슬래브의 연주 완료보다 빨라요: ${notYetCast.map((l) => l.lotNo).join(', ')}`);
 
     const coilItem = await tx.item.findUniqueOrThrow({ where: { id: ctx.plan.itemId }, select: { defaultYardId: true } });
     const producedDate = seoulDateOnly(window.completedAt);
@@ -509,13 +516,34 @@ export class ProductionResultService {
     return { plan, basis, salesOrderId: plan.salesOrderItem?.salesOrder.id ?? null };
   }
 
-  /** 이 계획의 제강 실적으로 만든, 아직 연주하지 않은 히트 */
-  private async loadCastableHeat(tx: Tx, ctx: PlanContext, heatLotId: number) {
+  /** 이 계획의 제강 실적으로 만든, 아직 연주하지 않은 히트. 연주는 그 제강을 마친 뒤에 시작한다 */
+  private async loadCastableHeat(tx: Tx, ctx: PlanContext, heatLotId: number, startedAt: Date) {
     const heat = await this.repository.findHeat(tx, heatLotId);
     if (!heat || heat.lotType !== LOT_TYPE.HEAT) throw new AppException('COM-003', '히트를 찾을 수 없어요');
     if (heat.productionResult?.productionPlanId !== ctx.plan.id) throw new AppException('COM-004', `${heat.lotNo}은 이 계획의 히트가 아니에요`);
     if (heat._count.lotRelationsAsParentLot > 0 || heat.lotStatus !== LOT_STATUS.AVAILABLE) throw new AppException('COM-001', `${heat.lotNo}은 이미 연주한 히트예요`);
+    const heatDoneAt = heat.productionResult.completedAt;
+    if (heatDoneAt && heatDoneAt > startedAt) throw new AppException('COM-004', `연주 시작 일시가 ${heat.lotNo}의 제강 완료보다 빨라요`);
     return heat;
+  }
+
+  /** 제선 1건·제강 투입 용선은 히트 1개 몫까지 (히트 용량 ÷ 제강 수율). 계획 없는 제선은 몫이 가장 큰 유형 기준 */
+  private async assertWithinHeat(tx: Tx, name: string, ton: Prisma.Decimal, basis: Pick<HeatPlanBasis, 'heatCapacityTon' | 'steelmakingYieldRate'> | null) {
+    const b = basis ?? (await this.production.loosestHotMetalBasis(tx));
+    const limit = hotMetalTonPerHeat(b.heatCapacityTon, b.steelmakingYieldRate);
+    if (ton.gt(limit)) {
+      throw new AppException('COM-004', `${name}은 히트 1개 몫 ${ton3(limit)}t(히트 용량 ${ton3(b.heatCapacityTon)}t ÷ 제강 수율 ${b.steelmakingYieldRate.toString()})까지 넣을 수 있어요`);
+    }
+  }
+
+  /** 같은 고로·전로에서 작업 시간이 겹치면 COM-001 (BP-PRD-02 동일 실적 중복). 완료 전에는 시작 시각만 본다 */
+  private async assertEquipmentFree(tx: Tx, result: { id: number; blastFurnaceCode: string | null; converterCode: string | null; startedAt: Date }, completedAt: Date | null) {
+    const equipment = result.blastFurnaceCode ? { blastFurnaceCode: result.blastFurnaceCode } : result.converterCode ? { converterCode: result.converterCode } : null;
+    if (!equipment) return;
+    const until = new Date(Math.max((completedAt ?? result.startedAt).getTime(), result.startedAt.getTime() + 1));
+    if (await this.repository.findOverlappingResult(tx, { equipment, from: result.startedAt, until, excludeId: result.id })) {
+      throw new AppException('COM-001', `${result.blastFurnaceCode ?? result.converterCode}에 작업 시간이 겹치는 실적이 있어요`);
+    }
   }
 
   /** 제선 실적은 계획에 묶이지 않아 작업 시작 로그의 계획을 쓴다 */

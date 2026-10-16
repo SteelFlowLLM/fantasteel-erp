@@ -100,6 +100,40 @@ export class ProductionResultRepository {
     });
   }
 
+  /** 같은 고로·전로에서 [from, until)과 겹치는 다른 실적. 작업 중 실적은 아직 끝나지 않은 것으로 본다 */
+  findOverlappingResult(tx: Tx, where: { equipment: { blastFurnaceCode: string } | { converterCode: string }; from: Date; until: Date; excludeId?: number }) {
+    return tx.productionResult.findFirst({
+      where: {
+        ...where.equipment,
+        id: where.excludeId === undefined ? undefined : { not: where.excludeId },
+        startedAt: { lt: where.until },
+        OR: [{ completedAt: null }, { completedAt: { gt: where.from } }],
+      },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * 실적 시뮬레이션이 이 시각 뒤에 놓여야 하는 마지막 완료 시각: 쓰는 고로·전로, 이 계획, 남은 용선을 만든 실적,
+   * 열연하면 그 슬래브 규격의 재고 슬래브를 만든 실적 (다른 계획의 여재도 열연 추천에 들어온다)
+   */
+  findLastCompletedAt(tx: Tx, where: { blastFurnaceCode: string; converterCode: string; productionPlanId: number; rollingSlabItemId: number | null }) {
+    return tx.productionResult.findFirst({
+      where: {
+        completedAt: { not: null },
+        OR: [
+          { blastFurnaceCode: where.blastFurnaceCode },
+          { converterCode: where.converterCode },
+          { productionPlanId: where.productionPlanId },
+          { lots: { some: { lotType: LOT_TYPE.HOT_METAL, lotStatus: LOT_STATUS.AVAILABLE, remainingTon: { gt: 0 } } } },
+          ...(where.rollingSlabItemId === null ? [] : [{ lots: { some: { lotType: LOT_TYPE.SLAB, lotStatus: LOT_STATUS.AVAILABLE, itemId: where.rollingSlabItemId } } }]),
+        ],
+      },
+      select: { completedAt: true },
+      orderBy: { completedAt: 'desc' },
+    });
+  }
+
   findResults(tx: Tx, filter: ResultListFilter, page?: { skip: number; take: number }) {
     return tx.productionResult.findMany({
       where: { productionPlanId: filter.productionPlanId, processType: filter.processType },
@@ -182,11 +216,16 @@ export class ProductionResultRepository {
         lotStatus: true,
         initialTon: true,
         steelGradeId: true,
-        productionResult: { select: { productionPlanId: true, processType: true } },
+        productionResult: { select: { productionPlanId: true, processType: true, completedAt: true } },
         qualityInspection: { select: { inspectionResult: true } },
         _count: { select: { lotRelationsAsParentLot: true } },
       },
     });
+  }
+
+  /** 이 시각보다 늦게 완료한 실적이 만든 LOT (작업 시작 전에 없던 투입 LOT) */
+  findLotsMadeAfter(tx: Tx, lotIds: number[], at: Date) {
+    return tx.lot.findMany({ where: { id: { in: lotIds }, productionResult: { completedAt: { gt: at } } }, select: { lotNo: true }, orderBy: { id: 'asc' } });
   }
 
   /** 계획의 히트 (제강 실적으로 만든 것) */
