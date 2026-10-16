@@ -246,6 +246,8 @@ describe('작업 실적 입력 기준: 히트 1개 몫·투입 순서·설비 �
 
   it('같은 고로의 작업 시간이 겹치면 COM-001: 시작이 다른 작업 안이거나, 완료가 다음 작업에 걸칠 때', async () => {
     await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF4', startedAt: on('00:00'), completedAt: on('04:00'), hotMetalTon: '277.778' });
+    // 입력 창은 마지막 고로(BF4)가 끝난 뒤를 시작 기본값으로 쓴다
+    expect(await results.workContext(planId)).toMatchObject({ lastBlastFurnaceCode: 'BF4', earliestIronmakingStartedAt: on('04:00') });
     expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: on('02:00'), completedAt: on('05:00'), hotMetalTon: '1' }))).toBe('COM-001');
     expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: '2019-05-31T22:00:00.000Z', completedAt: on('01:00'), hotMetalTon: '1' }))).toBe('COM-001');
     expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF4' } })).toBe(1);
@@ -256,6 +258,7 @@ describe('작업 실적 입력 기준: 히트 1개 몫·투입 순서·설비 �
     expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('03:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' }))).toBe('INV-001');
     const steel = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('04:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' });
     const heatId = steel.outputs[0].lotId;
+    expect((await results.workContext(planId)).uncastHeats).toEqual([expect.objectContaining({ lotId: heatId, completedAt: on('05:00') })]);
     expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('04:30') }))).toBe('COM-004');
     const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('05:00'), completedAt: on('07:00'), slabQty: 10 });
     expect(cast.outputQty).toBe(10);

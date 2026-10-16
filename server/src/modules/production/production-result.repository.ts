@@ -183,6 +183,12 @@ export class ProductionResultRepository {
   }
 
   /** 마지막으로 쓴 고로·전로 코드 (입력 기본값) */
+  /** 이 고로·전로에서 마지막으로 끝난 시각 (다음 작업 시작 기본값) */
+  async findLastCompletedOn(tx: Tx, equipment: { blastFurnaceCode: string } | { converterCode: string }): Promise<Date | null> {
+    const last = await tx.productionResult.findFirst({ where: { ...equipment, completedAt: { not: null } }, orderBy: { completedAt: 'desc' }, select: { completedAt: true } });
+    return last?.completedAt ?? null;
+  }
+
   async findLastEquipmentCodes(tx: Tx) {
     const [bf, bof] = await Promise.all([
       tx.productionResult.findFirst({ where: { blastFurnaceCode: { not: null } }, orderBy: { id: 'desc' }, select: { blastFurnaceCode: true } }),
@@ -232,7 +238,14 @@ export class ProductionResultRepository {
   findHeatsOfPlan(tx: Tx, productionPlanId: number) {
     return tx.lot.findMany({
       where: { lotType: LOT_TYPE.HEAT, productionResult: { productionPlanId } },
-      select: { id: true, lotNo: true, initialTon: true, qualityInspection: { select: { inspectionResult: true } }, _count: { select: { lotRelationsAsParentLot: true } } },
+      select: {
+        id: true,
+        lotNo: true,
+        initialTon: true,
+        productionResult: { select: { completedAt: true } },
+        qualityInspection: { select: { inspectionResult: true } },
+        _count: { select: { lotRelationsAsParentLot: true } },
+      },
       orderBy: { id: 'asc' },
     });
   }

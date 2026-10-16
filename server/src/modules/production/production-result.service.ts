@@ -141,6 +141,22 @@ export class ProductionResultService {
     const open = [...ironOpen.filter((o) => this.planIdOfStart(ironEvents.filter((e) => e.targetId === o.id)) === productionPlanId), ...planOpen];
     const events = await this.repository.findResultEvents(tx, open.map((o) => o.id));
     const hotMetalAvailable = hotMetalLots.reduce((sum, l) => sum.add(l.remainingTon ?? '0'), new Prisma.Decimal(0));
+    const perHeat = hotMetalTonPerHeat(basis.heatCapacityTon, basis.steelmakingYieldRate);
+    const [ironmakingFree, steelmakingFree] = await Promise.all([
+      lastCodes.blastFurnaceCode ? this.repository.findLastCompletedOn(tx, { blastFurnaceCode: lastCodes.blastFurnaceCode }) : null,
+      lastCodes.converterCode ? this.repository.findLastCompletedOn(tx, { converterCode: lastCodes.converterCode }) : null,
+    ]);
+    // 생산 순으로 쌓아 히트 1개 몫이 되는 용선 LOT의 제선 완료 = 그 용선을 모두 쓸 수 있는 때
+    let piled = new Prisma.Decimal(0);
+    let hotMetalReady: Date | null = null;
+    for (const l of hotMetalLots) {
+      piled = piled.add(l.remainingTon ?? '0');
+      if (piled.gte(perHeat)) {
+        hotMetalReady = l.productionResult?.completedAt ?? null;
+        break;
+      }
+    }
+    const latest = (...dates: (Date | null)[]) => dates.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null)?.toISOString() ?? null;
     return {
       productionPlanId: plan.id,
       productionPlanNo: plan.productionPlanNo,
@@ -151,7 +167,7 @@ export class ProductionResultService {
       castingYieldRate: basis.castingYieldRate.toFixed(4),
       steelmakingYieldRate: basis.steelmakingYieldRate.toFixed(4),
       heatCapacityTon: ton3(basis.heatCapacityTon),
-      hotMetalTonPerHeat: ton3(hotMetalTonPerHeat(basis.heatCapacityTon, basis.steelmakingYieldRate)),
+      hotMetalTonPerHeat: ton3(perHeat),
       slabItemId: basis.slabItem.id,
       slabItemCode: basis.slabItem.itemCode,
       slabTheoreticalWeightTon: ton3(basis.slabItem.theoreticalWeightTon),
@@ -173,6 +189,7 @@ export class ProductionResultService {
           heatTon: ton3(h.initialTon ?? new Prisma.Decimal(0)),
           maxSlabQty: slabQtyFromHeat(h.initialTon ?? '0', basis.castingYieldRate, basis.slabItem.theoreticalWeightTon),
           inspectionResult: (h.qualityInspection?.inspectionResult ?? null) as InspectionResult | null,
+          completedAt: h.productionResult?.completedAt?.toISOString() ?? null,
         })),
       openWork: open.map(
         (o): OpenWork => ({
@@ -186,6 +203,8 @@ export class ProductionResultService {
       ),
       lastBlastFurnaceCode: lastCodes.blastFurnaceCode,
       lastConverterCode: lastCodes.converterCode,
+      earliestIronmakingStartedAt: latest(ironmakingFree),
+      earliestSteelmakingStartedAt: latest(steelmakingFree, hotMetalReady),
     };
   }
 
