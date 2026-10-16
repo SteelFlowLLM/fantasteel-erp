@@ -9,7 +9,6 @@ import { agentCandidateApi } from '@/api/agentCandidates';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
-import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
 import { Textarea } from '@/components/Input';
@@ -21,7 +20,6 @@ import { StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { AiCard, MasterItem } from '@/features/agent/components/SoonExampleParts';
 import {
-  AGENT_RULE_ROWS,
   CANDIDATE_RISKS,
   CONFIRM_PERMISSION,
   RISK_NAME,
@@ -62,8 +60,7 @@ function AgentBoard({ candidates }: { candidates: AgentCandidateView[] }) {
     <div className="flex min-h-0 min-w-0 flex-1 gap-4">
       <CandidateList candidates={candidates} visible={visible} risk={risk} onRisk={setRisk} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
-        {selected ? <CandidateDetail key={selected.id} candidate={selected} /> : <EmptyDetail hasAny={candidates.length > 0} />}
-        <RuleCard />
+        {selected ? <CandidateDetail key={selected.id} candidate={selected} onSelect={setSelectedId} /> : <EmptyDetail hasAny={candidates.length > 0} />}
       </div>
     </div>
   );
@@ -141,7 +138,7 @@ function EmptyDetail({ hasAny }: { hasAny: boolean }) {
   );
 }
 
-function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
+function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateView; onSelect: (id: number) => void }) {
   const [explain, setExplain] = useState<AgentExplainView | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -150,7 +147,10 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
   const confirmable = isConfirmable(candidate);
   const explainAction = useAction(agentCandidateApi.explain, { onSuccess: setExplain });
   const confirmAction = useAction(agentCandidateApi.confirm, {
+    success: (result) => (result.executed ? executedMessageOf(result.draft) : '확정했지만 실행하지 못했어요'),
     onSuccess: (result) => {
+      // 확정하면 목록 순서가 바뀌므로, 방금 처리한 후보를 계속 보여 결과(만들어진 업무)를 확인할 수 있게 한다
+      onSelect(candidate.id);
       setFailure(result.executed ? null : `${result.errorMessage ?? '실행하지 못했어요'}${result.errorCode ? ` (${result.errorCode})` : ''}`);
     },
   });
@@ -173,7 +173,7 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
         }
       />
 
-      <AiCard title="상황 설명" meta="AI는 조회 근거로 설명만 해요 · 데이터 변경 없음" className="flex-none" petKey="card:agent.situation">
+      <AiCard title="상황 설명" className="flex-none" petKey="card:agent.situation">
         <p className="text-base leading-normal">{explain?.explanation ?? candidate.summary}</p>
         <KvList columns={1} items={Object.entries(candidate.evidence).map(([key, value]) => ({ label: evidenceLabelOf(key), value: value ?? '-' }))} />
         <div className="flex items-center gap-2 border-t border-ai-line pt-3">
@@ -195,7 +195,7 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
         </Banner>
       ) : null}
 
-      <AiCard icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} meta="규칙으로 생성 · Action Draft" className="flex-none" petKey="card:agent.candidate">
+      <AiCard icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} className="flex-none" petKey="card:agent.candidate">
         <CandidateBody candidate={candidate} />
         <KvList
           items={[
@@ -225,13 +225,19 @@ function CandidateDetail({ candidate }: { candidate: AgentCandidateView }) {
             </>
           ) : null}
           <ResultLink candidate={candidate} />
-          <span className="ml-auto text-cap text-ink-3">AI는 데이터를 바꾸지 않아요 · 확정한 담당 부서원의 권한으로 실행돼요</span>
         </div>
       </AiCard>
 
-      {rejecting ? <RejectModal candidate={candidate} onClose={() => setRejecting(false)} /> : null}
+      {rejecting ? <RejectModal candidate={candidate} onSelect={onSelect} onClose={() => setRejecting(false)} /> : null}
     </>
   );
+}
+
+/** 확정한 뒤 안내 문구: 만들어진 업무 번호를 보인다 */
+function executedMessageOf(draft: AgentCandidateView): string {
+  if (draft.result?.kind === 'PURCHASE_REQUISITION') return `구매요청 ${draft.result.no}을 만들었어요. 부서장 승인을 기다려요`;
+  if (draft.result?.kind === 'PRODUCTION_PLAN') return `재생산 계획 ${draft.result.no}을 만들었어요`;
+  return '추천을 확인했어요. 재고·출하요청 화면에서 이어서 처리해 주세요';
 }
 
 function CandidateBody({ candidate }: { candidate: AgentCandidateView }) {
@@ -303,9 +309,15 @@ function ResultLink({ candidate }: { candidate: AgentCandidateView }) {
   return null;
 }
 
-function RejectModal({ candidate, onClose }: { candidate: AgentCandidateView; onClose: () => void }) {
+function RejectModal({ candidate, onSelect, onClose }: { candidate: AgentCandidateView; onSelect: (id: number) => void; onClose: () => void }) {
   const [reason, setReason] = useState('');
-  const reject = useAction(agentCandidateApi.reject, { success: '대응 후보를 반려했어요', onSuccess: onClose });
+  const reject = useAction(agentCandidateApi.reject, {
+    success: '대응 후보를 반려했어요',
+    onSuccess: () => {
+      onSelect(candidate.id);
+      onClose();
+    },
+  });
   const trimmed = reason.trim();
   return (
     <Modal
@@ -326,28 +338,5 @@ function RejectModal({ candidate, onClose }: { candidate: AgentCandidateView; on
         {reason.length}/{REASON_MAX}
       </span>
     </Modal>
-  );
-}
-
-function RuleCard() {
-  return (
-    <Card className="flex-none" petKey="card:agent.rules">
-      <CardHead title="감지 규칙" meta="규칙이 감지하고 대응 후보를 만들어요 · 납기 위험·불합격률 상승은 알림만 보내요" />
-      <CardBody>
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-          {AGENT_RULE_ROWS.map((rule) => (
-            <Fragment key={rule.risk}>
-              <dt className="text-ink-3">
-                {RISK_NAME[rule.risk]}
-                <span className="ml-1 text-2xs">({rule.trigger})</span>
-              </dt>
-              <dd className="m-0 text-ink-2">
-                {rule.condition} → <b className="font-semibold">{rule.response}</b>
-              </dd>
-            </Fragment>
-          ))}
-        </dl>
-      </CardBody>
-    </Card>
   );
 }

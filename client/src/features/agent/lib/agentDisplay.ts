@@ -15,15 +15,6 @@ export const RISK_NAME: Record<AgentRiskType, string> = {
 /** 후보(Action Draft)를 만드는 위험 유형. 납기 위험·불합격률 상승은 후보 없이 알림만 보낸다 */
 export const CANDIDATE_RISKS: readonly AgentRiskType[] = ['RAW_SHORTAGE', 'GOOD_QTY_SHORTAGE', 'AGED_SURPLUS'];
 
-/** 감지 규칙 (요구사항 REQ-AGT-001·004) */
-export const AGENT_RULE_ROWS: readonly { risk: AgentRiskType; trigger: string; condition: string; response: string }[] = [
-  { risk: 'RAW_SHORTAGE', trigger: '스케줄', condition: '생산계획 소요량 > 원료 잔량 + 입고예정', response: '구매요청 초안' },
-  { risk: 'GOOD_QTY_SHORTAGE', trigger: '이벤트(검사 등록)', condition: '합격 매수 < 수주 매수', response: '재생산 계획 초안' },
-  { risk: 'DUE_RISK', trigger: '스케줄', condition: '납기까지 기준일 이하 + 출하 매수 < 수주 매수', response: '수주 담당자 알림' },
-  { risk: 'AGED_SURPLUS', trigger: '스케줄', condition: '여재를 오래 보유하고 대기 수주가 있음', response: '대기 수주 배정 추천' },
-  { risk: 'QUALITY_RATE_RISE', trigger: '스케줄', condition: '강종별 불합격률이 기준 초과', response: '품질 부서 알림' },
-];
-
 /** 후보가 만드는 업무의 확정 권한 (요구사항 REQ-AGT-006). 서버가 다시 확인한다 */
 export const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
   [ACTION_TYPE.PURCHASE_REQUISITION_CREATE]: PERMISSION.PURCHASE_REQUISITION_CREATE,
