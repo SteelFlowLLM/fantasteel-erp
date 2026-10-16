@@ -5,5 +5,8 @@ import type { Prisma } from '../../generated/prisma/client';
 export function readSettings(value: Prisma.JsonValue): IntegrationSettings {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
-  return typeof record.parentPageId === 'string' ? { parentPageId: record.parentPageId } : {};
+  const settings: IntegrationSettings = {};
+  if (typeof record.parentPageId === 'string') settings.parentPageId = record.parentPageId;
+  if (typeof record.folderId === 'string') settings.folderId = record.folderId;
+  return settings;
 }

@@ -18,7 +18,7 @@ export interface IntegrationProviderPreset {
 /**
  * 연결할 수 있는 대상. 행은 처음 설정·연결할 때 만든다.
  * 주소는 부를 때마다 읽는다: 테스트가 가짜 MCP 서버 주소(NOTION_MCP_URL)로 바꿔 끼운다.
- * Google Drive는 MCP가 아니라 REST API + OAuth 2.0(protocol OAUTH2)으로 여기에 더한다.
+ * Google Drive는 MCP가 아니라 REST API v3 + OAuth 2.0(protocol OAUTH2)이다: 서버 주소는 google-drive/google-oauth.ts의 고정 주소.
  */
 export function providerPresets(): Record<IntegrationProviderKey, IntegrationProviderPreset> {
   return {
@@ -28,6 +28,13 @@ export function providerPresets(): Record<IntegrationProviderKey, IntegrationPro
       protocol: 'MCP',
       serverUrl: process.env.NOTION_MCP_URL || NOTION_MCP_DEFAULT_URL,
       requiredTools: [NOTION_CREATE_PAGES_TOOL],
+    },
+    [INTEGRATION_PROVIDER.GOOGLE_DRIVE]: {
+      key: INTEGRATION_PROVIDER.GOOGLE_DRIVE,
+      displayName: 'Google Drive',
+      protocol: 'OAUTH2',
+      serverUrl: null,
+      requiredTools: [],
     },
   };
 }
