@@ -3,7 +3,7 @@
 // 답을 만드는 과정(생각·조회·중간 글) 보기. 전역 AI 패널과 회의 질문 카드가 함께 쓴다.
 // - AiLiveView: 답을 기다리는 동안 보이는 진행 상황 (생각 시간이 흐르고, 조회 중 → 완료로 바뀌고, 답 글이 자란다)
 // - AiStepsDetails: 답이 끝난 뒤 답 아래에 접어 두는 '생각 과정'
-import { AI_ASSISTANT_TOOL_TITLE } from '@fantasteel/shared';
+import { AI_ASSISTANT_TOOL_TITLE, isAiAssistantWriteTool } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { AiApprovalCards } from '@/features/shell/AiApprovalCard';
@@ -26,10 +26,13 @@ const wholeSeconds = (ms: number): number => Math.floor(ms / 1000);
 /** 접힌 '생각 과정'의 한 줄 요약: "생각 과정 보기 · 생각 8초 · 조회 2번" */
 export function aiStepsSummary(steps: readonly AiTimelineStep[]): string {
   const thinking = steps.reduce((sum, step) => (step.kind === 'thinking' ? sum + thinkingMs(step, step.startedAt) : sum), 0);
-  const toolCount = steps.filter((step) => step.kind === 'tool').length;
+  const tools = steps.filter((step) => step.kind === 'tool');
+  const writeCount = tools.filter((step) => isAiAssistantWriteTool(step.name)).length;
+  const readCount = tools.length - writeCount;
   const parts = [
     ...(thinking > 0 ? [`생각 ${Math.max(1, Math.round(thinking / 1000))}초`] : []),
-    ...(toolCount > 0 ? [`조회 ${toolCount}번`] : []),
+    ...(readCount > 0 ? [`조회 ${readCount}번`] : []),
+    ...(writeCount > 0 ? [`실행 요청 ${writeCount}번`] : []),
   ];
   return ['생각 과정 보기', ...parts].join(' · ');
 }
@@ -77,7 +80,11 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
       <Icon name={result ? 'check-circle' : 'search'} size="sm" className="mt-0.5 flex-none text-ink-3" />
       <span className="min-w-0 break-words">
         <b className="font-semibold">{toolTitleOf(step.name)}</b>
-        {result ? ` · 완료 ${formatDuration(result.durationMs)}${result.label ? ` · ${result.label}` : ''}` : ' … 조회 중'}
+        {result
+          ? ` · 완료 ${formatDuration(result.durationMs)}${result.label ? ` · ${result.label}` : ''}`
+          : isAiAssistantWriteTool(step.name)
+            ? ' … 확인 중'
+            : ' … 조회 중'}
       </span>
     </p>
   );

@@ -14,6 +14,15 @@ describe('aiStepsSummary', () => {
     ).toBe('생각 과정 보기 · 생각 8초 · 조회 2번');
   });
 
+  it('쓰기 도구는 조회가 아니라 실행 요청으로 센다', () => {
+    expect(
+      aiStepsSummary([
+        { kind: 'tool', id: 'a', name: 'get_inventory', arguments: '{}', result: null },
+        { kind: 'tool', id: 'b', name: 'add_my_schedule_event', arguments: '{}', result: null },
+      ]),
+    ).toBe('생각 과정 보기 · 조회 1번 · 실행 요청 1번');
+  });
+
   it('생각 시간을 모르면 생략하고, 조회가 없으면 조회를 생략한다', () => {
     expect(aiStepsSummary([{ kind: 'thinking', text: '음', startedAt: 0, endedAt: 0 }])).toBe('생각 과정 보기');
     expect(aiStepsSummary([{ kind: 'thinking', text: '음', startedAt: 0, endedAt: 400 }])).toBe('생각 과정 보기 · 생각 1초');
