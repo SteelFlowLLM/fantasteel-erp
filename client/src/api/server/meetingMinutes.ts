@@ -1,6 +1,6 @@
 // 회의록 화면 ↔ 서버 API (server/src/modules/meeting-minutes, API-258·259, docs/backend/meeting-minutes.md).
 // 서버가 막는 입력(빈 제목·기록, 참석자 없음, 길이)은 미리 입력칸 오류로 보인다. 없는 참석자·날짜 형식은 서버 문구를 그대로 보인다.
-import { MEETING_SUMMARY_MAX, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
+import { MEETING_SUMMARY_MAX, type MeetingNotionExportResult, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
 import { FieldErrors } from '@/api/errors';
 import { serverRequest, serverUpload } from '@/api/http';
 import { MEETING_AUDIO_MAX_BYTES, MEETING_LIST_PAGE_SIZE, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, type MeetingMinutesAudioInput, type MeetingMinutesListQuery } from '@/api/meetingMinutes';
@@ -68,6 +68,9 @@ export const serverMeetingMinutesApi = {
 
   /** API-261. 허가한 후보를 한 번에 등록하고 회의록을 확정한다 */
   register: (id: number): Promise<MeetingRegisterResult> => serverRequest<MeetingRegisterResult>('POST', `/meeting-minutes/${id}/register`),
+
+  /** 이슈 #358. 확정된 회의록을 회사 Notion의 상위 페이지 아래에 새 페이지로 내보낸다 (한 번만) */
+  exportToNotion: (id: number): Promise<MeetingNotionExportResult> => serverRequest<MeetingNotionExportResult>('POST', `/meeting-minutes/${id}/notion-export`),
 
   // async: 입력 오류도 다른 서버 오류처럼 거절된 약속으로 돌려준다
   create: async (input: MeetingMinutesCreateInput): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('POST', '/meeting-minutes', { body: bodyOf(input) }),

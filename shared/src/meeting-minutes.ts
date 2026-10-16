@@ -98,8 +98,19 @@ export interface MeetingMinutesView {
   creator: { id: number; name: string };
   attendees: MeetingAttendeeView[];
   confirmedAt: string | null;
+  /** Notion으로 내보낸 페이지 주소 (이슈 #358). 내보내지 않았으면 null */
+  notionPageUrl: string | null;
+  /** Notion 내보내기 시각. notionPageUrl이 있을 때만 값이 있다 */
+  notionExportedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** POST meeting-minutes/:id/notion-export (이슈 #358). 확정된 회의록만, 한 번만 내보낸다 */
+export interface MeetingNotionExportResult {
+  notionPageUrl: string;
+  notionExportedAt: string;
+  meetingMinutes: MeetingMinutesView;
 }
 
 export type MeetingMinutesPage = PageResult<MeetingMinutesListItem>;
