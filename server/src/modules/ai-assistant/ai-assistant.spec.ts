@@ -89,7 +89,7 @@ describe('프롬프트 (REQ-AST-007·009)', () => {
     expect(system.content).toContain('직접 계산하지 않고');
     // 상태 표시명을 지어내 영문 코드와 함께 쓰던 일이 있었다 (실제 모델 확인)
     expect(system.content).toContain('영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고');
-    expect(system.content).toContain('과거 사례를 묻는 질문은 사례 자료가 아직 없어서 확인할 수 없다고 답하고 되묻지 않아요');
+    expect(system.content).toContain('과거 사례를 묻는 질문은 search_past_cases로 찾아서 사례 번호');
     // 도구로 못 하는 조회를 제안하고, 참고 자료에 없는 상태 뜻을 덧붙이던 일이 있었다 (실제 모델 확인)
     expect(system.content).toContain('도구에 있는 조건으로만 제안해요');
     expect(system.content).toContain('"참고로" 같은 덧붙임으로도 설명하지 않아요');

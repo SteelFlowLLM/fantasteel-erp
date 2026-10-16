@@ -323,6 +323,7 @@ describe('도구 모음: service가 확인하는 권한', () => {
     services.rejectedLots,
     services.purchasing,
     services.shipments,
+    services.pastCases,
   );
 
   it('미리 막지 않고 service에 맡긴다 (부서장은 권한 코드 없이도 자기 부서 구매요청을 본다)', async () => {

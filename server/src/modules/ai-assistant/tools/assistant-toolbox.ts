@@ -7,6 +7,7 @@ import { BusinessEventService } from '../../business-event/business-event.servic
 import { InventoryService } from '../../inventory/inventory.service';
 import type { LlmToolCall, LlmToolDefinition } from '../../llm/llm.client';
 import { LotService } from '../../lot/lot.service';
+import { PastCaseService } from '../../past-case/past-case.service';
 import { ProductionResultService } from '../../production/production-result.service';
 import { ProductionService } from '../../production/production.service';
 import { PurchasingService } from '../../purchasing/purchasing.service';
@@ -23,6 +24,7 @@ import { productionPlanTool, productionResultTool } from './production.tool';
 import { goodsReceiptTool, purchaseOrderTool, purchaseRequisitionTool } from './purchasing.tool';
 import { qualityInspectionTool, rejectedLotTool } from './quality.tool';
 import { salesOrderTool } from './sales-order.tool';
+import { pastCaseTool } from './past-case.tool';
 import { millSheetTool, shipmentRequestTool } from './shipment.tool';
 
 /** 모델에 넘기는 도구 결과 길이 상한. 넘치면 자르고 잘렸다고 알린다 */
@@ -35,8 +37,9 @@ export interface ToolRunResult {
   source: AiAssistantSource | null;
 }
 
-/** 도구가 감싸는 조회 service (REQ-AST-004 조회 대상: 재고, 수주 진행, 생산계획·실적, LOT 역추적, 검사 결과, 구매·입고, 출하·밀시트, 작업 로그) */
+/** 도구가 감싸는 조회 service (REQ-AST-004 조회 대상: 재고, 수주 진행, 생산계획·실적, LOT 역추적, 검사 결과, 구매·입고, 출하·밀시트, 작업 로그 + REQ-AST-006 과거 사례) */
 export interface AssistantToolServices {
+  pastCases: PastCaseService;
   inventory: InventoryService;
   salesOrders: SalesOrderService;
   lots: LotService;
@@ -64,6 +67,7 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     shipmentRequestTool(s.shipments),
     millSheetTool(s.shipments),
     businessEventTool(s.events, s.salesOrders, s.lots),
+    pastCaseTool(s.pastCases),
   ];
 }
 
@@ -89,8 +93,9 @@ export class AssistantToolbox {
     rejectedLots: RejectedLotService,
     purchasing: PurchasingService,
     shipments: ShipmentService,
+    pastCases: PastCaseService,
   ) {
-    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments });
+    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases });
     this.tools = new Map(tools.map((tool) => [tool.definition.name, tool]));
   }
 

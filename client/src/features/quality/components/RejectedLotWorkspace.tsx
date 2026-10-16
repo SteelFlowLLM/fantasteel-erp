@@ -17,7 +17,9 @@ import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { DISPOSITION_STATUS_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, SALES_ORDER_ITEM_STATUS_LABEL, type DispositionStatus } from '@/codes';
-import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
+import { PastCaseRegisterModal } from '@/features/pastCases/PastCaseRegisterModal';
+import { similarCaseHref } from '@/features/pastCases/pastCaseExample';
+import { PastCaseMenu } from '@/features/quality/components/PastCaseMenu';
 import { DispositionForm } from '@/features/quality/components/DispositionForm';
 import { ImpactCard } from '@/features/quality/components/ImpactCard';
 import { InspectionValuesTable } from '@/features/quality/components/InspectionValuesTable';
@@ -347,6 +349,7 @@ function Detail({ lotId }: { lotId: number }) {
 
 function DetailBody({ detail }: { detail: RejectedLotDetail }) {
   const canEdit = useCanUse(PERMISSION.DISPOSITION_SET);
+  const [registering, setRegistering] = useState(false);
   const { row, evidence } = detail;
   const own = row.reason === 'FAILED';
   const soItem = row.salesOrderItem;
@@ -375,11 +378,22 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
             <ButtonLink href={lotTraceHref(row.lotNo, 'forward')} icon="trace">
               LOT 추적 (영향 범위)
             </ButtonLink>
-            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-002 사례로 등록, REQ-CASE-004 비슷한 사례 찾기) */}
-            <ComingSoonMenu items={[{ label: '사례로 등록' }, { label: '비슷한 사례 찾기' }]} />
+            {/* 과거 사례(EX): 사례로 등록(REQ-CASE-002)은 AI 초안 창을, 비슷한 사례 찾기(REQ-CASE-004)는 강종·LOT 종류로 검색한 과거 사례 화면을 연다 */}
+            <PastCaseMenu
+              items={[
+                {
+                  label: '사례로 등록',
+                  icon: 'plus',
+                  onSelect: () => setRegistering(true),
+                  disabledReason: canEdit ? undefined : '불합격 처리 상태 지정 사용 권한이 있어야 해요',
+                },
+                { label: '비슷한 사례 찾기', icon: 'search', href: similarCaseHref(row.steelGradeCode, row.lotType) },
+              ]}
+            />
           </>
         }
       />
+      {registering ? <PastCaseRegisterModal lotId={row.lotId} lotNo={row.lotNo} onClose={() => setRegistering(false)} /> : null}
 
       <Card className="flex-none" petKey="card:rejectedLots.lotInfo">
         <CardBody className="px-4 py-3">

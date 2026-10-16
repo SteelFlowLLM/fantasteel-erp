@@ -2,7 +2,7 @@ import type { Role } from '@fantasteel/shared';
 
 /**
  * 역할별 추천 질문 (REQ-AST-008, 질문 내용은 구현 단계 확정). 화면 디자인 단계의 AiPanel 예시 문구를 그대로 옮겼다(가정값).
- * 데이터를 묻는 질문은 조회 도구로 답한다. '비슷한 사례 찾아줘'는 과거 사례 DB(EX)가 없어 확인할 수 없다고 답한다.
+ * 데이터를 묻는 질문은 조회 도구로 답한다. '비슷한 사례 찾아줘'는 과거 사례 검색 도구(예시 사례 + 등록 사례)로 답한다.
  */
 export const ROLE_SUGGESTED_QUESTIONS: Record<Role, readonly string[]> = {
   SALES: ['납기 위험 수주 알려줘', '이 수주 진행 상황 알려줘', 'SS275 코일 재고 몇 개야?'],

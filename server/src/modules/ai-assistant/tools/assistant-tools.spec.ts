@@ -1,11 +1,14 @@
 import {
+  PAST_CASE_EXAMPLES,
   ROLE,
+  searchPastCases,
   type AuthUser,
   type BusinessEventView,
   type InventoryOverview,
   type LotSummary,
   type LotTrace,
   type PageResult,
+  type PastCaseSearchInput,
   type SalesOrderFulfillment,
   type SalesOrderSummary,
 } from '@fantasteel/shared';
@@ -14,6 +17,7 @@ import type { PrismaService } from '../../../prisma/prisma.service';
 import type { BusinessEventService } from '../../business-event/business-event.service';
 import type { InventoryService } from '../../inventory/inventory.service';
 import type { LotService } from '../../lot/lot.service';
+import type { PastCaseService } from '../../past-case/past-case.service';
 import type { ProductionResultService } from '../../production/production-result.service';
 import type { ProductionService } from '../../production/production.service';
 import type { PurchasingService } from '../../purchasing/purchasing.service';
@@ -251,6 +255,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
     {} as RejectedLotService,
     {} as PurchasingService,
     {} as ShipmentService,
+    { search: async (input: PastCaseSearchInput) => searchPastCases(PAST_CASE_EXAMPLES, input, '2026-10-16') } as unknown as PastCaseService,
   );
   const run = (name: string, args: string, permissions: AuthUser['permissions'] = {}) => toolbox.run(user(permissions), { id: 'c1', name, arguments: args });
 
@@ -259,7 +264,16 @@ describe('도구 모음 (권한·실패 처리)', () => {
     salesOrderCalls = 0;
   });
 
-  it('모델에 조회 도구 13개를 알린다 (REQ-AST-004 조회 대상 전부)', () => {
+  it('과거 사례 검색은 전 역할이 쓰고, 사례 번호를 출처에 남기며 예시 사례임을 모델에 알린다 (REQ-AST-006)', async () => {
+    const result = await run('search_past_cases', JSON.stringify({ query: 'SM355A 히트 성분 불합격' }));
+    expect(result.source).toMatchObject({ kind: 'DATA', id: 'search_past_cases' });
+    expect(result.source?.label).toContain('CASE-0005');
+    const data = JSON.parse(result.content) as { 사례: { 사례번호: string; 예시: string }[] };
+    expect(data.사례[0]).toMatchObject({ 사례번호: 'CASE-0005', 예시: '예시 사례(실제 사례 아님)' });
+    expect((await run('search_past_cases', JSON.stringify({ category: 'X' }))).content).toContain('category는 QUALITY, EQUIPMENT 중 하나예요');
+  });
+
+  it('모델에 조회 도구 14개를 알린다 (REQ-AST-004 조회 대상 전부 + REQ-AST-006 과거 사례)', () => {
     expect(toolbox.definitions().map((d) => d.name)).toEqual([
       'get_inventory',
       'get_sales_orders',
@@ -274,6 +288,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
       'get_shipment_requests',
       'get_mill_sheets',
       'get_business_events',
+      'search_past_cases',
     ]);
   });
 

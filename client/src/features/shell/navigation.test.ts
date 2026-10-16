@@ -144,6 +144,6 @@ describe('activeNavHref · routeTitleOf', () => {
     expect(routeTitleOf('/sales-orders/new')).toEqual({ title: '수주 등록', area: '영업' });
     expect(routeTitleOf('/sales-orders/3')).toEqual({ title: '수주 상세', area: '영업' });
     expect(routeTitleOf('/production/results').title).toBe('작업 실적');
-    expect(routeTitleOf('/past-cases').area).toBe('준비 중 (EX)');
+    expect(routeTitleOf('/past-cases').area).toBe('추가 기능 (EX)');
   });
 });

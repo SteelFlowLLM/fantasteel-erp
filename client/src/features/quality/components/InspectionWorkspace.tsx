@@ -19,7 +19,8 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Segmented } from '@/components/Tabs';
 import { INSPECTION_RESULT_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
-import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
+import { similarCaseHref } from '@/features/pastCases/pastCaseExample';
+import { PastCaseMenu } from '@/features/quality/components/PastCaseMenu';
 import { InspectionForm } from '@/features/quality/components/InspectionForm';
 import { LotHistoryCard } from '@/features/quality/components/LotHistoryCard';
 import { GradeSpec, InfoGrid, LotHeader, MasterItemLink, lotTraceHref } from '@/features/quality/components/LotHeader';
@@ -352,8 +353,8 @@ function DetailBody({ data, outcome, onSaved, nextPending, onNext }: Omit<Detail
                 불합격 관리
               </ButtonLink>
             ) : null}
-            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-004) */}
-            <ComingSoonMenu items={[{ label: '비슷한 사례 찾기' }]} />
+            {/* 비슷한 사례 찾기(REQ-CASE-004)는 강종·LOT 종류로 검색한 과거 사례 화면을 연다. 자주 쓰지 않아 더보기 메뉴 안에 둔다 */}
+            <PastCaseMenu items={[{ label: '비슷한 사례 찾기', icon: 'search', href: similarCaseHref(lot.steelGradeCode, lot.lotType) }]} />
           </>
         }
       />

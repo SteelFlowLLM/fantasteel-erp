@@ -99,7 +99,7 @@ export const SCREEN = {
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE }),
   meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
   schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),
-  pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE, soon: 'EX' }),
+  pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE }),
 } as const satisfies Record<string, ScreenDef>;
 
 export const SCREENS: readonly ScreenDef[] = Object.values(SCREEN);
