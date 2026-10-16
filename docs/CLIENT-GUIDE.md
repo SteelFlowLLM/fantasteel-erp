@@ -117,7 +117,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
   - 보고 있는 화면(REQ-AST-007): 경로 + 쿼리(열어 둔 문서 id), 화면 제목, 위젯 맥락(`useShellStore.aiContext`의 label)을 함께 보낸다.
   - 크게 펼치기(REQ-AST-001): `useShellStore.aiPanelExpanded`. 본문 전체 너비로 펼치고, 닫으면 되돌린다. Enter 보내기·Shift+Enter 줄바꿈(한글 조합 중 Enter는 보내지 않음).
   - 버튼: `<SoonButton>` / 작은 표시: `<ComingSoon grade="P2" />` / 영역: `<ComingSoonArea grade="P2" title="…">예시 내용</ComingSoonArea>`. 모두 `components/ComingSoon.tsx`.
-  - 예시 내용은 `features/agent/agentExample.ts`, `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다. 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
+  - 예시 내용은 `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다 (`/agent`는 서버 데이터로 동작해 예시가 없다). 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
 - 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).
 
 ## 7. 끝낼 때
