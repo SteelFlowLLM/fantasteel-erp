@@ -64,6 +64,8 @@
 
 **불합격 처리 상태**(REQ-QC-004): 불합격 LOT(자기 FAIL 또는 불합격 히트의 하위, TRM-078)에만 HOLD·DOWNGRADED·SCRAPPED 중 하나와 사유를 기록한다. 판정 때는 값 없이 둔다. **재고·예약·배정은 바꾸지 않는다**(후속 로직 없음, 불합격 LOT은 이미 제외돼 있음).
 
+**검사 대기 목록**(API-125 `GET quality-inspections`, `status=pending` 기본): 검사 행이 없거나 PENDING인 LOT. 불합격 히트의 하위 슬래브·코일은 이미 불합격이라(TRM-078) 뺀다. 대시보드 공정 흐름의 판정 대기 수도 같은 조건(`quality.repository.ts`의 `pendingInspectionLotWhere`)으로 센다(dashboard.md 4장).
+
 **검사 기준 새 버전**: 기존 기준·항목을 수정·삭제하지 않고 `version_no + 1`로 새 행을 만든다([05] 7-2). 기존 검사 기록은 당시 버전을 유지한다([07] 5장). 항목은 KS 인증심사기준 참고(화학성분·인장·항복·연신율, SM 계열은 탄소당량·샤르피), 무게 검사는 제외.
 
 ## 5. 오류 코드·작업 로그

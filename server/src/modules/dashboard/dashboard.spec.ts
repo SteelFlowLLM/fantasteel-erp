@@ -116,7 +116,7 @@ describe('공정 흐름 판정 대기 수 (검사 입력 대기 목록과 같은
     const inspector = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
     const slabItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SS275-250x1200x10000' } });
     const coilItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SS275-2.5x1200x980000' } });
-    // 실적·계획 없이 LOT만 만든다 (inventory-list.spec.ts와 같은 방식)
+    // 계획 없이 공정 실적만 만들어 LOT에 연결한다 (LOT 유형별 필수 칸, lot_type_columns_check)
     const resultOf = async (processType: string) =>
       (await prisma.productionResult.create({ data: { processType, converterCode: processType === 'STEELMAKING' ? 'BOF1' : null, startedAt: new Date(), completedAt: new Date() } })).id;
     const [steelmaking, casting, rolling] = [await resultOf('STEELMAKING'), await resultOf('CONTINUOUS_CASTING'), await resultOf('HOT_ROLLING')];
