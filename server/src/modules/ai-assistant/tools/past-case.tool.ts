@@ -42,7 +42,7 @@ export function pastCaseTool(pastCases: PastCaseService): AssistantTool {
             원인: c.cause || '(기록 없음)',
             조치: c.actionTaken || '(기록 없음)',
             '관련 설비': c.equipmentText || '(기록 없음)',
-            '관련 LOT': c.lots.map((l) => l.lotNo).join(', '),
+            '관련 LOT': c.lots.map((l) => l.lotNo).join(', ') || '(없음)',
             발생일: c.occurredDate,
             예시: c.isExample ? '예시 사례(실제 사례 아님)' : '등록 사례',
           })),

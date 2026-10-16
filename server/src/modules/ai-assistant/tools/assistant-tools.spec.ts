@@ -31,6 +31,7 @@ import { AssistantToolbox, MAX_TOOL_RESULT_LENGTH } from './assistant-toolbox';
 import { businessEventTool } from './business-event.tool';
 import { inventoryTool } from './inventory.tool';
 import { lotTraceTool } from './lot-trace.tool';
+import { pastCaseTool } from './past-case.tool';
 import { salesOrderTool } from './sales-order.tool';
 
 const page = <T>(items: T[], total = items.length): PageResult<T> => ({ items, page: 1, size: 20, total });
@@ -271,6 +272,10 @@ describe('도구 모음 (권한·실패 처리)', () => {
     const data = JSON.parse(result.content) as { 사례: { 사례번호: string; 예시: string }[] };
     expect(data.사례[0]).toMatchObject({ 사례번호: 'CASE-0005', 예시: '예시 사례(실제 사례 아님)' });
     expect((await run('search_past_cases', JSON.stringify({ category: 'X' }))).content).toContain('category는 QUALITY, EQUIPMENT 중 하나예요');
+    // DB로 옮기면 예시 사례는 관련 LOT 없이 둔다 (2026-10-16 결정)
+    await expect(pastCaseTool({ search: async () => [{ ...PAST_CASE_EXAMPLES[0]!, lots: [] }] } as unknown as PastCaseService).run({}, user({}))).resolves.toMatchObject({
+      data: { 사례: [{ '관련 LOT': '(없음)' }] },
+    });
   });
 
   it('모델에 조회 도구 14개를 알린다 (REQ-AST-004 조회 대상 전부 + REQ-AST-006 과거 사례)', () => {

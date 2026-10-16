@@ -96,7 +96,7 @@ function ResultList({ query, category, recent, results, loading, selectedNo, onQ
             >
               <span className="flex items-center gap-2">
                 <span className="text-cap text-ink-3 tabular-nums">{item.occurredDate.slice(5)}</span>
-                <span className="truncate font-mono text-xs">{item.lots[0]?.lotNo}</span>
+                <span className="truncate font-mono text-xs">{item.lots[0]?.lotNo ?? <span className="font-sans text-ink-3">관련 LOT 없음</span>}</span>
                 <span className="ml-auto flex flex-none items-center gap-1">
                   {item.isExample ? <ExampleBadge /> : null}
                   <CategoryBadge category={item.caseCategory} />
@@ -194,7 +194,7 @@ function CaseHistory({ item }: { item: PastCaseView }) {
   const history = exampleHistoryOf(item);
   return (
     <Card petKey="card:pastCases.history">
-      <CardHead title="사례 작업 로그" meta={`${item.lots[0]?.lotNo ?? ''} · ${history.length}건 · 예시`} />
+      <CardHead title="사례 작업 로그" meta={[item.lots[0]?.lotNo, `${history.length}건`, '예시'].filter(Boolean).join(' · ')} />
       <CardBody className="pb-1">
         <Timeline
           items={history.map((entry) => ({
@@ -267,7 +267,8 @@ function CaseDetail({ item, query, results, onSelect }: { item: PastCaseView; qu
               <KvList
                 items={[
                   { label: '구분', value: CASE_CATEGORY_LABEL[item.caseCategory] },
-                  { label: '관련 LOT', value: <span className="font-mono text-sm">{item.lots.map((l) => l.lotNo).join(', ')}</span> },
+                  // 예시 사례는 DB로 옮기면 실제 LOT이 없어 관련 LOT 없이 둔다 (2026-10-16 결정)
+                  { label: '관련 LOT', value: item.lots.length ? <span className="font-mono text-sm">{item.lots.map((l) => l.lotNo).join(', ')}</span> : '—' },
                   { label: '관련 설비', value: item.equipmentText || '—' },
                   { label: '발생일', value: item.occurredDate },
                 ]}

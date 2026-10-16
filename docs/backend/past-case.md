@@ -54,13 +54,20 @@
 - `search_past_cases`(`ai-assistant/tools/past-case.tool.ts`): 로그인한 전 역할. 사례 5건까지 넘기고, 예시 사례는 "예시 사례(실제 사례 아님)"로 표시한다. 출처는 조회 데이터 `과거 사례 · <검색어> · CASE-…`.
 - 철강맨AI 패널·사내 채팅 @AI가 같은 도구를 쓴다(REQ-CASE-004). 답하는 규칙 5번이 사례 질문에 이 도구를 쓰고 사례 번호를 밝히게 한다.
 
-## 7. 하지 않은 것 · 미결정
+## 7. DB로 옮길 때 정한 것
+
+- **예시 사례는 관련 LOT 없이 둔다** (2026-10-16, 이현수): 예시 사례의 LOT 번호는 실제 LOT이 아니라서 시드에서 `past_case_lot` 행을 만들지 않는다. `past_case_lot`은 별도 표라 LOT이 0개인 사례도 스키마상 문제가 없다. 시드용 가짜 LOT을 만들지 않는 이유: 재고·불합격 관리·LOT 추적·대시보드 숫자에 끼어든다.
+- 사람이 등록하는 사례는 지금처럼 관련 LOT이 하나 이상 있어야 한다(API-270 검증, 앱 규칙).
+- 화면과 AI 도구는 관련 LOT이 없으면 "관련 LOT 없음"·"—"·"(없음)"으로 보인다.
+- DB 변경 요청 전문: Notion "과거 사례 DB" 페이지, PR #346.
+
+## 8. 하지 않은 것 · 미결정
 
 - 작업 로그 `CASE_REGISTERED`: 공통 코드 정의서 3장 제안 코드(🟡)라 `shared/src/codes`에 없어 남기지 않는다. 확정되면 등록에서 `businessEventRecorder.record`를 부른다(저장이 파일이라 같은 트랜잭션은 아니다).
 - 구분 코드 `CASE_CATEGORY`(QUALITY·EQUIPMENT)도 🟡 제안 코드라 `shared/src/past-case.ts`에 `PAST_CASE_CATEGORY`로 따로 두었다.
 - `past_case` 테이블, ngram 인덱스, 사례 수정·삭제, 사례 시드 개수.
 
-## 8. 테스트
+## 9. 테스트
 
 - `past-case.unit.spec.ts`(DB 없음): 핵심어·검색 순서·구분·기간, 검사 결과 초안·AI 답 검사·AI에 넘기는 글, AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호·파일 저장·검색·상세, 동시 등록 번호, 없는 LOT·미래 발생일.
 - `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 도구 14개.
