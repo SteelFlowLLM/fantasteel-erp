@@ -15,6 +15,7 @@
     "agent:demo-risk": "node scripts/agent-demo-risk.mjs",
     "seed:demo": "tsc -p tsconfig.json --outDir node_modules/.cache/seed-demo && node node_modules/.cache/seed-demo/seed/seed-production-demo.js && node node_modules/.cache/seed-demo/seed/seed-collab-demo.js",
     "check-orphans": "node scripts/check-orphans.mjs",
+    "check-invariants": "node scripts/check-invariants.mjs",
     "glossary": "node scripts/generate-glossary.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
     "db:deploy": "node scripts/deploy-db.mjs",
