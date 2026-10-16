@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { LlmChatTestView, LlmConnectionTestInput, LlmConnectionView, LlmSettingsInput, LlmSettingsView } from '@fantasteel/shared';
 import { LlmClient, LlmRequestError, normalizeBaseUrl } from './llm.client';
+import { LLM_PROFILE } from './llm-profiles';
 import { LlmSettingsStore, type LlmSettings } from './llm-settings.store';
 
 const CHAT_TEST_PROMPT = '연결 확인입니다. 한국어 한 문장으로 짧게 인사해 주세요.';
@@ -46,7 +47,7 @@ export class LlmService {
     if (!settings.model) return { ok: false, model: null, reply: null, latencyMs: null, error: '모델을 먼저 골라 저장해 주세요' };
     const started = Date.now();
     try {
-      const reply = await this.client.chat(settings, settings.model, [{ role: 'user', content: CHAT_TEST_PROMPT }]);
+      const reply = await this.client.chat(settings, settings.model, [{ role: 'user', content: CHAT_TEST_PROMPT }], LLM_PROFILE.CONNECTION_TEST);
       return { ok: true, model: settings.model, reply, latencyMs: Date.now() - started, error: null };
     } catch (error) {
       return { ok: false, model: settings.model, reply: null, latencyMs: null, error: messageOf(error) };

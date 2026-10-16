@@ -12,6 +12,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { LLM_PROFILE } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { buildMeetingContext } from './assistant-meeting.context';
 import { parseAssistantAnswer } from './assistant.answer';
@@ -108,7 +109,7 @@ export class AiAssistantService {
 
   private async call(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
     try {
-      return await this.llm.chatWithTools(endpoint, model, messages, tools);
+      return await this.llm.chatWithTools(endpoint, model, messages, tools, LLM_PROFILE.ASSISTANT);
     } catch (error) {
       if (!(error instanceof LlmRequestError)) throw error;
       this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
