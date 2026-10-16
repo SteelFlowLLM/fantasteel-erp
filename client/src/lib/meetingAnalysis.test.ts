@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
+import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, registerPreview, reviewSummaryText, traceSummaryText } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -108,5 +108,29 @@ describe('reviewSummaryText', () => {
 
   it('2차 검토를 하지 않은 옛 결과는 아무것도 보이지 않는다', () => {
     expect(reviewSummaryText(undefined)).toBeNull();
+  });
+});
+
+describe('AI 실행 기록 표시', () => {
+  it('formatDuration: 1분 미만은 소수 한 자리 초, 넘으면 분·초', () => {
+    expect(formatDuration(8400)).toBe('8.4초');
+    expect(formatDuration(72_300)).toBe('1분 12초');
+    expect(formatDuration(-5)).toBe('0.0초');
+  });
+
+  it('traceSummaryText: 호출 수·전체 시간·버림·고침 수, 없는 것은 뺀다', () => {
+    const step = (changes: { action: 'DROPPED' | 'CHANGED' }[]) => ({
+      stage: 'ANALYSIS' as const,
+      model: 'm',
+      durationMs: 1000,
+      ok: true,
+      error: null,
+      rawAnswer: null,
+      thinking: null,
+      truncated: false,
+      changes: changes.map((c) => ({ ...c, title: null, reason: '이유' })),
+    });
+    expect(traceSummaryText({ steps: [step([{ action: 'DROPPED' }, { action: 'CHANGED' }]), step([{ action: 'DROPPED' }])], totalMs: 90_000 })).toBe('AI 호출 2번 · 1분 30초 · 버림 2 · 고침 1');
+    expect(traceSummaryText({ steps: [step([])], totalMs: 1500 })).toBe('AI 호출 1번 · 1.5초');
   });
 });

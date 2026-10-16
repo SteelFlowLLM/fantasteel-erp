@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingAnalysis, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -79,4 +79,22 @@ export function contextLinesOf(c: MeetingCandidate): MeetingCandidateContextLine
 export function reviewSummaryText(review: MeetingAnalysis['review']): string | null {
   if (!review) return null;
   return review.ok ? `2차 검토: 빠진 후보 ${review.missedCount}건 · 지적 ${review.concernCount}건` : '2차 검토 실패 — 1차 결과만 보여요';
+}
+
+export const TRACE_STAGE_LABEL: Record<MeetingTraceStage, string> = { ANALYSIS: '1차 분석', REVIEW: '2차 검토' };
+
+/** 걸린 시간: 1분이 넘으면 "1분 12초", 아니면 "8.4초" */
+export function formatDuration(ms: number): string {
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}초`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}분 ${whole % 60}초`;
+}
+
+/** 접힌 실행 기록 머리 줄: "AI 호출 2번 · 1분 30초 · 버림 3 · 고침 1" */
+export function traceSummaryText(trace: MeetingAnalysisTrace): string {
+  const changes = trace.steps.flatMap((step) => step.changes);
+  const dropped = changes.filter((c) => c.action === 'DROPPED').length;
+  const changed = changes.length - dropped;
+  return [`AI 호출 ${trace.steps.length}번`, formatDuration(trace.totalMs), ...(dropped ? [`버림 ${dropped}`] : []), ...(changed ? [`고침 ${changed}`] : [])].join(' · ');
 }

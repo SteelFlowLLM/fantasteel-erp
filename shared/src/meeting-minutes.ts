@@ -174,12 +174,47 @@ export interface MeetingDecision {
 /** AI 2차 검토 결과. 실패해도 1차 결과는 그대로 남는다 */
 export type MeetingReviewResult = { ok: true; missedCount: number; concernCount: number } | { ok: false; error: string };
 
+/** 서버가 모델 답에서 버리거나 고친 것 한 줄. 어느 항목인지 알 수 있게 모델이 쓴 제목을 함께 둔다 */
+export interface MeetingTraceChange {
+  action: 'DROPPED' | 'CHANGED';
+  /** 모델이 쓴 제목. 제목이 없던 항목이면 null */
+  title: string | null;
+  reason: string;
+}
+
+export type MeetingTraceStage = 'ANALYSIS' | 'REVIEW';
+
+/** AI 실행 기록의 한 단계 (1차 분석, 2차 검토). 모델이 무엇을 냈고 서버가 무엇을 걸렀는지 사람이 따라가 보게 한다 */
+export interface MeetingTraceStep {
+  stage: MeetingTraceStage;
+  model: string;
+  durationMs: number;
+  ok: boolean;
+  /** 실패한 단계의 이유 */
+  error: string | null;
+  /** 모델이 처음 낸 답 원문. 길면 앞부분만 */
+  rawAnswer: string | null;
+  /** 추론 모델이 답 앞에 쓴 생각 글. 모델이 스스로 쓴 설명이라 실제 판단과 다를 수 있다 */
+  thinking: string | null;
+  /** 원문이나 생각 글을 잘라 저장했으면 true */
+  truncated: boolean;
+  changes: MeetingTraceChange[];
+}
+
+export interface MeetingAnalysisTrace {
+  steps: MeetingTraceStep[];
+  /** 분석 시작부터 결과 저장 직전까지 (ERP 현황 계산 포함) */
+  totalMs: number;
+}
+
 export interface MeetingAnalysis {
   summary: string;
   decisions: MeetingDecision[];
   candidates: MeetingCandidate[];
   /** 2차 검토를 하지 않은 옛 분석 결과에는 없다 */
   review?: MeetingReviewResult;
+  /** AI 실행 기록. 이 기능 전의 분석 결과에는 없다 */
+  trace?: MeetingAnalysisTrace;
   model: string;
   analyzedAt: string;
 }

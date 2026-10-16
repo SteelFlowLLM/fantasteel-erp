@@ -53,7 +53,8 @@
   - 실패: 상태 `FAILED`, `failure_reason` = `SttRequestError` 문구 또는 `전사 중 오류가 났어요`.
   - 결과 반영은 `updateMany where status = TRANSCRIBING`이다. 그 사이 다른 상태가 됐으면 버린다. 로그에는 음성·전사 내용을 남기지 않는다.
 - **원본 음성은 저장하지 않는다** (BP-VOC-01): 업로드 버퍼는 메모리에만 있고 디스크·DB에 쓰지 않으며, 작업이 끝나면 참조를 놓는다.
-- **시작 복구**: 서버가 켜질 때(`onApplicationBootstrap`) `TRANSCRIBING`으로 남은 행은 음성이 메모리와 함께 사라졌으므로 `FAILED`, `failure_reason` = `서버가 다시 시작돼 전사가 중단됐어요. 음성을 다시 올려 주세요`로 바꾼다. 실패한 회의록은 다시 돌릴 수 없고 음성을 새로 올려야 한다.
+- **멈춘 작업 정리** (`MeetingJobLease`, 전사·분석 공통): 공용 DB(Supabase)에서는 여러 서버가 같은 표를 쓰므로, 켤 때 진행 중 행을 모두 실패로 돌리면 다른 팀원 서버가 처리 중인 작업까지 실패가 된다. 그래서 작업을 맡은 서버가 **줄을 선 순간부터 2분마다** 그 행의 `updated_at`을 갱신하고(`touchInProgress`), 정리는 **마지막 갱신이 10분 넘게 지난 행만**(이 서버가 맡은 행은 빼고) `FAILED`로 바꾼다(`failStale`). 정리는 서버가 켜질 때와 2분마다 돈다. 전사는 음성이 메모리와 함께 사라졌으므로 `failure_reason` = `전사하던 서버가 멈춰 전사가 중단됐어요. 음성을 다시 올려 주세요`. 실패한 회의록은 다시 돌릴 수 없고 음성을 새로 올려야 한다.
+  - 🟡 이 PR 전 코드를 쓰는 서버는 켤 때 여전히 모든 진행 중 행을 실패로 바꾼다. 공용 DB를 쓰는 팀원이 모두 이 코드로 올라와야 효과가 있다.
 
 **목록** 회의일 최신순, 같은 날은 id 큰 순. 필터: `meetingMinutesStatus`, `keyword`(제목 부분 일치, 대소문자 무시), `page`·`size`(기본 20, 최대 100). 🟡 회의일 범위 필터는 공통 패턴이 없어 만들지 않았다.
 
@@ -61,8 +62,8 @@
 
 **AI 분석** (`POST meeting-minutes/:id/analyze`, `MeetingAnalysisRunner`, `meeting-analysis.{prompt,validator}.ts`)
 - 작성자(`creator_id`)만 할 수 있다(`VOC-003` 403). 전사가 있는 `TRANSCRIBED`·`REVIEW`(다시 정리: 이전 분석을 새 결과로 바꾼다)·`FAILED`만 허용, 그 밖(`TRANSCRIBING`·`ANALYZING`·`CONFIRMED`, 전사 없는 `FAILED`)은 `VOC-004` 409. 전사가 40,000자를 넘으면 `VOC-005` 400(나눠 분석하는 방식은 나중). 상태는 `UPDATE … WHERE status IN (…)` 조건부로 `ANALYZING`(`failure_reason` 지움)으로 바꾸고 상세를 바로 돌려준다(두 번 눌러도 한 번만 시작). 분석은 응답 뒤 runner가 **한 번에 하나**씩 한다.
-- 성공: 상태 `REVIEW`, `analysis_result`(shared `MeetingAnalysis`), `summary` 복사. 실패: `FAILED` + 한국어 이유(`LlmRequestError` 문구, 아니면 `AI 정리 중 오류가 났어요. 다시 정리해 주세요`). 결과 반영은 `WHERE status = ANALYZING`이라 그 사이 상태가 바뀌었으면 버린다. 시작할 때 `ANALYZING`으로 남은 행은 `FAILED`(`서버가 다시 시작돼 분석이 중단됐어요. 다시 정리해 주세요`). `business_event`는 남기지 않는다.
-- LLM 호출: `LlmClient.chatJson` (JSON 스키마 강제, `temperature 0`, 제한 시간 5분). 400이면 형식 강제 없이 한 번 더 부르고, `<think>`·코드 울타리를 벗기며, content가 비면 `reasoning_content`를 읽는다. 모델·주소는 AI 연결 설정(`LlmSettingsStore`)이다.
+- 성공: 상태 `REVIEW`, `analysis_result`(shared `MeetingAnalysis`), `summary` 복사. 실패: `FAILED` + 한국어 이유(`LlmRequestError` 문구, 아니면 `AI 정리 중 오류가 났어요. 다시 정리해 주세요`). 결과 반영은 `WHERE status = ANALYZING`이라 그 사이 상태가 바뀌었으면 버린다. 맡은 서버의 표시가 끊긴 `ANALYZING` 행은 위 '멈춘 작업 정리'와 같은 규칙으로 `FAILED`(`분석하던 서버가 멈춰 분석이 중단됐어요. 다시 정리해 주세요`). `business_event`는 남기지 않는다.
+- LLM 호출: `LlmClient.chatJsonWithText` (JSON과 함께 원문·생각 글을 돌려준다. JSON 스키마 강제, `temperature 0`, 제한 시간 5분). 400이면 형식 강제 없이 한 번 더 부르고, `<think>`·코드 울타리를 벗기며, content가 비면 `reasoning_content`를 읽는다. 모델·주소는 AI 연결 설정(`LlmSettingsStore`)이다.
 - **프롬프트 주입 대응** (REQ-AST-005·009): ① 전사는 `<transcript>` 안의 **데이터**이고 지시가 아니라고 시스템 프롬프트에 못 박는다. ② 모델은 DB에 쓰지 못하고 JSON 제안만 낸다. ③ 서버가 모든 후보를 규칙으로 검증하고(아래), 사원 id·품목 id·수주 id·톤은 모델 값을 믿지 않고 DB 매칭·파싱으로만 정한다. ④ 근거 없는 항목은 버리고, 애매한 담당자·날짜는 지어내지 않고 `issues`(확인 필요)로 표시한다. ⑤ 이 단계는 등록하지 않으므로 오작동해도 후보 목록이 틀릴 뿐 데이터는 바뀌지 않는다.
 - **검증 규칙** (순수 함수 `validateAnalysis`, 발언 번호는 모델이 1부터 센 값 → `evidence`는 0부터의 위치):
   - 근거(`evidence`)가 범위 밖·정수 아님을 빼고 비면 후보·결정사항을 버린다. `kind`가 TASK/EVENT/PURCHASE가 아니거나 제목이 없으면 버린다(제목 200자). `sourceText`(말한 표현)는 근거 발언에 실제로 있을 때만 남긴다.
@@ -71,6 +72,10 @@
   - 구매요청: `item_type = RAW_MATERIAL`에서 이름·코드 정확 일치(대소문자 무시), 아니면 이름이 하나의 품목에만 포함될 때. 톤은 양수만 소수 3자리 문자열. `requestReason` = 제목, `sourceText` = 근거 발언 글. 못 찾으면 null + `원료 품목을 확인해 주세요`·`수량(톤)을 확인해 주세요`.
   - `relatedSalesOrderNo`는 `sales_order`에 있을 때만 `salesOrderId`와 함께 남기고, 없으면 조용히 버린다. 키는 `c1…`, `decision`은 항상 `PENDING`.
 - 화면 응답의 `analysisResult`는 읽을 수 없는 모양이면 null이다.
+- **AI 실행 기록** (문서에 없는 기능, `analysis_result.trace`, shared `MeetingAnalysisTrace`): 1차 분석·2차 검토 단계마다 모델, 걸린 시간, 성공 여부·실패 이유, 모델이 낸 답 원문, 생각 글(`<think>` 블록·`reasoning_content`), 서버가 **버리거나 고친 항목과 이유**(`changes`)를 남긴다. 테이블은 바꾸지 않는다.
+  - 버린 이유는 `DROP`(모양·종류·제목·근거 없음, 30개 초과)과 `REVIEW_DROP`(없는 후보 지적, 이유 없음, 모델이 스스로 문제 아니라고 한 지적, 1차와 중복, 자리 없음), 고친 것은 `CHANGE`(근거에 없는 인용 원문을 지움, ERP에 없는 수주번호를 지움)다. `issues`(확인 필요)로 이미 보이는 것은 `changes`에 넣지 않는다.
+  - 원문·생각 글은 단계당 20,000자(`TRACE_TEXT_MAX`)까지만 저장하고 잘랐으면 `truncated`. 2차 검토 답을 JSON으로 읽지 못해도(`LlmJsonParseError`) 원문을 남긴다. 1차 분석이 실패하면 결과 자체를 저장하지 않으므로 기록도 없다.
+  - 화면: AI 분석 카드 아래 접힌 "AI가 한 일 보기". 생각 글에는 "모델이 스스로 쓴 설명이라 실제 판단과 다를 수 있어요"를 붙인다. 이 기능 전의 분석 결과에는 `trace`가 없다.
 
 ### 분석 강화 (Voice2ERP 묶음 2, 문서에 없는 기능)
 

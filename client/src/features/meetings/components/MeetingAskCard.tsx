@@ -11,6 +11,7 @@ import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { AiMark } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
+import { AskTrace } from '@/features/meetings/components/MeetingTracePanel';
 import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/AiPanel';
 import { MEETING_SUGGESTED_QUESTIONS, meetingScreenContext, splitCitations } from '@/lib/meetingAsk';
 import { aiChatHistory, newAiChatId, type AiChatEntry } from '@/stores/useAiChatStore';
@@ -50,7 +51,8 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
   const mutation = useMutation({
     mutationFn: ({ question, history }: { question: string; history: AiAssistantTurn[] }) =>
       aiAssistantApi.ask({ question, history, meetingMinutesId: minutes.id, screen: meetingScreenContext(minutes) }),
-    onSuccess: (reply) => setEntries((current) => [...current, { id: newAiChatId(), role: 'assistant', content: reply.answer, sources: reply.sources }]),
+    onSuccess: (reply) =>
+      setEntries((current) => [...current, { id: newAiChatId(), role: 'assistant', content: reply.answer, sources: reply.sources, toolCalls: reply.toolCalls, thinking: reply.thinking }]),
     onError: (error, { question }) => setEntries((current) => [...current, { id: newAiChatId(), role: 'failure', content: errorMessageOf(error), question }]),
   });
   const pending = mutation.isPending;
@@ -137,6 +139,7 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
                       ))}
                     </div>
                   ) : null}
+                  <AskTrace toolCalls={entry.toolCalls ?? []} thinking={entry.thinking ?? null} />
                 </div>
               ),
             )}

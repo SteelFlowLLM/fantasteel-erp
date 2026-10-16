@@ -2,7 +2,8 @@
 import type { MeetingCandidate } from '@fantasteel/shared';
 import { validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
 import { buildReviewUserMessage, REVIEW_SYSTEM_PROMPT } from './meeting-analysis.prompt';
-import { isReadableReview, mergeReview, REVIEW_BAD_SHAPE, REVIEW_ISSUE, reviewItemsOf } from './meeting-review';
+import { DROP } from './meeting-analysis.validator';
+import { isReadableReview, mergeReview, REVIEW_BAD_SHAPE, REVIEW_DROP, REVIEW_ISSUE, reviewItemsOf } from './meeting-review';
 
 const ctx: AnalysisContext = {
   meetingDate: '2026-10-15',
@@ -150,5 +151,39 @@ describe('2차 검토 프롬프트', () => {
     expect(message).toContain('<transcript>\n[1] 김도윤: 출하 준비해 주세요\n</transcript>');
     expect(message).toContain('- c1 [TASK] 출하 준비 | 담당: 박서영 | 날짜: 2026-10-22 | 근거: [1]');
     expect(message).toContain('- c2 [EVENT] 방문 | 담당: 없음 | 날짜: 없음 | 근거: [1][3]');
+  });
+});
+
+describe('mergeReview 실행 기록', () => {
+  it('버린 지적·빠진 후보를 이유와 함께 남긴다', () => {
+    const r = mergeReview(
+      firstPass(),
+      {
+        missed: [
+          { kind: 'TASK', title: '출하 준비', evidence: [1] },
+          { kind: 'TASK', title: '근거 없음', evidence: [] },
+          { kind: 'TASK', title: '클레임 회신서 발송', evidence: [2] },
+        ],
+        concerns: [
+          { key: 'c9', reason: '없는 후보' },
+          { key: 'c1', reason: '' },
+          { key: 'c2', reason: '오류 아님' },
+          { key: 'c1', reason: '마감일이 맞는지 확인' },
+        ],
+      },
+      ctx,
+    );
+    expect(r.review).toEqual({ ok: true, missedCount: 1, concernCount: 1 });
+    expect(r.changes).toEqual([
+      { action: 'DROPPED', title: '없는 후보', reason: REVIEW_DROP.concernKey('c9') },
+      { action: 'DROPPED', title: '출하 준비', reason: REVIEW_DROP.concernReason },
+      { action: 'DROPPED', title: '샘플 발송', reason: REVIEW_DROP.notAProblem },
+      { action: 'DROPPED', title: '출하 준비', reason: REVIEW_DROP.duplicate },
+      { action: 'DROPPED', title: '근거 없음', reason: DROP.evidence },
+    ]);
+  });
+
+  it('읽을 수 없는 답이면 기록할 것이 없다', () => {
+    expect(mergeReview(firstPass(), 'x', ctx).changes).toEqual([]);
   });
 });

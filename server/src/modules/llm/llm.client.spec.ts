@@ -1,5 +1,5 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도를 확인한다.
-import { LlmClient, LlmRequestError, parseJsonContent } from './llm.client';
+import { LlmClient, LlmJsonParseError, LlmRequestError, parseJsonContent, splitThinking } from './llm.client';
 
 const endpoint = { baseUrl: 'http://llm.test/v1/', apiKey: null };
 const format = { name: 'demo', schema: { type: 'object' } };
@@ -62,5 +62,26 @@ describe('LlmClient.chatJson', () => {
 
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {
     expect(parseJsonContent('```\n[1,2]\n```')).toEqual([1, 2]);
+  });
+
+  it('splitThinking: 생각 글과 답을 나눈다', () => {
+    expect(splitThinking('<think>음…</think>\n{"a":1}')).toEqual({ thinking: '음…', text: '{"a":1}' });
+    // 여는 태그 없이 닫는 태그만 쓰는 모델
+    expect(splitThinking('생각 중</think>{"a":1}')).toEqual({ thinking: '생각 중', text: '{"a":1}' });
+    // 길이 상한에 걸려 끝나지 않은 생각
+    expect(splitThinking('<think>끝나지 않은')).toEqual({ thinking: '끝나지 않은', text: '' });
+    expect(splitThinking(' {"a":1} ')).toEqual({ thinking: null, text: '{"a":1}' });
+  });
+
+  it('chatJsonWithText: 원문과 생각 글(reasoning_content 포함)을 함께 돌려준다', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ choices: [{ message: { content: '<think>짧은 생각</think>{"items":[]}', reasoning_content: '긴 추론' } }] }));
+    expect(await new LlmClient().chatJsonWithText(endpoint, 'm', [], format, options)).toEqual({ value: { items: [] }, rawText: '{"items":[]}', thinking: '긴 추론\n\n짧은 생각' });
+  });
+
+  it('chatJsonWithText: JSON으로 읽지 못하면 원문을 든 오류를 던진다', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ choices: [{ message: { content: '<think>흠</think>죄송해요' } }] }));
+    const error = await new LlmClient().chatJsonWithText(endpoint, 'm', [], format, options).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmJsonParseError);
+    expect(error).toMatchObject({ rawText: '죄송해요', thinking: '흠' });
   });
 });

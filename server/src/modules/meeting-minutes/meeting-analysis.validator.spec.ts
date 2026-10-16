@@ -1,5 +1,5 @@
 // 모델 JSON 검증 규칙. 발언 번호는 모델이 1부터 센 값이고 결과 evidence는 0부터의 위치다.
-import { collectSalesOrderNos, ISSUE, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
+import { CHANGE, collectSalesOrderNos, DROP, ISSUE, LIST_MAX, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
 
 const ctx: AnalysisContext = {
   meetingDate: '2026-10-15',
@@ -228,6 +228,37 @@ describe('validateAnalysis', () => {
       expect(r?.candidates[2].assigneeId).toBe(2);
       expect(JSON.stringify(r)).not.toContain('999');
       expect(r?.candidates.every((c) => c.decision === 'PENDING')).toBe(true);
+    });
+  });
+
+  describe('실행 기록 (버리거나 고친 것)', () => {
+    it('버린 항목과 이유를 모델이 쓴 제목과 함께 남긴다', () => {
+      const r = run([item(), item({ kind: 'MEMO', title: '메모' }), item({ title: '  ' }), item({ title: '근거 없음', evidence: [99] }), 'x'], {
+        decisions: [{ text: '근거 없는 결정', evidence: [] }],
+      });
+      expect(r?.candidates).toHaveLength(1);
+      expect(r?.changes).toEqual([
+        { action: 'DROPPED', title: '근거 없는 결정', reason: DROP.decisionEvidence },
+        { action: 'DROPPED', title: '메모', reason: DROP.kind },
+        { action: 'DROPPED', title: null, reason: DROP.title },
+        { action: 'DROPPED', title: '근거 없음', reason: DROP.evidence },
+        { action: 'DROPPED', title: null, reason: DROP.shape },
+      ]);
+    });
+
+    it('후보는 남기고 말없이 지운 원문·수주번호를 고침으로 남긴다', () => {
+      const r = run([item({ sourceText: '전사에 없는 말', relatedSalesOrderNo: 'SO-999999-001' }), item({ title: '정상', sourceText: '출하 준비는', relatedSalesOrderNo: 'SO-251020-003' })]);
+      expect(r?.candidates.map((c) => c.sourceText)).toEqual([null, '출하 준비는']);
+      expect(r?.changes).toEqual([
+        { action: 'CHANGED', title: '출하 준비', reason: CHANGE.sourceText },
+        { action: 'CHANGED', title: '출하 준비', reason: CHANGE.salesOrder('SO-999999-001') },
+      ]);
+    });
+
+    it(`항목이 ${LIST_MAX}개를 넘으면 읽지 않은 수를 남긴다`, () => {
+      const r = run(Array.from({ length: LIST_MAX + 2 }, (_, i) => item({ title: `할 일 ${i}` })));
+      expect(r?.candidates).toHaveLength(LIST_MAX);
+      expect(r?.changes).toEqual([{ action: 'DROPPED', title: null, reason: DROP.overLimit(2) }]);
     });
   });
 });
