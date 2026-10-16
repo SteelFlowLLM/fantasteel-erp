@@ -58,6 +58,15 @@ export class MessageActionRepository {
     return tx.actionDraft.create({ data, select: draftSelect });
   }
 
+  /** createDraft와 같지만 관계를 읽지 않는다 (트랜잭션 안에서 관계를 여러 개 읽으면 pg 경고가 난다, SERVER-GUIDE) */
+  createDraftBrief(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue; requesterId: number }) {
+    return tx.actionDraft.create({ data, select: { id: true, draftStatus: true } });
+  }
+
+  async setDraftStatus(tx: Tx, id: number, draftStatus: string): Promise<void> {
+    await tx.actionDraft.update({ where: { id }, data: { draftStatus }, select: { id: true } });
+  }
+
   updateDraft(tx: Tx, id: number, data: Prisma.ActionDraftUpdateInput) {
     return tx.actionDraft.update({ where: { id }, data, select: draftSelect });
   }
@@ -72,10 +81,13 @@ export class MessageActionRepository {
     return tx.actionDraft.findUnique({ where: { id }, select: draftSelect });
   }
 
-  /** 메시지·회의록에서 만든 초안만 (원본이 없는 Agent 대응 후보는 factory-agent가 다룬다) */
+  /**
+   * 메시지·회의록·철강맨AI 대화에서 만든 초안만 (원본이 없는 Agent 대응 후보는 factory-agent가 다룬다).
+   * 철강맨AI 초안은 원본 행이 없어 payload의 fromAiAssistant로 찾는다
+   */
   findDrafts(tx: Tx, where: Prisma.ActionDraftWhereInput) {
     return tx.actionDraft.findMany({
-      where: { ...where, OR: [{ messageId: { not: null } }, { meetingMinutesId: { not: null } }] },
+      where: { ...where, OR: [{ messageId: { not: null } }, { meetingMinutesId: { not: null } }, { payload: { path: ['fromAiAssistant'], equals: true } }] },
       orderBy: { id: 'desc' },
       select: draftSelect,
     });

@@ -187,6 +187,17 @@ confirm(draftId, actor):
   - LLM을 부르기 전에 방 멤버·확정 주체·미처리 초안을 확인한다(미처리 초안이 있으면 부르지 않는다). 저장 트랜잭션에서 같은 확인을 다시 한다.
   - 메시지 초안의 DRAFT_CREATED는 AI 경유로 남기지 않는다(위 표의 AI 경유는 확정·핸들러·실행 로그).
   - 회의록(VOC-004)에서 만든 구매요청 초안은 AI가 회의에서 뽑은 값이라 채워진 칸을 `aiFilledFields`로 남긴다. 생성부터 확정·실행까지 모두 AI 경유다.
+  - 철강맨AI 대화에서 승인 카드로 만든 구매요청 초안(이슈 #362)도 모델이 채운 칸을 `aiFilledFields`로 남겨 생성(DRAFT_CREATED)부터 확정·실행까지 모두 AI 경유다.
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
-- `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
+- `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)·철강맨AI 대화(이슈 #362)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
+
+## 11. 철강맨AI 대화에서 만드는 초안 (이슈 #362, 문서에 없는 기능)
+
+철강맨AI의 쓰기 도구 `create_purchase_request_draft`가 사용자가 승인 카드에서 허용하면 구매요청 초안을 만든다(`docs/backend/ai-assistant.md` 4장 '승인 카드').
+
+- `previewFromAssistant(tx, user, input)`: 저장 없는 사전 확인. 순서: 요청자(= 묻는 사원)의 구매요청 등록 USE 권한(COM-002) → 승인권자(PUR-001, `assertCanExecute`) → 원료 코드·이름이 원료 하나와 정확히 맞는지(COM-003, 문구에 원료 목록을 붙여 모델이 고치게 함) → 톤·희망 입고일·요청 근거 형식(유형 정의 `applyPatch`, COM-004).
+- `createFromAssistant(user, input)`: 같은 확인을 트랜잭션 안에서 다시 하고 초안을 만든다. `message_id`·`meeting_minutes_id`는 없고 `requester_id` = 묻는 사원, 회의록 초안처럼 바로 `WAITING_APPROVAL`. 작업 로그 `DRAFT_CREATED`(AI 경유, 사유 `철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성`)를 같은 트랜잭션에 남긴다. 확정·실행은 지금 API 그대로 요청자가 한다.
+- 원본 표시: payload `fromAiAssistant: true`, `sourceText` = 사용자 질문(1000자까지). 스키마 변경 없이 이 값으로 구분한다. `payloadOf`가 이 값을 지키므로 수정·확정해도 남는다. 응답의 `message`·`meetingMinutes`는 `null`이다.
+- Agent 대응 후보와 구분: Agent 후보는 `payload.agent`가 있고 factory-agent가 다룬다. 철강맨AI 초안에는 `agent`가 없어 메시지 초안 API(상세·수정·확정·반려)로 처리된다. 상세는 요청자 본인만 본다(원본 방이 없다).
+- 메시지 초안처럼 같은 원본의 미처리 초안 중복 막기는 없다(원본 메시지가 없다). 한 번 허용할 때마다 하나 만든다.
 - AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.

@@ -7,5 +7,7 @@ import { ScheduleEventService } from './schedule-event.service';
 @Module({
   controllers: [ScheduleEventController],
   providers: [ScheduleEventService, ScheduleEventRepository],
+  // 철강맨AI 승인 카드(내 일정 추가)가 같은 등록 로직을 쓴다
+  exports: [ScheduleEventService],
 })
 export class ScheduleEventModule {}

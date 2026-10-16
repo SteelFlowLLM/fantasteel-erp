@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Logger, Post, Res } from '@nestjs/common';
-import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
+import { Body, Controller, Get, HttpCode, Logger, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
+import type { AiApprovalDecisionView, AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto } from './dto/ai-assistant.dto';
+import { AssistantApprovalRegistry } from './approval/approval.registry';
+import { AskAiAssistantDto, DecideAiApprovalDto } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 
 /**
@@ -14,7 +15,10 @@ import { AiAssistantService } from './ai-assistant.service';
 export class AiAssistantController {
   private readonly logger = new Logger(AiAssistantController.name);
 
-  constructor(private readonly service: AiAssistantService) {}
+  constructor(
+    private readonly service: AiAssistantService,
+    private readonly approvals: AssistantApprovalRegistry,
+  ) {}
 
   /** API-262. 대화가 저장되지 않아 새로 만드는 자원이 없으므로 200 */
   @Post('ai-assistant/messages')
@@ -26,11 +30,12 @@ export class AiAssistantController {
   /**
    * API-262의 실시간 판 (문서에 없는 기능, 2026-10-16 추가). 생각 글·도구 호출·답 글을 한 줄에 JSON 하나씩(NDJSON) 보낸다.
    * 모델 미설정·없는 회의록처럼 시작 전에 알 수 있는 오류는 평소 API 오류로 돌려주고, 시작한 뒤의 실패는 error 이벤트로 보낸다.
-   * 브라우저가 연결을 끊으면(멈추기) LLM 요청도 끊는다.
+   * 브라우저가 연결을 끊으면(멈추기) LLM 요청도 끊고, 기다리던 승인 카드는 거부로 끝낸다.
+   * approvalCards: true면 쓰기 도구를 알리고, 모델이 부르면 approval_required를 보내고 허용·거부를 기다린다 (이슈 #362).
    */
   @Post('ai-assistant/messages/stream')
   async askStream(@CurrentUser() user: AuthUser, @Body() dto: AskAiAssistantDto, @Res() res: Response): Promise<void> {
-    const prepared = await this.service.prepare(user, dto);
+    const prepared = await this.service.prepare(user, dto, { interactive: true });
     const abort = new AbortController();
     res.on('close', () => {
       if (!res.writableFinished) abort.abort();
@@ -58,6 +63,17 @@ export class AiAssistantController {
     } finally {
       res.end();
     }
+  }
+
+  /**
+   * 승인 카드 허용·거부 (문서에 없는 기능, 이슈 #362). 질문한 사원만, 처음 한 번만 받는다.
+   * 없거나 오래된 카드는 AST-001(404), 이미 처리됐거나 시간이 지난 카드는 AST-002(409), 다른 사원은 COM-002(403)
+   */
+  @Post('ai-assistant/approvals/:approvalId')
+  @HttpCode(200)
+  decide(@CurrentUser() user: AuthUser, @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string, @Body() dto: DecideAiApprovalDto): AiApprovalDecisionView {
+    this.approvals.decide(user, approvalId, dto.decision);
+    return { approvalId, decision: dto.decision };
   }
 
   /** 지금 모델이 사진·생각 정도를 지원하는지 (문서에 없는 기능, 2026-10-16 추가) */

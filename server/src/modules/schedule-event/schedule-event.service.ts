@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { AuthUser, ScheduleEventInput, ScheduleEventView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ListScheduleEventsQuery } from './dto/schedule-event.dto';
 import { ScheduleEventRepository, type ScheduleEventFields, type ScheduleEventRow } from './schedule-event.repository';
 
@@ -78,6 +78,20 @@ export class ScheduleEventService {
   async create(user: AuthUser, input: ScheduleEventInput): Promise<ScheduleEventView> {
     const fields = fieldsOf(input);
     return toView(await this.repository.createMine(this.prisma, user.employeeId, fields));
+  }
+
+  /**
+   * 직접 등록과 같은 규칙으로 넘겨받은 트랜잭션에서 만들고 id만 돌려준다 (철강맨AI 승인 카드가 AI 경유 작업 로그와 함께 남길 때).
+   * 트랜잭션 안에서 관계를 읽지 않으려고 응답 모양은 만들지 않는다 (SERVER-GUIDE, pg 경고)
+   */
+  async createIn(tx: Tx, user: AuthUser, input: ScheduleEventInput): Promise<number> {
+    const fields = fieldsOf(input);
+    return this.repository.createMineId(tx, user.employeeId, fields);
+  }
+
+  /** 저장하지 않고 등록과 같은 검사만 한다 (철강맨AI 승인 카드를 보이기 전 사전 확인). 틀리면 등록과 같은 오류 */
+  checkCreate(input: ScheduleEventInput): void {
+    fieldsOf(input);
   }
 
   /** 내가 직접 등록한 일정만 고친다. 볼 수 없는 일정은 없는 것처럼 COM-003 */

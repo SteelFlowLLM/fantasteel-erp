@@ -7,16 +7,21 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-AST-001·002·003·004·006·007·008·009. AST-005(실행 카드)·010(AI 경유)은 다음 단계. 006(사례)은 예시 사례 + 등록 사례(`past_case`)로 (2026-10-16, `past-case.md`) |
+| REQ | REQ-AST-001~010. AST-005(실행 카드)·010(AI 경유)은 승인 카드와 쓰기 도구 2개(내 일정 추가·구매요청 초안 만들기)로 시작했다(이슈 #362, 4장 '승인 카드'). 006(사례)은 예시 사례 + 등록 사례(`past_case`)로 (2026-10-16, `past-case.md`) |
 | BP | BP-AST-01 ([04] 7장) |
 | 등급 | P2 |
 | LLM | llm 모듈의 LLM 연결 설정(주소·모델)을 쓴다. 지금은 LM Studio(OpenAI 호환). 데이터 조회는 tool 호출을 지원하는 모델이어야 한다 |
 
-단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ← **지금** ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
+단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ③ 승인 카드(AST-005·010, 이슈 #362: 쓰기 도구 → 사용자 허용 → 실행·AI 경유 기록) ← **지금** ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
 
 ## 2. 테이블
 
-쓰기 없음. AI는 조회·설명만 하고 업무 데이터를 바꾸지 않는다([01] AI 사용 원칙). 대화 기록 저장 여부는 미결정([02] 21장)이고 ERD에 테이블이 없어 **저장하지 않는다**. 화면이 최근 대화를 함께 보낸다.
+이 모듈은 테이블에 직접 쓰지 않는다. 조회 도구는 읽기만 하고, 쓰기 도구는 사용자가 승인 카드에서 허용한 뒤 각 모듈 service로 쓴다([01] AI 사용 원칙: AI가 직접 바꾸지 않고 사용자가 확정):
+- `add_my_schedule_event` → `ScheduleEventService.createIn`(내 일정 직접 추가와 같은 검사·행): `schedule_event`·`schedule_event_attendee`, 작업 로그 `business_event` 1행.
+- `create_purchase_request_draft` → `MessageActionService.createFromAssistant`: `action_draft` 1행(`message_id`·`meeting_minutes_id` 없음), 작업 로그 1행.
+- 스키마 변경은 없다. 승인 카드 자리는 DB가 아니라 서버 메모리에 둔다(4장).
+
+대화 기록 저장 여부는 미결정([02] 21장)이고 ERD에 테이블이 없어 **저장하지 않는다**. 화면이 최근 대화를 함께 보낸다.
 
 읽기: `role_permission`·`role` — 권한 밖 요청에 조회할 수 있는 역할을 안내할 때(`ai-assistant.repository.ts`). 업무 데이터는 각 모듈 service로만 읽는다.
 
@@ -26,6 +31,7 @@
 | --- | --- | --- | --- | --- |
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
+| POST | `ai-assistant/approvals/:approvalId` | 없음 (문서에 없는 기능, 이슈 #362) | 로그인만. 질문한 사원 본인만 | `AiApprovalDecisionView` `{ approvalId, decision }` (200). 본문 `{ decision: 'ALLOW' \| 'DENY' }` (아래 '승인 카드') |
 | GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null` |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 
@@ -39,6 +45,7 @@
 | `history` | 선택. `{ role: 'user'\|'assistant', content }[]` 20개까지. 서버는 최근 10개, 한 줄 2000자까지만 쓴다 |
 | `images` | 선택. `{ mediaType: image/png·jpeg·webp, dataBase64 }[]`, 최대 4장·한 장 2MB(base64를 푼 크기). 마지막 질문 메시지에만 `image_url`(data URL)로 실린다. 모델이 사진을 못 본다고 LM Studio가 알리면(`vision: false`) LLM을 부르기 전에 400 COM-004. 모르면 보낸다. 지난 대화에는 남지 않는다. 사진 때문에 JSON 본문 한도를 12mb로 올렸다(`main.ts`). 문서에 없는 기능, 2026-10-16 추가 |
 | `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
+| `approvalCards` | 선택, boolean. 화면이 승인 카드를 보이고 허용·거부를 보낼 수 있으면 `true`. **실시간 답 API에서만** 쓰기 도구를 모델에 알린다. 없거나 `false`면, 또는 API-262(한 번에 답, 사내 채팅 @AI)면 쓰기 도구가 없다. 지금 AI 패널만 보내야 하고, 회의 질문 카드는 보내지 않는다(카드를 그리지 않으면 10분 동안 멈춰 있게 된다). 이슈 #362 |
 
 `sources[]`: `{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }` 또는 `{ kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' }`(업무 순서·흐름 답) 또는 `{ kind: 'MANUAL', id: 'MAN-SO-01', label: '수주 등록' }`(화면 절차 답) 또는 `{ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' }`. 조회 데이터가 앞에 오고, 업무 매뉴얼·업무 프로세스가 용어 사전보다 앞에 온다.
 
@@ -58,7 +65,12 @@
 | `tool_start` | `id`, `name`, `arguments` | 조회 도구를 부르기 시작. `name`은 도구 이름(한글 제목은 `AI_ASSISTANT_TOOL_TITLE`), `arguments`는 모델이 넘긴 입력 JSON 문자열 |
 | `tool_end` | `id`, `label`, `resultPreview`, `durationMs` | 같은 `id`의 도구 결과. `resultPreview`는 결과 앞부분, `label`은 조회 대상 이름(없으면 `null`), `durationMs`는 걸린 시간 |
 | `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이다 |
+| `approval_required` | `approvalId`, `toolId`, `toolName`, `title`, `details[]`, `expiresAt` | 쓰기 도구의 승인 카드 (이슈 #362). `toolId`는 같은 호출의 `tool_start.id`, `toolName`은 `AI_ASSISTANT_WRITE_TOOLS` 중 하나, `title`은 무엇을 하는지 한 줄(예: `내 일정 추가: 주간 회의`), `details`는 `{ label, value }[]`(예: 날짜·시간·메모·참석자, 원료·수량(톤)·희망 입고일·요청자·다음 단계), `expiresAt`은 ISO(지금 + 10분). 카드는 고칠 수 없고 허용·거부만 한다 |
+| `approval_resolved` | `approvalId`, `decision` | 카드가 끝남. `ALLOW`·`DENY`·`TIMEOUT`(10분 지남 = 거부) |
+| `tool_execution` | `approvalId`, `status`, `message`, `result`, `attempts` | 허용한 카드의 실행 결과. `status` `SUCCESS`·`FAILED`, `message`는 결과·실패 이유 문구, `result`는 성공이면 `{ table, id, label, linkPath }`(예: `{ table: 'schedule_event', id: 31, label: '주간 회의', linkPath: '/schedule?week=2026-10-19' }`, `{ table: 'action_draft', id: 12, label: '구매요청 초안 #12', linkPath: '/action-drafts/12' }`), 실패면 `null`. `attempts`는 시도 횟수(일시 오류면 최대 3). 거부·시간 초과면 오지 않는다 |
 | `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
+
+쓰기 도구 한 번의 이벤트 순서: `tool_start` → `approval_required` → `approval_resolved` → (허용이면) `tool_execution` → `tool_end`. 인자·사전 확인이 틀리면 카드 없이 `tool_start` → `tool_end`(결과 앞부분에 `오류`)만 오고 모델이 고쳐 다시 부른다. 기존 이벤트 모양은 그대로다.
 
 ## 4. 업무 규칙
 
@@ -104,6 +116,27 @@
 
 번호·키워드로 거를 수 없는 API는 100건(API 상한)을 읽어 서버에서 거른다. 그보다 많으면 '확인하지 못한 … 수'를 함께 준다.
 
+**승인 카드 (REQ-AST-005·010, 이슈 #362, 문서에 없는 결정값 포함)** — `approval/`, `tools/assistant-write-toolbox.ts`
+- 도구는 조회(READ)와 쓰기(WRITE)로 나눈다(`AssistantToolbox.kindOf`, 쓰기 이름은 shared `AI_ASSISTANT_WRITE_TOOLS`). **조회 도구는 묻지 않는다.** 쓰기 도구는 늘 카드를 거친다. 카드는 고칠 수 없고 허용·거부만 한다.
+- 쓰기 도구는 `approvalCards: true`인 실시간 답에서만 알린다. 아무도 보고 있지 않은 답(API-262, 사내 채팅 @AI)은 기다릴 수 없어 쓰기 도구를 아예 알리지 않는다(바로 거부하는 것보다 단순하고, 모델이 할 수 없는 일을 제안하지 않는다). 알리지 않은 쓰기 도구를 모델이 불러도 조회 도구 모음이 "바꿀 수 없어요" 결과만 돌려준다.
+- 카드를 보이기 전 확인 두 가지: ① 인자를 모델에 알린 JSON 스키마로 검사(`tools/tool-schema.ts`: JSON 아님·객체 아님·빠진 칸·없는 칸·형식·숫자 범위, `null`은 보내지 않은 칸) ② **사전 확인(dry-run)**: 실제 실행과 같은 업무 검증을 저장 없이 한다(일정: 날짜·시각·끝>시작, `ScheduleEventService.checkCreate` / 초안: 구매요청 등록 권한·승인권자(PUR-001)·원료·톤·날짜, `MessageActionService.previewFromAssistant`).
+- 둘 중 하나가 틀리면 카드 없이 이유를 도구 결과로 돌려줘 모델이 고치게 한다. **고칠 기회는 한 질문에 2번**(처음까지 3번, `MAX_FIX_ATTEMPTS`). 실패한 호출과 같은 도구·같은 인자로 다시 부르면 바로 멈춘다(키 순서·공백 무시). 멈추면 다음 차례는 도구 없이 "실행하지 못했고 이유는 …"을 답하게 한다.
+- 모델이 고칠 수 없는 실패는 바로 멈춘다: 400·404(형식·대상 없음)만 고칠 수 있고, 권한 없음(COM-002)·승인권자 없음(PUR-001)·상태 충돌(409)은 멈춘다. 권한 없음이면 그 쓰기의 **사용(USE)** 권한이 있는 역할을 함께 돌려줘 담당 역할을 안내하게 한다.
+- 도구 호출 상한은 그대로 한 질문 4번(`MAX_TOOL_ROUNDS`)이고, 고치는 호출도 이 안에서 센다.
+- 카드 자리(`AssistantApprovalRegistry`): `approval_required`를 보내기 **전에** 자리(UUID)를 만든다(화면이 아주 빨리 허용해도 자리가 있다). 기다리는 시간 **10분**(`AI_APPROVAL_TIMEOUT_MS`), 지나면 `TIMEOUT` = 거부. 처음 결정만 받고 그 뒤는 409. 질문한 사원만 결정한다(다른 사원 403). 스트림이 끊기면(멈추기·창 닫기) 기다리던 카드는 거부로 끝나고 LLM도 다시 부르지 않는다. 끝난 자리는 늦은 결정에 409로 답하려고 10분 더 기억한다.
+- 🟡 자리는 **서버 한 대의 메모리**에 둔다. 서버를 다시 띄우면 기다리던 카드는 사라진다(스트림도 끊겨 거부와 같다). 서버를 여러 대로 늘리면 허용 요청이 다른 서버로 갈 수 있어 공유 저장소(예: DB·Redis)로 옮겨야 한다.
+- 거부·시간 초과면 실행하지 않고 "사용자가 거부해 실행하지 않았어요"를 모델에 돌려준다.
+- 허용하면 실행한다. 실행 뒤 실패는 **모델이 고친 내용으로 다시 하지 않는다**. 일시 오류(DB 연결·풀 시간 초과·잠금 시간 초과·직렬화 충돌·교착·네트워크, `isTransientError`)만 LLM 없이 같은 내용으로 **2번까지** 다시 한다(`MAX_TRANSIENT_RETRIES`, 300ms·600ms 쉬고). 업무 오류는 바로 `tool_execution FAILED`와 이유를 보낸다. 내용을 바꿔야 하면 모델이 새 카드로 다시 제안한다.
+- 프롬프트: 쓰기 도구를 알릴 때만 규칙 9를 바꾸고 13을 더한다 — 쓰기 도구에 있는 일만 제안, 사용자가 분명히 부탁했을 때만, 카드에서 허용해야 실행, 도구 결과에 "실행했어요"가 오기 전에는 됐다고 말하지 않음, 거부·실패는 그대로 알리고 같은 내용을 다시 부르지 않음, 모르는 값은 지어내지 말고 물음.
+- **AI 경유 기록(REQ-AST-010)**: 공통 코드 정의서 BUSINESS_EVENT_TYPE 설명("AI 실행 카드 확정은 DRAFT_CONFIRMED + AI 경유 표시")과 회의록 초안(`createFromMeeting`)의 방식을 따른다. 쓰기와 같은 트랜잭션에서 `business_event.is_ai_assisted = true`, 주체 = 허용한 사원(USER)으로 남긴다.
+
+| 쓰기 도구 | 하는 일 (재사용 service) | 인자 | 작업 로그 |
+| --- | --- | --- | --- |
+| `add_my_schedule_event` 내 일정 추가 | 내 일정 직접 추가와 같다(`ScheduleEventService.createIn`): 등록자·참석자 = 본인, 알림 없음 | `title`(1~100자)·`date`(YYYY-MM-DD) 필수, `startTime`·`endTime`(HH:mm, 서울)·`memo`(1000자) 선택. 시각이 없으면 종일(그날 00:00~다음 날 00:00), `endTime`이 없으면 시작 60분 뒤(🟡 가정값, 카드에 적어 보인다). `endTime`만 있으면 인자 오류 | `DRAFT_CONFIRMED`, 대상 `schedule_event`, AI 경유, 사유 `DRAFT_CONFIRMED: 철강맨AI 승인 카드 허용 (내 일정 추가 · 제목)`. 일정 등록은 REQ-LOG-002 대상이 아니지만 AI 실행 카드 확정은 대상이다 |
+| `create_purchase_request_draft` 구매요청 초안 만들기 | Message → ERP와 같은 구매요청 초안(`action_draft`, `PURCHASE_REQUISITION_CREATE`)을 요청자 = 본인으로 만들고 바로 확인 대기(`WAITING_APPROVAL`)로 둔다. **확정은 지금처럼 초안 화면에서 요청자가 한다**(그때 구매요청이 생긴다) | `itemCode`(원료 코드나 이름, 정확히 하나와 맞아야 함)·`requestedTon`(0보다 큰 숫자) 필수, `desiredReceiptDate`(YYYY-MM-DD)·`requestReason`(500자) 선택. 희망 입고일이 없으면 초안 화면에서 채운다 | `DRAFT_CREATED`, 대상 `action_draft`, AI 경유. 모델이 채운 칸을 `aiFilledFields`로 남겨 나중의 확정·실행 로그도 AI 경유가 된다(메시지 초안과 같은 규칙). `payload.fromAiAssistant = true`, `sourceText` = 사용자 질문 |
+
+초안의 원본: 메시지·회의록이 없는 초안이라 `payload.fromAiAssistant`로 구분한다(스키마 변경 없음). `GET action-drafts`(내 초안)가 이 값으로 찾아 함께 보인다. Agent 대응 후보(`payload.agent`)와는 겹치지 않는다(`message-action.md`).
+
 **회의 질문 (Voice2ERP 묶음 3, 문서에 없는 기능)** — `assistant-meeting.context.ts`
 - `meetingMinutesId`가 오면 서비스가 `MeetingMinutesService.get`(읽기만, `MeetingMinutesModule`이 export)으로 회의록을 읽어 시스템 지시에 `[회의 질문 규칙]`과 `[이 회의]` 블록을 더한다. 기존 도구 반복(`MAX_TOOL_ROUNDS`)과 도구 권한은 그대로라 "SO-… 납기가 맞아?" 같은 ERP 질문은 묻는 사용자 권한으로 도구를 불러 답한다.
 - 권한: 회의록 상세는 전 역할이 보므로(`meeting-minutes.md` 3장) 로그인만 본다. 회의 내용을 읽는 것 말고 새 권한 검사는 없다.
@@ -143,10 +176,14 @@
 | --- | --- |
 | COM-004 | 질문 비었음·길이 초과·`history` 형식 오류 (ValidationPipe) |
 | COM-999 (HTTP 503) | LLM 모델 미설정, LLM 연결 실패·시간 초과(120초). 메시지는 이유 그대로(`LlmRequestError`) |
+| AST-001 (404) 🟡 | 승인 허용·거부: 없는 카드, 또는 끝난 지 10분이 지나 잊은 카드 (정의서 9.3에 없음, 이슈 #362) |
+| AST-002 (409) 🟡 | 승인 허용·거부: 이미 처리된 카드. 시간이 지나 거부된 카드는 "10분이 지나 거부로 처리된 승인 요청이에요" |
+| COM-002 (403) | 승인 허용·거부: 질문한 사원이 아님 |
+| COM-004 (400) | 승인 허용·거부: `decision`이 `ALLOW`·`DENY`가 아님, `approvalId`가 UUID가 아님 |
 
-도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다.
+도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다. 쓰기 도구의 사전 확인·실행 실패도 같다(실행 실패는 `tool_execution FAILED`로도 보낸다).
 
-작업 로그: 남기지 않는다. 질문·답·조회는 업무 데이터 변경이 아니고 REQ-LOG-002 대상 이벤트에 없다. 실행 카드 확정(AST-010)은 다음 단계에서 `is_ai_assisted`로 남긴다.
+작업 로그: 질문·답·조회는 남기지 않는다(REQ-LOG-002 대상 아님). 승인 카드로 실행한 쓰기는 그 쓰기와 같은 트랜잭션에서 AI 경유(`is_ai_assisted`)로 남긴다(4장 '승인 카드').
 
 ## 6. 다른 모듈과의 경계
 
@@ -155,6 +192,9 @@
 | llm | `LlmSettingsStore.read()`(주소·모델·API 키), `LlmClient.chatWithTools()`(이 단계에서 추가: 도구 정의·호출·결과 메시지). 기존 `chat()`은 그대로 |
 | inventory·sales-order·production·purchasing·shipment | 이미 export된 service를 쓴다 |
 | lot·business-event·quality | `exports`에 `LotService`·`BusinessEventService`·`QualityService`·`RejectedLotService`를 더했다(모듈 동작은 그대로) |
+| schedule-event | `exports: [ScheduleEventService]`를 더했다. `createIn(tx, user, input)`(넘겨받은 트랜잭션에서 만들고 id만, 트랜잭션 안에서 관계를 읽지 않음)과 `checkCreate(input)`(저장 없는 검사)를 더했다. 직접 등록 API 동작은 그대로 |
+| message-action | `MessageActionService.previewFromAssistant`(사전 확인)·`createFromAssistant`(초안 생성 + `DRAFT_CREATED` AI 경유)를 더했다. 유형 정의(`PurchaseRequisitionAction`)의 검증(`applyPatch`)·승인권자 확인을 그대로 쓴다 |
+| 공통 `BusinessEventRecorder` | 일정 카드의 AI 경유 작업 로그 |
 
 **기능별 LLM 설정 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `LLM_PROFILE`. 기능마다 샘플링 값과 생각 정도를 정해 요청마다 실어 보낸다. 값이 요청 시점에 들어가므로 LM Studio에서 모델을 다시 불러올 필요가 없다.
 
@@ -183,7 +223,10 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
 - `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
-실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
+- `approval/assistant-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 도구 종류(조회 READ·쓰기 WRITE·모름 null, 한글 제목, 조회 모음은 쓰기를 실행하지 않음, 쓰기 규칙은 알릴 때만 프롬프트에), 인자 스키마(JSON 아님·객체 아님·빠진 칸·없는 칸·형식·숫자, null은 빈 칸), 고칠 기회(2번, 같은 인자면 멈춤), 일시 오류만 같은 내용으로 2번 다시(업무 오류는 1번), 카드 자리(처음 결정만·409, 다른 사원 403, 없는 카드 404, 시간 초과 = 거부, 연결 끊김 = 거부), 호출 처리(스키마·사전 확인 실패는 고침, 같은 인자 반복·권한 없음·PUR-001은 멈춤, 자리를 먼저 만들어 이벤트 직후 허용해도 실행, 거부면 실행 안 함, 실행 뒤 업무 오류는 다시 하지 않음).
+- `assistant-approval.spec.ts`(실제 앱·DB `fs_collab`, 가짜 LLM): `approvalCards`가 없거나 API-262면 쓰기 도구 없음, 일정 허용 → 이벤트 순서·카드 내용·일정 생성·`DRAFT_CONFIRMED` AI 경유·다른 사원 403·늦은 결정 409, 거부 → 만들지 않음, 사전 확인 실패 → 모델이 고친 두 번째 호출에서 카드, 스키마 세 번 실패 → 도구 없이 답, 연결 끊김 → 거부·만들지 않음, 없는 카드 404·형식 400, 초안 허용 → 확인 대기 초안·`fromAiAssistant`·`aiFilledFields`·`DRAFT_CREATED` AI 경유·내 초안 목록, 없는 원료 → 원료 목록과 함께 고치게 함, 영업 사원 → 권한 없음·구매 역할 안내·도구 없이 답.
+
+실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). `assistant-approval.spec.ts`·`meeting-ask.spec.ts`를 뺀 나머지는 DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 
 ## 8. 확인 필요 🟡
 
@@ -198,4 +241,8 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 사진 수·크기 | 4장·2MB. 화면이 긴 변 1568px·JPEG로 줄여 보낸다 | 문서에 없음(가정값) |
 | 영상 | 받지 않음. LM Studio API가 `text`·`image_url`만 받는다(시험으로 확인). 필요하면 장면 몇 장을 사진으로 보낸다 | 실제 서버 확인 결과 |
 | 도구 수 | 14개(과거 사례 포함)를 한 번에 모델에 알린다. 작은 모델이 도구를 잘못 고르면 질문 종류로 미리 좁히는 방식을 검토 | 실제 모델 확인 결과 |
+| 승인 카드 자리 저장 | 서버 한 대의 메모리. 다시 띄우면 기다리던 카드가 사라진다 | 서버 여러 대로 늘리면 공유 저장소 필요 (이슈 #362) |
+| 승인 카드 오류 코드 | AST-001(404)·AST-002(409) | [04] 9.3에 없음 |
+| 끝 시각 없는 일정 | 시작 60분 뒤로 잡고 카드에 적어 보인다 | 문서에 없음(가정값) |
+| 철강맨AI 초안의 원본 표시 | `payload.fromAiAssistant`(스키마 변경 없음). 화면이 원본 칸에 "철강맨AI 대화"로 보이면 된다 | ERD에 AI 대화 원본 컬럼 없음 |
 | 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

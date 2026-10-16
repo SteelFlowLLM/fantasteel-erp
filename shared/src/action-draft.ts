@@ -17,6 +17,11 @@ export interface PurchaseRequisitionDraftPayload {
    * 서버 초안 응답에는 늘 있고(없으면 빈 배열), 회의록 후보(MeetingCandidate.purchase)에는 없다
    */
   aiFilledFields?: string[];
+  /**
+   * 철강맨AI 대화의 승인 카드로 만든 초안이면 true (메시지·회의록 원본이 없다, 이슈 #362). 그때 sourceText는 사용자의 질문이다.
+   * 없거나 false면 메시지·회의록에서 만든 초안
+   */
+  fromAiAssistant?: boolean;
 }
 
 /** 초안 값 (유형별 추출 스키마, 업무 프로세스 12.3). 유형을 더하면 그 유형의 값을 합집합으로 더한다 */

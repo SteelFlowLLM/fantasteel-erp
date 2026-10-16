@@ -30,6 +30,9 @@ export const ERROR_CODE = {
   'VOC-006': { message: '이 후보는 아직 허가할 수 없어요', status: 400 },
   'VOC-007': { message: '허가 또는 제외하지 않은 후보가 남아 있어요', status: 409 },
   'VOC-005': { message: '회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하)', status: 400 },
+  // 🟡 AST-는 정의서 9.3에 없다 (철강맨AI 승인 카드, 2026-10-16). 팀 확인 후 정의서에 올린다.
+  'AST-001': { message: '승인 요청을 찾을 수 없어요', status: 404 },
+  'AST-002': { message: '이미 처리된 승인 요청이에요', status: 409 },
   'SHP-001': { message: '밀시트 PDF 생성 실패(스냅샷은 있음)', status: 500 },
   'SHP-002': { message: '출하 가능 매수를 넘었습니다', status: 409 },
   'SHP-003': { message: '출고 확정된 출하요청은 취소할 수 없습니다', status: 409 },

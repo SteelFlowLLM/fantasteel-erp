@@ -23,7 +23,7 @@ const shell = process.platform === 'win32';
 const nodeOptions = [process.env.NODE_OPTIONS, '--experimental-vm-modules'].filter(Boolean).join(' ');
 
 if (process.argv.includes('--unit')) {
-  const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt', 'src/modules/llm', 'meeting-analysis.validator', 'meeting-speaker.unit', 'meeting-review.unit', 'meeting-candidate.context.unit', 'assistant-meeting.context.unit'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
+  const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt', 'src/modules/llm', 'meeting-analysis.validator', 'meeting-speaker.unit', 'meeting-review.unit', 'meeting-candidate.context.unit', 'assistant-meeting.context.unit', 'assistant-approval.unit'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
   process.exit(r.status ?? 1);
 }
 

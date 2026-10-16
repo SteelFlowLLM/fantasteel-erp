@@ -38,6 +38,12 @@ export class ScheduleEventRepository {
     return tx.scheduleEvent.create({ data: { ...fields, creatorId, attendees: { create: [{ employeeId: creatorId }] } }, include });
   }
 
+  /** createMine과 같은 행을 만들고 id만 읽는다 (다른 트랜잭션 안에서 부를 때) */
+  async createMineId(tx: Tx, creatorId: number, fields: ScheduleEventFields): Promise<number> {
+    const row = await tx.scheduleEvent.create({ data: { ...fields, creatorId, attendees: { create: [{ employeeId: creatorId }] } }, select: { id: true } });
+    return row.id;
+  }
+
   update(tx: Tx, id: number, fields: ScheduleEventFields): Promise<ScheduleEventRow> {
     return tx.scheduleEvent.update({ where: { id }, data: fields, include });
   }

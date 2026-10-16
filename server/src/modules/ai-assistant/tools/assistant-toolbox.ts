@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PERMISSION_LABEL, ROLE_LABEL, type AiAssistantSource, type AuthUser } from '@fantasteel/shared';
+import { isAiAssistantWriteTool, PERMISSION_LABEL, ROLE_LABEL, type AiAssistantSource, type AuthUser } from '@fantasteel/shared';
 import { hasPermission } from '../../../common/auth/auth.guard';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -105,6 +105,15 @@ export class AssistantToolbox {
   }
 
   /**
+   * 도구 종류 (이슈 #362): 조회(READ)는 묻지 않고 바로 실행하고, 쓰기(WRITE)는 늘 승인 카드를 거친다. 모르는 이름은 null.
+   * 쓰기 도구는 AssistantWriteToolbox에 있고 이름은 shared AI_ASSISTANT_WRITE_TOOLS가 정한다
+   */
+  kindOf(name: string): 'READ' | 'WRITE' | null {
+    if (isAiAssistantWriteTool(name)) return 'WRITE';
+    return this.tools.has(name) ? 'READ' : null;
+  }
+
+  /**
    * 이 사용자가 이 도구들이 보여 주는 데이터를 모두 볼 수 있는지 (채팅에 남은 AI 답을 멤버마다 보일지 정할 때).
    * 필요 권한 중 하나라도 VIEW 이상이면 된다. service가 따로 확인하는 조건(예: 구매요청의 부서장)은 여기서 알 수 없어
    * 권한만 본다 — 못 보는 쪽으로 기운다. 모르는 도구는 볼 수 없다고 본다.
@@ -118,6 +127,8 @@ export class AssistantToolbox {
   }
 
   async run(user: AuthUser, call: LlmToolCall): Promise<ToolRunResult> {
+    // 쓰기 도구는 승인 카드를 보일 수 있는 대화에서만 AssistantActionRunner가 실행한다. 여기로 오면 알리지 않은 도구를 부른 것이다
+    if (isAiAssistantWriteTool(call.name)) return failure('이 대화에서는 업무 데이터를 바꿀 수 없어요. 직접 할 수 없다고 답해요');
     const tool = this.tools.get(call.name);
     if (!tool) return failure(`없는 도구예요: ${call.name}`);
 

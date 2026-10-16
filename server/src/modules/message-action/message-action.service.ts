@@ -23,7 +23,7 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { retryOnNumberConflict } from '../purchasing/purchasing.service';
 import { isAiAssisted, type ActionDefinition } from './action-types/action-definition';
 import { ActionTypeRegistry } from './action-types/action-type.registry';
-import { filledExtractedFields } from './action-types/purchase-requisition.action';
+import { filledExtractedFields, materialIdOf } from './action-types/purchase-requisition.action';
 import { DraftExtractor } from './draft-extractor';
 import type { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionRepository, type DraftRow } from './message-action.repository';
@@ -35,6 +35,24 @@ const toJson = (payload: object) => payload as Prisma.InputJsonValue;
 
 /** 초안 값의 원료·규격 품목 id (화면에 품목 이름을 붙일 때) */
 const itemIdOf = (payload: object): number | null => ('itemId' in payload && typeof payload.itemId === 'number' ? payload.itemId : null);
+
+/** 철강맨AI 대화에서 모델이 넘긴 구매요청 초안 값 (이슈 #362). 형식(JSON 스키마)은 AI 어시스턴트 도구가 먼저 본다 */
+export interface AssistantDraftInput {
+  /** 원료 품목 코드나 이름 */
+  itemCode: string;
+  /** 톤. 숫자 글 */
+  requestedTon: string;
+  desiredReceiptDate: string | null;
+  requestReason: string | null;
+  /** 사용자가 철강맨AI에 한 질문. 원본 글(sourceText)로 남긴다 */
+  question: string;
+}
+
+export interface AssistantDraftPreview {
+  payload: PurchaseRequisitionDraftPayload;
+  itemCode: string;
+  itemName: string;
+}
 
 /**
  * Message → ERP 초안 (REQ-ACT-001~005, BP-ACT-01·02, docs/backend/message-action.md).
@@ -143,7 +161,56 @@ export class MessageActionService {
     return draft.id;
   }
 
-  /** chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 확정 주체인 초안(메시지·회의록에서 만든 것). 최근 것 먼저 */
+  /**
+   * 철강맨AI 승인 카드의 사전 확인 (이슈 #362). 저장하지 않고 초안을 만들 때와 같은 검사를 같은 순서로 한다:
+   * 요청자(= 묻는 사원)의 구매요청 등록 권한(COM-002) → 승인권자(PUR-001) → 원료(COM-003) → 칸 형식(COM-004).
+   * 메시지 초안의 확장 유형처럼 만든 사원이 확정 주체다(BP-ACT-02와 같은 규칙).
+   */
+  async previewFromAssistant(tx: Tx, user: AuthUser, input: AssistantDraftInput): Promise<AssistantDraftPreview> {
+    const definition = this.registry.get(ACTION_TYPE.PURCHASE_REQUISITION_CREATE);
+    this.creatorWhoCanConfirm(definition, user);
+    await definition.assertCanExecute(tx, user);
+    const materials = await this.repository.findRawMaterials(tx);
+    const itemId = materialIdOf(materials, input.itemCode);
+    const item = materials.find((m) => m.id === itemId);
+    if (!item) {
+      const known = materials.map((m) => `${m.itemCode}(${m.itemName})`).join(', ');
+      throw new AppException('COM-003', `원료 품목을 찾을 수 없어요: ${input.itemCode}. 원료는 ${known} 중 하나예요`);
+    }
+    const patch = { itemId: item.id, requestedTon: input.requestedTon, desiredReceiptDate: input.desiredReceiptDate, requestReason: input.requestReason };
+    const filled = await definition.applyPatch(tx, definition.empty(input.question), patch);
+    // 모델이 채운 칸은 AI가 채운 칸으로 남겨 나중의 확정·실행 작업 로그도 AI 경유로 한다 (REQ-AST-010)
+    const payload = { ...filled, aiFilledFields: filledExtractedFields(filled), fromAiAssistant: true };
+    return { payload, itemCode: item.itemCode, itemName: item.itemName };
+  }
+
+  /**
+   * 사용자가 승인 카드를 허용하면 초안을 만든다 (이슈 #362). 사전 확인과 같은 검사를 트랜잭션 안에서 다시 하고,
+   * 회의록 초안처럼 바로 요청자 확인 대기로 둔다. 확정은 초안 화면에서 요청자가 한다(지금 흐름 그대로).
+   * 작업 로그 DRAFT_CREATED를 AI 경유로 같은 트랜잭션에 남긴다.
+   */
+  async createFromAssistant(user: AuthUser, input: AssistantDraftInput): Promise<{ id: number }> {
+    return retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const { payload } = await this.previewFromAssistant(tx, user, input);
+        const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
+        const draft = await this.repository.createDraftBrief(tx, { actionType, payload: toJson(payload), requesterId: user.employeeId });
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
+          actor: user,
+          target: { table: 'action_draft', id: draft.id },
+          after: { draftStatus: draft.draftStatus, actionType, requesterId: user.employeeId, payload: toJson(payload) },
+          reason: '철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성',
+          isAiAssisted: true,
+          actionDraftId: draft.id,
+        });
+        await this.repository.setDraftStatus(tx, draft.id, DRAFT_STATUS.WAITING_APPROVAL);
+        return { id: draft.id };
+      }),
+    );
+  }
+
+  /** chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 확정 주체인 초안(메시지·회의록·철강맨AI 대화에서 만든 것). 최근 것 먼저 */
   async list(user: AuthUser, query: ListActionDraftsQuery): Promise<ActionDraftView[]> {
     const chatRoomId = query.chatRoomId;
     if (chatRoomId !== undefined && !(await this.repository.isRoomMember(this.prisma, chatRoomId, user.employeeId))) throw new AppException('COM-002', '채팅방 멤버만 볼 수 있어요');

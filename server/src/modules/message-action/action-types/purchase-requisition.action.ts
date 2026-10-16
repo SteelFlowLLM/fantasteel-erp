@@ -33,11 +33,13 @@ export function payloadOf(raw: unknown): PurchaseRequisitionDraftPayload {
     requestReason: textOrNull(p.requestReason),
     sourceText: textOrNull(p.sourceText),
     aiFilledFields: Array.isArray(p.aiFilledFields) ? p.aiFilledFields.filter((f): f is string => typeof f === 'string') : [],
+    // 철강맨AI 대화에서 만든 초안 표시는 고치거나 확정해도 남아야 한다 (목록이 이 값으로 찾는다)
+    ...(p.fromAiAssistant === true ? { fromAiAssistant: true } : {}),
   };
 }
 
 /** LLM이 고른 원료: 코드나 이름이 정확히 하나와 맞을 때만 (대소문자·앞뒤 공백 무시) */
-function materialIdOf(materials: MaterialBrief[], value: unknown): number | null {
+export function materialIdOf(materials: MaterialBrief[], value: unknown): number | null {
   if (typeof value !== 'string' || !value.trim()) return null;
   const key = value.trim().toLowerCase();
   const matches = materials.filter((m) => m.itemCode.toLowerCase() === key || m.itemName.toLowerCase() === key);

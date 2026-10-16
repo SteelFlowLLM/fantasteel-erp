@@ -1,6 +1,6 @@
-import { AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_APPROVAL_DECISIONS, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, type AiApprovalDecision, type AiApprovalDecisionInput, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBase64, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -79,4 +79,15 @@ export class AskAiAssistantDto {
   @ValidateNested({ each: true })
   @Type(() => AiAssistantImageDto)
   images?: AiAssistantImageDto[];
+
+  /** 화면이 승인 카드를 보일 수 있으면 true. 실시간 답 API에서만 쓰기 도구를 알린다 (이슈 #362) */
+  @IsOptional()
+  @IsBoolean()
+  approvalCards?: boolean;
+}
+
+/** POST ai-assistant/approvals/:approvalId (이슈 #362) */
+export class DecideAiApprovalDto implements AiApprovalDecisionInput {
+  @IsIn(AI_APPROVAL_DECISIONS, { message: 'decision은 ALLOW 또는 DENY예요' })
+  decision!: AiApprovalDecision;
 }

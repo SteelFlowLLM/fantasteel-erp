@@ -1,4 +1,5 @@
-// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답한다. 실행 카드는 아직 없다.
+// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답하고,
+// 쓰기 도구는 사용자가 승인 카드에서 허용해야 실행한다 (REQ-AST-005·010, 이슈 #362).
 import type { Role } from './codes';
 
 /** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
@@ -28,6 +29,11 @@ export interface AiAssistantMessageInput {
   reasoning?: AiReasoningLevel;
   /** 질문과 함께 보는 사진 (문서에 없는 기능, 2026-10-16 추가). 사진을 볼 수 있는 모델일 때만. 지난 대화에는 남기지 않는다 */
   images?: AiAssistantImageInput[];
+  /**
+   * 화면이 승인 카드(approval_required 이벤트)를 보이고 허용·거부를 보낼 수 있으면 true (문서에 없는 기능, 2026-10-16 추가).
+   * 실시간 답 API(messages/stream)에서만 쓰기 도구를 모델에 알린다. 없거나 false면, 또는 API-262(한 번에 답)면 쓰기 도구가 없다
+   */
+  approvalCards?: boolean;
 }
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
@@ -74,7 +80,55 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   get_shipment_requests: '출하요청 조회',
   get_mill_sheets: '밀시트 조회',
   search_past_cases: '과거 사례 검색',
+  add_my_schedule_event: '내 일정 추가',
+  create_purchase_request_draft: '구매요청 초안 만들기',
 };
+
+/** 업무 데이터를 바꾸는 쓰기 도구. 늘 승인 카드를 거친다. 나머지 도구는 조회 도구라 묻지 않는다 */
+export const AI_ASSISTANT_WRITE_TOOLS = ['add_my_schedule_event', 'create_purchase_request_draft'] as const;
+export type AiAssistantWriteTool = (typeof AI_ASSISTANT_WRITE_TOOLS)[number];
+
+export const isAiAssistantWriteTool = (name: string): name is AiAssistantWriteTool => (AI_ASSISTANT_WRITE_TOOLS as readonly string[]).includes(name);
+
+/** 승인 카드를 기다리는 시간 (결정값). 지나면 거부로 본다 */
+export const AI_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** 사용자가 카드에서 고르는 값 */
+export const AI_APPROVAL_DECISIONS = ['ALLOW', 'DENY'] as const;
+export type AiApprovalDecision = (typeof AI_APPROVAL_DECISIONS)[number];
+/** 카드가 끝난 이유: 허용·거부·시간 초과(거부로 본다) */
+export type AiApprovalResolution = AiApprovalDecision | 'TIMEOUT';
+export const AI_APPROVAL_RESOLUTION_LABEL: Record<AiApprovalResolution, string> = { ALLOW: '허용', DENY: '거부', TIMEOUT: '시간 초과' };
+
+/** 승인 카드에 보일 한 줄 (예: { label: '날짜', value: '2026-10-17 (토)' }) */
+export interface AiApprovalDetail {
+  label: string;
+  value: string;
+}
+
+/** POST ai-assistant/approvals/:approvalId 본문 */
+export interface AiApprovalDecisionInput {
+  decision: AiApprovalDecision;
+}
+
+/** POST ai-assistant/approvals/:approvalId 응답 */
+export interface AiApprovalDecisionView {
+  approvalId: string;
+  decision: AiApprovalDecision;
+}
+
+/** 쓰기 도구가 만든 업무. 화면이 linkPath로 이동 링크를 보인다 */
+export interface AiToolExecutionResult {
+  /** 만든 행의 테이블 (작업 로그 대상과 같은 이름, 예: schedule_event, action_draft) */
+  table: string;
+  id: number;
+  /** 화면에 보일 이름 (예: 일정 제목, '구매요청 초안 #12') */
+  label: string;
+  /** 화면 주소 (예: /schedule?week=2026-10-12, /action-drafts/12) */
+  linkPath: string;
+}
+
+export type AiToolExecutionStatus = 'SUCCESS' | 'FAILED';
 
 /** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), 조회 데이터. 사례 번호는 다음 단계 */
 export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'DATA';
@@ -116,6 +170,8 @@ export interface AiAssistantReplyView {
  * 답을 만드는 과정의 실시간 이벤트 (POST /ai-assistant/messages/stream, 한 줄에 JSON 하나).
  * - thinking·answer: 글 조각. answer는 출처 표시를 지우기 전 원문이라, done의 reply.answer로 바꿔 보인다
  * - 한 차례에서 answer 조각 뒤에 tool_start가 오면 그 글은 최종 답이 아니라 도구를 부르기 전의 중간 글이다
+ * - 쓰기 도구(승인 카드): tool_start → approval_required → approval_resolved → (허용이면) tool_execution → tool_end.
+ *   인자·사전 확인이 틀리면 카드 없이 tool_end만 온다(모델이 고쳐 다시 부른다). toolId는 같은 도구 호출의 tool_start.id
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
@@ -123,6 +179,30 @@ export type AiAssistantStreamEvent =
   | { type: 'answer'; text: string }
   | { type: 'tool_start'; id: string; name: string; arguments: string }
   | { type: 'tool_end'; id: string; label: string | null; resultPreview: string; durationMs: number }
+  | {
+      type: 'approval_required';
+      approvalId: string;
+      /** 같은 도구 호출의 tool_start.id */
+      toolId: string;
+      toolName: AiAssistantWriteTool;
+      /** 무엇을 하는지 한 줄 (예: 내 일정에 '주간 회의'를 추가해요) */
+      title: string;
+      details: AiApprovalDetail[];
+      /** 이 시각까지 고르지 않으면 거부(TIMEOUT)로 본다. ISO 8601 */
+      expiresAt: string;
+    }
+  | { type: 'approval_resolved'; approvalId: string; decision: AiApprovalResolution }
+  | {
+      type: 'tool_execution';
+      approvalId: string;
+      status: AiToolExecutionStatus;
+      /** 화면에 보일 결과·실패 이유 */
+      message: string;
+      /** 성공하면 만든 업무, 실패하면 null */
+      result: AiToolExecutionResult | null;
+      /** 실행 시도 횟수. 일시 오류(연결·잠금 시간 초과)면 같은 내용으로 2번까지 다시 해 최대 3 */
+      attempts: number;
+    }
   | { type: 'done'; reply: AiAssistantReplyView }
   | { type: 'error'; message: string };
 

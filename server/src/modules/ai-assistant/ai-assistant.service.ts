@@ -12,7 +12,7 @@ import {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolCall, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
@@ -22,14 +22,22 @@ import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
 import { findManualGuides } from './knowledge/manual.search';
 import { findProcessSteps } from './knowledge/process.search';
+import { AssistantActionRunner } from './approval/assistant-action.runner';
+import { WriteFixBudget } from './approval/write-call.rules';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox } from './tools/assistant-toolbox';
+import { AssistantWriteToolbox } from './tools/assistant-write-toolbox';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
 
 export interface PreparedAsk {
   run(emit?: AssistantEmit, signal?: AbortSignal): Promise<AiAssistantReplyView>;
+}
+
+export interface PrepareOptions {
+  /** 화면이 답을 실시간으로 보고 있는지 (스트리밍 API). 아니면 승인 카드를 기다릴 수 없어 쓰기 도구를 알리지 않는다 */
+  interactive?: boolean;
 }
 
 const NO_VISION = '지금 모델은 사진을 볼 수 없어요. 사진을 빼고 물어보거나, 관리자에게 사진을 보는 모델을 요청해 주세요';
@@ -45,8 +53,9 @@ const TRACE_THINKING_MAX = 8000;
 
 /**
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
- * 데이터는 모델이 고른 조회 도구를 서버가 사용자 권한으로 실행해 얻는다. AI는 조회·설명만 하고 업무 데이터를 바꾸지 않으므로
- * 작업 로그도 남기지 않는다(REQ-LOG-002 대상 아님). LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
+ * 데이터는 모델이 고른 조회 도구를 서버가 사용자 권한으로 실행해 얻는다. 조회는 작업 로그를 남기지 않는다(REQ-LOG-002 대상 아님).
+ * 쓰기 도구는 실시간 답에서 화면이 승인 카드를 보일 수 있을 때만 알리고, 사용자가 허용하면 실행해 AI 경유로 남긴다(이슈 #362).
+ * LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
  */
 @Injectable()
 export class AiAssistantService {
@@ -57,6 +66,8 @@ export class AiAssistantService {
     private readonly llm: LlmClient,
     private readonly toolbox: AssistantToolbox,
     private readonly meetingMinutes: MeetingMinutesService,
+    private readonly writeTools: AssistantWriteToolbox,
+    private readonly actions: AssistantActionRunner,
   ) {}
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
@@ -95,7 +106,7 @@ export class AiAssistantService {
    * 답을 만들기 전 확인(모델 설정·회의록)과 프롬프트 준비. 여기서 던지는 오류는 평소 API 오류로 나가고,
    * 스트리밍 API는 이것이 통과한 뒤에야 응답을 시작한다. run은 LLM 실패를 LlmRequestError로 던진다.
    */
-  async prepare(user: AuthUser, input: AiAssistantMessageInput): Promise<PreparedAsk> {
+  async prepare(user: AuthUser, input: AiAssistantMessageInput, options: PrepareOptions = {}): Promise<PreparedAsk> {
     const settings = await this.settingsStore.read();
     if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
     const model = settings.model;
@@ -106,6 +117,8 @@ export class AiAssistantService {
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
     const manualGuides = findManualGuides(input.question);
+    // 사내 채팅 @AI(API-262)처럼 아무도 보고 있지 않은 답은 승인을 기다릴 수 없어 쓰기 도구를 아예 알리지 않는다
+    const writable = options.interactive === true && input.approvalCards === true;
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -117,6 +130,7 @@ export class AiAssistantService {
       manualGuides,
       history,
       question: input.question,
+      writeTools: writable,
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
@@ -132,7 +146,11 @@ export class AiAssistantService {
         const started = Date.now();
         const dataSources: AiAssistantSource[] = [];
         const toolCalls: AiAssistantToolTrace[] = [];
-        const tools = this.toolbox.definitions();
+        const writeEnabled = writable && emit !== undefined;
+        const tools = writeEnabled ? [...this.toolbox.definitions(), ...this.writeTools.definitions()] : this.toolbox.definitions();
+        const budget = new WriteFixBudget();
+        // 쓰기 도구를 더 고칠 수 없거나 권한 밖이면 다음 차례는 도구 없이 답하게 한다
+        let stopped = false;
         const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
           emit
             ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
@@ -145,14 +163,20 @@ export class AiAssistantService {
             const callStarted = Date.now();
             const traceId = `t${toolCalls.length + 1}`;
             emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
-            const result = await this.toolbox.run(user, toolCall);
+            // 조회 도구는 묻지 않고 바로, 쓰기 도구는 승인 카드를 거쳐 실행한다
+            const result: { content: string; source: AiAssistantSource | null; stop?: boolean } =
+              emit && writeEnabled && this.toolbox.kindOf(toolCall.name) === 'WRITE'
+                ? await this.runWrite(user, toolCall, traceId, input.question, emit, budget, stopped, signal)
+                : await this.toolbox.run(user, toolCall);
+            if (result.stop) stopped = true;
             const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
             toolCalls.push(trace);
             emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs });
             messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
             if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
           }
-          reply = await call(round < MAX_TOOL_ROUNDS ? tools : []);
+          if (signal?.aborted) throw new LlmAbortedError();
+          reply = await call(round < MAX_TOOL_ROUNDS && !stopped ? tools : []);
         }
 
         const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
@@ -168,6 +192,22 @@ export class AiAssistantService {
         };
       },
     };
+  }
+
+  /** 쓰기 도구 한 번 (승인 카드). 앞에서 멈췄으면 같은 차례의 다른 쓰기 호출도 실행하지 않는다 */
+  private async runWrite(
+    user: AuthUser,
+    call: LlmToolCall,
+    toolId: string,
+    question: string,
+    emit: AssistantEmit,
+    budget: WriteFixBudget,
+    stopped: boolean,
+    signal?: AbortSignal,
+  ): Promise<{ content: string; source: null; stop: boolean }> {
+    if (stopped) return { content: JSON.stringify({ 오류: '이번 질문에서는 더 실행하지 않아요' }), source: null, stop: true };
+    const outcome = await this.actions.run({ user, call, toolId, question, emit, signal, budget });
+    return { ...outcome, source: null };
   }
 
   /** "그건 언제 풀려?"처럼 용어 없이 이어 묻는 질문은 바로 앞 질문의 용어를 쓴다 */

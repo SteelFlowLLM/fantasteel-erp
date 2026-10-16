@@ -9,7 +9,9 @@ import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
 import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
+import type { AssistantActionRunner } from './approval/assistant-action.runner';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
+import type { AssistantWriteToolbox } from './tools/assistant-write-toolbox';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { AskAiAssistantDto } from './dto/ai-assistant.dto';
@@ -183,7 +185,10 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes), calls, runs, capabilityAsks };
+    // 쓰기 도구(승인 카드)는 assistant-approval 시험이 본다. 여기서는 알리지 않는다
+    const writeTools = { definitions: () => [] } as unknown as AssistantWriteToolbox;
+    const actions = {} as unknown as AssistantActionRunner;
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, writeTools, actions), calls, runs, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {

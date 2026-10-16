@@ -28,6 +28,14 @@
 
 일정은 REQ-LOG-002 작업 로그 대상이 아니어서 등록·수정 로그를 남기지 않는다. 삭제는 요청 범위 밖이라 만들지 않았다.
 
+## 철강맨AI 승인 카드 (이슈 #362)
+
+철강맨AI의 쓰기 도구 `add_my_schedule_event`가 이 모듈의 service를 쓴다(`ScheduleEventModule`이 `ScheduleEventService`를 export).
+
+- `checkCreate(input)`: 저장하지 않고 직접 등록과 같은 검사(끝 시각 > 시작 시각, `COM-004`). 카드를 보이기 전 사전 확인.
+- `createIn(tx, user, input)`: 사용자가 카드를 허용하면 ai-assistant의 트랜잭션 안에서 직접 등록과 같은 행(등록자·참석자 = 본인, 알림 없음)을 만들고 id만 돌려준다.
+- 같은 트랜잭션에서 ai-assistant가 작업 로그 `DRAFT_CONFIRMED`(대상 `schedule_event`, AI 경유)를 남긴다. 일정 등록 자체는 REQ-LOG-002 대상이 아니지만 AI 실행 카드 확정은 대상이다(`ai-assistant.md` 4장 '승인 카드').
+
 ## 알림
 
 `SCHEDULE_EVENT_ASSIGNED`의 링크는 `/schedule?week=<일정이 속한 주의 월요일>`이다 (일정 자체의 `link_path`는 `/meetings?id=<회의록>` 그대로).
