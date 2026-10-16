@@ -53,7 +53,15 @@ const fake = {
   refreshGrants: 0,
   refreshFails: false,
   mediaFails: false,
+  /** 내용 응답 머리를 이만큼 늦춘다 (브라우저가 떠나는 시험) */
+  mediaDelayMs: 0,
+  /** 허용한 Google 계정 (about.user.permissionId) */
+  accountId: 'acct-1',
+  /** 토큰마다 발급할 때의 계정 */
+  tokenAccounts: new Map<string, string>(),
   revoked: [] as string[],
+  /** 내용 요청에 붙어 온 Range 머리 */
+  ranges: [] as string[],
   /** Drive 요청에 쓴 액세스 토큰 */
   bearers: [] as string[],
   files: new Map<string, FakeFile>(),
@@ -69,6 +77,7 @@ function issueAccess(): string {
   fake.issued += 1;
   const access = `g-access-${fake.issued}`;
   fake.accessTokens.add(access);
+  fake.tokenAccounts.set(access, fake.accountId);
   return access;
 }
 
@@ -101,7 +110,8 @@ function matchesQuery(file: FakeFile, q: string): boolean {
   if (parent && !file.parents.includes(parent)) return false;
   if (q.includes('trashed = false') && file.trashed) return false;
   if (q.includes("mimeType contains 'audio/'")) return file.mimeType.startsWith('audio/') || file.mimeType === 'video/webm' || file.mimeType === 'video/mp4';
-  if (q.includes("mimeType contains 'image/'")) return file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml';
+  const equals = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
+  if (equals.length > 0) return equals.includes(file.mimeType);
   return true;
 }
 
@@ -109,6 +119,7 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
   const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
   if (!fake.accessTokens.has(token)) return json(res, 401, { error: { code: 401, message: 'Request had invalid authentication credentials.' } });
   fake.bearers.push(token);
+  if (url.pathname === '/drive/v3/about') return json(res, 200, { user: { permissionId: fake.tokenAccounts.get(token) ?? fake.accountId } });
   if (url.pathname === '/drive/v3/files') {
     const q = url.searchParams.get('q') ?? '';
     const size = Number(url.searchParams.get('pageSize') ?? 100);
@@ -122,6 +133,21 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
   if (!file) return json(res, 404, { error: { code: 404, message: `File not found: ${id}.`, errors: [{ reason: 'notFound' }] } });
   if (url.searchParams.get('alt') !== 'media') return json(res, 200, metaOf(file));
   if (fake.mediaFails) return json(res, 500, { error: { code: 500, message: 'Backend Error' } });
+  if (fake.mediaDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fake.mediaDelayMs));
+  const range = typeof req.headers.range === 'string' ? req.headers.range : '';
+  if (range) {
+    fake.ranges.push(range);
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+    const total = file.content.length;
+    if (m) {
+      const start = m[1] === '' ? Math.max(0, total - Number(m[2])) : Number(m[1]);
+      const end = m[1] === '' || m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+      if (start >= total) return json(res, 416, { error: { code: 416, message: 'Request range not satisfiable' } });
+      const part = file.content.subarray(start, end + 1);
+      res.writeHead(206, { 'content-type': file.mimeType, 'content-length': String(part.length), 'content-range': `bytes ${start}-${end}/${total}` }).end(part);
+      return;
+    }
+  }
   if (file.fakeContentLength !== undefined) {
     // 머리만 보내고 끊는다: 서버는 Content-Length만 보고 받기 전에 거절해야 한다
     res.writeHead(200, { 'content-type': file.mimeType, 'content-length': String(file.fakeContentLength) });
@@ -153,7 +179,7 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
 
 async function handleFake(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', fake.origin);
-  if (url.pathname.startsWith('/drive/v3/files') && req.method === 'GET') return handleDrive(req, res, url);
+  if (url.pathname.startsWith('/drive/v3/') && req.method === 'GET') return handleDrive(req, res, url);
   const form = new URLSearchParams(await readBody(req));
   if (url.pathname === '/token' && req.method === 'POST') {
     if (form.get('client_id') !== CLIENT_ID || form.get('client_secret') !== CLIENT_SECRET) return json(res, 401, { error: 'invalid_client' });
@@ -288,6 +314,8 @@ beforeAll(async () => {
   addFile({ id: 'imageHuge00008', name: '큰 사진.png', mimeType: 'image/png', parents: [FOLDER], fakeSize: 21 * 1024 * 1024, content: Buffer.from('x') });
   addFile({ id: 'imageNoSize009', name: '크기 숨김.png', mimeType: 'image/png', parents: [FOLDER], hideSize: true, fakeContentLength: 25 * 1024 * 1024, content: Buffer.alloc(0) });
   addFile({ id: 'imageChunked10', name: '조각 사진.png', mimeType: 'image/png', parents: [FOLDER], hideSize: true, chunked: true, content: Buffer.alloc(21 * 1024 * 1024, 1) });
+  addFile({ id: 'imageReplaced12', name: '바뀐 사진.webp', mimeType: 'image/webp', parents: [FOLDER], fakeSize: 999, content: Buffer.from('new-webp!') });
+  addFile({ id: 'imageSvgUpper13', name: 'LOGO.SVG', mimeType: 'IMAGE/SVG+XML', parents: [FOLDER], content: Buffer.from('<svg/>') });
   addFile({ id: 'subFolder00011', name: '하위 폴더', mimeType: 'application/vnd.google-apps.folder', parents: [FOLDER], content: Buffer.alloc(0) });
   addFile({ id: FOLDER, name: '회의 녹음·현장 사진', mimeType: 'application/vnd.google-apps.folder', parents: ['root0000000'], content: Buffer.alloc(0) });
 }, 60_000);
@@ -321,6 +349,12 @@ describe('연결 전', () => {
     const { status, body } = await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
     expect(status).toBe(409);
     expect(body.error?.code).toBe('INT-002');
+  });
+
+  it('잘못된 client id는 행을 만들기 전에 거절한다', async () => {
+    const { status, body } = await call('PUT', '/integrations/google-drive/settings', adminCookie, { clientId: 'not-a-google-client', folder: FOLDER });
+    expect([status, body.error?.code]).toEqual([400, 'COM-004']);
+    expect(await prisma.integrationConnection.findUnique({ where: { providerKey: 'google-drive' } })).toBeNull();
   });
 
   it('client id·secret 없이 연결을 시작하면 INT-010이고 확인값을 남기지 않는다', async () => {
@@ -421,8 +455,8 @@ describe('OAuth 연결', () => {
     const { status, body } = await call<IntegrationTestResult>('POST', '/integrations/google-drive/test', adminCookie);
     expect(status).toBe(200);
     expect(body.data).toMatchObject({ ok: true, error: null, tools: [], missingTools: [] });
-    // 녹음 2 (지운 것·다른 폴더 제외), 사진 4 (SVG 제외)
-    expect(body.data.driveFolder).toEqual({ id: FOLDER, name: '회의 녹음·현장 사진', audioCount: 2, imageCount: 4, countLimited: false });
+    // 녹음 2 (지운 것·다른 폴더 제외), 사진 5 (대문자 SVG까지 제외)
+    expect(body.data.driveFolder).toEqual({ id: FOLDER, name: '회의 녹음·현장 사진', audioCount: 2, imageCount: 5, countLimited: false });
     expect(body.data.latencyMs).toEqual(expect.any(Number));
   });
 });
@@ -436,9 +470,9 @@ describe('GET integrations/google-drive/files', () => {
     expect(body.data.nextPageToken).toBeNull();
   });
 
-  it('사진: SVG·PDF·폴더는 빼고 미리보기 주소를 준다', async () => {
+  it('사진: 허용 목록(jpeg·png·webp…)만, SVG·PDF·폴더는 빼고 미리보기 주소를 준다', async () => {
     const { body } = await call<DriveFilePage>('GET', '/integrations/google-drive/files?kind=image', salesCookie);
-    expect(body.data.files.map((f) => f.id).sort()).toEqual(['imageChunked10', 'imageHuge00008', 'imageNoSize009', 'imagePhoto0005']);
+    expect(body.data.files.map((f) => f.id).sort()).toEqual(['imageChunked10', 'imageHuge00008', 'imageNoSize009', 'imagePhoto0005', 'imageReplaced12']);
     expect(body.data.files.find((f) => f.id === 'imagePhoto0005')?.thumbnailLink).toBe('https://lh3.googleusercontent.com/thumb-imagePhoto0005');
   });
 
@@ -490,8 +524,8 @@ describe('GET integrations/google-drive/files/:fileId/content', () => {
     }
   });
 
-  it('녹음·사진이 아니면 INT-013 (SVG·PDF·폴더)', async () => {
-    for (const id of ['imageSvgLogo06', 'docReportPdf07', 'subFolder00011']) {
+  it('녹음·사진이 아니면 INT-013 (SVG는 대소문자 상관없이·PDF·폴더)', async () => {
+    for (const id of ['imageSvgLogo06', 'imageSvgUpper13', 'docReportPdf07', 'subFolder00011']) {
       const { status, body } = await call('GET', `/integrations/google-drive/files/${id}/content`, salesCookie);
       expect([id, status, body.error?.code]).toEqual([id, 400, 'INT-013']);
     }
@@ -502,6 +536,56 @@ describe('GET integrations/google-drive/files/:fileId/content', () => {
     expect([meta.status, meta.body.error?.code]).toEqual([413, 'INT-014']);
     const header = await call('GET', '/integrations/google-drive/files/imageNoSize009/content', salesCookie);
     expect([header.status, header.body.error?.code]).toEqual([413, 'INT-014']);
+  });
+
+  it('Range 한 구간은 Drive로 넘겨 206 + Content-Range로 답한다', async () => {
+    const res = await fetch(`${baseUrl}/integrations/google-drive/files/audioNewest001/content`, { headers: { cookie: salesCookie, range: 'bytes=0-3' } });
+    expect(res.status).toBe(206);
+    expect(res.headers.get('content-range')).toBe('bytes 0-3/14');
+    expect(res.headers.get('content-length')).toBe('4');
+    expect(res.headers.get('accept-ranges')).toBe('bytes');
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('fake');
+    expect(fake.ranges.at(-1)).toBe('bytes=0-3');
+    const tail = await fetch(`${baseUrl}/integrations/google-drive/files/audioNewest001/content`, { headers: { cookie: salesCookie, range: 'bytes=10-' } });
+    expect([tail.status, tail.headers.get('content-range')]).toEqual([206, 'bytes 10-13/14']);
+    expect(Buffer.from(await tail.arrayBuffer()).toString()).toBe('ytes');
+  });
+
+  it('Range가 파일 크기를 넘으면 416, 여러 구간·이상한 값은 무시하고 전체를 준다', async () => {
+    const beyond = await fetch(`${baseUrl}/integrations/google-drive/files/audioNewest001/content`, { headers: { cookie: salesCookie, range: 'bytes=100-' } });
+    expect([beyond.status, beyond.headers.get('content-range')]).toEqual([416, 'bytes */14']);
+    const before = fake.ranges.length;
+    for (const range of ['bytes=0-1,4-5', 'items=0-3', 'bytes=5-2']) {
+      const res = await fetch(`${baseUrl}/integrations/google-drive/files/audioNewest001/content`, { headers: { cookie: salesCookie, range } });
+      expect([range, res.status]).toEqual([range, 200]);
+      expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('fake-m4a-bytes');
+    }
+    expect(fake.ranges.length).toBe(before);
+  });
+
+  it('Content-Length는 메타데이터가 아니라 Drive 내용 응답의 것을 쓴다 (그 사이 파일이 바뀌어도 어긋나지 않음)', async () => {
+    const res = await fetch(`${baseUrl}/integrations/google-drive/files/imageReplaced12/content`, { headers: { cookie: salesCookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe('9');
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('new-webp!');
+  });
+
+  it('브라우저가 받기 전에 떠나면 연결 오류(last_error)로 남기지 않는다', async () => {
+    expect((await driveView()).lastError).toBeNull();
+    fake.mediaDelayMs = 400;
+    try {
+      const leave = new AbortController();
+      const pending = fetch(`${baseUrl}/integrations/google-drive/files/audioNewest001/content`, { headers: { cookie: salesCookie }, signal: leave.signal }).catch(() => null);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      leave.abort();
+      await pending;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      fake.mediaDelayMs = 0;
+    }
+    const view = await driveView();
+    expect(view.lastError).toBeNull();
+    expect(view.status).toBe('CONNECTED');
   });
 
   it('크기를 모르고 받는 중에 상한을 넘으면 잘린 내용을 성공처럼 끝내지 않고 끊는다', async () => {
@@ -620,13 +704,15 @@ describe('토큰 갱신', () => {
 });
 
 describe('다시 연결·끊기', () => {
-  it('Drive 읽기 권한을 빼고 허용하면 연결하지 않는다', async () => {
+  it('Drive 읽기 권한을 빼고 허용하면 연결하지 않고, 지금 연결이 없으므로 방금 받은 허용을 거둔다', async () => {
     fake.grantScope = FILE_SCOPE;
     try {
+      const revokedBefore = fake.revoked.length;
       const location = new URL(await connectFlow());
       expect(location.searchParams.get('result')).toBe('error');
       expect(location.searchParams.get('message')).toContain('Drive 읽기 권한');
       expect((await driveView()).status).toBe('RECONNECT_REQUIRED');
+      expect(fake.revoked.slice(revokedBefore)).toEqual([`g-refresh-${fake.issued}`]);
     } finally {
       fake.grantScope = `${READ_SCOPE} ${FILE_SCOPE}`;
     }
@@ -642,6 +728,42 @@ describe('다시 연결·끊기', () => {
     expect(await connectFlow()).toBe('http://client.test/admin/integrations?integration=google-drive&result=connected');
     expect(await driveView()).toMatchObject({ status: 'CONNECTED', lastError: null });
     expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    expect((await storedTokens()).accountId).toBe('acct-1');
+  });
+
+  it('같은 계정으로 다시 연결하면 옛 리프레시 토큰을 취소하지 않는다 (취소가 새 허용까지 끊으므로)', async () => {
+    const old = (await storedTokens()).refreshToken;
+    const revokedBefore = fake.revoked.length;
+    expect(new URL(await connectFlow()).searchParams.get('result')).toBe('connected');
+    expect((await storedTokens()).refreshToken).not.toBe(old);
+    expect(fake.revoked.length).toBe(revokedBefore);
+  });
+
+  it('같은 계정으로 Drive 권한을 빼고 다시 허용하면 지금 연결을 지키려고 취소하지 않는다', async () => {
+    const current = (await storedTokens()).refreshToken;
+    const revokedBefore = fake.revoked.length;
+    fake.grantScope = FILE_SCOPE;
+    try {
+      expect(new URL(await connectFlow()).searchParams.get('result')).toBe('error');
+    } finally {
+      fake.grantScope = `${READ_SCOPE} ${FILE_SCOPE}`;
+    }
+    expect(fake.revoked.length).toBe(revokedBefore);
+    expect((await storedTokens()).refreshToken).toBe(current);
+    expect((await driveView()).status).toBe('CONNECTED');
+  });
+
+  it('다른 계정으로 다시 연결하면 새 토큰을 저장한 뒤 옛 계정의 허용을 거둔다', async () => {
+    const old = (await storedTokens()).refreshToken;
+    fake.accountId = 'acct-2';
+    try {
+      expect(new URL(await connectFlow()).searchParams.get('result')).toBe('connected');
+      expect(fake.revoked).toContain(old);
+      expect(await storedTokens()).toMatchObject({ accountId: 'acct-2' });
+      expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    } finally {
+      fake.accountId = 'acct-1';
+    }
   });
 
   it('끊기: Google에 허용 취소를 보내고 토큰을 지운다. client id·secret과 폴더는 남긴다', async () => {

@@ -15,8 +15,8 @@ import {
   GoogleTokenResponseError,
   googleEndpoints,
   hasDriveReadScope,
+  clientInputError,
   isAccessTokenFresh,
-  isGoogleClientId,
   isGoogleTokens,
   parseTokenResponse,
   type GoogleClientCredentials,
@@ -26,8 +26,8 @@ import {
 const KEY = INTEGRATION_PROVIDER.GOOGLE_DRIVE;
 /** 토큰 요청·Drive JSON 요청 하나의 상한, 내용 받기는 응답 머리가 올 때까지의 상한 */
 const HTTP_TIMEOUT_MS = 60_000;
-/** 끊기 때 Google 쪽 허용 취소는 덤이라 짧게 기다린다 */
-const REVOKE_TIMEOUT_MS = 10_000;
+/** 허용 취소·계정 확인은 덤이라 짧게 기다린다 */
+const SIDE_REQUEST_TIMEOUT_MS = 10_000;
 /** 내용 받기: 다음 조각이 이 시간 안에 오지 않으면 끊는다 (큰 녹음은 전체 시간을 정할 수 없다) */
 const MEDIA_IDLE_TIMEOUT_MS = 60_000;
 
@@ -43,8 +43,16 @@ function errorMessage(error: AppException): string {
   return (error.getResponse() as { message: string }).message;
 }
 
-/** 받은 바이트가 상한을 넘거나, 조각이 오래 오지 않으면 끊는다. 소비하는 쪽이 끊으면 Google 요청도 끊는다 */
-function guardStream(source: Readable, maxBytes: number, abort: () => void): Readable {
+/** 브라우저가 떠나 요청을 끊었는지 (시간 초과로 끊은 것은 아니다) */
+function isCallerAbort(signal: AbortSignal): boolean {
+  return signal.aborted && (signal.reason as { name?: unknown } | undefined)?.name !== 'TimeoutError';
+}
+
+/**
+ * 받은 바이트가 상한을 넘거나, Google이 조각을 오래 보내지 않으면 끊는다. 소비하는 쪽이 끊으면 Google 요청도 끊는다.
+ * 기다림은 Google 쪽만 잰다: 받는 쪽이 느려(멈춘 <audio>, 느린 회선) 소스가 멈춰 있는 동안은 재지 않는다.
+ */
+export function guardStream(source: Readable, maxBytes: number, abort: () => void, idleMs = MEDIA_IDLE_TIMEOUT_MS): Readable {
   let received = 0;
   let timer: NodeJS.Timeout | undefined;
   const guard = new Transform({
@@ -54,32 +62,74 @@ function guardStream(source: Readable, maxBytes: number, abort: () => void): Rea
         callback(new AppException('INT-014', `파일이 너무 커요 (최대 ${Math.floor(maxBytes / 1024 / 1024)}MB)`));
         return;
       }
-      arm();
       callback(null, chunk);
     },
   });
+  const stop = () => clearTimeout(timer);
   const arm = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => guard.destroy(new AppException('INT-004', `Google Drive에서 ${MEDIA_IDLE_TIMEOUT_MS / 1000}초 동안 받은 내용이 없어 끊었어요`)), MEDIA_IDLE_TIMEOUT_MS);
+    timer = setTimeout(() => guard.destroy(new AppException('INT-004', `Google Drive에서 ${Math.round(idleMs / 1000)}초 동안 받은 내용이 없어 끊었어요`)), idleMs);
   };
-  arm();
   pipeline(source, guard, (error) => {
-    clearTimeout(timer);
+    stop();
     if (error) abort();
   });
+  // pipeline이 붙인 뒤에 듣는다. 뒷압력으로 pipe가 소스를 멈추면 'pause', 다시 흐르면 'resume'이 온다.
+  // pipe는 같은 조각의 'data' 안에서 먼저 멈추므로, 멈춘 뒤 온 'data'로는 다시 재지 않는다
+  source.on('data', () => (source.readableFlowing === false ? stop() : arm()));
+  source.on('pause', stop);
+  source.on('resume', arm);
+  source.on('end', stop);
+  arm();
   guard.on('close', () => {
-    clearTimeout(timer);
+    stop();
     // 다 받기 전에 소비하는 쪽(브라우저·전사 작업)이 끊었으면 Google 요청도 끊는다
     if (!guard.readableEnded) abort();
   });
   return guard;
 }
 
-/** 끝까지 읽어 한 덩어리로 (회의 음성 전사용) */
-export async function readStreamToBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks);
+/**
+ * 끝까지 읽어 한 덩어리로 (회의 음성 전사용). 크기를 알면 그만큼 한 번만 잡아 조각을 복사해 넣는다:
+ * 조각 목록 + Buffer.concat이면 500MB 녹음이 잠깐 두 벌(1GB) 메모리에 오른다. 크기를 모르거나 더 많이 오면 concat으로 바꾼다.
+ */
+export async function readStreamToBuffer(stream: Readable, expectedBytes: number | null): Promise<Buffer> {
+  if (expectedBytes === null || !Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks);
+  }
+  const buffer = Buffer.allocUnsafe(expectedBytes);
+  let offset = 0;
+  let overflow: Buffer[] | null = null;
+  for await (const chunk of stream) {
+    const piece = chunk as Buffer;
+    if (overflow) {
+      overflow.push(piece);
+    } else if (offset + piece.length > expectedBytes) {
+      overflow = [buffer.subarray(0, offset), piece];
+    } else {
+      piece.copy(buffer, offset);
+      offset += piece.length;
+    }
+  }
+  if (overflow) return Buffer.concat(overflow);
+  // 덜 왔으면 받은 만큼만 (복사 없이 같은 메모리를 가리킨다)
+  return offset === expectedBytes ? buffer : buffer.subarray(0, offset);
+}
+
+/** 두 토큰이 다른 Google 계정인지. 계정을 모르면 같은 계정일 수 있어 false (취소하지 않는 쪽) */
+function isOtherAccount(a: GoogleTokens, b: GoogleTokens): boolean {
+  return Boolean(a.accountId && b.accountId && a.accountId !== b.accountId);
+}
+
+/** 내용 받기 결과. status 206이면 contentRange가 있다 */
+export interface DriveMedia {
+  stream: Readable;
+  status: 200 | 206;
+  /** Drive 응답의 Content-Length (압축 없이 받으므로 실제 바이트). 없으면 null */
+  length: number | null;
+  contentRange: string | null;
 }
 
 /**
@@ -117,12 +167,8 @@ export class GoogleDriveClient {
    * client id가 바뀌면 옛 클라이언트로 받은 리프레시 토큰은 새 클라이언트로 갱신할 수 없어 토큰을 지운다 (연결했었다면 다시 연결 필요).
    */
   updateClient(input: { clientId?: string | null; clientSecret?: string | null }): Promise<void> {
-    if (input.clientId && !isGoogleClientId(input.clientId)) {
-      throw new AppException('COM-004', 'OAuth 클라이언트 id는 Google Cloud Console의 "…apps.googleusercontent.com"으로 끝나는 값이에요');
-    }
-    if (input.clientSecret && (input.clientSecret.length > 200 || /\s/.test(input.clientSecret))) {
-      throw new AppException('COM-004', 'client secret이 올바르지 않아요. Google Cloud Console에서 복사한 값을 그대로 붙여 넣어 주세요');
-    }
+    const invalid = clientInputError(input);
+    if (invalid) throw new AppException('COM-004', invalid);
     return this.store.exclusive(KEY, async () => {
       // 키가 바뀌어 옛 값을 풀 수 없으면 새로 넣는 값으로 덮어쓴다
       const current = await this.readClient().catch((error: unknown) => {
@@ -181,10 +227,18 @@ export class GoogleDriveClient {
         if (error instanceof GoogleTokenResponseError) throw new AppException('INT-004', error.message);
         throw error;
       }
+      const accountId = await this.fetchAccountId(tokens.accessToken);
+      if (accountId) tokens.accountId = accountId;
+      const previous = await this.store.readTokens<unknown>(KEY).catch(() => undefined);
+      const current = isGoogleTokens(previous) ? previous : null;
       if (!hasDriveReadScope(tokens.scope)) {
+        // 방금 받은 허용을 거둔다. 지금 연결과 같은 계정이면 Google이 허용을 하나로 묶어 두어 취소하면 지금 연결까지 끊기므로, 다른 계정일 때만
+        if (!current || isOtherAccount(current, tokens)) await this.revokeToken(tokens.refreshToken);
         throw new AppException('INT-007', 'Google Drive 읽기 권한을 허용하지 않았어요. 다시 연결하면서 Drive 권한을 모두 허용해 주세요');
       }
       await this.store.saveTokens(KEY, tokens);
+      // 다른 계정으로 다시 연결했으면 옛 계정의 허용을 거둔다 (같은 계정이면 취소가 새 허용까지 끊으므로 두고, 옛 리프레시 토큰은 쓰지 않을 뿐이다)
+      if (current && current.refreshToken !== tokens.refreshToken && isOtherAccount(current, tokens)) await this.revokeToken(current.refreshToken);
     } finally {
       await this.store.clear(KEY, 'verifier');
     }
@@ -193,18 +247,35 @@ export class GoogleDriveClient {
   /** 끊기 전에 Google 쪽 허용을 취소한다. 실패해도 넘어간다 (우리 쪽 토큰은 부르는 쪽이 지운다). 부르는 쪽이 store.exclusive 안에서 부른다 */
   async revoke(): Promise<void> {
     const stored = await this.store.readTokens<unknown>(KEY).catch(() => undefined);
-    if (!isGoogleTokens(stored)) return;
+    if (isGoogleTokens(stored)) await this.revokeToken(stored.refreshToken);
+  }
+
+  /** 리프레시 토큰을 취소한다 (그 허용으로 받은 토큰이 모두 무효가 된다). 실패해도 넘어간다 */
+  private async revokeToken(token: string): Promise<void> {
     try {
-      // 리프레시 토큰을 취소하면 그 허용으로 받은 토큰이 모두 무효가 된다
       const res = await fetch(googleEndpoints().revoke, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ token: stored.refreshToken }).toString(),
-        signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
+        body: new URLSearchParams({ token }).toString(),
+        signal: AbortSignal.timeout(SIDE_REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) this.logger.warn(`Google 허용 취소 응답 HTTP ${res.status}`);
     } catch (error) {
       this.logger.warn(`Google 허용 취소 실패: ${messageOf(error)}`);
+    }
+  }
+
+  /** 허용한 Google 계정 (Drive about.user.permissionId). 다시 연결할 때 다른 계정인지 가린다. 못 읽으면 undefined */
+  private async fetchAccountId(accessToken: string): Promise<string | undefined> {
+    try {
+      const url = new URL(`${googleEndpoints().drive}/about`);
+      url.searchParams.set('fields', 'user(permissionId)');
+      const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(SIDE_REQUEST_TIMEOUT_MS) });
+      if (!res.ok) return undefined;
+      const body = (await res.json()) as { user?: { permissionId?: unknown } } | null;
+      return typeof body?.user?.permissionId === 'string' && body.user.permissionId ? body.user.permissionId : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -236,10 +307,12 @@ export class GoogleDriveClient {
   }
 
   /**
-   * 파일 내용을 스트림으로 연다. maxBytes를 넘거나 조각이 오래 오지 않으면 스트림이 오류로 끝난다.
-   * signal이 끊기면(브라우저가 떠남) Google 요청도 끊는다.
+   * 파일 내용을 스트림으로 연다. maxBytes를 넘거나 Google이 조각을 오래 보내지 않으면 스트림이 오류로 끝난다.
+   * range(검사를 마친 `bytes=…`)를 주면 Drive에 그대로 넘겨 206 부분 응답을 받는다 (Safari·iOS 재생, 긴 녹음 건너뛰기).
+   * signal이 끊기면(브라우저가 떠남) Google 요청도 끊고, 그 실패는 연결 오류로 남기지 않는다.
    */
-  async openMedia(fileId: string, maxBytes: number, signal?: AbortSignal): Promise<Readable> {
+  async openMedia(fileId: string, maxBytes: number, options: { signal?: AbortSignal; range?: string } = {}): Promise<DriveMedia> {
+    const { signal, range } = options;
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted) onAbort();
@@ -248,22 +321,25 @@ export class GoogleDriveClient {
     let res: Response;
     try {
       // 압축을 받지 않는다: 크기 상한·Content-Length를 실제 바이트로 맞춘다
-      res = await this.driveGet(`/files/${encodeURIComponent(fileId)}`, { alt: 'media', supportsAllDrives: 'true' }, controller.signal, { 'accept-encoding': 'identity' });
+      const headers: Record<string, string> = { 'accept-encoding': 'identity', ...(range ? { range } : {}) };
+      res = await this.driveGet(`/files/${encodeURIComponent(fileId)}`, { alt: 'media', supportsAllDrives: 'true' }, controller.signal, headers);
     } catch (error) {
       signal?.removeEventListener('abort', onAbort);
       throw error;
     } finally {
       clearTimeout(headerTimer);
     }
-    const length = Number(res.headers.get('content-length') ?? NaN);
-    if (Number.isFinite(length) && length > maxBytes) {
+    const lengthHeader = res.headers.get('content-length');
+    const length = lengthHeader !== null && /^\d+$/.test(lengthHeader) && !res.headers.get('content-encoding') ? Number(lengthHeader) : null;
+    if (length !== null && length > maxBytes) {
       controller.abort();
       throw new AppException('INT-014', `파일이 너무 커요 (최대 ${Math.floor(maxBytes / 1024 / 1024)}MB)`);
     }
+    const partial = res.status === 206;
     const source = res.body ? Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>) : Readable.from([]);
     const stream = guardStream(source, maxBytes, () => controller.abort());
     stream.on('close', () => signal?.removeEventListener('abort', onAbort));
-    return stream;
+    return { stream, status: partial ? 206 : 200, length, contentRange: partial ? res.headers.get('content-range') : null };
   }
 
   // ───────── 안쪽 ─────────
@@ -351,6 +427,8 @@ export class GoogleDriveClient {
       try {
         return await fetch(url, { headers: { ...headers, authorization: `Bearer ${token}` }, signal });
       } catch (error) {
+        // 브라우저가 떠나 끊은 것은 연결 문제가 아니다: last_error에 남기지 않고 그대로 던진다 (controller가 조용히 끝낸다)
+        if (isCallerAbort(signal)) throw error;
         this.logger.warn(`Google Drive 요청 실패: ${messageOf(error)}`);
         throw await this.fail(new AppException('INT-004', `Google Drive 요청이 실패했어요: ${messageOf(error)}`));
       }
@@ -388,8 +466,9 @@ export class GoogleDriveClient {
     const body = (await res.json().catch(() => null)) as { error?: { message?: unknown; errors?: { reason?: unknown }[] } } | null;
     const reason = typeof body?.error?.errors?.[0]?.reason === 'string' ? body.error.errors[0].reason : '';
     const detail = typeof body?.error?.message === 'string' ? body.error.message.slice(0, 200) : `HTTP ${res.status}`;
-    // 없는 파일·볼 수 없는 파일은 연결 문제가 아니다
+    // 없는 파일·볼 수 없는 파일, 맞지 않는 범위는 연결 문제가 아니다
     if (res.status === 404) return new AppException('INT-012');
+    if (res.status === 416) return new AppException('COM-004', '요청한 범위가 파일 크기를 벗어났어요', 416);
     if (reason === 'accessNotConfigured' || /SERVICE_DISABLED|has not been used|is disabled/i.test(detail)) {
       return this.fail(new AppException('INT-004', 'Google Cloud 프로젝트에서 Google Drive API가 꺼져 있어요. Cloud Console의 API 및 서비스에서 Google Drive API를 사용 설정해 주세요'));
     }

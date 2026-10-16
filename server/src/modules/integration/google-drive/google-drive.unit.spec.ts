@@ -1,5 +1,9 @@
-// Google Drive 연결의 순수 함수: 폴더 주소 읽기, 토큰 응답 읽기·만료, 허용 화면 주소, Drive 검색어·파일 읽기 (DB 없음)
+// Google Drive 연결의 순수 함수: 폴더 주소 읽기, 토큰 응답 읽기·만료, 허용 화면 주소, Drive 검색어·파일 읽기, Range,
+// 내용 스트림 지키기(상한·기다림)·메모리로 받기 (DB 없음)
+import { pipeline, Readable, Writable } from 'node:stream';
 import { DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
+import { AppException } from '../../../common/errors/app.exception';
+import { guardStream, readStreamToBuffer } from './google-drive.client';
 import {
   buildDriveFolderQuery,
   buildDriveListQuery,
@@ -7,12 +11,14 @@ import {
   driveFileKind,
   driveMaxBytes,
   normalizeDriveFolderId,
+  parseRangeHeader,
   readDriveFile,
   toDriveFileView,
 } from './google-drive.query';
 import {
   buildAuthorizationUrl,
   classifyTokenFailure,
+  clientInputError,
   createPkcePair,
   GoogleTokenResponseError,
   googleEndpoints,
@@ -63,8 +69,10 @@ describe('Drive 검색어', () => {
     );
   });
 
-  it('사진: image/*에서 SVG를 뺀다', () => {
-    expect(buildDriveListQuery(FOLDER, 'image')).toBe(`'${FOLDER}' in parents and trashed = false and (mimeType contains 'image/' and mimeType != 'image/svg+xml')`);
+  it('사진: 허용 목록의 형식만', () => {
+    expect(buildDriveListQuery(FOLDER, 'image')).toBe(
+      `'${FOLDER}' in parents and trashed = false and (mimeType = 'image/jpeg' or mimeType = 'image/png' or mimeType = 'image/gif' or mimeType = 'image/webp' or mimeType = 'image/heic' or mimeType = 'image/heif' or mimeType = 'image/bmp' or mimeType = 'image/tiff')`,
+    );
   });
 
   it('따옴표·역슬래시를 막는다', () => {
@@ -79,6 +87,12 @@ describe('파일 종류·크기', () => {
     expect(driveFileKind('application/octet-stream', '회의.mp3')).toBe('audio');
     expect(driveFileKind('image/jpeg', '현장.jpg')).toBe('image');
     expect(driveFileKind('image/svg+xml', 'logo.svg')).toBeNull();
+    // 대소문자·매개변수와 상관없이: 대문자 SVG도 빼고 대문자 JPEG는 받는다. 목록에 없는 형식(ico)은 뺀다
+    expect(driveFileKind('IMAGE/SVG+XML', 'LOGO.SVG')).toBeNull();
+    expect(driveFileKind('Image/Svg+Xml; charset=utf-8', 'x.svg')).toBeNull();
+    expect(driveFileKind('IMAGE/JPEG', 'A.JPG')).toBe('image');
+    expect(driveFileKind('image/x-icon', 'favicon.ico')).toBeNull();
+    expect(driveFileKind('AUDIO/MPEG', 'A.MP3')).toBe('audio');
     expect(driveFileKind('application/pdf', '보고서.pdf')).toBeNull();
     expect(driveFileKind('application/vnd.google-apps.document', '문서')).toBeNull();
   });
@@ -115,6 +129,10 @@ describe('파일 종류·크기', () => {
     expect(readDriveFile(null)).toBeNull();
   });
 
+  it('Content-Disposition: 짝 없는 대리 문자로 인코딩할 수 없으면 ASCII 이름만', () => {
+    expect(contentDisposition('\uD800abc.png')).toBe('inline; filename="_abc.png"');
+  });
+
   it('Content-Disposition: 한글 이름은 RFC 5987, 따옴표 안은 ASCII만', () => {
     expect(contentDisposition('회의 "1".m4a')).toBe(`inline; filename="__ _1_.m4a"; filename*=UTF-8''${encodeURIComponent('회의 "1".m4a')}`);
   });
@@ -133,8 +151,8 @@ describe('토큰 응답', () => {
   });
 
   it('갱신 응답에 없는 리프레시 토큰·권한은 이전 값을 잇는다. expires_in이 문자열이거나 없어도 읽는다', () => {
-    const previous = { accessToken: 'a1', refreshToken: 'r1', expiresAt: now, scope: 'x y' };
-    expect(parseTokenResponse({ access_token: 'a2', expires_in: '120' }, now, previous)).toEqual({ accessToken: 'a2', refreshToken: 'r1', expiresAt: now + 120_000, scope: 'x y' });
+    const previous = { accessToken: 'a1', refreshToken: 'r1', expiresAt: now, scope: 'x y', accountId: 'acct-1' };
+    expect(parseTokenResponse({ access_token: 'a2', expires_in: '120' }, now, previous)).toEqual({ accessToken: 'a2', refreshToken: 'r1', expiresAt: now + 120_000, scope: 'x y', accountId: 'acct-1' });
     expect(parseTokenResponse({ access_token: 'a3' }, now, previous).expiresAt).toBe(now + 3_600_000);
   });
 
@@ -204,11 +222,24 @@ describe('허용 화면 주소·PKCE', () => {
     expect(isGoogleClientId('x.apps.googleusercontent.com.evil')).toBe(false);
   });
 
-  it('테스트 주소 바꾸기는 운영에서 무시한다', () => {
+  it('client id·secret 입력 확인 (비우기는 통과)', () => {
+    expect(clientInputError({ clientId: '1-a.apps.googleusercontent.com', clientSecret: 'GOCSPX-x' })).toBeNull();
+    expect(clientInputError({ clientId: null, clientSecret: '' })).toBeNull();
+    expect(clientInputError({ clientId: 'nope' })).toMatch(/apps\.googleusercontent\.com/);
+    expect(clientInputError({ clientSecret: 'a b' })).toMatch(/client secret/);
+  });
+
+  it('테스트 주소 바꾸기는 NODE_ENV=test일 때만 읽는다', () => {
     const saved = { origin: process.env.GOOGLE_API_TEST_ORIGIN, env: process.env.NODE_ENV };
     try {
       process.env.GOOGLE_API_TEST_ORIGIN = 'http://127.0.0.1:9/';
+      process.env.NODE_ENV = 'test';
       expect(googleEndpoints().token).toBe('http://127.0.0.1:9/token');
+      // 테스트가 아니면 개발(값 없음·development)·운영 모두 무시한다
+      for (const env of ['production', 'development', '']) {
+        process.env.NODE_ENV = env;
+        expect(googleEndpoints().token).toBe('https://oauth2.googleapis.com/token');
+      }
       process.env.NODE_ENV = 'production';
       expect(googleEndpoints()).toEqual({
         authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -221,5 +252,109 @@ describe('허용 화면 주소·PKCE', () => {
       else process.env.GOOGLE_API_TEST_ORIGIN = saved.origin;
       process.env.NODE_ENV = saved.env;
     }
+  });
+});
+
+describe('parseRangeHeader', () => {
+  it('한 구간만 Drive로 넘긴다', () => {
+    expect(parseRangeHeader('bytes=0-99', 1000)).toEqual({ range: 'bytes=0-99' });
+    expect(parseRangeHeader('bytes=500-', 1000)).toEqual({ range: 'bytes=500-' });
+    expect(parseRangeHeader('bytes=-200', 1000)).toEqual({ range: 'bytes=-200' });
+    expect(parseRangeHeader(' bytes=0-0 ', null)).toEqual({ range: 'bytes=0-0' });
+  });
+
+  it('없거나 여러 구간·다른 단위·거꾸로·빈 범위는 무시(전체)', () => {
+    for (const header of [undefined, '', 'bytes=0-1,5-6', 'items=0-1', 'bytes=9-3', 'bytes=-', 'bytes=a-b', 'bytes=99999999999999999999-']) {
+      expect([header, parseRangeHeader(header, 1000)]).toEqual([header, null]);
+    }
+  });
+
+  it('크기를 넘는 시작·0바이트 끝 범위는 416', () => {
+    expect(parseRangeHeader('bytes=1000-', 1000)).toBe('unsatisfiable');
+    expect(parseRangeHeader('bytes=-0', 1000)).toBe('unsatisfiable');
+    // 크기를 모르면 Drive에 맡긴다
+    expect(parseRangeHeader('bytes=1000-', null)).toEqual({ range: 'bytes=1000-' });
+  });
+});
+
+/** 조각을 주는 대로 내보내고, 다 주면 끝나는 소스. stallAfter개 뒤에는 멈춘다(끝나지 않는다) */
+function sourceOf(chunks: Buffer[], stallAfter = Infinity): Readable {
+  let i = 0;
+  return new Readable({
+    read() {
+      if (i >= stallAfter) return;
+      if (i >= chunks.length) {
+        this.push(null);
+        return;
+      }
+      this.push(chunks[i]);
+      i += 1;
+    },
+  });
+}
+
+describe('guardStream', () => {
+  const kb = (n: number) => Buffer.alloc(n * 1024, 7);
+
+  it('받는 쪽이 느려 소스가 멈춘 동안은 기다림 시간을 재지 않는다 (멈춘 재생·느린 회선)', async () => {
+    const abort = jest.fn();
+    const guarded = guardStream(sourceOf(Array.from({ length: 64 }, () => kb(64))), 100 * 1024 * 1024, abort, 50);
+    // 처음 조금만 읽고 기다림 상한의 몇 배 동안 읽지 않는다
+    await new Promise<void>((resolve) => guarded.once('readable', () => resolve()));
+    guarded.read();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(guarded.destroyed).toBe(false);
+    const rest = await readStreamToBuffer(guarded, null);
+    expect(rest.length).toBeGreaterThan(0);
+    expect(abort).not.toHaveBeenCalled();
+  });
+
+  it('소스(Google)가 조각을 보내지 않으면 끊고 Google 요청도 끊는다', async () => {
+    const abort = jest.fn();
+    const guarded = guardStream(sourceOf([kb(1), kb(1), kb(1)], 1), 1024 * 1024, abort, 50);
+    const error = await readStreamToBuffer(guarded, null).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(AppException);
+    expect((error as AppException).code).toBe('INT-004');
+    expect(abort).toHaveBeenCalled();
+  });
+
+  it('상한을 넘으면 INT-014로 끊는다', async () => {
+    const abort = jest.fn();
+    const guarded = guardStream(sourceOf([kb(1), kb(1), kb(1)]), 2 * 1024, abort, 1000);
+    await expect(readStreamToBuffer(guarded, null)).rejects.toMatchObject({ code: 'INT-014' });
+    expect(abort).toHaveBeenCalled();
+  });
+
+  it('받는 쪽이 중간에 끊으면 Google 요청도 끊는다', async () => {
+    const abort = jest.fn();
+    const guarded = guardStream(sourceOf(Array.from({ length: 10 }, () => kb(64))), 100 * 1024 * 1024, abort, 1000);
+    const sink = new Writable({
+      write(_chunk, _enc, callback) {
+        sink.destroy();
+        callback();
+      },
+    });
+    // controller·전사 작업처럼 pipeline으로 이어 받는 쪽이 끊으면 지키는 스트림도 닫힌다
+    pipeline(guarded, sink, () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(abort).toHaveBeenCalled();
+  });
+});
+
+describe('readStreamToBuffer', () => {
+  const parts = [Buffer.from('abc'), Buffer.from('defg'), Buffer.from('h')];
+
+  it('크기를 알면 한 번 잡은 메모리에 채운다', async () => {
+    expect((await readStreamToBuffer(Readable.from(parts), 8)).toString()).toBe('abcdefgh');
+  });
+
+  it('덜 오거나 더 오거나 모르면 받은 그대로', async () => {
+    expect((await readStreamToBuffer(Readable.from(parts), 20)).toString()).toBe('abcdefgh');
+    expect((await readStreamToBuffer(Readable.from(parts), 5)).toString()).toBe('abcdefgh');
+    expect((await readStreamToBuffer(Readable.from(parts), null)).toString()).toBe('abcdefgh');
+    expect((await readStreamToBuffer(Readable.from([]), 4)).length).toBe(0);
   });
 });

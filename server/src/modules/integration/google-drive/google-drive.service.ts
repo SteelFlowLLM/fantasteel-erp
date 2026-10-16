@@ -1,11 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { Readable } from 'node:stream';
 import { INTEGRATION_PROVIDER, type DriveFileKind, type DriveFilePage, type IntegrationTestResult } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
 import { readSettings } from '../integration-settings';
-import { GoogleDriveClient, readStreamToBuffer } from './google-drive.client';
+import { GoogleDriveClient, readStreamToBuffer, type DriveMedia } from './google-drive.client';
 import {
   buildDriveFolderQuery,
   buildDriveListQuery,
@@ -16,6 +15,7 @@ import {
   driveFileKind,
   driveMaxBytes,
   isDriveId,
+  parseRangeHeader,
   toDriveFileView,
   type DriveFileMeta,
 } from './google-drive.query';
@@ -96,16 +96,23 @@ export class GoogleDriveService {
     return { ...meta, kind, maxBytes };
   }
 
-  /** 확인한 뒤 내용을 스트림으로 연다 (GET …/files/:fileId/content) */
-  async openContent(fileId: string, signal?: AbortSignal): Promise<{ file: CheckedDriveFile; stream: Readable }> {
+  /**
+   * 확인한 뒤 내용을 스트림으로 연다 (GET …/files/:fileId/content). Range는 한 구간만 Drive로 넘기고(206),
+   * 파일 크기를 넘는 범위면 열지 않고 unsatisfiable로 돌려준다(416).
+   */
+  async openContent(fileId: string, options: { signal?: AbortSignal; range?: string } = {}): Promise<{ file: CheckedDriveFile; media: DriveMedia } | { file: CheckedDriveFile; unsatisfiable: true }> {
     const file = await this.checkFile(fileId);
-    return { file, stream: await this.client.openMedia(file.id, file.maxBytes, signal) };
+    const range = parseRangeHeader(options.range, file.size);
+    if (range === 'unsatisfiable') return { file, unsatisfiable: true };
+    return { file, media: await this.client.openMedia(file.id, file.maxBytes, { signal: options.signal, range: range?.range }) };
   }
 
   /** 회의 녹음을 메모리로 받는다. 받기 직전에 다시 확인한다 (그 사이 옮겨졌거나 바뀌었을 수 있다) */
   async downloadAudio(fileId: string): Promise<{ buffer: Buffer; file: CheckedDriveFile }> {
     const file = await this.checkFile(fileId, 'audio');
-    const buffer = await readStreamToBuffer(await this.client.openMedia(file.id, file.maxBytes));
+    const media = await this.client.openMedia(file.id, file.maxBytes);
+    // 크기를 알면 한 번에 잡아 복사해 넣는다 (500MB 녹음이 두 벌 오르지 않게)
+    const buffer = await readStreamToBuffer(media.stream, media.length ?? file.size);
     return { buffer, file };
   }
 

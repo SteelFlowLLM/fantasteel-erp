@@ -28,10 +28,11 @@ export interface GoogleEndpoints {
 }
 
 /**
- * 부를 때마다 읽는다. GOOGLE_API_TEST_ORIGIN은 테스트가 가짜 Google 서버로 바꿔 끼우는 값이라 운영(NODE_ENV=production)에서는 무시한다.
+ * 부를 때마다 읽는다. GOOGLE_API_TEST_ORIGIN은 테스트가 가짜 Google 서버로 바꿔 끼우는 값이라 NODE_ENV=test(Jest)일 때만 읽는다.
+ * 개발·운영에서 잘못 넣어 둬도 토큰·client secret이 다른 주소로 가지 않는다.
  */
 export function googleEndpoints(): GoogleEndpoints {
-  const override = process.env.NODE_ENV === 'production' ? '' : (process.env.GOOGLE_API_TEST_ORIGIN?.trim().replace(/\/+$/, '') ?? '');
+  const override = process.env.NODE_ENV === 'test' ? (process.env.GOOGLE_API_TEST_ORIGIN?.trim().replace(/\/+$/, '') ?? '') : '';
   if (override) {
     return { authorize: `${override}/o/oauth2/v2/auth`, token: `${override}/token`, revoke: `${override}/revoke`, drive: `${override}/drive/v3` };
   }
@@ -52,6 +53,8 @@ export interface GoogleTokens {
   expiresAt: number;
   /** 허용받은 권한 (공백으로 구분) */
   scope: string;
+  /** 연결한 Google 계정 (Drive about.user.permissionId). 다시 연결할 때 다른 계정인지 가린다. 못 읽었으면 없다 */
+  accountId?: string;
 }
 
 /** 토큰 응답을 읽을 수 없음. 문구는 화면에 보여도 되는 것만 담는다 (토큰 값 없음) */
@@ -62,6 +65,15 @@ const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/;
 
 export function isGoogleClientId(value: string): boolean {
   return value.length <= 200 && CLIENT_ID_PATTERN.test(value);
+}
+
+/** 설정 저장 전 client id·secret 확인. 문제가 없으면 null, 있으면 화면 문구 (null·빈 글은 비우기라 통과) */
+export function clientInputError(input: { clientId?: string | null; clientSecret?: string | null }): string | null {
+  if (input.clientId && !isGoogleClientId(input.clientId)) return 'OAuth 클라이언트 id는 Google Cloud Console의 "…apps.googleusercontent.com"으로 끝나는 값이에요';
+  if (input.clientSecret && (input.clientSecret.length > 200 || /\s/.test(input.clientSecret))) {
+    return 'client secret이 올바르지 않아요. Google Cloud Console에서 복사한 값을 그대로 붙여 넣어 주세요';
+  }
+  return null;
 }
 
 /** PKCE (S256). verifier는 32바이트 무작위 base64url(43자) */
@@ -119,7 +131,10 @@ export function parseTokenResponse(body: unknown, now: number, previous?: Google
   }
   const expiresIn = positiveSeconds(record.expires_in) ?? DEFAULT_EXPIRES_IN_SEC;
   const scope = (typeof record.scope === 'string' && record.scope.trim()) || previous?.scope || '';
-  return { accessToken, refreshToken, expiresAt: now + expiresIn * 1000, scope };
+  const tokens: GoogleTokens = { accessToken, refreshToken, expiresAt: now + expiresIn * 1000, scope };
+  // 갱신해도 같은 계정이다
+  if (previous?.accountId) tokens.accountId = previous.accountId;
+  return tokens;
 }
 
 /** 저장된 토큰이 쓸 수 있는 모양인지 (키가 같아도 옛 모양이면 다시 연결) */

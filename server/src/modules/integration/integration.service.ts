@@ -23,7 +23,7 @@ import { clientReturnUrl, oauthCallbackUrl } from './integration-urls';
 import { GoogleDriveClient } from './google-drive/google-drive.client';
 import { normalizeDriveFolderId } from './google-drive/google-drive.query';
 import { GoogleDriveService } from './google-drive/google-drive.service';
-import type { GoogleClientCredentials } from './google-drive/google-oauth';
+import { clientInputError, type GoogleClientCredentials } from './google-drive/google-oauth';
 import { McpClientService } from './mcp/mcp.client';
 import { normalizeNotionPageId } from './notion/notion.tools';
 
@@ -132,6 +132,8 @@ export class IntegrationService {
     if (dto.parentPage && !pageId) throw new AppException('COM-004', 'Notion 페이지 주소나 id를 읽지 못했어요. 페이지에서 "링크 복사"한 주소를 붙여 넣어 주세요');
     const folderId = dto.folder ? normalizeDriveFolderId(dto.folder) : null;
     if (dto.folder && !folderId) throw new AppException('COM-004', 'Drive 폴더 주소나 id를 읽지 못했어요. Drive에서 폴더를 열고 주소창의 주소(…/drive/folders/…)를 붙여 넣어 주세요');
+    const clientInvalid = clientInputError({ clientId: dto.clientId, clientSecret: dto.clientSecret });
+    if (clientInvalid) throw new AppException('COM-004', clientInvalid);
 
     const row = await this.repository.ensure(this.prisma, preset.key, preset.serverUrl);
     const next: IntegrationSettings = { ...readSettings(row.settings) };

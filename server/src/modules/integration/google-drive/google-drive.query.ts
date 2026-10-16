@@ -54,16 +54,21 @@ function quote(value: string): string {
 }
 
 /**
+ * 받는 사진 형식 (허용 목록). SVG처럼 스크립트를 담을 수 있는 형식은 이 서버 주소로 열리면 위험해서 목록에 없는 것은 모두 뺀다.
+ * HEIC·HEIF는 아이폰 사진이다 (브라우저가 못 그리면 화면이 내려받기로 보인다).
+ */
+export const DRIVE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff'] as const;
+
+/**
  * files.list 검색어: 설정한 폴더 바로 아래, 휴지통 아닌 것, 종류별 MIME.
- * 녹음은 회의 음성 올리기와 같이 audio/*·video/webm(브라우저 녹음)·video/mp4를 받는다.
- * 사진은 image/*에서 SVG를 뺀다 (이 서버 주소로 SVG를 열면 스크립트가 돌 수 있다).
+ * 녹음은 회의 음성 올리기와 같이 audio/*·video/webm(브라우저 녹음)·video/mp4를 받는다. 사진은 DRIVE_IMAGE_MIME_TYPES만.
  */
 export function buildDriveListQuery(folderId: string, kind: DriveFileKind): string {
   const base = `${quote(folderId)} in parents and trashed = false`;
   const mime =
     kind === 'audio'
       ? "(mimeType contains 'audio/' or mimeType = 'video/webm' or mimeType = 'video/mp4')"
-      : "(mimeType contains 'image/' and mimeType != 'image/svg+xml')";
+      : `(${DRIVE_IMAGE_MIME_TYPES.map((type) => `mimeType = '${type}'`).join(' or ')})`;
   return `${base} and ${mime}`;
 }
 
@@ -72,14 +77,20 @@ export function buildDriveFolderQuery(folderId: string): string {
   return `${quote(folderId)} in parents and trashed = false`;
 }
 
+/** MIME은 대소문자를 가리지 않는다 (IMAGE/SVG+XML도 SVG). 매개변수(;charset=…)는 뗀다 */
+function normalizeMime(mimeType: string): string {
+  return mimeType.split(';')[0].trim().toLowerCase();
+}
+
 export function isDriveImage(mimeType: string): boolean {
-  return mimeType.startsWith('image/') && mimeType !== 'image/svg+xml';
+  return (DRIVE_IMAGE_MIME_TYPES as readonly string[]).includes(normalizeMime(mimeType));
 }
 
 /** 가져올 수 있는 종류인지. 녹음 판정은 회의 음성 올리기와 같다 */
 export function driveFileKind(mimeType: string, name: string): DriveFileKind | null {
-  if (isMeetingAudio(mimeType, name)) return 'audio';
-  if (isDriveImage(mimeType)) return 'image';
+  const mime = normalizeMime(mimeType);
+  if (isMeetingAudio(mime, name)) return 'audio';
+  if (isDriveImage(mime)) return 'image';
   return null;
 }
 
@@ -119,5 +130,28 @@ export function toDriveFileView(meta: DriveFileMeta): DriveFileView {
 /** 응답 헤더 Content-Disposition. 한글 이름은 RFC 5987로, 따옴표 안 이름은 ASCII만 남긴다 */
 export function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  let encoded: string;
+  try {
+    encoded = encodeURIComponent(fileName);
+  } catch {
+    // 짝 없는 대리 문자(깨진 이름)는 인코딩할 수 없다: ASCII 이름만 보낸다
+    return `inline; filename="${ascii}"`;
+  }
+  return `inline; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * 브라우저가 보낸 Range 머리를 Drive로 넘길지 정한다. 한 구간 `bytes=a-b`·`bytes=a-`·`bytes=-n`만 받는다 (여러 구간·다른 단위는 무시하고 전체를 준다).
+ * 파일 크기를 알면 시작이 크기 이상인 범위를 'unsatisfiable'로 알린다 (416).
+ */
+export function parseRangeHeader(header: string | undefined, size: number | null): { range: string } | 'unsatisfiable' | null {
+  const match = header ? /^bytes=(\d*)-(\d*)$/.exec(header.trim()) : null;
+  if (!match || (match[1] === '' && match[2] === '')) return null;
+  const start = match[1] === '' ? null : Number(match[1]);
+  const end = match[2] === '' ? null : Number(match[2]);
+  if ((start !== null && !Number.isSafeInteger(start)) || (end !== null && !Number.isSafeInteger(end))) return null;
+  if (start !== null && end !== null && end < start) return null;
+  if (start === null && end === 0) return 'unsatisfiable';
+  if (size !== null && start !== null && start >= size) return 'unsatisfiable';
+  return { range: `bytes=${match[1]}-${match[2]}` };
 }
