@@ -116,7 +116,7 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
         <KvList
           items={[
             { label: '연결한 시각', value: connection.connectedAt ? fmtDateTime(connection.connectedAt) : '-' },
-            { label: '연결한 사람', value: connection.connectedBy?.name ?? '-' },
+            { label: '연결한 사람', value: connection.connectedAt ? (connection.connectedBy?.name ?? '-') : '-' },
           ]}
         />
         {status === 'RECONNECT_REQUIRED' ? (
