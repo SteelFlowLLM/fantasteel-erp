@@ -240,3 +240,27 @@ describe('createThinkSplitter', () => {
   it('닫히지 않은 생각은 끝까지 생각 글이다', () => expect(run(['<think>길게', ' 생각 중'])).toEqual({ thinking: '길게 생각 중', answer: '' }));
   it('여는 태그 없는 닫는 태그는 지운다', () => expect(run(['생각</thi', 'nk>답'])).toEqual({ thinking: '', answer: '생각답' }));
 });
+
+describe('LlmClient 사진', () => {
+  it('사진을 실은 질문은 text와 image_url(data URL)로 보낸다', async () => {
+    fetchMock.mockResolvedValueOnce(reply('빨간색이에요'));
+    await new LlmClient().chatWithTools(endpoint, 'm', [{ role: 'user', content: '무슨 색?', images: [{ mediaType: 'image/png', dataBase64: 'AAAA' }] }], [], LLM_PROFILE.ASSISTANT);
+    expect(bodyOf(fetchMock.mock.calls[0]).messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '무슨 색?' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
+    ]);
+  });
+
+  it('modelCapabilities: LM Studio가 알린 vision·생각 설정을 돌려주고, 모르면 null', async () => {
+    modelsMock.mockResolvedValue(
+      Response.json({ models: [{ key: 'v', capabilities: { vision: true, reasoning: { allowed_options: ['off', 'on'] } } }, { key: 't', capabilities: { vision: false } }] }),
+    );
+    const client = new LlmClient();
+    await expect(client.modelCapabilities(endpoint, 'v')).resolves.toEqual({ vision: true, reasoning: true });
+    await expect(client.modelCapabilities(endpoint, 't')).resolves.toEqual({ vision: false, reasoning: false });
+    await expect(client.modelCapabilities(endpoint, 'unknown')).resolves.toEqual({ vision: null, reasoning: null });
+  });
+
+  it('modelCapabilities: LM Studio가 아니면 모두 null', async () => {
+    await expect(new LlmClient().modelCapabilities(endpoint, 'm')).resolves.toEqual({ vision: null, reasoning: null });
+  });
+});

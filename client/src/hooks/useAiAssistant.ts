@@ -1,7 +1,7 @@
 // AI 어시스턴트 훅. 답은 화면 토스트가 아니라 대화에 바로 보이므로 useAction이 아니라 대화 저장소에 직접 넣는다.
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
-import type { AiAssistantScreenContext, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
 import { useQuery } from '@tanstack/react-query';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
 import { isAbortError } from '@/api/http';
@@ -15,6 +15,17 @@ export function useAiSuggestedQuestions() {
     queryKey: aiAssistantKeys.suggestedQuestions(me.employeeId),
     queryFn: aiAssistantApi.getSuggestedQuestions,
     staleTime: Infinity,
+  });
+}
+
+/** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. 못 읽으면 data가 없어 화면은 '알 수 없음'(막지 않음)으로 다룬다 */
+export function useAiCapabilities() {
+  return useQuery({
+    queryKey: aiAssistantKeys.capabilities,
+    queryFn: aiAssistantApi.getCapabilities,
+    // 서버에서 모델을 바꿔 불러도 곧 따라가게 짧게 둔다
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -32,10 +43,12 @@ export interface AiAskVariables {
   screen: AiAssistantScreenContext;
   history: AiAssistantTurn[];
   reasoning?: AiReasoningLevel;
+  /** 질문과 함께 보내는 사진. 지난 대화(history)에는 담지 않는다 */
+  images?: AiAssistantImageInput[];
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다 */
-export async function runAiAsk({ questionId, question, screen, history, reasoning }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, history, reasoning, images }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -46,7 +59,7 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   });
   try {
     await aiAssistantApi.askStream(
-      { question, screen, history, ...(reasoning ? { reasoning } : {}) },
+      { question, screen, history, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}) },
       (event) => {
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
@@ -64,14 +77,14 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[]) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const history = aiChatHistory(chat.entries);
     const questionId = newAiChatId();
-    chat.addQuestion(questionId, text, reasoning);
-    void runAiAsk({ questionId, question: text, screen, history, reasoning });
+    chat.addQuestion(questionId, text, reasoning, images);
+    void runAiAsk({ questionId, question: text, screen, history, reasoning, images });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }

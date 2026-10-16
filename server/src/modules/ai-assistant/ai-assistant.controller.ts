@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Logger, Post, Res } from '@nestjs/common';
-import type { AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
+import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
@@ -58,6 +58,12 @@ export class AiAssistantController {
     } finally {
       res.end();
     }
+  }
+
+  /** 지금 모델이 사진·생각 정도를 지원하는지 (문서에 없는 기능, 2026-10-16 추가) */
+  @Get('ai-assistant/capabilities')
+  capabilities(): Promise<AiAssistantCapabilitiesView> {
+    return this.service.capabilities();
   }
 
   /** API-263 */

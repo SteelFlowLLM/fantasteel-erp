@@ -1,9 +1,10 @@
 // AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
-import type { AiAssistantMessageInput, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
+import type { AiAssistantCapabilitiesView, AiAssistantMessageInput, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
 import { serverRequest, serverStream } from '@/api/http';
 
 export const aiAssistantKeys = {
   suggestedQuestions: (employeeId: number) => ['ai-assistant', 'suggested-questions', employeeId] as const,
+  capabilities: ['ai-assistant', 'capabilities'] as const,
 };
 
 const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'done', 'error'];
@@ -37,5 +38,7 @@ export const aiAssistantApi = {
         if (event) onEvent(event);
       },
     }),
+  /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
+  getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
   getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),
 };
