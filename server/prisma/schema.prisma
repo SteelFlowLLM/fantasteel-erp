@@ -1054,14 +1054,14 @@ model ActionDraft {
 
 model IntegrationConnection {
   id Int @id @default(autoincrement())
-  providerKey String @unique @map("provider_key") @db.VarChar /// 연결 대상 (notion …). 서버 코드의 프리셋 키
+  providerKey String @unique @map("provider_key") @db.VarChar /// 연결 대상 (notion, google-drive). 서버 코드의 프리셋 키
   serverUrl String? @map("server_url") @db.VarChar /// MCP 서버 주소. MCP가 아닌 연결은 비어 있다
   oauthClientInformation String? @map("oauth_client_information") /// OAuth 클라이언트 정보 (암호문)
   oauthTokens String? @map("oauth_tokens") /// 액세스·리프레시 토큰 (암호문)
   oauthCodeVerifier String? @map("oauth_code_verifier") /// PKCE code verifier (암호문). 연결 중에만 있다
   oauthState String? @unique @map("oauth_state") @db.VarChar /// OAuth 콜백 확인값. 연결 중에만 있다
   oauthStateExpiresAt DateTime? @map("oauth_state_expires_at") @db.Timestamptz(3)
-  settings Json @default("{}") @db.JsonB /// 연결별 설정 (Notion: 상위 페이지 id)
+  settings Json @default("{}") @db.JsonB /// 연결별 설정 (Notion: 상위 페이지 id, Google Drive: 녹음·사진 폴더 id)
   connectedById Int? @map("connected_by_id") /// 마지막으로 연결을 시작한 관리자
   connectedAt DateTime? @map("connected_at") @db.Timestamptz(3) /// 연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다
   lastError String? @map("last_error") @db.VarChar /// 마지막 실패 이유 (비밀값 없음)

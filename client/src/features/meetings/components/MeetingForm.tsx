@@ -1,10 +1,12 @@
 'use client';
 
-// 새 회의록: 제목·회의일·참석자는 공통, 기록은 녹음 / 파일 올리기 / 글로 붙여넣기 중 하나로 받는다.
+// 새 회의록: 제목·회의일·참석자는 공통, 기록은 녹음 / 파일 올리기 / Drive에서 가져오기 / 글로 붙여넣기 중 하나로 받는다.
+// Drive 가져오기(이슈 #361)는 회사 Google Drive가 연결되고 폴더가 정해졌을 때만 보인다.
 // 음성은 올리면 서버가 백그라운드로 글로 바꾼다 (BP-VOC-01). AI 정리는 다음 단계다.
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { InputError } from '@/api/errors';
-import { MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, meetingMinutesApi, meetingMinutesAudioApi, type MeetingMinutesView } from '@/api/meetingMinutes';
+import type { DriveFileView } from '@/api/integrations';
+import { MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, meetingMinutesApi, meetingMinutesAudioApi, meetingMinutesDriveApi, type MeetingMinutesView } from '@/api/meetingMinutes';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
@@ -14,18 +16,22 @@ import { Input, Textarea } from '@/components/Input';
 import { PageHead } from '@/components/Page';
 import { Tabs } from '@/components/Tabs';
 import { AudioRecorder } from '@/features/meetings/components/AudioRecorder';
+import { DriveAudioPicker } from '@/features/meetings/components/DriveAudioPicker';
 import { AttendeePicker } from '@/features/meetings/components/AttendeePicker';
 import { useAction } from '@/hooks/useAction';
+import { useIntegrations } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { fmtBytes, todayStr } from '@/lib/format';
+import { canImportAudioFromDrive, driveFileSizeLabel, googleDriveConnection } from '@/lib/integrations';
 import { MEETING_AUDIO_ACCEPT, audioFileProblem } from '@/lib/meetingAudio';
 
-type InputMode = 'record' | 'file' | 'text';
-const MODE_TABS = [
+type InputMode = 'record' | 'file' | 'drive' | 'text';
+const MODE_TABS: readonly { key: InputMode; label: string }[] = [
   { key: 'record', label: '녹음' },
   { key: 'file', label: '파일 올리기' },
+  { key: 'drive', label: 'Drive에서 녹음 가져오기' },
   { key: 'text', label: '글로 붙여넣기' },
-] as const;
+];
 
 export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: MeetingMinutesView) => void; onCancel: () => void }) {
   const myId = useMe().employeeId;
@@ -40,6 +46,11 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [serverMessage, setServerMessage] = useState<string | null>(null);
+  const [driveFile, setDriveFile] = useState<DriveFileView | null>(null);
+  const [pickingDrive, setPickingDrive] = useState(false);
+  const integrations = useIntegrations();
+  const driveReady = canImportAudioFromDrive(googleDriveConnection(integrations.data));
+  const modeTabs = useMemo(() => MODE_TABS.filter((tab) => tab.key !== 'drive' || driveReady), [driveReady]);
 
   const create = useAction(meetingMinutesApi.create, {
     success: '회의록을 만들었어요',
@@ -60,12 +71,19 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
       setServerMessage(error instanceof Error ? error.message : '음성을 올리지 못했어요');
     },
   });
-  const pending = create.isPending || upload.isPending;
+  // 서버 오류(INT-002·003·010~014 …)는 토스트로 알린다. 입력칸 오류는 칸 아래에도 보인다
+  const importFromDrive = useAction(meetingMinutesDriveApi.create, {
+    success: 'Drive 녹음을 가져왔어요. 글로 바꾸는 중이에요',
+    onSuccess: onCreated,
+    onError: (error) => setFieldErrors(error instanceof InputError ? error.fieldErrors : {}),
+  });
+  const pending = create.isPending || upload.isPending || importFromDrive.isPending;
   const isAudio = mode !== 'text';
 
   const switchMode = (next: InputMode) => {
     setMode(next);
     setAudioFile(null);
+    setDriveFile(null);
     setFileProblem(null);
     setServerMessage(null);
     setFieldErrors({});
@@ -93,6 +111,10 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
             setServerMessage(null);
             setFieldErrors({});
             if (isAudio) {
+              if (mode === 'drive') {
+                if (driveFile && notified) importFromDrive.mutate({ meetingMinutesTitle: title, meetingDate, attendeeIds, driveFileId: driveFile.id });
+                return;
+              }
               if (audioFile && notified) upload.mutate({ meetingMinutesTitle: title, meetingDate, attendeeIds, file: audioFile });
               return;
             }
@@ -120,7 +142,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
             <Field label={`참석자 ${attendeeIds.length}명`} required error={fieldErrors.attendeeIds} hint="조직도의 사용 중인 사원">
               <AttendeePicker selected={attendeeIds} myId={myId} invalid={Boolean(fieldErrors.attendeeIds)} onChange={setAttendeeIds} />
             </Field>
-            <Tabs items={MODE_TABS} active={mode} onChange={switchMode} ariaLabel="기록 입력 방법" />
+            <Tabs items={modeTabs} active={mode} onChange={switchMode} ariaLabel="기록 입력 방법" />
             {isAudio ? (
               <>
                 <label className="flex items-start gap-2 text-sm">
@@ -131,6 +153,19 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
                 </label>
                 {mode === 'record' ? (
                   <AudioRecorder disabled={!notified || pending} file={audioFile} onChange={setAudioFile} />
+                ) : mode === 'drive' ? (
+                  <Field label="Drive 녹음" required htmlFor={`${formId}-drive`} error={fieldErrors.driveFileId} hint="회사 Drive 폴더에 올라온 녹음을 골라요. 파일은 서버가 Drive에서 직접 받아 글로 바꿔요">
+                    <div className="flex items-center gap-2.5">
+                      <Button id={`${formId}-drive`} icon="upload" onClick={() => setPickingDrive(true)} disabled={!notified || pending}>
+                        {driveFile ? '다른 녹음 고르기' : 'Drive에서 고르기'}
+                      </Button>
+                      {driveFile ? (
+                        <span className="min-w-0 truncate text-cap text-ink-2">
+                          {driveFile.name} · {driveFileSizeLabel(driveFile.size)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </Field>
                 ) : (
                   <Field label="음성 파일" required error={fieldErrors.file ?? fileProblem} hint="오디오 파일, 500MB까지 (m4a·mp3·wav·webm·aac·ogg·mp4·flac)">
                     <div className="flex flex-col gap-1.5">
@@ -181,12 +216,22 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
             <Button className="ml-auto" onClick={onCancel} disabled={pending}>
               취소
             </Button>
-            <Button variant="primary" type="submit" disabled={pending || (isAudio && (!notified || !audioFile))}>
-              {isAudio ? (upload.isPending ? '올리는 중…' : '올리기') : create.isPending ? '저장하는 중…' : '회의록 만들기'}
+            <Button variant="primary" type="submit" disabled={pending || (isAudio && (!notified || !(mode === 'drive' ? driveFile : audioFile)))}>
+              {isAudio ? (upload.isPending ? '올리는 중…' : importFromDrive.isPending ? '가져오는 중…' : mode === 'drive' ? '가져오기' : '올리기') : create.isPending ? '저장하는 중…' : '회의록 만들기'}
             </Button>
           </CardFoot>
         </form>
       </Card>
+      {pickingDrive ? (
+        <DriveAudioPicker
+          selectedId={driveFile?.id ?? null}
+          onPick={(file) => {
+            setDriveFile(file);
+            setPickingDrive(false);
+          }}
+          onClose={() => setPickingDrive(false)}
+        />
+      ) : null}
     </>
   );
 }

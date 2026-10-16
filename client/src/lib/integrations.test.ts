@@ -4,6 +4,15 @@ import { describe, expect, it } from 'vitest';
 import {
   INTEGRATION_STATUS_LABEL,
   canExportMeetingToNotion,
+  canImportAudioFromDrive,
+  driveAudioProblem,
+  driveConnectBlockReason,
+  driveFileSizeLabel,
+  driveFolderLink,
+  driveSettingsPatch,
+  googleDriveConnection,
+  integrationCallbackToast,
+  integrationCardKind,
   isNotionExportReady,
   notionConnection,
   notionPageLink,
@@ -24,6 +33,8 @@ const connection = (overrides: Partial<IntegrationConnectionView> = {}): Integra
   connectedBy: { id: 1, name: '관리자' },
   lastError: null,
   settings: { parentPageId: PAGE_ID },
+  redirectUri: null,
+  oauthClient: null,
   ...overrides,
 });
 
@@ -125,5 +136,99 @@ describe('safeExternalUrl', () => {
     expect(safeExternalUrl('javascript:alert(1)')).toBeNull();
     expect(safeExternalUrl('not a url')).toBeNull();
     expect(safeExternalUrl(null)).toBeNull();
+  });
+});
+
+const drive = (overrides: Partial<IntegrationConnectionView> = {}): IntegrationConnectionView =>
+  connection({
+    providerKey: 'google-drive',
+    displayName: 'Google Drive',
+    protocol: 'OAUTH2',
+    serverUrl: null,
+    settings: { folderId: 'folderId1234567' },
+    redirectUri: 'http://localhost:8787/api/v1/integrations/oauth/callback',
+    oauthClient: { clientId: 'abc.apps.googleusercontent.com', clientSecretSet: true },
+    ...overrides,
+  });
+
+describe('integrationCallbackToast', () => {
+  const notice = (providerKey: 'notion' | 'google-drive' | null, result: 'connected' | 'error', message: string | null = null) => ({ providerKey, result, message });
+
+  it('연결 대상 이름을 맞춰 알린다', () => {
+    expect(integrationCallbackToast(notice('notion', 'connected'))).toEqual({ tone: 'ok', text: 'Notion을 연결했어요' });
+    expect(integrationCallbackToast(notice('google-drive', 'connected'))).toEqual({ tone: 'ok', text: 'Google Drive를 연결했어요' });
+    expect(integrationCallbackToast(notice(null, 'connected')).text).toBe('연결했어요');
+  });
+
+  it('실패는 서버 문구를 그대로, 없으면 기본 문구', () => {
+    expect(integrationCallbackToast(notice('google-drive', 'error', 'client id·secret을 확인해 주세요'))).toEqual({ tone: 'error', text: 'client id·secret을 확인해 주세요' });
+    expect(integrationCallbackToast(notice('notion', 'error')).tone).toBe('error');
+  });
+});
+
+describe('integrationCardKind', () => {
+  it('연결 대상마다 카드를 고르고 모르는 대상은 그리지 않는다', () => {
+    expect(integrationCardKind({ providerKey: 'notion' })).toBe('notion');
+    expect(integrationCardKind({ providerKey: 'google-drive' })).toBe('google-drive');
+    expect(integrationCardKind({ providerKey: 'slack' as 'notion' })).toBeNull();
+  });
+});
+
+describe('Google Drive 녹음 가져오기 조건', () => {
+  it('연결됨 + 폴더가 있어야 보인다', () => {
+    expect(googleDriveConnection([connection(), drive()])?.providerKey).toBe('google-drive');
+    expect(googleDriveConnection(undefined)).toBeUndefined();
+    expect(canImportAudioFromDrive(drive())).toBe(true);
+    expect(canImportAudioFromDrive(drive({ settings: { folderId: null } }))).toBe(false);
+    expect(canImportAudioFromDrive(drive({ settings: {} }))).toBe(false);
+    expect(canImportAudioFromDrive(drive({ status: 'RECONNECT_REQUIRED' }))).toBe(false);
+    expect(canImportAudioFromDrive(drive({ status: 'NOT_CONNECTED' }))).toBe(false);
+    expect(canImportAudioFromDrive(undefined)).toBe(false);
+  });
+
+  it('폴더 id를 Drive 주소로 보여 준다', () => {
+    expect(driveFolderLink('abc_123')).toBe('https://drive.google.com/drive/folders/abc_123');
+  });
+});
+
+describe('Drive 파일 크기·가져오기 문제', () => {
+  it('크기를 읽기 쉽게, 없으면 크기 모름', () => {
+    expect(driveFileSizeLabel(5 * 1024 * 1024)).toBe('5.0 MB');
+    expect(driveFileSizeLabel(2048)).toBe('2.0 KB');
+    expect(driveFileSizeLabel(null)).toBe('크기 모름');
+  });
+
+  it('500MB를 넘는 녹음만 막는다', () => {
+    expect(driveAudioProblem({ size: 500 * 1024 * 1024 })).toBeNull();
+    expect(driveAudioProblem({ size: null })).toBeNull();
+    expect(driveAudioProblem({ size: 500 * 1024 * 1024 + 1 })).toContain('500.0 MB');
+  });
+});
+
+describe('driveConnectBlockReason', () => {
+  it('클라이언트 ID·보안 비밀번호가 저장돼야 연결할 수 있다', () => {
+    expect(driveConnectBlockReason(drive(), false)).toBeNull();
+    expect(driveConnectBlockReason(drive({ oauthClient: { clientId: null, clientSecretSet: true } }), false)).toContain('저장한 뒤');
+    expect(driveConnectBlockReason(drive({ oauthClient: { clientId: 'a.apps.googleusercontent.com', clientSecretSet: false } }), false)).toContain('저장한 뒤');
+    expect(driveConnectBlockReason(drive({ oauthClient: null }), false)).toContain('저장한 뒤');
+  });
+
+  it('저장하지 않은 변경이 있으면 먼저 저장하게 한다', () => {
+    expect(driveConnectBlockReason(drive(), true)).toContain('먼저 저장');
+  });
+});
+
+describe('driveSettingsPatch', () => {
+  const base = { savedClientId: 'a.apps.googleusercontent.com', clientId: 'a.apps.googleusercontent.com', clientSecret: '', savedFolder: 'https://drive.google.com/drive/folders/f1', folder: 'https://drive.google.com/drive/folders/f1' };
+
+  it('바뀐 칸만 보낸다', () => {
+    expect(driveSettingsPatch(base)).toEqual({});
+    expect(driveSettingsPatch({ ...base, clientSecret: ' s3cret ' })).toEqual({ clientSecret: 's3cret' });
+    expect(driveSettingsPatch({ ...base, folder: ' https://drive.google.com/drive/folders/f2 ' })).toEqual({ folder: 'https://drive.google.com/drive/folders/f2' });
+    expect(driveSettingsPatch({ ...base, clientId: 'b.apps.googleusercontent.com' })).toEqual({ clientId: 'b.apps.googleusercontent.com' });
+  });
+
+  it('칸을 비우면 null로 보내 서버가 비우게 한다', () => {
+    expect(driveSettingsPatch({ ...base, clientId: '  ', folder: '' })).toEqual({ clientId: null, folder: null });
   });
 });
