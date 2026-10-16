@@ -22,6 +22,8 @@ const view: MeetingMinutesView = {
   creator: { id: 5, name: '정다은' },
   attendees: [{ employeeId: 5, employeeName: '정다은', departmentName: '구매부', roleCode: 'PURCHASE' }],
   confirmedAt: null,
+  notionPageUrl: null,
+  notionExportedAt: null,
   createdAt: '2026-10-14T01:00:00.000Z',
   updatedAt: '2026-10-14T01:00:00.000Z',
 };

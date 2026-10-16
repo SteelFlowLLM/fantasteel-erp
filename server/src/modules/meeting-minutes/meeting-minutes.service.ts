@@ -5,6 +5,7 @@ import {
   MEETING_MINUTES_STATUS,
   missingFieldsOf,
   NOTIFICATION_TYPE,
+  PERMISSION,
   type AuthUser,
   type MeetingAnalysis,
   type MeetingCandidate,
@@ -14,11 +15,14 @@ import {
   type MeetingMinutesPage,
   type MeetingMinutesStatus,
   type MeetingMinutesView,
+  type MeetingNotionExportResult,
   type Role,
   type TranscriptSegment,
 } from '@fantasteel/shared';
+import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
+import { NotionPageService } from '../integration/notion/notion-page.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
 import { TaskService } from '../notification/task.service';
@@ -30,10 +34,13 @@ import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { isMeetingAudio } from './meeting-audio';
 import { readAnalysis, readSegments, summarizeSpeakers } from './meeting-minutes.json';
+import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 
 const DEFAULT_PAGE_SIZE = 20;
+/** 내보내던 서버가 멈춰 남은 잡기를 버리는 시간. MCP 요청 상한(60초)보다 넉넉히 길다 */
+const NOTION_EXPORT_STALE_MS = 5 * 60_000;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -124,6 +131,9 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
       roleCode: a.employee.role.roleCode as Role,
     })),
     confirmedAt: row.confirmedAt?.toISOString() ?? null,
+    notionPageUrl: row.notionPageUrl,
+    // 주소 없이 시각만 있으면 내보내는 중이라 화면에는 내보내지 않은 것으로 보인다
+    notionExportedAt: row.notionPageUrl ? (row.notionExportedAt?.toISOString() ?? null) : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -145,6 +155,7 @@ export class MeetingMinutesService {
     private readonly messageActions: MessageActionService,
     private readonly contexts: MeetingCandidateContextService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly notion: NotionPageService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -411,6 +422,41 @@ export class MeetingMinutesService {
       return { taskIds, scheduleEventIds, actionDraftIds, excludedKeys };
     });
     return { meetingMinutes: await this.get(id), ...created };
+  }
+
+  /**
+   * 확정한 회의록을 회사 Notion의 상위 페이지 아래 새 페이지로 내보낸다 (이슈 #358). 한 번만 내보내고 주소를 남긴다.
+   * 작성자나 관리자(ORG_MANAGE 사용)만 한다. 작업 로그는 남기지 않는다 (REQ-LOG-002에 맞는 이벤트가 없다).
+   */
+  async exportToNotion(user: AuthUser, id: number): Promise<MeetingNotionExportResult> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    const isAdmin = hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' });
+    if (row.creator.id !== user.employeeId && !isAdmin) throw new AppException('VOC-003', '회의록 작성자나 관리자만 Notion으로 내보낼 수 있어요');
+    if (row.confirmedAt === null || row.meetingMinutesStatus !== MEETING_MINUTES_STATUS.CONFIRMED) throw new AppException('VOC-004', '확정한 회의록만 Notion으로 내보낼 수 있어요');
+    if (row.notionPageUrl) throw new AppException('VOC-008');
+    // 연결·상위 페이지가 없으면 회의록을 잡기 전에 알린다
+    await this.notion.assertReady();
+
+    const claimedAt = new Date();
+    const { count } = await this.repository.claimNotionExport(this.prisma, id, claimedAt, new Date(claimedAt.getTime() - NOTION_EXPORT_STALE_MS));
+    if (count === 0) {
+      const current = await this.repository.findDetail(this.prisma, id);
+      if (current?.notionPageUrl) throw new AppException('VOC-008');
+      throw new AppException('VOC-008', '지금 다른 곳에서 이 회의록을 Notion으로 내보내는 중이에요. 잠시 뒤 새로 불러와 주세요');
+    }
+
+    let notionPageUrl: string;
+    try {
+      const view = toView(row);
+      notionPageUrl = await this.notion.createPage({ title: meetingNotionTitle(view), content: buildMeetingNotionMarkdown(view) });
+    } catch (error) {
+      await this.repository.releaseNotionExport(this.prisma, id, claimedAt);
+      throw error;
+    }
+    const exportedAt = new Date();
+    await this.repository.finishNotionExport(this.prisma, id, claimedAt, notionPageUrl, exportedAt);
+    return { notionPageUrl, notionExportedAt: exportedAt.toISOString(), meetingMinutes: await this.get(id) };
   }
 
   /** 작성자의 검토 중(REVIEW) 회의록과 그 분석 결과. 고치기·등록이 같은 확인을 한다 */

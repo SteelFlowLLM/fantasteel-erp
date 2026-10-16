@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView, type MeetingNotionExportResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
@@ -62,6 +62,13 @@ export class MeetingMinutesController {
   @HttpCode(200)
   register(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingRegisterResult> {
     return this.service.register(user, id);
+  }
+
+  /** 확정한 회의록을 Notion 페이지로 내보낸다 (이슈 #358, 문서에 없는 경로). 작성자나 관리자만, 한 번만 */
+  @Post(':id/notion-export')
+  @HttpCode(200)
+  exportToNotion(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingNotionExportResult> {
+    return this.service.exportToNotion(user, id);
   }
 
   /** API-259 목록 */

@@ -44,6 +44,7 @@ model Employee {
   meetingMinutesAsCreator MeetingMinutes[] @relation("MeetingMinutesCreator")
   meetingAttendees MeetingAttendee[] @relation("MeetingAttendeeEmployee")
   pastCasesAsCreatedEmployee PastCase[] @relation("PastCaseCreatedEmployee")
+  integrationConnectionsAsConnectedBy IntegrationConnection[] @relation("IntegrationConnectionConnectedBy")
   scheduleEventAttendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEmployee")
   notificationsAsRecipient Notification[] @relation("NotificationRecipient")
   chatRoomMembers ChatRoomMember[] @relation("ChatRoomMemberEmployee")
@@ -822,6 +823,8 @@ model MeetingMinutes {
   failureReason String? @map("failure_reason") @db.VarChar /// 전사·분석 실패 사유 (FAILED일 때)
   creatorId Int @map("creator_id") /// 회의록 작성자. 후보 항목을 허가하는 사람
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3) /// 확정 시각. 확정 후 수정·재분석 불가
+  notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소. 한 번만 내보낸다
+  notionExportedAt DateTime? @map("notion_exported_at") @db.Timestamptz(3) /// Notion 내보내기 시각. 주소가 없는데 값이 있으면 내보내는 중
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -1045,4 +1048,28 @@ model ActionDraft {
   @@index([meetingMinutesId])
   @@index([requesterId])
   @@map("action_draft")
+}
+
+// ───────────────────────────── 외부 연결 (MCP·OAuth) ─────────────────────────────
+
+model IntegrationConnection {
+  id Int @id @default(autoincrement())
+  providerKey String @unique @map("provider_key") @db.VarChar /// 연결 대상 (notion …). 서버 코드의 프리셋 키
+  serverUrl String? @map("server_url") @db.VarChar /// MCP 서버 주소. MCP가 아닌 연결은 비어 있다
+  oauthClientInformation String? @map("oauth_client_information") /// OAuth 클라이언트 정보 (암호문)
+  oauthTokens String? @map("oauth_tokens") /// 액세스·리프레시 토큰 (암호문)
+  oauthCodeVerifier String? @map("oauth_code_verifier") /// PKCE code verifier (암호문). 연결 중에만 있다
+  oauthState String? @unique @map("oauth_state") @db.VarChar /// OAuth 콜백 확인값. 연결 중에만 있다
+  oauthStateExpiresAt DateTime? @map("oauth_state_expires_at") @db.Timestamptz(3)
+  settings Json @default("{}") @db.JsonB /// 연결별 설정 (Notion: 상위 페이지 id)
+  connectedById Int? @map("connected_by_id") /// 마지막으로 연결을 시작한 관리자
+  connectedAt DateTime? @map("connected_at") @db.Timestamptz(3) /// 연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다
+  lastError String? @map("last_error") @db.VarChar /// 마지막 실패 이유 (비밀값 없음)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  connectedBy Employee? @relation("IntegrationConnectionConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([connectedById])
+  @@map("integration_connection")
 }
