@@ -460,6 +460,62 @@ function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unkn
  * 여는 태그 없이 닫는 태그만 오는 모델은 그 앞 글이 이미 답으로 나갔으므로 태그만 지운다 (최종 답은 done에서 다시 다듬는다).
  */
 export function createThinkSplitter(handlers: LlmStreamHandlers): { push(text: string): void; flush(): void } {
+  const inner = createTagSplitter(handlers);
+  // Gemma 4 계열은 생각 구간을 <|channel>thought … <channel|>로 감싸는데, LM Studio가 표시만 남기고 보낼 때가 있다.
+  // 닫는 표시는 </think>로 바꿔 앞 글을 생각으로 보내고, 여는 표시는 지운다.
+  // 짧은 <|channel>까지 지우면 글자가 하나씩 올 때 뒤의 thought가 남으므로 스트리밍에서는 전체 표시만 바꾼다
+  const markers = createMarkerRewriter([
+    [GEMMA_CHANNEL_OPEN, ''],
+    [GEMMA_CHANNEL_CLOSE, '</think>'],
+  ]);
+  return {
+    push(text) {
+      inner.push(markers.push(text));
+    },
+    flush() {
+      inner.push(markers.flush());
+      inner.flush();
+    },
+  };
+}
+
+const GEMMA_CHANNEL_OPEN = '<|channel>thought';
+const GEMMA_CHANNEL_OPEN_BARE = '<|channel>';
+const GEMMA_CHANNEL_CLOSE = '<channel|>';
+
+/** 조각 사이에서 잘려 올 수 있는 고정 표시를 다른 글로 바꾼다. 표시의 앞부분일 수 있는 끝 글자는 다음 조각까지 들고 있는다 */
+export function createMarkerRewriter(rules: readonly (readonly [string, string])[]): { push(text: string): string; flush(): string } {
+  const ordered = [...rules].sort((a, b) => b[0].length - a[0].length);
+  let pending = '';
+  const rewrite = (text: string) => ordered.reduce((out, [from, to]) => out.split(from).join(to), text);
+  const holdFrom = (text: string) => {
+    let hold = text.length;
+    for (const [from] of ordered) {
+      for (let size = Math.min(from.length - 1, text.length); size > 0; size -= 1) {
+        if (from.startsWith(text.slice(-size))) {
+          hold = Math.min(hold, text.length - size);
+          break;
+        }
+      }
+    }
+    return hold;
+  };
+  return {
+    push(text) {
+      const joined = rewrite(pending + text);
+      const cut = holdFrom(joined);
+      pending = joined.slice(cut);
+      return joined.slice(0, cut);
+    },
+    flush() {
+      const rest = rewrite(pending);
+      pending = '';
+      return rest;
+    },
+  };
+}
+
+function createTagSplitter(handlers: LlmStreamHandlers): { push(text: string): void; flush(): void } {
   const OPEN = '<think>';
   const CLOSE = '</think>';
   let inThink = false;
@@ -528,7 +584,8 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
  * 추론 모델이 답 앞에 쓴 <think> 블록을 떼어 낸다. 여는 태그 없이 `…</think>`로 시작하는 모델도 있어 마지막 닫는 태그 앞을 모두 생각 글로 본다.
  * 닫히지 않은 <think>(답 길이 상한에 걸려 끊긴 경우)는 전부 생각 글이다.
  */
-export function splitThinking(content: string): { thinking: string | null; text: string } {
+export function splitThinking(raw: string): { thinking: string | null; text: string } {
+  const content = raw.split(GEMMA_CHANNEL_CLOSE).join('</think>').split(GEMMA_CHANNEL_OPEN).join('').split(GEMMA_CHANNEL_OPEN_BARE).join('');
   const closed = content.lastIndexOf('</think>');
   if (closed >= 0) {
     const thinking = content.slice(0, closed).replace(/<\/?think>/gi, '').trim();
