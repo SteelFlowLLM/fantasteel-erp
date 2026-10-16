@@ -9,7 +9,6 @@ import { agentCandidateApi } from '@/api/agentCandidates';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
-import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
 import { Textarea } from '@/components/Input';
@@ -21,7 +20,6 @@ import { StateView } from '@/components/StateView';
 import { Tag } from '@/components/Tag';
 import { AiCard, MasterItem } from '@/features/agent/components/SoonExampleParts';
 import {
-  AGENT_RULE_ROWS,
   CANDIDATE_RISKS,
   CONFIRM_PERMISSION,
   RISK_NAME,
@@ -63,7 +61,6 @@ function AgentBoard({ candidates }: { candidates: AgentCandidateView[] }) {
       <CandidateList candidates={candidates} visible={visible} risk={risk} onRisk={setRisk} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
         {selected ? <CandidateDetail key={selected.id} candidate={selected} onSelect={setSelectedId} /> : <EmptyDetail hasAny={candidates.length > 0} />}
-        <RuleCard />
       </div>
     </div>
   );
@@ -176,7 +173,7 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
         }
       />
 
-      <AiCard title="상황 설명" meta="AI는 조회 근거로 설명만 해요 · 데이터 변경 없음" className="flex-none" petKey="card:agent.situation">
+      <AiCard title="상황 설명" className="flex-none" petKey="card:agent.situation">
         <p className="text-base leading-normal">{explain?.explanation ?? candidate.summary}</p>
         <KvList columns={1} items={Object.entries(candidate.evidence).map(([key, value]) => ({ label: evidenceLabelOf(key), value: value ?? '-' }))} />
         <div className="flex items-center gap-2 border-t border-ai-line pt-3">
@@ -198,7 +195,7 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
         </Banner>
       ) : null}
 
-      <AiCard icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} meta="규칙으로 생성 · Action Draft" className="flex-none" petKey="card:agent.candidate">
+      <AiCard icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} className="flex-none" petKey="card:agent.candidate">
         <CandidateBody candidate={candidate} />
         <KvList
           items={[
@@ -228,7 +225,6 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
             </>
           ) : null}
           <ResultLink candidate={candidate} />
-          <span className="ml-auto text-cap text-ink-3">AI는 데이터를 바꾸지 않아요 · 확정한 담당 부서원의 권한으로 실행돼요</span>
         </div>
       </AiCard>
 
@@ -342,28 +338,5 @@ function RejectModal({ candidate, onSelect, onClose }: { candidate: AgentCandida
         {reason.length}/{REASON_MAX}
       </span>
     </Modal>
-  );
-}
-
-function RuleCard() {
-  return (
-    <Card className="flex-none" petKey="card:agent.rules">
-      <CardHead title="감지 규칙" meta="규칙이 감지하고 대응 후보를 만들어요 · 납기 위험·불합격률 상승은 알림만 보내요" />
-      <CardBody>
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-          {AGENT_RULE_ROWS.map((rule) => (
-            <Fragment key={rule.risk}>
-              <dt className="text-ink-3">
-                {RISK_NAME[rule.risk]}
-                <span className="ml-1 text-2xs">({rule.trigger})</span>
-              </dt>
-              <dd className="m-0 text-ink-2">
-                {rule.condition} → <b className="font-semibold">{rule.response}</b>
-              </dd>
-            </Fragment>
-          ))}
-        </dl>
-      </CardBody>
-    </Card>
   );
 }
