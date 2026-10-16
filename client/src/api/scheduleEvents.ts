@@ -1,8 +1,8 @@
 // 내 일정 api (Voice2ERP 6단계). 서버를 부른다 (api/server/scheduleEvents.ts, docs/backend/schedule-event.md).
-import type { ScheduleEventView } from '@fantasteel/shared';
+import type { ScheduleEventInput, ScheduleEventView } from '@fantasteel/shared';
 import { serverScheduleEventApi } from '@/api/server/scheduleEvents';
 
-export type { ScheduleEventView } from '@fantasteel/shared';
+export type { ScheduleEventInput, ScheduleEventView } from '@fantasteel/shared';
 
 export const scheduleEventKeys = {
   all: ['schedule-events'] as const,
@@ -12,4 +12,8 @@ export const scheduleEventKeys = {
 export const scheduleEventApi = {
   /** from·to = 'YYYY-MM-DD' (Asia/Seoul, 끝 날짜 포함) */
   list: (from: string, to: string): Promise<ScheduleEventView[]> => serverScheduleEventApi.list(from, to),
+  /** 내 일정 직접 등록 (등록자 본인만 참석자) */
+  create: (input: ScheduleEventInput): Promise<ScheduleEventView> => serverScheduleEventApi.create(input),
+  /** 내가 직접 등록한 일정만 고칠 수 있다 (회의록 일정은 안 됨) */
+  update: ({ id, input }: { id: number; input: ScheduleEventInput }): Promise<ScheduleEventView> => serverScheduleEventApi.update(id, input),
 };

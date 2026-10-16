@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { AuthUser, ScheduleEventView } from '@fantasteel/shared';
+import type { AuthUser, ScheduleEventInput, ScheduleEventView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { ListScheduleEventsQuery } from './dto/schedule-event.dto';
-import { ScheduleEventRepository, type ScheduleEventRow } from './schedule-event.repository';
+import { ScheduleEventRepository, type ScheduleEventFields, type ScheduleEventRow } from './schedule-event.repository';
 
 const MAX_RANGE_DAYS = 62;
 const DAY_MS = 86_400_000;
@@ -42,7 +42,19 @@ function toView(row: ScheduleEventRow): ScheduleEventView {
   };
 }
 
-/** 내 일정 (Voice2ERP 6단계). 내가 참석자이거나 등록자인 일정만 */
+/** 입력 시각을 확인한다. schedule_event에 end_at > start_at CHECK가 있어 DB 오류가 되기 전에 업무 오류로 알린다 */
+function fieldsOf(input: ScheduleEventInput): ScheduleEventFields {
+  const startAt = new Date(input.startAt);
+  const endAt = new Date(input.endAt);
+  if (endAt.getTime() <= startAt.getTime()) throw new AppException('COM-004', '끝나는 시각은 시작 시각보다 뒤여야 해요');
+  return { scheduleEventTitle: input.scheduleEventTitle, scheduleEventDescription: input.scheduleEventDescription ?? null, startAt, endAt };
+}
+
+/**
+ * 내 일정 (Voice2ERP 6단계). 내가 참석자이거나 등록자인 일정만.
+ * 직접 등록·수정은 문서에 없는 기능(2026-10-16): 등록자 본인만 고치고, 회의록에서 등록한 일정은 회의록 쪽 기록이라 고치지 않는다.
+ * 일정은 REQ-LOG-002 작업 로그 대상이 아니어서 로그를 남기지 않는다(회의록 일정 등록도 알림만 보낸다).
+ */
 @Injectable()
 export class ScheduleEventService {
   constructor(
@@ -60,5 +72,24 @@ export class ScheduleEventService {
     if (days + 1 > MAX_RANGE_DAYS) throw new AppException('COM-004', `조회 기간은 ${MAX_RANGE_DAYS}일까지예요`);
     const rows = await this.repository.findMine(this.prisma, user.employeeId, seoulMidnight(from), seoulMidnight(addDays(to, 1)));
     return rows.map(toView);
+  }
+
+  /** 내 일정 직접 등록. 나 혼자 보는 일정이라 다른 사원에게 알림을 보내지 않는다 */
+  async create(user: AuthUser, input: ScheduleEventInput): Promise<ScheduleEventView> {
+    const fields = fieldsOf(input);
+    return toView(await this.repository.createMine(this.prisma, user.employeeId, fields));
+  }
+
+  /** 내가 직접 등록한 일정만 고친다. 볼 수 없는 일정은 없는 것처럼 COM-003 */
+  async update(user: AuthUser, id: number, input: ScheduleEventInput): Promise<ScheduleEventView> {
+    const fields = fieldsOf(input);
+    return this.prisma.$transaction(async (tx) => {
+      const event = await this.repository.findById(tx, id);
+      const visible = event && (event.creatorId === user.employeeId || event.attendees.some((a) => a.employeeId === user.employeeId));
+      if (!event || !visible) throw new AppException('COM-003', '일정을 찾을 수 없어요');
+      if (event.creatorId !== user.employeeId) throw new AppException('COM-002', '내가 등록한 일정만 고칠 수 있어요');
+      if (event.meetingMinutesId !== null) throw new AppException('COM-004', '회의록에서 등록한 일정은 여기서 고칠 수 없어요', 409);
+      return toView(await this.repository.update(tx, id, fields));
+    });
   }
 }
