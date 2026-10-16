@@ -16,6 +16,7 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { MeetingSpeakerCard } from '@/features/meetings/components/MeetingSpeakerCard';
 import { MeetingAskCard } from '@/features/meetings/components/MeetingAskCard';
 import { MeetingAnalysisPanel } from '@/features/meetings/components/MeetingAnalysisPanel';
+import { MeetingNotionExport } from '@/features/meetings/components/MeetingNotionExport';
 import { MeetingStatusBadge } from '@/features/meetings/components/MeetingStatusBadge';
 import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
 import { useMe } from '@/hooks/useMe';
@@ -44,7 +45,7 @@ function Body({ minutes }: { minutes: MeetingMinutesView }) {
   const failedAfterTranscript = minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED && !!minutes.transcript;
   return (
     <>
-      <PageHead crumb={<>회의록<Icon name="chevron-right" size="sm" />{minutes.meetingDate}</>} title={minutes.meetingMinutesTitle} actions={<MeetingStatusBadge status={minutes.meetingMinutesStatus} />} />
+      <PageHead crumb={<>회의록<Icon name="chevron-right" size="sm" />{minutes.meetingDate}</>} title={minutes.meetingMinutesTitle} actions={<><MeetingNotionExport minutes={minutes} /><MeetingStatusBadge status={minutes.meetingMinutesStatus} /></>} />
       {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.TRANSCRIBING ? (
         <Banner tone="run" icon="clock">
           <b>음성을 글로 바꾸는 중…</b> 길이에 따라 몇 분 걸릴 수 있어요. 이 화면은 끝나면 저절로 바뀌어요.
