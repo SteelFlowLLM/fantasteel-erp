@@ -245,3 +245,27 @@ describe('실시간 답 (스트림 이벤트)', () => {
     expect(store().entries).toEqual([]);
   });
 });
+
+describe('웹 검색 (이슈 #367)', () => {
+  const WEB = [{ title: '철강 시황', url: 'https://example.com/steel' }];
+
+  it('웹 도구 결과의 출처와 최종 답의 웹 출처를 대화에 남긴다. 웹 검색이 아니면 필드가 없다', () => {
+    store().addQuestion('q1', '철강 시황', undefined, undefined, true);
+    store().applyStreamEvent('q1', { type: 'tool_start', id: 't1', name: 'web_search', arguments: '{"query":"철강"}' }, 1000);
+    store().applyStreamEvent('q1', { type: 'tool_end', id: 't1', label: null, resultPreview: '…', durationMs: 900, webSources: WEB }, 1900);
+    const tool = store().live?.steps[0];
+    expect(tool?.kind === 'tool' ? tool.result?.webSources : null).toEqual(WEB);
+    store().applyStreamEvent('q1', { type: 'done', reply: { ...REPLY, webSources: WEB } }, 2000);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', webSources: WEB });
+
+    store().addQuestion('q2', '재고');
+    store().applyStreamEvent('q2', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).not.toHaveProperty('webSources');
+  });
+
+  it('웹 검색을 켜고 물은 질문이 실패하면 다시 물을 때 쓰도록 실패 줄에 담는다', () => {
+    store().addQuestion('q1', '철강 시황', undefined, undefined, true);
+    store().addFailure('q1', '철강 시황', '응답이 없어요');
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', webSearch: true });
+  });
+});
