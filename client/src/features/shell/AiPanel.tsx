@@ -513,19 +513,22 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
         <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
         <AiWebSources sources={entry.webSources} />
         {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} /> : null}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
-          <span className="font-semibold text-ink-2">출처</span>
-          {entry.sources.length ? (
-            entry.sources.map((source) => (
-              <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
-                <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
-                {sourceText(source)}
-              </span>
-            ))
-          ) : (
-            <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
-          )}
-        </div>
+        {/* 웹 출처만 있는 답에 '출처 없음'을 함께 보이면 서로 어긋나 보여서, 그때는 ERP 출처 줄을 숨긴다 */}
+        {entry.sources.length || !entry.webSources?.length ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
+            <span className="font-semibold text-ink-2">출처</span>
+            {entry.sources.length ? (
+              entry.sources.map((source) => (
+                <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
+                  <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
+                  {sourceText(source)}
+                </span>
+              ))
+            ) : (
+              <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
+            )}
+          </div>
+        ) : null}
         <AiStepsDetails steps={entry.steps} />
         {entry.reasoningApplied === false && entry.requestedReasoning && entry.requestedReasoning !== AI_REASONING_DEFAULT ? (
           <p className="text-cap text-ink-3">이 모델은 생각 정도를 바꿀 수 없어 기본값으로 답했어요</p>

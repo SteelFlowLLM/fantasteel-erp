@@ -239,6 +239,17 @@ describe('createThinkSplitter', () => {
   it('글자 하나씩 와도 나눈다', () => expect(run([...'<think>x</think>y'])).toEqual({ thinking: 'x', answer: 'y' }));
   it('닫히지 않은 생각은 끝까지 생각 글이다', () => expect(run(['<think>길게', ' 생각 중'])).toEqual({ thinking: '길게 생각 중', answer: '' }));
   it('여는 태그 없는 닫는 태그는 지운다', () => expect(run(['생각</thi', 'nk>답'])).toEqual({ thinking: '', answer: '생각답' }));
+  it('Gemma 여는 표시만 오면 지우고 답만 남긴다', () =>
+    expect(run(['<|chan', 'nel>thought\n포항제철소는'])).toEqual({ thinking: '', answer: '\n포항제철소는' }));
+  it('Gemma 닫는 표시가 조각 사이에서 잘려 와도 표시를 지운다', () =>
+    expect(run([...'<|channel>thought생각<channel|>답'])).toEqual({ thinking: '', answer: '생각답' }));
+});
+
+describe('splitThinking Gemma 표시', () => {
+  it('닫는 표시 앞은 생각, 뒤는 답이다', () =>
+    expect(splitThinking('<|channel>thought\n음…<channel|>답이에요')).toEqual({ thinking: '음…', text: '답이에요' }));
+  it('여는 표시만 있으면 지우고 모두 답이다', () =>
+    expect(splitThinking('<|channel>thought\n포항제철소는')).toEqual({ thinking: null, text: '포항제철소는' }));
 });
 
 describe('LlmClient 사진', () => {
