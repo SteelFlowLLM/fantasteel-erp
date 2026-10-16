@@ -57,6 +57,14 @@ export function slabQtyFromHeat(heatTon: Prisma.Decimal | string, castingYieldRa
   return D(heatTon).mul(D(castingYieldRate)).div(D(slabTheoreticalWeightTon)).floor().toNumber();
 }
 
+/**
+ * 히트 1개 몫 용선(t) = 히트 용량 ÷ 제강 수율 (소수 3자리 반올림). 제선 1건·제강 투입 용선의 상한이다.
+ * 히트 톤을 히트 용량과 바로 비교하면 반올림한 몫(277.778 × 0.90 = 250.0002)이 넘쳐서 용선 쪽에서 비교한다.
+ */
+export function hotMetalTonPerHeat(heatCapacityTon: Prisma.Decimal | string, steelmakingYieldRate: Prisma.Decimal | string): Prisma.Decimal {
+  return D(heatCapacityTon).div(D(steelmakingYieldRate)).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+}
+
 /** 계획 슬래브 매수와 예상 여재 (4.4에 없는 값이라 정했다 — 히트 단위 생산으로 수주보다 많이 나오는 슬래브) */
 export function plannedSlabQtyOf(input: { slabQtyPerHeat: number; heatCount: number; shortageQty: number }): { plannedSlabQty: number; expectedSurplusSlabQty: number } {
   const plannedSlabQty = input.slabQtyPerHeat * input.heatCount;

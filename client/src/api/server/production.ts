@@ -306,10 +306,19 @@ export const serverProductionResultApi = {
       ironmakingMaterials: context.ironmakingMaterials.map(toStock),
       ferroalloys: context.ferroalloys.map(toStock),
       heatsToMakeQty: context.heatsToMakeQty,
-      uncastHeats: context.uncastHeats.map((h) => ({ heatLotId: h.lotId, heatNo: h.lotNo, heatTon: h.heatTon, maxSlabQty: h.maxSlabQty, inspectionResult: (h.inspectionResult ?? 'PENDING') as InspectionResult })),
+      uncastHeats: context.uncastHeats.map((h) => ({
+        heatLotId: h.lotId,
+        heatNo: h.lotNo,
+        heatTon: h.heatTon,
+        maxSlabQty: h.maxSlabQty,
+        inspectionResult: (h.inspectionResult ?? 'PENDING') as InspectionResult,
+        completedAt: h.completedAt,
+      })),
       openWork: context.openWork.map((o) => ({ productionResultId: o.productionResultId, processType: o.processType, startedAt: o.startedAt, heatLotId: o.heatLotId, heatNo: heatNoOf(o.heatLotId) })),
       lastBlastFurnaceCode: context.lastBlastFurnaceCode,
       lastConverterCode: context.lastConverterCode,
+      earliestIronmakingStartedAt: context.earliestIronmakingStartedAt,
+      earliestSteelmakingStartedAt: context.earliestSteelmakingStartedAt,
     };
   },
 

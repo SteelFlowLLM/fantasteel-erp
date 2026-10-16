@@ -305,10 +305,12 @@ export const WORK_CONTEXT: WorkContext = {
   ],
   ferroalloys: [{ itemId: 4, itemCode: 'SMN01', itemName: '실리코망가니즈', rawMaterialType: 'FERROALLOY', consumptionRate: '20.000', remainingTon: '1.000' }],
   heatsToMakeQty: 0,
-  uncastHeats: [{ heatLotId: 50, heatNo: 'HT-BOF1-260918-001', heatTon: '250.000', maxSlabQty: 10, inspectionResult: 'PENDING' }],
+  uncastHeats: [{ heatLotId: 50, heatNo: 'HT-BOF1-260918-001', heatTon: '250.000', maxSlabQty: 10, inspectionResult: 'PENDING', completedAt: '2026-09-18T01:00:00.000Z' }],
   openWork: [],
   lastBlastFurnaceCode: 'BF2',
   lastConverterCode: 'BOF1',
+  earliestIronmakingStartedAt: null,
+  earliestSteelmakingStartedAt: null,
 };
 
 export const ROLLING_DETAIL: RollingDetail = {

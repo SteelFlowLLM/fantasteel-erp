@@ -125,10 +125,12 @@ describe('작업 실적 서버 어댑터', () => {
     ironmakingMaterials: [],
     ferroalloys: [],
     heatsToMakeQty: 0,
-    uncastHeats: [{ lotId: 901, lotNo: 'HT-BOF1-261005-001', heatTon: '250.000', maxSlabQty: 10, inspectionResult: null }],
+    uncastHeats: [{ lotId: 901, lotNo: 'HT-BOF1-261005-001', heatTon: '250.000', maxSlabQty: 10, inspectionResult: null, completedAt: '2026-10-05T00:30:00.000Z' }],
     openWork: [{ productionResultId: 77, processType: 'CONTINUOUS_CASTING', startedAt: '2026-10-05T01:00:00.000Z', heatLotId: 901 }],
     lastBlastFurnaceCode: null,
     lastConverterCode: null,
+    earliestIronmakingStartedAt: '2026-10-05T00:10:00.000Z',
+    earliestSteelmakingStartedAt: null,
   };
   const result = { id: 88, outputs: [{ lotNo: 'HT-BOF1-261005-002' }] };
 
@@ -141,7 +143,8 @@ describe('작업 실적 서버 어댑터', () => {
     });
     expect((await productionResultApi.plans()).map((p) => p.productionPlanNo)).toEqual(['PP-2610-0001', 'PP-2610-0003']);
     const work = await productionResultApi.work(300);
-    expect(work.uncastHeats[0]).toMatchObject({ heatLotId: 901, inspectionResult: 'PENDING' });
+    expect(work.uncastHeats[0]).toMatchObject({ heatLotId: 901, inspectionResult: 'PENDING', completedAt: '2026-10-05T00:30:00.000Z' });
+    expect(work).toMatchObject({ earliestIronmakingStartedAt: '2026-10-05T00:10:00.000Z', earliestSteelmakingStartedAt: null });
     expect(work.openWork[0]).toMatchObject({ productionResultId: 77, heatNo: 'HT-BOF1-261005-001' });
   });
 
