@@ -125,3 +125,60 @@ describe('GET /schedule-events', () => {
     expect(res.status).toBe(401);
   });
 });
+
+async function send<T>(method: 'POST' | 'PATCH', path: string, cookie: string, body: unknown) {
+  const res = await fetch(`${baseUrl}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error?: { code: string } } };
+}
+
+describe('내 일정 직접 등록·수정 (POST·PATCH /schedule-events, 2026-10-16)', () => {
+  const input = (title: string, startAt = '2026-11-03T14:00:00+09:00', endAt = '2026-11-03T15:30:00+09:00') => ({ scheduleEventTitle: title, scheduleEventDescription: '  메모  ', startAt, endAt });
+
+  it('등록하면 등록자 본인만 참석자로 두고, 내 일정에 보인다 (다른 사원에게는 안 보임)', async () => {
+    const res = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, input('거래처 미팅'));
+    expect(res.status).toBe(201);
+    created.push(res.body.data.id);
+    expect(res.body.data).toMatchObject({ scheduleEventTitle: '거래처 미팅', scheduleEventDescription: '메모', meetingMinutes: null, linkPath: null, creator: { id: ids['2103003'] } });
+    expect(res.body.data.attendees.map((a) => a.employeeId)).toEqual([ids['2103003']]);
+    expect(new Date(res.body.data.startAt).toISOString()).toBe('2026-11-03T05:00:00.000Z');
+    expect(titles((await get<ScheduleEventView[]>('/schedule-events?from=2026-11-02&to=2026-11-08', salesCookie)).body.data)).toContain('거래처 미팅');
+    expect(titles((await get<ScheduleEventView[]>('/schedule-events?from=2026-11-02&to=2026-11-08', outsiderCookie)).body.data)).not.toContain('거래처 미팅');
+  });
+
+  it('빈 메모는 없는 것으로, 끝이 시작과 같거나 앞이면 COM-004, 제목이 비면 COM-004', async () => {
+    const blank = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, { ...input('메모 없음'), scheduleEventDescription: '   ' });
+    created.push(blank.body.data.id);
+    expect(blank.body.data.scheduleEventDescription).toBeNull();
+    const same = await send<unknown>('POST', '/schedule-events', salesCookie, input('같은 시각', '2026-11-03T14:00:00+09:00', '2026-11-03T14:00:00+09:00'));
+    expect([same.status, same.body.error?.code]).toEqual([400, 'COM-004']);
+    const empty = await send<unknown>('POST', '/schedule-events', salesCookie, input('   '));
+    expect([empty.status, empty.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+
+  it('등록자 본인은 고칠 수 있고, 참석만 한 사원은 COM-002, 볼 수 없는 사원은 COM-003', async () => {
+    const mine = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, input('고칠 일정'));
+    created.push(mine.body.data.id);
+    const edited = await send<ScheduleEventView>('PATCH', `/schedule-events/${mine.body.data.id}`, salesCookie, input('고친 일정', '2026-11-05T10:00:00+09:00', '2026-11-05T11:00:00+09:00'));
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toMatchObject({ id: mine.body.data.id, scheduleEventTitle: '고친 일정' });
+    expect(new Date(edited.body.data.endAt).toISOString()).toBe('2026-11-05T02:00:00.000Z');
+    const outsider = await send<unknown>('PATCH', `/schedule-events/${mine.body.data.id}`, outsiderCookie, input('남의 일정'));
+    expect([outsider.status, outsider.body.error?.code]).toEqual([404, 'COM-003']);
+
+    // 2207005가 만들고 2103003이 참석하는 일정: 참석자는 고칠 수 없다
+    const shared = await prisma.scheduleEvent.findFirstOrThrow({ where: { scheduleEventTitle: '수요일 아침' } });
+    const attendee = await send<unknown>('PATCH', `/schedule-events/${shared.id}`, salesCookie, input('참석자가 고침'));
+    expect([attendee.status, attendee.body.error?.code]).toEqual([403, 'COM-002']);
+  });
+
+  it('회의록에서 등록한 일정은 등록자라도 여기서 고칠 수 없다 (COM-004 409)', async () => {
+    const minutes = await prisma.meetingMinutes.findFirst({ select: { id: true } });
+    if (!minutes) return;
+    const fromMeeting = await prisma.scheduleEvent.create({
+      data: { scheduleEventTitle: '회의 후속', startAt: new Date('2026-11-06T09:00:00+09:00'), endAt: new Date('2026-11-06T10:00:00+09:00'), creatorId: ids['2103003'], meetingMinutesId: minutes.id },
+    });
+    created.push(fromMeeting.id);
+    const res = await send<unknown>('PATCH', `/schedule-events/${fromMeeting.id}`, salesCookie, input('회의 일정 고침'));
+    expect([res.status, res.body.error?.code]).toEqual([409, 'COM-004']);
+  });
+});
