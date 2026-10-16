@@ -10,6 +10,7 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { LotService } from '../lot/lot.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { ProductionSimulationService } from '../production/production-simulation.service';
@@ -47,7 +48,11 @@ async function inspect(lotId: number, processType: string, steelGradeId: number,
 }
 
 beforeAll(async () => {
-  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  // 초안 만들기가 개발 PC에 저장된 LLM 설정(storage/settings/llm.json)으로 실제 모델을 부르지 않게 한다
+  moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(LlmSettingsStore)
+    .useValue({ read: async () => ({ baseUrl: 'http://llm.test/v1', model: null, apiKey: null }) })
+    .compile();
   await moduleRef.init();
   prisma = moduleRef.get(PrismaService);
   const authUsers = moduleRef.get(AuthUserService);

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DRAFT_STATUS } from '@fantasteel/shared';
+import { DRAFT_STATUS, ITEM_TYPE } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -42,7 +42,7 @@ export class MessageActionRepository {
   findMessage(tx: Tx, messageId: number) {
     return tx.message.findUnique({
       where: { id: messageId },
-      select: { id: true, chatRoomId: true, messageType: true, senderId: true, content: true, deletedAt: true, chatRoom: { select: { salesOrderId: true } } },
+      select: { id: true, chatRoomId: true, messageType: true, senderId: true, content: true, createdAt: true, deletedAt: true, chatRoom: { select: { salesOrderId: true } } },
     });
   }
 
@@ -79,6 +79,11 @@ export class MessageActionRepository {
       orderBy: { id: 'desc' },
       select: draftSelect,
     });
+  }
+
+  /** AI 추출 후보로 보낼 원료 (코드 순) */
+  findRawMaterials(tx: Tx) {
+    return tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true, itemCode: true, itemName: true }, orderBy: { itemCode: 'asc' } });
   }
 
   findItems(tx: Tx, ids: number[]) {

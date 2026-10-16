@@ -4,7 +4,10 @@ import { BUSINESS_EVENT_TYPE, DRAFT_STATUS, type AuthUser } from '@fantasteel/sh
 import { AppModule } from '../../app.module';
 import { AuthUserService } from '../../common/auth/auth-user.service';
 import { AppException } from '../../common/errors/app.exception';
+import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LlmClient, LlmRequestError, type ChatMessage } from '../llm/llm.client';
+import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { MessageActionService } from './message-action.service';
 
 let moduleRef: TestingModule;
@@ -20,6 +23,10 @@ let salesStaff: AuthUser;
 let logistics: AuthUser;
 let roomId: number;
 let oreId: number;
+
+/** 가짜 LLM. 모델이 없으면(기본) 추출하지 않는다. 테스트마다 모델·답을 바꾸고, 받은 대화를 남긴다 */
+const llm = { model: null as string | null, reply: async (): Promise<string> => '{}', calls: [] as ChatMessage[][] };
+const useLlm = (reply: () => Promise<string>) => Object.assign(llm, { model: 'test-model', reply });
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {
   try {
@@ -43,7 +50,18 @@ async function draftOf(content: string, payload: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    // 개발 PC에 저장된 LLM 설정(storage/settings/llm.json)으로 실제 모델을 부르지 않게 한다
+    .overrideProvider(LlmSettingsStore)
+    .useValue({ read: async () => ({ baseUrl: 'http://llm.test/v1', model: llm.model, apiKey: null }) })
+    .overrideProvider(LlmClient)
+    .useValue({
+      chat: async (_endpoint: unknown, _model: string, messages: ChatMessage[]) => {
+        llm.calls.push(messages);
+        return llm.reply();
+      },
+    })
+    .compile();
   await moduleRef.init();
   prisma = moduleRef.get(PrismaService);
   service = moduleRef.get(MessageActionService);
@@ -64,6 +82,10 @@ beforeAll(async () => {
   roomId = room.id;
   oreId = (await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } })).id;
 }, 60_000);
+
+afterEach(() => {
+  Object.assign(llm, { model: null, reply: async () => '{}', calls: [] });
+});
 
 afterAll(async () => {
   await moduleRef?.close();
@@ -125,10 +147,12 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(await service.get(purchaseHead, first.id)).toMatchObject({
       draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
       requesterId: purchaser.employeeId,
-      payload: { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content },
+      payload: { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content, aiFilledFields: [] },
       unresolvedFields: ['원료 품목', '수량(톤)', '희망 입고일'],
     });
-    const event = await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED, actionDraftId: first.id } });
+    // LLM 모델이 없으면 부르지 않고 빈 초안으로 만든다
+    expect(llm.calls).toHaveLength(0);
+    const event =await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED, actionDraftId: first.id } });
     expect(event).toMatchObject({ actorEmployeeId: purchaseHead.employeeId, messageId: message.id, targetType: 'action_draft', targetId: first.id });
     expect(await service.create(purchaser, message.id)).toEqual({ id: first.id, created: false });
   });
@@ -152,6 +176,74 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(await codeOf(service.create(purchaser, system.id))).toBe('COM-004');
     const deleted = await prisma.message.create({ data: { chatRoomId: roomId, senderId: purchaser.employeeId, content: '지운 글', deletedAt: new Date() } });
     expect(await codeOf(service.create(purchaser, deleted.id))).toBe('COM-004');
+  });
+});
+
+describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
+  it('모델이 있으면 메시지 글·작성일·원료 목록을 보내 원료·톤·희망 입고일을 채우고, 채운 칸을 남긴다', async () => {
+    useLlm(async () => '<think>원료 코드를 고른다</think>\n```json\n{"itemCode": " ore01 ", "requestedTon": 120.5, "desiredReceiptDate": "2026-11-20"}\n```');
+    const message = await send(purchaser, '철광석 120.5톤 11월 20일까지 필요해요');
+    const { id } = await service.create(purchaseHead, message.id);
+    expect(await service.get(purchaser, id)).toMatchObject({
+      draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
+      payload: { itemId: oreId, requestedTon: '120.500', desiredReceiptDate: '2026-11-20', sourceText: message.content, aiFilledFields: ['itemId', 'requestedTon', 'desiredReceiptDate'] },
+      unresolvedFields: [],
+    });
+    const [system, prompt] = llm.calls[0];
+    expect(prompt.content).toBe(message.content);
+    expect(system.content).toContain(seoulToday(message.createdAt));
+    expect(system.content).toContain('ORE01 | 철광석');
+  });
+
+  it('기준정보와 맞지 않는 값은 비워 두고 맞는 칸만 채운다 (원료는 이름으로도 맞춘다)', async () => {
+    useLlm(async () => '{"itemCode": "철광석", "requestedTon": "0", "desiredReceiptDate": "2026-02-30"}');
+    const message = await send(purchaser, '철광석 좀 2월 30일까지');
+    const { id } = await service.create(purchaser, message.id);
+    expect(await service.get(purchaser, id)).toMatchObject({
+      payload: { itemId: oreId, requestedTon: null, desiredReceiptDate: null, aiFilledFields: ['itemId'] },
+      unresolvedFields: ['수량(톤)', '희망 입고일'],
+    });
+  });
+
+  it('LLM 연결이 실패하거나 답이 JSON이 아니면 빈 초안으로 만든다 (초안 만들기는 실패하지 않는다)', async () => {
+    useLlm(async () => {
+      throw new LlmRequestError('연결할 수 없어요');
+    });
+    const failed = await service.create(purchaser, (await send(purchaser, '철광석 10톤')).id);
+    useLlm(async () => '네, 철광석 10톤이네요');
+    const notJson = await service.create(purchaser, (await send(purchaser, '철광석 10톤 다시')).id);
+    for (const { id, created } of [failed, notJson]) {
+      expect(created).toBe(true);
+      expect(await service.get(purchaser, id)).toMatchObject({
+        payload: { itemId: null, requestedTon: null, desiredReceiptDate: null, aiFilledFields: [] },
+        unresolvedFields: ['원료 품목', '수량(톤)', '희망 입고일'],
+      });
+    }
+  });
+
+  it('같은 메시지에 미처리 초안이 있으면 LLM을 부르지 않고 그 초안을 돌려준다', async () => {
+    useLlm(async () => '{}');
+    const message = await send(purchaser, '석회석 5톤');
+    const first = await service.create(purchaser, message.id);
+    expect(llm.calls).toHaveLength(1);
+    expect(await service.create(purchaseHead, message.id)).toEqual({ id: first.id, created: false });
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it('AI가 채운 초안은 사람이 고쳐도 확정·구매요청 생성·실행 작업 로그가 AI 경유로 남는다 (REQ-AST-010)', async () => {
+    useLlm(async () => '{"itemCode": "ORE01", "requestedTon": "8", "desiredReceiptDate": "2026-11-20"}');
+    const message = await send(purchaser, '철광석 8톤 11월 20일');
+    const { id } = await service.create(purchaser, message.id);
+    const edited = await service.update(purchaser, id, { payload: { requestedTon: '9' } });
+    expect(edited.payload.aiFilledFields).toEqual(['itemId', 'requestedTon', 'desiredReceiptDate']);
+    expect((await service.confirm(purchaser, id, {})).executed).toBe(true);
+    const events = await prisma.businessEvent.findMany({ where: { actionDraftId: id }, orderBy: { id: 'asc' } });
+    expect(events.map((e) => [e.businessEventType, e.isAiAssisted])).toEqual([
+      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, false],
+      [BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, true],
+      [BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, true],
+      [BUSINESS_EVENT_TYPE.DRAFT_EXECUTED, true],
+    ]);
   });
 });
 
@@ -207,6 +299,8 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
     expect(events.map((e) => e.businessEventType)).toEqual([BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, BUSINESS_EVENT_TYPE.DRAFT_EXECUTED]);
     // 실행 기록에는 만든 업무를 남긴다 (구매요청 밖의 유형은 이 기록으로 결과를 잇는다, 업무 프로세스 BP-ACT-02)
     expect(events.at(-1)?.afterData).toMatchObject({ resultTable: 'purchase_requisition', resultId: requisition.id, resultNo: requisition.purchaseRequisitionNo });
+    // 사람이 채운 초안이라 AI 경유가 아니다
+    expect(events.map((e) => e.isAiAssisted)).toEqual([false, false, false]);
 
     expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('COM-004');
     expect(await codeOf(service.execute(purchaser, draft.id))).toBe('COM-004');

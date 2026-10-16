@@ -12,6 +12,11 @@ export interface PurchaseRequisitionDraftPayload {
   requestReason: string | null;
   /** 원본 메시지 글 (만들 때 복사, 참고용) */
   sourceText: string | null;
+  /**
+   * 메시지에서 만들 때 AI가 채운 칸 이름(예: itemId). 사람이 고쳐도 그대로 두고, 비어 있지 않으면 확정·실행 작업 로그가 AI 경유다.
+   * 서버 초안 응답에는 늘 있고(없으면 빈 배열), 회의록 후보(MeetingCandidate.purchase)에는 없다
+   */
+  aiFilledFields?: string[];
 }
 
 /** 초안 값 (유형별 추출 스키마, 업무 프로세스 12.3). 유형을 더하면 그 유형의 값을 합집합으로 더한다 */

@@ -108,7 +108,7 @@ export interface DraftConfirmResult {
   errorMessage: string | null;
 }
 
-export type DraftPayloadInput = Partial<Omit<PurchaseRequisitionDraftPayload, 'sourceText'>>;
+export type DraftPayloadInput = Partial<Omit<PurchaseRequisitionDraftPayload, 'sourceText' | 'aiFilledFields'>>;
 
 // ── api ─────────────────────────────────────────────────
 

@@ -6,16 +6,22 @@ import { Prisma } from '../../../generated/prisma/client';
 import type { Tx } from '../../../prisma/prisma.service';
 import { isValidDate, PurchasingService, TON_PATTERN } from '../../purchasing/purchasing.service';
 import { MessageActionRepository, type DraftRow } from '../message-action.repository';
-import type { ActionDefinition } from './action-definition';
+import { isAiAssisted, type ActionDefinition } from './action-definition';
 
 const REQUEST_REASON_MAX = 500;
 const PATCH_FIELDS = new Set(['itemId', 'requestedTon', 'desiredReceiptDate', 'requestReason']);
+/** AI가 채우는 칸 (추출 스키마 REQ-ACT-001) */
+const EXTRACTED_FIELDS = ['itemId', 'requestedTon', 'desiredReceiptDate'] as const;
+
+/** 값이 들어 있는 추출 칸 이름 (AI가 채운 칸으로 남길 때) */
+export const filledExtractedFields = (p: PurchaseRequisitionDraftPayload): string[] => EXTRACTED_FIELDS.filter((field) => p[field] !== null);
 
 const isPositiveTon = (s: string) => TON_PATTERN.test(s) && Number(s) > 0;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const textOrNull = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : null);
 
 type ItemBrief = Awaited<ReturnType<MessageActionRepository['findItems']>>[number];
+type MaterialBrief = Awaited<ReturnType<MessageActionRepository['findRawMaterials']>>[number];
 
 /** 저장된 payload(jsonb)를 구매요청 초안 값으로 읽는다 */
 export function payloadOf(raw: unknown): PurchaseRequisitionDraftPayload {
@@ -26,7 +32,22 @@ export function payloadOf(raw: unknown): PurchaseRequisitionDraftPayload {
     desiredReceiptDate: textOrNull(p.desiredReceiptDate),
     requestReason: textOrNull(p.requestReason),
     sourceText: textOrNull(p.sourceText),
+    aiFilledFields: Array.isArray(p.aiFilledFields) ? p.aiFilledFields.filter((f): f is string => typeof f === 'string') : [],
   };
+}
+
+/** LLM이 고른 원료: 코드나 이름이 정확히 하나와 맞을 때만 (대소문자·앞뒤 공백 무시) */
+function materialIdOf(materials: MaterialBrief[], value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const key = value.trim().toLowerCase();
+  const matches = materials.filter((m) => m.itemCode.toLowerCase() === key || m.itemName.toLowerCase() === key);
+  return matches.length === 1 ? matches[0].id : null;
+}
+
+/** LLM이 준 톤(숫자나 글)을 소수 3자리 글로. 0 이하이거나 형식이 틀리면 null */
+function tonOf(value: unknown): string | null {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim().replace(/,/g, '') : '';
+  return isPositiveTon(text) ? new Prisma.Decimal(text).toFixed(3) : null;
 }
 
 /** 확정 전에 비어 있거나 기준정보와 맞지 않는 필수 칸 (추출 스키마 REQ-ACT-001: 원료 품목·수량(톤)·희망 입고일) */
@@ -61,7 +82,31 @@ export class PurchaseRequisitionAction implements ActionDefinition<PurchaseRequi
   }
 
   empty(sourceText: string | null): PurchaseRequisitionDraftPayload {
-    return { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText };
+    return { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText, aiFilledFields: [] };
+  }
+
+  /** 추출 스키마(REQ-ACT-001)의 원료·톤·희망 입고일. 요청자는 메시지 작성자로 정해져 있어 묻지 않는다 */
+  async extractionGuide(tx: Tx): Promise<string> {
+    const materials = await this.repository.findRawMaterials(tx);
+    return [
+      '- itemCode: 원료 품목 코드. 아래 원료 목록의 코드만 쓴다',
+      '- requestedTon: 요청 수량. 톤 단위 숫자',
+      '- desiredReceiptDate: 희망 입고일. YYYY-MM-DD',
+      '',
+      '원료 목록 (코드 | 이름):',
+      ...materials.map((m) => `${m.itemCode} | ${m.itemName}`),
+    ].join('\n');
+  }
+
+  async fromExtraction(tx: Tx, extracted: Record<string, unknown>, sourceText: string | null): Promise<PurchaseRequisitionDraftPayload> {
+    const date = typeof extracted.desiredReceiptDate === 'string' ? extracted.desiredReceiptDate.trim() : '';
+    const values = {
+      itemId: materialIdOf(await this.repository.findRawMaterials(tx), extracted.itemCode),
+      requestedTon: tonOf(extracted.requestedTon),
+      desiredReceiptDate: isValidDate(date) ? date : null,
+    };
+    const payload = { ...this.empty(sourceText), ...values };
+    return { ...payload, aiFilledFields: filledExtractedFields(payload) };
   }
 
   async applyPatch(tx: Tx, current: PurchaseRequisitionDraftPayload, patch: Record<string, unknown>): Promise<PurchaseRequisitionDraftPayload> {
@@ -112,7 +157,7 @@ export class PurchaseRequisitionAction implements ActionDefinition<PurchaseRequi
   async execute(tx: Tx, draft: DraftRow, actor: AuthUser): Promise<ActionDraftResultView> {
     const p = payloadOf(draft.payload);
     const input = { itemId: p.itemId ?? 0, requestedTon: p.requestedTon ?? '', desiredReceiptDate: p.desiredReceiptDate ?? '', requestReason: p.requestReason };
-    const requisition = await this.purchasing.createRequisition(tx, input, actor, { actionDraftId: draft.id, messageId: draft.messageId });
+    const requisition = await this.purchasing.createRequisition(tx, input, actor, { actionDraftId: draft.id, messageId: draft.messageId, isAiAssisted: isAiAssisted(p) });
     return { table: 'purchase_requisition', id: requisition.id, no: requisition.purchaseRequisitionNo, status: requisition.purchaseRequisitionStatus };
   }
 
