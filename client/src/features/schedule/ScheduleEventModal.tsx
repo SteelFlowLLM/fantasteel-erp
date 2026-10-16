@@ -6,8 +6,9 @@ import { useState } from 'react';
 import { scheduleEventApi, scheduleEventKeys } from '@/api/scheduleEvents';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
-import { Input, Select, Textarea } from '@/components/Input';
+import { Input, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
+import { TimeSelect } from '@/features/schedule/TimeSelect';
 import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, endOptions, formOf, formProblem, inputOf, shiftEnd, startOptions, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
 import { useAction } from '@/hooks/useAction';
 
@@ -52,29 +53,15 @@ export function ScheduleEventModal({ event, date, onClose }: { event?: ScheduleE
             <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} />
           </Field>
           <Field label="시작" required>
-            <Select
+            <TimeSelect
+              ariaLabel="시작 시각"
               value={form.start}
-              className="font-mono tabular-nums"
-              onChange={(e) => {
-                const start = e.target.value;
-                setForm((prev) => ({ ...prev, start, end: shiftEnd(prev.start, prev.end, start) }));
-              }}
-            >
-              {startOptions(form.start).map((time) => (
-                <option key={time} value={time}>
-                  {time}
-                </option>
-              ))}
-            </Select>
+              options={startOptions(form.start)}
+              onChange={(start) => setForm((prev) => ({ ...prev, start, end: shiftEnd(prev.start, prev.end, start) }))}
+            />
           </Field>
           <Field label="끝" required>
-            <Select value={form.end} className="font-mono tabular-nums" onChange={(e) => set('end', e.target.value)}>
-              {endOptions(form.start, form.end).map((time) => (
-                <option key={time} value={time}>
-                  {time}
-                </option>
-              ))}
-            </Select>
+            <TimeSelect ariaLabel="끝 시각" value={form.end} options={endOptions(form.start, form.end)} onChange={(end) => set('end', end)} />
           </Field>
         </div>
         {touched && problem && form.title.trim() ? <span className="text-xs text-danger">{problem}</span> : null}
