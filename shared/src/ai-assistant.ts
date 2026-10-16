@@ -29,6 +29,30 @@ export interface AiAssistantMessageInput {
   history?: AiAssistantTurn[];
   /** 생각 정도 (문서에 없는 기능, 2026-10-16 추가). 없으면 서버 기본값(보통) */
   reasoning?: AiReasoningLevel;
+  /** 질문과 함께 보는 사진 (문서에 없는 기능, 2026-10-16 추가). 사진을 볼 수 있는 모델일 때만. 지난 대화에는 남기지 않는다 */
+  images?: AiAssistantImageInput[];
+}
+
+/** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
+export const AI_IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export type AiImageMediaType = (typeof AI_IMAGE_MEDIA_TYPES)[number];
+/** 질문 하나에 붙이는 사진 수와 한 장의 크기 상한 (가정값). 화면이 긴 변을 줄여 보내므로 보통 수백 KB다 */
+export const AI_IMAGE_MAX_COUNT = 4;
+export const AI_IMAGE_MAX_BYTES = 2_000_000;
+
+export interface AiAssistantImageInput {
+  mediaType: AiImageMediaType;
+  /** data: 접두어 없는 base64 */
+  dataBase64: string;
+}
+
+/** 지금 설정된 모델이 할 수 있는 것 (GET /ai-assistant/capabilities). LM Studio가 아니면 알 수 없어 null */
+export interface AiAssistantCapabilitiesView {
+  model: string | null;
+  /** 사진을 볼 수 있는지 */
+  vision: boolean | null;
+  /** 생각 정도를 바꿀 수 있는지 */
+  reasoning: boolean | null;
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. 모델이 단계를 모르면 켜고 끄기만 한다 */

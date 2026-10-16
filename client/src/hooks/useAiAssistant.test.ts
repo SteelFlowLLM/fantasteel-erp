@@ -12,9 +12,11 @@ const DONE: AiAssistantStreamEvent = { type: 'done', reply: { answer: '최종 �
 beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null }));
 afterEach(() => vi.restoreAllMocks());
 
-function ask(reasoning?: 'off' | 'high') {
-  store().addQuestion('q1', '질문', reasoning);
-  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], reasoning });
+const PHOTO = { mediaType: 'image/jpeg' as const, dataBase64: 'QUJD' };
+
+function ask(reasoning?: 'off' | 'high', images?: (typeof PHOTO)[]) {
+  store().addQuestion('q1', '질문', reasoning, images);
+  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], reasoning, images });
 }
 
 describe('runAiAsk', () => {
@@ -32,6 +34,20 @@ describe('runAiAsk', () => {
 
     await ask();
     expect(spy.mock.calls[1][0]).not.toHaveProperty('reasoning');
+  });
+
+  it('사진은 질문과 함께 보내고, 없으면 images 필드를 보내지 않는다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent(DONE));
+    await ask(undefined, [PHOTO]);
+    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', images: [PHOTO] });
+    await ask(undefined, []);
+    expect(spy.mock.calls[1][0]).not.toHaveProperty('images');
+  });
+
+  it('사진 질문이 실패하면 실패 줄이 사진을 들고 있다 (모델이 사진을 못 보면 서버 400)', async () => {
+    vi.spyOn(aiAssistantApi, 'askStream').mockRejectedValue(new Error('지금 모델은 사진을 볼 수 없어요'));
+    await ask(undefined, [PHOTO]);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', content: '지금 모델은 사진을 볼 수 없어요', images: [PHOTO] });
   });
 
   it('done 없이 연결이 끝나면 실패 줄을 남긴다', async () => {

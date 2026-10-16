@@ -36,9 +36,16 @@ export interface LlmToolCall {
   arguments: string;
 }
 
+/** 질문과 함께 보내는 사진 (OpenAI 호환 image_url의 data URL로 보낸다) */
+export interface LlmImage {
+  mediaType: string;
+  dataBase64: string;
+}
+
 /** 도구를 쓰는 대화: 모델의 도구 호출과 그 결과(tool)가 끼어든다 */
 export type LlmToolMessage =
   | ChatMessage
+  | { role: 'user'; content: string; images: LlmImage[] }
   | { role: 'assistant'; content: string | null; toolCalls: LlmToolCall[] }
   | { role: 'tool'; toolCallId: string; content: string };
 
@@ -118,6 +125,13 @@ export interface LlmJsonOptions {
 interface LmStudioModelInfo {
   /** 생각 설정을 받는 모델만 있다. 예: ['off', 'on'], ['off', 'low', 'medium', 'xhigh', 'on'] */
   reasoningOptions: string[] | null;
+  vision: boolean;
+}
+
+/** 모델이 할 수 있는 것. LM Studio가 아니거나 모르는 모델이면 null */
+export interface LlmModelCapabilities {
+  vision: boolean | null;
+  reasoning: boolean | null;
 }
 
 /**
@@ -352,6 +366,14 @@ export class LlmClient {
     };
   }
 
+  /** 사진·생각 설정 지원 여부 (화면이 버튼을 켜고 끄는 데 쓴다) */
+  async modelCapabilities(endpoint: LlmEndpoint, model: string): Promise<LlmModelCapabilities> {
+    const models = await this.lmStudioModelInfo(endpoint);
+    const info = models ? findModelInfo(models, model) : undefined;
+    if (!info) return { vision: null, reasoning: null };
+    return { vision: info.vision, reasoning: Boolean(info.reasoningOptions?.length) };
+  }
+
   /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
   private async lmStudioModelInfo(endpoint: LlmEndpoint): Promise<Map<string, LmStudioModelInfo> | null> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
@@ -359,11 +381,11 @@ export class LlmClient {
     if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
     let models: Map<string, LmStudioModelInfo> | null;
     try {
-      type Wire = { models?: { key: string; variants?: string[]; capabilities?: { reasoning?: { allowed_options?: string[] } } }[] };
+      type Wire = { models?: { key: string; variants?: string[]; capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } } }[] };
       const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
       models = Array.isArray(body.models) ? new Map() : null;
       for (const m of body.models ?? []) {
-        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null };
+        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true };
         for (const id of [m.key, ...(m.variants ?? [])]) models?.set(id, info);
       }
     } catch {
@@ -488,6 +510,15 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
       role: 'assistant',
       content: message.content,
       tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+    };
+  }
+  if (message.role === 'user' && 'images' in message && message.images.length) {
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: message.content },
+        ...message.images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.dataBase64}` } })),
+      ],
     };
   }
   return { role: message.role, content: message.content };
