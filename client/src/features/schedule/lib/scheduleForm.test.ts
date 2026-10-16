@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScheduleEventView } from '@fantasteel/shared';
-import { canEditEvent, emptyForm, formOf, formProblem, inputOf, seoulIso } from '@/features/schedule/lib/scheduleForm';
+import { canEditEvent, emptyForm, endOptions, formOf, formProblem, inputOf, seoulIso, shiftEnd, startOptions } from '@/features/schedule/lib/scheduleForm';
 
 const event = (over: Partial<ScheduleEventView> = {}): ScheduleEventView => ({
   id: 1,
@@ -41,6 +41,22 @@ describe('내 일정 직접 등록·수정 입력', () => {
       startAt: '2026-11-03T05:00:00.000Z',
       endAt: '2026-11-03T06:30:00.000Z',
     });
+  });
+
+  it('시각은 30분 단위 목록에서 고르고, 끝 목록은 시작 뒤 시각과 하루 끝(23:59)', () => {
+    const starts = startOptions();
+    expect(starts).toHaveLength(48);
+    expect([starts[0], starts[1], starts.at(-1)]).toEqual(['00:00', '00:30', '23:30']);
+    expect(startOptions('14:15')).toContain('14:15');
+    expect(endOptions('22:30')).toEqual(['23:00', '23:30', '23:59']);
+    expect(endOptions('23:30')).toEqual(['23:59']);
+    expect(endOptions('09:00', '10:45')).toContain('10:45');
+  });
+
+  it('시작을 바꾸면 끝도 원래 길이만큼 옮기고, 하루를 넘으면 23:59', () => {
+    expect(shiftEnd('09:00', '10:30', '13:00')).toBe('14:30');
+    expect(shiftEnd('09:00', '09:00', '13:00')).toBe('14:00');
+    expect(shiftEnd('09:00', '11:00', '23:00')).toBe('23:59');
   });
 
   it('내가 직접 등록한 일정만 고칠 수 있다 (참석만 한 일정·회의록 일정은 안 됨)', () => {

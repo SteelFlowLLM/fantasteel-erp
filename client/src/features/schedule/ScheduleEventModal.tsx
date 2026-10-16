@@ -6,9 +6,9 @@ import { useState } from 'react';
 import { scheduleEventApi, scheduleEventKeys } from '@/api/scheduleEvents';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
-import { Input, Textarea } from '@/components/Input';
+import { Input, Select, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
-import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, formOf, formProblem, inputOf, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
+import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, endOptions, formOf, formProblem, inputOf, shiftEnd, startOptions, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
 import { useAction } from '@/hooks/useAction';
 
 /** event가 있으면 고치기, 없으면 date 날에 새로 추가 */
@@ -47,15 +47,34 @@ export function ScheduleEventModal({ event, date, onClose }: { event?: ScheduleE
         <Field label="제목" required error={touched && !form.title.trim() ? '제목을 입력해 주세요' : null}>
           <Input value={form.title} maxLength={TITLE_MAX} autoFocus placeholder="예: 거래처 방문" onChange={(e) => set('title', e.target.value)} />
         </Field>
-        <div className="grid grid-cols-[1fr_110px_110px] gap-3">
+        <div className="grid grid-cols-[1fr_120px_120px] gap-3">
           <Field label="날짜" required>
             <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} />
           </Field>
           <Field label="시작" required>
-            <Input type="time" value={form.start} onChange={(e) => set('start', e.target.value)} />
+            <Select
+              value={form.start}
+              className="font-mono tabular-nums"
+              onChange={(e) => {
+                const start = e.target.value;
+                setForm((prev) => ({ ...prev, start, end: shiftEnd(prev.start, prev.end, start) }));
+              }}
+            >
+              {startOptions(form.start).map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field label="끝" required>
-            <Input type="time" value={form.end} onChange={(e) => set('end', e.target.value)} />
+            <Select value={form.end} className="font-mono tabular-nums" onChange={(e) => set('end', e.target.value)}>
+              {endOptions(form.start, form.end).map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </Select>
           </Field>
         </div>
         {touched && problem && form.title.trim() ? <span className="text-xs text-danger">{problem}</span> : null}
