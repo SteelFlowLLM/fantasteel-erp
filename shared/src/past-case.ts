@@ -135,7 +135,7 @@ const example = (seq: number, item: Omit<PastCaseView, 'id' | 'caseNo' | 'create
   return { id: seq, caseNo: formatCaseNo(seq), ...rest, lots: lotNos.map((lotNo) => ({ lotId: null, lotNo })), createdEmployeeName: null, createdAt: null, isExample: true };
 };
 
-/** 예시 사례 5건 (품질 3, 설비 2). 등록 사례 번호는 CASE-0006부터 */
+/** 예시 사례 5건 (품질 2, 설비 3). 구분은 원인이 설비면 설비. 등록 사례 번호는 CASE-0006부터 */
 export const PAST_CASE_EXAMPLES: readonly PastCaseView[] = [
   example(5, {
     caseCategory: 'QUALITY',
@@ -168,10 +168,10 @@ export const PAST_CASE_EXAMPLES: readonly PastCaseView[] = [
     occurredDate: '2026-08-03',
   }),
   example(2, {
-    caseCategory: 'QUALITY',
+    caseCategory: 'EQUIPMENT',
     title: 'SS275 슬래브 표면 균열',
     phenomenon: '슬래브 표면에 가로 균열이 보여 불합격이에요.',
-    cause: '연주 냉각수 양이 고르지 않았어요.',
+    cause: '2차 냉각대 노즐이 막혀 연주 냉각수 양이 고르지 않았어요.',
     actionTaken: '냉각수 노즐을 청소하고 냉각 조건을 다시 맞췄어요.',
     equipmentText: '연주기 2차 냉각대',
     lotNos: ['HT-BOF1-260719-009-05'],
