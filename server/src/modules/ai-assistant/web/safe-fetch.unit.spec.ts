@@ -163,16 +163,18 @@ describe('웹 도구 끝에서 끝까지 (가짜 검색 + 실제 읽기)', () =>
     const results = `<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(`${base}/redirect-ok`)}">철강신문</a><a class="result__snippet">3고로 개수</a></div>`;
     const search = new WebSearchClient({ fetch: async () => new Response(results, { status: 200, headers: { 'content-type': 'text/html' } }) });
     const toolbox = new AssistantWebToolbox({ search, places: new KakaoPlaceClient(() => null), pages: new SafeWebPageReader(fetcher()) });
-    const session = toolbox.session();
+    const session = toolbox.session(1);
     await session.run({ id: 'c1', name: 'web_search', arguments: '{"query":"포항 3고로"}' });
     const read = await session.run({ id: 'c2', name: 'read_web_page', arguments: JSON.stringify({ url: `${base}/redirect-ok` }) });
     expect(read.webSources).toEqual([{ title: '포항제철소 3고로 개수 완료 - 철강신문', url: `${base}/article` }]);
-    expect(read.content).toContain(`<untrusted_web_content source="${base}/article">`);
+    // 최종 주소는 감싼 안에, 밖에는 호스트만
+    expect(read.content).toContain(`[웹 페이지] 127.0.0.1\n`);
+    expect(read.content).toContain(`<untrusted_web_content source="127.0.0.1">\n주소: ${base}/article\n제목: `);
     expect(read.content).toContain('포항제철소가 3고로 개수 공사를 마치고');
     expect(read.content).not.toContain('should not appear');
 
     // 같은 시험 서버라도 기본 읽기(운영 규칙)로는 막힌다
-    const strict = new AssistantWebToolbox({ search, places: new KakaoPlaceClient(() => null), pages: new SafeWebPageReader(fetcher({ policy: DEFAULT_FETCH_POLICY })) }).session();
+    const strict = new AssistantWebToolbox({ search, places: new KakaoPlaceClient(() => null), pages: new SafeWebPageReader(fetcher({ policy: DEFAULT_FETCH_POLICY })) }).session(1);
     await strict.run({ id: 'c1', name: 'web_search', arguments: '{"query":"포항 3고로"}' });
     const blocked = await strict.run({ id: 'c2', name: 'read_web_page', arguments: JSON.stringify({ url: `${base}/redirect-ok` }) });
     expect(JSON.parse(blocked.content).오류).toBe('80·443 포트의 주소만 읽을 수 있어요');

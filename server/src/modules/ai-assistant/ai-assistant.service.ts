@@ -158,7 +158,7 @@ export class AiAssistantService {
         const toolCalls: AiAssistantToolTrace[] = [];
         const writeEnabled = writable && emit !== undefined;
         // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다
-        const web = webSearch && emit !== undefined ? this.webTools.session() : null;
+        const web = webSearch && emit !== undefined ? this.webTools.session(user.employeeId) : null;
         const tools = [...this.toolbox.definitions(), ...(web ? this.webTools.definitions() : []), ...(writeEnabled ? this.writeTools.definitions() : [])];
         const maxRounds = web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
         const budget = new WriteFixBudget();
@@ -187,6 +187,8 @@ export class AiAssistantService {
               result = await this.runWrite(user, toolCall, traceId, input.question, emit, budget, stopped, signal);
             } else {
               result = await this.toolbox.run(user, toolCall);
+              // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
+              web?.observeErpResult(result.content);
             }
             if (result.stop) stopped = true;
             const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
