@@ -117,6 +117,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #steps{
   list-style:none;margin:0;padding:3px;display:flex;align-items:center;flex:1;min-width:0;
   overflow-x:auto;scrollbar-width:none;
+  /* 단계 이름이 붙어 줄이 넘치므로 양 끝을 흐려 가로로 더 있다는 것을 보인다 */
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);
 }
 #steps::-webkit-scrollbar{display:none}
 #steps li{display:flex;align-items:center;flex:none}
@@ -124,12 +127,20 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #steps li:last-child{margin-right:auto}
 #steps li+li::before{content:"";width:5px;height:2px;background:#2b3648}
 #steps button{
-  width:24px;height:24px;border-radius:50%;border:2px solid var(--c);background:transparent;
-  font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;padding:0;color:var(--text);
+  height:26px;border-radius:13px;border:2px solid var(--c);background:transparent;
+  display:inline-flex;align-items:center;gap:5px;padding:0 9px 0 3px;
+  font-size:11.5px;font-weight:600;white-space:nowrap;color:var(--text);
 }
-#steps button.done{background:var(--c);color:#0b0f15}
+#steps button b{
+  min-width:17px;height:17px;padding:0 3px;border-radius:9px;display:grid;place-items:center;
+  font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;background:var(--c);color:#0b0f15;
+}
+#steps button.done,#steps button.active{background:var(--c);color:#0b0f15}
+#steps button.done b,#steps button.active b{background:#0b0f15;color:var(--c)}
 #steps button.up{border-color:#3b475b;color:var(--muted)}
-#steps button.active{background:var(--c);color:#0b0f15;box-shadow:0 0 0 3px rgba(255,255,255,.22)}
+#steps button.up b{background:#3b475b;color:var(--muted)}
+#steps button.active{box-shadow:0 0 0 3px rgba(255,255,255,.22)}
+.ctrl button#btnSpeed[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:rgba(255,122,61,.12)}
 
 #fallback{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:var(--muted)}
 #fallback[hidden]{display:none}
@@ -210,6 +221,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <button id="btnPrev" aria-label="이전 단계"><svg viewBox="0 0 12 12"><path d="M8.5 1 3 6l5.5 5V1z"/></svg></button>
       <button id="btnPlay" class="primary" aria-label="진행 재생"><svg viewBox="0 0 12 12"><path d="M2.5 1v10l8-5z"/></svg><span class="txt">재생</span></button>
       <button id="btnNext" aria-label="다음 단계"><svg viewBox="0 0 12 12"><path d="M3.5 1 9 6l-5.5 5V1z"/></svg></button>
+      <button id="btnSpeed" aria-pressed="false" title="2배속으로 재생">2배속</button>
     </div>
     <ol id="steps"></ol>
     <div class="ctrl">
@@ -384,13 +396,14 @@ const tagOf = i => pad(i + 1);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let current = -1;            // -1 = 전체 보기, 0..N-1 = 업무 흐름 단계
 let playing = false, playTimer = 0;
+let playSpeed = 1;           // 2배속이면 단계 넘김 간격과 카메라·철강맨 이동이 함께 빨라진다
 let view = null;             // 3D 뷰 API (초기화 실패 시 null)
 
 const panel = $('#panel'), stepsEl = $('#steps'), legendEl = $('#legend'), labelsEl = $('#labels');
 
 legendEl.innerHTML = Object.values(ROLES).map(p => `<li style="--c:${p.color}"><i></i>${p.name}</li>`).join('');
 stepsEl.innerHTML = STAGES.map((s, i) =>
-  `<li><button data-i="${i}" style="--c:${colorOf(i)}" aria-label="${i + 1}단계 ${s.title}" title="${pad(i + 1)} ${s.title}">${i + 1}</button></li>`).join('');
+  `<li><button data-i="${i}" style="--c:${colorOf(i)}" aria-label="${i + 1}단계 ${s.title}" title="${pad(i + 1)} ${s.title}"><b>${i + 1}</b>${s.short}</button></li>`).join('');
 labelsEl.innerHTML = ITEMS.map((s, i) =>
   `<div class="label" data-i="${i}" style="--c:${colorOf(i)}"><span class="n">${tagOf(i)}</span><span class="t">${s.short}</span></div>`).join('')
   + '<div class="tok"></div>';
@@ -477,17 +490,33 @@ function setPlaying(on) {
     : '<svg viewBox="0 0 12 12"><path d="M2.5 1v10l8-5z"/></svg><span class="txt">재생</span>';
   if (on) {
     if (current < 0 || current >= N - 1) select(0, true);
-    playTimer = setInterval(() => {
-      if (current >= N - 1) setPlaying(false); else select(current + 1, true);
-    }, 4200);
+    startPlayTimer();
   }
+}
+function startPlayTimer() {
+  clearInterval(playTimer);
+  playTimer = setInterval(() => {
+    if (current >= N - 1) setPlaying(false); else select(current + 1, true);
+  }, 4200 / playSpeed);
+}
+function setSpeed(x) {
+  playSpeed = x;
+  const b = $('#btnSpeed');
+  b.setAttribute('aria-pressed', String(x > 1));
+  b.title = x > 1 ? '보통 속도로 재생' : '2배속으로 재생';
+  if (playing) startPlayTimer();   // 재생 중이면 지금 단계에서 이어서 새 간격으로
 }
 
 $('#btnPrev').onclick = () => step(-1);
 $('#btnNext').onclick = () => step(1);
 $('#btnPlay').onclick = () => setPlaying(!playing);
+$('#btnSpeed').onclick = () => setSpeed(playSpeed > 1 ? 1 : 2);
 $('#btnAll').onclick = () => select(-1);
 $('#btnSave').onclick = () => view && view.savePNG();
+stepsEl.addEventListener('wheel', e => {
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || stepsEl.scrollWidth <= stepsEl.clientWidth) return;
+  stepsEl.scrollLeft += e.deltaY; e.preventDefault();
+}, { passive: false });
 stepsEl.onclick = e => { const b = e.target.closest('button'); if (b) select(+b.dataset.i); };
 panel.onclick = e => { const b = e.target.closest('button[data-i]'); if (b) select(+b.dataset.i); };
 labelsEl.onclick = e => { const l = e.target.closest('.label'); if (l) select(+l.dataset.i); };
@@ -9026,7 +9055,7 @@ precision mediump float; void main(){}`;
     const dt = min(.1, (now - tPrev) / 1000), t = now / 1000; tPrev = now;
 
     if (goal) {
-      const a = reduceMotion ? 1 : 1 - exp(-dt * 3.4);
+      const a = reduceMotion ? 1 : 1 - exp(-dt * 3.4 * playSpeed);
       let dy = goal.yaw - cam.yaw; dy -= round(dy / (2 * PI)) * 2 * PI;
       cam.yaw += dy * a; cam.pitch += (goal.pitch - cam.pitch) * a; cam.dist += (goal.dist - cam.dist) * a;
       for (let k = 0; k < 3; k++) cam.t[k] += (goal.t[k] - cam.t[k]) * a;
@@ -9037,7 +9066,7 @@ precision mediump float; void main(){}`;
     if (fk) clampEye();
     const mix = (a, b) => a + (b - a) * fk;        // 로드맵 값 → 자유 시점 값
     const diff = progGoal - prog;
-    if (diff) { const stepMax = reduceMotion ? 1e9 : dt * max(70, abs(diff) * 2.2); prog += max(-stepMax, min(stepMax, diff)); }
+    if (diff) { const stepMax = reduceMotion ? 1e9 : dt * max(70, abs(diff) * 2.2) * playSpeed; prog += max(-stepMax, min(stepMax, diff)); }
     const k0 = min(path.length - 2, floor(prog)), fr = prog - k0, A = path[k0], B = path[k0 + 1];
     trav = [A.x + (B.x - A.x) * fr, reduceMotion ? 0 : sin(t * 2.4) * .08, A.z + (B.z - A.z) * fr];
 
