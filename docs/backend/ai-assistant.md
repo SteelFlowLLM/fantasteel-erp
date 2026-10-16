@@ -48,7 +48,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 대화가 저장되지 않아 새 자원이 없으므로 `POST`지만 200을 돌려준다.
 
 **실시간 답 API** (문서에 없는 기능, 2026-10-16 추가) — `ai-assistant.controller.ts`의 `askStream`
-- 요청: `POST ai-assistant/messages/stream`. 본문은 API-262와 같고 `reasoning`을 받는다. 입력 검사도 같다. 철강맨AI 패널은 이 API로 묻고 `actionCards: true`를 보낸다.
+- 요청: `POST ai-assistant/messages/stream`. 본문은 API-262와 같고 `reasoning`을 받는다. 입력 검사도 같다. 철강맨AI 패널은 이 API로 묻고 `actionCards: true`를 보내며, 입력창의 '웹 검색'을 켰으면 `webSearch: true`도 보낸다(실행 카드 도구와 웹 도구를 함께 알린다). `prepare(…, { interactive: true })`는 이 API만 넘긴다.
 - 응답: `Content-Type: application/x-ndjson`. 한 줄에 이벤트 JSON 하나를 보낸다. 시작한 뒤에는 `done` 또는 `error` 중 하나로 끝난다.
 - 시작 전 오류는 평소 JSON 오류 응답으로 돌려주고 스트림을 열지 않는다. 예: 질문 형식 `COM-004`, 없는 회의록 `VOC-001`(404), 모델 미설정 `COM-999`(503).
 - 시작한 뒤의 실패(LLM 연결 실패·시간 초과 등)는 HTTP 200을 유지한 채 `error` 이벤트로 보낸다.
