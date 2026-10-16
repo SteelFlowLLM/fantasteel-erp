@@ -13,6 +13,8 @@ export interface FetchPolicy {
   isAllowedAddress(address: string): boolean;
   /** 허용 포트. 빈 문자열은 scheme 기본 포트 */
   allowedPorts: readonly string[];
+  /** 읽지 않을 호스트 이름 (소문자). 없으면 막지 않는다 */
+  isDeniedHost?(host: string): boolean;
 }
 
 /** 공용 인터넷 주소만 허용한다. IPv4는 unicast, IPv6는 전역 unicast(2000::/3)만. IPv4-mapped(::ffff:a.b.c.d)는 풀어서 본다 */
@@ -42,7 +44,33 @@ const isPublicV4 = (v4: ipaddr.IPv4): boolean => v4.range() === 'unicast';
 const GLOBAL_UNICAST_V6 = ipaddr.parseCIDR('2000::/3') as [ipaddr.IPv6, number];
 const IPV4_COMPATIBLE = ipaddr.parseCIDR('::/96') as [ipaddr.IPv6, number];
 
-export const DEFAULT_FETCH_POLICY: FetchPolicy = { isAllowedAddress: isPublicAddress, allowedPorts: ['', '80', '443'] };
+/**
+ * 읽지 않을 호스트 (보안 검토): WEB_FETCH_DENY_HOSTS(쉼표 목록, 그 이름과 하위 도메인)와, 이 서버·화면 자신의 호스트
+ * (SERVER_PUBLIC_URL·CLIENT_BASE_URL·CORS_ORIGIN에 적힌 주소). 공용 주소로 열린 우리 서버를 모델이 읽게 하지 않는다.
+ * 부를 때마다 환경 변수를 읽는다.
+ */
+export function deniedHostsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const listed = (env.WEB_FETCH_DENY_HOSTS ?? '').split(',');
+  const own = [env.SERVER_PUBLIC_URL, env.CLIENT_BASE_URL, ...(env.CORS_ORIGIN ?? '').split(',')].map((value) => {
+    try {
+      return value ? new URL(value.trim()).hostname : '';
+    } catch {
+      return '';
+    }
+  });
+  return [...listed, ...own].map((host) => host.trim().toLowerCase().replace(/^\*?\./, '').replace(/\.$/, '')).filter(Boolean);
+}
+
+export function matchesDeniedHost(host: string, denied: readonly string[]): boolean {
+  const name = host.toLowerCase().replace(/\.$/, '');
+  return denied.some((d) => name === d || name.endsWith(`.${d}`));
+}
+
+export const DEFAULT_FETCH_POLICY: FetchPolicy = {
+  isAllowedAddress: isPublicAddress,
+  allowedPorts: ['', '80', '443'],
+  isDeniedHost: (host) => matchesDeniedHost(host, deniedHostsFromEnv()),
+};
 
 /** 주소를 읽기 전에 막는 이유. 모델에 그대로 돌려준다 */
 export class BlockedUrlError extends Error {}
@@ -63,6 +91,7 @@ export function assertFetchableUrl(raw: string, policy: FetchPolicy = DEFAULT_FE
   if (!policy.allowedPorts.includes(url.port)) throw new BlockedUrlError('80·443 포트의 주소만 읽을 수 있어요');
   const host = url.hostname.toLowerCase();
   if (!host) throw new BlockedUrlError('주소에 호스트가 없어요');
+  if (policy.isDeniedHost?.(host.startsWith('[') ? host.slice(1, -1) : host)) throw new BlockedUrlError('이 주소는 읽지 않도록 막혀 있어요');
   // WHATWG URL이 2130706433·0x7f.1 같은 IPv4 표기를 127.0.0.1로 바꿔 주므로 바뀐 이름으로 본다
   const literal = host.startsWith('[') ? host.slice(1, -1) : host;
   if (ipaddr.isValid(literal)) {

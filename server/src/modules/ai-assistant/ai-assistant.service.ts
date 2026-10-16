@@ -170,7 +170,7 @@ export class AiAssistantService {
         const toolCalls: AiAssistantToolTrace[] = [];
         const actionCards: AiActionCard[] = [];
         // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다
-        const web = webSearch && emit !== undefined ? this.webTools.session() : null;
+        const web = webSearch && emit !== undefined ? this.webTools.session(user.employeeId) : null;
         const tools = [...this.toolbox.definitions({ actionCards: input.actionCards }), ...(web ? this.webTools.definitions() : [])];
         const maxRounds = web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
         const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
@@ -199,6 +199,8 @@ export class AiAssistantService {
               webSources = webResult.webSources;
             } else {
               result = await this.toolbox.run(user, toolCall);
+              // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
+              web?.observeErpResult(result.content);
             }
             const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
             toolCalls.push(trace);

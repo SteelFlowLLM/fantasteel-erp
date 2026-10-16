@@ -550,7 +550,7 @@ describe('AiAssistantService', () => {
 
       const toolMessages = calls[2].messages.filter((m) => m.role === 'tool');
       expect(toolMessages).toHaveLength(2);
-      expect(toolMessages[1].content).toContain('<untrusted_web_content source="https://news.example.kr/a">');
+      expect(toolMessages[1].content).toContain('<untrusted_web_content source="news.example.kr">\n주소: https://news.example.kr/a\n');
 
       const ends = events.filter((e) => e.type === 'tool_end');
       expect(ends.map((e) => e.webSources)).toEqual([
@@ -576,6 +576,28 @@ describe('AiAssistantService', () => {
       expect(web.read).toEqual([]);
       expect(String(calls[1].messages.at(-1)?.content)).toContain('검색 결과에 없던 주소라 읽지 않았어요');
       expect(reply.webSources).toEqual([]);
+    });
+
+    it('이번 답의 ERP 조회 결과에 나온 거래처 이름·업무 번호가 든 검색어는 회사 밖으로 보내지 않는다', async () => {
+      const web = webToolbox();
+      const { service, calls } = setup(
+        {},
+        async (_call, index) =>
+          [
+            callTool('c1'),
+            webCall('c2', 'web_search', { query: '한빛중공업 신용등급' }),
+            webCall('c3', 'web_search', { query: 'SO-2610-001 납기 지연' }),
+            answer('회사 안 정보는 검색하지 않았어요'),
+          ][index],
+        { content: '{"수주":[{"수주번호":"SO-2610-001","고객사":"한빛중공업"}]}', source: { kind: 'DATA', id: 'get_sales_orders', label: '수주' } },
+        undefined,
+        web.toolbox,
+      );
+      await run(service, { question: '이 수주 고객사 평판도 찾아줘', webSearch: true });
+      expect(web.searched).toEqual([]);
+      const results = calls[3].messages.filter((m) => m.role === 'tool').map((m) => String(m.content));
+      expect(results[1]).toContain('회사 안 정보(거래처 이름)');
+      expect(results[2]).toContain('회사 안 정보(업무·LOT 번호)');
     });
 
     it(`웹 검색을 켜면 도구 호출 상한이 ${MAX_WEB_TOOL_ROUNDS}번이다`, async () => {

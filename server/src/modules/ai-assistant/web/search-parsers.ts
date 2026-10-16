@@ -1,5 +1,6 @@
 import { parseHTML } from 'linkedom';
-import { decodeEntities, htmlToText, tidyText } from './web-text';
+import { htmlToText } from './html-text';
+import { decodeEntities, tidyText } from './web-text';
 
 /** 웹 검색 결과 한 줄 */
 export interface WebSearchResult {
