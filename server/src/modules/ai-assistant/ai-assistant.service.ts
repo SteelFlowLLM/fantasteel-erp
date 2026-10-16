@@ -17,6 +17,7 @@ import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { actionCardExamplesFor } from './action-card-examples';
 import { AiActionCardService } from './ai-action-card.service';
+import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
@@ -110,6 +111,11 @@ export class AiAssistantService {
     const actionCards: AiActionCard[] = [];
     const tools = this.toolbox.definitions({ actionCards: input.actionCards });
     let reply = await this.call(settings, model, messages, tools);
+    // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
+    if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
+      messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
+      reply = await this.call(settings, model, messages, tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
+    }
     for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
       messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
       for (const call of reply.toolCalls) {
@@ -127,6 +133,8 @@ export class AiAssistantService {
     }
 
     const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+    // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
+    if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
     const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
     return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null, actionCards };
   }
@@ -149,5 +157,11 @@ export class AiAssistantService {
     return previousQuestion ? searchGlossary(previousQuestion.content) : [];
   }
 }
+
+/** 답이 "카드를 만들었다"고 말하는지 */
+export const claimsCardMade = (text: string): boolean => /카드(를|가)?\s*(만들었|만들어\s*(두|드렸|놓)|만들어졌|준비했|생성했)/.test(text);
+
+const CARD_TOOL_NUDGE = '방금 답은 카드를 만들었다고 했지만 도구를 부르지 않았어요. 카드는 propose_ 도구를 불러야 화면에 생겨요. 요청에 맞는 propose_ 도구를 지금 불러요. 카드로 만들 수 없는 요청이면 카드를 만들었다고 하지 말고 이유를 말해요.';
+const CARD_NOT_MADE = '카드를 만들지 못했어요. 요청을 조금 더 구체적으로 다시 말해 주세요. 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 카드로 만들 수 있어요.';
 
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
