@@ -11,6 +11,7 @@ import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
 import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
+import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
@@ -19,6 +20,7 @@ import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
+import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
 
@@ -76,10 +78,15 @@ export function AiPanel() {
   const [reasoning, setReasoning] = useState<AiReasoningLevel>(AI_REASONING_DEFAULT);
   const [oneShot, setOneShot] = useState(true);
   const [dragging, setDragging] = useState(false);
+  const [webSearchPref, setWebSearchPref] = useState(false);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
   const reasoningOff = capabilities.data?.reasoning === false;
+  // 웹 검색: 엔진이 하나도 없거나 AI 연결 정보를 못 읽었을 때만 막는다 (읽는 중에는 막지 않는다)
+  const webEngineHint = webSearchEngineHint(capabilities.data?.webSearch);
+  const webSearchBlocked = capabilities.isError || capabilities.data?.webSearch?.engines.length === 0;
+  const webSearchOn = webSearchPref && !webSearchBlocked;
   const photos = useAiImageDraft();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -98,6 +105,7 @@ export function AiPanel() {
     const saved = readAiReasoningPreference();
     setReasoning(saved.level);
     setOneShot(saved.oneShot);
+    setWebSearchPref(readAiWebSearchPreference());
   }, []);
 
   // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
@@ -123,6 +131,11 @@ export function AiPanel() {
     writeAiReasoningPreference({ level, oneShot });
   };
 
+  const changeWebSearch = (on: boolean) => {
+    setWebSearchPref(on);
+    writeAiWebSearchPreference(on);
+  };
+
   const changeOneShot = (checked: boolean) => {
     setOneShot(checked);
     writeAiReasoningPreference({ level: reasoning, oneShot: checked });
@@ -143,7 +156,7 @@ export function AiPanel() {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn);
     setDraft('');
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
@@ -163,7 +176,7 @@ export function AiPanel() {
   const retry = (failure: FailureEntry) => {
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images);
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked);
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
@@ -304,6 +317,7 @@ export function AiPanel() {
               />
             </div>
             <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
+            <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
             {pending ? (
               <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>
@@ -415,6 +429,27 @@ function ReasoningPicker({ level, oneShot, disabled, onLevel, onOneShot }: { lev
   );
 }
 
+/** 웹 검색 켜기. 켜면 이 질문에 인터넷 검색 도구를 쓰고, 질문 글이 검색 엔진으로 나간다 (이슈 #367) */
+function WebSearchToggle({ on, blocked, hint, onChange }: { on: boolean; blocked: boolean; hint: string; onChange: (on: boolean) => void }) {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={AI_WEB_SEARCH_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="웹 검색"
+        aria-describedby="ai-web-search-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="search" size="sm" />웹 검색
+      </button>
+      <span id="ai-web-search-hint">{blocked ? hint : on ? `${hint ? `${hint} · ` : ''}질문 글이 검색 엔진으로 나가요` : hint}</span>
+    </div>
+  );
+}
+
 /** 질문 칸 위에 붙여 둔 사진. 보내기 전에 하나씩 뺄 수 있다 */
 function DraftImages({ images, onRemove }: { images: readonly PreparedAiImage[]; onRemove: (index: number) => void }) {
   return (
@@ -475,7 +510,8 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
     <div className="flex gap-3">
       <SteelmanAiMark framed />
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
-        <p className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{entry.content}</p>
+        <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
+        <AiWebSources sources={entry.webSources} />
         {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} /> : null}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
           <span className="font-semibold text-ink-2">출처</span>
