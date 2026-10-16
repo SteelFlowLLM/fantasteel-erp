@@ -127,6 +127,16 @@ export const MESSAGE_EMOTICON_KEYWORDS: Partial<Record<MessageEmoticonKey, reado
   'steelman-cold': ['추워', '춥다'],
   'steelman-vacation': ['휴가', '여행'],
   'steelman-congrats': ['축하'],
+  // 7차: 요즘 말투 밈 더
+  'steelman-lucky-vicky': ['럭키비키', '원영적'],
+  'steelman-are-you-t': ['너 t야', 't야?', 't냐'],
+  'steelman-form': ['폼 미쳤', '폼미쳤'],
+  'steelman-workout': ['오운완', '운동 완료', '헬스'],
+  'steelman-self-made': ['스불재', '자업자득'],
+  'steelman-forced-hype': ['억텐', '억지 텐션'],
+  'steelman-azas': ['아자스', '아잣스'],
+  'steelman-agree': ['ㅇㅈ', '인정'],
+  'steelman-real': ['ㄹㅇ', '레알', '리얼'],
 };
 
 // ── 작은 철강맨 반응 (23번) ─────────────

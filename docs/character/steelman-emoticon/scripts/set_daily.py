@@ -1,9 +1,9 @@
-"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈), 5차 26종. 키는 shared MESSAGE_EMOTICONS와 같다."""
+"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈), 5차 26종, 7차 9종(요즘 말투 밈 더). 키는 shared MESSAGE_EMOTICONS와 같다."""
 from PIL import Image
 
 from emoticon_lib import (
     emoticon, face, flatten, flip, fr, ghost, heat, helmet_off, molten_bottom, nod, pix, prop, ring_burst,
-    roller_img, silver, stretch, sway, tint, wall_img, stretch_wide, CELL, big_text, glitch, helmet_off, shift,
+    roller_img, silver, stretch, sway, tint, wall_img, stretch_wide, CELL, big_text, glitch, helmet_off, shift, shine,
 )
 
 
@@ -630,4 +630,88 @@ def build(sh):
         fr(face(idle, eyes='happy'), 500, front=[('cat', 10, 28, 1.45, False)]),
         fr(face(idle, eyes='happy'), 300, front=[('cat', 18, 26, 1.0), ('heart_s', 4, 16)]),
     ]))
+
+    # ── 7차: 요즘 말투 밈 더 (4차와 같이 말 자체의 재미만 쓴다) ──
+    # 럭키비키: 네잎클로버가 팔랑 떨어져 손에 쏙 → 별 눈으로 만세
+    lucky = face(idle, eyes='star', mouth='open')
+    E.append(emoticon('럭키비키', 'steelman-lucky-vicky', '럭키비키', 'L', [
+        fr(idle, 160, front=[('clover', 40, 0)]),
+        fr(face(idle, mouth='o'), 140, front=[('clover', 38, 8)]),
+        fr(face(idle, mouth='o'), 140, front=[('clover', 36, 15)]),
+        fr(lucky, 120, front=[('clover', 37, 22), ('spark_l', 44, 14)]),
+        fr(happy[2], 110, back=[('burst_at', 0, -2, 7, 'y', 'L', 'E')], front=[('spark_s', 44, 6)]),
+        fr(happy[3], 110, back=[('burst_at', 32, -2, 8, 'y', 'L', 'E')], front=[('spark_s', 2, 10)]),
+        fr(lucky, 500, front=[('clover', 37, 22), ('spark_s', 2, 14), ('spark_s', 44, 8), ('heart_s', 4, 4)]),
+    ]))
+
+    # 너 T야?: 실눈 뜨고 고개를 쓱 내밀면 파란 T 표가 퐁
+    sus = face(idle, eyes='tired', mouth='flat')
+    E.append(emoticon('너 T야?', 'steelman-are-you-t', '너 T야?', 'B', [
+        fr(idle, 200),
+        fr(sus, 160),
+        fr(sway(sus, 1), 140),
+        fr(sway(sus, 2), 90, front=[('t_badge', 38, 4)], shake=(0, 1)),
+        fr(sway(sus, 2), 800, front=[('t_badge', 38, 2), ('qmark', 44, 16)]),
+    ]))
+
+    # 폼 미쳤다: 선글라스 쓴 은빛 몸에 광택이 쓱 지나가고 뒤에서 불꽃
+    cool = face(idle, mouth='smile')
+    shades = [('sunglasses', 15, 21)]
+    E.append(emoticon('폼 미쳤다', 'steelman-form', '폼 미쳤다', 'O', [
+        fr(cool, 160, front=shades),
+        fr(shine(silver(cool), 18), 70, front=shades),
+        fr(shine(silver(cool), 32), 70, front=shades),
+        fr(shine(silver(cool), 46), 70, front=shades),
+        fr(shine(silver(cool), 60), 70, front=shades),
+        fr(silver(cool), 100, back=[('burst_at', -4, -4, 8, 'y', 'Y', 'O')], front=shades + [('spark_l', 42, 6)]),
+        fr(silver(cool), 100, back=[('burst_at', -8, -6, 10, 'y', 'Y', 'O'), ('burst_at', 32, -4, 8, 'y', 'Y', 'O')], front=shades + [('spark_s', 2, 12)]),
+        fr(silver(cool), 500, back=[('burst_at', 30, -6, 10, 'y', 'Y', 'O')], front=shades + [('spark_l', 0, 8), ('spark_s', 44, 4)]),
+    ]))
+
+    # 오운완: 아령을 머리 위로 번쩍번쩍 → 초록 체크 (아령이 글자에 가리지 않게 캐릭터를 3칸 내림)
+    E.append(emoticon('오운완', 'steelman-workout', '오운완', 'E', [
+        fr(fall1, 160, front=[('dumbbell', 14, 2)]),
+        fr(fall0, 140, front=[('dumbbell', 14, -2), ('sweat', 38, 14)]),
+        fr(fall1, 140, front=[('dumbbell', 14, 2), ('sweat', 38, 16)]),
+        fr(fall0, 140, front=[('dumbbell', 14, -2), ('sweat', 38, 14), ('sweat', 6, 18)]),
+        fr(happy[5], 600, front=[('check', 38, 2), ('spark_s', 2, 10)]),
+    ], oy=18))
+
+    # 스불재: 서류를 한 장 더 올렸다가 무너진 더미에 깔림
+    pile =[('paper', 36, 34), ('paper', 37, 26), ('paper', 36, 18), ('paper', 37, 10)]
+    squashed = flatten(face(idle, eyes='x', mouth='wave'), 0.72, 1.1)
+    E.append(emoticon('스불재', 'steelman-self-made', '스불재', 'R', [
+        fr(grin, 220, front=pile + [('paper', 30, 0)]),
+        fr(grin, 160, front=pile + [('paper', 36, 2)]),
+        fr(face(idle, eyes='wide', mouth='o'), 90, front=[(n, x + 1, y) for n, x, y in pile] + [('paper', 37, 2)]),
+        fr(face(idle, eyes='wide', mouth='o'), 90, front=[(n, x - 1, y) for n, x, y in pile] + [('paper', 35, 2), ('sweat', 8, 18)]),
+        fr(sur1, 100, front=[('paper', 30, -2), ('paper', 20, 4), ('paper', 38, 12), ('paper', 12, 14)]),
+        fr(squashed, 90, front=[('paper', 14, 22), ('paper', 24, 20), ('paper', 32, 24), ('dust', 4, 42)], shake=(1, 0)),
+        fr(squashed, 700, front=[('paper', 14, 24), ('paper', 24, 22), ('paper', 32, 26), ('dust_s', 44, 42)]),
+    ]))
+
+    # 억텐: 활짝 웃으며 박수치는데 땀이 늘고, 한순간 영혼이 빠졌다 돌아옴
+    hype = face(idle, eyes='happy', mouth='big')
+    sweats = [[], [('sweat', 38, 18)], [('sweat', 38, 18), ('sweat', 6, 20)], [('sweat', 38, 16), ('sweat', 6, 18), ('drop', 40, 26)]]
+    E.append(emoticon('억텐', 'steelman-forced-hype', '억텐', 'Y', [
+        fr(hype, 100, front=[('clap', 20, 32)] + sweats[min(i // 2, 3)], cx=-(i % 2)) for i in range(7)
+    ] + [
+        fr(tint(face(idle, eyes='dot', mouth='flat'), 'g', 0.3), 400, front=[('ellipsis', 36, 14)]),
+        fr(hype, 400, front=[('clap', 20, 32), ('spark_s', 44, 10)] + sweats[3]),
+    ]))
+
+    # 아자스: 한 손 번쩍 + 가볍게 꾸벅꾸벅 + 엄지
+    thx = face(wave2, eyes='happy', mouth='big')
+    E.append(emoticon('아자스', 'steelman-azas', '아자스!', 'Y', [
+        fr(face(wave1, eyes='happy', mouth='big'), 140),
+        fr(thx, 140, front=[('spark_s', 42, 6)]),
+        fr(nod(face(idle, eyes='happy', mouth='smile'), 3), 90),
+        fr(face(idle, eyes='happy', mouth='smile'), 90),
+        fr(nod(face(idle, eyes='happy', mouth='smile'), 3), 90),
+        fr(face(idle, eyes='happy', mouth='open'), 500, front=[('thumb', 36, 26), ('spark_l', 2, 12)]),
+    ]))
+
+    # 글자만 크게 (5차와 같은 움직임)
+    big_word('ㅇㅈ', 'steelman-agree', 'ㅇㅈ', 'b')
+    big_word('ㄹㅇ', 'steelman-real', 'ㄹㅇ', 'R')
     return E

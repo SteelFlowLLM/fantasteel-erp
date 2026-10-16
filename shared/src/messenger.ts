@@ -16,7 +16,7 @@ export const MESSAGE_EMOTICON_SETS = [
 export type MessageEmoticonSetKey = (typeof MESSAGE_EMOTICON_SETS)[number]['key'];
 
 /**
- * 메신저 이모티콘 (18번~22번·25번, 문서에 없는 추가 기능): 묶음 3개, 118종. key를 message.emoticon_key에 저장한다.
+ * 메신저 이모티콘 (18번~22번·25번·7차, 문서에 없는 추가 기능): 묶음 3개, 127종. key를 message.emoticon_key에 저장한다.
  * 순서가 고르기 창 순서다. 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
  */
 export const MESSAGE_EMOTICONS = [
@@ -126,6 +126,15 @@ export const MESSAGE_EMOTICONS = [
   { key: 'steelman-clap', label: '박수', set: 'steelman-daily' },
   { key: 'steelman-coil-dog', label: '코일이', set: 'steelman-daily' },
   { key: 'steelman-slab-cat', label: '슬래브 냥이', set: 'steelman-daily' },
+  { key: 'steelman-lucky-vicky', label: '럭키비키', set: 'steelman-daily' },
+  { key: 'steelman-are-you-t', label: '너 T야?', set: 'steelman-daily' },
+  { key: 'steelman-form', label: '폼 미쳤다', set: 'steelman-daily' },
+  { key: 'steelman-workout', label: '오운완', set: 'steelman-daily' },
+  { key: 'steelman-self-made', label: '스불재', set: 'steelman-daily' },
+  { key: 'steelman-forced-hype', label: '억텐', set: 'steelman-daily' },
+  { key: 'steelman-azas', label: '아자스', set: 'steelman-daily' },
+  { key: 'steelman-agree', label: 'ㅇㅈ', set: 'steelman-daily' },
+  { key: 'steelman-real', label: 'ㄹㅇ', set: 'steelman-daily' },
   { key: 'steelman-new-year', label: '새해 복 많이 받으세요', set: 'steelman-event' },
   { key: 'steelman-seollal', label: '즐거운 설', set: 'steelman-event' },
   { key: 'steelman-chuseok', label: '즐거운 추석', set: 'steelman-event' },
