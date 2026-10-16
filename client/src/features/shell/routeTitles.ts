@@ -40,7 +40,8 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, RouteTitle]> = [
   [/^\/agent/, { title: 'AI Factory Agent', area: '준비 중 (P2)' }],
   [/^\/meetings/, { title: '회의록', area: '협업' }],
   [/^\/schedule/, { title: '내 일정', area: '협업' }],
-  [/^\/past-cases/, { title: '과거 사례 검색', area: '준비 중 (EX)' }],
+  // 예시 사례로 검색이 동작한다 (사례 DB 없음, 2026-10-16). EX = 추가 기능
+  [/^\/past-cases/, { title: '과거 사례 검색', area: '추가 기능 (EX)' }],
 ];
 
 export function routeTitleOf(pathname: string): RouteTitle {

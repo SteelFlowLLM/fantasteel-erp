@@ -17,6 +17,7 @@ import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { DISPOSITION_STATUS_LABEL, LOT_STATUS_LABEL, LOT_TYPE_LABEL, PERMISSION, SALES_ORDER_ITEM_STATUS_LABEL, type DispositionStatus } from '@/codes';
+import { similarCaseHref } from '@/features/pastCases/pastCaseExample';
 import { ComingSoonMenu } from '@/features/quality/components/ComingSoonMenu';
 import { DispositionForm } from '@/features/quality/components/DispositionForm';
 import { ImpactCard } from '@/features/quality/components/ImpactCard';
@@ -375,8 +376,8 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
             <ButtonLink href={lotTraceHref(row.lotNo, 'forward')} icon="trace">
               LOT 추적 (영향 범위)
             </ButtonLink>
-            {/* 과거 사례(EX)는 준비 중이라 더보기 메뉴 안에 둔다 (REQ-CASE-002 사례로 등록, REQ-CASE-004 비슷한 사례 찾기) */}
-            <ComingSoonMenu items={[{ label: '사례로 등록' }, { label: '비슷한 사례 찾기' }]} />
+            {/* 과거 사례(EX)는 더보기 메뉴 안에 둔다. 비슷한 사례 찾기는 강종·LOT 종류로 검색한 과거 사례 화면을 열고(REQ-CASE-004), 사례로 등록(REQ-CASE-002)은 준비 중 */}
+            <ComingSoonMenu items={[{ label: '사례로 등록' }, { label: '비슷한 사례 찾기', href: similarCaseHref(row.steelGradeCode, row.lotType) }]} />
           </>
         }
       />

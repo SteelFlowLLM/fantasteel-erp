@@ -1,6 +1,6 @@
 'use client';
 
-// 품질 상세 머리의 더보기(⋯) 메뉴: 과거 사례(EX)처럼 아직 준비 중인 동작을 모은다.
+// 품질 상세 머리의 더보기(⋯) 메뉴: 과거 사례(EX) 동작을 모은다.
 // 동작하는 버튼(검사 결과·LOT 추적)과 같은 줄에 나란히 두면 눌러도 안 되는 버튼이 먼저 눈에 띄어 메뉴 안으로 넣는다 (검사 기준의 '기준 삭제'와 같은 자리).
 import { useRouter } from 'next/navigation';
 import { ComingSoon } from '@/components/ComingSoon';
@@ -9,9 +9,13 @@ import { IconButton } from '@/components/IconButton';
 import { PopItem, PopPanel } from '@/features/shell/PopPanel';
 import { usePopover } from '@/hooks/usePopover';
 
-/** 메뉴 한 줄: 누르면 과거 사례 화면(디자인 미리 보기)으로 간다 (REQ-CASE-002·004) */
+/**
+ * 메뉴 한 줄 (REQ-CASE-002·004).
+ * href가 있으면 동작하는 항목(비슷한 사례 찾기 → 검색어를 넣어 과거 사례 화면), 없으면 준비 중 표시를 붙여 과거 사례 화면으로 간다(사례로 등록).
+ */
 export interface ComingSoonMenuItem {
   label: string;
+  href?: string;
 }
 
 export function ComingSoonMenu({ items }: { items: readonly ComingSoonMenuItem[] }) {
@@ -28,11 +32,11 @@ export function ComingSoonMenu({ items }: { items: readonly ComingSoonMenuItem[]
               role="menuitem"
               onClick={() => {
                 more.setOpen(false);
-                router.push('/past-cases');
+                router.push(item.href ?? '/past-cases');
               }}
             >
               <Icon name="search" size="sm" />
-              {item.label} <ComingSoon grade="EX" />
+              {item.label} {item.href ? null : <ComingSoon grade="EX" />}
             </PopItem>
           ))}
         </PopPanel>

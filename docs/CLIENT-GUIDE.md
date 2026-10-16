@@ -109,7 +109,8 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
 
 ## 6. P2·EX 처리 (준비 중)
 
-- P2(AI Factory Agent, Voice2ERP 회의록, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널과 사내 채팅 @AI다.
+- P2(AI Factory Agent, Voice2ERP 회의록, Message → ERP 확장 유형, Agent 승인)와 EX(과거 사례)는 **디자인만** 두고 기능은 없다. 예외는 아래 AI 어시스턴트 패널과 사내 채팅 @AI, 과거 사례 검색이다.
+- **과거 사례 검색**(`/past-cases`, `features/pastCases/`, 2026-10-16~): 기준 ERD에 `past_case` 테이블이 없어 서버·DB 없이 `pastCaseExample.ts`의 예시 사례 5건을 화면에서 거른다(REQ-CASE-003 흉내). 검색어에서 핵심어를 뽑아(`caseKeywords`: 두 글자 이상, 조사·질문마다 붙는 말 제외) 제목·현상·원인·조치·설비·LOT·사례 번호에서 찾고, 많이 맞는 순(같으면 최신순)으로 보인다. 구분(품질·설비)과 최근 90일로 거른다. AI 요약 대신 결과 사례의 원인·조치를 모은 '검색 결과 요약'을 보인다. 품질 화면(검사 입력·불합격 관리) 더보기의 '비슷한 사례 찾기'는 `similarCaseHref(강종, LOT 종류)`로 `?q=` 검색어를 넣어 이 화면을 연다. 사례로 등록(REQ-CASE-002), 철강맨AI·@AI의 사례 검색, AI 요약은 사례 DB가 생기면 붙인다(준비 중).
 - **사내 채팅 @AI**(`features/messenger/components/Composer.tsx`, `MessageBubble.tsx`, 2026-10-14~): 입력창에서 `@`를 치면 후보 맨 위에 `@AI`가 나오고(`@AI 호출` 버튼은 커서 자리에 `@AI `를 넣는다), `@AI`가 든 글을 보내면 서버가 답을 방에 남긴다(`docs/backend/messenger.md` '@AI 호출'). 새 API 함수는 없다. 메시지 목록·소켓의 `isAi: true` 메시지(`isSystem`도 true)를 시스템 알림 띠가 아니라 `AI 어시스턴트` 이름의 왼쪽 말풍선으로 그린다(줄바꿈 유지, 업무 번호 링크). 답은 보낸 뒤 몇 초~수십 초 걸리고, 그동안 '입력 중' 자리에 `AI 어시스턴트가 답을 쓰는 중…`이 보인다(`useMessengerLiveStore`, AI는 사원 id 0). 조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 없는 멤버에게는 서버가 보내지 않는다.
 - **AI 어시스턴트 패널**(`features/shell/AiPanel.tsx`, 2026-10-13~): 실제로 답한다. `api/aiAssistant.ts`가 서버 `POST /ai-assistant/messages`·`GET /ai-assistant/suggested-questions`(API-262·263, `docs/backend/ai-assistant.md`)를 부른다(LLM 연결 설정은 `api/llm.ts`).
   - 용어 사전과 서버 조회 도구(재고·수주·생산계획·작업 실적·LOT 추적·검사·불합격·구매요청·발주·입고·출하요청·밀시트·작업 로그, 사용자 권한 범위)로 답하고 출처를 붙인다: 용어 사전은 `용어 사전 · 예약 (TRM-056)`, 조회 데이터는 `조회 데이터 · 재고 · SS275`. 실행 카드·사례 검색은 다음 단계라 안내 문구로만 밝힌다.

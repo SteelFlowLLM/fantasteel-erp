@@ -1,10 +1,13 @@
-// 과거 사례 검색 예시 내용 (EX 준비 중 화면 전용, 실제 사례 아님).
+// 과거 사례 검색의 예시 사례와 검색 (실제 사례 아님).
 // 근거: 요구사항 REQ-CASE-001~005·REQ-AST-006, 업무 프로세스 BP-CASE-01, 용어 사전 TRM-108, ERD past_case·past_case_lot.
 // 항목 이름은 ERD past_case 열(caseNo·caseCategory·title·phenomenon·cause·actionTaken·equipmentText·occurredDate)을 따른다.
 // 사례 번호(case_no) 형식은 ERD에서 TBD라 'CASE-NNNN'을 예시 표기로만 쓴다 (가정값, docs/rework/areas/soon.md).
+// 기준 ERD에 past_case 테이블이 없어(서버·DB 없음, 2026-10-16 결정) 검색은 이 예시 사례를 화면에서 거른다.
 import {
   BUSINESS_EVENT_TYPE,
   CASE_CATEGORY,
+  CASE_CATEGORY_LABEL,
+  LOT_TYPE_LABEL,
   PROPOSED_BUSINESS_EVENT_TYPE,
   STEEL_GRADE,
   formatCoilNo,
@@ -13,6 +16,7 @@ import {
   formatSlabNo,
   type ActorType,
   type CaseCategory,
+  type LotType,
 } from '@/codes';
 import type { ExampleBusinessEventType } from '@/features/agent/lib/businessEventLabel';
 
@@ -146,15 +150,114 @@ export const SELECTED_CASE_HISTORY: readonly CaseHistoryEntry[] = [
   },
 ];
 
+/**
+ * 고른 사례의 작업 로그 (검사 불합격 → 처리 상태 지정 → 과거 사례 등록).
+ * CASE-0005는 위의 자세한 예시를, 나머지는 사례 내용으로 같은 세 단계를 만든다.
+ */
+export function caseHistoryOf(item: PastCaseExample): readonly CaseHistoryEntry[] {
+  if (item.caseNo === SELECTED_CASE.caseNo) return SELECTED_CASE_HISTORY;
+  const yymmdd = `26${item.occurredDate.replace('-', '')}`;
+  return [
+    { key: 'inspection', time: `${item.occurredDate} 09:00`, actorType: 'USER', businessEventType: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED, eventNo: formatEventNo(yymmdd, 3), head: '검사 불합격', detail: item.phenomenon },
+    { key: 'disposition', time: `${item.occurredDate} 10:00`, actorType: 'USER', businessEventType: BUSINESS_EVENT_TYPE.DISPOSITION_SET, eventNo: formatEventNo(yymmdd, 4), head: '처리 상태 보류 지정', detail: '불합격 LOT은 예약·배정·출고에서 빠져요' },
+    {
+      key: 'case',
+      time: `${item.occurredDate} 16:00`,
+      actorType: 'USER',
+      businessEventType: PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED,
+      eventNo: formatEventNo(yymmdd, 5),
+      head: 'AI 초안을 품질 담당이 확인·저장',
+      detail: `${item.caseNo} · 현상·원인·조치 기록`,
+      isAiAssisted: true,
+    },
+  ];
+}
+
 /** 사례가 쌓이는 순서 (BP-CASE-01 등록) */
 export const CASE_REGISTER_STEPS: readonly string[] = ['불합격 판정', '처리 상태 지정', '사례로 등록 (AI 초안)', '품질 담당 확인·저장'];
 
-/** 과거 사례를 찾는 곳 (REQ-CASE-004) */
-export const CASE_CALL_SITES: readonly { key: string; place: string; how: string }[] = [
-  { key: 'panel', place: '철강맨AI 패널', how: '모든 화면 오른쪽 패널에서 질문해요' },
-  { key: 'chat', place: '사내 채팅 @AI', how: '메신저에서 @AI로 같은 AI를 불러요' },
-  { key: 'quality', place: '품질 관리 [비슷한 사례 찾기]', how: '불합격 관리에서 누르면 AI 패널이 열리고 질문이 자동으로 들어가요' },
+/** 과거 사례를 찾는 곳 (REQ-CASE-004). ready: 지금 동작하는 곳 (AI 패널·@AI는 사례 DB가 생기면) */
+export const CASE_CALL_SITES: readonly { key: string; place: string; how: string; ready: boolean }[] = [
+  { key: 'panel', place: '철강맨AI 패널', how: '모든 화면 오른쪽 패널에서 질문해요', ready: false },
+  { key: 'chat', place: '사내 채팅 @AI', how: '메신저에서 @AI로 같은 AI를 불러요', ready: false },
+  { key: 'quality', place: '품질 관리 [비슷한 사례 찾기]', how: '검사 입력·불합격 관리의 더보기에서 누르면 이 화면이 열리고 검색어가 들어가요', ready: true },
 ];
+
+// ── 검색 (REQ-CASE-003: 핵심어를 뽑아 한국어 부분 일치로 찾는다) ──
+
+export type CaseCategoryFilter = CaseCategory | 'ALL';
+/** 기간: 전체 또는 최근 90일 */
+export type CasePeriod = 'ALL' | 'DAYS_90';
+export const CASE_PERIOD_DAYS = 90;
+
+/** 질문마다 붙는 말이라 검색어로 쓰면 모든 사례에 걸리거나 아무것에도 안 걸린다 */
+const STOP_WORDS = new Set(['과거', '사례', '비슷한', '찾아줘', '찾아', '알려줘', '관련', '원인', '조치', '현상']);
+/**
+ * 낱말 끝 조사 (세 글자 이상 낱말에서만 뗀다: '온도'·'히트' 같은 두 글자 낱말이 한 글자가 되지 않게).
+ * '로'는 넣지 않는다: '가열로'·'전로'처럼 설비 이름이 '로'로 끝난다
+ */
+const JOSA = /(에서|으로|과|와|은|는|이|가|을|를|의|에)$/;
+
+/** 검색어에서 핵심어를 뽑는다 (두 글자 이상, 중복·흔한 말 제외) */
+export function caseKeywords(query: string): string[] {
+  const words = query
+    .split(/[\s,·]+/)
+    .map((word) => (word.length > 2 ? word.replace(JOSA, '') : word))
+    .filter((word) => word.length >= 2 && !STOP_WORDS.has(word));
+  return [...new Set(words)];
+}
+
+function searchTextOf(item: PastCaseExample): string {
+  return [item.caseNo, CASE_CATEGORY_LABEL[item.caseCategory], item.title, item.phenomenon, item.cause, item.actionTaken, item.equipmentText, ...item.lotNos].join(' ').toLowerCase();
+}
+
+/** 사례 발생일(MM-DD)을 오늘 기준 연도로 놓는다. 오늘보다 뒤면 작년 사례다 */
+function occurredOn(mmdd: string, today: string): string {
+  const year = Number(today.slice(0, 4));
+  const thisYear = `${year}-${mmdd}`;
+  return thisYear > today ? `${year - 1}-${mmdd}` : thisYear;
+}
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+export interface CaseSearch {
+  query: string;
+  category: CaseCategoryFilter;
+  period: CasePeriod;
+  /** 오늘 YYYY-MM-DD (Asia/Seoul) */
+  today: string;
+}
+
+/**
+ * 핵심어가 많이 맞는 사례 먼저, 같으면 최신순. 핵심어가 없으면 거르기만 하고 최신순.
+ * 핵심어는 하나라도 맞으면 결과에 넣는다 ('SM355A 히트 불합격'에서 강종이 다른 불합격 사례도 비슷한 사례로 보인다).
+ */
+export function searchPastCases(search: CaseSearch, cases: readonly PastCaseExample[] = PAST_CASES): PastCaseExample[] {
+  const keywords = caseKeywords(search.query).map((word) => word.toLowerCase());
+  const scored = cases
+    .filter((item) => search.category === 'ALL' || item.caseCategory === search.category)
+    .filter((item) => search.period === 'ALL' || daysBetween(occurredOn(item.occurredDate, search.today), search.today) <= CASE_PERIOD_DAYS)
+    .map((item) => {
+      const text = searchTextOf(item);
+      return { item, score: keywords.filter((word) => text.includes(word)).length };
+    });
+  if (!keywords.length) return scored.map((row) => row.item);
+  return scored
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((row) => row.item);
+}
+
+/** 품질 화면 '비슷한 사례 찾기'가 이 화면에 넣을 검색어: 강종과 LOT 종류로 비슷한 불합격을 찾는다 */
+export function similarCaseQuery(steelGradeCode: string | null, lotType: LotType): string {
+  return [steelGradeCode, LOT_TYPE_LABEL[lotType], '불합격'].filter(Boolean).join(' ');
+}
+
+export function similarCaseHref(steelGradeCode: string | null, lotType: LotType): string {
+  return `/past-cases?q=${encodeURIComponent(similarCaseQuery(steelGradeCode, lotType))}`;
+}
 
 /** '비슷한 사례 찾기'가 AI 패널에 자동으로 넣을 질문 (REQ-CASE-004) */
 export function similarCaseQuestion(lotNo: string, steelGradeCode: string): string {

@@ -1,82 +1,151 @@
-// 과거 사례 검색 (EX 준비 중). 옛 B안 화면의 구성을 남기고 내용은 고정 예시다. 기능·검색·데이터 변경 없음.
-// 고친 점 (reports/6 C-1·C-5, PLAN 7장): 부르는 곳을 REQ-CASE-004(AI 패널·@AI·품질 관리 버튼)로 맞추고, '비슷한 사례 찾기'는 품질 관리 몫으로 옮김.
+'use client';
+
+// 과거 사례 검색 (REQ-CASE-003·004, BP-CASE-01). 기준 ERD에 past_case 테이블이 없어(2026-10-16 결정: DB 없이 화면만 동작)
+// 예시 사례 5건을 화면에서 핵심어·구분·기간으로 거른다. AI 요약·철강맨AI·@AI·사례 등록은 사례 DB가 생기면 붙인다.
+// 부르는 곳은 REQ-CASE-004(AI 패널·@AI·품질 관리 버튼). 품질 관리의 '비슷한 사례 찾기'는 ?q=검색어로 이 화면을 연다.
 // 작업 로그 주체는 사용자만(AI 주체 없음), 이벤트는 REQ-LOG-002 목록만, LOT 번호는 9.2 형식, 같은 종류 사례는 같은 구분끼리.
+import { useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
-import { ComingSoon, ComingSoonArea } from '@/components/ComingSoon';
+import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { KvList } from '@/components/KvList';
 import { PageHead } from '@/components/Page';
+import { EmptyNote, StateView } from '@/components/StateView';
 import { Steps } from '@/components/Steps';
 import { Timeline } from '@/components/Timeline';
 import { CASE_CATEGORY_LABEL, type CaseCategory } from '@/codes';
-import {
-  ActorTag,
-  AiAssistedTag,
-  AiCard,
-  EventName,
-  ExampleNotice,
-  MasterItem,
-  SourceList,
-} from '@/features/agent/components/SoonExampleParts';
+import { ActorTag, AiAssistedTag, EventName, ExampleNotice } from '@/features/agent/components/SoonExampleParts';
+import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 import {
   CASE_CALL_SITES,
+  CASE_PERIOD_DAYS,
   CASE_REGISTER_STEPS,
-  EXAMPLE_QUERY,
-  PAST_CASES,
-  SELECTED_CASE,
-  SELECTED_CASE_HISTORY,
+  caseHistoryOf,
+  caseKeywords,
   sameCategoryCases,
+  searchPastCases,
+  type CaseCategoryFilter,
+  type CasePeriod,
+  type PastCaseExample,
 } from '@/features/pastCases/pastCaseExample';
-import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
+import { cn } from '@/lib/cn';
+import { todayStr } from '@/lib/format';
+
+const CATEGORY_FILTERS: readonly CaseCategoryFilter[] = ['ALL', 'QUALITY', 'EQUIPMENT'];
+const EXAMPLE_LOT_HINT = '예시 사례의 LOT이라 열 수 없어요';
 
 function CategoryBadge({ category }: { category: CaseCategory }) {
   return <Badge tone={category === 'QUALITY' ? 'run' : 'wait'}>{CASE_CATEGORY_LABEL[category]}</Badge>;
 }
 
-function ResultList() {
+interface ResultListProps {
+  query: string;
+  category: CaseCategoryFilter;
+  period: CasePeriod;
+  results: readonly PastCaseExample[];
+  selectedNo: string | null;
+  onQueryChange: (query: string) => void;
+  onCategoryChange: (category: CaseCategoryFilter) => void;
+  onPeriodChange: (period: CasePeriod) => void;
+  onSelect: (caseNo: string) => void;
+}
+
+function ResultList({ query, category, period, results, selectedNo, onQueryChange, onCategoryChange, onPeriodChange, onSelect }: ResultListProps) {
+  const keywords = caseKeywords(query);
   return (
     <section aria-label="검색 결과 목록" data-pet-target="card:pastCases.results" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
-        <Input type="search" leadingIcon="search" defaultValue={EXAMPLE_QUERY} aria-label="검색어" disabled />
-        <div className="flex flex-wrap gap-1.5">
-          <Chip on data-pet-term="기간">
-            기간 90일 <Icon name="chevron-down" size="sm" />
-          </Chip>
-          <Chip data-pet-term="구분">
-            구분 전체 <Icon name="chevron-down" size="sm" />
+        <Input type="search" leadingIcon="search" value={query} placeholder="예: 성분 불합격, SM355A, 가열로" aria-label="검색어" onChange={(e) => onQueryChange(e.target.value)} />
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="구분">
+          {CATEGORY_FILTERS.map((key) => (
+            <Chip key={key} on={category === key} onClick={() => onCategoryChange(key)} data-pet-term="구분">
+              {key === 'ALL' ? '구분 전체' : CASE_CATEGORY_LABEL[key]}
+            </Chip>
+          ))}
+          <Chip on={period === 'DAYS_90'} onClick={() => onPeriodChange(period === 'DAYS_90' ? 'ALL' : 'DAYS_90')} data-pet-term="기간">
+            최근 {CASE_PERIOD_DAYS}일
           </Chip>
         </div>
-        <span className="text-cap text-ink-3">비슷한 사례 {PAST_CASES.length}건 · 최신순</span>
+        <span className="text-cap text-ink-3">
+          {keywords.length ? `핵심어 ${keywords.join(' · ')} · ` : ''}사례 {results.length}건 · {keywords.length ? '많이 맞는 순' : '최신순'}
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {PAST_CASES.map((item) => (
-          <MasterItem key={item.caseNo} active={item.caseNo === SELECTED_CASE.caseNo} petItem="pastCase" petTitle={item.caseNo}>
-            <div className="flex items-center gap-2">
-              <span className="text-cap text-ink-3 tabular-nums">{item.occurredDate}</span>
-              <span className="truncate font-mono text-xs">{item.lotNos[0]}</span>
-              <CategoryBadge category={item.caseCategory} />
-            </div>
-            <span className="text-xs leading-snug">
-              <span className="font-mono text-ink-3">{item.caseNo}</span> · {item.title}
-            </span>
-          </MasterItem>
-        ))}
+        {results.map((item) => {
+          const active = item.caseNo === selectedNo;
+          return (
+            <button
+              key={item.caseNo}
+              type="button"
+              aria-current={active || undefined}
+              data-pet-item="pastCase"
+              data-pet-item-title={item.caseNo}
+              onClick={() => onSelect(item.caseNo)}
+              className={cn(
+                'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
+                active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-cap text-ink-3 tabular-nums">{item.occurredDate}</span>
+                <span className="truncate font-mono text-xs">{item.lotNos[0]}</span>
+                <span className="ml-auto">
+                  <CategoryBadge category={item.caseCategory} />
+                </span>
+              </span>
+              <span className="text-xs leading-snug">
+                <span className="font-mono text-ink-3">{item.caseNo}</span> · {item.title}
+              </span>
+            </button>
+          );
+        })}
+        {results.length === 0 ? <EmptyNote>맞는 사례가 없어요. 핵심어를 줄이거나 구분·기간을 풀어 보세요.</EmptyNote> : null}
       </div>
       <div className="flex flex-none flex-col gap-1 border-t border-line bg-surface-2 px-4 py-3 text-cap text-ink-3">
-        <span>한국어 전문검색으로 비슷한 사례를 찾고 AI가 요약해요.</span>
+        <span>핵심어로 제목·현상·원인·조치·설비·LOT을 찾아요.</span>
         <span>사례 번호 형식은 아직 정하지 않았어요 (예시 표기).</span>
       </div>
     </section>
   );
 }
 
-function CaseDetail() {
-  const others = sameCategoryCases(SELECTED_CASE);
-  const lotNo = SELECTED_CASE.lotNos[0] ?? '';
+/** 검색 결과 요약: AI 요약 대신 결과 사례의 원인을 그대로 모은다 (사례 DB와 AI 요약은 다음 단계) */
+function ResultSummary({ results, onSelect }: { results: readonly PastCaseExample[]; onSelect: (caseNo: string) => void }) {
+  const quality = results.filter((item) => item.caseCategory === 'QUALITY').length;
+  return (
+    <Card className="flex-none" petKey="card:pastCases.summary">
+      <CardHead title="검색 결과 요약" meta={`결과 ${results.length}건 · 품질 ${quality} · 설비 ${results.length - quality}`} />
+      <CardBody>
+        <ul className="flex flex-col gap-1.5 text-xs leading-relaxed text-ink-2">
+          {results.map((item) => (
+            <li key={item.caseNo} className="flex gap-2">
+              <button type="button" className="flex-none font-mono text-run hover:underline" onClick={() => onSelect(item.caseNo)}>
+                {item.caseNo}
+              </button>
+              <span className="min-w-0">
+                <b className="font-semibold text-ink">원인</b> {item.cause} <b className="font-semibold text-ink">조치</b> {item.actionTaken}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <span className="inline-flex items-center gap-1 text-cap text-ink-3">
+          <Icon name="info" size="sm" />
+          사례 DB가 생기면 AI가 결과를 요약해요 (REQ-CASE-003)
+        </span>
+      </CardBody>
+    </Card>
+  );
+}
+
+function CaseDetail({ item, results, onSelect }: { item: PastCaseExample; results: readonly PastCaseExample[]; onSelect: (caseNo: string) => void }) {
+  const others = sameCategoryCases(item);
+  const history = caseHistoryOf(item);
+  const lotNo = item.lotNos[0] ?? '';
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
       <PageHead
@@ -89,50 +158,30 @@ function CaseDetail() {
         }
         title={
           <span className="flex items-center gap-2.5">
-            {SELECTED_CASE.caseNo} · {SELECTED_CASE.title}
-            <CategoryBadge category={SELECTED_CASE.caseCategory} />
+            {item.caseNo} · {item.title}
+            <CategoryBadge category={item.caseCategory} />
           </span>
         }
         actions={
           <>
-            <Button icon="trace" disabled>
+            <Button icon="trace" disabled title={EXAMPLE_LOT_HINT}>
               LOT 추적
             </Button>
-            <Button icon="history" disabled>
+            <Button icon="history" disabled title={EXAMPLE_LOT_HINT}>
               작업 로그
             </Button>
           </>
         }
       />
 
-      <AiCard
-        title="AI 요약 · 검색 결과 전체"
-        meta={`결과 ${PAST_CASES.length}건 기준 · 예시`}
-        actions={
-          <span className="inline-flex items-center gap-1 text-cap text-ink-3">
-            <Icon name="info" size="sm" />
-            AI 요약은 참고용 · 판단은 원본 사례로 확인
-          </span>
-        }
-        className="flex-none"
-        petKey="card:pastCases.summary"
-      >
-        <p className="text-base leading-normal">
-          &ldquo;{EXAMPLE_QUERY}&rdquo;와 비슷한 사례 {PAST_CASES.length}건을 찾았어요. 성분 불합격은 합금철 투입량 편차나 온도 측정 오차가 원인인
-          경우가 많았고, 투입량·측정값을 다시 확인하도록 조치했어요. 표면 결함은 열연·연주 조건과 함께 살펴본 사례가 있어요.
-        </p>
-        <SourceList
-          label="출처 · 사례 번호"
-          items={PAST_CASES.slice(0, 4).map((item) => ({ icon: 'link' as const, label: <span className="font-mono">{item.caseNo}</span> }))}
-        />
-      </AiCard>
+      <ResultSummary results={results} onSelect={onSelect} />
 
       <div className="grid min-h-0 flex-none grid-cols-[1.1fr_1fr] gap-3.5">
         <Card petKey="card:pastCases.history">
-          <CardHead title="사례 작업 로그" meta={`${lotNo} · ${SELECTED_CASE_HISTORY.length}건`} />
+          <CardHead title="사례 작업 로그" meta={`${lotNo} · ${history.length}건`} />
           <CardBody className="pb-1">
             <Timeline
-              items={SELECTED_CASE_HISTORY.map((entry) => ({
+              items={history.map((entry) => ({
                 key: entry.key,
                 tone: entry.key === 'inspection' ? 'danger' : entry.key === 'disposition' ? 'wait' : 'ok',
                 title: (
@@ -156,15 +205,15 @@ function CaseDetail() {
         </Card>
 
         <Card petKey="card:pastCases.detail">
-          <CardHead title="이 사례" meta={`작성 품질 담당 · ${SELECTED_CASE.occurredDate}`} />
+          <CardHead title="이 사례" meta={`작성 품질 담당 · ${item.occurredDate}`} />
           <CardBody>
-            <div data-pet-item="pastCase" data-pet-item-title={SELECTED_CASE.caseNo}>
+            <div data-pet-item="pastCase" data-pet-item-title={item.caseNo}>
               <KvList
                 items={[
-                  { label: '구분', value: CASE_CATEGORY_LABEL[SELECTED_CASE.caseCategory] },
-                  { label: '관련 LOT', value: <span className="font-mono text-sm">{SELECTED_CASE.lotNos.join(', ')}</span> },
-                  { label: '관련 설비', value: SELECTED_CASE.equipmentText },
-                  { label: '발생일', value: SELECTED_CASE.occurredDate },
+                  { label: '구분', value: CASE_CATEGORY_LABEL[item.caseCategory] },
+                  { label: '관련 LOT', value: <span className="font-mono text-sm">{item.lotNos.join(', ')}</span> },
+                  { label: '관련 설비', value: item.equipmentText },
+                  { label: '발생일', value: item.occurredDate },
                 ]}
               />
             </div>
@@ -172,28 +221,35 @@ function CaseDetail() {
               <p>
                 <b data-pet-term="현상" className="font-semibold text-ink">
                   현상
-                </b> {SELECTED_CASE.phenomenon}
+                </b> {item.phenomenon}
               </p>
               <p>
                 <b data-pet-term="원인" className="font-semibold text-ink">
                   원인
-                </b> {SELECTED_CASE.cause}
+                </b> {item.cause}
               </p>
               <p>
                 <b data-pet-term="조치" className="font-semibold text-ink">
                   조치
-                </b> {SELECTED_CASE.actionTaken}
+                </b> {item.actionTaken}
               </p>
             </div>
             <div className="flex flex-col gap-1.5 border-t border-line pt-3">
               <span className="text-xs font-semibold">같은 구분의 다른 사례</span>
-              {others.map((item) => (
-                <span key={item.caseNo} data-pet-item="pastCase" data-pet-item-title={item.caseNo} className="flex items-center gap-1.5 text-xs text-ink-2">
+              {others.map((other) => (
+                <button
+                  key={other.caseNo}
+                  type="button"
+                  data-pet-item="pastCase"
+                  data-pet-item-title={other.caseNo}
+                  onClick={() => onSelect(other.caseNo)}
+                  className="flex items-center gap-1.5 text-left text-xs text-ink-2 hover:text-ink"
+                >
                   <Icon name="link" size="sm" className="text-ink-3" />
-                  <span className="font-mono">{item.caseNo}</span>
-                  <span className="truncate">{item.title}</span>
-                  <em className="ml-auto text-cap text-ink-3 not-italic">{item.occurredDate}</em>
-                </span>
+                  <span className="font-mono">{other.caseNo}</span>
+                  <span className="truncate">{other.title}</span>
+                  <em className="ml-auto text-cap text-ink-3 not-italic">{other.occurredDate}</em>
+                </button>
               ))}
             </div>
           </CardBody>
@@ -201,12 +257,15 @@ function CaseDetail() {
       </div>
 
       <Card className="flex-none">
-        <CardHead title="과거 사례를 찾는 곳" meta="이 화면 밖에서도 같은 검색을 불러요" actions={<ComingSoon grade="EX" />} />
+        <CardHead title="과거 사례를 찾는 곳" meta="이 화면 밖에서도 같은 검색을 불러요" />
         <CardBody>
           <ul className="grid grid-cols-3 gap-2.5">
             {CASE_CALL_SITES.map((site) => (
               <li key={site.key} className="flex flex-col gap-1 rounded-sm border border-line bg-surface-2 px-3 py-2.5">
-                <b className="text-sm font-semibold">{site.place}</b>
+                <span className="flex items-center gap-1.5">
+                  <b className="text-sm font-semibold">{site.place}</b>
+                  {site.ready ? null : <ComingSoon grade="EX" />}
+                </span>
                 <span className="text-cap text-ink-3">{site.how}</span>
               </li>
             ))}
@@ -218,13 +277,46 @@ function CaseDetail() {
 }
 
 export function PastCaseScreen() {
+  const params = useSearchParams();
+  const initialQuery = params.get('q') ?? '';
+  const [query, setQuery] = useState(initialQuery);
+  const [category, setCategory] = useState<CaseCategoryFilter>('ALL');
+  const [period, setPeriod] = useState<CasePeriod>('ALL');
+  const [selectedNo, setSelectedNo] = useState<string | null>(null);
+
+  // 품질 화면의 '비슷한 사례 찾기'로 이 화면에 있는 채 다시 오면 주소의 검색어로 바꾼다
+  useEffect(() => {
+    setQuery(initialQuery);
+    setSelectedNo(null);
+  }, [initialQuery]);
+
+  const results = useMemo(() => searchPastCases({ query, category, period, today: todayStr() }), [query, category, period]);
+  // 고른 사례가 결과에서 빠지면 결과의 첫 사례를 보인다
+  const selected = results.find((item) => item.caseNo === selectedNo) ?? results[0] ?? null;
+
   return (
-    <ComingSoonArea grade="EX" title="과거 사례 검색">
-      <ExampleNotice text="아래 내용은 화면 구성을 보여 주는 예시예요. 실제 사례가 아니에요." />
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <ExampleNotice text="사례 DB가 아직 없어 예시 사례 5건에서 찾아요. 실제 사례가 아니에요." />
       <div className="flex min-h-0 flex-1 gap-4">
-        <ResultList />
-        <CaseDetail />
+        <ResultList
+          query={query}
+          category={category}
+          period={period}
+          results={results}
+          selectedNo={selected?.caseNo ?? null}
+          onQueryChange={setQuery}
+          onCategoryChange={setCategory}
+          onPeriodChange={setPeriod}
+          onSelect={setSelectedNo}
+        />
+        {selected ? (
+          <CaseDetail item={selected} results={results} onSelect={setSelectedNo} />
+        ) : (
+          <div className="flex min-w-0 flex-1">
+            <StateView kind="empty" title="맞는 사례가 없어요" text="핵심어를 줄이거나 구분·기간을 풀어 보세요." />
+          </div>
+        )}
       </div>
-    </ComingSoonArea>
+    </div>
   );
 }
