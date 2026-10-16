@@ -46,10 +46,12 @@ export interface AiAskVariables {
   reasoning?: AiReasoningLevel;
   /** 질문과 함께 보내는 사진. 지난 대화(history)에는 담지 않는다 */
   images?: AiAssistantImageInput[];
+  /** 웹 검색을 켠 질문이면 true (이슈 #367). 끄면 필드를 보내지 않는다 */
+  webSearch?: boolean;
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다 */
-export async function runAiAsk({ questionId, question, screen, history, reasoning, images }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -61,7 +63,7 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   try {
     await aiAssistantApi.askStream(
       // AI 패널은 승인 카드를 그리므로 쓰기 도구를 알리게 한다 (회의 질문 카드는 보내지 않는다)
-      { question, screen, history, approvalCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}) },
+      { question, screen, history, approvalCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}) },
       (event) => {
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
@@ -95,14 +97,14 @@ export async function decideAiApproval(approvalId: string, decision: AiApprovalD
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[]) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const history = aiChatHistory(chat.entries);
     const questionId = newAiChatId();
-    chat.addQuestion(questionId, text, reasoning, images);
-    void runAiAsk({ questionId, question: text, screen, history, reasoning, images });
+    chat.addQuestion(questionId, text, reasoning, images, webSearch);
+    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }

@@ -19,9 +19,9 @@ afterEach(() => vi.restoreAllMocks());
 
 const PHOTO = { mediaType: 'image/jpeg' as const, dataBase64: 'QUJD' };
 
-function ask(reasoning?: 'off' | 'high', images?: (typeof PHOTO)[]) {
-  store().addQuestion('q1', '질문', reasoning, images);
-  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], reasoning, images });
+function ask(reasoning?: 'off' | 'high', images?: (typeof PHOTO)[], webSearch?: boolean) {
+  store().addQuestion('q1', '질문', reasoning, images, webSearch);
+  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], reasoning, images, webSearch });
 }
 
 describe('runAiAsk', () => {
@@ -38,6 +38,16 @@ describe('runAiAsk', () => {
 
     await ask();
     expect(spy.mock.calls[1][0]).not.toHaveProperty('reasoning');
+  });
+
+  it('웹 검색을 켠 질문만 webSearch: true를 보낸다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent(DONE));
+    await ask(undefined, undefined, true);
+    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', webSearch: true });
+    await ask(undefined, undefined, false);
+    expect(spy.mock.calls[1][0]).not.toHaveProperty('webSearch');
+    await ask();
+    expect(spy.mock.calls[2][0]).not.toHaveProperty('webSearch');
   });
 
   it('사진은 질문과 함께 보내고, 없으면 images 필드를 보내지 않는다', async () => {
