@@ -31,8 +31,8 @@ describe('과거 사례 예시 (shared PAST_CASE_EXAMPLES, BP-CASE-01)', () => {
   });
 
   it('같은 구분의 다른 사례는 같은 구분만, 자기 자신은 빼고 고른다', () => {
-    expect(sameCategoryCases(caseOf('CASE-0003'), PAST_CASE_EXAMPLES).map((item) => item.caseNo)).toEqual(['CASE-0001']);
-    expect(sameCategoryCases(caseOf('CASE-0005'), PAST_CASE_EXAMPLES).map((item) => item.caseNo)).toEqual(['CASE-0004', 'CASE-0002']);
+    expect(sameCategoryCases(caseOf('CASE-0003'), PAST_CASE_EXAMPLES).map((item) => item.caseNo)).toEqual(['CASE-0002', 'CASE-0001']);
+    expect(sameCategoryCases(caseOf('CASE-0005'), PAST_CASE_EXAMPLES).map((item) => item.caseNo)).toEqual(['CASE-0004']);
   });
 
   it('예시 작업 로그: 주체는 사용자뿐(AI 주체 없음), 등록은 AI 경유. CASE-0005는 자세한 예시, 나머지도 세 단계', () => {
@@ -74,7 +74,7 @@ describe('과거 사례 검색 규칙 (shared, 서버 검색 API와 같음)', ()
     expect(nos('SM355A 히트 불합격')[0]).toBe('CASE-0005');
     expect(nos('가열로')).toEqual(['CASE-0001']);
     expect(nos('ht-bof1-260912-004')).toEqual(['CASE-0005']);
-    expect(nos('', { category: 'EQUIPMENT' })).toEqual(['CASE-0003', 'CASE-0001']);
+    expect(nos('', { category: 'EQUIPMENT' })).toEqual(['CASE-0003', 'CASE-0002', 'CASE-0001']);
     expect(nos('', { days: 90 })).toEqual(['CASE-0005', 'CASE-0004', 'CASE-0003', 'CASE-0002']);
     expect(nos('없는말')).toEqual([]);
   });
