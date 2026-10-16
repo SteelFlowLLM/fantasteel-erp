@@ -8,6 +8,7 @@ import {
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
   type AiAssistantToolTrace,
+  type AiWebSource,
   type AuthUser,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
@@ -27,6 +28,7 @@ import { WriteFixBudget } from './approval/write-call.rules';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox } from './tools/assistant-toolbox';
 import { AssistantWriteToolbox } from './tools/assistant-write-toolbox';
+import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
@@ -46,6 +48,8 @@ const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자�
 
 /** 한 질문에서 도구를 부르는 횟수 상한. 넘으면 도구 없이 지금까지의 결과로 답하게 한다 (모델이 같은 조회를 되풀이하는 것을 막음) */
 export const MAX_TOOL_ROUNDS = 4;
+/** 웹 검색을 켠 질문의 도구 횟수 상한. 검색 → 읽기 → (다른 결과 읽기·다시 검색) → 답에 4번은 빠듯해서 늘린다 (이슈 #367) */
+export const MAX_WEB_TOOL_ROUNDS = 6;
 /** AI 실행 기록에 담는 도구 입력·결과·생각 글의 길이. 답과 함께 화면에만 가므로 읽을 만큼만 */
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
@@ -55,6 +59,7 @@ const TRACE_THINKING_MAX = 8000;
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
  * 데이터는 모델이 고른 조회 도구를 서버가 사용자 권한으로 실행해 얻는다. 조회는 작업 로그를 남기지 않는다(REQ-LOG-002 대상 아님).
  * 쓰기 도구는 실시간 답에서 화면이 승인 카드를 보일 수 있을 때만 알리고, 사용자가 허용하면 실행해 AI 경유로 남긴다(이슈 #362).
+ * 웹 도구(웹 검색·페이지 읽기·장소 검색)는 웹 검색을 켠 실시간 답에서만 알린다(이슈 #367).
  * LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
  */
 @Injectable()
@@ -68,6 +73,7 @@ export class AiAssistantService {
     private readonly meetingMinutes: MeetingMinutesService,
     private readonly writeTools: AssistantWriteToolbox,
     private readonly actions: AssistantActionRunner,
+    private readonly webTools: AssistantWebToolbox,
   ) {}
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
@@ -119,6 +125,8 @@ export class AiAssistantService {
     const manualGuides = findManualGuides(input.question);
     // 사내 채팅 @AI(API-262)처럼 아무도 보고 있지 않은 답은 승인을 기다릴 수 없어 쓰기 도구를 아예 알리지 않는다
     const writable = options.interactive === true && input.approvalCards === true;
+    // 웹 도구도 화면이 실시간으로 보고 있는 답에서만 (사내 채팅 @AI는 웹 내용을 방 멤버 모두에게 보이게 되므로 쓰지 않는다)
+    const webSearch = options.interactive === true && input.webSearch === true;
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -131,6 +139,7 @@ export class AiAssistantService {
       history,
       question: input.question,
       writeTools: writable,
+      webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
@@ -147,7 +156,10 @@ export class AiAssistantService {
         const dataSources: AiAssistantSource[] = [];
         const toolCalls: AiAssistantToolTrace[] = [];
         const writeEnabled = writable && emit !== undefined;
-        const tools = writeEnabled ? [...this.toolbox.definitions(), ...this.writeTools.definitions()] : this.toolbox.definitions();
+        // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다
+        const web = webSearch && emit !== undefined ? this.webTools.session() : null;
+        const tools = [...this.toolbox.definitions(), ...(web ? this.webTools.definitions() : []), ...(writeEnabled ? this.writeTools.definitions() : [])];
+        const maxRounds = web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
         const budget = new WriteFixBudget();
         // 쓰기 도구를 더 고칠 수 없거나 권한 밖이면 다음 차례는 도구 없이 답하게 한다
         let stopped = false;
@@ -156,39 +168,48 @@ export class AiAssistantService {
             ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
             : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
         let reply = await call(tools);
-        for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
+        for (let round = 1; reply.toolCalls.length && round <= maxRounds; round += 1) {
           messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
           for (const toolCall of reply.toolCalls) {
             if (signal?.aborted) throw new LlmAbortedError();
             const callStarted = Date.now();
             const traceId = `t${toolCalls.length + 1}`;
             emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
-            // 조회 도구는 묻지 않고 바로, 쓰기 도구는 승인 카드를 거쳐 실행한다
-            const result: { content: string; source: AiAssistantSource | null; stop?: boolean } =
-              emit && writeEnabled && this.toolbox.kindOf(toolCall.name) === 'WRITE'
-                ? await this.runWrite(user, toolCall, traceId, input.question, emit, budget, stopped, signal)
-                : await this.toolbox.run(user, toolCall);
+            // 조회·웹 도구는 묻지 않고 바로, 쓰기 도구는 승인 카드를 거쳐 실행한다
+            let webSources: AiWebSource[] | undefined;
+            let result: { content: string; source: AiAssistantSource | null; stop?: boolean };
+            if (web?.has(toolCall.name)) {
+              const webResult = await web.run(toolCall, signal);
+              result = { content: webResult.content, source: null };
+              webSources = webResult.webSources;
+            } else if (emit && writeEnabled && this.toolbox.kindOf(toolCall.name) === 'WRITE') {
+              result = await this.runWrite(user, toolCall, traceId, input.question, emit, budget, stopped, signal);
+            } else {
+              result = await this.toolbox.run(user, toolCall);
+            }
             if (result.stop) stopped = true;
             const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
             toolCalls.push(trace);
-            emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs });
+            emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs, ...(webSources ? { webSources } : {}) });
             messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
             if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
           }
           if (signal?.aborted) throw new LlmAbortedError();
-          reply = await call(round < MAX_TOOL_ROUNDS && !stopped ? tools : []);
+          reply = await call(round < maxRounds && !stopped ? tools : []);
         }
 
         const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
         const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
+        const webFinal = web?.finalize(parsed.answer) ?? null;
         return {
-          answer: parsed.answer,
+          answer: webFinal?.answer ?? parsed.answer,
           sources: [...dataSources, ...parsed.sources],
           model,
           latencyMs: Date.now() - started,
           toolCalls,
           thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
           reasoningApplied: reply.reasoningApplied ?? true,
+          ...(webFinal ? { webSources: webFinal.webSources } : {}),
         };
       },
     };

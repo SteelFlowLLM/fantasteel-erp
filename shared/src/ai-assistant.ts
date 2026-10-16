@@ -34,6 +34,11 @@ export interface AiAssistantMessageInput {
    * 실시간 답 API(messages/stream)에서만 쓰기 도구를 모델에 알린다. 없거나 false면, 또는 API-262(한 번에 답)면 쓰기 도구가 없다
    */
   approvalCards?: boolean;
+  /**
+   * 웹 검색을 켠 질문이면 true (문서에 없는 기능, 이슈 #367). 실시간 답 API(messages/stream)에서만 웹 도구
+   * (web_search·read_web_page, 카카오 키가 있으면 search_places)를 모델에 알린다. 사내 채팅 @AI(API-262)는 쓰지 않는다
+   */
+  webSearch?: boolean;
 }
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
@@ -82,7 +87,22 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   search_past_cases: '과거 사례 검색',
   add_my_schedule_event: '내 일정 추가',
   create_purchase_request_draft: '구매요청 초안 만들기',
+  web_search: '웹 검색',
+  search_places: '장소 검색',
+  read_web_page: '웹 페이지 읽기',
 };
+
+/** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */
+export const AI_ASSISTANT_WEB_TOOLS = ['web_search', 'search_places', 'read_web_page'] as const;
+export type AiAssistantWebTool = (typeof AI_ASSISTANT_WEB_TOOLS)[number];
+
+export const isAiAssistantWebTool = (name: string): name is AiAssistantWebTool => (AI_ASSISTANT_WEB_TOOLS as readonly string[]).includes(name);
+
+/** 웹 도구가 찾거나 읽은 페이지 하나. url은 검색 결과에 있던 주소(읽은 페이지면 이동 뒤 최종 주소) */
+export interface AiWebSource {
+  title: string;
+  url: string;
+}
 
 /** 업무 데이터를 바꾸는 쓰기 도구. 늘 승인 카드를 거친다. 나머지 도구는 조회 도구라 묻지 않는다 */
 export const AI_ASSISTANT_WRITE_TOOLS = ['add_my_schedule_event', 'create_purchase_request_draft'] as const;
@@ -164,6 +184,11 @@ export interface AiAssistantReplyView {
   thinking: string | null;
   /** 고른 생각 정도를 모델에 보냈는지. 모델이 생각 설정을 받지 않으면 false (화면이 안내한다) */
   reasoningApplied: boolean;
+  /**
+   * 웹 출처 (이슈 #367). 웹 검색을 켠 질문에만 있다. 답이 링크로 단 검색 결과와 읽은 페이지 순서이고,
+   * 둘 다 없으면 검색 결과 앞의 3개. 답 본문의 링크는 이 질문의 웹 도구 결과에 있던 주소만 남는다
+   */
+  webSources?: AiWebSource[];
 }
 
 /**
@@ -173,13 +198,23 @@ export interface AiAssistantReplyView {
  * - 쓰기 도구(승인 카드): tool_start → approval_required → approval_resolved → (허용이면) tool_execution → tool_end.
  *   인자·사전 확인이 틀리면 카드 없이 tool_end만 온다(모델이 고쳐 다시 부른다). toolId는 같은 도구 호출의 tool_start.id.
  *   카드를 기다리는 동안 heartbeat가 20초마다 온다
+ * - 웹 도구(이슈 #367)는 조회 도구와 같은 tool_start → tool_end이고, tool_end.webSources에 찾은·읽은 페이지가 온다.
+ *   답에 쓴 웹 출처는 done의 reply.webSources
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
   | { type: 'thinking'; text: string }
   | { type: 'answer'; text: string }
   | { type: 'tool_start'; id: string; name: string; arguments: string }
-  | { type: 'tool_end'; id: string; label: string | null; resultPreview: string; durationMs: number }
+  | {
+      type: 'tool_end';
+      id: string;
+      label: string | null;
+      resultPreview: string;
+      durationMs: number;
+      /** 웹 도구일 때만: 이 호출이 찾은 결과(검색·장소) 또는 읽은 페이지 (이슈 #367) */
+      webSources?: AiWebSource[];
+    }
   | {
       type: 'approval_required';
       approvalId: string;

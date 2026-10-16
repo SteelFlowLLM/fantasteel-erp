@@ -84,6 +84,11 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsBoolean()
   approvalCards?: boolean;
+
+  /** 웹 검색을 켠 질문이면 true. 실시간 답 API에서만 웹 도구를 알린다 (이슈 #367) */
+  @IsOptional()
+  @IsBoolean()
+  webSearch?: boolean;
 }
 
 /** POST ai-assistant/approvals/:approvalId (이슈 #362) */
