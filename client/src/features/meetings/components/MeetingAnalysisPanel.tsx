@@ -49,7 +49,7 @@ function EvidenceChips({ evidence, onJump }: { evidence: number[]; onJump: (inde
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[84px_minmax(0,1fr)] gap-x-2 text-sm">
       <span className="text-xs text-ink-3">{label}</span>
@@ -58,24 +58,31 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-interface Names {
+const NO_EXTRA: readonly { employeeId: number; employeeName: string }[] = [];
+
+export interface Names {
   employee: (id: number) => string;
   item: (id: number) => string | null;
 }
 
 /** 담당자·참석자는 회의 참석자가 아니어도 되므로 조직도의 전체 사원에서, 품목은 원료 목록에서 이름을 찾는다 */
 function useNames(minutes: MeetingMinutesView): Names {
+  return useDirectoryNames(minutes.attendees);
+}
+
+/** 사원은 조직도 전체에서, 원료 품목은 원료 목록에서 이름을 찾는다. extra는 조직도에 아직 없을 수 있는 사원 (회의 참석자) */
+export function useDirectoryNames(extra: readonly { employeeId: number; employeeName: string }[] = NO_EXTRA): Names {
   const chart = useAdminOrgChart();
   const rawMaterials = useItemList({ itemType: ITEM_TYPE.RAW_MATERIAL });
   return useMemo(() => {
-    const employees = new Map<number, string>(minutes.attendees.map((a) => [a.employeeId, a.employeeName]));
+    const employees = new Map<number, string>(extra.map((a) => [a.employeeId, a.employeeName]));
     for (const group of groupsOfChart(chart.data ?? [])) for (const member of group.members) employees.set(member.id, member.employeeName);
     const items = new Map((rawMaterials.data ?? []).map((item) => [item.id, item.itemName]));
     return { employee: (id) => employees.get(id) ?? `사원 ${id}`, item: (id) => items.get(id) ?? null };
-  }, [minutes.attendees, chart.data, rawMaterials.data]);
+  }, [extra, chart.data, rawMaterials.data]);
 }
 
-function fields(c: MeetingCandidate, names: Names): React.ReactNode {
+export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode {
   if (c.kind === 'TASK') {
     return (
       <>
@@ -104,6 +111,9 @@ function fields(c: MeetingCandidate, names: Names): React.ReactNode {
     </>
   );
 }
+
+/** 칸을 글로 보일 때 필요한 후보 값. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
+export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'purchase' | 'itemName'>;
 
 /** 서버가 DB에서 읽어 만든 ERP 현황. 눈여겨볼 점(warn)은 경고색으로 */
 function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {

@@ -135,7 +135,7 @@ function evidenceOf(v: unknown, segmentCount: number): number[] {
   return [...picked].sort((a, b) => a - b);
 }
 
-function matchEmployee(name: string, attendees: AnalysisContext['attendees']): number | null {
+export function matchEmployee(name: string, attendees: AnalysisContext['attendees']): number | null {
   const find = (candidate: string) => attendees.filter((a) => a.employeeName.trim() === candidate);
   let found = find(name);
   // "박서영 대리"처럼 직급을 붙여 말한 경우: 첫 낱말이 참석자 이름과 정확히 같을 때만 인정한다
@@ -143,7 +143,7 @@ function matchEmployee(name: string, attendees: AnalysisContext['attendees']): n
   return found.length === 1 ? found[0].employeeId : null;
 }
 
-function matchItem(name: string, items: AnalysisContext['rawMaterials']): number | null {
+export function matchItem(name: string, items: AnalysisContext['rawMaterials']): number | null {
   const q = name.trim().toLowerCase();
   if (q === '') return null;
   const exact = items.filter((i) => i.itemName.trim().toLowerCase() === q || i.itemCode.trim().toLowerCase() === q);

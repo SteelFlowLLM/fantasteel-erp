@@ -7,16 +7,16 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-AST-001·002·003·004·006·007·008·009. AST-005(실행 카드)·010(AI 경유)은 다음 단계. 006(사례)은 예시 사례 + 등록 사례(`past_case`)로 (2026-10-16, `past-case.md`) |
+| REQ | REQ-AST-001·002·003·004·005·006·007·008·009. AST-010(AI 경유 기록)은 업무·일정을 뺀 실행 카드(구매요청 초안, 수주 등록, 열연 배정, 히트 편성; 아래 "실행 카드"). 사내 채팅 @AI(AST-002)의 실행 카드는 다음 단계. 006(사례)은 예시 사례 + 등록 사례(`past_case`)로 (2026-10-16, `past-case.md`) |
 | BP | BP-AST-01 ([04] 7장) |
 | 등급 | P2 |
 | LLM | llm 모듈의 LLM 연결 설정(주소·모델)을 쓴다. 지금은 LM Studio(OpenAI 호환). 데이터 조회는 tool 호출을 지원하는 모델이어야 한다 |
 
-단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ← **지금** ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
+단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ← **지금**(업무·일정·구매요청 초안 + 수주 등록·열연 배정·히트 편성·과거 사례 등록, 7종) ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
 
 ## 2. 테이블
 
-쓰기 없음. AI는 조회·설명만 하고 업무 데이터를 바꾸지 않는다([01] AI 사용 원칙). 대화 기록 저장 여부는 미결정([02] 21장)이고 ERD에 테이블이 없어 **저장하지 않는다**. 화면이 최근 대화를 함께 보낸다.
+AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸지 않는다([01] AI 사용 원칙). 이 모듈의 테이블은 없다. 실행 카드를 **사용자가 실행**하면 아래 "실행 카드"대로 업무(`task`)·일정(`schedule_event`, `schedule_event_attendee`)·구매요청 초안(`action_draft`)이 생기고, 나머지 4종은 각 모듈의 기존 확정 기능이 자기 테이블에 쓴다. 대화 기록 저장 여부는 미결정([02] 21장)이고 ERD에 테이블이 없어 **저장하지 않는다**. 화면이 최근 대화를 함께 보낸다.
 
 읽기: `role_permission`·`role` — 권한 밖 요청에 조회할 수 있는 역할을 안내할 때(`ai-assistant.repository.ts`). 업무 데이터는 각 모듈 service로만 읽는다.
 
@@ -27,6 +27,7 @@
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
+| POST | `ai-assistant/action-cards/execute` | 🟡 명세에 없음 | 로그인만(구매요청 카드는 구매요청 등록 USE를 service가 확인) | `AiActionCardExecuteResult` `{ kind, registered: { type: task / schedule_event / action_draft, id } }` (201) |
 
 요청 `POST ai-assistant/messages`:
 
@@ -35,6 +36,7 @@
 | `question` | 필수, 앞뒤 공백 제거, 1000자까지 |
 | `screen` | 선택. `{ path, title, label }` — 보고 있는 화면 주소(쿼리 포함)·제목·위젯 맥락(REQ-AST-007) |
 | `meetingMinutesId` | 선택, 1 이상 정수. 회의록 상세의 "이 회의에 대해 묻기"가 보낸다(아래 '회의 질문'). 없는 회의록이면 `VOC-001`(404)이고 LLM을 부르지 않는다 |
+| `actionCards` | 선택, boolean. 철강맨AI 패널만 `true`로 보낸다(아래 "실행 카드"). 응답의 `actionCards[]`에 카드가 담긴다 |
 | `history` | 선택. `{ role: 'user'\|'assistant', content }[]` 20개까지. 서버는 최근 10개, 한 줄 2000자까지만 쓴다 |
 | `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
 
@@ -43,7 +45,7 @@
 대화가 저장되지 않아 새 자원이 없으므로 `POST`지만 200을 돌려준다.
 
 **실시간 답 API** (문서에 없는 기능, 2026-10-16 추가) — `ai-assistant.controller.ts`의 `askStream`
-- 요청: `POST ai-assistant/messages/stream`. 본문은 API-262와 같고 `reasoning`을 받는다. 입력 검사도 같다.
+- 요청: `POST ai-assistant/messages/stream`. 본문은 API-262와 같고 `reasoning`을 받는다. 입력 검사도 같다. 철강맨AI 패널은 이 API로 묻고 `actionCards: true`를 보낸다.
 - 응답: `Content-Type: application/x-ndjson`. 한 줄에 이벤트 JSON 하나를 보낸다. 시작한 뒤에는 `done` 또는 `error` 중 하나로 끝난다.
 - 시작 전 오류는 평소 JSON 오류 응답으로 돌려주고 스트림을 열지 않는다. 예: 질문 형식 `COM-004`, 없는 회의록 `VOC-001`(404), 모델 미설정 `COM-999`(503).
 - 시작한 뒤의 실패(LLM 연결 실패·시간 초과 등)는 HTTP 200을 유지한 채 `error` 이벤트로 보낸다.
@@ -55,7 +57,7 @@
 | `answer` | `text` | 답 글 조각. 출처 표시(`[TRM-…]`)가 아직 남은 원문이다. 조각 뒤에 `tool_start`가 오면 도구를 부르기 전의 중간 글이라 최종 답이 아니다 |
 | `tool_start` | `id`, `name`, `arguments` | 조회 도구를 부르기 시작. `name`은 도구 이름(한글 제목은 `AI_ASSISTANT_TOOL_TITLE`), `arguments`는 모델이 넘긴 입력 JSON 문자열 |
 | `tool_end` | `id`, `label`, `resultPreview`, `durationMs` | 같은 `id`의 도구 결과. `resultPreview`는 결과 앞부분, `label`은 조회 대상 이름(없으면 `null`), `durationMs`는 걸린 시간 |
-| `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이다 |
+| `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이고, 실행 카드는 `reply.actionCards`로 온다. 카드를 만들었다고만 답해 카드 도구로 한 번 더 부르면 그 답 글도 이어서 `answer`로 오지만, 최종 답은 `reply.answer`다 |
 | `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
 
 ## 4. 업무 규칙
@@ -112,6 +114,27 @@
 - **AI 실행 기록** (문서에 없는 기능): 응답의 `toolCalls`에 부른 조회 도구를 부른 순서대로 담는다 — 도구 이름, 모델이 넘긴 입력(500자), 결과 앞부분(600자), 걸린 시간. `thinking`은 마지막 답의 생각 글(`reasoning_content` 또는 `<think>` 블록, 8,000자)이다. 서버에 저장하지 않고 이 응답에만 담는다. 회의 질문 카드는 답 아래 접힌 "조회한 것 보기"로 보여 주고, 사내 채팅 @AI 답은 이 칸을 쓰지 않는다(방 멤버 모두에게 보이는 메시지라서).
 - 답의 `#n` 표시는 서버가 지우지 않는다. 화면이 전사 길이 안의 번호만 눌러 이동하는 칩으로 바꾼다(`client/src/lib/meetingAsk.ts`).
 
+**실행 카드 (REQ-AST-005, 2026-10-16)** — `ai-action-card.service.ts`, `tools/action-card.tool.ts`
+- 모델은 `propose_action_card` 도구로 카드를 **제안만** 한다(`kind` TASK·EVENT·PURCHASE, 제목, 담당자·참석자 이름, 날짜·시각, 원료 이름·톤). 요청에 `actionCards: true`가 있을 때만 이 도구와 프롬프트의 `[실행 카드 규칙]`(`ACTION_CARD_RULES`)을 넣는다. 사내 채팅 @AI·회의 질문은 카드를 보여 줄 곳이 없어 보내지 않으므로 지금처럼 "직접 할 수 없다"로 답한다. 카드는 한 답에 5장까지(🟡 가정값).
+- 서버가 값을 맞춘다(모델의 id·숫자는 쓰지 않음): 이름 → 사용 중인 사원 id("나"는 사용자 본인, 같은 이름이 둘이면 못 찾은 것으로), 원료 이름·코드 → 원료 품목 id(회의록 분석과 같은 `matchItem`), 톤은 소수 3자리, 날짜·시각은 **오늘(Asia/Seoul)부터 1년 안**만. 못 맞춘 칸은 비워 두고 카드의 `issues`(확인 필요)로 알린다. 일정은 참석자를 말하지 않으면 본인 일정, 끝 시각이 없으면 시작 + 1시간(`endAssumed`). 구매요청은 구매요청 등록 권한이 없으면 카드를 만들지 않고 이유를 모델에 돌려준다.
+- 카드는 **서버에 저장하지 않는다**(대화 비저장과 같음). 화면이 카드 값을 들고 있고, 사용자가 칸을 고친 뒤 **[실행]**을 누르면 `POST ai-assistant/action-cards/execute`로 그 값을 보낸다. 서버는 회의록 후보 고치기와 같은 규칙(`applyCandidateEdit`, 기준일만 회의일 대신 오늘)으로 다시 검증하고, 필수 칸(`missingFieldsOf`: 업무 담당자·마감일 / 일정 시작·끝·참석자 / 구매요청 원료·수량·희망 입고일)이 비면 `ACT-001`, 담당자·참석자·원료가 그 사이 사라졌으면 `COM-003`/`COM-004`로 거절한다.
+- 실행은 한 트랜잭션이다: 업무 → `TaskService.createInTx`(등록자 = 사용자, 담당자 알림, 링크 `/tasks`), 일정 → `schedule_event`+참석자(등록자 = 사용자, 본인을 뺀 참석자에게 `SCHEDULE_EVENT_ASSIGNED`), 구매요청 → `MessageActionService.createFromAssistant`: 메시지·회의록 없는 `action_draft`(요청자 = 사용자)를 `WAITING_APPROVAL`로 만들고 `DRAFT_CREATED`를 **AI 경유**(`is_ai_assisted`)로 남긴다. 이후는 기존 초안 흐름(확정 → 구매요청 → 부서장 승인)이라 **구매요청은 카드에서 바로 만들어지지 않는다**(REQ-AST-010).
+- 🟡 업무·일정은 작업 로그 이벤트 코드가 공통 코드 정의서에 없어 `business_event`를 남기지 않는다(`task.service.ts`와 같음). "AI 실행 카드 확정" 이벤트(REQ-LOG-002)가 정의서에 생기면 더한다. 같은 카드를 두 번 보내는 것은 서버가 막지 않는다(카드가 저장되지 않음): 화면이 실행한 카드는 "실행됨"으로 잠근다.
+**운영 카드 4종 (2026-10-16)** — `ai-ops-card.service.ts`. 위 업무·일정·구매요청과 달리 새 규칙을 만들지 않고 각 모듈의 확정 기능을 그대로 부른다. 도구는 종류마다 따로 둔다(`propose_sales_order`, `propose_hot_rolling_allocation`, `propose_heat_plan_confirmation`, `propose_past_case`). 제안은 조회만 하고, 실행 권한은 같은 API의 `@RequirePermission(…, 'USE')`를 서비스에서 같은 기준으로 확인한다(제안할 때는 모델에 이유를 돌려주고, 실행할 때는 `COM-002`).
+
+| 카드 | 제안(조회) | 실행(기존 기능) | 권한 USE |
+| --- | --- | --- | --- |
+| `SALES_ORDER` 수주 등록 | 고객사·규격 이름을 id로 맞춤(정확히 같은 것 → 부분 일치가 하나뿐인 것), 매수는 정수, 납기는 오늘부터 1년 안 | `SalesOrderService.create`: 예약·부족분 생산계획·`SALES_ORDER_CREATED`까지 수주 등록과 같음(매수 `SO-002`) | 수주 등록 |
+| `HOT_ROLLING` 열연 배정 | 생산계획 번호 → `HotRollingService.detail`의 FIFO 추천 슬래브(`recommend`는 작업 로그를 남기므로 부르지 않음). 열연 불가·더 배정할 것 없음·가용 재고 없음이면 카드 없음 | `HotRollingService.confirm`(추천 슬래브 그대로) | 열연 투입 배정 |
+| `HEAT_PLAN` 히트 편성 확정 | `getPlanDetail`+`previewHeatPlan`: 현재 히트 수 → 다시 계산한 히트 수. 작업을 시작한 계획이면 카드 없음 | `ProductionService.confirmHeatPlan`(`HEAT_PLAN_CONFIRMED`) | 생산계획 확정 |
+| `PAST_CASE` 과거 사례 | LOT 번호 → `PastCaseService.createDraft`(불합격 LOT만, AI 실패해도 검사 결과로 채움) | `PastCaseService.create`(사용자가 고친 값, 원인·조치는 비어도 됨) | 불합격 처리(DISPOSITION_SET) |
+
+- 수주 등록·열연 배정·히트 편성은 재고·생산 영향이 커서 화면이 [실행] 뒤 확인창을 한 번 더 보인다(`needsConfirmation`). 열연 배정·히트 편성 카드는 고칠 칸이 없다(닫거나 실행).
+- **AI 경유 표시(REQ-AST-010)**: 수주 등록·열연 배정·히트 편성은 실행하는 동안 `runAsAiAssisted`(`common/business-event/ai-assisted.context.ts`, AsyncLocalStorage)로 감싸서, 그 거래에서 `businessEventRecorder.record`가 남기는 작업 로그가 모두 `is_ai_assisted = true`가 된다(수주 등록이 만드는 예약·생산계획 로그 포함). 기록할 때 `isAiAssisted`를 명시한 호출은 그 값을 따르고, 범위 밖의 요청에는 번지지 않는다. 과거 사례 등록은 지금 작업 로그 이벤트가 없어 표시할 로그가 없다. `HotRollingService`를 `ProductionModule`의 exports에 더했다.
+- 카드 요청(`ExecuteAiActionCardDto`)은 종류별 칸을 한 클래스에 선택으로 받고, 종류마다 필수 칸이 있는지는 service가 `ACT-001`로 본다.
+- **요청 예시 칩**: `GET ai-assistant/suggested-questions` 응답에 `actionCardExamples[]`(`kind`, `label`, `text`)가 더해졌다(`action-card-examples.ts`, 문구는 🟡 가정값). 실행할 때 확인하는 USE 권한이 있는 종류만 내려가고(업무·일정은 전 역할), 화면은 패널을 열었을 때 "실행 카드로 요청하기"로 보인다. 누르면 보내지 않고 입력칸에 채워 사용자가 ○○를 채워 보낸다.
+- 화면: `client/src/features/shell/AiActionCards.tsx`가 회의록 후보 카드(`MeetingAnalysisPanel`)와 같은 칸·편집기(`CandidateEditor`)로 그린다. 카드 값은 `useAiChatStore`(탭 메모리)에 있고 수정·닫기·실행됨 상태를 갖는다.
+
 **안전 규칙(REQ-AST-009)** — 시스템 지시로 넣는다(`assistant.prompt.ts`)
 - 용어·절차는 참고 자료(찾은 용어)만 근거로 하고, 쓴 문장 끝에 `[TRM-056]`을 붙인다.
 - 모든 문장을 해요체로 답한다. 지시문을 반말로 쓰면 작은 모델이 답에 반말을 섞어서 지시문도 해요체로 쓴다.
@@ -144,7 +167,9 @@
 
 도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다.
 
-작업 로그: 남기지 않는다. 질문·답·조회는 업무 데이터 변경이 아니고 REQ-LOG-002 대상 이벤트에 없다. 실행 카드 확정(AST-010)은 다음 단계에서 `is_ai_assisted`로 남긴다.
+작업 로그: 질문·답·조회는 남기지 않는다(업무 데이터 변경이 아니고 REQ-LOG-002 대상 이벤트에 없다). 실행 카드는 구매요청 초안 생성만 `DRAFT_CREATED`(AI 경유)로 남긴다(위 "실행 카드").
+
+실행 카드 오류: `ACT-001`(필수 칸 비었음), `COM-004`(값 범위·형식·종류에 없는 칸), `COM-003`(사원 없음·퇴사), `COM-002`(구매요청 등록 권한 없음 등).
 
 ## 6. 다른 모듈과의 경계
 
@@ -152,6 +177,7 @@
 | --- | --- |
 | llm | `LlmSettingsStore.read()`(주소·모델·API 키), `LlmClient.chatWithTools()`(이 단계에서 추가: 도구 정의·호출·결과 메시지). 기존 `chat()`은 그대로 |
 | inventory·sales-order·production·purchasing·shipment | 이미 export된 service를 쓴다 |
+| notification·message-action·meeting-minutes | 실행 카드: `TaskService.createInTx`, `NotificationService.notifyEmployees`, `MessageActionService.createFromAssistant`(`createFromMeeting`과 같은 `createAiDraft`), 회의록의 `applyCandidateEdit`·`matchEmployee`·`matchItem` 규칙을 쓴다. 일정 알림 문구는 `schedule-event/schedule-notice.ts`로 옮겨 회의록과 같이 쓴다 |
 | lot·business-event·quality | `exports`에 `LotService`·`BusinessEventService`·`QualityService`·`RejectedLotService`를 더했다(모듈 동작은 그대로) |
 
 **기능별 LLM 설정 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `LLM_PROFILE`. 기능마다 샘플링 값과 생각 정도를 정해 요청마다 실어 보낸다. 값이 요청 시점에 들어가므로 LM Studio에서 모델을 다시 불러올 필요가 없다.
@@ -181,6 +207,8 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
 - `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
+- `ai-action-card.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 카드 제안(이름·원료 맞추기, 지난 날짜·못 찾은 이름 사유, 본인 일정·끝 시각 가정, 구매요청 권한) · 실행(필수 칸·퇴사 담당자·알림 대상·초안 생성·다른 종류 칸 거절). `ai-ops-card.unit.spec.ts`(DB 없음)·`ai-ops-card.spec.ts`(DB): 운영 카드 4종의 제안(이름 맞추기·거절 이유)·실행(권한·필수 칸·기존 service 호출), 수주 등록은 실제 DB로 수주·품목·작업 로그 확인. `ai-action-card.spec.ts`(DB): 업무·일정·구매요청을 실제 DB로(업무·일정·초안 행, 알림, AI 경유 작업 로그, 권한 없는 역할). `ai-assistant.spec.ts`: 카드를 요청한 화면에만 도구·규칙·카드가 가고, 요청하지 않으면 없다.
+
 실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 
 ## 8. 확인 필요 🟡
@@ -193,5 +221,6 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 추천 질문 내용 | 디자인 단계 예시 그대로 | [02] REQ-AST-008 "구현 단계에서 확정" |
 | 질문 길이·대화 수 상한 | 1000자·20개(서버 사용 10개) | 문서에 없음(가정값) |
 | 도구 결과 상한 | 목록 15줄·8000자·도구 호출 4번 | 문서에 없음(가정값, 작은 로컬 모델 기준) |
-| 도구 수 | 14개(과거 사례 포함)를 한 번에 모델에 알린다. 작은 모델이 도구를 잘못 고르면 질문 종류로 미리 좁히는 방식을 검토 | 실제 모델 확인 결과 |
+| 실행 카드 | 업무·일정·구매요청(회의록 후보와 같은 규칙) + 수주 등록·열연 배정·히트 편성·과거 사례(기존 확정 기능 그대로). "사례 초안"은 PastCaseService의 사례 초안을 카드로 보여 등록하는 것으로 해석했다. 사내 채팅 @AI는 카드 없음. 카드 5장 상한·날짜 범위(오늘부터 1년)·수주 품목 10줄은 가정값. 출고 확정·승인·취소 등은 카드로 만들지 않음 | [02] REQ-AST-005, 회의록 등록과 같은 규칙 |
+| 도구 수 | 14개(과거 사례 포함)를 한 번에 모델에 알린다(실행 카드 도구는 패널 요청에만 더한다). 작은 모델이 도구를 잘못 고르면 질문 종류로 미리 좁히는 방식을 검토 | 실제 모델 확인 결과 |
 | 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

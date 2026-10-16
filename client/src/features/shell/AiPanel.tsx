@@ -1,7 +1,7 @@
 'use client';
 
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
-// 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 실행 카드(AST-005)는 다음 단계라 준비 중으로 둔다.
+// 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
 import { usePathname } from 'next/navigation';
@@ -12,6 +12,7 @@ import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
 import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { routeTitleOf } from '@/features/shell/routeTitles';
+import { AiActionCards } from '@/features/shell/AiActionCards';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useMe } from '@/hooks/useMe';
@@ -64,6 +65,7 @@ export function AiPanel() {
   const [oneShot, setOneShot] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const roleLabel = ROLE_LABEL[me.roleCode];
   const screenTitle = routeTitleOf(pathname).title || '대시보드';
   const pending = pendingId !== null;
@@ -120,6 +122,12 @@ export function AiPanel() {
     }
   };
 
+  // 실행 카드 요청 예시는 바로 보내지 않고 입력칸에 채워, 사용자가 ○○를 채우고 고쳐서 보낸다
+  const fill = (text: string) => {
+    setDraft(text);
+    inputRef.current?.focus();
+  };
+
   // 다시 물을 때는 처음 보냈던 생각 정도로 묻는다 (고른 값은 건드리지 않는다)
   const retry = (failureId: string, question: string, failedReasoning: AiReasoningLevel | undefined) => {
     removeFailure(failureId);
@@ -153,7 +161,7 @@ export function AiPanel() {
 
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         <div className={`mx-auto flex flex-col gap-3.5 p-4 ${expanded ? 'max-w-[880px]' : ''}`}>
-          {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={send} />}
+          {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={send} onFill={fill} />}
           {entries.map((entry) => (
             <ChatEntry key={entry.id} entry={entry} disabled={pending} onRetry={retry} />
           ))}
@@ -172,6 +180,7 @@ export function AiPanel() {
         </span>
         <div className="flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
           <textarea
+            ref={inputRef}
             rows={2}
             value={draft}
             maxLength={MAX_QUESTION_LENGTH}
@@ -202,21 +211,36 @@ export function AiPanel() {
   );
 }
 
-function Welcome({ roleLabel, contextQuestion, disabled, onAsk }: { roleLabel: string; contextQuestion: string | null; disabled: boolean; onAsk: (question: string) => void }) {
+function Welcome({ roleLabel, contextQuestion, disabled, onAsk, onFill }: { roleLabel: string; contextQuestion: string | null; disabled: boolean; onAsk: (question: string) => void; onFill: (text: string) => void }) {
   const suggested = useAiSuggestedQuestions();
   const roleQuestions = suggested.data?.roleQuestions ?? [];
   const firstTimeQuestions = suggested.data?.firstTimeQuestions ?? [];
+  const cardExamples = suggested.data?.actionCardExamples ?? [];
 
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. 실행 카드는 준비 중이에요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 부탁하면 실행 카드로 만들어 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
       </p>
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
         <>
           <b className="mt-1 text-xs font-semibold">추천 질문 · {roleLabel}</b>
           <QuestionChips questions={[...(contextQuestion ? [contextQuestion] : []), ...roleQuestions]} disabled={disabled} onAsk={onAsk} />
+        </>
+      ) : null}
+      {cardExamples.length ? (
+        <>
+          <b className="mt-1.5 text-xs font-semibold">실행 카드로 요청하기</b>
+          <span className="text-cap text-ink-3">누르면 입력칸에 채워져요. 고쳐서 보내면 카드로 만들어 줘요 (실행은 카드에서 직접 눌러요)</span>
+          <div className="flex flex-wrap gap-1.5">
+            {cardExamples.map((example) => (
+              <button key={example.kind} type="button" disabled={disabled} title={example.text} className={QUESTION_CHIP} onClick={() => onFill(example.text)}>
+                <Icon name="edit" size="sm" />
+                {example.label}
+              </button>
+            ))}
+          </div>
         </>
       ) : null}
       {firstTimeQuestions.length ? (
@@ -302,6 +326,7 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
       <SteelmanAiMark framed />
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
         <p className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{entry.content}</p>
+        {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} /> : null}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
           <span className="font-semibold text-ink-2">출처</span>
           {entry.sources.length ? (

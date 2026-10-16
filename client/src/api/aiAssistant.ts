@@ -1,5 +1,12 @@
 // AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
-import type { AiAssistantMessageInput, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
+import type {
+  AiActionCardExecuteInput,
+  AiActionCardExecuteResult,
+  AiAssistantMessageInput,
+  AiAssistantReplyView,
+  AiAssistantStreamEvent,
+  AiAssistantSuggestedQuestionsView,
+} from '@fantasteel/shared';
 import { serverRequest, serverStream } from '@/api/http';
 
 export const aiAssistantKeys = {
@@ -27,6 +34,8 @@ export function parseAiAssistantStreamEvent(line: string): AiAssistantStreamEven
 
 export const aiAssistantApi = {
   ask: (input: AiAssistantMessageInput): Promise<AiAssistantReplyView> => serverRequest('POST', '/ai-assistant/messages', { body: input }),
+  /** 실행 카드의 [실행]. 사용자가 확인·수정한 값을 보내면 서버가 다시 검증해 업무·일정·구매요청 초안을 만든다 */
+  executeActionCard: (input: AiActionCardExecuteInput): Promise<AiActionCardExecuteResult> => serverRequest('POST', '/ai-assistant/action-cards/execute', { body: input }),
   /** 답을 만드는 과정을 이벤트로 받는다. 마지막 이벤트는 done 또는 error. signal로 멈추면 AbortError가 던져진다 */
   askStream: (input: AiAssistantMessageInput, onEvent: (event: AiAssistantStreamEvent) => void, signal?: AbortSignal): Promise<void> =>
     serverStream('POST', '/ai-assistant/messages/stream', {

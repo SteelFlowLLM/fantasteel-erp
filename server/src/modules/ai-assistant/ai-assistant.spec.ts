@@ -6,6 +6,8 @@ import { LlmRequestError } from '../llm/llm.client';
 import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
 import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
+import type { AiActionCardService } from './ai-action-card.service';
+import type { AiOpsCardService } from './ai-ops-card.service';
 import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
@@ -67,6 +69,7 @@ describe('답 정리와 출처 (REQ-AST-009)', () => {
   it('추론 모델의 <think> 부분은 보이지 않고, 답이 비면 다시 물어 달라고 한다', () => {
     expect(parseAssistantAnswer('<think>음…</think>\n예약은 매수 단위예요 (TRM-056)', [RESERVATION]).answer).toBe('예약은 매수 단위예요');
     expect(parseAssistantAnswer('<think>끝나지 않은 생각', [RESERVATION]).answer).toBe(EMPTY_ANSWER);
+    expect(parseAssistantAnswer('<|channel>thought\n<channel|>예약은 매수 단위예요 (TRM-056)', [RESERVATION]).answer).toBe('예약은 매수 단위예요');
   });
 });
 
@@ -126,6 +129,7 @@ describe('AiAssistantService', () => {
     permissions: {},
   };
   const TOOL: LlmToolDefinition = { name: 'get_inventory', description: '재고', parameters: { type: 'object' } };
+  const CARD_TOOL: LlmToolDefinition = { name: 'propose_action_card', description: '카드', parameters: { type: 'object' } };
   const answer = (content: string): LlmToolReply => ({ content, toolCalls: [] });
   const callTool = (id: string): LlmToolReply => ({ content: '', toolCalls: [{ id, name: 'get_inventory', arguments: '{"keyword":"SS275"}' }] });
 
@@ -161,15 +165,19 @@ describe('AiAssistantService', () => {
       },
     } as unknown as LlmClient;
     const runs: string[] = [];
+    const definitionOptions: unknown[] = [];
     const meetingMinutes = {} as unknown as MeetingMinutesService;
     const toolbox = {
-      definitions: () => [TOOL],
+      definitions: (options?: { actionCards?: boolean }) => {
+        definitionOptions.push(options);
+        return options?.actionCards ? [TOOL, CARD_TOOL] : [TOOL];
+      },
       run: async (_user: AuthUser, call: { name: string; arguments: string }) => {
         runs.push(`${call.name} ${call.arguments}`);
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes), calls, runs };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService), calls, runs, definitionOptions };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -203,6 +211,61 @@ describe('AiAssistantService', () => {
     expect(reply.answer).toBe('예약은 매수를 확보하는 거예요.');
     expect(reply.thinking).toBe('재고를 볼 필요는 없겠다');
     expect(reply.toolCalls).toEqual([]);
+  });
+
+  it('실행 카드를 요청한 화면에는 카드 도구와 규칙을 주고, 도구가 만든 카드를 키를 붙여 답에 담는다 (REQ-AST-005)', async () => {
+    const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 7, assigneeName: '박서영', dueDate: '2026-10-20', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    const { service, calls, definitionOptions } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.')), {
+      content: '{"결과":"실행 카드를 화면에 만들었어요"}',
+      source: null,
+      cards: [card, { ...card, title: '일정 잡기' }],
+    });
+    const reply = await service.ask(user, { question: '견적서 보내기 업무 등록해줘', actionCards: true });
+    expect(definitionOptions[0]).toEqual({ actionCards: true });
+    expect(calls[0].messages[0].content).toContain('[실행 카드 규칙]');
+    expect(reply.actionCards.map((c) => [c.key, c.title])).toEqual([['a1', '견적서 보내기'], ['a2', '일정 잡기']]);
+    expect(reply.sources.filter((s) => s.kind === 'DATA')).toEqual([]);
+  });
+
+  it('모델이 카드 도구를 부르지 않고 만들었다고만 하면 카드 도구만 주고 한 번 다시 시킨다', async () => {
+    const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 1, assigneeName: '나', dueDate: '2026-10-23', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    const { service, calls } = setup(
+      {},
+      async (_call, index) => {
+        if (index === 0) return answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.');
+        if (index === 1) return { content: '', toolCalls: [{ id: 'c1', name: 'propose_action_card', arguments: '{"kind":"TASK","title":"견적서 보내기"}' }] };
+        return answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.');
+      },
+      { content: '{}', source: null, cards: [card] },
+    );
+    const reply = await service.ask(user, { question: '견적서 보내기 업무 등록해줘', actionCards: true });
+    expect(calls[1].tools.map((t) => t.name)).toEqual(['propose_action_card']);
+    expect(calls[1].messages.at(-1)?.content).toContain('propose_ 도구');
+    expect(reply.actionCards.map((c) => c.key)).toEqual(['a1']);
+    expect(reply.answer).toContain('카드를 만들었어요');
+  });
+
+  it('다시 시켜도 카드가 없는데 만들었다고 하면 만들지 못했다고 바로잡는다', async () => {
+    const { service } = setup({}, async () => answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.'));
+    const reply = await service.ask(user, { question: '견적서 보내기 업무 등록해줘', actionCards: true });
+    expect(reply.actionCards).toEqual([]);
+    expect(reply.answer).toContain('카드를 만들지 못했어요');
+  });
+
+  it('카드를 요청하지 않은 질문은 "카드를 만들었다"는 말이 있어도 다시 시키거나 고치지 않는다', async () => {
+    const { service, calls } = setup({}, async () => answer('카드를 만들었다고 말씀하셨네요.'));
+    const reply = await service.ask(user, { question: '카드 얘기 알려줘' });
+    expect(calls).toHaveLength(1);
+    expect(reply.answer).toBe('카드를 만들었다고 말씀하셨네요.');
+  });
+
+  it('카드를 요청하지 않은 질문(사내 채팅 @AI·회의 질문)에는 카드 규칙도 카드도 없다', async () => {
+    const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: null, assigneeName: null, dueDate: null, startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    const { service, calls, definitionOptions } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('등록할 수 없어요.')), { content: '{}', source: null, cards: [card] });
+    const reply = await service.ask(user, { question: '업무 등록해줘' });
+    expect(definitionOptions[0]).toEqual({ actionCards: undefined });
+    expect(calls[0].messages[0].content).not.toContain('[실행 카드 규칙]');
+    expect(reply.actionCards).toEqual([]);
   });
 
   it('조회에 실패한 도구(권한 없음 등)는 출처로 남기지 않는다', async () => {
@@ -283,6 +346,22 @@ describe('AiAssistantService', () => {
       expect(ends.every((e) => e.label === null)).toBe(true);
     });
 
+    it('실시간으로 물어도 카드를 만들었다고만 하면 카드 도구로 다시 시키고, 만든 카드는 reply에 담는다 (REQ-AST-005)', async () => {
+      const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 7, assigneeName: '박서영', dueDate: '2026-10-20', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+      const replies = [answer('카드를 만들었어요.'), { content: '', toolCalls: [{ id: 'c1', name: 'propose_action_card', arguments: '{}' }] }, answer('카드를 확인하고 실행을 눌러 주세요.')];
+      const { service, calls } = setup({}, async (_call, index) => replies[index]!, { content: '{"결과":"카드를 만들었어요"}', source: null, cards: [card] });
+      const { events, reply } = await collect(service, { question: '견적서 보내기 업무 등록해줘', actionCards: true });
+
+      expect(calls.map((c) => [c.streamed, c.tools.map((t) => t.name)])).toEqual([
+        [true, ['get_inventory', 'propose_action_card']],
+        [true, ['propose_action_card']],
+        [true, ['get_inventory', 'propose_action_card']],
+      ]);
+      expect(events.some((e) => e.type === 'tool_start' && e.name === 'propose_action_card')).toBe(true);
+      expect(reply.actionCards.map((c) => [c.key, c.title])).toEqual([['a1', '견적서 보내기']]);
+      expect(reply.answer).toBe('카드를 확인하고 실행을 눌러 주세요.');
+    });
+
     it('emit이 없으면 chatWithTools로 한 번에 답한다', async () => {
       const { service, calls } = setup({}, async () => answer('네'));
       await service.ask(user, { question: '예약이 뭐야?' });
@@ -341,6 +420,14 @@ describe('AiAssistantService', () => {
     expect(view.roleCode).toBe('QUALITY');
     expect(view.roleQuestions).toContain('비슷한 사례 찾아줘');
     expect(view.firstTimeQuestions).toContain('예약과 배정은 뭐가 달라?');
+  });
+
+  it('실행 카드 요청 예시는 실행 권한(USE)이 있는 종류만 보인다', () => {
+    const { service } = setup({}, async () => answer(''));
+    const kindsOf = (permissions: AuthUser['permissions']) => service.suggestedQuestions({ ...user, permissions }).actionCardExamples.map((e) => e.kind);
+    expect(kindsOf({})).toEqual(['TASK', 'EVENT']);
+    expect(kindsOf({ SALES_ORDER_CREATE: 'USE', PRODUCTION_PLAN_CONFIRM: 'VIEW' })).toEqual(['TASK', 'EVENT', 'SALES_ORDER']);
+    expect(kindsOf({ PURCHASE_REQUISITION_CREATE: 'USE', HOT_ROLLING_ALLOCATE: 'USE', PRODUCTION_PLAN_CONFIRM: 'USE', DISPOSITION_SET: 'USE' })).toEqual(['TASK', 'EVENT', 'PURCHASE', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE']);
   });
 });
 

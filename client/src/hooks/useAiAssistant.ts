@@ -34,7 +34,7 @@ export interface AiAskVariables {
   reasoning?: AiReasoningLevel;
 }
 
-/** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다 */
+/** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
 export async function runAiAsk({ questionId, question, screen, history, reasoning }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
@@ -46,7 +46,8 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   });
   try {
     await aiAssistantApi.askStream(
-      { question, screen, history, ...(reasoning ? { reasoning } : {}) },
+      // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
+      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}) },
       (event) => {
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);

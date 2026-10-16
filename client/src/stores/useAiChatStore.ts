@@ -1,10 +1,31 @@
 // AI 어시스턴트 대화. 대화 기록은 서버에 저장하지 않으므로(저장 여부 미결정, 요구사항 21장) 이 탭 메모리에만 둔다.
 // 패널을 닫았다 열어도 남고, 새로고침하거나 다른 사원으로 들어오면 사라진다.
-import type { AiAssistantReplyView, AiAssistantSource, AiAssistantStreamEvent, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
+import type {
+  AiActionCard,
+  AiActionCardExecuteResult,
+  AiAssistantReplyView,
+  AiAssistantSource,
+  AiAssistantStreamEvent,
+  AiAssistantTurn,
+  AiReasoningLevel,
+} from '@fantasteel/shared';
 import { create } from 'zustand';
 
 /** 서버로 함께 보내는 지난 대화 수. 서버도 최근 10개만 쓴다 */
 export const AI_CHAT_HISTORY_LIMIT = 10;
+
+/**
+ * 답에 붙은 실행 카드 한 장 (REQ-AST-005). 카드는 서버에 저장하지 않아 이 탭 메모리에만 있다.
+ * card는 사용자가 고친 값을 담고, done이면 result가 만든 업무다. dismissed는 사용자가 닫은 카드.
+ */
+export interface AiChatCard {
+  card: AiActionCard;
+  status: 'ready' | 'dismissed' | 'done';
+  result?: AiActionCardExecuteResult['registered'];
+}
+
+const readyCards = (cards: readonly AiActionCard[]): { cards?: AiChatCard[] } =>
+  cards.length ? { cards: cards.map((card): AiChatCard => ({ card, status: 'ready' })) } : {};
 
 /** 답을 만드는 과정의 한 단계. 일어난 순서대로 쌓는다 */
 export type AiTimelineStep =
@@ -32,8 +53,8 @@ export interface AiChatLive {
 
 export type AiChatEntry =
   | { id: string; role: 'user'; content: string }
-  /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다) */
-  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean }
+  /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드 */
+  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[] }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
   | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel };
 
@@ -105,6 +126,7 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
     sources: reply.sources,
     steps: liveSteps.length ? liveSteps : stepsFromReply(reply),
     ...(live.reasoning ? { requestedReasoning: live.reasoning, reasoningApplied: reply.reasoningApplied } : {}),
+    ...readyCards(reply.actionCards),
   };
 }
 
@@ -119,7 +141,9 @@ interface AiChatState {
   claim: (employeeId: number) => void;
   /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다) */
   addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel) => void;
-  addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[]) => void;
+  addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
+  /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
+  updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
   addFailure: (questionId: string, question: string, reason: string) => void;
   /** 스트림 이벤트 하나를 반영한다. done은 답 줄을, error는 실패 줄을 더한다 */
   applyStreamEvent: (questionId: string, event: AiAssistantStreamEvent, now?: number) => void;
@@ -141,12 +165,20 @@ export const useAiChatStore = create<AiChatState>((set) => ({
   addQuestion: (id, question, reasoning) =>
     set((state) => ({ entries: [...state.entries, { id, role: 'user', content: question }], pendingId: id, live: emptyAiChatLive(reasoning ?? null) })),
   // 그사이 대화를 비웠거나 사원이 바뀌었으면 늦게 온 답은 버린다
-  addAnswer: (questionId, answer, sources) =>
+  addAnswer: (questionId, answer, sources, cards = []) =>
     set((state) =>
       state.pendingId === questionId
-        ? { entries: [...state.entries, { id: newAiChatId(), role: 'assistant', content: answer, sources }], pendingId: null, live: null }
+        ? { entries: [...state.entries, { id: newAiChatId(), role: 'assistant', content: answer, sources, ...readyCards(cards) }], pendingId: null, live: null }
         : state,
     ),
+  updateCard: (entryId, key, patch) =>
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.id === entryId && entry.role === 'assistant' && entry.cards
+          ? { ...entry, cards: entry.cards.map((item) => (item.card.key === key ? { ...item, ...patch } : item)) }
+          : entry,
+      ),
+    })),
   addFailure: (questionId, question, reason) =>
     set((state) =>
       state.pendingId === questionId

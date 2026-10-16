@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   ROLE_LABEL,
+  type AiActionCard,
+  type AiActionCardExecuteResult,
   type AiAssistantMessageInput,
   type AiAssistantReplyView,
   type AiAssistantStreamEvent,
@@ -15,7 +17,12 @@ import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEnd
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
+import { actionCardExamplesFor } from './action-card-examples';
+import { AiActionCardService } from './ai-action-card.service';
+import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
+import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
+import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
@@ -39,6 +46,10 @@ export const MAX_TOOL_ROUNDS = 4;
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
 const TRACE_THINKING_MAX = 8000;
+/** 한 답에 담는 실행 카드 수 상한. 카드가 늘면 사용자가 하나하나 확인하기 어렵다 (가정값) */
+export const MAX_ACTION_CARDS = 5;
+/** 회의록 후보와 같은 규칙으로 실행하는 카드 종류 */
+const WORK_KINDS: readonly string[] = ['TASK', 'EVENT', 'PURCHASE'];
 
 /**
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
@@ -54,13 +65,22 @@ export class AiAssistantService {
     private readonly llm: LlmClient,
     private readonly toolbox: AssistantToolbox,
     private readonly meetingMinutes: MeetingMinutesService,
+    private readonly cards: AiActionCardService,
+    private readonly opsCards: AiOpsCardService,
   ) {}
+
+  /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
+  executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 나머지는 각 모듈의 확정 기능을 그대로 부른다
+    return WORK_KINDS.includes(dto.kind) ? this.cards.execute(user, dto) : this.opsCards.execute(user, dto);
+  }
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
     return {
       roleCode: user.roleCode,
       roleQuestions: [...ROLE_SUGGESTED_QUESTIONS[user.roleCode]],
       firstTimeQuestions: [...FIRST_TIME_QUESTIONS],
+      actionCardExamples: actionCardExamplesFor(user),
     };
   }
 
@@ -104,6 +124,7 @@ export class AiAssistantService {
       references,
       processSteps,
       manualGuides,
+      actionCards: input.actionCards === true,
       history,
       question: input.question,
     });
@@ -115,12 +136,18 @@ export class AiAssistantService {
         const started = Date.now();
         const dataSources: AiAssistantSource[] = [];
         const toolCalls: AiAssistantToolTrace[] = [];
-        const tools = this.toolbox.definitions();
+        const actionCards: AiActionCard[] = [];
+        const tools = this.toolbox.definitions({ actionCards: input.actionCards });
         const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
           emit
             ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
             : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
         let reply = await call(tools);
+        // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
+        if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
+          messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
+          reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
+        }
         for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
           messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
           for (const toolCall of reply.toolCalls) {
@@ -134,11 +161,17 @@ export class AiAssistantService {
             emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs });
             messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
             if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
+            // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
+            for (const card of input.actionCards ? (result.cards ?? []) : []) {
+              if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+            }
           }
           reply = await call(round < MAX_TOOL_ROUNDS ? tools : []);
         }
 
         const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+        // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
+        if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
         const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
         return {
           answer: parsed.answer,
@@ -148,6 +181,7 @@ export class AiAssistantService {
           toolCalls,
           thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
           reasoningApplied: reply.reasoningApplied ?? true,
+          actionCards,
         };
       },
     };
@@ -161,5 +195,11 @@ export class AiAssistantService {
     return previousQuestion ? searchGlossary(previousQuestion.content) : [];
   }
 }
+
+/** 답이 "카드를 만들었다"고 말하는지 */
+export const claimsCardMade = (text: string): boolean => /카드(를|가)?\s*(만들었|만들어\s*(두|드렸|놓)|만들어졌|준비했|생성했)/.test(text);
+
+const CARD_TOOL_NUDGE = '방금 답은 카드를 만들었다고 했지만 도구를 부르지 않았어요. 카드는 propose_ 도구를 불러야 화면에 생겨요. 요청에 맞는 propose_ 도구를 지금 불러요. 카드로 만들 수 없는 요청이면 카드를 만들었다고 하지 말고 이유를 말해요.';
+const CARD_NOT_MADE = '카드를 만들지 못했어요. 요청을 조금 더 구체적으로 다시 말해 주세요. 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 카드로 만들 수 있어요.';
 
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);

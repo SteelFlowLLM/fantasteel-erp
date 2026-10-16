@@ -7,7 +7,7 @@ import { useAiChatStore } from '@/stores/useAiChatStore';
 
 const store = () => useAiChatStore.getState();
 const SCREEN = { path: '/', title: '대시보드', label: null };
-const DONE: AiAssistantStreamEvent = { type: 'done', reply: { answer: '최종 답', sources: [], model: 'm', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: false } };
+const DONE: AiAssistantStreamEvent = { type: 'done', reply: { answer: '최종 답', sources: [], model: 'm', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: false, actionCards: [] } };
 
 beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null }));
 afterEach(() => vi.restoreAllMocks());
@@ -25,7 +25,8 @@ describe('runAiAsk', () => {
       onEvent(DONE);
     });
     await ask('high');
-    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', reasoning: 'high' });
+    // 철강맨AI 패널의 질문이라 실행 카드도 함께 달라고 한다
+    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', reasoning: 'high', actionCards: true });
     expect(store().pendingId).toBeNull();
     expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', content: '최종 답', requestedReasoning: 'high', reasoningApplied: false });
 

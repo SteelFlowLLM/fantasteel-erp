@@ -25,6 +25,8 @@ import type { QualityService } from '../../quality/quality.service';
 import type { RejectedLotService } from '../../quality/rejected-lot.service';
 import type { SalesOrderService } from '../../sales-order/sales-order.service';
 import type { ShipmentService } from '../../shipment/shipment.service';
+import type { AiActionCardService } from '../ai-action-card.service';
+import type { AiOpsCardService } from '../ai-ops-card.service';
 import type { AiAssistantRepository } from '../ai-assistant.repository';
 import { daysUntil, ToolArgumentError } from './assistant-tool';
 import { AssistantToolbox, MAX_TOOL_RESULT_LENGTH } from './assistant-toolbox';
@@ -256,6 +258,8 @@ describe('도구 모음 (권한·실패 처리)', () => {
     {} as PurchasingService,
     {} as ShipmentService,
     { search: async (input: PastCaseSearchInput) => searchPastCases(PAST_CASE_EXAMPLES, input, '2026-10-16') } as unknown as PastCaseService,
+    {} as AiActionCardService,
+    {} as AiOpsCardService,
   );
   const run = (name: string, args: string, permissions: AuthUser['permissions'] = {}) => toolbox.run(user(permissions), { id: 'c1', name, arguments: args });
 
