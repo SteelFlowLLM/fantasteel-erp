@@ -49,6 +49,55 @@ describe('AI 대화 저장소', () => {
   });
 });
 
+const PHOTO = { mediaType: 'image/jpeg' as const, dataBase64: 'QUJD' };
+
+describe('질문에 붙인 사진', () => {
+  it('질문 줄에 사진을 남기고, 사진이 없으면 필드를 만들지 않는다', () => {
+    store().addQuestion('q1', '이 화면이 뭐야?', undefined, [PHOTO]);
+    store().addAnswer('q1', '수주 화면이에요', []);
+    store().addQuestion('q2', '예약이 뭐야?');
+    expect(store().entries[0]).toEqual({ id: 'q1', role: 'user', content: '이 화면이 뭐야?', images: [PHOTO] });
+    expect(store().entries[2]).not.toHaveProperty('images');
+  });
+
+  it('지난 대화에는 사진이 들어가지 않는다 (글만)', () => {
+    store().addQuestion('q1', '이 화면이 뭐야?', undefined, [PHOTO]);
+    store().addAnswer('q1', '수주 화면이에요', []);
+    expect(aiChatHistory(store().entries)).toEqual([
+      { role: 'user', content: '이 화면이 뭐야?' },
+      { role: 'assistant', content: '수주 화면이에요' },
+    ]);
+    expect(JSON.stringify(aiChatHistory(store().entries))).not.toContain(PHOTO.dataBase64);
+  });
+
+  it('실패 줄이 사진을 들고 있어 다시 물을 때 같은 사진을 쓴다 (addFailure·error 이벤트 모두)', () => {
+    store().addQuestion('q1', '이 화면이 뭐야?', 'low', [PHOTO]);
+    store().addFailure('q1', '이 화면이 뭐야?', '응답이 없어요');
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', question: '이 화면이 뭐야?', reasoning: 'low', images: [PHOTO] });
+
+    store().clear();
+    store().addQuestion('q2', '이 화면이 뭐야?', undefined, [PHOTO]);
+    store().applyStreamEvent('q2', { type: 'error', message: '모델이 사진을 볼 수 없어요' });
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', content: '모델이 사진을 볼 수 없어요', images: [PHOTO] });
+  });
+
+  it('사진 없는 질문의 실패 줄에는 사진 필드가 없다', () => {
+    store().addQuestion('q1', '예약이 뭐야?');
+    store().addFailure('q1', '예약이 뭐야?', '응답이 없어요');
+    expect(store().entries.at(-1)).not.toHaveProperty('images');
+  });
+
+  it('다시 물으면 실패 줄과 사진 달린 질문을 지우고 같은 사진으로 새 질문을 넣는다', () => {
+    store().addQuestion('q1', '이 화면이 뭐야?', undefined, [PHOTO]);
+    store().addFailure('q1', '이 화면이 뭐야?', '응답이 없어요');
+    const failure = store().entries.at(-1);
+    if (failure?.role !== 'failure') throw new Error('실패 줄이 없어요');
+    store().removeFailure(failure.id);
+    store().addQuestion('q2', failure.question, failure.reasoning, failure.images);
+    expect(store().entries).toEqual([{ id: 'q2', role: 'user', content: '이 화면이 뭐야?', images: [PHOTO] }]);
+  });
+});
+
 describe('서버로 보낼 지난 대화', () => {
   it('답을 받은 질문과 답만 보내고, 실패한 질문은 빼며, 최근 것만 남긴다', () => {
     const entries: AiChatEntry[] = [

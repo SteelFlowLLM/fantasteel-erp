@@ -26,6 +26,7 @@
 | --- | --- | --- | --- | --- |
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
+| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null` |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 
 요청 `POST ai-assistant/messages`:
@@ -36,6 +37,7 @@
 | `screen` | 선택. `{ path, title, label }` — 보고 있는 화면 주소(쿼리 포함)·제목·위젯 맥락(REQ-AST-007) |
 | `meetingMinutesId` | 선택, 1 이상 정수. 회의록 상세의 "이 회의에 대해 묻기"가 보낸다(아래 '회의 질문'). 없는 회의록이면 `VOC-001`(404)이고 LLM을 부르지 않는다 |
 | `history` | 선택. `{ role: 'user'\|'assistant', content }[]` 20개까지. 서버는 최근 10개, 한 줄 2000자까지만 쓴다 |
+| `images` | 선택. `{ mediaType: image/png·jpeg·webp, dataBase64 }[]`, 최대 4장·한 장 2MB(base64를 푼 크기). 마지막 질문 메시지에만 `image_url`(data URL)로 실린다. 모델이 사진을 못 본다고 LM Studio가 알리면(`vision: false`) LLM을 부르기 전에 400 COM-004. 모르면 보낸다. 지난 대화에는 남지 않는다. 사진 때문에 JSON 본문 한도를 12mb로 올렸다(`main.ts`). 문서에 없는 기능, 2026-10-16 추가 |
 | `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
 
 `sources[]`: `{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }` 또는 `{ kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' }`(업무 순서·흐름 답) 또는 `{ kind: 'MANUAL', id: 'MAN-SO-01', label: '수주 등록' }`(화면 절차 답) 또는 `{ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' }`. 조회 데이터가 앞에 오고, 업무 매뉴얼·업무 프로세스가 용어 사전보다 앞에 온다.
@@ -193,5 +195,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 추천 질문 내용 | 디자인 단계 예시 그대로 | [02] REQ-AST-008 "구현 단계에서 확정" |
 | 질문 길이·대화 수 상한 | 1000자·20개(서버 사용 10개) | 문서에 없음(가정값) |
 | 도구 결과 상한 | 목록 15줄·8000자·도구 호출 4번 | 문서에 없음(가정값, 작은 로컬 모델 기준) |
+| 사진 수·크기 | 4장·2MB. 화면이 긴 변 1568px·JPEG로 줄여 보낸다 | 문서에 없음(가정값) |
+| 영상 | 받지 않음. LM Studio API가 `text`·`image_url`만 받는다(시험으로 확인). 필요하면 장면 몇 장을 사진으로 보낸다 | 실제 서버 확인 결과 |
 | 도구 수 | 14개(과거 사례 포함)를 한 번에 모델에 알린다. 작은 모델이 도구를 잘못 고르면 질문 종류로 미리 좁히는 방식을 검토 | 실제 모델 확인 결과 |
 | 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

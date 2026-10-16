@@ -1,6 +1,6 @@
-import { AI_REASONING_LEVELS, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBase64, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -33,6 +33,17 @@ export class AiAssistantTurnDto {
   content!: string;
 }
 
+export class AiAssistantImageDto {
+  @IsIn(AI_IMAGE_MEDIA_TYPES)
+  mediaType!: AiImageMediaType;
+
+  @IsString()
+  @IsBase64()
+  // base64는 4바이트로 3바이트를 담는다
+  @MaxLength(Math.ceil(AI_IMAGE_MAX_BYTES / 3) * 4, { message: `사진 한 장은 ${AI_IMAGE_MAX_BYTES / 1_000_000}MB까지 보낼 수 있어요` })
+  dataBase64!: string;
+}
+
 export class AskAiAssistantDto {
   @Transform(trim)
   @IsString()
@@ -61,4 +72,11 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsIn(AI_REASONING_LEVELS)
   reasoning?: AiReasoningLevel;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_IMAGE_MAX_COUNT, { message: `사진은 ${AI_IMAGE_MAX_COUNT}장까지 보낼 수 있어요` })
+  @ValidateNested({ each: true })
+  @Type(() => AiAssistantImageDto)
+  images?: AiAssistantImageDto[];
 }
