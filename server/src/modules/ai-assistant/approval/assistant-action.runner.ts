@@ -8,10 +8,13 @@ import { ToolArgumentError } from '../tools/assistant-tool';
 import type { AssistantWriteTool, PreparedWrite } from '../tools/assistant-write-tool';
 import { AssistantWriteToolbox } from '../tools/assistant-write-toolbox';
 import { parseToolArguments } from '../tools/tool-schema';
-import { AssistantApprovalRegistry } from './approval.registry';
+import { AssistantApprovalRegistry, type ApprovalOutcome } from './approval.registry';
 import { isFixableError, runWithTransientRetry, type WriteFixBudget } from './write-call.rules';
 
-type ApprovalEvent = Extract<AiAssistantStreamEvent, { type: 'approval_required' | 'approval_resolved' | 'tool_execution' }>;
+type ApprovalEvent = Extract<AiAssistantStreamEvent, { type: 'approval_required' | 'approval_resolved' | 'tool_execution' | 'heartbeat' }>;
+
+/** 카드를 기다리는 동안 빈 이벤트를 보내는 간격. 프록시가 조용한 연결(최대 10분)을 끊지 않게 한다 */
+export const APPROVAL_HEARTBEAT_MS = 20_000;
 
 export interface WriteCallContext {
   user: AuthUser;
@@ -82,14 +85,24 @@ export class AssistantActionRunner {
       details: prepared.card.details,
       expiresAt: pending.expiresAt.toISOString(),
     });
-    const decision = await pending.decision;
+    const heartbeat = setInterval(() => ctx.emit({ type: 'heartbeat' }), APPROVAL_HEARTBEAT_MS);
+    let decided: ApprovalOutcome;
+    try {
+      decided = await pending.decision;
+    } finally {
+      clearInterval(heartbeat);
+    }
+    const decision = decided.resolution;
     ctx.emit({ type: 'approval_resolved', approvalId: pending.id, decision });
-    if (decision !== 'ALLOW') {
+    if (decision !== 'ALLOW' || !decided.decidedBy) {
+      // 사용자가 싫다고 했거나 자리를 비웠다: 다시 제안해 스트림을 더 붙잡지 않게 다음 차례는 도구 없이 답하게 한다
       const outcome = decision === 'TIMEOUT' ? '10분 안에 허용하지 않아 실행하지 않았어요' : '사용자가 거부해 실행하지 않았어요';
-      return { content: json({ 결과: outcome, 안내: '실행하지 않았다고 짧게 알려요. 사용자가 다시 부탁하지 않으면 같은 내용을 다시 제안하지 않아요' }), stop: false };
+      return { content: json({ 결과: outcome, 안내: '실행하지 않았다고 짧게 알려요' }), stop: true };
     }
 
-    const executed = await runWithTransientRetry(() => prepared.execute());
+    // 실행은 허용을 보낸 순간의 사원 정보로 한다(같은 사원, 권한은 그때 DB에서 다시 읽은 값)
+    const actor = decided.decidedBy;
+    const executed = await runWithTransientRetry(() => prepared.execute(actor, pending.id), { idempotent: true });
     if (executed.ok) {
       const { message, result } = executed.value;
       ctx.emit({ type: 'tool_execution', approvalId: pending.id, status: 'SUCCESS', message, result, attempts: executed.attempts });

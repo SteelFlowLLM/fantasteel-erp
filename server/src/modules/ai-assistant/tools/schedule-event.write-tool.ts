@@ -1,6 +1,7 @@
 import { BUSINESS_EVENT_TYPE, type AuthUser, type ScheduleEventInput } from '@fantasteel/shared';
 import type { BusinessEventRecorder } from '../../../common/business-event/business-event.recorder';
 import type { PrismaService } from '../../../prisma/prisma.service';
+import type { AiAssistantRepository } from '../ai-assistant.repository';
 import type { ScheduleEventService } from '../../schedule-event/schedule-event.service';
 import { optionalString, requiredString, ToolArgumentError } from './assistant-tool';
 import type { AssistantWriteTool } from './assistant-write-tool';
@@ -38,6 +39,7 @@ export interface ScheduleEventWriteToolDeps {
   prisma: PrismaService;
   recorder: BusinessEventRecorder;
   scheduleEvents: ScheduleEventService;
+  repository: AiAssistantRepository;
 }
 
 /**
@@ -98,14 +100,17 @@ export function scheduleEventWriteTool(deps: ScheduleEventWriteToolDeps): Assist
             { label: '참석자', value: `${user.employeeName} (나만 보는 일정, 알림 없음)` },
           ],
         },
-        execute: async () => {
+        execute: async (actor, approvalId) => {
           const id = await deps.prisma.$transaction(async (tx) => {
-            const createdId = await deps.scheduleEvents.createIn(tx, user, input);
+            // 같은 카드로 이미 만들었으면(COMMIT 뒤 연결이 끊겨 다시 하는 경우) 그 일정을 돌려준다
+            const done = await deps.repository.findApprovalEvent(tx, approvalId);
+            if (done) return done.targetId;
+            const createdId = await deps.scheduleEvents.createIn(tx, actor, input);
             await deps.recorder.record(tx, {
               type: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
-              actor: user,
+              actor,
               target: { table: 'schedule_event', id: createdId },
-              after: input,
+              after: { ...input, approvalId },
               reason: `DRAFT_CONFIRMED: 철강맨AI 승인 카드 허용 (내 일정 추가 · ${title})`,
               isAiAssisted: true,
             });

@@ -46,6 +46,8 @@ export interface AssistantDraftInput {
   requestReason: string | null;
   /** 사용자가 철강맨AI에 한 질문. 원본 글(sourceText)로 남긴다 */
   question: string;
+  /** 승인 카드에 보인 원료 id. 실행할 때 원료 코드가 다른 원료를 가리키면 COM-001로 멈춘다 */
+  expectedItemId?: number;
 }
 
 export interface AssistantDraftPreview {
@@ -177,6 +179,9 @@ export class MessageActionService {
       const known = materials.map((m) => `${m.itemCode}(${m.itemName})`).join(', ');
       throw new AppException('COM-003', `원료 품목을 찾을 수 없어요: ${input.itemCode}. 원료는 ${known} 중 하나예요`);
     }
+    if (input.expectedItemId !== undefined && item.id !== input.expectedItemId) {
+      throw new AppException('COM-001', '승인 카드를 보인 뒤 원료 정보가 바뀌었어요. 다시 요청해 주세요');
+    }
     const patch = { itemId: item.id, requestedTon: input.requestedTon, desiredReceiptDate: input.desiredReceiptDate, requestReason: input.requestReason };
     const filled = await definition.applyPatch(tx, definition.empty(input.question), patch);
     // 모델이 채운 칸은 AI가 채운 칸으로 남겨 나중의 확정·실행 작업 로그도 AI 경유로 한다 (REQ-AST-010)
@@ -185,29 +190,26 @@ export class MessageActionService {
   }
 
   /**
-   * 사용자가 승인 카드를 허용하면 초안을 만든다 (이슈 #362). 사전 확인과 같은 검사를 트랜잭션 안에서 다시 하고,
-   * 회의록 초안처럼 바로 요청자 확인 대기로 둔다. 확정은 초안 화면에서 요청자가 한다(지금 흐름 그대로).
-   * 작업 로그 DRAFT_CREATED를 AI 경유로 같은 트랜잭션에 남긴다.
+   * 사용자가 승인 카드를 허용하면 부르는 쪽(ai-assistant)의 트랜잭션 안에서 초안을 만든다 (이슈 #362).
+   * 사전 확인과 같은 검사를 다시 하고(user는 허용을 보낸 순간의 사원), 회의록 초안처럼 바로 요청자 확인 대기로 둔다.
+   * 확정은 초안 화면에서 요청자가 한다(지금 흐름 그대로). 작업 로그 DRAFT_CREATED를 AI 경유로 남기고,
+   * after.approvalId에 카드 id를 넣어 같은 카드로 두 번 만들지 않게 한다(부르는 쪽이 먼저 확인한다).
    */
-  async createFromAssistant(user: AuthUser, input: AssistantDraftInput): Promise<{ id: number }> {
-    return retryOnNumberConflict(() =>
-      this.prisma.$transaction(async (tx) => {
-        const { payload } = await this.previewFromAssistant(tx, user, input);
-        const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
-        const draft = await this.repository.createDraftBrief(tx, { actionType, payload: toJson(payload), requesterId: user.employeeId });
-        await this.businessEventRecorder.record(tx, {
-          type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
-          actor: user,
-          target: { table: 'action_draft', id: draft.id },
-          after: { draftStatus: draft.draftStatus, actionType, requesterId: user.employeeId, payload: toJson(payload) },
-          reason: '철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성',
-          isAiAssisted: true,
-          actionDraftId: draft.id,
-        });
-        await this.repository.setDraftStatus(tx, draft.id, DRAFT_STATUS.WAITING_APPROVAL);
-        return { id: draft.id };
-      }),
-    );
+  async createFromAssistantIn(tx: Tx, user: AuthUser, input: AssistantDraftInput, approvalId: string): Promise<number> {
+    const { payload } = await this.previewFromAssistant(tx, user, input);
+    const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
+    const draft = await this.repository.createDraftBrief(tx, { actionType, payload: toJson(payload), requesterId: user.employeeId });
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
+      actor: user,
+      target: { table: 'action_draft', id: draft.id },
+      after: { draftStatus: draft.draftStatus, actionType, requesterId: user.employeeId, payload: toJson(payload), approvalId },
+      reason: '철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성',
+      isAiAssisted: true,
+      actionDraftId: draft.id,
+    });
+    await this.repository.setDraftStatus(tx, draft.id, DRAFT_STATUS.WAITING_APPROVAL);
+    return draft.id;
   }
 
   /** chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 확정 주체인 초안(메시지·회의록·철강맨AI 대화에서 만든 것). 최근 것 먼저 */

@@ -196,7 +196,7 @@ confirm(draftId, actor):
 철강맨AI의 쓰기 도구 `create_purchase_request_draft`가 사용자가 승인 카드에서 허용하면 구매요청 초안을 만든다(`docs/backend/ai-assistant.md` 4장 '승인 카드').
 
 - `previewFromAssistant(tx, user, input)`: 저장 없는 사전 확인. 순서: 요청자(= 묻는 사원)의 구매요청 등록 USE 권한(COM-002) → 승인권자(PUR-001, `assertCanExecute`) → 원료 코드·이름이 원료 하나와 정확히 맞는지(COM-003, 문구에 원료 목록을 붙여 모델이 고치게 함) → 톤·희망 입고일·요청 근거 형식(유형 정의 `applyPatch`, COM-004).
-- `createFromAssistant(user, input)`: 같은 확인을 트랜잭션 안에서 다시 하고 초안을 만든다. `message_id`·`meeting_minutes_id`는 없고 `requester_id` = 묻는 사원, 회의록 초안처럼 바로 `WAITING_APPROVAL`. 작업 로그 `DRAFT_CREATED`(AI 경유, 사유 `철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성`)를 같은 트랜잭션에 남긴다. 확정·실행은 지금 API 그대로 요청자가 한다.
+- `createFromAssistantIn(tx, user, input, approvalId)`: ai-assistant가 연 트랜잭션 안에서 같은 확인을 다시 하고 초안을 만든다(`user`는 허용을 보낸 순간의 사원). `input.expectedItemId`(카드에 보인 원료)와 원료 코드가 가리키는 원료가 다르면 COM-001. 작업 로그 `after.approvalId`에 카드 id를 남겨 같은 카드로 두 번 만들지 않는다(ai-assistant가 먼저 확인). `message_id`·`meeting_minutes_id`는 없고 `requester_id` = 묻는 사원, 회의록 초안처럼 바로 `WAITING_APPROVAL`. 작업 로그 `DRAFT_CREATED`(AI 경유, 사유 `철강맨AI 승인 카드 허용: 대화에서 구매요청 초안 생성`)를 같은 트랜잭션에 남긴다. 확정·실행은 지금 API 그대로 요청자가 한다.
 - 원본 표시: payload `fromAiAssistant: true`, `sourceText` = 사용자 질문(1000자까지). 스키마 변경 없이 이 값으로 구분한다. `payloadOf`가 이 값을 지키므로 수정·확정해도 남는다. 응답의 `message`·`meetingMinutes`는 `null`이다.
 - Agent 대응 후보와 구분: Agent 후보는 `payload.agent`가 있고 factory-agent가 다룬다. 철강맨AI 초안에는 `agent`가 없어 메시지 초안 API(상세·수정·확정·반려)로 처리된다. 상세는 요청자 본인만 본다(원본 방이 없다).
 - 메시지 초안처럼 같은 원본의 미처리 초안 중복 막기는 없다(원본 메시지가 없다). 한 번 허용할 때마다 하나 만든다.

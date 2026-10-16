@@ -18,7 +18,7 @@
 
 이 모듈은 테이블에 직접 쓰지 않는다. 조회 도구는 읽기만 하고, 쓰기 도구는 사용자가 승인 카드에서 허용한 뒤 각 모듈 service로 쓴다([01] AI 사용 원칙: AI가 직접 바꾸지 않고 사용자가 확정):
 - `add_my_schedule_event` → `ScheduleEventService.createIn`(내 일정 직접 추가와 같은 검사·행): `schedule_event`·`schedule_event_attendee`, 작업 로그 `business_event` 1행.
-- `create_purchase_request_draft` → `MessageActionService.createFromAssistant`: `action_draft` 1행(`message_id`·`meeting_minutes_id` 없음), 작업 로그 1행.
+- `create_purchase_request_draft` → `MessageActionService.createFromAssistantIn`(ai-assistant의 트랜잭션 안에서): `action_draft` 1행(`message_id`·`meeting_minutes_id` 없음), 작업 로그 1행.
 - 스키마 변경은 없다. 승인 카드 자리는 DB가 아니라 서버 메모리에 둔다(4장).
 
 대화 기록 저장 여부는 미결정([02] 21장)이고 ERD에 테이블이 없어 **저장하지 않는다**. 화면이 최근 대화를 함께 보낸다.
@@ -67,10 +67,11 @@
 | `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이다 |
 | `approval_required` | `approvalId`, `toolId`, `toolName`, `title`, `details[]`, `expiresAt` | 쓰기 도구의 승인 카드 (이슈 #362). `toolId`는 같은 호출의 `tool_start.id`, `toolName`은 `AI_ASSISTANT_WRITE_TOOLS` 중 하나, `title`은 무엇을 하는지 한 줄(예: `내 일정 추가: 주간 회의`), `details`는 `{ label, value }[]`(예: 날짜·시간·메모·참석자, 원료·수량(톤)·희망 입고일·요청자·다음 단계), `expiresAt`은 ISO(지금 + 10분). 카드는 고칠 수 없고 허용·거부만 한다 |
 | `approval_resolved` | `approvalId`, `decision` | 카드가 끝남. `ALLOW`·`DENY`·`TIMEOUT`(10분 지남 = 거부) |
+| `heartbeat` | 없음 | 승인 카드를 기다리는 동안 20초마다(`APPROVAL_HEARTBEAT_MS`). 프록시가 조용한 연결을 끊지 않게 하는 빈 이벤트라 화면은 무시한다 |
 | `tool_execution` | `approvalId`, `status`, `message`, `result`, `attempts` | 허용한 카드의 실행 결과. `status` `SUCCESS`·`FAILED`, `message`는 결과·실패 이유 문구, `result`는 성공이면 `{ table, id, label, linkPath }`(예: `{ table: 'schedule_event', id: 31, label: '주간 회의', linkPath: '/schedule?week=2026-10-19' }`, `{ table: 'action_draft', id: 12, label: '구매요청 초안 #12', linkPath: '/action-drafts/12' }`), 실패면 `null`. `attempts`는 시도 횟수(일시 오류면 최대 3). 거부·시간 초과면 오지 않는다 |
 | `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
 
-쓰기 도구 한 번의 이벤트 순서: `tool_start` → `approval_required` → `approval_resolved` → (허용이면) `tool_execution` → `tool_end`. 인자·사전 확인이 틀리면 카드 없이 `tool_start` → `tool_end`(결과 앞부분에 `오류`)만 오고 모델이 고쳐 다시 부른다. 기존 이벤트 모양은 그대로다.
+쓰기 도구 한 번의 이벤트 순서: `tool_start` → `approval_required` → (`heartbeat`…) → `approval_resolved` → (허용이면) `tool_execution` → `tool_end`. 인자·사전 확인이 틀리면 카드 없이 `tool_start` → `tool_end`(결과 앞부분에 `오류`)만 오고 모델이 고쳐 다시 부른다. 기존 이벤트 모양은 그대로다.
 
 ## 4. 업무 규칙
 
@@ -125,8 +126,15 @@
 - 도구 호출 상한은 그대로 한 질문 4번(`MAX_TOOL_ROUNDS`)이고, 고치는 호출도 이 안에서 센다.
 - 카드 자리(`AssistantApprovalRegistry`): `approval_required`를 보내기 **전에** 자리(UUID)를 만든다(화면이 아주 빨리 허용해도 자리가 있다). 기다리는 시간 **10분**(`AI_APPROVAL_TIMEOUT_MS`), 지나면 `TIMEOUT` = 거부. 처음 결정만 받고 그 뒤는 409. 질문한 사원만 결정한다(다른 사원 403). 스트림이 끊기면(멈추기·창 닫기) 기다리던 카드는 거부로 끝나고 LLM도 다시 부르지 않는다. 끝난 자리는 늦은 결정에 409로 답하려고 10분 더 기억한다.
 - 🟡 자리는 **서버 한 대의 메모리**에 둔다. 서버를 다시 띄우면 기다리던 카드는 사라진다(스트림도 끊겨 거부와 같다). 서버를 여러 대로 늘리면 허용 요청이 다른 서버로 갈 수 있어 공유 저장소(예: DB·Redis)로 옮겨야 한다.
-- 거부·시간 초과면 실행하지 않고 "사용자가 거부해 실행하지 않았어요"를 모델에 돌려준다.
-- 허용하면 실행한다. 실행 뒤 실패는 **모델이 고친 내용으로 다시 하지 않는다**. 일시 오류(DB 연결·풀 시간 초과·잠금 시간 초과·직렬화 충돌·교착·네트워크, `isTransientError`)만 LLM 없이 같은 내용으로 **2번까지** 다시 한다(`MAX_TRANSIENT_RETRIES`, 300ms·600ms 쉬고). 업무 오류는 바로 `tool_execution FAILED`와 이유를 보낸다. 내용을 바꿔야 하면 모델이 새 카드로 다시 제안한다.
+- 거부·시간 초과면 실행하지 않고 "사용자가 거부해 실행하지 않았어요"(또는 10분 지남)를 모델에 돌려주고 **멈춘다**: 다음 차례는 도구 없이 답한다. 모델이 같은 카드를 다시 내밀어 스트림을 최대 40분 붙잡는 일을 막는다. 사용자가 다시 부탁하면 새 질문에서 새 카드가 뜬다.
+- 허용하면 실행한다. 실행은 **허용을 보낸 요청의 사원**(`POST approvals/:id` 때 가드가 DB에서 다시 읽은 권한)으로 한다. 스트림을 시작할 때의 사원 정보는 10분까지 묵을 수 있어서다(같은 사원인지는 자리에서 확인). 그 사이 권한이 빠지면 실행이 COM-002로 실패한다. 작업 로그 주체도 이 사원이다.
+- 실행 뒤 실패는 **모델이 고친 내용으로 다시 하지 않는다**. 일시 오류만 LLM 없이 같은 내용으로 **2번까지** 다시 한다(`MAX_TRANSIENT_RETRIES`, 300ms·600ms 쉬고, `transientKind`):
+  - SAFE — 쿼리를 보내기 전이거나 DB가 롤백을 보장: 연결 못 함(P1001·ECONNREFUSED·초기화 오류), 풀 시간 초과(P2024), 직렬화 충돌(40001·P2034), 교착(40P01), 잠금 시간 초과(55P03).
+  - AMBIGUOUS — COMMIT 중·뒤에도 날 수 있어 이미 저장됐을 수 있음: 연결 끊김(P1017·ECONNRESET·EPIPE·"connection terminated"), 응답 시간 초과(P1008·ETIMEDOUT), 트랜잭션 시간 초과(P2028), P1002. **멱등 실행일 때만** 다시 한다.
+  - 쓰기 도구의 실행은 모두 멱등이다: AI 경유 작업 로그의 `after.approvalId`에 카드 id를 남기고, 실행 트랜잭션 처음에 같은 `approvalId`의 AI 경유 로그가 있는지 본다(`AiAssistantRepository.findApprovalEvent`). 있으면 새로 만들지 않고 그 대상(`target_id`)을 결과로 돌려준다. 그래서 COMMIT 뒤 끊겨 다시 해도 한 번만 만든다. 한 카드는 한 번에 하나씩 실행되므로(같은 요청 안에서 차례로 다시 함) 먼저 보는 것으로 충분하다.
+  - 업무 오류는 바로 `tool_execution FAILED`와 이유를 보낸다. 내용을 바꿔야 하면 모델이 새 카드로 다시 제안한다.
+- 구매요청 초안은 카드에 보인 원료(id)로만 만든다. 실행 때 원료 코드가 다른 원료를 가리키면(그 사이 기준정보가 바뀜) COM-001로 실패하고 다시 하지 않는다.
+- 허용한 뒤 스트림이 끊기면(창 닫기·네트워크) 실행은 서버에서 그대로 끝나지만 `tool_execution` 결과는 화면에 오지 않는다. 결과는 내 일정·내 초안 화면에서 확인한다. 사용자가 같은 부탁을 다시 하면 새 카드(새 `approvalId`)라 멱등 확인에 걸리지 않고 하나 더 만든다 — 화면 안내로 막는다(🟡).
 - 프롬프트: 쓰기 도구를 알릴 때만 규칙 9를 바꾸고 13을 더한다 — 쓰기 도구에 있는 일만 제안, 사용자가 분명히 부탁했을 때만, 카드에서 허용해야 실행, 도구 결과에 "실행했어요"가 오기 전에는 됐다고 말하지 않음, 거부·실패는 그대로 알리고 같은 내용을 다시 부르지 않음, 모르는 값은 지어내지 말고 물음.
 - **AI 경유 기록(REQ-AST-010)**: 공통 코드 정의서 BUSINESS_EVENT_TYPE 설명("AI 실행 카드 확정은 DRAFT_CONFIRMED + AI 경유 표시")과 회의록 초안(`createFromMeeting`)의 방식을 따른다. 쓰기와 같은 트랜잭션에서 `business_event.is_ai_assisted = true`, 주체 = 허용한 사원(USER)으로 남긴다.
 
@@ -193,7 +201,7 @@
 | inventory·sales-order·production·purchasing·shipment | 이미 export된 service를 쓴다 |
 | lot·business-event·quality | `exports`에 `LotService`·`BusinessEventService`·`QualityService`·`RejectedLotService`를 더했다(모듈 동작은 그대로) |
 | schedule-event | `exports: [ScheduleEventService]`를 더했다. `createIn(tx, user, input)`(넘겨받은 트랜잭션에서 만들고 id만, 트랜잭션 안에서 관계를 읽지 않음)과 `checkCreate(input)`(저장 없는 검사)를 더했다. 직접 등록 API 동작은 그대로 |
-| message-action | `MessageActionService.previewFromAssistant`(사전 확인)·`createFromAssistant`(초안 생성 + `DRAFT_CREATED` AI 경유)를 더했다. 유형 정의(`PurchaseRequisitionAction`)의 검증(`applyPatch`)·승인권자 확인을 그대로 쓴다 |
+| message-action | `MessageActionService.previewFromAssistant`(사전 확인)·`createFromAssistantIn(tx, …)`(부르는 쪽 트랜잭션에서 초안 생성 + `DRAFT_CREATED` AI 경유, `after.approvalId`)를 더했다. 유형 정의(`PurchaseRequisitionAction`)의 검증(`applyPatch`)·승인권자 확인을 그대로 쓴다 |
 | 공통 `BusinessEventRecorder` | 일정 카드의 AI 경유 작업 로그 |
 
 **기능별 LLM 설정 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `LLM_PROFILE`. 기능마다 샘플링 값과 생각 정도를 정해 요청마다 실어 보낸다. 값이 요청 시점에 들어가므로 LM Studio에서 모델을 다시 불러올 필요가 없다.
@@ -223,8 +231,8 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
 - `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
-- `approval/assistant-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 도구 종류(조회 READ·쓰기 WRITE·모름 null, 한글 제목, 조회 모음은 쓰기를 실행하지 않음, 쓰기 규칙은 알릴 때만 프롬프트에), 인자 스키마(JSON 아님·객체 아님·빠진 칸·없는 칸·형식·숫자, null은 빈 칸), 고칠 기회(2번, 같은 인자면 멈춤), 일시 오류만 같은 내용으로 2번 다시(업무 오류는 1번), 카드 자리(처음 결정만·409, 다른 사원 403, 없는 카드 404, 시간 초과 = 거부, 연결 끊김 = 거부), 호출 처리(스키마·사전 확인 실패는 고침, 같은 인자 반복·권한 없음·PUR-001은 멈춤, 자리를 먼저 만들어 이벤트 직후 허용해도 실행, 거부면 실행 안 함, 실행 뒤 업무 오류는 다시 하지 않음).
-- `assistant-approval.spec.ts`(실제 앱·DB `fs_collab`, 가짜 LLM): `approvalCards`가 없거나 API-262면 쓰기 도구 없음, 일정 허용 → 이벤트 순서·카드 내용·일정 생성·`DRAFT_CONFIRMED` AI 경유·다른 사원 403·늦은 결정 409, 거부 → 만들지 않음, 사전 확인 실패 → 모델이 고친 두 번째 호출에서 카드, 스키마 세 번 실패 → 도구 없이 답, 연결 끊김 → 거부·만들지 않음, 없는 카드 404·형식 400, 초안 허용 → 확인 대기 초안·`fromAiAssistant`·`aiFilledFields`·`DRAFT_CREATED` AI 경유·내 초안 목록, 없는 원료 → 원료 목록과 함께 고치게 함, 영업 사원 → 권한 없음·구매 역할 안내·도구 없이 답.
+- `approval/assistant-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 도구 종류(조회 READ·쓰기 WRITE·모름 null, 한글 제목, 조회 모음은 쓰기를 실행하지 않음, 쓰기 규칙은 알릴 때만 프롬프트에), 인자 스키마(JSON 아님·객체 아님·빠진 칸·없는 칸·형식·숫자, null은 빈 칸), 고칠 기회(2번, 같은 인자면 멈춤), 일시 오류만 같은 내용으로 2번 다시(SAFE·AMBIGUOUS 구분, AMBIGUOUS는 멱등일 때만, 업무 오류는 1번), 카드 자리(처음 결정만·409, 허용한 사원 정보를 넘김, 다른 사원 403, 없는 카드 404, 시간 초과 = 거부, 연결 끊김 = 거부), 호출 처리(스키마·사전 확인 실패는 고침, 같은 인자 반복·권한 없음·PUR-001은 멈춤, 자리를 먼저 만들어 이벤트 직후 허용해도 실행, 실행은 허용한 사원·카드 id로, 거부·시간 초과면 실행 안 하고 멈춤, 기다리는 동안 20초마다 heartbeat, 실행 뒤 업무 오류는 다시 하지 않음).
+- `assistant-approval.spec.ts`(실제 앱·DB `fs_collab`, 가짜 LLM): `approvalCards`가 없거나 API-262면 쓰기 도구 없음, 일정 허용 → 이벤트 순서·카드 내용·일정 생성·`DRAFT_CONFIRMED` AI 경유·다른 사원 403·늦은 결정 409, 거부 → 만들지 않음, 사전 확인 실패 → 모델이 고친 두 번째 호출에서 카드, 스키마 세 번 실패 → 도구 없이 답, 연결 끊김 → 거부·만들지 않음, 없는 카드 404·형식 400, 초안 허용 → 확인 대기 초안·`fromAiAssistant`·`aiFilledFields`·`DRAFT_CREATED` AI 경유·내 초안 목록, 없는 원료 → 원료 목록과 함께 고치게 함, 영업 사원 → 권한 없음·구매 역할 안내·도구 없이 답, COMMIT 뒤 연결 끊김을 흉내 내도 한 번만 만듦(시도 2번), 거부 뒤 도구 없이 답, 카드 뒤 권한이 빠지면 허용 순간의 권한으로 실패, 카드 뒤 원료 코드가 바뀌면 COM-001로 실패.
 
 실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). `assistant-approval.spec.ts`·`meeting-ask.spec.ts`를 뺀 나머지는 DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 

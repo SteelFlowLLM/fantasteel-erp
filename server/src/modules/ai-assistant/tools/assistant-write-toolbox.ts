@@ -5,6 +5,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import type { LlmToolDefinition } from '../../llm/llm.client';
 import { MessageActionService } from '../../message-action/message-action.service';
 import { ScheduleEventService } from '../../schedule-event/schedule-event.service';
+import { AiAssistantRepository } from '../ai-assistant.repository';
 import type { AssistantWriteTool } from './assistant-write-tool';
 import { purchaseRequisitionDraftWriteTool } from './purchase-requisition-draft.write-tool';
 import { scheduleEventWriteTool } from './schedule-event.write-tool';
@@ -14,8 +15,8 @@ import { scheduleEventWriteTool } from './schedule-event.write-tool';
 export class AssistantWriteToolbox {
   private readonly tools: Map<string, AssistantWriteTool>;
 
-  constructor(prisma: PrismaService, recorder: BusinessEventRecorder, scheduleEvents: ScheduleEventService, messageActions: MessageActionService) {
-    const tools = [scheduleEventWriteTool({ prisma, recorder, scheduleEvents }), purchaseRequisitionDraftWriteTool({ prisma, messageActions })];
+  constructor(prisma: PrismaService, recorder: BusinessEventRecorder, scheduleEvents: ScheduleEventService, messageActions: MessageActionService, repository: AiAssistantRepository) {
+    const tools = [scheduleEventWriteTool({ prisma, recorder, scheduleEvents, repository }), purchaseRequisitionDraftWriteTool({ prisma, messageActions, repository })];
     this.tools = new Map(tools.map((tool) => [tool.definition.name, tool]));
   }
 

@@ -53,32 +53,64 @@ export function isFixableError(error: AppException): boolean {
   return status === 400 || status === 404;
 }
 
-/** 일시 오류: DB 연결·풀 시간 초과·잠금 시간 초과·직렬화 충돌·교착, 네트워크 끊김. 업무 오류(AppException)는 아니다 */
-const TRANSIENT_PRISMA_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2028', 'P2034']);
-const TRANSIENT_DB_STATES = ['55P03', '40001', '40P01', '57014'];
-const TRANSIENT_NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN']);
+/**
+ * 일시 오류의 종류.
+ * - SAFE: 쿼리를 보내기 전이거나 DB가 롤백을 보장하는 오류(연결 못 함·풀 시간 초과·직렬화 충돌·교착·잠금 시간 초과). 그대로 다시 해도 된다
+ * - AMBIGUOUS: COMMIT 중이나 뒤에도 날 수 있는 오류(연결 끊김·응답 시간 초과·네트워크). 이미 저장됐을 수 있어
+ *   같은 승인을 이미 실행했는지 먼저 확인하는(멱등) 실행만 다시 한다
+ * 업무 오류(AppException)·버그는 일시 오류가 아니다(null)
+ */
+export type TransientKind = 'SAFE' | 'AMBIGUOUS';
 
-export function isTransientError(error: unknown): boolean {
-  if (error instanceof AppException) return false;
-  if (error instanceof Prisma.PrismaClientKnownRequestError) return TRANSIENT_PRISMA_CODES.has(error.code) || TRANSIENT_DB_STATES.some((state) => error.message.includes(state));
-  if (error instanceof Prisma.PrismaClientInitializationError || error instanceof Prisma.PrismaClientRustPanicError) return true;
+const SAFE_PRISMA_CODES = new Set(['P1001', 'P2024', 'P2034']);
+const SAFE_DB_STATES = ['40001', '40P01', '55P03'];
+const AMBIGUOUS_PRISMA_CODES = new Set(['P1002', 'P1008', 'P1017', 'P2028']);
+const AMBIGUOUS_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
+const SAFE_NETWORK_CODES = new Set(['ECONNREFUSED', 'EAI_AGAIN']);
+
+export function transientKind(error: unknown): TransientKind | null {
+  if (error instanceof AppException) return null;
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (SAFE_PRISMA_CODES.has(error.code) || SAFE_DB_STATES.some((state) => error.message.includes(state))) return 'SAFE';
+    return AMBIGUOUS_PRISMA_CODES.has(error.code) ? 'AMBIGUOUS' : null;
+  }
+  // 연결을 만들지 못한 것이라 아무것도 보내지 않았다
+  if (error instanceof Prisma.PrismaClientInitializationError) return 'SAFE';
   if (error instanceof Error) {
     const code = (error as Error & { code?: unknown }).code;
-    if (typeof code === 'string' && (TRANSIENT_NETWORK_CODES.has(code) || TRANSIENT_DB_STATES.includes(code))) return true;
-    return /lock timeout|could not obtain lock|deadlock detected|connection terminated/i.test(error.message);
+    if (typeof code === 'string') {
+      if (SAFE_DB_STATES.includes(code) || SAFE_NETWORK_CODES.has(code)) return 'SAFE';
+      if (AMBIGUOUS_NETWORK_CODES.has(code)) return 'AMBIGUOUS';
+    }
+    if (/lock timeout|could not obtain lock|deadlock detected|could not serialize access/i.test(error.message)) return 'SAFE';
+    if (/connection terminated|connection reset|socket hang up/i.test(error.message)) return 'AMBIGUOUS';
   }
-  return false;
+  return null;
 }
+
+export const isTransientError = (error: unknown): boolean => transientKind(error) !== null;
 
 export type RetryResult<T> = { ok: true; value: T; attempts: number } | { ok: false; error: unknown; attempts: number };
 
-/** 허용한 실행을 한다. 일시 오류면 같은 내용으로 2번까지 다시 하고, 그 밖의 실패는 바로 돌려준다(LLM이 내용을 바꿔 다시 하지 않는다) */
-export async function runWithTransientRetry<T>(work: () => Promise<T>, delayMs: number = RETRY_DELAY_MS): Promise<RetryResult<T>> {
+export interface RetryOptions {
+  /** work가 같은 승인을 이미 실행했는지 먼저 확인하는지. 아니면 AMBIGUOUS 오류는 다시 하지 않는다 */
+  idempotent: boolean;
+  delayMs?: number;
+}
+
+/**
+ * 허용한 실행을 한다. 일시 오류면 같은 내용으로 2번까지 다시 하고, 그 밖의 실패는 바로 돌려준다(LLM이 내용을 바꿔 다시 하지 않는다).
+ * COMMIT 뒤에 났을 수 있는 오류(AMBIGUOUS)는 멱등 실행일 때만 다시 한다 — 두 번 저장되지 않게.
+ */
+export async function runWithTransientRetry<T>(work: () => Promise<T>, options: RetryOptions): Promise<RetryResult<T>> {
+  const delayMs = options.delayMs ?? RETRY_DELAY_MS;
   for (let attempts = 1; ; attempts += 1) {
     try {
       return { ok: true, value: await work(), attempts };
     } catch (error) {
-      if (!isTransientError(error) || attempts > MAX_TRANSIENT_RETRIES) return { ok: false, error, attempts };
+      const kind = transientKind(error);
+      const retryable = kind === 'SAFE' || (kind === 'AMBIGUOUS' && options.idempotent);
+      if (!retryable || attempts > MAX_TRANSIENT_RETRIES) return { ok: false, error, attempts };
       if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs * attempts));
     }
   }

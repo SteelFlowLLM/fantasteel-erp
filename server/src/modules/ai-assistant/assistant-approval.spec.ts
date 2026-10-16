@@ -193,6 +193,35 @@ describe('내 일정 추가 (add_my_schedule_event)', () => {
     expect(app.get(AssistantApprovalRegistry).pendingCount()).toBe(0);
   });
 
+  it('COMMIT 뒤 연결이 끊겨(모호한 오류) 다시 해도 같은 카드로는 한 번만 만든다', async () => {
+    scriptLlm([[toolCall('c1', 'add_my_schedule_event', { ...SCHEDULE, title: '한 번만 만들 회의' })], '추가했어요.']);
+    const original = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+    let failedOnce = false;
+    const spy = jest.spyOn(prisma, '$transaction');
+    try {
+      const events = await stream({ question: '회의 잡아줘', approvalCards: true }, async (event) => {
+        if (event.type !== 'approval_required') return;
+        // 실행 트랜잭션이 커밋된 뒤 연결이 끊긴 것처럼 첫 번째만 오류를 던진다
+        spy.mockImplementation((async (...args: unknown[]) => {
+          const result = await original(...args);
+          if (!failedOnce) {
+            failedOnce = true;
+            throw Object.assign(new Error('Connection terminated unexpectedly'), { code: 'ECONNRESET' });
+          }
+          return result;
+        }) as unknown as typeof prisma.$transaction);
+        await decide(event.approvalId, 'ALLOW');
+      });
+      expect(failedOnce).toBe(true);
+      expect(events.find((e) => e.type === 'tool_execution')).toMatchObject({ status: 'SUCCESS', attempts: 2 });
+    } finally {
+      spy.mockRestore();
+    }
+    const rows = await prisma.scheduleEvent.findMany({ where: { scheduleEventTitle: '한 번만 만들 회의' } });
+    expect(rows).toHaveLength(1);
+    expect(await prisma.businessEvent.count({ where: { targetType: 'schedule_event', targetId: rows[0].id } })).toBe(1);
+  });
+
   it('거부하면 만들지 않고, 모델에 거부했다고 알린다', async () => {
     const before = await prisma.scheduleEvent.count();
     scriptLlm([[toolCall('c1', 'add_my_schedule_event', { ...SCHEDULE, title: '거부할 회의' })], '추가하지 않았어요.']);
@@ -203,6 +232,8 @@ describe('내 일정 추가 (add_my_schedule_event)', () => {
     expect(events[2]).toMatchObject({ decision: 'DENY' });
     expect(await prisma.scheduleEvent.count()).toBe(before);
     expect(toolMessages(seen[1])).toEqual([expect.objectContaining({ 결과: '사용자가 거부해 실행하지 않았어요' })]);
+    // 거부 뒤에는 도구 없이 답한다 (같은 카드를 다시 내밀지 않게)
+    expect(seen[1].tools).toEqual([]);
   });
 
   it('사전 확인이 틀리면 카드 없이 이유를 돌려주고, 모델이 고친 두 번째 호출에서 카드를 보인다', async () => {
@@ -283,6 +314,45 @@ describe('구매요청 초안 만들기 (create_purchase_request_draft)', () => 
     const list = await fetch(`${baseUrl}/action-drafts`, { headers: { cookie: purchaseCookie } });
     const views = ((await list.json()) as { data: ActionDraftView[] }).data;
     expect(views.find((v) => v.id === draft.id)).toMatchObject({ message: null, meetingMinutes: null, payload: { fromAiAssistant: true }, unresolvedFields: [] });
+  });
+
+  it('허용 순간의 권한으로 실행한다: 카드를 보인 뒤 권한이 빠지면 만들지 않는다', async () => {
+    const before = await prisma.actionDraft.count();
+    const role = await prisma.role.findFirstOrThrow({ where: { roleCode: 'PURCHASE' } });
+    const where = { roleId_permission: { roleId: role.id, permission: 'PURCHASE_REQUISITION_CREATE' } };
+    scriptLlm([[toolCall('c1', 'create_purchase_request_draft', { itemCode: 'ORE01', requestedTon: 5 })], '만들지 못했어요.']);
+    try {
+      const events = await stream({ question: '철광석 5톤 초안', approvalCards: true }, async (event) => {
+        if (event.type !== 'approval_required') return;
+        await prisma.rolePermission.update({ where, data: { permissionLevel: 'VIEW' } });
+        await decide(event.approvalId, 'ALLOW');
+      });
+      expect(events.find((e) => e.type === 'tool_execution')).toMatchObject({ status: 'FAILED', attempts: 1, message: expect.stringContaining('권한이 있어야') });
+    } finally {
+      await prisma.rolePermission.update({ where, data: { permissionLevel: 'USE' } });
+    }
+    expect(await prisma.actionDraft.count()).toBe(before);
+  });
+
+  it('카드에 보인 원료가 그 사이 다른 원료를 가리키면 다시 하지 않고 실패한다', async () => {
+    const before = await prisma.actionDraft.count();
+    scriptLlm([[toolCall('c1', 'create_purchase_request_draft', { itemCode: 'ORE01', requestedTon: 5 })], '만들지 못했어요.']);
+    const ore = await prisma.item.findFirstOrThrow({ where: { itemCode: 'ORE01' } });
+    const coal = await prisma.item.findFirstOrThrow({ where: { itemCode: 'COL01' } });
+    try {
+      const events = await stream({ question: '철광석 5톤 초안', approvalCards: true }, async (event) => {
+        if (event.type !== 'approval_required') return;
+        // ORE01 코드가 이제 석탄을 가리킨다
+        await prisma.item.update({ where: { id: ore.id }, data: { itemCode: 'ORE01-OLD' } });
+        await prisma.item.update({ where: { id: coal.id }, data: { itemCode: 'ORE01' } });
+        await decide(event.approvalId, 'ALLOW');
+      });
+      expect(events.find((e) => e.type === 'tool_execution')).toMatchObject({ status: 'FAILED', attempts: 1, message: '승인 카드를 보인 뒤 원료 정보가 바뀌었어요. 다시 요청해 주세요' });
+    } finally {
+      await prisma.item.update({ where: { id: coal.id }, data: { itemCode: 'COL01' } });
+      await prisma.item.update({ where: { id: ore.id }, data: { itemCode: 'ORE01' } });
+    }
+    expect(await prisma.actionDraft.count()).toBe(before);
   });
 
   it('없는 원료는 원료 목록과 함께 돌려줘 모델이 고치게 한다', async () => {

@@ -12,8 +12,8 @@ import { AssistantWriteToolbox } from '../tools/assistant-write-toolbox';
 import { scheduleEventWriteTool } from '../tools/schedule-event.write-tool';
 import { parseToolArguments } from '../tools/tool-schema';
 import { AssistantApprovalRegistry } from './approval.registry';
-import { AssistantActionRunner, type WriteCallContext } from './assistant-action.runner';
-import { isTransientError, MAX_FIX_ATTEMPTS, MAX_TRANSIENT_RETRIES, runWithTransientRetry, WriteFixBudget } from './write-call.rules';
+import { APPROVAL_HEARTBEAT_MS, AssistantActionRunner, type WriteCallContext } from './assistant-action.runner';
+import { isTransientError, MAX_FIX_ATTEMPTS, MAX_TRANSIENT_RETRIES, runWithTransientRetry, transientKind, WriteFixBudget } from './write-call.rules';
 
 const user: AuthUser = {
   employeeId: 5,
@@ -32,7 +32,7 @@ const SCHEDULE_SCHEMA = scheduleEventWriteTool(unused()).definition.parameters;
 
 describe('도구 종류 (조회는 묻지 않고, 쓰기는 늘 승인 카드)', () => {
   const readToolbox = new AssistantToolbox(unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused(), unused());
-  const writeToolbox = new AssistantWriteToolbox(unused(), unused(), unused(), unused());
+  const writeToolbox = new AssistantWriteToolbox(unused(), unused(), unused(), unused(), unused());
 
   it('조회 도구는 모두 READ, 쓰기 도구는 모두 WRITE이고 겹치지 않는다', () => {
     const readNames = readToolbox.definitions().map((d) => d.name);
@@ -86,7 +86,7 @@ describe('인자 스키마 검사', () => {
   });
 
   it('숫자 칸은 따옴표 없는 0보다 큰 숫자만', () => {
-    const schema = new AssistantWriteToolbox(unused(), unused(), unused(), unused()).get('create_purchase_request_draft')?.definition.parameters;
+    const schema = new AssistantWriteToolbox(unused(), unused(), unused(), unused(), unused()).get('create_purchase_request_draft')?.definition.parameters;
     if (!schema) throw new Error('도구 없음');
     expect(parseToolArguments('{"itemCode":"ORE01","requestedTon":"30"}', schema)).toEqual({ ok: false, errors: ['requestedTon는 숫자여야 해요 (따옴표 없이)'] });
     expect(parseToolArguments('{"itemCode":"ORE01","requestedTon":0}', schema)).toEqual({ ok: false, errors: ['requestedTon는 0보다 커야 해요'] });
@@ -128,7 +128,7 @@ describe('일시 오류만 같은 내용으로 다시', () => {
     const failed = await runWithTransientRetry(async () => {
       tries += 1;
       throw transient();
-    }, 0);
+    }, { idempotent: true, delayMs: 0 });
     expect(failed).toMatchObject({ ok: false, attempts: MAX_TRANSIENT_RETRIES + 1 });
     expect(tries).toBe(3);
 
@@ -137,8 +137,32 @@ describe('일시 오류만 같은 내용으로 다시', () => {
       flaky += 1;
       if (flaky < 3) throw transient();
       return 'ok';
-    }, 0);
+    }, { idempotent: true, delayMs: 0 });
     expect(recovered).toEqual({ ok: true, value: 'ok', attempts: 3 });
+  });
+
+  it('COMMIT 뒤에도 날 수 있는 오류(AMBIGUOUS)는 멱등 실행일 때만 다시 한다', async () => {
+    const ambiguous = () => Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+    expect(transientKind(ambiguous())).toBe('AMBIGUOUS');
+    expect(transientKind(new Prisma.PrismaClientKnownRequestError('closed', { code: 'P1017', clientVersion: 'test' }))).toBe('AMBIGUOUS');
+    expect(transientKind(new Prisma.PrismaClientKnownRequestError("Can't reach database server", { code: 'P1001', clientVersion: 'test' }))).toBe('SAFE');
+    expect(transientKind(Object.assign(new Error('deadlock detected'), { code: '40P01' }))).toBe('SAFE');
+    expect(transientKind(transient())).toBe('SAFE');
+
+    let tries = 0;
+    const notIdempotent = await runWithTransientRetry(async () => {
+      tries += 1;
+      throw ambiguous();
+    }, { idempotent: false, delayMs: 0 });
+    expect(notIdempotent).toMatchObject({ ok: false, attempts: 1 });
+    expect(tries).toBe(1);
+
+    let safeTries = 0;
+    await runWithTransientRetry(async () => {
+      safeTries += 1;
+      throw transient();
+    }, { idempotent: false, delayMs: 0 });
+    expect(safeTries).toBe(MAX_TRANSIENT_RETRIES + 1);
   });
 
   it('업무 오류는 다시 하지 않는다', async () => {
@@ -146,7 +170,7 @@ describe('일시 오류만 같은 내용으로 다시', () => {
     const result = await runWithTransientRetry(async () => {
       tries += 1;
       throw new AppException('PUR-001');
-    }, 0);
+    }, { idempotent: true, delayMs: 0 });
     expect(result).toMatchObject({ ok: false, attempts: 1 });
     expect(tries).toBe(1);
   });
@@ -162,8 +186,10 @@ describe('승인 카드 자리', () => {
   it('처음 고른 값으로 끝나고, 늦게 온 값은 AST-002(409)', async () => {
     const pending = registry.open(user.employeeId);
     expect(pending.expiresAt.getTime()).toBeGreaterThan(Date.now() + 9 * 60 * 1000);
-    registry.decide(user, pending.id, 'ALLOW');
-    await expect(pending.decision).resolves.toBe('ALLOW');
+    const fresh = { ...user, permissions: { PURCHASE_REQUISITION_CREATE: 'USE' as const } };
+    registry.decide(fresh, pending.id, 'ALLOW');
+    // 허용을 보낸 요청의 사원 정보(그 순간의 권한)를 함께 넘긴다
+    await expect(pending.decision).resolves.toEqual({ resolution: 'ALLOW', decidedBy: fresh });
     expect(() => registry.decide(user, pending.id, 'DENY')).toThrow(expect.objectContaining({ code: 'AST-002', status: 409 }));
     expect(registry.pendingCount()).toBe(0);
   });
@@ -173,7 +199,7 @@ describe('승인 카드 자리', () => {
     expect(() => registry.decide(other, pending.id, 'ALLOW')).toThrow(expect.objectContaining({ code: 'COM-002', status: 403 }));
     expect(registry.pendingCount()).toBe(1);
     registry.decide(user, pending.id, 'DENY');
-    await expect(pending.decision).resolves.toBe('DENY');
+    await expect(pending.decision).resolves.toEqual({ resolution: 'DENY', decidedBy: user });
   });
 
   it('없는 카드는 AST-001(404)', () => {
@@ -182,7 +208,7 @@ describe('승인 카드 자리', () => {
 
   it('시간이 지나면 거부(TIMEOUT)로 끝나고, 그 뒤 허용은 AST-002', async () => {
     const pending = registry.open(user.employeeId, undefined, 20);
-    await expect(pending.decision).resolves.toBe('TIMEOUT');
+    await expect(pending.decision).resolves.toEqual({ resolution: 'TIMEOUT', decidedBy: null });
     expect(() => registry.decide(user, pending.id, 'ALLOW')).toThrow(expect.objectContaining({ code: 'AST-002' }));
   });
 
@@ -190,10 +216,10 @@ describe('승인 카드 자리', () => {
     const abort = new AbortController();
     const pending = registry.open(user.employeeId, abort.signal);
     abort.abort();
-    await expect(pending.decision).resolves.toBe('DENY');
+    await expect(pending.decision).resolves.toEqual({ resolution: 'DENY', decidedBy: null });
 
     const gone = registry.open(user.employeeId, AbortSignal.abort());
-    await expect(gone.decision).resolves.toBe('DENY');
+    await expect(gone.decision).resolves.toMatchObject({ resolution: 'DENY' });
   });
 });
 
@@ -233,7 +259,7 @@ describe('쓰기 도구 호출 처리 (AssistantActionRunner)', () => {
   }
 
   const ok = (execute: PreparedWrite['execute']): PreparedWrite => ({ card: { title: '내 일정 추가: 회의', details: [{ label: '제목', value: '회의' }] }, execute });
-  const success = async () => ({ message: '추가했어요', result: { table: 'schedule_event', id: 9, label: '회의', linkPath: '/schedule?week=2026-10-19' } });
+  const success = async (_actor?: AuthUser, _approvalId?: string) => ({ message: '추가했어요', result: { table: 'schedule_event', id: 9, label: '회의', linkPath: '/schedule?week=2026-10-19' } });
 
   it('스키마가 틀리면 카드 없이 이유를 돌려주고, 세 번째 실패에서 멈춘다', async () => {
     const { runner, events, ctx } = setup(async () => ok(success));
@@ -290,20 +316,24 @@ describe('쓰기 도구 호출 처리 (AssistantActionRunner)', () => {
     expect(JSON.parse(outcome.content).오류).toBe('승인권자(부서장) 미지정');
   });
 
-  it('카드 자리를 먼저 만들고 이벤트를 보낸다: 이벤트를 받자마자 허용해도 실행된다', async () => {
-    let executed = 0;
+  it('카드 자리를 먼저 만들고 이벤트를 보낸다: 이벤트를 받자마자 허용해도 실행된다. 실행은 허용한 순간의 사원·카드 id로', async () => {
+    const executions: [AuthUser, string][] = [];
+    const fresh = { ...user, permissions: { PURCHASE_REQUISITION_CREATE: 'USE' as const } };
     const { runner, events, ctx } = setup(async () =>
-      ok(async () => {
-        executed += 1;
+      ok(async (actor, approvalId) => {
+        executions.push([actor, approvalId]);
         return success();
       }),
     );
+    let approvalId = '';
     const outcome = await runner.run(
       ctx('{"title":"회의","date":"2026-10-20"}', (event) => {
-        if (event.type === 'approval_required') registry.decide(user, event.approvalId, 'ALLOW');
+        if (event.type !== 'approval_required') return;
+        approvalId = event.approvalId;
+        registry.decide(fresh, event.approvalId, 'ALLOW');
       }),
     );
-    expect(executed).toBe(1);
+    expect(executions).toEqual([[fresh, approvalId]]);
     expect(events.map((e) => e.type)).toEqual(['approval_required', 'approval_resolved', 'tool_execution']);
     expect(events[0]).toMatchObject({ toolId: 't1', toolName: 'add_my_schedule_event', title: '내 일정 추가: 회의', details: [{ label: '제목', value: '회의' }] });
     expect(events[1]).toMatchObject({ decision: 'ALLOW' });
@@ -327,6 +357,8 @@ describe('쓰기 도구 호출 처리 (AssistantActionRunner)', () => {
     expect(executed).toBe(0);
     expect(events.map((e) => e.type)).toEqual(['approval_required', 'approval_resolved']);
     expect(JSON.parse(outcome.content).결과).toBe('사용자가 거부해 실행하지 않았어요');
+    // 사용자가 싫다고 했으니 다음 차례는 도구 없이 답한다 (다시 제안해 스트림을 붙잡지 않게)
+    expect(outcome.stop).toBe(true);
   });
 
   it('허용 뒤 업무 오류로 실패하면 다시 하지 않고 실패와 이유를 알린다', async () => {
@@ -346,5 +378,34 @@ describe('쓰기 도구 호출 처리 (AssistantActionRunner)', () => {
     expect(events.at(-1)).toMatchObject({ type: 'tool_execution', status: 'FAILED', message: '부서장이 정해지지 않았어요', result: null, attempts: 1 });
     expect(outcome.stop).toBe(false);
     expect(JSON.parse(outcome.content).안내).toContain('새 승인 카드');
+  });
+
+  it('시간 초과도 실행하지 않고 멈춘다. 기다리는 동안 20초마다 heartbeat를 보낸다', async () => {
+    jest.useFakeTimers();
+    try {
+      let executed = 0;
+      const { runner, events, ctx } = setup(async () =>
+        ok(async () => {
+          executed += 1;
+          return success();
+        }),
+      );
+      const running = runner.run(ctx('{"title":"회의","date":"2026-10-20"}'));
+      await jest.advanceTimersByTimeAsync(APPROVAL_HEARTBEAT_MS * 2 + 1);
+      expect(events.filter((e) => e.type === 'heartbeat')).toHaveLength(2);
+      await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+      const outcome = await running;
+      expect(executed).toBe(0);
+      expect(outcome.stop).toBe(true);
+      expect(JSON.parse(outcome.content).결과).toBe('10분 안에 허용하지 않아 실행하지 않았어요');
+      const resolvedAt = events.findIndex((e) => e.type === 'approval_resolved');
+      expect(events[resolvedAt]).toMatchObject({ decision: 'TIMEOUT' });
+      // 끝난 뒤에는 heartbeat가 멈춘다
+      const beats = events.filter((e) => e.type === 'heartbeat').length;
+      await jest.advanceTimersByTimeAsync(APPROVAL_HEARTBEAT_MS * 3);
+      expect(events.filter((e) => e.type === 'heartbeat')).toHaveLength(beats);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

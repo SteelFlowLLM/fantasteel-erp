@@ -6,17 +6,26 @@ import { AppException } from '../../../common/errors/app.exception';
 /** 끝난 카드를 기억하는 시간. 늦게 온 허용·거부에 '이미 처리됨'(409)으로 답하려고 둔다 */
 export const RESOLVED_APPROVAL_RETENTION_MS = 10 * 60 * 1000;
 
+export interface ApprovalOutcome {
+  resolution: AiApprovalResolution;
+  /**
+   * 허용·거부를 보낸 요청의 사원(가드가 그 순간 DB에서 다시 읽은 권한). 실행은 이 사원으로 한다:
+   * 스트림을 시작할 때의 사원 정보는 10분까지 묵을 수 있다. 시간 초과·연결 끊김이면 null
+   */
+  decidedBy: AuthUser | null;
+}
+
 export interface PendingApproval {
   id: string;
   expiresAt: Date;
   /** 허용·거부·시간 초과 중 처음 것. 연결이 끊기면 거부 */
-  decision: Promise<AiApprovalResolution>;
+  decision: Promise<ApprovalOutcome>;
 }
 
 interface Slot {
   employeeId: number;
   resolution: AiApprovalResolution | null;
-  settle: (resolution: AiApprovalResolution) => void;
+  settle: (outcome: ApprovalOutcome) => void;
   timer: NodeJS.Timeout;
 }
 
@@ -33,17 +42,17 @@ export class AssistantApprovalRegistry implements OnModuleDestroy {
   open(employeeId: number, signal?: AbortSignal, timeoutMs: number = AI_APPROVAL_TIMEOUT_MS): PendingApproval {
     const id = randomUUID();
     const expiresAt = new Date(Date.now() + timeoutMs);
-    let settle: (resolution: AiApprovalResolution) => void = () => undefined;
-    const decision = new Promise<AiApprovalResolution>((resolve) => {
+    let settle: (outcome: ApprovalOutcome) => void = () => undefined;
+    const decision = new Promise<ApprovalOutcome>((resolve) => {
       settle = resolve;
     });
     const onAbort = () => this.settle(id, 'DENY');
     const slot: Slot = {
       employeeId,
       resolution: null,
-      settle: (resolution) => {
+      settle: (outcome) => {
         signal?.removeEventListener('abort', onAbort);
-        settle(resolution);
+        settle(outcome);
       },
       timer: setTimeout(() => this.settle(id, 'TIMEOUT'), timeoutMs),
     };
@@ -61,7 +70,7 @@ export class AssistantApprovalRegistry implements OnModuleDestroy {
     if (slot.employeeId !== user.employeeId) throw new AppException('COM-002', '질문한 사람만 허용·거부할 수 있어요');
     if (slot.resolution === 'TIMEOUT') throw new AppException('AST-002', '10분이 지나 거부로 처리된 승인 요청이에요');
     if (slot.resolution !== null) throw new AppException('AST-002');
-    this.settle(id, decision);
+    this.settle(id, decision, user);
   }
 
   /** 기다리는 카드 수 (시험·점검용) */
@@ -77,12 +86,12 @@ export class AssistantApprovalRegistry implements OnModuleDestroy {
     this.slots.clear();
   }
 
-  private settle(id: string, resolution: AiApprovalResolution): void {
+  private settle(id: string, resolution: AiApprovalResolution, decidedBy: AuthUser | null = null): void {
     const slot = this.slots.get(id);
     if (!slot || slot.resolution !== null) return;
     slot.resolution = resolution;
     clearTimeout(slot.timer);
-    slot.settle(resolution);
+    slot.settle({ resolution, decidedBy });
     slot.timer = setTimeout(() => this.slots.delete(id), RESOLVED_APPROVAL_RETENTION_MS);
     slot.timer.unref();
   }

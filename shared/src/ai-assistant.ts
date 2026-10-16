@@ -171,7 +171,8 @@ export interface AiAssistantReplyView {
  * - thinking·answer: 글 조각. answer는 출처 표시를 지우기 전 원문이라, done의 reply.answer로 바꿔 보인다
  * - 한 차례에서 answer 조각 뒤에 tool_start가 오면 그 글은 최종 답이 아니라 도구를 부르기 전의 중간 글이다
  * - 쓰기 도구(승인 카드): tool_start → approval_required → approval_resolved → (허용이면) tool_execution → tool_end.
- *   인자·사전 확인이 틀리면 카드 없이 tool_end만 온다(모델이 고쳐 다시 부른다). toolId는 같은 도구 호출의 tool_start.id
+ *   인자·사전 확인이 틀리면 카드 없이 tool_end만 온다(모델이 고쳐 다시 부른다). toolId는 같은 도구 호출의 tool_start.id.
+ *   카드를 기다리는 동안 heartbeat가 20초마다 온다
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
@@ -192,6 +193,8 @@ export type AiAssistantStreamEvent =
       expiresAt: string;
     }
   | { type: 'approval_resolved'; approvalId: string; decision: AiApprovalResolution }
+  /** 승인 카드를 기다리는 동안 20초마다 보내는 빈 이벤트. 프록시가 조용한 연결을 끊지 않게 한다. 화면은 무시한다 */
+  | { type: 'heartbeat' }
   | {
       type: 'tool_execution';
       approvalId: string;

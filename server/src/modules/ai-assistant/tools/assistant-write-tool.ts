@@ -23,8 +23,13 @@ export interface WriteToolContext {
 
 export interface PreparedWrite {
   card: { title: string; details: AiApprovalDetail[] };
-  /** 허용 뒤 실행. 쓰기와 AI 경유 작업 로그를 한 트랜잭션에서 남긴다. 실패는 그대로 던진다 */
-  execute(): Promise<WriteToolOutcome>;
+  /**
+   * 허용 뒤 실행. 쓰기와 AI 경유 작업 로그(after.approvalId)를 한 트랜잭션에서 남긴다. 실패는 그대로 던진다.
+   * actor는 허용을 보낸 요청의 사원(그 순간의 권한)이라 권한 확인과 작업 로그 주체로 쓴다.
+   * 멱등이어야 한다: 같은 approvalId의 작업 로그가 이미 있으면 새로 만들지 않고 그 결과를 돌려준다
+   * (COMMIT 뒤 연결이 끊겨 다시 할 때 두 번 저장되지 않게)
+   */
+  execute(actor: AuthUser, approvalId: string): Promise<WriteToolOutcome>;
 }
 
 export interface WriteToolOutcome {

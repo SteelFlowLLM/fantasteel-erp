@@ -1,6 +1,8 @@
 import { PERMISSION, type AuthUser } from '@fantasteel/shared';
 import type { PrismaService } from '../../../prisma/prisma.service';
 import type { AssistantDraftInput, MessageActionService } from '../../message-action/message-action.service';
+import { retryOnNumberConflict } from '../../purchasing/purchasing.service';
+import type { AiAssistantRepository } from '../ai-assistant.repository';
 import { optionalDate, optionalString, requiredString } from './assistant-tool';
 import type { AssistantWriteTool } from './assistant-write-tool';
 
@@ -11,6 +13,7 @@ const QUESTION_MAX = 1000;
 export interface PurchaseRequisitionDraftWriteToolDeps {
   prisma: PrismaService;
   messageActions: MessageActionService;
+  repository: AiAssistantRepository;
 }
 
 /**
@@ -59,8 +62,16 @@ export function purchaseRequisitionDraftWriteTool(deps: PurchaseRequisitionDraft
             { label: '다음 단계', value: '초안 화면에서 확인·확정하면 구매요청이 등록되고 부서장 승인을 기다려요' },
           ],
         },
-        execute: async () => {
-          const { id } = await deps.messageActions.createFromAssistant(user, input);
+        execute: async (actor, approvalId) => {
+          // 카드에 보인 원료로만 만든다: 그 사이 코드가 다른 원료를 가리키면 COM-001로 멈춘다(다시 하지 않음)
+          const confirmed = { ...input, expectedItemId: payload.itemId ?? undefined };
+          const id = await retryOnNumberConflict(() =>
+            deps.prisma.$transaction(async (tx) => {
+              // 같은 카드로 이미 만들었으면(COMMIT 뒤 연결이 끊겨 다시 하는 경우) 그 초안을 돌려준다
+              const done = await deps.repository.findApprovalEvent(tx, approvalId);
+              return done ? done.targetId : deps.messageActions.createFromAssistantIn(tx, actor, confirmed, approvalId);
+            }),
+          );
           return {
             message: `구매요청 초안 #${id}을(를) 만들었어요. 초안 화면에서 확인·확정해 주세요`,
             result: { table: 'action_draft', id, label: `구매요청 초안 #${id}`, linkPath: `/action-drafts/${id}` },

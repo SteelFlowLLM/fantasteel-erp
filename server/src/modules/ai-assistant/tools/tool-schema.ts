@@ -31,7 +31,7 @@ export function parseToolArguments(raw: string, schema: ToolParameterSchema): Pa
 
   const args = Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null));
   const errors: string[] = [];
-  const unknown = Object.keys(args).filter((key) => !(key in schema.properties));
+  const unknown = Object.keys(args).filter((key) => !Object.hasOwn(schema.properties, key));
   if (unknown.length) errors.push(`없는 인자예요: ${unknown.join(', ')}`);
   for (const key of schema.required) {
     if (args[key] === undefined || args[key] === '') errors.push(`${key}가 필요해요`);
