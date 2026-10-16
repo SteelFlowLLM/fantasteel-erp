@@ -24,6 +24,8 @@ const connection = (overrides: Partial<IntegrationConnectionView> = {}): Integra
   connectedBy: { id: 1, name: '관리자' },
   lastError: null,
   settings: { parentPageId: PAGE_ID },
+  redirectUri: null,
+  oauthClient: null,
   ...overrides,
 });
 

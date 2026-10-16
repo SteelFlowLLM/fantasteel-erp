@@ -25,6 +25,7 @@
 | --- | --- | --- | --- |
 | POST | `meeting-minutes` | API-258 회의록 만들기(글로 붙여 넣기, JSON) | 로그인한 전 역할 |
 | POST | `meeting-minutes/audio` | 🟡 회의록 만들기(음성, multipart) | 로그인한 전 역할 |
+| POST | `meeting-minutes/audio/from-drive` | 🟡 회의록 만들기(회사 Google Drive 폴더의 녹음, JSON, 이슈 #361) | 로그인한 전 역할 |
 | POST | `meeting-minutes/:id/analyze` | API-260 AI 정리(다시 정리 포함) | **작성자만** |
 | PATCH | `meeting-minutes/:id/candidates/:key` | API-261 후보 고치기·허가·제외 | **작성자만**, `REVIEW`만 |
 | PATCH | `meeting-minutes/:id/speakers` | 🟡 화자 이름표 → 참석자 연결 (Voice2ERP 묶음 1) | **작성자만**, `TRANSCRIBED`·`REVIEW`·전사가 남은 `FAILED` |
@@ -56,6 +57,14 @@
 - **원본 음성은 저장하지 않는다** (BP-VOC-01): 업로드 버퍼는 메모리에만 있고 디스크·DB에 쓰지 않으며, 작업이 끝나면 참조를 놓는다.
 - **멈춘 작업 정리** (`MeetingJobLease`, 전사·분석 공통): 공용 DB(Supabase)에서는 여러 서버가 같은 표를 쓰므로, 켤 때 진행 중 행을 모두 실패로 돌리면 다른 팀원 서버가 처리 중인 작업까지 실패가 된다. 그래서 작업을 맡은 서버가 **줄을 선 순간부터 2분마다** 그 행의 `updated_at`을 갱신하고(`touchInProgress`), 정리는 **마지막 갱신이 10분 넘게 지난 행만**(이 서버가 맡은 행은 빼고) `FAILED`로 바꾼다(`failStale`). 정리는 서버가 켜질 때와 2분마다 돈다. 전사는 음성이 메모리와 함께 사라졌으므로 `failure_reason` = `전사하던 서버가 멈춰 전사가 중단됐어요. 음성을 다시 올려 주세요`. 실패한 회의록은 다시 돌릴 수 없고 음성을 새로 올려야 한다.
   - 🟡 이 PR 전 코드를 쓰는 서버는 켤 때 여전히 모든 진행 중 행을 실패로 바꾼다. 공용 DB를 쓰는 팀원이 모두 이 코드로 올라와야 효과가 있다.
+
+**Drive 녹음으로 만들기** (`POST meeting-minutes/audio/from-drive`, 이슈 #361, 문서에 없는 경로)
+- 관리자가 연결한 회사 Google Drive의 **정해 둔 폴더**에 팀이 올린 녹음을 고른다([integration.md](integration.md) 'Google Drive'). 화면은 `GET integrations/google-drive/files?kind=audio`로 목록을 받아 파일 id를 보낸다.
+- 본문(JSON): `meetingMinutesTitle`, `meetingDate`, `attendeeIds`(**숫자 배열** — multipart가 아니라 JSON이라 음성 올리기의 JSON 문자열과 다르다), `driveFileId`(Drive id 모양 `[A-Za-z0-9_-]{10,200}`, 아니면 `COM-004`). 권한은 음성 올리기와 같다(로그인).
+- **응답 전에 파일을 확인한다** (`GoogleDriveService.checkFile`): Drive 연결(`INT-002`·`INT-003`)·폴더 설정(`INT-011`) → 메타데이터로 **설정한 폴더 바로 아래·휴지통 아님**(아니면 `INT-012`, 폴더 밖 파일이 있는지도 알려 주지 않는다) → 녹음인지(음성 올리기와 같은 판정 `isMeetingAudio`, 아니면 `INT-013`) → **500MB 이하**(`MEETING_AUDIO_MAX_BYTES`, 넘으면 `INT-014`). 잘못된 파일로 회의록을 남기지 않으려고 확인 뒤에 `createRecord`(제목·회의일·참석자 검증, 한 트랜잭션)를 한다.
+- 그다음은 음성 올리기와 **같은 전사 작업**이다: `TRANSCRIBING`으로 바로 돌려주고(201), `MeetingTranscriptionRunner` 줄에 `loadAudio`를 넣는다. 차례가 오면 Drive에서 녹음을 **메모리로만** 받고(받기 직전 메타데이터를 다시 확인, 받는 중에도 500MB를 넘으면 끊는다, 조각이 60초 동안 오지 않으면 끊는다) 같은 `SttClient.transcribe`로 전사한다. 줄 안에서 받으므로 큰 녹음 여러 개가 한꺼번에 메모리에 오르지 않는다. 파일 이름·MIME은 Drive 값을 쓴다.
+- 받기 실패 → `FAILED`, `failure_reason` = `Drive에서 녹음을 받지 못했어요: <이유>`(예: 연결이 끊김·Google 오류). 원본은 Drive에 그대로 있으므로 다시 만들면 된다. 원본 음성은 이 서버의 디스크·DB에 남기지 않는다(BP-VOC-01).
+- 🟡 스키마는 바꾸지 않았다: 회의록에 Drive 파일 id를 남기지 않는다. 원본은 Drive 폴더에 있고, 회의록에서 원본으로 돌아가는 링크나 같은 녹음을 두 번 가져오는 것을 막는 규칙이 아직 필요 없어서다. 필요해지면 `meeting_minutes.source_drive_file_id`(nullable)를 더한다.
 
 **목록** 회의일 최신순, 같은 날은 id 큰 순. 필터: `meetingMinutesStatus`, `keyword`(제목 부분 일치, 대소문자 무시), `page`·`size`(기본 20, 최대 100). 🟡 회의일 범위 필터는 공통 패턴이 없어 만들지 않았다.
 
@@ -160,6 +169,8 @@ VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회
 
 입력 형식 오류(빈 제목·기록, 참석자 없음, 길이 초과, 없는 날짜)는 `COM-004`(400).
 
+Drive 녹음으로 만들기는 `INT-002`·`INT-003`(연결 없음·다시 연결 필요), `INT-011`(폴더 미설정), `INT-012`(폴더에 없는 파일), `INT-013`(녹음 아님), `INT-014`(500MB 초과)를 쓴다 ([integration.md](integration.md) 오류 코드).
+
 ## 6. 테스트
 
 `meeting-minutes.spec.ts` (묶음 `fs_collab`): 만들기(줄 나누기·참석자·중복), 빈 기록·없는 참석자·없는 날짜 거절, 목록 순서·필터·쪽, 상세·404. 음성: `SttClient`·`SttSettingsStore`를 가짜로 바꿔 즉시 TRANSCRIBING 응답 → TRANSCRIBED 구간 저장, 구간 없을 때 전체 글, STT 실패 → FAILED 이유, 이미 상태가 바뀐 행 덮어쓰지 않음, 한 번에 하나 실행, 시작 복구, 잘못된 입력 거절.
@@ -171,6 +182,8 @@ VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
 
 Notion 내보내기: `integration/integration.spec.ts` (묶음 `fs_collab`, 가짜 OAuth·MCP 서버) — 작성자·관리자·그 밖의 사원, 확정 전 `VOC-004`, 두 번째 `VOC-008`, 상위 페이지 없음 `INT-006`, 도구 없음 `INT-005` 뒤 잡기 풀림, 도구 호출 직전 잡기, 잡기를 잃으면 `COM-001`, 결과를 알 수 없으면 `INT-009`·잡기 유지, Notion 오류 `INT-004`·잡기 풀림, 다시 연결 필요 `INT-003`. 순수 단위 `meeting-notion.markdown.unit.spec.ts`: 마크다운 섹션·허가한 후보만·제목 자르기·Notion 태그와 블록 표시 막기.
+
+Drive 녹음으로 만들기: `integration/google-drive/google-drive.spec.ts` (묶음 `fs_collab`, 가짜 Google 서버 + 가짜 STT) — 받은 녹음 바이트·이름·MIME·화자 수가 STT에 그대로 가고 `TRANSCRIBED`, 사진·폴더 밖·잘못된 id·참석자 없음은 회의록을 만들지 않고 거절, 로그인 필요, 백그라운드 받기 실패 → `FAILED` + 이유, 연결이 끊긴 뒤 `INT-003`.
 
 `meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정.
 
