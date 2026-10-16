@@ -26,6 +26,8 @@ const detailSelect = {
   analysisResult: true,
   failureReason: true,
   confirmedAt: true,
+  notionPageUrl: true,
+  notionExportedAt: true,
   createdAt: true,
   updatedAt: true,
   creator: { select: { id: true, employeeName: true } },
@@ -232,6 +234,32 @@ export class MeetingMinutesRepository {
       data: { analysisResult },
       select: { id: true },
     });
+  }
+
+  /**
+   * Notion 내보내기를 잡는다: 확정됐고 아직 내보내지 않았으며 아무도 내보내는 중이 아닐 때만 notion_exported_at에 시각을 적는다. 아니면 0건.
+   * 두 사람이 동시에 눌러 Notion 페이지가 두 개 생기지 않게 한다. 내보내던 서버가 멈춘 잡기(staleBefore보다 오래됨)는 다시 잡을 수 있다.
+   */
+  claimNotionExport(tx: Tx, id: number, claimedAt: Date, staleBefore: Date) {
+    return tx.meetingMinutes.updateMany({
+      where: {
+        id,
+        meetingMinutesStatus: MEETING_MINUTES_STATUS.CONFIRMED,
+        notionPageUrl: null,
+        OR: [{ notionExportedAt: null }, { notionExportedAt: { lt: staleBefore } }],
+      },
+      data: { notionExportedAt: claimedAt },
+    });
+  }
+
+  /** 내가 잡은 내보내기만 끝낸다 */
+  finishNotionExport(tx: Tx, id: number, claimedAt: Date, notionPageUrl: string, exportedAt: Date) {
+    return tx.meetingMinutes.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionPageUrl, notionExportedAt: exportedAt } });
+  }
+
+  /** 내보내기가 실패하면 잡은 것을 푼다 */
+  releaseNotionExport(tx: Tx, id: number, claimedAt: Date) {
+    return tx.meetingMinutes.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionExportedAt: null } });
   }
 
   createScheduleEvent(tx: Tx, data: Omit<Prisma.ScheduleEventUncheckedCreateInput, 'attendees'>, attendeeIds: number[]) {

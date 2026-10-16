@@ -5,6 +5,7 @@ import {
   type AiActionCardExecuteResult,
   type AiAssistantMessageInput,
   type AiAssistantReplyView,
+  type AiAssistantStreamEvent,
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
   type AiAssistantToolTrace,
@@ -12,8 +13,9 @@ import {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { actionCardExamplesFor } from './action-card-examples';
 import { AiActionCardService } from './ai-action-card.service';
@@ -28,6 +30,13 @@ import { findManualGuides } from './knowledge/manual.search';
 import { findProcessSteps } from './knowledge/process.search';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox } from './tools/assistant-toolbox';
+
+/** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
+export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
+
+export interface PreparedAsk {
+  run(emit?: AssistantEmit, signal?: AbortSignal): Promise<AiAssistantReplyView>;
+}
 
 const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자에게 LLM 연결 설정을 요청해 주세요';
 
@@ -81,6 +90,21 @@ export class AiAssistantService {
   }
 
   async ask(user: AuthUser, input: AiAssistantMessageInput): Promise<AiAssistantReplyView> {
+    const prepared = await this.prepare(user, input);
+    try {
+      return await prepared.run();
+    } catch (error) {
+      if (!(error instanceof LlmRequestError)) throw error;
+      this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
+      throw new AppException('COM-999', error.message, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  /**
+   * 답을 만들기 전 확인(모델 설정·회의록)과 프롬프트 준비. 여기서 던지는 오류는 평소 API 오류로 나가고,
+   * 스트리밍 API는 이것이 통과한 뒤에야 응답을 시작한다. run은 LLM 실패를 LlmRequestError로 던진다.
+   */
+  async prepare(user: AuthUser, input: AiAssistantMessageInput): Promise<PreparedAsk> {
     const settings = await this.settingsStore.read();
     if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
     const model = settings.model;
@@ -104,49 +128,63 @@ export class AiAssistantService {
       history,
       question: input.question,
     });
+    const profile = assistantProfile(input.reasoning);
+    const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
 
-    const started = Date.now();
-    const dataSources: AiAssistantSource[] = [];
-    const toolCalls: AiAssistantToolTrace[] = [];
-    const actionCards: AiActionCard[] = [];
-    const tools = this.toolbox.definitions({ actionCards: input.actionCards });
-    let reply = await this.call(settings, model, messages, tools);
-    // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
-    if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
-      messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
-      reply = await this.call(settings, model, messages, tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
-    }
-    for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
-      messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
-      for (const call of reply.toolCalls) {
-        const callStarted = Date.now();
-        const result = await this.toolbox.run(user, call);
-        toolCalls.push({ name: call.name, arguments: cut(call.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted });
-        messages.push({ role: 'tool', toolCallId: call.id, content: result.content });
-        if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
-        // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
-        for (const card of input.actionCards ? (result.cards ?? []) : []) {
-          if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+    return {
+      run: async (emit, signal) => {
+        const started = Date.now();
+        const dataSources: AiAssistantSource[] = [];
+        const toolCalls: AiAssistantToolTrace[] = [];
+        const actionCards: AiActionCard[] = [];
+        const tools = this.toolbox.definitions({ actionCards: input.actionCards });
+        const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
+          emit
+            ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
+            : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
+        let reply = await call(tools);
+        // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
+        if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
+          messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
+          reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
         }
-      }
-      reply = await this.call(settings, model, messages, round < MAX_TOOL_ROUNDS ? tools : []);
-    }
+        for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
+          messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
+          for (const toolCall of reply.toolCalls) {
+            if (signal?.aborted) throw new LlmAbortedError();
+            const callStarted = Date.now();
+            const traceId = `t${toolCalls.length + 1}`;
+            emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
+            const result = await this.toolbox.run(user, toolCall);
+            const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
+            toolCalls.push(trace);
+            emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs });
+            messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
+            if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
+            // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
+            for (const card of input.actionCards ? (result.cards ?? []) : []) {
+              if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+            }
+          }
+          reply = await call(round < MAX_TOOL_ROUNDS ? tools : []);
+        }
 
-    const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
-    // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
-    if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
-    const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
-    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null, actionCards };
-  }
-
-  private async call(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
-    try {
-      return await this.llm.chatWithTools(endpoint, model, messages, tools);
-    } catch (error) {
-      if (!(error instanceof LlmRequestError)) throw error;
-      this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
-      throw new AppException('COM-999', error.message, HttpStatus.SERVICE_UNAVAILABLE);
-    }
+        const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+        // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
+        if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
+        const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
+        return {
+          answer: parsed.answer,
+          sources: [...dataSources, ...parsed.sources],
+          model,
+          latencyMs: Date.now() - started,
+          toolCalls,
+          thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
+          reasoningApplied: reply.reasoningApplied ?? true,
+          actionCards,
+        };
+      },
+    };
   }
 
   /** "그건 언제 풀려?"처럼 용어 없이 이어 묻는 질문은 바로 앞 질문의 용어를 쓴다 */

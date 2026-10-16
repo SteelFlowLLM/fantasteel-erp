@@ -1,3 +1,4 @@
+import { AI_REASONING_LEVELS, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
@@ -62,6 +63,10 @@ export class AskAiAssistantDto {
   @ValidateNested({ each: true })
   @Type(() => AiAssistantTurnDto)
   history?: AiAssistantTurnDto[];
+
+  @IsOptional()
+  @IsIn(AI_REASONING_LEVELS)
+  reasoning?: AiReasoningLevel;
 }
 
 /** 수주 등록 카드의 품목 줄. 매수·규격·납기의 뜻은 수주 등록 service가 본다 */

@@ -22,6 +22,7 @@
 | message-action | [message-action.md](message-action.md) | Message → ERP 구매요청 초안 | 정건희 |
 | ai-assistant | [ai-assistant.md](ai-assistant.md) | AI 어시스턴트 (P2): 용어 사전 답변·화면 맥락·추천 질문 | 현명지 |
 | past-case | [past-case.md](past-case.md) | 과거 사례 (EX): 검색·AI 사례 초안·등록. 예시 사례 + 등록 사례(`past_case`) | |
+| integration | [integration.md](integration.md) | 외부 서비스 연결(Notion 원격 MCP, 이후 Google Drive)·회의록 Notion 내보내기 (이슈 #358) | |
 
 시드 내용과 테스트 계정: [seed.md](seed.md). 담당 칸은 역할 분담이 정해지면 채운다 (기획안: 역할 분담 TBD).
 

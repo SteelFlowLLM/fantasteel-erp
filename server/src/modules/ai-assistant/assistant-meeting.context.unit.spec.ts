@@ -51,6 +51,8 @@ const meeting = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
   creator: { id: 7, name: '박서영' },
   attendees: [{ employeeId: 7, employeeName: '박서영', departmentName: '영업부', roleCode: ROLE.SALES }],
   confirmedAt: null,
+  notionPageUrl: null,
+  notionExportedAt: null,
   createdAt: '2026-10-14T00:00:00Z',
   updatedAt: '2026-10-14T00:00:00Z',
   ...over,

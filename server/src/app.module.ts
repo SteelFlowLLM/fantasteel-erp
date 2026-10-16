@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FactoryAgentModule } from './modules/factory-agent/factory-agent.module';
+import { IntegrationModule } from './modules/integration/integration.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { SttModule } from './modules/stt/stt.module';
@@ -55,6 +56,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ScheduleEventModule,
     DashboardModule,
     LlmModule,
+    IntegrationModule,
     SttModule,
     PastCaseModule,
     AiAssistantModule,

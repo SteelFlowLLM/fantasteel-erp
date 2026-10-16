@@ -28,6 +28,7 @@ import { NotificationService } from '../notification/notification.service';
 import { OrganizationService } from '../organization/organization.service';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { LLM_PROFILE } from '../llm/llm-profiles';
 import { MrpService } from '../mrp/mrp.service';
 import { ProductionService } from '../production/production.service';
 import { PurchasingService, retryOnNumberConflict } from '../purchasing/purchasing.service';
@@ -444,7 +445,7 @@ export class FactoryAgentService {
     if (!settings.model) return fallback;
     try {
       const messages = buildExplainMessages({ riskLabel: AGENT_RISK_TYPE_LABEL[view.riskType], summary: view.summary, basis, today: seoulToday() });
-      const reply = await this.llm.chat(settings, settings.model, messages);
+      const reply = await this.llm.chat(settings, settings.model, messages, LLM_PROFILE.AGENT_EXPLAIN);
       return reply ? { draftId: id, explanation: reply, basis, generatedByAi: true } : fallback;
     } catch (e) {
       if (!(e instanceof LlmRequestError)) throw e;

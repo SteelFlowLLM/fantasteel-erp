@@ -2,7 +2,7 @@
 
 // AI 실행 기록 (Voice2ERP). 모델이 단계마다 낸 답 원문·생각 글과 서버가 버리거나 고친 항목을 접어 둔다.
 // 후보가 왜 빠졌는지, 어떤 모델이 얼마나 걸렸는지 사람이 직접 따라가 보게 하려는 것이라 기본은 접혀 있다.
-import type { AiAssistantToolTrace, MeetingAnalysisTrace, MeetingTraceStep } from '@fantasteel/shared';
+import type { MeetingAnalysisTrace, MeetingTraceStep } from '@fantasteel/shared';
 import { Badge } from '@/components/Badge';
 import { formatDuration, TRACE_STAGE_LABEL, traceSummaryText } from '@/lib/meetingAnalysis';
 
@@ -62,38 +62,6 @@ export function MeetingTracePanel({ trace }: { trace: MeetingAnalysisTrace | und
           <Step key={step.stage} step={step} />
         ))}
       </ol>
-    </details>
-  );
-}
-
-/** 회의 질문 답 아래: 답을 만들며 부른 조회 도구와 생각 글. 서버에 남지 않고 이 답에만 있다 */
-export function AskTrace({ toolCalls, thinking }: { toolCalls: AiAssistantToolTrace[]; thinking: string | null }) {
-  if (toolCalls.length === 0 && !thinking) return null;
-  return (
-    <details className="border-t border-line pt-2">
-      <summary className={SUMMARY}>
-        {toolCalls.length > 0 ? `조회한 것 보기 · ${toolCalls.length}번` : '모델의 생각 글 보기'}
-      </summary>
-      {toolCalls.length > 0 ? (
-        <ol className="mt-1.5 flex flex-col gap-1.5">
-          {toolCalls.map((call, index) => (
-            <li key={index} className="flex flex-col gap-1 text-xs">
-              <span className="flex flex-wrap items-baseline gap-x-2">
-                <b className="font-mono">{call.name}</b>
-                <span className="text-ink-3">{formatDuration(call.durationMs)}</span>
-              </span>
-              <span className="font-mono text-cap break-all text-ink-3">입력 {call.arguments}</span>
-              <pre className={PRE}>{call.resultPreview}</pre>
-            </li>
-          ))}
-        </ol>
-      ) : null}
-      {thinking ? (
-        <div className="mt-1.5">
-          <p className="mb-1 text-cap text-ink-3">모델의 생각 글 · 모델이 스스로 쓴 설명이라 실제 판단과 다를 수 있어요</p>
-          <pre className={PRE}>{thinking}</pre>
-        </div>
-      ) : null}
     </details>
   );
 }

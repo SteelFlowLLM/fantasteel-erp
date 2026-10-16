@@ -24,7 +24,8 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 
 | Method | Path | ID | 권한 | 응답 |
 | --- | --- | --- | --- | --- |
-| POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking }` |
+| POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
+| POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 | POST | `ai-assistant/action-cards/execute` | 🟡 명세에 없음 | 로그인만(구매요청 카드는 구매요청 등록 USE를 service가 확인) | `AiActionCardExecuteResult` `{ kind, registered: { type: task / schedule_event / action_draft, id } }` (201) |
 
@@ -37,10 +38,27 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `meetingMinutesId` | 선택, 1 이상 정수. 회의록 상세의 "이 회의에 대해 묻기"가 보낸다(아래 '회의 질문'). 없는 회의록이면 `VOC-001`(404)이고 LLM을 부르지 않는다 |
 | `actionCards` | 선택, boolean. 철강맨AI 패널만 `true`로 보낸다(아래 "실행 카드"). 응답의 `actionCards[]`에 카드가 담긴다 |
 | `history` | 선택. `{ role: 'user'\|'assistant', content }[]` 20개까지. 서버는 최근 10개, 한 줄 2000자까지만 쓴다 |
+| `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
 
 `sources[]`: `{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }` 또는 `{ kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' }`(업무 순서·흐름 답) 또는 `{ kind: 'MANUAL', id: 'MAN-SO-01', label: '수주 등록' }`(화면 절차 답) 또는 `{ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' }`. 조회 데이터가 앞에 오고, 업무 매뉴얼·업무 프로세스가 용어 사전보다 앞에 온다.
 
 대화가 저장되지 않아 새 자원이 없으므로 `POST`지만 200을 돌려준다.
+
+**실시간 답 API** (문서에 없는 기능, 2026-10-16 추가) — `ai-assistant.controller.ts`의 `askStream`
+- 요청: `POST ai-assistant/messages/stream`. 본문은 API-262와 같고 `reasoning`을 받는다. 입력 검사도 같다. 철강맨AI 패널은 이 API로 묻고 `actionCards: true`를 보낸다.
+- 응답: `Content-Type: application/x-ndjson`. 한 줄에 이벤트 JSON 하나를 보낸다. 시작한 뒤에는 `done` 또는 `error` 중 하나로 끝난다.
+- 시작 전 오류는 평소 JSON 오류 응답으로 돌려주고 스트림을 열지 않는다. 예: 질문 형식 `COM-004`, 없는 회의록 `VOC-001`(404), 모델 미설정 `COM-999`(503).
+- 시작한 뒤의 실패(LLM 연결 실패·시간 초과 등)는 HTTP 200을 유지한 채 `error` 이벤트로 보낸다.
+- 브라우저가 연결을 끊으면(멈추기) LLM 요청도 끊는다. 멈춤은 오류로 보내지 않는다.
+
+| 이벤트 (`type`) | 필드 | 뜻 |
+| --- | --- | --- |
+| `thinking` | `text` | 생각 글 조각. 추론 모델의 `reasoning_content`나 답 안의 `<think>` 블록에서 온다 |
+| `answer` | `text` | 답 글 조각. 출처 표시(`[TRM-…]`)가 아직 남은 원문이다. 조각 뒤에 `tool_start`가 오면 도구를 부르기 전의 중간 글이라 최종 답이 아니다 |
+| `tool_start` | `id`, `name`, `arguments` | 조회 도구를 부르기 시작. `name`은 도구 이름(한글 제목은 `AI_ASSISTANT_TOOL_TITLE`), `arguments`는 모델이 넘긴 입력 JSON 문자열 |
+| `tool_end` | `id`, `label`, `resultPreview`, `durationMs` | 같은 `id`의 도구 결과. `resultPreview`는 결과 앞부분, `label`은 조회 대상 이름(없으면 `null`), `durationMs`는 걸린 시간 |
+| `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이고, 실행 카드는 `reply.actionCards`로 온다. 카드를 만들었다고만 답해 카드 도구로 한 번 더 부르면 그 답 글도 이어서 `answer`로 오지만, 최종 답은 `reply.answer`다 |
+| `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
 
 ## 4. 업무 규칙
 
@@ -126,6 +144,13 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - 자료·도구 결과에 없는 내용은 확인할 수 없다고 답한다. 등록·확정·승인 요청은 직접 할 수 없다고 답한다. 사용 금지 동의어 대신 한글명을 쓴다.
 - "이 수주"처럼 화면을 가리키면 화면 주소에서 번호·id를 찾고, 없으면 되묻는다.
 
+**생각 정도 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `assistantProfile`, `llm.client.ts`의 `reasoningEffortFor`
+- 단계: `off` 끔 · `low` 낮게 · `medium` 보통 · `high` 깊게. 고르지 않으면 보통(`AI_REASONING_DEFAULT`)이다.
+- 끔은 비생각 샘플링 값을 쓴다. 나머지 단계는 생각 샘플링 값을 쓴다(아래 기능별 설정 표).
+- `reasoning_effort`는 LM Studio `/api/v1/models`가 그 모델의 `capabilities.reasoning.allowed_options`를 알려 줄 때만 보낸다. 모델 정보는 60초 동안 기억한다.
+  - 고른 단계를 모델이 받으면 그대로 보낸다. 받지 않으면 가장 가까운 단계를 보낸다(같은 거리면 높은 쪽). `off`는 모델이 `off`를 받을 때만 `none`으로 보낸다.
+  - 모델 정보가 없거나(외부 LLM·옛 LM Studio) 맞는 단계가 없으면 `reasoning_effort`를 빼고 보낸다. 이때 응답의 `reasoningApplied`는 `false`이고, 화면이 그렇게 안내한다.
+
 **출처**(`assistant.answer.ts`)
 - 답 본문의 `[TRM-…]`·`[BP-…]`·`[MAN-…]`(괄호도 가능) 표시를 지우고, **넘긴 참고 자료 안의** 용어·업무만 `sources`로 돌려준다(모델이 지어낸 ID는 버림).
 - 모델이 ID를 빠뜨리면 본문에 이름이 나온 참고 용어를 출처로 둔다.
@@ -155,6 +180,26 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | notification·message-action·meeting-minutes | 실행 카드: `TaskService.createInTx`, `NotificationService.notifyEmployees`, `MessageActionService.createFromAssistant`(`createFromMeeting`과 같은 `createAiDraft`), 회의록의 `applyCandidateEdit`·`matchEmployee`·`matchItem` 규칙을 쓴다. 일정 알림 문구는 `schedule-event/schedule-notice.ts`로 옮겨 회의록과 같이 쓴다 |
 | lot·business-event·quality | `exports`에 `LotService`·`BusinessEventService`·`QualityService`·`RejectedLotService`를 더했다(모듈 동작은 그대로) |
 
+**기능별 LLM 설정 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `LLM_PROFILE`. 기능마다 샘플링 값과 생각 정도를 정해 요청마다 실어 보낸다. 값이 요청 시점에 들어가므로 LM Studio에서 모델을 다시 불러올 필요가 없다.
+
+| 기능 (`LLM_PROFILE` 키) | 샘플링 | 생각 정도 |
+| --- | --- | --- |
+| `CONNECTION_TEST` AI 연결 응답 확인 | 비생각 | 끔 |
+| `ASSISTANT` AI 어시스턴트 | 생각 | 보통 (사용자가 고르면 그 단계) |
+| `AGENT_EXPLAIN` Agent 상황 설명 | 비생각 | 끔 |
+| `MEETING_ANALYSIS` 회의록 1차 분석 (JSON) | 추출 | 보통 |
+| `MEETING_REVIEW` 회의록 2차 검토 (JSON) | 추출 | 보통 |
+| `MESSAGE_EXTRACT` Message → ERP 초안 (JSON) | 추출 | 끔 |
+| `PAST_CASE_DRAFT` 과거 사례 초안 (JSON) | 추출 | 낮게 |
+
+| 샘플링 | temperature | top_p | top_k * | min_p * | repeat_penalty * | presence_penalty |
+| --- | --- | --- | --- | --- | --- | --- |
+| 생각 | 1 | 0.95 | 20 | 0 | 1 | 1.5 |
+| 비생각 | 0.7 | 0.8 | 20 | 0 | 1 | 1.5 |
+| 추출 (JSON, 같은 입력에 같은 답) | 0 | 1 | 20 | 0 | 1 | 0 |
+
+\* `top_k`·`min_p`·`repeat_penalty`는 OpenAI 표준에 없어 LM Studio에만 보낸다. 외부 LLM에는 보내지 않는다.
+
 ## 7. 테스트
 
 DB·LLM 없이 가짜 객체로 돈다.
@@ -178,3 +223,4 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 도구 결과 상한 | 목록 15줄·8000자·도구 호출 4번 | 문서에 없음(가정값, 작은 로컬 모델 기준) |
 | 실행 카드 | 업무·일정·구매요청(회의록 후보와 같은 규칙) + 수주 등록·열연 배정·히트 편성·과거 사례(기존 확정 기능 그대로). "사례 초안"은 PastCaseService의 사례 초안을 카드로 보여 등록하는 것으로 해석했다. 사내 채팅 @AI는 카드 없음. 카드 5장 상한·날짜 범위(오늘부터 1년)·수주 품목 10줄은 가정값. 출고 확정·승인·취소 등은 카드로 만들지 않음 | [02] REQ-AST-005, 회의록 등록과 같은 규칙 |
 | 도구 수 | 14개(과거 사례 포함)를 한 번에 모델에 알린다(실행 카드 도구는 패널 요청에만 더한다). 작은 모델이 도구를 잘못 고르면 질문 종류로 미리 좁히는 방식을 검토 | 실제 모델 확인 결과 |
+| 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

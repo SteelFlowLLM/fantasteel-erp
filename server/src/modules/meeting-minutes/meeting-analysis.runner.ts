@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type LlmJsonReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { LLM_PROFILE } from '../llm/llm-profiles';
 import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, buildReviewUserMessage, REVIEW_JSON_SCHEMA, REVIEW_SYSTEM_PROMPT, segmentPromptText, type ReviewCandidateLine } from './meeting-analysis.prompt';
 import { collectSalesOrderNos, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
 import { MeetingCandidateContextService } from './meeting-candidate.context';
@@ -119,7 +120,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     }));
     const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
     const promptInput = { meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) };
-    const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS };
+    const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS };
     const started = Date.now();
     const reply = await this.llmClient.chatJsonWithText(
       endpoint,
@@ -183,7 +184,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
           { role: 'user', content: buildReviewUserMessage({ ...promptInput, candidates: first.map(reviewLine) }) },
         ],
         REVIEW_JSON_SCHEMA,
-        { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS },
+        { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_REVIEW },
       );
       const durationMs = Date.now() - started;
       const merged = mergeReview(first, reply.value, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(reply.value)) });

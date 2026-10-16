@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   MEETING_ANALYSIS_MAX_CHARS,
   MEETING_MINUTES_STATUS,
   missingFieldsOf,
   NOTIFICATION_TYPE,
+  PERMISSION,
   type AuthUser,
   type MeetingAnalysis,
   type MeetingCandidate,
@@ -14,11 +15,15 @@ import {
   type MeetingMinutesPage,
   type MeetingMinutesStatus,
   type MeetingMinutesView,
+  type MeetingNotionExportResult,
   type Role,
   type TranscriptSegment,
 } from '@fantasteel/shared';
+import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
+import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
+import { NotionPageService } from '../integration/notion/notion-page.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
 import { scheduleWeekLink, shortSeoulTime } from '../schedule-event/schedule-notice';
@@ -31,10 +36,16 @@ import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { isMeetingAudio } from './meeting-audio';
 import { readAnalysis, readSegments, summarizeSpeakers } from './meeting-minutes.json';
+import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 
 const DEFAULT_PAGE_SIZE = 20;
+/**
+ * 내보내던 서버가 멈췄거나 결과를 알 수 없어 남은 잡기를 버리는 시간. 잡기는 도구를 부르기 바로 전에 하고
+ * 도구 호출 한 번은 MCP 요청 상한(60초) 안에 끝나므로, 정상 호출이 끝나기 전에 다른 사람이 다시 잡을 수 없게 그 5배로 둔다.
+ */
+const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -113,6 +124,9 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
       roleCode: a.employee.role.roleCode as Role,
     })),
     confirmedAt: row.confirmedAt?.toISOString() ?? null,
+    notionPageUrl: row.notionPageUrl,
+    // 주소 없이 시각만 있으면 내보내는 중이라 화면에는 내보내지 않은 것으로 보인다
+    notionExportedAt: row.notionPageUrl ? (row.notionExportedAt?.toISOString() ?? null) : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -124,6 +138,8 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
  */
 @Injectable()
 export class MeetingMinutesService {
+  private readonly logger = new Logger(MeetingMinutesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: MeetingMinutesRepository,
@@ -134,6 +150,7 @@ export class MeetingMinutesService {
     private readonly messageActions: MessageActionService,
     private readonly contexts: MeetingCandidateContextService,
     private readonly businessEventRecorder: BusinessEventRecorder,
+    private readonly notion: NotionPageService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -400,6 +417,54 @@ export class MeetingMinutesService {
       return { taskIds, scheduleEventIds, actionDraftIds, excludedKeys };
     });
     return { meetingMinutes: await this.get(id), ...created };
+  }
+
+  /**
+   * 확정한 회의록을 회사 Notion의 상위 페이지 아래 새 페이지로 내보낸다 (이슈 #358). 한 번만 내보내고 주소를 남긴다.
+   * 작성자나 관리자(ORG_MANAGE 사용)만 한다. 작업 로그는 남기지 않는다 (REQ-LOG-002에 맞는 이벤트가 없다).
+   */
+  async exportToNotion(user: AuthUser, id: number): Promise<MeetingNotionExportResult> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    const isAdmin = hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' });
+    if (row.creator.id !== user.employeeId && !isAdmin) throw new AppException('VOC-003', '회의록 작성자나 관리자만 Notion으로 내보낼 수 있어요');
+    if (row.confirmedAt === null || row.meetingMinutesStatus !== MEETING_MINUTES_STATUS.CONFIRMED) throw new AppException('VOC-004', '확정한 회의록만 Notion으로 내보낼 수 있어요');
+    if (row.notionPageUrl) throw new AppException('VOC-008');
+    // 연결·상위 페이지가 없으면 회의록을 잡기 전에 알린다
+    await this.notion.assertReady();
+
+    // 같은 Notion 연결의 다른 호출을 기다린 뒤 도구를 부르기 바로 전에 잡는다: 줄을 오래 서도 잡기가 만료되지 않게
+    const claim: { at: Date | null } = { at: null };
+    const takeClaim = async () => {
+      const at = new Date();
+      const { count } = await this.repository.claimNotionExport(this.prisma, id, at, new Date(at.getTime() - NOTION_EXPORT_STALE_MS));
+      if (count === 0) {
+        const current = await this.repository.findDetail(this.prisma, id);
+        if (current?.notionPageUrl) throw new AppException('VOC-008');
+        throw new AppException('VOC-008', '지금 다른 곳에서 이 회의록을 Notion으로 내보내는 중이거나, 직전 내보내기 결과를 확인하지 못했어요. Notion을 확인하고 잠시 뒤 새로 불러와 주세요');
+      }
+      claim.at = at;
+    };
+
+    let notionPageUrl: string;
+    try {
+      const view = toView(row);
+      notionPageUrl = await this.notion.createPage({ title: meetingNotionTitle(view), content: buildMeetingNotionMarkdown(view) }, takeClaim);
+    } catch (error) {
+      // 페이지가 만들어졌을 수 있으면(INT-009) 잡기를 남겨 바로 다시 눌러 중복 페이지가 생기지 않게 한다 (만료되면 다시 잡을 수 있다)
+      const uncertain = error instanceof AppException && error.code === 'INT-009';
+      if (claim.at && !uncertain) await this.repository.releaseNotionExport(this.prisma, id, claim.at);
+      throw error;
+    }
+    const claimedAt = claim.at;
+    const exportedAt = new Date();
+    const { count } = claimedAt ? await this.repository.finishNotionExport(this.prisma, id, claimedAt, notionPageUrl, exportedAt) : { count: 0 };
+    if (count === 0) {
+      // 잡기가 만료돼 다른 요청이 가져갔다. 만든 페이지 주소를 잃지 않게 로그와 문구에 남긴다
+      this.logger.error(`회의록 ${id}: Notion 페이지(${notionPageUrl})를 만들었지만 잡기를 잃어 주소를 저장하지 못했어요`);
+      throw new AppException('COM-001', `Notion 페이지(${notionPageUrl})는 만들었지만 회의록에 주소를 남기지 못했어요. 새로 불러와 중복 페이지가 없는지 Notion에서 확인해 주세요`);
+    }
+    return { notionPageUrl, notionExportedAt: exportedAt.toISOString(), meetingMinutes: await this.get(id) };
   }
 
   /** 작성자의 검토 중(REVIEW) 회의록과 그 분석 결과. 고치기·등록이 같은 확인을 한다 */
