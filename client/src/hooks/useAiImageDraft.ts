@@ -77,5 +77,8 @@ export function useAiImageDraft() {
     setNotice(null);
   }, [commit]);
 
-  return { images, busy, notice, addFiles, addCapture, remove, clear };
+  /** 사진을 붙이지 못한 이유를 사진 줄 아래에 보인다 (예: 모델이 사진을 볼 수 없음) */
+  const warn = useCallback((text: string) => setNotice({ text, error: true }), []);
+
+  return { images, busy, notice, addFiles, addCapture, remove, clear, warn };
 }

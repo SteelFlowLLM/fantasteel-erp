@@ -160,12 +160,15 @@ export function AiPanel() {
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
   const attachFiles = (files: readonly File[]) => {
-    if (visionOff) return;
+    // 버튼은 꺼 두지만 붙여 넣기·끌어 놓기는 막을 수 없어, 말없이 버리지 않고 이유를 알린다
+    if (visionOff) {
+      photos.warn(NO_VISION_TITLE);
+      return;
+    }
     void photos.addFiles(files);
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (visionOff) return;
     const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
     if (!files.length) return; // 글자만 붙여 넣는 건 그대로 둔다
     event.preventDefault();
