@@ -34,6 +34,9 @@ describe('parseAiAssistantStreamEvent', () => {
   it('알려진 이벤트는 읽고, 모르는 종류는 건너뛰고, JSON이 아니면 오류다', () => {
     expect(parseAiAssistantStreamEvent('{"type":"answer","text":"가"}')).toEqual({ type: 'answer', text: '가' });
     expect(parseAiAssistantStreamEvent('{"type":"heartbeat"}')).toBeNull();
+    expect(parseAiAssistantStreamEvent('{"type":"approval_resolved","approvalId":"a1","decision":"DENY"}')).toEqual({ type: 'approval_resolved', approvalId: 'a1', decision: 'DENY' });
+    expect(parseAiAssistantStreamEvent('{"type":"approval_required","approvalId":"a1","toolId":"t1"}')).not.toBeNull();
+    expect(parseAiAssistantStreamEvent('{"type":"tool_execution","approvalId":"a1","status":"FAILED"}')).not.toBeNull();
     expect(() => parseAiAssistantStreamEvent('not json')).toThrow('서버 응답을 읽을 수 없어요');
     expect(() => parseAiAssistantStreamEvent('[1]')).toThrow('서버 응답을 읽을 수 없어요');
   });
@@ -101,5 +104,30 @@ describe('aiAssistantApi.getCapabilities', () => {
     login();
     await expect(aiAssistantApi.getCapabilities()).resolves.toEqual({ model: 'qwen-vl', vision: true, reasoning: null });
     expect(calls[0]).toMatch(/\/ai-assistant\/capabilities$/);
+  });
+});
+
+describe('스트림의 heartbeat', () => {
+  it('승인 카드를 기다리는 동안 오는 heartbeat 줄은 이벤트로 넘기지 않고 건너뛴다', async () => {
+    stubStream([new TextEncoder().encode('{"type":"heartbeat"}\n{"type":"answer","text":"가"}\n{"type":"heartbeat"}\n{"type":"done","reply":{"answer":"끝"}}\n')]);
+    login();
+    const events: AiAssistantStreamEvent[] = [];
+    await aiAssistantApi.askStream({ question: '일정' }, (event) => events.push(event));
+    expect(events.map((event) => event.type)).toEqual(['answer', 'done']);
+  });
+});
+
+describe('aiAssistantApi.decideApproval', () => {
+  it('승인 카드 주소로 결정을 POST한다', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ success: true, data: { approvalId: 'a-1', decision: 'ALLOW' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    login();
+    await expect(aiAssistantApi.decideApproval('a-1', 'ALLOW')).resolves.toEqual({ approvalId: 'a-1', decision: 'ALLOW' });
+    expect(calls[0].url).toMatch(/\/ai-assistant\/approvals\/a-1$/);
+    expect(calls[0].init.method).toBe('POST');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ decision: 'ALLOW' });
   });
 });

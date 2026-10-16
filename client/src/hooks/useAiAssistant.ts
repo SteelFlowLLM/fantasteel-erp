@@ -1,13 +1,14 @@
 // AI 어시스턴트 훅. 답은 화면 토스트가 아니라 대화에 바로 보이므로 useAction이 아니라 대화 저장소에 직접 넣는다.
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
-import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiApprovalDecision, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
 import { useQuery } from '@tanstack/react-query';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
+import { ApiError } from '@/api/errors';
 import { isAbortError } from '@/api/http';
 import { useMe } from '@/hooks/useMe';
 import { AI_CHAT_STOPPED_REASON, aiChatHistory, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
-import { errorMessageOf } from '@/stores/useToastStore';
+import { errorMessageOf, toast } from '@/stores/useToastStore';
 
 export function useAiSuggestedQuestions() {
   const me = useMe();
@@ -59,7 +60,8 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   });
   try {
     await aiAssistantApi.askStream(
-      { question, screen, history, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}) },
+      // AI 패널은 승인 카드를 그리므로 쓰기 도구를 알리게 한다 (회의 질문 카드는 보내지 않는다)
+      { question, screen, history, approvalCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}) },
       (event) => {
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
@@ -72,6 +74,22 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   } finally {
     unsubscribe();
     if (activeController === controller) activeController = null;
+  }
+}
+
+/**
+ * 승인 카드의 허용·거부를 보낸다. 보내는 동안 카드는 '보내는 중'이고, 카드를 끝내는 건 스트림의 approval_resolved다(여기서 미리 정하지 않는다).
+ * 실패하면 다시 고를 수 있게 풀고 이유를 알린다. 이미 처리된 카드(AST-002)는 오류가 아니라 스트림의 최신 상태를 따르면 된다.
+ */
+export async function decideAiApproval(approvalId: string, decision: AiApprovalDecision): Promise<void> {
+  const chat = () => useAiChatStore.getState();
+  chat().setApprovalSending(approvalId, decision);
+  try {
+    await aiAssistantApi.decideApproval(approvalId, decision);
+  } catch (error) {
+    chat().setApprovalSending(approvalId, null);
+    if (error instanceof ApiError && error.code === 'AST-002') toast.info('이미 처리된 승인 요청이에요');
+    else toast.apiError(error);
   }
 }
 

@@ -6,6 +6,8 @@
 import { AI_ASSISTANT_TOOL_TITLE } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { AiApprovalCards } from '@/features/shell/AiApprovalCard';
+import { aiApprovalsForTool, aiApprovalsWithoutTool } from '@/lib/aiApproval';
 import { formatDuration } from '@/lib/meetingAnalysis';
 import type { AiChatLive, AiTimelineStep } from '@/stores/useAiChatStore';
 
@@ -84,6 +86,7 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
 /** 답을 기다리는 동안의 진행 상황. 아무것도 오지 않았으면 '만들고 있어요'만 보인다 */
 export function AiLiveView({ live }: { live: AiChatLive }) {
   const empty = live.steps.length === 0 && live.answer === '';
+  const toolIds = new Set(live.steps.flatMap((step) => (step.kind === 'tool' ? [step.id] : [])));
   return (
     <div aria-live="polite" className="flex flex-col gap-1.5 text-sm">
       {empty ? <p className="text-ink-2">답을 만들고 있어요…</p> : null}
@@ -95,9 +98,14 @@ export function AiLiveView({ live }: { live: AiChatLive }) {
             {step.text}
           </p>
         ) : (
-          <LiveTool key={step.id} step={step} />
+          // 승인 카드는 그 카드를 만든 도구 줄 바로 아래에 보인다
+          <div key={step.id} className="flex flex-col gap-1.5">
+            <LiveTool step={step} />
+            <AiApprovalCards cards={aiApprovalsForTool(live.approvals, step.id)} />
+          </div>
         ),
       )}
+      <AiApprovalCards cards={aiApprovalsWithoutTool(live.approvals, toolIds)} />
       {live.answer ? <p className="leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{live.answer}</p> : null}
     </div>
   );

@@ -14,9 +14,11 @@ import { PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
 export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
   const message = draft.message;
+  // 철강맨AI 대화에서 만든 초안은 원본 행(메시지·회의록)이 없다: 사용자가 AI에게 한 말(sourceText)이 출처다
+  const fromAssistant = !message && !draft.meetingMinutes && draft.payload.fromAiAssistant === true;
   return (
     <Card petKey="card:purchaseRequisitions.draftMessage">
-      <CardHead title={draft.meetingMinutes ? "원본 회의록" : "원본 메시지"} />
+      <CardHead title={draft.meetingMinutes ? '원본 회의록' : fromAssistant ? '원본 대화' : '원본 메시지'} />
       <CardBody className="gap-2.5 px-3.5 py-3">
         {message ? (
           <div data-pet-item="message" data-pet-item-title={`초안 #${draft.id} 원본 메시지`} className="flex flex-col gap-1.5 rounded-md border border-line bg-surface-2 px-3 py-2.5">
@@ -53,13 +55,27 @@ export function OriginMessageCard({ draft }: { draft: DraftDetailView }) {
               회의록으로 이동
             </ButtonLink>
           </div>
+        ) : fromAssistant ? (
+          <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface-2 px-3 py-2.5">
+            <span className="flex items-center gap-1.5 text-cap text-ink-3">
+              <Icon name="chat" size="sm" />
+              철강맨AI 대화에서 만든 초안
+            </span>
+            {draft.payload.sourceText ? (
+              <p className="text-sm break-words whitespace-pre-wrap text-ink">“{draft.payload.sourceText}”</p>
+            ) : null}
+          </div>
         ) : (
           <div className="flex items-center gap-2 rounded-md border border-dashed border-line-strong px-3 py-2.5 text-sm text-ink-3">
             <Icon name="info" size="sm" />
             원본 메시지를 불러올 수 없어요
           </div>
         )}
-        <span className="text-cap text-ink-3">{draft.meetingMinutes ? '회의에서 허가한 값이에요. 확인하고 고칠 값이 있으면 왼쪽에서 고쳐 주세요.' : '메시지를 보면서 왼쪽 값을 직접 입력해 주세요.'}</span>
+        <span className="text-cap text-ink-3">{draft.meetingMinutes
+            ? '회의에서 허가한 값이에요. 확인하고 고칠 값이 있으면 왼쪽에서 고쳐 주세요.'
+            : fromAssistant
+              ? '철강맨AI가 대화에서 채운 값이에요. 확인하고 고칠 값이 있으면 왼쪽에서 고쳐 주세요.'
+              : '메시지를 보면서 왼쪽 값을 직접 입력해 주세요.'}</span>
       </CardBody>
     </Card>
   );

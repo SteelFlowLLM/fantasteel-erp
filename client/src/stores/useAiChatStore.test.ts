@@ -1,5 +1,5 @@
 // AI 어시스턴트 대화 저장소: 대화는 이 탭 메모리에만 두고, 서버에는 답을 받은 지난 대화만 보낸다.
-import type { AiAssistantReplyView } from '@fantasteel/shared';
+import type { AiAssistantReplyView, AiAssistantStreamEvent } from '@fantasteel/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AI_CHAT_HISTORY_LIMIT, AI_CHAT_STOPPED_REASON, aiChatHistory, useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
 
@@ -213,5 +213,59 @@ describe('실시간 답 (스트림 이벤트)', () => {
     expect(failure).toMatchObject({ role: 'failure', content: '멈췄어요' });
     store().removeFailure(failure?.id ?? '');
     expect(store().entries).toEqual([]);
+  });
+});
+
+describe('승인 카드 (이슈 #362)', () => {
+  const REQUIRED: Extract<AiAssistantStreamEvent, { type: 'approval_required' }> = {
+    type: 'approval_required',
+    approvalId: 'a1',
+    toolId: 't1',
+    toolName: 'add_my_schedule_event',
+    title: '내 일정 추가: 주간 회의',
+    details: [{ label: '날짜', value: '2026-10-19 (월)' }],
+    expiresAt: '2026-10-16T10:10:00.000Z',
+  };
+  const EXECUTION: AiAssistantStreamEvent = { type: 'tool_execution', approvalId: 'a1', status: 'SUCCESS', message: '일정을 추가했어요', result: { table: 'schedule_event', id: 31, label: '주간 회의', linkPath: '/schedule?week=2026-10-19' }, attempts: 1 };
+
+  it('카드가 도구 줄과 함께 쌓이고 서버 이벤트로만 끝난다', () => {
+    store().addQuestion('q1', '일정 추가해 줘');
+    store().applyStreamEvent('q1', { type: 'tool_start', id: 't1', name: 'add_my_schedule_event', arguments: '{}' });
+    store().applyStreamEvent('q1', REQUIRED);
+    store().setApprovalSending('a1', 'ALLOW');
+    expect(store().live?.approvals[0]).toMatchObject({ approvalId: 'a1', toolId: 't1', sending: 'ALLOW', resolution: null });
+    store().applyStreamEvent('q1', { type: 'approval_resolved', approvalId: 'a1', decision: 'ALLOW' });
+    store().applyStreamEvent('q1', EXECUTION);
+    expect(store().live?.approvals[0]).toMatchObject({ sending: null, resolution: 'ALLOW', execution: { status: 'SUCCESS' } });
+  });
+
+  it('done이 오면 카드가 답 줄에 남고, 카드가 없는 답에는 필드가 없다', () => {
+    store().addQuestion('q1', '일정 추가해 줘');
+    store().applyStreamEvent('q1', REQUIRED);
+    store().applyStreamEvent('q1', { type: 'approval_resolved', approvalId: 'a1', decision: 'DENY' });
+    store().applyStreamEvent('q1', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', approvals: [{ approvalId: 'a1', resolution: 'DENY' }] });
+
+    store().addQuestion('q2', '재고 알려줘');
+    store().applyStreamEvent('q2', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).not.toHaveProperty('approvals');
+  });
+
+  it('고르는 중에 멈추면 실패 줄이 그 카드를 거부됨으로 들고 있고, 이미 만든 일정의 링크는 남는다', () => {
+    store().addQuestion('q1', '일정 두 개 추가해 줘');
+    store().applyStreamEvent('q1', REQUIRED);
+    store().applyStreamEvent('q1', { type: 'approval_resolved', approvalId: 'a1', decision: 'ALLOW' });
+    store().applyStreamEvent('q1', EXECUTION);
+    store().applyStreamEvent('q1', { ...REQUIRED, approvalId: 'a2', toolId: 't2' });
+    store().addFailure('q1', '일정 두 개 추가해 줘', AI_CHAT_STOPPED_REASON);
+    const failure = store().entries.at(-1);
+    expect(failure).toMatchObject({ role: 'failure', approvals: [{ approvalId: 'a1', execution: { status: 'SUCCESS' } }, { approvalId: 'a2', resolution: 'DENY' }] });
+    expect(store().live).toBeNull();
+  });
+
+  it('카드가 없던 질문의 실패 줄에는 approvals 필드가 없다', () => {
+    store().addQuestion('q1', '재고');
+    store().addFailure('q1', '재고', '응답이 없어요');
+    expect(store().entries.at(-1)).not.toHaveProperty('approvals');
   });
 });

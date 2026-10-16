@@ -1,5 +1,5 @@
 // AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
-import type { AiAssistantCapabilitiesView, AiAssistantMessageInput, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
+import type { AiApprovalDecision, AiApprovalDecisionInput, AiApprovalDecisionView, AiAssistantCapabilitiesView, AiAssistantMessageInput, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView } from '@fantasteel/shared';
 import { serverRequest, serverStream } from '@/api/http';
 
 export const aiAssistantKeys = {
@@ -7,7 +7,7 @@ export const aiAssistantKeys = {
   capabilities: ['ai-assistant', 'capabilities'] as const,
 };
 
-const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'done', 'error'];
+const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'approval_required', 'approval_resolved', 'tool_execution', 'done', 'error'];
 
 /**
  * 스트림 한 줄을 이벤트로 읽는다. JSON이 아니면 오류, 모르는 종류의 이벤트는 null(서버가 새 종류를 더해도 화면이 멈추지 않게 건너뛴다).
@@ -38,6 +38,11 @@ export const aiAssistantApi = {
         if (event) onEvent(event);
       },
     }),
+  /** 승인 카드의 허용·거부를 서버에 보낸다 (이슈 #362). 카드가 끝나는 건 스트림의 approval_resolved 이벤트로 안다 */
+  decideApproval: (approvalId: string, decision: AiApprovalDecision): Promise<AiApprovalDecisionView> => {
+    const body: AiApprovalDecisionInput = { decision };
+    return serverRequest('POST', `/ai-assistant/approvals/${encodeURIComponent(approvalId)}`, { body });
+  },
   /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
   getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
   getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),

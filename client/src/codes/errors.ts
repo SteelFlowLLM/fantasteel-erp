@@ -22,6 +22,9 @@ export const ERROR_MESSAGE = {
   'COM-001': '검토 이후 데이터 변경',
   'COM-002': '해당 업무 권한 없음',
   'COM-003': '참조 대상이 없습니다',
+  // 철강맨AI 승인 카드(이슈 #362, 정의서 9.3에 없는 서버 코드). 서버 문구는 detail로 함께 보인다
+  'AST-001': '승인 요청을 찾을 수 없습니다',
+  'AST-002': '이미 처리된 승인 요청입니다',
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_MESSAGE;

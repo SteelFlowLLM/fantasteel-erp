@@ -1,7 +1,8 @@
 // AI 어시스턴트 대화. 대화 기록은 서버에 저장하지 않으므로(저장 여부 미결정, 요구사항 21장) 이 탭 메모리에만 둔다.
 // 패널을 닫았다 열어도 남고, 새로고침하거나 다른 사원으로 들어오면 사라진다.
-import type { AiAssistantImageInput, AiAssistantReplyView, AiAssistantSource, AiAssistantStreamEvent, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiApprovalDecision, AiAssistantImageInput, AiAssistantReplyView, AiAssistantSource, AiAssistantStreamEvent, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
 import { create } from 'zustand';
+import { reduceAiApprovals, setAiApprovalSending, settleAiApprovalsOnDisconnect, type AiApprovalCard } from '@/lib/aiApproval';
 
 /** 서버로 함께 보내는 지난 대화 수. 서버도 최근 10개만 쓴다 */
 export const AI_CHAT_HISTORY_LIMIT = 10;
@@ -28,20 +29,22 @@ export interface AiChatLive {
   answer: string;
   /** 이 질문에 보낸 생각 정도. 보내지 않았으면 null */
   reasoning: AiReasoningLevel | null;
+  /** 쓰기 도구의 승인 카드 (approvalId마다 하나, 도구 줄은 toolId로 찾는다) */
+  approvals: AiApprovalCard[];
 }
 
 export type AiChatEntry =
   /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (지난 대화로 서버에 보내지 않는다) */
   | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[] }
   /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다) */
-  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean }
+  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; approvals?: AiApprovalCard[] }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
-  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[] };
+  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; approvals?: AiApprovalCard[] };
 
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
 
-export const emptyAiChatLive = (reasoning: AiReasoningLevel | null = null): AiChatLive => ({ steps: [], answer: '', reasoning });
+export const emptyAiChatLive = (reasoning: AiReasoningLevel | null = null): AiChatLive => ({ steps: [], answer: '', reasoning, approvals: [] });
 
 /** 생각 중인 마지막 단계를 닫는다 (생각이 아닌 다음 이벤트가 오면 생각이 끝난 것) */
 function closeThinking(steps: AiTimelineStep[], now: number): AiTimelineStep[] {
@@ -50,7 +53,7 @@ function closeThinking(steps: AiTimelineStep[], now: number): AiTimelineStep[] {
   return [...steps.slice(0, -1), { ...last, endedAt: now }];
 }
 
-/** 진행 중 이벤트(thinking·answer·tool_start·tool_end)를 진행 상황에 반영한다. done·error는 호출하는 쪽이 따로 다룬다 */
+/** 진행 중 이벤트(thinking·answer·tool_start·tool_end·승인 카드)를 진행 상황에 반영한다. done·error는 호출하는 쪽이 따로 다룬다 */
 export function reduceAiChatLive(live: AiChatLive, event: AiAssistantStreamEvent, now: number): AiChatLive {
   switch (event.type) {
     case 'thinking': {
@@ -77,6 +80,11 @@ export function reduceAiChatLive(live: AiChatLive, event: AiAssistantStreamEvent
       );
       return { ...live, steps };
     }
+    case 'approval_required':
+      return { ...live, steps: closeThinking(live.steps, now), approvals: reduceAiApprovals(live.approvals, event) };
+    case 'approval_resolved':
+    case 'tool_execution':
+      return { ...live, approvals: reduceAiApprovals(live.approvals, event) };
     default:
       return live;
   }
@@ -106,6 +114,7 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
     sources: reply.sources,
     steps: liveSteps.length ? liveSteps : stepsFromReply(reply),
     ...(live.reasoning ? { requestedReasoning: live.reasoning, reasoningApplied: reply.reasoningApplied } : {}),
+    ...(live.approvals.length ? { approvals: settleAiApprovalsOnDisconnect(live.approvals) } : {}),
   };
 }
 
@@ -114,7 +123,17 @@ function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: 
   const asked = state.entries.find((entry) => entry.id === questionId);
   const images = asked?.role === 'user' ? asked.images : undefined;
   const reasoning = state.live?.reasoning;
-  return { id: newAiChatId(), role: 'failure', content: reason, question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}) };
+  // 멈추거나 끊겨도 이미 만든 일정·초안으로 가는 링크는 남기고, 고르던 카드는 서버가 거부로 끝낸 대로 거부됨으로 닫는다
+  const approvals = state.live?.approvals.length ? settleAiApprovalsOnDisconnect(state.live.approvals) : undefined;
+  return {
+    id: newAiChatId(),
+    role: 'failure',
+    content: reason,
+    question,
+    ...(reasoning ? { reasoning } : {}),
+    ...(images ? { images } : {}),
+    ...(approvals ? { approvals } : {}),
+  };
 }
 
 interface AiChatState {
@@ -132,6 +151,8 @@ interface AiChatState {
   addFailure: (questionId: string, question: string, reason: string) => void;
   /** 스트림 이벤트 하나를 반영한다. done은 답 줄을, error는 실패 줄을 더한다 */
   applyStreamEvent: (questionId: string, event: AiAssistantStreamEvent, now?: number) => void;
+  /** 승인 카드의 허용·거부를 보내는 중이면 보낸 값, 보내기가 끝났거나 실패했으면 null. 카드를 끝내는 건 서버 이벤트뿐이다 */
+  setApprovalSending: (approvalId: string, decision: AiApprovalDecision | null) => void;
   /** 실패한 질문과 실패 줄을 지운다 (다시 물을 때) */
   removeFailure: (failureId: string) => void;
   clear: () => void;
@@ -182,6 +203,8 @@ export const useAiChatStore = create<AiChatState>((set) => ({
       }
       return { live: reduceAiChatLive(state.live, event, now) };
     }),
+  setApprovalSending: (approvalId, decision) =>
+    set((state) => (state.live ? { live: { ...state.live, approvals: setAiApprovalSending(state.live.approvals, approvalId, decision) } } : state)),
   removeFailure: (failureId) =>
     set((state) => {
       const index = state.entries.findIndex((entry) => entry.id === failureId);

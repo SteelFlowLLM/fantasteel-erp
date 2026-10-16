@@ -19,6 +19,7 @@ export const TARGET_TABLE_LABEL: Partial<Record<string, string>> = {
   shipment_request_item: '출하요청 품목',
   mill_sheet: '밀시트',
   action_draft: 'Action Draft',
+  schedule_event: '일정',
   item: '품목',
   steel_grade: '강종',
   customer: '고객사',

@@ -2,14 +2,19 @@
 import type { AiAssistantStreamEvent } from '@fantasteel/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aiAssistantApi } from '@/api/aiAssistant';
-import { runAiAsk, stopAiAssistant } from '@/hooks/useAiAssistant';
+import { ApiError } from '@/api/errors';
+import { decideAiApproval, runAiAsk, stopAiAssistant } from '@/hooks/useAiAssistant';
+import { useToastStore } from '@/stores/useToastStore';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 
 const store = () => useAiChatStore.getState();
 const SCREEN = { path: '/', title: '대시보드', label: null };
 const DONE: AiAssistantStreamEvent = { type: 'done', reply: { answer: '최종 답', sources: [], model: 'm', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: false } };
 
-beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null }));
+beforeEach(() => {
+  useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null });
+  useToastStore.setState({ items: [] });
+});
 afterEach(() => vi.restoreAllMocks());
 
 const PHOTO = { mediaType: 'image/jpeg' as const, dataBase64: 'QUJD' };
@@ -27,7 +32,7 @@ describe('runAiAsk', () => {
       onEvent(DONE);
     });
     await ask('high');
-    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', reasoning: 'high' });
+    expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', reasoning: 'high', approvalCards: true });
     expect(store().pendingId).toBeNull();
     expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', content: '최종 답', requestedReasoning: 'high', reasoningApplied: false });
 
@@ -90,5 +95,52 @@ describe('runAiAsk', () => {
     await running;
     expect(aborted).toBe(true);
     expect(store().entries).toEqual([]);
+  });
+});
+
+const REQUIRED: AiAssistantStreamEvent = {
+  type: 'approval_required',
+  approvalId: 'a1',
+  toolId: 't1',
+  toolName: 'add_my_schedule_event',
+  title: '내 일정 추가: 주간 회의',
+  details: [],
+  expiresAt: '2026-10-16T10:10:00.000Z',
+};
+
+describe('decideAiApproval', () => {
+  const startCard = () => {
+    store().addQuestion('q1', '질문');
+    store().applyStreamEvent('q1', REQUIRED);
+  };
+
+  it('보내는 동안 보내는 중이고, 성공해도 카드는 서버 이벤트가 올 때까지 끝나지 않는다', async () => {
+    startCard();
+    let release: () => void = () => undefined;
+    const spy = vi.spyOn(aiAssistantApi, 'decideApproval').mockImplementation(() => new Promise((resolve) => (release = () => resolve({ approvalId: 'a1', decision: 'ALLOW' }))));
+    const running = decideAiApproval('a1', 'ALLOW');
+    expect(spy).toHaveBeenCalledWith('a1', 'ALLOW');
+    expect(store().live?.approvals[0]).toMatchObject({ sending: 'ALLOW', resolution: null });
+    release();
+    await running;
+    expect(store().live?.approvals[0]).toMatchObject({ sending: 'ALLOW', resolution: null });
+    store().applyStreamEvent('q1', { type: 'approval_resolved', approvalId: 'a1', decision: 'ALLOW' });
+    expect(store().live?.approvals[0]).toMatchObject({ sending: null, resolution: 'ALLOW' });
+  });
+
+  it('실패하면 다시 고를 수 있게 풀고 오류를 알린다', async () => {
+    startCard();
+    vi.spyOn(aiAssistantApi, 'decideApproval').mockRejectedValue(new ApiError('COM-002', '질문한 사원이 아니에요'));
+    await decideAiApproval('a1', 'DENY');
+    expect(store().live?.approvals[0]).toMatchObject({ sending: null, resolution: null });
+    expect(useToastStore.getState().items).toMatchObject([{ kind: 'error' }]);
+  });
+
+  it('이미 처리된 카드(AST-002)는 오류 알림 없이 풀고 스트림의 상태를 따른다', async () => {
+    startCard();
+    vi.spyOn(aiAssistantApi, 'decideApproval').mockRejectedValue(new ApiError('AST-002', '이미 처리됐어요'));
+    await decideAiApproval('a1', 'ALLOW');
+    expect(store().live?.approvals[0].sending).toBeNull();
+    expect(useToastStore.getState().items.map((item) => item.kind)).toEqual(['info']);
   });
 });

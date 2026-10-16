@@ -1,7 +1,7 @@
 'use client';
 
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
-// 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 실행 카드(AST-005)는 다음 단계라 준비 중으로 둔다.
+// 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 쓰기 도구(내 일정 추가·구매요청 초안 만들기)는 승인 카드에서 허용해야 실행한다(AST-005·010, 이슈 #362).
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
 import { usePathname } from 'next/navigation';
@@ -10,6 +10,7 @@ import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
+import { AiApprovalCards } from '@/features/shell/AiApprovalCard';
 import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
@@ -305,7 +306,7 @@ export function AiPanel() {
       </div>
       <div className="flex flex-none items-center gap-1.5 border-t border-line px-4 py-2 text-cap text-ink-3">
         <Icon name="lock" size="sm" />
-        철강맨AI는 조회와 초안만 만들어요 · 반영은 사람이 확정 · 내 권한({roleLabel}) 범위
+        철강맨AI는 조회와 초안만 만들어요 · 일정 추가·초안은 허용해야 실행 · 내 권한({roleLabel}) 범위
       </div>
     </aside>
   );
@@ -319,7 +320,7 @@ function Welcome({ roleLabel, contextQuestion, disabled, onAsk }: { roleLabel: s
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. 실행 카드는 준비 중이에요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "내일 3시에 주간 회의 일정 추가해 줘"처럼 부탁하면 승인 카드를 보여 드리고, 허용하면 그때 실행해요.
       </p>
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
@@ -437,6 +438,7 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
             {stopped ? '답을 멈췄어요' : '답을 받지 못했어요'}
           </span>
           {stopped ? null : <p className="leading-normal break-keep wrap-anywhere text-ink-2">{entry.content}</p>}
+          <AiApprovalCards cards={entry.approvals ?? []} />
           <Button size="sm" icon="refresh" className="self-start" disabled={disabled} onClick={() => onRetry(entry)}>
             다시 묻기
           </Button>
@@ -448,6 +450,7 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
     <div className="flex gap-3">
       <SteelmanAiMark framed />
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
+        <AiApprovalCards cards={entry.approvals ?? []} />
         <p className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{entry.content}</p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
           <span className="font-semibold text-ink-2">출처</span>

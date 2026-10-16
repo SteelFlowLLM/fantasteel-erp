@@ -37,3 +37,10 @@ describe('작업 로그 대상 링크', () => {
     expect(isTargetFilterTable('item')).toBe(false);
   });
 });
+
+describe('철강맨AI 승인 카드가 남기는 대상', () => {
+  it('일정은 이름이 있고 화면 링크는 없다', () => {
+    expect(targetTableLabel('schedule_event')).toBe('일정');
+    expect(targetHref(ref('schedule_event'))).toBeNull();
+  });
+});
