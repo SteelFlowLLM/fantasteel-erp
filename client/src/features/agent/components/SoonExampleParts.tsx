@@ -27,6 +27,7 @@ export function AiCard({
   className,
   bodyClassName,
   petKey,
+  tone = 'ai',
   children,
 }: {
   title: ReactNode;
@@ -38,13 +39,16 @@ export function AiCard({
   bodyClassName?: string;
   /** 화면 도우미 펫 설명 키 (Card와 같이 윗면은 펫이 올라가는 면) */
   petKey?: string;
+  /** 철강맨AI 주황색이 필요한 화면(Agent)에서 쓴다 */
+  tone?: 'ai' | 'steelman';
   children: ReactNode;
 }) {
+  const orange = tone === 'steelman';
   return (
-    <section data-pet-perch="" data-pet-target={petKey} className={cn('flex min-h-0 min-w-0 flex-col rounded-md border border-ai-line bg-surface shadow-1', className)}>
-      <header className="flex h-11 flex-none items-center gap-2 rounded-t-md border-b border-ai-line bg-ai-bg px-4">
-        {icon ? <Icon name={icon} className="text-ai-strong" /> : <AiMark size="sm" />}
-        <h2 className="text-base font-semibold text-ai-strong">{title}</h2>
+    <section data-pet-perch="" data-pet-target={petKey} className={cn('flex min-h-0 min-w-0 flex-col rounded-md border bg-surface shadow-1', orange ? 'border-steelman-shadow' : 'border-ai-line', className)}>
+      <header className={cn('flex h-11 flex-none items-center gap-2 rounded-t-md border-b px-4', orange ? 'border-steelman-shadow bg-steelman-soft' : 'border-ai-line bg-ai-bg')}>
+        {icon ? <Icon name={icon} className={orange ? 'text-steelman-ink' : 'text-ai-strong'} /> : <AiMark size="sm" tone={tone} />}
+        <h2 className={cn('text-base font-semibold', orange ? 'text-steelman-ink' : 'text-ai-strong')}>{title}</h2>
         {meta ? <span className="text-xs text-ink-3">{meta}</span> : null}
         {actions ? <div className="ml-auto flex items-center gap-1.5">{actions}</div> : null}
       </header>

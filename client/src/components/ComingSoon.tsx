@@ -54,12 +54,13 @@ export function SoonButton({ grade = 'P2', variant, size, className, children }:
 }
 
 /** AI 표시 (옛 hl-aimark): AI가 관여하는 곳은 늘 보라색으로 구분한다 */
-export function AiMark({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
+export function AiMark({ size = 'md', tone = 'ai', className }: { size?: 'sm' | 'md' | 'lg'; tone?: 'ai' | 'steelman'; className?: string }) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        'inline-flex flex-none items-center justify-center rounded-sm bg-ai font-mono leading-none font-semibold tracking-[0.02em] text-white',
+        'inline-flex flex-none items-center justify-center rounded-sm font-mono leading-none font-semibold tracking-[0.02em] text-white',
+        tone === 'steelman' ? 'bg-steelman' : 'bg-ai',
         size === 'sm' && 'size-5 text-[9px]',
         size === 'md' && 'size-6 text-2xs',
         size === 'lg' && 'size-8 text-xs',

@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Icon, type IconName } from '@/components/Icon';
 import { cn } from '@/lib/cn';
 
-export type ButtonVariant = 'default' | 'primary' | 'ghost' | 'danger' | 'danger-outline' | 'danger-ghost' | 'ai' | 'ai-outline';
+export type ButtonVariant = 'default' | 'primary' | 'ghost' | 'danger' | 'danger-outline' | 'danger-ghost' | 'ai' | 'ai-outline' | 'steelman-outline';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const BASE =
@@ -21,6 +21,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   'danger-ghost': 'border-transparent bg-transparent text-danger enabled:hover:bg-danger-bg',
   ai: 'border-ai bg-ai text-white enabled:hover:border-ai-strong enabled:hover:bg-ai-strong',
   'ai-outline': 'border-ai-line bg-surface text-ai-strong enabled:hover:border-ai enabled:hover:bg-ai-bg',
+  'steelman-outline': 'border-steelman-shadow bg-surface text-steelman-ink enabled:hover:border-steelman enabled:hover:bg-steelman-soft',
 };
 
 const SIZE: Record<ButtonSize, string> = {
