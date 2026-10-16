@@ -8,6 +8,7 @@ import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SttClient, SttRequestError, type SttTranscript } from '../stt/stt.client';
 import { SttSettingsStore } from '../stt/stt-settings.store';
+import { JOB_STALE_MS } from './meeting-job.lease';
 import { MeetingTranscriptionRunner, TRANSCRIPTION_INTERRUPTED_REASON } from './meeting-transcription.runner';
 
 let app: INestApplication;
@@ -257,16 +258,31 @@ describe('POST /meeting-minutes/audio (음성 → 전사)', () => {
     expect(peak).toBe(1);
   });
 
-  it('서버가 다시 시작되면 전사 중에 멈춘 행을 실패로 바꾼다', async () => {
-    const stuck = await prisma.meetingMinutes.create({
-      data: { meetingMinutesTitle: '멈춘 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBING', creatorId: purchaseId },
-    });
-    const done = await prisma.meetingMinutes.create({
-      data: { meetingMinutesTitle: '끝난 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript: '글', creatorId: purchaseId },
-    });
+  it('맡은 서버의 표시가 끊긴 전사 중 행만 실패로 바꾼다', async () => {
+    const meetingDate = new Date('2026-10-15T00:00:00.000Z');
+    const stuck = await prisma.meetingMinutes.create({ data: { meetingMinutesTitle: '멈춘 회의', meetingDate, meetingMinutesStatus: 'TRANSCRIBING', creatorId: purchaseId } });
+    await prisma.meetingMinutes.update({ where: { id: stuck.id }, data: { updatedAt: new Date(Date.now() - JOB_STALE_MS - 60_000) } });
+    // 다른 팀원 서버가 방금 표시를 남긴 행: 공용 DB에서 건드리면 안 된다
+    const others = await prisma.meetingMinutes.create({ data: { meetingMinutesTitle: '남의 전사', meetingDate, meetingMinutesStatus: 'TRANSCRIBING', creatorId: purchaseId } });
+    const done = await prisma.meetingMinutes.create({ data: { meetingMinutesTitle: '끝난 회의', meetingDate, meetingMinutesStatus: 'TRANSCRIBED', transcript: '글', creatorId: purchaseId } });
     expect(await runner.recoverInterrupted()).toBeGreaterThanOrEqual(1);
     expect(await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: stuck.id } })).toMatchObject({ meetingMinutesStatus: 'FAILED', failureReason: TRANSCRIPTION_INTERRUPTED_REASON });
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: others.id } })).meetingMinutesStatus).toBe('TRANSCRIBING');
     expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: done.id } })).meetingMinutesStatus).toBe('TRANSCRIBED');
+    await prisma.meetingMinutes.update({ where: { id: others.id }, data: { meetingMinutesStatus: 'FAILED' } });
+  });
+
+  it('이 서버가 맡은 전사는 오래 걸려도 실패로 바꾸지 않는다', async () => {
+    let release: (value: SttTranscript) => void = () => undefined;
+    sttClient.transcribe.mockImplementation(() => new Promise<SttTranscript>((resolve) => (release = resolve)));
+    const { body } = await uploadAudio();
+    await prisma.meetingMinutes.update({ where: { id: body.data.id }, data: { updatedAt: new Date(Date.now() - JOB_STALE_MS - 60_000) } });
+    await runner.recoverInterrupted();
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: body.data.id } })).meetingMinutesStatus).toBe('TRANSCRIBING');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release({ text: '끝난 글', segments: [], durationSec: null });
+    await runner.drain();
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: body.data.id } })).meetingMinutesStatus).toBe('TRANSCRIBED');
   });
 
   it('파일이 없거나 오디오가 아니거나 입력이 틀리면 거절하고 저장하지 않는다', async () => {

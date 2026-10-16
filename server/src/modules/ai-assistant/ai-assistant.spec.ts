@@ -174,6 +174,17 @@ describe('AiAssistantService', () => {
     ]);
     expect(reply.answer).toBe('SS275 코일 가용재고는 12매예요.');
     expect(reply.sources[0]).toEqual({ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' });
+    // AI 실행 기록: 부른 도구와 입력·결과 앞부분
+    expect(reply.toolCalls).toEqual([{ name: 'get_inventory', arguments: '{"keyword":"SS275"}', resultPreview: '{"제품":[]}', durationMs: expect.any(Number) }]);
+    expect(reply.thinking).toBeNull();
+  });
+
+  it('마지막 답의 생각 글은 답에서 빼고 실행 기록으로 돌려준다', async () => {
+    const { service } = setup({}, async () => ({ content: '<think>재고를 볼 필요는 없겠다</think>예약은 매수를 확보하는 거예요.', toolCalls: [] }));
+    const reply = await service.ask(user, { question: '예약이 뭐야?' });
+    expect(reply.answer).toBe('예약은 매수를 확보하는 거예요.');
+    expect(reply.thinking).toBe('재고를 볼 필요는 없겠다');
+    expect(reply.toolCalls).toEqual([]);
   });
 
   it('조회에 실패한 도구(권한 없음 등)는 출처로 남기지 않는다', async () => {

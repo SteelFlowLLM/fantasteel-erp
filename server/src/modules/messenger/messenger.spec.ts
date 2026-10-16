@@ -1090,7 +1090,7 @@ describe('@AI 호출 (REQ-AST-002)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('@AI가 든 메시지는 먼저 저장해 돌려주고, 묻는 사람 권한으로 물은 답을 시스템 메시지로 남겨 멤버에게 보낸다', async () => {
-    const ask = askSpy().mockResolvedValue({ answer: '예약은 재고를 수주에 묶어 두는 것이에요.', sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }], model: 'test-model', latencyMs: 1 });
+    const ask = askSpy().mockResolvedValue({ answer: '예약은 재고를 수주에 묶어 두는 것이에요.', sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null });
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     await send(qualityCookie, room.id, '예약이 뭐였죠?');
 
@@ -1148,6 +1148,8 @@ describe('@AI 호출 (REQ-AST-002)', () => {
         sources: [{ kind: 'DATA', id: 'get_sales_orders', label: '수주 · SO-2610-001' }],
         model: 'test-model',
         latencyMs: 1,
+        toolCalls: [],
+        thinking: null,
       });
       const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
       await send(salesCookie, room.id, '@AI SO-2610-001 납기 알려줘');
@@ -1168,7 +1170,7 @@ describe('@AI 호출 (REQ-AST-002)', () => {
       expect(purchaseRooms.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('AI 어시스턴트가 답했어요');
 
       // 정다은이 이어 물어도 박서영에게만 보인 답은 맥락으로 넘어가지 않는다
-      ask.mockResolvedValue({ answer: '확인할 수 없어요', sources: [], model: 'test-model', latencyMs: 1 });
+      ask.mockResolvedValue({ answer: '확인할 수 없어요', sources: [], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null });
       await send(purchaseCookie, room.id, '@AI 방금 뭐라고 했어?');
       await aiRepliesOf(room.id, 2);
       const history = ask.mock.calls[1][1].history ?? [];
@@ -1186,7 +1188,7 @@ describe('@AI 호출 (REQ-AST-002)', () => {
     for (let attempt = 0; attempt < 50 && typingRecords.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     expect(typingRecords.map((r) => r.employeeId).sort()).toEqual([salesId, qualityId].sort());
     expect(typingRecords[0].event).toEqual({ chatRoomId: room.id, employeeId: AI_TYPING_EMPLOYEE_ID, employeeName: AI_SENDER_NAME });
-    finish({ answer: '안녕하세요', sources: [], model: 'test-model', latencyMs: 1 });
+    finish({ answer: '안녕하세요', sources: [], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null });
     await aiRepliesOf(room.id, 1);
     // 답이 저장되면 더 보내지 않는다
     const sentCount = typingRecords.length;
@@ -1195,7 +1197,7 @@ describe('@AI 호출 (REQ-AST-002)', () => {
   }, 15_000);
 
   it('같은 보내기 id로 다시 보내면(재전송) AI를 다시 부르지 않는다', async () => {
-    const ask = askSpy().mockResolvedValue({ answer: '답이에요', sources: [], model: 'test-model', latencyMs: 1 });
+    const ask = askSpy().mockResolvedValue({ answer: '답이에요', sources: [], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null });
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     const body = { content: '@AI 안녕', clientMessageId: 'ai-resend-1' };
     await call<ChatMessageView>('POST', `/chat-rooms/${room.id}/messages`, salesCookie, body);

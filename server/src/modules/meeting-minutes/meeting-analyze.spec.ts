@@ -9,12 +9,18 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { ANALYSIS_INTERRUPTED_REASON, MeetingAnalysisRunner } from './meeting-analysis.runner';
+import { DROP } from './meeting-analysis.validator';
+import { JOB_STALE_MS } from './meeting-job.lease';
 
 let app: INestApplication;
 let baseUrl: string;
 let prisma: PrismaService;
 let runner: MeetingAnalysisRunner;
-const llmClient = { chatJson: jest.fn<Promise<unknown>, unknown[]>() };
+const llmClient = {
+  chatJson: jest.fn<Promise<unknown>, unknown[]>(),
+  // 러너는 원문까지 받는 쪽을 부른다: 시험은 chatJson 가짜 답을 원문으로 감싼다
+  chatJsonWithText: (...args: unknown[]) => llmClient.chatJson(...args).then((value) => ({ value, rawText: JSON.stringify(value), thinking: null })),
+};
 const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; model: string | null; apiKey: string | null }> => ({ baseUrl: 'http://llm.test/v1', model: 'test-model', apiKey: null })) };
 /** 정다은 (구매, 작성자) */
 let purchaseCookie: string;
@@ -128,6 +134,15 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
     const messages = llmClient.chatJson.mock.calls[0][2] as { role: string; content: string }[];
     expect(messages[1].content).toContain('<transcript>\n[1] 정다은:');
     expect(messages[1].content).toContain('2026-10-15 (목요일)');
+    // AI 실행 기록: 1차 원문과 버린 항목 이유, 2차 검토(가짜 답이 없어 실패) 단계
+    const trace = view.analysisResult?.trace;
+    expect(trace?.steps.map((s) => [s.stage, s.ok])).toEqual([
+      ['ANALYSIS', true],
+      ['REVIEW', false],
+    ]);
+    expect(trace?.steps[0]).toMatchObject({ model: 'test-model', rawAnswer: JSON.stringify(modelAnswer), thinking: null, truncated: false });
+    expect(trace?.steps[0].changes).toContainEqual({ action: 'DROPPED', title: '근거 없음', reason: DROP.evidence });
+    expect(trace?.totalMs).toBeGreaterThanOrEqual(0);
   });
 
   it('작성자가 아니면 403 VOC-003이고 상태를 바꾸지 않는다', async () => {
@@ -223,9 +238,13 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
     expect(await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } })).toMatchObject({ meetingMinutesStatus: 'FAILED', failureReason: '직접 바꿈', summary: null });
   });
 
-  it('서버가 다시 시작되면 분석 중에 멈춘 행을 실패로 바꾼다', async () => {
+  it('맡은 서버의 표시가 끊긴 분석 중 행만 실패로 바꾼다', async () => {
     const stuck = await prisma.meetingMinutes.create({
       data: { meetingMinutesTitle: '멈춘 분석', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'ANALYZING', transcript: '글', creatorId: purchaseId },
+    });
+    await prisma.meetingMinutes.update({ where: { id: stuck.id }, data: { updatedAt: new Date(Date.now() - JOB_STALE_MS - 60_000) } });
+    const others = await prisma.meetingMinutes.create({
+      data: { meetingMinutesTitle: '남의 분석', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'ANALYZING', transcript: '글', creatorId: purchaseId },
     });
     const review = await prisma.meetingMinutes.create({
       data: { meetingMinutesTitle: '검토 대기', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'REVIEW', transcript: '글', creatorId: purchaseId },
@@ -233,6 +252,8 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
     expect(await runner.recoverInterrupted()).toBeGreaterThanOrEqual(1);
     expect(await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: stuck.id } })).toMatchObject({ meetingMinutesStatus: 'FAILED', failureReason: ANALYSIS_INTERRUPTED_REASON });
     expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: review.id } })).meetingMinutesStatus).toBe('REVIEW');
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: others.id } })).meetingMinutesStatus).toBe('ANALYZING');
+    await prisma.meetingMinutes.update({ where: { id: others.id }, data: { meetingMinutesStatus: 'FAILED' } });
   });
   describe('2차 검토와 ERP 현황 (Voice2ERP 묶음 2)', () => {
     const reviewAnswer = {
@@ -276,6 +297,8 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
       analysis = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${id}`, purchaseCookie)).body.data;
       expect(analysis.analysisResult?.review).toEqual({ ok: false, error: 'AI 2차 검토 응답 형식이 올바르지 않아요' });
       expect(analysis.analysisResult?.candidates).toHaveLength(3);
+      // 알아볼 수 없는 답도 무엇을 냈는지 실행 기록에 남는다
+      expect(analysis.analysisResult?.trace?.steps[1]).toMatchObject({ stage: 'REVIEW', ok: false, error: 'AI 2차 검토 응답 형식이 올바르지 않아요', rawAnswer: '"쓰레기"' });
     });
 
     it('후보마다 DB에서 읽은 현황이 붙고, 후보를 고치면 다시 계산한다', async () => {

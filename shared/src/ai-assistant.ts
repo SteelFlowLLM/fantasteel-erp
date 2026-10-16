@@ -37,12 +37,27 @@ export interface AiAssistantSource {
   label: string;
 }
 
+/** 답을 만들며 부른 조회 도구 한 번 (AI 실행 기록). 묻는 사람 권한으로 실행한 결과라 그 사람 화면에만 보인다 */
+export interface AiAssistantToolTrace {
+  /** 도구 이름 (get_inventory) */
+  name: string;
+  /** 모델이 넘긴 입력 JSON 그대로. 길면 앞부분만 */
+  arguments: string;
+  /** 도구가 돌려준 결과의 앞부분 */
+  resultPreview: string;
+  durationMs: number;
+}
+
 export interface AiAssistantReplyView {
   answer: string;
   sources: AiAssistantSource[];
   /** 답한 모델 id */
   model: string;
   latencyMs: number;
+  /** 부른 조회 도구 (부른 순서). 서버에 저장하지 않고 이 답에만 담는다 */
+  toolCalls: AiAssistantToolTrace[];
+  /** 추론 모델이 마지막 답 앞에 쓴 생각 글. 없으면 null */
+  thinking: string | null;
 }
 
 /** 역할별 추천 질문과 처음 쓰는 사용자용 질문 (REQ-AST-008) */

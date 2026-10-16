@@ -1,6 +1,6 @@
 // AI 어시스턴트 대화. 대화 기록은 서버에 저장하지 않으므로(저장 여부 미결정, 요구사항 21장) 이 탭 메모리에만 둔다.
 // 패널을 닫았다 열어도 남고, 새로고침하거나 다른 사원으로 들어오면 사라진다.
-import type { AiAssistantSource, AiAssistantTurn } from '@fantasteel/shared';
+import type { AiAssistantSource, AiAssistantToolTrace, AiAssistantTurn } from '@fantasteel/shared';
 import { create } from 'zustand';
 
 /** 서버로 함께 보내는 지난 대화 수. 서버도 최근 10개만 쓴다 */
@@ -8,7 +8,8 @@ export const AI_CHAT_HISTORY_LIMIT = 10;
 
 export type AiChatEntry =
   | { id: string; role: 'user'; content: string }
-  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[] }
+  /** toolCalls·thinking은 회의 질문 카드만 담는다 (AI 실행 기록) */
+  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; toolCalls?: AiAssistantToolTrace[]; thinking?: string | null }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유 */
   | { id: string; role: 'failure'; content: string; question: string };
 

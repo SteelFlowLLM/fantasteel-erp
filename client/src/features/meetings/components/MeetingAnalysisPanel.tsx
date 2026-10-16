@@ -14,6 +14,7 @@ import { Icon } from '@/components/Icon';
 import { Textarea } from '@/components/Input';
 import { groupsOfChart } from '@/features/meetings/components/AttendeePicker';
 import { CandidateEditor } from '@/features/meetings/components/MeetingCandidateEditor';
+import { MeetingTracePanel } from '@/features/meetings/components/MeetingTracePanel';
 import { useAction } from '@/hooks/useAction';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 import { useItemList } from '@/hooks/useLookups';
@@ -407,6 +408,7 @@ function Result({ analysis, minutes, onJump }: { analysis: MeetingAnalysis; minu
         ))
       )}
       {editable ? <RegisterBar minutes={minutes} analysis={analysis} /> : null}
+      <MeetingTracePanel trace={analysis.trace} />
       <p className="text-cap text-ink-3">
         {confirmed
           ? '허가한 후보는 등록됐고, 제외한 후보는 등록하지 않았어요.'

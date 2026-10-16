@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ITEM_TYPE, LOT_TYPE, MEETING_MINUTES_STATUS, PURCHASE_ORDER_STATUS, RESERVATION_STATUS, SALES_ORDER_ITEM_STATUS, TASK_STATUS } from '@fantasteel/shared';
+import { ITEM_TYPE, LOT_TYPE, MEETING_MINUTES_STATUS, type MeetingMinutesStatus, PURCHASE_ORDER_STATUS, RESERVATION_STATUS, SALES_ORDER_ITEM_STATUS, TASK_STATUS } from '@fantasteel/shared';
 import type { SalesOrderContextInput } from './meeting-candidate.context';
 import { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
@@ -72,14 +72,6 @@ export class MeetingMinutesRepository {
     return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING }, data });
   }
 
-  /** 서버가 꺼지면서 음성을 잃은 전사 중 행을 모두 실패로 */
-  failAllTranscribing(tx: Tx, failureReason: string) {
-    return tx.meetingMinutes.updateMany({
-      where: { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING },
-      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason },
-    });
-  }
-
   /** AI 정리를 시작한다: 전사가 있고 정리할 수 있는 상태일 때만 ANALYZING으로. 아니면 0건 */
   startAnalysis(tx: Tx, id: number) {
     return tx.meetingMinutes.updateMany({
@@ -97,10 +89,15 @@ export class MeetingMinutesRepository {
     return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING }, data });
   }
 
-  /** 서버가 꺼지면서 중단된 분석 중 행을 모두 실패로 */
-  failAllAnalyzing(tx: Tx, failureReason: string) {
+  /** 이 서버가 맡은 전사·분석 행에 살아 있다는 표시를 남긴다 (updated_at만). 그 사이 다른 상태가 된 행은 건드리지 않는다 */
+  touchInProgress(tx: Tx, ids: number[], status: MeetingMinutesStatus) {
+    return tx.meetingMinutes.updateMany({ where: { id: { in: ids }, meetingMinutesStatus: status }, data: { updatedAt: new Date() } });
+  }
+
+  /** 맡은 서버가 멈춰 표시가 끊긴 전사·분석 행을 실패로. 마지막 표시가 staleBefore보다 오래된 행만, 이 서버가 맡은 행은 빼고 */
+  failStale(tx: Tx, status: MeetingMinutesStatus, staleBefore: Date, exceptIds: number[], failureReason: string) {
     return tx.meetingMinutes.updateMany({
-      where: { meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING },
+      where: { meetingMinutesStatus: status, updatedAt: { lt: staleBefore }, ...(exceptIds.length > 0 ? { id: { notIn: exceptIds } } : {}) },
       data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason },
     });
   }

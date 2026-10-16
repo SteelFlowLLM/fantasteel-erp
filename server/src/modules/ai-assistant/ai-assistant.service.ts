@@ -5,11 +5,12 @@ import {
   type AiAssistantReplyView,
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
+  type AiAssistantToolTrace,
   type AuthUser,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { LlmClient, LlmRequestError, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { buildMeetingContext } from './assistant-meeting.context';
@@ -25,6 +26,10 @@ const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자�
 
 /** 한 질문에서 도구를 부르는 횟수 상한. 넘으면 도구 없이 지금까지의 결과로 답하게 한다 (모델이 같은 조회를 되풀이하는 것을 막음) */
 export const MAX_TOOL_ROUNDS = 4;
+/** AI 실행 기록에 담는 도구 입력·결과·생각 글의 길이. 답과 함께 화면에만 가므로 읽을 만큼만 */
+const TRACE_ARGUMENTS_MAX = 500;
+const TRACE_RESULT_MAX = 600;
+const TRACE_THINKING_MAX = 8000;
 
 /**
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
@@ -81,12 +86,15 @@ export class AiAssistantService {
 
     const started = Date.now();
     const dataSources: AiAssistantSource[] = [];
+    const toolCalls: AiAssistantToolTrace[] = [];
     const tools = this.toolbox.definitions();
     let reply = await this.call(settings, model, messages, tools);
     for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
       messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
       for (const call of reply.toolCalls) {
+        const callStarted = Date.now();
         const result = await this.toolbox.run(user, call);
+        toolCalls.push({ name: call.name, arguments: cut(call.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted });
         messages.push({ role: 'tool', toolCallId: call.id, content: result.content });
         if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
       }
@@ -94,7 +102,8 @@ export class AiAssistantService {
     }
 
     const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
-    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started };
+    const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
+    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null };
   }
 
   private async call(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
@@ -115,3 +124,5 @@ export class AiAssistantService {
     return previousQuestion ? searchGlossary(previousQuestion.content) : [];
   }
 }
+
+const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);

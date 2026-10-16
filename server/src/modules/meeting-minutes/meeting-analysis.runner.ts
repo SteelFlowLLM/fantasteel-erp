@@ -1,17 +1,18 @@
-import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type MeetingCandidate, type MeetingReviewResult, type Role } from '@fantasteel/shared';
+import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type MeetingCandidate, type MeetingReviewResult, type MeetingTraceChange, type MeetingTraceStage, type MeetingTraceStep, type Role } from '@fantasteel/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
-import { LlmClient, LlmRequestError } from '../llm/llm.client';
+import { LlmClient, LlmJsonParseError, LlmRequestError, type LlmJsonReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, buildReviewUserMessage, REVIEW_JSON_SCHEMA, REVIEW_SYSTEM_PROMPT, segmentPromptText, type ReviewCandidateLine } from './meeting-analysis.prompt';
 import { collectSalesOrderNos, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
 import { MeetingCandidateContextService } from './meeting-candidate.context';
-import { mergeReview, reviewItemsOf } from './meeting-review';
+import { MeetingJobLease } from './meeting-job.lease';
+import { mergeReview, REVIEW_BAD_SHAPE, reviewItemsOf } from './meeting-review';
 import { readSegments } from './meeting-minutes.json';
 import { MeetingMinutesRepository } from './meeting-minutes.repository';
 
-export const ANALYSIS_INTERRUPTED_REASON = '서버가 다시 시작돼 분석이 중단됐어요. 다시 정리해 주세요';
+export const ANALYSIS_INTERRUPTED_REASON = '분석하던 서버가 멈춰 분석이 중단됐어요. 다시 정리해 주세요';
 const ANALYSIS_ERROR_REASON = 'AI 정리 중 오류가 났어요. 다시 정리해 주세요';
 const NO_MODEL_REASON = '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요';
 const BAD_SHAPE_REASON = 'AI 응답 형식이 올바르지 않아요';
@@ -19,6 +20,8 @@ const BAD_SHAPE_REASON = 'AI 응답 형식이 올바르지 않아요';
 const ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const ANALYSIS_MAX_TOKENS = 8000;
 const REVIEW_ERROR_REASON = 'AI 2차 검토 중 오류가 났어요';
+/** 실행 기록에 남기는 원문·생각 글의 단계당 상한. 회의록 한 행의 JSON이 지나치게 커지지 않게 한다 */
+export const TRACE_TEXT_MAX = 20_000;
 
 export interface AnalysisJob {
   meetingMinutesId: number;
@@ -27,12 +30,13 @@ export interface AnalysisJob {
 /**
  * 회의 전사를 백그라운드로 AI 분석한다 (REQ-VOC-003, BP-VOC-01). 작업은 한 번에 하나씩 돈다(로컬 LLM 하나를 겹쳐 부르지 않는다).
  * 모델은 후보를 제안만 하고 DB에 쓰지 않는다: 결과는 서버 검증(validateAnalysis)을 통과한 값만 analysis_result에 담긴다.
- * 서버가 꺼지면 진행 중이던 분석은 사라지므로 시작할 때 남은 ANALYZING 행을 실패로 돌린다.
+ * 서버가 꺼지면 진행 중이던 분석은 사라지므로, 맡은 서버의 표시가 끊긴 ANALYZING 행을 켤 때와 주기적으로 실패로 돌린다 (MeetingJobLease).
  */
 @Injectable()
-export class MeetingAnalysisRunner implements OnApplicationBootstrap {
+export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(MeetingAnalysisRunner.name);
   private tail: Promise<void> = Promise.resolve();
+  private readonly lease: MeetingJobLease;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -40,20 +44,27 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     private readonly llmClient: LlmClient,
     private readonly llmSettings: LlmSettingsStore,
     private readonly contexts: MeetingCandidateContextService,
-  ) {}
+  ) {
+    this.lease = new MeetingJobLease(prisma, repository, MEETING_MINUTES_STATUS.ANALYZING, ANALYSIS_INTERRUPTED_REASON, this.logger, '분석');
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     await this.recoverInterrupted();
+    this.lease.start();
   }
 
-  async recoverInterrupted(): Promise<number> {
-    const { count } = await this.repository.failAllAnalyzing(this.prisma, ANALYSIS_INTERRUPTED_REASON);
-    if (count > 0) this.logger.warn(`분석이 중단된 회의록 ${count}건을 실패로 바꿨어요`);
-    return count;
+  onModuleDestroy(): void {
+    this.lease.stop();
+  }
+
+  /** 맡은 서버가 멈춘 분석 행을 실패로 (테스트에서 시각을 넘겨 부른다) */
+  recoverInterrupted(now?: Date): Promise<number> {
+    return this.lease.recoverStale(now);
   }
 
   /** 줄 세우고 돌려준다. 돌려주는 약속은 이 작업이 끝나면 풀리고 절대 거절되지 않는다 */
   enqueue(job: AnalysisJob): Promise<void> {
+    this.lease.hold(job.meetingMinutesId);
     const run = this.tail.then(() => this.run(job));
     this.tail = run;
     return run;
@@ -65,6 +76,14 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
   }
 
   private async run(job: AnalysisJob): Promise<void> {
+    try {
+      await this.analyzeAndFinish(job);
+    } finally {
+      this.lease.release(job.meetingMinutesId);
+    }
+  }
+
+  private async analyzeAndFinish(job: AnalysisJob): Promise<void> {
     try {
       const analysis = await this.analyze(job.meetingMinutesId);
       await this.finish(job.meetingMinutesId, {
@@ -101,7 +120,8 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
     const promptInput = { meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) };
     const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS };
-    const raw = await this.llmClient.chatJson(
+    const started = Date.now();
+    const reply = await this.llmClient.chatJsonWithText(
       endpoint,
       settings.model,
       [
@@ -111,6 +131,8 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
       ANALYSIS_JSON_SCHEMA,
       options,
     );
+    const firstMs = Date.now() - started;
+    const raw = reply.value;
 
     const rawMaterials = await this.repository.findRawMaterials(this.prisma);
     const ctx: Omit<AnalysisContext, 'salesOrders'> = {
@@ -125,7 +147,16 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     // 2차 검토는 덤이다: 실패해도 1차 결과를 그대로 낸다
     const reviewed = await this.review(endpoint, settings.model, promptInput, validated.candidates, ctx);
     const candidates = await this.withContext(reviewed.candidates);
-    return { ...validated, candidates, review: reviewed.review, model: settings.model, analyzedAt: new Date().toISOString() };
+    const steps = [traceStep('ANALYSIS', settings.model, firstMs, reply, null, validated.changes), reviewed.step];
+    return {
+      summary: validated.summary,
+      decisions: validated.decisions,
+      candidates,
+      review: reviewed.review,
+      trace: { steps, totalMs: Date.now() - started },
+      model: settings.model,
+      analyzedAt: new Date().toISOString(),
+    };
   }
 
   private async salesOrdersIn(raw: unknown): Promise<Map<string, number>> {
@@ -141,9 +172,10 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     promptInput: Parameters<typeof buildAnalysisUserMessage>[0],
     first: MeetingCandidate[],
     ctx: Omit<AnalysisContext, 'salesOrders'>,
-  ): Promise<{ candidates: MeetingCandidate[]; review: MeetingReviewResult }> {
+  ): Promise<{ candidates: MeetingCandidate[]; review: MeetingReviewResult; step: MeetingTraceStep }> {
+    const started = Date.now();
     try {
-      const raw = await this.llmClient.chatJson(
+      const reply = await this.llmClient.chatJsonWithText(
         endpoint,
         model,
         [
@@ -153,10 +185,16 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
         REVIEW_JSON_SCHEMA,
         { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS },
       );
-      return mergeReview(first, raw, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(raw)) });
+      const durationMs = Date.now() - started;
+      const merged = mergeReview(first, reply.value, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(reply.value)) });
+      const error = merged.review.ok ? null : REVIEW_BAD_SHAPE;
+      return { candidates: merged.candidates, review: merged.review, step: traceStep('REVIEW', model, durationMs, reply, error, merged.changes) };
     } catch (error) {
       this.logger.warn(`2차 검토 실패: ${error instanceof LlmRequestError ? error.message : error instanceof Error ? error.name : 'unknown'}`);
-      return { candidates: first, review: { ok: false, error: error instanceof LlmRequestError ? error.message : REVIEW_ERROR_REASON } };
+      const reason = error instanceof LlmRequestError ? error.message : REVIEW_ERROR_REASON;
+      // JSON으로 읽지 못한 답도 무엇을 냈는지 볼 수 있게 원문을 남긴다
+      const reply = error instanceof LlmJsonParseError ? { rawText: error.rawText, thinking: error.thinking } : null;
+      return { candidates: first, review: { ok: false, error: reason }, step: traceStep('REVIEW', model, Date.now() - started, reply, reason, []) };
     }
   }
 
@@ -174,6 +212,25 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap {
     const { count } = await this.repository.finishAnalysis(this.prisma, id, data);
     if (count === 0) this.logger.warn(`회의록 ${id}는 더 이상 분석 중이 아니라 결과를 버렸어요`);
   }
+}
+
+function clip(value: string | null): { text: string | null; cut: boolean } {
+  if (value === null || value === '') return { text: null, cut: false };
+  return value.length > TRACE_TEXT_MAX ? { text: value.slice(0, TRACE_TEXT_MAX), cut: true } : { text: value, cut: false };
+}
+
+/** 한 단계의 실행 기록. 원문·생각 글은 길면 잘라 둔다 */
+function traceStep(
+  stage: MeetingTraceStage,
+  model: string,
+  durationMs: number,
+  reply: Pick<LlmJsonReply, 'rawText' | 'thinking'> | null,
+  error: string | null,
+  changes: MeetingTraceChange[],
+): MeetingTraceStep {
+  const raw = clip(reply?.rawText ?? null);
+  const thinking = clip(reply?.thinking ?? null);
+  return { stage, model, durationMs, ok: error === null, error, rawAnswer: raw.text, thinking: thinking.text, truncated: raw.cut || thinking.cut, changes };
 }
 
 const reviewLine = (c: MeetingCandidate): ReviewCandidateLine => ({

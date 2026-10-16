@@ -39,6 +39,17 @@ export interface LlmToolReply {
   content: string;
   /** 비어 있으면 모델이 답을 끝낸 것 */
   toolCalls: LlmToolCall[];
+  /** LM Studio 추론 모델이 content와 따로 주는 생각 글. 없으면 비어 있다 */
+  reasoning?: string | null;
+}
+
+/** JSON 답과 함께 모델이 실제로 쓴 글 (AI 실행 기록) */
+export interface LlmJsonReply {
+  value: unknown;
+  /** JSON을 읽은 원문 (<think> 블록을 뺀 것) */
+  rawText: string;
+  /** <think> 블록이나 reasoning_content의 생각 글. 없으면 null */
+  thinking: string | null;
 }
 
 interface WireToolCall {
@@ -53,6 +64,17 @@ export class LlmRequestError extends Error {
     message: string,
     /** LLM 서버가 돌려준 HTTP 상태. 연결 실패·시간 초과면 없다 */
     readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+/** 모델이 답은 냈지만 JSON으로 읽지 못함. 실행 기록에 남기려고 원문을 들고 있다 */
+export class LlmJsonParseError extends LlmRequestError {
+  constructor(
+    message: string,
+    readonly rawText: string,
+    readonly thinking: string | null,
   ) {
     super(message);
   }
@@ -122,6 +144,11 @@ export class LlmClient {
    * 서버가 response_format을 지원하지 않아 400을 주면 형식 강제 없이 한 번 더 부른다(프롬프트가 JSON만 달라고 요구한다).
    */
   async chatJson(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<unknown> {
+    return (await this.chatJsonWithText(endpoint, model, messages, format, options)).value;
+  }
+
+  /** chatJson과 같고, 모델이 쓴 원문과 생각 글도 돌려준다 (회의록 AI 실행 기록) */
+  async chatJsonWithText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<LlmJsonReply> {
     const base = { model, messages, stream: false, temperature: 0, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) };
     type Reply = { choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[] };
     let body: Reply;
@@ -139,7 +166,16 @@ export class LlmClient {
     }
     const message = body.choices?.[0]?.message;
     // LM Studio의 추론 모델은 형식을 강제해도 JSON을 content가 아니라 reasoning_content에 담아 content를 비우기도 한다
-    return parseJsonContent(message?.content?.trim() ? message.content : (message?.reasoning_content ?? ''));
+    const fromContent = Boolean(message?.content?.trim());
+    const split = splitThinking(fromContent ? (message?.content ?? '') : (message?.reasoning_content ?? ''));
+    const reasoning = fromContent ? message?.reasoning_content?.trim() || null : null;
+    const thinking = [reasoning, split.thinking].filter((t): t is string => Boolean(t)).join('\n\n') || null;
+    try {
+      return { value: parseJsonText(split.text), rawText: split.text, thinking };
+    } catch (error) {
+      if (error instanceof LlmRequestError) throw new LlmJsonParseError(error.message, split.text, thinking);
+      throw error;
+    }
   }
 
   /**
@@ -147,7 +183,7 @@ export class LlmClient {
    * tools가 비면 도구 없이 답만 받는다(도구 호출 횟수를 다 쓴 뒤 마지막 답).
    */
   async chatWithTools(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
-    const body = await this.request<{ choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] } }[] }>(
+    const body = await this.request<{ choices?: { message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: WireToolCall[] } }[] }>(
       endpoint,
       'POST',
       '/chat/completions',
@@ -163,7 +199,7 @@ export class LlmClient {
     const toolCalls = (message?.tool_calls ?? [])
       .filter((call) => call.function?.name)
       .map((call, index) => ({ id: call.id || `call-${index}`, name: call.function?.name ?? '', arguments: call.function?.arguments ?? '{}' }));
-    return { content: message?.content?.trim() ?? '', toolCalls };
+    return { content: message?.content?.trim() ?? '', toolCalls, reasoning: message?.reasoning_content?.trim() || null };
   }
 
   private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number): Promise<T> {
@@ -207,9 +243,28 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
   return { role: message.role, content: message.content };
 }
 
+/**
+ * 추론 모델이 답 앞에 쓴 <think> 블록을 떼어 낸다. 여는 태그 없이 `…</think>`로 시작하는 모델도 있어 마지막 닫는 태그 앞을 모두 생각 글로 본다.
+ * 닫히지 않은 <think>(답 길이 상한에 걸려 끊긴 경우)는 전부 생각 글이다.
+ */
+export function splitThinking(content: string): { thinking: string | null; text: string } {
+  const closed = content.lastIndexOf('</think>');
+  if (closed >= 0) {
+    const thinking = content.slice(0, closed).replace(/<\/?think>/gi, '').trim();
+    return { thinking: thinking || null, text: content.slice(closed + '</think>'.length).trim() };
+  }
+  const open = content.search(/<think>/i);
+  if (open >= 0) return { thinking: content.slice(open + '<think>'.length).trim() || null, text: content.slice(0, open).trim() };
+  return { thinking: null, text: content.trim() };
+}
+
 /** 추론 모델의 <think> 블록과 ```json 울타리를 벗기고 JSON으로 읽는다 */
 export function parseJsonContent(content: string): unknown {
-  let text = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  return parseJsonText(splitThinking(content).text);
+}
+
+function parseJsonText(content: string): unknown {
+  let text = content;
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
   if (fenced) text = fenced[1].trim();
   try {
