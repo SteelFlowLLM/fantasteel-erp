@@ -31,7 +31,7 @@ export class AiAssistantController {
    */
   @Post('ai-assistant/messages/stream')
   async askStream(@CurrentUser() user: AuthUser, @Body() dto: AskAiAssistantDto, @Res() res: Response): Promise<void> {
-    const prepared = await this.service.prepare(user, dto);
+    const prepared = await this.service.prepare(user, dto, { interactive: true });
     const abort = new AbortController();
     res.on('close', () => {
       if (!res.writableFinished) abort.abort();
