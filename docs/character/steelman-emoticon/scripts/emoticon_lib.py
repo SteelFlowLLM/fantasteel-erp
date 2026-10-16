@@ -383,6 +383,16 @@ PROPS = {
         ".NNN............NNN.", "NKHKN..........NKHKN", "NKHKNNNNNNNNNNNNKHKN", "NKHKNGGGGGGGGGGNKHKN",
         "NKHKNNNNNNNNNNNNKHKN", "NKHKN..........NKHKN", ".NNN............NNN.",
     ],
+    # ── 8차 소품 ──
+    'angle_steel': [
+        "NNNNN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........",
+        "NsGGN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........", "NsGGN.........",
+        "NsGGNNNNNNNNNN", "NsGGssssssssGN", "NsGGGGGGGGGGGN", "NHHHHHHHHHHHHN", "NNNNNNNNNNNNNN",
+    ],
+    'letter': [
+        "NNNNNNNNNNNNN", "NWWNWWWWWNWWN", "NWWWNWWWNWWWN", "NWWWWNNNWWWWN", "NWWWWWWWWWWWN", "NWgggggggggWN",
+        "NWWWWWWWWWWWN", "NNNNNNNNNNNNN",
+    ],
 }
 
 

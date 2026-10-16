@@ -1,4 +1,4 @@
-"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈), 5차 26종, 7차 9종(요즘 말투 밈 더). 키는 shared MESSAGE_EMOTICONS와 같다."""
+"""묶음 '철강맨 일상' (steelman-daily): 2차 19종 (동기끼리 주고받는 재미용 + 철강 말장난), 3차 14종, 4차 6종(요즘 말투 밈), 5차 26종, 7차 9종(요즘 말투 밈 더), 8차 6종(2026년 하반기 밈). 키는 shared MESSAGE_EMOTICONS와 같다."""
 from PIL import Image
 
 from emoticon_lib import (
@@ -714,4 +714,73 @@ def build(sh):
     # 글자만 크게 (5차와 같은 움직임)
     big_word('ㅇㅈ', 'steelman-agree', 'ㅇㅈ', 'b')
     big_word('ㄹㅇ', 'steelman-real', 'ㄹㅇ', 'R')
+
+    # ── 8차: 2026년 하반기 말투 밈 (7차와 같은 기준) ──
+    # L을 가져가: L자 모양 앵글(ㄱ형강)이 떨어져 손에 쏙 → 무게에 살짝 눌렸다가 웃으며 받아들임 (패배 인정)
+    E.append(emoticon('L을 가져가', 'steelman-take-the-l', 'L을 가져가', 'b', [
+        fr(face(idle, mouth='smile'), 200, front=[('angle_steel', 37, -2)]),
+        fr(face(idle, eyes='wide', mouth='o'), 120, front=[('angle_steel', 37, 10)]),
+        fr(face(idle, eyes='wide', mouth='o'), 100, front=[('angle_steel', 35, 21)], shake=(0, 1)),
+        fr(flatten(face(idle, eyes='squeeze', mouth='wave'), 0.9, 1.05), 160, front=[('angle_steel', 35, 26), ('sweat', 6, 24)]),
+        fr(flatten(face(idle, eyes='closed', mouth='smile'), 0.94, 1.03), 700, front=[('angle_steel', 35, 24), ('sweat', 6, 22)]),
+    ]))
+
+    # 일하기 전 제 모습이고요: 반짝반짝 출근한 철강맨 → 일이 끝나니 회색으로 바래 납작 (전후 비교)
+    fresh = face(idle, eyes='star', mouth='open')
+    worn = tint(face(idle, eyes='tired', mouth='wave'), 'g', 0.45)
+    E.append(emoticon('일하기 전', 'steelman-before-work', ['일하기 전', '제 모습이고요'], 'Y', [
+        fr(fresh, 160, front=[('spark_l', 2, 8), ('spark_s', 44, 4)]),
+        fr(shine(fresh, 26), 80, front=[('spark_l', 2, 8), ('spark_s', 44, 4)]),
+        fr(shine(fresh, 44), 80, front=[('spark_s', 4, 12), ('spark_l', 42, 2)]),
+        fr(fresh, 400, front=[('spark_s', 4, 12), ('spark_l', 42, 2), ('spark_s', 44, 22)]),
+        fr(tint(fresh, 'g', 0.25), 80, front=[('dust', 4, 40), ('dust_s', 40, 38)], shake=(1, 0)),
+        fr(flatten(worn, 0.92, 1.04), 160, front=[('sweat', 36, 22)]),
+        fr(flatten(worn, 0.84, 1.1), 800, front=[('sweat', 36, 26), ('drop', 13, 32), ('z', 40, 12), ('z', 44, 6)]),
+    ]))
+
+    # 거제 야호!: 두 손을 입에 모아 외치고 신나게 점프
+    hands = ('cup_hands', 19, 26)
+    yells = [('img', 39, 20, flip(prop('yell'))), ('img', 43, 18, flip(prop('yell')))]
+    E.append(emoticon('거제 야호', 'steelman-geoje-yaho', '거제 야호!', 'B', [
+        fr(yell, 160, front=[hands]),
+        fr(yell, 160, front=[hands] + yells, cx=-1),
+        fr(yell, 160, front=[hands] + yells),
+        fr(happy[2], 110, front=[('spark_s', 2, 8)]),
+        fr(happy[3], 110, front=[('spark_l', 42, 4)]),
+        fr(happy[2], 110, front=[('spark_s', 44, 10)]),
+        fr(happy[3], 500, front=[('spark_l', 0, 6), ('spark_s', 44, 4)]),
+    ]))
+
+    # 퇴사할게여: 사직서 봉투를 신나게 흔들다가 눈치 보며 슬쩍 집어넣고 머쓱하게 웃음 (장난으로 하는 말)
+    letter_up = [('letter', 36, 9), ('letter', 35, 13)]
+    E.append(emoticon('퇴사할게여', 'steelman-quit-joke', '퇴사할게여', 'O', [
+        fr(face(wave1, eyes='happy', mouth='big'), 140, front=[letter_up[0]]),
+        fr(face(wave2, eyes='happy', mouth='big'), 140, front=[letter_up[1], ('spark_s', 2, 10)]),
+        fr(face(wave1, eyes='happy', mouth='big'), 140, front=[letter_up[0]]),
+        fr(face(wave2, eyes='happy', mouth='big'), 140, front=[letter_up[1], ('spark_s', 44, 18)]),
+        fr(face(idle, eyes='look_l', mouth='flat'), 260, front=[('letter', 34, 26), ('ellipsis', 4, 14)]),
+        fr(face(idle, eyes='look_r', mouth='flat'), 200, front=[('letter', 34, 32)]),
+        fr(face(idle, eyes='happy', mouth='smile'), 700, front=[('sweat', 36, 20), ('note_y', 4, 12)]),
+    ]))
+
+    # 책없쾌: 책임 없는 쾌락 - 남의 강아지(코일이)를 실컷 예뻐하고 손 흔들어 보냄
+    E.append(emoticon('책없쾌', 'steelman-carefree', '책없쾌', 'P', [
+        fr(idle, 140, front=[('dog', 50, 22, 0)]),
+        fr(face(idle, eyes='heart'), 120, front=[('dog', 38, 22, 1)]),
+        fr(face(idle, eyes='heart', mouth='open'), 180, front=[('dog', 28, 22, 2), ('heart_s', 36, 12)]),
+        fr(face(idle, eyes='heart', mouth='open'), 180, front=[('dog', 28, 22, 3), ('heart_s', 38, 8), ('heart_s', 4, 14)]),
+        fr(face(wave1, eyes='happy', mouth='smile'), 140, front=[('dog', 40, 22, 4)]),
+        fr(face(wave2, eyes='happy', mouth='smile'), 140, front=[('dog', 52, 22, 5)]),
+        fr(face(idle, eyes='closed', mouth='smile'), 600, front=[('spark_s', 42, 10), ('heart_s', 4, 12)]),
+    ]))
+
+    # 니가 좋아~: 마이크 들고 눈 감고 좌우로 흔들며 립싱크 → 하트 퐁 (노래 챌린지 느낌만)
+    sing = [face(idle, eyes='closed', mouth='o'), face(idle, eyes='closed', mouth='open')]
+    E.append(emoticon('니가 좋아', 'steelman-like-you', '니가 좋아~', 'P', [
+        fr(sway(sing[i % 2], -2 if i % 2 else 2, -1 if i % 2 else 1), 180,
+           front=[('mic', 34, 26), ('note' if i % 2 else 'note_y', 4 if i % 2 else 42, 12 - (i % 3) * 3)])
+        for i in range(6)
+    ] + [
+        fr(face(idle, eyes='heart', mouth='smile'), 650, front=[('mic', 34, 26), ('heart', 40, 4), ('heart_s', 2, 12)]),
+    ]))
     return E

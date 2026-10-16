@@ -137,6 +137,13 @@ export const MESSAGE_EMOTICON_KEYWORDS: Partial<Record<MessageEmoticonKey, reado
   'steelman-azas': ['아자스', '아잣스'],
   'steelman-agree': ['ㅇㅈ', '인정'],
   'steelman-real': ['ㄹㅇ', '레알', '리얼'],
+  // 8차: 2026년 하반기 밈
+  'steelman-take-the-l': ['l을 가져가', 'l 가져가', '엘을 가져가', '패배 인정'],
+  'steelman-before-work': ['일하기 전', '제 모습이고요'],
+  'steelman-geoje-yaho': ['거제 야호', '야호'],
+  'steelman-quit-joke': ['퇴사할게여'],
+  'steelman-carefree': ['책없쾌', '책임 없는 쾌락'],
+  'steelman-like-you': ['니가 좋아', '네가 좋아'],
 };
 
 // ── 작은 철강맨 반응 (23번) ─────────────

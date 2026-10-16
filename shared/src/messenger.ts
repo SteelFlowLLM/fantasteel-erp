@@ -16,7 +16,7 @@ export const MESSAGE_EMOTICON_SETS = [
 export type MessageEmoticonSetKey = (typeof MESSAGE_EMOTICON_SETS)[number]['key'];
 
 /**
- * 메신저 이모티콘 (18번~22번·25번·7차, 문서에 없는 추가 기능): 묶음 3개, 127종. key를 message.emoticon_key에 저장한다.
+ * 메신저 이모티콘 (18번~22번·25번·7차·8차, 문서에 없는 추가 기능): 묶음 3개, 133종. key를 message.emoticon_key에 저장한다.
  * 순서가 고르기 창 순서다. 그림은 화면의 /emoticons/<key>.gif(움직임)·.png(멈춘 그림, 64px), 원본은 docs/character/steelman-emoticon/
  */
 export const MESSAGE_EMOTICONS = [
@@ -135,6 +135,12 @@ export const MESSAGE_EMOTICONS = [
   { key: 'steelman-azas', label: '아자스', set: 'steelman-daily' },
   { key: 'steelman-agree', label: 'ㅇㅈ', set: 'steelman-daily' },
   { key: 'steelman-real', label: 'ㄹㅇ', set: 'steelman-daily' },
+  { key: 'steelman-take-the-l', label: 'L을 가져가', set: 'steelman-daily' },
+  { key: 'steelman-before-work', label: '일하기 전 제 모습이고요', set: 'steelman-daily' },
+  { key: 'steelman-geoje-yaho', label: '거제 야호', set: 'steelman-daily' },
+  { key: 'steelman-quit-joke', label: '퇴사할게여', set: 'steelman-daily' },
+  { key: 'steelman-carefree', label: '책없쾌', set: 'steelman-daily' },
+  { key: 'steelman-like-you', label: '니가 좋아', set: 'steelman-daily' },
   { key: 'steelman-new-year', label: '새해 복 많이 받으세요', set: 'steelman-event' },
   { key: 'steelman-seollal', label: '즐거운 설', set: 'steelman-event' },
   { key: 'steelman-chuseok', label: '즐거운 추석', set: 'steelman-event' },
