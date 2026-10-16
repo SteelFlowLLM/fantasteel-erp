@@ -374,6 +374,15 @@ PROPS = {
     ],
     'goreum': ["NNNN", "NRRN", ".NRN", ".NRN", "NRRN", "NN.."],
     'dot_on': [".NNN.", "NEEEN", "NELEN", "NEEEN", ".NNN."],
+    # ── 7차 소품 ──
+    't_badge': [
+        ".NNNNNNNNN.", "NbbbbbbbbbN", "NbWWWWWWWbN", "NbWWWWWWWbN", "NbbbWWWbbbN", "NbbbWWWbbbN",
+        "NbbbWWWbbbN", "NbbbWWWbbbN", "NbbbWWWbbbN", "NbbbbbbbbbN", ".NNNNNNNNN.",
+    ],
+    'dumbbell': [
+        ".NNN............NNN.", "NKHKN..........NKHKN", "NKHKNNNNNNNNNNNNKHKN", "NKHKNGGGGGGGGGGNKHKN",
+        "NKHKNNNNNNNNNNNNKHKN", "NKHKN..........NKHKN", ".NNN............NNN.",
+    ],
 }
 
 
@@ -785,6 +794,37 @@ def hanbok(img, jacket='P', pants='b'):
     out.paste(top, (13, 31))
     bottom = recolor(img.crop((13, 40, 35, 45)), fn_for(pants))
     out.paste(bottom, (13, 40))
+    return out
+
+
+def clover_img():
+    """네잎클로버 (럭키비키): 잎 넷 + 가운데 + 줄기."""
+    leaves = ((5, 2.4), (5, 7.6), (2.4, 5), (7.6, 5))
+
+    def m(x, y):
+        return any(math.hypot(x - cx, y - cy) <= 2.5 for cx, cy in leaves)
+    im = blank(13, 14)
+    im.alpha_composite(outlined(m, 11, 11, 'L'), (0, 0))
+    for (x, y) in ((6, 6), (5, 6), (6, 5), (7, 6), (6, 7)):
+        im.putpixel((x, y), rgba('E'))
+    for (x, y) in ((8, 11), (9, 12), (10, 13)):
+        im.putpixel((x, y), rgba('e'))
+    return im
+
+
+PROC['clover'] = clover_img
+
+
+def shine(img, pos, width=4):
+    """강철 광택: 대각선 띠(x + y가 pos부터 width칸) 안의 색을 하얗게 (외곽선은 그대로)."""
+    out = img.copy()
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
+            c = px[x, y]
+            if not _is_outline(c) and pos <= x + y < pos + width:
+                r, g, b = mix(c[:3], (255, 255, 255), 0.75)
+                px[x, y] = (int(r), int(g), int(b), 255)
     return out
 
 
