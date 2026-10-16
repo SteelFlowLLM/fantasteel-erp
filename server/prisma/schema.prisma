@@ -43,6 +43,7 @@ model Employee {
   scheduleEventsAsCreator ScheduleEvent[] @relation("ScheduleEventCreator")
   meetingMinutesAsCreator MeetingMinutes[] @relation("MeetingMinutesCreator")
   meetingAttendees MeetingAttendee[] @relation("MeetingAttendeeEmployee")
+  pastCasesAsCreatedEmployee PastCase[] @relation("PastCaseCreatedEmployee")
   scheduleEventAttendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEmployee")
   notificationsAsRecipient Notification[] @relation("NotificationRecipient")
   chatRoomMembers ChatRoomMember[] @relation("ChatRoomMemberEmployee")
@@ -501,6 +502,7 @@ model Lot {
   lotRelationsAsChildLot LotRelation[] @relation("LotRelationChildLot")
   qualityInspection QualityInspection? @relation("QualityInspectionLot")
   businessEventLots BusinessEventLot[] @relation("BusinessEventLotLot")
+  pastCaseLots PastCaseLot[] @relation("PastCaseLotLot")
 
   @@index([itemId])
   @@index([steelGradeId])
@@ -605,6 +607,42 @@ model QualityInspectionValue {
   @@unique([qualityInspectionId, inspectionStandardItemId])
   @@index([inspectionStandardItemId])
   @@map("quality_inspection_value")
+}
+
+model PastCase {
+  id Int @id @default(autoincrement()) /// 시퀀스 6부터 (예시 사례 CASE-0001~0005와 겹치지 않게, 마이그레이션 SQL)
+  caseNo String @unique @map("case_no") @db.VarChar /// CASE-{id 4자리} (번호 형식 TBD, 가정값)
+  caseCategory String @map("case_category") @db.VarChar /// CASE_CATEGORY 🟡: QUALITY·EQUIPMENT
+  title String @db.VarChar
+  phenomenon String
+  cause String?
+  actionTaken String? @map("action_taken")
+  equipmentText String? @map("equipment_text") @db.VarChar /// 설비 마스터 없이 텍스트 (REQ-CASE-001)
+  occurredDate DateTime @map("occurred_date") @db.Date
+  createdEmployeeId Int @map("created_employee_id") /// 등록자
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdEmployee Employee @relation("PastCaseCreatedEmployee", fields: [createdEmployeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  pastCaseLots PastCaseLot[] @relation("PastCaseLotPastCase")
+
+  @@index([createdEmployeeId])
+  @@map("past_case")
+}
+
+model PastCaseLot {
+  id Int @id @default(autoincrement())
+  pastCaseId Int @map("past_case_id")
+  lotId Int @map("lot_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  pastCase PastCase @relation("PastCaseLotPastCase", fields: [pastCaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lot Lot @relation("PastCaseLotLot", fields: [lotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([pastCaseId, lotId])
+  @@index([lotId])
+  @@map("past_case_lot")
 }
 
 // ───────────────────────────── 구매 (PUR) ─────────────────────────────

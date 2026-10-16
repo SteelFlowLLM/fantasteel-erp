@@ -8,17 +8,16 @@
 | 업무 프로세스 | BP-CASE-01 과거 사례 등록·검색 |
 | API | API-267 검색 · API-268 상세 · API-269 사례 초안 · API-270 등록 (API 명세 초안) |
 | 용어 | TRM-108 과거 사례 (`pastCase` / `past_case`) |
-| 저장 | **DB가 아니라 저장소 폴더 JSON 파일**(2026-10-16 결정, 아래 2장) |
+| 저장 | ERD `past_case`·`past_case_lot` (2026-10-16 추가, 아래 2장) |
 
-## 2. 저장 (사례 DB 없음)
+## 2. 저장
 
-- 기준 ERD(`docs/erd/fantasteel_erp_p1.dbml`)와 `schema.prisma`에 `past_case`·`past_case_lot`이 없다. 스키마를 바꾸지 않고 먼저 쓰기로 했다(2026-10-16).
 - 사례 = **예시 사례 5건** + **등록 사례**.
-  - 예시 사례: `shared/src/past-case.ts`의 `PAST_CASE_EXAMPLES` (CASE-0001~0005, 실제 사례 아님, `isExample: true`, LOT은 `lotId: null`). 화면 구성과 시연용(REQ-CASE-005 시드 개수·작성 방식 TBD).
-  - 등록 사례: `PastCaseStore`가 `STORAGE_DIR/past-cases/cases.json`(기본 `server/storage/`, git 제외)에 쓴다. LLM 연결 설정(`llm-settings.store.ts`)과 같은 방식.
-- 번호: `CASE-NNNN` (ERD의 `case_no`가 TBD라 가정값). 등록 사례는 CASE-0006부터, 파일의 가장 큰 번호 + 1.
-- 서버 1대 가정: 쓰기는 한 번에 하나씩 이어서 해 번호가 겹치지 않는다. 임시 파일에 쓴 뒤 바꿔 반쯤 쓴 파일이 남지 않는다.
-- `past_case` 테이블이 생기면 `PastCaseStore`만 repository로 바꾸면 된다. 칸은 `docs/rework/erd-final.txt`의 `past_case`·`past_case_lot` 열을 따랐다.
+  - 예시 사례: `shared/src/past-case.ts`의 `PAST_CASE_EXAMPLES` (CASE-0001~0005, 실제 사례 아님, `isExample: true`, LOT은 `lotId: null`). 관련 LOT이 실제 LOT이 아니라 DB에 넣지 않는다. 화면 구성과 시연용(REQ-CASE-005 시드 개수·작성 방식 TBD).
+  - 등록 사례: `past_case`(사례) + `past_case_lot`(관련 LOT, 사례·LOT 쌍 unique). 처음에는 저장소 폴더 JSON 파일에 두었다가(#346) 공용 DB에서 함께 보도록 테이블을 추가했다(#350).
+- 번호: `CASE-{id 4자리}` (ERD의 `case_no`가 TBD라 가정값). 마이그레이션이 `past_case` id 시퀀스를 6부터 시작해 예시 사례 id 1~5와 상세 조회(`GET past-cases/:id`)가 겹치지 않는다.
+- 등록은 한 트랜잭션: 겹치지 않는 임시 번호(`PENDING-…`)로 사례·관련 LOT을 만든 뒤 id로 번호를 채운다(번호가 id에서 나와서). 롤백되면 시퀀스 값 하나가 비어 번호가 건너뛸 수 있다.
+- 빈 원인·조치·설비는 NULL로 저장하고 응답은 지금처럼 빈 문자열로 준다.
 
 ## 3. API
 
@@ -56,11 +55,12 @@
 
 ## 7. 하지 않은 것 · 미결정
 
-- 작업 로그 `CASE_REGISTERED`: 공통 코드 정의서 3장 제안 코드(🟡)라 `shared/src/codes`에 없어 남기지 않는다. 확정되면 등록에서 `businessEventRecorder.record`를 부른다(저장이 파일이라 같은 트랜잭션은 아니다).
-- 구분 코드 `CASE_CATEGORY`(QUALITY·EQUIPMENT)도 🟡 제안 코드라 `shared/src/past-case.ts`에 `PAST_CASE_CATEGORY`로 따로 두었다.
-- `past_case` 테이블, ngram 인덱스, 사례 수정·삭제, 사례 시드 개수.
+- 작업 로그 `CASE_REGISTERED`: 공통 코드 정의서 3장 제안 코드(🟡)라 `shared/src/codes`에 없어 남기지 않는다. 확정되면 등록 트랜잭션 안에서 `businessEventRecorder.record`를 부른다.
+- 구분 코드 `CASE_CATEGORY`(QUALITY·EQUIPMENT)도 🟡 제안 코드라 `shared/src/past-case.ts`에 `PAST_CASE_CATEGORY`로 따로 두었다. 그래서 `case_category`에 CHECK 제약을 걸지 않고 DTO에서 값을 확인한다.
+- ngram 인덱스, 사례 수정·삭제, 사례 시드 개수.
 
 ## 8. 테스트
 
-- `past-case.unit.spec.ts`(DB 없음): 핵심어·검색 순서·구분·기간, 검사 결과 초안·AI 답 검사·AI에 넘기는 글, AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호·파일 저장·검색·상세, 동시 등록 번호, 없는 LOT·미래 발생일.
+- `past-case.unit.spec.ts`(DB 없음): 핵심어·검색 순서·구분·기간, 검사 결과 초안·AI 답 검사·AI에 넘기는 글.
+- `past-case.spec.ts`(DB `fs_collab`, 초안용 LOT 검사 조회는 고정 값): AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호(id 6 이상, CASE-{id})·DB 저장(빈 원인 NULL, 관련 LOT)·검색·상세, 동시 등록 번호와 임시 번호 정리, 없는 LOT·미래 발생일.
 - `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 도구 14개.

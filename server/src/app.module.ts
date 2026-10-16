@@ -30,7 +30,7 @@ import { ShipmentModule } from './modules/shipment/shipment.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 // 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(voice-erp)은 그 단계에서 추가한다.
-// past-case(EX)는 사례 DB 없이 예시 사례 + 저장소 파일로 먼저 넣었다 (2026-10-16).
+// past-case(EX)는 예시 사례 + 등록 사례(past_case 테이블)를 합쳐 쓴다 (2026-10-16).
 @Module({
   imports: [
     PrismaModule,

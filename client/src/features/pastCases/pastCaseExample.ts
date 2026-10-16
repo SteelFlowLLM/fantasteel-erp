@@ -1,5 +1,5 @@
 // 과거 사례 화면의 표시 규칙과 예시 작업 로그 (REQ-CASE-001~005·REQ-AST-006, BP-CASE-01, 용어 사전 TRM-108).
-// 사례와 검색은 서버(API-267~270)가 준다: 예시 사례 5건(shared PAST_CASE_EXAMPLES, 실제 사례 아님)과 등록 사례(저장소 파일).
+// 사례와 검색은 서버(API-267~270)가 준다: 예시 사례 5건(shared PAST_CASE_EXAMPLES, 실제 사례 아님)과 등록 사례(DB past_case).
 // 사례 번호(case_no) 형식은 ERD에서 TBD라 'CASE-NNNN'을 쓴다 (가정값, docs/rework/areas/soon.md).
 import type { PastCaseView } from '@fantasteel/shared';
 import { BUSINESS_EVENT_TYPE, LOT_TYPE_LABEL, PROPOSED_BUSINESS_EVENT_TYPE, formatEventNo, type ActorType, type LotType } from '@/codes';

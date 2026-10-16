@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   INSPECTION_RESULT,
@@ -7,6 +8,7 @@ import {
   searchPastCases,
   type AuthUser,
   type CreatePastCaseInput,
+  type PastCaseCategory,
   type PastCaseDraftView,
   type PastCaseSearchInput,
   type PastCaseView,
@@ -17,11 +19,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { DRAFT_JSON_SCHEMA, buildDraftMessages, parseDraft, ruleDraft, similarQueryOf, type FailedItemFact, type FailureFacts } from './past-case.draft';
-import { PastCaseRepository } from './past-case.repository';
-import { PastCaseStore, type StoredPastCase } from './past-case.store';
+import { PastCaseRepository, type PastCaseRow } from './past-case.repository';
 
-/** 등록 사례 번호는 예시 사례(CASE-0001~0005) 다음부터 */
-const FIRST_REGISTERED_SEQ = PAST_CASE_EXAMPLES.length + 1;
 /** 초안은 화면이 기다리는 동안 써야 해서 AI 어시스턴트(120초)보다 짧게 둔다. 넘으면 검사 결과 초안을 준다 */
 const DRAFT_TIMEOUT_MS = 60_000;
 const DRAFT_MAX_TOKENS = 1200;
@@ -31,8 +30,8 @@ type DraftLot = NonNullable<Awaited<ReturnType<PastCaseRepository['findLot']>>>;
 
 /**
  * 과거 사례 (EX, REQ-CASE-001~005, API-267~270, docs/backend/past-case.md).
- * 기준 ERD에 past_case가 없어 예시 사례(shared PAST_CASE_EXAMPLES)와 등록 사례(PastCaseStore, JSON 파일)를 합쳐 쓴다.
- * 등록은 저장소 파일이라 업무 트랜잭션이 없고, 작업 로그 CASE_REGISTERED는 공통 코드에 없는 제안 코드(🟡)라 남기지 않는다.
+ * 예시 사례(shared PAST_CASE_EXAMPLES, 관련 LOT이 실제 LOT이 아니라 DB에 넣지 않음)와 등록 사례(past_case)를 합쳐 쓴다.
+ * 작업 로그 CASE_REGISTERED는 공통 코드에 없는 제안 코드(🟡)라 남기지 않는다.
  */
 @Injectable()
 export class PastCaseService {
@@ -41,15 +40,14 @@ export class PastCaseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: PastCaseRepository,
-    private readonly store: PastCaseStore,
     private readonly llmSettings: LlmSettingsStore,
     private readonly llm: LlmClient,
   ) {}
 
   /** 예시 사례 + 등록 사례 */
   async all(): Promise<PastCaseView[]> {
-    const stored = await this.store.list();
-    return [...stored.map(viewOf), ...PAST_CASE_EXAMPLES];
+    const registered = await this.repository.findCases(this.prisma);
+    return [...registered.map(viewOf), ...PAST_CASE_EXAMPLES];
   }
 
   /** API-267 과거 사례 검색 */
@@ -91,24 +89,30 @@ export class PastCaseService {
     const lots = await this.repository.findLotNos(this.prisma, lotIds);
     if (lots.length !== lotIds.length) throw new AppException('COM-003', '관련 LOT을 찾을 수 없어요');
     if (input.occurredDate > seoulToday()) throw new AppException('COM-004', '발생일은 오늘보다 뒤일 수 없어요');
-    const lotNoOf = new Map(lots.map((l) => [l.id, l.lotNo]));
-    const created = await this.store.append(FIRST_REGISTERED_SEQ, (seq) => ({
-      id: seq,
-      caseNo: formatCaseNo(seq),
-      caseCategory: input.caseCategory,
-      title: input.title,
-      phenomenon: input.phenomenon,
-      cause: input.cause,
-      actionTaken: input.actionTaken,
-      equipmentText: input.equipmentText,
-      lots: lotIds.map((id) => ({ lotId: id, lotNo: lotNoOf.get(id) ?? '' })),
-      occurredDate: input.occurredDate,
-      createdEmployeeId: user.employeeId,
-      createdEmployeeName: user.employeeName,
-      createdAt: new Date().toISOString(),
-    }));
-    this.logger.log(`과거 사례 등록 ${created.caseNo} (사원 ${user.employeeId})`);
-    return viewOf(created);
+    const id = await this.prisma.$transaction(async (tx) => {
+      // 사례 번호(CASE-{id})가 id에서 나와서, 겹치지 않는 임시 번호로 만든 뒤 같은 트랜잭션에서 번호를 채운다
+      const created = await this.repository.createCase(
+        tx,
+        {
+          caseNo: `PENDING-${randomUUID()}`,
+          caseCategory: input.caseCategory,
+          title: input.title,
+          phenomenon: input.phenomenon,
+          cause: input.cause || null,
+          actionTaken: input.actionTaken || null,
+          equipmentText: input.equipmentText || null,
+          occurredDate: new Date(`${input.occurredDate}T00:00:00.000Z`),
+          createdEmployeeId: user.employeeId,
+        },
+        lotIds,
+      );
+      await this.repository.updateCaseNo(tx, created.id, formatCaseNo(created.id));
+      return created.id;
+    });
+    const saved = await this.repository.findCase(this.prisma, id);
+    if (!saved) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+    this.logger.log(`과거 사례 등록 ${saved.caseNo} (사원 ${user.employeeId})`);
+    return viewOf(saved);
   }
 
   /** 자기 검사가 불합격이면 그 값, 아니면 위로 올라가며 성분 불합격인 히트를 찾는다(코일 → 슬래브 → 히트) */
@@ -141,9 +145,22 @@ export class PastCaseService {
   }
 }
 
-function viewOf(stored: StoredPastCase): PastCaseView {
-  const { createdEmployeeId: _createdEmployeeId, ...rest } = stored;
-  return { ...rest, isExample: false };
+function viewOf(row: PastCaseRow): PastCaseView {
+  return {
+    id: row.id,
+    caseNo: row.caseNo,
+    caseCategory: row.caseCategory as PastCaseCategory,
+    title: row.title,
+    phenomenon: row.phenomenon,
+    cause: row.cause ?? '',
+    actionTaken: row.actionTaken ?? '',
+    equipmentText: row.equipmentText ?? '',
+    lots: row.pastCaseLots.map(({ lot }) => ({ lotId: lot.id, lotNo: lot.lotNo })),
+    occurredDate: row.occurredDate.toISOString().slice(0, 10),
+    createdEmployeeName: row.createdEmployee.employeeName,
+    createdAt: row.createdAt.toISOString(),
+    isExample: false,
+  };
 }
 
 function steelGradeOf(lot: DraftLot): string | null {

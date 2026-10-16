@@ -8,7 +8,7 @@ const CASE_ROW_LIMIT = 5;
 
 /**
  * 과거 사례 검색 (REQ-AST-006·REQ-CASE-003, GET /past-cases와 같은 전 역할).
- * 사례 DB가 없어 예시 사례와 등록 사례를 핵심어로 찾는다. 예시 사례는 "예시"라고 표시해 모델이 실제 사례처럼 말하지 않게 한다.
+ * 예시 사례와 등록 사례를 핵심어로 찾는다. 예시 사례는 "예시"라고 표시해 모델이 실제 사례처럼 말하지 않게 한다.
  */
 export function pastCaseTool(pastCases: PastCaseService): AssistantTool {
   return {
