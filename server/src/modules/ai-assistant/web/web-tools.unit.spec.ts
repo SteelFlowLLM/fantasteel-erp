@@ -1,20 +1,31 @@
 // 철강맨AI 웹 검색 (이슈 #367) 단위 시험. 실제 네트워크 없이 돈다 (npm run test:unit).
 import { AI_ASSISTANT_TOOL_TITLE, AI_ASSISTANT_WEB_TOOLS, isAiAssistantWebTool } from '@fantasteel/shared';
+import { Logger } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LookupAddress } from 'node:dns';
 import { AssistantWebToolbox, MAX_PAGE_READS_PER_ANSWER, MAX_WEB_SEARCHES_PER_ANSWER, type ReadPage, type WebPageReader, type WebToolDeps } from './assistant-web-toolbox';
 import { decodeBody, extractPage, limitPageText, PAGE_TEXT_MAX } from './page-extract';
 import { WebFetchError } from './safe-fetch';
-import { isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, parseDuckDuckGoHtml, parseWikipediaSearch, resolveDuckDuckGoHref, wikipediaArticleUrl } from './search-parsers';
+import { isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, mapNaverPlaces, parseDuckDuckGoHtml, parseNaverWebSearch, parseWikipediaSearch, resolveDuckDuckGoHref, wikipediaArticleUrl } from './search-parsers';
 import { assertFetchableUrl, BLOCKED_LOOKUP_CODE, guardedLookup, isPublicAddress, type LookupFunction } from './ssrf-guard';
-import { KakaoPlaceClient, SEARCH_CACHE_TTL_MS, SEARCH_PER_MINUTE, SearchRateLimitError, WebSearchClient, WIKIPEDIA_USER_AGENT, type HttpFetch } from './web-search.client';
+import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, SEARCH_CACHE_TTL_MS, SEARCH_PER_MINUTE, SearchRateLimitError, WebSearchClient, WIKIPEDIA_USER_AGENT, type HttpFetch } from './web-search.client';
 import { filterAnswerLinks, htmlToText, redactQuery, urlKey, wrapUntrusted } from './web-text';
 
 const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name), 'utf8');
 const DDG_RESULTS = fixture('ddg-results.html');
 const DDG_ANOMALY = fixture('ddg-anomaly.html');
 const ARTICLE = fixture('article.html');
+const NAVER_WEB = JSON.parse(fixture('naver-webkr.json')) as unknown;
+const NAVER_LOCAL = JSON.parse(fixture('naver-local.json')) as unknown;
+const NAVER_KEYS = { clientId: 'test-client-id', clientSecret: 'test-client-secret' };
+
+// 개발자 PC의 환경 변수에 키가 있어도 시험은 키 없음에서 시작한다 (키가 필요한 시험은 생성자로 넣는다)
+beforeAll(() => {
+  delete process.env.NAVER_CLIENT_ID;
+  delete process.env.NAVER_CLIENT_SECRET;
+  delete process.env.KAKAO_REST_API_KEY;
+});
 
 const WIKI_KO = {
   query: {
@@ -91,6 +102,30 @@ describe('카카오 로컬 응답 읽기', () => {
     expect(kakaoKeywordUrl('포항 남구 맛집', 'restaurant')).toContain('category_group_code=FD6');
     expect(kakaoKeywordUrl('포항 카페', 'cafe')).toContain('category_group_code=CE7');
     expect(kakaoKeywordUrl('포항역', 'any')).not.toContain('category_group_code');
+  });
+});
+
+describe('네이버 검색 API 응답 읽기', () => {
+  it('웹문서(webkr): <b> 태그·엔티티를 지우고, 중복·http(s)가 아닌 주소·제목 없는 줄은 뺀다', () => {
+    expect(parseNaverWebSearch(NAVER_WEB)).toEqual([
+      { title: '포항제철소 - 포스코', url: 'https://www.posco.co.kr/homepage/docs/kor7/jsp/company/posco/s91a1010050c.jsp', snippet: '포항제철소는 1973년 1고로 "첫 출선"을 시작으로 & 일관 제철소로 자리 잡았습니다.' },
+      { title: '포항 제철소 견학 안내', url: 'https://www.poscotour.example.kr/visit', snippet: '견학 신청은 홈페이지에서 할 수 있습니다.' },
+    ]);
+    expect(parseNaverWebSearch({ errorMessage: 'x', errorCode: 'SE01' })).toEqual([]);
+  });
+
+  it('지역(local): 도로명 → 지번 주소, 빈 link는 네이버 지도 검색 주소로, 빈 전화는 null', () => {
+    expect(mapNaverPlaces(NAVER_LOCAL)).toEqual([
+      { name: '포항 물회 본점', category: '한식>해물,생선요리', address: '경상북도 포항시 남구 해도로 1', phone: null, url: 'https://www.mulhoe.example.kr/', distanceM: null },
+      {
+        name: '죽도시장 & 횟집',
+        category: '한식>회',
+        address: '경상북도 포항시 북구 죽도동 2',
+        phone: '054-000-0000',
+        url: `https://map.naver.com/p/search/${encodeURIComponent('죽도시장 & 횟집 경상북도 포항시 북구 죽도동 2')}`,
+        distanceM: null,
+      },
+    ]);
   });
 });
 
@@ -348,6 +383,86 @@ describe('웹 검색 (DuckDuckGo → 위키백과)', () => {
   });
 });
 
+describe('검색 엔진 순서: 네이버(키가 있을 때) → DuckDuckGo → 위키백과', () => {
+  const naverOk = () => json(NAVER_WEB);
+
+  it('키가 있으면 네이버 웹문서 검색을 먼저 부르고(X-Naver-Client-Id·Secret, display=5), 결과가 있으면 DuckDuckGo는 부르지 않는다', async () => {
+    const http = fakeHttp((url) => (url.startsWith('https://openapi.naver.com') ? naverOk() : html(DDG_RESULTS)));
+    const client = new WebSearchClient({ fetch: http.fetch, naver: () => NAVER_KEYS });
+    const outcome = await client.search('포항 제철소');
+    expect(outcome.engine).toBe('네이버');
+    expect(outcome.results).toHaveLength(2);
+    expect(http.sent).toHaveLength(1);
+    expect(http.sent[0].url).toBe('https://openapi.naver.com/v1/search/webkr.json?query=%ED%8F%AC%ED%95%AD+%EC%A0%9C%EC%B2%A0%EC%86%8C&display=5');
+    expect(http.sent[0].init.method).toBe('GET');
+    expect(http.sent[0].init.headers).toMatchObject({ 'x-naver-client-id': 'test-client-id', 'x-naver-client-secret': 'test-client-secret' });
+    expect(client.engines()).toEqual(['naver', 'duckduckgo', 'wikipedia']);
+    expect(new WebSearchClient({ naver: () => null }).engines()).toEqual(['duckduckgo', 'wikipedia']);
+  });
+
+  it('네이버가 401·429면 한 번만 로그를 남기고(키 값 없이) DuckDuckGo로 넘어간다. 결과가 없어도 넘어간다', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      let naverStatus = 401;
+      const http = fakeHttp((url) => (url.startsWith('https://openapi.naver.com') ? json({ errorMessage: 'Authentication failed', errorCode: '024' }, naverStatus) : html(DDG_RESULTS)));
+      const client = new WebSearchClient({ fetch: http.fetch, naver: () => NAVER_KEYS });
+      expect((await client.search('하나')).engine).toBe('DuckDuckGo');
+      expect((await client.search('둘')).engine).toBe('DuckDuckGo');
+      naverStatus = 429;
+      expect((await client.search('셋')).engine).toBe('DuckDuckGo');
+      const naverLogs = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('네이버'));
+      expect(naverLogs).toHaveLength(2);
+      expect(naverLogs[0]).toContain('HTTP 401 024');
+      expect(naverLogs[1]).toContain('HTTP 429');
+      expect(naverLogs.join(' ')).not.toMatch(/test-client-(id|secret)/);
+
+      const empty = fakeHttp((url) => (url.startsWith('https://openapi.naver.com') ? json({ items: [] }) : html(DDG_RESULTS)));
+      expect((await new WebSearchClient({ fetch: empty.fetch, naver: () => NAVER_KEYS }).search('없는말')).engine).toBe('DuckDuckGo');
+      expect(empty.sent.map((s) => new URL(s.url).hostname)).toEqual(['openapi.naver.com', 'html.duckduckgo.com']);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('키가 없으면 네이버를 부르지 않는다', async () => {
+    const http = fakeHttp(() => html(DDG_RESULTS));
+    await new WebSearchClient({ fetch: http.fetch, naver: () => null }).search('포항');
+    expect(http.sent.map((s) => new URL(s.url).hostname)).toEqual(['html.duckduckgo.com']);
+  });
+});
+
+describe('장소 검색 제공자: 카카오 → 네이버 지역', () => {
+  it('카카오 키가 있으면 카카오, 없고 네이버 키가 있으면 네이버(local.json, display=5), 둘 다 없으면 꺼짐', async () => {
+    const http = fakeHttp((url) => (url.includes('kakao') ? json({ documents: [{ place_name: '카카오 물회', place_url: 'http://place.map.kakao.com/1' }] }) : json(NAVER_LOCAL)));
+    const naver = new NaverPlaceClient(() => NAVER_KEYS, { fetch: http.fetch });
+    const both = new PlaceSearch([new KakaoPlaceClient(() => 'k', { fetch: http.fetch }), naver]);
+    expect(both.provider).toBe('kakao');
+    expect((await both.search('포항 맛집', 'restaurant'))[0].name).toBe('카카오 물회');
+
+    const naverOnly = new PlaceSearch([new KakaoPlaceClient(() => null), naver]);
+    expect(naverOnly.provider).toBe('naver');
+    expect((await naverOnly.search('포항 남구 맛집', 'restaurant')).map((p) => p.name)).toEqual(['포항 물회 본점', '죽도시장 & 횟집']);
+    const sent = http.sent.at(-1);
+    expect(sent?.url).toBe('https://openapi.naver.com/v1/search/local.json?query=%ED%8F%AC%ED%95%AD+%EB%82%A8%EA%B5%AC+%EB%A7%9B%EC%A7%91&display=5');
+    expect(sent?.init.headers).toMatchObject({ 'x-naver-client-id': 'test-client-id', 'x-naver-client-secret': 'test-client-secret' });
+
+    const none = new PlaceSearch([new KakaoPlaceClient(() => null), new NaverPlaceClient(() => null)]);
+    expect(none.enabled).toBe(false);
+    expect(none.provider).toBeNull();
+    await expect(none.search('포항', 'any')).rejects.toThrow('설정되지 않았어요');
+  });
+
+  it('네이버 지역 검색이 429면 하루 한도를 알린다', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const client = new NaverPlaceClient(() => NAVER_KEYS, { fetch: async () => json({ errorCode: '010' }, 429) });
+      await expect(client.search('포항 맛집')).rejects.toThrow('하루 한도');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('카카오 장소 검색', () => {
   it('키가 없으면 꺼져 있고, 있으면 KakaoAK 헤더로 부른다', async () => {
     expect(new KakaoPlaceClient(() => null).enabled).toBe(false);
@@ -369,7 +484,7 @@ describe('카카오 장소 검색', () => {
 describe('웹 도구 모음 (한 답의 세션)', () => {
   const pages = (read: (url: string) => Promise<ReadPage>): WebPageReader => ({ read });
   const deps = (overrides: Partial<WebToolDeps> = {}): WebToolDeps => ({
-    search: new WebSearchClient({ fetch: fakeHttp(() => html(DDG_RESULTS)).fetch }),
+    search: new WebSearchClient({ fetch: fakeHttp(() => html(DDG_RESULTS)).fetch, naver: () => null }),
     places: new KakaoPlaceClient(() => null),
     pages: pages(async (url) => ({ url, title: '기사', text: extractPage(ARTICLE, 'text/html', url).text })),
     ...overrides,
@@ -380,6 +495,14 @@ describe('웹 도구 모음 (한 답의 세션)', () => {
     const names = new AssistantWebToolbox(deps({ places: new KakaoPlaceClient(() => 'k') })).definitions().map((d) => d.name);
     expect([...names].sort()).toEqual([...AI_ASSISTANT_WEB_TOOLS].sort());
     expect(names.every((name) => AI_ASSISTANT_TOOL_TITLE[name] && isAiAssistantWebTool(name) && !name.startsWith('propose_'))).toBe(true);
+  });
+
+  it('capabilities: 쓸 수 있는 엔진과 장소 검색 여부', () => {
+    expect(new AssistantWebToolbox(deps()).capabilities()).toEqual({ engines: ['duckduckgo', 'wikipedia'], placeSearch: false });
+    const naverPlaces = new PlaceSearch([new KakaoPlaceClient(() => null), new NaverPlaceClient(() => NAVER_KEYS)]);
+    const withNaver = new AssistantWebToolbox(deps({ search: new WebSearchClient({ naver: () => NAVER_KEYS }), places: naverPlaces }));
+    expect(withNaver.capabilities()).toEqual({ engines: ['naver', 'duckduckgo', 'wikipedia'], placeSearch: true });
+    expect(withNaver.definitions().map((d) => d.name)).toContain('search_places');
   });
 
   it('카카오 키가 없으면 장소 검색을 알리지 않는다', () => {

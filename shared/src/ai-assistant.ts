@@ -58,6 +58,19 @@ export interface AiAssistantCapabilitiesView {
   vision: boolean | null;
   /** 생각 정도를 바꿀 수 있는지 */
   reasoning: boolean | null;
+  /** 웹 검색으로 쓸 수 있는 것 (이슈 #367). 모델과 상관없이 서버의 키 설정으로 정해진다 */
+  webSearch: AiWebSearchCapabilities;
+}
+
+/** 웹 검색 엔진: 네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
+export const AI_WEB_SEARCH_ENGINES = ['naver', 'duckduckgo', 'wikipedia'] as const;
+export type AiWebSearchEngine = (typeof AI_WEB_SEARCH_ENGINES)[number];
+
+export interface AiWebSearchCapabilities {
+  /** 쓸 수 있는 엔진 (부르는 순서) */
+  engines: AiWebSearchEngine[];
+  /** 장소 검색(search_places)을 쓸 수 있는지. 카카오나 네이버 키가 있어야 한다 */
+  placeSearch: boolean;
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. 모델이 단계를 모르면 켜고 끄기만 한다 */

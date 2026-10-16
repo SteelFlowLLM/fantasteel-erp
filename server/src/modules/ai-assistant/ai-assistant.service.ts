@@ -98,12 +98,13 @@ export class AiAssistantService {
     };
   }
 
-  /** 지금 설정된 모델이 사진·생각 정도를 지원하는지 (화면이 버튼을 켜고 끈다) */
+  /** 지금 설정된 모델이 사진·생각 정도를 지원하는지, 웹 검색으로 무엇을 쓸 수 있는지 (화면이 버튼을 켜고 끈다) */
   async capabilities(): Promise<AiAssistantCapabilitiesView> {
     const settings = await this.settingsStore.read();
-    if (!settings.model) return { model: null, vision: null, reasoning: null };
+    const webSearch = this.webTools.capabilities();
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps };
+    return { model: settings.model, ...caps, webSearch };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
