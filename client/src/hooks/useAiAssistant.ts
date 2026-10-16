@@ -26,8 +26,8 @@ interface AskVariables {
 
 export function useAskAiAssistant() {
   const mutation = useMutation({
-    mutationFn: ({ question, screen, history }: AskVariables) => aiAssistantApi.ask({ question, screen, history }),
-    onSuccess: (reply, { questionId }) => useAiChatStore.getState().addAnswer(questionId, reply.answer, reply.sources),
+    mutationFn: ({ question, screen, history }: AskVariables) => aiAssistantApi.ask({ question, screen, history, actionCards: true }),
+    onSuccess: (reply, { questionId }) => useAiChatStore.getState().addAnswer(questionId, reply.answer, reply.sources, reply.actionCards),
     onError: (error, { questionId, question }) => useAiChatStore.getState().addFailure(questionId, question, errorMessageOf(error)),
   });
 

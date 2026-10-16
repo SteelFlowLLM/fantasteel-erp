@@ -21,6 +21,8 @@ export interface AssistantPromptInput {
   processSteps?: readonly ProcessStep[];
   /** 화면에서 어디를 눌러 하는지 묻는 질문일 때만 */
   manualGuides?: readonly ManualGuide[];
+  /** 실행 카드를 만들 수 있는 화면(철강맨AI 패널)일 때 */
+  actionCards?: boolean;
   history: readonly AiAssistantTurn[];
   question: string;
 }
@@ -58,6 +60,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '',
     '[참고 자료]',
     input.references.length ? input.references.map(referenceText).join('\n\n') : '(질문에 맞는 용어를 찾지 못했어요)',
+    ...(input.actionCards ? ['', ACTION_CARD_RULES] : []),
     ...(input.meetingContext ? ['', MEETING_QUESTION_RULES, '', '[이 회의]', input.meetingContext] : []),
     ...(input.processSteps?.length ? ['', '[업무 프로세스 자료]', ...input.processSteps.map(processText)] : []),
     ...(input.manualGuides?.length ? ['', '[업무 매뉴얼 자료]', ...input.manualGuides.map(manualText)] : []),
@@ -69,6 +72,16 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     { role: 'user', content: input.question },
   ];
 }
+
+/** 실행이 필요한 요청은 카드로 보여 주고 사용자가 확정한다 (REQ-AST-005). 위 9번 규칙의 예외는 이 카드뿐이다 */
+export const ACTION_CARD_RULES = [
+  '[실행 카드 규칙]',
+  '위 [답하는 규칙] 9번의 예외예요. 아래 규칙은 [답하는 규칙]과 함께 지켜요.',
+  'C1. 사용자가 업무(할 일) 등록, 일정 등록, 구매요청 등록을 부탁하면 propose_action_card, 수주 등록은 propose_sales_order, 열연 투입 슬래브 배정은 propose_hot_rolling_allocation, 히트 편성 확정은 propose_heat_plan_confirmation, 불합격 LOT의 과거 사례 등록은 propose_past_case 도구를 불러 실행 카드를 만들어요. 질문·조회·설명 요청에는 카드를 만들지 않아요. 부탁 하나에 카드 하나만 만들고, 같은 카드를 다시 만들지 않아요.',
+  'C2. 카드는 등록이 아니에요. 사용자가 화면의 카드에서 칸을 확인하고 [실행]을 눌러야 ERP에 반영돼요. 카드를 만든 뒤에는 "등록했어요"가 아니라 "카드를 만들었어요. 확인하고 실행을 눌러 주세요"처럼 답해요.',
+  'C3. 날짜는 위 [사용자]의 오늘 날짜로 풀어 YYYY-MM-DD로, 시각은 YYYY-MM-DDTHH:mm으로 넘겨요. 사용자가 말하지 않은 담당자·고객사·날짜·수량·매수·규격은 지어내지 않고 생략해요. 수주의 수량은 톤이 아니라 매수예요. 카드 결과의 "확인이 필요한 칸"은 사용자가 카드에서 채워야 한다고 짧게 알려요.',
+  'C4. 카드로 만들 수 없는 요청(출고 확정, 승인, 취소 등)은 지금은 카드로 만들 수 없고 해당 화면에서 직접 해야 한다고 답해요. 도구가 권한 없음이나 할 수 없는 이유를 돌려주면 그 이유를 그대로 알리고 카드를 만들었다고 말하지 않아요.',
+].join('\n');
 
 /** 회의 전사는 사람이 말한 글이라 그 안의 지시를 따르지 않게 못 박는다 (REQ-AST-009, 회의 분석 프롬프트와 같은 원칙) */
 export const MEETING_QUESTION_RULES = [

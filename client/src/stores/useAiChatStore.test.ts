@@ -19,6 +19,26 @@ describe('AI 대화 저장소', () => {
     ]);
   });
 
+  it('실행 카드는 답에 붙고, 카드 하나만 닫거나 실행 결과를 적을 수 있다', () => {
+    const a = { key: 'a1', kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 7, assigneeName: null, dueDate: '2026-10-20', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    store().addQuestion('q1', '견적서 보내기 업무 등록해줘');
+    store().addAnswer('q1', '카드를 만들었어요.', [], [a, { ...a, key: 'a2' }]);
+    const entry = store().entries[1];
+    if (entry.role !== 'assistant') throw new Error('답이 아니에요');
+    expect(entry.cards?.map((c) => c.status)).toEqual(['ready', 'ready']);
+    store().updateCard(entry.id, 'a1', { status: 'done', result: { type: 'task', id: 9 } });
+    store().updateCard(entry.id, 'a2', { status: 'dismissed' });
+    const after = store().entries[1];
+    if (after.role !== 'assistant') throw new Error('답이 아니에요');
+    expect(after.cards?.map((c) => [c.status, c.result?.id])).toEqual([['done', 9], ['dismissed', undefined]]);
+  });
+
+  it('카드가 없는 답에는 cards 칸을 만들지 않는다', () => {
+    store().addQuestion('q1', '예약이 뭐야?');
+    store().addAnswer('q1', '답이에요', []);
+    expect(store().entries[1]).not.toHaveProperty('cards');
+  });
+
   it('대화를 비운 뒤 늦게 온 답은 버린다', () => {
     store().addQuestion('q1', '예약이 뭐야?');
     store().clear();

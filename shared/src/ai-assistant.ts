@@ -1,5 +1,6 @@
-// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답한다. 실행 카드는 아직 없다.
+// AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답하고, 실행이 필요한 요청은 실행 카드(REQ-AST-005)로 보여 준다.
 import type { Role } from './codes';
+import type { MeetingCandidate, MeetingCandidateUpdateInput } from './meeting-minutes';
 
 /** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
 export interface AiAssistantTurn {
@@ -22,6 +23,8 @@ export interface AiAssistantMessageInput {
   screen?: AiAssistantScreenContext;
   /** 회의록 상세에서 묻는 질문이면 그 회의록 id. 서버가 회의 내용을 읽어 질문의 맥락으로 쓴다 (Voice2ERP 회의 질문하기) */
   meetingMinutesId?: number;
+  /** true면 실행이 필요한 요청을 실행 카드로 만들어 답에 담는다 (철강맨AI 패널만 보낸다) */
+  actionCards?: boolean;
   /** 오래된 것부터. 서버는 최근 몇 개만 쓴다 */
   history?: AiAssistantTurn[];
 }
@@ -58,6 +61,117 @@ export interface AiAssistantReplyView {
   toolCalls: AiAssistantToolTrace[];
   /** 추론 모델이 마지막 답 앞에 쓴 생각 글. 없으면 null */
   thinking: string | null;
+  /** 실행 카드(REQ-AST-005). 서버는 저장하지 않고, 사용자가 확인해 실행을 누를 때만 업무에 반영한다 */
+  actionCards: AiActionCard[];
+}
+
+/**
+ * 업무·일정·구매요청 카드. 회의록 등록 후보(MeetingCandidate)와 같은 칸·같은 규칙이다: 업무(TASK)·일정(EVENT)·구매요청 초안(PURCHASE).
+ * key는 한 답 안에서 카드를 가르는 'a1', 'a2' …. 사원·품목 id는 모델이 아니라 서버가 DB에서 맞춘 값이다.
+ */
+export type AiWorkCard = Pick<
+  MeetingCandidate,
+  'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'purchase' | 'itemName' | 'issues'
+>;
+
+/** 수주 등록 카드의 품목 한 줄. 못 맞춘 칸은 null이고 카드의 issues로 알린다 */
+export interface AiSalesOrderCardLine {
+  itemId: number | null;
+  /** 규격 코드 · 품목 이름 (itemId가 없으면 모델이 말한 규격 그대로) */
+  itemLabel: string | null;
+  orderedQty: number | null;
+  /** YYYY-MM-DD */
+  dueDate: string | null;
+}
+
+/** 수주 등록 카드 (SalesOrderService.create). 예약·부족분 생산계획은 실행할 때 기존 수주 등록 로직이 한다 */
+export interface AiSalesOrderCard {
+  key: string;
+  kind: 'SALES_ORDER';
+  title: string;
+  customerId: number | null;
+  customerName: string | null;
+  lines: AiSalesOrderCardLine[];
+  issues: string[];
+}
+
+/** 열연 배정 카드 (HotRollingService.confirm). 슬래브는 FIFO 추천 순서이고 서버가 저장하지 않고 보여 주기만 한다 */
+export interface AiHotRollingCard {
+  key: string;
+  kind: 'HOT_ROLLING';
+  title: string;
+  productionPlanId: number;
+  productionPlanNo: string;
+  itemLabel: string;
+  neededQty: number;
+  availableQty: number;
+  lots: { lotId: number; lotNo: string; producedDate: string | null; heatNo: string | null }[];
+  issues: string[];
+}
+
+/** 히트 편성 확정 카드 (ProductionService.confirmHeatPlan) */
+export interface AiHeatPlanCard {
+  key: string;
+  kind: 'HEAT_PLAN';
+  title: string;
+  productionPlanId: number;
+  productionPlanNo: string;
+  itemLabel: string;
+  shortageQty: number;
+  currentHeatCount: number;
+  newHeatCount: number;
+  /** 소수 3자리 문자열 */
+  heatTon: string;
+  requiredMoltenSteelTon: string;
+  issues: string[];
+}
+
+/** 과거 사례 등록 카드 (PastCaseService.createDraft → create). 불합격 LOT의 초안을 사용자가 고쳐 등록한다 */
+export interface AiPastCaseCard {
+  key: string;
+  kind: 'PAST_CASE';
+  title: string;
+  lotId: number;
+  lotNo: string;
+  caseCategory: 'QUALITY' | 'EQUIPMENT';
+  phenomenon: string;
+  cause: string;
+  actionTaken: string;
+  equipmentText: string;
+  /** YYYY-MM-DD */
+  occurredDate: string;
+  aiWritten: boolean;
+  referenceCaseNos: string[];
+  issues: string[];
+}
+
+/** 실행 카드 한 장 (REQ-AST-005). 종류는 kind로 가른다 */
+export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard;
+export type AiActionCardKind = AiActionCard['kind'];
+
+/** POST ai-assistant/action-cards/execute. 카드에서 사용자가 확인·수정한 값을 그대로 보낸다 (서버가 다시 검증한다) */
+export type AiActionCardExecuteInput =
+  | AiWorkCardExecuteInput
+  | { kind: 'SALES_ORDER'; customerId?: number; lines: { itemId?: number; orderedQty?: number; dueDate?: string }[] }
+  | { kind: 'HOT_ROLLING'; productionPlanId: number; lotIds: number[] }
+  | { kind: 'HEAT_PLAN'; productionPlanId: number }
+  | { kind: 'PAST_CASE'; lotId: number; caseCategory: 'QUALITY' | 'EQUIPMENT'; title: string; phenomenon: string; cause: string; actionTaken: string; equipmentText: string; occurredDate: string };
+
+export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput, 'decision'> {
+  kind: AiWorkCard['kind'];
+  /** 비어 있는 칸(아직 정하지 않은 값)은 보내지 않는다. 필수 칸이 비면 서버가 ACT-001로 거절한다 */
+  title: string;
+}
+
+/** 카드를 실행해 만든 것. 구매요청은 바로 만들지 않고 초안(확인 대기)으로 만든다 */
+export interface AiActionCardExecuteResult {
+  kind: AiActionCardKind;
+  registered: {
+    type: 'task' | 'schedule_event' | 'action_draft' | 'sales_order' | 'hot_rolling' | 'heat_plan' | 'past_case';
+    id: number;
+    /** 번호가 있는 것 (수주번호·생산계획 번호·사례 번호) */
+    no?: string;
+  };
 }
 
 /** 역할별 추천 질문과 처음 쓰는 사용자용 질문 (REQ-AST-008) */
@@ -65,4 +179,14 @@ export interface AiAssistantSuggestedQuestionsView {
   roleCode: Role;
   roleQuestions: string[];
   firstTimeQuestions: string[];
+  /** 내 권한으로 실행 카드를 만들 수 있는 요청 예시 (REQ-AST-005). 화면이 입력칸에 채워 주고 사용자가 고쳐서 보낸다 */
+  actionCardExamples: AiActionCardExample[];
+}
+
+export interface AiActionCardExample {
+  kind: AiActionCardKind;
+  /** 칩에 보일 짧은 이름 (예: 수주 등록) */
+  label: string;
+  /** 입력칸에 채울 요청 문장. ○○는 사용자가 채울 자리 */
+  text: string;
 }

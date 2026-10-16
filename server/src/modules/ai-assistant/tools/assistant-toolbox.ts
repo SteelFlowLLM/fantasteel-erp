@@ -15,7 +15,11 @@ import { QualityService } from '../../quality/quality.service';
 import { RejectedLotService } from '../../quality/rejected-lot.service';
 import { SalesOrderService } from '../../sales-order/sales-order.service';
 import { ShipmentService } from '../../shipment/shipment.service';
+import type { ProposedAnyCard } from '../action-card.types';
+import { AiActionCardService } from '../ai-action-card.service';
+import { AiOpsCardService } from '../ai-ops-card.service';
 import { AiAssistantRepository } from '../ai-assistant.repository';
+import { ACTION_CARD_TOOLS, actionCardTools } from './action-card.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
 import { businessEventTool } from './business-event.tool';
 import { inventoryTool } from './inventory.tool';
@@ -35,6 +39,8 @@ export interface ToolRunResult {
   content: string;
   /** 조회에 성공했을 때만 출처로 남긴다 */
   source: AiAssistantSource | null;
+  /** 실행 카드를 만든 도구만 담는다 (키는 부르는 쪽이 붙인다) */
+  cards?: ProposedAnyCard[];
 }
 
 /** 도구가 감싸는 조회 service (REQ-AST-004 조회 대상: 재고, 수주 진행, 생산계획·실적, LOT 역추적, 검사 결과, 구매·입고, 출하·밀시트, 작업 로그 + REQ-AST-006 과거 사례) */
@@ -50,6 +56,8 @@ export interface AssistantToolServices {
   rejectedLots: RejectedLotService;
   purchasing: PurchasingService;
   shipments: ShipmentService;
+  actionCards: AiActionCardService;
+  opsCards: AiOpsCardService;
 }
 
 export function assistantTools(s: AssistantToolServices): AssistantTool[] {
@@ -68,6 +76,7 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     millSheetTool(s.shipments),
     businessEventTool(s.events, s.salesOrders, s.lots),
     pastCaseTool(s.pastCases),
+    ...actionCardTools(s.actionCards, s.opsCards),
   ];
 }
 
@@ -94,14 +103,19 @@ export class AssistantToolbox {
     purchasing: PurchasingService,
     shipments: ShipmentService,
     pastCases: PastCaseService,
+    actionCards: AiActionCardService,
+    opsCards: AiOpsCardService,
   ) {
-    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases });
+    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases, actionCards, opsCards });
     this.tools = new Map(tools.map((tool) => [tool.definition.name, tool]));
   }
 
-  /** 모두에게 같은 도구 목록을 준다. 권한은 실행할 때 확인해서, 권한 밖이면 담당 역할을 안내하게 한다 */
-  definitions(): LlmToolDefinition[] {
-    return [...this.tools.values()].map((tool) => tool.definition);
+  /**
+   * 모두에게 같은 도구 목록을 준다. 권한은 실행할 때 확인해서, 권한 밖이면 담당 역할을 안내하게 한다.
+   * 실행 카드 도구는 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 넣는다.
+   */
+  definitions(options: { actionCards?: boolean } = {}): LlmToolDefinition[] {
+    return [...this.tools.values()].filter((tool) => options.actionCards || !ACTION_CARD_TOOLS.includes(tool.definition.name)).map((tool) => tool.definition);
   }
 
   /**
@@ -136,7 +150,7 @@ export class AssistantToolbox {
 
     try {
       const output = await tool.run(args as Record<string, unknown>, user);
-      return { content: truncate(JSON.stringify(output.data)), source: { kind: 'DATA', id: call.name, label: output.label } };
+      return { content: truncate(JSON.stringify(output.data)), source: output.cards ? null : { kind: 'DATA', id: call.name, label: output.label }, cards: output.cards };
     } catch (error) {
       if (error instanceof ToolArgumentError) return failure(error.message);
       // service가 사용자로 확인하는 도구는 권한 밖이면 COM-002를 던진다

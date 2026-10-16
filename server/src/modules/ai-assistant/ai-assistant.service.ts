@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   ROLE_LABEL,
+  type AiActionCard,
+  type AiActionCardExecuteResult,
   type AiAssistantMessageInput,
   type AiAssistantReplyView,
   type AiAssistantSource,
@@ -13,7 +15,11 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
+import { actionCardExamplesFor } from './action-card-examples';
+import { AiActionCardService } from './ai-action-card.service';
+import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
+import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
@@ -30,6 +36,10 @@ export const MAX_TOOL_ROUNDS = 4;
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
 const TRACE_THINKING_MAX = 8000;
+/** 한 답에 담는 실행 카드 수 상한. 카드가 늘면 사용자가 하나하나 확인하기 어렵다 (가정값) */
+export const MAX_ACTION_CARDS = 5;
+/** 회의록 후보와 같은 규칙으로 실행하는 카드 종류 */
+const WORK_KINDS: readonly string[] = ['TASK', 'EVENT', 'PURCHASE'];
 
 /**
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
@@ -45,13 +55,22 @@ export class AiAssistantService {
     private readonly llm: LlmClient,
     private readonly toolbox: AssistantToolbox,
     private readonly meetingMinutes: MeetingMinutesService,
+    private readonly cards: AiActionCardService,
+    private readonly opsCards: AiOpsCardService,
   ) {}
+
+  /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
+  executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 나머지는 각 모듈의 확정 기능을 그대로 부른다
+    return WORK_KINDS.includes(dto.kind) ? this.cards.execute(user, dto) : this.opsCards.execute(user, dto);
+  }
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
     return {
       roleCode: user.roleCode,
       roleQuestions: [...ROLE_SUGGESTED_QUESTIONS[user.roleCode]],
       firstTimeQuestions: [...FIRST_TIME_QUESTIONS],
+      actionCardExamples: actionCardExamplesFor(user),
     };
   }
 
@@ -80,6 +99,7 @@ export class AiAssistantService {
       references,
       processSteps,
       manualGuides,
+      actionCards: input.actionCards === true,
       history,
       question: input.question,
     });
@@ -87,7 +107,8 @@ export class AiAssistantService {
     const started = Date.now();
     const dataSources: AiAssistantSource[] = [];
     const toolCalls: AiAssistantToolTrace[] = [];
-    const tools = this.toolbox.definitions();
+    const actionCards: AiActionCard[] = [];
+    const tools = this.toolbox.definitions({ actionCards: input.actionCards });
     let reply = await this.call(settings, model, messages, tools);
     for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
       messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
@@ -97,13 +118,17 @@ export class AiAssistantService {
         toolCalls.push({ name: call.name, arguments: cut(call.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted });
         messages.push({ role: 'tool', toolCallId: call.id, content: result.content });
         if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
+        // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
+        for (const card of input.actionCards ? (result.cards ?? []) : []) {
+          if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+        }
       }
       reply = await this.call(settings, model, messages, round < MAX_TOOL_ROUNDS ? tools : []);
     }
 
     const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
     const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
-    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null };
+    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null, actionCards };
   }
 
   private async call(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {

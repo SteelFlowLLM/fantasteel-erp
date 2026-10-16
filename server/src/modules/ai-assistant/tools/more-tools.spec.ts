@@ -21,6 +21,8 @@ import type { PurchasingService } from '../../purchasing/purchasing.service';
 import type { QualityService } from '../../quality/quality.service';
 import type { RejectedLotService } from '../../quality/rejected-lot.service';
 import type { ShipmentService } from '../../shipment/shipment.service';
+import type { AiActionCardService } from '../ai-action-card.service';
+import type { AiOpsCardService } from '../ai-ops-card.service';
 import type { AiAssistantRepository } from '../ai-assistant.repository';
 import { codeLabelList, ToolArgumentError } from './assistant-tool';
 import { AssistantToolbox, type AssistantToolServices } from './assistant-toolbox';
@@ -324,6 +326,8 @@ describe('도구 모음: service가 확인하는 권한', () => {
     services.purchasing,
     services.shipments,
     services.pastCases,
+    {} as AiActionCardService,
+    {} as AiOpsCardService,
   );
 
   it('미리 막지 않고 service에 맡긴다 (부서장은 권한 코드 없이도 자기 부서 구매요청을 본다)', async () => {

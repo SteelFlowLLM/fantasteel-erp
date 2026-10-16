@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { Permission, Role } from '@fantasteel/shared';
+import { ITEM_TYPE, type Permission, type Role } from '@fantasteel/shared';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장) */
@@ -14,5 +15,45 @@ export class AiAssistantRepository {
     const rows = await tx.rolePermission.findMany({ where: { permission: { in: [...permissions] } }, select: { roleId: true } });
     const roles = await tx.role.findMany({ where: { id: { in: [...new Set(rows.map((row) => row.roleId))] } }, select: { roleCode: true }, orderBy: { id: 'asc' } });
     return roles.map((role) => role.roleCode as Role);
+  }
+
+  /** 실행 카드의 담당자·참석자 이름을 사원 id로 맞출 때 (사용 중인 사원만) */
+  findActiveEmployees(tx: Tx) {
+    return tx.employee.findMany({ where: { isActive: true }, select: { id: true, employeeName: true }, orderBy: { id: 'asc' } });
+  }
+
+  findActiveEmployeeIds(tx: Tx, ids: number[]) {
+    return tx.employee.findMany({ where: { id: { in: ids }, isActive: true }, select: { id: true } });
+  }
+
+  /** 구매요청 카드의 원료 품목 이름을 id로 맞출 때 */
+  findRawMaterials(tx: Tx) {
+    return tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true, itemCode: true, itemName: true }, orderBy: { itemCode: 'asc' } });
+  }
+
+  findRawMaterialIds(tx: Tx, ids: number[]) {
+    return tx.item.findMany({ where: { id: { in: ids }, itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true } });
+  }
+
+  /** 수주 카드의 고객사 이름을 id로 맞출 때 */
+  findCustomers(tx: Tx) {
+    return tx.customer.findMany({ select: { id: true, customerCode: true, customerName: true }, orderBy: { id: 'asc' } });
+  }
+
+  /** 수주 카드의 규격(슬래브·코일)을 id로 맞출 때 */
+  findProducts(tx: Tx) {
+    return tx.item.findMany({ where: { itemType: { in: [ITEM_TYPE.SLAB, ITEM_TYPE.COIL] } }, select: { id: true, itemCode: true, itemName: true }, orderBy: { itemCode: 'asc' } });
+  }
+
+  findProductionPlanByNo(tx: Tx, productionPlanNo: string) {
+    return tx.productionPlan.findUnique({ where: { productionPlanNo }, select: { id: true } });
+  }
+
+  findLotByNo(tx: Tx, lotNo: string) {
+    return tx.lot.findUnique({ where: { lotNo }, select: { id: true } });
+  }
+
+  createScheduleEvent(tx: Tx, data: Omit<Prisma.ScheduleEventUncheckedCreateInput, 'attendees'>, attendeeIds: number[]) {
+    return tx.scheduleEvent.create({ data: { ...data, attendees: { create: attendeeIds.map((employeeId) => ({ employeeId })) } }, select: { id: true } });
   }
 }

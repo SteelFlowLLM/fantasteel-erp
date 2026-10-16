@@ -112,9 +112,22 @@ export class MessageActionService {
    * 사람이 허가한 후보만 부르므로 AI_GENERATED는 거치지 않고 바로 요청자 확인 대기로 둔다. 요청자가 나중에 확정할 수 없는 초안은 만들지 않는다.
    */
   async createFromMeeting(tx: Tx, requester: AuthUser, meetingMinutesId: number, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
+    return this.createAiDraft(tx, requester, { meetingMinutesId }, payload, salesOrderId);
+  }
+
+  /**
+   * AI 어시스턴트 실행 카드를 사용자가 실행했을 때 구매요청 초안을 만든다 (REQ-AST-005). 원본 메시지·회의록 없이 요청자 = 카드를 실행한 사람이다.
+   * 회의록 후보와 같이 바로 요청자 확인 대기로 두고, 이후 기존 초안 흐름(확정 → 구매요청 → 부서장 승인)을 탄다.
+   */
+  async createFromAssistant(tx: Tx, requester: AuthUser, payload: PurchaseRequisitionDraftPayload): Promise<number> {
+    return this.createAiDraft(tx, requester, {}, payload, null);
+  }
+
+  private async createAiDraft(tx: Tx, requester: AuthUser, origin: { meetingMinutesId?: number }, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
     await this.assertCanRequestFromMeeting(tx, requester);
     const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
-    // 회의록 후보는 AI가 회의에서 뽑은 값이라 채워진 칸을 AI가 채운 칸으로 남겨 확정·실행 로그도 AI 경유로 한다 (모듈 문서 10장)
+    const { meetingMinutesId } = origin;
+    // AI가 뽑은 값이라 채워진 칸을 AI가 채운 칸으로 남겨 확정·실행 로그도 AI 경유로 한다 (모듈 문서 10장)
     const stored = { ...payload, aiFilledFields: filledExtractedFields(payload) };
     const draft = await this.repository.createDraft(tx, {
       actionType,

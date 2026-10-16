@@ -28,7 +28,10 @@ interface Draft {
   desiredReceiptDate: string;
 }
 
-const draftOf = (c: MeetingCandidate): Draft => ({
+/** 고칠 수 있는 칸. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
+export type EditableCandidate = Pick<MeetingCandidate, 'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'purchase'>;
+
+const draftOf = (c: EditableCandidate): Draft => ({
   title: c.title,
   description: c.description ?? '',
   assigneeId: c.assigneeId === null ? '' : String(c.assigneeId),
@@ -42,7 +45,7 @@ const draftOf = (c: MeetingCandidate): Draft => ({
 });
 
 /** 처음 값과 다른 칸만 모은다. 비어 있는 칸은 "아직 정하지 않음"이라 보내지 않는다 */
-export function changesOf(c: MeetingCandidate, next: Draft): MeetingCandidateUpdateInput {
+export function changesOf(c: EditableCandidate, next: Draft): MeetingCandidateUpdateInput {
   const before = draftOf(c);
   const input: MeetingCandidateUpdateInput = {};
   if (next.title.trim() !== before.title) input.title = next.title.trim();
@@ -65,7 +68,21 @@ export function changesOf(c: MeetingCandidate, next: Draft): MeetingCandidateUpd
   return input;
 }
 
-export function CandidateEditor({ candidate, myId, pending, onCancel, onSave }: { candidate: MeetingCandidate; myId: number; pending: boolean; onCancel: () => void; onSave: (input: MeetingCandidateUpdateInput) => void }) {
+export function CandidateEditor({
+  candidate,
+  myId,
+  pending,
+  assigneeHint = '회의 참석자가 아니어도 고를 수 있어요',
+  onCancel,
+  onSave,
+}: {
+  candidate: EditableCandidate;
+  myId: number;
+  pending: boolean;
+  assigneeHint?: string;
+  onCancel: () => void;
+  onSave: (input: MeetingCandidateUpdateInput) => void;
+}) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(candidate));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const chart = useAdminOrgChart();
@@ -90,7 +107,7 @@ export function CandidateEditor({ candidate, myId, pending, onCancel, onSave }: 
       </Field>
       {candidate.kind === 'TASK' ? (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <Field label="담당자" htmlFor={`cand-${candidate.key}-assignee`} hint="회의 참석자가 아니어도 고를 수 있어요">
+          <Field label="담당자" htmlFor={`cand-${candidate.key}-assignee`} hint={assigneeHint}>
             <Select id={`cand-${candidate.key}-assignee`} value={draft.assigneeId} onChange={(e) => set('assigneeId', e.target.value)}>
               <option value="">선택해 주세요</option>
               {groups.map((group) => (

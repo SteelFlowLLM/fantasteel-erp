@@ -1,4 +1,5 @@
 import type { AuthUser, Permission } from '@fantasteel/shared';
+import type { ProposedAnyCard } from '../action-card.types';
 import type { LlmToolDefinition } from '../../llm/llm.client';
 
 /**
@@ -25,6 +26,8 @@ export interface ToolOutput {
   label: string;
   /** 모델에 JSON으로 넘길 결과 */
   data: unknown;
+  /** 실행 카드를 만든 도구만 담는다. 카드는 답과 함께 화면에 가고, 조회한 데이터가 아니라서 출처로 붙이지 않는다 */
+  cards?: ProposedAnyCard[];
 }
 
 /** 모델이 넘긴 인자가 틀렸을 때. 이유를 모델에 돌려줘 다시 부르게 한다 */

@@ -21,6 +21,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
+import { scheduleWeekLink, shortSeoulTime } from '../schedule-event/schedule-notice';
 import { TaskService } from '../notification/task.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
@@ -60,18 +61,6 @@ function parseAttendeeIds(value: string): number[] {
     throw new AppException('COM-004', '참석자를 1명 이상 골라 주세요');
   }
   return parsed as number[];
-}
-
-/** 알림 문구용 `M/D HH:mm` (+09:00 ISO에서 그대로 읽는다) */
-function shortSeoulTime(iso: string): string {
-  return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))} ${iso.slice(11, 16)}`;
-}
-
-/** 알림이 여는 내 일정 주: 일정이 있는 날(+09:00 ISO의 날짜)이 속한 주의 월요일 */
-function scheduleWeekLink(iso: string): string {
-  const day = new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);
-  const monday = new Date(day.getTime() - ((day.getUTCDay() + 6) % 7) * 86_400_000);
-  return `/schedule?week=${monday.toISOString().slice(0, 10)}`;
 }
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);

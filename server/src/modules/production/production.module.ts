@@ -14,6 +14,7 @@ import { ProductionService } from './production.service';
   imports: [forwardRef(() => InventoryModule)],
   controllers: [ProductionController],
   providers: [ProductionService, ProductionRepository, ProductionResultService, ProductionResultRepository, HotRollingService, ProductionSimulationService],
-  exports: [ProductionService, ProductionResultService],
+  // AI 어시스턴트 실행 카드(열연 배정 추천·확정)가 HotRollingService를 쓴다
+  exports: [ProductionService, ProductionResultService, HotRollingService],
 })
 export class ProductionModule {}

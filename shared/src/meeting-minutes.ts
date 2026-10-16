@@ -255,7 +255,7 @@ export interface MeetingRegisterResult {
 }
 
 /** 허가하려면 채워져 있어야 하는 칸 중 비어 있는 것 (표시명). 비면 허가할 수 있다. 서버와 화면이 같은 규칙을 쓴다 */
-export function missingFieldsOf(c: MeetingCandidate): string[] {
+export function missingFieldsOf(c: Pick<MeetingCandidate, 'kind' | 'title' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'purchase'>): string[] {
   const missing: string[] = [];
   if (c.title.trim() === '') missing.push('제목');
   if (c.kind === 'TASK') {

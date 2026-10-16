@@ -22,7 +22,7 @@ const KIND_LABEL = {
  * 사용자가 직접 정한 칸은 AI가 붙인 확인 사유가 풀리므로 그 칸의 issues를 지운다.
  * 사원·품목이 실제로 있는지는 DB가 필요해 부르는 쪽이 먼저 확인한다. decision은 여기서 다루지 않는다.
  */
-export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeetingCandidateDto, meetingDate: string): MeetingCandidate {
+export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeetingCandidateDto, meetingDate: string, baseLabel = '회의일'): MeetingCandidate {
   const next: MeetingCandidate = {
     ...candidate,
     issues: [...candidate.issues],
@@ -48,7 +48,7 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
   if (dto.dueDate !== undefined) {
     if (candidate.kind !== 'TASK') throw WRONG_KIND('마감일', kindLabel);
     const dueDate = validDate(dto.dueDate, meetingDate);
-    if (dueDate === null) throw new AppException('COM-004', `마감일은 회의일(${meetingDate})부터 1년 안의 날짜로 입력해 주세요`);
+    if (dueDate === null) throw new AppException('COM-004', `마감일은 ${baseLabel}(${meetingDate})부터 1년 안의 날짜로 입력해 주세요`);
     next.dueDate = dueDate;
     next.issues = without(next.issues, ISSUE.dueDate, ISSUE.sameDay);
   }
@@ -58,7 +58,7 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
   }
   if (dto.startAt !== undefined) {
     const startAt = normalizeDateTime(dto.startAt, meetingDate);
-    if (startAt === null) throw new AppException('COM-004', `시작 시각은 회의일(${meetingDate})부터 1년 안의 시각으로 입력해 주세요`);
+    if (startAt === null) throw new AppException('COM-004', `시작 시각은 ${baseLabel}(${meetingDate})부터 1년 안의 시각으로 입력해 주세요`);
     next.startAt = startAt;
     next.issues = without(next.issues, ISSUE.eventStart);
     // 끝 시각을 말하지 않아 1시간으로 가정한 일정은 시작을 옮기면 끝도 같이 옮긴다
@@ -71,7 +71,7 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
   }
   if (dto.endAt !== undefined) {
     const endAt = normalizeDateTime(dto.endAt, meetingDate);
-    if (endAt === null) throw new AppException('COM-004', `끝 시각은 회의일(${meetingDate})부터 1년 안의 시각으로 입력해 주세요`);
+    if (endAt === null) throw new AppException('COM-004', `끝 시각은 ${baseLabel}(${meetingDate})부터 1년 안의 시각으로 입력해 주세요`);
     next.endAt = endAt;
     next.endAssumed = false;
     next.issues = without(next.issues, ISSUE.eventEndAssumed);
@@ -99,7 +99,7 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
     }
     if (p.desiredReceiptDate !== undefined) {
       const date = validDate(p.desiredReceiptDate, meetingDate);
-      if (date === null) throw new AppException('COM-004', `희망 입고일은 회의일(${meetingDate})부터 1년 안의 날짜로 입력해 주세요`);
+      if (date === null) throw new AppException('COM-004', `희망 입고일은 ${baseLabel}(${meetingDate})부터 1년 안의 날짜로 입력해 주세요`);
       next.purchase.desiredReceiptDate = date;
       next.issues = without(next.issues, ISSUE.desiredReceiptDate);
     }
