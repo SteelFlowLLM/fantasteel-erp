@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Quer
 import type { ActionDraftCreateResult, ActionDraftExecutionResult, ActionDraftView, AgentCandidateExecutionResult, AgentCandidateView, AuthUser } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { FactoryAgentService } from '../factory-agent/factory-agent.service';
-import { ConfirmActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
+import { ConfirmActionDraftDto, CreateActionDraftDto, ListActionDraftsQuery, RejectActionDraftDto, UpdateActionDraftDto } from './dto/action-draft.dto';
 import { MessageActionService } from './message-action.service';
 
 /**
@@ -19,9 +19,10 @@ export class MessageActionController {
     private readonly agent: FactoryAgentService,
   ) {}
 
+  /** API-251. 유형이 없으면 구매요청 초안 (업무 프로세스 12.3) */
   @Post('messages/:id/action-drafts')
-  create(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) messageId: number): Promise<ActionDraftCreateResult> {
-    return this.service.create(user, messageId);
+  create(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) messageId: number, @Body() dto: CreateActionDraftDto): Promise<ActionDraftCreateResult> {
+    return this.service.create(user, messageId, dto.actionType);
   }
 
   @Get('action-drafts')

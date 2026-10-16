@@ -24,7 +24,7 @@ const view = (overrides: Partial<ActionDraftView> = {}): ActionDraftView => ({
   message: { id: 900, chatRoomId: 70, chatRoomName: null, chatRoomType: 'DIRECT', senderName: '정다은', content: '실리코망가니즈 20톤 부탁해요', createdAt: '2026-10-13T00:00:00.000Z' },
   meetingMinutes: null,
   unresolvedFields: [],
-  purchaseRequisition: null,
+  result: null,
   executionErrorCode: null,
   executionAttemptCount: 0,
   rejectReason: null,
@@ -54,8 +54,8 @@ describe('초안 서버 모드 (api/server/actionDrafts.ts)', () => {
     });
   });
 
-  it('수정은 보낸 칸만 서버 칸 이름(requestedTon)으로 보내고, 확정 결과는 만든 구매요청을 대상으로 보인다', async () => {
-    const executed = view({ draftStatus: 'EXECUTED', executionAttemptCount: 1, purchaseRequisition: { id: 77, purchaseRequisitionNo: 'PR-2610-0009', purchaseRequisitionStatus: 'WAITING_APPROVAL' } });
+  it('수정은 보낸 칸만 서버 칸 이름(requestedTon)으로 payload에 담아 보내고, 확정 결과는 만든 구매요청을 대상으로 보인다', async () => {
+    const executed = view({ draftStatus: 'EXECUTED', executionAttemptCount: 1, result: { table: 'purchase_requisition', id: 77, no: 'PR-2610-0009', status: 'WAITING_APPROVAL' } });
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => {
       if (c.path === '/auth/me') return ok(me);
       if (c.method === 'PATCH' && c.path === '/action-drafts/31') return ok(view());
@@ -64,7 +64,7 @@ describe('초안 서버 모드 (api/server/actionDrafts.ts)', () => {
       return undefined;
     });
     await actionDraftApi.update({ actionDraftId: 31, payload: { requestedTon: ' 20 ', desiredReceiptDate: '' }, expectedUpdatedAt: '2026-10-13T00:05:00.000Z' });
-    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ requestedTon: '20', desiredReceiptDate: null, expectedUpdatedAt: '2026-10-13T00:05:00.000Z' });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ payload: { requestedTon: '20', desiredReceiptDate: null }, expectedUpdatedAt: '2026-10-13T00:05:00.000Z' });
 
     const result = await actionDraftApi.confirm({ actionDraftId: 31 });
     expect(result).toMatchObject({ executed: true, target: { targetType: 'purchase_requisition', targetId: 77, targetNo: 'PR-2610-0009' }, draft: { executedAt: executed.updatedAt } });

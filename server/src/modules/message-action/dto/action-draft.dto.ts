@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { ACTION_TYPE, type ActionType } from '@fantasteel/shared';
+import { IsIn, IsInt, IsISO8601, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 /** GET action-drafts: chatRoomId가 있으면 그 방 메시지의 초안(방 멤버만), 없으면 내가 요청자인 초안 */
 export class ListActionDraftsQuery {
@@ -15,24 +16,18 @@ export class ListActionDraftsQuery {
   source?: 'agent';
 }
 
-/** PATCH action-drafts/:id. 보내지 않은 칸은 그대로 두고, null이면 비운다 */
+/** POST messages/:id/action-drafts. 유형이 없으면 구매요청 생성 */
+export class CreateActionDraftDto {
+  @IsOptional()
+  @IsIn(Object.values(ACTION_TYPE), { message: '업무 유형이 올바르지 않아요' })
+  actionType?: ActionType;
+}
+
+/** PATCH action-drafts/:id. payload의 보내지 않은 칸은 그대로 두고, null이면 비운다. 칸 검증은 유형 정의가 한다 */
 export class UpdateActionDraftDto {
   @IsOptional()
-  @IsInt({ message: '원료 품목을 골라 주세요' })
-  itemId?: number | null;
-
-  @IsOptional()
-  @IsString({ message: '수량(톤)은 숫자로 입력해 주세요' })
-  requestedTon?: string | null;
-
-  @IsOptional()
-  @IsString({ message: '희망 입고일은 YYYY-MM-DD로 입력해 주세요' })
-  desiredReceiptDate?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500, { message: '요청 근거는 500자까지 쓸 수 있어요' })
-  requestReason?: string | null;
+  @IsObject({ message: 'payload는 객체여야 해요' })
+  payload?: Record<string, unknown>;
 
   /** 화면을 연 시점의 updatedAt. 그 사이 바뀌었으면 COM-001 */
   @IsOptional()

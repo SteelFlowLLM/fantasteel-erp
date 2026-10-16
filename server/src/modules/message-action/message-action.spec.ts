@@ -82,7 +82,7 @@ describe('초안 조회 (REQ-ACT-002)', () => {
       requesterName: purchaser.employeeName,
       message: { id: message.id, chatRoomId: roomId, chatRoomName: '원료 구매 협의', chatRoomType: 'GROUP', senderName: purchaser.employeeName },
       unresolvedFields: ['희망 입고일'],
-      purchaseRequisition: null,
+      result: null,
       executionAttemptCount: 0,
     });
     expect(view.requesterDepartmentName).not.toBeNull();
@@ -110,6 +110,11 @@ describe('초안 조회 (REQ-ACT-002)', () => {
     expect((await service.list(salesStaff, { chatRoomId: roomId })).map((d) => d.id)).toEqual(expect.arrayContaining([older.id, newer.id]));
     expect(await codeOf(service.list(logistics, { chatRoomId: roomId }))).toBe('COM-002');
   });
+
+  it('내 초안 목록에는 메시지에서 만든 초안만 나온다 (확정한 Agent 대응 후보는 factory-agent 목록에 있다)', async () => {
+    const agentDraft = await prisma.actionDraft.create({ data: { actionType: 'REPRODUCTION_PLAN_CREATE', draftStatus: DRAFT_STATUS.APPROVED, payload: {}, requesterId: purchaser.employeeId } });
+    expect((await service.list(purchaser, {})).map((d) => d.id)).not.toContain(agentDraft.id);
+  });
 });
 
 describe('초안 생성 (REQ-ACT-001, API-251)', () => {
@@ -136,6 +141,12 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(await codeOf(service.create(purchaser, fromSales.id))).toBe('COM-002');
   });
 
+  it('업무 유형 등록부에 없는 유형(아직 메시지에서 만들 수 없는 유형)은 COM-004', async () => {
+    const message = await send(purchaser, '수주 20매 들어왔어요');
+    expect(await codeOf(service.create(purchaser, message.id, 'SALES_ORDER_CREATE'))).toBe('COM-004');
+    expect(await prisma.actionDraft.count({ where: { messageId: message.id } })).toBe(0);
+  });
+
   it('시스템 메시지·삭제된 메시지에서는 만들 수 없다 (COM-004)', async () => {
     const system = await prisma.message.create({ data: { chatRoomId: roomId, messageType: 'SYSTEM', content: '업무방을 열었어요' } });
     expect(await codeOf(service.create(purchaser, system.id))).toBe('COM-004');
@@ -150,22 +161,31 @@ describe('초안 수정 (REQ-ACT-002)', () => {
     const message = await send(purchaser, '철광석 50톤');
     const { id } = await service.create(purchaser, message.id);
 
-    expect(await codeOf(service.update(purchaseHead, id, { requestedTon: '50' }))).toBe('COM-002');
-    expect(await codeOf(service.update(purchaser, id, { itemId: slabId }))).toBe('COM-004');
-    expect(await codeOf(service.update(purchaser, id, { itemId: 2_000_000_000 }))).toBe('COM-003');
-    expect(await codeOf(service.update(purchaser, id, { requestedTon: '-1' }))).toBe('COM-004');
-    expect(await codeOf(service.update(purchaser, id, { desiredReceiptDate: '2026-02-30' }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaseHead, id, { payload: { requestedTon: '50' } }))).toBe('COM-002');
+    expect(await codeOf(service.update(purchaser, id, { payload: { itemId: slabId } }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, id, { payload: { itemId: 2_000_000_000 } }))).toBe('COM-003');
+    expect(await codeOf(service.update(purchaser, id, { payload: { requestedTon: '-1' } }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, id, { payload: { desiredReceiptDate: '2026-02-30' } }))).toBe('COM-004');
 
-    const partial = await service.update(purchaser, id, { itemId: oreId, requestedTon: '50.5' });
+    const partial = await service.update(purchaser, id, { payload: { itemId: oreId, requestedTon: '50.5' } });
     // 톤은 소수 3자리로 맞춰 저장한다
     expect(partial).toMatchObject({ itemCode: 'ORE01', payload: { itemId: oreId, requestedTon: '50.500' }, unresolvedFields: ['희망 입고일'] });
-    expect(await codeOf(service.update(purchaser, id, { desiredReceiptDate: '2026-11-20', expectedUpdatedAt: '2000-01-01T00:00:00.000Z' }))).toBe('COM-001');
-    const filled = await service.update(purchaser, id, { desiredReceiptDate: '2026-11-20', expectedUpdatedAt: partial.updatedAt });
+    expect(await codeOf(service.update(purchaser, id, { payload: { desiredReceiptDate: '2026-11-20' }, expectedUpdatedAt: '2000-01-01T00:00:00.000Z' }))).toBe('COM-001');
+    const filled = await service.update(purchaser, id, { payload: { desiredReceiptDate: '2026-11-20' }, expectedUpdatedAt: partial.updatedAt });
     expect(filled.unresolvedFields).toEqual([]);
-    expect((await service.update(purchaser, id, { requestedTon: null })).unresolvedFields).toEqual(['수량(톤)']);
+    expect((await service.update(purchaser, id, { payload: { requestedTon: null } })).unresolvedFields).toEqual(['수량(톤)']);
 
     await prisma.actionDraft.update({ where: { id }, data: { draftStatus: DRAFT_STATUS.REJECTED } });
-    expect(await codeOf(service.update(purchaser, id, { requestedTon: '10' }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, id, { payload: { requestedTon: '10' } }))).toBe('COM-004');
+  });
+});
+
+describe('초안 수정 칸 검증 (유형 정의)', () => {
+  it('그 유형에 없는 칸이나 형식이 틀린 칸을 보내면 COM-004', async () => {
+    const { draft } = await draftOf('철광석 40톤', {});
+    expect(await codeOf(service.update(purchaser, draft.id, { payload: { customerId: 3 } }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, draft.id, { payload: { itemId: String(oreId) } }))).toBe('COM-004');
+    expect(await codeOf(service.update(purchaser, draft.id, { payload: { requestReason: 'x'.repeat(501) } }))).toBe('COM-004');
   });
 });
 
@@ -178,13 +198,15 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
     expect(result).toMatchObject({
       executed: true,
       errorCode: null,
-      draft: { draftStatus: DRAFT_STATUS.EXECUTED, executionAttemptCount: 1, purchaseRequisition: { purchaseRequisitionStatus: 'WAITING_APPROVAL' } },
+      draft: { draftStatus: DRAFT_STATUS.EXECUTED, executionAttemptCount: 1, result: { table: 'purchase_requisition', status: 'WAITING_APPROVAL' } },
     });
     const requisition = await prisma.purchaseRequisition.findUniqueOrThrow({ where: { actionDraftId: draft.id } });
     expect(requisition).toMatchObject({ itemId: oreId, requesterId: purchaser.employeeId });
     expect(requisition.requestedTon.toFixed(3)).toBe('30.000');
     const events = await prisma.businessEvent.findMany({ where: { actionDraftId: draft.id }, orderBy: { id: 'asc' } });
     expect(events.map((e) => e.businessEventType)).toEqual([BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, BUSINESS_EVENT_TYPE.DRAFT_EXECUTED]);
+    // 실행 기록에는 만든 업무를 남긴다 (구매요청 밖의 유형은 이 기록으로 결과를 잇는다, 업무 프로세스 BP-ACT-02)
+    expect(events.at(-1)?.afterData).toMatchObject({ resultTable: 'purchase_requisition', resultId: requisition.id, resultNo: requisition.purchaseRequisitionNo });
 
     expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('COM-004');
     expect(await codeOf(service.execute(purchaser, draft.id))).toBe('COM-004');
@@ -207,7 +229,7 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
       expect(await service.execute(purchaser, draft.id)).toMatchObject({
         executed: false,
         errorCode: 'PUR-001',
-        draft: { draftStatus: DRAFT_STATUS.APPROVED, executionErrorCode: 'PUR-001', executionAttemptCount: 1, purchaseRequisition: null },
+        draft: { draftStatus: DRAFT_STATUS.APPROVED, executionErrorCode: 'PUR-001', executionAttemptCount: 1, result: null },
       });
     } finally {
       await prisma.department.update({ where: { id: department.id }, data: { headEmployeeId: department.headEmployeeId } });

@@ -48,7 +48,7 @@ let baseUrl: string;
 let prisma: PrismaService;
 /** 박서영 (영업) */
 let salesCookie: string;
-/** 정다은 (구매, 수주 조회 권한 없음) */
+/** 정다은 (구매). 수주 조회 권한이 없는 경우는 테스트 동안 역할 권한을 빼서 본다 */
 let purchaseCookie: string;
 /** 서민지 (품질) */
 let qualityCookie: string;

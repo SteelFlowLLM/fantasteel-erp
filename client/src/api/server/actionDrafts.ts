@@ -12,6 +12,12 @@ const me = () => serverRequest<AuthUser>('GET', '/auth/me');
 const chatRoomLabelOf = (message: ActionDraftView['message']): string | null =>
   message ? (message.chatRoomName ?? `${CHAT_ROOM_TYPE_LABEL[message.chatRoomType]} 채팅방`) : null;
 
+/** 실행 결과가 구매요청이면 화면의 구매요청 칸 모양으로 (다른 유형 화면은 Message → ERP 화면 단계에서 붙인다) */
+function purchaseRequisitionOf(v: ActionDraftView): DraftDetailView['purchaseRequisition'] {
+  const r = v.result;
+  return r && r.table === 'purchase_requisition' ? { id: r.id, purchaseRequisitionNo: r.no, purchaseRequisitionStatus: r.status ?? '' } : null;
+}
+
 /** 화면의 실행 실패 표시(getExecutionFailure)가 읽는 모양 */
 function executionResultOf(v: ActionDraftView) {
   if (v.draftStatus !== 'APPROVED' || v.executionErrorCode === null) return null;
@@ -34,7 +40,7 @@ function toDetail(v: ActionDraftView, employeeId: number): DraftDetailView {
     message: message ? { id: message.id, chatRoomId: message.chatRoomId, chatRoomName: message.chatRoomName, senderName: message.senderName, content: message.content, createdAt: message.createdAt } : null,
     meetingMinutes: v.meetingMinutes,
     unresolvedFields: v.unresolvedFields,
-    purchaseRequisition: v.purchaseRequisition,
+    purchaseRequisition: purchaseRequisitionOf(v),
     executionResult: executionResultOf(v),
     rejectReason: v.rejectReason,
     createdAt: v.createdAt,
@@ -56,7 +62,7 @@ async function get(actionDraftId: number): Promise<DraftDetailView> {
 
 async function toConfirmResult(result: ActionDraftExecutionResult): Promise<DraftConfirmResult> {
   const user = await me();
-  const pr = result.draft.purchaseRequisition;
+  const pr = purchaseRequisitionOf(result.draft);
   return {
     draft: toDetail(result.draft, user.employeeId),
     executed: result.executed,
@@ -70,10 +76,12 @@ async function toConfirmResult(result: ActionDraftExecutionResult): Promise<Draf
 function patchBody(payload: DraftPayloadInput, expectedUpdatedAt: string | null | undefined) {
   const text = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null);
   return {
-    itemId: payload.itemId,
-    requestedTon: text(payload.requestedTon),
-    desiredReceiptDate: text(payload.desiredReceiptDate),
-    requestReason: text(payload.requestReason),
+    payload: {
+      itemId: payload.itemId,
+      requestedTon: text(payload.requestedTon),
+      desiredReceiptDate: text(payload.desiredReceiptDate),
+      requestReason: text(payload.requestReason),
+    },
     expectedUpdatedAt: expectedUpdatedAt ?? undefined,
   };
 }
@@ -89,7 +97,7 @@ export const serverActionDraftApi = {
       draftStatus: v.draftStatus,
       chatRoomName: chatRoomLabelOf(v.message),
       messageContent: v.message?.content ?? null,
-      purchaseRequisitionNo: v.purchaseRequisition?.purchaseRequisitionNo ?? null,
+      purchaseRequisitionNo: purchaseRequisitionOf(v)?.purchaseRequisitionNo ?? null,
       createdAt: v.createdAt,
       updatedAt: v.updatedAt,
     })),
