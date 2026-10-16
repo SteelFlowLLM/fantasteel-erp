@@ -1,3 +1,4 @@
+import { AI_REASONING_LEVELS, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
@@ -56,4 +57,8 @@ export class AskAiAssistantDto {
   @ValidateNested({ each: true })
   @Type(() => AiAssistantTurnDto)
   history?: AiAssistantTurnDto[];
+
+  @IsOptional()
+  @IsIn(AI_REASONING_LEVELS)
+  reasoning?: AiReasoningLevel;
 }

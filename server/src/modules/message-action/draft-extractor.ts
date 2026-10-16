@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmClient } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { LLM_PROFILE } from '../llm/llm-profiles';
 
 /** 사용자가 초안 만들기 응답을 기다리므로 기본 대화(120초)보다 짧게 끊는다 */
 const EXTRACT_TIMEOUT_MS = 30_000;
@@ -52,7 +53,7 @@ export class DraftExtractor {
         { role: 'system' as const, content: systemPrompt(await guide(), writtenAt) },
         { role: 'user' as const, content },
       ];
-      const extracted = parseJsonObject(await this.llm.chat(settings, settings.model, messages, undefined, EXTRACT_TIMEOUT_MS));
+      const extracted = parseJsonObject(await this.llm.chat(settings, settings.model, messages, LLM_PROFILE.MESSAGE_EXTRACT, undefined, EXTRACT_TIMEOUT_MS));
       if (!extracted) this.logger.warn('AI 추출 답이 JSON 객체가 아니라 빈 초안으로 만듭니다');
       return extracted;
     } catch (error) {

@@ -1,9 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import type { LlmModelView } from '@fantasteel/shared';
+import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
 /** 모델 목록은 바로 와야 하고, 첫 대화는 LM Studio가 모델을 메모리에 올리느라 오래 걸릴 수 있다 */
 const MODELS_TIMEOUT_MS = 5_000;
 const CHAT_TIMEOUT_MS = 120_000;
+/** 모델의 생각 설정 지원 여부는 요청마다 묻지 않는다. 모델을 바꾸거나 새로 받으면 이 시간 안에 반영된다 */
+const MODEL_INFO_TTL_MS = 60_000;
+/** 스트리밍은 전체 시간이 아니라 조각 사이를 잰다: 긴 생각도 조각은 계속 온다 */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
+/** reasoning_effort가 받는 단계 (가까운 단계를 고를 때 순서로 쓴다) */
+const REASONING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 
 export interface LlmEndpoint {
   baseUrl: string;
@@ -41,6 +48,14 @@ export interface LlmToolReply {
   toolCalls: LlmToolCall[];
   /** LM Studio 추론 모델이 content와 따로 주는 생각 글. 없으면 비어 있다 */
   reasoning?: string | null;
+  /** 기능 설정의 생각 정도를 모델에 보냈는지 (모델이 생각 설정을 받지 않으면 false) */
+  reasoningApplied?: boolean;
+}
+
+/** 스트리밍으로 받는 글 조각. 답 글 안의 <think> 블록은 생각 글로 넘긴다 */
+export interface LlmStreamHandlers {
+  onThinking(text: string): void;
+  onAnswer(text: string): void;
 }
 
 /** JSON 답과 함께 모델이 실제로 쓴 글 (AI 실행 기록) */
@@ -69,6 +84,13 @@ export class LlmRequestError extends Error {
   }
 }
 
+/** 부른 쪽(사용자 멈춤)이 요청을 끊었다. 화면에 알릴 실패가 아니다 */
+export class LlmAbortedError extends LlmRequestError {
+  constructor() {
+    super('요청을 멈췄어요');
+  }
+}
+
 /** 모델이 답은 냈지만 JSON으로 읽지 못함. 실행 기록에 남기려고 원문을 들고 있다 */
 export class LlmJsonParseError extends LlmRequestError {
   constructor(
@@ -89,6 +111,13 @@ export interface LlmJsonSchema {
 export interface LlmJsonOptions {
   timeoutMs: number;
   maxTokens?: number;
+  profile: LlmProfile;
+}
+
+/** LM Studio 고유 API(/api/v1/models)가 알려 주는 모델 정보. 외부 LLM이면 서버 전체가 null이다 */
+interface LmStudioModelInfo {
+  /** 생각 설정을 받는 모델만 있다. 예: ['off', 'on'], ['off', 'low', 'medium', 'xhigh', 'on'] */
+  reasoningOptions: string[] | null;
 }
 
 /**
@@ -97,6 +126,8 @@ export interface LlmJsonOptions {
  */
 @Injectable()
 export class LlmClient {
+  private readonly modelInfoCache = new Map<string, { at: number; models: Map<string, LmStudioModelInfo> | null }>();
+
   async listModels(endpoint: LlmEndpoint): Promise<LlmModelView[]> {
     const body = await this.request<{ data?: { id: string; owned_by?: string }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
     const details = await this.lmStudioModelDetails(endpoint);
@@ -129,12 +160,12 @@ export class LlmClient {
   }
 
   /** timeoutMs: 사용자가 답을 기다리는 짧은 작업(Message → ERP 추출)은 기본 120초보다 짧게 준다 */
-  async chat(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], maxTokens?: number, timeoutMs = CHAT_TIMEOUT_MS): Promise<string> {
+  async chat(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], profile: LlmProfile, maxTokens?: number, timeoutMs = CHAT_TIMEOUT_MS): Promise<string> {
     const body = await this.request<{ choices?: { message?: { content?: string | null } }[] }>(
       endpoint,
       'POST',
       '/chat/completions',
-      { model, messages, stream: false, ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }) },
+      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, profile)).fields, ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }) },
       timeoutMs,
     );
     return body.choices?.[0]?.message?.content?.trim() ?? '';
@@ -150,7 +181,13 @@ export class LlmClient {
 
   /** chatJson과 같고, 모델이 쓴 원문과 생각 글도 돌려준다 (회의록 AI 실행 기록) */
   async chatJsonWithText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<LlmJsonReply> {
-    const base = { model, messages, stream: false, temperature: 0, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) };
+    const base = {
+      model,
+      messages,
+      stream: false,
+      ...(await this.profileFields(endpoint, model, options.profile)).fields,
+      ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
+    };
     type Reply = { choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[] };
     let body: Reply;
     try {
@@ -183,7 +220,8 @@ export class LlmClient {
    * 도구를 함께 넘기는 대화 (AI 어시스턴트 데이터 조회). 모델이 도구를 고르면 toolCalls로 돌려주고, 실행은 부르는 쪽이 한다.
    * tools가 비면 도구 없이 답만 받는다(도구 호출 횟수를 다 쓴 뒤 마지막 답).
    */
-  async chatWithTools(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
+  async chatWithTools(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[], profile: LlmProfile): Promise<LlmToolReply> {
+    const profiled = await this.profileFields(endpoint, model, profile);
     const body = await this.request<{ choices?: { message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: WireToolCall[] } }[] }>(
       endpoint,
       'POST',
@@ -192,7 +230,8 @@ export class LlmClient {
         model,
         messages: messages.map(toWireMessage),
         stream: false,
-        ...(tools.length ? { tools: tools.map((tool) => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {}),
+        ...profiled.fields,
+        ...toolFields(tools),
       },
       CHAT_TIMEOUT_MS,
     );
@@ -200,10 +239,151 @@ export class LlmClient {
     const toolCalls = (message?.tool_calls ?? [])
       .filter((call) => call.function?.name)
       .map((call, index) => ({ id: call.id || `call-${index}`, name: call.function?.name ?? '', arguments: call.function?.arguments ?? '{}' }));
-    return { content: message?.content?.trim() ?? '', toolCalls, reasoning: message?.reasoning_content?.trim() || null };
+    return { content: message?.content?.trim() ?? '', toolCalls, reasoning: message?.reasoning_content?.trim() || null, reasoningApplied: profiled.reasoningApplied };
+  }
+
+  /**
+   * chatWithTools와 같고, 생각 글·답 글을 오는 대로 handlers에 넘긴다 (AI 어시스턴트 실시간 표시).
+   * signal이 끊기면(사용자가 멈춤) LLM 요청도 끊고 LlmAbortedError를 던진다.
+   */
+  async streamWithTools(
+    endpoint: LlmEndpoint,
+    model: string,
+    messages: LlmToolMessage[],
+    tools: LlmToolDefinition[],
+    profile: LlmProfile,
+    handlers: LlmStreamHandlers,
+    signal?: AbortSignal,
+  ): Promise<LlmToolReply> {
+    const profiled = await this.profileFields(endpoint, model, profile);
+    const idle = new AbortController();
+    let timer = setTimeout(() => idle.abort(idleTimeout()), STREAM_IDLE_TIMEOUT_MS);
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => idle.abort(idleTimeout()), STREAM_IDLE_TIMEOUT_MS);
+    };
+    const combined = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal;
+    const payload = { model, messages: messages.map(toWireMessage), stream: true, ...profiled.fields, ...toolFields(tools) };
+
+    let content = '';
+    let reasoning = '';
+    const calls = new Map<number, { id?: string; name: string; arguments: string }>();
+    const splitter = createThinkSplitter(handlers);
+    const onData = (data: string) => {
+      if (data === '[DONE]') return;
+      let chunk: StreamChunk;
+      try {
+        chunk = JSON.parse(data) as StreamChunk;
+      } catch {
+        return;
+      }
+      if (chunk.error) throw new LlmRequestError(`LLM 서버 오류: ${typeof chunk.error === 'string' ? chunk.error : (chunk.error.message ?? '알 수 없음')}`);
+      const delta = chunk.choices?.[0]?.delta;
+      if (!delta) return;
+      if (delta.reasoning_content) {
+        reasoning += delta.reasoning_content;
+        handlers.onThinking(delta.reasoning_content);
+      }
+      if (delta.content) {
+        content += delta.content;
+        splitter.push(delta.content);
+      }
+      for (const call of delta.tool_calls ?? []) {
+        const index = call.index ?? 0;
+        const entry = calls.get(index) ?? { name: '', arguments: '' };
+        if (call.id) entry.id = call.id;
+        if (call.function?.name) entry.name += call.function.name;
+        if (call.function?.arguments) entry.arguments += call.function.arguments;
+        calls.set(index, entry);
+      }
+    };
+
+    try {
+      const res = await this.send(endpoint, 'POST', '/chat/completions', payload, combined, STREAM_IDLE_TIMEOUT_MS);
+      const reader = res.body?.getReader();
+      if (!reader) throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read().catch((error: unknown) => {
+          throw readError(error, combined, STREAM_IDLE_TIMEOUT_MS);
+        });
+        if (done) break;
+        resetTimer();
+        buffer += decoder.decode(value, { stream: true });
+        for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line.startsWith('data:')) onData(line.slice(5).trim());
+        }
+      }
+      const rest = (buffer + decoder.decode()).trim();
+      if (rest.startsWith('data:')) onData(rest.slice(5).trim());
+      splitter.flush();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const toolCalls = [...calls.entries()]
+      .sort(([a], [b]) => a - b)
+      .filter(([, call]) => call.name)
+      .map(([index, call]) => ({ id: call.id || `call-${index}`, name: call.name, arguments: call.arguments || '{}' }));
+    return { content: content.trim(), toolCalls, reasoning: reasoning.trim() || null, reasoningApplied: profiled.reasoningApplied };
+  }
+
+  /**
+   * 기능별 샘플링 값과 생각 정도를 요청 필드로 바꾼다.
+   * top_k·min_p·repeat_penalty는 OpenAI 표준에 없어 외부 LLM이 거절할 수 있으므로 LM Studio일 때만 보낸다.
+   * 생각 설정을 모르는 모델에 reasoning_effort를 보내면 무시되거나 오류가 나므로, 모델이 받는다고 알린 때만 보낸다.
+   */
+  private async profileFields(endpoint: LlmEndpoint, model: string, profile: LlmProfile): Promise<{ fields: Record<string, unknown>; reasoningApplied: boolean }> {
+    const models = await this.lmStudioModelInfo(endpoint);
+    const s = profile.sampling;
+    const effort = reasoningEffortFor(profile.reasoning, models ? findModelInfo(models, model)?.reasoningOptions : null);
+    return {
+      fields: {
+        temperature: s.temperature,
+        top_p: s.topP,
+        presence_penalty: s.presencePenalty,
+        ...(models ? { top_k: s.topK, min_p: s.minP, repeat_penalty: s.repeatPenalty } : {}),
+        ...(effort ? { reasoning_effort: effort } : {}),
+      },
+      reasoningApplied: profile.reasoning === null || effort !== null,
+    };
+  }
+
+  /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
+  private async lmStudioModelInfo(endpoint: LlmEndpoint): Promise<Map<string, LmStudioModelInfo> | null> {
+    const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
+    const cached = this.modelInfoCache.get(root);
+    if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
+    let models: Map<string, LmStudioModelInfo> | null;
+    try {
+      type Wire = { models?: { key: string; variants?: string[]; capabilities?: { reasoning?: { allowed_options?: string[] } } }[] };
+      const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
+      models = Array.isArray(body.models) ? new Map() : null;
+      for (const m of body.models ?? []) {
+        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null };
+        for (const id of [m.key, ...(m.variants ?? [])]) models?.set(id, info);
+      }
+    } catch {
+      models = null;
+    }
+    this.modelInfoCache.set(root, { at: Date.now(), models });
+    return models;
   }
 
   private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number): Promise<T> {
+    const res = await this.send(endpoint, method, path, payload, AbortSignal.timeout(timeoutMs), timeoutMs);
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
+    }
+  }
+
+  /** 요청을 보내고 상태 코드까지 확인한다. 본문은 부르는 쪽이 JSON이나 스트림으로 읽는다 */
+  private async send(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, signal: AbortSignal, timeoutMs: number): Promise<Response> {
     const url = `${normalizeBaseUrl(endpoint.baseUrl)}${path}`;
     let res: Response;
     try {
@@ -214,22 +394,91 @@ export class LlmClient {
           ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}),
         },
         body: payload === undefined ? undefined : JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal,
       });
     } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') {
-        throw new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LM Studio 서버와 모델 상태를 확인해 주세요`);
-      }
+      const known = readError(error, signal, timeoutMs);
+      if (known instanceof LlmRequestError) throw known;
       throw new LlmRequestError(`${url}에 연결할 수 없어요. LM Studio의 Developer 탭에서 서버를 켰는지, 주소가 맞는지 확인해 주세요`);
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (!res.ok) throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`, res.status);
-    try {
-      return (await res.json()) as T;
-    } catch {
-      throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
-    }
+    return res;
   }
+}
+
+/** OpenAI 호환 스트리밍의 한 조각 (data: 줄의 JSON) */
+interface StreamChunk {
+  choices?: { delta?: { content?: string | null; reasoning_content?: string | null; tool_calls?: (WireToolCall & { index?: number })[] } }[];
+  error?: string | { message?: string };
+}
+
+function toolFields(tools: LlmToolDefinition[]): Record<string, unknown> {
+  return tools.length ? { tools: tools.map((tool) => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {};
+}
+
+function idleTimeout(): DOMException {
+  return new DOMException('stream idle', 'TimeoutError');
+}
+
+/** fetch·읽기 실패를 화면에 보일 이유로 바꾼다. 시간 초과·멈춤이 아니면 원래 오류를 돌려준다 */
+function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unknown {
+  if (error instanceof LlmRequestError) return error;
+  const reason: unknown = signal.aborted ? signal.reason : error;
+  if (reason instanceof Error && reason.name === 'TimeoutError') {
+    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LM Studio 서버와 모델 상태를 확인해 주세요`);
+  }
+  if (signal.aborted) return new LlmAbortedError();
+  return error;
+}
+
+/**
+ * 답 글 조각 안의 <think>…</think>를 생각 글로 넘긴다. 태그가 조각 사이에서 잘려 와도 맞게 나누도록
+ * 태그의 앞부분일 수 있는 끝 글자는 다음 조각이 올 때까지 들고 있는다.
+ * 여는 태그 없이 닫는 태그만 오는 모델은 그 앞 글이 이미 답으로 나갔으므로 태그만 지운다 (최종 답은 done에서 다시 다듬는다).
+ */
+export function createThinkSplitter(handlers: LlmStreamHandlers): { push(text: string): void; flush(): void } {
+  const OPEN = '<think>';
+  const CLOSE = '</think>';
+  let inThink = false;
+  let pending = '';
+  const emit = (text: string) => {
+    if (!text) return;
+    if (inThink) handlers.onThinking(text);
+    else handlers.onAnswer(text);
+  };
+  const keepFrom = (text: string, tag: string) => {
+    for (let size = Math.min(tag.length - 1, text.length); size > 0; size -= 1) {
+      if (tag.startsWith(text.slice(-size))) return text.length - size;
+    }
+    return text.length;
+  };
+  return {
+    push(text) {
+      pending += text;
+      for (;;) {
+        const tag = inThink ? CLOSE : OPEN;
+        const at = pending.indexOf(tag);
+        const strayClose = inThink ? -1 : pending.indexOf(CLOSE);
+        if (strayClose >= 0 && (at < 0 || strayClose < at)) {
+          emit(pending.slice(0, strayClose));
+          pending = pending.slice(strayClose + CLOSE.length);
+          continue;
+        }
+        if (at < 0) break;
+        emit(pending.slice(0, at));
+        pending = pending.slice(at + tag.length);
+        inThink = !inThink;
+      }
+      const cut = Math.min(keepFrom(pending, inThink ? CLOSE : OPEN), inThink ? pending.length : keepFrom(pending, CLOSE));
+      emit(pending.slice(0, cut));
+      pending = pending.slice(cut);
+    },
+    flush() {
+      emit(pending);
+      pending = '';
+    },
+  };
 }
 
 function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
@@ -273,6 +522,26 @@ function parseJsonText(content: string): unknown {
   } catch {
     throw new LlmRequestError('AI 응답을 JSON으로 읽지 못했어요');
   }
+}
+
+/** 설정의 모델 이름은 /v1/models의 id다. LM Studio는 key나 `key@양자화` 변형 이름으로 준다 */
+function findModelInfo(models: Map<string, LmStudioModelInfo>, model: string): LmStudioModelInfo | undefined {
+  return models.get(model) ?? models.get(model.split('@')[0]);
+}
+
+/**
+ * 원하는 생각 정도를 모델이 받는 reasoning_effort 값으로 바꾼다. 보내지 않을 때는 null.
+ * - off: 모델이 'off'를 받을 때만 'none'
+ * - 단계: 모델이 아는 단계 중 가장 가까운 것(같으면 높은 쪽). 단계 없이 켜기만 아는 모델('on')은 'none'이 아닌 값이면 켜지므로 그대로 보낸다
+ */
+export function reasoningEffortFor(want: LlmReasoning | null, allowedOptions: readonly string[] | null | undefined): string | null {
+  if (!want || !allowedOptions?.length) return null;
+  if (want === 'off') return allowedOptions.includes('off') ? 'none' : null;
+  const levels = REASONING_LEVELS.filter((level) => allowedOptions.includes(level));
+  if (levels.length === 0) return allowedOptions.includes('on') ? want : null;
+  const wantIndex = REASONING_LEVELS.indexOf(want);
+  const distance = (level: (typeof REASONING_LEVELS)[number]) => Math.abs(REASONING_LEVELS.indexOf(level) - wantIndex);
+  return levels.reduce((best, level) => (distance(level) <= distance(best) ? level : best));
 }
 
 /** 끝의 / 를 떼어 경로를 붙일 수 있게 한다 */

@@ -2,19 +2,19 @@
 
 // 이 회의에 대해 묻기 (Voice2ERP 묶음 3). 서버의 AI 어시스턴트에 회의록 id를 함께 보내 이 회의 내용으로 답하게 한다.
 // 전역 AI 패널과 대화가 섞이지 않게 대화는 이 카드 안(메모리)에만 둔다. 서버에도 저장하지 않는다 (요구사항 21장 미결정).
-import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AiAssistantTurn } from '@fantasteel/shared';
 import type { MeetingMinutesView } from '@/api/meetingMinutes';
 import { aiAssistantApi } from '@/api/aiAssistant';
+import { isAbortError } from '@/api/http';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { AiMark } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
-import { AskTrace } from '@/features/meetings/components/MeetingTracePanel';
+import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/AiPanel';
 import { MEETING_SUGGESTED_QUESTIONS, meetingScreenContext, splitCitations } from '@/lib/meetingAsk';
-import { aiChatHistory, newAiChatId, type AiChatEntry } from '@/stores/useAiChatStore';
+import { AI_CHAT_STOPPED_REASON, aiAnswerEntryFromReply, aiChatHistory, emptyAiChatLive, newAiChatId, reduceAiChatLive, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
 /** 서버 DTO와 같은 상한 (가정값) */
@@ -48,25 +48,64 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
   const bottomRef = useRef<HTMLDivElement>(null);
   const segmentCount = minutes.transcriptSegments.length;
 
-  const mutation = useMutation({
-    mutationFn: ({ question, history }: { question: string; history: AiAssistantTurn[] }) =>
-      aiAssistantApi.ask({ question, history, meetingMinutesId: minutes.id, screen: meetingScreenContext(minutes) }),
-    onSuccess: (reply) =>
-      setEntries((current) => [...current, { id: newAiChatId(), role: 'assistant', content: reply.answer, sources: reply.sources, toolCalls: reply.toolCalls, thinking: reply.thinking }]),
-    onError: (error, { question }) => setEntries((current) => [...current, { id: newAiChatId(), role: 'failure', content: errorMessageOf(error), question }]),
-  });
-  const pending = mutation.isPending;
+  // 이 카드는 전역 대화 저장소를 쓰지 않아 진행 상황도 여기서 쌓는다. 생각 정도는 보내지 않는다 (서버 고정 기본값)
+  const [live, setLive] = useState<AiChatLive | null>(null);
+  const liveRef = useRef<AiChatLive | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const pending = live !== null;
+
+  const updateLive = (next: AiChatLive | null) => {
+    liveRef.current = next;
+    setLive(next);
+  };
+  const appendEntry = (entry: AiChatEntry) => setEntries((current) => [...current, entry]);
+
+  // 카드를 떠나면 서버에서 하던 일도 멈춘다
+  useEffect(() => () => controllerRef.current?.abort(), []);
 
   useEffect(() => {
-    if (entries.length) bottomRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [entries.length, pending]);
+    if (entries.length || live) bottomRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [entries.length, live]);
+
+  const run = async (question: string, history: AiAssistantTurn[]) => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    updateLive(emptyAiChatLive());
+    let finished = false;
+    const fail = (reason: string) => appendEntry({ id: newAiChatId(), role: 'failure', content: reason, question });
+    try {
+      await aiAssistantApi.askStream(
+        { question, history, meetingMinutesId: minutes.id, screen: meetingScreenContext(minutes) },
+        (event) => {
+          const current = liveRef.current;
+          if (!current || finished) return;
+          if (event.type === 'done') {
+            finished = true;
+            appendEntry(aiAnswerEntryFromReply(current, event.reply, Date.now(), newAiChatId()));
+          } else if (event.type === 'error') {
+            finished = true;
+            fail(event.message);
+          } else {
+            updateLive(reduceAiChatLive(current, event, Date.now()));
+          }
+        },
+        controller.signal,
+      );
+      if (!finished) fail('답이 끝나기 전에 연결이 끊겼어요. 다시 물어봐 주세요');
+    } catch (error) {
+      fail(controller.signal.aborted || isAbortError(error) ? AI_CHAT_STOPPED_REASON : errorMessageOf(error));
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null;
+      updateLive(null);
+    }
+  };
 
   const ask = (question: string, base: AiChatEntry[] = entries) => {
     const text = question.trim();
     if (!text || pending) return;
     setEntries([...base, { id: newAiChatId(), role: 'user', content: text }]);
     setDraft('');
-    mutation.mutate({ question: text, history: aiChatHistory(base) });
+    void run(text, aiChatHistory(base));
   };
 
   // 실패한 질문과 실패 줄을 지우고 같은 질문을 다시 보낸다
@@ -114,6 +153,17 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
                 <div key={entry.id} className="max-w-[85%] self-end rounded-md rounded-br-xs bg-brand-tint px-3 py-2 text-sm whitespace-pre-wrap text-ink">
                   {entry.content}
                 </div>
+              ) : entry.role === 'failure' && entry.content === AI_CHAT_STOPPED_REASON ? (
+                // 사용자가 직접 멈춘 것은 실패가 아니라 경고 색 없이 보인다
+                <div key={entry.id} role="status" className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 px-3 py-2.5 text-sm">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-ink-2">
+                    <Icon name="x-circle" size="sm" />
+                    답을 멈췄어요
+                  </span>
+                  <Button size="sm" icon="refresh" className="self-start" disabled={pending} onClick={() => retry(entry.id, entry.question)}>
+                    다시 묻기
+                  </Button>
+                </div>
               ) : entry.role === 'failure' ? (
                 <div key={entry.id} role="alert" className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg px-3 py-2.5 text-sm">
                   <span className="inline-flex items-center gap-1.5 font-semibold text-danger">
@@ -139,13 +189,13 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
                       ))}
                     </div>
                   ) : null}
-                  <AskTrace toolCalls={entry.toolCalls ?? []} thinking={entry.thinking ?? null} />
+                  <AiStepsDetails steps={entry.steps} />
                 </div>
               ),
             )}
-            {pending ? (
-              <div aria-live="polite" className="rounded-md border border-ai-line bg-ai-bg px-3 py-2 text-sm text-ai-strong">
-                답을 만들고 있어요…
+            {live ? (
+              <div className="rounded-md border border-ai-line bg-ai-bg px-3 py-2.5">
+                <AiLiveView live={live} />
               </div>
             ) : null}
             <div ref={bottomRef} />
@@ -164,7 +214,13 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
           />
           <div className="flex items-center gap-1 px-1.5 pt-1 pb-1.5">
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
-            <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || pending} aria-label="보내기" onClick={() => ask(draft)} />
+            {pending ? (
+              <Button variant="ai-outline" size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => controllerRef.current?.abort()}>
+                멈추기
+              </Button>
+            ) : (
+              <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim()} aria-label="보내기" onClick={() => ask(draft)} />
+            )}
           </div>
         </div>
       </CardBody>

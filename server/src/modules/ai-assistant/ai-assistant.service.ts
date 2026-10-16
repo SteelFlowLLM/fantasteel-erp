@@ -3,6 +3,7 @@ import {
   ROLE_LABEL,
   type AiAssistantMessageInput,
   type AiAssistantReplyView,
+  type AiAssistantStreamEvent,
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
   type AiAssistantToolTrace,
@@ -10,8 +11,9 @@ import {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { buildMeetingContext } from './assistant-meeting.context';
 import { parseAssistantAnswer } from './assistant.answer';
@@ -21,6 +23,13 @@ import { findManualGuides } from './knowledge/manual.search';
 import { findProcessSteps } from './knowledge/process.search';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox } from './tools/assistant-toolbox';
+
+/** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
+export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
+
+export interface PreparedAsk {
+  run(emit?: AssistantEmit, signal?: AbortSignal): Promise<AiAssistantReplyView>;
+}
 
 const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자에게 LLM 연결 설정을 요청해 주세요';
 
@@ -61,6 +70,21 @@ export class AiAssistantService {
   }
 
   async ask(user: AuthUser, input: AiAssistantMessageInput): Promise<AiAssistantReplyView> {
+    const prepared = await this.prepare(user, input);
+    try {
+      return await prepared.run();
+    } catch (error) {
+      if (!(error instanceof LlmRequestError)) throw error;
+      this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
+      throw new AppException('COM-999', error.message, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  /**
+   * 답을 만들기 전 확인(모델 설정·회의록)과 프롬프트 준비. 여기서 던지는 오류는 평소 API 오류로 나가고,
+   * 스트리밍 API는 이것이 통과한 뒤에야 응답을 시작한다. run은 LLM 실패를 LlmRequestError로 던진다.
+   */
+  async prepare(user: AuthUser, input: AiAssistantMessageInput): Promise<PreparedAsk> {
     const settings = await this.settingsStore.read();
     if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
     const model = settings.model;
@@ -83,37 +107,50 @@ export class AiAssistantService {
       history,
       question: input.question,
     });
+    const profile = assistantProfile(input.reasoning);
+    const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
 
-    const started = Date.now();
-    const dataSources: AiAssistantSource[] = [];
-    const toolCalls: AiAssistantToolTrace[] = [];
-    const tools = this.toolbox.definitions();
-    let reply = await this.call(settings, model, messages, tools);
-    for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
-      messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
-      for (const call of reply.toolCalls) {
-        const callStarted = Date.now();
-        const result = await this.toolbox.run(user, call);
-        toolCalls.push({ name: call.name, arguments: cut(call.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted });
-        messages.push({ role: 'tool', toolCallId: call.id, content: result.content });
-        if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
-      }
-      reply = await this.call(settings, model, messages, round < MAX_TOOL_ROUNDS ? tools : []);
-    }
+    return {
+      run: async (emit, signal) => {
+        const started = Date.now();
+        const dataSources: AiAssistantSource[] = [];
+        const toolCalls: AiAssistantToolTrace[] = [];
+        const tools = this.toolbox.definitions();
+        const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
+          emit
+            ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
+            : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
+        let reply = await call(tools);
+        for (let round = 1; reply.toolCalls.length && round <= MAX_TOOL_ROUNDS; round += 1) {
+          messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
+          for (const toolCall of reply.toolCalls) {
+            if (signal?.aborted) throw new LlmAbortedError();
+            const callStarted = Date.now();
+            const traceId = `t${toolCalls.length + 1}`;
+            emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
+            const result = await this.toolbox.run(user, toolCall);
+            const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
+            toolCalls.push(trace);
+            emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs });
+            messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
+            if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
+          }
+          reply = await call(round < MAX_TOOL_ROUNDS ? tools : []);
+        }
 
-    const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
-    const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
-    return { answer: parsed.answer, sources: [...dataSources, ...parsed.sources], model, latencyMs: Date.now() - started, toolCalls, thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null };
-  }
-
-  private async call(endpoint: LlmEndpoint, model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> {
-    try {
-      return await this.llm.chatWithTools(endpoint, model, messages, tools);
-    } catch (error) {
-      if (!(error instanceof LlmRequestError)) throw error;
-      this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
-      throw new AppException('COM-999', error.message, HttpStatus.SERVICE_UNAVAILABLE);
-    }
+        const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+        const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
+        return {
+          answer: parsed.answer,
+          sources: [...dataSources, ...parsed.sources],
+          model,
+          latencyMs: Date.now() - started,
+          toolCalls,
+          thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
+          reasoningApplied: reply.reasoningApplied ?? true,
+        };
+      },
+    };
   }
 
   /** "그건 언제 풀려?"처럼 용어 없이 이어 묻는 질문은 바로 앞 질문의 용어를 쓴다 */

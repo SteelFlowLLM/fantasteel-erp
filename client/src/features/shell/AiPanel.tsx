@@ -3,18 +3,20 @@
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 실행 카드(AST-005)는 다음 단계라 준비 중으로 둔다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import type { AiAssistantScreenContext, AiAssistantSource } from '@fantasteel/shared';
+import { AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
+import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useMe } from '@/hooks/useMe';
-import { useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
+import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
+import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
 
 /** 서버 DTO와 같은 상한 (가정값) */
@@ -38,7 +40,10 @@ const TAIL_SHAPE =
   'after:absolute after:top-[11px] after:-left-[6px] after:border-y-5 after:border-r-7 after:border-l-0 after:border-y-transparent';
 const ANSWER_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-steelman bg-surface shadow-[3px_3px_0_var(--color-steelman-shadow)] before:border-r-steelman after:border-r-surface`;
 const FAILURE_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-danger bg-surface shadow-[3px_3px_0_var(--color-danger-line)] before:border-r-danger after:border-r-surface`;
-const THINKING_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-steelman-shadow bg-steelman-soft before:border-r-steelman-shadow after:border-r-steelman-soft`;
+const STOPPED_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-line-strong bg-surface-2 before:border-r-line-strong after:border-r-surface-2`;
+
+/** 위로 스크롤해 읽는 중이면 새 내용이 와도 끌어내리지 않는다: 바닥에서 이만큼(px) 안이면 따라간다 */
+const STICK_TO_BOTTOM_PX = 80;
 
 export function AiPanel() {
   const me = useMe();
@@ -49,12 +54,16 @@ export function AiPanel() {
   const toggleExpanded = useShellStore((state) => state.toggleAiPanelExpanded);
   const entries = useAiChatStore((state) => state.entries);
   const pendingId = useAiChatStore((state) => state.pendingId);
+  const live = useAiChatStore((state) => state.live);
   const claim = useAiChatStore((state) => state.claim);
   const clear = useAiChatStore((state) => state.clear);
   const removeFailure = useAiChatStore((state) => state.removeFailure);
   const ask = useAskAiAssistant();
   const [draft, setDraft] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [reasoning, setReasoning] = useState<AiReasoningLevel>(AI_REASONING_DEFAULT);
+  const [oneShot, setOneShot] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
   const roleLabel = ROLE_LABEL[me.roleCode];
   const screenTitle = routeTitleOf(pathname).title || '대시보드';
   const pending = pendingId !== null;
@@ -63,9 +72,34 @@ export function AiPanel() {
     claim(me.employeeId);
   }, [claim, me.employeeId]);
 
+  // 저장된 생각 정도는 화면을 그린 뒤에 읽는다 (서버에서 먼저 그릴 때와 어긋나지 않게)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [entries.length, pending]);
+    const saved = readAiReasoningPreference();
+    setReasoning(saved.level);
+    setOneShot(saved.oneShot);
+  }, []);
+
+  // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
+  const liveSize = live ? `${live.steps.length}:${live.answer.length}:${lastStepSize(live)}` : '';
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (scroller && stickRef.current) scroller.scrollTop = scroller.scrollHeight;
+  }, [entries.length, pending, liveSize]);
+
+  const onScroll = () => {
+    const scroller = scrollRef.current;
+    if (scroller) stickRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < STICK_TO_BOTTOM_PX;
+  };
+
+  const changeReasoning = (level: AiReasoningLevel) => {
+    setReasoning(level);
+    writeAiReasoningPreference({ level, oneShot });
+  };
+
+  const changeOneShot = (checked: boolean) => {
+    setOneShot(checked);
+    writeAiReasoningPreference({ level: reasoning, oneShot: checked });
+  };
 
   // 주소의 쿼리(열어 둔 수주 id 등)도 함께 보내 '이 수주'를 알아듣게 한다 (REQ-AST-007)
   const screenContext = (): AiAssistantScreenContext => ({
@@ -76,13 +110,21 @@ export function AiPanel() {
 
   const send = (question: string) => {
     if (!question.trim() || pending) return;
-    ask(question, screenContext());
+    stickRef.current = true;
+    ask(question, screenContext(), reasoning);
     setDraft('');
+    const next = reasoningAfterSend(reasoning, oneShot);
+    if (next !== reasoning) {
+      setReasoning(next);
+      writeAiReasoningPreference({ level: next, oneShot });
+    }
   };
 
-  const retry = (failureId: string, question: string) => {
+  // 다시 물을 때는 처음 보냈던 생각 정도로 묻는다 (고른 값은 건드리지 않는다)
+  const retry = (failureId: string, question: string, failedReasoning: AiReasoningLevel | undefined) => {
     removeFailure(failureId);
-    ask(question, screenContext());
+    stickRef.current = true;
+    ask(question, screenContext(), failedReasoning ?? reasoning);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -109,14 +151,13 @@ export function AiPanel() {
         <IconButton icon="x" label="패널 닫기" size="sm" onClick={close} />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         <div className={`mx-auto flex flex-col gap-3.5 p-4 ${expanded ? 'max-w-[880px]' : ''}`}>
           {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={send} />}
           {entries.map((entry) => (
             <ChatEntry key={entry.id} entry={entry} disabled={pending} onRetry={retry} />
           ))}
-          {pending ? <Thinking /> : null}
-          <div ref={bottomRef} />
+          {pending && live ? <LiveAnswer live={live} /> : null}
         </div>
       </div>
 
@@ -140,9 +181,16 @@ export function AiPanel() {
             aria-label="철강맨AI에게 질문"
             className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-snug outline-none"
           />
-          <div className="flex items-center gap-1 px-1.5 pt-1 pb-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1.5 pt-1 pb-1.5">
+            <ReasoningPicker level={reasoning} oneShot={oneShot} onLevel={changeReasoning} onOneShot={changeOneShot} />
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
-            <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || pending} aria-label="보내기" onClick={() => send(draft)} />
+            {pending ? (
+              <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>
+                멈추기
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim()} aria-label="보내기" onClick={() => send(draft)} />
+            )}
           </div>
         </div>
       </div>
@@ -193,21 +241,56 @@ function QuestionChips({ questions, disabled, onAsk }: { questions: readonly str
   );
 }
 
-function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled: boolean; onRetry: (failureId: string, question: string) => void }) {
+/** 마지막 단계의 글 길이: 생각 글이 자라는 것도 따라가려고 */
+function lastStepSize(live: AiChatLive): number {
+  const last = live.steps.at(-1);
+  return last && last.kind !== 'tool' ? last.text.length : 0;
+}
+
+/** 생각 정도: 끔·낮게·보통·깊게. '이번 질문만'을 켜 두면 보낸 뒤 기본값으로 돌아간다 */
+function ReasoningPicker({ level, oneShot, onLevel, onOneShot }: { level: AiReasoningLevel; oneShot: boolean; onLevel: (level: AiReasoningLevel) => void; onOneShot: (checked: boolean) => void }) {
+  return (
+    <div className="inline-flex items-center gap-2 text-cap text-ink-3">
+      <span id="ai-reasoning-label">생각</span>
+      <div role="radiogroup" aria-labelledby="ai-reasoning-label" className="inline-flex overflow-hidden rounded-sm border border-line-strong">
+        {AI_REASONING_LEVELS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            role="radio"
+            aria-checked={option === level}
+            onClick={() => onLevel(option)}
+            className={`h-6 px-2 text-cap not-first:border-l not-first:border-line-strong ${option === level ? 'bg-steelman-soft font-semibold text-steelman-ink' : 'bg-surface text-ink-2 hover:bg-surface-2'}`}
+          >
+            {AI_REASONING_LABEL[option]}
+          </button>
+        ))}
+      </div>
+      <label className="inline-flex items-center gap-1 text-ink-2">
+        <input type="checkbox" checked={oneShot} onChange={(event) => onOneShot(event.target.checked)} />
+        이번 질문만
+      </label>
+    </div>
+  );
+}
+
+function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled: boolean; onRetry: (failureId: string, question: string, reasoning: AiReasoningLevel | undefined) => void }) {
   if (entry.role === 'user') {
     return <div className="max-w-[85%] self-end rounded-lg rounded-br-xs bg-brand-tint px-3 py-2 text-sm break-keep whitespace-pre-wrap wrap-anywhere text-brand">{entry.content}</div>;
   }
   if (entry.role === 'failure') {
+    // 사용자가 직접 멈춘 것은 실패가 아니라 경고 색 없이 보인다
+    const stopped = entry.content === AI_CHAT_STOPPED_REASON;
     return (
       <div className="flex gap-3">
         <SteelmanAiMark framed />
-        <div role="alert" className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 text-sm ${FAILURE_BUBBLE}`}>
-          <span className="inline-flex items-center gap-1.5 font-semibold text-danger">
-            <Icon name="alert" size="sm" />
-            답을 받지 못했어요
+        <div role={stopped ? 'status' : 'alert'} className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 text-sm ${stopped ? STOPPED_BUBBLE : FAILURE_BUBBLE}`}>
+          <span className={`inline-flex items-center gap-1.5 font-semibold ${stopped ? 'text-ink-2' : 'text-danger'}`}>
+            <Icon name={stopped ? 'x-circle' : 'alert'} size="sm" />
+            {stopped ? '답을 멈췄어요' : '답을 받지 못했어요'}
           </span>
-          <p className="leading-normal break-keep wrap-anywhere text-ink-2">{entry.content}</p>
-          <Button size="sm" icon="refresh" className="self-start" disabled={disabled} onClick={() => onRetry(entry.id, entry.question)}>
+          {stopped ? null : <p className="leading-normal break-keep wrap-anywhere text-ink-2">{entry.content}</p>}
+          <Button size="sm" icon="refresh" className="self-start" disabled={disabled} onClick={() => onRetry(entry.id, entry.question, entry.reasoning)}>
             다시 묻기
           </Button>
         </div>
@@ -232,16 +315,22 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
             <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
           )}
         </div>
+        <AiStepsDetails steps={entry.steps} />
+        {entry.reasoningApplied === false && entry.requestedReasoning && entry.requestedReasoning !== AI_REASONING_DEFAULT ? (
+          <p className="text-cap text-ink-3">이 모델은 생각 정도를 바꿀 수 없어 기본값으로 답했어요</p>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function Thinking() {
+function LiveAnswer({ live }: { live: AiChatLive }) {
   return (
-    <div className="flex gap-3" aria-live="polite">
+    <div className="flex gap-3">
       <SteelmanAiMark framed />
-      <div className={`px-3 py-2 text-sm text-steelman-ink ${THINKING_BUBBLE}`}>답을 만들고 있어요…</div>
+      <div className={`min-w-0 flex-1 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
+        <AiLiveView live={live} />
+      </div>
     </div>
   );
 }

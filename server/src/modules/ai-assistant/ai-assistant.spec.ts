@@ -1,7 +1,9 @@
 import { ROLE, type AuthUser } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import type { LlmClient, LlmEndpoint, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
+import type { AiAssistantStreamEvent } from '@fantasteel/shared';
+import type { LlmClient, LlmEndpoint, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
+import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
 import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { AiAssistantService, MAX_TOOL_ROUNDS } from './ai-assistant.service';
@@ -130,16 +132,32 @@ describe('AiAssistantService', () => {
   interface LlmCall {
     messages: LlmToolMessage[];
     tools: LlmToolDefinition[];
+    profile: LlmProfile;
+    /** 실시간(streamWithTools)으로 부른 호출인지 */
+    streamed: boolean;
   }
 
   function setup(settings: Partial<LlmSettings>, replies: (call: LlmCall, index: number) => Promise<LlmToolReply>, toolResult?: ToolRunResult) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
     const client = {
-      chatWithTools: async (_endpoint: LlmEndpoint, _model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]) => {
-        const call = { messages: [...messages], tools };
+      chatWithTools: async (_endpoint: LlmEndpoint, _model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[], profile: LlmProfile) => {
+        const call = { messages: [...messages], tools, profile, streamed: false };
         calls.push(call);
         return replies(call, calls.length - 1);
+      },
+      // 실제 클라이언트처럼 생각 글·답 글을 조각내 먼저 넘기고 같은 답을 돌려준다
+      streamWithTools: async (_endpoint: LlmEndpoint, _model: string, messages: LlmToolMessage[], tools: LlmToolDefinition[], profile: LlmProfile, handlers: LlmStreamHandlers) => {
+        const call = { messages: [...messages], tools, profile, streamed: true };
+        calls.push(call);
+        handlers.onThinking('재고를 ');
+        handlers.onThinking('확인해요');
+        const reply = await replies(call, calls.length - 1);
+        if (reply.content) {
+          handlers.onAnswer(reply.content.slice(0, 5));
+          handlers.onAnswer(reply.content.slice(5));
+        }
+        return reply;
       },
     } as unknown as LlmClient;
     const runs: string[] = [];
@@ -226,6 +244,95 @@ describe('AiAssistantService', () => {
       throw new TypeError('버그');
     });
     await expect(broken.service.ask(user, { question: '예약이 뭐야?' })).rejects.toBeInstanceOf(TypeError);
+  });
+
+  describe('실시간 실행 (run에 emit을 넘김)', () => {
+    const collect = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => {
+      const events: AiAssistantStreamEvent[] = [];
+      const prepared = await service.prepare(user, input);
+      const reply = await prepared.run((event) => events.push(event));
+      return { events, reply };
+    };
+
+    it('생각·답 조각과 도구 호출의 시작·끝을 일어난 순서대로 내보내고, 답은 완성된 reply로 돌려준다', async () => {
+      const { service, calls } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('SS275 코일은 12매예요 [TRM-056].')));
+      const { events, reply } = await collect(service, { question: 'SS275 코일 예약 재고 몇 매야?' });
+
+      expect(calls.every((c) => c.streamed)).toBe(true);
+      expect(events).toEqual([
+        { type: 'thinking', text: '재고를 ' },
+        { type: 'thinking', text: '확인해요' },
+        { type: 'tool_start', id: 't1', name: 'get_inventory', arguments: '{"keyword":"SS275"}' },
+        { type: 'tool_end', id: 't1', label: '재고 · SS275', resultPreview: '{"제품":[]}', durationMs: expect.any(Number) },
+        { type: 'thinking', text: '재고를 ' },
+        { type: 'thinking', text: '확인해요' },
+        { type: 'answer', text: 'SS275' },
+        { type: 'answer', text: ' 코일은 12매예요 [TRM-056].' },
+      ]);
+      // 조각은 출처 표시가 붙은 원문이라 최종 답은 reply만 믿는다
+      expect(reply.answer).toBe('SS275 코일은 12매예요.');
+      expect(reply.sources.map((s) => s.id)).toEqual(['get_inventory', 'TRM-056']);
+      expect(reply.toolCalls).toHaveLength(1);
+    });
+
+    it('조회에 실패한 도구는 tool_end의 label이 null이고, 도구를 여러 번 부르면 id가 t1, t2로 이어진다', async () => {
+      const { service } = setup({}, async (_call, index) => (index < 2 ? callTool(`c${index}`) : answer('권한이 없어요')), { content: '{"오류":"권한 없음"}', source: null });
+      const { events } = await collect(service, { question: '이 수주 진행 상황 알려줘' });
+      const ends = events.filter((e) => e.type === 'tool_end');
+      expect(ends.map((e) => e.id)).toEqual(['t1', 't2']);
+      expect(ends.every((e) => e.label === null)).toBe(true);
+    });
+
+    it('emit이 없으면 chatWithTools로 한 번에 답한다', async () => {
+      const { service, calls } = setup({}, async () => answer('네'));
+      await service.ask(user, { question: '예약이 뭐야?' });
+      expect(calls.map((c) => c.streamed)).toEqual([false]);
+    });
+
+    it('LLM 실패는 LlmRequestError 그대로 던진다 (스트리밍 컨트롤러가 error 이벤트로 바꾼다)', async () => {
+      const { service } = setup({}, async () => {
+        throw new LlmRequestError('120초 안에 응답이 없어요');
+      });
+      const prepared = await service.prepare(user, { question: '예약이 뭐야?' });
+      await expect(prepared.run(() => undefined)).rejects.toBeInstanceOf(LlmRequestError);
+    });
+
+    it('모델이 없거나 지시가 잘못된 질문은 prepare에서 막혀 응답을 시작하기 전에 알린다', async () => {
+      const { service, calls } = setup({ model: null }, async () => answer(''));
+      await expect(service.prepare(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'COM-999', status: 503 });
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  describe('생각 정도 (reasoning)', () => {
+    it('고른 생각 정도를 LLM 프로필에 실어 보내고, 고르지 않으면 어시스턴트 기본값을 쓴다', async () => {
+      const streamed = setup({}, async () => answer('네'));
+      await (await streamed.service.prepare(user, { question: '예약이 뭐야?', reasoning: 'high' })).run(() => undefined);
+      expect(streamed.calls[0].profile.reasoning).toBe('high');
+
+      const plain = setup({}, async () => answer('네'));
+      await plain.service.ask(user, { question: '예약이 뭐야?', reasoning: 'low' });
+      expect(plain.calls[0].profile.reasoning).toBe('low');
+
+      const unset = setup({}, async () => answer('네'));
+      await unset.service.ask(user, { question: '예약이 뭐야?' });
+      expect(unset.calls[0].profile).toEqual(LLM_PROFILE.ASSISTANT);
+    });
+
+    it('생각을 끄면 생각하지 않는 모드의 샘플링 값을 쓴다 (모드마다 권장 값이 다르다)', async () => {
+      const off = setup({}, async () => answer('네'));
+      const on = setup({}, async () => answer('네'));
+      await off.service.ask(user, { question: '예약이 뭐야?', reasoning: 'off' });
+      await on.service.ask(user, { question: '예약이 뭐야?', reasoning: 'medium' });
+      expect(off.calls[0].profile.sampling.temperature).toBeLessThan(on.calls[0].profile.sampling.temperature);
+    });
+
+    it('reasoningApplied는 클라이언트가 알린 값을 따르고, 알리지 않으면 true', async () => {
+      const unknown = setup({}, async () => answer('네'));
+      expect((await unknown.service.ask(user, { question: '예약이 뭐야?' })).reasoningApplied).toBe(true);
+      const ignored = setup({}, async () => ({ content: '네', toolCalls: [], reasoningApplied: false }));
+      expect((await ignored.service.ask(user, { question: '예약이 뭐야?', reasoning: 'high' })).reasoningApplied).toBe(false);
+    });
   });
 
   it('추천 질문은 로그인 사원의 역할 기준', () => {
