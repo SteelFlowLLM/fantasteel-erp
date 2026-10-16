@@ -86,7 +86,7 @@ function CandidateList({
     <section aria-label="대응 후보 목록" data-pet-target="card:agent.detections" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
         <div className="flex items-center gap-2">
-          <Icon name="radar" className="text-ai" />
+          <Icon name="radar" className="text-steelman" />
           <b className="text-base font-semibold">대응 후보 {openCount}건</b>
           <span className="text-cap text-ink-3">확정 대기</span>
         </div>
@@ -173,11 +173,11 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
         }
       />
 
-      <AiCard title="상황 설명" className="flex-none" petKey="card:agent.situation">
+      <AiCard tone="steelman" title="상황 설명" className="flex-none" petKey="card:agent.situation">
         <p className="text-base leading-normal">{explain?.explanation ?? candidate.summary}</p>
         <KvList columns={1} items={Object.entries(candidate.evidence).map(([key, value]) => ({ label: evidenceLabelOf(key), value: value ?? '-' }))} />
-        <div className="flex items-center gap-2 border-t border-ai-line pt-3">
-          <Button size="sm" variant="ai-outline" icon="info" disabled={explainAction.isPending} onClick={() => explainAction.mutate({ id: candidate.id })}>
+        <div className="flex items-center gap-2 border-t border-steelman-shadow pt-3">
+          <Button size="sm" variant="steelman-outline" icon="info" disabled={explainAction.isPending} onClick={() => explainAction.mutate({ id: candidate.id })}>
             {explain ? '다시 설명 받기' : 'AI에게 상황 설명 받기'}
           </Button>
           {explain ? <Tag size="sm">{explain.generatedByAi ? 'AI가 작성' : '규칙 요약 (AI 연결 없음)'}</Tag> : null}
@@ -195,7 +195,7 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
         </Banner>
       ) : null}
 
-      <AiCard icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} className="flex-none" petKey="card:agent.candidate">
+      <AiCard tone="steelman" icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} className="flex-none" petKey="card:agent.candidate">
         <CandidateBody candidate={candidate} />
         <KvList
           items={[
@@ -206,7 +206,7 @@ function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateVie
             ...(candidate.actionType === 'PURCHASE_REQUISITION_CREATE' ? [{ label: '최종 승인', value: '확정한 사람 소속 부서장' }] : []),
           ]}
         />
-        <div className="flex items-center gap-2 border-t border-ai-line pt-3">
+        <div className="flex items-center gap-2 border-t border-steelman-shadow pt-3">
           {confirmable ? (
             <>
               <Button
