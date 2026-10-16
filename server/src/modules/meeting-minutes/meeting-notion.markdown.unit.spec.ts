@@ -1,6 +1,6 @@
 // 확정 회의록 → Notion 마크다운: 머리 정보, 요약, 결정사항, 허가한 후보만 싣는지 확인한다.
 import { MEETING_MINUTES_STATUS, ROLE, type MeetingCandidate, type MeetingMinutesView } from '@fantasteel/shared';
-import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
+import { buildMeetingNotionMarkdown, escapeNotionText, meetingNotionTitle } from './meeting-notion.markdown';
 
 const candidate = (over: Partial<MeetingCandidate>): MeetingCandidate => ({
   key: 'c1',
@@ -122,5 +122,40 @@ describe('meetingNotionTitle', () => {
     expect(meetingNotionTitle(meeting({ meetingMinutesTitle: ' 주간\n회의 ' }))).toBe('주간 회의');
     expect(meetingNotionTitle(meeting({ meetingMinutesTitle: '가'.repeat(300) }))).toHaveLength(200);
     expect(meetingNotionTitle(meeting({ meetingMinutesTitle: '  ' }))).toBe('2026-10-14 회의');
+  });
+});
+
+describe('escapeNotionText', () => {
+  it('Notion 태그·링크·백슬래시를 글자로 막는다', () => {
+    expect(escapeNotionText('<mention-user url="user://1"/> 님 [링크](https://x) a\\b')).toBe('\\<mention-user url="user://1"/\\> 님 \\[링크\\](https://x) a\\\\b');
+    expect(escapeNotionText('<page url="https://www.notion.so/abc">비밀</page>')).toBe('\\<page url="https://www.notion.so/abc"\\>비밀\\</page\\>');
+    expect(escapeNotionText('<callout>주의</callout>')).not.toMatch(/(^|[^\\])</);
+  });
+
+  it('줄 맨 앞 블록 표시(제목·인용·목록·구분선·코드·표·수식)를 막는다', () => {
+    expect(escapeNotionText('# 제목\n> 인용\n- 목록\n* 별\n+ 더하기\n---\n```js\n| a | b |\n$$x$$\n1. 첫째\n2) 둘째')).toBe(
+      ['\\# 제목', '\\> 인용', '\\- 목록', '\\* 별', '\\+ 더하기', '\\---', '\\```js', '\\| a | b |', '\\$$x$$', '1\\. 첫째', '2\\) 둘째'].join('\n'),
+    );
+  });
+
+  it('줄 앞 공백(하위 블록)을 지우고, 보통 글·줄 중간 표시는 그대로 둔다', () => {
+    expect(escapeNotionText('    - 들여쓴 목록\n\t코드')).toBe('\\- 들여쓴 목록\n코드');
+    expect(escapeNotionText('철광석 120톤 - 다음 주 #3 라인 1.5배')).toBe('철광석 120톤 - 다음 주 #3 라인 1.5배');
+    expect(escapeNotionText('#해시태그 2026.10')).toBe('#해시태그 2026.10');
+  });
+
+  it('회의록 칸(요약·제목·결정사항·이름)이 모두 막힌다', () => {
+    const view = meeting({
+      summary: '# 가짜 제목\n<mention-user url="user://9"/>',
+      attendees: [{ employeeId: 7, employeeName: '<b>박</b>', departmentName: '영업부', roleCode: ROLE.SALES }],
+    });
+    view.analysisResult!.decisions = [{ text: '> 인용처럼', evidence: [] }];
+    view.analysisResult!.candidates = [candidate({ title: '<page url="x">', assigneeId: 7, dueDate: '2026-10-20' })];
+    const md = buildMeetingNotionMarkdown(view);
+    expect(md).toContain('## 요약\n\\# 가짜 제목\n\\<mention-user url="user://9"/\\>');
+    expect(md).toContain('**참석자** \\<b\\>박\\</b\\>(영업부)');
+    expect(md).toContain('- \\> 인용처럼');
+    expect(md).toContain('- [ ] \\<page url="x"\\> — 담당 \\<b\\>박\\</b\\>');
+    expect(md).not.toMatch(/(^|[^\\])<(mention|page|b)/m);
   });
 });

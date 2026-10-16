@@ -112,8 +112,11 @@ function findPage(value: unknown, depth = 0): { url: string | null; id: string |
   return null;
 }
 
-/** 페이지 만들기 결과에서 새 페이지 주소를 읽는다. 오류 결과·비동기 작업·주소 없음은 INT-004 */
-export function readCreatedPageUrl(result: CallToolResult): string {
+/**
+ * 페이지 만들기 결과에서 새 페이지 주소를 읽는다. 서버가 오류로 답했으면(만들지 않았다) INT-004.
+ * 성공으로 답했는데 주소를 찾지 못하면(비동기 작업 결과 포함) null: 페이지가 만들어졌을 수 있다.
+ */
+export function readCreatedPageUrl(result: CallToolResult): string | null {
   const texts = textsOf(result);
   if (result.isError) {
     throw new AppException('INT-004', `Notion 페이지를 만들지 못했어요: ${texts.join(' ').slice(0, 300) || '이유 없음'}`);
@@ -133,6 +136,5 @@ export function readCreatedPageUrl(result: CallToolResult): string {
   }
   const inText = texts.join('\n').match(/https:\/\/(?:www\.)?notion\.(?:so|site)\/[^\s)"'\]]+/i);
   // 문장 끝 마침표가 주소에 붙지 않게 뗀다
-  if (inText) return inText[0].replace(/[.,;:]+$/, '');
-  throw new AppException('INT-004', 'Notion 페이지를 만들었는지 확인하지 못했어요 (응답에 페이지 주소가 없어요). Notion에서 직접 확인해 주세요');
+  return inText ? inText[0].replace(/[.,;:]+$/, '') : null;
 }

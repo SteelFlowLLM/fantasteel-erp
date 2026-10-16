@@ -27,6 +27,13 @@ const fake = {
   registrations: 0,
   refreshGrants: 0,
   calls: [] as { name: string; args: Record<string, unknown> }[],
+  /** 리프레시 요청에 500으로 답한다 (일시적 장애) */
+  refreshFails: false,
+  /** notion-create-pages 답: 정상 · 주소 없는 성공 · 오류 */
+  createResponse: 'ok' as 'ok' | 'no-url' | 'error',
+  /** 도구 목록·도구 호출을 받을 때 시험이 끼워 넣는 일 */
+  onListTools: null as (() => Promise<void>) | null,
+  onCallTool: null as (() => Promise<void>) | null,
   tools: [
     { name: 'notion-search', description: '검색', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
     {
@@ -67,9 +74,15 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, body: string
     return;
   }
   const server = new McpServer({ name: 'fake-notion', version: '1.0.0' }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: fake.tools }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    await fake.onListTools?.();
+    return { tools: fake.tools };
+  });
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     fake.calls.push({ name: request.params.name, args: request.params.arguments ?? {} });
+    await fake.onCallTool?.();
+    if (fake.createResponse === 'error') return { content: [{ type: 'text', text: 'Could not find parent page' }], isError: true };
+    if (fake.createResponse === 'no-url') return { content: [{ type: 'text', text: 'Accepted' }] };
     return { content: [{ type: 'text', text: JSON.stringify({ pages: [{ id: CREATED_ID, url: `https://www.notion.so/Meeting-${CREATED_ID}`, properties: {} }] }) }] };
   });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -114,6 +127,7 @@ async function handleFake(req: IncomingMessage, res: ServerResponse): Promise<vo
     }
     if (form.get('grant_type') === 'refresh_token') {
       fake.refreshGrants += 1;
+      if (fake.refreshFails) return json(res, 500, { message: 'temporarily unavailable' });
       const refresh = form.get('refresh_token') ?? '';
       if (!fake.refreshTokens.delete(refresh)) return json(res, 400, { error: 'invalid_grant' });
       return json(res, 200, issueTokens());
@@ -326,6 +340,49 @@ describe('OAuth 연결', () => {
     expect(body.data.ok).toBe(true);
     expect(fake.refreshGrants).toBe(before + 1);
   });
+
+  it('갱신 요청이 일시적으로 실패하면 토큰을 지우지 않고 INT-004로 알린다', async () => {
+    fake.accessTokens.clear();
+    fake.refreshFails = true;
+    const id = await confirmedMeeting(purchaseId);
+    const failed = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    const test = await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie);
+    fake.refreshFails = false;
+    expect(failed.status).toBe(502);
+    expect(failed.body.error?.code).toBe('INT-004');
+    expect(test.body.data).toMatchObject({ ok: false, error: expect.stringContaining('잠시 뒤') });
+    expect((await prisma.integrationConnection.findUniqueOrThrow({ where: { providerKey: 'notion' } })).oauthTokens).not.toBeNull();
+    expect((await notionView()).status).toBe('CONNECTED');
+    // 장애가 지나면 남겨 둔 리프레시 토큰으로 이어 간다
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+  });
+
+  it('다시 연결: 허용이 끝날 때까지 옛 토큰을 쓰고, 다른 사원으로 로그인한 콜백은 거절한다', async () => {
+    const start = async () => {
+      const { body } = await call<IntegrationConnectResult>('POST', '/integrations/notion/connect', adminCookie);
+      const url = new URL(body.data.authorizationUrl);
+      fake.pendingChallenge = url.searchParams.get('code_challenge');
+      return url.searchParams.get('state') ?? '';
+    };
+    const issuedBefore = fake.issued;
+    const first = await start();
+    expect((await notionView()).status).toBe('CONNECTED');
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+
+    const wrongUser = await fetch(`${baseUrl}/integrations/oauth/callback?code=good-code&state=${encodeURIComponent(first)}`, { redirect: 'manual', headers: { cookie: salesCookie } });
+    const wrongUrl = new URL(wrongUser.headers.get('location') ?? '');
+    expect(wrongUrl.searchParams.get('result')).toBe('error');
+    expect(wrongUrl.searchParams.get('message')).toContain('연결을 시작한 관리자');
+    expect(fake.issued).toBe(issuedBefore);
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+
+    const second = await start();
+    const ok = await fetch(`${baseUrl}/integrations/oauth/callback?code=good-code&state=${encodeURIComponent(second)}`, { redirect: 'manual', headers: { cookie: adminCookie } });
+    expect(new URL(ok.headers.get('location') ?? '').searchParams.get('result')).toBe('connected');
+    expect(fake.issued).toBe(issuedBefore + 1);
+    expect(fake.registrations).toBe(1);
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+  });
 });
 
 describe('POST meeting-minutes/:id/notion-export', () => {
@@ -364,6 +421,67 @@ describe('POST meeting-minutes/:id/notion-export', () => {
     expect(again.status).toBe(409);
     expect(again.body.error?.code).toBe('VOC-008');
     expect(fake.calls).toHaveLength(1);
+  });
+
+  it('회의록은 도구를 부르기 바로 전에 잡는다 (도구 목록을 받을 때는 아직 잡지 않음)', async () => {
+    const id = await confirmedMeeting(purchaseId);
+    const seen: Record<string, Date | null> = {};
+    const exportedAtNow = async () => (await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } })).notionExportedAt;
+    fake.onListTools = async () => {
+      seen.listTools = await exportedAtNow();
+    };
+    fake.onCallTool = async () => {
+      seen.callTool = await exportedAtNow();
+    };
+    const { status } = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    fake.onListTools = null;
+    fake.onCallTool = null;
+    expect(status).toBe(200);
+    expect(seen.listTools).toBeNull();
+    expect(seen.callTool).toBeInstanceOf(Date);
+  });
+
+  it('잡기를 잃으면(다른 요청이 가져감) 성공으로 답하지 않고 만든 주소를 문구에 담는다', async () => {
+    const id = await confirmedMeeting(purchaseId);
+    fake.onCallTool = async () => {
+      await prisma.meetingMinutes.update({ where: { id }, data: { notionExportedAt: new Date('2000-01-01T00:00:00.000Z') } });
+    };
+    const { status, body } = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    fake.onCallTool = null;
+    expect(status).toBe(409);
+    expect(body.error?.code).toBe('COM-001');
+    expect(body.error?.message).toContain(CREATED_ID);
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } })).notionPageUrl).toBeNull();
+  });
+
+  it('만들어졌는지 알 수 없으면 INT-009, 잡기를 남겨 바로 다시 눌러도 중복으로 만들지 않는다', async () => {
+    const id = await confirmedMeeting(purchaseId);
+    fake.createResponse = 'no-url';
+    const { status, body } = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    fake.createResponse = 'ok';
+    expect(status).toBe(502);
+    expect(body.error?.code).toBe('INT-009');
+    expect(body.error?.message).toContain('Notion에서 확인');
+    const row = await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } });
+    expect(row.notionPageUrl).toBeNull();
+    expect(row.notionExportedAt).not.toBeNull();
+
+    const callsBefore = fake.calls.length;
+    const retry = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    expect(retry.status).toBe(409);
+    expect(retry.body.error?.code).toBe('VOC-008');
+    expect(fake.calls).toHaveLength(callsBefore);
+  });
+
+  it('Notion이 오류로 답하면(만들지 않음) INT-004, 잡기를 풀어 다시 내보낼 수 있다', async () => {
+    const id = await confirmedMeeting(purchaseId);
+    fake.createResponse = 'error';
+    const { status, body } = await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie);
+    fake.createResponse = 'ok';
+    expect(status).toBe(502);
+    expect(body.error?.code).toBe('INT-004');
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } })).notionExportedAt).toBeNull();
+    expect((await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie)).status).toBe(200);
   });
 
   it('관리자는 남의 회의록도 내보낸다', async () => {

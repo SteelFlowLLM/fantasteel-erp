@@ -4,7 +4,11 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import { oauthCallbackUrl } from '../integration-urls';
 import type { IntegrationTokenStore } from '../integration-token.store';
 
-/** 토큰이 만료·취소돼 사람이 브라우저에서 다시 허용해야 함. 백그라운드 호출(내보내기·연결 확인)에서 난다 */
+/**
+ * 백그라운드 호출(내보내기·연결 확인)에서 SDK가 브라우저 허용을 새로 시키려 함.
+ * 리프레시 토큰이 거절됐을 때(SDK가 토큰을 먼저 지운다)와 갱신 요청이 일시적으로 실패했을 때(토큰이 남아 있다) 모두 난다.
+ * 어느 쪽인지는 부르는 쪽이 토큰이 남았는지로 가린다.
+ */
 export class McpReconnectRequiredError extends Error {
   constructor() {
     super('다시 연결해야 해요');
@@ -62,7 +66,9 @@ export class McpOAuthProvider implements OAuthClientProvider {
     await this.store.saveClientInformation(this.providerKey, info);
   }
 
-  tokens(): Promise<OAuthTokens | undefined> {
+  async tokens(): Promise<OAuthTokens | undefined> {
+    // 연결 시작에서는 옛 토큰을 없는 것처럼 보여 SDK가 갱신 대신 허용 화면으로 가게 한다. 옛 토큰은 새 토큰을 받을 때까지 그대로 쓴다
+    if (this.mode.kind === 'interactive') return undefined;
     return this.store.readTokens<OAuthTokens>(this.providerKey);
   }
 
@@ -89,6 +95,15 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
   async invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): Promise<void> {
     if (scope === 'discovery') return;
+    if (this.mode.kind === 'interactive') {
+      // 연결 시작이 실패해도 지금 쓰는 토큰은 남긴다 (새 허용이 끝나야 바꾼다)
+      if (scope === 'tokens') return;
+      if (scope === 'all') {
+        await this.store.clear(this.providerKey, 'client');
+        await this.store.clear(this.providerKey, 'verifier');
+        return;
+      }
+    }
     await this.store.clear(this.providerKey, scope);
   }
 }

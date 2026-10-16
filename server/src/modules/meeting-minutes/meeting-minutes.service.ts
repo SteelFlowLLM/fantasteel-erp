@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   MEETING_ANALYSIS_MAX_CHARS,
@@ -22,6 +22,7 @@ import {
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
+import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
@@ -39,8 +40,11 @@ import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 
 const DEFAULT_PAGE_SIZE = 20;
-/** 내보내던 서버가 멈춰 남은 잡기를 버리는 시간. MCP 요청 상한(60초)보다 넉넉히 길다 */
-const NOTION_EXPORT_STALE_MS = 5 * 60_000;
+/**
+ * 내보내던 서버가 멈췄거나 결과를 알 수 없어 남은 잡기를 버리는 시간. 잡기는 도구를 부르기 바로 전에 하고
+ * 도구 호출 한 번은 MCP 요청 상한(60초) 안에 끝나므로, 정상 호출이 끝나기 전에 다른 사람이 다시 잡을 수 없게 그 5배로 둔다.
+ */
+const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -145,6 +149,8 @@ function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
  */
 @Injectable()
 export class MeetingMinutesService {
+  private readonly logger = new Logger(MeetingMinutesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: MeetingMinutesRepository,
@@ -438,24 +444,37 @@ export class MeetingMinutesService {
     // 연결·상위 페이지가 없으면 회의록을 잡기 전에 알린다
     await this.notion.assertReady();
 
-    const claimedAt = new Date();
-    const { count } = await this.repository.claimNotionExport(this.prisma, id, claimedAt, new Date(claimedAt.getTime() - NOTION_EXPORT_STALE_MS));
-    if (count === 0) {
-      const current = await this.repository.findDetail(this.prisma, id);
-      if (current?.notionPageUrl) throw new AppException('VOC-008');
-      throw new AppException('VOC-008', '지금 다른 곳에서 이 회의록을 Notion으로 내보내는 중이에요. 잠시 뒤 새로 불러와 주세요');
-    }
+    // 같은 Notion 연결의 다른 호출을 기다린 뒤 도구를 부르기 바로 전에 잡는다: 줄을 오래 서도 잡기가 만료되지 않게
+    const claim: { at: Date | null } = { at: null };
+    const takeClaim = async () => {
+      const at = new Date();
+      const { count } = await this.repository.claimNotionExport(this.prisma, id, at, new Date(at.getTime() - NOTION_EXPORT_STALE_MS));
+      if (count === 0) {
+        const current = await this.repository.findDetail(this.prisma, id);
+        if (current?.notionPageUrl) throw new AppException('VOC-008');
+        throw new AppException('VOC-008', '지금 다른 곳에서 이 회의록을 Notion으로 내보내는 중이거나, 직전 내보내기 결과를 확인하지 못했어요. Notion을 확인하고 잠시 뒤 새로 불러와 주세요');
+      }
+      claim.at = at;
+    };
 
     let notionPageUrl: string;
     try {
       const view = toView(row);
-      notionPageUrl = await this.notion.createPage({ title: meetingNotionTitle(view), content: buildMeetingNotionMarkdown(view) });
+      notionPageUrl = await this.notion.createPage({ title: meetingNotionTitle(view), content: buildMeetingNotionMarkdown(view) }, takeClaim);
     } catch (error) {
-      await this.repository.releaseNotionExport(this.prisma, id, claimedAt);
+      // 페이지가 만들어졌을 수 있으면(INT-009) 잡기를 남겨 바로 다시 눌러 중복 페이지가 생기지 않게 한다 (만료되면 다시 잡을 수 있다)
+      const uncertain = error instanceof AppException && error.code === 'INT-009';
+      if (claim.at && !uncertain) await this.repository.releaseNotionExport(this.prisma, id, claim.at);
       throw error;
     }
+    const claimedAt = claim.at;
     const exportedAt = new Date();
-    await this.repository.finishNotionExport(this.prisma, id, claimedAt, notionPageUrl, exportedAt);
+    const { count } = claimedAt ? await this.repository.finishNotionExport(this.prisma, id, claimedAt, notionPageUrl, exportedAt) : { count: 0 };
+    if (count === 0) {
+      // 잡기가 만료돼 다른 요청이 가져갔다. 만든 페이지 주소를 잃지 않게 로그와 문구에 남긴다
+      this.logger.error(`회의록 ${id}: Notion 페이지(${notionPageUrl})를 만들었지만 잡기를 잃어 주소를 저장하지 못했어요`);
+      throw new AppException('COM-001', `Notion 페이지(${notionPageUrl})는 만들었지만 회의록에 주소를 남기지 못했어요. 새로 불러와 중복 페이지가 없는지 Notion에서 확인해 주세요`);
+    }
     return { notionPageUrl, notionExportedAt: exportedAt.toISOString(), meetingMinutes: await this.get(id) };
   }
 

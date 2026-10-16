@@ -133,8 +133,11 @@
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.
 - 조건: 확정(`CONFIRMED`, `confirmed_at` 있음)한 회의록만(아니면 `VOC-004`), 작성자나 `ORG_MANAGE` 사용 권한자만(아니면 `VOC-003`), **한 번만**(이미 주소가 있으면 `VOC-008`, 화면은 상세의 `notionPageUrl` 링크를 보인다). 연결·상위 페이지가 없으면 회의록을 잡기 전에 `INT-002`·`INT-003`·`INT-006`.
-- 동시에 두 번 눌러 페이지가 두 개 생기지 않게 `notion_exported_at`에 시각을 적어 먼저 잡는다(`claimNotionExport`, 확정 + 주소 없음 + 잡은 사람 없음 조건부 UPDATE). Notion 호출이 실패하면 푼다. 내보내던 서버가 멈춰 5분 넘게 남은 잡기는 다시 잡을 수 있다. 상세의 `notionExportedAt`은 주소가 있을 때만 값이 있다.
-- 페이지 제목 = 회의록 제목(줄바꿈 제거, 200자). 본문(`meeting-notion.markdown.ts`, Notion 마크다운): 회의일·참석자(부서)·작성자·확정 시각(서울) → `## 요약`(확정본 `summary`) → `## 결정사항` → 확정 때 **허가한** 후보만 `## 할 일`(`- [ ]`, 담당·마감) · `## 일정`(시각·참석) · `## 구매요청 초안`(품목·톤·희망 입고일) → 출처 한 줄. 제외한 후보와 원본 전사는 싣지 않는다.
+- 동시에 두 번 눌러 페이지가 두 개 생기지 않게 `notion_exported_at`에 시각을 적어 잡는다(`claimNotionExport`, 확정 + 주소 없음 + 잡은 사람 없음 조건부 UPDATE). 잡기는 같은 Notion 연결의 다른 호출을 기다린 뒤 **도구를 부르기 바로 전**에 한다(줄을 오래 서도 만료되지 않게). 못 잡으면 `VOC-008`.
+- 잡기 만료 = MCP 요청 상한(60초) × 5 = 5분: 도구 호출 한 번이 끝나기 전에 다른 요청이 다시 잡을 수 없다. 만료된 잡기는 다시 잡을 수 있다.
+- 실패: Notion이 오류로 답했거나 도구를 부르기 전 실패면 잡기를 푼다. 시간 초과·연결 끊김·주소 없는 성공 답처럼 **페이지가 만들어졌을 수 있으면 `INT-009`** 로 Notion을 먼저 확인하라고 알리고 잡기를 남긴다(바로 다시 눌러도 중복으로 만들지 않는다, 5분 뒤 다시 잡을 수 있다).
+- 주소를 남길 때 내 잡기가 그대로인지 본다(`finishNotionExport` 0건이면 다른 요청이 가져간 것). 그러면 성공으로 답하지 않고 만든 페이지 주소를 로그와 `COM-001` 문구에 담는다. 상세의 `notionExportedAt`은 주소가 있을 때만 값이 있다.
+- 페이지 제목 = 회의록 제목(줄바꿈 제거, 200자). 본문(`meeting-notion.markdown.ts`, Notion 마크다운): 회의일·참석자(부서)·작성자·확정 시각(서울) → `## 요약`(확정본 `summary`) → `## 결정사항` → 확정 때 **허가한** 후보만 `## 할 일`(`- [ ]`, 담당·마감) · `## 일정`(시각·참석) · `## 구매요청 초안`(품목·톤·희망 입고일) → 출처 한 줄. 제외한 후보와 원본 전사는 싣지 않는다. 사람·AI가 쓴 칸(요약·제목·결정사항·이름·품목)은 `escapeNotionText`로 막는다: `\ < > [ ]` 앞에 백슬래시, 줄 맨 앞 블록 표시(`#`·`>`·`-`·`*`·`+`·`---`·```` ``` ````·`|`·`$$`·`1.`)도 백슬래시로, 줄 앞 공백은 지운다. 요약에 `<mention-user>`·`<page>`·`<callout>` 같은 Notion 태그가 있어도 글로 보인다.
 - LLM은 쓰지 않는다. 서버 코드가 `notion-create-pages` 도구 하나만 직접 부른다.
 - 작업 로그는 남기지 않는다 (REQ-LOG-002에 맞는 이벤트가 없고 공통 코드를 새로 만들지 않기로 했다).
 
@@ -167,7 +170,7 @@ VOC-003·004는 확인·등록·화자 연결에서 문구를 바꿔 쓴다(`회
 
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
 
-Notion 내보내기: `integration/integration.spec.ts` (묶음 `fs_collab`, 가짜 OAuth·MCP 서버) — 작성자·관리자·그 밖의 사원, 확정 전 `VOC-004`, 두 번째 `VOC-008`, 상위 페이지 없음 `INT-006`, 도구 없음 `INT-005` 뒤 잡기 풀림, 다시 연결 필요 `INT-003`. 순수 단위 `meeting-notion.markdown.unit.spec.ts`: 마크다운 섹션·허가한 후보만·제목 자르기.
+Notion 내보내기: `integration/integration.spec.ts` (묶음 `fs_collab`, 가짜 OAuth·MCP 서버) — 작성자·관리자·그 밖의 사원, 확정 전 `VOC-004`, 두 번째 `VOC-008`, 상위 페이지 없음 `INT-006`, 도구 없음 `INT-005` 뒤 잡기 풀림, 도구 호출 직전 잡기, 잡기를 잃으면 `COM-001`, 결과를 알 수 없으면 `INT-009`·잡기 유지, Notion 오류 `INT-004`·잡기 풀림, 다시 연결 필요 `INT-003`. 순수 단위 `meeting-notion.markdown.unit.spec.ts`: 마크다운 섹션·허가한 후보만·제목 자르기·Notion 태그와 블록 표시 막기.
 
 `meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정.
 

@@ -40,6 +40,7 @@ export const ERROR_CODE = {
   'INT-006': { message: 'Notion 상위 페이지가 설정되지 않았어요. 관리자가 연결 설정에서 정해 주세요', status: 409 },
   'INT-007': { message: '연결 요청이 만료됐거나 올바르지 않아요. 처음부터 다시 연결해 주세요', status: 400 },
   'INT-008': { message: '서버 암호화 키(INTEGRATION_SECRET_KEY)가 없거나 올바르지 않아요', status: 500 },
+  'INT-009': { message: '외부 서비스가 요청을 처리했는지 확인하지 못했어요. 결과를 직접 확인한 뒤 다시 시도해 주세요', status: 502 },
   'SHP-001': { message: '밀시트 PDF 생성 실패(스냅샷은 있음)', status: 500 },
   'SHP-002': { message: '출하 가능 매수를 넘었습니다', status: 409 },
   'SHP-003': { message: '출고 확정된 출하요청은 취소할 수 없습니다', status: 409 },

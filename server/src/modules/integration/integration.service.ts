@@ -108,7 +108,7 @@ export class IntegrationService {
       lastError: null,
     });
     try {
-      const url = await this.mcp.startAuthorization(preset.key, state);
+      const url = await this.store.exclusive(preset.key, () => this.mcp.startAuthorization(preset.key, state));
       return { authorizationUrl: url.toString() };
     } catch (error) {
       await this.repository.update(this.prisma, preset.key, { oauthState: null, oauthStateExpiresAt: null, lastError: messageOf(error).slice(0, 500) });
@@ -117,10 +117,11 @@ export class IntegrationService {
   }
 
   /**
-   * OAuth 콜백 (로그인 쿠키 없이 브라우저가 들어온다). 저장해 둔 state로 연결을 찾고 한 번만 쓴다.
+   * OAuth 콜백 (로그인 쿠키 없이 브라우저가 들어올 수 있다). 저장해 둔 state로 연결을 찾고 한 번만 쓴다.
+   * 로그인한 브라우저(쿠키가 SameSite=Lax라 이 GET에 함께 온다)면 연결을 시작한 관리자와 같은 사원이어야 한다.
    * 결과와 상관없이 화면으로 돌려보낼 주소를 돌려준다 (오류도 JSON이 아니라 화면 쿼리로 알린다).
    */
-  async handleCallback(query: OAuthCallbackQuery): Promise<string> {
+  async handleCallback(query: OAuthCallbackQuery, sessionEmployeeId: number | null): Promise<string> {
     const state = typeof query.state === 'string' ? query.state : '';
     const row = state ? await this.repository.findByState(this.prisma, state) : null;
     if (!row) return clientReturnUrl(null, 'error', '연결 요청을 찾을 수 없어요. 처음부터 다시 연결해 주세요');
@@ -132,19 +133,24 @@ export class IntegrationService {
       return clientReturnUrl(providerKey, 'error', message);
     };
     if (count === 0) return clientReturnUrl(providerKey, 'error', '이미 처리한 연결 요청이에요. 처음부터 다시 연결해 주세요');
+    if (sessionEmployeeId !== null && sessionEmployeeId !== row.connectedBy?.id) return fail('연결을 시작한 관리자와 지금 로그인한 사원이 달라요. 연결을 시작한 계정으로 다시 연결해 주세요');
     if (!row.oauthStateExpiresAt || row.oauthStateExpiresAt.getTime() < Date.now()) return fail('연결 요청이 만료됐어요. 처음부터 다시 연결해 주세요');
     if (typeof query.error === 'string' && query.error) {
       return fail(query.error === 'access_denied' ? '허용하지 않아 연결하지 않았어요' : `연결이 거절됐어요 (${query.error})`);
     }
     if (typeof query.code !== 'string' || !query.code) return fail('인가 코드가 없어요. 처음부터 다시 연결해 주세요');
 
+    const code = query.code;
     try {
-      await this.mcp.finishAuthorization(providerKey, query.code);
+      // 토큰을 쓰는 호출이 끝난 뒤에 새 토큰을 넣는다: 그 호출의 갱신이 새 토큰을 덮어쓰지 않게
+      await this.store.exclusive(providerKey, async () => {
+        await this.mcp.finishAuthorization(providerKey, code);
+        await this.repository.update(this.prisma, providerKey, { connectedAt: new Date(), lastError: null });
+      });
     } catch (error) {
       if (!(error instanceof AppException)) this.logger.error(`${providerKey} 콜백 처리 실패`, error instanceof Error ? error.stack : undefined);
       return fail(messageOf(error));
     }
-    await this.repository.update(this.prisma, providerKey, { connectedAt: new Date(), lastError: null });
     return clientReturnUrl(providerKey, 'connected');
   }
 
@@ -155,7 +161,8 @@ export class IntegrationService {
   async disconnect(providerKey: string): Promise<IntegrationConnectionView> {
     const preset = providerPreset(providerKey);
     await this.repository.ensure(this.prisma, preset.key, preset.serverUrl);
-    const row = await this.repository.update(this.prisma, preset.key, {
+    // 진행 중인 호출의 토큰 갱신이 끊은 뒤에 토큰을 되살리지 않게 그 호출이 끝난 뒤 지운다
+    const row = await this.store.exclusive(preset.key, () => this.repository.update(this.prisma, preset.key, {
       oauthClientInformation: null,
       oauthTokens: null,
       oauthCodeVerifier: null,
@@ -164,7 +171,7 @@ export class IntegrationService {
       connectedAt: null,
       connectedById: null,
       lastError: null,
-    });
+    }));
     return toView(preset, row);
   }
 

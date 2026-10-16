@@ -3,6 +3,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from './integration-connection.repository';
 import { IntegrationCrypto, IntegrationDecryptError } from './integration-crypto';
+import { KeyedQueue } from './integration-lock';
 
 export type IntegrationCredentialScope = 'all' | 'client' | 'tokens' | 'verifier';
 
@@ -16,11 +17,21 @@ const LAST_ERROR_MAX = 500;
  */
 @Injectable()
 export class IntegrationTokenStore {
+  private readonly queue = new KeyedQueue();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: IntegrationConnectionRepository,
     private readonly crypto: IntegrationCrypto,
   ) {}
+
+  /**
+   * 같은 연결 대상의 토큰을 읽고 쓰는 작업을 한 줄로 세운다 (호출 중 갱신·콜백 토큰 교환·연결 시작·끊기).
+   * 안에서 다시 exclusive를 부르면 서로 기다려 멈추므로 한 겹만 쓴다.
+   */
+  exclusive<T>(providerKey: string, task: () => Promise<T>): Promise<T> {
+    return this.queue.run(providerKey, task);
+  }
 
   /** 토큰이 있는지, 없다면 한 번 연결했다가 끊긴 것인지(다시 연결 필요) */
   async connectionState(providerKey: string): Promise<{ hasTokens: boolean; wasConnected: boolean }> {

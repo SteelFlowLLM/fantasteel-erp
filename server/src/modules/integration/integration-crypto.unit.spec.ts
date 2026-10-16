@@ -32,6 +32,14 @@ describe('encryptSecret · decryptSecret', () => {
     expect(() => decryptSecret(randomBytes(32), payload)).toThrow(IntegrationDecryptError);
   });
 
+  it('iv가 12바이트가 아니거나 태그가 16바이트가 아니면 풀지 않는다 (짧은 태그 위조 막기)', () => {
+    const [version, iv, tag, data] = encryptSecret(key, 'secret-value').split(':');
+    const shortTag = Buffer.from(tag, 'base64').subarray(0, 4).toString('base64');
+    expect(() => decryptSecret(key, [version, iv, shortTag, data].join(':'))).toThrow(IntegrationDecryptError);
+    const longIv = Buffer.concat([Buffer.from(iv, 'base64'), Buffer.alloc(4)]).toString('base64');
+    expect(() => decryptSecret(key, [version, longIv, tag, data].join(':'))).toThrow(IntegrationDecryptError);
+  });
+
   it('형식이 아닌 값은 풀지 않는다', () => {
     expect(() => decryptSecret(key, 'plain-text')).toThrow(IntegrationDecryptError);
     expect(() => decryptSecret(key, 'v2:a:b:c')).toThrow(IntegrationDecryptError);

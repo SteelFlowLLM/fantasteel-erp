@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { PERMISSION, type AuthUser, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult } from '@fantasteel/shared';
+import { AuthTokenService } from '../../common/auth/auth-token.service';
 import { CurrentUser, Public, RequirePermission } from '../../common/auth/auth.decorators';
 import { UpdateIntegrationSettingsDto, type OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationService } from './integration.service';
@@ -12,7 +13,10 @@ import { IntegrationService } from './integration.service';
  */
 @Controller()
 export class IntegrationController {
-  constructor(private readonly service: IntegrationService) {}
+  constructor(
+    private readonly service: IntegrationService,
+    private readonly tokens: AuthTokenService,
+  ) {}
 
   @Get('integrations')
   list(): Promise<IntegrationConnectionView[]> {
@@ -21,12 +25,13 @@ export class IntegrationController {
 
   /**
    * OAuth 콜백. OAuth 서버가 브라우저를 돌려보내므로 로그인 쿠키가 없을 수 있어 공개로 두고, 저장해 둔 state로 확인한다.
-   * 응답은 JSON이 아니라 화면(관리 > 외부 연결)으로 보내는 302다.
+   * 로그인 쿠키가 있으면 연결을 시작한 관리자인지 service가 본다. 응답은 JSON이 아니라 화면(관리 > 외부 연결)으로 보내는 302다.
    */
   @Public()
   @Get('integrations/oauth/callback')
-  async callback(@Query() query: OAuthCallbackQuery, @Res() res: Response): Promise<void> {
-    res.redirect(302, await this.service.handleCallback(query));
+  async callback(@Query() query: OAuthCallbackQuery, @Req() req: Request, @Res() res: Response): Promise<void> {
+    const sessionEmployeeId = await this.tokens.verifyCookieHeader(req.headers.cookie);
+    res.redirect(302, await this.service.handleCallback(query, sessionEmployeeId));
   }
 
   @Put('integrations/:providerKey/settings')

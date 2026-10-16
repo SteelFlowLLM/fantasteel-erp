@@ -77,8 +77,12 @@ describe('readCreatedPageUrl', () => {
     expect(readCreatedPageUrl(text(`Created page: https://www.notion.so/Weekly-${ID}.`))).toBe(`https://www.notion.so/Weekly-${ID}`);
   });
 
-  it('오류 결과·주소 없음은 INT-004', () => {
+  it('서버가 오류로 답하면(만들지 않음) INT-004', () => {
     expect(() => readCreatedPageUrl({ ...text('Could not find page'), isError: true })).toThrow(expect.objectContaining({ code: 'INT-004' }));
-    expect(() => readCreatedPageUrl(text('{"async_task":{"id":"t1"}}'))).toThrow(expect.objectContaining({ code: 'INT-004' }));
+  });
+
+  it('성공 답인데 주소가 없으면(만들어졌을 수 있음) null', () => {
+    expect(readCreatedPageUrl(text('{"async_task":{"id":"t1"}}'))).toBeNull();
+    expect(readCreatedPageUrl(text('Done'))).toBeNull();
   });
 });
