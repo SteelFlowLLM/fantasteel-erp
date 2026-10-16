@@ -149,7 +149,7 @@ describe('AiAssistantService', () => {
     replies: (call: LlmCall, index: number) => Promise<LlmToolReply>,
     toolResult?: ToolRunResult,
     capabilities: LlmModelCapabilities = { vision: true, reasoning: true },
-    webTools: AssistantWebToolbox = new AssistantWebToolbox({ search: new WebSearchClient({ fetch: () => Promise.reject(new Error('검색하지 않음')) }), places: new KakaoPlaceClient(() => null), pages: { read: () => Promise.reject(new Error('읽지 않음')) } }),
+    webTools: AssistantWebToolbox = new AssistantWebToolbox({ search: new WebSearchClient({ fetch: () => Promise.reject(new Error('검색하지 않음')), naver: () => null }), places: new KakaoPlaceClient(() => null), pages: { read: () => Promise.reject(new Error('읽지 않음')) } }),
   ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
@@ -424,6 +424,7 @@ describe('AiAssistantService', () => {
       const searched: string[] = [];
       const read: string[] = [];
       const search = new WebSearchClient({
+        naver: () => null,
         fetch: async (_url, init) => {
           searched.push(String(init.body));
           return new Response(DDG_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
@@ -529,7 +530,7 @@ describe('AiAssistantService', () => {
     });
 
     it('카카오 키가 있으면 장소 검색과 그 규칙을 함께 알린다', async () => {
-      const toolbox = new AssistantWebToolbox({ search: new WebSearchClient(), places: new KakaoPlaceClient(() => 'test-key'), pages: { read: () => Promise.reject(new Error('x')) } });
+      const toolbox = new AssistantWebToolbox({ search: new WebSearchClient({ naver: () => null }), places: new KakaoPlaceClient(() => 'test-key'), pages: { read: () => Promise.reject(new Error('x')) } });
       const { service, calls } = setup({}, async () => answer('어느 동네예요?'), undefined, undefined, toolbox);
       await run(service, { question: '근처 맛집 알려줘', webSearch: true });
       expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory', 'web_search', 'search_places', 'read_web_page']);
@@ -540,12 +541,13 @@ describe('AiAssistantService', () => {
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null });
+      // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

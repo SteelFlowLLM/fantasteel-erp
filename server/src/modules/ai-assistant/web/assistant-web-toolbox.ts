@@ -1,11 +1,11 @@
 import { Logger } from '@nestjs/common';
-import { isAiAssistantWebTool, type AiWebSource } from '@fantasteel/shared';
+import { isAiAssistantWebTool, type AiWebSearchCapabilities, type AiWebSource } from '@fantasteel/shared';
 import type { LlmToolCall, LlmToolDefinition } from '../../llm/llm.client';
 import { optionalEnum, requiredString, ToolArgumentError } from '../tools/assistant-tool';
 import { decodeBody, extractPage, limitPageText, PAGE_TEXT_MAX } from './page-extract';
 import { SafePageFetcher, WebFetchError } from './safe-fetch';
-import { PLACE_CATEGORIES, WEB_SEARCH_RESULT_LIMIT, type KakaoPlace } from './search-parsers';
-import { KakaoPlaceClient, PlaceSearchError, SearchRateLimitError, SearchUnavailableError, WebSearchClient, type WebSearchOutcome } from './web-search.client';
+import { PLACE_CATEGORIES, WEB_SEARCH_RESULT_LIMIT, type Place } from './search-parsers';
+import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, PlaceSearchError, SearchRateLimitError, SearchUnavailableError, WebSearchClient, type WebSearchOutcome } from './web-search.client';
 import { cutText, filterAnswerLinks, redactQuery, UNTRUSTED_NOTE, uniqueSources, urlKey, wrapUntrusted } from './web-text';
 
 /** 한 답에서 웹 도구를 부르는 수 (가정값). 한 차례에 여러 도구를 한꺼번에 불러도 이만큼만 실행한다 */
@@ -38,20 +38,25 @@ export class SafeWebPageReader implements WebPageReader {
   }
 }
 
+/** 장소 검색: PlaceSearch(카카오 → 네이버) 또는 제공자 하나 */
+export type PlaceSearchLike = Pick<PlaceSearch, 'enabled' | 'search'> & { readonly provider: 'kakao' | 'naver' | null };
+
 export interface WebToolDeps {
   search: WebSearchClient;
-  places: KakaoPlaceClient;
+  places: PlaceSearchLike;
   pages: WebPageReader;
 }
 
-/** 운영 기본값. 카카오 키는 부를 때마다 환경 변수에서 읽는다 */
+/** 운영 기본값. 카카오·네이버 키는 부를 때마다 환경 변수에서 읽는다 */
 export function defaultWebToolDeps(): WebToolDeps {
   return {
     search: new WebSearchClient(),
-    places: new KakaoPlaceClient(() => process.env.KAKAO_REST_API_KEY?.trim() || null),
+    places: new PlaceSearch([new KakaoPlaceClient(() => process.env.KAKAO_REST_API_KEY?.trim() || null), new NaverPlaceClient()]),
     pages: new SafeWebPageReader(),
   };
 }
+
+const PLACE_PROVIDER_LABEL = { kakao: '카카오맵', naver: '네이버 지도' } as const;
 
 const WEB_SEARCH: LlmToolDefinition = {
   name: 'web_search',
@@ -66,7 +71,7 @@ const WEB_SEARCH: LlmToolDefinition = {
 
 const SEARCH_PLACES: LlmToolDefinition = {
   name: 'search_places',
-  description: '맛집·식당·카페·가게·장소를 카카오맵에서 찾는다. 지역 이름을 검색어에 넣는다(예: 포항 남구 맛집, 광양 중마동 카페). 이름·분류·주소·전화·카카오맵 주소를 10개까지 돌려준다.',
+  description: '맛집·식당·카페·가게·장소를 지도(카카오맵, 없으면 네이버 지도)에서 찾는다. 지역 이름과 찾는 것을 검색어에 넣는다(예: 포항 남구 맛집, 광양 중마동 카페). 이름·분류·주소·전화·지도 주소를 돌려준다.',
   parameters: {
     type: 'object',
     properties: {
@@ -88,7 +93,7 @@ const READ_WEB_PAGE: LlmToolDefinition = {
 };
 
 /**
- * 웹 도구 모음 (이슈 #367): web_search·read_web_page, 카카오 키가 있으면 search_places.
+ * 웹 도구 모음 (이슈 #367): web_search·read_web_page, 카카오나 네이버 키가 있으면 search_places.
  * 조회 도구처럼 묻지 않고 실행하지만 웹 검색을 켠 실시간 답에서만 알린다. 답마다 session()을 새로 만들어
  * 그 답의 검색 결과 주소만 읽게 하고(모델이 지어낸 주소는 거절), 답의 링크도 그 주소만 남긴다.
  */
@@ -102,6 +107,11 @@ export class AssistantWebToolbox {
 
   get placeSearchEnabled(): boolean {
     return this.deps.places.enabled;
+  }
+
+  /** 화면에 보일 웹 검색 기능 (GET ai-assistant/capabilities) */
+  capabilities(): AiWebSearchCapabilities {
+    return { engines: this.deps.search.engines(), placeSearch: this.deps.places.enabled };
   }
 
   session(): WebToolSession {
@@ -183,7 +193,7 @@ export class WebToolSession {
     const category = optionalEnum(args, 'category', PLACE_CATEGORIES) ?? 'any';
     if (!query) return failure('검색어가 비었어요');
     if (++this.searches > MAX_WEB_SEARCHES_PER_ANSWER) return failure(`이번 질문에서는 검색을 ${MAX_WEB_SEARCHES_PER_ANSWER}번까지만 해요`, { 안내: '지금까지의 결과로 답해요' });
-    let places: KakaoPlace[];
+    let places: Place[];
     try {
       places = await this.deps.places.search(query, category);
     } catch (error) {
@@ -199,14 +209,16 @@ export class WebToolSession {
           `   주소: ${p.address || '(없음)'}`,
           p.phone ? `   전화: ${p.phone}` : null,
           p.distanceM !== null ? `   거리: ${p.distanceM}m` : null,
-          `   카카오맵: ${p.url}`,
+          `   지도: ${p.url}`,
         ]
           .filter(Boolean)
           .join('\n'),
       )
       .join('\n');
     const removedNote = removed.length ? `검색어에서 ${removed.join('·')}로 보이는 부분을 빼고 검색했어요.` : null;
-    const content = [`[장소 검색 결과] 검색어: ${query} · 카카오맵 · ${places.length}곳`, removedNote, UNTRUSTED_NOTE, wrapUntrusted('search_places:kakao', body)].filter(Boolean).join('\n');
+    const provider = this.deps.places.provider;
+    const label = provider ? PLACE_PROVIDER_LABEL[provider] : '지도';
+    const content = [`[장소 검색 결과] 검색어: ${query} · ${label} · ${places.length}곳`, removedNote, UNTRUSTED_NOTE, wrapUntrusted(`search_places:${provider ?? 'map'}`, body)].filter(Boolean).join('\n');
     return { content, webSources: places.map((p) => ({ title: p.name, url: p.url })) };
   }
 

@@ -32,7 +32,7 @@
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
 | POST | `ai-assistant/approvals/:approvalId` | 없음 (문서에 없는 기능, 이슈 #362) | 로그인만. 질문한 사원 본인만 | `AiApprovalDecisionView` `{ approvalId, decision }` (200). 본문 `{ decision: 'ALLOW' \| 'DENY' }` (아래 '승인 카드') |
-| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null` |
+| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning, webSearch }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null`. `webSearch: { engines: ('naver'\|'duckduckgo'\|'wikipedia')[], placeSearch: boolean }`는 서버 키 설정으로 쓸 수 있는 검색 엔진(부르는 순서)과 장소 검색 여부(모델이 없어도 채운다, 이슈 #367) |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 
 요청 `POST ai-assistant/messages`:
@@ -156,18 +156,24 @@
 
 | 도구 | 인자 | 하는 일 | 결과 |
 | --- | --- | --- | --- |
-| `web_search` 웹 검색 | `query`(필수, 200자) | DuckDuckGo HTML → 위키백과(한국어 → 영어) | 제목·주소·요약(300자) 5개까지 |
-| `search_places` 장소 검색 | `query`(필수, 100자, 지역 이름 포함 예: "포항 남구 맛집"), `category`(`restaurant` FD6·`cafe` CE7·`any`, 기본 `any`) | 카카오 로컬 키워드 검색. **`KAKAO_REST_API_KEY`가 있을 때만 알린다** | 이름·분류·주소(도로명, 없으면 지번)·전화·거리(있으면)·카카오맵 주소 10개까지 |
+| `web_search` 웹 검색 | `query`(필수, 200자) | 네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과(한국어 → 영어) | 제목·주소·요약(300자) 5개까지 |
+| `search_places` 장소 검색 | `query`(필수, 100자, 지역 이름 포함 예: "포항 남구 맛집"), `category`(`restaurant` FD6·`cafe` CE7·`any`, 기본 `any`. 카카오만 쓴다) | 카카오 로컬 키워드 검색, 카카오 키가 없으면 네이버 지역 검색. **`KAKAO_REST_API_KEY` 또는 `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`이 있을 때만 알린다** | 이름·분류·주소(도로명, 없으면 지번)·전화·거리(카카오, 있으면)·지도 주소. 카카오 10곳·네이버 5곳까지 |
 | `read_web_page` 웹 페이지 읽기 | `url`(필수) | **이번 답의 `web_search`·`search_places` 결과에 있던 주소만** 읽는다 | 제목 + 본문 글 6,000자까지(넘치면 "앞 6000자만" 안내) |
 
 검색(`web/web-search.client.ts`)
+- 순서: **네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과 한국어 → 영어.** 앞 엔진이 실패하거나 결과가 0건이면 다음으로 넘어간다. 지금 쓸 수 있는 엔진은 `GET ai-assistant/capabilities`의 `webSearch.engines`로 화면에 알린다.
+- 네이버(공식, developers.naver.com/docs/serviceapi/search/web/web.md 확인): `GET https://openapi.naver.com/v1/search/webkr.json?query=<검색어>&display=5`, 헤더 `X-Naver-Client-Id`·`X-Naver-Client-Secret`(`NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`). 응답 `items[]`의 `title`·`link`·`description`을 쓰고, 검색어를 감싼 `<b>` 태그와 엔티티를 지운다. 중복·http(s)가 아닌 주소·제목 없는 줄은 뺀다. 웹문서가 0건이면 블로그·뉴스 API로 넓히지 않고 다음 엔진으로 넘어간다(단순하게 둠).
+- 네이버 실패: 401(키 틀림, 공통 오류 024)·403(애플리케이션 API 설정에 '검색' 없음)·429(하루 한도 초과)·그 밖의 오류는 다음 엔진으로 넘어가고, 같은 API·같은 상태는 서버를 띄운 뒤 **처음 한 번만** 로그(`HTTP 상태 + errorCode`와 확인할 것)를 남긴다. 키 값은 로그에 남기지 않는다.
+- 네이버 키 준비: developers.naver.com → Application → 애플리케이션 등록 → 사용 API에 **검색** 추가 → Client ID·Client Secret을 `server/.env`에 넣는다. 검색 API **하루 25,000회**(웹문서·지역 등 검색 API 합산, 2026-10 문서 기준). 키는 부를 때마다 환경 변수에서 읽는다.
 - DuckDuckGo: `POST https://html.duckduckgo.com/html/` 폼 `q=<검색어>&kl=kr-kr`, 브라우저 User-Agent + `Referer`·`Origin: https://html.duckduckgo.com`. `div.result`마다 `a.result__a`(주소·제목)·`.result__snippet`(요약)을 읽는다(`web/search-parsers.ts`). 주소가 `//duckduckgo.com/l/?uddg=…`면 풀고, 광고(`result--ad`, `duckduckgo.com/y.js`)·중복·http(s)가 아닌 주소는 뺀다.
-- 🟡 **DuckDuckGo HTML은 공식 API가 아니다.** 화면 모양이 바뀌면 결과를 못 읽고, 서버에서 부르면 봇으로 보고 자주 막는다(202 + anomaly 화면). 막힘(202·403·429, 결과 없는 anomaly 화면)이면 1~2초 쉬고 한 번만 다시 하고, 그래도 막히거나 결과가 없으면 위키백과로 찾는다. 2026-10-16 실제 확인: 처음 한 번은 결과 5개가 왔고, 이어진 요청은 202 anomaly로 막혀 위키백과로 답했다. 안정적으로 쓰려면 유료 검색 API(예: Brave·Bing·Google)로 바꿔야 한다.
+- 🟡 **DuckDuckGo HTML은 공식 API가 아니다.** 화면 모양이 바뀌면 결과를 못 읽고, 서버에서 부르면 봇으로 보고 자주 막는다(202 + anomaly 화면). 막힘(202·403·429, 결과 없는 anomaly 화면)이면 1~2초 쉬고 한 번만 다시 하고, 그래도 막히거나 결과가 없으면 위키백과로 찾는다. 2026-10-16 실제 확인: 처음 한 번은 결과 5개가 왔고, 이어진 요청은 202 anomaly로 막혀 위키백과로 답했다. 그래서 네이버 키를 넣어 네이버를 먼저 쓰는 것을 권한다.
 - 위키백과: `https://{ko|en}.wikipedia.org/w/api.php?action=query&list=search&srsearch=…&srlimit=5&format=json&utf8=1`, 위키백과 정책대로 누구인지 밝히는 User-Agent(`FantaSteelERP/1.0 (internal assistant; contact via repo)`). 요약의 태그·엔티티를 지우고 문서 주소(`/wiki/제목`)를 만든다.
 - DuckDuckGo 요청은 서버 안에서 한 번에 하나씩(차례로) 보낸다. 같은 검색어(앞뒤 공백·대소문자 무시)는 **10분** 기억한다(캐시는 1분 한도에 세지 않음). 서버 전체 **1분 10번**을 넘으면 검색하지 않고 "웹 검색이 잠시 많아요. 1분쯤 뒤에 다시…"를 결과로 돌려준다. 🟡 캐시·한도는 서버 한 대의 메모리다.
 - 검색어는 회사 밖으로 나가므로 이메일·전화번호·카드 번호(13~19자리)·주민등록번호·API 키 모양(`sk-…`·`ghp_…`·`AKIA…`·숫자와 글자가 섞인 24자 이상)을 지우고 보낸다(`redactQuery`). 지웠으면 결과에 "…로 보이는 부분을 빼고 검색했어요"를 붙이고, 다 지워져 비면 검색하지 않는다. 장소 검색어도 같다. 모델에게도 개인정보·회사 내부 정보를 넣지 말라고 한다(W6).
 
-장소 검색(카카오 로컬)
+장소 검색(카카오 로컬, 없으면 네이버 지역)
+- 제공자: 카카오 키가 있으면 카카오, 없고 네이버 키가 있으면 네이버 지역 검색(`PlaceSearch`, 부를 때마다 고름). 결과 머리말과 `source`에 어느 지도인지 적는다.
+- 네이버 지역(local.md 확인): `GET https://openapi.naver.com/v1/search/local.json?query=…&display=5`(최댓값 5), 같은 헤더. `title`(태그 지움)·`category`·`roadAddress`(없으면 `address`)·`telephone`·`link`. `link`가 비면 이름·주소로 네이버 지도 검색 주소(`https://map.naver.com/p/search/…`)를 만든다. `telephone`은 문서상 '값을 반환하지 않는 요소'라 대개 비어 있다. 음식점·카페를 거르는 인자가 없어 `category`는 쓰지 않는다(모델이 검색어에 "맛집"·"카페"를 넣는다). 429면 "하루 한도를 넘었어요"를 돌려준다.
 - `GET https://dapi.kakao.com/v2/local/search/keyword.json?query=…&size=10[&category_group_code=FD6|CE7]`, 헤더 `Authorization: KakaoAK <KAKAO_REST_API_KEY>`. 사용자 위치(x·y·radius)는 아직 보내지 않는다 — 모델이 지역 이름을 검색어에 넣는다(W2, 모르면 먼저 묻는다). 같은 검색어 10분 캐시.
 - 키 준비: developers.kakao.com → 내 애플리케이션 → 애플리케이션 추가 → 앱 키의 **REST API 키**를 `server/.env`의 `KAKAO_REST_API_KEY`에 넣는다. 같은 앱에서 **카카오맵 사용 설정을 ON**으로 켜야 한다. 꺼져 있으면 401 `OPEN_MAP_AND_LOCAL`이 오고, 도구는 "카카오맵 사용 설정이 꺼져 있어…관리자에게"를 돌려준다(틀린 키는 "API 키가 맞지 않아"). 키는 부를 때마다 환경 변수에서 읽어 서버를 다시 띄우면 바로 반영된다.
 
@@ -246,7 +252,7 @@
 | schedule-event | `exports: [ScheduleEventService]`를 더했다. `createIn(tx, user, input)`(넘겨받은 트랜잭션에서 만들고 id만, 트랜잭션 안에서 관계를 읽지 않음)과 `checkCreate(input)`(저장 없는 검사)를 더했다. 직접 등록 API 동작은 그대로 |
 | message-action | `MessageActionService.previewFromAssistant`(사전 확인)·`createFromAssistantIn(tx, …)`(부르는 쪽 트랜잭션에서 초안 생성 + `DRAFT_CREATED` AI 경유, `after.approvalId`)를 더했다. 유형 정의(`PurchaseRequisitionAction`)의 검증(`applyPatch`)·승인권자 확인을 그대로 쓴다 |
 | 공통 `BusinessEventRecorder` | 일정 카드의 AI 경유 작업 로그 |
-| 바깥 서비스 (이슈 #367) | DuckDuckGo HTML(비공식)·위키백과 검색 API·카카오 로컬 API(`KAKAO_REST_API_KEY`)·검색 결과의 웹 페이지. 의존성 `undici`(MIT)·`ipaddr.js`(MIT)·`@mozilla/readability`(Apache-2.0)·`linkedom`(ISC) |
+| 바깥 서비스 (이슈 #367) | 네이버 검색 API 웹문서·지역(`NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`)·DuckDuckGo HTML(비공식)·위키백과 검색 API·카카오 로컬 API(`KAKAO_REST_API_KEY`)·검색 결과의 웹 페이지. 의존성 `undici`(MIT)·`ipaddr.js`(MIT)·`@mozilla/readability`(Apache-2.0)·`linkedom`(ISC) |
 
 **기능별 LLM 설정 (문서에 없는 기능, 2026-10-16 추가)** — `llm-profiles.ts`의 `LLM_PROFILE`. 기능마다 샘플링 값과 생각 정도를 정해 요청마다 실어 보낸다. 값이 요청 시점에 들어가므로 LM Studio에서 모델을 다시 불러올 필요가 없다.
 
@@ -278,7 +284,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `approval/assistant-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 도구 종류(조회 READ·쓰기 WRITE·모름 null, 한글 제목, 조회 모음은 쓰기를 실행하지 않음, 쓰기 규칙은 알릴 때만 프롬프트에), 인자 스키마(JSON 아님·객체 아님·빠진 칸·없는 칸·형식·숫자, null은 빈 칸), 고칠 기회(2번, 같은 인자면 멈춤), 일시 오류만 같은 내용으로 2번 다시(SAFE·AMBIGUOUS 구분, AMBIGUOUS는 멱등일 때만, 업무 오류는 1번), 카드 자리(처음 결정만·409, 허용한 사원 정보를 넘김, 다른 사원 403, 없는 카드 404, 시간 초과 = 거부, 연결 끊김 = 거부), 호출 처리(스키마·사전 확인 실패는 고침, 같은 인자 반복·권한 없음·PUR-001은 멈춤, 자리를 먼저 만들어 이벤트 직후 허용해도 실행, 실행은 허용한 사원·카드 id로, 거부·시간 초과면 실행 안 하고 멈춤, 기다리는 동안 20초마다 heartbeat, 실행 뒤 업무 오류는 다시 하지 않음).
 - `assistant-approval.spec.ts`(실제 앱·DB `fs_collab`, 가짜 LLM): `approvalCards`가 없거나 API-262면 쓰기 도구 없음, 일정 허용 → 이벤트 순서·카드 내용·일정 생성·`DRAFT_CONFIRMED` AI 경유·다른 사원 403·늦은 결정 409, 거부 → 만들지 않음, 사전 확인 실패 → 모델이 고친 두 번째 호출에서 카드, 스키마 세 번 실패 → 도구 없이 답, 연결 끊김 → 거부·만들지 않음, 없는 카드 404·형식 400, 초안 허용 → 확인 대기 초안·`fromAiAssistant`·`aiFilledFields`·`DRAFT_CREATED` AI 경유·내 초안 목록, 없는 원료 → 원료 목록과 함께 고치게 함, 영업 사원 → 권한 없음·구매 역할 안내·도구 없이 답, COMMIT 뒤 연결 끊김을 흉내 내도 한 번만 만듦(시도 2번), 거부 뒤 도구 없이 답, 카드 뒤 권한이 빠지면 허용 순간의 권한으로 실패, 카드 뒤 원료 코드가 바뀌면 COM-001로 실패.
 
-- `web/web-tools.unit.spec.ts`(네트워크 없음, `npm run test:unit`에 포함): DuckDuckGo HTML 읽기(fixture: 결과·광고·uddg·중복·javascript, anomaly 화면), 위키백과·카카오 응답 읽기, 검색어 개인정보 빼기, 감싸기·이스케이프, 주소 키·답의 링크 거르기, 공용 주소 판단(IPv4·IPv6·mapped·compatible·영역 표시), 주소 확인(scheme·포트·사용자 정보·정수/16진 IPv4·localhost), lookup(배열·주소 하나·재바인딩·mapped), Readability 본문 뽑기·EUC-KR, 검색 클라이언트(POST 모양, 막힘 → 1~2초 쉬고 다시 → 위키백과 한국어 → 영어, 10분 캐시, 1분 한도, 차례로 보내기), 카카오(KakaoAK 헤더, OPEN_MAP_AND_LOCAL 401 안내), 세션(키 없으면 장소 검색 안 알림, 결과에 없던 주소 거절, 한 답 횟수 상한, 출처 고르기).
+- `web/web-tools.unit.spec.ts`(네트워크 없음, `npm run test:unit`에 포함): DuckDuckGo HTML 읽기(fixture: 결과·광고·uddg·중복·javascript, anomaly 화면), 위키백과·카카오 응답 읽기, 검색어 개인정보 빼기, 감싸기·이스케이프, 주소 키·답의 링크 거르기, 공용 주소 판단(IPv4·IPv6·mapped·compatible·영역 표시), 주소 확인(scheme·포트·사용자 정보·정수/16진 IPv4·localhost), lookup(배열·주소 하나·재바인딩·mapped), Readability 본문 뽑기·EUC-KR, 검색 클라이언트(POST 모양, 막힘 → 1~2초 쉬고 다시 → 위키백과 한국어 → 영어, 10분 캐시, 1분 한도, 차례로 보내기), 카카오(KakaoAK 헤더, OPEN_MAP_AND_LOCAL 401 안내), 네이버(fixture `naver-webkr.json`·`naver-local.json`: `<b>`·엔티티 지움·중복·빈 link → 지도 검색 주소, 엔진 순서 네이버 → DuckDuckGo, 헤더·display, 401·429 로그 한 번·키 값 없음·다음 엔진으로, 0건이면 다음 엔진, 키 없으면 안 부름), 장소 제공자(카카오 → 네이버 → 꺼짐), capabilities(엔진·장소 검색), 세션(키 없으면 장소 검색 안 알림, 결과에 없던 주소 거절, 한 답 횟수 상한, 출처 고르기).
 - `web/safe-fetch.unit.spec.ts`(127.0.0.1 시험 서버만): 기본 규칙은 시험 서버 자신을 막음(IP 그대로·이름 → 루프백 lookup·포트), 시험 전용 규칙(127.0.0.1·그 포트 허용 — 생성자로만 넣고 환경 변수로는 못 바꿈)으로 HTML·text/plain·gzip 읽기, PDF·사진·404 거절, 이동마다 다시 확인(메타데이터·file·다른 포트 거절), 이동 5번 상한, 본문 상한에서 끊기, 시간 초과, 가짜 검색 + 실제 읽기 끝에서 끝까지.
 - `ai-assistant.spec.ts` '웹 검색': 가짜 LLM으로 `webSearch: true` → `web_search` → `read_web_page` → 답(도구 목록·웹 규칙, 검색어 전화번호 빠짐, 감싼 도구 결과, `tool_end.webSources`, 모르는 링크·사진 지움, `reply.webSources`, DATA 출처 아님), 결과에 없던 주소 거절, 도구 호출 6번 상한, `webSearch` 없음·false·API-262면 웹 도구·규칙 없음, 카카오 키가 있으면 장소 검색과 규칙.
 
@@ -301,7 +307,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 승인 카드 오류 코드 | AST-001(404)·AST-002(409) | [04] 9.3에 없음 |
 | 끝 시각 없는 일정 | 시작 60분 뒤로 잡고 카드에 적어 보인다 | 문서에 없음(가정값) |
 | 철강맨AI 초안의 원본 표시 | `payload.fromAiAssistant`(스키마 변경 없음). 화면이 원본 칸에 "철강맨AI 대화"로 보이면 된다 | ERD에 AI 대화 원본 컬럼 없음 |
-| 웹 검색 엔진 | DuckDuckGo HTML(비공식, 자주 막힘) → 위키백과. 막히면 위키백과에 있는 것만 찾는다 | 이슈 #367 결정. 안정적으로 쓰려면 유료 검색 API |
+| 웹 검색 엔진 | 네이버 검색 API(공식, 키가 있을 때) → DuckDuckGo HTML(비공식, 자주 막힘) → 위키백과. 네이버 키가 없으면 DuckDuckGo가 막힐 때 위키백과에 있는 것만 찾는다 | 이슈 #367 결정. 네이버 하루 25,000회 |
 | 웹 한도 | 검색 1분 10번(서버 전체)·10분 캐시, 한 답에 검색 3번·읽기 3개, 페이지 10초·2MB·이동 5번·글 6,000자, 도구 호출 6번 | 이슈 #367 결정값·가정값. 캐시·한도는 서버 한 대의 메모리 |
 | 장소 검색 위치 | 사용자 위치를 보내지 않고 모델이 지역 이름을 검색어에 넣는다 | 이슈 #367 (위치 권한은 다음 단계) |
 | 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

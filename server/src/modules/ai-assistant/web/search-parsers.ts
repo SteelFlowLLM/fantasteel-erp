@@ -98,7 +98,8 @@ export const PLACE_CATEGORIES = ['restaurant', 'cafe', 'any'] as const;
 export type PlaceCategory = (typeof PLACE_CATEGORIES)[number];
 export const KAKAO_CATEGORY_CODE: Record<PlaceCategory, string | null> = { restaurant: 'FD6', cafe: 'CE7', any: null };
 
-export interface KakaoPlace {
+/** 장소 검색 결과 한 곳 (카카오·네이버 공통) */
+export interface Place {
   name: string;
   category: string;
   address: string;
@@ -121,7 +122,7 @@ interface KakaoDocument {
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 /** 카카오 로컬 키워드 검색 응답(documents[]) → 장소. 도로명 주소가 없으면 지번 주소, 주소(place_url)가 없는 줄은 뺀다 */
-export function mapKakaoPlaces(json: unknown, limit = 10): KakaoPlace[] {
+export function mapKakaoPlaces(json: unknown, limit = 10): Place[] {
   const documents = (json as { documents?: KakaoDocument[] } | null)?.documents;
   if (!Array.isArray(documents)) return [];
   return documents
@@ -145,4 +146,72 @@ export function kakaoKeywordUrl(query: string, category: PlaceCategory, size = 1
   const code = KAKAO_CATEGORY_CODE[category];
   if (code) params.set('category_group_code', code);
   return `https://dapi.kakao.com/v2/local/search/keyword.json?${params.toString()}`;
+}
+
+/**
+ * 네이버 검색 API (공식, developers.naver.com/docs/serviceapi/search/web/web.md).
+ * webkr.json 응답 items[]의 title·link·description. 제목·요약에서 검색어는 <b>로 감싸 오므로 태그를 지운다.
+ */
+export function naverWebSearchUrl(query: string, display = WEB_SEARCH_RESULT_LIMIT): string {
+  return `https://openapi.naver.com/v1/search/webkr.json?${new URLSearchParams({ query, display: String(display) }).toString()}`;
+}
+
+interface NaverItem {
+  title?: unknown;
+  link?: unknown;
+  description?: unknown;
+  category?: unknown;
+  telephone?: unknown;
+  address?: unknown;
+  roadAddress?: unknown;
+}
+
+const naverItems = (json: unknown): NaverItem[] => {
+  const items = (json as { items?: unknown } | null)?.items;
+  return Array.isArray(items) ? (items as NaverItem[]) : [];
+};
+
+/** 태그(<b>)·엔티티를 지운 한 줄 */
+const naverText = (value: unknown): string => (typeof value === 'string' ? htmlToText(value).replace(/\s+/g, ' ').trim() : '');
+
+export function parseNaverWebSearch(json: unknown, limit = WEB_SEARCH_RESULT_LIMIT): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+  for (const item of naverItems(json)) {
+    if (results.length >= limit) break;
+    const title = naverText(item.title);
+    const link = typeof item.link === 'string' ? item.link.trim() : '';
+    if (!title || !/^https?:\/\//i.test(link) || results.some((r) => r.url === link)) continue;
+    results.push({ title, url: link, snippet: naverText(item.description) });
+  }
+  return results;
+}
+
+/** 네이버 지역 검색은 한 번에 5곳까지 (display 최댓값 5, local.md) */
+export const NAVER_LOCAL_DISPLAY_MAX = 5;
+
+export function naverLocalSearchUrl(query: string): string {
+  return `https://openapi.naver.com/v1/search/local.json?${new URLSearchParams({ query, display: String(NAVER_LOCAL_DISPLAY_MAX) }).toString()}`;
+}
+
+/**
+ * 네이버 지역 검색(local.json) → 장소. link(상세 주소)는 비어 올 때가 많아 그때는 이름·주소로 네이버 지도 검색 주소를 만든다.
+ * telephone은 문서상 '값을 반환하지 않는 요소'라 대개 비어 있다.
+ */
+export function mapNaverPlaces(json: unknown, limit = NAVER_LOCAL_DISPLAY_MAX): Place[] {
+  return naverItems(json)
+    .map((item) => {
+      const name = naverText(item.title);
+      const address = naverText(item.roadAddress) || naverText(item.address);
+      const link = typeof item.link === 'string' ? item.link.trim() : '';
+      return {
+        name,
+        category: naverText(item.category),
+        address,
+        phone: naverText(item.telephone) || null,
+        url: /^https?:\/\//i.test(link) ? link : `https://map.naver.com/p/search/${encodeURIComponent([name, address].filter(Boolean).join(' '))}`,
+        distanceM: null,
+      };
+    })
+    .filter((place) => place.name)
+    .slice(0, limit);
 }

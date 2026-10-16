@@ -1,0 +1,37 @@
+{
+  "lastBuildDate": "Fri, 16 Oct 2026 13:40:00 +0900",
+  "total": 120,
+  "start": 1,
+  "display": 3,
+  "items": [
+    {
+      "title": "<b>포항</b> 물회 본점",
+      "link": "https://www.mulhoe.example.kr/",
+      "category": "한식>해물,생선요리",
+      "description": "",
+      "telephone": "",
+      "address": "경상북도 포항시 남구 해도동 1",
+      "roadAddress": "경상북도 포항시 남구 해도로 1",
+      "mapx": "1293654321",
+      "mapy": "360123456"
+    },
+    {
+      "title": "죽도시장 &amp; 횟집",
+      "link": "",
+      "category": "한식>회",
+      "description": "",
+      "telephone": "054-000-0000",
+      "address": "경상북도 포항시 북구 죽도동 2",
+      "roadAddress": "",
+      "mapx": "1293650000",
+      "mapy": "360200000"
+    },
+    {
+      "title": "",
+      "link": "",
+      "category": "",
+      "address": "",
+      "roadAddress": ""
+    }
+  ]
+}
