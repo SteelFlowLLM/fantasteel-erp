@@ -15,7 +15,7 @@ export const aiAssistantKeys = {
   capabilities: ['ai-assistant', 'capabilities'] as const,
 };
 
-const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'done', 'error'];
+const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'done', 'error'];
 
 /**
  * 스트림 한 줄을 이벤트로 읽는다. JSON이 아니면 오류, 모르는 종류의 이벤트는 null(서버가 새 종류를 더해도 화면이 멈추지 않게 건너뛴다).

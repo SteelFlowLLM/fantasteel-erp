@@ -245,3 +245,52 @@ describe('실시간 답 (스트림 이벤트)', () => {
     expect(store().entries).toEqual([]);
   });
 });
+
+describe('브라우저 사용 (이슈 #373)', () => {
+  const frame = (n: number) => ({ type: 'browser_frame' as const, url: `example.kr/${n}`, title: `제목 ${n}`, imageBase64: 'QUJD', at: '2026-10-17T00:00:00.000Z' });
+
+  it('화면 사진을 모으고 최종 답 줄에 남긴다. 규칙에 어긋난 사진은 버리고, 사진이 없으면 필드가 없다', () => {
+    store().addQuestion('q1', '페이지 열어 줘', undefined, undefined, undefined, true);
+    expect(store().entries[0]).toMatchObject({ role: 'user', browser: true });
+    for (let n = 1; n <= 12; n += 1) store().applyStreamEvent('q1', frame(n));
+    store().applyStreamEvent('q1', { ...frame(99), imageBase64: '<img onerror=x>' });
+    expect(store().live?.browserFrames).toHaveLength(10);
+    expect(store().live?.browserFrames.at(-1)?.url).toBe('example.kr/12');
+    store().applyStreamEvent('q1', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', browserFrames: expect.arrayContaining([expect.objectContaining({ url: 'example.kr/12' })]) });
+
+    store().addQuestion('q2', '재고');
+    store().applyStreamEvent('q2', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).not.toHaveProperty('browserFrames');
+  });
+
+  it('실패 줄에 브라우저 사용 여부를 남겨 다시 물을 때 쓴다', () => {
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true);
+    store().applyStreamEvent('q1', { type: 'error', message: '실패' } as never);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', browser: true });
+  });
+});
+
+describe('웹 검색 (이슈 #367)', () => {
+  const WEB = [{ title: '철강 시황', url: 'https://example.com/steel' }];
+
+  it('웹 도구 결과의 출처와 최종 답의 웹 출처를 대화에 남긴다. 웹 검색이 아니면 필드가 없다', () => {
+    store().addQuestion('q1', '철강 시황', undefined, undefined, true);
+    store().applyStreamEvent('q1', { type: 'tool_start', id: 't1', name: 'web_search', arguments: '{"query":"철강"}' }, 1000);
+    store().applyStreamEvent('q1', { type: 'tool_end', id: 't1', label: null, resultPreview: '…', durationMs: 900, webSources: WEB }, 1900);
+    const tool = store().live?.steps[0];
+    expect(tool?.kind === 'tool' ? tool.result?.webSources : null).toEqual(WEB);
+    store().applyStreamEvent('q1', { type: 'done', reply: { ...REPLY, webSources: WEB } }, 2000);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', webSources: WEB });
+
+    store().addQuestion('q2', '재고');
+    store().applyStreamEvent('q2', { type: 'done', reply: REPLY });
+    expect(store().entries.at(-1)).not.toHaveProperty('webSources');
+  });
+
+  it('웹 검색을 켜고 물은 질문이 실패하면 다시 물을 때 쓰도록 실패 줄에 담는다', () => {
+    store().addQuestion('q1', '철강 시황', undefined, undefined, true);
+    store().addFailure('q1', '철강 시황', '응답이 없어요');
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', webSearch: true });
+  });
+});
