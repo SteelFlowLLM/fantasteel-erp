@@ -90,6 +90,11 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsBoolean()
   webSearch?: boolean;
+
+  /** 브라우저 사용을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 브라우저 도구를 알린다 (이슈 #373) */
+  @IsOptional()
+  @IsBoolean()
+  browser?: boolean;
 }
 
 /** 수주 등록 카드의 품목 줄. 매수·규격·납기의 뜻은 수주 등록 service가 본다 */

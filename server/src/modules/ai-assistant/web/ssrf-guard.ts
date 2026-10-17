@@ -120,14 +120,35 @@ export function guardedLookup(policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolv
       if (error) return callback(error, options.all ? [] : '');
       const addresses: LookupAddress[] = typeof result === 'string' ? [{ address: result, family: result.includes(':') ? 6 : 4 }] : result;
       if (!addresses.length) return callback(dnsError(hostname, 'ENOTFOUND', '주소를 찾지 못했어요'), options.all ? [] : '');
-      const blocked = addresses.find((entry) => !policy.isAllowedAddress(entry.address));
-      if (blocked) return callback(dnsError(hostname, 'EBLOCKED', '사내망·내부 주소는 읽을 수 없어요'), options.all ? [] : '');
+      if (firstBlockedAddress(addresses.map((entry) => entry.address), policy) !== null) return callback(dnsError(hostname, 'EBLOCKED', '사내망·내부 주소는 읽을 수 없어요'), options.all ? [] : '');
       if (options.all) return callback(null, addresses);
       const wanted = options.family === 6 ? 6 : options.family === 4 ? 4 : null;
       const first = addresses.find((entry) => wanted === null || entry.family === wanted) ?? addresses[0];
       return callback(null, first.address, first.family);
     });
   };
+}
+
+/** 푼 주소 중 연결하면 안 되는 첫 주소. 모두 괜찮으면 null. 페이지 읽기(guardedLookup)와 브라우저(이슈 #373)가 함께 쓴다 */
+export function firstBlockedAddress(addresses: readonly string[], policy: FetchPolicy = DEFAULT_FETCH_POLICY): string | null {
+  return addresses.find((address) => !policy.isAllowedAddress(address)) ?? null;
+}
+
+/**
+ * 이름을 풀어 모든 주소가 공용 주소인지 본다 (브라우저 요청 확인, 이슈 #373). 막을 이유를 돌려주고, 괜찮으면 null.
+ * IP를 그대로 적은 이름은 풀지 않고 그 주소를 본다. 브라우저는 연결할 때 다시 DNS를 풀어 이 확인과 연결 사이 틈이 남는다(문서 참고).
+ */
+export function checkHostAddresses(hostname: string, policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolve: LookupFunction = systemLookup): Promise<string | null> {
+  const literal = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  if (ipaddr.isValid(literal)) return Promise.resolve(policy.isAllowedAddress(literal) ? null : '사내망·내부 주소는 열 수 없어요');
+  return new Promise((done) => {
+    resolve(literal, { all: true }, (error, result) => {
+      if (error) return done('주소를 찾지 못했어요');
+      const addresses = typeof result === 'string' ? [result] : result.map((entry) => entry.address);
+      if (!addresses.length) return done('주소를 찾지 못했어요');
+      done(firstBlockedAddress(addresses, policy) === null ? null : '사내망·내부 주소는 열 수 없어요');
+    });
+  });
 }
 
 /** lookup이 내부 주소라 막았을 때의 오류 코드 */

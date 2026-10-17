@@ -183,9 +183,12 @@ export class AssistantWebToolbox {
     return { engines: this.deps.search.engines(), placeSearch: this.deps.places.enabled };
   }
 
-  /** employeeId: 사원별 1분 검색 수를 센다 */
-  session(employeeId: number): WebToolSession {
-    return new WebToolSession(this.deps, this.definitions().map((d) => d.name), employeeId, this.userLimiter);
+  /**
+   * employeeId: 사원별 1분 검색 수를 센다. offerTools: false면 웹 도구는 알리지 않고 주소 허용 목록·답의 링크 거르기·
+   * 회사 안 정보 막기만 쓴다 (웹 검색을 끄고 브라우저만 켠 질문, 이슈 #373)
+   */
+  session(employeeId: number, options: { offerTools?: boolean } = {}): WebToolSession {
+    return new WebToolSession(this.deps, options.offerTools === false ? [] : this.definitions().map((d) => d.name), employeeId, this.userLimiter);
   }
 }
 
@@ -217,6 +220,22 @@ export class WebToolSession {
   /** ERP 조회 도구 결과를 본다 (거래처 이름 모으기). 서비스가 조회 도구를 부를 때마다 넘긴다 */
   observeErpResult(content: string) {
     for (const name of partnerNamesIn(content)) this.partnerNames.add(name);
+  }
+
+  /** 회사 밖으로 나가는 글(브라우저가 여는 주소·입력하는 글, 이슈 #373)에 회사 안 정보가 있으면 그 종류 */
+  internalReference(text: string): ReturnType<typeof internalReferenceIn> {
+    return internalReferenceIn(text, this.partnerNames);
+  }
+
+  /** 이번 답의 웹 결과(검색·장소 결과, 읽은 페이지, 브라우저로 본 페이지)에 있던 주소인지 */
+  knows(url: string): boolean {
+    const key = urlKey(url);
+    return key !== null && this.found.has(key);
+  }
+
+  /** 브라우저로 본 페이지 (이슈 #373). 답이 이 주소를 링크로 달 수 있게 한다 */
+  rememberVisited(url: string, title: string) {
+    this.remember(url, cutText(stripInvisible(title), TITLE_MAX));
   }
 
   /** 검색 전 확인: 회사 안 정보·한 답 횟수·사원별 1분 수. 막히면 모델에 돌려줄 결과 */
