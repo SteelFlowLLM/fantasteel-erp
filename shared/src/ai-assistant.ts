@@ -31,6 +31,11 @@ export interface AiAssistantMessageInput {
   reasoning?: AiReasoningLevel;
   /** 질문과 함께 보는 사진 (문서에 없는 기능, 2026-10-16 추가). 사진을 볼 수 있는 모델일 때만. 지난 대화에는 남기지 않는다 */
   images?: AiAssistantImageInput[];
+  /**
+   * 웹 검색을 켠 질문이면 true (문서에 없는 기능, 이슈 #367). 실시간 답 API(messages/stream)에서만 웹 도구
+   * (web_search·read_web_page, 카카오 키가 있으면 search_places)를 모델에 알린다. 사내 채팅 @AI(API-262)는 쓰지 않는다
+   */
+  webSearch?: boolean;
 }
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
@@ -53,6 +58,19 @@ export interface AiAssistantCapabilitiesView {
   vision: boolean | null;
   /** 생각 정도를 바꿀 수 있는지 */
   reasoning: boolean | null;
+  /** 웹 검색으로 쓸 수 있는 것 (이슈 #367). 모델과 상관없이 서버의 키 설정으로 정해진다 */
+  webSearch: AiWebSearchCapabilities;
+}
+
+/** 웹 검색 엔진: 네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
+export const AI_WEB_SEARCH_ENGINES = ['naver', 'duckduckgo', 'wikipedia'] as const;
+export type AiWebSearchEngine = (typeof AI_WEB_SEARCH_ENGINES)[number];
+
+export interface AiWebSearchCapabilities {
+  /** 쓸 수 있는 엔진 (부르는 순서) */
+  engines: AiWebSearchEngine[];
+  /** 장소 검색(search_places)을 쓸 수 있는지. 카카오나 네이버 키가 있어야 한다 */
+  placeSearch: boolean;
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. 모델이 단계를 모르면 켜고 끄기만 한다 */
@@ -77,7 +95,22 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   get_shipment_requests: '출하요청 조회',
   get_mill_sheets: '밀시트 조회',
   search_past_cases: '과거 사례 검색',
+  web_search: '웹 검색',
+  search_places: '장소 검색',
+  read_web_page: '웹 페이지 읽기',
 };
+
+/** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */
+export const AI_ASSISTANT_WEB_TOOLS = ['web_search', 'search_places', 'read_web_page'] as const;
+export type AiAssistantWebTool = (typeof AI_ASSISTANT_WEB_TOOLS)[number];
+
+export const isAiAssistantWebTool = (name: string): name is AiAssistantWebTool => (AI_ASSISTANT_WEB_TOOLS as readonly string[]).includes(name);
+
+/** 웹 도구가 찾거나 읽은 페이지 하나. url은 검색 결과에 있던 주소(읽은 페이지면 이동 뒤 최종 주소) */
+export interface AiWebSource {
+  title: string;
+  url: string;
+}
 
 /** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), 조회 데이터. 사례 번호는 다음 단계 */
 export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'DATA';
@@ -115,6 +148,11 @@ export interface AiAssistantReplyView {
   reasoningApplied: boolean;
   /** 실행 카드(REQ-AST-005). 서버는 저장하지 않고, 사용자가 확인해 실행을 누를 때만 업무에 반영한다 */
   actionCards: AiActionCard[];
+  /**
+   * 웹 출처 (이슈 #367). 웹 검색을 켠 질문에만 있다. 답이 링크로 단 검색 결과와 읽은 페이지 순서이고,
+   * 둘 다 없으면 검색 결과 앞의 3개. 답 본문의 링크는 이 질문의 웹 도구 결과에 있던 주소만 남는다
+   */
+  webSources?: AiWebSource[];
 }
 
 /**
@@ -230,13 +268,23 @@ export interface AiActionCardExecuteResult {
  * 답을 만드는 과정의 실시간 이벤트 (POST /ai-assistant/messages/stream, 한 줄에 JSON 하나).
  * - thinking·answer: 글 조각. answer는 출처 표시를 지우기 전 원문이라, done의 reply.answer로 바꿔 보인다
  * - 한 차례에서 answer 조각 뒤에 tool_start가 오면 그 글은 최종 답이 아니라 도구를 부르기 전의 중간 글이다
+ * - 웹 도구(이슈 #367)는 조회 도구와 같은 tool_start → tool_end이고, tool_end.webSources에 찾은·읽은 페이지가 온다.
+ *   답에 쓴 웹 출처는 done의 reply.webSources
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
   | { type: 'thinking'; text: string }
   | { type: 'answer'; text: string }
   | { type: 'tool_start'; id: string; name: string; arguments: string }
-  | { type: 'tool_end'; id: string; label: string | null; resultPreview: string; durationMs: number }
+  | {
+      type: 'tool_end';
+      id: string;
+      label: string | null;
+      resultPreview: string;
+      durationMs: number;
+      /** 웹 도구일 때만: 이 호출이 찾은 결과(검색·장소) 또는 읽은 페이지 (이슈 #367) */
+      webSources?: AiWebSource[];
+    }
   | { type: 'done'; reply: AiAssistantReplyView }
   | { type: 'error'; message: string };
 

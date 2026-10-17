@@ -6,6 +6,7 @@
 import { AI_ASSISTANT_TOOL_TITLE } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { webToolDoneText, webToolRunningText } from '@/lib/aiWebSearch';
 import { formatDuration } from '@/lib/meetingAnalysis';
 import type { AiChatLive, AiTimelineStep } from '@/stores/useAiChatStore';
 
@@ -70,12 +71,16 @@ function LiveThinking({ step }: { step: ThinkingStep }) {
 
 function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> }) {
   const { result } = step;
+  // 웹 도구는 개수·호스트만 보인다 (제목은 웹에서 온 글이라 이 줄에는 쓰지 않는다)
+  const webSummary = result ? webToolDoneText(step.name, result.webSources) : null;
   return (
     <p className="flex items-start gap-1.5 text-xs text-ink-2">
       <Icon name={result ? 'check-circle' : 'search'} size="sm" className="mt-0.5 flex-none text-ink-3" />
       <span className="min-w-0 break-words">
         <b className="font-semibold">{toolTitleOf(step.name)}</b>
-        {result ? ` · 완료 ${formatDuration(result.durationMs)}${result.label ? ` · ${result.label}` : ''}` : ' … 조회 중'}
+        {result
+          ? ` · 완료 ${formatDuration(result.durationMs)}${webSummary ? ` · ${webSummary}` : result.label ? ` · ${result.label}` : ''}`
+          : (webToolRunningText(step.name) ?? ' … 조회 중')}
       </span>
     </p>
   );
@@ -132,6 +137,7 @@ function DetailStep({ step }: { step: AiTimelineStep }) {
         <span className="font-mono text-cap text-ink-3">{step.name}</span>
         {step.result ? <span className="text-ink-3">{formatDuration(step.result.durationMs)}</span> : null}
         {step.result?.label ? <span className="text-ink-3">· {step.result.label}</span> : null}
+        {step.result && webToolDoneText(step.name, step.result.webSources) ? <span className="text-ink-3">· {webToolDoneText(step.name, step.result.webSources)}</span> : null}
       </span>
       <span className="font-mono text-cap break-all text-ink-3">입력 {step.arguments}</span>
       {step.result ? <pre className={PRE}>{step.result.resultPreview}</pre> : null}
