@@ -290,6 +290,8 @@ export interface UncastHeat {
   /** floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
   maxSlabQty: number;
   inspectionResult: InspectionResult | null;
+  /** 제강 완료 일시. 연주는 이 뒤에 시작한다 */
+  completedAt: string | null;
 }
 
 /** 작업 중 실적 */
@@ -329,6 +331,10 @@ export interface WorkContext {
   openWork: OpenWork[];
   lastBlastFurnaceCode: string | null;
   lastConverterCode: string | null;
+  /** 제선을 시작할 수 있는 가장 이른 일시 = 마지막 고로(lastBlastFurnaceCode)의 마지막 완료. 없으면 null */
+  earliestIronmakingStartedAt: string | null;
+  /** 제강을 시작할 수 있는 가장 이른 일시 = 마지막 전로가 비는 때와 히트 1개 몫의 용선이 모이는 때(생산 순) 중 늦은 쪽 */
+  earliestSteelmakingStartedAt: string | null;
 }
 
 // ── 열연 투입 (REQ-PRD-004, REQ-INV-006, BP-INV-01) ─────────────

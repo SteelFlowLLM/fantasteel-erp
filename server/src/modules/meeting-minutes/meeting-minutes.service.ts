@@ -23,6 +23,7 @@ import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
+import { GoogleDriveService } from '../integration/google-drive/google-drive.service';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
@@ -30,7 +31,7 @@ import { scheduleWeekLink, shortSeoulTime } from '../schedule-event/schedule-not
 import { TaskService } from '../notification/task.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
-import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingCandidateContextService } from './meeting-candidate.context';
 import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
@@ -151,6 +152,7 @@ export class MeetingMinutesService {
     private readonly contexts: MeetingCandidateContextService,
     private readonly businessEventRecorder: BusinessEventRecorder,
     private readonly notion: NotionPageService,
+    private readonly drive: GoogleDriveService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -179,6 +181,29 @@ export class MeetingMinutesService {
       { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING, transcript: null, transcriptSegments: Prisma.DbNull },
     );
     void this.runner.enqueue({ meetingMinutesId: id, audio: file.buffer, fileName, mimeType: file.mimetype || 'application/octet-stream', speakerCount: new Set(attendeeIds).size });
+    return this.get(id);
+  }
+
+  /**
+   * 회사 Google Drive 폴더의 녹음으로 만든다 (이슈 #361). 연결·폴더·파일(설정한 폴더 안, 녹음, 500MB 이하)을 먼저 확인해
+   * 잘못된 파일로 회의록을 남기지 않는다. 그 뒤는 음성 올리기와 같다: TRANSCRIBING으로 바로 돌려주고, 같은 전사 줄에서
+   * 차례가 오면 Drive에서 받아(메모리에만) 전사한다. 받기에 실패하면 FAILED + 이유. 원본은 Drive에 그대로 있고 이 서버에는 남기지 않는다.
+   */
+  async createFromDrive(user: AuthUser, dto: CreateMeetingMinutesFromDriveDto): Promise<MeetingMinutesView> {
+    const file = await this.drive.checkFile(dto.driveFileId, 'audio');
+    const id = await this.createRecord(
+      user,
+      { meetingMinutesTitle: dto.meetingMinutesTitle, meetingDate: dto.meetingDate, attendeeIds: dto.attendeeIds },
+      { meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING, transcript: null, transcriptSegments: Prisma.DbNull },
+    );
+    void this.runner.enqueue({
+      meetingMinutesId: id,
+      audio: null,
+      loadAudio: async () => (await this.drive.downloadAudio(file.id)).buffer,
+      fileName: file.name,
+      mimeType: file.mimeType || 'application/octet-stream',
+      speakerCount: new Set(dto.attendeeIds).size,
+    });
     return this.get(id);
   }
 

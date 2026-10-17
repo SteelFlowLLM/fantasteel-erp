@@ -23,3 +23,16 @@ export function fromDateTimeLocal(text: string): string {
 
 /** 지금부터 hours시간 전의 입력칸 값 (작업일시 기본값) */
 export const dateTimeLocalHoursAgo = (hours: number, now: Date = new Date()): string => toDateTimeLocal(new Date(now.getTime() - hours * 3_600_000));
+
+/**
+ * 작업 시작 일시 기본값: hours시간 전. 앞 공정이나 같은 설비의 앞 작업(earliest)이 그보다 늦게 끝났으면 그 뒤 첫 분.
+ * 입력칸이 분 단위라 올려야 서버의 시간 순서·설비 겹침 검증을 통과한다.
+ */
+export function defaultStartedLocal(hours: number, earliest: string | null, now: Date = new Date()): string {
+  const from = now.getTime() - hours * 3_600_000;
+  const ready = earliest ? new Date(earliest).getTime() : Number.NaN;
+  return toDateTimeLocal(new Date(Number.isNaN(ready) ? from : Math.max(from, Math.ceil(ready / 60_000) * 60_000)));
+}
+
+/** 둘 중 늦은 입력칸 값 ('YYYY-MM-DDTHH:mm'은 글자 순서가 곧 시간 순서) */
+export const laterLocal = (a: string, b: string): string => (a >= b ? a : b);

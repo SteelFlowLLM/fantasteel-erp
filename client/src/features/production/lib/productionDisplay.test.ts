@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProductionPlanStatus } from '@/codes';
-import { fromDateTimeLocal, toDateTimeLocal } from '@/features/production/lib/dateTimeLocal';
+import { defaultStartedLocal, fromDateTimeLocal, laterLocal, toDateTimeLocal } from '@/features/production/lib/dateTimeLocal';
 import { actualLossRateText, countResultsByProcess, fmtYieldRate, planProcesses, processStepItems } from '@/features/production/lib/productionDisplay';
 
 describe('생산 화면 표시 계산', () => {
@@ -67,5 +67,16 @@ describe('생산 화면 표시 계산', () => {
     expect(fromDateTimeLocal('2026-10-01T08:30')).toBe('2026-09-30T23:30:00.000Z');
     expect(fromDateTimeLocal('2026-10-01 08:30')).toBe('');
     expect(toDateTimeLocal(null)).toBe('');
+  });
+
+  it('작업 시작 기본값: 앞 공정·같은 설비의 앞 작업이 늦게 끝났으면 그 뒤 첫 분, 완료는 시작보다 이르지 않게', () => {
+    const now = new Date('2026-10-16T07:00:20.000Z'); // 서울 16:00:20
+    expect(defaultStartedLocal(1, null, now)).toBe('2026-10-16T15:00');
+    expect(defaultStartedLocal(1, '2026-10-16T05:30:00.000Z', now)).toBe('2026-10-16T15:00');
+    // 용선이 16:00:15에 나왔다: 16:00으로 내리면 그보다 이르므로 16:01
+    expect(defaultStartedLocal(1, '2026-10-16T07:00:15.000Z', now)).toBe('2026-10-16T16:01');
+    expect(defaultStartedLocal(1, '2026-10-16T07:00:00.000Z', now)).toBe('2026-10-16T16:00');
+    expect(defaultStartedLocal(1, 'x', now)).toBe('2026-10-16T15:00');
+    expect(laterLocal('2026-10-16T16:00', '2026-10-16T16:01')).toBe('2026-10-16T16:01');
   });
 });

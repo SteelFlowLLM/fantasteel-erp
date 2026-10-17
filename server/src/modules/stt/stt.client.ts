@@ -49,7 +49,8 @@ export class SttClient {
   async transcribe(endpoint: SttEndpoint, input: SttTranscribeInput, timeoutMs = TRANSCRIBE_TIMEOUT_MS): Promise<SttTranscript> {
     const url = `${normalizeBaseUrl(endpoint.baseUrl)}/audio/transcriptions`;
     const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(input.audio)], { type: input.mimeType }), input.fileName);
+    // Buffer를 그대로 넘긴다: new Uint8Array(buffer)는 한 벌 더 복사해 500MB 녹음이면 메모리가 크게 늘어난다 (Blob은 어차피 자기 몫을 복사한다)
+    form.append('file', new Blob([input.audio as Uint8Array<ArrayBuffer>], { type: input.mimeType }), input.fileName);
     form.append('model', input.model || DEFAULT_MODEL);
     form.append('language', input.language ?? 'ko');
     form.append('response_format', 'verbose_json');

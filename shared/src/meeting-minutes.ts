@@ -62,6 +62,19 @@ export interface MeetingMinutesCreateInput {
   transcript: string;
 }
 
+/**
+ * POST meeting-minutes/audio/from-drive (이슈 #361). 회사 Google Drive 폴더의 녹음으로 만든다.
+ * 음성 올리기(multipart)와 같은 칸이지만 JSON이라 attendeeIds는 숫자 배열이다.
+ */
+export interface MeetingMinutesFromDriveInput {
+  meetingMinutesTitle: string;
+  /** YYYY-MM-DD */
+  meetingDate: string;
+  attendeeIds: number[];
+  /** 설정한 Drive 폴더 안의 녹음 파일 id (GET integrations/google-drive/files?kind=audio) */
+  driveFileId: string;
+}
+
 /** 목록 한 줄 (API-259 목록) */
 export interface MeetingMinutesListItem {
   id: number;

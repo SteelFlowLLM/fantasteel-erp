@@ -990,14 +990,14 @@ Table action_draft {
 
 Table integration_connection {
   id int [pk, increment]
-  provider_key varchar [unique, not null, note: '연결 대상 (notion …). 서버 코드의 프리셋 키. 공통 코드 아님']
+  provider_key varchar [unique, not null, note: '연결 대상 (notion, google-drive). 서버 코드의 프리셋 키. 공통 코드 아님']
   server_url varchar [note: 'MCP 서버 주소 (Streamable HTTP). MCP가 아닌 연결(REST API + OAuth)은 비어 있다']
   oauth_client_information text [note: 'OAuth 클라이언트 정보 (AES-256-GCM 암호문). MCP는 동적 등록 결과, 일반 OAuth는 관리자가 넣은 client id·secret']
   oauth_tokens text [note: '액세스·리프레시 토큰 (AES-256-GCM 암호문)']
   oauth_code_verifier text [note: 'PKCE code verifier (AES-256-GCM 암호문). 연결 중에만 있다']
   oauth_state varchar [unique, note: 'OAuth 콜백 확인값. 연결 중에만 있다']
   oauth_state_expires_at timestamptz [note: 'oauth_state 만료 시각']
-  settings jsonb [not null, default: `'{}'`, note: '연결별 설정 (Notion: 회의록을 넣을 상위 페이지 id)']
+  settings jsonb [not null, default: `'{}'`, note: '연결별 설정 (Notion: 회의록을 넣을 상위 페이지 id, Google Drive: 녹음·사진을 올리는 폴더 id)']
   connected_by_id int [ref: > employee.id, note: '마지막으로 연결을 시작한 관리자']
   connected_at timestamptz [note: '연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다']
   last_error varchar [note: '마지막 실패 이유 (비밀값 없음)']
@@ -1009,8 +1009,8 @@ Table integration_connection {
   }
 
   Note: '''
-외부 서비스 연결 (2026-10-16 추가, 이슈 #358). 회사 계정 하나로 연결하고 모든 사원이 함께 쓴다 (사원별 연결 없음).
-Notion은 원격 MCP 서버(OAuth 동적 등록 + PKCE), 이후 Google Drive는 REST API + 일반 OAuth 2.0으로 같은 행 모양을 쓴다.
+외부 서비스 연결 (2026-10-16 추가, 이슈 #358·#361). 회사 계정 하나로 연결하고 모든 사원이 함께 쓴다 (사원별 연결 없음).
+Notion은 원격 MCP 서버(OAuth 동적 등록 + PKCE), Google Drive는 REST API v3 + 일반 OAuth 2.0(관리자가 넣은 client id·secret, PKCE)으로 같은 행 모양을 쓴다.
 토큰·클라이언트 정보·code verifier는 서버 환경변수 INTEGRATION_SECRET_KEY로 암호화해 저장한다.
 '''
 }

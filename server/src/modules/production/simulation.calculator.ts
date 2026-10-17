@@ -35,12 +35,12 @@ export function castingLoss(plannedQty: number, sampleLossRate: string): { lossQ
 export const SIMULATION_HOURS = { IRONMAKING: 4, STEELMAKING: 1, CONTINUOUS_CASTING: 2, HOT_ROLLING: 2 } as const;
 
 /**
- * 작업 시간을 지금을 끝으로 거꾸로 이어 붙인다. 오늘(서울) 0시보다 앞으로 넘어가면 0시~지금 안으로 비율대로 줄인다.
- * 오늘 입고한 원료도 쓸 수 있게 한다 (원료 FIFO는 작업 완료일까지 입고된 LOT만 쓴다).
+ * 작업 시간을 지금을 끝으로 거꾸로 이어 붙인다. earliest(오늘(서울) 0시 또는 마지막 관련 실적 완료)보다 앞으로 넘어가면
+ * earliest~지금 안으로 비율대로 줄인다. 오늘 입고한 원료도 쓸 수 있게 한다 (원료 FIFO는 작업 완료일까지 입고된 LOT만 쓴다).
  */
-export function layoutSteps(hours: readonly number[], now: Date, todayStart: Date): { startedAt: Date; completedAt: Date }[] {
+export function layoutSteps(hours: readonly number[], now: Date, earliest: Date): { startedAt: Date; completedAt: Date }[] {
   const total = hours.reduce((sum, h) => sum + h, 0) * 3_600_000;
-  const available = Math.max(0, now.getTime() - todayStart.getTime());
+  const available = Math.max(0, now.getTime() - earliest.getTime());
   const scale = total > available ? available / total : 1;
   let cursor = now.getTime() - total * scale;
   return hours.map((h) => {

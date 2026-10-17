@@ -33,6 +33,7 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 | `npm run test:unit -w @fantasteel/server` | DB 없이 공통 단위 테스트만 |
 | `npm run typecheck` | shared·server·client 타입 검사 |
 | `npm run check-orphans -w @fantasteel/server` | 고아 데이터 점검 (시드 후·PR 전, 컨벤션 7-2) |
+| `npm run check-invariants -w @fantasteel/server` | 업무 불변식 점검: 재고 수량·원료/용선 잔량·실적 순서·설비 겹침·예약 (읽기만, 위반 있으면 종료 코드 1, `-- --all`로 위반 행 모두) |
 | `npm run generate:sql -w @fantasteel/server` | `prisma/sql/*.sql` TypedSQL 타입 생성 (DB 필요) |
 | `npm run codes -w @fantasteel/shared` | 공통 코드 정의서 2장 → `shared/src/codes/index.ts` 다시 만들기 |
 

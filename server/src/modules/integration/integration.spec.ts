@@ -239,6 +239,8 @@ describe('연결 전', () => {
       connectedBy: null,
       lastError: null,
       settings: { parentPageId: null },
+      redirectUri: null,
+      oauthClient: null,
     });
   });
 
@@ -330,7 +332,7 @@ describe('OAuth 연결', () => {
   it('연결 확인: 도구 목록을 받고 필요한 도구가 있는지 본다', async () => {
     const { status, body } = await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie);
     expect(status).toBe(200);
-    expect(body.data).toMatchObject({ ok: true, tools: ['notion-search', 'notion-create-pages'], missingTools: [], error: null });
+    expect(body.data).toMatchObject({ ok: true, tools: ['notion-search', 'notion-create-pages'], missingTools: [], error: null, driveFolder: null });
   });
 
   it('액세스 토큰이 만료되면 리프레시 토큰으로 갱신해 이어 간다', async () => {
