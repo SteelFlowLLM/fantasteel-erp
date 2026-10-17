@@ -47,10 +47,12 @@ export interface AiAskVariables {
   images?: AiAssistantImageInput[];
   /** 웹 검색을 켠 질문이면 true (이슈 #367). 끄면 필드를 보내지 않는다 */
   webSearch?: boolean;
+  /** 브라우저 사용을 켠 질문이면 true (이슈 #373). 끄면 필드를 보내지 않는다 */
+  browser?: boolean;
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch, browser }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -62,7 +64,7 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   try {
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
-      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}) },
+      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}) },
       (event) => {
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
@@ -80,14 +82,14 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const history = aiChatHistory(chat.entries);
     const questionId = newAiChatId();
-    chat.addQuestion(questionId, text, reasoning, images, webSearch);
-    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch });
+    chat.addQuestion(questionId, text, reasoning, images, webSearch, browser);
+    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch, browser });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }
