@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { ResponseInterceptor } from './common/http/response.interceptor';
 import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
+import { AiResearchModule } from './modules/ai-research/ai-research.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -60,6 +61,7 @@ import { PrismaModule } from './prisma/prisma.module';
     SttModule,
     PastCaseModule,
     AiAssistantModule,
+    AiResearchModule,
     FactoryAgentModule,
   ],
   providers: [

@@ -198,16 +198,43 @@ export function parseAiReply(content: string | null): { text: string; dataTools:
 }
 
 /** '@AI' 뒤에 영문·숫자가 이어지지 않는 호출만 (@AI야·@AI, 는 호출, @AIR는 아님) */
-const AI_MENTION_PATTERN = /(^|\s)@AI(?![A-Za-z0-9_])/i;
+const AI_MENTION_PATTERN = /(^|\s)@AI(?![A-Za-z0-9_])/gi;
 
-export function mentionsAi(content: string): boolean {
-  return AI_MENTION_PATTERN.test(content);
+const blank = (match: string): string => match.replace(/[^\n]/g, ' ');
+
+/**
+ * 호출로 치지 않는 자리(펜스 코드 블록 ```…```, 인라인 코드 `…`, '>'로 시작하는 인용 줄)를 공백으로 가린 글.
+ * 길이를 그대로 두어 가린 글에서 찾은 위치를 원문에 쓸 수 있다. 닫히지 않은 펜스는 글 끝까지 코드로 본다.
+ */
+function withoutQuotedParts(content: string): string {
+  return content
+    .replace(/```[\s\S]*?(?:```|$)/g, blank)
+    .replace(/`[^`\n]*`/g, blank)
+    .replace(/^[ \t]*>.*$/gm, blank);
 }
 
-/** @AI 표시를 뺀 질문 */
+function mentionRanges(content: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  for (const match of withoutQuotedParts(content).matchAll(AI_MENTION_PATTERN)) {
+    const start = match.index + match[1].length;
+    ranges.push({ start, end: start + '@AI'.length });
+  }
+  return ranges;
+}
+
+export function mentionsAi(content: string): boolean {
+  return mentionRanges(content).length > 0;
+}
+
+/** @AI 표시를 뺀 질문 (코드·인용 안의 @AI는 글로 남긴다) */
 export function aiQuestionOf(content: string): string {
-  return content
-    .replace(new RegExp(AI_MENTION_PATTERN.source, 'gi'), '$1')
+  let rest = '';
+  let from = 0;
+  for (const { start, end } of mentionRanges(content)) {
+    rest += content.slice(from, start);
+    from = end;
+  }
+  return (rest + content.slice(from))
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[,:;]\s*/, '');

@@ -4,21 +4,26 @@
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { aiResearchApi } from '@/api/aiResearch';
 import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
-import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
+import { AiBrowserFramesDetails, AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
+import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
+import { useAction } from '@/hooks/useAction';
 import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
+import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
+import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
 
@@ -61,6 +66,7 @@ const STICK_TO_BOTTOM_PX = 80;
 export function AiPanel() {
   const me = useMe();
   const pathname = usePathname();
+  const router = useRouter();
   const close = useShellStore((state) => state.closeAiPanel);
   const context = useShellStore((state) => state.aiContext);
   const expanded = useShellStore((state) => state.aiPanelExpanded);
@@ -76,10 +82,28 @@ export function AiPanel() {
   const [reasoning, setReasoning] = useState<AiReasoningLevel>(AI_REASONING_DEFAULT);
   const [oneShot, setOneShot] = useState(true);
   const [dragging, setDragging] = useState(false);
+  const [webSearchPref, setWebSearchPref] = useState(false);
+  const [browserPref, setBrowserPref] = useState(false);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
   const reasoningOff = capabilities.data?.reasoning === false;
+  // 웹 검색: 엔진이 하나도 없거나 AI 연결 정보를 못 읽었을 때만 막는다 (읽는 중에는 막지 않는다)
+  const webEngineHint = webSearchEngineHint(capabilities.data?.webSearch);
+  const webSearchBlocked = capabilities.isError || capabilities.data?.webSearch?.engines.length === 0;
+  const webSearchOn = webSearchPref && !webSearchBlocked;
+  // 브라우저 사용: 서버가 못 쓴다고 했거나 연결 정보를 못 읽었을 때만 막는다 (읽는 중에는 막지 않는다)
+  const browserBlockedReason = browserDisabledReason(capabilities.data, capabilities.isError);
+  const browserOn = browserPref && browserBlockedReason === null;
+  // 심층 조사 (이슈 #378): 서버가 모델이 정해져 있다고 알릴 때만. 지금 입력한 글로 조사를 만들고 그 화면으로 간다
+  const deepResearchOn = capabilities.data?.deepResearch?.available === true;
+  const sendToResearch = useAction(aiResearchApi.create, {
+    success: '심층 조사 계획을 세우고 있어요',
+    onSuccess: (run) => {
+      setDraft('');
+      router.push(`/ai-research?id=${run.id}`);
+    },
+  });
   const photos = useAiImageDraft();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -98,10 +122,12 @@ export function AiPanel() {
     const saved = readAiReasoningPreference();
     setReasoning(saved.level);
     setOneShot(saved.oneShot);
+    setWebSearchPref(readAiWebSearchPreference());
+    setBrowserPref(readAiBrowserPreference());
   }, []);
 
   // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
-  const liveSize = live ? `${live.steps.length}:${live.answer.length}:${lastStepSize(live)}` : '';
+  const liveSize = live ? `${live.steps.length}:${live.answer.length}:${lastStepSize(live)}:${live.browserFrames.length}` : '';
   useEffect(() => {
     const scroller = scrollRef.current;
     if (scroller && stickRef.current) scroller.scrollTop = scroller.scrollHeight;
@@ -121,6 +147,16 @@ export function AiPanel() {
   const changeReasoning = (level: AiReasoningLevel) => {
     setReasoning(level);
     writeAiReasoningPreference({ level, oneShot });
+  };
+
+  const changeWebSearch = (on: boolean) => {
+    setWebSearchPref(on);
+    writeAiWebSearchPreference(on);
+  };
+
+  const changeBrowser = (on: boolean) => {
+    setBrowserPref(on);
+    writeAiBrowserPreference(on);
   };
 
   const changeOneShot = (checked: boolean) => {
@@ -143,7 +179,7 @@ export function AiPanel() {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn);
     setDraft('');
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
@@ -163,7 +199,7 @@ export function AiPanel() {
   const retry = (failure: FailureEntry) => {
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images);
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null);
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
@@ -304,6 +340,20 @@ export function AiPanel() {
               />
             </div>
             <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
+            <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
+            <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
+            {deepResearchOn ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="search"
+                disabled={draft.trim().length < 2 || sendToResearch.isPending}
+                title="웹을 여러 번 찾아 읽고 출처가 달린 보고서를 써요. 먼저 조사 계획을 보여 줘요"
+                onClick={() => sendToResearch.mutate(draft.trim())}
+              >
+                심층 조사로 보내기
+              </Button>
+            ) : null}
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
             {pending ? (
               <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>
@@ -415,6 +465,49 @@ function ReasoningPicker({ level, oneShot, disabled, onLevel, onOneShot }: { lev
   );
 }
 
+/** 웹 검색 켜기. 켜면 이 질문에 인터넷 검색 도구를 쓰고, 질문 글이 검색 엔진으로 나간다 (이슈 #367) */
+function WebSearchToggle({ on, blocked, hint, onChange }: { on: boolean; blocked: boolean; hint: string; onChange: (on: boolean) => void }) {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={AI_WEB_SEARCH_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="웹 검색"
+        aria-describedby="ai-web-search-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="search" size="sm" />웹 검색
+      </button>
+      <span id="ai-web-search-hint">{blocked ? hint : on ? `${hint ? `${hint} · ` : ''}질문 글이 검색 엔진으로 나가요` : hint}</span>
+    </div>
+  );
+}
+
+/** 브라우저 사용 켜기. 켜면 이 질문에 철강맨AI가 설치된 Chrome으로 웹 페이지를 열고 눌러 본다 (이슈 #373) */
+function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedReason: string | null; onChange: (on: boolean) => void }) {
+  const blocked = blockedReason !== null;
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={AI_BROWSER_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="브라우저"
+        aria-describedby="ai-browser-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="search" size="sm" />브라우저
+      </button>
+      <span id="ai-browser-hint">{blocked ? blockedReason : on ? AI_BROWSER_TITLE : ''}</span>
+    </div>
+  );
+}
+
 /** 질문 칸 위에 붙여 둔 사진. 보내기 전에 하나씩 뺄 수 있다 */
 function DraftImages({ images, onRemove }: { images: readonly PreparedAiImage[]; onRemove: (index: number) => void }) {
   return (
@@ -475,21 +568,26 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
     <div className="flex gap-3">
       <SteelmanAiMark framed />
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
-        <p className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{entry.content}</p>
+        <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
+        <AiWebSources sources={entry.webSources} />
         {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} /> : null}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
-          <span className="font-semibold text-ink-2">출처</span>
-          {entry.sources.length ? (
-            entry.sources.map((source) => (
-              <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
-                <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
-                {sourceText(source)}
-              </span>
-            ))
-          ) : (
-            <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
-          )}
-        </div>
+        {/* 웹 출처만 있는 답에 '출처 없음'을 함께 보이면 서로 어긋나 보여서, 그때는 ERP 출처 줄을 숨긴다 */}
+        {entry.sources.length || !entry.webSources?.length ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
+            <span className="font-semibold text-ink-2">출처</span>
+            {entry.sources.length ? (
+              entry.sources.map((source) => (
+                <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
+                  <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
+                  {sourceText(source)}
+                </span>
+              ))
+            ) : (
+              <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
+            )}
+          </div>
+        ) : null}
+        <AiBrowserFramesDetails frames={entry.browserFrames} />
         <AiStepsDetails steps={entry.steps} />
         {entry.reasoningApplied === false && entry.requestedReasoning && entry.requestedReasoning !== AI_REASONING_DEFAULT ? (
           <p className="text-cap text-ink-3">이 모델은 생각 정도를 바꿀 수 없어 기본값으로 답했어요</p>
