@@ -63,6 +63,13 @@ export class AskAiAssistantDto {
   @Max(2147483647)
   meetingMinutesId?: number;
 
+  /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (내 완료한 조사만, 이슈 #384) */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  researchRunId?: number;
+
   /** 철강맨AI 패널만 true로 보낸다. 사내 채팅 @AI·회의 질문은 카드를 보여 줄 곳이 없어 보내지 않는다 */
   @IsOptional()
   @IsBoolean()

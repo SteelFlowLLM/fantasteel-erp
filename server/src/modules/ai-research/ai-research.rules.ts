@@ -1,6 +1,7 @@
 import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
 import { cutText, internalReferenceIn, redactQuery, stripInvisible } from '../ai-assistant/web/web-text';
+import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
 
 /** DB의 sources jsonb 한 줄. readText는 읽은 페이지 본문 (6,000자까지) */
 export interface StoredSource {
@@ -47,28 +48,34 @@ export const EMPTY_STATE: StoredState = { summary: '', gaps: [], unsupportedClai
 
 // ───────────────────────────── 예산 ─────────────────────────────
 
-export function defaultBudget(): AiResearchBudget {
-  return { maxSteps: AI_RESEARCH_LIMITS.defaultMaxSteps, maxSources: AI_RESEARCH_LIMITS.defaultMaxSources };
+/** 새 조사의 예산: 환경 변수 기본값, 조사별 요청(budget)이 있으면 상한 안에서 그 값 */
+export function defaultBudget(requested: Partial<AiResearchBudget> = {}, limits: ResearchLimits = researchLimits()): AiResearchBudget {
+  const pick = (v: number | undefined, fallback: number, cap: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? Math.min(v, cap) : fallback);
+  return { maxSteps: pick(requested.maxSteps, limits.maxSteps, RESEARCH_CAPS.maxSteps), maxSources: pick(requested.maxSources, limits.maxSources, RESEARCH_CAPS.maxSources) };
 }
 
 /** 단계를 다 써서(또는 검색이 막혀 멈춰서) 끝났고 모르는 것이 남았고 더 늘릴 수 있을 때만. 검색이 막혀 멈춘 때는 모르는 것 목록이 비어도 된다 */
-export function canExtend(run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: (AiResearchState & { searchDownAt?: number }) | null }): boolean {
-  if (run.status !== AI_RESEARCH_STATUS.COMPLETED || run.budget.maxSteps >= AI_RESEARCH_LIMITS.maxTotalSteps) return false;
+export function canExtend(
+  run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: (AiResearchState & { searchDownAt?: number }) | null },
+  limits: ResearchLimits = researchLimits(),
+): boolean {
+  if (run.status !== AI_RESEARCH_STATUS.COMPLETED || run.budget.maxSteps >= limits.maxTotalSteps) return false;
   if (run.state?.searchDownAt === run.stepsUsed) return true;
   return run.stepsUsed >= run.budget.maxSteps && (run.state?.gaps.length ?? 0) > 0;
 }
 
-/** +4단계, 모두 20단계까지 */
-export function extendedBudget(budget: AiResearchBudget): AiResearchBudget {
-  return { ...budget, maxSteps: Math.min(budget.maxSteps + AI_RESEARCH_LIMITS.extendSteps, AI_RESEARCH_LIMITS.maxTotalSteps) };
+/** +4단계, 모두 min(30, 기본 단계 × 2)까지 */
+export function extendedBudget(budget: AiResearchBudget, limits: ResearchLimits = researchLimits()): AiResearchBudget {
+  return { ...budget, maxSteps: Math.min(budget.maxSteps + AI_RESEARCH_LIMITS.extendSteps, limits.maxTotalSteps) };
 }
 
-export function readBudget(value: unknown): AiResearchBudget {
+/** DB의 budget jsonb. 상한(30단계·100개)만 다시 막는다 (만들 때 정한 값을 그대로 쓴다) */
+export function readBudget(value: unknown, limits: ResearchLimits = researchLimits()): AiResearchBudget {
   const raw = isRecord(value) ? value : {};
   const int = (v: unknown, fallback: number, max: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? Math.min(v, max) : fallback);
   return {
-    maxSteps: int(raw.maxSteps, AI_RESEARCH_LIMITS.defaultMaxSteps, AI_RESEARCH_LIMITS.maxTotalSteps),
-    maxSources: int(raw.maxSources, AI_RESEARCH_LIMITS.defaultMaxSources, AI_RESEARCH_LIMITS.defaultMaxSources),
+    maxSteps: int(raw.maxSteps, limits.maxSteps, RESEARCH_CAPS.maxSteps),
+    maxSources: int(raw.maxSources, limits.maxSources, RESEARCH_CAPS.maxSources),
   };
 }
 

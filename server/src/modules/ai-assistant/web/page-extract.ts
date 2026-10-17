@@ -85,6 +85,38 @@ export function extractPage(rawSource: string, contentType: string, url: string)
   return { title: pageTitle, text: domText(whole, { skipPageChrome: true }) };
 }
 
+/** PDF는 앞 20쪽만 읽는다 (글 뽑기 시간·메모리를 묶는다, 이슈 #384) */
+export const PDF_MAX_PAGES = 20;
+
+/**
+ * PDF → 제목과 글 (unpdf = pdf.js, 네이티브 모듈 없음). 앞 PDF_MAX_PAGES쪽만, 글은 EXTRACT_INPUT_MAX자까지.
+ * 글꼴은 불러오지 않는다(글만 뽑는다). 같은 스레드에서 돌므로 서버에서는 extractPdfIsolated(worker)로 부른다.
+ */
+export async function extractPdf(data: Uint8Array, url: string): Promise<ExtractedPage> {
+  const { getDocumentProxy } = await import('unpdf');
+  const pdf = await getDocumentProxy(data, { disableFontFace: true, useSystemFonts: false, stopAtErrors: false });
+  try {
+    const parts: string[] = [];
+    let size = 0;
+    for (let n = 1; n <= Math.min(pdf.numPages, PDF_MAX_PAGES) && size < EXTRACT_INPUT_MAX; n += 1) {
+      const content = await (await pdf.getPage(n)).getTextContent();
+      const text = content.items.map((item) => ('str' in item ? `${item.str}${item.hasEOL ? '\n' : ''}` : '')).join('');
+      parts.push(text);
+      size += text.length;
+    }
+    let title = '';
+    try {
+      const info = (await pdf.getMetadata()).info as Record<string, unknown> | undefined;
+      title = typeof info?.Title === 'string' ? tidyText(info.Title) : '';
+    } catch {
+      // 메타데이터가 깨진 PDF는 주소로 제목을 정한다
+    }
+    return { title: title || fallbackTitle(url), text: tidyText(parts.join('\n\n').slice(0, EXTRACT_INPUT_MAX)) };
+  } finally {
+    await pdf.cleanup();
+  }
+}
+
 function fallbackTitle(url: string): string {
   try {
     return new URL(url).hostname;
@@ -105,10 +137,11 @@ export function limitPageText(text: string, max = PAGE_TEXT_MAX): { text: string
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
 if (workerData.modulePath.endsWith('.ts')) require('tsx/cjs');
-const { extractPage } = require(workerData.modulePath);
-parentPort.on('message', (job) => {
+const { extractPage, extractPdf } = require(workerData.modulePath);
+parentPort.on('message', async (job) => {
   try {
-    parentPort.postMessage({ type: 'done', page: extractPage(job.source, job.contentType, job.url) });
+    const page = job.pdf ? await extractPdf(job.pdf, job.url) : extractPage(job.source, job.contentType, job.url);
+    parentPort.postMessage({ type: 'done', page });
   } catch (error) {
     parentPort.postMessage({ type: 'failed', message: String(error && error.message) });
   }
@@ -126,6 +159,17 @@ type WorkerMessage = { type: 'ready' } | { type: 'done'; page: ExtractedPage } |
  * timeoutMs 안에 끝나지 않거나 worker가 죽으면(메모리·스택) worker를 끝내고 PageTooComplexError.
  */
 export function extractPageIsolated(source: string, contentType: string, url: string, timeoutMs = EXTRACT_TIMEOUT_MS): Promise<ExtractedPage> {
+  return runExtractWorker({ source: source.length > EXTRACT_INPUT_MAX ? source.slice(0, EXTRACT_INPUT_MAX) : source, contentType, url }, timeoutMs);
+}
+
+/** PDF 글 뽑기를 worker에서 (HTML과 같은 3초·메모리 한도). 읽지 못하면(깨진 PDF 포함) PageTooComplexError */
+export function extractPdfIsolated(body: Buffer, url: string, timeoutMs = EXTRACT_TIMEOUT_MS): Promise<ExtractedPage> {
+  return runExtractWorker({ pdf: new Uint8Array(body), url }, timeoutMs);
+}
+
+type ExtractJob = { source: string; contentType: string; url: string } | { pdf: Uint8Array; url: string };
+
+function runExtractWorker(job: ExtractJob, timeoutMs: number): Promise<ExtractedPage> {
   return new Promise<ExtractedPage>((resolve, reject) => {
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
@@ -146,7 +190,7 @@ export function extractPageIsolated(source: string, contentType: string, url: st
       if (message.type === 'ready') {
         clearTimeout(timer);
         timer = setTimeout(() => finish({ error: new PageTooComplexError() }), timeoutMs);
-        worker.postMessage({ source: source.length > EXTRACT_INPUT_MAX ? source.slice(0, EXTRACT_INPUT_MAX) : source, contentType, url });
+        worker.postMessage(job);
       } else if (message.type === 'done') {
         finish({ page: message.page });
       } else {

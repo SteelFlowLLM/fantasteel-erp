@@ -581,7 +581,7 @@ describe('웹 도구 모음 (한 답의 세션)', () => {
     const session = new AssistantWebToolbox(
       deps({
         pages: pages(async (url) => {
-          if (url.includes('wikipedia')) throw new WebFetchError('PDF는 아직 못 읽어요');
+          if (url.includes('wikipedia')) throw new WebFetchError('PDF가 5MB를 넘어 읽지 않았어요');
           return { url, title: '기사', text: '본문' };
         }),
       }),
@@ -589,7 +589,7 @@ describe('웹 도구 모음 (한 답의 세션)', () => {
     for (let i = 0; i < MAX_WEB_SEARCHES_PER_ANSWER; i += 1) await session.run(call('web_search', { query: `포항 ${i}` }));
     expect(JSON.parse((await session.run(call('web_search', { query: '하나 더' }))).content).오류).toContain(`${MAX_WEB_SEARCHES_PER_ANSWER}번까지만`);
     const pdf = await session.run(call('read_web_page', { url: 'https://ko.wikipedia.org/wiki/%ED%8F%AC%ED%95%AD%EC%A0%9C%EC%B2%A0%EC%86%8C' }));
-    expect(JSON.parse(pdf.content).오류).toBe('PDF는 아직 못 읽어요');
+    expect(JSON.parse(pdf.content).오류).toBe('PDF가 5MB를 넘어 읽지 않았어요');
     await session.run(call('read_web_page', { url: 'https://news.example.kr/article?id=7&lang=ko' }));
     await session.run(call('read_web_page', { url: 'https://news.example.kr/article?id=7&lang=ko' }));
     expect(JSON.parse((await session.run(call('read_web_page', { url: 'https://news.example.kr/article?id=7&lang=ko' }))).content).오류).toContain(`${MAX_PAGE_READS_PER_ANSWER}개까지만`);

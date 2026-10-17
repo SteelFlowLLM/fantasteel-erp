@@ -1,6 +1,7 @@
 import type { AiResearchEventView, AiResearchRunSummaryView, AiResearchRunView, AiResearchStatus } from '@fantasteel/shared';
 import type { AiResearchEvent, AiResearchRun } from '../../generated/prisma/client';
 import type { listAiResearchRuns } from '../../generated/prisma/sql';
+import { storedCharts } from './ai-research.charts';
 import { canExtend, readBudget, storedAudit, storedPlan, storedSources, storedState } from './ai-research.rules';
 
 export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSummaryView {
@@ -49,6 +50,8 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     incompleteReason: audit?.incompleteReason ?? null,
     failureReason: row.failureReason,
     canExtend: canExtend({ status, stepsUsed: row.stepsUsed, budget, state }),
+    charts: storedCharts(row.charts),
+    notionPageUrl: row.notionPageUrl,
     events: events.map((e) => ({ seq: e.seq, type: e.type, payload: e.payload, createdAt: e.createdAt.toISOString() }) as AiResearchEventView),
     lastSeq,
   };

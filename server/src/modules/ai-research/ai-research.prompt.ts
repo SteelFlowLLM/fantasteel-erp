@@ -1,15 +1,19 @@
 import { AI_RESEARCH_LIMITS, type AiResearchBudget, type AiResearchPlan } from '@fantasteel/shared';
 import type { ChatMessage, LlmJsonSchema } from '../llm/llm.client';
 import { cutText, UNTRUSTED_NOTE, wrapUntrusted } from '../ai-assistant/web/web-text';
+import { DEFAULT_RESEARCH_LIMITS, researchLimits, type ResearchLimits } from './ai-research.config';
 import type { StoredAudit, StoredSource, StoredState } from './ai-research.rules';
 
-/** 한 번의 LLM 요청(시스템 지시 + 사용자 글)의 글자 수 상한. 로컬 모델의 문맥 창에 넉넉히 들어가게 둔 가정값 */
-export const PROMPT_CHAR_BUDGET = 24_000;
-/** 한 차례에 모델에 보이는 출처 본문 수 (최근 것부터) */
-export const EXCERPT_SOURCES_MAX = 6;
-/** 점검·보고서에 보이는 출처 본문 수 */
-const FINAL_EXCERPT_SOURCES_MAX = 12;
+/** 한 번의 LLM 요청(시스템 지시 + 사용자 글)의 글자 수 상한 기본값. 환경 변수 AI_RESEARCH_PROMPT_CHARS로 바꾼다 (ai-research.config.ts) */
+export const PROMPT_CHAR_BUDGET = DEFAULT_RESEARCH_LIMITS.promptChars;
+/** 한 차례에 모델에 보이는 출처 본문 수 기본값 (최근 것부터). AI_RESEARCH_EVIDENCE_SOURCES */
+export const EXCERPT_SOURCES_MAX = DEFAULT_RESEARCH_LIMITS.evidenceSources;
 const EXCERPT_MIN = 200;
+/** 점검·보고서·차트는 출처를 모두(AI_RESEARCH_REPORT_SOURCES까지) 넣되, 한 출처에 이만큼은 보이도록 수를 줄인다 */
+const FINAL_EXCERPT_MIN = 1200;
+
+/** 프롬프트를 만들 때 쓰는 상한 (없으면 환경 변수에서 읽는다) */
+export type PromptLimits = Pick<ResearchLimits, 'promptChars' | 'evidenceSources' | 'reportSources'>;
 
 const COMMON_RULES = `규칙
 - 한국어로 쓴다.
@@ -108,6 +112,56 @@ export const REPORT_SYSTEM_PROMPT = `너는 웹 조사 보고서를 쓰는 작�
 - 맨 끝의 출처 목록은 서버가 붙이므로 쓰지 않는다.
 ${COMMON_RULES}`;
 
+export const CHART_SYSTEM_PROMPT = `너는 웹 조사 보고서에 붙일 차트를 고르는 정리자다. 모은 출처의 글에 실제로 적힌 숫자만으로 차트를 0~${AI_RESEARCH_LIMITS.maxCharts}개 제안한다.
+- 차트마다 title(제목), type("line": 시간에 따른 변화, "bar": 항목끼리 비교), unit(단위, 예: 만 톤·%·달러/톤), xLabel(가로축 이름), series(계열 이름 name과 점 points)를 쓴다.
+- 점마다 x(연도·항목 이름), y(숫자), sourceId(그 숫자가 적힌 출처 번호)를 쓴다. y는 출처 글에 적힌 숫자를 그대로 쓴다(1,234 → 1234, 1.2만 → 1.2 또는 12000, 56.7% → 56.7). 계산·추정·반올림한 숫자는 쓰지 않는다.
+- 같은 차트의 숫자는 단위가 같아야 한다. 점이 2개 이상 되는 차트만 낸다. 알맞은 숫자가 없으면 charts를 빈 목록으로 답한다.
+${COMMON_RULES}
+JSON만 답한다.`;
+
+export const CHART_JSON_SCHEMA: LlmJsonSchema = {
+  name: 'research_charts',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['charts'],
+    properties: {
+      charts: {
+        type: 'array',
+        maxItems: AI_RESEARCH_LIMITS.maxCharts,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['title', 'type', 'unit', 'xLabel', 'series'],
+          properties: {
+            title: { type: 'string' },
+            type: { type: 'string', enum: ['line', 'bar'] },
+            unit: { type: 'string' },
+            xLabel: { type: 'string' },
+            series: {
+              type: 'array',
+              maxItems: AI_RESEARCH_LIMITS.maxChartSeries,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['name', 'points'],
+                properties: {
+                  name: { type: 'string' },
+                  points: {
+                    type: 'array',
+                    maxItems: AI_RESEARCH_LIMITS.maxChartPoints,
+                    items: { type: 'object', additionalProperties: false, required: ['x', 'y', 'sourceId'], properties: { x: { type: 'string' }, y: { type: 'number' }, sourceId: { type: 'integer' } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 export interface TurnPromptInput {
   question: string;
   plan: AiResearchPlan;
@@ -115,9 +169,10 @@ export interface TurnPromptInput {
   sources: readonly StoredSource[];
   stepsUsed: number;
   budget: AiResearchBudget;
+  limits?: PromptLimits;
 }
 
-/** 다음 행동을 묻는 메시지. 시스템 지시를 합쳐 PROMPT_CHAR_BUDGET 안이다 */
+/** 다음 행동을 묻는 메시지. 시스템 지시를 합쳐 promptChars 안이다 */
 export function buildTurnMessages(input: TurnPromptInput): ChatMessage[] {
   const searched = new Set(input.state.searchedQueries.map((q) => q.toLowerCase()));
   const fixed = [
@@ -128,8 +183,9 @@ export function buildTurnMessages(input: TurnPromptInput): ChatMessage[] {
     input.state.searchedQueries.length ? `[이미 한 검색어]\n${input.state.searchedQueries.slice(-20).map((q) => `- ${q}`).join('\n')}` : '[이미 한 검색어] 없음',
     sourceIndexBlock(input.sources),
   ];
-  const excerpts = pickRecentExcerpts(input.sources, EXCERPT_SOURCES_MAX);
-  return fit(TURN_SYSTEM_PROMPT, fixed, excerpts, '다음 행동 하나를 JSON으로 답해요.');
+  const limits = input.limits ?? researchLimits();
+  const excerpts = pickRecentExcerpts(input.sources, limits.evidenceSources);
+  return fit(TURN_SYSTEM_PROMPT, fixed, excerpts, '다음 행동 하나를 JSON으로 답해요.', limits.promptChars, EXCERPT_MIN);
 }
 
 export interface FinalPromptInput {
@@ -137,11 +193,13 @@ export interface FinalPromptInput {
   plan: AiResearchPlan;
   state: StoredState;
   sources: readonly StoredSource[];
+  limits?: PromptLimits;
 }
 
 export function buildAuditMessages(input: FinalPromptInput): ChatMessage[] {
   const fixed = [questionBlock(input.question), `[계획 제목] ${cutText(input.plan.title, 100)}`, stateBlock(input.state), sourceIndexBlock(input.sources)];
-  return fit(AUDIT_SYSTEM_PROMPT, fixed, pickFinalExcerpts(input.sources, []), '점검 결과를 JSON으로 답해요.');
+  const limits = input.limits ?? researchLimits();
+  return fit(AUDIT_SYSTEM_PROMPT, fixed, pickFinalExcerpts(input.sources, [], limits.reportSources), '점검 결과를 JSON으로 답해요.', limits.promptChars, FINAL_EXCERPT_MIN);
 }
 
 export function buildReportMessages(input: FinalPromptInput & { audit: StoredAudit }): ChatMessage[] {
@@ -158,7 +216,15 @@ export function buildReportMessages(input: FinalPromptInput & { audit: StoredAud
     .join('\n');
   const cited = audit.supportedClaims.flatMap((c) => c.sourceIds);
   const fixed = [questionBlock(input.question), cutText(auditText, 6000), stateBlock(input.state), sourceIndexBlock(input.sources)];
-  return fit(REPORT_SYSTEM_PROMPT, fixed, pickFinalExcerpts(input.sources, cited), '보고서를 마크다운으로 써요.');
+  const limits = input.limits ?? researchLimits();
+  return fit(REPORT_SYSTEM_PROMPT, fixed, pickFinalExcerpts(input.sources, cited, limits.reportSources), '보고서를 마크다운으로 써요.', limits.promptChars, FINAL_EXCERPT_MIN);
+}
+
+/** 차트 제안 (보고서 뒤). 출처 본문을 모두(상한 안에서) 보인다 */
+export function buildChartMessages(input: FinalPromptInput): ChatMessage[] {
+  const limits = input.limits ?? researchLimits();
+  const fixed = [questionBlock(input.question), `[계획 제목] ${cutText(input.plan.title, 100)}`, sourceIndexBlock(input.sources)];
+  return fit(CHART_SYSTEM_PROMPT, fixed, pickFinalExcerpts(input.sources, [], limits.reportSources), '차트 제안을 JSON으로 답해요.', limits.promptChars, FINAL_EXCERPT_MIN);
 }
 
 export function buildPlanMessages(question: string): ChatMessage[] {
@@ -199,27 +265,28 @@ function pickRecentExcerpts(sources: readonly StoredSource[], max: number): Exce
 }
 
 /** 점검이 고른 출처 → 읽은 출처 → 나머지 순 */
-function pickFinalExcerpts(sources: readonly StoredSource[], preferred: readonly number[]): Excerpt[] {
+function pickFinalExcerpts(sources: readonly StoredSource[], preferred: readonly number[], max: number): Excerpt[] {
   const rank = (s: StoredSource) => (preferred.includes(s.id) ? 0 : s.readText !== undefined ? 1 : 2);
   return [...sources]
     .filter((s) => s.readText || s.snippet)
     .sort((a, b) => rank(a) - rank(b) || a.id - b.id)
-    .slice(0, FINAL_EXCERPT_SOURCES_MAX)
+    .slice(0, max)
     .map((s) => ({ source: s, text: s.readText ?? s.snippet }));
 }
 
 /**
- * 시스템 지시 + 고정 글 + 출처 본문을 상한 안에 맞춘다. 고정 글은 위에서 각각 줄여 두었고, 남은 글자를 본문들이 똑같이 나눠 쓴다.
- * 그래도 넘으면(고정 글이 아주 긴 경우) 사용자 글 뒤를 자른다.
+ * 시스템 지시 + 고정 글 + 출처 본문을 상한(budget) 안에 맞춘다. 고정 글은 위에서 각각 줄여 두었고, 남은 글자를 본문들이 똑같이 나눠 쓴다.
+ * 한 본문이 minEach보다 짧아지면 순위가 낮은 본문부터 뺀다. 그래도 넘으면(고정 글이 아주 긴 경우) 사용자 글 뒤를 자른다.
  */
-function fit(system: string, fixed: string[], excerpts: Excerpt[], ask: string): ChatMessage[] {
+function fit(system: string, fixed: string[], excerpts: Excerpt[], ask: string, budget: number, minEach: number): ChatMessage[] {
   const head = fixed.join('\n\n');
   const frame = `\n\n${UNTRUSTED_NOTE}\n\n\n\n${ask}`;
-  const room = PROMPT_CHAR_BUDGET - system.length - head.length - frame.length;
+  const room = budget - system.length - head.length - frame.length;
   const blocks: string[] = [];
   if (excerpts.length && room > 0) {
-    const each = Math.floor(room / excerpts.length);
-    for (const { source, text } of excerpts) {
+    const shown = excerpts.slice(0, Math.max(1, Math.min(excerpts.length, Math.floor(room / minEach))));
+    const each = Math.floor(room / shown.length);
+    for (const { source, text } of shown) {
       const label = `출처 [${source.id}] ${cutText(source.title, 80)}\n주소: ${source.url}\n\n`;
       // 감싸는 태그·이스케이프로 늘어나는 몫을 남긴다
       const allowance = each - label.length - 120;
@@ -228,7 +295,7 @@ function fit(system: string, fixed: string[], excerpts: Excerpt[], ask: string):
     }
   }
   let user = blocks.length ? `${head}\n\n${UNTRUSTED_NOTE}\n\n${blocks.join('\n')}\n\n${ask}` : `${head}\n\n${ask}`;
-  const max = PROMPT_CHAR_BUDGET - system.length;
+  const max = budget - system.length;
   if (user.length > max) user = `${user.slice(0, max - ask.length - 2)}\n\n${ask}`.slice(0, max);
   return [
     { role: 'system', content: system },

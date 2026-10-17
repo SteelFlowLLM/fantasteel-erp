@@ -1,15 +1,18 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_STATUS, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/assistant-web-toolbox';
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { AUDIT_JSON_SCHEMA, buildAuditMessages, buildPlanMessages, buildReportMessages, buildTurnMessages, PLAN_JSON_SCHEMA, TURN_JSON_SCHEMA } from './ai-research.prompt';
+import { checkCharts } from './ai-research.charts';
+import { notifyResearchFinished } from './ai-research.notify';
+import { AUDIT_JSON_SCHEMA, buildAuditMessages, buildChartMessages, buildPlanMessages, buildReportMessages, buildTurnMessages, CHART_JSON_SCHEMA, PLAN_JSON_SCHEMA, TURN_JSON_SCHEMA } from './ai-research.prompt';
 import { fallbackReportBody, finalizeReport } from './ai-research.report';
 import { AiResearchRepository, retryOnSeqConflict, type NewResearchEvent } from './ai-research.repository';
 import {
@@ -128,6 +131,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     private readonly llmClient: LlmClient,
     private readonly llmSettings: LlmSettingsStore,
     private readonly webTools: AssistantWebToolbox,
+    private readonly notifications: NotificationService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -213,7 +217,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       // 질문·웹 내용은 로그에 남기지 않는다
       this.logger.error(`조사 ${id} 실패: ${error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : error instanceof Error ? (error.stack ?? error.name) : 'unknown'}`);
       const reason = error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : RESEARCH_ERROR_REASON;
-      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }]).catch((e: unknown) => {
+      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }], (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.FAILED)).catch((e: unknown) => {
         if (!(e instanceof LeaseLostError)) this.logger.error(`조사 ${id} 실패 상태를 저장하지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`);
       });
     } finally {
@@ -337,12 +341,46 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     }
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
+    // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
+    const charted = llmDown ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
     await this.save(
       ctx,
       AI_RESEARCH_STATUS.RUNNING,
-      { status: AI_RESEARCH_STATUS.COMPLETED, report, audit: json({ ...audit, reportTruncated: truncated, incompleteReason }), finishedAt: new Date(this.config.now()), failureReason: null, ...released },
-      [{ type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } }],
+      {
+        status: AI_RESEARCH_STATUS.COMPLETED,
+        report,
+        audit: json({ ...audit, reportTruncated: truncated, incompleteReason }),
+        charts: json(charted?.charts ?? []),
+        finishedAt: new Date(this.config.now()),
+        failureReason: null,
+        ...released,
+      },
+      [
+        { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } },
+        ...(charted ? [{ type: 'charts.ready' as const, payload: { count: charted.charts.length, droppedPoints: charted.droppedPoints } }] : []),
+      ],
+      (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.COMPLETED),
     );
+  }
+
+  /** 보고서 뒤 차트 제안 (JSON 한 번). 점마다 출처 글에 그 숫자가 있는지 확인한다. LLM 실패·못 읽음이면 null (차트 없이 끝낸다) */
+  private async charts(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, state: StoredState, sources: StoredSource[]): Promise<{ charts: AiResearchChart[]; droppedPoints: number } | null> {
+    if (!sources.length) return null;
+    await this.assertMine(ctx);
+    try {
+      const value = await this.askJson(ctx, endpoint, buildChartMessages({ question, plan, state, sources }), CHART_JSON_SCHEMA, (v) => Array.isArray(v.charts));
+      return value ? checkCharts(value, sources) : null;
+    } catch (error) {
+      if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
+      this.logger.warn(`조사 ${ctx.id} 차트 제안 실패: ${error instanceof Error ? error.name : 'unknown'}`);
+      return null;
+    }
+  }
+
+  /** 끝난 조사(완료·실패)를 만든 사원에게 알린다 (같은 트랜잭션) */
+  private async notifyFinished(tx: Tx, id: number, status: typeof AI_RESEARCH_STATUS.COMPLETED | typeof AI_RESEARCH_STATUS.FAILED): Promise<void> {
+    const row = await this.repository.findById(tx, id);
+    if (row) await notifyResearchFinished(this.notifications, tx, row, status);
   }
 
   /**
@@ -483,7 +521,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   /** 내가 맡은 행일 때만 저장하고 이벤트를 붙인다 (같은 트랜잭션). 맡은 표시 시각은 renewLease(DB now())만 늘린다 */
-  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[]): Promise<void> {
+  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[], after?: (tx: Tx) => Promise<void>): Promise<void> {
     return retryOnSeqConflict(() =>
       this.prisma.$transaction(async (tx) => {
         const { count } = await this.repository.updateLeased(tx, ctx.id, this.owner, status, data);
@@ -492,6 +530,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           throw new LeaseLostError();
         }
         await this.repository.appendEvents(tx, ctx.id, events);
+        await after?.(tx);
       }),
     );
   }

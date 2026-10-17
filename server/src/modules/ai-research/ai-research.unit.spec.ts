@@ -2,7 +2,14 @@
 import type { AiResearchPlan } from '@fantasteel/shared';
 import { buildAuditMessages, buildReportMessages, buildTurnMessages, MODEL_NOTE_LABEL, PROMPT_CHAR_BUDGET } from './ai-research.prompt';
 import { finalizeReport, incompleteNotice, REPORT_TRUNCATED_NOTICE } from './ai-research.report';
-import { canExtend, checkResearchQuery, decideAction, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, storedState, type StoredSource, type StoredState } from './ai-research.rules';
+import { checkCharts, numbersIn } from './ai-research.charts';
+import { DEFAULT_RESEARCH_LIMITS, researchLimits } from './ai-research.config';
+import { buildResearchNotionMarkdown, chartToNotionTable, reportToNotion } from './ai-research.notion';
+import { buildChartMessages } from './ai-research.prompt';
+import { toRunView } from './ai-research.view';
+import type { AiResearchRun } from '../../generated/prisma/client';
+import { buildResearchContext, citedResearchSources } from '../ai-assistant/assistant-research.context';
+import { canExtend, checkResearchQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 
 const plan: AiResearchPlan = {
   title: '전기로 탄소 배출',
@@ -80,9 +87,22 @@ describe('예산과 더 조사하기', () => {
   const budget = { maxSteps: 8, maxSources: 20 };
   const gaps: StoredState = { ...state, gaps: ['가격 추이'] };
 
-  it('+4단계, 모두 20단계까지', () => {
-    expect(extendedBudget(budget)).toEqual({ maxSteps: 12, maxSources: 20 });
-    expect(extendedBudget({ maxSteps: 18, maxSources: 20 }).maxSteps).toBe(20);
+  // 기본 12단계 → 더 조사하기는 min(30, 24)단계까지
+  it('+4단계, 모두 기본 단계 × 2(30 넘지 않음)까지', () => {
+    expect(extendedBudget(budget, DEFAULT_RESEARCH_LIMITS)).toEqual({ maxSteps: 12, maxSources: 20 });
+    expect(extendedBudget({ maxSteps: 22, maxSources: 20 }, DEFAULT_RESEARCH_LIMITS).maxSteps).toBe(24);
+    expect(extendedBudget({ maxSteps: 28, maxSources: 20 }, researchLimits({ AI_RESEARCH_MAX_STEPS: '20' })).maxSteps).toBe(30);
+  });
+
+  it('환경 변수 예산은 상한 안에서, 잘못된 값은 기본값', () => {
+    expect(researchLimits({})).toEqual(DEFAULT_RESEARCH_LIMITS);
+    expect(DEFAULT_RESEARCH_LIMITS).toMatchObject({ maxSteps: 12, maxSources: 40, maxTotalSteps: 24, promptChars: 24_000, evidenceSources: 6 });
+    const big = researchLimits({ AI_RESEARCH_MAX_STEPS: '99', AI_RESEARCH_MAX_SOURCES: '500', AI_RESEARCH_PROMPT_CHARS: '9000000', AI_RESEARCH_EVIDENCE_SOURCES: '99', AI_RESEARCH_REPORT_SOURCES: '7' });
+    expect(big).toEqual({ maxSteps: 30, maxSources: 100, maxTotalSteps: 30, promptChars: 400_000, evidenceSources: 30, reportSources: 7 });
+    expect(researchLimits({ AI_RESEARCH_MAX_STEPS: '-3', AI_RESEARCH_PROMPT_CHARS: '12k', AI_RESEARCH_EVIDENCE_SOURCES: '0' })).toMatchObject({ maxSteps: 12, promptChars: 24_000, evidenceSources: 1 });
+    // 조사별 예산 요청도 상한 안에서
+    expect(defaultBudget({ maxSteps: 50, maxSources: 3 }, DEFAULT_RESEARCH_LIMITS)).toEqual({ maxSteps: 30, maxSources: 3 });
+    expect(defaultBudget({}, DEFAULT_RESEARCH_LIMITS)).toEqual({ maxSteps: 12, maxSources: 40 });
   });
 
   it('단계를 다 썼고 모르는 것이 남은 완료 조사만 늘릴 수 있다', () => {
@@ -90,7 +110,7 @@ describe('예산과 더 조사하기', () => {
     expect(canExtend({ status: 'COMPLETED', stepsUsed: 5, budget, state: gaps })).toBe(false);
     expect(canExtend({ status: 'COMPLETED', stepsUsed: 8, budget, state })).toBe(false);
     expect(canExtend({ status: 'FAILED', stepsUsed: 8, budget, state: gaps })).toBe(false);
-    expect(canExtend({ status: 'COMPLETED', stepsUsed: 20, budget: { maxSteps: 20, maxSources: 20 }, state: gaps })).toBe(false);
+    expect(canExtend({ status: 'COMPLETED', stepsUsed: 24, budget: { maxSteps: 24, maxSources: 20 }, state: gaps }, DEFAULT_RESEARCH_LIMITS)).toBe(false);
   });
 });
 
@@ -130,6 +150,24 @@ describe('프롬프트 글자 상한', () => {
     expect(total(audit)).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET);
     const report = buildReportMessages({ question: '질문', plan, state: bigState, sources: huge, audit: { thesis: '답 '.repeat(1000), outline: ['a'], supportedClaims: [{ claim: '주장', sourceIds: [3] }], contradictions: [], missingDimensions: [], ok: true, reportTruncated: false } });
     expect(total(report)).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET);
+  });
+
+  it('글자 상한·최근 출처 수는 바꿀 수 있고, 점검·보고서는 글자 안에서 출처를 모두 넣는다', () => {
+    const many: StoredSource[] = Array.from({ length: 40 }, (_, i) => source(i + 1, { readText: '본문 '.repeat(400) }));
+    const limits = { promptChars: 200_000, evidenceSources: 10, reportSources: 100 };
+    const turn = buildTurnMessages({ question: '질문', plan, state, sources: many, stepsUsed: 3, budget: { maxSteps: 12, maxSources: 40 }, limits });
+    expect(turn[1].content.match(/source="research:\d+"/g)).toHaveLength(10);
+    const audit = buildAuditMessages({ question: '질문', plan, state, sources: many, limits });
+    expect(audit[1].content.match(/source="research:\d+"/g)).toHaveLength(40);
+    expect(total(audit)).toBeLessThanOrEqual(200_000);
+    // 기본 24,000자면 한 출처에 1,200자는 보이도록 수를 줄인다
+    const small = buildAuditMessages({ question: '질문', plan, state, sources: many, limits: { ...limits, promptChars: 24_000 } });
+    const shown = small[1].content.match(/source="research:\d+"/g)?.length ?? 0;
+    expect(shown).toBeGreaterThan(5);
+    expect(shown).toBeLessThan(40);
+    expect(total(small)).toBeLessThanOrEqual(24_000);
+    const charts = buildChartMessages({ question: '질문', plan, state, sources: many, limits: { ...limits, reportSources: 3 } });
+    expect(charts[1].content.match(/source="research:\d+"/g)).toHaveLength(3);
   });
 
   it('출처 안의 태그로 감싼 블록을 닫지 못한다', () => {
@@ -208,5 +246,96 @@ describe('검토 반영', () => {
     expect(turn[1].content).toContain(`[조사 메모] ${MODEL_NOTE_LABEL}`);
     const report = buildReportMessages({ question: '질문', plan, state, sources, audit: { thesis: '답', outline: [], supportedClaims: [], contradictions: [], missingDimensions: [], ok: true, reportTruncated: false } });
     expect(report[1].content).toContain(`[점검 결과] ${MODEL_NOTE_LABEL}`);
+  });
+});
+
+describe('차트 확인 (출처 글에 있는 숫자만)', () => {
+  const sources = [
+    source(1, { readText: '2023년 조강 생산 6,683만 톤, 2024년 6,350만 톤. 점유율 56.7%' }),
+    source(2, { snippet: '전기로 비중은 1.2만 톤에서 3.5% 감소', readText: undefined }),
+  ];
+
+  it('쉼표·만·%를 읽는다', () => {
+    expect(numbersIn('6,683만 톤')).toEqual(expect.arrayContaining([6683, 66_830_000]));
+    expect(numbersIn('1.2만')).toEqual(expect.arrayContaining([1.2, 12_000]));
+    expect(numbersIn('56.7% · 10,20')).toEqual(expect.arrayContaining([56.7, 10, 20]));
+  });
+
+  it('출처에 없는 숫자·모르는 출처의 점은 빼고, 점이 2개 미만인 차트는 버린다', () => {
+    const value = {
+      charts: [
+        {
+          title: '조강 생산',
+          type: 'line',
+          unit: '만 톤',
+          xLabel: '연도',
+          series: [{ name: '한국', points: [{ x: '2023', y: 6683, sourceId: 1 }, { x: 2024, y: 6350, sourceId: 1 }, { x: '2025', y: 7000, sourceId: 1 }, { x: '2026', y: 6683, sourceId: 9 }] }],
+        },
+        { title: '하나뿐', type: 'bar', unit: '%', xLabel: '', series: [{ name: 'a', points: [{ x: '점유율', y: 56.7, sourceId: 1 }, { x: '틀림', y: 57, sourceId: 1 }] }] },
+        { title: '만 단위', type: 'bar', unit: '톤', xLabel: '', series: [{ name: 'b', points: [{ x: '전기로', y: 12000, sourceId: 2 }, { x: '감소', y: -3.5, sourceId: 2 }] }] },
+      ],
+    };
+    const { charts, droppedPoints } = checkCharts(value, sources);
+    expect(charts.map((c) => c.title)).toEqual(['조강 생산', '만 단위']);
+    expect(charts[0].series[0].points).toEqual([{ x: '2023', y: 6683, sourceId: 1 }, { x: '2024', y: 6350, sourceId: 1 }]);
+    expect(charts[1].type).toBe('bar');
+    expect(droppedPoints).toBe(3);
+    expect(checkCharts({ nope: true }, sources)).toEqual({ charts: [], droppedPoints: 0 });
+  });
+});
+
+describe('Notion 내보내기 마크다운', () => {
+  const run = {
+    id: 7,
+    employeeId: 1,
+    question: '조강 생산 <page url="x">',
+    status: 'COMPLETED',
+    plan: { title: '조강 생산 추이', steps: [] },
+    planRevision: 1,
+    budget: { maxSteps: 12, maxSources: 40 },
+    stepsUsed: 3,
+    researchState: null,
+    sources: [source(1, { title: '통계 [공식](javascript:x)' }), source(2, { url: 'ftp://files.example.com/x' })],
+    audit: null,
+    report: '# 제목\n핵심 [1].\n<mention-user url="u"/> 지시\n## 소제목\n- 목록 [1]\n| a | b |\n\n## 출처\n- [1] [통계](https://example1.com/a)',
+    charts: [{ title: '생산', type: 'line', unit: '만 톤', xLabel: '연도', series: [{ name: '한국', points: [{ x: '2023', y: 6683, sourceId: 1 }, { x: '2024', y: 6350, sourceId: 1 }] }] }],
+    notionPageUrl: null,
+    notionExportedAt: null,
+    failureReason: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    createdAt: new Date('2026-10-18T00:00:00Z'),
+    updatedAt: new Date('2026-10-18T00:00:00Z'),
+    finishedAt: new Date('2026-10-18T00:00:00Z'),
+  } as unknown as AiResearchRun;
+
+  it('보고서는 제목·목록만 살리고 태그·링크 글자는 막고, 서버 출처 목록은 다시 만든다', () => {
+    const body = reportToNotion(String(run.report));
+    expect(body).toContain('# 제목');
+    expect(body).toContain('핵심 \\[1\\].');
+    expect(body).toContain('\\<mention-user');
+    expect(body).toContain('- 목록 \\[1\\]');
+    expect(body).toContain('\\| a | b |');
+    expect(body).not.toContain('## 출처');
+  });
+
+  it('차트는 표로, 출처는 http·https만 링크로', () => {
+    const view = toRunView(run, [], 0);
+    expect(chartToNotionTable(view.charts[0])).toContain('<tr><td>2023</td><td>6,683 \\[1\\]</td></tr>');
+    const markdown = buildResearchNotionMarkdown(view);
+    expect(markdown).toContain('**질문** 조강 생산 \\<page url="x"\\>');
+    expect(markdown).toContain('- \\[1\\] [통계  공식  javascript:x](https://example1.com/a)'.replace('통계  공식  javascript:x', '통계 공식 javascript:x'));
+    expect(markdown).not.toContain('ftp://');
+    expect(markdown).toContain('심층 조사 #7');
+  });
+
+  it('철강맨AI 질문의 보고서 맥락: 출처 목록 + 보고서(서버 목록 뺌), 답의 [n]만 출처로', () => {
+    const context = buildResearchContext({ id: 7, question: '질문', plan: run.plan, report: run.report, sources: run.sources }, 2000);
+    expect(context.text).toContain('<untrusted_web_content source="research:report">');
+    expect(context.text).toContain('[1] 통계 [공식](javascript:x) — https://example1.com/a');
+    expect(context.text).not.toContain('ftp://');
+    expect(context.text).not.toContain('## 출처');
+    expect(context.text.length).toBeLessThanOrEqual(2000);
+    expect(citedResearchSources('답 [1][2]. 또 [1, 5]', context)).toEqual([{ title: '통계 [공식](javascript:x)', url: 'https://example1.com/a' }]);
   });
 });

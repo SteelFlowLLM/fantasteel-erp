@@ -38,12 +38,18 @@ export const AI_RESEARCH_LIMITS = {
   stepTitleMax: 100,
   /** 검색어 길이 (웹 검색과 같다) */
   queryMax: 80,
-  defaultMaxSteps: 8,
-  defaultMaxSources: 20,
-  /** 더 조사하기 한 번에 늘리는 단계 */
+  /** 서버 기본값 (서버는 환경 변수 AI_RESEARCH_MAX_STEPS·AI_RESEARCH_MAX_SOURCES로 바꿀 수 있다. 실제 값은 조사의 budget) */
+  defaultMaxSteps: 12,
+  defaultMaxSources: 40,
+  /** 단계·출처 상한 (환경 변수·조사별 budget 모두 이 안) */
+  maxStepsCap: 30,
+  maxSourcesCap: 100,
+  /** 더 조사하기 한 번에 늘리는 단계 (모두 min(30, 기본 단계 × 2)까지) */
   extendSteps: 4,
-  /** 늘려도 이 단계까지 */
-  maxTotalSteps: 20,
+  /** 차트 수·계열 수·점 수 상한 */
+  maxCharts: 2,
+  maxChartSeries: 4,
+  maxChartPoints: 24,
   /** 사원 한 명이 동시에 진행(계획·대기·조사 중)할 수 있는 조사 수 */
   activeRunsPerEmployee: 3,
 } as const;
@@ -110,6 +116,7 @@ export const AI_RESEARCH_EVENT_TYPES = [
   'failed',
   'cancelled',
   'budget.exhausted',
+  'charts.ready',
 ] as const;
 export type AiResearchEventType = (typeof AI_RESEARCH_EVENT_TYPES)[number];
 
@@ -126,6 +133,29 @@ export interface AiResearchEventPayloads {
   failed: { reason: string };
   cancelled: Record<string, never>;
   'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number; reason?: string };
+  /** 보고서 뒤 차트 제안. count는 확인을 통과한 차트 수, droppedPoints는 출처 글에서 찾지 못해 뺀 점 수 */
+  'charts.ready': { count: number; droppedPoints: number };
+}
+
+/** 차트 한 점. y는 출처(sourceId)의 글에 실제로 있는 숫자만 (서버가 확인한다) */
+export interface AiResearchChartPoint {
+  x: string;
+  y: number;
+  sourceId: number;
+}
+
+export interface AiResearchChartSeries {
+  name: string;
+  points: AiResearchChartPoint[];
+}
+
+/** 보고서와 함께 보는 차트 (코드 실행 없이 화면이 그린다) */
+export interface AiResearchChart {
+  title: string;
+  type: 'line' | 'bar';
+  unit: string;
+  xLabel: string;
+  series: AiResearchChartSeries[];
 }
 
 export type AiResearchEventView = {
@@ -165,6 +195,10 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   failureReason: string | null;
   /** 단계를 다 써서 끝났고 아직 모르는 것이 남아 더 조사할 수 있는지 */
   canExtend: boolean;
+  /** 출처의 숫자로 만든 차트 (2개까지). 없으면 [] */
+  charts: AiResearchChart[];
+  /** Notion으로 내보낸 페이지 주소. 내보내지 않았으면 null */
+  notionPageUrl: string | null;
   events: AiResearchEventView[];
   /** 지금까지의 마지막 이벤트 순번. 다음 조회의 afterSeq로 쓴다 */
   lastSeq: number;
@@ -177,6 +211,14 @@ export interface AiResearchCapabilities {
 
 export interface CreateAiResearchRunInput {
   question: string;
+  /** 조사별 예산 (없으면 서버 기본값). 상한(maxStepsCap·maxSourcesCap) 안에서만 */
+  budget?: Partial<AiResearchBudget>;
+}
+
+/** POST ai-research/runs/:id/notion-export */
+export interface AiResearchNotionExportResult {
+  notionPageUrl: string;
+  run: AiResearchRunView;
 }
 
 export interface UpdateAiResearchPlanInput {

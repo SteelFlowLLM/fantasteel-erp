@@ -23,6 +23,8 @@ export interface AiAssistantMessageInput {
   screen?: AiAssistantScreenContext;
   /** 회의록 상세에서 묻는 질문이면 그 회의록 id. 서버가 회의 내용을 읽어 질문의 맥락으로 쓴다 (Voice2ERP 회의 질문하기) */
   meetingMinutesId?: number;
+  /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (내 조사만). 서버가 보고서·출처 목록을 참고 자료로 넣는다 (이슈 #384) */
+  researchRunId?: number;
   /** true면 실행이 필요한 요청을 실행 카드로 만들어 답에 담는다 (철강맨AI 패널만 보낸다) */
   actionCards?: boolean;
   /** 오래된 것부터. 서버는 최근 몇 개만 쓴다 */

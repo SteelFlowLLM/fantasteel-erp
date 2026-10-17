@@ -1090,6 +1090,9 @@ model AiResearchRun {
   sources Json @default("[]") @db.JsonB /// 모은 출처 [{id, title, url, snippet, readText?}]
   audit Json? @db.JsonB /// 보고서 전 점검 {thesis, outline[], supportedClaims[], contradictions[], missingDimensions[], reportTruncated}
   report String? /// 보고서 (마크다운)
+  charts Json? @db.JsonB /// 출처의 숫자로 만든 차트 [{title, type, unit, xLabel, series:[{name, points:[{x, y, sourceId}]}]}] (2개까지)
+  notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소
+  notionExportedAt DateTime? @map("notion_exported_at") @db.Timestamptz(3) /// 내보낸 시각. 주소가 없으면 내보내는 중(잡은 시각)
   failureReason String? @map("failure_reason") @db.VarChar
   leaseOwner String? @map("lease_owner") @db.VarChar /// 맡은 서버 표시
   leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(3)
