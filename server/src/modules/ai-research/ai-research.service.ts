@@ -31,6 +31,7 @@ export class AiResearchService {
   async create(user: AuthUser, dto: CreateAiResearchRunDto): Promise<AiResearchRunView> {
     if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
     const run = await this.prisma.$transaction(async (tx) => {
+      await this.repository.lockEmployee(tx, user.employeeId);
       if ((await this.repository.countActive(tx, user.employeeId)) >= AI_RESEARCH_LIMITS.activeRunsPerEmployee) throw new AppException('RES-006');
       return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget() } });
     });
@@ -95,9 +96,9 @@ export class AiResearchService {
     return view;
   }
 
-  /** 취소: 끝나지 않은 조사만. 일꾼은 다음 저장에서 멈춘다 */
+  /** 취소: 끝나지 않은 조사만 */
   async cancel(user: AuthUser, id: number): Promise<AiResearchRunView> {
-    return retryOnSeqConflict(() =>
+    const view = await retryOnSeqConflict(() =>
       this.prisma.$transaction(async (tx) => {
         await this.owned(tx, user, id);
         const active = [AI_RESEARCH_STATUS.PLANNING, AI_RESEARCH_STATUS.AWAITING_APPROVAL, AI_RESEARCH_STATUS.QUEUED, AI_RESEARCH_STATUS.RUNNING];
@@ -107,6 +108,9 @@ export class AiResearchService {
         return this.view(tx, await this.owned(tx, user, id));
       }),
     );
+    // 이 서버가 하고 있으면 하던 LLM 요청·페이지 읽기를 바로 끊는다 (다른 서버는 표시를 늘리지 못할 때 끊는다)
+    this.runner.interrupt(id);
+    return view;
   }
 
   private async owned(tx: Tx, user: AuthUser, id: number): Promise<AiResearchRun> {

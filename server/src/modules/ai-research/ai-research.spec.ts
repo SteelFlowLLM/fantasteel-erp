@@ -10,11 +10,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AssistantWebToolbox, UserSearchLimiter } from '../ai-assistant/web/assistant-web-toolbox';
 import type { WebSearchClient } from '../ai-assistant/web/web-search.client';
 import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
-import { LlmClient, LlmJsonParseError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonOptions, type LlmJsonSchema } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { AiResearchRunner } from './ai-research.runner';
 
-type Turn = Record<string, unknown> | { parseError: string };
+/** parseError: JSON이 깨진 답, error: LLM 연결 실패, hang: 끊길(abort) 때까지 기다림 */
+type Turn = Record<string, unknown> | { parseError: string } | { error: string } | { hang: true };
 
 let app: INestApplication;
 let baseUrl: string;
@@ -29,6 +30,10 @@ let startId = 0;
 let turns: Turn[] = [];
 let turnPrompts: string[] = [];
 let reportText = '';
+let reportError: string | null = null;
+let auditCalls = 0;
+/** hang 차례가 시작되면 풀린다 (시험이 그때 취소한다) */
+let hangStarted: () => void = () => undefined;
 let onSearch: (query: string) => Promise<void> = async () => undefined;
 const searched: string[] = [];
 const readUrls: string[] = [];
@@ -37,7 +42,7 @@ const settings = { model: 'test-model' as string | null };
 const state = (summary: string, gaps: string[] = []) => ({ summary, gaps, unsupportedClaims: [] });
 
 const llmClient = {
-  chatJsonWithText: jest.fn(async (_endpoint: unknown, _model: string, messages: ChatMessage[], format: LlmJsonSchema) => {
+  chatJsonWithText: jest.fn(async (_endpoint: unknown, _model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions) => {
     if (format.name === 'research_plan')
       return wrap({
         title: '전기로와 고로 비교',
@@ -47,13 +52,26 @@ const llmClient = {
           { title: '막힌 단계', query: 'SO-2610-001 납기' },
         ],
       });
+    if (format.name === 'research_audit') auditCalls += 1;
     if (format.name === 'research_audit') return wrap({ thesis: '전기로가 배출이 적다', outline: ['배출 비교'], supportedClaims: [{ claim: '전기로 배출이 적다', sourceIds: [1, 99] }], contradictions: [], missingDimensions: [] });
     turnPrompts.push(messages.map((m) => m.content).join('\n'));
     const next = turns.shift() ?? { action: 'finish', query: '', sourceId: 0, researchState: state('끝') };
     if ('parseError' in next) throw new LlmJsonParseError('AI 응답을 JSON으로 읽지 못했어요', String(next.parseError), null);
+    if ('error' in next) throw new LlmRequestError(String(next.error));
+    if ('hang' in next)
+      return new Promise<never>((_resolve, reject) => {
+        const signal = options.signal;
+        if (!signal) return reject(new Error('signal 없음'));
+        signal.addEventListener('abort', () => reject(new LlmAbortedError()), { once: true });
+        hangStarted();
+      });
     return wrap(next);
   }),
-  chatText: jest.fn(async () => ({ text: reportText, thinking: null, truncated: false })),
+  chatText: jest.fn(async (_endpoint: unknown, _model: string, _messages: ChatMessage[], options: LlmJsonOptions) => {
+    if (!options.signal) throw new Error('signal 없음');
+    if (reportError) throw new LlmRequestError(reportError);
+    return { text: reportText, thinking: null, truncated: false };
+  }),
 };
 const wrap = (value: unknown) => ({ value, rawText: JSON.stringify(value), thinking: null });
 const llmSettings = { read: jest.fn(async () => ({ baseUrl: 'http://llm.test/v1', model: settings.model, apiKey: null })) };
@@ -147,6 +165,10 @@ beforeEach(async () => {
   turns = [];
   turnPrompts = [];
   reportText = '';
+  reportError = null;
+  auditCalls = 0;
+  llmClient.chatText.mockClear();
+  runner.config = { ...runner.config, now: Date.now, renewMs: 30_000 };
   onSearch = async () => undefined;
   searched.length = 0;
   readUrls.length = 0;
@@ -345,3 +367,130 @@ describe('심층 조사', () => {
   });
 });
 
+
+/** 계획 → 시작까지 (QUEUED) */
+async function queued(question: string): Promise<AiResearchRunView> {
+  const run = await planned(question);
+  await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+  return run;
+}
+
+describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · 취소 · 이어서 하기', () => {
+  it('반복 중 LLM 연결이 끊기면 모은 출처로 대신 정리해 COMPLETED (맨 위 알림, 점검·보고서 LLM은 부르지 않음)', async () => {
+    const run = await queued('LLM 끊김');
+    turns = [{ action: 'search', query: '끊기기 전 검색', sourceId: 0, researchState: state('하나 찾음', ['더']) }, { error: '180초 안에 응답이 없어요' }];
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.sources).toHaveLength(2);
+    expect(done.incompleteReason).toContain('AI 응답을 받지 못해 조사를 멈췄어요(180초 안에 응답이 없어요)');
+    expect(done.report?.startsWith('> **이 보고서는 완전하지 않아요.**')).toBe(true);
+    expect(done.report).toContain('하나 찾음');
+    expect(done.report).toContain('## 출처');
+    expect(auditCalls).toBe(0);
+    expect(llmClient.chatText).not.toHaveBeenCalled();
+    expect(done.events.at(-1)).toMatchObject({ type: 'report.ready', payload: { incomplete: true } });
+  });
+
+  it('30분 상한을 넘으면 모은 것으로 점검·보고서를 쓴다', async () => {
+    const run = await queued('시간 상한');
+    let clock = Date.now();
+    // 부를 때마다 20분씩 흐른다: 첫 단계는 하고 두 번째 단계 전에 상한을 넘는다
+    runner.config = { ...runner.config, now: () => (clock += 20 * 60_000) };
+    turns = [{ action: 'search', query: '시간 안의 검색', sourceId: 0, researchState: state('찾음') }, { action: 'search', query: '못 할 검색', sourceId: 0, researchState: state('x') }];
+    reportText = '시간 안에 찾은 것 [1]';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.stepsUsed).toBe(1);
+    expect(searched).toEqual(['시간 안의 검색']);
+    expect(done.incompleteReason).toBe('조사 시간이 30분을 넘어 멈췄어요.');
+    expect(done.report).toContain('시간 안에 찾은 것 [1]');
+    expect(done.report?.startsWith('> **이 보고서는 완전하지 않아요.** 조사 시간이 30분을 넘어')).toBe(true);
+    expect(auditCalls).toBe(1);
+  });
+
+  it('보고서 LLM이 실패하면 점검 결과로 대신 써서 COMPLETED', async () => {
+    const run = await queued('보고서 실패');
+    turns = [{ action: 'search', query: '보고서 전 검색', sourceId: 0, researchState: state('메모') }];
+    reportError = 'LLM 서버 오류 (HTTP 500)';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.failureReason).toBeNull();
+    expect(done.incompleteReason).toContain('AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요');
+    expect(done.report).toContain('전기로가 배출이 적다');
+    expect(done.report).toContain('- 전기로 배출이 적다 [1]');
+  });
+
+  it('취소하면 하던 LLM 요청을 바로 끊는다 (이 서버: interrupt)', async () => {
+    const run = await queued('하던 요청 끊기');
+    turns = [{ hang: true }];
+    const hanging = new Promise<void>((resolve) => (hangStarted = resolve));
+    const work = runner.processNext();
+    await hanging;
+    expect((await call('POST', `/ai-research/runs/${run.id}/cancel`, ownerCookie)).status).toBe(200);
+    await work;
+    const stopped = await getRun(run.id);
+    expect(stopped.status).toBe('CANCELLED');
+    expect(stopped.events.map((e) => e.type)).not.toContain('failed');
+  });
+
+  it('다른 서버에서 취소하면 표시를 늘리지 못할 때 하던 요청을 끊는다', async () => {
+    const run = await queued('다른 서버 취소');
+    runner.config = { ...runner.config, renewMs: 30 };
+    turns = [{ hang: true }];
+    const hanging = new Promise<void>((resolve) => (hangStarted = resolve));
+    const work = runner.processNext();
+    await hanging;
+    await prisma.aiResearchRun.update({ where: { id: run.id }, data: { status: 'CANCELLED', leaseOwner: null, leaseExpiresAt: null } });
+    await work;
+    expect((await getRun(run.id)).status).toBe('CANCELLED');
+  });
+
+  it('이어서 할 때 저장해 둔 행동(pending)부터 하고 단계를 다시 세지 않는다. 남긴 알림·점검은 되풀이하지 않는다', async () => {
+    const plan = { title: '이어서', steps: [{ title: 'a', query: '계획 검색' }] };
+    const base = { employeeId: ownerId, status: 'RUNNING', plan, planRevision: 1, budget: { maxSteps: 8, maxSources: 20 }, leaseOwner: 'dead-server', leaseExpiresAt: new Date(Date.now() - 1000) };
+    const pending = await prisma.aiResearchRun.create({
+      data: { ...base, question: '행동 중 멈춤', stepsUsed: 3, sources: [], researchState: { summary: '앞', gaps: [], unsupportedClaims: [], searchedQueries: ['계획 검색'], pending: { kind: 'search', query: '멈춘 검색', step: 3 } } },
+    });
+    reportText = '이어서 [1]';
+    await runner.processNext();
+    const resumed = await getRun(pending.id);
+    expect(searched).toEqual(['멈춘 검색']);
+    expect(resumed.stepsUsed).toBe(3);
+    expect(resumed.searchedQueries).toEqual(['계획 검색', '멈춘 검색']);
+    expect(resumed.status).toBe('COMPLETED');
+    // 멈춘 행동은 모델에 다시 묻지 않았다: 다음 차례(끝내기) 한 번만
+    expect(turnPrompts).toHaveLength(1);
+    expect(resumed.events.map((e) => e.type)).not.toContain('step.started');
+
+    const audit = { thesis: '저장된 점검', outline: [], supportedClaims: [], contradictions: [], missingDimensions: [], ok: true, reportTruncated: false };
+    const reported = await prisma.aiResearchRun.create({
+      data: { ...base, question: '보고서 전 멈춤', stepsUsed: 8, sources: [], audit, researchState: { summary: '다 함', gaps: ['남음'], unsupportedClaims: [], searchedQueries: [], exhaustedAt: 8, auditedAt: 8 } },
+    });
+    auditCalls = 0;
+    reportText = '다시 쓴 보고서';
+    await runner.processNext();
+    const again = await getRun(reported.id);
+    expect(again.status).toBe('COMPLETED');
+    expect(again.events.map((e) => e.type)).toEqual(['report.ready']);
+    expect(auditCalls).toBe(0);
+    expect(again.audit?.thesis).toBe('저장된 점검');
+    expect(again.canExtend).toBe(true);
+  });
+
+  it('동시에 여러 개를 만들어도 진행 중 3개를 넘지 않는다 (사원별 잠금)', async () => {
+    const results = await Promise.all(Array.from({ length: 5 }, (_, i) => call('POST', '/ai-research/runs', ownerCookie, { question: `동시 만들기 ${i}` })));
+    expect(results.filter((r) => r.status === 201)).toHaveLength(3);
+    expect(results.filter((r) => r.body.error?.code === 'RES-006')).toHaveLength(2);
+  });
+
+  it('int4를 넘는 id·afterSeq는 DB 오류가 아니라 404·400', async () => {
+    expect((await call('GET', '/ai-research/runs/99999999999', ownerCookie)).body.error?.code).toBe('RES-001');
+    expect((await call('GET', '/ai-research/runs/abc', ownerCookie)).status).toBe(404);
+    const run = await planned('큰 숫자');
+    expect((await call('GET', `/ai-research/runs/${run.id}?afterSeq=3000000000`, ownerCookie)).status).toBe(400);
+    expect((await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: 3000000000 })).status).toBe(400);
+  });
+});

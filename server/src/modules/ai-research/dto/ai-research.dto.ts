@@ -2,6 +2,9 @@ import { AI_RESEARCH_LIMITS } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
+/** int4 상한. 넘는 값은 DB 오류(500) 대신 입력 오류로 */
+export const INT4_MAX = 2147483647;
+
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 /** POST ai-research/runs */
@@ -46,6 +49,7 @@ export class AiResearchPlanDto {
 export class UpdateAiResearchPlanDto {
   @IsInt({ message: '계획 판(revision)이 올바르지 않아요' })
   @Min(0)
+  @Max(INT4_MAX)
   revision!: number;
 
   @ValidateNested()
@@ -57,6 +61,7 @@ export class UpdateAiResearchPlanDto {
 export class StartAiResearchRunDto {
   @IsInt({ message: '계획 판(revision)이 올바르지 않아요' })
   @Min(0)
+  @Max(INT4_MAX)
   revision!: number;
 }
 
@@ -66,6 +71,8 @@ export class ListAiResearchRunsQuery {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  // (page - 1) × size가 int4를 넘지 않게
+  @Max(1_000_000)
   page?: number;
 
   @IsOptional()
@@ -82,5 +89,6 @@ export class GetAiResearchRunQuery {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(INT4_MAX)
   afterSeq?: number;
 }

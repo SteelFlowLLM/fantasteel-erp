@@ -1,13 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { AI_RESEARCH_STATUS, type AiResearchEventPayloads, type AiResearchEventType, type AiResearchStatus } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { listAiResearchRuns } from '../../generated/prisma/sql';
+import { claimAiResearchRun, findClaimableAiResearchRuns, listAiResearchRuns, lockAiResearchEmployee, renewAiResearchLease } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 진행 중(끝나지 않은) 상태. 사원별 동시 진행 수를 셀 때 쓴다 */
 export const ACTIVE_STATUSES: AiResearchStatus[] = [AI_RESEARCH_STATUS.PLANNING, AI_RESEARCH_STATUS.AWAITING_APPROVAL, AI_RESEARCH_STATUS.QUEUED, AI_RESEARCH_STATUS.RUNNING];
-/** 일꾼이 맡을 수 있는 상태 (RUNNING은 맡은 표시가 끊긴 것만) */
-const CLAIMABLE_STATUSES: AiResearchStatus[] = [AI_RESEARCH_STATUS.PLANNING, AI_RESEARCH_STATUS.QUEUED, AI_RESEARCH_STATUS.RUNNING];
 
 export type NewResearchEvent = { [K in AiResearchEventType]: { type: K; payload: AiResearchEventPayloads[K] } }[AiResearchEventType];
 
@@ -22,8 +20,6 @@ export async function retryOnSeqConflict<T>(work: () => Promise<T>, tries = 3): 
     }
   }
 }
-
-const leaseFree = (now: Date): Prisma.AiResearchRunWhereInput => ({ OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }] });
 
 @Injectable()
 export class AiResearchRepository {
@@ -69,22 +65,14 @@ export class AiResearchRepository {
     return tx.aiResearchRun.updateMany({ where: { ...rest, status: { in: status } }, data });
   }
 
-  /** 맡을 후보 (오래된 것부터). 맡기는 claim이 조건부로 한다 */
-  findClaimable(tx: Tx, now: Date, take: number) {
-    return tx.aiResearchRun.findMany({
-      where: { status: { in: CLAIMABLE_STATUSES }, ...leaseFree(now) },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      select: { id: true, status: true },
-      take,
-    });
+  /** 맡을 후보 (오래된 것부터). 맡기는 claim이 조건부로 한다. 시각은 DB의 now() */
+  findClaimable(tx: Tx, take: number) {
+    return tx.$queryRawTyped(findClaimableAiResearchRuns(take));
   }
 
-  /** 상태가 그대로이고 아무도 맡지 않았을(표시가 끊겼을) 때만 맡는다. QUEUED는 RUNNING이 된다 */
-  claim(tx: Tx, id: number, status: AiResearchStatus, owner: string, now: Date, expiresAt: Date) {
-    return tx.aiResearchRun.updateMany({
-      where: { id, status, ...leaseFree(now) },
-      data: { leaseOwner: owner, leaseExpiresAt: expiresAt, ...(status === AI_RESEARCH_STATUS.QUEUED ? { status: AI_RESEARCH_STATUS.RUNNING } : {}) },
-    });
+  /** 상태가 그대로이고 아무도 맡지 않았을(표시가 끊겼을) 때만 맡는다. QUEUED는 RUNNING이 된다. 맡았으면 true */
+  async claim(tx: Tx, id: number, status: AiResearchStatus, owner: string, leaseMs: number): Promise<boolean> {
+    return (await tx.$queryRawTyped(claimAiResearchRun(id, status, owner, leaseMs))).length === 1;
   }
 
   /** 내가 맡은 행만 바꾼다 (그 사이 취소됐거나 남이 맡았으면 0건) */
@@ -92,7 +80,14 @@ export class AiResearchRepository {
     return tx.aiResearchRun.updateMany({ where: { id, leaseOwner: owner, status }, data });
   }
 
-  renewLease(tx: Tx, id: number, owner: string, expiresAt: Date) {
-    return tx.aiResearchRun.updateMany({ where: { id, leaseOwner: owner, status: { in: [AI_RESEARCH_STATUS.PLANNING, AI_RESEARCH_STATUS.RUNNING] } }, data: { leaseExpiresAt: expiresAt } });
+  /** 표시를 지금(DB now()) + leaseMs로. 내가 맡은 계획·조사 중 행이 아니면 false */
+  async renewLease(tx: Tx, id: number, owner: string, leaseMs: number): Promise<boolean> {
+    return (await tx.$queryRawTyped(renewAiResearchLease(id, owner, leaseMs))).length === 1;
   }
+
+  /** 사원별 잠금 (트랜잭션이 끝날 때까지). 진행 중 수를 세고 만드는 사이에 다른 요청이 끼지 못하게 */
+  async lockEmployee(tx: Tx, employeeId: number): Promise<void> {
+    await tx.$queryRawTyped(lockAiResearchEmployee(employeeId));
+  }
+
 }

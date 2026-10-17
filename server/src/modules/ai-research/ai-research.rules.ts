@@ -16,13 +16,23 @@ export interface StoredSource {
 /** DB의 research_state jsonb. searchedQueries는 이어서 할 때 같은 검색을 되풀이하지 않으려고 둔다 */
 export interface StoredState extends AiResearchState {
   searchedQueries: string[];
+  /** 저장했지만 결과를 아직 저장하지 못한 행동. 서버가 멈췄다 이어서 하면 모델에 다시 묻지 않고 이것부터 한다 (단계를 잃거나 같은 검색을 되풀이하지 않게) */
+  pending?: PendingAction;
+  /** budget.exhausted를 남긴 때의 maxSteps (이어서 할 때 같은 알림을 두 번 남기지 않게) */
+  exhaustedAt?: number;
+  /** 점검을 저장한 때의 stepsUsed. 같으면 이어서 할 때 점검을 다시 하지 않는다 */
+  auditedAt?: number;
 }
+
+export type PendingAction = { kind: 'search'; query: string; step: number } | { kind: 'read'; sourceId: number; step: number };
 
 /** DB의 audit jsonb */
 export interface StoredAudit extends AiResearchAudit {
   /** 점검 LLM 답을 읽었는지. false면 조사 메모로 만든 대신값 */
   ok: boolean;
   reportTruncated: boolean;
+  /** 조사를 다 마치지 못하고 모은 것으로 보고서를 쓴 이유 (시간 상한·LLM 실패). 다 마쳤으면 null */
+  incompleteReason?: string | null;
 }
 
 const SUMMARY_MAX = 1500;
@@ -135,23 +145,38 @@ export function storedPlan(value: unknown): AiResearchPlan | null {
 
 export function readState(value: unknown, previous: StoredState): StoredState | null {
   if (!isRecord(value) || typeof value.summary !== 'string') return null;
+  // 모델이 웹 내용을 보고 쓴 글이라 보이지 않는 글자를 지운다 (다음 프롬프트에 다시 들어간다)
   return {
-    summary: cutText(value.summary.trim(), SUMMARY_MAX),
+    ...previous,
+    summary: cutText(stripInvisible(value.summary).trim(), SUMMARY_MAX),
     gaps: stringList(value.gaps),
     unsupportedClaims: stringList(value.unsupportedClaims),
-    searchedQueries: previous.searchedQueries,
   };
 }
 
 export function storedState(value: unknown): StoredState {
   if (!isRecord(value)) return { ...EMPTY_STATE, searchedQueries: [] };
   const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const int = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) ? v : undefined);
+  const pending = readPending(value.pending);
+  const exhaustedAt = int(value.exhaustedAt);
+  const auditedAt = int(value.auditedAt);
   return {
     summary: typeof value.summary === 'string' ? value.summary : '',
     gaps: strings(value.gaps),
     unsupportedClaims: strings(value.unsupportedClaims),
     searchedQueries: strings(value.searchedQueries),
+    ...(pending ? { pending } : {}),
+    ...(exhaustedAt !== undefined ? { exhaustedAt } : {}),
+    ...(auditedAt !== undefined ? { auditedAt } : {}),
   };
+}
+
+function readPending(value: unknown): PendingAction | undefined {
+  if (!isRecord(value) || typeof value.step !== 'number') return undefined;
+  if (value.kind === 'search' && typeof value.query === 'string') return { kind: 'search', query: value.query, step: value.step };
+  if (value.kind === 'read' && typeof value.sourceId === 'number') return { kind: 'read', sourceId: value.sourceId, step: value.step };
+  return undefined;
 }
 
 export function storedSources(value: unknown): StoredSource[] {
@@ -176,7 +201,13 @@ export function storedAudit(value: unknown): StoredAudit | null {
   const claims = Array.isArray(value.supportedClaims)
     ? value.supportedClaims.filter((c): c is { claim: string; sourceIds: number[] } => isRecord(c) && typeof c.claim === 'string' && Array.isArray(c.sourceIds)).map((c) => ({ claim: c.claim, sourceIds: c.sourceIds.filter((n) => typeof n === 'number') }))
     : [];
-  return { ...audit, supportedClaims: claims, ok: value.ok !== false, reportTruncated: value.reportTruncated === true };
+  return {
+    ...audit,
+    supportedClaims: claims,
+    ok: value.ok !== false,
+    reportTruncated: value.reportTruncated === true,
+    incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
+  };
 }
 
 /** 점검 답 다듬기: 모르는 출처 번호는 빼고, 번호가 하나도 남지 않은 주장은 버린다 */
@@ -187,11 +218,11 @@ export function readAudit(value: unknown, knownIds: ReadonlySet<number>): AiRese
     for (const c of value.supportedClaims) {
       if (!isRecord(c) || typeof c.claim !== 'string' || !c.claim.trim() || !Array.isArray(c.sourceIds)) continue;
       const ids = [...new Set(c.sourceIds.map(toInt).filter((n): n is number => n !== null && knownIds.has(n)))];
-      if (ids.length) supportedClaims.push({ claim: cutText(c.claim.trim(), 400), sourceIds: ids });
+      if (ids.length) supportedClaims.push({ claim: cutText(stripInvisible(c.claim).trim(), 400), sourceIds: ids });
       if (supportedClaims.length >= 20) break;
     }
   return {
-    thesis: cutText(value.thesis.trim(), 800),
+    thesis: cutText(stripInvisible(value.thesis).trim(), 800),
     outline: stringList(value.outline, 12),
     supportedClaims,
     contradictions: stringList(value.contradictions),
@@ -354,7 +385,8 @@ function stringList(value: unknown, max = LIST_MAX): string[] {
   return value
     .filter((v): v is string => typeof v === 'string' && v.trim() !== '')
     .slice(0, max)
-    .map((v) => cutText(v.trim(), LIST_ITEM_MAX));
+    .map((v) => cutText(stripInvisible(v).trim(), LIST_ITEM_MAX))
+    .filter((v) => v !== '');
 }
 
 const oneLine = (text: string): string => stripInvisible(text).replace(/\s+/g, ' ').trim();

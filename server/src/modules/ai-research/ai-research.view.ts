@@ -46,6 +46,7 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     audit: audit ? { thesis: audit.thesis, outline: audit.outline, supportedClaims: audit.supportedClaims, contradictions: audit.contradictions, missingDimensions: audit.missingDimensions } : null,
     report: row.report,
     reportTruncated: audit?.reportTruncated ?? false,
+    incompleteReason: audit?.incompleteReason ?? null,
     failureReason: row.failureReason,
     canExtend: canExtend({ status, stepsUsed: row.stepsUsed, budget, state }),
     events: events.map((e) => ({ seq: e.seq, type: e.type, payload: e.payload, createdAt: e.createdAt.toISOString() }) as AiResearchEventView),

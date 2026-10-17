@@ -1,8 +1,8 @@
 // 심층 조사(이슈 #378)의 순수 규칙: 너그러운 JSON 읽기, 행동 대신하기, 예산·더 조사하기, 프롬프트 글자 상한, 보고서 인용 다듬기, 검색어 막기. DB·네트워크 없음
 import type { AiResearchPlan } from '@fantasteel/shared';
-import { buildAuditMessages, buildReportMessages, buildTurnMessages, PROMPT_CHAR_BUDGET } from './ai-research.prompt';
-import { finalizeReport, REPORT_TRUNCATED_NOTICE } from './ai-research.report';
-import { canExtend, checkResearchQuery, decideAction, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readTurn, type StoredSource, type StoredState } from './ai-research.rules';
+import { buildAuditMessages, buildReportMessages, buildTurnMessages, MODEL_NOTE_LABEL, PROMPT_CHAR_BUDGET } from './ai-research.prompt';
+import { finalizeReport, incompleteNotice, REPORT_TRUNCATED_NOTICE } from './ai-research.report';
+import { canExtend, checkResearchQuery, decideAction, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 
 const plan: AiResearchPlan = {
   title: '전기로 탄소 배출',
@@ -172,5 +172,41 @@ describe('보고서 인용 다듬기', () => {
     const audit = readAudit({ thesis: '답', outline: ['a'], supportedClaims: [{ claim: '참', sourceIds: [1, 99] }, { claim: '근거 없음', sourceIds: [42] }], contradictions: [], missingDimensions: ['b'] }, new Set([1, 2]));
     expect(audit?.supportedClaims).toEqual([{ claim: '참', sourceIds: [1] }]);
     expect(audit?.missingDimensions).toEqual(['b']);
+  });
+});
+
+describe('검토 반영', () => {
+  const sources = [source(1), source(2)];
+
+  it('모델이 쓴 출처·참고 목록은 마지막 제목일 때만 뗀다', () => {
+    const middle = finalizeReport('# 제목\n## 참고\n중간의 참고 설명 [1]\n## 결론\n끝 [2]', sources, false).report;
+    expect(middle).toContain('중간의 참고 설명 [1]');
+    expect(middle).toContain('## 결론');
+    const last = finalizeReport('# 제목\n본문 [1]\n## 참고 자료\n- 모델 목록', sources, false).report;
+    expect(last).not.toContain('모델 목록');
+    expect(last).not.toContain('## 참고 자료');
+  });
+
+  it('다 마치지 못한 보고서는 맨 위에 이유를 알리고, 끊김 알림이 그 뒤', () => {
+    const { report } = finalizeReport('본문 [1]', sources, true, '조사 시간이 30분을 넘어 멈췄어요.');
+    expect(report.startsWith(incompleteNotice('조사 시간이 30분을 넘어 멈췄어요.'))).toBe(true);
+    expect(report.indexOf(REPORT_TRUNCATED_NOTICE)).toBeGreaterThan(0);
+  });
+
+  it('모델이 쓴 메모·점검의 보이지 않는 글자를 지우고, 이어서 하기 표시는 남긴다', () => {
+    const previous: StoredState = { ...state, searchedQueries: ['a'], pending: { kind: 'search', query: 'b', step: 2 }, exhaustedAt: 8 };
+    const next = readState({ summary: '요약\u200b\u202e', gaps: ['모름\u{E0041}', '\u200b'], unsupportedClaims: [] }, previous);
+    expect(next).toEqual({ summary: '요약', gaps: ['모름'], unsupportedClaims: [], searchedQueries: ['a'], pending: { kind: 'search', query: 'b', step: 2 }, exhaustedAt: 8 });
+    const audit = readAudit({ thesis: '답\u2066', outline: ['목\u200d차'], supportedClaims: [{ claim: '주\ufeff장', sourceIds: [1] }], contradictions: [], missingDimensions: [] }, new Set([1]));
+    expect(audit).toMatchObject({ thesis: '답', outline: ['목차'], supportedClaims: [{ claim: '주장', sourceIds: [1] }] });
+    expect(storedState(JSON.parse(JSON.stringify(next)))).toEqual(next);
+    expect(storedState({ summary: '', pending: { kind: 'dance', step: 1 } }).pending).toBeUndefined();
+  });
+
+  it('프롬프트는 메모·점검을 모델이 적은 메모(지시 아님)로 알린다', () => {
+    const turn = buildTurnMessages({ question: '질문', plan, state, sources, stepsUsed: 0, budget: { maxSteps: 8, maxSources: 20 } });
+    expect(turn[1].content).toContain(`[조사 메모] ${MODEL_NOTE_LABEL}`);
+    const report = buildReportMessages({ question: '질문', plan, state, sources, audit: { thesis: '답', outline: [], supportedClaims: [], contradictions: [], missingDimensions: [], ok: true, reportTruncated: false } });
+    expect(report[1].content).toContain(`[점검 결과] ${MODEL_NOTE_LABEL}`);
   });
 });

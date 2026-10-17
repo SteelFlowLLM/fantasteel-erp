@@ -122,7 +122,7 @@ export interface AiResearchEventPayloads {
   'page.read': { sourceId: number; title: string; chars: number; error: string | null };
   'state.updated': { summary: string; gapCount: number; unsupportedCount: number };
   'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean };
-  'report.ready': { chars: number; truncated: boolean; citedCount: number };
+  'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean };
   failed: { reason: string };
   cancelled: Record<string, never>;
   'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number };
@@ -160,6 +160,8 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   report: string | null;
   /** 보고서가 길이 한도에 걸려 끊겼는지 (보고서 맨 위에도 알림이 있다) */
   reportTruncated: boolean;
+  /** 조사를 다 마치지 못하고(30분 상한·LLM 실패) 그때까지 모은 출처로 보고서를 쓴 이유. 다 마쳤으면 null (보고서 맨 위에도 알림이 있다) */
+  incompleteReason?: string | null;
   failureReason: string | null;
   /** 단계를 다 써서 끝났고 아직 모르는 것이 남아 더 조사할 수 있는지 */
   canExtend: boolean;
