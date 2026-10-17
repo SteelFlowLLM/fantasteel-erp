@@ -99,6 +99,8 @@ export const SCREEN = {
   messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE }),
   meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
+  // 철강맨AI 심층 조사 (이슈 #378, 문서에 없는 기능). 자기 조사만 보고 바꾼다 (서버가 확인)
+  aiResearch: screen({ href: '/ai-research', label: '심층 조사', icon: 'search', access: EVERYONE }),
   schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),
   pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE }),
 } as const satisfies Record<string, ScreenDef>;
