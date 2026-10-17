@@ -22,6 +22,8 @@ export interface StoredState extends AiResearchState {
   exhaustedAt?: number;
   /** 점검을 저장한 때의 stepsUsed. 같으면 이어서 할 때 점검을 다시 하지 않는다 */
   auditedAt?: number;
+  /** 검색이 연달아 비어 멈춘 때의 stepsUsed. 단계가 남았어도 더 조사하기를 허용한다 (이후 단계가 더해지면 저절로 낡는다) */
+  searchDownAt?: number;
 }
 
 export type PendingAction = { kind: 'search'; query: string; step: number } | { kind: 'read'; sourceId: number; step: number };
@@ -49,14 +51,11 @@ export function defaultBudget(): AiResearchBudget {
   return { maxSteps: AI_RESEARCH_LIMITS.defaultMaxSteps, maxSources: AI_RESEARCH_LIMITS.defaultMaxSources };
 }
 
-/** 단계를 다 써서 끝났고 모르는 것이 남았고 더 늘릴 수 있을 때만 */
-export function canExtend(run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: AiResearchState | null }): boolean {
-  return (
-    run.status === AI_RESEARCH_STATUS.COMPLETED &&
-    run.stepsUsed >= run.budget.maxSteps &&
-    (run.state?.gaps.length ?? 0) > 0 &&
-    run.budget.maxSteps < AI_RESEARCH_LIMITS.maxTotalSteps
-  );
+/** 단계를 다 써서(또는 검색이 막혀 멈춰서) 끝났고 모르는 것이 남았고 더 늘릴 수 있을 때만. 검색이 막혀 멈춘 때는 모르는 것 목록이 비어도 된다 */
+export function canExtend(run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: (AiResearchState & { searchDownAt?: number }) | null }): boolean {
+  if (run.status !== AI_RESEARCH_STATUS.COMPLETED || run.budget.maxSteps >= AI_RESEARCH_LIMITS.maxTotalSteps) return false;
+  if (run.state?.searchDownAt === run.stepsUsed) return true;
+  return run.stepsUsed >= run.budget.maxSteps && (run.state?.gaps.length ?? 0) > 0;
 }
 
 /** +4단계, 모두 20단계까지 */
@@ -161,6 +160,7 @@ export function storedState(value: unknown): StoredState {
   const pending = readPending(value.pending);
   const exhaustedAt = int(value.exhaustedAt);
   const auditedAt = int(value.auditedAt);
+  const searchDownAt = int(value.searchDownAt);
   return {
     summary: typeof value.summary === 'string' ? value.summary : '',
     gaps: strings(value.gaps),
@@ -169,6 +169,7 @@ export function storedState(value: unknown): StoredState {
     ...(pending ? { pending } : {}),
     ...(exhaustedAt !== undefined ? { exhaustedAt } : {}),
     ...(auditedAt !== undefined ? { auditedAt } : {}),
+    ...(searchDownAt !== undefined ? { searchDownAt } : {}),
   };
 }
 

@@ -35,6 +35,7 @@ let auditCalls = 0;
 /** hang 차례가 시작되면 풀린다 (시험이 그때 취소한다) */
 let hangStarted: () => void = () => undefined;
 let onSearch: (query: string) => Promise<void> = async () => undefined;
+let searchEmpty = false;
 const searched: string[] = [];
 const readUrls: string[] = [];
 const settings = { model: 'test-model' as string | null };
@@ -81,6 +82,7 @@ const fakeSearch = {
   search: async (query: string) => {
     searched.push(query);
     await onSearch(query);
+    if (searchEmpty) return { engine: '위키백과(영어)', results: [] };
     const slug = encodeURIComponent(query);
     return {
       engine: '위키백과(한국어)',
@@ -170,6 +172,7 @@ beforeEach(async () => {
   llmClient.chatText.mockClear();
   runner.config = { ...runner.config, now: Date.now, renewMs: 30_000 };
   onSearch = async () => undefined;
+  searchEmpty = false;
   searched.length = 0;
   readUrls.length = 0;
   settings.model = 'test-model';
@@ -408,6 +411,37 @@ describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · �
     expect(done.report).toContain('시간 안에 찾은 것 [1]');
     expect(done.report?.startsWith('> **이 보고서는 완전하지 않아요.** 조사 시간이 30분을 넘어')).toBe(true);
     expect(auditCalls).toBe(1);
+  });
+
+  it('검색이 연달아 3번 빈손이면 남은 단계를 쓰지 않고 모은 것으로 보고서를 쓴다 (budget.exhausted에 이유, 더 조사하기는 가능)', async () => {
+    const run = await queued('검색 막힘');
+    searchEmpty = true;
+    turns = Array.from({ length: 6 }, (_, i) => ({ action: 'search' as const, query: `빈손 검색 ${i}`, sourceId: 0, researchState: state('못 찾음', ['전부']) }));
+    reportText = '찾은 것이 없어요';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.stepsUsed).toBe(3);
+    expect(searched).toHaveLength(3);
+    expect(done.incompleteReason).toContain('검색 엔진에서 결과를 받지 못했어요.');
+    expect(done.incompleteReason).toContain('NAVER_CLIENT_ID·NAVER_CLIENT_SECRET');
+    const exhausted = done.events.find((e) => e.type === 'budget.exhausted');
+    expect(exhausted?.payload).toMatchObject({ stepsUsed: 3, maxSteps: 8, reason: expect.stringContaining('검색 엔진에서 결과를 받지 못했어요.') });
+    expect(done.canExtend).toBe(true);
+  });
+
+  it('빈 검색 사이에 결과가 있는 검색이 끼면 세기를 처음부터 다시 한다', async () => {
+    const run = await queued('가끔 막힘');
+    const empties = [true, true, false, true, true, false];
+    onSearch = async () => {
+      searchEmpty = empties.shift() ?? false;
+    };
+    turns = Array.from({ length: 6 }, (_, i) => ({ action: 'search' as const, query: `섞인 검색 ${i}`, sourceId: 0, researchState: state('메모') }));
+    reportText = '보고서';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.stepsUsed).toBe(6);
+    expect(done.events.some((e) => e.type === 'budget.exhausted')).toBe(false);
   });
 
   it('보고서 LLM이 실패하면 점검 결과로 대신 써서 COMPLETED', async () => {

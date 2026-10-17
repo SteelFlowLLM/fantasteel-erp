@@ -125,7 +125,7 @@ export interface AiResearchEventPayloads {
   'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean };
   failed: { reason: string };
   cancelled: Record<string, never>;
-  'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number };
+  'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number; reason?: string };
 }
 
 export type AiResearchEventView = {

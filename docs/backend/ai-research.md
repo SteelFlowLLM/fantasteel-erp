@@ -106,7 +106,7 @@ COMPLETED(canExtend) ─(extend)→ QUEUED          끝나지 않은 상태 ─(
 | `source.added` | `sourceId, title, url` |
 | `page.read` | `sourceId, title, chars, error` |
 | `state.updated` | `summary`(300자), `gapCount, unsupportedCount` |
-| `budget.exhausted` | `stepsUsed, maxSteps, gapCount` |
+| `budget.exhausted` | `stepsUsed, maxSteps, gapCount`, 검색이 연달아 3번 빈손이라 멈췄을 때만 `reason` |
 | `audit.ready` | `claimCount, contradictionCount, missingCount, ok` |
 | `report.ready` | `chars, truncated, citedCount, incomplete` |
 | `failed` | `reason` |

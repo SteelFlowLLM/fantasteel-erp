@@ -84,6 +84,36 @@ export function parseWikipediaSearch(json: unknown, lang: 'ko' | 'en', limit = W
     }));
 }
 
+/** 위키백과 검색에서 뜻 없는 낱말 (짧은 영어 검색어가 이것 때문에 0건이 되는 일을 줄인다) */
+const WIKI_STOPWORDS = new Set(['vs', 'and', 'or', 'the', 'a', 'an', 'of', 'for', 'in', 'on', 'to', 'with', 'by', 'per', 'plan', 'recent', 'news', 'comparison', 'challenges', '계획', '비교', '최근']);
+const WIKI_RETRY_TERMS = 3;
+const splitTerms = (query: string): string[] => query.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+/** 뜻 있는 낱말만 앞에서 3개. 위키백과가 0건일 때 한 번 더 찾는 짧은 검색어. 줄일 것이 없으면(낱말 3개 이하·같은 결과) null */
+export function shortenWikipediaQuery(query: string): string | null {
+  if (query.trim().split(/\s+/).length <= WIKI_RETRY_TERMS) return null;
+  const kept = splitTerms(query).filter((t) => !WIKI_STOPWORDS.has(t.toLowerCase()));
+  const shortened = kept.slice(0, WIKI_RETRY_TERMS).join(' ');
+  return shortened && shortened !== query.trim() ? shortened : null;
+}
+
+/**
+ * 위키백과 결과가 검색어와 정말 닿는지 (제목·요약에 검색어의 뜻 있는 낱말이 하나라도). 약어(EAF 같은 대문자 4자 이하)와 짧은 낱말은 우연히 맞기 쉬워 뺀다
+ * (한글은 2자부터 셈, 영어판에서는 한글 낱말을 세지 않는다). 셀 낱말이 하나도 없으면 거르지 않는다.
+ */
+export function filterRelevantWikipedia(results: WebSearchResult[], query: string, lang: 'ko' | 'en' = 'ko'): WebSearchResult[] {
+  const terms = splitTerms(query)
+    .filter((t) => lang === 'ko' || !/\p{Script=Hangul}/u.test(t))
+    .filter((t) => !WIKI_STOPWORDS.has(t.toLowerCase()))
+    .filter((t) => (/\p{Script=Hangul}/u.test(t) ? t.length >= 2 : t.length >= 3) && !/^\p{Lu}{1,4}$/u.test(t))
+    .map((t) => t.toLowerCase());
+  if (!terms.length) return results;
+  return results.filter((r) => {
+    const text = `${r.title} ${r.snippet ?? ''}`.toLowerCase();
+    return terms.some((t) => text.includes(t));
+  });
+}
+
 export function wikipediaArticleUrl(lang: 'ko' | 'en', title: string): string {
   const path = encodeURIComponent(title.replace(/ /g, '_')).replace(/%2F/g, '/').replace(/%3A/g, ':');
   return `https://${lang}.wikipedia.org/wiki/${path}`;

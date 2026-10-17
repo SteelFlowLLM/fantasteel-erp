@@ -10,7 +10,9 @@ import {
   naverWebSearchUrl,
   parseDuckDuckGoHtml,
   parseNaverWebSearch,
+  filterRelevantWikipedia,
   parseWikipediaSearch,
+  shortenWikipediaQuery,
   wikipediaSearchUrl,
   type Place,
   type PlaceCategory,
@@ -136,7 +138,7 @@ export class WebSearchClient {
     // 결과가 없다고 답한 엔진이 하나라도 있으면 '결과 없음', 모두 실패했으면 오류
     let answered: SearchEngine | null = naver ? '네이버' : ddg ? 'DuckDuckGo' : null;
     for (const lang of ['ko', 'en'] as const) {
-      const results = await this.wikipedia(query, lang);
+      const results = await this.wikipediaWithRetry(query, lang);
       if (results === null) continue;
       const engine = lang === 'ko' ? '위키백과(한국어)' : '위키백과(영어)';
       if (results.length) return { engine, results };
@@ -199,6 +201,14 @@ export class WebSearchClient {
     }
   }
 
+  /** 0건이고 검색어가 길면 뜻 있는 낱말 3개로 줄여 한 번 더 */
+  private async wikipediaWithRetry(query: string, lang: 'ko' | 'en'): Promise<WebSearchResult[] | null> {
+    const first = await this.wikipedia(query, lang);
+    if (first === null || first.length) return first;
+    const shortened = shortenWikipediaQuery(query);
+    return shortened ? ((await this.wikipedia(shortened, lang)) ?? first) : first;
+  }
+
   /** 결과 또는 실패면 null */
   private async wikipedia(query: string, lang: 'ko' | 'en'): Promise<WebSearchResult[] | null> {
     try {
@@ -208,7 +218,7 @@ export class WebSearchClient {
         signal: AbortSignal.timeout(SEARCH_REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) return null;
-      return parseWikipediaSearch(await response.json(), lang);
+      return filterRelevantWikipedia(parseWikipediaSearch(await response.json(), lang), query, lang);
     } catch (error) {
       this.logger.warn(`위키백과(${lang}) 검색 실패: ${error instanceof Error ? error.message : String(error)}`);
       return null;

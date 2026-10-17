@@ -40,6 +40,10 @@ import {
 export const RESEARCH_NO_MODEL_REASON = '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요';
 /** 보고서 맨 위 알림에 들어가는 이유들 (다 마치지 못하고 모은 것으로 정리했을 때) */
 export const INCOMPLETE_TIMEOUT = '조사 시간이 30분을 넘어 멈췄어요.';
+/** 검색이 연달아 이만큼 비면 남은 단계를 쓰지 않고 모은 것으로 정리한다 */
+export const SEARCH_FAIL_STREAK_MAX = 3;
+const SEARCH_UNAVAILABLE = '검색 엔진에서 결과를 받지 못했어요.';
+const NAVER_HINT = ' 서버 .env에 네이버 검색 키(NAVER_CLIENT_ID·NAVER_CLIENT_SECRET)를 넣으면 나아져요.';
 const RESEARCH_ERROR_REASON = '조사 중 오류가 났어요. 새 조사로 다시 물어봐 주세요';
 const NO_PLAN_REASON = '계획에 쓸 검색어를 만들지 못했어요. 업무·LOT 번호 같은 회사 안 정보를 빼고 새 조사로 다시 물어봐 주세요';
 
@@ -99,6 +103,8 @@ interface Work {
   state: StoredState;
   sources: StoredSource[];
   stepsUsed: number;
+  /** 연달아 출처를 하나도 못 얻은 검색 수 (이어서 할 때는 0에서 다시 센다) */
+  emptySearchStreak: number;
 }
 
 /**
@@ -249,7 +255,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     if (!plan) throw new ResearchFailure('조사 계획이 없어요');
     const endpoint = await this.endpoint();
     const budget = readBudget(run.budget);
-    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed };
+    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0 };
     // 읽기는 이 조사가 모은 출처만 (검색 결과로 받은 주소). 이어서 할 때는 저장된 출처를 다시 알려 준다
     const session = this.webTools.session(run.employeeId, { offerTools: false, maxSearches: Number.MAX_SAFE_INTEGER, maxReads: Number.MAX_SAFE_INTEGER });
     for (const source of work.sources) session.rememberVisited(source.url, source.title);
@@ -257,8 +263,9 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const notes: string[] = [];
     let llmDown = false;
     let exhausted = false;
+    let searchDown = false;
     try {
-      exhausted = await this.loop(ctx, endpoint, run.question, plan, budget, work, session);
+      ({ exhausted, searchDown } = await this.loop(ctx, endpoint, run.question, plan, budget, work, session));
     } catch (error) {
       if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
       if (error instanceof WallClockExceeded) notes.push(INCOMPLETE_TIMEOUT);
@@ -268,7 +275,12 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       } else throw error;
     }
     const { state, sources, stepsUsed } = work;
-    if (exhausted && state.exhaustedAt !== budget.maxSteps) {
+    if (searchDown) {
+      const reason = this.webTools.capabilities().engines.includes('naver') ? SEARCH_UNAVAILABLE : `${SEARCH_UNAVAILABLE}${NAVER_HINT}`;
+      notes.push(reason);
+      state.searchDownAt = stepsUsed;
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(state) }, [{ type: 'budget.exhausted', payload: { stepsUsed, maxSteps: budget.maxSteps, gapCount: state.gaps.length, reason } }]);
+    } else if (exhausted && state.exhaustedAt !== budget.maxSteps) {
       // 이어서 할 때 같은 알림을 두 번 남기지 않는다 (더 조사하기로 maxSteps가 바뀌면 다시 남긴다)
       state.exhaustedAt = budget.maxSteps;
       await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(state) }, [{ type: 'budget.exhausted', payload: { stepsUsed, maxSteps: budget.maxSteps, gapCount: state.gaps.length } }]);
@@ -326,16 +338,17 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   /**
-   * 반복. 단계를 다 써서 끝났으면 true, 모델이 끝냈으면 false.
+   * 반복. 단계를 다 써서 끝났으면 exhausted, 검색이 연달아 비어 멈췄으면 searchDown, 모델이 끝냈으면 둘 다 false.
    * 행동은 실행 전에 단계 수와 함께 pending으로 저장하고, 결과와 함께 지운다: 서버가 그 사이 멈추면 이어서 할 때 모델에 다시 묻지 않고 그 행동부터 한다.
    */
-  private async loop(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, budget: ReturnType<typeof readBudget>, work: Work, session: WebToolSession): Promise<boolean> {
+  private async loop(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, budget: ReturnType<typeof readBudget>, work: Work, session: WebToolSession): Promise<{ exhausted: boolean; searchDown: boolean }> {
     for (;;) {
       if (work.state.pending) {
         await this.execute(ctx, session, work, budget.maxSources, work.state.pending);
+        if (work.emptySearchStreak >= SEARCH_FAIL_STREAK_MAX) return { exhausted: false, searchDown: true };
         continue;
       }
-      if (work.stepsUsed >= budget.maxSteps) return true;
+      if (work.stepsUsed >= budget.maxSteps) return { exhausted: true, searchDown: false };
       await this.assertMine(ctx);
       if (this.config.now() - ctx.started > this.config.wallClockMs) throw new WallClockExceeded();
       const value = await this.askJson(ctx, endpoint, buildTurnMessages({ question, plan, state: work.state, sources: work.sources, stepsUsed: work.stepsUsed, budget }), TURN_JSON_SCHEMA, (v) => typeof v.action === 'string' || isRecord(v.researchState));
@@ -346,7 +359,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const stateEvent: NewResearchEvent[] = nextState ? [{ type: 'state.updated', payload: { summary: cutText(work.state.summary, 300), gapCount: work.state.gaps.length, unsupportedCount: work.state.unsupportedClaims.length } }] : [];
       if (decision.kind === 'finish') {
         await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state) }, stateEvent);
-        return false;
+        return { exhausted: false, searchDown: false };
       }
       const step = work.stepsUsed + 1;
       const pending: PendingAction = decision.kind === 'search' ? { kind: 'search', query: decision.query, step } : { kind: 'read', sourceId: decision.sourceId, step };
@@ -363,6 +376,10 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   /** 저장해 둔 행동 하나를 하고, 결과·출처와 함께 pending을 지운다 */
   private async execute(ctx: RunContext, session: WebToolSession, work: Work, maxSources: number, pending: PendingAction): Promise<void> {
     const events = pending.kind === 'search' ? await this.search(ctx, session, pending.query, work.sources, maxSources) : await this.read(ctx, session, pending.sourceId, work.sources);
+    if (pending.kind === 'search') {
+      const done = events[0];
+      work.emptySearchStreak = done?.type === 'search.done' && done.payload.resultCount === 0 ? work.emptySearchStreak + 1 : 0;
+    }
     const { pending: _done, ...rest } = work.state;
     work.state = pending.kind === 'search' ? { ...rest, searchedQueries: [...rest.searchedQueries.filter((q) => queryKey(q) !== queryKey(pending.query)), pending.query] } : rest;
     await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), sources: json(work.sources) }, events);

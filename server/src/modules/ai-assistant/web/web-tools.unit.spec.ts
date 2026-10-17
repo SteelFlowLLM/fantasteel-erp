@@ -7,7 +7,7 @@ import type { LookupAddress } from 'node:dns';
 import { AssistantWebToolbox, MAX_PAGE_READS_PER_ANSWER, MAX_WEB_SEARCHES_PER_ANSWER, type ReadPage, type WebPageReader, type WebToolDeps } from './assistant-web-toolbox';
 import { decodeBody, extractPage, limitPageText, PAGE_TEXT_MAX } from './page-extract';
 import { WebFetchError } from './safe-fetch';
-import { isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, mapNaverPlaces, parseDuckDuckGoHtml, parseNaverWebSearch, parseWikipediaSearch, resolveDuckDuckGoHref, wikipediaArticleUrl } from './search-parsers';
+import { filterRelevantWikipedia, isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, mapNaverPlaces, parseDuckDuckGoHtml, parseNaverWebSearch, parseWikipediaSearch, resolveDuckDuckGoHref, shortenWikipediaQuery, wikipediaArticleUrl } from './search-parsers';
 import { assertFetchableUrl, BLOCKED_LOOKUP_CODE, guardedLookup, isPublicAddress, type LookupFunction } from './ssrf-guard';
 import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, SEARCH_CACHE_TTL_MS, SEARCH_PER_MINUTE, SearchRateLimitError, WebSearchClient, WIKIPEDIA_USER_AGENT, type HttpFetch } from './web-search.client';
 import { htmlToText } from './html-text';
@@ -337,6 +337,33 @@ describe('웹 검색 (DuckDuckGo → 위키백과)', () => {
     expect(http.sent[2].url).toContain('action=query&list=search&srsearch=');
     expect((http.sent[2].init.headers as Record<string, string>)['user-agent']).toBe(WIKIPEDIA_USER_AGENT);
     expect(outcome).toEqual({ engine: '위키백과(영어)', results: [{ title: 'Pohang Steelworks', url: 'https://en.wikipedia.org/wiki/Pohang_Steelworks', snippet: 'integrated steel mill' }] });
+  });
+
+  it('위키백과가 0건이고 검색어가 4낱말 이상이면 뜻 있는 낱말 3개로 줄여 한 번 더 찾는다', async () => {
+    const http = fakeHttp((url) => {
+      if (url.includes('duckduckgo')) return html('', 202);
+      const q = new URL(url).searchParams.get('srsearch');
+      return q === 'steel EAF BOF' && url.startsWith('https://en.wikipedia.org')
+        ? json({ query: { search: [{ title: 'Electric arc furnace', snippet: 'EAF <b>steel</b>making' }, { title: '2003 invasion of Iraq', snippet: 'EAF' }] } })
+        : json({ query: { search: [] } });
+    });
+    const client = new WebSearchClient({ fetch: http.fetch, sleep: async () => undefined });
+    const outcome = await client.search('steel EAF vs BOF carbon emissions comparison');
+    const wiki = http.sent.filter((s) => s.url.includes('wikipedia')).map((s) => `${new URL(s.url).hostname.slice(0, 2)}:${new URL(s.url).searchParams.get('srsearch')}`);
+    expect(wiki).toEqual(['ko:steel EAF vs BOF carbon emissions comparison', 'ko:steel EAF BOF', 'en:steel EAF vs BOF carbon emissions comparison', 'en:steel EAF BOF']);
+    expect(outcome.results.map((r) => r.title)).toEqual(['Electric arc furnace']);
+    expect(shortenWikipediaQuery('EAF vs BF-BOF carbon emissions comparison')).toBe('EAF BF BOF');
+    expect(shortenWikipediaQuery('전기로 탄소 배출')).toBeNull();
+    expect(shortenWikipediaQuery('Korean steelmakers EAF transition plan POSCO Hyundai Steel')).toBe('Korean steelmakers EAF');
+  });
+
+  it('위키백과 결과는 제목·요약에 뜻 있는 낱말(약어·짧은 낱말 제외)이 있어야 남긴다', () => {
+    const iraq = { title: '2003 invasion of Iraq', url: 'https://en.wikipedia.org/wiki/i', snippet: 'a war... EAF' };
+    const steel = { title: 'Electric arc furnace', url: 'https://en.wikipedia.org/wiki/e', snippet: 'Steelmaking with scrap, lower carbon emissions' };
+    expect(filterRelevantWikipedia([iraq, steel], 'EAF carbon emissions', 'en')).toEqual([steel]);
+    expect(filterRelevantWikipedia([iraq], 'EAF', 'en')).toEqual([iraq]);
+    expect(filterRelevantWikipedia([iraq, { title: '전기로', url: 'https://ko.wikipedia.org/wiki/x', snippet: '' }], '전기로 EAF', 'ko')).toEqual([{ title: '전기로', url: 'https://ko.wikipedia.org/wiki/x', snippet: '' }]);
+    expect(filterRelevantWikipedia([iraq], '포항 제철소', 'en')).toEqual([iraq]);
   });
 
   it('모든 엔진이 실패하면 오류, 결과가 없다고 답한 엔진이 있으면 빈 결과', async () => {
