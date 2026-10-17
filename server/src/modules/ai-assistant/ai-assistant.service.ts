@@ -22,12 +22,14 @@ import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.servic
 import { actionCardExamplesFor } from './action-card-examples';
 import { AiActionCardService } from './ai-action-card.service';
 import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
+import { READ_KNOWLEDGE_TOOL } from './tools/knowledge.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
+import { KnowledgeReads } from './knowledge/knowledge.reads';
 import { findManualGuides } from './knowledge/manual.search';
 import { findProcessSteps } from './knowledge/process.search';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
@@ -177,6 +179,8 @@ export class AiAssistantService {
         const dataSources: AiAssistantSource[] = [];
         const toolCalls: AiAssistantToolTrace[] = [];
         const actionCards: AiActionCard[] = [];
+        // read_knowledge로 읽은 항목은 이 답의 출처로 인정한다 (REQ-AST-003)
+        const readKnowledge = new KnowledgeReads();
         // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다.
         // 브라우저만 켰으면 웹 도구는 알리지 않고 주소 허용 목록·링크 거르기·회사 안 정보 막기만 쓴다
         const streaming = emit !== undefined;
@@ -218,6 +222,7 @@ export class AiAssistantService {
                 if (browserResult.frame) emit?.({ type: 'browser_frame', ...browserResult.frame });
               } else {
                 result = await this.toolbox.run(user, toolCall);
+                if (toolCall.name === READ_KNOWLEDGE_TOOL) readKnowledge.add(toolCall.arguments);
                 // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
                 web?.observeErpResult(result.content);
               }
@@ -235,7 +240,7 @@ export class AiAssistantService {
             reply = await call(round < maxRounds ? tools : []);
           }
 
-          const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
           // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
           if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
           const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;

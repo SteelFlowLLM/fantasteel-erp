@@ -2,7 +2,9 @@ import { ALLOCATION_STATUS_LABEL, DRAFT_STATUS_LABEL, RESERVATION_STATUS_LABEL, 
 import type { ChatMessage } from '../llm/llm.client';
 import type { GlossaryTerm } from './knowledge/glossary.types';
 import type { ManualGuide } from './knowledge/manual.types';
+import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import type { ProcessStep } from './knowledge/process.types';
+import { PROCESS_STEPS } from './knowledge/process.generated';
 
 /** 지난 대화는 최근 것만 보낸다. 작은 로컬 모델의 문맥 길이를 넘지 않게 한다 */
 export const MAX_HISTORY_TURNS = 10;
@@ -87,6 +89,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '10. 참고 자료의 "사용 금지 동의어"는 쓰지 않고 한글명으로 말해요. 상태는 결과에 있는 한글 표시명으로 말하고, 영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고 뜻만 한글로 말해요.',
     '11. "이 수주"처럼 화면을 가리키면 [보고 있는 화면]의 주소에서 번호·id를 찾아 도구에 넘겨요. 없으면 어떤 것인지 되물어요.',
     '12. [업무 매뉴얼 자료]가 있으면 화면에서 어디를 눌러 하는지는 그 자료의 절차만 근거로, 순서대로 풀어서 설명해요. 메뉴·버튼·칸 이름은 자료에 적힌 글자 그대로 쓰고, 쓴 문장 끝에는 [MAN-SO-01]처럼 그 매뉴얼 ID를 붙여요. 자료에 없는 화면 조작은 확인할 수 없다고 답하고, 직접 눌러 줄 수는 없어요. 매뉴얼은 검수 전 초안이라 화면과 다를 수 있다고 한 번 덧붙여요.',
+    '13. 아래 [지식 목록]의 업무 매뉴얼·업무 프로세스·용어는 read_knowledge 도구로 전체 내용을 읽을 수 있어요. 위 자료에 없는 업무 절차나 용어 뜻을 물으면 먼저 읽고, 읽은 내용만 근거로 답해요. 읽은 문장 끝에는 그 ID([MAN-SO-01]·[BP-SO-01]·[TRM-056])를 붙여요.',
     '',
     '[사용자]',
     `${input.employeeName} · 역할 ${input.roleLabel}`,
@@ -97,6 +100,8 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '',
     '[참고 자료]',
     input.references.length ? input.references.map(referenceText).join('\n\n') : '(질문에 맞는 용어를 찾지 못했어요)',
+    '',
+    knowledgeCatalog(),
     ...(input.actionCards ? ['', ACTION_CARD_RULES] : []),
     ...(input.webTools ? ['', webRules({ places: input.webTools.places, actionCards: input.actionCards === true })] : []),
     ...(input.browserTools ? ['', browserRules({ actionCards: input.actionCards === true })] : []),
@@ -110,6 +115,19 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     ...recentHistory(input.history).map((turn) => ({ role: turn.role, content: turn.content })),
     { role: 'user', content: input.question },
   ];
+}
+
+/**
+ * 지식 목록 (REQ-AST-003). 매뉴얼·업무 프로세스는 ID와 이름만 알리고, 전체 내용은 read_knowledge로 읽게 한다.
+ * 용어 117개는 나열하지 않는다(프롬프트가 길어져 작은 모델이 흐려진다). 이름이나 TRM ID로 찾는다.
+ */
+export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES, steps: readonly ProcessStep[] = PROCESS_STEPS): string {
+  return [
+    '[지식 목록] (read_knowledge 도구로 전체 내용을 읽어요)',
+    `- 업무 매뉴얼(kind: manual): ${guides.map((guide) => `${guide.id} ${guide.name}`).join(', ')}`,
+    `- 업무 프로세스(kind: process): ${steps.map((step) => `${step.id} ${step.name}`).join(', ')}`,
+    '- 용어(kind: glossary): id에 용어 이름이나 TRM ID를 넣어 찾아요(예: id "예약 매수").',
+  ].join('\n');
 }
 
 /** 실행이 필요한 요청은 카드로 보여 주고 사용자가 확정한다 (REQ-AST-005). 위 9번 규칙의 예외는 이 카드뿐이다 */
@@ -151,17 +169,17 @@ function screenText(screen: AiAssistantScreenContext | null): string {
 const STATUS_CODE_LABEL: Record<string, string> = { ...DRAFT_STATUS_LABEL, ...ALLOCATION_STATUS_LABEL, ...RESERVATION_STATUS_LABEL };
 const withStatusLabels = (text: string): string => text.replace(/[A-Z][A-Z_]{4,}/g, (code) => STATUS_CODE_LABEL[code] ?? code);
 
-function processText(step: ProcessStep): string {
+export function processText(step: ProcessStep): string {
   const detail = step.normalFlow ? ` / 정상 흐름: ${step.normalFlow}` : '';
   return withStatusLabels(`[${step.id}] ${step.name} (주체: ${step.actor}) 핵심 흐름: ${step.flow}${detail} / 결과물: ${step.output}`);
 }
 
-function manualText(guide: ManualGuide): string {
+export function manualText(guide: ManualGuide): string {
   return withStatusLabels(`[${guide.id}] ${guide.name} 화면 절차
 ${guide.text}`);
 }
 
-function referenceText(term: GlossaryTerm): string {
+export function referenceText(term: GlossaryTerm): string {
   return [
     `[${term.id}] ${term.name}${term.englishName ? ` (${term.englishName})` : ''}`,
     `정의: ${term.definition}`,

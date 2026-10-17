@@ -70,6 +70,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 ## 4. 업무 규칙
 
 **업무 지식(REQ-AST-003)**
+- **지식 목록 + 읽기 도구(2026-10-18, 이슈 #380)**: 시스템 프롬프트에 `[지식 목록]`(`knowledgeCatalog`: 매뉴얼 ID·이름, 업무 ID·이름, 용어는 "이름이나 TRM ID로 읽는다"는 한 줄)을 늘 넣고 `read_knowledge` 도구로 전체 내용을 읽게 한다(규칙 13). 아래 키워드 자동 주입은 그대로 둔다(작은 모델은 도구를 잘 부르지 않는다). 읽은 항목은 그 답에서 `parseAssistantAnswer`가 출처로 인정한다(`KnowledgeReads`가 도구 인자로 모은다. 읽지 않은 ID는 여전히 지어낸 것으로 보고 버림). 패널과 사내 채팅 @AI 모두 같은 도구 목록이라 둘 다 쓴다. 테스트: `knowledge/knowledge.read.unit.spec.ts`.
 - 근거는 용어 사전, 업무 순서·흐름을 물을 때의 업무 프로세스 정의서([04]) 6.0 '한눈에 보기' 표, 화면 절차를 물을 때의 업무 매뉴얼 초안이다. 매뉴얼 작성·검수 담당은 정해지지 않았다([02] 21장).
 - `npm run glossary -w @fantasteel/server`가 `docs/notion/03-용어-사전.md` 표를 읽어 `knowledge/glossary.generated.ts`를 만든다(공통 코드처럼 생성 파일을 커밋, 손으로 고치지 않음). 서버는 실행 중에 docs/를 읽지 않는다. 같은 명령이 `docs/notion/04-업무-프로세스-정의서.md` 6.0 표(16개 업무)도 읽어 `knowledge/process.generated.ts`를 만든다.
 - 업무 순서·진행 방법(`knowledge/process.search.ts`): 두 경우에만 업무 프로세스 표를 `[업무 프로세스 자료]`로 프롬프트에 넣는다.
@@ -108,6 +109,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `get_mill_sheets` | `ShipmentService.listMillSheets` (GET mill-sheets) | 밀시트 조회 VIEW | `keyword`(밀시트·출하요청·수주번호) |
 | `get_business_events` | `BusinessEventService.list` (GET business-events) | 없음(전 역할) | `salesOrderNo`, `lotNo`, `from`·`to`. 최신순 15건, 변경 전·후 원본은 넘기지 않음 |
 | `search_past_cases` | `PastCaseService.search` (GET past-cases, REQ-AST-006) | 없음(전 역할) | `query`(핵심어), `category`(QUALITY·EQUIPMENT). 5건까지, 예시 사례는 "예시 사례(실제 사례 아님)"로 표시 (`past-case.md`) |
+| `read_knowledge` | `knowledge/knowledge.read.ts` (용어·업무·매뉴얼 생성 파일. REQ-AST-003) | 없음(전 역할) | `kind`(manual·process·glossary), `id`(MAN-SO-01·BP-SO-01, 용어는 이름 또는 TRM ID). 본문 4,000자까지(넘으면 잘렸다고 알림). 없는 id는 가능한 값·비슷한 용어를 알려 줌. 출처 줄(DATA)에는 남기지 않음 |
 
 번호·키워드로 거를 수 없는 API는 100건(API 상한)을 읽어 서버에서 거른다. 그보다 많으면 '확인하지 못한 … 수'를 함께 준다.
 
