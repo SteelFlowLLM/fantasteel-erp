@@ -23,9 +23,23 @@ export interface StoredState extends AiResearchState {
   exhaustedAt?: number;
   /** 점검을 저장한 때의 stepsUsed. 같으면 이어서 할 때 점검을 다시 하지 않는다 */
   auditedAt?: number;
+  /** 단계마다의 기록 (검색어와 그 결과, 읽은 출처). 점검·보고서·다음 행동의 근거로 쓴다 (이슈 #384). 옛 조사에는 없다 */
+  notes?: StepNote[];
   /** 검색이 연달아 비어 멈춘 때의 stepsUsed. 단계가 남았어도 더 조사하기를 허용한다 (이후 단계가 더해지면 저절로 낡는다) */
   searchDownAt?: number;
 }
+
+/** 검색 결과 한 줄. sourceId는 출처 번호(출처가 꽉 차 넣지 못했으면 null — 근거로 보이되 인용할 수 없다) */
+export interface StepNoteResult {
+  sourceId: number | null;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export type StepNote =
+  | { step: number; kind: 'search'; query: string; engine: string | null; error: string | null; results: StepNoteResult[] }
+  | { step: number; kind: 'read'; sourceId: number; error: string | null };
 
 export type PendingAction = { kind: 'search'; query: string; step: number } | { kind: 'read'; sourceId: number; step: number };
 
@@ -104,7 +118,12 @@ function cutAtSpace(text: string, max: number): string {
   return (space >= max / 2 ? head.slice(0, space) : head).trim();
 }
 
-export const queryKey = (query: string): string => query.trim().replace(/\s+/g, ' ').toLowerCase();
+/**
+ * 같은 검색인지 보는 열쇠: 글자 모양(NFKC)·대소문자·문장부호·낱말 순서·같은 낱말 되풀이를 무시한다.
+ * "고로 탄소 배출" · "탄소 배출, 고로" · "고로 탄소 배출 고로"는 같은 검색이다 (바꿔 말하기만 한 검색을 되풀이하지 않게, 이슈 #384)
+ */
+export const queryKey = (query: string): string =>
+  [...new Set(query.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').trim().split(/\s+/).filter(Boolean))].sort().join(' ');
 
 // ───────────────────────────── 계획 ─────────────────────────────
 
@@ -168,6 +187,7 @@ export function storedState(value: unknown): StoredState {
   const exhaustedAt = int(value.exhaustedAt);
   const auditedAt = int(value.auditedAt);
   const searchDownAt = int(value.searchDownAt);
+  const notes = readNotes(value.notes);
   return {
     summary: typeof value.summary === 'string' ? value.summary : '',
     gaps: strings(value.gaps),
@@ -177,7 +197,30 @@ export function storedState(value: unknown): StoredState {
     ...(exhaustedAt !== undefined ? { exhaustedAt } : {}),
     ...(auditedAt !== undefined ? { auditedAt } : {}),
     ...(searchDownAt !== undefined ? { searchDownAt } : {}),
+    ...(notes.length ? { notes } : {}),
   };
+}
+
+function readNotes(value: unknown): StepNote[] {
+  if (!Array.isArray(value)) return [];
+  const out: StepNote[] = [];
+  for (const n of value) {
+    if (!isRecord(n) || typeof n.step !== 'number') continue;
+    const error = typeof n.error === 'string' ? n.error : null;
+    if (n.kind === 'read' && typeof n.sourceId === 'number') out.push({ step: n.step, kind: 'read', sourceId: n.sourceId, error });
+    else if (n.kind === 'search' && typeof n.query === 'string' && Array.isArray(n.results))
+      out.push({
+        step: n.step,
+        kind: 'search',
+        query: n.query,
+        engine: typeof n.engine === 'string' ? n.engine : null,
+        error,
+        results: n.results
+          .filter((r): r is StepNoteResult => isRecord(r) && typeof r.title === 'string' && typeof r.url === 'string' && typeof r.snippet === 'string')
+          .map((r) => ({ sourceId: typeof r.sourceId === 'number' ? r.sourceId : null, title: r.title, url: r.url, snippet: r.snippet })),
+      });
+  }
+  return out;
 }
 
 function readPending(value: unknown): PendingAction | undefined {
@@ -212,6 +255,8 @@ export function storedAudit(value: unknown): StoredAudit | null {
   return {
     ...audit,
     supportedClaims: claims,
+    designInferences: audit.designInferences ?? [],
+    unsupportedPrecision: audit.unsupportedPrecision ?? [],
     ok: value.ok !== false,
     reportTruncated: value.reportTruncated === true,
     incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
@@ -235,12 +280,14 @@ export function readAudit(value: unknown, knownIds: ReadonlySet<number>): AiRese
     supportedClaims,
     contradictions: stringList(value.contradictions),
     missingDimensions: stringList(value.missingDimensions),
+    designInferences: stringList(value.designInferences),
+    unsupportedPrecision: stringList(value.unsupportedPrecision),
   };
 }
 
 /** 점검 LLM이 실패했을 때 조사 메모로 만든 대신값 */
 export function fallbackAudit(state: StoredState): StoredAudit {
-  return { thesis: state.summary, outline: [], supportedClaims: [], contradictions: [], missingDimensions: state.gaps, ok: false, reportTruncated: false };
+  return { thesis: state.summary, outline: [], supportedClaims: [], contradictions: [], missingDimensions: state.gaps, designInferences: [], unsupportedPrecision: [], ok: false, reportTruncated: false };
 }
 
 // ───────────────────────────── 다음 행동 ─────────────────────────────

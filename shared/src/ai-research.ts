@@ -102,6 +102,10 @@ export interface AiResearchAudit {
   supportedClaims: AiResearchSupportedClaim[];
   contradictions: string[];
   missingDimensions: string[];
+  /** 근거에서 끌어낸 설계 가설 (보고서는 '추론'으로 표시하고 확인 방법과 함께 쓴다, 이슈 #384) */
+  designInferences?: string[];
+  /** 근거 없이 정밀한 수치·임계값 (보고서에 사실처럼 쓰지 않는다) */
+  unsupportedPrecision?: string[];
 }
 
 export const AI_RESEARCH_EVENT_TYPES = [

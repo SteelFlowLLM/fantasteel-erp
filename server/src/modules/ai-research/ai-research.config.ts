@@ -39,6 +39,47 @@ export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = {
   reportSources: RESEARCH_CAPS.reportSources,
 };
 
+/** 보고서 한 번의 출력 토큰 상한 (문맥이 작으면 줄인다) */
+export const REPORT_MAX_TOKENS = 16_384;
+/** 문맥 길이 중 프롬프트에 쓰는 몫 (나머지는 출력·여유) */
+export const CONTEXT_PROMPT_SHARE = 0.7;
+/**
+ * 토큰 → 글자 환산. 프롬프트는 한국어 지시·메모와 영어·숫자가 섞인 웹 글이라 1토큰 ≈ 2자로 본다
+ * (한국어만이면 1자 ≈ 1토큰까지 늘 수 있어 넘치면 AI_RESEARCH_PROMPT_CHARS로 줄인다)
+ */
+export const CHARS_PER_TOKEN = 2;
+const DERIVED_PROMPT_CHARS_MIN = 4_000;
+
+export interface ModelBudget {
+  promptChars: number;
+  reportMaxTokens: number;
+  /** 알아낸 문맥 길이(토큰). 모르면 null */
+  contextLength: number | null;
+}
+
+/** 환경 변수로 정한 프롬프트 글자 수 (없거나 잘못됐으면 null) */
+export function envPromptChars(env: NodeJS.ProcessEnv = process.env): number | null {
+  const text = env.AI_RESEARCH_PROMPT_CHARS?.trim();
+  if (!text || !/^\d+$/.test(text)) return null;
+  return Math.min(Math.max(Number(text), PROMPT_CHARS_MIN), RESEARCH_CAPS.promptChars);
+}
+
+/**
+ * 모델 문맥 길이로 프롬프트 글자 수·보고서 출력 토큰을 정한다 (이슈 #384).
+ * 출력 몫 = min(16,384, 문맥/2)을 남기고, 프롬프트 = min(문맥 × 70%, 문맥 − 출력 몫)토큰 × 2자. AI_RESEARCH_PROMPT_CHARS가 있으면 그 값을 넘지 않는다.
+ * 문맥을 모르면(외부 LLM·옛 LM Studio) AI_RESEARCH_PROMPT_CHARS 또는 24,000자, 보고서 16,384토큰.
+ */
+export function modelBudget(contextLength: number | null, env: NodeJS.ProcessEnv = process.env): ModelBudget {
+  const fromEnv = envPromptChars(env);
+  if (!contextLength || contextLength <= 0) return { promptChars: fromEnv ?? DEFAULT_RESEARCH_LIMITS.promptChars, reportMaxTokens: REPORT_MAX_TOKENS, contextLength: null };
+  const reserve = Math.min(REPORT_MAX_TOKENS, Math.floor(contextLength / 2));
+  const promptTokens = Math.min(Math.floor(contextLength * CONTEXT_PROMPT_SHARE), contextLength - reserve);
+  const derived = Math.min(Math.max(DERIVED_PROMPT_CHARS_MIN, promptTokens * CHARS_PER_TOKEN), RESEARCH_CAPS.promptChars);
+  const promptChars = fromEnv === null ? derived : Math.min(fromEnv, derived);
+  const reportMaxTokens = Math.min(REPORT_MAX_TOKENS, Math.max(1024, contextLength - Math.ceil(promptChars / CHARS_PER_TOKEN)));
+  return { promptChars, reportMaxTokens, contextLength };
+}
+
 function intEnv(raw: string | undefined, fallback: number, min: number, max: number): number {
   const text = raw?.trim();
   if (!text || !/^\d+$/.test(text)) return fallback;

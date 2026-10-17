@@ -44,7 +44,7 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     researchState: state ? { summary: state.summary, gaps: state.gaps, unsupportedClaims: state.unsupportedClaims } : null,
     searchedQueries: state?.searchedQueries ?? [],
     sources: sources.map((s) => ({ id: s.id, title: s.title, url: s.url, snippet: s.snippet, read: s.readText !== undefined })),
-    audit: audit ? { thesis: audit.thesis, outline: audit.outline, supportedClaims: audit.supportedClaims, contradictions: audit.contradictions, missingDimensions: audit.missingDimensions } : null,
+    audit: audit ? { thesis: audit.thesis, outline: audit.outline, supportedClaims: audit.supportedClaims, contradictions: audit.contradictions, missingDimensions: audit.missingDimensions, designInferences: audit.designInferences, unsupportedPrecision: audit.unsupportedPrecision } : null,
     report: row.report,
     reportTruncated: audit?.reportTruncated ?? false,
     incompleteReason: audit?.incompleteReason ?? null,
