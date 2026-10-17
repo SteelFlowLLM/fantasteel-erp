@@ -19,8 +19,18 @@ export const ACTION_SNAPSHOT_MAX_CHARS = 3_000;
 export const BROWSER_TYPE_MAX = 200;
 
 /** 누르지 않는 낱말: 이름·값·글에 있으면 막는다. 영어는 낱말 앞머리로 본다(payment·orders도 막힘, border는 안 막힘) */
-const RISKY_KO = /로그인|결제|구매|주문|삭제|송금|이체|가입/;
-const RISKY_EN = /\b(?:log[\s-]?in|sign[\s-]?in|sign[\s-]?up|buy|pay|check[\s-]?out|purchase|order|delete|transfer|subscribe)/i;
+const RISKY_KO = /로그인|결제|구매|주문|삭제|송금|이체|가입|장바구니|예약|신청|탈퇴|해지/;
+const RISKY_EN = /\b(?:log[\s-]?in|sign[\s-]?in|sign[\s-]?up|register|buy|pay|check[\s-]?out|purchase|order|delete|transfer|subscribe|add[\s-]?to[\s-]?cart)/i;
+
+/**
+ * 규칙에 대기 전 글 다듬기 (보안 검토): 보이지 않는 글자를 지우고 NFKC로 바꾼다.
+ * 로\u200B그인·ｌｏｇｉｎ(전각)·ﬁ 같은 합자로 낱말 검사를 피하지 못하게 한다
+ */
+export const normalizeForRules = (text: string): string =>
+  stripInvisible(text)
+    .normalize('NFKC')
+    // 그 밖의 형식 문자(Cf)·결합 문자 이음·한글 채움 문자도 지운다
+    .replace(/[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0]/gu, '');
 
 /** 넣지 않는 칸 이름 (name·id·placeholder·aria-label·label 글) */
 const SENSITIVE_FIELD = /card|cvc|cvv|otp|password|passwd|주민|계좌|비밀번호/i;
@@ -32,7 +42,8 @@ export const USER_MUST_DO_IT = '이 일은 AI가 하지 않아요. 사용자에�
 export function riskyWordIn(...texts: (string | null | undefined)[]): string | null {
   for (const text of texts) {
     if (!text) continue;
-    const match = RISKY_KO.exec(text) ?? RISKY_EN.exec(text);
+    const normalized = normalizeForRules(text);
+    const match = RISKY_KO.exec(normalized) ?? RISKY_EN.exec(normalized);
     if (match) return match[0];
   }
   return null;
@@ -53,9 +64,9 @@ export function isPostFormSubmission(formMethod: string | null | undefined, subm
 /** 비밀번호·카드·일회용 코드처럼 값을 보이지도 넣지도 않는 칸인지 */
 export function isSensitiveField(field: Pick<ElementInfo, 'type' | 'autocomplete' | 'hints'>): boolean {
   if (field.type === 'password') return true;
-  const tokens = field.autocomplete.toLowerCase().split(/\s+/);
+  const tokens = normalizeForRules(field.autocomplete).toLowerCase().split(/\s+/);
   if (tokens.some((t) => t.startsWith('cc-') || t === 'one-time-code' || t === 'current-password' || t === 'new-password')) return true;
-  return SENSITIVE_FIELD.test(field.hints);
+  return SENSITIVE_FIELD.test(normalizeForRules(field.hints));
 }
 
 /** 누르면 안 되는 요소면 이유 */
@@ -63,7 +74,7 @@ export function clickBlockReason(el: ElementInfo): string | null {
   if (el.type === 'file') return '파일 올리기는 막혀 있어요';
   if (el.download) return '파일 내려받기는 막혀 있어요';
   const word = riskyWordIn(el.name, el.value, el.text);
-  if (word) return `"${word}" 같은 로그인·결제·구매·주문·삭제·송금·가입 버튼·링크는 누르지 않아요`;
+  if (word) return `"${word}" 같은 로그인·가입·결제·구매·장바구니·주문·예약·신청·삭제·탈퇴·해지·송금 버튼·링크는 누르지 않아요`;
   if (el.isSubmitter && el.inForm && isPostFormSubmission(el.formMethod, el.submitterMethod)) return '정보를 보내는 폼(POST)은 제출하지 않아요';
   return null;
 }

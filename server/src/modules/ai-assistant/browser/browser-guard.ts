@@ -1,11 +1,19 @@
 import type { BrowserContext } from 'playwright-core';
 import { assertFetchableUrl, BlockedUrlError, checkHostAddresses, DEFAULT_FETCH_POLICY, type FetchPolicy, type LookupFunction } from '../web/ssrf-guard';
+import { BROWSER_LOOKUP } from './browser-dns';
 
 /**
  * 브라우저의 모든 요청 확인 (이슈 #373). 페이지 읽기(web/ssrf-guard.ts)와 같은 규칙을 쓴다:
  * http·https만(그림 같은 하위 요청은 data:·blob:도), 80·443 포트, 막을 호스트, 이름을 푼 주소가 모두 공용 주소.
  * 그리고 페이지 이동(문서 요청)이 POST면 막는다(폼 보내기). 웹소켓은 모두 막는다.
+ * route는 리다이렉트의 첫 주소만 보므로 이것은 앞쪽 확인이고, 모든 연결은 브라우저 프록시(browser-proxy.ts)가 다시 확인한다.
  */
+
+/** 한 컨텍스트(한 답)에서 요청하는 서로 다른 호스트 수 (보안 검토: 이름 풀기를 넘치게 하지 못하게) */
+export const MAX_HOSTS_PER_CONTEXT = 100;
+
+/** 한 답 동안 호스트별 판단 */
+export type HostDecisionCache = Map<string, Promise<string | null>>;
 
 export interface BrowserRequestInfo {
   url: string;
@@ -23,7 +31,7 @@ export interface RequestGuardOptions {
 }
 
 /** 요청 하나를 보낼지 (Chrome 없이 시험한다) */
-export async function decideBrowserRequest(request: BrowserRequestInfo, options: RequestGuardOptions & { cache?: Map<string, Promise<string | null>> } = {}): Promise<RequestDecision> {
+export async function decideBrowserRequest(request: BrowserRequestInfo, options: RequestGuardOptions & { cache?: HostDecisionCache } = {}): Promise<RequestDecision> {
   const policy = options.policy ?? DEFAULT_FETCH_POLICY;
   let url: URL;
   try {
@@ -44,7 +52,8 @@ export async function decideBrowserRequest(request: BrowserRequestInfo, options:
   // 한 페이지가 같은 호스트에 하위 요청을 많이 보내므로 한 답(컨텍스트) 동안 판단을 기억한다
   let pending = options.cache?.get(host);
   if (!pending) {
-    pending = checkHostAddresses(host, policy, options.resolve);
+    if (options.cache && options.cache.size >= MAX_HOSTS_PER_CONTEXT) return { allow: false, reason: `한 페이지에서 ${MAX_HOSTS_PER_CONTEXT}개가 넘는 사이트로 요청해서 막았어요` };
+    pending = checkHostAddresses(host, policy, options.resolve ?? BROWSER_LOOKUP);
     options.cache?.set(host, pending);
   }
   const reason = await pending;
@@ -55,8 +64,8 @@ export async function decideBrowserRequest(request: BrowserRequestInfo, options:
  * 컨텍스트의 모든 요청에 확인을 건다. 가장 나중에 건 route가 먼저 돌므로 다른 route(시험 fixture)보다 뒤에 건다.
  * 허락한 요청은 fallback으로 넘겨 다음 route나 네트워크로 보낸다.
  */
-export async function installRequestGuard(context: BrowserContext, options: RequestGuardOptions & { onBlocked?: (reason: string, url: string) => void } = {}): Promise<void> {
-  const cache = new Map<string, Promise<string | null>>();
+export async function installRequestGuard(context: BrowserContext, options: RequestGuardOptions & { cache: HostDecisionCache; onBlocked?: (reason: string, url: string) => void }): Promise<void> {
+  const { cache } = options;
   await context.routeWebSocket(/.*/, (ws) => ws.close({ code: 1008, reason: 'blocked' }));
   await context.route('**/*', async (route) => {
     const request = route.request();

@@ -6,7 +6,7 @@ import { LlmAbortedError, type LlmToolCall, type LlmToolDefinition } from '../..
 import { optionalEnum, requiredString, ToolArgumentError } from '../tools/assistant-tool';
 import { assertFetchableUrl, BlockedUrlError } from '../web/ssrf-guard';
 import { cutText, redactQuery, stripInvisible, urlKey } from '../web/web-text';
-import { installRequestGuard, type RequestGuardOptions } from './browser-guard';
+import { decideBrowserRequest, installRequestGuard, type HostDecisionCache, type RequestGuardOptions } from './browser-guard';
 import { BrowserPool, BrowserUnavailableError } from './browser-pool';
 import {
   ACTION_SNAPSHOT_MAX_CHARS,
@@ -25,6 +25,12 @@ import {
 } from './browser-rules';
 import { pageScript, type ElementInfo, type PageScriptArg, type PageSnapshot } from './page-script';
 
+/**
+ * 페이지로 보낼 함수 글. 빌드 도구(tsx·esbuild keepNames)가 함수에 __name(…) 호출을 끼워 넣기도 해서
+ * 그 이름을 아무 일도 하지 않는 함수로 감싸 둔다(페이지에는 __name이 없다)
+ */
+const PAGE_SCRIPT_SOURCE = `((__name) => (${pageScript.toString()}))((target) => target)`;
+
 export type BrowserFrame = Omit<Extract<AiAssistantStreamEvent, { type: 'browser_frame' }>, 'type'>;
 
 /** 화면 사진: JPEG 품질 50, 너비 800 (결정값). 모델에는 보내지 않는다 */
@@ -38,6 +44,16 @@ const SETTLE_MS = 400;
 /** 화면 읽기에서 모으는 줄 수 상한 (글 길이 상한 전에 페이지에서 꺼내는 양을 묶는다) */
 const SNAPSHOT_MAX_ITEMS = 600;
 const TITLE_MAX = 200;
+/**
+ * 프록시를 거치지 않는 WebRTC·WebTransport(UDP)를 페이지에서 지운다 (보안 검토). 모든 프레임에서 문서보다 먼저 돈다.
+ * Chrome 실행 인자(--force-webrtc-ip-handling-policy)와 함께 쓴다
+ */
+const NO_UDP_SCRIPT = `(() => {
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'WebTransport']) {
+    try { delete globalThis[name]; } catch (e) {}
+    try { Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false }); } catch (e) {}
+  }
+})();`;
 
 const OPEN: LlmToolDefinition = {
   name: 'browser_open',
@@ -177,6 +193,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private fileChooserBlocked = false;
   /** 다음 화면 글에 붙일 안내 */
   private notes: string[] = [];
+  /** 이 답(컨텍스트)의 호스트별 판단. 요청 확인과 페이지 주소 다시 확인이 함께 쓴다 */
+  private readonly hostCache: HostDecisionCache = new Map();
   private readonly onAbort = () => void this.close('abort');
 
   constructor(
@@ -212,7 +230,11 @@ export class BrowserToolSession implements BrowserToolSessionLike {
         case 'browser_open':
           return await this.open(requiredString(args, 'url', 2000));
         case 'browser_snapshot':
-          return await this.withPage(async (page) => ({ content: await this.snapshotText(page, SNAPSHOT_MAX_CHARS), frame: null, webSources: [] }));
+          return await this.withPage(async (page) => {
+            const unsafe = await this.closeIfUnsafe(page);
+            if (unsafe) return unsafe;
+            return { content: await this.snapshotText(page, SNAPSHOT_MAX_CHARS), frame: null, webSources: [] };
+          });
         case 'browser_click':
           return await this.click(args.ref);
         case 'browser_type':
@@ -274,9 +296,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
     } catch (error) {
       if (this.closed) throw error;
+      this.logger.debug(`페이지를 열지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
       const reason = this.blockedRequests.at(-1);
       this.blockedRequests = [];
-      await this.leaveErrorPage(page);
+      await this.resetToBlank(page);
       return failure(reason ? `페이지를 열지 않았어요: ${reason}` : '페이지를 열지 못했어요', { 안내: '열지 못했다고 알리고 검색 결과로 답해요' });
     }
     return this.afterAction(page);
@@ -322,11 +345,14 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private async locate(page: Page, rawRef: unknown): Promise<{ locator: Locator; info: ElementInfo } | BrowserToolResult> {
     const check = this.refs.check(rawRef);
     if (!check.ok) return failure(check.reason);
-    const locator = page.locator(`[${this.attr}="${check.id}"]`);
-    if ((await locator.count()) !== 1) return failure(`r${check.id} 요소를 찾지 못했어요`, { 안내: 'browser_snapshot으로 지금 화면을 다시 읽어요' });
+    const selector = `[${this.attr}="${check.id}"]`;
     const arg: PageScriptArg = { op: 'describe' };
-    const info = (await locator.evaluate(pageScript, arg)) as ElementInfo;
-    return { locator, info };
+    const found = (await this.evaluateIsolated(
+      page,
+      `(() => { const list = document.querySelectorAll(${JSON.stringify(selector)}); return list.length === 1 ? { count: 1, info: (${PAGE_SCRIPT_SOURCE})(list[0], ${JSON.stringify(arg)}) } : { count: list.length }; })()`,
+    )) as { count: number; info?: ElementInfo };
+    if (found.count !== 1 || !found.info) return failure(`r${check.id} 요소를 찾지 못했어요`, { 안내: 'browser_snapshot으로 지금 화면을 다시 읽어요' });
+    return { locator: page.locator(selector), info: found.info };
   }
 
   private async withPage(task: (page: Page) => Promise<BrowserToolResult>): Promise<BrowserToolResult> {
@@ -378,13 +404,51 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       serviceWorkers: 'block',
     });
     try {
+      await context.addInitScript(NO_UDP_SCRIPT);
       await this.options.prepareContext?.(context);
-      await installRequestGuard(context, { ...this.options.guard, onBlocked: (reason) => this.blockedRequests.push(reason) });
+      await installRequestGuard(context, { ...this.options.guard, cache: this.hostCache, onBlocked: (reason) => this.blockedRequests.push(reason) });
     } catch (error) {
       await context.close().catch(() => undefined);
       throw error;
     }
     return context;
+  }
+
+  /**
+   * 화면 글·사진 전에 지금 페이지와 모든 프레임의 주소를 다시 확인한다 (보안 검토: 리다이렉트로 들어간 주소 등).
+   * 막을 주소면 about:blank로 비우고 막았다는 결과를, 괜찮으면 null
+   */
+  private async closeIfUnsafe(page: Page): Promise<BrowserToolResult | null> {
+    let reason: string | null = null;
+    for (const frame of page.frames()) {
+      reason = await this.frameUrlProblem(frame.url(), frame === page.mainFrame());
+      if (reason) break;
+    }
+    if (!reason) return null;
+    this.logger.warn(`브라우저 페이지 주소를 다시 확인해 막았어요: ${reason}`);
+    await this.resetToBlank(page);
+    this.blockedRequests = [];
+    this.notes = [];
+    return failure(`막았어요: 페이지가 열 수 없는 주소로 이동해서 비웠어요 (${reason})`, { 안내: '이 페이지는 열 수 없다고 알리고 다른 결과로 답해요' });
+  }
+
+  private async frameUrlProblem(raw: string, main: boolean): Promise<string | null> {
+    if (raw === '' || raw.startsWith('about:') || raw.startsWith('data:') || raw.startsWith('blob:')) return null;
+    // 막은 iframe은 오류 페이지로 남는다(내용 없음). 본 문서가 오류 페이지면 되돌리지 못한 것이다
+    if (raw.startsWith('chrome-error:')) return main ? '열지 못한 페이지' : null;
+    const decision = await decideBrowserRequest({ url: raw, method: 'GET', isNavigation: true }, { ...this.options.guard, cache: this.hostCache });
+    return decision.allow ? null : decision.reason;
+  }
+
+  /**
+   * 빈 페이지로 비운다. 실패한 이동은 goto가 끝난 뒤에 오류 페이지를 올리기도 해서(다음 열기가 끊긴다) 잠깐씩 보며 몇 번 다시 비운다
+   */
+  private async resetToBlank(page: Page) {
+    for (let i = 0; i < 3; i += 1) {
+      await page.waitForTimeout(150);
+      if (page.url() === 'about:blank') return;
+      await page.goto('about:blank', { timeout: ACTION_TIMEOUT_MS }).catch(() => undefined);
+    }
   }
 
   /** 막은 이동으로 Chrome 오류 페이지가 되었으면 뒤로 가서 이전 페이지로 되돌린다. 되돌렸으면 true */
@@ -400,6 +464,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     await page.waitForLoadState('domcontentloaded', { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => undefined);
     const blockedMove = this.blockedRequests.at(-1);
     if (await this.leaveErrorPage(page)) this.notes.push(`막은 이동(${blockedMove ?? '막힌 주소'}) 때문에 이전 페이지로 돌아왔어요. 페이지를 다시 불러 번호가 바뀌었어요`);
+    const unsafe = await this.closeIfUnsafe(page);
+    if (unsafe) return unsafe;
     const content = await this.snapshotText(page, ACTION_SNAPSHOT_MAX_CHARS);
     const url = page.url();
     const title = cutText(stripInvisible(await page.title().catch(() => '')), TITLE_MAX);
@@ -411,7 +477,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private async snapshotText(page: Page, maxChars: number): Promise<string> {
     const { docStart, next } = this.refs.range;
     const arg: PageScriptArg = { op: 'snapshot', attr: this.attr, docStart, next, maxNodes: SNAPSHOT_MAX_NODES, maxItems: SNAPSHOT_MAX_ITEMS };
-    const snapshot = (await page.locator(':root').evaluate(pageScript, arg)) as PageSnapshot;
+    const snapshot = (await this.evaluateIsolated(page, `(${PAGE_SCRIPT_SOURCE})(document.documentElement, ${JSON.stringify(arg)})`)) as PageSnapshot;
     this.refs.advance(snapshot.next);
     const notes: string[] = [];
     if (this.blockedRequests.length) notes.push(`(브라우저가 이 페이지의 요청 ${this.blockedRequests.length}개를 막았어요: ${[...new Set(this.blockedRequests)].slice(0, 3).join(' / ')})`);
@@ -424,14 +490,33 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     return [formatSnapshot(snapshot, maxChars), ...notes, `(브라우저 동작 ${remaining}번 남음)`].join('\n');
   }
 
+  private async cdpFor(page: Page): Promise<CDPSession> {
+    if (!this.context) throw new Error('브라우저를 닫았어요');
+    this.cdp ??= await this.context.newCDPSession(page);
+    return this.cdp;
+  }
+
+  /**
+   * 페이지 글 읽기·번호 붙이기는 본 문서의 격리된 실행 공간(isolated world)에서 돌린다 (보안 검토):
+   * 페이지 스크립트가 getAttribute·innerText 같은 DOM 함수를 바꿔 로그인 버튼을 "다음"으로 속이지 못하게 한다(DOM은 같이 본다).
+   * Playwright locator.evaluate는 끝나지 않은 이동을 기다리며 멈추기도 해서 CDP로 바로 묻는다
+   */
+  private async evaluateIsolated(page: Page, expression: string): Promise<unknown> {
+    const cdp = await this.cdpFor(page);
+    const { frameTree } = await cdp.send('Page.getFrameTree');
+    const { executionContextId } = await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: 'fantasteel-browser' });
+    const result = await cdp.send('Runtime.evaluate', { expression, contextId: executionContextId, returnByValue: true, timeout: ACTION_TIMEOUT_MS });
+    if (result.exceptionDetails) throw new Error(`페이지 읽기 실패: ${result.exceptionDetails.exception?.description?.split('\n')[0] ?? result.exceptionDetails.text}`);
+    return result.result.value;
+  }
+
   /** 화면 사진. Chrome DevTools 프로토콜로 줄여 찍는다(Playwright 사진은 크기를 줄이지 못함). 못 찍으면 null */
   private async frame(page: Page, title: string): Promise<BrowserFrame | null> {
     try {
-      if (!this.context) return null;
-      this.cdp ??= await this.context.newCDPSession(page);
-      const metrics = (await this.cdp.send('Page.getLayoutMetrics')) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
+      const cdp = await this.cdpFor(page);
+      const metrics = (await cdp.send('Page.getLayoutMetrics')) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
       const view = metrics.cssVisualViewport;
-      const shot = await this.cdp.send('Page.captureScreenshot', {
+      const shot = await cdp.send('Page.captureScreenshot', {
         format: 'jpeg',
         quality: FRAME_QUALITY,
         clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: Math.min(1, FRAME_WIDTH / view.clientWidth) },

@@ -2,6 +2,8 @@
 //   BROWSER_E2E=1 npx jest src/modules/ai-assistant/browser/browser-chrome   (server 폴더에서)
 // 네트워크는 쓰지 않는다: https://example.test/ 는 context.route로 fixture를 돌려주고, 이름 풀기도 가짜 주소로 한다.
 import { readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserContext } from 'playwright-core';
 import type { LookupFunction } from '../web/ssrf-guard';
@@ -14,6 +16,9 @@ const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name)
 
 /** 막은 요청을 세려고 fixture 서버가 받은 요청을 적는다 */
 const served: string[] = [];
+/** 리다이렉트로 노리는 사내 서버 대신 (127.0.0.1). 요청이 오면 안 된다 */
+const internalHits: string[] = [];
+let internalPort = 0;
 async function serveFixtures(context: BrowserContext) {
   await context.route(
     (url) => url.hostname === 'example.test',
@@ -23,6 +28,17 @@ async function serveFixtures(context: BrowserContext) {
       const html = (body: string) => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body });
       if (url.pathname === '/') return html(fixture('home.html'));
       if (url.pathname === '/page/2') return html(fixture('page2.html'));
+      // 리다이렉트는 route가 첫 주소만 보므로 다음 주소는 브라우저 프록시가 막아야 한다 (보안 검토)
+      if (url.pathname === '/redirect') return route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:${internalPort}/meta` } });
+      if (url.pathname === '/redirect-metadata') return route.fulfill({ status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } });
+      if (url.pathname === '/redirect-name') return route.fulfill({ status: 302, headers: { location: 'http://internal.test/meta' } });
+      if (url.pathname === '/redirect-https') return route.fulfill({ status: 302, headers: { location: 'https://internal.test/meta' } });
+      if (url.pathname === '/rtc') return html(`<!doctype html><title>rtc</title><p id="o">x</p><script>document.getElementById('o').textContent = 'RTC:' + typeof RTCPeerConnection + ' WT:' + typeof WebTransport</script>`);
+      // 페이지가 DOM 함수를 바꿔 로그인 버튼을 "다음"으로 속이려 한다
+      if (url.pathname === '/tamper')
+        return html(
+          `<!doctype html><title>tamper</title><button>로그인</button><script>for (const [proto, key] of [[HTMLElement.prototype, 'innerText'], [Node.prototype, 'textContent']]) Object.defineProperty(proto, key, { get() { return '다음'; } }); Element.prototype.getAttribute = () => null;</script>`,
+        );
       if (url.pathname === '/search') return html(`<!doctype html><title>검색</title><h1>검색 결과: ${url.searchParams.get('q')?.replace(/[<&]/g, '') ?? ''}</h1>`);
       return html(`<!doctype html><title>${url.pathname}</title><p>도착: ${url.pathname}</p>`);
     },
@@ -59,7 +75,23 @@ function jpegWidth(base64: string): number {
 
 e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
   jest.setTimeout(90_000);
-  const pool = new BrowserPool({ env: { ...process.env, AI_BROWSER_ENABLED: 'true' } });
+  /** 브라우저 프록시가 막은 주소 */
+  const proxyBlocked: string[] = [];
+  // 프록시의 이름 풀기도 가짜: internal.test → 127.0.0.1 (사내 주소처럼)
+  const proxyLookup: LookupFunction = (hostname, _options, callback) =>
+    hostname === 'internal.test' ? callback(null, [{ address: '127.0.0.1', family: 4 }]) : callback(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }), []);
+  const pool = new BrowserPool({ env: { ...process.env, AI_BROWSER_ENABLED: 'true' }, proxy: { lookup: proxyLookup, onBlocked: (target) => void proxyBlocked.push(target) } });
+  let internal: Server;
+
+  beforeAll(async () => {
+    internal = createServer((req, res) => {
+      internalHits.push(req.url ?? '');
+      res.end('<title>INTERNAL</title>internal secret');
+    });
+    await new Promise<void>((resolve) => internal.listen(0, '127.0.0.1', () => resolve()));
+    internalPort = (internal.address() as AddressInfo).port;
+  });
+  afterAll(() => new Promise<void>((resolve) => internal.close(() => resolve())));
   const toolbox = (timeLimitMs?: number) => new AssistantBrowserToolbox(pool, { guard: { resolve }, prepareContext: serveFixtures, timeLimitMs });
 
   afterAll(() => pool.shutdown());
@@ -139,6 +171,28 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
       await session.close();
     }
     expect(pool.activeContexts).toBe(0);
+  });
+
+  it('리다이렉트로 사내 주소(IP·이름·https)에 가지 못하고, WebRTC·WebTransport는 없고, 바꾼 DOM 함수에 속지 않는다', async () => {
+    const session = toolbox().session({ question: 'https://example.test/redirect https://example.test/redirect-metadata https://example.test/redirect-name https://example.test/redirect-https https://example.test/rtc https://example.test/tamper', web: web() });
+    try {
+      for (const path of ['/redirect', '/redirect-metadata', '/redirect-name', '/redirect-https']) {
+        const result = await session.run(call('browser_open', { url: `https://example.test${path}` }));
+        expect(result.frame).toBeNull();
+        expect(errorOf(result)).toMatch(/^(막았어요|페이지를 열지)/);
+      }
+      expect(internalHits).toEqual([]);
+      // route가 아니라 프록시가 막았다 (리다이렉트 다음 주소는 route를 지나지 않는다)
+      expect(proxyBlocked).toEqual(expect.arrayContaining([`http://127.0.0.1:${internalPort}/meta`, 'http://169.254.169.254/latest/meta-data/', 'http://internal.test/meta', 'internal.test']));
+      const rtc = await session.run(call('browser_open', { url: 'https://example.test/rtc' }));
+      expect(rtc.content).toContain('RTC:undefined WT:undefined');
+      // 화면 읽기·규칙은 격리된 실행 공간에서 돌아 페이지가 바꾼 DOM 함수에 속지 않는다
+      const tamper = await session.run(call('browser_open', { url: 'https://example.test/tamper' }));
+      expect(tamper.content).toMatch(/\[r\d+\] button "로그인"/);
+      expect(errorOf(await session.run(call('browser_click', { ref: refOf(tamper, 'button "로그인"') })))).toContain('막았어요');
+    } finally {
+      await session.close();
+    }
   });
 
   it('한 답 시간 상한이 지나면 컨텍스트를 닫고, 멈추면 바로 닫는다', async () => {

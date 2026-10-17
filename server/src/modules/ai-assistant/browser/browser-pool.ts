@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
 import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 import type { AiBrowserCapabilities } from '@fantasteel/shared';
+import { GuardedProxy, type GuardedProxyOptions } from './browser-proxy';
 
 /** 브라우저를 아무도 쓰지 않으면 닫는 시간 (결정값) */
 export const BROWSER_IDLE_CLOSE_MS = 5 * 60_000;
@@ -27,23 +28,40 @@ export function chromeCandidates(platform: NodeJS.Platform, env: NodeJS.ProcessE
   return [];
 }
 
+/** Chrome을 띄울 때 넘기는 것: 실행 파일(null이면 channel: 'chrome'), 프록시, 샌드박스 */
+export interface ChromeLaunch {
+  executablePath: string | null;
+  proxy: { server: string; username: string; password: string };
+  sandbox: boolean;
+}
+
+/**
+ * WebRTC는 UDP로 프록시를 거치지 않고 나간다. 프록시를 거치지 않는 UDP를 끈다 (보안 검토).
+ * RTCPeerConnection·WebTransport는 컨텍스트마다 init script로도 지운다(browser 세션)
+ */
+export const CHROME_ARGS = ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'];
+
 export interface BrowserPoolOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   exists?: (path: string) => boolean;
-  /** 시험은 띄우는 함수를 바꾼다. executablePath가 null이면 channel: 'chrome' */
-  launch?: (executablePath: string | null) => Promise<Browser>;
+  /** 시험은 띄우는 함수를 바꾼다 */
+  launch?: (options: ChromeLaunch) => Promise<Browser>;
+  /** 브라우저 프록시의 확인 규칙 (시험만 바꾼다) */
+  proxy?: GuardedProxyOptions;
   idleMs?: number;
   maxContexts?: number;
   now?: () => number;
 }
 
-const launchChrome = (executablePath: string | null): Promise<Browser> =>
+const launchChrome = (options: ChromeLaunch): Promise<Browser> =>
   chromium.launch({
-    ...(executablePath ? { executablePath } : { channel: 'chrome' }),
+    ...(options.executablePath ? { executablePath: options.executablePath } : { channel: 'chrome' }),
     headless: true,
-    // macOS·Windows는 Chrome 샌드박스를 켠다. Linux 서버(root·컨테이너)는 샌드박스가 뜨지 않는 일이 많아 Playwright 기본값(끔)을 둔다
-    chromiumSandbox: process.platform !== 'linux',
+    chromiumSandbox: options.sandbox,
+    // 모든 연결을 우리 프록시로. <-loopback>: Chrome이 localhost·127.0.0.1을 프록시 없이 바로 여는 기본 동작을 끈다
+    proxy: { ...options.proxy, bypass: '<-loopback>' },
+    args: CHROME_ARGS,
     timeout: 30_000,
   });
 
@@ -56,7 +74,9 @@ export class BrowserPool {
   private readonly env: NodeJS.ProcessEnv;
   private readonly platform: NodeJS.Platform;
   private readonly exists: (path: string) => boolean;
-  private readonly launcher: (executablePath: string | null) => Promise<Browser>;
+  private readonly launcher: (options: ChromeLaunch) => Promise<Browser>;
+  private readonly proxyOptions: GuardedProxyOptions;
+  private proxy: GuardedProxy | null = null;
   private readonly idleMs: number;
   private readonly maxContexts: number;
   private readonly now: () => number;
@@ -72,6 +92,7 @@ export class BrowserPool {
     this.platform = options.platform ?? process.platform;
     this.exists = options.exists ?? existsSync;
     this.launcher = options.launch ?? launchChrome;
+    this.proxyOptions = options.proxy ?? {};
     this.idleMs = options.idleMs ?? BROWSER_IDLE_CLOSE_MS;
     this.maxContexts = options.maxContexts ?? MAX_BROWSER_CONTEXTS;
     this.now = options.now ?? Date.now;
@@ -132,24 +153,37 @@ export class BrowserPool {
     if (this.contexts.delete(context)) this.scheduleIdle();
   }
 
+  /** Chrome 샌드박스는 늘 켠다. 켜지지 않는 Linux 서버(root·컨테이너)만 BROWSER_NO_SANDBOX=true로 끈다 */
+  private get sandbox(): boolean {
+    return this.env.BROWSER_NO_SANDBOX?.trim().toLowerCase() !== 'true';
+  }
+
   private launch(): Promise<Browser> {
     if (!this.browser) {
       const executable = this.executable();
-      const launching = this.launcher(executable.path).then(
-        (browser) => {
-          this.launchFailedAt = null;
-          browser.on('disconnected', () => {
-            if (this.browser === launching) this.browser = null;
-          });
-          return browser;
-        },
-        (error: unknown) => {
-          this.browser = null;
-          this.launchFailedAt = this.now();
-          this.logger.warn(`Chrome을 띄우지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
-          throw new BrowserUnavailableError('Chrome을 띄우지 못했어요');
-        },
-      );
+      // 띄울 때마다 새 프록시(새 포트·새 인증 값)
+      const proxy = new GuardedProxy(this.proxyOptions);
+      this.proxy = proxy;
+      const launching = proxy
+        .start()
+        .then(() => this.launcher({ executablePath: executable.path, proxy: { server: proxy.url, username: proxy.username, password: proxy.password }, sandbox: this.sandbox }))
+        .then(
+          (browser) => {
+            this.launchFailedAt = null;
+            browser.on('disconnected', () => {
+              if (this.browser === launching) this.browser = null;
+              void proxy.stop();
+            });
+            return browser;
+          },
+          (error: unknown) => {
+            this.browser = null;
+            void proxy.stop();
+            this.launchFailedAt = this.now();
+            this.logger.warn(`Chrome을 띄우지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+            throw new BrowserUnavailableError('Chrome을 띄우지 못했어요');
+          },
+        );
       this.browser = launching;
     }
     return this.browser;
@@ -172,5 +206,7 @@ export class BrowserPool {
     this.browser = null;
     if (!browser) return;
     await browser.then((b) => b.close()).catch(() => undefined);
+    await this.proxy?.stop();
+    this.proxy = null;
   }
 }
