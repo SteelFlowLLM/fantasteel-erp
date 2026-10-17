@@ -217,6 +217,28 @@ export function parseNaverWebSearch(json: unknown, limit = WEB_SEARCH_RESULT_LIM
   return results;
 }
 
+/**
+ * 카카오 다음 웹 검색 (공식, developers.kakao.com/docs/latest/ko/daum-search/dev-guide).
+ * GET /v2/search/web 응답 documents[]의 title·contents·url. 제목·요약에는 검색어 <b> 태그와 엔티티가 섞여 온다.
+ */
+export function kakaoWebSearchUrl(query: string, size = WEB_SEARCH_RESULT_LIMIT): string {
+  return `https://dapi.kakao.com/v2/search/web?${new URLSearchParams({ query, sort: 'accuracy', size: String(size) }).toString()}`;
+}
+
+export function parseKakaoWebSearch(json: unknown, limit = WEB_SEARCH_RESULT_LIMIT): WebSearchResult[] {
+  const documents = (json as { documents?: unknown } | null)?.documents;
+  const results: WebSearchResult[] = [];
+  if (!Array.isArray(documents)) return results;
+  for (const item of documents as { title?: unknown; contents?: unknown; url?: unknown }[]) {
+    if (results.length >= limit) break;
+    const title = naverText(item.title);
+    const link = typeof item.url === 'string' ? item.url.trim() : '';
+    if (!title || !/^https?:\/\//i.test(link) || results.some((r) => r.url === link)) continue;
+    results.push({ title, url: link, snippet: naverText(item.contents) });
+  }
+  return results;
+}
+
 /** 네이버 지역 검색은 한 번에 5곳까지 (display 최댓값 5, local.md) */
 export const NAVER_LOCAL_DISPLAY_MAX = 5;
 

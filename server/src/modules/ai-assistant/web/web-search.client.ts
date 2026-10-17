@@ -3,6 +3,8 @@ import type { AiWebSearchEngine } from '@fantasteel/shared';
 import { BROWSER_USER_AGENT } from './safe-fetch';
 import {
   isDuckDuckGoBlocked,
+  kakaoWebSearchUrl,
+  parseKakaoWebSearch,
   kakaoKeywordUrl,
   mapKakaoPlaces,
   mapNaverPlaces,
@@ -31,7 +33,7 @@ const SEARCH_REQUEST_TIMEOUT_MS = 8000;
 /** 위키백과는 누구인지 밝히는 User-Agent를 요구한다 (API 이용 정책) */
 export const WIKIPEDIA_USER_AGENT = 'FantaSteelERP/1.0 (internal assistant; contact via repo)';
 
-export type SearchEngine = '네이버' | 'DuckDuckGo' | '위키백과(한국어)' | '위키백과(영어)';
+export type SearchEngine = '네이버' | '다음(카카오)' | 'DuckDuckGo' | '위키백과(한국어)' | '위키백과(영어)';
 
 /** 네이버 검색 API 키 (developers.naver.com 애플리케이션의 Client ID·Secret). 없으면 네이버를 건너뛴다 */
 export interface NaverCredentials {
@@ -67,6 +69,22 @@ class NaverFailureLog {
   }
 }
 
+/**
+ * 카카오 다음 웹 검색 실패를 한 번만 남기는 기록기. 키 값은 남기지 않는다.
+ * 401(키 틀림)·403(권한 없음)·429(한도 초과)는 같은 이유가 계속되므로 처음 한 번만.
+ */
+class KakaoFailureLog {
+  private readonly logged = new Set<number>();
+  constructor(private readonly logger: Logger) {}
+
+  note(response: Response) {
+    if (this.logged.has(response.status)) return;
+    this.logged.add(response.status);
+    const hint = response.status === 401 ? 'REST API 키를 확인하세요' : response.status === 403 ? '카카오 앱의 사용 권한을 확인하세요' : response.status === 429 ? '호출 한도를 넘었어요' : '잠시 뒤 다시 시도해요';
+    this.logger.warn(`카카오 다음 웹 검색 실패 (HTTP ${response.status}) — ${hint}. 다음 검색 방법으로 넘어가요`);
+  }
+}
+
 export interface WebSearchOutcome {
   engine: SearchEngine;
   results: WebSearchResult[];
@@ -81,13 +99,15 @@ export interface WebSearchDeps {
   fetch?: HttpFetch;
   /** 네이버 검색 API 키. 기본은 환경 변수(NAVER_CLIENT_ID·NAVER_CLIENT_SECRET) */
   naver?: () => NaverCredentials | null;
+  /** 카카오 REST API 키(다음 웹 검색). 기본은 환경 변수 KAKAO_REST_API_KEY — 장소 검색과 같은 키 */
+  kakao?: () => string | null;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   random?: () => number;
 }
 
 /**
- * 웹 검색. 네이버 검색 API(공식, 키가 있을 때) → DuckDuckGo HTML(비공식) → 막히면 1~2초 쉬고 한 번 더 → 그래도 막히거나 결과가 없으면 위키백과(한국어 → 영어).
+ * 웹 검색. 네이버 검색 API(공식, 키가 있을 때) → 다음(카카오) 웹 검색(공식, 키가 있을 때) → DuckDuckGo HTML(비공식) → 막히면 1~2초 쉬고 한 번 더 → 그래도 막히거나 결과가 없으면 위키백과(한국어 → 영어).
  * DuckDuckGo가 봇으로 보지 않게 요청을 한 번에 하나씩 보내고(차례로), 같은 검색어는 10분 기억하고, 서버 전체 1분 10번으로 묶는다.
  */
 export class WebSearchClient {
@@ -97,6 +117,8 @@ export class WebSearchClient {
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly naver: () => NaverCredentials | null;
+  private readonly kakao: () => string | null;
+  private readonly kakaoFailures = new KakaoFailureLog(this.logger);
   private readonly naverFailures = new NaverFailureLog(this.logger);
   private readonly cache = new Map<string, { at: number; outcome: WebSearchOutcome }>();
   private readonly sentAt: number[] = [];
@@ -108,11 +130,15 @@ export class WebSearchClient {
     this.now = deps.now ?? Date.now;
     this.random = deps.random ?? Math.random;
     this.naver = deps.naver ?? naverCredentialsFromEnv;
+    this.kakao = deps.kakao ?? (() => process.env.KAKAO_REST_API_KEY?.trim() || null);
   }
 
   /** 지금 쓸 수 있는 검색 엔진(부르는 순서). 화면의 capabilities에 보인다 */
   engines(): AiWebSearchEngine[] {
-    return this.naver() ? ['naver', 'duckduckgo', 'wikipedia'] : ['duckduckgo', 'wikipedia'];
+    const engines: AiWebSearchEngine[] = [];
+    if (this.naver()) engines.push('naver');
+    if (this.kakao()) engines.push('kakao');
+    return [...engines, 'duckduckgo', 'wikipedia'];
   }
 
   async search(query: string): Promise<WebSearchOutcome> {
@@ -133,10 +159,12 @@ export class WebSearchClient {
   private async searchEngines(query: string): Promise<WebSearchOutcome> {
     const naver = await this.naverWeb(query);
     if (naver?.length) return { engine: '네이버', results: naver };
+    const kakao = await this.kakaoWeb(query);
+    if (kakao?.length) return { engine: '다음(카카오)', results: kakao };
     const ddg = await this.duckDuckGoWithRetry(query);
     if (ddg?.length) return { engine: 'DuckDuckGo', results: ddg };
     // 결과가 없다고 답한 엔진이 하나라도 있으면 '결과 없음', 모두 실패했으면 오류
-    let answered: SearchEngine | null = naver ? '네이버' : ddg ? 'DuckDuckGo' : null;
+    let answered: SearchEngine | null = naver ? '네이버' : kakao ? '다음(카카오)' : ddg ? 'DuckDuckGo' : null;
     for (const lang of ['ko', 'en'] as const) {
       const results = await this.wikipediaWithRetry(query, lang);
       if (results === null) continue;
@@ -161,6 +189,23 @@ export class WebSearchClient {
       return parseNaverWebSearch(await response.json());
     } catch (error) {
       this.logger.warn(`네이버 웹문서 검색 실패: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /** 다음 웹 검색(카카오). 키가 없거나 실패(401·403·429 등)면 null — 다음 엔진으로 넘어간다 */
+  private async kakaoWeb(query: string): Promise<WebSearchResult[] | null> {
+    const key = this.kakao();
+    if (!key) return null;
+    try {
+      const response = await this.fetch(kakaoWebSearchUrl(query), { method: 'GET', headers: { authorization: `KakaoAK ${key}` }, signal: AbortSignal.timeout(SEARCH_REQUEST_TIMEOUT_MS) });
+      if (!response.ok) {
+        this.kakaoFailures.note(response);
+        return null;
+      }
+      return parseKakaoWebSearch(await response.json());
+    } catch (error) {
+      this.logger.warn(`카카오 다음 웹 검색 실패: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }

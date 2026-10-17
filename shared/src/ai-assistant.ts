@@ -77,8 +77,8 @@ export interface AiBrowserCapabilities {
   reason?: string;
 }
 
-/** 웹 검색 엔진: 네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
-export const AI_WEB_SEARCH_ENGINES = ['naver', 'duckduckgo', 'wikipedia'] as const;
+/** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
+export const AI_WEB_SEARCH_ENGINES = ['naver', 'kakao', 'duckduckgo', 'wikipedia'] as const;
 export type AiWebSearchEngine = (typeof AI_WEB_SEARCH_ENGINES)[number];
 
 export interface AiWebSearchCapabilities {

@@ -7,7 +7,7 @@ import type { LookupAddress } from 'node:dns';
 import { AssistantWebToolbox, MAX_PAGE_READS_PER_ANSWER, MAX_WEB_SEARCHES_PER_ANSWER, type ReadPage, type WebPageReader, type WebToolDeps } from './assistant-web-toolbox';
 import { decodeBody, extractPage, limitPageText, PAGE_TEXT_MAX } from './page-extract';
 import { WebFetchError } from './safe-fetch';
-import { filterRelevantWikipedia, isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, mapNaverPlaces, parseDuckDuckGoHtml, parseNaverWebSearch, parseWikipediaSearch, resolveDuckDuckGoHref, shortenWikipediaQuery, wikipediaArticleUrl } from './search-parsers';
+import { filterRelevantWikipedia, isDuckDuckGoBlocked, kakaoKeywordUrl, mapKakaoPlaces, mapNaverPlaces, parseDuckDuckGoHtml, parseKakaoWebSearch, parseNaverWebSearch, parseWikipediaSearch, resolveDuckDuckGoHref, shortenWikipediaQuery, wikipediaArticleUrl } from './search-parsers';
 import { assertFetchableUrl, BLOCKED_LOOKUP_CODE, guardedLookup, isPublicAddress, type LookupFunction } from './ssrf-guard';
 import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, SEARCH_CACHE_TTL_MS, SEARCH_PER_MINUTE, SearchRateLimitError, WebSearchClient, WIKIPEDIA_USER_AGENT, type HttpFetch } from './web-search.client';
 import { htmlToText } from './html-text';
@@ -18,6 +18,7 @@ const DDG_RESULTS = fixture('ddg-results.html');
 const DDG_ANOMALY = fixture('ddg-anomaly.html');
 const ARTICLE = fixture('article.html');
 const NAVER_WEB = JSON.parse(fixture('naver-webkr.json')) as unknown;
+const KAKAO_WEB = JSON.parse(fixture('kakao-web.json')) as unknown;
 const NAVER_LOCAL = JSON.parse(fixture('naver-local.json')) as unknown;
 const NAVER_KEYS = { clientId: 'test-client-id', clientSecret: 'test-client-secret' };
 
@@ -628,5 +629,57 @@ describe('웹 도구 모음 (한 답의 세션)', () => {
     await plain.run(call('web_search', { query: '포항 제철소' }));
     expect(plain.finalize('요약만 보고 답했어요').webSources).toHaveLength(3);
     expect(new AssistantWebToolbox(deps()).session(1).finalize('웹을 안 썼어요').webSources).toEqual([]);
+  });
+});
+
+describe('다음(카카오) 웹 검색', () => {
+  const kakaoOk = () => json(KAKAO_WEB);
+  const isKakao = (url: string) => url.startsWith('https://dapi.kakao.com/v2/search/web');
+
+  it('<b>·엔티티를 지우고 중복·http(s)가 아닌 주소·제목 없는 줄은 뺀다', () => {
+    const results = parseKakaoWebSearch(KAKAO_WEB);
+    expect(results.map((r) => r.title)).toEqual(['포항제철소 - 포스코', '포항 제철소 견학 안내']);
+    expect(results[0].snippet).toBe('포항제철소는 1973년 1고로 "첫 출선"을 시작으로 & 일관 제철소로 자리 잡았습니다.');
+    expect(parseKakaoWebSearch({})).toEqual([]);
+  });
+
+  it('네이버 키가 없고 카카오 키가 있으면 KakaoAK 헤더로 먼저 부르고, 결과가 있으면 DuckDuckGo는 부르지 않는다', async () => {
+    const http = fakeHttp((url) => (isKakao(url) ? kakaoOk() : html(DDG_RESULTS)));
+    const client = new WebSearchClient({ fetch: http.fetch, naver: () => null, kakao: () => 'kakao-test-key' });
+    const outcome = await client.search('포항 제철소');
+    expect(outcome.engine).toBe('다음(카카오)');
+    expect(outcome.results).toHaveLength(2);
+    expect(http.sent).toHaveLength(1);
+    expect(http.sent[0].url).toBe('https://dapi.kakao.com/v2/search/web?query=%ED%8F%AC%ED%95%AD+%EC%A0%9C%EC%B2%A0%EC%86%8C&sort=accuracy&size=5');
+    expect(http.sent[0].init.headers).toMatchObject({ authorization: 'KakaoAK kakao-test-key' });
+    expect(client.engines()).toEqual(['kakao', 'duckduckgo', 'wikipedia']);
+    expect(new WebSearchClient({ naver: () => NAVER_KEYS, kakao: () => 'k' }).engines()).toEqual(['naver', 'kakao', 'duckduckgo', 'wikipedia']);
+    expect(new WebSearchClient({ naver: () => null, kakao: () => null }).engines()).toEqual(['duckduckgo', 'wikipedia']);
+  });
+
+  it('네이버가 실패하면 카카오로, 카카오가 401·429면 한 번만 로그(키 값 없이) 남기고 DuckDuckGo로 넘어간다', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const both = fakeHttp((url) => (url.startsWith('https://openapi.naver.com') ? json({}, 500) : isKakao(url) ? kakaoOk() : html(DDG_RESULTS)));
+      expect((await new WebSearchClient({ fetch: both.fetch, naver: () => NAVER_KEYS, kakao: () => 'kakao-test-key' }).search('포항')).engine).toBe('다음(카카오)');
+
+      let status = 401;
+      const http = fakeHttp((url) => (isKakao(url) ? json({ errorType: 'AccessDeniedError', message: 'x' }, status) : html(DDG_RESULTS)));
+      const client = new WebSearchClient({ fetch: http.fetch, naver: () => null, kakao: () => 'kakao-test-key' });
+      expect((await client.search('하나')).engine).toBe('DuckDuckGo');
+      expect((await client.search('둘')).engine).toBe('DuckDuckGo');
+      status = 429;
+      expect((await client.search('셋')).engine).toBe('DuckDuckGo');
+      const logs = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('카카오'));
+      expect(logs).toHaveLength(2);
+      expect(logs[0]).toContain('HTTP 401');
+      expect(logs[1]).toContain('HTTP 429');
+      expect(logs.join(' ')).not.toContain('kakao-test-key');
+
+      const empty = fakeHttp((url) => (isKakao(url) ? json({ documents: [] }) : html(DDG_RESULTS)));
+      expect((await new WebSearchClient({ fetch: empty.fetch, naver: () => null, kakao: () => 'k' }).search('없는말')).engine).toBe('DuckDuckGo');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
