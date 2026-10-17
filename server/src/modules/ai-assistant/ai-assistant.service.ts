@@ -11,6 +11,7 @@ import {
   type AiAssistantSuggestedQuestionsView,
   type AiAssistantToolTrace,
   type AiWebSource,
+  type AiScreenActionResultInput,
   type AuthUser,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
@@ -36,6 +37,7 @@ import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-ques
 import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox';
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
+import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
@@ -59,6 +61,8 @@ export const MAX_TOOL_ROUNDS = 4;
 export const MAX_WEB_TOOL_ROUNDS = 6;
 /** 브라우저 사용을 켠 질문의 도구 횟수 상한. 열기 → 읽기 → 입력 → 누르기 …가 이어져서 늘린다 (이슈 #373 결정값) */
 export const MAX_BROWSER_TOOL_ROUNDS = 12;
+/** 화면 조작을 켠 질문의 도구 횟수 상한. 읽기 → 열기 → 채우기 …가 이어진다 (이슈 #382, 화면 동작 12번과 맞춤) */
+export const MAX_SCREEN_TOOL_ROUNDS = 12;
 /** AI 실행 기록에 담는 도구 입력·결과·생각 글의 길이. 답과 함께 화면에만 가므로 읽을 만큼만 */
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
@@ -87,7 +91,13 @@ export class AiAssistantService {
     private readonly opsCards: AiOpsCardService,
     private readonly webTools: AssistantWebToolbox,
     private readonly browserTools: AssistantBrowserToolbox,
+    private readonly screenTools: AssistantScreenToolbox,
   ) {}
+
+  /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
+  settleUiAction(user: AuthUser, actionId: string, result: AiScreenActionResultInput): void {
+    if (!this.screenTools.broker.settle(user.employeeId, actionId, result)) throw new AppException('COM-003', '기다리는 화면 조작이 없어요');
+  }
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
   executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
@@ -109,9 +119,10 @@ export class AiAssistantService {
     const settings = await this.settingsStore.read();
     const webSearch = this.webTools.capabilities();
     const browser = this.browserTools.capabilities();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false } };
+    const screenControl = this.screenTools.capabilities();
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true } };
+    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
@@ -149,6 +160,9 @@ export class AiAssistantService {
     const webSearch = options.interactive === true && input.webSearch === true;
     // 브라우저도 화면이 실시간으로 볼 때만, 서버 설정(AI_BROWSER_ENABLED)과 Chrome이 있을 때만 (이슈 #373)
     const browserOn = options.interactive === true && input.browser === true && this.browserTools.capabilities().available;
+    // 화면 조작도 화면이 실시간으로 볼 때만, 서버 설정(AI_SCREEN_CONTROL_ENABLED)이 켜졌을 때만. 동작은 그 화면이 한다 (이슈 #382)
+    const screenOn = options.interactive === true && input.screenControl === true && this.screenTools.capabilities().available;
+    const screens = screenOn ? (input.screenMap ?? []) : [];
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -163,6 +177,7 @@ export class AiAssistantService {
       question: input.question,
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
       browserTools: browserOn,
+      screenControl: screenOn ? { screens } : null,
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
@@ -187,8 +202,15 @@ export class AiAssistantService {
         const web = (webSearch || browserOn) && streaming ? this.webTools.session(user.employeeId, { offerTools: webSearch }) : null;
         // 브라우저는 답마다 새 시크릿 컨텍스트(첫 브라우저 도구 때 연다). 끝·멈춤·오류 때 닫는다
         const browser: BrowserToolSessionLike | null = browserOn && web ? this.browserTools.session({ question: input.question, web, signal }) : null;
-        const tools = [...this.toolbox.definitions({ actionCards: input.actionCards }), ...(webSearch && web ? this.webTools.definitions() : []), ...(browser ? this.browserTools.definitions() : [])];
-        const maxRounds = browser ? MAX_BROWSER_TOOL_ROUNDS : webSearch && web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+        // 화면 조작: 동작은 ui_action 이벤트로 그 화면에 보내고 결과를 기다린다 (이슈 #382)
+        const screen: ScreenControlSession | null = screenOn && emit ? this.screenTools.session({ owner: user.employeeId, screens, emit, signal }) : null;
+        const tools = [
+          ...this.toolbox.definitions({ actionCards: input.actionCards }),
+          ...(webSearch && web ? this.webTools.definitions() : []),
+          ...(browser ? this.browserTools.definitions() : []),
+          ...(screen ? this.screenTools.definitions() : []),
+        ];
+        const maxRounds = browser ? MAX_BROWSER_TOOL_ROUNDS : screen ? MAX_SCREEN_TOOL_ROUNDS : webSearch && web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
         try {
           const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
             emit
@@ -220,6 +242,8 @@ export class AiAssistantService {
                 webSources = browserResult.webSources;
                 // 화면 사진은 화면에만 보낸다(모델에는 글만)
                 if (browserResult.frame) emit?.({ type: 'browser_frame', ...browserResult.frame });
+              } else if (screen?.has(toolCall.name)) {
+                result = { content: await screen.run(toolCall), source: null };
               } else {
                 result = await this.toolbox.run(user, toolCall);
                 if (toolCall.name === READ_KNOWLEDGE_TOOL) readKnowledge.add(toolCall.arguments);

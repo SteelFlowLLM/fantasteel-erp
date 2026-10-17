@@ -223,7 +223,7 @@ describe('GET ai-assistant/capabilities', () => {
     llmClient.modelCapabilities.mockResolvedValue({ vision: true, reasoning: false });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ model: 'test-model', vision: true, reasoning: false, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true } });
+    expect(res.body.data).toEqual({ model: 'test-model', vision: true, reasoning: false, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) } });
     expect(llmClient.modelCapabilities.mock.calls[0][1]).toBe('test-model');
   });
 
@@ -231,14 +231,24 @@ describe('GET ai-assistant/capabilities', () => {
     llmSettings.read.mockResolvedValueOnce({ baseUrl: 'http://llm.test/v1', model: null, apiKey: null });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: false } });
+    expect(res.body.data).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: false }, screenControl: { available: expect.any(Boolean) } });
     expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
   });
 
   it('외부 LLM처럼 알 수 없으면 vision·reasoning이 null로 나간다', async () => {
     llmClient.modelCapabilities.mockResolvedValue({ vision: null, reasoning: null });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
-    expect(res.body.data).toEqual({ model: 'test-model', vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true } });
+    expect(res.body.data).toEqual({ model: 'test-model', vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) } });
+  });
+});
+
+describe('POST ai-assistant/ui-actions/:actionId (이슈 #382)', () => {
+  it('기다리는 화면 조작이 없으면 COM-003, actionId가 UUID가 아니거나 본문이 틀리면 400', async () => {
+    const missing = await call('POST', '/ai-assistant/ui-actions/00000000-0000-4000-8000-000000000000', { ok: true, result: '[r1] button "검색"' });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error?.code).toBe('COM-003');
+    expect((await call('POST', '/ai-assistant/ui-actions/not-a-uuid', { ok: true })).status).toBe(400);
+    expect((await call('POST', '/ai-assistant/ui-actions/00000000-0000-4000-8000-000000000000', { ok: 'yes' })).status).toBe(400);
   });
 });
 

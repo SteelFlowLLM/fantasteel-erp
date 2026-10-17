@@ -23,6 +23,7 @@ import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
+import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
@@ -84,6 +85,7 @@ export function AiPanel() {
   const [dragging, setDragging] = useState(false);
   const [webSearchPref, setWebSearchPref] = useState(false);
   const [browserPref, setBrowserPref] = useState(false);
+  const [screenControlPref, setScreenControlPref] = useState(false);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
@@ -95,6 +97,9 @@ export function AiPanel() {
   // 브라우저 사용: 서버가 못 쓴다고 했거나 연결 정보를 못 읽었을 때만 막는다 (읽는 중에는 막지 않는다)
   const browserBlockedReason = browserDisabledReason(capabilities.data, capabilities.isError);
   const browserOn = browserPref && browserBlockedReason === null;
+  // ERP 화면 조작 (이슈 #382, 시험 중): 서버가 켜 두었을 때만 칩을 보인다
+  const screenControlAvailable = capabilities.data?.screenControl?.available === true;
+  const screenControlOn = screenControlPref && screenControlAvailable;
   // 심층 조사 (이슈 #378): 서버가 모델이 정해져 있다고 알릴 때만. 지금 입력한 글로 조사를 만들고 그 화면으로 간다
   const deepResearchOn = capabilities.data?.deepResearch?.available === true;
   const sendToResearch = useAction(aiResearchApi.create, {
@@ -124,6 +129,7 @@ export function AiPanel() {
     setOneShot(saved.oneShot);
     setWebSearchPref(readAiWebSearchPreference());
     setBrowserPref(readAiBrowserPreference());
+    setScreenControlPref(readAiScreenControlPreference());
   }, []);
 
   // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
@@ -159,6 +165,11 @@ export function AiPanel() {
     writeAiBrowserPreference(on);
   };
 
+  const changeScreenControl = (on: boolean) => {
+    setScreenControlPref(on);
+    writeAiScreenControlPreference(on);
+  };
+
   const changeOneShot = (checked: boolean) => {
     setOneShot(checked);
     writeAiReasoningPreference({ level: reasoning, oneShot: checked });
@@ -179,7 +190,7 @@ export function AiPanel() {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn);
     setDraft('');
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
@@ -199,7 +210,7 @@ export function AiPanel() {
   const retry = (failure: FailureEntry) => {
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null);
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn);
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
@@ -246,6 +257,8 @@ export function AiPanel() {
   return (
     <aside
       aria-label="철강맨AI"
+      // 화면 조작의 화면 글에서 패널 자신은 뺀다 (lib/aiScreenAgent.ts)
+      data-ai-skip=""
       // 펫이 패널 밑(보내기 버튼 위)에 서 있지 않게 비켜서게 한다 (pet-engine.js avoidEdges)
       data-pet-avoid=""
       onDragOver={onDragOver}
@@ -342,6 +355,7 @@ export function AiPanel() {
             <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
+            {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
             {deepResearchOn ? (
               <Button
                 size="sm"
@@ -504,6 +518,25 @@ function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedRe
         <Icon name="search" size="sm" />브라우저
       </button>
       <span id="ai-browser-hint">{blocked ? blockedReason : on ? AI_BROWSER_TITLE : ''}</span>
+    </div>
+  );
+}
+
+/** ERP 화면 조작 켜기 (이슈 #382, 시험 중). 켜면 철강맨AI가 지금 화면을 읽고 옮기고 칸을 채운다. 저장·확정은 사용자가 누른다 */
+function ScreenControlToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={AI_SCREEN_CONTROL_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="화면 조작"
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 hover:bg-surface-2'}`}
+      >
+        <Icon name="dashboard" size="sm" />화면 조작
+      </button>
+      {on ? <span>시험 중 · 저장은 직접 눌러요</span> : null}
     </div>
   );
 }

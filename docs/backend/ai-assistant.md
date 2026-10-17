@@ -12,7 +12,7 @@
 | 등급 | P2 |
 | LLM | llm 모듈의 LLM 연결 설정(주소·모델)을 쓴다. 지금은 LM Studio(OpenAI 호환). 데이터 조회는 tool 호출을 지원하는 모델이어야 한다 |
 
-단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ← **지금**(업무·일정·구매요청 초안 + 수주 등록·열연 배정·히트 편성·과거 사례 등록, 7종) ③-2 웹 검색과 페이지 읽기(이슈 #367, 문서에 없는 기능, 4장 '웹 검색') ③-3 브라우저 사용(이슈 #373, 문서에 없는 기능, 4장 '브라우저 사용') ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
+단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ← **지금**(업무·일정·구매요청 초안 + 수주 등록·열연 배정·히트 편성·과거 사례 등록, 7종) ③-2 웹 검색과 페이지 읽기(이슈 #367, 문서에 없는 기능, 4장 '웹 검색') ③-3 브라우저 사용(이슈 #373, 문서에 없는 기능, 4장 '브라우저 사용') ③-4 ERP 화면 조작(이슈 #382, 문서에 없는 기능·시험 중, 4장 'ERP 화면 조작') ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
 
 ## 2. 테이블
 
@@ -26,9 +26,10 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | --- | --- | --- | --- | --- |
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
-| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning, webSearch }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null`. `webSearch: { engines: ('naver'\|'duckduckgo'\|'wikipedia')[], placeSearch: boolean }`는 서버 키 설정으로 쓸 수 있는 검색 엔진(부르는 순서)과 장소 검색 여부(모델이 없어도 채운다, 이슈 #367). `browser: { available, reason? }`는 브라우저 사용을 쓸 수 있는지(`AI_BROWSER_ENABLED=true`이고 Chrome 실행 파일이 있을 때. Chrome을 띄워 보지는 않는다. 띄우기에 실패하면 1분 동안 `false`, 이슈 #373). `deepResearch: { available }`는 심층 조사를 쓸 수 있는지(모델이 정해져 있으면 `true`, 이슈 #378, [ai-research.md](ai-research.md)) |
+| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning, webSearch }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null`. `webSearch: { engines: ('naver'\|'duckduckgo'\|'wikipedia')[], placeSearch: boolean }`는 서버 키 설정으로 쓸 수 있는 검색 엔진(부르는 순서)과 장소 검색 여부(모델이 없어도 채운다, 이슈 #367). `browser: { available, reason? }`는 브라우저 사용을 쓸 수 있는지(`AI_BROWSER_ENABLED=true`이고 Chrome 실행 파일이 있을 때. Chrome을 띄워 보지는 않는다. 띄우기에 실패하면 1분 동안 `false`, 이슈 #373). `deepResearch: { available }`는 심층 조사를 쓸 수 있는지(모델이 정해져 있으면 `true`, 이슈 #378, [ai-research.md](ai-research.md)). `screenControl: { available }`는 ERP 화면 조작을 쓸 수 있는지(`AI_SCREEN_CONTROL_ENABLED=true`, 이슈 #382) |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 | POST | `ai-assistant/action-cards/execute` | 🟡 명세에 없음 | 로그인만(구매요청 카드는 구매요청 등록 USE를 service가 확인) | `AiActionCardExecuteResult` `{ kind, registered: { type: task / schedule_event / action_draft, id } }` (201) |
+| POST | `ai-assistant/ui-actions/:actionId` | 없음 (문서에 없는 기능, 이슈 #382, **시험 중**) | 로그인만. 그 답을 물은 사원만 | `{ accepted: true }`. 본문 `{ ok, result?, error? }`(`result` 8,000자·`error` 500자). 기다리는 자리가 없거나 다른 사원의 것이거나 이미 끝났으면 `COM-003`(404). 아래 4장 '화면 조작' |
 
 요청 `POST ai-assistant/messages`:
 
@@ -42,6 +43,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `images` | 선택. `{ mediaType: image/png·jpeg·webp, dataBase64 }[]`, 최대 4장·한 장 2MB(base64를 푼 크기). 마지막 질문 메시지에만 `image_url`(data URL)로 실린다. 모델이 사진을 못 본다고 LM Studio가 알리면(`vision: false`) LLM을 부르기 전에 400 COM-004. 모르면 보낸다. 지난 대화에는 남지 않는다. 사진 때문에 JSON 본문 한도를 12mb로 올렸다(`main.ts`). 문서에 없는 기능, 2026-10-16 추가 |
 | `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
 | `browser` | 선택, boolean. 화면에서 브라우저 사용을 켠 질문이면 `true`(기본 꺼짐). 서버 `AI_BROWSER_ENABLED=true`이고 Chrome이 있고 **실시간 답 API**일 때만 브라우저 도구 6개와 `[브라우저 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다. 문서에 없는 기능, 이슈 #373 (4장 '브라우저 사용') |
+| `screenControl`·`screenMap` | 선택. `screenControl: true`는 화면에서 '화면 조작'을 켠 질문(기본 꺼짐), `screenMap`은 이 사원이 여는 화면 `{ path, title }[]`(80개, 경로는 `/영문-숫자/`만). 서버 `AI_SCREEN_CONTROL_ENABLED=true`이고 **실시간 답 API**일 때만 화면 도구 5개와 `[화면 조작 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다. 문서에 없는 기능, 이슈 #382 (4장 '화면 조작') |
 | `webSearch` | 선택, boolean. 화면에서 웹 검색을 켠 질문이면 `true`. **실시간 답 API에서만** 웹 도구(`web_search`·`read_web_page`, 카카오 키가 있으면 `search_places`)와 웹 규칙을 모델에 알린다. 없거나 `false`면, 또는 API-262(한 번에 답, 사내 채팅 @AI)면 웹 도구가 없다. 문서에 없는 기능, 이슈 #367 (4장 '웹 검색') |
 
 `sources[]`: `{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }` 또는 `{ kind: 'PROCESS', id: 'BP-SO-01', label: '수주 등록·예약·계획' }`(업무 순서·흐름 답) 또는 `{ kind: 'MANUAL', id: 'MAN-SO-01', label: '수주 등록' }`(화면 절차 답) 또는 `{ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' }`. 조회 데이터가 앞에 오고, 업무 매뉴얼·업무 프로세스가 용어 사전보다 앞에 온다.
@@ -62,6 +64,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `tool_start` | `id`, `name`, `arguments` | 조회 도구를 부르기 시작. `name`은 도구 이름(한글 제목은 `AI_ASSISTANT_TOOL_TITLE`), `arguments`는 모델이 넘긴 입력 JSON 문자열 |
 | `tool_end` | `id`, `label`, `resultPreview`, `durationMs`, (`webSources`) | 같은 `id`의 도구 결과. `resultPreview`는 결과 앞부분, `label`은 조회 대상 이름(없으면 `null`), `durationMs`는 걸린 시간. **웹 도구일 때만** `webSources: { title, url }[]` — 검색·장소 검색은 찾은 결과, 페이지 읽기는 읽은 페이지(이동 뒤 최종 주소). 실패하면 빈 배열 (이슈 #367) |
 | `browser_frame` | `url`, `title`, `imageBase64`, `at` | 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진(이슈 #373). `url`은 호스트+경로(쿼리·#조각 없음), `title`은 페이지 제목(웹에서 온 글이라 글로만 그린다), `imageBase64`는 JPEG(품질 50, 너비 800) base64(data: 접두어 없음), `at`은 ISO 시각. 같은 도구의 `tool_end` 바로 앞에 온다. **모델에는 보내지 않는다.** 화면 읽기(`browser_snapshot`)와 실패한 동작은 사진이 없다 |
+| `ui_action` | `actionId`, `tool`, `args` | 화면 조작(이슈 #382). 화면이 지금 DOM에서 실행하고 `POST ai-assistant/ui-actions/:actionId`로 결과를 돌려준다. `tool`은 `ui_snapshot`·`ui_navigate`·`ui_click`·`ui_fill`·`ui_select`, `args`는 글 값(`path`·`ref`·`value`). 같은 도구의 `tool_start` 뒤, `tool_end` 앞에 온다 |
 | `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이고, 실행 카드는 `reply.actionCards`로 온다. 카드를 만들었다고만 답해 카드 도구로 한 번 더 부르면 그 답 글도 이어서 `answer`로 오지만, 최종 답은 `reply.answer`다 웹 검색을 켠 질문이면 `reply.webSources: { title, url }[]`가 있다(4장 '웹 검색') |
 | `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
 
@@ -206,6 +209,26 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
   - 요소를 다시 읽고 누르기까지 사이에 페이지가 바꿀 수 있다(짧은 틈). Playwright는 누르는 자리를 다른 요소가 덮고 있으면 누르지 않는다.
   - 브라우저·컨텍스트 수·시간은 서버 한 대의 메모리다.
 
+**ERP 화면 조작 (이슈 #382, 문서에 없는 기능·시험 중 — 잘 되지 않으면 뺀다)** — 서버 `screen/`, 화면 `client/src/lib/aiScreenAgent.ts`·`features/shell/AiScreenControl.tsx`
+- 켜기: 서버 `AI_SCREEN_CONTROL_ENABLED=true` **그리고** 요청 `screenControl: true`(패널의 '화면 조작' 칩, 기본 꺼짐, 서버가 켜 두었을 때만 보인다) **그리고** 실시간 답 API일 때만. 사내 채팅 @AI는 늘 끔.
+- 동작은 **사용자의 브라우저**가 한다. 서버는 도구 호출마다 `ui_action { actionId, tool, args }`를 보내고 기다리는 자리(서버 메모리 `ScreenActionBroker`, `actionId`는 UUID, 주인 = 물은 사원)를 만든 뒤 기다린다. 화면이 결과를 `POST ai-assistant/ui-actions/:actionId`로 보내면 끝난다: 주인만, **처음 온 결과만**(그 뒤는 `COM-003`), **30초** 안에 안 오면 "화면이 30초 안에 답하지 않았어요" 도구 오류, 답을 멈추거나 연결이 끊기면(Abort) 자리를 지우고 답도 멈춘다. 서버를 여러 대 띄우면 같은 서버로 결과가 와야 한다(지금은 한 대).
+- 도구 5개 (한 답에 **12번**, 도구 호출 차례 12번 `MAX_SCREEN_TOOL_ROUNDS`):
+
+| 도구 | 인자 | 하는 일 |
+| --- | --- | --- |
+| `ui_snapshot` | 없음 | 지금 화면 글 |
+| `ui_navigate` | `path` | `screenMap`의 주소 그대로(뒤에 `?쿼리`만 허용)만 연다. 서버·화면이 함께 본다(`aiScreenPathAllowed`). 옮긴 뒤 화면 글 |
+| `ui_click` | `ref` | 누르고 0.7초 뒤 화면 글 |
+| `ui_fill` | `ref`, `value`(200자) | 입력칸에 넣는다(저장하지 않음) |
+| `ui_select` | `ref`, `value` | select에서 보이는 글·값·두 글자 이상 일부로 고른다 |
+
+- 화면 글(`buildScreenSnapshot`): `[data-ai-capture]`(상단 바+본문) 안에서 `[data-ai-skip]`(철강맨AI 패널·조작 배너)·숨김·`aria-hidden`·script 등을 빼고 문서 순서로 **3,000개** 노드, **6,000자**까지. 줄 모양 `[r12] button "검색"`, `[r13] textbox "수량" value="10"`, `[r14] combobox "강종" value="SM355A" options="SS275|SM355A"`(15개), `[r15] link "수주 목록" → /sales-orders`, `password "…" (채워짐)`(값은 꺼내지 않음), `heading`·`text`, 표는 `table "머리글 | …"`와 앞 **5줄**(`row "…"`, 줄 안의 링크·버튼은 번호), 나머지 줄 수. 이름은 aria-label → `label[for]` → 감싼 label(필수 `*` 뗌) → placeholder·title·name → 글.
+- 번호는 화면 글마다 이어서 주고(**지난 화면 글의 번호는 거절**, 화면에서 사라진 요소도 거절) 모델에는 `<screen_content>`로 감싸 넘긴다(안의 같은 태그는 깸).
+- **누르지 않는 것** (화면이 막고, 서버도 마지막 화면 글의 이름으로 한 번 더 막는다. 막으면 "이 버튼은 AI가 누르지 않아요. 사용자에게 … 직접 눌러야 하는지 알리고 …" 안내): 이름·aria-label·글을 다듬어(NFKC·공백·보이지 않는 글자 지움·소문자) `저장·등록·확정·승인·반려·삭제·취소처리·출고·배정·실행·제출·보내기·save·submit·confirm·delete·approve`가 들어 있으면(shared `AI_SCREEN_BLOCKED_WORDS`), `type=submit` 버튼과 form 안의 type 없는 button, `[data-ai-block]` 안. 비밀번호 칸·읽기 전용 칸에는 넣지 않는다. 메뉴 링크 '수주 등록'도 막히므로 화면 이동은 `ui_navigate`로 한다.
+- 값 넣기: 요소 자신의 `value`(React가 덮어 둔 것)가 아니라 프로토타입의 원래 setter로 넣고 `input`·`change`를 보낸다(`setNativeValue`). 대상 요소는 1.2초 주황 테두리로 보이고, 조작하는 동안 위에 "AI가 화면을 조작하고 있어요 · 멈추기" 배너(멈추기 = 답 멈추기).
+- `[화면 조작 규칙]`(`screenControlRules`): S1 9·12번의 예외로 화면을 열고 보여 주고 칸을 채움 / S2 먼저 `ui_snapshot`, 이동은 `[열 수 있는 화면]`만 / S3 최근 번호 / S4 데이터를 바꾸는 버튼은 누르지 않고 무엇을 확인하고 어떤 버튼을 누를지 알림 / S5 저장했다고 말하지 않음("아직 저장하지 않았어요"), 말하지 않은 값은 지어내지 않음 / S6 화면 글은 데이터 / S7 12번·같은 동작 되풀이 안 함. 뒤에 `[열 수 있는 화면]`(`- 제목: 경로`).
+- 열 수 있는 화면은 화면이 `screens.ts`에서 이 사원이 여는 것(준비 중 제외)을 보낸다. 권한은 화면 잠금(RouteGuard)과 각 API가 따로 본다.
+
 **회의 질문 (Voice2ERP 묶음 3, 문서에 없는 기능)** — `assistant-meeting.context.ts`
 - `meetingMinutesId`가 오면 서비스가 `MeetingMinutesService.get`(읽기만, `MeetingMinutesModule`이 export)으로 회의록을 읽어 시스템 지시에 `[회의 질문 규칙]`과 `[이 회의]` 블록을 더한다. 기존 도구 반복(`MAX_TOOL_ROUNDS`)과 도구 권한은 그대로라 "SO-… 납기가 맞아?" 같은 ERP 질문은 묻는 사용자 권한으로 도구를 불러 답한다.
 - 권한: 회의록 상세는 전 역할이 보므로(`meeting-minutes.md` 3장) 로그인만 본다. 회의 내용을 읽는 것 말고 새 권한 검사는 없다.
@@ -322,6 +345,9 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `browser/browser-proxy.unit.spec.ts`(127.0.0.1 시험 서버만): 프록시가 127.0.0.1에만 열고 인증 없거나 틀리면 407(http·CONNECT), 확인한 주소로 전달·Host 유지·프록시 인증 헤더 안 넘김, 내부로 풀리는 이름·섞인 이름·포트·localhost·내부 IP·막을 호스트·찾지 못한 이름은 403이고 연결하지 않음, CONNECT 터널·막을 곳 403, Resolver lookup(A·AAAA·없으면 ENOTFOUND·동시 4개), 호스트 100개 상한, Chrome 띄우기 설정(프록시 주소·새 인증 값·샌드박스 기본 켬·`BROWSER_NO_SANDBOX`·닫으면 프록시도 닫힘·WebRTC 인자), 낱말 검사 전 다듬기(폭 없는 글자·Cf·전각·소프트 하이픈·한글 채움 문자)와 새 낱말.
 - `browser/browser-chrome.e2e.spec.ts`(설치된 Chrome, **`BROWSER_E2E=1`일 때만**, 네트워크 없음: `https://example.test/`는 `context.route`로 `browser/fixtures/*.html`을 주고 이름 풀기도 가짜): 열기·화면 글(제목·글·검색칸·링크·비밀번호 (비어 있음)·숨은 글 없음)·사내망 그림 요청 막음·사진(JPEG 너비 800)·로그인 버튼·파일 칸·비밀번호 칸·POST 폼 입력+Enter·POST 제출 버튼 막음·거래처 이름·이메일 입력 막음·스크립트의 POST `form.submit()`을 요청 확인이 막고 이전 페이지로 되돌림·새 창 닫음, GET 검색칸 입력+Enter 이동·이전 번호 거절·뒤로·링크·스크롤, **리다이렉트**(fixture 302 → `http://127.0.0.1:포트`·`169.254.169.254`·사내로 풀리는 이름·`https://` 사내 이름)를 route가 아니라 프록시가 막고 사내 서버에 요청이 0번, `RTCPeerConnection`·`WebTransport`가 없음, 페이지가 DOM 함수를 바꿔도 로그인 버튼을 알아보고 막음, 시간 상한(시험은 1초)에 컨텍스트 닫음·멈추면 바로 닫음. 실행: `server`에서 `BROWSER_E2E=1 npx jest src/modules/ai-assistant/browser/browser-chrome`.
 - `ai-assistant.spec.ts` '브라우저 사용': 가짜 브라우저 모음으로 `browser: true` → 브라우저 도구·`[브라우저 규칙]`·B5, `browser_frame`이 `tool_end` 앞에 오고 모델 메시지에는 사진이 없음, 본 페이지 링크는 남고 모르는 링크는 지움, 끝나면 닫음, 도구 호출 12번 상한, LLM 실패에도 닫음, 서버 설정 꺼짐·`browser` 없음·API-262면 도구 없음.
+- `screen/screen-control.unit.spec.ts`(`npm run test:unit`에 포함): 기다리는 자리(주인만·처음 온 결과만·시간 초과·멈추면 지움·멈춘 뒤에는 보내지 않음), 누르지 않는 낱말(띄어쓰기·대소문자·폭 없는 글자·전각, 검색·조회·취소는 안 막음), 열 수 있는 주소(쿼리만 허용, `//`·바깥 주소·#·목록 밖), 세션(마지막 화면 글의 막을 버튼은 화면에 보내지 않음, 틀린 인자, 화면 거절 안내, 12번 상한), 화면 글 번호 읽기·감싸기.
+- `ai-assistant.spec.ts` 'ERP 화면 조작': `screenControl: true` → 도구 5개·`[화면 조작 규칙]`·열 수 있는 화면, `ui_action`이 `tool_start`와 `tool_end` 사이, 결과가 `<screen_content>`로 모델에 감, 서버가 막는 누르기·목록 밖 이동, 도구 호출 12번, 서버 설정 꺼짐·`screenControl` 없음·API-262면 도구 없음, 남의·없는 자리 `COM-003`. HTTP는 `meeting-ask.spec.ts`(없는 자리 404 `COM-003`, UUID 아님·틀린 본문 400).
+- 화면 `client/src/lib/aiScreenAgent.test.ts`(작은 가짜 DOM): 화면 글 줄(label·label[for]·값·select·비밀번호 감춤·링크·표 앞 5줄·`data-ai-skip`·hidden), 글 길이 상한, 번호 장부(이전 범위·없는 번호), 누르지 않는 것(이름·aria-label·submit·form 안 button·`data-ai-block`), 넣지 않는 칸, 원래 setter + input → change.
 
 실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 
@@ -342,5 +368,6 @@ DB·LLM 없이 가짜 객체로 돈다.
 | 웹 검색 엔진 | 네이버 검색 API(공식, 키가 있을 때) → DuckDuckGo HTML(비공식, 자주 막힘) → 위키백과. 네이버 키가 없으면 DuckDuckGo가 막힐 때 위키백과에 있는 것만 찾는다 | 이슈 #367 결정. 네이버 하루 25,000회 |
 | 웹 한도 | 검색 1분 10번(서버 전체)·사원별 1분 5번·10분 캐시·검색어 80자, 한 답에 검색 3번·읽기 3개, 페이지 10초·2MB·이동 5번·뽑기 입력 512K자·worker 3초·동시 4개·글 6,000자, 도구 호출 6번 | 이슈 #367 결정값·가정값. 캐시·한도는 서버 한 대의 메모리 |
 | 브라우저 사용 | 설치된 Chrome·시크릿 컨텍스트, 위험한 동작은 승인 없이 막음. 한 답 15번·3분·도구 호출 12번, 서버 전체 컨텍스트 2개, 5분 놀면 닫음, 사진 JPEG 50·너비 800 | 이슈 #373 결정값. 보안 검토: 전용 프록시·Resolver(2초·동시 4개·호스트 100개)·WebRTC 끔·샌드박스 늘 켬(`BROWSER_NO_SANDBOX`)·격리된 실행 공간 |
+| ERP 화면 조작 | **시험 중**(잘 안 되면 뺀다). 한 답 12번·30초 기다림·화면 글 6,000자/3,000노드·표 5줄, 막는 낱말 목록. 확인한 화면 없음(실제 모델로 수주 등록·재고·구매요청 화면을 돌려 봐야 한다) | 이슈 #382 결정값 |
 | 장소 검색 위치 | 사용자 위치를 보내지 않고 모델이 지역 이름을 검색어에 넣는다 | 이슈 #367 (위치 권한은 다음 단계) |
 | 기능별 샘플링 값·생각 정도 | Qwen 권장값을 바탕으로 정한 가정값. 기능별 생각 정도도 정해 둔 값 | 문서에 없음 (`llm-profiles.ts` 주석) |

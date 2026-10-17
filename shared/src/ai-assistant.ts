@@ -1,6 +1,7 @@
 // AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답하고, 실행이 필요한 요청은 실행 카드(REQ-AST-005)로 보여 준다.
 import type { Role } from './codes';
 import type { MeetingCandidate, MeetingCandidateUpdateInput } from './meeting-minutes';
+import type { AiScreenMapEntry, AiScreenTool } from './ai-screen-control';
 
 /** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
 export interface AiAssistantTurn {
@@ -41,6 +42,13 @@ export interface AiAssistantMessageInput {
    * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back)를 모델에 알린다. 기본은 꺼짐
    */
   browser?: boolean;
+  /**
+   * 화면 조작을 켠 질문이면 true (문서에 없는 기능, 이슈 #382, 시험 중). 서버에서 AI_SCREEN_CONTROL_ENABLED=true이고 실시간 답 API일 때만
+   * 화면 도구(ui_snapshot·ui_navigate·ui_click·ui_fill·ui_select)를 모델에 알린다. 동작은 사용자의 브라우저가 한다
+   */
+  screenControl?: boolean;
+  /** 화면 조작 때 열 수 있는 화면(이 사원의 레일 메뉴). ui_navigate는 이 주소만 연다 */
+  screenMap?: AiScreenMapEntry[];
 }
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
@@ -69,6 +77,8 @@ export interface AiAssistantCapabilitiesView {
   browser: AiBrowserCapabilities;
   /** 심층 조사를 쓸 수 있는지 (이슈 #378). LLM 모델이 정해져 있으면 쓸 수 있다 */
   deepResearch: { available: boolean };
+  /** ERP 화면 조작을 쓸 수 있는지 (이슈 #382). 서버 AI_SCREEN_CONTROL_ENABLED=true일 때 */
+  screenControl: { available: boolean };
 }
 
 export interface AiBrowserCapabilities {
@@ -119,6 +129,11 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   browser_type: '브라우저 입력',
   browser_scroll: '브라우저 스크롤',
   browser_back: '브라우저 뒤로',
+  ui_snapshot: '화면 읽기',
+  ui_navigate: '화면 열기',
+  ui_click: '화면 누르기',
+  ui_fill: '화면 입력',
+  ui_select: '화면 고르기',
 };
 
 /** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */
@@ -298,6 +313,8 @@ export interface AiActionCardExecuteResult {
  * - 웹 도구(이슈 #367)는 조회 도구와 같은 tool_start → tool_end이고, tool_end.webSources에 찾은·읽은 페이지가 온다.
  *   답에 쓴 웹 출처는 done의 reply.webSources
  * - browser_frame: 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진 (이슈 #373). 모델에는 보내지 않고 화면에만 보인다
+ * - ui_action: 화면 조작 (이슈 #382). 사용자의 브라우저가 지금 화면에서 실행하고 POST /ai-assistant/ui-actions/:actionId로 결과를 돌려준다.
+ *   같은 도구의 tool_start 뒤, tool_end 앞에 온다
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
@@ -324,6 +341,7 @@ export type AiAssistantStreamEvent =
       /** 찍은 때 (ISO 8601) */
       at: string;
     }
+  | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
   | { type: 'done'; reply: AiAssistantReplyView }
   | { type: 'error'; message: string };
 
