@@ -29,3 +29,4 @@ export * from './schedule-event';
 export * from './factory-agent';
 export * from './past-case';
 export * from './integration';
+export * from './ai-research';

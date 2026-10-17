@@ -67,6 +67,8 @@ export interface AiAssistantCapabilitiesView {
   webSearch: AiWebSearchCapabilities;
   /** 브라우저 사용을 쓸 수 있는지 (이슈 #373). 서버 설정과 Chrome이 있는지로 정한다(Chrome을 띄워 보지는 않는다) */
   browser: AiBrowserCapabilities;
+  /** 심층 조사를 쓸 수 있는지 (이슈 #378). LLM 모델이 정해져 있으면 쓸 수 있다 */
+  deepResearch: { available: boolean };
 }
 
 export interface AiBrowserCapabilities {

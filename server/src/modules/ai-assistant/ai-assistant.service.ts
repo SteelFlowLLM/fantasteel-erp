@@ -107,9 +107,9 @@ export class AiAssistantService {
     const settings = await this.settingsStore.read();
     const webSearch = this.webTools.capabilities();
     const browser = this.browserTools.capabilities();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser };
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false } };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch, browser };
+    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true } };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */

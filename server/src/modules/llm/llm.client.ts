@@ -186,6 +186,25 @@ export class LlmClient {
   }
 
   /**
+   * 긴 글 답 (심층 조사 보고서, 이슈 #378). 길이 상한에 걸려 끊겼는지(finish_reason=length)와 생각 글을 함께 돌려준다.
+   * 닫히지 않은 <think>만 있으면 답 글이 비고 끊긴 것으로 본다.
+   */
+  async chatText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], options: LlmJsonOptions): Promise<{ text: string; thinking: string | null; truncated: boolean }> {
+    type Reply = { choices?: { finish_reason?: string | null; message?: { content?: string | null; reasoning_content?: string | null } }[] };
+    const body = await this.request<Reply>(
+      endpoint,
+      'POST',
+      '/chat/completions',
+      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, options.profile)).fields, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) },
+      options.timeoutMs,
+    );
+    const choice = body.choices?.[0];
+    const split = splitThinking(choice?.message?.content ?? '');
+    const thinking = [choice?.message?.reasoning_content?.trim() || null, split.thinking].filter((t): t is string => Boolean(t)).join('\n\n') || null;
+    return { text: split.text, thinking, truncated: choice?.finish_reason === 'length' };
+  }
+
+  /**
    * JSON 스키마로 답 모양을 강제해 받는다 (회의록 AI 분석). 모델이 쓴 값은 믿을 수 없으므로 `unknown`으로 돌려주고 부르는 쪽이 검증한다.
    * 서버가 response_format을 지원하지 않아 400을 주면 형식 강제 없이 한 번 더 부른다(프롬프트가 JSON만 달라고 요구한다).
    */
