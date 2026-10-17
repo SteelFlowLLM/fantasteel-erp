@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, Logger, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Logger, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
 import type { AiActionCardExecuteResult, AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 
 /**
@@ -31,7 +31,7 @@ export class AiAssistantController {
    */
   @Post('ai-assistant/messages/stream')
   async askStream(@CurrentUser() user: AuthUser, @Body() dto: AskAiAssistantDto, @Res() res: Response): Promise<void> {
-    const prepared = await this.service.prepare(user, dto);
+    const prepared = await this.service.prepare(user, dto, { interactive: true });
     const abort = new AbortController();
     res.on('close', () => {
       if (!res.writableFinished) abort.abort();
@@ -61,7 +61,18 @@ export class AiAssistantController {
     }
   }
 
-  /** 지금 모델이 사진·생각 정도를 지원하는지 (문서에 없는 기능, 2026-10-16 추가) */
+  /**
+   * 화면 조작 결과 (문서에 없는 기능, 이슈 #382, 시험 중). 실시간 답이 보낸 ui_action을 사용자의 브라우저가 실행하고 결과를 돌려준다.
+   * 그 답을 물은 사원만 보낼 수 있고 처음 온 결과만 쓴다. 기다리는 자리가 없으면 COM-003
+   */
+  @Post('ai-assistant/ui-actions/:actionId')
+  @HttpCode(200)
+  settleUiAction(@CurrentUser() user: AuthUser, @Param('actionId', new ParseUUIDPipe()) actionId: string, @Body() dto: ScreenActionResultDto): { accepted: true } {
+    this.service.settleUiAction(user, actionId, dto);
+    return { accepted: true };
+  }
+
+  /** 지금 모델이 사진·생각 정도를 지원하는지, 웹 검색 엔진·장소 검색·브라우저 사용을 쓸 수 있는지 (문서에 없는 기능, 2026-10-16 추가, 이슈 #367·#373) */
   @Get('ai-assistant/capabilities')
   capabilities(): Promise<AiAssistantCapabilitiesView> {
     return this.service.capabilities();

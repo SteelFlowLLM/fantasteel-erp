@@ -23,6 +23,7 @@ import { ACTION_CARD_TOOLS, actionCardTools } from './action-card.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
 import { businessEventTool } from './business-event.tool';
 import { inventoryTool } from './inventory.tool';
+import { knowledgeTool } from './knowledge.tool';
 import { lotTraceTool } from './lot-trace.tool';
 import { productionPlanTool, productionResultTool } from './production.tool';
 import { goodsReceiptTool, purchaseOrderTool, purchaseRequisitionTool } from './purchasing.tool';
@@ -76,6 +77,7 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     millSheetTool(s.shipments),
     businessEventTool(s.events, s.salesOrders, s.lots),
     pastCaseTool(s.pastCases),
+    knowledgeTool(),
     ...actionCardTools(s.actionCards, s.opsCards),
   ];
 }
@@ -150,7 +152,7 @@ export class AssistantToolbox {
 
     try {
       const output = await tool.run(args as Record<string, unknown>, user);
-      return { content: truncate(JSON.stringify(output.data)), source: output.cards ? null : { kind: 'DATA', id: call.name, label: output.label }, cards: output.cards };
+      return { content: truncate(JSON.stringify(output.data)), source: output.cards || output.hideSource ? null : { kind: 'DATA', id: call.name, label: output.label }, cards: output.cards };
     } catch (error) {
       if (error instanceof ToolArgumentError) return failure(error.message);
       // service가 사용자로 확인하는 도구는 권한 밖이면 COM-002를 던진다

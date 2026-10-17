@@ -28,6 +28,8 @@ export interface ToolOutput {
   data: unknown;
   /** 실행 카드를 만든 도구만 담는다. 카드는 답과 함께 화면에 가고, 조회한 데이터가 아니라서 출처로 붙이지 않는다 */
   cards?: ProposedAnyCard[];
+  /** 출처 줄에 남기지 않는 도구(지식 읽기: 답이 인용한 ID가 출처가 된다) */
+  hideSource?: boolean;
 }
 
 /** 모델이 넘긴 인자가 틀렸을 때. 이유를 모델에 돌려줘 다시 부르게 한다 */

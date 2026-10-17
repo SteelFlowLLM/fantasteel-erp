@@ -40,6 +40,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, RouteTitle]> = [
   [/^\/admin\/integrations/, { title: '외부 연결', area: '관리자' }],
   [/^\/agent/, { title: 'AI Factory Agent', area: 'AI' }],
   [/^\/meetings/, { title: '회의록', area: '협업' }],
+  [/^\/ai-research/, { title: '심층 조사', area: 'AI' }],
   [/^\/schedule/, { title: '내 일정', area: '협업' }],
   // 예시 사례 + 등록 사례로 검색이 동작한다 (2026-10-16). EX = 추가 기능
   [/^\/past-cases/, { title: '과거 사례 검색', area: '추가 기능 (EX)' }],
