@@ -312,21 +312,29 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let truncated = false;
     if (!llmDown)
       try {
-        const reply = await this.llmClient.chatText(endpoint, endpoint.model, buildReportMessages({ question: run.question, plan, state, sources, audit }), {
-          timeoutMs: this.config.reportTimeoutMs,
-          maxTokens: 6000,
-          profile: LLM_PROFILE.RESEARCH_REPORT,
-          signal: ctx.abort.signal,
-        });
+        const messages = buildReportMessages({ question: run.question, plan, state, sources, audit });
+        const ask = (msgs: ChatMessage[], maxTokens: number) =>
+          this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs: this.config.reportTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
+        let reply = await ask(messages, REPORT_MAX_TOKENS);
+        // 생각만 하다 예산을 다 쓴 답은 한 번만 더 크게·생각 없이 부탁한다
+        if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
+          await this.assertMine(ctx);
+          reply = await ask(withNoThinkHint(messages), retryMaxTokens(REPORT_MAX_TOKENS));
+        }
         body = reply.text.trim();
         truncated = reply.truncated;
+        if (body.length < NEAR_EMPTY_CHARS) body = '';
         if (!body) notes.push('AI가 빈 보고서를 내 조사 메모로 대신 정리했어요.');
       } catch (error) {
         if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
         notes.push(`AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요(${cutText(error.message, 160)}).`);
       }
     else notes.push('보고서는 조사 메모로 대신 정리했어요.');
-    if (!body) body = fallbackReportBody(run.question, audit, state);
+    if (!body) {
+      // 조사 메모는 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
+      truncated = false;
+      body = fallbackReportBody(run.question, audit, state);
+    }
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
     await this.save(
@@ -446,16 +454,22 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
    * 그래도 없으면 null (부르는 쪽이 대신값을 쓴다). 연결 실패·시간 초과(LlmRequestError)·끊김은 던진다.
    */
   private async askJson(ctx: RunContext, endpoint: Endpoint, messages: ChatMessage[], schema: LlmJsonSchema, accept: (v: Record<string, unknown>) => boolean): Promise<Record<string, unknown> | null> {
-    const options = { timeoutMs: this.config.jsonTimeoutMs, maxTokens: 4000, profile: LLM_PROFILE.RESEARCH_JSON, signal: ctx.abort.signal };
-    try {
-      const reply = await this.llmClient.chatJsonWithText(endpoint, endpoint.model, messages, schema, options);
-      if (isRecord(reply.value) && accept(reply.value)) return reply.value;
-      return parseLenientJson([reply.rawText, reply.thinking], accept);
-    } catch (error) {
-      if (ctx.abort.signal.aborted) throw new LeaseLostError();
-      if (error instanceof LlmJsonParseError) return parseLenientJson([error.rawText, error.thinking], accept);
-      throw error;
-    }
+    const ask = async (msgs: ChatMessage[], maxTokens: number): Promise<{ value: Record<string, unknown> | null; empty: boolean }> => {
+      const options = { timeoutMs: this.config.jsonTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_JSON, signal: ctx.abort.signal };
+      try {
+        const reply = await this.llmClient.chatJsonWithText(endpoint, endpoint.model, msgs, schema, options);
+        if (isRecord(reply.value) && accept(reply.value)) return { value: reply.value, empty: false };
+        return { value: parseLenientJson([reply.rawText, reply.thinking], accept), empty: !reply.rawText.trim() };
+      } catch (error) {
+        if (ctx.abort.signal.aborted) throw new LeaseLostError();
+        if (error instanceof LlmJsonParseError) return { value: parseLenientJson([error.rawText, error.thinking], accept), empty: !error.rawText.trim() };
+        throw error;
+      }
+    };
+    const first = await ask(messages, JSON_MAX_TOKENS);
+    if (first.value || !first.empty) return first.value;
+    // content가 빈 답(생각에 예산을 다 씀)이면 한 번만 더 크게·생각 없이 부탁한다
+    return (await ask(withNoThinkHint(messages), retryMaxTokens(JSON_MAX_TOKENS))).value;
   }
 
   /** 단계 사이: 취소됐거나 남이 맡았으면 하던 일을 끊고 멈춘다 */
@@ -481,6 +495,21 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       }),
     );
   }
+}
+
+const REPORT_MAX_TOKENS = 6000;
+const JSON_MAX_TOKENS = 4000;
+const RETRY_MAX_TOKENS_CAP = 16000;
+const NEAR_EMPTY_CHARS = 5;
+const NO_THINK_HINT = '지금은 생각 과정 없이 바로 답만 써요. /no_think';
+
+const retryMaxTokens = (base: number): number => Math.min(base * 2, RETRY_MAX_TOKENS_CAP);
+
+/** 마지막 user 메시지 끝에 '생각하지 말고 바로 답' 지시를 붙인다 (/no_think는 Qwen 외 모델에는 그냥 글) */
+export function withNoThinkHint(messages: ChatMessage[]): ChatMessage[] {
+  const index = messages.map((m) => m.role).lastIndexOf('user');
+  if (index < 0) return [...messages, { role: 'user', content: NO_THINK_HINT }];
+  return messages.map((m, i) => (i === index ? { ...m, content: `${m.content}\n\n${NO_THINK_HINT}` } : m));
 }
 
 const released = { leaseOwner: null, leaseExpiresAt: null } as const;
