@@ -63,6 +63,13 @@ export class AskAiAssistantDto {
   @Max(2147483647)
   meetingMinutesId?: number;
 
+  /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (내 완료한 조사만, 이슈 #384) */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  researchRunId?: number;
+
   /** 철강맨AI 패널만 true로 보낸다. 사내 채팅 @AI·회의 질문은 카드를 보여 줄 곳이 없어 보내지 않는다 */
   @IsOptional()
   @IsBoolean()
@@ -85,6 +92,16 @@ export class AskAiAssistantDto {
   @ValidateNested({ each: true })
   @Type(() => AiAssistantImageDto)
   images?: AiAssistantImageDto[];
+
+  /** 웹 검색을 켠 질문이면 true. 실시간 답 API에서만 웹 도구를 알린다 (이슈 #367) */
+  @IsOptional()
+  @IsBoolean()
+  webSearch?: boolean;
+
+  /** 브라우저 사용을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 브라우저 도구를 알린다 (이슈 #373) */
+  @IsOptional()
+  @IsBoolean()
+  browser?: boolean;
 }
 
 /** 수주 등록 카드의 품목 줄. 매수·규격·납기의 뜻은 수주 등록 service가 본다 */

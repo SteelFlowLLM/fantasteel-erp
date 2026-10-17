@@ -1,0 +1,204 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  AI_RESEARCH_LIMITS,
+  AI_RESEARCH_STATUS,
+  type AiResearchCapabilities,
+  type AiResearchNotionExportResult,
+  type AiResearchPlan,
+  type AiResearchRunSummaryView,
+  type AiResearchRunView,
+  type AiResearchStatus,
+  type AuthUser,
+  type PageResult,
+} from '@fantasteel/shared';
+import { AppException } from '../../common/errors/app.exception';
+import type { AiResearchRun, Prisma } from '../../generated/prisma/client';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
+import { NotionPageService } from '../integration/notion/notion-page.service';
+import { LlmSettingsStore } from '../llm/llm-settings.store';
+import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery } from './dto/ai-research.dto';
+import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
+import { canExtend, checkResearchQuery, defaultBudget, extendedBudget, queryKey, readBudget, storedState } from './ai-research.rules';
+import { AiResearchRunner } from './ai-research.runner';
+import { researchLimits } from './ai-research.config';
+import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
+import { toRunSummary, toRunView } from './ai-research.view';
+
+/** Notion 내보내기를 잡은 표시가 이만큼 지나면 다른 요청이 다시 잡을 수 있다 (회의록 내보내기와 같다) */
+const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
+
+/**
+ * 심층 조사 API (이슈 #378, 문서에 없는 기능). 로그인한 사원은 누구나 쓰고, 자기 조사만 보고 바꾼다(남의 조사는 없는 것처럼 RES-001).
+ * 조사는 일꾼(AiResearchRunner)이 백그라운드로 하고, 화면은 GET runs/:id?afterSeq=로 진행을 받아 간다.
+ * ERP 데이터는 쓰지 않는다: 질문과 검색어만 회사 밖(검색 엔진)으로 나가고, 검색어는 웹 검색과 같은 회사 안 정보 막기를 거친다.
+ */
+@Injectable()
+export class AiResearchService {
+  private readonly logger = new Logger(AiResearchService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly repository: AiResearchRepository,
+    private readonly llmSettings: LlmSettingsStore,
+    private readonly runner: AiResearchRunner,
+    private readonly notion: NotionPageService,
+  ) {}
+
+  async capabilities(): Promise<AiResearchCapabilities> {
+    return { available: Boolean((await this.llmSettings.read()).model) };
+  }
+
+  async create(user: AuthUser, dto: CreateAiResearchRunDto): Promise<AiResearchRunView> {
+    if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
+    const run = await this.prisma.$transaction(async (tx) => {
+      await this.repository.lockEmployee(tx, user.employeeId);
+      if ((await this.repository.countActive(tx, user.employeeId)) >= AI_RESEARCH_LIMITS.activeRunsPerEmployee) throw new AppException('RES-006');
+      return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget) } });
+    });
+    this.runner.wake();
+    return toRunView(run, [], 0);
+  }
+
+  async list(user: AuthUser, query: ListAiResearchRunsQuery): Promise<PageResult<AiResearchRunSummaryView>> {
+    const page = query.page ?? 1;
+    const size = query.size ?? 20;
+    const [rows, total] = await Promise.all([this.repository.list(this.prisma, user.employeeId, size, (page - 1) * size), this.repository.countByEmployee(this.prisma, user.employeeId)]);
+    return { items: rows.map(toRunSummary), page, size, total };
+  }
+
+  async get(user: AuthUser, id: number, afterSeq = 0): Promise<AiResearchRunView> {
+    return this.view(this.prisma, await this.owned(this.prisma, user, id), afterSeq);
+  }
+
+  /** 계획 고치기: 계획 확인 대기일 때만, 화면이 본 판(revision)이 지금 판과 같을 때만 (다르면 RES-003) */
+  async updatePlan(user: AuthUser, id: number, revision: number, dto: AiResearchPlanDto): Promise<AiResearchRunView> {
+    const plan = checkedPlan(dto);
+    return this.prisma.$transaction(async (tx) => {
+      const run = await this.owned(tx, user, id);
+      const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.AWAITING_APPROVAL], planRevision: revision }, {
+        plan: plan as unknown as Prisma.InputJsonObject,
+        planRevision: { increment: 1 },
+      });
+      if (count === 0) throw conflictFor(run, revision);
+      return this.view(tx, await this.owned(tx, user, id));
+    });
+  }
+
+  /** 계획 승인: 본 판이 지금 판과 같을 때만 QUEUED */
+  async start(user: AuthUser, id: number, revision: number): Promise<AiResearchRunView> {
+    const view = await this.prisma.$transaction(async (tx) => {
+      const run = await this.owned(tx, user, id);
+      const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.AWAITING_APPROVAL], planRevision: revision }, { status: AI_RESEARCH_STATUS.QUEUED });
+      if (count === 0) throw conflictFor(run, revision);
+      return this.view(tx, await this.owned(tx, user, id));
+    });
+    this.runner.wake();
+    return view;
+  }
+
+  /** 더 조사하기: 단계를 다 써서 끝났고 모르는 것이 남았을 때 +4단계(모두 min(30, 기본 단계 × 2)까지), 저장된 메모·출처에서 이어서 하고 점검·보고서를 다시 쓴다 */
+  async extend(user: AuthUser, id: number): Promise<AiResearchRunView> {
+    const view = await this.prisma.$transaction(async (tx) => {
+      const run = await this.owned(tx, user, id);
+      const budget = readBudget(run.budget);
+      if (!canExtend({ status: run.status as AiResearchStatus, stepsUsed: run.stepsUsed, budget, state: run.researchState === null ? null : storedState(run.researchState) }))
+        throw new AppException('RES-002', `단계를 다 써서 끝났고 아직 모르는 것이 남은 조사만 더 조사할 수 있어요 (모두 ${researchLimits().maxTotalSteps}단계까지)`);
+      // 그 사이 다른 요청이 먼저 늘렸으면 updatedAt이 달라 0건이다
+      const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.COMPLETED], updatedAt: run.updatedAt }, {
+        status: AI_RESEARCH_STATUS.QUEUED,
+        budget: { ...extendedBudget(budget) },
+        finishedAt: null,
+      });
+      if (count === 0) throw new AppException('RES-002');
+      return this.view(tx, await this.owned(tx, user, id));
+    });
+    this.runner.wake();
+    return view;
+  }
+
+  /** 취소: 끝나지 않은 조사만 */
+  async cancel(user: AuthUser, id: number): Promise<AiResearchRunView> {
+    const view = await retryOnSeqConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        await this.owned(tx, user, id);
+        const active = [AI_RESEARCH_STATUS.PLANNING, AI_RESEARCH_STATUS.AWAITING_APPROVAL, AI_RESEARCH_STATUS.QUEUED, AI_RESEARCH_STATUS.RUNNING];
+        const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: active }, { status: AI_RESEARCH_STATUS.CANCELLED, finishedAt: new Date(), leaseOwner: null, leaseExpiresAt: null });
+        if (count === 0) throw new AppException('RES-002', '이미 끝난 조사예요');
+        await this.repository.appendEvents(tx, id, [{ type: 'cancelled', payload: {} }]);
+        return this.view(tx, await this.owned(tx, user, id));
+      }),
+    );
+    // 이 서버가 하고 있으면 하던 LLM 요청·페이지 읽기를 바로 끊는다 (다른 서버는 표시를 늘리지 못할 때 끊는다)
+    this.runner.interrupt(id);
+    return view;
+  }
+
+  /**
+   * 완료한 조사의 보고서를 회사 Notion의 상위 페이지(회의록 내보내기와 같은 곳) 아래 새 페이지로 내보낸다. 내 조사만, 한 번만.
+   * 회의록 내보내기와 같이 도구를 부르기 바로 전에 잡고(notion_exported_at), 결과를 알 수 없으면(INT-009) 잡기를 남겨 중복 페이지를 막는다.
+   */
+  async exportToNotion(user: AuthUser, id: number): Promise<AiResearchNotionExportResult> {
+    const run = await this.owned(this.prisma, user, id);
+    if (run.status !== AI_RESEARCH_STATUS.COMPLETED || !run.report) throw new AppException('RES-002', '완료한 조사만 Notion으로 내보낼 수 있어요');
+    if (run.notionPageUrl) throw new AppException('RES-007');
+    await this.notion.assertReady();
+
+    const claim: { at: Date | null } = { at: null };
+    const takeClaim = async () => {
+      const at = new Date();
+      const { count } = await this.repository.claimNotionExport(this.prisma, id, user.employeeId, at, new Date(at.getTime() - NOTION_EXPORT_STALE_MS));
+      if (count === 0) {
+        const current = await this.repository.findById(this.prisma, id);
+        if (current?.notionPageUrl) throw new AppException('RES-007');
+        throw new AppException('RES-002', '지금 다른 곳에서 이 조사를 Notion으로 내보내는 중이거나, 직전 내보내기 결과를 확인하지 못했어요. Notion을 확인하고 잠시 뒤 다시 해 주세요');
+      }
+      claim.at = at;
+    };
+    const view = toRunView(run, [], 0);
+    let notionPageUrl: string;
+    try {
+      notionPageUrl = await this.notion.createPage({ title: researchNotionTitle(view), content: buildResearchNotionMarkdown(view) }, takeClaim);
+    } catch (error) {
+      const uncertain = error instanceof AppException && error.code === 'INT-009';
+      if (claim.at && !uncertain) await this.repository.releaseNotionExport(this.prisma, id, claim.at);
+      throw error;
+    }
+    const { count } = claim.at ? await this.repository.finishNotionExport(this.prisma, id, claim.at, notionPageUrl, new Date()) : { count: 0 };
+    if (count === 0) {
+      this.logger.error(`조사 ${id}: Notion 페이지(${notionPageUrl})를 만들었지만 잡기를 잃어 주소를 저장하지 못했어요`);
+      throw new AppException('COM-001', `Notion 페이지(${notionPageUrl})는 만들었지만 조사에 주소를 남기지 못했어요. 새로 불러와 중복 페이지가 없는지 Notion에서 확인해 주세요`);
+    }
+    return { notionPageUrl, run: await this.get(user, id) };
+  }
+
+  private async owned(tx: Tx, user: AuthUser, id: number): Promise<AiResearchRun> {
+    const run = await this.repository.findById(tx, id);
+    if (!run || run.employeeId !== user.employeeId) throw new AppException('RES-001');
+    return run;
+  }
+
+  private async view(tx: Tx, run: AiResearchRun, afterSeq = 0): Promise<AiResearchRunView> {
+    const [events, lastSeq] = await Promise.all([this.repository.eventsAfter(tx, run.id, afterSeq), this.repository.lastSeq(tx, run.id)]);
+    return toRunView(run, events, lastSeq);
+  }
+}
+
+/** 사용자가 고친 계획: 검색어마다 회사 안 정보 막기, 같은 검색어 두 번 금지 */
+function checkedPlan(dto: AiResearchPlanDto): AiResearchPlan {
+  const seen = new Set<string>();
+  const steps = dto.steps.map((step, i) => {
+    const checked = checkResearchQuery(step.query);
+    if (!checked.ok) throw new AppException('RES-004', `${i + 1}단계: ${checked.reason}. 일반적인 낱말로 바꿔 주세요`);
+    if (seen.has(queryKey(checked.query))) throw new AppException('COM-004', `${i + 1}단계 검색어가 앞 단계와 같아요`);
+    seen.add(queryKey(checked.query));
+    return { title: step.title, query: checked.query };
+  });
+  return { title: dto.title, steps };
+}
+
+function conflictFor(run: AiResearchRun, revision: number): AppException {
+  if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) return new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고치거나 시작할 수 있어요');
+  if (run.planRevision !== revision) return new AppException('RES-003');
+  return new AppException('RES-002');
+}

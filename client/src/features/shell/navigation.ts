@@ -54,7 +54,7 @@ const AREA_SCREENS: readonly ScreenDef[] = [
   SCREEN.inventories,
 ];
 
-const COMMON_SCREENS: readonly ScreenDef[] = [SCREEN.orgChart, SCREEN.lotTrace, SCREEN.businessEvents, SCREEN.tasks, SCREEN.messenger, SCREEN.meetings, SCREEN.schedule];
+const COMMON_SCREENS: readonly ScreenDef[] = [SCREEN.orgChart, SCREEN.lotTrace, SCREEN.businessEvents, SCREEN.tasks, SCREEN.messenger, SCREEN.meetings, SCREEN.aiResearch, SCREEN.schedule];
 const SOON_SCREENS: readonly ScreenDef[] = [SCREEN.agent, SCREEN.pastCases];
 
 export interface NavUser extends AccessUser {

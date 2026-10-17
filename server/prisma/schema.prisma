@@ -51,6 +51,7 @@ model Employee {
   messagesAsSender Message[] @relation("MessageSender")
   messageReactions MessageReaction[] @relation("MessageReactionEmployee")
   actionDraftsAsRequester ActionDraft[] @relation("ActionDraftRequester")
+  aiResearchRuns AiResearchRun[] @relation("AiResearchRunEmployee")
 
   @@index([departmentId])
   @@index([jobGradeId])
@@ -1072,4 +1073,51 @@ model IntegrationConnection {
 
   @@index([connectedById])
   @@map("integration_connection")
+}
+
+// ───────────────────────────── 철강맨AI 심층 조사 (이슈 #378) ─────────────────────────────
+
+model AiResearchRun {
+  id Int @id @default(autoincrement())
+  employeeId Int @map("employee_id") /// 조사를 만든 사원 (본인만 본다)
+  question String /// 사용자가 물은 조사 질문
+  status String @db.VarChar /// PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING·COMPLETED·FAILED·CANCELLED (CHECK, 공통 코드 아님)
+  plan Json? @db.JsonB /// 조사 계획 {title, steps:[{title, query}]}
+  planRevision Int @default(0) @map("plan_revision") /// 계획을 고칠 때마다 1씩 오른다 (시작할 때 맞춰 본다)
+  budget Json @db.JsonB /// {maxSteps, maxSources}
+  stepsUsed Int @default(0) @map("steps_used") /// 쓴 단계 수 (검색·읽기)
+  researchState Json? @map("research_state") @db.JsonB /// {summary, gaps[], unsupportedClaims[], searchedQueries[]}
+  sources Json @default("[]") @db.JsonB /// 모은 출처 [{id, title, url, snippet, readText?}]
+  audit Json? @db.JsonB /// 보고서 전 점검 {thesis, outline[], supportedClaims[], contradictions[], missingDimensions[], reportTruncated}
+  report String? /// 보고서 (마크다운)
+  charts Json? @db.JsonB /// 출처의 숫자로 만든 차트 [{title, type, unit, xLabel, series:[{name, points:[{x, y, sourceId}]}]}] (2개까지)
+  notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소
+  notionExportedAt DateTime? @map("notion_exported_at") @db.Timestamptz(3) /// 내보낸 시각. 주소가 없으면 내보내는 중(잡은 시각)
+  failureReason String? @map("failure_reason") @db.VarChar
+  leaseOwner String? @map("lease_owner") @db.VarChar /// 맡은 서버 표시
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  employee Employee @relation("AiResearchRunEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events AiResearchEvent[] @relation("AiResearchEventRun")
+
+  @@index([employeeId, createdAt])
+  @@index([status])
+  @@map("ai_research_run")
+}
+
+model AiResearchEvent {
+  id Int @id @default(autoincrement())
+  runId Int @map("run_id")
+  seq Int /// 조사 안의 순번 (1부터)
+  type String @db.VarChar /// plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted
+  payload Json @default("{}") @db.JsonB /// 짧은 내용
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run AiResearchRun @relation("AiResearchEventRun", fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([runId, seq])
+  @@map("ai_research_event")
 }

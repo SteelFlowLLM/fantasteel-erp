@@ -36,3 +36,13 @@ describe('AI 패널 크게 펼치기 (REQ-AST-001)', () => {
     expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiPanelExpanded: false });
   });
 });
+
+describe('AI 패널 보고서 칩 (이슈 #384)', () => {
+  it('보고서로 묻기는 패널을 열고 칩을 붙이며, ×로 지울 수 있다', () => {
+    useShellStore.setState({ aiResearchRef: null });
+    useShellStore.getState().askAboutResearch({ id: 5, title: '열연 코일 조사' });
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiResearchRef: { id: 5, title: '열연 코일 조사' } });
+    useShellStore.getState().setAiResearchRef(null);
+    expect(useShellStore.getState().aiResearchRef).toBeNull();
+  });
+});

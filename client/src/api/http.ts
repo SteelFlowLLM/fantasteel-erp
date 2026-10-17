@@ -72,7 +72,15 @@ function toClientError(error: ServerError): Error {
   if (error.code === 'COM-004') return new InputError(error.message);
   // 로그인 실패(AUTH-001)는 로그인 화면에 서버 문구 그대로 보인다
   if (error.code === 'AUTH-001' || error.code === 'AUTH-002') return new Error(error.message);
-  return new Error(error.message);
+  // 화면 오류 코드표에 없는 코드(RES- 등)도 화면이 구분할 수 있게 code를 남긴다 (errorCodeOf)
+  return Object.assign(new Error(error.message), { code: error.code });
+}
+
+/** 서버가 준 오류 코드. ApiError가 아닌 오류(화면 코드표에 없는 코드)에 남겨 둔 code도 읽는다 */
+export function errorCodeOf(error: unknown): string | null {
+  if (error instanceof ApiError) return error.code;
+  if (error instanceof Error && 'code' in error && typeof error.code === 'string') return error.code;
+  return null;
 }
 
 /** fetch를 AbortController로 멈췄을 때의 오류인지. 연결 실패와 달리 사용자가 멈춘 것이라 화면이 따로 다룬다 */
