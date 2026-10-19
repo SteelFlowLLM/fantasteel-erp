@@ -4,7 +4,9 @@ import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
 import { readSettings } from '../integration-settings';
-import { GoogleDriveClient, readStreamToBuffer, type DriveMedia } from './google-drive.client';
+import { GoogleDriveClient, readStreamToBuffer, serviceAccountShareMessage, type DriveMedia } from './google-drive.client';
+import { effectiveDriveFolder } from './google-drive.env';
+import { GoogleServiceAccount } from './google-service-account';
 import {
   buildDriveFolderQuery,
   buildDriveListQuery,
@@ -53,18 +55,26 @@ export class GoogleDriveService {
     private readonly prisma: PrismaService,
     private readonly repository: IntegrationConnectionRepository,
     private readonly client: GoogleDriveClient,
+    private readonly serviceAccount: GoogleServiceAccount,
   ) {}
 
-  /** 연결(토큰)·폴더 설정을 본다. 토큰 자체가 쓸 수 있는지는 요청할 때 안다 */
+  /**
+   * 연결·폴더 설정을 본다. 토큰 자체가 쓸 수 있는지는 요청할 때 안다.
+   * .env에 서비스 계정 키가 있으면 DB 토큰은 보지 않는다. 폴더는 .env(GOOGLE_DRIVE_FOLDER)가 화면 설정보다 먼저다.
+   */
   async assertReady(): Promise<string> {
     const row = await this.repository.findByProviderKey(this.prisma, KEY);
-    if (!row?.oauthTokens) {
+    if (this.serviceAccount.isActive()) {
+      const error = this.serviceAccount.configError();
+      if (error) throw new AppException('INT-015', error);
+    } else if (!row?.oauthTokens) {
       if (row?.connectedAt) throw new AppException('INT-003', 'Google Drive 연결이 끊겼어요. 관리자가 다시 연결해 주세요');
       throw new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요');
     }
-    const folderId = readSettings(row.settings).folderId;
-    if (!folderId) throw new AppException('INT-011');
-    return folderId;
+    const folder = effectiveDriveFolder(readSettings(row?.settings ?? null).folderId);
+    if (folder.error) throw new AppException('INT-015', folder.error);
+    if (!folder.folderId) throw new AppException('INT-011');
+    return folder.folderId;
   }
 
   /** 폴더 안 녹음·사진·문서(kind=all이면 모두), 최신 수정순 50개씩 */
@@ -168,9 +178,11 @@ export class GoogleDriveService {
     }
   }
 
-  /** 폴더를 볼 수 없을 때(404) 파일이 아니라 폴더 설정을 고치라고 알린다 */
+  /** 폴더를 볼 수 없을 때(404·서비스 계정의 403) 파일이 아니라 폴더 설정·공유를 고치라고 알린다 */
   private folderMissing(error: unknown): unknown {
     if (error instanceof AppException && error.code === 'INT-012') {
+      const email = this.serviceAccount.isActive() ? this.serviceAccount.email() : null;
+      if (email) return new AppException('INT-012', serviceAccountShareMessage(email));
       return new AppException('INT-012', '설정한 Drive 폴더를 찾을 수 없어요. 연결한 Google 계정이 그 폴더를 볼 수 있는지, 폴더 주소가 맞는지 확인해 주세요');
     }
     return error;

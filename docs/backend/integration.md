@@ -11,6 +11,7 @@
 | 1단계 | 회사 Notion 계정 하나를 원격 MCP 서버(`https://mcp.notion.com/mcp`)에 OAuth로 연결하고, 확정한 회의록을 Notion 페이지로 내보낸다 ([meeting-minutes.md](meeting-minutes.md) 'Notion으로 내보내기') |
 | 3단계 | 이슈 #391 **Notion 업무 공간**. 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 만들고 ERP → Notion 한 방향으로 자동 반영한다 (12장) |
 | 2단계 | 이슈 #361 **Google Drive 연결과 녹음 가져오기**. 회사 Google 계정 하나를 Drive REST API v3 + 일반 OAuth 2.0으로 연결하고, 관리자가 정한 폴더의 녹음·사진을 목록·내용으로 보여 주며, 녹음으로 회의록을 만든다 (11장, [meeting-minutes.md](meeting-minutes.md) 'Drive 녹음으로 만들기') |
+| 3단계 | 이슈 #395 **Google Drive 서비스 계정**. 서버 `.env`에 서비스 계정 키를 넣으면 관리자 로그인 없이 그 계정으로 Drive를 읽는다(읽기 전용). 서버 재시작·DB 초기화·다른 PC에서도 다시 연결하지 않는다 (11장 '서비스 계정') |
 
 - **회사 계정 하나**: 관리자(`ORG_MANAGE` 사용)가 한 번 연결하면 모든 사원이 그 연결을 쓴다. 사원별 연결은 없다.
 - **LLM은 Notion 도구 목록을 보지 않는다.** 서버 코드가 정한 도구(`notion-create-pages`)만 직접 부른다.
@@ -59,6 +60,8 @@
 - 🟡 목록은 로그인만 본다: 회의록 화면이 내보내기 버튼을 보일지(`status === 'CONNECTED'`, `settings.parentPageId` 있음) 정하려고 읽는다. 비밀값은 응답에 없다.
 - 🟡 Drive 파일 목록·내용도 로그인만 본다: 회사가 녹음·사진을 함께 올리는 폴더이고, 읽기만 하며, 설정한 폴더 바로 아래 파일만 연다.
 - `providerKey`는 `notion`·`google-drive`(`INTEGRATION_PROVIDER`). 모르는 키는 `INT-001`. 다른 연결 대상의 설정 칸을 보내면(예: Notion에 `clientId`) `COM-004`.
+- `IntegrationConnectionView`의 연결 방법 칸(이슈 #395): `authMode`(`OAUTH`|`SERVICE_ACCOUNT`, Notion은 늘 `OAUTH`), `serviceAccountEmail`(서비스 계정 키를 읽었을 때 그 `client_email`, 관리자가 Drive 폴더를 공유할 주소. 아니면 `null`), `driveFolderFromEnv`(Google Drive 폴더를 `.env`의 `GOOGLE_DRIVE_FOLDER`가 정함). Google Drive의 `settings.folderId`는 **실제로 읽는 폴더**(`.env`가 먼저)다.
+- 🟡 Google Drive가 서비스 계정으로 연결돼 있으면 `connect`·`disconnect`는 `INT-016`(409)으로 거절한다: 끊어도 `.env` 키로 다시 읽으므로 끊긴 것처럼 보이면 안 된다. 설정 저장(`PUT …/settings`)은 그대로 받는다(폴더·OAuth 클라이언트는 키를 빼면 쓴다).
 - `IntegrationConnectionView`에 OAUTH2 연결(Google Drive)만 값이 있는 칸: `redirectUri`(관리자가 Google Cloud Console에 등록할 주소 = `{SERVER_PUBLIC_URL}/integrations/oauth/callback`), `oauthClient { clientId, clientSecretSet }`(client secret은 돌려주지 않고 넣었는지만). MCP는 둘 다 `null`.
 
 ## 4. OAuth 흐름 — Notion (MCP 인가 규격: 발견 + 동적 클라이언트 등록 + PKCE)
@@ -96,6 +99,7 @@
 - 비밀값은 응답·로그·`last_error`에 넣지 않는다. 로그에는 실패 문구만 남긴다(Nest `Logger`).
 - 콜백은 공개지만 `state`(32바이트 무작위, 10분, 한 번)로만 연결을 찾고, 로그인한 브라우저면 연결을 시작한 관리자여야 한다. PKCE(S256)로 인가 코드를 가로채도 토큰으로 바꿀 수 없다.
 - 공개 클라이언트(`token_endpoint_auth_method: none`)로 동적 등록한다. 서버가 client secret을 주면 SDK가 그것을 쓴다(암호화해 저장).
+- Google Drive 서비스 계정(이슈 #395): 키는 `.env`·키 파일에만 있고 DB·응답·로그·`last_error`에 넣지 않는다. 개인 키는 읽자마자 `KeyObject`로 바꿔 들고 있고, 액세스 토큰은 메모리에만 둔다. 권한은 `drive.readonly` 하나다. 키 파일은 `server/secrets/`(`.gitignore`)에 둔다. 키의 `token_uri`는 쓰지 않고 고정된 Google 토큰 주소로만 보낸다.
 - Google Drive: 관리자가 넣은 client secret은 암호화해 두고 어떤 응답에도 돌려주지 않는다. Google 고정 주소로만 요청하고, 파일 내용은 설정한 폴더 바로 아래 녹음·사진만 상한 안에서 `nosniff`·`sandbox` 머리를 붙여 흘려보낸다(11장).
 
 ## 7. 환경변수 (`server/.env.example`)
@@ -106,9 +110,12 @@
 | `SERVER_PUBLIC_URL` | `http://localhost:{API_PORT}/api/v1` | 브라우저가 서버에 닿는 주소. redirect URI = `{이 값}/integrations/oauth/callback`. 바뀌면 다음 연결 때 클라이언트를 다시 등록한다 |
 | `CLIENT_BASE_URL` | `CORS_ORIGIN`의 첫 주소 → `http://localhost:5173` | 콜백 뒤 돌아갈 화면 (`/admin/integrations`) |
 | `NOTION_MCP_URL` | `https://mcp.notion.com/mcp` | Notion MCP 서버 주소 (테스트가 가짜 서버로 바꾼다) |
+| `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` | 없음 | 🟡 Google 서비스 계정 키 JSON 파일 경로(이슈 #395). 상대 경로는 서버를 띄운 폴더(`server/`) 기준(`STORAGE_DIR`과 같다). 예: `secrets/google-service-account.json` |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | 없음 | 🟡 키 JSON 자체 또는 그 base64(한 줄). 파일을 둘 수 없는 배포 환경용. **둘 다 있으면 파일을 쓴다** |
+| `GOOGLE_DRIVE_FOLDER` | 없음 | 🟡 읽을 Drive 폴더 주소·id(선택). 있으면 화면에서 저장한 폴더보다 먼저다(OAuth 연결에도 적용). 읽을 수 없는 값이면 화면 폴더로 넘어가지 않고 `INT-015` |
 | `GOOGLE_API_TEST_ORIGIN` | 없음 | **테스트 전용**. Google 인가·토큰·취소·Drive 주소를 가짜 서버(`{값}/o/oauth2/v2/auth`, `/token`, `/revoke`, `/drive/v3`)로 바꾼다. **`NODE_ENV=test`(Jest)일 때만** 읽고 개발·운영에서는 무시한다(잘못 넣어도 토큰·client secret이 다른 주소로 가지 않게). `.env`에 넣지 않는다 |
 
-Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 외부 연결 화면에서 넣는다(DB에 암호화).
+서비스 계정 키를 넣지 않으면 Google Drive의 client id·secret·폴더는 관리 > 외부 연결 화면에서 넣는다(DB에 암호화). `.env`를 바꾸면 서버를 다시 띄운다(키 파일 내용은 처음 읽은 것을 기억한다. 읽지 못했으면 다음 호출에 다시 읽는다).
 
 ## 8. 새 연결 대상 더하기
 
@@ -136,6 +143,8 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 | INT-012 | Drive 폴더나 파일을 찾을 수 없어요 (설정한 폴더 밖·휴지통·없는 파일 모두 이 코드. 폴더 자체를 못 찾으면 폴더 설정을 확인하라는 문구) | 404 |
 | INT-013 | 가져올 수 없는 종류의 파일이에요 (녹음·사진·문서가 아님, 회의록은 녹음만) | 400 |
 | INT-014 | 파일이 너무 커서 가져올 수 없어요 (녹음 500MB, 사진 20MB, PDF·Office 50MB, Google 문서→PDF 10MB) | 413 |
+| INT-015 | 서버 설정(.env)의 Google 값이 올바르지 않아요. 서버 관리자가 확인해 주세요 (서비스 계정 키 파일 없음·JSON 아님·서비스 계정 키 아님·`client_email`/`private_key` 없음·개인 키 깨짐, `GOOGLE_DRIVE_FOLDER`를 읽을 수 없음. 문구에 어느 변수인지 담고 키 내용은 담지 않는다) | 500 |
+| INT-016 | 서버 설정(.env)의 서비스 계정으로 연결돼 있어 이 화면에서 연결하거나 끊지 않아요 (서비스 계정 모드의 Google Drive `connect`·`disconnect`) | 409 |
 
 설정의 상위 페이지·Drive 폴더·client id를 읽지 못하면 `COM-004`(400), 권한이 없으면 `COM-002`(403). 작업 로그는 남기지 않는다(REQ-LOG-002에 외부 연결 이벤트가 없다).
 
@@ -145,6 +154,8 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 - 순수 단위(DB 없음, `npm run test:unit`): `integration-crypto.unit.spec.ts`(왕복·위변조·다른 키·키 형식·iv/태그 길이), `integration-lock.unit.spec.ts`(연결 대상별 줄), `notion/notion.tools.unit.spec.ts`(페이지 id 읽기·입력 만들기·결과 읽기), `meeting-minutes/meeting-notion.markdown.unit.spec.ts`(섹션·Notion 태그·블록 표시 막기).
 - `google-drive/google-drive.spec.ts` (묶음 `fs_collab`): 이 파일 안에 **가짜 Google 서버**(토큰: 인가 코드 + PKCE 확인·client secret 확인·갱신·`invalid_grant`·취소, Drive v3: `files.get`·`files.list`(q의 부모 폴더·휴지통·MIME)·`alt=media`)를 띄우고 `GOOGLE_API_TEST_ORIGIN`으로 바꿔 끼운다. 목록(redirect URI·`oauthClient`), 연결 전 `INT-002`, client 없이 연결 `INT-010`, 설정(권한·다른 연결의 칸·잘못된 client id·파일 주소 거절, secret은 응답에 없고 암호문으로만), 연결 시작(오프라인·동의·두 권한·PKCE·state), 콜백(verifier·secret·redirect URI 확인, 토큰 암호문, state 재사용 거절), 연결 확인(폴더 이름·녹음 2·사진 5), 목록(폴더 안·휴지통 제외·최신순·허용 목록 사진만·50개 쪽 넘기기·잘못된 kind), 잘못된 client id는 행 없이 거절, 내용(MIME·이름·nosniff·sandbox, 폴더 밖·휴지통·없는 파일·이상한 id `INT-012`, 대소문자 SVG·PDF·폴더 `INT-013`, 메타데이터 크기·Content-Length 초과 `INT-014`, Range 206·`bytes=a-`·416·여러 구간 무시, Content-Length는 내용 응답 것, 브라우저가 떠나도 `last_error` 없음, 받는 중 상한 초과는 연결을 끊음), 회의록 Drive 녹음(STT에 바이트·이름·MIME 전달 → `TRANSCRIBED`, 사진·폴더 밖은 회의록 없이 거절, 받기 실패 `FAILED`), 만료 전 미리 갱신(리프레시 토큰 이어 쓰기), 401 → 한 번 갱신 후 재시도, 갱신 5xx → 토큰 유지·`INT-004`·`last_error`·회복 후 지움, `invalid_grant` → 토큰 삭제·`RECONNECT_REQUIRED`·`INT-003`, Drive 읽기 권한을 빼고 허용 → 연결 안 함·(연결이 없으면) 새 허용 취소, 틀린 코드 → 연결 안 함, 다시 연결(`accountId`), 같은 계정 재연결은 옛 토큰을 취소하지 않음, 같은 계정이 권한을 빼면 지금 연결 유지, 다른 계정 재연결은 옛 계정 허용 취소, 끊기(허용 취소에 리프레시 토큰, client·폴더 유지), client id 변경 → 토큰 삭제(secret 교체는 유지), 폴더 비움 → `INT-011`.
 - 순수 단위 `google-drive/google-drive.unit.spec.ts`: 폴더 주소·id 읽기(여러 주소 모양, 파일 주소·다른 호스트·내 드라이브 거절), 검색어(녹음·사진 허용 목록, 따옴표 막기), 종류(대소문자·매개변수)·크기 상한, Drive 응답 읽기, Content-Disposition(짝 없는 대리 문자), Range 읽기, `guardStream`(뒷압력 중에는 기다림을 재지 않음·Google이 멈추면 끊음·상한·받는 쪽이 끊으면 Google 요청도 끊음), `readStreamToBuffer`(미리 잡은 메모리·덜/더/모름), client 입력 확인, 토큰 응답 읽기(리프레시 토큰 잇기·expires_in·Bearer 확인)·만료 여유, Drive 권한 확인, 토큰 실패 종류, 허용 화면 주소, PKCE(RFC 7636 예시), client id 모양, 테스트 주소는 `NODE_ENV=test`일 때만.
+- `google-drive/google-drive-service-account.spec.ts` (묶음 `fs_collab`, 이슈 #395): 이 파일 안의 **가짜 Google 서버**의 `/token`이 jwt-bearer assertion을 테스트 공개 키로 서명 확인하고 클레임(`iss`·`scope=drive.readonly`·`aud`=토큰 주소·`exp-iat=3600`·`iat`±60초)을 본다. Drive는 서비스 계정에 공유한 폴더만 보여 준다(그 밖은 404, 한 폴더는 403 `insufficientFilePermissions`). 키 파일만으로 `CONNECTED`·`SERVICE_ACCOUNT`·메일(행을 만들지 않음), 폴더 없으면 `INT-011`, `connect`·`disconnect` `INT-016`(확인값 없음), OAuth 토큰 없이 목록·내용(Range 206)·연결 확인·회의 녹음(`downloadAudio`·`from-drive`), 토큰은 한 번 받아 다시 씀, 저장된 OAuth 토큰이 있어도 서비스 계정이 먼저, Drive 401 → 한 번 새로 받음, `GOOGLE_DRIVE_FOLDER`가 화면 폴더보다 먼저(화면 값은 남음)·잘못된 값 `INT-015`, 공유하지 않은 폴더(404·403) → 서비스 계정 메일에 '뷰어'로 공유하라는 문구, 키 파일 없음 → `NOT_CONNECTED`+`lastError`·`INT-015`, base64 키·파일이 먼저, Google이 키를 거절 → `INT-004`+`lastError`·회복하면 지움, 키를 빼면 `OAUTH`로 돌아감. `.env` 값은 `afterEach`에서 기준값으로, `afterAll`에서 처음 값으로 되돌리고 `google-drive` 연결 행을 지운다(같은 DB의 OAuth 테스트와 섞이지 않게).
+- 순수 단위 `google-drive/google-service-account.unit.spec.ts`: 키 읽기(JSON·base64·글자 `\n` 개인 키, JSON 아님·서비스 계정 아님·OAuth 클라이언트 JSON·`client_email`·`private_key` 없음·깨진 키·RSA 아님), `.env` 읽기(상대·절대 경로, 파일 우선, 없는 파일), `GOOGLE_DRIVE_FOLDER`, JWT(머리·클레임, 생성한 공개 키로 서명 확인, 다른 키·바뀐 내용은 실패), 토큰 응답, 토큰 기억·동시 호출 한 번·만료 1분 전 갱신·거절된 토큰만 새로·키가 바뀌면 버림·실패는 기억하지 않음·키를 못 읽으면 Google에 묻지 않음.
 - 실제 Notion·Google은 자동 테스트하지 않는다: 관리자가 브라우저에서 허용해야 한다. 직접 확인하는 법은 아래와 11장.
 
 **실제 Notion으로 확인하기**
@@ -224,6 +235,33 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 4. **사용자 인증 정보 > 사용자 인증 정보 만들기 > OAuth 클라이언트 ID**, 애플리케이션 유형 **웹 애플리케이션**. **승인된 리디렉션 URI**에 관리 > 외부 연결 > Google Drive 카드에 보이는 주소(`redirectUri` = `{SERVER_PUBLIC_URL}/integrations/oauth/callback`, 개발 기본값 `http://localhost:8787/api/v1/integrations/oauth/callback`)를 **글자 그대로** 넣는다. Google은 localhost가 아니면 https 주소만 받는다. 자바스크립트 원본은 비워도 된다.
 5. 만든 **클라이언트 ID·클라이언트 보안 비밀번호**를 ERP 화면에 넣고, 녹음·사진을 올릴 **Drive 폴더 주소**를 붙여 넣는다. 폴더는 연결할 Google 계정이 볼 수 있어야 한다. 🟡 공유 드라이브 안의 폴더도 되도록 모든 Drive 요청에 `supportsAllDrives=true`(목록은 `includeItemsFromAllDrives=true`도)를 붙였지만 **실제 Google로는 확인하지 않았다**.
 6. **연결** → Google 계정 고르기 → 권한 허용(체크 박스가 보이면 Drive 권한을 모두 체크) → ERP 화면으로 돌아온다 → **연결 확인**으로 폴더 이름과 녹음·사진 수를 본다.
+
+### 서비스 계정 (이슈 #395, 권장)
+
+OAuth 연결은 관리자가 브라우저에서 허용해야 하고(외부+테스트 앱은 7일마다), 토큰이 DB에 있어 DB를 비우거나 다른 PC에서 띄우면 다시 연결해야 한다. **서비스 계정**은 서버 `.env`의 키로 토큰을 받으므로 로그인·다시 연결이 없다. 회사가 Drive 폴더를 서비스 계정 메일에 공유하면 ERP가 그 폴더를 **읽기만** 한다.
+
+**관리자 준비 (Google Cloud Console)**
+1. [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트를 고른다(없으면 만든다).
+2. **API 및 서비스 > 라이브러리 > Google Drive API > 사용 설정**.
+3. **IAM 및 관리자 > 서비스 계정 > 서비스 계정 만들기**. 이름만 넣고, 역할(권한)은 주지 않아도 된다(Drive는 공유로 권한을 준다).
+4. 만든 서비스 계정 > **키 > 키 추가 > 새 키 만들기 > JSON** → 파일이 내려받아진다. 이 파일은 비밀번호와 같다. 조직 정책(`iam.disableServiceAccountKeyCreation`)으로 막혀 있으면 조직 관리자가 풀어야 한다.
+5. 파일을 서버의 `server/secrets/`(git에 올라가지 않음)에 두고 `server/.env`에 `GOOGLE_SERVICE_ACCOUNT_KEY_FILE=secrets/<파일 이름>.json`. 파일을 둘 수 없으면 `GOOGLE_SERVICE_ACCOUNT_KEY=<JSON의 base64>`.
+6. **Drive에서** 녹음·사진 폴더 > **공유** > 서비스 계정 메일(`…@<프로젝트>.iam.gserviceaccount.com`, 키 파일의 `client_email`, 관리 화면 카드에도 보인다)을 **뷰어**로 추가한다. 공유 드라이브면 그 드라이브(또는 폴더)에 멤버로 추가한다.
+7. 폴더를 관리 > 외부 연결 > Google Drive 카드에 저장하거나 `.env`의 `GOOGLE_DRIVE_FOLDER`에 넣는다.
+8. 서버를 다시 띄우고 카드의 **연결 확인**으로 폴더 이름과 녹음·사진 수를 본다.
+
+**동작**
+- **우선순위**: 키(`GOOGLE_SERVICE_ACCOUNT_KEY_FILE` 또는 `GOOGLE_SERVICE_ACCOUNT_KEY`)를 넣으면 OAuth 토큰이 저장돼 있어도 서비스 계정을 쓴다. 키를 빼면 OAuth 연결이 그대로 돌아온다(저장된 토큰·클라이언트는 지우지 않는다).
+- **상태**: 키를 읽을 수 있으면 `CONNECTED`(`connectedAt`·`connectedBy`는 `null`), 넣었는데 읽을 수 없으면 `NOT_CONNECTED` + `lastError`에 이유(어느 변수인지). 서버가 뜰 때 한 번 읽어 로그에 서비스 계정 메일 또는 이유를 남긴다(키 내용은 남기지 않는다).
+- **토큰** (`google-drive/google-service-account.ts`): OAuth 2.0 JWT bearer(RFC 7523). Node `crypto`로 RS256 서명한 assertion — 머리 `{alg:'RS256',typ:'JWT'}`, 클레임 `{iss: client_email, scope: drive.readonly, aud: 토큰 주소, iat, exp: iat+3600}` — 을 `POST https://oauth2.googleapis.com/token`(`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=…`)으로 보낸다. 🟡 `aud`는 키의 `token_uri`가 아니라 실제로 보내는 고정 주소다(같은 값이고, 키 파일의 주소로는 요청하지 않는다). 받은 토큰은 메모리에 두고 **만료 60초 전**에 새로 받는다. 동시에 여러 요청이 와도 토큰 요청은 하나만 보낸다. 리프레시 토큰은 없다.
+- 토큰 요청 실패: `invalid_grant`·`invalid_client`(키 삭제·사용 중지, 서버 시계 틀림) → `INT-004` "서비스 계정 키를 거절했어요", 5xx·429·네트워크 → `INT-004` "잠시 뒤". 연결 행이 없으면 만들어 `last_error`에 남긴다(관리 화면에 보이게). 실패는 기억하지 않아 다음 호출이 다시 시도한다.
+- Drive가 401 → 기억한 토큰이 그것이면 새로 받아 한 번 다시 보낸다. 또 401이면 `INT-004`(OAuth와 달리 지울 DB 토큰이 없다).
+- **폴더 공유 안내**: 서비스 계정 모드에서 폴더를 못 찾거나(404) 권한이 부족하면(403 `insufficientPermissions`·`insufficientFilePermissions`) `INT-012` "Drive에서 폴더를 `<서비스 계정 메일>`에 '뷰어'로 공유하고…"(연결 확인은 `ok: false` + 이 문구). OAuth 모드의 "다시 연결" 문구는 쓰지 않는다.
+- **폴더**: `GOOGLE_DRIVE_FOLDER`(주소·id, `normalizeDriveFolderId`)가 있으면 화면에서 저장한 폴더보다 먼저다. 화면 값은 지우지 않는다. 카드의 폴더 칸은 잠긴다(`driveFolderFromEnv`).
+- 파일 목록·내용(Range)·회의 녹음·`/drive` 화면·AI·메신저 Drive 선택은 그대로 된다: 서버는 `assertReady`가 서비스 계정이면 DB 토큰을 보지 않고, 화면은 `isDriveReady`(`status === 'CONNECTED'` + 실제 폴더)를 그대로 쓴다.
+- 서비스 계정은 `drive.readonly`만 받는다. 나중에 Drive에 쓰려면 공유 권한을 '편집자'로 바꾸고 범위를 늘려야 한다(지금은 쓰지 않는다).
+
+**실제 Google로 확인하기**: 위 준비를 마치고 서버를 띄운다 → 관리자(1503001)로 관리 > 외부 연결 > Google Drive가 '연결됨'·'서비스 계정 (서버 .env)'·서비스 계정 메일을 보이는지 → 연결 확인 → `/drive` 화면에서 녹음·사진이 보이는지 → 서버를 다시 띄우거나 `npm run db:reset` 뒤에도 그대로 연결됨인지.
 
 ### 설정 (`PUT integrations/google-drive/settings`)
 

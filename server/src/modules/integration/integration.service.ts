@@ -23,9 +23,11 @@ import { readSettings } from './integration-settings';
 import { IntegrationTokenStore } from './integration-token.store';
 import { clientReturnUrl, oauthCallbackUrl } from './integration-urls';
 import { GoogleDriveClient } from './google-drive/google-drive.client';
+import { effectiveDriveFolder } from './google-drive/google-drive.env';
 import { normalizeDriveFolderId } from './google-drive/google-drive.query';
 import { GoogleDriveService } from './google-drive/google-drive.service';
 import { clientInputError, type GoogleClientCredentials } from './google-drive/google-oauth';
+import { GoogleServiceAccount } from './google-drive/google-service-account';
 import { McpClientService } from './mcp/mcp.client';
 import { normalizeNotionPageId } from './notion/notion.tools';
 import { NotionWorkspaceService } from './notion/notion-workspace.service';
@@ -38,32 +40,46 @@ function statusOf(row: IntegrationConnectionRow | null): IntegrationConnectionSt
   return row?.connectedAt ? 'RECONNECT_REQUIRED' : 'NOT_CONNECTED';
 }
 
-/** 연결 대상마다 쓰는 설정 칸만 보인다 */
+/** 연결 대상마다 쓰는 설정 칸만 보인다. Drive 폴더는 실제로 읽는 폴더(.env가 먼저)다: 화면들이 이 값으로 Drive를 쓸 수 있는지 정한다 */
 function settingsView(preset: IntegrationProviderPreset, settings: IntegrationSettings): IntegrationSettings {
   if (preset.key === INTEGRATION_PROVIDER.NOTION) return { parentPageId: settings.parentPageId ?? null };
-  if (preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE) return { folderId: settings.folderId ?? null };
+  if (preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE) return { folderId: effectiveDriveFolder(settings.folderId).folderId };
   return settings;
+}
+
+/** .env의 서비스 계정 상태 (Google Drive가 아니거나 키를 넣지 않았으면 null) */
+interface ServiceAccountView {
+  email: string | null;
+  error: string | null;
 }
 
 function toView(
   preset: IntegrationProviderPreset,
   row: IntegrationConnectionRow | null,
   oauthClient: IntegrationOAuthClientView | null,
+  serviceAccount: ServiceAccountView | null,
   notionWorkspace: NotionWorkspaceView | null,
 ): IntegrationConnectionView {
+  const settings = readSettings(row?.settings ?? null);
+  const folder = preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE ? effectiveDriveFolder(settings.folderId) : null;
   return {
     providerKey: preset.key,
     displayName: preset.displayName,
     protocol: preset.protocol,
     serverUrl: preset.serverUrl,
-    status: statusOf(row),
-    connectedAt: row?.connectedAt?.toISOString() ?? null,
-    connectedBy: row?.connectedBy ? { id: row.connectedBy.id, name: row.connectedBy.employeeName } : null,
-    lastError: row?.lastError ?? null,
-    settings: settingsView(preset, readSettings(row?.settings ?? null)),
+    // 서비스 계정은 로그인한 사람이 없다: 키를 읽을 수 있으면 연결됨
+    status: serviceAccount ? (serviceAccount.email ? 'CONNECTED' : 'NOT_CONNECTED') : statusOf(row),
+    connectedAt: serviceAccount ? null : (row?.connectedAt?.toISOString() ?? null),
+    connectedBy: !serviceAccount && row?.connectedBy ? { id: row.connectedBy.id, name: row.connectedBy.employeeName } : null,
+    // .env를 잘못 넣은 것이 지난 호출의 실패보다 먼저 고칠 일이다
+    lastError: serviceAccount?.error ?? folder?.error ?? row?.lastError ?? null,
+    settings: settingsView(preset, settings),
     // 관리자가 OAuth 클라이언트에 등록할 주소. MCP는 동적 등록이 알아서 넣는다
     redirectUri: preset.protocol === 'OAUTH2' ? oauthCallbackUrl() : null,
     oauthClient,
+    authMode: serviceAccount ? 'SERVICE_ACCOUNT' : 'OAUTH',
+    serviceAccountEmail: serviceAccount?.email ?? null,
+    driveFolderFromEnv: folder?.fromEnv ?? false,
     notionWorkspace,
   };
 }
@@ -100,6 +116,7 @@ export class IntegrationService {
     private readonly crypto: IntegrationCrypto,
     private readonly drive: GoogleDriveClient,
     private readonly driveService: GoogleDriveService,
+    private readonly serviceAccount: GoogleServiceAccount,
     private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
@@ -119,8 +136,19 @@ export class IntegrationService {
   }
 
   private async view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): Promise<IntegrationConnectionView> {
+    const serviceAccount = this.usesServiceAccount(preset) ? { email: this.serviceAccount.email(), error: this.serviceAccount.configError() } : null;
     const workspace = preset.key === INTEGRATION_PROVIDER.NOTION ? await this.notionWorkspace.view(readSettings(row?.settings ?? null)) : null;
-    return toView(preset, row, this.oauthClientView(preset, row), workspace);
+    return toView(preset, row, this.oauthClientView(preset, row), serviceAccount, workspace);
+  }
+
+  /** Google Drive이고 .env에 서비스 계정 키가 있으면 OAuth 연결 대신 그것을 쓴다 */
+  private usesServiceAccount(preset: IntegrationProviderPreset): boolean {
+    return preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE && this.serviceAccount.isActive();
+  }
+
+  /** 서비스 계정으로 쓰는 동안 화면의 OAuth 연결·끊기는 막는다: 끊어도 .env 키로 다시 읽으므로 끊긴 것처럼 보이면 안 된다 */
+  private assertOAuthUsable(preset: IntegrationProviderPreset): void {
+    if (this.usesServiceAccount(preset)) throw new AppException('INT-016');
   }
 
   /** 연결할 수 있는 대상 전부. 아직 행이 없으면 연결하지 않은 상태로 보인다 */
@@ -160,6 +188,7 @@ export class IntegrationService {
    */
   async connect(user: AuthUser, providerKey: string): Promise<IntegrationConnectResult> {
     const preset = providerPreset(providerKey);
+    this.assertOAuthUsable(preset);
     const serverUrl = preset.protocol === 'MCP' ? mcpServerUrlOf(preset) : null;
     await this.repository.ensure(this.prisma, preset.key, serverUrl);
     // 클라이언트를 넣지 않았으면 확인값을 쓰기 전에 알린다
@@ -231,6 +260,7 @@ export class IntegrationService {
    */
   async disconnect(providerKey: string): Promise<IntegrationConnectionView> {
     const preset = providerPreset(providerKey);
+    this.assertOAuthUsable(preset);
     await this.repository.ensure(this.prisma, preset.key, preset.serverUrl);
     // 진행 중인 호출의 토큰 갱신이 끊은 뒤에 토큰을 되살리지 않게 그 호출이 끝난 뒤 지운다
     const row = await this.store.exclusive(preset.key, async () => {

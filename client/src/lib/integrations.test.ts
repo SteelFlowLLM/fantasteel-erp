@@ -11,6 +11,8 @@ import {
   driveFolderLink,
   driveSettingsPatch,
   googleDriveConnection,
+  isDriveReady,
+  isDriveServiceAccount,
   integrationCallbackToast,
   integrationCardKind,
   isNotionExportReady,
@@ -41,6 +43,9 @@ const connection = (overrides: Partial<IntegrationConnectionView> = {}): Integra
   settings: { parentPageId: PAGE_ID },
   redirectUri: null,
   oauthClient: null,
+  authMode: 'OAUTH',
+  serviceAccountEmail: null,
+  driveFolderFromEnv: false,
   notionWorkspace: null,
   ...overrides,
 });
@@ -222,6 +227,34 @@ describe('driveConnectBlockReason', () => {
 
   it('저장하지 않은 변경이 있으면 먼저 저장하게 한다', () => {
     expect(driveConnectBlockReason(drive(), true)).toContain('먼저 저장');
+  });
+
+  it('서비스 계정이면 화면에서 연결하지 않는다 (OAuth 클라이언트가 없어도 같은 안내)', () => {
+    const sa = drive({ authMode: 'SERVICE_ACCOUNT', serviceAccountEmail: 'erp@p.iam.gserviceaccount.com', oauthClient: { clientId: null, clientSecretSet: false } });
+    expect(driveConnectBlockReason(sa, false)).toBe('서버 설정(.env)의 서비스 계정으로 연결돼 있어요');
+    expect(driveConnectBlockReason(sa, true)).toBe('서버 설정(.env)의 서비스 계정으로 연결돼 있어요');
+  });
+});
+
+describe('서비스 계정 (이슈 #395)', () => {
+  const sa = (overrides: Partial<IntegrationConnectionView> = {}) =>
+    drive({ authMode: 'SERVICE_ACCOUNT', serviceAccountEmail: 'erp@p.iam.gserviceaccount.com', connectedAt: null, connectedBy: null, oauthClient: { clientId: null, clientSecretSet: false }, ...overrides });
+
+  it('authMode로 가린다', () => {
+    expect(isDriveServiceAccount(sa())).toBe(true);
+    expect(isDriveServiceAccount(drive())).toBe(false);
+    expect(isDriveServiceAccount(undefined)).toBe(false);
+  });
+
+  it('로그인한 사람·OAuth 클라이언트 없이도 연결됨 + 폴더가 있으면 Drive를 쓸 수 있다 (.env 폴더 포함)', () => {
+    expect(isDriveReady(sa())).toBe(true);
+    expect(isDriveReady(sa({ driveFolderFromEnv: true, settings: { folderId: 'envFolder1234567' } }))).toBe(true);
+    expect(canImportAudioFromDrive(sa())).toBe(true);
+  });
+
+  it('키를 읽지 못했거나(연결 안 됨) .env 폴더를 읽지 못했으면(폴더 없음) 쓸 수 없다', () => {
+    expect(isDriveReady(sa({ status: 'NOT_CONNECTED', serviceAccountEmail: null }))).toBe(false);
+    expect(isDriveReady(sa({ driveFolderFromEnv: true, settings: { folderId: null } }))).toBe(false);
   });
 });
 

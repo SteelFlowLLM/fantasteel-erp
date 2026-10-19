@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { GoogleDriveClient } from './google-drive/google-drive.client';
 import { GoogleDriveController } from './google-drive/google-drive.controller';
 import { GoogleDriveService } from './google-drive/google-drive.service';
+import { GoogleServiceAccount } from './google-drive/google-service-account';
 import { IntegrationConnectionRepository } from './integration-connection.repository';
 import { IntegrationController } from './integration.controller';
 import { IntegrationCrypto } from './integration-crypto';
@@ -31,6 +32,7 @@ import { NotionWorkspaceService } from './notion/notion-workspace.service';
     NotionWorkspaceService,
     GoogleDriveClient,
     GoogleDriveService,
+    GoogleServiceAccount,
   ],
   // 일정·업무·회의록을 저장하는 모듈이 NotionWorkspaceService.kick()으로 Notion 업무 공간 반영을 깨운다 (이슈 #391)
   exports: [NotionPageService, NotionWorkspaceService, McpClientService, IntegrationTokenStore, GoogleDriveService],

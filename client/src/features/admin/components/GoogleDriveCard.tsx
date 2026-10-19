@@ -2,6 +2,7 @@
 
 // 외부 연결의 Google Drive 카드 (문서에 없는 기능, 이슈 #361). Notion과 달리 MCP가 아니라 Drive REST API + 관리자가 넣은 OAuth 클라이언트다.
 // 순서: Google Cloud Console에서 OAuth 클라이언트 만들기 → 클라이언트 ID·보안 비밀번호·폴더 저장 → 연결하기(Google 허용 화면) → 연결 확인.
+// 서버 .env에 서비스 계정 키가 있으면(이슈 #395) 로그인 없이 그 계정으로 읽는다: OAuth 칸·연결·끊기를 숨기고, 폴더를 공유할 서비스 계정 메일을 보여 준다.
 import { useState } from 'react';
 import { integrationApi, integrationKeys, type IntegrationConnectionView, type IntegrationTestResult } from '@/api/integrations';
 import { Badge } from '@/components/Badge';
@@ -15,7 +16,15 @@ import { KvList } from '@/components/KvList';
 import { useAction } from '@/hooks/useAction';
 import { useIntegrationTest } from '@/hooks/useIntegrations';
 import { fmtDateTime } from '@/lib/format';
-import { INTEGRATION_STATUS_LABEL, INTEGRATION_STATUS_TONE, driveConnectBlockReason, driveFolderLink, driveSettingsPatch } from '@/lib/integrations';
+import {
+  DRIVE_SERVICE_ACCOUNT_NOTE,
+  INTEGRATION_STATUS_LABEL,
+  INTEGRATION_STATUS_TONE,
+  driveConnectBlockReason,
+  driveFolderLink,
+  driveSettingsPatch,
+  isDriveServiceAccount,
+} from '@/lib/integrations';
 import { toast } from '@/stores/useToastStore';
 
 export function GoogleDriveCard({ connection, canEdit }: { connection: IntegrationConnectionView; canEdit: boolean }) {
@@ -53,17 +62,31 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
   const clientIdChanged = clientId.trim() !== savedClientId;
   const busy = connect.isPending || disconnect.isPending;
   const blockReason = driveConnectBlockReason(connection, dirty);
+  const serviceAccount = isDriveServiceAccount(connection);
 
   return (
     <Card petKey={`card:integrations.${providerKey}`}>
       <CardHead title={connection.displayName} meta={<Badge tone={INTEGRATION_STATUS_TONE[status]}>{INTEGRATION_STATUS_LABEL[status]}</Badge>} />
       <CardBody>
-        <KvList
-          items={[
-            { label: '연결한 시각', value: connection.connectedAt ? fmtDateTime(connection.connectedAt) : '-' },
-            { label: '연결한 사람', value: connection.connectedAt ? (connection.connectedBy?.name ?? '-') : '-' },
-          ]}
-        />
+        {serviceAccount ? (
+          <KvList items={[{ label: '연결 방식', value: '서비스 계정 (서버 .env)' }]} />
+        ) : (
+          <KvList
+            items={[
+              { label: '연결한 시각', value: connection.connectedAt ? fmtDateTime(connection.connectedAt) : '-' },
+              { label: '연결한 사람', value: connection.connectedAt ? (connection.connectedBy?.name ?? '-') : '-' },
+            ]}
+          />
+        )}
+        {serviceAccount ? (
+          <Banner tone={connected ? 'ok' : 'wait'} icon={connected ? 'check-circle' : 'alert'}>
+            <b>{DRIVE_SERVICE_ACCOUNT_NOTE}.</b> 로그인하거나 다시 연결하지 않아도 돼요.
+            {connection.serviceAccountEmail ? " 읽을 Drive 폴더를 아래 메일 주소에 '뷰어'로 공유해 주세요." : ' 서버가 키를 읽지 못했어요. 아래 오류를 서버 관리자에게 알려 주세요.'}
+          </Banner>
+        ) : null}
+        {connection.serviceAccountEmail ? (
+          <CopyField label="서비스 계정 메일" hint="Drive에서 폴더 › 공유 › 이 주소를 '뷰어'로 추가해요" value={connection.serviceAccountEmail} />
+        ) : null}
         {status === 'RECONNECT_REQUIRED' ? (
           <Banner tone="wait" icon="alert">
             <b>연결이 끊겼어요.</b> 허용이 만료되었거나 취소되었어요. 관리자가 다시 연결해 주세요.
@@ -76,55 +99,71 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
           </Banner>
         ) : null}
 
-        <SetupGuide />
+        {serviceAccount ? <ServiceAccountGuide /> : <SetupGuide />}
 
-        <div className="flex flex-col gap-3 rounded-md border border-line p-3">
-          <span className="text-xs font-semibold text-ink-2">OAuth 클라이언트</span>
-          <Field label="클라이언트 ID" hint="Google Cloud Console의 OAuth 클라이언트 ID (…apps.googleusercontent.com)">
-            <Input
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              disabled={!canEdit}
-              placeholder="1234567890-abc.apps.googleusercontent.com"
-              spellCheck={false}
-              autoComplete="off"
-            />
-          </Field>
-          <Field
-            label={
-              <>
-                클라이언트 보안 비밀번호 {secretSaved ? <Badge tone="ok">저장됨</Badge> : <Badge tone="neutral">저장 안 됨</Badge>}
-              </>
-            }
-            hint="저장만 하고 다시 보여 주지 않아요. 바꾸려면 새 값을 넣고 저장하세요"
-          >
-            <Input
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              disabled={!canEdit}
-              placeholder={secretSaved ? '새 값으로 바꾸려면 입력' : 'GOCSPX-…'}
-              spellCheck={false}
-              autoComplete="new-password"
-            />
-          </Field>
-          {connection.redirectUri ? <RedirectUri uri={connection.redirectUri} /> : null}
-          {connected && clientIdChanged ? (
-            <Banner tone="wait" icon="alert">
-              클라이언트 ID를 바꾸면 지금 연결이 풀려서 다시 연결해야 해요.
-            </Banner>
-          ) : null}
-        </div>
+        {serviceAccount ? null : (
+          <div className="flex flex-col gap-3 rounded-md border border-line p-3">
+            <span className="text-xs font-semibold text-ink-2">OAuth 클라이언트</span>
+            <Field label="클라이언트 ID" hint="Google Cloud Console의 OAuth 클라이언트 ID (…apps.googleusercontent.com)">
+              <Input
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                disabled={!canEdit}
+                placeholder="1234567890-abc.apps.googleusercontent.com"
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </Field>
+            <Field
+              label={
+                <>
+                  클라이언트 보안 비밀번호 {secretSaved ? <Badge tone="ok">저장됨</Badge> : <Badge tone="neutral">저장 안 됨</Badge>}
+                </>
+              }
+              hint="저장만 하고 다시 보여 주지 않아요. 바꾸려면 새 값을 넣고 저장하세요"
+            >
+              <Input
+                type="password"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                disabled={!canEdit}
+                placeholder={secretSaved ? '새 값으로 바꾸려면 입력' : 'GOCSPX-…'}
+                spellCheck={false}
+                autoComplete="new-password"
+              />
+            </Field>
+            {connection.redirectUri ? (
+              <CopyField label="리디렉션 URI" hint="Google Cloud Console의 OAuth 클라이언트 '승인된 리디렉션 URI'에 넣으세요" value={connection.redirectUri} />
+            ) : null}
+            {connected && clientIdChanged ? (
+              <Banner tone="wait" icon="alert">
+                클라이언트 ID를 바꾸면 지금 연결이 풀려서 다시 연결해야 해요.
+              </Banner>
+            ) : null}
+          </div>
+        )}
 
         <Field
           label="녹음·사진을 올리는 Drive 폴더"
-          hint="Drive 폴더의 링크를 붙여 넣어요. 연결한 Google 계정이 볼 수 있는 폴더여야 하고, 폴더 바로 아래 파일만 읽어요"
+          hint={
+            connection.driveFolderFromEnv
+              ? '서버 설정(GOOGLE_DRIVE_FOLDER)이 폴더를 정해서 여기서 바꾸지 않아요'
+              : serviceAccount
+                ? 'Drive 폴더의 링크를 붙여 넣어요. 서비스 계정 메일에 공유한 폴더여야 하고, 폴더 바로 아래 파일만 읽어요'
+                : 'Drive 폴더의 링크를 붙여 넣어요. 연결한 Google 계정이 볼 수 있는 폴더여야 하고, 폴더 바로 아래 파일만 읽어요'
+          }
         >
-          <Input value={folder} onChange={(e) => setFolder(e.target.value)} disabled={!canEdit} placeholder="https://drive.google.com/drive/folders/…" spellCheck={false} />
+          <Input
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            disabled={!canEdit || connection.driveFolderFromEnv}
+            placeholder="https://drive.google.com/drive/folders/…"
+            spellCheck={false}
+          />
         </Field>
         {savedFolderId ? (
           <span className="text-cap text-ink-3">
-            저장된 폴더{' '}
+            {connection.driveFolderFromEnv ? '서버 설정 폴더' : '저장된 폴더'}{' '}
             <a href={savedFolder} target="_blank" rel="noopener noreferrer" className="font-mono text-run hover:underline">
               {savedFolderId}
             </a>
@@ -147,24 +186,30 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
         ) : null}
       </CardBody>
       <CardFoot>
-        <span className="text-xs text-ink-3">{blockReason ?? (connected ? '확인하면 폴더 이름과 녹음·사진 수를 읽어 와요' : '연결하면 Google 허용 화면으로 이동해요')}</span>
-        {connected ? (
+        <span className="text-xs text-ink-3">
+          {serviceAccount
+            ? '확인하면 서비스 계정으로 폴더 이름과 녹음·사진 수를 읽어 와요'
+            : (blockReason ?? (connected ? '확인하면 폴더 이름과 녹음·사진 수를 읽어 와요' : '연결하면 Google 허용 화면으로 이동해요'))}
+        </span>
+        {connected && !serviceAccount ? (
           <Button className="ml-auto" variant="danger-ghost" onClick={() => setConfirmDisconnect(true)} disabled={!canEdit || busy}>
             연결 끊기
           </Button>
         ) : null}
-        <Button className={connected ? undefined : 'ml-auto'} icon="refresh" onClick={() => test.mutate(providerKey)} disabled={!canEdit || !connected || test.isPending || busy}>
+        <Button className={connected && !serviceAccount ? undefined : 'ml-auto'} icon="refresh" onClick={() => test.mutate(providerKey)} disabled={!canEdit || !connected || test.isPending || busy}>
           {test.isPending ? '확인 중…' : '연결 확인'}
         </Button>
-        <Button
-          variant={connected ? 'default' : 'primary'}
-          icon="link"
-          onClick={() => connect.mutate(providerKey)}
-          disabled={!canEdit || busy || blockReason !== null}
-          title={blockReason ?? undefined}
-        >
-          {connect.isPending ? '이동하는 중…' : status === 'NOT_CONNECTED' ? '연결하기' : '다시 연결'}
-        </Button>
+        {serviceAccount ? null : (
+          <Button
+            variant={connected ? 'default' : 'primary'}
+            icon="link"
+            onClick={() => connect.mutate(providerKey)}
+            disabled={!canEdit || busy || blockReason !== null}
+            title={blockReason ?? undefined}
+          >
+            {connect.isPending ? '이동하는 중…' : status === 'NOT_CONNECTED' ? '연결하기' : '다시 연결'}
+          </Button>
+        )}
       </CardFoot>
       {confirmDisconnect ? (
         <ConfirmDialog
@@ -183,20 +228,20 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
   );
 }
 
-/** 관리자가 Google Cloud Console의 OAuth 클라이언트에 그대로 등록할 주소 */
-function RedirectUri({ uri }: { uri: string }) {
+/** 관리자가 다른 곳(Google Cloud Console의 리디렉션 URI, Drive 폴더 공유)에 그대로 넣을 값 */
+function CopyField({ label, hint, value }: { label: string; hint: string; value: string }) {
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(uri);
-      toast.ok('주소를 복사했어요');
+      await navigator.clipboard.writeText(value);
+      toast.ok('복사했어요');
     } catch {
-      toast.error('복사하지 못했어요. 주소를 직접 선택해 복사해 주세요');
+      toast.error('복사하지 못했어요. 직접 선택해 복사해 주세요');
     }
   };
   return (
-    <Field label="리디렉션 URI" hint="Google Cloud Console의 OAuth 클라이언트 '승인된 리디렉션 URI'에 넣으세요">
+    <Field label={label} hint={hint}>
       <div className="flex gap-2">
-        <Input value={uri} readOnly spellCheck={false} className="flex-1 font-mono" onFocus={(e) => e.currentTarget.select()} />
+        <Input value={value} readOnly spellCheck={false} className="flex-1 font-mono" onFocus={(e) => e.currentTarget.select()} />
         <Button icon="copy" onClick={copy}>
           복사
         </Button>
@@ -219,6 +264,21 @@ function SetupGuide() {
         <li>사용자 인증 정보 › OAuth 클라이언트 ID(웹 애플리케이션)를 만들고, 아래 리디렉션 URI를 승인된 리디렉션 URI에 글자 그대로 넣어요.</li>
         <li>클라이언트 ID·보안 비밀번호와 Drive 폴더 링크를 이 카드에 넣고 저장해요.</li>
         <li>연결하기 › Google 계정을 고르고 권한을 모두 허용해요. 돌아오면 연결 확인으로 폴더 이름과 파일 수를 봐요.</li>
+      </ol>
+    </details>
+  );
+}
+
+function ServiceAccountGuide() {
+  return (
+    <details className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm">
+      <summary className="cursor-pointer text-xs font-medium text-ink-2">서비스 계정 설정 방법 (Google Cloud Console)</summary>
+      <ol className="mt-2 ml-4 flex list-decimal flex-col gap-1.5 text-xs leading-normal text-ink-2">
+        <li>Google Cloud Console에서 프로젝트를 고르고, API 및 서비스 › 라이브러리에서 Google Drive API를 사용 설정해요.</li>
+        <li>IAM 및 관리자 › 서비스 계정 › 서비스 계정 만들기. 역할은 주지 않아도 돼요.</li>
+        <li>만든 서비스 계정 › 키 › 키 추가 › 새 키 만들기 › JSON. 내려받은 파일을 서버의 server/secrets/ 폴더에 두고 .env의 GOOGLE_SERVICE_ACCOUNT_KEY_FILE에 경로를 적어요.</li>
+        <li>Drive에서 녹음·사진 폴더 › 공유 › 위의 서비스 계정 메일을 뷰어로 추가해요.</li>
+        <li>폴더 링크를 이 카드에 저장하거나 .env의 GOOGLE_DRIVE_FOLDER에 적어요. .env를 바꿨으면 서버를 다시 띄운 뒤 연결 확인을 눌러요.</li>
       </ol>
     </details>
   );
