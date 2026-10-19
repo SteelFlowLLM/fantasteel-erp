@@ -203,3 +203,19 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
     expect(calls.map((c) => c.path)).toEqual(['/inventories']);
   });
 });
+
+describe('정합성 보정 (REQ-INV-010)', () => {
+  const result = { checkedAt: '2026-10-19T01:00:00.000Z', applied: false, checkedItemCount: 3, mismatchCount: 1, correctedCount: 0, unfixableCount: 0, rows: [] };
+
+  it('점검은 GET, 보정은 POST로 같은 경로를 부르고 서버 결과를 그대로 준다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/inventories/reconciliation' ? ok(c.method === 'POST' ? { ...result, applied: true, correctedCount: 1 } : result) : undefined));
+    expect(await inventoryApi.checkReconciliation()).toEqual(result);
+    expect(await inventoryApi.reconcile()).toMatchObject({ applied: true, correctedCount: 1 });
+    expect(calls.filter((c) => c.path === '/inventories/reconciliation').map((c) => c.method)).toEqual(['GET', 'POST']);
+  });
+
+  it('관리자가 아니면 서버의 권한 오류(COM-002)를 던진다', async () => {
+    useFakeServer(SEED_EMPLOYEE_NO.salesHead, (c) => (c.path === '/inventories/reconciliation' ? fail(403, 'COM-002', '정합성 보정은 관리자만 실행할 수 있어요') : undefined));
+    await expect(inventoryApi.reconcile()).rejects.toThrow('권한');
+  });
+});

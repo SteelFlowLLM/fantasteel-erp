@@ -9,9 +9,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-INV-001~009 (REQ-INV-010 정합성 보정 배치는 P2라 제외) |
-| BP | BP-INV-01 열연 배정(배정 부분), BP-INV-02 동시성 통제(P1 부분), 4.2 예약·배정, 4.3 합격 재고·여재, 13.2 `confirmAllocation` |
-| 등급 | P1 |
+| REQ | REQ-INV-001~009, REQ-INV-010 정합성 보정(P2, 9장) |
+| BP | BP-INV-01 열연 배정(배정 부분), BP-INV-02 동시성 통제(P1)·예약 정합성 보정(P2), 4.2 예약·배정, 4.3 합격 재고·여재, 13.2 `confirmAllocation` |
+| 등급 | P1 (정합성 보정만 P2) |
 
 ## 2. 테이블
 
@@ -43,6 +43,8 @@
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
 | GET | `inventories` | 재고 조회 | 로그인만(재고 메뉴는 전 역할) | `?itemId=`. 원료 재고는 원료 LOT 잔량 합계(TRM-054) |
+| GET | `inventories/reconciliation` | 정합성 점검 | 로그인만 | 🟡 경로 제안(API 목록에 없음). 바꾸지 않는다. 9장 |
+| POST | `inventories/reconciliation` | 정합성 보정 | 관리자 역할(service 확인, 아니면 `COM-002`) | 🟡 경로 제안. 9장 |
 | POST | `allocations/recommend` | 배정 추천 | 목적별 USE ↓ | 저장하지 않고 작업 로그(ALLOCATION_RECOMMENDED)만 |
 | POST | `allocations` | 배정 확정 | 목적별 USE ↓ | INV-001~004. LOT당 CONFIRMED 1건 |
 | POST | `allocations/:id/release` | 배정 해제·변경 | 목적별 USE ↓ | CONSUMED 배정은 변경 불가 |
@@ -181,3 +183,29 @@ RETURNING id;
 | --- | --- |
 | 여재 매수 | 슬래브 규격별 미배정 합격 LOT 수(적격 + AVAILABLE + CONFIRMED 배정 없음, `findAllocatableLots.sql`) − ACTIVE 예약 매수, 0 미만은 0 (사용자 결정). 진행 중(진행중·부분출하)인 코일 수주에 묶인 슬래브(LOT → 실적 → 계획 → 수주 품목, 4장 자동 예약과 같은 경로)는 열연에 쓰일 몫이라 빼고 센다 |
 | 여재 LOT·보유 기간 | 예약은 매수 단위라 LOT을 정할 수 없어 FIFO상 가장 늦게 쓰일 LOT을 여재로 보고, 그중 가장 이른 생산완료일부터 센다(여재 전환 시각이 ERD에 없다) |
+
+## 9. 정합성 보정 (REQ-INV-010, BP-INV-02 P2, TRM-062)
+
+[02] "예약 매수 합계와 재고의 예약 매수를 주기적으로 비교·보정한다", [04] BP-INV-02 "ACTIVE 예약 합계와 `reserved_qty`를 비교하고 불일치 시 보정 / 담당자 알림·보정 전후 이벤트, 예약을 임의로 삭제해 맞추지 않는다, 실시간 동시성 통제를 대신하지 않는다"(구현 제안).
+
+- 코드: `reconciliation.calculator.ts`(판단, 순수 함수) · `reconciliation.repository.ts` · `reconciliation.service.ts` · `reconciliation.scheduler.ts`. 화면은 재고 상단 [정합성 보정] → `ReconciliationModal`.
+- 대상: 재고 행이 있거나 ACTIVE 예약이 있는 제품 규격. 비교 = `inventory.reserved_qty` vs 규격별 ACTIVE `reservation.reserved_qty` 합계.
+- 판단
+
+| 상태 | 조건 | 보정 |
+| --- | --- | --- |
+| 일치 | 같음 | 없음(응답 `rows`에서 뺀다) |
+| 불일치 → 보정함 | 다르고, ACTIVE 합계 ≤ `on_hand − rolling` | `reserved_qty`를 ACTIVE 합계로 (`reconcileInventoryReservedQty.sql`: 읽은 값과 같고 가용 ≥ 0일 때만) |
+| 보정 불가 | ACTIVE 합계 > `on_hand − rolling`(맞추면 `inventory_available_qty_check` 위반), 재고 행 없음, 보정 사이 값이 바뀜 | 하지 않는다. 예약은 지우지 않고 이유를 준다 |
+
+- 잠금: 보정은 한 tx에서 재고 행 전부를 item_id 순으로 `FOR UPDATE`(`lockInventoriesForReconciliation.sql`) → ACTIVE 합계 → 조건부 UPDATE. 4장 잠금 순서(inventory → reservation)와 같다. 점검(GET)은 잠그지 않는다.
+- 실행: 점검은 전 역할, 보정은 관리자 역할(권한 코드가 없어 `roleCode === ADMIN`, 2026-10-19 사용자 결정). 서버도 띄운 직후 한 번, 그 뒤 24시간마다 SYSTEM으로 보정한다(`RESERVATION_RECONCILE_INTERVAL_HOURS`, 0이면 끔, `NODE_ENV=test`면 안 돎).
+- 알림: 보정했거나 보정 불가가 있으면 재직 중 관리자에게 같은 tx에서 알린다. 같은 내용을 읽지 않은 사원에게는 다시 보내지 않는다(매일 같은 보정 불가가 쌓이지 않게). 링크 `/inventories`.
+
+| 🟡 확인 필요 | 지금 | 근거 |
+| --- | --- | --- |
+| 작업 로그 이벤트 유형 | 공통 코드 `BUSINESS_EVENT_TYPE`에 보정 유형이 없어 작업 로그에 남기지 않는다. 보정 전·후 매수는 응답과 서버 로그(`ReconciliationService` warn)에 남는다(2026-10-19 사용자 결정). 정의서에 유형이 생기면 같은 tx에서 기록한다 | [04] BP-INV-02 "보정 전후 이벤트", [06] |
+| 알림 유형·받는 사람 | 보정 알림 유형이 없어 Factory Agent처럼 `TASK_ASSIGNED`(업무 지정)를 쓰고, "담당자"가 정해지지 않아 관리자 역할에게 보낸다(2026-10-19 사용자 결정) | [04] BP-INV-02, [06] NOTIFICATION_TYPE |
+| 보정 주기 | 24시간(Factory Agent와 같음). [04] 16장 "스케줄 주기는 설정값" | [02] REQ-INV-010 "주기적으로" |
+| API 경로 | API 목록에 없어 `inventories/reconciliation`(GET 점검·POST 보정)으로 둔다 | [CSV] |
+| `on_hand`·`rolling` 불일치 | REQ-INV-010은 예약 매수만 정해서 보지 않는다. 다른 불변식은 `npm run check-invariants -w @fantasteel/server`가 본다 | [02], [ERD] Project Note |
