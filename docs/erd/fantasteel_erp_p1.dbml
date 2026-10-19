@@ -5,7 +5,7 @@
 Project steel_erp_p1 {
   database_type: 'PostgreSQL'
   Note: '''
-# 철강 제조 ERP P1 ERD (51 테이블)
+# 철강 제조 ERP P1 ERD (53 테이블)
 
 ## 공통 규칙 (코드 컨벤션 7-2)
 - 모든 테이블: id autoincrement PK, created_at·updated_at timestamptz(3)
