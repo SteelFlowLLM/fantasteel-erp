@@ -200,7 +200,7 @@ export interface AiAssistantReplyView {
   thinking: string | null;
   /** 고른 생각 정도를 모델에 보냈는지. 모델이 생각 설정을 받지 않으면 false (화면이 안내한다) */
   reasoningApplied: boolean;
-  /** 실행 카드(REQ-AST-005). 서버는 저장하지 않고, 사용자가 확인해 실행을 누를 때만 업무에 반영한다 */
+  /** 실행 카드(REQ-AST-005). 사용자가 확인해 실행을 누를 때만 업무에 반영한다. 철강맨AI 패널 대화면 대화 기록에 함께 저장한다 (이슈 #399) */
   actionCards: AiActionCard[];
   /**
    * 웹 출처 (이슈 #367). 웹 검색을 켠 질문에만 있다. 답이 링크로 단 검색 결과와 읽은 페이지 순서이고,
