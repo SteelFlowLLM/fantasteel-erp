@@ -110,7 +110,10 @@ export function googleDriveConnection(integrations: readonly IntegrationConnecti
   return integrations?.find((item) => item.providerKey === INTEGRATION_PROVIDER.GOOGLE_DRIVE);
 }
 
-/** Drive 파일을 읽을 수 있는지: 연결되어 있고 폴더가 정해져 있을 때 (회의록·Drive 화면·AI 입력·메신저 첨부가 같이 쓴다) */
+/**
+ * Drive 파일을 읽을 수 있는지: 연결되어 있고 폴더가 정해져 있을 때 (회의록·Drive 화면·AI 입력·메신저 첨부가 같이 쓴다).
+ * 서비스 계정(이슈 #395)도 같다: 서버가 키를 읽으면 CONNECTED, 폴더는 .env(GOOGLE_DRIVE_FOLDER)가 먼저인 실제 폴더를 준다.
+ */
 export function isDriveReady(connection: IntegrationConnectionView | undefined): boolean {
   return connection?.status === 'CONNECTED' && !!connection.settings.folderId;
 }
@@ -136,8 +139,16 @@ export function driveAudioProblem(file: Pick<DriveFileView, 'size'>): string | n
   return null;
 }
 
+/** 서버 .env의 서비스 계정으로 Drive를 읽는지 (이슈 #395). 이때는 화면에서 연결·끊기를 하지 않는다 */
+export function isDriveServiceAccount(connection: Pick<IntegrationConnectionView, 'authMode'> | undefined): boolean {
+  return connection?.authMode === 'SERVICE_ACCOUNT';
+}
+
+export const DRIVE_SERVICE_ACCOUNT_NOTE = '서버 설정(.env)의 서비스 계정으로 연결돼 있어요';
+
 /** 연결하기 단추가 막힌 이유. 막히지 않았으면 null. 저장한 값만 본다: 연결할 때 서버가 저장된 OAuth 클라이언트를 쓴다 */
 export function driveConnectBlockReason(connection: IntegrationConnectionView, hasUnsavedChanges: boolean): string | null {
+  if (isDriveServiceAccount(connection)) return DRIVE_SERVICE_ACCOUNT_NOTE;
   const client = connection.oauthClient;
   if (!client?.clientId || !client.clientSecretSet) return '클라이언트 ID와 보안 비밀번호를 저장한 뒤 연결할 수 있어요';
   if (hasUnsavedChanges) return '저장하지 않은 변경이 있어요. 먼저 저장해 주세요';
