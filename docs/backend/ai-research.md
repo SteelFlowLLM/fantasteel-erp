@@ -1,6 +1,6 @@
 # ai-research — 철강맨AI 심층 조사
 
-> 이슈 #378, #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
+> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
 > Unsloth Studio의 deep research 흐름(계획 → 검색·읽기 반복 → 점검 → 인용 보고서)을 참고해 새로 썼다(코드는 가져오지 않음).
 
 ## 1. 담당 범위
@@ -32,6 +32,8 @@
 | GET | `ai-research/runs/:id` | `?afterSeq=` (기본 0) | `AiResearchRunView`. `events`는 `seq > afterSeq`만(500개까지), `lastSeq`는 지금 마지막 순번 |
 | PUT | `ai-research/runs/:id/plan` | `{ revision, plan: { title, steps: [{ title, query }] } }` (1~6단계, 제목 100자, 검색어 80자) | AWAITING_APPROVAL이고 `revision`이 지금 `planRevision`과 같을 때만 → `planRevision + 1`. 판이 다르면 409 `RES-003`, 다른 상태면 409 `RES-002`, 검색어에 회사 안 정보면 400 `RES-004`, 같은 검색어 두 번이면 400 `COM-004` |
 | POST | `ai-research/runs/:id/start` | `{ revision }` | 200. 같은 조건(판 확인)으로 QUEUED |
+| PATCH | `ai-research/runs/:id/title` | `{ revision, title }` (1~100자, 앞뒤 공백 뗌) | 200. 계획이 있으면 **어느 상태에서나** 계획 제목만 바꾸고 `planRevision + 1`(단계·검색어·보고서·상태는 그대로). 계획 중(계획 없음)이면 409 `RES-002`, 판이 다르면 409 `RES-003` (이슈 #400) |
+| POST | `ai-research/runs/:id/rerun` | | 201 새 `AiResearchRunView`. **끝난(COMPLETED·FAILED·CANCELLED)** 내 조사의 질문·계획·예산을 복사한다. 계획이 있으면 계획 세우기를 건너뛰고 AWAITING_APPROVAL(판 1, `plan.ready.copiedFrom` = 원래 id), 계획 전에 끝났으면 PLANNING부터. 원래 조사는 그대로. 끝나지 않았으면 409 `RES-002`, 모델 없음 `RES-005`, 진행 중 3개면 `RES-006` (이슈 #400) |
 | POST | `ai-research/runs/:id/extend` | | 200. `canExtend`일 때만 `maxSteps + 4`(모두 min(30, 기본 단계×2)까지, 기본 24) → QUEUED. 아니면 409 `RES-002` |
 | POST | `ai-research/runs/:id/notion-export` | | 200 `{ notionPageUrl, run }`. 내 COMPLETED 조사만(아니면 409 `RES-002`), 한 번만(409 `RES-007`). 연결·상위 페이지 오류는 integration의 `INT-002`·`INT-003`·`INT-004`·`INT-005`·`INT-006`·`INT-009` 그대로 |
 | POST | `ai-research/runs/:id/cancel` | | 200. 끝나지 않은 조사만 CANCELLED(+ `cancelled` 이벤트). 이미 끝났으면 409 `RES-002` |
@@ -52,10 +54,14 @@
 PLANNING ─(일꾼: 계획)→ AWAITING_APPROVAL ─(start, 판 확인)→ QUEUED ─(일꾼이 맡음)→ RUNNING ─→ COMPLETED
                          └ PUT plan(판 +1)                                         └→ FAILED
 COMPLETED(canExtend) ─(extend)→ QUEUED          끝나지 않은 상태 ─(cancel)→ CANCELLED
+COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAITING_APPROVAL, 없으면 PLANNING (원래 조사는 그대로)
+계획이 있는 모든 상태 ─(PATCH title, 판 +1)→ 같은 상태
 ```
 
 - `canExtend` = COMPLETED **그리고** `stepsUsed ≥ maxSteps`(단계를 다 씀) **그리고** `researchState.gaps`가 남음 **그리고** `maxSteps < maxTotalSteps`(= min(30, 기본 단계×2)).
-- 계획을 처음 만들면 `planRevision = 1`, 고칠 때마다 +1. 시작·고치기는 화면이 본 판을 함께 보내 그 사이 바뀌었으면 막는다(낙관적 동시성).
+- 계획을 처음 만들면 `planRevision = 1`, 고칠 때(제목 바꾸기 포함)마다 +1. 시작·고치기·제목 바꾸기는 화면이 본 판을 함께 보내 그 사이 바뀌었으면 막는다(낙관적 동시성).
+- 끝난 조사의 계획은 그 자리에서 고치지 않는다(보고서가 그 계획으로 쓰였다). 고쳐서 다시 하려면 **다시 조사**로 새 조사를 만든다. 제목은 이름일 뿐이라 어느 상태에서나 바꾼다. 일꾼은 계획을 세운 뒤로 `plan`을 다시 쓰지 않아 조사 중에 바꿔도 겹치지 않는다. 이미 Notion으로 내보낸 페이지 제목은 바뀌지 않는다.
+- 화면(`AiResearchPlanEditor`): **[계획 저장]**은 `PUT plan`만(시작하지 않음), **[조사 시작]**은 고친 것이 있으면 저장한 뒤 시작한다. 계획에 문제가 있으면 두 버튼이 꺼지고 그 옆에 맨 앞 문제(`planBlockReason`)를 보인다. 저장하지 않은 고침이 있으면 그 사실을 보이고, 창을 닫거나 새로 고치면 브라우저가 묻는다.
 
 ### 예산 (`ai-research.config.ts` · 환경 변수, 이슈 #384)
 
@@ -118,7 +124,7 @@ COMPLETED(canExtend) ─(extend)→ QUEUED          끝나지 않은 상태 ─(
 
 | type | payload |
 | --- | --- |
-| `plan.ready` | `title, stepCount, revision, fallback` |
+| `plan.ready` | `title, stepCount, revision, fallback`, 다시 조사로 가져온 계획이면 `copiedFrom`(원래 조사 id) |
 | `step.started` | `step, action(search·read), query, sourceId, fallback` |
 | `search.done` | `query, engine, resultCount, added, error` |
 | `source.added` | `sourceId, title, url` |
@@ -205,7 +211,7 @@ COMPLETED(canExtend) ─(extend)→ QUEUED          끝나지 않은 상태 ─(
 - `ai-research.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 너그러운 JSON(울타리·think·마지막 객체·따옴표 안 중괄호·생각 글), 행동 확인·대신하기(모르는 행동·막힌 검색어·이미 한 검색·모르는/읽은/실패한 출처·출처 없는 끝내기·꽉 찬 출처), 예산·더 조사하기 계산, 검색어 막기·자르기·계획 다듬기, 프롬프트 24,000자 상한·출처 6개·태그 이스케이프, 보고서 인용·링크·출처 목록(http·https만)·제목 이스케이프·끊김 알림, 점검 출처 번호 거르기.
 - 이슈 #384 단위: 환경 변수 예산·상한·조사별 예산, 더 조사하기 min(30, 기본×2), 글자 상한 바꾸기, 차트 숫자 읽기(쉼표·만·%)·없는 숫자/모르는 출처 빼기·점 2개 미만 버리기, Notion 마크다운(태그·링크 막기·표·http만), 보고서 묻기 맥락(감싸기·글자 상한·[n] 출처). `web/pdf-extract.unit.spec.ts`: pdfkit으로 만든 작은 PDF(5KB 안)를 worker에서 읽기·20쪽만·깨진 PDF·시간 초과·`SafeWebPageReader`. `safe-fetch.unit.spec.ts`: PDF 받기·`.pdf` octet-stream·5MB 상한(알린 크기·받는 중).
 - 이슈 #384 2차 단위: 오늘 날짜 첫 줄·글자 상한, 점검·보고서의 계획 전체·모든 단계 기록(넘친 결과 포함)·출처 목록 형식·점검 새 칸, 똑같이 나누기(12,000자 상한·400자 바닥이면 최근만), 다음 행동의 출처 목록 전체·최근 기록 수, 목록 넘침(요약 빼기→뒤 줄 빼기), 옛 조사 기록 만들기, `modelBudget`(모름·32k·131k·8k·상한·환경 변수), 이어 쓰기 메시지·겹침 떼기, 같은 검색(순서·문장부호·되풀이), 점검 스키마, 계획·행동 지시 문구. `llm.client.spec.ts`: `modelContextLength`(불러온 것 먼저·최대값·외부 LLM null).
-- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002).
+- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404.
 
 ## 8. 확인 필요 🟡
 

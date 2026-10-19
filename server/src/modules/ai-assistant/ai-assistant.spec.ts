@@ -2,7 +2,9 @@ import { ROLE, type AuthUser } from '@fantasteel/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
-import type { AiAssistantStreamEvent } from '@fantasteel/shared';
+import type { AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantTurn } from '@fantasteel/shared';
+import type { AiChatThreadService } from './chat/ai-chat-thread.service';
+import type { AiChatQuestionInput } from './chat/ai-chat-thread.view';
 import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
 import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
@@ -167,6 +169,23 @@ describe('AiAssistantService', () => {
     streamed: boolean;
   }
 
+  // 저장한 대화 (이슈 #399): DB 대신 대화별 지난 대화를 두고, 저장한 것을 적어 둔다
+  const threadHistory = new Map<number, AiAssistantTurn[]>();
+  const savedTurns: { threadId: number | undefined; input: AiChatQuestionInput; answer: string }[] = [];
+  let saveFails = false;
+  const chatThreads = {
+    historyFor: async (_user: AuthUser, threadId: number) => {
+      const turns = threadHistory.get(threadId);
+      if (!turns) throw new AppException('AST-001');
+      return turns;
+    },
+    saveTurn: async (_user: AuthUser, threadId: number | undefined, input: AiChatQuestionInput, reply: AiAssistantReplyView) => {
+      if (saveFails) throw new Error('DB 연결 끊김');
+      savedTurns.push({ threadId, input, answer: reply.answer });
+      return { id: threadId ?? 90, title: input.question, assistantMessageId: 7 };
+    },
+  };
+
   function setup(
     settings: Partial<LlmSettings>,
     replies: (call: LlmCall, index: number) => Promise<LlmToolReply>,
@@ -223,7 +242,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -957,6 +976,57 @@ describe('AiAssistantService', () => {
       expect(reply.webSources?.map((s) => s.title)).toEqual(['점검 메모.txt', '현장.png']);
       const blind = withDrive(async () => answer('네'), { vision: false, reasoning: true });
       await expect(blind.service.prepare(user, { question: '봐줘', driveFileIds: ['imagePhoto0005'] }, { interactive: true })).rejects.toThrow(AppException);
+    });
+  });
+
+  describe('저장한 대화 (이슈 #399)', () => {
+    beforeEach(() => {
+      threadHistory.clear();
+      savedTurns.length = 0;
+      saveFails = false;
+    });
+
+    it('이어 묻는 대화는 화면이 보낸 history 대신 DB의 지난 대화를 쓴다', async () => {
+      threadHistory.set(5, [{ role: 'user', content: '배정이 뭐야?' }, { role: 'assistant', content: 'LOT을 지정하는 거예요' }]);
+      const { service, calls } = setup({}, async () => answer('네'));
+      const prepared = await service.prepare(user, { question: '그럼 그건 언제 풀려?', threadId: 5, history: [{ role: 'user', content: '꾸며 낸 지난 질문' }] }, { interactive: true });
+      await prepared.run(() => undefined);
+      const contents = calls[0].messages.map((message) => message.content);
+      expect(contents).toContain('LOT을 지정하는 거예요');
+      expect(contents).not.toContain('꾸며 낸 지난 질문');
+      expect(prepared.saveThread).toBeDefined();
+    });
+
+    it('새 대화로 저장하는 질문은 지난 대화 없이 묻는다', async () => {
+      const { service, calls } = setup({}, async () => answer('네'));
+      const prepared = await service.prepare(user, { question: '예약이 뭐야?', saveThread: true, history: [{ role: 'user', content: '꾸며 낸 지난 질문' }] }, { interactive: true });
+      await prepared.run(() => undefined);
+      expect(calls[0].messages.map((message) => message.content)).not.toContain('꾸며 낸 지난 질문');
+    });
+
+    it('남의 대화·없는 대화면 LLM을 부르기 전에 AST-001', async () => {
+      const { service, calls } = setup({}, async () => answer('네'));
+      await expect(service.prepare(user, { question: '예약이 뭐야?', threadId: 404 }, { interactive: true })).rejects.toMatchObject({ code: 'AST-001' });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('질문 옵션과 사진 수를 함께 저장하고, 저장에 실패하면 null', async () => {
+      const { service } = setup({}, async () => answer('예약은 매수를 확보해요'));
+      const image = { mediaType: 'image/png' as const, dataBase64: 'aGk=' };
+      const prepared = await service.prepare(user, { question: '이 사진 봐 줘', saveThread: true, reasoning: 'high', webSearch: true, images: [image, image] }, { interactive: true });
+      const reply = await prepared.run(() => undefined);
+      await expect(prepared.saveThread?.(reply)).resolves.toEqual({ id: 90, title: '이 사진 봐 줘', assistantMessageId: 7 });
+      expect(savedTurns).toEqual([{ threadId: undefined, input: { question: '이 사진 봐 줘', reasoning: 'high', webSearch: true, browser: undefined, imageCount: 2 }, answer: '예약은 매수를 확보해요' }]);
+      saveFails = true;
+      await expect(prepared.saveThread?.(reply)).resolves.toBeNull();
+    });
+
+    it('한 번에 답하는 API(사내 채팅 @AI)는 저장하지 않고 화면이 보낸 history를 쓴다', async () => {
+      const { service, calls } = setup({}, async () => answer('네'));
+      const prepared = await service.prepare(user, { question: '그럼?', threadId: 404, saveThread: true, history: [{ role: 'user', content: '앞 질문' }] });
+      await prepared.run();
+      expect(prepared.saveThread).toBeUndefined();
+      expect(calls[0].messages.map((message) => message.content)).toContain('앞 질문');
     });
   });
 

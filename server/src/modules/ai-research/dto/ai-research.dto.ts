@@ -77,6 +77,20 @@ export class UpdateAiResearchPlanDto {
   plan!: AiResearchPlanDto;
 }
 
+/** PATCH ai-research/runs/:id/title — 계획이 있는 조사의 제목만 (상태와 상관없이) */
+export class RenameAiResearchRunDto {
+  @IsInt({ message: '계획 판(revision)이 올바르지 않아요' })
+  @Min(0)
+  @Max(INT4_MAX)
+  revision!: number;
+
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: '제목을 써 주세요' })
+  @MaxLength(AI_RESEARCH_LIMITS.planTitleMax, { message: `제목은 ${AI_RESEARCH_LIMITS.planTitleMax}자까지 쓸 수 있어요` })
+  title!: string;
+}
+
 /** POST ai-research/runs/:id/start */
 export class StartAiResearchRunDto {
   @IsInt({ message: '계획 판(revision)이 올바르지 않아요' })

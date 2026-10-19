@@ -110,6 +110,18 @@ export class AskAiAssistantDto {
   @Type(() => AiAssistantTurnDto)
   history?: AiAssistantTurnDto[];
 
+  /** 이어 묻는 저장한 대화 (이슈 #399). 내 대화가 아니거나 없으면 AST-001 */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  threadId?: number;
+
+  /** 철강맨AI 패널만 true: 답이 끝나면 질문과 답을 저장한다 (이슈 #399) */
+  @IsOptional()
+  @IsBoolean()
+  saveThread?: boolean;
+
   @IsOptional()
   @IsIn(AI_REASONING_LEVELS)
   reasoning?: AiReasoningLevel;
@@ -189,6 +201,19 @@ export class ExecuteSalesOrderLineDto {
   dueDate?: string;
 }
 
+/** 실행한 카드가 있는 저장한 답 (이슈 #399) */
+export class AiChatCardRefDto {
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  messageId!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  cardKey!: string;
+}
+
 const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE', 'NOTION_PAGE_CREATE', 'NOTION_PAGE_APPEND', 'NOTION_PAGE_UPDATE', 'SCHEDULE_EVENT_UPDATE', 'TASK_UPDATE'] as const;
 
 /**
@@ -198,6 +223,12 @@ const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', '
 export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @IsIn(CARD_KINDS, { message: '카드 종류가 올바르지 않아요' })
   kind!: (typeof CARD_KINDS)[number];
+
+  /** 저장한 대화의 카드면 그 자리. 실행하면 서버가 그 카드를 실행됨으로 바꾼다 (이슈 #399) */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiChatCardRefDto)
+  chat?: AiChatCardRefDto;
 
   // 수주 등록
   @IsOptional()
@@ -303,4 +334,22 @@ export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @IsOptional()
   @IsBoolean()
   complete?: boolean;
+}
+
+/** GET ai-assistant/threads (이슈 #399) */
+export class ListAiChatThreadsQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  // (page - 1) × size가 int4를 넘지 않게
+  @Max(1_000_000)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  size?: number;
 }

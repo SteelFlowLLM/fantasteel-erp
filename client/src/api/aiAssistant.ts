@@ -1,20 +1,28 @@
 // AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
 import type {
-  AiActionCardExecuteInput,
+  AiActionCardExecuteRequest,
   AiActionCardExecuteResult,
   AiAssistantCapabilitiesView,
   AiAssistantMessageInput,
   AiAssistantReplyView,
   AiAssistantStreamEvent,
   AiAssistantSuggestedQuestionsView,
+  AiChatThreadSummaryView,
+  AiChatThreadView,
   AiScreenActionResultInput,
+  PageResult,
 } from '@fantasteel/shared';
 import { serverRequest, serverStream } from '@/api/http';
 
 export const aiAssistantKeys = {
   suggestedQuestions: (employeeId: number) => ['ai-assistant', 'suggested-questions', employeeId] as const,
   capabilities: ['ai-assistant', 'capabilities'] as const,
+  /** 저장한 대화 목록 (이슈 #399). 사원마다 따로 */
+  threads: (employeeId: number) => ['ai-assistant', 'threads', employeeId] as const,
 };
+
+/** 대화 목록 한 번에 읽는 수 */
+export const AI_CHAT_THREAD_PAGE_SIZE = 20;
 
 const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'ui_action', 'done', 'error'];
 
@@ -37,8 +45,13 @@ export function parseAiAssistantStreamEvent(line: string): AiAssistantStreamEven
 
 export const aiAssistantApi = {
   ask: (input: AiAssistantMessageInput): Promise<AiAssistantReplyView> => serverRequest('POST', '/ai-assistant/messages', { body: input }),
-  /** 실행 카드의 [실행]. 사용자가 확인·수정한 값을 보내면 서버가 다시 검증해 업무·일정·구매요청 초안을 만든다 */
-  executeActionCard: (input: AiActionCardExecuteInput): Promise<AiActionCardExecuteResult> => serverRequest('POST', '/ai-assistant/action-cards/execute', { body: input }),
+  /** 실행 카드의 [실행]. 사용자가 확인·수정한 값을 보내면 서버가 다시 검증해 업무·일정·구매요청 초안을 만든다. chat이 있으면 저장한 카드를 실행됨으로 남긴다 */
+  executeActionCard: (input: AiActionCardExecuteRequest): Promise<AiActionCardExecuteResult> => serverRequest('POST', '/ai-assistant/action-cards/execute', { body: input }),
+  /** 저장한 대화 목록 (이슈 #399). 내 대화만, 마지막으로 묻고 답한 순서 */
+  listThreads: (page: number, size = AI_CHAT_THREAD_PAGE_SIZE): Promise<PageResult<AiChatThreadSummaryView>> => serverRequest('GET', '/ai-assistant/threads', { query: { page, size } }),
+  getThread: (id: number): Promise<AiChatThreadView> => serverRequest('GET', `/ai-assistant/threads/${id}`),
+  /** 대화와 메시지를 모두 지운다 (되살릴 수 없다) */
+  deleteThread: (id: number): Promise<AiChatThreadSummaryView> => serverRequest('DELETE', `/ai-assistant/threads/${id}`),
   /** 답을 만드는 과정을 이벤트로 받는다. 마지막 이벤트는 done 또는 error. signal로 멈추면 AbortError가 던져진다 */
   askStream: (input: AiAssistantMessageInput, onEvent: (event: AiAssistantStreamEvent) => void, signal?: AbortSignal): Promise<void> =>
     serverStream('POST', '/ai-assistant/messages/stream', {

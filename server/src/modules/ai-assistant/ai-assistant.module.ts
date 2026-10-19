@@ -27,6 +27,8 @@ import { AssistantNotionToolbox } from './notion/assistant-notion-toolbox';
 import { AiAssistantController } from './ai-assistant.controller';
 import { AiAssistantRepository } from './ai-assistant.repository';
 import { AiAssistantService } from './ai-assistant.service';
+import { AiChatThreadRepository } from './chat/ai-chat-thread.repository';
+import { AiChatThreadService } from './chat/ai-chat-thread.service';
 import { AssistantToolbox } from './tools/assistant-toolbox';
 import { AssistantWebToolbox, defaultWebToolDeps } from './web/assistant-web-toolbox';
 import { AssistantBrowserToolbox } from './browser/assistant-browser-toolbox';
@@ -61,6 +63,9 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
   providers: [
     AiAssistantService,
     AiAssistantRepository,
+    // 저장한 대화 (이슈 #399)
+    AiChatThreadService,
+    AiChatThreadRepository,
     AssistantToolbox,
     AiActionCardService,
     AiOpsCardService,

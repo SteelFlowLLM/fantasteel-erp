@@ -149,11 +149,14 @@ export class LlmClient {
   async listModels(endpoint: LlmEndpoint): Promise<LlmModelView[]> {
     const body = await this.request<{ data?: { id: string; owned_by?: string }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
     const details = await this.lmStudioModelDetails(endpoint);
+    // 연결 확인은 새로 받은 모델 정보를 보여야 하므로 기억해 둔 값을 쓰지 않는다
+    const info = await this.lmStudioModelInfo(endpoint, { refresh: true });
     return (body.data ?? []).map((m) => ({
       id: m.id,
       ownedBy: m.owned_by ?? null,
       type: details.get(m.id)?.type ?? null,
       loaded: details.has(m.id) ? details.get(m.id)?.state === 'loaded' : null,
+      reasoning: info ? reasoningSupported(findModelInfo(info, m.id)) : null,
     }));
   }
 
@@ -396,7 +399,7 @@ export class LlmClient {
     const models = await this.lmStudioModelInfo(endpoint);
     const info = models ? findModelInfo(models, model) : undefined;
     if (!info) return { vision: null, reasoning: null };
-    return { vision: info.vision, reasoning: Boolean(info.reasoningOptions?.length) };
+    return { vision: info.vision, reasoning: reasoningSupported(info) };
   }
 
   /**
@@ -409,10 +412,10 @@ export class LlmClient {
   }
 
   /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
-  private async lmStudioModelInfo(endpoint: LlmEndpoint): Promise<Map<string, LmStudioModelInfo> | null> {
+  private async lmStudioModelInfo(endpoint: LlmEndpoint, { refresh = false } = {}): Promise<Map<string, LmStudioModelInfo> | null> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
     const cached = this.modelInfoCache.get(root);
-    if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
+    if (!refresh && cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
     let models: Map<string, LmStudioModelInfo> | null;
     try {
       type Wire = {
@@ -667,6 +670,11 @@ function contextLengthOf(m: { max_context_length?: number; loaded_instances?: { 
 
 function findModelInfo(models: Map<string, LmStudioModelInfo>, model: string): LmStudioModelInfo | undefined {
   return models.get(model) ?? models.get(model.split('@')[0]);
+}
+
+/** LM Studio가 모르는 모델이면 null (지원 여부를 알 수 없다) */
+function reasoningSupported(info: LmStudioModelInfo | undefined): boolean | null {
+  return info ? Boolean(info.reasoningOptions?.length) : null;
 }
 
 /**

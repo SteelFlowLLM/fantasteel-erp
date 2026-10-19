@@ -2,6 +2,7 @@
 
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
+// 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
@@ -16,9 +17,10 @@ import { AiBrowserFramesDetails, AiLiveView, AiStepsDetails } from '@/features/s
 import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
+import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAction } from '@/hooks/useAction';
-import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
+import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
@@ -60,7 +62,6 @@ const STOPPED_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-line-strong bg-
 
 /** 지금 모델이 사진을 볼 수 없을 때 첨부 단추에 보이는 안내 */
 const NO_VISION_TITLE = '지금 모델은 사진을 볼 수 없어요';
-const NO_REASONING_HINT = '이 모델은 생각 정도를 바꿀 수 없어요';
 const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp';
 
 type FailureEntry = Extract<AiChatEntry, { role: 'failure' }>;
@@ -85,6 +86,9 @@ export function AiPanel() {
   const claim = useAiChatStore((state) => state.claim);
   const clear = useAiChatStore((state) => state.clear);
   const removeFailure = useAiChatStore((state) => state.removeFailure);
+  const threadId = useAiChatStore((state) => state.threadId);
+  const openThread = useOpenAiChatThread();
+  const [showThreads, setShowThreads] = useState(false);
   const researchRef = useShellStore((state) => state.aiResearchRef);
   const setResearchRef = useShellStore((state) => state.setAiResearchRef);
   const ask = useAskAiAssistant();
@@ -142,6 +146,7 @@ export function AiPanel() {
   useEffect(() => {
     claim(me.employeeId);
   }, [claim, me.employeeId]);
+  useRememberAiChatThread();
 
   // 저장된 생각 정도는 화면을 그린 뒤에 읽는다 (서버에서 먼저 그릴 때와 어긋나지 않게)
   useEffect(() => {
@@ -250,6 +255,7 @@ export function AiPanel() {
   const send = (question: string, withImages = true) => {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
+    setShowThreads(false);
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
     ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [] });
     setDraft('');
@@ -341,18 +347,49 @@ export function AiPanel() {
           <b className="text-base leading-tight font-bold">철강맨AI</b>
           <small className="truncate text-cap text-ink-3">화면 도우미 철강맨이 답해요</small>
         </div>
-        <IconButton icon="refresh" label="새 대화" size="sm" className="ml-auto" disabled={!entries.length || pending} onClick={clear} />
+        <IconButton
+          icon="history"
+          label={showThreads ? '대화로 돌아가기' : '대화 목록'}
+          size="sm"
+          className={`ml-auto ${showThreads ? 'bg-steelman-soft text-steelman-ink' : ''}`}
+          aria-pressed={showThreads}
+          onClick={() => setShowThreads((open) => !open)}
+        />
+        <IconButton
+          icon="refresh"
+          label="새 대화"
+          size="sm"
+          disabled={!entries.length || pending}
+          onClick={() => {
+            clear();
+            setShowThreads(false);
+          }}
+        />
         <IconButton icon={expanded ? 'minimize' : 'maximize'} label={expanded ? '작게 보기' : '크게 펼치기'} size="sm" onClick={toggleExpanded} />
         <IconButton icon="x" label="패널 닫기" size="sm" onClick={close} />
       </div>
 
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         <div className={`mx-auto flex flex-col gap-3.5 p-4 ${expanded ? 'max-w-[880px]' : ''}`}>
-          {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={(question) => send(question, false)} onFill={fill} />}
-          {entries.map((entry) => (
-            <ChatEntry key={entry.id} entry={entry} disabled={pending} onRetry={retry} />
-          ))}
-          {pending && live ? <LiveAnswer live={live} /> : null}
+          {showThreads ? (
+            <AiChatThreadList
+              currentThreadId={threadId}
+              busy={pending}
+              opening={openThread.isPending}
+              onOpen={(id) => {
+                stickRef.current = true;
+                openThread.mutate(id, { onSuccess: () => setShowThreads(false) });
+              }}
+            />
+          ) : (
+            <>
+              {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={(question) => send(question, false)} onFill={fill} />}
+              {entries.map((entry) => (
+                <ChatEntry key={entry.id} entry={entry} disabled={pending} onRetry={retry} />
+              ))}
+              {pending && live ? <LiveAnswer live={live} /> : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -437,7 +474,8 @@ export function AiPanel() {
                 }}
               />
             </div>
-            <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
+            {/* 생각 정도를 못 바꾸는 모델이면 칸을 숨긴다. 모르는 모델(null)은 보여 주고, 서버가 못 쓰면 답 아래에 알린다 */}
+            {reasoningOff ? null : <ReasoningPicker level={reasoning} oneShot={oneShot} onLevel={changeReasoning} onOneShot={changeOneShot} />}
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
             {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
@@ -550,33 +588,28 @@ function lastStepSize(live: AiChatLive): number {
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. '이번 질문만'을 켜 두면 보낸 뒤 기본값으로 돌아간다 */
-function ReasoningPicker({ level, oneShot, disabled, onLevel, onOneShot }: { level: AiReasoningLevel; oneShot: boolean; disabled: boolean; onLevel: (level: AiReasoningLevel) => void; onOneShot: (checked: boolean) => void }) {
+function ReasoningPicker({ level, oneShot, onLevel, onOneShot }: { level: AiReasoningLevel; oneShot: boolean; onLevel: (level: AiReasoningLevel) => void; onOneShot: (checked: boolean) => void }) {
   return (
-    <div className="inline-flex items-center gap-2 text-cap text-ink-3" title={disabled ? NO_REASONING_HINT : undefined}>
+    <div className="inline-flex items-center gap-2 text-cap text-ink-3">
       <span id="ai-reasoning-label">생각</span>
-      <div role="radiogroup" aria-labelledby="ai-reasoning-label" aria-disabled={disabled} className={`inline-flex overflow-hidden rounded-sm border border-line-strong ${disabled ? 'opacity-55' : ''}`}>
+      <div role="radiogroup" aria-labelledby="ai-reasoning-label" className="inline-flex overflow-hidden rounded-sm border border-line-strong">
         {AI_REASONING_LEVELS.map((option) => (
           <button
             key={option}
             type="button"
             role="radio"
             aria-checked={option === level}
-            disabled={disabled}
             onClick={() => onLevel(option)}
-            className={`h-6 px-2 text-cap not-first:border-l not-first:border-line-strong disabled:cursor-not-allowed ${option === level ? 'bg-steelman-soft font-semibold text-steelman-ink' : 'bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+            className={`h-6 px-2 text-cap not-first:border-l not-first:border-line-strong ${option === level ? 'bg-steelman-soft font-semibold text-steelman-ink' : 'bg-surface text-ink-2 hover:bg-surface-2'}`}
           >
             {AI_REASONING_LABEL[option]}
           </button>
         ))}
       </div>
-      {disabled ? (
-        <span>{NO_REASONING_HINT}</span>
-      ) : (
-        <label className="inline-flex items-center gap-1 text-ink-2">
-          <input type="checkbox" checked={oneShot} onChange={(event) => onOneShot(event.target.checked)} />
-          이번 질문만
-        </label>
-      )}
+      <label className="inline-flex items-center gap-1 text-ink-2">
+        <input type="checkbox" checked={oneShot} onChange={(event) => onOneShot(event.target.checked)} />
+        이번 질문만
+      </label>
     </div>
   );
 }
@@ -738,6 +771,12 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
               <img key={index} src={aiImageDataUrl(image)} alt={`첨부한 사진 ${index + 1}`} className="size-16 rounded-sm border border-line object-cover" />
             ))}
           </div>
+        ) : entry.imageCount ? (
+          // 저장한 대화를 다시 열면 사진은 없다 (저장하지 않는다)
+          <span className="inline-flex items-center gap-1 rounded-sm border border-line bg-surface-2 px-2 py-0.5 text-cap text-ink-3">
+            <Icon name="file" size="sm" />
+            사진 {entry.imageCount}장 · 사진은 저장하지 않아요
+          </span>
         ) : null}
         <div className="rounded-lg rounded-br-xs bg-brand-tint px-3 py-2 text-sm break-keep whitespace-pre-wrap wrap-anywhere text-brand">{entry.content}</div>
       </div>
@@ -768,7 +807,7 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
         <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
         <AiWebSources sources={entry.webSources} />
-        {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} /> : null}
+        {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} messageId={entry.messageId} /> : null}
         {/* 웹 출처만 있는 답에 '출처 없음'을 함께 보이면 서로 어긋나 보여서, 그때는 ERP 출처 줄을 숨긴다 */}
         {entry.sources.length || !entry.webSources?.length ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
@@ -790,6 +829,7 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
         {entry.reasoningApplied === false && entry.requestedReasoning && entry.requestedReasoning !== AI_REASONING_DEFAULT ? (
           <p className="text-cap text-ink-3">이 모델은 생각 정도를 바꿀 수 없어 기본값으로 답했어요</p>
         ) : null}
+        {entry.unsaved ? <p className="text-cap text-ink-3">이 질문과 답은 대화 목록에 저장하지 못했어요</p> : null}
       </div>
     </div>
   );

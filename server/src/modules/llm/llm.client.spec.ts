@@ -294,3 +294,27 @@ describe('LlmClient.modelContextLength (심층 조사 프롬프트 예산, 이�
     expect(await new LlmClient().modelContextLength(endpoint, 'loaded')).toBeNull();
   });
 });
+
+describe('LlmClient.listModels 생각 지원 표시', () => {
+  it('LM Studio가 알려 준 생각 옵션으로 표시하고, 모르는 모델·외부 LLM이면 null', async () => {
+    const openAiModels = () => Response.json({ data: [{ id: 'think' }, { id: 'plain' }, { id: 'mystery' }] });
+    fetchMock.mockImplementation(async (url) => (url.endsWith('/v1/models') ? openAiModels() : new Response('not found', { status: 404 })));
+    modelsMock.mockResolvedValueOnce(lmStudioModels([{ key: 'think', reasoning: ['off', 'on'] }, { key: 'plain' }]));
+    const models = await new LlmClient().listModels(endpoint);
+    expect(models.map((m) => [m.id, m.reasoning])).toEqual([
+      ['think', true],
+      ['plain', false],
+      ['mystery', null],
+    ]);
+    // /api/v1/models가 없는 서버(외부 LLM)
+    expect((await new LlmClient().listModels(endpoint)).map((m) => m.reasoning)).toEqual([null, null, null]);
+  });
+
+  it('연결 확인은 기억해 둔 모델 정보를 쓰지 않고 다시 묻는다', async () => {
+    fetchMock.mockImplementation(async (url) => (url.endsWith('/v1/models') ? Response.json({ data: [{ id: 'm' }] }) : new Response('not found', { status: 404 })));
+    modelsMock.mockResolvedValueOnce(lmStudioModels([{ key: 'm' }])).mockResolvedValueOnce(lmStudioModels([{ key: 'm', reasoning: ['on'] }]));
+    const client = new LlmClient();
+    expect((await client.listModels(endpoint))[0].reasoning).toBe(false);
+    expect((await client.listModels(endpoint))[0].reasoning).toBe(true);
+  });
+});

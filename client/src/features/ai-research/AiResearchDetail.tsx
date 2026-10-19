@@ -1,7 +1,9 @@
 'use client';
 
 // 심층 조사 상세: 상태마다 다른 모습 (계획 중 · 계획 확인 · 진행 · 완료 · 실패/취소).
-import { AI_RESEARCH_STATUS_LABEL, type AiResearchRunView } from '@fantasteel/shared';
+// 계획을 세운 뒤에는 제목을 언제든 바꾸고, 끝난 조사는 [다시 조사]로 질문·계획을 복사한 새 조사를 만들어 고친 뒤 시작한다.
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView } from '@fantasteel/shared';
+import { useState } from 'react';
 import { useShellStore } from '@/stores/useShellStore';
 import { useIntegrations } from '@/hooks/useIntegrations';
 import { isNotionExportReady, notionConnection, safeExternalUrl } from '@/lib/integrations';
@@ -9,7 +11,10 @@ import { aiResearchApi } from '@/api/aiResearch';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
+import { Field } from '@/components/Field';
 import { Icon } from '@/components/Icon';
+import { Input } from '@/components/Input';
+import { Modal } from '@/components/Modal';
 import { PageHead } from '@/components/Page';
 import { Progress } from '@/components/Progress';
 import { QueryBoundary } from '@/components/QueryBoundary';
@@ -18,9 +23,12 @@ import { AiResearchPlanEditor } from '@/features/ai-research/AiResearchPlanEdito
 import { AiResearchReport } from '@/features/ai-research/AiResearchReport';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
 import { AiResearchCharts } from '@/features/ai-research/AiResearchCharts';
+import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
+import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchRun } from '@/hooks/useAiResearch';
-import { canCancelRun, progressText, timelineLines } from '@/lib/aiResearch';
+import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines } from '@/lib/aiResearch';
+import { toast } from '@/stores/useToastStore';
 import { fmtDateTime, fmtHM } from '@/lib/format';
 
 function RunTimeline({ run }: { run: AiResearchRunView }) {
@@ -100,8 +108,58 @@ function ProgressCard({ run }: { run: AiResearchRunView }) {
   );
 }
 
+/** 제목 바꾸기 창: 제목만 바꾸고 단계·검색어·보고서는 그대로 둔다 */
+function RenameModal({ run, onClose }: { run: AiResearchRunView; onClose: () => void }) {
+  const [title, setTitle] = useState(run.title ?? '');
+  const problem = planTitleProblem(title);
+  const unchanged = title.trim() === (run.title ?? '').trim();
+  const rename = useAction(() => aiResearchApi.rename(run.id, run.planRevision, title), {
+    success: '제목을 바꿨어요',
+    onSuccess: onClose,
+    toastOnError: false,
+    onError: (error) => (errorCodeOf(error) === 'RES-003' ? toast.error('다른 곳에서 계획이 바뀌었어요. 최신 제목을 불러왔으니 다시 바꿔 주세요') : toast.apiError(error)),
+  });
+  const submit = () => {
+    if (!problem && !unchanged && !rename.isPending) rename.mutate(undefined);
+  };
+  return (
+    <Modal
+      title="제목 바꾸기"
+      onClose={onClose}
+      width={480}
+      footer={
+        <>
+          <Button onClick={onClose}>취소</Button>
+          <Button variant="primary" disabled={problem !== null || unchanged || rename.isPending} onClick={submit}>
+            {rename.isPending ? '바꾸는 중…' : '바꾸기'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <Field label="제목" htmlFor="research-rename-title" error={problem}>
+          <Input id="research-rename-title" value={title} maxLength={AI_RESEARCH_LIMITS.planTitleMax} invalid={!!problem} autoFocus onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <p className="text-cap text-ink-3">제목만 바뀌어요. 단계·검색어·보고서는 그대로예요{run.notionPageUrl ? ' (이미 내보낸 Notion 페이지 제목은 그대로예요)' : ''}.</p>
+      </form>
+    </Modal>
+  );
+}
+
 function Body({ run }: { run: AiResearchRunView }) {
+  const { set } = useUrlParams();
+  const [renaming, setRenaming] = useState(false);
   const cancel = useAction(() => aiResearchApi.cancel(run.id), { success: '조사를 취소했어요' });
+  const rerun = useAction(() => aiResearchApi.rerun(run.id), {
+    success: (created) => (created.status === 'PLANNING' ? '같은 질문으로 계획을 다시 세우고 있어요' : '질문·계획을 복사했어요. 고친 뒤 시작해 주세요'),
+    onSuccess: (created) => set({ id: created.id, new: null }),
+  });
   const extend = useAction(() => aiResearchApi.extend(run.id), { success: '더 조사를 시작했어요' });
   const askAboutResearch = useShellStore((state) => state.askAboutResearch);
   const gaps = run.researchState?.gaps ?? [];
@@ -115,6 +173,16 @@ function Body({ run }: { run: AiResearchRunView }) {
         actions={
           <>
             <AiResearchStatusBadge status={run.status} />
+            {canRenameRun(run) ? (
+              <Button size="sm" icon="edit" onClick={() => setRenaming(true)}>
+                제목 바꾸기
+              </Button>
+            ) : null}
+            {canRerunRun(run.status) ? (
+              <Button size="sm" icon="copy" disabled={rerun.isPending} aria-busy={rerun.isPending} title="질문·계획을 복사한 새 조사를 만들어 고친 뒤 시작해요. 이 조사는 그대로 남아요" onClick={() => rerun.mutate(undefined)}>
+                {rerun.isPending ? '만드는 중…' : '다시 조사'}
+              </Button>
+            ) : null}
             {run.status === 'COMPLETED' && run.report ? (
               <>
                 <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
@@ -131,6 +199,7 @@ function Body({ run }: { run: AiResearchRunView }) {
           </>
         }
       />
+      {renaming ? <RenameModal run={run} onClose={() => setRenaming(false)} /> : null}
       <Card className="flex-none">
         <CardBody>
           <b className="text-cap font-semibold text-ink-2">질문</b>
@@ -140,7 +209,7 @@ function Body({ run }: { run: AiResearchRunView }) {
 
       {run.status === 'PLANNING' ? (
         <Banner tone="run" icon="clock">
-          <b>계획 세우는 중…</b> 끝나면 저절로 바뀌어요.
+          <b>계획 세우는 중…</b> 다 세우면 이 화면에서 제목·단계·검색어를 고치고 저장하거나 시작할 수 있어요.
         </Banner>
       ) : null}
 

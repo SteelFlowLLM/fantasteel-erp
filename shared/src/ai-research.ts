@@ -126,7 +126,8 @@ export type AiResearchEventType = (typeof AI_RESEARCH_EVENT_TYPES)[number];
 
 /** 이벤트마다의 짧은 내용. 웹에서 온 글(title)은 화면이 글로만 그린다 */
 export interface AiResearchEventPayloads {
-  'plan.ready': { title: string; stepCount: number; revision: number; fallback: boolean };
+  /** copiedFrom: 다시 조사로 계획을 가져온 조사 id (새로 세운 계획이면 없다) */
+  'plan.ready': { title: string; stepCount: number; revision: number; fallback: boolean; copiedFrom?: number };
   'step.started': { step: number; action: 'search' | 'read'; query: string | null; sourceId: number | null; fallback: boolean };
   'search.done': { query: string; engine: string | null; resultCount: number; added: number; error: string | null };
   'source.added': { sourceId: number; title: string; url: string };

@@ -1,6 +1,7 @@
 'use client';
 
 // AI 연결 /admin/llm (문서에 없는 기능, 2026-10-07 추가): LM Studio 서버 연결 확인 · 모델 선택 · 응답 확인.
+// 모델은 연결 확인으로 받은 목록에서 고르므로 서버 연결 카드 안에 둔다.
 // 같은 화면 아래에 음성 인식(STT) 카드가 있다 (Voice2ERP 1단계).
 // 나중에 외부 LLM을 쓸 때는 주소와 API 키만 바꾼다 (둘 다 OpenAI 호환 API).
 // 설정 전용 권한 코드가 없어 부서·권한 관리(ORG_MANAGE) 권한으로 연다(가정). 사용 권한이 없으면 조회만 한다.
@@ -38,7 +39,7 @@ export function LlmSettingsScreen() {
       <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
         {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
       </QueryBoundary>
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
+      <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
         <SttSettingsCard canEdit={canEdit} />
       </div>
     </PageMain>
@@ -70,7 +71,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   const onSave = () => save.mutate({ baseUrl, model: model || null, apiKey: apiKeyInput() }, { onSuccess: () => chat.reset() });
 
   return (
-    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
+    <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
       <div className="flex min-w-0 flex-col gap-4">
         <Card petKey="card:llmSettings.connection">
           <CardHead
@@ -121,23 +122,14 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
                 {result.error}
               </Banner>
             ) : null}
-          </CardBody>
-          <CardFoot>
-            {result?.connected ? (
-              <span className="text-xs text-ink-3" data-pet-term="응답 시간">
-                모델 {result.models.length}개 · {result.latencyMs}ms
-              </span>
-            ) : null}
-            <Button className="ml-auto" icon="refresh" onClick={runConnectionTest} disabled={!canEdit || connection.isPending || !baseUrl.trim()}>
-              {connection.isPending ? '확인 중…' : '연결 확인'}
-            </Button>
-          </CardFoot>
-        </Card>
-
-        <Card petKey="card:llmSettings.model">
-          <CardHead title="모델" meta={saved.model ? `저장된 모델 ${saved.model}` : '아직 고르지 않았어요'} />
-          <CardBody>
-            <Field label={<span data-pet-term="사용할 모델">사용할 모델</span>} hint="연결 확인으로 받은 목록에서 골라요. LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요">
+            <Field
+              label={<span data-pet-term="사용할 모델">사용할 모델</span>}
+              hint={
+                saved.model
+                  ? `저장된 모델 ${saved.model} · LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요. '생각 가능' 모델만 철강맨AI의 생각 정도를 바꿀 수 있어요`
+                  : `연결 확인으로 받은 목록에서 골라요. LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요. '생각 가능' 모델만 철강맨AI의 생각 정도를 바꿀 수 있어요`
+              }
+            >
               <Select value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit || !result?.connected}>
                 <option value="">모델을 골라 주세요</option>
                 {modelOptions(result, model).map((option) => (
@@ -165,8 +157,18 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
             ) : null}
           </CardBody>
           <CardFoot>
-            <span className="text-xs text-ink-3">응답 확인은 저장된 설정으로 짧은 질문을 보내요. 처음엔 모델을 올리느라 오래 걸릴 수 있어요</span>
-            <Button className="ml-auto" variant="ai-outline" onClick={() => chat.mutate()} disabled={!canEdit || chat.isPending || !saved.model || dirty}>
+            <span className="text-xs text-ink-3" data-pet-term="응답 시간">
+              {result?.connected ? `모델 ${result.models.length}개 · ${result.latencyMs}ms` : null}
+            </span>
+            <Button className="ml-auto" icon="refresh" onClick={runConnectionTest} disabled={!canEdit || connection.isPending || !baseUrl.trim()}>
+              {connection.isPending ? '확인 중…' : '연결 확인'}
+            </Button>
+            <Button
+              variant="ai-outline"
+              onClick={() => chat.mutate()}
+              disabled={!canEdit || chat.isPending || !saved.model || dirty}
+              title="저장된 설정으로 짧은 질문을 보내요. 처음엔 모델을 올리느라 오래 걸릴 수 있어요"
+            >
               {chat.isPending ? '답 기다리는 중…' : '응답 확인'}
             </Button>
             <Button variant="primary" onClick={onSave} disabled={!canEdit || !dirty || save.isPending || !baseUrl.trim()}>
@@ -209,11 +211,12 @@ function ConnectionBadge({ result, pending }: { result: LlmConnectionView | unde
 
 /**
  * 받은 목록에서 대화용 모델만 (임베딩 모델은 답을 만들지 못한다). 로드된 모델을 앞에 둔다.
+ * 생각 정도를 못 바꾸는 모델도 빠른 답에는 쓸 수 있어 숨기지 않고, 되는 모델에만 표시한다.
  * 지금 고른 모델이 목록에 없으면 따로 표시해 선택이 사라지지 않게 한다.
  */
 function modelOptions(result: LlmConnectionView | undefined, selected: string): { id: string; label: string }[] {
   const models = (result?.models ?? []).filter((m) => m.type !== 'embeddings').sort((a, b) => Number(b.loaded === true) - Number(a.loaded === true));
-  const options = models.map((m) => ({ id: m.id, label: m.loaded ? `${m.id} · 로드됨` : m.id }));
+  const options = models.map((m) => ({ id: m.id, label: [m.id, m.reasoning ? '생각 가능' : null, m.loaded ? '로드됨' : null].filter(Boolean).join(' · ') }));
   if (selected && !options.some((o) => o.id === selected)) options.unshift({ id: selected, label: `${selected} (지금 목록에 없음)` });
   return options;
 }

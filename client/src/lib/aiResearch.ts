@@ -28,6 +28,16 @@ export function canCancelRun(status: AiResearchStatus): boolean {
   return status !== 'COMPLETED' && status !== 'FAILED' && status !== 'CANCELLED';
 }
 
+/** 다시 조사(질문·계획을 복사한 새 조사)를 만들 수 있는지: 끝난(완료·실패·취소) 조사 */
+export function canRerunRun(status: AiResearchStatus): boolean {
+  return !canCancelRun(status);
+}
+
+/** 머리의 제목 바꾸기를 보일지: 계획이 있고, 계획 확인 대기가 아닐 때 (그때는 계획 고치기 칸에서 제목을 고친다) */
+export function canRenameRun(run: Pick<AiResearchRunView, 'status' | 'plan'>): boolean {
+  return run.plan !== null && run.status !== 'PLANNING' && run.status !== 'AWAITING_APPROVAL';
+}
+
 export const RUN_POLL_MS = 2500;
 
 /** 서버가 한 번에 주는 이벤트 수. 이만큼 받았으면 더 있을 수 있어 afterSeq를 마지막 받은 순번으로 잇는다 */
@@ -64,7 +74,8 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
   switch (event.type) {
     case 'plan.ready': {
       const p = event.payload;
-      return { ...base, tone: 'ai', title: p.fallback ? '질문 그대로 한 단계로 계획을 세웠어요' : `계획을 세웠어요 · ${p.stepCount}단계`, detail: cut(webSourceTitle(p.title, ''), 100) };
+      const title = p.copiedFrom ? `조사 #${p.copiedFrom}의 계획을 가져왔어요 · ${p.stepCount}단계` : p.fallback ? '질문 그대로 한 단계로 계획을 세웠어요' : `계획을 세웠어요 · ${p.stepCount}단계`;
+      return { ...base, tone: 'ai', title, detail: cut(webSourceTitle(p.title, ''), 100) };
     }
     case 'step.started': {
       const p = event.payload;
@@ -228,13 +239,18 @@ export interface PlanProblems {
 
 const normalizedQuery = (query: string): string => query.trim().replace(/\s+/g, ' ').toLowerCase();
 
+/** 계획 제목 확인 (계획 고치기·제목 바꾸기). 문제가 없으면 null */
+export function planTitleProblem(value: string): string | null {
+  const title = value.trim();
+  if (!title) return '제목을 적어 주세요';
+  if (title.length > AI_RESEARCH_LIMITS.planTitleMax) return `제목은 ${AI_RESEARCH_LIMITS.planTitleMax}자까지 쓸 수 있어요`;
+  return null;
+}
+
 /** 계획을 서버 한도에 맞게 확인한다. 문제가 없으면 null */
 export function validatePlan(plan: AiResearchPlan): PlanProblems | null {
   const L = AI_RESEARCH_LIMITS;
-  const problems: PlanProblems = { title: null, steps: [], general: null };
-  const title = plan.title.trim();
-  if (!title) problems.title = '제목을 적어 주세요';
-  else if (title.length > L.planTitleMax) problems.title = `제목은 ${L.planTitleMax}자까지 쓸 수 있어요`;
+  const problems: PlanProblems = { title: planTitleProblem(plan.title), steps: [], general: null };
   if (plan.steps.length < 1) problems.general = '단계를 하나 이상 넣어 주세요';
   else if (plan.steps.length > L.maxPlanSteps) problems.general = `단계는 ${L.maxPlanSteps}개까지 넣을 수 있어요`;
   const seen = new Set<string>();
@@ -254,6 +270,20 @@ export function validatePlan(plan: AiResearchPlan): PlanProblems | null {
   }
   const bad = problems.title !== null || problems.general !== null || problems.steps.some((s) => s.title !== null || s.query !== null);
   return bad ? problems : null;
+}
+
+/** 시작·저장 버튼이 꺼진 까닭 한 줄: 맨 앞 문제를 칸 이름과 함께, 더 있으면 남은 곳 수. 문제가 없으면 null */
+export function planBlockReason(problems: PlanProblems | null): string | null {
+  if (!problems) return null;
+  const all: string[] = [];
+  if (problems.title) all.push(problems.title);
+  if (problems.general) all.push(problems.general);
+  problems.steps.forEach((step, index) => {
+    if (step.title) all.push(`${index + 1}단계: ${step.title}`);
+    if (step.query) all.push(`${index + 1}단계: ${step.query}`);
+  });
+  if (all.length === 0) return null;
+  return all.length === 1 ? all[0] : `${all[0]} 외 ${all.length - 1}곳`;
 }
 
 /** 서버에 보낼 모양: 앞뒤 공백을 뗀다 */

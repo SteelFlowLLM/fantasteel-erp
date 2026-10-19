@@ -19,11 +19,17 @@ import { NotionPageService } from '../integration/notion/notion-page.service';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery } from './dto/ai-research.dto';
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
-import { canExtend, checkResearchQuery, defaultBudget, extendedBudget, queryKey, readBudget, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, queryKey, readBudget, storedPlan, storedState } from './ai-research.rules';
 import { AiResearchRunner } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
 import { toRunSummary, toRunView } from './ai-research.view';
+
+/** 계획이 세워진 뒤의 상태 (제목을 바꿀 수 있다). 그 사이 일꾼이 상태를 넘겨도(QUEUED → RUNNING) 막지 않는다 */
+const PLANNED_STATUSES: AiResearchStatus[] = Object.values(AI_RESEARCH_STATUS).filter((status) => status !== AI_RESEARCH_STATUS.PLANNING);
+
+/** 다시 조사할 수 있는(끝난) 상태 */
+const FINISHED_STATUSES: AiResearchStatus[] = [AI_RESEARCH_STATUS.COMPLETED, AI_RESEARCH_STATUS.FAILED, AI_RESEARCH_STATUS.CANCELLED];
 
 /** Notion 내보내기를 잡은 표시가 이만큼 지나면 다른 요청이 다시 잡을 수 있다 (회의록 내보내기와 같다) */
 const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
@@ -52,12 +58,38 @@ export class AiResearchService {
   async create(user: AuthUser, dto: CreateAiResearchRunDto): Promise<AiResearchRunView> {
     if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
     const run = await this.prisma.$transaction(async (tx) => {
-      await this.repository.lockEmployee(tx, user.employeeId);
-      if ((await this.repository.countActive(tx, user.employeeId)) >= AI_RESEARCH_LIMITS.activeRunsPerEmployee) throw new AppException('RES-006');
+      await this.lockActiveSlot(tx, user);
       return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget) } });
     });
     this.runner.wake();
     return toRunView(run, [], 0);
+  }
+
+  /**
+   * 다시 조사: 끝난(완료·실패·취소) 내 조사의 질문·계획·예산을 새 조사로 복사한다. 원래 조사는 그대로 둔다.
+   * 계획이 있으면 계획 세우기를 건너뛰고 계획 확인 대기(판 1)로 만들어 고친 뒤 시작하게 하고, 계획 전에 끝났으면 계획부터 다시 세운다.
+   */
+  async rerun(user: AuthUser, id: number): Promise<AiResearchRunView> {
+    if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
+    const created = await this.prisma.$transaction(async (tx) => {
+      const source = await this.owned(tx, user, id);
+      if (!FINISHED_STATUSES.includes(source.status as AiResearchStatus)) throw new AppException('RES-002', '끝난(완료·실패·취소) 조사만 다시 조사할 수 있어요');
+      await this.lockActiveSlot(tx, user);
+      const budget = { ...readBudget(source.budget) };
+      const plan = storedPlan(source.plan);
+      if (!plan) return this.repository.create(tx, { employeeId: user.employeeId, question: source.question, budget });
+      const run = await this.repository.createPlanned(tx, {
+        employeeId: user.employeeId,
+        question: source.question,
+        budget,
+        plan: plan as unknown as Prisma.InputJsonObject,
+        researchState: { ...EMPTY_STATE } as unknown as Prisma.InputJsonObject,
+      });
+      await this.repository.appendEvents(tx, run.id, [{ type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision: run.planRevision, fallback: false, copiedFrom: source.id } }]);
+      return run;
+    });
+    if (created.status === AI_RESEARCH_STATUS.PLANNING) this.runner.wake();
+    return this.get(user, created.id);
   }
 
   async list(user: AuthUser, query: ListAiResearchRunsQuery): Promise<PageResult<AiResearchRunSummaryView>> {
@@ -81,6 +113,24 @@ export class AiResearchService {
         planRevision: { increment: 1 },
       });
       if (count === 0) throw conflictFor(run, revision);
+      return this.view(tx, await this.owned(tx, user, id));
+    });
+  }
+
+  /**
+   * 제목 바꾸기: 계획이 있으면 어느 상태에서나 계획의 제목만 바꾼다(단계·검색어는 그대로). 본 판이 지금 판과 같을 때만, 판 +1.
+   * 일꾼은 계획을 세운 뒤로 plan을 다시 쓰지 않아 조사 중에 바꿔도 겹치지 않는다. 이미 Notion으로 내보낸 페이지 제목은 그대로다.
+   */
+  async rename(user: AuthUser, id: number, revision: number, title: string): Promise<AiResearchRunView> {
+    return this.prisma.$transaction(async (tx) => {
+      const run = await this.owned(tx, user, id);
+      const plan = storedPlan(run.plan);
+      if (!plan || run.status === AI_RESEARCH_STATUS.PLANNING) throw new AppException('RES-002', '계획을 다 세운 뒤에 제목을 바꿀 수 있어요');
+      const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: PLANNED_STATUSES, planRevision: revision }, {
+        plan: { ...plan, title } as unknown as Prisma.InputJsonObject,
+        planRevision: { increment: 1 },
+      });
+      if (count === 0) throw run.planRevision !== revision ? new AppException('RES-003') : new AppException('RES-002');
       return this.view(tx, await this.owned(tx, user, id));
     });
   }
@@ -170,6 +220,12 @@ export class AiResearchService {
       throw new AppException('COM-001', `Notion 페이지(${notionPageUrl})는 만들었지만 조사에 주소를 남기지 못했어요. 새로 불러와 중복 페이지가 없는지 Notion에서 확인해 주세요`);
     }
     return { notionPageUrl, run: await this.get(user, id) };
+  }
+
+  /** 사원별 잠금 안에서 진행 중 조사 수를 센다. 상한이면 RES-006 (트랜잭션 안에서 부른다) */
+  private async lockActiveSlot(tx: Tx, user: AuthUser): Promise<void> {
+    await this.repository.lockEmployee(tx, user.employeeId);
+    if ((await this.repository.countActive(tx, user.employeeId)) >= AI_RESEARCH_LIMITS.activeRunsPerEmployee) throw new AppException('RES-006');
   }
 
   private async owned(tx: Tx, user: AuthUser, id: number): Promise<AiResearchRun> {

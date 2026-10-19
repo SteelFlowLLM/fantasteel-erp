@@ -56,6 +56,8 @@ export const ERROR_CODE = {
   'RES-005': { message: '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요', status: 409 },
   'RES-006': { message: '진행 중인 조사가 너무 많아요. 끝나거나 취소한 뒤 다시 시작해 주세요', status: 409 },
   'RES-007': { message: '이미 Notion으로 내보낸 조사예요', status: 409 },
+  // 🟡 AST-는 정의서 9.3에 없다 (철강맨AI 대화 기록, 2026-10-19 이슈 #399). 팀 확인 후 정의서에 올린다.
+  'AST-001': { message: '대화를 찾을 수 없어요', status: 404 },
   'SHP-001': { message: '밀시트 PDF 생성 실패(스냅샷은 있음)', status: 500 },
   'SHP-002': { message: '출하 가능 매수를 넘었습니다', status: 409 },
   'SHP-003': { message: '출고 확정된 출하요청은 취소할 수 없습니다', status: 409 },
