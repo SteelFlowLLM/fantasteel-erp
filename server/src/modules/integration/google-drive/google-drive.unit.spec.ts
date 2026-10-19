@@ -1,15 +1,18 @@
 // Google Drive 연결의 순수 함수: 폴더 주소 읽기, 토큰 응답 읽기·만료, 허용 화면 주소, Drive 검색어·파일 읽기, Range,
 // 내용 스트림 지키기(상한·기다림)·메모리로 받기 (DB 없음)
 import { pipeline, Readable, Writable } from 'node:stream';
-import { DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
+import { DRIVE_DOCUMENT_MAX_BYTES, DRIVE_EXPORT_MAX_BYTES, DRIVE_FILE_LIST_KINDS, DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { guardStream, readStreamToBuffer } from './google-drive.client';
 import {
   buildDriveFolderQuery,
   buildDriveListQuery,
   contentDisposition,
+  driveDelivery,
   driveFileKind,
   driveMaxBytes,
+  isDriveDownloadOnly,
+  isDriveGoogleDoc,
   normalizeDriveFolderId,
   parseRangeHeader,
   readDriveFile,
@@ -75,6 +78,33 @@ describe('Drive 검색어', () => {
     );
   });
 
+  it('문서: PDF·Office·Google 문서·스프레드시트·프레젠테이션', () => {
+    const query = buildDriveListQuery(FOLDER, 'document');
+    expect(query.startsWith(`'${FOLDER}' in parents and trashed = false and (mimeType = 'application/pdf'`)).toBe(true);
+    for (const mime of [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.google-apps.document',
+      'application/vnd.google-apps.spreadsheet',
+      'application/vnd.google-apps.presentation',
+    ]) {
+      expect(query).toContain(`mimeType = '${mime}'`);
+    }
+    // 폴더·Google 양식 같은 것은 검색어에 없다
+    expect(query).not.toContain('google-apps.folder');
+    expect(query).not.toContain('google-apps.form');
+  });
+
+  it('all: 녹음·사진·문서를 한 검색어에 묶는다', () => {
+    const query = buildDriveListQuery(FOLDER, 'all');
+    expect(query).toContain("mimeType contains 'audio/'");
+    expect(query).toContain("mimeType = 'image/jpeg'");
+    expect(query).toContain("mimeType = 'application/pdf'");
+    expect(query.startsWith(`'${FOLDER}' in parents and trashed = false and ((`)).toBe(true);
+    expect(DRIVE_FILE_LIST_KINDS).toEqual(['audio', 'image', 'document', 'all']);
+  });
+
   it('따옴표·역슬래시를 막는다', () => {
     expect(buildDriveFolderQuery("a'b\\c")).toBe("'a\\'b\\\\c' in parents and trashed = false");
   });
@@ -93,13 +123,40 @@ describe('파일 종류·크기', () => {
     expect(driveFileKind('IMAGE/JPEG', 'A.JPG')).toBe('image');
     expect(driveFileKind('image/x-icon', 'favicon.ico')).toBeNull();
     expect(driveFileKind('AUDIO/MPEG', 'A.MP3')).toBe('audio');
-    expect(driveFileKind('application/pdf', '보고서.pdf')).toBeNull();
-    expect(driveFileKind('application/vnd.google-apps.document', '문서')).toBeNull();
+    expect(driveFileKind('application/pdf', '보고서.pdf')).toBe('document');
+    expect(driveFileKind('APPLICATION/PDF', '보고서.PDF')).toBe('document');
+    expect(driveFileKind('application/vnd.google-apps.document', '문서')).toBe('document');
+    expect(driveFileKind('application/vnd.google-apps.spreadsheet', '시트')).toBe('document');
+    expect(driveFileKind('application/vnd.google-apps.presentation', '발표')).toBe('document');
+    expect(driveFileKind('application/vnd.openxmlformats-officedocument.wordprocessingml.document', '견적.docx')).toBe('document');
+    // 폴더·바로가기·양식·HTML·압축 파일은 문서가 아니다
+    for (const mime of ['application/vnd.google-apps.folder', 'application/vnd.google-apps.shortcut', 'application/vnd.google-apps.form', 'text/html', 'application/zip']) {
+      expect(driveFileKind(mime, 'x')).toBeNull();
+    }
   });
 
-  it('상한: 녹음은 회의 음성 상한, 사진은 20MB', () => {
+  it('상한: 녹음은 회의 음성 상한, 사진은 20MB, 문서는 50MB, Google 문서는 내보내기 상한 10MB', () => {
     expect(driveMaxBytes('audio')).toBe(MEETING_AUDIO_MAX_BYTES);
     expect(driveMaxBytes('image')).toBe(DRIVE_IMAGE_MAX_BYTES);
+    expect(driveMaxBytes('document', 'application/pdf')).toBe(DRIVE_DOCUMENT_MAX_BYTES);
+    expect(driveMaxBytes('document', 'application/vnd.google-apps.spreadsheet')).toBe(DRIVE_EXPORT_MAX_BYTES);
+    expect(DRIVE_EXPORT_MAX_BYTES).toBe(10 * 1024 * 1024);
+  });
+
+  it('Google 문서류는 PDF로 내보내 보낸다 (MIME·이름), 나머지는 그대로', () => {
+    expect(isDriveGoogleDoc('application/vnd.google-apps.document')).toBe(true);
+    expect(isDriveGoogleDoc('application/pdf')).toBe(false);
+    expect(driveDelivery({ mimeType: 'application/vnd.google-apps.document', name: '회의 안건' })).toEqual({ mimeType: 'application/pdf', name: '회의 안건.pdf' });
+    expect(driveDelivery({ mimeType: 'application/vnd.google-apps.document', name: '계약서.PDF' })).toEqual({ mimeType: 'application/pdf', name: '계약서.PDF' });
+    expect(driveDelivery({ mimeType: 'application/pdf', name: '보고서.pdf' })).toEqual({ mimeType: 'application/pdf', name: '보고서.pdf' });
+    expect(driveDelivery({ mimeType: 'image/png', name: 'a.png' })).toEqual({ mimeType: 'image/png', name: 'a.png' });
+  });
+
+  it('Office 파일만 내려받기 전용이다 (PDF·사진·녹음은 열어 볼 수 있다)', () => {
+    expect(isDriveDownloadOnly('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).toBe(true);
+    expect(isDriveDownloadOnly('application/pdf')).toBe(false);
+    expect(isDriveDownloadOnly('application/vnd.google-apps.spreadsheet')).toBe(false);
+    expect(isDriveDownloadOnly('image/png')).toBe(false);
   });
 
   it('Drive 응답을 읽는다: 문자열 크기, 없는 칸, https가 아닌 미리보기', () => {
@@ -123,10 +180,17 @@ describe('파일 종류·크기', () => {
       parents: [FOLDER],
       trashed: false,
     });
-    expect(meta && toDriveFileView(meta)).not.toHaveProperty('parents');
+    expect(meta && toDriveFileView(meta, 'audio')).not.toHaveProperty('parents');
+    expect(meta && toDriveFileView(meta, 'audio')).toMatchObject({ kind: 'audio', id: 'f1' });
     expect(readDriveFile({ id: 'f2', name: 'a', mimeType: 'image/png', thumbnailLink: 'javascript:x' })).toMatchObject({ size: null, thumbnailLink: null, parents: [], trashed: false });
     expect(readDriveFile({ id: 'f3', name: 'a' })).toBeNull();
     expect(readDriveFile(null)).toBeNull();
+  });
+
+  it('Content-Disposition: 내려받기는 attachment, 기본은 inline', () => {
+    expect(contentDisposition('보고서.pdf')).toMatch(/^inline; /);
+    expect(contentDisposition('보고서.pdf', 'attachment')).toBe(`attachment; filename="___.pdf"; filename*=UTF-8''${encodeURIComponent('보고서.pdf')}`);
+    expect(contentDisposition('\uD800abc.pdf', 'attachment')).toBe('attachment; filename="_abc.pdf"');
   });
 
   it('Content-Disposition: 짝 없는 대리 문자로 인코딩할 수 없으면 ASCII 이름만', () => {

@@ -39,6 +39,8 @@ interface FakeFile {
   chunked?: boolean;
   /** 내용 응답의 Content-Length를 이 값으로 보인다 (내용은 보내지 않는다) */
   fakeContentLength?: number;
+  /** 내보내기(files.export)가 10MB 상한 오류로 실패한다 */
+  exportTooLarge?: boolean;
 }
 
 const fake = {
@@ -62,6 +64,8 @@ const fake = {
   revoked: [] as string[],
   /** 내용 요청에 붙어 온 Range 머리 */
   ranges: [] as string[],
+  /** files.export로 온 요청의 mimeType */
+  exports: [] as string[],
   /** Drive 요청에 쓴 액세스 토큰 */
   bearers: [] as string[],
   files: new Map<string, FakeFile>(),
@@ -104,15 +108,15 @@ function metaOf(file: FakeFile): Record<string, unknown> {
   };
 }
 
-/** files.list의 q 가운데 테스트가 쓰는 모양만 읽는다: '<폴더>' in parents, trashed = false, 녹음·사진 MIME */
+/** files.list의 q 가운데 테스트가 쓰는 모양만 읽는다: '<폴더>' in parents, trashed = false, 녹음·사진·문서 MIME (or로 묶인 것은 하나라도 맞으면) */
 function matchesQuery(file: FakeFile, q: string): boolean {
   const parent = /'([^']+)' in parents/.exec(q)?.[1];
   if (parent && !file.parents.includes(parent)) return false;
   if (q.includes('trashed = false') && file.trashed) return false;
-  if (q.includes("mimeType contains 'audio/'")) return file.mimeType.startsWith('audio/') || file.mimeType === 'video/webm' || file.mimeType === 'video/mp4';
+  const audio = q.includes("mimeType contains 'audio/'") && file.mimeType.startsWith('audio/');
   const equals = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
-  if (equals.length > 0) return equals.includes(file.mimeType);
-  return true;
+  if (!q.includes('mimeType')) return true;
+  return audio || equals.includes(file.mimeType);
 }
 
 async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
@@ -128,9 +132,19 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
     const page = all.slice(offset, offset + size);
     return json(res, 200, { files: page.map(metaOf), ...(offset + size < all.length ? { nextPageToken: String(offset + size) } : {}) });
   }
-  const id = decodeURIComponent(url.pathname.slice('/drive/v3/files/'.length));
+  const rest = decodeURIComponent(url.pathname.slice('/drive/v3/files/'.length));
+  const exporting = rest.endsWith('/export');
+  const id = exporting ? rest.slice(0, -'/export'.length) : rest;
   const file = fake.files.get(id);
   if (!file) return json(res, 404, { error: { code: 404, message: `File not found: ${id}.`, errors: [{ reason: 'notFound' }] } });
+  if (exporting) {
+    fake.exports.push(url.searchParams.get('mimeType') ?? '');
+    if (!file.mimeType.startsWith('application/vnd.google-apps.')) return json(res, 403, { error: { code: 403, message: 'Export only supports Docs Editors files.', errors: [{ reason: 'fileNotExportable' }] } });
+    if (file.exportTooLarge) return json(res, 403, { error: { code: 403, message: 'This file is too large to be exported.', errors: [{ reason: 'exportSizeLimitExceeded' }] } });
+    // 실제 Drive처럼 내보낸 PDF는 길이 없이 조각으로 온다
+    res.writeHead(200, { 'content-type': url.searchParams.get('mimeType') ?? 'application/pdf' }).end(file.content);
+    return;
+  }
   if (url.searchParams.get('alt') !== 'media') return json(res, 200, metaOf(file));
   if (fake.mediaFails) return json(res, 500, { error: { code: 500, message: 'Backend Error' } });
   if (fake.mediaDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fake.mediaDelayMs));
@@ -310,7 +324,15 @@ beforeAll(async () => {
   addFile({ id: 'audioOutside04', name: '다른 폴더 녹음.mp3', mimeType: 'audio/mpeg', parents: [OTHER_FOLDER], content: Buffer.from('secret-audio') });
   addFile({ id: 'imagePhoto0005', name: '현장 사진.jpg', mimeType: 'image/jpeg', parents: [FOLDER], modifiedTime: '2026-10-13T09:00:00.000Z', content: Buffer.from('fake-jpeg') });
   addFile({ id: 'imageSvgLogo06', name: 'logo.svg', mimeType: 'image/svg+xml', parents: [FOLDER], content: Buffer.from('<svg onload="alert(1)"/>') });
-  addFile({ id: 'docReportPdf07', name: '보고서.pdf', mimeType: 'application/pdf', parents: [FOLDER], content: Buffer.from('%PDF') });
+  addFile({ id: 'docReportPdf07', name: '보고서.pdf', mimeType: 'application/pdf', parents: [FOLDER], modifiedTime: '2026-10-12T09:00:00.000Z', content: Buffer.from('%PDF-1.7 fake') });
+  addFile({ id: 'docGoogleDoc014', name: '회의 안건', mimeType: 'application/vnd.google-apps.document', parents: [FOLDER], modifiedTime: '2026-10-16T09:00:00.000Z', hideSize: true, content: Buffer.from('%PDF-exported') });
+  addFile({ id: 'docGoogleSheet15', name: '재고 현황.pdf', mimeType: 'application/vnd.google-apps.spreadsheet', parents: [FOLDER], modifiedTime: '2026-10-11T09:00:00.000Z', hideSize: true, content: Buffer.from('%PDF-sheet') });
+  addFile({ id: 'docGoogleBig016', name: '큰 문서', mimeType: 'application/vnd.google-apps.document', parents: [FOLDER], modifiedTime: '2026-10-10T09:00:00.000Z', hideSize: true, exportTooLarge: true, content: Buffer.alloc(0) });
+  addFile({ id: 'docGoogleForm17', name: '설문', mimeType: 'application/vnd.google-apps.form', parents: [FOLDER], hideSize: true, content: Buffer.alloc(0) });
+  addFile({ id: 'docWordFile018', name: '견적서.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', parents: [FOLDER], modifiedTime: '2026-10-09T09:00:00.000Z', content: Buffer.from('fake-docx') });
+  addFile({ id: 'docPdfHuge0019', name: '큰 PDF.pdf', mimeType: 'application/pdf', parents: [FOLDER], modifiedTime: '2026-10-08T09:00:00.000Z', fakeSize: 51 * 1024 * 1024, content: Buffer.from('x') });
+  addFile({ id: 'docPdfOutside20', name: '다른 폴더 문서.pdf', mimeType: 'application/pdf', parents: [OTHER_FOLDER], content: Buffer.from('secret-pdf') });
+  addFile({ id: 'otherZipFile021', name: '자료.zip', mimeType: 'application/zip', parents: [FOLDER], content: Buffer.from('PK') });
   addFile({ id: 'imageHuge00008', name: '큰 사진.png', mimeType: 'image/png', parents: [FOLDER], fakeSize: 21 * 1024 * 1024, content: Buffer.from('x') });
   addFile({ id: 'imageNoSize009', name: '크기 숨김.png', mimeType: 'image/png', parents: [FOLDER], hideSize: true, fakeContentLength: 25 * 1024 * 1024, content: Buffer.alloc(0) });
   addFile({ id: 'imageChunked10', name: '조각 사진.png', mimeType: 'image/png', parents: [FOLDER], hideSize: true, chunked: true, content: Buffer.alloc(21 * 1024 * 1024, 1) });
@@ -466,7 +488,7 @@ describe('GET integrations/google-drive/files', () => {
     const { status, body } = await call<DriveFilePage>('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
     expect(status).toBe(200);
     expect(body.data.files.map((f) => f.id)).toEqual(['audioNewest001', 'audioWebm00002']);
-    expect(body.data.files[0]).toEqual({ id: 'audioNewest001', name: '주간 회의.m4a', mimeType: 'audio/mp4', size: 14, modifiedTime: '2026-10-15T09:00:00.000Z', thumbnailLink: null });
+    expect(body.data.files[0]).toEqual({ id: 'audioNewest001', name: '주간 회의.m4a', mimeType: 'audio/mp4', kind: 'audio', size: 14, modifiedTime: '2026-10-15T09:00:00.000Z', thumbnailLink: null });
     expect(body.data.nextPageToken).toBeNull();
   });
 
@@ -474,6 +496,24 @@ describe('GET integrations/google-drive/files', () => {
     const { body } = await call<DriveFilePage>('GET', '/integrations/google-drive/files?kind=image', salesCookie);
     expect(body.data.files.map((f) => f.id).sort()).toEqual(['imageChunked10', 'imageHuge00008', 'imageNoSize009', 'imagePhoto0005', 'imageReplaced12']);
     expect(body.data.files.find((f) => f.id === 'imagePhoto0005')?.thumbnailLink).toBe('https://lh3.googleusercontent.com/thumb-imagePhoto0005');
+  });
+
+  it('문서: PDF·Google 문서·스프레드시트·Office만 (폴더·양식·zip·폴더 밖은 뺀다), kind를 달아 준다', async () => {
+    const { body } = await call<DriveFilePage>('GET', '/integrations/google-drive/files?kind=document', salesCookie);
+    expect(body.data.files.map((f) => f.id)).toEqual(['docGoogleDoc014', 'docReportPdf07', 'docGoogleSheet15', 'docGoogleBig016', 'docWordFile018', 'docPdfHuge0019']);
+    expect(body.data.files.every((f) => f.kind === 'document')).toBe(true);
+    // Google 문서는 크기를 주지 않는다
+    expect(body.data.files[0]).toMatchObject({ name: '회의 안건', mimeType: 'application/vnd.google-apps.document', size: null });
+  });
+
+  it('all: 녹음·사진·문서를 최신 수정순으로 섞어 주고, 지원하지 않는 것은 뺀다', async () => {
+    const { body } = await call<DriveFilePage>('GET', '/integrations/google-drive/files?kind=all', salesCookie);
+    const ids = body.data.files.map((f) => f.id);
+    expect(ids.slice(0, 4)).toEqual(['docGoogleDoc014', 'audioNewest001', 'audioWebm00002', 'imagePhoto0005']);
+    for (const excluded of ['imageSvgLogo06', 'imageSvgUpper13', 'subFolder00011', 'docGoogleForm17', 'otherZipFile021', 'audioTrashed03', 'audioOutside04', 'docPdfOutside20']) {
+      expect(ids).not.toContain(excluded);
+    }
+    expect(new Set(body.data.files.map((f) => f.kind))).toEqual(new Set(['audio', 'image', 'document']));
   });
 
   it('50개씩 나눠 주고 nextPageToken으로 다음 쪽을 읽는다', async () => {
@@ -524,8 +564,8 @@ describe('GET integrations/google-drive/files/:fileId/content', () => {
     }
   });
 
-  it('녹음·사진이 아니면 INT-013 (SVG는 대소문자 상관없이·PDF·폴더)', async () => {
-    for (const id of ['imageSvgLogo06', 'imageSvgUpper13', 'docReportPdf07', 'subFolder00011']) {
+  it('녹음·사진·문서가 아니면 INT-013 (SVG는 대소문자 상관없이·zip·Google 양식·폴더)', async () => {
+    for (const id of ['imageSvgLogo06', 'imageSvgUpper13', 'otherZipFile021', 'docGoogleForm17', 'subFolder00011']) {
       const { status, body } = await call('GET', `/integrations/google-drive/files/${id}/content`, salesCookie);
       expect([id, status, body.error?.code]).toEqual([id, 400, 'INT-013']);
     }
@@ -536,6 +576,76 @@ describe('GET integrations/google-drive/files/:fileId/content', () => {
     expect([meta.status, meta.body.error?.code]).toEqual([413, 'INT-014']);
     const header = await call('GET', '/integrations/google-drive/files/imageNoSize009/content', salesCookie);
     expect([header.status, header.body.error?.code]).toEqual([413, 'INT-014']);
+  });
+
+  it('PDF는 inline으로, nosniff·sandbox를 그대로 붙여 연다 (CSP를 낮추지 않는다)', async () => {
+    const res = await fetch(`${baseUrl}/integrations/google-drive/files/docReportPdf07/content`, { headers: { cookie: salesCookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    expect(res.headers.get('content-disposition')).toMatch(/^inline; /);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe('sandbox');
+    expect(res.headers.get('accept-ranges')).toBe('bytes');
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('%PDF-1.7 fake');
+  });
+
+  it('download=1이면 attachment로 보낸다 (이름·MIME·보안 머리는 그대로). 0이나 다른 값은 기본·COM-004', async () => {
+    for (const id of ['docReportPdf07', 'audioNewest001', 'imagePhoto0005']) {
+      const res = await fetch(`${baseUrl}/integrations/google-drive/files/${id}/content?download=1`, { headers: { cookie: salesCookie } });
+      expect([id, res.status, res.headers.get('content-disposition')?.split(';')[0]]).toEqual([id, 200, 'attachment']);
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-security-policy')).toBe('sandbox');
+      await res.arrayBuffer();
+    }
+    const pdf = await fetch(`${baseUrl}/integrations/google-drive/files/docReportPdf07/content?download=1`, { headers: { cookie: salesCookie } });
+    expect(pdf.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent('보고서.pdf')}`);
+    await pdf.arrayBuffer();
+    const off = await fetch(`${baseUrl}/integrations/google-drive/files/docReportPdf07/content?download=0`, { headers: { cookie: salesCookie } });
+    expect(off.headers.get('content-disposition')).toMatch(/^inline; /);
+    await off.arrayBuffer();
+    const bad = await call('GET', '/integrations/google-drive/files/docReportPdf07/content?download=yes', salesCookie);
+    expect([bad.status, bad.body.error?.code]).toEqual([400, 'COM-004']);
+  });
+
+  it('Google 문서는 PDF로 내보내 보낸다: MIME은 application/pdf, 이름 끝에 .pdf, Range는 받지 않는다', async () => {
+    const before = fake.ranges.length;
+    const res = await fetch(`${baseUrl}/integrations/google-drive/files/docGoogleDoc014/content`, { headers: { cookie: salesCookie, range: 'bytes=0-3' } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    expect(res.headers.get('content-disposition')).toBe(`inline; filename="__ __.pdf"; filename*=UTF-8''${encodeURIComponent('회의 안건.pdf')}`);
+    expect(res.headers.get('accept-ranges')).toBe('none');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe('sandbox');
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('%PDF-exported');
+    expect(fake.exports.at(-1)).toBe('application/pdf');
+    expect(fake.ranges.length).toBe(before);
+    // 이름이 이미 .pdf로 끝나면 .pdf.pdf로 만들지 않고, download=1도 같다
+    const sheet = await fetch(`${baseUrl}/integrations/google-drive/files/docGoogleSheet15/content?download=1`, { headers: { cookie: salesCookie } });
+    expect(sheet.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent('재고 현황.pdf')}`);
+    expect(sheet.headers.get('content-disposition')).toMatch(/^attachment; /);
+    await sheet.arrayBuffer();
+  });
+
+  it('Google 문서가 Drive의 내보내기 상한(10MB)을 넘으면 INT-014로 이유를 알려 준다', async () => {
+    const { status, body } = await call('GET', '/integrations/google-drive/files/docGoogleBig016/content', salesCookie);
+    expect([status, body.error?.code]).toEqual([413, 'INT-014']);
+    expect(body.error?.message).toContain('10MB');
+    expect((await driveView()).lastError).toBeNull();
+  });
+
+  it('Office 파일은 열어 볼 수 없으니 download가 없어도 attachment', async () => {
+    const res = await fetch(`${baseUrl}/integrations/google-drive/files/docWordFile018/content`, { headers: { cookie: salesCookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; /);
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('fake-docx');
+  });
+
+  it('PDF가 50MB를 넘으면 INT-014, 폴더 밖 PDF는 INT-012', async () => {
+    const big = await call('GET', '/integrations/google-drive/files/docPdfHuge0019/content', salesCookie);
+    expect([big.status, big.body.error?.code]).toEqual([413, 'INT-014']);
+    const outside = await call('GET', '/integrations/google-drive/files/docPdfOutside20/content', salesCookie);
+    expect([outside.status, outside.body.error?.code]).toEqual([404, 'INT-012']);
   });
 
   it('Range 한 구간은 Drive로 넘겨 206 + Content-Range로 답한다', async () => {

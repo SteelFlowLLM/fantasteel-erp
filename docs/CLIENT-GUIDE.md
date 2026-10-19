@@ -124,6 +124,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
   - 크게 펼치기(REQ-AST-001): `useShellStore.aiPanelExpanded`. 본문 전체 너비로 펼치고, 닫으면 되돌린다. Enter 보내기·Shift+Enter 줄바꿈(한글 조합 중 Enter는 보내지 않음).
   - 버튼: `<SoonButton>` / 작은 표시: `<ComingSoon grade="P2" />` / 영역: `<ComingSoonArea grade="P2" title="…">예시 내용</ComingSoonArea>`. 모두 `components/ComingSoon.tsx`.
   - 예시 내용은 `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다 (`/agent`는 서버 데이터로 동작해 예시가 없다). 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
+- **Drive 파일**(`/drive`, `features/drive/`, 이슈 #392, 문서에 없는 기능): 관리자가 연결한 회사 Google Drive 폴더의 사진·녹음·문서를 탭(전체·사진·녹음·문서)으로 보고 눌러서 미리 본다. 사진·PDF는 서버(`GET integrations/google-drive/files/:fileId/content`)에서 Blob으로 받아 보이고(PDF는 서버의 sandbox CSP가 Chrome 뷰어를 막아 Blob 주소로 보인다), 녹음은 `<audio>`가 서버 주소를 이어 받아 재생한다. Google 문서·스프레드시트·프레젠테이션은 서버가 PDF로 내보내 보내며(10MB까지), Office 파일은 내려받기만 된다. 내려받기는 `?download=1`. Drive가 연결되지 않았으면 관리자가 먼저 연결하라는 안내가 보인다. 파일 고르는 창은 공용 `features/drive/components/DriveFilePicker.tsx`(회의록 녹음 가져오기도 이것을 쓴다), 순수 도우미는 `lib/driveFiles.ts`.
 - 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).
 
 ## 7. 끝낼 때

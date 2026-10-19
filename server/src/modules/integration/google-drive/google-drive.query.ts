@@ -1,4 +1,4 @@
-import { DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES, type DriveFileKind, type DriveFileView } from '@fantasteel/shared';
+import { DRIVE_DOCUMENT_MAX_BYTES, DRIVE_EXPORT_MAX_BYTES, DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES, type DriveFileKind, type DriveFileListKind, type DriveFileView } from '@fantasteel/shared';
 import { isMeetingAudio } from '../../meeting-minutes/meeting-audio';
 
 /** Drive 폴더·파일 id 모양. 공유 드라이브 최상위는 19자, 보통 파일은 28~44자 */
@@ -59,16 +59,38 @@ function quote(value: string): string {
  */
 export const DRIVE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff'] as const;
 
+/** 그대로 내려받는 문서. PDF는 브라우저에서 미리보고, Office 파일은 내려받기만 된다 */
+export const DRIVE_PDF_MIME = 'application/pdf';
+export const DRIVE_OFFICE_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+] as const;
+
+/** Google 문서·스프레드시트·프레젠테이션: 내용이 없는 파일이라 files.export로 PDF를 만들어 준다 */
+export const DRIVE_GOOGLE_DOC_MIME_TYPES = [
+  'application/vnd.google-apps.document',
+  'application/vnd.google-apps.spreadsheet',
+  'application/vnd.google-apps.presentation',
+] as const;
+
+const AUDIO_QUERY = "(mimeType contains 'audio/' or mimeType = 'video/webm' or mimeType = 'video/mp4')";
+
+function mimeEquals(types: readonly string[]): string {
+  return types.map((type) => `mimeType = '${type}'`).join(' or ');
+}
+
 /**
  * files.list 검색어: 설정한 폴더 바로 아래, 휴지통 아닌 것, 종류별 MIME.
  * 녹음은 회의 음성 올리기와 같이 audio/*·video/webm(브라우저 녹음)·video/mp4를 받는다. 사진은 DRIVE_IMAGE_MIME_TYPES만.
+ * 문서는 PDF·Office·Google 문서 세 가지. all은 위 셋을 모두.
  */
-export function buildDriveListQuery(folderId: string, kind: DriveFileKind): string {
+export function buildDriveListQuery(folderId: string, kind: DriveFileListKind): string {
   const base = `${quote(folderId)} in parents and trashed = false`;
-  const mime =
-    kind === 'audio'
-      ? "(mimeType contains 'audio/' or mimeType = 'video/webm' or mimeType = 'video/mp4')"
-      : `(${DRIVE_IMAGE_MIME_TYPES.map((type) => `mimeType = '${type}'`).join(' or ')})`;
+  const audio = AUDIO_QUERY;
+  const image = `(${mimeEquals(DRIVE_IMAGE_MIME_TYPES)})`;
+  const document = `(${mimeEquals([DRIVE_PDF_MIME, ...DRIVE_OFFICE_MIME_TYPES, ...DRIVE_GOOGLE_DOC_MIME_TYPES])})`;
+  const mime = kind === 'audio' ? audio : kind === 'image' ? image : kind === 'document' ? document : `(${audio} or ${image} or ${document})`;
   return `${base} and ${mime}`;
 }
 
@@ -86,20 +108,40 @@ export function isDriveImage(mimeType: string): boolean {
   return (DRIVE_IMAGE_MIME_TYPES as readonly string[]).includes(normalizeMime(mimeType));
 }
 
+/** Google 문서류인지 (PDF로 내보내야 열린다) */
+export function isDriveGoogleDoc(mimeType: string): boolean {
+  return (DRIVE_GOOGLE_DOC_MIME_TYPES as readonly string[]).includes(normalizeMime(mimeType));
+}
+
 /** 가져올 수 있는 종류인지. 녹음 판정은 회의 음성 올리기와 같다 */
 export function driveFileKind(mimeType: string, name: string): DriveFileKind | null {
   const mime = normalizeMime(mimeType);
   if (isMeetingAudio(mime, name)) return 'audio';
   if (isDriveImage(mime)) return 'image';
+  if (mime === DRIVE_PDF_MIME || isDriveGoogleDoc(mime) || (DRIVE_OFFICE_MIME_TYPES as readonly string[]).includes(mime)) return 'document';
   return null;
 }
 
-export function driveMaxBytes(kind: DriveFileKind): number {
-  return kind === 'audio' ? MEETING_AUDIO_MAX_BYTES : DRIVE_IMAGE_MAX_BYTES;
+/** 종류별 크기 상한. Google 문서는 내보내기 상한(10MB)이다: 원본 크기를 알 수 없고 Drive가 그 이상은 내보내지 않는다 */
+export function driveMaxBytes(kind: DriveFileKind, mimeType = ''): number {
+  if (kind === 'audio') return MEETING_AUDIO_MAX_BYTES;
+  if (kind === 'image') return DRIVE_IMAGE_MAX_BYTES;
+  return isDriveGoogleDoc(mimeType) ? DRIVE_EXPORT_MAX_BYTES : DRIVE_DOCUMENT_MAX_BYTES;
+}
+
+/** 브라우저가 열지 못해 내려받기만 되는 파일 (Office). 열어 보라고 inline으로 내보내도 어차피 내려받기가 된다 */
+export function isDriveDownloadOnly(mimeType: string): boolean {
+  return (DRIVE_OFFICE_MIME_TYPES as readonly string[]).includes(normalizeMime(mimeType));
+}
+
+/** 응답으로 보낼 MIME과 이름. Google 문서는 PDF로 내보내므로 application/pdf, 이름 끝에 .pdf */
+export function driveDelivery(meta: Pick<DriveFileMeta, 'mimeType' | 'name'>): { mimeType: string; name: string } {
+  if (!isDriveGoogleDoc(meta.mimeType)) return { mimeType: meta.mimeType, name: meta.name };
+  return { mimeType: DRIVE_PDF_MIME, name: /\.pdf$/i.test(meta.name) ? meta.name : `${meta.name}.pdf` };
 }
 
 /** Drive files 응답 한 개 (쓰는 칸만) */
-export interface DriveFileMeta extends DriveFileView {
+export interface DriveFileMeta extends Omit<DriveFileView, 'kind'> {
   parents: string[];
   trashed: boolean;
 }
@@ -123,21 +165,22 @@ export function readDriveFile(raw: unknown): DriveFileMeta | null {
   };
 }
 
-export function toDriveFileView(meta: DriveFileMeta): DriveFileView {
-  return { id: meta.id, name: meta.name, mimeType: meta.mimeType, size: meta.size, modifiedTime: meta.modifiedTime, thumbnailLink: meta.thumbnailLink };
+/** 종류를 정한 뒤의 화면용 모양 */
+export function toDriveFileView(meta: DriveFileMeta, kind: DriveFileKind): DriveFileView {
+  return { id: meta.id, name: meta.name, mimeType: meta.mimeType, kind, size: meta.size, modifiedTime: meta.modifiedTime, thumbnailLink: meta.thumbnailLink };
 }
 
-/** 응답 헤더 Content-Disposition. 한글 이름은 RFC 5987로, 따옴표 안 이름은 ASCII만 남긴다 */
-export function contentDisposition(fileName: string): string {
+/** 응답 헤더 Content-Disposition. 한글 이름은 RFC 5987로, 따옴표 안 이름은 ASCII만 남긴다. attachment면 브라우저가 열지 않고 저장한다 */
+export function contentDisposition(fileName: string, disposition: 'inline' | 'attachment' = 'inline'): string {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
   let encoded: string;
   try {
     encoded = encodeURIComponent(fileName);
   } catch {
     // 짝 없는 대리 문자(깨진 이름)는 인코딩할 수 없다: ASCII 이름만 보낸다
-    return `inline; filename="${ascii}"`;
+    return `${disposition}; filename="${ascii}"`;
   }
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 /**

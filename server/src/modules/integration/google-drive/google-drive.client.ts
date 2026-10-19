@@ -310,9 +310,11 @@ export class GoogleDriveClient {
    * 파일 내용을 스트림으로 연다. maxBytes를 넘거나 Google이 조각을 오래 보내지 않으면 스트림이 오류로 끝난다.
    * range(검사를 마친 `bytes=…`)를 주면 Drive에 그대로 넘겨 206 부분 응답을 받는다 (Safari·iOS 재생, 긴 녹음 건너뛰기).
    * signal이 끊기면(브라우저가 떠남) Google 요청도 끊고, 그 실패는 연결 오류로 남기지 않는다.
+   * exportMimeType을 주면 내용 대신 그 형식으로 내보낸 것을 받는다 (Google 문서류 → PDF, files.export). 내보내기는 Range를 받지 않으므로 range는 쓰지 않는다.
    */
-  async openMedia(fileId: string, maxBytes: number, options: { signal?: AbortSignal; range?: string } = {}): Promise<DriveMedia> {
-    const { signal, range } = options;
+  async openMedia(fileId: string, maxBytes: number, options: { signal?: AbortSignal; range?: string; exportMimeType?: string } = {}): Promise<DriveMedia> {
+    const { signal, exportMimeType } = options;
+    const range = exportMimeType ? undefined : options.range;
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted) onAbort();
@@ -322,7 +324,10 @@ export class GoogleDriveClient {
     try {
       // 압축을 받지 않는다: 크기 상한·Content-Length를 실제 바이트로 맞춘다
       const headers: Record<string, string> = { 'accept-encoding': 'identity', ...(range ? { range } : {}) };
-      res = await this.driveGet(`/files/${encodeURIComponent(fileId)}`, { alt: 'media', supportsAllDrives: 'true' }, controller.signal, headers);
+      const target: { path: string; params: Record<string, string> } = exportMimeType
+        ? { path: `/files/${encodeURIComponent(fileId)}/export`, params: { mimeType: exportMimeType } }
+        : { path: `/files/${encodeURIComponent(fileId)}`, params: { alt: 'media', supportsAllDrives: 'true' } };
+      res = await this.driveGet(target.path, target.params, controller.signal, headers);
     } catch (error) {
       signal?.removeEventListener('abort', onAbort);
       throw error;
@@ -472,6 +477,11 @@ export class GoogleDriveClient {
     if (reason === 'accessNotConfigured' || /SERVICE_DISABLED|has not been used|is disabled/i.test(detail)) {
       return this.fail(new AppException('INT-004', 'Google Cloud 프로젝트에서 Google Drive API가 꺼져 있어요. Cloud Console의 API 및 서비스에서 Google Drive API를 사용 설정해 주세요'));
     }
+    // Drive는 10MB를 넘는 Google 문서를 PDF로 내보내지 못한다
+    if (reason === 'exportSizeLimitExceeded') {
+      return new AppException('INT-014', 'Google 문서가 너무 커서 PDF로 바꿀 수 없어요 (Drive는 10MB까지만 내보내요). Drive에서 직접 내려받아 주세요');
+    }
+    if (reason === 'fileNotExportable') return new AppException('INT-013', '이 Google 문서는 PDF로 바꿀 수 없어요');
     if (reason === 'insufficientPermissions' || reason === 'insufficientFilePermissions') {
       return this.fail(new AppException('INT-004', 'Google Drive 권한이 부족해요. 관리자가 다시 연결하면서 Drive 권한을 모두 허용해 주세요'));
     }
