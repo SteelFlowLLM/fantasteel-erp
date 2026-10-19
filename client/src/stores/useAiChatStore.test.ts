@@ -1,12 +1,12 @@
-// AI 어시스턴트 대화 저장소: 대화는 이 탭 메모리에만 두고, 서버에는 답을 받은 지난 대화만 보낸다.
-import type { AiAssistantReplyView } from '@fantasteel/shared';
+// AI 어시스턴트 대화 저장소: 지금 보는 대화를 이 탭 메모리에 두고, 저장한 대화(이슈 #399)를 열어 되살린다.
+import type { AiActionCard, AiAssistantReplyView, AiChatThreadView } from '@fantasteel/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AI_CHAT_HISTORY_LIMIT, AI_CHAT_STOPPED_REASON, aiChatHistory, useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
+import { AI_CHAT_HISTORY_LIMIT, AI_CHAT_STOPPED_REASON, aiChatEntriesFromThread, aiChatHistory, useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
 
 const store = () => useAiChatStore.getState();
 const SOURCE = { kind: 'GLOSSARY' as const, id: 'TRM-056', label: '예약' };
 
-beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null }));
+beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, threadId: null, entries: [], pendingId: null, live: null }));
 
 describe('AI 대화 저장소', () => {
   it('질문을 넣으면 답을 기다리고, 답이 오면 질문 뒤에 붙는다', () => {
@@ -292,5 +292,77 @@ describe('웹 검색 (이슈 #367)', () => {
     store().addQuestion('q1', '철강 시황', undefined, undefined, true);
     store().addFailure('q1', '철강 시황', '응답이 없어요');
     expect(store().entries.at(-1)).toMatchObject({ role: 'failure', webSearch: true });
+  });
+});
+
+describe('저장한 대화 (이슈 #399)', () => {
+  const THREAD: AiChatThreadView = {
+    id: 5,
+    title: '예약이 뭐야?',
+    createdAt: '2026-10-19T01:00:00.000Z',
+    updatedAt: '2026-10-19T01:01:00.000Z',
+    messages: [
+      { id: 11, seq: 1, role: 'user', content: '예약이 뭐야?', createdAt: '2026-10-19T01:00:00.000Z', imageCount: 2, webSearch: true },
+      {
+        id: 12,
+        seq: 2,
+        role: 'assistant',
+        content: '매수를 확보하는 거예요',
+        createdAt: '2026-10-19T01:00:05.000Z',
+        sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }],
+        actionCards: [{ card: { key: 'a1', kind: 'TASK', title: '견적서' } as unknown as AiActionCard, status: 'done', result: { type: 'task', id: 3 } }],
+        reasoning: 'high',
+        reasoningApplied: false,
+      },
+    ],
+  };
+
+  it('저장한 메시지를 대화 줄로 되살린다: 사진은 수만, 답은 저장 id·카드 상태와 함께', () => {
+    expect(aiChatEntriesFromThread(THREAD)).toEqual([
+      { id: 'saved-11', role: 'user', content: '예약이 뭐야?', imageCount: 2, webSearch: true },
+      {
+        id: 'saved-12',
+        role: 'assistant',
+        content: '매수를 확보하는 거예요',
+        sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }],
+        messageId: 12,
+        requestedReasoning: 'high',
+        reasoningApplied: false,
+        cards: [{ card: { key: 'a1', kind: 'TASK', title: '견적서' }, status: 'done', result: { type: 'task', id: 3 } }],
+      },
+    ]);
+  });
+
+  it('대화를 열면 그 대화로 바꾸고, 답을 기다리는 중이면 열지 않는다', () => {
+    store().openThread(THREAD);
+    expect(store().threadId).toBe(5);
+    expect(store().entries).toHaveLength(2);
+    store().addQuestion('q1', '다음 질문');
+    store().openThread({ ...THREAD, id: 6, messages: [] });
+    expect(store().threadId).toBe(5);
+  });
+
+  it('새 대화는 대화 id도 비우고, 다른 사원으로 들어와도 비운다', () => {
+    store().claim(1);
+    store().openThread(THREAD);
+    store().clear();
+    expect(store().threadId).toBeNull();
+    store().openThread(THREAD);
+    store().claim(2);
+    expect(store()).toMatchObject({ threadId: null, entries: [] });
+  });
+
+  it('지운 대화가 지금 대화면 비우고, 답을 기다리는 중이면 대화 id만 잊는다', () => {
+    store().openThread(THREAD);
+    store().forgetThread(99);
+    expect(store().threadId).toBe(5);
+    store().forgetThread(5);
+    expect(store()).toMatchObject({ threadId: null, entries: [] });
+    store().openThread(THREAD);
+    store().addQuestion('q1', '다음 질문');
+    store().forgetThread(5);
+    expect(store().threadId).toBeNull();
+    expect(store().pendingId).toBe('q1');
+    expect(store().entries).toHaveLength(3);
   });
 });
