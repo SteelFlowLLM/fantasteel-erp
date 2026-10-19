@@ -61,7 +61,7 @@ export class AiAssistantController {
     }
   }
 
-  /** 지금 모델이 사진·생각 정도를 지원하는지, 웹 검색 엔진·장소 검색을 쓸 수 있는지 (문서에 없는 기능, 2026-10-16 추가, 이슈 #367) */
+  /** 지금 모델이 사진·생각 정도를 지원하는지, 웹 검색 엔진·장소 검색·브라우저 사용을 쓸 수 있는지 (문서에 없는 기능, 2026-10-16 추가, 이슈 #367·#373) */
   @Get('ai-assistant/capabilities')
   capabilities(): Promise<AiAssistantCapabilitiesView> {
     return this.service.capabilities();

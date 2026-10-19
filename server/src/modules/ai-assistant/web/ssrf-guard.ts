@@ -120,14 +120,48 @@ export function guardedLookup(policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolv
       if (error) return callback(error, options.all ? [] : '');
       const addresses: LookupAddress[] = typeof result === 'string' ? [{ address: result, family: result.includes(':') ? 6 : 4 }] : result;
       if (!addresses.length) return callback(dnsError(hostname, 'ENOTFOUND', '주소를 찾지 못했어요'), options.all ? [] : '');
-      const blocked = addresses.find((entry) => !policy.isAllowedAddress(entry.address));
-      if (blocked) return callback(dnsError(hostname, 'EBLOCKED', '사내망·내부 주소는 읽을 수 없어요'), options.all ? [] : '');
+      if (firstBlockedAddress(addresses.map((entry) => entry.address), policy) !== null) return callback(dnsError(hostname, 'EBLOCKED', '사내망·내부 주소는 읽을 수 없어요'), options.all ? [] : '');
       if (options.all) return callback(null, addresses);
       const wanted = options.family === 6 ? 6 : options.family === 4 ? 4 : null;
       const first = addresses.find((entry) => wanted === null || entry.family === wanted) ?? addresses[0];
       return callback(null, first.address, first.family);
     });
   };
+}
+
+/** 푼 주소 중 연결하면 안 되는 첫 주소. 모두 괜찮으면 null. 페이지 읽기(guardedLookup)와 브라우저(이슈 #373)가 함께 쓴다 */
+export function firstBlockedAddress(addresses: readonly string[], policy: FetchPolicy = DEFAULT_FETCH_POLICY): string | null {
+  return addresses.find((address) => !policy.isAllowedAddress(address)) ?? null;
+}
+
+/** 연결해도 되는 주소 하나, 또는 막을 이유 */
+export type CheckedAddress = { address: string; family: 4 | 6 } | { blocked: string };
+
+/**
+ * 이름을 풀어 모든 주소가 공용 주소이면 연결할 주소 하나(IPv4 먼저)를 돌려준다 (브라우저 요청 확인·브라우저 프록시, 이슈 #373).
+ * IP를 그대로 적은 이름은 풀지 않고 그 주소를 본다. 프록시는 여기서 확인한 주소로 바로 연결하므로 확인과 연결 사이 틈이 없다.
+ */
+export function resolvePublicAddress(hostname: string, policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolve: LookupFunction = systemLookup): Promise<CheckedAddress> {
+  const literal = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  if (ipaddr.isValid(literal)) return Promise.resolve(policy.isAllowedAddress(literal) ? { address: literal, family: literal.includes(':') ? 6 : 4 } : { blocked: INTERNAL_ADDRESS });
+  return new Promise((done) => {
+    resolve(literal, { all: true }, (error, result) => {
+      if (error) return done({ blocked: '주소를 찾지 못했어요' });
+      const addresses: LookupAddress[] = typeof result === 'string' ? [{ address: result, family: result.includes(':') ? 6 : 4 }] : result;
+      if (!addresses.length) return done({ blocked: '주소를 찾지 못했어요' });
+      if (firstBlockedAddress(addresses.map((entry) => entry.address), policy) !== null) return done({ blocked: INTERNAL_ADDRESS });
+      const first = addresses.find((entry) => entry.family === 4) ?? addresses[0];
+      done({ address: first.address, family: first.family === 6 ? 6 : 4 });
+    });
+  });
+}
+
+const INTERNAL_ADDRESS = '사내망·내부 주소는 열 수 없어요';
+
+/** 이름을 푼 주소가 모두 공용 주소인지. 막을 이유를 돌려주고, 괜찮으면 null */
+export async function checkHostAddresses(hostname: string, policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolve: LookupFunction = systemLookup): Promise<string | null> {
+  const checked = await resolvePublicAddress(hostname, policy, resolve);
+  return 'blocked' in checked ? checked.blocked : null;
 }
 
 /** lookup이 내부 주소라 막았을 때의 오류 코드 */

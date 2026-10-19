@@ -33,6 +33,7 @@ import { findProcessSteps } from './knowledge/process.search';
 import { FIRST_TIME_QUESTIONS, ROLE_SUGGESTED_QUESTIONS } from './suggested-questions';
 import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox';
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
+import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
@@ -54,6 +55,8 @@ const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자�
 export const MAX_TOOL_ROUNDS = 4;
 /** 웹 검색을 켠 질문의 도구 횟수 상한. 검색 → 읽기 → (다른 결과 읽기·다시 검색) → 답에 4번은 빠듯해서 늘린다 (이슈 #367) */
 export const MAX_WEB_TOOL_ROUNDS = 6;
+/** 브라우저 사용을 켠 질문의 도구 횟수 상한. 열기 → 읽기 → 입력 → 누르기 …가 이어져서 늘린다 (이슈 #373 결정값) */
+export const MAX_BROWSER_TOOL_ROUNDS = 12;
 /** AI 실행 기록에 담는 도구 입력·결과·생각 글의 길이. 답과 함께 화면에만 가므로 읽을 만큼만 */
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
@@ -67,7 +70,7 @@ const WORK_KINDS: readonly string[] = ['TASK', 'EVENT', 'PURCHASE'];
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
  * 데이터는 모델이 고른 조회 도구를 서버가 사용자 권한으로 실행해 얻는다. AI는 조회·설명만 하고 업무 데이터를 바꾸지 않으므로
  * 작업 로그도 남기지 않는다(REQ-LOG-002 대상 아님). 웹 도구(웹 검색·페이지 읽기·장소 검색)는 웹 검색을 켠
- * 실시간 답에서만 알린다(이슈 #367). LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
+ * 실시간 답에서만 알린다(이슈 #367). 브라우저 도구는 브라우저 사용을 켠 실시간 답에서만(이슈 #373). LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
  */
 @Injectable()
 export class AiAssistantService {
@@ -81,6 +84,7 @@ export class AiAssistantService {
     private readonly cards: AiActionCardService,
     private readonly opsCards: AiOpsCardService,
     private readonly webTools: AssistantWebToolbox,
+    private readonly browserTools: AssistantBrowserToolbox,
   ) {}
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
@@ -102,9 +106,10 @@ export class AiAssistantService {
   async capabilities(): Promise<AiAssistantCapabilitiesView> {
     const settings = await this.settingsStore.read();
     const webSearch = this.webTools.capabilities();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch };
+    const browser = this.browserTools.capabilities();
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch };
+    return { model: settings.model, ...caps, webSearch, browser };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
@@ -140,6 +145,8 @@ export class AiAssistantService {
     const manualGuides = findManualGuides(input.question);
     // 웹 도구는 화면이 실시간으로 보고 있는 답에서만 (사내 채팅 @AI는 웹 내용을 방 멤버 모두에게 보이게 되므로 쓰지 않는다)
     const webSearch = options.interactive === true && input.webSearch === true;
+    // 브라우저도 화면이 실시간으로 볼 때만, 서버 설정(AI_BROWSER_ENABLED)과 Chrome이 있을 때만 (이슈 #373)
+    const browserOn = options.interactive === true && input.browser === true && this.browserTools.capabilities().available;
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -153,6 +160,7 @@ export class AiAssistantService {
       history,
       question: input.question,
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
+      browserTools: browserOn,
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
@@ -169,69 +177,83 @@ export class AiAssistantService {
         const dataSources: AiAssistantSource[] = [];
         const toolCalls: AiAssistantToolTrace[] = [];
         const actionCards: AiActionCard[] = [];
-        // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다
-        const web = webSearch && emit !== undefined ? this.webTools.session(user.employeeId) : null;
-        const tools = [...this.toolbox.definitions({ actionCards: input.actionCards }), ...(web ? this.webTools.definitions() : [])];
-        const maxRounds = web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
-        const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
-          emit
-            ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
-            : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
-        let reply = await call(tools);
-        // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
-        if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
-          messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
-          reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
-        }
-        for (let round = 1; reply.toolCalls.length && round <= maxRounds; round += 1) {
-          messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
-          for (const toolCall of reply.toolCalls) {
-            if (signal?.aborted) throw new LlmAbortedError();
-            const callStarted = Date.now();
-            const traceId = `t${toolCalls.length + 1}`;
-            emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
-            // 조회·실행 카드·웹 도구 모두 읽기만 해서 묻지 않고 바로 실행한다
-            let webSources: AiWebSource[] | undefined;
-            let result: ToolRunResult;
-            if (web?.has(toolCall.name)) {
-              const webResult = await web.run(toolCall, signal);
-              result = { content: webResult.content, source: null };
-              webSources = webResult.webSources;
-            } else {
-              result = await this.toolbox.run(user, toolCall);
-              // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
-              web?.observeErpResult(result.content);
-            }
-            const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
-            toolCalls.push(trace);
-            emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs, ...(webSources ? { webSources } : {}) });
-            messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
-            if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
-            // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
-            for (const card of input.actionCards ? (result.cards ?? []) : []) {
-              if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
-            }
+        // 답마다 새 세션: 이 답의 검색 결과 주소만 읽고, 답의 링크도 그 주소만 남긴다.
+        // 브라우저만 켰으면 웹 도구는 알리지 않고 주소 허용 목록·링크 거르기·회사 안 정보 막기만 쓴다
+        const streaming = emit !== undefined;
+        const web = (webSearch || browserOn) && streaming ? this.webTools.session(user.employeeId, { offerTools: webSearch }) : null;
+        // 브라우저는 답마다 새 시크릿 컨텍스트(첫 브라우저 도구 때 연다). 끝·멈춤·오류 때 닫는다
+        const browser: BrowserToolSessionLike | null = browserOn && web ? this.browserTools.session({ question: input.question, web, signal }) : null;
+        const tools = [...this.toolbox.definitions({ actionCards: input.actionCards }), ...(webSearch && web ? this.webTools.definitions() : []), ...(browser ? this.browserTools.definitions() : [])];
+        const maxRounds = browser ? MAX_BROWSER_TOOL_ROUNDS : webSearch && web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+        try {
+          const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
+            emit
+              ? this.llm.streamWithTools(endpoint, model, messages, roundTools, profile, { onThinking: (text) => emit({ type: 'thinking', text }), onAnswer: (text) => emit({ type: 'answer', text }) }, signal)
+              : this.llm.chatWithTools(endpoint, model, messages, roundTools, profile);
+          let reply = await call(tools);
+          // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
+          if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
+            messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
+            reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
           }
-          if (signal?.aborted) throw new LlmAbortedError();
-          reply = await call(round < maxRounds ? tools : []);
-        }
+          for (let round = 1; reply.toolCalls.length && round <= maxRounds; round += 1) {
+            messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
+            for (const toolCall of reply.toolCalls) {
+              if (signal?.aborted) throw new LlmAbortedError();
+              const callStarted = Date.now();
+              const traceId = `t${toolCalls.length + 1}`;
+              emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
+              // 조회·실행 카드·웹 도구는 읽기만 해서 묻지 않고 바로 실행한다. 브라우저 도구도 묻지 않지만 위험한 동작은 서버가 막는다(이슈 #373)
+              let webSources: AiWebSource[] | undefined;
+              let result: ToolRunResult;
+              if (web?.has(toolCall.name)) {
+                const webResult = await web.run(toolCall, signal);
+                result = { content: webResult.content, source: null };
+                webSources = webResult.webSources;
+              } else if (browser?.has(toolCall.name)) {
+                const browserResult = await browser.run(toolCall, signal);
+                result = { content: browserResult.content, source: null };
+                webSources = browserResult.webSources;
+                // 화면 사진은 화면에만 보낸다(모델에는 글만)
+                if (browserResult.frame) emit?.({ type: 'browser_frame', ...browserResult.frame });
+              } else {
+                result = await this.toolbox.run(user, toolCall);
+                // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
+                web?.observeErpResult(result.content);
+              }
+              const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
+              toolCalls.push(trace);
+              emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs, ...(webSources ? { webSources } : {}) });
+              messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });
+              if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
+              // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
+              for (const card of input.actionCards ? (result.cards ?? []) : []) {
+                if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+              }
+            }
+            if (signal?.aborted) throw new LlmAbortedError();
+            reply = await call(round < maxRounds ? tools : []);
+          }
 
-        const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
-        // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
-        if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
-        const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
-        const webFinal = web?.finalize(parsed.answer) ?? null;
-        return {
-          answer: webFinal?.answer ?? parsed.answer,
-          sources: [...dataSources, ...parsed.sources],
-          model,
-          latencyMs: Date.now() - started,
-          toolCalls,
-          thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
-          reasoningApplied: reply.reasoningApplied ?? true,
-          actionCards,
-          ...(webFinal ? { webSources: webFinal.webSources } : {}),
-        };
+          const parsed = parseAssistantAnswer(reply.content, references, processSteps, manualGuides);
+          // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
+          if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
+          const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
+          const webFinal = web?.finalize(parsed.answer) ?? null;
+          return {
+            answer: webFinal?.answer ?? parsed.answer,
+            sources: [...dataSources, ...parsed.sources],
+            model,
+            latencyMs: Date.now() - started,
+            toolCalls,
+            thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
+            reasoningApplied: reply.reasoningApplied ?? true,
+            actionCards,
+            ...(webFinal ? { webSources: webFinal.webSources } : {}),
+          };
+        } finally {
+          await browser?.close();
+        }
       },
     };
   }
