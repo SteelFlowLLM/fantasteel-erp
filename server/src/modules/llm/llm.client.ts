@@ -119,6 +119,8 @@ export interface LlmJsonOptions {
   timeoutMs: number;
   maxTokens?: number;
   profile: LlmProfile;
+  /** 부른 쪽이 끊으면(심층 조사 취소) 요청도 끊고 LlmAbortedError를 던진다 */
+  signal?: AbortSignal;
 }
 
 /** LM Studio 고유 API(/api/v1/models)가 알려 주는 모델 정보. 외부 LLM이면 서버 전체가 null이다 */
@@ -186,6 +188,26 @@ export class LlmClient {
   }
 
   /**
+   * 긴 글 답 (심층 조사 보고서, 이슈 #378). 길이 상한에 걸려 끊겼는지(finish_reason=length)와 생각 글을 함께 돌려준다.
+   * 닫히지 않은 <think>만 있으면 답 글이 비고 끊긴 것으로 본다.
+   */
+  async chatText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], options: LlmJsonOptions): Promise<{ text: string; thinking: string | null; truncated: boolean }> {
+    type Reply = { choices?: { finish_reason?: string | null; message?: { content?: string | null; reasoning_content?: string | null } }[] };
+    const body = await this.request<Reply>(
+      endpoint,
+      'POST',
+      '/chat/completions',
+      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, options.profile)).fields, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) },
+      options.timeoutMs,
+      options.signal,
+    );
+    const choice = body.choices?.[0];
+    const split = splitThinking(choice?.message?.content ?? '');
+    const thinking = [choice?.message?.reasoning_content?.trim() || null, split.thinking].filter((t): t is string => Boolean(t)).join('\n\n') || null;
+    return { text: split.text, thinking, truncated: choice?.finish_reason === 'length' };
+  }
+
+  /**
    * JSON 스키마로 답 모양을 강제해 받는다 (회의록 AI 분석). 모델이 쓴 값은 믿을 수 없으므로 `unknown`으로 돌려주고 부르는 쪽이 검증한다.
    * 서버가 response_format을 지원하지 않아 400을 주면 형식 강제 없이 한 번 더 부른다(프롬프트가 JSON만 달라고 요구한다).
    */
@@ -211,10 +233,11 @@ export class LlmClient {
         '/chat/completions',
         { ...base, response_format: { type: 'json_schema', json_schema: { name: format.name, strict: true, schema: format.schema } } },
         options.timeoutMs,
+        options.signal,
       );
     } catch (error) {
       if (!(error instanceof LlmRequestError) || error.status !== 400) throw error;
-      body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs);
+      body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs, options.signal);
     }
     const message = body.choices?.[0]?.message;
     // LM Studio의 추론 모델은 형식을 강제해도 JSON을 content가 아니라 reasoning_content에 담아 content를 비우기도 한다
@@ -395,11 +418,14 @@ export class LlmClient {
     return models;
   }
 
-  private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number): Promise<T> {
-    const res = await this.send(endpoint, method, path, payload, AbortSignal.timeout(timeoutMs), timeoutMs);
+  private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number, abort?: AbortSignal): Promise<T> {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = abort ? AbortSignal.any([abort, timeout]) : timeout;
+    const res = await this.send(endpoint, method, path, payload, signal, timeoutMs);
     try {
       return (await res.json()) as T;
     } catch {
+      if (abort?.aborted) throw new LlmAbortedError();
       throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
     }
   }

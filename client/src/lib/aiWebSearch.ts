@@ -10,7 +10,7 @@ export const AI_WEB_SEARCH_TITLE = '켜면 이번 질문에 인터넷을 검색�
 export const AI_WEB_SEARCH_NO_ENGINE_HINT = '쓸 수 있는 검색 엔진이 없어요';
 export const AI_WEB_SEARCH_UNAVAILABLE_HINT = 'AI 연결을 확인하지 못해 지금은 켤 수 없어요';
 
-const ENGINE_LABEL: Record<AiWebSearchEngine, string> = { naver: '네이버', duckduckgo: 'DuckDuckGo', wikipedia: '위키백과' };
+const ENGINE_LABEL: Record<AiWebSearchEngine, string> = { naver: '네이버', kakao: '다음(카카오)', duckduckgo: 'DuckDuckGo', wikipedia: '위키백과' };
 
 /** 저장된 글에서 켜기 설정을 읽는다. 깨졌거나 없으면 꺼짐 */
 export function parseAiWebSearchPreference(raw: string | null): boolean {

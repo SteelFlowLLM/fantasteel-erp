@@ -44,6 +44,7 @@ describe('webSearchEngineHint', () => {
   });
 
   it('장소 검색이 되면 덧붙이고, 엔진이 없으면 없다고 알린다', () => {
+    expect(webSearchEngineHint({ engines: ['kakao', 'duckduckgo', 'wikipedia'], placeSearch: false })).toBe('다음(카카오)·DuckDuckGo·위키백과 (네이버 키 없음)');
     expect(webSearchEngineHint({ engines: ['naver', 'wikipedia'], placeSearch: true })).toBe('네이버·위키백과 · 장소 검색 가능');
     expect(webSearchEngineHint({ engines: [], placeSearch: true })).toBe(AI_WEB_SEARCH_NO_ENGINE_HINT);
   });

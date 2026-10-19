@@ -4,8 +4,8 @@ import type { LlmToolCall, LlmToolDefinition } from '../../llm/llm.client';
 import { optionalEnum, requiredString, ToolArgumentError } from '../tools/assistant-tool';
 import { decodeBody, extractPageIsolated, limitPageText, PAGE_TEXT_MAX, PageTooComplexError } from './page-extract';
 import { SafePageFetcher, WebFetchError } from './safe-fetch';
-import { PLACE_CATEGORIES, WEB_SEARCH_RESULT_LIMIT, type Place } from './search-parsers';
-import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, PlaceSearchError, SearchRateLimitError, SearchUnavailableError, WebSearchClient, type WebSearchOutcome } from './web-search.client';
+import { PLACE_CATEGORIES, WEB_SEARCH_RESULT_LIMIT, type Place, type WebSearchResult } from './search-parsers';
+import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, PlaceSearchError, SearchRateLimitError, SearchUnavailableError, WebSearchClient, type SearchEngine, type WebSearchOutcome } from './web-search.client';
 import { cutText, filterAnswerLinks, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, UNTRUSTED_NOTE, uniqueSources, urlKey, wrapUntrusted } from './web-text';
 
 /** 한 답에서 웹 도구를 부르는 수 (가정값). 한 차례에 여러 도구를 한꺼번에 불러도 이만큼만 실행한다 */
@@ -187,9 +187,32 @@ export class AssistantWebToolbox {
    * employeeId: 사원별 1분 검색 수를 센다. offerTools: false면 웹 도구는 알리지 않고 주소 허용 목록·답의 링크 거르기·
    * 회사 안 정보 막기만 쓴다 (웹 검색을 끄고 브라우저만 켠 질문, 이슈 #373)
    */
-  session(employeeId: number, options: { offerTools?: boolean } = {}): WebToolSession {
-    return new WebToolSession(this.deps, options.offerTools === false ? [] : this.definitions().map((d) => d.name), employeeId, this.userLimiter);
+  session(employeeId: number, options: WebSessionOptions = {}): WebToolSession {
+    const limits = { searches: options.maxSearches ?? MAX_WEB_SEARCHES_PER_ANSWER, reads: options.maxReads ?? MAX_PAGE_READS_PER_ANSWER };
+    return new WebToolSession(this.deps, options.offerTools === false ? [] : this.definitions().map((d) => d.name), employeeId, this.userLimiter, limits);
   }
+}
+
+export interface WebSessionOptions {
+  offerTools?: boolean;
+  /** 한 세션의 검색·페이지 읽기 상한. 기본은 한 답의 3번·3개. 심층 조사(이슈 #378)는 조사 예산으로 따로 센다 */
+  maxSearches?: number;
+  maxReads?: number;
+}
+
+/** 구조화된 검색 결과 (심층 조사, 이슈 #378). 막히거나 실패하면 kind와 이유 */
+export type SessionSearchOutcome =
+  | { ok: true; query: string; engine: SearchEngine; results: WebSearchResult[]; removed: string[] }
+  | { ok: false; kind: 'empty' | 'internal' | 'limit' | 'rate' | 'unavailable' | 'none'; reason: string; hint: string; query: string; removed: string[] };
+
+/** 구조화된 페이지 읽기 결과 (심층 조사, 이슈 #378). text는 웹에서 온 글이라 감싸서 모델에 넘긴다 */
+export type SessionReadOutcome =
+  | { ok: true; url: string; title: string; text: string; truncated: boolean }
+  | { ok: false; reason: string; hint: string; url: string | null };
+
+/** 같은 구조의 이유를 모델에 돌려줄 도구 결과로 */
+function blockedFailure(outcome: { reason: string; hint: string }): WebToolResult {
+  return failure(outcome.reason, { 안내: outcome.hint });
 }
 
 export interface WebToolResult {
@@ -215,6 +238,7 @@ export class WebToolSession {
     private readonly offered: readonly string[],
     private readonly employeeId: number,
     private readonly userLimiter: UserSearchLimiter,
+    private readonly limits: { searches: number; reads: number } = { searches: MAX_WEB_SEARCHES_PER_ANSWER, reads: MAX_PAGE_READS_PER_ANSWER },
   ) {}
 
   /** ERP 조회 도구 결과를 본다 (거래처 이름 모으기). 서비스가 조회 도구를 부를 때마다 넘긴다 */
@@ -238,15 +262,17 @@ export class WebToolSession {
     this.remember(url, cutText(stripInvisible(title), TITLE_MAX));
   }
 
-  /** 검색 전 확인: 회사 안 정보·한 답 횟수·사원별 1분 수. 막히면 모델에 돌려줄 결과 */
-  private searchBlocked(query: string): WebToolResult | null {
+  /** 검색 전 확인: 회사 안 정보·한 답 횟수·사원별 1분 수. 막히면 그 종류와 이유 */
+  private searchBlocked(query: string): { kind: 'internal' | 'limit' | 'rate'; reason: string; hint: string } | null {
     const internal = internalReferenceIn(query, this.partnerNames);
     if (internal)
-      return failure(`검색어에 회사 안 정보(${internal})가 있어 검색하지 않았어요`, {
-        안내: '업무·LOT 번호, 고객사·공급업체 이름 같은 회사 내부 정보는 빼고 일반적인 낱말로만 다시 검색해요. 내부 데이터는 조회 도구로 확인해요',
-      });
-    if (++this.searches > MAX_WEB_SEARCHES_PER_ANSWER) return failure(`이번 질문에서는 검색을 ${MAX_WEB_SEARCHES_PER_ANSWER}번까지만 해요`, { 안내: '지금까지의 결과로 답해요' });
-    if (!this.userLimiter.take(this.employeeId)) return failure('검색을 너무 자주 했어요. 1분쯤 뒤에 다시 물어봐 주세요', { 안내: '검색하지 못했다고 사용자에게 알리고 지어내지 않아요' });
+      return {
+        kind: 'internal',
+        reason: `검색어에 회사 안 정보(${internal})가 있어 검색하지 않았어요`,
+        hint: '업무·LOT 번호, 고객사·공급업체 이름 같은 회사 내부 정보는 빼고 일반적인 낱말로만 다시 검색해요. 내부 데이터는 조회 도구로 확인해요',
+      };
+    if (++this.searches > this.limits.searches) return { kind: 'limit', reason: `이번 질문에서는 검색을 ${this.limits.searches}번까지만 해요`, hint: '지금까지의 결과로 답해요' };
+    if (!this.userLimiter.take(this.employeeId)) return { kind: 'rate', reason: '검색을 너무 자주 했어요. 1분쯤 뒤에 다시 물어봐 주세요', hint: '검색하지 못했다고 사용자에게 알리고 지어내지 않아요' };
     return null;
   }
 
@@ -277,23 +303,37 @@ export class WebToolSession {
     }
   }
 
-  private async webSearch(args: Record<string, unknown>): Promise<WebToolResult> {
-    const { query, removed } = redactQuery(requiredString(args, 'query', WEB_QUERY_MAX));
-    if (!query) return failure('검색어가 비었어요', { 안내: '개인정보를 뺀 검색어로 다시 불러요' });
+  /**
+   * 개인정보를 빼고·회사 안 정보와 한도를 확인한 뒤 웹 검색한다. 결과 주소는 이 세션이 읽어도 되는 주소로 기억한다.
+   * web_search 도구와 심층 조사(이슈 #378)가 함께 쓴다. query는 WEB_QUERY_MAX 안이어야 한다(부르는 쪽이 자른다).
+   */
+  async searchWeb(rawQuery: string): Promise<SessionSearchOutcome> {
+    const { query, removed } = redactQuery(rawQuery);
+    if (!query) return { ok: false, kind: 'empty', reason: '검색어가 비었어요', hint: '개인정보를 뺀 검색어로 다시 불러요', query, removed };
     const blocked = this.searchBlocked(query);
-    if (blocked) return blocked;
+    if (blocked) return { ok: false, ...blocked, query, removed };
     let outcome: WebSearchOutcome;
     try {
       outcome = await this.deps.search.search(query);
     } catch (error) {
-      if (error instanceof SearchRateLimitError || error instanceof SearchUnavailableError) return failure(error.message, { 안내: '검색하지 못했다고 사용자에게 알리고 지어내지 않아요' });
+      if (error instanceof SearchRateLimitError) return { ok: false, kind: 'rate', reason: error.message, hint: '검색하지 못했다고 사용자에게 알리고 지어내지 않아요', query, removed };
+      if (error instanceof SearchUnavailableError) return { ok: false, kind: 'unavailable', reason: error.message, hint: '검색하지 못했다고 사용자에게 알리고 지어내지 않아요', query, removed };
       throw error;
     }
-    const removedNote = removed.length ? `검색어에서 ${removed.join('·')}로 보이는 부분을 빼고 검색했어요.` : null;
-    if (!outcome.results.length) return failure('검색 결과가 없어요', { 검색어: query, 안내: '찾지 못했다고 사용자에게 알려요', ...(removedNote ? { 참고: removedNote } : {}) });
-
+    if (!outcome.results.length) return { ok: false, kind: 'none', reason: '검색 결과가 없어요', hint: '찾지 못했다고 사용자에게 알려요', query, removed };
     const results = outcome.results.slice(0, WEB_SEARCH_RESULT_LIMIT);
     for (const r of results) this.remember(r.url, r.title);
+    return { ok: true, query, engine: outcome.engine, results, removed };
+  }
+
+  private async webSearch(args: Record<string, unknown>): Promise<WebToolResult> {
+    const outcome = await this.searchWeb(requiredString(args, 'query', WEB_QUERY_MAX));
+    const removedNote = outcome.removed.length ? `검색어에서 ${outcome.removed.join('·')}로 보이는 부분을 빼고 검색했어요.` : null;
+    if (!outcome.ok) {
+      if (outcome.kind === 'none') return failure(outcome.reason, { 검색어: outcome.query, 안내: outcome.hint, ...(removedNote ? { 참고: removedNote } : {}) });
+      return blockedFailure(outcome);
+    }
+    const { query, results } = outcome;
     const body = results.map((r, i) => [`${i + 1}. ${cutText(r.title, TITLE_MAX)}`, `   주소: ${r.url}`, r.snippet ? `   요약: ${cutText(r.snippet, SNIPPET_MAX)}` : null].filter(Boolean).join('\n')).join('\n');
     const content = [`[웹 검색 결과] 검색어: ${query} · 검색: ${outcome.engine} · ${results.length}건`, removedNote, UNTRUSTED_NOTE, wrapUntrusted(`web_search:${outcome.engine}`, body)].filter(Boolean).join('\n');
     return { content, webSources: results.map(({ title, url }) => ({ title: stripInvisible(title), url })) };
@@ -304,7 +344,7 @@ export class WebToolSession {
     const category = optionalEnum(args, 'category', PLACE_CATEGORIES) ?? 'any';
     if (!query) return failure('검색어가 비었어요');
     const blocked = this.searchBlocked(query);
-    if (blocked) return blocked;
+    if (blocked) return blockedFailure(blocked);
     let places: Place[];
     try {
       places = await this.deps.places.search(query, category);
@@ -334,37 +374,46 @@ export class WebToolSession {
     return { content, webSources: places.map((p) => ({ title: stripInvisible(p.name), url: p.url })) };
   }
 
-  private async readPage(args: Record<string, unknown>, signal?: AbortSignal): Promise<WebToolResult> {
-    const raw = requiredString(args, 'url', 2000);
+  /**
+   * 이 세션의 검색 결과(또는 기억한 주소)에 있던 주소만 읽는다. 모델이 지어내거나 페이지 안에서 본 주소는 읽지 않는다.
+   * read_web_page 도구와 심층 조사(이슈 #378)가 함께 쓴다.
+   */
+  async readKnownPage(raw: string, signal?: AbortSignal): Promise<SessionReadOutcome> {
     const key = urlKey(raw);
     const known = key ? this.found.get(key) : undefined;
-    // 모델이 지어내거나 페이지 안에서 본 주소는 읽지 않는다 (검색 결과로 받은 주소만)
-    if (!key || !known) return failure('이번 답의 검색 결과에 없던 주소라 읽지 않았어요', { 안내: 'web_search 결과의 주소를 그대로 넘기거나, 먼저 검색해요' });
-    if (++this.reads > MAX_PAGE_READS_PER_ANSWER) return failure(`이번 질문에서는 페이지를 ${MAX_PAGE_READS_PER_ANSWER}개까지만 읽어요`, { 안내: '지금까지 읽은 내용으로 답해요' });
+    if (!key || !known) return { ok: false, reason: '이번 답의 검색 결과에 없던 주소라 읽지 않았어요', hint: 'web_search 결과의 주소를 그대로 넘기거나, 먼저 검색해요', url: null };
+    if (++this.reads > this.limits.reads) return { ok: false, reason: `이번 질문에서는 페이지를 ${this.limits.reads}개까지만 읽어요`, hint: '지금까지 읽은 내용으로 답해요', url: null };
     let page: ReadPage;
     try {
       page = await this.deps.pages.read(known.url, signal);
     } catch (error) {
-      if (error instanceof WebFetchError || error instanceof PageTooComplexError) return failure(error.message, { 주소: known.url, 안내: '읽지 못했다고 알리고 검색 요약이나 다른 결과로 답해요' });
+      if (error instanceof WebFetchError || error instanceof PageTooComplexError) return { ok: false, reason: error.message, hint: '읽지 못했다고 알리고 검색 요약이나 다른 결과로 답해요', url: known.url };
       throw error;
     }
     const limited = limitPageText(page.text);
-    if (!limited.text.trim()) return failure('페이지에 읽을 글이 없어요', { 주소: page.url, 안내: '검색 요약이나 다른 결과로 답해요' });
+    if (!limited.text.trim()) return { ok: false, reason: '페이지에 읽을 글이 없어요', hint: '검색 요약이나 다른 결과로 답해요', url: page.url };
     const title = cutText(stripInvisible(page.title || known.title), TITLE_MAX);
     const source = { title, url: page.url };
     this.read.push(source);
     const finalKey = urlKey(page.url);
     if (finalKey && !this.found.has(finalKey)) this.found.set(finalKey, source);
+    return { ok: true, url: page.url, title, text: limited.text, truncated: limited.truncated };
+  }
+
+  private async readPage(args: Record<string, unknown>, signal?: AbortSignal): Promise<WebToolResult> {
+    const outcome = await this.readKnownPage(requiredString(args, 'url', 2000), signal);
+    if (!outcome.ok) return failure(outcome.reason, { ...(outcome.url ? { 주소: outcome.url } : {}), 안내: outcome.hint });
+    const { url, title, text, truncated } = outcome;
     const content = [
       // 최종 주소는 페이지가 정한 값(이동)이라 감싼 안에 두고, 밖에는 호스트만
-      `[웹 페이지] ${hostOf(page.url)}`,
+      `[웹 페이지] ${hostOf(url)}`,
       UNTRUSTED_NOTE,
-      wrapUntrusted(hostOf(page.url), `주소: ${page.url}\n제목: ${title}\n\n${limited.text}`),
-      limited.truncated ? `(페이지가 길어 앞 ${PAGE_TEXT_MAX}자만 넘겼어요)` : null,
+      wrapUntrusted(hostOf(url), `주소: ${url}\n제목: ${title}\n\n${text}`),
+      truncated ? `(페이지가 길어 앞 ${PAGE_TEXT_MAX}자만 넘겼어요)` : null,
     ]
       .filter(Boolean)
       .join('\n');
-    return { content, webSources: [source] };
+    return { content, webSources: [{ title, url }] };
   }
 
   private remember(url: string, title: string) {

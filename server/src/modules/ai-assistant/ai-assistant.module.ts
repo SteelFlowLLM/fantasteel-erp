@@ -52,6 +52,7 @@ import { BrowserPool } from './browser/browser-pool';
     // 브라우저 사용(이슈 #373): Chrome 하나를 서버에 두고(처음 쓸 때 띄움) 답마다 새 컨텍스트를 빌린다. 서버가 꺼질 때 닫는다
     { provide: AssistantBrowserToolbox, useFactory: () => new AssistantBrowserToolbox(new BrowserPool()) },
   ],
-  exports: [AiAssistantService],
+  // 심층 조사(이슈 #378)가 같은 웹 검색 클라이언트(캐시·1분 한도)와 페이지 읽기(SSRF 막기·동시 4개)를 쓴다
+  exports: [AiAssistantService, AssistantWebToolbox],
 })
 export class AiAssistantModule {}

@@ -4,8 +4,9 @@
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { aiResearchApi } from '@/api/aiResearch';
 import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -15,6 +16,7 @@ import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
+import { useAction } from '@/hooks/useAction';
 import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useMe } from '@/hooks/useMe';
@@ -64,6 +66,7 @@ const STICK_TO_BOTTOM_PX = 80;
 export function AiPanel() {
   const me = useMe();
   const pathname = usePathname();
+  const router = useRouter();
   const close = useShellStore((state) => state.closeAiPanel);
   const context = useShellStore((state) => state.aiContext);
   const expanded = useShellStore((state) => state.aiPanelExpanded);
@@ -92,6 +95,15 @@ export function AiPanel() {
   // 브라우저 사용: 서버가 못 쓴다고 했거나 연결 정보를 못 읽었을 때만 막는다 (읽는 중에는 막지 않는다)
   const browserBlockedReason = browserDisabledReason(capabilities.data, capabilities.isError);
   const browserOn = browserPref && browserBlockedReason === null;
+  // 심층 조사 (이슈 #378): 서버가 모델이 정해져 있다고 알릴 때만. 지금 입력한 글로 조사를 만들고 그 화면으로 간다
+  const deepResearchOn = capabilities.data?.deepResearch?.available === true;
+  const sendToResearch = useAction(aiResearchApi.create, {
+    success: '심층 조사 계획을 세우고 있어요',
+    onSuccess: (run) => {
+      setDraft('');
+      router.push(`/ai-research?id=${run.id}`);
+    },
+  });
   const photos = useAiImageDraft();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -330,6 +342,18 @@ export function AiPanel() {
             <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
+            {deepResearchOn ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="search"
+                disabled={draft.trim().length < 2 || sendToResearch.isPending}
+                title="웹을 여러 번 찾아 읽고 출처가 달린 보고서를 써요. 먼저 조사 계획을 보여 줘요"
+                onClick={() => sendToResearch.mutate(draft.trim())}
+              >
+                심층 조사로 보내기
+              </Button>
+            ) : null}
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
             {pending ? (
               <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>

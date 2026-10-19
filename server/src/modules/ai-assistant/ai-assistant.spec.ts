@@ -753,13 +753,13 @@ describe('AiAssistantService', () => {
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

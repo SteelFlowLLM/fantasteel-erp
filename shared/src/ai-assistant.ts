@@ -67,6 +67,8 @@ export interface AiAssistantCapabilitiesView {
   webSearch: AiWebSearchCapabilities;
   /** 브라우저 사용을 쓸 수 있는지 (이슈 #373). 서버 설정과 Chrome이 있는지로 정한다(Chrome을 띄워 보지는 않는다) */
   browser: AiBrowserCapabilities;
+  /** 심층 조사를 쓸 수 있는지 (이슈 #378). LLM 모델이 정해져 있으면 쓸 수 있다 */
+  deepResearch: { available: boolean };
 }
 
 export interface AiBrowserCapabilities {
@@ -75,8 +77,8 @@ export interface AiBrowserCapabilities {
   reason?: string;
 }
 
-/** 웹 검색 엔진: 네이버 검색 API(키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
-export const AI_WEB_SEARCH_ENGINES = ['naver', 'duckduckgo', 'wikipedia'] as const;
+/** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
+export const AI_WEB_SEARCH_ENGINES = ['naver', 'kakao', 'duckduckgo', 'wikipedia'] as const;
 export type AiWebSearchEngine = (typeof AI_WEB_SEARCH_ENGINES)[number];
 
 export interface AiWebSearchCapabilities {
