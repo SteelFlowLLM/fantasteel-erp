@@ -77,3 +77,9 @@ export function driveSizeText(file: Pick<DriveFileView, 'kind' | 'mimeType' | 's
 export function driveAiImageProblem(file: Pick<DriveFileView, 'mimeType'>): string | null {
   return (AI_IMAGE_MEDIA_TYPES as readonly string[]).includes(mimeOf(file)) ? null : 'PNG, JPEG, WebP 사진만 붙일 수 있어요';
 }
+
+/** 크기 상한(maxBytes)을 알 수 있을 때 넘는 파일의 이유. 크기를 모르는 파일(Google 문서류)은 받은 뒤 확인한다 */
+export function driveSizeProblem(file: Pick<DriveFileView, 'size'>, maxBytes: number): string | null {
+  if (file.size !== null && file.size > maxBytes) return `${fmtBytes(maxBytes).replace(/\.0 /, '')}를 넘어서 첨부할 수 없어요`;
+  return null;
+}

@@ -126,6 +126,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
   - 예시 내용은 `features/meetings/meetingExample.ts`, `features/pastCases/pastCaseExample.ts`의 고정 값이다 (`/agent`는 서버 데이터로 동작해 예시가 없다). 실제 데이터로 오해할 수 있는 숫자는 예시임이 보이게 한다.
 - **Drive 파일**(`/drive`, `features/drive/`, 이슈 #392, 문서에 없는 기능): 관리자가 연결한 회사 Google Drive 폴더의 사진·녹음·문서를 탭(전체·사진·녹음·문서)으로 보고 눌러서 미리 본다. 사진·PDF는 서버(`GET integrations/google-drive/files/:fileId/content`)에서 Blob으로 받아 보이고(PDF는 서버의 sandbox CSP가 Chrome 뷰어를 막아 Blob 주소로 보인다), 녹음은 `<audio>`가 서버 주소를 이어 받아 재생한다. Google 문서·스프레드시트·프레젠테이션은 서버가 PDF로 내보내 보내며(10MB까지), Office 파일은 내려받기만 된다. 내려받기는 `?download=1`. Drive가 연결되지 않았으면 관리자가 먼저 연결하라는 안내가 보인다. 파일 고르는 창은 공용 `features/drive/components/DriveFilePicker.tsx`(회의록 녹음 가져오기도 이것을 쓴다), 순수 도우미는 `lib/driveFiles.ts`.
   - 철강맨AI 입력창: Drive가 연결되어 있으면 사진 첨부 옆에 `Drive에서 사진 첨부` 단추가 생긴다. 고른 사진은 Blob으로 받아 로컬 사진과 같은 준비 과정(`prepareAiImage`)에 넣으므로 장수(4장)·크기·형식(PNG·JPEG·WebP)·사진 가능 모델 확인이 같다 (`useAiImageDraft.addDriveFile`).
+  - 메신저 입력창: Drive가 연결되어 있으면 파일 첨부 옆에 `Drive에서 첨부` 단추가 생긴다(전체·사진·녹음·문서 탭). 고른 파일은 Blob으로 받아 `File`(Drive 이름·MIME, Google 문서는 `<이름>.pdf`)로 만들어 내 컴퓨터에서 고른 파일과 같은 첨부 목록에 넣으므로 개수(10개)·크기(10MB) 규칙과 오류가 같다. 크기를 아는 파일은 고르는 창에서 상한 초과를 미리 막는다. 서버 변경 없음(기존 다중 첨부 API를 그대로 쓴다).
 - 화면: `/agent`, `/meetings`, `/past-cases`, 상단 AI 어시스턴트 패널(`features/shell/AiPanel.tsx`).
 
 ## 7. 끝낼 때

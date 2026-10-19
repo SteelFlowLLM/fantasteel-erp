@@ -1,7 +1,7 @@
 // Drive 파일 도우미 (이슈 #392): 미리보기 방식, 내려받는 이름·MIME, 내용 주소
 import type { DriveFileView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { DRIVE_KIND_LABEL, DRIVE_KIND_TAB_ORDER, driveAiImageProblem, driveBlobToFile, driveContentPath, driveDeliveredMime, driveDeliveredName, driveKindLabel, drivePreviewType, driveSizeText } from '@/lib/driveFiles';
+import { DRIVE_KIND_LABEL, DRIVE_KIND_TAB_ORDER, driveAiImageProblem, driveBlobToFile, driveContentPath, driveDeliveredMime, driveDeliveredName, driveKindLabel, drivePreviewType, driveSizeProblem, driveSizeText } from '@/lib/driveFiles';
 
 const file = (overrides: Partial<DriveFileView> = {}): DriveFileView => ({
   id: 'f1',
@@ -84,5 +84,14 @@ describe('driveAiImageProblem', () => {
     for (const mimeType of ['image/gif', 'image/heic', 'image/bmp', 'image/tiff']) {
       expect(driveAiImageProblem({ mimeType })).toBe('PNG, JPEG, WebP 사진만 붙일 수 있어요');
     }
+  });
+});
+
+describe('driveSizeProblem', () => {
+  const TEN_MB = 10 * 1024 * 1024;
+  it('상한을 넘는 크기만 이유를 준다 (크기를 모르면 받은 뒤 확인)', () => {
+    expect(driveSizeProblem({ size: TEN_MB }, TEN_MB)).toBeNull();
+    expect(driveSizeProblem({ size: TEN_MB + 1 }, TEN_MB)).toBe('10MB를 넘어서 첨부할 수 없어요');
+    expect(driveSizeProblem({ size: null }, TEN_MB)).toBeNull();
   });
 });
