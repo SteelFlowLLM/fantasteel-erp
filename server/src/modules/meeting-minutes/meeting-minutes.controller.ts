@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView, type MeetingNotionExportResult } from '@fantasteel/shared';
+import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView, type MeetingNotionExportResult, type MeetingSpeakerSuggestResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
@@ -64,6 +64,13 @@ export class MeetingMinutesController {
   @Patch(':id/speakers')
   updateSpeakers(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateMeetingSpeakersDto): Promise<MeetingMinutesView> {
     return this.service.updateSpeakers(user, id, dto);
+  }
+
+  /** AI가 화자가 누구인지 추정한다 (이슈 #406, 문서에 없는 경로). 저장하지 않는다. 작성자만 */
+  @Post(':id/speakers/suggest')
+  @HttpCode(200)
+  suggestSpeakers(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingSpeakerSuggestResult> {
+    return this.service.suggestSpeakers(user, id);
   }
 
   /** API-261. 허가한 후보를 등록하고 회의록을 확정한다 */

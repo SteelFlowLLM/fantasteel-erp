@@ -29,6 +29,7 @@
 | POST | `meeting-minutes/:id/analyze` | API-260 AI 정리(다시 정리 포함) | **작성자만** |
 | PATCH | `meeting-minutes/:id/candidates/:key` | API-261 후보 고치기·허가·제외 | **작성자만**, `REVIEW`만 |
 | PATCH | `meeting-minutes/:id/speakers` | 🟡 화자 이름표 → 참석자 연결 (Voice2ERP 묶음 1) | **작성자만**, `TRANSCRIBED`·`REVIEW`·전사가 남은 `FAILED` |
+| POST | `meeting-minutes/:id/speakers/suggest` | 🟡 AI 화자 추정, 저장 안 함 (이슈 #406) | **작성자만**, 화자 연결과 같은 상태 |
 | PATCH | `meeting-minutes/:id/summary` | 🟡 AI 요약 고치기 | **작성자만**, `REVIEW`만 |
 | POST | `meeting-minutes/:id/register` | API-261 확정하고 등록 | **작성자만**, `REVIEW`만 |
 | POST | `meeting-minutes/:id/notion-export` | 🟡 확정한 회의록을 Notion 페이지로 내보내기 (이슈 #358) | **작성자 또는 `ORG_MANAGE` 사용**, `CONFIRMED`만, 한 번만 |
@@ -129,6 +130,7 @@
 ### 화자 분리·연결 (Voice2ERP 묶음 1, 문서에 없는 기능)
 - `transcript_segments`(jsonb 배열)의 구간에 `speaker`('SPEAKER_1' …, 처음 나온 순서)가 붙을 수 있다. STT 사이드카(`tools/voice-sidecar/`, [stt.md](stt.md))가 줄 때만 있고, 글로 넣은 회의록과 일반 whisper 전사는 칸이 없다. 스키마는 바꾸지 않았다.
 - **화자 연결** `PATCH meeting-minutes/:id/speakers` body `{ mapping: { "SPEAKER_1": employeeId | null, … } }`. 작성자만(`VOC-003`), `TRANSCRIBED`·`REVIEW`·전사(`transcript`)가 남은 `FAILED`만(그 밖은 `VOC-004`; 확정 뒤에는 못 바꾼다), 사원은 **이 회의의 참석자**여야 한다(`VOC-002`). 이 회의록에 없는 이름표·정수가 아닌 값·`mapping` 없음은 `COM-004`/400.
+- **AI 화자 추정** `POST meeting-minutes/:id/speakers/suggest` (이슈 #406, 문서에 없는 경로). 권한·상태는 화자 연결과 같고, 목소리로 나뉜 화자가 없으면 `VOC-004`. 참석자(번호·이름·부서·역할)와 전사 앞 24,000자를 LLM(`MEETING_SPEAKER` 프로필, 2분)에 주고 화자마다 참석자 번호와 근거를 받는다. 서버가 다시 걸러 목록 밖 번호·소수는 '모름', 같은 사람을 두 화자에 고르면 둘 다 '모름', 답에서 빠진 화자도 '모름'으로 채운다. 응답 `{ suggestions: [{ label, employeeId | null, reason }], failureReason }` — AI 실패·형식 오류·모델 없음은 오류가 아니라 200 + `failureReason`(과거 사례 초안과 같은 방식). **저장하지 않는다**: 화면이 선택 칸을 채우고 작성자가 화자 연결(PATCH)로 저장한다.
 - 연결은 각 구간에 `speakerEmployeeId`·`speakerName`을 적어 저장한다(분석 결과가 아직 없을 수 있어 `analysis_result`에는 두지 않는다). 이름표 → 사원 표는 구간에서 다시 만들 수 있다. `null`은 '모름'(두 칸을 null로 되돌림), 보내지 않은 이름표는 그대로. `updatedAt` 조건부 `updateMany`라 동시에 고쳐도 한쪽이 사라지지 않는다(`COM-001`).
 - 상세 응답: `transcriptSegments[].speaker/speakerEmployeeId/speakerName`과 파생 값 `speakers: [{ label, employeeId, employeeName, segmentCount, firstTexts(첫 2개 발언) }]`(화자 칸이 없는 전사는 빈 배열).
 - **AI 분석 프롬프트**: 구간에 `speakerName`이 있으면 `[n] 이름: 글`, 이름표만 있으면 `[n] 화자1: 글`, 화자가 없으면 지금처럼 `[n] 글`. "화자1"은 사람 이름이 아니라는 규칙을 시스템 프롬프트에 넣었다. 검증기는 원문 구간 글로 근거·담당자를 맞춘다(이름 매칭은 참석자 이름 기준 그대로). 이름을 연결한 뒤에는 **다시 정리**해야 반영된다.
@@ -186,6 +188,6 @@ Notion 내보내기: `integration/integration.spec.ts` (묶음 `fs_collab`, 가�
 
 Drive 녹음으로 만들기: `integration/google-drive/google-drive.spec.ts` (묶음 `fs_collab`, 가짜 Google 서버 + 가짜 STT) — 받은 녹음 바이트·이름·MIME·화자 수가 STT에 그대로 가고 `TRANSCRIBED`, 사진·폴더 밖·잘못된 id·참석자 없음은 회의록을 만들지 않고 거절, 로그인 필요, 백그라운드 받기 실패 → `FAILED` + 이유, 연결이 끊긴 뒤 `INT-003`.
 
-`meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정.
+`meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정. AI 화자 추정(사원 id로 바꾸기·저장 안 함, AI 실패·형식 오류·모델 없음은 200 + 이유, 작성자·상태·화자 없음 거절).
 
 `meeting-analysis.validator.spec.ts`·`meeting-review.unit.spec.ts`·`meeting-candidate.context.unit.spec.ts` (DB 없음, `npm run test:unit`): 2차 검토 합치기(키 이어 붙이기·표시·사유·120자·중복·상한·알아볼 수 없는 답·검증 규칙), 현황 문구·판단(납기 초과·재고/입고 예정 계산·같은 주 업무량·일정 겹침·확인 사유 지우기). `meeting-analyze.spec.ts`에 2차 호출 두 번·실패 시 1차 유지, 일정 겹침·업무 쏠림·재고 줄·후보를 고치면 현황 재계산 시나리오를 더했다.

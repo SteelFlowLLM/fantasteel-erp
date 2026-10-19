@@ -1,7 +1,7 @@
 // 화자 도우미: 배지 문구·색, 선택값 → 저장할 값, 연결 카드 표시 조건.
 import type { MeetingMinutesView, MeetingSpeakerSummary, TranscriptSegment } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { SPEAKER_TONE_CLASSES, canLinkSpeakers, duplicatePickedIds, initialSpeakerSelection, speakerBadge, speakerMappingToSave, speakerOrder } from '@/lib/meetingSpeakers';
+import { SPEAKER_TONE_CLASSES, applySpeakerSuggestions, canLinkSpeakers, duplicatePickedIds, initialSpeakerSelection, speakerBadge, speakerMappingToSave, speakerOrder } from '@/lib/meetingSpeakers';
 
 const seg = (text: string, speaker?: string, speakerName?: string): TranscriptSegment => ({ start: 0, end: 1, text, ...(speaker ? { speaker, speakerEmployeeId: null, speakerName: speakerName ?? null } : {}) });
 const speakers: MeetingSpeakerSummary[] = [
@@ -36,6 +36,14 @@ describe('화자 연결 선택값', () => {
     expect(speakerMappingToSave(speakers, { SPEAKER_1: '', SPEAKER_2: '7' })).toBeNull();
     expect(speakerMappingToSave(speakers, { SPEAKER_1: '5', SPEAKER_2: '7' })).toEqual({ SPEAKER_1: 5 });
     expect(speakerMappingToSave(speakers, { SPEAKER_1: '5', SPEAKER_2: '' })).toEqual({ SPEAKER_1: 5, SPEAKER_2: null });
+  });
+
+  it('AI 추정은 사원을 고른 화자만 채우고, 모른다고 한 화자는 작성자 값을 그대로 둔다', () => {
+    const suggestions = [
+      { label: 'SPEAKER_1', employeeId: 5, reason: '자기소개' },
+      { label: 'SPEAKER_2', employeeId: null, reason: '근거 없음' },
+    ];
+    expect(applySpeakerSuggestions({ SPEAKER_1: '', SPEAKER_2: '7' }, suggestions)).toEqual({ SPEAKER_1: '5', SPEAKER_2: '7' });
   });
 
   it('같은 사원을 두 화자에 고르면 알려 준다', () => {

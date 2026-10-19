@@ -1,8 +1,9 @@
-// DB 없이 도는 화자 분리 단위 테스트: 구간 읽기·요약, 분석 프롬프트의 화자 표시, 업로드 형식 판정.
+// DB 없이 도는 화자 분리 단위 테스트: 구간 읽기·요약, 분석 프롬프트의 화자 표시, 업로드 형식 판정, AI 화자 추정 답 거르기.
 import type { TranscriptSegment } from '@fantasteel/shared';
 import { buildAnalysisUserMessage, segmentPromptText } from './meeting-analysis.prompt';
 import { isMeetingAudio } from './meeting-audio';
 import { readSegments, summarizeSpeakers } from './meeting-minutes.json';
+import { buildSpeakerUserMessage, pickSpeakerSuggestions, SUGGEST_TRANSCRIPT_MAX } from './meeting-speaker-suggest';
 
 describe('readSegments (화자 칸)', () => {
   it('speaker가 문자열이면 화자 칸을 모두 읽고, 없으면 칸 자체를 만들지 않는다', () => {
@@ -80,5 +81,75 @@ describe('isMeetingAudio', () => {
 
   it('분명한 비오디오 MIME은 확장자가 오디오여도 거절한다', () => {
     expect(isMeetingAudio('text/plain', 'a.mp3')).toBe(false);
+  });
+});
+
+describe('AI 화자 추정 (이슈 #406)', () => {
+  const attendees = [
+    { employeeId: 11, employeeName: '정다은', departmentName: '구매부', roleLabel: '구매' },
+    { employeeId: 22, employeeName: '최준혁', departmentName: '구매부', roleLabel: '구매 부서장' },
+    { employeeId: 33, employeeName: '김품질', departmentName: '품질부', roleLabel: '품질' },
+  ];
+  const labels = ['SPEAKER_1', 'SPEAKER_2', 'SPEAKER_3'];
+
+  it('프롬프트에 번호 붙은 참석자, 화면과 같은 화자 이름, 연결된 이름 대신 이름표를 넣는다', () => {
+    const text = buildSpeakerUserMessage({
+      attendees,
+      labels: ['SPEAKER_1', 'SPEAKER_2'],
+      segments: [
+        { start: 0, end: 1, text: '구매부 정다은입니다', speaker: 'SPEAKER_1', speakerEmployeeId: 11, speakerName: '정다은' },
+        { start: 1, end: 2, text: '네', speaker: 'SPEAKER_2' },
+        { start: 2, end: 3, text: '잡음', speaker: null },
+      ],
+    });
+    expect(text).toContain('1. 정다은 (구매부, 구매)\n2. 최준혁 (구매부, 구매 부서장)');
+    expect(text).toContain('화자: 화자1, 화자2');
+    expect(text).toContain('[1] 화자1: 구매부 정다은입니다\n[2] 화자2: 네\n[3] (화자 모름): 잡음');
+  });
+
+  it('긴 전사는 상한까지만 넣는다', () => {
+    const segments = Array.from({ length: 2000 }, (_, i) => ({ start: i, end: i + 1, text: '가'.repeat(50), speaker: 'SPEAKER_1' }));
+    const text = buildSpeakerUserMessage({ attendees, labels: ['SPEAKER_1'], segments });
+    const transcript = text.slice(text.indexOf('<transcript>'));
+    expect(transcript.length).toBeLessThan(SUGGEST_TRANSCRIPT_MAX + 100);
+    expect(transcript).not.toContain('[2000]');
+  });
+
+  it('번호를 사원 id로 바꾸고, 답에서 빠진 화자는 모름으로 채운다', () => {
+    const result = pickSpeakerSuggestions({ speakers: [{ speaker: '화자1', attendeeNo: 1, reason: "[1] '정다은입니다'" }, { speaker: '화자 2', attendeeNo: null, reason: '근거 없음' }] }, labels, attendees);
+    expect(result).toEqual([
+      { label: 'SPEAKER_1', employeeId: 11, reason: "[1] '정다은입니다'" },
+      { label: 'SPEAKER_2', employeeId: null, reason: '근거 없음' },
+      { label: 'SPEAKER_3', employeeId: null, reason: '' },
+    ]);
+  });
+
+  it('목록 밖 번호·소수는 모름, 없는 화자는 버리고, 같은 사람을 둘에 고르면 둘 다 비운다', () => {
+    const result = pickSpeakerSuggestions(
+      {
+        speakers: [
+          { speaker: '화자1', attendeeNo: 2, reason: 'a' },
+          { speaker: '화자2', attendeeNo: 2, reason: 'b' },
+          { speaker: '화자3', attendeeNo: 9, reason: 'c' },
+          { speaker: '화자7', attendeeNo: 3, reason: 'd' },
+          { speaker: 'SPEAKER_3', attendeeNo: 3, reason: '두 번째 답은 무시' },
+        ],
+      },
+      labels,
+      attendees,
+    );
+    expect(result?.map((r) => [r.label, r.employeeId])).toEqual([
+      ['SPEAKER_1', null],
+      ['SPEAKER_2', null],
+      ['SPEAKER_3', null],
+    ]);
+    expect(result?.[0].reason).toBe('같은 사람을 다른 화자에도 골라 비워 뒀어요');
+    expect(pickSpeakerSuggestions({ speakers: [{ speaker: '화자1', attendeeNo: 1.5, reason: '' }] }, labels, attendees)?.[0].employeeId).toBeNull();
+  });
+
+  it('모양이 틀리거나 알아볼 화자가 하나도 없으면 null', () => {
+    expect(pickSpeakerSuggestions(null, labels, attendees)).toBeNull();
+    expect(pickSpeakerSuggestions({ speakers: 'x' }, labels, attendees)).toBeNull();
+    expect(pickSpeakerSuggestions({ speakers: [{ speaker: '화자9', attendeeNo: 1, reason: '' }] }, labels, attendees)).toBeNull();
   });
 });
