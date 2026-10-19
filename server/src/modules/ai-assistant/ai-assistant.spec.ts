@@ -4,6 +4,7 @@ import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
 import type { AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantTurn } from '@fantasteel/shared';
 import type { AiChatThreadService } from './chat/ai-chat-thread.service';
+import type { AiResearchCardService } from './ai-research-card.service';
 import type { AiChatQuestionInput } from './chat/ai-chat-thread.view';
 import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmRequestError } from '../llm/llm.client';
@@ -242,7 +243,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {

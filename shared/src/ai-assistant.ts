@@ -2,6 +2,7 @@
 import type { Role } from './codes';
 import type { MeetingCandidate, MeetingCandidateUpdateInput } from './meeting-minutes';
 import type { AiScreenMapEntry, AiScreenTool } from './ai-screen-control';
+import type { AiResearchSeed } from './ai-research';
 
 /** 지난 대화 한 줄. 저장한 대화(threadId)면 서버가 DB에서 읽고, 아니면 화면이 최근 것을 함께 보낸다 (회의 질문) */
 export interface AiAssistantTurn {
@@ -417,8 +418,21 @@ export interface AiTaskUpdateCard {
   issues: string[];
 }
 
+/**
+ * 심층 조사 만들기 카드 (이슈 #408). 대화에서 "심층 조사해 줘"라고 하면 AI가 만든다. 사용자가 질문을 확인하고 [실행]을 눌러야 조사를 만든다.
+ * 바로 앞(또는 이 답)의 웹 검색 결과를 함께 넘길지는 화면이 정한다(seed).
+ */
+export interface AiResearchCard {
+  key: string;
+  kind: 'RESEARCH';
+  title: string;
+  /** 조사 질문 (카드에서 고칠 수 있다) */
+  question: string;
+  issues: string[];
+}
+
 /** 실행 카드 한 장 (REQ-AST-005). 종류는 kind로 가른다 */
-export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard | AiNotionCard | AiScheduleEventUpdateCard | AiTaskUpdateCard;
+export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard | AiNotionCard | AiScheduleEventUpdateCard | AiTaskUpdateCard | AiResearchCard;
 export type AiActionCardKind = AiActionCard['kind'];
 
 /** POST ai-assistant/action-cards/execute. 카드에서 사용자가 확인·수정한 값을 그대로 보낸다 (서버가 다시 검증한다) */
@@ -432,7 +446,8 @@ export type AiActionCardExecuteInput =
   | { kind: 'NOTION_PAGE_APPEND'; nonce: string; notionPageId: string; content: string }
   | { kind: 'NOTION_PAGE_UPDATE'; nonce: string; notionPageId: string; pageTitle?: string; edits: AiNotionTextEdit[] }
   | { kind: 'SCHEDULE_EVENT_UPDATE'; scheduleEventId: number; title: string; description: string | null; startAt: string; endAt: string }
-  | { kind: 'TASK_UPDATE'; taskId: number; title?: string; description?: string | null; dueDate?: string; complete?: boolean };
+  | { kind: 'TASK_UPDATE'; taskId: number; title?: string; description?: string | null; dueDate?: string; complete?: boolean }
+  | { kind: 'RESEARCH'; question: string; seed?: AiResearchSeed };
 
 /** 실행 요청 본문: 카드 값 + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399) */
 export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { chat?: AiChatCardRef };
@@ -447,7 +462,7 @@ export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput
 export interface AiActionCardExecuteResult {
   kind: AiActionCardKind;
   registered: {
-    type: 'task' | 'schedule_event' | 'action_draft' | 'sales_order' | 'hot_rolling' | 'heat_plan' | 'past_case' | 'notion_page';
+    type: 'task' | 'schedule_event' | 'action_draft' | 'sales_order' | 'hot_rolling' | 'heat_plan' | 'past_case' | 'notion_page' | 'research';
     /** ERP 행 id. Notion 페이지는 ERP 행이 없어 0 */
     id: number;
     /** 번호가 있는 것 (수주번호·생산계획 번호·사례 번호) */

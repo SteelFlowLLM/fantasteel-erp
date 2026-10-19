@@ -1,7 +1,7 @@
-import { AI_RESEARCH_LIMITS, type AiResearchBudget, type AiResearchPlan } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed } from '@fantasteel/shared';
 import type { ChatMessage, LlmJsonSchema } from '../llm/llm.client';
 import { seoulToday } from '../../common/time/seoul-date';
-import { cutText, UNTRUSTED_NOTE } from '../ai-assistant/web/web-text';
+import { cutText, UNTRUSTED_NOTE, wrapUntrusted } from '../ai-assistant/web/web-text';
 import { DEFAULT_RESEARCH_LIMITS, researchLimits, type ResearchLimits } from './ai-research.config';
 import { evenEvidence, notesFor, recentEvidence, sourceCatalog } from './ai-research.evidence';
 import { queryKey, type StoredAudit, type StoredSource, type StoredState } from './ai-research.rules';
@@ -257,11 +257,24 @@ export function buildChartMessages(input: FinalPromptInput): ChatMessage[] {
   return assemble(dated(CHART_SYSTEM_PROMPT, input.today), fixed, input.sources, 'final', finalEvidence(input, limits), '차트 제안을 JSON으로 답해요.', limits.promptChars);
 }
 
-export function buildPlanMessages(question: string, today?: string): ChatMessage[] {
+/** 먼저 알아본 것이 있을 때 계획에 붙이는 부탁 (이슈 #408) */
+export const SEED_PLAN_RULE =
+  '위 [먼저 찾아본 것]은 철강맨AI가 웹 검색으로 간단히 훑어본 내용이에요. 확인된 사실이 아니라 출발점이에요. 같은 내용을 다시 찾는 단계는 줄이고, 간단 답에서 근거가 약하거나 빠진 부분, 수치·1차 자료 확인, 반대 근거처럼 더 깊이 볼 부분을 중심으로 단계를 짜요.';
+
+export function buildPlanMessages(question: string, today?: string, seed?: AiResearchSeed | null): ChatMessage[] {
+  const blocks = [questionBlock(question)];
+  if (seed) blocks.push(seedBlock(seed), SEED_PLAN_RULE);
   return [
     { role: 'system', content: dated(PLAN_SYSTEM_PROMPT, today) },
-    { role: 'user', content: `${questionBlock(question)}\n\n조사 계획을 JSON으로 답해요.` },
+    { role: 'user', content: `${blocks.join('\n\n')}\n\n조사 계획을 JSON으로 답해요.` },
   ];
+}
+
+/** 간단 답과 그 출처 (웹 내용을 보고 쓴 글이라 감싼다) */
+function seedBlock(seed: AiResearchSeed): string {
+  const sources = seed.sources.map((s) => `- ${cutText(s.title.replace(/\s+/g, ' '), 100)} — ${s.url}`).join('\n');
+  const body = `[간단 답]\n${seed.answer || '(없음)'}\n\n[간단 답의 출처]\n${sources || '(없음)'}`;
+  return `[먼저 찾아본 것]\n${UNTRUSTED_NOTE}\n${wrapUntrusted('research:seed', body)}`;
 }
 
 /** 보고서가 길이 한도에 걸렸을 때 이어 쓰기 부탁 (앞 답 다음에 붙인다) */

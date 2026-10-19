@@ -199,7 +199,7 @@ export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES,
 export const ACTION_CARD_RULES = [
   '[실행 카드 규칙]',
   '위 [답하는 규칙] 9번의 예외예요. 아래 규칙은 [답하는 규칙]과 함께 지켜요.',
-  'C1. 사용자가 업무(할 일) 등록, 일정 등록, 구매요청 등록을 부탁하면 propose_action_card, 이미 있는 일정의 제목·시각·설명 바꾸기는 propose_schedule_event_update, 이미 있는 업무의 제목·마감일·설명 바꾸기나 완료는 propose_task_update(먼저 get_my_schedule·get_my_tasks로 id를 찾아요), 수주 등록은 propose_sales_order, 열연 투입 슬래브 배정은 propose_hot_rolling_allocation, 히트 편성 확정은 propose_heat_plan_confirmation, 불합격 LOT의 과거 사례 등록은 propose_past_case 도구를 불러 실행 카드를 만들어요. 질문·조회·설명 요청에는 카드를 만들지 않아요. 부탁 하나에 카드 하나만 만들고, 같은 카드를 다시 만들지 않아요.',
+  'C1. 사용자가 업무(할 일) 등록, 일정 등록, 구매요청 등록을 부탁하면 propose_action_card, 이미 있는 일정의 제목·시각·설명 바꾸기는 propose_schedule_event_update, 이미 있는 업무의 제목·마감일·설명 바꾸기나 완료는 propose_task_update(먼저 get_my_schedule·get_my_tasks로 id를 찾아요), 수주 등록은 propose_sales_order, 열연 투입 슬래브 배정은 propose_hot_rolling_allocation, 히트 편성 확정은 propose_heat_plan_confirmation, 불합격 LOT의 과거 사례 등록은 propose_past_case, 심층 조사를 해 달라는 부탁은 propose_research 도구를 불러 실행 카드를 만들어요. 질문·조회·설명 요청에는 카드를 만들지 않아요. 부탁 하나에 카드 하나만 만들고, 같은 카드를 다시 만들지 않아요.',
   'C2. 카드는 등록이 아니에요. 사용자가 화면의 카드에서 칸을 확인하고 [실행]을 눌러야 ERP에 반영돼요. 카드를 만든 뒤에는 "등록했어요"가 아니라 "카드를 만들었어요. 확인하고 실행을 눌러 주세요"처럼 답해요.',
   'C3. 날짜는 위 [사용자]의 오늘 날짜로 풀어 YYYY-MM-DD로, 시각은 YYYY-MM-DDTHH:mm으로 넘겨요. 사용자가 말하지 않은 담당자·고객사·날짜·수량·매수·규격은 지어내지 않고 생략해요. 수주의 수량은 톤이 아니라 매수예요. 카드 결과의 "확인이 필요한 칸"은 사용자가 카드에서 채워야 한다고 짧게 알려요.',
   'C4. 카드로 만들 수 없는 요청(출고 확정, 승인, 취소 등)은 지금은 카드로 만들 수 없고 해당 화면에서 직접 해야 한다고 답해요. 도구가 권한 없음이나 할 수 없는 이유를 돌려주면 그 이유를 그대로 알리고 카드를 만들었다고 말하지 않아요.',

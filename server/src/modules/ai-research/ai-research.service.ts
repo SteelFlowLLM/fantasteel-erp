@@ -7,6 +7,7 @@ import {
   type AiResearchPlan,
   type AiResearchRunSummaryView,
   type AiResearchRunView,
+  type AiResearchSeed,
   type AiResearchStatus,
   type AuthUser,
   type PageResult,
@@ -19,7 +20,7 @@ import { NotionPageService } from '../integration/notion/notion-page.service';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery } from './dto/ai-research.dto';
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, queryKey, readBudget, storedPlan, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, seedSources, storedPlan, storedSeed, storedState } from './ai-research.rules';
 import { AiResearchRunner } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
@@ -57,9 +58,10 @@ export class AiResearchService {
 
   async create(user: AuthUser, dto: CreateAiResearchRunDto): Promise<AiResearchRunView> {
     if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
+    const seed = normalizeSeed(dto.seed);
     const run = await this.prisma.$transaction(async (tx) => {
       await this.lockActiveSlot(tx, user);
-      return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget) } });
+      return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget) }, ...seedColumns(seed) });
     });
     this.runner.wake();
     return toRunView(run, [], 0);
@@ -77,13 +79,16 @@ export class AiResearchService {
       await this.lockActiveSlot(tx, user);
       const budget = { ...readBudget(source.budget) };
       const plan = storedPlan(source.plan);
-      if (!plan) return this.repository.create(tx, { employeeId: user.employeeId, question: source.question, budget });
+      // 먼저 알아본 것도 함께 옮긴다 (출처는 그것만 다시 넣고, 원래 조사가 모은 출처는 새로 찾는다)
+      const seed = seedColumns(storedSeed(source.seed));
+      if (!plan) return this.repository.create(tx, { employeeId: user.employeeId, question: source.question, budget, ...seed });
       const run = await this.repository.createPlanned(tx, {
         employeeId: user.employeeId,
         question: source.question,
         budget,
         plan: plan as unknown as Prisma.InputJsonObject,
         researchState: { ...EMPTY_STATE } as unknown as Prisma.InputJsonObject,
+        ...seed,
       });
       await this.repository.appendEvents(tx, run.id, [{ type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision: run.planRevision, fallback: false, copiedFrom: source.id } }]);
       return run;
@@ -257,4 +262,10 @@ function conflictFor(run: AiResearchRun, revision: number): AppException {
   if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) return new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고치거나 시작할 수 있어요');
   if (run.planRevision !== revision) return new AppException('RES-003');
   return new AppException('RES-002');
+}
+
+/** seed와 그 출처를 저장할 열로 (없으면 빈 객체: 열 기본값을 쓴다) */
+function seedColumns(seed: AiResearchSeed | null): { seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray } {
+  if (!seed) return {};
+  return { seed: seed as unknown as Prisma.InputJsonObject, sources: seedSources(seed) as unknown as Prisma.InputJsonArray };
 }

@@ -1027,6 +1027,7 @@ Table ai_research_run {
   id int [pk, increment]
   employee_id int [not null, ref: > employee.id, note: '조사를 만든 사원. 본인만 보고 고친다']
   question text [not null, note: '조사 질문']
+  seed jsonb [note: '철강맨AI에서 먼저 알아본 것 {answer, sources:[{title, url}]} (이슈 #408). 웹 검색 답·대화 카드에서 만들 때만. 계획을 세울 때 참고하고, 출처는 sources에 미리 넣는다']
   status varchar [not null, note: 'PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING·COMPLETED·FAILED·CANCELLED (CHECK ai_research_run_status_check). 공통 코드 아님']
   plan jsonb [note: '조사 계획 {title, steps:[{title, query}]} (6단계까지)']
   plan_revision int [not null, default: 0, note: '계획을 고칠 때마다 1씩 오른다. 시작 요청의 revision과 같아야 시작한다']

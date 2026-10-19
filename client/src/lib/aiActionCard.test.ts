@@ -143,3 +143,14 @@ describe('열연 배정·히트 편성·사례 카드', () => {
     expect(executeInputOf(pastCase())).toMatchObject({ kind: 'PAST_CASE', lotId: 5, title: '성분 불합격', occurredDate: '2026-10-10' });
   });
 });
+
+describe('심층 조사 카드 (이슈 #408)', () => {
+  const research: AiActionCard = { key: 'a1', kind: 'RESEARCH', title: '심층 조사 만들기', question: '  열연 가격 전망  ', issues: [] };
+
+  it('질문이 2자 미만이면 채울 칸, 실행 요청에는 다듬은 질문만 (seed는 카드 부품이 붙인다)', () => {
+    expect(missingOfCard(research)).toEqual([]);
+    expect(missingOfCard({ ...research, question: ' x ' })).toEqual(['조사할 질문']);
+    expect(executeInputOf(research)).toEqual({ kind: 'RESEARCH', question: '열연 가격 전망' });
+    expect(needsConfirmation(research)).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 # ai-research — 철강맨AI 심층 조사
 
-> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
+> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #408(철강맨AI 웹 검색 답·대화 카드에서 이어 가기), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
 > Unsloth Studio의 deep research 흐름(계획 → 검색·읽기 반복 → 점검 → 인용 보고서)을 참고해 새로 썼다(코드는 가져오지 않음).
 
 ## 1. 담당 범위
@@ -10,11 +10,11 @@
 - 웹 검색·페이지 읽기는 ai-assistant 모듈의 웹 도구(`AssistantWebToolbox` — 같은 검색 캐시·1분 한도·SSRF 막기·worker 글 뽑기·동시 4개)를 그대로 쓴다. 이 모듈은 `AiAssistantModule`이 export한 `AssistantWebToolbox`를 받는다.
 - 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · rules(순수 규칙) · prompt · report · view), 공유 타입 `shared/src/ai-research.ts`.
 
-## 2. 테이블 (ERD `ai_research_run`·`ai_research_event`, 마이그레이션 `20261017142607_ai_research`·`20261018090000_ai_research_plus`)
+## 2. 테이블 (ERD `ai_research_run`·`ai_research_event`, 마이그레이션 `20261017142607_ai_research`·`20261018090000_ai_research_plus`·`20261019082940_ai_research_seed`)
 
 | 테이블 | 내용 |
 | --- | --- |
-| `ai_research_run` | 조사 하나. `employee_id`(만든 사원), `question`, `status`(CHECK), `plan` `{title, steps:[{title, query}]}`, `plan_revision`, `budget` `{maxSteps, maxSources}`, `steps_used`, `research_state` `{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?}`, `sources` `[{id, title, url, snippet, readText?, readError?}]`, `audit`, `report`, `charts`(차트 2개까지), `notion_page_url`·`notion_exported_at`(Notion 내보내기), `failure_reason`, `lease_owner`·`lease_expires_at`(맡은 서버 표시), `finished_at` |
+| `ai_research_run` | 조사 하나. `employee_id`(만든 사원), `question`, `seed`(철강맨AI에서 먼저 알아본 것 `{answer, sources:[{title, url}]}`, 이슈 #408), `status`(CHECK), `plan` `{title, steps:[{title, query}]}`, `plan_revision`, `budget` `{maxSteps, maxSources}`, `steps_used`, `research_state` `{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?}`, `sources` `[{id, title, url, snippet, readText?, readError?}]`, `audit`, `report`, `charts`(차트 2개까지), `notion_page_url`·`notion_exported_at`(Notion 내보내기), `failure_reason`, `lease_owner`·`lease_expires_at`(맡은 서버 표시), `finished_at` |
 | `ai_research_event` | 진행 기록(타임라인). `run_id`, `seq`(조사 안 순번, `(run_id, seq)` unique), `type`(CHECK), `payload`(짧은 jsonb) |
 
 - 상태·이벤트 종류는 공통 코드가 아니다(이 기능 안의 값, CHECK로 막음). 작업 로그(business_event)는 남기지 않는다(REQ-LOG-002 이벤트가 아니고 ERP 데이터를 바꾸지 않는다).
@@ -27,7 +27,7 @@
 | 메서드 | 경로 | 본문·쿼리 | 응답 |
 | --- | --- | --- | --- |
 | GET | `ai-research/capabilities` | | `{ available }` — LLM 모델이 정해져 있으면 `true`. `GET ai-assistant/capabilities`의 `deepResearch.available`도 같다 |
-| POST | `ai-research/runs` | `{ question, budget? }` (2~1000자, `budget: { maxSteps?(1~30), maxSources?(1~100) }` 없으면 서버 기본값, 넘으면 400) | 201 `AiResearchRunView` (PLANNING). 모델 없음 409 `RES-005`, 진행 중(PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING) 조사가 이미 **3개**면 409 `RES-006` |
+| POST | `ai-research/runs` | `{ question, budget?, seed? }` (2~1000자, `budget: { maxSteps?(1~30), maxSources?(1~100) }` 없으면 서버 기본값, 넘으면 400. `seed: { answer(4,000자까지), sources:[{title(300자), url(2,000자)}](10개까지) }` — 아래 '철강맨AI에서 이어 가기') | 201 `AiResearchRunView` (PLANNING). 모델 없음 409 `RES-005`, 진행 중(PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING) 조사가 이미 **3개**면 409 `RES-006` |
 | GET | `ai-research/runs` | `?page=1&size=20` (size 50까지) | `PageResult<AiResearchRunSummaryView>` 내 조사, 최근 것부터 |
 | GET | `ai-research/runs/:id` | `?afterSeq=` (기본 0) | `AiResearchRunView`. `events`는 `seq > afterSeq`만(500개까지), `lastSeq`는 지금 마지막 순번 |
 | PUT | `ai-research/runs/:id/plan` | `{ revision, plan: { title, steps: [{ title, query }] } }` (1~6단계, 제목 100자, 검색어 80자) | AWAITING_APPROVAL이고 `revision`이 지금 `planRevision`과 같을 때만 → `planRevision + 1`. 판이 다르면 409 `RES-003`, 다른 상태면 409 `RES-002`, 검색어에 회사 안 정보면 400 `RES-004`, 같은 검색어 두 번이면 400 `COM-004` |
@@ -54,7 +54,7 @@
 PLANNING ─(일꾼: 계획)→ AWAITING_APPROVAL ─(start, 판 확인)→ QUEUED ─(일꾼이 맡음)→ RUNNING ─→ COMPLETED
                          └ PUT plan(판 +1)                                         └→ FAILED
 COMPLETED(canExtend) ─(extend)→ QUEUED          끝나지 않은 상태 ─(cancel)→ CANCELLED
-COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAITING_APPROVAL, 없으면 PLANNING (원래 조사는 그대로)
+COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAITING_APPROVAL, 없으면 PLANNING (원래 조사는 그대로, `seed`와 그 출처도 옮긴다)
 계획이 있는 모든 상태 ─(PATCH title, 판 +1)→ 같은 상태
 ```
 
@@ -156,6 +156,14 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - LLM 설정: 계획·다음 행동·점검·차트는 `RESEARCH_JSON`(temperature 0, 생각 low, JSON 스키마 강제·4,000토큰·3분), 보고서는 `RESEARCH_REPORT`(비생각 샘플링, 생각 끔).
 - JSON 너그럽게 읽기(`parseLenientJson`): 형식대로 오면 그 값, 아니면(서버가 형식을 무시했거나 JSON이 깨졌을 때) 답 글에서 `{`가 나오는 곳마다 짝 맞는 객체를 읽어 조건에 맞는 **마지막** 것, 답 글에 없으면 생각 글(reasoning)에서도 찾는다(글 6만 자·시도 300번까지).
 
+### 철강맨AI에서 이어 가기 (이슈 #408)
+
+- **어디서**: 철강맨AI 패널의 웹 검색 답 아래 [심층 조사로 더 알아보기](질문·간단 답·웹 출처를 넘김), 대화 중 "심층 조사해 줘"에 AI가 만드는 심층 조사 카드(`propose_research`, 실행은 `POST ai-assistant/action-cards/execute`의 `RESEARCH` → 이 모듈의 `create`). 카드는 그 답이나 바로 앞 답이 웹 검색 답이면 그 결과를 넘길지 사용자가 고른다(기본 넘김).
+- **다듬기**(`normalizeSeed`): 간단 답은 보이지 않는 글자를 지우고 4,000자까지, 출처는 http(s)만·같은 주소(`urlKey`) 한 번만·10개까지. 둘 다 비면 seed 없음(질문만으로 계획).
+- **출처**: seed의 출처를 조사 출처 1번부터 미리 넣는다(요약 "철강맨AI 간단 답에서 쓴 출처 (아직 읽지 않음)"). 조사는 이 주소를 읽고 인용할 수 있고 같은 주소를 다시 찾지 않는다. 출처 수 상한(`maxSources`)에 함께 센다.
+- **계획**: 계획 프롬프트에 `[먼저 찾아본 것]`(간단 답·출처, `wrapUntrusted('research:seed')`로 감쌈)과 부탁 `SEED_PLAN_RULE`(이미 확인된 내용을 다시 찾는 단계는 줄이고, 근거가 약하거나 빠진 부분·수치·1차 자료·반대 근거 중심)을 붙인다. 다음 행동·점검·보고서에는 넣지 않는다(간단 답은 확인된 사실이 아니라서 출처로만 쓴다).
+- 화면은 조사 상세의 질문 칸 아래에 접힌 "철강맨AI에서 먼저 알아본 것"으로 보인다(글자로만, 주소는 http(s)만 연다).
+
 ### 회사 안 정보 막기
 
 - 검색어는 공백 정리 → 80자로 자름 → `redactQuery`(이메일·전화·카드·주민번호·키 모양 빼기) → `internalReferenceIn`(업무·LOT 번호 모양이면 막음). 모델이 낸 계획·사용자가 고친 계획(400 `RES-004`)·모델이 고른 검색어(막히면 계획의 다음 검색어로) 모두 거친다. 웹 세션도 한 번 더 본다.
@@ -211,7 +219,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - `ai-research.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 너그러운 JSON(울타리·think·마지막 객체·따옴표 안 중괄호·생각 글), 행동 확인·대신하기(모르는 행동·막힌 검색어·이미 한 검색·모르는/읽은/실패한 출처·출처 없는 끝내기·꽉 찬 출처), 예산·더 조사하기 계산, 검색어 막기·자르기·계획 다듬기, 프롬프트 24,000자 상한·출처 6개·태그 이스케이프, 보고서 인용·링크·출처 목록(http·https만)·제목 이스케이프·끊김 알림, 점검 출처 번호 거르기.
 - 이슈 #384 단위: 환경 변수 예산·상한·조사별 예산, 더 조사하기 min(30, 기본×2), 글자 상한 바꾸기, 차트 숫자 읽기(쉼표·만·%)·없는 숫자/모르는 출처 빼기·점 2개 미만 버리기, Notion 마크다운(태그·링크 막기·표·http만), 보고서 묻기 맥락(감싸기·글자 상한·[n] 출처). `web/pdf-extract.unit.spec.ts`: pdfkit으로 만든 작은 PDF(5KB 안)를 worker에서 읽기·20쪽만·깨진 PDF·시간 초과·`SafeWebPageReader`. `safe-fetch.unit.spec.ts`: PDF 받기·`.pdf` octet-stream·5MB 상한(알린 크기·받는 중).
 - 이슈 #384 2차 단위: 오늘 날짜 첫 줄·글자 상한, 점검·보고서의 계획 전체·모든 단계 기록(넘친 결과 포함)·출처 목록 형식·점검 새 칸, 똑같이 나누기(12,000자 상한·400자 바닥이면 최근만), 다음 행동의 출처 목록 전체·최근 기록 수, 목록 넘침(요약 빼기→뒤 줄 빼기), 옛 조사 기록 만들기, `modelBudget`(모름·32k·131k·8k·상한·환경 변수), 이어 쓰기 메시지·겹침 떼기, 같은 검색(순서·문장부호·되풀이), 점검 스키마, 계획·행동 지시 문구. `llm.client.spec.ts`: `modelContextLength`(불러온 것 먼저·최대값·외부 LLM null).
-- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404.
+- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404. / (이슈 #408) seed 저장·다듬기(같은 주소·http 아닌 주소 뺌)·출처 미리 넣기·계획 프롬프트의 감싼 블록과 부탁·미리 넣은 출처 읽기 → COMPLETED, seed 없으면 null·블록 없음, 출처 11개·답 4,001자·모양 틀림 400, 다시 조사가 seed·출처를 옮김, 심층 조사 카드 실행(다듬은 질문·seed·남의 것 404·짧은 질문 ACT-001·진행 중 3개 RES-006). `ai-research.unit.spec.ts`: `normalizeSeed`·`seedSources`·`storedSeed`, 계획 프롬프트 seed 블록, `proposeResearchCard`.
 
 ## 8. 확인 필요 🟡
 

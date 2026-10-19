@@ -1,7 +1,7 @@
 // 철강맨AI 심층 조사 api (이슈 #378, 문서에 없는 기능). 서버 docs/backend/ai-research.md
 // 진행은 소켓이 아니라 화면이 2~3초마다 afterSeq 다음 이벤트만 받아 간다.
 import type {
-  AiResearchBudget,
+  CreateAiResearchRunInput,
   AiResearchCapabilities,
   AiResearchNotionExportResult,
   AiResearchPlan,
@@ -24,7 +24,7 @@ export const aiResearchApi = {
   list: (): Promise<PageResult<AiResearchRunSummaryView>> => serverRequest('GET', '/ai-research/runs', { query: { page: 1, size: AI_RESEARCH_LIST_SIZE } }),
   /** afterSeq 다음 이벤트만 받는다 */
   get: (id: number, afterSeq: number): Promise<AiResearchRunView> => serverRequest('GET', `/ai-research/runs/${id}`, { query: { afterSeq } }),
-  create: (input: { question: string; budget?: Partial<AiResearchBudget> }): Promise<AiResearchRunView> => serverRequest('POST', '/ai-research/runs', { body: input }),
+  create: (input: CreateAiResearchRunInput): Promise<AiResearchRunView> => serverRequest('POST', '/ai-research/runs', { body: input }),
   exportToNotion: (id: number): Promise<AiResearchNotionExportResult> => serverRequest('POST', `/ai-research/runs/${id}/notion-export`),
   updatePlan: (id: number, revision: number, plan: AiResearchPlan): Promise<AiResearchRunView> => serverRequest('PUT', `/ai-research/runs/${id}/plan`, { body: { revision, plan } }),
   /** 제목만 바꾼다 (계획이 있으면 어느 상태에서나, 판 +1) */

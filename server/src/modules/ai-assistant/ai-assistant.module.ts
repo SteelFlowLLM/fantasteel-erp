@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
+import { AiResearchModule } from '../ai-research/ai-research.module';
 import { BusinessEventModule } from '../business-event/business-event.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
 import { IntegrationModule } from '../integration/integration.module';
@@ -22,6 +23,7 @@ import { ShipmentModule } from '../shipment/shipment.module';
 import { AiActionCardService } from './ai-action-card.service';
 import { AiOpsCardService } from './ai-ops-card.service';
 import { AiUpdateCardService } from './ai-update-card.service';
+import { AiResearchCardService } from './ai-research-card.service';
 import { AiNotionCardService } from './notion/ai-notion-card.service';
 import { AssistantNotionToolbox } from './notion/assistant-notion-toolbox';
 import { AiAssistantController } from './ai-assistant.controller';
@@ -58,6 +60,8 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     MessageActionModule,
     // 내 일정 조회·일정 고치기 카드가 일정 화면과 같은 service를 쓴다 (이슈 #398)
     ScheduleEventModule,
+    // 심층 조사 카드(이슈 #408)가 조사 만들기 service를 쓴다. 심층 조사도 이 모듈의 웹 도구를 써서 서로 부르므로 forwardRef
+    forwardRef(() => AiResearchModule),
   ],
   controllers: [AiAssistantController],
   providers: [
@@ -70,6 +74,7 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     AiActionCardService,
     AiOpsCardService,
     AiUpdateCardService,
+    AiResearchCardService,
     AiNotionCardService,
     // Notion 도구(이슈 #398): 읽기는 IntegrationModule의 NotionAssistantService, 쓰기 카드는 AiNotionCardService
     { provide: AssistantNotionToolbox, useFactory: (notion: NotionAssistantService, cards: AiNotionCardService) => new AssistantNotionToolbox(notion, cards), inject: [NotionAssistantService, AiNotionCardService] },

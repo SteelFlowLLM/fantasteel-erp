@@ -1,6 +1,7 @@
 import type { AiActionCardService } from '../ai-action-card.service';
 import type { AiOpsCardService } from '../ai-ops-card.service';
 import type { AiUpdateCardService } from '../ai-update-card.service';
+import { proposeResearchCard } from '../ai-research-card.service';
 import { OPEN_ACCESS, type AssistantTool } from './assistant-tool';
 
 export const ACTION_CARD_TOOL = 'propose_action_card';
@@ -10,9 +11,10 @@ export const HEAT_PLAN_CARD_TOOL = 'propose_heat_plan_confirmation';
 export const PAST_CASE_CARD_TOOL = 'propose_past_case';
 export const SCHEDULE_UPDATE_CARD_TOOL = 'propose_schedule_event_update';
 export const TASK_UPDATE_CARD_TOOL = 'propose_task_update';
+export const RESEARCH_CARD_TOOL = 'propose_research';
 
 /** 카드를 만드는 도구 전부. 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 모델에 알린다 (Notion 카드 도구는 notion/에서 따로) */
-export const ACTION_CARD_TOOLS: readonly string[] = [ACTION_CARD_TOOL, SALES_ORDER_CARD_TOOL, HOT_ROLLING_CARD_TOOL, HEAT_PLAN_CARD_TOOL, PAST_CASE_CARD_TOOL, SCHEDULE_UPDATE_CARD_TOOL, TASK_UPDATE_CARD_TOOL];
+export const ACTION_CARD_TOOLS: readonly string[] = [ACTION_CARD_TOOL, SALES_ORDER_CARD_TOOL, HOT_ROLLING_CARD_TOOL, HEAT_PLAN_CARD_TOOL, PAST_CASE_CARD_TOOL, SCHEDULE_UPDATE_CARD_TOOL, TASK_UPDATE_CARD_TOOL, RESEARCH_CARD_TOOL];
 
 const NOT_REGISTERED = '실행 카드를 화면에 만들었어요. 아직 반영되지 않았어요. 사용자가 카드를 확인하고 실행을 눌러야 반영돼요';
 
@@ -161,6 +163,28 @@ export function actionCardTools(cards: AiActionCardService, ops: AiOpsCardServic
       async run(args, user) {
         const card = await updates.proposeTask(user, args);
         return { label: '실행 카드', cards: [card], data: { 결과: NOT_REGISTERED, 카드: { 종류: card.kind, 제목: card.title, 마감일: card.dueDate, 완료: card.complete } } };
+      },
+    },
+    {
+      access: OPEN_ACCESS,
+      definition: {
+        name: RESEARCH_CARD_TOOL,
+        description:
+          '사용자가 심층 조사(여러 번 검색하고 읽어 출처 달린 보고서 쓰기)를 해 달라고 직접 부탁했을 때 심층 조사 만들기 카드를 만든다. 간단한 질문이나 웹 검색으로 답할 수 있는 질문에는 쓰지 않는다. 사용자가 카드에서 실행을 눌러야 조사가 만들어지고, 조사 계획을 보고 고친 뒤 시작한다. 앞 답의 웹 검색 결과는 화면이 함께 넘기므로 question에는 조사할 질문만 쓴다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: '조사할 질문 한두 문장. 대화 맥락을 풀어 혼자 읽어도 알 수 있게 쓴다(예: "그거" 대신 대상 이름). 회사 안 정보(고객사·LOT 번호·사원)는 넣지 않는다',
+            },
+          },
+          required: ['question'],
+        },
+      },
+      async run(args) {
+        const card = proposeResearchCard(args);
+        return { label: '실행 카드', cards: [card], data: { 결과: '심층 조사 카드를 화면에 만들었어요. 아직 조사를 만들지 않았어요. 사용자가 카드를 확인하고 실행을 눌러야 만들어져요', 카드: { 종류: card.kind, 질문: card.question } } };
       },
     },
   ];

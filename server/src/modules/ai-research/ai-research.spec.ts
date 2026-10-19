@@ -4,7 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { AiAssistantReplyView, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
+import type { AiActionCardExecuteResult, AiAssistantReplyView, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { AppModule } from '../../app.module';
@@ -15,6 +15,8 @@ import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
 import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonOptions, type LlmJsonSchema, type LlmToolMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { AiResearchRunner } from './ai-research.runner';
+import { SEED_PLAN_RULE } from './ai-research.prompt';
+import { SEED_SOURCE_SNIPPET } from './ai-research.rules';
 
 /** parseError: JSON이 깨진 답, error: LLM 연결 실패, hang: 끊길(abort) 때까지 기다림 */
 type Turn = Record<string, unknown> | { parseError: string } | { error: string } | { hang: true };
@@ -842,6 +844,93 @@ describe('심층 조사 — 계획 저장·제목 바꾸기·다시 조사 (이�
     for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-research/runs', ownerCookie, { question: `동시 진행 ${i}` })).status).toBe(201);
     const full = await call('POST', `/ai-research/runs/${created.body.data.id}/rerun`, ownerCookie);
     expect(full.status).toBe(409);
+    expect(full.body.error?.code).toBe('RES-006');
+  });
+});
+
+describe('심층 조사 — 철강맨AI에서 이어 가기 (이슈 #408)', () => {
+  const seed = {
+    answer: '열연 코일 가격은 최근 올랐어요 [1]. 원료값 때문이라는 말이 있어요.',
+    sources: [
+      { title: '열연 가격 기사', url: 'https://news.example.kr/hot-coil' },
+      // 같은 주소(끝 / 만 다름)·http가 아닌 주소는 서버가 뺀다
+      { title: '같은 기사', url: 'https://news.example.kr/hot-coil/' },
+      { title: 'Notion 메모', url: 'notion://page/abc' },
+      { title: '철강 협회 통계', url: 'https://steel.example.or.kr/stats' },
+    ],
+  };
+  const planPrompts = () =>
+    llmClient.chatJsonWithText.mock.calls.filter(([, , , format]) => format.name === 'research_plan').map(([, , messages]) => (messages as ChatMessage[]).map((m) => m.content).join('\n'));
+
+  it('먼저 알아본 것을 넘기면 저장하고, 출처를 조사 출처로 미리 넣고, 계획 프롬프트에 함께 준다. 미리 넣은 출처는 읽을 수 있다', async () => {
+    llmClient.chatJsonWithText.mockClear();
+    const created = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '열연 코일 가격이 왜 올랐나', seed, budget: { maxSteps: 4, maxSources: 20 } });
+    expect(created.status).toBe(201);
+    const run = created.body.data;
+    expect(run.seed).toEqual({ answer: seed.answer, sources: [seed.sources[0], seed.sources[3]] });
+    expect(run.sources).toEqual([
+      { id: 1, title: '열연 가격 기사', url: 'https://news.example.kr/hot-coil', snippet: SEED_SOURCE_SNIPPET, read: false },
+      { id: 2, title: '철강 협회 통계', url: 'https://steel.example.or.kr/stats', snippet: SEED_SOURCE_SNIPPET, read: false },
+    ]);
+
+    expect(await runner.processNext()).toBe(true);
+    const prompt = planPrompts().at(-1) ?? '';
+    expect(prompt).toContain('[먼저 찾아본 것]');
+    expect(prompt).toContain(seed.answer);
+    expect(prompt).toContain('https://steel.example.or.kr/stats');
+    expect(prompt).toContain(SEED_PLAN_RULE);
+    // 간단 답은 웹 내용을 보고 쓴 글이라 감싼다
+    expect(prompt).toMatch(/<untrusted_web_content[^>]*>[\s\S]*열연 코일 가격은 최근 올랐어요/);
+
+    const planned = await getRun(run.id);
+    expect(planned.status).toBe('AWAITING_APPROVAL');
+    expect(planned.sources).toHaveLength(2);
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: planned.planRevision });
+    turns = [{ action: 'read', query: '', sourceId: 2, researchState: state('통계를 읽었어요') }];
+    reportText = '보고서 [2]';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(readUrls).toContain('https://steel.example.or.kr/stats');
+    expect(done.sources.find((s) => s.id === 2)?.read).toBe(true);
+    expect(done.seed).toEqual(run.seed);
+  });
+
+  it('먼저 알아본 것 없이 만들면 seed는 null이고 계획 프롬프트에 블록이 없다. 상한을 넘으면 400', async () => {
+    llmClient.chatJsonWithText.mockClear();
+    const plain = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '질문만 있는 조사' });
+    expect(plain.body.data).toMatchObject({ seed: null, sources: [] });
+    await runner.processNext();
+    expect(planPrompts().at(-1)).not.toContain('[먼저 찾아본 것]');
+
+    const tooMany = { answer: '답', sources: Array.from({ length: 11 }, (_, i) => ({ title: `출처 ${i}`, url: `https://example.com/${i}` })) };
+    expect((await call('POST', '/ai-research/runs', ownerCookie, { question: '출처가 많은 조사', seed: tooMany })).status).toBe(400);
+    expect((await call('POST', '/ai-research/runs', ownerCookie, { question: '답이 긴 조사', seed: { answer: 'x'.repeat(4001), sources: [] } })).status).toBe(400);
+    expect((await call('POST', '/ai-research/runs', ownerCookie, { question: '모양이 틀린 조사', seed: { answer: '답', sources: [{ url: 'https://example.com' }] } })).status).toBe(400);
+  });
+
+  it('다시 조사는 먼저 알아본 것과 그 출처도 함께 옮긴다', async () => {
+    const created = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '다시 조사할 이어 가기', seed });
+    await call('POST', `/ai-research/runs/${created.body.data.id}/cancel`, ownerCookie);
+    const rerun = await call<AiResearchRunView>('POST', `/ai-research/runs/${created.body.data.id}/rerun`, ownerCookie);
+    expect(rerun.body.data).toMatchObject({ status: 'PLANNING', seed: created.body.data.seed, sources: created.body.data.sources });
+  });
+
+  it('철강맨AI의 심층 조사 카드를 실행하면 같은 규칙으로 조사를 만든다 (질문이 짧으면 ACT-001, 진행 중 3개면 RES-006)', async () => {
+    const executed = await call<AiActionCardExecuteResult>('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: '  카드로 만든 조사  ', seed });
+    expect(executed.status).toBe(201);
+    expect(executed.body.data).toMatchObject({ kind: 'RESEARCH', registered: { type: 'research' } });
+    const run = await getRun(executed.body.data.registered.id);
+    expect(run).toMatchObject({ status: 'PLANNING', question: '카드로 만든 조사', seed: { answer: seed.answer } });
+    // 남의 조사로는 보이지 않는다
+    expect((await call('GET', `/ai-research/runs/${run.id}`, otherCookie)).body.error?.code).toBe('RES-001');
+
+    const short = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: ' x ' });
+    expect(short.status).toBe(400);
+    expect(short.body.error?.code).toBe('ACT-001');
+
+    for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: `카드 조사 ${i}` })).status).toBe(201);
+    const full = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: '네 번째 카드 조사' });
     expect(full.body.error?.code).toBe('RES-006');
   });
 });

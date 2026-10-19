@@ -1,6 +1,7 @@
 // AI 어시스턴트 실행 카드 (REQ-AST-005). 카드는 서버에 저장하지 않아 화면이 사용자가 고친 값을 들고 있다가, 실행할 때 그대로 보낸다.
 // 업무·일정·구매요청 카드의 필수 칸 규칙은 회의록 후보와 같은 shared의 missingFieldsOf를 쓰고, 값의 뜻은 서버가 실행할 때 다시 검증한다.
 import {
+  AI_RESEARCH_LIMITS,
   missingFieldsOf,
   type AiActionCard,
   type AiActionCardExecuteInput,
@@ -28,6 +29,7 @@ export const CARD_KIND_LABEL = {
   NOTION_PAGE_UPDATE: 'Notion 고치기',
   SCHEDULE_EVENT_UPDATE: '일정 고치기',
   TASK_UPDATE: '업무 고치기',
+  RESEARCH: '심층 조사',
 } as const satisfies Record<AiActionCardKind, string>;
 
 type Registered = AiActionCardExecuteResult['registered'];
@@ -42,6 +44,7 @@ export const CARD_RESULT: Record<Registered['type'], { message: (registered: Reg
   heat_plan: { message: (r) => `${r.no ?? '생산계획'}의 히트 편성을 확정했어요`, href: () => '/production/plans', linkLabel: () => '생산계획 보기' },
   past_case: { message: (r) => `과거 사례 ${r.no ?? ''}를 등록했어요`, href: () => '/past-cases', linkLabel: () => '과거 사례 보기' },
   notion_page: { message: (r) => (r.note ? `Notion에 반영했어요 (Notion 알림: ${r.note})` : 'Notion에 반영했어요'), href: (r) => r.url ?? '', linkLabel: () => 'Notion에서 열기', external: true },
+  research: { message: () => '심층 조사를 만들었어요. 계획을 확인하고 시작해 주세요', href: (r) => `/ai-research?id=${r.id}`, linkLabel: () => '조사 화면 열기' },
 };
 
 export const isNotionCard = (card: AiActionCard): card is AiNotionCard => card.kind === 'NOTION_PAGE_CREATE' || card.kind === 'NOTION_PAGE_APPEND' || card.kind === 'NOTION_PAGE_UPDATE';
@@ -91,6 +94,8 @@ export function missingOfCard(card: AiActionCard): string[] {
       return card.edits.length === 0 && card.newTitle === null ? ['바꿀 내용'] : [];
     case 'SCHEDULE_EVENT_UPDATE':
       return card.scheduleEventTitle.trim() === '' ? ['제목'] : [];
+    case 'RESEARCH':
+      return card.question.trim().length < AI_RESEARCH_LIMITS.questionMin ? ['조사할 질문'] : [];
     default:
       return missingFieldsOf(card);
   }
@@ -135,6 +140,9 @@ export function executeInputOf(card: AiActionCard): AiActionCardExecuteInput {
       return { kind: card.kind, scheduleEventId: card.scheduleEventId, title: card.scheduleEventTitle, description: card.scheduleEventDescription, startAt: card.startAt, endAt: card.endAt };
     case 'TASK_UPDATE':
       return taskUpdateInputOf(card);
+    case 'RESEARCH':
+      // 앞 답의 웹 검색 결과(seed)는 카드가 아니라 대화에서 오므로 카드 부품이 붙인다
+      return { kind: 'RESEARCH', question: card.question.trim() };
     default:
       return workInputOf(card);
   }
