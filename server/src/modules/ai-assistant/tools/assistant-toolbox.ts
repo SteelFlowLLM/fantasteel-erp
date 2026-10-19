@@ -20,6 +20,9 @@ import { ShipmentService } from '../../shipment/shipment.service';
 import type { ProposedAnyCard } from '../action-card.types';
 import { AiActionCardService } from '../ai-action-card.service';
 import { AiOpsCardService } from '../ai-ops-card.service';
+import { AiUpdateCardService } from '../ai-update-card.service';
+import { ScheduleEventService } from '../../schedule-event/schedule-event.service';
+import { TaskService } from '../../notification/task.service';
 import { AiAssistantRepository } from '../ai-assistant.repository';
 import { ACTION_CARD_TOOLS, actionCardTools } from './action-card.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
@@ -27,6 +30,7 @@ import { businessEventTool } from './business-event.tool';
 import { dashboardTool } from './dashboard.tool';
 import { inventoryTool } from './inventory.tool';
 import { knowledgeTool } from './knowledge.tool';
+import { myScheduleTool, myTasksTool } from './my-work.tool';
 import { lotTraceTool } from './lot-trace.tool';
 import { mrpTool } from './mrp.tool';
 import { productionPlanTool, productionResultTool } from './production.tool';
@@ -68,6 +72,9 @@ export interface AssistantToolServices {
   shipments: ShipmentService;
   actionCards: AiActionCardService;
   opsCards: AiOpsCardService;
+  updateCards: AiUpdateCardService;
+  scheduleEvents: ScheduleEventService;
+  tasks: TaskService;
 }
 
 export function assistantTools(s: AssistantToolServices): AssistantTool[] {
@@ -90,7 +97,9 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     businessEventTool(s.events, s.salesOrders, s.lots),
     pastCaseTool(s.pastCases),
     knowledgeTool(),
-    ...actionCardTools(s.actionCards, s.opsCards),
+    myScheduleTool(s.scheduleEvents),
+    myTasksTool(s.tasks),
+    ...actionCardTools(s.actionCards, s.opsCards, s.updateCards),
   ];
 }
 
@@ -121,17 +130,20 @@ export class AssistantToolbox {
     opsCards: AiOpsCardService,
     dashboard: DashboardService,
     mrp: MrpService,
+    updateCards: AiUpdateCardService,
+    scheduleEvents: ScheduleEventService,
+    tasks: TaskService,
   ) {
-    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases, actionCards, opsCards, dashboard, mrp });
+    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases, actionCards, opsCards, dashboard, mrp, updateCards, scheduleEvents, tasks });
     this.tools = new Map(tools.map((tool) => [tool.definition.name, tool]));
   }
 
   /**
    * 모두에게 같은 도구 목록을 준다. 권한은 실행할 때 확인해서, 권한 밖이면 담당 역할을 안내하게 한다.
-   * 실행 카드 도구는 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 넣는다.
+   * 실행 카드 도구와 내 일정·업무 조회(panelOnly)는 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 넣는다.
    */
   definitions(options: { actionCards?: boolean } = {}): LlmToolDefinition[] {
-    return [...this.tools.values()].filter((tool) => options.actionCards || !ACTION_CARD_TOOLS.includes(tool.definition.name)).map((tool) => tool.definition);
+    return [...this.tools.values()].filter((tool) => options.actionCards || (!ACTION_CARD_TOOLS.includes(tool.definition.name) && !tool.panelOnly)).map((tool) => tool.definition);
   }
 
   /**
@@ -141,8 +153,10 @@ export class AssistantToolbox {
    */
   canViewAll(user: AuthUser, toolNames: readonly string[]): boolean {
     return toolNames.every((name) => {
-      const permissions = this.tools.get(name)?.access.permissions;
-      if (!permissions) return false;
+      const tool = this.tools.get(name);
+      // 사원 본인의 것은 다른 멤버에게 보이지 않는다
+      if (!tool || tool.panelOnly) return false;
+      const permissions = tool.access.permissions;
       return permissions.length === 0 || permissions.some((permission) => hasPermission(user, { permission, level: 'VIEW' }));
     });
   }

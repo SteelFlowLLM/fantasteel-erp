@@ -91,6 +91,7 @@
 - 도구 호출 중 오류: 인증 실패·서버의 JSON-RPC 오류(시간 초과 제외)는 실행 전 거절이라 그대로 던진다. 시간 초과·연결 끊김·5xx는 Notion이 이미 만들었는지 알 수 없어 `INT-009`(Notion에서 확인한 뒤 다시 하라는 문구).
 - 상위 페이지 읽기(`normalizeNotionPageId`): 32자리 16진수·대시 있는 UUID, `notion.so`·`notion.site`·`notion.com` 주소의 끝 id(제목 슬러그·퍼센트 인코딩 허용), 미리보기 쿼리 `p`를 먼저 본다. 못 읽으면 `COM-004`.
 - 페이지 쓰기 권한: Notion MCP는 연결한 사람의 권한으로 쓴다. 상위 페이지는 그 계정이 편집할 수 있는 페이지여야 한다.
+- 철강맨AI의 Notion 읽기·쓰기(이슈 #398)는 `notion/notion-assistant.tools.ts`(검색·fetch·행 SQL·찾아 바꾸기 입력, fetch 결과의 조상 경로 읽기, 상위 페이지 범위 규칙 `notionScopeOf`)와 `notion/notion-assistant.service.ts`(`NotionAssistantService`, export)에 따로 둔다. 상위 페이지 아래만 읽고 쓰며, 업무 공간의 세 데이터베이스(`settings.notionWorkspace`)와 그 행은 쓰지 않는다. 자세한 규칙은 [ai-assistant.md](ai-assistant.md) 4장 'Notion'.
 
 ## 6. 보안
 

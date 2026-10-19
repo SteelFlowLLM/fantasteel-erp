@@ -41,6 +41,9 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
+import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
+import { AiNotionCardService } from './notion/ai-notion-card.service';
+import { AiUpdateCardService } from './ai-update-card.service';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
@@ -66,6 +69,11 @@ export const MAX_WEB_TOOL_ROUNDS = 6;
 export const MAX_BROWSER_TOOL_ROUNDS = 12;
 /** 화면 조작을 켠 질문의 도구 횟수 상한. 읽기 → 열기 → 채우기 …가 이어진다 (이슈 #382, 화면 동작 12번과 맞춤) */
 export const MAX_SCREEN_TOOL_ROUNDS = 12;
+/**
+ * Notion을 켠 질문의 도구 횟수 상한 (이슈 #398). 실제 시험에서 "데이터베이스 3개와 회의 페이지를 읽고 정리 페이지 만들기"가
+ * 검색 → 읽기 4번 → 카드 → 다시 읽기·고치기로 10번쯤 썼다. 상한에 닿아도 마지막에 도구 없이 한 번 더 물어 답하게 한다
+ */
+export const MAX_NOTION_TOOL_ROUNDS = 14;
 /** AI 실행 기록에 담는 도구 입력·결과·생각 글의 길이. 답과 함께 화면에만 가므로 읽을 만큼만 */
 const TRACE_ARGUMENTS_MAX = 500;
 const TRACE_RESULT_MAX = 600;
@@ -74,12 +82,17 @@ const TRACE_THINKING_MAX = 8000;
 export const MAX_ACTION_CARDS = 5;
 /** 회의록 후보와 같은 규칙으로 실행하는 카드 종류 */
 const WORK_KINDS: readonly string[] = ['TASK', 'EVENT', 'PURCHASE'];
+/** Notion 페이지 카드 (이슈 #398) */
+const NOTION_KINDS: readonly string[] = ['NOTION_PAGE_CREATE', 'NOTION_PAGE_APPEND', 'NOTION_PAGE_UPDATE'];
+/** 일정·업무 고치기 카드 (이슈 #398) */
+const UPDATE_KINDS: readonly string[] = ['SCHEDULE_EVENT_UPDATE', 'TASK_UPDATE'];
 
 /**
  * AI 어시스턴트 (BP-AST-01). 업무 지식(용어 사전, REQ-AST-003)과 데이터 조회(REQ-AST-004)를 답한다.
  * 데이터는 모델이 고른 조회 도구를 서버가 사용자 권한으로 실행해 얻는다. AI는 조회·설명만 하고 업무 데이터를 바꾸지 않으므로
  * 작업 로그도 남기지 않는다(REQ-LOG-002 대상 아님). 웹 도구(웹 검색·페이지 읽기·장소 검색)는 웹 검색을 켠
- * 실시간 답에서만 알린다(이슈 #367). 브라우저 도구는 브라우저 사용을 켠 실시간 답에서만(이슈 #373). LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
+ * 실시간 답에서만 알린다(이슈 #367). 브라우저 도구는 브라우저 사용을 켠 실시간 답에서만(이슈 #373). Notion 도구는 Notion을 켠 실시간 답에서만, 쓰기는 실행 카드로만(이슈 #398).
+ * LLM은 LLM 연결 설정(llm 모듈)에 저장된 주소·모델을 쓴다.
  */
 @Injectable()
 export class AiAssistantService {
@@ -96,6 +109,9 @@ export class AiAssistantService {
     private readonly browserTools: AssistantBrowserToolbox,
     private readonly screenTools: AssistantScreenToolbox,
     private readonly prisma: PrismaService,
+    private readonly notionTools: AssistantNotionToolbox,
+    private readonly notionCards: AiNotionCardService,
+    private readonly updateCards: AiUpdateCardService,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -105,8 +121,11 @@ export class AiAssistantService {
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
   executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
-    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 나머지는 각 모듈의 확정 기능을 그대로 부른다
-    return WORK_KINDS.includes(dto.kind) ? this.cards.execute(user, dto) : this.opsCards.execute(user, dto);
+    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 나머지는 각 모듈의 확정 기능을 그대로 부른다
+    if (WORK_KINDS.includes(dto.kind)) return this.cards.execute(user, dto);
+    if (NOTION_KINDS.includes(dto.kind)) return this.notionCards.execute(user, dto);
+    if (UPDATE_KINDS.includes(dto.kind)) return this.updateCards.execute(user, dto);
+    return this.opsCards.execute(user, dto);
   }
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
@@ -124,9 +143,10 @@ export class AiAssistantService {
     const webSearch = this.webTools.capabilities();
     const browser = this.browserTools.capabilities();
     const screenControl = this.screenTools.capabilities();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl };
+    const notion = await this.notionTools.availability();
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl };
+    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */
@@ -169,6 +189,8 @@ export class AiAssistantService {
     // 화면 조작도 화면이 실시간으로 볼 때만, 서버 설정(AI_SCREEN_CONTROL_ENABLED)이 켜졌을 때만. 동작은 그 화면이 한다 (이슈 #382)
     const screenOn = options.interactive === true && input.screenControl === true && this.screenTools.capabilities().available;
     const screens = screenOn ? (input.screenMap ?? []) : [];
+    // Notion도 화면이 실시간으로 볼 때만, 연결과 상위 페이지가 있을 때만 (이슈 #398). Notion 글을 사내 채팅 방 멤버에게 보이지 않게 @AI는 쓰지 않는다
+    const notionOn = options.interactive === true && input.notion === true && (await this.notionTools.availability()).available;
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -185,6 +207,7 @@ export class AiAssistantService {
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
       browserTools: browserOn,
       screenControl: screenOn ? { screens } : null,
+      notionTools: notionOn,
     });
     const profile = assistantProfile(input.reasoning);
     const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
@@ -211,13 +234,22 @@ export class AiAssistantService {
         const browser: BrowserToolSessionLike | null = browserOn && web ? this.browserTools.session({ question: input.question, web, signal }) : null;
         // 화면 조작: 동작은 ui_action 이벤트로 그 화면에 보내고 결과를 기다린다 (이슈 #382)
         const screen: ScreenControlSession | null = screenOn && emit ? this.screenTools.session({ owner: user.employeeId, screens, emit, signal }) : null;
+        // Notion: 읽기는 바로, 쓰기는 실행 카드로만 (이슈 #398)
+        const notion: NotionToolSession | null = notionOn && streaming ? this.notionTools.session(user, { actionCards: input.actionCards === true }) : null;
         const tools = [
           ...this.toolbox.definitions({ actionCards: input.actionCards }),
           ...(webSearch && web ? this.webTools.definitions() : []),
           ...(browser ? this.browserTools.definitions() : []),
           ...(screen ? this.screenTools.definitions() : []),
+          ...(notion ? this.notionTools.definitions({ actionCards: input.actionCards === true }) : []),
         ];
-        const maxRounds = browser ? MAX_BROWSER_TOOL_ROUNDS : screen ? MAX_SCREEN_TOOL_ROUNDS : webSearch && web ? MAX_WEB_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+        const maxRounds = Math.max(
+          MAX_TOOL_ROUNDS,
+          webSearch && web ? MAX_WEB_TOOL_ROUNDS : 0,
+          browser ? MAX_BROWSER_TOOL_ROUNDS : 0,
+          screen ? MAX_SCREEN_TOOL_ROUNDS : 0,
+          notion ? MAX_NOTION_TOOL_ROUNDS : 0,
+        );
         try {
           const call = (roundTools: LlmToolDefinition[]): Promise<LlmToolReply> =>
             emit
@@ -227,7 +259,7 @@ export class AiAssistantService {
           // 작은 모델은 카드 도구를 부르지 않고 "카드를 만들었어요"라고만 말하기도 한다. 한 번만 도구를 부르게 다시 시킨다
           if (input.actionCards && reply.toolCalls.length === 0 && claimsCardMade(reply.content)) {
             messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
-            reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name)));
+            reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name) || tool.name === NOTION_CARD_TOOL));
           }
           for (let round = 1; reply.toolCalls.length && round <= maxRounds; round += 1) {
             messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
@@ -251,6 +283,12 @@ export class AiAssistantService {
                 if (browserResult.frame) emit?.({ type: 'browser_frame', ...browserResult.frame });
               } else if (screen?.has(toolCall.name)) {
                 result = { content: await screen.run(toolCall), source: null };
+              } else if (notion?.has(toolCall.name)) {
+                const notionResult = await notion.run(toolCall);
+                result = { content: notionResult.content, source: null, cards: notionResult.cards };
+                webSources = notionResult.webSources;
+                // 웹 도구도 켠 답이면 읽은 Notion 페이지 링크가 답에서 지워지지 않게 알려 둔다
+                if (toolCall.name !== NOTION_CARD_TOOL) for (const source of notionResult.webSources) web?.rememberVisited(source.url, source.title);
               } else {
                 result = await this.toolbox.run(user, toolCall);
                 if (toolCall.name === READ_KNOWLEDGE_TOOL) readKnowledge.add(toolCall.arguments);
@@ -279,7 +317,9 @@ export class AiAssistantService {
           const finalAnswer = webFinal?.answer ?? parsed.answer;
           // 조사 보고서의 출처를 [n]으로 쓴 답은 그 출처를 웹 출처로 함께 돌려준다
           const researchSources = research ? citedResearchSources(finalAnswer, research).filter((s) => !webFinal?.webSources.some((w) => w.url === s.url)) : [];
-          const webSources = webFinal || researchSources.length ? [...(webFinal?.webSources ?? []), ...researchSources] : null;
+          // 읽은 Notion 페이지는 웹 출처처럼 답 아래 보인다 (이슈 #398)
+          const notionSources = (notion?.sources() ?? []).filter((s) => !webFinal?.webSources.some((w) => w.url === s.url));
+          const webSources = webFinal || researchSources.length || notionSources.length ? [...(webFinal?.webSources ?? []), ...researchSources, ...notionSources] : null;
           return {
             answer: finalAnswer,
             sources: [...dataSources, ...parsed.sources],
@@ -318,6 +358,6 @@ export class AiAssistantService {
 export const claimsCardMade = (text: string): boolean => /카드(를|가)?\s*(만들었|만들어\s*(두|드렸|놓)|만들어졌|준비했|생성했)/.test(text);
 
 const CARD_TOOL_NUDGE = '방금 답은 카드를 만들었다고 했지만 도구를 부르지 않았어요. 카드는 propose_ 도구를 불러야 화면에 생겨요. 요청에 맞는 propose_ 도구를 지금 불러요. 카드로 만들 수 없는 요청이면 카드를 만들었다고 하지 말고 이유를 말해요.';
-const CARD_NOT_MADE = '카드를 만들지 못했어요. 요청을 조금 더 구체적으로 다시 말해 주세요. 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 카드로 만들 수 있어요.';
+const CARD_NOT_MADE = '카드를 만들지 못했어요. 요청을 조금 더 구체적으로 다시 말해 주세요. 업무·일정·구매요청·수주 등록, 일정·업무 고치기, 열연 배정, 히트 편성 확정, 과거 사례 등록(Notion을 켜면 Notion 페이지 쓰기)을 카드로 만들 수 있어요.';
 
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);

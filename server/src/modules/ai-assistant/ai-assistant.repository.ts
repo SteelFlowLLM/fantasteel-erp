@@ -56,4 +56,17 @@ export class AiAssistantRepository {
   createScheduleEvent(tx: Tx, data: Omit<Prisma.ScheduleEventUncheckedCreateInput, 'attendees'>, attendeeIds: number[]) {
     return tx.scheduleEvent.create({ data: { ...data, attendees: { create: attendeeIds.map((employeeId) => ({ employeeId })) } }, select: { id: true } });
   }
+
+  /** 일정 고치기 카드를 만들 때 지금 값과 고칠 수 있는지(등록자·참석자·회의록 일정)를 본다 */
+  findScheduleEventForCard(tx: Tx, id: number) {
+    return tx.scheduleEvent.findUnique({
+      where: { id },
+      select: { id: true, scheduleEventTitle: true, scheduleEventDescription: true, startAt: true, endAt: true, creatorId: true, meetingMinutesId: true, attendees: { select: { employeeId: true } } },
+    });
+  }
+
+  /** 업무 고치기 카드를 만들 때 지금 값과 고칠 수 있는지(등록자·담당자·상태)를 본다 */
+  findTaskForCard(tx: Tx, id: number) {
+    return tx.task.findUnique({ where: { id }, select: { id: true, taskTitle: true, taskDescription: true, dueDate: true, taskStatus: true, creatorId: true, assigneeId: true } });
+  }
 }

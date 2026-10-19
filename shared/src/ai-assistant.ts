@@ -51,6 +51,11 @@ export interface AiAssistantMessageInput {
   screenControl?: boolean;
   /** 화면 조작 때 열 수 있는 화면(이 사원의 레일 메뉴). ui_navigate는 이 주소만 연다 */
   screenMap?: AiScreenMapEntry[];
+  /**
+   * Notion을 켠 질문이면 true (문서에 없는 기능, 이슈 #398). Notion이 연결돼 있고 상위 페이지가 정해져 있고 실시간 답 API일 때만
+   * Notion 도구(notion_search·notion_read_page, 실행 카드를 받는 화면이면 propose_notion_page)를 모델에 알린다. 기본은 꺼짐
+   */
+  notion?: boolean;
 }
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
@@ -81,6 +86,14 @@ export interface AiAssistantCapabilitiesView {
   deepResearch: { available: boolean };
   /** ERP 화면 조작을 쓸 수 있는지 (이슈 #382). 서버 AI_SCREEN_CONTROL_ENABLED=true일 때 */
   screenControl: { available: boolean };
+  /** Notion을 쓸 수 있는지 (이슈 #398). Notion이 연결돼 있고 관리자가 상위 페이지를 정했을 때 */
+  notion: AiNotionCapabilities;
+}
+
+export interface AiNotionCapabilities {
+  available: boolean;
+  /** 쓸 수 없을 때 화면에 보일 이유 (예: 관리자가 Notion 상위 페이지를 정하지 않았어요) */
+  reason?: string;
 }
 
 export interface AiBrowserCapabilities {
@@ -139,6 +152,10 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   ui_click: '화면 누르기',
   ui_fill: '화면 입력',
   ui_select: '화면 고르기',
+  notion_search: 'Notion 검색',
+  notion_read_page: 'Notion 페이지 읽기',
+  get_my_schedule: '내 일정 조회',
+  get_my_tasks: '내 업무 조회',
 };
 
 /** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */
@@ -152,6 +169,12 @@ export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', '
 export type AiAssistantBrowserTool = (typeof AI_ASSISTANT_BROWSER_TOOLS)[number];
 
 export const isAiAssistantBrowserTool = (name: string): name is AiAssistantBrowserTool => (AI_ASSISTANT_BROWSER_TOOLS as readonly string[]).includes(name);
+
+/** Notion 읽기 도구 (이슈 #398). Notion을 켠 실시간 답에서만 알린다. 쓰기는 실행 카드(propose_notion_page)로만 한다 */
+export const AI_ASSISTANT_NOTION_TOOLS = ['notion_search', 'notion_read_page'] as const;
+export type AiAssistantNotionTool = (typeof AI_ASSISTANT_NOTION_TOOLS)[number];
+
+export const isAiAssistantNotionTool = (name: string): name is AiAssistantNotionTool => (AI_ASSISTANT_NOTION_TOOLS as readonly string[]).includes(name);
 
 /** 웹 도구가 찾거나 읽은 페이지 하나. url은 검색 결과에 있던 주소(읽은 페이지면 이동 뒤 최종 주소) */
 export interface AiWebSource {
@@ -282,8 +305,96 @@ export interface AiPastCaseCard {
   issues: string[];
 }
 
+/** 카드가 가리키는 Notion 페이지. id는 대시 없는 32자리 16진수 */
+export interface AiNotionPageRef {
+  id: string;
+  title: string;
+  url: string;
+}
+
+/** Notion 페이지 고치기 한 군데: 페이지 글에서 oldStr을 찾아 newStr로 바꾼다 */
+export interface AiNotionTextEdit {
+  oldStr: string;
+  newStr: string;
+}
+
+/**
+ * Notion 실행 카드 공통 (이슈 #398). nonce는 서버가 카드마다 만든 값으로, 같은 카드를 두 번 실행하지 않게 실행 요청에 그대로 보낸다.
+ * 대상은 관리자가 정한 상위 페이지 아래(그 페이지 포함)만 되고, ERP가 채우는 일정·회의록·할 일 데이터베이스와 그 행은 안 된다.
+ */
+interface AiNotionCardBase {
+  key: string;
+  title: string;
+  nonce: string;
+  issues: string[];
+}
+
+/** 새 Notion 페이지 만들기. parent 아래에 만든다 */
+export interface AiNotionCreateCard extends AiNotionCardBase {
+  kind: 'NOTION_PAGE_CREATE';
+  parent: AiNotionPageRef;
+  pageTitle: string;
+  /** Notion 마크다운. 제목은 넣지 않는다 */
+  content: string;
+}
+
+/** 있는 Notion 페이지 끝에 글 더하기 */
+export interface AiNotionAppendCard extends AiNotionCardBase {
+  kind: 'NOTION_PAGE_APPEND';
+  page: AiNotionPageRef;
+  content: string;
+}
+
+/** 있는 Notion 페이지의 글 일부 바꾸기·제목 바꾸기. 페이지 전체를 덮어쓰거나 하위 페이지를 지우지 않는다 */
+export interface AiNotionUpdateCard extends AiNotionCardBase {
+  kind: 'NOTION_PAGE_UPDATE';
+  page: AiNotionPageRef;
+  /** 바꿀 제목. 그대로면 null */
+  newTitle: string | null;
+  edits: AiNotionTextEdit[];
+}
+
+export type AiNotionCard = AiNotionCreateCard | AiNotionAppendCard | AiNotionUpdateCard;
+
+/** Notion 카드 글 상한 (가정값). 작은 모델이 한 번에 쓰는 양보다 넉넉하고, 사용자가 카드에서 읽을 수 있는 정도 */
+export const AI_NOTION_TITLE_MAX = 200;
+export const AI_NOTION_CONTENT_MAX = 20_000;
+export const AI_NOTION_EDIT_MAX = 10;
+export const AI_NOTION_EDIT_TEXT_MAX = 4000;
+
+/** 일정 고치기 카드 (ScheduleEventService.update). 내가 직접 등록한 일정만, 회의록에서 만든 일정은 안 된다 */
+export interface AiScheduleEventUpdateCard {
+  key: string;
+  kind: 'SCHEDULE_EVENT_UPDATE';
+  title: string;
+  scheduleEventId: number;
+  before: { scheduleEventTitle: string; scheduleEventDescription: string | null; startAt: string; endAt: string };
+  scheduleEventTitle: string;
+  scheduleEventDescription: string | null;
+  /** +09:00 ISO */
+  startAt: string;
+  endAt: string;
+  issues: string[];
+}
+
+/** 업무 고치기·완료 카드 (TaskService.update·complete). 진행 중인 업무만, 고치기는 등록자·담당자, 완료는 담당자만 */
+export interface AiTaskUpdateCard {
+  key: string;
+  kind: 'TASK_UPDATE';
+  title: string;
+  taskId: number;
+  before: { taskTitle: string; taskDescription: string | null; dueDate: string };
+  taskTitle: string;
+  taskDescription: string | null;
+  /** YYYY-MM-DD */
+  dueDate: string;
+  /** true면 내용은 그대로 두고 완료로 바꾼다 */
+  complete: boolean;
+  issues: string[];
+}
+
 /** 실행 카드 한 장 (REQ-AST-005). 종류는 kind로 가른다 */
-export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard;
+export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard | AiNotionCard | AiScheduleEventUpdateCard | AiTaskUpdateCard;
 export type AiActionCardKind = AiActionCard['kind'];
 
 /** POST ai-assistant/action-cards/execute. 카드에서 사용자가 확인·수정한 값을 그대로 보낸다 (서버가 다시 검증한다) */
@@ -292,7 +403,12 @@ export type AiActionCardExecuteInput =
   | { kind: 'SALES_ORDER'; customerId?: number; lines: { itemId?: number; orderedQty?: number; dueDate?: string }[] }
   | { kind: 'HOT_ROLLING'; productionPlanId: number; lotIds: number[] }
   | { kind: 'HEAT_PLAN'; productionPlanId: number }
-  | { kind: 'PAST_CASE'; lotId: number; caseCategory: 'QUALITY' | 'EQUIPMENT'; title: string; phenomenon: string; cause: string; actionTaken: string; equipmentText: string; occurredDate: string };
+  | { kind: 'PAST_CASE'; lotId: number; caseCategory: 'QUALITY' | 'EQUIPMENT'; title: string; phenomenon: string; cause: string; actionTaken: string; equipmentText: string; occurredDate: string }
+  | { kind: 'NOTION_PAGE_CREATE'; nonce: string; notionPageId: string; pageTitle: string; content: string }
+  | { kind: 'NOTION_PAGE_APPEND'; nonce: string; notionPageId: string; content: string }
+  | { kind: 'NOTION_PAGE_UPDATE'; nonce: string; notionPageId: string; pageTitle?: string; edits: AiNotionTextEdit[] }
+  | { kind: 'SCHEDULE_EVENT_UPDATE'; scheduleEventId: number; title: string; description: string | null; startAt: string; endAt: string }
+  | { kind: 'TASK_UPDATE'; taskId: number; title?: string; description?: string | null; dueDate?: string; complete?: boolean };
 
 export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput, 'decision'> {
   kind: AiWorkCard['kind'];
@@ -304,10 +420,17 @@ export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput
 export interface AiActionCardExecuteResult {
   kind: AiActionCardKind;
   registered: {
-    type: 'task' | 'schedule_event' | 'action_draft' | 'sales_order' | 'hot_rolling' | 'heat_plan' | 'past_case';
+    type: 'task' | 'schedule_event' | 'action_draft' | 'sales_order' | 'hot_rolling' | 'heat_plan' | 'past_case' | 'notion_page';
+    /** ERP 행 id. Notion 페이지는 ERP 행이 없어 0 */
     id: number;
     /** 번호가 있는 것 (수주번호·생산계획 번호·사례 번호) */
     no?: string;
+    /** Notion 페이지 주소 (notion_page) */
+    url?: string;
+    /** 일정·업무를 고쳤으면 true (새로 만든 것이 아님) */
+    updated?: boolean;
+    /** 외부 서비스가 함께 알린 말 (예: Notion이 찾지 못한 고칠 곳) */
+    note?: string;
   };
 }
 

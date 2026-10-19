@@ -11,10 +11,13 @@ import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.s
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
+import { AssistantNotionToolbox, type NotionReader } from './notion/assistant-notion-toolbox';
+import type { AiNotionCardService } from './notion/ai-notion-card.service';
+import type { AiUpdateCardService } from './ai-update-card.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { KakaoPlaceClient, WebSearchClient } from './web/web-search.client';
@@ -27,6 +30,12 @@ import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import { findManualGuides, MANUAL_MATCH_LIMIT } from './knowledge/manual.search';
 import { PROCESS_STEPS } from './knowledge/process.generated';
 import { findProcessSteps, PROCESS_MATCH_LIMIT } from './knowledge/process.search';
+
+const OFF_NOTION: NotionReader = {
+  availability: async () => ({ available: false, reason: 'Notion이 연결되어 있지 않아요' }),
+  search: () => Promise.reject(new Error('찾지 않음')),
+  read: () => Promise.reject(new Error('읽지 않음')),
+};
 
 const termOf = (id: string) => {
   const term = GLOSSARY_TERMS.find((t) => t.id === id);
@@ -160,6 +169,8 @@ describe('AiAssistantService', () => {
     browserTools: AssistantBrowserToolbox = new AssistantBrowserToolbox(new BrowserPool({ env: {} })),
     // 기본은 서버 설정이 꺼진 화면 조작
     screenTools: AssistantScreenToolbox = new AssistantScreenToolbox(new ScreenActionBroker(), {}),
+    // 기본은 연결하지 않은 Notion (이슈 #398)
+    notionTools: AssistantNotionToolbox = new AssistantNotionToolbox(OFF_NOTION, { propose: () => Promise.reject(new Error('카드를 만들지 않음')) }),
   ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
@@ -202,7 +213,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -829,16 +840,71 @@ describe('AiAssistantService', () => {
     });
   });
 
+  describe('Notion (이슈 #398)', () => {
+    const PAGE_URL = 'https://www.notion.so/aaaabbbbccccddddeeeeffff00001111';
+    const onNotion: NotionReader = {
+      availability: async () => ({ available: true }),
+      search: async () => ({ hits: [{ id: 'aaaabbbbccccddddeeeeffff00001111', title: '주간 회의', url: PAGE_URL, snippet: '설비', type: 'page' }], raw: '' }),
+      read: async () => ({ id: 'aaaabbbbccccddddeeeeffff00001111', kind: 'page', title: '주간 회의', url: PAGE_URL, ancestors: [], dataSourceIds: [], body: '설비 점검', scope: 'inside', rows: null }),
+    };
+    const card = { kind: 'NOTION_PAGE_APPEND' as const, title: 'Notion 글 더하기 · 주간 회의', nonce: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', page: { id: 'aaaabbbbccccddddeeeeffff00001111', title: '주간 회의', url: PAGE_URL }, content: '추가', issues: [] };
+    const notionCall = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
+    const run = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => (await service.prepare(user, input, { interactive: true })).run(() => undefined);
+
+    it('켜면 읽기 도구·카드 도구·[Notion 규칙]을 알리고, 읽은 페이지를 출처로, 카드를 답에 담는다', async () => {
+      const notionTools = new AssistantNotionToolbox(onNotion, { propose: async () => card });
+      const { service, calls } = setup(
+        {},
+        async (_call, index) =>
+          [notionCall('c1', 'notion_read_page', { page: PAGE_URL }), notionCall('c2', 'propose_notion_page', { action: 'append', page: PAGE_URL, content: '추가' }), answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.')][index],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        notionTools,
+      );
+      const reply = await run(service, { question: '주간 회의 페이지에 한 줄 더해줘', notion: true, actionCards: true });
+      expect(calls[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['notion_search', 'notion_read_page', 'propose_notion_page', 'get_inventory']));
+      expect(calls[0].messages[0].content).toContain('[Notion 규칙]');
+      expect(calls[0].messages[0].content).toContain('한국어로만 써요');
+      expect(String(calls[1].messages.at(-1)?.content)).toContain('<untrusted_web_content source="notion:');
+      expect(reply.webSources).toEqual([{ title: '주간 회의', url: PAGE_URL }]);
+      expect(reply.actionCards.map((c) => [c.key, c.kind])).toEqual([['a1', 'NOTION_PAGE_APPEND']]);
+    });
+
+    it(`켜면 도구 호출 상한이 ${MAX_NOTION_TOOL_ROUNDS}번이고, 상한에 닿으면 도구 없이 한 번 더 물어 답하게 한다`, async () => {
+      const { service, calls } = setup({}, async (_call, index) => notionCall(`c${index}`, 'notion_search', { query: `회의 ${index}` }), undefined, undefined, undefined, undefined, undefined, new AssistantNotionToolbox(onNotion, { propose: async () => card }));
+      await run(service, { question: '계속 찾아줘', notion: true });
+      expect(calls).toHaveLength(MAX_NOTION_TOOL_ROUNDS + 1);
+      expect(calls.at(-1)?.tools).toEqual([]);
+    });
+
+    it('연결이 없거나, 끄거나, 한 번에 답(사내 채팅 @AI)이면 Notion 도구가 없다', async () => {
+      const offService = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, new AssistantNotionToolbox(OFF_NOTION, { propose: async () => card }));
+      await run(offService.service, { question: '회의 찾아줘', notion: true });
+      const onBox = new AssistantNotionToolbox(onNotion, { propose: async () => card });
+      const notAsked = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, onBox);
+      await run(notAsked.service, { question: '회의 찾아줘' });
+      const chat = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, onBox);
+      await chat.service.ask(user, { question: '회의 찾아줘', notion: true });
+      for (const calls of [offService.calls, notAsked.calls, chat.calls]) {
+        expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+        expect(calls[0].messages[0].content).not.toContain('[Notion 규칙]');
+      }
+    });
+  });
+
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });
