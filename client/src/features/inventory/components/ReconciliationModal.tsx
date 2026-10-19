@@ -19,9 +19,13 @@ import { Qty } from '@/features/inventory/components/InventoryParts';
 import { useAction } from '@/hooks/useAction';
 import { useReservationReconciliation } from '@/hooks/useInventories';
 import { useMe } from '@/hooks/useMe';
-import { fmtDateTime, fmtInt } from '@/lib/format';
+import { fmtDate, fmtInt } from '@/lib/format';
+import { toast } from '@/stores/useToastStore';
 
 const STATUS_TONE: Record<ReconciliationStatus, BadgeTone> = { MATCHED: 'ok', MISMATCHED: 'wait', CORRECTED: 'ok', UNFIXABLE: 'danger' };
+const SEOUL_TIME = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+/** 같은 분 안에 다시 점검해도 바뀐 게 보이도록 초까지 */
+const checkedAtText = (iso: string) => `${fmtDate(iso)} ${SEOUL_TIME.format(new Date(iso))}`;
 
 export function ReconciliationModal({ onClose }: { onClose: () => void }) {
   const me = useMe();
@@ -34,9 +38,12 @@ export function ReconciliationModal({ onClose }: { onClose: () => void }) {
     success: (r) => (r.correctedCount ? `예약 매수 ${r.correctedCount}개 규격을 맞췄어요` : '맞출 규격이 없었어요'),
     onSuccess: (r) => setApplied(r),
   });
-  const recheck = () => {
+  // 결과가 그대로면 화면이 바뀌지 않아 눌린 줄 모르므로, 끝나면 알림으로 결과를 알린다
+  const recheck = async () => {
     setApplied(null);
-    void query.refetch();
+    const result = await query.refetch();
+    if (result.error) toast.apiError(result.error);
+    else if (result.data) toast.ok(result.data.mismatchCount ? `다시 점검했어요 · 불일치 ${result.data.mismatchCount}개` : '다시 점검했어요 · 모든 규격이 맞아요');
   };
   const fixable = (applied ?? query.data)?.rows.filter((r) => r.status === RECONCILIATION_STATUS.MISMATCHED).length ?? 0;
 
@@ -53,8 +60,8 @@ export function ReconciliationModal({ onClose }: { onClose: () => void }) {
               점검만 할 수 있어요 · 보정은 관리자만 실행해요
             </span>
           ) : null}
-          <Button onClick={recheck} disabled={query.isFetching || reconcile.isPending}>
-            다시 점검
+          <Button onClick={() => void recheck()} disabled={query.isFetching || reconcile.isPending}>
+            {query.isFetching ? '점검하는 중…' : '다시 점검'}
           </Button>
           {isAdmin ? (
             <Button variant="primary" onClick={() => reconcile.mutate(undefined)} disabled={fixable === 0 || reconcile.isPending || query.isFetching}>
@@ -75,14 +82,14 @@ export function ReconciliationModal({ onClose }: { onClose: () => void }) {
             <>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-2">
                 <span>
-                  {result.applied ? '보정 결과' : '점검 결과'} · {fmtDateTime(result.checkedAt)}
+                  {result.applied ? '보정 결과' : '점검 결과'} · {checkedAtText(result.checkedAt)}
                 </span>
                 <span>규격 {fmtInt(result.checkedItemCount)}개 점검</span>
                 <span>불일치 {fmtInt(result.mismatchCount)}개</span>
                 {result.applied ? <span>보정 {fmtInt(result.correctedCount)}개</span> : null}
                 {result.unfixableCount ? <span className="text-danger">보정 불가 {fmtInt(result.unfixableCount)}개</span> : null}
               </div>
-              <div className="overflow-x-auto rounded-md border border-line">
+              <div className={`overflow-x-auto rounded-md border border-line transition-opacity ${query.isFetching ? 'opacity-50' : ''}`}>
                 <Table compact>
                   <thead>
                     <tr>
