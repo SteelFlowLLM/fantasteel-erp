@@ -4,6 +4,9 @@ import {
   INTEGRATION_PROVIDER,
   NOTION_WORKSPACE_DATABASES,
   type IntegrationSettings,
+  type NotionCalendarOption,
+  type NotionCalendarSettings,
+  type NotionCalendarSettingsInput,
   type NotionDatabaseRef,
   type NotionWorkspaceDatabaseKey,
   type NotionWorkspaceView,
@@ -16,16 +19,32 @@ import { buildMeetingNotionMarkdown, meetingNotionTitle } from '../../meeting-mi
 import { toMeetingMinutesView } from '../../meeting-minutes/meeting-minutes.view';
 import { scheduleWeekLink } from '../../schedule-event/schedule-notice';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
-import { readSettings, readyWorkspace } from '../integration-settings';
+import { readSettings, readyWorkspace, type ReadyNotionWorkspace } from '../integration-settings';
 import { clientBaseUrl } from '../integration-urls';
 import { isAuthFailure, isRejectedBeforeRun, McpClientService, NOTION_EXPORT_STALE_MS, type McpSession, type McpToolInfo } from '../mcp/mcp.client';
-import { NOTION_CREATE_PAGES_TOOL } from './notion.tools';
+import { NOTION_CREATE_PAGES_TOOL, notionPageUrlOf, parentPageNotFound } from './notion.tools';
 import { NotionPageService } from './notion-page.service';
 import { NotionSyncRepository, type NotionMeetingRow, type NotionScheduleEventRow, type NotionTaskRow } from './notion-sync.repository';
+import {
+  buildCreateCalendarEventArgs,
+  buildUpdateCalendarEventArgs,
+  NOTION_CALENDAR_CREATE_TOOL,
+  NOTION_CALENDAR_LIST_TOOL,
+  NOTION_CALENDAR_UPDATE_TOOL,
+  readCalendarList,
+  readCalendarUpdateResult,
+  readCreatedCalendarEvents,
+  type CalendarEventDraft,
+} from './notion-calendar.tools';
 import {
   buildCreateDatabaseArgs,
   buildCreateRowsArgs,
   buildCreateViewArgs,
+  buildFetchDataSourceArgs,
+  missingViews,
+  NOTION_FETCH_TOOL,
+  readDatabaseOfDataSource,
+  workspaceNeedsRepair,
   buildReplaceContentArgs,
   buildUpdatePropertiesArgs,
   erpUrl,
@@ -59,10 +78,12 @@ const BACKOFF_MAX_MS = 60 * 60_000;
 /** 만들어졌는지 알 수 없는 페이지는 Notion에 생겼는지 사람이 볼 시간을 두고 다시 만든다 */
 const UNCERTAIN_BACKOFF_MS = 30 * 60_000;
 const DAY_MS = 86_400_000;
+const REPAIR_RETRY_MS = 60 * 60_000;
 
 type SyncKind = NotionWorkspaceDatabaseKey;
-type ReadyWorkspace = NonNullable<ReturnType<typeof readyWorkspace>>;
-type SyncTools = { createPages: McpToolInfo; updatePage: McpToolInfo };
+type ReadyWorkspace = ReadyNotionWorkspace;
+/** 캘린더 도구는 Notion 캘린더를 쓰지 않는 계정에는 없을 수 있어 고른 캘린더가 있을 때만 확인한다 */
+type SyncTools = { createPages: McpToolInfo; updatePage: McpToolInfo; createEvents: McpToolInfo | undefined; updateEvents: McpToolInfo | undefined };
 
 /** 성공으로 답했지만 만든 페이지를 읽지 못함: 만들어졌을 수 있다 */
 class UncertainCreateError extends Error {}
@@ -105,6 +126,9 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
   private readonly failures: Record<SyncKind, Map<number, RowFailure>> = { scheduleEvents: new Map(), meetingMinutes: new Map(), tasks: new Map() };
   private lastSyncedAt: Date | null = null;
   private lastSyncError: string | null = null;
+  private setupWarning: string | null = null;
+  /** 1단계에서 만든 업무 공간을 고친(데이터베이스 주소·보기) 마지막 시도. 실패해도 1시간에 한 번만 다시 해 본다 */
+  private lastRepairAt: number | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -180,6 +204,8 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
       failedCount: Object.values(this.failures).reduce((sum, map) => sum + map.size, 0),
       pendingCount: ready ? await this.countPending() : 0,
       lastSyncError: this.lastSyncError,
+      setupWarning: this.setupWarning,
+      calendar: ws.calendar ?? null,
     };
   }
 
@@ -196,49 +222,96 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
 
   /**
    * 상위 페이지 아래에 세 데이터베이스와 보기를 만든다. 이미 만든 데이터베이스는 다시 만들지 않는다(중간에 멈췄으면 없는 것만 만든다).
-   * 데이터베이스를 하나 만들 때마다 id를 저장한다. 보기는 없어도 반영은 되므로 실패해도 로그만 남긴다.
+   * 데이터베이스를 하나 만들 때마다 id를 저장한다. 이미 다 있으면 고칠 것(데이터베이스 주소·빠진 보기)만 고친다.
    * 다 만들면 반영을 시작한다 (지난 30일·진행 중인 일정·업무와 확정한 회의록).
    */
   async setup(): Promise<void> {
     const parentPageId = await this.notionPage.assertReady();
     await this.enqueue(async () => {
       const settings = await this.currentSettings();
-      if (readyWorkspace(settings)) return;
+      const ws = settings.notionWorkspace ?? {};
+      if (readyWorkspace(settings) && !workspaceNeedsRepair(ws)) return;
       const names = (await this.repository.findActiveEmployeeNames(this.prisma)).map((e) => e.employeeName);
       const defs = notionDatabaseDefs(names);
       await this.mcp.withSession(INTEGRATION_PROVIDER.NOTION, async (session) => {
         const tools = await this.requireTools(session, [NOTION_CREATE_DATABASE_TOOL, NOTION_CREATE_VIEW_TOOL, NOTION_CREATE_PAGES_TOOL, NOTION_UPDATE_PAGE_TOOL]);
         const createDatabase = tools.get(NOTION_CREATE_DATABASE_TOOL) as McpToolInfo;
-        const createView = tools.get(NOTION_CREATE_VIEW_TOOL) as McpToolInfo;
         for (const key of NOTION_WORKSPACE_DATABASES) {
-          if (settings.notionWorkspace?.[key]) continue;
+          if (ws[key]) continue;
           const def = defs[key];
           const args = buildCreateDatabaseArgs(createDatabase, parentPageId, def);
           let ref: NotionDatabaseRef | null;
           try {
             ref = readCreatedDatabase(await session.callTool(createDatabase.name, args), parentPageId);
           } catch (error) {
-            if (error instanceof AppException || isRejectedBeforeRun(error)) throw error;
+            if (error instanceof AppException) throw error;
+            if (isRejectedBeforeRun(error)) throw parentPageNotFound(error) ?? error;
             this.logger.warn(`Notion 데이터베이스(${def.title}) 만들기 결과를 알 수 없음: ${messageOf(error)}`);
             ref = null;
           }
           if (!ref) {
             throw new AppException('INT-009', `Notion에 "${def.title}" 데이터베이스가 만들어졌는지 확인하지 못했어요. 상위 페이지에 생겼으면 지운 뒤 다시 만들어 주세요`);
           }
-          await this.saveWorkspace({ [key]: ref });
-          for (const view of def.views) {
-            try {
-              readViewResult(await session.callTool(createView.name, buildCreateViewArgs(createView, ref, parentPageId, view)));
-            } catch (error) {
-              if (isAuthFailure(error)) throw error;
-              this.logger.warn(`Notion 보기(${def.title} › ${view.name})를 만들지 못했어요: ${messageOf(error)}`);
-            }
-          }
+          await this.saveWorkspace({ [key]: { ...ref, views: [] } });
         }
-        await this.saveWorkspace({ createdAt: new Date().toISOString() });
+        await this.repairWorkspace(session, tools, parentPageId);
+        if (!ws.createdAt) await this.saveWorkspace({ createdAt: new Date().toISOString() });
       });
     });
     this.kick();
+  }
+
+  /**
+   * 데이터베이스 id를 모르면 데이터 소스(`collection://…`)를 읽어 찾고, 빠진 보기를 그 데이터베이스의 보기 탭으로 만든다.
+   * 상위 페이지에 연결된 보기(inline)로는 만들지 않는다: 데이터베이스 id를 끝내 모르면 보기를 건너뛰고 안내를 남긴다.
+   * 보기를 하나 만들 때마다 이름을 저장해 다시 돌아도 같은 보기를 또 만들지 않는다. 보기가 없어도 반영은 되므로 실패는 안내로만 남긴다.
+   */
+  private async repairWorkspace(session: McpSession, tools: Map<string, McpToolInfo>, parentPageId: string | null): Promise<void> {
+    const createView = tools.get(NOTION_CREATE_VIEW_TOOL);
+    const fetchTool = tools.get(NOTION_FETCH_TOOL);
+    const warnings: string[] = [];
+    for (const key of NOTION_WORKSPACE_DATABASES) {
+      let ref = (await this.currentSettings()).notionWorkspace?.[key];
+      if (!ref) continue;
+      const title = NOTION_DATABASE_TITLES[key];
+      if (!ref.databaseId && fetchTool) {
+        try {
+          const found = readDatabaseOfDataSource(await session.callTool(fetchTool.name, buildFetchDataSourceArgs(fetchTool, ref.dataSourceId)), ref.dataSourceId, parentPageId ?? '');
+          if (found) {
+            ref = { ...ref, databaseId: found.databaseId, url: found.url };
+            await this.saveWorkspace({ [key]: ref });
+          }
+        } catch (error) {
+          if (isAuthFailure(error)) throw error;
+          this.logger.warn(`Notion 데이터베이스(${title}) 주소를 찾지 못했어요: ${messageOf(error)}`);
+        }
+      }
+      const databaseId = ref.databaseId;
+      if (!databaseId) {
+        warnings.push(`"${title}" 데이터베이스 주소를 찾지 못해 보기를 만들지 않았어요`);
+        continue;
+      }
+      if (!ref.url) {
+        ref = { ...ref, url: notionPageUrlOf(databaseId) };
+        await this.saveWorkspace({ [key]: ref });
+      }
+      for (const view of missingViews(key, ref)) {
+        if (!createView) {
+          warnings.push(`Notion MCP 서버에 ${NOTION_CREATE_VIEW_TOOL} 도구가 없어 보기를 만들지 않았어요`);
+          break;
+        }
+        try {
+          readViewResult(await session.callTool(createView.name, buildCreateViewArgs(createView, databaseId, ref.dataSourceId, view)));
+          ref = { ...ref, views: [...(ref.views ?? []), view.name] };
+          await this.saveWorkspace({ [key]: ref });
+        } catch (error) {
+          if (isAuthFailure(error)) throw error;
+          warnings.push(`보기 "${title} › ${view.name}"를 만들지 못했어요: ${messageOf(error)}`.slice(0, 300));
+          this.logger.warn(warnings[warnings.length - 1]);
+        }
+      }
+    }
+    this.setupWarning = warnings.length > 0 ? warnings.join(' · ').slice(0, 500) : null;
   }
 
   private async currentSettings(): Promise<IntegrationSettings> {
@@ -247,9 +320,13 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
   }
 
   /** 저장된 설정을 다시 읽어 업무 공간 칸만 더한다 (그 사이 관리자가 바꾼 상위 페이지를 덮어쓰지 않게) */
-  private async saveWorkspace(patch: Partial<Record<NotionWorkspaceDatabaseKey, NotionDatabaseRef>> & { createdAt?: string }): Promise<void> {
+  private async saveWorkspace(patch: Partial<Record<NotionWorkspaceDatabaseKey, NotionDatabaseRef>> & { createdAt?: string; calendar?: NotionCalendarSettings | null }): Promise<void> {
     const settings = await this.currentSettings();
-    const next: IntegrationSettings = { ...settings, notionWorkspace: { ...settings.notionWorkspace, ...patch } };
+    const { calendar, ...rest } = patch;
+    const workspace = { ...settings.notionWorkspace, ...rest };
+    if (calendar === null) delete workspace.calendar;
+    else if (calendar) workspace.calendar = calendar;
+    const next: IntegrationSettings = { ...settings, notionWorkspace: workspace };
     await this.connections.update(this.prisma, INTEGRATION_PROVIDER.NOTION, { settings: next as Prisma.InputJsonObject });
   }
 
@@ -262,7 +339,62 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
 
   private async syncTools(session: McpSession): Promise<SyncTools> {
     const tools = await this.requireTools(session, [NOTION_CREATE_PAGES_TOOL, NOTION_UPDATE_PAGE_TOOL]);
-    return { createPages: tools.get(NOTION_CREATE_PAGES_TOOL) as McpToolInfo, updatePage: tools.get(NOTION_UPDATE_PAGE_TOOL) as McpToolInfo };
+    return {
+      createPages: tools.get(NOTION_CREATE_PAGES_TOOL) as McpToolInfo,
+      updatePage: tools.get(NOTION_UPDATE_PAGE_TOOL) as McpToolInfo,
+      createEvents: tools.get(NOTION_CALENDAR_CREATE_TOOL),
+      updateEvents: tools.get(NOTION_CALENDAR_UPDATE_TOOL),
+    };
+  }
+
+  // ── Notion 캘린더 (이슈 #391 2단계) ──
+
+  /** 회사 Notion 계정에 연결된 캘린더. 하나도 없으면 빈 배열 (Notion 캘린더에 Google 캘린더를 연결하지 않았다) */
+  listCalendars(): Promise<NotionCalendarOption[]> {
+    return this.mcp.withSession(INTEGRATION_PROVIDER.NOTION, (session) => this.readCalendars(session));
+  }
+
+  private async readCalendars(session: McpSession): Promise<NotionCalendarOption[]> {
+    const tool = (await session.listTools()).find((t) => t.name === NOTION_CALENDAR_LIST_TOOL);
+    if (!tool) throw new AppException('INT-005', `Notion MCP 서버에 캘린더 도구(${NOTION_CALENDAR_LIST_TOOL})가 없어요. Notion을 다시 연결해 보고, 그래도 없으면 Notion 캘린더를 쓸 수 있는 계정인지 확인해 주세요`);
+    return readCalendarList(await session.callTool(tool.name, {}));
+  }
+
+  /**
+   * 일정을 함께 만들 캘린더와 초대 여부를 정한다. 고른 캘린더는 목록에 있고 쓸 수 있어야 한다.
+   * 캘린더를 바꾸면 옛 캘린더의 일정 id를 지우고 앞으로의 일정(지난 30일 포함)을 새 캘린더에 만든다. 옛 캘린더의 일정은 지우지 않는다.
+   * 초대 여부만 바꾸면 같은 일정들을 다시 보낸다(켜면 참석자가 더해진다).
+   */
+  async updateCalendar(input: NotionCalendarSettingsInput): Promise<void> {
+    await this.enqueue(async () => {
+      const settings = await this.currentSettings();
+      if (!readyWorkspace(settings)) throw new AppException('COM-004', '먼저 Notion 업무 공간을 만들어 주세요', 409);
+      const current = settings.notionWorkspace?.calendar ?? null;
+      let next: NotionCalendarSettings | null = current;
+      if (input.accountId === null) {
+        next = null;
+      } else if (input.accountId !== undefined || input.calendarId !== undefined) {
+        const { accountId, calendarId } = input;
+        if (!accountId || !calendarId) throw new AppException('COM-004', '캘린더 계정과 캘린더를 함께 골라 주세요');
+        const options = await this.mcp.withSession(INTEGRATION_PROVIDER.NOTION, (session) => this.readCalendars(session));
+        const option = options.find((o) => o.accountId === accountId && o.calendarId === calendarId);
+        if (!option) throw new AppException('COM-004', '고른 캘린더를 Notion에서 찾을 수 없어요. 캘린더 목록을 다시 불러와 주세요');
+        if (option.writable === false) throw new AppException('COM-004', '일정을 만들 수 없는(읽기 전용) 캘린더예요. 다른 캘린더를 골라 주세요');
+        next = { accountId, calendarId, name: option.name, accountEmail: option.accountEmail, sendInvites: input.sendInvites ?? current?.sendInvites ?? false };
+      } else if (input.sendInvites !== undefined) {
+        if (!current) throw new AppException('COM-004', '먼저 캘린더를 골라 주세요');
+        next = { ...current, sendInvites: input.sendInvites };
+      }
+      await this.saveWorkspace({ calendar: next });
+      if (!next) return;
+      const moved = !current || current.accountId !== next.accountId || current.calendarId !== next.calendarId;
+      if (moved || current.sendInvites !== next.sendInvites) {
+        await this.repository.resetScheduleEventCalendarSync(this.prisma, new Date(Date.now() - NOTION_BACKFILL_DAYS * DAY_MS), moved);
+      }
+      // 관리자가 캘린더를 다시 저장하면(권한을 고친 뒤 등) 미룬 일정을 바로 다시 해 본다
+      this.failures.scheduleEvents.clear();
+    });
+    this.kick();
   }
 
   // ── 회의록 직접 내보내기 ──
@@ -366,10 +498,10 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
    * 행 몇 개를 반영한다. 행의 실패는 표시만 남기고 넘어간다. 인증 실패와 전송 실패(시간 초과·연결 끊김)는 다음 행도 실패할 것이라
    * 다시 던져 이번 반영을 멈춘다 (withSession이 연결 오류로 남긴다). 만드는 중 결과를 알 수 없으면 오래 미룬다.
    */
-  private async guard(kind: SyncKind, ids: number[], creating: boolean, task: () => Promise<void>): Promise<boolean> {
+  private async guard(kind: SyncKind, ids: number[], creating: boolean, task: () => Promise<void>, clearOnSuccess = true): Promise<boolean> {
     try {
       await task();
-      for (const id of ids) this.succeeded(kind, id);
+      if (clearOnSuccess) for (const id of ids) this.succeeded(kind, id);
       return true;
     } catch (error) {
       if (isAuthFailure(error)) throw error;
@@ -382,9 +514,13 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
 
   private async sweep(): Promise<void> {
     if (this.stopped) return;
-    const ws = await this.readyContext();
+    const row = await this.connections.findByProviderKey(this.prisma, INTEGRATION_PROVIDER.NOTION);
+    if (!row?.oauthTokens) return;
+    const settings = readSettings(row.settings);
+    const ws = readyWorkspace(settings);
     if (!ws) return;
     const now = Date.now();
+    const repair = workspaceNeedsRepair(ws) && (this.lastRepairAt === null || now - this.lastRepairAt > REPAIR_RETRY_MS);
     const since = new Date(now - NOTION_BACKFILL_DAYS * DAY_MS);
     const staleBefore = new Date(now - NOTION_EXPORT_STALE_MS);
     const skip = { meetingMinutes: this.excluded('meetingMinutes'), scheduleEvents: this.excluded('scheduleEvents'), tasks: this.excluded('tasks') };
@@ -392,7 +528,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     const meetings = (await this.repository.findMeetingIdsToUpdate(this.prisma, skip.meetingMinutes, ROWS_PER_RUN)).map((m) => m.id);
     const events = await this.repository.findDirtyScheduleEvents(this.prisma, since, skip.scheduleEvents, ROWS_PER_RUN);
     const tasks = await this.repository.findDirtyTasks(this.prisma, since, skip.tasks, ROWS_PER_RUN);
-    if (meetingIds.length + meetings.length + events.length + tasks.length === 0) {
+    if (meetingIds.length + meetings.length + events.length + tasks.length === 0 && !repair) {
       this.lastSyncedAt = new Date();
       return;
     }
@@ -400,6 +536,10 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     let progressed = false;
     try {
       await this.mcp.withSession(INTEGRATION_PROVIDER.NOTION, async (session) => {
+        if (repair) {
+          this.lastRepairAt = now;
+          await this.repairWorkspace(session, new Map((await session.listTools()).map((t) => [t.name, t])), settings.parentPageId ?? null);
+        }
         const tools = await this.syncTools(session);
         // 회의록을 먼저 만들어 같은 회의에서 나온 일정·업무가 회의록 페이지 주소를 가리키게 한다
         for (const id of meetingIds) {
@@ -468,17 +608,65 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     });
   }
 
-  private syncScheduleEvents(session: McpSession, tools: SyncTools, ws: ReadyWorkspace, rows: NotionScheduleEventRow[]): Promise<boolean> {
-    return this.syncRows(session, tools, ws.scheduleEvents, 'scheduleEvents', rows, (row) => this.scheduleEventDraft(row), (id, pageId, at) => this.repository.markScheduleEventSynced(this.prisma, id, pageId, at));
+  /**
+   * 일정은 데이터베이스 페이지와 (고른 캘린더가 있으면) 캘린더 일정 두 곳에 반영한다. 페이지 id·일정 id는 만들자마자 적어
+   * 한쪽이 실패해도 다음에 다른 쪽을 또 만들지 않는다. 두 곳 모두 반영해야 notion_synced_at을 적는다.
+   */
+  private async syncScheduleEvents(session: McpSession, tools: SyncTools, ws: ReadyWorkspace, rows: NotionScheduleEventRow[]): Promise<boolean> {
+    const since = new Date(Date.now() - NOTION_BACKFILL_DAYS * DAY_MS);
+    const pages = await this.syncRows(session, tools, ws.scheduleEvents, 'scheduleEvents', rows, (row) => this.scheduleEventDraft(row), (row, pageId) => this.repository.setScheduleEventPage(this.prisma, row.id, pageId), false);
+    let progressed = pages.progressed;
+    for (const row of rows) {
+      if (!pages.done.has(row.id)) continue;
+      const creating = ws.calendar !== null && row.notionCalendarEventId === null;
+      progressed = (await this.guard('scheduleEvents', [row.id], creating, () => this.syncCalendarEvent(session, tools, ws.calendar, row, since))) || progressed;
+    }
+    return progressed;
   }
 
-  private syncTasks(session: McpSession, tools: SyncTools, ws: ReadyWorkspace, rows: NotionTaskRow[]): Promise<boolean> {
-    return this.syncRows(session, tools, ws.tasks, 'tasks', rows, (row) => this.taskDraft(row), (id, pageId, at) => this.repository.markTaskSynced(this.prisma, id, pageId, at));
+  private calendarDraft(row: NotionScheduleEventRow, calendar: NotionCalendarSettings): CalendarEventDraft {
+    return {
+      title: row.scheduleEventTitle,
+      description: row.scheduleEventDescription,
+      startAt: row.startAt,
+      endAt: row.endAt,
+      erpUrl: erpUrl(clientBaseUrl(), row.linkPath ?? scheduleWeekLink(seoulIso(row.startAt))),
+      // 초대를 켰을 때만 메일이 있는 참석자를 보낸다 (Google 캘린더가 초대 메일을 보낸다)
+      attendees: calendar.sendInvites ? row.attendees.flatMap((a) => (a.employee.email ? [{ email: a.employee.email, displayName: a.employee.employeeName }] : [])) : null,
+    };
+  }
+
+  /** 고른 캘린더에 일정을 만들거나 고친 뒤 반영 시각을 적는다. 캘린더가 없거나 페이지만 있는 지난 일정이면 반영 시각만 적는다 */
+  private async syncCalendarEvent(session: McpSession, tools: SyncTools, calendar: NotionCalendarSettings | null, row: NotionScheduleEventRow, since: Date): Promise<void> {
+    if (calendar) {
+      const draft = this.calendarDraft(row, calendar);
+      if (row.notionCalendarEventId) {
+        const tool = this.calendarTool(tools.updateEvents, NOTION_CALENDAR_UPDATE_TOOL);
+        readCalendarUpdateResult(await session.callTool(tool.name, buildUpdateCalendarEventArgs(tool, calendar, row.notionCalendarEventId, draft)));
+      } else if (row.endAt >= since) {
+        const tool = this.calendarTool(tools.createEvents, NOTION_CALENDAR_CREATE_TOOL);
+        const ids = readCreatedCalendarEvents(await session.callTool(tool.name, buildCreateCalendarEventArgs(tool, calendar, draft)), 1);
+        if (!ids) throw new UncertainCreateError('Notion 캘린더 일정 만들기 응답에서 일정 id를 읽지 못했어요');
+        await this.repository.setScheduleEventCalendarEvent(this.prisma, row.id, ids[0]);
+      }
+    }
+    await this.repository.markScheduleEventSynced(this.prisma, row.id, row.updatedAt);
+  }
+
+  private calendarTool(tool: McpToolInfo | undefined, name: string): McpToolInfo {
+    if (!tool) throw new AppException('INT-005', `Notion MCP 서버에 캘린더 도구(${name})가 없어요`);
+    return tool;
+  }
+
+  private async syncTasks(session: McpSession, tools: SyncTools, ws: ReadyWorkspace, rows: NotionTaskRow[]): Promise<boolean> {
+    const result = await this.syncRows(session, tools, ws.tasks, 'tasks', rows, (row) => this.taskDraft(row), (row, pageId) => this.repository.markTaskSynced(this.prisma, row.id, pageId, row.updatedAt));
+    return result.progressed;
   }
 
   /**
-   * 페이지가 없는 행은 여러 개씩 만들고, 있는 행은 속성만 고친다. 반영한 행의 updated_at을 notion_synced_at에 적는다.
+   * 페이지가 없는 행은 여러 개씩 만들고, 있는 행은 속성만 고친다. 페이지를 반영한 행마다 mark를 부르고, 그 행과 페이지 id를 돌려준다.
    * 여러 개를 한 번에 만들다 Notion이 오류로 답하면(만들지 않았다) 어느 행 때문인지 알 수 없어 하나씩 다시 만든다.
+   * clearOnSuccess가 false면 실패 표시를 지우지 않는다 (일정은 캘린더까지 반영한 뒤에 지운다).
    */
   private async syncRows<R extends { id: number; notionPageId: string | null; updatedAt: Date }>(
     session: McpSession,
@@ -487,23 +675,28 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     kind: SyncKind,
     rows: R[],
     draft: (row: R) => NotionProperties,
-    mark: (id: number, pageId: string, syncedAt: Date) => Promise<unknown>,
-  ): Promise<boolean> {
+    mark: (row: R, pageId: string) => Promise<unknown>,
+    clearOnSuccess = true,
+  ): Promise<{ progressed: boolean; done: Map<number, string> }> {
     let progressed = false;
+    const done = new Map<number, string>();
     const create = async (batch: R[]) => {
       const result = await session.callTool(tools.createPages.name, buildCreateRowsArgs(tools.createPages, ref.dataSourceId, batch.map((row) => ({ properties: draft(row) }))));
       const pages = readCreatedPages(result, batch.length);
       if (!pages) throw new UncertainCreateError('Notion 페이지 만들기 응답에서 만든 페이지를 모두 읽지 못했어요');
-      for (const [i, row] of batch.entries()) await mark(row.id, pages[i].id, row.updatedAt);
+      for (const [i, row] of batch.entries()) {
+        await mark(row, pages[i].id);
+        done.set(row.id, pages[i].id);
+      }
     };
     for (const batch of chunks(rows.filter((row) => row.notionPageId === null), CREATE_BATCH_SIZE)) {
       try {
         await create(batch);
-        for (const row of batch) this.succeeded(kind, row.id);
+        if (clearOnSuccess) for (const row of batch) this.succeeded(kind, row.id);
         progressed = true;
       } catch (error) {
         if (batch.length > 1 && error instanceof AppException) {
-          for (const row of batch) progressed = (await this.guard(kind, [row.id], true, () => create([row]))) || progressed;
+          for (const row of batch) progressed = (await this.guard(kind, [row.id], true, () => create([row]), clearOnSuccess)) || progressed;
           continue;
         }
         // 한 개짜리이거나 결과를 알 수 없는 실패: guard와 같이 다룬다
@@ -514,11 +707,18 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
       const pageId = row.notionPageId;
       if (pageId === null) continue;
       progressed =
-        (await this.guard(kind, [row.id], false, async () => {
-          readUpdateResult(await session.callTool(tools.updatePage.name, buildUpdatePropertiesArgs(tools.updatePage, pageId, draft(row))));
-          await mark(row.id, pageId, row.updatedAt);
-        })) || progressed;
+        (await this.guard(
+          kind,
+          [row.id],
+          false,
+          async () => {
+            readUpdateResult(await session.callTool(tools.updatePage.name, buildUpdatePropertiesArgs(tools.updatePage, pageId, draft(row))));
+            await mark(row, pageId);
+            done.set(row.id, pageId);
+          },
+          clearOnSuccess,
+        )) || progressed;
     }
-    return progressed;
+    return { progressed, done };
   }
 }

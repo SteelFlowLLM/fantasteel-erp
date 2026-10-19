@@ -5,6 +5,10 @@ import {
   buildCreateDatabaseArgs,
   buildCreateRowsArgs,
   buildCreateViewArgs,
+  buildFetchDataSourceArgs,
+  missingViews,
+  readDatabaseOfDataSource,
+  workspaceNeedsRepair,
   buildReplaceContentArgs,
   buildUpdatePropertiesArgs,
   meetingProperties,
@@ -77,11 +81,53 @@ describe('데이터베이스·보기 만들기', () => {
     expect(() => readCreatedDatabase(text('parent not found', true), PARENT)).toThrow(AppException);
   });
 
-  it('보기: 데이터베이스 id가 있으면 그 데이터베이스에, 없으면 상위 페이지에 붙인다', () => {
+  it('보기: 늘 데이터베이스의 보기 탭으로 만든다 (상위 페이지에 붙이지 않는다)', () => {
     const view = { name: '상태별', type: 'board' as const, configure: 'GROUP BY "상태"' };
     const createView = tool('notion-create-view', ['database_id', 'parent_page_id', 'data_source_id', 'name', 'type', 'configure']);
-    expect(buildCreateViewArgs(createView, { databaseId: DB, dataSourceId: DS, url: null }, PARENT, view)).toEqual({ database_id: DB, data_source_id: DS, name: '상태별', type: 'board', configure: 'GROUP BY "상태"' });
-    expect(buildCreateViewArgs(createView, { databaseId: null, dataSourceId: DS, url: null }, PARENT, view)).toMatchObject({ parent_page_id: PARENT, data_source_id: DS });
+    const args = buildCreateViewArgs(createView, DB, DS, view);
+    expect(args).toEqual({ database_id: DB, data_source_id: DS, name: '상태별', type: 'board', configure: 'GROUP BY "상태"' });
+    expect(args).not.toHaveProperty('parent_page_id');
+    expect(() => buildCreateViewArgs(tool('notion-create-view', ['parent_page_id', 'data_source_id', 'name', 'type']), DB, DS, view)).toThrow(AppException);
+  });
+});
+
+describe('실제 Notion 응답 (2026-10-19 확인)', () => {
+  // 실제 응답의 주소는 app.notion.com/p/<id>이고 마크다운에서는 {{…}}로 감싼다
+  const REAL_DB = '0654571d777347869b23a886f9ad967d';
+  const REAL_DS = '3fe44f56-d61f-81a3-b0b1-000b2c4e1a11';
+  const REAL_PARENT = '1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6';
+
+  it('데이터베이스 만들기: <database url="{{https://app.notion.com/p/…}}" inline="false">와 {{collection://…}}', () => {
+    const result = text(
+      `Created database.\n<database url="{{https://app.notion.com/p/${REAL_DB}}}" inline="false">\n<data-source url="{{collection://${REAL_DS}}}">\nCREATE TABLE ("제목" TITLE)\n</data-source>\n</database>`,
+    );
+    expect(readCreatedDatabase(result, REAL_PARENT)).toEqual({ databaseId: REAL_DB, dataSourceId: REAL_DS, url: `https://app.notion.com/p/${REAL_DB}` });
+  });
+
+  it('페이지 만들기: id는 대시 있는 UUID, 주소는 ?pvs=204를 떼고 남긴다', () => {
+    const json = '{"pages":[{"id":"3fe44f56-d61f-81f2-92e0-ffd920d310c4","url":"https://app.notion.com/p/3fe44f56d61f81f292e0ffd920d310c4?pvs=204","properties":{"title":"원료 회의"}}]}';
+    expect(readCreatedPages(text(json), 1)).toEqual([{ id: '3fe44f56d61f81f292e0ffd920d310c4', url: 'https://app.notion.com/p/3fe44f56d61f81f292e0ffd920d310c4' }]);
+  });
+
+  it('데이터 소스 읽기 결과에서 데이터베이스를 찾는다 (태그·JSON만, 글 속 다른 주소는 고르지 않음)', () => {
+    const fetched = text(
+      `<data-source url="{{collection://${REAL_DS}}}">\n<parent-database url="{{https://app.notion.com/p/${REAL_DB}}}"/>\n<page url="{{https://app.notion.com/p/${PAGE1}}}"/>\n</data-source>`,
+    );
+    expect(readDatabaseOfDataSource(fetched, REAL_DS, REAL_PARENT)).toEqual({ databaseId: REAL_DB, url: `https://app.notion.com/p/${REAL_DB}` });
+    expect(readDatabaseOfDataSource(text(JSON.stringify({ database_id: REAL_DB })), REAL_DS, REAL_PARENT)?.databaseId).toBe(REAL_DB);
+    expect(readDatabaseOfDataSource(text(`<page url="{{https://app.notion.com/p/${PAGE1}}}"/>`), REAL_DS, REAL_PARENT)).toBeNull();
+    expect(buildFetchDataSourceArgs(tool('notion-fetch', ['id']), REAL_DS)).toEqual({ id: `collection://${REAL_DS}` });
+  });
+
+  it('고칠 것: 데이터베이스 id·주소가 없거나 보기 기록이 빠졌으면 고친다', () => {
+    const allViews = ['달력', '일정 목록'];
+    const full = { databaseId: REAL_DB, dataSourceId: REAL_DS, url: `https://app.notion.com/p/${REAL_DB}`, views: allViews };
+    expect(workspaceNeedsRepair({ scheduleEvents: full })).toBe(false);
+    expect(workspaceNeedsRepair({ scheduleEvents: { ...full, databaseId: null } })).toBe(true);
+    expect(workspaceNeedsRepair({ scheduleEvents: { ...full, url: null } })).toBe(true);
+    // 1단계에서 만든 업무 공간: 보기 기록이 없다
+    expect(workspaceNeedsRepair({ scheduleEvents: { databaseId: REAL_DB, dataSourceId: REAL_DS, url: 'x' } })).toBe(true);
+    expect(missingViews('tasks', { views: ['상태별'] }).map((v) => v.name)).toEqual(['담당자별', '마감일순']);
   });
 });
 

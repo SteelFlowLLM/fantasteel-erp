@@ -23,6 +23,11 @@ describe('normalizeNotionPageId', () => {
     expect(normalizeNotionPageId(`https://www.notion.so/team/${encodeURIComponent('회의록')}-${ID}`)).toBe(ID);
   });
 
+  it('하위 도메인 주소(app.notion.com/p/<id>)도 읽는다', () => {
+    expect(normalizeNotionPageId('https://app.notion.com/p/0654571d777347869b23a886f9ad967d')).toBe('0654571d777347869b23a886f9ad967d');
+    expect(normalizeNotionPageId(`https://app.notion.com/p/${ID}?pvs=204`)).toBe(ID);
+  });
+
   it('미리보기로 연 페이지(p)를 먼저 본다', () => {
     const other = 'ffffffffffffffffffffffffffffffff';
     expect(normalizeNotionPageId(`https://www.notion.so/team/Board-${other}?v=0000&p=${ID}&pm=s`)).toBe(ID);
@@ -71,6 +76,12 @@ describe('readCreatedPageUrl', () => {
 
   it('structuredContent도 본다', () => {
     expect(readCreatedPageUrl({ content: [], structuredContent: { result: { url: 'https://www.notion.so/abc' } } })).toBe('https://www.notion.so/abc');
+  });
+
+  it('실제 응답(app.notion.com/p/…?pvs=204)은 물음표 뒤를 떼고 남긴다', () => {
+    const real = '{"pages":[{"id":"3fe44f56-d61f-81f2-92e0-ffd920d310c4","url":"https://app.notion.com/p/3fe44f56d61f81f292e0ffd920d310c4?pvs=204","properties":{"title":"x"}}]}';
+    expect(readCreatedPageUrl(text(real))).toBe('https://app.notion.com/p/3fe44f56d61f81f292e0ffd920d310c4');
+    expect(readCreatedPageUrl(text(`Created https://app.notion.com/p/${ID}?pvs=204.`))).toBe(`https://app.notion.com/p/${ID}`);
   });
 
   it('JSON이 아닌 글 속 주소', () => {

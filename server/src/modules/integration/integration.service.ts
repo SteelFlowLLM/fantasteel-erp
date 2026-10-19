@@ -9,12 +9,13 @@ import {
   type IntegrationOAuthClientView,
   type IntegrationSettings,
   type IntegrationTestResult,
+  type NotionCalendarOption,
   type NotionWorkspaceView,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
-import type { UpdateIntegrationSettingsDto, OAuthCallbackQuery } from './dto/integration.dto';
+import type { UpdateIntegrationSettingsDto, UpdateNotionCalendarDto, OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationConnectionRepository, type IntegrationConnectionRow } from './integration-connection.repository';
 import { IntegrationCrypto } from './integration-crypto';
 import { isProviderKey, mcpServerUrlOf, providerPreset, providerPresets, type IntegrationProviderPreset } from './integration-providers';
@@ -254,6 +255,17 @@ export class IntegrationService {
    */
   async setupNotionWorkspace(): Promise<IntegrationConnectionView> {
     await this.notionWorkspace.setup();
+    return this.get(INTEGRATION_PROVIDER.NOTION);
+  }
+
+  /** 회사 Notion 계정에 연결된 캘린더 (이슈 #391 2단계). 없으면 빈 배열 */
+  listNotionCalendars(): Promise<NotionCalendarOption[]> {
+    return this.notionWorkspace.listCalendars();
+  }
+
+  /** 일정을 함께 만들 Notion 캘린더와 초대 여부 (이슈 #391 2단계) */
+  async updateNotionCalendar(dto: UpdateNotionCalendarDto): Promise<IntegrationConnectionView> {
+    await this.notionWorkspace.updateCalendar(dto);
     return this.get(INTEGRATION_PROVIDER.NOTION);
   }
 

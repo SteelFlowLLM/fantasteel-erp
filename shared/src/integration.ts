@@ -24,11 +24,45 @@ export type NotionWorkspaceDatabaseKey = (typeof NOTION_WORKSPACE_DATABASES)[num
 
 /** 만든 Notion 데이터베이스 하나. 페이지는 dataSourceId 아래에 만든다 */
 export interface NotionDatabaseRef {
-  /** 데이터베이스 id (32자리 16진수). 만들기 결과에서 읽지 못하면 null (보기를 상위 페이지에 붙인다) */
+  /** 데이터베이스 id (32자리 16진수). 만들기 결과에서 읽지 못하면 null: 데이터 소스를 읽어 찾은 뒤 보기를 만든다 */
   databaseId: string | null;
   /** 데이터 소스 id (UUID) */
   dataSourceId: string;
   url: string | null;
+  /** 이 데이터베이스에 만든 보기 이름. 빠진 보기만 다시 만든다 */
+  views?: string[];
+}
+
+/** Notion 캘린더에서 고른 캘린더 (이슈 #391 2단계). 일정 데이터베이스와 함께 이 캘린더에도 일정을 만든다 */
+export interface NotionCalendarSettings {
+  accountId: string;
+  calendarId: string;
+  name: string;
+  /** 캘린더가 속한 계정의 메일 (목록에 있으면) */
+  accountEmail: string | null;
+  /** 켜면 일정 참석자 중 메일이 있는 사원을 초대한다 (초대 메일이 간다). 기본 꺼짐 */
+  sendInvites: boolean;
+}
+
+/** GET integrations/notion/calendars 한 줄: 회사 Notion 계정에 연결된 캘린더 */
+export interface NotionCalendarOption {
+  accountId: string;
+  accountEmail: string | null;
+  calendarId: string;
+  name: string;
+  primary: boolean;
+  /** 일정을 만들 수 있는지. Notion이 알려 주지 않으면 null */
+  writable: boolean | null;
+}
+
+/**
+ * PUT integrations/notion/calendar. accountId·calendarId를 주면 그 캘린더로 바꾸고, accountId가 null이면 캘린더 반영을 끈다.
+ * sendInvites만 주면 초대 여부만 바꾼다.
+ */
+export interface NotionCalendarSettingsInput {
+  accountId?: string | null;
+  calendarId?: string;
+  sendInvites?: boolean;
 }
 
 /** 서버만 쓰는 설정: 상위 페이지 아래에 만든 데이터베이스. 만든 것만 칸이 있다 (만들다 멈추면 다음에 없는 것만 만든다) */
@@ -38,6 +72,8 @@ export interface NotionWorkspaceSettings {
   tasks?: NotionDatabaseRef;
   /** 세 데이터베이스를 모두 만든 시각 */
   createdAt?: string;
+  /** 일정을 함께 만들 Notion 캘린더. 없으면 캘린더에는 반영하지 않는다 */
+  calendar?: NotionCalendarSettings;
 }
 
 /** 연결별 설정. 연결 대상마다 쓰는 칸이 다르다 */
@@ -64,6 +100,10 @@ export interface NotionWorkspaceView {
   pendingCount: number;
   /** 마지막 반영 실패 이유 */
   lastSyncError: string | null;
+  /** 데이터베이스 주소를 찾지 못했거나 보기를 만들지 못했을 때 안내 (반영은 된다) */
+  setupWarning: string | null;
+  /** 일정을 함께 만드는 Notion 캘린더. 고르지 않았으면 null */
+  calendar: NotionCalendarSettings | null;
 }
 
 /** OAUTH2 연결에 관리자가 넣은 OAuth 클라이언트. client secret은 돌려주지 않고 넣었는지만 알린다 */

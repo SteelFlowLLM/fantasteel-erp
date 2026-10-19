@@ -1,7 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { MEETING_MINUTES_STATUS, TASK_STATUS } from '@fantasteel/shared';
 import type { Prisma } from '../../../generated/prisma/client';
-import { finishMeetingMinutesNotionPage, markMeetingMinutesNotionSynced, markScheduleEventNotionSynced, markTaskNotionSynced } from '../../../generated/prisma/sql';
+import {
+  finishMeetingMinutesNotionPage,
+  markMeetingMinutesNotionSynced,
+  markScheduleEventNotionSynced,
+  markTaskNotionSynced,
+  resetScheduleEventCalendarSync,
+  setScheduleEventCalendarEvent,
+  setScheduleEventNotionPage,
+} from '../../../generated/prisma/sql';
 import type { Tx } from '../../../prisma/prisma.service';
 import { meetingMinutesDetailSelect } from '../../meeting-minutes/meeting-minutes.repository';
 
@@ -15,10 +23,11 @@ const scheduleEventSelect = {
   endAt: true,
   linkPath: true,
   notionPageId: true,
+  notionCalendarEventId: true,
   updatedAt: true,
   creator: { select: { employeeName: true } },
   meetingMinutes: meetingLink,
-  attendees: { orderBy: { id: 'asc' }, select: { employee: { select: { employeeName: true } } } },
+  attendees: { orderBy: { id: 'asc' }, select: { employee: { select: { employeeName: true, email: true } } } },
 } satisfies Prisma.ScheduleEventSelect;
 
 const taskSelect = {
@@ -73,8 +82,22 @@ export class NotionSyncRepository {
     return tx.scheduleEvent.count({ where: this.scheduleEventWhere(tx, since) });
   }
 
-  markScheduleEventSynced(tx: Tx, id: number, notionPageId: string, syncedAt: Date) {
-    return tx.$queryRawTyped(markScheduleEventNotionSynced(id, notionPageId, syncedAt));
+  /** 일정 데이터베이스 페이지 id만 적는다. 캘린더까지 반영해야 markScheduleEventSynced로 끝낸다 */
+  setScheduleEventPage(tx: Tx, id: number, notionPageId: string) {
+    return tx.$queryRawTyped(setScheduleEventNotionPage(id, notionPageId));
+  }
+
+  setScheduleEventCalendarEvent(tx: Tx, id: number, eventId: string) {
+    return tx.$queryRawTyped(setScheduleEventCalendarEvent(id, eventId));
+  }
+
+  markScheduleEventSynced(tx: Tx, id: number, syncedAt: Date) {
+    return tx.$queryRawTyped(markScheduleEventNotionSynced(id, syncedAt));
+  }
+
+  /** 캘린더 설정이 바뀌면 since 뒤에 끝나는 일정을 다시 반영하게 하고, 캘린더를 바꿨으면 옛 일정 id를 지운다 */
+  resetScheduleEventCalendarSync(tx: Tx, since: Date, clearEvents: boolean) {
+    return tx.$queryRawTyped(resetScheduleEventCalendarSync(since, clearEvents));
   }
 
   // ── 업무 ──

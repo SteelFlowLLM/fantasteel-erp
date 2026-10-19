@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
-import { DRIVE_FILE_KINDS, type DriveFileKind, type IntegrationSettingsInput } from '@fantasteel/shared';
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import { DRIVE_FILE_KINDS, type DriveFileKind, type IntegrationSettingsInput, type NotionCalendarSettingsInput } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -40,6 +40,29 @@ export class UpdateIntegrationSettingsDto implements IntegrationSettingsInput {
   @IsString({ message: 'Drive 폴더 주소나 id를 글로 보내 주세요' })
   @MaxLength(2000, { message: 'Drive 폴더 주소가 너무 길어요' })
   folder?: string | null;
+}
+
+/**
+ * PUT integrations/notion/calendar (이슈 #391 2단계). accountId·calendarId를 함께 주면 그 캘린더로 바꾸고, accountId가 null이면 캘린더 반영을 끈다.
+ * sendInvites만 주면 초대 여부만 바꾼다.
+ */
+export class UpdateNotionCalendarDto implements NotionCalendarSettingsInput {
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString({ message: '캘린더 계정을 골라 주세요' })
+  @IsNotEmpty({ message: '캘린더 계정을 골라 주세요' })
+  @MaxLength(500)
+  accountId?: string | null;
+
+  @IsOptional()
+  @IsString({ message: '캘린더를 골라 주세요' })
+  @IsNotEmpty({ message: '캘린더를 골라 주세요' })
+  @MaxLength(1000)
+  calendarId?: string;
+
+  @IsOptional()
+  @IsBoolean({ message: '초대 여부는 true 또는 false여야 해요' })
+  sendInvites?: boolean;
 }
 
 /** GET integrations/google-drive/files */

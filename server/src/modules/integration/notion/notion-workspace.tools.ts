@@ -1,13 +1,14 @@
 // Notion 업무 공간(이슈 #391)에서 Notion 원격 MCP 서버에 맞춘 부분: 데이터베이스·보기 정의, 도구 입력 만들기, 결과 읽기, 행 → 속성 바꾸기.
 // 서버가 도구 모양을 바꾸면 여기만 고친다. 페이지 하나 만들기(회의록 직접 내보내기)는 notion.tools.ts에 있다.
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { TASK_STATUS_LABEL, type NotionDatabaseRef, type NotionWorkspaceDatabaseKey, type TaskStatus } from '@fantasteel/shared';
+import { NOTION_WORKSPACE_DATABASES, TASK_STATUS_LABEL, type NotionDatabaseRef, type NotionWorkspaceDatabaseKey, type TaskStatus } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
-import { normalizeNotionPageId, notionPageUrlOf, textsOf, type ToolShape } from './notion.tools';
+import { cleanNotionUrl, isNotionNotFound, normalizeNotionPageId, NOTION_URL_IN_TEXT, notionPageUrlOf, PARENT_PAGE_NOT_FOUND_MESSAGE, textsOf, type ToolShape } from './notion.tools';
 
 export const NOTION_CREATE_DATABASE_TOOL = 'notion-create-database';
 export const NOTION_CREATE_VIEW_TOOL = 'notion-create-view';
 export const NOTION_UPDATE_PAGE_TOOL = 'notion-update-page';
+export const NOTION_FETCH_TOOL = 'notion-fetch';
 
 /** Notion 글 속성 한 칸의 상한 (rich text 조각 하나가 2000자) */
 const TEXT_MAX = 2000;
@@ -102,6 +103,20 @@ export function notionDatabaseDefs(assigneeNames: readonly string[]): Record<Not
   };
 }
 
+/** 이 데이터베이스에 아직 만들지 않은 보기 (보기 정의는 담당자 이름과 상관없다) */
+export function missingViews(key: NotionWorkspaceDatabaseKey, ref: Pick<NotionDatabaseRef, 'views'>): NotionViewDef[] {
+  const made = new Set(ref.views ?? []);
+  return notionDatabaseDefs([])[key].views.filter((view) => !made.has(view.name));
+}
+
+/** 데이터베이스 id를 모르거나 빠진 보기가 있어 고칠 것이 있는지 (1단계에서 만든 업무 공간은 보기 기록이 없다) */
+export function workspaceNeedsRepair(refs: Partial<Record<NotionWorkspaceDatabaseKey, NotionDatabaseRef | null>>): boolean {
+  return NOTION_WORKSPACE_DATABASES.some((key) => {
+    const ref = refs[key];
+    return ref != null && (!ref.databaseId || !ref.url || missingViews(key, ref).length > 0);
+  });
+}
+
 function propertiesOf(tool: ToolShape): Record<string, unknown> {
   return tool.inputSchema.properties ?? {};
 }
@@ -128,9 +143,13 @@ export function buildCreateDatabaseArgs(tool: ToolShape, parentPageId: string, d
   };
 }
 
-function failIfError(result: CallToolResult, what: string): string[] {
+/** 오류 답이면 INT-004. notFoundMessage를 주면 Notion이 대상을 못 찾았다는 답일 때 그 문구로 알린다 */
+function failIfError(result: CallToolResult, what: string, notFoundMessage?: string): string[] {
   const texts = textsOf(result);
-  if (result.isError) throw new AppException('INT-004', `Notion ${what}: ${texts.join(' ').slice(0, 300) || '이유 없음'}`);
+  if (result.isError) {
+    if (notFoundMessage && isNotionNotFound(texts.join(' '))) throw new AppException('INT-004', notFoundMessage);
+    throw new AppException('INT-004', `Notion ${what}: ${texts.join(' ').slice(0, 300) || '이유 없음'}`);
+  }
   return texts;
 }
 
@@ -162,7 +181,7 @@ function findString(value: unknown, keys: string[], depth = 0): string | null {
 }
 
 const UUID_IN_TEXT = /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i;
-const NOTION_URL = /https:\/\/(?:www\.)?notion\.(?:so|site|com)\/[^\s)"'\]<>}]+/gi;
+const NOTION_URL = NOTION_URL_IN_TEXT;
 
 /** 데이터 소스 id를 대시 있는 UUID 소문자로 */
 function toUuid(value: string): string | null {
@@ -178,7 +197,7 @@ function toUuid(value: string): string | null {
  * 상위 페이지 주소가 글에 함께 나올 수 있어 그 id는 데이터베이스 id로 보지 않는다.
  */
 export function readCreatedDatabase(result: CallToolResult, parentPageId: string): NotionDatabaseRef | null {
-  const texts = failIfError(result, '데이터베이스를 만들지 못했어요');
+  const texts = failIfError(result, '데이터베이스를 만들지 못했어요', PARENT_PAGE_NOT_FOUND_MESSAGE);
   const text = texts.join('\n');
   const json = jsonCandidates(result, texts);
 
@@ -186,28 +205,51 @@ export function readCreatedDatabase(result: CallToolResult, parentPageId: string
   const dataSourceId = collection ? toUuid(collection) : null;
   if (!dataSourceId) return null;
 
+  const own = findDatabaseUrl(text, json, [parentPageId, dataSourceId], false);
+  return { databaseId: own?.databaseId ?? null, dataSourceId, url: own?.url ?? null };
+}
+
+/**
+ * 글·JSON에서 데이터베이스 주소를 찾는다. `<database url="{{https://app.notion.com/p/…}}">`처럼 이름에 database가 든 태그를 먼저 보고,
+ * 그다음 JSON의 database_id·url, 끝으로 글 속 주소(onlyTagged가 false일 때). 상위 페이지·데이터 소스 id는 데이터베이스로 보지 않는다.
+ */
+function findDatabaseUrl(text: string, json: unknown[], excludeIds: string[], onlyTagged: boolean): { databaseId: string; url: string } | null {
+  const exclude = new Set(excludeIds.map((id) => id.replace(/-/g, '').toLowerCase()));
   const urls: string[] = [];
-  const tag = /<database\b[^>]*\burl="([^"]+)"/i.exec(text)?.[1];
-  if (tag) urls.push(...(tag.match(NOTION_URL) ?? []));
+  for (const match of text.matchAll(/<([\w-]*database[\w-]*)\b[^>]*\burl="([^"]+)"/gi)) urls.push(...(match[2].match(NOTION_URL) ?? []));
   for (const candidate of json) {
+    const id = findString(candidate, ['database_id', 'databaseId']);
+    const normalized = id ? normalizeNotionPageId(id) : null;
+    if (normalized && !exclude.has(normalized)) return { databaseId: normalized, url: notionPageUrlOf(normalized) };
     const url = findString(candidate, ['url']);
     if (url) urls.push(url);
   }
-  urls.push(...(text.match(NOTION_URL) ?? []));
-  const fromJsonId = json.map((c) => findString(c, ['database_id', 'databaseId'])).find((v) => v !== null) ?? null;
-
-  const parent = parentPageId.replace(/-/g, '').toLowerCase();
-  const own = urls.map((url) => ({ url: url.replace(/[.,;:]+$/, ''), id: normalizeNotionPageId(url) })).find((u) => u.id !== null && u.id !== parent && u.id !== dataSourceId.replace(/-/g, ''));
-  const databaseId = own?.id ?? (fromJsonId ? normalizeNotionPageId(fromJsonId) : null);
-  return { databaseId, dataSourceId, url: own?.url ?? (databaseId ? notionPageUrlOf(databaseId) : null) };
+  if (!onlyTagged) urls.push(...(text.match(NOTION_URL) ?? []));
+  for (const url of urls) {
+    const id = normalizeNotionPageId(url);
+    if (id && !exclude.has(id)) return { databaseId: id, url: cleanNotionUrl(url) };
+  }
+  return null;
 }
 
-/** 보기 만들기. 데이터베이스 id를 읽지 못했으면 상위 페이지에 연결된 보기로 붙인다 */
-export function buildCreateViewArgs(tool: ToolShape, ref: NotionDatabaseRef, parentPageId: string, view: NotionViewDef): Record<string, unknown> {
-  requireInputs(tool, ['data_source_id', 'name', 'type']);
+/** 데이터 소스(`collection://…`)를 읽어 그 데이터베이스를 찾는다 (만들기 결과에서 데이터베이스 id를 읽지 못했을 때) */
+export function buildFetchDataSourceArgs(tool: ToolShape, dataSourceId: string): Record<string, unknown> {
+  requireInputs(tool, ['id']);
+  return { id: `collection://${dataSourceId}` };
+}
+
+/** 데이터 소스 읽기 결과에서 데이터베이스 id·주소. 이름에 database가 든 태그나 JSON에서만 찾는다(글 속 다른 페이지 주소를 잘못 고르지 않게). 못 찾으면 null */
+export function readDatabaseOfDataSource(result: CallToolResult, dataSourceId: string, parentPageId: string): { databaseId: string; url: string } | null {
+  const texts = failIfError(result, '데이터 소스를 읽지 못했어요');
+  return findDatabaseUrl(texts.join('\n'), jsonCandidates(result, texts), [parentPageId, dataSourceId], true);
+}
+
+/** 보기 만들기: 데이터베이스의 보기 탭으로 만든다. 상위 페이지에 연결된 보기(inline)로는 만들지 않는다 */
+export function buildCreateViewArgs(tool: ToolShape, databaseId: string, dataSourceId: string, view: NotionViewDef): Record<string, unknown> {
+  requireInputs(tool, ['database_id', 'data_source_id', 'name', 'type']);
   return {
-    ...(ref.databaseId ? { database_id: ref.databaseId } : { parent_page_id: parentPageId }),
-    data_source_id: ref.dataSourceId,
+    database_id: databaseId,
+    data_source_id: dataSourceId,
     name: view.name,
     type: view.type,
     configure: view.configure,
@@ -251,7 +293,7 @@ function pagesFromJson(value: unknown): CreatedNotionPage[] | null {
     const entry = item as Record<string, unknown>;
     const id = (typeof entry.id === 'string' ? normalizeNotionPageId(entry.id) : null) ?? (typeof entry.url === 'string' ? normalizeNotionPageId(entry.url) : null);
     if (!id) return null;
-    pages.push({ id, url: typeof entry.url === 'string' && /^https:\/\//i.test(entry.url) ? entry.url : notionPageUrlOf(id) });
+    pages.push({ id, url: typeof entry.url === 'string' && /^https:\/\//i.test(entry.url) ? cleanNotionUrl(entry.url) : notionPageUrlOf(id) });
   }
   return pages;
 }
@@ -266,7 +308,7 @@ export function readCreatedPages(result: CallToolResult, expected: number): Crea
     const pages = pagesFromJson(candidate);
     if (pages) return pages.length === expected ? pages : null;
   }
-  const urls = (texts.join('\n').match(NOTION_URL) ?? []).map((url) => url.replace(/[.,;:]+$/, ''));
+  const urls = (texts.join('\n').match(NOTION_URL) ?? []).map(cleanNotionUrl);
   const pages = urls.flatMap((url) => {
     const id = normalizeNotionPageId(url);
     return id ? [{ id, url }] : [];
