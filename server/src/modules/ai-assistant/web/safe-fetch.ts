@@ -8,6 +8,9 @@ import { assertFetchableUrl, BLOCKED_LOOKUP_CODE, BlockedUrlError, DEFAULT_FETCH
 export const PAGE_FETCH_TIMEOUT_MS = 10_000;
 export const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const PAGE_MAX_REDIRECTS = 5;
+/** PDF는 앞부분만으로는 읽을 수 없어 통째로 받는다. 이보다 크면 받지 않는다 (이슈 #384) */
+export const PDF_MAX_BYTES = 5 * 1024 * 1024;
+export const PDF_CONTENT_TYPE = 'application/pdf';
 
 /** 브라우저처럼 보이는 User-Agent. 많은 사이트가 낯선 프로그램에는 빈 페이지·403을 준다 */
 export const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -32,6 +35,7 @@ export interface SafeFetcherOptions {
   timeoutMs?: number;
   maxBytes?: number;
   maxRedirects?: number;
+  pdfMaxBytes?: number;
 }
 
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
@@ -49,12 +53,14 @@ export class SafePageFetcher {
   private readonly timeoutMs: number;
   private readonly maxBytes: number;
   private readonly maxRedirects: number;
+  private readonly pdfMaxBytes: number;
 
   constructor(options: SafeFetcherOptions = {}) {
     this.policy = options.policy ?? DEFAULT_FETCH_POLICY;
     this.timeoutMs = options.timeoutMs ?? PAGE_FETCH_TIMEOUT_MS;
     this.maxBytes = options.maxBytes ?? PAGE_MAX_BYTES;
     this.maxRedirects = options.maxRedirects ?? PAGE_MAX_REDIRECTS;
+    this.pdfMaxBytes = options.pdfMaxBytes ?? PDF_MAX_BYTES;
     const base = buildConnector({ lookup: guardedLookup(this.policy, options.resolve), timeout: this.timeoutMs });
     const policy = this.policy;
     this.agent = new Agent({
@@ -84,7 +90,7 @@ export class SafePageFetcher {
           method: 'GET',
           headers: {
             'user-agent': BROWSER_USER_AGENT,
-            accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1',
+            accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,application/pdf;q=0.8,*/*;q=0.1',
             'accept-language': 'ko-KR,ko;q=0.9,en;q=0.8',
             'accept-encoding': 'gzip, deflate, br',
           },
@@ -105,9 +111,16 @@ export class SafePageFetcher {
         }
         const contentType = (header(response.headers, 'content-type') ?? '').toLowerCase();
         const mediaType = contentType.split(';')[0].trim();
-        if (mediaType === 'application/pdf') {
-          discard(response.body);
-          throw new WebFetchError('PDF는 아직 못 읽어요');
+        if (isPdf(mediaType, url)) {
+          // 잘린 PDF는 읽을 수 없으므로 크기를 알리면 먼저 보고, 받는 중에 넘어도 버린다
+          const declared = Number(header(response.headers, 'content-length'));
+          if (Number.isFinite(declared) && declared > this.pdfMaxBytes) {
+            discard(response.body);
+            throw new WebFetchError(pdfTooLarge(this.pdfMaxBytes));
+          }
+          const pdf = await readCapped(response.body, header(response.headers, 'content-encoding'), this.pdfMaxBytes);
+          if (pdf.truncated) throw new WebFetchError(pdfTooLarge(this.pdfMaxBytes));
+          return { url: url.toString(), contentType: PDF_CONTENT_TYPE, body: pdf.body, truncated: false };
         }
         // 형식을 알리지 않은 페이지는 HTML로 보고 읽어 본다
         if (mediaType && !READABLE_TYPES.includes(mediaType)) {
@@ -128,6 +141,14 @@ export class SafePageFetcher {
 }
 
 type Headers = Record<string, string | string[] | undefined>;
+
+/** PDF로 볼 응답: application/pdf, 또는 형식을 알리지 않거나 그냥 파일(octet-stream)로 알린 .pdf 주소 */
+function isPdf(mediaType: string, url: URL): boolean {
+  if (mediaType === PDF_CONTENT_TYPE || mediaType === 'application/x-pdf') return true;
+  return (mediaType === '' || mediaType === 'application/octet-stream' || mediaType === 'binary/octet-stream') && /\.pdf$/i.test(url.pathname);
+}
+
+const pdfTooLarge = (max: number) => `PDF가 ${max >= 1024 * 1024 ? `${Math.round(max / 1024 / 1024)}MB` : `${Math.ceil(max / 1024)}KB`}를 넘어 읽지 않았어요`;
 
 /** 읽지 않을 본문을 버리고 연결을 닫는다. 끊으면 본문이 abort 오류를 내므로 받아 둔다(처리하지 않은 오류가 되지 않게) */
 function discard(body: Readable) {

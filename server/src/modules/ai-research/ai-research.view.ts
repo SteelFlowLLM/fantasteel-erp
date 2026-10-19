@@ -1,6 +1,7 @@
 import type { AiResearchEventView, AiResearchRunSummaryView, AiResearchRunView, AiResearchStatus } from '@fantasteel/shared';
 import type { AiResearchEvent, AiResearchRun } from '../../generated/prisma/client';
 import type { listAiResearchRuns } from '../../generated/prisma/sql';
+import { storedCharts } from './ai-research.charts';
 import { canExtend, readBudget, storedAudit, storedPlan, storedSources, storedState } from './ai-research.rules';
 
 export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSummaryView {
@@ -43,12 +44,14 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     researchState: state ? { summary: state.summary, gaps: state.gaps, unsupportedClaims: state.unsupportedClaims } : null,
     searchedQueries: state?.searchedQueries ?? [],
     sources: sources.map((s) => ({ id: s.id, title: s.title, url: s.url, snippet: s.snippet, read: s.readText !== undefined })),
-    audit: audit ? { thesis: audit.thesis, outline: audit.outline, supportedClaims: audit.supportedClaims, contradictions: audit.contradictions, missingDimensions: audit.missingDimensions } : null,
+    audit: audit ? { thesis: audit.thesis, outline: audit.outline, supportedClaims: audit.supportedClaims, contradictions: audit.contradictions, missingDimensions: audit.missingDimensions, designInferences: audit.designInferences, unsupportedPrecision: audit.unsupportedPrecision } : null,
     report: row.report,
     reportTruncated: audit?.reportTruncated ?? false,
     incompleteReason: audit?.incompleteReason ?? null,
     failureReason: row.failureReason,
     canExtend: canExtend({ status, stepsUsed: row.stepsUsed, budget, state }),
+    charts: storedCharts(row.charts),
+    notionPageUrl: row.notionPageUrl,
     events: events.map((e) => ({ seq: e.seq, type: e.type, payload: e.payload, createdAt: e.createdAt.toISOString() }) as AiResearchEventView),
     lastSeq,
   };

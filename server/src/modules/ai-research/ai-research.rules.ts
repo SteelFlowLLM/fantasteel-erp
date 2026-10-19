@@ -1,6 +1,7 @@
 import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
 import { cutText, internalReferenceIn, redactQuery, stripInvisible } from '../ai-assistant/web/web-text';
+import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
 
 /** DB의 sources jsonb 한 줄. readText는 읽은 페이지 본문 (6,000자까지) */
 export interface StoredSource {
@@ -22,7 +23,23 @@ export interface StoredState extends AiResearchState {
   exhaustedAt?: number;
   /** 점검을 저장한 때의 stepsUsed. 같으면 이어서 할 때 점검을 다시 하지 않는다 */
   auditedAt?: number;
+  /** 단계마다의 기록 (검색어와 그 결과, 읽은 출처). 점검·보고서·다음 행동의 근거로 쓴다 (이슈 #384). 옛 조사에는 없다 */
+  notes?: StepNote[];
+  /** 검색이 연달아 비어 멈춘 때의 stepsUsed. 단계가 남았어도 더 조사하기를 허용한다 (이후 단계가 더해지면 저절로 낡는다) */
+  searchDownAt?: number;
 }
+
+/** 검색 결과 한 줄. sourceId는 출처 번호(출처가 꽉 차 넣지 못했으면 null — 근거로 보이되 인용할 수 없다) */
+export interface StepNoteResult {
+  sourceId: number | null;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export type StepNote =
+  | { step: number; kind: 'search'; query: string; engine: string | null; error: string | null; results: StepNoteResult[] }
+  | { step: number; kind: 'read'; sourceId: number; error: string | null };
 
 export type PendingAction = { kind: 'search'; query: string; step: number } | { kind: 'read'; sourceId: number; step: number };
 
@@ -45,31 +62,34 @@ export const EMPTY_STATE: StoredState = { summary: '', gaps: [], unsupportedClai
 
 // ───────────────────────────── 예산 ─────────────────────────────
 
-export function defaultBudget(): AiResearchBudget {
-  return { maxSteps: AI_RESEARCH_LIMITS.defaultMaxSteps, maxSources: AI_RESEARCH_LIMITS.defaultMaxSources };
+/** 새 조사의 예산: 환경 변수 기본값, 조사별 요청(budget)이 있으면 상한 안에서 그 값 */
+export function defaultBudget(requested: Partial<AiResearchBudget> = {}, limits: ResearchLimits = researchLimits()): AiResearchBudget {
+  const pick = (v: number | undefined, fallback: number, cap: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? Math.min(v, cap) : fallback);
+  return { maxSteps: pick(requested.maxSteps, limits.maxSteps, RESEARCH_CAPS.maxSteps), maxSources: pick(requested.maxSources, limits.maxSources, RESEARCH_CAPS.maxSources) };
 }
 
-/** 단계를 다 써서 끝났고 모르는 것이 남았고 더 늘릴 수 있을 때만 */
-export function canExtend(run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: AiResearchState | null }): boolean {
-  return (
-    run.status === AI_RESEARCH_STATUS.COMPLETED &&
-    run.stepsUsed >= run.budget.maxSteps &&
-    (run.state?.gaps.length ?? 0) > 0 &&
-    run.budget.maxSteps < AI_RESEARCH_LIMITS.maxTotalSteps
-  );
+/** 단계를 다 써서(또는 검색이 막혀 멈춰서) 끝났고 모르는 것이 남았고 더 늘릴 수 있을 때만. 검색이 막혀 멈춘 때는 모르는 것 목록이 비어도 된다 */
+export function canExtend(
+  run: { status: AiResearchStatus; stepsUsed: number; budget: AiResearchBudget; state: (AiResearchState & { searchDownAt?: number }) | null },
+  limits: ResearchLimits = researchLimits(),
+): boolean {
+  if (run.status !== AI_RESEARCH_STATUS.COMPLETED || run.budget.maxSteps >= limits.maxTotalSteps) return false;
+  if (run.state?.searchDownAt === run.stepsUsed) return true;
+  return run.stepsUsed >= run.budget.maxSteps && (run.state?.gaps.length ?? 0) > 0;
 }
 
-/** +4단계, 모두 20단계까지 */
-export function extendedBudget(budget: AiResearchBudget): AiResearchBudget {
-  return { ...budget, maxSteps: Math.min(budget.maxSteps + AI_RESEARCH_LIMITS.extendSteps, AI_RESEARCH_LIMITS.maxTotalSteps) };
+/** +4단계, 모두 min(30, 기본 단계 × 2)까지 */
+export function extendedBudget(budget: AiResearchBudget, limits: ResearchLimits = researchLimits()): AiResearchBudget {
+  return { ...budget, maxSteps: Math.min(budget.maxSteps + AI_RESEARCH_LIMITS.extendSteps, limits.maxTotalSteps) };
 }
 
-export function readBudget(value: unknown): AiResearchBudget {
+/** DB의 budget jsonb. 상한(30단계·100개)만 다시 막는다 (만들 때 정한 값을 그대로 쓴다) */
+export function readBudget(value: unknown, limits: ResearchLimits = researchLimits()): AiResearchBudget {
   const raw = isRecord(value) ? value : {};
   const int = (v: unknown, fallback: number, max: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? Math.min(v, max) : fallback);
   return {
-    maxSteps: int(raw.maxSteps, AI_RESEARCH_LIMITS.defaultMaxSteps, AI_RESEARCH_LIMITS.maxTotalSteps),
-    maxSources: int(raw.maxSources, AI_RESEARCH_LIMITS.defaultMaxSources, AI_RESEARCH_LIMITS.defaultMaxSources),
+    maxSteps: int(raw.maxSteps, limits.maxSteps, RESEARCH_CAPS.maxSteps),
+    maxSources: int(raw.maxSources, limits.maxSources, RESEARCH_CAPS.maxSources),
   };
 }
 
@@ -98,7 +118,12 @@ function cutAtSpace(text: string, max: number): string {
   return (space >= max / 2 ? head.slice(0, space) : head).trim();
 }
 
-export const queryKey = (query: string): string => query.trim().replace(/\s+/g, ' ').toLowerCase();
+/**
+ * 같은 검색인지 보는 열쇠: 글자 모양(NFKC)·대소문자·문장부호·낱말 순서·같은 낱말 되풀이를 무시한다.
+ * "고로 탄소 배출" · "탄소 배출, 고로" · "고로 탄소 배출 고로"는 같은 검색이다 (바꿔 말하기만 한 검색을 되풀이하지 않게, 이슈 #384)
+ */
+export const queryKey = (query: string): string =>
+  [...new Set(query.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').trim().split(/\s+/).filter(Boolean))].sort().join(' ');
 
 // ───────────────────────────── 계획 ─────────────────────────────
 
@@ -161,6 +186,8 @@ export function storedState(value: unknown): StoredState {
   const pending = readPending(value.pending);
   const exhaustedAt = int(value.exhaustedAt);
   const auditedAt = int(value.auditedAt);
+  const searchDownAt = int(value.searchDownAt);
+  const notes = readNotes(value.notes);
   return {
     summary: typeof value.summary === 'string' ? value.summary : '',
     gaps: strings(value.gaps),
@@ -169,7 +196,31 @@ export function storedState(value: unknown): StoredState {
     ...(pending ? { pending } : {}),
     ...(exhaustedAt !== undefined ? { exhaustedAt } : {}),
     ...(auditedAt !== undefined ? { auditedAt } : {}),
+    ...(searchDownAt !== undefined ? { searchDownAt } : {}),
+    ...(notes.length ? { notes } : {}),
   };
+}
+
+function readNotes(value: unknown): StepNote[] {
+  if (!Array.isArray(value)) return [];
+  const out: StepNote[] = [];
+  for (const n of value) {
+    if (!isRecord(n) || typeof n.step !== 'number') continue;
+    const error = typeof n.error === 'string' ? n.error : null;
+    if (n.kind === 'read' && typeof n.sourceId === 'number') out.push({ step: n.step, kind: 'read', sourceId: n.sourceId, error });
+    else if (n.kind === 'search' && typeof n.query === 'string' && Array.isArray(n.results))
+      out.push({
+        step: n.step,
+        kind: 'search',
+        query: n.query,
+        engine: typeof n.engine === 'string' ? n.engine : null,
+        error,
+        results: n.results
+          .filter((r): r is StepNoteResult => isRecord(r) && typeof r.title === 'string' && typeof r.url === 'string' && typeof r.snippet === 'string')
+          .map((r) => ({ sourceId: typeof r.sourceId === 'number' ? r.sourceId : null, title: r.title, url: r.url, snippet: r.snippet })),
+      });
+  }
+  return out;
 }
 
 function readPending(value: unknown): PendingAction | undefined {
@@ -204,6 +255,8 @@ export function storedAudit(value: unknown): StoredAudit | null {
   return {
     ...audit,
     supportedClaims: claims,
+    designInferences: audit.designInferences ?? [],
+    unsupportedPrecision: audit.unsupportedPrecision ?? [],
     ok: value.ok !== false,
     reportTruncated: value.reportTruncated === true,
     incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
@@ -227,12 +280,14 @@ export function readAudit(value: unknown, knownIds: ReadonlySet<number>): AiRese
     supportedClaims,
     contradictions: stringList(value.contradictions),
     missingDimensions: stringList(value.missingDimensions),
+    designInferences: stringList(value.designInferences),
+    unsupportedPrecision: stringList(value.unsupportedPrecision),
   };
 }
 
 /** 점검 LLM이 실패했을 때 조사 메모로 만든 대신값 */
 export function fallbackAudit(state: StoredState): StoredAudit {
-  return { thesis: state.summary, outline: [], supportedClaims: [], contradictions: [], missingDimensions: state.gaps, ok: false, reportTruncated: false };
+  return { thesis: state.summary, outline: [], supportedClaims: [], contradictions: [], missingDimensions: state.gaps, designInferences: [], unsupportedPrecision: [], ok: false, reportTruncated: false };
 }
 
 // ───────────────────────────── 다음 행동 ─────────────────────────────

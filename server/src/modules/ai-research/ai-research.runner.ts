@@ -1,15 +1,32 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_STATUS, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/assistant-web-toolbox';
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { AUDIT_JSON_SCHEMA, buildAuditMessages, buildPlanMessages, buildReportMessages, buildTurnMessages, PLAN_JSON_SCHEMA, TURN_JSON_SCHEMA } from './ai-research.prompt';
+import { checkCharts } from './ai-research.charts';
+import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
+import { notifyResearchFinished } from './ai-research.notify';
+import { seoulToday } from '../../common/time/seoul-date';
+import {
+  AUDIT_JSON_SCHEMA,
+  buildAuditMessages,
+  buildChartMessages,
+  buildPlanMessages,
+  buildReportMessages,
+  buildTurnMessages,
+  CHART_JSON_SCHEMA,
+  PLAN_JSON_SCHEMA,
+  REPORT_CONTINUE_PROMPT,
+  TURN_JSON_SCHEMA,
+  type PromptLimits,
+} from './ai-research.prompt';
 import { fallbackReportBody, finalizeReport } from './ai-research.report';
 import { AiResearchRepository, retryOnSeqConflict, type NewResearchEvent } from './ai-research.repository';
 import {
@@ -32,6 +49,8 @@ import {
   storedSources,
   storedState,
   type PendingAction,
+  type StepNote,
+  type StepNoteResult,
   type StoredAudit,
   type StoredSource,
   type StoredState,
@@ -40,6 +59,10 @@ import {
 export const RESEARCH_NO_MODEL_REASON = '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요';
 /** 보고서 맨 위 알림에 들어가는 이유들 (다 마치지 못하고 모은 것으로 정리했을 때) */
 export const INCOMPLETE_TIMEOUT = '조사 시간이 30분을 넘어 멈췄어요.';
+/** 검색이 연달아 이만큼 비면 남은 단계를 쓰지 않고 모은 것으로 정리한다 */
+export const SEARCH_FAIL_STREAK_MAX = 3;
+const SEARCH_UNAVAILABLE = '검색 엔진에서 결과를 받지 못했어요.';
+const NAVER_HINT = ' 서버 .env에 네이버 검색 키(NAVER_CLIENT_ID·NAVER_CLIENT_SECRET)를 넣으면 나아져요.';
 const RESEARCH_ERROR_REASON = '조사 중 오류가 났어요. 새 조사로 다시 물어봐 주세요';
 const NO_PLAN_REASON = '계획에 쓸 검색어를 만들지 못했어요. 업무·LOT 번호 같은 회사 안 정보를 빼고 새 조사로 다시 물어봐 주세요';
 
@@ -92,6 +115,11 @@ interface RunContext {
   id: number;
   started: number;
   abort: AbortController;
+  /** 오늘 (Asia/Seoul). 모든 프롬프트 첫 줄에 넣는다 */
+  today: string;
+  /** 모델 문맥 길이로 정한 프롬프트 글자 수·보고서 출력 토큰 (조사를 맡을 때 한 번 정한다) */
+  limits: PromptLimits;
+  model: ModelBudget;
 }
 
 /** 조사하며 바뀌는 값 (실패해도 그때까지의 값으로 보고서를 쓰려고 밖에 둔다) */
@@ -99,6 +127,8 @@ interface Work {
   state: StoredState;
   sources: StoredSource[];
   stepsUsed: number;
+  /** 연달아 출처를 하나도 못 얻은 검색 수 (이어서 할 때는 0에서 다시 센다) */
+  emptySearchStreak: number;
 }
 
 /**
@@ -122,6 +152,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     private readonly llmClient: LlmClient,
     private readonly llmSettings: LlmSettingsStore,
     private readonly webTools: AssistantWebToolbox,
+    private readonly notifications: NotificationService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -187,7 +218,14 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   private async process(id: number, status: typeof AI_RESEARCH_STATUS.PLANNING | typeof AI_RESEARCH_STATUS.RUNNING): Promise<void> {
-    const ctx: RunContext = { id, started: this.config.now(), abort: new AbortController() };
+    const ctx: RunContext = {
+      id,
+      started: this.config.now(),
+      abort: new AbortController(),
+      today: seoulToday(),
+      limits: researchLimits(),
+      model: modelBudget(null),
+    };
     this.current = ctx;
     const renew = setInterval(() => {
       this.repository
@@ -207,7 +245,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       // 질문·웹 내용은 로그에 남기지 않는다
       this.logger.error(`조사 ${id} 실패: ${error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : error instanceof Error ? (error.stack ?? error.name) : 'unknown'}`);
       const reason = error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : RESEARCH_ERROR_REASON;
-      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }]).catch((e: unknown) => {
+      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }], (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.FAILED)).catch((e: unknown) => {
         if (!(e instanceof LeaseLostError)) this.logger.error(`조사 ${id} 실패 상태를 저장하지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`);
       });
     } finally {
@@ -222,7 +260,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const run = await this.repository.findById(this.prisma, ctx.id);
     if (!run) return;
     const endpoint = await this.endpoint();
-    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
+    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
     let plan: AiResearchPlan | null = readPlan(value, run.question)?.plan ?? null;
     const fallback = plan === null;
     plan ??= fallbackPlan(run.question);
@@ -248,8 +286,9 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const plan = storedPlan(run.plan);
     if (!plan) throw new ResearchFailure('조사 계획이 없어요');
     const endpoint = await this.endpoint();
+    await this.sizeForModel(ctx, endpoint);
     const budget = readBudget(run.budget);
-    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed };
+    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0 };
     // 읽기는 이 조사가 모은 출처만 (검색 결과로 받은 주소). 이어서 할 때는 저장된 출처를 다시 알려 준다
     const session = this.webTools.session(run.employeeId, { offerTools: false, maxSearches: Number.MAX_SAFE_INTEGER, maxReads: Number.MAX_SAFE_INTEGER });
     for (const source of work.sources) session.rememberVisited(source.url, source.title);
@@ -257,8 +296,9 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const notes: string[] = [];
     let llmDown = false;
     let exhausted = false;
+    let searchDown = false;
     try {
-      exhausted = await this.loop(ctx, endpoint, run.question, plan, budget, work, session);
+      ({ exhausted, searchDown } = await this.loop(ctx, endpoint, run.question, plan, budget, work, session));
     } catch (error) {
       if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
       if (error instanceof WallClockExceeded) notes.push(INCOMPLETE_TIMEOUT);
@@ -268,7 +308,12 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       } else throw error;
     }
     const { state, sources, stepsUsed } = work;
-    if (exhausted && state.exhaustedAt !== budget.maxSteps) {
+    if (searchDown) {
+      const reason = this.webTools.capabilities().engines.includes('naver') ? SEARCH_UNAVAILABLE : `${SEARCH_UNAVAILABLE}${NAVER_HINT}`;
+      notes.push(reason);
+      state.searchDownAt = stepsUsed;
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(state) }, [{ type: 'budget.exhausted', payload: { stepsUsed, maxSteps: budget.maxSteps, gapCount: state.gaps.length, reason } }]);
+    } else if (exhausted && state.exhaustedAt !== budget.maxSteps) {
       // 이어서 할 때 같은 알림을 두 번 남기지 않는다 (더 조사하기로 maxSteps가 바뀌면 다시 남긴다)
       state.exhaustedAt = budget.maxSteps;
       await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(state) }, [{ type: 'budget.exhausted', payload: { stepsUsed, maxSteps: budget.maxSteps, gapCount: state.gaps.length } }]);
@@ -300,45 +345,104 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let truncated = false;
     if (!llmDown)
       try {
-        const reply = await this.llmClient.chatText(endpoint, endpoint.model, buildReportMessages({ question: run.question, plan, state, sources, audit }), {
-          timeoutMs: this.config.reportTimeoutMs,
-          maxTokens: 6000,
-          profile: LLM_PROFILE.RESEARCH_REPORT,
-          signal: ctx.abort.signal,
-        });
+        const messages = buildReportMessages({ question: run.question, plan, state, sources, audit, limits: ctx.limits, today: ctx.today });
+        const maxTokens = ctx.model.reportMaxTokens;
+        const ask = (msgs: ChatMessage[]) =>
+          this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs: this.config.reportTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
+        let reply = await ask(messages);
+        // 생각만 하다 예산을 다 쓴 답은 한 번만 더 생각 없이 부탁한다
+        if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
+          await this.assertMine(ctx);
+          reply = await ask(withNoThinkHint(messages));
+        }
         body = reply.text.trim();
         truncated = reply.truncated;
+        // 길이 한도에 걸렸으면 한 번만 끊긴 곳부터 이어 쓰게 하고 붙인다. 이어 쓰기가 실패하면 끊긴 보고서를 쓴다(맨 위 알림)
+        if (truncated && body.length >= NEAR_EMPTY_CHARS) {
+          await this.assertMine(ctx);
+          try {
+            const more = await ask(continuationMessages(messages, body));
+            const merged = mergeContinuation(body, more.text);
+            if (merged.length > body.length) {
+              body = merged;
+              truncated = more.truncated;
+            }
+          } catch (error) {
+            if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
+            this.logger.warn(`조사 ${ctx.id} 보고서 이어 쓰기 실패: ${cutText(error.message, 160)}`);
+          }
+        }
+        if (body.length < NEAR_EMPTY_CHARS) body = '';
         if (!body) notes.push('AI가 빈 보고서를 내 조사 메모로 대신 정리했어요.');
       } catch (error) {
         if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
         notes.push(`AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요(${cutText(error.message, 160)}).`);
       }
     else notes.push('보고서는 조사 메모로 대신 정리했어요.');
-    if (!body) body = fallbackReportBody(run.question, audit, state);
+    if (!body) {
+      // 조사 메모는 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
+      truncated = false;
+      body = fallbackReportBody(run.question, audit, state);
+    }
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
+    // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
+    const charted = llmDown ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
     await this.save(
       ctx,
       AI_RESEARCH_STATUS.RUNNING,
-      { status: AI_RESEARCH_STATUS.COMPLETED, report, audit: json({ ...audit, reportTruncated: truncated, incompleteReason }), finishedAt: new Date(this.config.now()), failureReason: null, ...released },
-      [{ type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } }],
+      {
+        status: AI_RESEARCH_STATUS.COMPLETED,
+        report,
+        audit: json({ ...audit, reportTruncated: truncated, incompleteReason }),
+        charts: json(charted?.charts ?? []),
+        finishedAt: new Date(this.config.now()),
+        failureReason: null,
+        ...released,
+      },
+      [
+        { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } },
+        ...(charted ? [{ type: 'charts.ready' as const, payload: { count: charted.charts.length, droppedPoints: charted.droppedPoints } }] : []),
+      ],
+      (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.COMPLETED),
     );
   }
 
+  /** 보고서 뒤 차트 제안 (JSON 한 번). 점마다 출처 글에 그 숫자가 있는지 확인한다. LLM 실패·못 읽음이면 null (차트 없이 끝낸다) */
+  private async charts(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, state: StoredState, sources: StoredSource[]): Promise<{ charts: AiResearchChart[]; droppedPoints: number } | null> {
+    if (!sources.length) return null;
+    await this.assertMine(ctx);
+    try {
+      const value = await this.askJson(ctx, endpoint, buildChartMessages({ question, plan, state, sources, limits: ctx.limits, today: ctx.today }), CHART_JSON_SCHEMA, (v) => Array.isArray(v.charts));
+      return value ? checkCharts(value, sources) : null;
+    } catch (error) {
+      if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
+      this.logger.warn(`조사 ${ctx.id} 차트 제안 실패: ${error instanceof Error ? error.name : 'unknown'}`);
+      return null;
+    }
+  }
+
+  /** 끝난 조사(완료·실패)를 만든 사원에게 알린다 (같은 트랜잭션) */
+  private async notifyFinished(tx: Tx, id: number, status: typeof AI_RESEARCH_STATUS.COMPLETED | typeof AI_RESEARCH_STATUS.FAILED): Promise<void> {
+    const row = await this.repository.findById(tx, id);
+    if (row) await notifyResearchFinished(this.notifications, tx, row, status);
+  }
+
   /**
-   * 반복. 단계를 다 써서 끝났으면 true, 모델이 끝냈으면 false.
+   * 반복. 단계를 다 써서 끝났으면 exhausted, 검색이 연달아 비어 멈췄으면 searchDown, 모델이 끝냈으면 둘 다 false.
    * 행동은 실행 전에 단계 수와 함께 pending으로 저장하고, 결과와 함께 지운다: 서버가 그 사이 멈추면 이어서 할 때 모델에 다시 묻지 않고 그 행동부터 한다.
    */
-  private async loop(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, budget: ReturnType<typeof readBudget>, work: Work, session: WebToolSession): Promise<boolean> {
+  private async loop(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, budget: ReturnType<typeof readBudget>, work: Work, session: WebToolSession): Promise<{ exhausted: boolean; searchDown: boolean }> {
     for (;;) {
       if (work.state.pending) {
         await this.execute(ctx, session, work, budget.maxSources, work.state.pending);
+        if (work.emptySearchStreak >= SEARCH_FAIL_STREAK_MAX) return { exhausted: false, searchDown: true };
         continue;
       }
-      if (work.stepsUsed >= budget.maxSteps) return true;
+      if (work.stepsUsed >= budget.maxSteps) return { exhausted: true, searchDown: false };
       await this.assertMine(ctx);
       if (this.config.now() - ctx.started > this.config.wallClockMs) throw new WallClockExceeded();
-      const value = await this.askJson(ctx, endpoint, buildTurnMessages({ question, plan, state: work.state, sources: work.sources, stepsUsed: work.stepsUsed, budget }), TURN_JSON_SCHEMA, (v) => typeof v.action === 'string' || isRecord(v.researchState));
+      const value = await this.askJson(ctx, endpoint, buildTurnMessages({ question, plan, state: work.state, sources: work.sources, stepsUsed: work.stepsUsed, budget, limits: ctx.limits, today: ctx.today }), TURN_JSON_SCHEMA, (v) => typeof v.action === 'string' || isRecord(v.researchState));
       const turn = readTurn(value);
       const nextState = readState(turn.state, work.state);
       if (nextState) work.state = nextState;
@@ -346,7 +450,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const stateEvent: NewResearchEvent[] = nextState ? [{ type: 'state.updated', payload: { summary: cutText(work.state.summary, 300), gapCount: work.state.gaps.length, unsupportedCount: work.state.unsupportedClaims.length } }] : [];
       if (decision.kind === 'finish') {
         await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state) }, stateEvent);
-        return false;
+        return { exhausted: false, searchDown: false };
       }
       const step = work.stepsUsed + 1;
       const pending: PendingAction = decision.kind === 'search' ? { kind: 'search', query: decision.query, step } : { kind: 'read', sourceId: decision.sourceId, step };
@@ -362,56 +466,85 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
 
   /** 저장해 둔 행동 하나를 하고, 결과·출처와 함께 pending을 지운다 */
   private async execute(ctx: RunContext, session: WebToolSession, work: Work, maxSources: number, pending: PendingAction): Promise<void> {
-    const events = pending.kind === 'search' ? await this.search(ctx, session, pending.query, work.sources, maxSources) : await this.read(ctx, session, pending.sourceId, work.sources);
+    const { events, note } = pending.kind === 'search' ? await this.search(ctx, session, pending.query, pending.step, work.sources, maxSources) : await this.read(ctx, session, pending.sourceId, pending.step, work.sources);
+    if (pending.kind === 'search') {
+      const done = events[0];
+      work.emptySearchStreak = done?.type === 'search.done' && done.payload.resultCount === 0 ? work.emptySearchStreak + 1 : 0;
+    }
     const { pending: _done, ...rest } = work.state;
-    work.state = pending.kind === 'search' ? { ...rest, searchedQueries: [...rest.searchedQueries.filter((q) => queryKey(q) !== queryKey(pending.query)), pending.query] } : rest;
+    const notes = [...(rest.notes ?? []).filter((n) => n.step !== note.step), note].slice(-NOTES_KEPT);
+    work.state = pending.kind === 'search' ? { ...rest, notes, searchedQueries: [...rest.searchedQueries.filter((q) => queryKey(q) !== queryKey(pending.query)), pending.query] } : { ...rest, notes };
     await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), sources: json(work.sources) }, events);
   }
 
   /** 검색 → 새 주소를 출처로 (꽉 차면 더 넣지 않음). 1분 한도에 걸리면 쉬었다 다시 한다 */
-  private async search(ctx: RunContext, session: WebToolSession, query: string, sources: StoredSource[], maxSources: number): Promise<NewResearchEvent[]> {
+  private async search(ctx: RunContext, session: WebToolSession, query: string, step: number, sources: StoredSource[], maxSources: number): Promise<{ events: NewResearchEvent[]; note: StepNote }> {
     let outcome = await session.searchWeb(query);
     for (let retry = 0; !outcome.ok && outcome.kind === 'rate' && retry < this.config.rateLimitRetries; retry += 1) {
       await this.config.sleep(this.config.rateLimitWaitMs, ctx.abort.signal);
       await this.assertMine(ctx);
       outcome = await session.searchWeb(query);
     }
-    if (!outcome.ok) return [{ type: 'search.done', payload: { query: outcome.query || query, engine: null, resultCount: 0, added: 0, error: outcome.reason } }];
-    const known = new Set(sources.map((s) => urlKey(s.url)));
+    if (!outcome.ok)
+      return {
+        events: [{ type: 'search.done', payload: { query: outcome.query || query, engine: null, resultCount: 0, added: 0, error: outcome.reason } }],
+        note: { step, kind: 'search', query, engine: null, error: outcome.reason, results: [] },
+      };
+    const known = new Map(sources.map((s) => [urlKey(s.url), s.id]));
     const added: StoredSource[] = [];
+    // 출처로 넣지 못한 결과(이미 있는 주소·꽉 참)도 단계 기록에는 남긴다 (검색어와 그 결과를 함께 근거로 보인다)
+    const results: StepNoteResult[] = [];
     for (const result of outcome.results) {
       const key = urlKey(result.url);
-      if (!key || known.has(key) || sources.length >= maxSources) continue;
-      known.add(key);
-      const source: StoredSource = {
-        id: sources.reduce((max, s) => Math.max(max, s.id), 0) + 1,
-        title: cutText(stripInvisible(result.title), SOURCE_TITLE_MAX),
-        url: result.url,
-        snippet: cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX),
-      };
+      const title = cutText(stripInvisible(result.title), SOURCE_TITLE_MAX);
+      const snippet = cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX);
+      if (!key) continue;
+      const existing = known.get(key);
+      if (existing !== undefined || sources.length >= maxSources) {
+        results.push({ sourceId: existing ?? null, title, url: result.url, snippet });
+        continue;
+      }
+      const source: StoredSource = { id: sources.reduce((max, s) => Math.max(max, s.id), 0) + 1, title, url: result.url, snippet };
+      known.set(key, source.id);
       sources.push(source);
       added.push(source);
+      results.push({ sourceId: source.id, title, url: result.url, snippet });
     }
-    return [
-      { type: 'search.done', payload: { query: outcome.query, engine: outcome.engine, resultCount: outcome.results.length, added: added.length, error: null } },
-      ...added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } })),
-    ];
+    return {
+      events: [
+        { type: 'search.done', payload: { query: outcome.query, engine: outcome.engine, resultCount: outcome.results.length, added: added.length, error: null } },
+        ...added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } })),
+      ],
+      note: { step, kind: 'search', query: outcome.query, engine: outcome.engine, error: null, results },
+    };
   }
 
-  private async read(ctx: RunContext, session: WebToolSession, sourceId: number, sources: StoredSource[]): Promise<NewResearchEvent[]> {
+  private async read(ctx: RunContext, session: WebToolSession, sourceId: number, step: number, sources: StoredSource[]): Promise<{ events: NewResearchEvent[]; note: StepNote }> {
     const source = sources.find((s) => s.id === sourceId);
-    if (!source) return [];
+    if (!source) return { events: [], note: { step, kind: 'read', sourceId, error: '모르는 출처예요' } };
     const outcome = await session.readKnownPage(source.url, ctx.abort.signal);
     if (!outcome.ok) {
       source.readError = outcome.reason;
-      return [{ type: 'page.read', payload: { sourceId, title: source.title, chars: 0, error: outcome.reason } }];
+      return { events: [{ type: 'page.read', payload: { sourceId, title: source.title, chars: 0, error: outcome.reason } }], note: { step, kind: 'read', sourceId, error: outcome.reason } };
     }
     source.readText = outcome.text;
-    return [{ type: 'page.read', payload: { sourceId, title: source.title, chars: outcome.text.length, error: null } }];
+    return { events: [{ type: 'page.read', payload: { sourceId, title: source.title, chars: outcome.text.length, error: null } }], note: { step, kind: 'read', sourceId, error: null } };
+  }
+
+  /** 모델 문맥 길이(LM Studio)로 이 조사의 프롬프트 글자 수·보고서 출력 토큰을 정한다. 모르면 환경 변수 또는 24,000자 */
+  private async sizeForModel(ctx: RunContext, endpoint: Endpoint): Promise<void> {
+    let contextLength: number | null = null;
+    try {
+      contextLength = await this.llmClient.modelContextLength(endpoint, endpoint.model);
+    } catch {
+      contextLength = null;
+    }
+    ctx.model = modelBudget(contextLength);
+    ctx.limits = { ...ctx.limits, promptChars: ctx.model.promptChars };
   }
 
   private async audit(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, state: StoredState, sources: StoredSource[]): Promise<StoredAudit> {
-    const value = await this.askJson(ctx, endpoint, buildAuditMessages({ question, plan, state, sources }), AUDIT_JSON_SCHEMA, (v) => typeof v.thesis === 'string');
+    const value = await this.askJson(ctx, endpoint, buildAuditMessages({ question, plan, state, sources, limits: ctx.limits, today: ctx.today }), AUDIT_JSON_SCHEMA, (v) => typeof v.thesis === 'string');
     const audit = readAudit(value, new Set(sources.map((s) => s.id)));
     return audit ? { ...audit, ok: true, reportTruncated: false } : fallbackAudit(state);
   }
@@ -429,16 +562,22 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
    * 그래도 없으면 null (부르는 쪽이 대신값을 쓴다). 연결 실패·시간 초과(LlmRequestError)·끊김은 던진다.
    */
   private async askJson(ctx: RunContext, endpoint: Endpoint, messages: ChatMessage[], schema: LlmJsonSchema, accept: (v: Record<string, unknown>) => boolean): Promise<Record<string, unknown> | null> {
-    const options = { timeoutMs: this.config.jsonTimeoutMs, maxTokens: 4000, profile: LLM_PROFILE.RESEARCH_JSON, signal: ctx.abort.signal };
-    try {
-      const reply = await this.llmClient.chatJsonWithText(endpoint, endpoint.model, messages, schema, options);
-      if (isRecord(reply.value) && accept(reply.value)) return reply.value;
-      return parseLenientJson([reply.rawText, reply.thinking], accept);
-    } catch (error) {
-      if (ctx.abort.signal.aborted) throw new LeaseLostError();
-      if (error instanceof LlmJsonParseError) return parseLenientJson([error.rawText, error.thinking], accept);
-      throw error;
-    }
+    const ask = async (msgs: ChatMessage[], maxTokens: number): Promise<{ value: Record<string, unknown> | null; empty: boolean }> => {
+      const options = { timeoutMs: this.config.jsonTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_JSON, signal: ctx.abort.signal };
+      try {
+        const reply = await this.llmClient.chatJsonWithText(endpoint, endpoint.model, msgs, schema, options);
+        if (isRecord(reply.value) && accept(reply.value)) return { value: reply.value, empty: false };
+        return { value: parseLenientJson([reply.rawText, reply.thinking], accept), empty: !reply.rawText.trim() };
+      } catch (error) {
+        if (ctx.abort.signal.aborted) throw new LeaseLostError();
+        if (error instanceof LlmJsonParseError) return { value: parseLenientJson([error.rawText, error.thinking], accept), empty: !error.rawText.trim() };
+        throw error;
+      }
+    };
+    const first = await ask(messages, JSON_MAX_TOKENS);
+    if (first.value || !first.empty) return first.value;
+    // content가 빈 답(생각에 예산을 다 씀)이면 한 번만 더 크게·생각 없이 부탁한다
+    return (await ask(withNoThinkHint(messages), retryMaxTokens(JSON_MAX_TOKENS))).value;
   }
 
   /** 단계 사이: 취소됐거나 남이 맡았으면 하던 일을 끊고 멈춘다 */
@@ -452,7 +591,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   /** 내가 맡은 행일 때만 저장하고 이벤트를 붙인다 (같은 트랜잭션). 맡은 표시 시각은 renewLease(DB now())만 늘린다 */
-  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[]): Promise<void> {
+  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[], after?: (tx: Tx) => Promise<void>): Promise<void> {
     return retryOnSeqConflict(() =>
       this.prisma.$transaction(async (tx) => {
         const { count } = await this.repository.updateLeased(tx, ctx.id, this.owner, status, data);
@@ -461,9 +600,47 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           throw new LeaseLostError();
         }
         await this.repository.appendEvents(tx, ctx.id, events);
+        await after?.(tx);
       }),
     );
   }
+}
+
+const JSON_MAX_TOKENS = 4000;
+/** 단계 기록은 이만큼까지 남긴다 (단계 상한 30보다 넉넉히) */
+const NOTES_KEPT = 60;
+const RETRY_MAX_TOKENS_CAP = 16000;
+const NEAR_EMPTY_CHARS = 5;
+const NO_THINK_HINT = '지금은 생각 과정 없이 바로 답만 써요. /no_think';
+
+const retryMaxTokens = (base: number): number => Math.min(base * 2, RETRY_MAX_TOKENS_CAP);
+
+/** 끊긴 보고서를 이어 쓰게 하는 메시지: 앞 요청 + 끊긴 답 + 이어 쓰기 부탁 */
+export function continuationMessages(messages: ChatMessage[], partial: string): ChatMessage[] {
+  return [...messages, { role: 'assistant', content: partial }, { role: 'user', content: REPORT_CONTINUE_PROMPT }];
+}
+
+/**
+ * 끊긴 보고서 + 이어 쓴 글. 이어 쓴 글이 앞 글의 끝부분(8~400자)을 되풀이하며 시작하면 겹친 만큼 떼고 붙인다.
+ * 끊긴 자리가 낱말 중간이면 그대로 잇고, 줄 끝이면 줄을 바꿔 잇는다.
+ */
+export function mergeContinuation(partial: string, more: string): string {
+  const next = more.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, '').replace(/\s+$/, '');
+  if (!next.trim()) return partial;
+  const head = partial.replace(/\s+$/, '');
+  const trimmedNext = next.replace(/^\s+/, '');
+  for (let n = Math.min(400, head.length, trimmedNext.length); n >= 8; n -= 1) {
+    if (trimmedNext.startsWith(head.slice(head.length - n))) return `${head}${trimmedNext.slice(n)}`;
+  }
+  const joiner = /\n\s*$/.test(partial) || /^\s*\n/.test(more) || /^#{1,6}\s/.test(trimmedNext) ? '\n' : /\s$/.test(partial) || /^\s/.test(more) ? ' ' : '';
+  return `${head}${joiner}${trimmedNext}`;
+}
+
+/** 마지막 user 메시지 끝에 '생각하지 말고 바로 답' 지시를 붙인다 (/no_think는 Qwen 외 모델에는 그냥 글) */
+export function withNoThinkHint(messages: ChatMessage[]): ChatMessage[] {
+  const index = messages.map((m) => m.role).lastIndexOf('user');
+  if (index < 0) return [...messages, { role: 'user', content: NO_THINK_HINT }];
+  return messages.map((m, i) => (i === index ? { ...m, content: `${m.content}\n\n${NO_THINK_HINT}` } : m));
 }
 
 const released = { leaseOwner: null, leaseExpiresAt: null } as const;

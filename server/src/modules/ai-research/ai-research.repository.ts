@@ -85,6 +85,24 @@ export class AiResearchRepository {
     return (await tx.$queryRawTyped(renewAiResearchLease(id, owner, leaseMs))).length === 1;
   }
 
+  /** Notion 내보내기 잡기: 완료한 내 조사이고 아직 주소가 없고, 아무도 잡지 않았거나 잡은 지 오래됐을 때만 */
+  claimNotionExport(tx: Tx, id: number, employeeId: number, claimedAt: Date, staleBefore: Date) {
+    return tx.aiResearchRun.updateMany({
+      where: { id, employeeId, status: AI_RESEARCH_STATUS.COMPLETED, notionPageUrl: null, OR: [{ notionExportedAt: null }, { notionExportedAt: { lt: staleBefore } }] },
+      data: { notionExportedAt: claimedAt },
+    });
+  }
+
+  /** 내가 잡은 내보내기만 끝낸다 */
+  finishNotionExport(tx: Tx, id: number, claimedAt: Date, notionPageUrl: string, exportedAt: Date) {
+    return tx.aiResearchRun.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionPageUrl, notionExportedAt: exportedAt } });
+  }
+
+  /** 내보내기가 실패하면 잡은 것을 푼다 */
+  releaseNotionExport(tx: Tx, id: number, claimedAt: Date) {
+    return tx.aiResearchRun.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionExportedAt: null } });
+  }
+
   /** 사원별 잠금 (트랜잭션이 끝날 때까지). 진행 중 수를 세고 만드는 사이에 다른 요청이 끼지 못하게 */
   async lockEmployee(tx: Tx, employeeId: number): Promise<void> {
     await tx.$queryRawTyped(lockAiResearchEmployee(employeeId));

@@ -2,8 +2,8 @@ import { Logger } from '@nestjs/common';
 import { isAiAssistantWebTool, type AiWebSearchCapabilities, type AiWebSource } from '@fantasteel/shared';
 import type { LlmToolCall, LlmToolDefinition } from '../../llm/llm.client';
 import { optionalEnum, requiredString, ToolArgumentError } from '../tools/assistant-tool';
-import { decodeBody, extractPageIsolated, limitPageText, PAGE_TEXT_MAX, PageTooComplexError } from './page-extract';
-import { SafePageFetcher, WebFetchError } from './safe-fetch';
+import { decodeBody, extractPageIsolated, extractPdfIsolated, limitPageText, PAGE_TEXT_MAX, PageTooComplexError } from './page-extract';
+import { PDF_CONTENT_TYPE, SafePageFetcher, WebFetchError } from './safe-fetch';
 import { PLACE_CATEGORIES, WEB_SEARCH_RESULT_LIMIT, type Place, type WebSearchResult } from './search-parsers';
 import { KakaoPlaceClient, NaverPlaceClient, PlaceSearch, PlaceSearchError, SearchRateLimitError, SearchUnavailableError, WebSearchClient, type SearchEngine, type WebSearchOutcome } from './web-search.client';
 import { cutText, filterAnswerLinks, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, UNTRUSTED_NOTE, uniqueSources, urlKey, wrapUntrusted } from './web-text';
@@ -95,7 +95,10 @@ export class SafeWebPageReader implements WebPageReader {
     return this.slots.run(async () => {
       if (signal?.aborted) throw signal.reason;
       const page = await this.fetcher.fetch(url, signal);
-      const extracted = await extractPageIsolated(decodeBody(page.body, page.contentType), page.contentType, page.url, this.extractTimeoutMs);
+      const extracted =
+        page.contentType === PDF_CONTENT_TYPE
+          ? await extractPdfIsolated(page.body, page.url, this.extractTimeoutMs)
+          : await extractPageIsolated(decodeBody(page.body, page.contentType), page.contentType, page.url, this.extractTimeoutMs);
       return { url: page.url, title: extracted.title, text: extracted.text };
     });
   }

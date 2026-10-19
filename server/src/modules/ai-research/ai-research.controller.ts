@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Injectable, Param, Post, Put, Query, type PipeTransform } from '@nestjs/common';
-import type { AiResearchCapabilities, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
+import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
 import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, StartAiResearchRunDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
@@ -58,6 +58,12 @@ export class AiResearchController {
   @HttpCode(200)
   extend(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchRunView> {
     return this.service.extend(user, id);
+  }
+
+  @Post('ai-research/runs/:id/notion-export')
+  @HttpCode(200)
+  exportToNotion(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchNotionExportResult> {
+    return this.service.exportToNotion(user, id);
   }
 
   @Post('ai-research/runs/:id/cancel')

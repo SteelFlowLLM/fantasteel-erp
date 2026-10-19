@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { AssistantWebToolbox, SafeWebPageReader } from './assistant-web-toolbox';
+import { tinyPdf } from './fixtures/tiny-pdf';
 import { SafePageFetcher, WebFetchError } from './safe-fetch';
 import { DEFAULT_FETCH_POLICY, type FetchPolicy, type LookupFunction } from './ssrf-guard';
 import { KakaoPlaceClient, WebSearchClient } from './web-search.client';
@@ -17,6 +18,7 @@ let base: string;
 let port: string;
 /** 요청이 끝까지 읽혔는지(크기 상한에서 끊었는지) 본다 */
 let bigBodyFinished = false;
+let PDF_BYTES: Buffer = Buffer.alloc(0);
 const hits: string[] = [];
 
 function route(req: IncomingMessage, res: ServerResponse) {
@@ -29,7 +31,10 @@ function route(req: IncomingMessage, res: ServerResponse) {
   if (path === '/article') return send(200, 'text/html; charset=utf-8', ARTICLE);
   if (path === '/plain') return send(200, 'text/plain; charset=utf-8', '그냥 글이에요');
   if (path === '/gzip') return send(200, 'text/html; charset=utf-8', gzipSync(ARTICLE), { 'content-encoding': 'gzip' });
-  if (path === '/pdf') return send(200, 'application/pdf', '%PDF-1.7');
+  if (path === '/pdf') return send(200, 'application/pdf', PDF_BYTES);
+  if (path === '/files/doc.pdf') return send(200, 'application/octet-stream', PDF_BYTES);
+  if (path === '/big-declared.pdf') return send(200, 'application/pdf', PDF_BYTES, { 'content-length': String(PDF_BYTES.length) });
+  if (path === '/files/doc.bin') return send(200, 'application/octet-stream', PDF_BYTES);
   if (path === '/image') return send(200, 'image/png', Buffer.from([0x89, 0x50]));
   if (path === '/missing') return send(404, 'text/html', 'not found');
   if (path === '/redirect-ok') return send(302, 'text/html', '', { location: '/article' });
@@ -60,6 +65,7 @@ function route(req: IncomingMessage, res: ServerResponse) {
 }
 
 beforeAll(async () => {
+  PDF_BYTES = await tinyPdf(['Steel 1,234']);
   server = createServer(route);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = String((server.address() as AddressInfo).port);
@@ -124,9 +130,17 @@ describe('시험 전용 규칙으로 읽기', () => {
     expect((await named.fetch(`http://news.example.com:${port}/plain`)).body.toString('utf8')).toBe('그냥 글이에요');
   });
 
-  it('gzip 압축을 풀고, PDF·사진은 읽지 않고, 4xx는 이유를 알린다', async () => {
+  it('gzip 압축을 풀고, PDF는 통째로 받고(5MB까지), 사진은 읽지 않고, 4xx는 이유를 알린다', async () => {
     expect((await fetcher().fetch(`${base}/gzip`)).body.toString('utf8')).toContain('3고로');
-    expect(await failureOf(fetcher().fetch(`${base}/pdf`))).toBe('PDF는 아직 못 읽어요');
+    const pdf = await fetcher().fetch(`${base}/pdf`);
+    expect(pdf).toMatchObject({ contentType: 'application/pdf', truncated: false });
+    expect(pdf.body.equals(PDF_BYTES)).toBe(true);
+    // 형식을 그냥 파일로 알려도 .pdf 주소면 PDF로 본다. .pdf가 아니면 읽지 않는다
+    expect((await fetcher().fetch(`${base}/files/doc.pdf`)).contentType).toBe('application/pdf');
+    expect(await failureOf(fetcher().fetch(`${base}/files/doc.bin`))).toBe('읽을 수 없는 형식이에요 (application/octet-stream)');
+    // 크기 상한: 알린 크기로 먼저 막고, 알리지 않았으면 받는 중에 넘으면 버린다 (잘린 PDF는 읽을 수 없다)
+    expect(await failureOf(fetcher({ pdfMaxBytes: 100 }).fetch(`${base}/big-declared.pdf`))).toBe('PDF가 1KB를 넘어 읽지 않았어요');
+    expect(await failureOf(fetcher({ pdfMaxBytes: 100 }).fetch(`${base}/pdf`))).toBe('PDF가 1KB를 넘어 읽지 않았어요');
     expect(await failureOf(fetcher().fetch(`${base}/image`))).toBe('읽을 수 없는 형식이에요 (image/png)');
     expect(await failureOf(fetcher().fetch(`${base}/missing`))).toBe('페이지가 404 오류를 돌려줬어요');
   });

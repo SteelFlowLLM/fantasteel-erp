@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_RESEARCH_STATUS,
   ROLE_LABEL,
   type AiActionCard,
   type AiActionCardExecuteResult,
@@ -26,6 +27,8 @@ import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
 import { READ_KNOWLEDGE_TOOL } from './tools/knowledge.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
+import { buildResearchContext, citedResearchSources, type ResearchContext } from './assistant-research.context';
+import { PrismaService } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
@@ -92,6 +95,7 @@ export class AiAssistantService {
     private readonly webTools: AssistantWebToolbox,
     private readonly browserTools: AssistantBrowserToolbox,
     private readonly screenTools: AssistantScreenToolbox,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -152,6 +156,8 @@ export class AiAssistantService {
 
     // 없는 회의록이면 VOC-001(404). 회의록은 전 역할이 볼 수 있어 따로 권한을 보지 않는다
     const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId));
+    // 심층 조사 보고서에 대한 질문 (이슈 #384): 내 완료한 조사만. 남의 조사는 없는 것처럼 RES-001
+    const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     const history = recentHistory(input.history ?? []);
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
@@ -169,6 +175,7 @@ export class AiAssistantService {
       today: seoulToday(),
       screen: input.screen ?? null,
       meetingContext,
+      researchContext: research?.text ?? null,
       references,
       processSteps,
       manualGuides,
@@ -269,8 +276,12 @@ export class AiAssistantService {
           if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
           const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
           const webFinal = web?.finalize(parsed.answer) ?? null;
+          const finalAnswer = webFinal?.answer ?? parsed.answer;
+          // 조사 보고서의 출처를 [n]으로 쓴 답은 그 출처를 웹 출처로 함께 돌려준다
+          const researchSources = research ? citedResearchSources(finalAnswer, research).filter((s) => !webFinal?.webSources.some((w) => w.url === s.url)) : [];
+          const webSources = webFinal || researchSources.length ? [...(webFinal?.webSources ?? []), ...researchSources] : null;
           return {
-            answer: webFinal?.answer ?? parsed.answer,
+            answer: finalAnswer,
             sources: [...dataSources, ...parsed.sources],
             model,
             latencyMs: Date.now() - started,
@@ -278,13 +289,20 @@ export class AiAssistantService {
             thinking: thinking ? cut(thinking, TRACE_THINKING_MAX) : null,
             reasoningApplied: reply.reasoningApplied ?? true,
             actionCards,
-            ...(webFinal ? { webSources: webFinal.webSources } : {}),
+            ...(webSources ? { webSources } : {}),
           };
         } finally {
           await browser?.close();
         }
       },
     };
+  }
+
+  private async researchContext(user: AuthUser, id: number): Promise<ResearchContext> {
+    const run = await this.prisma.aiResearchRun.findUnique({ where: { id }, select: { id: true, employeeId: true, question: true, plan: true, report: true, sources: true, status: true } });
+    if (!run || run.employeeId !== user.employeeId) throw new AppException('RES-001');
+    if (run.status !== AI_RESEARCH_STATUS.COMPLETED || !run.report) throw new AppException('RES-002', '보고서가 나온 조사에 대해서만 물어볼 수 있어요');
+    return buildResearchContext(run);
   }
 
   /** "그건 언제 풀려?"처럼 용어 없이 이어 묻는 질문은 바로 앞 질문의 용어를 쓴다 */

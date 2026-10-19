@@ -91,6 +91,10 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
       const counts = [p.gapCount > 0 ? `아직 모르는 것 ${p.gapCount}개` : '', p.unsupportedCount > 0 ? `근거 없는 주장 ${p.unsupportedCount}개` : ''].filter(Boolean).join(' · ');
       return { ...base, tone: 'ai', title: '조사 메모를 고쳤어요', detail: [cut(p.summary, 300), counts].filter(Boolean).join('\n') || undefined };
     }
+    case 'charts.ready': {
+      const p = event.payload;
+      return { ...base, tone: 'ai', title: p.count > 0 ? `차트를 ${p.count}개 만들었어요` : '출처의 숫자로 만들 차트가 없어요', detail: p.droppedPoints > 0 ? `출처 글에서 찾지 못한 숫자 ${p.droppedPoints}개는 뺐어요` : undefined };
+    }
     case 'budget.exhausted': {
       const p = event.payload;
       return { ...base, tone: 'wait', title: `정해 둔 ${p.maxSteps}단계를 다 썼어요`, detail: p.gapCount > 0 ? `아직 모르는 것 ${p.gapCount}개가 남았어요` : undefined };

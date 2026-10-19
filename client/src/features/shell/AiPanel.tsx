@@ -22,6 +22,7 @@ import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
+import { researchChipLabel } from '@/lib/aiResearchChart';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
@@ -78,6 +79,8 @@ export function AiPanel() {
   const claim = useAiChatStore((state) => state.claim);
   const clear = useAiChatStore((state) => state.clear);
   const removeFailure = useAiChatStore((state) => state.removeFailure);
+  const researchRef = useShellStore((state) => state.aiResearchRef);
+  const setResearchRef = useShellStore((state) => state.setAiResearchRef);
   const ask = useAskAiAssistant();
   const [draft, setDraft] = useState('');
   const [reasoning, setReasoning] = useState<AiReasoningLevel>(AI_REASONING_DEFAULT);
@@ -190,7 +193,7 @@ export function AiPanel() {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id);
     setDraft('');
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
@@ -301,6 +304,15 @@ export function AiPanel() {
           </span>
           <span className="flex-none text-ink-3">(질문과 함께 보내요)</span>
         </span>
+        {researchRef ? (
+          <span className="mb-1.5 ml-1.5 inline-flex max-w-full items-center gap-1 rounded-sm border border-line bg-brand-tint px-2 py-1 text-cap text-ink-2">
+            <Icon name="search" size="sm" />
+            <span className="truncate" title={researchRef.title}>{researchChipLabel(researchRef)}</span>
+            <button type="button" aria-label="보고서 빼기" className="flex-none text-ink-3 hover:text-ink" onClick={() => setResearchRef(null)}>
+              ×
+            </button>
+          </span>
+        ) : null}
         <div className="flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
           {draftImages.length ? <DraftImages images={draftImages} onRemove={photos.remove} /> : null}
           <textarea
@@ -363,7 +375,7 @@ export function AiPanel() {
                 icon="search"
                 disabled={draft.trim().length < 2 || sendToResearch.isPending}
                 title="웹을 여러 번 찾아 읽고 출처가 달린 보고서를 써요. 먼저 조사 계획을 보여 줘요"
-                onClick={() => sendToResearch.mutate(draft.trim())}
+                onClick={() => sendToResearch.mutate({ question: draft.trim() })}
               >
                 심층 조사로 보내기
               </Button>

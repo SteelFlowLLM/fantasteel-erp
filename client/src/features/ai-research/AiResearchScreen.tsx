@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
-import { Textarea } from '@/components/Input';
+import { Select, Textarea } from '@/components/Input';
 import { MasterPane, PageHead, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, StateView } from '@/components/StateView';
@@ -16,6 +16,7 @@ import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBa
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchList } from '@/hooks/useAiResearch';
+import { budgetOfScope, RESEARCH_SCOPE_OPTIONS, type ResearchScope } from '@/lib/aiResearchChart';
 import { cn } from '@/lib/cn';
 import { fmtMDHM } from '@/lib/format';
 
@@ -66,6 +67,7 @@ function RunMaster({ currentId, onNew }: { currentId: number | null; onNew: () =
 
 function NewRunForm({ onCreated, onCancel }: { onCreated: (id: number) => void; onCancel: () => void }) {
   const [question, setQuestion] = useState('');
+  const [scope, setScope] = useState<ResearchScope>('default');
   const trimmed = question.trim();
   const create = useAction(aiResearchApi.create, { success: '조사 계획을 세우고 있어요', onSuccess: (run) => onCreated(run.id) });
   const tooShort = trimmed.length < AI_RESEARCH_LIMITS.questionMin;
@@ -79,8 +81,17 @@ function NewRunForm({ onCreated, onCancel }: { onCreated: (id: number) => void; 
       >
         <Textarea id="research-question" rows={5} value={question} maxLength={AI_RESEARCH_LIMITS.questionMax} placeholder="예: 열연 코일 가격이 최근 왜 올랐는지, 앞으로 전망은 어떤지 조사해 줘" onChange={(event) => setQuestion(event.target.value)} />
       </Field>
+      <Field label="조사 범위" htmlFor="research-scope" hint="넓게·최대는 단계와 출처를 더 많이 써서 오래 걸려요. 서버가 정한 상한을 넘지 않아요.">
+        <Select id="research-scope" value={scope} onChange={(event) => setScope(event.target.value as ResearchScope)}>
+          {RESEARCH_SCOPE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      </Field>
       <div className="flex items-center gap-2">
-        <Button variant="primary" icon="search" disabled={tooShort || create.isPending} onClick={() => create.mutate(trimmed)}>
+        <Button variant="primary" icon="search" disabled={tooShort || create.isPending} onClick={() => create.mutate({ question: trimmed, budget: budgetOfScope(scope) })}>
           계획 세우기
         </Button>
         <Button onClick={onCancel}>닫기</Button>
