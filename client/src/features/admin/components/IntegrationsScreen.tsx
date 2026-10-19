@@ -54,7 +54,7 @@ export function IntegrationsScreen() {
       </div>
       <QueryBoundary query={integrations} loadingLabel="외부 연결을 불러오는 중">
         {(items) => (
-          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-2">
+          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-2">
             {items.map((item) => {
               const kind = integrationCardKind(item);
               if (kind === 'google-drive') {
