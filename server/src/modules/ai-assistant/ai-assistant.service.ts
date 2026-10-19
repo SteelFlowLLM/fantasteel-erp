@@ -11,6 +11,7 @@ import {
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
   type AiAssistantToolTrace,
+  type AiChatThreadRef,
   type AiWebSource,
   type AiScreenActionResultInput,
   type AuthUser,
@@ -41,12 +42,15 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
+import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
 
 export interface PreparedAsk {
   run(emit?: AssistantEmit, signal?: AbortSignal): Promise<AiAssistantReplyView>;
+  /** 저장을 요청한 질문(이슈 #399)이면 답을 저장한다. 저장하지 못하면 null (답은 그대로 보낸다) */
+  saveThread?(reply: AiAssistantReplyView): Promise<AiChatThreadRef | null>;
 }
 
 export interface PrepareOptions {
@@ -96,6 +100,7 @@ export class AiAssistantService {
     private readonly browserTools: AssistantBrowserToolbox,
     private readonly screenTools: AssistantScreenToolbox,
     private readonly prisma: PrismaService,
+    private readonly chatThreads: AiChatThreadService,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -104,9 +109,16 @@ export class AiAssistantService {
   }
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
-  executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+  async executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 나머지는 각 모듈의 확정 기능을 그대로 부른다
-    return WORK_KINDS.includes(dto.kind) ? this.cards.execute(user, dto) : this.opsCards.execute(user, dto);
+    const result = WORK_KINDS.includes(dto.kind) ? await this.cards.execute(user, dto) : await this.opsCards.execute(user, dto);
+    // 저장한 대화의 카드면 실행됨으로 남긴다 (이슈 #399). 업무는 이미 만들었으므로 이것이 실패해도 실행은 성공으로 돌려준다
+    if (dto.chat) {
+      await this.chatThreads.markCardDone(user, dto.chat, result.registered).catch((error: unknown) => {
+        this.logger.warn(`실행한 카드를 대화에 남기지 못함 (답 ${dto.chat?.messageId}): ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
+    return result;
   }
 
   suggestedQuestions(user: AuthUser): AiAssistantSuggestedQuestionsView {
@@ -158,7 +170,9 @@ export class AiAssistantService {
     const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId));
     // 심층 조사 보고서에 대한 질문 (이슈 #384): 내 완료한 조사만. 남의 조사는 없는 것처럼 RES-001
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
-    const history = recentHistory(input.history ?? []);
+    // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
+    const saving = options.interactive === true && (input.saveThread === true || input.threadId !== undefined);
+    const history = recentHistory(saving ? (input.threadId === undefined ? [] : await this.chatThreads.historyFor(user, input.threadId)) : (input.history ?? []));
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
     const manualGuides = findManualGuides(input.question);
@@ -195,7 +209,22 @@ export class AiAssistantService {
       messages[question] = { role: 'user', content: input.question, images: input.images };
     }
 
+    const saveThread = async (reply: AiAssistantReplyView): Promise<AiChatThreadRef | null> => {
+      try {
+        return await this.chatThreads.saveTurn(
+          user,
+          input.threadId,
+          { question: input.question, reasoning: input.reasoning, webSearch: input.webSearch, browser: input.browser, imageCount: input.images?.length },
+          reply,
+        );
+      } catch (error) {
+        this.logger.warn(`대화를 저장하지 못함: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      }
+    };
+
     return {
+      ...(saving ? { saveThread } : {}),
       run: async (emit, signal) => {
         const started = Date.now();
         const dataSources: AiAssistantSource[] = [];

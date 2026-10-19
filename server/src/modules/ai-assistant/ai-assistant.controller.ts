@@ -1,10 +1,32 @@
-import { Body, Controller, Get, HttpCode, Logger, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
-import type { AiActionCardExecuteResult, AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantSuggestedQuestionsView, AuthUser } from '@fantasteel/shared';
+import { Body, Controller, Delete, Get, HttpCode, Injectable, Logger, Param, ParseUUIDPipe, Post, Query, Res, type PipeTransform } from '@nestjs/common';
+import type {
+  AiActionCardExecuteResult,
+  AiAssistantCapabilitiesView,
+  AiAssistantReplyView,
+  AiAssistantStreamEvent,
+  AiAssistantSuggestedQuestionsView,
+  AiChatThreadSummaryView,
+  AiChatThreadView,
+  AuthUser,
+  PageResult,
+} from '@fantasteel/shared';
+import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, ScreenActionResultDto } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
+import { AiChatThreadService } from './chat/ai-chat-thread.service';
+
+/** 대화 id: 1~int4 상한의 정수만. 아니면 없는 대화(AST-001) — 넘는 값이 DB 오류(500)가 되지 않게 */
+@Injectable()
+export class ChatThreadIdPipe implements PipeTransform<string, number> {
+  transform(value: string): number {
+    const id = /^\d{1,10}$/.test(value) ? Number(value) : NaN;
+    if (!Number.isInteger(id) || id < 1 || id > 2147483647) throw new AppException('AST-001');
+    return id;
+  }
+}
 
 /**
  * 라우팅·DTO 검증만 둔다. 경로는 API 명세서(API-262·263), 전역 prefix /api/v1은 main.ts가 붙인다.
@@ -15,7 +37,10 @@ import { AiAssistantService } from './ai-assistant.service';
 export class AiAssistantController {
   private readonly logger = new Logger(AiAssistantController.name);
 
-  constructor(private readonly service: AiAssistantService) {}
+  constructor(
+    private readonly service: AiAssistantService,
+    private readonly chatThreads: AiChatThreadService,
+  ) {}
 
   /** API-262. 대화가 저장되지 않아 새로 만드는 자원이 없으므로 200 */
   @Post('ai-assistant/messages')
@@ -46,7 +71,10 @@ export class AiAssistantController {
       if (!res.writableEnded && !abort.signal.aborted) res.write(`${JSON.stringify(event)}\n`);
     };
     try {
-      write({ type: 'done', reply: await prepared.run(write, abort.signal) });
+      const reply = await prepared.run(write, abort.signal);
+      // 저장은 답이 다 만들어진 뒤에 (실패·멈춘 질문은 저장하지 않는다, 이슈 #399)
+      const thread = prepared.saveThread ? await prepared.saveThread(reply) : undefined;
+      write({ type: 'done', reply, ...(thread !== undefined ? { thread } : {}) });
     } catch (error) {
       if (error instanceof LlmAbortedError) return;
       if (error instanceof LlmRequestError) {
@@ -82,6 +110,23 @@ export class AiAssistantController {
   @Get('ai-assistant/suggested-questions')
   suggestedQuestions(@CurrentUser() user: AuthUser): AiAssistantSuggestedQuestionsView {
     return this.service.suggestedQuestions(user);
+  }
+
+  /** 저장한 대화 목록 (문서에 없는 기능, 이슈 #399). 내 대화만, 마지막으로 묻고 답한 순서 */
+  @Get('ai-assistant/threads')
+  listThreads(@CurrentUser() user: AuthUser, @Query() query: ListAiChatThreadsQuery): Promise<PageResult<AiChatThreadSummaryView>> {
+    return this.chatThreads.list(user, query);
+  }
+
+  @Get('ai-assistant/threads/:id')
+  getThread(@CurrentUser() user: AuthUser, @Param('id', ChatThreadIdPipe) id: number): Promise<AiChatThreadView> {
+    return this.chatThreads.get(user, id);
+  }
+
+  /** 대화와 메시지를 모두 지운다. 지운 대화의 목록 줄을 돌려준다 */
+  @Delete('ai-assistant/threads/:id')
+  deleteThread(@CurrentUser() user: AuthUser, @Param('id', ChatThreadIdPipe) id: number): Promise<AiChatThreadSummaryView> {
+    return this.chatThreads.delete(user, id);
   }
 
   /** 🟡 명세에 없는 API (REQ-AST-005 실행 카드). 업무·일정·구매요청 초안이 만들어지므로 201 */
