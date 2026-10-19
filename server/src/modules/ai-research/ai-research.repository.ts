@@ -27,6 +27,11 @@ export class AiResearchRepository {
     return tx.aiResearchRun.create({ data: { ...data, status: AI_RESEARCH_STATUS.PLANNING } });
   }
 
+  /** 다시 조사: 가져온 계획으로 계획 확인 대기부터 (계획 세우기를 건너뛴다) */
+  createPlanned(tx: Tx, data: { employeeId: number; question: string; budget: Prisma.InputJsonObject; plan: Prisma.InputJsonObject; researchState: Prisma.InputJsonObject }) {
+    return tx.aiResearchRun.create({ data: { ...data, status: AI_RESEARCH_STATUS.AWAITING_APPROVAL, planRevision: 1 } });
+  }
+
   findById(tx: Tx, id: number) {
     return tx.aiResearchRun.findUnique({ where: { id } });
   }

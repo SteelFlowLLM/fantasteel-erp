@@ -27,6 +27,10 @@ export const aiResearchApi = {
   create: (input: { question: string; budget?: Partial<AiResearchBudget> }): Promise<AiResearchRunView> => serverRequest('POST', '/ai-research/runs', { body: input }),
   exportToNotion: (id: number): Promise<AiResearchNotionExportResult> => serverRequest('POST', `/ai-research/runs/${id}/notion-export`),
   updatePlan: (id: number, revision: number, plan: AiResearchPlan): Promise<AiResearchRunView> => serverRequest('PUT', `/ai-research/runs/${id}/plan`, { body: { revision, plan } }),
+  /** 제목만 바꾼다 (계획이 있으면 어느 상태에서나, 판 +1) */
+  rename: (id: number, revision: number, title: string): Promise<AiResearchRunView> => serverRequest('PATCH', `/ai-research/runs/${id}/title`, { body: { revision, title: title.trim() } }),
+  /** 끝난 조사의 질문·계획을 복사해 계획 확인 대기인 새 조사를 만든다 */
+  rerun: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/rerun`),
   start: (id: number, revision: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/start`, { body: { revision } }),
   extend: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/extend`),
   cancel: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/cancel`),

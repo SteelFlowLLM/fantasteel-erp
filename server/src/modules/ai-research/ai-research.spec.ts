@@ -150,7 +150,7 @@ async function login(employeeNo: string): Promise<string> {
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'POST' | 'PUT', path: string, cookie: string, payload?: unknown) {
+async function call<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, cookie: string, payload?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: { cookie, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -386,6 +386,8 @@ describe('심층 조사', () => {
       ['POST', `/ai-research/runs/${run.id}/start`, { revision: run.planRevision }],
       ['POST', `/ai-research/runs/${run.id}/extend`, undefined],
       ['POST', `/ai-research/runs/${run.id}/cancel`, undefined],
+      ['PATCH', `/ai-research/runs/${run.id}/title`, { revision: run.planRevision, title: '남의 제목' }],
+      ['POST', `/ai-research/runs/${run.id}/rerun`, undefined],
     ] as const) {
       const res = await call(method, path, otherCookie, body);
       expect(res.status).toBe(404);
@@ -737,5 +739,109 @@ describe('심층 조사 — Unsloth 수준 근거·보고서 (이슈 #384 2차)'
     expect(reportCalls[0].maxTokens).toBe(4_096);
     const lengths = llmClient.chatJsonWithText.mock.calls.slice(-5).map((c) => (c[2] as ChatMessage[]).reduce((n, m) => n + m.content.length, 0));
     expect(Math.max(...lengths)).toBeLessThanOrEqual(8_192);
+  });
+});
+
+describe('심층 조사 — 계획 저장·제목 바꾸기·다시 조사 (이슈 #400)', () => {
+  const plan = { title: '저장한 계획', steps: [{ title: '가격', query: '열연 코일 가격' }, { title: '전망', query: '열연 코일 전망' }] };
+
+  it('계획 저장: 시작하지 않고 고친 계획만 저장해 계획 확인 대기로 남는다. 시작한 뒤에는 고칠 수 없다', async () => {
+    const run = await planned('계획만 저장');
+    const saved = await call<AiResearchRunView>('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, { revision: run.planRevision, plan });
+    expect(saved.status).toBe(200);
+    expect(saved.body.data).toMatchObject({ status: 'AWAITING_APPROVAL', planRevision: run.planRevision + 1, plan, title: '저장한 계획' });
+    // 다시 읽어도 저장한 계획이고, 일꾼이 맡을 것은 없다
+    expect((await getRun(run.id)).plan).toEqual(plan);
+    expect(await runner.processNext()).toBe(false);
+    // 한 번 더 저장(판 이어서) → 시작
+    const again = await call<AiResearchRunView>('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, { revision: saved.body.data.planRevision, plan: { ...plan, title: '두 번 저장' } });
+    expect(again.body.data.planRevision).toBe(run.planRevision + 2);
+    expect((await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: again.body.data.planRevision })).status).toBe(200);
+    const late = await call('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, { revision: again.body.data.planRevision + 1, plan });
+    expect(late.status).toBe(409);
+    expect(late.body.error?.code).toBe('RES-002');
+  });
+
+  it('제목 바꾸기: 계획이 있으면 어느 상태에서나 제목만, 판 +1. 계획 중이면 RES-002, 본 판이 다르면 RES-003', async () => {
+    const planning = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '아직 계획 중인 조사' });
+    const early = await call('PATCH', `/ai-research/runs/${planning.body.data.id}/title`, ownerCookie, { revision: 0, title: '이른 제목' });
+    expect(early.status).toBe(409);
+    expect(early.body.error?.code).toBe('RES-002');
+    await call('POST', `/ai-research/runs/${planning.body.data.id}/cancel`, ownerCookie);
+
+    const run = await planned('제목을 바꿀 조사');
+    const steps = run.plan?.steps;
+    const renamed = await call<AiResearchRunView>('PATCH', `/ai-research/runs/${run.id}/title`, ownerCookie, { revision: run.planRevision, title: '  새 제목  ' });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.data).toMatchObject({ status: 'AWAITING_APPROVAL', title: '새 제목', planRevision: run.planRevision + 1 });
+    expect(renamed.body.data.plan?.steps).toEqual(steps);
+    // 제목을 바꾸기 전 판으로는 시작·고치기·제목 바꾸기를 못 한다 (덮어쓰지 않게)
+    expect((await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision })).body.error?.code).toBe('RES-003');
+    expect((await call('PATCH', `/ai-research/runs/${run.id}/title`, ownerCookie, { revision: run.planRevision, title: '옛 판' })).body.error?.code).toBe('RES-003');
+    for (const title of ['', '   ', 'x'.repeat(101)]) expect((await call('PATCH', `/ai-research/runs/${run.id}/title`, ownerCookie, { revision: renamed.body.data.planRevision, title })).status).toBe(400);
+
+    // 끝난 조사도 제목만 바뀌고 보고서·상태는 그대로, 목록에도 보인다
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: renamed.body.data.planRevision });
+    reportText = '보고서 [1]';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    const after = await call<AiResearchRunView>('PATCH', `/ai-research/runs/${run.id}/title`, ownerCookie, { revision: done.planRevision, title: '끝난 뒤 제목' });
+    expect(after.body.data).toMatchObject({ status: 'COMPLETED', title: '끝난 뒤 제목', report: done.report, stepsUsed: done.stepsUsed, finishedAt: done.finishedAt });
+    const list = await call<PageResult<AiResearchRunSummaryView>>('GET', '/ai-research/runs?size=5', ownerCookie);
+    expect(list.body.data.items.find((r) => r.id === run.id)?.title).toBe('끝난 뒤 제목');
+  });
+
+  it('다시 조사: 끝난 조사의 질문·계획·예산을 복사해 계획 확인 대기인 새 조사를 만들고, 원래 조사는 그대로 둔다', async () => {
+    const source = await planned('다시 조사할 질문', { maxSteps: 5, maxSources: 15 });
+    await call('PUT', `/ai-research/runs/${source.id}/plan`, ownerCookie, { revision: source.planRevision, plan });
+    // 끝나지 않은 조사는 다시 조사하지 않는다
+    const active = await call('POST', `/ai-research/runs/${source.id}/rerun`, ownerCookie);
+    expect(active.status).toBe(409);
+    expect(active.body.error?.code).toBe('RES-002');
+    await call('POST', `/ai-research/runs/${source.id}/start`, ownerCookie, { revision: source.planRevision + 1 });
+    reportText = '첫 보고서 [1]';
+    await runner.processNext();
+    const finished = await getRun(source.id);
+    expect(finished.status).toBe('COMPLETED');
+
+    const rerun = await call<AiResearchRunView>('POST', `/ai-research/runs/${source.id}/rerun`, ownerCookie);
+    expect(rerun.status).toBe(201);
+    const copy = rerun.body.data;
+    expect(copy.id).not.toBe(source.id);
+    expect(copy).toMatchObject({ status: 'AWAITING_APPROVAL', question: '다시 조사할 질문', plan, planRevision: 1, budget: { maxSteps: 5, maxSources: 15 }, stepsUsed: 0, sources: [], report: null, finishedAt: null, notionPageUrl: null });
+    expect(copy.events.map((e) => e.payload)).toEqual([{ title: plan.title, stepCount: 2, revision: 1, fallback: false, copiedFrom: source.id }]);
+    // 계획 세우기를 건너뛰어 일꾼이 맡을 것이 없다
+    expect(await runner.processNext()).toBe(false);
+    const original = await getRun(source.id);
+    expect(original).toMatchObject({ status: 'COMPLETED', report: finished.report, planRevision: finished.planRevision });
+
+    // 새 조사는 고치고 시작할 수 있다
+    const edited = await call<AiResearchRunView>('PUT', `/ai-research/runs/${copy.id}/plan`, ownerCookie, { revision: 1, plan: { title: '고친 다시 조사', steps: [{ title: '수입', query: '열연 코일 수입 가격' }] } });
+    expect(edited.body.data.planRevision).toBe(2);
+    expect((await call<AiResearchRunView>('POST', `/ai-research/runs/${copy.id}/start`, ownerCookie, { revision: 2 })).body.data.status).toBe('QUEUED');
+    turns = [{ action: 'search', query: '열연 코일 수입 가격', sourceId: 0, researchState: state('수입 가격') }];
+    reportText = '다시 쓴 보고서 [1]';
+    await runner.processNext();
+    expect((await getRun(copy.id)).status).toBe('COMPLETED');
+    expect(searched.at(-1)).toBe('열연 코일 수입 가격');
+  });
+
+  it('다시 조사: 계획 전에 끝난 조사는 계획부터 다시 세운다. 모델이 없으면 RES-005, 진행 중 3개면 RES-006', async () => {
+    const created = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '계획 전에 취소한 조사' });
+    await call('POST', `/ai-research/runs/${created.body.data.id}/cancel`, ownerCookie);
+    const rerun = await call<AiResearchRunView>('POST', `/ai-research/runs/${created.body.data.id}/rerun`, ownerCookie);
+    expect(rerun.body.data).toMatchObject({ status: 'PLANNING', question: '계획 전에 취소한 조사', plan: null, planRevision: 0 });
+    expect(await runner.processNext()).toBe(true);
+    expect((await getRun(rerun.body.data.id)).status).toBe('AWAITING_APPROVAL');
+
+    settings.model = null;
+    expect((await call('POST', `/ai-research/runs/${created.body.data.id}/rerun`, ownerCookie)).body.error?.code).toBe('RES-005');
+    settings.model = 'test-model';
+    // 위의 다시 조사(계획 확인 대기) + 2개 = 진행 중 3개
+    for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-research/runs', ownerCookie, { question: `동시 진행 ${i}` })).status).toBe(201);
+    const full = await call('POST', `/ai-research/runs/${created.body.data.id}/rerun`, ownerCookie);
+    expect(full.status).toBe(409);
+    expect(full.body.error?.code).toBe('RES-006');
   });
 });
