@@ -26,7 +26,7 @@ describe('buildNavigation', () => {
     const nav = hrefs(navOf('SALES'));
     expect(nav.slice(0, 5)).toEqual(['/dashboard', '/sales-orders', '/sales-orders/new', '/shipment-requests', '/inventories']);
     expect(nav).not.toContain('/approvals');
-    expect(nav.slice(-10)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/meetings', '/ai-research', '/schedule', '/agent', '/past-cases']);
+    expect(nav.slice(-11)).toEqual(['/org-chart', '/lots/trace', '/business-events', '/tasks', '/messenger', '/meetings', '/drive', '/ai-research', '/schedule', '/agent', '/past-cases']);
   });
 
   it('업무 조회는 모든 역할: 다른 영역 업무 화면이 모두 구분선 뒤에 영역 순서로 붙고, 관리 화면은 기준정보만 (역할별 메뉴 v2 3장 표)', () => {

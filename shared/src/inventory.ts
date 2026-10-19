@@ -57,3 +57,46 @@ export interface InventoryOverview {
   /** 여재가 있는 슬래브 규격 (API-195 "여재 포함") */
   surplus: SurplusSlabRow[];
 }
+
+/**
+ * 정합성 보정 한 규격의 상태 (REQ-INV-010, TRM-062). 공통 코드가 아니라 이 응답에서만 쓰는 값이다.
+ * MATCHED 일치 · MISMATCHED 불일치(점검만 했을 때) · CORRECTED 보정함 · UNFIXABLE 보정 불가(예약을 지우지 않고는 맞출 수 없음)
+ */
+export const RECONCILIATION_STATUS = { MATCHED: 'MATCHED', MISMATCHED: 'MISMATCHED', CORRECTED: 'CORRECTED', UNFIXABLE: 'UNFIXABLE' } as const;
+export type ReconciliationStatus = (typeof RECONCILIATION_STATUS)[keyof typeof RECONCILIATION_STATUS];
+export const RECONCILIATION_STATUS_LABEL: Record<ReconciliationStatus, string> = { MATCHED: '일치', MISMATCHED: '불일치', CORRECTED: '보정함', UNFIXABLE: '보정 불가' };
+
+/** 예약 매수가 어긋난 규격 한 줄 */
+export interface ReservationReconciliationRow {
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  itemType: string;
+  steelGradeCode: string | null;
+  /** 재고 행의 예약 매수(inventory.reserved_qty, 보정 전). 재고 행이 없으면 null */
+  inventoryReservedQty: number | null;
+  /** ACTIVE 예약 매수 합계 */
+  activeReservedQty: number;
+  /** 재고 행 예약 매수 − ACTIVE 합계 (재고 행이 없으면 0 − ACTIVE 합계) */
+  differenceQty: number;
+  onHandQty: number;
+  rollingAllocatedQty: number;
+  status: ReconciliationStatus;
+  /** 보정하지 못한 이유 (UNFIXABLE만) */
+  reason: string | null;
+}
+
+/** 정합성 보정 점검·실행 결과 (GET·POST inventories/reconciliation) */
+export interface ReservationReconciliationView {
+  /** 점검한 시각 (ISO) */
+  checkedAt: string;
+  /** 보정까지 했는지. 점검만이면 false */
+  applied: boolean;
+  /** 점검한 제품 규격 수 (재고 행 또는 ACTIVE 예약이 있는 규격) */
+  checkedItemCount: number;
+  mismatchCount: number;
+  correctedCount: number;
+  unfixableCount: number;
+  /** 일치하지 않은 규격만 (규격 코드 순) */
+  rows: ReservationReconciliationRow[];
+}

@@ -50,8 +50,8 @@
 | POST | `integrations/:providerKey/disconnect` | 연결 끊기 | `ORG_MANAGE` 사용 |
 | POST | `integrations/notion/workspace` | 🟡 Notion 업무 공간 만들기 (12장). 이미 있으면 만들지 않고 지금 상태를 돌려준다 → `IntegrationConnectionView` | `ORG_MANAGE` 사용 |
 | POST | `integrations/:providerKey/test` | 연결 확인 (`IntegrationTestResult`, 실패도 결과로). MCP: 도구 목록. Google Drive: 폴더 이름과 녹음·사진 수(`driveFolder`) | `ORG_MANAGE` 사용 |
-| GET | `integrations/google-drive/files?kind=audio\|image&pageToken=` | 🟡 설정한 폴더의 녹음 또는 사진 (`DriveFilePage`, 최신 수정순 50개) | 로그인한 전 역할 🟡 |
-| GET | `integrations/google-drive/files/:fileId/content` | 🟡 파일 내용 그대로 (응답 포맷으로 감싸지 않는다) | 로그인한 전 역할 🟡 |
+| GET | `integrations/google-drive/files?kind=all\|audio\|image\|document&pageToken=` | 🟡 설정한 폴더의 녹음·사진·문서 (`DriveFilePage`, 최신 수정순 50개, 각 파일에 `kind`). 이슈 #392 | 로그인한 전 역할 🟡 |
+| GET | `integrations/google-drive/files/:fileId/content?download=1` | 🟡 파일 내용 그대로 (응답 포맷으로 감싸지 않는다). `download=1`이면 `attachment`, 아니면 `inline`. Google 문서류는 PDF로 내보내 보낸다 | 로그인한 전 역할 🟡 |
 | POST | `meeting-minutes/:id/notion-export` | 회의록 내보내기 ([meeting-minutes.md](meeting-minutes.md)) | 작성자 또는 `ORG_MANAGE` 사용 |
 | POST | `meeting-minutes/audio/from-drive` | Drive 녹음으로 회의록 만들기 ([meeting-minutes.md](meeting-minutes.md)) | 로그인한 전 역할 |
 
@@ -134,8 +134,8 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 | INT-010 | Google OAuth 클라이언트 id·secret이 설정되지 않았어요. 관리자가 연결 설정에서 넣어 주세요 | 409 |
 | INT-011 | Google Drive 폴더가 설정되지 않았어요. 관리자가 연결 설정에서 정해 주세요 | 409 |
 | INT-012 | Drive 폴더나 파일을 찾을 수 없어요 (설정한 폴더 밖·휴지통·없는 파일 모두 이 코드. 폴더 자체를 못 찾으면 폴더 설정을 확인하라는 문구) | 404 |
-| INT-013 | 가져올 수 없는 종류의 파일이에요 (녹음·사진이 아님, 회의록은 녹음만) | 400 |
-| INT-014 | 파일이 너무 커서 가져올 수 없어요 (녹음 500MB, 사진 20MB) | 413 |
+| INT-013 | 가져올 수 없는 종류의 파일이에요 (녹음·사진·문서가 아님, 회의록은 녹음만) | 400 |
+| INT-014 | 파일이 너무 커서 가져올 수 없어요 (녹음 500MB, 사진 20MB, PDF·Office 50MB, Google 문서→PDF 10MB) | 413 |
 
 설정의 상위 페이지·Drive 폴더·client id를 읽지 못하면 `COM-004`(400), 권한이 없으면 `COM-002`(403). 작업 로그는 남기지 않는다(REQ-LOG-002에 외부 연결 이벤트가 없다).
 
@@ -261,7 +261,9 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 - **목록** `GET integrations/google-drive/files?kind=audio|image&pageToken=`: `files.list` q = `'<folderId>' in parents and trashed = false and (<MIME>)`, `orderBy=modifiedTime desc`, `pageSize=50`, `supportsAllDrives`·`includeItemsFromAllDrives`(공유 드라이브 폴더). 녹음 MIME = `audio/*`·`video/webm`(브라우저 녹음)·`video/mp4`(회의 음성 올리기와 같은 판정 `isMeetingAudio`), 사진 = **허용 목록** `image/jpeg`·`png`·`gif`·`webp`·`heic`·`heif`·`bmp`·`tiff`(그 밖·SVG는 뺀다). 종류 판정은 MIME을 소문자로 바꾸고 매개변수를 뗀 뒤 한다(`IMAGE/SVG+XML`도 SVG). 받은 뒤 같은 판정·부모 폴더·휴지통으로 한 번 더 거른다. **바로 아래만** 본다(하위 폴더 안은 보지 않는다).
   - 응답 `DriveFilePage { files: [{ id, name, mimeType, size(바이트|null), modifiedTime, thumbnailLink }], nextPageToken }`. `thumbnailLink`는 Drive가 준 미리보기 주소(https만, 몇 시간 뒤 만료, 브라우저의 Google 로그인 상태에 따라 안 보일 수 있어 화면은 안 보이면 내용 경로로 연다).
   - 🟡 MIME이 `application/octet-stream`으로 올라간 녹음은 Drive 검색어로 고를 수 없어 목록에 나오지 않는다(내용·회의록 경로는 확장자로 받는다).
-- **내용** `GET integrations/google-drive/files/:fileId/content`: 먼저 메타데이터(`files.get`)로 확인한다 — id 모양, **설정한 폴더 바로 아래**(`parents`), 휴지통 아님 → 아니면 `INT-012`(폴더 밖 파일이 있는지 알리지 않는다). 녹음·사진이 아니면 `INT-013`. 크기 상한: 녹음 500MB(`MEETING_AUDIO_MAX_BYTES`), 사진 20MB(`DRIVE_IMAGE_MAX_BYTES`) → `INT-014`(413). 그다음 `alt=media`를 압축 없이 받아 그대로 흘려보낸다. 응답 Content-Length가 상한을 넘으면 `INT-014`, **받는 중** 상한을 넘거나 Google이 60초 동안 조각을 보내지 않으면 연결을 끊는다(잘린 내용을 성공처럼 끝내지 않는다). 브라우저가 떠나면 Google 요청도 끊는다.
+- **문서(이슈 #392)**: `kind=document`는 PDF(`application/pdf`)·Office(docx·xlsx·pptx)·Google 문서·스프레드시트·프레젠테이션(`application/vnd.google-apps.*`). `kind=all`은 녹음·사진·문서를 한 검색어에 묶는다. Google 문서류는 내용이 없어 `files.export?mimeType=application/pdf`로 PDF를 받아 `application/pdf`·이름 끝 `.pdf`로 보낸다 (Range 없음, `Accept-Ranges: none`). Drive가 10MB를 넘는 문서를 내보내지 못하므로(`exportSizeLimitExceeded`) `INT-014`로 알린다. Office 파일은 브라우저가 열지 못해 `download` 없이도 `attachment`. 상수 `DRIVE_DOCUMENT_MAX_BYTES`(50MB)·`DRIVE_EXPORT_MAX_BYTES`(10MB).
+- **PDF와 CSP**: 응답은 늘 `nosniff` + `Content-Security-Policy: sandbox`다. sandbox는 Chrome 내장 PDF 뷰어를 막으므로 CSP를 낮추지 않고, 화면이 PDF를 인증 요청으로 Blob(`application/pdf`로 고정)으로 받아 그 주소를 `iframe`에 보여 준다. 이 서버 주소로 PDF를 직접 열면 Chrome에서는 뷰어 대신 내려받기가 된다.
+- **내용** `GET integrations/google-drive/files/:fileId/content`: 먼저 메타데이터(`files.get`)로 확인한다 — id 모양, **설정한 폴더 바로 아래**(`parents`), 휴지통 아님 → 아니면 `INT-012`(폴더 밖 파일이 있는지 알리지 않는다). 녹음·사진·문서가 아니면 `INT-013`. 크기 상한: 녹음 500MB(`MEETING_AUDIO_MAX_BYTES`), 사진 20MB(`DRIVE_IMAGE_MAX_BYTES`), 문서 50MB → `INT-014`(413). 그다음 `alt=media`를 압축 없이 받아 그대로 흘려보낸다. 응답 Content-Length가 상한을 넘으면 `INT-014`, **받는 중** 상한을 넘거나 Google이 60초 동안 조각을 보내지 않으면 연결을 끊는다(잘린 내용을 성공처럼 끝내지 않는다). 브라우저가 떠나면 Google 요청도 끊는다.
   - **Range**: 브라우저의 `Range` 한 구간(`bytes=a-b`·`bytes=a-`·`bytes=-n`)을 Drive에 그대로 넘겨 **206** + `Content-Range`로 답한다(Safari·iOS는 이것이 있어야 오디오를 재생하고, 긴 녹음을 건너뛸 수 있다). 메타데이터 크기 이상에서 시작하는 범위·`bytes=-0`은 Drive에 묻지 않고 **416** + `Content-Range: bytes */<크기>`. 여러 구간·다른 단위·거꾸로 된 범위는 무시하고 전체(200)를 준다. 크기를 몰라 Drive가 416을 주면 `COM-004`(416). 응답은 늘 `Accept-Ranges: bytes`. 상태 코드를 직접 정하려고 `StreamableFile` 대신 응답에 바로 흘린다.
   - 응답 머리: `Content-Type` = Drive MIME, `Content-Disposition: inline; filename="…"; filename*=UTF-8''…`(이름을 인코딩할 수 없으면 ASCII 이름만), `Content-Length` = **Drive 내용 응답의 길이**(메타데이터를 쓰지 않는다: 그 사이 파일이 바뀌어도 길이가 어긋나지 않게, 없으면 조각 전송), `Content-Range`(206), `Accept-Ranges: bytes`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`(이 서버 주소로 열리므로 스크립트가 돌지 않게), `Cache-Control: private, max-age=300`.
 - **연결 확인** `POST integrations/google-drive/test`: 연결·폴더 설정(`INT-002`·`INT-003`·`INT-011`) → 폴더 메타데이터(폴더 MIME·휴지통 아님, 못 찾으면 폴더 설정을 확인하라는 문구) → 폴더 바로 아래 앞 1,000개에서 녹음·사진 수. 결과 `driveFolder { id, name, audioCount, imageCount, countLimited }`(`countLimited`면 더 있다). 실패도 `ok: false` + `error`로 돌려준다.

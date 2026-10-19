@@ -17,3 +17,8 @@ export function useRawMaterialInventory() {
 export function useSurplusSlabs() {
   return useQuery({ queryKey: inventoryKeys.surplus(), queryFn: inventoryApi.listSurplus });
 }
+
+/** 정합성 점검: 창을 열 때마다 새로 점검한다 */
+export function useReservationReconciliation() {
+  return useQuery({ queryKey: inventoryKeys.reconciliation(), queryFn: inventoryApi.checkReconciliation, staleTime: 0, gcTime: 0 });
+}

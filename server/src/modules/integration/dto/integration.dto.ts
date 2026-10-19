@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
-import { DRIVE_FILE_KINDS, type DriveFileKind, type IntegrationSettingsInput, type NotionCalendarSettingsInput } from '@fantasteel/shared';
+import { DRIVE_FILE_LIST_KINDS, type DriveFileListKind, type IntegrationSettingsInput, type NotionCalendarSettingsInput } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -67,13 +67,21 @@ export class UpdateNotionCalendarDto implements NotionCalendarSettingsInput {
 
 /** GET integrations/google-drive/files */
 export class ListDriveFilesQuery {
-  @IsIn(DRIVE_FILE_KINDS, { message: 'kind는 audio 또는 image예요' })
-  kind!: DriveFileKind;
+  @IsIn(DRIVE_FILE_LIST_KINDS, { message: 'kind는 all, audio, image, document 중 하나예요' })
+  kind!: DriveFileListKind;
 
   @IsOptional()
   @IsString()
   @MaxLength(2000, { message: 'pageToken이 너무 길어요' })
   pageToken?: string;
+}
+
+/** GET integrations/google-drive/files/:fileId/content */
+export class DriveContentQuery {
+  /** 1이면 열지 않고 내려받는다 (Content-Disposition: attachment) */
+  @IsOptional()
+  @IsIn(['0', '1'], { message: 'download는 0 또는 1이에요' })
+  download?: '0' | '1';
 }
 
 /** OAuth 서버가 브라우저를 돌려보내며 붙이는 쿼리. 모르는 칸이 와도 거절하지 않게 controller에서 직접 읽는다 */

@@ -4,7 +4,7 @@
 //   불합격 = 그 가운데 자기 검사 불합격, 판정 대기 = 나머지(상위 히트만 불합격인 LOT도 여기에 든다).
 // - 여재 탭은 서버 재고 응답의 surplus(inventory.md 8-1)를 쓴다. 여재 전환 시각은 ERD에 없어 비우고, LOT 목록의 여재 표시는 끈다.
 // - 생산계획 링크, 공급업체, 기본 야드는 서버 응답에 없어 비운다.
-import type { InventoryOverview, InspectionResult, ItemView, LotDetail, LotSummary, PurchaseOrderView, GoodsReceiptView } from '@fantasteel/shared';
+import type { InventoryOverview, InspectionResult, ItemView, LotDetail, LotSummary, PurchaseOrderView, GoodsReceiptView, ReservationReconciliationView } from '@fantasteel/shared';
 import type { LotListFilter, LotListView, ProductInventoryView, RawMaterialInventoryView, SurplusSpecView } from '@/api/inventories';
 import { serverRequest } from '@/api/http';
 import { allPages, orEmpty } from '@/api/server/inspections';
@@ -212,4 +212,9 @@ async function listSurplus(): Promise<SurplusSpecView[]> {
   }));
 }
 
-export const serverInventoryApi = { listProducts, listLots, listRawMaterials, listSurplus };
+/** 정합성 점검 (REQ-INV-010): 바꾸지 않고 예약 매수가 어긋난 규격만 받는다 */
+const checkReconciliation = () => serverRequest<ReservationReconciliationView>('GET', '/inventories/reconciliation');
+/** 정합성 보정: 관리자만 (서버가 확인한다) */
+const reconcile = () => serverRequest<ReservationReconciliationView>('POST', '/inventories/reconciliation');
+
+export const serverInventoryApi = { listProducts, listLots, listRawMaterials, listSurplus, checkReconciliation, reconcile };

@@ -6,19 +6,23 @@
 // 보내면 입력창을 바로 비우고 대화에 '보내는 중' 말풍선을 띄운다. 실패는 그 말풍선에서 다시 보낸다 (useMessageOutbox).
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { AI_MENTION, AI_SENDER_NAME, MESSAGE_ATTACHMENT_MAX_COUNT, inlineEmoticonKeys, inlineEmoticonText, inlineEmoticonToken, type MessageEmoticonKey } from '@fantasteel/shared';
+import { integrationApi, type DriveFileView } from '@/api/integrations';
 import { MESSAGE_CONTENT_MAX, MESSAGE_FILE_MAX_BYTES, type ChatRoomDetailView } from '@/api/messenger';
 import type { MentionTarget } from '@/api/messengerRules';
 import { Button } from '@/components/Button';
+import { DriveFilePicker } from '@/features/drive/components/DriveFilePicker';
 import { EmoticonImage, EmoticonPicker, EmoticonSuggestions, emoticonLabelOf } from '@/features/messenger/components/Emoticon';
 import { pushRecentEmoticon } from '@/features/messenger/lib/emoticonRecent';
 import { suggestEmoticons } from '@/features/messenger/lib/emoticonSuggest';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { useMessageOutbox } from '@/hooks/useMessenger';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
 import { cn } from '@/lib/cn';
+import { driveBlobToFile, driveSizeProblem } from '@/lib/driveFiles';
 import { fmtBytes } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
@@ -62,6 +66,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reading, setReading] = useState(false);
+  const [pickingDrive, setPickingDrive] = useState(false);
+  const [fetchingDrive, setFetchingDrive] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +75,8 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
   // 메시지 메뉴의 '답장'으로 고른 메시지 (이 방 것만)
   const replyTo = useMessageComposeStore((state) => (state.replyTo?.chatRoomId === room.id ? state.replyTo : null));
   const clearReply = () => useMessageComposeStore.getState().setReplyTo(null);
-  const pending = reading;
+  const drive = useDriveReady();
+  const pending = reading || fetchingDrive;
 
   const candidates = useMemo<MentionCandidate[]>(() => {
     if (!mention) return [];
@@ -166,6 +173,24 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
       textarea?.focus();
       textarea?.setSelectionRange(position, position);
     });
+  };
+
+  /** Drive 파일을 받아 내 컴퓨터에서 고른 파일처럼 첨부 목록에 넣는다 (이슈 #392). 개수·크기 규칙은 같은 목록이 그대로 적용한다 */
+  const attachDriveFile = async (driveFile: DriveFileView) => {
+    setPickingDrive(false);
+    if (files.length >= MESSAGE_ATTACHMENT_MAX_COUNT) {
+      toast.error(`파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
+      return;
+    }
+    setFetchingDrive(true);
+    try {
+      const file = driveBlobToFile(await integrationApi.driveFileBlob(driveFile.id), driveFile);
+      setFiles((current) => (current.length >= MESSAGE_ATTACHMENT_MAX_COUNT ? current : [...current, file]));
+    } catch (error) {
+      toast.apiError(error);
+    } finally {
+      setFetchingDrive(false);
+    }
   };
 
   const submit = async () => {
@@ -326,6 +351,15 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
           disabled={pending || files.length >= MESSAGE_ATTACHMENT_MAX_COUNT || emoticon !== null}
           onClick={() => fileInputRef.current?.click()}
         />
+        {drive.ready ? (
+          <IconButton
+            icon="file"
+            label="Drive에서 첨부"
+            title={`회사 Drive 폴더의 파일을 첨부 (파일마다 ${FILE_LIMIT_TEXT}까지)`}
+            disabled={pending || files.length >= MESSAGE_ATTACHMENT_MAX_COUNT || emoticon !== null}
+            onClick={() => setPickingDrive(true)}
+          />
+        ) : null}
         <EmoticonPicker
           employeeId={myId}
           disabled={pending}
@@ -341,9 +375,20 @@ export function Composer({ room, onSent }: { room: ChatRoomDetailView; onSent: (
         </Button>
         <span className="ml-auto text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
         <Button variant="primary" size="sm" icon="send" disabled={pending || (!text.trim() && files.length === 0 && !emoticon)} onClick={() => void submit()}>
-          {reading ? '파일 읽는 중…' : '보내기'}
+          {fetchingDrive ? 'Drive 파일 받는 중…' : reading ? '파일 읽는 중…' : '보내기'}
         </Button>
       </div>
+      {pickingDrive ? (
+        <DriveFilePicker
+          title="Drive에서 첨부"
+          description={`회사 Drive 폴더의 파일이에요. 파일마다 ${FILE_LIMIT_TEXT}까지 보낼 수 있고, Google 문서는 PDF로 바꿔 붙어요`}
+          kinds={['all', 'image', 'audio', 'document']}
+          problemOf={(file) => driveSizeProblem(file, MESSAGE_FILE_MAX_BYTES)}
+          confirmLabel="첨부하기"
+          onPick={(file) => void attachDriveFile(file)}
+          onClose={() => setPickingDrive(false)}
+        />
+      ) : null}
     </div>
   );
 }

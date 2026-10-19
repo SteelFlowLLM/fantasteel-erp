@@ -112,6 +112,7 @@ export const inventoryKeys = {
   lots: (filter: LotListFilter = {}) => [...inventoryKeys.all, 'lots', filter] as const,
   rawMaterials: () => [...inventoryKeys.all, 'raw-materials'] as const,
   surplus: () => [...inventoryKeys.all, 'surplus'] as const,
+  reconciliation: () => [...inventoryKeys.all, 'reconciliation'] as const,
 };
 
 /** 제품 재고 한 줄 (규격별) */
@@ -165,4 +166,8 @@ export const inventoryApi = {
   listLots: (filter: LotListFilter = {}) => serverInventoryApi.listLots(filter),
   listRawMaterials: () => serverInventoryApi.listRawMaterials(),
   listSurplus: () => serverInventoryApi.listSurplus(),
+  /** 정합성 점검 (REQ-INV-010, TRM-062): ACTIVE 예약 합계와 재고의 예약 매수가 다른 규격. 바꾸지 않는다 */
+  checkReconciliation: () => serverInventoryApi.checkReconciliation(),
+  /** 정합성 보정: 재고의 예약 매수를 ACTIVE 예약 합계로 맞춘다(예약은 지우지 않는다). 관리자만 */
+  reconcile: () => serverInventoryApi.reconcile(),
 };

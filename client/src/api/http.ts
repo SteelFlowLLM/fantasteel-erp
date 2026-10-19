@@ -230,6 +230,11 @@ export async function serverDownload(path: string): Promise<Blob> {
   return res.blob();
 }
 
+/** 서버 API 경로의 전체 주소. 브라우저가 직접 여는 곳(<audio src>, 내려받기 링크)에 쓴다. 로그인 쿠키가 같이 간다 */
+export function serverUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
 /** 실시간 연결(WebSocket)용 서버 주소: API 주소에서 /api/v1을 뺀 origin */
 export function serverOrigin(): string {
   return new URL(API_BASE_URL).origin;

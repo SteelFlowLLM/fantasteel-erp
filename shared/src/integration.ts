@@ -172,19 +172,32 @@ export interface IntegrationDriveFolderSummary {
   countLimited: boolean;
 }
 
-/** GET integrations/google-drive/files?kind= */
-export type DriveFileKind = 'audio' | 'image';
+/** 파일 한 개의 종류. document는 PDF·Google 문서(PDF로 내보냄)·Office 파일 */
+export type DriveFileKind = 'audio' | 'image' | 'document';
 
-export const DRIVE_FILE_KINDS: readonly DriveFileKind[] = ['audio', 'image'];
+export const DRIVE_FILE_KINDS: readonly DriveFileKind[] = ['audio', 'image', 'document'];
+
+/** GET integrations/google-drive/files?kind= . all은 지원하는 모든 종류 */
+export type DriveFileListKind = DriveFileKind | 'all';
+
+export const DRIVE_FILE_LIST_KINDS: readonly DriveFileListKind[] = [...DRIVE_FILE_KINDS, 'all'];
 
 /** Drive 사진 파일 한 개의 최대 크기 (녹음은 회의 음성 상한 MEETING_AUDIO_MAX_BYTES) */
 export const DRIVE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+/** Drive 문서(PDF·Office) 파일 한 개의 최대 크기 */
+export const DRIVE_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
+
+/** Google 문서·스프레드시트·프레젠테이션을 PDF로 내보낼 때의 최대 크기. Drive files.export 자체의 상한(10MB)이다 */
+export const DRIVE_EXPORT_MAX_BYTES = 10 * 1024 * 1024;
 
 /** 설정한 Drive 폴더 안의 파일 한 개 */
 export interface DriveFileView {
   id: string;
   name: string;
   mimeType: string;
+  /** 종류. 목록에는 지원하는 종류만 나온다 */
+  kind: DriveFileKind;
   /** 바이트. Drive가 크기를 주지 않으면 null */
   size: number | null;
   modifiedTime: string | null;
