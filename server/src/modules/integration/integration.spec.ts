@@ -241,6 +241,9 @@ describe('연결 전', () => {
       settings: { parentPageId: null },
       redirectUri: null,
       oauthClient: null,
+      authMode: 'OAUTH',
+      serviceAccountEmail: null,
+      driveFolderFromEnv: false,
     });
   });
 

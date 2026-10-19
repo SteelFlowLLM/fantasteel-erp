@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { GoogleDriveClient } from './google-drive/google-drive.client';
 import { GoogleDriveController } from './google-drive/google-drive.controller';
 import { GoogleDriveService } from './google-drive/google-drive.service';
+import { GoogleServiceAccount } from './google-drive/google-service-account';
 import { IntegrationConnectionRepository } from './integration-connection.repository';
 import { IntegrationController } from './integration.controller';
 import { IntegrationCrypto } from './integration-crypto';
@@ -26,6 +27,7 @@ import { NotionPageService } from './notion/notion-page.service';
     NotionPageService,
     GoogleDriveClient,
     GoogleDriveService,
+    GoogleServiceAccount,
   ],
   exports: [NotionPageService, McpClientService, IntegrationTokenStore, GoogleDriveService],
 })

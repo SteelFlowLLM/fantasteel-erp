@@ -26,6 +26,12 @@ export interface IntegrationSettings {
   folderId?: string | null;
 }
 
+/**
+ * 연결 방법. OAUTH: 관리자가 화면에서 허용한 토큰(DB 암호문).
+ * SERVICE_ACCOUNT: Google Drive만. 서버 .env의 서비스 계정 키로 토큰을 받아 로그인·다시 연결이 없다 (이슈 #395).
+ */
+export type IntegrationAuthMode = 'OAUTH' | 'SERVICE_ACCOUNT';
+
 /** OAUTH2 연결에 관리자가 넣은 OAuth 클라이언트. client secret은 돌려주지 않고 넣었는지만 알린다 */
 export interface IntegrationOAuthClientView {
   clientId: string | null;
@@ -49,6 +55,12 @@ export interface IntegrationConnectionView {
   redirectUri: string | null;
   /** OAUTH2: 관리자가 넣은 OAuth 클라이언트. MCP는 null */
   oauthClient: IntegrationOAuthClientView | null;
+  /** SERVICE_ACCOUNT면 화면의 연결·끊기를 쓰지 않는다 (서버 설정이 정한다) */
+  authMode: IntegrationAuthMode;
+  /** SERVICE_ACCOUNT: Drive 폴더를 공유할 서비스 계정 메일. 키를 읽지 못했거나 OAUTH면 null */
+  serviceAccountEmail: string | null;
+  /** Google Drive: 폴더를 서버 설정(GOOGLE_DRIVE_FOLDER)이 정해 화면의 폴더 설정을 쓰지 않는다. settings.folderId는 실제로 읽는 폴더다 */
+  driveFolderFromEnv: boolean;
 }
 
 /** PUT integrations/:providerKey/settings */

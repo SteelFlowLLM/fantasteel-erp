@@ -301,6 +301,8 @@ beforeAll(async () => {
   process.env.INTEGRATION_SECRET_KEY = randomBytes(32).toString('base64');
   process.env.GOOGLE_API_TEST_ORIGIN = fake.origin;
   process.env.CLIENT_BASE_URL = 'http://client.test';
+  // 이 파일은 OAuth 연결을 본다: 서비스 계정·.env 폴더(google-drive-service-account.spec.ts)가 끼지 않게
+  for (const name of ['GOOGLE_SERVICE_ACCOUNT_KEY_FILE', 'GOOGLE_SERVICE_ACCOUNT_KEY', 'GOOGLE_DRIVE_FOLDER']) delete process.env[name];
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(SttClient).useValue(sttClient).overrideProvider(SttSettingsStore).useValue(sttSettings).compile();
   app = moduleRef.createNestApplication();
@@ -363,6 +365,9 @@ describe('연결 전', () => {
       settings: { folderId: null },
       redirectUri: `${baseUrl}/integrations/oauth/callback`,
       oauthClient: { clientId: null, clientSecretSet: false },
+      authMode: 'OAUTH',
+      serviceAccountEmail: null,
+      driveFolderFromEnv: false,
     });
   });
 

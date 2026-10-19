@@ -46,6 +46,8 @@ export const ERROR_CODE = {
   'INT-012': { message: 'Drive 폴더나 파일을 찾을 수 없어요', status: 404 },
   'INT-013': { message: '가져올 수 없는 종류의 파일이에요', status: 400 },
   'INT-014': { message: '파일이 너무 커서 가져올 수 없어요', status: 413 },
+  'INT-015': { message: '서버 설정(.env)의 Google 값이 올바르지 않아요. 서버 관리자가 확인해 주세요', status: 500 },
+  'INT-016': { message: '서버 설정(.env)의 서비스 계정으로 연결돼 있어 이 화면에서 연결하거나 끊지 않아요', status: 409 },
   // 🟡 RES-는 정의서 9.3에 없다 (철강맨AI 심층 조사, 2026-10-17 이슈 #378). 팀 확인 후 정의서에 올린다.
   'RES-001': { message: '조사를 찾을 수 없어요', status: 404 },
   'RES-002': { message: '지금 상태에서는 할 수 없어요', status: 409 },

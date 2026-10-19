@@ -8,6 +8,7 @@ import { IntegrationConnectionRepository } from '../integration-connection.repos
 import { IntegrationTokenStore } from '../integration-token.store';
 import { oauthCallbackUrl } from '../integration-urls';
 import { readDriveFile, type DriveFileMeta } from './google-drive.query';
+import { GoogleServiceAccount } from './google-service-account';
 import {
   buildAuthorizationUrl,
   classifyTokenFailure,
@@ -118,6 +119,11 @@ export async function readStreamToBuffer(stream: Readable, expectedBytes: number
   return offset === expectedBytes ? buffer : buffer.subarray(0, offset);
 }
 
+/** 서비스 계정이 폴더·파일을 볼 수 없을 때. Drive는 공유하지 않은 파일을 404·403으로 답한다 */
+export function serviceAccountShareMessage(email: string): string {
+  return `서비스 계정이 Drive 폴더를 볼 수 없어요. Drive에서 폴더를 ${email}에 '뷰어'로 공유하고, 폴더 주소가 맞는지 확인해 주세요`;
+}
+
 /** 두 토큰이 다른 Google 계정인지. 계정을 모르면 같은 계정일 수 있어 false (취소하지 않는 쪽) */
 function isOtherAccount(a: GoogleTokens, b: GoogleTokens): boolean {
   return Boolean(a.accountId && b.accountId && a.accountId !== b.accountId);
@@ -137,6 +143,8 @@ export interface DriveMedia {
  * 동적 클라이언트 등록이 없으며 큰 파일을 받지 못한다. 회사 Google 계정 하나의 토큰을 DB에 암호화해 둔다(IntegrationTokenStore).
  * 고정된 Google 주소로만 요청한다 (googleEndpoints).
  *
+ * .env에 서비스 계정 키가 있으면(이슈 #395) DB 토큰 대신 그 계정의 토큰을 쓴다(GoogleServiceAccount). Drive 요청·오류 처리는 같다.
+ *
  * 토큰 읽기·갱신·저장은 연결 대상 줄(store.exclusive) 안에서만 한다. Drive 요청 자체는 줄 밖에서 보낸다:
  * 큰 녹음을 받는 동안 다른 호출이 기다리지 않게 하려는 것이고, 토큰을 쓰는 작업이 겹치지 않으면 충분하다.
  */
@@ -148,6 +156,7 @@ export class GoogleDriveClient {
     private readonly prisma: PrismaService,
     private readonly repository: IntegrationConnectionRepository,
     private readonly store: IntegrationTokenStore,
+    private readonly serviceAccount: GoogleServiceAccount,
   ) {}
 
   // ───────── 관리자가 넣은 OAuth 클라이언트 ─────────
@@ -370,7 +379,15 @@ export class GoogleDriveClient {
    * 쓸 수 있는 액세스 토큰. 만료가 가까우면 갱신한다.
    * rejected를 주면(Drive가 그 토큰을 401로 거절함) 아직 그 토큰이 저장돼 있을 때만 갱신한다: 줄을 기다리는 사이 다른 호출이 이미 갱신했으면 그 토큰을 쓴다.
    */
-  private accessToken(rejected?: string): Promise<string> {
+  private async accessToken(rejected?: string): Promise<string> {
+    if (this.serviceAccount.isActive()) {
+      try {
+        return await this.serviceAccount.accessToken(rejected);
+      } catch (error) {
+        if (error instanceof AppException) throw await this.fail(error);
+        throw error;
+      }
+    }
     return this.store.exclusive(KEY, async () => {
       const stored = await this.store.readTokens<unknown>(KEY);
       if (!isGoogleTokens(stored)) {
@@ -446,6 +463,10 @@ export class GoogleDriveClient {
       res = await send(token);
       if (res.status === 401) {
         await res.body?.cancel().catch(() => undefined);
+        if (this.serviceAccount.isActive()) {
+          this.serviceAccount.forget(token);
+          throw await this.fail(new AppException('INT-004', 'Google이 서비스 계정 토큰을 거절했어요. Cloud Console에서 서비스 계정과 키가 사용 중인지 확인해 주세요'));
+        }
         // 갱신한 토큰도 거절됨: 그 사이 새로 연결해 바뀐 토큰은 지우지 않는다
         await this.store.exclusive(KEY, async () => {
           const stored = await this.store.readTokens<unknown>(KEY).catch(() => undefined);
@@ -483,6 +504,9 @@ export class GoogleDriveClient {
     }
     if (reason === 'fileNotExportable') return new AppException('INT-013', '이 Google 문서는 PDF로 바꿀 수 없어요');
     if (reason === 'insufficientPermissions' || reason === 'insufficientFilePermissions') {
+      // 서비스 계정은 다시 연결할 것이 없다: 폴더가 그 계정에 공유되지 않은 것이다
+      const email = this.serviceAccount.isActive() ? this.serviceAccount.email() : null;
+      if (email) return new AppException('INT-012', serviceAccountShareMessage(email));
       return this.fail(new AppException('INT-004', 'Google Drive 권한이 부족해요. 관리자가 다시 연결하면서 Drive 권한을 모두 허용해 주세요'));
     }
     if (res.status === 429 || /rateLimitExceeded/i.test(reason)) {
@@ -494,7 +518,10 @@ export class GoogleDriveClient {
 
   /** 연결 문제(INT-003·INT-004)는 last_error에 남긴다. 비밀값은 문구에 없다 */
   private async fail(error: AppException): Promise<AppException> {
-    if (error.code === 'INT-003' || error.code === 'INT-004') await this.store.recordError(KEY, errorMessage(error)).catch(() => undefined);
+    if (error.code !== 'INT-003' && error.code !== 'INT-004') return error;
+    // 서비스 계정은 연결 행 없이도 쓰므로, 관리 화면에 이유가 보이게 행을 만든다
+    if (this.serviceAccount.isActive()) await this.repository.ensure(this.prisma, KEY, null).catch(() => undefined);
+    await this.store.recordError(KEY, errorMessage(error)).catch(() => undefined);
     return error;
   }
 }
