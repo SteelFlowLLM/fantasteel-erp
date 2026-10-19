@@ -9,6 +9,7 @@
 | --- | --- |
 | 이슈 | #358 MCP 연결과 회의록 Notion 내보내기 (AI 기능 계획 1단계). 🟡 설계 문서에 없는 기능 |
 | 1단계 | 회사 Notion 계정 하나를 원격 MCP 서버(`https://mcp.notion.com/mcp`)에 OAuth로 연결하고, 확정한 회의록을 Notion 페이지로 내보낸다 ([meeting-minutes.md](meeting-minutes.md) 'Notion으로 내보내기') |
+| 3단계 | 이슈 #391 **Notion 업무 공간**. 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 만들고 ERP → Notion 한 방향으로 자동 반영한다 (12장) |
 | 2단계 | 이슈 #361 **Google Drive 연결과 녹음 가져오기**. 회사 Google 계정 하나를 Drive REST API v3 + 일반 OAuth 2.0으로 연결하고, 관리자가 정한 폴더의 녹음·사진을 목록·내용으로 보여 주며, 녹음으로 회의록을 만든다 (11장, [meeting-minutes.md](meeting-minutes.md) 'Drive 녹음으로 만들기') |
 
 - **회사 계정 하나**: 관리자(`ORG_MANAGE` 사용)가 한 번 연결하면 모든 사원이 그 연결을 쓴다. 사원별 연결은 없다.
@@ -19,7 +20,8 @@
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
 | 쓰기 | `integration_connection` 🟡 | 연결 대상(`provider_key`, unique, 서버 코드 프리셋 키 — 공통 코드 아님)마다 한 행. 처음 설정·연결할 때 만든다 |
-| 쓰기 | `meeting_minutes` | `notion_page_url`, `notion_exported_at` (내보내기) |
+| 쓰기 | `meeting_minutes` | `notion_page_url`, `notion_exported_at` (내보내기), `notion_page_id`, `notion_synced_at` (업무 공간, 12장) |
+| 쓰기 | `schedule_event`, `task` | `notion_page_id`, `notion_synced_at` (업무 공간, 12장). `schedule_event.notion_calendar_event_id`, `employee.email`은 2단계(Notion 캘린더)용으로 칸만 있다 |
 
 `integration_connection` 칸 (마이그레이션 `20261016024725_integration_connection`):
 
@@ -30,7 +32,7 @@
 | `oauth_tokens` | 액세스·리프레시 토큰 **암호문**. MCP는 SDK가 준 모양 그대로(`issuer` 포함), Google Drive는 `{ accessToken, refreshToken, expiresAt(epoch ms), scope }` |
 | `oauth_code_verifier` | PKCE code verifier **암호문**. 연결 중에만 있다 |
 | `oauth_state`, `oauth_state_expires_at` | 콜백 확인값(32바이트 무작위, unique)과 만료(10분). 연결 중에만 있다 |
-| `settings` jsonb | 연결별 설정. Notion: `{ parentPageId }` (32자리 소문자 16진수). Google Drive: `{ folderId }` (Drive 폴더 id) |
+| `settings` jsonb | 연결별 설정. Notion: `{ parentPageId, notionWorkspace? }` (32자리 소문자 16진수, 업무 공간은 12장). Google Drive: `{ folderId }` (Drive 폴더 id) |
 | `connected_by_id` | 마지막으로 연결을 시작한 관리자 |
 | `connected_at` | 연결 완료 시각. **토큰이 없는데 값이 있으면 다시 연결해야 한다** |
 | `last_error` | 마지막 실패 이유 (500자, 비밀값 없음) |
@@ -46,6 +48,7 @@
 | POST | `integrations/:providerKey/connect` | 연결 시작 → `{ authorizationUrl }` | `ORG_MANAGE` 사용 |
 | GET | `integrations/oauth/callback` | OAuth 콜백 → 화면으로 302 | **공개**(`@Public`), `state`로 확인 |
 | POST | `integrations/:providerKey/disconnect` | 연결 끊기 | `ORG_MANAGE` 사용 |
+| POST | `integrations/notion/workspace` | 🟡 Notion 업무 공간 만들기 (12장). 이미 있으면 만들지 않고 지금 상태를 돌려준다 → `IntegrationConnectionView` | `ORG_MANAGE` 사용 |
 | POST | `integrations/:providerKey/test` | 연결 확인 (`IntegrationTestResult`, 실패도 결과로). MCP: 도구 목록. Google Drive: 폴더 이름과 녹음·사진 수(`driveFolder`) | `ORG_MANAGE` 사용 |
 | GET | `integrations/google-drive/files?kind=audio\|image&pageToken=` | 🟡 설정한 폴더의 녹음 또는 사진 (`DriveFilePage`, 최신 수정순 50개) | 로그인한 전 역할 🟡 |
 | GET | `integrations/google-drive/files/:fileId/content` | 🟡 파일 내용 그대로 (응답 포맷으로 감싸지 않는다) | 로그인한 전 역할 🟡 |
@@ -150,6 +153,37 @@ Google Drive의 client id·secret·폴더는 환경변수가 아니라 관리 > 
 3. `POST /api/v1/integrations/notion/connect` → 응답 `authorizationUrl`을 **같은 PC의 브라우저**에서 열어 Notion 계정으로 허용한다. 콜백 뒤 `http://localhost:5173/admin/integrations?integration=notion&result=connected`로 돌아온다(화면이 아직 없으면 주소창의 쿼리만 확인).
 4. `POST /api/v1/integrations/notion/test` → `ok: true`, `missingTools: []`.
 5. 확정한 회의록으로 `POST /api/v1/meeting-minutes/:id/notion-export` → 응답의 `notionPageUrl`을 열어 페이지를 확인한다.
+
+## 12. Notion 업무 공간 (이슈 #391)
+
+회사 Notion의 상위 페이지 아래에 데이터베이스 세 개를 만들고, ERP의 일정·확정한 회의록·업무를 **ERP → Notion 한 방향**으로 옮긴다. Notion에서 고친 내용은 읽지 않는다(ERP에서 그 행이 다시 바뀌면 덮어쓴다). 지우기는 없다(일정·업무를 지우는 기능이 없다).
+
+| 데이터베이스 | ERP | 속성 | 보기 |
+| --- | --- | --- | --- |
+| ERP 일정 | `schedule_event` | 제목, 일시(시작·끝, 서울 시각), 참석자(이름 글), 등록자, 설명, 회의록(URL), ERP(URL), 번호(ERP id) | 달력(`CALENDAR BY "일시"`), 일정 목록 |
+| ERP 회의록 | 확정한 `meeting_minutes` | 제목, 회의일, 참석자, 작성자, 확정(서울 시각), ERP, 번호 + 본문(`meeting-notion.markdown.ts`, 직접 내보내기와 같은 마크다운) | 최근 회의, 회의 달력 |
+| ERP 할 일 | `task` | 제목, 상태(선택: `TASK_STATUS_LABEL` 진행·완료), 담당자(선택), 마감일, 등록자, 출처(선택: 직접 등록·회의록·메시지), 회의록(URL), 설명, ERP, 번호 | 상태별·담당자별 보드, 마감일순 |
+
+- 🟡 사원은 Notion 계정이 없어 담당자는 사람 속성이 아니라 **선택 항목**이다(보드를 담당자별로 묶으려고). 만들 때 사용 중인 사원 이름을 항목으로 넣고, 그 뒤 생긴 이름은 값을 쓸 때 Notion이 항목을 더한다고 본다(**실제 Notion으로 확인 필요**). 참석자는 글이다.
+- 🟡 상태는 Notion STATUS가 아니라 SELECT다: STATUS는 할 일(to_do) 묶음이 비면 만들어지는지 확인하지 못했다.
+- ERP 링크 = `CLIENT_BASE_URL` + 행의 `link_path`(없으면 일정은 그 주 `/schedule?week=`, 업무는 `/tasks`, 회의록은 `/meetings?id=`). 회의록 링크는 회의록의 Notion 페이지 주소, 없으면 ERP 회의록 화면.
+- 텍스트 속성은 2000자, 선택 항목 이름은 100자로 자르고 쉼표·작은따옴표를 바꾼다(`selectOption`).
+
+**만들기** (`POST integrations/notion/workspace`, 관리 > 외부 연결 > Notion 카드의 "Notion 업무 공간 만들기"): 연결·상위 페이지 확인(`INT-002`·`INT-003`·`INT-006`) → 도구 확인(`notion-create-database`·`notion-create-view`·`notion-create-pages`·`notion-update-page`, 없으면 `INT-005`) → 데이터베이스마다 `notion-create-database`(`parent: page_id`, `CREATE TABLE …`) → 결과 마크다운의 `<data-source url="collection://…">`에서 데이터 소스 id, `<database url="…">`에서 데이터베이스 id를 읽어 **하나 만들 때마다** `settings.notionWorkspace`에 저장 → 보기(`notion-create-view`, 데이터베이스 id를 못 읽었으면 상위 페이지에 연결된 보기). 보기 실패는 로그만 남긴다. 데이터 소스 id를 읽지 못하면(만들어졌을 수 있다) `INT-009`. 이미 저장된 데이터베이스는 다시 만들지 않는다(멈췄으면 없는 것만 이어서). 다 만들면 반영을 깨운다.
+
+`settings.notionWorkspace` = `{ scheduleEvents?, meetingMinutes?, tasks?: { databaseId: string|null, dataSourceId: string(UUID), url: string|null }, createdAt? }`. 목록 응답에는 `settings`가 아니라 `notionWorkspace: NotionWorkspaceView | null`(`ready`, `createdAt`, `databases[{ key, title, url }]`, `lastSyncedAt`, `failedCount`, `pendingCount`, `lastSyncError`)로 보인다. 마지막 반영 시각·실패 수·이유는 서버 메모리 값이라 다시 띄우면 비어 있다.
+
+**반영** (`notion/notion-workspace.service.ts`):
+- 반영할 행 = `notion_synced_at IS NULL OR updated_at > notion_synced_at`. 반영한 뒤 **그 행의 `updated_at`** 을 `notion_synced_at`에 적는다(now()가 아니다: 읽은 뒤 바뀐 것은 다음에 다시 간다). 이 쓰기는 TypedSQL(`prisma/sql/mark*NotionSynced.sql`)이다: Prisma로 쓰면 `@updatedAt`이 바뀌어 방금 반영한 행이 다시 바뀐 것으로 보인다. 조건부 `updateMany`(업무 완료)도 Prisma가 `updated_at`을 바꾼다(테스트로 확인).
+- 언제: 일정·업무·회의록을 저장한 service가 **트랜잭션이 끝난 뒤** `NotionWorkspaceService.kick()`(기다리지 않음, 실패해도 요청은 성공) — 업무 등록·고치기·완료, 일정 등록·고치기, 회의록 확정(거기서 만든 일정·업무 포함), 철강맨AI 실행 카드. 그리고 **1분마다**(테스트에서는 돌지 않고 `runNow()`로 직접 부른다). 연결이 없거나 세 데이터베이스가 다 있지 않으면 아무것도 하지 않는다.
+- 같은 서버 안에서는 반영·만들기·직접 내보내기가 **한 줄**로 돈다(기다리는 반영은 하나로 합친다). 🟡 서버를 여러 대 띄우면 같은 행을 두 서버가 함께 만들 수 있다(토큰 줄과 같은 전제).
+- 처음 반영(페이지가 없는 행): 일정은 **끝난 지 30일 안**이거나 앞으로의 것, 업무는 **진행 중이거나 30일 안에 바뀐** 것(`NOTION_BACKFILL_DAYS`), 회의록은 확정한 것 전부. 이미 페이지가 있는 행은 기간과 상관없이 바뀌면 고친다.
+- 순서: 회의록 → 일정 → 업무(같은 회의에서 나온 일정·업무가 회의록 페이지 주소를 가리키게). 한 번에 종류마다 100행, 남으면 이어서 돈다.
+- 만들기: `notion-create-pages`(`parent: data_source_id`, 20개씩, `allow_async: false`) → 결과의 페이지를 **보낸 순서대로** 읽어 행에 붙인다. 읽은 수가 다르면 어느 행 것인지 몰라 "결과 모름"으로 둔다. 여러 개를 보냈는데 Notion이 오류로 답하면(만들지 않았다) 하나씩 다시 보낸다. 고치기: `notion-update-page` `update_properties`(회의록은 `replace_content`로 본문도).
+- 회의록 만들기는 직접 내보내기와 **같은 잡기**(`notion_exported_at`, 5분 만료)를 쓴다: 둘이 동시에 페이지를 만들지 않는다. 만든 뒤 `notion_page_url`·`notion_page_id`·`notion_exported_at`·`notion_synced_at`을 함께 적는다(TypedSQL `finishMeetingMinutesNotionPage`, 내 잡기일 때만). 그래서 회의록 화면의 "Notion으로 내보내기"는 링크로 바뀐다. **직접 내보낸 회의록**(`notion_page_url`만 있고 `notion_page_id` 없음)은 데이터베이스에 또 만들지 않는다.
+- 업무 공간이 있으면 `POST meeting-minutes/:id/notion-export`도 상위 페이지가 아니라 **회의록 데이터베이스**에 만든다(같은 줄·같은 잡기, 오류 코드는 직접 내보내기와 같다).
+- 실패: 행의 실패(Notion 오류 답·JSON-RPC 오류)는 그 행만 **미룬다**(1분에서 두 배씩 1시간까지, 서버 메모리). 만들기 결과를 알 수 없으면(페이지 id 없는 성공 답·시간 초과·연결 끊김) **30분** 미룬다: Notion에 생겼는지 사람이 볼 시간을 둔다(그 뒤 다시 만들면 중복이 생길 수 있다). 인증 실패·전송 실패는 이번 반영을 멈추고 `last_error`에 남는다(withSession). 행은 반영하지 않은 채로 남아 다음에 다시 간다.
+- 테스트: `integration.spec.ts`의 'Notion 업무 공간' — 만들기 전에는 부르지 않음, 권한, 데이터베이스 3개·보기 7개를 한 번만·두 번째는 그대로, 만들기 전 업무도 반영, 일정 만들기 → 그대로면 안 보냄 → 고치면 같은 페이지 `update_properties`, 업무 완료 → 상태 고치기(`updated_at` 확인), 회의록 → 본문과 함께 만들고 주소·VOC-008 → 바뀌면 속성·본문 고치기, 직접 내보내기가 데이터베이스로 감, Notion 오류 → 행 남김·실패 수·이유·바로 다시 부르지 않음, 결과 모름 → 남김·미룸, 고치기 실패 → 남김. 순수 단위 `notion/notion-workspace.tools.unit.spec.ts`: 정의·DDL, 입력 만들기, 데이터 소스 id·데이터베이스 id 읽기(상위 페이지 주소 건너뛰기), 만든 페이지 순서·개수, 행 → 속성.
 
 ## 11. Google Drive (이슈 #361)
 

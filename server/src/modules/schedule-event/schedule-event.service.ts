@@ -3,6 +3,7 @@ import type { AuthUser, ScheduleEventInput, ScheduleEventView } from '@fantastee
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import type { ListScheduleEventsQuery } from './dto/schedule-event.dto';
 import { ScheduleEventRepository, type ScheduleEventFields, type ScheduleEventRow } from './schedule-event.repository';
 
@@ -60,6 +61,7 @@ export class ScheduleEventService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: ScheduleEventRepository,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   async listMine(user: AuthUser, query: ListScheduleEventsQuery): Promise<ScheduleEventView[]> {
@@ -77,13 +79,16 @@ export class ScheduleEventService {
   /** 내 일정 직접 등록. 나 혼자 보는 일정이라 다른 사원에게 알림을 보내지 않는다 */
   async create(user: AuthUser, input: ScheduleEventInput): Promise<ScheduleEventView> {
     const fields = fieldsOf(input);
-    return toView(await this.repository.createMine(this.prisma, user.employeeId, fields));
+    const view = toView(await this.repository.createMine(this.prisma, user.employeeId, fields));
+    // Notion 업무 공간(이슈 #391) 반영은 저장 뒤에 깨우고 기다리지 않는다
+    this.notionWorkspace.kick();
+    return view;
   }
 
   /** 내가 직접 등록한 일정만 고친다. 볼 수 없는 일정은 없는 것처럼 COM-003 */
   async update(user: AuthUser, id: number, input: ScheduleEventInput): Promise<ScheduleEventView> {
     const fields = fieldsOf(input);
-    return this.prisma.$transaction(async (tx) => {
+    const view = await this.prisma.$transaction(async (tx) => {
       const event = await this.repository.findById(tx, id);
       const visible = event && (event.creatorId === user.employeeId || event.attendees.some((a) => a.employeeId === user.employeeId));
       if (!event || !visible) throw new AppException('COM-003', '일정을 찾을 수 없어요');
@@ -91,5 +96,7 @@ export class ScheduleEventService {
       if (event.meetingMinutesId !== null) throw new AppException('COM-004', '회의록에서 등록한 일정은 여기서 고칠 수 없어요', 409);
       return toView(await this.repository.update(tx, id, fields));
     });
+    this.notionWorkspace.kick();
+    return view;
   }
 }

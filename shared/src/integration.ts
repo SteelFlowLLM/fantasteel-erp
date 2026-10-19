@@ -18,12 +18,52 @@ export type IntegrationProtocol = 'MCP' | 'OAUTH2';
  */
 export type IntegrationConnectionStatus = 'NOT_CONNECTED' | 'CONNECTED' | 'RECONNECT_REQUIRED';
 
+/** Notion 업무 공간의 데이터베이스 종류 (이슈 #391). ERP 표 하나가 Notion 데이터베이스 하나로 간다 */
+export const NOTION_WORKSPACE_DATABASES = ['scheduleEvents', 'meetingMinutes', 'tasks'] as const;
+export type NotionWorkspaceDatabaseKey = (typeof NOTION_WORKSPACE_DATABASES)[number];
+
+/** 만든 Notion 데이터베이스 하나. 페이지는 dataSourceId 아래에 만든다 */
+export interface NotionDatabaseRef {
+  /** 데이터베이스 id (32자리 16진수). 만들기 결과에서 읽지 못하면 null (보기를 상위 페이지에 붙인다) */
+  databaseId: string | null;
+  /** 데이터 소스 id (UUID) */
+  dataSourceId: string;
+  url: string | null;
+}
+
+/** 서버만 쓰는 설정: 상위 페이지 아래에 만든 데이터베이스. 만든 것만 칸이 있다 (만들다 멈추면 다음에 없는 것만 만든다) */
+export interface NotionWorkspaceSettings {
+  scheduleEvents?: NotionDatabaseRef;
+  meetingMinutes?: NotionDatabaseRef;
+  tasks?: NotionDatabaseRef;
+  /** 세 데이터베이스를 모두 만든 시각 */
+  createdAt?: string;
+}
+
 /** 연결별 설정. 연결 대상마다 쓰는 칸이 다르다 */
 export interface IntegrationSettings {
   /** Notion: 회의록 페이지를 만들 상위 페이지 id (32자리 16진수, 대시 없음) */
   parentPageId?: string | null;
+  /** Notion: 업무 공간 데이터베이스 (이슈 #391). 목록 응답에는 notionWorkspace로 따로 보인다 */
+  notionWorkspace?: NotionWorkspaceSettings;
   /** Google Drive: 팀이 녹음·사진을 올리는 폴더 id */
   folderId?: string | null;
+}
+
+/** 관리 화면에 보이는 Notion 업무 공간 상태 (이슈 #391). ERP → Notion 한 방향으로만 반영한다 */
+export interface NotionWorkspaceView {
+  /** 세 데이터베이스를 모두 만들었는지. 만든 뒤부터 자동 반영한다 */
+  ready: boolean;
+  createdAt: string | null;
+  databases: { key: NotionWorkspaceDatabaseKey; title: string; url: string | null }[];
+  /** 마지막으로 반영을 끝낸 시각 (서버를 다시 띄우면 비어 있다) */
+  lastSyncedAt: string | null;
+  /** 반영에 실패해 잠시 뒤 다시 할 행 수 */
+  failedCount: number;
+  /** 반영을 기다리는 행 수 (실패한 행 포함) */
+  pendingCount: number;
+  /** 마지막 반영 실패 이유 */
+  lastSyncError: string | null;
 }
 
 /** OAUTH2 연결에 관리자가 넣은 OAuth 클라이언트. client secret은 돌려주지 않고 넣었는지만 알린다 */
@@ -49,6 +89,8 @@ export interface IntegrationConnectionView {
   redirectUri: string | null;
   /** OAUTH2: 관리자가 넣은 OAuth 클라이언트. MCP는 null */
   oauthClient: IntegrationOAuthClientView | null;
+  /** Notion: 업무 공간 상태. 만든 적이 없거나 Notion이 아니면 null */
+  notionWorkspace: NotionWorkspaceView | null;
 }
 
 /** PUT integrations/:providerKey/settings */

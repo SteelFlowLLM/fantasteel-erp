@@ -341,6 +341,7 @@ describe('연결 전', () => {
       settings: { folderId: null },
       redirectUri: `${baseUrl}/integrations/oauth/callback`,
       oauthClient: { clientId: null, clientSecretSet: false },
+      notionWorkspace: null,
     });
   });
 

@@ -6,7 +6,7 @@ import { AppException } from '../../../common/errors/app.exception';
 export const NOTION_CREATE_PAGES_TOOL = 'notion-create-pages';
 
 /** 도구 이름과 입력 스키마 (mcp.client.ts의 McpToolInfo와 같은 모양) */
-interface ToolShape {
+export interface ToolShape {
   name: string;
   inputSchema: { properties?: Record<string, unknown> };
 }
@@ -87,7 +87,8 @@ export function buildCreatePageArgs(tool: ToolShape, parentPageId: string, page:
   };
 }
 
-function textsOf(result: CallToolResult): string[] {
+/** 도구 결과의 글 조각 */
+export function textsOf(result: CallToolResult): string[] {
   return result.content.flatMap((item) => (item.type === 'text' ? [item.text] : []));
 }
 

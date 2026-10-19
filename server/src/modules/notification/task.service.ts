@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { MESSAGE_TYPE, NOTIFICATION_TYPE, TASK_STATUS, type AuthUser, type PageResult, type TaskStatus, type TaskView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import type { CreateTaskDto, ListTasksQuery, UpdateTaskDto } from './dto/task.dto';
 import { NotificationService } from './notification.service';
 import { TaskRepository, type TaskRow } from './task.repository';
@@ -44,6 +45,7 @@ export class TaskService {
     private readonly prisma: PrismaService,
     private readonly repository: TaskRepository,
     private readonly notifications: NotificationService,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   /** API-239 */
@@ -78,6 +80,8 @@ export class TaskService {
         linkPath: dto.linkPath ?? null,
       });
     });
+    // Notion 업무 공간(이슈 #391) 반영은 커밋 뒤에 깨우고 기다리지 않는다
+    this.notionWorkspace.kick();
     return this.view(id);
   }
 
@@ -143,6 +147,7 @@ export class TaskService {
         await this.notifications.notifyEmployees(tx, [dto.assigneeId], { notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: `업무 지정 · ${taskTitle ?? task.taskTitle}`, linkPath: '/tasks' });
       }
     });
+    this.notionWorkspace.kick();
     return this.view(id);
   }
 
@@ -155,6 +160,7 @@ export class TaskService {
       const { count } = await this.repository.updateStatusIfOpen(tx, id, TASK_STATUS.OPEN, TASK_STATUS.DONE);
       if (count === 0) throw new AppException('COM-001', '이미 완료된 업무예요');
     });
+    this.notionWorkspace.kick();
     return this.view(id);
   }
 

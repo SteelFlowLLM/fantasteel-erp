@@ -9,6 +9,7 @@ import {
   type IntegrationOAuthClientView,
   type IntegrationSettings,
   type IntegrationTestResult,
+  type NotionWorkspaceView,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,6 +27,7 @@ import { GoogleDriveService } from './google-drive/google-drive.service';
 import { clientInputError, type GoogleClientCredentials } from './google-drive/google-oauth';
 import { McpClientService } from './mcp/mcp.client';
 import { normalizeNotionPageId } from './notion/notion.tools';
+import { NotionWorkspaceService } from './notion/notion-workspace.service';
 
 /** 관리자가 허용 화면(Notion·Google)에서 머무를 수 있는 시간 */
 const OAUTH_STATE_TTL_MS = 10 * 60_000;
@@ -42,7 +44,12 @@ function settingsView(preset: IntegrationProviderPreset, settings: IntegrationSe
   return settings;
 }
 
-function toView(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null, oauthClient: IntegrationOAuthClientView | null): IntegrationConnectionView {
+function toView(
+  preset: IntegrationProviderPreset,
+  row: IntegrationConnectionRow | null,
+  oauthClient: IntegrationOAuthClientView | null,
+  notionWorkspace: NotionWorkspaceView | null,
+): IntegrationConnectionView {
   return {
     providerKey: preset.key,
     displayName: preset.displayName,
@@ -56,6 +63,7 @@ function toView(preset: IntegrationProviderPreset, row: IntegrationConnectionRow
     // 관리자가 OAuth 클라이언트에 등록할 주소. MCP는 동적 등록이 알아서 넣는다
     redirectUri: preset.protocol === 'OAUTH2' ? oauthCallbackUrl() : null,
     oauthClient,
+    notionWorkspace,
   };
 }
 
@@ -91,6 +99,7 @@ export class IntegrationService {
     private readonly crypto: IntegrationCrypto,
     private readonly drive: GoogleDriveClient,
     private readonly driveService: GoogleDriveService,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   /**
@@ -108,14 +117,15 @@ export class IntegrationService {
     }
   }
 
-  private view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): IntegrationConnectionView {
-    return toView(preset, row, this.oauthClientView(preset, row));
+  private async view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): Promise<IntegrationConnectionView> {
+    const workspace = preset.key === INTEGRATION_PROVIDER.NOTION ? await this.notionWorkspace.view(readSettings(row?.settings ?? null)) : null;
+    return toView(preset, row, this.oauthClientView(preset, row), workspace);
   }
 
   /** 연결할 수 있는 대상 전부. 아직 행이 없으면 연결하지 않은 상태로 보인다 */
   async list(): Promise<IntegrationConnectionView[]> {
     const rows = new Map((await this.repository.findAll(this.prisma)).map((row) => [row.providerKey, row]));
-    return Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null));
+    return Promise.all(Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null)));
   }
 
   async get(providerKey: string): Promise<IntegrationConnectionView> {
@@ -236,6 +246,15 @@ export class IntegrationService {
       });
     });
     return this.view(preset, row);
+  }
+
+  /**
+   * Notion 업무 공간 만들기 (이슈 #391): 상위 페이지 아래 일정·회의록·할 일 데이터베이스와 보기를 만들고 자동 반영을 시작한다.
+   * 이미 만들었으면 다시 만들지 않고 지금 상태를 돌려준다.
+   */
+  async setupNotionWorkspace(): Promise<IntegrationConnectionView> {
+    await this.notionWorkspace.setup();
+    return this.get(INTEGRATION_PROVIDER.NOTION);
   }
 
   /** MCP: 저장된 토큰으로 붙어 도구 목록을 받는다. Google Drive: 폴더와 그 안의 녹음·사진 수. 실패도 오류가 아니라 결과로 돌려준다 */

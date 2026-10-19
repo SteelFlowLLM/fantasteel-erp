@@ -15,7 +15,8 @@ const listSelect = {
   _count: { select: { attendees: true } },
 } satisfies Prisma.MeetingMinutesSelect;
 
-const detailSelect = {
+/** 회의록 상세 (Notion 업무 공간 반영도 같은 모양으로 읽는다) */
+export const meetingMinutesDetailSelect = {
   id: true,
   meetingMinutesTitle: true,
   meetingDate: true,
@@ -38,7 +39,7 @@ const detailSelect = {
 } satisfies Prisma.MeetingMinutesSelect;
 
 export type MeetingMinutesListRow = Prisma.MeetingMinutesGetPayload<{ select: typeof listSelect }>;
-export type MeetingMinutesDetailRow = Prisma.MeetingMinutesGetPayload<{ select: typeof detailSelect }>;
+export type MeetingMinutesDetailRow = Prisma.MeetingMinutesGetPayload<{ select: typeof meetingMinutesDetailSelect }>;
 
 /** DB 접근만 둔다. 첫 인자는 항상 tx (컨벤션 6장) */
 @Injectable()
@@ -57,7 +58,7 @@ export class MeetingMinutesRepository {
   }
 
   findDetail(tx: Tx, id: number) {
-    return tx.meetingMinutes.findUnique({ where: { id }, select: detailSelect });
+    return tx.meetingMinutes.findUnique({ where: { id }, select: meetingMinutesDetailSelect });
   }
 
   count(tx: Tx, where: Prisma.MeetingMinutesWhereInput) {
