@@ -15,6 +15,9 @@ import {
   integrationCardKind,
   isNotionExportReady,
   notionConnection,
+  notionCalendarKey,
+  notionCalendarLabel,
+  notionCalendarSaveInput,
   notionPageLink,
   notionWorkspaceBlockReason,
   notionWorkspaceStatusLabel,
@@ -250,6 +253,8 @@ describe('Notion 업무 공간', () => {
     failedCount: 0,
     pendingCount: 0,
     lastSyncError: null,
+    setupWarning: null,
+    calendar: null,
     ...overrides,
   });
 
@@ -270,5 +275,30 @@ describe('Notion 업무 공간', () => {
     expect(notionWorkspaceSyncLabel(workspace())).toBe('모두 반영했어요');
     expect(notionWorkspaceSyncLabel(workspace({ pendingCount: 3, failedCount: 1 }))).toBe('3건 기다리는 중 · 1건 실패(잠시 뒤 다시)');
     expect(notionWorkspaceSyncLabel(workspace({ pendingCount: 0, failedCount: 2 }))).toBe('2건 실패(잠시 뒤 다시)');
+  });
+});
+
+describe('Notion 캘린더 고르기 (이슈 #391 2단계)', () => {
+  const erp = { accountId: 'acc-1', accountEmail: 'erp@company.com', calendarId: 'erp-cal', name: 'ERP', primary: true, writable: true };
+  const holiday = { accountId: 'acc-1', accountEmail: null, calendarId: 'holiday|kr', name: '휴일', primary: false, writable: false };
+
+  it('고르기 값은 계정·캘린더를 인코딩해 겹치지 않는다', () => {
+    expect(notionCalendarKey(holiday)).toBe('acc-1|holiday%7Ckr');
+    expect(notionCalendarKey({ accountId: 'a|b', calendarId: 'c' })).not.toBe(notionCalendarKey({ accountId: 'a', calendarId: 'b|c' }));
+  });
+
+  it('한 줄: 이름 · 계정 메일, 읽기 전용 표시', () => {
+    expect(notionCalendarLabel(erp)).toBe('ERP · erp@company.com');
+    expect(notionCalendarLabel(holiday)).toBe('휴일 (읽기 전용)');
+  });
+
+  it('저장 본문: 새로 고르면 계정·캘린더·초대, 초대만 바꾸면 초대만, 바뀐 것이 없으면 null', () => {
+    const current = { accountId: 'acc-1', calendarId: 'erp-cal', sendInvites: false };
+    expect(notionCalendarSaveInput(null, notionCalendarKey(erp), [erp, holiday], false)).toEqual({ accountId: 'acc-1', calendarId: 'erp-cal', sendInvites: false });
+    expect(notionCalendarSaveInput(current, notionCalendarKey(holiday), [erp, holiday], true)).toEqual({ accountId: 'acc-1', calendarId: 'holiday|kr', sendInvites: true });
+    expect(notionCalendarSaveInput(current, notionCalendarKey(erp), [erp], true)).toEqual({ sendInvites: true });
+    expect(notionCalendarSaveInput(current, '', [], true)).toEqual({ sendInvites: true });
+    expect(notionCalendarSaveInput(current, notionCalendarKey(erp), [erp], false)).toBeNull();
+    expect(notionCalendarSaveInput(null, '', [], true)).toBeNull();
   });
 });

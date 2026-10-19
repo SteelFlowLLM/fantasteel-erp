@@ -8,6 +8,8 @@ import type {
   IntegrationProviderKey,
   IntegrationSettingsInput,
   IntegrationTestResult,
+  NotionCalendarOption,
+  NotionCalendarSettingsInput,
 } from '@fantasteel/shared';
 import { serverRequest } from '@/api/http';
 
@@ -20,6 +22,9 @@ export type {
   IntegrationProviderKey,
   IntegrationSettingsInput,
   IntegrationTestResult,
+  NotionCalendarOption,
+  NotionCalendarSettings,
+  NotionCalendarSettingsInput,
   NotionWorkspaceView,
 } from '@fantasteel/shared';
 
@@ -39,6 +44,10 @@ export const integrationApi = {
   test: (providerKey: IntegrationProviderKey): Promise<IntegrationTestResult> => serverRequest('POST', `/integrations/${providerKey}/test`),
   /** 이슈 #391. 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 만들고 자동 반영을 시작한다. 이미 있으면 만들지 않는다 */
   setupNotionWorkspace: (): Promise<IntegrationConnectionView> => serverRequest('POST', '/integrations/notion/workspace'),
+  /** 이슈 #391 2단계. 회사 Notion 계정에 연결된 캘린더 (없으면 빈 목록) */
+  notionCalendars: (): Promise<NotionCalendarOption[]> => serverRequest('GET', '/integrations/notion/calendars'),
+  /** 일정을 함께 만들 캘린더·초대 여부. accountId null이면 캘린더 반영을 끈다 */
+  updateNotionCalendar: (input: NotionCalendarSettingsInput): Promise<IntegrationConnectionView> => serverRequest('PUT', '/integrations/notion/calendar', { body: input }),
   /** 이슈 #361. 설정한 Drive 폴더의 녹음·사진, 최신 수정순 한 쪽(50개). pageToken으로 다음 쪽 */
   driveFiles: ({ kind, pageToken }: { kind: DriveFileKind; pageToken?: string }): Promise<DriveFilePage> =>
     serverRequest('GET', '/integrations/google-drive/files', { query: { kind, pageToken } }),
