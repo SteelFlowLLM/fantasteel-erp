@@ -45,6 +45,13 @@ describe('readCalendarList', () => {
     expect(readCalendarList(result)).toEqual([{ accountId: 'acc-1', accountEmail: null, calendarId: 'c1', name: 'A', primary: false, writable: true }]);
   });
 
+  it('Notion 캘린더를 쓰지 않는 계정의 calendar_request_rejected 오류는 빈 목록이고, 다른 오류는 INT-004', () => {
+    const rejected =
+      '{"name":"APIResponseError","code":"validation_error","status":400,"body":"{\\"message\\":\\"Failed to run Calendar tool \'listCalendars\': Something went wrong.\\",\\"additional_data\\":{\\"tool_error_code\\":\\"calendar_request_rejected\\"}}"}';
+    expect(readCalendarList({ content: [{ type: 'text', text: rejected }], isError: true })).toEqual([]);
+    expect(() => readCalendarList({ content: [{ type: 'text', text: 'rate limited' }], isError: true })).toThrow(expect.objectContaining({ code: 'INT-004' }));
+  });
+
   it('태그 글(<account> 아래 <calendar>)도 읽는다', () => {
     const tags = '<account id="acc-9" email="erp@company.com">\n<calendar id="c-1" name="ERP 일정" accessRole="writer" primary="true"/>\n</account>';
     expect(readCalendarList(text(tags))).toEqual([{ accountId: 'acc-9', accountEmail: 'erp@company.com', calendarId: 'c-1', name: 'ERP 일정', primary: true, writable: true }]);

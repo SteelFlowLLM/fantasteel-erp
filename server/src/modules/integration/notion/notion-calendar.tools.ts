@@ -117,6 +117,8 @@ function calendarsFromTags(text: string): NotionCalendarOption[] {
  * 읽을 수 있는 캘린더가 없으면 빈 배열: Notion 캘린더에 Google 캘린더를 연결하지 않은 계정이다.
  */
 export function readCalendarList(result: CallToolResult): NotionCalendarOption[] {
+  // Notion 캘린더를 한 번도 쓰지 않은 계정은 빈 목록 대신 이 오류로 답한다 (2026-10-19 실제 응답)
+  if (result.isError && result.content.some((item) => item.type === 'text' && item.text.includes('calendar_request_rejected'))) return [];
   const texts = failIfError(result, '목록을 받지 못했어요');
   const found: NotionCalendarOption[] = [];
   for (const candidate of jsonCandidates(result, texts)) walkCalendars(candidate, { accountId: null, accountEmail: null }, found);
