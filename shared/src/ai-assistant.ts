@@ -56,7 +56,20 @@ export interface AiAssistantMessageInput {
    * Notion 도구(notion_search·notion_read_page, 실행 카드를 받는 화면이면 propose_notion_page)를 모델에 알린다. 기본은 꺼짐
    */
   notion?: boolean;
+  /**
+   * Drive를 켠 질문이면 true (문서에 없는 기능, 이슈 #398 2단계). Drive가 연결돼 있고 폴더가 정해져 있고 실시간 답 API일 때만
+   * Drive 도구(drive_search·drive_read_file)를 모델에 알린다. 기본은 꺼짐
+   */
+  drive?: boolean;
+  /**
+   * 입력칸에서 @로 고른 Drive 파일 id (이슈 #398 2단계, AI_DRIVE_ATTACH_MAX개까지). Drive 칩과 상관없이 서버가 읽어 이 질문에 글(또는 사진)로 붙인다.
+   * 실시간 답 API에서만 쓴다. 지난 대화에는 남지 않는다
+   */
+  driveFileIds?: string[];
 }
+
+/** 질문 하나에 @로 붙이는 Drive 파일 수 (가정값) */
+export const AI_DRIVE_ATTACH_MAX = 3;
 
 /** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
 export const AI_IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
@@ -88,6 +101,8 @@ export interface AiAssistantCapabilitiesView {
   screenControl: { available: boolean };
   /** Notion을 쓸 수 있는지 (이슈 #398). Notion이 연결돼 있고 관리자가 상위 페이지를 정했을 때 */
   notion: AiNotionCapabilities;
+  /** Drive 도구를 쓸 수 있는지 (이슈 #398 2단계). Drive가 연결돼 있고(서비스 계정 또는 OAuth) 폴더가 정해졌을 때 */
+  drive: AiNotionCapabilities;
 }
 
 export interface AiNotionCapabilities {
@@ -154,6 +169,8 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   ui_select: '화면 고르기',
   notion_search: 'Notion 검색',
   notion_read_page: 'Notion 페이지 읽기',
+  drive_search: 'Drive 파일 찾기',
+  drive_read_file: 'Drive 파일 읽기',
   get_my_schedule: '내 일정 조회',
   get_my_tasks: '내 업무 조회',
 };

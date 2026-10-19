@@ -11,11 +11,13 @@ import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.s
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
 import { AssistantNotionToolbox, type NotionReader } from './notion/assistant-notion-toolbox';
+import { AssistantDriveToolbox } from './drive/assistant-drive-toolbox';
+import type { DriveSource } from './drive/drive-file-reader';
 import type { AiNotionCardService } from './notion/ai-notion-card.service';
 import type { AiUpdateCardService } from './ai-update-card.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
@@ -30,6 +32,12 @@ import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import { findManualGuides, MANUAL_MATCH_LIMIT } from './knowledge/manual.search';
 import { PROCESS_STEPS } from './knowledge/process.generated';
 import { findProcessSteps, PROCESS_MATCH_LIMIT } from './knowledge/process.search';
+
+const OFF_DRIVE: DriveSource = {
+  assertReady: () => Promise.reject(new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요')),
+  searchFiles: () => Promise.reject(new Error('찾지 않음')),
+  readForAssistant: () => Promise.reject(new Error('읽지 않음')),
+};
 
 const OFF_NOTION: NotionReader = {
   availability: async () => ({ available: false, reason: 'Notion이 연결되어 있지 않아요' }),
@@ -171,6 +179,8 @@ describe('AiAssistantService', () => {
     screenTools: AssistantScreenToolbox = new AssistantScreenToolbox(new ScreenActionBroker(), {}),
     // 기본은 연결하지 않은 Notion (이슈 #398)
     notionTools: AssistantNotionToolbox = new AssistantNotionToolbox(OFF_NOTION, { propose: () => Promise.reject(new Error('카드를 만들지 않음')) }),
+    // 기본은 연결하지 않은 Drive (이슈 #398 2단계)
+    driveTools: AssistantDriveToolbox = new AssistantDriveToolbox(OFF_DRIVE),
   ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
@@ -213,7 +223,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -895,16 +905,71 @@ describe('AiAssistantService', () => {
     });
   });
 
+  describe('Drive (이슈 #398 2단계)', () => {
+    const FOLDER = '1FolderAbCdEfGhIjKlMnOpQrStUv';
+    const meta = { size: 10, modifiedTime: '2026-10-12T09:00:00.000Z', thumbnailLink: null, parents: [FOLDER], trashed: false, maxBytes: 1, exportMimeType: null };
+    const onDrive: DriveSource = {
+      assertReady: async () => FOLDER,
+      searchFiles: async () => [{ id: 'docNotes00001', name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', size: 10, modifiedTime: null, thumbnailLink: null }],
+      readForAssistant: async (id) =>
+        id === 'imagePhoto0005'
+          ? { file: { ...meta, id, name: '현장.png', mimeType: 'image/png', kind: 'image', contentType: 'image/png', contentName: '현장.png' }, plan: { mode: 'image', maxBytes: 2_000_000, mediaType: 'image/png' }, buffer: Buffer.from('png') }
+          : { file: { ...meta, id, name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', contentType: 'text/plain', contentName: '점검 메모.txt' }, plan: { mode: 'text', maxBytes: 1_000, exportMimeType: null }, buffer: Buffer.from('라인 점검 10/24 완료') },
+    };
+    const driveCall = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
+    const run = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => (await service.prepare(user, input, { interactive: true })).run(() => undefined);
+    const withDrive = (replies: (call: { messages: LlmToolMessage[] }, index: number) => Promise<LlmToolReply>, capabilities?: LlmModelCapabilities) =>
+      setup({}, replies, undefined, capabilities, undefined, undefined, undefined, undefined, new AssistantDriveToolbox(onDrive));
+
+    it('켜면 찾기·읽기 도구와 [Drive 규칙]을 알리고, 읽은 파일을 출처로, 사진은 tool 뒤 user 메시지로 붙인다', async () => {
+      const { service, calls } = withDrive(async (_call, index) => [driveCall('c1', 'drive_read_file', { file: 'docNotes00001' }), driveCall('c2', 'drive_read_file', { file: 'imagePhoto0005' }), answer('점검 메모에 완료라고 적혀 있어요.')][index]);
+      const reply = await run(service, { question: '점검 메모 읽어줘', drive: true });
+      expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory', 'drive_search', 'drive_read_file']);
+      expect(calls[0].messages[0].content).toContain('[Drive 규칙]');
+      expect(String(calls[1].messages.at(-1)?.content)).toContain('<untrusted_web_content source="drive:docNotes00001">');
+      const last = calls[2].messages.slice(-2);
+      expect(last[0]).toMatchObject({ role: 'tool', toolCallId: 'c2' });
+      expect(last[1]).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }] });
+      expect(reply.webSources).toEqual([
+        { title: '점검 메모.txt', url: 'https://drive.google.com/file/d/docNotes00001/view' },
+        { title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' },
+      ]);
+    });
+
+    it(`도구 호출 상한은 ${MAX_DRIVE_TOOL_ROUNDS}번이고, 끄거나 한 번에 답(@AI)이면 도구가 없다`, async () => {
+      const looping = withDrive(async (_call, index) => driveCall(`c${index}`, 'drive_search', { query: `${index}` }));
+      await run(looping.service, { question: '계속 찾아줘', drive: true });
+      expect(looping.calls).toHaveLength(MAX_DRIVE_TOOL_ROUNDS + 1);
+      const off = withDrive(async () => answer('네'));
+      await run(off.service, { question: '찾아줘' });
+      await off.service.ask(user, { question: '찾아줘', drive: true });
+      for (const call of off.calls) expect(call.tools.map((t) => t.name)).toEqual(['get_inventory']);
+    });
+
+    it('@로 붙인 파일은 칩과 상관없이 질문에 감싼 글·사진으로 붙고 출처가 된다. 사진을 못 보는 모델이면 시작 전에 막는다', async () => {
+      const { service, calls } = withDrive(async () => answer('네'));
+      const reply = await run(service, { question: '이 파일 요약해줘', driveFileIds: ['docNotes00001', 'imagePhoto0005'] });
+      const question = calls[0].messages.at(-1);
+      expect(question).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png' }] });
+      expect(String(question?.content)).toMatch(/^이 파일 요약해줘\n\n\[사용자가 붙인 Drive 파일\]/);
+      expect(String(question?.content)).toContain('라인 점검 10/24 완료');
+      expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+      expect(reply.webSources?.map((s) => s.title)).toEqual(['점검 메모.txt', '현장.png']);
+      const blind = withDrive(async () => answer('네'), { vision: false, reasoning: true });
+      await expect(blind.service.prepare(user, { question: '봐줘', driveFileIds: ['imagePhoto0005'] }, { interactive: true })).rejects.toThrow(AppException);
+    });
+  });
+
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

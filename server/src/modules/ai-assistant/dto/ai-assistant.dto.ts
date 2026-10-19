@@ -1,4 +1,4 @@
-import { AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_DRIVE_ATTACH_MAX, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
@@ -147,6 +147,19 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsBoolean()
   notion?: boolean;
+
+  /** Drive를 켠 질문이면 true. Drive가 연결돼 있고 폴더가 정해져 있고 실시간 답 API일 때만 Drive 도구를 알린다 (이슈 #398 2단계) */
+  @IsOptional()
+  @IsBoolean()
+  drive?: boolean;
+
+  /** 입력칸에서 @로 고른 Drive 파일 id. 실시간 답 API에서만 읽어 질문에 붙인다 (이슈 #398 2단계) */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_DRIVE_ATTACH_MAX, { message: `Drive 파일은 ${AI_DRIVE_ATTACH_MAX}개까지 붙일 수 있어요` })
+  @ArrayUnique({ message: '같은 파일을 두 번 붙일 수 없어요' })
+  @Matches(/^[A-Za-z0-9_-]{10,200}$/, { each: true, message: 'Drive 파일 id가 올바르지 않아요' })
+  driveFileIds?: string[];
 }
 
 /** Notion 페이지 고치기 한 군데 (이슈 #398) */

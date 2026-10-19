@@ -14,6 +14,9 @@ import { SttClient, type SttTranscript } from '../../stt/stt.client';
 import { SttSettingsStore } from '../../stt/stt-settings.store';
 import { MeetingTranscriptionRunner } from '../../meeting-minutes/meeting-transcription.runner';
 import { IntegrationCrypto } from '../integration-crypto';
+import { AiAssistantService } from '../../ai-assistant/ai-assistant.service';
+import { AssistantDriveToolbox } from '../../ai-assistant/drive/assistant-drive-toolbox';
+import { tinyPdf } from '../../ai-assistant/web/fixtures/tiny-pdf';
 import type { GoogleTokens } from './google-oauth';
 
 const CLIENT_ID = '1234567890-fantasteel.apps.googleusercontent.com';
@@ -113,6 +116,9 @@ function matchesQuery(file: FakeFile, q: string): boolean {
   const parent = /'([^']+)' in parents/.exec(q)?.[1];
   if (parent && !file.parents.includes(parent)) return false;
   if (q.includes('trashed = false') && file.trashed) return false;
+  // 철강맨AI drive_search (이슈 #398 2단계): 이름 검색어
+  const name = /name contains '((?:\\.|[^'\\])*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1');
+  if (name !== undefined && !file.name.includes(name)) return false;
   const audio = q.includes("mimeType contains 'audio/'") && file.mimeType.startsWith('audio/');
   const equals = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
   if (!q.includes('mimeType')) return true;
@@ -762,6 +768,62 @@ describe('POST meeting-minutes/audio/from-drive', () => {
     } finally {
       fake.mediaFails = false;
     }
+  });
+});
+
+describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
+  const added = ['aiNotesText001', 'aiSheetCsv0002', 'aiReportPdf003', 'aiPdfTooBig004'];
+  let toolbox: AssistantDriveToolbox;
+  const run = (name: string, args: unknown) => toolbox.session(async () => true).run({ id: 'c1', name, arguments: JSON.stringify(args) });
+
+  beforeAll(async () => {
+    toolbox = app.get(AssistantDriveToolbox);
+    addFile({ id: 'aiNotesText001', name: '라인 점검 메모.txt', mimeType: 'text/plain', parents: [FOLDER], modifiedTime: '2026-10-18T09:00:00.000Z', content: Buffer.from('\uFEFF3라인 롤 교체 10/24 예정\r\n담당: 정다은') });
+    addFile({ id: 'aiSheetCsv0002', name: '점검 일정표', mimeType: 'application/vnd.google-apps.spreadsheet', parents: [FOLDER], modifiedTime: '2026-10-17T09:00:00.000Z', hideSize: true, content: Buffer.from('설비,날짜\n3라인,2026-10-24') });
+    addFile({ id: 'aiReportPdf003', name: '설비 점검 보고서.pdf', mimeType: 'application/pdf', parents: [FOLDER], modifiedTime: '2026-10-16T10:00:00.000Z', content: await tinyPdf(['Roll change approved for line 3'], 'Inspection') });
+    addFile({ id: 'aiPdfTooBig004', name: '점검 원본 스캔.pdf', mimeType: 'application/pdf', parents: [FOLDER], fakeSize: 21 * 1024 * 1024, content: Buffer.from('x') });
+  });
+
+  afterAll(() => {
+    for (const id of added) fake.files.delete(id);
+  });
+
+  it('칩을 켤 수 있는지: 연결·폴더가 있으면 켜진다 (Google을 부르지 않는다)', async () => {
+    const before = fake.bearers.length;
+    expect((await app.get(AiAssistantService).capabilities()).drive).toEqual({ available: true });
+    expect(fake.bearers.length).toBe(before);
+  });
+
+  it('찾기: 설정한 폴더에서 이름으로, 최신 수정순. 폴더 밖 파일은 나오지 않는다', async () => {
+    const result = await run('drive_search', { query: '점검' });
+    expect(result.webSources.map((s) => s.title)).toEqual(['라인 점검 메모.txt', '점검 일정표', '설비 점검 보고서.pdf', '점검 원본 스캔.pdf']);
+    const all = await run('drive_search', {});
+    expect(all.content).not.toContain('다른 폴더');
+  });
+
+  it('읽기: 글 파일은 그대로, Google 스프레드시트는 CSV로 내보내, PDF는 글을 뽑아 감싸서 준다', async () => {
+    const text = await run('drive_read_file', { file: 'aiNotesText001' });
+    expect(text.content).toContain('3라인 롤 교체 10/24 예정\n담당: 정다은');
+    expect(text.content).toContain('<untrusted_web_content source="drive:aiNotesText001">');
+    fake.exports.length = 0;
+    const sheet = await run('drive_read_file', { file: 'aiSheetCsv0002' });
+    expect(fake.exports).toEqual(['text/csv']);
+    expect(sheet.content).toContain('3라인,2026-10-24');
+    const pdf = await run('drive_read_file', { file: 'aiReportPdf003' });
+    expect(pdf.content).toContain('Roll change approved for line 3');
+    expect(pdf.webSources).toEqual([{ title: '설비 점검 보고서.pdf', url: 'https://drive.google.com/file/d/aiReportPdf003/view' }]);
+  });
+
+  it('폴더 밖·너무 큰 파일·Office·녹음은 읽지 않고 이유를 준다', async () => {
+    expect(JSON.parse((await run('drive_read_file', { file: 'docPdfOutside20' })).content).오류).toBe('설정한 Drive 폴더에 그 파일이 없어요');
+    expect(JSON.parse((await run('drive_read_file', { file: 'aiPdfTooBig004' })).content).오류).toContain('20MB까지');
+    expect(JSON.parse((await run('drive_read_file', { file: 'docWordFile018' })).content).오류).toContain('Word');
+    expect(JSON.parse((await run('drive_read_file', { file: 'audioNewest001' })).content).오류).toContain('녹음');
+  });
+
+  it('@로 붙인 파일도 같은 규칙: 폴더 밖이면 질문을 시작하지 않는다(INT-012)', async () => {
+    await expect(toolbox.reader.read('docPdfOutside20')).rejects.toMatchObject({ code: 'INT-012' });
+    expect(await toolbox.reader.read('aiNotesText001')).toMatchObject({ kind: 'text', file: { name: '라인 점검 메모.txt' } });
   });
 });
 

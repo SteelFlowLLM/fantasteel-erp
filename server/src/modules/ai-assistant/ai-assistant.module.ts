@@ -14,6 +14,8 @@ import { ProductionModule } from '../production/production.module';
 import { PurchasingModule } from '../purchasing/purchasing.module';
 import { ScheduleEventModule } from '../schedule-event/schedule-event.module';
 import { NotionAssistantService } from '../integration/notion/notion-assistant.service';
+import { GoogleDriveService } from '../integration/google-drive/google-drive.service';
+import { AssistantDriveToolbox } from './drive/assistant-drive-toolbox';
 import { QualityModule } from '../quality/quality.module';
 import { SalesOrderModule } from '../sales-order/sales-order.module';
 import { ShipmentModule } from '../shipment/shipment.module';
@@ -66,6 +68,8 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     AiNotionCardService,
     // Notion 도구(이슈 #398): 읽기는 IntegrationModule의 NotionAssistantService, 쓰기 카드는 AiNotionCardService
     { provide: AssistantNotionToolbox, useFactory: (notion: NotionAssistantService, cards: AiNotionCardService) => new AssistantNotionToolbox(notion, cards), inject: [NotionAssistantService, AiNotionCardService] },
+    // Drive 도구(이슈 #398 2단계): 회사 Drive 폴더 읽기는 IntegrationModule의 GoogleDriveService
+    { provide: AssistantDriveToolbox, useFactory: (drive: GoogleDriveService) => new AssistantDriveToolbox(drive), inject: [GoogleDriveService] },
     // 웹 도구(이슈 #367): 검색 캐시·1분 한도·SSRF를 막는 연결을 서버에 하나만 둔다. 시험은 가짜 의존성을 넣어 따로 만든다
     { provide: AssistantWebToolbox, useFactory: () => new AssistantWebToolbox(defaultWebToolDeps()) },
     // 브라우저 사용(이슈 #373): Chrome 하나를 서버에 두고(처음 쓸 때 띄움) 답마다 새 컨텍스트를 빌린다. 서버가 꺼질 때 닫는다

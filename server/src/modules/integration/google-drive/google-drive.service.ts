@@ -10,6 +10,9 @@ import { GoogleServiceAccount } from './google-service-account';
 import {
   buildDriveFolderQuery,
   buildDriveListQuery,
+  buildDriveSearchQuery,
+  driveReadPlan,
+  type DriveReadPlan,
   DRIVE_COUNT_PAGE_SIZE,
   DRIVE_FILE_FIELDS,
   DRIVE_FOLDER_MIME,
@@ -113,7 +116,7 @@ export class GoogleDriveService {
     if (meta.trashed || !meta.parents.includes(folderId)) throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
     const kind = driveFileKind(meta.mimeType, meta.name);
     if (!kind || (expected && kind !== expected)) {
-      throw new AppException('INT-013', expected === 'audio' ? '녹음(오디오) 파일만 가져올 수 있어요' : '녹음·사진·문서(PDF, Google 문서, Office) 파일만 열 수 있어요');
+      throw new AppException('INT-013', expected === 'audio' ? '녹음(오디오) 파일만 가져올 수 있어요' : '녹음·사진·문서(PDF, Google 문서, Office, 글 파일) 파일만 열 수 있어요');
     }
     const maxBytes = driveMaxBytes(kind, meta.mimeType);
     if (meta.size !== null && meta.size > maxBytes) {
@@ -135,6 +138,41 @@ export class GoogleDriveService {
     const range = parseRangeHeader(options.range, file.size);
     if (range === 'unsatisfiable') return { file, unsatisfiable: true };
     return { file, media: await this.client.openMedia(file.id, file.maxBytes, { signal: options.signal, range: range?.range }) };
+  }
+
+  /**
+   * 철강맨AI의 drive_search (이슈 #398): 이름에 query가 든 파일(없으면 모두), 최신 수정순 limit개.
+   * 폴더·휴지통·종류는 목록과 같이 다시 거른다.
+   */
+  async searchFiles(query: string | null, kind: DriveFileListKind, limit: number): Promise<DriveFileView[]> {
+    const folderId = await this.assertReady();
+    let page: { files: DriveFileMeta[] };
+    try {
+      page = await this.client.listFiles({ q: buildDriveSearchQuery(folderId, kind, query), fields: `files(${DRIVE_FILE_FIELDS})`, pageSize: limit, orderBy: 'modifiedTime desc' });
+    } catch (error) {
+      throw this.folderMissing(error);
+    }
+    return page.files.flatMap((f) => {
+      const fileKind = driveFileKind(f.mimeType, f.name);
+      if (f.trashed || !f.parents.includes(folderId) || !fileKind || (kind !== 'all' && fileKind !== kind)) return [];
+      return [toDriveFileView(f, fileKind)];
+    });
+  }
+
+  /**
+   * 철강맨AI가 읽을 파일을 메모리로 받는다 (이슈 #398). 폴더·종류는 checkFile로 확인하고, 읽는 방법(PDF·글·Google 문서 글 내보내기·사진)과
+   * 그 상한은 driveReadPlan이 정한다. 읽지 않는 종류(녹음·Office·그 밖의 사진)는 받지 않고 이유만 돌려준다.
+   */
+  async readForAssistant(fileId: string): Promise<{ file: CheckedDriveFile; plan: DriveReadPlan; buffer: Buffer | null }> {
+    const file = await this.checkFile(fileId);
+    let plan = driveReadPlan(file.mimeType, file.kind);
+    // 큰 사진은 서버가 줄이지 못해(사진 처리 의존성 없음) 화면에서 붙이게 한다: 화면은 줄여서 보낸다
+    if (plan.mode === 'image' && file.size !== null && file.size > plan.maxBytes) plan = { mode: 'unsupported', reason: `사진이 ${megabytes(plan.maxBytes)}를 넘어 직접 볼 수 없어요. 사용자에게 입력칸에서 @로 이 사진을 붙여 달라고 해요(화면이 줄여서 보내요)` };
+    if (plan.mode === 'unsupported') return { file, plan, buffer: null };
+    if (file.size !== null && file.size > plan.maxBytes) throw new AppException('INT-014', `파일이 너무 커서 철강맨AI가 읽지 않아요 (${megabytes(plan.maxBytes)}까지)`);
+    const exportMimeType = plan.mode === 'text' ? (plan.exportMimeType ?? undefined) : undefined;
+    const media = await this.client.openMedia(file.id, plan.maxBytes, { exportMimeType });
+    return { file, plan, buffer: await readStreamToBuffer(media.stream, media.length) };
   }
 
   /** 회의 녹음을 메모리로 받는다. 받기 직전에 다시 확인한다 (그 사이 옮겨졌거나 바뀌었을 수 있다) */
