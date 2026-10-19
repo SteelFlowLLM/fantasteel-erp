@@ -8,6 +8,8 @@ export interface EmployeeFormValues {
   departmentId: number | null;
   jobGradeId: number | null;
   roleId: number | null;
+  /** 회사 메일 (이슈 #391). 비어 있으면 빈 글 */
+  email: string;
 }
 
 export interface EmployeeFormTarget {
@@ -16,6 +18,7 @@ export interface EmployeeFormTarget {
   departmentId: number;
   jobGradeId: number;
   roleId: number;
+  email?: string | null;
   updatedAt: string;
 }
 
@@ -34,14 +37,26 @@ export function openEmployeeForm(target?: EmployeeFormTarget): OpenedEmployeeFor
       departmentId: target?.departmentId ?? null,
       jobGradeId: target?.jobGradeId ?? null,
       roleId: target?.roleId ?? null,
+      email: target?.email ?? '',
     },
     expectedUpdatedAt: target?.updatedAt ?? null,
   };
 }
 
-/** 연 시점의 값과 달라졌는지 (이름은 앞뒤 공백을 빼고 비교) */
+/** 연 시점의 값과 달라졌는지 (이름·메일은 앞뒤 공백을 빼고 비교) */
 export function isEmployeeFormDirty(form: EmployeeFormValues, opened: EmployeeFormValues): boolean {
   return (Object.keys(opened) as (keyof EmployeeFormValues)[]).some((key) =>
-    key === 'employeeName' ? form.employeeName.trim() !== opened.employeeName : form[key] !== opened[key],
+    key === 'employeeName' || key === 'email' ? form[key].trim() !== opened[key] : form[key] !== opened[key],
   );
+}
+
+/** 메일 주소 모양만 본다 (자세한 검사는 서버). 비어 있으면 통과 */
+export const EMPLOYEE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMPLOYEE_EMAIL_MAX = 254;
+
+export function employeeEmailProblem(email: string): string | null {
+  const value = email.trim();
+  if (value === '') return null;
+  if (value.length > EMPLOYEE_EMAIL_MAX) return `메일 주소는 ${EMPLOYEE_EMAIL_MAX}자 이하로 입력해 주세요`;
+  return EMPLOYEE_EMAIL_PATTERN.test(value) ? null : '메일 주소 형식이 올바르지 않아요';
 }

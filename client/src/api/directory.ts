@@ -17,6 +17,8 @@ export interface EmployeeView {
   roleCode: RoleCode;
   roleName: string;
   isActive: boolean;
+  /** 회사 메일 (이슈 #391). Notion 캘린더 일정 초대에 쓴다 */
+  email: string | null;
   lastLoginAt: string | null;
   /** 부서장으로 지정된 부서 (부서장은 역할이 아니다) */
   headDepartmentIds: number[];
