@@ -1,6 +1,6 @@
-import { AI_REASONING_LEVELS, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -34,6 +34,45 @@ export class AiAssistantTurnDto {
   content!: string;
 }
 
+export class AiAssistantImageDto {
+  @IsIn(AI_IMAGE_MEDIA_TYPES)
+  mediaType!: AiImageMediaType;
+
+  @IsString()
+  @IsBase64()
+  // base64는 4바이트로 3바이트를 담는다
+  @MaxLength(Math.ceil(AI_IMAGE_MAX_BYTES / 3) * 4, { message: `사진 한 장은 ${AI_IMAGE_MAX_BYTES / 1_000_000}MB까지 보낼 수 있어요` })
+  dataBase64!: string;
+}
+
+/** 화면 조작 때 열 수 있는 화면 한 개 (이슈 #382). 쿼리 없는 앱 안 경로만 */
+export class AiScreenMapEntryDto {
+  @IsString()
+  @MaxLength(200)
+  @Matches(/^\/[A-Za-z0-9\-/]*$/)
+  path!: string;
+
+  @IsString()
+  @MaxLength(60)
+  title!: string;
+}
+
+/** POST ai-assistant/ui-actions/:actionId (이슈 #382). 화면이 동작을 한 결과 */
+export class ScreenActionResultDto {
+  @IsBoolean()
+  ok!: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_SCREEN_RESULT_MAX)
+  result?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_SCREEN_ERROR_MAX)
+  error?: string;
+}
+
 export class AskAiAssistantDto {
   @Transform(trim)
   @IsString()
@@ -52,6 +91,13 @@ export class AskAiAssistantDto {
   @Max(2147483647)
   meetingMinutesId?: number;
 
+  /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (내 완료한 조사만, 이슈 #384) */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  researchRunId?: number;
+
   /** 철강맨AI 패널만 true로 보낸다. 사내 채팅 @AI·회의 질문은 카드를 보여 줄 곳이 없어 보내지 않는다 */
   @IsOptional()
   @IsBoolean()
@@ -67,6 +113,35 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsIn(AI_REASONING_LEVELS)
   reasoning?: AiReasoningLevel;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_IMAGE_MAX_COUNT, { message: `사진은 ${AI_IMAGE_MAX_COUNT}장까지 보낼 수 있어요` })
+  @ValidateNested({ each: true })
+  @Type(() => AiAssistantImageDto)
+  images?: AiAssistantImageDto[];
+
+  /** 웹 검색을 켠 질문이면 true. 실시간 답 API에서만 웹 도구를 알린다 (이슈 #367) */
+  @IsOptional()
+  @IsBoolean()
+  webSearch?: boolean;
+
+  /** 브라우저 사용을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 브라우저 도구를 알린다 (이슈 #373) */
+  @IsOptional()
+  @IsBoolean()
+  browser?: boolean;
+
+  /** 화면 조작을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 화면 도구를 알린다 (이슈 #382, 시험 중) */
+  @IsOptional()
+  @IsBoolean()
+  screenControl?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_SCREEN_MAP_MAX)
+  @ValidateNested({ each: true })
+  @Type(() => AiScreenMapEntryDto)
+  screenMap?: AiScreenMapEntryDto[];
 }
 
 /** 수주 등록 카드의 품목 줄. 매수·규격·납기의 뜻은 수주 등록 service가 본다 */

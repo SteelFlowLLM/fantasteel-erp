@@ -120,7 +120,8 @@ describe('14.1 슬래브 4매: 제선 → 제강 → 연주', () => {
 
   it('원료가 모자라면 INV-001이고 아무것도 바꾸지 않는다', async () => {
     const before = (await lotOf(ore2)).remainingTon?.toFixed(3);
-    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF8', startedAt: at('04:00'), completedAt: at('05:00'), hotMetalTon: '1000' }))).toBe('INV-001');
+    // 히트 1개 몫 277.778t에는 철광석 444.445t이 필요한데 155.555t만 남았다
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF8', startedAt: at('04:00'), completedAt: at('05:00'), hotMetalTon: '277.778' }))).toBe('INV-001');
     expect((await lotOf(ore2)).remainingTon?.toFixed(3)).toBe(before);
     expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF8' } })).toBe(0);
   });
@@ -202,5 +203,64 @@ describe('작업 실적 입력 오류', () => {
   it('슬래브 계획에는 열연 공정이 없다 (COM-004)', async () => {
     const plan = await planFor('SL-SS275-250x1500x10000', 1);
     expect(await codeOf(results.register(producer, { processType: 'HOT_ROLLING', productionPlanId: plan.id, startedAt: at('11:00') }))).toBe('COM-004');
+  });
+});
+
+describe('작업 실적 입력 기준: 히트 1개 몫·투입 순서·설비 겹침', () => {
+  // 다른 테스트의 원료·용선보다 앞선 2019-06에 두고 입고량을 딱 맞춰, 끝나면 이 묶음의 원료·용선이 남지 않게 한다
+  const on = (hhmm: string) => `2019-06-01T${hhmm}:00.000Z`;
+  let planId: number;
+
+  async function errorOf(promise: Promise<unknown>): Promise<{ code: string; message: string }> {
+    try {
+      await promise;
+    } catch (e) {
+      if (e instanceof AppException) return { code: e.code, message: e.message };
+      throw e;
+    }
+    throw new Error('오류가 나지 않았습니다');
+  }
+
+  beforeAll(async () => {
+    planId = (await planFor('SL-SS275-250x1200x10000', 4)).id;
+    // 용선 277.778t = 철광석 444.445 + 석탄 166.667 + 석회석 41.667, 히트 250t × SS275 합금철 10 kg/t = 2.500t
+    for (const [code, ton] of [['ORE01', '444.445'], ['COL01', '166.667'], ['LIM01', '41.667'], ['SMN01', '2.500']] as const) await receive(code, ton, '2019-05-31');
+  });
+
+  it('제선 용선량·제강 투입 용선은 히트 1개 몫까지. 계획 없는 제선은 제강 수율이 낮은 유형 기준', async () => {
+    const coil = await prisma.routing.findFirstOrThrow({ where: { itemType: 'COIL', processType: 'STEELMAKING' } });
+    await prisma.routing.update({ where: { id: coil.id }, data: { plannedYieldRate: '0.8000' } });
+    try {
+      // 계획 없음: 250 ÷ 0.8 = 312.500t / 슬래브 계획: 250 ÷ 0.9 = 277.778t
+      const free = await errorOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: on('10:00'), completedAt: on('11:00'), hotMetalTon: '312.501' }));
+      expect(free).toEqual({ code: 'COM-004', message: expect.stringContaining('312.500t') });
+      const planned = await errorOf(results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF4', startedAt: on('10:00'), completedAt: on('11:00'), hotMetalTon: '277.779' }));
+      expect(planned).toEqual({ code: 'COM-004', message: expect.stringContaining('277.778t') });
+    } finally {
+      await prisma.routing.update({ where: { id: coil.id }, data: { plannedYieldRate: coil.plannedYieldRate } });
+    }
+    const steel = await errorOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('10:00'), completedAt: on('11:00'), inputHotMetalTon: '2777.78' }));
+    expect(steel).toEqual({ code: 'COM-004', message: expect.stringContaining('277.778t') });
+    expect(await prisma.productionResult.count({ where: { OR: [{ blastFurnaceCode: 'BF4' }, { converterCode: 'BOF4' }] } })).toBe(0);
+  });
+
+  it('같은 고로의 작업 시간이 겹치면 COM-001: 시작이 다른 작업 안이거나, 완료가 다음 작업에 걸칠 때', async () => {
+    await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF4', startedAt: on('00:00'), completedAt: on('04:00'), hotMetalTon: '277.778' });
+    // 입력 창은 마지막 고로(BF4)가 끝난 뒤를 시작 기본값으로 쓴다
+    expect(await results.workContext(planId)).toMatchObject({ lastBlastFurnaceCode: 'BF4', earliestIronmakingStartedAt: on('04:00') });
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: on('02:00'), completedAt: on('05:00'), hotMetalTon: '1' }))).toBe('COM-001');
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: '2019-05-31T22:00:00.000Z', completedAt: on('01:00'), hotMetalTon: '1' }))).toBe('COM-001');
+    expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF4' } })).toBe(1);
+  });
+
+  it('제강은 시작 전에 제선을 마친 용선만, 연주는 제강을 마친 뒤에 시작한다', async () => {
+    // 용선은 04:00에 나왔다: 03:00에 시작한 제강은 쓸 용선이 없다
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('03:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' }))).toBe('INV-001');
+    const steel = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('04:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' });
+    const heatId = steel.outputs[0].lotId;
+    expect((await results.workContext(planId)).uncastHeats).toEqual([expect.objectContaining({ lotId: heatId, completedAt: on('05:00') })]);
+    expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('04:30') }))).toBe('COM-004');
+    const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('05:00'), completedAt: on('07:00'), slabQty: 10 });
+    expect(cast.outputQty).toBe(10);
   });
 });

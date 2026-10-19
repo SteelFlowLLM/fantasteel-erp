@@ -115,6 +115,15 @@ export class ProductionService {
     };
   }
 
+  /** 계획 없이 등록하는 제선의 히트 1개 몫 기준: 히트 용량과 슬래브·코일 중 낮은 제강 수율 (몫이 가장 큰 쪽) */
+  async loosestHotMetalBasis(tx: Tx): Promise<Pick<HeatPlanBasis, 'heatCapacityTon' | 'steelmakingYieldRate'>> {
+    const setting = await this.repository.findProductionSetting(tx);
+    if (!setting) throw new AppException('MST-001', '히트 용량 설정값이 없어요');
+    const rates = (await this.repository.findRoutingsOfProcess(tx, PROCESS_TYPE.STEELMAKING)).flatMap((r) => (r.plannedYieldRate ? [r.plannedYieldRate] : []));
+    if (rates.length === 0) throw new AppException('MST-001', '제강 계획 수율이 없어요');
+    return { heatCapacityTon: setting.heatCapacityTon, steelmakingYieldRate: Prisma.Decimal.min(...rates) };
+  }
+
   /** 히트 편성 계산 (4.4). 수율·매핑·히트 용량이 없으면 MST-001 */
   async calcHeatPlanForItem(tx: Tx, itemId: number, shortageQty: number): Promise<HeatPlan> {
     return calcHeatPlan(this.heatPlanInputOf(await this.heatPlanBasisOf(tx, itemId), shortageQty));

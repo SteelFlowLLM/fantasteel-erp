@@ -43,6 +43,30 @@ export class CreateMeetingMinutesAudioDto {
   attendeeIds!: string;
 }
 
+/**
+ * POST meeting-minutes/audio/from-drive (이슈 #361). 음성 올리기와 같은 칸이지만 JSON이라 attendeeIds는 숫자 배열이다.
+ * driveFileId는 설정한 Drive 폴더 안의 녹음 (GET integrations/google-drive/files?kind=audio의 id).
+ */
+export class CreateMeetingMinutesFromDriveDto {
+  @IsString({ message: '제목을 입력해 주세요' })
+  @IsNotEmpty({ message: '제목을 입력해 주세요' })
+  @MaxLength(MEETING_TITLE_MAX, { message: `제목은 ${MEETING_TITLE_MAX}자까지 쓸 수 있어요` })
+  meetingMinutesTitle!: string;
+
+  @Matches(DATE_PATTERN, { message: '회의일은 YYYY-MM-DD로 입력해 주세요' })
+  meetingDate!: string;
+
+  @IsArray({ message: '참석자를 골라 주세요' })
+  @ArrayMinSize(1, { message: '참석자를 1명 이상 골라 주세요' })
+  @ArrayMaxSize(100, { message: '참석자는 100명까지 고를 수 있어요' })
+  @IsInt({ each: true, message: '참석자 id가 올바르지 않아요' })
+  attendeeIds!: number[];
+
+  @IsString({ message: 'Drive 녹음 파일을 골라 주세요' })
+  @Matches(/^[A-Za-z0-9_-]{10,200}$/, { message: 'Drive 파일 id가 올바르지 않아요' })
+  driveFileId!: string;
+}
+
 /** GET meeting-minutes (API-259 목록) */
 export class ListMeetingMinutesQuery {
   @IsOptional()

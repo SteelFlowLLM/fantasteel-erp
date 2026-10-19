@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Quer
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView, type MeetingNotionExportResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
 
 /**
@@ -31,6 +31,15 @@ export class MeetingMinutesController {
     @UploadedFile() file: UploadedMeetingAudio | undefined,
   ): Promise<MeetingMinutesView> {
     return this.service.createFromAudio(user, dto, file);
+  }
+
+  /**
+   * 회사 Google Drive 폴더의 녹음으로 만든다 (이슈 #361, 문서에 없는 경로). 음성 올리기와 같은 권한(로그인)·같은 전사 작업을 쓴다.
+   * 파일 확인(폴더·종류·크기)까지 하고 바로 돌려주며, 받기와 전사는 응답 뒤 백그라운드로 돈다.
+   */
+  @Post('audio/from-drive')
+  createFromDrive(@CurrentUser() user: AuthUser, @Body() dto: CreateMeetingMinutesFromDriveDto): Promise<MeetingMinutesView> {
+    return this.service.createFromDrive(user, dto);
   }
 
   /** API-260. 작성자가 AI 정리를 시킨다. 바로 ANALYZING 상세를 돌려주고 분석은 백그라운드로 돈다 */

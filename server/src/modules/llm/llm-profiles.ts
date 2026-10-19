@@ -43,6 +43,10 @@ export const LLM_PROFILE = {
   MESSAGE_EXTRACT: { sampling: EXTRACTION, reasoning: 'off' },
   /** 과거 사례 초안 (JSON) */
   PAST_CASE_DRAFT: { sampling: EXTRACTION, reasoning: 'low' },
+  /** 심층 조사 계획·다음 행동·점검 (JSON, 이슈 #378): 단계가 많아 생각을 짧게 */
+  RESEARCH_JSON: { sampling: EXTRACTION, reasoning: 'low' },
+  /** 심층 조사 보고서 (마크다운, 이슈 #378): 근거는 점검 단계에서 정리했으므로 생각하지 않고 쓴다 */
+  RESEARCH_REPORT: { sampling: NON_THINKING, reasoning: 'off' },
 } as const satisfies Record<string, LlmProfile>;
 
 /**

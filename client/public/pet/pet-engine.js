@@ -773,7 +773,7 @@
 .fp-chat-who{display:flex;flex-direction:column;min-width:0;flex:1;line-height:16px}
 .fp-chat-who b{font-size:13px;font-weight:700}
 .fp-chat-who small{font-size:11px;color:var(--fp-ink-3)}
-.fp-chat-log{flex:1 1 auto;min-height:96px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+.fp-chat-log{flex:1 1 auto;min-height:180px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
 .fp-msg{max-width:88%;padding:7px 10px;border-radius:8px;font-size:13px;line-height:19px;word-break:keep-all;overflow-wrap:anywhere}
 .fp-msg--pet{align-self:flex-start;background:var(--fp-surface-2);border:1px solid var(--fp-line);border-bottom-left-radius:2px}
 .fp-msg--me{align-self:flex-end;background:var(--fp-brand-tint);color:var(--fp-brand);border-bottom-right-radius:2px}

@@ -36,9 +36,16 @@ export interface LlmToolCall {
   arguments: string;
 }
 
+/** 질문과 함께 보내는 사진 (OpenAI 호환 image_url의 data URL로 보낸다) */
+export interface LlmImage {
+  mediaType: string;
+  dataBase64: string;
+}
+
 /** 도구를 쓰는 대화: 모델의 도구 호출과 그 결과(tool)가 끼어든다 */
 export type LlmToolMessage =
   | ChatMessage
+  | { role: 'user'; content: string; images: LlmImage[] }
   | { role: 'assistant'; content: string | null; toolCalls: LlmToolCall[] }
   | { role: 'tool'; toolCallId: string; content: string };
 
@@ -112,12 +119,23 @@ export interface LlmJsonOptions {
   timeoutMs: number;
   maxTokens?: number;
   profile: LlmProfile;
+  /** 부른 쪽이 끊으면(심층 조사 취소) 요청도 끊고 LlmAbortedError를 던진다 */
+  signal?: AbortSignal;
 }
 
 /** LM Studio 고유 API(/api/v1/models)가 알려 주는 모델 정보. 외부 LLM이면 서버 전체가 null이다 */
 interface LmStudioModelInfo {
   /** 생각 설정을 받는 모델만 있다. 예: ['off', 'on'], ['off', 'low', 'medium', 'xhigh', 'on'] */
   reasoningOptions: string[] | null;
+  vision: boolean;
+  /** 불러온 인스턴스의 문맥 길이(토큰), 불러오지 않았으면 모델의 최대 문맥 길이. 모르면 null */
+  contextLength: number | null;
+}
+
+/** 모델이 할 수 있는 것. LM Studio가 아니거나 모르는 모델이면 null */
+export interface LlmModelCapabilities {
+  vision: boolean | null;
+  reasoning: boolean | null;
 }
 
 /**
@@ -172,6 +190,26 @@ export class LlmClient {
   }
 
   /**
+   * 긴 글 답 (심층 조사 보고서, 이슈 #378). 길이 상한에 걸려 끊겼는지(finish_reason=length)와 생각 글을 함께 돌려준다.
+   * 닫히지 않은 <think>만 있으면 답 글이 비고 끊긴 것으로 본다.
+   */
+  async chatText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], options: LlmJsonOptions): Promise<{ text: string; thinking: string | null; truncated: boolean }> {
+    type Reply = { choices?: { finish_reason?: string | null; message?: { content?: string | null; reasoning_content?: string | null } }[] };
+    const body = await this.request<Reply>(
+      endpoint,
+      'POST',
+      '/chat/completions',
+      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, options.profile)).fields, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) },
+      options.timeoutMs,
+      options.signal,
+    );
+    const choice = body.choices?.[0];
+    const split = splitThinking(choice?.message?.content ?? '');
+    const thinking = [choice?.message?.reasoning_content?.trim() || null, split.thinking].filter((t): t is string => Boolean(t)).join('\n\n') || null;
+    return { text: split.text, thinking, truncated: choice?.finish_reason === 'length' };
+  }
+
+  /**
    * JSON 스키마로 답 모양을 강제해 받는다 (회의록 AI 분석). 모델이 쓴 값은 믿을 수 없으므로 `unknown`으로 돌려주고 부르는 쪽이 검증한다.
    * 서버가 response_format을 지원하지 않아 400을 주면 형식 강제 없이 한 번 더 부른다(프롬프트가 JSON만 달라고 요구한다).
    */
@@ -197,10 +235,11 @@ export class LlmClient {
         '/chat/completions',
         { ...base, response_format: { type: 'json_schema', json_schema: { name: format.name, strict: true, schema: format.schema } } },
         options.timeoutMs,
+        options.signal,
       );
     } catch (error) {
       if (!(error instanceof LlmRequestError) || error.status !== 400) throw error;
-      body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs);
+      body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs, options.signal);
     }
     const message = body.choices?.[0]?.message;
     // LM Studio의 추론 모델은 형식을 강제해도 JSON을 content가 아니라 reasoning_content에 담아 content를 비우기도 한다
@@ -352,6 +391,23 @@ export class LlmClient {
     };
   }
 
+  /** 사진·생각 설정 지원 여부 (화면이 버튼을 켜고 끄는 데 쓴다) */
+  async modelCapabilities(endpoint: LlmEndpoint, model: string): Promise<LlmModelCapabilities> {
+    const models = await this.lmStudioModelInfo(endpoint);
+    const info = models ? findModelInfo(models, model) : undefined;
+    if (!info) return { vision: null, reasoning: null };
+    return { vision: info.vision, reasoning: Boolean(info.reasoningOptions?.length) };
+  }
+
+  /**
+   * LM Studio가 알려 주는 이 모델의 문맥 길이(토큰). 불러온 인스턴스의 값(여럿이면 가장 작은 것)이 먼저, 없으면 최대 문맥 길이.
+   * 외부 LLM·옛 LM Studio·모르는 모델이면 null (심층 조사가 프롬프트 글자 수를 정할 때 쓴다, 이슈 #384)
+   */
+  async modelContextLength(endpoint: LlmEndpoint, model: string): Promise<number | null> {
+    const models = await this.lmStudioModelInfo(endpoint);
+    return (models ? findModelInfo(models, model)?.contextLength : null) ?? null;
+  }
+
   /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
   private async lmStudioModelInfo(endpoint: LlmEndpoint): Promise<Map<string, LmStudioModelInfo> | null> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
@@ -359,11 +415,19 @@ export class LlmClient {
     if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
     let models: Map<string, LmStudioModelInfo> | null;
     try {
-      type Wire = { models?: { key: string; variants?: string[]; capabilities?: { reasoning?: { allowed_options?: string[] } } }[] };
+      type Wire = {
+        models?: {
+          key: string;
+          variants?: string[];
+          max_context_length?: number;
+          loaded_instances?: { config?: { context_length?: number } }[];
+          capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } };
+        }[];
+      };
       const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
       models = Array.isArray(body.models) ? new Map() : null;
       for (const m of body.models ?? []) {
-        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null };
+        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true, contextLength: contextLengthOf(m) };
         for (const id of [m.key, ...(m.variants ?? [])]) models?.set(id, info);
       }
     } catch {
@@ -373,11 +437,14 @@ export class LlmClient {
     return models;
   }
 
-  private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number): Promise<T> {
-    const res = await this.send(endpoint, method, path, payload, AbortSignal.timeout(timeoutMs), timeoutMs);
+  private async request<T>(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, timeoutMs: number, abort?: AbortSignal): Promise<T> {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = abort ? AbortSignal.any([abort, timeout]) : timeout;
+    const res = await this.send(endpoint, method, path, payload, signal, timeoutMs);
     try {
       return (await res.json()) as T;
     } catch {
+      if (abort?.aborted) throw new LlmAbortedError();
       throw new LlmRequestError('LLM 서버 응답을 읽을 수 없어요. OpenAI 호환 주소(…/v1)가 맞는지 확인해 주세요');
     }
   }
@@ -438,6 +505,62 @@ function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unkn
  * 여는 태그 없이 닫는 태그만 오는 모델은 그 앞 글이 이미 답으로 나갔으므로 태그만 지운다 (최종 답은 done에서 다시 다듬는다).
  */
 export function createThinkSplitter(handlers: LlmStreamHandlers): { push(text: string): void; flush(): void } {
+  const inner = createTagSplitter(handlers);
+  // Gemma 4 계열은 생각 구간을 <|channel>thought … <channel|>로 감싸는데, LM Studio가 표시만 남기고 보낼 때가 있다.
+  // 닫는 표시는 </think>로 바꿔 앞 글을 생각으로 보내고, 여는 표시는 지운다.
+  // 짧은 <|channel>까지 지우면 글자가 하나씩 올 때 뒤의 thought가 남으므로 스트리밍에서는 전체 표시만 바꾼다
+  const markers = createMarkerRewriter([
+    [GEMMA_CHANNEL_OPEN, ''],
+    [GEMMA_CHANNEL_CLOSE, '</think>'],
+  ]);
+  return {
+    push(text) {
+      inner.push(markers.push(text));
+    },
+    flush() {
+      inner.push(markers.flush());
+      inner.flush();
+    },
+  };
+}
+
+const GEMMA_CHANNEL_OPEN = '<|channel>thought';
+const GEMMA_CHANNEL_OPEN_BARE = '<|channel>';
+const GEMMA_CHANNEL_CLOSE = '<channel|>';
+
+/** 조각 사이에서 잘려 올 수 있는 고정 표시를 다른 글로 바꾼다. 표시의 앞부분일 수 있는 끝 글자는 다음 조각까지 들고 있는다 */
+export function createMarkerRewriter(rules: readonly (readonly [string, string])[]): { push(text: string): string; flush(): string } {
+  const ordered = [...rules].sort((a, b) => b[0].length - a[0].length);
+  let pending = '';
+  const rewrite = (text: string) => ordered.reduce((out, [from, to]) => out.split(from).join(to), text);
+  const holdFrom = (text: string) => {
+    let hold = text.length;
+    for (const [from] of ordered) {
+      for (let size = Math.min(from.length - 1, text.length); size > 0; size -= 1) {
+        if (from.startsWith(text.slice(-size))) {
+          hold = Math.min(hold, text.length - size);
+          break;
+        }
+      }
+    }
+    return hold;
+  };
+  return {
+    push(text) {
+      const joined = rewrite(pending + text);
+      const cut = holdFrom(joined);
+      pending = joined.slice(cut);
+      return joined.slice(0, cut);
+    },
+    flush() {
+      const rest = rewrite(pending);
+      pending = '';
+      return rest;
+    },
+  };
+}
+
+function createTagSplitter(handlers: LlmStreamHandlers): { push(text: string): void; flush(): void } {
   const OPEN = '<think>';
   const CLOSE = '</think>';
   let inThink = false;
@@ -490,6 +613,15 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
       tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
     };
   }
+  if (message.role === 'user' && 'images' in message && message.images.length) {
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: message.content },
+        ...message.images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.dataBase64}` } })),
+      ],
+    };
+  }
   return { role: message.role, content: message.content };
 }
 
@@ -497,7 +629,8 @@ function toWireMessage(message: LlmToolMessage): Record<string, unknown> {
  * 추론 모델이 답 앞에 쓴 <think> 블록을 떼어 낸다. 여는 태그 없이 `…</think>`로 시작하는 모델도 있어 마지막 닫는 태그 앞을 모두 생각 글로 본다.
  * 닫히지 않은 <think>(답 길이 상한에 걸려 끊긴 경우)는 전부 생각 글이다.
  */
-export function splitThinking(content: string): { thinking: string | null; text: string } {
+export function splitThinking(raw: string): { thinking: string | null; text: string } {
+  const content = raw.split(GEMMA_CHANNEL_CLOSE).join('</think>').split(GEMMA_CHANNEL_OPEN).join('').split(GEMMA_CHANNEL_OPEN_BARE).join('');
   const closed = content.lastIndexOf('</think>');
   if (closed >= 0) {
     const thinking = content.slice(0, closed).replace(/<\/?think>/gi, '').trim();
@@ -525,6 +658,13 @@ function parseJsonText(content: string): unknown {
 }
 
 /** 설정의 모델 이름은 /v1/models의 id다. LM Studio는 key나 `key@양자화` 변형 이름으로 준다 */
+function contextLengthOf(m: { max_context_length?: number; loaded_instances?: { config?: { context_length?: number } }[] }): number | null {
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  const loaded = (m.loaded_instances ?? []).map((i) => i.config?.context_length).filter(positive);
+  if (loaded.length) return Math.min(...loaded);
+  return positive(m.max_context_length) ? m.max_context_length : null;
+}
+
 function findModelInfo(models: Map<string, LmStudioModelInfo>, model: string): LmStudioModelInfo | undefined {
   return models.get(model) ?? models.get(model.split('@')[0]);
 }

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 /** .env.example의 로컬 비밀키. 누구나 아는 값이라 운영에서 쓰면 토큰을 위조할 수 있다 */
@@ -17,7 +18,9 @@ function assertProductionEnv(): void {
 
 async function bootstrap() {
   assertProductionEnv();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // AI 어시스턴트 질문에 사진(최대 4장 × 2MB, base64)이 실린다. 기본 100kb로는 받지 못한다
+  app.useBodyParser('json', { limit: '12mb' });
   app.setGlobalPrefix('api/v1');
   // 프론트 origin만 허용하고 쿠키를 주고받는다 (컨벤션 6장)
   app.enableCors({ origin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(','), credentials: true });

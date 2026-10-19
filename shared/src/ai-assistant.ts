@@ -1,6 +1,7 @@
 // AI 어시스턴트 (REQ-AST, BP-AST-01, API-262·263). 업무 지식(용어 사전)과 데이터 조회(REQ-AST-004)를 답하고, 실행이 필요한 요청은 실행 카드(REQ-AST-005)로 보여 준다.
 import type { Role } from './codes';
 import type { MeetingCandidate, MeetingCandidateUpdateInput } from './meeting-minutes';
+import type { AiScreenMapEntry, AiScreenTool } from './ai-screen-control';
 
 /** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
 export interface AiAssistantTurn {
@@ -23,12 +24,80 @@ export interface AiAssistantMessageInput {
   screen?: AiAssistantScreenContext;
   /** 회의록 상세에서 묻는 질문이면 그 회의록 id. 서버가 회의 내용을 읽어 질문의 맥락으로 쓴다 (Voice2ERP 회의 질문하기) */
   meetingMinutesId?: number;
+  /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (내 조사만). 서버가 보고서·출처 목록을 참고 자료로 넣는다 (이슈 #384) */
+  researchRunId?: number;
   /** true면 실행이 필요한 요청을 실행 카드로 만들어 답에 담는다 (철강맨AI 패널만 보낸다) */
   actionCards?: boolean;
   /** 오래된 것부터. 서버는 최근 몇 개만 쓴다 */
   history?: AiAssistantTurn[];
   /** 생각 정도 (문서에 없는 기능, 2026-10-16 추가). 없으면 서버 기본값(보통) */
   reasoning?: AiReasoningLevel;
+  /** 질문과 함께 보는 사진 (문서에 없는 기능, 2026-10-16 추가). 사진을 볼 수 있는 모델일 때만. 지난 대화에는 남기지 않는다 */
+  images?: AiAssistantImageInput[];
+  /**
+   * 웹 검색을 켠 질문이면 true (문서에 없는 기능, 이슈 #367). 실시간 답 API(messages/stream)에서만 웹 도구
+   * (web_search·read_web_page, 카카오 키가 있으면 search_places)를 모델에 알린다. 사내 채팅 @AI(API-262)는 쓰지 않는다
+   */
+  webSearch?: boolean;
+  /**
+   * 브라우저 사용을 켠 질문이면 true (문서에 없는 기능, 이슈 #373). 서버에서 AI_BROWSER_ENABLED=true이고 실시간 답 API일 때만
+   * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back)를 모델에 알린다. 기본은 꺼짐
+   */
+  browser?: boolean;
+  /**
+   * 화면 조작을 켠 질문이면 true (문서에 없는 기능, 이슈 #382, 시험 중). 서버에서 AI_SCREEN_CONTROL_ENABLED=true이고 실시간 답 API일 때만
+   * 화면 도구(ui_snapshot·ui_navigate·ui_click·ui_fill·ui_select)를 모델에 알린다. 동작은 사용자의 브라우저가 한다
+   */
+  screenControl?: boolean;
+  /** 화면 조작 때 열 수 있는 화면(이 사원의 레일 메뉴). ui_navigate는 이 주소만 연다 */
+  screenMap?: AiScreenMapEntry[];
+}
+
+/** LM Studio(OpenAI 호환 image_url)가 받는 사진 형식 */
+export const AI_IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export type AiImageMediaType = (typeof AI_IMAGE_MEDIA_TYPES)[number];
+/** 질문 하나에 붙이는 사진 수와 한 장의 크기 상한 (가정값). 화면이 긴 변을 줄여 보내므로 보통 수백 KB다 */
+export const AI_IMAGE_MAX_COUNT = 4;
+export const AI_IMAGE_MAX_BYTES = 2_000_000;
+
+export interface AiAssistantImageInput {
+  mediaType: AiImageMediaType;
+  /** data: 접두어 없는 base64 */
+  dataBase64: string;
+}
+
+/** 지금 설정된 모델이 할 수 있는 것 (GET /ai-assistant/capabilities). LM Studio가 아니면 알 수 없어 null */
+export interface AiAssistantCapabilitiesView {
+  model: string | null;
+  /** 사진을 볼 수 있는지 */
+  vision: boolean | null;
+  /** 생각 정도를 바꿀 수 있는지 */
+  reasoning: boolean | null;
+  /** 웹 검색으로 쓸 수 있는 것 (이슈 #367). 모델과 상관없이 서버의 키 설정으로 정해진다 */
+  webSearch: AiWebSearchCapabilities;
+  /** 브라우저 사용을 쓸 수 있는지 (이슈 #373). 서버 설정과 Chrome이 있는지로 정한다(Chrome을 띄워 보지는 않는다) */
+  browser: AiBrowserCapabilities;
+  /** 심층 조사를 쓸 수 있는지 (이슈 #378). LLM 모델이 정해져 있으면 쓸 수 있다 */
+  deepResearch: { available: boolean };
+  /** ERP 화면 조작을 쓸 수 있는지 (이슈 #382). 서버 AI_SCREEN_CONTROL_ENABLED=true일 때 */
+  screenControl: { available: boolean };
+}
+
+export interface AiBrowserCapabilities {
+  available: boolean;
+  /** 쓸 수 없을 때 화면에 보일 이유 (예: 서버에서 꺼 두었어요) */
+  reason?: string;
+}
+
+/** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
+export const AI_WEB_SEARCH_ENGINES = ['naver', 'kakao', 'duckduckgo', 'wikipedia'] as const;
+export type AiWebSearchEngine = (typeof AI_WEB_SEARCH_ENGINES)[number];
+
+export interface AiWebSearchCapabilities {
+  /** 쓸 수 있는 엔진 (부르는 순서) */
+  engines: AiWebSearchEngine[];
+  /** 장소 검색(search_places)을 쓸 수 있는지. 카카오나 네이버 키가 있어야 한다 */
+  placeSearch: boolean;
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. 모델이 단계를 모르면 켜고 끄기만 한다 */
@@ -53,7 +122,39 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   get_shipment_requests: '출하요청 조회',
   get_mill_sheets: '밀시트 조회',
   search_past_cases: '과거 사례 검색',
+  web_search: '웹 검색',
+  search_places: '장소 검색',
+  read_web_page: '웹 페이지 읽기',
+  browser_open: '브라우저 열기',
+  browser_snapshot: '브라우저 화면 읽기',
+  browser_click: '브라우저 누르기',
+  browser_type: '브라우저 입력',
+  browser_scroll: '브라우저 스크롤',
+  browser_back: '브라우저 뒤로',
+  ui_snapshot: '화면 읽기',
+  ui_navigate: '화면 열기',
+  ui_click: '화면 누르기',
+  ui_fill: '화면 입력',
+  ui_select: '화면 고르기',
 };
+
+/** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */
+export const AI_ASSISTANT_WEB_TOOLS = ['web_search', 'search_places', 'read_web_page'] as const;
+export type AiAssistantWebTool = (typeof AI_ASSISTANT_WEB_TOOLS)[number];
+
+export const isAiAssistantWebTool = (name: string): name is AiAssistantWebTool => (AI_ASSISTANT_WEB_TOOLS as readonly string[]).includes(name);
+
+/** 브라우저 도구 (이슈 #373). 브라우저 사용을 켠 실시간 답에서만 알린다. 로그인·결제·삭제·개인정보 입력은 서버가 막는다 */
+export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back'] as const;
+export type AiAssistantBrowserTool = (typeof AI_ASSISTANT_BROWSER_TOOLS)[number];
+
+export const isAiAssistantBrowserTool = (name: string): name is AiAssistantBrowserTool => (AI_ASSISTANT_BROWSER_TOOLS as readonly string[]).includes(name);
+
+/** 웹 도구가 찾거나 읽은 페이지 하나. url은 검색 결과에 있던 주소(읽은 페이지면 이동 뒤 최종 주소) */
+export interface AiWebSource {
+  title: string;
+  url: string;
+}
 
 /** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), 조회 데이터. 사례 번호는 다음 단계 */
 export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'DATA';
@@ -91,6 +192,11 @@ export interface AiAssistantReplyView {
   reasoningApplied: boolean;
   /** 실행 카드(REQ-AST-005). 서버는 저장하지 않고, 사용자가 확인해 실행을 누를 때만 업무에 반영한다 */
   actionCards: AiActionCard[];
+  /**
+   * 웹 출처 (이슈 #367). 웹 검색을 켠 질문에만 있다. 답이 링크로 단 검색 결과와 읽은 페이지 순서이고,
+   * 둘 다 없으면 검색 결과 앞의 3개. 답 본문의 링크는 이 질문의 웹 도구 결과에 있던 주소만 남는다
+   */
+  webSources?: AiWebSource[];
 }
 
 /**
@@ -206,13 +312,38 @@ export interface AiActionCardExecuteResult {
  * 답을 만드는 과정의 실시간 이벤트 (POST /ai-assistant/messages/stream, 한 줄에 JSON 하나).
  * - thinking·answer: 글 조각. answer는 출처 표시를 지우기 전 원문이라, done의 reply.answer로 바꿔 보인다
  * - 한 차례에서 answer 조각 뒤에 tool_start가 오면 그 글은 최종 답이 아니라 도구를 부르기 전의 중간 글이다
+ * - 웹 도구(이슈 #367)는 조회 도구와 같은 tool_start → tool_end이고, tool_end.webSources에 찾은·읽은 페이지가 온다.
+ *   답에 쓴 웹 출처는 done의 reply.webSources
+ * - browser_frame: 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진 (이슈 #373). 모델에는 보내지 않고 화면에만 보인다
+ * - ui_action: 화면 조작 (이슈 #382). 사용자의 브라우저가 지금 화면에서 실행하고 POST /ai-assistant/ui-actions/:actionId로 결과를 돌려준다.
+ *   같은 도구의 tool_start 뒤, tool_end 앞에 온다
  * - 마지막은 done 또는 error 하나
  */
 export type AiAssistantStreamEvent =
   | { type: 'thinking'; text: string }
   | { type: 'answer'; text: string }
   | { type: 'tool_start'; id: string; name: string; arguments: string }
-  | { type: 'tool_end'; id: string; label: string | null; resultPreview: string; durationMs: number }
+  | {
+      type: 'tool_end';
+      id: string;
+      label: string | null;
+      resultPreview: string;
+      durationMs: number;
+      /** 웹 도구일 때만: 이 호출이 찾은 결과(검색·장소) 또는 읽은 페이지 (이슈 #367) */
+      webSources?: AiWebSource[];
+    }
+  | {
+      type: 'browser_frame';
+      /** 호스트 + 경로 (쿼리·#조각 없음) */
+      url: string;
+      /** 페이지 제목. 웹에서 온 글이라 글로만 그린다 */
+      title: string;
+      /** JPEG(품질 50쯤, 너비 800 이하) base64, data: 접두어 없음 */
+      imageBase64: string;
+      /** 찍은 때 (ISO 8601) */
+      at: string;
+    }
+  | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
   | { type: 'done'; reply: AiAssistantReplyView }
   | { type: 'error'; message: string };
 

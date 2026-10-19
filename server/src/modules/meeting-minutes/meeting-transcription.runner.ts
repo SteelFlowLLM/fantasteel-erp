@@ -1,5 +1,6 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { MEETING_MINUTES_STATUS } from '@fantasteel/shared';
+import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { SttClient, SttRequestError } from '../stt/stt.client';
@@ -9,11 +10,17 @@ import { MeetingMinutesRepository } from './meeting-minutes.repository';
 
 export const TRANSCRIPTION_INTERRUPTED_REASON = '전사하던 서버가 멈춰 전사가 중단됐어요. 음성을 다시 올려 주세요';
 const TRANSCRIPTION_ERROR_REASON = '전사 중 오류가 났어요';
+const AUDIO_LOAD_ERROR_REASON = 'Drive에서 녹음을 받지 못했어요';
 
 export interface TranscriptionJob {
   meetingMinutesId: number;
   /** 원본 음성은 디스크·DB에 두지 않는다: 이 메모리 참조가 전부이고 작업이 끝나면 놓는다 */
   audio: Buffer | null;
+  /**
+   * audio가 없을 때 차례가 오면 음성을 받아 온다 (Drive 녹음). 줄 안에서 받으므로 큰 녹음 여러 개가 한꺼번에 메모리에 오르지 않는다.
+   * 실패하면 AppException 문구가 실패 이유가 된다.
+   */
+  loadAudio?: () => Promise<Buffer>;
   fileName: string;
   mimeType: string;
   /** 참석자 수. 화자 분리 엔진에 화자 수로 알려 준다 */
@@ -68,8 +75,14 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
   }
 
   private async run(job: TranscriptionJob): Promise<void> {
+    let loading = false;
     try {
-      const audio = job.audio;
+      let audio = job.audio;
+      if (!audio && job.loadAudio) {
+        loading = true;
+        audio = await job.loadAudio();
+        loading = false;
+      }
       if (!audio) return;
       const settings = await this.sttSettings.read();
       const result = await this.sttClient.transcribe(settings, { audio, fileName: job.fileName, mimeType: job.mimeType, model: settings.model, speakerCount: job.speakerCount });
@@ -84,13 +97,20 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
       await this.finish(job.meetingMinutesId, data);
     } catch (error) {
       // 음성·전사 내용은 로그에 남기지 않는다
-      this.logger.error(`회의록 ${job.meetingMinutesId} 전사 실패: ${error instanceof SttRequestError ? error.message : error instanceof Error ? error.name : 'unknown'}`);
-      const reason = error instanceof SttRequestError ? error.message : TRANSCRIPTION_ERROR_REASON;
+      const detail = error instanceof SttRequestError || error instanceof AppException ? error.message : error instanceof Error ? error.name : 'unknown';
+      this.logger.error(`회의록 ${job.meetingMinutesId} ${loading ? '녹음 받기' : '전사'} 실패: ${detail}`);
+      const reason =
+        error instanceof SttRequestError
+          ? error.message
+          : loading
+            ? `${AUDIO_LOAD_ERROR_REASON}: ${error instanceof AppException ? (error.getResponse() as { message: string }).message : '알 수 없는 오류'}`.slice(0, 500)
+            : TRANSCRIPTION_ERROR_REASON;
       await this.finish(job.meetingMinutesId, { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason: reason }).catch((e: unknown) =>
         this.logger.error(`회의록 ${job.meetingMinutesId} 실패 상태를 저장하지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`),
       );
     } finally {
       job.audio = null;
+      job.loadAudio = undefined;
       this.lease.release(job.meetingMinutesId);
     }
   }

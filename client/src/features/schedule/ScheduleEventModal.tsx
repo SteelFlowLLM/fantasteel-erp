@@ -8,7 +8,8 @@ import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
-import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, formOf, formProblem, inputOf, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
+import { TimeSelect } from '@/features/schedule/TimeSelect';
+import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, endOptions, formOf, formProblem, inputOf, shiftEnd, startOptions, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
 import { useAction } from '@/hooks/useAction';
 
 /** event가 있으면 고치기, 없으면 date 날에 새로 추가 */
@@ -47,15 +48,20 @@ export function ScheduleEventModal({ event, date, onClose }: { event?: ScheduleE
         <Field label="제목" required error={touched && !form.title.trim() ? '제목을 입력해 주세요' : null}>
           <Input value={form.title} maxLength={TITLE_MAX} autoFocus placeholder="예: 거래처 방문" onChange={(e) => set('title', e.target.value)} />
         </Field>
-        <div className="grid grid-cols-[1fr_110px_110px] gap-3">
+        <div className="grid grid-cols-[1fr_120px_120px] gap-3">
           <Field label="날짜" required>
             <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} />
           </Field>
           <Field label="시작" required>
-            <Input type="time" value={form.start} onChange={(e) => set('start', e.target.value)} />
+            <TimeSelect
+              ariaLabel="시작 시각"
+              value={form.start}
+              options={startOptions(form.start)}
+              onChange={(start) => setForm((prev) => ({ ...prev, start, end: shiftEnd(prev.start, prev.end, start) }))}
+            />
           </Field>
           <Field label="끝" required>
-            <Input type="time" value={form.end} onChange={(e) => set('end', e.target.value)} />
+            <TimeSelect ariaLabel="끝 시각" value={form.end} options={endOptions(form.start, form.end)} onChange={(end) => set('end', end)} />
           </Field>
         </div>
         {touched && problem && form.title.trim() ? <span className="text-xs text-danger">{problem}</span> : null}

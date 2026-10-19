@@ -5,7 +5,7 @@
 // 'start'는 작업 시작만 기록하고(완료 일시 없음), 'complete'는 시작한 실적을 같은 행으로 완료한다.
 import { useState } from 'react';
 import { INSPECTION_RESULT_LABEL, PROCESS_TYPE_LABEL } from '@/codes';
-import { productionResultApi, type WorkContext } from '@/api/productionResults';
+import { productionResultApi, type UncastHeat, type WorkContext } from '@/api/productionResults';
 import type { ProductionResultView } from '@/api/production';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -13,7 +13,7 @@ import { Field } from '@/components/Field';
 import { Input, Select } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { Table, Td, Th } from '@/components/Table';
-import { dateTimeLocalHoursAgo, fromDateTimeLocal, toDateTimeLocal } from '@/features/production/lib/dateTimeLocal';
+import { dateTimeLocalHoursAgo, defaultStartedLocal, fromDateTimeLocal, laterLocal, toDateTimeLocal } from '@/features/production/lib/dateTimeLocal';
 import { fieldErrorsOf } from '@/features/production/lib/formErrors';
 import { useAction } from '@/hooks/useAction';
 import { decCmp, decMul, isDecimalText, TON_DIGITS } from '@/lib/decimal';
@@ -44,14 +44,17 @@ export interface ResultFormModalProps {
 
 export function ResultFormModal({ ctx, process, mode, openResult, onClose }: ResultFormModalProps) {
   const plan = ctx.plan;
-  const [startedText, setStartedText] = useState(() => (openResult ? toDateTimeLocal(openResult.startedAt) : dateTimeLocalHoursAgo(DEFAULT_HOURS[process])));
-  const [completedText, setCompletedText] = useState(() => dateTimeLocalHoursAgo(0));
-  const [blastFurnaceCode, setBlastFurnaceCode] = useState(openResult?.blastFurnaceCode ?? ctx.lastBlastFurnaceCode ?? '');
-  const [converterCode, setConverterCode] = useState(openResult?.converterCode ?? ctx.lastConverterCode ?? '');
-  const [tonText, setTonText] = useState(ctx.hotMetalTonPerHeat);
   // 작업 완료: 작업 시작 때 기록한 히트로 고정한다 (작업 로그 PRODUCTION_STARTED와 실적·슬래브의 히트가 같아야 한다)
   const startedHeatLotId = mode === 'complete' && openResult ? (ctx.openWork.find((w) => w.productionResultId === openResult.id)?.heatLotId ?? null) : null;
   const firstHeat = ctx.uncastHeats.find((h) => h.heatLotId === startedHeatLotId) ?? ctx.uncastHeats[0];
+  // 앞 공정(용선·히트)과 같은 설비의 앞 작업이 끝난 뒤에 시작해야 한다 (서버가 시간 순서·설비 겹침을 검증)
+  const earliestOf = (h: UncastHeat | null | undefined) =>
+    process === 'IRONMAKING' ? ctx.earliestIronmakingStartedAt : process === 'STEELMAKING' ? ctx.earliestSteelmakingStartedAt : (h?.completedAt ?? null);
+  const [startedText, setStartedText] = useState(() => (openResult ? toDateTimeLocal(openResult.startedAt) : defaultStartedLocal(DEFAULT_HOURS[process], earliestOf(firstHeat))));
+  const [completedText, setCompletedText] = useState(() => laterLocal(dateTimeLocalHoursAgo(0), startedText));
+  const [blastFurnaceCode, setBlastFurnaceCode] = useState(openResult?.blastFurnaceCode ?? ctx.lastBlastFurnaceCode ?? '');
+  const [converterCode, setConverterCode] = useState(openResult?.converterCode ?? ctx.lastConverterCode ?? '');
+  const [tonText, setTonText] = useState(ctx.hotMetalTonPerHeat);
   const [heatLotId, setHeatLotId] = useState<number | null>(startedHeatLotId ?? firstHeat?.heatLotId ?? null);
   const heat = ctx.uncastHeats.find((h) => h.heatLotId === heatLotId) ?? null;
   const [qtyText, setQtyText] = useState(String(firstHeat?.maxSlabQty ?? ''));
@@ -141,8 +144,14 @@ export function ResultFormModal({ ctx, process, mode, openResult, onClose }: Res
               disabled={startedHeatLotId !== null}
               onChange={(e) => {
                 const id = Number(e.target.value);
+                const picked = ctx.uncastHeats.find((h) => h.heatLotId === id);
                 setHeatLotId(id);
-                setQtyText(String(ctx.uncastHeats.find((h) => h.heatLotId === id)?.maxSlabQty ?? ''));
+                setQtyText(String(picked?.maxSlabQty ?? ''));
+                if (!openResult) {
+                  const started = defaultStartedLocal(DEFAULT_HOURS.CONTINUOUS_CASTING, earliestOf(picked));
+                  setStartedText(started);
+                  setCompletedText((c) => laterLocal(c, started));
+                }
               }}
               invalid={!!errors.heatLotId}
             >

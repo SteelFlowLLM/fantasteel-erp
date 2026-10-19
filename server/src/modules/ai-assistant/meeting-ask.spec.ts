@@ -3,10 +3,10 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { AiAssistantReplyView, AiAssistantStreamEvent, MeetingMinutesView } from '@fantasteel/shared';
+import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, MeetingMinutesView } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LlmClient, LlmRequestError, type LlmStreamHandlers, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { LlmClient, LlmRequestError, type LlmModelCapabilities, type LlmStreamHandlers, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import type { LlmProfile } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 
@@ -19,6 +19,7 @@ let startId = 0;
 const llmClient = {
   chatWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile]>(),
   streamWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile, LlmStreamHandlers, AbortSignal | undefined]>(),
+  modelCapabilities: jest.fn<Promise<LlmModelCapabilities>, [unknown, string]>(),
 };
 const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; model: string | null; apiKey: null }> => ({ baseUrl: 'http://llm.test/v1', model: 'test-model', apiKey: null })) };
 
@@ -54,6 +55,9 @@ afterAll(async () => {
 beforeEach(() => {
   llmClient.chatWithTools.mockReset();
   llmClient.streamWithTools.mockReset();
+  // 기본은 사진을 볼 수 있는 모델. 시험마다 바꾼다
+  llmClient.modelCapabilities.mockReset();
+  llmClient.modelCapabilities.mockResolvedValue({ vision: true, reasoning: true });
 });
 
 /** 스트리밍 API(NDJSON). 시작 전 오류면 events 대신 평소 JSON 봉투가 와서 text를 그대로 둔다 */
@@ -211,5 +215,142 @@ describe('POST ai-assistant/messages reasoning', () => {
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe('COM-004');
     expect(llmClient.chatWithTools).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET ai-assistant/capabilities', () => {
+  it('설정된 모델과 사진·생각 정도 지원 여부를 돌려준다', async () => {
+    llmClient.modelCapabilities.mockResolvedValue({ vision: true, reasoning: false });
+    const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ model: 'test-model', vision: true, reasoning: false, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) } });
+    expect(llmClient.modelCapabilities.mock.calls[0][1]).toBe('test-model');
+  });
+
+  it('모델이 아직 없으면 모두 null이고 LLM 서버에 묻지 않는다', async () => {
+    llmSettings.read.mockResolvedValueOnce({ baseUrl: 'http://llm.test/v1', model: null, apiKey: null });
+    const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: false }, screenControl: { available: expect.any(Boolean) } });
+    expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('외부 LLM처럼 알 수 없으면 vision·reasoning이 null로 나간다', async () => {
+    llmClient.modelCapabilities.mockResolvedValue({ vision: null, reasoning: null });
+    const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
+    expect(res.body.data).toEqual({ model: 'test-model', vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) } });
+  });
+});
+
+describe('POST ai-assistant/ui-actions/:actionId (이슈 #382)', () => {
+  it('기다리는 화면 조작이 없으면 COM-003, actionId가 UUID가 아니거나 본문이 틀리면 400', async () => {
+    const missing = await call('POST', '/ai-assistant/ui-actions/00000000-0000-4000-8000-000000000000', { ok: true, result: '[r1] button "검색"' });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error?.code).toBe('COM-003');
+    expect((await call('POST', '/ai-assistant/ui-actions/not-a-uuid', { ok: true })).status).toBe(400);
+    expect((await call('POST', '/ai-assistant/ui-actions/00000000-0000-4000-8000-000000000000', { ok: 'yes' })).status).toBe(400);
+  });
+});
+
+describe('ai-assistant 질문의 사진 (images)', () => {
+  // 본문 한도(12mb)는 main.ts에서만 올리므로 여기서는 아주 작은 PNG 머리말만 쓴다
+  const IMAGE = { mediaType: 'image/png', dataBase64: 'iVBORw0KGgo=' };
+  const HISTORY = [
+    { role: 'user', content: '지난 질문' },
+    { role: 'assistant', content: '지난 답' },
+  ];
+
+  it('사진을 볼 수 있는 모델이면 마지막 질문에만 사진이 붙고 지난 대화에는 붙지 않는다 (일반 API)', async () => {
+    llmClient.chatWithTools.mockResolvedValue({ content: '네', toolCalls: [] });
+
+    const res = await call<AiAssistantReplyView>('POST', '/ai-assistant/messages', { question: '이 사진 뭐야?', history: HISTORY, images: [IMAGE] });
+
+    expect(res.status).toBe(200);
+    const messages = llmClient.chatWithTools.mock.calls[0][2];
+    expect(messages.at(-1)).toEqual({ role: 'user', content: '이 사진 뭐야?', images: [IMAGE] });
+    expect(messages.slice(0, -1).some((m) => 'images' in m)).toBe(false);
+    expect(messages.some((m) => m.content === '지난 질문')).toBe(true);
+  });
+
+  it('스트리밍 API도 같은 모양으로 사진을 보낸다', async () => {
+    llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
+
+    const res = await stream({ question: '이 사진 뭐야?', history: HISTORY, images: [IMAGE, { mediaType: 'image/webp', dataBase64: 'UklGRg==' }] });
+
+    expect(res.status).toBe(200);
+    const messages = llmClient.streamWithTools.mock.calls[0][2];
+    expect(messages.at(-1)).toEqual({ role: 'user', content: '이 사진 뭐야?', images: [IMAGE, { mediaType: 'image/webp', dataBase64: 'UklGRg==' }] });
+    expect(messages.slice(0, -1).some((m) => 'images' in m)).toBe(false);
+  });
+
+  it('사진을 못 보는 모델(vision false)이면 400 COM-004이고 LLM을 부르지 않는다', async () => {
+    llmClient.modelCapabilities.mockResolvedValue({ vision: false, reasoning: false });
+
+    const plain = await call('POST', '/ai-assistant/messages', { question: '이 사진 뭐야?', images: [IMAGE] });
+    expect(plain.status).toBe(400);
+    expect(plain.body.error?.code).toBe('COM-004');
+    expect(plain.body.error?.message).toContain('사진');
+
+    // 스트리밍도 응답을 시작하기 전에 평소 JSON 오류로 막는다
+    const streamed = await stream({ question: '이 사진 뭐야?', images: [IMAGE] });
+    expect(streamed.status).toBe(400);
+    expect(streamed.contentType).toContain('application/json');
+    expect(JSON.parse(streamed.text)).toMatchObject({ error: { code: 'COM-004' } });
+
+    expect(llmClient.chatWithTools).not.toHaveBeenCalled();
+    expect(llmClient.streamWithTools).not.toHaveBeenCalled();
+  });
+
+  it('알 수 없는 모델(vision null)이면 막지 않고 사진을 보낸다', async () => {
+    llmClient.modelCapabilities.mockResolvedValue({ vision: null, reasoning: null });
+    llmClient.chatWithTools.mockResolvedValue({ content: '네', toolCalls: [] });
+
+    const res = await call('POST', '/ai-assistant/messages', { question: '이 사진 뭐야?', images: [IMAGE] });
+
+    expect(res.status).toBe(200);
+    expect(llmClient.chatWithTools.mock.calls[0][2].at(-1)).toMatchObject({ role: 'user', images: [IMAGE] });
+  });
+
+  it('사진이 없거나 빈 배열이면 모델 정보를 묻지 않는다 (질문이 느려지지 않게)', async () => {
+    llmClient.chatWithTools.mockResolvedValue({ content: '네', toolCalls: [] });
+    llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
+
+    await call('POST', '/ai-assistant/messages', { question: '예약이 뭐야?' });
+    await call('POST', '/ai-assistant/messages', { question: '예약이 뭐야?', images: [] });
+    await stream({ question: '예약이 뭐야?' });
+
+    expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
+    expect(llmClient.chatWithTools.mock.calls[0][2].some((m) => 'images' in m)).toBe(false);
+  });
+
+  it('사진이 5장이면 400 COM-004이고, 4장까지는 받는다', async () => {
+    llmClient.chatWithTools.mockResolvedValue({ content: '네', toolCalls: [] });
+
+    const four = await call('POST', '/ai-assistant/messages', { question: '이 사진들 뭐야?', images: Array.from({ length: 4 }, () => IMAGE) });
+    expect(four.status).toBe(200);
+
+    llmClient.chatWithTools.mockClear();
+    const five = await call('POST', '/ai-assistant/messages', { question: '이 사진들 뭐야?', images: Array.from({ length: 5 }, () => IMAGE) });
+    expect(five.status).toBe(400);
+    expect(five.body.error?.code).toBe('COM-004');
+    expect(llmClient.chatWithTools).not.toHaveBeenCalled();
+  });
+
+  it('허용하지 않는 형식(image/gif)이나 base64가 아닌 데이터, 빠진 필드는 400 COM-004', async () => {
+    const gif = await call('POST', '/ai-assistant/messages', { question: '이 사진 뭐야?', images: [{ mediaType: 'image/gif', dataBase64: 'R0lGODlh' }] });
+    expect(gif.status).toBe(400);
+    expect(gif.body.error?.code).toBe('COM-004');
+
+    const notBase64 = await call('POST', '/ai-assistant/messages', { question: '이 사진 뭐야?', images: [{ mediaType: 'image/png', dataBase64: 'data:image/png;base64,iVBORw0KGgo=' }] });
+    expect(notBase64.status).toBe(400);
+    expect(notBase64.body.error?.code).toBe('COM-004');
+
+    const missing = await stream({ question: '이 사진 뭐야?', images: [{ mediaType: 'image/png' }] });
+    expect(missing.status).toBe(400);
+    expect(JSON.parse(missing.text)).toMatchObject({ error: { code: 'COM-004' } });
+
+    expect(llmClient.chatWithTools).not.toHaveBeenCalled();
+    expect(llmClient.streamWithTools).not.toHaveBeenCalled();
+    expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
   });
 });

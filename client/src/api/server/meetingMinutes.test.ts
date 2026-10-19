@@ -2,7 +2,7 @@
 import type { MeetingAnalysis, MeetingMinutesPage, MeetingMinutesView, MeetingRegisterResult } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputError } from '@/api/errors';
-import { meetingMinutesApi, meetingMinutesAudioApi } from '@/api/meetingMinutes';
+import { meetingMinutesApi, meetingMinutesAudioApi, meetingMinutesDriveApi } from '@/api/meetingMinutes';
 import { ok, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
@@ -88,6 +88,24 @@ describe('회의록 서버 모드 (api/server/meetingMinutes.ts)', () => {
     const error = await meetingMinutesAudioApi.create({ meetingMinutesTitle: ' ', meetingDate: '2026-10-15', attendeeIds: [], file: new File([], 'a.webm', { type: 'audio/webm' }) }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(InputError);
     expect((error as InputError).fieldErrors).toEqual({ meetingMinutesTitle: '제목을 입력해 주세요', attendeeIds: '참석자를 1명 이상 골라 주세요', file: '음성이 비어 있어요' });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('Drive 녹음으로 만들기 (이슈 #361)', () => {
+  it('JSON 본문에 참석자를 숫자 배열로, 제목은 다듬어 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path === '/meeting-minutes/audio/from-drive' ? ok({ ...view, meetingMinutesStatus: 'TRANSCRIBING' }) : undefined));
+    const created = await meetingMinutesDriveApi.create({ meetingMinutesTitle: ' Drive 회의 ', meetingDate: '2026-10-16', attendeeIds: [5, 5, 6], driveFileId: 'file_ID-1234567' });
+    expect(created.meetingMinutesStatus).toBe('TRANSCRIBING');
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].body).toEqual({ meetingMinutesTitle: 'Drive 회의', meetingDate: '2026-10-16', attendeeIds: [5, 6], driveFileId: 'file_ID-1234567' });
+  });
+
+  it('제목·참석자·파일이 비면 서버를 부르기 전에 입력칸 오류', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, () => undefined);
+    const error = await meetingMinutesDriveApi.create({ meetingMinutesTitle: ' ', meetingDate: '2026-10-16', attendeeIds: [], driveFileId: '' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InputError);
+    expect((error as InputError).fieldErrors).toEqual({ meetingMinutesTitle: '제목을 입력해 주세요', attendeeIds: '참석자를 1명 이상 골라 주세요', driveFileId: 'Drive에서 녹음을 골라 주세요' });
     expect(calls).toHaveLength(0);
   });
 });

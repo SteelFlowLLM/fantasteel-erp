@@ -55,6 +55,8 @@ export interface UncastHeat {
   /** 연주 최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
   maxSlabQty: number;
   inspectionResult: InspectionResult;
+  /** 제강 완료 일시. 연주는 이 뒤에 시작한다 */
+  completedAt: string | null;
 }
 
 /** 작업 시작만 기록한(완료 일시 없는) 실적. 연주는 시작 때 기록한 히트를 함께 (PRODUCTION_STARTED) */
@@ -91,6 +93,9 @@ export interface WorkContext {
   /** 이 계획에서 마지막으로 쓴 고로·전로 코드 (입력 기본값) */
   lastBlastFurnaceCode: string | null;
   lastConverterCode: string | null;
+  /** 작업 시작 일시 기본값의 하한: 같은 고로의 앞 작업, 같은 전로의 앞 작업·히트 1개 몫 용선이 끝난 때 */
+  earliestIronmakingStartedAt: string | null;
+  earliestSteelmakingStartedAt: string | null;
 }
 
 export interface StartWorkInput {

@@ -23,7 +23,7 @@ describe('과거 사례 검색 규칙 (shared, 서버·화면 공통)', () => {
     const nos = (q: string, extra: { category?: 'QUALITY' | 'EQUIPMENT'; days?: number } = {}) => searchPastCases(PAST_CASE_EXAMPLES, { q, ...extra }, '2026-10-16').map((c) => c.caseNo);
     expect(nos('')).toEqual(['CASE-0005', 'CASE-0004', 'CASE-0003', 'CASE-0002', 'CASE-0001']);
     expect(nos('SM355A 히트 불합격')[0]).toBe('CASE-0005');
-    expect(nos('', { category: 'EQUIPMENT' })).toEqual(['CASE-0003', 'CASE-0001']);
+    expect(nos('', { category: 'EQUIPMENT' })).toEqual(['CASE-0003', 'CASE-0002', 'CASE-0001']);
     expect(nos('', { days: 90 })).toEqual(['CASE-0005', 'CASE-0004', 'CASE-0003', 'CASE-0002']);
     expect(nos('없는말')).toEqual([]);
   });
@@ -48,9 +48,12 @@ describe('사례 초안 (REQ-CASE-002)', () => {
     expect(parseDraft({ caseCategory: 'EQUIPMENT', title: 't'.repeat(300), phenomenon: 'p' })?.title).toHaveLength(200);
   });
 
-  it('AI에 넘기는 글: 불합격 사실의 숫자와 비슷한 사례(예시 표시), 숫자를 지어내지 말라는 규칙', () => {
+  it('AI에 넘기는 글: 불합격 사실의 숫자와 비슷한 사례(예시 표시), 숫자를 지어내지 말라는 규칙, 근거 사례 번호·조치 제안·구분 기준', () => {
     const [system, user] = buildDraftMessages(facts, [PAST_CASE_EXAMPLES[0]!]);
     expect(system?.content).toContain('숫자(측정값·기준)는 [불합격 사실]에 있는 값만');
+    expect(system?.content).toContain('근거 사례 번호와 함께 "추정"');
+    expect(system?.content).toContain('조치는 이미 한 일이 아니라 앞으로 할 일을 제안');
+    expect(system?.content).toContain('원인이 설비 문제');
     expect(user?.content).toContain('망가니즈(MN) 1.68 % (기준 1.60 이하)');
     expect(user?.content).toContain('CASE-0005');
     expect(user?.content).toContain('(예시 사례)');

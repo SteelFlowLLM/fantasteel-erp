@@ -277,7 +277,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
     expect((await run('search_past_cases', JSON.stringify({ category: 'X' }))).content).toContain('category는 QUALITY, EQUIPMENT 중 하나예요');
   });
 
-  it('모델에 조회 도구 14개를 알린다 (REQ-AST-004 조회 대상 전부 + REQ-AST-006 과거 사례)', () => {
+  it('모델에 조회 도구 15개를 알린다 (REQ-AST-004 조회 대상 전부 + REQ-AST-006 과거 사례 + REQ-AST-003 지식 읽기)', () => {
     expect(toolbox.definitions().map((d) => d.name)).toEqual([
       'get_inventory',
       'get_sales_orders',
@@ -293,6 +293,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
       'get_mill_sheets',
       'get_business_events',
       'search_past_cases',
+      'read_knowledge',
     ]);
   });
 
