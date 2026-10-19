@@ -100,7 +100,8 @@ export class DriveToolSession {
   private readonly logger = new Logger(DriveToolSession.name);
   private searches = 0;
   private reads = 0;
-  private readonly read: AiWebSource[] = [];
+  /** 이번 답에서 찾거나 읽은 파일 (답의 출처) */
+  private readonly seen: AiWebSource[] = [];
 
   constructor(
     private readonly drive: DriveSource,
@@ -112,9 +113,13 @@ export class DriveToolSession {
     return AI_ASSISTANT_DRIVE_TOOLS.includes(name);
   }
 
-  /** 이번 답에서 읽은 파일 (답의 출처) */
+  /** 이번 답에서 찾거나 읽은 파일 (답의 출처). 찾기만 하고 답한 경우에도 출처가 빈 채로 보이지 않게 찾은 파일도 넣는다 */
   sources(): AiWebSource[] {
-    return [...this.read];
+    return [...this.seen];
+  }
+
+  private remember(sources: readonly AiWebSource[]) {
+    for (const source of sources) if (!this.seen.some((s) => s.url === source.url)) this.seen.push(source);
   }
 
   async run(call: LlmToolCall): Promise<DriveToolResult> {
@@ -145,10 +150,9 @@ export class DriveToolSession {
     const files = await this.drive.searchFiles(query, kind, DRIVE_SEARCH_LIMIT);
     if (files.length === 0) return failure('찾은 파일이 없어요', { 검색어: query, 안내: '이름의 다른 낱말로 한 번 더 찾거나, 없다고 알려요' });
     const body = files.map((f, i) => `${i + 1}. ${cutText(stripInvisible(f.name), 200)} (${KIND_LABEL[f.kind]}, ${sizeText(f.size)}, 수정 ${f.modifiedTime?.slice(0, 10) ?? '알 수 없음'})\n   id: ${f.id}`).join('\n');
-    return {
-      content: [`[Drive 찾기 결과] ${query ? `이름에 "${query}"` : '최근 파일'} · ${files.length}개`, DRIVE_UNTRUSTED_NOTE, wrapUntrusted('drive_search', body)].join('\n'),
-      webSources: files.map((f) => ({ title: stripInvisible(f.name), url: driveWebUrl(f.id) })),
-    };
+    const webSources = files.map((f) => ({ title: stripInvisible(f.name), url: driveWebUrl(f.id) }));
+    this.remember(webSources);
+    return { content: [`[Drive 찾기 결과] ${query ? `이름에 "${query}"` : '최근 파일'} · ${files.length}개`, DRIVE_UNTRUSTED_NOTE, wrapUntrusted('drive_search', body)].join('\n'), webSources };
   }
 
   private async readFile(args: Record<string, unknown>): Promise<DriveToolResult> {
@@ -156,7 +160,7 @@ export class DriveToolSession {
     if (++this.reads > MAX_DRIVE_READS_PER_ANSWER) return failure(`이번 질문에서는 Drive 파일을 ${MAX_DRIVE_READS_PER_ANSWER}개까지만 읽어요`, { 안내: '지금까지 읽은 내용으로 답해요' });
     const fileId = isDriveId(ref) ? ref : await this.idByName(ref);
     const result = driveOutcomeContent(await this.reader.read(fileId), await this.vision());
-    for (const source of result.webSources) if (!this.read.some((s) => s.url === source.url)) this.read.push(source);
+    this.remember(result.webSources);
     return result;
   }
 

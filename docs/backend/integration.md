@@ -310,7 +310,7 @@ OAuth 연결은 관리자가 브라우저에서 허용해야 하고(외부+테�
 - **글 파일 (이슈 #398 2단계)**: `kind=document`에 `text/plain`·`text/markdown`·`text/x-markdown`·`text/csv`를 더했다(철강맨AI가 읽는다). HTML처럼 이 서버 주소로 열면 스크립트가 도는 형식은 넣지 않는다. 화면은 '글 파일'로 보이고 미리보기 없이 내려받는다.
 - **철강맨AI 읽기 (이슈 #398 2단계)** — `GoogleDriveService.searchFiles(query, kind, limit)`·`readForAssistant(fileId)`, 규칙은 `google-drive.query.ts`의 `buildDriveSearchQuery`(목록 검색어 + `name contains '…'`, `'`·`\` 막음)·`driveReadPlan`:
   - 폴더·휴지통·종류는 `checkFile`과 같다(폴더 밖 `INT-012`).
-  - PDF는 20MB까지 받아(`DRIVE_AI_PDF_MAX_BYTES`) 철강맨AI가 웹 페이지 읽기와 같은 worker PDF 글 뽑기(`unpdf`)로 읽는다. Google 문서·프레젠테이션은 `files.export?mimeType=text/plain`, 스프레드시트는 `text/csv`(첫 시트)로 5MB까지. 글 파일은 2MB까지 그대로. PNG·JPEG·WebP 사진은 2MB(`AI_IMAGE_MAX_BYTES`)까지 base64로(더 크면 받지 않고 "입력칸 @로 붙여 달라"는 이유: 서버에 사진 줄이기 의존성이 없다).
+  - PDF는 20MB까지 받아(`DRIVE_AI_PDF_MAX_BYTES`) 철강맨AI가 웹 페이지 읽기와 같은 worker PDF 글 뽑기(`unpdf`)로 읽는다. Google 문서·프레젠테이션은 `files.export?mimeType=text/plain`, 스프레드시트는 `text/csv`(첫 시트)로 5MB까지. 글 파일은 2MB까지 그대로. PNG·JPEG·WebP 사진은 2MB(`AI_IMAGE_MAX_BYTES`)까지 base64로. 더 크거나 크기를 모르거나 다른 형식(HEIC 등)이면 Drive 미리보기(`thumbnailLink`의 `=s…`를 `=s1568`로)를 같은 토큰으로 받는다(`fetchThumbnail`: https `*.googleusercontent.com`·`drive.google.com`만, 넘김도 그 호스트만 3번, PNG·JPEG·WebP·2MB 확인). 미리보기도 없으면 이유만(서버에 사진 줄이기 의존성이 없다).
   - 녹음·Word·Excel·PowerPoint·HEIC 등은 받지 않고 이유만 돌려준다. 크기를 알면 받기 전에 `INT-014`, 모르면 받는 중 상한에서 끊는다.
   - 자세한 도구 규칙은 [ai-assistant.md](ai-assistant.md) 4장 'Drive'.
 

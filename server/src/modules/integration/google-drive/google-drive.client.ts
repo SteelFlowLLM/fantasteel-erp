@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Readable, Transform, pipeline } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
-import { INTEGRATION_PROVIDER } from '@fantasteel/shared';
+import { AI_IMAGE_MEDIA_TYPES, INTEGRATION_PROVIDER } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
@@ -117,6 +117,37 @@ export async function readStreamToBuffer(stream: Readable, expectedBytes: number
   if (overflow) return Buffer.concat(overflow);
   // 덜 왔으면 받은 만큼만 (복사 없이 같은 메모리를 가리킨다)
   return offset === expectedBytes ? buffer : buffer.subarray(0, offset);
+}
+
+/** Drive 미리보기를 받을 긴 변 (화면이 철강맨AI 사진을 줄이는 1568px과 같다, 이슈 #398) */
+export const DRIVE_THUMBNAIL_LONG_EDGE = 1568;
+/** 미리보기 주소가 다른 Google 주소로 넘기는 횟수 상한 */
+const THUMBNAIL_MAX_REDIRECTS = 3;
+
+/**
+ * 토큰을 실어 보내도 되는 Drive 미리보기 주소인지: https, 기본 포트, 사용자 정보 없음, `*.googleusercontent.com`·`drive.google.com`만.
+ * thumbnailLink는 Drive가 준 값이지만 이 서버가 토큰을 실어 부르므로 호스트를 다시 확인한다 (넘김 주소도 매번).
+ */
+export function isGoogleThumbnailUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  return url.protocol === 'https:' && url.port === '' && !url.username && !url.password && (host === 'drive.google.com' || host.endsWith('.googleusercontent.com'));
+}
+
+/** 미리보기 주소의 크기 꼬리(`=s220`, `=s220-c` 등)를 긴 변 size로 바꾼다. 꼬리가 없으면 붙인다 */
+export function sizedThumbnailUrl(link: string, size = DRIVE_THUMBNAIL_LONG_EDGE): string {
+  return /=s\d+[\w-]*$/.test(link) ? link.replace(/=s\d+[\w-]*$/, `=s${size}`) : `${link}=s${size}`;
+}
+
+/** 시험에서는 미리보기 요청을 가짜 Google 서버로 보낸다 (확인은 원래 주소로 한다) */
+function thumbnailFetchTarget(url: string): string {
+  const origin = googleEndpoints().drive.replace(/\/drive\/v3$/, '');
+  return origin.startsWith('https://www.googleapis.com') ? url : `${origin}/__thumbnail?url=${encodeURIComponent(url)}`;
 }
 
 /** 서비스 계정이 폴더·파일을 볼 수 없을 때. Drive는 공유하지 않은 파일을 404·403으로 답한다 */
@@ -354,6 +385,50 @@ export class GoogleDriveClient {
     const stream = guardStream(source, maxBytes, () => controller.abort());
     stream.on('close', () => signal?.removeEventListener('abort', onAbort));
     return { stream, status: partial ? 206 : 200, length, contentRange: partial ? res.headers.get('content-range') : null };
+  }
+
+  /**
+   * Drive 미리보기 사진을 받는다 (이슈 #398 2단계: 휴대폰 사진은 3~5MB라 모델 상한(2MB)을 넘는다). 긴 변 1568px로 바꿔 요청하고,
+   * Google 주소로만 토큰을 실어 보낸다. 넘김(3xx)은 Google 주소일 때만 따라간다. PNG·JPEG·WebP이고 maxBytes 안일 때만 돌려주고,
+   * 못 받으면 null (부르는 쪽이 이유를 알린다). 실패를 연결 오류로 남기지 않는다 (원본은 읽을 수 있다).
+   */
+  async fetchThumbnail(link: string, maxBytes: number): Promise<{ buffer: Buffer; mediaType: (typeof AI_IMAGE_MEDIA_TYPES)[number] } | null> {
+    let url = sizedThumbnailUrl(link);
+    for (let hop = 0; hop <= THUMBNAIL_MAX_REDIRECTS; hop += 1) {
+      if (!isGoogleThumbnailUrl(url)) {
+        this.logger.warn('Drive 미리보기 주소가 Google 주소가 아니라 받지 않았어요');
+        return null;
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+      try {
+        const res = await fetch(thumbnailFetchTarget(url), { headers: { authorization: `Bearer ${await this.accessToken()}` }, redirect: 'manual', signal: controller.signal });
+        if (res.status >= 300 && res.status < 400) {
+          await res.body?.cancel().catch(() => undefined);
+          const location = res.headers.get('location');
+          if (!location) return null;
+          url = new URL(location, url).href;
+          continue;
+        }
+        const mediaType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+        const length = Number(res.headers.get('content-length') ?? NaN);
+        const allowed = (AI_IMAGE_MEDIA_TYPES as readonly string[]).includes(mediaType);
+        if (!res.ok || !allowed || (Number.isFinite(length) && length > maxBytes)) {
+          await res.body?.cancel().catch(() => undefined);
+          return null;
+        }
+        const source = res.body ? Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>) : Readable.from([]);
+        const buffer = await readStreamToBuffer(guardStream(source, maxBytes, () => controller.abort()), Number.isFinite(length) ? length : null);
+        return { buffer, mediaType: mediaType as (typeof AI_IMAGE_MEDIA_TYPES)[number] };
+      } catch (error) {
+        if (error instanceof AppException && error.code !== 'INT-014') throw error;
+        this.logger.warn(`Drive 미리보기를 받지 못했어요: ${messageOf(error)}`);
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
   }
 
   // ───────── 안쪽 ─────────

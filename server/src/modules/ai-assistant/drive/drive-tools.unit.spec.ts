@@ -3,6 +3,8 @@ import type { DriveFileView } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import type { CheckedDriveFile } from '../../integration/google-drive/google-drive.service';
 import { buildDriveSearchQuery, driveFileKind, driveReadPlan, type DriveReadPlan } from '../../integration/google-drive/google-drive.query';
+import { isGoogleThumbnailUrl, sizedThumbnailUrl } from '../../integration/google-drive/google-drive.client';
+import { DRIVE_PHOTO_UNREADABLE } from '../../integration/google-drive/google-drive.service';
 import { PageTooComplexError } from '../web/page-extract';
 import { tinyPdf } from '../web/fixtures/tiny-pdf';
 import { AssistantDriveToolbox, MAX_DRIVE_READS_PER_ANSWER } from './assistant-drive-toolbox';
@@ -72,6 +74,26 @@ describe('읽는 방법 (MIME → PDF·글 내보내기·글·사진·못 읽음
   it("이름 검색어의 ' 와 \\ 는 막는다", () => {
     expect(buildDriveSearchQuery(FOLDER, 'document', "점검'표\\")).toMatch(/and name contains '점검\\'표\\\\'$/);
     expect(buildDriveSearchQuery(FOLDER, 'all', null)).not.toContain('name contains');
+  });
+});
+
+describe('Drive 미리보기 주소', () => {
+  it('크기 꼬리를 긴 변 1568px로 바꾸고, 없으면 붙인다', () => {
+    expect(sizedThumbnailUrl('https://lh3.googleusercontent.com/drive-storage/AbC=s220')).toBe('https://lh3.googleusercontent.com/drive-storage/AbC=s1568');
+    expect(sizedThumbnailUrl('https://lh3.googleusercontent.com/x=s220-c')).toBe('https://lh3.googleusercontent.com/x=s1568');
+    expect(sizedThumbnailUrl('https://drive.google.com/thumbnail?id=1')).toBe('https://drive.google.com/thumbnail?id=1=s1568');
+  });
+
+  it('토큰을 실어 보내는 주소는 https Google 미리보기 호스트만', () => {
+    expect(isGoogleThumbnailUrl('https://lh3.googleusercontent.com/a=s1568')).toBe(true);
+    expect(isGoogleThumbnailUrl('https://drive.google.com/thumbnail?id=1')).toBe(true);
+    for (const bad of ['http://lh3.googleusercontent.com/a', 'https://googleusercontent.com.evil.example/a', 'https://evil.example/lh3.googleusercontent.com', 'https://lh3.googleusercontent.com:8443/a', 'https://user@lh3.googleusercontent.com/a', 'https://docs.google.com/a', 'not a url']) {
+      expect(isGoogleThumbnailUrl(bad)).toBe(false);
+    }
+  });
+
+  it('못 볼 때의 이유는 상한을 상수 그대로 적는다 (2MB)', () => {
+    expect(DRIVE_PHOTO_UNREADABLE).toContain('(2MB)');
   });
 });
 

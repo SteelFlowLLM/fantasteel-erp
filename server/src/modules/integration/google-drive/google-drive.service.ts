@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { INTEGRATION_PROVIDER, type DriveFileKind, type DriveFileListKind, type DriveFilePage, type DriveFileView, type IntegrationTestResult } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_BYTES, INTEGRATION_PROVIDER, type DriveFileKind, type DriveFileListKind, type DriveFilePage, type DriveFileView, type IntegrationTestResult } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
@@ -41,6 +41,9 @@ export interface CheckedDriveFile extends DriveFileMeta {
   /** Google 문서류를 내보낼 형식. 그대로 받는 파일은 null */
   exportMimeType: string | null;
 }
+
+/** 원본도 미리보기도 모델에 붙일 수 없는 사진. 상한은 상수에서 그대로 적는다 (모델이 숫자를 지어내지 않게) */
+export const DRIVE_PHOTO_UNREADABLE = `사진 원본이 철강맨AI가 바로 볼 수 있는 크기(${AI_IMAGE_MAX_BYTES / 1_000_000}MB)·형식(PNG·JPEG·WebP)이 아니고, Drive 미리보기도 받지 못했어요. 사용자에게 입력칸에서 @로 이 사진을 붙여 달라고 해요(화면이 줄여서 보내요)`;
 
 const KIND_LABEL: Record<DriveFileKind, string> = { audio: '녹음', image: '사진', document: '문서' };
 
@@ -165,9 +168,13 @@ export class GoogleDriveService {
    */
   async readForAssistant(fileId: string): Promise<{ file: CheckedDriveFile; plan: DriveReadPlan; buffer: Buffer | null }> {
     const file = await this.checkFile(fileId);
-    let plan = driveReadPlan(file.mimeType, file.kind);
-    // 큰 사진은 서버가 줄이지 못해(사진 처리 의존성 없음) 화면에서 붙이게 한다: 화면은 줄여서 보낸다
-    if (plan.mode === 'image' && file.size !== null && file.size > plan.maxBytes) plan = { mode: 'unsupported', reason: `사진이 ${megabytes(plan.maxBytes)}를 넘어 직접 볼 수 없어요. 사용자에게 입력칸에서 @로 이 사진을 붙여 달라고 해요(화면이 줄여서 보내요)` };
+    const plan = driveReadPlan(file.mimeType, file.kind);
+    // 원본을 모델에 붙일 수 없는 사진(상한을 넘거나 크기를 모름, HEIC 등)은 서버가 줄이지 못해(사진 처리 의존성 없음) Drive 미리보기(긴 변 1568px)를 쓴다
+    if (file.kind === 'image' && !(plan.mode === 'image' && file.size !== null && file.size <= plan.maxBytes)) {
+      const thumbnail = file.thumbnailLink ? await this.client.fetchThumbnail(file.thumbnailLink, AI_IMAGE_MAX_BYTES) : null;
+      if (thumbnail) return { file, plan: { mode: 'image', maxBytes: AI_IMAGE_MAX_BYTES, mediaType: thumbnail.mediaType }, buffer: thumbnail.buffer };
+      return { file, plan: { mode: 'unsupported', reason: DRIVE_PHOTO_UNREADABLE }, buffer: null };
+    }
     if (plan.mode === 'unsupported') return { file, plan, buffer: null };
     if (file.size !== null && file.size > plan.maxBytes) throw new AppException('INT-014', `파일이 너무 커서 철강맨AI가 읽지 않아요 (${megabytes(plan.maxBytes)}까지)`);
     const exportMimeType = plan.mode === 'text' ? (plan.exportMimeType ?? undefined) : undefined;
