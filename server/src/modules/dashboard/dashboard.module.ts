@@ -11,5 +11,7 @@ import { DashboardService } from './dashboard.service';
   imports: [SalesOrderModule, InventoryModule, ProductionModule],
   controllers: [DashboardController],
   providers: [DashboardService, DashboardRepository],
+  // AI 어시스턴트 대시보드 현황 도구가 같은 계산을 쓴다 (docs/backend/ai-assistant.md)
+  exports: [DashboardService],
 })
 export class DashboardModule {}

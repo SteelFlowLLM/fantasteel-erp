@@ -4,9 +4,11 @@ import { hasPermission } from '../../../common/auth/auth.guard';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { BusinessEventService } from '../../business-event/business-event.service';
+import { DashboardService } from '../../dashboard/dashboard.service';
 import { InventoryService } from '../../inventory/inventory.service';
 import type { LlmToolCall, LlmToolDefinition } from '../../llm/llm.client';
 import { LotService } from '../../lot/lot.service';
+import { MrpService } from '../../mrp/mrp.service';
 import { PastCaseService } from '../../past-case/past-case.service';
 import { ProductionResultService } from '../../production/production-result.service';
 import { ProductionService } from '../../production/production.service';
@@ -22,12 +24,14 @@ import { AiAssistantRepository } from '../ai-assistant.repository';
 import { ACTION_CARD_TOOLS, actionCardTools } from './action-card.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
 import { businessEventTool } from './business-event.tool';
+import { dashboardTool } from './dashboard.tool';
 import { inventoryTool } from './inventory.tool';
 import { knowledgeTool } from './knowledge.tool';
 import { lotTraceTool } from './lot-trace.tool';
+import { mrpTool } from './mrp.tool';
 import { productionPlanTool, productionResultTool } from './production.tool';
 import { goodsReceiptTool, purchaseOrderTool, purchaseRequisitionTool } from './purchasing.tool';
-import { qualityInspectionTool, rejectedLotTool } from './quality.tool';
+import { qualityInspectionTool, qualityRejectRateTool, rejectedLotTool } from './quality.tool';
 import { salesOrderTool } from './sales-order.tool';
 import { pastCaseTool } from './past-case.tool';
 import { millSheetTool, shipmentRequestTool } from './shipment.tool';
@@ -44,9 +48,14 @@ export interface ToolRunResult {
   cards?: ProposedAnyCard[];
 }
 
-/** 도구가 감싸는 조회 service (REQ-AST-004 조회 대상: 재고, 수주 진행, 생산계획·실적, LOT 역추적, 검사 결과, 구매·입고, 출하·밀시트, 작업 로그 + REQ-AST-006 과거 사례) */
+/**
+ * 도구가 감싸는 조회 service (REQ-AST-004 조회 대상: 재고, 수주 진행, 생산계획·실적, LOT 역추적, 검사 결과, 구매·입고, 출하·밀시트, 작업 로그 + REQ-AST-006 과거 사례).
+ * 대시보드·MRP는 같은 대상을 묶은 숫자(불합격률·수율·출하 실적·원료 소요)라 모델이 직접 계산하지 않게(프롬프트 규칙 4) 따로 둔다
+ */
 export interface AssistantToolServices {
   pastCases: PastCaseService;
+  dashboard: DashboardService;
+  mrp: MrpService;
   inventory: InventoryService;
   salesOrders: SalesOrderService;
   lots: LotService;
@@ -70,11 +79,14 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     lotTraceTool(s.lots),
     qualityInspectionTool(s.quality),
     rejectedLotTool(s.rejectedLots),
+    qualityRejectRateTool(s.quality),
     purchaseRequisitionTool(s.purchasing),
     purchaseOrderTool(s.purchasing),
     goodsReceiptTool(s.purchasing),
+    mrpTool(s.mrp),
     shipmentRequestTool(s.shipments),
     millSheetTool(s.shipments),
+    dashboardTool(s.dashboard),
     businessEventTool(s.events, s.salesOrders, s.lots),
     pastCaseTool(s.pastCases),
     knowledgeTool(),
@@ -107,8 +119,10 @@ export class AssistantToolbox {
     pastCases: PastCaseService,
     actionCards: AiActionCardService,
     opsCards: AiOpsCardService,
+    dashboard: DashboardService,
+    mrp: MrpService,
   ) {
-    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases, actionCards, opsCards });
+    const tools = assistantTools({ inventory, salesOrders, lots, events, plans, results, quality, rejectedLots, purchasing, shipments, pastCases, actionCards, opsCards, dashboard, mrp });
     this.tools = new Map(tools.map((tool) => [tool.definition.name, tool]));
   }
 

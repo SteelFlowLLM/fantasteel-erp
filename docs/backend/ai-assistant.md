@@ -105,16 +105,21 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `get_production_results` | `ProductionResultService.listResults` (GET production-results) | 작업 실적 확정 VIEW | `productionPlanNo`(→ id), `processType`. 최신 15건, 산출 LOT 5개까지(생략한 수를 함께 줌). 계획 번호로 거르면 제선 실적이 빠진다는 안내를 붙임(제선은 `production_plan_id` null) |
 | `get_quality_inspections` | `QualityService.listQualityInspections` (GET quality-inspections) | 검사 등록 VIEW | `status`(pending·done), `result`(PASS·FAIL), `lotNo`. 상위 히트 판정 포함 |
 | `get_rejected_lots` | `RejectedLotService.listRejectedLots` (GET lots/rejected) | SERVICE: 불합격 처리 또는 검사 등록 VIEW | 없음. 불합격 상태·사유, 기준을 벗어난 항목만 |
+| `get_quality_reject_rate` | `QualityService.listQualityInspections` (GET quality-inspections?status=done을 100건씩, 판정 시각 최신순이라 기간 시작일 전이 나오면 멈춤, 5,000건까지) | 검사 등록 VIEW | `days`(1~365, 기본 30), `steelGradeCode`. 강종별·강종 안 공정별 판정 수·불합격 수·불합격률(소수 1자리 %). 대시보드 강종별 불합격률 위젯과 같은 기준(판정 시각 서울 날짜가 기간 안인 합격·불합격 중 불합격) |
 | `get_purchase_requisitions` | `PurchasingService.listRequisitions` (GET purchase-requisitions) | SERVICE: 구매요청 등록 VIEW 또는 부서장 | `status`, `keyword`(번호·원료) |
 | `get_purchase_orders` | `PurchasingService.listPurchaseOrders` (GET purchase-orders) | 발주 확정 VIEW | `status`, `keyword`(번호·공급업체·원료). 품목별 입고예정일·미입고 톤(= 입고예정) |
 | `get_goods_receipts` | `PurchasingService.listGoodsReceipts` (GET goods-receipts) | 입고 확정 VIEW | `keyword`(입고·발주 번호·원료). 거를 말이 없으면 최신 15건 |
+| `get_mrp_requirements` | `MrpService.requirements` (GET mrp/requirements, API-206) | 구매요청 등록·MRP VIEW | `from`·`to`(YYYY-MM-DD, 기본 오늘 ~ 오늘 + 30일 = Factory Agent 원료 부족 기간). 원료별 소요·잔량·입고예정·순소요 톤과 처음 부족한 필요일, 구매요청으로 이어질 줄 15줄 |
 | `get_shipment_requests` | `ShipmentService.list` (GET shipment-requests) | SERVICE: 출하요청 관리 또는 출고 확정 VIEW | `status`, `shipmentRequestNo`, `customerName`(API는 고객사 id만 받아 100건을 읽어 이름으로 거름) |
 | `get_mill_sheets` | `ShipmentService.listMillSheets` (GET mill-sheets) | 밀시트 조회 VIEW | `keyword`(밀시트·출하요청·수주번호) |
+| `get_dashboard_summary` | `DashboardService` (GET dashboard/widgets/*, REQ-DSH-001·002. `DashboardModule`이 service를 export) | SERVICE: 위젯별로 대시보드 API와 같음 — `process_flow`·`surplus_age` 전 역할, `shipment_result` 출고 확정 VIEW, `process_yield` 작업 실적 확정 VIEW | `widget`(필수: `process_flow` 공정 흐름 현황, `shipment_result` 최근 30일 출하 실적, `process_yield` 공정별 수율, `surplus_age` 여재 보유 기간). 수율은 %(소수 1자리)로. 수주 충족·제품 재고는 `get_sales_orders`·`get_inventory`가 같은 숫자를 줘서 넣지 않음 |
 | `get_business_events` | `BusinessEventService.list` (GET business-events) | 없음(전 역할) | `salesOrderNo`, `lotNo`, `from`·`to`. 최신순 15건, 변경 전·후 원본은 넘기지 않음 |
 | `search_past_cases` | `PastCaseService.search` (GET past-cases, REQ-AST-006) | 없음(전 역할) | `query`(핵심어), `category`(QUALITY·EQUIPMENT). 5건까지, 예시 사례는 "예시 사례(실제 사례 아님)"로 표시 (`past-case.md`) |
 | `read_knowledge` | `knowledge/knowledge.read.ts` (용어·업무·매뉴얼 생성 파일. REQ-AST-003) | 없음(전 역할) | `kind`(manual·process·glossary), `id`(MAN-SO-01·BP-SO-01, 용어는 이름 또는 TRM ID). 본문 4,000자까지(넘으면 잘렸다고 알림). 없는 id는 가능한 값·비슷한 용어를 알려 줌. 출처 줄(DATA)에는 남기지 않음 |
 
 번호·키워드로 거를 수 없는 API는 100건(API 상한)을 읽어 서버에서 거른다. 그보다 많으면 '확인하지 못한 … 수'를 함께 준다.
+
+비율·합계를 묻는 질문(불합격률·수율·출하 실적·원료 소요)은 모델이 목록으로 직접 계산하지 않는다(프롬프트 규칙 4). 그래서 `get_quality_reject_rate`·`get_dashboard_summary`·`get_mrp_requirements`가 대시보드·MRP 화면과 같은 계산 결과를 주고, 규칙 3에 이 도구들을 먼저 쓰라고 적는다. 이 도구들이 없을 때는 "강종별 불합격률 알려줘"에 도구를 부르지 않고 "아직 조회할 수 없어요"로 답했다(2026-10-19 확인).
 
 **웹 검색 (이슈 #367, 문서에 없는 기능·결정값)** — `web/`
 - 켜기: 요청의 `webSearch: true` + 실시간 답 API일 때만 웹 도구와 `[웹 검색 규칙]`을 알린다. 사내 채팅 @AI(API-262)는 웹 내용이 방 멤버 모두에게 보이게 되므로 쓰지 않는다. 알리지 않은 웹 도구를 모델이 부르면 조회 도구 모음이 "없는 도구예요"만 돌려준다.

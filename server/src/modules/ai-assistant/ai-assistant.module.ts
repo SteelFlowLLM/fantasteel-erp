@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BusinessEventModule } from '../business-event/business-event.module';
+import { DashboardModule } from '../dashboard/dashboard.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { LlmModule } from '../llm/llm.module';
 import { MeetingMinutesModule } from '../meeting-minutes/meeting-minutes.module';
 import { MessageActionModule } from '../message-action/message-action.module';
+import { MrpModule } from '../mrp/mrp.module';
 import { NotificationModule } from '../notification/notification.module';
 import { PastCaseModule } from '../past-case/past-case.module';
 import { LotModule } from '../lot/lot.module';
@@ -37,6 +39,9 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     BusinessEventModule,
     MeetingMinutesModule,
     PastCaseModule,
+    // 불합격률·수율·출하 실적·원료 소요처럼 묶은 숫자는 대시보드·MRP 계산을 그대로 쓴다
+    DashboardModule,
+    MrpModule,
     // 실행 카드가 업무·알림·구매요청 초안을 만든다 (REQ-AST-005)
     NotificationModule,
     MessageActionModule,
