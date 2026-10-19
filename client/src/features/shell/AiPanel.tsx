@@ -146,6 +146,8 @@ export function AiPanel() {
       aria-label="철강맨AI"
       // 펫이 패널 밑(보내기 버튼 위)에 서 있지 않게 비켜서게 한다 (pet-engine.js avoidEdges)
       data-pet-avoid=""
+      // 패널은 펫보다 아래 층이라, 패널 밑에 깔린 요소를 가리키는 표시(테두리·지시봉)는 패널 앞에서 멈추게 한다
+      data-pet-cover=""
       className={`absolute inset-y-0 right-0 z-10 flex min-h-0 flex-col border-l-2 border-ink bg-surface shadow-[-4px_0_0_rgba(18,24,32,0.16),var(--shadow-pop)] ${expanded ? 'w-full' : 'w-[min(620px,46vw)]'}`}
     >
       <div className="flex min-h-12 flex-none items-center gap-1 border-b-2 border-line bg-surface-2 py-1.5 pr-2 pl-3">

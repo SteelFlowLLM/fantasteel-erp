@@ -2817,6 +2817,13 @@
       top = Math.max(top, 0);
       right = Math.min(right, W());
       bottom = Math.min(bottom, H());
+      // 펫보다 아래 층에 있는 채팅창(data-pet-cover)이 화면 한쪽을 덮으면, 그 밑의 요소는 표시도 그 앞에서 멈춘다
+      for (const c of doc.querySelectorAll('[data-pet-cover]')) {
+        const cr = c.getBoundingClientRect();
+        if (cr.width <= 0 || cr.height <= 0) continue;
+        if (cr.left >= W() / 2) right = Math.min(right, cr.left);
+        else left = Math.max(left, cr.right);
+      }
       return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
     }
     function placeFlash(it) {
@@ -2849,6 +2856,7 @@
     function showBeam(el) {
       hideBeam(true);
       if (!el || !el.isConnected || S.mode !== 'ground') return null;
+      if (visibleRect(el).width <= 0) return null;
       const g = beamGeom(el);
       if (g.len < BEAM_MIN) return null;
       const th = Math.max(6, Math.round(4 * S.scale));
