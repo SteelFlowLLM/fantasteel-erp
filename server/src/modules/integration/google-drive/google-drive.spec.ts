@@ -368,6 +368,7 @@ describe('연결 전', () => {
       authMode: 'OAUTH',
       serviceAccountEmail: null,
       driveFolderFromEnv: false,
+      notionWorkspace: null,
     });
   });
 

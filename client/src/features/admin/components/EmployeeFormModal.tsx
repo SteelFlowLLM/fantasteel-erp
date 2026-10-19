@@ -1,6 +1,6 @@
 'use client';
 
-// 사원 등록·정보 수정 창 (REQ-AUTH-002). 칸: 사원번호·이름·부서·직급·역할(1개). 비밀번호·이메일은 로그인 작업 때 넣는다.
+// 사원 등록·정보 수정 창 (REQ-AUTH-002). 칸: 사원번호·이름·부서·직급·역할(1개)·메일(이슈 #391, 선택). 비밀번호는 등록할 때만 받는다.
 import { useState } from 'react';
 import { ROLE_LABEL } from '@/codes';
 import { employeeAdminApi } from '@/api/adminEmployees';
@@ -68,6 +68,7 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
         departmentId: form.departmentId,
         jobGradeId: form.jobGradeId,
         roleId: form.roleId,
+        email: form.email,
         expectedUpdatedAt: opened.expectedUpdatedAt,
       });
     } else {
@@ -77,6 +78,7 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
         departmentId: form.departmentId,
         jobGradeId: form.jobGradeId,
         roleId: form.roleId,
+        email: form.email,
         password: askPassword ? password : undefined,
       });
     }
@@ -163,6 +165,24 @@ export function EmployeeFormModal({ target, meId, departments, jobGrades, roles,
               </option>
             ))}
           </Select>
+        </Field>
+        <Field
+          className="col-span-2"
+          label="메일"
+          error={errors.email}
+          hint="Notion 캘린더 일정 초대를 보낼 때 써요 · 비워 둘 수 있어요"
+          htmlFor="employee-email"
+        >
+          <Input
+            id="employee-email"
+            type="email"
+            autoComplete="off"
+            maxLength={254}
+            placeholder="name@company.com"
+            value={form.email}
+            invalid={Boolean(errors.email)}
+            onChange={(e) => set('email', e.target.value)}
+          />
         </Field>
       </div>
 

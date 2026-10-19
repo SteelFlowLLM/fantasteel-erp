@@ -12,6 +12,8 @@ export interface EmployeeCreateInput {
   roleId: number | null;
   /** 등록 때 필수 (API-156 bcrypt 저장). 없으면 서버 어댑터가 입력칸 오류로 막는다 */
   password?: string;
+  /** 회사 메일 (이슈 #391). 비우면 저장하지 않는다 */
+  email?: string;
 }
 
 export interface EmployeeUpdateInput {
@@ -20,6 +22,8 @@ export interface EmployeeUpdateInput {
   departmentId: number | null;
   jobGradeId: number | null;
   roleId: number | null;
+  /** 회사 메일 (이슈 #391). 비우면 지운다 */
+  email?: string;
   /** 수정 화면을 연 시점의 updatedAt (COM-001) */
   expectedUpdatedAt?: string | null;
 }
@@ -40,7 +44,7 @@ export const employeeAdminApi = {
   /** 사원 등록: 사용 중(is_active = true)으로 만든다. */
   create: (input: EmployeeCreateInput): Promise<EmployeeSaved> => serverOrganizationApi.createEmployee(input),
 
-  /** 사원 정보 수정: 이름·부서·직급·역할. 사원번호는 바꾸지 않는다. */
+  /** 사원 정보 수정: 이름·부서·직급·역할·메일. 사원번호는 바꾸지 않는다. */
   update: (input: EmployeeUpdateInput): Promise<EmployeeSaved> => serverOrganizationApi.updateEmployee(input),
 
   /** 사용 안 함으로 바꾸기 (퇴사 처리, 컨벤션 7-2). 조직도·담당자 목록에서 빠지고 업무를 할 수 없다. */

@@ -5,7 +5,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
 import { readSettings } from '../integration-settings';
 import { isRejectedBeforeRun, McpClientService } from '../mcp/mcp.client';
-import { buildCreatePageArgs, NOTION_CREATE_PAGES_TOOL, readCreatedPageUrl, type NotionPageDraft } from './notion.tools';
+import { buildCreatePageArgs, NOTION_CREATE_PAGES_TOOL, parentPageNotFound, readCreatedPageUrl, type NotionPageDraft } from './notion.tools';
 
 /** 페이지가 만들어졌는지 알 수 없을 때. 다시 누르면 같은 페이지가 하나 더 생길 수 있어 확인을 먼저 부탁한다 */
 const UNCERTAIN_MESSAGE = 'Notion 페이지가 만들어졌는지 확인하지 못했어요. 상위 페이지에 이미 생겼는지 Notion에서 확인한 뒤, 없으면 몇 분 뒤 다시 내보내 주세요';
@@ -52,7 +52,7 @@ export class NotionPageService {
       try {
         result = await session.callTool(tool.name, args);
       } catch (error) {
-        if (isRejectedBeforeRun(error)) throw error;
+        if (isRejectedBeforeRun(error)) throw parentPageNotFound(error) ?? error;
         this.logger.warn(`Notion 페이지 만들기 결과를 알 수 없음: ${error instanceof Error ? error.message : String(error)}`);
         throw new AppException('INT-009', UNCERTAIN_MESSAGE);
       }

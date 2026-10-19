@@ -66,6 +66,7 @@ export class OrganizationService {
         departmentId: dto.departmentId,
         jobGradeId: dto.jobGradeId,
         roleId: dto.roleId,
+        email: dto.email ?? null,
       });
     });
     return this.employeeView(id);
@@ -86,6 +87,7 @@ export class OrganizationService {
         jobGradeId: dto.jobGradeId,
         roleId: dto.roleId,
         isActive: dto.isActive,
+        email: dto.email,
       });
     });
     return this.employeeView(id);
@@ -304,6 +306,7 @@ function toEmployeeView(row: EmployeeRow): EmployeeView {
     roleCode: row.role.roleCode as Role,
     roleName: row.role.roleName,
     isActive: row.isActive,
+    email: row.email,
     headDepartmentIds: row.departmentsAsHeadEmployee.map((d) => d.id),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

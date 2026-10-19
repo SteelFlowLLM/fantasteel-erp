@@ -1,6 +1,7 @@
 import { INTEGRATION_PROVIDER, type IntegrationProtocol, type IntegrationProviderKey } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { NOTION_CREATE_PAGES_TOOL } from './notion/notion.tools';
+import { NOTION_CREATE_DATABASE_TOOL, NOTION_CREATE_VIEW_TOOL, NOTION_UPDATE_PAGE_TOOL } from './notion/notion-workspace.tools';
 
 /** Notion 공식 원격 MCP 서버 (OAuth만 받는다) */
 export const NOTION_MCP_DEFAULT_URL = 'https://mcp.notion.com/mcp';
@@ -27,7 +28,8 @@ export function providerPresets(): Record<IntegrationProviderKey, IntegrationPro
       displayName: 'Notion',
       protocol: 'MCP',
       serverUrl: process.env.NOTION_MCP_URL || NOTION_MCP_DEFAULT_URL,
-      requiredTools: [NOTION_CREATE_PAGES_TOOL],
+      // 회의록 내보내기 + 업무 공간 (데이터베이스·보기 만들기, 페이지 고치기)
+      requiredTools: [NOTION_CREATE_PAGES_TOOL, NOTION_CREATE_DATABASE_TOOL, NOTION_CREATE_VIEW_TOOL, NOTION_UPDATE_PAGE_TOOL],
     },
     [INTEGRATION_PROVIDER.GOOGLE_DRIVE]: {
       key: INTEGRATION_PROVIDER.GOOGLE_DRIVE,

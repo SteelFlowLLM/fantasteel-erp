@@ -2,6 +2,7 @@ import { ROLE, type AuthUser } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import type { PrismaService, Tx } from '../../prisma/prisma.service';
+import type { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import type { MessageActionService } from '../message-action/message-action.service';
 import type { NotificationService } from '../notification/notification.service';
 import type { TaskService } from '../notification/task.service';
@@ -43,7 +44,8 @@ function setup(options: { canRequestPurchase?: boolean; inactiveIds?: number[] }
     },
     createFromAssistant: record('createFromAssistant', 31),
   } as unknown as MessageActionService;
-  return { service: new AiActionCardService(prisma, repository, tasks, notifications, messageActions), calls };
+  const notionWorkspace = { kick: () => undefined } as unknown as NotionWorkspaceService;
+  return { service: new AiActionCardService(prisma, repository, tasks, notifications, messageActions, notionWorkspace), calls };
 }
 
 const dto = (over: Partial<ExecuteAiActionCardDto>): ExecuteAiActionCardDto => ({ kind: 'TASK', title: '견적서 보내기', ...over }) as ExecuteAiActionCardDto;

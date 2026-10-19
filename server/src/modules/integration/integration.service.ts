@@ -9,11 +9,13 @@ import {
   type IntegrationOAuthClientView,
   type IntegrationSettings,
   type IntegrationTestResult,
+  type NotionCalendarOption,
+  type NotionWorkspaceView,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
-import type { UpdateIntegrationSettingsDto, OAuthCallbackQuery } from './dto/integration.dto';
+import type { UpdateIntegrationSettingsDto, UpdateNotionCalendarDto, OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationConnectionRepository, type IntegrationConnectionRow } from './integration-connection.repository';
 import { IntegrationCrypto } from './integration-crypto';
 import { isProviderKey, mcpServerUrlOf, providerPreset, providerPresets, type IntegrationProviderPreset } from './integration-providers';
@@ -28,6 +30,7 @@ import { clientInputError, type GoogleClientCredentials } from './google-drive/g
 import { GoogleServiceAccount } from './google-drive/google-service-account';
 import { McpClientService } from './mcp/mcp.client';
 import { normalizeNotionPageId } from './notion/notion.tools';
+import { NotionWorkspaceService } from './notion/notion-workspace.service';
 
 /** 관리자가 허용 화면(Notion·Google)에서 머무를 수 있는 시간 */
 const OAUTH_STATE_TTL_MS = 10 * 60_000;
@@ -55,6 +58,7 @@ function toView(
   row: IntegrationConnectionRow | null,
   oauthClient: IntegrationOAuthClientView | null,
   serviceAccount: ServiceAccountView | null,
+  notionWorkspace: NotionWorkspaceView | null,
 ): IntegrationConnectionView {
   const settings = readSettings(row?.settings ?? null);
   const folder = preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE ? effectiveDriveFolder(settings.folderId) : null;
@@ -76,6 +80,7 @@ function toView(
     authMode: serviceAccount ? 'SERVICE_ACCOUNT' : 'OAUTH',
     serviceAccountEmail: serviceAccount?.email ?? null,
     driveFolderFromEnv: folder?.fromEnv ?? false,
+    notionWorkspace,
   };
 }
 
@@ -112,6 +117,7 @@ export class IntegrationService {
     private readonly drive: GoogleDriveClient,
     private readonly driveService: GoogleDriveService,
     private readonly serviceAccount: GoogleServiceAccount,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   /**
@@ -129,9 +135,10 @@ export class IntegrationService {
     }
   }
 
-  private view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): IntegrationConnectionView {
+  private async view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): Promise<IntegrationConnectionView> {
     const serviceAccount = this.usesServiceAccount(preset) ? { email: this.serviceAccount.email(), error: this.serviceAccount.configError() } : null;
-    return toView(preset, row, this.oauthClientView(preset, row), serviceAccount);
+    const workspace = preset.key === INTEGRATION_PROVIDER.NOTION ? await this.notionWorkspace.view(readSettings(row?.settings ?? null)) : null;
+    return toView(preset, row, this.oauthClientView(preset, row), serviceAccount, workspace);
   }
 
   /** Google Drive이고 .env에 서비스 계정 키가 있으면 OAuth 연결 대신 그것을 쓴다 */
@@ -147,7 +154,7 @@ export class IntegrationService {
   /** 연결할 수 있는 대상 전부. 아직 행이 없으면 연결하지 않은 상태로 보인다 */
   async list(): Promise<IntegrationConnectionView[]> {
     const rows = new Map((await this.repository.findAll(this.prisma)).map((row) => [row.providerKey, row]));
-    return Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null));
+    return Promise.all(Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null)));
   }
 
   async get(providerKey: string): Promise<IntegrationConnectionView> {
@@ -270,6 +277,26 @@ export class IntegrationService {
       });
     });
     return this.view(preset, row);
+  }
+
+  /**
+   * Notion 업무 공간 만들기 (이슈 #391): 상위 페이지 아래 일정·회의록·할 일 데이터베이스와 보기를 만들고 자동 반영을 시작한다.
+   * 이미 만들었으면 다시 만들지 않고 지금 상태를 돌려준다.
+   */
+  async setupNotionWorkspace(): Promise<IntegrationConnectionView> {
+    await this.notionWorkspace.setup();
+    return this.get(INTEGRATION_PROVIDER.NOTION);
+  }
+
+  /** 회사 Notion 계정에 연결된 캘린더 (이슈 #391 2단계). 없으면 빈 배열 */
+  listNotionCalendars(): Promise<NotionCalendarOption[]> {
+    return this.notionWorkspace.listCalendars();
+  }
+
+  /** 일정을 함께 만들 Notion 캘린더와 초대 여부 (이슈 #391 2단계) */
+  async updateNotionCalendar(dto: UpdateNotionCalendarDto): Promise<IntegrationConnectionView> {
+    await this.notionWorkspace.updateCalendar(dto);
+    return this.get(INTEGRATION_PROVIDER.NOTION);
   }
 
   /** MCP: 저장된 토큰으로 붙어 도구 목록을 받는다. Google Drive: 폴더와 그 안의 녹음·사진 수. 실패도 오류가 아니라 결과로 돌려준다 */

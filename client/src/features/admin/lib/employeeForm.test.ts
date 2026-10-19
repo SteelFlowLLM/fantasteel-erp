@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL } from '@/codes';
-import { isEmployeeFormDirty, openEmployeeForm } from '@/features/admin/lib/employeeForm';
+import { employeeEmailProblem, isEmployeeFormDirty, openEmployeeForm } from '@/features/admin/lib/employeeForm';
 import { levelCountText, levelLabelOf, NO_PERMISSION_LEVEL_LABEL } from '@/features/admin/lib/permissionMatrix';
 
 const target = { employeeNo: '2610001', employeeName: '박서영', departmentId: 2, jobGradeId: 3, roleId: 1, updatedAt: '2026-10-01T09:00:00.000Z' };
@@ -17,7 +17,7 @@ describe('사원 수정 창: 연 시점의 값 (COM-001)', () => {
 
   it('등록이면 빈 값과 updatedAt 없음', () => {
     expect(openEmployeeForm()).toEqual({
-      values: { employeeNo: '', employeeName: '', departmentId: null, jobGradeId: null, roleId: null },
+      values: { employeeNo: '', employeeName: '', departmentId: null, jobGradeId: null, roleId: null, email: '' },
       expectedUpdatedAt: null,
     });
   });
@@ -28,6 +28,20 @@ describe('사원 수정 창: 연 시점의 값 (COM-001)', () => {
     expect(isEmployeeFormDirty({ ...values, employeeName: ' 박서영 ' }, values)).toBe(false);
     expect(isEmployeeFormDirty({ ...values, employeeName: '박서윤' }, values)).toBe(true);
     expect(isEmployeeFormDirty({ ...values, roleId: 2 }, values)).toBe(true);
+    expect(isEmployeeFormDirty({ ...values, email: '  ' }, values)).toBe(false);
+    expect(isEmployeeFormDirty({ ...values, email: 'park@fantasteel.test' }, values)).toBe(true);
+  });
+
+  it('메일: 저장된 값이 있으면 그대로, 없으면 빈 글로 연다', () => {
+    expect(openEmployeeForm({ ...target, email: 'park@fantasteel.test' }).values.email).toBe('park@fantasteel.test');
+    expect(openEmployeeForm({ ...target, email: null }).values.email).toBe('');
+  });
+
+  it('메일 형식: 비우면 통과, 모양이 틀리거나 너무 길면 문구', () => {
+    expect(employeeEmailProblem('')).toBeNull();
+    expect(employeeEmailProblem(' park@fantasteel.test ')).toBeNull();
+    expect(employeeEmailProblem('park@')).toBe('메일 주소 형식이 올바르지 않아요');
+    expect(employeeEmailProblem(`${'a'.repeat(250)}@x.co`)).toContain('254자');
   });
 });
 
