@@ -1,8 +1,8 @@
-import { Body, Controller, Get, HttpCode, Injectable, Param, Post, Put, Query, type PipeTransform } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Injectable, Param, Patch, Post, Put, Query, type PipeTransform } from '@nestjs/common';
 import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, StartAiResearchRunDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
+import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, RenameAiResearchRunDto, StartAiResearchRunDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchService } from './ai-research.service';
 
 /**
@@ -46,6 +46,16 @@ export class AiResearchController {
   @Put('ai-research/runs/:id/plan')
   updatePlan(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: UpdateAiResearchPlanDto): Promise<AiResearchRunView> {
     return this.service.updatePlan(user, id, dto.revision, dto.plan);
+  }
+
+  @Patch('ai-research/runs/:id/title')
+  rename(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: RenameAiResearchRunDto): Promise<AiResearchRunView> {
+    return this.service.rename(user, id, dto.revision, dto.title);
+  }
+
+  @Post('ai-research/runs/:id/rerun')
+  rerun(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchRunView> {
+    return this.service.rerun(user, id);
   }
 
   @Post('ai-research/runs/:id/start')

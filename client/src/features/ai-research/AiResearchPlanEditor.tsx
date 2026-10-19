@@ -1,9 +1,10 @@
 'use client';
 
-// 조사 계획 고치기 (AWAITING_APPROVAL). 시작을 누르면 고친 계획을 판(revision)과 함께 보내고, 그 사이 다른 곳에서 바뀌었으면 서버가 막는다 (RES-003).
+// 조사 계획 고치기 (AWAITING_APPROVAL). [계획 저장]은 시작하지 않고 저장만, [조사 시작]은 고친 것이 있으면 저장한 뒤 시작한다.
+// 둘 다 판(revision)과 함께 보내고, 그 사이 다른 곳에서 바뀌었으면 서버가 막는다 (RES-003).
 import { AI_RESEARCH_LIMITS, type AiResearchPlan, type AiResearchRunView } from '@fantasteel/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { aiResearchApi, aiResearchKeys } from '@/api/aiResearch';
 import { errorCodeOf } from '@/api/http';
 import { Button } from '@/components/Button';
@@ -12,7 +13,7 @@ import { Field } from '@/components/Field';
 import { IconButton } from '@/components/IconButton';
 import { Input } from '@/components/Input';
 import { useAction } from '@/hooks/useAction';
-import { addPlanStep, isPlanChanged, movePlanStep, normalizePlan, removePlanStep, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, isPlanChanged, movePlanStep, normalizePlan, planBlockReason, removePlanStep, validatePlan } from '@/lib/aiResearch';
 import { toast } from '@/stores/useToastStore';
 
 export function AiResearchPlanEditor({ run }: { run: AiResearchRunView }) {
@@ -20,36 +21,47 @@ export function AiResearchPlanEditor({ run }: { run: AiResearchRunView }) {
   const original: AiResearchPlan = run.plan ?? { title: run.question.slice(0, AI_RESEARCH_LIMITS.planTitleMax), steps: [] };
   const [plan, setPlan] = useState<AiResearchPlan>(original);
   const problems = validatePlan(plan);
+  const blockReason = planBlockReason(problems);
   const changed = isPlanChanged(original, plan);
+  const reasonId = useId();
 
+  // 다른 곳에서 계획이 바뀌었거나 상태가 달라졌으면 서버의 최신 상태로 다시 읽는다
+  const onConflict = (verb: '저장' | '시작') => (error: unknown) => {
+    const code = errorCodeOf(error);
+    if (code === 'RES-003' || code === 'RES-002') {
+      toast.error(code === 'RES-003' ? `다른 곳에서 계획이 바뀌었어요. 새 계획을 불러왔으니 확인하고 다시 ${verb}해 주세요` : `지금 상태에서는 ${verb}할 수 없어요. 최신 상태를 불러왔어요`);
+      void queryClient.invalidateQueries({ queryKey: aiResearchKeys.all });
+    } else {
+      toast.apiError(error);
+    }
+  };
+
+  // 저장하면 판이 올라 이 칸은 새 계획으로 다시 그려진다 (상위의 key가 판을 포함)
+  const save = useAction(() => aiResearchApi.updatePlan(run.id, run.planRevision, normalizePlan(plan)), { success: '계획을 저장했어요', toastOnError: false, onError: onConflict('저장') });
   const start = useAction(
     async () => {
       let revision = run.planRevision;
       if (changed) revision = (await aiResearchApi.updatePlan(run.id, revision, normalizePlan(plan))).planRevision;
       return aiResearchApi.start(run.id, revision);
     },
-    {
-      success: '조사를 시작했어요',
-      toastOnError: false,
-      onError: (error) => {
-        // 다른 곳에서 계획이 바뀌었거나 상태가 달라졌으면 서버의 최신 상태로 다시 읽는다
-        const code = errorCodeOf(error);
-        if (code === 'RES-003' || code === 'RES-002') {
-          toast.error(code === 'RES-003' ? '다른 곳에서 계획이 바뀌었어요. 새 계획을 불러왔으니 확인하고 다시 시작해 주세요' : '지금 상태에서는 시작할 수 없어요. 최신 상태를 불러왔어요');
-          void queryClient.invalidateQueries({ queryKey: aiResearchKeys.all });
-        } else {
-          toast.apiError(error);
-        }
-      },
-    },
+    { success: '조사를 시작했어요', toastOnError: false, onError: onConflict('시작') },
   );
+  const busy = save.isPending || start.isPending;
+
+  // 저장하지 않은 고침이 있으면 창을 닫거나 새로 고치기 전에 브라우저가 묻는다
+  useEffect(() => {
+    if (!changed) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [changed]);
 
   const setStep = (index: number, field: 'title' | 'query', value: string) =>
     setPlan((current) => ({ ...current, steps: current.steps.map((step, i) => (i === index ? { ...step, [field]: value } : step)) }));
 
   return (
     <Card className="flex-none">
-      <CardHead title="조사 계획" meta="고쳐도 되고 그대로 시작해도 돼요" />
+      <CardHead title="조사 계획" meta="고쳐서 저장해 두거나 그대로 시작해도 돼요" />
       <CardBody className="gap-3">
         <Field label="제목" htmlFor="research-plan-title" error={problems?.title}>
           <Input id="research-plan-title" value={plan.title} maxLength={AI_RESEARCH_LIMITS.planTitleMax} invalid={!!problems?.title} onChange={(event) => setPlan({ ...plan, title: event.target.value })} />
@@ -89,10 +101,22 @@ export function AiResearchPlanEditor({ run }: { run: AiResearchRunView }) {
           </span>
         </div>
       </CardBody>
-      <CardFoot>
-        <Button variant="primary" icon="arrow-right" disabled={problems !== null || start.isPending} onClick={() => start.mutate(undefined)}>
-          조사 시작
+      <CardFoot className="flex-wrap">
+        <Button variant="primary" icon="arrow-right" disabled={problems !== null || busy} aria-describedby={blockReason ? reasonId : undefined} onClick={() => start.mutate(undefined)}>
+          {changed ? '저장하고 조사 시작' : '조사 시작'}
         </Button>
+        <Button icon="check" disabled={!changed || problems !== null || busy} aria-busy={save.isPending} onClick={() => save.mutate(undefined)}>
+          {save.isPending ? '저장하는 중…' : '계획 저장'}
+        </Button>
+        {blockReason ? (
+          <span id={reasonId} className="text-cap text-danger">
+            고칠 곳이 있어 시작할 수 없어요 · {blockReason}
+          </span>
+        ) : changed ? (
+          <span className="text-cap text-ink-3">저장하지 않은 고침이 있어요. 저장하지 않고 다른 조사로 옮기면 사라져요</span>
+        ) : (
+          <span className="text-cap text-ink-3">저장된 계획이에요</span>
+        )}
       </CardFoot>
     </Card>
   );

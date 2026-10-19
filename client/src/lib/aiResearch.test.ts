@@ -1,6 +1,6 @@
 import type { AiResearchEventView, AiResearchPlan, AiResearchRunView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { addPlanStep, canCancelRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
 
 const at = '2026-10-17T01:00:00.000Z';
 const sources = [
@@ -17,6 +17,18 @@ describe('폴링 조건', () => {
   it('끝나지 않은 조사만 취소할 수 있다', () => {
     expect(canCancelRun('AWAITING_APPROVAL')).toBe(true);
     expect(canCancelRun('COMPLETED')).toBe(false);
+  });
+  it('끝난(완료·실패·취소) 조사만 다시 조사할 수 있다', () => {
+    expect(['COMPLETED', 'FAILED', 'CANCELLED'].map((s) => canRerunRun(s as never))).toEqual([true, true, true]);
+    expect(['PLANNING', 'AWAITING_APPROVAL', 'QUEUED', 'RUNNING'].map((s) => canRerunRun(s as never))).toEqual([false, false, false, false]);
+  });
+  it('머리의 제목 바꾸기는 계획이 있고 계획 확인 대기가 아닐 때만 (대기 중에는 계획 칸에서 고친다)', () => {
+    const plan = { title: 't', steps: [] };
+    expect(canRenameRun({ status: 'RUNNING', plan })).toBe(true);
+    expect(canRenameRun({ status: 'COMPLETED', plan })).toBe(true);
+    expect(canRenameRun({ status: 'AWAITING_APPROVAL', plan })).toBe(false);
+    expect(canRenameRun({ status: 'PLANNING', plan: null })).toBe(false);
+    expect(canRenameRun({ status: 'CANCELLED', plan: null })).toBe(false);
   });
 });
 
@@ -49,6 +61,11 @@ describe('타임라인', () => {
   it('실패한 읽기·검색은 경고 톤', () => {
     expect(timelineLineOf({ seq: 3, type: 'page.read', createdAt: at, payload: { sourceId: 1, title: '', chars: 0, error: '시간 초과' } }).tone).toBe('wait');
     expect(timelineLineOf({ seq: 4, type: 'failed', createdAt: at, payload: { reason: '이유' } }).tone).toBe('danger');
+  });
+  it('다시 조사로 가져온 계획은 어느 조사에서 왔는지 보인다', () => {
+    const payload = { title: '계획', stepCount: 2, revision: 1, fallback: false };
+    expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload: { ...payload, copiedFrom: 7 } }).title).toBe('조사 #7의 계획을 가져왔어요 · 2단계');
+    expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload }).title).toBe('계획을 세웠어요 · 2단계');
   });
   it('조사 메모는 요약과 모자란 것 개수를 보인다', () => {
     const line = timelineLineOf({ seq: 5, type: 'state.updated', createdAt: at, payload: { summary: '요약', gapCount: 2, unsupportedCount: 0 } });
@@ -109,6 +126,17 @@ describe('계획 고치기', () => {
     expect(removePlanStep(plan.steps, 0).map((s) => s.title)).toEqual(['B']);
     expect(movePlanStep(plan.steps, 0, 1).map((s) => s.title)).toEqual(['B', 'A']);
     expect(movePlanStep(plan.steps, 0, -1).map((s) => s.title)).toEqual(['A', 'B']);
+  });
+  it('시작·저장을 막는 까닭은 맨 앞 문제를 칸 이름과 함께, 더 있으면 남은 곳 수', () => {
+    expect(planBlockReason(validatePlan(plan))).toBeNull();
+    expect(planBlockReason(validatePlan({ ...plan, steps: [plan.steps[0], { title: 'B', query: ' ' }] }))).toBe('2단계: 검색어를 적어 주세요');
+    expect(planBlockReason(validatePlan({ title: '', steps: [{ title: '', query: '열연 가격' }, { title: 'B', query: '열연 가격' }] }))).toBe('제목을 적어 주세요 외 2곳');
+    expect(planBlockReason(validatePlan({ title: 't', steps: [] }))).toBe('단계를 하나 이상 넣어 주세요');
+  });
+  it('제목 확인은 빈 칸과 100자 상한', () => {
+    expect(planTitleProblem('  ')).toBe('제목을 적어 주세요');
+    expect(planTitleProblem('x'.repeat(101))).toBe('제목은 100자까지 쓸 수 있어요');
+    expect(planTitleProblem(' 새 제목 ')).toBeNull();
   });
   it('공백만 다른 수정은 바뀐 것이 아니다', () => {
     expect(isPlanChanged(plan, { ...plan, title: ' 조사 ' })).toBe(false);
