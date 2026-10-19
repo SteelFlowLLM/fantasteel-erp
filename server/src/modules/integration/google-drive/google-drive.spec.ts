@@ -14,6 +14,9 @@ import { SttClient, type SttTranscript } from '../../stt/stt.client';
 import { SttSettingsStore } from '../../stt/stt-settings.store';
 import { MeetingTranscriptionRunner } from '../../meeting-minutes/meeting-transcription.runner';
 import { IntegrationCrypto } from '../integration-crypto';
+import { AiAssistantService } from '../../ai-assistant/ai-assistant.service';
+import { AssistantDriveToolbox } from '../../ai-assistant/drive/assistant-drive-toolbox';
+import { tinyPdf } from '../../ai-assistant/web/fixtures/tiny-pdf';
 import type { GoogleTokens } from './google-oauth';
 
 const CLIENT_ID = '1234567890-fantasteel.apps.googleusercontent.com';
@@ -41,6 +44,8 @@ interface FakeFile {
   fakeContentLength?: number;
   /** 내보내기(files.export)가 10MB 상한 오류로 실패한다 */
   exportTooLarge?: boolean;
+  /** Drive 미리보기 (이슈 #398 2단계): 없음 · 다른 Google 주소로 넘김 · Google 밖 주소로 넘김 · Google 밖 주소 */
+  thumbnail?: 'none' | 'redirect' | 'redirect-off' | 'off-host';
 }
 
 const fake = {
@@ -68,6 +73,8 @@ const fake = {
   exports: [] as string[],
   /** Drive 요청에 쓴 액세스 토큰 */
   bearers: [] as string[],
+  /** 미리보기로 받은 원래 주소 */
+  thumbnails: [] as string[],
   files: new Map<string, FakeFile>(),
 };
 
@@ -104,7 +111,9 @@ function metaOf(file: FakeFile): Record<string, unknown> {
     modifiedTime: file.modifiedTime,
     trashed: file.trashed ?? false,
     ...(file.hideSize ? {} : { size: String(file.fakeSize ?? file.content.length) }),
-    ...(file.mimeType.startsWith('image/') ? { thumbnailLink: `https://lh3.googleusercontent.com/thumb-${file.id}` } : {}),
+    ...(file.mimeType.startsWith('image/') && file.thumbnail !== 'none'
+      ? { thumbnailLink: file.thumbnail === 'off-host' ? `https://evil.example/thumb-${file.id}=s220` : `https://lh3.googleusercontent.com/thumb-${file.id}${file.thumbnail ? '=s220' : ''}` }
+      : {}),
   };
 }
 
@@ -113,6 +122,9 @@ function matchesQuery(file: FakeFile, q: string): boolean {
   const parent = /'([^']+)' in parents/.exec(q)?.[1];
   if (parent && !file.parents.includes(parent)) return false;
   if (q.includes('trashed = false') && file.trashed) return false;
+  // 철강맨AI drive_search (이슈 #398 2단계): 이름 검색어
+  const name = /name contains '((?:\\.|[^'\\])*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1');
+  if (name !== undefined && !file.name.includes(name)) return false;
   const audio = q.includes("mimeType contains 'audio/'") && file.mimeType.startsWith('audio/');
   const equals = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
   if (!q.includes('mimeType')) return true;
@@ -191,8 +203,23 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
   res.writeHead(200, { 'content-type': file.mimeType, 'content-length': String(file.content.length) }).end(file.content);
 }
 
+/** 미리보기 (google-drive.client.ts가 시험에서 원래 주소를 ?url=로 넘긴다). 토큰이 있어야 준다 */
+function handleThumbnail(req: IncomingMessage, res: ServerResponse, url: URL): void {
+  const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
+  if (!fake.accessTokens.has(token)) return void res.writeHead(403).end();
+  const target = url.searchParams.get('url') ?? '';
+  fake.thumbnails.push(target);
+  const id = /thumb-([^=/]+)/.exec(target)?.[1] ?? '';
+  const file = fake.files.get(id);
+  if (file?.thumbnail === 'redirect') return void res.writeHead(302, { location: `https://lh4.googleusercontent.com/thumb-${id}-moved=s1568` }).end();
+  if (file?.thumbnail === 'redirect-off') return void res.writeHead(302, { location: `https://evil.example/steal-${id}` }).end();
+  const png = Buffer.from(`png-thumbnail-of-${id.replace(/-moved$/, '')}`);
+  res.writeHead(200, { 'content-type': 'image/png', 'content-length': String(png.length) }).end(png);
+}
+
 async function handleFake(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', fake.origin);
+  if (url.pathname === '/__thumbnail' && req.method === 'GET') return handleThumbnail(req, res, url);
   if (url.pathname.startsWith('/drive/v3/') && req.method === 'GET') return handleDrive(req, res, url);
   const form = new URLSearchParams(await readBody(req));
   if (url.pathname === '/token' && req.method === 'POST') {
@@ -762,6 +789,96 @@ describe('POST meeting-minutes/audio/from-drive', () => {
     } finally {
       fake.mediaFails = false;
     }
+  });
+});
+
+describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
+  const added = ['aiNotesText001', 'aiSheetCsv0002', 'aiReportPdf003', 'aiPdfTooBig004', 'aiPhoneJpg0005', 'aiPhoneHeic006', 'aiPhoneMoved07', 'aiPhoneEvil008', 'aiPhoneOffH009', 'aiSmallPng0010'];
+  let toolbox: AssistantDriveToolbox;
+  const run = (name: string, args: unknown) => toolbox.session(async () => true).run({ id: 'c1', name, arguments: JSON.stringify(args) });
+
+  beforeAll(async () => {
+    toolbox = app.get(AssistantDriveToolbox);
+    addFile({ id: 'aiNotesText001', name: '라인 점검 메모.txt', mimeType: 'text/plain', parents: [FOLDER], modifiedTime: '2026-10-18T09:00:00.000Z', content: Buffer.from('\uFEFF3라인 롤 교체 10/24 예정\r\n담당: 정다은') });
+    addFile({ id: 'aiSheetCsv0002', name: '점검 일정표', mimeType: 'application/vnd.google-apps.spreadsheet', parents: [FOLDER], modifiedTime: '2026-10-17T09:00:00.000Z', hideSize: true, content: Buffer.from('설비,날짜\n3라인,2026-10-24') });
+    addFile({ id: 'aiReportPdf003', name: '설비 점검 보고서.pdf', mimeType: 'application/pdf', parents: [FOLDER], modifiedTime: '2026-10-16T10:00:00.000Z', content: await tinyPdf(['Roll change approved for line 3'], 'Inspection') });
+    addFile({ id: 'aiPdfTooBig004', name: '점검 원본 스캔.pdf', mimeType: 'application/pdf', parents: [FOLDER], fakeSize: 21 * 1024 * 1024, content: Buffer.from('x') });
+    // 휴대폰 사진은 3~5MB다
+    addFile({ id: 'aiPhoneJpg0005', name: '롤 사진.jpg', mimeType: 'image/jpeg', parents: [FOLDER], fakeSize: 4 * 1024 * 1024, content: Buffer.from('big-jpeg') });
+    addFile({ id: 'aiPhoneHeic006', name: '아이폰 사진.heic', mimeType: 'image/heic', parents: [FOLDER], thumbnail: 'none', content: Buffer.from('heic') });
+    addFile({ id: 'aiPhoneMoved07', name: '넘긴 사진.jpg', mimeType: 'image/jpeg', parents: [FOLDER], fakeSize: 3 * 1024 * 1024, thumbnail: 'redirect', content: Buffer.from('big') });
+    addFile({ id: 'aiPhoneEvil008', name: '밖으로 넘긴 사진.jpg', mimeType: 'image/jpeg', parents: [FOLDER], fakeSize: 3 * 1024 * 1024, thumbnail: 'redirect-off', content: Buffer.from('big') });
+    addFile({ id: 'aiPhoneOffH009', name: '밖 미리보기 사진.jpg', mimeType: 'image/jpeg', parents: [FOLDER], fakeSize: 3 * 1024 * 1024, thumbnail: 'off-host', content: Buffer.from('big') });
+    addFile({ id: 'aiSmallPng0010', name: '작은 사진.png', mimeType: 'image/png', parents: [FOLDER], content: Buffer.from('small-png') });
+  });
+
+  afterAll(() => {
+    for (const id of added) fake.files.delete(id);
+  });
+
+  it('칩을 켤 수 있는지: 연결·폴더가 있으면 켜진다 (Google을 부르지 않는다)', async () => {
+    const before = fake.bearers.length;
+    expect((await app.get(AiAssistantService).capabilities()).drive).toEqual({ available: true });
+    expect(fake.bearers.length).toBe(before);
+  });
+
+  it('찾기: 설정한 폴더에서 이름으로, 최신 수정순. 폴더 밖 파일은 나오지 않는다', async () => {
+    const result = await run('drive_search', { query: '점검' });
+    expect(result.webSources.map((s) => s.title)).toEqual(['라인 점검 메모.txt', '점검 일정표', '설비 점검 보고서.pdf', '점검 원본 스캔.pdf']);
+    const all = await run('drive_search', {});
+    expect(all.content).not.toContain('다른 폴더');
+  });
+
+  it('읽기: 글 파일은 그대로, Google 스프레드시트는 CSV로 내보내, PDF는 글을 뽑아 감싸서 준다', async () => {
+    const text = await run('drive_read_file', { file: 'aiNotesText001' });
+    expect(text.content).toContain('3라인 롤 교체 10/24 예정\n담당: 정다은');
+    expect(text.content).toContain('<untrusted_web_content source="drive:aiNotesText001">');
+    fake.exports.length = 0;
+    const sheet = await run('drive_read_file', { file: 'aiSheetCsv0002' });
+    expect(fake.exports).toEqual(['text/csv']);
+    expect(sheet.content).toContain('3라인,2026-10-24');
+    const pdf = await run('drive_read_file', { file: 'aiReportPdf003' });
+    expect(pdf.content).toContain('Roll change approved for line 3');
+    expect(pdf.webSources).toEqual([{ title: '설비 점검 보고서.pdf', url: 'https://drive.google.com/file/d/aiReportPdf003/view' }]);
+  });
+
+  it('폴더 밖·너무 큰 파일·Office·녹음은 읽지 않고 이유를 준다', async () => {
+    expect(JSON.parse((await run('drive_read_file', { file: 'docPdfOutside20' })).content).오류).toBe('설정한 Drive 폴더에 그 파일이 없어요');
+    expect(JSON.parse((await run('drive_read_file', { file: 'aiPdfTooBig004' })).content).오류).toContain('20MB까지');
+    expect(JSON.parse((await run('drive_read_file', { file: 'docWordFile018' })).content).오류).toContain('Word');
+    expect(JSON.parse((await run('drive_read_file', { file: 'audioNewest001' })).content).오류).toContain('녹음');
+  });
+
+  it('사진: 모델 상한 안이면 원본, 넘으면 Drive 미리보기(긴 변 1568px)를 같은 토큰으로 받아 붙인다', async () => {
+    fake.thumbnails.length = 0;
+    expect(await toolbox.reader.read('aiSmallPng0010')).toMatchObject({ kind: 'image', image: { mediaType: 'image/png', dataBase64: Buffer.from('small-png').toString('base64') } });
+    expect(fake.thumbnails).toEqual([]);
+    const phone = await toolbox.reader.read('aiPhoneJpg0005');
+    expect(phone).toMatchObject({ kind: 'image', image: { mediaType: 'image/png', dataBase64: Buffer.from('png-thumbnail-of-aiPhoneJpg0005').toString('base64') } });
+    expect(fake.thumbnails).toEqual(['https://lh3.googleusercontent.com/thumb-aiPhoneJpg0005=s1568']);
+    // Google 안에서 넘기면 따라간다
+    expect(await toolbox.reader.read('aiPhoneMoved07')).toMatchObject({ kind: 'image', image: { dataBase64: Buffer.from('png-thumbnail-of-aiPhoneMoved07').toString('base64') } });
+  });
+
+  it('미리보기가 없거나(HEIC) Google 밖 주소로 넘기거나 Google 밖 주소면 받지 않고, 상한을 상수 그대로 적어 이유를 준다', async () => {
+    fake.thumbnails.length = 0;
+    for (const id of ['aiPhoneHeic006', 'aiPhoneEvil008', 'aiPhoneOffH009']) {
+      const outcome = await toolbox.reader.read(id);
+      expect(outcome).toMatchObject({ kind: 'note', note: expect.stringContaining('2MB') });
+    }
+    // Google 밖 주소는 요청하지 않고, 넘김은 Google 주소까지만 갔다
+    expect(fake.thumbnails).toEqual(['https://lh3.googleusercontent.com/thumb-aiPhoneEvil008=s1568']);
+  });
+
+  it('찾기만 해도 찾은 파일이 답의 출처가 된다', async () => {
+    const session = toolbox.session(async () => true);
+    await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '메모' }) });
+    expect(session.sources()).toEqual([{ title: '라인 점검 메모.txt', url: 'https://drive.google.com/file/d/aiNotesText001/view' }]);
+  });
+
+  it('@로 붙인 파일도 같은 규칙: 폴더 밖이면 질문을 시작하지 않는다(INT-012)', async () => {
+    await expect(toolbox.reader.read('docPdfOutside20')).rejects.toMatchObject({ code: 'INT-012' });
+    expect(await toolbox.reader.read('aiNotesText001')).toMatchObject({ kind: 'text', file: { name: '라인 점검 메모.txt' } });
   });
 });
 

@@ -24,7 +24,7 @@ export class AiChatThreadRepository {
 
   /** 최근 take개 (새것부터) */
   findRecentMessages(tx: Tx, threadId: number, take: number) {
-    return tx.aiChatMessage.findMany({ where: { threadId }, orderBy: { seq: 'desc' }, take, select: { role: true, content: true } });
+    return tx.aiChatMessage.findMany({ where: { threadId }, orderBy: { seq: 'desc' }, take, select: { role: true, content: true, meta: true } });
   }
 
   async lastSeq(tx: Tx, threadId: number): Promise<number> {

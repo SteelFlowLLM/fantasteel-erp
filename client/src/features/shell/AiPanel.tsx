@@ -4,7 +4,7 @@
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -29,6 +29,9 @@ import { driveAiImageProblem } from '@/lib/driveFiles';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
+import { AiDriveMention } from '@/features/shell/AiDriveMention';
+import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionTriggerAt, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
+import { AI_NOTION_TITLE, notionDisabledReason, readAiNotionPreference, writeAiNotionPreference } from '@/lib/aiNotion';
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
@@ -96,6 +99,11 @@ export function AiPanel() {
   const [webSearchPref, setWebSearchPref] = useState(false);
   const [browserPref, setBrowserPref] = useState(false);
   const [screenControlPref, setScreenControlPref] = useState(false);
+  const [notionPref, setNotionPref] = useState(false);
+  const [drivePref, setDrivePref] = useState(false);
+  // 입력칸 @로 붙인 Drive 문서 (사진은 사진 칸으로 간다)와 @ 창을 연 자리 (이슈 #398 2단계)
+  const [driveFiles, setDriveFiles] = useState<DriveFileView[]>([]);
+  const [mentionAt, setMentionAt] = useState<number | null>(null);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
@@ -110,6 +118,11 @@ export function AiPanel() {
   // ERP 화면 조작 (이슈 #382, 시험 중): 서버가 켜 두었을 때만 칩을 보인다
   const screenControlAvailable = capabilities.data?.screenControl?.available === true;
   const screenControlOn = screenControlPref && screenControlAvailable;
+  // Notion (이슈 #398): 서버가 연결·상위 페이지를 확인해 줄 때만 켠다. 못 켜면 이유를 보인다
+  const notionBlockedReason = notionDisabledReason(capabilities.data, capabilities.isError);
+  const notionOn = notionPref && notionBlockedReason === null;
+  const driveBlockedReason = driveDisabledReason(capabilities.data, capabilities.isError);
+  const driveOn = drivePref && driveBlockedReason === null;
   // 심층 조사 (이슈 #378): 서버가 모델이 정해져 있다고 알릴 때만. 지금 입력한 글로 조사를 만들고 그 화면으로 간다
   const deepResearchOn = capabilities.data?.deepResearch?.available === true;
   const sendToResearch = useAction(aiResearchApi.create, {
@@ -143,6 +156,8 @@ export function AiPanel() {
     setWebSearchPref(readAiWebSearchPreference());
     setBrowserPref(readAiBrowserPreference());
     setScreenControlPref(readAiScreenControlPreference());
+    setNotionPref(readAiNotionPreference());
+    setDrivePref(readAiDrivePreference());
   }, []);
 
   // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
@@ -183,6 +198,44 @@ export function AiPanel() {
     writeAiScreenControlPreference(on);
   };
 
+  const changeNotion = (on: boolean) => {
+    setNotionPref(on);
+    writeAiNotionPreference(on);
+  };
+
+  const changeDrive = (on: boolean) => {
+    setDrivePref(on);
+    writeAiDrivePreference(on);
+  };
+
+  // 입력칸에 @를 치면 Drive 파일 고르기를 연다. Drive가 준비됐을 때만 (메신저 입력칸의 @와는 따로다)
+  const changeDraft = (next: string, caret: number) => {
+    if (drive.ready && mentionAt === null) {
+      const at = mentionTriggerAt(draft, next, caret);
+      if (at !== null) setMentionAt(at);
+    }
+    setDraft(next);
+  };
+
+  const closeMention = () => {
+    setMentionAt(null);
+    inputRef.current?.focus();
+  };
+
+  const pickMention = (file: DriveFileView) => {
+    if (mentionAt !== null) setDraft((current) => removeMentionTrigger(current, mentionAt));
+    closeMention();
+    // 사진은 'Drive에서 사진 첨부'와 같은 길로 (화면이 줄여서 사진 칸에 붙인다)
+    if (file.kind === 'image') {
+      if (visionOff) photos.warn(NO_VISION_TITLE);
+      else void photos.addDriveFile(file);
+      return;
+    }
+    const next = attachDriveFile(driveFiles, file);
+    if (next.problem) photos.warn(next.problem);
+    setDriveFiles(next.list);
+  };
+
   const changeOneShot = (checked: boolean) => {
     setOneShot(checked);
     writeAiReasoningPreference({ level: reasoning, oneShot: checked });
@@ -204,8 +257,9 @@ export function AiPanel() {
     stickRef.current = true;
     setShowThreads(false);
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [] });
     setDraft('');
+    if (withImages) setDriveFiles([]);
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
     if (!reasoningOff && next !== reasoning) {
@@ -224,7 +278,7 @@ export function AiPanel() {
   const retry = (failure: FailureEntry) => {
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn);
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, undefined, notionOn, { drive: driveOn });
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
@@ -357,17 +411,19 @@ export function AiPanel() {
             </button>
           </span>
         ) : null}
-        <div className="flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
+        <div className="relative flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
+          {mentionAt !== null ? <AiDriveMention onPick={pickMention} onClose={closeMention} /> : null}
           {draftImages.length ? <DraftImages images={draftImages} onRemove={photos.remove} /> : null}
+          {driveFiles.length ? <DraftDriveFiles files={driveFiles} onRemove={(id) => setDriveFiles((current) => current.filter((file) => file.id !== id))} /> : null}
           <textarea
             ref={inputRef}
             rows={2}
             value={draft}
             maxLength={MAX_QUESTION_LENGTH}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => changeDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            placeholder="철강맨AI에게 묻기 — 예: 여재가 뭐야?"
+            placeholder={drive.ready ? '철강맨AI에게 묻기 — 예: 여재가 뭐야? (@로 Drive 파일 붙이기)' : '철강맨AI에게 묻기 — 예: 여재가 뭐야?'}
             aria-label="철강맨AI에게 질문"
             className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-snug outline-none"
           />
@@ -423,6 +479,8 @@ export function AiPanel() {
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
             {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
+            <NotionToggle on={notionOn} blockedReason={notionBlockedReason} onChange={changeNotion} />
+            <DriveToggle on={driveOn} blockedReason={driveBlockedReason} onChange={changeDrive} />
             {deepResearchOn ? (
               <Button
                 size="sm"
@@ -478,7 +536,7 @@ function Welcome({ roleLabel, contextQuestion, disabled, onAsk, onFill }: { role
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 부탁하면 실행 카드로 만들어 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록, 내 일정·업무 고치기를 부탁하면 실행 카드로 만들어 줘요. 'Notion'을 켜면 회사 Notion을 찾아 읽고 정리 글을 Notion 카드로 써 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
       </p>
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
@@ -595,6 +653,69 @@ function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedRe
         <Icon name="search" size="sm" />브라우저
       </button>
       <span id="ai-browser-hint">{blocked ? blockedReason : on ? AI_BROWSER_TITLE : ''}</span>
+    </div>
+  );
+}
+
+/** Drive 켜기 (이슈 #398 2단계). 켜면 이 질문에 회사 Drive 폴더의 파일을 찾아 읽는다. 연결·폴더가 없으면 이유와 함께 꺼 둔다 */
+function DriveToggle({ on, blockedReason, onChange }: { on: boolean; blockedReason: string | null; onChange: (on: boolean) => void }) {
+  const blocked = blockedReason !== null;
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={blocked ? blockedReason : AI_DRIVE_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Drive"
+        aria-describedby="ai-drive-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="file" size="sm" />Drive
+      </button>
+      <span id="ai-drive-hint">{blocked ? blockedReason : on ? '읽기만 해요' : ''}</span>
+    </div>
+  );
+}
+
+/** 입력칸 @로 붙인 Drive 문서. 보내면 서버가 읽어 질문에 붙인다 */
+function DraftDriveFiles({ files, onRemove }: { files: readonly DriveFileView[]; onRemove: (id: string) => void }) {
+  return (
+    <div role="group" aria-label={`붙인 Drive 파일 ${files.length}개`} className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+      {files.map((file) => (
+        <span key={file.id} className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line bg-surface-2 px-2 py-0.5 text-cap text-ink-2">
+          <Icon name="file" size="sm" className="flex-none text-ink-3" />
+          <span className="truncate" title={file.name}>
+            {file.name}
+          </span>
+          <button type="button" aria-label={`${file.name} 빼기`} className="flex-none text-ink-3 hover:text-ink" onClick={() => onRemove(file.id)}>
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Notion 켜기 (이슈 #398). 켜면 이 질문에 회사 Notion을 찾아 읽고, 쓰기는 실행 카드로 제안한다. 연결·상위 페이지가 없으면 이유와 함께 꺼 둔다 */
+function NotionToggle({ on, blockedReason, onChange }: { on: boolean; blockedReason: string | null; onChange: (on: boolean) => void }) {
+  const blocked = blockedReason !== null;
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={blocked ? blockedReason : AI_NOTION_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Notion"
+        aria-describedby="ai-notion-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="book" size="sm" />Notion
+      </button>
+      <span id="ai-notion-hint">{blocked ? blockedReason : on ? '쓰기는 카드로만 해요' : ''}</span>
     </div>
   );
 }

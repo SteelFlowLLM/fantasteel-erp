@@ -1,4 +1,4 @@
-import { DRIVE_DOCUMENT_MAX_BYTES, DRIVE_EXPORT_MAX_BYTES, DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES, type DriveFileKind, type DriveFileListKind, type DriveFileView } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_BYTES, AI_IMAGE_MEDIA_TYPES, DRIVE_DOCUMENT_MAX_BYTES, DRIVE_EXPORT_MAX_BYTES, DRIVE_IMAGE_MAX_BYTES, MEETING_AUDIO_MAX_BYTES, type DriveFileKind, type DriveFileListKind, type DriveFileView } from '@fantasteel/shared';
 import { isMeetingAudio } from '../../meeting-minutes/meeting-audio';
 
 /** Drive 폴더·파일 id 모양. 공유 드라이브 최상위는 19자, 보통 파일은 28~44자 */
@@ -67,6 +67,9 @@ export const DRIVE_OFFICE_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ] as const;
 
+/** 글 파일 (철강맨AI가 읽는다, 이슈 #398). HTML처럼 이 서버 주소로 열면 스크립트가 도는 형식은 넣지 않는다 */
+export const DRIVE_TEXT_MIME_TYPES = ['text/plain', 'text/markdown', 'text/x-markdown', 'text/csv'] as const;
+
 /** Google 문서·스프레드시트·프레젠테이션: 내용이 없는 파일이라 files.export로 PDF를 만들어 준다 */
 export const DRIVE_GOOGLE_DOC_MIME_TYPES = [
   'application/vnd.google-apps.document',
@@ -89,9 +92,15 @@ export function buildDriveListQuery(folderId: string, kind: DriveFileListKind): 
   const base = `${quote(folderId)} in parents and trashed = false`;
   const audio = AUDIO_QUERY;
   const image = `(${mimeEquals(DRIVE_IMAGE_MIME_TYPES)})`;
-  const document = `(${mimeEquals([DRIVE_PDF_MIME, ...DRIVE_OFFICE_MIME_TYPES, ...DRIVE_GOOGLE_DOC_MIME_TYPES])})`;
+  const document = `(${mimeEquals([DRIVE_PDF_MIME, ...DRIVE_OFFICE_MIME_TYPES, ...DRIVE_GOOGLE_DOC_MIME_TYPES, ...DRIVE_TEXT_MIME_TYPES])})`;
   const mime = kind === 'audio' ? audio : kind === 'image' ? image : kind === 'document' ? document : `(${audio} or ${image} or ${document})`;
   return `${base} and ${mime}`;
+}
+
+/** 이름에 name이 든 파일만 (철강맨AI drive_search, 이슈 #398). Drive의 name contains는 낱말 앞부분으로 맞춘다 */
+export function buildDriveSearchQuery(folderId: string, kind: DriveFileListKind, name: string | null): string {
+  const query = buildDriveListQuery(folderId, kind);
+  return name ? `${query} and name contains ${quote(name)}` : query;
 }
 
 /** 연결 확인에서 폴더의 파일 종류를 셀 때 */
@@ -118,8 +127,42 @@ export function driveFileKind(mimeType: string, name: string): DriveFileKind | n
   const mime = normalizeMime(mimeType);
   if (isMeetingAudio(mime, name)) return 'audio';
   if (isDriveImage(mime)) return 'image';
-  if (mime === DRIVE_PDF_MIME || isDriveGoogleDoc(mime) || (DRIVE_OFFICE_MIME_TYPES as readonly string[]).includes(mime)) return 'document';
+  if (mime === DRIVE_PDF_MIME || isDriveGoogleDoc(mime) || (DRIVE_OFFICE_MIME_TYPES as readonly string[]).includes(mime) || (DRIVE_TEXT_MIME_TYPES as readonly string[]).includes(mime)) return 'document';
   return null;
+}
+
+/** 철강맨AI가 읽을 때의 크기 상한 (가정값). 화면에서 여는 상한보다 작다: 글만 뽑으면 되고, 받은 내용을 메모리에 올린다 */
+export const DRIVE_AI_PDF_MAX_BYTES = 20 * 1024 * 1024;
+export const DRIVE_AI_EXPORT_MAX_BYTES = 5 * 1024 * 1024;
+export const DRIVE_AI_TEXT_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Google 문서류를 글로 내보낼 형식: 문서·프레젠테이션은 글, 스프레드시트는 CSV(첫 시트) */
+const DRIVE_TEXT_EXPORT: Record<string, string> = {
+  'application/vnd.google-apps.document': 'text/plain',
+  'application/vnd.google-apps.spreadsheet': 'text/csv',
+  'application/vnd.google-apps.presentation': 'text/plain',
+};
+
+/** 철강맨AI가 파일을 읽는 방법. 받지 않는 것은 이유를 모델에 돌려준다 */
+export type DriveReadPlan =
+  | { mode: 'pdf'; maxBytes: number }
+  | { mode: 'text'; maxBytes: number; exportMimeType: string | null }
+  | { mode: 'image'; maxBytes: number; mediaType: (typeof AI_IMAGE_MEDIA_TYPES)[number] }
+  | { mode: 'unsupported'; reason: string };
+
+export function driveReadPlan(mimeType: string, kind: DriveFileKind): DriveReadPlan {
+  const mime = normalizeMime(mimeType);
+  if (kind === 'audio') return { mode: 'unsupported', reason: '녹음(오디오) 파일이라 글로 읽을 수 없어요. 회의록 화면에서 전사할 수 있어요' };
+  if (kind === 'image') {
+    const mediaType = (AI_IMAGE_MEDIA_TYPES as readonly string[]).includes(mime) ? (mime as (typeof AI_IMAGE_MEDIA_TYPES)[number]) : null;
+    if (!mediaType) return { mode: 'unsupported', reason: 'PNG·JPEG·WebP 사진만 볼 수 있어요' };
+    return { mode: 'image', maxBytes: AI_IMAGE_MAX_BYTES, mediaType };
+  }
+  if (mime === DRIVE_PDF_MIME) return { mode: 'pdf', maxBytes: DRIVE_AI_PDF_MAX_BYTES };
+  const exportMimeType = DRIVE_TEXT_EXPORT[mime];
+  if (exportMimeType) return { mode: 'text', maxBytes: DRIVE_AI_EXPORT_MAX_BYTES, exportMimeType };
+  if ((DRIVE_TEXT_MIME_TYPES as readonly string[]).includes(mime)) return { mode: 'text', maxBytes: DRIVE_AI_TEXT_MAX_BYTES, exportMimeType: null };
+  return { mode: 'unsupported', reason: 'Word·Excel·PowerPoint 파일은 아직 읽지 못해요. Google 문서로 바꾸거나 PDF로 올려 달라고 안내해요' };
 }
 
 /** 종류별 크기 상한. Google 문서는 내보내기 상한(10MB)이다: 원본 크기를 알 수 없고 Drive가 그 이상은 내보내지 않는다 */

@@ -24,6 +24,8 @@ export interface AiChatQuestionInput {
   webSearch?: boolean;
   browser?: boolean;
   imageCount?: number;
+  /** 입력칸 @로 붙인 Drive 파일 이름 (이슈 #398). 파일 글은 저장하지 않고 이름만 남긴다 */
+  driveFiles?: string[];
 }
 
 interface ThreadRow {
@@ -58,12 +60,24 @@ export const toChatThreadSummary = (row: ThreadRow): AiChatThreadSummaryView => 
   updatedAt: row.updatedAt.toISOString(),
 });
 
-/** 지난 대화로 모델에 보내는 줄 (오래된 것부터) */
-export const chatHistoryTurns = (rows: readonly Pick<MessageRow, 'role' | 'content'>[]): AiAssistantTurn[] =>
-  rows.map((row) => ({ role: row.role === AI_CHAT_ROLE.ASSISTANT ? 'assistant' : 'user', content: row.content }));
+/**
+ * 지난 대화로 모델에 보내는 줄 (오래된 것부터). @로 붙인 Drive 파일은 글을 다시 넣지 않고 이름만 한 줄 덧붙인다 (이슈 #398):
+ * 이어 묻는 질문이 "그 파일"을 알아듣게 하되, 파일 글(감싼 외부 글)을 차례마다 다시 싣지 않는다. 다시 보려면 Drive 도구로 읽는다
+ */
+export const chatHistoryTurns = (rows: readonly (Pick<MessageRow, 'role' | 'content'> & { meta?: unknown })[]): AiAssistantTurn[] =>
+  rows.map((row) => {
+    if (row.role === AI_CHAT_ROLE.ASSISTANT) return { role: 'assistant', content: row.content };
+    const files = driveFilesOf(objectOf(row.meta).driveFiles);
+    return { role: 'user', content: files.length ? `${row.content}\n(이 질문에 붙인 Drive 파일: ${files.join(', ')})` : row.content };
+  });
 
-export function questionMeta(input: AiChatQuestionInput): Record<string, string | number | boolean> | null {
+function driveFilesOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((name): name is string => typeof name === 'string') : [];
+}
+
+export function questionMeta(input: AiChatQuestionInput): Record<string, string | number | boolean | string[]> | null {
   const meta = {
+    ...(input.driveFiles?.length ? { driveFiles: input.driveFiles.slice(0, 3).map((name) => name.slice(0, 200)) } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     ...(input.webSearch ? { webSearch: true } : {}),
     ...(input.browser ? { browser: true } : {}),
@@ -101,6 +115,7 @@ export function toChatMessageView(row: MessageRow): AiChatMessageView {
       ...(meta.webSearch === true ? { webSearch: true } : {}),
       ...(meta.browser === true ? { browser: true } : {}),
       ...(typeof meta.imageCount === 'number' && meta.imageCount > 0 ? { imageCount: meta.imageCount } : {}),
+      ...(driveFilesOf(meta.driveFiles).length ? { driveFiles: driveFilesOf(meta.driveFiles) } : {}),
     };
   }
   const webSources = Array.isArray(row.webSources) ? (row.webSources as AiWebSource[]) : null;

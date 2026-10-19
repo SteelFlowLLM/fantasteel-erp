@@ -1,5 +1,6 @@
 import type { AiActionCardService } from '../ai-action-card.service';
 import type { AiOpsCardService } from '../ai-ops-card.service';
+import type { AiUpdateCardService } from '../ai-update-card.service';
 import { OPEN_ACCESS, type AssistantTool } from './assistant-tool';
 
 export const ACTION_CARD_TOOL = 'propose_action_card';
@@ -7,9 +8,11 @@ export const SALES_ORDER_CARD_TOOL = 'propose_sales_order';
 export const HOT_ROLLING_CARD_TOOL = 'propose_hot_rolling_allocation';
 export const HEAT_PLAN_CARD_TOOL = 'propose_heat_plan_confirmation';
 export const PAST_CASE_CARD_TOOL = 'propose_past_case';
+export const SCHEDULE_UPDATE_CARD_TOOL = 'propose_schedule_event_update';
+export const TASK_UPDATE_CARD_TOOL = 'propose_task_update';
 
-/** 카드를 만드는 도구 전부. 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 모델에 알린다 */
-export const ACTION_CARD_TOOLS: readonly string[] = [ACTION_CARD_TOOL, SALES_ORDER_CARD_TOOL, HOT_ROLLING_CARD_TOOL, HEAT_PLAN_CARD_TOOL, PAST_CASE_CARD_TOOL];
+/** 카드를 만드는 도구 전부. 카드를 보여 줄 수 있는 화면(철강맨AI 패널)이 요청했을 때만 모델에 알린다 (Notion 카드 도구는 notion/에서 따로) */
+export const ACTION_CARD_TOOLS: readonly string[] = [ACTION_CARD_TOOL, SALES_ORDER_CARD_TOOL, HOT_ROLLING_CARD_TOOL, HEAT_PLAN_CARD_TOOL, PAST_CASE_CARD_TOOL, SCHEDULE_UPDATE_CARD_TOOL, TASK_UPDATE_CARD_TOOL];
 
 const NOT_REGISTERED = '실행 카드를 화면에 만들었어요. 아직 반영되지 않았어요. 사용자가 카드를 확인하고 실행을 눌러야 반영돼요';
 
@@ -17,7 +20,7 @@ const NOT_REGISTERED = '실행 카드를 화면에 만들었어요. 아직 반�
  * 실행 카드 제안 도구 (REQ-AST-005). 조회 도구와 달리 아무것도 바꾸지 않고, 사용자가 카드에서 실행을 눌러야 업무에 반영된다.
  * 권한은 제안할 때(만들 수 없는 사람에게는 카드를 만들지 않는다)와 실행할 때 사용자 권한으로 본다.
  */
-export function actionCardTools(cards: AiActionCardService, ops: AiOpsCardService): AssistantTool[] {
+export function actionCardTools(cards: AiActionCardService, ops: AiOpsCardService, updates: AiUpdateCardService): AssistantTool[] {
   return [
     {
       access: OPEN_ACCESS,
@@ -112,6 +115,52 @@ export function actionCardTools(cards: AiActionCardService, ops: AiOpsCardServic
       async run(args, user) {
         const card = await ops.proposePastCase(user, args);
         return { label: '실행 카드', cards: [card], data: { 결과: NOT_REGISTERED, 카드: { 종류: card.kind, 제목: card.title, '확인이 필요한 칸': card.issues } } };
+      },
+    },
+    {
+      access: OPEN_ACCESS,
+      definition: {
+        name: SCHEDULE_UPDATE_CARD_TOOL,
+        description:
+          'ERP 일정의 제목·시각·설명을 바꾸는 실행 카드를 만든다. 일정 id는 get_my_schedule로 먼저 찾는다. 바꿀 칸만 넘긴다(시작만 옮기면 끝도 같은 길이로 따라간다). 내가 직접 등록한 일정만 되고 참석자는 바꾸지 못한다. 사용자가 실행을 눌러야 바뀌고, Notion 일정 데이터베이스에는 그 뒤 자동으로 반영된다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scheduleEventId: { type: 'integer', description: 'get_my_schedule 결과의 일정id' },
+            title: { type: 'string', description: '바꿀 제목' },
+            startAt: { type: 'string', description: '바꿀 시작 시각 YYYY-MM-DDTHH:mm (서울)' },
+            endAt: { type: 'string', description: '바꿀 끝 시각 YYYY-MM-DDTHH:mm' },
+            description: { type: 'string', description: '바꿀 설명 (지우려면 빈 글)' },
+          },
+          required: ['scheduleEventId'],
+        },
+      },
+      async run(args, user) {
+        const card = await updates.proposeScheduleEvent(user, args);
+        return { label: '실행 카드', cards: [card], data: { 결과: NOT_REGISTERED, 카드: { 종류: card.kind, 제목: card.title, 바뀌는시각: `${card.startAt} ~ ${card.endAt}` } } };
+      },
+    },
+    {
+      access: OPEN_ACCESS,
+      definition: {
+        name: TASK_UPDATE_CARD_TOOL,
+        description:
+          'ERP 업무(할 일)의 제목·마감일·설명을 바꾸거나 완료로 바꾸는 실행 카드를 만든다. 업무 id는 get_my_tasks로 먼저 찾는다. 바꿀 칸만 넘기고, 완료는 complete=true만 따로 넘긴다. 진행 중인 업무만 되고 완료를 되돌리지는 못한다. 사용자가 실행을 눌러야 바뀌고, Notion 할 일 데이터베이스에는 그 뒤 자동으로 반영된다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'integer', description: 'get_my_tasks 결과의 업무id' },
+            title: { type: 'string', description: '바꿀 제목' },
+            dueDate: { type: 'string', description: '바꿀 마감일 YYYY-MM-DD' },
+            description: { type: 'string', description: '바꿀 설명 (지우려면 빈 글)' },
+            complete: { type: 'boolean', description: '완료로 바꾸려면 true (다른 칸과 함께 쓰지 않는다)' },
+          },
+          required: ['taskId'],
+        },
+      },
+      async run(args, user) {
+        const card = await updates.proposeTask(user, args);
+        return { label: '실행 카드', cards: [card], data: { 결과: NOT_REGISTERED, 카드: { 종류: card.kind, 제목: card.title, 마감일: card.dueDate, 완료: card.complete } } };
       },
     },
   ];

@@ -330,6 +330,10 @@ describe('도구 모음: service가 확인하는 권한', () => {
     {} as AiOpsCardService,
     services.dashboard,
     services.mrp,
+    // 일정·업무 고치기 카드와 내 일정·업무 조회 (이슈 #398): 이 시험에서는 부르지 않는다
+    {} as never,
+    {} as never,
+    {} as never,
   );
 
   it('미리 막지 않고 service에 맡긴다 (부서장은 권한 코드 없이도 자기 부서 구매요청을 본다)', async () => {

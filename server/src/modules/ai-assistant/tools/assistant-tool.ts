@@ -15,6 +15,8 @@ export interface AssistantTool {
    *   permissions·note는 막혔을 때 담당 역할 안내에만 쓴다
    */
   access: { checkedBy: 'TOOLBOX' | 'SERVICE'; permissions: readonly Permission[]; note?: string };
+  /** 사원 본인의 것(내 일정·업무)이라 철강맨AI 패널에서만 알리는 도구. 사내 채팅 @AI 답은 방 멤버 모두가 봐서 쓰지 않는다 */
+  panelOnly?: boolean;
   run(args: Record<string, unknown>, user: AuthUser): Promise<ToolOutput>;
 }
 

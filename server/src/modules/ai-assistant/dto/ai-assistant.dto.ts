@@ -1,6 +1,6 @@
-import { AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_DRIVE_ATTACH_MAX, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -154,6 +154,36 @@ export class AskAiAssistantDto {
   @ValidateNested({ each: true })
   @Type(() => AiScreenMapEntryDto)
   screenMap?: AiScreenMapEntryDto[];
+
+  /** Notion을 켠 질문이면 true. Notion이 연결돼 있고 상위 페이지가 정해져 있고 실시간 답 API일 때만 Notion 도구를 알린다 (이슈 #398) */
+  @IsOptional()
+  @IsBoolean()
+  notion?: boolean;
+
+  /** Drive를 켠 질문이면 true. Drive가 연결돼 있고 폴더가 정해져 있고 실시간 답 API일 때만 Drive 도구를 알린다 (이슈 #398 2단계) */
+  @IsOptional()
+  @IsBoolean()
+  drive?: boolean;
+
+  /** 입력칸에서 @로 고른 Drive 파일 id. 실시간 답 API에서만 읽어 질문에 붙인다 (이슈 #398 2단계) */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_DRIVE_ATTACH_MAX, { message: `Drive 파일은 ${AI_DRIVE_ATTACH_MAX}개까지 붙일 수 있어요` })
+  @ArrayUnique({ message: '같은 파일을 두 번 붙일 수 없어요' })
+  @Matches(/^[A-Za-z0-9_-]{10,200}$/, { each: true, message: 'Drive 파일 id가 올바르지 않아요' })
+  driveFileIds?: string[];
+}
+
+/** Notion 페이지 고치기 한 군데 (이슈 #398) */
+export class AiNotionTextEditDto {
+  @IsString()
+  @MinLength(1, { message: '바꿀 글을 입력해 주세요' })
+  @MaxLength(AI_NOTION_EDIT_TEXT_MAX)
+  oldStr!: string;
+
+  @IsString()
+  @MaxLength(AI_NOTION_EDIT_TEXT_MAX)
+  newStr!: string;
 }
 
 /** 수주 등록 카드의 품목 줄. 매수·규격·납기의 뜻은 수주 등록 service가 본다 */
@@ -184,7 +214,7 @@ export class AiChatCardRefDto {
   cardKey!: string;
 }
 
-const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE'] as const;
+const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE', 'NOTION_PAGE_CREATE', 'NOTION_PAGE_APPEND', 'NOTION_PAGE_UPDATE', 'SCHEDULE_EVENT_UPDATE', 'TASK_UPDATE'] as const;
 
 /**
  * POST ai-assistant/action-cards/execute. 업무·일정·구매요청 칸은 회의록 후보 고치기와 같다(UpdateMeetingCandidateDto).
@@ -260,6 +290,50 @@ export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '발생일은 YYYY-MM-DD로 입력해 주세요' })
   occurredDate?: string;
+
+  // Notion 페이지 만들기·더하기·고치기 (이슈 #398). 대상이 상위 페이지 아래인지는 service가 Notion을 읽어 다시 본다
+  @IsOptional()
+  @IsUUID('4', { message: '카드 번호가 올바르지 않아요' })
+  nonce?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notionPageId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_NOTION_TITLE_MAX, { message: `페이지 제목은 ${AI_NOTION_TITLE_MAX}자까지 쓸 수 있어요` })
+  pageTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_NOTION_CONTENT_MAX, { message: `내용은 ${AI_NOTION_CONTENT_MAX}자까지 쓸 수 있어요` })
+  content?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_NOTION_EDIT_MAX, { message: `고칠 곳은 ${AI_NOTION_EDIT_MAX}군데까지예요` })
+  @ValidateNested({ each: true })
+  @Type(() => AiNotionTextEditDto)
+  edits?: AiNotionTextEditDto[];
+
+  // 일정·업무 고치기 (이슈 #398). 제목·설명·시각·마감일은 위 업무·일정 칸을 같이 쓴다
+  @IsOptional()
+  @IsInt({ message: '일정이 올바르지 않아요' })
+  @Min(1)
+  @Max(2147483647)
+  scheduleEventId?: number;
+
+  @IsOptional()
+  @IsInt({ message: '업무가 올바르지 않아요' })
+  @Min(1)
+  @Max(2147483647)
+  taskId?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  complete?: boolean;
 }
 
 /** GET ai-assistant/threads (이슈 #399) */

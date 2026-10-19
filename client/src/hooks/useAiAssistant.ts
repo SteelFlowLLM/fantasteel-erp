@@ -59,6 +59,12 @@ export interface AiAskVariables {
   screenControl?: boolean;
   /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (이슈 #384) */
   researchRunId?: number;
+  /** Notion을 켠 질문이면 true (이슈 #398). 끄면 필드를 보내지 않는다 */
+  notion?: boolean;
+  /** Drive를 켠 질문이면 true (이슈 #398 2단계). 끄면 필드를 보내지 않는다 */
+  drive?: boolean;
+  /** 입력칸에서 @로 붙인 Drive 문서 id (이슈 #398 2단계) */
+  driveFileIds?: string[];
 }
 
 /** 서버가 보낸 화면 동작을 이 화면에서 실행하고 결과를 돌려준다. 보내기에 실패하면 서버가 시간 초과로 끝낸다 */
@@ -68,7 +74,7 @@ async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -82,7 +88,7 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
       // 지난 대화는 보내지 않는다: 서버가 저장한 대화에서 읽는다
-      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}) },
+      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
       (event) => {
         if (event.type === 'ui_action') {
           void answerUiAction(event);
@@ -105,13 +111,13 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, screenControl?: boolean, researchRunId?: number) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, screenControl?: boolean, researchRunId?: number, notion?: boolean, extra: { drive?: boolean; driveFileIds?: string[] } = {}) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const questionId = newAiChatId();
     chat.addQuestion(questionId, text, reasoning, images, webSearch, browser);
-    void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId });
+    void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, ...extra });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }

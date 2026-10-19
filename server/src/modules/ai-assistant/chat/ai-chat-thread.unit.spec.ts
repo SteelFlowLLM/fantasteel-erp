@@ -71,6 +71,22 @@ describe('저장한 메시지 모양', () => {
   it('지난 대화는 역할을 소문자로 바꿔 순서대로 넘긴다', () => {
     expect(chatHistoryTurns([{ role: 'USER', content: 'q' }, { role: 'ASSISTANT', content: 'a' }])).toEqual([{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }]);
   });
+
+  it('@로 붙인 Drive 파일은 이름만 남기고, 지난 대화에는 글 없이 이름 한 줄만 붙인다 (이슈 #398)', () => {
+    const meta = questionMeta({ question: 'q', driveFiles: ['점검 메모.txt', '보고서.pdf'] });
+    expect(meta).toEqual({ driveFiles: ['점검 메모.txt', '보고서.pdf'] });
+    expect(toChatMessageView(row({ role: AI_CHAT_ROLE.USER, meta }))).toMatchObject({ role: 'user', driveFiles: ['점검 메모.txt', '보고서.pdf'] });
+    expect(chatHistoryTurns([{ role: 'USER', content: '요약해줘', meta }, { role: 'ASSISTANT', content: 'a', meta: null }])).toEqual([
+      { role: 'user', content: '요약해줘\n(이 질문에 붙인 Drive 파일: 점검 메모.txt, 보고서.pdf)' },
+      { role: 'assistant', content: 'a' },
+    ]);
+  });
+
+  it('새 카드 종류(Notion·고치기)도 저장·실행 표시가 된다 (이슈 #398)', () => {
+    const notion = { key: 'a1', kind: 'NOTION_PAGE_APPEND' as const, title: 'Notion 글 더하기 · 회의', nonce: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', page: { id: 'p', title: '회의', url: 'https://www.notion.so/p' }, content: '추가', issues: [] };
+    const next = cardsWithDone(readyCards([notion]), 'a1', { type: 'notion_page', id: 0, url: 'https://www.notion.so/p' });
+    expect(next).toEqual([{ card: notion, status: 'done', result: { type: 'notion_page', id: 0, url: 'https://www.notion.so/p' } }]);
+  });
 });
 
 describe('저장한 카드 실행 표시', () => {

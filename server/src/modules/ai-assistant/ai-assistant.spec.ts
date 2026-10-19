@@ -13,10 +13,15 @@ import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.s
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
+import { AssistantNotionToolbox, type NotionReader } from './notion/assistant-notion-toolbox';
+import { AssistantDriveToolbox } from './drive/assistant-drive-toolbox';
+import type { DriveSource } from './drive/drive-file-reader';
+import type { AiNotionCardService } from './notion/ai-notion-card.service';
+import type { AiUpdateCardService } from './ai-update-card.service';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { KakaoPlaceClient, WebSearchClient } from './web/web-search.client';
@@ -29,6 +34,18 @@ import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import { findManualGuides, MANUAL_MATCH_LIMIT } from './knowledge/manual.search';
 import { PROCESS_STEPS } from './knowledge/process.generated';
 import { findProcessSteps, PROCESS_MATCH_LIMIT } from './knowledge/process.search';
+
+const OFF_DRIVE: DriveSource = {
+  assertReady: () => Promise.reject(new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요')),
+  searchFiles: () => Promise.reject(new Error('찾지 않음')),
+  readForAssistant: () => Promise.reject(new Error('읽지 않음')),
+};
+
+const OFF_NOTION: NotionReader = {
+  availability: async () => ({ available: false, reason: 'Notion이 연결되어 있지 않아요' }),
+  search: () => Promise.reject(new Error('찾지 않음')),
+  read: () => Promise.reject(new Error('읽지 않음')),
+};
 
 const termOf = (id: string) => {
   const term = GLOSSARY_TERMS.find((t) => t.id === id);
@@ -179,6 +196,10 @@ describe('AiAssistantService', () => {
     browserTools: AssistantBrowserToolbox = new AssistantBrowserToolbox(new BrowserPool({ env: {} })),
     // 기본은 서버 설정이 꺼진 화면 조작
     screenTools: AssistantScreenToolbox = new AssistantScreenToolbox(new ScreenActionBroker(), {}),
+    // 기본은 연결하지 않은 Notion (이슈 #398)
+    notionTools: AssistantNotionToolbox = new AssistantNotionToolbox(OFF_NOTION, { propose: () => Promise.reject(new Error('카드를 만들지 않음')) }),
+    // 기본은 연결하지 않은 Drive (이슈 #398 2단계)
+    driveTools: AssistantDriveToolbox = new AssistantDriveToolbox(OFF_DRIVE),
   ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
@@ -221,7 +242,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, chatThreads as unknown as AiChatThreadService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -848,6 +869,116 @@ describe('AiAssistantService', () => {
     });
   });
 
+  describe('Notion (이슈 #398)', () => {
+    const PAGE_URL = 'https://www.notion.so/aaaabbbbccccddddeeeeffff00001111';
+    const onNotion: NotionReader = {
+      availability: async () => ({ available: true }),
+      search: async () => ({ hits: [{ id: 'aaaabbbbccccddddeeeeffff00001111', title: '주간 회의', url: PAGE_URL, snippet: '설비', type: 'page' }], raw: '' }),
+      read: async () => ({ id: 'aaaabbbbccccddddeeeeffff00001111', kind: 'page', title: '주간 회의', url: PAGE_URL, ancestors: [], dataSourceIds: [], body: '설비 점검', scope: 'inside', rows: null }),
+    };
+    const card = { kind: 'NOTION_PAGE_APPEND' as const, title: 'Notion 글 더하기 · 주간 회의', nonce: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', page: { id: 'aaaabbbbccccddddeeeeffff00001111', title: '주간 회의', url: PAGE_URL }, content: '추가', issues: [] };
+    const notionCall = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
+    const run = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => (await service.prepare(user, input, { interactive: true })).run(() => undefined);
+
+    it('켜면 읽기 도구·카드 도구·[Notion 규칙]을 알리고, 읽은 페이지를 출처로, 카드를 답에 담는다', async () => {
+      const notionTools = new AssistantNotionToolbox(onNotion, { propose: async () => card });
+      const { service, calls } = setup(
+        {},
+        async (_call, index) =>
+          [notionCall('c1', 'notion_read_page', { page: PAGE_URL }), notionCall('c2', 'propose_notion_page', { action: 'append', page: PAGE_URL, content: '추가' }), answer('카드를 만들었어요. 확인하고 실행을 눌러 주세요.')][index],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        notionTools,
+      );
+      const reply = await run(service, { question: '주간 회의 페이지에 한 줄 더해줘', notion: true, actionCards: true });
+      expect(calls[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['notion_search', 'notion_read_page', 'propose_notion_page', 'get_inventory']));
+      expect(calls[0].messages[0].content).toContain('[Notion 규칙]');
+      expect(calls[0].messages[0].content).toContain('한국어로만 써요');
+      expect(String(calls[1].messages.at(-1)?.content)).toContain('<untrusted_web_content source="notion:');
+      expect(reply.webSources).toEqual([{ title: '주간 회의', url: PAGE_URL }]);
+      expect(reply.actionCards.map((c) => [c.key, c.kind])).toEqual([['a1', 'NOTION_PAGE_APPEND']]);
+    });
+
+    it(`켜면 도구 호출 상한이 ${MAX_NOTION_TOOL_ROUNDS}번이고, 상한에 닿으면 도구 없이 한 번 더 물어 답하게 한다`, async () => {
+      const { service, calls } = setup({}, async (_call, index) => notionCall(`c${index}`, 'notion_search', { query: `회의 ${index}` }), undefined, undefined, undefined, undefined, undefined, new AssistantNotionToolbox(onNotion, { propose: async () => card }));
+      await run(service, { question: '계속 찾아줘', notion: true });
+      expect(calls).toHaveLength(MAX_NOTION_TOOL_ROUNDS + 1);
+      expect(calls.at(-1)?.tools).toEqual([]);
+    });
+
+    it('연결이 없거나, 끄거나, 한 번에 답(사내 채팅 @AI)이면 Notion 도구가 없다', async () => {
+      const offService = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, new AssistantNotionToolbox(OFF_NOTION, { propose: async () => card }));
+      await run(offService.service, { question: '회의 찾아줘', notion: true });
+      const onBox = new AssistantNotionToolbox(onNotion, { propose: async () => card });
+      const notAsked = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, onBox);
+      await run(notAsked.service, { question: '회의 찾아줘' });
+      const chat = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, undefined, onBox);
+      await chat.service.ask(user, { question: '회의 찾아줘', notion: true });
+      for (const calls of [offService.calls, notAsked.calls, chat.calls]) {
+        expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+        expect(calls[0].messages[0].content).not.toContain('[Notion 규칙]');
+      }
+    });
+  });
+
+  describe('Drive (이슈 #398 2단계)', () => {
+    const FOLDER = '1FolderAbCdEfGhIjKlMnOpQrStUv';
+    const meta = { size: 10, modifiedTime: '2026-10-12T09:00:00.000Z', thumbnailLink: null, parents: [FOLDER], trashed: false, maxBytes: 1, exportMimeType: null };
+    const onDrive: DriveSource = {
+      assertReady: async () => FOLDER,
+      searchFiles: async () => [{ id: 'docNotes00001', name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', size: 10, modifiedTime: null, thumbnailLink: null }],
+      readForAssistant: async (id) =>
+        id === 'imagePhoto0005'
+          ? { file: { ...meta, id, name: '현장.png', mimeType: 'image/png', kind: 'image', contentType: 'image/png', contentName: '현장.png' }, plan: { mode: 'image', maxBytes: 2_000_000, mediaType: 'image/png' }, buffer: Buffer.from('png') }
+          : { file: { ...meta, id, name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', contentType: 'text/plain', contentName: '점검 메모.txt' }, plan: { mode: 'text', maxBytes: 1_000, exportMimeType: null }, buffer: Buffer.from('라인 점검 10/24 완료') },
+    };
+    const driveCall = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
+    const run = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => (await service.prepare(user, input, { interactive: true })).run(() => undefined);
+    const withDrive = (replies: (call: { messages: LlmToolMessage[] }, index: number) => Promise<LlmToolReply>, capabilities?: LlmModelCapabilities) =>
+      setup({}, replies, undefined, capabilities, undefined, undefined, undefined, undefined, new AssistantDriveToolbox(onDrive));
+
+    it('켜면 찾기·읽기 도구와 [Drive 규칙]을 알리고, 읽은 파일을 출처로, 사진은 tool 뒤 user 메시지로 붙인다', async () => {
+      const { service, calls } = withDrive(async (_call, index) => [driveCall('c1', 'drive_read_file', { file: 'docNotes00001' }), driveCall('c2', 'drive_read_file', { file: 'imagePhoto0005' }), answer('점검 메모에 완료라고 적혀 있어요.')][index]);
+      const reply = await run(service, { question: '점검 메모 읽어줘', drive: true });
+      expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory', 'drive_search', 'drive_read_file']);
+      expect(calls[0].messages[0].content).toContain('[Drive 규칙]');
+      expect(String(calls[1].messages.at(-1)?.content)).toContain('<untrusted_web_content source="drive:docNotes00001">');
+      const last = calls[2].messages.slice(-2);
+      expect(last[0]).toMatchObject({ role: 'tool', toolCallId: 'c2' });
+      expect(last[1]).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }] });
+      expect(reply.webSources).toEqual([
+        { title: '점검 메모.txt', url: 'https://drive.google.com/file/d/docNotes00001/view' },
+        { title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' },
+      ]);
+    });
+
+    it(`도구 호출 상한은 ${MAX_DRIVE_TOOL_ROUNDS}번이고, 끄거나 한 번에 답(@AI)이면 도구가 없다`, async () => {
+      const looping = withDrive(async (_call, index) => driveCall(`c${index}`, 'drive_search', { query: `${index}` }));
+      await run(looping.service, { question: '계속 찾아줘', drive: true });
+      expect(looping.calls).toHaveLength(MAX_DRIVE_TOOL_ROUNDS + 1);
+      const off = withDrive(async () => answer('네'));
+      await run(off.service, { question: '찾아줘' });
+      await off.service.ask(user, { question: '찾아줘', drive: true });
+      for (const call of off.calls) expect(call.tools.map((t) => t.name)).toEqual(['get_inventory']);
+    });
+
+    it('@로 붙인 파일은 칩과 상관없이 질문에 감싼 글·사진으로 붙고 출처가 된다. 사진을 못 보는 모델이면 시작 전에 막는다', async () => {
+      const { service, calls } = withDrive(async () => answer('네'));
+      const reply = await run(service, { question: '이 파일 요약해줘', driveFileIds: ['docNotes00001', 'imagePhoto0005'] });
+      const question = calls[0].messages.at(-1);
+      expect(question).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png' }] });
+      expect(String(question?.content)).toMatch(/^이 파일 요약해줘\n\n\[사용자가 붙인 Drive 파일\]/);
+      expect(String(question?.content)).toContain('라인 점검 10/24 완료');
+      expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+      expect(reply.webSources?.map((s) => s.title)).toEqual(['점검 메모.txt', '현장.png']);
+      const blind = withDrive(async () => answer('네'), { vision: false, reasoning: true });
+      await expect(blind.service.prepare(user, { question: '봐줘', driveFileIds: ['imagePhoto0005'] }, { interactive: true })).rejects.toThrow(AppException);
+    });
+  });
+
   describe('저장한 대화 (이슈 #399)', () => {
     beforeEach(() => {
       threadHistory.clear();
@@ -902,13 +1033,13 @@ describe('AiAssistantService', () => {
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

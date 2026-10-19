@@ -12,11 +12,18 @@ import { PastCaseModule } from '../past-case/past-case.module';
 import { LotModule } from '../lot/lot.module';
 import { ProductionModule } from '../production/production.module';
 import { PurchasingModule } from '../purchasing/purchasing.module';
+import { ScheduleEventModule } from '../schedule-event/schedule-event.module';
+import { NotionAssistantService } from '../integration/notion/notion-assistant.service';
+import { GoogleDriveService } from '../integration/google-drive/google-drive.service';
+import { AssistantDriveToolbox } from './drive/assistant-drive-toolbox';
 import { QualityModule } from '../quality/quality.module';
 import { SalesOrderModule } from '../sales-order/sales-order.module';
 import { ShipmentModule } from '../shipment/shipment.module';
 import { AiActionCardService } from './ai-action-card.service';
 import { AiOpsCardService } from './ai-ops-card.service';
+import { AiUpdateCardService } from './ai-update-card.service';
+import { AiNotionCardService } from './notion/ai-notion-card.service';
+import { AssistantNotionToolbox } from './notion/assistant-notion-toolbox';
 import { AiAssistantController } from './ai-assistant.controller';
 import { AiAssistantRepository } from './ai-assistant.repository';
 import { AiAssistantService } from './ai-assistant.service';
@@ -49,6 +56,8 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     // 실행 카드가 업무·알림·구매요청 초안을 만든다 (REQ-AST-005)
     NotificationModule,
     MessageActionModule,
+    // 내 일정 조회·일정 고치기 카드가 일정 화면과 같은 service를 쓴다 (이슈 #398)
+    ScheduleEventModule,
   ],
   controllers: [AiAssistantController],
   providers: [
@@ -60,6 +69,12 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     AssistantToolbox,
     AiActionCardService,
     AiOpsCardService,
+    AiUpdateCardService,
+    AiNotionCardService,
+    // Notion 도구(이슈 #398): 읽기는 IntegrationModule의 NotionAssistantService, 쓰기 카드는 AiNotionCardService
+    { provide: AssistantNotionToolbox, useFactory: (notion: NotionAssistantService, cards: AiNotionCardService) => new AssistantNotionToolbox(notion, cards), inject: [NotionAssistantService, AiNotionCardService] },
+    // Drive 도구(이슈 #398 2단계): 회사 Drive 폴더 읽기는 IntegrationModule의 GoogleDriveService
+    { provide: AssistantDriveToolbox, useFactory: (drive: GoogleDriveService) => new AssistantDriveToolbox(drive), inject: [GoogleDriveService] },
     // 웹 도구(이슈 #367): 검색 캐시·1분 한도·SSRF를 막는 연결을 서버에 하나만 둔다. 시험은 가짜 의존성을 넣어 따로 만든다
     { provide: AssistantWebToolbox, useFactory: () => new AssistantWebToolbox(defaultWebToolDeps()) },
     // 브라우저 사용(이슈 #373): Chrome 하나를 서버에 두고(처음 쓸 때 띄움) 답마다 새 컨텍스트를 빌린다. 서버가 꺼질 때 닫는다

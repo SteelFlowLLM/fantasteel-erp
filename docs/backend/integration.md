@@ -91,6 +91,7 @@
 - 도구 호출 중 오류: 인증 실패·서버의 JSON-RPC 오류(시간 초과 제외)는 실행 전 거절이라 그대로 던진다. 시간 초과·연결 끊김·5xx는 Notion이 이미 만들었는지 알 수 없어 `INT-009`(Notion에서 확인한 뒤 다시 하라는 문구).
 - 상위 페이지 읽기(`normalizeNotionPageId`): 32자리 16진수·대시 있는 UUID, `notion.so`·`notion.site`·`notion.com` 주소의 끝 id(제목 슬러그·퍼센트 인코딩 허용), 미리보기 쿼리 `p`를 먼저 본다. 못 읽으면 `COM-004`.
 - 페이지 쓰기 권한: Notion MCP는 연결한 사람의 권한으로 쓴다. 상위 페이지는 그 계정이 편집할 수 있는 페이지여야 한다.
+- 철강맨AI의 Notion 읽기·쓰기(이슈 #398)는 `notion/notion-assistant.tools.ts`(검색·fetch·행 SQL·찾아 바꾸기 입력, fetch 결과의 조상 경로 읽기, 상위 페이지 범위 규칙 `notionScopeOf`)와 `notion/notion-assistant.service.ts`(`NotionAssistantService`, export)에 따로 둔다. 상위 페이지 아래만 읽고 쓰며, 업무 공간의 세 데이터베이스(`settings.notionWorkspace`)와 그 행은 쓰지 않는다. 자세한 규칙은 [ai-assistant.md](ai-assistant.md) 4장 'Notion'.
 
 ## 6. 보안
 
@@ -306,6 +307,12 @@ OAuth 연결은 관리자가 브라우저에서 허용해야 하고(외부+테�
   - 응답 머리: `Content-Type` = Drive MIME, `Content-Disposition: inline; filename="…"; filename*=UTF-8''…`(이름을 인코딩할 수 없으면 ASCII 이름만), `Content-Length` = **Drive 내용 응답의 길이**(메타데이터를 쓰지 않는다: 그 사이 파일이 바뀌어도 길이가 어긋나지 않게, 없으면 조각 전송), `Content-Range`(206), `Accept-Ranges: bytes`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`(이 서버 주소로 열리므로 스크립트가 돌지 않게), `Cache-Control: private, max-age=300`.
 - **연결 확인** `POST integrations/google-drive/test`: 연결·폴더 설정(`INT-002`·`INT-003`·`INT-011`) → 폴더 메타데이터(폴더 MIME·휴지통 아님, 못 찾으면 폴더 설정을 확인하라는 문구) → 폴더 바로 아래 앞 1,000개에서 녹음·사진 수. 결과 `driveFolder { id, name, audioCount, imageCount, countLimited }`(`countLimited`면 더 있다). 실패도 `ok: false` + `error`로 돌려준다.
 - 스키마는 바꾸지 않았다(`integration_connection` 그대로, `settings.folderId`만 더함).
+- **글 파일 (이슈 #398 2단계)**: `kind=document`에 `text/plain`·`text/markdown`·`text/x-markdown`·`text/csv`를 더했다(철강맨AI가 읽는다). HTML처럼 이 서버 주소로 열면 스크립트가 도는 형식은 넣지 않는다. 화면은 '글 파일'로 보이고 미리보기 없이 내려받는다.
+- **철강맨AI 읽기 (이슈 #398 2단계)** — `GoogleDriveService.searchFiles(query, kind, limit)`·`readForAssistant(fileId)`, 규칙은 `google-drive.query.ts`의 `buildDriveSearchQuery`(목록 검색어 + `name contains '…'`, `'`·`\` 막음)·`driveReadPlan`:
+  - 폴더·휴지통·종류는 `checkFile`과 같다(폴더 밖 `INT-012`).
+  - PDF는 20MB까지 받아(`DRIVE_AI_PDF_MAX_BYTES`) 철강맨AI가 웹 페이지 읽기와 같은 worker PDF 글 뽑기(`unpdf`)로 읽는다. Google 문서·프레젠테이션은 `files.export?mimeType=text/plain`, 스프레드시트는 `text/csv`(첫 시트)로 5MB까지. 글 파일은 2MB까지 그대로. PNG·JPEG·WebP 사진은 2MB(`AI_IMAGE_MAX_BYTES`)까지 base64로. 더 크거나 크기를 모르거나 다른 형식(HEIC 등)이면 Drive 미리보기(`thumbnailLink`의 `=s…`를 `=s1568`로)를 같은 토큰으로 받는다(`fetchThumbnail`: https `*.googleusercontent.com`·`drive.google.com`만, 넘김도 그 호스트만 3번, PNG·JPEG·WebP·2MB 확인). 미리보기도 없으면 이유만(서버에 사진 줄이기 의존성이 없다).
+  - 녹음·Word·Excel·PowerPoint·HEIC 등은 받지 않고 이유만 돌려준다. 크기를 알면 받기 전에 `INT-014`, 모르면 받는 중 상한에서 끊는다.
+  - 자세한 도구 규칙은 [ai-assistant.md](ai-assistant.md) 4장 'Drive'.
 
 ### 실제 Google로 확인하기
 
