@@ -11,7 +11,17 @@ import type {
 } from '@fantasteel/shared';
 import { serverRequest } from '@/api/http';
 
-export type { DriveFileKind, DriveFilePage, DriveFileView, IntegrationConnectResult, IntegrationConnectionView, IntegrationProviderKey, IntegrationSettingsInput, IntegrationTestResult } from '@fantasteel/shared';
+export type {
+  DriveFileKind,
+  DriveFilePage,
+  DriveFileView,
+  IntegrationConnectResult,
+  IntegrationConnectionView,
+  IntegrationProviderKey,
+  IntegrationSettingsInput,
+  IntegrationTestResult,
+  NotionWorkspaceView,
+} from '@fantasteel/shared';
 
 export const integrationKeys = {
   all: ['integrations'] as const,
@@ -27,6 +37,8 @@ export const integrationApi = {
   connect: (providerKey: IntegrationProviderKey): Promise<IntegrationConnectResult> => serverRequest('POST', `/integrations/${providerKey}/connect`),
   disconnect: (providerKey: IntegrationProviderKey): Promise<IntegrationConnectionView> => serverRequest('POST', `/integrations/${providerKey}/disconnect`),
   test: (providerKey: IntegrationProviderKey): Promise<IntegrationTestResult> => serverRequest('POST', `/integrations/${providerKey}/test`),
+  /** 이슈 #391. 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 만들고 자동 반영을 시작한다. 이미 있으면 만들지 않는다 */
+  setupNotionWorkspace: (): Promise<IntegrationConnectionView> => serverRequest('POST', '/integrations/notion/workspace'),
   /** 이슈 #361. 설정한 Drive 폴더의 녹음·사진, 최신 수정순 한 쪽(50개). pageToken으로 다음 쪽 */
   driveFiles: ({ kind, pageToken }: { kind: DriveFileKind; pageToken?: string }): Promise<DriveFilePage> =>
     serverRequest('GET', '/integrations/google-drive/files', { query: { kind, pageToken } }),

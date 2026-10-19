@@ -1,6 +1,6 @@
 'use client';
 
-// 외부 연결 /admin/integrations (문서에 없는 기능, 이슈 #358·#361): 회사 Notion 계정 연결과 회의록을 둘 상위 페이지, 회사 Google Drive 연결과 녹음 폴더.
+// 외부 연결 /admin/integrations (문서에 없는 기능, 이슈 #358·#361·#391): 회사 Notion 계정 연결과 회의록을 둘 상위 페이지·업무 공간, 회사 Google Drive 연결과 녹음 폴더.
 // 회사 계정 하나를 모든 사원이 함께 쓴다. 설정 전용 권한 코드가 없어 AI 연결 화면처럼 ORG_MANAGE로 연다(가정). 사용 권한이 없으면 조회만 한다.
 // OAuth 허용이 끝나면 서버가 브라우저를 ?integration=notion|google-drive&result=connected|error&message=… 로 돌려보낸다.
 import { useEffect, useRef, useState } from 'react';
@@ -22,7 +22,19 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { useAction } from '@/hooks/useAction';
 import { useIntegrationTest, useIntegrations } from '@/hooks/useIntegrations';
 import { useCanUse } from '@/hooks/usePermission';
-import { INTEGRATION_STATUS_LABEL, INTEGRATION_STATUS_TONE, integrationCallbackToast, integrationCardKind, notionPageLink, parseIntegrationCallback, withoutCallbackParams } from '@/lib/integrations';
+import {
+  INTEGRATION_STATUS_LABEL,
+  INTEGRATION_STATUS_TONE,
+  integrationCallbackToast,
+  integrationCardKind,
+  notionPageLink,
+  notionWorkspaceBlockReason,
+  notionWorkspaceStatusLabel,
+  notionWorkspaceSyncLabel,
+  parseIntegrationCallback,
+  safeExternalUrl,
+  withoutCallbackParams,
+} from '@/lib/integrations';
 import { fmtDateTime } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
@@ -133,7 +145,7 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
 
         <Field
           label="회의록을 둘 Notion 상위 페이지"
-          hint="Notion 페이지의 링크를 붙여 넣어요. 연결한 Notion 계정이 편집할 수 있는 페이지여야 하고, 회의록은 이 페이지 아래에 새 페이지로 만들어져요"
+          hint="Notion 페이지의 링크를 붙여 넣어요. 연결한 Notion 계정이 편집할 수 있는 페이지여야 하고, 회의록과 업무 공간 데이터베이스가 이 페이지 아래에 만들어져요"
         >
           <div className="flex gap-2">
             <Input
@@ -163,6 +175,8 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
         ) : (
           <span className="text-cap text-ink-3">상위 페이지를 정하기 전에는 회의록을 내보낼 수 없어요</span>
         )}
+
+        <NotionWorkspaceSection connection={connection} canEdit={canEdit} hasUnsavedChanges={dirty} />
 
         {test.data ? <TestResult result={test.data} /> : null}
         {test.error ? (
@@ -199,6 +213,67 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
         </ConfirmDialog>
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * Notion 업무 공간 (이슈 #391): 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 한 번 만들고, 그 뒤로 서버가 ERP → Notion으로 자동 반영한다.
+ * 이미 만들었으면 단추 대신 데이터베이스 링크와 반영 상태를 보인다. 만들다 멈췄으면(일부만) 없는 것만 이어서 만든다.
+ */
+function NotionWorkspaceSection({ connection, canEdit, hasUnsavedChanges }: { connection: IntegrationConnectionView; canEdit: boolean; hasUnsavedChanges: boolean }) {
+  const workspace = connection.notionWorkspace;
+  const setup = useAction(integrationApi.setupNotionWorkspace, { success: 'Notion 업무 공간을 만들었어요. 일정·회의록·할 일을 옮기기 시작해요', invalidate: [integrationKeys.all] });
+  const blocked = notionWorkspaceBlockReason(connection, hasUnsavedChanges);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-line p-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-ink-2">Notion 업무 공간</span>
+        <Badge tone={workspace?.ready ? 'ok' : workspace ? 'wait' : 'neutral'}>{notionWorkspaceStatusLabel(workspace)}</Badge>
+      </div>
+      <span className="text-cap text-ink-3">
+        상위 페이지 아래에 일정(달력)·회의록·할 일(상태별·담당자별 보드) 데이터베이스를 만들고, ERP에 저장한 내용을 자동으로 옮겨요. Notion에서 고친 내용은 ERP로 돌아오지 않아요.
+      </span>
+      {workspace ? (
+        <KvList
+          items={[
+            { label: '만든 시각', value: workspace.createdAt ? fmtDateTime(workspace.createdAt) : '-' },
+            { label: '마지막 반영', value: workspace.lastSyncedAt ? fmtDateTime(workspace.lastSyncedAt) : '아직 없어요' },
+            { label: '반영', value: workspace.ready ? notionWorkspaceSyncLabel(workspace) : '-' },
+          ]}
+        />
+      ) : null}
+      {workspace && workspace.databases.length > 0 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-cap">
+          {workspace.databases.map((db) => {
+            const href = safeExternalUrl(db.url);
+            return href ? (
+              <a key={db.key} href={href} target="_blank" rel="noopener noreferrer" className="text-run hover:underline">
+                {db.title}
+              </a>
+            ) : (
+              <span key={db.key} className="text-ink-3">
+                {db.title}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {workspace?.lastSyncError ? (
+        <Banner tone="wait" icon="alert">
+          <span className="text-cap font-medium">마지막 반영 오류</span>
+          <div className="break-words">{workspace.lastSyncError}</div>
+        </Banner>
+      ) : null}
+      {workspace?.ready ? null : (
+        <div className="flex items-center gap-2">
+          <Button variant="primary" onClick={() => setup.mutate()} disabled={!canEdit || blocked !== null || setup.isPending}>
+            {setup.isPending ? '만드는 중…' : workspace ? '이어서 만들기' : 'Notion 업무 공간 만들기'}
+          </Button>
+          {blocked ? <span className="text-cap text-ink-3">{blocked}</span> : null}
+        </div>
+      )}
+    </div>
   );
 }
 

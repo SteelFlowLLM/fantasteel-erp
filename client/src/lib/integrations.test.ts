@@ -1,5 +1,5 @@
-// 외부 연결 도우미: 상태 문구, 콜백 쿼리 읽기, Notion 내보내기 버튼 조건 (이슈 #358)
-import type { IntegrationConnectionView, MeetingMinutesView } from '@fantasteel/shared';
+// 외부 연결 도우미: 상태 문구, 콜백 쿼리 읽기, Notion 내보내기 버튼 조건 (이슈 #358), Notion 업무 공간 (이슈 #391)
+import type { IntegrationConnectionView, MeetingMinutesView, NotionWorkspaceView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
 import {
   INTEGRATION_STATUS_LABEL,
@@ -16,6 +16,9 @@ import {
   isNotionExportReady,
   notionConnection,
   notionPageLink,
+  notionWorkspaceBlockReason,
+  notionWorkspaceStatusLabel,
+  notionWorkspaceSyncLabel,
   parseIntegrationCallback,
   safeExternalUrl,
   withoutCallbackParams,
@@ -35,6 +38,7 @@ const connection = (overrides: Partial<IntegrationConnectionView> = {}): Integra
   settings: { parentPageId: PAGE_ID },
   redirectUri: null,
   oauthClient: null,
+  notionWorkspace: null,
   ...overrides,
 });
 
@@ -230,5 +234,41 @@ describe('driveSettingsPatch', () => {
 
   it('칸을 비우면 null로 보내 서버가 비우게 한다', () => {
     expect(driveSettingsPatch({ ...base, clientId: '  ', folder: '' })).toEqual({ clientId: null, folder: null });
+  });
+});
+
+describe('Notion 업무 공간', () => {
+  const workspace = (overrides: Partial<NotionWorkspaceView> = {}): NotionWorkspaceView => ({
+    ready: true,
+    createdAt: '2026-10-19T01:00:00.000Z',
+    databases: [
+      { key: 'scheduleEvents', title: 'ERP 일정', url: 'https://www.notion.so/a' },
+      { key: 'meetingMinutes', title: 'ERP 회의록', url: 'https://www.notion.so/b' },
+      { key: 'tasks', title: 'ERP 할 일', url: 'https://www.notion.so/c' },
+    ],
+    lastSyncedAt: null,
+    failedCount: 0,
+    pendingCount: 0,
+    lastSyncError: null,
+    ...overrides,
+  });
+
+  it('만들기는 연결·저장한 상위 페이지가 있고 고치던 값이 없을 때만', () => {
+    expect(notionWorkspaceBlockReason(connection(), false)).toBeNull();
+    expect(notionWorkspaceBlockReason(connection({ status: 'RECONNECT_REQUIRED' }), false)).toContain('연결한 뒤');
+    expect(notionWorkspaceBlockReason(connection({ settings: { parentPageId: null } }), false)).toContain('상위 페이지를 저장한 뒤');
+    expect(notionWorkspaceBlockReason(connection(), true)).toContain('먼저 저장');
+  });
+
+  it('상태 문구: 안 만듦 · 일부만 · 자동 반영', () => {
+    expect(notionWorkspaceStatusLabel(null)).toBe('아직 만들지 않았어요');
+    expect(notionWorkspaceStatusLabel(workspace({ ready: false, databases: workspace().databases.slice(0, 1) }))).toBe('일부만 만들었어요 (1/3)');
+    expect(notionWorkspaceStatusLabel(workspace())).toBe('자동으로 반영하고 있어요');
+  });
+
+  it('반영 문구: 기다림·실패 수', () => {
+    expect(notionWorkspaceSyncLabel(workspace())).toBe('모두 반영했어요');
+    expect(notionWorkspaceSyncLabel(workspace({ pendingCount: 3, failedCount: 1 }))).toBe('3건 기다리는 중 · 1건 실패(잠시 뒤 다시)');
+    expect(notionWorkspaceSyncLabel(workspace({ pendingCount: 0, failedCount: 2 }))).toBe('2건 실패(잠시 뒤 다시)');
   });
 });
