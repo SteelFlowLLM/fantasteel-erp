@@ -201,6 +201,27 @@ describe('PATCH /employees/:id (API-157)', () => {
     expect((await get<PageResult<EmployeeView>>('/employees?keyword=1702004')).body.data.items[0].isActive).toBe(true);
   });
 
+  it('메일 주소: 등록·고치기·비우기, 형식이 틀리거나 너무 길면 COM-004 (이슈 #391)', async () => {
+    const payload = await newEmployeePayload();
+    const created = (await send<EmployeeView>('POST', '/employees', { ...payload, email: ' kim@fantasteel.test ' })).body.data;
+    expect(created.email).toBe('kim@fantasteel.test');
+    expect((await send<EmployeeView>('POST', '/employees', await newEmployeePayload())).body.data.email).toBeNull();
+
+    const changed = await send<EmployeeView>('PATCH', `/employees/${created.id}`, { email: 'kim2@fantasteel.test' });
+    expect(changed.body.data.email).toBe('kim2@fantasteel.test');
+    // 메일을 보내지 않으면 그대로
+    expect((await send<EmployeeView>('PATCH', `/employees/${created.id}`, { employeeName: '메일그대로' })).body.data.email).toBe('kim2@fantasteel.test');
+    expect((await send<EmployeeView>('PATCH', `/employees/${created.id}`, { email: '' })).body.data.email).toBeNull();
+    expect((await send<EmployeeView>('PATCH', `/employees/${created.id}`, { email: 'kim3@fantasteel.test' })).body.data.email).toBe('kim3@fantasteel.test');
+    expect((await send<EmployeeView>('PATCH', `/employees/${created.id}`, { email: null })).body.data.email).toBeNull();
+
+    const bad = await send('PATCH', `/employees/${created.id}`, { email: 'not-an-email' });
+    expect([bad.status, bad.body.error?.code]).toEqual([400, 'COM-004']);
+    const long = await send('PATCH', `/employees/${created.id}`, { email: `${'a'.repeat(250)}@x.co` });
+    expect(long.body.error?.code).toBe('COM-004');
+    expect((await send('POST', '/employees', { ...(await newEmployeePayload()), email: 'x@' })).body.error?.code).toBe('COM-004');
+  });
+
   it('사원번호는 바꿀 수 없다 (받지 않는 값은 COM-004), 없는 사원은 COM-003', async () => {
     const head = (await get<PageResult<EmployeeView>>('/employees?keyword=1702004')).body.data.items[0];
     expect((await send('PATCH', `/employees/${head.id}`, { employeeNo: '9999999' })).body.error?.code).toBe('COM-004');

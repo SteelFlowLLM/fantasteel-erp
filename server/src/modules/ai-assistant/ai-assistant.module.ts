@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BusinessEventModule } from '../business-event/business-event.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
+import { IntegrationModule } from '../integration/integration.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { LlmModule } from '../llm/llm.module';
 import { MeetingMinutesModule } from '../meeting-minutes/meeting-minutes.module';
@@ -28,6 +29,7 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
 /** AI 어시스턴트 (REQ-AST, docs/backend/ai-assistant.md). 조회 도구는 각 모듈의 조회 service를 쓴다. 웹 도구는 web/ (이슈 #367), 브라우저 도구는 browser/ (이슈 #373) */
 @Module({
   imports: [
+    IntegrationModule,
     LlmModule,
     InventoryModule,
     SalesOrderModule,

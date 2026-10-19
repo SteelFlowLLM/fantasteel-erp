@@ -5,6 +5,7 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { normalizeDateTime, matchEmployee, matchItem, quantityOf, validDate } from '../meeting-minutes/meeting-analysis.validator';
 import { applyCandidateEdit, employeeIdsIn } from '../meeting-minutes/meeting-candidate.rules';
+import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
 import { TaskService } from '../notification/task.service';
@@ -48,6 +49,7 @@ export class AiActionCardService {
     private readonly tasks: TaskService,
     private readonly notifications: NotificationService,
     private readonly messageActions: MessageActionService,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   /** 모델이 넘긴 인자를 카드로 만든다. 못 맞춘 칸은 비워 두고 확인 사유(issues)를 붙인다 */
@@ -141,6 +143,8 @@ export class AiActionCardService {
       await this.requireReferences(tx, card);
       return this.register(tx, user, card);
     });
+    // 업무·일정이면 Notion 업무 공간(이슈 #391) 반영을 커밋 뒤에 깨운다
+    if (registered.type !== 'action_draft') this.notionWorkspace.kick();
     return { kind, registered };
   }
 

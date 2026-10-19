@@ -16,15 +16,15 @@ import {
   type MeetingMinutesStatus,
   type MeetingMinutesView,
   type MeetingNotionExportResult,
-  type Role,
   type TranscriptSegment,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
-import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
+import { NOTION_EXPORT_STALE_MS } from '../integration/mcp/mcp.client';
 import { GoogleDriveService } from '../integration/google-drive/google-drive.service';
 import { NotionPageService } from '../integration/notion/notion-page.service';
+import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { NotificationService } from '../notification/notification.service';
 import { scheduleWeekLink, shortSeoulTime } from '../schedule-event/schedule-notice';
@@ -36,17 +36,13 @@ import { MeetingCandidateContextService } from './meeting-candidate.context';
 import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { isMeetingAudio } from './meeting-audio';
-import { readAnalysis, readSegments, summarizeSpeakers } from './meeting-minutes.json';
+import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
+import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 
 const DEFAULT_PAGE_SIZE = 20;
-/**
- * 내보내던 서버가 멈췄거나 결과를 알 수 없어 남은 잡기를 버리는 시간. 잡기는 도구를 부르기 바로 전에 하고
- * 도구 호출 한 번은 MCP 요청 상한(60초) 안에 끝나므로, 정상 호출이 끝나기 전에 다른 사람이 다시 잡을 수 없게 그 5배로 둔다.
- */
-const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -105,33 +101,6 @@ function toListItem(row: MeetingMinutesListRow): MeetingMinutesListItem {
   };
 }
 
-function toView(row: MeetingMinutesDetailRow): MeetingMinutesView {
-  return {
-    id: row.id,
-    meetingMinutesTitle: row.meetingMinutesTitle,
-    meetingDate: dateOnly(row.meetingDate),
-    meetingMinutesStatus: row.meetingMinutesStatus as MeetingMinutesStatus,
-    transcript: row.transcript,
-    transcriptSegments: readSegments(row.transcriptSegments),
-    speakers: summarizeSpeakers(readSegments(row.transcriptSegments)),
-    summary: row.summary,
-    analysisResult: readAnalysis(row.analysisResult),
-    failureReason: row.failureReason,
-    creator: { id: row.creator.id, name: row.creator.employeeName },
-    attendees: row.attendees.map((a) => ({
-      employeeId: a.employeeId,
-      employeeName: a.employee.employeeName,
-      departmentName: a.employee.department.departmentName,
-      roleCode: a.employee.role.roleCode as Role,
-    })),
-    confirmedAt: row.confirmedAt?.toISOString() ?? null,
-    notionPageUrl: row.notionPageUrl,
-    // 주소 없이 시각만 있으면 내보내는 중이라 화면에는 내보내지 않은 것으로 보인다
-    notionExportedAt: row.notionPageUrl ? (row.notionExportedAt?.toISOString() ?? null) : null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
-}
 
 /**
  * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다(등록은 다음 단계).
@@ -153,6 +122,7 @@ export class MeetingMinutesService {
     private readonly businessEventRecorder: BusinessEventRecorder,
     private readonly notion: NotionPageService,
     private readonly drive: GoogleDriveService,
+    private readonly notionWorkspace: NotionWorkspaceService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -441,6 +411,8 @@ export class MeetingMinutesService {
       await this.repository.saveAnalysisResult(tx, id, withResults as unknown as Prisma.InputJsonObject);
       return { taskIds, scheduleEventIds, actionDraftIds, excludedKeys };
     });
+    // 확정한 회의록과 거기서 만든 일정·업무를 Notion 업무 공간에 반영한다 (커밋 뒤, 기다리지 않음)
+    this.notionWorkspace.kick();
     return { meetingMinutes: await this.get(id), ...created };
   }
 
@@ -457,6 +429,12 @@ export class MeetingMinutesService {
     if (row.notionPageUrl) throw new AppException('VOC-008');
     // 연결·상위 페이지가 없으면 회의록을 잡기 전에 알린다
     await this.notion.assertReady();
+    // Notion 업무 공간(이슈 #391)이 있으면 상위 페이지가 아니라 회의록 데이터베이스에 만든다 (자동 반영과 같은 페이지)
+    if (await this.notionWorkspace.isReady()) {
+      const notionPageUrl = await this.notionWorkspace.exportMeeting(id);
+      const meetingMinutes = await this.get(id);
+      return { notionPageUrl, notionExportedAt: meetingMinutes.notionExportedAt ?? new Date().toISOString(), meetingMinutes };
+    }
 
     // 같은 Notion 연결의 다른 호출을 기다린 뒤 도구를 부르기 바로 전에 잡는다: 줄을 오래 서도 잡기가 만료되지 않게
     const claim: { at: Date | null } = { at: null };

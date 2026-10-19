@@ -141,6 +141,7 @@
 
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.
+- 🟡 **Notion 업무 공간**(이슈 #391, [integration.md](integration.md) 12장)이 있으면 상위 페이지가 아니라 **회의록 데이터베이스**에 만든다. 확정한 회의록은 자동 반영이 먼저 만들 수 있고, 그러면 `notion_page_url`이 채워져 이 버튼은 링크로 바뀐다(두 번째는 `VOC-008`).
 - 조건: 확정(`CONFIRMED`, `confirmed_at` 있음)한 회의록만(아니면 `VOC-004`), 작성자나 `ORG_MANAGE` 사용 권한자만(아니면 `VOC-003`), **한 번만**(이미 주소가 있으면 `VOC-008`, 화면은 상세의 `notionPageUrl` 링크를 보인다). 연결·상위 페이지가 없으면 회의록을 잡기 전에 `INT-002`·`INT-003`·`INT-006`.
 - 동시에 두 번 눌러 페이지가 두 개 생기지 않게 `notion_exported_at`에 시각을 적어 잡는다(`claimNotionExport`, 확정 + 주소 없음 + 잡은 사람 없음 조건부 UPDATE). 잡기는 같은 Notion 연결의 다른 호출을 기다린 뒤 **도구를 부르기 바로 전**에 한다(줄을 오래 서도 만료되지 않게). 못 잡으면 `VOC-008`.
 - 잡기 만료 = MCP 요청 상한(60초) × 5 = 5분: 도구 호출 한 번이 끝나기 전에 다른 요청이 다시 잡을 수 없다. 만료된 잡기는 다시 잡을 수 있다.

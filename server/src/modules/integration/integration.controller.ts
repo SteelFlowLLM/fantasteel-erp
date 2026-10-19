@@ -1,9 +1,9 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { PERMISSION, type AuthUser, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult, type NotionCalendarOption } from '@fantasteel/shared';
 import { AuthTokenService } from '../../common/auth/auth-token.service';
 import { CurrentUser, Public, RequirePermission } from '../../common/auth/auth.decorators';
-import { UpdateIntegrationSettingsDto, type OAuthCallbackQuery } from './dto/integration.dto';
+import { UpdateIntegrationSettingsDto, UpdateNotionCalendarDto, type OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationService } from './integration.service';
 
 /**
@@ -53,6 +53,28 @@ export class IntegrationController {
   @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
   disconnect(@Param('providerKey') providerKey: string): Promise<IntegrationConnectionView> {
     return this.service.disconnect(providerKey);
+  }
+
+  /** Notion 업무 공간(일정·회의록·할 일 데이터베이스) 만들기 (이슈 #391). 이미 있으면 만들지 않는다 */
+  @Post('integrations/notion/workspace')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  setupNotionWorkspace(): Promise<IntegrationConnectionView> {
+    return this.service.setupNotionWorkspace();
+  }
+
+  /** 회사 Notion 계정에 연결된 캘린더 (이슈 #391 2단계). 서버가 Notion에 물어보므로 사용 권한으로 막는다 */
+  @Get('integrations/notion/calendars')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  listNotionCalendars(): Promise<NotionCalendarOption[]> {
+    return this.service.listNotionCalendars();
+  }
+
+  /** 일정을 함께 만들 Notion 캘린더와 참석자 초대 여부 (이슈 #391 2단계) */
+  @Put('integrations/notion/calendar')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateNotionCalendar(@Body() dto: UpdateNotionCalendarDto): Promise<IntegrationConnectionView> {
+    return this.service.updateNotionCalendar(dto);
   }
 
   /** 저장된 연결로 도구 목록을 받아 본다. 서버가 외부로 요청을 보내므로 사용 권한으로 막는다 */

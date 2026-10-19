@@ -18,6 +18,12 @@ const HTTP_TIMEOUT_MS = 60_000;
  */
 export const MCP_REQUEST_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = MCP_REQUEST_TIMEOUT_MS;
+/**
+ * 회의록 Notion 내보내기 잡기(notion_exported_at)를 버리는 시간. 잡기는 도구를 부르기 바로 전에 하고
+ * 도구 호출 한 번은 MCP 요청 상한 안에 끝나므로, 정상 호출이 끝나기 전에 다른 쪽이 다시 잡을 수 없게 그 5배로 둔다.
+ * 직접 내보내기(meeting-minutes.service.ts)와 업무 공간 자동 반영(notion-workspace-sync.service.ts)이 같은 값을 쓴다.
+ */
+export const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
 const CLIENT_INFO = { name: 'fantasteel-erp', version: '0.2.0' };
 
 /** 도구 이름과 입력 스키마. 서버 코드가 직접 고른 도구만 부르고, LLM에게 목록을 넘기지 않는다 */
@@ -53,6 +59,11 @@ function isRejectedToken(error: unknown): boolean {
 export function isRejectedBeforeRun(error: unknown): boolean {
   if (error instanceof McpReconnectRequiredError || isRejectedToken(error)) return true;
   return error instanceof McpError && error.code !== ErrorCode.RequestTimeout;
+}
+
+/** 토큰 문제로 거절됐는지. 행 하나의 실패가 아니라 연결 전체의 문제라, 여러 행을 반영하던 쪽은 멈추고 withSession이 처리하게 다시 던진다 */
+export function isAuthFailure(error: unknown): boolean {
+  return error instanceof McpReconnectRequiredError || isRejectedToken(error);
 }
 
 /** 연결 자체의 문제라 last_error에 남길 오류인지. 업무 오류(VOC- 등)는 연결 상태가 아니다 */

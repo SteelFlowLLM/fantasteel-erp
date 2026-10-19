@@ -22,6 +22,7 @@ const employee = (id: number, employeeName: string): EmployeeView => ({
   roleCode: 'PRODUCTION',
   roleName: '생산',
   isActive: true,
+  email: null,
   headDepartmentIds: [],
   createdAt: AT,
   updatedAt: AT,
@@ -122,6 +123,18 @@ describe('조직 서버 어댑터 — 변경', () => {
     const saved = await employeeAdminApi.create({ ...input, password: 'pass-1' });
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/employees', body: { ...input, password: 'pass-1' } });
     expect(saved).toEqual({ id: 21, employeeNo: '9000021', employeeName: '새사원', isActive: true });
+  });
+
+  it('메일(이슈 #391): 앞뒤 공백을 빼고 보내고, 비우면 null(지우기), 모양이 틀리면 서버를 부르지 않는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, echo);
+    const base = { id: 11, employeeName: '강부장', departmentId: 5, jobGradeId: 1, roleId: 3 };
+    const bad = await employeeAdminApi.update({ ...base, email: 'kang@' }).catch((e: unknown) => e);
+    expect((bad as InputError).fieldErrors).toEqual({ email: '메일 주소 형식이 올바르지 않아요' });
+    expect(calls).toEqual([]);
+    await employeeAdminApi.update({ ...base, email: ' kang@fantasteel.test ' });
+    await employeeAdminApi.update({ ...base, email: '' });
+    await employeeAdminApi.create({ employeeNo: '2610098', employeeName: '새사원', departmentId: 2, jobGradeId: 1, roleId: 3, password: 'pass-1', email: 'new@fantasteel.test' });
+    expect(calls.map((c) => (c.body as { email?: string | null }).email)).toEqual(['kang@fantasteel.test', null, 'new@fantasteel.test']);
   });
 
   it('사원 수정은 화면 확인값(expectedUpdatedAt) 없이 보내고, 사용 안 함·다시 사용은 isActive만 보낸다', async () => {

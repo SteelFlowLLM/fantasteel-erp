@@ -14,6 +14,7 @@ import type { DepartmentView, EmployeeView, JobGradeView, RoleView } from '@/api
 import { FieldErrors, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import type { EmployeeListQuery } from '@/api/queryKeys';
+import { employeeEmailProblem } from '@/features/admin/lib/employeeForm';
 import { DEPARTMENT_CODE_PATTERN, DEPARTMENT_CODE_RULE_TEXT, EMPLOYEE_NO_PATTERN, EMPLOYEE_NO_RULE_TEXT } from '@/features/admin/lib/orgRules';
 
 const PAGE_SIZE = 100;
@@ -104,13 +105,22 @@ async function createEmployee(input: EmployeeCreateInput): Promise<EmployeeSaved
   const errors = new FieldErrors();
   if (employeeNo && !EMPLOYEE_NO_PATTERN.test(employeeNo)) errors.add('employeeNo', EMPLOYEE_NO_RULE_TEXT);
   if (!password) errors.add('password', '비밀번호를 입력해 주세요');
+  const emailProblem = employeeEmailProblem(input.email ?? '');
+  if (emailProblem) errors.add('email', emailProblem);
   errors.throwIfAny();
-  return savedEmployee(await serverRequest<ServerEmployeeView>('POST', '/employees', { body: { employeeNo, password, employeeName, departmentId, jobGradeId, roleId } }));
+  const email = input.email?.trim() || null;
+  return savedEmployee(await serverRequest<ServerEmployeeView>('POST', '/employees', { body: { employeeNo, password, employeeName, departmentId, jobGradeId, roleId, email } }));
 }
 
 async function updateEmployee(input: EmployeeUpdateInput): Promise<EmployeeSaved> {
   const { employeeName, departmentId, jobGradeId, roleId } = input;
-  return savedEmployee(await serverRequest<ServerEmployeeView>('PATCH', `/employees/${input.id}`, { body: { employeeName, departmentId, jobGradeId, roleId } }));
+  const errors = new FieldErrors();
+  const emailProblem = employeeEmailProblem(input.email ?? '');
+  if (emailProblem) errors.add('email', emailProblem);
+  errors.throwIfAny();
+  // 메일 칸을 보내지 않으면(undefined) 서버가 그대로 두고, 비우면 지운다
+  const email = input.email === undefined ? undefined : input.email.trim() || null;
+  return savedEmployee(await serverRequest<ServerEmployeeView>('PATCH', `/employees/${input.id}`, { body: { employeeName, departmentId, jobGradeId, roleId, email } }));
 }
 
 /** 퇴사 처리·다시 사용 (사원은 삭제하지 않는다) */

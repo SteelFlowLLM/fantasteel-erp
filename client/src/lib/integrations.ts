@@ -1,5 +1,6 @@
-// 외부 연결 도우미: 상태 문구·색, 콜백 쿼리 읽기, 회의록 Notion 내보내기 버튼 조건 (이슈 #358), Google Drive 카드·녹음 가져오기 조건 (이슈 #361).
-import { INTEGRATION_PROVIDER, MEETING_AUDIO_MAX_BYTES, MEETING_MINUTES_STATUS, type DriveFileView, type IntegrationConnectionStatus, type IntegrationConnectionView, type IntegrationProviderKey, type IntegrationSettingsInput, type MeetingMinutesView } from '@fantasteel/shared';
+// 외부 연결 도우미: 상태 문구·색, 콜백 쿼리 읽기, 회의록 Notion 내보내기 버튼 조건 (이슈 #358), Google Drive 카드·녹음 가져오기 조건 (이슈 #361),
+// Notion 업무 공간 만들기 조건·상태 문구, Notion 캘린더 고르기 (이슈 #391).
+import { INTEGRATION_PROVIDER, MEETING_AUDIO_MAX_BYTES, MEETING_MINUTES_STATUS, type DriveFileView, type IntegrationConnectionStatus, type IntegrationConnectionView, type IntegrationProviderKey, type IntegrationSettingsInput, type MeetingMinutesView, type NotionCalendarOption, type NotionCalendarSettings, type NotionCalendarSettingsInput, type NotionWorkspaceView } from '@fantasteel/shared';
 import { PERMISSION } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
 import { fmtBytes } from '@/lib/format';
@@ -59,6 +60,57 @@ export function canExportMeetingToNotion(
   if (minutes.meetingMinutesStatus !== MEETING_MINUTES_STATUS.CONFIRMED || minutes.notionPageUrl) return false;
   if (!isNotionExportReady(connection)) return false;
   return minutes.creator.id === user.employeeId || canUse(user, PERMISSION.ORG_MANAGE);
+}
+
+/** "Notion 업무 공간 만들기"가 막힌 이유. 막히지 않았으면 null. 저장한 상위 페이지 아래에 만들므로 고치던 값이 있으면 먼저 저장하게 한다 */
+export function notionWorkspaceBlockReason(connection: IntegrationConnectionView, hasUnsavedChanges: boolean): string | null {
+  if (connection.status !== 'CONNECTED') return 'Notion을 연결한 뒤 만들 수 있어요';
+  if (!connection.settings.parentPageId) return '상위 페이지를 저장한 뒤 만들 수 있어요';
+  if (hasUnsavedChanges) return '저장하지 않은 상위 페이지가 있어요. 먼저 저장해 주세요';
+  return null;
+}
+
+/** 업무 공간 상태 한 줄: 안 만듦 · 만들다 멈춤(일부만) · 자동 반영 중 */
+export function notionWorkspaceStatusLabel(workspace: NotionWorkspaceView | null): string {
+  if (!workspace) return '아직 만들지 않았어요';
+  if (!workspace.ready) return `일부만 만들었어요 (${workspace.databases.length}/3)`;
+  return '자동으로 반영하고 있어요';
+}
+
+/** 반영 대기·실패 수 문구 */
+export function notionWorkspaceSyncLabel(workspace: Pick<NotionWorkspaceView, 'pendingCount' | 'failedCount'>): string {
+  if (workspace.pendingCount === 0 && workspace.failedCount === 0) return '모두 반영했어요';
+  const parts = [workspace.pendingCount > 0 ? `${workspace.pendingCount}건 기다리는 중` : null, workspace.failedCount > 0 ? `${workspace.failedCount}건 실패(잠시 뒤 다시)` : null];
+  return parts.filter(Boolean).join(' · ');
+}
+
+/** Notion 캘린더 목록이 비었을 때 안내 */
+export const NOTION_CALENDAR_EMPTY_HINT = '연결한 Notion 계정에 캘린더가 없어요. 회사 Notion 계정으로 Notion 캘린더(calendar.notion.so)에 들어가 Google 캘린더를 먼저 연결해 주세요';
+
+/** 캘린더 고르기 값 (계정 + 캘린더). 계정 id·캘린더 id에 어떤 글자가 와도 겹치지 않게 인코딩한다 */
+export function notionCalendarKey(calendar: Pick<NotionCalendarOption, 'accountId' | 'calendarId'>): string {
+  return `${encodeURIComponent(calendar.accountId)}|${encodeURIComponent(calendar.calendarId)}`;
+}
+
+/** 캘린더 고르기 한 줄: 이름 · 계정 메일 (읽기 전용) */
+export function notionCalendarLabel(option: Pick<NotionCalendarOption, 'name' | 'accountEmail' | 'writable'>): string {
+  return `${option.name}${option.accountEmail ? ` · ${option.accountEmail}` : ''}${option.writable === false ? ' (읽기 전용)' : ''}`;
+}
+
+/**
+ * 캘린더 저장 본문. 다른 캘린더를 골랐으면 계정·캘린더·초대 여부, 초대 여부만 바꿨으면 그것만, 바뀐 것이 없으면 null.
+ * selectedKey는 notionCalendarKey 값(비었으면 고르지 않음)이고 options에서 찾는다.
+ */
+export function notionCalendarSaveInput(
+  current: Pick<NotionCalendarSettings, 'accountId' | 'calendarId' | 'sendInvites'> | null,
+  selectedKey: string,
+  options: readonly NotionCalendarOption[],
+  sendInvites: boolean,
+): NotionCalendarSettingsInput | null {
+  const picked = options.find((o) => notionCalendarKey(o) === selectedKey);
+  if (picked && (!current || notionCalendarKey(current) !== selectedKey)) return { accountId: picked.accountId, calendarId: picked.calendarId, sendInvites };
+  if (current && sendInvites !== current.sendInvites) return { sendInvites };
+  return null;
 }
 
 /** 화면에 보일 상위 페이지 id 표시: 대시 없는 32자리를 Notion 주소로 보여 준다 */

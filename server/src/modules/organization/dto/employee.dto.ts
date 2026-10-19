@@ -1,7 +1,8 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+const blankToNull = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() || null : value);
 
 /** API-156. 사원번호 형식은 문서에 정해진 것이 없어 빈 값만 막는다 */
 export class CreateEmployeeDto {
@@ -29,6 +30,14 @@ export class CreateEmployeeDto {
 
   @IsInt({ message: '역할을 골라 주세요' })
   roleId!: number;
+
+  /** 회사 메일 주소 (이슈 #391, 문서에 없는 칸). Notion 캘린더 일정 초대에 쓴다. 겹쳐도 된다. 빈 글·null이면 비운다 */
+  @IsOptional()
+  @Transform(blankToNull)
+  @ValidateIf((_, value) => value !== null)
+  @IsEmail({}, { message: '메일 주소 형식이 올바르지 않아요' })
+  @MaxLength(254, { message: '메일 주소는 254자 이하로 입력해 주세요' })
+  email?: string | null;
 }
 
 /** API-157. 사원번호는 로그인 ID라 바꾸지 않는다. 퇴사는 isActive=false (삭제하지 않음) */
@@ -54,4 +63,12 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsBoolean({ message: 'isActive는 true 또는 false여야 해요' })
   isActive?: boolean;
+
+  /** 회사 메일 주소 (이슈 #391, 문서에 없는 칸). Notion 캘린더 일정 초대에 쓴다. 겹쳐도 된다. 빈 글·null이면 비운다 */
+  @IsOptional()
+  @Transform(blankToNull)
+  @ValidateIf((_, value) => value !== null)
+  @IsEmail({}, { message: '메일 주소 형식이 올바르지 않아요' })
+  @MaxLength(254, { message: '메일 주소는 254자 이하로 입력해 주세요' })
+  email?: string | null;
 }

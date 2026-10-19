@@ -25,6 +25,7 @@ const employeeSelect = {
   jobGradeId: true,
   roleId: true,
   isActive: true,
+  email: true,
   createdAt: true,
   updatedAt: true,
   department: { select: { departmentName: true } },

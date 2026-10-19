@@ -113,6 +113,7 @@ export function EmployeeDetail({ employee, meId, canManage, roles, departments, 
                 { label: '부서', value: employee.departmentName },
                 { label: '직급', value: employee.jobGradeName },
                 { label: '역할', value: ROLE_LABEL[employee.roleCode] },
+                { label: '메일', value: employee.email ?? '-' },
                 { label: '사용 여부', value: activeLabelOf(employee.isActive) },
                 { label: '등록일', value: fmtDate(employee.createdAt) },
               ]}
