@@ -153,7 +153,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - 연결은 전용 undici `Agent`로만 한다. `connect.lookup`이 DNS로 푼 주소를 **모두** 확인해 하나라도 내부면 연결하지 않는다(확인과 연결이 같은 조회라 DNS 재바인딩이 끼어들 틈이 없다). Node가 `all: true`로 물으면 배열, 아니면 주소 하나로 돌려준다. IP 그대로의 주소는 lookup을 거치지 않으므로 커넥터가 연결 직전에 한 번 더 본다. 프록시 환경 변수는 쓰지 않는다.
 - 이동(redirect)은 `request()`가 따라가지 않게 두고 직접 따라간다: 단계마다 위 주소 확인을 다시 하고(예: 공용 페이지 → `169.254.169.254` 이동은 거절), **5번**까지.
 - 전체 **10초**(연결·헤더·본문 포함), 본문은 **2MB**까지(압축을 푼 크기, gzip·deflate·br 풀기)만 읽고 연결을 끊는다. 넘으면 앞 2MB로 읽는다.
-- 형식: `text/html`·`application/xhtml+xml`·`text/plain`만(형식을 안 알리면 HTML로 본다). PDF는 "PDF는 아직 못 읽어요", 그 밖(사진 등)은 "읽을 수 없는 형식이에요". 4xx·5xx는 "페이지가 404 오류를…".
+- 형식: `text/html`·`application/xhtml+xml`·`text/plain`만(형식을 안 알리면 HTML로 본다). PDF(`application/pdf`, 또는 octet-stream·형식 없음의 `.pdf` 주소)는 5MB까지 통째로 받아 worker에서 앞 20쪽 글을 뽑는다(이슈 #384, `docs/backend/ai-research.md` 4장 'PDF 읽기'), 그 밖(사진 등)은 "읽을 수 없는 형식이에요". 4xx·5xx는 "페이지가 404 오류를…".
 - 글 뽑기: 문자 집합은 `Content-Type`의 charset → `<meta charset>` → UTF-8(EUC-KR 페이지도 푼다). HTML은 `@mozilla/readability` + `linkedom`으로 본문만 뽑고(문단마다 줄 바꿈), 본문이 200자보다 짧거나 못 찾으면 메뉴·머리말·꼬리말·스크립트를 뺀 페이지 전체 글을 쓴다. 6,000자까지(도구 결과 상한 8,000자 안).
 - **글 뽑기 CPU 막기(보안 검토)**: 예전 정규식(`<(script|…)>[\s\S]*?</\1>`)은 악의적인 2MB 페이지에서 75초 동안 서버 스레드를 막았고, 2만 겹 div는 Readability가 6초 돌다 스택이 넘쳤다. 지금은
   - 파싱하기 전에 HTML을 **512K자**로 자른다(`EXTRACT_INPUT_MAX`).

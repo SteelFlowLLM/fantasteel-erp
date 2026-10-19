@@ -7,6 +7,21 @@ export const INT4_MAX = 2147483647;
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
+/** 조사별 예산 (없으면 서버 기본값). 상한 안에서만 */
+export class AiResearchBudgetDto {
+  @IsOptional()
+  @IsInt({ message: '단계 수는 정수로 써 주세요' })
+  @Min(1)
+  @Max(AI_RESEARCH_LIMITS.maxStepsCap, { message: `단계는 ${AI_RESEARCH_LIMITS.maxStepsCap}개까지예요` })
+  maxSteps?: number;
+
+  @IsOptional()
+  @IsInt({ message: '출처 수는 정수로 써 주세요' })
+  @Min(1)
+  @Max(AI_RESEARCH_LIMITS.maxSourcesCap, { message: `출처는 ${AI_RESEARCH_LIMITS.maxSourcesCap}개까지예요` })
+  maxSources?: number;
+}
+
 /** POST ai-research/runs */
 export class CreateAiResearchRunDto {
   @Transform(trim)
@@ -14,6 +29,11 @@ export class CreateAiResearchRunDto {
   @MinLength(AI_RESEARCH_LIMITS.questionMin, { message: `질문은 ${AI_RESEARCH_LIMITS.questionMin}자 이상 써 주세요` })
   @MaxLength(AI_RESEARCH_LIMITS.questionMax, { message: `질문은 ${AI_RESEARCH_LIMITS.questionMax}자까지 쓸 수 있어요` })
   question!: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiResearchBudgetDto)
+  budget?: AiResearchBudgetDto;
 }
 
 export class AiResearchPlanStepDto {

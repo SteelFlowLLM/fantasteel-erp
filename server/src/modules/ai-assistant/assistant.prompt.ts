@@ -1,5 +1,6 @@
 import { ALLOCATION_STATUS_LABEL, DRAFT_STATUS_LABEL, RESERVATION_STATUS_LABEL, type AiAssistantScreenContext, type AiAssistantTurn } from '@fantasteel/shared';
 import type { ChatMessage } from '../llm/llm.client';
+import { RESEARCH_QUESTION_RULES } from './assistant-research.context';
 import type { GlossaryTerm } from './knowledge/glossary.types';
 import type { ManualGuide } from './knowledge/manual.types';
 import { MANUAL_GUIDES } from './knowledge/manual.generated';
@@ -18,6 +19,8 @@ export interface AssistantPromptInput {
   screen: AiAssistantScreenContext | null;
   /** 회의록 상세에서 묻는 질문일 때 buildMeetingContext가 만든 회의 내용 */
   meetingContext?: string | null;
+  /** 심층 조사 보고서에 대해 묻는 질문일 때 buildResearchContext가 만든 보고서·출처 블록 (이슈 #384) */
+  researchContext?: string | null;
   references: readonly GlossaryTerm[];
   /** 업무 순서·흐름을 묻는 질문일 때만 */
   processSteps?: readonly ProcessStep[];
@@ -106,6 +109,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     ...(input.webTools ? ['', webRules({ places: input.webTools.places, actionCards: input.actionCards === true })] : []),
     ...(input.browserTools ? ['', browserRules({ actionCards: input.actionCards === true })] : []),
     ...(input.meetingContext ? ['', MEETING_QUESTION_RULES, '', '[이 회의]', input.meetingContext] : []),
+    ...(input.researchContext ? ['', RESEARCH_QUESTION_RULES, '', '[이 조사]', input.researchContext] : []),
     ...(input.processSteps?.length ? ['', '[업무 프로세스 자료]', ...input.processSteps.map(processText)] : []),
     ...(input.manualGuides?.length ? ['', '[업무 매뉴얼 자료]', ...input.manualGuides.map(manualText)] : []),
   ].join('\n');

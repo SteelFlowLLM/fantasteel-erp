@@ -2,6 +2,9 @@
 
 // 심층 조사 상세: 상태마다 다른 모습 (계획 중 · 계획 확인 · 진행 · 완료 · 실패/취소).
 import { AI_RESEARCH_STATUS_LABEL, type AiResearchRunView } from '@fantasteel/shared';
+import { useShellStore } from '@/stores/useShellStore';
+import { useIntegrations } from '@/hooks/useIntegrations';
+import { isNotionExportReady, notionConnection, safeExternalUrl } from '@/lib/integrations';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -14,6 +17,7 @@ import { Timeline } from '@/components/Timeline';
 import { AiResearchPlanEditor } from '@/features/ai-research/AiResearchPlanEditor';
 import { AiResearchReport } from '@/features/ai-research/AiResearchReport';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
+import { AiResearchCharts } from '@/features/ai-research/AiResearchCharts';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchRun } from '@/hooks/useAiResearch';
 import { canCancelRun, progressText, timelineLines } from '@/lib/aiResearch';
@@ -32,6 +36,32 @@ function RunTimeline({ run }: { run: AiResearchRunView }) {
         body: line.detail ? <span className="text-cap whitespace-pre-line break-words text-ink-2">{line.detail}</span> : undefined,
       }))}
     />
+  );
+}
+
+/** 완료된 조사의 Notion 내보내기 (회의록과 같이: 연결·상위 페이지가 준비됐을 때만 버튼, 내보냈으면 링크) */
+function ResearchNotionExport({ run }: { run: AiResearchRunView }) {
+  const integrations = useIntegrations();
+  const exportToNotion = useAction(() => aiResearchApi.exportToNotion(run.id), { success: 'Notion으로 내보냈어요' });
+  const link = safeExternalUrl(run.notionPageUrl);
+  if (link) {
+    return (
+      <a
+        href={link}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink no-underline hover:border-[#a9b3be] hover:bg-surface-2"
+      >
+        <Icon name="share" size="sm" />
+        Notion에서 보기
+      </a>
+    );
+  }
+  if (!isNotionExportReady(notionConnection(integrations.data))) return null;
+  return (
+    <Button size="sm" icon="share" onClick={() => exportToNotion.mutate(undefined)} disabled={exportToNotion.isPending} aria-busy={exportToNotion.isPending}>
+      {exportToNotion.isPending ? 'Notion으로 보내는 중…' : 'Notion으로 내보내기'}
+    </Button>
   );
 }
 
@@ -73,6 +103,7 @@ function ProgressCard({ run }: { run: AiResearchRunView }) {
 function Body({ run }: { run: AiResearchRunView }) {
   const cancel = useAction(() => aiResearchApi.cancel(run.id), { success: '조사를 취소했어요' });
   const extend = useAction(() => aiResearchApi.extend(run.id), { success: '더 조사를 시작했어요' });
+  const askAboutResearch = useShellStore((state) => state.askAboutResearch);
   const gaps = run.researchState?.gaps ?? [];
   const incomplete = run.reportTruncated || (run.stepsUsed >= run.budget.maxSteps && gaps.length > 0);
 
@@ -84,6 +115,14 @@ function Body({ run }: { run: AiResearchRunView }) {
         actions={
           <>
             <AiResearchStatusBadge status={run.status} />
+            {run.status === 'COMPLETED' && run.report ? (
+              <>
+                <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
+                  이 보고서로 묻기
+                </Button>
+                <ResearchNotionExport run={run} />
+              </>
+            ) : null}
             {canCancelRun(run.status) ? (
               <Button size="sm" variant="danger-outline" icon="x-circle" disabled={cancel.isPending} onClick={() => cancel.mutate(undefined)}>
                 취소
@@ -141,6 +180,7 @@ function Body({ run }: { run: AiResearchRunView }) {
             </div>
           ) : null}
           <AiResearchReport run={run} />
+          <AiResearchCharts run={run} />
         </>
       ) : null}
 

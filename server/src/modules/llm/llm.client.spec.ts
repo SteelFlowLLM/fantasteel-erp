@@ -275,3 +275,22 @@ describe('LlmClient 사진', () => {
     await expect(new LlmClient().modelCapabilities(endpoint, 'm')).resolves.toEqual({ vision: null, reasoning: null });
   });
 });
+
+describe('LlmClient.modelContextLength (심층 조사 프롬프트 예산, 이슈 #384)', () => {
+  it('불러온 인스턴스의 문맥 길이를 먼저(여럿이면 작은 것), 없으면 최대 문맥 길이, 외부 LLM이면 null', async () => {
+    modelsMock.mockResolvedValueOnce(
+      Response.json({
+        models: [
+          { key: 'loaded', max_context_length: 262144, loaded_instances: [{ config: { context_length: 32768 } }, { config: { context_length: 16384 } }] },
+          { key: 'idle', max_context_length: 131072, loaded_instances: [] },
+          { key: 'unknown' },
+        ],
+      }),
+    );
+    const client = new LlmClient();
+    expect(await client.modelContextLength(endpoint, 'loaded')).toBe(16384);
+    expect(await client.modelContextLength(endpoint, 'idle')).toBe(131072);
+    expect(await client.modelContextLength(endpoint, 'unknown')).toBeNull();
+    expect(await new LlmClient().modelContextLength(endpoint, 'loaded')).toBeNull();
+  });
+});

@@ -128,6 +128,8 @@ interface LmStudioModelInfo {
   /** 생각 설정을 받는 모델만 있다. 예: ['off', 'on'], ['off', 'low', 'medium', 'xhigh', 'on'] */
   reasoningOptions: string[] | null;
   vision: boolean;
+  /** 불러온 인스턴스의 문맥 길이(토큰), 불러오지 않았으면 모델의 최대 문맥 길이. 모르면 null */
+  contextLength: number | null;
 }
 
 /** 모델이 할 수 있는 것. LM Studio가 아니거나 모르는 모델이면 null */
@@ -397,6 +399,15 @@ export class LlmClient {
     return { vision: info.vision, reasoning: Boolean(info.reasoningOptions?.length) };
   }
 
+  /**
+   * LM Studio가 알려 주는 이 모델의 문맥 길이(토큰). 불러온 인스턴스의 값(여럿이면 가장 작은 것)이 먼저, 없으면 최대 문맥 길이.
+   * 외부 LLM·옛 LM Studio·모르는 모델이면 null (심층 조사가 프롬프트 글자 수를 정할 때 쓴다, 이슈 #384)
+   */
+  async modelContextLength(endpoint: LlmEndpoint, model: string): Promise<number | null> {
+    const models = await this.lmStudioModelInfo(endpoint);
+    return (models ? findModelInfo(models, model)?.contextLength : null) ?? null;
+  }
+
   /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
   private async lmStudioModelInfo(endpoint: LlmEndpoint): Promise<Map<string, LmStudioModelInfo> | null> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
@@ -404,11 +415,19 @@ export class LlmClient {
     if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
     let models: Map<string, LmStudioModelInfo> | null;
     try {
-      type Wire = { models?: { key: string; variants?: string[]; capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } } }[] };
+      type Wire = {
+        models?: {
+          key: string;
+          variants?: string[];
+          max_context_length?: number;
+          loaded_instances?: { config?: { context_length?: number } }[];
+          capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } };
+        }[];
+      };
       const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
       models = Array.isArray(body.models) ? new Map() : null;
       for (const m of body.models ?? []) {
-        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true };
+        const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true, contextLength: contextLengthOf(m) };
         for (const id of [m.key, ...(m.variants ?? [])]) models?.set(id, info);
       }
     } catch {
@@ -639,6 +658,13 @@ function parseJsonText(content: string): unknown {
 }
 
 /** 설정의 모델 이름은 /v1/models의 id다. LM Studio는 key나 `key@양자화` 변형 이름으로 준다 */
+function contextLengthOf(m: { max_context_length?: number; loaded_instances?: { config?: { context_length?: number } }[] }): number | null {
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  const loaded = (m.loaded_instances ?? []).map((i) => i.config?.context_length).filter(positive);
+  if (loaded.length) return Math.min(...loaded);
+  return positive(m.max_context_length) ? m.max_context_length : null;
+}
+
 function findModelInfo(models: Map<string, LmStudioModelInfo>, model: string): LmStudioModelInfo | undefined {
   return models.get(model) ?? models.get(model.split('@')[0]);
 }

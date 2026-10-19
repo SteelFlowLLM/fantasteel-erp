@@ -1,15 +1,32 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_STATUS, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/assistant-web-toolbox';
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { AUDIT_JSON_SCHEMA, buildAuditMessages, buildPlanMessages, buildReportMessages, buildTurnMessages, PLAN_JSON_SCHEMA, TURN_JSON_SCHEMA } from './ai-research.prompt';
+import { checkCharts } from './ai-research.charts';
+import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
+import { notifyResearchFinished } from './ai-research.notify';
+import { seoulToday } from '../../common/time/seoul-date';
+import {
+  AUDIT_JSON_SCHEMA,
+  buildAuditMessages,
+  buildChartMessages,
+  buildPlanMessages,
+  buildReportMessages,
+  buildTurnMessages,
+  CHART_JSON_SCHEMA,
+  PLAN_JSON_SCHEMA,
+  REPORT_CONTINUE_PROMPT,
+  TURN_JSON_SCHEMA,
+  type PromptLimits,
+} from './ai-research.prompt';
 import { fallbackReportBody, finalizeReport } from './ai-research.report';
 import { AiResearchRepository, retryOnSeqConflict, type NewResearchEvent } from './ai-research.repository';
 import {
@@ -32,6 +49,8 @@ import {
   storedSources,
   storedState,
   type PendingAction,
+  type StepNote,
+  type StepNoteResult,
   type StoredAudit,
   type StoredSource,
   type StoredState,
@@ -96,6 +115,11 @@ interface RunContext {
   id: number;
   started: number;
   abort: AbortController;
+  /** 오늘 (Asia/Seoul). 모든 프롬프트 첫 줄에 넣는다 */
+  today: string;
+  /** 모델 문맥 길이로 정한 프롬프트 글자 수·보고서 출력 토큰 (조사를 맡을 때 한 번 정한다) */
+  limits: PromptLimits;
+  model: ModelBudget;
 }
 
 /** 조사하며 바뀌는 값 (실패해도 그때까지의 값으로 보고서를 쓰려고 밖에 둔다) */
@@ -128,6 +152,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     private readonly llmClient: LlmClient,
     private readonly llmSettings: LlmSettingsStore,
     private readonly webTools: AssistantWebToolbox,
+    private readonly notifications: NotificationService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -193,7 +218,14 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   private async process(id: number, status: typeof AI_RESEARCH_STATUS.PLANNING | typeof AI_RESEARCH_STATUS.RUNNING): Promise<void> {
-    const ctx: RunContext = { id, started: this.config.now(), abort: new AbortController() };
+    const ctx: RunContext = {
+      id,
+      started: this.config.now(),
+      abort: new AbortController(),
+      today: seoulToday(),
+      limits: researchLimits(),
+      model: modelBudget(null),
+    };
     this.current = ctx;
     const renew = setInterval(() => {
       this.repository
@@ -213,7 +245,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       // 질문·웹 내용은 로그에 남기지 않는다
       this.logger.error(`조사 ${id} 실패: ${error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : error instanceof Error ? (error.stack ?? error.name) : 'unknown'}`);
       const reason = error instanceof LlmRequestError || error instanceof ResearchFailure ? error.message : RESEARCH_ERROR_REASON;
-      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }]).catch((e: unknown) => {
+      await this.save(ctx, status, { status: AI_RESEARCH_STATUS.FAILED, failureReason: reason, finishedAt: new Date(this.config.now()), ...released }, [{ type: 'failed', payload: { reason } }], (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.FAILED)).catch((e: unknown) => {
         if (!(e instanceof LeaseLostError)) this.logger.error(`조사 ${id} 실패 상태를 저장하지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`);
       });
     } finally {
@@ -228,7 +260,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const run = await this.repository.findById(this.prisma, ctx.id);
     if (!run) return;
     const endpoint = await this.endpoint();
-    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
+    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
     let plan: AiResearchPlan | null = readPlan(value, run.question)?.plan ?? null;
     const fallback = plan === null;
     plan ??= fallbackPlan(run.question);
@@ -254,6 +286,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const plan = storedPlan(run.plan);
     if (!plan) throw new ResearchFailure('조사 계획이 없어요');
     const endpoint = await this.endpoint();
+    await this.sizeForModel(ctx, endpoint);
     const budget = readBudget(run.budget);
     const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0 };
     // 읽기는 이 조사가 모은 출처만 (검색 결과로 받은 주소). 이어서 할 때는 저장된 출처를 다시 알려 준다
@@ -312,17 +345,33 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let truncated = false;
     if (!llmDown)
       try {
-        const messages = buildReportMessages({ question: run.question, plan, state, sources, audit });
-        const ask = (msgs: ChatMessage[], maxTokens: number) =>
+        const messages = buildReportMessages({ question: run.question, plan, state, sources, audit, limits: ctx.limits, today: ctx.today });
+        const maxTokens = ctx.model.reportMaxTokens;
+        const ask = (msgs: ChatMessage[]) =>
           this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs: this.config.reportTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
-        let reply = await ask(messages, REPORT_MAX_TOKENS);
-        // 생각만 하다 예산을 다 쓴 답은 한 번만 더 크게·생각 없이 부탁한다
+        let reply = await ask(messages);
+        // 생각만 하다 예산을 다 쓴 답은 한 번만 더 생각 없이 부탁한다
         if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
           await this.assertMine(ctx);
-          reply = await ask(withNoThinkHint(messages), retryMaxTokens(REPORT_MAX_TOKENS));
+          reply = await ask(withNoThinkHint(messages));
         }
         body = reply.text.trim();
         truncated = reply.truncated;
+        // 길이 한도에 걸렸으면 한 번만 끊긴 곳부터 이어 쓰게 하고 붙인다. 이어 쓰기가 실패하면 끊긴 보고서를 쓴다(맨 위 알림)
+        if (truncated && body.length >= NEAR_EMPTY_CHARS) {
+          await this.assertMine(ctx);
+          try {
+            const more = await ask(continuationMessages(messages, body));
+            const merged = mergeContinuation(body, more.text);
+            if (merged.length > body.length) {
+              body = merged;
+              truncated = more.truncated;
+            }
+          } catch (error) {
+            if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
+            this.logger.warn(`조사 ${ctx.id} 보고서 이어 쓰기 실패: ${cutText(error.message, 160)}`);
+          }
+        }
         if (body.length < NEAR_EMPTY_CHARS) body = '';
         if (!body) notes.push('AI가 빈 보고서를 내 조사 메모로 대신 정리했어요.');
       } catch (error) {
@@ -337,12 +386,46 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     }
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
+    // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
+    const charted = llmDown ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
     await this.save(
       ctx,
       AI_RESEARCH_STATUS.RUNNING,
-      { status: AI_RESEARCH_STATUS.COMPLETED, report, audit: json({ ...audit, reportTruncated: truncated, incompleteReason }), finishedAt: new Date(this.config.now()), failureReason: null, ...released },
-      [{ type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } }],
+      {
+        status: AI_RESEARCH_STATUS.COMPLETED,
+        report,
+        audit: json({ ...audit, reportTruncated: truncated, incompleteReason }),
+        charts: json(charted?.charts ?? []),
+        finishedAt: new Date(this.config.now()),
+        failureReason: null,
+        ...released,
+      },
+      [
+        { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } },
+        ...(charted ? [{ type: 'charts.ready' as const, payload: { count: charted.charts.length, droppedPoints: charted.droppedPoints } }] : []),
+      ],
+      (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.COMPLETED),
     );
+  }
+
+  /** 보고서 뒤 차트 제안 (JSON 한 번). 점마다 출처 글에 그 숫자가 있는지 확인한다. LLM 실패·못 읽음이면 null (차트 없이 끝낸다) */
+  private async charts(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, state: StoredState, sources: StoredSource[]): Promise<{ charts: AiResearchChart[]; droppedPoints: number } | null> {
+    if (!sources.length) return null;
+    await this.assertMine(ctx);
+    try {
+      const value = await this.askJson(ctx, endpoint, buildChartMessages({ question, plan, state, sources, limits: ctx.limits, today: ctx.today }), CHART_JSON_SCHEMA, (v) => Array.isArray(v.charts));
+      return value ? checkCharts(value, sources) : null;
+    } catch (error) {
+      if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
+      this.logger.warn(`조사 ${ctx.id} 차트 제안 실패: ${error instanceof Error ? error.name : 'unknown'}`);
+      return null;
+    }
+  }
+
+  /** 끝난 조사(완료·실패)를 만든 사원에게 알린다 (같은 트랜잭션) */
+  private async notifyFinished(tx: Tx, id: number, status: typeof AI_RESEARCH_STATUS.COMPLETED | typeof AI_RESEARCH_STATUS.FAILED): Promise<void> {
+    const row = await this.repository.findById(tx, id);
+    if (row) await notifyResearchFinished(this.notifications, tx, row, status);
   }
 
   /**
@@ -359,7 +442,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       if (work.stepsUsed >= budget.maxSteps) return { exhausted: true, searchDown: false };
       await this.assertMine(ctx);
       if (this.config.now() - ctx.started > this.config.wallClockMs) throw new WallClockExceeded();
-      const value = await this.askJson(ctx, endpoint, buildTurnMessages({ question, plan, state: work.state, sources: work.sources, stepsUsed: work.stepsUsed, budget }), TURN_JSON_SCHEMA, (v) => typeof v.action === 'string' || isRecord(v.researchState));
+      const value = await this.askJson(ctx, endpoint, buildTurnMessages({ question, plan, state: work.state, sources: work.sources, stepsUsed: work.stepsUsed, budget, limits: ctx.limits, today: ctx.today }), TURN_JSON_SCHEMA, (v) => typeof v.action === 'string' || isRecord(v.researchState));
       const turn = readTurn(value);
       const nextState = readState(turn.state, work.state);
       if (nextState) work.state = nextState;
@@ -383,60 +466,85 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
 
   /** 저장해 둔 행동 하나를 하고, 결과·출처와 함께 pending을 지운다 */
   private async execute(ctx: RunContext, session: WebToolSession, work: Work, maxSources: number, pending: PendingAction): Promise<void> {
-    const events = pending.kind === 'search' ? await this.search(ctx, session, pending.query, work.sources, maxSources) : await this.read(ctx, session, pending.sourceId, work.sources);
+    const { events, note } = pending.kind === 'search' ? await this.search(ctx, session, pending.query, pending.step, work.sources, maxSources) : await this.read(ctx, session, pending.sourceId, pending.step, work.sources);
     if (pending.kind === 'search') {
       const done = events[0];
       work.emptySearchStreak = done?.type === 'search.done' && done.payload.resultCount === 0 ? work.emptySearchStreak + 1 : 0;
     }
     const { pending: _done, ...rest } = work.state;
-    work.state = pending.kind === 'search' ? { ...rest, searchedQueries: [...rest.searchedQueries.filter((q) => queryKey(q) !== queryKey(pending.query)), pending.query] } : rest;
+    const notes = [...(rest.notes ?? []).filter((n) => n.step !== note.step), note].slice(-NOTES_KEPT);
+    work.state = pending.kind === 'search' ? { ...rest, notes, searchedQueries: [...rest.searchedQueries.filter((q) => queryKey(q) !== queryKey(pending.query)), pending.query] } : { ...rest, notes };
     await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), sources: json(work.sources) }, events);
   }
 
   /** 검색 → 새 주소를 출처로 (꽉 차면 더 넣지 않음). 1분 한도에 걸리면 쉬었다 다시 한다 */
-  private async search(ctx: RunContext, session: WebToolSession, query: string, sources: StoredSource[], maxSources: number): Promise<NewResearchEvent[]> {
+  private async search(ctx: RunContext, session: WebToolSession, query: string, step: number, sources: StoredSource[], maxSources: number): Promise<{ events: NewResearchEvent[]; note: StepNote }> {
     let outcome = await session.searchWeb(query);
     for (let retry = 0; !outcome.ok && outcome.kind === 'rate' && retry < this.config.rateLimitRetries; retry += 1) {
       await this.config.sleep(this.config.rateLimitWaitMs, ctx.abort.signal);
       await this.assertMine(ctx);
       outcome = await session.searchWeb(query);
     }
-    if (!outcome.ok) return [{ type: 'search.done', payload: { query: outcome.query || query, engine: null, resultCount: 0, added: 0, error: outcome.reason } }];
-    const known = new Set(sources.map((s) => urlKey(s.url)));
+    if (!outcome.ok)
+      return {
+        events: [{ type: 'search.done', payload: { query: outcome.query || query, engine: null, resultCount: 0, added: 0, error: outcome.reason } }],
+        note: { step, kind: 'search', query, engine: null, error: outcome.reason, results: [] },
+      };
+    const known = new Map(sources.map((s) => [urlKey(s.url), s.id]));
     const added: StoredSource[] = [];
+    // 출처로 넣지 못한 결과(이미 있는 주소·꽉 참)도 단계 기록에는 남긴다 (검색어와 그 결과를 함께 근거로 보인다)
+    const results: StepNoteResult[] = [];
     for (const result of outcome.results) {
       const key = urlKey(result.url);
-      if (!key || known.has(key) || sources.length >= maxSources) continue;
-      known.add(key);
-      const source: StoredSource = {
-        id: sources.reduce((max, s) => Math.max(max, s.id), 0) + 1,
-        title: cutText(stripInvisible(result.title), SOURCE_TITLE_MAX),
-        url: result.url,
-        snippet: cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX),
-      };
+      const title = cutText(stripInvisible(result.title), SOURCE_TITLE_MAX);
+      const snippet = cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX);
+      if (!key) continue;
+      const existing = known.get(key);
+      if (existing !== undefined || sources.length >= maxSources) {
+        results.push({ sourceId: existing ?? null, title, url: result.url, snippet });
+        continue;
+      }
+      const source: StoredSource = { id: sources.reduce((max, s) => Math.max(max, s.id), 0) + 1, title, url: result.url, snippet };
+      known.set(key, source.id);
       sources.push(source);
       added.push(source);
+      results.push({ sourceId: source.id, title, url: result.url, snippet });
     }
-    return [
-      { type: 'search.done', payload: { query: outcome.query, engine: outcome.engine, resultCount: outcome.results.length, added: added.length, error: null } },
-      ...added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } })),
-    ];
+    return {
+      events: [
+        { type: 'search.done', payload: { query: outcome.query, engine: outcome.engine, resultCount: outcome.results.length, added: added.length, error: null } },
+        ...added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } })),
+      ],
+      note: { step, kind: 'search', query: outcome.query, engine: outcome.engine, error: null, results },
+    };
   }
 
-  private async read(ctx: RunContext, session: WebToolSession, sourceId: number, sources: StoredSource[]): Promise<NewResearchEvent[]> {
+  private async read(ctx: RunContext, session: WebToolSession, sourceId: number, step: number, sources: StoredSource[]): Promise<{ events: NewResearchEvent[]; note: StepNote }> {
     const source = sources.find((s) => s.id === sourceId);
-    if (!source) return [];
+    if (!source) return { events: [], note: { step, kind: 'read', sourceId, error: '모르는 출처예요' } };
     const outcome = await session.readKnownPage(source.url, ctx.abort.signal);
     if (!outcome.ok) {
       source.readError = outcome.reason;
-      return [{ type: 'page.read', payload: { sourceId, title: source.title, chars: 0, error: outcome.reason } }];
+      return { events: [{ type: 'page.read', payload: { sourceId, title: source.title, chars: 0, error: outcome.reason } }], note: { step, kind: 'read', sourceId, error: outcome.reason } };
     }
     source.readText = outcome.text;
-    return [{ type: 'page.read', payload: { sourceId, title: source.title, chars: outcome.text.length, error: null } }];
+    return { events: [{ type: 'page.read', payload: { sourceId, title: source.title, chars: outcome.text.length, error: null } }], note: { step, kind: 'read', sourceId, error: null } };
+  }
+
+  /** 모델 문맥 길이(LM Studio)로 이 조사의 프롬프트 글자 수·보고서 출력 토큰을 정한다. 모르면 환경 변수 또는 24,000자 */
+  private async sizeForModel(ctx: RunContext, endpoint: Endpoint): Promise<void> {
+    let contextLength: number | null = null;
+    try {
+      contextLength = await this.llmClient.modelContextLength(endpoint, endpoint.model);
+    } catch {
+      contextLength = null;
+    }
+    ctx.model = modelBudget(contextLength);
+    ctx.limits = { ...ctx.limits, promptChars: ctx.model.promptChars };
   }
 
   private async audit(ctx: RunContext, endpoint: Endpoint, question: string, plan: AiResearchPlan, state: StoredState, sources: StoredSource[]): Promise<StoredAudit> {
-    const value = await this.askJson(ctx, endpoint, buildAuditMessages({ question, plan, state, sources }), AUDIT_JSON_SCHEMA, (v) => typeof v.thesis === 'string');
+    const value = await this.askJson(ctx, endpoint, buildAuditMessages({ question, plan, state, sources, limits: ctx.limits, today: ctx.today }), AUDIT_JSON_SCHEMA, (v) => typeof v.thesis === 'string');
     const audit = readAudit(value, new Set(sources.map((s) => s.id)));
     return audit ? { ...audit, ok: true, reportTruncated: false } : fallbackAudit(state);
   }
@@ -483,7 +591,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   /** 내가 맡은 행일 때만 저장하고 이벤트를 붙인다 (같은 트랜잭션). 맡은 표시 시각은 renewLease(DB now())만 늘린다 */
-  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[]): Promise<void> {
+  private save(ctx: RunContext, status: AiResearchStatus, data: Prisma.AiResearchRunUncheckedUpdateManyInput, events: readonly NewResearchEvent[], after?: (tx: Tx) => Promise<void>): Promise<void> {
     return retryOnSeqConflict(() =>
       this.prisma.$transaction(async (tx) => {
         const { count } = await this.repository.updateLeased(tx, ctx.id, this.owner, status, data);
@@ -492,18 +600,41 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           throw new LeaseLostError();
         }
         await this.repository.appendEvents(tx, ctx.id, events);
+        await after?.(tx);
       }),
     );
   }
 }
 
-const REPORT_MAX_TOKENS = 6000;
 const JSON_MAX_TOKENS = 4000;
+/** 단계 기록은 이만큼까지 남긴다 (단계 상한 30보다 넉넉히) */
+const NOTES_KEPT = 60;
 const RETRY_MAX_TOKENS_CAP = 16000;
 const NEAR_EMPTY_CHARS = 5;
 const NO_THINK_HINT = '지금은 생각 과정 없이 바로 답만 써요. /no_think';
 
 const retryMaxTokens = (base: number): number => Math.min(base * 2, RETRY_MAX_TOKENS_CAP);
+
+/** 끊긴 보고서를 이어 쓰게 하는 메시지: 앞 요청 + 끊긴 답 + 이어 쓰기 부탁 */
+export function continuationMessages(messages: ChatMessage[], partial: string): ChatMessage[] {
+  return [...messages, { role: 'assistant', content: partial }, { role: 'user', content: REPORT_CONTINUE_PROMPT }];
+}
+
+/**
+ * 끊긴 보고서 + 이어 쓴 글. 이어 쓴 글이 앞 글의 끝부분(8~400자)을 되풀이하며 시작하면 겹친 만큼 떼고 붙인다.
+ * 끊긴 자리가 낱말 중간이면 그대로 잇고, 줄 끝이면 줄을 바꿔 잇는다.
+ */
+export function mergeContinuation(partial: string, more: string): string {
+  const next = more.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, '').replace(/\s+$/, '');
+  if (!next.trim()) return partial;
+  const head = partial.replace(/\s+$/, '');
+  const trimmedNext = next.replace(/^\s+/, '');
+  for (let n = Math.min(400, head.length, trimmedNext.length); n >= 8; n -= 1) {
+    if (trimmedNext.startsWith(head.slice(head.length - n))) return `${head}${trimmedNext.slice(n)}`;
+  }
+  const joiner = /\n\s*$/.test(partial) || /^\s*\n/.test(more) || /^#{1,6}\s/.test(trimmedNext) ? '\n' : /\s$/.test(partial) || /^\s/.test(more) ? ' ' : '';
+  return `${head}${joiner}${trimmedNext}`;
+}
 
 /** 마지막 user 메시지 끝에 '생각하지 말고 바로 답' 지시를 붙인다 (/no_think는 Qwen 외 모델에는 그냥 글) */
 export function withNoThinkHint(messages: ChatMessage[]): ChatMessage[] {
