@@ -57,7 +57,6 @@ const STOPPED_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-line-strong bg-
 
 /** 지금 모델이 사진을 볼 수 없을 때 첨부 단추에 보이는 안내 */
 const NO_VISION_TITLE = '지금 모델은 사진을 볼 수 없어요';
-const NO_REASONING_HINT = '이 모델은 생각 정도를 바꿀 수 없어요';
 const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp';
 
 type FailureEntry = Extract<AiChatEntry, { role: 'failure' }>;
@@ -381,7 +380,8 @@ export function AiPanel() {
                 }}
               />
             </div>
-            <ReasoningPicker level={reasoning} oneShot={oneShot} disabled={reasoningOff} onLevel={changeReasoning} onOneShot={changeOneShot} />
+            {/* 생각 정도를 못 바꾸는 모델이면 칸을 숨긴다. 모르는 모델(null)은 보여 주고, 서버가 못 쓰면 답 아래에 알린다 */}
+            {reasoningOff ? null : <ReasoningPicker level={reasoning} oneShot={oneShot} onLevel={changeReasoning} onOneShot={changeOneShot} />}
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
             {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
@@ -492,33 +492,28 @@ function lastStepSize(live: AiChatLive): number {
 }
 
 /** 생각 정도: 끔·낮게·보통·깊게. '이번 질문만'을 켜 두면 보낸 뒤 기본값으로 돌아간다 */
-function ReasoningPicker({ level, oneShot, disabled, onLevel, onOneShot }: { level: AiReasoningLevel; oneShot: boolean; disabled: boolean; onLevel: (level: AiReasoningLevel) => void; onOneShot: (checked: boolean) => void }) {
+function ReasoningPicker({ level, oneShot, onLevel, onOneShot }: { level: AiReasoningLevel; oneShot: boolean; onLevel: (level: AiReasoningLevel) => void; onOneShot: (checked: boolean) => void }) {
   return (
-    <div className="inline-flex items-center gap-2 text-cap text-ink-3" title={disabled ? NO_REASONING_HINT : undefined}>
+    <div className="inline-flex items-center gap-2 text-cap text-ink-3">
       <span id="ai-reasoning-label">생각</span>
-      <div role="radiogroup" aria-labelledby="ai-reasoning-label" aria-disabled={disabled} className={`inline-flex overflow-hidden rounded-sm border border-line-strong ${disabled ? 'opacity-55' : ''}`}>
+      <div role="radiogroup" aria-labelledby="ai-reasoning-label" className="inline-flex overflow-hidden rounded-sm border border-line-strong">
         {AI_REASONING_LEVELS.map((option) => (
           <button
             key={option}
             type="button"
             role="radio"
             aria-checked={option === level}
-            disabled={disabled}
             onClick={() => onLevel(option)}
-            className={`h-6 px-2 text-cap not-first:border-l not-first:border-line-strong disabled:cursor-not-allowed ${option === level ? 'bg-steelman-soft font-semibold text-steelman-ink' : 'bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+            className={`h-6 px-2 text-cap not-first:border-l not-first:border-line-strong ${option === level ? 'bg-steelman-soft font-semibold text-steelman-ink' : 'bg-surface text-ink-2 hover:bg-surface-2'}`}
           >
             {AI_REASONING_LABEL[option]}
           </button>
         ))}
       </div>
-      {disabled ? (
-        <span>{NO_REASONING_HINT}</span>
-      ) : (
-        <label className="inline-flex items-center gap-1 text-ink-2">
-          <input type="checkbox" checked={oneShot} onChange={(event) => onOneShot(event.target.checked)} />
-          이번 질문만
-        </label>
-      )}
+      <label className="inline-flex items-center gap-1 text-ink-2">
+        <input type="checkbox" checked={oneShot} onChange={(event) => onOneShot(event.target.checked)} />
+        이번 질문만
+      </label>
     </div>
   );
 }

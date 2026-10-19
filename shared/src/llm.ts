@@ -32,6 +32,8 @@ export interface LlmModelView {
   type: string | null;
   /** LM Studio만 알려 준다: 지금 메모리에 올라가 있는지. 외부 LLM이면 null */
   loaded: boolean | null;
+  /** LM Studio만 알려 준다: 생각 정도(reasoning_effort)를 받는지. 외부 LLM·옛 LM Studio면 null */
+  reasoning: boolean | null;
 }
 
 export interface LlmConnectionView {
