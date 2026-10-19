@@ -9,6 +9,7 @@ import { sourceText } from '@/features/shell/AiPanel';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { canOpenScreen, SCREEN, screenOfPath, SCREEN_KEY_BY_HREF, type AccessUser } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
+import { useShellStore } from '@/stores/useShellStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
 const CHARACTERS = ['steelman', 'steelman_old', 'harin_office', 'gocheol', 'poseokho', 'coil'];
@@ -95,6 +96,10 @@ export function PetMount() {
         screenLocked: lockedRef.current,
         screenHrefs: SCREEN_HREFS,
         navigate: (href: string) => routerRef.current.push(href),
+        // AI 패널이 열려 있으면 설명할 화면을 가리므로 설명을 시작할 때 닫는다
+        onExplain: () => {
+          if (useShellStore.getState().aiPanelOpen) useShellStore.getState().closeAiPanel();
+        },
         askAi,
       });
     });

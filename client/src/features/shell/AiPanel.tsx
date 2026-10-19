@@ -264,6 +264,8 @@ export function AiPanel() {
       data-ai-skip=""
       // 펫이 패널 밑(보내기 버튼 위)에 서 있지 않게 비켜서게 한다 (pet-engine.js avoidEdges)
       data-pet-avoid=""
+      // 패널은 펫보다 아래 층이라, 패널 밑에 깔린 요소를 가리키는 표시(테두리·지시봉)는 패널 앞에서 멈추게 한다
+      data-pet-cover=""
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
