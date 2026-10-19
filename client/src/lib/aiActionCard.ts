@@ -6,7 +6,10 @@ import {
   type AiActionCardExecuteInput,
   type AiActionCardExecuteResult,
   type AiActionCardKind,
+  type AiNotionCard,
   type AiPastCaseCard,
+  type AiScheduleEventUpdateCard,
+  type AiTaskUpdateCard,
   type AiSalesOrderCard,
   type AiWorkCard,
   type MeetingCandidateUpdateInput,
@@ -20,20 +23,31 @@ export const CARD_KIND_LABEL = {
   HOT_ROLLING: '열연 배정',
   HEAT_PLAN: '히트 편성',
   PAST_CASE: '과거 사례',
+  NOTION_PAGE_CREATE: 'Notion 새 페이지',
+  NOTION_PAGE_APPEND: 'Notion 글 더하기',
+  NOTION_PAGE_UPDATE: 'Notion 고치기',
+  SCHEDULE_EVENT_UPDATE: '일정 고치기',
+  TASK_UPDATE: '업무 고치기',
 } as const satisfies Record<AiActionCardKind, string>;
 
 type Registered = AiActionCardExecuteResult['registered'];
 
-/** 실행 결과를 열 수 있는 화면과 안내 문구 */
-export const CARD_RESULT: Record<Registered['type'], { message: (registered: Registered) => string; href: (registered: Registered) => string; linkLabel: (registered: Registered) => string }> = {
-  task: { message: () => '업무로 등록됐어요', href: () => '/tasks', linkLabel: () => '업무 보기' },
-  schedule_event: { message: () => '일정으로 등록됐어요', href: () => '/schedule', linkLabel: () => '내 일정 보기' },
+/** 실행 결과를 열 수 있는 화면과 안내 문구. external이면 새 탭으로 여는 바깥 주소(Notion) */
+export const CARD_RESULT: Record<Registered['type'], { message: (registered: Registered) => string; href: (registered: Registered) => string; linkLabel: (registered: Registered) => string; external?: boolean }> = {
+  task: { message: (r) => (r.updated ? '업무를 고쳤어요' : '업무로 등록됐어요'), href: () => '/tasks', linkLabel: () => '업무 보기' },
+  schedule_event: { message: (r) => (r.updated ? '일정을 고쳤어요' : '일정으로 등록됐어요'), href: () => '/schedule', linkLabel: () => '내 일정 보기' },
   action_draft: { message: () => '구매요청 초안이 만들어졌어요. 초안을 확정하면 구매요청이 되고 부서장 승인을 기다려요', href: (r) => `/action-drafts/${r.id}`, linkLabel: (r) => `초안 #${r.id} 열기` },
   sales_order: { message: (r) => `수주 ${r.no ?? ''}를 등록했어요`, href: (r) => `/sales-orders/${r.id}`, linkLabel: () => '수주 열기' },
   hot_rolling: { message: (r) => `${r.no ?? '생산계획'}의 열연 배정을 확정했어요`, href: () => '/production/rolling', linkLabel: () => '열연 투입 배정 보기' },
   heat_plan: { message: (r) => `${r.no ?? '생산계획'}의 히트 편성을 확정했어요`, href: () => '/production/plans', linkLabel: () => '생산계획 보기' },
   past_case: { message: (r) => `과거 사례 ${r.no ?? ''}를 등록했어요`, href: () => '/past-cases', linkLabel: () => '과거 사례 보기' },
+  notion_page: { message: (r) => (r.note ? `Notion에 반영했어요 (Notion 알림: ${r.note})` : 'Notion에 반영했어요'), href: (r) => r.url ?? '', linkLabel: () => 'Notion에서 열기', external: true },
 };
+
+export const isNotionCard = (card: AiActionCard): card is AiNotionCard => card.kind === 'NOTION_PAGE_CREATE' || card.kind === 'NOTION_PAGE_APPEND' || card.kind === 'NOTION_PAGE_UPDATE';
+
+/** Notion 카드가 가리키는 페이지 (새 페이지면 그 위 페이지) */
+export const notionTargetOf = (card: AiNotionCard) => (card.kind === 'NOTION_PAGE_CREATE' ? card.parent : card.page);
 
 /** 재고·생산에 큰 영향이 있어 [실행] 뒤 확인창을 한 번 더 거치는 카드 */
 export const needsConfirmation = (card: AiActionCard): boolean => card.kind === 'SALES_ORDER' || card.kind === 'HOT_ROLLING' || card.kind === 'HEAT_PLAN';
@@ -67,7 +81,16 @@ export function missingOfCard(card: AiActionCard): string[] {
       return missingOfPastCase(card);
     case 'HOT_ROLLING':
     case 'HEAT_PLAN':
+    case 'TASK_UPDATE':
       return [];
+    case 'NOTION_PAGE_CREATE':
+      return [...(card.pageTitle.trim() === '' ? ['제목'] : []), ...(card.content.trim() === '' ? ['내용'] : [])];
+    case 'NOTION_PAGE_APPEND':
+      return card.content.trim() === '' ? ['내용'] : [];
+    case 'NOTION_PAGE_UPDATE':
+      return card.edits.length === 0 && card.newTitle === null ? ['바꿀 내용'] : [];
+    case 'SCHEDULE_EVENT_UPDATE':
+      return card.scheduleEventTitle.trim() === '' ? ['제목'] : [];
     default:
       return missingFieldsOf(card);
   }
@@ -102,9 +125,40 @@ export function executeInputOf(card: AiActionCard): AiActionCardExecuteInput {
         equipmentText: card.equipmentText,
         occurredDate: card.occurredDate,
       };
+    case 'NOTION_PAGE_CREATE':
+      return { kind: card.kind, nonce: card.nonce, notionPageId: card.parent.id, pageTitle: card.pageTitle, content: card.content };
+    case 'NOTION_PAGE_APPEND':
+      return { kind: card.kind, nonce: card.nonce, notionPageId: card.page.id, content: card.content };
+    case 'NOTION_PAGE_UPDATE':
+      return { kind: card.kind, nonce: card.nonce, notionPageId: card.page.id, ...(card.newTitle !== null ? { pageTitle: card.newTitle } : {}), edits: card.edits };
+    case 'SCHEDULE_EVENT_UPDATE':
+      return { kind: card.kind, scheduleEventId: card.scheduleEventId, title: card.scheduleEventTitle, description: card.scheduleEventDescription, startAt: card.startAt, endAt: card.endAt };
+    case 'TASK_UPDATE':
+      return taskUpdateInputOf(card);
     default:
       return workInputOf(card);
   }
+}
+
+/** 업무 고치기는 바뀐 칸만 보낸다 (완료 카드는 완료만) */
+function taskUpdateInputOf(card: AiTaskUpdateCard): AiActionCardExecuteInput {
+  if (card.complete) return { kind: 'TASK_UPDATE', taskId: card.taskId, complete: true };
+  return {
+    kind: 'TASK_UPDATE',
+    taskId: card.taskId,
+    ...(card.taskTitle !== card.before.taskTitle ? { title: card.taskTitle } : {}),
+    ...(card.taskDescription !== card.before.taskDescription ? { description: card.taskDescription } : {}),
+    ...(card.dueDate !== card.before.dueDate ? { dueDate: card.dueDate } : {}),
+  };
+}
+
+/** 일정 고치기 카드의 시각을 화면 칸(datetime-local, 서울)으로 */
+export const seoulLocalOf = (iso: string): string => new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 16);
+
+/** 일정 고치기 카드에 사용자가 고친 칸을 반영한다 (시각은 'YYYY-MM-DDTHH:mm' 서울) */
+export function applyScheduleChanges(card: AiScheduleEventUpdateCard, input: { title: string; description: string; startAt: string; endAt: string }): AiScheduleEventUpdateCard {
+  const issues = Date.parse(toSeoulIso(input.endAt)) <= Date.parse(toSeoulIso(input.startAt)) ? ['끝 시각은 시작 시각보다 뒤여야 해요'] : [];
+  return { ...card, title: `일정 고치기 · ${input.title}`, scheduleEventTitle: input.title, scheduleEventDescription: input.description.trim() || null, startAt: toSeoulIso(input.startAt), endAt: toSeoulIso(input.endAt), issues };
 }
 
 function workInputOf(card: AiWorkCard): AiActionCardExecuteInput {

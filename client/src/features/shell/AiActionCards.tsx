@@ -13,10 +13,12 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
 import { fields, useDirectoryNames } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { CandidateEditor } from '@/features/meetings/components/MeetingCandidateEditor';
+import { NotionCardBody, NotionCardEditor, ScheduleUpdateBody, ScheduleUpdateEditor, TaskUpdateBody, TaskUpdateEditor } from '@/features/shell/AiNotionCardParts';
 import { HeatPlanBody, HotRollingBody, PastCaseBody, PastCaseEditor, SalesOrderBody, SalesOrderEditor } from '@/features/shell/AiOpsCardParts';
 import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
-import { applyCardChanges, CARD_KIND_LABEL, CARD_RESULT, executeInputOf, isWorkCard, missingOfCard, needsConfirmation } from '@/lib/aiActionCard';
+import { applyCardChanges, CARD_KIND_LABEL, CARD_RESULT, executeInputOf, isNotionCard, isWorkCard, missingOfCard, needsConfirmation } from '@/lib/aiActionCard';
+import { isNotionUrl } from '@/lib/aiNotion';
 import { cn } from '@/lib/cn';
 import { useAiChatStore, type AiChatCard } from '@/stores/useAiChatStore';
 
@@ -84,7 +86,8 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
   const dismissed = status === 'dismissed';
   const done = status === 'done';
   const locked = done || dismissed;
-  const editable = isWorkCard(card) || card.kind === 'SALES_ORDER' || card.kind === 'PAST_CASE';
+  // 완료 카드는 고칠 칸이 없다
+  const editable = isWorkCard(card) || card.kind === 'SALES_ORDER' || card.kind === 'PAST_CASE' || isNotionCard(card) || card.kind === 'SCHEDULE_EVENT_UPDATE' || (card.kind === 'TASK_UPDATE' && !card.complete);
 
   const replaceCard = (next: AiActionCard) => {
     updateCard(entryId, card.key, { card: next });
@@ -115,6 +118,12 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
         <SalesOrderEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
       ) : editing && card.kind === 'PAST_CASE' ? (
         <PastCaseEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
+      ) : editing && isNotionCard(card) ? (
+        <NotionCardEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
+      ) : editing && card.kind === 'SCHEDULE_EVENT_UPDATE' ? (
+        <ScheduleUpdateEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
+      ) : editing && card.kind === 'TASK_UPDATE' ? (
+        <TaskUpdateEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
       ) : (
         <>
           {isWorkCard(card) ? (
@@ -128,6 +137,12 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
             <HotRollingBody card={card} />
           ) : card.kind === 'HEAT_PLAN' ? (
             <HeatPlanBody card={card} />
+          ) : isNotionCard(card) ? (
+            <NotionCardBody card={card} />
+          ) : card.kind === 'SCHEDULE_EVENT_UPDATE' ? (
+            <ScheduleUpdateBody card={card} />
+          ) : card.kind === 'TASK_UPDATE' ? (
+            <TaskUpdateBody card={card} />
           ) : (
             <PastCaseBody card={card} />
           )}
@@ -149,9 +164,17 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
         <div className="flex items-center gap-1 rounded-xs bg-ok-bg px-2 py-1.5 text-xs text-ok-strong">
           <Icon name="check" size="sm" />
           <span>{CARD_RESULT[item.result.type].message(item.result)}</span>
-          <Link href={CARD_RESULT[item.result.type].href(item.result)} className="font-medium text-brand hover:underline">
-            {CARD_RESULT[item.result.type].linkLabel(item.result)}
-          </Link>
+          {CARD_RESULT[item.result.type].external ? (
+            isNotionUrl(item.result.url) ? (
+              <a href={item.result.url} target="_blank" rel="noopener noreferrer" className="font-medium text-brand hover:underline">
+                {CARD_RESULT[item.result.type].linkLabel(item.result)}
+              </a>
+            ) : null
+          ) : (
+            <Link href={CARD_RESULT[item.result.type].href(item.result)} className="font-medium text-brand hover:underline">
+              {CARD_RESULT[item.result.type].linkLabel(item.result)}
+            </Link>
+          )}
         </div>
       ) : null}
 
@@ -170,7 +193,7 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
             size="sm"
             variant="primary"
             disabled={execute.isPending || missing.length > 0}
-            title={missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 실행할 수 있어요` : '내 권한으로 업무에 반영해요'}
+            title={missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 실행할 수 있어요` : isNotionCard(card) ? '회사 Notion에 반영해요 (한 번만 실행돼요)' : '내 권한으로 업무에 반영해요'}
             onClick={run}
           >
             {execute.isPending ? '실행하는 중…' : '실행'}

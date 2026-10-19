@@ -27,6 +27,7 @@ import { driveAiImageProblem } from '@/lib/driveFiles';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
+import { AI_NOTION_TITLE, notionDisabledReason, readAiNotionPreference, writeAiNotionPreference } from '@/lib/aiNotion';
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
@@ -92,6 +93,7 @@ export function AiPanel() {
   const [webSearchPref, setWebSearchPref] = useState(false);
   const [browserPref, setBrowserPref] = useState(false);
   const [screenControlPref, setScreenControlPref] = useState(false);
+  const [notionPref, setNotionPref] = useState(false);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
@@ -106,6 +108,9 @@ export function AiPanel() {
   // ERP 화면 조작 (이슈 #382, 시험 중): 서버가 켜 두었을 때만 칩을 보인다
   const screenControlAvailable = capabilities.data?.screenControl?.available === true;
   const screenControlOn = screenControlPref && screenControlAvailable;
+  // Notion (이슈 #398): 서버가 연결·상위 페이지를 확인해 줄 때만 켠다. 못 켜면 이유를 보인다
+  const notionBlockedReason = notionDisabledReason(capabilities.data, capabilities.isError);
+  const notionOn = notionPref && notionBlockedReason === null;
   // 심층 조사 (이슈 #378): 서버가 모델이 정해져 있다고 알릴 때만. 지금 입력한 글로 조사를 만들고 그 화면으로 간다
   const deepResearchOn = capabilities.data?.deepResearch?.available === true;
   const sendToResearch = useAction(aiResearchApi.create, {
@@ -138,6 +143,7 @@ export function AiPanel() {
     setWebSearchPref(readAiWebSearchPreference());
     setBrowserPref(readAiBrowserPreference());
     setScreenControlPref(readAiScreenControlPreference());
+    setNotionPref(readAiNotionPreference());
   }, []);
 
   // 답이 자라는 동안(생각·조회·답 글) 맨 아래를 따라간다
@@ -178,6 +184,11 @@ export function AiPanel() {
     writeAiScreenControlPreference(on);
   };
 
+  const changeNotion = (on: boolean) => {
+    setNotionPref(on);
+    writeAiNotionPreference(on);
+  };
+
   const changeOneShot = (checked: boolean) => {
     setOneShot(checked);
     writeAiReasoningPreference({ level: reasoning, oneShot: checked });
@@ -198,7 +209,7 @@ export function AiPanel() {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id);
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id, notionOn);
     setDraft('');
     if (withImages) photos.clear();
     const next = reasoningAfterSend(reasoning, oneShot);
@@ -218,7 +229,7 @@ export function AiPanel() {
   const retry = (failure: FailureEntry) => {
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn);
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, undefined, notionOn);
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
@@ -385,6 +396,7 @@ export function AiPanel() {
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
             {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
+            <NotionToggle on={notionOn} blockedReason={notionBlockedReason} onChange={changeNotion} />
             {deepResearchOn ? (
               <Button
                 size="sm"
@@ -440,7 +452,7 @@ function Welcome({ roleLabel, contextQuestion, disabled, onAsk, onFill }: { role
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록을 부탁하면 실행 카드로 만들어 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록, 내 일정·업무 고치기를 부탁하면 실행 카드로 만들어 줘요. 'Notion'을 켜면 회사 Notion을 찾아 읽고 정리 글을 Notion 카드로 써 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
       </p>
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
@@ -562,6 +574,28 @@ function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedRe
         <Icon name="search" size="sm" />브라우저
       </button>
       <span id="ai-browser-hint">{blocked ? blockedReason : on ? AI_BROWSER_TITLE : ''}</span>
+    </div>
+  );
+}
+
+/** Notion 켜기 (이슈 #398). 켜면 이 질문에 회사 Notion을 찾아 읽고, 쓰기는 실행 카드로 제안한다. 연결·상위 페이지가 없으면 이유와 함께 꺼 둔다 */
+function NotionToggle({ on, blockedReason, onChange }: { on: boolean; blockedReason: string | null; onChange: (on: boolean) => void }) {
+  const blocked = blockedReason !== null;
+  return (
+    <div className="inline-flex items-center gap-1.5 text-cap text-ink-3" title={blocked ? blockedReason : AI_NOTION_TITLE}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Notion"
+        aria-describedby="ai-notion-hint"
+        disabled={blocked}
+        onClick={() => onChange(!on)}
+        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+      >
+        <Icon name="book" size="sm" />Notion
+      </button>
+      <span id="ai-notion-hint">{blocked ? blockedReason : on ? '쓰기는 카드로만 해요' : ''}</span>
     </div>
   );
 }
