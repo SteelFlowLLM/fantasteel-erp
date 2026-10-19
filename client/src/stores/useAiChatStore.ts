@@ -9,6 +9,7 @@ import type {
   AiAssistantStreamEvent,
   AiAssistantTurn,
   AiReasoningLevel,
+  AiWebSource,
 } from '@fantasteel/shared';
 import { create } from 'zustand';
 
@@ -41,6 +42,8 @@ export interface AiToolResult {
   label: string | null;
   resultPreview: string;
   durationMs: number;
+  /** 웹 도구일 때만: 찾은 결과·읽은 페이지 (이슈 #367). 제목은 웹에서 온 글이라 글로만 보인다 */
+  webSources?: AiWebSource[];
 }
 
 /** 답을 기다리는 동안 보이는 진행 상황 */
@@ -54,11 +57,11 @@ export interface AiChatLive {
 
 export type AiChatEntry =
   /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (지난 대화로 서버에 보내지 않는다) */
-  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[] }
+  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; webSearch?: boolean }
   /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드 */
-  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[] }
+  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[]; webSources?: AiWebSource[] }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
-  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[] };
+  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean };
 
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
@@ -94,7 +97,7 @@ export function reduceAiChatLive(live: AiChatLive, event: AiAssistantStreamEvent
     case 'tool_end': {
       const steps = closeThinking(live.steps, now).map((step): AiTimelineStep =>
         step.kind === 'tool' && step.id === event.id
-          ? { ...step, result: { label: event.label, resultPreview: event.resultPreview, durationMs: event.durationMs } }
+          ? { ...step, result: { label: event.label, resultPreview: event.resultPreview, durationMs: event.durationMs, ...(event.webSources ? { webSources: event.webSources } : {}) } }
           : step,
       );
       return { ...live, steps };
@@ -127,6 +130,7 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
     content: reply.answer,
     sources: reply.sources,
     steps: liveSteps.length ? liveSteps : stepsFromReply(reply),
+    ...(reply.webSources ? { webSources: reply.webSources } : {}),
     ...(live.reasoning ? { requestedReasoning: live.reasoning, reasoningApplied: reply.reasoningApplied } : {}),
     ...readyCards(reply.actionCards),
   };
@@ -136,8 +140,9 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
 function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: string, question: string, reason: string): AiChatEntry {
   const asked = state.entries.find((entry) => entry.id === questionId);
   const images = asked?.role === 'user' ? asked.images : undefined;
+  const webSearch = asked?.role === 'user' ? asked.webSearch : undefined;
   const reasoning = state.live?.reasoning;
-  return { id: newAiChatId(), role: 'failure', content: reason, question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}) };
+  return { id: newAiChatId(), role: 'failure', content: reason, question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}), ...(webSearch ? { webSearch } : {}) };
 }
 
 interface AiChatState {
@@ -150,7 +155,7 @@ interface AiChatState {
   live: AiChatLive | null;
   claim: (employeeId: number) => void;
   /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다), images: 질문과 함께 보내는 사진 */
-  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[]) => void;
+  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean) => void;
   addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
   /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
@@ -172,9 +177,9 @@ export const useAiChatStore = create<AiChatState>((set) => ({
   live: null,
   claim: (employeeId) =>
     set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, entries: [], pendingId: null, live: null })),
-  addQuestion: (id, question, reasoning, images) =>
+  addQuestion: (id, question, reasoning, images, webSearch) =>
     set((state) => ({
-      entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}) }],
+      entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch } : {}) }],
       pendingId: id,
       live: emptyAiChatLive(reasoning ?? null),
     })),
