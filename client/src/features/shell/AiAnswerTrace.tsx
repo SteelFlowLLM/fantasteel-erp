@@ -7,6 +7,7 @@ import { AI_ASSISTANT_TOOL_TITLE } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { AI_BROWSER_MAX_ACTIONS, browserActionCount, browserFrameSrc, browserFramesSummary, browserToolRunningText, type AiBrowserFrame } from '@/lib/aiBrowser';
+import { driveToolDoneText, driveToolRunningText } from '@/lib/aiDrive';
 import { notionToolDoneText, notionToolRunningText } from '@/lib/aiNotion';
 import { webToolDoneText, webToolRunningText } from '@/lib/aiWebSearch';
 import { formatDuration } from '@/lib/meetingAnalysis';
@@ -74,7 +75,7 @@ function LiveThinking({ step }: { step: ThinkingStep }) {
 function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> }) {
   const { result } = step;
   // 웹 도구는 개수·호스트만 보인다 (제목은 웹에서 온 글이라 이 줄에는 쓰지 않는다)
-  const webSummary = result ? (webToolDoneText(step.name, result.webSources) ?? notionToolDoneText(step.name, result.webSources)) : null;
+  const webSummary = result ? (webToolDoneText(step.name, result.webSources) ?? notionToolDoneText(step.name, result.webSources) ?? driveToolDoneText(step.name, result.webSources)) : null;
   return (
     <p className="flex items-start gap-1.5 text-xs text-ink-2">
       <Icon name={result ? 'check-circle' : 'search'} size="sm" className="mt-0.5 flex-none text-ink-3" />
@@ -82,7 +83,7 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
         <b className="font-semibold">{toolTitleOf(step.name)}</b>
         {result
           ? ` · 완료 ${formatDuration(result.durationMs)}${webSummary ? ` · ${webSummary}` : result.label ? ` · ${result.label}` : ''}`
-          : (webToolRunningText(step.name) ?? browserToolRunningText(step.name) ?? notionToolRunningText(step.name) ?? ' … 조회 중')}
+          : (webToolRunningText(step.name) ?? browserToolRunningText(step.name) ?? notionToolRunningText(step.name) ?? driveToolRunningText(step.name) ?? ' … 조회 중')}
       </span>
     </p>
   );

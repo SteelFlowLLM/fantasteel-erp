@@ -53,6 +53,8 @@ export function driveKindLabel(file: Pick<DriveFileView, 'kind' | 'mimeType'>): 
   if (mime.includes('wordprocessingml')) return 'Word';
   if (mime.includes('spreadsheetml')) return 'Excel';
   if (mime.includes('presentationml')) return 'PowerPoint';
+  // 글 파일(텍스트·마크다운·CSV)은 철강맨AI가 읽으려고 목록에 넣었다 (이슈 #398 2단계)
+  if (mime.startsWith('text/')) return '글 파일';
   return '문서';
 }
 
