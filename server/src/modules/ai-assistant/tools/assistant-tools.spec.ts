@@ -15,8 +15,10 @@ import {
 import { AppException } from '../../../common/errors/app.exception';
 import type { PrismaService } from '../../../prisma/prisma.service';
 import type { BusinessEventService } from '../../business-event/business-event.service';
+import type { DashboardService } from '../../dashboard/dashboard.service';
 import type { InventoryService } from '../../inventory/inventory.service';
 import type { LotService } from '../../lot/lot.service';
+import type { MrpService } from '../../mrp/mrp.service';
 import type { PastCaseService } from '../../past-case/past-case.service';
 import type { ProductionResultService } from '../../production/production-result.service';
 import type { ProductionService } from '../../production/production.service';
@@ -260,6 +262,8 @@ describe('도구 모음 (권한·실패 처리)', () => {
     { search: async (input: PastCaseSearchInput) => searchPastCases(PAST_CASE_EXAMPLES, input, '2026-10-16') } as unknown as PastCaseService,
     {} as AiActionCardService,
     {} as AiOpsCardService,
+    {} as DashboardService,
+    {} as MrpService,
   );
   const run = (name: string, args: string, permissions: AuthUser['permissions'] = {}) => toolbox.run(user(permissions), { id: 'c1', name, arguments: args });
 
@@ -277,7 +281,7 @@ describe('도구 모음 (권한·실패 처리)', () => {
     expect((await run('search_past_cases', JSON.stringify({ category: 'X' }))).content).toContain('category는 QUALITY, EQUIPMENT 중 하나예요');
   });
 
-  it('모델에 조회 도구 15개를 알린다 (REQ-AST-004 조회 대상 전부 + REQ-AST-006 과거 사례 + REQ-AST-003 지식 읽기)', () => {
+  it('모델에 조회 도구 18개를 알린다 (REQ-AST-004 조회 대상 전부 + 묶은 숫자 3개 + REQ-AST-006 과거 사례 + REQ-AST-003 지식 읽기)', () => {
     expect(toolbox.definitions().map((d) => d.name)).toEqual([
       'get_inventory',
       'get_sales_orders',
@@ -286,11 +290,14 @@ describe('도구 모음 (권한·실패 처리)', () => {
       'trace_lot',
       'get_quality_inspections',
       'get_rejected_lots',
+      'get_quality_reject_rate',
       'get_purchase_requisitions',
       'get_purchase_orders',
       'get_goods_receipts',
+      'get_mrp_requirements',
       'get_shipment_requests',
       'get_mill_sheets',
+      'get_dashboard_summary',
       'get_business_events',
       'search_past_cases',
       'read_knowledge',
