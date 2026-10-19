@@ -1,11 +1,12 @@
 // AI 어시스턴트 훅. 답은 화면 토스트가 아니라 대화에 바로 보이므로 useAction이 아니라 대화 저장소에 직접 넣는다.
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
-import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
 import { useQuery } from '@tanstack/react-query';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
 import { isAbortError } from '@/api/http';
 import { useMe } from '@/hooks/useMe';
+import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
 import { AI_CHAT_STOPPED_REASON, aiChatHistory, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
@@ -49,12 +50,20 @@ export interface AiAskVariables {
   webSearch?: boolean;
   /** 브라우저 사용을 켠 질문이면 true (이슈 #373). 끄면 필드를 보내지 않는다 */
   browser?: boolean;
+  /** 화면 조작을 켠 질문이면 true (이슈 #382, 시험 중). 끄면 필드를 보내지 않는다 */
+  screenControl?: boolean;
   /** 심층 조사 보고서에 대해 묻는 질문이면 그 조사 id (이슈 #384) */
   researchRunId?: number;
 }
 
+/** 서버가 보낸 화면 동작을 이 화면에서 실행하고 결과를 돌려준다. 보내기에 실패하면 서버가 시간 초과로 끝낸다 */
+async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui_action' }>): Promise<void> {
+  const result = await runUiAction(event);
+  await aiAssistantApi.sendUiActionResult(event.actionId, result).catch(() => undefined);
+}
+
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch, browser, researchRunId }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch, browser, screenControl, researchRunId }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -63,11 +72,16 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   const unsubscribe = useAiChatStore.subscribe((state) => {
     if (!finished && state.pendingId !== questionId) controller.abort();
   });
+  if (screenControl) useAiScreenControlStore.getState().setRunning(true);
   try {
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
-      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(researchRunId ? { researchRunId } : {}) },
+      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}) },
       (event) => {
+        if (event.type === 'ui_action') {
+          void answerUiAction(event);
+          return;
+        }
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
       },
@@ -78,20 +92,21 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
     chat().addFailure(questionId, question, controller.signal.aborted || isAbortError(error) ? AI_CHAT_STOPPED_REASON : errorMessageOf(error));
   } finally {
     unsubscribe();
+    if (screenControl) useAiScreenControlStore.getState().setRunning(false);
     if (activeController === controller) activeController = null;
   }
 }
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, researchRunId?: number) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, screenControl?: boolean, researchRunId?: number) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const history = aiChatHistory(chat.entries);
     const questionId = newAiChatId();
     chat.addQuestion(questionId, text, reasoning, images, webSearch, browser);
-    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch, browser, researchRunId });
+    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch, browser, screenControl, researchRunId });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }

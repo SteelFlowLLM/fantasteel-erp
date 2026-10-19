@@ -21,6 +21,7 @@ import { AssistantToolbox } from './tools/assistant-toolbox';
 import { AssistantWebToolbox, defaultWebToolDeps } from './web/assistant-web-toolbox';
 import { AssistantBrowserToolbox } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
+import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
 
 /** AI 어시스턴트 (REQ-AST, docs/backend/ai-assistant.md). 조회 도구는 각 모듈의 조회 service를 쓴다. 웹 도구는 web/ (이슈 #367), 브라우저 도구는 browser/ (이슈 #373) */
 @Module({
@@ -51,6 +52,8 @@ import { BrowserPool } from './browser/browser-pool';
     { provide: AssistantWebToolbox, useFactory: () => new AssistantWebToolbox(defaultWebToolDeps()) },
     // 브라우저 사용(이슈 #373): Chrome 하나를 서버에 두고(처음 쓸 때 띄움) 답마다 새 컨텍스트를 빌린다. 서버가 꺼질 때 닫는다
     { provide: AssistantBrowserToolbox, useFactory: () => new AssistantBrowserToolbox(new BrowserPool()) },
+    // ERP 화면 조작(이슈 #382, 시험 중): 화면 동작을 기다리는 자리를 서버 메모리에 하나만 둔다
+    { provide: AssistantScreenToolbox, useFactory: () => new AssistantScreenToolbox(new ScreenActionBroker()) },
   ],
   // 심층 조사(이슈 #378)가 같은 웹 검색 클라이언트(캐시·1분 한도)와 페이지 읽기(SSRF 막기·동시 4개)를 쓴다
   exports: [AiAssistantService, AssistantWebToolbox],

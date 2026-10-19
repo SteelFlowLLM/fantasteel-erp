@@ -11,9 +11,10 @@ import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.s
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
+import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
 import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox';
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { KakaoPlaceClient, WebSearchClient } from './web/web-search.client';
@@ -157,6 +158,8 @@ describe('AiAssistantService', () => {
     webTools: AssistantWebToolbox = new AssistantWebToolbox({ search: new WebSearchClient({ fetch: () => Promise.reject(new Error('검색하지 않음')), naver: () => null }), places: new KakaoPlaceClient(() => null), pages: { read: () => Promise.reject(new Error('읽지 않음')) } }),
     // 기본은 서버 설정이 꺼진 브라우저 (Chrome을 띄우지 않는다)
     browserTools: AssistantBrowserToolbox = new AssistantBrowserToolbox(new BrowserPool({ env: {} })),
+    // 기본은 서버 설정이 꺼진 화면 조작
+    screenTools: AssistantScreenToolbox = new AssistantScreenToolbox(new ScreenActionBroker(), {}),
   ) {
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
@@ -199,7 +202,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, {} as PrismaService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -751,16 +754,91 @@ describe('AiAssistantService', () => {
     });
   });
 
+  describe('ERP 화면 조작 (이슈 #382)', () => {
+    const SCREENS = [
+      { path: '/sales-orders', title: '수주' },
+      { path: '/sales-orders/new', title: '수주 등록' },
+    ];
+    const call = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
+    /** 화면 역할: ui_action을 받으면 answerOf가 돌려준 결과를 바로 보낸다 */
+    const run = async (replies: LlmToolReply[], input: Parameters<AiAssistantService['prepare']>[1], answerOf: (tool: string) => { ok: boolean; result?: string; error?: string }, enabled = true) => {
+      const broker = new ScreenActionBroker(1000);
+      const screenTools = new AssistantScreenToolbox(broker, enabled ? { AI_SCREEN_CONTROL_ENABLED: 'true' } : {});
+      const { service, calls } = setup({}, async (_call, index) => replies[Math.min(index, replies.length - 1)], undefined, undefined, undefined, undefined, screenTools);
+      const events: AiAssistantStreamEvent[] = [];
+      const reply = await (await service.prepare(user, input, { interactive: true })).run((event) => {
+        events.push(event);
+        if (event.type === 'ui_action') queueMicrotask(() => service.settleUiAction(user, event.actionId, answerOf(event.tool)));
+      });
+      return { calls, events, reply, broker, service };
+    };
+
+    it('screenControl: true면 화면 도구·규칙·열 수 있는 화면을 알리고, ui_action을 화면에 보내 결과를 모델에 넘긴다', async () => {
+      const { calls, events, reply, broker } = await run(
+        [call('c1', 'ui_navigate', { path: '/sales-orders/new' }), answer('수주 등록 화면을 열었어요. 아직 저장하지 않았어요.')],
+        { question: '수주 등록 화면 열어줘', screenControl: true, screenMap: SCREENS },
+        () => ({ ok: true, result: '[화면] 수주 등록 (/sales-orders/new)\n[r1] textbox "고객사" value=""\n[r2] button "등록"' }),
+      );
+      expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory', 'ui_snapshot', 'ui_navigate', 'ui_click', 'ui_fill', 'ui_select']);
+      expect(calls[0].messages[0].content).toContain('[화면 조작 규칙]');
+      expect(calls[0].messages[0].content).toContain('- 수주 등록: /sales-orders/new');
+      const types = events.map((e) => e.type).filter((t) => t !== 'thinking' && t !== 'answer');
+      expect(types).toEqual(['tool_start', 'ui_action', 'tool_end']);
+      expect(events.find((e) => e.type === 'ui_action')).toMatchObject({ tool: 'ui_navigate', args: { path: '/sales-orders/new' } });
+      expect(calls[1].messages.at(-1)?.content).toContain('<screen_content>');
+      expect(reply.answer).toContain('아직 저장하지 않았어요');
+      expect(broker.size).toBe(0);
+    });
+
+    it('서버가 막는 것: 마지막 화면 글의 데이터를 바꾸는 버튼 누르기, 열 수 있는 화면 밖의 주소 (화면에 보내지 않는다)', async () => {
+      const { calls, events } = await run(
+        [call('c1', 'ui_snapshot', {}), call('c2', 'ui_click', { ref: 'r2' }), call('c3', 'ui_navigate', { path: '/admin/employees' }), answer('등록 버튼은 직접 눌러 주세요.')],
+        { question: '등록해줘', screenControl: true, screenMap: SCREENS },
+        () => ({ ok: true, result: '[r1] textbox "고객사" value=""\n[r2] button "수주 등록"' }),
+      );
+      expect(events.filter((e) => e.type === 'ui_action').map((e) => (e.type === 'ui_action' ? e.tool : ''))).toEqual(['ui_snapshot']);
+      expect(calls[2].messages.at(-1)?.content).toContain('막았어요');
+      expect(calls[2].messages.at(-1)?.content).toContain('직접 눌러야');
+      expect(calls[3].messages.at(-1)?.content).toContain('열 수 있는 화면이 아니에요');
+    });
+
+    it(`화면 조작을 켜면 도구 호출 상한이 ${MAX_SCREEN_TOOL_ROUNDS}번이다`, async () => {
+      const { calls } = await run([call('c', 'ui_snapshot', {})], { question: '계속 읽어줘', screenControl: true, screenMap: SCREENS }, () => ({ ok: true, result: '[r1] button "검색"' }));
+      expect(calls).toHaveLength(MAX_SCREEN_TOOL_ROUNDS + 1);
+    });
+
+    it('서버 설정이 꺼졌거나 screenControl이 없거나 한 번에 답(API-262·사내 채팅 @AI)이면 화면 도구가 없다', async () => {
+      for (const [enabled, input] of [
+        [false, { question: '열어줘', screenControl: true, screenMap: SCREENS }],
+        [true, { question: '열어줘', screenMap: SCREENS }],
+      ] as const) {
+        const { calls, events } = await run([answer('네')], input, () => ({ ok: true }), enabled);
+        expect(calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+        expect(calls[0].messages[0].content).not.toContain('[화면 조작 규칙]');
+        expect(events.some((e) => e.type === 'ui_action')).toBe(false);
+      }
+      const screenTools = new AssistantScreenToolbox(new ScreenActionBroker(), { AI_SCREEN_CONTROL_ENABLED: 'true' });
+      const plain = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, screenTools);
+      await plain.service.ask(user, { question: '열어줘', screenControl: true, screenMap: SCREENS });
+      expect(plain.calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+    });
+
+    it('다른 사원이 보낸 결과·없는 자리는 COM-003', () => {
+      const { service } = setup({}, async () => answer(''));
+      expect(() => service.settleUiAction(user, '00000000-0000-4000-8000-000000000000', { ok: true })).toThrow(AppException);
+    });
+  });
+
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });
