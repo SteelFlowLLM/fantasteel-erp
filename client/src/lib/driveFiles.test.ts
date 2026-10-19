@@ -1,7 +1,7 @@
 // Drive 파일 도우미 (이슈 #392): 미리보기 방식, 내려받는 이름·MIME, 내용 주소
 import type { DriveFileView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { DRIVE_KIND_LABEL, DRIVE_KIND_TAB_ORDER, driveBlobToFile, driveContentPath, driveDeliveredMime, driveDeliveredName, driveKindLabel, drivePreviewType, driveSizeText } from '@/lib/driveFiles';
+import { DRIVE_KIND_LABEL, DRIVE_KIND_TAB_ORDER, driveAiImageProblem, driveBlobToFile, driveContentPath, driveDeliveredMime, driveDeliveredName, driveKindLabel, drivePreviewType, driveSizeText } from '@/lib/driveFiles';
 
 const file = (overrides: Partial<DriveFileView> = {}): DriveFileView => ({
   id: 'f1',
@@ -73,5 +73,16 @@ describe('표시', () => {
     expect(driveSizeText(file({ size: 2048 }))).toBe('2.0 KB');
     expect(driveSizeText(file({ size: null, mimeType: 'application/vnd.google-apps.document' }))).toBe('-');
     expect(driveSizeText(file({ size: null }))).toBe('크기 모름');
+  });
+});
+
+describe('driveAiImageProblem', () => {
+  it('로컬 사진과 같이 PNG·JPEG·WebP만 붙인다', () => {
+    for (const mimeType of ['image/png', 'image/jpeg', 'IMAGE/WEBP']) {
+      expect(driveAiImageProblem({ mimeType })).toBeNull();
+    }
+    for (const mimeType of ['image/gif', 'image/heic', 'image/bmp', 'image/tiff']) {
+      expect(driveAiImageProblem({ mimeType })).toBe('PNG, JPEG, WebP 사진만 붙일 수 있어요');
+    }
   });
 });

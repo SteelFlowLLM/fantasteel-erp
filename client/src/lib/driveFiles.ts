@@ -1,6 +1,6 @@
 // Drive 파일 도우미: 종류 이름, 미리보기 방식, 내려받을 때의 이름·MIME, 내용 주소 (이슈 #392).
 // 서버가 Google 문서·스프레드시트·프레젠테이션을 PDF로 내보내 보내므로, 받은 파일의 이름·MIME은 원본이 아니라 그 PDF 기준이다 (server driveDelivery와 같은 규칙).
-import type { DriveFileListKind, DriveFileView } from '@fantasteel/shared';
+import { AI_IMAGE_MEDIA_TYPES, type DriveFileListKind, type DriveFileView } from '@fantasteel/shared';
 import { fmtBytes } from '@/lib/format';
 
 export const DRIVE_KIND_LABEL: Record<DriveFileListKind, string> = { all: '전체', image: '사진', audio: '녹음', document: '문서' };
@@ -71,4 +71,9 @@ export function driveBlobToFile(blob: Blob, file: Pick<DriveFileView, 'mimeType'
 export function driveSizeText(file: Pick<DriveFileView, 'kind' | 'mimeType' | 'size'>): string {
   if (file.size !== null) return fmtBytes(file.size);
   return isGoogleNativeDoc(file) ? '-' : '크기 모름';
+}
+
+/** 철강맨AI 입력에 붙일 수 있는 사진인지(붙이는 형식은 로컬 사진과 같다: PNG·JPEG·WebP). 안 되면 한국어 이유 */
+export function driveAiImageProblem(file: Pick<DriveFileView, 'mimeType'>): string | null {
+  return (AI_IMAGE_MEDIA_TYPES as readonly string[]).includes(mimeOf(file)) ? null : 'PNG, JPEG, WebP 사진만 붙일 수 있어요';
 }

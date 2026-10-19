@@ -11,6 +11,7 @@ import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
+import { DriveFilePicker } from '@/features/drive/components/DriveFilePicker';
 import { AiBrowserFramesDetails, AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
@@ -19,8 +20,10 @@ import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { useAction } from '@/hooks/useAction';
 import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
+import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
+import { driveAiImageProblem } from '@/lib/driveFiles';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
@@ -113,6 +116,8 @@ export function AiPanel() {
     },
   });
   const photos = useAiImageDraft();
+  const drive = useDriveReady();
+  const [pickingDrive, setPickingDrive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -353,6 +358,16 @@ export function AiPanel() {
                 title={visionOff ? NO_VISION_TITLE : '지금 ERP 화면을 사진으로 붙여요'}
                 onClick={() => void photos.addCapture()}
               />
+              {drive.ready ? (
+                <IconButton
+                  icon="file"
+                  label="Drive에서 사진 첨부"
+                  size="sm"
+                  disabled={visionOff || photos.busy}
+                  title={visionOff ? NO_VISION_TITLE : '회사 Drive 폴더의 사진을 붙여요'}
+                  onClick={() => setPickingDrive(true)}
+                />
+              ) : null}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -397,6 +412,21 @@ export function AiPanel() {
         <Icon name="lock" size="sm" />
         철강맨AI는 조회와 초안만 만들어요 · 반영은 사람이 확정 · 내 권한({roleLabel}) 범위
       </div>
+      {pickingDrive ? (
+        <DriveFilePicker
+          title="Drive에서 사진 고르기"
+          description="회사 Drive 폴더의 사진이에요. 고르면 질문 칸에 붙어요"
+          kinds={['image']}
+          problemOf={driveAiImageProblem}
+          confirmLabel="이 사진 붙이기"
+          emptyText="폴더에 사진이 없어요. Drive 폴더에 사진을 올린 뒤 다시 열어 주세요"
+          onPick={(file) => {
+            setPickingDrive(false);
+            void photos.addDriveFile(file);
+          }}
+          onClose={() => setPickingDrive(false)}
+        />
+      ) : null}
     </aside>
   );
 }
