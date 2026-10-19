@@ -31,6 +31,20 @@ export interface MeetingSpeakerMappingInput {
   mapping: Record<string, number | null>;
 }
 
+/** AI가 추정한 화자 하나 (이슈 #406). employeeId가 null이면 근거가 없어 '모름'으로 둔 것 */
+export interface MeetingSpeakerSuggestion {
+  label: string;
+  employeeId: number | null;
+  /** 짐작한 근거 (자기소개·호칭·부서 이야기 등). 모름이면 빈 문자열일 수 있다 */
+  reason: string;
+}
+
+/** POST meeting-minutes/:id/speakers/suggest. 저장하지 않는다. AI가 실패하면 suggestions가 비고 failureReason에 이유를 담는다 */
+export interface MeetingSpeakerSuggestResult {
+  suggestions: MeetingSpeakerSuggestion[];
+  failureReason: string | null;
+}
+
 export const MEETING_TITLE_MAX = 200;
 export const MEETING_TRANSCRIPT_MAX = 100000;
 /** 음성 파일 한 개의 최대 크기 (녹음·파일 올리기 공통) */

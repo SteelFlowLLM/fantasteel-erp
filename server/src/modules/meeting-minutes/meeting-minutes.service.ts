@@ -6,6 +6,7 @@ import {
   missingFieldsOf,
   NOTIFICATION_TYPE,
   PERMISSION,
+  ROLE_LABEL,
   type AuthUser,
   type MeetingAnalysis,
   type MeetingCandidate,
@@ -16,6 +17,8 @@ import {
   type MeetingMinutesStatus,
   type MeetingMinutesView,
   type MeetingNotionExportResult,
+  type MeetingSpeakerSuggestResult,
+  type Role,
   type TranscriptSegment,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
@@ -38,11 +41,14 @@ import { MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { isMeetingAudio } from './meeting-audio';
 import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
+import { MeetingSpeakerSuggester } from './meeting-speaker-suggest';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
 import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 
 const DEFAULT_PAGE_SIZE = 20;
+/** 화자를 연결·추정할 수 있는 상태: 전사가 끝났고 확정 전 */
+const SPEAKER_OPEN_STATUSES: readonly string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -123,6 +129,7 @@ export class MeetingMinutesService {
     private readonly notion: NotionPageService,
     private readonly drive: GoogleDriveService,
     private readonly notionWorkspace: NotionWorkspaceService,
+    private readonly speakerSuggester: MeetingSpeakerSuggester,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -221,12 +228,7 @@ export class MeetingMinutesService {
    * AI 정리 전에 하는 것이 목적이라 TRANSCRIBED·REVIEW·전사가 남은 FAILED에서 할 수 있다 (정리를 다시 해야 이름이 반영된다).
    */
   async updateSpeakers(user: AuthUser, id: number, dto: UpdateMeetingSpeakersDto): Promise<MeetingMinutesView> {
-    const row = await this.repository.findDetail(this.prisma, id);
-    if (!row) throw new AppException('VOC-001');
-    if (row.creator.id !== user.employeeId) throw new AppException('VOC-003', '회의록 작성자만 화자를 연결할 수 있어요');
-    const segments = readSegments(row.transcriptSegments);
-    const allowed: string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
-    if (!allowed.includes(row.meetingMinutesStatus) || row.transcript === null) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
+    const { row, segments } = await this.loadForSpeakers(user, id);
 
     const labels = new Set(segments.flatMap((s) => (s.speaker ? [s.speaker] : [])));
     const entries = Object.entries(dto.mapping);
@@ -247,10 +249,36 @@ export class MeetingMinutesService {
     const { count } = await this.repository.saveSegments(this.prisma, id, row.updatedAt, updated as unknown as Prisma.InputJsonArray);
     if (count === 0) {
       const current = await this.repository.findDetail(this.prisma, id);
-      if (current && !allowed.includes(current.meetingMinutesStatus)) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
+      if (current && !SPEAKER_OPEN_STATUSES.includes(current.meetingMinutesStatus)) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
       throw new AppException('COM-001', '그 사이 다른 곳에서 회의록을 고쳤어요. 새로 불러와 주세요');
     }
     return this.get(id);
+  }
+
+  /**
+   * AI가 화자 이름표마다 참석자 중 누구인지 추정한다 (이슈 #406, 문서에 없는 경로). 화자 연결과 같은 사람·같은 상태에서만.
+   * 저장하지 않는다: 작성자가 화면에서 확인하고 화자 연결(PATCH)로 저장한다.
+   */
+  async suggestSpeakers(user: AuthUser, id: number): Promise<MeetingSpeakerSuggestResult> {
+    const { row, segments } = await this.loadForSpeakers(user, id);
+    const labels = [...new Set(segments.flatMap((s) => (s.speaker ? [s.speaker] : [])))];
+    if (labels.length === 0) throw new AppException('VOC-004', '목소리로 나뉜 화자가 없는 회의록이에요');
+    const attendees = row.attendees.map((a) => ({
+      employeeId: a.employeeId,
+      employeeName: a.employee.employeeName,
+      departmentName: a.employee.department.departmentName,
+      roleLabel: ROLE_LABEL[a.employee.role.roleCode as Role] ?? a.employee.role.roleCode,
+    }));
+    return this.speakerSuggester.suggest({ attendees, labels, segments });
+  }
+
+  /** 화자 연결·추정 공통: 작성자만, 전사가 끝났고 확정 전인 회의록만 */
+  private async loadForSpeakers(user: AuthUser, id: number): Promise<{ row: MeetingMinutesDetailRow; segments: TranscriptSegment[] }> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    if (row.creator.id !== user.employeeId) throw new AppException('VOC-003', '회의록 작성자만 화자를 연결할 수 있어요');
+    if (!SPEAKER_OPEN_STATUSES.includes(row.meetingMinutesStatus) || row.transcript === null) throw new AppException('VOC-004', '전사가 끝났고 확정 전인 회의록만 화자를 연결할 수 있어요');
+    return { row, segments: readSegments(row.transcriptSegments) };
   }
 
   /**

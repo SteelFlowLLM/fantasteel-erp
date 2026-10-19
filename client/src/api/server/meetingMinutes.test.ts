@@ -117,6 +117,13 @@ describe('회의록 AI 정리 (API-260)', () => {
     expect(calls[0].body).toEqual({ mapping: { SPEAKER_1: 5, SPEAKER_2: null } });
   });
 
+  it('AI 화자 추정: POST speakers/suggest를 부르고 결과를 그대로 돌려준다', async () => {
+    const result = { suggestions: [{ label: 'SPEAKER_1', employeeId: 5, reason: '자기소개' }], failureReason: null };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes/3/speakers/suggest' ? ok(result) : undefined));
+    await expect(meetingMinutesApi.suggestSpeakers(3)).resolves.toEqual(result);
+    expect(calls).toHaveLength(1);
+  });
+
   it('음성 올리기: 500MB를 넘으면 서버를 부르기 전에 입력칸 오류', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, () => undefined);
     const big = new File(['x'], '큰.wav', { type: 'audio/wav' });

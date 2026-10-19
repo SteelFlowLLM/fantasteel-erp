@@ -1,11 +1,13 @@
-// 화자 분리(Voice2ERP 묶음 1)를 실제 앱과 DB(fs_collab)로 확인한다: 화자가 붙은 전사 저장, 화자 연결 PATCH, 확장자로 받는 업로드.
+// 화자 분리(Voice2ERP 묶음 1)를 실제 앱과 DB(fs_collab)로 확인한다: 화자가 붙은 전사 저장, 화자 연결 PATCH, AI 화자 추정, 확장자로 받는 업로드.
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { MeetingMinutesView } from '@fantasteel/shared';
+import type { MeetingMinutesView, MeetingSpeakerSuggestResult } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LlmClient, LlmRequestError } from '../llm/llm.client';
+import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { SttClient, type SttTranscript } from '../stt/stt.client';
 import { SttSettingsStore } from '../stt/stt-settings.store';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
@@ -16,6 +18,8 @@ let prisma: PrismaService;
 let runner: MeetingTranscriptionRunner;
 const sttClient = { transcribe: jest.fn<Promise<SttTranscript>, unknown[]>() };
 const sttSettings = { read: jest.fn(async () => ({ baseUrl: 'http://stt.test/v1', model: null, apiKey: null })) };
+const llmClient = { chatJson: jest.fn<Promise<unknown>, [unknown, string, { role: string; content: string }[], ...unknown[]]>() };
+const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; apiKey: string | null; model: string | null }> => ({ baseUrl: 'http://llm.test/v1', apiKey: null, model: 'test-model' })) };
 /** 정다은 (구매, 작성자) */
 let purchaseCookie: string;
 let purchaseId: number;
@@ -32,7 +36,7 @@ async function login(employeeNo: string): Promise<string> {
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'PATCH', path: string, cookie: string, payload?: unknown) {
+async function call<T>(method: 'GET' | 'PATCH' | 'POST', path: string, cookie: string, payload?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: { cookie, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -47,6 +51,10 @@ beforeAll(async () => {
     .useValue(sttClient)
     .overrideProvider(SttSettingsStore)
     .useValue(sttSettings)
+    .overrideProvider(LlmClient)
+    .useValue(llmClient)
+    .overrideProvider(LlmSettingsStore)
+    .useValue(llmSettings)
     .compile();
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api/v1');
@@ -194,5 +202,62 @@ describe('PATCH /meeting-minutes/:id/speakers', () => {
     const { status, body } = await call<MeetingMinutesView>('PATCH', '/meeting-minutes/99999999/speakers', purchaseCookie, { mapping: {} });
     expect(status).toBe(404);
     expect(body.error?.code).toBe('VOC-001');
+  });
+});
+
+describe('POST /meeting-minutes/:id/speakers/suggest (이슈 #406)', () => {
+  /** 프롬프트의 '번호. 이름' 줄에서 그 사람의 번호를 찾는다 (참석자 순서를 테스트가 가정하지 않게) */
+  const attendeeNo = (prompt: string, name: string) => Number(new RegExp(`(\\d+)\\. ${name} `).exec(prompt)?.[1]);
+  beforeEach(() => {
+    llmClient.chatJson.mockReset();
+    llmSettings.read.mockClear();
+  });
+
+  it('AI 답을 사원 id로 바꿔 돌려주고 저장하지는 않는다', async () => {
+    llmClient.chatJson.mockImplementation(async (_endpoint, _model, messages) => {
+      const prompt = messages[1].content;
+      return { speakers: [{ speaker: '화자1', attendeeNo: attendeeNo(prompt, '최준혁'), reason: '[1] 방문을 제안' }, { speaker: '화자2', attendeeNo: null, reason: '근거 없음' }] };
+    });
+    const id = await seedMinutes();
+    const { status, body } = await call<MeetingSpeakerSuggestResult>('POST', `/meeting-minutes/${id}/speakers/suggest`, purchaseCookie);
+    expect(status).toBe(200);
+    expect(body.data).toEqual({
+      suggestions: [
+        { label: 'SPEAKER_1', employeeId: headId, reason: '[1] 방문을 제안' },
+        { label: 'SPEAKER_2', employeeId: null, reason: '근거 없음' },
+      ],
+      failureReason: null,
+    });
+    const prompt = llmClient.chatJson.mock.calls[0][2][1].content;
+    expect(prompt).toContain('[1] 화자1: 다음 주에 방문합시다');
+    const row = await prisma.meetingMinutes.findUniqueOrThrow({ where: { id } });
+    expect(row.transcriptSegments).toEqual(SEGMENTS);
+  });
+
+  it('AI가 실패하거나 모양이 틀리거나 모델이 없으면 200과 이유를 준다', async () => {
+    const id = await seedMinutes();
+    llmClient.chatJson.mockRejectedValueOnce(new LlmRequestError('AI 서버에 연결할 수 없어요'));
+    const failed = await call<MeetingSpeakerSuggestResult>('POST', `/meeting-minutes/${id}/speakers/suggest`, purchaseCookie);
+    expect([failed.status, failed.body.data]).toEqual([200, { suggestions: [], failureReason: 'AI 서버에 연결할 수 없어요' }]);
+
+    llmClient.chatJson.mockResolvedValueOnce({ nope: true });
+    const badShape = await call<MeetingSpeakerSuggestResult>('POST', `/meeting-minutes/${id}/speakers/suggest`, purchaseCookie);
+    expect(badShape.body.data.suggestions).toEqual([]);
+    expect(badShape.body.data.failureReason).toContain('형식');
+
+    llmSettings.read.mockResolvedValueOnce({ baseUrl: 'http://llm.test/v1', apiKey: null, model: null });
+    const noModel = await call<MeetingSpeakerSuggestResult>('POST', `/meeting-minutes/${id}/speakers/suggest`, purchaseCookie);
+    expect(noModel.body.data.failureReason).toContain('모델');
+  });
+
+  it('작성자가 아니면 VOC-003, 확정이면 VOC-004, 화자가 없으면 VOC-004이고 AI를 부르지 않는다', async () => {
+    const id = await seedMinutes();
+    expect((await call('POST', `/meeting-minutes/${id}/speakers/suggest`, headCookie)).body.error?.code).toBe('VOC-003');
+    const confirmed = await seedMinutes('CONFIRMED');
+    expect((await call('POST', `/meeting-minutes/${confirmed}/speakers/suggest`, purchaseCookie)).body.error?.code).toBe('VOC-004');
+    const noSpeaker = await seedMinutes('TRANSCRIBED', { transcriptSegments: [{ start: null, end: null, text: '글로 넣은 회의' }] });
+    const res = await call('POST', `/meeting-minutes/${noSpeaker}/speakers/suggest`, purchaseCookie);
+    expect([res.status, res.body.error?.code]).toEqual([409, 'VOC-004']);
+    expect(llmClient.chatJson).not.toHaveBeenCalled();
   });
 });

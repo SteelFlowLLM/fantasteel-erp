@@ -39,6 +39,8 @@ export const LLM_PROFILE = {
   MEETING_ANALYSIS: { sampling: EXTRACTION, reasoning: 'medium' },
   /** 회의록 2차 검토 (JSON) */
   MEETING_REVIEW: { sampling: EXTRACTION, reasoning: 'medium' },
+  /** 회의록 화자 추정 (JSON, 이슈 #406): 작성자가 버튼을 누르고 기다리므로 생각을 짧게 */
+  MEETING_SPEAKER: { sampling: EXTRACTION, reasoning: 'low' },
   /** Message → ERP 초안 칸 채우기 (JSON): 사용자가 초안을 기다리므로 생각하지 않는다 */
   MESSAGE_EXTRACT: { sampling: EXTRACTION, reasoning: 'off' },
   /** 과거 사례 초안 (JSON) */

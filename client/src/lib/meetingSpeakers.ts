@@ -1,5 +1,5 @@
 // 회의 화자 도우미: 전사 구간의 화자 표시와 색, 화자 연결 선택값 → 서버에 보낼 값. (Voice2ERP 화자 분리)
-import { MEETING_MINUTES_STATUS, speakerLabelText, type MeetingMinutesView, type MeetingSpeakerSummary, type TranscriptSegment } from '@fantasteel/shared';
+import { MEETING_MINUTES_STATUS, speakerLabelText, type MeetingMinutesView, type MeetingSpeakerSuggestion, type MeetingSpeakerSummary, type TranscriptSegment } from '@fantasteel/shared';
 
 /** 화자마다 돌려 쓰는 색 (배지 배경·글자) */
 export const SPEAKER_TONE_CLASSES = ['bg-brand-tint text-brand', 'bg-ok-bg text-ok', 'bg-wait-bg text-wait', 'bg-ai-bg text-ai-strong', 'bg-surface-3 text-ink-2'] as const;
@@ -37,6 +37,13 @@ export function speakerMappingToSave(speakers: MeetingSpeakerSummary[], selectio
     if (next !== s.employeeId) changed[s.label] = next;
   }
   return Object.keys(changed).length > 0 ? changed : null;
+}
+
+/** AI 추정을 선택값에 채운다 (이슈 #406). AI가 모른다고 한 화자는 작성자가 고른 값을 그대로 둔다 */
+export function applySpeakerSuggestions(selection: Record<string, string>, suggestions: MeetingSpeakerSuggestion[]): Record<string, string> {
+  const next = { ...selection };
+  for (const s of suggestions) if (s.employeeId !== null) next[s.label] = String(s.employeeId);
+  return next;
 }
 
 /** 같은 사원을 두 화자에 고르면 그 사원 이름들을 돌려준다 (한 사람이 두 화자일 수도 있어 막지는 않고 알려 주기만 한다) */
