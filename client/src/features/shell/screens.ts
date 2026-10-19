@@ -99,6 +99,8 @@ export const SCREEN = {
   messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
   agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE }),
   meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
+  // 회사 Google Drive 폴더의 사진·녹음·문서 보기 (이슈 #392, 문서에 없는 기능). 읽기만 하고 연결 설정은 관리자의 외부 연결에서 한다
+  drive: screen({ href: '/drive', label: 'Drive 파일', icon: 'file', access: EVERYONE }),
   // 철강맨AI 심층 조사 (이슈 #378, 문서에 없는 기능). 자기 조사만 보고 바꾼다 (서버가 확인)
   aiResearch: screen({ href: '/ai-research', label: '심층 조사', icon: 'search', access: EVERYONE }),
   schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),

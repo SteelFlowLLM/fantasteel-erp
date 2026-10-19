@@ -110,9 +110,14 @@ export function googleDriveConnection(integrations: readonly IntegrationConnecti
   return integrations?.find((item) => item.providerKey === INTEGRATION_PROVIDER.GOOGLE_DRIVE);
 }
 
-/** 회의록 만들기에서 "Drive에서 녹음 가져오기"를 보일지: 연결되어 있고 녹음을 올리는 폴더가 정해져 있을 때 */
-export function canImportAudioFromDrive(connection: IntegrationConnectionView | undefined): boolean {
+/** Drive 파일을 읽을 수 있는지: 연결되어 있고 폴더가 정해져 있을 때 (회의록·Drive 화면·AI 입력·메신저 첨부가 같이 쓴다) */
+export function isDriveReady(connection: IntegrationConnectionView | undefined): boolean {
   return connection?.status === 'CONNECTED' && !!connection.settings.folderId;
+}
+
+/** 회의록 만들기에서 "Drive에서 녹음 가져오기"를 보일지 */
+export function canImportAudioFromDrive(connection: IntegrationConnectionView | undefined): boolean {
+  return isDriveReady(connection);
 }
 
 /** 폴더 id를 Drive 주소로 보여 준다 */
