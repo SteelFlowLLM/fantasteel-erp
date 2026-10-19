@@ -9,14 +9,14 @@ const store = () => useAiChatStore.getState();
 const SCREEN = { path: '/', title: '대시보드', label: null };
 const DONE: AiAssistantStreamEvent = { type: 'done', reply: { answer: '최종 답', sources: [], model: 'm', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: false, actionCards: [] } };
 
-beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, entries: [], pendingId: null, live: null }));
+beforeEach(() => useAiChatStore.setState({ ownerEmployeeId: null, threadId: null, entries: [], pendingId: null, live: null }));
 afterEach(() => vi.restoreAllMocks());
 
 const PHOTO = { mediaType: 'image/jpeg' as const, dataBase64: 'QUJD' };
 
 function ask(reasoning?: 'off' | 'high', images?: (typeof PHOTO)[], webSearch?: boolean) {
   store().addQuestion('q1', '질문', reasoning, images, webSearch);
-  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], reasoning, images, webSearch });
+  return runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, threadId: null, reasoning, images, webSearch });
 }
 
 describe('runAiAsk', () => {
@@ -36,6 +36,28 @@ describe('runAiAsk', () => {
     expect(spy.mock.calls[1][0]).not.toHaveProperty('reasoning');
   });
 
+  it('지난 대화 대신 저장을 요청하고, 서버가 저장한 대화를 이어 묻는다 (이슈 #399)', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent({ ...DONE, thread: { id: 41, title: '질문', assistantMessageId: 82 } }));
+    await ask();
+    expect(spy.mock.calls[0][0]).toMatchObject({ saveThread: true });
+    expect(spy.mock.calls[0][0]).not.toHaveProperty('threadId');
+    expect(spy.mock.calls[0][0]).not.toHaveProperty('history');
+    expect(store().threadId).toBe(41);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', messageId: 82 });
+
+    store().addQuestion('q2', '이어서', undefined);
+    await runAiAsk({ questionId: 'q2', question: '이어서', screen: SCREEN, threadId: store().threadId });
+    expect(spy.mock.calls[1][0]).toMatchObject({ saveThread: true, threadId: 41 });
+  });
+
+  it('저장에 실패한 답은 저장하지 못했다고 표시하고 대화 id는 그대로 둔다', async () => {
+    vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent({ ...DONE, thread: null }));
+    useAiChatStore.setState({ threadId: 7 });
+    await ask();
+    expect(store().threadId).toBe(7);
+    expect(store().entries.at(-1)).toMatchObject({ role: 'assistant', unsaved: true });
+  });
+
   it('웹 검색을 켠 질문만 webSearch: true를 보낸다', async () => {
     const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent(DONE));
     await ask(undefined, undefined, true);
@@ -49,7 +71,7 @@ describe('runAiAsk', () => {
   it('브라우저 사용을 켠 질문만 browser: true를 보낸다', async () => {
     const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent(DONE));
     store().addQuestion('q1', '질문', undefined, undefined, undefined, true);
-    await runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, history: [], browser: true });
+    await runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, threadId: null, browser: true });
     expect(spy.mock.calls[0][0]).toMatchObject({ question: '질문', browser: true });
     await ask();
     expect(spy.mock.calls[1][0]).not.toHaveProperty('browser');

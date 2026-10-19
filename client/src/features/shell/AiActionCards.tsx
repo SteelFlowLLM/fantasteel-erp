@@ -20,11 +20,12 @@ import { applyCardChanges, CARD_KIND_LABEL, CARD_RESULT, executeInputOf, isWorkC
 import { cn } from '@/lib/cn';
 import { useAiChatStore, type AiChatCard } from '@/stores/useAiChatStore';
 
-export function AiActionCards({ entryId, items }: { entryId: string; items: readonly AiChatCard[] }) {
+/** messageId: 서버에 저장한 답이면 그 id. 실행할 때 함께 보내 저장한 카드를 실행됨으로 남긴다 (이슈 #399) */
+export function AiActionCards({ entryId, items, messageId }: { entryId: string; items: readonly AiChatCard[]; messageId?: number }) {
   return (
     <ul aria-label="실행 카드" className="flex flex-col gap-2">
       {items.map((item) => (
-        <ActionCard key={item.card.key} entryId={entryId} item={item} />
+        <ActionCard key={item.card.key} entryId={entryId} item={item} messageId={messageId} />
       ))}
     </ul>
   );
@@ -65,7 +66,7 @@ function ConfirmText({ card }: { card: AiActionCard }): ReactNode {
   return null;
 }
 
-function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
+function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiChatCard; messageId?: number }) {
   const { card, status } = item;
   const me = useMe();
   const names = useDirectoryNames();
@@ -94,7 +95,8 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
     if (isWorkCard(card) && Object.keys(changes).length > 0) updateCard(entryId, card.key, { card: applyCardChanges(card, changes) });
     setEditing(false);
   };
-  const run = () => (needsConfirmation(card) ? setConfirming(true) : execute.mutate(executeInputOf(card)));
+  const executeCard = () => execute.mutate({ ...executeInputOf(card), ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
+  const run = () => (needsConfirmation(card) ? setConfirming(true) : executeCard());
 
   return (
     <li className={cn('flex flex-col gap-2 rounded-sm border bg-surface-2 p-3', done ? 'border-ok' : 'border-line', dismissed && 'opacity-60')}>
@@ -179,7 +181,7 @@ function ActionCard({ entryId, item }: { entryId: string; item: AiChatCard }) {
       ) : null}
 
       {confirming ? (
-        <ConfirmDialog title={`${CARD_KIND_LABEL[card.kind]}을(를) 실행할까요?`} confirmLabel="실행" pending={execute.isPending} onConfirm={() => execute.mutate(executeInputOf(card))} onCancel={() => setConfirming(false)}>
+        <ConfirmDialog title={`${CARD_KIND_LABEL[card.kind]}을(를) 실행할까요?`} confirmLabel="실행" pending={execute.isPending} onConfirm={executeCard} onCancel={() => setConfirming(false)}>
           <ConfirmText card={card} />
         </ConfirmDialog>
       ) : null}

@@ -1,5 +1,5 @@
-// AI 어시스턴트 대화. 대화 기록은 서버에 저장하지 않으므로(저장 여부 미결정, 요구사항 21장) 이 탭 메모리에만 둔다.
-// 패널을 닫았다 열어도 남고, 새로고침하거나 다른 사원으로 들어오면 사라진다.
+// AI 어시스턴트 대화. 답을 받은 질문은 서버가 대화(thread)로 저장하고(이슈 #399, 문서에 없는 기능), 이 탭 메모리에는 지금 보는 대화를 둔다.
+// 생각 과정·도구 기록·사진·브라우저 화면 사진·실패 줄은 저장하지 않아 이 탭 메모리에만 있고, 저장한 대화를 다시 열면 보이지 않는다.
 import type {
   AiActionCard,
   AiActionCardExecuteResult,
@@ -8,18 +8,20 @@ import type {
   AiAssistantSource,
   AiAssistantStreamEvent,
   AiAssistantTurn,
+  AiChatThreadRef,
+  AiChatThreadView,
   AiReasoningLevel,
   AiWebSource,
 } from '@fantasteel/shared';
 import { create } from 'zustand';
 import { appendBrowserFrame, toBrowserFrame, type AiBrowserFrame } from '@/lib/aiBrowser';
 
-/** 서버로 함께 보내는 지난 대화 수. 서버도 최근 10개만 쓴다 */
+/** 서버로 함께 보내는 지난 대화 수 (회의 질문). 서버도 최근 10개만 쓴다. 철강맨AI 패널은 서버가 저장한 대화에서 읽는다 */
 export const AI_CHAT_HISTORY_LIMIT = 10;
 
 /**
- * 답에 붙은 실행 카드 한 장 (REQ-AST-005). 카드는 서버에 저장하지 않아 이 탭 메모리에만 있다.
- * card는 사용자가 고친 값을 담고, done이면 result가 만든 업무다. dismissed는 사용자가 닫은 카드.
+ * 답에 붙은 실행 카드 한 장 (REQ-AST-005). 서버는 처음 카드와 실행 여부만 저장한다(이슈 #399).
+ * card는 사용자가 고친 값을 담고(고친 값은 저장하지 않음), done이면 result가 만든 업무다. dismissed는 사용자가 닫은 카드(저장하지 않음).
  */
 export interface AiChatCard {
   card: AiActionCard;
@@ -59,10 +61,13 @@ export interface AiChatLive {
 }
 
 export type AiChatEntry =
-  /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (지난 대화로 서버에 보내지 않는다) */
-  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean }
-  /** steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드 */
-  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[]; webSources?: AiWebSource[]; browserFrames?: AiBrowserFrame[] }
+  /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (저장하지 않는다). 저장한 대화를 열면 imageCount(보낸 사진 수)만 있다 */
+  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; imageCount?: number; webSearch?: boolean; browser?: boolean }
+  /**
+   * steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드.
+   * messageId는 서버에 저장한 답의 id (카드를 실행할 때 보낸다), unsaved는 저장하지 못한 답
+   */
+  | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[]; webSources?: AiWebSource[]; browserFrames?: AiBrowserFrame[]; messageId?: number; unsaved?: boolean }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
   | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean };
 
@@ -129,8 +134,11 @@ function stepsFromReply(reply: AiAssistantReplyView): AiTimelineStep[] {
   ];
 }
 
-/** done 이벤트로 받은 최종 답을 대화 줄로 만든다. 최종 답이 지금까지 받은 글을 대신한다 */
-export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReplyView, now: number, id: string): AiChatEntry {
+/**
+ * done 이벤트로 받은 최종 답을 대화 줄로 만든다. 최종 답이 지금까지 받은 글을 대신한다.
+ * thread: 저장한 대화 (저장을 요청하지 않았으면 undefined, 저장에 실패했으면 null)
+ */
+export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReplyView, now: number, id: string, thread?: AiChatThreadRef | null): AiChatEntry {
   const liveSteps = closeThinking(live.steps, now);
   return {
     id,
@@ -142,7 +150,28 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
     ...(live.browserFrames.length ? { browserFrames: live.browserFrames } : {}),
     ...(live.reasoning ? { requestedReasoning: live.reasoning, reasoningApplied: reply.reasoningApplied } : {}),
     ...readyCards(reply.actionCards),
+    ...(thread ? { messageId: thread.assistantMessageId } : thread === null ? { unsaved: true } : {}),
   };
+}
+
+/** 저장한 대화를 대화 줄로 되살린다. 생각 과정·사진·브라우저 화면 사진은 저장하지 않아 없다 */
+export function aiChatEntriesFromThread(thread: AiChatThreadView): AiChatEntry[] {
+  return thread.messages.map((message): AiChatEntry => {
+    const id = `saved-${message.id}`;
+    if (message.role === 'user') {
+      return { id, role: 'user', content: message.content, ...(message.imageCount ? { imageCount: message.imageCount } : {}), ...(message.webSearch ? { webSearch: true } : {}), ...(message.browser ? { browser: true } : {}) };
+    }
+    return {
+      id,
+      role: 'assistant',
+      content: message.content,
+      sources: message.sources,
+      messageId: message.id,
+      ...(message.webSources ? { webSources: message.webSources } : {}),
+      ...(message.reasoning ? { requestedReasoning: message.reasoning, reasoningApplied: message.reasoningApplied } : {}),
+      ...(message.actionCards.length ? { cards: message.actionCards.map((item): AiChatCard => ({ card: item.card, status: item.status, ...(item.result ? { result: item.result } : {}) })) } : {}),
+    };
+  });
 }
 
 /** 실패 줄: 다시 물을 때 같은 생각 정도·사진으로 묻도록 질문 때의 값을 담는다 */
@@ -158,6 +187,8 @@ function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: 
 interface AiChatState {
   /** 이 대화의 사원. 다른 사원으로 들어오면 대화를 비운다 */
   ownerEmployeeId: number | null;
+  /** 서버에 저장한 대화 id (이슈 #399). 첫 답을 저장하기 전이면 null */
+  threadId: number | null;
   entries: AiChatEntry[];
   /** 답을 기다리는 질문의 id */
   pendingId: string | null;
@@ -174,6 +205,11 @@ interface AiChatState {
   applyStreamEvent: (questionId: string, event: AiAssistantStreamEvent, now?: number) => void;
   /** 실패한 질문과 실패 줄을 지운다 (다시 물을 때) */
   removeFailure: (failureId: string) => void;
+  /** 저장한 대화를 연다 (답을 기다리는 중이면 열지 않는다) */
+  openThread: (thread: AiChatThreadView) => void;
+  /** 지운 대화가 지금 보는 대화면 새 대화로. 답을 기다리는 중이면 대화 id만 잊는다 (다음 질문은 새 대화) */
+  forgetThread: (threadId: number) => void;
+  /** 새 대화. 저장한 대화는 서버에 남는다 */
   clear: () => void;
 }
 
@@ -182,11 +218,12 @@ export const newAiChatId = (): string => `ai-${Date.now()}-${(sequence += 1)}`;
 
 export const useAiChatStore = create<AiChatState>((set) => ({
   ownerEmployeeId: null,
+  threadId: null,
   entries: [],
   pendingId: null,
   live: null,
   claim: (employeeId) =>
-    set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, entries: [], pendingId: null, live: null })),
+    set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, threadId: null, entries: [], pendingId: null, live: null })),
   addQuestion: (id, question, reasoning, images, webSearch, browser) =>
     set((state) => ({
       entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) }],
@@ -222,7 +259,12 @@ export const useAiChatStore = create<AiChatState>((set) => ({
     set((state) => {
       if (state.pendingId !== questionId || !state.live) return state;
       if (event.type === 'done') {
-        return { entries: [...state.entries, aiAnswerEntryFromReply(state.live, event.reply, now, newAiChatId())], pendingId: null, live: null };
+        return {
+          entries: [...state.entries, aiAnswerEntryFromReply(state.live, event.reply, now, newAiChatId(), event.thread)],
+          pendingId: null,
+          live: null,
+          ...(event.thread ? { threadId: event.thread.id } : {}),
+        };
       }
       if (event.type === 'error') {
         const question = state.entries.find((entry) => entry.id === questionId)?.content ?? '';
@@ -238,7 +280,10 @@ export const useAiChatStore = create<AiChatState>((set) => ({
       const from = before?.role === 'user' ? index - 1 : index;
       return { entries: [...state.entries.slice(0, from), ...state.entries.slice(index + 1)] };
     }),
-  clear: () => set({ entries: [], pendingId: null, live: null }),
+  openThread: (thread) => set((state) => (state.pendingId ? state : { threadId: thread.id, entries: aiChatEntriesFromThread(thread), live: null })),
+  forgetThread: (threadId) =>
+    set((state) => (state.threadId !== threadId ? state : state.pendingId ? { threadId: null } : { threadId: null, entries: [], live: null })),
+  clear: () => set({ threadId: null, entries: [], pendingId: null, live: null }),
 }));
 
 /** 서버로 보낼 지난 대화: 답을 받은 질문과 답만, 최근 것부터 AI_CHAT_HISTORY_LIMIT개 */

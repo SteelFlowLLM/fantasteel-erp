@@ -1,13 +1,17 @@
 // AI 어시스턴트 훅. 답은 화면 토스트가 아니라 대화에 바로 보이므로 useAction이 아니라 대화 저장소에 직접 넣는다.
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
-import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiAssistantTurn, AiReasoningLevel } from '@fantasteel/shared';
-import { useQuery } from '@tanstack/react-query';
+// 대화는 서버가 저장한다(이슈 #399): 질문에 대화 id를 보내면 서버가 지난 대화를 DB에서 읽고, 답이 끝나면 질문과 답을 저장한다.
+import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
 import { isAbortError } from '@/api/http';
+import { useAction } from '@/hooks/useAction';
+import { readAiChatThread, writeAiChatThread } from '@/lib/aiChatThread';
 import { useMe } from '@/hooks/useMe';
 import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
-import { AI_CHAT_STOPPED_REASON, aiChatHistory, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
+import { AI_CHAT_STOPPED_REASON, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
 export function useAiSuggestedQuestions() {
@@ -42,9 +46,10 @@ export interface AiAskVariables {
   questionId: string;
   question: string;
   screen: AiAssistantScreenContext;
-  history: AiAssistantTurn[];
+  /** 이어 묻는 저장한 대화. 없으면(null) 서버가 새 대화로 저장한다 */
+  threadId: number | null;
   reasoning?: AiReasoningLevel;
-  /** 질문과 함께 보내는 사진. 지난 대화(history)에는 담지 않는다 */
+  /** 질문과 함께 보내는 사진. 저장하지 않는다 (사진 수만 남는다) */
   images?: AiAssistantImageInput[];
   /** 웹 검색을 켠 질문이면 true (이슈 #367). 끄면 필드를 보내지 않는다 */
   webSearch?: boolean;
@@ -63,7 +68,7 @@ async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, history, reasoning, images, webSearch, browser, screenControl, researchRunId }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -76,7 +81,8 @@ export async function runAiAsk({ questionId, question, screen, history, reasonin
   try {
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
-      { question, screen, history, actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}) },
+      // 지난 대화는 보내지 않는다: 서버가 저장한 대화에서 읽는다
+      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}) },
       (event) => {
         if (event.type === 'ui_action') {
           void answerUiAction(event);
@@ -103,10 +109,67 @@ export function useAskAiAssistant() {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
-    const history = aiChatHistory(chat.entries);
     const questionId = newAiChatId();
     chat.addQuestion(questionId, text, reasoning, images, webSearch, browser);
-    void runAiAsk({ questionId, question: text, screen, history, reasoning, images, webSearch, browser, screenControl, researchRunId });
+    void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
+}
+
+/** 저장한 대화 목록 (이슈 #399). 목록을 열 때마다 새로 읽는다 (그 사이 물은 대화가 맨 위로 온다) */
+export function useAiChatThreads(enabled: boolean) {
+  const me = useMe();
+  return useInfiniteQuery({
+    queryKey: aiAssistantKeys.threads(me.employeeId),
+    queryFn: ({ pageParam }) => aiAssistantApi.listThreads(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page * last.size < last.total ? last.page + 1 : undefined),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+/** 저장한 대화를 열어 이 패널에 되살린다. 답을 기다리는 중이면 열지 않는다 */
+export function useOpenAiChatThread() {
+  return useAction(aiAssistantApi.getThread, { onSuccess: (thread) => useAiChatStore.getState().openThread(thread) });
+}
+
+/** 대화 지우기. 지금 보는 대화를 지우면 새 대화가 된다 (답을 기다리는 중이면 그 답은 저장되지 않는다) */
+export function useDeleteAiChatThread() {
+  return useAction(aiAssistantApi.deleteThread, {
+    success: '대화를 지웠어요',
+    onSuccess: (removed) => useAiChatStore.getState().forgetThread(removed.id),
+  });
+}
+
+/**
+ * 새로고침하면 이 탭에서 보던 저장한 대화를 다시 연다 (이슈 #399). 보는 대화가 바뀔 때마다 이 탭에 적어 둔다.
+ * 그 사이 지웠거나 못 읽으면 조용히 새 대화로 둔다.
+ */
+export function useRememberAiChatThread() {
+  const me = useMe();
+  const threadId = useAiChatStore((state) => state.threadId);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const chat = useAiChatStore.getState();
+    const saved = readAiChatThread(me.employeeId);
+    if (saved === null || chat.threadId !== null || chat.entries.length || chat.pendingId) return;
+    aiAssistantApi.getThread(saved).then(
+      (thread) => {
+        const now = useAiChatStore.getState();
+        // 읽는 사이 사용자가 질문했거나 다른 대화를 열었으면 덮어쓰지 않는다
+        if (now.threadId === null && !now.entries.length && !now.pendingId) now.openThread(thread);
+      },
+      () => writeAiChatThread(me.employeeId, null),
+    );
+  }, [me.employeeId]);
+  const previous = useRef<number | null>(null);
+  useEffect(() => {
+    // 되살리기 전(처음 null)에는 지우지 않는다. 보던 대화가 있다가 비면(새 대화·지움) 지운다
+    if (threadId !== null) writeAiChatThread(me.employeeId, threadId);
+    else if (previous.current !== null) writeAiChatThread(me.employeeId, null);
+    previous.current = threadId;
+  }, [me.employeeId, threadId]);
 }

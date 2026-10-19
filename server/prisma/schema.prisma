@@ -53,6 +53,7 @@ model Employee {
   messageReactions MessageReaction[] @relation("MessageReactionEmployee")
   actionDraftsAsRequester ActionDraft[] @relation("ActionDraftRequester")
   aiResearchRuns AiResearchRun[] @relation("AiResearchRunEmployee")
+  aiChatThreads AiChatThread[] @relation("AiChatThreadEmployee")
 
   @@index([departmentId])
   @@index([jobGradeId])
@@ -1128,4 +1129,37 @@ model AiResearchEvent {
 
   @@unique([runId, seq])
   @@map("ai_research_event")
+}
+
+/// 철강맨AI 패널 대화 (이슈 #399, 문서에 없는 기능). 본인만 보고 지운다
+model AiChatThread {
+  id Int @id @default(autoincrement())
+  employeeId Int @map("employee_id") /// 대화한 사원 (본인만 본다)
+  title String @db.VarChar /// 첫 질문 앞 40자
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3) /// 마지막으로 묻고 답한 시각 (목록 순서)
+
+  employee Employee @relation("AiChatThreadEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  messages AiChatMessage[] @relation("AiChatMessageThread")
+
+  @@index([employeeId, updatedAt])
+  @@map("ai_chat_thread")
+}
+
+model AiChatMessage {
+  id Int @id @default(autoincrement())
+  threadId Int @map("thread_id")
+  seq Int /// 대화 안의 순번 (1부터)
+  role String @db.VarChar /// USER·ASSISTANT (CHECK, 공통 코드 아님)
+  content String /// 질문 글 또는 답 글
+  sources Json @default("[]") @db.JsonB /// 답의 출처 [{kind, id, label}]
+  webSources Json? @map("web_sources") @db.JsonB /// 답의 웹 출처 [{title, url}]
+  actionCards Json? @map("action_cards") @db.JsonB /// 답의 실행 카드 [{card, status, result?}]
+  meta Json? @db.JsonB /// 질문: {reasoning?, webSearch?, browser?, imageCount?} 답: {reasoning?, reasoningApplied?}
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  thread AiChatThread @relation("AiChatMessageThread", fields: [threadId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([threadId, seq])
+  @@map("ai_chat_message")
 }

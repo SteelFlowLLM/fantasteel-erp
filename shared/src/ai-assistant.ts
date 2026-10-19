@@ -3,7 +3,7 @@ import type { Role } from './codes';
 import type { MeetingCandidate, MeetingCandidateUpdateInput } from './meeting-minutes';
 import type { AiScreenMapEntry, AiScreenTool } from './ai-screen-control';
 
-/** 화면이 들고 있는 지난 대화 한 줄. 대화 기록은 서버에 저장하지 않아(저장 여부 미결정) 화면이 최근 것을 함께 보낸다 */
+/** 지난 대화 한 줄. 저장한 대화(threadId)면 서버가 DB에서 읽고, 아니면 화면이 최근 것을 함께 보낸다 (회의 질문) */
 export interface AiAssistantTurn {
   role: 'user' | 'assistant';
   content: string;
@@ -30,6 +30,13 @@ export interface AiAssistantMessageInput {
   actionCards?: boolean;
   /** 오래된 것부터. 서버는 최근 몇 개만 쓴다 */
   history?: AiAssistantTurn[];
+  /**
+   * 이어 묻는 저장한 대화 id (문서에 없는 기능, 이슈 #399). 내 대화만. 있으면 지난 대화를 DB에서 읽고 history는 쓰지 않는다.
+   * 실시간 답 API(messages/stream)에서만 저장한다
+   */
+  threadId?: number;
+  /** true면 답이 끝났을 때 질문과 답을 저장한다 (threadId가 없으면 새 대화). 철강맨AI 패널만 보낸다 (이슈 #399) */
+  saveThread?: boolean;
   /** 생각 정도 (문서에 없는 기능, 2026-10-16 추가). 없으면 서버 기본값(보통) */
   reasoning?: AiReasoningLevel;
   /** 질문과 함께 보는 사진 (문서에 없는 기능, 2026-10-16 추가). 사진을 볼 수 있는 모델일 때만. 지난 대화에는 남기지 않는다 */
@@ -193,7 +200,7 @@ export interface AiAssistantReplyView {
   thinking: string | null;
   /** 고른 생각 정도를 모델에 보냈는지. 모델이 생각 설정을 받지 않으면 false (화면이 안내한다) */
   reasoningApplied: boolean;
-  /** 실행 카드(REQ-AST-005). 서버는 저장하지 않고, 사용자가 확인해 실행을 누를 때만 업무에 반영한다 */
+  /** 실행 카드(REQ-AST-005). 사용자가 확인해 실행을 누를 때만 업무에 반영한다. 철강맨AI 패널 대화면 대화 기록에 함께 저장한다 (이슈 #399) */
   actionCards: AiActionCard[];
   /**
    * 웹 출처 (이슈 #367). 웹 검색을 켠 질문에만 있다. 답이 링크로 단 검색 결과와 읽은 페이지 순서이고,
@@ -294,6 +301,9 @@ export type AiActionCardExecuteInput =
   | { kind: 'HEAT_PLAN'; productionPlanId: number }
   | { kind: 'PAST_CASE'; lotId: number; caseCategory: 'QUALITY' | 'EQUIPMENT'; title: string; phenomenon: string; cause: string; actionTaken: string; equipmentText: string; occurredDate: string };
 
+/** 실행 요청 본문: 카드 값 + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399) */
+export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { chat?: AiChatCardRef };
+
 export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput, 'decision'> {
   kind: AiWorkCard['kind'];
   /** 비어 있는 칸(아직 정하지 않은 값)은 보내지 않는다. 필수 칸이 비면 서버가 ACT-001로 거절한다 */
@@ -347,7 +357,8 @@ export type AiAssistantStreamEvent =
       at: string;
     }
   | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
-  | { type: 'done'; reply: AiAssistantReplyView }
+  /** thread: 저장을 요청한 질문이면 저장한 대화, 저장에 실패했으면 null (이슈 #399) */
+  | { type: 'done'; reply: AiAssistantReplyView; thread?: AiChatThreadRef | null }
   | { type: 'error'; message: string };
 
 /** 역할별 추천 질문과 처음 쓰는 사용자용 질문 (REQ-AST-008) */
@@ -365,4 +376,71 @@ export interface AiActionCardExample {
   label: string;
   /** 입력칸에 채울 요청 문장. ○○는 사용자가 채울 자리 */
   text: string;
+}
+
+// ── 저장한 대화 (문서에 없는 기능, 이슈 #399) ─────────────────────────────
+
+/** 대화 제목: 첫 질문 앞 몇 자 */
+export const AI_CHAT_TITLE_MAX = 40;
+
+/** 대화 목록 한 줄 (GET ai-assistant/threads) */
+export interface AiChatThreadSummaryView {
+  id: number;
+  title: string;
+  createdAt: string;
+  /** 마지막으로 묻고 답한 시각. 목록은 이것이 최근인 순서 */
+  updatedAt: string;
+}
+
+/** 저장한 실행 카드. 실행하면 done과 만든 것. 닫은 카드는 저장하지 않는다 */
+export interface AiChatSavedCard {
+  card: AiActionCard;
+  status: 'ready' | 'done';
+  result?: AiActionCardExecuteResult['registered'];
+}
+
+/** 저장한 질문·답 한 줄. 생각 글·도구 기록·사진·브라우저 화면 사진은 저장하지 않는다 */
+export type AiChatMessageView =
+  | {
+      id: number;
+      seq: number;
+      role: 'user';
+      content: string;
+      createdAt: string;
+      reasoning?: AiReasoningLevel;
+      webSearch?: boolean;
+      browser?: boolean;
+      /** 함께 보낸 사진 수 (사진은 저장하지 않는다) */
+      imageCount?: number;
+    }
+  | {
+      id: number;
+      seq: number;
+      role: 'assistant';
+      content: string;
+      createdAt: string;
+      sources: AiAssistantSource[];
+      webSources?: AiWebSource[];
+      actionCards: AiChatSavedCard[];
+      /** 질문에 보낸 생각 정도와 모델에 보냈는지 (질문에 생각 정도를 보냈을 때만) */
+      reasoning?: AiReasoningLevel;
+      reasoningApplied?: boolean;
+    };
+
+/** 대화 하나 (GET ai-assistant/threads/:id). 메시지는 순번 순서 */
+export interface AiChatThreadView extends AiChatThreadSummaryView {
+  messages: AiChatMessageView[];
+}
+
+/** 질문과 답을 저장한 뒤 done 이벤트에 담는 것. assistantMessageId는 카드를 실행할 때 보낸다 */
+export interface AiChatThreadRef {
+  id: number;
+  title: string;
+  assistantMessageId: number;
+}
+
+/** 실행 카드를 실행할 때 함께 보내는 저장한 카드 자리. 실행하면 서버가 그 카드를 done으로 바꾼다 */
+export interface AiChatCardRef {
+  messageId: number;
+  cardKey: string;
 }
