@@ -887,6 +887,7 @@
         navigate: null, // (href) => void — '이 화면으로 가기'. 없으면 링크를 누른다
         screenHrefs: null, // { <SCREEN 키>: 주소 } — 다른 화면의 카드를 물으면 그 화면으로 데려갈 때 쓴다
         askAi: null, // (question, history) => Promise<{ text, sources? }> — 있으면 대화 창에 AI 연결 ON·OFF가 생긴다
+        onExplain: null, // () => void — 화면 설명(호버 설명·항목·용어·화면 안내)을 시작할 때 부른다. 설명 대상을 가리는 창을 닫는 데 쓴다
       },
       options || {},
     );
@@ -3137,6 +3138,7 @@
       const t = now();
       if (!el.isConnected) return;
       if (fromHover && hoverBlocked(key, t)) return;
+      if (o.onExplain) o.onExplain();
       S.lastExplain = { key, t };
       const tok = begin();
       if (!fromHover) S.flow = tok;
@@ -3601,6 +3603,7 @@
       const key = `item:${info.kind}:${info.title}`;
       const t = now();
       if (fromHover && hoverBlocked(key, t)) return;
+      if (o.onExplain) o.onExplain();
       S.lastExplain = { key, t };
       const tok = begin();
       if (!fromHover) S.flow = tok;
@@ -3651,6 +3654,7 @@
       const key = `term:${g.scope}:${g.term}`;
       const t = now();
       if (fromHover && hoverBlocked(key, t)) return;
+      if (o.onExplain) o.onExplain();
       S.lastExplain = { key, t };
       const tok = begin();
       if (!fromHover) S.flow = tok;
@@ -3974,6 +3978,7 @@
       return out.map(({ target, text }) => ({ target, text }));
     }
     async function runTour(spec) {
+      if (o.onExplain) o.onExplain();
       const steps = spec.kind === 'screen' ? screenSteps(spec.steps) : spec.steps.filter((st) => findTarget(st.target));
       const items = spec.intro.map((text) => ({ text, target: null })).concat(steps);
       if (S.mode === 'hidden') show(true);
