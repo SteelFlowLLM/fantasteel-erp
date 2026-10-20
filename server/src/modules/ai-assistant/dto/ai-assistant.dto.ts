@@ -1,4 +1,4 @@
-import { AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_AGENT_CONTROL_COMMANDS, AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiAgentControlCommand, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
@@ -56,6 +56,12 @@ export class AiScreenMapEntryDto {
   @IsString()
   @MaxLength(60)
   title!: string;
+}
+
+/** POST ai-assistant/agent-control/:controlId (이슈 #425). 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 */
+export class AgentControlDto {
+  @IsIn(AI_AGENT_CONTROL_COMMANDS, { message: '명령은 pause·step·resume 중 하나예요' })
+  command!: AiAgentControlCommand;
 }
 
 /** POST ai-assistant/ui-actions/:actionId (이슈 #382). 화면이 동작을 한 결과 */
@@ -148,6 +154,11 @@ export class AskAiAssistantDto {
   @IsOptional()
   @IsUUID('4', { message: '브라우저 대화 열쇠가 올바르지 않아요' })
   browserSessionId?: string;
+
+  /** 답마다 화면이 만든 열쇠. 답하는 동안 브라우저·화면 조작을 멈추고 이어 가게 한다 (이슈 #425) */
+  @IsOptional()
+  @IsUUID('4', { message: '멈춤 열쇠가 올바르지 않아요' })
+  agentControlId?: string;
 
   /** 화면 조작을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 화면 도구를 알린다 (이슈 #382, 시험 중) */
   @IsOptional()

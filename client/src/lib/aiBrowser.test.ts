@@ -114,6 +114,7 @@ describe('도구 줄', () => {
     expect(browserToolRunningText('browser_open')).toBe(' … 여는 중');
     expect(browserToolRunningText('browser_click')).toBe(' … 누르는 중');
     expect(browserToolRunningText('browser_type')).toBe(' … 입력 중');
+    expect(browserToolRunningText('browser_read_file')).toBe(' … 문서 읽는 중');
     expect(browserToolRunningText('web_search')).toBeNull();
     expect(AI_ASSISTANT_TOOL_TITLE['browser_open']).toBe('브라우저 열기');
   });

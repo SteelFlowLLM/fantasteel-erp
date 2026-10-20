@@ -2,7 +2,7 @@
 import type { AiAssistantStreamEvent } from '@fantasteel/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aiAssistantApi } from '@/api/aiAssistant';
-import { runAiAsk, stopAiAssistant } from '@/hooks/useAiAssistant';
+import { controlAiAgent, runAiAsk, stopAiAssistant } from '@/hooks/useAiAssistant';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 
 const store = () => useAiChatStore.getState();
@@ -132,5 +132,85 @@ describe('runAiAsk', () => {
     await running;
     expect(aborted).toBe(true);
     expect(store().entries).toEqual([]);
+  });
+});
+
+describe('controlAiAgent (이슈 #425)', () => {
+  const CONTROL_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+  const requested = () => store().live?.control?.requested;
+
+  it('멈추기·한 단계는 멈추기를 기다리는 상태(requested true)로 두고 서버에 명령을 보낸다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'controlAgent').mockResolvedValue({ accepted: true });
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    await controlAiAgent('pause');
+    expect(requested()).toBe(true);
+    await controlAiAgent('step');
+    expect(requested()).toBe(true);
+    expect(spy.mock.calls).toEqual([[CONTROL_ID, 'pause'], [CONTROL_ID, 'step']]);
+  });
+
+  it('계속은 requested를 false로 되돌린다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'controlAgent').mockResolvedValue({ accepted: true });
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    await controlAiAgent('pause');
+    await controlAiAgent('resume');
+    expect(requested()).toBe(false);
+    expect(spy).toHaveBeenLastCalledWith(CONTROL_ID, 'resume');
+  });
+
+  it('보내기에 실패하면(답이 이미 끝남 등) 오류를 던지지 않고 requested를 false로 되돌린다', async () => {
+    vi.spyOn(aiAssistantApi, 'controlAgent').mockRejectedValue(new Error('답하는 중인 브라우저·화면 조작이 없어요'));
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    await expect(controlAiAgent('pause')).resolves.toBeUndefined();
+    expect(requested()).toBe(false);
+  });
+
+  it('요청이 실패하기 전에 답이 바뀌었으면 새 질문의 상태는 건드리지 않는다', async () => {
+    let fail: (reason: Error) => void = () => undefined;
+    vi.spyOn(aiAssistantApi, 'controlAgent').mockImplementation(() => new Promise((_resolve, reject) => void (fail = reject)));
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    const sending = controlAiAgent('pause');
+    store().addAnswer('q1', '답', []);
+    store().addQuestion('q2', '다음', undefined, undefined, undefined, true, 'bbbbbbbb-3b7d-4bad-9bdd-2b0d7b3dcb6d');
+    store().setControlRequested('q2', true);
+    fail(new Error('끝남'));
+    await sending;
+    expect(store().live?.control).toMatchObject({ id: 'bbbbbbbb-3b7d-4bad-9bdd-2b0d7b3dcb6d', requested: true });
+  });
+
+  it('답하는 중인 질문이 없거나 멈출 수 없는 답(control 없음)이면 서버에 보내지 않는다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'controlAgent').mockResolvedValue({ accepted: true });
+    await controlAiAgent('pause');
+    store().addQuestion('q1', '질문');
+    await controlAiAgent('pause');
+    expect(spy).not.toHaveBeenCalled();
+    expect(store().live?.control).toBeNull();
+  });
+});
+
+describe('runAiAsk의 agentControlId (이슈 #425)', () => {
+  const CONTROL_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+
+  it('열쇠가 있으면 agentControlId로 보내고, 없으면 필드를 보내지 않는다', async () => {
+    const spy = vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => onEvent(DONE));
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    await runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, threadId: null, browser: true, controlId: CONTROL_ID });
+    store().addQuestion('q2', '질문');
+    await runAiAsk({ questionId: 'q2', question: '질문', screen: SCREEN, threadId: null });
+    expect(spy.mock.calls[0][0]).toMatchObject({ agentControlId: CONTROL_ID });
+    expect(spy.mock.calls[1][0]).not.toHaveProperty('agentControlId');
+  });
+
+  it('서버가 보낸 agent_paused·browser_live가 같은 질문의 live에 쌓인다', async () => {
+    let seen: ReturnType<typeof store>['live'] = null;
+    vi.spyOn(aiAssistantApi, 'askStream').mockImplementation(async (_input, onEvent) => {
+      onEvent({ type: 'browser_live', url: 'example.kr', imageBase64: 'QUJD', at: '2026-10-20T00:00:00.000Z' });
+      onEvent({ type: 'agent_paused', tool: 'browser_open' });
+      seen = store().live;
+      onEvent(DONE);
+    });
+    store().addQuestion('q1', '질문', undefined, undefined, undefined, true, CONTROL_ID);
+    await runAiAsk({ questionId: 'q1', question: '질문', screen: SCREEN, threadId: null, browser: true, controlId: CONTROL_ID });
+    expect(seen).toMatchObject({ liveFrame: { url: 'example.kr' }, control: { id: CONTROL_ID, pausedBefore: 'browser_open' } });
   });
 });

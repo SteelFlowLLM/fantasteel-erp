@@ -58,6 +58,20 @@ export interface AiChatLive {
   reasoning: AiReasoningLevel | null;
   /** 브라우저 도구가 찍은 화면 사진 (이슈 #373). 오래된 것부터 최대 AI_BROWSER_MAX_FRAMES장 */
   browserFrames: AiBrowserFrame[];
+  /** 답하는 동안 계속 바뀌는 브라우저 화면 (이슈 #425). 가장 최근 한 장만, 답에는 남기지 않는다 */
+  liveFrame: AiBrowserFrame | null;
+  /** 브라우저·화면 조작을 멈출 수 있는 답이면 그 상태 (이슈 #425) */
+  control: AiAgentControlState | null;
+}
+
+/**
+ * 멈춤 상태 (이슈 #425). requested: 멈추기를 눌렀고 다음 동작 앞에서 멈추길 기다리는 중,
+ * pausedBefore: 서버가 멈춰 기다리는 다음 도구 이름 (멈추지 않았으면 null)
+ */
+export interface AiAgentControlState {
+  id: string;
+  requested: boolean;
+  pausedBefore: string | null;
 }
 
 export type AiChatEntry =
@@ -74,7 +88,14 @@ export type AiChatEntry =
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
 
-export const emptyAiChatLive = (reasoning: AiReasoningLevel | null = null): AiChatLive => ({ steps: [], answer: '', reasoning, browserFrames: [] });
+export const emptyAiChatLive = (reasoning: AiReasoningLevel | null = null, controlId: string | null = null): AiChatLive => ({
+  steps: [],
+  answer: '',
+  reasoning,
+  browserFrames: [],
+  liveFrame: null,
+  control: controlId ? { id: controlId, requested: false, pausedBefore: null } : null,
+});
 
 /** 생각 중인 마지막 단계를 닫는다 (생각이 아닌 다음 이벤트가 오면 생각이 끝난 것) */
 function closeThinking(steps: AiTimelineStep[], now: number): AiTimelineStep[] {
@@ -115,6 +136,14 @@ export function reduceAiChatLive(live: AiChatLive, event: AiAssistantStreamEvent
       const frame = toBrowserFrame(event);
       return frame ? { ...live, browserFrames: appendBrowserFrame(live.browserFrames, frame) } : live;
     }
+    case 'browser_live': {
+      const frame = toBrowserFrame({ ...event, title: '' });
+      return frame ? { ...live, liveFrame: frame } : live;
+    }
+    case 'agent_paused':
+      return live.control ? { ...live, control: { ...live.control, requested: false, pausedBefore: event.tool } } : live;
+    case 'agent_resumed':
+      return live.control ? { ...live, control: { ...live.control, pausedBefore: null } } : live;
     default:
       return live;
   }
@@ -196,7 +225,9 @@ interface AiChatState {
   live: AiChatLive | null;
   claim: (employeeId: number) => void;
   /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다), images: 질문과 함께 보내는 사진 */
-  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean) => void;
+  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, controlId?: string) => void;
+  /** 멈추기·한 단계를 눌렀으면 true(다음 동작 앞에서 멈춘다), 계속이면 false. 실제로 멈춘 것은 서버의 agent_paused로 안다 (이슈 #425) */
+  setControlRequested: (questionId: string, requested: boolean) => void;
   addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
   /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
@@ -224,12 +255,14 @@ export const useAiChatStore = create<AiChatState>((set) => ({
   live: null,
   claim: (employeeId) =>
     set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, threadId: null, entries: [], pendingId: null, live: null })),
-  addQuestion: (id, question, reasoning, images, webSearch, browser) =>
+  addQuestion: (id, question, reasoning, images, webSearch, browser, controlId) =>
     set((state) => ({
       entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) }],
       pendingId: id,
-      live: emptyAiChatLive(reasoning ?? null),
+      live: emptyAiChatLive(reasoning ?? null, controlId ?? null),
     })),
+  setControlRequested: (questionId, requested) =>
+    set((state) => (state.pendingId === questionId && state.live?.control ? { live: { ...state.live, control: { ...state.live.control, requested } } } : state)),
   // 그사이 대화를 비웠거나 사원이 바뀌었으면 늦게 온 답은 버린다
   addAnswer: (questionId, answer, sources, cards = []) =>
     set((state) =>
