@@ -181,6 +181,8 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   drive_read_file: 'Drive 파일 읽기',
   get_my_schedule: '내 일정 조회',
   get_my_tasks: '내 업무 조회',
+  search_chat_history: '지난 대화 찾기',
+  search_room_messages: '지난 메시지 찾기',
 };
 
 /** 웹 도구 (이슈 #367). 조회 도구처럼 묻지 않고 실행하지만, 웹 검색을 켠 실시간 답에서만 알린다 */

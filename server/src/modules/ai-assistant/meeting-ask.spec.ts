@@ -20,6 +20,8 @@ const llmClient = {
   chatWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile]>(),
   streamWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile, LlmStreamHandlers, AbortSignal | undefined]>(),
   modelCapabilities: jest.fn<Promise<LlmModelCapabilities>, [unknown, string]>(),
+  // 지난 대화 예산(이슈 #412). 모르면 예전 값
+  modelContextLength: jest.fn(async () => null),
 };
 const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; model: string | null; apiKey: null }> => ({ baseUrl: 'http://llm.test/v1', model: 'test-model', apiKey: null })) };
 

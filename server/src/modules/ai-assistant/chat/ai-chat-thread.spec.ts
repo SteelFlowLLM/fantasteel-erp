@@ -9,6 +9,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { seoulToday } from '../../../common/time/seoul-date';
 import { LlmClient, type LlmStreamHandlers, type LlmToolMessage } from '../../llm/llm.client';
 import { LlmSettingsStore } from '../../llm/llm-settings.store';
+import { AiChatThreadService } from './ai-chat-thread.service';
 import { AI_CHAT_ROLE } from './ai-chat-thread.view';
 
 let app: INestApplication;
@@ -23,14 +24,18 @@ let startNotificationId = 0;
 
 /** 가짜 LLM이 받은 메시지 (질문마다) */
 const prompts: LlmToolMessage[][] = [];
+/** 가짜 LLM에 알린 도구 이름 (질문마다) */
+const toolNames: string[][] = [];
 let nextAnswer = '예약은 합격 재고의 매수를 확보하는 거예요 [TRM-056].';
 let failNext = false;
 const LONG_QUESTION = '예약이\n뭐야? SS275 열연 코일 재고와 배정 상태를 함께 알려 주세요 부탁해요';
 
 const llmClient = {
   modelCapabilities: async () => ({ vision: true, reasoning: true }),
-  streamWithTools: async (_endpoint: unknown, _model: string, messages: LlmToolMessage[], _tools: unknown, _profile: unknown, handlers: LlmStreamHandlers) => {
+  modelContextLength: async () => null,
+  streamWithTools: async (_endpoint: unknown, _model: string, messages: LlmToolMessage[], tools: { name: string }[], _profile: unknown, handlers: LlmStreamHandlers) => {
     prompts.push([...messages]);
+    toolNames.push(tools.map((tool) => tool.name));
     if (failNext) {
       failNext = false;
       const { LlmRequestError } = await import('../../llm/llm.client');
@@ -100,6 +105,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   prompts.length = 0;
+  toolNames.length = 0;
   nextAnswer = '예약은 합격 재고의 매수를 확보하는 거예요 [TRM-056].';
 });
 
@@ -208,5 +214,70 @@ describe('저장한 대화 (이슈 #399)', () => {
     expect(await prisma.aiChatMessage.count({ where: { threadId } })).toBe(0);
     expect(await call('GET', `/ai-assistant/threads/${threadId}`, ownerCookie)).toMatchObject({ status: 404, code: 'AST-001' });
     expect(await askStream(ownerCookie, { question: '지운 대화에 이어 묻기', threadId })).toMatchObject({ status: 404, code: 'AST-001' });
+  });
+});
+
+describe('지난 대화 찾기 (이슈 #412)', () => {
+  let otherId: number;
+  const base = new Date('2026-09-01T00:00:00Z');
+  const at = (days: number) => new Date(base.getTime() + days * 86_400_000);
+
+  async function threadWith(employeeId: number, title: string, messages: { role: 'USER' | 'ASSISTANT'; content: string; createdAt: Date }[]) {
+    const thread = await prisma.aiChatThread.create({ data: { employeeId, title } });
+    for (const [index, message] of messages.entries()) await prisma.aiChatMessage.create({ data: { threadId: thread.id, seq: index + 1, ...message } });
+    return thread;
+  }
+
+  beforeAll(async () => {
+    otherId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1702004' } })).id;
+    await threadWith(ownerId, '메모리 SS275 납기 문의', [
+      { role: 'USER', content: '메모리검색 SS275 납기가 언제예요?', createdAt: at(1) },
+      { role: 'ASSISTANT', content: '메모리검색 SS275 납기는 11월 20일이에요', createdAt: at(2) },
+    ]);
+    await threadWith(ownerId, '메모리 알파 문의', [
+      { role: 'USER', content: '메모리검색 SS275 재고만 알려줘 알파낱말', createdAt: at(3) },
+      { role: 'ASSISTANT', content: '메모리검색 SS275 재고는 12매예요', createdAt: at(4) },
+    ]);
+    // 같은 낱말을 쓴 남의 대화
+    await threadWith(otherId, '남의 SS275 납기', [
+      { role: 'USER', content: '메모리검색 SS275 납기 남의 질문', createdAt: at(5) },
+      { role: 'ASSISTANT', content: '메모리검색 SS275 납기 남의 답', createdAt: at(6) },
+    ]);
+  });
+
+  const searchOf = (employeeId: number) => app.get(AiChatThreadService).searchSource({ employeeId } as Parameters<AiChatThreadService['searchSource']>[0]);
+
+  it('내 대화만 찾는다 (남이 같은 낱말을 써도 나오지 않는다)', async () => {
+    const hits = await searchOf(ownerId).search(['SS275', '납기'], 8);
+    expect(hits.map((h) => h.text)).toEqual(['메모리검색 SS275 납기는 11월 20일이에요', '메모리검색 SS275 납기가 언제예요?']);
+    expect(hits.some((h) => h.text.includes('남의'))).toBe(false);
+    const others = await searchOf(otherId).search(['SS275', '납기'], 8);
+    expect(others.map((h) => h.text)).toEqual(['메모리검색 SS275 납기 남의 답', '메모리검색 SS275 납기 남의 질문']);
+  });
+
+  it('새것부터, 대화 제목을 어디로, 질문은 나·답은 철강맨AI로 돌려준다', async () => {
+    const hits = await searchOf(ownerId).search(['메모리검색', 'SS275'], 8);
+    expect(hits.map((h) => h.at.getTime())).toEqual([...hits.map((h) => h.at.getTime())].sort((a, b) => b - a));
+    expect(hits[0]).toEqual({ at: at(4), who: '철강맨AI', where: '메모리 알파 문의', text: '메모리검색 SS275 재고는 12매예요' });
+    expect(hits.at(-1)).toEqual({ at: at(1), who: '나', where: '메모리 SS275 납기 문의', text: '메모리검색 SS275 납기가 언제예요?' });
+    expect(hits).toHaveLength(4);
+  });
+
+  it('낱말을 모두 담은 글이 없으면 하나라도 담은 글을 찾는다 (낱말이 하나면 그대로 없음)', async () => {
+    const hits = await searchOf(ownerId).search(['알파낱말', '없는낱말'], 8);
+    expect(hits.map((h) => h.text)).toEqual(['메모리검색 SS275 재고만 알려줘 알파낱말']);
+    expect(await searchOf(ownerId).search(['없는낱말'], 8)).toEqual([]);
+  });
+
+  it('대소문자를 가리지 않고, 개수 한도를 지킨다', async () => {
+    const hits = await searchOf(ownerId).search(['ss275'], 3);
+    expect(hits).toHaveLength(3);
+    expect(hits.every((h) => h.text.includes('SS275'))).toBe(true);
+  });
+
+  it('저장하는 실시간 질문은 모델에 지난 대화 찾기 도구를 알린다', async () => {
+    const { events } = await askStream(ownerCookie, { question: '메모리검색 예약이 뭐야?', saveThread: true });
+    expect(doneOf(events).reply.answer).toBeTruthy();
+    expect(toolNames[0]).toContain('search_chat_history');
   });
 });

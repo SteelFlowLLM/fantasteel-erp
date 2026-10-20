@@ -27,6 +27,19 @@ export class AiChatThreadRepository {
     return tx.aiChatMessage.findMany({ where: { threadId }, orderBy: { seq: 'desc' }, take, select: { role: true, content: true, meta: true } });
   }
 
+  /** 내 대화의 메시지 중 낱말을 모두 담은 것 (새것부터). 낱말이 하나도 같이 안 나오면 하나라도 담은 것 */
+  async searchMessages(tx: Tx, employeeId: number, words: readonly string[], take: number) {
+    const query = (mode: 'AND' | 'OR') =>
+      tx.aiChatMessage.findMany({
+        where: { thread: { employeeId }, [mode]: words.map((word) => ({ content: { contains: word, mode: 'insensitive' as const } })) },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: { role: true, content: true, createdAt: true, thread: { select: { title: true } } },
+      });
+    const all = await query('AND');
+    return all.length || words.length === 1 ? all : query('OR');
+  }
+
   async lastSeq(tx: Tx, threadId: number): Promise<number> {
     const { _max } = await tx.aiChatMessage.aggregate({ where: { threadId }, _max: { seq: true } });
     return _max.seq ?? 0;

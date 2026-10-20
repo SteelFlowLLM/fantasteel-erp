@@ -66,6 +66,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { Prisma, type ChatRoom } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
+import type { HistoryHit, HistorySearchSource } from '../ai-assistant/history/chat-memory';
 import { NotificationService } from '../notification/notification.service';
 import type { CreateChatRoomDto, EditMessageDto, InviteMembersDto, PinMessageDto, ToggleReactionDto, ListMessagesQuery, MarkReadDto, RenameChatRoomDto, SearchMessagesQuery, SendMessageDto, UpdateChatRoomSettingsDto, UploadAttachmentDto } from './dto/messenger.dto';
 import { MessengerGateway } from './messenger.gateway';
@@ -218,8 +219,8 @@ const SYSTEM_SENDER_NAME = '시스템';
 /** AI 답의 출처 줄에 쓰는 종류 이름 */
 const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', DATA: '조회 데이터' };
 
-/** @AI 호출에 함께 넘기는 직전 대화 수 (AI 어시스턴트 서버가 쓰는 수와 같게) */
-const AI_HISTORY_MESSAGES = 10;
+/** @AI 호출에 함께 넘기는 직전 대화 수의 최대. 실제로 넣는 양은 AI 어시스턴트가 모델 문맥 길이로 줄인다 (이슈 #412) */
+const AI_HISTORY_MESSAGES = 50;
 /** AI 어시스턴트 질문 최대 길이 (API-262 규칙) */
 const AI_QUESTION_MAX = 1000;
 
@@ -920,7 +921,11 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     } else {
       const stopTyping = this.startAiTyping(chatRoomId);
       try {
-        const reply = await this.aiAssistant.ask(user, { question, screen: await this.aiScreenOf(chatRoomId), history: await this.aiHistoryOf(user, chatRoomId, messageId) });
+        const reply = await this.aiAssistant.ask(
+          user,
+          { question, screen: await this.aiScreenOf(chatRoomId), history: await this.aiHistoryOf(user, chatRoomId, messageId) },
+          { historySearch: this.aiRoomSearchOf(user, chatRoomId) },
+        );
         text = aiReplyContentOf(user.employeeName, reply);
       } catch (error) {
         if (!(error instanceof AppException)) this.logger.error(`@AI 답 만들기 실패 (메시지 ${messageId}): ${String(error)}`);
@@ -953,6 +958,28 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     const room = await this.repository.findRoom(this.prisma, chatRoomId);
     const salesOrderNo = room?.salesOrderId == null ? undefined : (await this.repository.findSalesOrderNos(this.prisma, [room.salesOrderId]))[0]?.salesOrderNo;
     return { path: `/messenger?room=${chatRoomId}`, title: '사내 채팅', label: salesOrderNo ? `수주 ${salesOrderNo} 업무방` : null };
+  }
+
+  /**
+   * @AI의 지난 대화 찾기 (이슈 #412): 이 방 메시지만. 직전 대화(aiHistoryOf)와 같은 규칙으로 지운 메시지·시스템 메시지는 빼고,
+   * 묻는 사람이 볼 수 없는 AI 답(그 데이터를 볼 권한이 없는 답)도 뺀다. 걸러질 것을 생각해 넉넉히 읽는다
+   */
+  private aiRoomSearchOf(asker: AuthUser, chatRoomId: number): HistorySearchSource {
+    return {
+      kind: 'room',
+      search: async (words, limit) => {
+        const rows = await this.repository.searchRoomMessages(this.prisma, chatRoomId, words, limit * 3);
+        return rows
+          .flatMap((row): HistoryHit[] => {
+            if (!row.content || !this.canSee(asker, row.content)) return [];
+            const aiText = aiReplyTextOf(row.content);
+            if (aiText !== null) return [{ at: row.createdAt, who: '철강맨AI', where: null, text: aiText }];
+            if (row.sender === null) return [];
+            return [{ at: row.createdAt, who: row.sender.employeeName, where: null, text: row.content }];
+          })
+          .slice(0, limit);
+      },
+    };
   }
 
   /** 질문 직전 대화 (오래된 순). 사람 말은 이름을 붙여 user로, AI 답은 assistant로. 삭제·일반 시스템 메시지·글 없는 메시지는 뺀다 */
