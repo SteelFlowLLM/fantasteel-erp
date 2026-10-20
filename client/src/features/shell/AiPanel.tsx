@@ -3,8 +3,9 @@
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
+// 입력칸 맨 앞의 /로 명령(심층 조사·이번 질문만 웹 검색·브라우저, 새 대화, 대화 목록)을 부른다(이슈 #410, lib/aiSlashCommand.ts).
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -31,7 +32,9 @@ import { researchChipLabel } from '@/lib/aiResearchChart';
 import { researchCardSeedAt, webResearchStartAt, type AiWebResearchStart } from '@/lib/aiResearchSeed';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
 import { AiDriveMention } from '@/features/shell/AiDriveMention';
-import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionTriggerAt, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
+import { AI_SLASH_MENU_ID, AiSlashCommandMenu, aiSlashOptionId } from '@/features/shell/AiSlashCommandMenu';
+import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionTriggerAt, moveMentionIndex, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
+import { AI_SLASH_ESCAPED_HINT, AI_SLASH_NEED_QUESTION, filterSlashCommands, parseSlashDraft, slashCompletion, slashQueryOf, type AiSlashCommand, type AiSlashCommandKey } from '@/lib/aiSlashCommand';
 import { AI_NOTION_TITLE, notionDisabledReason, readAiNotionPreference, writeAiNotionPreference } from '@/lib/aiNotion';
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
@@ -63,6 +66,12 @@ const STOPPED_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-line-strong bg-
 
 /** 지금 모델이 사진을 볼 수 없을 때 첨부 단추에 보이는 안내 */
 const NO_VISION_TITLE = '지금 모델은 사진을 볼 수 없어요';
+/** / 명령을 지금 쓸 수 없을 때 고르기 창과 입력칸 아래에 보이는 이유 */
+const SLASH_RESEARCH_OFF = '심층 조사를 쓸 수 없어요 (AI 연결에 모델이 정해져 있지 않아요)';
+const SLASH_WEB_OFF = '웹 검색을 쓸 수 없어요';
+const SLASH_NEW_CHAT_PENDING = '답을 받는 중에는 새 대화를 시작할 수 없어요';
+const SLASH_NEW_CHAT_EMPTY = '이미 새 대화예요';
+const SLASH_RESEARCH_SHORT = `조사할 질문을 ${AI_RESEARCH_LIMITS.questionMin}자 이상 적어 주세요`;
 const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp';
 
 type FailureEntry = Extract<AiChatEntry, { role: 'failure' }>;
@@ -105,6 +114,11 @@ export function AiPanel() {
   // 입력칸 @로 붙인 Drive 문서 (사진은 사진 칸으로 간다)와 @ 창을 연 자리 (이슈 #398 2단계)
   const [driveFiles, setDriveFiles] = useState<DriveFileView[]>([]);
   const [mentionAt, setMentionAt] = useState<number | null>(null);
+  // / 명령 고르기 창 (이슈 #410): Esc로 닫으면 입력칸이 /로 시작하지 않게 될 때까지 다시 열지 않는다
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  // 고른 줄은 명령으로 든다 (거르면 순서가 바뀐다). null이면 쓸 수 있는 첫 명령
+  const [slashActive, setSlashActive] = useState<AiSlashCommandKey | null>(null);
+  const [slashProblem, setSlashProblem] = useState<string | null>(null);
   const capabilities = useAiCapabilities();
   // 모델 정보를 아직 못 읽었거나 알 수 없으면(null) 막지 않는다. 확실히 안 되는 것(false)만 막는다
   const visionOff = capabilities.data?.vision === false;
@@ -214,12 +228,38 @@ export function AiPanel() {
     writeAiDrivePreference(on);
   };
 
+  // / 명령: 맨 앞이 /이고 띄어쓰기 전이면 고르기 창을 연다. @ 창이 열려 있으면 열지 않는다
+  const slashQuery = mentionAt === null && !slashDismissed ? slashQueryOf(draft) : null;
+  const slashCommands = slashQuery === null ? [] : filterSlashCommands(slashQuery);
+  const slashOpen = slashCommands.length > 0;
+  const slashDraft = parseSlashDraft(draft);
+
+  const slashBlockedReason = (key: AiSlashCommandKey): string | null => {
+    switch (key) {
+      case 'research':
+        return deepResearchOn ? null : SLASH_RESEARCH_OFF;
+      case 'web':
+        return webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint || SLASH_WEB_OFF) : null;
+      case 'browser':
+        return browserBlockedReason;
+      case 'newChat':
+        return pending ? SLASH_NEW_CHAT_PENDING : entries.length ? null : SLASH_NEW_CHAT_EMPTY;
+      case 'threads':
+        return null;
+    }
+  };
+  const slashPicked = slashCommands.findIndex((command) => command.key === slashActive);
+  const slashCurrent = slashPicked >= 0 ? slashPicked : Math.max(0, slashCommands.findIndex((command) => slashBlockedReason(command.key) === null));
+
   // 입력칸에 @를 치면 Drive 파일 고르기를 연다. Drive가 준비됐을 때만 (메신저 입력칸의 @와는 따로다)
   const changeDraft = (next: string, caret: number) => {
     if (drive.ready && mentionAt === null) {
       const at = mentionTriggerAt(draft, next, caret);
       if (at !== null) setMentionAt(at);
     }
+    if (!next.startsWith('/')) setSlashDismissed(false);
+    if (slashQueryOf(next) !== slashQueryOf(draft)) setSlashActive(null);
+    setSlashProblem(null);
     setDraft(next);
   };
 
@@ -257,13 +297,13 @@ export function AiPanel() {
   // 생각 정도를 바꿀 수 없는 모델이면 보내지 않는다 (서버도 무시한다)
   const sentReasoning = (level: AiReasoningLevel): AiReasoningLevel | undefined => (reasoningOff ? undefined : level);
 
-  // withImages=false: 추천 질문 칩처럼 붙여 둔 사진과 상관없이 묻는 질문
-  const send = (question: string, withImages = true) => {
+  // withImages=false: 추천 질문 칩처럼 붙여 둔 사진과 상관없이 묻는 질문. once: / 명령으로 이번 질문만 켜는 도구 (저장된 켜기 설정은 그대로)
+  const send = (question: string, withImages = true, once: { webSearch?: boolean; browser?: boolean } = {}) => {
     if (!question.trim() || pending || photos.busy) return;
     stickRef.current = true;
     setShowThreads(false);
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn, browserOn, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [] });
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn || once.webSearch === true, browserOn || once.browser === true, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [] });
     setDraft('');
     if (withImages) setDriveFiles([]);
     if (withImages) photos.clear();
@@ -272,6 +312,59 @@ export function AiPanel() {
       setReasoning(next);
       writeAiReasoningPreference({ level: next, oneShot });
     }
+  };
+
+  const startNewChat = () => {
+    clear();
+    setShowThreads(false);
+  };
+
+  // 쓸 수 없는 명령이나 질문이 빠진 명령은 보내지 않고 입력칸 아래에 이유를 보인다
+  const runSlashCommand = (command: AiSlashCommand, question: string) => {
+    const blocked = slashBlockedReason(command.key);
+    if (blocked) {
+      setSlashProblem(blocked);
+      return;
+    }
+    if (command.takesQuestion && !question) {
+      setSlashProblem(AI_SLASH_NEED_QUESTION);
+      return;
+    }
+    switch (command.key) {
+      case 'research':
+        if (question.length < AI_RESEARCH_LIMITS.questionMin) setSlashProblem(SLASH_RESEARCH_SHORT);
+        else if (!sendToResearch.isPending) sendToResearch.mutate({ question: question.slice(0, AI_RESEARCH_LIMITS.questionMax) });
+        return;
+      case 'web':
+        send(question, true, { webSearch: true });
+        return;
+      case 'browser':
+        send(question, true, { browser: true });
+        return;
+      // 질문을 받지 않는 명령 뒤에 적은 글은 버리지 않고 입력칸에 남긴다
+      case 'newChat':
+        startNewChat();
+        setDraft(question);
+        return;
+      case 'threads':
+        setShowThreads(true);
+        setDraft(question);
+        return;
+    }
+  };
+
+  // 고르기 창에서 고르면: 질문을 받는 명령은 `/웹 `까지 채우고, 아니면 바로 한다
+  const pickSlashCommand = (command: AiSlashCommand) => {
+    const blocked = slashBlockedReason(command.key);
+    if (blocked) setSlashProblem(blocked);
+    else if (command.takesQuestion) setDraft(slashCompletion(command));
+    else runSlashCommand(command, '');
+    inputRef.current?.focus();
+  };
+
+  const submit = () => {
+    if (slashDraft.kind === 'command') runSlashCommand(slashDraft.command, slashDraft.question);
+    else send(slashDraft.text);
   };
 
   // 실행 카드 요청 예시는 바로 보내지 않고 입력칸에 채워, 사용자가 ○○를 채우고 고쳐서 보낸다
@@ -323,10 +416,39 @@ export function AiPanel() {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return; // 한글 조합 중 Enter는 보내지 않는다
+    if (event.nativeEvent.isComposing) return; // 한글 조합 중 Enter는 보내지 않는다
+    if (slashOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashActive(slashCommands[moveMentionIndex(slashCurrent, event.key === 'ArrowDown' ? 1 : -1, slashCommands.length)].key);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+        event.preventDefault();
+        pickSlashCommand(slashCommands[slashCurrent]);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSlashDismissed(true);
+        return;
+      }
+    }
+    if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
-    send(draft);
+    submit();
   };
+
+  // 입력칸 아래 / 명령 줄: 못 한 이유, 명령이 할 일, //로 글 그대로 보냄
+  const slashLine: { text: string; error: boolean } | null = slashProblem
+    ? { text: slashProblem, error: true }
+    : slashDraft.kind === 'command' && !slashOpen
+      ? { text: slashBlockedReason(slashDraft.command.key) ?? slashDraft.command.hint, error: slashBlockedReason(slashDraft.command.key) !== null }
+      : slashDraft.kind === 'text' && slashDraft.escaped
+        ? { text: AI_SLASH_ESCAPED_HINT, error: false }
+        : null;
+  // [심층 조사로 보내기]도 / 명령 낱말은 빼고 질문만 넘긴다
+  const researchQuestion = slashDraft.kind === 'command' ? slashDraft.question : slashDraft.text.trim();
 
   return (
     <aside
@@ -366,10 +488,7 @@ export function AiPanel() {
           label="새 대화"
           size="sm"
           disabled={!entries.length || pending}
-          onClick={() => {
-            clear();
-            setShowThreads(false);
-          }}
+          onClick={startNewChat}
         />
         <IconButton icon={expanded ? 'minimize' : 'maximize'} label={expanded ? '작게 보기' : '크게 펼치기'} size="sm" onClick={toggleExpanded} />
         <IconButton icon="x" label="패널 닫기" size="sm" onClick={close} />
@@ -429,6 +548,7 @@ export function AiPanel() {
         ) : null}
         <div className="relative flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
           {mentionAt !== null ? <AiDriveMention onPick={pickMention} onClose={closeMention} /> : null}
+          {slashOpen ? <AiSlashCommandMenu commands={slashCommands} active={slashCurrent} blockedReasonOf={slashBlockedReason} onPick={pickSlashCommand} onHover={(index) => setSlashActive(slashCommands[index].key)} /> : null}
           {draftImages.length ? <DraftImages images={draftImages} onRemove={photos.remove} /> : null}
           {driveFiles.length ? <DraftDriveFiles files={driveFiles} onRemove={(id) => setDriveFiles((current) => current.filter((file) => file.id !== id))} /> : null}
           <textarea
@@ -439,10 +559,17 @@ export function AiPanel() {
             onChange={(event) => changeDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            placeholder={drive.ready ? '철강맨AI에게 묻기 — 예: 여재가 뭐야? (@로 Drive 파일 붙이기)' : '철강맨AI에게 묻기 — 예: 여재가 뭐야?'}
+            placeholder={drive.ready ? '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령, @로 Drive 파일 붙이기)' : '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령)'}
             aria-label="철강맨AI에게 질문"
+            aria-controls={slashOpen ? AI_SLASH_MENU_ID : undefined}
+            aria-activedescendant={slashOpen ? aiSlashOptionId(slashCommands[slashCurrent].key) : undefined}
             className="resize-none border-0 bg-transparent px-3 py-2.5 text-base leading-snug outline-none"
           />
+          {slashLine ? (
+            <p role={slashLine.error ? 'alert' : 'status'} className={`px-3 pb-1 text-cap ${slashLine.error ? 'text-danger' : 'text-ink-3'}`}>
+              {slashLine.text}
+            </p>
+          ) : null}
           {draftImages.length && !draft.trim() ? <p className="px-3 pb-1 text-cap text-ink-3">사진과 함께 물어볼 내용을 적어 주세요</p> : null}
           {photos.notice ? (
             <p role={photos.notice.error ? 'alert' : 'status'} className={`px-3 pb-1 text-cap ${photos.notice.error ? 'text-danger' : 'text-ink-3'}`}>
@@ -502,20 +629,20 @@ export function AiPanel() {
                 size="sm"
                 variant="ghost"
                 icon="search"
-                disabled={draft.trim().length < 2 || sendToResearch.isPending}
-                title="웹을 여러 번 찾아 읽고 출처가 달린 보고서를 써요. 먼저 조사 계획을 보여 줘요"
-                onClick={() => sendToResearch.mutate({ question: draft.trim() })}
+                disabled={researchQuestion.length < AI_RESEARCH_LIMITS.questionMin || sendToResearch.isPending}
+                title="웹을 여러 번 찾아 읽고 출처가 달린 보고서를 써요. 먼저 조사 계획을 보여 줘요 (/조사 질문으로도 보내요)"
+                onClick={() => sendToResearch.mutate({ question: researchQuestion })}
               >
                 심층 조사로 보내기
               </Button>
             ) : null}
-            <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈</span>
+            <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈 · / 명령</span>
             {pending ? (
               <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>
                 멈추기
               </Button>
             ) : (
-              <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || photos.busy} aria-label="보내기" onClick={() => send(draft)} />
+              <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || photos.busy} aria-label="보내기" onClick={submit} />
             )}
           </div>
         </div>
