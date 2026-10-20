@@ -2,7 +2,7 @@
 
 // 심층 조사 상세: 상태마다 다른 모습 (계획 중 · 계획 확인 · 진행 · 완료 · 실패/취소).
 // 계획을 세운 뒤에는 제목을 언제든 바꾸고, 끝난 조사는 [다시 조사]로 질문·계획을 복사한 새 조사를 만들어 고친 뒤 시작한다.
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView, type AiResearchSeed } from '@fantasteel/shared';
 import { useState } from 'react';
 import { useShellStore } from '@/stores/useShellStore';
 import { useIntegrations } from '@/hooks/useIntegrations';
@@ -28,8 +28,35 @@ import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchRun } from '@/hooks/useAiResearch';
 import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines } from '@/lib/aiResearch';
+import { openableWebSources } from '@/lib/aiWebLinks';
+import { AiAnswerText } from '@/features/shell/AiWebAnswer';
 import { toast } from '@/stores/useToastStore';
 import { fmtDateTime, fmtHM } from '@/lib/format';
+
+/** 철강맨AI에서 넘긴 간단 답과 출처 (이슈 #408). 웹 내용을 보고 쓴 글이라 HTML로 바꾸지 않고, 주소는 http(s)만 연다 */
+function SeedDetails({ seed }: { seed: AiResearchSeed }) {
+  const sources = openableWebSources(seed.sources);
+  return (
+    <details className="mt-2 rounded-xs border border-line bg-surface-2 px-3 py-2">
+      <summary className="cursor-pointer text-cap font-semibold text-ink-2">철강맨AI에서 먼저 알아본 것 · 출처 {seed.sources.length}개</summary>
+      <p className="mt-2 text-cap text-ink-3">웹 검색으로 간단히 답한 내용이에요. 계획은 이것을 참고해 모자란 부분을 중심으로 세웠어요.</p>
+      {/* 채팅 답과 같이 출처에 있는 주소의 마크다운 링크만 링크로 보인다 */}
+      {seed.answer ? <AiAnswerText content={seed.answer} webSources={seed.sources} className="mt-1.5 text-sm leading-relaxed break-keep whitespace-pre-line wrap-anywhere text-ink-2" /> : null}
+      {sources.length ? (
+        <ul className="mt-2 flex flex-col gap-0.5 text-cap">
+          {sources.map((source) => (
+            <li key={source.href} className="truncate">
+              <a href={source.href} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+                {source.title}
+              </a>
+              <span className="text-ink-3"> · {source.host}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
+  );
+}
 
 function RunTimeline({ run }: { run: AiResearchRunView }) {
   const lines = timelineLines(run.events);
@@ -204,6 +231,7 @@ function Body({ run }: { run: AiResearchRunView }) {
         <CardBody>
           <b className="text-cap font-semibold text-ink-2">질문</b>
           <p className="text-sm leading-relaxed whitespace-pre-line">{run.question}</p>
+          {run.seed ? <SeedDetails seed={run.seed} /> : null}
         </CardBody>
       </Card>
 

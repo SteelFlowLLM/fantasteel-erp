@@ -1,7 +1,8 @@
-import { AI_DRIVE_ATTACH_MAX, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
+import { AiResearchSeedDto } from '../../ai-research/dto/ai-research.dto';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -214,7 +215,7 @@ export class AiChatCardRefDto {
   cardKey!: string;
 }
 
-const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE', 'NOTION_PAGE_CREATE', 'NOTION_PAGE_APPEND', 'NOTION_PAGE_UPDATE', 'SCHEDULE_EVENT_UPDATE', 'TASK_UPDATE'] as const;
+const CARD_KINDS = ['TASK', 'EVENT', 'PURCHASE', 'SALES_ORDER', 'HOT_ROLLING', 'HEAT_PLAN', 'PAST_CASE', 'NOTION_PAGE_CREATE', 'NOTION_PAGE_APPEND', 'NOTION_PAGE_UPDATE', 'SCHEDULE_EVENT_UPDATE', 'TASK_UPDATE', 'RESEARCH'] as const;
 
 /**
  * POST ai-assistant/action-cards/execute. 업무·일정·구매요청 칸은 회의록 후보 고치기와 같다(UpdateMeetingCandidateDto).
@@ -334,6 +335,17 @@ export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @IsOptional()
   @IsBoolean()
   complete?: boolean;
+
+  // 심층 조사 만들기 (이슈 #408). seed는 조사 만들기 API와 같은 검증
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.questionMax, { message: `질문은 ${AI_RESEARCH_LIMITS.questionMax}자까지 쓸 수 있어요` })
+  question?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiResearchSeedDto)
+  seed?: AiResearchSeedDto;
 }
 
 /** GET ai-assistant/threads (이슈 #399) */

@@ -52,6 +52,11 @@ export const AI_RESEARCH_LIMITS = {
   maxChartPoints: 24,
   /** 사원 한 명이 동시에 진행(계획·대기·조사 중)할 수 있는 조사 수 */
   activeRunsPerEmployee: 3,
+  /** 철강맨AI에서 먼저 알아본 것(seed): 간단 답 글자 수·출처 수 상한 (이슈 #408) */
+  seedAnswerMax: 4000,
+  seedSourcesMax: 10,
+  seedTitleMax: 300,
+  seedUrlMax: 2000,
 } as const;
 
 export interface AiResearchPlanStep {
@@ -184,6 +189,8 @@ export interface AiResearchRunSummaryView {
 
 /** 조사 하나 (GET ai-research/runs/:id). events는 afterSeq 다음 것만 */
 export interface AiResearchRunView extends AiResearchRunSummaryView {
+  /** 철강맨AI에서 먼저 알아본 것. 질문만으로 만든 조사면 null */
+  seed: AiResearchSeed | null;
   plan: AiResearchPlan | null;
   planRevision: number;
   budget: AiResearchBudget;
@@ -214,10 +221,23 @@ export interface AiResearchCapabilities {
   available: boolean;
 }
 
+/**
+ * 철강맨AI에서 먼저 알아본 것 (이슈 #408). 웹 검색 답·대화의 심층 조사 카드에서 조사를 만들 때 넘긴다.
+ * 계획을 세울 때 참고하고(이미 확인된 것은 다시 찾지 않게), 출처는 조사 출처 목록에 미리 넣는다.
+ */
+export interface AiResearchSeed {
+  /** 철강맨AI의 간단 답 (seedAnswerMax자까지) */
+  answer: string;
+  /** 간단 답의 웹 출처 (http·https만, seedSourcesMax개까지) */
+  sources: { title: string; url: string }[];
+}
+
 export interface CreateAiResearchRunInput {
   question: string;
   /** 조사별 예산 (없으면 서버 기본값). 상한(maxStepsCap·maxSourcesCap) 안에서만 */
   budget?: Partial<AiResearchBudget>;
+  /** 철강맨AI에서 먼저 알아본 것 (없으면 질문만으로 계획을 세운다) */
+  seed?: AiResearchSeed;
 }
 
 /** POST ai-research/runs/:id/notion-export */

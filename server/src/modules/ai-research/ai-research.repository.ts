@@ -23,12 +23,16 @@ export async function retryOnSeqConflict<T>(work: () => Promise<T>, tries = 3): 
 
 @Injectable()
 export class AiResearchRepository {
-  create(tx: Tx, data: { employeeId: number; question: string; budget: Prisma.InputJsonObject }) {
+  /** seed가 있으면 그 출처를 조사 출처로 함께 넣는다 (이슈 #408) */
+  create(tx: Tx, data: { employeeId: number; question: string; budget: Prisma.InputJsonObject; seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray }) {
     return tx.aiResearchRun.create({ data: { ...data, status: AI_RESEARCH_STATUS.PLANNING } });
   }
 
   /** 다시 조사: 가져온 계획으로 계획 확인 대기부터 (계획 세우기를 건너뛴다) */
-  createPlanned(tx: Tx, data: { employeeId: number; question: string; budget: Prisma.InputJsonObject; plan: Prisma.InputJsonObject; researchState: Prisma.InputJsonObject }) {
+  createPlanned(
+    tx: Tx,
+    data: { employeeId: number; question: string; budget: Prisma.InputJsonObject; plan: Prisma.InputJsonObject; researchState: Prisma.InputJsonObject; seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray },
+  ) {
     return tx.aiResearchRun.create({ data: { ...data, status: AI_RESEARCH_STATUS.AWAITING_APPROVAL, planRevision: 1 } });
   }
 

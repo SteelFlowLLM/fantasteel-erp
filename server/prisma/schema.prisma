@@ -1090,6 +1090,7 @@ model AiResearchRun {
   id Int @id @default(autoincrement())
   employeeId Int @map("employee_id") /// 조사를 만든 사원 (본인만 본다)
   question String /// 사용자가 물은 조사 질문
+  seed Json? @db.JsonB /// 철강맨AI에서 먼저 알아본 것 {answer, sources:[{title, url}]} (이슈 #408). 계획을 세울 때 참고한다
   status String @db.VarChar /// PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING·COMPLETED·FAILED·CANCELLED (CHECK, 공통 코드 아님)
   plan Json? @db.JsonB /// 조사 계획 {title, steps:[{title, query}]}
   planRevision Int @default(0) @map("plan_revision") /// 계획을 고칠 때마다 1씩 오른다 (시작할 때 맞춰 본다)

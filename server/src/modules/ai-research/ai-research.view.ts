@@ -2,7 +2,7 @@ import type { AiResearchEventView, AiResearchRunSummaryView, AiResearchRunView, 
 import type { AiResearchEvent, AiResearchRun } from '../../generated/prisma/client';
 import type { listAiResearchRuns } from '../../generated/prisma/sql';
 import { storedCharts } from './ai-research.charts';
-import { canExtend, readBudget, storedAudit, storedPlan, storedSources, storedState } from './ai-research.rules';
+import { canExtend, readBudget, storedAudit, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 
 export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSummaryView {
   return {
@@ -38,6 +38,7 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    seed: storedSeed(row.seed),
     plan,
     planRevision: row.planRevision,
     budget,

@@ -46,6 +46,7 @@ import {
   SOURCE_TITLE_MAX,
   storedAudit,
   storedPlan,
+  storedSeed,
   storedSources,
   storedState,
   type PendingAction,
@@ -260,7 +261,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const run = await this.repository.findById(this.prisma, ctx.id);
     if (!run) return;
     const endpoint = await this.endpoint();
-    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
+    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today, storedSeed(run.seed)), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
     let plan: AiResearchPlan | null = readPlan(value, run.question)?.plan ?? null;
     const fallback = plan === null;
     plan ??= fallbackPlan(run.question);

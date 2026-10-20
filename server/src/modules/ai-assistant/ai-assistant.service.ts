@@ -49,6 +49,7 @@ import { AiUpdateCardService } from './ai-update-card.service';
 import { AssistantDriveToolbox, type DriveToolSession } from './drive/assistant-drive-toolbox';
 import { DRIVE_UNTRUSTED_NOTE, driveTextBlock, type DriveReadOutcome } from './drive/drive-file-reader';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
+import { AiResearchCardService } from './ai-research-card.service';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
 export type AssistantEmit = (event: Exclude<AiAssistantStreamEvent, { type: 'done' | 'error' }>) => void;
@@ -123,6 +124,7 @@ export class AiAssistantService {
     private readonly updateCards: AiUpdateCardService,
     private readonly driveTools: AssistantDriveToolbox,
     private readonly chatThreads: AiChatThreadService,
+    private readonly researchCards: AiResearchCardService,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -132,14 +134,16 @@ export class AiAssistantService {
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
   async executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
-    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 나머지는 각 모듈의 확정 기능을 그대로 부른다
+    // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 심층 조사는 조사 화면과 같은 service, 나머지는 각 모듈의 확정 기능을 그대로 부른다
     const result = WORK_KINDS.includes(dto.kind)
       ? await this.cards.execute(user, dto)
       : NOTION_KINDS.includes(dto.kind)
         ? await this.notionCards.execute(user, dto)
         : UPDATE_KINDS.includes(dto.kind)
           ? await this.updateCards.execute(user, dto)
-          : await this.opsCards.execute(user, dto);
+          : dto.kind === 'RESEARCH'
+            ? await this.researchCards.execute(user, dto)
+            : await this.opsCards.execute(user, dto);
     // 저장한 대화의 카드면 실행됨으로 남긴다 (이슈 #399). 업무는 이미 만들었으므로 이것이 실패해도 실행은 성공으로 돌려준다
     if (dto.chat) {
       await this.chatThreads.markCardDone(user, dto.chat, result.registered).catch((error: unknown) => {

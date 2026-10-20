@@ -1,6 +1,6 @@
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
-import { cutText, internalReferenceIn, redactQuery, stripInvisible } from '../ai-assistant/web/web-text';
+import { cutText, internalReferenceIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
 
 /** DB의 sources jsonb 한 줄. readText는 읽은 페이지 본문 (6,000자까지) */
@@ -242,6 +242,39 @@ export function storedSources(value: unknown): StoredSource[] {
       ...(typeof s.readText === 'string' ? { readText: s.readText } : {}),
       ...(typeof s.readError === 'string' ? { readError: s.readError } : {}),
     }));
+}
+
+/** 먼저 알아본 출처를 조사 출처 목록에 넣을 때의 요약 (검색 결과 요약이 없어서 어디서 왔는지만 적는다) */
+export const SEED_SOURCE_SNIPPET = '철강맨AI 간단 답에서 쓴 출처 (아직 읽지 않음)';
+
+/**
+ * 철강맨AI에서 넘긴 seed를 저장할 모양으로 다듬는다 (이슈 #408). 간단 답은 글자 수 상한까지, 출처는 http(s)만·같은 주소는 한 번만·상한 개수까지.
+ * 간단 답도 출처도 없으면 null (질문만으로 계획을 세운다).
+ */
+export function normalizeSeed(input: AiResearchSeed | null | undefined): AiResearchSeed | null {
+  if (!input) return null;
+  // 저장한 값이 다시 조사·카드 실행의 입력 상한을 넘지 않게 말줄임표 없이 자른다
+  const answer = stripInvisible(input.answer ?? '').trim().slice(0, AI_RESEARCH_LIMITS.seedAnswerMax);
+  const seen = new Set<string>();
+  const sources: AiResearchSeed['sources'] = [];
+  for (const s of input.sources ?? []) {
+    const key = urlKey(s.url ?? '');
+    if (!key || seen.has(key) || sources.length >= AI_RESEARCH_LIMITS.seedSourcesMax) continue;
+    seen.add(key);
+    sources.push({ title: cutText(stripInvisible(s.title ?? '').trim() || key, SOURCE_TITLE_MAX), url: s.url.trim() });
+  }
+  return answer || sources.length ? { answer, sources } : null;
+}
+
+export function storedSeed(value: unknown): AiResearchSeed | null {
+  if (!isRecord(value) || typeof value.answer !== 'string' || !Array.isArray(value.sources)) return null;
+  const sources = value.sources.filter((s): s is { title: string; url: string } => isRecord(s) && typeof s.title === 'string' && typeof s.url === 'string');
+  return { answer: value.answer, sources: sources.map((s) => ({ title: s.title, url: s.url })) };
+}
+
+/** seed의 출처를 조사 출처(1번부터)로. 조사가 읽고 인용할 수 있고, 같은 주소는 다시 찾지 않는다 */
+export function seedSources(seed: AiResearchSeed | null): StoredSource[] {
+  return (seed?.sources ?? []).map((s, i) => ({ id: i + 1, title: s.title, url: s.url, snippet: SEED_SOURCE_SNIPPET }));
 }
 
 export function storedAudit(value: unknown): StoredAudit | null {

@@ -22,6 +22,30 @@ export class AiResearchBudgetDto {
   maxSources?: number;
 }
 
+export class AiResearchSeedSourceDto {
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.seedTitleMax, { message: `출처 제목은 ${AI_RESEARCH_LIMITS.seedTitleMax}자까지예요` })
+  title!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: '출처 주소가 비어 있어요' })
+  @MaxLength(AI_RESEARCH_LIMITS.seedUrlMax, { message: `출처 주소는 ${AI_RESEARCH_LIMITS.seedUrlMax}자까지예요` })
+  url!: string;
+}
+
+/** 철강맨AI에서 먼저 알아본 것 (이슈 #408). http(s)가 아닌 주소·같은 주소는 서버가 뺀다 */
+export class AiResearchSeedDto {
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.seedAnswerMax, { message: `간단 답은 ${AI_RESEARCH_LIMITS.seedAnswerMax}자까지 넘길 수 있어요` })
+  answer!: string;
+
+  @IsArray()
+  @ArrayMaxSize(AI_RESEARCH_LIMITS.seedSourcesMax, { message: `출처는 ${AI_RESEARCH_LIMITS.seedSourcesMax}개까지 넘길 수 있어요` })
+  @ValidateNested({ each: true })
+  @Type(() => AiResearchSeedSourceDto)
+  sources!: AiResearchSeedSourceDto[];
+}
+
 /** POST ai-research/runs */
 export class CreateAiResearchRunDto {
   @Transform(trim)
@@ -34,6 +58,11 @@ export class CreateAiResearchRunDto {
   @ValidateNested()
   @Type(() => AiResearchBudgetDto)
   budget?: AiResearchBudgetDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiResearchSeedDto)
+  seed?: AiResearchSeedDto;
 }
 
 export class AiResearchPlanStepDto {

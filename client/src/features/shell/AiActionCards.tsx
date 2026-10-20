@@ -3,7 +3,7 @@
 // 철강맨AI 실행 카드 (REQ-AST-005). AI는 업무 데이터를 직접 바꾸지 않고 카드로 제안만 한다.
 // 사용자가 칸을 확인·수정해 [실행]을 누르면 사용자 권한으로 반영된다. 업무·일정·구매요청 카드는 회의록 후보 카드(MeetingAnalysisPanel)와 같은 모양·같은 칸이고,
 // 수주 등록·열연 배정·히트 편성은 재고·생산에 영향이 커서 [실행] 뒤 확인창을 한 번 더 거친다.
-import type { AiActionCard, MeetingCandidateUpdateInput } from '@fantasteel/shared';
+import type { AiActionCard, AiResearchSeed, MeetingCandidateUpdateInput } from '@fantasteel/shared';
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { aiAssistantApi } from '@/api/aiAssistant';
@@ -15,6 +15,7 @@ import { fields, useDirectoryNames } from '@/features/meetings/components/Meetin
 import { CandidateEditor } from '@/features/meetings/components/MeetingCandidateEditor';
 import { NotionCardBody, NotionCardEditor, ScheduleUpdateBody, ScheduleUpdateEditor, TaskUpdateBody, TaskUpdateEditor } from '@/features/shell/AiNotionCardParts';
 import { HeatPlanBody, HotRollingBody, PastCaseBody, PastCaseEditor, SalesOrderBody, SalesOrderEditor } from '@/features/shell/AiOpsCardParts';
+import { ResearchCardBody, ResearchCardEditor } from '@/features/shell/AiResearchCardParts';
 import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
 import { applyCardChanges, CARD_KIND_LABEL, CARD_RESULT, executeInputOf, isNotionCard, isWorkCard, missingOfCard, needsConfirmation } from '@/lib/aiActionCard';
@@ -22,12 +23,15 @@ import { isNotionUrl } from '@/lib/aiNotion';
 import { cn } from '@/lib/cn';
 import { useAiChatStore, type AiChatCard } from '@/stores/useAiChatStore';
 
-/** messageId: 서버에 저장한 답이면 그 id. 실행할 때 함께 보내 저장한 카드를 실행됨으로 남긴다 (이슈 #399) */
-export function AiActionCards({ entryId, items, messageId }: { entryId: string; items: readonly AiChatCard[]; messageId?: number }) {
+/**
+ * messageId: 서버에 저장한 답이면 그 id. 실행할 때 함께 보내 저장한 카드를 실행됨으로 남긴다 (이슈 #399)
+ * researchSeed: 심층 조사 카드가 함께 넘길 수 있는 앞 답의 웹 검색 결과 (이슈 #408). 없으면 null
+ */
+export function AiActionCards({ entryId, items, messageId, researchSeed = null }: { entryId: string; items: readonly AiChatCard[]; messageId?: number; researchSeed?: AiResearchSeed | null }) {
   return (
     <ul aria-label="실행 카드" className="flex flex-col gap-2">
       {items.map((item) => (
-        <ActionCard key={item.card.key} entryId={entryId} item={item} messageId={messageId} />
+        <ActionCard key={item.card.key} entryId={entryId} item={item} messageId={messageId} researchSeed={researchSeed} />
       ))}
     </ul>
   );
@@ -68,8 +72,9 @@ function ConfirmText({ card }: { card: AiActionCard }): ReactNode {
   return null;
 }
 
-function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiChatCard; messageId?: number }) {
+function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: string; item: AiChatCard; messageId?: number; researchSeed: AiResearchSeed | null }) {
   const { card, status } = item;
+  const [includeSeed, setIncludeSeed] = useState(true);
   const me = useMe();
   const names = useDirectoryNames();
   const updateCard = useAiChatStore((state) => state.updateCard);
@@ -88,7 +93,8 @@ function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiCha
   const done = status === 'done';
   const locked = done || dismissed;
   // 완료 카드는 고칠 칸이 없다
-  const editable = isWorkCard(card) || card.kind === 'SALES_ORDER' || card.kind === 'PAST_CASE' || isNotionCard(card) || card.kind === 'SCHEDULE_EVENT_UPDATE' || (card.kind === 'TASK_UPDATE' && !card.complete);
+  const editable =
+    isWorkCard(card) || card.kind === 'SALES_ORDER' || card.kind === 'PAST_CASE' || isNotionCard(card) || card.kind === 'SCHEDULE_EVENT_UPDATE' || (card.kind === 'TASK_UPDATE' && !card.complete) || card.kind === 'RESEARCH';
 
   const replaceCard = (next: AiActionCard) => {
     updateCard(entryId, card.key, { card: next });
@@ -98,7 +104,8 @@ function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiCha
     if (isWorkCard(card) && Object.keys(changes).length > 0) updateCard(entryId, card.key, { card: applyCardChanges(card, changes) });
     setEditing(false);
   };
-  const executeCard = () => execute.mutate({ ...executeInputOf(card), ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
+  const seed = card.kind === 'RESEARCH' && includeSeed && researchSeed ? { seed: researchSeed } : {};
+  const executeCard = () => execute.mutate({ ...executeInputOf(card), ...seed, ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
   const run = () => (needsConfirmation(card) ? setConfirming(true) : executeCard());
 
   return (
@@ -126,6 +133,8 @@ function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiCha
         <ScheduleUpdateEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
       ) : editing && card.kind === 'TASK_UPDATE' ? (
         <TaskUpdateEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
+      ) : editing && card.kind === 'RESEARCH' ? (
+        <ResearchCardEditor card={card} onCancel={() => setEditing(false)} onSave={replaceCard} />
       ) : (
         <>
           {isWorkCard(card) ? (
@@ -145,6 +154,8 @@ function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiCha
             <ScheduleUpdateBody card={card} />
           ) : card.kind === 'TASK_UPDATE' ? (
             <TaskUpdateBody card={card} />
+          ) : card.kind === 'RESEARCH' ? (
+            <ResearchCardBody card={card} seed={researchSeed} includeSeed={includeSeed} locked={locked} onIncludeSeed={setIncludeSeed} />
           ) : (
             <PastCaseBody card={card} />
           )}
@@ -195,7 +206,7 @@ function ActionCard({ entryId, item, messageId }: { entryId: string; item: AiCha
             size="sm"
             variant="primary"
             disabled={execute.isPending || missing.length > 0}
-            title={missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 실행할 수 있어요` : isNotionCard(card) ? '회사 Notion에 반영해요 (한 번만 실행돼요)' : '내 권한으로 업무에 반영해요'}
+            title={missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 실행할 수 있어요` : isNotionCard(card) ? '회사 Notion에 반영해요 (한 번만 실행돼요)' : card.kind === 'RESEARCH' ? '심층 조사를 만들고 계획을 세워요' : '내 권한으로 업무에 반영해요'}
             onClick={run}
           >
             {execute.isPending ? '실행하는 중…' : '실행'}

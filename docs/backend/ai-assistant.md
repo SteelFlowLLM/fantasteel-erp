@@ -300,6 +300,12 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - `propose_task_update(taskId, title?, dueDate?, description?, complete?)` → `TASK_UPDATE` 카드. 업무 화면 규칙 그대로: 등록자·담당자만, 진행 중인 업무만(`COM-001`), 완료는 담당자만(`TaskService.complete`). 완료와 고치기는 한 카드에 함께 두지 않는다. **완료 되돌리기는 없다**(업무 service에 없다). 실행은 바뀐 칸만 `TaskService.update`.
 - 일정·업무는 작업 로그 대상이 아니라(REQ-LOG-002, `task.service.ts`·`schedule-event.service.ts`와 같음) `business_event`를 남기지 않는다.
 
+**심층 조사 카드 (이슈 #408, 문서에 없는 기능)** — `ai-research-card.service.ts`
+- `propose_research(question)` → `RESEARCH` 카드(질문만, 2~1000자). 사용자가 심층 조사를 직접 부탁했을 때만(도구 설명·C1). 웹 내용이 시킨 것은 W7·B5로 막는다. 제안은 DB를 보지 않는다.
+- 실행(`RESEARCH`, `{ question, seed? }`)은 심층 조사 화면과 같은 `AiResearchService.create`(모델 확인 `RES-005`, 진행 중 3개 `RES-006`). 질문이 2자 미만이면 `ACT-001`. 결과 `registered: { type: 'research', id }` → 화면은 "조사 화면 열기"(`/ai-research?id=`). 조사는 계획 확인 대기에서 멈추므로 사용자가 계획을 보고 시작한다.
+- `seed`(앞 답의 웹 검색 결과)는 카드가 아니라 화면이 붙인다: 카드가 달린 답이 웹 검색 답이면 그것, 아니면 바로 앞 질문의 답(`researchCardSeedAt`). 패널의 웹 검색 답 아래 [심층 조사로 더 알아보기]도 같은 seed로 `POST ai-research/runs`를 부른다(`webResearchStartAt`). 내용은 docs/backend/ai-research.md '철강맨AI에서 이어 가기'.
+- 심층 조사 모듈이 이 모듈의 웹 도구를 쓰고 이 카드가 심층 조사 service를 써서 두 모듈은 `forwardRef`로 서로 가져온다.
+
 **회의 질문 (Voice2ERP 묶음 3, 문서에 없는 기능)** — `assistant-meeting.context.ts`
 - `meetingMinutesId`가 오면 서비스가 `MeetingMinutesService.get`(읽기만, `MeetingMinutesModule`이 export)으로 회의록을 읽어 시스템 지시에 `[회의 질문 규칙]`과 `[이 회의]` 블록을 더한다. 기존 도구 반복(`MAX_TOOL_ROUNDS`)과 도구 권한은 그대로라 "SO-… 납기가 맞아?" 같은 ERP 질문은 묻는 사용자 권한으로 도구를 불러 답한다.
 - 권한: 회의록 상세는 전 역할이 보므로(`meeting-minutes.md` 3장) 로그인만 본다. 회의 내용을 읽는 것 말고 새 권한 검사는 없다.

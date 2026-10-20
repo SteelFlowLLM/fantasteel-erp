@@ -4,7 +4,7 @@
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -28,6 +28,7 @@ import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { driveAiImageProblem } from '@/lib/driveFiles';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
+import { researchCardSeedAt, webResearchStartAt, type AiWebResearchStart } from '@/lib/aiResearchSeed';
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
 import { AiDriveMention } from '@/features/shell/AiDriveMention';
 import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionTriggerAt, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
@@ -131,6 +132,11 @@ export function AiPanel() {
       setDraft('');
       router.push(`/ai-research?id=${run.id}`);
     },
+  });
+  // 웹 검색 답에서 이어 가기 (이슈 #408): 입력하던 글은 그대로 두고 조사 화면으로 간다
+  const continueToResearch = useAction(aiResearchApi.create, {
+    success: '먼저 찾은 내용을 넘겨 심층 조사 계획을 세우고 있어요',
+    onSuccess: (run) => router.push(`/ai-research?id=${run.id}`),
   });
   const photos = useAiImageDraft();
   const drive = useDriveReady();
@@ -384,8 +390,18 @@ export function AiPanel() {
           ) : (
             <>
               {entries.length ? null : <Welcome roleLabel={roleLabel} contextQuestion={context?.question ?? null} disabled={pending} onAsk={(question) => send(question, false)} onFill={fill} />}
-              {entries.map((entry) => (
-                <ChatEntry key={entry.id} entry={entry} disabled={pending} onRetry={retry} />
+              {entries.map((entry, index) => (
+                <ChatEntry
+                  key={entry.id}
+                  entry={entry}
+                  disabled={pending}
+                  onRetry={retry}
+                  research={
+                    deepResearchOn && entry.role === 'assistant'
+                      ? { start: webResearchStartAt(entries, index), cardSeed: researchCardSeedAt(entries, index), pending: continueToResearch.isPending, onStart: (start) => continueToResearch.mutate(start) }
+                      : null
+                  }
+                />
               ))}
               {pending && live ? <LiveAnswer live={live} /> : null}
             </>
@@ -761,7 +777,15 @@ function DraftImages({ images, onRemove }: { images: readonly PreparedAiImage[];
   );
 }
 
-function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled: boolean; onRetry: (failure: FailureEntry) => void }) {
+/** 답에서 심층 조사로 잇기 (이슈 #408). start는 웹 검색 답이면 그 질문·seed, cardSeed는 심층 조사 카드가 넘길 웹 검색 결과 */
+interface ChatEntryResearch {
+  start: AiWebResearchStart | null;
+  cardSeed: AiResearchSeed | null;
+  pending: boolean;
+  onStart: (start: AiWebResearchStart) => void;
+}
+
+function ChatEntry({ entry, disabled, onRetry, research }: { entry: AiChatEntry; disabled: boolean; onRetry: (failure: FailureEntry) => void; research: ChatEntryResearch | null }) {
   if (entry.role === 'user') {
     return (
       <div className="flex max-w-[85%] flex-col items-end gap-1.5 self-end">
@@ -807,7 +831,20 @@ function ChatEntry({ entry, disabled, onRetry }: { entry: AiChatEntry; disabled:
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
         <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
         <AiWebSources sources={entry.webSources} />
-        {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} messageId={entry.messageId} /> : null}
+        {research?.start ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="search"
+            className="self-start"
+            disabled={research.pending}
+            title="이 질문과 답, 웹 출처를 넘겨 심층 조사를 만들어요. 이미 찾은 것은 빼고 모자란 부분을 더 찾아요"
+            onClick={() => research.start && research.onStart(research.start)}
+          >
+            심층 조사로 더 알아보기
+          </Button>
+        ) : null}
+        {entry.cards?.length ? <AiActionCards entryId={entry.id} items={entry.cards} messageId={entry.messageId} researchSeed={research?.cardSeed ?? null} /> : null}
         {/* 웹 출처만 있는 답에 '출처 없음'을 함께 보이면 서로 어긋나 보여서, 그때는 ERP 출처 줄을 숨긴다 */}
         {entry.sources.length || !entry.webSources?.length ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
