@@ -49,7 +49,7 @@ export interface AiAssistantMessageInput {
   webSearch?: boolean;
   /**
    * 브라우저 사용을 켠 질문이면 true (문서에 없는 기능, 이슈 #373). 서버에서 AI_BROWSER_ENABLED=true이고 실시간 답 API일 때만
-   * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back)를 모델에 알린다. 기본은 꺼짐
+   * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back·browser_read_file)를 모델에 알린다. 기본은 꺼짐
    */
   browser?: boolean;
   /**
@@ -180,6 +180,7 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   browser_type: '브라우저 입력',
   browser_scroll: '브라우저 스크롤',
   browser_back: '브라우저 뒤로',
+  browser_read_file: '브라우저 문서 읽기',
   ui_snapshot: '화면 읽기',
   ui_navigate: '화면 열기',
   ui_click: '화면 누르기',
@@ -202,7 +203,7 @@ export type AiAssistantWebTool = (typeof AI_ASSISTANT_WEB_TOOLS)[number];
 export const isAiAssistantWebTool = (name: string): name is AiAssistantWebTool => (AI_ASSISTANT_WEB_TOOLS as readonly string[]).includes(name);
 
 /** 브라우저 도구 (이슈 #373). 브라우저 사용을 켠 실시간 답에서만 알린다. 로그인·결제·삭제·개인정보 입력은 서버가 막는다 */
-export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back'] as const;
+export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back', 'browser_read_file'] as const;
 export type AiAssistantBrowserTool = (typeof AI_ASSISTANT_BROWSER_TOOLS)[number];
 
 export const isAiAssistantBrowserTool = (name: string): name is AiAssistantBrowserTool => (AI_ASSISTANT_BROWSER_TOOLS as readonly string[]).includes(name);

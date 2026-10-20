@@ -94,6 +94,8 @@ export function browserToolRunningText(name: string): string | null {
       return ' … 내리는 중';
     case 'browser_back':
       return ' … 돌아가는 중';
+    case 'browser_read_file':
+      return ' … 문서 읽는 중';
     default:
       return null;
   }

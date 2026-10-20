@@ -2,10 +2,12 @@ import { Logger, type OnModuleDestroy } from '@nestjs/common';
 import { isAiAssistantBrowserTool, type AiAssistantStreamEvent, type AiBrowserCapabilities, type AiWebSource } from '@fantasteel/shared';
 import type { Browser, BrowserContext, CDPSession, Locator, Page } from 'playwright-core';
 import { randomBytes } from 'node:crypto';
-import { LlmAbortedError, type LlmToolCall, type LlmToolDefinition } from '../../llm/llm.client';
+import { LlmAbortedError, type LlmImage, type LlmToolCall, type LlmToolDefinition } from '../../llm/llm.client';
 import { optionalEnum, requiredString, ToolArgumentError } from '../tools/assistant-tool';
 import { assertFetchableUrl, BlockedUrlError } from '../web/ssrf-guard';
-import { cutText, redactQuery, stripInvisible, urlKey } from '../web/web-text';
+import type { SessionReadOutcome } from '../web/assistant-web-toolbox';
+import { PAGE_TEXT_MAX } from '../web/page-extract';
+import { cutText, redactQuery, stripInvisible, UNTRUSTED_NOTE, urlKey, wrapUntrusted } from '../web/web-text';
 import { decideBrowserRequest, installRequestGuard, type HostDecisionCache, type RequestGuardOptions } from './browser-guard';
 import { BrowserPool, BrowserUnavailableError } from './browser-pool';
 import {
@@ -83,6 +85,42 @@ function cursorScript(id: string, from: { x: number; y: number }, to: { x: numbe
   }, ms);
 })(${JSON.stringify(id)}, ${JSON.stringify(from)}, ${JSON.stringify(to)}, ${ripple}, ${CURSOR_MOVE_MS})`;
 }
+/** 모델에 보내는 화면 사진: 너비, JPEG 품질, 번호 표 수 상한 (가정값, 이슈 #427) */
+const MODEL_IMAGE_WIDTH = 1024;
+const MODEL_IMAGE_QUALITY = 60;
+const MARK_MAX = 150;
+/** 번호 표를 지운 뒤에도 잠깐은 실시간 화면 사진을 버린다 (표를 지우기 전에 찍힌 사진이 늦게 오기도 한다) */
+const MARK_LIVE_GRACE_MS = 250;
+/**
+ * 화면 글로 번호를 붙인 요소 중 보이는 것에 노란 [r번호] 표를 그린다 (이슈 #427). 모델이 사진과 화면 글을 맞춰 보게 한다.
+ * 보이는 마우스처럼 html 바로 아래 shadow root에 그리고 마우스 이벤트는 받지 않는다. 그린 표 수를 돌려준다
+ */
+function marksScript(id: string, attr: string, docStart: number): string {
+  return `((id, attr, docStart, max) => {
+  document.getElementById(id)?.remove();
+  const host = document.createElement('div');
+  host.id = id;
+  host.setAttribute('aria-hidden', 'true');
+  for (const [k, v] of [['position', 'fixed'], ['left', '0'], ['top', '0'], ['width', '0'], ['height', '0'], ['z-index', '2147483647'], ['pointer-events', 'none'], ['display', 'block']]) host.style.setProperty(k, v, 'important');
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  let html = '<style>.m{position:absolute;padding:0 2px;font:bold 11px/13px monospace;color:#000;background:#facc15;border:1px solid #000;border-radius:2px;white-space:nowrap}</style>';
+  let count = 0;
+  for (const el of document.querySelectorAll('[' + attr + ']')) {
+    const n = Number(el.getAttribute(attr));
+    if (!Number.isInteger(n) || n < docStart) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1 || r.bottom < 0 || r.right < 0 || r.top > h || r.left > w) continue;
+    const x = Math.round(Math.max(0, Math.min(w - 36, r.left)));
+    const y = Math.round(Math.max(0, Math.min(h - 15, r.top)));
+    html += '<div class="m" style="left:' + x + 'px;top:' + y + 'px">r' + n + '</div>';
+    if (++count >= max) break;
+  }
+  host.attachShadow({ mode: 'open' }).innerHTML = html;
+  document.documentElement.appendChild(host);
+  return count;
+})(${JSON.stringify(id)}, ${JSON.stringify(attr)}, ${docStart}, ${MARK_MAX})`;
+}
 /** 같은 대화의 다음 질문이 이어 쓰게 답이 끝난 탭을 열어 두는 시간, 한 탭을 쓰는 최대 시간 (가정값, 이슈 #423) */
 export const BROWSER_KEEP_MS = 10 * 60_000;
 export const BROWSER_SESSION_MAX_MS = 30 * 60_000;
@@ -136,7 +174,18 @@ const BACK: LlmToolDefinition = {
   description: '브라우저에서 뒤로 간다.',
   parameters: { type: 'object', properties: {} },
 };
-const DEFINITIONS = [OPEN, SNAPSHOT, CLICK, TYPE, SCROLL, BACK];
+const READ_FILE: LlmToolDefinition = {
+  name: 'browser_read_file',
+  description: `페이지의 PDF·문서 링크를 내려받아 제목과 글(${PAGE_TEXT_MAX}자까지)을 읽는다. 브라우저는 파일을 내려받지 않으므로 PDF 링크는 누르지 말고 이것으로 읽는다. ref(화면 글의 링크 번호)나 url(browser_open으로 열 수 있는 주소) 중 하나를 넘긴다.`,
+  parameters: {
+    type: 'object',
+    properties: {
+      ref: { type: 'string', description: '화면 글의 링크 번호 (예: r21)' },
+      url: { type: 'string', description: 'ref가 없을 때: 검색 결과나 질문에 있던 주소 그대로' },
+    },
+  },
+};
+const DEFINITIONS = [OPEN, SNAPSHOT, CLICK, TYPE, SCROLL, BACK, READ_FILE];
 
 export interface BrowserToolResult {
   content: string;
@@ -144,6 +193,8 @@ export interface BrowserToolResult {
   frame: BrowserFrame | null;
   /** 지금 페이지 (tool_end.webSources) */
   webSources: AiWebSource[];
+  /** 모델에 보내는 번호 표 붙은 화면 사진 (이슈 #427). 화면 이벤트로 보내거나 저장하지 않는다 */
+  modelImage?: LlmImage;
 }
 
 /** 한 답의 브라우저 도구. 서비스는 이것만 안다(시험은 가짜를 넣는다) */
@@ -155,11 +206,12 @@ export interface BrowserToolSessionLike {
   holdDeadline?(): () => void;
 }
 
-/** 브라우저 세션이 웹 세션에서 쓰는 것: 열어도 되는 주소, 본 페이지 기억, 회사 안 정보 막기 */
+/** 브라우저 세션이 웹 세션에서 쓰는 것: 열어도 되는 주소, 본 페이지 기억, 회사 안 정보 막기, 문서 읽기(이슈 #427) */
 export interface BrowserWebLink {
   knows(url: string): boolean;
   rememberVisited(url: string, title: string): void;
   internalReference(text: string): string | null;
+  readKnownPage(url: string, signal?: AbortSignal): Promise<SessionReadOutcome>;
 }
 
 export interface BrowserSessionInput {
@@ -168,6 +220,8 @@ export interface BrowserSessionInput {
   signal?: AbortSignal;
   /** 답하는 동안 실시간 화면을 받는 곳 (이슈 #425). 없으면 실시간 화면을 찍지 않는다 */
   onLive?: (frame: BrowserLiveFrame) => void;
+  /** 동작 뒤 번호 표 붙은 화면 사진을 찍어 모델에 보낼지 (사진을 보는 모델이고 BROWSER_VISION이 켜졌을 때, 이슈 #427) */
+  markedImages?: boolean;
 }
 
 export interface BrowserToolboxOptions {
@@ -302,6 +356,9 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private cursor: { x: number; y: number } = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
   /** 실시간 화면을 찍는 중인지 */
   private live = false;
+  /** 모델용 번호 표를 그려 둔 동안(과 지운 뒤 잠깐)은 실시간 화면 사진을 버린다 */
+  private marking = false;
+  private marksClearedAt = 0;
   /** 지난 동작 뒤로 막은 요청 (모델에 알린다) */
   private blockedRequests: string[] = [];
   private fileChooserBlocked = false;
@@ -425,6 +482,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
             if (!response && page.url() === before) return failure('뒤로 갈 페이지가 없어요');
             return this.afterAction(page);
           });
+        case 'browser_read_file':
+          return await this.readFile(args, signal);
         default:
           return failure(`없는 도구예요: ${call.name}`);
       }
@@ -451,9 +510,14 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     if (context) await this.pool.release(context);
   }
 
-  private async open(url: string): Promise<BrowserToolResult> {
+  /** browser_open으로 열 수 있는 주소: 이번 답의 웹 결과, 질문에 적힌 주소, 이 탭에서 연 페이지, 시작 사이트 */
+  private mayOpen(url: string): boolean {
     const key = urlKey(url);
-    if (!key || (!this.input.web.knows(url) && !this.questionUrls.has(key) && !this.visited.has(key) && !isStartSiteUrl(url, browserStartSites())))
+    return key !== null && (this.input.web.knows(url) || this.questionUrls.has(key) || this.visited.has(key) || isStartSiteUrl(url, browserStartSites()));
+  }
+
+  private async open(url: string): Promise<BrowserToolResult> {
+    if (!this.mayOpen(url))
       return failure('이번 답의 검색 결과·질문·시작 사이트에 없는 주소라 열지 않았어요', {
         안내: `web_search 결과의 주소, 사용자가 적은 주소, 시작 사이트(${browserStartSites().join(', ')})만 열어요. 페이지 안의 링크는 browser_click으로 눌러요`,
       });
@@ -478,6 +542,54 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       return failure(reason ? `페이지를 열지 않았어요: ${reason}` : '페이지를 열지 못했어요', { 안내: '열지 못했다고 알리고 검색 결과로 답해요' });
     }
     return this.afterAction(page);
+  }
+
+  /**
+   * PDF·문서 링크를 웹 페이지 읽기와 같은 fetch(사내망 막기·크기·시간 제한)로 읽는다 (이슈 #427).
+   * Chrome은 내려받기를 막아 PDF 링크를 눌러도 아무것도 되지 않는다. ref는 지금 화면의 http(s) 링크, url은 browser_open과 같은 주소만
+   */
+  private async readFile(args: Record<string, unknown>, signal?: AbortSignal): Promise<BrowserToolResult> {
+    let url: string;
+    let name = '';
+    if (args.ref !== undefined && args.ref !== null && args.ref !== '') {
+      if (!this.page) return failure('아직 연 페이지가 없어요', { 안내: 'ref 대신 url로 넘기거나 먼저 browser_open으로 페이지를 열어요' });
+      const target = await this.locate(this.page, args.ref);
+      if ('content' in target) return target;
+      // 격리된 실행 공간에서 읽은 a.href라 이미 절대 주소다
+      const href = target.info.href;
+      if (!href || !/^https?:\/\//i.test(href)) return failure('http(s) 문서 링크가 아니에요', { 안내: '화면 글에서 link 번호를 골라요' });
+      url = href;
+      name = target.info.name;
+    } else {
+      url = requiredString(args, 'url', 2000);
+      if (!this.mayOpen(url))
+        return failure('이번 답의 검색 결과·질문·시작 사이트에 없는 주소라 읽지 않았어요', { 안내: '페이지 안의 문서 링크는 화면 글의 번호를 ref로 넘겨요' });
+    }
+    const internal = this.input.web.internalReference(url);
+    if (internal) return blocked(`주소에 회사 안 정보(${internal})가 있어요`);
+    try {
+      assertFetchableUrl(url);
+    } catch (error) {
+      if (error instanceof BlockedUrlError) return failure(error.message);
+      throw error;
+    }
+    // 웹 세션은 기억한 주소만 읽는다. 기억해 두면 답에 이 문서 링크도 남는다
+    this.input.web.rememberVisited(url, name || displayUrl(url));
+    const outcome = await this.input.web.readKnownPage(url, signal);
+    if (!outcome.ok) return failure(outcome.reason, { ...(outcome.url ? { 주소: outcome.url } : {}), 안내: outcome.hint });
+    const host = hostOf(outcome.url);
+    const remaining = Math.max(0, MAX_BROWSER_ACTIONS_PER_ANSWER - this.actions);
+    const content = [
+      // 최종 주소는 사이트가 정한 값(이동)이라 감싼 안에 두고, 밖에는 호스트만
+      `[웹 문서] ${host}`,
+      UNTRUSTED_NOTE,
+      wrapUntrusted(host, `주소: ${outcome.url}\n제목: ${outcome.title}\n\n${outcome.text}`),
+      outcome.truncated ? `(문서가 길어 앞 ${PAGE_TEXT_MAX}자만 넘겼어요)` : null,
+      `(브라우저 동작 ${remaining}번 남음)`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return { content, frame: null, webSources: [{ title: outcome.title, url: outcome.url }] };
   }
 
   private async click(rawRef: unknown): Promise<BrowserToolResult> {
@@ -590,6 +702,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       locale: 'ko-KR',
       timezoneId: 'Asia/Seoul',
       viewport: VIEWPORT,
+      // 창을 띄우면(BROWSER_HEADLESS=false) 화면 배율(Retina 2배)을 따라가 사진이 두 배로 커진다. 사진 너비를 지키려고 1로 둔다
+      deviceScaleFactor: 1,
       serviceWorkers: 'block',
     });
     try {
@@ -665,7 +779,30 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       if (key) this.visited.add(key);
       this.lastPage = { title: title || displayUrl(url), url };
     }
-    return { content, frame: await this.frame(page, title), webSources: isWeb ? [{ title: title || displayUrl(url), url }] : [] };
+    // 사람에게 보내는 사진을 먼저 찍는다(번호 표 없이)
+    const frame = await this.frame(page, title);
+    const modelImage = this.input.markedImages ? await this.markedImage(page) : null;
+    return { content, frame, webSources: isWeb ? [{ title: title || displayUrl(url), url }] : [], ...(modelImage ? { modelImage } : {}) };
+  }
+
+  /**
+   * 모델에 보낼 화면 사진 (이슈 #427): 번호 표를 그려 찍고 바로 지운다. 그동안 실시간 화면 사진은 버린다.
+   * 못 찍으면 null (모델은 화면 글만 본다)
+   */
+  private async markedImage(page: Page): Promise<LlmImage | null> {
+    const host = `${this.attr}-marks`;
+    this.marking = true;
+    try {
+      await this.evaluateIsolated(page, marksScript(host, this.attr, this.refs.range.docStart));
+      return { mediaType: 'image/jpeg', dataBase64: await this.capture(page, MODEL_IMAGE_WIDTH, MODEL_IMAGE_QUALITY) };
+    } catch (error) {
+      this.logger.debug(`번호 붙은 화면 사진을 찍지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+      return null;
+    } finally {
+      await this.evaluateIsolated(page, `document.getElementById(${JSON.stringify(host)})?.remove()`).catch(() => undefined);
+      this.marksClearedAt = Date.now();
+      this.marking = false;
+    }
   }
 
   private async snapshotText(page: Page, maxChars: number): Promise<string> {
@@ -739,7 +876,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   /** 사진 한 장을 보내고, 간격이 지난 뒤에 받았다고 알린다 (그래야 Chrome이 다음 사진을 보낸다 = 초당 2장쯤) */
   private onScreencastFrame(cdp: CDPSession, event: { data: string; sessionId: number }) {
     const page = this.page;
-    if (this.live && page && this.input.onLive) this.input.onLive({ url: displayUrl(page.url()), imageBase64: event.data, at: new Date().toISOString() });
+    const marked = this.marking || Date.now() - this.marksClearedAt < MARK_LIVE_GRACE_MS;
+    if (this.live && page && this.input.onLive && !marked) this.input.onLive({ url: displayUrl(page.url()), imageBase64: event.data, at: new Date().toISOString() });
     const ack = setTimeout(() => {
       if (this.live && this.cdp === cdp) void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => undefined);
     }, LIVE_FRAME_GAP_MS);
@@ -760,20 +898,33 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     return result.result.value;
   }
 
-  /** 화면 사진. Chrome DevTools 프로토콜로 줄여 찍는다(Playwright 사진은 크기를 줄이지 못함). 못 찍으면 null */
+  /** 화면 사진. 못 찍으면 null */
   private async frame(page: Page, title: string): Promise<BrowserFrame | null> {
     try {
-      const cdp = await this.cdpFor(page);
-      const metrics = (await cdp.send('Page.getLayoutMetrics')) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
-      const view = metrics.cssVisualViewport;
-      const shot = await cdp.send('Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: FRAME_QUALITY,
-        clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: Math.min(1, FRAME_WIDTH / view.clientWidth) },
-      });
-      return { url: displayUrl(page.url()), title, imageBase64: shot.data, at: new Date().toISOString() };
+      return { url: displayUrl(page.url()), title, imageBase64: await this.capture(page, FRAME_WIDTH, FRAME_QUALITY), at: new Date().toISOString() };
     } catch {
       return null;
     }
+  }
+
+  /** 보이는 화면을 JPEG base64로. Chrome DevTools 프로토콜로 줄여 찍는다(Playwright 사진은 크기를 줄이지 못함) */
+  private async capture(page: Page, width: number, quality: number): Promise<string> {
+    const cdp = await this.cdpFor(page);
+    const metrics = (await cdp.send('Page.getLayoutMetrics')) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
+    const view = metrics.cssVisualViewport;
+    const shot = await cdp.send('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality,
+      clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: Math.min(1, width / view.clientWidth) },
+    });
+    return shot.data;
+  }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'web';
   }
 }

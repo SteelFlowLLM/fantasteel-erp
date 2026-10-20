@@ -6,7 +6,9 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserContext } from 'playwright-core';
+import { extractPdfIsolated } from '../web/page-extract';
 import type { LookupFunction } from '../web/ssrf-guard';
+import { tinyPdf } from '../web/fixtures/tiny-pdf';
 import { internalReferenceIn } from '../web/web-text';
 import { AssistantBrowserToolbox, type BrowserLiveFrame, type BrowserToolResult, type BrowserWebLink } from './assistant-browser-toolbox';
 import { BrowserPool } from './browser-pool';
@@ -41,6 +43,11 @@ async function serveFixtures(context: BrowserContext) {
         );
       // 누르면 글만 바뀌고 이동하지 않는 버튼: 보이는 마우스가 그 자리에 남아 있어야 한다 (이슈 #425)
       if (url.pathname === '/cursor') return html(`<!doctype html><title>cursor</title><button id="b" onclick="this.textContent = '눌렀어요'">누르기</button>`);
+      // PDF·문서 링크가 있는 페이지 (이슈 #427). 노란 표가 잘 보이게 글자만 둔다
+      if (url.pathname === '/docs')
+        return html(
+          `<!doctype html><title>자료실</title><h1>자료실</h1><p><a href="/files/report.pdf">2026 철강 보고서 (PDF)</a></p><p><a href="mailto:help@example.test">문의 메일</a></p><p><button>목록</button></p>`,
+        );
       if (url.pathname === '/search') return html(`<!doctype html><title>검색</title><h1>검색 결과: ${url.searchParams.get('q')?.replace(/[<&]/g, '') ?? ''}</h1>`);
       return html(`<!doctype html><title>${url.pathname}</title><p>도착: ${url.pathname}</p>`);
     },
@@ -51,9 +58,23 @@ const resolve: LookupFunction = (hostname, _options, callback) => {
   if (hostname === 'example.test') return callback(null, [{ address: '93.184.215.14', family: 4 }]);
   callback(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }), []);
 };
-const web = (): BrowserWebLink & { visited: string[] } => {
+/** 문서 읽기는 웹 세션이 한다(네트워크 fetch). 시험은 기억한 주소만 시험용 PDF로 읽는다 (이슈 #427) */
+const web = (): BrowserWebLink & { visited: string[]; reads: string[] } => {
   const visited: string[] = [];
-  return { visited, knows: () => false, rememberVisited: (url) => void visited.push(url), internalReference: (text) => internalReferenceIn(text, ['대한강재']) };
+  const reads: string[] = [];
+  return {
+    visited,
+    reads,
+    knows: () => false,
+    rememberVisited: (url) => void visited.push(url),
+    internalReference: (text) => internalReferenceIn(text, ['대한강재']),
+    readKnownPage: async (url) => {
+      reads.push(url);
+      if (!visited.includes(url)) return { ok: false, reason: '기억하지 않은 주소', hint: '', url: null };
+      const page = await extractPdfIsolated(await tinyPdf(['Steel report page one', 'Tensile 410 MPa'], 'Steel Report 2026'), url);
+      return { ok: true, url, title: page.title, text: page.text, truncated: false };
+    },
+  };
 };
 const call = (name: string, args: unknown = {}) => ({ id: 'c1', name, arguments: JSON.stringify(args) });
 const refOf = (result: BrowserToolResult, line: string): string => {
@@ -312,6 +333,73 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
       }
     } finally {
       await session.close();
+    }
+  });
+
+  it('PDF 링크는 번호로 읽고, 모델용 사진에만 노란 번호 표가 있고 사람에게 보내는 사진·실시간 화면에는 없다 (이슈 #427)', async () => {
+    const link = web();
+    const live: BrowserLiveFrame[] = [];
+    const session = toolbox().session({ question: 'https://example.test/docs 자료 읽어줘', web: link, markedImages: true, onLive: (frame) => void live.push(frame) });
+    const page = () => contexts.at(-1)?.pages()[0];
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/docs' }));
+      expect(opened.modelImage?.mediaType).toBe('image/jpeg');
+      expect(jpegWidth(opened.modelImage?.dataBase64 ?? '')).toBe(1024);
+      expect(jpegWidth(opened.frame?.imageBase64 ?? '')).toBe(800);
+      // 찍은 뒤 표를 지웠다
+      expect(await page()?.evaluate('document.querySelectorAll(\'[id$="-marks"]\').length')).toBe(0);
+
+      const read = await session.run(call('browser_read_file', { ref: refOf(opened, 'link "2026 철강 보고서 (PDF)"') }));
+      expect(link.reads).toEqual(['https://example.test/files/report.pdf']);
+      expect(link.visited).toContain('https://example.test/files/report.pdf');
+      expect(read.content).toContain('[웹 문서] example.test');
+      expect(read.content).toContain('Tensile 410 MPa');
+      expect(read.webSources).toEqual([{ title: 'Steel Report 2026', url: 'https://example.test/files/report.pdf' }]);
+      expect(read.frame).toBeNull();
+      // 읽기는 페이지를 옮기지 않는다
+      expect(page()?.url()).toBe('https://example.test/docs');
+      expect(errorOf(await session.run(call('browser_read_file', { ref: refOf(opened, 'link "문의 메일"') })))).toBe('http(s) 문서 링크가 아니에요');
+
+      const scrolled = await session.run(call('browser_scroll', { direction: 'down' }));
+      expect(scrolled.modelImage).toBeDefined();
+      await until(() => live.length >= 3);
+
+      // 노란(#facc15) 픽셀을 센다: 브라우저 밖의 빈 탭에서 JPEG를 푼다
+      const decoder = await (page()?.context().browser() as NonNullable<ReturnType<BrowserContext['browser']>>).newContext();
+      try {
+        const blank = await decoder.newPage();
+        const yellowIn = async (base64: string) =>
+          (await blank.evaluate(`(async () => {
+            const image = new Image();
+            image.src = 'data:image/jpeg;base64,${base64}';
+            await image.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0);
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let count = 0;
+            for (let i = 0; i < data.length; i += 4) if (data[i] > 220 && data[i + 1] > 170 && data[i + 2] < 90) count += 1;
+            return count;
+          })()`)) as number;
+        expect(await yellowIn(opened.modelImage?.dataBase64 ?? '')).toBeGreaterThanOrEqual(100);
+        expect(await yellowIn(opened.frame?.imageBase64 ?? '')).toBe(0);
+        expect(await yellowIn(scrolled.frame?.imageBase64 ?? '')).toBe(0);
+        for (const frame of live) expect(await yellowIn(frame.imageBase64)).toBe(0);
+      } finally {
+        await decoder.close();
+      }
+    } finally {
+      await session.close();
+    }
+
+    // markedImages가 없으면 모델용 사진을 찍지 않는다
+    const plain = toolbox().session({ question: 'https://example.test/docs 봐줘', web: web() });
+    try {
+      expect((await plain.run(call('browser_open', { url: 'https://example.test/docs' }))).modelImage).toBeUndefined();
+    } finally {
+      await plain.close();
     }
   });
 
