@@ -1033,10 +1033,10 @@ Table ai_research_run {
   plan_revision int [not null, default: 0, note: '계획을 고칠 때마다 1씩 오른다. 시작 요청의 revision과 같아야 시작한다']
   budget jsonb [not null, note: '{maxSteps, maxSources}. 기본 12단계·출처 40개(환경 변수로 바꿈, 상한 30단계·100개), 더 조사하기 한 번에 +4단계(모두 min(30, 기본×2)단계까지)']
   steps_used int [not null, default: 0, note: '쓴 단계 수 (검색·읽기 한 번이 한 단계). CHECK steps_used >= 0 AND plan_revision >= 0']
-  research_state jsonb [note: '{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?}. 단계마다 갱신해 서버가 멈춰도 이어서 한다. pending은 저장했지만 결과를 아직 저장하지 못한 행동']
+  research_state jsonb [note: '{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?, revision?}. 단계마다 갱신해 서버가 멈춰도 이어서 한다. pending은 저장했지만 결과를 아직 저장하지 못한 행동. revision은 아직 판이 나오지 않은 보고서 고치기 {version, instruction, search} (이슈 #418)']
   sources jsonb [not null, default: `'[]'`, note: '모은 출처 [{id, title, url, snippet, readText?, readError?}]. 본문은 6,000자까지, readError는 읽기 실패 이유(다시 읽지 않음)']
   audit jsonb [note: '보고서 전 점검 {thesis, outline[], supportedClaims[{claim, sourceIds[]}], contradictions[], missingDimensions[], ok, reportTruncated, incompleteReason}']
-  report text [note: '보고서 (마크다운, 인용 [n] = sources.id, 끝에 출처 목록)']
+  report text [note: '보고서 (마크다운, 인용 [n] = sources.id, 끝에 출처 목록). 고쳤으면 마지막 판과 같다 (ai_research_report_version)']
   charts jsonb [note: '출처의 숫자로 만든 차트 [{title, type(line·bar), unit, xLabel, series:[{name, points:[{x, y, sourceId}]}]}] (2개까지). 점마다 y가 그 출처 글에 있는지 서버가 확인 (이슈 #384)']
   notion_page_url varchar [note: 'Notion으로 내보낸 페이지 주소 (이슈 #384)']
   notion_exported_at timestamptz [note: '내보낸 시각. notion_page_url이 없으면 내보내는 중(잡은 시각, 오래되면 다시 잡음)']
@@ -1063,7 +1063,7 @@ Table ai_research_event {
   id int [pk, increment]
   run_id int [not null, ref: > ai_research_run.id]
   seq int [not null, note: '조사 안의 순번 (1부터). 화면은 ?afterSeq=로 새 것만 받는다']
-  type varchar [not null, note: 'plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready (CHECK ai_research_event_type_check)']
+  type varchar [not null, note: 'plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready·revision.requested·revision.ready (CHECK ai_research_event_type_check)']
   payload jsonb [not null, default: `'{}'`, note: '짧은 내용 (웹에서 온 제목은 글로만 보인다)']
   created_at timestamptz [not null, default: `now()`]
 
@@ -1072,6 +1072,27 @@ Table ai_research_event {
   }
 
   Note: '심층 조사 진행 기록 (타임라인)'
+}
+
+Table ai_research_report_version {
+  id int [pk, increment]
+  run_id int [not null, ref: > ai_research_run.id]
+  version int [not null, note: '판 번호 (1부터, CHECK version >= 1). 1판은 처음 고칠 때 그때의 보고서를 남긴 것. 조사마다 10판까지(가정값)']
+  instruction text [note: '이 판을 만든 고치기 부탁 (500자까지). 1판·더 조사하기로 나온 판은 null']
+  search boolean [not null, default: false, note: '고칠 때 더 검색했는지 ("필요하면 더 검색"을 켰는지)']
+  report text [not null, note: '그 판의 보고서 (ai_research_run.report와 같은 모양)']
+  charts jsonb [not null, default: `'[]'`, note: '그 판의 차트 (ai_research_run.charts와 같은 모양)']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (run_id, version) [unique]
+  }
+
+  Note: '''
+심층 조사 보고서의 판 (2026-10-20 추가, 이슈 #418, 문서에 없는 기능). 완료한 조사의 보고서를 말로 고치면(POST revisions)
+처음 한 번 그때 보고서를 1판으로 남기고, 일꾼이 고친 보고서를 COMPLETED로 저장하는 같은 트랜잭션에서 다음 판을 넣는다.
+판이 생긴 뒤에는 더 조사하기로 다시 쓴 보고서도 판으로 남긴다. 지우거나 고치지 않는다. docs/backend/ai-research.md
+'''
 }
 
 Table ai_chat_thread {
@@ -1190,6 +1211,7 @@ TableGroup integration {
 TableGroup ai_research {
   ai_research_run
   ai_research_event
+  ai_research_report_version
 }
 
 TableGroup ai_chat {

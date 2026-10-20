@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
@@ -28,7 +28,7 @@ import {
   TURN_JSON_SCHEMA,
   type PromptLimits,
 } from './ai-research.prompt';
-import { fallbackReportBody, finalizeReport } from './ai-research.report';
+import { fallbackReportBody, finalizeReport, reportBodyForRevision } from './ai-research.report';
 import { AiResearchRepository, retryOnSeqConflict, type NewResearchEvent } from './ai-research.repository';
 import {
   decideAction,
@@ -42,6 +42,7 @@ import {
   readPlan,
   readState,
   readTurn,
+  revisionNeedsStep,
   SNIPPET_MAX,
   SOURCE_TITLE_MAX,
   storedAudit,
@@ -53,6 +54,7 @@ import {
   type StepNote,
   type StepNoteResult,
   type StoredAudit,
+  type StoredRevision,
   type StoredSource,
   type StoredState,
 } from './ai-research.rules';
@@ -298,16 +300,21 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let llmDown = false;
     let exhausted = false;
     let searchDown = false;
-    try {
-      ({ exhausted, searchDown } = await this.loop(ctx, endpoint, run.question, plan, budget, work, session));
-    } catch (error) {
-      if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
-      if (error instanceof WallClockExceeded) notes.push(INCOMPLETE_TIMEOUT);
-      else if (error instanceof LlmRequestError) {
-        notes.push(`AI 응답을 받지 못해 조사를 멈췄어요(${cutText(error.message, 160)}).`);
-        llmDown = true;
-      } else throw error;
-    }
+    // 보고서 고치기(이슈 #418): 앞 보고서를 부탁대로 고쳐 쓴다. 더 검색하지 않으면 반복을 건너뛰고 모은 것으로 다시 쓴다
+    const revision = work.state.revision ?? null;
+    const previousReport = revision && run.report ? reportBodyForRevision(run.report) : null;
+    const replacement = previousReport ? '앞 판 내용을 그대로 두었어요' : '조사 메모로 대신 정리했어요';
+    if (!revision || revision.search)
+      try {
+        ({ exhausted, searchDown } = await this.loop(ctx, endpoint, run.question, plan, budget, work, session));
+      } catch (error) {
+        if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
+        if (error instanceof WallClockExceeded) notes.push(INCOMPLETE_TIMEOUT);
+        else if (error instanceof LlmRequestError) {
+          notes.push(`AI 응답을 받지 못해 조사를 멈췄어요(${cutText(error.message, 160)}).`);
+          llmDown = true;
+        } else throw error;
+      }
     const { state, sources, stepsUsed } = work;
     if (searchDown) {
       const reason = this.webTools.capabilities().engines.includes('naver') ? SEARCH_UNAVAILABLE : `${SEARCH_UNAVAILABLE}${NAVER_HINT}`;
@@ -346,7 +353,16 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let truncated = false;
     if (!llmDown)
       try {
-        const messages = buildReportMessages({ question: run.question, plan, state, sources, audit, limits: ctx.limits, today: ctx.today });
+        const messages = buildReportMessages({
+          question: run.question,
+          plan,
+          state,
+          sources,
+          audit,
+          limits: ctx.limits,
+          today: ctx.today,
+          revision: revision && previousReport ? { instruction: revision.instruction, previousReport } : null,
+        });
         const maxTokens = ctx.model.reportMaxTokens;
         const ask = (msgs: ChatMessage[]) =>
           this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs: this.config.reportTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
@@ -374,21 +390,25 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           }
         }
         if (body.length < NEAR_EMPTY_CHARS) body = '';
-        if (!body) notes.push('AI가 빈 보고서를 내 조사 메모로 대신 정리했어요.');
+        if (!body) notes.push(`AI가 빈 보고서를 내 ${replacement}.`);
       } catch (error) {
         if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
-        notes.push(`AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요(${cutText(error.message, 160)}).`);
+        notes.push(`AI가 보고서를 쓰지 못해 ${replacement}(${cutText(error.message, 160)}).`);
       }
-    else notes.push('보고서는 조사 메모로 대신 정리했어요.');
+    else notes.push(`보고서는 ${replacement}.`);
     if (!body) {
-      // 조사 메모는 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
+      // 조사 메모·앞 판은 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
       truncated = false;
-      body = fallbackReportBody(run.question, audit, state);
+      body = previousReport ?? fallbackReportBody(run.question, audit, state);
     }
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
     // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
     const charted = llmDown ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
+    const charts = charted?.charts ?? [];
+    // 고치기를 마쳤으니 부탁을 메모에서 지운다 (판으로 남는다)
+    const finished: StoredState = { ...state };
+    delete finished.revision;
     await this.save(
       ctx,
       AI_RESEARCH_STATUS.RUNNING,
@@ -396,7 +416,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
         status: AI_RESEARCH_STATUS.COMPLETED,
         report,
         audit: json({ ...audit, reportTruncated: truncated, incompleteReason }),
-        charts: json(charted?.charts ?? []),
+        charts: json(charts),
+        researchState: json(finished),
         finishedAt: new Date(this.config.now()),
         failureReason: null,
         ...released,
@@ -405,8 +426,23 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
         { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } },
         ...(charted ? [{ type: 'charts.ready' as const, payload: { count: charted.charts.length, droppedPoints: charted.droppedPoints } }] : []),
       ],
-      (tx) => this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.COMPLETED),
+      async (tx) => {
+        await this.notifyFinished(tx, ctx.id, AI_RESEARCH_STATUS.COMPLETED);
+        await this.saveVersion(tx, ctx.id, revision, report, charts);
+      },
     );
+  }
+
+  /**
+   * 보고서 판 남기기 (이슈 #418, COMPLETED로 저장하는 같은 트랜잭션): 고치기였으면 그 부탁으로 다음 판을 넣고 revision.ready를 남긴다.
+   * 판이 생긴 뒤에 더 조사하기로 다시 쓴 보고서도 부탁 없는 판으로 남긴다(상한을 넘으면 남기지 않는다. 서비스가 미리 막는다). 고친 적이 없으면 아무것도 하지 않는다.
+   */
+  private async saveVersion(tx: Tx, id: number, revision: StoredRevision | null, report: string, charts: AiResearchChart[]): Promise<void> {
+    const last = await this.repository.lastVersion(tx, id);
+    if (!revision && (last === 0 || last >= AI_RESEARCH_LIMITS.maxReportVersions)) return;
+    const version = last + 1;
+    await this.repository.createVersion(tx, { runId: id, version, instruction: revision?.instruction ?? null, search: revision?.search ?? false, report, charts: json(charts) });
+    if (revision) await this.repository.appendEvents(tx, id, [{ type: 'revision.ready', payload: { version, chars: report.length } }]);
   }
 
   /** 보고서 뒤 차트 제안 (JSON 한 번). 점마다 출처 글에 그 숫자가 있는지 확인한다. LLM 실패·못 읽음이면 null (차트 없이 끝낸다) */
@@ -447,7 +483,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const turn = readTurn(value);
       const nextState = readState(turn.state, work.state);
       if (nextState) work.state = nextState;
-      const decision = decideAction(turn, { plan, searchedQueries: work.state.searchedQueries, sources: work.sources, maxSources: budget.maxSources });
+      const noFinish = revisionNeedsStep(work.state, work.stepsUsed, budget.maxSteps) ? work.state.revision?.instruction : undefined;
+      const decision = decideAction(turn, { plan, searchedQueries: work.state.searchedQueries, sources: work.sources, maxSources: budget.maxSources, noFinish });
       const stateEvent: NewResearchEvent[] = nextState ? [{ type: 'state.updated', payload: { summary: cutText(work.state.summary, 300), gapCount: work.state.gaps.length, unsupportedCount: work.state.unsupportedClaims.length } }] : [];
       if (decision.kind === 'finish') {
         await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state) }, stateEvent);

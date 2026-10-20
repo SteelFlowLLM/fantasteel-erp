@@ -5,6 +5,7 @@ import {
   type AiResearchEventView,
   type AiResearchPlan,
   type AiResearchPlanStep,
+  type AiResearchReportVersionSummary,
   type AiResearchRunView,
   type AiResearchSourceView,
   type AiResearchStatus,
@@ -123,6 +124,15 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
       return { ...base, tone: 'danger', title: '조사에 실패했어요', detail: cut(event.payload.reason, 300) };
     case 'cancelled':
       return { ...base, tone: 'neutral', title: '조사를 취소했어요' };
+    case 'revision.requested': {
+      const p = event.payload;
+      const how = !p.search ? '검색 없이 모은 출처로 다시 써요' : p.addedSteps > 0 ? `필요하면 ${p.addedSteps}단계까지 더 찾아요` : '단계를 다 써서 모은 출처로 다시 써요';
+      return { ...base, tone: 'ai', title: `보고서 고치기 요청 · ${p.version}판`, detail: `${cut(p.instruction, 200)}\n${how}` };
+    }
+    case 'revision.ready': {
+      const p = event.payload;
+      return { ...base, tone: 'ok', title: `${p.version}판 보고서를 썼어요`, detail: `${p.chars.toLocaleString('ko-KR')}자` };
+    }
   }
 }
 
@@ -364,6 +374,40 @@ export function planSuggestionSummary(diff: PlanSuggestionDiff): string | null {
   const count = (mark: PlanStepMark) => diff.marks.filter((m) => m === mark).length;
   const parts = [diff.titleChanged ? '제목 바뀜' : '', count('new') ? `새 단계 ${count('new')}` : '', count('changed') ? `바뀐 단계 ${count('changed')}` : '', diff.removed.length ? `빠진 단계 ${diff.removed.length}` : ''].filter(Boolean);
   return parts.length ? parts.join(' · ') : null;
+}
+
+// ── 보고서 판 (이슈 #418) ──
+
+/** 판 이름: "1판 · 처음 보고서", "3판 · 더 조사하기", 고치기로 나온 판은 "2판" */
+export function versionLabel(version: Pick<AiResearchReportVersionSummary, 'version' | 'instruction'>): string {
+  if (version.instruction !== null) return `${version.version}판`;
+  return version.version === 1 ? '1판 · 처음 보고서' : `${version.version}판 · 더 조사하기`;
+}
+
+export interface RevisionTurn {
+  version: number;
+  /** 사원이 쓴 부탁. 더 조사하기로 나온 판이면 null */
+  instruction: string | null;
+  search: boolean;
+  /** 판이 아직 없음 (고치는 중) */
+  pending: boolean;
+  at: string | null;
+}
+
+/** 대화처럼 보이는 고치기 기록: 1판 뒤의 판마다 부탁 → 그 판, 고치는 중이면 맨 끝에 그 부탁 */
+export function revisionTurns(run: Pick<AiResearchRunView, 'versions' | 'pendingRevision'>): RevisionTurn[] {
+  const turns: RevisionTurn[] = run.versions.filter((v) => v.version > 1).map((v) => ({ version: v.version, instruction: v.instruction, search: v.search, pending: false, at: v.createdAt }));
+  if (run.pendingRevision) turns.push({ version: run.pendingRevision.version, instruction: run.pendingRevision.instruction, search: run.pendingRevision.search, pending: true, at: null });
+  return turns;
+}
+
+/** 보고서 고치기 칸이 꺼진 까닭. 고칠 수 있으면 null */
+export function revisionBlockReason(run: Pick<AiResearchRunView, 'status' | 'canRevise' | 'versions' | 'pendingRevision'>): string | null {
+  if (run.canRevise) return null;
+  if (run.pendingRevision) return `${run.pendingRevision.version}판을 쓰는 중이에요. 끝나면 또 고칠 수 있어요`;
+  if (run.versions.length >= AI_RESEARCH_LIMITS.maxReportVersions) return `판은 ${AI_RESEARCH_LIMITS.maxReportVersions}개까지예요. 더 고치려면 [다시 조사]로 새 조사를 만들어 주세요`;
+  if (run.status !== 'COMPLETED') return '조사가 끝난 뒤에 고칠 수 있어요';
+  return '보고서가 없어 고칠 수 없어요';
 }
 
 /** 진행 한 줄: "3/8 단계 · 출처 5/20" */

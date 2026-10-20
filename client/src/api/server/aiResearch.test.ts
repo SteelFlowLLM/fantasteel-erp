@@ -37,4 +37,15 @@ describe('심층 조사 api (api/aiResearch.ts)', () => {
     expect(await aiResearchApi.suggestPlan(3, '  전망 넣어 줘 ', plan)).toEqual(suggested);
     expect(calls[0].body).toEqual({ instruction: '전망 넣어 줘', plan });
   });
+
+  it('보고서 고치기는 다듬은 부탁과 더 검색 여부를 POST, 판은 GET으로 읽는다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => {
+      if (c.method === 'POST' && c.path === '/ai-research/runs/3/revisions') return ok(view({ status: 'QUEUED' }));
+      if (c.method === 'GET' && c.path === '/ai-research/runs/3/versions/2') return ok({ version: 2, instruction: '보강', search: true, createdAt: '2026-10-20T03:00:00.000Z', report: '# 2판', charts: [] });
+      return undefined;
+    });
+    expect((await aiResearchApi.revise(3, '  3장 보강 ', false)).status).toBe('QUEUED');
+    expect(calls[0].body).toEqual({ instruction: '3장 보강', search: false });
+    expect((await aiResearchApi.getVersion(3, 2)).report).toBe('# 2판');
+  });
 });

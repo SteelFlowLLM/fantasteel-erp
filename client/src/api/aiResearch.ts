@@ -6,6 +6,7 @@ import type {
   AiResearchNotionExportResult,
   AiResearchPlan,
   AiResearchPlanSuggestion,
+  AiResearchReportVersionView,
   AiResearchRunSummaryView,
   AiResearchRunView,
   PageResult,
@@ -16,6 +17,7 @@ export const aiResearchKeys = {
   all: ['ai-research'] as const,
   list: (employeeId: number) => ['ai-research', 'list', employeeId] as const,
   detail: (employeeId: number, id: number) => ['ai-research', 'detail', employeeId, id] as const,
+  version: (employeeId: number, id: number, version: number) => ['ai-research', 'version', employeeId, id, version] as const,
 };
 
 export const AI_RESEARCH_LIST_SIZE = 50;
@@ -36,6 +38,11 @@ export const aiResearchApi = {
   /** 끝난 조사의 질문·계획을 복사해 계획 확인 대기인 새 조사를 만든다 */
   rerun: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/rerun`),
   start: (id: number, revision: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/start`, { body: { revision } }),
+  /** 보고서를 말로 고치기 (이슈 #418): 부탁을 보내 다시 줄에 세운다. 고친 보고서는 다음 판으로 남는다 */
+  revise: (id: number, instruction: string, search: boolean): Promise<AiResearchRunView> =>
+    serverRequest('POST', `/ai-research/runs/${id}/revisions`, { body: { instruction: instruction.trim(), search } }),
+  /** 보고서 판 하나 (본문·차트) */
+  getVersion: (id: number, version: number): Promise<AiResearchReportVersionView> => serverRequest('GET', `/ai-research/runs/${id}/versions/${version}`),
   extend: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/extend`),
   cancel: (id: number): Promise<AiResearchRunView> => serverRequest('POST', `/ai-research/runs/${id}/cancel`),
 };

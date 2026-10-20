@@ -1,6 +1,6 @@
 import { AI_RESEARCH_LIMITS } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 /** int4 상한. 넘는 값은 DB 오류(500) 대신 입력 오류로 */
 export const INT4_MAX = 2147483647;
@@ -141,6 +141,20 @@ export class SuggestAiResearchPlanDto {
   @ValidateNested()
   @Type(() => AiResearchDraftPlanDto)
   plan!: AiResearchDraftPlanDto;
+}
+
+/** POST ai-research/runs/:id/revisions (이슈 #418) */
+export class CreateAiResearchRevisionDto {
+  @Transform(trim)
+  @IsString({ message: '보고서를 어떻게 고칠지 써 주세요' })
+  @IsNotEmpty({ message: '보고서를 어떻게 고칠지 써 주세요' })
+  @MaxLength(AI_RESEARCH_LIMITS.instructionMax, { message: `부탁은 ${AI_RESEARCH_LIMITS.instructionMax}자까지 쓸 수 있어요` })
+  instruction!: string;
+
+  /** 필요하면 더 검색 (없으면 true) */
+  @IsOptional()
+  @IsBoolean({ message: '더 검색할지는 true·false로 보내 주세요' })
+  search?: boolean;
 }
 
 /** PATCH ai-research/runs/:id/title — 계획이 있는 조사의 제목만 (상태와 상관없이) */

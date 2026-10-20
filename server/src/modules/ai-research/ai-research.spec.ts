@@ -4,7 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { AiActionCardExecuteResult, AiAssistantReplyView, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
+import type { AiActionCardExecuteResult, AiAssistantReplyView, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchReportVersionView, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { AppModule } from '../../app.module';
@@ -15,7 +15,7 @@ import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
 import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonOptions, type LlmJsonSchema, type LlmToolMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { AiResearchRunner } from './ai-research.runner';
-import { SEED_PLAN_RULE } from './ai-research.prompt';
+import { REVISION_REPORT_RULE, SEED_PLAN_RULE } from './ai-research.prompt';
 import { SEED_SOURCE_SNIPPET } from './ai-research.rules';
 
 /** parseError: JSON이 깨진 답, error: LLM 연결 실패, hang: 끊길(abort) 때까지 기다림 */
@@ -209,6 +209,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma?.notification.deleteMany({ where: { linkPath: { startsWith: '/ai-research?id=' } } });
   await prisma?.aiResearchEvent.deleteMany({ where: { runId: { gt: startId } } });
+  await prisma?.aiResearchReportVersion.deleteMany({ where: { runId: { gt: startId } } });
   await prisma?.aiResearchRun.deleteMany({ where: { id: { gt: startId } } });
   await app?.close();
 });
@@ -1027,5 +1028,170 @@ describe('심층 조사 — 계획을 말로 고치기 (이슈 #416)', () => {
     expect(started.status).toBe(409);
     expect(started.body.error?.code).toBe('RES-002');
     expect(suggestPrompts).toHaveLength(0);
+  });
+});
+
+describe('심층 조사 — 보고서를 말로 고치기 (판, 이슈 #418)', () => {
+  const revise = (id: number, body: unknown, cookie = ownerCookie) => call<AiResearchRunView>('POST', `/ai-research/runs/${id}/revisions`, cookie, body);
+  const version = (id: number, n: number, cookie = ownerCookie) => call<AiResearchReportVersionView>('GET', `/ai-research/runs/${id}/versions/${n}`, cookie);
+
+  /** 검색 하나 하고 끝낸 완료 조사 */
+  async function completed(question: string, report = '첫 보고서 [1]'): Promise<AiResearchRunView> {
+    const run = await planned(question);
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    turns = [
+      { action: 'search', query: '전기로 탄소 배출량', sourceId: 0, researchState: state('처음 메모', ['수입 가격']) },
+      { action: 'finish', query: '', sourceId: 0, researchState: state('처음 메모', ['수입 가격']) },
+    ];
+    reportText = report;
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    return done;
+  }
+
+  it('더 검색해 고치기: 1판을 남기고 줄에 세운 뒤, 부탁을 겨냥해 찾고 다시 점검해 앞 보고서를 고친 2판을 남긴다', async () => {
+    const done = await completed('보고서 고치기 검색');
+    expect(done).toMatchObject({ versions: [], pendingRevision: null, canRevise: true });
+    const firstReport = done.report;
+
+    const res = await revise(done.id, { instruction: '  3장 근거가 약해, 더 찾아서 고쳐 줘 ' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ status: 'QUEUED', finishedAt: null, canRevise: false, maxSteps: done.stepsUsed + 4, pendingRevision: { version: 2, instruction: '3장 근거가 약해, 더 찾아서 고쳐 줘', search: true } });
+    expect(res.body.data.versions).toEqual([expect.objectContaining({ version: 1, instruction: null, search: false })]);
+    expect(res.body.data.researchState?.gaps).toEqual(['3장 근거가 약해, 더 찾아서 고쳐 줘', '수입 가격']);
+    expect(res.body.data.events.at(-1)).toMatchObject({ type: 'revision.requested', payload: { version: 2, instruction: '3장 근거가 약해, 더 찾아서 고쳐 줘', search: true, addedSteps: 4 } });
+    // 고치는 중에는 또 고치거나 더 조사할 수 없다
+    expect((await revise(done.id, { instruction: '하나 더' })).body.error?.code).toBe('RES-002');
+    expect((await call('POST', `/ai-research/runs/${done.id}/extend`, ownerCookie)).body.error?.code).toBe('RES-002');
+
+    const turnsBefore = turnPrompts.length;
+    const auditsBefore = auditCalls;
+    turns = [
+      { action: 'search', query: '고로 탄소 배출 통계', sourceId: 0, researchState: state('더 찾음', []) },
+      { action: 'finish', query: '', sourceId: 0, researchState: state('더 찾음', []) },
+    ];
+    reportText = '# 고친 보고서\n\n3장을 보강했어요 [3].';
+    reportCalls.length = 0;
+    await runner.processNext();
+    const revised = await getRun(done.id);
+    expect(revised).toMatchObject({ status: 'COMPLETED', pendingRevision: null, canRevise: true, stepsUsed: done.stepsUsed + 1 });
+    expect(revised.report).toContain('3장을 보강했어요 [3]');
+    expect(revised.versions.map((v) => [v.version, v.instruction, v.search])).toEqual([
+      [1, null, false],
+      [2, '3장 근거가 약해, 더 찾아서 고쳐 줘', true],
+    ]);
+    expect(revised.events.map((e) => e.type)).toEqual(expect.arrayContaining(['revision.requested', 'step.started', 'audit.ready', 'report.ready', 'revision.ready']));
+    expect(revised.events.at(-1)).toMatchObject({ type: 'revision.ready', payload: { version: 2, chars: revised.report?.length } });
+    // 다음 행동에 부탁이 들어갔고, 단계가 늘어 점검을 다시 했다
+    expect(turnPrompts.slice(turnsBefore)[0]).toContain('[보고서 고치기 부탁] (사원이 쓴 글)\n3장 근거가 약해, 더 찾아서 고쳐 줘');
+    expect(auditCalls).toBe(auditsBefore + 1);
+    // 보고서 프롬프트: 감싼 앞 보고서(서버 출처 목록은 뗌)·부탁·"부탁한 것만" 규칙
+    const prompt = reportCalls[0].messages.map((m) => m.content).join('\n');
+    expect(prompt).toContain('<untrusted_web_content source="research:previous-report">');
+    expect(prompt).toContain('첫 보고서 [1]');
+    expect(prompt).not.toContain('## 출처');
+    expect(prompt).toContain('[고칠 부탁] (사원이 쓴 글)\n3장 근거가 약해, 더 찾아서 고쳐 줘');
+    expect(prompt).toContain(REVISION_REPORT_RULE);
+    // 판 본문: 1판은 처음 보고서, 2판은 고친 보고서. 메모에서 부탁은 지웠다
+    expect((await version(done.id, 1)).body.data).toMatchObject({ version: 1, instruction: null, report: firstReport });
+    expect((await version(done.id, 2)).body.data).toMatchObject({ version: 2, report: revised.report, charts: revised.charts });
+    const row = await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: done.id } });
+    expect((row.researchState as { revision?: unknown }).revision).toBeUndefined();
+  });
+
+  it('더 검색하는 고치기에서 모델이 바로 끝내려 하면 부탁 글로 한 번은 찾는다', async () => {
+    const done = await completed('바로 끝내려는 고치기');
+    await revise(done.id, { instruction: '수입 열연 가격 통계 보강' });
+    turns = [
+      { action: 'finish', query: '', sourceId: 0, researchState: state('충분해요') },
+      { action: 'finish', query: '', sourceId: 0, researchState: state('이제 충분해요') },
+    ];
+    await runner.processNext();
+    const after = await getRun(done.id);
+    expect(after.stepsUsed).toBe(done.stepsUsed + 1);
+    const step = after.events.find((e) => e.type === 'step.started' && e.payload.step === done.stepsUsed + 1);
+    expect(step?.payload).toMatchObject({ action: 'search', query: '수입 열연 가격 통계 보강', fallback: true });
+    expect(after.versions.map((v) => v.version)).toEqual([1, 2]);
+  });
+
+  it('검색 없이 고치기: 반복·점검 없이 모은 것으로 다시 쓰고 3판을 남긴다. 옛 판은 그대로', async () => {
+    const done = await completed('검색 없이 고치기');
+    await revise(done.id, { instruction: '처음에 붙였던 표현 고쳐 줘', search: false });
+    await runner.processNext();
+    const two = await getRun(done.id);
+    const turnsBefore = turnPrompts.length;
+    const auditsBefore = auditCalls;
+    const res = await revise(done.id, { instruction: '결론을 세 줄로 줄여 줘', search: false });
+    expect(res.body.data).toMatchObject({ maxSteps: two.maxSteps, pendingRevision: { version: 3, search: false } });
+    expect(res.body.data.researchState?.gaps).toEqual(two.researchState?.gaps);
+    expect(res.body.data.events.at(-1)).toMatchObject({ type: 'revision.requested', payload: { search: false, addedSteps: 0 } });
+    reportText = '# 짧은 결론\n\n세 줄 [1].';
+    await runner.processNext();
+    const three = await getRun(done.id);
+    expect(three.status).toBe('COMPLETED');
+    expect(three.stepsUsed).toBe(done.stepsUsed);
+    expect(turnPrompts.length).toBe(turnsBefore);
+    expect(auditCalls).toBe(auditsBefore);
+    expect(three.versions.map((v) => [v.version, v.search])).toEqual([
+      [1, false],
+      [2, false],
+      [3, false],
+    ]);
+    expect((await version(done.id, 1)).body.data.report).toBe(done.report);
+    expect((await version(done.id, 2)).body.data.report).toBe(two.report);
+    expect((await version(done.id, 3)).body.data.report).toContain('세 줄 [1]');
+  });
+
+  it('보고서 LLM이 실패하면 앞 판 내용을 그대로 두고(맨 위 알림) 판을 남긴다', async () => {
+    const done = await completed('고치다 실패');
+    await revise(done.id, { instruction: '전망 절 더해 줘', search: false });
+    reportError = 'LLM 서버 오류 (HTTP 500)';
+    await runner.processNext();
+    const after = await getRun(done.id);
+    expect(after.status).toBe('COMPLETED');
+    expect(after.incompleteReason).toContain('AI가 보고서를 쓰지 못해 앞 판 내용을 그대로 두었어요');
+    expect(after.report).toContain('첫 보고서 [1]');
+    expect(after.versions).toHaveLength(2);
+  });
+
+  it('상태·입력 확인: 완료 전 RES-002, 남의 것 404, 부탁 1~500자, search는 true·false, 모델 없음 RES-005, 진행 중 3개 RES-006', async () => {
+    const waiting = await planned('아직 계획 확인');
+    expect((await revise(waiting.id, { instruction: '고쳐 줘' })).body.error?.code).toBe('RES-002');
+    const done = await completed('입력 확인용');
+    const other = await revise(done.id, { instruction: '고쳐 줘' }, otherCookie);
+    expect(other.status).toBe(404);
+    expect(other.body.error?.code).toBe('RES-001');
+    expect((await version(done.id, 1, otherCookie)).status).toBe(404);
+    for (const body of [{ instruction: '' }, { instruction: '   ' }, { instruction: '가'.repeat(501) }, { instruction: '고쳐 줘', search: 'yes' }, {}]) expect((await revise(done.id, body)).status).toBe(400);
+    settings.model = null;
+    expect((await revise(done.id, { instruction: '고쳐 줘' })).body.error?.code).toBe('RES-005');
+    settings.model = 'test-model';
+    // 진행 중 2개(계획 확인 대기 + 하나 더) + 고치기 = 3개까지
+    await planned('진행 중 하나 더');
+    await planned('진행 중 셋째');
+    expect((await revise(done.id, { instruction: '고쳐 줘' })).body.error?.code).toBe('RES-006');
+    // 막힌 요청은 판을 남기지 않았다
+    expect((await getRun(done.id)).versions).toEqual([]);
+    expect((await version(done.id, 1)).status).toBe(404);
+  });
+
+  it('판은 10개까지: 꽉 차면 고치기·더 조사하기 모두 RES-002, canRevise false', async () => {
+    const done = await completed('판 상한');
+    await prisma.aiResearchReportVersion.createMany({ data: Array.from({ length: 10 }, (_, i) => ({ runId: done.id, version: i + 1, instruction: i ? `부탁 ${i}` : null, report: `판 ${i + 1}` })) });
+    const full = await getRun(done.id);
+    expect(full).toMatchObject({ canRevise: false, canExtend: false });
+    expect(full.versions).toHaveLength(10);
+    const res = await revise(done.id, { instruction: '하나 더' });
+    expect(res.status).toBe(409);
+    expect(res.body.error?.message).toContain('10개까지');
+  });
+
+  it('고치는 중에 취소하면 앞 보고서와 1판이 남고, 부탁은 보이지 않는다', async () => {
+    const done = await completed('고치다 취소');
+    await revise(done.id, { instruction: '근거 더 찾아 줘' });
+    const cancelled = await call<AiResearchRunView>('POST', `/ai-research/runs/${done.id}/cancel`, ownerCookie);
+    expect(cancelled.body.data).toMatchObject({ status: 'CANCELLED', report: done.report, pendingRevision: null, canRevise: false });
+    expect(cancelled.body.data.versions.map((v) => v.version)).toEqual([1]);
   });
 });

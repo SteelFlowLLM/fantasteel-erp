@@ -57,8 +57,14 @@ export const AI_RESEARCH_LIMITS = {
   seedSourcesMax: 10,
   seedTitleMax: 300,
   seedUrlMax: 2000,
-  /** 계획을 말로 고치기: 부탁 글자 수 (이슈 #416, 가정값) */
+  /** 계획·보고서를 말로 고치기: 부탁 글자 수 (이슈 #416·#418, 가정값) */
   instructionMax: 500,
+  /** 보고서 판 수 상한 (1판 포함, 이슈 #418, 가정값) */
+  maxReportVersions: 10,
+  /** 보고서 고치기에서 더 검색할 때 늘리는 단계 (모두 maxStepsCap까지) */
+  revisionSteps: 4,
+  /** 보고서 고치기에서 더 검색할 때 새 출처 자리 (모은 출처 + 이만큼, maxSourcesCap까지) */
+  revisionSources: 10,
 } as const;
 
 export interface AiResearchPlanStep {
@@ -128,6 +134,8 @@ export const AI_RESEARCH_EVENT_TYPES = [
   'cancelled',
   'budget.exhausted',
   'charts.ready',
+  'revision.requested',
+  'revision.ready',
 ] as const;
 export type AiResearchEventType = (typeof AI_RESEARCH_EVENT_TYPES)[number];
 
@@ -147,6 +155,38 @@ export interface AiResearchEventPayloads {
   'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number; reason?: string };
   /** 보고서 뒤 차트 제안. count는 확인을 통과한 차트 수, droppedPoints는 출처 글에서 찾지 못해 뺀 점 수 */
   'charts.ready': { count: number; droppedPoints: number };
+  /** 보고서 고치기 요청 (이슈 #418). instruction은 200자까지, addedSteps는 더 검색하려고 늘린 단계 수 */
+  'revision.requested': { version: number; instruction: string; search: boolean; addedSteps: number };
+  /** 고친 보고서를 version판으로 남겼다 */
+  'revision.ready': { version: number; chars: number };
+}
+
+/** 보고서 판 하나 (목록용, 본문 없음). instruction이 null이면 1판(처음 보고서)이거나 더 조사하기로 다시 쓴 판 */
+export interface AiResearchReportVersionSummary {
+  version: number;
+  instruction: string | null;
+  search: boolean;
+  createdAt: string;
+}
+
+/** GET ai-research/runs/:id/versions/:version */
+export interface AiResearchReportVersionView extends AiResearchReportVersionSummary {
+  report: string;
+  charts: AiResearchChart[];
+}
+
+/** 아직 판이 나오지 않은 보고서 고치기 */
+export interface AiResearchPendingRevision {
+  version: number;
+  instruction: string;
+  search: boolean;
+}
+
+/** POST ai-research/runs/:id/revisions */
+export interface CreateAiResearchRevisionInput {
+  instruction: string;
+  /** 필요하면 더 검색 (기본 true) */
+  search?: boolean;
 }
 
 /** 차트 한 점. y는 출처(sourceId)의 글에 실제로 있는 숫자만 (서버가 확인한다) */
@@ -213,6 +253,12 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   charts: AiResearchChart[];
   /** Notion으로 내보낸 페이지 주소. 내보내지 않았으면 null */
   notionPageUrl: string | null;
+  /** 보고서 판 (오래된 것부터, 본문 없음). 고친 적이 없으면 [] (이슈 #418) */
+  versions: AiResearchReportVersionSummary[];
+  /** 고치는 중인 부탁 (판이 아직 없음). 없으면 null */
+  pendingRevision: AiResearchPendingRevision | null;
+  /** 보고서를 고칠 수 있는지: 완료·보고서 있음·판이 상한 아래 */
+  canRevise: boolean;
   events: AiResearchEventView[];
   /** 지금까지의 마지막 이벤트 순번. 다음 조회의 afterSeq로 쓴다 */
   lastSeq: number;

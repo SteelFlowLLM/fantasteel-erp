@@ -1,6 +1,6 @@
 import type { AiResearchEventView, AiResearchPlan, AiResearchRunView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, revisionBlockReason, revisionTurns, versionLabel, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
 
 const at = '2026-10-17T01:00:00.000Z';
 const sources = [
@@ -181,6 +181,37 @@ describe('계획을 말로 고치기 표시 (이슈 #416)', () => {
     expect(diff.marks).toEqual(['changed', 'new']);
     expect(diff.removed).toEqual([{ title: '', query: '' }]);
     expect(planQueryKey('탄소 배출, 고로')).toBe(planQueryKey('고로 탄소 배출 고로'));
+  });
+});
+
+describe('보고서 판·고치기 기록 (이슈 #418)', () => {
+  const v = (version: number, instruction: string | null, search = false) => ({ version, instruction, search, createdAt: '2026-10-20T03:00:00.000Z' });
+  it('판 이름: 1판은 처음 보고서, 부탁 없는 뒤 판은 더 조사하기', () => {
+    expect(versionLabel(v(1, null))).toBe('1판 · 처음 보고서');
+    expect(versionLabel(v(2, '3장 보강'))).toBe('2판');
+    expect(versionLabel(v(3, null))).toBe('3판 · 더 조사하기');
+  });
+  it('고치기 기록은 1판 뒤 판마다, 고치는 중이면 맨 끝에 그 부탁', () => {
+    const turns = revisionTurns({ versions: [v(1, null), v(2, '3장 보강', true), v(3, null)], pendingRevision: { version: 4, instruction: '줄여 줘', search: false } });
+    expect(turns.map((t) => [t.version, t.instruction, t.pending])).toEqual([
+      [2, '3장 보강', false],
+      [3, null, false],
+      [4, '줄여 줘', true],
+    ]);
+    expect(revisionTurns({ versions: [], pendingRevision: null })).toEqual([]);
+  });
+  it('고치기 칸이 꺼진 까닭: 고치는 중·판 상한·완료 전', () => {
+    const base = { status: 'COMPLETED' as const, canRevise: true, versions: [], pendingRevision: null };
+    expect(revisionBlockReason(base)).toBeNull();
+    expect(revisionBlockReason({ ...base, status: 'QUEUED', canRevise: false, pendingRevision: { version: 2, instruction: 'a', search: true } })).toContain('2판을 쓰는 중');
+    expect(revisionBlockReason({ ...base, canRevise: false, versions: Array.from({ length: 10 }, (_, i) => v(i + 1, null)) })).toContain('10개까지');
+    expect(revisionBlockReason({ ...base, status: 'CANCELLED', canRevise: false })).toContain('끝난 뒤');
+  });
+  it('타임라인: 고치기 요청·새 판', () => {
+    const requested = timelineLineOf({ seq: 1, type: 'revision.requested', payload: { version: 2, instruction: '3장 보강', search: true, addedSteps: 4 }, createdAt: '2026-10-20T03:00:00.000Z' });
+    expect(requested).toMatchObject({ tone: 'ai', title: '보고서 고치기 요청 · 2판', detail: '3장 보강\n필요하면 4단계까지 더 찾아요' });
+    expect(timelineLineOf({ seq: 2, type: 'revision.requested', payload: { version: 3, instruction: 'a', search: false, addedSteps: 0 }, createdAt: '2026-10-20T03:00:00.000Z' }).detail).toContain('검색 없이');
+    expect(timelineLineOf({ seq: 3, type: 'revision.ready', payload: { version: 2, chars: 1200 }, createdAt: '2026-10-20T03:00:00.000Z' })).toMatchObject({ tone: 'ok', title: '2판 보고서를 썼어요', detail: '1,200자' });
   });
 });
 

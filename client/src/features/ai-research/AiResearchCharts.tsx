@@ -128,11 +128,12 @@ function ChartCard({ chart, sources }: { chart: AiResearchChart; sources: AiRese
   );
 }
 
-export function AiResearchCharts({ run }: { run: AiResearchRunView }) {
-  if (run.charts.length === 0) return null;
+/** charts를 주면 그 판의 차트를 그린다 (없으면 지금 차트) */
+export function AiResearchCharts({ run, charts = run.charts }: { run: AiResearchRunView; charts?: AiResearchRunView['charts'] }) {
+  if (charts.length === 0) return null;
   return (
     <>
-      {run.charts.map((chart, index) => (
+      {charts.map((chart, index) => (
         <ChartCard key={index} chart={chart} sources={run.sources} />
       ))}
     </>

@@ -2,6 +2,7 @@
 
 // 심층 조사 상세: 상태마다 다른 모습 (계획 중 · 계획 확인 · 진행 · 완료 · 실패/취소).
 // 계획을 세운 뒤에는 제목을 언제든 바꾸고, 끝난 조사는 [다시 조사]로 질문·계획을 복사한 새 조사를 만들어 고친 뒤 시작한다.
+// 완료한 보고서는 말로 고쳐 판(1판·2판…)으로 남기고, 판을 골라 앞 판을 다시 본다 (이슈 #418).
 import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView, type AiResearchSeed } from '@fantasteel/shared';
 import { useState } from 'react';
 import { useShellStore } from '@/stores/useShellStore';
@@ -23,11 +24,12 @@ import { AiResearchPlanEditor } from '@/features/ai-research/AiResearchPlanEdito
 import { AiResearchReport } from '@/features/ai-research/AiResearchReport';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
 import { AiResearchCharts } from '@/features/ai-research/AiResearchCharts';
+import { AiResearchRevisions, AiResearchVersionPicker } from '@/features/ai-research/AiResearchRevisions';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
-import { useAiResearchRun } from '@/hooks/useAiResearch';
-import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines } from '@/lib/aiResearch';
+import { useAiResearchRun, useAiResearchVersion } from '@/hooks/useAiResearch';
+import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines, versionLabel } from '@/lib/aiResearch';
 import { openableWebSources } from '@/lib/aiWebLinks';
 import { AiAnswerText } from '@/features/shell/AiWebAnswer';
 import { toast } from '@/stores/useToastStore';
@@ -132,6 +134,55 @@ function ProgressCard({ run }: { run: AiResearchRunView }) {
         <RunTimeline run={run} />
       </CardBody>
     </Card>
+  );
+}
+
+/**
+ * 보고서와 판 (이슈 #418): 판이 있으면 판 고르기를 두고, 최신 판이 아닌 판을 고르면 그 판의 보고서·차트를 읽어 보인다.
+ * 고치는 중(대기·조사 중)에도 지금 보고서와 고치기 기록을 보인다.
+ */
+const VERSION_PICKER_ID = 'research-version-picker';
+
+function ReportWithVersions({ run }: { run: AiResearchRunView }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const latest = run.versions.at(-1)?.version ?? null;
+  const older = picked !== null && picked !== latest ? picked : null;
+  const version = useAiResearchVersion(run.id, older);
+  const shown = older !== null ? run.versions.find((v) => v.version === older) : undefined;
+  const select = (next: number) => {
+    setPicked(next);
+    document.getElementById(VERSION_PICKER_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return (
+    <>
+      <div id={VERSION_PICKER_ID} className="scroll-mt-4">
+        <AiResearchVersionPicker run={run} selected={older ?? latest ?? 0} onSelect={select} />
+      </div>
+      {shown ? (
+        <Banner tone="neutral" actions={<Button size="sm" onClick={() => setPicked(null)}>최신 판 보기</Button>}>
+          <b>앞 판을 보고 있어요 · {versionLabel(shown)}</b>
+          {shown.instruction ? <div className="mt-0.5 text-cap whitespace-pre-line break-words">부탁: {shown.instruction}</div> : null}
+        </Banner>
+      ) : null}
+      {older !== null ? (
+        version.data ? (
+          <>
+            <AiResearchReport run={run} report={version.data.report} title={`보고서 · ${version.data.version}판`} />
+            <AiResearchCharts run={run} charts={version.data.charts} />
+          </>
+        ) : version.isError ? (
+          <Banner tone="danger">판을 불러오지 못했어요. 다시 골라 주세요</Banner>
+        ) : (
+          <p className="text-sm text-ink-3">판을 불러오는 중…</p>
+        )
+      ) : (
+        <>
+          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} />
+          <AiResearchCharts run={run} />
+        </>
+      )}
+      <AiResearchRevisions run={run} onSelect={select} />
+    </>
   );
 }
 
@@ -244,6 +295,7 @@ function Body({ run }: { run: AiResearchRunView }) {
       {run.status === 'AWAITING_APPROVAL' ? <AiResearchPlanEditor key={`${run.id}:${run.planRevision}`} run={run} /> : null}
 
       {run.status === 'QUEUED' || run.status === 'RUNNING' ? <ProgressCard run={run} /> : null}
+      {(run.status === 'QUEUED' || run.status === 'RUNNING') && run.pendingRevision && run.report ? <ReportWithVersions run={run} /> : null}
 
       {run.status === 'COMPLETED' ? (
         <>
@@ -276,8 +328,7 @@ function Body({ run }: { run: AiResearchRunView }) {
               </Button>
             </div>
           ) : null}
-          <AiResearchReport run={run} />
-          <AiResearchCharts run={run} />
+          <ReportWithVersions run={run} />
         </>
       ) : null}
 
@@ -310,7 +361,7 @@ export function AiResearchDetail({ id }: { id: number }) {
   const query = useAiResearchRun(id);
   return (
     <QueryBoundary query={query} loadingLabel="조사를 불러오는 중…">
-      {(run) => <Body run={run} />}
+      {(run) => <Body key={run.id} run={run} />}
     </QueryBoundary>
   );
 }
