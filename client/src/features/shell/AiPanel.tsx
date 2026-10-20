@@ -20,6 +20,8 @@ import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
 import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
+import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
+import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
 import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
@@ -162,6 +164,27 @@ export function AiPanel() {
   const roleLabel = ROLE_LABEL[me.roleCode];
   const screenTitle = routeTitleOf(pathname).title || '대시보드';
   const pending = pendingId !== null;
+  // 철강맨 모습 (이슈 #414): 패널을 열면 인사, 질문을 쓰는 동안 듣는 중. 막 끝난 답 옆에는 끝난 모습을 잠깐 보인다
+  const [greetKey] = useState(() => String(Date.now()));
+  const [greeting, setGreeting] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setGreeting(false), AFTER_ANSWER_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const headerStatus: SteelmanStatus | null = pending ? null : greeting ? 'greet' : draft.trim() ? 'listening' : null;
+  const [afterAnswer, setAfterAnswer] = useState<{ entryId: string } | null>(null);
+  const wasPending = useRef(false);
+  const afterTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const finished = wasPending.current && !pending;
+    wasPending.current = pending;
+    const last = entries.at(-1);
+    if (!finished || !last || last.role === 'user') return;
+    setAfterAnswer({ entryId: last.id });
+    window.clearTimeout(afterTimer.current);
+    afterTimer.current = window.setTimeout(() => setAfterAnswer(null), AFTER_ANSWER_MS);
+  }, [pending, entries]);
+  useEffect(() => () => window.clearTimeout(afterTimer.current), []);
 
   useEffect(() => {
     claim(me.employeeId);
@@ -470,7 +493,7 @@ export function AiPanel() {
         </div>
       ) : null}
       <div className="flex min-h-12 flex-none items-center gap-1 border-b-2 border-line bg-surface-2 py-1.5 pr-2 pl-3">
-        <SteelmanAiMark framed />
+        <SteelmanAiStatus size="sm" status={headerStatus} seedKey={greetKey} />
         <div className="ml-1 flex min-w-0 flex-col">
           <b className="text-base leading-tight font-bold">철강맨AI</b>
           <small className="truncate text-cap text-ink-3">화면 도우미 철강맨이 답해요</small>
@@ -515,6 +538,7 @@ export function AiPanel() {
                   entry={entry}
                   disabled={pending}
                   onRetry={retry}
+                  steelman={afterAnswer?.entryId === entry.id ? finishedSteelmanStatus(entry) : null}
                   research={
                     deepResearchOn && entry.role === 'assistant'
                       ? { start: webResearchStartAt(entries, index), cardSeed: researchCardSeedAt(entries, index), pending: continueToResearch.isPending, onStart: (start) => continueToResearch.mutate(start) }
@@ -522,7 +546,7 @@ export function AiPanel() {
                   }
                 />
               ))}
-              {pending && live ? <LiveAnswer live={live} /> : null}
+              {pending && live ? <LiveAnswer live={live} seedKey={pendingId ?? 'live'} /> : null}
             </>
           )}
         </div>
@@ -912,7 +936,20 @@ interface ChatEntryResearch {
   onStart: (start: AiWebResearchStart) => void;
 }
 
-function ChatEntry({ entry, disabled, onRetry, research }: { entry: AiChatEntry; disabled: boolean; onRetry: (failure: FailureEntry) => void; research: ChatEntryResearch | null }) {
+function ChatEntry({
+  entry,
+  disabled,
+  onRetry,
+  research,
+  steelman,
+}: {
+  entry: AiChatEntry;
+  disabled: boolean;
+  onRetry: (failure: FailureEntry) => void;
+  research: ChatEntryResearch | null;
+  /** 답이 막 끝났을 때의 철강맨 모습 (이슈 #414). 없으면 가만히 있는 얼굴 */
+  steelman: SteelmanStatus | null;
+}) {
   if (entry.role === 'user') {
     return (
       <div className="flex max-w-[85%] flex-col items-end gap-1.5 self-end">
@@ -938,7 +975,7 @@ function ChatEntry({ entry, disabled, onRetry, research }: { entry: AiChatEntry;
     const stopped = entry.content === AI_CHAT_STOPPED_REASON;
     return (
       <div className="flex gap-3">
-        <SteelmanAiMark framed />
+        <SteelmanAiStatus status={stopped ? null : steelman} seedKey={entry.id} />
         <div role={stopped ? 'status' : 'alert'} className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 text-sm ${stopped ? STOPPED_BUBBLE : FAILURE_BUBBLE}`}>
           <span className={`inline-flex items-center gap-1.5 font-semibold ${stopped ? 'text-ink-2' : 'text-danger'}`}>
             <Icon name={stopped ? 'x-circle' : 'alert'} size="sm" />
@@ -954,7 +991,7 @@ function ChatEntry({ entry, disabled, onRetry, research }: { entry: AiChatEntry;
   }
   return (
     <div className="flex gap-3">
-      <SteelmanAiMark framed />
+      <SteelmanAiStatus status={steelman} seedKey={entry.id} />
       <div className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
         <AiAnswerText content={entry.content} webSources={entry.webSources} className="text-sm leading-normal break-keep whitespace-pre-wrap wrap-anywhere" />
         <AiWebSources sources={entry.webSources} />
@@ -999,10 +1036,28 @@ function ChatEntry({ entry, disabled, onRetry, research }: { entry: AiChatEntry;
   );
 }
 
-function LiveAnswer({ live }: { live: AiChatLive }) {
+/** 답을 기다리는 동안 철강맨이 단계에 맞춰 바뀐다 (이슈 #414). 도구의 시작·끝 시각은 이 화면이 받은 때로 센다 */
+function LiveAnswer({ live, seedKey }: { live: AiChatLive; seedKey: string }) {
+  const times = useRef(new Map<string, ToolTimes>());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  const status = liveSteelmanStatus(live, now, (step) => {
+    const seen = times.current.get(step.id) ?? {};
+    if (seen.startedAt === undefined) seen.startedAt = now;
+    if (step.result && seen.endedAt === undefined) seen.endedAt = now;
+    times.current.set(step.id, seen);
+    return seen;
+  });
+  // 같은 상황이 이어지는 동안 같은 시안: 상황이 바뀔 때만 다음 열쇠로 넘어간다 (단계가 늘어도 같은 상황이면 그대로)
+  const segment = useRef({ status, count: 0 });
+  if (segment.current.status !== status) segment.current = { status, count: segment.current.count + 1 };
+  const stepKey = `${seedKey}:${segment.current.count}`;
   return (
     <div className="flex gap-3">
-      <SteelmanAiMark framed />
+      <SteelmanAiStatus status={status} seedKey={stepKey} />
       <div className={`min-w-0 flex-1 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
         <AiLiveView live={live} />
       </div>
