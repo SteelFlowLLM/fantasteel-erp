@@ -34,6 +34,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
+import type { HistorySearchSource } from '../ai-assistant/history/chat-memory';
 import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
 
@@ -1197,6 +1198,60 @@ actionCards: [],
     await new Promise((resolve) => setTimeout(resolve, TYPING_SEND_INTERVAL_MS + 500));
     expect(typingRecords.length).toBe(sentCount);
   }, 15_000);
+
+  it('지난 대화 찾기(이슈 #412): 이 방 메시지만, 지운 글은 빼고, AI 답은 철강맨AI로, 묻는 사람이 못 보는 AI 답은 뺀다', async () => {
+    const restore = await revokeRolePermission('PURCHASE', 'SALES_ORDER_CREATE');
+    try {
+      const reply = (answer: string, withData: boolean) => ({ answer, sources: withData ? [{ kind: 'DATA' as const, id: 'get_sales_orders', label: '수주 · SO-2610-001' }] : [], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: true, actionCards: [] });
+      const ask = askSpy().mockResolvedValueOnce(reply('기억검색 출하 일정은 11월 20일이에요.', true)).mockResolvedValue(reply('알겠어요', false));
+      const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId, qualityId] });
+      const otherRoom = await createRoom(qualityCookie, { chatRoomType: 'GROUP', memberIds: [salesId] });
+      await send(qualityCookie, otherRoom.id, '기억검색 출하 일정은 다른 방 이야기');
+      await send(qualityCookie, room.id, '기억검색 출하 일정은 금요일로 정했어요');
+      const removed = await send(qualityCookie, room.id, '기억검색 출하 일정 지울 글');
+      await call('DELETE', `/messages/${removed.body.data.id}`, qualityCookie);
+
+      // 영업(박서영)이 묻고, 데이터를 쓴 AI 답이 방에 남는다
+      await send(salesCookie, room.id, '@AI 기억검색 출하 일정 알려줘');
+      await aiRepliesOf(room.id, 1);
+      // 영업과 구매가 각각 이어 묻는다
+      await send(salesCookie, room.id, '@AI 기억검색 출하 일정 다시');
+      await aiRepliesOf(room.id, 2);
+      await send(purchaseCookie, room.id, '@AI 기억검색 출하 일정 뭐였죠?');
+      await aiRepliesOf(room.id, 3);
+
+      const sourceOf = (index: number): HistorySearchSource => {
+        const options = ask.mock.calls[index][2];
+        if (!options?.historySearch) throw new Error('historySearch 없음');
+        return options.historySearch;
+      };
+      expect(ask.mock.calls.map((c) => c[2]?.historySearch?.kind)).toEqual(['room', 'room', 'room']);
+
+      const salesHits = await sourceOf(1).search(['기억검색', '출하', '일정'], 8);
+      const salesTexts = salesHits.map((h) => `${h.who}: ${h.text}`);
+      expect(salesTexts).toEqual(expect.arrayContaining(['서민지: 기억검색 출하 일정은 금요일로 정했어요', '박서영: @AI 기억검색 출하 일정 알려줘']));
+      // AI 답은 표식·접두어 없이 철강맨AI의 말로
+      expect(salesHits.filter((h) => h.who === '철강맨AI').map((h) => h.text)).toEqual([expect.stringContaining('기억검색 출하 일정은 11월 20일이에요.')]);
+      expect(salesTexts.join('\n')).not.toContain(AI_REPLY_MARK);
+      // 지운 글·다른 방 글은 없다. 새것부터, 방이라 where는 없다
+      expect(salesTexts.join('\n')).not.toContain('지울 글');
+      expect(salesTexts.join('\n')).not.toContain('다른 방');
+      expect(salesHits.every((h) => h.where === null)).toBe(true);
+      const times = salesHits.map((h) => h.at.getTime());
+      expect(times).toEqual([...times].sort((a, b) => b - a));
+
+      // 구매(정다은)는 수주 조회 권한이 없어 영업에게만 보인 AI 답을 찾을 수 없다. 사람 글은 그대로 찾는다
+      const purchaseHits = await sourceOf(2).search(['기억검색', '출하', '일정'], 8);
+      const purchaseTexts = purchaseHits.map((h) => `${h.who}: ${h.text}`);
+      expect(purchaseTexts.join('\n')).not.toContain('11월 20일');
+      expect(purchaseTexts).toEqual(expect.arrayContaining(['서민지: 기억검색 출하 일정은 금요일로 정했어요']));
+
+      // 한도를 지킨다
+      expect(await sourceOf(1).search(['기억검색'], 2)).toHaveLength(2);
+    } finally {
+      await restore();
+    }
+  });
 
   it('같은 보내기 id로 다시 보내면(재전송) AI를 다시 부르지 않는다', async () => {
     const ask = askSpy().mockResolvedValue({ answer: '답이에요', sources: [], model: 'test-model', latencyMs: 1, toolCalls: [], thinking: null, reasoningApplied: true, actionCards: [] });

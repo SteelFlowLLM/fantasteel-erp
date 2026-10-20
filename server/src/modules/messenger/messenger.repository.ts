@@ -178,6 +178,19 @@ export class MessengerRepository {
   }
 
   /** before보다 오래된 메시지를 최신순으로 take개 */
+  /** @AI 지난 대화 찾기(이슈 #412): 이 방의 지우지 않은 메시지 중 낱말을 모두 담은 것 (새것부터). 같이 안 나오면 하나라도 담은 것 */
+  async searchRoomMessages(tx: Tx, chatRoomId: number, words: readonly string[], take: number) {
+    const query = (mode: 'AND' | 'OR') =>
+      tx.message.findMany({
+        where: { chatRoomId, deletedAt: null, [mode]: words.map((word) => ({ content: { contains: word, mode: 'insensitive' as const } })) },
+        orderBy: { id: 'desc' },
+        take,
+        select: { content: true, createdAt: true, sender: { select: { employeeName: true } } },
+      });
+    const all = await query('AND');
+    return all.length || words.length === 1 ? all : query('OR');
+  }
+
   findMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
     return tx.message.findMany({
       where: { chatRoomId, id: before === undefined ? undefined : { lt: before } },

@@ -14,6 +14,7 @@ import type { Prisma } from '../../../generated/prisma/client';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../../prisma/prisma.service';
 import { MAX_HISTORY_TURNS } from '../assistant.prompt';
+import type { HistorySearchSource } from '../history/chat-memory';
 import { AiChatThreadRepository } from './ai-chat-thread.repository';
 import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTitle, questionMeta, readyCards, toChatMessageView, toChatThreadSummary, type AiChatQuestionInput } from './ai-chat-thread.view';
 
@@ -54,11 +55,22 @@ export class AiChatThreadService {
     });
   }
 
-  /** 이어 묻는 대화의 지난 대화 (최근 MAX_HISTORY_TURNS줄, 오래된 것부터). 화면이 보낸 history 대신 쓴다 */
-  async historyFor(user: AuthUser, threadId: number): Promise<AiAssistantTurn[]> {
+  /** 이어 묻는 대화의 지난 대화 (최근 take줄, 오래된 것부터). 화면이 보낸 history 대신 쓴다. take는 모델 문맥 길이로 정한다(이슈 #412) */
+  async historyFor(user: AuthUser, threadId: number, take: number = MAX_HISTORY_TURNS): Promise<AiAssistantTurn[]> {
     const thread = await this.owned(this.prisma, user, threadId);
-    const recent = await this.repository.findRecentMessages(this.prisma, thread.id, MAX_HISTORY_TURNS);
+    const recent = await this.repository.findRecentMessages(this.prisma, thread.id, take);
     return chatHistoryTurns(recent.reverse());
+  }
+
+  /** 지난 대화 찾기(이슈 #412): 내 저장한 대화만, 새것부터. 대화 제목을 함께 준다 */
+  searchSource(user: AuthUser): HistorySearchSource {
+    return {
+      kind: 'chat',
+      search: async (words, limit) => {
+        const rows = await this.repository.searchMessages(this.prisma, user.employeeId, words, limit);
+        return rows.map((row) => ({ at: row.createdAt, who: row.role === AI_CHAT_ROLE.USER ? '나' : '철강맨AI', where: row.thread.title, text: row.content }));
+      },
+    };
   }
 
   /** 질문과 답 한 쌍을 저장한다. threadId가 없으면 첫 질문으로 제목을 지어 새 대화를 만든다 */

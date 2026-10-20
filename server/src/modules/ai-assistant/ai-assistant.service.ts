@@ -49,6 +49,7 @@ import { AiUpdateCardService } from './ai-update-card.service';
 import { AssistantDriveToolbox, type DriveToolSession } from './drive/assistant-drive-toolbox';
 import { DRIVE_UNTRUSTED_NOTE, driveTextBlock, type DriveReadOutcome } from './drive/drive-file-reader';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
+import { historyBudget, HistorySearchSession, type HistorySearchSource } from './history/chat-memory';
 import { AiResearchCardService } from './ai-research-card.service';
 
 /** 답을 만드는 과정의 이벤트를 받는 쪽 (스트리밍 API). 없으면 한 번에 답만 돌려준다 */
@@ -63,6 +64,8 @@ export interface PreparedAsk {
 export interface PrepareOptions {
   /** 화면이 답을 실시간으로 보고 있는지 (스트리밍 API). 아니면 웹 도구를 알리지 않는다 (이슈 #367) */
   interactive?: boolean;
+  /** 지난 대화 찾기의 찾는 곳 (이슈 #412). 사내 채팅 @AI는 메신저가 그 방을 넘긴다. 없으면 패널은 내 저장한 대화 */
+  historySearch?: HistorySearchSource;
 }
 
 const NO_VISION = '지금 모델은 사진을 볼 수 없어요. 사진을 빼고 물어보거나, 관리자에게 사진을 보는 모델을 요청해 주세요';
@@ -180,8 +183,8 @@ export class AiAssistantService {
     return this.toolbox.canViewAll(user, toolNames);
   }
 
-  async ask(user: AuthUser, input: AiAssistantMessageInput): Promise<AiAssistantReplyView> {
-    const prepared = await this.prepare(user, input);
+  async ask(user: AuthUser, input: AiAssistantMessageInput, options: PrepareOptions = {}): Promise<AiAssistantReplyView> {
+    const prepared = await this.prepare(user, input, options);
     try {
       return await prepared.run();
     } catch (error) {
@@ -206,7 +209,11 @@ export class AiAssistantService {
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
     const saving = options.interactive === true && (input.saveThread === true || input.threadId !== undefined);
-    const history = recentHistory(saving ? (input.threadId === undefined ? [] : await this.chatThreads.historyFor(user, input.threadId)) : (input.history ?? []));
+    const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    // 지난 대화는 모델 문맥 길이만큼 (이슈 #412). 넘치는 옛 이야기는 지난 대화 찾기 도구로 읽는다
+    const budget = historyBudget(await this.llm.modelContextLength(endpoint, model));
+    const history = recentHistory(saving ? (input.threadId === undefined ? [] : await this.chatThreads.historyFor(user, input.threadId, budget.maxTurns)) : (input.history ?? []), budget);
+    const historySource = options.historySearch ?? (options.interactive === true ? this.chatThreads.searchSource(user) : null);
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
     const manualGuides = findManualGuides(input.question);
@@ -234,6 +241,8 @@ export class AiAssistantService {
       manualGuides,
       actionCards: input.actionCards === true,
       history,
+      historyBudget: budget,
+      historySearch: historySource?.kind ?? null,
       question: input.question,
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
       browserTools: browserOn,
@@ -242,7 +251,6 @@ export class AiAssistantService {
       driveTools: driveOn,
     });
     const profile = assistantProfile(input.reasoning);
-    const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
     const questionImages: AiAssistantImageInput[] = [...(input.images ?? []), ...(attached?.images ?? [])];
     const questionText = attached?.text ? `${input.question}\n\n${attached.text}` : input.question;
     if (questionImages.length) {
@@ -292,6 +300,7 @@ export class AiAssistantService {
         const notion: NotionToolSession | null = notionOn && streaming ? this.notionTools.session(user, { actionCards: input.actionCards === true }) : null;
         // Drive: 읽기만. 사진은 도구 결과(글만 받는다) 대신 그 차례 뒤의 user 메시지로 붙인다 (이슈 #398 2단계)
         const drive: DriveToolSession | null = driveOn && streaming ? this.driveTools.session(visionOf) : null;
+        const historySearch = historySource ? new HistorySearchSession(historySource) : null;
         const tools = [
           ...this.toolbox.definitions({ actionCards: input.actionCards }),
           ...(webSearch && web ? this.webTools.definitions() : []),
@@ -299,6 +308,7 @@ export class AiAssistantService {
           ...(screen ? this.screenTools.definitions() : []),
           ...(notion ? this.notionTools.definitions({ actionCards: input.actionCards === true }) : []),
           ...(drive ? this.driveTools.definitions() : []),
+          ...(historySearch ? [historySearch.definition] : []),
         ];
         const maxRounds = Math.max(
           MAX_TOOL_ROUNDS,
@@ -354,6 +364,8 @@ export class AiAssistantService {
                 webSources = driveResult.webSources;
                 roundImages.push(...(driveResult.images ?? []));
                 if (toolCall.name !== 'drive_search') for (const source of driveResult.webSources) web?.rememberVisited(source.url, source.title);
+              } else if (historySearch?.has(toolCall.name)) {
+                result = { content: await historySearch.run(toolCall), source: null };
               } else {
                 result = await this.toolbox.run(user, toolCall);
                 if (toolCall.name === READ_KNOWLEDGE_TOOL) readKnowledge.add(toolCall.arguments);
@@ -377,8 +389,10 @@ export class AiAssistantService {
           }
 
           const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
-          // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다
-          if (input.actionCards && actionCards.length === 0 && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
+          // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다.
+          // 지난 대화를 찾아 읽은 답은 "그때 카드를 만들었어요"처럼 지난 일을 옮기는 것이라 바로잡지 않는다 (이슈 #412)
+          const recalled = toolCalls.some((call) => historySearch?.has(call.name) === true);
+          if (input.actionCards && actionCards.length === 0 && !recalled && claimsCardMade(parsed.answer)) parsed.answer = CARD_NOT_MADE;
           const thinking = reply.reasoning ?? splitThinking(reply.content).thinking;
           const webFinal = web?.finalize(parsed.answer) ?? null;
           const finalAnswer = webFinal?.answer ?? parsed.answer;

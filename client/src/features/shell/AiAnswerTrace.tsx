@@ -19,6 +19,9 @@ const PRE = 'max-h-64 overflow-auto rounded-xs bg-surface-2 px-2 py-1.5 font-mon
 /** 조회 도구의 한글 제목 (모르는 도구는 이름 그대로) */
 export const toolTitleOf = (name: string): string => AI_ASSISTANT_TOOL_TITLE[name] ?? name;
 
+/** 지난 대화 찾기 (이슈 #412) */
+const historyToolRunningText = (name: string): string | null => (name === 'search_chat_history' || name === 'search_room_messages' ? ' … 찾는 중' : null);
+
 type ThinkingStep = Extract<AiTimelineStep, { kind: 'thinking' }>;
 
 /** 생각에 쓴 초. 끝나지 않은 생각은 now까지 */
@@ -83,7 +86,7 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
         <b className="font-semibold">{toolTitleOf(step.name)}</b>
         {result
           ? ` · 완료 ${formatDuration(result.durationMs)}${webSummary ? ` · ${webSummary}` : result.label ? ` · ${result.label}` : ''}`
-          : (webToolRunningText(step.name) ?? browserToolRunningText(step.name) ?? notionToolRunningText(step.name) ?? driveToolRunningText(step.name) ?? ' … 조회 중')}
+          : (webToolRunningText(step.name) ?? browserToolRunningText(step.name) ?? notionToolRunningText(step.name) ?? driveToolRunningText(step.name) ?? historyToolRunningText(step.name) ?? ' … 조회 중')}
       </span>
     </p>
   );
