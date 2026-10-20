@@ -28,11 +28,13 @@ export function chromeCandidates(platform: NodeJS.Platform, env: NodeJS.ProcessE
   return [];
 }
 
-/** Chrome을 띄울 때 넘기는 것: 실행 파일(null이면 channel: 'chrome'), 프록시, 샌드박스 */
+/** Chrome을 띄울 때 넘기는 것: 실행 파일(null이면 channel: 'chrome'), 프록시, 샌드박스, 창을 보일지 */
 export interface ChromeLaunch {
   executablePath: string | null;
   proxy: { server: string; username: string; password: string };
   sandbox: boolean;
+  /** false면 서버 컴퓨터 화면에 Chrome 창이 떠서 AI가 움직이는 것을 볼 수 있다 (BROWSER_HEADLESS=false, 이슈 #423) */
+  headless: boolean;
 }
 
 /**
@@ -57,11 +59,12 @@ export interface BrowserPoolOptions {
 const launchChrome = (options: ChromeLaunch): Promise<Browser> =>
   chromium.launch({
     ...(options.executablePath ? { executablePath: options.executablePath } : { channel: 'chrome' }),
-    headless: true,
+    headless: options.headless,
     chromiumSandbox: options.sandbox,
     // 모든 연결을 우리 프록시로. <-loopback>: Chrome이 localhost·127.0.0.1을 프록시 없이 바로 여는 기본 동작을 끈다
     proxy: { ...options.proxy, bypass: '<-loopback>' },
-    args: CHROME_ARGS,
+    // 창을 띄울 때는 페이지(1280×800)가 다 보이게 창을 조금 크게
+    args: options.headless ? CHROME_ARGS : [...CHROME_ARGS, '--window-size=1300,940'],
     timeout: 30_000,
   });
 
@@ -113,10 +116,14 @@ export class BrowserPool {
     return { available: true };
   }
 
-  /** 새 컨텍스트. 2개를 이미 쓰고 있으면 null. 쓸 수 없으면 BrowserUnavailableError */
-  async openContext(configure: (browser: Browser) => Promise<BrowserContext>): Promise<BrowserContext | null> {
+  /**
+   * 새 컨텍스트. 2개를 이미 쓰고 있으면 makeRoom(쉬고 있는 대화의 탭 닫기, 이슈 #423)을 한 번 불러 보고, 그래도 꽉 찼으면 null.
+   * 쓸 수 없으면 BrowserUnavailableError
+   */
+  async openContext(configure: (browser: Browser) => Promise<BrowserContext>, makeRoom?: () => Promise<boolean>): Promise<BrowserContext | null> {
     const availability = this.availability();
     if (!availability.available) throw new BrowserUnavailableError(availability.reason ?? '브라우저를 쓸 수 없어요');
+    if (this.contexts.size + this.opening >= this.maxContexts && makeRoom) await makeRoom();
     if (this.contexts.size + this.opening >= this.maxContexts) return null;
     this.opening += 1;
     this.clearIdle();
@@ -153,6 +160,11 @@ export class BrowserPool {
     if (this.contexts.delete(context)) this.scheduleIdle();
   }
 
+  /** 창 없이 띄우는 것이 기본. 개발·시연 때 BROWSER_HEADLESS=false면 서버 컴퓨터에 창을 띄운다 */
+  private get headless(): boolean {
+    return this.env.BROWSER_HEADLESS?.trim().toLowerCase() !== 'false';
+  }
+
   /** Chrome 샌드박스는 늘 켠다. 켜지지 않는 Linux 서버(root·컨테이너)만 BROWSER_NO_SANDBOX=true로 끈다 */
   private get sandbox(): boolean {
     return this.env.BROWSER_NO_SANDBOX?.trim().toLowerCase() !== 'true';
@@ -166,7 +178,7 @@ export class BrowserPool {
       this.proxy = proxy;
       const launching = proxy
         .start()
-        .then(() => this.launcher({ executablePath: executable.path, proxy: { server: proxy.url, username: proxy.username, password: proxy.password }, sandbox: this.sandbox }))
+        .then(() => this.launcher({ executablePath: executable.path, proxy: { server: proxy.url, username: proxy.username, password: proxy.password }, sandbox: this.sandbox, headless: this.headless }))
         .then(
           (browser) => {
             this.launchFailedAt = null;

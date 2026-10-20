@@ -195,6 +195,51 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     }
   });
 
+  it('답이 끝나도 탭을 열어 두고 같은 열쇠의 다음 질문이 이어 쓴다. 멈추면 닫고, 자리가 모자라면 가장 오래 쉰 탭부터 닫는다 (이슈 #423)', async () => {
+    const box = toolbox();
+    const first = box.session({ question: 'https://example.test/ 에서 시세 봐줘', web: web() }, 'k1');
+    const opened = await first.run(call('browser_open', { url: 'https://example.test/' }));
+    expect(opened.content).toContain('heading "오늘의 강판 시세"');
+    await box.finish(first, 'k1', false);
+    expect(pool.activeContexts).toBe(1);
+    expect(box.openPage('k1')).toEqual({ title: '강판 시세 안내', url: 'https://example.test/' });
+
+    // 다음 질문: 같은 세션, browser_open 없이 지금 화면을 읽고 이어서 누른다. 새 질문의 횟수·시간은 새로 센다
+    const link = web();
+    const second = box.session({ question: '다음 쪽으로 가줘', web: link }, 'k1');
+    expect(second).toBe(first);
+    expect(link.visited).toEqual(['https://example.test/']);
+    const snap = await second.run(call('browser_snapshot'));
+    expect(snap.content).toContain('heading "오늘의 강판 시세"');
+    const next = await second.run(call('browser_click', { ref: refOf(snap, 'link "다음"') }));
+    expect(next.content).toContain('heading "두 번째 쪽이에요"');
+    // 이전 답에서 본 주소는 질문에 없어도 다시 열 수 있고, 처음 보는 주소는 막는다
+    const reopened = await second.run(call('browser_open', { url: 'https://example.test/' }));
+    expect(reopened.content).toContain('heading "오늘의 강판 시세"');
+    expect(errorOf(await second.run(call('browser_open', { url: 'https://example.test/never-seen' })))).toContain('질문에 없던 주소');
+    await box.finish(second, 'k1', false);
+
+    // 두 번째 대화 탭, 세 번째가 필요하면 가장 오래 쉰 k1이 닫힌다
+    const other = box.session({ question: 'https://example.test/page/2 봐줘', web: web() }, 'k2');
+    await other.run(call('browser_open', { url: 'https://example.test/page/2' }));
+    await box.finish(other, 'k2', false);
+    expect(pool.activeContexts).toBe(2);
+    const third = box.session({ question: 'https://example.test/ 봐줘', web: web() }, 'k3');
+    const thirdOpened = await third.run(call('browser_open', { url: 'https://example.test/' }));
+    expect(thirdOpened.content).toContain('heading "오늘의 강판 시세"');
+    expect(box.openPage('k1')).toBeNull();
+    expect(box.openPage('k2')).not.toBeNull();
+    expect(pool.activeContexts).toBe(2);
+
+    // 멈춘 답은 열어 두지 않고 닫는다
+    await box.finish(third, 'k3', true);
+    expect(box.openPage('k3')).toBeNull();
+    expect(pool.activeContexts).toBe(1);
+    const parked = box.session({ question: '봐줘', web: web() }, 'k2');
+    await box.finish(parked, 'k2', true);
+    expect(pool.activeContexts).toBe(0);
+  });
+
   it('한 답 시간 상한이 지나면 컨텍스트를 닫고, 멈추면 바로 닫는다', async () => {
     const timed = toolbox(1_000).session({ question: 'https://example.test/', web: web() });
     await timed.run(call('browser_open', { url: 'https://example.test/' }));

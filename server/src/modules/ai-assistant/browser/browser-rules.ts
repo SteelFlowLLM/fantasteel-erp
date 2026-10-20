@@ -196,3 +196,32 @@ export function formatSnapshot(snapshot: PageSnapshot, maxChars: number = SNAPSH
   ].filter((n): n is string => n !== null);
   return [`[브라우저 화면] ${host}`, UNTRUSTED_NOTE, wrapUntrusted(`browser:${host}`, [...head, ...lines].join('\n')), ...notes].join('\n');
 }
+
+/**
+ * 링크 없이 열 수 있는 시작 사이트 (이슈 #423). 검색·백과·공공·통계·철강·무역 사이트를 골랐다(가정값).
+ * BROWSER_START_SITES(쉼표로 나눈 호스트, 빈 값이면 없음)로 바꾼다. 그 호스트와 하위 호스트(예: go.kr → www.kosis.go.kr)를 연다.
+ * 다른 열기 규칙(SSRF 막기·회사 안 정보 막기·요청 확인)은 그대로 거친다
+ */
+export const DEFAULT_BROWSER_START_SITES = ['naver.com', 'daum.net', 'wikipedia.org', 'namu.wiki', 'go.kr', 'kosis.kr', 'kosa.or.kr', 'worldsteel.org', 'kita.net'];
+
+export function browserStartSites(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env.BROWSER_START_SITES;
+  if (raw === undefined) return DEFAULT_BROWSER_START_SITES;
+  return raw
+    .split(',')
+    .map((host) => host.trim().toLowerCase().replace(/^\.+|\.+$/g, ''))
+    .filter((host) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(host) || /^[a-z0-9-]+\.[a-z0-9-]+$/.test(host));
+}
+
+/** 주소가 시작 사이트(또는 그 하위 호스트)인지. https·http만 */
+export function isStartSiteUrl(url: string, sites: readonly string[]): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return sites.some((site) => host === site || host.endsWith(`.${site}`));
+}

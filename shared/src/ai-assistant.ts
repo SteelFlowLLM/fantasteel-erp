@@ -53,6 +53,11 @@ export interface AiAssistantMessageInput {
    */
   browser?: boolean;
   /**
+   * 화면이 대화마다 만드는 열쇠(UUID). 같은 열쇠의 다음 질문은 열어 둔 브라우저 탭을 이어 쓴다 (이슈 #423).
+   * 서버는 사원 번호와 묶어 쓰므로 남의 열쇠를 보내도 남의 탭은 쓰지 않는다
+   */
+  browserSessionId?: string;
+  /**
    * 화면 조작을 켠 질문이면 true (문서에 없는 기능, 이슈 #382, 시험 중). 서버에서 AI_SCREEN_CONTROL_ENABLED=true이고 실시간 답 API일 때만
    * 화면 도구(ui_snapshot·ui_navigate·ui_click·ui_fill·ui_select)를 모델에 알린다. 동작은 사용자의 브라우저가 한다
    */
