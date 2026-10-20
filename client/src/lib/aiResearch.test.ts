@@ -1,6 +1,6 @@
 import type { AiResearchEventView, AiResearchPlan, AiResearchRunView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
 
 const at = '2026-10-17T01:00:00.000Z';
 const sources = [
@@ -142,6 +142,45 @@ describe('계획 고치기', () => {
     expect(isPlanChanged(plan, { ...plan, title: ' 조사 ' })).toBe(false);
     expect(isPlanChanged(plan, { ...plan, title: '다른' })).toBe(true);
     expect(normalizePlan({ title: ' a ', steps: [{ title: ' b', query: 'c ' }] })).toEqual({ title: 'a', steps: [{ title: 'b', query: 'c' }] });
+  });
+});
+
+describe('계획을 말로 고치기 표시 (이슈 #416)', () => {
+  const base: AiResearchPlan = {
+    title: '조사',
+    steps: [
+      { title: '현황', query: '열연 가격' },
+      { title: '원인', query: '철광석 가격' },
+      { title: '반론', query: '열연 가격 하락 전망' },
+    ],
+  };
+  it('같은 검색어는 그대로(이름이 다르면 바뀜), 같은 이름은 검색어가 바뀐 것, 나머지는 새 단계·빠진 단계', () => {
+    const next: AiResearchPlan = {
+      title: '조사',
+      steps: [
+        { title: '현황', query: '가격, 열연' },
+        { title: '원인', query: '원료탄 가격 통계' },
+        { title: '가격 전망', query: '열연 가격 전망 2026' },
+      ],
+    };
+    const diff = planSuggestionDiff(base, next);
+    expect(diff.marks).toEqual(['same', 'changed', 'new']);
+    expect(diff.removed.map((s) => s.title)).toEqual(['반론']);
+    expect(diff.titleChanged).toBe(false);
+    expect(planSuggestionSummary(diff)).toBe('새 단계 1 · 바뀐 단계 1 · 빠진 단계 1');
+  });
+  it('순서만 바꾸거나 공백만 다르면 그대로이고, 제목이 바뀌면 알린다', () => {
+    const diff = planSuggestionDiff(base, { title: '새 조사', steps: [base.steps[2], base.steps[0], { title: ' 원인 ', query: '철광석  가격' }] });
+    expect(diff.marks).toEqual(['same', 'same', 'same']);
+    expect(diff.removed).toEqual([]);
+    expect(planSuggestionSummary(diff)).toBe('제목 바뀜');
+    expect(planSuggestionSummary(planSuggestionDiff(base, base))).toBeNull();
+  });
+  it('검색어가 같고 이름만 바뀌면 바뀐 단계, 빈 칸 단계는 이름으로 짝짓지 않는다', () => {
+    const diff = planSuggestionDiff({ title: 't', steps: [{ title: '', query: '' }, { title: 'A', query: '열연 가격' }] }, { title: 't', steps: [{ title: 'A2', query: '열연 가격' }, { title: '', query: '냉연' }] });
+    expect(diff.marks).toEqual(['changed', 'new']);
+    expect(diff.removed).toEqual([{ title: '', query: '' }]);
+    expect(planQueryKey('탄소 배출, 고로')).toBe(planQueryKey('고로 탄소 배출 고로'));
   });
 });
 

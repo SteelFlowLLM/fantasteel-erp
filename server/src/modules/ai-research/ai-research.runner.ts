@@ -7,11 +7,12 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/assistant-web-toolbox';
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
-import { LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
+import { LlmClient, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
 import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
+import { askResearchJson, withNoThinkHint } from './ai-research.llm';
 import { notifyResearchFinished } from './ai-research.notify';
 import { seoulToday } from '../../common/time/seoul-date';
 import {
@@ -35,7 +36,6 @@ import {
   fallbackAudit,
   fallbackPlan,
   isRecord,
-  parseLenientJson,
   queryKey,
   readAudit,
   readBudget,
@@ -558,27 +558,14 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model };
   }
 
-  /**
-   * JSON 형식을 강제해 묻고 너그럽게 읽는다: 형식대로 왔으면 그 값, 아니면 답 글·생각 글에서 조건에 맞는 마지막 객체.
-   * 그래도 없으면 null (부르는 쪽이 대신값을 쓴다). 연결 실패·시간 초과(LlmRequestError)·끊김은 던진다.
-   */
+  /** JSON으로 묻는다 (askResearchJson). 끊겼으면(취소·표시 잃음) 결과를 버리고 멈춘다 */
   private async askJson(ctx: RunContext, endpoint: Endpoint, messages: ChatMessage[], schema: LlmJsonSchema, accept: (v: Record<string, unknown>) => boolean): Promise<Record<string, unknown> | null> {
-    const ask = async (msgs: ChatMessage[], maxTokens: number): Promise<{ value: Record<string, unknown> | null; empty: boolean }> => {
-      const options = { timeoutMs: this.config.jsonTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_JSON, signal: ctx.abort.signal };
-      try {
-        const reply = await this.llmClient.chatJsonWithText(endpoint, endpoint.model, msgs, schema, options);
-        if (isRecord(reply.value) && accept(reply.value)) return { value: reply.value, empty: false };
-        return { value: parseLenientJson([reply.rawText, reply.thinking], accept), empty: !reply.rawText.trim() };
-      } catch (error) {
-        if (ctx.abort.signal.aborted) throw new LeaseLostError();
-        if (error instanceof LlmJsonParseError) return { value: parseLenientJson([error.rawText, error.thinking], accept), empty: !error.rawText.trim() };
-        throw error;
-      }
-    };
-    const first = await ask(messages, JSON_MAX_TOKENS);
-    if (first.value || !first.empty) return first.value;
-    // content가 빈 답(생각에 예산을 다 씀)이면 한 번만 더 크게·생각 없이 부탁한다
-    return (await ask(withNoThinkHint(messages), retryMaxTokens(JSON_MAX_TOKENS))).value;
+    try {
+      return await askResearchJson(this.llmClient, endpoint, messages, schema, accept, { timeoutMs: this.config.jsonTimeoutMs, signal: ctx.abort.signal });
+    } catch (error) {
+      if (ctx.abort.signal.aborted) throw new LeaseLostError();
+      throw error;
+    }
   }
 
   /** 단계 사이: 취소됐거나 남이 맡았으면 하던 일을 끊고 멈춘다 */
@@ -607,14 +594,9 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   }
 }
 
-const JSON_MAX_TOKENS = 4000;
 /** 단계 기록은 이만큼까지 남긴다 (단계 상한 30보다 넉넉히) */
 const NOTES_KEPT = 60;
-const RETRY_MAX_TOKENS_CAP = 16000;
 const NEAR_EMPTY_CHARS = 5;
-const NO_THINK_HINT = '지금은 생각 과정 없이 바로 답만 써요. /no_think';
-
-const retryMaxTokens = (base: number): number => Math.min(base * 2, RETRY_MAX_TOKENS_CAP);
 
 /** 끊긴 보고서를 이어 쓰게 하는 메시지: 앞 요청 + 끊긴 답 + 이어 쓰기 부탁 */
 export function continuationMessages(messages: ChatMessage[], partial: string): ChatMessage[] {
@@ -635,13 +617,6 @@ export function mergeContinuation(partial: string, more: string): string {
   }
   const joiner = /\n\s*$/.test(partial) || /^\s*\n/.test(more) || /^#{1,6}\s/.test(trimmedNext) ? '\n' : /\s$/.test(partial) || /^\s/.test(more) ? ' ' : '';
   return `${head}${joiner}${trimmedNext}`;
-}
-
-/** 마지막 user 메시지 끝에 '생각하지 말고 바로 답' 지시를 붙인다 (/no_think는 Qwen 외 모델에는 그냥 글) */
-export function withNoThinkHint(messages: ChatMessage[]): ChatMessage[] {
-  const index = messages.map((m) => m.role).lastIndexOf('user');
-  if (index < 0) return [...messages, { role: 'user', content: NO_THINK_HINT }];
-  return messages.map((m, i) => (i === index ? { ...m, content: `${m.content}\n\n${NO_THINK_HINT}` } : m));
 }
 
 const released = { leaseOwner: null, leaseExpiresAt: null } as const;

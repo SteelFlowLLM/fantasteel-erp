@@ -5,6 +5,7 @@ import {
   type AiResearchCapabilities,
   type AiResearchNotionExportResult,
   type AiResearchPlan,
+  type AiResearchPlanSuggestion,
   type AiResearchRunSummaryView,
   type AiResearchRunView,
   type AiResearchSeed,
@@ -17,11 +18,14 @@ import type { AiResearchRun, Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
+import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery } from './dto/ai-research.dto';
+import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery, SuggestAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, seedSources, storedPlan, storedSeed, storedState } from './ai-research.rules';
-import { AiResearchRunner } from './ai-research.runner';
+import { askResearchJson } from './ai-research.llm';
+import { buildPlanReviseMessages, PLAN_JSON_SCHEMA } from './ai-research.prompt';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, readPlan, seedSources, storedPlan, storedSeed, storedState } from './ai-research.rules';
+import { AiResearchRunner, DEFAULT_RUNNER_CONFIG } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
 import { toRunSummary, toRunView } from './ai-research.view';
@@ -48,6 +52,7 @@ export class AiResearchService {
     private readonly prisma: PrismaService,
     private readonly repository: AiResearchRepository,
     private readonly llmSettings: LlmSettingsStore,
+    private readonly llmClient: LlmClient,
     private readonly runner: AiResearchRunner,
     private readonly notion: NotionPageService,
   ) {}
@@ -120,6 +125,33 @@ export class AiResearchService {
       if (count === 0) throw conflictFor(run, revision);
       return this.view(tx, await this.owned(tx, user, id));
     });
+  }
+
+  /**
+   * 계획을 말로 고치기 (이슈 #416): 화면의 지금 계획(저장하지 않은 고침 포함)과 부탁을 모델에 보내 고친 계획 전체를 받는다. 저장하지 않는다.
+   * 받은 계획은 모델이 세운 계획과 같이 다듬는다(검색어 확인을 통과한 단계만·같은 검색어 하나·6단계까지). 저장·시작은 PUT plan·start가 다시 확인한다.
+   * 일꾼을 거치지 않고 이 요청에서 바로 부른다(사원이 기다리는 짧은 JSON 하나). 일꾼이 다른 조사를 하고 있으면 LLM 요청이 겹칠 수 있다.
+   */
+  async suggestPlan(user: AuthUser, id: number, dto: SuggestAiResearchPlanDto): Promise<AiResearchPlanSuggestion> {
+    const settings = await this.llmSettings.read();
+    if (!settings.model) throw new AppException('RES-005');
+    const run = await this.owned(this.prisma, user, id);
+    if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) throw new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고칠 수 있어요');
+    const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed) });
+    let value: Record<string, unknown> | null;
+    try {
+      value = await askResearchJson(this.llmClient, { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model }, messages, PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps), {
+        timeoutMs: DEFAULT_RUNNER_CONFIG.jsonTimeoutMs,
+      });
+    } catch (error) {
+      if (!(error instanceof LlmRequestError)) throw error;
+      this.logger.warn(`조사 ${id} 계획 말로 고치기 LLM 실패: ${error.message.slice(0, 160)}`);
+      throw new AppException('RES-008', `AI 응답을 받지 못했어요(${error.message.slice(0, 160)}). 잠시 뒤 다시 해 주세요`);
+    }
+    // 모델이 제목을 비우면 지금 제목을 둔다
+    const read = readPlan(value, dto.plan.title.trim() || run.question);
+    if (!read) throw new AppException('RES-008');
+    return { plan: read.plan, dropped: read.dropped };
   }
 
   /**

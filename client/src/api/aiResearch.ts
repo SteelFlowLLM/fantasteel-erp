@@ -5,6 +5,7 @@ import type {
   AiResearchCapabilities,
   AiResearchNotionExportResult,
   AiResearchPlan,
+  AiResearchPlanSuggestion,
   AiResearchRunSummaryView,
   AiResearchRunView,
   PageResult,
@@ -27,6 +28,9 @@ export const aiResearchApi = {
   create: (input: CreateAiResearchRunInput): Promise<AiResearchRunView> => serverRequest('POST', '/ai-research/runs', { body: input }),
   exportToNotion: (id: number): Promise<AiResearchNotionExportResult> => serverRequest('POST', `/ai-research/runs/${id}/notion-export`),
   updatePlan: (id: number, revision: number, plan: AiResearchPlan): Promise<AiResearchRunView> => serverRequest('PUT', `/ai-research/runs/${id}/plan`, { body: { revision, plan } }),
+  /** 계획을 말로 고치기 (이슈 #416): 화면의 지금 계획과 부탁을 보내 고친 계획을 받는다. 서버는 저장하지 않는다 */
+  suggestPlan: (id: number, instruction: string, plan: AiResearchPlan): Promise<AiResearchPlanSuggestion> =>
+    serverRequest('POST', `/ai-research/runs/${id}/plan/suggest`, { body: { instruction: instruction.trim(), plan } }),
   /** 제목만 바꾼다 (계획이 있으면 어느 상태에서나, 판 +1) */
   rename: (id: number, revision: number, title: string): Promise<AiResearchRunView> => serverRequest('PATCH', `/ai-research/runs/${id}/title`, { body: { revision, title: title.trim() } }),
   /** 끝난 조사의 질문·계획을 복사해 계획 확인 대기인 새 조사를 만든다 */
