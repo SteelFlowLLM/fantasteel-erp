@@ -370,8 +370,10 @@ describe('브라우저 모음 (Chrome 없이)', () => {
     const openedSession = async (toolbox: AssistantBrowserToolbox, pool: BrowserPool, key: string | null, page: { title: string; url: string } | null = { title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' }) => {
       const session = toolbox.session({ question: '요로 알려줘', web: web() }, key);
       const context = await pool.openContext(async () => fakeContext() as unknown as BrowserContext);
-      Object.assign(session as unknown as Record<string, unknown>, { context, page: {}, lastPage: page });
-      return { session, context: context as BrowserContext };
+      // 페이지는 닫혔는지만 묻는 가짜다: 탭이 밖에서 닫혔는지 확인하는 attach·park가 쓴다 (이슈 #425)
+      const fakePage = { closed: false, isClosed: () => fakePage.closed };
+      Object.assign(session as unknown as Record<string, unknown>, { context, page: fakePage, lastPage: page });
+      return { session, context: context as BrowserContext, page: fakePage };
     };
     const setup = () => {
       const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: async () => fakeBrowser() as unknown as Browser });
@@ -474,6 +476,107 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       await toolbox.finish(bound, 'k1', false);
       expect(toolbox.openPage('k1')).toBeNull();
       await pool.shutdown();
+    });
+
+    it('탭이 밖에서 닫혔으면(page.isClosed) 이어 받지도 열어 두지도 않고 닫는다 (이슈 #425)', async () => {
+      const { pool, toolbox } = setup();
+      const { session, page, context } = await openedSession(toolbox, pool, 'k1');
+      const bound = session as BrowserToolSession;
+      page.closed = true;
+      expect(bound.park()).toBe(false);
+      expect(bound.attach({ question: '봐줘', web: web() })).toBe(false);
+      // finish는 park가 거절하면 닫는다
+      await toolbox.finish(bound, 'k1', false);
+      expect((context as unknown as { closed: boolean }).closed).toBe(true);
+      expect(toolbox.openPage('k1')).toBeNull();
+      await pool.shutdown();
+    });
+
+    it('열어 둔 탭이 그 사이 닫혔으면 같은 열쇠로 물어도 새 세션을 준다 (이슈 #425)', async () => {
+      const { pool, toolbox } = setup();
+      const { session, page } = await openedSession(toolbox, pool, 'k1');
+      await toolbox.finish(session, 'k1', false);
+      expect(toolbox.openPage('k1')).not.toBeNull();
+      page.closed = true;
+      const next = toolbox.session({ question: '봐줘', web: web() }, 'k1');
+      expect(next).not.toBe(session);
+      expect(toolbox.openPage('k1')).toBeNull();
+      await next.close();
+      await pool.shutdown();
+    });
+
+    describe('멈춘 동안 시간 제한 잡기 (holdDeadline, 이슈 #425)', () => {
+      it('연 페이지가 없어 시간을 세고 있지 않으면 아무 일도 하지 않는 함수를 돌려준다', () => {
+        const { toolbox } = setup();
+        const session = toolbox.session({ question: '봐줘', web: web() }) as BrowserToolSession;
+        const release = session.holdDeadline();
+        expect(release).toEqual(expect.any(Function));
+        expect(release()).toBeUndefined();
+        // 놓아도 시간 제한이 새로 생기지 않는다
+        expect((session as unknown as { deadline: number | null }).deadline).toBeNull();
+        expect((session as unknown as { deadlineTimer: unknown }).deadlineTimer).toBeNull();
+      });
+
+      it('닫힌 세션에서도 아무 일도 하지 않는다', async () => {
+        const { pool, toolbox } = setup();
+        const { session } = await openedSession(toolbox, pool, null);
+        const bound = session as BrowserToolSession;
+        await bound.close();
+        const release = bound.holdDeadline();
+        release();
+        expect((bound as unknown as { deadlineTimer: unknown }).deadlineTimer).toBeNull();
+        await pool.shutdown();
+      });
+
+      it('잡는 동안은 시간이 지나도 컨텍스트를 닫지 않고, 놓으면 남은 시간부터 다시 센다', async () => {
+        jest.useFakeTimers();
+        try {
+          const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: async () => fakeBrowser() as unknown as Browser });
+          const toolbox = new AssistantBrowserToolbox(pool, { timeLimitMs: 1_000 });
+          const { session, context } = await openedSession(toolbox, pool, null);
+          const bound = session as BrowserToolSession;
+          const closedOf = () => (context as unknown as { closed: boolean }).closed;
+          // 새 질문에 붙이면 시간 제한을 새로 세기 시작한다
+          expect(bound.attach({ question: '봐줘', web: web() })).toBe(true);
+
+          await jest.advanceTimersByTimeAsync(400);
+          const release = bound.holdDeadline();
+          // 한참 멈춰 있어도 시간 제한이 닫지 않는다
+          await jest.advanceTimersByTimeAsync(60_000);
+          expect(closedOf()).toBe(false);
+
+          release();
+          await jest.advanceTimersByTimeAsync(599);
+          expect(closedOf()).toBe(false);
+          await jest.advanceTimersByTimeAsync(2);
+          expect(closedOf()).toBe(true);
+          // 놓는 함수를 또 불러도 이미 닫혔으니 아무 일도 없다
+          release();
+          await pool.shutdown();
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('놓는 함수를 두 번 불러도 시간 제한은 하나만 센다', async () => {
+        jest.useFakeTimers();
+        try {
+          const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: async () => fakeBrowser() as unknown as Browser });
+          const toolbox = new AssistantBrowserToolbox(pool, { timeLimitMs: 1_000 });
+          const { session } = await openedSession(toolbox, pool, null);
+          const bound = session as BrowserToolSession;
+          bound.attach({ question: '봐줘', web: web() });
+          const release = bound.holdDeadline();
+          release();
+          const first = (bound as unknown as { deadlineTimer: unknown }).deadlineTimer;
+          release();
+          expect((bound as unknown as { deadlineTimer: unknown }).deadlineTimer).toBe(first);
+          await bound.close();
+          await pool.shutdown();
+        } finally {
+          jest.useRealTimers();
+        }
+      });
     });
 
     it('이어 받으면 이전 답에서 본 주소는 다시 열 수 있게 되고, 모르는 주소는 여전히 막는다', async () => {

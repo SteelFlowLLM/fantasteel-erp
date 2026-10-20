@@ -39,6 +39,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | DELETE | `ai-assistant/threads/:id` | 없음 (이슈 #399) | 로그인만. 내 대화만(`AST-001`) | 지운 대화의 목록 줄. 메시지까지 완전히 지운다(되살릴 수 없음) |
 | POST | `ai-assistant/action-cards/execute` | 🟡 명세에 없음 | 로그인만(구매요청 카드는 구매요청 등록 USE를 service가 확인) | `AiActionCardExecuteResult` `{ kind, registered: { type: task / schedule_event / action_draft / sales_order / hot_rolling / heat_plan / past_case / notion_page, id, no?, url?, updated?, note? } }` (201). Notion 카드는 `id: 0`과 페이지 `url`(Notion이 알린 경고는 `note`), 일정·업무 고치기는 `updated: true` (이슈 #398). 저장한 대화의 카드는 `chat { messageId, cardKey }`를 함께 보내면 실행 뒤 그 카드를 실행됨으로 남긴다(이슈 #399, 새 카드 종류도 같다) |
 | POST | `ai-assistant/ui-actions/:actionId` | 없음 (문서에 없는 기능, 이슈 #382, **시험 중**) | 로그인만. 그 답을 물은 사원만 | `{ accepted: true }`. 본문 `{ ok, result?, error? }`(`result` 8,000자·`error` 500자). 기다리는 자리가 없거나 다른 사원의 것이거나 이미 끝났으면 `COM-003`(404). 아래 4장 '화면 조작' |
+| POST | `ai-assistant/agent-control/:controlId` | 없음 (문서에 없는 기능, 이슈 #425) | 로그인만. 그 답을 물은 사원만 | `{ accepted: true }`. 본문 `{ command: 'pause' \| 'step' \| 'resume' }`. 답하는 동안 브라우저·화면 조작을 멈추고 한 단계씩 넘기고 이어 간다. 답하는 중인 열쇠가 없거나(이미 끝남·켜지 않음) 다른 사원의 것이면 `COM-003`(404). 아래 4장 '멈춤·실시간 화면' |
 
 요청 `POST ai-assistant/messages`:
 
@@ -55,6 +56,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `reasoning` | 선택. `off`·`low`·`medium`·`high`. 없으면 보통(`medium`). 문서에 없는 기능, 2026-10-16 추가 (아래 '생각 정도') |
 | `browser` | 선택, boolean. 화면에서 브라우저 사용을 켠 질문이면 `true`(기본 꺼짐). 서버 `AI_BROWSER_ENABLED=true`이고 Chrome이 있고 **실시간 답 API**일 때만 브라우저 도구 6개와 `[브라우저 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다. 문서에 없는 기능, 이슈 #373 (4장 '브라우저 사용') |
 | `screenControl`·`screenMap` | 선택. `screenControl: true`는 화면에서 '화면 조작'을 켠 질문(기본 꺼짐), `screenMap`은 이 사원이 여는 화면 `{ path, title }[]`(80개, 경로는 `/영문-숫자/`만). 서버 `AI_SCREEN_CONTROL_ENABLED=true`이고 **실시간 답 API**일 때만 화면 도구 5개와 `[화면 조작 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다. 문서에 없는 기능, 이슈 #382 (4장 '화면 조작') |
+| `agentControlId` | 선택. 답마다 화면이 만드는 열쇠(UUID v4). 브라우저나 화면 조작을 켠 실시간 답에서만 쓰고, 서버는 `사원 id:열쇠`로 묶는다. 문서에 없는 기능, 이슈 #425 |
 | `notion` | 선택, boolean. 화면에서 'Notion'을 켠 질문이면 `true`(기본 꺼짐). Notion이 연결돼 있고 상위 페이지가 정해져 있고 **실시간 답 API**일 때만 Notion 도구(`notion_search`·`notion_read_page`, `actionCards: true`면 `propose_notion_page`)와 `[Notion 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다(Notion 글이 방 멤버에게 보이게 되므로). 문서에 없는 기능, 이슈 #398 (4장 'Notion') |
 | `drive` | 선택, boolean. 화면에서 'Drive'를 켠 질문이면 `true`(기본 꺼짐). Drive가 준비됐고 **실시간 답 API**일 때만 Drive 도구(`drive_search`·`drive_read_file`)와 `[Drive 규칙]`을 알린다. API-262·사내 채팅 @AI는 쓰지 않는다. 이슈 #398 2단계 (4장 'Drive') |
 | `driveFileIds` | 선택, 문자열 배열 3개까지(Drive id 모양, 같은 id 두 번 안 됨). 입력칸에서 `@`로 붙인 Drive 파일. Drive 칩과 상관없이 **실시간 답 API**에서 시작 전에 읽어 질문(user 메시지)에 감싼 글·사진으로 붙이고 답의 출처(`webSources`)로 돌려준다. 폴더 밖·없는 파일 `INT-012`, 너무 큼 `INT-014`, 사진인데 모델이 사진을 못 봄 `COM-004`는 평소 API 오류로 나가고 답을 시작하지 않는다. 지난 대화(`history`)에는 남지 않는다. 이슈 #398 2단계 |
@@ -78,6 +80,9 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `tool_start` | `id`, `name`, `arguments` | 조회 도구를 부르기 시작. `name`은 도구 이름(한글 제목은 `AI_ASSISTANT_TOOL_TITLE`), `arguments`는 모델이 넘긴 입력 JSON 문자열 |
 | `tool_end` | `id`, `label`, `resultPreview`, `durationMs`, (`webSources`) | 같은 `id`의 도구 결과. `resultPreview`는 결과 앞부분, `label`은 조회 대상 이름(없으면 `null`), `durationMs`는 걸린 시간. **웹 도구일 때만** `webSources: { title, url }[]` — 검색·장소 검색은 찾은 결과, 페이지 읽기는 읽은 페이지(이동 뒤 최종 주소). 실패하면 빈 배열 (이슈 #367) |
 | `browser_frame` | `url`, `title`, `imageBase64`, `at` | 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진(이슈 #373). `url`은 호스트+경로(쿼리·#조각 없음), `title`은 페이지 제목(웹에서 온 글이라 글로만 그린다), `imageBase64`는 JPEG(품질 50, 너비 800) base64(data: 접두어 없음), `at`은 ISO 시각. 같은 도구의 `tool_end` 바로 앞에 온다. **모델에는 보내지 않는다.** 화면 읽기(`browser_snapshot`)와 실패한 동작은 사진이 없다 |
+| `browser_live` | `url`, `imageBase64`, `at` | 답하는 동안 브라우저 화면(이슈 #425). Chrome 화면 녹화(CDP `Page.startScreencast`, JPEG 품질 45·800×500 이하)를 초당 2장쯤 보낸다. `browser_frame`과 달리 답에 남기지 않고 화면은 가장 최근 한 장만 둔다 |
+| `agent_paused` | `tool` | 사용자가 멈춘 답이 다음 브라우저·화면 도구(`tool`) 앞에서 기다리기 시작했다(이슈 #425). 그 도구의 `tool_start`보다 먼저 온다 |
+| `agent_resumed` | 없음 | 한 단계·계속으로 다시 간다(이슈 #425) |
 | `ui_action` | `actionId`, `tool`, `args` | 화면 조작(이슈 #382). 화면이 지금 DOM에서 실행하고 `POST ai-assistant/ui-actions/:actionId`로 결과를 돌려준다. `tool`은 `ui_snapshot`·`ui_navigate`·`ui_click`·`ui_fill`·`ui_select`, `args`는 글 값(`path`·`ref`·`value`). 같은 도구의 `tool_start` 뒤, `tool_end` 앞에 온다 |
 | `done` | `reply` | 마지막 이벤트. API-262 응답과 같은 `AiAssistantReplyView`다. `reply.answer`가 출처 표시를 지운 최종 답이고, 실행 카드는 `reply.actionCards`로 온다. 카드를 만들었다고만 답해 카드 도구로 한 번 더 부르면 그 답 글도 이어서 `answer`로 오지만, 최종 답은 `reply.answer`다 웹 검색을 켠 질문이면 `reply.webSources: { title, url }[]`가 있다(4장 '웹 검색') |
 | `error` | `message` | 마지막 이벤트. 시작한 뒤의 실패. 화면에 보일 이유 문구다 |
@@ -200,6 +205,9 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - 브라우저 하나를 서버에 두고(처음 쓸 때 띄움, 컨텍스트가 없고 **5분** 놀면 닫음, 서버가 꺼질 때 닫음) 답마다 **새 시크릿 컨텍스트** 하나·페이지 하나를 쓴다(첫 `browser_open` 때 연다). 서버 전체 동시 컨텍스트 **2개**(`BrowserPool`), 넘으면 기다리지 않고 "지금은 브라우저가 바빠요". 컨텍스트: `acceptDownloads: false`, 권한 없음, `ko-KR`, `Asia/Seoul`, 1280×800, `serviceWorkers: 'block'`. 새 창(팝업)은 바로 닫고, alert·confirm은 닫고(dismiss), 파일 고르기 창은 파일을 넣지 않고 버리고, 내려받기는 취소한다. 멈추거나(Abort) 오류가 나면 컨텍스트를 바로 닫는다.
 - **창 띄우기·이어 묻기 (이슈 #423)**: `BROWSER_HEADLESS=false`면 서버 컴퓨터 화면에 Chrome 창을 띄운다(창 1300×940, 개발·시연용, 다른 사원 PC에는 보이지 않음). 화면이 대화마다 만든 열쇠(`browserSessionId`, UUID v4)를 보내면 서버는 `사원 id:열쇠`로 묶어, 답이 끝난 탭(연 페이지가 있고 멈추지 않았을 때)을 **10분** 열어 두고 같은 열쇠의 다음 질문에 그대로 준다(한 탭은 처음 연 때부터 **30분**까지). 이어 쓸 때 이번 답의 동작 15번·3분을 새로 세고, 그 탭에서 연 주소는 다시 열 수 있다. 프롬프트 B7이 열어 둔 페이지(제목·주소)를 알려 `browser_snapshot`부터 하게 한다. 쉬는 탭도 서버 전체 2개에 들어가므로 새 탭이 필요하면 가장 오래 쉰 탭부터 닫는다. 열쇠가 없으면(API-262·사내 채팅 @AI 등) 예전처럼 답마다 닫는다.
 - **웹 검색 함께·시작 사이트 (이슈 #423)**: 브라우저를 켜면(`browser: true`이고 서버에서 쓸 수 있을 때) `webSearch`를 따로 보내지 않아도 웹 검색 도구·규칙을 함께 준다. 주소를 모르면 먼저 `web_search`로 찾게 하려는 것이다. `browser_open`은 이번 답의 검색 결과·질문·열어 둔 탭에서 연 주소 말고도 **시작 사이트**와 그 하위 주소(`*.naver.com` 등)를 링크 없이 연다. 기본값은 naver.com·daum.net·wikipedia.org·namu.wiki·go.kr·kosis.kr·kosa.or.kr·worldsteel.org·kita.net이다. `BROWSER_START_SITES`(쉼표 목록)로 바꾸고, 빈 값이면 하나도 두지 않는다. 사내 정보 검사·내부 주소 차단·프록시 확인은 시작 사이트에도 그대로 한다.
+- **보이는 마우스·실시간 화면 (이슈 #425)**: `browser_click`·`browser_type` 전에 주황색 커서를 그 요소 가운데로 350ms 동안 움직이고 물결을 보인 뒤 누른다. 커서는 `html` 바로 아래 shadow root에 그려 화면 글(body 아래)에 끼지 않고 마우스 이벤트도 받지 않는다. 화면 사진·실시간 화면·창에 보이며, 페이지를 옮기면 사라지고 다음 동작 때 마지막 자리에서 다시 움직인다. 그리지 못해도 동작은 그대로 한다. 실시간 화면은 첫 탭을 열 때·열어 둔 탭을 이어 받을 때 켜고, 탭을 쉬게 할 때 끈다. 받았다고 알리기(ack)를 500ms 늦춰 초당 2장쯤으로 묶는다.
+- **멈춤·한 단계·계속 (이슈 #425)**: 요청에 `agentControlId`가 있고 브라우저나 화면 조작이 켜진 실시간 답이면 답하는 동안 문(`AgentGate`, 서버 메모리)을 연다. 사용자가 멈추면 이미 하는 동작은 끝까지 하고, 다음 `browser_*`·`ui_*` 도구 앞에서 `agent_paused`를 보내고 기다린다. 한 단계면 하나만 하고 다시 멈추고, 계속이면 간다. 기다리는 동안은 브라우저의 한 답 시간 제한(3분)을 세지 않는다. **10분**(`AI_AGENT_PAUSE_MAX_MS`, 가정값)이 지나면 그 도구를 하지 않고 "사용자가 멈춘 채 10분이 지나…"를 도구 결과로 주며, 그 답의 남은 브라우저·화면 도구도 모두 같은 결과다. 답 전체를 끊는 [멈추기](연결 끊기)와 다르다. 답이 끝나면 문을 닫는다.
+- **밖에서 닫힌 탭 (이슈 #425)**: 창을 띄웠을 때 사람이 탭을 닫으면 그 컨텍스트를 놓는다. 다음 `browser_open`은 새 탭을 열고, 열어 둔 탭이 닫혔으면 이어 받지 않는다. Enter·누르기 뒤 새 문서가 아직 비어 화면 읽기가 실패하면 문서가 뜨기를 기다려 한 번 더 읽는다.
 
 | 도구 | 입력 | 하는 일 |
 | --- | --- | --- |
@@ -233,6 +241,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 
 **ERP 화면 조작 (이슈 #382, 문서에 없는 기능·시험 중 — 잘 되지 않으면 뺀다)** — 서버 `screen/`, 화면 `client/src/lib/aiScreenAgent.ts`·`features/shell/AiScreenControl.tsx`
 - 켜기: 서버 `AI_SCREEN_CONTROL_ENABLED=true` **그리고** 요청 `screenControl: true`(패널의 '화면 조작' 칩, 기본 꺼짐, 서버가 켜 두었을 때만 보인다) **그리고** 실시간 답 API일 때만. 사내 채팅 @AI는 늘 끔.
+- 보이는 마우스(이슈 #425): 누르기·채우기·고르기 전에 칸을 화면 가운데로 옮기고(바로) 주황 테두리를 그린 뒤, 서버 Chrome과 같은 모양의 커서를 그 칸으로 움직인다(`client/src/lib/aiCursor.ts`, `pointer-events: none`, `data-ai-skip`, 2.5초 뒤 숨김). '동작 줄이기'를 켠 사용자에게는 움직이지 않고 바로 그 자리에 보인다. 멈춤·한 단계·계속은 브라우저와 같다(위 '멈춤·한 단계·계속').
 - 동작은 **사용자의 브라우저**가 한다. 서버는 도구 호출마다 `ui_action { actionId, tool, args }`를 보내고 기다리는 자리(서버 메모리 `ScreenActionBroker`, `actionId`는 UUID, 주인 = 물은 사원)를 만든 뒤 기다린다. 화면이 결과를 `POST ai-assistant/ui-actions/:actionId`로 보내면 끝난다: 주인만, **처음 온 결과만**(그 뒤는 `COM-003`), **30초** 안에 안 오면 "화면이 30초 안에 답하지 않았어요" 도구 오류, 답을 멈추거나 연결이 끊기면(Abort) 자리를 지우고 답도 멈춘다. 서버를 여러 대 띄우면 같은 서버로 결과가 와야 한다(지금은 한 대).
 - 도구 5개 (한 답에 **12번**, 도구 호출 차례 12번 `MAX_SCREEN_TOOL_ROUNDS`):
 

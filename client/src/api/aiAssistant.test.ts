@@ -39,6 +39,31 @@ describe('parseAiAssistantStreamEvent', () => {
   });
 });
 
+describe('parseAiAssistantStreamEvent: 실시간 화면·멈춤 이벤트 (이슈 #425)', () => {
+  it('browser_live·agent_paused·agent_resumed를 읽는다', () => {
+    const live = '{"type":"browser_live","url":"example.kr/a","imageBase64":"QUJD","at":"2026-10-20T00:00:00.000Z"}';
+    expect(parseAiAssistantStreamEvent(live)).toEqual({ type: 'browser_live', url: 'example.kr/a', imageBase64: 'QUJD', at: '2026-10-20T00:00:00.000Z' });
+    expect(parseAiAssistantStreamEvent('{"type":"agent_paused","tool":"browser_click"}')).toEqual({ type: 'agent_paused', tool: 'browser_click' });
+    expect(parseAiAssistantStreamEvent('{"type":"agent_resumed"}')).toEqual({ type: 'agent_resumed' });
+  });
+});
+
+describe('aiAssistantApi.controlAgent (이슈 #425)', () => {
+  it('POST /ai-assistant/agent-control/:열쇠로 명령을 보낸다', async () => {
+    login();
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ success: true, data: { accepted: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    await expect(aiAssistantApi.controlAgent('9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d', 'step')).resolves.toEqual({ accepted: true });
+    const sent = calls.find((c) => c.url.includes('/ai-assistant/agent-control/'));
+    expect(sent?.url).toContain('/ai-assistant/agent-control/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d');
+    expect(sent?.init.method).toBe('POST');
+    expect(JSON.parse(String(sent?.init.body))).toEqual({ command: 'step' });
+  });
+});
+
 describe('aiAssistantApi.askStream', () => {
   it('줄과 한글 글자 중간에서 끊긴 조각도 이벤트 순서대로 돌려주고 본문에 생각 정도를 담는다', async () => {
     const text = '{"type":"thinking","text":"재고를 볼게요"}\n{"type":"answer","text":"철강"}\n{"type":"done","reply":{"answer":"끝"}}\n';

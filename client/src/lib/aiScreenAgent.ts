@@ -3,6 +3,7 @@
 // 화면 글은 [data-ai-capture] 안에서 [data-ai-skip](철강맨AI 패널·조작 배너)을 빼고 만든다.
 import { aiScreenBlockedWord, aiScreenPathAllowed, type AiAssistantStreamEvent, type AiScreenActionResultInput, type AiScreenMapEntry } from '@fantasteel/shared';
 import { create } from 'zustand';
+import { moveAiCursorTo } from '@/lib/aiCursor';
 
 type UiAction = Extract<AiAssistantStreamEvent, { type: 'ui_action' }>;
 
@@ -348,8 +349,9 @@ function snapshotNow(): string {
   });
 }
 
-function highlight(element: HTMLElement): void {
-  element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+/** 칸을 화면 가운데로 옮기고 테두리를 그린 뒤, 보이는 마우스를 그 칸으로 움직인다 (이슈 #425). 커서가 정확히 가도록 바로 옮긴다 */
+async function highlight(element: HTMLElement): Promise<void> {
+  element.scrollIntoView({ block: 'center', behavior: 'instant' });
   const before = element.style.outline;
   const offset = element.style.outlineOffset;
   element.style.outline = '3px solid #f97316';
@@ -358,6 +360,7 @@ function highlight(element: HTMLElement): void {
     element.style.outline = before;
     element.style.outlineOffset = offset;
   }, HIGHLIGHT_MS);
+  await moveAiCursorTo(element);
 }
 
 function target(ref: string | undefined): HTMLElement | string {
@@ -390,7 +393,7 @@ export async function runUiAction(action: UiAction): Promise<AiScreenActionResul
         const name = nameOf(element);
         const refused = clickRefusal(element, name);
         if (refused) return { ok: false, error: refused };
-        highlight(element);
+        await highlight(element);
         element.click();
         await wait(SETTLE_MS);
         return { ok: true, result: `'${name}'을(를) 눌렀어요.\n${snapshotNow()}` };
@@ -400,7 +403,7 @@ export async function runUiAction(action: UiAction): Promise<AiScreenActionResul
         if (typeof element === 'string') return { ok: false, error: element };
         const refused = fillRefusal(element, roleOf(element));
         if (refused) return { ok: false, error: refused };
-        highlight(element);
+        await highlight(element);
         element.focus();
         setNativeValue(element, action.args.value ?? '', dispatcher(element));
         element.blur();
@@ -413,7 +416,7 @@ export async function runUiAction(action: UiAction): Promise<AiScreenActionResul
         if (element.disabled) return { ok: false, error: '꺼진 칸이에요' };
         const option = findOption(element.options, action.args.value ?? '') as HTMLOptionElement | null;
         if (!option) return { ok: false, error: `'${action.args.value}' 항목이 없어요` };
-        highlight(element);
+        await highlight(element);
         setNativeValue(element, option.value, dispatcher(element));
         return { ok: true, result: `${action.args.ref} ${quote(nameOf(element))}에서 ${quote(clean(option.textContent))}을(를) 골랐어요. 아직 저장하지 않았어요` };
       }

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { BrowserContext } from 'playwright-core';
 import type { LookupFunction } from '../web/ssrf-guard';
 import { internalReferenceIn } from '../web/web-text';
-import { AssistantBrowserToolbox, type BrowserToolResult, type BrowserWebLink } from './assistant-browser-toolbox';
+import { AssistantBrowserToolbox, type BrowserLiveFrame, type BrowserToolResult, type BrowserWebLink } from './assistant-browser-toolbox';
 import { BrowserPool } from './browser-pool';
 
 const e2e = process.env.BROWSER_E2E === '1' ? describe : describe.skip;
@@ -39,6 +39,8 @@ async function serveFixtures(context: BrowserContext) {
         return html(
           `<!doctype html><title>tamper</title><button>로그인</button><script>for (const [proto, key] of [[HTMLElement.prototype, 'innerText'], [Node.prototype, 'textContent']]) Object.defineProperty(proto, key, { get() { return '다음'; } }); Element.prototype.getAttribute = () => null;</script>`,
         );
+      // 누르면 글만 바뀌고 이동하지 않는 버튼: 보이는 마우스가 그 자리에 남아 있어야 한다 (이슈 #425)
+      if (url.pathname === '/cursor') return html(`<!doctype html><title>cursor</title><button id="b" onclick="this.textContent = '눌렀어요'">누르기</button>`);
       if (url.pathname === '/search') return html(`<!doctype html><title>검색</title><h1>검색 결과: ${url.searchParams.get('q')?.replace(/[<&]/g, '') ?? ''}</h1>`);
       return html(`<!doctype html><title>${url.pathname}</title><p>도착: ${url.pathname}</p>`);
     },
@@ -92,7 +94,20 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     internalPort = (internal.address() as AddressInfo).port;
   });
   afterAll(() => new Promise<void>((resolve) => internal.close(() => resolve())));
-  const toolbox = (timeLimitMs?: number) => new AssistantBrowserToolbox(pool, { guard: { resolve }, prepareContext: serveFixtures, timeLimitMs });
+  /** 세션이 연 컨텍스트들 (밖에서 페이지 DOM을 보거나 탭을 닫으려고 모은다) */
+  const contexts: BrowserContext[] = [];
+  const toolbox = (timeLimitMs?: number) =>
+    new AssistantBrowserToolbox(pool, {
+      guard: { resolve },
+      prepareContext: async (context) => {
+        contexts.push(context);
+        await serveFixtures(context);
+      },
+      timeLimitMs,
+    });
+  const until = async (done: () => boolean, ms = 6_000) => {
+    for (const start = Date.now(); !done() && Date.now() - start < ms; ) await new Promise((r) => setTimeout(r, 100));
+  };
 
   afterAll(() => pool.shutdown());
 
@@ -216,7 +231,7 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     // 이전 답에서 본 주소는 질문에 없어도 다시 열 수 있고, 처음 보는 주소는 막는다
     const reopened = await second.run(call('browser_open', { url: 'https://example.test/' }));
     expect(reopened.content).toContain('heading "오늘의 강판 시세"');
-    expect(errorOf(await second.run(call('browser_open', { url: 'https://example.test/never-seen' })))).toContain('질문에 없던 주소');
+    expect(errorOf(await second.run(call('browser_open', { url: 'https://example.test/never-seen' })))).toContain('시작 사이트에 없는 주소');
     await box.finish(second, 'k1', false);
 
     // 두 번째 대화 탭, 세 번째가 필요하면 가장 오래 쉰 k1이 닫힌다
@@ -237,6 +252,147 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     expect(pool.activeContexts).toBe(1);
     const parked = box.session({ question: '봐줘', web: web() }, 'k2');
     await box.finish(parked, 'k2', true);
+    expect(pool.activeContexts).toBe(0);
+  });
+
+  it('누르기 전에 보이는 마우스를 그리고, 이동 없는 클릭 뒤에도 그 마우스가 화면 사진에 남는다 (이슈 #425)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/cursor 눌러줘', web: web() });
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/cursor' }));
+      // 읽기·열기만으로는 마우스를 그리지 않는다
+      const page = contexts.at(-1)?.pages()[0];
+      if (!page) throw new Error('페이지 없음');
+      const cursorCount = () => page.evaluate('document.querySelectorAll(\'[id$="-cursor"]\').length');
+      expect(await cursorCount()).toBe(0);
+
+      const clicked = await session.run(call('browser_click', { ref: refOf(opened, 'button "누르기"') }));
+      expect(clicked.content).toContain('눌렀어요');
+      expect(clicked.frame?.url).toBe('example.test/cursor');
+
+      // 페이지 글 읽기(body 아래)에 끼지 않게 html 바로 아래, 열린 shadow root, 마우스 이벤트는 받지 않는다
+      // 서버 tsconfig에는 DOM 형식이 없어 페이지에서 돌 글을 문자열로 보낸다
+      const cursor = (await page.evaluate(`(() => {
+        const host = document.documentElement.querySelector(':scope > [id$="-cursor"]');
+        if (!host) return null;
+        const path = host.shadowRoot && host.shadowRoot.querySelector('path');
+        return { id: host.id, parent: host.parentElement.tagName, hasShadow: host.shadowRoot !== null, pointerEvents: host.style.pointerEvents, ariaHidden: host.getAttribute('aria-hidden'), fill: path ? path.getAttribute('fill') : null, inBody: document.body.contains(host) };
+      })()`)) as { id: string; parent: string; hasShadow: boolean; pointerEvents: string; ariaHidden: string; fill: string | null; inBody: boolean } | null;
+      expect(cursor).toMatchObject({ parent: 'HTML', hasShadow: true, pointerEvents: 'none', ariaHidden: 'true', fill: '#f97316', inBody: false });
+      expect(cursor?.id).toMatch(/^data-fs-[0-9a-f]{8}-cursor$/);
+      // 같은 요소를 다시 그리지 않고 쓴다
+      await session.run(call('browser_snapshot'));
+      expect(await cursorCount()).toBe(1);
+      // 화면 읽기 글에는 마우스가 나오지 않는다
+      expect((await session.run(call('browser_snapshot'))).content).not.toMatch(/-cursor|f97316/);
+
+      // 화면 사진에 주황(#f97316) 마우스가 찍혔다: 브라우저 밖의 빈 탭에서 JPEG를 풀어 주황 픽셀을 센다.
+      // 누르기 전 사진에는 없던 주황이 누른 뒤 사진에 생겼는지 견준다 (화살표가 작아 픽셀 수의 절대값은 타이밍에 따라 달라진다)
+      const decoder = await (page.context().browser() as NonNullable<ReturnType<BrowserContext['browser']>>).newContext();
+      try {
+        const blank = await decoder.newPage();
+        const orangeIn = async (base64: string) =>
+          (await blank.evaluate(`(async () => {
+            const image = new Image();
+            image.src = 'data:image/jpeg;base64,${base64}';
+            await image.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0);
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let count = 0;
+            for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] > 70 && data[i + 1] < 170 && data[i + 2] < 100) count += 1;
+            return count;
+          })()`)) as number;
+        expect(await orangeIn(opened.frame?.imageBase64 ?? '')).toBe(0);
+        expect(await orangeIn(clicked.frame?.imageBase64 ?? '')).toBeGreaterThanOrEqual(5);
+      } finally {
+        await decoder.close();
+      }
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('onLive를 주면 페이지를 연 뒤 실시간 화면 사진이 오고, 탭을 열어 두거나 닫으면 멈추고, 이어 받으면 다시 온다 (이슈 #425)', async () => {
+    const box = toolbox();
+    const frames: BrowserLiveFrame[] = [];
+    const session = box.session({ question: 'https://example.test/ 봐줘', web: web(), onLive: (frame) => void frames.push(frame) }, 'live');
+    await session.run(call('browser_open', { url: 'https://example.test/' }));
+    await until(() => frames.some((f) => f.url === 'example.test'));
+    const shown = frames.find((f) => f.url === 'example.test');
+    expect(shown).toBeDefined();
+    expect(shown?.imageBase64.startsWith('/9j/')).toBe(true);
+    expect(jpegWidth(shown?.imageBase64 ?? '')).toBeLessThanOrEqual(800);
+    expect(Number.isNaN(Date.parse(shown?.at ?? ''))).toBe(false);
+
+    // 답이 끝나 탭을 열어 두면 사진 보내기를 멈춘다
+    await box.finish(session, 'live', false);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const settled = frames.length;
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(frames.length).toBe(settled);
+
+    // 다음 질문이 이어 받으면 새 질문의 받는 곳으로 다시 온다
+    const next: BrowserLiveFrame[] = [];
+    const second = box.session({ question: '다시 봐줘', web: web(), onLive: (frame) => void next.push(frame) }, 'live');
+    expect(second).toBe(session);
+    await second.run(call('browser_scroll', { direction: 'down' }));
+    await until(() => next.length > 0);
+    expect(next.length).toBeGreaterThan(0);
+    expect(frames.length).toBe(settled);
+    await box.finish(second, 'live', true);
+
+    // onLive가 없으면 사진을 찍지 않는다
+    const quiet = toolbox().session({ question: 'https://example.test/ 봐줘', web: web() });
+    try {
+      await quiet.run(call('browser_open', { url: 'https://example.test/' }));
+      expect((quiet as unknown as { live: boolean }).live).toBe(false);
+    } finally {
+      await quiet.close();
+    }
+    expect(pool.activeContexts).toBe(0);
+  });
+
+  it('탭이 밖에서 닫히면(사람이 창을 닫음) 컨텍스트를 놓고, 다음 browser_open이 새 탭을 연다 (이슈 #425)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/ 봐줘', web: web() });
+    try {
+      await session.run(call('browser_open', { url: 'https://example.test/' }));
+      expect(pool.activeContexts).toBe(1);
+      const before = contexts.length;
+      const page = contexts.at(-1)?.pages()[0];
+      await page?.close();
+      await until(() => pool.activeContexts === 0, 3_000);
+      expect(pool.activeContexts).toBe(0);
+
+      // 닫힌 탭을 읽거나 누르려 하면 열라고 안내하고, 열면 새 탭이다
+      expect(errorOf(await session.run(call('browser_snapshot')))).toBe('아직 연 페이지가 없어요');
+      const reopened = await session.run(call('browser_open', { url: 'https://example.test/' }));
+      expect(reopened.content).toContain('heading "오늘의 강판 시세"');
+      expect(reopened.content).toContain('브라우저 탭이 닫혀서');
+      expect(contexts.length).toBe(before + 1);
+      expect(pool.activeContexts).toBe(1);
+    } finally {
+      await session.close();
+    }
+    expect(pool.activeContexts).toBe(0);
+  });
+
+  it('열어 둔 탭이 밖에서 닫히면 같은 열쇠의 다음 질문은 이어 받지 않고 새 세션이다 (이슈 #425)', async () => {
+    const box = toolbox();
+    const first = box.session({ question: 'https://example.test/ 봐줘', web: web() }, 'closing');
+    await first.run(call('browser_open', { url: 'https://example.test/' }));
+    await box.finish(first, 'closing', false);
+    expect(box.openPage('closing')).not.toBeNull();
+    await contexts.at(-1)?.pages()[0]?.close();
+    await until(() => box.openPage('closing') === null, 3_000);
+    expect(box.openPage('closing')).toBeNull();
+    const second = box.session({ question: '다시 열어줘', web: web() }, 'closing');
+    expect(second).not.toBe(first);
+    await second.close();
+    await box.finish(first, 'closing', true);
+    await until(() => pool.activeContexts === 0, 3_000);
     expect(pool.activeContexts).toBe(0);
   });
 

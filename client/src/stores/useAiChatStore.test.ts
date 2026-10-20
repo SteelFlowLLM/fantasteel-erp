@@ -1,7 +1,7 @@
 // AI 어시스턴트 대화 저장소: 지금 보는 대화를 이 탭 메모리에 두고, 저장한 대화(이슈 #399)를 열어 되살린다.
 import type { AiActionCard, AiAssistantReplyView, AiChatThreadView } from '@fantasteel/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AI_CHAT_HISTORY_LIMIT, AI_CHAT_STOPPED_REASON, aiChatEntriesFromThread, aiChatHistory, useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
+import { AI_CHAT_HISTORY_LIMIT, AI_CHAT_STOPPED_REASON, aiChatEntriesFromThread, aiChatHistory, emptyAiChatLive, reduceAiChatLive, useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
 
 const store = () => useAiChatStore.getState();
 const SOURCE = { kind: 'GLOSSARY' as const, id: 'TRM-056', label: '예약' };
@@ -268,6 +268,97 @@ describe('브라우저 사용 (이슈 #373)', () => {
     store().addQuestion('q1', '질문', undefined, undefined, undefined, true);
     store().applyStreamEvent('q1', { type: 'error', message: '실패' } as never);
     expect(store().entries.at(-1)).toMatchObject({ role: 'failure', browser: true });
+  });
+});
+
+describe('실시간 브라우저 화면·멈춤 (이슈 #425)', () => {
+  const CONTROL_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+  const liveEvent = { type: 'browser_live' as const, url: 'example.kr/a', imageBase64: 'QUJD', at: '2026-10-20T00:00:00.000Z' };
+
+  describe('reduceAiChatLive', () => {
+    it('emptyAiChatLive는 열쇠가 있을 때만 멈춤 상태를 만든다', () => {
+      expect(emptyAiChatLive(null, CONTROL_ID)).toMatchObject({ liveFrame: null, control: { id: CONTROL_ID, requested: false, pausedBefore: null } });
+      expect(emptyAiChatLive()).toMatchObject({ liveFrame: null, control: null });
+      expect(emptyAiChatLive('high', null).control).toBeNull();
+    });
+
+    it('browser_live는 가장 최근 한 장만 liveFrame에 두고(제목은 비움), browserFrames에는 더하지 않는다', () => {
+      const first = reduceAiChatLive(emptyAiChatLive(), liveEvent, 0);
+      expect(first.liveFrame).toEqual({ url: 'example.kr/a', title: '', imageBase64: 'QUJD', at: '2026-10-20T00:00:00.000Z' });
+      expect(first.browserFrames).toEqual([]);
+      const second = reduceAiChatLive(first, { ...liveEvent, imageBase64: 'QUJDRA==', at: '2026-10-20T00:00:01.000Z' }, 0);
+      expect(second.liveFrame?.imageBase64).toBe('QUJDRA==');
+    });
+
+    it('규칙에 어긋난 사진(base64 아님·길이 안 맞음·빈 값)은 버리고 이전 화면을 그대로 둔다', () => {
+      const shown = reduceAiChatLive(emptyAiChatLive(), liveEvent, 0);
+      for (const bad of ['<img onerror=x>', 'QUJ', '', 'data:image/jpeg;base64,QUJD']) {
+        expect(reduceAiChatLive(shown, { ...liveEvent, imageBase64: bad }, 0)).toBe(shown);
+      }
+    });
+
+    it('agent_paused는 멈춘 도구를 적고 멈추기 요청을 끝내며, agent_resumed는 멈춘 도구를 지운다', () => {
+      const asked = { ...emptyAiChatLive(null, CONTROL_ID), control: { id: CONTROL_ID, requested: true, pausedBefore: null } };
+      const paused = reduceAiChatLive(asked, { type: 'agent_paused', tool: 'browser_click' }, 0);
+      expect(paused.control).toEqual({ id: CONTROL_ID, requested: false, pausedBefore: 'browser_click' });
+      const resumed = reduceAiChatLive(paused, { type: 'agent_resumed' }, 0);
+      expect(resumed.control).toEqual({ id: CONTROL_ID, requested: false, pausedBefore: null });
+    });
+
+    it('agent_resumed는 아직 누른 멈추기 요청(requested)을 건드리지 않는다', () => {
+      const live = { ...emptyAiChatLive(null, CONTROL_ID), control: { id: CONTROL_ID, requested: true, pausedBefore: 'ui_click' } };
+      expect(reduceAiChatLive(live, { type: 'agent_resumed' }, 0).control).toEqual({ id: CONTROL_ID, requested: true, pausedBefore: null });
+    });
+
+    it('멈출 수 없는 답(control이 null)에서는 agent_paused·agent_resumed를 무시한다', () => {
+      const live = emptyAiChatLive();
+      expect(reduceAiChatLive(live, { type: 'agent_paused', tool: 'browser_open' }, 0)).toBe(live);
+      expect(reduceAiChatLive(live, { type: 'agent_resumed' }, 0)).toBe(live);
+    });
+  });
+
+  describe('저장소', () => {
+    it('addQuestion에 열쇠를 주면 live.control이 생기고, 안 주면 null이다', () => {
+      store().addQuestion('q1', '봐줘', undefined, undefined, undefined, true, CONTROL_ID);
+      expect(store().live?.control).toEqual({ id: CONTROL_ID, requested: false, pausedBefore: null });
+      store().addAnswer('q1', '답', []);
+      store().addQuestion('q2', '재고');
+      expect(store().live?.control).toBeNull();
+    });
+
+    it('setControlRequested는 답하는 중인 그 질문의 control에만 적용한다', () => {
+      store().addQuestion('q1', '봐줘', undefined, undefined, undefined, true, CONTROL_ID);
+      store().setControlRequested('q1', true);
+      expect(store().live?.control?.requested).toBe(true);
+      store().setControlRequested('q1', false);
+      expect(store().live?.control?.requested).toBe(false);
+
+      // 다른 질문 id, 멈출 수 없는 답, 답을 마친 뒤에는 바꾸지 않는다
+      const before = store().live;
+      store().setControlRequested('other', true);
+      expect(store().live).toBe(before);
+      store().addAnswer('q1', '답', []);
+      store().setControlRequested('q1', true);
+      expect(store().live).toBeNull();
+      store().addQuestion('q2', '재고');
+      const plain = store().live;
+      store().setControlRequested('q2', true);
+      expect(store().live).toBe(plain);
+    });
+
+    it('스트림 이벤트가 저장소 live에 반영되고, 답이 끝나면 liveFrame·control은 대화에 남지 않는다', () => {
+      store().addQuestion('q1', '봐줘', undefined, undefined, undefined, true, CONTROL_ID);
+      store().applyStreamEvent('q1', liveEvent);
+      store().applyStreamEvent('q1', { type: 'agent_paused', tool: 'browser_open' });
+      expect(store().live).toMatchObject({ liveFrame: { url: 'example.kr/a' }, control: { pausedBefore: 'browser_open' } });
+      store().applyStreamEvent('q1', { type: 'agent_resumed' });
+      store().applyStreamEvent('q1', { type: 'done', reply: REPLY });
+      expect(store().live).toBeNull();
+      const answer = store().entries.at(-1);
+      expect(answer).not.toHaveProperty('liveFrame');
+      expect(answer).not.toHaveProperty('control');
+      expect(answer).not.toHaveProperty('browserFrames');
+    });
   });
 });
 

@@ -34,6 +34,7 @@ import { pageScript, type ElementInfo, type PageScriptArg, type PageSnapshot } f
 const PAGE_SCRIPT_SOURCE = `((__name) => (${pageScript.toString()}))((target) => target)`;
 
 export type BrowserFrame = Omit<Extract<AiAssistantStreamEvent, { type: 'browser_frame' }>, 'type'>;
+export type BrowserLiveFrame = Omit<Extract<AiAssistantStreamEvent, { type: 'browser_live' }>, 'type'>;
 
 /** 화면 사진: JPEG 품질 50, 너비 800 (결정값). 모델에는 보내지 않는다 */
 const FRAME_QUALITY = 50;
@@ -46,6 +47,42 @@ const SETTLE_MS = 400;
 /** 화면 읽기에서 모으는 줄 수 상한 (글 길이 상한 전에 페이지에서 꺼내는 양을 묶는다) */
 const SNAPSHOT_MAX_ITEMS = 600;
 const TITLE_MAX = 200;
+/** 실시간 화면: 사진 사이 간격(초당 2장쯤), 품질, 크기 (가정값, 이슈 #425). Chrome은 받았다고 알리기 전에는 다음 사진을 보내지 않는다 */
+export const LIVE_FRAME_GAP_MS = 500;
+const LIVE_QUALITY = 45;
+const LIVE_MAX = { width: 800, height: 500 };
+/** 보이는 마우스가 요소까지 움직이는 시간 (가정값, 이슈 #425) */
+export const CURSOR_MOVE_MS = 350;
+/**
+ * 보이는 마우스를 그린다 (이슈 #425). 화면 사진·창에서 AI가 어디를 누르는지 보이게 할 뿐 누르기는 Playwright가 한다.
+ * 페이지 글 읽기(body 아래)에 끼지 않게 html 바로 아래 shadow root에 그리고, 마우스 이벤트는 받지 않는다
+ */
+function cursorScript(id: string, from: { x: number; y: number }, to: { x: number; y: number }, ripple: boolean): string {
+  return `((id, from, to, ripple, ms) => {
+  let host = document.getElementById(id);
+  if (!host || !host.shadowRoot) {
+    host = document.createElement('div');
+    host.id = id;
+    host.setAttribute('aria-hidden', 'true');
+    for (const [k, v] of [['position', 'fixed'], ['left', '0'], ['top', '0'], ['width', '0'], ['height', '0'], ['z-index', '2147483647'], ['pointer-events', 'none'], ['display', 'block']]) host.style.setProperty(k, v, 'important');
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = '<style>.c{position:absolute;left:0;top:0;width:24px;height:24px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}.r{position:absolute;left:0;top:0;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;border:3px solid #f97316;opacity:0}</style><div class="r"></div><svg class="c" viewBox="0 0 24 24"><path d="M3 2l7.5 19 2.6-7.6L20.7 11z" fill="#f97316" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+    document.documentElement.appendChild(host);
+  }
+  const c = host.shadowRoot.querySelector('.c');
+  const r = host.shadowRoot.querySelector('.r');
+  c.style.transition = 'none';
+  c.style.transform = 'translate(' + from.x + 'px,' + from.y + 'px)';
+  void c.getBoundingClientRect();
+  c.style.transition = 'transform ' + ms + 'ms cubic-bezier(.2,.7,.3,1)';
+  c.style.transform = 'translate(' + to.x + 'px,' + to.y + 'px)';
+  if (ripple) setTimeout(() => {
+    r.style.left = to.x + 'px';
+    r.style.top = to.y + 'px';
+    if (r.animate) r.animate([{ opacity: 0.9, transform: 'scale(0.3)' }, { opacity: 0, transform: 'scale(1.4)' }], { duration: 450, easing: 'ease-out' });
+  }, ms);
+})(${JSON.stringify(id)}, ${JSON.stringify(from)}, ${JSON.stringify(to)}, ${ripple}, ${CURSOR_MOVE_MS})`;
+}
 /** 같은 대화의 다음 질문이 이어 쓰게 답이 끝난 탭을 열어 두는 시간, 한 탭을 쓰는 최대 시간 (가정값, 이슈 #423) */
 export const BROWSER_KEEP_MS = 10 * 60_000;
 export const BROWSER_SESSION_MAX_MS = 30 * 60_000;
@@ -114,6 +151,8 @@ export interface BrowserToolSessionLike {
   has(name: string): boolean;
   run(call: LlmToolCall, signal?: AbortSignal): Promise<BrowserToolResult>;
   close(): Promise<void>;
+  /** 사용자가 멈춘 동안 이 답의 시간 제한을 세지 않는다. 돌려준 함수를 부르면 남은 시간부터 다시 센다 (이슈 #425) */
+  holdDeadline?(): () => void;
 }
 
 /** 브라우저 세션이 웹 세션에서 쓰는 것: 열어도 되는 주소, 본 페이지 기억, 회사 안 정보 막기 */
@@ -127,6 +166,8 @@ export interface BrowserSessionInput {
   question: string;
   web: BrowserWebLink;
   signal?: AbortSignal;
+  /** 답하는 동안 실시간 화면을 받는 곳 (이슈 #425). 없으면 실시간 화면을 찍지 않는다 */
+  onLive?: (frame: BrowserLiveFrame) => void;
 }
 
 export interface BrowserToolboxOptions {
@@ -257,6 +298,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private deadline: number | null = null;
   private deadlineTimer: NodeJS.Timeout | null = null;
   private closed: 'time' | 'abort' | 'done' | null = null;
+  /** 보이는 마우스의 마지막 자리 (페이지를 옮겨도 이어서 움직인다) */
+  private cursor: { x: number; y: number } = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
+  /** 실시간 화면을 찍는 중인지 */
+  private live = false;
   /** 지난 동작 뒤로 막은 요청 (모델에 알린다) */
   private blockedRequests: string[] = [];
   private fileChooserBlocked = false;
@@ -291,8 +336,9 @@ export class BrowserToolSession implements BrowserToolSessionLike {
    * 연 페이지가 없거나 이미 닫혔거나 너무 오래 썼으면 false (부르는 쪽이 닫는다)
    */
   park(): boolean {
-    if (!this.page || this.closed || Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS) return false;
+    if (!this.page || this.closed || this.page.isClosed() || Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS) return false;
     this.input.signal?.removeEventListener('abort', this.onAbort);
+    void this.stopLive();
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadlineTimer = null;
     this.deadline = null;
@@ -301,7 +347,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   /** 열어 둔 탭을 다음 질문에 붙인다: 새 질문의 주소·웹 세션·멈춤 신호, 횟수·시간 제한은 새로 센다. 닫혔으면 false */
   attach(input: BrowserSessionInput): boolean {
-    if (!this.page || this.closed) return false;
+    if (!this.page || this.closed || this.page.isClosed()) return false;
     this.input = input;
     for (const key of questionUrlKeys(input.question)) this.questionUrls.add(key);
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
@@ -310,7 +356,22 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     // 지난 답에서 본 페이지들은 이번 답의 링크·주소 허용 목록에도 넣는다
     if (this.lastPage) input.web.rememberVisited(this.lastPage.url, this.lastPage.title);
     this.notes.push('지난 질문에서 연 페이지를 이어서 써요');
+    void this.startLive(this.page);
     return true;
+  }
+
+  holdDeadline(): () => void {
+    if (this.deadline === null || this.closed) return () => undefined;
+    const remaining = Math.max(0, this.deadline - Date.now());
+    if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = null;
+    this.deadline = null;
+    return () => {
+      if (this.closed || this.deadline !== null) return;
+      this.deadline = Date.now() + remaining;
+      this.deadlineTimer = setTimeout(() => void this.close('time'), remaining);
+      this.deadlineTimer.unref();
+    };
   }
 
   private startDeadline() {
@@ -382,6 +443,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadlineTimer = null;
     this.input.signal?.removeEventListener('abort', this.onAbort);
+    this.live = false;
     const context = this.context;
     this.context = null;
     this.page = null;
@@ -425,6 +487,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       const reason = clickBlockReason(target.info);
       if (reason) return blocked(reason);
       if (target.info.disabled) return failure('누를 수 없는 요소예요');
+      await this.showCursor(page, target.locator);
       // 누른 뒤 이동을 기다리지 않는다(막은 이동은 끝나지 않는다). 기다림은 afterAction이 한다
       await target.locator.click({ timeout: ACTION_TIMEOUT_MS, noWaitAfter: true });
       return this.afterAction(page);
@@ -446,6 +509,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       const { removed } = redactQuery(text);
       if (removed.length) return blocked(`입력할 글에 ${removed.join('·')}로 보이는 개인정보가 있어요`);
       if (submit && info.inForm && isPostFormSubmission(info.formMethod)) return blocked('정보를 보내는 폼(POST)은 제출하지 않아요');
+      await this.showCursor(page, locator);
       if (info.tag === 'select') await locator.selectOption({ label: text }, { timeout: ACTION_TIMEOUT_MS });
       else if (info.editable) await locator.fill(text, { timeout: ACTION_TIMEOUT_MS });
       else return failure('글을 넣을 수 있는 칸이 아니에요', { 안내: '화면 글에서 textbox·searchbox·combobox 번호를 골라요' });
@@ -473,6 +537,18 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     return task(this.page);
   }
 
+  private async dropPage(page: Page): Promise<void> {
+    if (this.page !== page || this.closed) return;
+    const context = this.context;
+    this.page = null;
+    this.context = null;
+    this.cdp = null;
+    this.live = false;
+    this.lastPage = null;
+    this.notes.push('브라우저 탭이 닫혀서 다음 browser_open 때 새로 열어요');
+    if (context) await this.pool.release(context);
+  }
+
   private async ensurePage(): Promise<Page | null> {
     if (this.page) return this.page;
     const context = await this.pool.openContext((browser) => this.newContext(browser), this.makeRoom);
@@ -497,10 +573,13 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) this.refs.startDocument();
     });
+    // 탭이 밖에서 닫히면(창을 띄웠을 때 사람이 닫는 등) 그 컨텍스트를 놓고, 다음 열기가 새 탭을 연다
+    page.on('close', () => void this.dropPage(page));
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     this.page = page;
     this.startDeadline();
+    await this.startLive(page);
     return page;
   }
 
@@ -592,7 +671,13 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private async snapshotText(page: Page, maxChars: number): Promise<string> {
     const { docStart, next } = this.refs.range;
     const arg: PageScriptArg = { op: 'snapshot', attr: this.attr, docStart, next, maxNodes: SNAPSHOT_MAX_NODES, maxItems: SNAPSHOT_MAX_ITEMS };
-    const snapshot = (await this.evaluateIsolated(page, `(${PAGE_SCRIPT_SOURCE})(document.documentElement, ${JSON.stringify(arg)})`)) as PageSnapshot;
+    const expression = `(${PAGE_SCRIPT_SOURCE})(document.documentElement, ${JSON.stringify(arg)})`;
+    // Enter·누르기로 이동이 늦게 시작되면 새 문서가 아직 비어 있을 때 읽기도 한다. 문서가 뜨기를 기다려 한 번 더 읽는다
+    const snapshot = (await this.evaluateIsolated(page, expression).catch(async () => {
+      await page.waitForLoadState('domcontentloaded', { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => undefined);
+      await page.waitForTimeout(SETTLE_MS);
+      return this.evaluateIsolated(page, expression);
+    })) as PageSnapshot;
     this.refs.advance(snapshot.next);
     const notes: string[] = [];
     if (this.blockedRequests.length) notes.push(`(브라우저가 이 페이지의 요청 ${this.blockedRequests.length}개를 막았어요: ${[...new Set(this.blockedRequests)].slice(0, 3).join(' / ')})`);
@@ -607,8 +692,58 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   private async cdpFor(page: Page): Promise<CDPSession> {
     if (!this.context) throw new Error('브라우저를 닫았어요');
-    this.cdp ??= await this.context.newCDPSession(page);
+    if (!this.cdp) {
+      const cdp = await this.context.newCDPSession(page);
+      cdp.on('Page.screencastFrame', (event) => this.onScreencastFrame(cdp, event));
+      this.cdp = cdp;
+    }
     return this.cdp;
+  }
+
+  /**
+   * 누르기·입력 전에 보이는 마우스를 그 요소 가운데로 움직이고 다 갈 때까지 기다린다 (이슈 #425).
+   * 그리지 못해도(요소가 화면 밖·페이지가 막음) 동작은 그대로 한다
+   */
+  private async showCursor(page: Page, locator: Locator): Promise<void> {
+    try {
+      await locator.scrollIntoViewIfNeeded({ timeout: ACTION_TIMEOUT_MS });
+      const box = await locator.boundingBox({ timeout: ACTION_TIMEOUT_MS });
+      if (!box) return;
+      const to = { x: Math.round(Math.min(Math.max(box.x + box.width / 2, 0), VIEWPORT.width)), y: Math.round(Math.min(Math.max(box.y + box.height / 2, 0), VIEWPORT.height)) };
+      await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, this.cursor, to, true));
+      this.cursor = to;
+      await page.waitForTimeout(CURSOR_MOVE_MS);
+    } catch (error) {
+      this.logger.debug(`마우스를 그리지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+    }
+  }
+
+  /** 실시간 화면을 켠다 (받는 곳이 있을 때만). 못 켜도 답은 그대로 한다 */
+  private async startLive(page: Page): Promise<void> {
+    if (!this.input.onLive || this.live || this.closed) return;
+    try {
+      const cdp = await this.cdpFor(page);
+      this.live = true;
+      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: LIVE_QUALITY, maxWidth: LIVE_MAX.width, maxHeight: LIVE_MAX.height });
+    } catch {
+      this.live = false;
+    }
+  }
+
+  private async stopLive(): Promise<void> {
+    if (!this.live) return;
+    this.live = false;
+    await this.cdp?.send('Page.stopScreencast').catch(() => undefined);
+  }
+
+  /** 사진 한 장을 보내고, 간격이 지난 뒤에 받았다고 알린다 (그래야 Chrome이 다음 사진을 보낸다 = 초당 2장쯤) */
+  private onScreencastFrame(cdp: CDPSession, event: { data: string; sessionId: number }) {
+    const page = this.page;
+    if (this.live && page && this.input.onLive) this.input.onLive({ url: displayUrl(page.url()), imageBase64: event.data, at: new Date().toISOString() });
+    const ack = setTimeout(() => {
+      if (this.live && this.cdp === cdp) void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => undefined);
+    }, LIVE_FRAME_GAP_MS);
+    ack.unref();
   }
 
   /**

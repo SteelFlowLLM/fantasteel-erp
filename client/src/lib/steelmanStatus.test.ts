@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AiChatEntry, AiChatLive, AiTimelineStep } from '@/stores/useAiChatStore';
 import { finishedSteelmanStatus, liveSteelmanStatus, SLOW_TOOL_MS, steelmanSpriteSrc, TOOL_RESULT_FLASH_MS } from '@/lib/steelmanStatus';
 
-const live = (steps: AiTimelineStep[], answer = ''): AiChatLive => ({ steps, answer, reasoning: null, browserFrames: [] });
+const live = (steps: AiTimelineStep[], answer = ''): AiChatLive => ({ steps, answer, reasoning: null, browserFrames: [], liveFrame: null, control: null });
 const tool = (name: string, resultPreview: string | null = null): AiTimelineStep => ({
   kind: 'tool',
   id: `t-${name}`,

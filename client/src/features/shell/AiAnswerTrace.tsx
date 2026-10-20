@@ -3,7 +3,7 @@
 // 답을 만드는 과정(생각·조회·중간 글) 보기. 전역 AI 패널과 회의 질문 카드가 함께 쓴다.
 // - AiLiveView: 답을 기다리는 동안 보이는 진행 상황 (생각 시간이 흐르고, 조회 중 → 완료로 바뀌고, 답 글이 자란다)
 // - AiStepsDetails: 답이 끝난 뒤 답 아래에 접어 두는 '생각 과정'
-import { AI_ASSISTANT_TOOL_TITLE } from '@fantasteel/shared';
+import { AI_ASSISTANT_TOOL_TITLE, type AiAgentControlCommand } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { AI_BROWSER_MAX_ACTIONS, browserActionCount, browserFrameSrc, browserFramesSummary, browserToolRunningText, type AiBrowserFrame } from '@/lib/aiBrowser';
@@ -11,7 +11,7 @@ import { driveToolDoneText, driveToolRunningText } from '@/lib/aiDrive';
 import { notionToolDoneText, notionToolRunningText } from '@/lib/aiNotion';
 import { webToolDoneText, webToolRunningText } from '@/lib/aiWebSearch';
 import { formatDuration } from '@/lib/meetingAnalysis';
-import type { AiChatLive, AiTimelineStep } from '@/stores/useAiChatStore';
+import type { AiAgentControlState, AiChatLive, AiTimelineStep } from '@/stores/useAiChatStore';
 
 const SUMMARY = 'cursor-pointer select-none text-xs font-medium text-ink-2 hover:text-ink';
 const PRE = 'max-h-64 overflow-auto rounded-xs bg-surface-2 px-2 py-1.5 font-mono text-cap whitespace-pre-wrap break-words text-ink-2';
@@ -93,8 +93,8 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
 }
 
 /** 답을 기다리는 동안의 진행 상황. 아무것도 오지 않았으면 '만들고 있어요'만 보인다 */
-export function AiLiveView({ live }: { live: AiChatLive }) {
-  const empty = live.steps.length === 0 && live.answer === '' && live.browserFrames.length === 0;
+export function AiLiveView({ live, onControl }: { live: AiChatLive; onControl?: (command: AiAgentControlCommand) => void }) {
+  const empty = live.steps.length === 0 && live.answer === '' && live.browserFrames.length === 0 && live.liveFrame === null;
   return (
     <div aria-live="polite" className="flex flex-col gap-1.5 text-sm">
       {empty ? <p className="text-ink-2">답을 만들고 있어요…</p> : null}
@@ -109,7 +109,8 @@ export function AiLiveView({ live }: { live: AiChatLive }) {
           <LiveTool key={step.id} step={step} />
         ),
       )}
-      <AiBrowserLiveCard frames={live.browserFrames} actions={browserActionCount(live.steps)} />
+      <AiBrowserLiveCard frames={live.browserFrames} liveFrame={live.liveFrame} actions={browserActionCount(live.steps)} />
+      {live.control && onControl ? <AiAgentControlBar control={live.control} onControl={onControl} /> : null}
       {live.answer ? <p className="leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{live.answer}</p> : null}
     </div>
   );
@@ -125,19 +126,76 @@ function BrowserFrameCaption({ frame }: { frame: AiBrowserFrame }) {
   );
 }
 
-/** 답을 기다리는 동안: 철강맨AI가 지금 보는 웹 페이지 화면 (가장 최근 한 장) */
-export function AiBrowserLiveCard({ frames, actions }: { frames: readonly AiBrowserFrame[]; actions: number }) {
-  const latest = frames.at(-1);
-  if (!latest) return null;
+/**
+ * 보일 화면: 실시간 화면이 동작 뒤 사진보다 새것이면 실시간 화면 (이슈 #425). 실시간 화면에는 제목이 없어 같은 주소의 사진 제목을 빌린다
+ */
+export function shownBrowserFrame(frames: readonly AiBrowserFrame[], liveFrame: AiBrowserFrame | null): { frame: AiBrowserFrame; live: boolean } | null {
+  const latest = frames.at(-1) ?? null;
+  if (liveFrame && (!latest || Date.parse(liveFrame.at) >= Date.parse(latest.at))) {
+    return { frame: { ...liveFrame, title: latest && latest.url === liveFrame.url ? latest.title : '' }, live: true };
+  }
+  return latest ? { frame: latest, live: false } : null;
+}
+
+/** 답을 기다리는 동안: 철강맨AI가 지금 보는 웹 페이지 화면 (실시간 화면, 없으면 가장 최근 사진 한 장) */
+export function AiBrowserLiveCard({ frames, liveFrame = null, actions }: { frames: readonly AiBrowserFrame[]; liveFrame?: AiBrowserFrame | null; actions: number }) {
+  const shown = shownBrowserFrame(frames, liveFrame);
+  if (!shown) return null;
+  const { frame } = shown;
   return (
     <section aria-label="브라우저 화면" className="flex flex-col gap-1.5 rounded-sm border border-line bg-surface-2 p-2">
       <div className="flex items-center justify-between text-cap text-ink-3">
-        <b className="font-semibold text-ink-2">브라우저 화면</b>
+        <span className="inline-flex items-center gap-1.5">
+          <b className="font-semibold text-ink-2">브라우저 화면</b>
+          {shown.live ? (
+            <span className="inline-flex items-center gap-1 font-medium text-steelman-ink">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-steelman motion-safe:animate-pulse" />
+              실시간
+            </span>
+          ) : null}
+        </span>
         {actions > 0 ? <span aria-label={`브라우저 동작 ${actions}번, 최대 ${AI_BROWSER_MAX_ACTIONS}번`}>{Math.min(actions, AI_BROWSER_MAX_ACTIONS)}/{AI_BROWSER_MAX_ACTIONS}</span> : null}
       </div>
-      <img src={browserFrameSrc(latest)} alt={latest.title ? `브라우저 화면: ${latest.title}` : '브라우저 화면'} className="w-full rounded-xs border border-line bg-surface" />
-      <BrowserFrameCaption frame={latest} />
+      <img src={browserFrameSrc(frame)} alt={frame.title ? `브라우저 화면: ${frame.title}` : '브라우저 화면'} className="w-full rounded-xs border border-line bg-surface" />
+      <BrowserFrameCaption frame={frame} />
     </section>
+  );
+}
+
+const CONTROL_BUTTON = 'inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-line-strong bg-surface px-2 text-cap text-ink-2 hover:bg-surface-2';
+
+/** 멈춤 줄의 안내 (이슈 #425) */
+export function agentControlText(control: AiAgentControlState): string {
+  if (control.pausedBefore) return `멈췄어요 · 다음 동작: ${toolTitleOf(control.pausedBefore)}`;
+  if (control.requested) return '다음 브라우저·화면 동작 앞에서 멈춰요…';
+  return '브라우저·화면 조작 중';
+}
+
+/** 답하는 동안 브라우저·화면 조작 멈추기·한 단계·계속 (이슈 #425). 답 전체를 멈추는 [멈추기]와 달리 답은 이어진다 */
+function AiAgentControlBar({ control, onControl }: { control: AiAgentControlState; onControl: (command: AiAgentControlCommand) => void }) {
+  const waiting = control.pausedBefore !== null || control.requested;
+  return (
+    <div role="group" aria-label="브라우저·화면 조작 멈춤" className="flex flex-wrap items-center gap-1.5 text-cap text-ink-3">
+      <span aria-live="polite" className={control.pausedBefore ? 'font-semibold text-steelman-ink' : ''}>
+        {agentControlText(control)}
+      </span>
+      {waiting ? (
+        <>
+          {control.pausedBefore ? (
+            <button type="button" className={CONTROL_BUTTON} onClick={() => onControl('step')}>
+              <Icon name="chevron-right" size="sm" />한 단계
+            </button>
+          ) : null}
+          <button type="button" className={CONTROL_BUTTON} onClick={() => onControl('resume')}>
+            <Icon name="arrow-right" size="sm" />계속
+          </button>
+        </>
+      ) : (
+        <button type="button" className={CONTROL_BUTTON} onClick={() => onControl('pause')}>
+          <Icon name="clock" size="sm" />일시정지
+        </button>
+      )}
+    </div>
   );
 }
 
