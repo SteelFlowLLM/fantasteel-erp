@@ -38,6 +38,8 @@ export type AiTimelineStep =
   | { kind: 'thinking'; text: string; startedAt: number; endedAt: number | null }
   /** 조회 도구를 부르기 전에 모델이 남긴 중간 글 (최종 답이 아니다) */
   | { kind: 'note'; text: string }
+  /** 사용자가 작업 중에 덧붙인 말 (이슈 #430). applied: 서버가 모델에 넘겼다고 알렸는지 (그 전에는 '전하는 중') */
+  | { kind: 'userNote'; text: string; applied: boolean }
   /** 조회 도구 한 번. result가 null이면 조회 중 */
   | { kind: 'tool'; id: string; name: string; arguments: string; result: AiToolResult | null };
 
@@ -76,7 +78,7 @@ export interface AiAgentControlState {
 
 export type AiChatEntry =
   /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (저장하지 않는다). 저장한 대화를 열면 imageCount(보낸 사진 수)만 있다 */
-  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; imageCount?: number; webSearch?: boolean; browser?: boolean }
+  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; imageCount?: number; webSearch?: boolean; browser?: boolean; notes?: string[] }
   /**
    * steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드.
    * messageId는 서버에 저장한 답의 id (카드를 실행할 때 보낸다), unsaved는 저장하지 못한 답
@@ -140,6 +142,13 @@ export function reduceAiChatLive(live: AiChatLive, event: AiAssistantStreamEvent
       const frame = toBrowserFrame({ ...event, title: '' });
       return frame ? { ...live, liveFrame: frame } : live;
     }
+    case 'user_note': {
+      // 화면이 보낸 말을 서버가 모델에 넘겼다는 알림: 같은 말을 '전하는 중'에서 바꾼다. 못 찾으면(다른 화면에서 보냄) 새로 더한다
+      const index = live.steps.findIndex((step) => step.kind === 'userNote' && !step.applied && step.text === event.text);
+      const steps = closeThinking(live.steps, now);
+      if (index >= 0) return { ...live, steps: steps.map((step, i) => (i === index ? { kind: 'userNote', text: event.text, applied: true } : step)) };
+      return { ...live, steps: [...steps, { kind: 'userNote', text: event.text, applied: true }] };
+    }
     case 'agent_paused':
       return live.control ? { ...live, control: { ...live.control, requested: false, pausedBefore: event.tool } } : live;
     case 'agent_resumed':
@@ -188,7 +197,7 @@ export function aiChatEntriesFromThread(thread: AiChatThreadView): AiChatEntry[]
   return thread.messages.map((message): AiChatEntry => {
     const id = `saved-${message.id}`;
     if (message.role === 'user') {
-      return { id, role: 'user', content: message.content, ...(message.imageCount ? { imageCount: message.imageCount } : {}), ...(message.webSearch ? { webSearch: true } : {}), ...(message.browser ? { browser: true } : {}) };
+      return { id, role: 'user', content: message.content, ...(message.notes?.length ? { notes: message.notes } : {}), ...(message.imageCount ? { imageCount: message.imageCount } : {}), ...(message.webSearch ? { webSearch: true } : {}), ...(message.browser ? { browser: true } : {}) };
     }
     return {
       id,
@@ -228,6 +237,8 @@ interface AiChatState {
   addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, controlId?: string) => void;
   /** 멈추기·한 단계를 눌렀으면 true(다음 동작 앞에서 멈춘다), 계속이면 false. 실제로 멈춘 것은 서버의 agent_paused로 안다 (이슈 #425) */
   setControlRequested: (questionId: string, requested: boolean) => void;
+  /** 답하는 중에 보낸 말을 '전하는 중'으로 진행 상황에 더한다 (서버가 user_note로 알리면 전했음으로 바뀐다, 이슈 #430) */
+  addAgentNote: (questionId: string, text: string) => void;
   addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
   /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
@@ -263,6 +274,8 @@ export const useAiChatStore = create<AiChatState>((set) => ({
     })),
   setControlRequested: (questionId, requested) =>
     set((state) => (state.pendingId === questionId && state.live?.control ? { live: { ...state.live, control: { ...state.live.control, requested } } } : state)),
+  addAgentNote: (questionId, text) =>
+    set((state) => (state.pendingId === questionId && state.live?.control ? { live: { ...state.live, steps: [...state.live.steps, { kind: 'userNote', text, applied: false }] } } : state)),
   // 그사이 대화를 비웠거나 사원이 바뀌었으면 늦게 온 답은 버린다
   addAnswer: (questionId, answer, sources, cards = []) =>
     set((state) =>
@@ -292,8 +305,11 @@ export const useAiChatStore = create<AiChatState>((set) => ({
     set((state) => {
       if (state.pendingId !== questionId || !state.live) return state;
       if (event.type === 'done') {
+        // 답하는 중에 덧붙인 말은 질문 아래에 남긴다 (서버도 질문 줄에 저장한다)
+        const notes = state.live.steps.flatMap((step) => (step.kind === 'userNote' && step.applied ? [step.text] : []));
+        const entries = notes.length ? state.entries.map((entry) => (entry.id === questionId && entry.role === 'user' ? { ...entry, notes } : entry)) : state.entries;
         return {
-          entries: [...state.entries, aiAnswerEntryFromReply(state.live, event.reply, now, newAiChatId(), event.thread)],
+          entries: [...entries, aiAnswerEntryFromReply(state.live, event.reply, now, newAiChatId(), event.thread)],
           pendingId: null,
           live: null,
           ...(event.thread ? { threadId: event.thread.id } : {}),

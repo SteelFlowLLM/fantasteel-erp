@@ -1,4 +1,4 @@
-import { AI_AGENT_PAUSE_MAX_MS, type AiAgentControlCommand } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, type AiAgentControlCommand } from '@fantasteel/shared';
 import { LlmAbortedError } from '../llm/llm.client';
 
 /** 멈춘 동작 앞에서 기다린 결과: go = 해도 된다, timeout = 너무 오래 멈춰 이 답은 브라우저·화면 조작을 그만둔다 */
@@ -75,31 +75,73 @@ export class AgentGate {
   }
 }
 
+/**
+ * 답하는 동안 사용자가 덧붙인 말 (이슈 #430). 서비스가 다음 모델 호출 앞에서 꺼내 간다.
+ * 질문과 같은 사용자의 말이라 따로 거르지 않고, 개수·길이만 묶는다
+ */
+export class AgentNotes {
+  private queue: string[] = [];
+  private accepted = 0;
+
+  /** 쌓는다. 한 답에 받을 수 있는 수를 넘으면 false */
+  add(text: string): boolean {
+    if (this.accepted >= AI_AGENT_NOTES_MAX) return false;
+    this.accepted += 1;
+    this.queue.push(text);
+    return true;
+  }
+
+  get pending(): number {
+    return this.queue.length;
+  }
+
+  /** 쌓인 말을 오래된 것부터 꺼낸다 */
+  drain(): string[] {
+    const notes = this.queue;
+    this.queue = [];
+    return notes;
+  }
+}
+
+/** 한 답의 문과 덧붙인 말 */
+export interface AgentControl {
+  gate: AgentGate;
+  notes: AgentNotes;
+}
+
 /** 답하는 동안의 문 모음 (서버 메모리). 열쇠는 사원 번호 + 화면이 답마다 만든 열쇠라 남의 답은 멈출 수 없다 */
 export class AgentControlRegistry {
-  private readonly gates = new Map<string, AgentGate>();
+  private readonly controls = new Map<string, AgentControl>();
 
   /** 답을 시작할 때 문을 만든다. 끝나면 돌려준 함수로 지운다 */
-  open(owner: number, controlId: string, gate = new AgentGate()): { gate: AgentGate; close: () => void } {
+  open(owner: number, controlId: string, gate = new AgentGate()): AgentControl & { close: () => void } {
     const key = `${owner}:${controlId}`;
-    this.gates.set(key, gate);
+    const control: AgentControl = { gate, notes: new AgentNotes() };
+    this.controls.set(key, control);
     return {
-      gate,
+      ...control,
       close: () => {
-        if (this.gates.get(key) === gate) this.gates.delete(key);
+        if (this.controls.get(key) === control) this.controls.delete(key);
       },
     };
   }
 
   /** 명령을 보낸다. 그 사원의 답하는 중인 열쇠가 없으면 false */
   command(owner: number, controlId: string, command: AiAgentControlCommand): boolean {
-    const gate = this.gates.get(`${owner}:${controlId}`);
-    if (!gate) return false;
-    gate.command(command);
+    const control = this.controls.get(`${owner}:${controlId}`);
+    if (!control) return false;
+    control.gate.command(command);
     return true;
   }
 
+  /** 말을 덧붙인다. 답하는 중인 열쇠가 없으면 'none', 한 답에 받는 수를 넘으면 'full' */
+  addNote(owner: number, controlId: string, text: string): 'ok' | 'none' | 'full' {
+    const control = this.controls.get(`${owner}:${controlId}`);
+    if (!control) return 'none';
+    return control.notes.add(text) ? 'ok' : 'full';
+  }
+
   get size(): number {
-    return this.gates.size;
+    return this.controls.size;
   }
 }

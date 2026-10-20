@@ -82,6 +82,14 @@ describe('저장한 메시지 모양', () => {
     ]);
   });
 
+  it('답하는 중에 덧붙인 말은 질문 줄의 meta에 남고, 다시 열면 질문 아래에 보이며, 지난 대화에는 한 줄로 붙는다 (이슈 #430)', () => {
+    const meta = questionMeta({ question: 'q', notes: ['서울 기준으로', '2주 안 자료만'] });
+    expect(meta).toEqual({ notes: ['서울 기준으로', '2주 안 자료만'] });
+    expect(questionMeta({ question: 'q', notes: [] })).toBeNull();
+    expect(toChatMessageView(row({ role: AI_CHAT_ROLE.USER, meta }))).toMatchObject({ role: 'user', notes: ['서울 기준으로', '2주 안 자료만'] });
+    expect(chatHistoryTurns([{ role: 'USER', content: '시세 알려줘', meta }])).toEqual([{ role: 'user', content: '시세 알려줘\n(답하는 중에 덧붙인 말: 서울 기준으로 / 2주 안 자료만)' }]);
+  });
+
   it('새 카드 종류(Notion·고치기)도 저장·실행 표시가 된다 (이슈 #398)', () => {
     const notion = { key: 'a1', kind: 'NOTION_PAGE_APPEND' as const, title: 'Notion 글 더하기 · 회의', nonce: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', page: { id: 'p', title: '회의', url: 'https://www.notion.so/p' }, content: '추가', issues: [] };
     const next = cardsWithDone(readyCards([notion]), 'a1', { type: 'notion_page', id: 0, url: 'https://www.notion.so/p' });

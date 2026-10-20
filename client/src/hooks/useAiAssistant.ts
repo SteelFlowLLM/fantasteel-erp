@@ -12,7 +12,7 @@ import { readAiChatThread, writeAiChatThread } from '@/lib/aiChatThread';
 import { useMe } from '@/hooks/useMe';
 import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
 import { AI_CHAT_STOPPED_REASON, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
-import { errorMessageOf } from '@/stores/useToastStore';
+import { errorMessageOf, toast } from '@/stores/useToastStore';
 
 export function useAiSuggestedQuestions() {
   const me = useMe();
@@ -81,6 +81,26 @@ export async function controlAiAgent(command: AiAgentControlCommand): Promise<vo
   // 한 단계는 하나만 하고 다시 멈추므로 멈추기를 기다리는 상태로 둔다
   chat.setControlRequested(questionId, command !== 'resume');
   await aiAssistantApi.controlAgent(control.id, command).catch(() => useAiChatStore.getState().setControlRequested(questionId, false));
+}
+
+/**
+ * 답하는 중에 말을 덧붙인다 (이슈 #430). 브라우저·화면 조작을 켠 답(열쇠가 있는 답)이 진행 중일 때만 보낼 수 있다.
+ * 보냈으면 true, 보낼 수 없거나 실패했으면 false (실패하면 이유를 알린다)
+ */
+export async function sendAiAgentNote(text: string): Promise<boolean> {
+  const chat = useAiChatStore.getState();
+  const questionId = chat.pendingId;
+  const control = chat.live?.control;
+  const note = text.trim();
+  if (!questionId || !control || !note) return false;
+  try {
+    await aiAssistantApi.addAgentNote(control.id, note);
+  } catch (error) {
+    toast.error(errorMessageOf(error));
+    return false;
+  }
+  useAiChatStore.getState().addAgentNote(questionId, note);
+  return true;
 }
 
 /** 서버가 보낸 화면 동작을 이 화면에서 실행하고 결과를 돌려준다. 보내기에 실패하면 서버가 시간 초과로 끝낸다 */

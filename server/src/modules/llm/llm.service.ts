@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import type { LlmChatTestView, LlmConnectionTestInput, LlmConnectionView, LlmSettingsInput, LlmSettingsView } from '@fantasteel/shared';
+import type { LlmBrowserSettingsInput, LlmBrowserSettingsView, LlmChatTestView, LlmConnectionTestInput, LlmConnectionView, LlmSettingsInput, LlmSettingsView } from '@fantasteel/shared';
+import { effectiveStartSites } from '../ai-assistant/browser/browser-rules';
+import { BrowserSettingsStore } from './browser-settings.store';
 import { LlmClient, LlmRequestError, normalizeBaseUrl } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 import { LlmSettingsStore, type LlmSettings } from './llm-settings.store';
@@ -11,6 +13,7 @@ export class LlmService {
   constructor(
     private readonly store: LlmSettingsStore,
     private readonly client: LlmClient,
+    private readonly browserStore: BrowserSettingsStore,
   ) {}
 
   async getSettings(): Promise<LlmSettingsView> {
@@ -26,6 +29,16 @@ export class LlmService {
     };
     await this.store.write(next);
     return toView(next);
+  }
+
+  async getBrowserSettings(): Promise<LlmBrowserSettingsView> {
+    return toBrowserView(await this.browserStore.read());
+  }
+
+  async updateBrowserSettings(input: LlmBrowserSettingsInput): Promise<LlmBrowserSettingsView> {
+    const next = { startSites: input.startSites === null ? null : [...new Set(input.startSites)], openAllSites: input.openAllSites };
+    await this.browserStore.write(next);
+    return toBrowserView(next);
   }
 
   /** 저장하기 전 주소로 연결을 확인하고 모델 목록을 받는다. 실패도 오류가 아니라 결과로 돌려준다 */
@@ -53,6 +66,10 @@ export class LlmService {
       return { ok: false, model: settings.model, reply: null, latencyMs: null, error: messageOf(error) };
     }
   }
+}
+
+function toBrowserView(settings: { startSites: string[] | null; openAllSites: boolean }): LlmBrowserSettingsView {
+  return { startSites: settings.startSites, effectiveStartSites: effectiveStartSites(settings.startSites), defaultStartSites: effectiveStartSites(null), openAllSites: settings.openAllSites };
 }
 
 function toView(settings: LlmSettings): LlmSettingsView {

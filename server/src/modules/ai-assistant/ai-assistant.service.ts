@@ -18,10 +18,12 @@ import {
   type AuthUser,
   type AiAgentControlCommand,
   AI_AGENT_PAUSE_MAX_MS,
+  AI_AGENT_NOTES_MAX,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmImage, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
+import { BrowserSettingsStore } from '../llm/browser-settings.store';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
@@ -45,7 +47,7 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AgentControlRegistry, type AgentGate } from './agent-control';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
-import { browserVisionEnabled } from './browser/browser-rules';
+import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, effectiveStartSites } from './browser/browser-rules';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
 import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
 import { AiNotionCardService } from './notion/ai-notion-card.service';
@@ -80,8 +82,15 @@ const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자�
 export const MAX_TOOL_ROUNDS = 4;
 /** 웹 검색을 켠 질문의 도구 횟수 상한. 검색 → 읽기 → (다른 결과 읽기·다시 검색) → 답에 4번은 빠듯해서 늘린다 (이슈 #367) */
 export const MAX_WEB_TOOL_ROUNDS = 6;
-/** 브라우저 사용을 켠 질문의 도구 횟수 상한. 열기 → 읽기 → 입력 → 누르기 …가 이어져서 늘린다 (이슈 #373 결정값) */
-export const MAX_BROWSER_TOOL_ROUNDS = 12;
+/**
+ * 브라우저 사용을 켠 질문의 도구 횟수 상한 = 동작 수 상한(BROWSER_MAX_ACTIONS) + 이 값 (이슈 #373, #430).
+ * 화면 읽기와 실패한 동작은 동작 수에 세지 않지만 도구 차례는 쓰므로 그 몫을 더한다 (가정값)
+ */
+export const BROWSER_EXTRA_TOOL_ROUNDS = 20;
+/** 덧붙인 말을 모델에 넘길 때 붙이는 머리말 (이슈 #430) */
+export const USER_NOTE_PREFIX = '[사용자가 작업 중에 덧붙인 말]';
+/** 멈춘 동안 말이 덧붙어 하려던 동작을 건너뛸 때 모델에 주는 결과 (이슈 #430) */
+const NOTE_SKIPPED_ACTION = JSON.stringify({ 오류: '사용자가 말을 덧붙여 이 동작은 하지 않았어요', 안내: '덧붙인 말을 반영해 다음에 할 동작을 다시 정해요' });
 /** 화면 조작을 켠 질문의 도구 횟수 상한. 읽기 → 열기 → 채우기 …가 이어진다 (이슈 #382, 화면 동작 12번과 맞춤) */
 export const MAX_SCREEN_TOOL_ROUNDS = 12;
 /** 멈춘 채 너무 오래 두었을 때 모델에 알리는 말 (이슈 #425) */
@@ -136,6 +145,7 @@ export class AiAssistantService {
     private readonly driveTools: AssistantDriveToolbox,
     private readonly chatThreads: AiChatThreadService,
     private readonly researchCards: AiResearchCardService,
+    private readonly browserSettings: BrowserSettingsStore,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -146,6 +156,13 @@ export class AiAssistantService {
   /** 답하는 동안 브라우저·화면 조작을 멈추거나 이어 간다 (이슈 #425). 묻는 사원 본인의 답하는 중인 열쇠만 */
   controlAgent(user: AuthUser, controlId: string, command: AiAgentControlCommand): void {
     if (!this.agentControls.command(user.employeeId, controlId, command)) throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+  }
+
+  /** 답하는 중에 사용자가 말을 덧붙인다 (이슈 #430). 묻는 사원 본인의 답하는 중인 열쇠만 */
+  addAgentNote(user: AuthUser, controlId: string, text: string): void {
+    const outcome = this.agentControls.addNote(user.employeeId, controlId, text);
+    if (outcome === 'none') throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+    if (outcome === 'full') throw new AppException('COM-004', `한 답에 덧붙일 수 있는 말은 ${AI_AGENT_NOTES_MAX}번까지예요`);
   }
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
@@ -182,7 +199,8 @@ export class AiAssistantService {
   async capabilities(): Promise<AiAssistantCapabilitiesView> {
     const settings = await this.settingsStore.read();
     const webSearch = this.webTools.capabilities();
-    const browser = this.browserTools.capabilities();
+    const browserSaved = await this.browserSettings.read();
+    const browser = { ...this.browserTools.capabilities(), maxActions: browserMaxActions(), openAllSites: browserSaved.openAllSites };
     const screenControl = this.screenTools.capabilities();
     const notion = await this.notionTools.availability();
     const drive = await this.driveTools.availability();
@@ -253,6 +271,10 @@ export class AiAssistantService {
     const visionOf = () => (vision ??= this.llm.modelCapabilities(endpoint, model).then((caps) => caps.vision));
     // 사진을 보는 모델이면 브라우저 동작 뒤 번호 표 붙은 화면 사진도 보낸다 (이슈 #427)
     const browserVision = browserOn && browserVisionEnabled() && (await visionOf()) === true;
+    // 열 수 있는 주소 범위는 관리자가 AI 연결 화면에서 정한다 (이슈 #430). 답마다 새로 읽는다
+    const browserSaved = browserOn ? await this.browserSettings.read() : null;
+    const browserStartSites = effectiveStartSites(browserSaved?.startSites ?? null);
+    const browserLimits = browserOn ? { openAllSites: browserSaved?.openAllSites === true, maxActions: browserMaxActions(), timeLimitMinutes: Math.round(browserTimeLimitMs() / 60_000) } : undefined;
     const messages: LlmToolMessage[] = buildAssistantMessages({
       employeeName: user.employeeName,
       roleLabel: ROLE_LABEL[user.roleCode],
@@ -272,6 +294,7 @@ export class AiAssistantService {
       browserTools: browserOn,
       browserOpenPage,
       browserVision,
+      ...(browserLimits ? { browserLimits } : {}),
       screenControl: screenOn ? { screens } : null,
       notionTools: notionOn,
       driveTools: driveOn,
@@ -286,13 +309,15 @@ export class AiAssistantService {
     } else if (attached?.text) {
       messages[messages.length - 1] = { role: 'user', content: questionText };
     }
+    // 답하는 중에 덧붙인 말 중 모델에 넘긴 것. 저장한 질문 아래에 남긴다 (이슈 #430)
+    const userNotes: string[] = [];
     const saveThread = async (reply: AiAssistantReplyView): Promise<AiChatThreadRef | null> => {
       try {
         return await this.chatThreads.saveTurn(
           user,
           input.threadId,
           // @로 붙인 Drive 파일은 글이 아니라 이름만 남긴다 (이어 묻는 질문의 맥락용, 이슈 #398)
-          { question: input.question, reasoning: input.reasoning, webSearch: input.webSearch, browser: input.browser, imageCount: input.images?.length, driveFiles: attached?.names },
+          { question: input.question, reasoning: input.reasoning, webSearch: input.webSearch, browser: input.browser, imageCount: input.images?.length, driveFiles: attached?.names, ...(userNotes.length ? { notes: [...userNotes] } : {}) },
           reply,
         );
       } catch (error) {
@@ -317,7 +342,7 @@ export class AiAssistantService {
         // 브라우저는 답마다 새 시크릿 컨텍스트(첫 브라우저 도구 때 연다). 끝·멈춤·오류 때 닫는다
         const browser: BrowserToolSessionLike | null =
           browserOn && web
-            ? this.browserTools.session({ question: input.question, web, signal, markedImages: browserVision, ...(emit ? { onLive: (frame) => emit({ type: 'browser_live', ...frame }) } : {}) }, browserKey)
+            ? this.browserTools.session({ question: input.question, web, signal, markedImages: browserVision, startSites: browserStartSites, openAllSites: browserLimits?.openAllSites === true, ...(emit ? { onLive: (frame) => emit({ type: 'browser_live', ...frame }) } : {}) }, browserKey)
             : null;
         // 화면 조작: 동작은 ui_action 이벤트로 그 화면에 보내고 결과를 기다린다 (이슈 #382)
         const screen: ScreenControlSession | null = screenOn && emit ? this.screenTools.session({ owner: user.employeeId, screens, emit, signal }) : null;
@@ -339,7 +364,7 @@ export class AiAssistantService {
         const maxRounds = Math.max(
           MAX_TOOL_ROUNDS,
           webSearch && web ? MAX_WEB_TOOL_ROUNDS : 0,
-          browser ? MAX_BROWSER_TOOL_ROUNDS : 0,
+          browser ? browserMaxActions() + BROWSER_EXTRA_TOOL_ROUNDS : 0,
           screen ? MAX_SCREEN_TOOL_ROUNDS : 0,
           notion ? MAX_NOTION_TOOL_ROUNDS : 0,
           drive ? MAX_DRIVE_TOOL_ROUNDS : 0,
@@ -355,16 +380,31 @@ export class AiAssistantService {
             messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
             reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name) || tool.name === NOTION_CARD_TOOL));
           }
-          for (let round = 1; reply.toolCalls.length && round <= maxRounds; round += 1) {
-            messages.push({ role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls });
+          // 사용자가 작업 중에 덧붙인 말은 다음 모델 호출 앞에서 user 메시지로 넣는다 (이슈 #430)
+          const injectNotes = () => {
+            const notes = control?.notes.drain() ?? [];
+            if (!notes.length) return;
+            messages.push({ role: 'user', content: notes.map((note) => `${USER_NOTE_PREFIX} ${note}`).join('\n') });
+            for (const note of notes) {
+              userNotes.push(note);
+              emit?.({ type: 'user_note', text: note });
+            }
+          };
+          // 답을 쓰는 중에 말이 덧붙었으면 그 말을 반영해 한 번 더 이어 간다
+          for (let round = 1; (reply.toolCalls.length || (control?.notes.pending ?? 0) > 0) && round <= maxRounds; round += 1) {
+            messages.push(reply.toolCalls.length ? { role: 'assistant', content: reply.content || null, toolCalls: reply.toolCalls } : { role: 'assistant', content: reply.content || '…' });
             const roundImages: LlmImage[] = [];
             let browserImage: LlmImage | null = null;
+            // 멈춰 있는 동안 말이 덧붙었으면, 이 차례에 하려던 브라우저·화면 동작은 건너뛰고 말을 먼저 반영한다
+            let redirected = false;
             for (const toolCall of reply.toolCalls) {
               if (signal?.aborted) throw new LlmAbortedError();
               // 사용자가 멈췄으면 브라우저·화면 동작 앞에서 기다린다. 기다리는 동안은 브라우저 시간 제한을 세지 않는다 (이슈 #425)
               const gate: AgentGate | null = control && (browser?.has(toolCall.name) || screen?.has(toolCall.name)) ? control.gate : null;
+              let waited = false;
               const passed = gate
                 ? await gate.beforeAction(signal, () => {
+                    waited = true;
                     emit?.({ type: 'agent_paused', tool: toolCall.name });
                     const release = browser?.holdDeadline?.();
                     return () => {
@@ -373,6 +413,7 @@ export class AiAssistantService {
                     };
                   })
                 : 'go';
+              if (waited && (control?.notes.pending ?? 0) > 0) redirected = true;
               const callStarted = Date.now();
               const traceId = `t${toolCalls.length + 1}`;
               emit?.({ type: 'tool_start', id: traceId, name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX) });
@@ -381,6 +422,8 @@ export class AiAssistantService {
               let result: ToolRunResult;
               if (passed === 'timeout') {
                 result = { content: JSON.stringify({ 오류: AGENT_PAUSE_TIMEOUT, 안내: '브라우저·화면 도구를 더 부르지 말고 지금까지 본 내용으로 답해요' }), source: null };
+              } else if (redirected && gate) {
+                result = { content: NOTE_SKIPPED_ACTION, source: null };
               } else if (web?.has(toolCall.name)) {
                 const webResult = await web.run(toolCall, signal);
                 result = { content: webResult.content, source: null };
@@ -427,6 +470,7 @@ export class AiAssistantService {
             // tool 메시지는 글만 받아서, 읽은 Drive 사진은 그 뒤 user 메시지로 붙인다
             if (roundImages.length) messages.push({ role: 'user', content: DRIVE_IMAGE_NOTE, images: roundImages });
             if (browserImage) pushBrowserImage(messages, browserImage);
+            injectNotes();
             if (signal?.aborted) throw new LlmAbortedError();
             reply = await call(round < maxRounds ? tools : []);
           }

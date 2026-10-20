@@ -7,7 +7,7 @@ import { internalReferenceIn, urlKey } from '../web/web-text';
 import { AssistantBrowserToolbox, BROWSER_KEEP_MS, BrowserToolSession, type BrowserWebLink } from './assistant-browser-toolbox';
 import { decideBrowserRequest } from './browser-guard';
 import { BrowserPool, BrowserUnavailableError, chromeCandidates, type ChromeLaunch } from './browser-pool';
-import { clickBlockReason, displayUrl, formatSnapshot, isPostFormSubmission, isSensitiveField, MAX_BROWSER_ACTIONS_PER_ANSWER, parseRef, RefBook, riskyWordIn, typeBlockReason, browserStartSites, browserVisionEnabled, DEFAULT_BROWSER_START_SITES, isStartSiteUrl } from './browser-rules';
+import { clickBlockReason, displayUrl, formatSnapshot, isPostFormSubmission, isSensitiveField, browserMaxActions, browserTimeLimitMs, DEFAULT_BROWSER_MAX_ACTIONS, DEFAULT_BROWSER_TIME_LIMIT_MINUTES, effectiveStartSites, RepeatGuard, parseRef, RefBook, riskyWordIn, typeBlockReason, browserStartSites, browserVisionEnabled, DEFAULT_BROWSER_START_SITES, isStartSiteUrl } from './browser-rules';
 import type { ElementInfo, PageSnapshot, SnapshotItem } from './page-script';
 
 const element = (overrides: Partial<ElementInfo> = {}): ElementInfo => ({
@@ -626,6 +626,25 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       expect(errorOf((await fromSearch.run(call('browser_open', { url: 'https://news.example.kr/a' }))).content)).toBe('지금은 브라우저가 바빠요');
     });
 
+    it('관리자가 저장한 시작 사이트 목록이 기본 목록을 대신한다 (이슈 #430)', async () => {
+      const toolbox = new AssistantBrowserToolbox(busyPool());
+      const session = toolbox.session({ question: '봐줘', web: web(), startSites: ['steel.example.kr'] });
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://www.steel.example.kr/a' }))).content)).toBe('지금은 브라우저가 바빠요');
+      const blocked = errorOf((await session.run(call('browser_open', { url: 'https://search.naver.com/' }))).content);
+      expect(blocked).toContain('시작 사이트에 없는 주소');
+      expect(blocked).not.toContain('naver.com');
+    });
+
+    it("'모든 사이트 열기'를 켜면 목록 밖 주소도 열러 가지만, 내부 주소·회사 안 정보는 그대로 막는다 (이슈 #430)", async () => {
+      const toolbox = new AssistantBrowserToolbox(busyPool());
+      const session = toolbox.session({ question: '대한강재 시세 봐줘', web: web([], ['대한강재']), openAllSites: true });
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://random.example.org/a' }))).content)).toBe('지금은 브라우저가 바빠요');
+      expect(errorOf((await session.run(call('browser_open', { url: 'http://127.0.0.1/admin' }))).content)).toContain('내부 주소');
+      expect(errorOf((await session.run(call('browser_open', { url: 'http://192.168.0.5/' }))).content)).toContain('내부 주소');
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://news.example.kr/search?q=대한강재' }))).content)).toContain('거래처 이름');
+      expect(errorOf((await session.run(call('browser_open', { url: 'javascript:alert(1)' }))).content)).not.toBe('지금은 브라우저가 바빠요');
+    });
+
     it('회사 안 정보가 든 주소와 내부 주소는 막는다', async () => {
       const toolbox = new AssistantBrowserToolbox(busyPool());
       const session = toolbox.session({ question: 'https://news.example.kr/q?c=SO-2610-001 http://127.0.0.1/admin https://news.example.kr/search?q=대한강재 봐줘', web: web([], ['대한강재']) });
@@ -634,12 +653,23 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       expect(errorOf((await session.run(call('browser_open', { url: 'http://127.0.0.1/admin' }))).content)).toContain('내부 주소');
     });
 
-    it('연 페이지가 없으면 화면 읽기·누르기를 하지 않고, 한 답 동작 수를 넘으면 멈춘다', async () => {
-      const session = new AssistantBrowserToolbox(busyPool()).session({ question: '봐줘', web: web() });
+    it('연 페이지가 없으면 화면 읽기·누르기를 하지 않고, 실패한 동작은 동작 수에 세지 않는다 (이슈 #430)', async () => {
+      const session = new AssistantBrowserToolbox(busyPool(), { maxActions: 2 }).session({ question: '봐줘', web: web() });
       expect(errorOf((await session.run(call('browser_snapshot'))).content)).toBe('아직 연 페이지가 없어요');
-      for (let i = 1; i < MAX_BROWSER_ACTIONS_PER_ANSWER; i += 1) await session.run(call('browser_click', { ref: 'r1' }));
-      expect(errorOf((await session.run(call('browser_scroll', { direction: 'down' }))).content)).toContain(`${MAX_BROWSER_ACTIONS_PER_ANSWER}번까지만`);
-      expect(errorOf((await session.run(call('nope'))).content)).toContain(`${MAX_BROWSER_ACTIONS_PER_ANSWER}번까지만`);
+      // 동작 상한(2)을 넘게 실패해도 "N번까지만"으로 막히지 않고 실패 이유가 그대로 온다
+      for (const ref of ['r1', 'r2', 'r3', 'r4', 'r5']) expect(errorOf((await session.run(call('browser_click', { ref }))).content)).toBe('아직 연 페이지가 없어요');
+      expect(errorOf((await session.run(call('nope'))).content)).toBe('없는 도구예요: nope');
+    });
+
+    it('같은 도구를 같은 인자로 연달아 3번 부르면 막고, 다른 동작이 끼면 처음부터 센다 (이슈 #430)', async () => {
+      const session = new AssistantBrowserToolbox(busyPool()).session({ question: '봐줘', web: web() });
+      const click = (ref: string) => session.run(call('browser_click', { ref }));
+      expect(errorOf((await click('r1')).content)).toBe('아직 연 페이지가 없어요');
+      expect(errorOf((await click('r1')).content)).toBe('아직 연 페이지가 없어요');
+      expect(errorOf((await click('r1')).content)).toBe('같은 동작을 되풀이해요');
+      expect(errorOf((await click('r1')).content)).toBe('같은 동작을 되풀이해요');
+      expect(errorOf((await click('r2')).content)).toBe('아직 연 페이지가 없어요');
+      expect(errorOf((await click('r1')).content)).toBe('아직 연 페이지가 없어요');
     });
 
     describe('문서 읽기 browser_read_file (이슈 #427)', () => {
@@ -668,7 +698,7 @@ describe('브라우저 모음 (Chrome 없이)', () => {
         expect(result.content).toContain('[웹 문서] www.kosa.or.kr');
         expect(result.content).toContain('<untrusted_web_content source="www.kosa.or.kr">');
         expect(result.content).toContain('SS275 인장강도 410 MPa');
-        expect(result.content).toContain(`(브라우저 동작 ${MAX_BROWSER_ACTIONS_PER_ANSWER - 1}번 남음)`);
+        expect(result.content).toContain(`(브라우저 동작 ${browserMaxActions() - 1}번 남음)`);
         expect(result.frame).toBeNull();
         expect(result.modelImage).toBeUndefined();
         expect(result.webSources).toEqual([{ title: '2026 철강 보고서', url: 'https://www.kosa.or.kr/report.pdf' }]);
@@ -729,5 +759,34 @@ describe('시작 사이트 (이슈 #423)', () => {
   it('BROWSER_START_SITES로 바꾸고, 빈 값이면 하나도 없다', () => {
     expect(browserStartSites({ BROWSER_START_SITES: ' Example.COM , .posco.co.kr. , 잘못된 값 ' })).toEqual(['example.com', 'posco.co.kr']);
     expect(browserStartSites({ BROWSER_START_SITES: '' })).toEqual([]);
+  });
+});
+
+describe('브라우저 동작·시간 상한과 되풀이 막기 (이슈 #430)', () => {
+  it('env로 정하고, 없거나 범위 밖이면 기본값을 쓴다', () => {
+    expect(browserMaxActions({})).toBe(DEFAULT_BROWSER_MAX_ACTIONS);
+    expect(browserMaxActions({ BROWSER_MAX_ACTIONS: '60' })).toBe(60);
+    expect(browserMaxActions({ BROWSER_MAX_ACTIONS: '0' })).toBe(DEFAULT_BROWSER_MAX_ACTIONS);
+    expect(browserMaxActions({ BROWSER_MAX_ACTIONS: '9999' })).toBe(DEFAULT_BROWSER_MAX_ACTIONS);
+    expect(browserMaxActions({ BROWSER_MAX_ACTIONS: 'abc' })).toBe(DEFAULT_BROWSER_MAX_ACTIONS);
+    expect(browserTimeLimitMs({})).toBe(DEFAULT_BROWSER_TIME_LIMIT_MINUTES * 60_000);
+    expect(browserTimeLimitMs({ BROWSER_TIME_LIMIT_MINUTES: '20' })).toBe(20 * 60_000);
+    expect(browserTimeLimitMs({ BROWSER_TIME_LIMIT_MINUTES: '-1' })).toBe(DEFAULT_BROWSER_TIME_LIMIT_MINUTES * 60_000);
+  });
+
+  it('RepeatGuard: 같은 도구·인자는 3번째에 걸리고, 스크롤은 6번째에 걸린다', () => {
+    const guard = new RepeatGuard();
+    expect([1, 2, 3, 4].map(() => guard.hit('browser_click', { ref: 'r1' }))).toEqual([false, false, true, true]);
+    expect(guard.hit('browser_click', { ref: 'r2' })).toBe(false);
+    expect([1, 2, 3, 4, 5, 6].map(() => guard.hit('browser_scroll', { direction: 'down' }))).toEqual([false, false, false, false, false, true]);
+    guard.reset();
+    expect(guard.hit('browser_scroll', { direction: 'down' })).toBe(false);
+  });
+
+  it('시작 사이트: 저장한 목록이 있으면 그것을, 없으면 env·기본 목록을 쓴다', () => {
+    expect(effectiveStartSites(['kosis.kr'], { BROWSER_START_SITES: 'daum.net' })).toEqual(['kosis.kr']);
+    expect(effectiveStartSites(null, { BROWSER_START_SITES: 'daum.net' })).toEqual(['daum.net']);
+    expect(effectiveStartSites([], { BROWSER_START_SITES: 'daum.net' })).toEqual([]);
+    expect(effectiveStartSites(null, {})).toEqual(DEFAULT_BROWSER_START_SITES);
   });
 });

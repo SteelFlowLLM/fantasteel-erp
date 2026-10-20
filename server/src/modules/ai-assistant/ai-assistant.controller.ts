@@ -14,7 +14,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentNoteDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
@@ -108,6 +108,17 @@ export class AiAssistantController {
   @HttpCode(200)
   controlAgent(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentControlDto): { accepted: true } {
     this.service.controlAgent(user, controlId, dto.command);
+    return { accepted: true };
+  }
+
+  /**
+   * 답하는 중에 말 덧붙이기 (문서에 없는 기능, 이슈 #430). 서비스가 다음 모델 호출 앞에서 user 메시지로 넣는다.
+   * 그 답을 물은 사원만 보낼 수 있고, 답하는 중인 열쇠가 없으면(이미 끝남) COM-003
+   */
+  @Post('ai-assistant/agent-control/:controlId/notes')
+  @HttpCode(200)
+  addAgentNote(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentNoteDto): { accepted: true } {
+    this.service.addAgentNote(user, controlId, dto.text);
     return { accepted: true };
   }
 

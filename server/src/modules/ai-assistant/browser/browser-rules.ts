@@ -6,10 +6,44 @@ import type { ElementInfo, PageSnapshot, SnapshotItem } from './page-script';
  * 막는 버튼·칸, POST 폼 판단, 요소 번호(ref)가 지금 페이지 것인지, 화면 글 만들기.
  */
 
-/** 한 답에서 브라우저 도구를 부르는 수 (화면 읽기 포함, 결정값) */
-export const MAX_BROWSER_ACTIONS_PER_ANSWER = 15;
-/** 한 답에서 브라우저를 쓰는 시간. 첫 브라우저 도구부터 센다 (결정값) */
-export const BROWSER_TIME_PER_ANSWER_MS = 3 * 60_000;
+/**
+ * 한 답에서 세는 브라우저 동작 수 (이슈 #430). browser_snapshot과 실패한 동작은 세지 않는다.
+ * 15번은 로딩이 덜 된 화면·스크롤로 금방 닳아서 40번으로 늘렸다(가정값). BROWSER_MAX_ACTIONS로 바꾼다
+ */
+export const DEFAULT_BROWSER_MAX_ACTIONS = 40;
+/** 한 답에서 브라우저를 쓰는 시간. 첫 브라우저 도구부터 센다 (가정값). BROWSER_TIME_LIMIT_MINUTES로 바꾼다 */
+export const DEFAULT_BROWSER_TIME_LIMIT_MINUTES = 10;
+
+function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const value = Number(raw?.trim());
+  return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+export const browserMaxActions = (env: NodeJS.ProcessEnv = process.env): number => boundedInt(env.BROWSER_MAX_ACTIONS, DEFAULT_BROWSER_MAX_ACTIONS, 1, 200);
+export const browserTimeLimitMs = (env: NodeJS.ProcessEnv = process.env): number => boundedInt(env.BROWSER_TIME_LIMIT_MINUTES, DEFAULT_BROWSER_TIME_LIMIT_MINUTES, 1, 60) * 60_000;
+
+/** 같은 도구를 같은 인자로 연달아 부를 수 있는 횟수. 스크롤은 같은 인자로 이어 내리는 게 보통이라 넉넉히 둔다 (가정값) */
+const REPEAT_LIMIT = 3;
+const REPEAT_LIMIT_SCROLL = 6;
+
+/** 같은 동작을 되풀이하는지 본다 (이슈 #430). 다른 동작이 끼면 처음부터 센다 */
+export class RepeatGuard {
+  private lastKey: string | null = null;
+  private streak = 0;
+
+  /** 이번 호출이 연달아 한도를 넘은 되풀이면 true */
+  hit(name: string, args: unknown): boolean {
+    const key = `${name}:${JSON.stringify(args)}`;
+    this.streak = key === this.lastKey ? this.streak + 1 : 1;
+    this.lastKey = key;
+    return this.streak >= (name === 'browser_scroll' ? REPEAT_LIMIT_SCROLL : REPEAT_LIMIT);
+  }
+
+  reset() {
+    this.lastKey = null;
+    this.streak = 0;
+  }
+}
 /** 화면 읽기에서 도는 요소 수와 모델에 넘기는 글 길이 (결정값) */
 export const SNAPSHOT_MAX_NODES = 5_000;
 export const SNAPSHOT_MAX_CHARS = 8_000;
@@ -217,6 +251,9 @@ export function browserStartSites(env: NodeJS.ProcessEnv = process.env): string[
     .map((host) => host.trim().toLowerCase().replace(/^\.+|\.+$/g, ''))
     .filter((host) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(host) || /^[a-z0-9-]+\.[a-z0-9-]+$/.test(host));
 }
+
+/** 관리자가 저장한 시작 사이트가 있으면 그것을, 없으면 env·기본 목록을 쓴다 (이슈 #430) */
+export const effectiveStartSites = (saved: readonly string[] | null, env: NodeJS.ProcessEnv = process.env): string[] => (saved ? [...saved] : browserStartSites(env));
 
 /** 주소가 시작 사이트(또는 그 하위 호스트)인지. https·http만 */
 export function isStartSiteUrl(url: string, sites: readonly string[]): boolean {

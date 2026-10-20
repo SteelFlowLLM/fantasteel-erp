@@ -297,6 +297,26 @@ describe('실시간 브라우저 화면·멈춤 (이슈 #425)', () => {
       }
     });
 
+    it('덧붙인 말은 전하는 중으로 더해지고, user_note가 오면 전했음으로 바뀌며, 답이 끝나면 질문 아래에 남는다 (이슈 #430)', () => {
+      store().addQuestion('q1', '시세 알려줘', undefined, undefined, undefined, true, CONTROL_ID);
+      store().addAgentNote('q1', '서울 기준으로');
+      expect(store().live?.steps).toEqual([{ kind: 'userNote', text: '서울 기준으로', applied: false }]);
+      store().applyStreamEvent('q1', { type: 'user_note', text: '서울 기준으로' });
+      expect(store().live?.steps).toEqual([{ kind: 'userNote', text: '서울 기준으로', applied: true }]);
+      store().addAgentNote('q1', '아직 못 전한 말');
+      store().applyStreamEvent('q1', { type: 'done', reply: REPLY });
+      const user = store().entries[0];
+      expect(user).toMatchObject({ role: 'user', notes: ['서울 기준으로'] });
+    });
+
+    it('열쇠가 없는 답(멈출 수 없는 답)에는 덧붙임을 더하지 않고, 저장한 대화를 열면 질문 아래에 덧붙임이 보인다', () => {
+      store().addQuestion('q1', '예약이 뭐야?');
+      store().addAgentNote('q1', '무시됨');
+      expect(store().live?.steps).toEqual([]);
+      const thread: AiChatThreadView = { id: 5, title: 't', createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z', messages: [{ id: 1, seq: 1, role: 'user', content: '질문', createdAt: '2026-10-20T00:00:00.000Z', notes: ['서울 기준으로'] }] };
+      expect(aiChatEntriesFromThread(thread)[0]).toMatchObject({ role: 'user', notes: ['서울 기준으로'] });
+    });
+
     it('agent_paused는 멈춘 도구를 적고 멈추기 요청을 끝내며, agent_resumed는 멈춘 도구를 지운다', () => {
       const asked = { ...emptyAiChatLive(null, CONTROL_ID), control: { id: CONTROL_ID, requested: true, pausedBefore: null } };
       const paused = reduceAiChatLive(asked, { type: 'agent_paused', tool: 'browser_click' }, 0);

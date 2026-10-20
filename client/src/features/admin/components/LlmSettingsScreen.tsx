@@ -21,6 +21,7 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { useAction } from '@/hooks/useAction';
 import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/useLlm';
 import { useCanUse } from '@/hooks/usePermission';
+import { BrowserSettingsCard } from './BrowserSettingsCard';
 import { SttSettingsCard } from './SttSettingsCard';
 
 export function LlmSettingsScreen() {
@@ -39,6 +40,9 @@ export function LlmSettingsScreen() {
       <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
         {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
       </QueryBoundary>
+      <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
+        <BrowserSettingsCard canEdit={canEdit} />
+      </div>
       <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
         <SttSettingsCard canEdit={canEdit} />
       </div>

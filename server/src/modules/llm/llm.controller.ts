@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Put } from '@nestjs/common';
-import { PERMISSION, type LlmChatTestView, type LlmConnectionView, type LlmSettingsView } from '@fantasteel/shared';
+import { PERMISSION, type LlmBrowserSettingsView, type LlmChatTestView, type LlmConnectionView, type LlmSettingsView } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
-import { TestLlmConnectionDto, UpdateLlmSettingsDto } from './dto/llm-settings.dto';
+import { TestLlmConnectionDto, UpdateLlmBrowserSettingsDto, UpdateLlmSettingsDto } from './dto/llm-settings.dto';
 import { LlmService } from './llm.service';
 
 /**
@@ -23,6 +23,19 @@ export class LlmController {
   @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
   updateSettings(@Body() dto: UpdateLlmSettingsDto): Promise<LlmSettingsView> {
     return this.service.updateSettings(dto);
+  }
+
+  /** 철강맨AI 브라우저의 시작 사이트·모든 사이트 열기 (이슈 #430). AI 연결 설정과 같은 권한 */
+  @Get('llm/browser-settings')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  getBrowserSettings(): Promise<LlmBrowserSettingsView> {
+    return this.service.getBrowserSettings();
+  }
+
+  @Put('llm/browser-settings')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateBrowserSettings(@Body() dto: UpdateLlmBrowserSettingsDto): Promise<LlmBrowserSettingsView> {
+    return this.service.updateBrowserSettings(dto);
   }
 
   @Post('llm/connection-test')
