@@ -12,7 +12,9 @@ import {
   ACTION_SNAPSHOT_MAX_CHARS,
   BROWSER_TIME_PER_ANSWER_MS,
   BROWSER_TYPE_MAX,
+  browserStartSites,
   clickBlockReason,
+  isStartSiteUrl,
   displayUrl,
   formatSnapshot,
   isPostFormSubmission,
@@ -61,7 +63,7 @@ const NO_UDP_SCRIPT = `(() => {
 const OPEN: LlmToolDefinition = {
   name: 'browser_open',
   description:
-    '브라우저로 페이지를 연다. 이번 답의 web_search·search_places 결과에 있던 주소나 사용자가 질문에 적은 주소만 열 수 있다. 페이지 안에서 검색하거나 다음 쪽으로 넘기는 등 read_web_page로 모자랄 때만 쓴다. 결과는 화면 글(요소마다 [r번호])이다.',
+    '브라우저로 페이지를 연다. 이번 답의 web_search·search_places 결과에 있던 주소, 사용자가 질문에 적은 주소, 시작 사이트(네이버·다음·위키백과·정부 go.kr 등)의 주소만 열 수 있다. 페이지 안에서 검색하거나 다음 쪽으로 넘기는 등 read_web_page로 모자랄 때만 쓴다. 결과는 화면 글(요소마다 [r번호])이다.',
   parameters: { type: 'object', properties: { url: { type: 'string', description: '검색 결과나 질문에 있던 주소 그대로' } }, required: ['url'] },
 };
 const SNAPSHOT: LlmToolDefinition = {
@@ -389,8 +391,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   private async open(url: string): Promise<BrowserToolResult> {
     const key = urlKey(url);
-    if (!key || (!this.input.web.knows(url) && !this.questionUrls.has(key) && !this.visited.has(key)))
-      return failure('이번 답의 검색 결과나 질문에 없던 주소라 열지 않았어요', { 안내: 'web_search 결과의 주소나 사용자가 적은 주소를 그대로 넘겨요. 페이지 안의 링크는 browser_click으로 눌러요' });
+    if (!key || (!this.input.web.knows(url) && !this.questionUrls.has(key) && !this.visited.has(key) && !isStartSiteUrl(url, browserStartSites())))
+      return failure('이번 답의 검색 결과·질문·시작 사이트에 없는 주소라 열지 않았어요', {
+        안내: `web_search 결과의 주소, 사용자가 적은 주소, 시작 사이트(${browserStartSites().join(', ')})만 열어요. 페이지 안의 링크는 browser_click으로 눌러요`,
+      });
     const internal = this.input.web.internalReference(url);
     if (internal) return blocked(`주소에 회사 안 정보(${internal})가 있어요`);
     try {

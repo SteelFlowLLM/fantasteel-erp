@@ -5,7 +5,7 @@ import { internalReferenceIn, urlKey } from '../web/web-text';
 import { AssistantBrowserToolbox, BROWSER_KEEP_MS, BrowserToolSession, type BrowserWebLink } from './assistant-browser-toolbox';
 import { decideBrowserRequest } from './browser-guard';
 import { BrowserPool, BrowserUnavailableError, chromeCandidates, type ChromeLaunch } from './browser-pool';
-import { clickBlockReason, displayUrl, formatSnapshot, isPostFormSubmission, isSensitiveField, MAX_BROWSER_ACTIONS_PER_ANSWER, parseRef, RefBook, riskyWordIn, typeBlockReason } from './browser-rules';
+import { clickBlockReason, displayUrl, formatSnapshot, isPostFormSubmission, isSensitiveField, MAX_BROWSER_ACTIONS_PER_ANSWER, parseRef, RefBook, riskyWordIn, typeBlockReason, browserStartSites, DEFAULT_BROWSER_START_SITES, isStartSiteUrl } from './browser-rules';
 import type { ElementInfo, PageSnapshot, SnapshotItem } from './page-script';
 
 const element = (overrides: Partial<ElementInfo> = {}): ElementInfo => ({
@@ -483,10 +483,10 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       (session as unknown as { visited: Set<string> }).visited.add(urlKey('https://ko.wikipedia.org/wiki/요로') as string);
       await toolbox.finish(session, 'k1', false);
       const next = toolbox.session({ question: '다시 열어줘', web: web() }, 'k1');
-      expect(errorOf((await next.run(call('browser_open', { url: 'https://evil.example.com/' }))).content)).toContain('질문에 없던 주소');
-      // 막히는 이유가 "없던 주소"가 아니면 이 주소는 허용 목록을 통과한 것이다 (사내 정보 검사·열기 단계로 넘어감)
+      expect(errorOf((await next.run(call('browser_open', { url: 'https://evil.example.com/' }))).content)).toContain('시작 사이트에 없는 주소');
+      // 막히는 이유가 "없는 주소"가 아니면 이 주소는 허용 목록을 통과한 것이다 (사내 정보 검사·열기 단계로 넘어감)
       const reopened = await next.run(call('browser_open', { url: 'https://ko.wikipedia.org/wiki/요로' }));
-      expect(JSON.stringify(reopened.content)).not.toContain('질문에 없던 주소');
+      expect(JSON.stringify(reopened.content)).not.toContain('시작 사이트에 없는 주소');
       await next.close();
       await pool.shutdown();
     });
@@ -503,8 +503,14 @@ describe('브라우저 모음 (Chrome 없이)', () => {
 
     it('검색 결과나 질문에 없던 주소는 열지 않는다 (브라우저를 빌리지도 않는다)', async () => {
       const session = new AssistantBrowserToolbox(new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: () => Promise.reject(new Error('띄우면 안 됨')) })).session({ question: '시세 봐줘', web: web() });
-      expect(errorOf((await session.run(call('browser_open', { url: 'https://evil.example.com/' }))).content)).toContain('질문에 없던 주소');
-      expect(errorOf((await session.run(call('browser_open', { url: 'javascript:alert(1)' }))).content)).toContain('질문에 없던 주소');
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://evil.example.com/' }))).content)).toContain('시작 사이트에 없는 주소');
+      expect(errorOf((await session.run(call('browser_open', { url: 'javascript:alert(1)' }))).content)).toContain('시작 사이트에 없는 주소');
+    });
+
+    it('시작 사이트는 링크가 없어도 열러 간다 (지금은 바쁨)', async () => {
+      const session = new AssistantBrowserToolbox(busyPool()).session({ question: '네이버에서 철근 시세 찾아줘', web: web() });
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://search.naver.com/search.naver?query=철근' }))).content)).toBe('지금은 브라우저가 바빠요');
+      expect(errorOf((await session.run(call('browser_open', { url: 'https://ko.wikipedia.org/wiki/철근' }))).content)).toBe('지금은 브라우저가 바빠요');
     });
 
     it('질문에 적힌 주소와 검색 결과 주소는 열러 간다 (지금은 바쁨)', async () => {
@@ -535,5 +541,24 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       const session = new AssistantBrowserToolbox(new BrowserPool({ env: {} })).session({ question: 'https://news.example.kr/a', web: web() });
       expect(errorOf((await session.run(call('browser_open', { url: 'https://news.example.kr/a' }))).content)).toBe('서버에서 브라우저 사용을 꺼 두었어요');
     });
+  });
+});
+
+describe('시작 사이트 (이슈 #423)', () => {
+  it('기본 목록과 그 하위 호스트는 링크 없이 열 수 있다', () => {
+    const sites = browserStartSites({});
+    expect(sites).toEqual(DEFAULT_BROWSER_START_SITES);
+    expect(isStartSiteUrl('https://www.naver.com/', sites)).toBe(true);
+    expect(isStartSiteUrl('https://ko.wikipedia.org/wiki/제철', sites)).toBe(true);
+    expect(isStartSiteUrl('https://www.kosis.go.kr/statHtml', sites)).toBe(true);
+    expect(isStartSiteUrl('https://evilnaver.com/', sites)).toBe(false);
+    expect(isStartSiteUrl('https://naver.com.evil.io/', sites)).toBe(false);
+    expect(isStartSiteUrl('ftp://naver.com/', sites)).toBe(false);
+    expect(isStartSiteUrl('주소 아님', sites)).toBe(false);
+  });
+
+  it('BROWSER_START_SITES로 바꾸고, 빈 값이면 하나도 없다', () => {
+    expect(browserStartSites({ BROWSER_START_SITES: ' Example.COM , .posco.co.kr. , 잘못된 값 ' })).toEqual(['example.com', 'posco.co.kr']);
+    expect(browserStartSites({ BROWSER_START_SITES: '' })).toEqual([]);
   });
 });

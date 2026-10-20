@@ -217,10 +217,11 @@ export class AiAssistantService {
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
     const manualGuides = findManualGuides(input.question);
-    // 웹 도구는 화면이 실시간으로 보고 있는 답에서만 (사내 채팅 @AI는 웹 내용을 방 멤버 모두에게 보이게 되므로 쓰지 않는다)
-    const webSearch = options.interactive === true && input.webSearch === true;
-    // 브라우저도 화면이 실시간으로 볼 때만, 서버 설정(AI_BROWSER_ENABLED)과 Chrome이 있을 때만 (이슈 #373)
+    // 브라우저는 화면이 실시간으로 볼 때만, 서버 설정(AI_BROWSER_ENABLED)과 Chrome이 있을 때만 (이슈 #373)
     const browserOn = options.interactive === true && input.browser === true && this.browserTools.capabilities().available;
+    // 웹 도구는 화면이 실시간으로 보고 있는 답에서만 (사내 채팅 @AI는 웹 내용을 방 멤버 모두에게 보이게 되므로 쓰지 않는다).
+    // 브라우저를 켜면 웹 검색도 같이 알린다: 링크를 주지 않아도 검색해서 연 주소를 브라우저로 열 수 있게 (이슈 #423)
+    const webSearch = options.interactive === true && (input.webSearch === true || browserOn);
     // 같은 대화의 다음 질문은 열어 둔 탭을 이어 쓴다 (이슈 #423). 열쇠는 사원과 묶어 남의 탭을 쓰지 않게 한다
     const browserKey = browserOn && input.browserSessionId ? `${user.employeeId}:${input.browserSessionId}` : null;
     const browserOpenPage = this.browserTools.openPage(browserKey);

@@ -6,7 +6,7 @@ import { isAiAssistantBrowserTool, type AiBrowserCapabilities } from '@fantastee
 export const AI_BROWSER_KEY = 'fantasteel.ai-browser';
 
 /** 켜기 단추 설명 */
-export const AI_BROWSER_TITLE = '켜면 철강맨AI가 웹 페이지를 열고 눌러 봐요. 로그인·결제·입력 제출은 하지 않아요.';
+export const AI_BROWSER_TITLE = '켜면 철강맨AI가 웹 검색도 함께 해서 페이지를 열고 눌러 봐요. 링크가 없어도 네이버·위키백과·정부 사이트 등은 바로 열어요. 로그인·결제·입력 제출은 하지 않아요.';
 export const AI_BROWSER_OFF_REASON = '서버에서 브라우저 사용이 꺼져 있어요';
 export const AI_BROWSER_UNAVAILABLE_HINT = 'AI 연결을 확인하지 못해 지금은 켤 수 없어요';
 

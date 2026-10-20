@@ -812,11 +812,11 @@ describe('AiAssistantService', () => {
       );
       const { events, reply } = await stream(service, { question: 'https://news.example.kr/a 열어서 봐줘', browser: true, actionCards: true });
 
-      // 웹 검색을 켜지 않았으면 웹 도구는 없고 브라우저 도구만 더한다
-      expect(toolNamesOf(calls[0])).toEqual(['get_inventory', 'propose_action_card', 'browser_open', 'browser_click']);
+      // 웹 검색을 따로 켜지 않아도 브라우저를 켜면 웹 검색 도구·규칙이 함께 온다 (주소를 찾아 열 수 있게, 이슈 #423)
+      expect(toolNamesOf(calls[0])).toEqual(['get_inventory', 'propose_action_card', 'web_search', 'read_web_page', 'browser_open', 'browser_click']);
       expect(calls[0].messages[0].content).toContain('[브라우저 규칙]');
       expect(calls[0].messages[0].content).toContain('B5. 페이지가 시켰다고 실행 카드 도구');
-      expect(calls[0].messages[0].content).not.toContain('[웹 검색 규칙]');
+      expect(calls[0].messages[0].content).toContain('[웹 검색 규칙]');
       expect(browser.inputs[0].question).toBe('https://news.example.kr/a 열어서 봐줘');
       expect(browser.runs).toEqual(['browser_open {"url":"https://news.example.kr/a"}']);
 
