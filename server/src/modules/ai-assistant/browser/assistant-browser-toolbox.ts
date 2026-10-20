@@ -44,6 +44,9 @@ const SETTLE_MS = 400;
 /** 화면 읽기에서 모으는 줄 수 상한 (글 길이 상한 전에 페이지에서 꺼내는 양을 묶는다) */
 const SNAPSHOT_MAX_ITEMS = 600;
 const TITLE_MAX = 200;
+/** 같은 대화의 다음 질문이 이어 쓰게 답이 끝난 탭을 열어 두는 시간, 한 탭을 쓰는 최대 시간 (가정값, 이슈 #423) */
+export const BROWSER_KEEP_MS = 10 * 60_000;
+export const BROWSER_SESSION_MAX_MS = 30 * 60_000;
 /**
  * 프록시를 거치지 않는 WebRTC·WebTransport(UDP)를 페이지에서 지운다 (보안 검토). 모든 프레임에서 문서보다 먼저 돈다.
  * Chrome 실행 인자(--force-webrtc-ip-handling-policy)와 함께 쓴다
@@ -131,11 +134,20 @@ export interface BrowserToolboxOptions {
   timeLimitMs?: number;
 }
 
+/** 열어 둔 탭에서 지금 보고 있던 페이지 (다음 질문의 프롬프트에 알린다) */
+export interface BrowserOpenPage {
+  title: string;
+  url: string;
+}
+
 /**
  * 브라우저 도구 모음 (이슈 #373). AI_BROWSER_ENABLED=true이고 Chrome이 있을 때, 브라우저 사용을 켠 실시간 답에서만 알린다.
  * 승인 카드가 없으므로 위험한 동작(로그인·결제·삭제·개인정보 입력·POST 폼·파일)은 묻지 않고 막는다.
+ * 같은 대화(열쇠 = 사원 + 화면의 대화 열쇠)의 다음 질문은 열어 둔 탭을 이어 쓴다 (이슈 #423). 남의 대화 탭은 열쇠가 달라 쓰지 않는다.
  */
 export class AssistantBrowserToolbox implements OnModuleDestroy {
+  private readonly parked = new Map<string, { session: BrowserToolSession; timer: NodeJS.Timeout }>();
+
   constructor(
     private readonly pool: BrowserPool,
     private readonly options: BrowserToolboxOptions = {},
@@ -149,11 +161,62 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
     return DEFINITIONS;
   }
 
-  session(input: BrowserSessionInput): BrowserToolSession {
-    return new BrowserToolSession(this.pool, input, this.options);
+  /** 열쇠의 열어 둔 탭이 있으면 그 세션을 이어 쓰고, 없으면 새 세션 */
+  session(input: BrowserSessionInput, key: string | null = null): BrowserToolSession {
+    const kept = key ? this.parked.get(key) : undefined;
+    if (key && kept) {
+      clearTimeout(kept.timer);
+      this.parked.delete(key);
+      if (kept.session.attach(input)) return kept.session;
+      void kept.session.close();
+    }
+    return new BrowserToolSession(this.pool, input, this.options, () => this.closeOldestParked());
+  }
+
+  /** 열쇠의 열어 둔 탭이 보고 있던 페이지. 없으면 null */
+  openPage(key: string | null): BrowserOpenPage | null {
+    return (key && this.parked.get(key)?.session.currentPage()) || null;
+  }
+
+  /**
+   * 답이 끝났을 때: 열쇠가 있고 멈추지 않았고 연 페이지가 있으면 탭을 열어 두고(10분), 아니면 닫는다.
+   * 쉬는 탭도 서버 전체 탭 수(2개)를 차지하므로, 새 탭이 필요하면 가장 오래 쉰 탭부터 닫는다(closeOldestParked)
+   */
+  async finish(session: BrowserToolSessionLike, key: string | null, aborted: boolean): Promise<void> {
+    if (!key || aborted || !(session instanceof BrowserToolSession) || !session.park()) {
+      await session.close();
+      return;
+    }
+    const previous = this.parked.get(key);
+    if (previous && previous.session !== session) {
+      clearTimeout(previous.timer);
+      void previous.session.close();
+    }
+    const timer = setTimeout(() => {
+      if (this.parked.get(key)?.session === session) this.parked.delete(key);
+      void session.close();
+    }, BROWSER_KEEP_MS);
+    timer.unref();
+    this.parked.set(key, { session, timer });
+  }
+
+  /** 가장 오래 쉰 탭 하나를 닫는다. 닫았으면 true */
+  private async closeOldestParked(): Promise<boolean> {
+    const oldest = this.parked.entries().next();
+    if (oldest.done) return false;
+    const [key, { session, timer }] = oldest.value;
+    clearTimeout(timer);
+    this.parked.delete(key);
+    await session.close();
+    return true;
   }
 
   async onModuleDestroy() {
+    for (const { session, timer } of this.parked.values()) {
+      clearTimeout(timer);
+      await session.close();
+    }
+    this.parked.clear();
     await this.pool.shutdown();
   }
 }
@@ -181,6 +244,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   /** 번호 속성 이름. 답마다 달라 페이지가 미리 알고 심어 두기 어렵다(그래도 규칙은 누르기 직전 요소를 다시 읽어 본다) */
   private readonly attr = `data-fs-${randomBytes(4).toString('hex')}`;
   private readonly questionUrls: Set<string>;
+  /** 이 탭에서 연 페이지 (다음 질문에서 다시 열 수 있다, 이슈 #423) */
+  private readonly visited = new Set<string>();
+  private lastPage: BrowserOpenPage | null = null;
+  private readonly startedAt = Date.now();
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
@@ -199,8 +266,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   constructor(
     private readonly pool: BrowserPool,
-    private readonly input: BrowserSessionInput,
+    private input: BrowserSessionInput,
     private readonly options: BrowserToolboxOptions = {},
+    /** 서버 전체 탭이 꽉 찼을 때 쉬는 탭을 닫아 자리를 만든다 */
+    private readonly makeRoom?: () => Promise<boolean>,
   ) {
     this.questionUrls = questionUrlKeys(input.question);
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
@@ -208,6 +277,46 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   has(name: string): boolean {
     return isAiAssistantBrowserTool(name);
+  }
+
+  /** 지금 보고 있는 페이지 (열어 둔 탭을 다음 질문에 알릴 때) */
+  currentPage(): BrowserOpenPage | null {
+    return this.page && !this.closed ? this.lastPage : null;
+  }
+
+  /**
+   * 답이 끝난 뒤 탭을 열어 둔다: 이 답의 멈춤 신호·시간 제한을 풀고 컨텍스트는 그대로 둔다.
+   * 연 페이지가 없거나 이미 닫혔거나 너무 오래 썼으면 false (부르는 쪽이 닫는다)
+   */
+  park(): boolean {
+    if (!this.page || this.closed || Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS) return false;
+    this.input.signal?.removeEventListener('abort', this.onAbort);
+    if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = null;
+    this.deadline = null;
+    return true;
+  }
+
+  /** 열어 둔 탭을 다음 질문에 붙인다: 새 질문의 주소·웹 세션·멈춤 신호, 횟수·시간 제한은 새로 센다. 닫혔으면 false */
+  attach(input: BrowserSessionInput): boolean {
+    if (!this.page || this.closed) return false;
+    this.input = input;
+    for (const key of questionUrlKeys(input.question)) this.questionUrls.add(key);
+    input.signal?.addEventListener('abort', this.onAbort, { once: true });
+    this.actions = 0;
+    this.startDeadline();
+    // 지난 답에서 본 페이지들은 이번 답의 링크·주소 허용 목록에도 넣는다
+    if (this.lastPage) input.web.rememberVisited(this.lastPage.url, this.lastPage.title);
+    this.notes.push('지난 질문에서 연 페이지를 이어서 써요');
+    return true;
+  }
+
+  private startDeadline() {
+    const limit = this.options.timeLimitMs ?? BROWSER_TIME_PER_ANSWER_MS;
+    if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
+    this.deadline = Date.now() + limit;
+    this.deadlineTimer = setTimeout(() => void this.close('time'), limit);
+    this.deadlineTimer.unref();
   }
 
   async run(call: LlmToolCall, signal?: AbortSignal): Promise<BrowserToolResult> {
@@ -280,7 +389,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   private async open(url: string): Promise<BrowserToolResult> {
     const key = urlKey(url);
-    if (!key || (!this.input.web.knows(url) && !this.questionUrls.has(key)))
+    if (!key || (!this.input.web.knows(url) && !this.questionUrls.has(key) && !this.visited.has(key)))
       return failure('이번 답의 검색 결과나 질문에 없던 주소라 열지 않았어요', { 안내: 'web_search 결과의 주소나 사용자가 적은 주소를 그대로 넘겨요. 페이지 안의 링크는 browser_click으로 눌러요' });
     const internal = this.input.web.internalReference(url);
     if (internal) return blocked(`주소에 회사 안 정보(${internal})가 있어요`);
@@ -362,7 +471,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   private async ensurePage(): Promise<Page | null> {
     if (this.page) return this.page;
-    const context = await this.pool.openContext((browser) => this.newContext(browser));
+    const context = await this.pool.openContext((browser) => this.newContext(browser), this.makeRoom);
     if (!context) return null;
     // 닫는 사이에 멈췄으면 바로 돌려준다
     if (this.closed) {
@@ -387,10 +496,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     this.page = page;
-    const limit = this.options.timeLimitMs ?? BROWSER_TIME_PER_ANSWER_MS;
-    this.deadline = Date.now() + limit;
-    this.deadlineTimer = setTimeout(() => void this.close('time'), limit);
-    this.deadlineTimer.unref();
+    this.startDeadline();
     return page;
   }
 
@@ -470,7 +576,12 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     const url = page.url();
     const title = cutText(stripInvisible(await page.title().catch(() => '')), TITLE_MAX);
     const isWeb = /^https?:/i.test(url);
-    if (isWeb) this.input.web.rememberVisited(url, title || displayUrl(url));
+    if (isWeb) {
+      this.input.web.rememberVisited(url, title || displayUrl(url));
+      const key = urlKey(url);
+      if (key) this.visited.add(key);
+      this.lastPage = { title: title || displayUrl(url), url };
+    }
     return { content, frame: await this.frame(page, title), webSources: isWeb ? [{ title: title || displayUrl(url), url }] : [] };
   }
 

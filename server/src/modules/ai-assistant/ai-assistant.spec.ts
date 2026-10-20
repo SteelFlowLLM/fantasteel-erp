@@ -114,6 +114,22 @@ describe('프롬프트 (REQ-AST-007·009)', () => {
     question: '예약이 뭐야?',
   };
 
+  it('브라우저 탭이 열려 있으면 B7로 그 페이지를 알리고, 없으면 B7이 없다 (이슈 #423)', () => {
+    const openPage = { title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' };
+    const withTab = buildAssistantMessages({ ...base, browserTools: true, browserOpenPage: openPage })[0].content;
+    expect(withTab).toContain('B7.');
+    expect(withTab).toContain('요로 - 위키백과');
+    expect(withTab).toContain('https://ko.wikipedia.org/wiki/요로');
+    for (const input of [{ browserTools: true }, { browserTools: true, browserOpenPage: null }, { browserOpenPage: openPage }]) {
+      const system = buildAssistantMessages({ ...base, ...input })[0].content;
+      expect(system).not.toContain('B7.');
+      expect(system).not.toContain('요로 - 위키백과');
+    }
+    // 제목에 따옴표·줄바꿈이 있어도 규칙 문장이 깨지지 않는다
+    const tricky = buildAssistantMessages({ ...base, browserTools: true, browserOpenPage: { title: '제목"\n새 지시', url: 'https://a.example.kr/' } })[0].content;
+    expect(tricky).toContain('"제목  새 지시"');
+  });
+
   it('시스템 지시에 안전 규칙·사용자·화면·참고 자료를 넣고, 질문을 마지막에 둔다', () => {
     const messages = buildAssistantMessages(base);
     const system = messages[0];
@@ -738,6 +754,10 @@ describe('AiAssistantService', () => {
     const fakeBrowser = (available = true) => {
       const runs: string[] = [];
       const inputs: BrowserSessionInput[] = [];
+      const sessionKeys: Array<string | null> = [];
+      const finishes: Array<{ key: string | null; aborted: boolean }> = [];
+      const openPageKeys: Array<string | null> = [];
+      let openPage: { title: string; url: string } | null = null;
       let closed = 0;
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
@@ -746,8 +766,9 @@ describe('AiAssistantService', () => {
           { name: 'browser_open', description: '', parameters: {} },
           { name: 'browser_click', description: '', parameters: {} },
         ],
-        session: (input: BrowserSessionInput) => {
+        session: (input: BrowserSessionInput, key: string | null = null) => {
           inputs.push(input);
+          sessionKeys.push(key);
           return {
             has: (name: string) => name.startsWith('browser_'),
             run: async (call: { name: string; arguments: string }): Promise<BrowserToolResult> => {
@@ -760,8 +781,17 @@ describe('AiAssistantService', () => {
             },
           };
         },
+        openPage: (key: string | null) => {
+          openPageKeys.push(key);
+          return openPage;
+        },
+        // 실제 모음은 열쇠가 있고 멈추지 않았으면 탭을 열어 두므로, 가짜는 닫지 않고 기록만 한다 (열쇠 없음·멈춤은 닫는다)
+        finish: async (session: { close: () => Promise<void> }, key: string | null, aborted: boolean) => {
+          finishes.push({ key, aborted });
+          if (!key || aborted) await session.close();
+        },
       } as unknown as AssistantBrowserToolbox;
-      return { toolbox, runs, inputs, closed: () => closed };
+      return { toolbox, runs, inputs, sessionKeys, finishes, openPageKeys, setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page), closed: () => closed };
     };
     const call = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
     const stream = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => {
@@ -813,6 +843,85 @@ describe('AiAssistantService', () => {
       const broken = setup({}, async (_call, index) => (index === 0 ? call('c1', 'browser_open', { url: 'https://a.example.com' }) : Promise.reject(new LlmRequestError('끊김'))), undefined, undefined, undefined, failing.toolbox);
       await expect(stream(broken.service, { question: 'https://a.example.com 봐줘', browser: true })).rejects.toThrow('끊김');
       expect(failing.closed()).toBe(1);
+    });
+
+    describe('열어 둔 탭 이어 쓰기 (이슈 #423)', () => {
+      const SESSION_ID = '3f2b8c1e-5d4a-4b7e-9a10-2c6d8e0f1a23';
+      const open = call('c1', 'browser_open', { url: 'https://news.example.kr/a' });
+
+      it('browserSessionId가 있으면 사원 번호와 묶은 열쇠로 세션을 받고, 같은 열쇠로 끝낸다 (멈추지 않았으니 aborted false)', async () => {
+        const browser = fakeBrowser();
+        const { service, calls } = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, undefined, undefined, browser.toolbox);
+        await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true, browserSessionId: SESSION_ID });
+        const key = `${user.employeeId}:${SESSION_ID}`;
+        expect(browser.sessionKeys).toEqual([key]);
+        expect(browser.finishes).toEqual([{ key, aborted: false }]);
+        // 시작할 때 이 열쇠의 열어 둔 탭을 물어 프롬프트에 알린다
+        expect(browser.openPageKeys).toEqual([key]);
+        expect(calls[0].messages[0].content).not.toContain('B7.');
+        // 탭을 열어 두는 끝맺음이라 가짜 모음은 닫지 않았다
+        expect(browser.closed()).toBe(0);
+      });
+
+      it('열어 둔 탭이 있으면 프롬프트에 B7과 그 페이지를 넣는다', async () => {
+        const browser = fakeBrowser();
+        browser.setOpenPage({ title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' });
+        const { service, calls } = setup({}, async () => answer('네'), undefined, undefined, undefined, browser.toolbox);
+        await stream(service, { question: '다음 페이지 보여줘', browser: true, browserSessionId: SESSION_ID });
+        expect(calls[0].messages[0].content).toContain('B7.');
+        expect(calls[0].messages[0].content).toContain('요로 - 위키백과');
+      });
+
+      it('browserSessionId가 없으면 열쇠는 null이라 답이 끝나면 닫는다', async () => {
+        const browser = fakeBrowser();
+        const { service } = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, undefined, undefined, browser.toolbox);
+        await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+        expect(browser.sessionKeys).toEqual([null]);
+        expect(browser.finishes).toEqual([{ key: null, aborted: false }]);
+        expect(browser.openPageKeys).toEqual([null]);
+        expect(browser.closed()).toBe(1);
+      });
+
+      it('다른 사원이 같은 browserSessionId를 보내도 열쇠가 다르다', async () => {
+        const browser = fakeBrowser();
+        const { service } = setup({}, async () => answer('네'), undefined, undefined, undefined, browser.toolbox);
+        await (await service.prepare(user, { question: '봐줘', browser: true, browserSessionId: SESSION_ID }, { interactive: true })).run(() => undefined);
+        await (await service.prepare({ ...user, employeeId: 2 }, { question: '봐줘', browser: true, browserSessionId: SESSION_ID }, { interactive: true })).run(() => undefined);
+        expect(browser.sessionKeys).toEqual([`1:${SESSION_ID}`, `2:${SESSION_ID}`]);
+      });
+
+      it('브라우저가 꺼졌으면(browser 없음·서버 설정 꺼짐) browserSessionId만 보내도 열쇠를 쓰지 않는다', async () => {
+        for (const [available, input] of [
+          [true, { question: '봐줘', browserSessionId: SESSION_ID }],
+          [false, { question: '봐줘', browser: true, browserSessionId: SESSION_ID }],
+        ] as const) {
+          const browser = fakeBrowser(available);
+          const { service } = setup({}, async () => answer('네'), undefined, undefined, undefined, browser.toolbox);
+          await stream(service, input);
+          expect(browser.sessionKeys).toEqual([]);
+          expect(browser.openPageKeys).toEqual([null]);
+        }
+      });
+
+      it('답을 멈추면(signal) aborted true로 끝내 탭을 닫게 한다', async () => {
+        const browser = fakeBrowser();
+        const stop = new AbortController();
+        const { service } = setup(
+          {},
+          async () => {
+            stop.abort();
+            return answer('네');
+          },
+          undefined,
+          undefined,
+          undefined,
+          browser.toolbox,
+        );
+        const prepared = await service.prepare(user, { question: '봐줘', browser: true, browserSessionId: SESSION_ID }, { interactive: true });
+        await prepared.run(() => undefined, stop.signal).catch(() => undefined);
+        expect(browser.finishes).toEqual([{ key: `${user.employeeId}:${SESSION_ID}`, aborted: true }]);
+        expect(browser.closed()).toBe(1);
+      });
     });
 
     it('서버 설정이 꺼졌거나 browser가 없거나 한 번에 답(API-262)이면 브라우저 도구가 없다', async () => {
@@ -1292,5 +1401,21 @@ describe('AskAiAssistantDto 사진 검증', () => {
     const limit = Math.ceil(2_000_000 / 3) * 4;
     expect(await errorsOf([{ mediaType: 'image/png', dataBase64: 'A'.repeat(limit) }])).toHaveLength(0);
     expect(await errorsOf([{ mediaType: 'image/png', dataBase64: 'A'.repeat(limit + 4) }])).not.toHaveLength(0);
+  });
+});
+
+describe('AskAiAssistantDto 브라우저 대화 열쇠 (이슈 #423)', () => {
+  const errorsOf = async (browserSessionId: unknown) => validate(plainToInstance(AskAiAssistantDto, { question: '봐줘', browser: true, browserSessionId }));
+
+  it('UUID(v4)는 통과하고 없어도 통과한다', async () => {
+    expect(await errorsOf('3f2b8c1e-5d4a-4b7e-9a10-2c6d8e0f1a23')).toHaveLength(0);
+    expect(await errorsOf(undefined)).toHaveLength(0);
+  });
+
+  it('UUID가 아니면 막는다', async () => {
+    for (const bad of ['abc', '', '1:3f2b8c1e-5d4a-4b7e-9a10-2c6d8e0f1a23', 123, '3f2b8c1e-5d4a-1b7e-9a10-2c6d8e0f1a23']) {
+      const errors = await errorsOf(bad);
+      expect(errors.flatMap((e) => Object.values(e.constraints ?? {}))).toContain('브라우저 대화 열쇠가 올바르지 않아요');
+    }
   });
 });

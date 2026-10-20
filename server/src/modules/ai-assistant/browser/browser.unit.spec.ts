@@ -1,10 +1,10 @@
 // 철강맨AI 브라우저 사용 (이슈 #373) 단위 시험. 네트워크·Chrome 없이 돈다 (npm run test:unit).
 import type { Browser, BrowserContext } from 'playwright-core';
 import type { LookupFunction } from '../web/ssrf-guard';
-import { internalReferenceIn } from '../web/web-text';
-import { AssistantBrowserToolbox, type BrowserWebLink } from './assistant-browser-toolbox';
+import { internalReferenceIn, urlKey } from '../web/web-text';
+import { AssistantBrowserToolbox, BROWSER_KEEP_MS, BrowserToolSession, type BrowserWebLink } from './assistant-browser-toolbox';
 import { decideBrowserRequest } from './browser-guard';
-import { BrowserPool, BrowserUnavailableError, chromeCandidates } from './browser-pool';
+import { BrowserPool, BrowserUnavailableError, chromeCandidates, type ChromeLaunch } from './browser-pool';
 import { clickBlockReason, displayUrl, formatSnapshot, isPostFormSubmission, isSensitiveField, MAX_BROWSER_ACTIONS_PER_ANSWER, parseRef, RefBook, riskyWordIn, typeBlockReason } from './browser-rules';
 import type { ElementInfo, PageSnapshot, SnapshotItem } from './page-script';
 
@@ -292,6 +292,204 @@ describe('브라우저 모음 (Chrome 없이)', () => {
     const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: () => Promise.reject(new Error('spawn ENOENT')) });
     await expect(pool.openContext(async () => fakeContext() as unknown as BrowserContext)).rejects.toBeInstanceOf(BrowserUnavailableError);
     expect(pool.availability()).toEqual({ available: false, reason: 'Chrome을 띄우지 못했어요' });
+  });
+
+  it('Chrome 창은 기본이 숨김(headless)이고, BROWSER_HEADLESS=false일 때만 창을 띄운다 (이슈 #423)', async () => {
+    const launched: ChromeLaunch[] = [];
+    const poolWith = (env: NodeJS.ProcessEnv) =>
+      new BrowserPool({
+        env: { ...on, ...env },
+        platform: 'darwin',
+        exists: chrome,
+        launch: async (options) => {
+          launched.push(options);
+          return fakeBrowser() as unknown as Browser;
+        },
+      });
+    for (const env of [{}, { BROWSER_HEADLESS: 'true' }, { BROWSER_HEADLESS: '' }, { BROWSER_HEADLESS: 'no' }, { BROWSER_HEADLESS: 'FALSE' }, { BROWSER_HEADLESS: ' false ' }]) {
+      const pool = poolWith(env);
+      await pool.openContext(async () => fakeContext() as unknown as BrowserContext);
+      await pool.shutdown();
+    }
+    expect(launched.map((l) => l.headless)).toEqual([true, true, true, true, false, false]);
+    // 창 모드여도 샌드박스·프록시 설정은 그대로다
+    expect(launched.every((l) => l.sandbox && l.proxy.server.startsWith('http://'))).toBe(true);
+  });
+
+  describe('컨텍스트 자리 만들기 (makeRoom, 이슈 #423)', () => {
+    const roomPool = () => new BrowserPool({ env: on, platform: 'darwin', exists: chrome, maxContexts: 1, launch: async () => fakeBrowser() as unknown as Browser });
+
+    it('꽉 찼을 때 makeRoom을 한 번 부르고, 자리가 나면 연다', async () => {
+      const pool = roomPool();
+      const first = (await pool.openContext(async () => fakeContext() as unknown as BrowserContext)) as BrowserContext;
+      let asked = 0;
+      const second = await pool.openContext(
+        async () => fakeContext() as unknown as BrowserContext,
+        async () => {
+          asked += 1;
+          await pool.release(first);
+          return true;
+        },
+      );
+      expect(asked).toBe(1);
+      expect(second).not.toBeNull();
+      expect(pool.activeContexts).toBe(1);
+      await pool.shutdown();
+    });
+
+    it('makeRoom이 자리를 못 만들면(false) null이고, 자리가 남아 있으면 부르지 않는다', async () => {
+      const pool = roomPool();
+      let asked = 0;
+      const makeRoom = async () => {
+        asked += 1;
+        return false;
+      };
+      expect(await pool.openContext(async () => fakeContext() as unknown as BrowserContext, makeRoom)).not.toBeNull();
+      expect(asked).toBe(0);
+      expect(await pool.openContext(async () => fakeContext() as unknown as BrowserContext, makeRoom)).toBeNull();
+      expect(asked).toBe(1);
+      expect(pool.activeContexts).toBe(1);
+      await pool.shutdown();
+    });
+
+    it('makeRoom이 true라고 해도 실제로 자리가 안 났으면 null이다', async () => {
+      const pool = roomPool();
+      await pool.openContext(async () => fakeContext() as unknown as BrowserContext);
+      expect(await pool.openContext(async () => fakeContext() as unknown as BrowserContext, async () => true)).toBeNull();
+      await pool.shutdown();
+    });
+  });
+
+  describe('탭 열어 두기 (같은 대화의 다음 질문이 이어 쓴다, 이슈 #423)', () => {
+    const web = (): BrowserWebLink & { visited: Array<[string, string]> } => {
+      const visited: Array<[string, string]> = [];
+      return { visited, knows: () => false, rememberVisited: (url, title) => void visited.push([url, title]), internalReference: () => null };
+    };
+    const call = (name: string, args: unknown = {}) => ({ id: 'c1', name, arguments: JSON.stringify(args) });
+    /** Chrome 없이 "페이지를 하나 열어 본" 세션처럼 만든다: 컨텍스트를 풀에서 실제로 빌리고 세션 내부 상태만 채운다 */
+    const openedSession = async (toolbox: AssistantBrowserToolbox, pool: BrowserPool, key: string | null, page: { title: string; url: string } | null = { title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' }) => {
+      const session = toolbox.session({ question: '요로 알려줘', web: web() }, key);
+      const context = await pool.openContext(async () => fakeContext() as unknown as BrowserContext);
+      Object.assign(session as unknown as Record<string, unknown>, { context, page: {}, lastPage: page });
+      return { session, context: context as BrowserContext };
+    };
+    const setup = () => {
+      const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: async () => fakeBrowser() as unknown as Browser });
+      return { pool, toolbox: new AssistantBrowserToolbox(pool) };
+    };
+
+    it('열쇠가 있고 멈추지 않았으면 탭을 열어 두고, 같은 열쇠의 다음 질문은 같은 세션을 이어 받는다', async () => {
+      const { pool, toolbox } = setup();
+      const { session } = await openedSession(toolbox, pool, 'k1');
+      await toolbox.finish(session, 'k1', false);
+      expect(pool.activeContexts).toBe(1);
+      expect(toolbox.openPage('k1')).toEqual({ title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' });
+      expect(toolbox.openPage('k2')).toBeNull();
+      expect(toolbox.openPage(null)).toBeNull();
+
+      const link = web();
+      const next = toolbox.session({ question: '다음 페이지 보여줘', web: link }, 'k1');
+      expect(next).toBe(session);
+      // 이어 받으면 열어 둔 탭에서 보던 페이지를 이번 답의 링크 허용 목록에도 넣고, 쉬는 목록에서는 빠진다
+      expect(link.visited).toEqual([['https://ko.wikipedia.org/wiki/요로', '요로 - 위키백과']]);
+      expect(toolbox.openPage('k1')).toBeNull();
+      await next.close();
+      await pool.shutdown();
+    });
+
+    it('다른 열쇠는 새 세션이고, 열쇠가 없으면 이어 쓰지 않는다', async () => {
+      const { pool, toolbox } = setup();
+      const { session } = await openedSession(toolbox, pool, 'k1');
+      await toolbox.finish(session, 'k1', false);
+      const other = toolbox.session({ question: '봐줘', web: web() }, 'k2');
+      const keyless = toolbox.session({ question: '봐줘', web: web() }, null);
+      const defaulted = toolbox.session({ question: '봐줘', web: web() });
+      expect(new Set([other, keyless, defaulted, session]).size).toBe(4);
+      expect(other).toBeInstanceOf(BrowserToolSession);
+      expect(toolbox.openPage('k1')).not.toBeNull();
+      await toolbox.onModuleDestroy();
+    });
+
+    it('멈췄거나(aborted) 열쇠가 없거나 연 페이지가 없으면 열어 두지 않고 닫는다', async () => {
+      const { pool, toolbox } = setup();
+      const aborted = await openedSession(toolbox, pool, 'k1');
+      await toolbox.finish(aborted.session, 'k1', true);
+      expect((aborted.context as unknown as { closed: boolean }).closed).toBe(true);
+      expect(toolbox.openPage('k1')).toBeNull();
+
+      const keyless = await openedSession(toolbox, pool, null);
+      await toolbox.finish(keyless.session, null, false);
+      expect((keyless.context as unknown as { closed: boolean }).closed).toBe(true);
+
+      // 페이지를 한 번도 열지 못한 세션(page가 없음)은 열어 둘 탭이 없다
+      const untouched = toolbox.session({ question: '봐줘', web: web() }, 'k3');
+      await toolbox.finish(untouched, 'k3', false);
+      expect(toolbox.openPage('k3')).toBeNull();
+      expect(pool.activeContexts).toBe(0);
+      await pool.shutdown();
+    });
+
+    it('같은 열쇠로 새 세션을 열어 두면 이전에 쉬던 탭은 닫는다', async () => {
+      const { pool, toolbox } = setup();
+      const old = await openedSession(toolbox, pool, 'k1', { title: '옛 페이지', url: 'https://a.example.kr/' });
+      await toolbox.finish(old.session, 'k1', false);
+      // 열쇠 없이 만든 세션을 같은 열쇠로 끝내는 경우 (session()은 쉬는 탭을 먼저 가져가므로 방어 경로)
+      const fresh = await openedSession(toolbox, pool, null, { title: '새 페이지', url: 'https://b.example.kr/' });
+      await toolbox.finish(fresh.session, 'k1', false);
+      expect((old.context as unknown as { closed: boolean }).closed).toBe(true);
+      expect(toolbox.openPage('k1')).toEqual({ title: '새 페이지', url: 'https://b.example.kr/' });
+      await toolbox.onModuleDestroy();
+    });
+
+    it('열어 둔 탭은 10분 뒤 닫히고, 모듈이 내려갈 때도 모두 닫는다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { pool, toolbox } = setup();
+        const a = await openedSession(toolbox, pool, 'k1');
+        await toolbox.finish(a.session, 'k1', false);
+        await jest.advanceTimersByTimeAsync(BROWSER_KEEP_MS - 1);
+        expect(toolbox.openPage('k1')).not.toBeNull();
+        await jest.advanceTimersByTimeAsync(2);
+        expect(toolbox.openPage('k1')).toBeNull();
+        expect((a.context as unknown as { closed: boolean }).closed).toBe(true);
+
+        const b = await openedSession(toolbox, pool, 'k2');
+        await toolbox.finish(b.session, 'k2', false);
+        await toolbox.onModuleDestroy();
+        expect((b.context as unknown as { closed: boolean }).closed).toBe(true);
+        expect(toolbox.openPage('k2')).toBeNull();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('닫힌 세션은 이어 받지 않고(attach false), 다시 열어 둘 수도 없다', async () => {
+      const { pool, toolbox } = setup();
+      const { session } = await openedSession(toolbox, pool, 'k1');
+      const bound = session as BrowserToolSession;
+      await bound.close();
+      expect(bound.attach({ question: '봐줘', web: web() })).toBe(false);
+      expect(bound.park()).toBe(false);
+      expect(bound.currentPage()).toBeNull();
+      await toolbox.finish(bound, 'k1', false);
+      expect(toolbox.openPage('k1')).toBeNull();
+      await pool.shutdown();
+    });
+
+    it('이어 받으면 이전 답에서 본 주소는 다시 열 수 있게 되고, 모르는 주소는 여전히 막는다', async () => {
+      const { pool, toolbox } = setup();
+      const { session } = await openedSession(toolbox, pool, 'k1');
+      // 이전 답에서 이 주소를 열어 본 것으로 만든다
+      (session as unknown as { visited: Set<string> }).visited.add(urlKey('https://ko.wikipedia.org/wiki/요로') as string);
+      await toolbox.finish(session, 'k1', false);
+      const next = toolbox.session({ question: '다시 열어줘', web: web() }, 'k1');
+      expect(errorOf((await next.run(call('browser_open', { url: 'https://evil.example.com/' }))).content)).toContain('질문에 없던 주소');
+      // 막히는 이유가 "없던 주소"가 아니면 이 주소는 허용 목록을 통과한 것이다 (사내 정보 검사·열기 단계로 넘어감)
+      const reopened = await next.run(call('browser_open', { url: 'https://ko.wikipedia.org/wiki/요로' }));
+      expect(JSON.stringify(reopened.content)).not.toContain('질문에 없던 주소');
+      await next.close();
+      await pool.shutdown();
+    });
   });
 
   describe('세션: 여는 주소·횟수', () => {

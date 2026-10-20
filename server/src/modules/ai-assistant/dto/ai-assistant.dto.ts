@@ -144,6 +144,11 @@ export class AskAiAssistantDto {
   @IsBoolean()
   browser?: boolean;
 
+  /** 대화마다 화면이 만든 열쇠. 같은 열쇠의 다음 질문은 열어 둔 브라우저 탭을 이어 쓴다 (이슈 #423) */
+  @IsOptional()
+  @IsUUID('4', { message: '브라우저 대화 열쇠가 올바르지 않아요' })
+  browserSessionId?: string;
+
   /** 화면 조작을 켠 질문이면 true. 서버 설정이 켜져 있고 실시간 답 API일 때만 화면 도구를 알린다 (이슈 #382, 시험 중) */
   @IsOptional()
   @IsBoolean()

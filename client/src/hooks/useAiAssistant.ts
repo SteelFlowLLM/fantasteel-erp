@@ -73,6 +73,30 @@ async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui
   await aiAssistantApi.sendUiActionResult(event.actionId, result).catch(() => undefined);
 }
 
+/**
+ * 브라우저 탭을 이어 쓰는 대화 열쇠 (이슈 #423). 서버는 같은 열쇠의 다음 질문에 열어 둔 탭을 준다.
+ * 새 대화는 첫 답이 저장될 때까지 같은 열쇠를 쓰고, 저장되면 그 대화 id에 묶는다. 새 대화를 시작하면 새 열쇠다
+ */
+const browserKeys = new Map<number, string>();
+let newConversationKey: string | null = null;
+
+export function browserSessionIdFor(threadId: number | null, firstQuestion: boolean): string {
+  if (threadId !== null) {
+    const known = browserKeys.get(threadId) ?? crypto.randomUUID();
+    browserKeys.set(threadId, known);
+    return known;
+  }
+  if (firstQuestion || newConversationKey === null) newConversationKey = crypto.randomUUID();
+  return newConversationKey;
+}
+
+/** 새 대화의 첫 답이 저장되어 대화 id가 생기면 지금까지 쓰던 열쇠를 그 대화에 묶는다 */
+export function bindBrowserSession(threadId: number): void {
+  if (newConversationKey === null || browserKeys.has(threadId)) return;
+  browserKeys.set(threadId, newConversationKey);
+  newConversationKey = null;
+}
+
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
 export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
@@ -84,11 +108,13 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     if (!finished && state.pendingId !== questionId) controller.abort();
   });
   if (screenControl) useAiScreenControlStore.getState().setRunning(true);
+  const firstQuestion = chat().entries.filter((entry) => entry.role === 'user').length <= 1;
+  const browserSessionId = browser ? browserSessionIdFor(threadId, firstQuestion) : undefined;
   try {
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
       // 지난 대화는 보내지 않는다: 서버가 저장한 대화에서 읽는다
-      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
+      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true, browserSessionId } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
       (event) => {
         if (event.type === 'ui_action') {
           void answerUiAction(event);
@@ -96,6 +122,8 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
         }
         if (event.type === 'done' || event.type === 'error') finished = true;
         chat().applyStreamEvent(questionId, event);
+        const savedThreadId = chat().threadId;
+        if (event.type === 'done' && threadId === null && savedThreadId !== null) bindBrowserSession(savedThreadId);
       },
       controller.signal,
     );

@@ -221,6 +221,9 @@ export class AiAssistantService {
     const webSearch = options.interactive === true && input.webSearch === true;
     // 브라우저도 화면이 실시간으로 볼 때만, 서버 설정(AI_BROWSER_ENABLED)과 Chrome이 있을 때만 (이슈 #373)
     const browserOn = options.interactive === true && input.browser === true && this.browserTools.capabilities().available;
+    // 같은 대화의 다음 질문은 열어 둔 탭을 이어 쓴다 (이슈 #423). 열쇠는 사원과 묶어 남의 탭을 쓰지 않게 한다
+    const browserKey = browserOn && input.browserSessionId ? `${user.employeeId}:${input.browserSessionId}` : null;
+    const browserOpenPage = this.browserTools.openPage(browserKey);
     // 화면 조작도 화면이 실시간으로 볼 때만, 서버 설정(AI_SCREEN_CONTROL_ENABLED)이 켜졌을 때만. 동작은 그 화면이 한다 (이슈 #382)
     const screenOn = options.interactive === true && input.screenControl === true && this.screenTools.capabilities().available;
     const screens = screenOn ? (input.screenMap ?? []) : [];
@@ -246,6 +249,7 @@ export class AiAssistantService {
       question: input.question,
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
       browserTools: browserOn,
+      browserOpenPage,
       screenControl: screenOn ? { screens } : null,
       notionTools: notionOn,
       driveTools: driveOn,
@@ -293,7 +297,7 @@ export class AiAssistantService {
         const streaming = emit !== undefined;
         const web = (webSearch || browserOn) && streaming ? this.webTools.session(user.employeeId, { offerTools: webSearch }) : null;
         // 브라우저는 답마다 새 시크릿 컨텍스트(첫 브라우저 도구 때 연다). 끝·멈춤·오류 때 닫는다
-        const browser: BrowserToolSessionLike | null = browserOn && web ? this.browserTools.session({ question: input.question, web, signal }) : null;
+        const browser: BrowserToolSessionLike | null = browserOn && web ? this.browserTools.session({ question: input.question, web, signal }, browserKey) : null;
         // 화면 조작: 동작은 ui_action 이벤트로 그 화면에 보내고 결과를 기다린다 (이슈 #382)
         const screen: ScreenControlSession | null = screenOn && emit ? this.screenTools.session({ owner: user.employeeId, screens, emit, signal }) : null;
         // Notion: 읽기는 바로, 쓰기는 실행 카드로만 (이슈 #398)
@@ -416,7 +420,7 @@ export class AiAssistantService {
             ...(webSources ? { webSources } : {}),
           };
         } finally {
-          await browser?.close();
+          if (browser) await this.browserTools.finish(browser, browserKey, signal?.aborted === true);
         }
       },
     };
