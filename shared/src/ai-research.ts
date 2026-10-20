@@ -57,6 +57,8 @@ export const AI_RESEARCH_LIMITS = {
   seedSourcesMax: 10,
   seedTitleMax: 300,
   seedUrlMax: 2000,
+  /** 계획을 말로 고치기: 부탁 글자 수 (이슈 #416, 가정값) */
+  instructionMax: 500,
 } as const;
 
 export interface AiResearchPlanStep {
@@ -253,4 +255,16 @@ export interface UpdateAiResearchPlanInput {
 
 export interface StartAiResearchRunInput {
   revision: number;
+}
+
+/** POST ai-research/runs/:id/plan/suggest (이슈 #416). plan은 화면의 지금 계획(저장하지 않은 고침 포함) */
+export interface SuggestAiResearchPlanInput {
+  instruction: string;
+  plan: AiResearchPlan;
+}
+
+/** 말로 고치기 결과. 서버는 저장하지 않는다. dropped = 규칙(검색어 확인·같은 검색어·6단계)에 맞지 않아 뺀 단계 수 */
+export interface AiResearchPlanSuggestion {
+  plan: AiResearchPlan;
+  dropped: number;
 }

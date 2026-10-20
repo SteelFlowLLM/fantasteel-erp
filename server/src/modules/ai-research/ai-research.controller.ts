@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Injectable, Param, Patch, Post, Put, Query, type PipeTransform } from '@nestjs/common';
-import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
+import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, RenameAiResearchRunDto, StartAiResearchRunDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
+import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, RenameAiResearchRunDto, StartAiResearchRunDto, SuggestAiResearchPlanDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchService } from './ai-research.service';
 
 /**
@@ -46,6 +46,13 @@ export class AiResearchController {
   @Put('ai-research/runs/:id/plan')
   updatePlan(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: UpdateAiResearchPlanDto): Promise<AiResearchRunView> {
     return this.service.updatePlan(user, id, dto.revision, dto.plan);
+  }
+
+  /** 계획을 말로 고치기 (이슈 #416): 고친 계획을 돌려주기만 하고 저장하지 않는다 */
+  @Post('ai-research/runs/:id/plan/suggest')
+  @HttpCode(200)
+  suggestPlan(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: SuggestAiResearchPlanDto): Promise<AiResearchPlanSuggestion> {
+    return this.service.suggestPlan(user, id, dto);
   }
 
   @Patch('ai-research/runs/:id/title')

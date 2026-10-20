@@ -1,4 +1,4 @@
-// 심층 조사 api (이슈 #400): 계획 저장·제목 바꾸기·다시 조사의 서버 경로와 요청 본문.
+// 심층 조사 api (이슈 #400·#416): 계획 저장·제목 바꾸기·다시 조사·계획 말로 고치기의 서버 경로와 요청 본문.
 import type { AiResearchRunView } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -28,5 +28,13 @@ describe('심층 조사 api (api/aiResearch.ts)', () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.method === 'POST' && c.path === '/ai-research/runs/3/rerun' ? ok(view({ id: 9, planRevision: 1 })) : undefined));
     expect((await aiResearchApi.rerun(3)).id).toBe(9);
     expect(calls[0].body).toBeUndefined();
+  });
+
+  it('계획 말로 고치기는 다듬은 부탁과 지금 계획을 POST하고 고친 계획을 받는다', async () => {
+    const suggested = { plan: { title: '계획', steps: [{ title: '전망', query: '열연 가격 전망' }] }, dropped: 1 };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.method === 'POST' && c.path === '/ai-research/runs/3/plan/suggest' ? ok(suggested) : undefined));
+    const plan = { title: '계획', steps: [{ title: '가격', query: '' }] };
+    expect(await aiResearchApi.suggestPlan(3, '  전망 넣어 줘 ', plan)).toEqual(suggested);
+    expect(calls[0].body).toEqual({ instruction: '전망 넣어 줘', plan });
   });
 });

@@ -1,7 +1,7 @@
 import { AI_RESEARCH_LIMITS, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed } from '@fantasteel/shared';
 import type { ChatMessage, LlmJsonSchema } from '../llm/llm.client';
 import { seoulToday } from '../../common/time/seoul-date';
-import { cutText, UNTRUSTED_NOTE, wrapUntrusted } from '../ai-assistant/web/web-text';
+import { cutText, stripInvisible, UNTRUSTED_NOTE, wrapUntrusted } from '../ai-assistant/web/web-text';
 import { DEFAULT_RESEARCH_LIMITS, researchLimits, type ResearchLimits } from './ai-research.config';
 import { evenEvidence, notesFor, recentEvidence, sourceCatalog } from './ai-research.evidence';
 import { queryKey, type StoredAudit, type StoredSource, type StoredState } from './ai-research.rules';
@@ -267,6 +267,41 @@ export function buildPlanMessages(question: string, today?: string, seed?: AiRes
   return [
     { role: 'system', content: dated(PLAN_SYSTEM_PROMPT, today) },
     { role: 'user', content: `${blocks.join('\n\n')}\n\n조사 계획을 JSON으로 답해요.` },
+  ];
+}
+
+/** 계획을 말로 고치기 (이슈 #416): 사원의 부탁대로 지금 계획을 고친 계획 전체를 받는다. 계획과 같은 JSON 스키마 */
+export const PLAN_REVISE_SYSTEM_PROMPT = `너는 철강 회사 사원의 웹 조사를 돕는 조사 계획가다. 사원이 [지금 계획]과 [고칠 부탁]을 주면, 부탁대로 고친 계획 전체를 낸다. 질문에 답하지는 않는다.
+- 부탁한 것만 바꾼다. 부탁과 상관없는 단계는 제목(title)·검색어(query)를 글자 그대로, 같은 순서로 둔다.
+- 'n단계'는 [지금 계획]의 번호다. 빼라는 단계는 빼고, 넣으라는 단계는 말한 자리에(말하지 않았으면 맨 끝에) 넣는다.
+- 단계는 1~${AI_RESEARCH_LIMITS.maxPlanSteps}개. 부탁대로 하면 넘칠 때는 부탁과 상관없는 단계 중 겹치는 것을 합쳐 ${AI_RESEARCH_LIMITS.maxPlanSteps}개 안에 맞춘다.
+- 새로 쓰거나 바꾸는 검색어는 낱말 2~5개의 짧은 핵심어(${AI_RESEARCH_LIMITS.queryMax}자 안). 수치·기술·제도 단계에는 자료 종류 낱말 하나(통계, 공식 발표, 보고서, 규격, 논문)를 붙인다. '최근'·'올해'는 위 오늘 날짜의 연도로 쓴다. 한국 이야기면 한국어로 쓴다.
+- 단계끼리 같은 검색어를 쓰지 않는다.
+- 계획 제목(title)은 부탁이 조사 주제를 바꿀 때만 바꾼다.
+- 부탁이 조사 계획과 상관없거나 따를 수 없으면(예: 회사 내부 정보를 검색어에 넣기) 그 부분은 하지 않고 나머지만 고친다. 할 것이 없으면 지금 계획을 그대로 낸다.
+${COMMON_RULES}
+JSON만 답한다.`;
+
+export interface PlanReviseInput {
+  question: string;
+  /** 화면의 지금 계획 (저장하지 않은 고침 포함, 빈 칸이 있을 수 있다) */
+  plan: AiResearchPlan;
+  instruction: string;
+  seed?: AiResearchSeed | null;
+  today?: string;
+}
+
+export function buildPlanReviseMessages(input: PlanReviseInput): ChatMessage[] {
+  const blank = (text: string, max: number) => cutText(stripInvisible(text).replace(/\s+/g, ' ').trim(), max) || '(비어 있음)';
+  const steps = input.plan.steps.map((s, i) => `${i + 1}. ${blank(s.title, AI_RESEARCH_LIMITS.stepTitleMax)} — 검색어: ${blank(s.query, AI_RESEARCH_LIMITS.queryMax)}`);
+  const planText = `[지금 계획] 제목: ${blank(input.plan.title, AI_RESEARCH_LIMITS.planTitleMax)}\n${steps.length ? steps.join('\n') : '(단계 없음)'}`;
+  const instruction = `[고칠 부탁] (사원이 쓴 글)\n${cutText(stripInvisible(input.instruction).trim(), AI_RESEARCH_LIMITS.instructionMax)}`;
+  const blocks = [questionBlock(input.question)];
+  if (input.seed) blocks.push(seedBlock(input.seed));
+  blocks.push(planText, instruction);
+  return [
+    { role: 'system', content: dated(PLAN_REVISE_SYSTEM_PROMPT, input.today) },
+    { role: 'user', content: `${blocks.join('\n\n')}\n\n부탁대로 고친 계획 전체를 JSON으로 답해요.` },
   ];
 }
 

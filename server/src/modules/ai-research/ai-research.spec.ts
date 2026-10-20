@@ -4,7 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { AiActionCardExecuteResult, AiAssistantReplyView, AiResearchNotionExportResult, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
+import type { AiActionCardExecuteResult, AiAssistantReplyView, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchRunSummaryView, AiResearchRunView, PageResult } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { AppModule } from '../../app.module';
@@ -56,11 +56,20 @@ let searchEmpty = false;
 const searched: string[] = [];
 const readUrls: string[] = [];
 const settings = { model: 'test-model' as string | null };
+/** 계획 말로 고치기 답 (이슈 #416). 계획 프롬프트 중 [고칠 부탁]이 든 요청에만 쓴다 */
+let suggestReply: Turn = { title: '고친 계획', steps: [{ title: '가격', query: '열연 가격 전망' }] };
+const suggestPrompts: string[] = [];
 
 const state = (summary: string, gaps: string[] = []) => ({ summary, gaps, unsupportedClaims: [] });
 
 const llmClient = {
   chatJsonWithText: jest.fn(async (_endpoint: unknown, _model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions) => {
+    if (format.name === 'research_plan' && messages.some((m) => m.content.includes('[고칠 부탁]'))) {
+      suggestPrompts.push(messages.map((m) => m.content).join('\n'));
+      if ('parseError' in suggestReply) throw new LlmJsonParseError('AI 응답을 JSON으로 읽지 못했어요', String(suggestReply.parseError), null);
+      if ('error' in suggestReply) throw new LlmRequestError(String(suggestReply.error));
+      return wrap(suggestReply);
+    }
     if (format.name === 'research_plan')
       return wrap({
         title: '전기로와 고로 비교',
@@ -227,6 +236,8 @@ beforeEach(async () => {
   searched.length = 0;
   readUrls.length = 0;
   settings.model = 'test-model';
+  suggestReply = { title: '고친 계획', steps: [{ title: '가격', query: '열연 가격 전망' }] };
+  suggestPrompts.length = 0;
 });
 
 describe('심층 조사', () => {
@@ -948,5 +959,89 @@ describe('심층 조사 — 철강맨AI에서 이어 가기 (이슈 #408)', () =
     for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: `카드 조사 ${i}` })).status).toBe(201);
     const full = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: '네 번째 카드 조사' });
     expect(full.body.error?.code).toBe('RES-006');
+  });
+});
+
+describe('심층 조사 — 계획을 말로 고치기 (이슈 #416)', () => {
+  const draft = { title: '전기로와 고로 비교', steps: [{ title: '전기로 배출', query: '전기로 탄소 배출량' }, { title: '고치던 단계', query: '' }] };
+  const suggest = (id: number, body: unknown, cookie = ownerCookie) => call<AiResearchPlanSuggestion>('POST', `/ai-research/runs/${id}/plan/suggest`, cookie, body);
+
+  it('화면의 지금 계획과 부탁으로 고친 계획을 돌려주고, 저장하지 않는다. 막힌 검색어·같은 검색어는 빼고 그 수를 알린다', async () => {
+    const run = await planned('말로 고칠 조사');
+    suggestReply = {
+      title: '전기로와 고로 비교',
+      steps: [
+        { title: '전기로 배출', query: '전기로 탄소 배출량' },
+        { title: '가격 전망', query: '열연 가격 전망 2026' },
+        { title: '같은 검색', query: '배출량 탄소, 전기로' },
+        { title: '막힌 단계', query: 'SO-2610-001 납기' },
+      ],
+    };
+    const res = await suggest(run.id, { instruction: '  2단계 빼고 가격 전망 넣어 줘  ', plan: draft });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ plan: { title: '전기로와 고로 비교', steps: [{ title: '전기로 배출', query: '전기로 탄소 배출량' }, { title: '가격 전망', query: '열연 가격 전망 2026' }] }, dropped: 2 });
+    // 모델에는 질문·저장하지 않은 고침(빈 검색어)·다듬은 부탁이 갔다
+    expect(suggestPrompts).toHaveLength(1);
+    expect(suggestPrompts[0]).toContain('말로 고칠 조사');
+    expect(suggestPrompts[0]).toContain('2. 고치던 단계 — 검색어: (비어 있음)');
+    expect(suggestPrompts[0]).toContain('[고칠 부탁] (사원이 쓴 글)\n2단계 빼고 가격 전망 넣어 줘');
+    // 저장하지 않는다: 판·계획·상태 그대로, 이벤트도 없다
+    const after = await getRun(run.id);
+    expect(after).toMatchObject({ status: 'AWAITING_APPROVAL', planRevision: run.planRevision, plan: run.plan });
+    expect(after.events.map((e) => e.type)).toEqual(['plan.ready']);
+    // 여러 번 할 수 있고, 받은 계획을 저장하면 판이 오른다
+    const again = await suggest(run.id, { instruction: '하나 더', plan: res.body.data.plan });
+    expect(again.status).toBe(200);
+    const saved = await call<AiResearchRunView>('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, { revision: run.planRevision, plan: res.body.data.plan });
+    expect(saved.body.data.planRevision).toBe(run.planRevision + 1);
+  });
+
+  it('모델이 제목을 비우면 지금 계획의 제목을 둔다', async () => {
+    const run = await planned('제목 비운 답');
+    suggestReply = { title: '', steps: [{ title: '', query: '철강 수출 통계 2026' }] };
+    const res = await suggest(run.id, { instruction: '수출 통계만 봐 줘', plan: draft });
+    expect(res.body.data.plan).toEqual({ title: '전기로와 고로 비교', steps: [{ title: '철강 수출 통계 2026', query: '철강 수출 통계 2026' }] });
+  });
+
+  it('쓸 단계가 없거나 LLM이 실패하면 RES-008(502), 깨진 JSON은 너그럽게 읽는다', async () => {
+    const run = await planned('고치기 실패');
+    suggestReply = { title: 't', steps: [{ title: '막힘', query: 'SO-2610-001 납기' }] };
+    let res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
+    expect(res.status).toBe(502);
+    expect(res.body.error?.code).toBe('RES-008');
+    suggestReply = { error: 'connect ECONNREFUSED' };
+    res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
+    expect(res.body.error?.code).toBe('RES-008');
+    expect(res.body.error?.message).toContain('AI 응답을 받지 못했어요');
+    suggestReply = { parseError: '답: {"title":"깨진 답에서 읽음","steps":[{"title":"원료","query":"철광석 가격 통계"}]} 끝' };
+    res = await suggest(run.id, { instruction: '원료만', plan: draft });
+    expect(res.status).toBe(200);
+    expect(res.body.data.plan.title).toBe('깨진 답에서 읽음');
+  });
+
+  it('부탁은 1~500자, 계획은 6단계·칸 길이까지 (400). 모델이 없으면 RES-005', async () => {
+    const run = await planned('입력 확인');
+    for (const instruction of ['', '   ', '가'.repeat(501)]) expect((await suggest(run.id, { instruction, plan: draft })).status).toBe(400);
+    expect((await suggest(run.id, { instruction: '가'.repeat(500), plan: draft })).status).toBe(200);
+    const seven = { title: 't', steps: Array.from({ length: 7 }, (_, i) => ({ title: `${i}`, query: `q ${i}` })) };
+    expect((await suggest(run.id, { instruction: '줄여 줘', plan: seven })).status).toBe(400);
+    expect((await suggest(run.id, { instruction: '줄여 줘', plan: { title: 't', steps: [{ title: 't', query: 'q'.repeat(81) }] } })).status).toBe(400);
+    expect((await suggest(run.id, { instruction: '줄여 줘' })).status).toBe(400);
+    settings.model = null;
+    expect((await suggest(run.id, { instruction: '줄여 줘', plan: draft })).body.error?.code).toBe('RES-005');
+  });
+
+  it('계획 확인 대기가 아니면 RES-002, 남의 조사는 RES-001', async () => {
+    const planning = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '아직 계획 중' });
+    expect((await suggest(planning.body.data.id, { instruction: '고쳐 줘', plan: draft })).body.error?.code).toBe('RES-002');
+    const run = await planned('남의 것과 시작한 것');
+    const other = await suggest(run.id, { instruction: '고쳐 줘', plan: draft }, otherCookie);
+    expect(other.status).toBe(404);
+    expect(other.body.error?.code).toBe('RES-001');
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    const started = await suggest(run.id, { instruction: '고쳐 줘', plan: draft });
+    expect(started.status).toBe(409);
+    expect(started.body.error?.code).toBe('RES-002');
+    expect(suggestPrompts).toHaveLength(0);
   });
 });

@@ -108,6 +108,43 @@ export class UpdateAiResearchPlanDto {
   plan!: AiResearchPlanDto;
 }
 
+/** 말로 고치기에 보내는 지금 계획: 고치던 중이라 빈 칸·같은 검색어가 있을 수 있다 (모델에만 보이고, 돌려줄 계획은 서버가 다시 확인한다) */
+export class AiResearchDraftStepDto {
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.stepTitleMax, { message: `단계 이름은 ${AI_RESEARCH_LIMITS.stepTitleMax}자까지 쓸 수 있어요` })
+  title!: string;
+
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.queryMax, { message: `검색어는 ${AI_RESEARCH_LIMITS.queryMax}자까지 쓸 수 있어요` })
+  query!: string;
+}
+
+export class AiResearchDraftPlanDto {
+  @IsString()
+  @MaxLength(AI_RESEARCH_LIMITS.planTitleMax, { message: `계획 제목은 ${AI_RESEARCH_LIMITS.planTitleMax}자까지 쓸 수 있어요` })
+  title!: string;
+
+  @IsArray()
+  @ArrayMaxSize(AI_RESEARCH_LIMITS.maxPlanSteps, { message: `단계는 ${AI_RESEARCH_LIMITS.maxPlanSteps}개까지예요` })
+  @ValidateNested({ each: true })
+  @Type(() => AiResearchDraftStepDto)
+  steps!: AiResearchDraftStepDto[];
+}
+
+/** POST ai-research/runs/:id/plan/suggest (이슈 #416) */
+export class SuggestAiResearchPlanDto {
+  @Transform(trim)
+  @IsString({ message: '어떻게 고칠지 써 주세요' })
+  @IsNotEmpty({ message: '어떻게 고칠지 써 주세요' })
+  @MaxLength(AI_RESEARCH_LIMITS.instructionMax, { message: `부탁은 ${AI_RESEARCH_LIMITS.instructionMax}자까지 쓸 수 있어요` })
+  instruction!: string;
+
+  @IsObject({ message: '지금 계획을 함께 보내 주세요' })
+  @ValidateNested()
+  @Type(() => AiResearchDraftPlanDto)
+  plan!: AiResearchDraftPlanDto;
+}
+
 /** PATCH ai-research/runs/:id/title — 계획이 있는 조사의 제목만 (상태와 상관없이) */
 export class RenameAiResearchRunDto {
   @IsInt({ message: '계획 판(revision)이 올바르지 않아요' })

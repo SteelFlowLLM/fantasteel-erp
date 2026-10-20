@@ -1,6 +1,6 @@
 # ai-research — 철강맨AI 심층 조사
 
-> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #408(철강맨AI 웹 검색 답·대화 카드에서 이어 가기), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
+> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #408(철강맨AI 웹 검색 답·대화 카드에서 이어 가기), #416(계획을 말로 고치기), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
 > Unsloth Studio의 deep research 흐름(계획 → 검색·읽기 반복 → 점검 → 인용 보고서)을 참고해 새로 썼다(코드는 가져오지 않음).
 
 ## 1. 담당 범위
@@ -8,7 +8,7 @@
 - 사원이 질문하면 AI가 **조사 계획**을 세우고, 사원이 계획을 보고 고친 뒤 **시작**하면 서버가 백그라운드로 웹을 **검색·읽기**를 반복하며 근거를 모으고, **점검**을 거쳐 출처 번호 `[n]`을 단 **마크다운 보고서**를 쓴다.
 - ERP 데이터는 읽지도 보내지도 않는다. 회사 밖으로 나가는 것은 검색어뿐이고, 검색어는 웹 검색(`docs/backend/ai-assistant.md` 4장 '웹 검색')과 같은 회사 안 정보 막기를 거친다.
 - 웹 검색·페이지 읽기는 ai-assistant 모듈의 웹 도구(`AssistantWebToolbox` — 같은 검색 캐시·1분 한도·SSRF 막기·worker 글 뽑기·동시 4개)를 그대로 쓴다. 이 모듈은 `AiAssistantModule`이 export한 `AssistantWebToolbox`를 받는다.
-- 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · rules(순수 규칙) · prompt · report · view), 공유 타입 `shared/src/ai-research.ts`.
+- 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · rules(순수 규칙) · prompt · llm(JSON 묻기) · report · view), 공유 타입 `shared/src/ai-research.ts`.
 
 ## 2. 테이블 (ERD `ai_research_run`·`ai_research_event`, 마이그레이션 `20261017142607_ai_research`·`20261018090000_ai_research_plus`·`20261019082940_ai_research_seed`)
 
@@ -31,6 +31,7 @@
 | GET | `ai-research/runs` | `?page=1&size=20` (size 50까지) | `PageResult<AiResearchRunSummaryView>` 내 조사, 최근 것부터 |
 | GET | `ai-research/runs/:id` | `?afterSeq=` (기본 0) | `AiResearchRunView`. `events`는 `seq > afterSeq`만(500개까지), `lastSeq`는 지금 마지막 순번 |
 | PUT | `ai-research/runs/:id/plan` | `{ revision, plan: { title, steps: [{ title, query }] } }` (1~6단계, 제목 100자, 검색어 80자) | AWAITING_APPROVAL이고 `revision`이 지금 `planRevision`과 같을 때만 → `planRevision + 1`. 판이 다르면 409 `RES-003`, 다른 상태면 409 `RES-002`, 검색어에 회사 안 정보면 400 `RES-004`, 같은 검색어 두 번이면 400 `COM-004` |
+| POST | `ai-research/runs/:id/plan/suggest` | `{ instruction, plan: { title, steps: [{ title, query }] } }` (부탁 1~500자, 앞뒤 공백 뗌. `plan`은 화면의 지금 계획으로 저장하지 않은 고침·빈 칸·같은 검색어가 있어도 된다. 6단계·칸 길이 상한만 본다) | 200 `{ plan, dropped }`. AI가 부탁대로 고친 계획을 **저장하지 않고** 돌려준다(이슈 #416, 아래 '계획을 말로 고치기'). 내 AWAITING_APPROVAL 조사만(아니면 409 `RES-002`), 모델 없음 409 `RES-005`, LLM 실패·쓸 단계 없음 502 `RES-008` |
 | POST | `ai-research/runs/:id/start` | `{ revision }` | 200. 같은 조건(판 확인)으로 QUEUED |
 | PATCH | `ai-research/runs/:id/title` | `{ revision, title }` (1~100자, 앞뒤 공백 뗌) | 200. 계획이 있으면 **어느 상태에서나** 계획 제목만 바꾸고 `planRevision + 1`(단계·검색어·보고서·상태는 그대로). 계획 중(계획 없음)이면 409 `RES-002`, 판이 다르면 409 `RES-003` (이슈 #400) |
 | POST | `ai-research/runs/:id/rerun` | | 201 새 `AiResearchRunView`. **끝난(COMPLETED·FAILED·CANCELLED)** 내 조사의 질문·계획·예산을 복사한다. 계획이 있으면 계획 세우기를 건너뛰고 AWAITING_APPROVAL(판 1, `plan.ready.copiedFrom` = 원래 id), 계획 전에 끝났으면 PLANNING부터. 원래 조사는 그대로. 끝나지 않았으면 409 `RES-002`, 모델 없음 `RES-005`, 진행 중 3개면 `RES-006` (이슈 #400) |
@@ -61,7 +62,16 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - `canExtend` = COMPLETED **그리고** `stepsUsed ≥ maxSteps`(단계를 다 씀) **그리고** `researchState.gaps`가 남음 **그리고** `maxSteps < maxTotalSteps`(= min(30, 기본 단계×2)).
 - 계획을 처음 만들면 `planRevision = 1`, 고칠 때(제목 바꾸기 포함)마다 +1. 시작·고치기·제목 바꾸기는 화면이 본 판을 함께 보내 그 사이 바뀌었으면 막는다(낙관적 동시성).
 - 끝난 조사의 계획은 그 자리에서 고치지 않는다(보고서가 그 계획으로 쓰였다). 고쳐서 다시 하려면 **다시 조사**로 새 조사를 만든다. 제목은 이름일 뿐이라 어느 상태에서나 바꾼다. 일꾼은 계획을 세운 뒤로 `plan`을 다시 쓰지 않아 조사 중에 바꿔도 겹치지 않는다. 이미 Notion으로 내보낸 페이지 제목은 바뀌지 않는다.
-- 화면(`AiResearchPlanEditor`): **[계획 저장]**은 `PUT plan`만(시작하지 않음), **[조사 시작]**은 고친 것이 있으면 저장한 뒤 시작한다. 계획에 문제가 있으면 두 버튼이 꺼지고 그 옆에 맨 앞 문제(`planBlockReason`)를 보인다. 저장하지 않은 고침이 있으면 그 사실을 보이고, 창을 닫거나 새로 고치면 브라우저가 묻는다.
+- 화면(`AiResearchPlanEditor`): 맨 위 **말로 고치기** 칸(아래), **[계획 저장]**은 `PUT plan`만(시작하지 않음), **[조사 시작]**은 고친 것이 있으면 저장한 뒤 시작한다. 계획에 문제가 있으면 두 버튼이 꺼지고 그 옆에 맨 앞 문제(`planBlockReason`)를 보인다. 저장하지 않은 고침이 있으면 그 사실을 보이고, 창을 닫거나 새로 고치면 브라우저가 묻는다.
+
+### 계획을 말로 고치기 (이슈 #416)
+
+- 계획 확인 대기에서 단계를 하나씩 고치지 않고 "2단계 빼고 가격 전망 넣어 줘"처럼 부탁한다. 화면은 **지금 칸의 계획**(저장하지 않은 고침 포함)과 부탁을 `POST plan/suggest`로 보낸다.
+- 서버는 `buildPlanReviseMessages`(질문 · 먼저 알아본 것(감쌈) · `[지금 계획]`(빈 칸은 "(비어 있음)") · `[고칠 부탁] (사원이 쓴 글)`)를 `RESEARCH_JSON` 프로필·계획과 같은 `PLAN_JSON_SCHEMA`로 한 번 묻는다(`askResearchJson`: 일꾼과 같은 너그러운 JSON 읽기·빈 답이면 생각 없이 한 번 더, 3분). 지시(`PLAN_REVISE_SYSTEM_PROMPT`): 부탁한 것만 바꾸고 나머지 단계는 글자 그대로·같은 순서, 'n단계'는 지금 계획의 번호, 넣는 단계는 말한 자리(없으면 끝), 6단계를 넘으면 상관없는 단계 중 겹치는 것을 합침, 새 검색어는 계획 규칙과 같음, 제목은 주제가 바뀔 때만, 따를 수 없는 부탁(회사 안 정보를 검색어에)은 그 부분만 하지 않음.
+- 받은 계획은 모델이 세운 계획과 같이 `readPlan`으로 다듬는다: 검색어 확인(회사 안 정보 막기·80자)을 통과한 단계만, 같은 검색어(`queryKey`)는 하나, 6단계까지. 뺀 단계 수는 `dropped`. 제목이 비면 지금 제목. 남은 단계가 없으면 `RES-008`.
+- **저장하지 않는다**: 판(`planRevision`)·상태·이벤트가 그대로다. 사원이 [계획 저장]·[조사 시작]을 눌러야 `PUT plan`이 판 확인과 함께 저장한다. 몇 번이든 다시 부탁할 수 있다.
+- 일꾼(한 번에 조사 하나)을 거치지 않고 요청 안에서 바로 LLM을 부른다(사원이 기다리는 짧은 JSON 하나). 그래서 일꾼이 다른 조사를 하는 중이면 로컬 LLM 요청이 겹칠 수 있다.
+- 화면: 받은 계획을 칸에 채우고, 고치기 전 계획과 단계를 짝지어(같은 검색어 → 같은 이름 순, `planSuggestionDiff`) **새 단계**·**바뀐 단계** 표시와 줄 그은 **빠진 단계** 목록, "AI가 고친 계획이에요 · 새 단계 1 · 빠진 단계 1" 한 줄, 뺀 단계 수, [고치기 전으로](마지막 고치기 전 계획으로)를 보인다. 바뀐 것이 없으면 칸은 그대로 두고 알림만 띄운다. Enter로 보내고 Shift+Enter는 줄바꿈.
 
 ### 예산 (`ai-research.config.ts` · 환경 변수, 이슈 #384)
 
@@ -86,6 +96,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | 출처 본문 | 6,000자(웹 페이지 읽기와 같은 `PAGE_TEXT_MAX`, PDF 포함), 제목 200자, 요약 300자 |
 | 한 번 맡아 조사하는 시간 | 30분 → 넘으면 반복을 멈추고 모은 것으로 점검·보고서 (COMPLETED, 맨 위 알림) |
 | 사원별 동시 진행 | 3개 |
+| 계획 말로 고치기 부탁 | 500자 (이슈 #416) |
 
 ### 일꾼 (`ai-research.runner.ts`)
 
@@ -203,6 +214,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | RES-005 | 409 | 사용할 AI 모델이 정해지지 않았어요 |
 | RES-006 | 409 | 진행 중인 조사가 너무 많아요 (3개) |
 | RES-007 | 409 | 이미 Notion으로 내보낸 조사예요 |
+| RES-008 | 502 | AI가 고친 계획을 내지 못했어요 (계획 말로 고치기: LLM 실패·쓸 단계 없음, 이슈 #416) |
 
 ## 6. 다른 모듈과의 경계
 
@@ -220,9 +232,11 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - 이슈 #384 단위: 환경 변수 예산·상한·조사별 예산, 더 조사하기 min(30, 기본×2), 글자 상한 바꾸기, 차트 숫자 읽기(쉼표·만·%)·없는 숫자/모르는 출처 빼기·점 2개 미만 버리기, Notion 마크다운(태그·링크 막기·표·http만), 보고서 묻기 맥락(감싸기·글자 상한·[n] 출처). `web/pdf-extract.unit.spec.ts`: pdfkit으로 만든 작은 PDF(5KB 안)를 worker에서 읽기·20쪽만·깨진 PDF·시간 초과·`SafeWebPageReader`. `safe-fetch.unit.spec.ts`: PDF 받기·`.pdf` octet-stream·5MB 상한(알린 크기·받는 중).
 - 이슈 #384 2차 단위: 오늘 날짜 첫 줄·글자 상한, 점검·보고서의 계획 전체·모든 단계 기록(넘친 결과 포함)·출처 목록 형식·점검 새 칸, 똑같이 나누기(12,000자 상한·400자 바닥이면 최근만), 다음 행동의 출처 목록 전체·최근 기록 수, 목록 넘침(요약 빼기→뒤 줄 빼기), 옛 조사 기록 만들기, `modelBudget`(모름·32k·131k·8k·상한·환경 변수), 이어 쓰기 메시지·겹침 떼기, 같은 검색(순서·문장부호·되풀이), 점검 스키마, 계획·행동 지시 문구. `llm.client.spec.ts`: `modelContextLength`(불러온 것 먼저·최대값·외부 LLM null).
 - `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404. / (이슈 #408) seed 저장·다듬기(같은 주소·http 아닌 주소 뺌)·출처 미리 넣기·계획 프롬프트의 감싼 블록과 부탁·미리 넣은 출처 읽기 → COMPLETED, seed 없으면 null·블록 없음, 출처 11개·답 4,001자·모양 틀림 400, 다시 조사가 seed·출처를 옮김, 심층 조사 카드 실행(다듬은 질문·seed·남의 것 404·짧은 질문 ACT-001·진행 중 3개 RES-006). `ai-research.unit.spec.ts`: `normalizeSeed`·`seedSources`·`storedSeed`, 계획 프롬프트 seed 블록, `proposeResearchCard`.
+- (이슈 #416) `ai-research.unit.spec.ts`: 말로 고치기 프롬프트(빈 칸·다듬은 부탁·오늘 날짜·감싼 seed·500자), 고친 계획 다듬기(막힌·같은 검색어·6단계·빈 제목), `askResearchJson`(형식대로·깨진 답의 마지막 객체·빈 답이면 생각 없이 한 번 더·연결 실패는 던짐). `ai-research.spec.ts`(가짜 LLM): 고친 계획·`dropped`, 모델에 간 지금 계획·부탁, 저장하지 않음(판·계획·이벤트 그대로)·여러 번·받은 계획 저장, 빈 제목, 쓸 단계 없음·LLM 실패 `RES-008`·깨진 JSON 읽기, 부탁 0·501자·7단계·81자 검색어·계획 없음 400, `RES-005`, 계획 중·시작 뒤 `RES-002`, 남의 조사 `RES-001`. 화면: `planSuggestionDiff`·`planSuggestionSummary`(`lib/aiResearch.test.ts`), `suggestPlan` 요청 본문(`api/server/aiResearch.test.ts`).
 
 ## 8. 확인 필요 🟡
 
+- 계획 말로 고치기(이슈 #416)의 부탁 500자는 가정값이다. 요청 안에서 LLM을 바로 불러 일꾼의 조사와 LLM 요청이 겹칠 수 있다(로컬 모델이 하나면 둘 다 느려진다).
 - 예산·한도·글자 상한·시간은 로컬 모델(LM Studio) 기준 가정값이다. 문맥 창이 작은 모델이면 `AI_RESEARCH_PROMPT_CHARS`를 줄이고, 큰 모델이면 LM Studio의 Context Length와 함께 늘린다.
 - 차트 숫자 확인은 "그 숫자가 출처 글 어딘가에 있다"까지만 본다. 그 숫자가 그 x(연도·항목)의 값인지는 보지 않는다(출처 번호를 함께 보여 사람이 확인한다). 출처 본문에 주소·날짜 숫자가 많으면 우연히 맞을 수 있다.
 - Notion 표는 Notion 마크다운의 `<table>` 문법을 쓴다(Notion MCP의 `notion-create-pages` 기준). 서버가 문법을 바꾸면 `ai-research.notion.ts`만 고친다.

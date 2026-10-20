@@ -312,6 +312,60 @@ export function movePlanStep(steps: readonly AiResearchPlanStep[], index: number
   return next;
 }
 
+// ── 계획을 말로 고치기 (이슈 #416) ──
+
+/** 같은 검색인지 보는 열쇠 (서버 queryKey와 같은 규칙: 글자 모양·대소문자·문장부호·낱말 순서·되풀이 무시) */
+export const planQueryKey = (query: string): string =>
+  [...new Set(query.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').trim().split(/\s+/).filter(Boolean))].sort().join(' ');
+
+export type PlanStepMark = 'new' | 'changed' | 'same';
+
+export interface PlanSuggestionDiff {
+  /** 고친 계획의 단계 순서대로 */
+  marks: PlanStepMark[];
+  /** 고치기 전 계획에서 빠진 단계 */
+  removed: AiResearchPlanStep[];
+  titleChanged: boolean;
+}
+
+const sameText = (a: string, b: string): boolean => a.trim().replace(/\s+/g, ' ') === b.trim().replace(/\s+/g, ' ');
+
+/**
+ * 고치기 전 계획(base)과 고친 계획(next)을 단계별로 맞춘다. 먼저 같은 검색어끼리(이름이 다르면 바뀜), 남은 것은 같은 이름끼리(검색어가 바뀜) 짝짓고,
+ * 짝이 없는 고친 단계는 새 단계, 짝이 없는 고치기 전 단계는 빠진 단계다. 순서만 바뀐 단계는 그대로로 본다.
+ */
+export function planSuggestionDiff(base: AiResearchPlan, next: AiResearchPlan): PlanSuggestionDiff {
+  const used = base.steps.map(() => false);
+  const match = next.steps.map(() => -1);
+  const claim = (i: number, same: (b: AiResearchPlanStep) => boolean) => {
+    const j = base.steps.findIndex((b, k) => !used[k] && same(b));
+    if (j < 0) return;
+    used[j] = true;
+    match[i] = j;
+  };
+  next.steps.forEach((step, i) => {
+    const key = planQueryKey(step.query);
+    if (key) claim(i, (b) => planQueryKey(b.query) === key);
+  });
+  next.steps.forEach((step, i) => {
+    if (match[i] < 0 && step.title.trim()) claim(i, (b) => sameText(b.title, step.title));
+  });
+  const marks = next.steps.map((step, i): PlanStepMark => {
+    const j = match[i];
+    if (j < 0) return 'new';
+    const before = base.steps[j];
+    return sameText(before.title, step.title) && planQueryKey(before.query) === planQueryKey(step.query) ? 'same' : 'changed';
+  });
+  return { marks, removed: base.steps.filter((_, k) => !used[k]), titleChanged: !sameText(base.title, next.title) };
+}
+
+/** 고친 계획 위 한 줄: "새 단계 1 · 바뀐 단계 1 · 빠진 단계 1". 바뀐 것이 없으면 null */
+export function planSuggestionSummary(diff: PlanSuggestionDiff): string | null {
+  const count = (mark: PlanStepMark) => diff.marks.filter((m) => m === mark).length;
+  const parts = [diff.titleChanged ? '제목 바뀜' : '', count('new') ? `새 단계 ${count('new')}` : '', count('changed') ? `바뀐 단계 ${count('changed')}` : '', diff.removed.length ? `빠진 단계 ${diff.removed.length}` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 /** 진행 한 줄: "3/8 단계 · 출처 5/20" */
 export function progressText(run: Pick<AiResearchRunView, 'stepsUsed' | 'budget' | 'sources'>): string {
   return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.length}/${run.budget.maxSources}`;
