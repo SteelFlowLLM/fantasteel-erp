@@ -205,6 +205,7 @@ export function buildTurnMessages(input: TurnPromptInput): ChatMessage[] {
     stateBlock(input.state),
     input.state.searchedQueries.length ? `[이미 한 검색어] (같은 낱말로 다시 찾지 않는다)\n${input.state.searchedQueries.slice(-30).map((q) => `- ${q}`).join('\n')}` : '[이미 한 검색어] 없음',
   ];
+  if (input.state.revision) fixed.push(revisionTurnBlock(input.state.revision.instruction));
   const notes = notesFor(input.state, input.sources).slice(-limits.evidenceSources);
   return assemble(system, fixed, input.sources, 'turn', (room) => recentEvidence(notes, input.sources, room), '다음 행동 하나를 JSON으로 답해요.', limits.promptChars);
 }
@@ -230,7 +231,26 @@ export function buildAuditMessages(input: FinalPromptInput): ChatMessage[] {
   return assemble(dated(AUDIT_SYSTEM_PROMPT, input.today), fixed, input.sources, 'final', finalEvidence(input, limits), '점검 결과를 JSON으로 답해요.', limits.promptChars);
 }
 
-export function buildReportMessages(input: FinalPromptInput & { audit: StoredAudit }): ChatMessage[] {
+/** 보고서 고치기(이슈 #418)에 넣는 것: 사원의 부탁과 앞 보고서(서버 알림·출처 목록을 뗀 본문) */
+export interface ReportRevisionInput {
+  instruction: string;
+  previousReport: string;
+}
+
+/** 앞 보고서는 프롬프트 글자의 이만큼까지 (나머지는 점검·단계 기록) */
+const PREVIOUS_REPORT_SHARE = 0.4;
+
+export const REVISION_REPORT_RULE = `위 [고칠 부탁]대로 [앞 보고서]를 고친 보고서 전체를 다시 쓴다.
+- 부탁한 것만 고친다. 부탁과 상관없는 제목·절·문장·인용 번호는 [앞 보고서] 그대로 둔다(말을 다듬거나 순서를 바꾸지 않는다).
+- 부탁한 부분은 단계 기록·출처 목록의 근거로 고친다. 새로 모은 출처가 있으면 그 부분에 쓰고 번호를 붙인다. 근거가 없으면 지어내지 말고 확인하지 못했다고 쓴다.
+- 고친 곳만 따로 내지 말고, 처음부터 끝까지 이어지는 보고서 하나로 쓴다. 고쳤다는 설명이나 인사는 쓰지 않는다.`;
+
+/** 다음 행동에 붙이는 고치기 부탁 (사원이 쓴 글이라 감싸지 않는다). 사원이 더 검색을 허락한 차례에만 붙는다 */
+function revisionTurnBlock(instruction: string): string {
+  return `[보고서 고치기 부탁] (사원이 쓴 글)\n${cutText(instruction, AI_RESEARCH_LIMITS.instructionMax)}\n사원이 이 부탁을 위해 더 찾아도 된다고 했다. 부탁한 부분의 근거를 [이미 한 검색어]와 다른 검색어로 먼저 찾고(모은 출처 중 아직 읽지 않은 것이 더 맞으면 read), 그 부분의 근거가 모였을 때 finish한다. 부탁과 상관없는 측면은 찾지 않는다.`;
+}
+
+export function buildReportMessages(input: FinalPromptInput & { audit: StoredAudit; revision?: ReportRevisionInput | null }): ChatMessage[] {
   const limits = input.limits ?? researchLimits();
   const audit = input.audit;
   const list = (label: string, items: readonly string[]) => (items.length ? `${label}:\n${items.map((o) => `- ${o}`).join('\n')}` : null);
@@ -247,7 +267,16 @@ export function buildReportMessages(input: FinalPromptInput & { audit: StoredAud
     .filter(Boolean)
     .join('\n');
   const fixed = [questionBlock(input.question), planBlock(input.plan, input.state), cutText(auditText, 8000), stateBlock(input.state)];
-  return assemble(dated(REPORT_SYSTEM_PROMPT, input.today), fixed, input.sources, 'final', finalEvidence(input, limits), '보고서를 마크다운으로 써요.', limits.promptChars);
+  if (input.revision) {
+    const previous = cutText(input.revision.previousReport, Math.floor(limits.promptChars * PREVIOUS_REPORT_SHARE));
+    fixed.push(
+      `[앞 보고서] ${MODEL_NOTE_LABEL}\n${wrapUntrusted('research:previous-report', previous)}`,
+      `[고칠 부탁] (사원이 쓴 글)\n${cutText(stripInvisible(input.revision.instruction).trim(), AI_RESEARCH_LIMITS.instructionMax)}`,
+      REVISION_REPORT_RULE,
+    );
+  }
+  const ask = input.revision ? '부탁대로 고친 보고서 전체를 마크다운으로 써요.' : '보고서를 마크다운으로 써요.';
+  return assemble(dated(REPORT_SYSTEM_PROMPT, input.today), fixed, input.sources, 'final', finalEvidence(input, limits), ask, limits.promptChars);
 }
 
 /** 차트 제안 (보고서 뒤). 근거는 점검·보고서와 같다 */

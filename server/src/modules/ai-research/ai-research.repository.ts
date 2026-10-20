@@ -112,6 +112,24 @@ export class AiResearchRepository {
     return tx.aiResearchRun.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionExportedAt: null } });
   }
 
+  /** 보고서 판 목록 (본문 없이, 오래된 것부터, 이슈 #418) */
+  listVersions(tx: Tx, runId: number) {
+    return tx.aiResearchReportVersion.findMany({ where: { runId }, orderBy: { version: 'asc' }, select: { version: true, instruction: true, search: true, createdAt: true } });
+  }
+
+  findVersion(tx: Tx, runId: number, version: number) {
+    return tx.aiResearchReportVersion.findUnique({ where: { runId_version: { runId, version } } });
+  }
+
+  async lastVersion(tx: Tx, runId: number): Promise<number> {
+    const last = await tx.aiResearchReportVersion.findFirst({ where: { runId }, orderBy: { version: 'desc' }, select: { version: true } });
+    return last?.version ?? 0;
+  }
+
+  createVersion(tx: Tx, data: { runId: number; version: number; instruction: string | null; search: boolean; report: string; charts: Prisma.InputJsonValue }) {
+    return tx.aiResearchReportVersion.create({ data });
+  }
+
   /** 사원별 잠금 (트랜잭션이 끝날 때까지). 진행 중 수를 세고 만드는 사이에 다른 요청이 끼지 못하게 */
   async lockEmployee(tx: Tx, employeeId: number): Promise<void> {
     await tx.$queryRawTyped(lockAiResearchEmployee(employeeId));

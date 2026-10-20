@@ -16,6 +16,17 @@ export function useAiResearchList() {
   });
 }
 
+/** 보고서 판 하나 (판은 바뀌지 않아 한 번만 읽는다). version이 null이면 읽지 않는다 */
+export function useAiResearchVersion(id: number, version: number | null) {
+  const me = useMe();
+  return useQuery({
+    queryKey: aiResearchKeys.version(me.employeeId, id, version ?? 0),
+    queryFn: version === null ? skipToken : () => aiResearchApi.getVersion(id, version),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
 export function useAiResearchRun(id: number | null) {
   const me = useMe();
   const queryClient = useQueryClient();

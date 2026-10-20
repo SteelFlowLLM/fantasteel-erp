@@ -6,6 +6,7 @@ import {
   type AiResearchNotionExportResult,
   type AiResearchPlan,
   type AiResearchPlanSuggestion,
+  type AiResearchReportVersionView,
   type AiResearchRunSummaryView,
   type AiResearchRunView,
   type AiResearchSeed,
@@ -24,11 +25,11 @@ import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
 import { askResearchJson } from './ai-research.llm';
 import { buildPlanReviseMessages, PLAN_JSON_SCHEMA } from './ai-research.prompt';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, readPlan, seedSources, storedPlan, storedSeed, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 import { AiResearchRunner, DEFAULT_RUNNER_CONFIG } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
-import { toRunSummary, toRunView } from './ai-research.view';
+import { hasVersionRoom, toRunSummary, toRunView, toVersionView } from './ai-research.view';
 
 /** 계획이 세워진 뒤의 상태 (제목을 바꿀 수 있다). 그 사이 일꾼이 상태를 넘겨도(QUEUED → RUNNING) 막지 않는다 */
 const PLANNED_STATUSES: AiResearchStatus[] = Object.values(AI_RESEARCH_STATUS).filter((status) => status !== AI_RESEARCH_STATUS.PLANNING);
@@ -191,6 +192,9 @@ export class AiResearchService {
       const budget = readBudget(run.budget);
       if (!canExtend({ status: run.status as AiResearchStatus, stepsUsed: run.stepsUsed, budget, state: run.researchState === null ? null : storedState(run.researchState) }))
         throw new AppException('RES-002', `단계를 다 써서 끝났고 아직 모르는 것이 남은 조사만 더 조사할 수 있어요 (모두 ${researchLimits().maxTotalSteps}단계까지)`);
+      // 판이 생긴 뒤의 더 조사하기도 판을 하나 남긴다 (이슈 #418)
+      const versions = await this.repository.lastVersion(tx, id);
+      if (versions > 0 && !hasVersionRoom(versions)) throw new AppException('RES-002', `보고서 판은 ${AI_RESEARCH_LIMITS.maxReportVersions}개까지 남길 수 있어요. 다시 조사로 새 조사를 만들어 주세요`);
       // 그 사이 다른 요청이 먼저 늘렸으면 updatedAt이 달라 0건이다
       const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.COMPLETED], updatedAt: run.updatedAt }, {
         status: AI_RESEARCH_STATUS.QUEUED,
@@ -202,6 +206,52 @@ export class AiResearchService {
     });
     this.runner.wake();
     return view;
+  }
+
+  /**
+   * 보고서를 말로 고치기 (이슈 #418): 완료한 내 조사만. 처음이면 지금 보고서를 1판으로 남기고, 부탁을 메모(research_state.revision)에 넣어 다시 줄에 세운다(더 조사하기와 같은 일꾼).
+   * 더 검색하면 +4단계(모두 30단계까지)와 부탁을 맨 앞 '모르는 것'으로, 아니면 모은 것으로 다시 쓴다. 고친 보고서는 일꾼이 다음 판으로 남긴다.
+   * 진행 중 3개 상한에 함께 센다(RES-006). 판은 1판 포함 10개까지(RES-002).
+   */
+  async revise(user: AuthUser, id: number, instruction: string, search: boolean): Promise<AiResearchRunView> {
+    if (!(await this.llmSettings.read()).model) throw new AppException('RES-005');
+    const view = await retryOnSeqConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const run = await this.owned(tx, user, id);
+        if (run.status !== AI_RESEARCH_STATUS.COMPLETED || !run.report) throw new AppException('RES-002', '완료한 조사의 보고서만 고칠 수 있어요');
+        await this.lockActiveSlot(tx, user);
+        let last = await this.repository.lastVersion(tx, id);
+        if (!hasVersionRoom(last)) throw new AppException('RES-002', `보고서 판은 ${AI_RESEARCH_LIMITS.maxReportVersions}개까지 남길 수 있어요. 다시 조사로 새 조사를 만들어 주세요`);
+        if (last === 0) {
+          await this.repository.createVersion(tx, { runId: id, version: 1, instruction: null, search: false, report: run.report, charts: (run.charts ?? []) as Prisma.InputJsonValue });
+          last = 1;
+        }
+        const version = last + 1;
+        const started = revisionStart({ stepsUsed: run.stepsUsed, budget: readBudget(run.budget), state: storedState(run.researchState), sourceCount: storedSources(run.sources).length }, { version, instruction, search });
+        // 그 사이 다른 요청(고치기·더 조사하기)이 먼저 줄에 세웠으면 updatedAt이 달라 0건이다
+        const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.COMPLETED], updatedAt: run.updatedAt }, {
+          status: AI_RESEARCH_STATUS.QUEUED,
+          budget: { ...started.budget },
+          researchState: started.state as unknown as Prisma.InputJsonObject,
+          finishedAt: null,
+        });
+        if (count === 0) throw new AppException('RES-002');
+        await this.repository.appendEvents(tx, id, [
+          { type: 'revision.requested', payload: { version, instruction: started.state.revision?.instruction.slice(0, 200) ?? '', search, addedSteps: started.addedSteps } },
+        ]);
+        return this.view(tx, await this.owned(tx, user, id));
+      }),
+    );
+    this.runner.wake();
+    return view;
+  }
+
+  /** 보고서 판 하나 (내 조사만). 없는 판은 RES-001 */
+  async getVersion(user: AuthUser, id: number, version: number): Promise<AiResearchReportVersionView> {
+    await this.owned(this.prisma, user, id);
+    const row = await this.repository.findVersion(this.prisma, id, version);
+    if (!row) throw new AppException('RES-001', '보고서 판을 찾을 수 없어요');
+    return toVersionView(row);
   }
 
   /** 취소: 끝나지 않은 조사만 */
@@ -272,8 +322,8 @@ export class AiResearchService {
   }
 
   private async view(tx: Tx, run: AiResearchRun, afterSeq = 0): Promise<AiResearchRunView> {
-    const [events, lastSeq] = await Promise.all([this.repository.eventsAfter(tx, run.id, afterSeq), this.repository.lastSeq(tx, run.id)]);
-    return toRunView(run, events, lastSeq);
+    const [events, lastSeq, versions] = await Promise.all([this.repository.eventsAfter(tx, run.id, afterSeq), this.repository.lastSeq(tx, run.id), this.repository.listVersions(tx, run.id)]);
+    return toRunView(run, events, lastSeq, versions);
   }
 }
 

@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Injectable, Param, Patch, Post, Put, Query, type PipeTransform } from '@nestjs/common';
-import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
+import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchReportVersionView, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, RenameAiResearchRunDto, StartAiResearchRunDto, SuggestAiResearchPlanDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
+import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, CreateAiResearchRevisionDto, RenameAiResearchRunDto, StartAiResearchRunDto, SuggestAiResearchPlanDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchService } from './ai-research.service';
 
 /**
@@ -75,6 +75,19 @@ export class AiResearchController {
   @HttpCode(200)
   extend(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchRunView> {
     return this.service.extend(user, id);
+  }
+
+  /** 보고서를 말로 고치기 (이슈 #418): 부탁을 저장하고 다시 줄에 세운다. 고친 보고서는 판으로 남는다 */
+  @Post('ai-research/runs/:id/revisions')
+  @HttpCode(200)
+  revise(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: CreateAiResearchRevisionDto): Promise<AiResearchRunView> {
+    return this.service.revise(user, id, dto.instruction, dto.search ?? true);
+  }
+
+  /** 보고서 판 하나 (본문·차트) */
+  @Get('ai-research/runs/:id/versions/:version')
+  getVersion(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Param('version', ResearchRunIdPipe) version: number): Promise<AiResearchReportVersionView> {
+    return this.service.getVersion(user, id, version);
   }
 
   @Post('ai-research/runs/:id/notion-export')

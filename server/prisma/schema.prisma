@@ -1112,6 +1112,7 @@ model AiResearchRun {
 
   employee Employee @relation("AiResearchRunEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   events AiResearchEvent[] @relation("AiResearchEventRun")
+  reportVersions AiResearchReportVersion[] @relation("AiResearchReportVersionRun")
 
   @@index([employeeId, createdAt])
   @@index([status])
@@ -1122,7 +1123,7 @@ model AiResearchEvent {
   id Int @id @default(autoincrement())
   runId Int @map("run_id")
   seq Int /// 조사 안의 순번 (1부터)
-  type String @db.VarChar /// plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted
+  type String @db.VarChar /// plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready·revision.requested·revision.ready
   payload Json @default("{}") @db.JsonB /// 짧은 내용
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
@@ -1130,6 +1131,23 @@ model AiResearchEvent {
 
   @@unique([runId, seq])
   @@map("ai_research_event")
+}
+
+/// 심층 조사 보고서의 판 (이슈 #418, 문서에 없는 기능). 보고서를 말로 고칠 때마다 남긴다. 지우거나 고치지 않는다
+model AiResearchReportVersion {
+  id Int @id @default(autoincrement())
+  runId Int @map("run_id")
+  version Int /// 판 번호 (1부터). 1판은 처음 고칠 때의 보고서
+  instruction String? /// 이 판을 만든 고치기 부탁. 1판·더 조사하기로 나온 판은 null
+  search Boolean @default(false) /// 고칠 때 더 검색했는지
+  report String /// 그 판의 보고서
+  charts Json @default("[]") @db.JsonB /// 그 판의 차트
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run AiResearchRun @relation("AiResearchReportVersionRun", fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([runId, version])
+  @@map("ai_research_report_version")
 }
 
 /// 철강맨AI 패널 대화 (이슈 #399, 문서에 없는 기능). 본인만 보고 지운다

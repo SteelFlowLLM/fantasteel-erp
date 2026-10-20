@@ -40,6 +40,20 @@ export function finalizeReport(raw: string, sources: readonly StoredSource[], tr
   return { report: parts.join('\n\n'), citedIds: cited };
 }
 
+/**
+ * 보고서 고치기(이슈 #418)에 앞 보고서로 넣을 본문: 서버가 맨 위에 단 알림(완전하지 않음·길이 한도)과 끝의 서버 출처 목록을 뗀다.
+ * 고친 보고서도 finalizeReport가 다시 붙인다.
+ */
+export function reportBodyForRevision(report: string): string {
+  let body = report;
+  const sources = body.lastIndexOf(`\n${SOURCE_HEADING}\n`);
+  if (sources >= 0) body = body.slice(0, sources);
+  else if (body.startsWith(`${SOURCE_HEADING}\n`)) body = '';
+  const notices = body.split(/\n{2,}/);
+  while (notices.length && (notices[0].startsWith('> **이 보고서는 완전하지 않아요.**') || notices[0] === REPORT_TRUNCATED_NOTICE)) notices.shift();
+  return notices.join('\n\n').trim();
+}
+
 /** 다 마치지 못했거나 대신 쓴 보고서의 알림 (맨 위). 이유는 서버가 정한 글이다 */
 export function incompleteNotice(reason: string): string {
   return `> **이 보고서는 완전하지 않아요.** ${reason.replace(/\s+/g, ' ')} 그때까지 모은 출처로 정리했어요.`;

@@ -41,13 +41,14 @@ function Inline({ parts }: { parts: ReportInline[] }) {
 
 const HEADING = ['text-lg font-semibold', 'text-base font-semibold', 'text-sm font-semibold', 'text-sm font-semibold text-ink-2'];
 
-export function AiResearchReport({ run }: { run: AiResearchRunView }) {
-  const blocks = useMemo(() => reportBlocks(run.report ?? '', run.sources), [run.report, run.sources]);
+/** report를 주면 그 판의 보고서를 그린다 (없으면 지금 보고서). 출처는 판과 상관없이 조사의 출처다 (출처는 늘기만 한다) */
+export function AiResearchReport({ run, report = run.report, title = '보고서' }: { run: AiResearchRunView; report?: string | null; title?: string }) {
+  const blocks = useMemo(() => reportBlocks(report ?? '', run.sources), [report, run.sources]);
   const rows = useMemo(() => sourceRows(run.sources), [run.sources]);
   return (
     <>
       <Card className="flex-none">
-        <CardHead title="보고서" />
+        <CardHead title={title} />
         <CardBody className="gap-2.5 text-sm leading-relaxed">
           {blocks.length === 0 ? <p className="text-ink-3">보고서 내용이 없어요</p> : null}
           {blocks.map((block, index) => {

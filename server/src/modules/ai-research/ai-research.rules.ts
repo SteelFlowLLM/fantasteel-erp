@@ -27,6 +27,17 @@ export interface StoredState extends AiResearchState {
   notes?: StepNote[];
   /** 검색이 연달아 비어 멈춘 때의 stepsUsed. 단계가 남았어도 더 조사하기를 허용한다 (이후 단계가 더해지면 저절로 낡는다) */
   searchDownAt?: number;
+  /** 아직 판이 나오지 않은 보고서 고치기 (이슈 #418). 고친 보고서를 저장할 때 판을 남기고 지운다 */
+  revision?: StoredRevision;
+}
+
+/** 보고서 고치기 요청. search가 false면 검색·읽기 없이 모은 것으로 다시 쓴다 */
+export interface StoredRevision {
+  version: number;
+  instruction: string;
+  search: boolean;
+  /** 요청했을 때의 stepsUsed. 더 검색하는 고치기는 여기서 한 단계도 하지 않고는 끝내지 않는다 */
+  fromStep?: number;
 }
 
 /** 검색 결과 한 줄. sourceId는 출처 번호(출처가 꽉 차 넣지 못했으면 null — 근거로 보이되 인용할 수 없다) */
@@ -188,6 +199,7 @@ export function storedState(value: unknown): StoredState {
   const auditedAt = int(value.auditedAt);
   const searchDownAt = int(value.searchDownAt);
   const notes = readNotes(value.notes);
+  const revision = readRevision(value.revision);
   return {
     summary: typeof value.summary === 'string' ? value.summary : '',
     gaps: strings(value.gaps),
@@ -198,6 +210,45 @@ export function storedState(value: unknown): StoredState {
     ...(auditedAt !== undefined ? { auditedAt } : {}),
     ...(searchDownAt !== undefined ? { searchDownAt } : {}),
     ...(notes.length ? { notes } : {}),
+    ...(revision ? { revision } : {}),
+  };
+}
+
+function readRevision(value: unknown): StoredRevision | undefined {
+  if (!isRecord(value) || typeof value.version !== 'number' || typeof value.instruction !== 'string' || typeof value.search !== 'boolean') return undefined;
+  return { version: value.version, instruction: value.instruction, search: value.search, ...(typeof value.fromStep === 'number' ? { fromStep: value.fromStep } : {}) };
+}
+
+/** 더 검색하는 고치기에서 아직 한 단계도 하지 않았으면 끝내기를 막는다 (모델이 바로 끝내 부탁한 근거를 찾지 않는 것을 막는다) */
+export function revisionNeedsStep(state: StoredState, stepsUsed: number, maxSteps: number): boolean {
+  const revision = state.revision;
+  return Boolean(revision?.search && revision.fromStep === stepsUsed && stepsUsed < maxSteps);
+}
+
+// ───────────────────────────── 보고서 고치기 (이슈 #418) ─────────────────────────────
+
+/** 고치기 부탁을 '모르는 것' 맨 앞에 둘 때의 길이 */
+const REVISION_GAP_MAX = 200;
+
+/**
+ * 보고서 고치기를 줄에 세울 때의 예산·메모. 더 검색하면 지금 쓴 단계에서 +4단계(모두 30단계까지)로 maxSteps를 맞추고(일찍 끝낸 조사도 4단계만 더 한다),
+ * 출처가 꽉 차 검색을 못 하지 않게 maxSources를 모은 출처 + 10개 이상으로(100개까지) 늘리고, 부탁을 '모르는 것' 맨 앞에 둔다.
+ * 더 검색하지 않으면 예산·메모는 그대로이고 일꾼이 반복을 건너뛴다.
+ */
+export function revisionStart(
+  run: { stepsUsed: number; budget: AiResearchBudget; state: StoredState; sourceCount: number },
+  request: { version: number; instruction: string; search: boolean },
+): { budget: AiResearchBudget; state: StoredState; addedSteps: number } {
+  const addedSteps = request.search ? Math.max(0, Math.min(run.stepsUsed + AI_RESEARCH_LIMITS.revisionSteps, RESEARCH_CAPS.maxSteps) - run.stepsUsed) : 0;
+  const instruction = stripInvisible(request.instruction).trim();
+  const revision: StoredRevision = { version: request.version, instruction, search: request.search, fromStep: run.stepsUsed };
+  const state = run.state;
+  if (!request.search) return { budget: run.budget, state: { ...state, revision }, addedSteps };
+  const gap = cutText(instruction.replace(/\s+/g, ' '), REVISION_GAP_MAX);
+  return {
+    budget: { maxSteps: run.stepsUsed + addedSteps, maxSources: Math.max(run.budget.maxSources, Math.min(run.sourceCount + AI_RESEARCH_LIMITS.revisionSources, RESEARCH_CAPS.maxSources)) },
+    state: { ...state, gaps: [gap, ...state.gaps.filter((g) => g !== gap)].slice(0, LIST_MAX), revision },
+    addedSteps,
   };
 }
 
@@ -354,6 +405,8 @@ export interface DecisionContext {
   searchedQueries: readonly string[];
   sources: readonly StoredSource[];
   maxSources: number;
+  /** 끝내기를 막는다(더 검색하는 보고서 고치기의 첫 단계, 이슈 #418). 이 글(고치기 부탁)을 마지막 대신 검색어로 쓴다 */
+  noFinish?: string;
 }
 
 /**
@@ -371,7 +424,14 @@ export function decideAction(turn: ResearchTurn, ctx: DecisionContext): Research
     const source = ctx.sources.find((s) => s.id === turn.sourceId);
     if (source && source.readText === undefined && source.readError === undefined) return { kind: 'read', sourceId: source.id, fallback: false };
   }
-  if (turn.action === 'finish' && ctx.sources.length > 0) return { kind: 'finish', fallback: false };
+  if (turn.action === 'finish' && ctx.sources.length > 0 && ctx.noFinish === undefined) return { kind: 'finish', fallback: false };
+  if (ctx.noFinish !== undefined && !full) {
+    // 끝내기를 막았으면: 모델이 함께 쓴 검색어 → 부탁 글(80자로 자름) → 계획의 남은 검색어 순으로 찾는다
+    for (const raw of [turn.query, ctx.noFinish, ...ctx.plan.steps.map((s) => s.query)]) {
+      const checked = checkResearchQuery(raw);
+      if (checked.ok && !searched.has(queryKey(checked.query))) return { kind: 'search', query: checked.query, fallback: true };
+    }
+  }
   return fallbackAction(ctx, searched, full);
 }
 
