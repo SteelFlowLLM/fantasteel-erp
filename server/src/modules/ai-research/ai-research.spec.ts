@@ -764,6 +764,22 @@ describe('심층 조사 — 계획 저장·제목 바꾸기·다시 조사 (이�
     expect(late.body.error?.code).toBe('RES-002');
   });
 
+  it('계획 저장에 계획이 빠졌거나 객체가 아니면 500이 아니라 400, 판은 그대로', async () => {
+    const run = await planned('계획이 빠진 저장');
+    const put = (body: unknown) => call('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, body);
+    for (const body of [{ revision: run.planRevision }, { revision: run.planRevision, plan: null }, { revision: run.planRevision, plan: '계획' }]) {
+      const res = await put(body);
+      expect(res.status).toBe(400);
+    }
+    expect((await getRun(run.id)).planRevision).toBe(run.planRevision);
+  });
+
+  it('조사 만들기에 예산·먼저 알아본 것을 null로 보내도 없는 것으로 본다', async () => {
+    const res = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '예산이 null인 조사', budget: null, seed: null });
+    expect(res.status).toBe(201);
+    expect(res.body.data.seed).toBeNull();
+  });
+
   it('제목 바꾸기: 계획이 있으면 어느 상태에서나 제목만, 판 +1. 계획 중이면 RES-002, 본 판이 다르면 RES-003', async () => {
     const planning = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '아직 계획 중인 조사' });
     const early = await call('PATCH', `/ai-research/runs/${planning.body.data.id}/title`, ownerCookie, { revision: 0, title: '이른 제목' });

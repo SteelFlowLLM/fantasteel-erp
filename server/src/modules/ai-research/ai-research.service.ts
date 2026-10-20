@@ -61,7 +61,7 @@ export class AiResearchService {
     const seed = normalizeSeed(dto.seed);
     const run = await this.prisma.$transaction(async (tx) => {
       await this.lockActiveSlot(tx, user);
-      return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget) }, ...seedColumns(seed) });
+      return this.repository.create(tx, { employeeId: user.employeeId, question: dto.question, budget: { ...defaultBudget(dto.budget ?? undefined) }, ...seedColumns(seed) });
     });
     this.runner.wake();
     return toRunView(run, [], 0);

@@ -1,6 +1,6 @@
 import { AI_RESEARCH_LIMITS } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 /** int4 상한. 넘는 값은 DB 오류(500) 대신 입력 오류로 */
 export const INT4_MAX = 2147483647;
@@ -101,6 +101,8 @@ export class UpdateAiResearchPlanDto {
   @Max(INT4_MAX)
   revision!: number;
 
+  // ValidateNested만으론 plan이 빠진 요청이 통과해 서비스에서 500이 난다
+  @IsObject({ message: '계획을 함께 보내 주세요' })
   @ValidateNested()
   @Type(() => AiResearchPlanDto)
   plan!: AiResearchPlanDto;
