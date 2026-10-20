@@ -23,7 +23,7 @@ import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
-import { useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
+import { controlAiAgent, useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
@@ -1074,7 +1074,7 @@ function LiveAnswer({ live, seedKey }: { live: AiChatLive; seedKey: string }) {
     <div className="flex gap-3">
       <SteelmanAiStatus status={status} seedKey={stepKey} />
       <div className={`min-w-0 flex-1 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
-        <AiLiveView live={live} />
+        <AiLiveView live={live} onControl={(command) => void controlAiAgent(command)} />
       </div>
     </div>
   );

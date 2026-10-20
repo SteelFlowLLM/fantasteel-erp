@@ -1,5 +1,7 @@
 // AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
 import type {
+  AiAgentControlCommand,
+  AiAgentControlInput,
   AiActionCardExecuteRequest,
   AiActionCardExecuteResult,
   AiAssistantCapabilitiesView,
@@ -24,7 +26,7 @@ export const aiAssistantKeys = {
 /** 대화 목록 한 번에 읽는 수 */
 export const AI_CHAT_THREAD_PAGE_SIZE = 20;
 
-const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'ui_action', 'done', 'error'];
+const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'browser_live', 'agent_paused', 'agent_resumed', 'ui_action', 'done', 'error'];
 
 /**
  * 스트림 한 줄을 이벤트로 읽는다. JSON이 아니면 오류, 모르는 종류의 이벤트는 null(서버가 새 종류를 더해도 화면이 멈추지 않게 건너뛴다).
@@ -65,6 +67,9 @@ export const aiAssistantApi = {
   /** 화면 조작 결과 (이슈 #382). 실시간 답이 보낸 ui_action을 이 화면에서 실행한 결과를 돌려준다 */
   sendUiActionResult: (actionId: string, result: AiScreenActionResultInput): Promise<{ accepted: true }> =>
     serverRequest('POST', `/ai-assistant/ui-actions/${encodeURIComponent(actionId)}`, { body: result }),
+  /** 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 (이슈 #425). 답이 이미 끝났으면 COM-003 */
+  controlAgent: (controlId: string, command: AiAgentControlCommand): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}`, { body: { command } satisfies AiAgentControlInput }),
   /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
   getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
   getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),

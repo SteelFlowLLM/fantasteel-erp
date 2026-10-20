@@ -1,4 +1,4 @@
-import { ROLE, type AuthUser } from '@fantasteel/shared';
+import { AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AuthUser } from '@fantasteel/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
@@ -7,14 +7,14 @@ import type { AiChatThreadService } from './chat/ai-chat-thread.service';
 import type { AiResearchCardService } from './ai-research-card.service';
 import type { AiChatQuestionInput } from './chat/ai-chat-thread.view';
 import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
-import { LlmRequestError } from '../llm/llm.client';
+import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
 import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AGENT_PAUSE_TIMEOUT, AiAssistantService, BROWSER_IMAGE_DROPPED, BROWSER_IMAGE_NOTE, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
@@ -29,7 +29,7 @@ import { KakaoPlaceClient, WebSearchClient } from './web/web-search.client';
 import { EMPTY_ANSWER, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
 import { historyBudget, type HistorySearchSource } from './history/chat-memory';
-import { AskAiAssistantDto } from './dto/ai-assistant.dto';
+import { AgentControlDto, AskAiAssistantDto } from './dto/ai-assistant.dto';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
 import { GLOSSARY_SEARCH_LIMIT, searchGlossary } from './knowledge/glossary.search';
 import { MANUAL_GUIDES } from './knowledge/manual.generated';
@@ -759,6 +759,13 @@ describe('AiAssistantService', () => {
       const openPageKeys: Array<string | null> = [];
       let openPage: { title: string; url: string } | null = null;
       let closed = 0;
+      // 멈춘 동안 시간 제한을 세지 않게 잡은 횟수와 놓은(다시 세기 시작한) 횟수 (이슈 #425)
+      let holds = 0;
+      let releases = 0;
+      // 도구를 실행하는 중에 실시간 화면 사진으로 보낼 것 (이슈 #425)
+      let live: { url: string; imageBase64: string; at: string } | null = null;
+      // markedImages를 받은 세션이 동작마다 모델용 사진을 돌려줄지 (이슈 #427)
+      let modelImages = false;
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
         capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
@@ -773,11 +780,23 @@ describe('AiAssistantService', () => {
             has: (name: string) => name.startsWith('browser_'),
             run: async (call: { name: string; arguments: string }): Promise<BrowserToolResult> => {
               runs.push(`${call.name} ${call.arguments}`);
+              if (live) input.onLive?.(live);
               input.web.rememberVisited('https://news.example.kr/a', '3고로 소식');
-              return { content: '[브라우저 화면] news.example.kr\n<untrusted_web_content source="browser:news.example.kr">[r1] link "다음"</untrusted_web_content>', frame, webSources: [{ title: '3고로 소식', url: 'https://news.example.kr/a' }] };
+              return {
+                content: '[브라우저 화면] news.example.kr\n<untrusted_web_content source="browser:news.example.kr">[r1] link "다음"</untrusted_web_content>',
+                frame,
+                webSources: [{ title: '3고로 소식', url: 'https://news.example.kr/a' }],
+                ...(modelImages && input.markedImages ? { modelImage: { mediaType: 'image/jpeg', dataBase64: `MARKED-${runs.length}` } } : {}),
+              };
             },
             close: async () => {
               closed += 1;
+            },
+            holdDeadline: () => {
+              holds += 1;
+              return () => {
+                releases += 1;
+              };
             },
           };
         },
@@ -791,7 +810,20 @@ describe('AiAssistantService', () => {
           if (!key || aborted) await session.close();
         },
       } as unknown as AssistantBrowserToolbox;
-      return { toolbox, runs, inputs, sessionKeys, finishes, openPageKeys, setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page), closed: () => closed };
+      return {
+        toolbox,
+        runs,
+        inputs,
+        sessionKeys,
+        finishes,
+        openPageKeys,
+        setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page),
+        setLive: (frame: { url: string; imageBase64: string; at: string } | null) => void (live = frame),
+        setModelImages: (on: boolean) => void (modelImages = on),
+        closed: () => closed,
+        holds: () => holds,
+        releases: () => releases,
+      };
     };
     const call = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
     const stream = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => {
@@ -829,6 +861,51 @@ describe('AiAssistantService', () => {
       expect(reply.answer).toBe('다음 쪽에 있어요 [3고로 소식](https://news.example.kr/a) 딴곳');
       expect(reply.webSources).toEqual([{ title: '3고로 소식', url: 'https://news.example.kr/a' }]);
       expect(browser.closed()).toBe(1);
+    });
+
+    describe('번호 붙은 화면 사진 (이슈 #427)', () => {
+      const open = call('c1', 'browser_open', { url: 'https://news.example.kr/a' });
+      const imagesIn = (messages: LlmToolMessage[]) => messages.flatMap((m) => (m.role === 'user' && 'images' in m ? m.images.map((i) => i.dataBase64) : []));
+
+      it('사진을 보는 모델이면 동작 뒤 사진을 user 메시지로 붙이고, 가장 최근 한 장만 남긴다. 화면 이벤트·답에는 없다', async () => {
+        const browser = fakeBrowser();
+        browser.setModelImages(true);
+        const { service, calls } = setup({}, async (_call, index) => [open, call('c2', 'browser_click', { ref: 'r1' }), answer('다음 쪽에 있어요')][index], undefined, undefined, undefined, browser.toolbox);
+        const { events, reply } = await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+
+        expect(browser.inputs[0].markedImages).toBe(true);
+        expect(calls[0].messages[0].content).toContain('B9. 열기·누르기·입력·스크롤·뒤로 뒤에는 그 화면 사진');
+        expect(calls[1].messages.at(-1)).toEqual({ role: 'user', content: BROWSER_IMAGE_NOTE, images: [{ mediaType: 'image/jpeg', dataBase64: 'MARKED-1' }] });
+        expect(imagesIn(calls[1].messages)).toEqual(['MARKED-1']);
+        // 다음 사진을 붙이면 지난 사진 메시지는 글만 남는다
+        expect(imagesIn(calls[2].messages)).toEqual(['MARKED-2']);
+        expect(calls[2].messages.filter((m) => m.role === 'user' && m.content === BROWSER_IMAGE_DROPPED)).toEqual([{ role: 'user', content: BROWSER_IMAGE_DROPPED }]);
+        expect(calls[2].messages.at(-1)).toMatchObject({ role: 'user', content: BROWSER_IMAGE_NOTE });
+        expect(JSON.stringify(events)).not.toContain('MARKED-');
+        expect(JSON.stringify(reply)).not.toContain('MARKED-');
+      });
+
+      it('사진을 못 보는 모델이거나 BROWSER_VISION=false면 사진을 찍지 않는다', async () => {
+        const blind = fakeBrowser();
+        const noVision = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, { vision: false, reasoning: true }, undefined, blind.toolbox);
+        await stream(noVision.service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+        expect(blind.inputs[0].markedImages).toBe(false);
+        expect(noVision.calls[0].messages[0].content).not.toContain('B9.');
+
+        const previous = process.env.BROWSER_VISION;
+        process.env.BROWSER_VISION = 'false';
+        try {
+          const off = fakeBrowser();
+          off.setModelImages(true);
+          const { service, calls } = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, undefined, undefined, off.toolbox);
+          await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+          expect(off.inputs[0].markedImages).toBe(false);
+          expect(imagesIn(calls[1].messages)).toEqual([]);
+        } finally {
+          if (previous === undefined) delete process.env.BROWSER_VISION;
+          else process.env.BROWSER_VISION = previous;
+        }
+      });
     });
 
     it(`브라우저를 켜면 도구 호출 상한이 ${MAX_BROWSER_TOOL_ROUNDS}번이고, 답이 실패해도 브라우저를 닫는다`, async () => {
@@ -924,6 +1001,307 @@ describe('AiAssistantService', () => {
       });
     });
 
+    describe('멈춤·한 단계·계속 (이슈 #425)', () => {
+      const CONTROL_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+      const open = call('c1', 'browser_open', { url: 'https://news.example.kr/a' });
+      const click = call('c2', 'browser_click', { ref: 'r1' });
+      const base = { question: 'https://news.example.kr/a 봐줘', browser: true, agentControlId: CONTROL_ID };
+
+      /**
+       * 첫 모델 호출 중에 사용자가 멈춘 것으로 시작한다(문은 run이 열므로 그 안에서만 보낼 수 있다).
+       * 멈춘 동작을 알리는 agent_paused마다 onPaused(몇 번째, 도구)를 부르고, 거기서 사용자가 누를 명령을 service로 보낸다
+       */
+      const run = async (
+        replies: LlmToolReply[],
+        onPaused: (nth: number, tool: string, service: AiAssistantService) => void,
+        options: { input?: Parameters<AiAssistantService['prepare']>[1]; signal?: AbortSignal; pauseFirst?: boolean; browser?: ReturnType<typeof fakeBrowser> } = {},
+      ) => {
+        const browser = options.browser ?? fakeBrowser();
+        const ref: { service: AiAssistantService | null } = { service: null };
+        const { service, calls } = setup(
+          {},
+          async (_call, index) => {
+            if (index === 0 && options.pauseFirst !== false) ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+            return replies[Math.min(index, replies.length - 1)];
+          },
+          undefined,
+          undefined,
+          undefined,
+          browser.toolbox,
+        );
+        ref.service = service;
+        const events: AiAssistantStreamEvent[] = [];
+        let paused = 0;
+        const prepared = await service.prepare(user, options.input ?? base, { interactive: true });
+        const reply = await prepared.run((event) => {
+          events.push(event);
+          // emit 안에서 바로 보내면 아직 기다리기 시작하지 않은 문에 보내게 되므로(실제로는 SSE라 늦게 닿는다) 한 박자 뒤에 보낸다
+          if (event.type === 'agent_paused') queueMicrotask(() => onPaused(++paused, event.tool, service));
+        }, options.signal);
+        return { events, reply, calls, browser, service };
+      };
+      const kinds = (events: AiAssistantStreamEvent[]) => events.map((e) => e.type).filter((t) => t !== 'thinking' && t !== 'answer');
+
+      it('멈추면 브라우저 도구 앞에서 agent_paused(도구 이름)를 내보내고 기다리다가, 계속하면 agent_resumed 뒤에 도구를 실행한다', async () => {
+        const { events, browser, reply } = await run([open, answer('봤어요')], (_nth, _tool, service) => service.controlAgent(user, CONTROL_ID, 'resume'));
+        expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'browser_frame', 'tool_end']);
+        expect(events.find((e) => e.type === 'agent_paused')).toEqual({ type: 'agent_paused', tool: 'browser_open' });
+        expect(browser.runs).toEqual(['browser_open {"url":"https://news.example.kr/a"}']);
+        expect(reply.answer).toBe('봤어요');
+      });
+
+      it('멈춘 동안 브라우저의 시간 제한을 잡고(holdDeadline) 계속하면 놓는다', async () => {
+        const watched = fakeBrowser();
+        let heldWhileWaiting = -1;
+        const { browser } = await run(
+          [open, answer('봤어요')],
+          (_nth, _tool, service) => {
+            // 기다리는 동안(아직 계속을 누르기 전)에는 잡기만 하고 놓지 않았다
+            heldWhileWaiting = watched.holds() * 10 + watched.releases();
+            service.controlAgent(user, CONTROL_ID, 'resume');
+          },
+          { browser: watched },
+        );
+        expect(heldWhileWaiting).toBe(10);
+        expect(browser.holds()).toBe(1);
+        expect(browser.releases()).toBe(1);
+      });
+
+      it('멈추지 않았으면 agent_paused도 holdDeadline도 없다', async () => {
+        const { events, browser } = await run([open, answer('봤어요')], () => undefined, { pauseFirst: false });
+        expect(kinds(events)).toEqual(['tool_start', 'browser_frame', 'tool_end']);
+        expect(browser.holds()).toBe(0);
+      });
+
+      it('한 단계(step)는 동작 하나만 보내고 다음 브라우저 동작 앞에서 다시 멈추며, 계속하면 이어 간다', async () => {
+        const commands: AiAgentControlCommand[] = ['step', 'resume'];
+        const { events, browser, calls } = await run([open, click, answer('끝')], (nth, _tool, service) => service.controlAgent(user, CONTROL_ID, commands[nth - 1]));
+        expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'browser_frame', 'tool_end', 'agent_paused', 'agent_resumed', 'tool_start', 'browser_frame', 'tool_end']);
+        expect(events.filter((e) => e.type === 'agent_paused')).toEqual([
+          { type: 'agent_paused', tool: 'browser_open' },
+          { type: 'agent_paused', tool: 'browser_click' },
+        ]);
+        expect(browser.runs).toHaveLength(2);
+        expect(browser.holds()).toBe(2);
+        expect(browser.releases()).toBe(2);
+        expect(calls).toHaveLength(3);
+      });
+
+      it('브라우저·화면 도구가 아닌 도구(재고 조회 등)는 멈춰 있어도 기다리지 않는다', async () => {
+        const { events, runs } = await (async () => {
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const made = setup(
+            {},
+            async (_call, index) => {
+              if (index === 0) ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+              return index === 0 ? callTool('c1') : answer('12매예요');
+            },
+            undefined,
+            undefined,
+            undefined,
+            browser.toolbox,
+          );
+          ref.service = made.service;
+          const collected: AiAssistantStreamEvent[] = [];
+          await (await made.service.prepare(user, base, { interactive: true })).run((event) => collected.push(event));
+          return { events: collected, runs: made.runs };
+        })();
+        expect(runs).toEqual(['get_inventory {"keyword":"SS275"}']);
+        expect(kinds(events)).toEqual(['tool_start', 'tool_end']);
+      });
+
+      it(`너무 오래 멈춰 두면(${AI_AGENT_PAUSE_MAX_MS / 60_000}분) 도구를 실행하지 않고 AGENT_PAUSE_TIMEOUT 오류를 모델에 주며, 그 뒤 브라우저 도구는 기다리지 않고 같은 오류다`, async () => {
+        jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+        try {
+          const { events, browser, calls, reply } = await run([open, click, answer('지금까지 본 것으로 답해요')], () => {
+            jest.advanceTimersByTime(AI_AGENT_PAUSE_MAX_MS);
+          });
+          // 한 번 기다린 뒤 풀려서(agent_resumed) 두 번째 동작은 기다리지 않는다
+          expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'tool_end', 'tool_start', 'tool_end']);
+          expect(browser.runs).toEqual([]);
+          expect(browser.holds()).toBe(1);
+          expect(browser.releases()).toBe(1);
+          for (const index of [1, 2]) {
+            const toolMessage = calls[index].messages.at(-1);
+            expect(toolMessage?.role).toBe('tool');
+            expect(JSON.parse(toolMessage?.content ?? '{}')).toMatchObject({ 오류: AGENT_PAUSE_TIMEOUT });
+          }
+          expect(reply.answer).toBe('지금까지 본 것으로 답해요');
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('멈춘 채 답을 멈추면(signal) 기다림이 끝나고 시간 제한을 놓으며 agent_resumed는 내보내지 않는다', async () => {
+        const stop = new AbortController();
+        const error = await run([open, answer('봤어요')], () => stop.abort(), { signal: stop.signal }).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(LlmAbortedError);
+      });
+
+      it('답을 멈춰 끝난 뒤에는 holdDeadline도 풀리고 브라우저는 aborted로 끝난다', async () => {
+        const stop = new AbortController();
+        const browser = fakeBrowser();
+        const ref: { service: AiAssistantService | null } = { service: null };
+        const { service } = setup(
+          {},
+          async () => {
+            ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+            return open;
+          },
+          undefined,
+          undefined,
+          undefined,
+          browser.toolbox,
+        );
+        ref.service = service;
+        const events: AiAssistantStreamEvent[] = [];
+        const prepared = await service.prepare(user, base, { interactive: true });
+        await prepared
+          .run((event) => {
+            events.push(event);
+            if (event.type === 'agent_paused') queueMicrotask(() => stop.abort());
+          }, stop.signal)
+          .catch(() => undefined);
+        expect(browser.holds()).toBe(1);
+        expect(browser.releases()).toBe(1);
+        expect(events.some((e) => e.type === 'agent_resumed')).toBe(false);
+        expect(browser.runs).toEqual([]);
+        expect(browser.finishes).toEqual([{ key: null, aborted: true }]);
+      });
+
+      describe('controlAgent', () => {
+        it('답하는 중이 아니면(열쇠를 모르거나 아직 시작 전) COM-003이다', () => {
+          const { service } = setup({}, async () => answer(''));
+          expect(() => service.controlAgent(user, CONTROL_ID, 'pause')).toThrow(AppException);
+          expect(() => service.controlAgent(user, CONTROL_ID, 'pause')).toThrow('답하는 중인 브라우저·화면 조작이 없어요');
+          try {
+            service.controlAgent(user, CONTROL_ID, 'resume');
+          } catch (error) {
+            expect((error as AppException).getResponse()).toMatchObject({ code: 'COM-003' });
+          }
+        });
+
+        it('다른 사원은 같은 열쇠를 알아도 남의 답을 멈출 수 없고(COM-003), 본인은 된다', async () => {
+          const results: string[] = [];
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service } = setup(
+            {},
+            async (_call, index) => {
+              if (index === 0) {
+                for (const who of [{ ...user, employeeId: 2 }, user]) {
+                  try {
+                    ref.service?.controlAgent(who, CONTROL_ID, 'resume');
+                    results.push(`${who.employeeId}:ok`);
+                  } catch (error) {
+                    results.push(`${who.employeeId}:${((error as AppException).getResponse() as { code: string }).code}`);
+                  }
+                }
+              }
+              return answer('네');
+            },
+            undefined,
+            undefined,
+            undefined,
+            browser.toolbox,
+          );
+          ref.service = service;
+          await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          expect(results).toEqual(['2:COM-003', '1:ok']);
+        });
+
+        it('agentControlId가 없거나, 브라우저·화면 조작이 꺼졌거나, 한 번에 답(API-262)이면 문을 열지 않아 답하는 동안에도 COM-003이다', async () => {
+          const cases: Array<[string, Parameters<AiAssistantService['prepare']>[1], boolean]> = [
+            ['agentControlId 없음', { question: '봐줘', browser: true }, true],
+            ['browser·screenControl 없음', { question: '봐줘', agentControlId: CONTROL_ID }, true],
+            ['한 번에 답', { question: '봐줘', browser: true, agentControlId: CONTROL_ID }, false],
+          ];
+          for (const [label, input, interactive] of cases) {
+            const browser = fakeBrowser();
+            const ref: { service: AiAssistantService | null } = { service: null };
+            let code = 'not-thrown';
+            const { service } = setup(
+              {},
+              async () => {
+                try {
+                  ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+                } catch (error) {
+                  code = ((error as AppException).getResponse() as { code: string }).code;
+                }
+                return answer('네');
+              },
+              undefined,
+              undefined,
+              undefined,
+              browser.toolbox,
+            );
+            ref.service = service;
+            if (interactive) await (await service.prepare(user, input, { interactive: true })).run(() => undefined);
+            else await service.ask(user, input);
+            expect({ label, code }).toEqual({ label, code: 'COM-003' });
+          }
+
+          // 서버 설정이 꺼진 브라우저도 마찬가지다
+          const off = fakeBrowser(false);
+          const ref: { service: AiAssistantService | null } = { service: null };
+          let offCode = 'not-thrown';
+          const { service } = setup(
+            {},
+            async () => {
+              try {
+                ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+              } catch (error) {
+                offCode = ((error as AppException).getResponse() as { code: string }).code;
+              }
+              return answer('네');
+            },
+            undefined,
+            undefined,
+            undefined,
+            off.toolbox,
+          );
+          ref.service = service;
+          await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          expect(offCode).toBe('COM-003');
+        });
+
+        it('답이 끝나면(성공이든 실패든) 문을 닫아 그 뒤 명령은 COM-003이다', async () => {
+          const ok = await run([open, answer('봤어요')], () => undefined, { pauseFirst: false });
+          expect(() => ok.service.controlAgent(user, CONTROL_ID, 'pause')).toThrow(AppException);
+
+          const browser = fakeBrowser();
+          const { service } = setup({}, async (_call, index) => (index === 0 ? open : Promise.reject(new LlmRequestError('끊김'))), undefined, undefined, undefined, browser.toolbox);
+          await expect((await service.prepare(user, base, { interactive: true })).run(() => undefined)).rejects.toThrow('끊김');
+          expect(() => service.controlAgent(user, CONTROL_ID, 'pause')).toThrow(AppException);
+        });
+      });
+    });
+
+    describe('실시간 브라우저 화면 (이슈 #425)', () => {
+      const LIVE = { url: 'news.example.kr/a', imageBase64: '/9j/LIVE', at: '2026-10-20T00:00:00.000Z' };
+
+      it('세션에 onLive를 넘기고, 세션이 보낸 사진은 browser_live 이벤트로 내보낸다 (browser_frame과 따로)', async () => {
+        const browser = fakeBrowser();
+        browser.setLive(LIVE);
+        const { service } = setup({}, async (_call, index) => [call('c1', 'browser_open', { url: 'https://news.example.kr/a' }), answer('봤어요')][index], undefined, undefined, undefined, browser.toolbox);
+        const { events } = await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+        expect(browser.inputs[0].onLive).toEqual(expect.any(Function));
+        const types = events.map((e) => e.type).filter((t) => t !== 'thinking' && t !== 'answer');
+        expect(types).toEqual(['tool_start', 'browser_live', 'browser_frame', 'tool_end']);
+        expect(events.find((e) => e.type === 'browser_live')).toEqual({ type: 'browser_live', ...LIVE });
+      });
+
+      it('실시간 사진은 모델에도 답(reply)에도 남지 않는다', async () => {
+        const browser = fakeBrowser();
+        browser.setLive(LIVE);
+        const { service, calls } = setup({}, async (_call, index) => [call('c1', 'browser_open', { url: 'https://news.example.kr/a' }), answer('봤어요')][index], undefined, undefined, undefined, browser.toolbox);
+        const { reply } = await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+        expect(JSON.stringify(calls[1].messages)).not.toContain('/9j/LIVE');
+        expect(JSON.stringify(reply)).not.toContain('/9j/LIVE');
+      });
+    });
+
     it('서버 설정이 꺼졌거나 browser가 없거나 한 번에 답(API-262)이면 브라우저 도구가 없다', async () => {
       for (const [available, input] of [
         [false, { question: '봐줘', browser: true }],
@@ -1011,6 +1389,36 @@ describe('AiAssistantService', () => {
       const plain = setup({}, async () => answer('네'), undefined, undefined, undefined, undefined, screenTools);
       await plain.service.ask(user, { question: '열어줘', screenControl: true, screenMap: SCREENS });
       expect(plain.calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+    });
+
+    it('화면 조작도 멈출 수 있다: ui_* 도구 앞에서 agent_paused를 내보내 기다리고, 계속하면 ui_action을 화면에 보낸다 (이슈 #425)', async () => {
+      const CONTROL_ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+      const screenTools = new AssistantScreenToolbox(new ScreenActionBroker(1000), { AI_SCREEN_CONTROL_ENABLED: 'true' });
+      const ref: { service: AiAssistantService | null } = { service: null };
+      const replies = [call('c1', 'ui_snapshot', {}), answer('읽었어요')];
+      const { service } = setup(
+        {},
+        async (_call, index) => {
+          if (index === 0) ref.service?.controlAgent(user, CONTROL_ID, 'pause');
+          return replies[index];
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        screenTools,
+      );
+      ref.service = service;
+      const events: AiAssistantStreamEvent[] = [];
+      await (await service.prepare(user, { question: '화면 읽어줘', screenControl: true, screenMap: SCREENS, agentControlId: CONTROL_ID }, { interactive: true })).run((event) => {
+        events.push(event);
+        if (event.type === 'agent_paused') queueMicrotask(() => service.controlAgent(user, CONTROL_ID, 'resume'));
+        if (event.type === 'ui_action') queueMicrotask(() => service.settleUiAction(user, event.actionId, { ok: true, result: '[r1] button "검색"' }));
+      });
+      const types = events.map((e) => e.type).filter((t) => t !== 'thinking' && t !== 'answer');
+      expect(types).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'ui_action', 'tool_end']);
+      expect(events.find((e) => e.type === 'agent_paused')).toEqual({ type: 'agent_paused', tool: 'ui_snapshot' });
+      expect(() => service.controlAgent(user, CONTROL_ID, 'pause')).toThrow(AppException);
     });
 
     it('다른 사원이 보낸 결과·없는 자리는 COM-003', () => {
@@ -1417,5 +1825,37 @@ describe('AskAiAssistantDto 브라우저 대화 열쇠 (이슈 #423)', () => {
       const errors = await errorsOf(bad);
       expect(errors.flatMap((e) => Object.values(e.constraints ?? {}))).toContain('브라우저 대화 열쇠가 올바르지 않아요');
     }
+  });
+});
+
+describe('AskAiAssistantDto 멈춤 열쇠 (이슈 #425)', () => {
+  const errorsOf = async (agentControlId: unknown) => validate(plainToInstance(AskAiAssistantDto, { question: '봐줘', browser: true, agentControlId }));
+  const messagesOf = (errors: Awaited<ReturnType<typeof errorsOf>>) => errors.flatMap((e) => Object.values(e.constraints ?? {}));
+
+  it('UUID(v4)는 통과하고 없어도 통과한다', async () => {
+    expect(await errorsOf('9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d')).toHaveLength(0);
+    expect(await errorsOf(undefined)).toHaveLength(0);
+  });
+
+  it('UUID(v4)가 아니면 막는다', async () => {
+    for (const bad of ['abc', '', 123, '1:9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d', '9b1deb4d-3b7d-1bad-9bdd-2b0d7b3dcb6d']) {
+      expect(messagesOf(await errorsOf(bad))).toContain('멈춤 열쇠가 올바르지 않아요');
+    }
+  });
+});
+
+describe('AgentControlDto (이슈 #425)', () => {
+  const errorsOf = async (command: unknown) => validate(plainToInstance(AgentControlDto, { command }));
+
+  it('pause·step·resume은 통과한다', async () => {
+    for (const command of ['pause', 'step', 'resume']) expect(await errorsOf(command)).toHaveLength(0);
+  });
+
+  it('그 밖의 명령(stop 등)과 빈 값은 막는다', async () => {
+    for (const bad of ['stop', 'PAUSE', '', undefined, 1]) {
+      const errors = await errorsOf(bad);
+      expect(errors).not.toHaveLength(0);
+    }
+    expect((await errorsOf('stop')).flatMap((e) => Object.values(e.constraints ?? {}))).toContain('명령은 pause·step·resume 중 하나예요');
   });
 });

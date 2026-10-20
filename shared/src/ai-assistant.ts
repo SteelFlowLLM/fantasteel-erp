@@ -49,7 +49,7 @@ export interface AiAssistantMessageInput {
   webSearch?: boolean;
   /**
    * 브라우저 사용을 켠 질문이면 true (문서에 없는 기능, 이슈 #373). 서버에서 AI_BROWSER_ENABLED=true이고 실시간 답 API일 때만
-   * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back)를 모델에 알린다. 기본은 꺼짐
+   * 브라우저 도구(browser_open·browser_snapshot·browser_click·browser_type·browser_scroll·browser_back·browser_read_file)를 모델에 알린다. 기본은 꺼짐
    */
   browser?: boolean;
   /**
@@ -57,6 +57,11 @@ export interface AiAssistantMessageInput {
    * 서버는 사원 번호와 묶어 쓰므로 남의 열쇠를 보내도 남의 탭은 쓰지 않는다
    */
   browserSessionId?: string;
+  /**
+   * 답마다 화면이 만드는 열쇠(UUID). 답하는 동안 POST /ai-assistant/agent-control/:agentControlId로
+   * 브라우저·화면 조작을 멈추고 한 단계씩 넘기고 이어 가게 한다 (이슈 #425). 서버는 사원 번호와 묶어 쓴다
+   */
+  agentControlId?: string;
   /**
    * 화면 조작을 켠 질문이면 true (문서에 없는 기능, 이슈 #382, 시험 중). 서버에서 AI_SCREEN_CONTROL_ENABLED=true이고 실시간 답 API일 때만
    * 화면 도구(ui_snapshot·ui_navigate·ui_click·ui_fill·ui_select)를 모델에 알린다. 동작은 사용자의 브라우저가 한다
@@ -175,6 +180,7 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   browser_type: '브라우저 입력',
   browser_scroll: '브라우저 스크롤',
   browser_back: '브라우저 뒤로',
+  browser_read_file: '브라우저 문서 읽기',
   ui_snapshot: '화면 읽기',
   ui_navigate: '화면 열기',
   ui_click: '화면 누르기',
@@ -197,7 +203,7 @@ export type AiAssistantWebTool = (typeof AI_ASSISTANT_WEB_TOOLS)[number];
 export const isAiAssistantWebTool = (name: string): name is AiAssistantWebTool => (AI_ASSISTANT_WEB_TOOLS as readonly string[]).includes(name);
 
 /** 브라우저 도구 (이슈 #373). 브라우저 사용을 켠 실시간 답에서만 알린다. 로그인·결제·삭제·개인정보 입력은 서버가 막는다 */
-export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back'] as const;
+export const AI_ASSISTANT_BROWSER_TOOLS = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back', 'browser_read_file'] as const;
 export type AiAssistantBrowserTool = (typeof AI_ASSISTANT_BROWSER_TOOLS)[number];
 
 export const isAiAssistantBrowserTool = (name: string): name is AiAssistantBrowserTool => (AI_ASSISTANT_BROWSER_TOOLS as readonly string[]).includes(name);
@@ -490,6 +496,8 @@ export interface AiActionCardExecuteResult {
  * - 웹 도구(이슈 #367)는 조회 도구와 같은 tool_start → tool_end이고, tool_end.webSources에 찾은·읽은 페이지가 온다.
  *   답에 쓴 웹 출처는 done의 reply.webSources
  * - browser_frame: 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진 (이슈 #373). 모델에는 보내지 않고 화면에만 보인다
+ * - browser_live: 답하는 동안 브라우저 화면을 초당 2장쯤 계속 보낸다 (이슈 #425). browser_frame과 달리 답에 남기지 않는다
+ * - agent_paused·agent_resumed: 사용자가 멈춘 답이 다음 브라우저·화면 동작(tool) 앞에서 기다리기 시작했을 때·다시 갈 때 (이슈 #425)
  * - ui_action: 화면 조작 (이슈 #382). 사용자의 브라우저가 지금 화면에서 실행하고 POST /ai-assistant/ui-actions/:actionId로 결과를 돌려준다.
  *   같은 도구의 tool_start 뒤, tool_end 앞에 온다
  * - 마지막은 done 또는 error 하나
@@ -518,6 +526,16 @@ export type AiAssistantStreamEvent =
       /** 찍은 때 (ISO 8601) */
       at: string;
     }
+  | {
+      type: 'browser_live';
+      /** 호스트 + 경로 (쿼리·#조각 없음) */
+      url: string;
+      /** JPEG base64 (너비 800 이하), data: 접두어 없음 */
+      imageBase64: string;
+      at: string;
+    }
+  | { type: 'agent_paused'; tool: string }
+  | { type: 'agent_resumed' }
   | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
   /** thread: 저장을 요청한 질문이면 저장한 대화, 저장에 실패했으면 null (이슈 #399) */
   | { type: 'done'; reply: AiAssistantReplyView; thread?: AiChatThreadRef | null }
@@ -608,3 +626,14 @@ export interface AiChatCardRef {
   messageId: number;
   cardKey: string;
 }
+
+/** 답하는 동안 브라우저·화면 조작을 다루는 명령 (이슈 #425). pause: 다음 동작 앞에서 멈춤, step: 하나만 하고 다시 멈춤, resume: 이어 가기 */
+export const AI_AGENT_CONTROL_COMMANDS = ['pause', 'step', 'resume'] as const;
+export type AiAgentControlCommand = (typeof AI_AGENT_CONTROL_COMMANDS)[number];
+
+export interface AiAgentControlInput {
+  command: AiAgentControlCommand;
+}
+
+/** 멈춰 둘 수 있는 시간. 넘으면 그 답은 브라우저·화면 조작을 그만두고 지금까지 본 것으로 답한다 (가정값, 이슈 #425) */
+export const AI_AGENT_PAUSE_MAX_MS = 10 * 60_000;

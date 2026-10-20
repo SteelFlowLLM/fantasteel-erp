@@ -14,7 +14,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, ScreenActionResultDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
@@ -97,6 +97,17 @@ export class AiAssistantController {
   @HttpCode(200)
   settleUiAction(@CurrentUser() user: AuthUser, @Param('actionId', new ParseUUIDPipe()) actionId: string, @Body() dto: ScreenActionResultDto): { accepted: true } {
     this.service.settleUiAction(user, actionId, dto);
+    return { accepted: true };
+  }
+
+  /**
+   * 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 (문서에 없는 기능, 이슈 #425). 그 답을 물은 사원만 보낼 수 있다.
+   * 답하는 중인 열쇠가 없으면(이미 끝남) COM-003
+   */
+  @Post('ai-assistant/agent-control/:controlId')
+  @HttpCode(200)
+  controlAgent(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentControlDto): { accepted: true } {
+    this.service.controlAgent(user, controlId, dto.command);
     return { accepted: true };
   }
 

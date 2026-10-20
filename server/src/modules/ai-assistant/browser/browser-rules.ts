@@ -204,6 +204,11 @@ export function formatSnapshot(snapshot: PageSnapshot, maxChars: number = SNAPSH
  */
 export const DEFAULT_BROWSER_START_SITES = ['naver.com', 'daum.net', 'wikipedia.org', 'namu.wiki', 'go.kr', 'kosis.kr', 'kosa.or.kr', 'worldsteel.org', 'kita.net'];
 
+/** 사진을 보는 모델에 번호 표 붙은 화면 사진을 보낼지 (이슈 #427). BROWSER_VISION=false일 때만 끈다 */
+export function browserVisionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.BROWSER_VISION?.trim().toLowerCase() !== 'false';
+}
+
 export function browserStartSites(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.BROWSER_START_SITES;
   if (raw === undefined) return DEFAULT_BROWSER_START_SITES;

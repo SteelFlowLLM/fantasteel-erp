@@ -2,7 +2,7 @@
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
 // 대화는 서버가 저장한다(이슈 #399): 질문에 대화 id를 보내면 서버가 지난 대화를 DB에서 읽고, 답이 끝나면 질문과 답을 저장한다.
-import type { AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiAgentControlCommand, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
@@ -65,6 +65,22 @@ export interface AiAskVariables {
   drive?: boolean;
   /** 입력칸에서 @로 붙인 Drive 문서 id (이슈 #398 2단계) */
   driveFileIds?: string[];
+  /** 브라우저·화면 조작을 멈출 수 있게 답마다 만든 열쇠 (이슈 #425) */
+  controlId?: string;
+}
+
+/**
+ * 답하는 동안 브라우저·화면 조작을 멈추고(pause) 한 단계씩(step) 넘기거나 이어 간다(resume) (이슈 #425).
+ * 보내기에 실패하면(답이 이미 끝남) 화면 상태만 되돌린다
+ */
+export async function controlAiAgent(command: AiAgentControlCommand): Promise<void> {
+  const chat = useAiChatStore.getState();
+  const questionId = chat.pendingId;
+  const control = chat.live?.control;
+  if (!questionId || !control) return;
+  // 한 단계는 하나만 하고 다시 멈추므로 멈추기를 기다리는 상태로 둔다
+  chat.setControlRequested(questionId, command !== 'resume');
+  await aiAssistantApi.controlAgent(control.id, command).catch(() => useAiChatStore.getState().setControlRequested(questionId, false));
 }
 
 /** 서버가 보낸 화면 동작을 이 화면에서 실행하고 결과를 돌려준다. 보내기에 실패하면 서버가 시간 초과로 끝낸다 */
@@ -98,7 +114,7 @@ export function bindBrowserSession(threadId: number): void {
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds, controlId }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -114,7 +130,7 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
       // 지난 대화는 보내지 않는다: 서버가 저장한 대화에서 읽는다
-      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true, browserSessionId } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
+      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true, browserSessionId } : {}), ...(controlId ? { agentControlId: controlId } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
       (event) => {
         if (event.type === 'ui_action') {
           void answerUiAction(event);
@@ -144,8 +160,9 @@ export function useAskAiAssistant() {
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;
     const questionId = newAiChatId();
-    chat.addQuestion(questionId, text, reasoning, images, webSearch, browser);
-    void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, ...extra });
+    const controlId = browser || screenControl ? crypto.randomUUID() : undefined;
+    chat.addQuestion(questionId, text, reasoning, images, webSearch, browser, controlId);
+    void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, controlId, ...extra });
   };
   return Object.assign(ask, { stop: stopAiAssistant });
 }
