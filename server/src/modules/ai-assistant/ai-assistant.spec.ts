@@ -14,7 +14,7 @@ import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.s
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AGENT_PAUSE_TIMEOUT, AiAssistantService, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AGENT_PAUSE_TIMEOUT, AiAssistantService, BROWSER_IMAGE_DROPPED, BROWSER_IMAGE_NOTE, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
@@ -764,6 +764,8 @@ describe('AiAssistantService', () => {
       let releases = 0;
       // 도구를 실행하는 중에 실시간 화면 사진으로 보낼 것 (이슈 #425)
       let live: { url: string; imageBase64: string; at: string } | null = null;
+      // markedImages를 받은 세션이 동작마다 모델용 사진을 돌려줄지 (이슈 #427)
+      let modelImages = false;
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
         capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
@@ -780,7 +782,12 @@ describe('AiAssistantService', () => {
               runs.push(`${call.name} ${call.arguments}`);
               if (live) input.onLive?.(live);
               input.web.rememberVisited('https://news.example.kr/a', '3고로 소식');
-              return { content: '[브라우저 화면] news.example.kr\n<untrusted_web_content source="browser:news.example.kr">[r1] link "다음"</untrusted_web_content>', frame, webSources: [{ title: '3고로 소식', url: 'https://news.example.kr/a' }] };
+              return {
+                content: '[브라우저 화면] news.example.kr\n<untrusted_web_content source="browser:news.example.kr">[r1] link "다음"</untrusted_web_content>',
+                frame,
+                webSources: [{ title: '3고로 소식', url: 'https://news.example.kr/a' }],
+                ...(modelImages && input.markedImages ? { modelImage: { mediaType: 'image/jpeg', dataBase64: `MARKED-${runs.length}` } } : {}),
+              };
             },
             close: async () => {
               closed += 1;
@@ -812,6 +819,7 @@ describe('AiAssistantService', () => {
         openPageKeys,
         setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page),
         setLive: (frame: { url: string; imageBase64: string; at: string } | null) => void (live = frame),
+        setModelImages: (on: boolean) => void (modelImages = on),
         closed: () => closed,
         holds: () => holds,
         releases: () => releases,
@@ -853,6 +861,51 @@ describe('AiAssistantService', () => {
       expect(reply.answer).toBe('다음 쪽에 있어요 [3고로 소식](https://news.example.kr/a) 딴곳');
       expect(reply.webSources).toEqual([{ title: '3고로 소식', url: 'https://news.example.kr/a' }]);
       expect(browser.closed()).toBe(1);
+    });
+
+    describe('번호 붙은 화면 사진 (이슈 #427)', () => {
+      const open = call('c1', 'browser_open', { url: 'https://news.example.kr/a' });
+      const imagesIn = (messages: LlmToolMessage[]) => messages.flatMap((m) => (m.role === 'user' && 'images' in m ? m.images.map((i) => i.dataBase64) : []));
+
+      it('사진을 보는 모델이면 동작 뒤 사진을 user 메시지로 붙이고, 가장 최근 한 장만 남긴다. 화면 이벤트·답에는 없다', async () => {
+        const browser = fakeBrowser();
+        browser.setModelImages(true);
+        const { service, calls } = setup({}, async (_call, index) => [open, call('c2', 'browser_click', { ref: 'r1' }), answer('다음 쪽에 있어요')][index], undefined, undefined, undefined, browser.toolbox);
+        const { events, reply } = await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+
+        expect(browser.inputs[0].markedImages).toBe(true);
+        expect(calls[0].messages[0].content).toContain('B9. 열기·누르기·입력·스크롤·뒤로 뒤에는 그 화면 사진');
+        expect(calls[1].messages.at(-1)).toEqual({ role: 'user', content: BROWSER_IMAGE_NOTE, images: [{ mediaType: 'image/jpeg', dataBase64: 'MARKED-1' }] });
+        expect(imagesIn(calls[1].messages)).toEqual(['MARKED-1']);
+        // 다음 사진을 붙이면 지난 사진 메시지는 글만 남는다
+        expect(imagesIn(calls[2].messages)).toEqual(['MARKED-2']);
+        expect(calls[2].messages.filter((m) => m.role === 'user' && m.content === BROWSER_IMAGE_DROPPED)).toEqual([{ role: 'user', content: BROWSER_IMAGE_DROPPED }]);
+        expect(calls[2].messages.at(-1)).toMatchObject({ role: 'user', content: BROWSER_IMAGE_NOTE });
+        expect(JSON.stringify(events)).not.toContain('MARKED-');
+        expect(JSON.stringify(reply)).not.toContain('MARKED-');
+      });
+
+      it('사진을 못 보는 모델이거나 BROWSER_VISION=false면 사진을 찍지 않는다', async () => {
+        const blind = fakeBrowser();
+        const noVision = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, { vision: false, reasoning: true }, undefined, blind.toolbox);
+        await stream(noVision.service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+        expect(blind.inputs[0].markedImages).toBe(false);
+        expect(noVision.calls[0].messages[0].content).not.toContain('B9.');
+
+        const previous = process.env.BROWSER_VISION;
+        process.env.BROWSER_VISION = 'false';
+        try {
+          const off = fakeBrowser();
+          off.setModelImages(true);
+          const { service, calls } = setup({}, async (_call, index) => [open, answer('봤어요')][index], undefined, undefined, undefined, off.toolbox);
+          await stream(service, { question: 'https://news.example.kr/a 봐줘', browser: true });
+          expect(off.inputs[0].markedImages).toBe(false);
+          expect(imagesIn(calls[1].messages)).toEqual([]);
+        } finally {
+          if (previous === undefined) delete process.env.BROWSER_VISION;
+          else process.env.BROWSER_VISION = previous;
+        }
+      });
     });
 
     it(`브라우저를 켜면 도구 호출 상한이 ${MAX_BROWSER_TOOL_ROUNDS}번이고, 답이 실패해도 브라우저를 닫는다`, async () => {
