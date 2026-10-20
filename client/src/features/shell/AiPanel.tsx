@@ -808,7 +808,7 @@ function WebSearchToggle({ on, blocked, hint, onChange }: { on: boolean; blocked
         aria-describedby="ai-web-search-hint"
         disabled={blocked}
         onClick={() => onChange(!on)}
-        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
       >
         <Icon name="search" size="sm" />웹 검색
       </button>
@@ -830,7 +830,7 @@ function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedRe
         aria-describedby="ai-browser-hint"
         disabled={blocked}
         onClick={() => onChange(!on)}
-        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
       >
         <Icon name="search" size="sm" />브라우저
       </button>
@@ -852,7 +852,7 @@ function DriveToggle({ on, blockedReason, onChange }: { on: boolean; blockedReas
         aria-describedby="ai-drive-hint"
         disabled={blocked}
         onClick={() => onChange(!on)}
-        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
       >
         <Icon name="file" size="sm" />Drive
       </button>
@@ -893,7 +893,7 @@ function NotionToggle({ on, blockedReason, onChange }: { on: boolean; blockedRea
         aria-describedby="ai-notion-hint"
         disabled={blocked}
         onClick={() => onChange(!on)}
-        className={`inline-flex h-6 items-center gap-1 rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border px-2 text-cap disabled:cursor-not-allowed disabled:opacity-55 ${on ? 'border-steelman bg-steelman-soft font-semibold text-steelman-ink' : 'border-line-strong bg-surface text-ink-2 enabled:hover:bg-surface-2'}`}
       >
         <Icon name="book" size="sm" />Notion
       </button>
