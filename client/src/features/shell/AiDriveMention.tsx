@@ -12,17 +12,39 @@ import { cn } from '@/lib/cn';
 const KIND_ICON: Record<DriveFileView['kind'], IconName> = { document: 'file', image: 'file', audio: 'file' };
 const KIND_LABEL: Record<DriveFileView['kind'], string> = { document: '문서', image: '사진', audio: '녹음' };
 
-export function AiDriveMention({ onPick, onClose }: { onPick: (file: DriveFileView) => void; onClose: () => void }) {
+export function AiDriveMention({
+  onPick,
+  onClose,
+  onCancel,
+  onDismiss,
+}: {
+  onPick: (file: DriveFileView) => void;
+  /** Esc: 창만 닫고 입력칸으로 돌아간다 */
+  onClose: () => void;
+  /** 빈 검색칸에서 지우기: 입력칸의 @까지 지운다 */
+  onCancel: () => void;
+  /** 창 밖을 눌렀다: 누른 곳의 포커스를 빼앗지 않고 닫기만 한다 */
+  onDismiss: () => void;
+}) {
   const files = useDriveFiles('all', true);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const shown = useMemo(() => filterMentionFiles(files.data?.pages[0]?.files ?? [], query), [files.data, query]);
   const current = Math.min(active, Math.max(0, shown.length - 1));
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !boxRef.current?.contains(event.target)) onDismiss();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [onDismiss]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -36,11 +58,14 @@ export function AiDriveMention({ onPick, onClose }: { onPick: (file: DriveFileVi
     } else if (event.key === 'Escape') {
       event.preventDefault();
       onClose();
+    } else if (event.key === 'Backspace' && query === '') {
+      event.preventDefault();
+      onCancel();
     }
   };
 
   return (
-    <div role="dialog" aria-label="Drive 파일 붙이기" className="absolute right-0 bottom-full left-0 z-20 mb-1.5 flex max-h-72 flex-col rounded-md border border-line-strong bg-surface shadow-pop">
+    <div ref={boxRef} role="dialog" aria-label="Drive 파일 붙이기" className="absolute right-0 bottom-full left-0 z-20 mb-1.5 flex max-h-72 flex-col rounded-md border border-line-strong bg-surface shadow-pop">
       <div className="flex items-center gap-1.5 border-b border-line px-2.5 py-1.5">
         <Icon name="search" size="sm" className="text-ink-3" />
         <input

@@ -9,6 +9,7 @@ import {
   driveToolRunningText,
   DRIVE_MENTION_LIST_MAX,
   filterMentionFiles,
+  mentionStillOpen,
   mentionTriggerAt,
   moveMentionIndex,
   parseAiDrivePreference,
@@ -48,6 +49,12 @@ describe('입력칸 @', () => {
   it('고르면 그 @를 글에서 뺀다', () => {
     expect(removeMentionTrigger('이 파일 @ 요약해줘', 5)).toBe('이 파일  요약해줘');
     expect(removeMentionTrigger('바뀐 글', 1)).toBe('바뀐 글');
+  });
+
+  it('@를 지우거나 앞 글이 지워져 @가 밀리면 창을 닫는다', () => {
+    expect(mentionStillOpen('이 파일 @보', 5)).toBe(true);
+    expect(mentionStillOpen('이 파일 ', 5)).toBe(false);
+    expect(mentionStillOpen('파일 @', 5)).toBe(false);
   });
 
   it('창의 파일: 녹음은 빼고 이름(띄어쓰기·대소문자 무시)으로 거르고, 개수 상한', () => {

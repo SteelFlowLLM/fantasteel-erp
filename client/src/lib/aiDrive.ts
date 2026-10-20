@@ -68,6 +68,11 @@ export function mentionTriggerAt(previous: string, next: string, caret: number):
   return before === '' || /\s/.test(before) ? caret - 1 : null;
 }
 
+/** 입력칸 글이 바뀌어 @ 창을 연 자리에 @가 없으면(지웠거나 앞 글이 지워져 밀렸으면) 창을 닫는다 */
+export function mentionStillOpen(value: string, index: number): boolean {
+  return value[index] === '@';
+}
+
 /** 파일을 골랐으면 그 @를 글에서 뺀다 (파일은 글이 아니라 입력칸 위 칩으로 붙는다). 그 자리가 @가 아니면 그대로 */
 export function removeMentionTrigger(value: string, index: number): string {
   return value[index] === '@' ? value.slice(0, index) + value.slice(index + 1) : value;

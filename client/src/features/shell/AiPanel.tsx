@@ -7,7 +7,7 @@
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
 import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Button } from '@/components/Button';
 import { Icon, type IconName } from '@/components/Icon';
@@ -35,7 +35,7 @@ import { researchCardSeedAt, webResearchStartAt, type AiWebResearchStart } from 
 import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
 import { AiDriveMention } from '@/features/shell/AiDriveMention';
 import { AI_SLASH_MENU_ID, AiSlashCommandMenu, aiSlashOptionId } from '@/features/shell/AiSlashCommandMenu';
-import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionTriggerAt, moveMentionIndex, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
+import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionStillOpen, mentionTriggerAt, moveMentionIndex, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
 import { AI_SLASH_ESCAPED_HINT, AI_SLASH_NEED_QUESTION, filterSlashCommands, parseSlashDraft, slashCompletion, slashQueryOf, type AiSlashCommand, type AiSlashCommandKey } from '@/lib/aiSlashCommand';
 import { AI_NOTION_TITLE, notionDisabledReason, readAiNotionPreference, writeAiNotionPreference } from '@/lib/aiNotion';
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
@@ -276,7 +276,8 @@ export function AiPanel() {
 
   // 입력칸에 @를 치면 Drive 파일 고르기를 연다. Drive가 준비됐을 때만 (메신저 입력칸의 @와는 따로다)
   const changeDraft = (next: string, caret: number) => {
-    if (drive.ready && mentionAt === null) {
+    if (mentionAt !== null && !mentionStillOpen(next, mentionAt)) setMentionAt(null);
+    else if (drive.ready && mentionAt === null) {
       const at = mentionTriggerAt(draft, next, caret);
       if (at !== null) setMentionAt(at);
     }
@@ -289,6 +290,14 @@ export function AiPanel() {
   const closeMention = () => {
     setMentionAt(null);
     inputRef.current?.focus();
+  };
+
+  const dismissMention = useCallback(() => setMentionAt(null), []);
+
+  // @ 창 검색칸이 비었을 때 지우기를 누르면 입력칸의 그 @까지 지운 것으로 본다
+  const cancelMention = () => {
+    if (mentionAt !== null) setDraft((current) => removeMentionTrigger(current, mentionAt));
+    closeMention();
   };
 
   const pickMention = (file: DriveFileView) => {
@@ -440,6 +449,12 @@ export function AiPanel() {
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return; // 한글 조합 중 Enter는 보내지 않는다
+    // 입력칸으로 돌아와 있어도 Esc로 @ 창을 닫는다
+    if (event.key === 'Escape' && mentionAt !== null) {
+      event.preventDefault();
+      closeMention();
+      return;
+    }
     if (slashOpen) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -571,7 +586,7 @@ export function AiPanel() {
           </span>
         ) : null}
         <div className="relative flex flex-col rounded-md border border-line-strong bg-surface focus-within:border-steelman focus-within:shadow-[0_0_0_2px_var(--color-steelman-soft)]">
-          {mentionAt !== null ? <AiDriveMention onPick={pickMention} onClose={closeMention} /> : null}
+          {mentionAt !== null ? <AiDriveMention onPick={pickMention} onClose={closeMention} onCancel={cancelMention} onDismiss={dismissMention} /> : null}
           {slashOpen ? <AiSlashCommandMenu commands={slashCommands} active={slashCurrent} blockedReasonOf={slashBlockedReason} onPick={pickSlashCommand} onHover={(index) => setSlashActive(slashCommands[index].key)} /> : null}
           {draftImages.length ? <DraftImages images={draftImages} onRemove={photos.remove} /> : null}
           {driveFiles.length ? <DraftDriveFiles files={driveFiles} onRemove={(id) => setDriveFiles((current) => current.filter((file) => file.id !== id))} /> : null}
