@@ -70,7 +70,7 @@ const plan = (id: number, productionPlanNo: string, salesOrderNo: string | null)
   createdAt: '2026-10-13T05:00:00.000Z',
 });
 const plans = [plan(1, 'PP-2610-0001', 'SO-2610-001'), plan(2, 'PP-2610-0002', 'SO-2610-002')];
-const planService = { listPlans: async () => page(plans) } as unknown as ProductionService;
+const planService = { listPlans: async () => page(plans), planIdByNo: async (no: string) => plans.find((p) => p.productionPlanNo === no.toUpperCase())?.id ?? null } as unknown as ProductionService;
 
 const result: ProductionResultView = {
   id: 9,

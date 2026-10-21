@@ -33,10 +33,22 @@ export interface AiScreenActionResultInput {
 }
 
 /**
- * 누르지 않는 버튼 낱말: 데이터를 바꾸는 동작. 다듬은(소문자·공백 없앰) 이름에 들어 있으면 막는다.
- * 사람이 직접 눌러야 한다 (AI는 조회·초안만, 기획안 AI 사용 원칙)
+ * 누르지 않는 버튼 낱말: 데이터를 바꾸거나 되돌리기 어려운 동작. 다듬은(소문자·공백 없앰) 이름에 들어 있으면 막는다.
+ * 사람이 직접 눌러야 한다 (AI는 조회·초안만, 기획안 AI 사용 원칙). 2026-10-21 점검(이슈 #479)에서 취소·완료·만들기·해제·사용 안 함·연결 끊기 등을 더했다
  */
-export const AI_SCREEN_BLOCKED_WORDS = ['저장', '등록', '확정', '승인', '반려', '삭제', '취소처리', '출고', '배정', '실행', '제출', '보내기', 'save', 'submit', 'confirm', 'delete', 'approve'] as const;
+export const AI_SCREEN_BLOCKED_WORDS = [
+  '저장', '등록', '확정', '승인', '반려', '삭제', '취소처리', '출고', '배정', '실행', '제출', '보내기',
+  '취소', '완료', '만들기', '생성', '해제', '사용안함', '비활성', '연결끊기', '끊기', '연결하기', '다시연결',
+  '시작', '종료', '마감', '중지', '정지', '발송', '전송', '발행', '내보내기', '가져오기', '업로드', '올리기',
+  '허가', '제외', '되살리기', '복원', '해지', '퇴사', '잠금', '분석', '정리하기', '다시정리', '로그아웃', '비밀번호',
+  'save', 'submit', 'confirm', 'delete', 'approve', 'cancel', 'create', 'remove', 'complete', 'publish', 'send', 'upload', 'disconnect', 'deactivate', 'disable', 'logout',
+] as const;
+
+/**
+ * 이름이 이것 하나뿐이면 낱말 목록에 걸려도 서버는 막지 않는다: 창을 닫는 "취소"는 데이터를 바꾸지 않는다.
+ * 화면은 이 버튼이 대화상자(dialog) 안에 있을 때만 누른다 (목록 줄의 "취소"는 출하요청 취소처럼 데이터를 바꾼다)
+ */
+export const AI_SCREEN_DIALOG_DISMISS_LABELS = ['취소', 'cancel'] as const;
 
 /** 낱말 검사 전 다듬기: 호환 글자 펼치기, 보이지 않는 글자·공백 지우기, 소문자 */
 export function normalizeAiScreenLabel(label: string): string {
@@ -46,9 +58,33 @@ export function normalizeAiScreenLabel(label: string): string {
     .toLowerCase();
 }
 
-/** 이 이름의 요소를 누르면 안 되면 걸린 낱말, 아니면 null */
-export function aiScreenBlockedWord(label: string): string | null {
+/** 창 닫기 "취소"처럼 이름 전체가 닫기 낱말인지 */
+export function isAiScreenDismissLabel(label: string): boolean {
   const normalized = normalizeAiScreenLabel(label);
+  return (AI_SCREEN_DIALOG_DISMISS_LABELS as readonly string[]).includes(normalized);
+}
+
+/**
+ * 낱말이 들어 있어도 데이터를 바꾸지 않는 이름 조각 (다듬은 모양). 정렬·필터 머리의 날짜 칸, 고른 것·필터 풀기 같은 화면 안의 동작.
+ * 이 조각을 먼저 지우고 나서 막을 낱말을 찾는다 (예: '생성일 정렬'·'시작일~종료일'·'필터 해제'는 누른다)
+ */
+export const AI_SCREEN_SAFE_PHRASES = [
+  '생성일자', '생성일', '시작일자', '시작일', '시작시각', '종료일자', '종료일', '종료시각', '완료일', '취소일', '등록일자', '등록일', '승인일', '출고일', '배정일', '마감일',
+  '완료여부', '취소여부', '필터해제', '선택해제', '전체해제', '분석결과',
+] as const;
+
+/** 누르는 요소의 역할 중 데이터를 바꾸지 않는 것: 상태 탭('완료'·'취소' 탭)은 보기만 바꾼다 */
+const VIEW_ONLY_ROLES: readonly string[] = ['tab'];
+
+/**
+ * 이 이름의 요소를 누르면 안 되면 걸린 낱말, 아니면 null. 이름 전체가 "취소"면 막지 않는다(화면이 대화상자 안인지 따로 본다).
+ * role은 화면 글의 역할(button·link·tab …)로, 탭은 막지 않는다
+ */
+export function aiScreenBlockedWord(label: string, role?: string | null): string | null {
+  if (isAiScreenDismissLabel(label)) return null;
+  if (role && VIEW_ONLY_ROLES.includes(role)) return null;
+  let normalized = normalizeAiScreenLabel(label);
+  for (const phrase of AI_SCREEN_SAFE_PHRASES) normalized = normalized.split(phrase).join(' ');
   return AI_SCREEN_BLOCKED_WORDS.find((word) => normalized.includes(word)) ?? null;
 }
 

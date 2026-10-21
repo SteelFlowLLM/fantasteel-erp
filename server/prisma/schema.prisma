@@ -54,6 +54,7 @@ model Employee {
   actionDraftsAsRequester ActionDraft[] @relation("ActionDraftRequester")
   aiResearchRuns AiResearchRun[] @relation("AiResearchRunEmployee")
   aiChatThreads AiChatThread[] @relation("AiChatThreadEmployee")
+  aiActionCardRuns AiActionCardRun[] @relation("AiActionCardRunEmployee")
 
   @@index([departmentId])
   @@index([jobGradeId])
@@ -1188,4 +1189,21 @@ model AiChatMessage {
 
   @@unique([threadId, seq])
   @@map("ai_chat_message")
+}
+
+/// 철강맨AI 실행 카드 실행 기록 (이슈 #479). 같은 사원이 같은 카드를 한 번만 실행하게 (employee_id, card_id)로 잡는다
+model AiActionCardRun {
+  id Int @id @default(autoincrement())
+  cardId String @map("card_id") @db.VarChar /// 카드 번호(UUID), notion:nonce 또는 chat:답 id:카드 key
+  employeeId Int @map("employee_id") /// 실행한 사원
+  cardKind String @map("card_kind") @db.VarChar /// 카드 종류 (공통 코드 아님)
+  runStatus String @map("run_status") @db.VarChar /// RUNNING·DONE (CHECK)
+  result Json? @db.JsonB /// 실행 결과 {registered} (DONE일 때)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  employee Employee @relation("AiActionCardRunEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([employeeId, cardId])
+  @@map("ai_action_card_run")
 }

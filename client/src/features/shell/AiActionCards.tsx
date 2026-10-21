@@ -113,7 +113,7 @@ function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: strin
   const seed = card.kind === 'RESEARCH' && includeSeed && researchSeed ? { seed: researchSeed } : {};
   const executeCard = () => {
     if (!claimCardRun(entryId, card.key)) return;
-    execute.mutate({ ...executeInputOf(card), ...seed, ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
+    execute.mutate({ ...executeInputOf(card), ...seed, ...(card.cardId ? { cardId: card.cardId } : {}), ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
   };
   const run = () => (needsConfirmation(card) ? setConfirming(true) : executeCard());
 

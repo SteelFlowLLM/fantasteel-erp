@@ -29,11 +29,12 @@ const setup = (company = { enabled: true, voiceApproval: true }) => {
     updateCards: { execute: run },
     researchCards: { execute: run },
     wakeSettings: { read: async () => company },
+    cardRuns: { claim: async () => ({ state: 'claimed' }), finish: async () => undefined, release: async () => undefined },
   }) as unknown as AiAssistantService;
   return { service, seen };
 };
 
-const dto = (kind: string, approvedByVoice?: boolean) => ({ kind, title: 'a', ...(approvedByVoice === undefined ? {} : { approvedByVoice }) }) as unknown as ExecuteAiActionCardDto;
+const dto = (kind: string, approvedByVoice?: boolean) => ({ kind, title: 'a', cardId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', ...(approvedByVoice === undefined ? {} : { approvedByVoice }) }) as unknown as ExecuteAiActionCardDto;
 
 describe('말로 승인한 카드 실행', () => {
   it('말로 승인할 수 있는 카드는 업무·일정·구매요청뿐이다', () => {

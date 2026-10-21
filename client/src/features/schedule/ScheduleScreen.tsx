@@ -45,7 +45,8 @@ function NotionSyncButton({ event }: { event: ScheduleEventView }) {
   };
   return (
     <>
-      <button type="button" onClick={flip} disabled={toggle.isPending} className="text-xs text-brand hover:underline disabled:opacity-50">
+      {/* 넣기는 확인 창 없이 바로 바뀌고 Notion·캘린더 초대로 이어져 철강맨AI 화면 조작이 누르지 않는다 (이슈 #479) */}
+      <button type="button" onClick={flip} disabled={toggle.isPending} data-ai-block="" className="text-xs text-brand hover:underline disabled:opacity-50">
         {event.notionSync ? 'Notion에서 빼기' : 'Notion에 넣기'}
       </button>
       {confirming ? (

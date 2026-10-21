@@ -250,6 +250,11 @@ export class ProductionService {
 
   // ── 생산계획 조회·히트 편성·취소 (API-200~205) ─────────────
 
+  /** 생산계획 번호로 id (철강맨AI 조회 도구가 번호로 거를 때). 번호는 대문자로 맞춘다. 없으면 null */
+  async planIdByNo(productionPlanNo: string): Promise<number | null> {
+    return (await this.repository.findPlanIdByNo(this.prisma, productionPlanNo.trim().toUpperCase()))?.id ?? null;
+  }
+
   async listPlans(query: ListProductionPlansDto): Promise<PageResult<ProductionPlanSummary>> {
     const page = query.page ?? 1;
     const size = query.size ?? 20;

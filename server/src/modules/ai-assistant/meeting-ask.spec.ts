@@ -192,6 +192,26 @@ describe('POST ai-assistant/messages/stream', () => {
     expect(llmClient.streamWithTools).not.toHaveBeenCalled();
   });
 
+  it('준비하는 사이에 화면이 연결을 끊으면 LLM을 부르지 않는다 (이슈 #479)', async () => {
+    llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
+    let releaseRead: () => void = () => undefined;
+    llmSettings.read.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseRead = () => resolve({ baseUrl: 'http://llm.test/v1', model: 'test-model', apiKey: null });
+        }),
+    );
+    const leaving = new AbortController();
+    const request = fetch(`${baseUrl}/ai-assistant/messages/stream`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ question: '예약이 뭐야?' }), signal: leaving.signal }).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    leaving.abort();
+    await request;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    releaseRead();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(llmClient.streamWithTools).not.toHaveBeenCalled();
+  });
+
   it("reasoning 'high'는 LLM 프로필까지 전달되고, 목록에 없는 값은 400 COM-004", async () => {
     llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
     const high = await stream({ question: '예약이 뭐야?', reasoning: 'high' });
