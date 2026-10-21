@@ -8,7 +8,7 @@ ERP 서버가 부르는 OpenAI 호환 `POST /v1/audio/transcriptions`를 흉내 
 `GET /v1/models`는 위 셋을 화면에 보일 이름과 함께 알려 준다.
 
 API 키(`Authorization: Bearer …`): 키가 있으면 모든 /v1 요청에 요구한다. 다른 PC에 열 때(SIDECAR_HOST가 127.0.0.1이 아닐 때)는
-키가 꼭 있어야 하고, 없으면 만들어 KEY_FILE에 둔다. whisper.cpp에는 키 기능이 없어 그쪽은 127.0.0.1에만 열고 밖에는 이 서버만 연다.
+키가 꼭 있어야 하고, 없으면 만들어 KEY_FILE에 둔다. 127.0.0.1로만 열면 SIDECAR_API_KEY를 직접 줄 때만 키를 요구한다. whisper.cpp에는 키 기능이 없어 그쪽은 127.0.0.1에만 열고 밖에는 이 서버만 연다.
 
 음성은 임시 파일로만 다루고 요청이 끝나면(성공이든 실패든) 모두 지운다 (BP-VOC-01).
 실행: ~/voice-env/bin/python tools/voice-sidecar/server.py
@@ -188,20 +188,24 @@ def has_hf_token() -> bool:
 
 
 def resolve_api_key(host: str) -> Optional[str]:
-    """SIDECAR_API_KEY → KEY_FILE 순서. 다른 PC에 열면서 둘 다 없으면 새로 만들어 KEY_FILE에 둔다(본인만 읽기)."""
+    """SIDECAR_API_KEY가 있으면 그 키. 127.0.0.1로만 열면 그 밖에는 키 없이 연다(이전에 다른 PC용으로 만든 KEY_FILE이 남아 있어도).
+    다른 PC에 열면 KEY_FILE 키를 쓰고, 없으면 새로 만든다."""
     key = os.environ.get("SIDECAR_API_KEY", "").strip()
     if key:
         return key
+    if host in LOOPBACK_HOSTS:
+        return None
     if KEY_FILE.exists():
+        KEY_FILE.chmod(0o600)
         saved = KEY_FILE.read_text(encoding="utf-8").strip()
         if saved:
             return saved
-    if host in LOOPBACK_HOSTS:
-        return None
-    KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    KEY_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     key = "fsv-" + secrets.token_urlsafe(32)
-    KEY_FILE.write_text(key + "\n", encoding="utf-8")
-    KEY_FILE.chmod(0o600)
+    # 만들 때부터 본인만 읽게 한다: write_text 뒤에 chmod하면 그 사이에 다른 사용자가 읽을 수 있다
+    fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(key + "\n")
     return key
 
 

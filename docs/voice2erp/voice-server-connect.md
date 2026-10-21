@@ -42,7 +42,7 @@ ERP에 넣을 API 키: fsv-…
 ```
 
 - 키는 처음 켤 때 만들어 `~/.config/fantasteel-voice/api-key`(본인만 읽기)에 두고, 다음부터 같은 키를 쓴다. 바꾸려면 그 파일을 지우고 다시 켠다. `SIDECAR_API_KEY=…`로 직접 정해도 된다.
-- **ERP 서버도 이 Mac이면** `tools/voice-sidecar/start.sh --local`로 켜고 주소 `http://127.0.0.1:8001/v1`, 키는 비워 둔다(이 Mac 밖에는 열지 않는다).
+- **ERP 서버도 이 Mac이면** `tools/voice-sidecar/start.sh --local`로 켜고 주소 `http://127.0.0.1:8001/v1`, 키는 비워 둔다(이 Mac 밖에는 열지 않는다). 전에 다른 PC용으로 켜서 키 파일이 남아 있어도 `--local`은 키를 요구하지 않는다.
 - 모델 파일은 `WHISPER_MODEL=경로` → `~/models/ggml-large-v3-turbo*.bin` → `~/models/ggml-*.bin` → Spokenly가 받아 둔 파일 순서로 찾는다. `~/models/ggml-silero-*.bin`이 있으면 VAD(소리 없는 구간 건너뛰기)를 켠다.
 - 필요한 것: `brew install whisper-cpp ffmpeg`, 파이썬 환경 `~/voice-env`([tools/voice-sidecar/README.md](../../tools/voice-sidecar/README.md)), 화자 분리용 `HF_TOKEN`(`server/.env`).
 
