@@ -4,9 +4,6 @@
 import type {
   CustomerView as ServerCustomerView,
   ItemView as ServerItemView,
-  ProductionSettingView as ServerProductionSettingView,
-  RoutingView as ServerRoutingView,
-  SpecificConsumptionView as ServerSpecificConsumptionView,
   SpecMappingView as ServerSpecMappingView,
   SteelGradeView as ServerSteelGradeView,
   SupplierView as ServerSupplierView,
@@ -14,21 +11,9 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
-import type {
-  CustomerView,
-  ItemView,
-  ProductionSettingView,
-  ProductSpecView,
-  RoutingView,
-  SpecificConsumptionView,
-  SpecMappingView,
-  SteelGradeView,
-  SupplierView,
-  YardView,
-} from '@/api/lookups';
+import type { CustomerView, ItemView, ProductSpecView, SteelGradeView } from '@/api/lookups';
 import type { ItemListQuery, ProductSpecListQuery } from '@/api/queryKeys';
 import type { ProductItemType } from '@/codes';
-import { specificConsumptionUnitOf } from '@/lib/units';
 
 /** 기준정보 조회 권한이 없으면(COM-002) empty */
 async function orEmpty<T>(read: () => Promise<T>, empty: T): Promise<T> {
@@ -50,14 +35,6 @@ const isProductItem = (item: ServerItemView): item is ServerItemView & { itemTyp
 
 async function listCustomers(): Promise<CustomerView[]> {
   return orEmpty(async () => (await serverRequest<ServerCustomerView[]>('GET', '/customers')).map(({ id, customerCode, customerName }) => ({ id, customerCode, customerName })).sort(byCode((c) => c.customerCode)), []);
-}
-
-async function listSuppliers(): Promise<SupplierView[]> {
-  return orEmpty(async () => (await getSuppliers()).map(({ id, supplierCode, supplierName }) => ({ id, supplierCode, supplierName })).sort(byCode((s) => s.supplierCode)), []);
-}
-
-async function listYards(): Promise<YardView[]> {
-  return orEmpty(async () => (await getYards()).map(({ id, yardCode, yardName, yardType }) => ({ id, yardCode, yardName, yardType })).sort(byCode((y) => y.yardCode)), []);
 }
 
 async function listSteelGrades(): Promise<SteelGradeView[]> {
@@ -124,69 +101,9 @@ async function listProductSpecs(query: ProductSpecListQuery = {}): Promise<Produ
   }, []);
 }
 
-async function listSpecMappings(): Promise<SpecMappingView[]> {
-  return orEmpty(
-    async () =>
-      (await getSpecMappings()).map((m) => ({
-        id: m.id,
-        steelGradeCode: m.steelGradeCode,
-        slabItemId: m.slabItem.id,
-        slabItemCode: m.slabItem.itemCode,
-        slabTheoreticalWeightTon: m.slabItem.theoreticalWeightTon,
-        coilItemId: m.coilItem.id,
-        coilItemCode: m.coilItem.itemCode,
-        coilTheoreticalWeightTon: m.coilItem.theoreticalWeightTon,
-        hotRollingPlannedYieldRate: m.hotRollingYieldRate,
-      })),
-    [],
-  );
-}
-
-async function listRoutings(): Promise<RoutingView[]> {
-  return orEmpty(
-    async () =>
-      (await serverRequest<ServerRoutingView[]>('GET', '/routings'))
-        .filter((r): r is ServerRoutingView & { itemType: ProductItemType } => r.itemType === 'SLAB' || r.itemType === 'COIL')
-        .sort((a, b) => a.itemType.localeCompare(b.itemType) || a.sequenceNo - b.sequenceNo)
-        .map((r) => ({ id: r.id, itemType: r.itemType, processType: r.processType, processSeq: r.sequenceNo, plannedYieldRate: r.plannedYieldRate })),
-    [],
-  );
-}
-
-async function listSpecificConsumptions(): Promise<SpecificConsumptionView[]> {
-  return orEmpty(async () => {
-    const [rows, materials] = await Promise.all([serverRequest<ServerSpecificConsumptionView[]>('GET', '/specific-consumptions'), getItems('RAW_MATERIAL')]);
-    return rows.map((c) => ({
-      id: c.id,
-      itemId: c.rawMaterialItemId,
-      itemCode: c.rawMaterialItemCode,
-      itemName: materials.find((m) => m.id === c.rawMaterialItemId)?.itemName ?? c.rawMaterialItemCode,
-      rawMaterialType: c.rawMaterialType,
-      steelGradeId: c.steelGradeId,
-      steelGradeCode: c.steelGradeCode,
-      consumptionRate: c.consumptionRate,
-      consumptionUnit: specificConsumptionUnitOf(c.rawMaterialType),
-    }));
-  }, []);
-}
-
-async function getProductionSetting(): Promise<ProductionSettingView | null> {
-  return orEmpty(async () => {
-    const row = await serverRequest<ServerProductionSettingView>('GET', '/production-settings');
-    // 서버 응답에 수정 시각이 없다
-    return { id: row.id, heatCapacityTon: row.heatCapacityTon, deliveryRiskDays: row.deliveryRiskDays, updatedAt: '' };
-  }, null);
-}
-
 export const serverLookupApi = {
   listCustomers,
-  listSuppliers,
-  listYards,
   listSteelGrades,
   listItems,
   listProductSpecs,
-  listSpecMappings,
-  listRoutings,
-  listSpecificConsumptions,
-  getProductionSetting,
 };

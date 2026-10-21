@@ -8,8 +8,6 @@ import { isErpSource, queryKey, type StoredAudit, type StoredSource, type Stored
 
 /** 한 번의 LLM 요청(시스템 지시 + 사용자 글)의 글자 수 상한 기본값. 환경 변수 AI_RESEARCH_PROMPT_CHARS로 바꾼다 (ai-research.config.ts) */
 export const PROMPT_CHAR_BUDGET = DEFAULT_RESEARCH_LIMITS.promptChars;
-/** 다음 행동에 보이는 최근 단계 기록 수 기본값. AI_RESEARCH_EVIDENCE_SOURCES */
-export const EXCERPT_SOURCES_MAX = DEFAULT_RESEARCH_LIMITS.evidenceSources;
 
 /** 프롬프트를 만들 때 쓰는 상한 (없으면 환경 변수에서 읽는다) */
 export type PromptLimits = Pick<ResearchLimits, 'promptChars' | 'evidenceSources' | 'reportSources'>;

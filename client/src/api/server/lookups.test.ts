@@ -75,7 +75,6 @@ describe('선택 목록 서버 모드 (api/server/lookups.ts)', () => {
     useFakeServer(SEED_EMPLOYEE_NO.logistics, denied);
     expect(await lookupApi.listCustomers()).toEqual([]);
     expect(await lookupApi.listProductSpecs()).toEqual([]);
-    expect(await lookupApi.getProductionSetting()).toBeNull();
   });
 });
 
