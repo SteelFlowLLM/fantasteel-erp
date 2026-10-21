@@ -116,6 +116,11 @@ export interface VoiceApprovalPending {
 }
 
 export function resolveVoiceApproval(pending: VoiceApprovalPending, text: string, now: number): 'execute' | 'cancel' | 'expired' {
-  if (now > pending.deadline) return 'expired';
+  return resolveConfirmation(pending.deadline, text, now);
+}
+
+/** 두 번 확인(말로 승인·화면 조작 켜기)을 기다리는 중에 들은 말. 마감이 지나면 들은 말과 상관없이 취소다 */
+export function resolveConfirmation(deadline: number, text: string, now: number): 'execute' | 'cancel' | 'expired' {
+  if (now > deadline) return 'expired';
   return confirmationOf(text) === 'yes' ? 'execute' : 'cancel';
 }

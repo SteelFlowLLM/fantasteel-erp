@@ -175,3 +175,47 @@ export function encodeWav(samples: Float32Array, sampleRate = WAV_SAMPLE_RATE): 
 export function clipToWav(clip: Float32Array, sampleRate: number): Blob {
   return new Blob([encodeWav(downsample(clip, sampleRate))], { type: 'audio/wav' });
 }
+
+/** 음성 서버가 느릴 때 쌓아 둘 조각 수 (가정값). 넘으면 오래된 것부터 버린다: 늦게 올라간 옛 말이 질문이 되지 않게 */
+export const MAX_WAITING_CLIPS = 3;
+
+/**
+ * 조각을 하나씩 차례로 올린다 (말 순서가 바뀌면 "철강맨" 뒤의 질문을 놓친다).
+ * 끄거나 탭을 숨긴 뒤(stopped)에는 기다리던 조각을 올리지 않고 버린다
+ */
+export class ClipUploadQueue<T> {
+  private waiting: T[] = [];
+  private running = false;
+
+  constructor(
+    private readonly send: (item: T) => Promise<void>,
+    private readonly stopped: () => boolean,
+    private readonly max = MAX_WAITING_CLIPS,
+  ) {}
+
+  get size(): number {
+    return this.waiting.length;
+  }
+
+  push(item: T): void {
+    if (this.stopped()) return;
+    this.waiting.push(item);
+    while (this.waiting.length > this.max) this.waiting.shift();
+    void this.drain();
+  }
+
+  private async drain(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      while (!this.stopped()) {
+        const next = this.waiting.shift();
+        if (next === undefined) break;
+        await this.send(next).catch(() => undefined);
+      }
+    } finally {
+      this.running = false;
+      if (this.stopped()) this.waiting = [];
+    }
+  }
+}

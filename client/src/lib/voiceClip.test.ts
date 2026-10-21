@@ -1,6 +1,6 @@
 // 철강맨 부르기 (이슈 #457): 소리 크기로 말 조각 자르기, 16kHz로 줄이기, WAV 머리글.
-import { describe, expect, it } from 'vitest';
-import { downsample, encodeWav, rmsOf, VoiceSegmenter } from '@/lib/voiceClip';
+import { describe, expect, it, vi } from 'vitest';
+import { ClipUploadQueue, downsample, encodeWav, rmsOf, VoiceSegmenter } from '@/lib/voiceClip';
 
 const RATE = 16_000;
 /** 10ms 조각 하나 (크기 amp인 사각파) */
@@ -79,5 +79,45 @@ describe('WAV', () => {
     expect(view.getUint32(24, true)).toBe(16_000);
     expect(view.getUint16(34, true)).toBe(16);
     expect([0, 1, 2, 3].map((i) => view.getInt16(44 + i * 2, true))).toEqual([0, 32767, -32768, 32767]);
+  });
+});
+
+describe('ClipUploadQueue', () => {
+  it('하나씩 차례로 올리고, 밀리면 오래된 것부터 버려 3개만 남긴다', async () => {
+    const sent: number[] = [];
+    let release: () => void = () => undefined;
+    const queue = new ClipUploadQueue<number>(
+      (item) => {
+        sent.push(item);
+        return item === 1 ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve();
+      },
+      () => false,
+    );
+    [1, 2, 3, 4, 5, 6].forEach((item) => queue.push(item));
+    expect(sent).toEqual([1]);
+    expect(queue.size).toBe(3);
+    release();
+    await vi.waitFor(() => expect(sent).toEqual([1, 4, 5, 6]));
+  });
+
+  it('멈춘 뒤에는 기다리던 조각을 올리지 않고 새 조각도 받지 않는다', async () => {
+    let stopped = false;
+    const sent: number[] = [];
+    let release: () => void = () => undefined;
+    const queue = new ClipUploadQueue<number>(
+      (item) => {
+        sent.push(item);
+        return new Promise<void>((resolve) => (release = resolve));
+      },
+      () => stopped,
+    );
+    queue.push(1);
+    queue.push(2);
+    stopped = true;
+    queue.push(3);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual([1]);
+    expect(queue.size).toBe(0);
   });
 });

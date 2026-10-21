@@ -2,7 +2,7 @@
 // (질문은 패널에서 보낸 것과 같게 켜 둔 칩 그대로 보내야 해서 패널이 보낸다).
 import { create } from 'zustand';
 import type { VoiceApprovalPending } from '@/lib/steelmanWake';
-import { readSteelmanWakePreference, readVoiceApprovalPreference, writeSteelmanWakePreference, writeVoiceApprovalPreference } from '@/lib/steelmanWakePreference';
+import { readSteelmanWakePreference, writeSteelmanWakePreference } from '@/lib/steelmanWakePreference';
 
 /** off: 꺼짐, starting: 마이크 여는 중, listening: 듣는 중, paused: 탭이 숨겨져 쉼, error: 마이크를 못 엶 */
 export type SteelmanWakeStatus = 'off' | 'starting' | 'listening' | 'paused' | 'error';
@@ -11,8 +11,8 @@ type PanelRequestInput = { kind: 'ask'; question: string } | { kind: 'screenCont
 export type SteelmanPanelRequest = PanelRequestInput & { id: number };
 
 interface SteelmanWakeState {
-  /** 화면을 그린 뒤 설정을 읽었는지 (서버에서 먼저 그릴 때와 어긋나지 않게) */
-  loaded: boolean;
+  /** 설정을 읽은 사원. 화면을 그린 뒤 읽고(서버에서 먼저 그릴 때와 어긋나지 않게), 다른 사원이 들어오면 그 사원 것으로 다시 읽는다 */
+  employeeId: number | null;
   enabled: boolean;
   voiceApproval: boolean;
   status: SteelmanWakeStatus;
@@ -25,10 +25,12 @@ interface SteelmanWakeState {
   /** 잠깐 보일 안내 (멈췄어요, 실행할 카드가 없어요 등) */
   notice: { id: number; text: string } | null;
   approval: VoiceApprovalPending | null;
+  /** "화면 조작 켜"를 들어 확인을 기다리는 중 (끄기는 바로 한다) */
+  screenConfirm: { deadline: number } | null;
   panelRequest: SteelmanPanelRequest | null;
   /** 말로 물어 답을 기다리는 질문 id (답이 끝나면 읽어 줄 자리로 넘긴다) */
   voiceQuestionId: string | null;
-  load: () => void;
+  load: (employeeId: number) => void;
   setEnabled: (on: boolean) => void;
   setVoiceApproval: (on: boolean) => void;
   setStatus: (status: SteelmanWakeStatus, problem?: string | null) => void;
@@ -38,6 +40,7 @@ interface SteelmanWakeState {
   notify: (text: string) => void;
   clearNotice: (id: number) => void;
   setApproval: (approval: VoiceApprovalPending | null) => void;
+  setScreenConfirm: (screenConfirm: { deadline: number } | null) => void;
   requestPanel: (request: PanelRequestInput) => void;
   takePanelRequest: (id: number) => void;
   setVoiceQuestionId: (id: string | null) => void;
@@ -45,8 +48,8 @@ interface SteelmanWakeState {
 
 let nextId = 1;
 
-export const useSteelmanWakeStore = create<SteelmanWakeState>((set) => ({
-  loaded: false,
+export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
+  employeeId: null,
   enabled: false,
   voiceApproval: false,
   status: 'off',
@@ -55,15 +58,21 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set) => ({
   called: null,
   notice: null,
   approval: null,
+  screenConfirm: null,
   panelRequest: null,
   voiceQuestionId: null,
-  load: () => set({ loaded: true, enabled: readSteelmanWakePreference(), voiceApproval: readVoiceApprovalPreference() }),
+  load: (employeeId) => {
+    const saved = readSteelmanWakePreference(employeeId);
+    set({ employeeId, enabled: saved.wake, voiceApproval: saved.voiceApproval, status: 'off', hearing: false, problem: null, called: null, notice: null, approval: null, screenConfirm: null, panelRequest: null, voiceQuestionId: null });
+  },
   setEnabled: (on) => {
-    writeSteelmanWakePreference(on);
-    set(on ? { enabled: true, problem: null } : { enabled: false, status: 'off', hearing: false, problem: null, called: null, approval: null });
+    const { employeeId, voiceApproval } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: on, voiceApproval });
+    set(on ? { enabled: true, problem: null } : { enabled: false, status: 'off', hearing: false, problem: null, called: null, approval: null, screenConfirm: null });
   },
   setVoiceApproval: (on) => {
-    writeVoiceApprovalPreference(on);
+    const { employeeId, enabled } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: enabled, voiceApproval: on });
     set(on ? { voiceApproval: true } : { voiceApproval: false, approval: null });
   },
   setStatus: (status, problem) => set(problem === undefined ? { status } : { status, problem }),
@@ -73,6 +82,7 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set) => ({
   notify: (text) => set({ notice: { id: nextId++, text } }),
   clearNotice: (id) => set((state) => (state.notice?.id === id ? { notice: null } : {})),
   setApproval: (approval) => set({ approval }),
+  setScreenConfirm: (screenConfirm) => set({ screenConfirm }),
   requestPanel: (request) => set({ panelRequest: { ...request, id: nextId++ } }),
   takePanelRequest: (id) => set((state) => (state.panelRequest?.id === id ? { panelRequest: null } : {})),
   setVoiceQuestionId: (voiceQuestionId) => set({ voiceQuestionId }),

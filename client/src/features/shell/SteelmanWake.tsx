@@ -6,24 +6,20 @@
 // 켜 있는 동안 화면 위쪽 띠에 '듣는 중'이 늘 보이고 거기서 바로 끈다. 탭이 숨겨지면 마이크를 닫고, 돌아오면 다시 연다.
 import type { AiActionCard } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
-import { aiAssistantApi } from '@/api/aiAssistant';
-import { errorCodeOf } from '@/api/http';
-import { sttApi } from '@/api/stt';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { fields, useDirectoryNames } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
-import { controlAiAgent, sendAiAgentNote, stopAiAssistant, useAiCapabilities } from '@/hooks/useAiAssistant';
-import { CARD_KIND_LABEL, CARD_RESULT, executeInputOf, isWorkCard } from '@/lib/aiActionCard';
+import { useMe } from '@/hooks/useMe';
+import { useAiCapabilities } from '@/hooks/useAiAssistant';
+import { CARD_KIND_LABEL, isWorkCard } from '@/lib/aiActionCard';
 import { microphoneErrorMessage } from '@/lib/meetingAudio';
-import { isLikelyHallucination, matchWakeWord, parseVoiceCommand, pickVoiceApprovalCard, resolveVoiceApproval, VOICE_APPROVAL_MS, WAKE_FOLLOW_UP_MS, WAKE_REPLIES, type VoiceCommand } from '@/lib/steelmanWake';
-import { playWakeChime, speakSteelmanReply, WAKE_CHIME_MS } from '@/lib/steelmanVoice';
-import { clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
+import { speakSteelmanReply } from '@/lib/steelmanVoice';
+import { executeApproved, setWakeAudioContext, transcribe, turnOnScreenControl, wakeMuted } from '@/lib/steelmanWakeActions';
+import { ClipUploadQueue, clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
 import { useAiChatStore } from '@/stores/useAiChatStore';
-import { useShellStore } from '@/stores/useShellStore';
 import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
-import { errorMessageOf, toast } from '@/stores/useToastStore';
 
 /** 안내를 띠에 보이는 시간 */
 const NOTICE_MS = 4_000;
@@ -32,158 +28,12 @@ const FRAME_SIZE = 2048;
 
 const store = () => useSteelmanWakeStore.getState();
 
-/** 띠링을 울린 뒤 그 소리를 말로 잡지 않게 이때까지 듣기를 쉰다 */
-let muteUntil = 0;
-let audioContext: AudioContext | null = null;
-let replyTurn = 0;
-
-function chime(): void {
-  muteUntil = Date.now() + WAKE_CHIME_MS + 150;
-  if (audioContext) playWakeChime(audioContext);
-}
-
-/** 패널을 열고 그 사원의 지금 대화에 이어 묻는다. 답하는 중이면 브라우저·화면 조작 중일 때만 말을 덧붙인다 */
-function ask(question: string): void {
-  useShellStore.getState().showAiPanel();
-  const chat = useAiChatStore.getState();
-  if (!chat.pendingId) {
-    store().requestPanel({ kind: 'ask', question });
-    return;
-  }
-  if (chat.live?.control) {
-    void sendAiAgentNote(question).then((sent) => store().notify(sent ? `작업 중인 철강맨AI에게 덧붙였어요: ${question}` : '말을 덧붙이지 못했어요'));
-    return;
-  }
-  store().notify('답하는 중이에요. "철강맨, 멈춰"라고 하면 멈춰요');
-}
-
-function startApproval(index: number | null): void {
-  if (!store().voiceApproval) {
-    store().notify('말로 승인이 꺼져 있어요. 위 띠에서 "말로 승인 허용"을 켜거나 화면에서 눌러 실행해 주세요');
-    return;
-  }
-  if (useAiChatStore.getState().pendingId) {
-    store().notify('답을 다 받은 뒤에 실행해 주세요');
-    return;
-  }
-  const picked = pickVoiceApprovalCard(useAiChatStore.getState().entries, index);
-  if (!picked.ok) {
-    store().notify(picked.reason);
-    return;
-  }
-  useShellStore.getState().showAiPanel();
-  chime();
-  store().setApproval({ entryId: picked.entryId, ...(picked.messageId ? { messageId: picked.messageId } : {}), item: picked.item, deadline: Date.now() + VOICE_APPROVAL_MS });
-}
-
-/** 말로 승인한 카드를 손으로 누를 때와 같은 API로 실행한다. 서버가 권한을 다시 보고 작업 로그에 말로 승인을 남긴다 */
-async function executeApproved(): Promise<void> {
-  const approval = store().approval;
-  store().setApproval(null);
-  if (!approval) return;
-  const { card } = approval.item;
-  try {
-    const result = await aiAssistantApi.executeActionCard({ ...executeInputOf(card), approvedByVoice: true, ...(approval.messageId ? { chat: { messageId: approval.messageId, cardKey: card.key } } : {}) });
-    useAiChatStore.getState().updateCard(approval.entryId, card.key, { status: 'done', result: result.registered });
-    toast.ok(CARD_RESULT[result.registered.type].message(result.registered));
-  } catch (error) {
-    toast.error(errorMessageOf(error));
-  }
-}
-
-function runCommand(command: Exclude<VoiceCommand, { kind: 'empty' }>, screenControlAvailable: boolean): void {
-  const chat = useAiChatStore.getState();
-  switch (command.kind) {
-    case 'ask':
-      ask(command.question);
-      return;
-    case 'stop':
-      if (!chat.pendingId) store().notify('멈출 답이 없어요');
-      else {
-        stopAiAssistant();
-        store().notify('답을 멈췄어요');
-      }
-      return;
-    case 'pause':
-    case 'resume':
-      if (!chat.live?.control) store().notify('지금은 멈추거나 이어 갈 작업이 없어요 (브라우저·화면 조작 중일 때만)');
-      else {
-        void controlAiAgent(command.kind);
-        store().notify(command.kind === 'pause' ? '잠깐 멈췄어요. "철강맨, 계속"이라고 하면 이어 가요' : '이어서 할게요');
-      }
-      return;
-    case 'newChat':
-      if (chat.pendingId) store().notify('답을 받는 중에는 새 대화를 시작할 수 없어요');
-      else {
-        chat.clear();
-        useShellStore.getState().showAiPanel();
-        store().notify('새 대화를 시작했어요');
-      }
-      return;
-    case 'screenControl':
-      if (!screenControlAvailable) store().notify('이 서버에서는 화면 조작을 쓸 수 없어요');
-      else {
-        store().requestPanel({ kind: 'screenControl', on: command.on });
-        useShellStore.getState().showAiPanel();
-        store().notify(command.on ? '화면 조작을 켰어요' : '화면 조작을 껐어요');
-      }
-      return;
-    case 'approve':
-      startApproval(command.index);
-      return;
-  }
-}
-
-/** 받아쓴 글 하나를 처리한다. 부르는 말도 없고 기다리던 말도 아니면 아무것도 남기지 않고 버린다 */
-function handleText(text: string, screenControlAvailable: boolean): void {
-  const now = Date.now();
-  const { approval, called } = store();
-  if (approval) {
-    const outcome = resolveVoiceApproval(approval, text, now);
-    if (outcome === 'execute') void executeApproved();
-    else {
-      store().setApproval(null);
-      store().notify(outcome === 'expired' ? '10초가 지나 실행하지 않았어요' : '실행하지 않았어요');
-    }
-    return;
-  }
-  const wake = matchWakeWord(text);
-  const waiting = called !== null && now <= called.until;
-  if (!wake.called && !(waiting && !isLikelyHallucination(text))) return;
-  const command = parseVoiceCommand(wake.called ? wake.rest : text);
-  if (command.kind === 'empty') {
-    replyTurn += 1;
-    chime();
-    store().setCalled({ reply: WAKE_REPLIES[replyTurn % WAKE_REPLIES.length], until: now + WAKE_FOLLOW_UP_MS });
-    return;
-  }
-  store().setCalled(null);
-  runCommand(command, screenControlAvailable);
-}
-
-/** 조각 하나를 받아쓴다. 음성 서버에 닿지 않으면 스위치 옆에 이유를 보인다 */
-async function transcribe(wav: Blob, stopped: () => boolean, screenControlAvailable: () => boolean): Promise<void> {
-  try {
-    const result = await sttApi.transcribeWakeClip(wav);
-    if (stopped()) return;
-    if (result.error) {
-      store().setProblem(`음성 서버가 꺼져 있어요 · ${result.error}`);
-      return;
-    }
-    if (store().problem) store().setProblem(null);
-    if (result.text) handleText(result.text, screenControlAvailable());
-  } catch (error) {
-    if (stopped()) return;
-    if (errorCodeOf(error) === 'VOC-009') store().notify(errorMessageOf(error));
-    else store().setProblem(errorMessageOf(error));
-  }
-}
-
 /**
  * 셸에 늘 붙어 있는 듣기 담당 + 위쪽 띠 + 말로 승인 창. 꺼져 있으면 아무것도 그리지 않고 마이크도 열지 않는다
  */
 export function SteelmanWake() {
-  const loaded = useSteelmanWakeStore((state) => state.loaded);
+  const me = useMe();
+  const loadedFor = useSteelmanWakeStore((state) => state.employeeId);
   const enabled = useSteelmanWakeStore((state) => state.enabled);
   const capabilities = useAiCapabilities();
   const screenControlAvailable = capabilities.data?.screenControl?.available === true;
@@ -192,8 +42,8 @@ export function SteelmanWake() {
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    if (!loaded) store().load();
-  }, [loaded]);
+    if (loadedFor !== me.employeeId) store().load(me.employeeId);
+  }, [loadedFor, me.employeeId]);
 
   useEffect(() => {
     const update = () => setVisible(document.visibilityState === 'visible');
@@ -202,9 +52,12 @@ export function SteelmanWake() {
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
 
+  // 이 사원의 설정을 읽기 전에는 앞 사원의 켜기 설정으로 마이크를 열지 않는다
+  const active = enabled && loadedFor === me.employeeId;
+
   // 켜 있고 탭이 보일 때만 마이크를 연다. 끄거나 숨기면 마이크 표시등까지 꺼지게 트랙을 닫는다
   useEffect(() => {
-    if (!enabled) return;
+    if (!active) return;
     if (!visible) {
       store().setStatus('paused');
       return;
@@ -213,7 +66,7 @@ export function SteelmanWake() {
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     let processor: ScriptProcessorNode | null = null;
-    let queue = Promise.resolve();
+    const uploads = new ClipUploadQueue<Blob>((wav) => transcribe(wav, () => cancelled, () => screenControlRef.current), () => cancelled);
     store().setStatus('starting');
     (async () => {
       try {
@@ -227,23 +80,21 @@ export function SteelmanWake() {
         return;
       }
       context = new AudioContext();
-      audioContext = context;
+      setWakeAudioContext(context);
       const source = context.createMediaStreamSource(stream);
       // AudioWorklet은 모듈 파일이 따로 필요해서, 짧은 말 조각에는 충분한 ScriptProcessor를 쓴다
       processor = context.createScriptProcessor(FRAME_SIZE, 1, 1);
       const segmenter = new VoiceSegmenter({ sampleRate: context.sampleRate });
       const rate = context.sampleRate;
       processor.onaudioprocess = (event) => {
-        if (Date.now() < muteUntil) {
+        if (wakeMuted()) {
           segmenter.reset();
           return;
         }
         const clip = segmenter.feed(new Float32Array(event.inputBuffer.getChannelData(0)));
         if (store().hearing !== segmenter.speaking) store().setHearing(segmenter.speaking);
         if (!clip) return;
-        const wav = clipToWav(clip, rate);
-        // 조각은 하나씩 차례로 보낸다 (말 순서가 바뀌면 "철강맨" 뒤의 질문을 놓친다)
-        queue = queue.then(() => transcribe(wav, () => cancelled, () => screenControlRef.current));
+        uploads.push(clipToWav(clip, rate));
       };
       source.connect(processor);
       processor.connect(context.destination);
@@ -255,19 +106,20 @@ export function SteelmanWake() {
       processor?.disconnect();
       stream?.getTracks().forEach((track) => track.stop());
       void context?.close();
-      if (audioContext === context) audioContext = null;
+      setWakeAudioContext(null);
       store().setHearing(false);
     };
-  }, [enabled, visible]);
+  }, [active, visible]);
 
   useSpeakVoiceAnswers();
   useExpireTimers();
 
-  if (!enabled) return null;
+  if (!active) return null;
   return (
     <>
       <SteelmanWakeBar />
       <VoiceApprovalDialog />
+      <ScreenControlConfirmDialog />
     </>
   );
 }
@@ -277,6 +129,16 @@ function useExpireTimers(): void {
   const called = useSteelmanWakeStore((state) => state.called);
   const approval = useSteelmanWakeStore((state) => state.approval);
   const notice = useSteelmanWakeStore((state) => state.notice);
+  const screenConfirm = useSteelmanWakeStore((state) => state.screenConfirm);
+  useEffect(() => {
+    if (!screenConfirm) return;
+    const timer = window.setTimeout(() => {
+      if (store().screenConfirm !== screenConfirm) return;
+      store().setScreenConfirm(null);
+      store().notify('10초가 지나 화면 조작을 켜지 않았어요');
+    }, Math.max(0, screenConfirm.deadline - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [screenConfirm]);
   useEffect(() => {
     if (!called) return;
     const timer = window.setTimeout(() => {
@@ -363,15 +225,9 @@ function ApprovalSummary({ card }: { card: AiActionCard }) {
 /** 말로 승인: 카드를 크게 보이고 10초 안에 "실행"을 기다린다. 손으로도 고를 수 있다 */
 function VoiceApprovalDialog() {
   const approval = useSteelmanWakeStore((state) => state.approval);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!approval) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(timer);
-  }, [approval]);
+  const left = useSecondsLeft(approval?.deadline ?? null);
   if (!approval) return null;
   const { card } = approval.item;
-  const left = Math.max(0, Math.ceil((approval.deadline - now) / 1000));
   return (
     <div data-ai-skip="" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(18,24,32,0.46)] p-4">
       <div role="alertdialog" aria-modal="true" aria-labelledby="voice-approval-title" className="flex w-full max-w-lg flex-col gap-3 rounded-lg border-2 border-steelman bg-surface p-5 shadow-pop">
@@ -398,8 +254,54 @@ function VoiceApprovalDialog() {
           >
             취소
           </Button>
-          <Button size="sm" variant="primary" onClick={() => void executeApproved()}>
+          <Button size="sm" variant="primary" onClick={() => void executeApproved(false)}>
             실행
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 1초마다 남은 초 */
+function useSecondsLeft(deadline: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === null) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  return deadline === null ? 0 : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+/** "화면 조작 켜" 확인 창. 말로는 '말로 승인 허용'이 켜졌을 때만 "실행"으로 켜고, 아니면 [켜기]를 눌러야 한다 */
+function ScreenControlConfirmDialog() {
+  const screenConfirm = useSteelmanWakeStore((state) => state.screenConfirm);
+  const voiceApproval = useSteelmanWakeStore((state) => state.voiceApproval);
+  const left = useSecondsLeft(screenConfirm?.deadline ?? null);
+  if (!screenConfirm) return null;
+  return (
+    <div data-ai-skip="" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(18,24,32,0.46)] p-4">
+      <div role="alertdialog" aria-modal="true" aria-labelledby="screen-confirm-title" className="flex w-full max-w-md flex-col gap-3 rounded-lg border-2 border-steelman bg-surface p-5 shadow-pop">
+        <h2 id="screen-confirm-title" className="text-lg font-bold">
+          화면 조작을 켤까요?
+        </h2>
+        <p className="text-sm text-ink-2">켜면 철강맨AI가 이 화면을 읽고, 화면을 옮기고, 칸을 채워요. 저장·등록·확정 버튼은 누르지 않아요.</p>
+        <p className="rounded-sm bg-steelman-soft px-3 py-2 text-base font-semibold text-steelman-ink">
+          {voiceApproval ? <>맞으면 &lsquo;실행&rsquo;이라고 말하거나 [켜기]를 눌러 주세요</> : <>[켜기]를 눌러 주세요</>} <span className="font-normal">({left}초)</span>
+        </p>
+        <div className="flex justify-end gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => {
+              store().setScreenConfirm(null);
+              store().notify('화면 조작을 켜지 않았어요');
+            }}
+          >
+            취소
+          </Button>
+          <Button size="sm" variant="primary" onClick={() => turnOnScreenControl(false)}>
+            켜기
           </Button>
         </div>
       </div>
