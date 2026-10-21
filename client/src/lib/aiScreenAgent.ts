@@ -116,7 +116,7 @@ export function clickRefusal(node: AgentNode, name: string): string | null {
   if (labels.length > 0 && labels.every(isAiScreenDismissLabel)) {
     return insideDialog(node) ? null : `막았어요: '${name}'은(는) 대화상자 밖의 취소 버튼이라 데이터를 바꿀 수 있어요. 사용자가 직접 눌러야 해요`;
   }
-  const word = aiScreenBlockedWord(`${name} ${clean(attr(node, 'aria-label'))} ${clean(node.textContent)}`);
+  const word = aiScreenBlockedWord(`${name} ${clean(attr(node, 'aria-label'))} ${clean(node.textContent)}`, roleOf(node));
   return word ? `막았어요: '${name}' 버튼은 데이터를 바꿔요(${word}). 사용자가 직접 눌러야 해요` : null;
 }
 

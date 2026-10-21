@@ -102,14 +102,30 @@ describe('실행 카드 한 번만 실행 (이슈 #479)', () => {
     expect(await tasksTitled('번호 없음')).toBe(0);
   });
 
-  it(`실행 중으로 ${CARD_RUN_STALE_MS / 60_000}분 넘게 남은 카드는 다시 잡을 수 있다 (서버가 실행 중에 멈춘 경우)`, async () => {
+  it(`실행 중으로 ${CARD_RUN_STALE_MS / 60_000}분 넘게 남은 카드는 실행과 기록이 한 트랜잭션인 카드만 다시 잡는다`, async () => {
     const ledger = app.get(AiActionCardRunLedger);
     const cardId = randomUUID();
-    expect(await ledger.claim(cardId, ownerId, 'TASK')).toEqual({ state: 'claimed' });
-    expect(await ledger.claim(cardId, ownerId, 'TASK')).toEqual({ state: 'running' });
+    expect(await ledger.claim(cardId, ownerId, 'TASK', true)).toEqual({ state: 'claimed' });
+    expect(await ledger.claim(cardId, ownerId, 'TASK', true)).toEqual({ state: 'running' });
     const later = new Date(Date.now() + CARD_RUN_STALE_MS + 1000);
-    expect(await ledger.claim(cardId, ownerId, 'TASK', later)).toEqual({ state: 'claimed' });
-    expect(await ledger.claim(cardId, ownerId, 'TASK', later)).toEqual({ state: 'running' });
+    expect(await ledger.claim(cardId, ownerId, 'TASK', true, later)).toEqual({ state: 'claimed' });
+    expect(await ledger.claim(cardId, ownerId, 'TASK', true, later)).toEqual({ state: 'running' });
+    // 수주처럼 다른 모듈의 트랜잭션으로 실행한 카드는 실행됐는지 몰라 다시 실행하지 않는다
+    const order = randomUUID();
+    expect(await ledger.claim(order, ownerId, 'SALES_ORDER', false)).toEqual({ state: 'claimed' });
+    expect(await ledger.claim(order, ownerId, 'SALES_ORDER', false, later)).toEqual({ state: 'unknown' });
+  });
+
+  it('업무 카드의 실행 기록은 업무와 같은 트랜잭션에 남는다 (업무가 롤백되면 기록도 없다)', async () => {
+    const cardId = randomUUID();
+    const done = await execute(ownerCookie, taskCard('한 트랜잭션 시험', cardId));
+    expect(done.status).toBe(201);
+    const row = await prisma.aiActionCardRun.findFirstOrThrow({ where: { cardId } });
+    expect(row).toMatchObject({ runStatus: 'DONE', result: { kind: 'TASK', registered: { type: 'task', id: done.data?.registered.id } } });
+    // 업무 트랜잭션이 거절되면 RUNNING도 지워져 다시 실행할 수 있다
+    const rejectedId = randomUUID();
+    expect((await execute(ownerCookie, { ...taskCard('거절 시험', rejectedId), assigneeId: 2147483000 })).status).toBeGreaterThanOrEqual(400);
+    expect(await prisma.aiActionCardRun.count({ where: { cardId: rejectedId } })).toBe(0);
   });
 
   it('열쇠는 카드 번호 → Notion 카드 번호 → 저장한 대화 자리 순으로 고른다', () => {

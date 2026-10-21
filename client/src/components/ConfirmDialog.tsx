@@ -25,7 +25,8 @@ export function ConfirmDialog({ title, confirmLabel, cancelLabel = '취소', ton
           <Button onClick={onCancel} disabled={pending}>
             {cancelLabel}
           </Button>
-          <Button variant={tone} onClick={onConfirm} disabled={pending}>
+          {/* 확인 단추는 되돌리기 어려운 일을 한다: 철강맨AI 화면 조작이 누르지 않는다 (이슈 #479) */}
+          <Button variant={tone} onClick={onConfirm} disabled={pending} data-ai-block="">
             {pending ? '처리하는 중…' : confirmLabel}
           </Button>
         </>

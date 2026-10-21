@@ -104,9 +104,9 @@ export class ScreenActionBroker {
 }
 
 /** 화면 글 줄 `[r12] button "검색"`에서 번호 → 이름. 이름 안의 따옴표는 \" */
-export function snapshotLabels(text: string): Map<string, string> {
-  const labels = new Map<string, string>();
-  for (const match of text.matchAll(/^\[(r\d+)\] \S+ "((?:[^"\\]|\\.)*)"/gm)) labels.set(match[1], match[2].replace(/\\(.)/g, '$1'));
+export function snapshotLabels(text: string): Map<string, { role: string; label: string }> {
+  const labels = new Map<string, { role: string; label: string }>();
+  for (const match of text.matchAll(/^\[(r\d+)\] (\S+) "((?:[^"\\]|\\.)*)"/gm)) labels.set(match[1], { role: match[2], label: match[3].replace(/\\(.)/g, '$1') });
   return labels;
 }
 
@@ -128,7 +128,7 @@ export interface ScreenSessionInput {
 /** 한 답의 화면 조작: 동작 수, 마지막 화면 글의 번호 → 이름 (서버 쪽에서도 막을 버튼을 본다) */
 export class ScreenControlSession {
   private actions = 0;
-  private labels = new Map<string, string>();
+  private labels = new Map<string, { role: string; label: string }>();
 
   constructor(
     private readonly broker: ScreenActionBroker,
@@ -149,9 +149,9 @@ export class ScreenControlSession {
       throw error;
     }
     if (call.name === 'ui_click') {
-      const label = this.labels.get(args.ref);
-      const word = label === undefined ? null : aiScreenBlockedWord(label);
-      if (word) return failure(`막았어요: '${label}' 버튼은 데이터를 바꿔요`, { 안내: USER_MUST_PRESS });
+      const entry = this.labels.get(args.ref);
+      const word = entry === undefined ? null : aiScreenBlockedWord(entry.label, entry.role);
+      if (word) return failure(`막았어요: '${entry?.label}' 버튼은 데이터를 바꿔요`, { 안내: USER_MUST_PRESS });
     }
     if (++this.actions > AI_SCREEN_MAX_ACTIONS) return failure(`이번 질문에서는 화면 조작을 ${AI_SCREEN_MAX_ACTIONS}번까지만 해요`, { 안내: '지금까지 한 것으로 답해요' });
     const tool: AiScreenTool = call.name;

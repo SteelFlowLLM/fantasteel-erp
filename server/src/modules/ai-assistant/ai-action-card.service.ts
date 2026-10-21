@@ -137,7 +137,8 @@ export class AiActionCardService {
    * 업무·일정은 바로 만들고 구매요청은 기존 초안 흐름(확인 대기 → 구매요청 → 부서장 승인)의 초안으로 만든다.
    * 업무·일정·초안 생성이 한 트랜잭션이라 중간에 실패하면 아무것도 남지 않는다.
    */
-  async execute(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+  /** onRegistered: 만든 것을 같은 트랜잭션에서 기록한다 (실행 카드를 한 번만 실행하게, 이슈 #479) */
+  async execute(user: AuthUser, dto: ExecuteAiActionCardDto, onRegistered?: (tx: Tx, result: AiActionCardExecuteResult) => Promise<void>): Promise<AiActionCardExecuteResult> {
     const kind = KINDS.find((k) => k === dto.kind);
     if (!kind) throw new AppException('COM-004', '카드 종류가 올바르지 않아요');
     const card = applyCandidateEdit(blankCandidate(kind), dto, seoulToday(), '오늘');
@@ -145,7 +146,9 @@ export class AiActionCardService {
     if (missing.length > 0) throw new AppException('ACT-001', `채워야 할 칸: ${missing.join(', ')}`);
     const registered = await this.prisma.$transaction(async (tx) => {
       await this.requireReferences(tx, card);
-      return this.register(tx, user, card);
+      const made = await this.register(tx, user, card);
+      await onRegistered?.(tx, { kind, registered: made });
+      return made;
     });
     // 업무·일정이면 Notion 업무 공간(이슈 #391) 반영을 커밋 뒤에 깨운다
     if (registered.type !== 'action_draft') this.notionWorkspace.kick();

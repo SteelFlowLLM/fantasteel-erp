@@ -86,14 +86,11 @@ export function productionResultTool(plans: ProductionService, results: Producti
   };
 }
 
+/** 생산계획 번호는 unique라 번호로 바로 찾는다 */
 async function planIdOf(plans: ProductionService, productionPlanNo: string): Promise<number> {
-  const wanted = productionPlanNo.toLowerCase();
-  const scan = await scanFiltered((page, size) => plans.listPlans({ page, size }), (p) => p.productionPlanNo.toLowerCase() === wanted, { first: true });
-  const found = scan.rows[0];
-  if (found) return found.id;
-  // 다 읽지 못했으면 "없다"고 단정하지 않는다
-  if (scan.unscanned > 0) throw new ToolArgumentError(`생산계획 번호 ${productionPlanNo}를 최근 ${scan.total - scan.unscanned}건에서 찾지 못했어요 (확인하지 못한 생산계획 ${scan.unscanned}건)`);
-  throw new ToolArgumentError(`생산계획 번호 ${productionPlanNo}가 없어요`);
+  const id = await plans.planIdByNo(productionPlanNo);
+  if (id === null) throw new ToolArgumentError(`생산계획 번호 ${productionPlanNo}가 없어요`);
+  return id;
 }
 
 function planRow(p: ProductionPlanSummary) {

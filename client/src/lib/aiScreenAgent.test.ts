@@ -130,6 +130,16 @@ describe('누르지 않는 것·넣지 않는 칸', () => {
     expect(refused(h('a', { href: '/sales-orders' }, '수주 목록'))).toBeNull();
   });
 
+  it('상태 탭·날짜 정렬·필터 풀기는 누르고, 확인 창의 확인 단추는 data-ai-block으로 막는다 (이슈 #479)', () => {
+    const refused = (node: FakeElement) => clickRefusal(node, nameOf(node));
+    expect(refused(h('button', { type: 'button', role: 'tab' }, '완료'))).toBeNull();
+    expect(refused(h('button', { type: 'button' }, '생성일 정렬'))).toBeNull();
+    expect(refused(h('button', { type: 'button' }, '필터 해제'))).toBeNull();
+    const confirm = h('button', { type: 'button', 'data-ai-block': '' }, '나가기');
+    h('div', { role: 'dialog' }, confirm);
+    expect(refused(confirm)).toContain('AI가 누르지 않는 곳');
+  });
+
   it('되돌리기 어려운 버튼(취소·완료·만들기·해제·사용 안 함·연결 끊기)을 막고, 이름이 "취소"뿐이면 대화상자 안일 때만 누른다 (이슈 #479)', () => {
     const refused = (node: FakeElement) => clickRefusal(node, nameOf(node));
     for (const label of ['출하요청 취소', '완료', '만들기', '해제', '사용 안 함', '연결 끊기', '작업 시작']) expect(refused(h('button', { type: 'button' }, label))).toMatch(/^막았어요/);

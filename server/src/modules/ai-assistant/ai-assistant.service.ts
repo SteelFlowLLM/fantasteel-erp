@@ -40,7 +40,7 @@ import { READ_KNOWLEDGE_TOOL } from './tools/knowledge.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
 import { buildMeetingContext } from './assistant-meeting.context';
 import { buildResearchContext, citedResearchSources, type ResearchContext } from './assistant-research.context';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
@@ -231,8 +231,11 @@ export class AiAssistantService {
   private async runActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     const runKey = cardRunKeyOf(dto);
     if (runKey === null) throw new AppException('COM-004', '카드 번호가 없어요. 다시 물어 카드를 새로 받아 주세요');
-    const claim = await this.cardRuns.claim(runKey, user.employeeId, dto.kind);
+    // 업무·일정·구매요청 초안은 실행과 실행 기록이 한 트랜잭션이라 멈춘 실행을 다시 잡아도 겹치지 않는다
+    const inOneTx = WORK_KINDS.includes(dto.kind);
+    const claim = await this.cardRuns.claim(runKey, user.employeeId, dto.kind, inOneTx);
     if (claim.state === 'running') throw new AppException('COM-001', '이 카드를 실행하는 중이에요. 잠시 뒤 결과를 확인해 주세요');
+    if (claim.state === 'unknown') throw new AppException('COM-001', '이 카드를 실행하던 중에 멈춰 결과를 확인하지 못했어요. 해당 화면에서 확인하고, 필요하면 다시 물어 새 카드로 실행해 주세요');
     if (claim.state === 'other-kind') throw new AppException('COM-001', '이미 실행한 다른 카드의 번호예요');
     if (claim.state === 'done') {
       await this.markChatCard(user, dto, claim.result);
@@ -240,12 +243,16 @@ export class AiAssistantService {
     }
     let result: AiActionCardExecuteResult;
     try {
-      result = await this.dispatchActionCard(user, dto);
+      result = await this.dispatchActionCard(user, dto, inOneTx ? (tx, made) => this.cardRuns.finish(runKey, user.employeeId, made, tx) : undefined);
     } catch (error) {
       if (!(error instanceof AppException && error.code === 'INT-009')) await this.cardRuns.release(runKey, user.employeeId);
       throw error;
     }
-    // 업무는 이미 만들었으므로 기록이 실패해도 실행은 성공으로 돌려준다 (그동안은 RUNNING이 남아 상한 시간 뒤 다시 잡힌다)
+    if (inOneTx) {
+      await this.markChatCard(user, dto, result);
+      return result;
+    }
+    // 다른 모듈의 트랜잭션으로 실행한 카드는 커밋 뒤에 기록한다. 기록이 실패해도 실행은 성공으로 돌려준다(RUNNING이 남아 그 카드는 다시 실행되지 않는다)
     await this.cardRuns.finish(runKey, user.employeeId, result).catch((error: unknown) => this.logger.warn(`실행한 카드를 기록하지 못함: ${error instanceof Error ? error.message : String(error)}`));
     await this.markChatCard(user, dto, result);
     return result;
@@ -259,10 +266,10 @@ export class AiAssistantService {
     });
   }
 
-  private async dispatchActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+  private async dispatchActionCard(user: AuthUser, dto: ExecuteAiActionCardDto, onRegistered?: (tx: Tx, result: AiActionCardExecuteResult) => Promise<void>): Promise<AiActionCardExecuteResult> {
     // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 심층 조사는 조사 화면과 같은 service, 나머지는 각 모듈의 확정 기능을 그대로 부른다
     const result = WORK_KINDS.includes(dto.kind)
-      ? await this.cards.execute(user, dto)
+      ? await this.cards.execute(user, dto, onRegistered)
       : NOTION_KINDS.includes(dto.kind)
         ? await this.notionCards.execute(user, dto)
         : UPDATE_KINDS.includes(dto.kind)
