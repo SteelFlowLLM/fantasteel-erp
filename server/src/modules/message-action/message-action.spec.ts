@@ -154,7 +154,7 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(llm.calls).toHaveLength(0);
     const event =await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED, actionDraftId: first.id } });
     expect(event).toMatchObject({ actorEmployeeId: purchaseHead.employeeId, messageId: message.id, targetType: 'action_draft', targetId: first.id });
-    expect(await service.create(purchaser, message.id)).toEqual({ id: first.id, created: false });
+    expect(await service.create(purchaser, message.id)).toEqual({ id: first.id, created: false, requesterId: purchaser.employeeId, requesterName: purchaser.employeeName });
   });
 
   it('방 멤버가 아니면 COM-002, 없는 메시지는 COM-003, 요청자(작성자)에게 구매요청 등록 권한이 없으면 COM-002', async () => {
@@ -165,9 +165,9 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(await codeOf(service.create(purchaser, fromSales.id))).toBe('COM-002');
   });
 
-  it('업무 유형 등록부에 없는 유형(아직 메시지에서 만들 수 없는 유형)은 COM-004', async () => {
-    const message = await send(purchaser, '수주 20매 들어왔어요');
-    expect(await codeOf(service.create(purchaser, message.id, 'SALES_ORDER_CREATE'))).toBe('COM-004');
+  it('업무 유형 등록부에 없는 유형(메시지에서 만들지 않는 생산계획 생성)은 COM-004', async () => {
+    const message = await send(purchaser, '생산계획 20매 잡아 주세요');
+    expect(await codeOf(service.create(purchaser, message.id, 'PRODUCTION_PLAN_CREATE'))).toBe('COM-004');
     expect(await prisma.actionDraft.count({ where: { messageId: message.id } })).toBe(0);
   });
 
@@ -226,7 +226,7 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     const message = await send(purchaser, '석회석 5톤');
     const first = await service.create(purchaser, message.id);
     expect(llm.calls).toHaveLength(1);
-    expect(await service.create(purchaseHead, message.id)).toEqual({ id: first.id, created: false });
+    expect(await service.create(purchaseHead, message.id)).toEqual({ id: first.id, created: false, requesterId: purchaser.employeeId, requesterName: purchaser.employeeName });
     expect(llm.calls).toHaveLength(1);
   });
 
