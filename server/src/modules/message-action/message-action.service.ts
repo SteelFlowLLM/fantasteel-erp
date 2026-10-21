@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   ACTION_TYPE,
+  ACTION_TYPE_LABEL,
   BUSINESS_EVENT_TYPE,
   DRAFT_STATUS,
   MESSAGE_TYPE,
@@ -116,7 +117,10 @@ export class MessageActionService {
     }));
   }
 
-  /** 초안을 만들 수 있는 메시지인지와 확정 주체를 확인하고, 같은 메시지·유형의 미처리 초안을 찾는다 */
+  /**
+   * 초안을 만들 수 있는 메시지인지와 확정 주체를 확인하고, 같은 메시지·유형의 미처리 초안을 찾는다.
+   * 이미 ERP에 반영된 초안이 있으면 막는다: 다시 만들면 같은 수주·구매요청이 두 번 등록된다(#496). 반려된 초안만 있으면 다시 만들 수 있다
+   */
   private async creatable(tx: Tx, user: AuthUser, messageId: number, definition: ActionDefinition) {
     const message = await this.repository.findMessage(tx, messageId);
     if (!message) throw new AppException('COM-003', '메시지를 찾을 수 없어요');
@@ -124,7 +128,18 @@ export class MessageActionService {
     if (message.messageType !== MESSAGE_TYPE.USER || message.senderId === null || message.deletedAt) throw new AppException('COM-004', '사원이 보낸 메시지에서만 초안을 만들 수 있어요');
     const requester = definition.confirmer === 'MESSAGE_SENDER' ? await this.senderWhoCanConfirm(definition, message.senderId) : this.creatorWhoCanConfirm(definition, user);
     await definition.assertCanExecute(tx, requester);
-    return { message, requester, open: await this.repository.findOpenDraft(tx, message.id, definition.actionType) };
+    const open = await this.repository.findOpenDraft(tx, message.id, definition.actionType);
+    if (!open) {
+      const executed = await this.repository.findExecutedDraft(tx, message.id, definition.actionType);
+      if (executed) {
+        const resultNo = definition.resultOf(executed)?.no;
+        throw new AppException(
+          'COM-004',
+          `이 메시지로 만든 ${ACTION_TYPE_LABEL[definition.actionType]} 초안(#${executed.id})은 이미 ERP에 반영했어요${resultNo ? ` (${resultNo})` : ''}. 같은 업무가 두 번 등록되지 않게 새 초안은 만들 수 없어요`,
+        );
+      }
+    }
+    return { message, requester, open };
   }
 
   /** 회의록 작성자가 구매요청 초안의 요청자가 될 수 있는지. 허가할 때 미리 막아 확정 단계에서 전체가 취소되지 않게 한다 */
