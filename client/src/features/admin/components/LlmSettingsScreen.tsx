@@ -41,6 +41,12 @@ export function LlmSettingsScreen() {
   const canEdit = useCanUse(PERMISSION.ORG_MANAGE);
   const settings = useLlmSettings();
   const [tab, setTab] = useState<SettingsTab>('model');
+  // 한 번이라도 연 탭. 음성 서버 연결 확인은 1초 무음을 실제로 보내므로 그 탭을 처음 열 때 한다
+  const [opened, setOpened] = useState<ReadonlySet<SettingsTab>>(() => new Set(['model']));
+  const openTab = (next: SettingsTab) => {
+    setTab(next);
+    setOpened((current) => (current.has(next) ? current : new Set([...current, next])));
+  };
 
   return (
     <PageMain>
@@ -51,7 +57,7 @@ export function LlmSettingsScreen() {
         </div>
         <div className="ml-auto flex items-center gap-2">{canEdit ? null : <ReadOnlyHint permissions={[PERMISSION.ORG_MANAGE]} />}</div>
       </div>
-      <Tabs<SettingsTab> items={TABS} active={tab} onChange={setTab} ariaLabel="AI 연결 설정" />
+      <Tabs<SettingsTab> items={TABS} active={tab} onChange={openTab} ariaLabel="AI 연결 설정" />
       <TabPanel active={tab === 'model'} label="AI 모델">
         <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
           {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
@@ -59,11 +65,11 @@ export function LlmSettingsScreen() {
       </TabPanel>
       <TabPanel active={tab === 'voice'} label="음성 인식">
         <TwoColumns aside={<><SttLocalServerCard canEdit={canEdit} /><SttGuideCard /></>}>
-          <SttSettingsCard canEdit={canEdit} />
+          <SttSettingsCard canEdit={canEdit} active={tab === 'voice'} />
         </TwoColumns>
       </TabPanel>
       <TabPanel active={tab === 'assistant'} label="철강맨AI 기능">
-        <TwoColumns aside={<SteelmanWakeSettingsCard canEdit={canEdit} />}>
+        <TwoColumns aside={<SteelmanWakeSettingsCard canEdit={canEdit} checkVoiceServer={opened.has('assistant')} onOpenVoiceTab={() => openTab('voice')} />}>
           <BrowserSettingsCard canEdit={canEdit} />
         </TwoColumns>
       </TabPanel>

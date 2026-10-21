@@ -7,6 +7,7 @@ export const sttKeys = {
   settings: () => ['stt', 'settings'] as const,
   localServer: () => ['stt', 'local-server'] as const,
   wakeSettings: () => ['stt', 'wake-settings'] as const,
+  savedConnection: () => ['stt', 'saved-connection'] as const,
 };
 
 export const sttApi = {
