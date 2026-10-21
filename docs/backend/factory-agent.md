@@ -72,6 +72,7 @@
 | 위험 유형 코드 | 정의서 2장 `AGENT_RISK_TYPE` 5종 확정. `shared/src/factory-agent.ts`의 자체 정의를 지우고 `shared/src/codes`(생성 파일)를 쓴다 |
 | 후보 생성 알림 | `AGENT_CANDIDATE`로 확정 권한자에게 보낸다 (2장 참고) |
 | 중복 방지 | DB 부분 unique 추가. 마이그레이션 `20261021120000_agent_case_gaps` |
+| 옛 알림 | 배포 전에 `TASK_ASSIGNED`로 보낸 안 읽은 같은 내용의 Agent 알림도 같은 알림으로 봐서 배포 뒤 첫 감지에 한 번 더 보내지 않는다 (`LEGACY_ALERT_NOTIFICATION_TYPE`, 옛 알림이 모두 읽히면 지운다) |
 
 **기존 중복 데이터 처리 (마이그레이션)**: 인덱스를 만들기 전에 같은 `targetKey`의 미처리 후보가 둘 이상이면 가장 진행된 1건(APPROVED > WAITING_APPROVAL > AI_GENERATED, 같으면 id가 작은 것)만 남기고 나머지를 `REJECTED`(사유 `[자동] 같은 대상의 미처리 후보가 이미 있어 정리했어요`)로 닫는다. 지우지 않으므로 작업 로그·구매요청 연결은 그대로고, 반려 뒤에는 다음 감지에서 필요하면 새 후보가 다시 생긴다. 중복이 없으면 아무 행도 바꾸지 않는다. 중복이 있는 DB로 일회용 DB에서 시험했다(남기는 후보·닫는 후보·처리된 후보·agent 칸 없는 초안).
 

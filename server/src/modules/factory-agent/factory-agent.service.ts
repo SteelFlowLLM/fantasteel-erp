@@ -72,6 +72,12 @@ const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
   [ACTION_TYPE.ALLOCATION_CONFIRM]: PERMISSION.SHIPMENT_REQUEST_MANAGE,
 };
 
+/**
+ * 알림 유형을 나누기 전(2026-10-21 이전)에는 납기 위험·불합격률 알림을 TASK_ASSIGNED로 보냈다.
+ * 그때 보낸 안 읽은 알림도 같은 알림으로 봐서, 배포 뒤 첫 감지에 같은 알림이 한 번 더 가지 않게 한다.
+ * 안 읽은 옛 알림이 없어지면 이 상수와 아래 두 곳의 목록을 지운다.
+ */
+const LEGACY_ALERT_NOTIFICATION_TYPE = NOTIFICATION_TYPE.TASK_ASSIGNED;
 /** 품질 부서 코드 (시드 조직) */
 const QUALITY_DEPARTMENT_CODE = 'QC';
 
@@ -198,7 +204,7 @@ export class FactoryAgentService {
     let created = 0;
     for (const alert of alerts) {
       const sent = await this.prisma.$transaction(async (tx) => {
-        if (await this.repository.hasUnreadSameNotification(tx, alert.ownerEmployeeId, NOTIFICATION_TYPE.DUE_RISK, alert.content)) return 0;
+        if (await this.repository.hasUnreadSameNotification(tx, alert.ownerEmployeeId, [NOTIFICATION_TYPE.DUE_RISK, LEGACY_ALERT_NOTIFICATION_TYPE], alert.content)) return 0;
         return this.notification.notifyEmployees(tx, [alert.ownerEmployeeId], { notificationType: NOTIFICATION_TYPE.DUE_RISK, notificationContent: alert.content, linkPath: `/sales-orders/${alert.salesOrderId}` });
       });
       created += sent;
@@ -229,7 +235,7 @@ export class FactoryAgentService {
       created += await this.prisma.$transaction(async (tx) => {
         const members = await this.organization.findActiveMemberIds(tx, department.id);
         const unread = new Set<number>();
-        for (const id of members) if (await this.repository.hasUnreadSameNotification(tx, id, NOTIFICATION_TYPE.QUALITY_RATE_RISE, alert.content)) unread.add(id);
+        for (const id of members) if (await this.repository.hasUnreadSameNotification(tx, id, [NOTIFICATION_TYPE.QUALITY_RATE_RISE, LEGACY_ALERT_NOTIFICATION_TYPE], alert.content)) unread.add(id);
         const targets = members.filter((id) => !unread.has(id));
         return this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.QUALITY_RATE_RISE, notificationContent: alert.content });
       });
@@ -326,7 +332,7 @@ export class FactoryAgentService {
     const content = `[Agent 대응 후보] ${AGENT_RISK_TYPE_LABEL[meta.riskType]}: ${meta.summary}`;
     const members = await this.repository.findActiveEmployeeIdsWithPermission(tx, permission);
     const targets: number[] = [];
-    for (const id of members) if (!(await this.repository.hasUnreadSameNotification(tx, id, NOTIFICATION_TYPE.AGENT_CANDIDATE, content))) targets.push(id);
+    for (const id of members) if (!(await this.repository.hasUnreadSameNotification(tx, id, [NOTIFICATION_TYPE.AGENT_CANDIDATE], content))) targets.push(id);
     await this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.AGENT_CANDIDATE, notificationContent: content, linkPath: '/agent', businessEventId });
   }
 

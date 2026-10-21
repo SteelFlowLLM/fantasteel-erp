@@ -120,8 +120,8 @@ export class FactoryAgentRepository {
     return tx.department.findUnique({ where: { departmentCode }, select: { id: true } });
   }
 
-  /** 받는 사람이 아직 읽지 않은 같은 알림이 있는지 (같은 위험을 매 주기마다 다시 보내지 않는다) */
-  async hasUnreadSameNotification(tx: Tx, recipientId: number, notificationType: string, notificationContent: string): Promise<boolean> {
-    return (await tx.notification.count({ where: { recipientId, notificationType, notificationContent, readAt: null } })) > 0;
+  /** 받는 사람이 아직 읽지 않은 같은 알림이 있는지 (같은 위험을 매 주기마다 다시 보내지 않는다). 유형은 여러 개를 함께 본다 */
+  async hasUnreadSameNotification(tx: Tx, recipientId: number, notificationTypes: readonly string[], notificationContent: string): Promise<boolean> {
+    return (await tx.notification.count({ where: { recipientId, notificationType: { in: [...notificationTypes] }, notificationContent, readAt: null } })) > 0;
   }
 }

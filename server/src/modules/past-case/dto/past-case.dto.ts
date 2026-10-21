@@ -67,5 +67,9 @@ export class CreatePastCaseDto implements CreatePastCaseInput {
   lotIds!: number[];
 }
 
-/** 과거 사례 수정: 등록과 같은 항목·같은 검사 */
-export class UpdatePastCaseDto extends CreatePastCaseDto implements UpdatePastCaseInput {}
+/** 과거 사례 수정: 등록과 같은 항목·같은 검사 + 불러온 시각(동시 수정 확인) */
+export class UpdatePastCaseDto extends CreatePastCaseDto implements UpdatePastCaseInput {
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
+}

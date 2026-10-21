@@ -244,16 +244,18 @@ export class AiOpsCardService {
       ...(dto.caseCategory === undefined ? ['구분'] : []),
     ];
     if (missing.length > 0 || dto.lotId === undefined || dto.caseCategory === undefined || dto.occurredDate === undefined) throw new AppException('ACT-001', `채워야 할 칸: ${missing.join(', ')}`);
-    const created = await this.pastCases.create(user, {
+    // 작업 로그(CASE_REGISTERED)가 AI 경유로 남는다 (REQ-AST-010, 다른 카드와 같다)
+    const { lotId, occurredDate } = dto;
+    const created = await runAsAiAssisted(() => this.pastCases.create(user, {
       caseCategory: dto.caseCategory === 'EQUIPMENT' ? PAST_CASE_CATEGORY.EQUIPMENT : PAST_CASE_CATEGORY.QUALITY,
       title: (dto.title ?? '').trim(),
       phenomenon: (dto.phenomenon ?? '').trim(),
       cause: (dto.cause ?? '').trim(),
       actionTaken: (dto.actionTaken ?? '').trim(),
       equipmentText: (dto.equipmentText ?? '').trim(),
-      occurredDate: dto.occurredDate,
-      lotIds: [dto.lotId],
-    });
+      occurredDate,
+      lotIds: [lotId],
+    }));
     return { kind: 'PAST_CASE', registered: { type: 'past_case', id: created.id, no: created.caseNo } };
   }
 

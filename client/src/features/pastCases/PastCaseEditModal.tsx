@@ -1,7 +1,7 @@
 'use client';
 
 // 사례 수정 (이슈 #464): 등록과 같은 항목을 고친다. 번호·등록자·등록 시각·관련 LOT은 그대로다.
-// 수정은 작업 로그 유형이 없어 작업 로그에 남지 않는다 (docs/backend/past-case.md).
+// 수정은 작업 로그 유형이 없어 작업 로그에 남지 않는다 (docs/backend/past-case.md). 불러온 뒤 다른 사람이 고쳤으면 서버가 거절한다 (COM-001).
 import type { PastCaseView } from '@fantasteel/shared';
 import { useState } from 'react';
 import { pastCaseApi, pastCaseKeys } from '@/api/pastCases';
@@ -13,7 +13,7 @@ import { useAction } from '@/hooks/useAction';
 
 export function PastCaseEditModal({ item, onClose }: { item: PastCaseView; onClose: () => void }) {
   const [form, setForm] = useState<PastCaseForm>(() => formOfCase(item));
-  const save = useAction((input: PastCaseForm) => pastCaseApi.update(item.id, { ...input, lotIds: lotIdsOf(item) }), {
+  const save = useAction((input: PastCaseForm) => pastCaseApi.update(item.id, { ...input, lotIds: lotIdsOf(item), expectedUpdatedAt: item.updatedAt }), {
     success: (saved) => `${saved.caseNo}를 고쳤어요`,
     invalidate: [pastCaseKeys.all],
     onSuccess: onClose,

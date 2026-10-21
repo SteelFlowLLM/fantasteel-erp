@@ -2,7 +2,8 @@
 // 서버는 예시 사례(아래 PAST_CASE_EXAMPLES)와 등록 사례(ERD past_case·past_case_lot)를 합쳐 쓴다.
 // 항목 이름은 ERD past_case 열을 따른다. 검색 규칙은 서버(검색 API·AI 도구)와 화면이 함께 쓴다.
 
-import { CASE_CATEGORY, CASE_CATEGORY_LABEL, type CaseCategory } from './codes';
+import type { AuthUser } from './api';
+import { CASE_CATEGORY, CASE_CATEGORY_LABEL, ROLE, type CaseCategory } from './codes';
 
 /** 공통 코드 정의서 2장 CASE_CATEGORY (EX). 과거 사례 쪽 이름으로 다시 내보낸다 */
 export const PAST_CASE_CATEGORY = CASE_CATEGORY;
@@ -36,8 +37,13 @@ export interface PastCaseView {
   occurredDate: string;
   /** 예시 사례면 null */
   createdEmployeeName: string | null;
+  /** 등록한 사원과 그 소속 부서 (수정·삭제 권한 판단용). 예시 사례면 null */
+  createdEmployeeId: number | null;
+  createdEmployeeDepartmentId: number | null;
   /** 등록 시각 (ISO). 예시 사례면 null */
   createdAt: string | null;
+  /** 마지막 수정 시각 (ISO). 수정할 때 expectedUpdatedAt으로 돌려보내 동시 수정을 막는다. 예시 사례면 null */
+  updatedAt: string | null;
   /** 화면 구성용 예시 사례 (실제 사례 아님) */
   isExample: boolean;
 }
@@ -132,9 +138,9 @@ export function searchPastCases(cases: readonly PastCaseView[], search: PastCase
 
 // ── 예시 사례 (실제 사례 아님): 화면 구성과 시연용. REQ-CASE-005 시드 개수·작성 방식 TBD ──
 
-const example = (seq: number, item: Omit<PastCaseView, 'id' | 'caseNo' | 'createdEmployeeName' | 'createdAt' | 'isExample' | 'lots'> & { lotNos: string[] }): PastCaseView => {
+const example = (seq: number, item: Omit<PastCaseView, 'id' | 'caseNo' | 'createdEmployeeName' | 'createdEmployeeId' | 'createdEmployeeDepartmentId' | 'createdAt' | 'updatedAt' | 'isExample' | 'lots'> & { lotNos: string[] }): PastCaseView => {
   const { lotNos, ...rest } = item;
-  return { id: seq, caseNo: formatCaseNo(seq), ...rest, lots: lotNos.map((lotNo) => ({ lotId: null, lotNo })), createdEmployeeName: null, createdAt: null, isExample: true };
+  return { id: seq, caseNo: formatCaseNo(seq), ...rest, lots: lotNos.map((lotNo) => ({ lotId: null, lotNo })), createdEmployeeName: null, createdEmployeeId: null, createdEmployeeDepartmentId: null, createdAt: null, updatedAt: null, isExample: true };
 };
 
 /** 예시 사례 5건 (품질 2, 설비 3). 구분은 원인이 설비면 설비. 등록 사례 번호는 CASE-0006부터 */
@@ -192,4 +198,14 @@ export const PAST_CASE_EXAMPLES: readonly PastCaseView[] = [
 ];
 
 /** 사례 수정 (등록과 같은 항목 전체를 다시 보낸다. 관련 LOT은 보낸 목록으로 바꾼다) */
-export type UpdatePastCaseInput = CreatePastCaseInput;
+export interface UpdatePastCaseInput extends CreatePastCaseInput {
+  /** 사례를 불러왔을 때의 updatedAt. 그 사이 다른 사람이 고쳤으면 COM-001로 거절한다 */
+  expectedUpdatedAt?: string | null;
+}
+
+/** 사례를 고치거나 지울 수 있는 사람: 등록한 사원 본인, 그 사원 소속 부서의 부서장, 관리자. 예시 사례는 아무도 못 한다 */
+export function canModifyPastCase(user: Pick<AuthUser, 'employeeId' | 'roleCode' | 'headDepartmentIds'>, pastCase: Pick<PastCaseView, 'createdEmployeeId' | 'createdEmployeeDepartmentId'>): boolean {
+  if (pastCase.createdEmployeeId === null) return false;
+  if (user.roleCode === ROLE.ADMIN || user.employeeId === pastCase.createdEmployeeId) return true;
+  return pastCase.createdEmployeeDepartmentId !== null && user.headDepartmentIds.includes(pastCase.createdEmployeeDepartmentId);
+}

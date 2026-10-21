@@ -239,6 +239,31 @@ describe('사례 수정·삭제 (이슈 #464)', () => {
     expect(next.id).toBeGreaterThan(created.id);
   });
 
+  it('등록한 사원 본인·그 부서의 부서장·관리자만 고치고 지운다 (다른 사원은 COM-002)', async () => {
+    const created = await register(input());
+    const other: AuthUser = { ...user, employeeId: user.employeeId + 1000, roleCode: ROLE.QUALITY, headDepartmentIds: [] };
+    const head: AuthUser = { ...other, headDepartmentIds: [user.departmentId] };
+    const otherHead: AuthUser = { ...other, headDepartmentIds: [user.departmentId + 1000] };
+    const admin: AuthUser = { ...other, roleCode: ROLE.ADMIN };
+    await expect(service().update(other, created.id, input())).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service().update(otherHead, created.id, input())).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service().remove(other, created.id)).rejects.toMatchObject({ code: 'COM-002' });
+    expect(await prisma.pastCase.count({ where: { id: created.id } })).toBe(1);
+    await expect(service().update(head, created.id, { ...input(), title: '부서장이 고침' })).resolves.toMatchObject({ title: '부서장이 고침' });
+    await expect(service().update(admin, created.id, { ...input(), title: '관리자가 고침' })).resolves.toMatchObject({ title: '관리자가 고침' });
+    await expect(service().remove(head, created.id)).resolves.toMatchObject({ id: created.id });
+  });
+
+  it('불러온 뒤 다른 곳에서 고쳤으면 COM-001로 거절한다 (expectedUpdatedAt)', async () => {
+    const created = await register(input());
+    const first = await service().update(user, created.id, { ...input(), title: '첫 수정', expectedUpdatedAt: created.updatedAt });
+    expect(first.updatedAt).not.toBe(created.updatedAt);
+    await expect(service().update(user, created.id, { ...input(), title: '늦은 수정', expectedUpdatedAt: created.updatedAt })).rejects.toMatchObject({ code: 'COM-001' });
+    expect((await service().detail(created.id)).title).toBe('첫 수정');
+    // 새로 불러온 시각으로는 고칠 수 있다
+    await expect(service().update(user, created.id, { ...input(), title: '새로 불러와 수정', expectedUpdatedAt: first.updatedAt })).resolves.toMatchObject({ title: '새로 불러와 수정' });
+  });
+
   it('구분은 DB CHECK로도 막는다 (QUALITY·EQUIPMENT만)', async () => {
     const created = await register(input());
     await expect(prisma.pastCase.update({ where: { id: created.id }, data: { caseCategory: 'OTHER' } })).rejects.toThrow();

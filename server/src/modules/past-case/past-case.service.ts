@@ -5,6 +5,7 @@ import {
   INSPECTION_RESULT,
   LOT_TYPE,
   PAST_CASE_EXAMPLES,
+  canModifyPastCase,
   formatCaseNo,
   searchPastCases,
   type AuthUser,
@@ -120,7 +121,11 @@ export class PastCaseService {
     const lotIds = await this.checkedLotIds(input);
     const before = await this.prisma.$transaction(async (tx) => {
       const found = await this.repository.findCase(tx, id);
-      if (!found || !(await this.repository.updateCase(tx, id, fieldsOf(input), lotIds))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      if (!found) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      this.assertCanModify(user, found);
+      const stale = () => new AppException('COM-001', '그 사이 다른 곳에서 사례를 고쳤어요. 새로 불러와 주세요');
+      if (input.expectedUpdatedAt && new Date(input.expectedUpdatedAt).getTime() !== found.updatedAt.getTime()) throw stale();
+      if (!(await this.repository.updateCase(tx, id, found.updatedAt, fieldsOf(input), lotIds))) throw stale();
       return found;
     });
     const saved = await this.repository.findCase(this.prisma, id);
@@ -134,11 +139,18 @@ export class PastCaseService {
     this.assertRegisteredCase(id);
     const removed = await this.prisma.$transaction(async (tx) => {
       const found = await this.repository.findCase(tx, id);
-      if (!found || !(await this.repository.deleteCase(tx, id))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      if (!found) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      this.assertCanModify(user, found);
+      if (!(await this.repository.deleteCase(tx, id))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
       return found;
     });
     this.logger.log(`과거 사례 삭제 ${removed.caseNo} (사원 ${user.employeeId}) 지운 내용 ${JSON.stringify(viewOf(removed))}`);
     return viewOf(removed);
+  }
+
+  /** 등록한 사원 본인, 그 사원 소속 부서의 부서장, 관리자만 고치거나 지운다 (컨트롤러는 DISPOSITION_SET 사용 권한까지만 본다) */
+  private assertCanModify(user: AuthUser, row: PastCaseRow): void {
+    if (!canModifyPastCase(user, viewOf(row))) throw new AppException('COM-002', '사례를 등록한 사원, 그 사원의 부서장, 관리자만 고치거나 지울 수 있어요');
   }
 
   /** 예시 사례(id 1~5)는 DB에 없는 화면용 사례라 고치거나 지우지 못한다 */
@@ -212,7 +224,10 @@ function viewOf(row: PastCaseRow): PastCaseView {
     lots: row.pastCaseLots.map(({ lot }) => ({ lotId: lot.id, lotNo: lot.lotNo })),
     occurredDate: row.occurredDate.toISOString().slice(0, 10),
     createdEmployeeName: row.createdEmployee.employeeName,
+    createdEmployeeId: row.createdEmployeeId,
+    createdEmployeeDepartmentId: row.createdEmployee.departmentId,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
     isExample: false,
   };
 }
