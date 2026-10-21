@@ -42,7 +42,7 @@ import { buildMeetingContext } from './assistant-meeting.context';
 import { buildResearchContext, citedResearchSources, type ResearchContext } from './assistant-research.context';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
-import { parseAssistantAnswer } from './assistant.answer';
+import { EMPTY_ANSWER_NUDGE, emptyAnswerError, isEmptyReply, parseAssistantAnswer } from './assistant.answer';
 import { buildAssistantMessages, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
 import { KnowledgeReads } from './knowledge/knowledge.reads';
@@ -486,6 +486,13 @@ export class AiAssistantService {
             messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: CARD_TOOL_NUDGE });
             reply = await call(tools.filter((tool) => ACTION_CARD_TOOLS.includes(tool.name) || tool.name === NOTION_CARD_TOOL));
           }
+          // 생각만 하고 답 글을 비우면 한 번 다시 시킨다. 처음 답이면 도구를 부를 수 있게 루프 앞에서 (#519)
+          let emptyRetried = false;
+          if (isEmptyReply(reply)) {
+            emptyRetried = true;
+            messages.push({ role: 'assistant', content: '…' }, { role: 'user', content: EMPTY_ANSWER_NUDGE });
+            reply = await call(tools);
+          }
           // 사용자가 작업 중에 덧붙인 말은 다음 모델 호출 앞에서 user 메시지로 넣는다 (이슈 #430)
           const injectNotes = () => {
             const notes = control?.notes.drain() ?? [];
@@ -594,7 +601,16 @@ export class AiAssistantService {
             reply = await call(round < maxRounds ? tools : []);
           }
 
-          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
+          const parseReply = () => parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
+          let parsed = parseReply();
+          // 도구 상한에 닿고도 도구만 부르는 답은 다시 시켜도 같아서 바로 실패로 돌린다
+          if (!parsed.answer && !emptyRetried && reply.toolCalls.length === 0) {
+            messages.push({ role: 'assistant', content: '…' }, { role: 'user', content: EMPTY_ANSWER_NUDGE });
+            reply = await call([]);
+            parsed = parseReply();
+          }
+          // 그래도 비면 실패로 돌린다: 빈 답을 정상 답으로 보이거나 대화에 저장하지 않는다 (#519)
+          if (!parsed.answer) throw emptyAnswerError();
           // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다.
           // 지난 대화를 찾아 읽은 답은 "그때 카드를 만들었어요"처럼 지난 일을 옮기는 것이라 바로잡지 않는다 (이슈 #412)
           const recalled = toolCalls.some((call) => historySearch?.has(call.name) === true);

@@ -2,8 +2,17 @@ import type { AiAssistantSource } from '@fantasteel/shared';
 import type { GlossaryTerm } from './knowledge/glossary.types';
 import type { ManualGuide } from './knowledge/manual.types';
 import type { ProcessStep } from './knowledge/process.types';
+import { LlmRequestError } from '../llm/llm.client';
 
-export const EMPTY_ANSWER = '답을 만들지 못했어요. 질문을 조금 바꿔 다시 물어봐 주세요.';
+/**
+ * 다시 시켜도 답 글이 빈 답의 안내 (#519). 정상 답으로 보이면 다시 물을 단추가 없고 대화에도 남아서,
+ * LLM 실패(AST-005)로 돌려 화면이 [다시 묻기]가 있는 실패로 보이게 한다
+ */
+export const EMPTY_ANSWER = '모델이 빈 답을 줬어요. 다시 물어봐 주세요. 계속되면 질문을 조금 바꿔 주세요';
+export const emptyAnswerError = (): LlmRequestError => new LlmRequestError(EMPTY_ANSWER);
+
+/** 빈 답을 한 번 다시 시킬 때 모델에 덧붙이는 말 */
+export const EMPTY_ANSWER_NUDGE = '방금 답 글이 비어 있었어요. 생각만 하고 끝내지 말고 사용자 질문에 대한 답을 글로 써요.';
 
 const TERM_ID = /TRM-\d{3}/g;
 /** [TRM-056] · [TRM-056, TRM-060] · (TRM-056) 같은 출처 표시 */
@@ -42,7 +51,7 @@ export function parseAssistantAnswer(raw: string, references: readonly GlossaryT
     .filter((guide): guide is ManualGuide => guide !== undefined);
 
   return {
-    answer: answer || EMPTY_ANSWER,
+    answer,
     sources: [
       ...citedGuides.map((guide) => ({ kind: 'MANUAL' as const, id: guide.id, label: guide.name })),
       ...citedSteps.map((step) => ({ kind: 'PROCESS' as const, id: step.id, label: step.name })),
@@ -50,6 +59,9 @@ export function parseAssistantAnswer(raw: string, references: readonly GlossaryT
     ],
   };
 }
+
+/** 도구를 부르지 않았는데 생각·출처 표시를 빼면 글이 없는 답 (생각만 하고 끝난 답) */
+export const isEmptyReply = (reply: { content: string; toolCalls: readonly unknown[] }): boolean => reply.toolCalls.length === 0 && parseAssistantAnswer(reply.content, []).answer === '';
 
 /** 추론 모델(LM Studio의 qwen·deepseek 등)이 답 앞에 붙이는 <think> 부분은 보이지 않는다 */
 function withoutThinking(raw: string): string {
