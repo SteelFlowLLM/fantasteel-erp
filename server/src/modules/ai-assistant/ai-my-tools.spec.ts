@@ -366,6 +366,10 @@ describe('아침 브리핑 (get_my_briefing)', () => {
     const data = brief.data;
     expect(brief.sourceId).toBe('get_my_briefing');
     expect(data.기준일).toBe(today);
+    // 먼저 할 일 후보는 급한 순서로 읽을 것이 있는 묶음의 한 줄 (지난 업무가 맨 앞)
+    const top = data['먼저 할 일 후보(급한 순서, 최대 3)'] as string[];
+    expect(top.length).toBeLessThanOrEqual(3);
+    expect(top[0]).toContain('마감이 지난 내 업무');
     const titles = (group: unknown) => ((group as { 업무?: { 제목: string }[] }).업무 ?? []).map((t) => t.제목);
     expect(titles(data['마감이 지난 내 업무'])).toContain(`${TAG} 지난 업무`);
     expect(titles(data['마감이 지난 내 업무'])).not.toContain(`${TAG} 끝난 업무`);
@@ -396,9 +400,9 @@ describe('아침 브리핑 (get_my_briefing)', () => {
     expect(Object.keys(brief)).toEqual(expect.arrayContaining(['오늘 내 일정', '마감이 지난 내 업무', '안 읽은 알림', '열린 Agent 위험']));
   });
 
-  it('묶음은 먼저 할 일의 우선순위 순서다: 지난 업무 → (납기) → Agent → (결재) → 일정 → 임박 업무 → 알림 → 제외한 묶음', async () => {
+  it('묶음은 먼저 할 일 후보 → 지난 업무 → (납기) → Agent → (결재) → 일정 → 임박 업무 → 알림 → 제외한 묶음 순서다', async () => {
     const brief = (await call(withoutAccess(jeong), 'get_my_briefing')).data;
-    expect(Object.keys(brief)).toEqual(['기준일', '마감이 지난 내 업무', '열린 Agent 위험', '오늘 내 일정', '마감 임박 내 업무 (3일 안)', '안 읽은 알림', '제외한 묶음']);
+    expect(Object.keys(brief)).toEqual(['기준일', '먼저 할 일 후보(급한 순서, 최대 3)', '마감이 지난 내 업무', '열린 Agent 위험', '오늘 내 일정', '마감 임박 내 업무 (3일 안)', '안 읽은 알림', '제외한 묶음']);
     // 후보를 볼 권한이 없으면 Agent 묶음에는 알림 칸만 있다
     const agent = brief['열린 Agent 위험'];
     expect(agent === '없음' || (typeof agent === 'object' && agent !== null && !('대응 후보' in agent))).toBe(true);
