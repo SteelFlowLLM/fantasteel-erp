@@ -60,6 +60,8 @@ const STOPPED_BUBBLE = `${TAIL_SHAPE} rounded-lg border-2 border-line-strong bg-
 
 /** 지금 모델이 사진을 볼 수 없을 때 첨부 단추에 보이는 안내 */
 const NO_VISION_TITLE = '지금 모델은 사진을 볼 수 없어요';
+/** 사진을 붙인 질문을 다시 물으려는데 그 사이 모델이 사진을 볼 수 없게 됐을 때 */
+const NO_VISION_RETRY = `${NO_VISION_TITLE}. 사진을 빼고 다시 물으면 사진을 보지 않은 답이 나와요. 사진을 볼 수 있을 때 다시 묻거나 사진 없이 새로 물어봐 주세요`;
 /** / 명령을 지금 쓸 수 없을 때 고르기 창과 입력칸 아래에 보이는 이유 */
 const SLASH_RESEARCH_OFF = '심층 조사를 쓸 수 없어요 (AI 연결에 모델이 정해져 있지 않아요)';
 const SLASH_WEB_OFF = '웹 검색을 쓸 수 없어요';
@@ -437,9 +439,14 @@ export function AiPanel() {
 
   // 다시 물을 때는 처음 보냈던 생각 정도로 묻는다 (고른 값은 건드리지 않는다)
   const retry = (failure: FailureEntry) => {
+    // 사진을 말없이 빼고 다시 물으면 사진을 읽은 답으로 오해한다 (#519)
+    if (visionOff && failure.images?.length) {
+      photos.warn(NO_VISION_RETRY);
+      return;
+    }
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), visionOff ? undefined : failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, undefined, notionOn, { drive: driveOn });
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, undefined, notionOn, { drive: driveOn });
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
