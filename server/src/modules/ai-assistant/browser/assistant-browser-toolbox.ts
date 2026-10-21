@@ -365,6 +365,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private closed: 'time' | 'abort' | 'done' | null = null;
   /** 보이는 마우스의 마지막 자리 (페이지를 옮겨도 이어서 움직인다) */
   private cursor: { x: number; y: number } = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
+  /** AI가 이 탭을 쓰는 동안은 새 문서가 뜰 때마다 마우스를 마지막 자리에 다시 그린다 (이슈 #433) */
+  private cursorActive = false;
   /** 실시간 화면을 찍는 중인지 */
   private live = false;
   /** 모델용 번호 표를 그려 둔 동안(과 지운 뒤 잠깐)은 실시간 화면 사진을 버린다 */
@@ -408,6 +410,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   park(): boolean {
     if (!this.page || this.closed || this.page.isClosed() || Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS) return false;
     this.input.signal?.removeEventListener('abort', this.onAbort);
+    this.cursorActive = false;
     void this.stopLive();
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadlineTimer = null;
@@ -472,6 +475,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     const counted = call.name !== 'browser_snapshot';
     if (counted && this.actions >= this.maxActions) return failure(`이번 질문에서는 브라우저 동작을 ${this.maxActions}번까지만 해요`, { 안내: '지금까지 본 내용으로 답해요' });
     if (counted) this.actions += 1;
+    this.cursorActive = true;
     const result = await this.dispatch(call, args, signal);
     if (counted && result.failed) this.actions -= 1;
     return result;
@@ -499,6 +503,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
         case 'browser_scroll': {
           const direction = optionalEnum(args, 'direction', ['down', 'up'] as const) ?? 'down';
           return await this.withPage(async (page) => {
+            // 클릭 없이 스크롤만 해도 마우스가 보이게
+            await this.drawCursor(page);
             await page.evaluate(`window.scrollBy(0, ${(direction === 'down' ? 1 : -1) * Math.round(VIEWPORT.height * 0.8)})`);
             return this.afterAction(page);
           });
@@ -718,6 +724,10 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) this.refs.startDocument();
     });
+    // 새 문서는 마우스가 없으므로 뜬 뒤에 마지막 자리에 다시 그린다
+    page.on('domcontentloaded', () => {
+      if (this.cursorActive && this.page === page) void this.drawCursor(page);
+    });
     // 탭이 밖에서 닫히면(창을 띄웠을 때 사람이 닫는 등) 그 컨텍스트를 놓고, 다음 열기가 새 탭을 연다
     page.on('close', () => void this.dropPage(page));
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
@@ -883,6 +893,15 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, this.cursor, to, true));
       this.cursor = to;
       await page.waitForTimeout(CURSOR_MOVE_MS);
+    } catch (error) {
+      this.logger.debug(`마우스를 그리지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+    }
+  }
+
+  /** 움직이지 않고 마지막 자리에 마우스를 그린다. 못 그려도 동작은 그대로 한다 */
+  private async drawCursor(page: Page): Promise<void> {
+    try {
+      await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, this.cursor, this.cursor, false));
     } catch (error) {
       this.logger.debug(`마우스를 그리지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
     }

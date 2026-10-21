@@ -1,10 +1,10 @@
 // 철강맨AI 보이는 마우스 (이슈 #425, 문서에 없는 기능). ERP 화면 조작이 누르기·채우기·고르기 전에 그 칸으로 커서를 움직이고 물결을 보인다.
 // 서버 Chrome의 커서와 같은 모양이다. 화면에 그리기만 하고 마우스 이벤트는 받지 않는다(pointer-events: none).
 // 움직임을 줄이도록 설정한 사용자에게는 움직이지 않고 바로 그 자리에 보인다.
+// 첫 동작부터 답이 끝날 때까지(hideAiCursor) 마지막 자리에 계속 보인다 (이슈 #433).
 
-/** 커서가 칸까지 움직이는 시간, 마지막 동작 뒤 숨기기까지의 시간 (가정값) */
+/** 커서가 칸까지 움직이는 시간 (가정값) */
 export const AI_CURSOR_MOVE_MS = 350;
-export const AI_CURSOR_HIDE_MS = 2500;
 const RIPPLE_MS = 450;
 const ID = 'fantasteel-ai-cursor';
 
@@ -12,7 +12,6 @@ const CURSOR_SVG =
   '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 2l7.5 19 2.6-7.6L20.7 11z" fill="#f97316" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 
 let position: { x: number; y: number } | null = null;
-let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 요소 가운데 (화면 기준). 화면 밖이면 가장자리로 붙인다 */
 export function cursorTarget(rect: { left: number; top: number; width: number; height: number }, viewport: { width: number; height: number }): { x: number; y: number } {
@@ -57,7 +56,6 @@ export async function moveAiCursorTo(element: HTMLElement, ripple = true): Promi
     const { cursor, ripple: ring } = ensureLayer();
     const from = position ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     const moveMs = reducedMotion() ? 0 : AI_CURSOR_MOVE_MS;
-    if (hideTimer) clearTimeout(hideTimer);
     cursor.style.opacity = '1';
     cursor.style.transition = 'opacity .2s';
     cursor.style.transform = `translate(${from.x}px, ${from.y}px)`;
@@ -71,10 +69,12 @@ export async function moveAiCursorTo(element: HTMLElement, ripple = true): Promi
       ring.style.top = `${to.y}px`;
       ring.animate([{ opacity: 0.9, transform: 'scale(0.3)' }, { opacity: 0, transform: 'scale(1.4)' }], { duration: RIPPLE_MS, easing: 'ease-out' });
     }
-    hideTimer = setTimeout(() => {
-      cursor.style.opacity = '0';
-    }, AI_CURSOR_HIDE_MS);
   } catch {
     // 커서는 보이기만 하는 것이라 실패해도 동작을 막지 않는다
   }
+}
+
+/** 답이 끝났을 때 커서를 숨긴다. 다음 답의 첫 동작은 이 자리에서 이어서 움직인다 */
+export function hideAiCursor(): void {
+  if (layer?.root.isConnected) layer.cursor.style.opacity = '0';
 }

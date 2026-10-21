@@ -131,6 +131,15 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     for (const start = Date.now(); !done() && Date.now() - start < ms; ) await new Promise((r) => setTimeout(r, 100));
   };
 
+  /** 비동기로 읽는 값이 want가 될 때까지 잠깐 기다린다 (못 되면 마지막 값으로 실패) */
+  const settles = async <T>(read: () => Promise<T>, want: T, ms = 4_000): Promise<void> => {
+    for (const start = Date.now(); Date.now() - start < ms; ) {
+      if ((await read()) === want) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(await read()).toBe(want);
+  };
+
   afterAll(() => pool.shutdown());
 
   it('화면 읽기와 실패한 동작은 동작 수에 세지 않고, 상한을 넘는 동작은 막는다 (이슈 #430)', async () => {
@@ -292,15 +301,15 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     expect(pool.activeContexts).toBe(0);
   });
 
-  it('누르기 전에 보이는 마우스를 그리고, 이동 없는 클릭 뒤에도 그 마우스가 화면 사진에 남는다 (이슈 #425)', async () => {
+  it('페이지를 열면 마우스를 그리고, 누르기 전에 요소로 움직이며, 이동 없는 클릭 뒤에도 그 마우스가 화면 사진에 남는다 (이슈 #425, #433)', async () => {
     const session = toolbox().session({ question: 'https://example.test/cursor 눌러줘', web: web() });
     try {
       const opened = await session.run(call('browser_open', { url: 'https://example.test/cursor' }));
-      // 읽기·열기만으로는 마우스를 그리지 않는다
       const page = contexts.at(-1)?.pages()[0];
       if (!page) throw new Error('페이지 없음');
       const cursorCount = () => page.evaluate('document.querySelectorAll(\'[id$="-cursor"]\').length');
-      expect(await cursorCount()).toBe(0);
+      // 새 문서가 뜨면 누르기 전에도 마우스가 있다 (그리는 일은 문서가 뜬 뒤 따로 돈다)
+      await settles(cursorCount as () => Promise<unknown>, 1);
 
       const clicked = await session.run(call('browser_click', { ref: refOf(opened, 'button "누르기"') }));
       expect(clicked.content).toContain('눌렀어요');
@@ -323,7 +332,7 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
       expect((await session.run(call('browser_snapshot'))).content).not.toMatch(/-cursor|f97316/);
 
       // 화면 사진에 주황(#f97316) 마우스가 찍혔다: 브라우저 밖의 빈 탭에서 JPEG를 풀어 주황 픽셀을 센다.
-      // 누르기 전 사진에는 없던 주황이 누른 뒤 사진에 생겼는지 견준다 (화살표가 작아 픽셀 수의 절대값은 타이밍에 따라 달라진다)
+      // 누른 뒤 사진에 주황이 있다 (화살표가 작아 픽셀 수의 절대값은 타이밍에 따라 달라진다)
       const decoder = await (page.context().browser() as NonNullable<ReturnType<BrowserContext['browser']>>).newContext();
       try {
         const blank = await decoder.newPage();
@@ -342,11 +351,38 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
             for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] > 70 && data[i + 1] < 170 && data[i + 2] < 100) count += 1;
             return count;
           })()`)) as number;
-        expect(await orangeIn(opened.frame?.imageBase64 ?? '')).toBe(0);
         expect(await orangeIn(clicked.frame?.imageBase64 ?? '')).toBeGreaterThanOrEqual(5);
       } finally {
         await decoder.close();
       }
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('페이지를 옮겨도 마지막 자리에 마우스를 다시 그리고, 클릭 없이 스크롤만 해도 보인다 (이슈 #433)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/cursor 눌러 보고 https://example.test/page/2 로 가줘', web: web() });
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/cursor' }));
+      const page = contexts.at(-1)?.pages()[0];
+      if (!page) throw new Error('페이지 없음');
+      const cursorAt = () =>
+        page.evaluate(`(() => {
+          const host = document.documentElement.querySelector(':scope > [id$="-cursor"]');
+          const arrow = host && host.shadowRoot && host.shadowRoot.querySelector('.c');
+          return arrow ? arrow.style.transform : null;
+        })()`);
+      await session.run(call('browser_click', { ref: refOf(opened, 'button "누르기"') }));
+      const clickedAt = await cursorAt();
+      expect(clickedAt).toMatch(/^translate\(\d+px, ?\d+px\)$/);
+
+      // 새 문서에는 마우스가 없지만, 뜬 뒤에 마지막 자리에 다시 그린다
+      await session.run(call('browser_open', { url: 'https://example.test/page/2' }));
+      await settles(cursorAt as () => Promise<unknown>, clickedAt);
+
+      // 긴 페이지를 클릭 없이 스크롤해도 마우스가 있다 (position: fixed라 스크롤을 따라가지 않는다)
+      await session.run(call('browser_scroll', { direction: 'down' }));
+      expect(await cursorAt()).toBe(clickedAt);
     } finally {
       await session.close();
     }

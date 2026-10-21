@@ -10,6 +10,7 @@ import { isAbortError } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { readAiChatThread, writeAiChatThread } from '@/lib/aiChatThread';
 import { useMe } from '@/hooks/useMe';
+import { hideAiCursor } from '@/lib/aiCursor';
 import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
 import { AI_CHAT_STOPPED_REASON, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
@@ -168,7 +169,10 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     chat().addFailure(questionId, question, controller.signal.aborted || isAbortError(error) ? AI_CHAT_STOPPED_REASON : errorMessageOf(error));
   } finally {
     unsubscribe();
-    if (screenControl) useAiScreenControlStore.getState().setRunning(false);
+    if (screenControl) {
+      useAiScreenControlStore.getState().setRunning(false);
+      hideAiCursor();
+    }
     if (activeController === controller) activeController = null;
   }
 }

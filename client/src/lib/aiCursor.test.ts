@@ -159,19 +159,24 @@ describe('moveAiCursorTo', () => {
     expect((layerOf()?.children[0] as FakeNode).animate).not.toHaveBeenCalled();
   });
 
-  it('마지막 동작 뒤 AI_CURSOR_HIDE_MS가 지나면 숨기고, 그 전에 새 동작이 오면 숨기기를 미룬다', async () => {
-    const { AI_CURSOR_HIDE_MS } = await load();
+  it('시간이 지나도 숨기지 않고, hideAiCursor를 부르면 숨긴다. 다음 동작은 다시 보인다', async () => {
+    const { hideAiCursor } = await load();
     await moveTo(target({ left: 100, top: 100, width: 40, height: 20 }));
     const cursor = layerOf()?.children[1] as FakeNode;
-    await vi.advanceTimersByTimeAsync(AI_CURSOR_HIDE_MS - 100);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(cursor.style.opacity).toBe('1');
 
-    await moveTo(target({ left: 200, top: 200, width: 40, height: 20 }));
-    // 처음 숨기기 시각이 지나도 새 동작이 미뤘으니 아직 보인다
-    await vi.advanceTimersByTimeAsync(300);
-    expect(cursor.style.opacity).toBe('1');
-    await vi.advanceTimersByTimeAsync(AI_CURSOR_HIDE_MS);
+    hideAiCursor();
     expect(cursor.style.opacity).toBe('0');
+
+    await moveTo(target({ left: 200, top: 200, width: 40, height: 20 }));
+    expect(cursor.style.opacity).toBe('1');
+  });
+
+  it('커서를 그린 적이 없으면 hideAiCursor는 아무 일도 하지 않는다', async () => {
+    const { hideAiCursor } = await load();
+    expect(() => hideAiCursor()).not.toThrow();
+    expect(layerOf()).toBeUndefined();
   });
 
   it('요소가 문서에서 떨어졌으면 층을 다시 만든다', async () => {
