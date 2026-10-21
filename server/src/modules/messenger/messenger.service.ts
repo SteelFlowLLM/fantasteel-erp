@@ -26,6 +26,7 @@ import {
   aiQuestionOf,
   aiReplyContent,
   aiReplyTextOf,
+  isUnreadableAiReply,
   mentionsAi,
   parseAiReply,
   AI_TYPING_EMPLOYEE_ID,
@@ -307,17 +308,24 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     private readonly authUsers: AuthUserService,
   ) {}
 
-  /** 조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 있는 멤버에게만 보인다. 다른 메시지는 모두에게 */
-  private canSee(viewer: AuthUser, content: string | null): boolean {
+  /**
+   * 조회 데이터로 답한 AI 답은 그 데이터를 볼 권한이 있는 멤버에게만 보인다. 다른 메시지는 모두에게.
+   * AI 답(시스템 메시지)인데 표시를 읽지 못하면 어떤 데이터를 썼는지 몰라 아무에게도 보이지 않는다(fail-closed, 이슈 #506):
+   * 위젯 id(`get_dashboard_summary:process_yield`)를 못 읽던 때 데이터 답이 방 멤버 모두에게 보였다.
+   * 사람이 쓴 글(`[AI 어시스턴트 사용법]` 같은 제목)은 숨기지 않는다
+   */
+  private canSee(viewer: AuthUser, content: string | null, fromSystem = false): boolean {
+    if (fromSystem && isUnreadableAiReply(content)) return false;
     const dataTools = parseAiReply(content)?.dataTools ?? [];
     return dataTools.length === 0 || this.aiAssistant.canViewData(viewer, dataTools);
   }
 
   /** 소켓으로 보낼 때 같은 기준으로 멤버를 거른다 (사원을 읽지 못하면 보내지 않는다) */
-  private async membersWhoCanSee(content: string | null, memberIds: readonly number[]): Promise<number[]> {
+  private async membersWhoCanSee(content: string | null, memberIds: readonly number[], fromSystem: boolean): Promise<number[]> {
+    if (fromSystem && isUnreadableAiReply(content)) return [];
     if ((parseAiReply(content)?.dataTools ?? []).length === 0) return [...memberIds];
     const users = await Promise.all(memberIds.map((id) => this.authUsers.load(id)));
-    return users.flatMap((viewer) => (viewer && this.canSee(viewer, content) ? [viewer.employeeId] : []));
+    return users.flatMap((viewer) => (viewer && this.canSee(viewer, content, fromSystem) ? [viewer.employeeId] : []));
   }
 
   /** 수주 작업 로그가 기록되면 같은 tx에서 그 수주의 업무방에 진행 알림을 남긴다 (다른 모듈 코드를 고치지 않으려고 기록기에 건다) */
@@ -361,7 +369,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
   /** 방 멤버 전원에게 새 메시지를 보낸다 (안 읽은 사람 수·ERP 링크 포함) */
   private async emitNewMessage(message: MessageWithSender): Promise<void> {
     const allMemberIds = (await this.repository.findMemberIds(this.prisma, message.chatRoomId)).map((m) => m.employeeId);
-    const memberIds = await this.membersWhoCanSee(message.content, allMemberIds);
+    const memberIds = await this.membersWhoCanSee(message.content, allMemberIds, message.senderId === null);
     const reads = await this.repository.findMemberReads(this.prisma, message.chatRoomId);
     const erpLinksOf = await this.erpLinkResolver([message.content]);
     const unread = unreadMemberCountOf(message, reads);
@@ -405,7 +413,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
               senderName: last.senderId === null ? (aiReplyTextOf(last.content) === null ? SYSTEM_SENDER_NAME : AI_SENDER_NAME) : (lastSender?.employeeName ?? '-'),
               isMine: last.senderId === me,
               isSystem: last.senderId === null,
-              preview: last.senderId === null && !this.canSee(user, last.content) ? HIDDEN_AI_REPLY_PREVIEW : lastPreviewOf(last),
+              preview: last.senderId === null && !this.canSee(user, last.content, true) ? HIDDEN_AI_REPLY_PREVIEW : lastPreviewOf(last),
               createdAt: last.createdAt.toISOString(),
             }
           : null,
@@ -697,7 +705,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
 
   /** 메시지 목록 응답: 멤버 읽음 위치를 한 번 읽어 메시지마다 안 읽은 사람 수를 붙인다. 볼 권한이 없는 AI 답은 뺀다 */
   private async toPage(chatRoomId: number, viewer: AuthUser, allRows: readonly MessageWithSender[], hasMore: boolean): Promise<ChatMessagePage> {
-    const rows = allRows.filter((m) => this.canSee(viewer, m.content));
+    const rows = allRows.filter((m) => this.canSee(viewer, m.content, m.senderId === null));
     const reads = await this.repository.findMemberReads(this.prisma, chatRoomId);
     const erpLinksOf = await this.erpLinkResolver(rows.map((m) => m.content));
     return { items: rows.map((m) => toMessageView(m, viewer.employeeId, unreadMemberCountOf(m, reads), erpLinksOf)), hasMore };
@@ -996,7 +1004,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
         const rows = await this.repository.searchRoomMessages(this.prisma, chatRoomId, words, limit * 3);
         return rows
           .flatMap((row): HistoryHit[] => {
-            if (!row.content || !this.canSee(asker, row.content)) return [];
+            if (!row.content || !this.canSee(asker, row.content, row.sender === null)) return [];
             const aiText = aiReplyTextOf(row.content);
             if (aiText !== null) return [{ at: row.createdAt, who: '철강맨AI', where: null, text: aiText }];
             if (row.sender === null) return [];
@@ -1012,7 +1020,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     const recent = await this.repository.findMessagesBefore(this.prisma, chatRoomId, beforeMessageId, AI_HISTORY_MESSAGES);
     return recent.reverse().flatMap((message): AiAssistantTurn[] => {
       // 묻는 사람이 볼 수 없는 AI 답은 맥락에도 넣지 않는다 (그 데이터가 질문자에게 새지 않게)
-      if (message.deletedAt || !message.content || !this.canSee(asker, message.content)) return [];
+      if (message.deletedAt || !message.content || !this.canSee(asker, message.content, message.sender === null)) return [];
       const aiText = aiReplyTextOf(message.content);
       if (aiText !== null) return [{ role: 'assistant', content: aiText }];
       if (message.sender === null) return [];
