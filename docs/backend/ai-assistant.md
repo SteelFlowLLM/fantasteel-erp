@@ -487,7 +487,7 @@ Notion·일정·업무 고치기 카드 오류 (이슈 #398, 새 코드 없음):
 | `MEETING_ANALYSIS` 회의록 1차 분석 (JSON) | 추출 | 보통 |
 | `MEETING_REVIEW` 회의록 2차 검토 (JSON) | 추출 | 보통 |
 | `MESSAGE_EXTRACT` Message → ERP 초안 (JSON) | 추출 | 끔 |
-| `PAST_CASE_DRAFT` 과거 사례 초안 (JSON) | 추출 | 낮게 |
+| `PAST_CASE_DRAFT` 과거 사례 초안 (JSON) | 추출 | 끔 (낮게면 60초 제한을 자주 넘겼다, #519) |
 
 | 샘플링 | temperature | top_p | top_k * | min_p * | repeat_penalty * | presence_penalty |
 | --- | --- | --- | --- | --- | --- | --- |
