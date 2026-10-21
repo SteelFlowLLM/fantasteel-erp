@@ -20,6 +20,9 @@ function displayNameOf(providerKey: string): string {
   return isProviderKey(providerKey) ? providerPresets()[providerKey].displayName : providerKey;
 }
 
+/** 풀 장애가 없다는 확인을 이만큼 기억한다. 성공한 호출마다 DB를 읽지 않으려는 것이고, 다른 서버가 그 사이 기록한 장애는 이 서버의 다음 확인(최대 이 시간 뒤)에 풀린다 */
+const CLEAN_CACHE_MS = 30_000;
+
 function messageOf(error: AppException): string {
   return (error.getResponse() as { message: string }).message;
 }
@@ -32,10 +35,15 @@ function messageOf(error: AppException): string {
  * 알림 여부는 DB에서 조건부 UPDATE(claimIntegrationFaultAlert)로 정해 서버가 여러 대여도 같은 알림이 두 번 가지 않는다.
  * 알림은 장애 줄을 고치는 트랜잭션과 같은 tx에서 만들어 알림만 사라지거나 알리지 않은 채 알린 것으로 적히지 않는다.
  * 기록하다 실패해도 본 호출(내보내기·Drive 읽기 등)의 결과를 바꾸지 않도록 어떤 함수도 던지지 않는다.
+ *
+ * 성공한 호출마다 `resolve`가 불리므로 '풀 장애가 없다'는 확인을 30초 기억한다(`cleanUntil`). 이 서버가 장애를 기록하면 바로 잊는다.
+ * 다른 서버가 장애를 기록한 직후라면 이 서버의 복구는 최대 30초 늦을 뿐이다(복구 알림이 빠지지는 않는다).
  */
 @Injectable()
 export class IntegrationFaultService {
   private readonly logger = new Logger(IntegrationFaultService.name);
+  /** `연결 대상|종류들` → 이 시각까지는 풀 장애가 없다고 본다 */
+  private readonly cleanUntil = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -52,12 +60,15 @@ export class IntegrationFaultService {
   /** 장애 한 번을 기록하고, 알릴 때가 됐으면 연동 관리 권한자에게 알림을 보낸다 */
   async report(providerKey: string, faultKind: IntegrationFaultKind, message: string): Promise<void> {
     try {
+      this.forgetClean(providerKey);
       const displayName = displayNameOf(providerKey);
       await this.prisma.$transaction(async (tx) => {
         await this.repository.record(tx, providerKey, faultKind, message.slice(0, FAULT_MESSAGE_MAX));
+        // 받을 사람이 없으면 알린 것으로 적지 않는다: 나중에 권한자가 생기거나 돌아오면 다음 실패가 알린다
+        const recipients = await this.repository.findActiveEmployeeIdsWithPermission(tx, PERMISSION.ORG_MANAGE);
+        if (recipients.length === 0) return;
         const [claimed] = await this.repository.claimAlert(tx, providerKey, faultKind, FAULT_ALERT_AFTER[faultKind], FAULT_REPEAT_MS);
         if (!claimed) return;
-        const recipients = await this.repository.findActiveEmployeeIdsWithPermission(tx, PERMISSION.ORG_MANAGE);
         await this.notifications.notifyEmployees(tx, recipients, {
           notificationType: NOTIFICATION_TYPE.INTEGRATION_FAULT,
           notificationContent: faultAlertContent({ displayName, faultKind, message: claimed.last_message, failureCount: claimed.failure_count }),
@@ -80,8 +91,13 @@ export class IntegrationFaultService {
    */
   async resolve(providerKey: string, kinds: readonly IntegrationFaultKind[]): Promise<void> {
     try {
+      const cacheKey = `${providerKey}|${kinds.join(',')}`;
+      if ((this.cleanUntil.get(cacheKey) ?? 0) > Date.now()) return;
       const open = await this.repository.findByProvider(this.prisma, providerKey);
-      if (!open.some((fault) => (kinds as readonly string[]).includes(fault.faultKind))) return;
+      if (!open.some((fault) => (kinds as readonly string[]).includes(fault.faultKind))) {
+        this.cleanUntil.set(cacheKey, Date.now() + CLEAN_CACHE_MS);
+        return;
+      }
       const displayName = displayNameOf(providerKey);
       await this.prisma.$transaction(async (tx) => {
         // 줄을 잠근 뒤 읽는다: 두 서버가 함께 풀어도 먼저 잠근 서버만 줄을 보고 복구 알림을 보낸다
@@ -102,6 +118,11 @@ export class IntegrationFaultService {
     } catch (error) {
       this.logger.warn(`${providerKey} 장애를 풀지 못했어요: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /** 이 연결 대상에 대해 기억한 '풀 장애 없음'을 잊는다 (장애를 기록했으니 다음 성공 호출이 풀어야 한다) */
+  private forgetClean(providerKey: string): void {
+    for (const key of this.cleanUntil.keys()) if (key.startsWith(`${providerKey}|`)) this.cleanUntil.delete(key);
   }
 
   /** 관리자가 연결을 끊었다: 일부러 끊은 것이라 장애를 알림 없이 지운다 */

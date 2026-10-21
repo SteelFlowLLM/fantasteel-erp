@@ -10,6 +10,7 @@ import { AppModule } from '../../app.module';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FAULT_REPEAT_MS } from './integration-fault.rules';
+import { IntegrationFaultRepository } from './integration-fault.repository';
 import { IntegrationFaultService } from './integration-fault.service';
 
 let app: INestApplication;
@@ -152,6 +153,77 @@ describe('장애 알림', () => {
     await Promise.all(Array.from({ length: 12 }, () => faults.report('google-drive', 'CREDENTIAL_ERROR', '서비스 계정 키를 거절했어요')));
     expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerIds.length);
     expect((await prisma.integrationFault.findFirstOrThrow({ where: { providerKey: 'google-drive' } })).failureCount).toBe(12);
+  });
+});
+
+describe('받는 사람', () => {
+  it('재직 중이 아닌 연동 관리 권한자에게는 보내지 않고, 받을 사람이 없으면 알린 것으로 적지 않는다. 권한이 생긴 재직 사원에게는 보낸다', async () => {
+    const admin = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1503001' } });
+    const sales = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2103003' } });
+    const where = { providerKey_faultKind: { providerKey: 'google-drive', faultKind: 'RECONNECT_REQUIRED' } };
+    try {
+      // 연동 관리 권한자가 모두 퇴사 처리된 상태
+      await prisma.employee.updateMany({ where: { id: { in: managerIds } }, data: { isActive: false } });
+      await faults.report('google-drive', 'RECONNECT_REQUIRED', '만료');
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(0);
+      expect((await prisma.integrationFault.findUniqueOrThrow({ where })).notifiedAt).toBeNull();
+
+      // 영업 사원에게 관리자 역할을 주면(권한이 생기면) 그 사람이 받는다. 퇴사 처리된 관리자는 여전히 받지 않는다
+      await prisma.employee.update({ where: { id: sales.id }, data: { roleId: admin.roleId } });
+      await faults.report('google-drive', 'RECONNECT_REQUIRED', '만료');
+      expect((await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).map((a) => a.recipientId)).toEqual([sales.id]);
+
+      // 관리자가 돌아오면 다음 장애부터 함께 받는다
+      await prisma.employee.updateMany({ where: { id: { in: managerIds } }, data: { isActive: true } });
+      await faults.report('notion', 'RECONNECT_REQUIRED', '만료');
+      expect((await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).map((a) => a.recipientId).sort()).toEqual([...managerIds, sales.id, sales.id].sort());
+    } finally {
+      await prisma.employee.updateMany({ where: { id: { in: managerIds } }, data: { isActive: true } });
+      await prisma.employee.update({ where: { id: sales.id }, data: { roleId: sales.roleId } });
+    }
+  });
+});
+
+describe('풀 장애가 없다는 확인의 기억', () => {
+  it('성공한 호출마다 DB를 읽지 않고(30초 기억), 이 서버가 장애를 기록하면 바로 잊으며, 30초가 지나면 다시 읽는다', async () => {
+    const read = jest.spyOn(app.get(IntegrationFaultRepository), 'findByProvider');
+    const KEY = 'cache-check';
+    try {
+      await faults.resolveConnection(KEY);
+      await faults.resolveConnection(KEY);
+      await faults.resolveConnection(KEY);
+      expect(read).toHaveBeenCalledTimes(1);
+
+      // 장애를 기록하면 기억을 잊어 다음 성공 호출이 읽고 푼다
+      await faults.report(KEY, 'REQUEST_FAILED', '시간 초과');
+      await faults.resolveConnection(KEY);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(await prisma.integrationFault.count({ where: { providerKey: KEY } })).toBe(0);
+
+      // 푼 뒤 읽어 보니 장애가 없어 다시 기억하고, 30초가 지나야 다시 읽는다
+      await faults.resolveConnection(KEY);
+      await faults.resolveConnection(KEY);
+      expect(read).toHaveBeenCalledTimes(3);
+      const now = Date.now();
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 31_000);
+      try {
+        await faults.resolveConnection(KEY);
+      } finally {
+        clock.mockRestore();
+      }
+      expect(read).toHaveBeenCalledTimes(4);
+    } finally {
+      read.mockRestore();
+      await prisma.integrationFault.deleteMany({ where: { providerKey: KEY } });
+    }
+  });
+
+  it('다른 연결 대상의 기억은 건드리지 않고, 기억 동안에도 이 서버가 기록한 장애는 풀린다', async () => {
+    await faults.resolveConnection('notion');
+    await faults.report('google-drive', 'RECONNECT_REQUIRED', '만료');
+    await faults.resolveConnection('google-drive');
+    expect(await prisma.integrationFault.count()).toBe(0);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerIds.length);
   });
 });
 

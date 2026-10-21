@@ -1199,17 +1199,77 @@ describe('Notion 업무 공간 (이슈 #391)', () => {
       expect(await prisma.notionSyncFailure.count()).toBe(0);
     });
 
+    /** 이 시험이 Notion에 만든 페이지의 ERP 번호 (보낸 순서대로, 업무·일정·회의록 합쳐서) */
+    const createdNumbers = () =>
+      fake.calls
+        .filter((c) => c.name === 'notion-create-pages')
+        .flatMap((c) => c.args.pages as { properties: Record<string, unknown> }[])
+        .map((p) => p.properties['번호']);
+
     it('다시 시도(전체): 미룬 시각을 기다리지 않고 바로 반영해 성공한 행의 줄을 지운다', async () => {
       const a = await failingTask('다시 시도할 업무 A');
-      const b = await failingTask('다시 시도할 업무 B', 'no-url');
+      const b = await failingTask('다시 시도할 업무 B');
       expect(await failures()).toHaveLength(2);
 
       const { status, body } = await retryAll();
       expect(status).toBe(200);
-      expect(body.data).toMatchObject({ requested: 2, succeeded: 2, failed: 0, failures: [] });
+      expect(body.data).toMatchObject({ requested: 2, succeeded: 2, failed: 0, skipped: 0, failures: [] });
       for (const id of [a, b]) expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toMatch(HEX32);
       expect(await prisma.notionSyncFailure.count()).toBe(0);
       expect((await notionView()).notionWorkspace?.failedCount).toBe(0);
+    });
+
+    it('다시 시도(전체)는 만들어졌는지 모르는 건을 빼고 건너뛴 수를 알린다 (확인 없이 다시 만들면 Notion 페이지가 중복될 수 있다). 그 건은 한 건씩 다시 시도한다', async () => {
+      const normal = await failingTask('결과를 아는 실패');
+      const unknown = await failingTask('결과 모름 실패', 'no-url');
+      const unknownRow = (await failures()).find((f) => f.targetId === unknown);
+      expect(unknownRow).toMatchObject({ isResultUnknown: true, failureCount: 1 });
+
+      fake.calls = [];
+      const all = await retryAll();
+      expect(all.status).toBe(200);
+      expect(all.body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0, skipped: 1 });
+      expect(all.body.data.failures).toMatchObject([{ id: unknownRow?.id, targetId: unknown, isResultUnknown: true, failureCount: 1, retryAfter: unknownRow?.retryAfter }]);
+      // 결과 모름 건은 Notion에 만들기를 부르지도 않았다
+      expect(createdNumbers()).toContain(normal);
+      expect(createdNumbers()).not.toContain(unknown);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: unknown } })).notionPageId).toBeNull();
+
+      // 한 건씩은 사람이 확인하고 하는 것이라 다시 만든다
+      const one = await call<NotionSyncRetryResult>('POST', `/integrations/notion/sync-failures/${unknownRow?.id}/retry`, adminCookie);
+      expect(one.body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0, skipped: 0, failures: [] });
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: unknown } })).notionPageId).toMatch(HEX32);
+    });
+
+    it('결과 모름 건만 남았으면 전체 다시 시도는 Notion을 부르지 않고 건너뛴 수만 알린다', async () => {
+      const unknown = await failingTask('결과 모름뿐', 'no-url');
+      fake.calls = [];
+      const { body } = await retryAll();
+      expect(body.data).toMatchObject({ requested: 0, succeeded: 0, failed: 0, skipped: 1 });
+      expect(body.data.failures).toMatchObject([{ targetId: unknown, isResultUnknown: true }]);
+      expect(fake.calls.filter((c) => c.name === 'notion-create-pages')).toEqual([]);
+    });
+
+    it('한 번 결과 모름이 된 행은 그 뒤 오류 답으로 또 실패해도 성공할 때까지 결과 모름으로 두고 30분 미룬다', async () => {
+      const id = await failingTask('결과 모름 뒤 오류', 'no-url');
+      await makeDue();
+      fake.createResponse = 'error';
+      await sync();
+      fake.createResponse = 'ok';
+      const [row] = await failures();
+      expect(row).toMatchObject({ targetId: id, failureCount: 2, isResultUnknown: true });
+      expect(row.lastError).toContain('Could not find parent page');
+      expect(new Date(row.retryAfter).getTime() - new Date(row.lastFailedAt).getTime()).toBe(30 * 60_000);
+    });
+
+    it('자동 반영과 다시 시도를 동시에 불러도 Notion 페이지는 한 번만 만든다', async () => {
+      const id = await failingTask('동시에 반영');
+      await makeDue();
+      fake.calls = [];
+      await Promise.all([sync(), retryAll(), sync(), retryAll()]);
+      expect(createdNumbers().filter((number) => number === id)).toHaveLength(1);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toMatch(HEX32);
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
     });
 
     it('다시 시도(한 건): 그 건만 다시 하고 나머지는 그대로 둔다', async () => {

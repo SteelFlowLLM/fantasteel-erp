@@ -41,10 +41,6 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function errorMessage(error: AppException): string {
-  return (error.getResponse() as { message: string }).message;
-}
-
 /** 브라우저가 떠나 요청을 끊었는지 (시간 초과로 끊은 것은 아니다) */
 function isCallerAbort(signal: AbortSignal): boolean {
   return signal.aborted && (signal.reason as { name?: unknown } | undefined)?.name !== 'TimeoutError';

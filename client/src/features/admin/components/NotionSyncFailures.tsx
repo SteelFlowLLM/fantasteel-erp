@@ -12,7 +12,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAction } from '@/hooks/useAction';
 import { useNotionSyncFailures } from '@/hooks/useIntegrations';
 import { fmtDateTime } from '@/lib/format';
-import { NOTION_SYNC_FAILURES_NOTE, notionSyncTargetLabel, syncFailureNextLabel, syncRetryConfirmText, syncRetryToast } from '@/lib/integrations';
+import { NOTION_SYNC_FAILURES_NOTE, notionSyncTargetLabel, syncFailureNextLabel, syncRetryConfirmText, syncRetryToast, syncUnknownSkipNote } from '@/lib/integrations';
 import { permissionNeedText } from '@/lib/permissions';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
 
@@ -35,6 +35,9 @@ export function NotionSyncFailuresSection({ canView, canEdit }: { canView: boole
     onError: () => setConfirming(null),
   });
   const failures = query.data ?? [];
+  // 결과 모름 건은 전체 다시 시도에서 빼고 한 건씩 확인한 뒤 시도하게 한다 (중복 페이지 방지)
+  const unknownCount = failures.filter((failure) => failure.isResultUnknown).length;
+  const retryableCount = failures.length - unknownCount;
   const busy = retryAll.isPending || retryOne.isPending;
   const needText = canEdit ? undefined : permissionNeedText([PERMISSION.ORG_MANAGE]);
 
@@ -50,12 +53,23 @@ export function NotionSyncFailuresSection({ canView, canEdit }: { canView: boole
         <span className="text-xs font-semibold text-ink-2">반영 실패 목록</span>
         <Badge tone={failures.length > 0 ? 'danger' : 'ok'}>{query.data ? (failures.length > 0 ? `${failures.length}건` : '없음') : '불러오는 중'}</Badge>
         {failures.length > 0 ? (
-          <Button className="ml-auto" icon="refresh" onClick={() => retryAll.mutate()} disabled={!canEdit || busy} title={needText}>
+          <Button
+            className="ml-auto"
+            icon="refresh"
+            onClick={() => retryAll.mutate()}
+            disabled={!canEdit || busy || retryableCount === 0}
+            title={needText ?? (retryableCount === 0 ? '결과 모름 건만 남았어요. 한 건씩 확인한 뒤 다시 시도해 주세요' : undefined)}
+          >
             {retryAll.isPending ? '다시 시도하는 중…' : '전체 다시 시도'}
           </Button>
         ) : null}
       </div>
       <span className="text-cap text-ink-3">{NOTION_SYNC_FAILURES_NOTE}</span>
+      {unknownCount > 0 ? (
+        <Banner tone="wait" icon="alert">
+          {syncUnknownSkipNote(unknownCount)}. 전체 다시 시도는 이 건들을 빼요.
+        </Banner>
+      ) : null}
       {query.error ? (
         <Banner tone="danger" icon="alert">
           {errorMessageOf(query.error)}

@@ -173,6 +173,11 @@ export interface NotionSyncRetryResult {
   requested: number;
   succeeded: number;
   failed: number;
+  /**
+   * 전체 다시 시도가 건너뛴 '결과 모름' 건수. 만들어졌는지 모르는 건을 경고 없이 다시 만들면 Notion 페이지가 중복될 수 있어
+   * 전체 다시 시도는 이 건들을 빼고, 사람이 Notion을 확인한 뒤 한 건씩 다시 시도해야 한다. 한 건 다시 시도에서는 늘 0
+   */
+  skipped: number;
   /** 지금 남은 실패 목록 전체 */
   failures: NotionSyncFailureView[];
 }

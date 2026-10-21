@@ -1060,7 +1060,7 @@ Table notion_sync_failure {
   target_id int [not null, note: '그 행의 id (FK 없음: 행이 지워져도 다음 반영이 이 줄을 치운다)']
   failure_count int [not null, default: 1, note: '이어서 실패한 횟수. CHECK failure_count >= 1']
   last_error varchar [not null, note: '마지막 실패 이유 (500자)']
-  is_result_unknown boolean [not null, default: false, note: 'Notion에 만들어졌는지 알 수 없는 실패(시간 초과·페이지 id 없는 성공 답). 다시 시도하면 Notion에 같은 페이지가 둘 생길 수 있다']
+  is_result_unknown boolean [not null, default: false, note: 'Notion에 만들어졌는지 알 수 없는 실패(시간 초과·페이지 id 없는 성공 답). 다시 시도하면 Notion에 같은 페이지가 둘 생길 수 있다. 한 번 true가 되면 그 뒤 오류 답으로 또 실패해도 성공해서 줄이 지워질 때까지 true로 둔다']
   retry_after timestamptz [not null, note: '자동 반영이 이 시각 전에는 이 행을 건너뛴다 (1분에서 두 배씩 1시간까지, 결과를 알 수 없으면 30분)']
   first_failed_at timestamptz [not null, default: `now()`]
   last_failed_at timestamptz [not null, default: `now()`]

@@ -35,6 +35,7 @@ import {
   syncFailureNextLabel,
   syncRetryConfirmText,
   syncRetryToast,
+  syncUnknownSkipNote,
   withoutCallbackParams,
 } from '@/lib/integrations';
 
@@ -414,12 +415,21 @@ describe('Notion 반영 실패 목록 (이슈 #518)', () => {
     expect(text).toContain('같은 페이지가 하나 더 생겨요');
   });
 
+  const result = (requested: number, succeeded: number, skipped = 0): NotionSyncRetryResult => ({ requested, succeeded, failed: requested - succeeded, skipped, failures: [] });
+
   it('다시 시도 결과 안내', () => {
-    const result = (requested: number, succeeded: number): NotionSyncRetryResult => ({ requested, succeeded, failed: requested - succeeded, failures: [] });
     expect(syncRetryToast(result(0, 0))).toEqual({ tone: 'ok', text: '다시 시도할 반영 실패가 없어요' });
     expect(syncRetryToast(result(3, 3))).toEqual({ tone: 'ok', text: '3건을 Notion에 반영했어요' });
     expect(syncRetryToast(result(2, 0))).toEqual({ tone: 'error', text: '2건이 또 실패했어요. 이유를 확인해 주세요' });
     expect(syncRetryToast(result(3, 1))).toEqual({ tone: 'error', text: '1건은 반영했고 2건은 또 실패했어요' });
+  });
+
+  it('전체 다시 시도가 건너뛴 결과 모름 건이 있으면 Notion을 확인한 뒤 한 건씩 하라고 알린다', () => {
+    const note = '결과 모름 2건은 Notion에서 이미 만들어졌는지 확인한 뒤 한 건씩 다시 시도하세요';
+    expect(syncUnknownSkipNote(2)).toBe(note);
+    expect(syncRetryToast(result(3, 3, 2))).toEqual({ tone: 'error', text: `3건을 Notion에 반영했어요. ${note}` });
+    expect(syncRetryToast(result(0, 0, 2))).toEqual({ tone: 'error', text: note });
+    expect(syncRetryToast(result(0, 0, 0))).toEqual({ tone: 'ok', text: '다시 시도할 반영 실패가 없어요' });
   });
 
   it('설명에 서버를 다시 띄워도 남는다고 적는다', () => {

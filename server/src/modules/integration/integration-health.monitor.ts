@@ -7,14 +7,22 @@ import { McpClientService } from './mcp/mcp.client';
 
 /** 연결 상태를 확인하는 기본 주기 (가정값). INTEGRATION_HEALTH_CHECK_MINUTES로 바꾸고 0이면 확인하지 않는다 */
 const DEFAULT_CHECK_MINUTES = 30;
+/** 바꿀 수 있는 범위(분): 1분~하루. setInterval은 약 24.8일(2^31-1 ms)을 넘으면 1ms로 돌고, 너무 짧으면 외부 서비스를 괴롭히므로 범위 밖은 기본값으로 쓴다 */
+export const MIN_CHECK_MINUTES = 1;
+export const MAX_CHECK_MINUTES = 24 * 60;
 /** 서버를 띄운 직후 한 번 확인하기까지: 부팅 작업(마이그레이션 뒤 첫 요청, 서비스 계정 키 읽기)이 끝난 뒤 */
 const FIRST_CHECK_DELAY_MS = 30_000;
 
-/** 확인 주기(분). 읽을 수 없거나 음수면 기본값, 0이면 끈다 */
-export function healthCheckMinutes(raw: string | undefined = process.env.INTEGRATION_HEALTH_CHECK_MINUTES): number {
+/**
+ * 확인 주기(분). 비우면 기본값, 0이면 끈다. 숫자가 아니거나 1~1440분 밖이면 기본값으로 쓰고 warn으로 이유를 알린다.
+ */
+export function healthCheckMinutes(raw: string | undefined = process.env.INTEGRATION_HEALTH_CHECK_MINUTES, warn?: (message: string) => void): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_CHECK_MINUTES;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CHECK_MINUTES;
+  if (parsed === 0) return 0;
+  if (Number.isFinite(parsed) && parsed >= MIN_CHECK_MINUTES && parsed <= MAX_CHECK_MINUTES) return parsed;
+  warn?.(`INTEGRATION_HEALTH_CHECK_MINUTES(${raw.trim().slice(0, 40)})가 ${MIN_CHECK_MINUTES}~${MAX_CHECK_MINUTES}분(또는 끄는 0)이 아니에요. 기본값 ${DEFAULT_CHECK_MINUTES}분으로 확인해요`);
+  return DEFAULT_CHECK_MINUTES;
 }
 
 /**
@@ -38,7 +46,7 @@ export class IntegrationHealthMonitor implements OnApplicationBootstrap, OnAppli
 
   onApplicationBootstrap(): void {
     if (process.env.NODE_ENV === 'test') return;
-    const minutes = healthCheckMinutes();
+    const minutes = healthCheckMinutes(process.env.INTEGRATION_HEALTH_CHECK_MINUTES, (message) => this.logger.warn(message));
     if (minutes === 0) return;
     this.firstTimer = setTimeout(() => void this.runNow(), FIRST_CHECK_DELAY_MS);
     this.timer = setInterval(() => void this.runNow(), minutes * 60_000);

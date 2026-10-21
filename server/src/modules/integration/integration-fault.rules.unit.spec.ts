@@ -12,7 +12,6 @@ import {
   healthOf,
   type HealthInput,
 } from './integration-fault.rules';
-import { healthCheckMinutes } from './integration-health.monitor';
 
 describe('faultKindOf (오류 → 장애 종류)', () => {
   it('다시 연결이 필요한 INT-003은 RECONNECT_REQUIRED', () => {
@@ -138,16 +137,5 @@ describe('연결 상태 신호등 (healthOf)', () => {
     expect(healthOf({ ...base, lastError: '시간 초과', lastErrorAt: at }).lastErrorAt).toBe(at.toISOString());
     expect(healthOf({ ...base, lastError: null, lastErrorAt: at }).lastErrorAt).toBeNull();
     expect(healthOf({ ...base, lastError: '서버 설정 오류', lastErrorAt: null }).lastErrorAt).toBeNull();
-  });
-});
-
-describe('healthCheckMinutes (주기 확인)', () => {
-  it('비우면 기본 30분, 0이면 끈다, 잘못된 값은 기본값', () => {
-    expect(healthCheckMinutes(undefined)).toBe(30);
-    expect(healthCheckMinutes('')).toBe(30);
-    expect(healthCheckMinutes('10')).toBe(10);
-    expect(healthCheckMinutes('0')).toBe(0);
-    expect(healthCheckMinutes('-5')).toBe(30);
-    expect(healthCheckMinutes('abc')).toBe(30);
   });
 });

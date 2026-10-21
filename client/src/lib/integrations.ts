@@ -86,12 +86,26 @@ export function syncRetryConfirmText(failure: Pick<NotionSyncFailureView, 'isRes
   return `「${failure.title}」는 Notion에 페이지가 만들어졌는지 알 수 없었어요. 이미 만들어졌다면 다시 시도할 때 같은 페이지가 하나 더 생겨요. Notion에서 먼저 확인했나요?`;
 }
 
-/** 다시 시도 결과를 알리는 토스트 */
+/** 결과 모름 건을 전체 다시 시도에서 빼는 이유 (확인 없이 다시 만들면 Notion 페이지가 중복될 수 있다) */
+export function syncUnknownSkipNote(count: number): string {
+  return `결과 모름 ${count}건은 Notion에서 이미 만들어졌는지 확인한 뒤 한 건씩 다시 시도하세요`;
+}
+
+/** 다시 시도 결과를 알리는 토스트. 전체 다시 시도가 건너뛴 결과 모름 건이 있으면 그 안내를 붙인다 */
 export function syncRetryToast(result: NotionSyncRetryResult): { tone: 'ok' | 'error'; text: string } {
-  if (result.requested === 0) return { tone: 'ok', text: '다시 시도할 반영 실패가 없어요' };
-  if (result.failed === 0) return { tone: 'ok', text: `${result.succeeded}건을 Notion에 반영했어요` };
-  if (result.succeeded === 0) return { tone: 'error', text: `${result.failed}건이 또 실패했어요. 이유를 확인해 주세요` };
-  return { tone: 'error', text: `${result.succeeded}건은 반영했고 ${result.failed}건은 또 실패했어요` };
+  const skipNote = result.skipped > 0 ? syncUnknownSkipNote(result.skipped) : null;
+  if (result.requested === 0) return skipNote ? { tone: 'error', text: skipNote } : { tone: 'ok', text: '다시 시도할 반영 실패가 없어요' };
+  let tone: 'ok' | 'error' = 'error';
+  let text: string;
+  if (result.failed === 0) {
+    tone = 'ok';
+    text = `${result.succeeded}건을 Notion에 반영했어요`;
+  } else if (result.succeeded === 0) {
+    text = `${result.failed}건이 또 실패했어요. 이유를 확인해 주세요`;
+  } else {
+    text = `${result.succeeded}건은 반영했고 ${result.failed}건은 또 실패했어요`;
+  }
+  return skipNote ? { tone: 'error', text: `${text}. ${skipNote}` } : { tone, text };
 }
 
 /** OAuth 콜백이 돌려보낸 주소의 쿼리 (?integration=notion&result=connected|error&message=…) */

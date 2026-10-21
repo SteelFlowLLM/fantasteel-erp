@@ -18,7 +18,7 @@ const failure: NotionSyncFailureView = {
   firstFailedAt: '2026-10-22T04:55:00.000Z',
   lastFailedAt: '2026-10-22T04:59:00.000Z',
 };
-const retried: NotionSyncRetryResult = { requested: 1, succeeded: 0, failed: 1, failures: [{ ...failure, failureCount: 3 }] };
+const retried: NotionSyncRetryResult = { requested: 1, succeeded: 0, failed: 1, skipped: 0, failures: [{ ...failure, failureCount: 3 }] };
 
 afterEach(() => stopFakeServer());
 
