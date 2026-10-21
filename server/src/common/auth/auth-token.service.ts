@@ -5,8 +5,11 @@ import type { CookieOptions } from 'express';
 /** access token을 담는 httpOnly 쿠키 이름 (컨벤션 6장) */
 export const ACCESS_TOKEN_COOKIE = 'access_token';
 
-/** httpOnly · Secure · SameSite=Lax (컨벤션 6장). localhost는 브라우저가 secure context로 봐서 http에서도 쿠키가 저장된다. */
-export const ACCESS_TOKEN_COOKIE_OPTIONS: CookieOptions = { httpOnly: true, secure: true, sameSite: 'lax', path: '/' };
+/**
+ * httpOnly · Secure · SameSite=Lax (컨벤션 6장). localhost는 브라우저가 secure context로 봐서 http에서도 쿠키가 저장된다.
+ * 다른 PC가 사내 IP(http)로 들어오면 Secure 쿠키를 저장하지 않아 로그인이 안 된다: 그때만 COOKIE_SECURE=false (이슈 #440).
+ */
+export const ACCESS_TOKEN_COOKIE_OPTIONS: CookieOptions = { httpOnly: true, secure: process.env.COOKIE_SECURE !== 'false', sameSite: 'lax', path: '/' };
 
 /** 요청 헤더의 Cookie 문자열에서 값 하나를 꺼낸다 */
 export function readCookie(cookieHeader: string | undefined, name: string): string | undefined {

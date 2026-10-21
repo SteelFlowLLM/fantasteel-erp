@@ -8,7 +8,13 @@ import { ApiError, InputError } from '@/api/errors';
 import { createLineSplitter } from '@/api/lineSplitter';
 import { isErrorCode } from '@/codes';
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8787/api/v1').replace(/\/$/, '');
+/**
+ * 화면과 같은 주소로 부르고 화면 서버(Next)가 ERP 서버로 넘긴다 (next.config.ts rewrites, 이슈 #440).
+ * 다른 PC에서 IP로 들어와도 그 PC의 localhost가 아니라 서버로 가고, 로그인 쿠키도 화면 주소에 붙는다.
+ */
+const API_BASE_URL = '/api/v1';
+/** 서버가 꺼져 있으면 Next 프록시가 JSON이 아닌 5xx로 답한다 */
+const SERVER_UNREACHABLE = '서버에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요';
 
 /**
  * 서버 쿠키가 지금 누구 것인지. 다른 탭이 다른 사원으로 로그인하면 쿠키가 바뀌므로, 마지막 로그인 사원번호를
@@ -100,13 +106,13 @@ async function send(method: string, path: string, body?: unknown, headers: Recor
   } catch (error) {
     // 멈춘 것을 '서버에 연결할 수 없어요'로 바꾸면 호출한 쪽이 멈춤과 실패를 가리지 못한다
     if (signal?.aborted || isAbortError(error)) throw error;
-    throw new Error(`서버(${API_BASE_URL})에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요`);
+    throw new Error(SERVER_UNREACHABLE);
   }
 }
 
 async function readBody<T>(res: Response): Promise<T> {
   const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
-  if (!json) throw new Error(`서버 응답을 읽을 수 없어요 (HTTP ${res.status})`);
+  if (!json) throw new Error(res.status >= 500 ? SERVER_UNREACHABLE : `서버 응답을 읽을 수 없어요 (HTTP ${res.status})`);
   if (json.success) return json.data;
   throw toClientError(json.error);
 }
@@ -212,7 +218,7 @@ async function sendRaw(method: 'GET' | 'POST', path: string, body?: BodyInit): P
   try {
     res = await fetch(`${API_BASE_URL}${path}`, { method, credentials: 'include', body });
   } catch {
-    throw new Error(`서버(${API_BASE_URL})에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요`);
+    throw new Error(SERVER_UNREACHABLE);
   }
   failIfSessionExpired(res);
   return res;
@@ -235,9 +241,9 @@ export function serverUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
-/** 실시간 연결(WebSocket)용 서버 주소: API 주소에서 /api/v1을 뺀 origin */
+/** 실시간 연결(WebSocket)용 주소: 화면 주소. /socket.io도 화면 서버가 넘긴다 */
 export function serverOrigin(): string {
-  return new URL(API_BASE_URL).origin;
+  return window.location.origin;
 }
 
 /** 테스트에서 이 사원으로 로그인한 상태로 둔다 (null이면 로그아웃 상태) */

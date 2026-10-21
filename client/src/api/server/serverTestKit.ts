@@ -23,7 +23,8 @@ export function useFakeServer(employeeNo: string, respond: (call: ServerCall) =>
   actAs(employeeNo);
   resetServerSessionForTest(employeeNo);
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-    const parsed = new URL(url);
+    // 화면은 같은 주소의 /api/v1로 부른다 (상대 주소)
+    const parsed = new URL(url, 'http://localhost');
     const call: ServerCall = {
       method: init.method ?? 'GET',
       path: parsed.pathname.replace(/^.*\/api\/v1/, ''),
