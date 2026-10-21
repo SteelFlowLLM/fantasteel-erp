@@ -5,7 +5,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { aiAssistantApi } from '@/api/aiAssistant';
-import { sourceText } from '@/features/shell/AiPanel';
+import { sourceText } from '@/features/shell/aiSourceDisplay';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { canOpenScreen, SCREEN, screenOfPath, SCREEN_KEY_BY_HREF, type AccessUser } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
