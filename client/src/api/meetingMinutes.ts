@@ -54,6 +54,12 @@ export const meetingMinutesApi = {
   /** 허가한 후보를 등록하고 회의록을 확정한다. 남은 후보가 있으면 서버가 거절한다 */
   register: (id: number): Promise<MeetingRegisterResult> => serverMeetingMinutesApi.register(id),
 
+  /** 참석자를 고친다 (이슈 #449). 작성자 또는 ORG_MANAGE 사용, 확정 전·전사·정리 중이 아닐 때만. 빠진 참석자의 화자 연결은 '모름'이 된다 */
+  updateAttendees: ({ id, attendeeIds }: { id: number; attendeeIds: number[] }): Promise<MeetingMinutesView> => serverMeetingMinutesApi.updateAttendees(id, attendeeIds),
+
+  /** 회의록을 지운다 (이슈 #449). 참석자 고치기와 같은 사람·같은 상태에서만 */
+  remove: (id: number): Promise<{ id: number }> => serverMeetingMinutesApi.remove(id),
+
   /** 확정된 회의록을 Notion 페이지로 내보낸다 (이슈 #358). 작성자 또는 ORG_MANAGE 사용, 한 번만 */
   exportToNotion: (id: number): Promise<MeetingNotionExportResult> => serverMeetingMinutesApi.exportToNotion(id),
 };

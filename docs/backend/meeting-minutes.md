@@ -33,6 +33,8 @@
 | PATCH | `meeting-minutes/:id/summary` | 🟡 AI 요약 고치기 | **작성자만**, `REVIEW`만 |
 | POST | `meeting-minutes/:id/register` | API-261 확정하고 등록 | **작성자만**, `REVIEW`만 |
 | POST | `meeting-minutes/:id/notion-export` | 🟡 확정한 회의록을 Notion 페이지로 내보내기 (이슈 #358) | **작성자 또는 `ORG_MANAGE` 사용**, `CONFIRMED`만, 한 번만 |
+| PUT | `meeting-minutes/:id/attendees` | 🟡 참석자 고치기 (이슈 #449) | **작성자 또는 `ORG_MANAGE` 사용**, `TRANSCRIBED`·`REVIEW`·`FAILED` |
+| DELETE | `meeting-minutes/:id` | 🟡 회의록 지우기 (이슈 #449) | **작성자 또는 `ORG_MANAGE` 사용**, `TRANSCRIBED`·`REVIEW`·`FAILED` |
 | GET | `meeting-minutes` | API-259 목록 | 전 역할 |
 | GET | `meeting-minutes/:id` | API-259 상세 | 전 역할 |
 
@@ -154,6 +156,14 @@
 - LLM은 쓰지 않는다. 서버 코드가 `notion-create-pages` 도구 하나만 직접 부른다.
 - 작업 로그는 남기지 않는다 (REQ-LOG-002에 맞는 이벤트가 없고 공통 코드를 새로 만들지 않기로 했다).
 
+### 지우기·참석자 고치기 (이슈 #449, 문서에 없는 기능)
+- 둘 다 작성자나 `ORG_MANAGE` 사용 권한자만(아니면 `VOC-003`), **확정 전이고 전사·AI 정리 중이 아닐 때**(`TRANSCRIBED`·`REVIEW`·`FAILED`, 아니면 `VOC-004`)만 된다. 확정한 회의록은 업무·일정·구매요청 초안·작업 로그·알림·Notion 페이지가 이어져 있어 막고, 전사·분석 중에는 백그라운드 작업이 결과를 쓰러 돌아오므로 막는다.
+- `PUT meeting-minutes/:id/attendees` `{ attendeeIds }` → 상세. 보낸 목록으로 참석자 전체를 바꾼다(1~100명, 중복은 하나로). **새로 넣는 사람만** 사용 중 사원인지 본다(`VOC-002`): 그대로 둔 참석자는 그 사이 퇴사했어도 남긴다. 빠진 참석자에게 연결한 화자 이름표는 '모름'(`speakerEmployeeId`·`speakerName` = null)으로 되돌린다. AI 요약·후보는 그대로 둔다(후보의 담당자·참석자는 회의 참석자가 아니어도 되고 검토 중에 고친다). 확정 전이라 보낸 알림이 없고, 확정할 때 그때의 참석자에게 공유 알림이 간다.
+- 읽은 `updated_at`을 조건으로 회의록 행을 먼저 갱신하고(`saveForAttendeeEdit`), 0건이면 상태가 바뀌었는지(`VOC-004`)·동시에 고쳤는지(`COM-001`) 가려 알린다. 참석자 행 바꾸기와 같은 트랜잭션이다.
+- `DELETE meeting-minutes/:id` → `{ id }`. **행을 지운다**(표시만 하는 삭제가 아니다): 확정 전에는 `task`·`schedule_event`·`action_draft`의 `meeting_minutes_id`가 가리키지 않고, Notion 페이지는 확정 뒤에만 생기며, 원본 음성은 저장하지 않는다. 참석자 행과 회의록 행을 한 트랜잭션에서 지우고, 회의록 삭제에 상태 조건을 걸어 그 사이 분석을 시작했으면 롤백한다.
+- 작업 로그는 남기지 않는다: REQ-LOG-002에 회의록 생성·삭제 이벤트가 없다(만들기도 남기지 않는다).
+- 화면: 상세 머리에 "참석자 고치기"(조직도 체크 창, 풀리는 화자 연결 수 안내)와 "삭제"(확인 창) 버튼. 조건은 `client/src/lib/meetingEdit.ts`가 서버와 같게 본다.
+
 ## 5. 오류 코드
 
 🟡 VOC-는 정의서 9.3에 없다. `shared/src/errors.ts`에 두었고 팀 확인 후 정의서에 올린다.
@@ -190,5 +200,7 @@ Notion 내보내기: `integration/integration.spec.ts` (묶음 `fs_collab`, 가�
 Drive 녹음으로 만들기: `integration/google-drive/google-drive.spec.ts` (묶음 `fs_collab`, 가짜 Google 서버 + 가짜 STT) — 받은 녹음 바이트·이름·MIME·화자 수가 STT에 그대로 가고 `TRANSCRIBED`, 사진·폴더 밖·잘못된 id·참석자 없음은 회의록을 만들지 않고 거절, 로그인 필요, 백그라운드 받기 실패 → `FAILED` + 이유, 연결이 끊긴 뒤 `INT-003`.
 
 `meeting-speakers.spec.ts` (묶음 `fs_collab`): STT가 준 `speaker` 저장·`speakers` 요약, `application/octet-stream` + `.m4a` 업로드 허용·`.pdf` 거절, 화자 연결(이름 기록·'모름'·일부만 바꾸기), REVIEW/FAILED 허용, 작성자 아님 `VOC-003`, 확정·분석 중·전사 중·전사 없음 `VOC-004`, 비참석자 `VOC-002`, 잘못된 입력 400, 없는 회의록 `VOC-001`. 순수 단위(DB 없음) `meeting-speaker.unit.spec.ts`: 구간 읽기·화자 요약·프롬프트 표시("이름:"/"화자1:")·업로드 형식 판정. AI 화자 추정(사원 id로 바꾸기·저장 안 함, AI 실패·형식 오류·모델 없음은 200 + 이유, 작성자·상태·화자 없음 거절).
+
+`meeting-edit.spec.ts` (묶음 `fs_collab`): 참석자 고치기(중복 정리·빠진 사람의 화자 연결만 풀기), 관리자 허용·그 밖 `VOC-003`, 빈 목록 400·새로 넣는 퇴사자 `VOC-002`·그대로 둔 퇴사자 유지, 확정·분석 중·전사 중 `VOC-004`(참석자 그대로); 지우기(회의록·참석자 행 삭제·뒤이은 상세 404), 참석자인 비작성자 `VOC-003`·관리자 허용, 확정·분석 중·전사 중 `VOC-004`(아무것도 지우지 않음), 없는 회의록 404, 다른 트랜잭션이 행을 잡은 동안의 순서(확정이 먼저면 지우기 `VOC-004`, 지우기가 먼저면 확정이 FK 오류 없이 `VOC-001`·`VOC-004`). 퇴사자는 이 시험 전용 사원을 만들어 쓴다.
 
 `meeting-analysis.validator.spec.ts`·`meeting-review.unit.spec.ts`·`meeting-candidate.context.unit.spec.ts` (DB 없음, `npm run test:unit`): 2차 검토 합치기(키 이어 붙이기·표시·사유·120자·중복·상한·알아볼 수 없는 답·검증 규칙), 현황 문구·판단(납기 초과·재고/입고 예정 계산·같은 주 업무량·일정 겹침·확인 사유 지우기). `meeting-analyze.spec.ts`에 2차 호출 두 번·실패 시 1차 유지, 일정 겹침·업무 쏠림·재고 줄·후보를 고치면 현황 재계산 시나리오를 더했다.

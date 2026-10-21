@@ -1,8 +1,8 @@
-import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MEETING_AUDIO_MAX_BYTES, type AuthUser, type MeetingMinutesPage, type MeetingRegisterResult, type MeetingMinutesView, type MeetingNotionExportResult, type MeetingSpeakerSuggestResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingAttendeesDto, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingMinutesService, type UploadedMeetingAudio } from './meeting-minutes.service';
 
 /**
@@ -85,6 +85,18 @@ export class MeetingMinutesController {
   @HttpCode(200)
   exportToNotion(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<MeetingNotionExportResult> {
     return this.service.exportToNotion(user, id);
+  }
+
+  /** 참석자를 고친다 (이슈 #449, 문서에 없는 경로). 작성자나 관리자만, 확정 전에만 */
+  @Put(':id/attendees')
+  updateAttendees(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateMeetingAttendeesDto): Promise<MeetingMinutesView> {
+    return this.service.updateAttendees(user, id, dto);
+  }
+
+  /** 회의록을 지운다 (이슈 #449, 문서에 없는 경로). 작성자나 관리자만, 확정 전에만 */
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number): Promise<{ id: number }> {
+    return this.service.remove(user, id);
   }
 
   /** API-259 목록 */

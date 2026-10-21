@@ -172,3 +172,12 @@ export class UpdateMeetingSpeakersDto {
   @IsObject({ message: '화자 연결 정보가 올바르지 않아요' })
   mapping!: Record<string, number | null>;
 }
+
+/** PUT meeting-minutes/:id/attendees (이슈 #449). 참석자 전체를 보낸 목록으로 바꾼다 */
+export class UpdateMeetingAttendeesDto {
+  @IsArray({ message: '참석자를 골라 주세요' })
+  @ArrayMinSize(1, { message: '참석자를 1명 이상 골라 주세요' })
+  @ArrayMaxSize(100, { message: '참석자는 100명까지 고를 수 있어요' })
+  @IsInt({ each: true, message: '참석자 id가 올바르지 않아요' })
+  attendeeIds!: number[];
+}
