@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_VOICE_APPROVABLE_KINDS,
   AI_RESEARCH_STATUS,
   ROLE_LABEL,
   type AiActionCard,
@@ -22,6 +23,7 @@ import {
   AI_AGENT_PAUSE_MAX_MS,
   AI_AGENT_NOTES_MAX,
 } from '@fantasteel/shared';
+import { runAsVoiceApproved } from '../../common/business-event/ai-assisted.context';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmImage, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
@@ -209,6 +211,14 @@ export class AiAssistantService {
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
   async executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+    if (dto.approvedByVoice) {
+      if (!AI_VOICE_APPROVABLE_KINDS.includes(dto.kind)) throw new AppException('VOC-010');
+      return runAsVoiceApproved(() => this.runActionCard(user, dto));
+    }
+    return this.runActionCard(user, dto);
+  }
+
+  private async runActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 심층 조사는 조사 화면과 같은 service, 나머지는 각 모듈의 확정 기능을 그대로 부른다
     const result = WORK_KINDS.includes(dto.kind)
       ? await this.cards.execute(user, dto)

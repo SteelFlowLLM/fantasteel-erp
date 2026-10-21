@@ -128,14 +128,16 @@ describe('실행 카드 실행 (사용자가 확인한 값을 다시 검증해 �
     expect(calls).toEqual([]);
   });
 
-  it('업무: 담당자·마감일을 채우면 사용자를 등록자로 업무를 만든다', async () => {
+  it('업무: 담당자·마감일을 채우면 사용자를 등록자로 업무를 만들고 같은 트랜잭션에 TASK_CREATED를 AI 경유로 남긴다', async () => {
     const { service, calls } = setup();
     const due = plusDays(5);
     const result = await service.execute(user, dto({ assigneeId: 7, dueDate: due, description: '메모' }));
     expect(result).toEqual({ kind: 'TASK', registered: { type: 'task', id: 11 } });
-    expect(calls).toHaveLength(1);
+    expect(calls.map((c) => c.name)).toEqual(['createInTx', 'record']);
     expect(calls[0].args[1]).toBe(1);
     expect(calls[0].args[2]).toMatchObject({ taskTitle: '견적서 보내기', taskDescription: '메모', assigneeId: 7, dueDate: new Date(`${due}T00:00:00.000Z`), linkPath: '/tasks' });
+    expect(calls[1].args[0]).toBe(calls[0].args[0]);
+    expect(calls[1].args[1]).toMatchObject({ type: 'TASK_CREATED', target: { table: 'task', id: 11 }, after: { taskTitle: '견적서 보내기', assigneeId: 7, dueDate: due }, isAiAssisted: true });
   });
 
   it('업무: 지난 마감일은 거절하고 메시지는 "오늘" 기준이다', async () => {

@@ -473,6 +473,7 @@ export const BUSINESS_EVENT_TYPE = {
   DRAFT_EXECUTED: 'DRAFT_EXECUTED',
   MEETING_MINUTES_CONFIRMED: 'MEETING_MINUTES_CONFIRMED',
   SCHEDULE_EVENT_CREATED: 'SCHEDULE_EVENT_CREATED',
+  TASK_CREATED: 'TASK_CREATED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -509,4 +510,5 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   DRAFT_EXECUTED: '초안 실행(ERP 반영)',
   MEETING_MINUTES_CONFIRMED: '회의록 확정',
   SCHEDULE_EVENT_CREATED: '일정 등록',
+  TASK_CREATED: '업무 등록',
 };

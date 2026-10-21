@@ -477,8 +477,18 @@ export type AiActionCardExecuteInput =
   | { kind: 'TASK_UPDATE'; taskId: number; title?: string; description?: string | null; dueDate?: string; complete?: boolean }
   | { kind: 'RESEARCH'; question: string; seed?: AiResearchSeed };
 
-/** 실행 요청 본문: 카드 값 + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399) */
-export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { chat?: AiChatCardRef };
+/**
+ * 실행 요청 본문: 카드 값 + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399).
+ * approvedByVoice: 철강맨 부르기로 말로 승인한 실행 (이슈 #457). 작업 로그 사유에 표시가 남는다
+ */
+export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { chat?: AiChatCardRef; approvedByVoice?: true };
+
+/**
+ * 말로 승인할 수 있는 카드 (이슈 #457). 실행하면 같은 트랜잭션에 작업 로그가 남는 업무·일정·구매요청 초안만이다.
+ * 수주·열연 배정·히트 편성은 재고·생산에 바로 영향을 주고, Notion은 회사 밖 문서를 바꾸며, 고치기 카드는 있던 기록을 덮어써 되돌리기 어렵다.
+ * 과거 사례·심층 조사는 작업 로그가 없어 말로 승인했다는 흔적을 남길 수 없다. 이런 카드는 화면에서 눌러 실행한다
+ */
+export const AI_VOICE_APPROVABLE_KINDS: readonly AiActionCardKind[] = ['TASK', 'EVENT', 'PURCHASE'];
 
 export interface AiWorkCardExecuteInput extends Omit<MeetingCandidateUpdateInput, 'decision'> {
   kind: AiWorkCard['kind'];
