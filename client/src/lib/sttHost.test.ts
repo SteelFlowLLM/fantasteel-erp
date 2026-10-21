@@ -1,6 +1,6 @@
 // 음성 서버 주소 종류 분류, 방식 짐작·기본값.
 import { describe, expect, it } from 'vitest';
-import { classifySttHost, sameOriginUrl, sttModeDefaults, sttModeOf } from '@/lib/sttHost';
+import { classifySttHost, sameOriginUrl, sttModeDefaults, sttModeOf, sttModelChoices } from '@/lib/sttHost';
 
 const kindOf = (url: string) => classifySttHost(url).kind;
 
@@ -71,5 +71,26 @@ describe('sameOriginUrl', () => {
     expect(sameOriginUrl('https://api.openai.com/v1', 'http://192.168.0.20:8000/v1')).toBe(false);
     expect(sameOriginUrl('http://192.168.0.20:8000/v1', 'http://192.168.0.20:8001/v1')).toBe(false);
     expect(sameOriginUrl('이상한 주소', 'http://127.0.0.1:8000/v1')).toBe(false);
+  });
+});
+
+describe('sttModelChoices', () => {
+  const sidecar = [
+    { id: 'whisper-pyannote', label: '받아쓰기 + 화자 분리 (whisper + pyannote)', diarization: true, available: true, note: null },
+    { id: 'vibevoice', label: '받아쓰기 + 화자 분리 (VibeVoice, 느림)', diarization: true, available: false, note: 'VibeVoice 모델 폴더가 없어요' },
+  ];
+
+  it('서버가 준 이름과 못 쓰는 이유를 보인다', () => {
+    expect(sttModelChoices(sidecar, 'whisper-pyannote').map((c) => c.label)).toEqual([
+      '받아쓰기 + 화자 분리 (whisper + pyannote)',
+      '받아쓰기 + 화자 분리 (VibeVoice, 느림) — 지금 못 씀: VibeVoice 모델 폴더가 없어요',
+    ]);
+  });
+
+  it('이름이 없으면 id를 쓰고, 목록에 없는 선택은 앞에 남긴다', () => {
+    const choices = sttModelChoices([{ id: 'whisper-1', label: null, diarization: null, available: null, note: null }], 'my-model');
+    expect(choices.map((c) => c.id)).toEqual(['my-model', 'whisper-1']);
+    expect(choices[0].label).toContain('목록에 없음');
+    expect(choices[1].label).toBe('whisper-1');
   });
 });

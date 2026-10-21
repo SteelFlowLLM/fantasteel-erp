@@ -3,19 +3,27 @@
 
 ERP 서버가 부르는 OpenAI 호환 `POST /v1/audio/transcriptions`를 흉내 내되, 응답 구간에 `speaker`를 붙인다.
   model=whisper-pyannote (기본)  whisper.cpp 서버(전사) + pyannote(화자 분리)를 시간 겹침으로 합친다
+  model=whisper                  whisper.cpp 서버로 받아쓰기만 한다 (화자 없음, 빠름)
   model=vibevoice                VibeVoice-ASR MLX 4-bit 한 모델이 전사와 화자 분리를 한 번에 한다
+`GET /v1/models`는 위 셋을 화면에 보일 이름과 함께 알려 준다.
+
+API 키(`Authorization: Bearer …`): 키가 있으면 모든 /v1 요청에 요구한다. 다른 PC에 열 때(SIDECAR_HOST가 127.0.0.1이 아닐 때)는
+키가 꼭 있어야 하고, 없으면 만들어 KEY_FILE에 둔다. whisper.cpp에는 키 기능이 없어 그쪽은 127.0.0.1에만 열고 밖에는 이 서버만 연다.
 
 음성은 임시 파일로만 다루고 요청이 끝나면(성공이든 실패든) 모두 지운다 (BP-VOC-01).
 실행: ~/voice-env/bin/python tools/voice-sidecar/server.py
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import mmap
 import os
 import re
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -27,6 +35,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 HOST = os.environ.get("SIDECAR_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SIDECAR_PORT", "8001"))
@@ -37,6 +46,16 @@ VIBEVOICE_MODEL = os.environ.get(
 )
 VIBEVOICE_MAX_TOKENS = int(os.environ.get("VIBEVOICE_MAX_TOKENS", "65536"))
 MAX_UPLOAD_BYTES = 600 * 1024 * 1024
+KEY_FILE = Path(os.environ.get("SIDECAR_API_KEY_FILE", str(Path.home() / ".config/fantasteel-voice/api-key")))
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+SHORT_AUDIO_SEC = 3.0
+
+ENGINES: list[dict[str, Any]] = [
+    {"id": "whisper-pyannote", "label": "받아쓰기 + 화자 분리 (whisper + pyannote)", "diarization": True},
+    {"id": "whisper", "label": "받아쓰기만 (whisper, 빠름)", "diarization": False},
+    {"id": "vibevoice", "label": "받아쓰기 + 화자 분리 (VibeVoice, 느림)", "diarization": True},
+]
+ENGINE_IDS = tuple(e["id"] for e in ENGINES)
 REPO_ENV = Path(__file__).resolve().parents[2] / "server" / ".env"
 
 log = logging.getLogger("voice-sidecar")
@@ -45,6 +64,7 @@ log = logging.getLogger("voice-sidecar")
 engine_lock = threading.Lock()
 _pipeline: Any = None
 _vibevoice: Any = None
+API_KEY: Optional[str] = None
 
 
 class SidecarError(Exception):
@@ -156,6 +176,81 @@ def load_hf_token() -> str:
     raise SidecarError(500, "HF_TOKEN이 없어요. server/.env에 HF_TOKEN=… 을 넣어 주세요")
 
 
+def has_hf_token() -> bool:
+    try:
+        load_hf_token()
+        return True
+    except SidecarError:
+        return False
+
+
+# ── API 키 ─────────────────────────────────────────────────────────────────────────────────
+
+
+def resolve_api_key(host: str) -> Optional[str]:
+    """SIDECAR_API_KEY → KEY_FILE 순서. 다른 PC에 열면서 둘 다 없으면 새로 만들어 KEY_FILE에 둔다(본인만 읽기)."""
+    key = os.environ.get("SIDECAR_API_KEY", "").strip()
+    if key:
+        return key
+    if KEY_FILE.exists():
+        saved = KEY_FILE.read_text(encoding="utf-8").strip()
+        if saved:
+            return saved
+    if host in LOOPBACK_HOSTS:
+        return None
+    KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    key = "fsv-" + secrets.token_urlsafe(32)
+    KEY_FILE.write_text(key + "\n", encoding="utf-8")
+    KEY_FILE.chmod(0o600)
+    return key
+
+
+def authorized(header: Optional[str]) -> bool:
+    if API_KEY is None:
+        return True
+    if not header or not header.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(header[len("Bearer ") :].strip().encode(), API_KEY.encode())
+
+
+# ── 엔진 준비 상태 (모델 목록에 같이 보인다) ──────────────────────────────────────────────
+
+
+def whisper_reachable() -> bool:
+    url = urlparse(WHISPER_URL)
+    try:
+        with socket.create_connection((url.hostname or "127.0.0.1", url.port or 80), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def model_list() -> dict[str, Any]:
+    whisper_ok = whisper_reachable()
+    notes = {
+        "whisper": None if whisper_ok else f"whisper 서버({WHISPER_URL})가 꺼져 있어요",
+        "whisper-pyannote": (
+            f"whisper 서버({WHISPER_URL})가 꺼져 있어요" if not whisper_ok else None if has_hf_token() else "HF_TOKEN이 없어 화자 분리를 못 해요"
+        ),
+        "vibevoice": None if Path(VIBEVOICE_MODEL).exists() else "VibeVoice 모델 폴더가 없어요",
+    }
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": e["id"],
+                "object": "model",
+                "owned_by": "voice-sidecar",
+                "label": e["label"],
+                "diarization": e["diarization"],
+                "available": notes[e["id"]] is None,
+                "note": notes[e["id"]],
+            }
+            for e in ENGINES
+        ],
+    }
+
+
 # ── 엔진 A: whisper.cpp + pyannote ─────────────────────────────────────────────────────────
 
 
@@ -240,8 +335,7 @@ def assign_speakers(segments: list[dict[str, Any]], turns: list[tuple[float, flo
     return labels
 
 
-def run_whisper_pyannote(wav_path: str, language: str, num_speakers: Optional[int] = None) -> tuple[list[dict[str, Any]], float]:
-    raw = whisper_transcribe(wav_path, language)
+def whisper_segments(raw: dict[str, Any]) -> list[dict[str, Any]]:
     segments = [
         {"start": float(s.get("start", 0.0)), "end": float(s.get("end", 0.0)), "text": str(s.get("text", "")).strip()}
         for s in raw.get("segments", [])
@@ -249,10 +343,34 @@ def run_whisper_pyannote(wav_path: str, language: str, num_speakers: Optional[in
     ]
     if not segments and str(raw.get("text", "")).strip():
         segments = [{"start": 0.0, "end": float(raw.get("duration") or 0.0), "text": str(raw["text"]).strip()}]
+    return segments
+
+
+def whisper_duration(raw: dict[str, Any], segments: list[dict[str, Any]]) -> float:
+    return float(raw.get("duration") or (segments[-1]["end"] if segments else 0.0))
+
+
+def run_whisper(wav_path: str, language: str) -> tuple[list[dict[str, Any]], float]:
+    raw = whisper_transcribe(wav_path, language)
+    segments = whisper_segments(raw)
+    for seg in segments:
+        seg["speaker"] = None
+    return segments, whisper_duration(raw, segments)
+
+
+def run_whisper_pyannote(wav_path: str, language: str, num_speakers: Optional[int] = None) -> tuple[list[dict[str, Any]], float]:
+    raw = whisper_transcribe(wav_path, language)
+    segments = whisper_segments(raw)
+    duration = whisper_duration(raw, segments)
+    if duration < SHORT_AUDIO_SEC:
+        # ERP의 연결 확인(1초 무음)처럼 짧은 소리는 화자를 나눌 것이 없어 pyannote를 올리지 않는다 (첫 확인이 1분 가까이 걸렸다)
+        for seg in segments:
+            seg["speaker"] = "SPEAKER_1"
+        return segments, duration
     labels = renumber(assign_speakers(segments, diarize(wav_path, num_speakers))) if segments else []
     for seg, label in zip(segments, labels):
         seg["speaker"] = label
-    return segments, float(raw.get("duration") or (segments[-1]["end"] if segments else 0.0))
+    return segments, duration
 
 
 # ── 엔진 B: VibeVoice-ASR (MLX) ────────────────────────────────────────────────────────────
@@ -307,15 +425,26 @@ def transcribe_request(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         engine = (fields.get("model") or "whisper-pyannote").strip()
         if engine in ("", "whisper-1"):
             engine = "whisper-pyannote"
-        if engine not in ("whisper-pyannote", "vibevoice"):
-            raise SidecarError(400, f"model은 whisper-pyannote 또는 vibevoice여야 해요 (받은 값: {engine})")
+        if engine not in ENGINE_IDS:
+            raise SidecarError(400, f"model은 {', '.join(ENGINE_IDS)} 중 하나여야 해요 (받은 값: {engine})")
         language = (fields.get("language") or "ko").strip() or "ko"
         hint = (fields.get("num_speakers") or "").strip()
         num_speakers = int(hint) if hint.isdigit() and 1 <= int(hint) <= 20 else None
 
         started = time.time()
-        with engine_lock:
-            segments, duration = run_vibevoice(wav_path) if engine == "vibevoice" else run_whisper_pyannote(wav_path, language, num_speakers)
+        # 짧은 소리(ERP 연결 확인)는 긴 회의 전사가 끝날 때까지 기다리지 않고 바로 바쁘다고 알린다 (기다리면 확인이 시간 초과로 끝난다)
+        short = (os.path.getsize(wav_path) - 44) / (16000 * 2) < SHORT_AUDIO_SEC
+        if not engine_lock.acquire(blocking=not short):
+            raise SidecarError(503, "지금 다른 녹음을 받아쓰는 중이에요. 주소·키는 맞으니 끝난 뒤 다시 확인해 주세요")
+        try:
+            if engine == "vibevoice":
+                segments, duration = run_vibevoice(wav_path)
+            elif engine == "whisper":
+                segments, duration = run_whisper(wav_path, language)
+            else:
+                segments, duration = run_whisper_pyannote(wav_path, language, num_speakers)
+        finally:
+            engine_lock.release()
         log.info("%s: 구간 %d개, %.1f초 걸림", engine, len(segments), time.time() - started)
 
         if fields.get("response_format") == "json":
@@ -348,15 +477,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _deny(self) -> bool:
+        """키가 틀리면 401로 끊는다. 본문을 읽기 전에 막아 큰 파일을 받지 않는다"""
+        if authorized(self.headers.get("Authorization")):
+            return False
+        self.close_connection = True
+        self._send(401, {"error": {"message": "API 키가 맞지 않아요"}})
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.split("?")[0] == "/health":
-            self._send(200, {"status": "ok", "engines": ["whisper-pyannote", "vibevoice"]})
+        path = self.path.split("?")[0]
+        if path == "/health":
+            self._send(200, {"status": "ok"})
+        elif path in ("/v1/models", "/models"):
+            if not self._deny():
+                self._send(200, model_list())
         else:
             self._send(404, {"error": {"message": "없는 경로예요"}})
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path.split("?")[0] not in ("/v1/audio/transcriptions", "/audio/transcriptions"):
             self._send(404, {"error": {"message": "없는 경로예요"}})
+            return
+        if self._deny():
             return
         try:
             self._send(200, transcribe_request(self))
@@ -368,9 +511,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    global API_KEY
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
+    API_KEY = resolve_api_key(HOST)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    log.info("voice-sidecar가 http://%s:%d 에서 기다려요 (엔진: whisper-pyannote, vibevoice)", HOST, PORT)
+    log.info("voice-sidecar가 http://%s:%d 에서 기다려요 (엔진: %s)", HOST, PORT, ", ".join(ENGINE_IDS))
+    if API_KEY is None:
+        log.info("API 키 없이 열었어요 (이 컴퓨터에서만 쓸 수 있어요)")
+    else:
+        # 이 컴퓨터의 터미널에만 보인다. ERP의 음성 인식 카드 API 키 칸에 넣는다
+        print(f"\nERP에 넣을 API 키: {API_KEY}\n(저장 위치: {KEY_FILE if not os.environ.get('SIDECAR_API_KEY') else 'SIDECAR_API_KEY'})\n", file=sys.stderr, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

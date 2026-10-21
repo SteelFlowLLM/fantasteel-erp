@@ -42,10 +42,10 @@ export class SttService {
     const model = input.model === undefined ? current.model : input.model;
     const started = Date.now();
     try {
-      await this.client.checkConnection({ baseUrl, apiKey }, model);
-      return { connected: true, baseUrl: redactUrl(baseUrl), latencyMs: Date.now() - started, error: null };
+      const models = await this.client.checkConnection({ baseUrl, apiKey }, model);
+      return { connected: true, baseUrl: redactUrl(baseUrl), latencyMs: Date.now() - started, error: null, models };
     } catch (error) {
-      return { connected: false, baseUrl: redactUrl(baseUrl), latencyMs: null, error: messageOf(error) };
+      return { connected: false, baseUrl: redactUrl(baseUrl), latencyMs: null, error: messageOf(error), models: [] };
     }
   }
 

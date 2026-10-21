@@ -1,6 +1,6 @@
 // 음성 인식 서버 주소가 어느 쪽에 있는지 알려 주는 안내용 분류 (문서에 없는 기능, 이슈 #432).
 // 막는 규칙이 아니다: 관리자가 넣는 서버 설정이라 어떤 주소든 저장은 되고, 화면이 종류와 주의점만 보여 준다.
-import { STT_API_BASE_URL, STT_API_DEFAULT_MODEL, STT_DEFAULT_BASE_URL } from '@fantasteel/shared';
+import { STT_API_BASE_URL, STT_API_DEFAULT_MODEL, STT_DEFAULT_BASE_URL, type SttModelOption } from '@fantasteel/shared';
 
 export type SttHostKind = 'self' | 'lan' | 'tailscale' | 'internet' | 'unknown' | 'unspecified' | 'blocked' | 'invalid';
 
@@ -54,7 +54,7 @@ export function classifySttHost(baseUrl: string): SttHostInfo {
     return { kind: 'self', note: 'ERP 서버를 돌리는 컴퓨터에서 켠 음성 서버예요 (사용자 PC가 아니에요)', warn: false };
   }
   if (host.endsWith('.ts.net') || (ip && ip[0] === 100 && ip[1] >= 64 && ip[1] <= 127)) {
-    return { kind: 'tailscale', note: 'Tailscale로 연결된 PC예요. ERP 서버 컴퓨터에도 Tailscale이 켜져 있어야 해요', warn: false };
+    return { kind: 'tailscale', note: 'Tailscale로 연결된 PC예요. ERP 서버 컴퓨터에도 Tailscale이 켜져 있어야 하고, 그 PC 터미널의 API 키를 넣어요', warn: false };
   }
   if (
     /^f[cd][0-9a-f]{2}:/.test(host) ||
@@ -63,7 +63,7 @@ export function classifySttHost(baseUrl: string): SttHostInfo {
     host.endsWith('.lan') ||
     (!ip && !host.includes('.') && !host.includes(':'))
   ) {
-    return { kind: 'lan', note: '같은 망의 PC예요. 그 PC에서 음성 서버를 0.0.0.0으로 띄우고 방화벽에서 포트를 열어야 해요', warn: false };
+    return { kind: 'lan', note: '같은 망의 PC예요. 그 PC에서 tools/voice-sidecar/start.sh로 켜고, 터미널에 보이는 API 키를 넣어요', warn: false };
   }
   // 점이 있는 이름은 사내 DNS일 수도 인터넷일 수도 있어 단정하지 않는다. 확실한 인터넷은 공인 IP와 api.openai.com뿐이다
   if (!ip && !host.includes(':') && host !== 'api.openai.com' && !host.endsWith('.openai.com')) {
@@ -105,4 +105,18 @@ export function sameOriginUrl(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 연결 확인으로 받은 모델 목록을 고르기 칸 항목으로. 서버가 준 이름이 있으면 그 이름, 없으면 id.
+ * 지금 고른 모델이 목록에 없으면 따로 표시해 선택이 사라지지 않게 한다.
+ */
+export function sttModelChoices(models: SttModelOption[], selected: string): { id: string; label: string; disabled: boolean }[] {
+  const choices = models.map((m) => {
+    const name = m.label ?? [m.id, m.diarization === true ? '화자 분리' : null].filter(Boolean).join(' · ');
+    const unavailable = m.available === false ? ` — 지금 못 씀${m.note ? `: ${m.note}` : ''}` : '';
+    return { id: m.id, label: `${name}${unavailable}`, disabled: false };
+  });
+  if (selected && !models.some((m) => m.id === selected)) choices.unshift({ id: selected, label: `${selected} (이 서버 목록에 없음)`, disabled: false });
+  return choices;
 }

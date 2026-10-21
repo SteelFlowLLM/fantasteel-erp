@@ -3,6 +3,7 @@
 // 음성 인식(STT) 연결 카드 (문서에 없는 기능, Voice2ERP 1단계 · 이슈 #432): 방식(내 음성 서버 / OpenAI 방식 API)·주소·모델·API 키 저장, 연결 확인, 파일로 시험.
 // 방식은 서버에 저장하지 않는다: 주소로 짐작하고, 바꾸면 주소·모델 기본값만 채운다.
 // AI 연결(LLM) 카드와 같은 권한(ORG_MANAGE)을 쓴다(가정). LLM을 API로 바꿔도 음성은 이 설정을 따로 쓴다.
+// 모델은 연결 확인으로 받은 목록(사이드카의 GET /v1/models, 이슈 #445)이 있으면 고르기 칸, 없으면 직접 입력이다.
 import { useRef, useState } from 'react';
 import { STT_API_BASE_URL, type SttSettingsView } from '@fantasteel/shared';
 import { sttApi, sttKeys } from '@/api/stt';
@@ -14,7 +15,7 @@ import { Field } from '@/components/Field';
 import { Input, Select } from '@/components/Input';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { useAction } from '@/hooks/useAction';
-import { STT_HOST_KIND_LABEL, STT_MODE_LABEL, classifySttHost, sttModeDefaults, sttModeOf, sameOriginUrl, type SttMode } from '@/lib/sttHost';
+import { STT_HOST_KIND_LABEL, STT_MODE_LABEL, classifySttHost, sttModeDefaults, sttModeOf, sttModelChoices, sameOriginUrl, type SttMode } from '@/lib/sttHost';
 import { useSttConnectionTest, useSttSettings, useSttTranscribeTest } from '@/hooks/useStt';
 
 export function SttSettingsCard({ canEdit }: { canEdit: boolean }) {
@@ -45,6 +46,7 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
   const apiKeyInput = (): string | undefined => (apiKey.trim() ? apiKey.trim() : clearApiKey || savedKeyDropped ? '' : undefined);
   const dirty = baseUrl.trim() !== saved.baseUrl || model.trim() !== (saved.model ?? '') || apiKey.trim() !== '' || clearApiKey;
   const result = connection.data;
+  const models = result?.models ?? [];
   const test = transcribe.data;
   const host = classifySttHost(baseUrl);
   const changeMode = (next: SttMode) => {
@@ -65,7 +67,7 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
           label="방식"
           hint={
             mode === 'server'
-              ? '내 컴퓨터나 같은 망·Tailscale의 PC에서 켠 whisper.cpp·화자 분리 서버예요. 키가 필요 없어요'
+              ? '이 Mac이나 같은 망·Tailscale의 PC에서 켠 whisper.cpp·화자 분리 서버예요. 다른 PC의 서버면 그 터미널에 보이는 API 키를 넣어요'
               : 'OpenAI처럼 키로 쓰는 음성 인식 API예요. 회의 음성이 그 회사 서버로 나가요'
           }
         >
@@ -96,12 +98,32 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
             spellCheck={false}
           />
         </Field>
-        <Field label="모델" hint={mode === 'server' ? 'whisper.cpp는 비워 두면 돼요 · 화자 분리 서버는 whisper-pyannote' : 'OpenAI는 whisper-1'}>
-          <Input value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit} placeholder="비워 둠" spellCheck={false} />
+        <Field
+          label="모델"
+          hint={
+            models.length
+              ? '연결 확인으로 받은 목록이에요. 화자 분리 모델이라야 회의록에서 누가 말했는지 나뉘어요'
+              : mode === 'server'
+                ? '연결 확인을 누르면 서버가 가진 모델이 목록으로 나와요 · whisper.cpp만 켰다면 비워 둬요'
+                : 'OpenAI는 whisper-1'
+          }
+        >
+          {models.length ? (
+            <Select value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit} aria-label="음성 인식 모델">
+              <option value="">서버 기본값</option>
+              {sttModelChoices(models, model).map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Input value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit} placeholder="비워 둠" spellCheck={false} aria-label="음성 인식 모델" />
+          )}
         </Field>
         <Field
           label="API 키"
-          hint={savedKeyDropped ? '주소가 바뀌어 저장된 키는 새 주소로 보내지 않아요. 저장하면 지워져요' : saved.hasApiKey && !clearApiKey ? '저장된 키가 있어요. 바꿀 때만 입력해요' : '내 음성 서버는 비워 둬요. 키가 필요한 API일 때만 입력해요'}
+          hint={savedKeyDropped ? '주소가 바뀌어 저장된 키는 새 주소로 보내지 않아요. 저장하면 지워져요' : saved.hasApiKey && !clearApiKey ? '저장된 키가 있어요. 바꿀 때만 입력해요' : mode === 'server' ? '이 Mac에서만 켠 음성 서버면 비워 둬요. 다른 PC에 연 서버는 그 터미널의 "ERP에 넣을 API 키"를 넣어요' : 'API 회사에서 받은 키를 넣어요'}
         >
           <div className="flex gap-2">
             <Input
