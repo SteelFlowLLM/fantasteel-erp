@@ -725,13 +725,16 @@ model GoodsReceipt {
   id Int @id @default(autoincrement())
   goodsReceiptNo String @unique @map("goods_receipt_no") @db.VarChar /// GR-YYMM-NNNN
   purchaseOrderItemId Int @map("purchase_order_item_id")
-  receivedTon Decimal @map("received_ton") @db.Decimal(12, 3)
-  receivedDate DateTime @map("received_date") @db.Date /// 원료 FIFO 기준
+  receivedTon Decimal @map("received_ton") @db.Decimal(12, 3) /// 입고 취소 행은 음수
+  receivedDate DateTime @map("received_date") @db.Date /// 원료 FIFO 기준. 입고 취소 행은 취소한 날
+  reversedGoodsReceiptId Int? @unique @map("reversed_goods_receipt_id") /// 입고 취소(반대 거래)면 취소한 원래 입고
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   lot Lot? @relation("LotGoodsReceipt")
   purchaseOrderItem PurchaseOrderItem @relation("GoodsReceiptPurchaseOrderItem", fields: [purchaseOrderItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversedGoodsReceipt GoodsReceipt? @relation("GoodsReceiptReversal", fields: [reversedGoodsReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversal GoodsReceipt? @relation("GoodsReceiptReversal")
 
   @@index([purchaseOrderItemId])
   @@map("goods_receipt")
