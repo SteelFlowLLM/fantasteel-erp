@@ -1,10 +1,11 @@
 'use client';
 
-// 철강맨 부르기 (이슈 #457, 문서에 없는 기능): "철강맨~"으로 부르면 듣고 말한 일을 한다. 1단계는 답을 글로 보인다.
+// 철강맨 부르기 (이슈 #457, 문서에 없는 기능): "철강맨~"으로 부르면 듣고 말한 일을 한다. 답은 글로 보이고, 읽어 주기(이슈 #507)가 켜져 있으면 브라우저 음성으로도 읽는다.
 // 소리는 우리 음성 서버로만 간다: 브라우저가 소리 크기로 말 조각만 잘라(lib/voiceClip.ts) ERP 서버(stt/wake-clip)로 보내고,
 // 받아쓴 글에서 부르는 말을 찾는다(lib/steelmanWake.ts). 부르는 말이 없는 글은 바로 버린다.
 // 켜 있는 동안 화면 위쪽 띠에 '듣는 중'이 늘 보이고 거기서 바로 끈다. 탭이 숨겨지면 마이크를 닫고, 돌아오면 다시 연다.
-// 띠는 지금 단계(소리 크기·받아쓰는 중·들은 말·물어보는 중·답하는 중)를 보인다 (이슈 #494). 받아쓴 글은 이 화면 메모리에만 몇 초 둔다.
+// 띠는 지금 단계(소리 크기·받아쓰는 중·들은 말·물어보는 중·답하는 중·읽어 주는 중)를 보인다 (이슈 #494). 받아쓴 글은 이 화면 메모리에만 몇 초 둔다.
+// 읽는 동안은 마이크가 쉬고(lib/steelmanWakeActions.ts의 wakeMuted) 다 읽으면 다시 듣는다. 이어 말하기 시간은 다 읽은 뒤부터 센다.
 import type { AiActionCard } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/Button';
@@ -15,9 +16,10 @@ import { useMe } from '@/hooks/useMe';
 import { useAiCapabilities } from '@/hooks/useAiAssistant';
 import { CARD_KIND_LABEL, isWorkCard } from '@/lib/aiActionCard';
 import { microphoneErrorMessage } from '@/lib/meetingAudio';
-import { speakSteelmanReply } from '@/lib/steelmanVoice';
-import { COMMAND_QUIET_MS, CONVERSATION_FOLLOW_UP_MS, FOLLOW_UP_REPLY } from '@/lib/steelmanWake';
-import { executeApproved, flushCommandPrefix, setWakeAudioContext, transcribe, transcribePartial, turnOnScreenControl, wakeMuted, type HeardClip } from '@/lib/steelmanWakeActions';
+import { setSteelmanSpeaker } from '@/lib/steelmanVoice';
+import { koreanVoices, stopSpeaking, useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
+import { COMMAND_QUIET_MS } from '@/lib/steelmanWake';
+import { afterVoiceAnswer, executeApproved, flushCommandPrefix, setWakeAudioContext, speakVoiceReply, transcribe, transcribePartial, turnOnScreenControl, wakeMuted, watchSteelmanSpeech, type HeardClip } from '@/lib/steelmanWakeActions';
 import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
 import { setWakeLiveLevel } from '@/lib/wakeOrb';
 import { WakeCalledOrb, WakeLevelMeter, WakeOrb } from '@/features/shell/WakeOrb';
@@ -25,6 +27,7 @@ import { ClipUploadQueue, clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
 import { keepAudioRunning } from '@/lib/wakeAudioUnlock';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
+import { SteelmanSpeakMenu } from '@/features/shell/SteelmanSpeakMenu';
 import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 
 /** 안내를 띠에 보이는 시간 */
@@ -109,7 +112,10 @@ export function SteelmanWake() {
       let quietSince: number | null = null;
       processor.onaudioprocess = (event) => {
         if (wakeMuted()) {
+          // 띠링이나 철강맨이 읽는 소리 동안은 듣지 않는다. 읽는 동안은 길어서 말소리 잡는 표시와 소리 크기 막대도 쉬게 한다 (이슈 #507)
           segmenter.reset();
+          if (store().hearing) store().setHearing(false);
+          setWakeLiveLevel(0, segmenter.startThreshold);
           return;
         }
         const wake = store();
@@ -235,22 +241,25 @@ function useExpireTimers(screenControlRef: { readonly current: boolean }): void 
   }, [notice]);
 }
 
-/** 말로 물은 질문의 답이 끝나면 읽어 줄 자리로 넘긴다 (1단계는 글로만 보인다) */
+/** 말로 물은 질문의 답이 끝나면 읽어 주고 이어 말하기를 연다 (lib/steelmanWakeActions.ts의 afterVoiceAnswer) */
 function useSpeakVoiceAnswers(): void {
-  useEffect(
-    () =>
-      useAiChatStore.subscribe((state, previous) => {
-        const voiceId = store().voiceQuestionId;
-        if (!voiceId || previous.pendingId !== voiceId || state.pendingId === voiceId) return;
-        store().setVoiceQuestionId(null);
-        store().showActivity({ kind: 'answered' });
-        // 이어 말하기: 답이 끝나면 잠깐 부르는 말 없이 다음 질문을 받는다 ("그만·고마워·됐어"면 끝, 이슈 #494)
-        store().setCalled({ reply: FOLLOW_UP_REPLY, until: Date.now() + CONVERSATION_FOLLOW_UP_MS, followUp: true });
-        const last = state.entries.at(-1);
-        if (last?.role === 'assistant') speakSteelmanReply(last.content);
-      }),
-    [],
-  );
+  useEffect(() => {
+    // 1단계 목소리는 브라우저 음성. 한국어 목소리 목록은 첫 조회 때 브라우저가 채우기 시작하므로 미리 한 번 부른다
+    koreanVoices();
+    setSteelmanSpeaker(speakVoiceReply);
+    const unwatch = watchSteelmanSpeech();
+    const unsubscribe = useAiChatStore.subscribe((state, previous) => {
+      const voiceId = store().voiceQuestionId;
+      if (!voiceId || previous.pendingId !== voiceId || state.pendingId === voiceId) return;
+      store().setVoiceQuestionId(null);
+      afterVoiceAnswer(state.entries.at(-1));
+    });
+    return () => {
+      unsubscribe();
+      unwatch();
+      setSteelmanSpeaker(null);
+    };
+  }, []);
 }
 
 /** 띠·패널 머리에 보일 지금 단계 한 줄 (이슈 #494). 남은 초가 줄어들게 기다리는 동안은 자주 다시 그린다 */
@@ -265,8 +274,9 @@ export function useWakeBarLine(): ReturnType<typeof wakeBarLine> {
   const partialText = useSteelmanWakeStore((state) => state.partialText);
   const continuing = useSteelmanWakeStore((state) => state.commandPrefix !== null);
   const answering = useAiChatStore((state) => voiceQuestionId !== null && state.pendingId === voiceQuestionId);
+  const speaking = useSteelmanSpeechStore((state) => state.speaking !== null);
   const now = useTicking(called !== null);
-  return wakeBarLine({ status, audioBlocked, hearing, transcribing, called, activity, answering, partialText, continuing, now });
+  return wakeBarLine({ status, audioBlocked, hearing, transcribing, called, activity, answering, speaking, partialText, continuing, now });
 }
 
 /** ticking이면 0.25초마다 지금 시각을 바꾼다 */
@@ -294,6 +304,7 @@ function SteelmanWakeBar() {
   const voiceApproval = useSteelmanWakeStore((state) => state.voiceApproval);
   const companyVoiceApproval = useSteelmanWakeStore((state) => state.company.voiceApproval);
   const panelOpen = useShellStore((state) => state.aiPanelOpen);
+  const speaking = useSteelmanSpeechStore((state) => state.speaking !== null);
   const line = useWakeBarLine();
   return (
     <div data-ai-skip="" role="status" aria-live="polite" className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-steelman bg-steelman-soft px-4 py-1.5 text-sm text-steelman-ink">
@@ -309,6 +320,11 @@ function SteelmanWakeBar() {
       {activity?.kind === 'answered' && !panelOpen ? (
         <Button size="sm" variant="ghost" onClick={() => useShellStore.getState().showAiPanel()}>
           답 보기
+        </Button>
+      ) : null}
+      {speaking ? (
+        <Button size="sm" icon="stop" onClick={() => stopSpeaking('stopped')}>
+          읽기 멈춤
         </Button>
       ) : null}
       {problem ? <span className="text-cap font-medium text-danger">{problem}</span> : null}
@@ -335,6 +351,7 @@ function SteelmanWakeBar() {
           말로 승인 허용
         </label>
       ) : null}
+      <SteelmanSpeakMenu appearance="bar" />
       <Button size="sm" icon="x-circle" onClick={() => store().setEnabled(false)}>
         끄기
       </Button>

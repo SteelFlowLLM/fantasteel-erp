@@ -70,3 +70,14 @@ describe('긴 명령 표시 (이슈 #494)', () => {
     expect(text({ answering: true, hearing: true, partialText: 'x' })).toBe('철강맨이 답하는 중…');
   });
 });
+
+describe('읽어 주는 중 표시 (이슈 #507)', () => {
+  it('철강맨이 답을 읽는 동안은 듣기를 쉰다고 보이고, 소리 처리 막힘·마이크 문제보다는 뒤다', () => {
+    expect(wakeBarLine({ ...base, speaking: true })).toEqual({ text: '철강맨이 읽어 주는 중… 듣기는 잠깐 쉬어요', tone: 'busy' });
+    // 읽는 동안 마이크가 쉬므로 말소리·중간 글·"네?"가 있어도 읽는 중이 먼저
+    expect(text({ speaking: true, hearing: true, partialText: 'x', called: { reply: '네?', until: now + 5_000 } })).toBe('철강맨이 읽어 주는 중… 듣기는 잠깐 쉬어요');
+    expect(text({ speaking: true, status: 'error' })).toBe('듣지 못하고 있어요');
+    expect(text({ speaking: true, audioBlocked: true })).toContain('화면을 한 번 눌러 주세요');
+    expect(text({ speaking: false })).toBe(text({}));
+  });
+});

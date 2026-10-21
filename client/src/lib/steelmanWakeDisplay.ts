@@ -41,6 +41,8 @@ export interface WakeBarInput {
   activity: WakeActivity | null;
   /** 말로 물은 질문의 답을 기다리는 중 */
   answering: boolean;
+  /** 철강맨이 답을 소리 내 읽는 중 (이슈 #507). 그동안 마이크는 쉰다 */
+  speaking?: boolean;
   /** 명령을 말하는 동안 받은 중간 글 (이슈 #494) */
   partialText?: string | null;
   /** 8초에서 잘린 명령의 나머지를 듣는 중 */
@@ -63,6 +65,7 @@ export function wakeBarLine(input: WakeBarInput): { text: string; tone: WakeBarT
   if (input.status === 'paused') return { text: '탭이 숨겨져 잠깐 쉬어요', tone: 'idle' };
   if (input.status === 'error') return { text: '듣지 못하고 있어요', tone: 'problem' };
   if (input.audioBlocked) return { text: '화면을 한 번 눌러 주세요 · 브라우저가 소리 듣기를 멈춰 두었어요', tone: 'action' };
+  if (input.speaking) return { text: '철강맨이 읽어 주는 중… 듣기는 잠깐 쉬어요', tone: 'busy' };
   if (input.answering) return { text: '철강맨이 답하는 중…', tone: 'busy' };
   if (input.hearing && input.partialText) return { text: `듣는 중: '${shorten(input.partialText)}'`, tone: 'busy' };
   if (input.continuing) return { text: '계속 듣는 중… 말이 끝나면 물어봐요', tone: 'busy' };
