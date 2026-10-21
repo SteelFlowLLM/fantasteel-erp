@@ -99,20 +99,24 @@ export class MessengerGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
     await client.join(employeeChannel(user.employeeId));
+    // 사원을 읽는 사이 퇴사 처리가 커밋됐으면 그 알림은 사원 채널에 들기 전이라 이 소켓에 닿지 않았다 → 채널에 든 뒤 한 번 더 본다
+    if (!(await this.users.load(user.employeeId))) {
+      client.disconnect(true);
+      return;
+    }
     // 여기부터는 기다리지 않는다: 확인하는 사이 끊겼으면 접속 상태에 세지 않는다(세면 handleDisconnect가 이미 지나가 온라인으로 남는다)
     if (!client.connected) return;
+    const left = session.expiresAt === null ? null : session.expiresAt - Date.now();
+    if (left !== null && left <= 0) {
+      client.disconnect(true);
+      return;
+    }
+    // 접속 수에 세는 소켓에만 user를 둔다 (먼저 두면 위에서 끊을 때 세지 않은 접속을 빼 같은 사원의 다른 기기가 오프라인으로 보인다)
     const data = socketDataOf(client);
     data.user = { employeeId: user.employeeId, employeeName: user.employeeName, token: session.token };
-    if (session.expiresAt !== null) {
-      const left = session.expiresAt - Date.now();
-      if (left <= 0) {
-        client.disconnect(true);
-        return;
-      }
-      if (left <= MAX_TIMER_MS) {
-        data.expiryTimer = setTimeout(() => client.disconnect(true), left);
-        data.expiryTimer.unref();
-      }
+    if (left !== null && left <= MAX_TIMER_MS) {
+      data.expiryTimer = setTimeout(() => client.disconnect(true), left);
+      data.expiryTimer.unref();
     }
     // 사내 접속 상태는 메신저를 쓰는 모든 사원에게 보인다 (방 멤버로 좁히지 않는다)
     if (this.presence.connect(user.employeeId)) this.broadcast(MESSENGER_EVENT.PRESENCE_CHANGED, { employeeId: user.employeeId, online: true } satisfies PresenceChangedEvent);

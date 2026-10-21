@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'node:crypto';
 import type { CookieOptions } from 'express';
 
 /** access token을 담는 httpOnly 쿠키 이름 (컨벤션 6장) */
@@ -33,8 +34,9 @@ export function readCookie(cookieHeader: string | undefined, name: string): stri
 export class AuthTokenService {
   constructor(private readonly jwt: JwtService) {}
 
+  /** jti로 로그인마다 다른 토큰을 만든다: 같은 1초에 두 기기에서 로그인해도 한쪽 로그아웃이 다른 쪽 메신저 소켓을 끊지 않게 (이슈 #488) */
   sign(employeeId: number): Promise<string> {
-    return this.jwt.signAsync({ sub: employeeId });
+    return this.jwt.signAsync({ sub: employeeId, jti: randomUUID() });
   }
 
   /** 유효하면 사원 id, 아니면 null */

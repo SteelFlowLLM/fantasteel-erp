@@ -707,16 +707,46 @@ describe('접속 상태 · 입력 중 (소켓)', () => {
     expect(short.socket.disconnected).toBe(true);
     gateway.handleDisconnect(short.asSocket);
 
+    // 만료된 토큰으로 접속해 끊겨도, 같은 사원의 다른 기기 접속 수를 빼지 않는다
+    const online = fakeSocket(qualityCookie);
+    await gateway.handleConnection(online.asSocket);
     const expired = fakeSocket(`access_token=${await jwt.signAsync({ sub: qualityId }, { expiresIn: -10 })}`);
     await gateway.handleConnection(expired.asSocket);
+    gateway.handleDisconnect(expired.asSocket);
     expect(expired.socket.disconnected).toBe(true);
+    const presence = (gateway as unknown as { presence: { onlineEmployeeIds(): number[] } }).presence;
+    expect(presence.onlineEmployeeIds()).toContain(qualityId);
+    gateway.handleDisconnect(online.asSocket);
+    expect(presence.onlineEmployeeIds()).not.toContain(qualityId);
+  });
+
+  it('사원을 읽는 사이 퇴사 처리되면 채널에 든 뒤 다시 확인해 끊고, 접속에 세지 않는다 (이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    const broadcasts: unknown[] = [];
+    (gateway as unknown as GatewayInternals).broadcast = (_event, payload) => void broadcasts.push(payload);
+    const users = (gateway as unknown as { users: { load: (id: number) => Promise<unknown> } }).users;
+    const original = users.load.bind(users);
+    let calls = 0;
+    users.load = async (id: number) => (++calls === 1 ? original(id) : null);
+    try {
+      const tab = fakeSocket(qualityCookie);
+      await gateway.handleConnection(tab.asSocket);
+      expect(tab.socket.disconnected).toBe(true);
+      gateway.handleDisconnect(tab.asSocket);
+      expect(broadcasts).toEqual([]);
+    } finally {
+      users.load = original;
+    }
   });
 
   it('로그아웃하면 그 토큰의 소켓만, 퇴사 처리하면 그 사원의 소켓을 모두 끊는다 (이슈 #488)', async () => {
     const gateway = app.get(MessengerGateway);
     const revocations: AuthRevocation[] = [];
     const stop = app.get(AuthSessionEvents).on((r) => void revocations.push(r));
-    const token = (await login('2304015')).split('=')[1];
+    // 같은 1초에 두 기기에서 로그인해도 토큰이 다르다(jti): 한쪽 로그아웃이 다른 쪽을 끊지 않는다
+    const [first, second] = await Promise.all([login('2304015'), login('2304015')]);
+    expect(first).not.toBe(second);
+    const token = first.split('=')[1];
     const logout = await fetch(`${baseUrl}/auth/logout`, { method: 'POST', headers: { cookie: `access_token=${token}` } });
     expect(logout.status).toBe(200);
     expect(revocations).toEqual([{ token }]);
@@ -771,6 +801,24 @@ describe('메신저 보강 (이슈 #488)', () => {
       service.saveMessage = original;
     }
     expect(await storedFiles()).toBe(before);
+
+    // 커밋된 뒤 실패(ERP 링크 조회)하면 파일은 메시지가 쓰므로 지우지 않는다
+    const linked = app.get(MessengerService) as unknown as { erpLinkResolver: (...args: unknown[]) => Promise<unknown> };
+    const originalLinks = linked.erpLinkResolver;
+    linked.erpLinkResolver = async () => {
+      throw new Error('링크 조회 실패');
+    };
+    try {
+      const failedAfterCommit = await upload(salesCookie, room.id, 'kept.txt', new Uint8Array([4, 5]));
+      expect(failedAfterCommit.status).toBe(500);
+    } finally {
+      linked.erpLinkResolver = originalLinks;
+    }
+    expect(await storedFiles()).toBe(before + 1);
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+    const keptId = page.body.data.items.at(-1)?.attachments[0]?.id;
+    const kept = await fetch(`${baseUrl}/attachments/${keptId}`, { headers: { cookie: salesCookie } });
+    expect(new Uint8Array(await kept.arrayBuffer())).toEqual(new Uint8Array([4, 5]));
   });
 
   it('반응을 거의 동시에 두 번 눌러도 500 없이 처리된다', async () => {

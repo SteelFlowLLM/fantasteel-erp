@@ -755,18 +755,20 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     const duplicate = clientMessageId ? await this.findDuplicate(user.employeeId, chatRoomId, clientMessageId) : null;
     if (duplicate) return duplicate;
     const attachments: { filePath: string; fileName: string; fileSize: number }[] = [];
-    // 저장 중·저장 뒤 실패하거나 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일은 DB에 남지 않으므로 지운다
+    // 메시지가 커밋되기 전에 실패하거나 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일은 DB에 남지 않으므로 지운다.
+    // 커밋된 뒤의 실패(ERP 링크 조회 등)는 파일을 메시지가 쓰므로 지우지 않는다
+    const progress = { committed: false };
     const removeSaved = () => Promise.all(attachments.map((a) => this.storage.remove(a.filePath).catch((error: unknown) => this.logger.warn(`첨부 정리 실패 (${a.filePath}): ${String(error)}`))));
     try {
       for (const { file, fileName } of named) {
         attachments.push({ filePath: await this.storage.save('messages', fileName, file.buffer), fileName, fileSize: file.size });
       }
       const content = dto.content?.trim() || null;
-      const posted = await this.postMessageResult(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId }, []);
+      const posted = await this.postMessageResult(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId }, [], progress);
       if (!posted.saved) await removeSaved();
       return posted.view;
     } catch (error) {
-      await removeSaved();
+      if (!progress.committed) await removeSaved();
       throw error;
     }
   }
@@ -896,6 +898,8 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     chatRoomId: number,
     data: NewMessage,
     mentionedEmployeeIds: readonly number[],
+    /** 메시지 tx가 커밋되면 committed를 true로 바꾼다 (첨부 정리가 커밋 뒤 실패와 앞 실패를 가르려고) */
+    progress: { committed: boolean } = { committed: false },
   ): Promise<{ view: ChatMessageView; saved: boolean }> {
     const me = user.employeeId;
     // 재전송 중복 방지 (#151): 이미 저장된 보내기 id면 알림·소켓 없이 처음 메시지를 돌려준다
@@ -906,6 +910,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     let saved: { message: MessageWithSender; memberIds: number[] };
     try {
       saved = await this.saveMessage(user, chatRoomId, data, mentionedEmployeeIds);
+      progress.committed = true;
     } catch (error) {
       // 같은 보내기 id가 거의 동시에 두 번 들어오면 부분 unique에 걸린다 → 먼저 저장된 메시지를 돌려준다
       if (data.clientMessageId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

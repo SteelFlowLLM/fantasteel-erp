@@ -65,7 +65,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 **메시지·실시간**(REQ-MSG-002)
 - 보낸 사람 = 로그인 사원. 저장은 tx 안에서, 소켓 발송은 커밋 뒤에 한다(롤백된 메시지를 보내지 않도록).
 - WebSocket Gateway는 이 모듈에 둔다(`@nestjs/websockets`·`@nestjs/platform-socket.io` 의존성 있음, [05] 6장 [강제]). handshake에서 `client.handshake.headers.cookie`를 `AuthTokenService.verifyCookieSession`으로 검증하고 `AuthUserService.load`로 사원을 읽는다(둘 다 CommonModule export). 인증에 실패하면 연결을 끊는다.
-- 접속 뒤 다시 끊는 때(이슈 #488): **토큰 만료 시각**(JWT `exp`, 지금 12시간)에 끊는다. **로그아웃**(`POST auth/logout`)하면 그 토큰으로 연결한 소켓만 끊는다(같은 사원의 다른 브라우저는 그대로). **퇴사 처리**(`PATCH employees/:id { isActive: false }`)하면 그 사원의 소켓을 모두 끊는다. 공통 `AuthSessionEvents`(서버 메모리 안 알림)로 전한다. 서버를 여러 대로 늘리면 공유 채널이 필요하다. 로그아웃한 토큰 자체는 HTTP에서 만료까지 유효하다(토큰 무효화 목록 없음, 따로 결정).
+- 접속 뒤 다시 끊는 때(이슈 #488): **토큰 만료 시각**(JWT `exp`, 지금 12시간)에 끊는다. **로그아웃**(`POST auth/logout`)하면 그 토큰으로 연결한 소켓만 끊는다(같은 사원의 다른 브라우저는 그대로). **퇴사 처리**(`PATCH employees/:id { isActive: false }`)하면 그 사원의 소켓을 모두 끊는다. 공통 `AuthSessionEvents`(서버 메모리 안 알림)로 전한다. 서버를 여러 대로 늘리면 공유 채널이 필요하다. 로그아웃한 토큰 자체는 HTTP에서 만료까지 유효하다(토큰 무효화 목록 없음, 따로 결정). 토큰에는 로그인마다 다른 `jti`(UUID)가 들어가 같은 1초에 두 기기에서 로그인해도 한쪽 로그아웃이 다른 쪽을 끊지 않는다. 사원을 읽는 사이 퇴사 처리가 커밋되면 그 알림이 아직 채널에 들기 전이라, 채널에 든 뒤 사원 상태를 한 번 더 본다. 만료·퇴사로 끊는 소켓은 접속 수에 세기 전에 끊어 같은 사원의 다른 기기 접속 수를 건드리지 않는다.
 - namespace `/messenger`. 연결된 소켓은 채팅방이 아니라 **사원 채널**(`employee:{사원 id}`)에 join한다. 새로 초대된 방도 다시 join하지 않고 받기 위해서다. 발송은 방 멤버 각자의 사원 채널로 한다.
 - 목록은 최신 메시지부터 `limit`개를 오래된 순으로 주고 `hasMore`를 붙인다. 이전 메시지는 `before`(메시지 id)로 더 불러온다(OFFSET을 쓰지 않는다).
 - 본문은 앞뒤 공백을 지우고 1~4000자. 보낸 사람의 읽음 위치를 그 메시지로 옮긴다.
@@ -90,7 +90,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 파일 수: **10개까지**(`MESSAGE_ATTACHMENT_MAX_COUNT`, 가정값, 넘으면 multer가 400·COM-004). 하나라도 규칙에 걸리면 아무것도 저장하지 않는다.
 - 제한(2026-10-07 결정): **파일마다 10MB까지**(`MESSAGE_ATTACHMENT_MAX_BYTES`, 넘으면 multer가 413·COM-004로 끊는다), **실행 파일 확장자만 거부**(`BLOCKED_ATTACHMENT_EXTENSIONS`: exe·msi·bat·cmd·com·scr·ps1·vbs·js·jar·sh·app·dll, COM-004). 파일 이름 1~255자.
 - multer는 파일 이름을 latin1로 읽어 한글이 깨지므로 UTF-8로 다시 읽는다.
-- 방 멤버·답글 대상(`parentMessageId`)·재전송 여부를 먼저 확인하고 저장한다(실패할 요청의 파일이 저장소에 남지 않게). 저장한 뒤 메시지 저장이 실패하거나, 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일을 지운다(`StorageService.remove`, 이슈 #488).
+- 방 멤버·답글 대상(`parentMessageId`)·재전송 여부를 먼저 확인하고 저장한다(실패할 요청의 파일이 저장소에 남지 않게). 파일을 저장한 뒤 메시지 tx가 커밋되기 전에 실패하거나, 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일을 지운다(`StorageService.remove`, 이슈 #488). 커밋된 뒤의 실패(ERP 링크 조회 등)는 메시지가 파일을 쓰므로 지우지 않는다.
 - 업로드: multipart(`FilesInterceptor('files')`) → 파일마다 `StorageService.save('messages', 파일명, buffer)` → 메시지 1건과 `message_attachment` 행(올린 순서 = `sort_order`, 크기 저장)을 같은 tx에서 만든다. 응답 `attachments: [{ id, fileName, fileSize }]`.
 - 미리보기(목록·알림·답글·공지): 글이 없으면 `파일 · 이름`, 여러 개면 `파일 · 첫 이름 외 N개`.
 - 다운로드: `:id`는 첨부(`message_attachment`) id. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 없는 첨부·삭제된 메시지의 첨부는 COM-003.
