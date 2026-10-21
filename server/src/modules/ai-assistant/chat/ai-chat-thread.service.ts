@@ -21,7 +21,7 @@ import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTi
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
 /** 답을 오래(분 단위) 기다리는 사이 놀던 DB 연결이 닫혀, 다시 여는 데 기본 maxWait(2초)를 넘기면 만든 답을 저장하지 못한다(#519) */
-const AFTER_AI_TX = { maxWait: 10_000, timeout: 15_000 };
+const AFTER_AI_TX = { maxWait: 10_000 };
 
 /**
  * 철강맨AI 패널 대화 저장 (이슈 #399, 문서에 없는 기능). 본인 대화만 다루고, 남의 대화는 없는 것처럼 AST-001.
