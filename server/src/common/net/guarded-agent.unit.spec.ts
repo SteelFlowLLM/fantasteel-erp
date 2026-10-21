@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fetch as undiciFetch } from 'undici';
 import type { LookupFunction } from '../../modules/ai-assistant/web/ssrf-guard';
-import { createMetadataGuardedAgent, isBlockedLookupError } from './guarded-agent';
+import { createMetadataGuardedAgent, isBlockedLookupError, metadataGuardedLookup } from './guarded-agent';
 
 let server: Server;
 let port: number;
@@ -38,10 +38,13 @@ const resolverOf =
 const resolve = resolverOf({
   'meta.test': ['169.254.169.254'],
   'mapped.test': ['::ffff:a9fe:a9fe'],
+  'nat64.test': ['64:ff9b::a9fe:a9fe'],
   'aws-v6.test': ['fd00:ec2::254'],
-  'linklocal.test': ['fe80::1'],
+  'alibaba.test': ['100.100.100.200'],
   'mixed.test': ['127.0.0.1', '169.254.169.254'],
   'local.test': ['127.0.0.1'],
+  // LAN의 mDNS(*.local) 이름: 사설 IPv4와 함께 IPv6 링크 로컬을 돌려준다 — 메타데이터가 아니므로 막지 않는다
+  'macbook.local': ['127.0.0.1', 'fe80::1'],
 });
 
 async function get(name: string, table: LookupFunction = resolve): Promise<{ text: string } | { error: unknown }> {
@@ -57,7 +60,7 @@ async function get(name: string, table: LookupFunction = resolve): Promise<{ tex
 }
 
 describe('createMetadataGuardedAgent', () => {
-  it.each(['meta.test', 'mapped.test', 'aws-v6.test', 'linklocal.test', 'mixed.test'])('이름 %s 이 메타데이터 주소로 풀리면 연결하지 않는다', async (name) => {
+  it.each(['meta.test', 'mapped.test', 'nat64.test', 'aws-v6.test', 'alibaba.test', 'mixed.test'])('이름 %s 이 메타데이터 주소로 풀리면 연결하지 않는다', async (name) => {
     const result = await get(name);
     expect('error' in result && isBlockedLookupError(result.error)).toBe(true);
     // 시험 서버에는 요청이 가지 않았다
@@ -66,6 +69,11 @@ describe('createMetadataGuardedAgent', () => {
 
   it('localhost·사설망·Tailscale 같은 주소로 풀리는 이름은 연결한다', async () => {
     expect(await get('local.test')).toEqual({ text: 'ok' });
+    expect(hits).toBe(1);
+  });
+
+  it('LAN의 mDNS(*.local) 이름처럼 사설 IPv4와 fe80::(IPv6 링크 로컬)을 함께 돌려주는 이름도 연결한다 (#503에서는 됐다)', async () => {
+    expect(await get('macbook.local')).toEqual({ text: 'ok' });
     expect(hits).toBe(1);
   });
 
@@ -84,5 +92,43 @@ describe('isBlockedLookupError', () => {
     expect(isBlockedLookupError(new TypeError('fetch failed'))).toBe(false);
     expect(isBlockedLookupError('글')).toBe(false);
     expect(isBlockedLookupError(undefined)).toBe(false);
+  });
+});
+
+describe('metadataGuardedLookup (연결 없이 정책만)', () => {
+  /** lookup을 불러 결과(주소들 또는 오류)를 받는다 */
+  const lookupOf = (table: Record<string, string[]>) => (name: string) =>
+    new Promise<{ addresses: string[] } | { code?: string }>((done) => {
+      metadataGuardedLookup(resolverOf(table))(name, { all: true }, (error, result) =>
+        error ? done({ code: error.code }) : done({ addresses: (result as { address: string }[]).map((entry) => entry.address) }),
+      );
+    });
+  const table = {
+    'lan.test': ['192.168.1.5', 'fe80::1'],
+    'lan-zone.test': ['10.0.0.5', 'fe80::1%en0'],
+    'linklocal-only.test': ['fe80::abcd'],
+    'tailscale.test': ['100.64.0.5'],
+    'magicdns.test': ['100.101.102.103', 'fd7a:115c:a1e0::1'],
+    'private6.test': ['fd12:3456::1'],
+    'loopback6.test': ['::1'],
+    'meta-mixed.test': ['192.168.1.5', 'fe80::1', '169.254.169.254'],
+    'tailscale-meta.test': ['100.64.0.5', '100.100.100.200'],
+  };
+  const lookup = lookupOf(table);
+
+  it.each([
+    ['lan.test', ['192.168.1.5', 'fe80::1']],
+    ['lan-zone.test', ['10.0.0.5', 'fe80::1%en0']],
+    ['linklocal-only.test', ['fe80::abcd']],
+    ['tailscale.test', ['100.64.0.5']],
+    ['magicdns.test', ['100.101.102.103', 'fd7a:115c:a1e0::1']],
+    ['private6.test', ['fd12:3456::1']],
+    ['loopback6.test', ['::1']],
+  ])('%s 은 풀린 주소를 그대로 돌려준다 (IPv6 링크 로컬·Tailscale·사설망은 막지 않는다)', async (name, addresses) => {
+    expect(await lookup(name)).toEqual({ addresses });
+  });
+
+  it.each(['meta-mixed.test', 'tailscale-meta.test'])('%s 은 풀린 주소 중 하나라도 메타데이터면 EBLOCKED다', async (name) => {
+    expect(await lookup(name)).toEqual({ code: 'EBLOCKED' });
   });
 });

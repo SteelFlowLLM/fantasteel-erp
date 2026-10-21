@@ -3,7 +3,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { TestLlmConnectionDto, UpdateLlmSettingsDto } from '../../modules/llm/dto/llm-settings.dto';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from '../../modules/stt/dto/stt-settings.dto';
-import { isBlockedServerAddress, isBlockedServerHost, redactUrl, sameOrigin } from './server-url';
+import { isBlockedServerAddress, isBlockedServerHost, isCloudMetadataAddress, redactUrl, sameOrigin } from './server-url';
 
 const BLOCKED = [
   'http://169.254.169.254/latest/meta-data',
@@ -79,6 +79,22 @@ describe('isBlockedServerAddress (이름을 푼 주소를 연결할 때 본다)'
 
   it.each(['127.0.0.1', '::1', '10.0.0.5', '192.168.0.20', '100.64.0.1', '100.87.40.116', '100.100.100.100', 'fd7a:115c:a1e0::1', '::ffff:127.0.0.1', '8.8.8.8', 'localhost', 'metadata.google.internal', '', 'not an address'])('%s 는 막지 않는다 (이름은 주소가 아니라 이 함수가 보지 않는다)', (address) => {
     expect(isBlockedServerAddress(address)).toBe(false);
+  });
+});
+
+describe('isCloudMetadataAddress (이름을 푼 주소를 연결할 때 본다: IPv6 링크 로컬은 막지 않는다)', () => {
+  it.each(['169.254.169.254', '169.254.0.5', 'fd00:ec2::254', 'FD00:EC2:0:0:0:0:0:254', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '64:ff9b::a9fe:a9fe', '100.100.100.200', '::ffff:100.100.100.200', '[fd00:ec2::254]'])('%s 는 메타데이터다', (address) => {
+    expect(isCloudMetadataAddress(address)).toBe(true);
+  });
+
+  it.each(['fe80::1', 'fe80::1%eth0', 'febf::1', '127.0.0.1', '::1', '10.0.0.5', '192.168.0.20', '100.64.0.1', '100.87.40.116', '100.100.100.100', 'fd7a:115c:a1e0::1', '::ffff:192.168.0.20', '', 'metadata.google.internal'])('%s 는 메타데이터가 아니다', (address) => {
+    expect(isCloudMetadataAddress(address)).toBe(false);
+  });
+
+  it('글로 적은 주소는 fe80::/10도 막는다(isBlockedServerAddress·isBlockedServerHost): 둘의 차이는 IPv6 링크 로컬뿐이다', () => {
+    expect(isBlockedServerAddress('fe80::1')).toBe(true);
+    expect(isCloudMetadataAddress('fe80::1')).toBe(false);
+    expect(isBlockedServerHost('http://[fe80::1]:8000/v1')).toBe(true);
   });
 });
 

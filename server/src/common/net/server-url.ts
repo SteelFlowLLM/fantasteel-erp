@@ -16,7 +16,7 @@ const IPV4_COMPATIBLE = ipaddr.parseCIDR('::/96') as [ipaddr.IPv6, number];
  * 사설망·Tailscale·localhost는 관리자가 직접 넣는 로컬 LLM·음성 서버라 허용하지만, 메타데이터 서버는 ERP 서버의 자격 증명을 내주는 곳이라 막는다.
  * WHATWG URL이 10진수·16진수·8진수 IP(2852039166)와 IPv6 표기(대문자·0 생략)를 정규화하므로 정규화된 hostname으로 보고,
  * IPv4가 IPv6 안에 담긴 주소(::ffff:169.254.169.254, NAT64 64:ff9b::…)는 IPv4로 풀어서 다시 본다.
- * DNS 이름이 가리키는 주소(169.254.169.254.nip.io 같은 것)는 여기서 알 수 없다: 이름은 연결할 때 푼 주소를 guarded-agent.ts가 isBlockedServerAddress로 다시 본다.
+ * DNS 이름이 가리키는 주소(169.254.169.254.nip.io 같은 것)는 여기서 알 수 없다: 이름은 연결할 때 푼 주소를 guarded-agent.ts가 isCloudMetadataAddress로 다시 본다.
  */
 export function isBlockedServerHost(baseUrl: string): boolean {
   let host: string;
@@ -30,21 +30,35 @@ export function isBlockedServerHost(baseUrl: string): boolean {
 }
 
 /**
- * IP 주소 글(DNS가 푼 주소 포함)이 막을 주소인지. isBlockedServerHost와 같은 목록이고, 이름이나 IP가 아닌 글은 막지 않는다.
- * 이름을 푼 주소는 연결할 때 이 함수로 다시 본다(common/net/guarded-agent.ts): 169.254.169.254.nip.io 같은 이름이 메타데이터 주소로 풀리는 것을 막는다
+ * 주소로 적은 글(IP 글자)이 막을 주소인지: 클라우드 메타데이터 + IPv6 링크 로컬(fe80::/10). isBlockedServerHost가 글로 적은 주소를 볼 때 쓴다.
+ * 이름이나 IP가 아닌 글은 막지 않는다
  */
 export function isBlockedServerAddress(address: string): boolean {
-  // fe80::1%eth0 같은 영역 표시는 떼고 본다 (fe80::/10은 영역이 붙어도 링크 로컬이다)
-  const bare = address.replace(/^\[|\]$/g, '').split('%')[0];
-  return ipaddr.isValid(bare) && isBlockedAddress(ipaddr.parse(bare));
+  return isBlockedAddressText(address, true);
 }
 
-function isBlockedAddress(address: ipaddr.IPv4 | ipaddr.IPv6): boolean {
+/**
+ * DNS가 이름을 푼 주소가 클라우드 메타데이터 주소인지 (IPv4 169.254.0.0/16, fd00:ec2::254, 100.100.100.200, 이들을 담은 IPv4-mapped·NAT64).
+ * 연결할 때 이름이 풀린 주소를 보는 데 쓴다(common/net/guarded-agent.ts): 169.254.169.254.nip.io 같은 이름이 메타데이터 주소로 풀리는 것을 막는다.
+ * IPv6 링크 로컬(fe80::/10)은 막지 않는다: LAN의 `*.local`(mDNS) 이름은 192.168.x.x와 함께 fe80::…을 돌려주는 것이 보통이고 메타데이터 서버가 아니다.
+ * 글로 적은 [fe80::1] 주소를 저장 때 막는 것(isBlockedServerAddress)과 다르다
+ */
+export function isCloudMetadataAddress(address: string): boolean {
+  return isBlockedAddressText(address, false);
+}
+
+function isBlockedAddressText(address: string, includeLinkLocalV6: boolean): boolean {
+  // fe80::1%eth0 같은 영역 표시는 떼고 본다 (fe80::/10은 영역이 붙어도 링크 로컬이다)
+  const bare = address.replace(/^\[|\]$/g, '').split('%')[0];
+  return ipaddr.isValid(bare) && isBlockedIp(ipaddr.parse(bare), includeLinkLocalV6);
+}
+
+function isBlockedIp(address: ipaddr.IPv4 | ipaddr.IPv6, includeLinkLocalV6: boolean): boolean {
   if (address.kind() === 'ipv4') return address.range() === 'linkLocal' || METADATA_ADDRESSES.has(address.toNormalizedString());
   const v6 = address as ipaddr.IPv6;
-  if (v6.range() === 'linkLocal' || METADATA_ADDRESSES.has(v6.toNormalizedString())) return true;
+  if ((includeLinkLocalV6 && v6.range() === 'linkLocal') || METADATA_ADDRESSES.has(v6.toNormalizedString())) return true;
   const embedded = embeddedIpv4(v6);
-  return embedded !== null && isBlockedAddress(embedded);
+  return embedded !== null && isBlockedIp(embedded, includeLinkLocalV6);
 }
 
 /** IPv6 주소 끝 32비트에 IPv4가 담긴 형태: IPv4-mapped(::ffff:a.b.c.d)·NAT64(64:ff9b::/96)·옛 IPv4-compatible(::a.b.c.d). 아니면 null */
