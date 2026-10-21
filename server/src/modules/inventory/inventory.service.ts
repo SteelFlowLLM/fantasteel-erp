@@ -330,7 +330,7 @@ export class InventoryService {
       const allocations = await this.repository.findConfirmedAllocationsOfLots(tx, ineligible.map((l) => l.id));
       let rollingReleased = 0;
       for (const allocation of allocations) {
-        await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${allocation.lot.lotNo}이 불합격(또는 상위 히트 불합격)이라 배정 해제`);
+        if (!(await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${allocation.lot.lotNo}이 불합격(또는 상위 히트 불합격)이라 배정 해제`))) continue;
         if (allocation.allocationPurpose === ALLOCATION_PURPOSE.HOT_ROLLING) rollingReleased += 1;
         if (allocation.shipmentRequestItem) refreshRequestIds.add(allocation.shipmentRequestItem.shipmentRequestId);
       }
@@ -667,8 +667,9 @@ export class InventoryService {
     }
     for (const [itemId, rows] of [...byItem.entries()].sort(([a], [b]) => a - b)) {
       await this.repository.lockInventory(tx, itemId);
-      for (const allocation of rows) await this.releaseRow(tx, allocation, input.actor, input.reason, input.salesOrderId);
-      await this.decrementRolling(tx, itemId, rows.length);
+      let releasedQty = 0;
+      for (const allocation of rows) if (await this.releaseRow(tx, allocation, input.actor, input.reason, input.salesOrderId)) releasedQty += 1;
+      if (releasedQty > 0) await this.decrementRolling(tx, itemId, releasedQty);
     }
     return confirmed.map((a) => a.lotId);
   }
@@ -779,10 +780,17 @@ export class InventoryService {
     }
   }
 
-  /** 검사 판정이 바뀔 LOT들이 건드릴 재고 행을 먼저 잠근다 (품질 검사가 작업 로그를 남기기 전에 부른다) */
+  /**
+   * 검사 판정이 바뀔 LOT들이 건드릴 행을 품질 검사가 작업 로그를 남기기 전에 잠근다.
+   * 출고 확정과 같은 순서(출하요청 → 재고 → 작업 로그): 불합격으로 출하 배정을 풀면 그 출하요청 상태를 다시 계산하므로
+   * 출하요청을 먼저 잠그고(id 순) 재고 행을 잠근다 (#478 리뷰)
+   */
   async lockInventoriesOfLots(tx: Tx, lotIds: readonly number[]): Promise<void> {
     const productLotIds = await this.repository.findAffectedProductLotIds(tx, [...lotIds]);
     if (productLotIds.length === 0) return;
+    const allocations = await this.repository.findConfirmedAllocationsOfLots(tx, productLotIds);
+    const requestIds = [...new Set(allocations.flatMap((a) => (a.shipmentRequestItem ? [a.shipmentRequestItem.shipmentRequestId] : [])))].sort((a, b) => a - b);
+    for (const id of requestIds) await this.repository.lockShipmentRequest(tx, id);
     const lots = await this.repository.findProductLots(tx, productLotIds);
     await this.lockInventoriesFirst(tx, lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])));
   }
@@ -799,15 +807,23 @@ export class InventoryService {
 
   // ── 내부 ──────────────────────────────────────────────
 
-  /** rolling_allocated_qty가 확정 열연 배정 합계보다 작으면 같은 배정을 두 번 뺀 것이다. 서버 오류로 남기고 거래 전체를 되돌린다 */
+  /**
+   * rolling_allocated_qty가 해제·소진할 확정 열연 배정 수보다 작으면 예전에 같은 배정을 두 번 뺀 행이다(#478 전 버그).
+   * 0 아래로 내리지 않고 거래 전체를 되돌린다. 관리자가 재고 정합 보정(REQ-INV-010)을 실행하면 확정 배정 수로 맞춰진다
+   */
   private async decrementRolling(tx: Tx, itemId: number, qty: number): Promise<void> {
     if (!(await this.repository.decrementRollingAllocatedQty(tx, itemId, qty))) {
-      throw new Error(`inventory.rolling_allocated_qty가 해제할 열연 배정 ${qty}매보다 작습니다 (item ${itemId})`);
+      throw new AppException('COM-001', '열연 배정 매수 기록이 실제 확정 배정과 어긋나요. 관리자가 재고 정합 보정을 실행한 뒤 다시 해 주세요');
     }
   }
 
-  private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)) {
-    const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
+  /**
+   * 확정 배정 하나를 해제하고 작업 로그를 남긴다. 읽은 뒤 다른 거래(생산계획 취소 ↔ 불합격 판정 등)가 먼저 해제·소진했으면
+   * 아무것도 하지 않고 false: 부르는 쪽은 true인 것만 세어 열연 배정 매수를 줄인다 (#478 리뷰)
+   */
+  private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)): Promise<boolean> {
+    const released = await this.repository.releaseConfirmedAllocation(tx, allocation.id);
+    if (!released) return false;
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED,
       actor,
@@ -818,6 +834,7 @@ export class InventoryService {
       after: allocationSnapshot(released),
       reason,
     });
+    return true;
   }
 
   /** 출하요청 품목을 찾고 그 출하요청을 잠근다 */

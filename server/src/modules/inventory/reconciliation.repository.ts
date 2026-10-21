@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { ITEM_TYPE, RESERVATION_STATUS, ROLE, type NotificationType } from '@fantasteel/shared';
-import { lockInventoriesForReconciliation, reconcileInventoryReservedQty } from '../../generated/prisma/sql';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, ITEM_TYPE, RESERVATION_STATUS, ROLE, type NotificationType } from '@fantasteel/shared';
+import { lockInventoriesForReconciliation, reconcileInventoryReservedQty, reconcileInventoryRollingQty } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 import type { InventoryQtyRow, ReconciliationItem } from './reconciliation.calculator';
 
@@ -35,6 +35,22 @@ export class ReconciliationRepository {
   /** 예약 매수를 ACTIVE 합계로 바꾼다. 읽은 뒤 바뀌었거나 가용이 0 미만이 되면 false */
   async setReservedQty(tx: Tx, itemId: number, beforeQty: number, activeQty: number): Promise<boolean> {
     return (await tx.$queryRawTyped(reconcileInventoryReservedQty(itemId, beforeQty, activeQty))).length > 0;
+  }
+
+  /** 규격별 확정(CONFIRMED) 열연 배정 수 (rolling_allocated_qty와 같아야 한다) */
+  async countConfirmedRollingAllocations(tx: Tx): Promise<Map<number, number>> {
+    const rows = await tx.allocation.findMany({
+      where: { allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
+      select: { lot: { select: { itemId: true } } },
+    });
+    const counts = new Map<number, number>();
+    for (const row of rows) if (row.lot.itemId !== null) counts.set(row.lot.itemId, (counts.get(row.lot.itemId) ?? 0) + 1);
+    return counts;
+  }
+
+  /** 열연 배정 매수를 확정 열연 배정 수로 바꾼다. 읽은 뒤 바뀌었거나 가용이 0 미만이 되면 false */
+  async setRollingAllocatedQty(tx: Tx, itemId: number, beforeQty: number, confirmedQty: number): Promise<boolean> {
+    return (await tx.$queryRawTyped(reconcileInventoryRollingQty(itemId, beforeQty, confirmedQty))).length > 0;
   }
 
   /** 보정 알림을 받을 관리자 (재직 중) */

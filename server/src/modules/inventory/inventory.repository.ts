@@ -317,6 +317,12 @@ export class InventoryRepository {
     return tx.allocation.findUnique({ where: { id }, include: allocationInclude });
   }
 
+  /** 확정(CONFIRMED) 배정만 해제한다. 해제했으면 바꾼 행, 그사이 다른 거래가 해제·소진했으면 null (같은 배정을 두 번 해제하지 않게) */
+  async releaseConfirmedAllocation(tx: Tx, id: number) {
+    const { count } = await tx.allocation.updateMany({ where: { id, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, data: { allocationStatus: ALLOCATION_STATUS.RELEASED } });
+    return count === 1 ? tx.allocation.findUniqueOrThrow({ where: { id }, include: allocationInclude }) : null;
+  }
+
   updateAllocationStatus(tx: Tx, id: number, allocationStatus: AllocationStatus) {
     return tx.allocation.update({ where: { id }, data: { allocationStatus }, include: allocationInclude });
   }

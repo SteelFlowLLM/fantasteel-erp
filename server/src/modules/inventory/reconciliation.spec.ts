@@ -176,4 +176,16 @@ describe('ReconciliationService (REQ-INV-010, BP-INV-02 P2)', () => {
     await service.reconcile(admin);
     expect(await count()).toBe(before);
   });
+
+  it('열연 배정 매수가 확정 열연 배정 수와 다르면 그 수로 맞춘다 (#478)', async () => {
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: fixItemId } });
+    // 예전 이중 차감 버그로 확정 열연 배정 1건인데 rolling이 0인 행
+    const casting = await prisma.productionResult.create({ data: { processType: 'CONTINUOUS_CASTING', startedAt: new Date(), completedAt: new Date() } });
+    const lot = await prisma.lot.create({ data: { lotNo: `SL-TREC${tag}-R1`, lotType: 'SLAB', itemId: item.id, productionResultId: casting.id, producedDate: new Date('2026-10-01T00:00:00.000Z') } });
+    const plan = await prisma.productionPlan.create({ data: { productionPlanNo: `T-REC-PP-${tag}`, itemId: item.id, shortageQty: 1, heatCount: 1 } });
+    await prisma.allocation.create({ data: { lotId: lot.id, productionPlanId: plan.id, allocationPurpose: 'HOT_ROLLING', allocationStatus: 'CONFIRMED' } });
+    await prisma.inventory.update({ where: { itemId: fixItemId }, data: { rollingAllocatedQty: 0 } });
+    await service.reconcile(admin);
+    expect((await prisma.inventory.findUniqueOrThrow({ where: { itemId: fixItemId } })).rollingAllocatedQty).toBe(1);
+  });
 });
