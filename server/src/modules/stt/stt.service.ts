@@ -21,12 +21,12 @@ const WAKE_SERVER_BUSY = '음성 서버가 바빠 이번 말은 받아쓰지 못
 const BUSY_FAILURE = /\(HTTP (?:429|503)\)|초 안에 응답이 없어요/;
 const BUSY_REPLY = /\(HTTP (?:429|503)\)/;
 /**
- * 명령·부르는 말 조각은 놓치면 말한 명령이 사라진다. 사이드카는 받아쓰기를 하나씩만 받아, 같은 사람의 중간 글이 끝나기 전에 온
+ * 명령 덩어리는 놓치면 말한 명령이 사라진다. 사이드카는 받아쓰기를 하나씩만 받아, 같은 사람의 중간 글이 끝나기 전에 온
  * 짧은 명령("첫 번째 카드 실행")이 늘 503으로 거절됐다 (#519). 바쁘다고 답하면 짧게 몇 번(합계 4초 안) 다시 보낸다.
- * 중간 글은 보이기만 하고 다시 보내면 더 겹치므로 다시 보내지 않는다
+ * 부르는 말 조각·중간 글은 다시 보내지 않고 조용히 넘긴다: 긴 회의 전사 중에는 주변 말마다 조각이 와서 안내가 되풀이되고 조각 줄이 밀렸다
  */
-const BUSY_RETRY_DELAYS_MS = [400, 600, 800, 800, 800];
-/** 같은 사원의 중간 글이 받아쓰는 중이면 명령·부르는 말 조각은 그것이 끝날 때까지(이만큼까지) 기다렸다 보낸다 */
+const COMMAND_BUSY_RETRY_DELAYS_MS = [400, 600, 800, 800, 800];
+/** 같은 사원의 중간 글이 받아쓰는 중이면 명령 덩어리는 그것이 끝날 때까지(이만큼까지) 기다렸다 보낸다 */
 const PARTIAL_WAIT_MAX_MS = 4_000;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
@@ -112,8 +112,8 @@ export class SttService {
    * 철강맨 부르기 (이슈 #457): 말소리 조각(PCM WAV, 8초까지) 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
    * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
    * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
-   * 음성 서버가 바쁘면(503·시간 초과) 꺼짐으로 남기지 않게 VOC-009(잠시 뒤 다시)로 알린다: 화면은 띠에 문제로 두지 않고 잠깐 안내한다.
-   * 명령·부르는 말 조각은 같은 사원의 중간 글이 끝난 뒤 보내고, 그래도 503이면 짧게 몇 번 다시 보낸다 (#519)
+   * 음성 서버가 바쁘면(503·시간 초과) 꺼짐으로 남기지 않는다 (#519). 명령 덩어리는 같은 사원의 중간 글이 끝난 뒤 보내고, 그래도 503이면
+   * 짧게 몇 번 다시 보낸 뒤 VOC-009(잠시 뒤 다시, 화면은 띠에 문제로 두지 않고 잠깐 안내)로 알린다. 부르는 말 조각·중간 글은 빈 글로 넘긴다
    */
   /**
    * mode(이슈 #494): wake는 부르는 말을 찾는 8초 조각, command는 "철강맨" 뒤 명령 한 덩어리(30초), partial은 명령을 말하는 동안 보이기만 할 중간 글.
@@ -131,8 +131,9 @@ export class SttService {
     if (problem) throw new AppException('COM-004', problem);
     const settings = await this.store.read();
     const input = { audio: file.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: quickModelOf(settings.model) };
-    const retryDelays = mode === 'partial' ? [] : BUSY_RETRY_DELAYS_MS;
-    if (mode !== 'partial') await this.partialDone(user.employeeId);
+    const command = mode === 'command';
+    const retryDelays = command ? COMMAND_BUSY_RETRY_DELAYS_MS : [];
+    if (command) await this.partialDone(user.employeeId);
     for (let attempt = 0; ; attempt += 1) {
       try {
         const pending = this.client.transcribe(settings, input, WAKE_CLIP_TIMEOUT_MS);
@@ -146,8 +147,10 @@ export class SttService {
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
           continue;
         }
+        const busy = BUSY_FAILURE.test(detail);
+        if (busy && !command) return { text: null, error: null };
         this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
-        if (BUSY_FAILURE.test(detail)) throw new AppException('VOC-009', WAKE_SERVER_BUSY);
+        if (busy) throw new AppException('VOC-009', WAKE_SERVER_BUSY);
         return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
       }
     }

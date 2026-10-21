@@ -65,7 +65,7 @@ describe('SttService.transcribeWakeClip', () => {
     expect(plain).toEqual({ text: null, error: '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요' });
   });
 
-  it('음성 서버가 바쁘면(503·시간 초과) 꺼짐이 아니라 잠시 뒤 다시 부르라고 VOC-009로 알린다 (#519)', async () => {
+  it('음성 서버가 바쁘면(503·시간 초과) 꺼짐이 아니다: 명령 덩어리는 VOC-009(잠시 뒤 다시), 부르는 말 조각은 빈 글로 넘긴다 (#519)', async () => {
     // 바쁨은 SttClient가 만드는 오류 문구로 가리므로, 실제 SttClient가 만든 오류로 확인한다
     const fetchMock = jest.spyOn(globalThis, 'fetch');
     const errorOf = async (): Promise<unknown> =>
@@ -79,9 +79,17 @@ describe('SttService.transcribeWakeClip', () => {
       fetchMock.mockRejectedValueOnce(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
       const slow = await errorOf();
       for (const error of [busy, slow]) {
+        expect(await setup(jest.fn().mockRejectedValue(error)).transcribeWakeClip(user(1), clip, 'wake')).toEqual({ text: null, error: null });
         for (const asker of [user(1), user(2, { ORG_MANAGE: 'USE' })]) {
-          // 다시 보내지 않는 중간 글로 확인한다 (다시 보내기는 아래 묶음)
-          await expect(setup(jest.fn().mockRejectedValue(error)).transcribeWakeClip(asker, clip, 'partial')).rejects.toMatchObject({ code: 'VOC-009', message: expect.stringContaining('잠시 뒤 다시 불러 주세요') });
+          // 503이면 다시 보내므로 가짜 시계로 기다림을 건너뛴다
+          jest.useFakeTimers();
+          try {
+            const settled = expect(setup(jest.fn().mockRejectedValue(error)).transcribeWakeClip(asker, clip, 'command')).rejects.toMatchObject({ code: 'VOC-009', message: expect.stringContaining('잠시 뒤 다시 불러 주세요') });
+            await jest.advanceTimersByTimeAsync(4_000);
+            await settled;
+          } finally {
+            jest.useRealTimers();
+          }
         }
       }
       // 연결이 안 되는 것은 그대로 꺼짐(연결할 수 없어요)이다
@@ -98,12 +106,10 @@ describe('SttService.transcribeWakeClip', () => {
     const heard = (text: string) => ({ text, segments: [], durationSec: 1 });
     const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-    it('명령·부르는 말 조각은 503이면 짧게 다시 보내 받아쓴다', async () => {
-      for (const mode of ['command', 'wake'] as const) {
-        const transcribe = jest.fn().mockRejectedValueOnce(busy).mockResolvedValueOnce(heard('첫 번째 카드 실행'));
-        expect(await setup(transcribe).transcribeWakeClip(user(1), clip, mode)).toEqual({ text: '첫 번째 카드 실행', error: null });
-        expect(transcribe).toHaveBeenCalledTimes(2);
-      }
+    it('명령 덩어리는 503이면 짧게 다시 보내 받아쓴다', async () => {
+      const transcribe = jest.fn().mockRejectedValueOnce(busy).mockResolvedValueOnce(heard('첫 번째 카드 실행'));
+      expect(await setup(transcribe).transcribeWakeClip(user(1), clip, 'command')).toEqual({ text: '첫 번째 카드 실행', error: null });
+      expect(transcribe).toHaveBeenCalledTimes(2);
     });
 
     it('합계 4초 안에 다섯 번까지 다시 보내고, 그래도 바쁘면 VOC-009(잠시 뒤 다시)', async () => {
@@ -119,10 +125,12 @@ describe('SttService.transcribeWakeClip', () => {
       }
     });
 
-    it('중간 글은 다시 보내지 않는다 (보이기만 하고, 다시 보내면 더 겹친다)', async () => {
-      const transcribe = jest.fn().mockRejectedValue(busy);
-      await expect(setup(transcribe).transcribeWakeClip(user(1), clip, 'partial')).rejects.toMatchObject({ code: 'VOC-009' });
-      expect(transcribe).toHaveBeenCalledTimes(1);
+    it('부르는 말 조각·중간 글은 다시 보내지 않고 빈 글로 조용히 넘긴다 (회의 전사 중 주변 말마다 안내가 되풀이되지 않게)', async () => {
+      for (const mode of ['wake', 'partial'] as const) {
+        const transcribe = jest.fn().mockRejectedValue(busy);
+        expect(await setup(transcribe).transcribeWakeClip(user(1), clip, mode)).toEqual({ text: null, error: null });
+        expect(transcribe).toHaveBeenCalledTimes(1);
+      }
     });
 
     it('같은 사원의 중간 글을 받아쓰는 중이면 명령 조각은 그것이 끝난 뒤 보낸다', async () => {
@@ -141,6 +149,28 @@ describe('SttService.transcribeWakeClip', () => {
       expect(await partial).toEqual({ text: '첫 번째', error: null });
       expect(await command).toEqual({ text: '첫 번째 카드 실행', error: null });
       expect(transcribe).toHaveBeenCalledTimes(2);
+    });
+
+    it('중간 글이 멈춰 있으면 명령 덩어리는 4초까지만 기다리고 보낸다', async () => {
+      jest.useFakeTimers();
+      try {
+        const transcribe = jest
+          .fn()
+          .mockImplementationOnce(() => new Promise(() => undefined))
+          .mockResolvedValueOnce(heard('첫 번째 카드 실행'));
+        const service = setup(transcribe);
+        void service.transcribeWakeClip(user(1), clip, 'partial');
+        await jest.advanceTimersByTimeAsync(0);
+        expect(transcribe).toHaveBeenCalledTimes(1);
+        const command = service.transcribeWakeClip(user(1), clip, 'command');
+        await jest.advanceTimersByTimeAsync(3_900);
+        expect(transcribe).toHaveBeenCalledTimes(1);
+        await jest.advanceTimersByTimeAsync(200);
+        expect(await command).toEqual({ text: '첫 번째 카드 실행', error: null });
+        expect(transcribe).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
