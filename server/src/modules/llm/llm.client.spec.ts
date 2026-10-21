@@ -1,5 +1,5 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
-import { createThinkSplitter, LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
+import { createThinkSplitter, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
 const endpoint = { baseUrl: 'http://llm.test/v1/', apiKey: null };
@@ -16,13 +16,20 @@ function bodyOf(call: unknown[]): Record<string, unknown> {
 
 /** LM Studio 고유 API(/api/v1/models)는 따로 답한다. 기본은 404: 외부 LLM처럼 LM Studio가 아닌 서버 */
 const modelsMock = jest.fn<Promise<Response>, [string]>();
+/** Unsloth Studio를 알아보는 경로(/v1/status·/api/settings·/api/models)도 따로 답한다. 기본은 404 */
+const unslothMock = jest.fn<Promise<Response>, [string]>();
 const fetchMock = jest.fn<Promise<Response>, [string, RequestInit]>();
 
 beforeEach(() => {
   fetchMock.mockReset();
   modelsMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
+  unslothMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
   jest.spyOn(globalThis, 'fetch').mockImplementation(((url: string, init: RequestInit) =>
-    url.endsWith('/api/v1/models') ? modelsMock(url) : fetchMock(url, init)) as unknown as typeof fetch);
+    url.endsWith('/api/v1/models')
+      ? modelsMock(url)
+      : url.endsWith('/v1/status') || url.includes('/api/settings/') || url.includes('/api/models/')
+        ? unslothMock(url)
+        : fetchMock(url, init)) as unknown as typeof fetch);
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -316,5 +323,170 @@ describe('LlmClient.listModels 생각 지원 표시', () => {
     const client = new LlmClient();
     expect((await client.listModels(endpoint))[0].reasoning).toBe(false);
     expect((await client.listModels(endpoint))[0].reasoning).toBe(true);
+  });
+});
+
+/** Unsloth Studio (이슈 #465): /v1/status 모양으로 알아보고, /v1/models의 loaded로 불러온 모델을 안다 */
+describe('LlmClient Unsloth Studio', () => {
+  const unslothEndpoint = { baseUrl: 'http://127.0.0.1:8888/v1', apiKey: 'k' };
+  const idleStatus = { supports_reasoning: false, reasoning_style: 'enable_thinking', reasoning_effort_levels: [], is_vision: false, context_length: null };
+
+  /** /v1/models·/v1/chat/completions는 fetchMock, 나머지 Unsloth 경로는 unslothMock이 답한다 */
+  function unsloth({
+    loaded = [] as string[],
+    status = idleStatus as Record<string, unknown>,
+    autoSwitch = false as boolean | null,
+    vision = {} as Record<string, boolean>,
+    chat = () => reply('안녕하세요'),
+  } = {}) {
+    unslothMock.mockImplementation(async (url) => {
+      if (url.endsWith('/v1/status')) return Response.json(status);
+      if (url.endsWith('/api/settings/openai-auto-switch')) return autoSwitch === null ? new Response('no', { status: 401 }) : Response.json({ enabled: autoSwitch, auto_unload_idle_seconds: 0 });
+      const name = decodeURIComponent(url.split('/api/models/check-vision/')[1] ?? '');
+      return name in vision ? Response.json({ model_name: name, is_vision: vision[name] }) : new Response('no', { status: 404 });
+    });
+    fetchMock.mockImplementation(async (url) =>
+      url.endsWith('/v1/models')
+        ? Response.json({ object: 'list', data: ['a/think', 'b/plain'].map((id) => ({ id, owned_by: 'unsloth-studio', loaded: loaded.includes(id), status: { value: loaded.includes(id) ? 'loaded' : 'unloaded' } })) })
+        : chat(),
+    );
+  }
+  const chatBodies = () => fetchMock.mock.calls.filter(([url]) => url.endsWith('/chat/completions')).map(bodyOf);
+
+  it('서버 종류를 unsloth로 알고, 모델 목록에 불러옴을 표시하고, auto-switch를 알린다', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, supports_reasoning: true, reasoning_effort_levels: ['low', 'medium', 'high'] }, autoSwitch: true });
+    const client = new LlmClient();
+    const models = await client.listModels(unslothEndpoint);
+    expect(models.map((m) => [m.id, m.loaded, m.reasoning])).toEqual([
+      ['a/think', true, true],
+      ['b/plain', false, null],
+    ]);
+    await expect(client.serverSummary(unslothEndpoint)).resolves.toEqual({ kind: 'unsloth', autoSwitch: true });
+    // Bearer 키를 함께 보낸다
+    expect((fetchMock.mock.calls[0][1].headers as Record<string, string>).authorization).toBe('Bearer k');
+  });
+
+  it('LM Studio도 Unsloth도 아니면 openai', async () => {
+    fetchMock.mockImplementation(async () => Response.json({ data: [{ id: 'gpt' }] }));
+    const client = new LlmClient();
+    await client.listModels(endpoint);
+    await expect(client.serverSummary(endpoint)).resolves.toEqual({ kind: 'openai', autoSwitch: null });
+  });
+
+  it('불러온 모델이 생각 단계를 알리면 reasoning_effort와 enable_thinking, Unsloth 샘플링 이름으로 보낸다', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, supports_reasoning: true, reasoning_effort_levels: ['low', 'medium', 'high'] } });
+    const client = new LlmClient();
+    await client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.ASSISTANT);
+    await client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST);
+    const [thinking, off] = chatBodies();
+    expect(thinking).toMatchObject({ reasoning_effort: 'medium', enable_thinking: true, top_k: 20, min_p: 0, repetition_penalty: 1 });
+    expect(thinking).not.toHaveProperty('repeat_penalty');
+    expect(off).toMatchObject({ reasoning_effort: 'none', enable_thinking: false });
+  });
+
+  it('불러온 모델이 생각을 못 하면 관리자가 켰어도 생각 설정을 보내지 않는다 (모델 정보가 먼저)', async () => {
+    unsloth({ loaded: ['b/plain'] });
+    const reply = await new LlmClient().chatWithTools({ ...unslothEndpoint, reasoningSupport: true }, 'b/plain', [], [], LLM_PROFILE.ASSISTANT);
+    expect(chatBodies()[0]).not.toHaveProperty('reasoning_effort');
+    expect(reply.reasoningApplied).toBe(false);
+  });
+
+  it('auto-switch가 켜져 있어 모델 정보가 없으면 관리자 설정대로 생각 정도를 보낸다', async () => {
+    unsloth({ loaded: [], autoSwitch: true });
+    const client = new LlmClient();
+    await client.chat({ ...unslothEndpoint, reasoningSupport: true }, 'a/think', [], LLM_PROFILE.MEETING_SPEAKER);
+    await client.chat({ ...unslothEndpoint, reasoningSupport: null }, 'a/think', [], LLM_PROFILE.MEETING_SPEAKER);
+    const [manual, unknown] = chatBodies();
+    expect(manual).toMatchObject({ reasoning_effort: 'low', enable_thinking: true });
+    expect(unknown).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('auto-switch가 꺼져 있고 고른 모델이 안 불러와져 있으면 부르기 전에 알기 쉬운 이유로 막는다', async () => {
+    unsloth({ loaded: ['b/plain'] });
+    const client = new LlmClient();
+    const error = await client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmModelNotLoadedError);
+    expect((error as Error).message).toBe(
+      '고른 모델(a/think)이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: b/plain). Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요',
+    );
+    expect(chatBodies()).toHaveLength(0);
+  });
+
+  it('아무 모델도 없으면 그렇게 알리고, 그사이 불러왔으면 다시 물어 통과한다', async () => {
+    unsloth({ loaded: [] });
+    const client = new LlmClient();
+    await expect(client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST)).rejects.toThrow(
+      'Unsloth Studio에 불러온 모델이 없어요. Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요',
+    );
+    unsloth({ loaded: ['a/think'] });
+    await expect(client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST)).resolves.toBe('안녕하세요');
+  });
+
+  it('서버가 No model loaded(400)를 주면 같은 안내로 바꾸고, JSON 형식 없이 다시 부르지 않는다', async () => {
+    const noModel = () =>
+      Response.json(
+        { error: { message: 'No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.', type: 'invalid_request_error' } },
+        { status: 400 },
+      );
+    // auto-switch를 못 읽으면 미리 막지 않는다
+    unsloth({ loaded: [], autoSwitch: null, chat: noModel });
+    await expect(new LlmClient().chatJson(unslothEndpoint, 'a/think', [], format, options)).rejects.toThrow('Unsloth Studio에 불러온 모델이 없어요');
+    expect(chatBodies()).toHaveLength(1);
+  });
+
+  it('modelCapabilities: 불러온 모델은 status, 안 불러온 모델의 사진은 check-vision이 먼저이고 모르면 관리자 설정', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, supports_reasoning: true, is_vision: true }, vision: { 'a/think': false, 'b/plain': true } });
+    const client = new LlmClient();
+    const manual = { ...unslothEndpoint, visionSupport: false, reasoningSupport: false };
+    await expect(client.modelCapabilities(manual, 'a/think')).resolves.toEqual({ vision: true, reasoning: true });
+    await expect(client.modelCapabilities(manual, 'b/plain')).resolves.toEqual({ vision: true, reasoning: false });
+    await expect(client.modelCapabilities(manual, 'c/unknown')).resolves.toEqual({ vision: false, reasoning: false });
+    await expect(client.modelCapabilities(unslothEndpoint, 'c/unknown')).resolves.toEqual({ vision: null, reasoning: null });
+  });
+
+  it('한 모델을 별칭과 전체 이름으로 함께 불러옴으로 주면 한 모델로 보고 둘 다 같은 정보를 쓴다', async () => {
+    unslothMock.mockImplementation(async (url) =>
+      url.endsWith('/v1/status') ? Response.json({ ...idleStatus, supports_reasoning: true }) : Response.json({ enabled: false, auto_unload_idle_seconds: 0 }),
+    );
+    fetchMock.mockImplementation(async (url) =>
+      url.endsWith('/v1/models')
+        ? Response.json({ data: ['Flash-GGUF', 'unsloth/Flash-GGUF', 'other/Plain'].map((id) => ({ id, owned_by: 'unsloth-studio', loaded: id !== 'other/Plain' })) })
+        : reply('ok'),
+    );
+    const models = await new LlmClient().listModels(unslothEndpoint);
+    expect(models.map((m) => [m.id, m.loaded, m.reasoning])).toEqual([
+      ['Flash-GGUF', true, true],
+      ['unsloth/Flash-GGUF', true, true],
+      ['other/Plain', false, null],
+    ]);
+  });
+
+  it('modelContextLength: 불러온 모델의 status 문맥 길이', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, context_length: 32768 } });
+    const client = new LlmClient();
+    expect(await client.modelContextLength(unslothEndpoint, 'a/think')).toBe(32768);
+    expect(await client.modelContextLength(unslothEndpoint, 'b/plain')).toBeNull();
+  });
+});
+
+describe('LlmClient 그 밖의 OpenAI 호환 서버의 관리자 설정 (이슈 #465)', () => {
+  it('modelCapabilities는 관리자 설정을 그대로, LM Studio면 관리자 설정을 쓰지 않는다', async () => {
+    await expect(new LlmClient().modelCapabilities({ ...endpoint, visionSupport: true, reasoningSupport: false }, 'm')).resolves.toEqual({ vision: true, reasoning: false });
+    modelsMock.mockResolvedValue(lmStudioModels([{ key: 'm' }]));
+    await expect(new LlmClient().modelCapabilities({ ...endpoint, visionSupport: true, reasoningSupport: true }, 'x')).resolves.toEqual({ vision: null, reasoning: null });
+  });
+
+  it('생각 정도 지원을 켜면 reasoning_effort만 보내고(끄기는 none) enable_thinking·top_k는 보내지 않는다', async () => {
+    fetchMock.mockImplementation(async () => reply('ok'));
+    const client = new LlmClient();
+    await client.chat({ ...endpoint, reasoningSupport: true }, 'm', [], LLM_PROFILE.ASSISTANT);
+    await client.chat({ ...endpoint, reasoningSupport: true }, 'm', [], LLM_PROFILE.CONNECTION_TEST);
+    const [on, off] = fetchMock.mock.calls.map(bodyOf);
+    expect(on).toMatchObject({ reasoning_effort: 'medium' });
+    expect(off).toMatchObject({ reasoning_effort: 'none' });
+    for (const body of [on, off]) {
+      expect(body).not.toHaveProperty('enable_thinking');
+      expect(body).not.toHaveProperty('top_k');
+    }
   });
 });

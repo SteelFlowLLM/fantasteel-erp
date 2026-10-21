@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { LlmModelView } from '@fantasteel/shared';
+import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
 /** 모델 목록은 바로 와야 하고, 첫 대화는 LM Studio가 모델을 메모리에 올리느라 오래 걸릴 수 있다 */
@@ -11,10 +11,17 @@ const MODEL_INFO_TTL_MS = 60_000;
 const STREAM_IDLE_TIMEOUT_MS = 120_000;
 /** reasoning_effort가 받는 단계 (가까운 단계를 고를 때 순서로 쓴다) */
 const REASONING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+/** 관리자가 생각 정도 지원을 켰을 때 쓰는 값: 끄기('none')와 단계를 그대로 보낸다 */
+const MANUAL_REASONING_OPTIONS = ['off', 'on'] as const;
+/** Unsloth Studio의 top_k 상한 (ChatCompletionRequest 스키마) */
+const UNSLOTH_TOP_K_MAX = 100;
 
 export interface LlmEndpoint {
   baseUrl: string;
   apiKey: string | null;
+  /** 관리자가 AI 연결 화면에서 정한 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다). 없거나 null이면 모름 */
+  visionSupport?: boolean | null;
+  reasoningSupport?: boolean | null;
 }
 
 export interface ChatMessage {
@@ -91,6 +98,19 @@ export class LlmRequestError extends Error {
   }
 }
 
+/** Unsloth Studio에 고른 모델이 불러와 있지 않다. 형식을 바꿔 다시 불러도 소용없다 */
+export class LlmModelNotLoadedError extends LlmRequestError {}
+
+/**
+ * Unsloth Studio에 모델이 없을 때 화면에 보일 안내. Unsloth는 요청의 model을 보지 않고 불러온 모델로 답하므로
+ * 다른 모델이 불러와 있어도 고른 모델로 답하지 않는다 (auto-switch를 켜면 고른 모델을 불러온다)
+ */
+export function unslothNotLoadedMessage(model: string | null, loaded: readonly string[]): string {
+  const fix = 'Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요';
+  if (!model || loaded.length === 0) return `Unsloth Studio에 불러온 모델이 없어요. ${fix}`;
+  return `고른 모델(${model})이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: ${loaded.join(', ')}). ${fix}`;
+}
+
 /** 부른 쪽(사용자 멈춤)이 요청을 끊었다. 화면에 알릴 실패가 아니다 */
 export class LlmAbortedError extends LlmRequestError {
   constructor() {
@@ -132,32 +152,70 @@ interface LmStudioModelInfo {
   contextLength: number | null;
 }
 
-/** 모델이 할 수 있는 것. LM Studio가 아니거나 모르는 모델이면 null */
+/** Unsloth Studio가 알려 주는 것 (이슈 #465) */
+interface UnslothInfo {
+  /** /v1/models의 loaded가 true인 모델 id */
+  loaded: string[];
+  /** Settings > API > Model auto-switch. 못 읽으면 null */
+  autoSwitch: boolean | null;
+  /**
+   * 불러온 모델이 하나일 때 /v1/status가 알려 주는 그 모델의 정보. 없거나 여럿이면 null (status가 어느 모델 것인지 모른다).
+   * Unsloth는 한 모델을 별칭(`Qwen3.8-Flash-Next-GGUF`)과 전체 이름(`unsloth/Qwen3.8-Flash-Next-GGUF`)으로 함께 loaded로 줄 수 있어 ids에 모두 둔다
+   */
+  active: (LmStudioModelInfo & { ids: string[] }) | null;
+}
+
+/** 서버 종류와 종류별 모델 정보. 종류마다 하나만 채운다 */
+interface LlmServerInfo {
+  kind: LlmServerKind;
+  lmStudio: Map<string, LmStudioModelInfo> | null;
+  unsloth: UnslothInfo | null;
+}
+
+/** Unsloth Studio GET /v1/status 중 쓰는 칸 */
+interface UnslothStatusWire {
+  supports_reasoning?: unknown;
+  reasoning_style?: unknown;
+  reasoning_effort_levels?: unknown;
+  reasoning_always_on?: unknown;
+  is_vision?: unknown;
+  context_length?: unknown;
+}
+
+/** 모델이 할 수 있는 것. 알 수 없으면 null */
 export interface LlmModelCapabilities {
   vision: boolean | null;
   reasoning: boolean | null;
 }
 
 /**
- * OpenAI 호환 API 호출 (LM Studio 로컬 서버·LM Link, 나중에 API 키를 쓰는 외부 LLM).
+ * OpenAI 호환 API 호출 (LM Studio 로컬 서버·LM Link, Unsloth Studio, API 키를 쓰는 외부 LLM).
  * 브라우저가 아니라 서버가 부르므로 LM Studio의 CORS 설정이 필요 없고, LM Link는 이 서버 컴퓨터에만 연결하면 된다.
  */
 @Injectable()
 export class LlmClient {
-  private readonly modelInfoCache = new Map<string, { at: number; models: Map<string, LmStudioModelInfo> | null }>();
+  private readonly serverInfoCache = new Map<string, { at: number; info: LlmServerInfo }>();
+  /** Unsloth Studio의 모델별 사진 지원 (/api/models/check-vision). 열쇠는 `서버 루트|모델` */
+  private readonly unslothVisionCache = new Map<string, { at: number; vision: boolean | null }>();
 
   async listModels(endpoint: LlmEndpoint): Promise<LlmModelView[]> {
-    const body = await this.request<{ data?: { id: string; owned_by?: string }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
-    const details = await this.lmStudioModelDetails(endpoint);
+    const body = await this.request<{ data?: { id: string; owned_by?: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
     // 연결 확인은 새로 받은 모델 정보를 보여야 하므로 기억해 둔 값을 쓰지 않는다
-    const info = await this.lmStudioModelInfo(endpoint, { refresh: true });
+    const server = await this.serverInfo(endpoint, { refresh: true });
+    const details = server.kind === 'lmstudio' ? await this.lmStudioModelDetails(endpoint) : new Map<string, { type?: string; state?: string }>();
     return (body.data ?? []).map((m) => ({
       id: m.id,
       ownedBy: m.owned_by ?? null,
       type: details.get(m.id)?.type ?? null,
-      loaded: details.has(m.id) ? details.get(m.id)?.state === 'loaded' : null,
-      reasoning: info ? reasoningSupported(findModelInfo(info, m.id)) : null,
+      loaded: server.unsloth ? m.loaded === true : details.has(m.id) ? details.get(m.id)?.state === 'loaded' : null,
+      reasoning: server.lmStudio ? reasoningSupported(findModelInfo(server.lmStudio, m.id)) : reasoningSupported(unslothActive(server, m.id)),
     }));
+  }
+
+  /** 서버 종류와 Unsloth auto-switch (연결 확인 결과에 싣는다). listModels 바로 뒤에 부르면 다시 묻지 않는다 */
+  async serverSummary(endpoint: LlmEndpoint): Promise<{ kind: LlmServerKind; autoSwitch: boolean | null }> {
+    const server = await this.serverInfo(endpoint);
+    return { kind: server.kind, autoSwitch: server.unsloth?.autoSwitch ?? null };
   }
 
   /**
@@ -241,7 +299,7 @@ export class LlmClient {
         options.signal,
       );
     } catch (error) {
-      if (!(error instanceof LlmRequestError) || error.status !== 400) throw error;
+      if (!(error instanceof LlmRequestError) || error.status !== 400 || error instanceof LlmModelNotLoadedError) throw error;
       body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs, options.signal);
     }
     const message = body.choices?.[0]?.message;
@@ -375,31 +433,74 @@ export class LlmClient {
 
   /**
    * 기능별 샘플링 값과 생각 정도를 요청 필드로 바꾼다.
-   * top_k·min_p·repeat_penalty는 OpenAI 표준에 없어 외부 LLM이 거절할 수 있으므로 LM Studio일 때만 보낸다.
-   * 생각 설정을 모르는 모델에 reasoning_effort를 보내면 무시되거나 오류가 나므로, 모델이 받는다고 알린 때만 보낸다.
+   * top_k·min_p·반복 벌점은 OpenAI 표준에 없어 외부 LLM이 거절할 수 있으므로 LM Studio(repeat_penalty)·Unsloth Studio(repetition_penalty)일 때만 보낸다.
+   * 생각 설정을 모르는 모델에 reasoning_effort를 보내면 무시되거나 오류가 나므로, 모델이 받는다고 알렸거나 관리자가 지원한다고 정한 때만 보낸다.
+   * Unsloth Studio는 고른 모델이 불러와 있지 않으면 부르기 전에 LlmModelNotLoadedError를 던진다 (다른 모델로 답하지 않게).
    */
   private async profileFields(endpoint: LlmEndpoint, model: string, profile: LlmProfile): Promise<{ fields: Record<string, unknown>; reasoningApplied: boolean }> {
-    const models = await this.lmStudioModelInfo(endpoint);
+    const server = await this.readyServerInfo(endpoint, model);
     const s = profile.sampling;
-    const effort = reasoningEffortFor(profile.reasoning, models ? findModelInfo(models, model)?.reasoningOptions : null);
+    const effort = reasoningEffortFor(profile.reasoning, reasoningOptionsOf(server, endpoint, model));
     return {
       fields: {
         temperature: s.temperature,
         top_p: s.topP,
         presence_penalty: s.presencePenalty,
-        ...(models ? { top_k: s.topK, min_p: s.minP, repeat_penalty: s.repeatPenalty } : {}),
+        ...(server.kind === 'lmstudio' ? { top_k: s.topK, min_p: s.minP, repeat_penalty: s.repeatPenalty } : {}),
+        ...(server.kind === 'unsloth' ? { top_k: Math.min(s.topK, UNSLOTH_TOP_K_MAX), min_p: s.minP, repetition_penalty: s.repeatPenalty } : {}),
         ...(effort ? { reasoning_effort: effort } : {}),
+        // Unsloth는 생각 켜기·끄기를 enable_thinking으로 받는 모델이 있다 (reasoning_style: enable_thinking)
+        ...(effort && server.kind === 'unsloth' ? { enable_thinking: effort !== 'none' } : {}),
       },
       reasoningApplied: profile.reasoning === null || effort !== null,
     };
   }
 
-  /** 사진·생각 설정 지원 여부 (화면이 버튼을 켜고 끄는 데 쓴다) */
+  /**
+   * Unsloth Studio(auto-switch 꺼짐)에 고른 모델이 없으면 알기 쉬운 이유로 막는다. 기억해 둔 정보가 '없음'이면
+   * 그사이 불러왔을 수 있어 한 번 다시 묻는다. auto-switch를 못 읽었으면 막지 않고 서버의 400을 바꿔 보인다.
+   */
+  private async readyServerInfo(endpoint: LlmEndpoint, model: string): Promise<LlmServerInfo> {
+    const notReady = (info: LlmServerInfo) => info.unsloth !== null && info.unsloth.autoSwitch === false && !info.unsloth.loaded.includes(model);
+    let server = await this.serverInfo(endpoint);
+    if (!notReady(server)) return server;
+    server = await this.serverInfo(endpoint, { refresh: true });
+    if (notReady(server)) throw new LlmModelNotLoadedError(unslothNotLoadedMessage(model, server.unsloth?.loaded ?? []));
+    return server;
+  }
+
+  /**
+   * 사진·생각 설정 지원 여부 (화면이 버튼을 켜고 끄는 데 쓴다).
+   * LM Studio는 모델 정보만, Unsloth Studio는 모델 정보(불러온 모델: /v1/status, 안 불러온 모델의 사진: check-vision)가 먼저이고 모르면 관리자 설정,
+   * 그 밖의 OpenAI 호환 서버는 관리자 설정만 쓴다.
+   */
   async modelCapabilities(endpoint: LlmEndpoint, model: string): Promise<LlmModelCapabilities> {
-    const models = await this.lmStudioModelInfo(endpoint);
-    const info = models ? findModelInfo(models, model) : undefined;
-    if (!info) return { vision: null, reasoning: null };
-    return { vision: info.vision, reasoning: reasoningSupported(info) };
+    const server = await this.serverInfo(endpoint);
+    if (server.lmStudio) {
+      const info = findModelInfo(server.lmStudio, model);
+      return info ? { vision: info.vision, reasoning: reasoningSupported(info) } : { vision: null, reasoning: null };
+    }
+    const manual = { vision: endpoint.visionSupport ?? null, reasoning: endpoint.reasoningSupport ?? null };
+    if (!server.unsloth) return manual;
+    const active = unslothActive(server, model);
+    return {
+      // 불러온 모델은 실제로 불러온 상태(mmproj 포함)를 아는 status가 먼저. check-vision은 불러오지 않은 GGUF를 false로 볼 때가 있다
+      vision: active ? active.vision : ((await this.unslothVision(endpoint, model)) ?? manual.vision),
+      reasoning: active ? reasoningSupported(active) : manual.reasoning,
+    };
+  }
+
+  /** Unsloth Studio가 이 모델을 사진 모델로 보는지 (불러오지 않아도 답한다). 못 읽으면 null */
+  private async unslothVision(endpoint: LlmEndpoint, model: string): Promise<boolean | null> {
+    const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
+    const key = `${root}|${model}`;
+    const cached = this.unslothVisionCache.get(key);
+    if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.vision;
+    const vision = await this.request<{ is_vision?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/check-vision/${encodeURIComponent(model)}`, undefined, MODELS_TIMEOUT_MS)
+      .then((body) => (typeof body.is_vision === 'boolean' ? body.is_vision : null))
+      .catch(() => null);
+    this.unslothVisionCache.set(key, { at: Date.now(), vision });
+    return vision;
   }
 
   /**
@@ -407,15 +508,44 @@ export class LlmClient {
    * 외부 LLM·옛 LM Studio·모르는 모델이면 null (심층 조사가 프롬프트 글자 수를 정할 때 쓴다, 이슈 #384)
    */
   async modelContextLength(endpoint: LlmEndpoint, model: string): Promise<number | null> {
-    const models = await this.lmStudioModelInfo(endpoint);
-    return (models ? findModelInfo(models, model)?.contextLength : null) ?? null;
+    const server = await this.serverInfo(endpoint);
+    if (server.lmStudio) return findModelInfo(server.lmStudio, model)?.contextLength ?? null;
+    return unslothActive(server, model)?.contextLength ?? null;
   }
 
-  /** 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 null로 잠시 기억해 요청마다 다시 묻지 않는다 */
-  private async lmStudioModelInfo(endpoint: LlmEndpoint, { refresh = false } = {}): Promise<Map<string, LmStudioModelInfo> | null> {
+  /**
+   * 서버 종류와 모델 정보. LM Studio 고유 API가 답하면 LM Studio, 아니면 /v1/status가 Unsloth 모양이면 Unsloth Studio, 둘 다 아니면 외부 LLM.
+   * 실패(외부 LLM, /api/v1이 없는 옛 LM Studio)도 잠시 기억해 요청마다 다시 묻지 않는다
+   */
+  private async serverInfo(endpoint: LlmEndpoint, { refresh = false } = {}): Promise<LlmServerInfo> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
-    const cached = this.modelInfoCache.get(root);
-    if (!refresh && cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.models;
+    const cached = this.serverInfoCache.get(root);
+    if (!refresh && cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.info;
+    const lmStudio = await this.lmStudioModelInfo(endpoint, root);
+    const unsloth = lmStudio ? null : await this.unslothInfo(endpoint, root);
+    const info: LlmServerInfo = { kind: lmStudio ? 'lmstudio' : unsloth ? 'unsloth' : 'openai', lmStudio, unsloth };
+    this.serverInfoCache.set(root, { at: Date.now(), info });
+    return info;
+  }
+
+  /** Unsloth Studio의 불러온 모델·auto-switch·불러온 모델 정보. /v1/status가 Unsloth 모양이 아니면 null */
+  private async unslothInfo(endpoint: LlmEndpoint, root: string): Promise<UnslothInfo | null> {
+    const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, MODELS_TIMEOUT_MS).catch(() => null);
+    if (!status || typeof status.supports_reasoning !== 'boolean' || typeof status.reasoning_style !== 'string') return null;
+    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS).catch(() => ({ data: [] }));
+    const loaded = (models.data ?? []).filter((m) => m.loaded === true).map((m) => m.id);
+    const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, MODELS_TIMEOUT_MS)
+      .then((body) => (typeof body.enabled === 'boolean' ? body.enabled : null))
+      .catch(() => null);
+    const active =
+      loaded.length > 0 && new Set(loaded.map(unslothBaseName)).size === 1
+        ? { ids: loaded, reasoningOptions: unslothReasoningOptions(status), vision: status.is_vision === true, contextLength: positiveInt(status.context_length) ? status.context_length : null }
+        : null;
+    return { loaded, autoSwitch, active };
+  }
+
+  /** LM Studio 고유 API(/api/v1/models)의 모델 정보. LM Studio가 아니면 null */
+  private async lmStudioModelInfo(endpoint: LlmEndpoint, root: string): Promise<Map<string, LmStudioModelInfo> | null> {
     let models: Map<string, LmStudioModelInfo> | null;
     try {
       type Wire = {
@@ -436,7 +566,6 @@ export class LlmClient {
     } catch {
       models = null;
     }
-    this.modelInfoCache.set(root, { at: Date.now(), models });
     return models;
   }
 
@@ -469,10 +598,15 @@ export class LlmClient {
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
-      throw new LlmRequestError(`${url}에 연결할 수 없어요. LM Studio의 Developer 탭에서 서버를 켰는지, 주소가 맞는지 확인해 주세요`);
+      throw new LlmRequestError(`${url}에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 주소가 맞는지 확인해 주세요`);
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
-    if (!res.ok) throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`, res.status);
+    if (!res.ok) {
+      const message = await errorMessageOf(res);
+      // Unsloth Studio: "No model loaded. Call POST /inference/load first. Or enable Model auto-switch …"
+      if (res.status === 400 && /no model loaded/i.test(message)) throw new LlmModelNotLoadedError(unslothNotLoadedMessage(null, []), res.status);
+      throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${message}`, res.status);
+    }
     return res;
   }
 }
@@ -496,7 +630,7 @@ function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unkn
   if (error instanceof LlmRequestError) return error;
   const reason: unknown = signal.aborted ? signal.reason : error;
   if (reason instanceof Error && reason.name === 'TimeoutError') {
-    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LM Studio 서버와 모델 상태를 확인해 주세요`);
+    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LLM 서버(LM Studio·Unsloth Studio)와 모델 상태를 확인해 주세요`);
   }
   if (signal.aborted) return new LlmAbortedError();
   return error;
@@ -662,18 +796,50 @@ function parseJsonText(content: string): unknown {
 
 /** 설정의 모델 이름은 /v1/models의 id다. LM Studio는 key나 `key@양자화` 변형 이름으로 준다 */
 function contextLengthOf(m: { max_context_length?: number; loaded_instances?: { config?: { context_length?: number } }[] }): number | null {
-  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
-  const loaded = (m.loaded_instances ?? []).map((i) => i.config?.context_length).filter(positive);
+  const loaded = (m.loaded_instances ?? []).map((i) => i.config?.context_length).filter(positiveInt);
   if (loaded.length) return Math.min(...loaded);
-  return positive(m.max_context_length) ? m.max_context_length : null;
+  return positiveInt(m.max_context_length) ? m.max_context_length : null;
+}
+
+function positiveInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0;
+}
+
+/** Unsloth에 불러온 단 하나의 모델이 이 모델이면 그 정보 */
+function unslothActive(server: LlmServerInfo, model: string): UnslothInfo['active'] {
+  const active = server.unsloth?.active ?? null;
+  return active?.ids.includes(model) ? active : null;
+}
+
+/** 별칭과 전체 이름을 한 모델로 묶는 열쇠: 마지막 / 뒤를 소문자로 */
+function unslothBaseName(id: string): string {
+  return (id.split('/').pop() ?? id).toLowerCase();
+}
+
+/**
+ * Unsloth /v1/status의 생각 설정을 LM Studio의 allowed_options 모양으로 바꾼다.
+ * 생각을 못 하면 빈 목록, 늘 켜져 있으면 'off'를 빼고, 단계를 알리지 않으면(enable_thinking 방식) 켜기('on')만 둔다
+ */
+function unslothReasoningOptions(status: UnslothStatusWire): string[] {
+  if (status.supports_reasoning !== true) return [];
+  const levels = Array.isArray(status.reasoning_effort_levels) ? status.reasoning_effort_levels.filter((v): v is string => typeof v === 'string' && v !== 'none') : [];
+  return [...(status.reasoning_always_on === true ? [] : ['off']), ...(levels.length ? levels : ['on'])];
+}
+
+/** reasoning_effort로 바꿀 이 모델의 생각 옵션. 모델 정보가 먼저이고, LM Studio가 아니면 관리자가 지원한다고 정한 때만 */
+function reasoningOptionsOf(server: LlmServerInfo, endpoint: LlmEndpoint, model: string): readonly string[] | null {
+  if (server.lmStudio) return findModelInfo(server.lmStudio, model)?.reasoningOptions ?? null;
+  const active = unslothActive(server, model);
+  if (active) return active.reasoningOptions;
+  return endpoint.reasoningSupport === true ? MANUAL_REASONING_OPTIONS : null;
 }
 
 function findModelInfo(models: Map<string, LmStudioModelInfo>, model: string): LmStudioModelInfo | undefined {
   return models.get(model) ?? models.get(model.split('@')[0]);
 }
 
-/** LM Studio가 모르는 모델이면 null (지원 여부를 알 수 없다) */
-function reasoningSupported(info: LmStudioModelInfo | undefined): boolean | null {
+/** 모르는 모델이면 null (지원 여부를 알 수 없다) */
+function reasoningSupported(info: LmStudioModelInfo | null | undefined): boolean | null {
   return info ? Boolean(info.reasoningOptions?.length) : null;
 }
 

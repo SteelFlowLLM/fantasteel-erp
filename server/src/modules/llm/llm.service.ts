@@ -4,7 +4,7 @@ import { effectiveStartSites } from '../ai-assistant/browser/browser-rules';
 import { BrowserSettingsStore } from './browser-settings.store';
 import { LlmClient, LlmRequestError, normalizeBaseUrl } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
-import { LlmSettingsStore, type LlmSettings } from './llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore, type LlmSettings } from './llm-settings.store';
 
 const CHAT_TEST_PROMPT = '연결 확인입니다. 한국어 한 문장으로 짧게 인사해 주세요.';
 
@@ -26,6 +26,8 @@ export class LlmService {
       baseUrl: normalizeBaseUrl(input.baseUrl),
       model: input.model,
       apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey || null,
+      visionSupport: input.visionSupport === undefined ? current.visionSupport : input.visionSupport,
+      reasoningSupport: input.reasoningSupport === undefined ? current.reasoningSupport : input.reasoningSupport,
     };
     await this.store.write(next);
     return toView(next);
@@ -48,19 +50,21 @@ export class LlmService {
     const started = Date.now();
     try {
       const models = await this.client.listModels({ baseUrl, apiKey });
-      return { connected: true, baseUrl, latencyMs: Date.now() - started, models, error: null };
+      const latencyMs = Date.now() - started;
+      const server = await this.client.serverSummary({ baseUrl, apiKey });
+      return { connected: true, baseUrl, latencyMs, models, error: null, serverKind: server.kind, autoSwitch: server.autoSwitch };
     } catch (error) {
-      return { connected: false, baseUrl, latencyMs: null, models: [], error: messageOf(error) };
+      return { connected: false, baseUrl, latencyMs: null, models: [], error: messageOf(error), serverKind: null, autoSwitch: null };
     }
   }
 
-  /** 저장된 설정의 모델에 짧은 질문을 보내 실제로 답하는지 본다 */
+  /** 저장된 설정의 모델에 짧은 질문을 보내 실제로 답하는지 본다. Unsloth Studio에 고른 모델이 안 불러와져 있으면 부르기 전에 그 이유를 돌려준다 */
   async testChat(): Promise<LlmChatTestView> {
     const settings = await this.store.read();
     if (!settings.model) return { ok: false, model: null, reply: null, latencyMs: null, error: '모델을 먼저 골라 저장해 주세요' };
     const started = Date.now();
     try {
-      const reply = await this.client.chat(settings, settings.model, [{ role: 'user', content: CHAT_TEST_PROMPT }], LLM_PROFILE.CONNECTION_TEST);
+      const reply = await this.client.chat(llmEndpointOf(settings), settings.model, [{ role: 'user', content: CHAT_TEST_PROMPT }], LLM_PROFILE.CONNECTION_TEST);
       return { ok: true, model: settings.model, reply, latencyMs: Date.now() - started, error: null };
     } catch (error) {
       return { ok: false, model: settings.model, reply: null, latencyMs: null, error: messageOf(error) };
@@ -73,7 +77,7 @@ function toBrowserView(settings: { startSites: string[] | null; openAllSites: bo
 }
 
 function toView(settings: LlmSettings): LlmSettingsView {
-  return { baseUrl: settings.baseUrl, model: settings.model, hasApiKey: Boolean(settings.apiKey) };
+  return { baseUrl: settings.baseUrl, model: settings.model, hasApiKey: Boolean(settings.apiKey), visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport };
 }
 
 function messageOf(error: unknown): string {

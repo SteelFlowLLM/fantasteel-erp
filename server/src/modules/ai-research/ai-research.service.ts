@@ -20,7 +20,7 @@ import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery, SuggestAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
 import { askResearchJson } from './ai-research.llm';
@@ -143,7 +143,7 @@ export class AiResearchService {
     const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed), erp: sources.filter(isErpSource) });
     let value: Record<string, unknown> | null;
     try {
-      value = await askResearchJson(this.llmClient, { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model }, messages, PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps), {
+      value = await askResearchJson(this.llmClient, { ...llmEndpointOf(settings), model: settings.model }, messages, PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps), {
         timeoutMs: DEFAULT_RUNNER_CONFIG.jsonTimeoutMs,
       });
     } catch (error) {

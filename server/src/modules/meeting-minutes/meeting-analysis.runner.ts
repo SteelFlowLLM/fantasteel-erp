@@ -3,7 +3,7 @@ import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type MeetingC
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type LlmJsonReply } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { ANALYSIS_JSON_SCHEMA, ANALYSIS_SYSTEM_PROMPT, buildAnalysisUserMessage, buildReviewUserMessage, REVIEW_JSON_SCHEMA, REVIEW_SYSTEM_PROMPT, segmentPromptText, type ReviewCandidateLine } from './meeting-analysis.prompt';
 import { collectSalesOrderNos, validateAnalysis, type AnalysisContext } from './meeting-analysis.validator';
@@ -118,7 +118,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
       departmentName: a.employee.department.departmentName,
       roleLabel: ROLE_LABEL[a.employee.role.roleCode as Role] ?? a.employee.role.roleCode,
     }));
-    const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    const endpoint = llmEndpointOf(settings);
     const promptInput = { meetingDate, attendees, segments: transcriptSegments.map(segmentPromptText) };
     const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS };
     const started = Date.now();

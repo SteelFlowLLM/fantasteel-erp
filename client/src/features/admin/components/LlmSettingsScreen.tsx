@@ -1,13 +1,13 @@
 'use client';
 
-// AI 연결 /admin/llm (문서에 없는 기능, 2026-10-07 추가): LM Studio 서버 연결 확인 · 모델 선택 · 응답 확인.
+// AI 연결 /admin/llm (문서에 없는 기능, 2026-10-07 추가): LLM 서버(LM Studio·Unsloth Studio·외부 LLM) 연결 확인 · 모델 선택 · 응답 확인.
 // 모델은 연결 확인으로 받은 목록에서 고르므로 서버 연결 카드 안에 둔다.
 // 카드가 늘어 탭 세 개로 나눈다: AI 모델(LM Studio) · 음성 인식(STT, Voice2ERP) · 철강맨AI 기능(브라우저, 철강맨 부르기).
 // 탭을 바꿔도 저장하지 않은 입력이 사라지지 않게 세 탭을 모두 그려 두고 고른 탭만 보인다.
-// 나중에 외부 LLM을 쓸 때는 주소와 API 키만 바꾼다 (둘 다 OpenAI 호환 API).
+// Unsloth Studio·외부 LLM은 주소와 API 키만 바꾼다 (모두 OpenAI 호환 API). LM Studio가 아니면 사진·생각 정도 지원을 관리자가 정한다 (이슈 #465).
 // 설정 전용 권한 코드가 없어 부서·권한 관리(ORG_MANAGE) 권한으로 연다(가정). 사용 권한이 없으면 조회만 한다.
 import { useEffect, useState, type ReactNode } from 'react';
-import { LLM_DEFAULT_BASE_URL, type LlmConnectionView, type LlmSettingsView } from '@fantasteel/shared';
+import { LLM_DEFAULT_BASE_URL, LLM_UNSLOTH_BASE_URL, type LlmConnectionView, type LlmSettingsView } from '@fantasteel/shared';
 import { PERMISSION } from '@/codes';
 import { llmApi, llmKeys } from '@/api/llm';
 import { Badge } from '@/components/Badge';
@@ -23,6 +23,7 @@ import { Tabs } from '@/components/Tabs';
 import { useAction } from '@/hooks/useAction';
 import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/useLlm';
 import { useCanUse } from '@/hooks/usePermission';
+import { llmModelOptions, showsSupportChoices, supportChoiceOf, supportValueOf, unslothModelWarning, type SupportChoice } from '@/lib/llmSettings';
 import { BrowserSettingsCard } from './BrowserSettingsCard';
 import { SttGuideCard } from './SttGuideCard';
 import { SttLocalServerCard } from './SttLocalServerCard';
@@ -53,14 +54,20 @@ export function LlmSettingsScreen() {
       <div className="flex flex-none items-end gap-4">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-2xl font-semibold">AI 연결</h1>
-          <span className="text-cap text-ink-3">AI 기능이 쓸 모델(LM Studio)과 음성 인식(Whisper) 서버를 연결하고, 철강맨AI가 쓸 기능을 정해요</span>
+          <span className="text-cap text-ink-3">AI 기능이 쓸 모델(LM Studio·Unsloth Studio)과 음성 인식(Whisper) 서버를 연결하고, 철강맨AI가 쓸 기능을 정해요</span>
         </div>
         <div className="ml-auto flex items-center gap-2">{canEdit ? null : <ReadOnlyHint permissions={[PERMISSION.ORG_MANAGE]} />}</div>
       </div>
       <Tabs<SettingsTab> items={TABS} active={tab} onChange={openTab} ariaLabel="AI 연결 설정" />
       <TabPanel active={tab === 'model'} label="AI 모델">
         <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
-          {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
+          {(data) => (
+            <LlmSettingsForm
+              key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}|${String(data.visionSupport)}|${String(data.reasoningSupport)}`}
+              saved={data}
+              canEdit={canEdit}
+            />
+          )}
         </QueryBoundary>
       </TabPanel>
       <TabPanel active={tab === 'voice'} label="음성 인식">
@@ -101,6 +108,8 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   const [model, setModel] = useState(saved.model ?? '');
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
+  const [vision, setVision] = useState<SupportChoice>(supportChoiceOf(saved.visionSupport));
+  const [reasoning, setReasoning] = useState<SupportChoice>(supportChoiceOf(saved.reasoningSupport));
 
   const connection = useLlmConnectionTest();
   const chat = useLlmChatTest();
@@ -117,8 +126,15 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   }, []);
 
   const result = connection.data;
-  const dirty = baseUrl.trim() !== saved.baseUrl || model !== (saved.model ?? '') || apiKey.trim() !== '' || clearApiKey;
-  const onSave = () => save.mutate({ baseUrl, model: model || null, apiKey: apiKeyInput() }, { onSuccess: () => chat.reset() });
+  const supportDirty = vision !== supportChoiceOf(saved.visionSupport) || reasoning !== supportChoiceOf(saved.reasoningSupport);
+  const dirty = baseUrl.trim() !== saved.baseUrl || model !== (saved.model ?? '') || apiKey.trim() !== '' || clearApiKey || supportDirty;
+  const onSave = () =>
+    save.mutate(
+      { baseUrl, model: model || null, apiKey: apiKeyInput(), visionSupport: supportValueOf(vision), reasoningSupport: supportValueOf(reasoning) },
+      { onSuccess: () => chat.reset() },
+    );
+  const modelWarning = unslothModelWarning(result, model);
+  const unsloth = result?.connected === true && result.serverKind === 'unsloth';
 
   return (
     <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
@@ -133,7 +149,11 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
             }
           />
           <CardBody>
-            <Field label={<span data-pet-term="서버 주소">서버 주소</span>} required hint={`LM Studio 기본값 ${LLM_DEFAULT_BASE_URL} · OpenAI 호환 주소(…/v1)`}>
+            <Field
+              label={<span data-pet-term="서버 주소">서버 주소</span>}
+              required
+              hint={`LM Studio 기본값 ${LLM_DEFAULT_BASE_URL} · Unsloth Studio ${LLM_UNSLOTH_BASE_URL} · OpenAI 호환 주소(…/v1)`}
+            >
               <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} disabled={!canEdit} placeholder={LLM_DEFAULT_BASE_URL} spellCheck={false} />
             </Field>
             <Field
@@ -141,7 +161,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
               hint={
                 saved.hasApiKey && !clearApiKey
                   ? '저장된 키가 있어요. 바꿀 때만 입력해요'
-                  : 'LM Studio는 비워 둬요. 서버에서 인증을 켰거나 외부 LLM을 쓸 때만 입력해요'
+                  : 'LM Studio는 비워 둬요. Unsloth Studio는 꼭 넣어요(Settings > API에서 만든 키). 외부 LLM이나 LM Studio에서 인증을 켰을 때도 입력해요'
               }
             >
               <div className="flex gap-2">
@@ -175,20 +195,51 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
             <Field
               label={<span data-pet-term="사용할 모델">사용할 모델</span>}
               hint={
-                saved.model
-                  ? `저장된 모델 ${saved.model} · LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요. '생각 가능' 모델만 철강맨AI의 생각 정도를 바꿀 수 있어요`
-                  : `연결 확인으로 받은 목록에서 골라요. LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요. '생각 가능' 모델만 철강맨AI의 생각 정도를 바꿀 수 있어요`
+                `${saved.model ? `저장된 모델 ${saved.model}` : '연결 확인으로 받은 목록에서 골라요'} · ${
+                  unsloth
+                    ? 'Unsloth Studio는 불러온 모델로만 답해요. 고른 모델을 Unsloth Studio에서 불러 두세요'
+                    : "LM Studio에서 다운로드한 모델(LM Link로 연결한 다른 컴퓨터의 모델 포함)이 보여요. '생각 가능' 모델만 철강맨AI의 생각 정도를 바꿀 수 있어요"
+                }`
               }
             >
               <Select value={model} onChange={(e) => setModel(e.target.value)} disabled={!canEdit || !result?.connected}>
                 <option value="">모델을 골라 주세요</option>
-                {modelOptions(result, model).map((option) => (
+                {llmModelOptions(result, model).map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
                 ))}
               </Select>
             </Field>
+            {modelWarning ? (
+              <Banner tone="wait" icon="alert">
+                {modelWarning}
+              </Banner>
+            ) : null}
+            {showsSupportChoices(result, saved) ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label={<span data-pet-term="사진 지원">사진 지원</span>}
+                  hint={unsloth ? 'Unsloth Studio가 사진 모델인지 알려 주면 그 값을 먼저 써요' : '모델이 사진을 읽을 수 있을 때만 켜요'}
+                >
+                  <Select aria-label="사진 지원" value={vision} onChange={(e) => setVision(e.target.value as SupportChoice)} disabled={!canEdit}>
+                    <option value="">모름 (사진 첨부를 막지 않음)</option>
+                    <option value="yes">지원</option>
+                    <option value="no">지원 안 함 (사진 첨부를 끔)</option>
+                  </Select>
+                </Field>
+                <Field
+                  label={<span data-pet-term="생각 정도 지원">생각 정도 지원</span>}
+                  hint={unsloth ? '불러온 모델이 알려 주면 그 값을 먼저 써요. 지원이면 생각 정도(reasoning_effort)를 보내요' : '지원이면 생각 정도(reasoning_effort)를 보내요'}
+                >
+                  <Select aria-label="생각 정도 지원" value={reasoning} onChange={(e) => setReasoning(e.target.value as SupportChoice)} disabled={!canEdit}>
+                    <option value="">모름 (생각 정도를 보내지 않음)</option>
+                    <option value="yes">지원</option>
+                    <option value="no">지원 안 함 (생각 정도를 끔)</option>
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
             {chat.data ? (
               chat.data.ok ? (
                 <Banner tone="ok" icon="check-circle">
@@ -208,7 +259,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
           </CardBody>
           <CardFoot>
             <span className="text-xs text-ink-3" data-pet-term="응답 시간">
-              {result?.connected ? `모델 ${result.models.length}개 · ${result.latencyMs}ms` : null}
+              {result?.connected ? `${SERVER_LABEL[result.serverKind ?? 'openai']} · 모델 ${result.models.length}개 · ${result.latencyMs}ms` : null}
             </span>
             <Button className="ml-auto" icon="refresh" onClick={runConnectionTest} disabled={!canEdit || connection.isPending || !baseUrl.trim()}>
               {connection.isPending ? '확인 중…' : '연결 확인'}
@@ -229,7 +280,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
       </div>
 
       <Card petKey="card:llmSettings.setup">
-        <CardHead title="LM Studio 준비" />
+        <CardHead title="LLM 서버 준비" />
         <CardBody className="text-sm leading-relaxed text-ink-2">
           <ol className="flex list-decimal flex-col gap-1.5 pl-4">
             <li>LM Studio에서 모델을 다운로드해요.</li>
@@ -247,6 +298,21 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
             <b>LM Link</b>: GPU가 있는 다른 컴퓨터의 모델을 쓰려면 ERP 서버 컴퓨터의 LM Studio(또는 llmster)를 같은 Link에 넣어요. 원격 모델도 이 주소 그대로 목록에
             보여요.
           </p>
+          <h3 className="mt-2 font-semibold text-ink">Unsloth Studio를 쓸 때</h3>
+          <ol className="flex list-decimal flex-col gap-1.5 pl-4">
+            <li>
+              Unsloth Studio를 켜고 <b>Settings &gt; API</b>에서 API 키를 만들어요.
+            </li>
+            <li>
+              주소 <b>{LLM_UNSLOTH_BASE_URL}</b>와 API 키(꼭 필요)를 넣고 <b>연결 확인</b>.
+            </li>
+            <li>
+              쓸 모델을 Unsloth Studio에서 <b>불러오거나</b> Settings &gt; API의 <b>Model auto-switch</b>를 켜요. 목록에 &lsquo;불러옴&rsquo;이 보여야 답해요.
+            </li>
+            <li>
+              사진·생각 정도 지원을 정하고 <b>저장</b> → <b>응답 확인</b>.
+            </li>
+          </ol>
         </CardBody>
       </Card>
     </div>
@@ -259,14 +325,4 @@ function ConnectionBadge({ result, pending }: { result: LlmConnectionView | unde
   return result.connected ? <Badge tone="ok">연결됨</Badge> : <Badge tone="danger">연결 안 됨</Badge>;
 }
 
-/**
- * 받은 목록에서 대화용 모델만 (임베딩 모델은 답을 만들지 못한다). 로드된 모델을 앞에 둔다.
- * 생각 정도를 못 바꾸는 모델도 빠른 답에는 쓸 수 있어 숨기지 않고, 되는 모델에만 표시한다.
- * 지금 고른 모델이 목록에 없으면 따로 표시해 선택이 사라지지 않게 한다.
- */
-function modelOptions(result: LlmConnectionView | undefined, selected: string): { id: string; label: string }[] {
-  const models = (result?.models ?? []).filter((m) => m.type !== 'embeddings').sort((a, b) => Number(b.loaded === true) - Number(a.loaded === true));
-  const options = models.map((m) => ({ id: m.id, label: [m.id, m.reasoning ? '생각 가능' : null, m.loaded ? '로드됨' : null].filter(Boolean).join(' · ') }));
-  if (selected && !options.some((o) => o.id === selected)) options.unshift({ id: selected, label: `${selected} (지금 목록에 없음)` });
-  return options;
-}
+const SERVER_LABEL = { lmstudio: 'LM Studio', unsloth: 'Unsloth Studio', openai: 'OpenAI 호환' } as const;

@@ -25,6 +25,15 @@ export class UpdateLlmSettingsDto {
   @IsString()
   @MaxLength(500)
   apiKey?: string;
+
+  /** 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다, 이슈 #465). 보내지 않으면 그대로, null이면 모름 */
+  @IsOptional()
+  @IsBoolean()
+  visionSupport?: boolean | null;
+
+  @IsOptional()
+  @IsBoolean()
+  reasoningSupport?: boolean | null;
 }
 
 export class TestLlmConnectionDto {
