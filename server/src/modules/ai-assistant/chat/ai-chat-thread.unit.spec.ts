@@ -1,5 +1,5 @@
 import { AI_CHAT_TITLE_MAX, type AiActionCard } from '@fantasteel/shared';
-import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTitle, questionMeta, readyCards, toChatMessageView } from './ai-chat-thread.view';
+import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTitle, questionMeta, readyCards, toChatMessageView, TRACE_STEPS_MAX, traceStepsOf } from './ai-chat-thread.view';
 
 const card = (key: string) => ({ key, kind: 'TASK', title: `업무 ${key}` }) as unknown as AiActionCard;
 const row = (patch: Partial<Parameters<typeof toChatMessageView>[0]>) => ({
@@ -33,8 +33,8 @@ describe('저장한 메시지 모양', () => {
   it('질문 옵션은 켠 것만, 없으면 null', () => {
     expect(questionMeta({ question: 'q' })).toBeNull();
     expect(questionMeta({ question: 'q', reasoning: 'low', webSearch: true, browser: false, imageCount: 0 })).toEqual({ reasoning: 'low', webSearch: true });
-    expect(answerMeta(undefined, { reasoningApplied: true })).toBeNull();
-    expect(answerMeta('high', { reasoningApplied: false })).toEqual({ reasoning: 'high', reasoningApplied: false });
+    expect(answerMeta(undefined, { reasoningApplied: true, thinking: null, toolCalls: [] })).toBeNull();
+    expect(answerMeta('high', { reasoningApplied: false, thinking: null, toolCalls: [] })).toEqual({ reasoning: 'high', reasoningApplied: false });
   });
 
   it('질문 줄은 옵션을, 답 줄은 출처·웹 출처·카드·생각 정도를 돌려준다', () => {
@@ -112,5 +112,51 @@ describe('저장한 카드 실행 표시', () => {
     expect(cardsWithDone(readyCards([card('a1')]), 'a9', registered)).toBeNull();
     expect(cardsWithDone([{ card: card('a1'), status: 'done', result: { type: 'task', id: 1 } }], 'a1', registered)).toBeNull();
     expect(cardsWithDone(null, 'a1', registered)).toBeNull();
+  });
+});
+
+describe('생각 과정과 도구 동작 기록 저장 (이슈 #433)', () => {
+  const call = (patch: Partial<Parameters<typeof traceStepsOf>[0][number]>) => ({ name: 'get_inventory', arguments: '{"item":"SS275"}', resultPreview: '[{"재고":120}]', durationMs: 40, ...patch });
+
+  it('결과 글은 빼고 입력·걸린 시간·조회 대상·본 주소·실패 이유만 줄여서 남긴다', () => {
+    const steps = traceStepsOf([
+      call({ label: '재고 · SS275' }),
+      call({ name: 'browser_open', arguments: '{"url":"https://a.example.kr/x"}', resultPreview: '[브라우저 화면] a.example.kr\n긴 페이지 글', url: 'a.example.kr/x' }),
+      call({ name: 'browser_click', arguments: '{"ref":"r9"}', resultPreview: '{"오류":"막았어요: 로그인 버튼은 사용자가 직접 눌러요","안내":"..."}' }),
+      call({ arguments: 'a'.repeat(500) }),
+    ]);
+    expect(steps[0]).toEqual({ name: 'get_inventory', arguments: '{"item":"SS275"}', durationMs: 40, label: '재고 · SS275' });
+    expect(steps[1]).toEqual({ name: 'browser_open', arguments: '{"url":"https://a.example.kr/x"}', durationMs: 40, url: 'a.example.kr/x' });
+    expect(steps[2]).toMatchObject({ name: 'browser_click', error: '막았어요: 로그인 버튼은 사용자가 직접 눌러요' });
+    expect(JSON.stringify(steps)).not.toContain('긴 페이지 글');
+    expect(JSON.stringify(steps)).not.toContain('120');
+    expect(steps[3].arguments).toHaveLength(201);
+  });
+
+  it('동작 기록은 최대 TRACE_STEPS_MAX개까지만 남긴다', () => {
+    expect(traceStepsOf(Array.from({ length: TRACE_STEPS_MAX + 10 }, () => call({})))).toHaveLength(TRACE_STEPS_MAX);
+  });
+
+  it('답 meta에는 생각 글과 동작 기록이 생각 정도 없이도 들어가고, 아무것도 없으면 null', () => {
+    const meta = answerMeta(undefined, { reasoningApplied: true, thinking: '재고를 먼저 본다', toolCalls: [call({})] });
+    expect(meta).toEqual({ thinking: '재고를 먼저 본다', trace: [{ name: 'get_inventory', arguments: '{"item":"SS275"}', durationMs: 40 }] });
+    expect(answerMeta(undefined, { reasoningApplied: true, thinking: null, toolCalls: [] })).toBeNull();
+  });
+
+  it('저장한 meta의 생각 글·동작 기록을 답 줄로 되살리고, 깨진 줄은 건너뛴다', () => {
+    const view = toChatMessageView(
+      row({
+        role: AI_CHAT_ROLE.ASSISTANT,
+        meta: {
+          thinking: '재고를 먼저 본다',
+          trace: [{ name: 'browser_open', arguments: '{}', durationMs: 5, url: 'a.example.kr/x' }, { name: 3 }, 'x', { name: 'get_inventory', arguments: '{}', durationMs: 'oops' }],
+        },
+      }),
+    );
+    expect(view).toMatchObject({ role: 'assistant', thinking: '재고를 먼저 본다', trace: [{ name: 'browser_open', arguments: '{}', durationMs: 5, url: 'a.example.kr/x' }] });
+    // 예전에 저장한 답(meta에 없음)은 그대로
+    const old = toChatMessageView(row({ role: AI_CHAT_ROLE.ASSISTANT, meta: { reasoning: 'low', reasoningApplied: true } }));
+    expect(old).not.toHaveProperty('thinking');
+    expect(old).not.toHaveProperty('trace');
   });
 });

@@ -47,7 +47,7 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AgentControlRegistry, type AgentGate } from './agent-control';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
-import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, effectiveStartSites } from './browser/browser-rules';
+import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, displayUrl, effectiveStartSites } from './browser/browser-rules';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
 import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
 import { AiNotionCardService } from './notion/ai-notion-card.service';
@@ -457,7 +457,16 @@ export class AiAssistantService {
                 // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
                 web?.observeErpResult(result.content);
               }
-              const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
+              // 저장한 대화의 동작 기록에는 결과 글 대신 조회 대상·본 주소를 남긴다 (이슈 #433)
+              const seenUrl = browser?.has(toolCall.name) ? webSources?.find((source) => source.url)?.url : undefined;
+              const trace = {
+                name: toolCall.name,
+                arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX),
+                resultPreview: cut(result.content, TRACE_RESULT_MAX),
+                durationMs: Date.now() - callStarted,
+                ...(result.source?.label ? { label: result.source.label } : {}),
+                ...(seenUrl && displayUrl(seenUrl) ? { url: displayUrl(seenUrl) } : {}),
+              };
               toolCalls.push(trace);
               emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs, ...(webSources ? { webSources } : {}) });
               messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });

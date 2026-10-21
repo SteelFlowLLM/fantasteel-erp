@@ -1,5 +1,6 @@
 // AI 어시스턴트 대화. 답을 받은 질문은 서버가 대화(thread)로 저장하고(이슈 #399, 문서에 없는 기능), 이 탭 메모리에는 지금 보는 대화를 둔다.
-// 생각 과정·도구 기록·사진·브라우저 화면 사진·실패 줄은 저장하지 않아 이 탭 메모리에만 있고, 저장한 대화를 다시 열면 보이지 않는다.
+// 생각 글과 도구 동작 기록(짧게 줄인 것)은 서버가 답과 함께 저장해 다시 열어도 '생각 과정'이 나온다 (이슈 #433).
+// 도구 결과 글·사진·브라우저 화면 사진·실패 줄은 저장하지 않아 이 탭 메모리에만 있다.
 import type {
   AiActionCard,
   AiActionCardExecuteResult,
@@ -8,6 +9,7 @@ import type {
   AiAssistantSource,
   AiAssistantStreamEvent,
   AiAssistantTurn,
+  AiChatMessageView,
   AiChatThreadRef,
   AiChatThreadView,
   AiReasoningLevel,
@@ -192,19 +194,35 @@ export function aiAnswerEntryFromReply(live: AiChatLive, reply: AiAssistantReply
   };
 }
 
-/** 저장한 대화를 대화 줄로 되살린다. 생각 과정·사진·브라우저 화면 사진은 저장하지 않아 없다 */
+/** 저장한 답의 생각 글·도구 동작 기록으로 '생각 과정'을 되살린다. 결과 글은 저장하지 않아 조회 대상·본 주소·실패 이유만 있다 (이슈 #433) */
+export function stepsFromSavedAnswer(message: Extract<AiChatMessageView, { role: 'assistant' }>): AiTimelineStep[] {
+  return [
+    ...(message.thinking ? [{ kind: 'thinking' as const, text: message.thinking, startedAt: 0, endedAt: 0 }] : []),
+    ...(message.trace ?? []).map((step, index) => ({
+      kind: 'tool' as const,
+      id: `saved-${message.id}-${index}`,
+      name: step.name,
+      arguments: step.arguments,
+      result: { label: step.label ?? step.url ?? null, resultPreview: step.error ? JSON.stringify({ 오류: step.error }) : '', durationMs: step.durationMs },
+    })),
+  ];
+}
+
+/** 저장한 대화를 대화 줄로 되살린다. 사진·브라우저 화면 사진은 저장하지 않아 없다 */
 export function aiChatEntriesFromThread(thread: AiChatThreadView): AiChatEntry[] {
   return thread.messages.map((message): AiChatEntry => {
     const id = `saved-${message.id}`;
     if (message.role === 'user') {
       return { id, role: 'user', content: message.content, ...(message.notes?.length ? { notes: message.notes } : {}), ...(message.imageCount ? { imageCount: message.imageCount } : {}), ...(message.webSearch ? { webSearch: true } : {}), ...(message.browser ? { browser: true } : {}) };
     }
+    const steps = stepsFromSavedAnswer(message);
     return {
       id,
       role: 'assistant',
       content: message.content,
       sources: message.sources,
       messageId: message.id,
+      ...(steps.length ? { steps } : {}),
       ...(message.webSources ? { webSources: message.webSources } : {}),
       ...(message.reasoning ? { requestedReasoning: message.reasoning, reasoningApplied: message.reasoningApplied } : {}),
       ...(message.actionCards.length ? { cards: message.actionCards.map((item): AiChatCard => ({ card: item.card, status: item.status, ...(item.result ? { result: item.result } : {}) })) } : {}),

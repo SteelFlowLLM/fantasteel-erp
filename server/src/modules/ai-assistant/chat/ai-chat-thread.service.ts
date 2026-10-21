@@ -22,7 +22,7 @@ const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
 /**
  * 철강맨AI 패널 대화 저장 (이슈 #399, 문서에 없는 기능). 본인 대화만 다루고, 남의 대화는 없는 것처럼 AST-001.
- * 답이 끝났을 때 질문과 답을 한 트랜잭션으로 저장한다. 생각 글·도구 기록·사진·브라우저 화면 사진은 저장하지 않는다(docs/backend/ai-assistant.md).
+ * 답이 끝났을 때 질문과 답을 한 트랜잭션으로 저장한다. 생각 글과 도구 동작 기록(짧게 줄인 것)은 답의 meta에 함께 저장하고, 도구 결과 글·사진·브라우저 화면 사진·사람이 직접 넣은 글은 저장하지 않는다(이슈 #433, docs/backend/ai-assistant.md).
  * AI 대화라 업무 데이터가 아니므로 작업 로그를 남기지 않는다(REQ-LOG-002 대상 아님).
  */
 @Injectable()
@@ -98,7 +98,7 @@ export class AiChatThreadService {
         sources: asJson(reply.sources),
         ...(reply.webSources ? { webSources: asJson(reply.webSources) } : {}),
         ...(reply.actionCards.length ? { actionCards: asJson(readyCards(reply.actionCards)) } : {}),
-        ...(replyMeta ? { meta: replyMeta } : {}),
+        ...(replyMeta ? { meta: asJson(replyMeta) } : {}),
       });
       return { id: thread.id, title: thread.title, assistantMessageId: answer.id };
     });

@@ -332,7 +332,7 @@ describe('AiAssistantService', () => {
     expect(reply.answer).toBe('SS275 코일 가용재고는 12매예요.');
     expect(reply.sources[0]).toEqual({ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' });
     // AI 실행 기록: 부른 도구와 입력·결과 앞부분
-    expect(reply.toolCalls).toEqual([{ name: 'get_inventory', arguments: '{"keyword":"SS275"}', resultPreview: '{"제품":[]}', durationMs: expect.any(Number) }]);
+    expect(reply.toolCalls).toEqual([{ name: 'get_inventory', arguments: '{"keyword":"SS275"}', resultPreview: '{"제품":[]}', durationMs: expect.any(Number), label: '재고 · SS275' }]);
     expect(reply.thinking).toBeNull();
   });
 
@@ -870,6 +870,8 @@ describe('AiAssistantService', () => {
       expect(reply.answer).toBe('다음 쪽에 있어요 [3고로 소식](https://news.example.kr/a) 딴곳');
       expect(reply.webSources).toEqual([{ title: '3고로 소식', url: 'https://news.example.kr/a' }]);
       expect(browser.closed()).toBe(1);
+      // 저장한 대화의 동작 기록에 쓰도록 본 주소(쿼리 없는 호스트 + 경로)를 도구 기록에 담는다 (이슈 #433)
+      expect(reply.toolCalls).toEqual([expect.objectContaining({ name: 'browser_open', url: 'news.example.kr/a' })]);
     });
 
     describe('번호 붙은 화면 사진 (이슈 #427)', () => {

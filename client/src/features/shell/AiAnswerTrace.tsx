@@ -272,12 +272,12 @@ function DetailStep({ step }: { step: AiTimelineStep }) {
         {step.result && webToolDoneText(step.name, step.result.webSources) ? <span className="text-ink-3">· {webToolDoneText(step.name, step.result.webSources)}</span> : null}
       </span>
       <span className="font-mono text-cap break-all text-ink-3">입력 {step.arguments}</span>
-      {step.result ? <pre className={PRE}>{step.result.resultPreview}</pre> : null}
+      {step.result?.resultPreview ? <pre className={PRE}>{step.result.resultPreview}</pre> : null}
     </li>
   );
 }
 
-/** 답 아래: 답을 만들며 거친 생각·조회·중간 메모. 서버에 남지 않고 이 답에만 있다 */
+/** 답 아래: 답을 만들며 거친 생각·조회·중간 메모. 저장한 대화는 생각 글과 도구 동작 기록만 다시 보인다 (이슈 #433) */
 export function AiStepsDetails({ steps }: { steps: readonly AiTimelineStep[] | undefined }) {
   if (!steps || steps.length === 0) return null;
   return (
