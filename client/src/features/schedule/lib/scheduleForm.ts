@@ -11,6 +11,8 @@ export interface ScheduleForm {
   /** HH:mm (서울) */
   start: string;
   end: string;
+  /** Notion 업무 공간에도 넣을지 (이슈 #434). 새 일정은 넣는다 */
+  notionSync: boolean;
 }
 
 export const TITLE_MAX = 100;
@@ -23,12 +25,12 @@ export function seoulIso(date: string, time: string): string {
 
 /** 새 일정: 고른 날 09:00~10:00 */
 export function emptyForm(date: string): ScheduleForm {
-  return { title: '', description: '', date, start: '09:00', end: '10:00' };
+  return { title: '', description: '', date, start: '09:00', end: '10:00', notionSync: true };
 }
 
 /** 고칠 일정 → 입력값. 직접 등록한 일정은 하루 안에 시작·끝이 있다 */
 export function formOf(event: ScheduleEventView): ScheduleForm {
-  return { title: event.scheduleEventTitle, description: event.scheduleEventDescription ?? '', date: seoulDayOf(event.startAt), start: fmtHM(event.startAt), end: fmtHM(event.endAt) };
+  return { title: event.scheduleEventTitle, description: event.scheduleEventDescription ?? '', date: seoulDayOf(event.startAt), start: fmtHM(event.startAt), end: fmtHM(event.endAt), notionSync: event.notionSync };
 }
 
 // ── 시각 고르기: 30분 단위 목록 (브라우저 기본 시계 입력은 칸이 좁으면 '오전 09:0'처럼 잘리고 고르기 불편하다) ──
@@ -68,7 +70,7 @@ export function formProblem(form: ScheduleForm): string | null {
 }
 
 export function inputOf(form: ScheduleForm): ScheduleEventInput {
-  return { scheduleEventTitle: form.title.trim(), scheduleEventDescription: form.description.trim() || null, startAt: seoulIso(form.date, form.start), endAt: seoulIso(form.date, form.end) };
+  return { scheduleEventTitle: form.title.trim(), scheduleEventDescription: form.description.trim() || null, startAt: seoulIso(form.date, form.start), endAt: seoulIso(form.date, form.end), notionSync: form.notionSync };
 }
 
 /** 내가 직접 등록한 일정만 고친다 (회의록에서 등록한 일정은 회의록 쪽 기록) */

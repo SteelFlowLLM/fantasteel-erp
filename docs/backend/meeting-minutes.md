@@ -113,13 +113,14 @@
 
 - **후보 고치기** `PATCH candidates/:key` (body는 보낸 칸만, 모두 선택): `title`, `description`, `assigneeId`·`dueDate`(TASK), `startAt`·`endAt`·`attendeeIds`(EVENT), `purchase {itemId, requestedTon, desiredReceiptDate}`(PURCHASE), `decision`(`PENDING`·`APPROVED`·`EXCLUDED`). 다른 종류의 칸을 보내면 `COM-004`.
   - 검증은 분석과 같다: 날짜는 회의일부터 1년 안, 시각은 서울 `YYYY-MM-DDTHH:mm`(또는 `+09:00` ISO)이고 `endAt > startAt`, 톤은 0보다 크고 소수 3자리까지, `itemId`는 `RAW_MATERIAL`, 담당자·참석자는 **재직 중인 아무 사원**(회의 참석자가 아니어도 된다, 없으면 `VOC-002`).
+  - EVENT 후보는 `notionSync`(boolean)로 Notion 업무 공간에도 넣을지 정한다(이슈 #434, 기본 넣음, 다른 종류에 보내면 `COM-004`). 자세한 규칙은 [schedule-event.md](schedule-event.md) 'Notion에 넣을지'.
   - 직접 정한 칸은 AI가 붙인 확인 사유(`issues`)를 지운다: 담당자 → 담당자, 마감일 → 마감일·당일 경고, 끝 시각 → 가정 경고(`endAssumed` false), 참석자, 시작 시각, 원료·수량·희망 입고일. 끝 시각을 가정한 일정은 시작만 옮기면 끝도 1시간 뒤로 따라간다.
   - **허가(`APPROVED`)** 는 필수 칸이 찬 후보만: TASK 제목·담당자·마감일 / EVENT 제목·시작·끝(시작보다 뒤)·참석자 1명 이상 / PURCHASE 원료·수량·희망 입고일. 모자라면 `VOC-006`(모자란 칸 이름을 문구에 담는다). 남은 경고(끝 시각 가정, 마감일 당일)는 막지 않는다: 허가가 곧 확인했다는 뜻이다.
   - 저장은 `WHERE status = REVIEW AND updated_at = 읽은 값`인 조건부 UPDATE다. 상태가 바뀌었으면 `VOC-004`, 같은 회의록을 동시에 고쳤으면 `COM-001`. `summary`도 같다(`summary` 칸과 `analysis_result.summary`를 같이 바꾼다).
-- **확정하고 등록** `POST register` → `{ meetingMinutes, taskIds, scheduleEventIds, actionDraftIds, excludedKeys }`. 남은(PENDING) 후보가 있으면 `VOC-007`, 허가 후보가 비었으면 `VOC-006`. 허가 0건이어도 확정은 된다. 아래를 **한 트랜잭션**으로 한다(하나라도 실패하면 전부 취소, 상태는 `REVIEW` 그대로):
+- **확정하고 등록** `POST register` → `{ meetingMinutes, taskIds, scheduleEventIds, actionDraftIds, excludedKeys, notionNotice }`. `notionNotice`는 Notion에 넣기로 한 일정이 있는데 Notion 업무 공간을 지금 쓸 수 없을 때의 이유(이슈 #434), 아니면 null. 남은(PENDING) 후보가 있으면 `VOC-007`, 허가 후보가 비었으면 `VOC-006`. 허가 0건이어도 확정은 된다. 아래를 **한 트랜잭션**으로 한다(하나라도 실패하면 전부 취소, 상태는 `REVIEW` 그대로):
   1. `WHERE status = REVIEW`인 조건부 UPDATE로 `CONFIRMED` + `confirmed_at`. 0건이면 `VOC-004`(더블 클릭 방지). 이어서 담당자·참석자·원료가 아직 유효한지 다시 본다.
   2. 허가 TASK → `task` (`creator` = 작성자, 상태 `OPEN`, `link_path` `/meetings?id=<id>`, `meeting_minutes_id`, 설명 = 후보 설명 + `근거 발언: "…" / "…"`). `TaskService.createInTx`(`POST /tasks`와 같은 경로)가 담당자에게 `TASK_ASSIGNED`(`업무 지정 · 제목`, 본인 제외)를 보낸다.
-  3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`, 알림 링크 `/schedule?week=<일정이 속한 주 월요일>`).
+  3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`, `notion_sync` = 후보의 `notionSync`, 칸이 없던 옛 후보는 true). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`, 알림 링크 `/schedule?week=<일정이 속한 주 월요일>`).
   4. 허가 PURCHASE → `MessageActionService.createFromMeeting`: `action_draft`(`PURCHASE_REQUISITION_CREATE`, `meeting_minutes_id`, `message_id` null, 요청자 = 작성자) + `DRAFT_CREATED`(AI 보조, `action_draft_id`) → `WAITING_APPROVAL`. 작성자에게 구매요청 등록 권한이 없거나 승인권자가 없으면(`PUR-001`) 그 오류로 전체가 취소된다: 이때는 구매요청 후보를 제외하거나 구매 담당자가 확정해야 한다. 이후 기존 초안 흐름(확인 → 구매요청 → 부서장 승인)을 그대로 탄다. 초안 응답에 `meetingMinutes {id, title}`이 추가됐다(메시지 초안이면 null).
   5. `MEETING_MINUTES_CONFIRMED`(행위자 작성자, 대상 `meeting_minutes`, AI 보조, after = `taskIds`·`scheduleEventIds`·`actionDraftIds`·`excludedKeys`).
   6. 참석자 전원(작성자 제외)에게 `MEETING_MINUTES_SHARED`(`회의록 공유 · 제목`).

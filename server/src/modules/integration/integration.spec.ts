@@ -842,6 +842,43 @@ describe('Notion 업무 공간 (이슈 #391)', () => {
     expect(createdIn(ws.scheduleEvents.dataSourceId).filter((p) => p.properties['번호'] === id)).toEqual([]);
   });
 
+  it('일정: Notion에 넣지 않기로 한 일정은 만들지 않고, 상태 조회는 준비됨으로 답한다 (이슈 #434)', async () => {
+    const ws = await workspaceSettings();
+    const status = await call<{ ready: boolean; reason: string | null }>('GET', '/schedule-events/notion-status', purchaseCookie);
+    expect(status.body.data).toMatchObject({ ready: true, reason: null });
+    const start = new Date(Date.now() + 3 * DAY);
+    fake.calls = [];
+    const created = await call<{ id: number; notionSync: boolean; notionPageUrl: string | null }>('POST', '/schedule-events', purchaseCookie, {
+      scheduleEventTitle: '개인 병원 예약',
+      scheduleEventDescription: null,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + 3_600_000).toISOString(),
+      notionSync: false,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ notionSync: false, notionPageUrl: null });
+    const id = created.body.data.id;
+    scheduleEventIds.push(id);
+    await sync();
+    expect(createdIn(ws.scheduleEvents.dataSourceId).filter((p) => p.properties['번호'] === id)).toEqual([]);
+    expect((await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } })).notionPageId).toBeNull();
+
+    // 다시 켜면 다음 반영 때 만들고, 내 일정에 Notion 주소가 보인다
+    const patched = await call('PATCH', `/schedule-events/${id}`, purchaseCookie, {
+      scheduleEventTitle: '개인 병원 예약',
+      scheduleEventDescription: null,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + 3_600_000).toISOString(),
+      notionSync: true,
+    });
+    expect(patched.status).toBe(200);
+    await sync();
+    expect(createdIn(ws.scheduleEvents.dataSourceId).filter((p) => p.properties['번호'] === id)).toHaveLength(1);
+    const day = new Date(start.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
+    const mine = await call<{ id: number; notionPageUrl: string | null }[]>('GET', `/schedule-events?from=${day}&to=${day}`, purchaseCookie);
+    expect(mine.body.data.find((e) => e.id === id)?.notionPageUrl).toMatch(/^https:\/\/www\.notion\.so\/[0-9a-f]{32}$/);
+  });
+
   it('업무: 완료하면(조건부 updateMany) 같은 페이지의 상태를 고친다', async () => {
     const ws = await workspaceSettings();
     const id = await createTask('견적서 보내기');

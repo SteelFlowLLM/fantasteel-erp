@@ -821,6 +821,7 @@ Table schedule_event {
   notion_page_id varchar [note: 'Notion 일정 데이터베이스에 만든 페이지 id (2026-10-19, 이슈 #391). ERP → Notion 한 방향']
   notion_synced_at timestamptz [note: 'Notion에 마지막으로 반영한 행의 updated_at. 비었거나 updated_at보다 앞이면 다시 반영한다']
   notion_calendar_event_id varchar [note: 'Notion 캘린더에 만든 일정 id (이슈 #391 2단계)']
+  notion_sync boolean [not null, default: true, note: 'Notion 업무 공간에 반영할지 (2026-10-21, 이슈 #434). 등록할 때 일정마다 고른다. 끄면 반영하지 않고, 이미 만든 Notion 페이지는 두고 더 고치지 않는다']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
 

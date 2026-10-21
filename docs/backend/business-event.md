@@ -75,6 +75,8 @@ await this.businessEventRecorder.record(tx, {
 | PURCHASE_REQUISITION_CREATED·APPROVED·REJECTED, PURCHASE_ORDER_CREATED, GOODS_RECEIPT_CONFIRMED | purchasing | 각 테이블 | 계획이 수주에 연결되면 | 입고 원료 LOT |
 | SHIPMENT_REQUEST_CREATED·CANCELLED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED | shipment | 각 테이블 | ● | 출고 LOT |
 | DRAFT_CREATED·CONFIRMED·REJECTED·EXECUTED | message-action | `action_draft` | | |
+| MEETING_MINUTES_CONFIRMED (문서 밖) | meeting-minutes | `meeting_minutes` | | |
+| SCHEDULE_EVENT_CREATED (문서 밖, 이슈 #434) | ai-assistant (일정 실행 카드) | `schedule_event` | | |
 
 자동 예약은 RESERVATION_CREATED + SYSTEM, 불합격 판정은 INSPECTION_REGISTERED의 판정 결과로 구분한다([06]).
 

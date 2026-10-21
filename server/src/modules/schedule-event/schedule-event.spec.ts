@@ -171,6 +171,26 @@ describe('내 일정 직접 등록·수정 (POST·PATCH /schedule-events, 2026-1
     expect([attendee.status, attendee.body.error?.code]).toEqual([403, 'COM-002']);
   });
 
+  it('Notion에 넣을지 정하지 않으면 넣는 일정이고, Notion이 연결되지 않았으면 상태 조회가 이유를 알린다 (이슈 #434)', async () => {
+    const res = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, input('Notion 기본값'));
+    created.push(res.body.data.id);
+    expect(res.body.data).toMatchObject({ notionSync: true, notionPageUrl: null });
+    const off = await send<ScheduleEventView>('PATCH', `/schedule-events/${res.body.data.id}`, salesCookie, { ...input('Notion 기본값'), notionSync: false });
+    expect(off.body.data.notionSync).toBe(false);
+    // 수정에서 보내지 않으면 그대로 둔다
+    const kept = await send<ScheduleEventView>('PATCH', `/schedule-events/${res.body.data.id}`, salesCookie, input('Notion 기본값 (고침)'));
+    expect(kept.body.data.notionSync).toBe(false);
+    const bad = await send<unknown>('POST', '/schedule-events', salesCookie, { ...input('잘못된 값'), notionSync: 'yes' });
+    expect(bad.status).toBe(400);
+
+    const notion = await prisma.integrationConnection.findFirst({ where: { providerKey: 'notion' }, select: { oauthTokens: true } });
+    if (notion?.oauthTokens) return;
+    const status = await get<{ ready: boolean; reason: string | null }>('/schedule-events/notion-status', outsiderCookie);
+    expect(status.status).toBe(200);
+    expect(status.body.data.ready).toBe(false);
+    expect(status.body.data.reason).toContain('Notion');
+  });
+
   it('회의록에서 등록한 일정은 등록자라도 여기서 고칠 수 없다 (COM-004 409)', async () => {
     const minutes = await prisma.meetingMinutes.findFirst({ select: { id: true } });
     if (!minutes) return;

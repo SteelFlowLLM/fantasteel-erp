@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
-import type { AuthUser, ScheduleEventView } from '@fantasteel/shared';
+import type { AuthUser, ScheduleEventView, ScheduleNotionStatus } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { ListScheduleEventsQuery, ScheduleEventInputDto } from './dto/schedule-event.dto';
 import { ScheduleEventService } from './schedule-event.service';
@@ -12,6 +12,12 @@ export class ScheduleEventController {
   @Get('schedule-events')
   list(@CurrentUser() user: AuthUser, @Query() query: ListScheduleEventsQuery): Promise<ScheduleEventView[]> {
     return this.service.listMine(user, query);
+  }
+
+  /** 일정을 Notion에 넣을 수 있는지 (이슈 #434). 일정 등록 창·회의록 일정 후보·철강맨AI 일정 카드가 본다 */
+  @Get('schedule-events/notion-status')
+  notionStatus(): Promise<ScheduleNotionStatus> {
+    return this.service.notionStatus();
   }
 
   @Post('schedule-events')

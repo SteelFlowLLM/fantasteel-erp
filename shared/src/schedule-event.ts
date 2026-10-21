@@ -8,6 +8,8 @@ export interface ScheduleEventInput {
   /** ISO 8601. endAt은 startAt보다 뒤 */
   startAt: string;
   endAt: string;
+  /** Notion 업무 공간에도 넣을지 (이슈 #434). 보내지 않으면 등록은 넣고, 수정은 그대로 둔다 */
+  notionSync?: boolean;
 }
 export interface ScheduleEventAttendeeView {
   employeeId: number;
@@ -25,4 +27,18 @@ export interface ScheduleEventView {
   meetingMinutes: { id: number; title: string } | null;
   attendees: ScheduleEventAttendeeView[];
   creator: { id: number; name: string };
+  /** Notion 업무 공간에 넣는 일정인지 (이슈 #434) */
+  notionSync: boolean;
+  /** Notion 일정 데이터베이스에 만든 페이지. 아직 올라가지 않았으면 null */
+  notionPageUrl: string | null;
+}
+
+/** GET /schedule-events/notion-status. 일정을 Notion에 넣을 수 있는지 (사원 누구나 본다, 이슈 #434) */
+export interface ScheduleNotionStatus {
+  /** Notion이 연결돼 있고 업무 공간(일정 데이터베이스)이 준비됨 */
+  ready: boolean;
+  /** 준비되지 않은 이유. ready면 null */
+  reason: string | null;
+  /** 관리자가 고른 Notion 캘린더 이름. 고르지 않았으면 null (일정 데이터베이스에만 올라간다) */
+  calendarName: string | null;
 }

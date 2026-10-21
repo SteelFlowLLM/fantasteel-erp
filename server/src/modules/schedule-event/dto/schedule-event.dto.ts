@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsISO8601, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsISO8601, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 import type { ScheduleEventInput } from '@fantasteel/shared';
 
 const DATE_MESSAGE = '날짜는 YYYY-MM-DD로 입력해 주세요';
@@ -37,4 +37,8 @@ export class ScheduleEventInputDto implements ScheduleEventInput {
 
   @IsISO8601({ strict: true }, { message: TIME_MESSAGE })
   endAt!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  notionSync?: boolean;
 }

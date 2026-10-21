@@ -45,6 +45,7 @@ export const BUSINESS_EVENT_TYPE = {
   DRAFT_REJECTED: 'DRAFT_REJECTED',
   DRAFT_EXECUTED: 'DRAFT_EXECUTED',
   MEETING_MINUTES_CONFIRMED: 'MEETING_MINUTES_CONFIRMED',
+  SCHEDULE_EVENT_CREATED: 'SCHEDULE_EVENT_CREATED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -80,9 +81,10 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   DRAFT_REJECTED: '초안 반려',
   DRAFT_EXECUTED: '초안 실행(ERP 반영)',
   MEETING_MINUTES_CONFIRMED: '회의록 확정',
+  SCHEDULE_EVENT_CREATED: '일정 등록',
 };
 
-export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록'] as const;
+export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록', '일정'] as const;
 export type BusinessEventArea = (typeof BUSINESS_EVENT_AREAS)[number];
 export const BUSINESS_EVENT_AREA: Record<BusinessEventType, BusinessEventArea> = {
   SALES_ORDER_CREATED: '수주',
@@ -117,6 +119,7 @@ export const BUSINESS_EVENT_AREA: Record<BusinessEventType, BusinessEventArea> =
   DRAFT_REJECTED: '초안',
   DRAFT_EXECUTED: '초안',
   MEETING_MINUTES_CONFIRMED: '회의록',
+  SCHEDULE_EVENT_CREATED: '일정',
 };
 
 /**

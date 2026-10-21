@@ -40,7 +40,12 @@ export function actionCardTools(cards: AiActionCardService, ops: AiOpsCardServic
             dueDate: { type: 'string', description: 'TASK 마감일 YYYY-MM-DD. 오늘 날짜를 기준으로 풀고, 모르면 생략' },
             startAt: { type: 'string', description: 'EVENT 시작 시각 YYYY-MM-DDTHH:mm (서울). 모르면 생략' },
             endAt: { type: 'string', description: 'EVENT 끝 시각 YYYY-MM-DDTHH:mm. 말이 없으면 생략' },
-            attendeeNames: { type: 'array', items: { type: 'string' }, description: 'EVENT 참석자 이름들. 사용자 본인만이면 생략' },
+            attendeeNames: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'EVENT 참석자 이름들. 사용자 본인도 참석하면 "나"를 넣는다 (예: "김도윤·조은서도" → ["나", "김도윤", "조은서"]). 사용자 본인만이면 생략',
+            },
+            notionSync: { type: 'boolean', description: 'EVENT를 회사 Notion 캘린더에도 넣을지. 사용자가 Notion에는 넣지 말라고 했을 때만 false, 아니면 생략' },
             itemName: { type: 'string', description: 'PURCHASE 원료 이름 또는 코드 (예: 철광석, ORE01)' },
             quantityTon: { type: 'number', description: 'PURCHASE 수량(톤). 모르면 생략' },
             desiredReceiptDate: { type: 'string', description: 'PURCHASE 희망 입고일 YYYY-MM-DD. 모르면 생략' },

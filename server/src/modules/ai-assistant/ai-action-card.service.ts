@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { missingFieldsOf, NOTIFICATION_TYPE, type AiWorkCard, type AiActionCardExecuteResult, type AuthUser, type MeetingCandidate } from '@fantasteel/shared';
+import { BUSINESS_EVENT_TYPE, missingFieldsOf, notionSyncOf, NOTIFICATION_TYPE, type AiWorkCard, type AiActionCardExecuteResult, type AuthUser, type MeetingCandidate } from '@fantasteel/shared';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
@@ -50,6 +51,7 @@ export class AiActionCardService {
     private readonly notifications: NotificationService,
     private readonly messageActions: MessageActionService,
     private readonly notionWorkspace: NotionWorkspaceService,
+    private readonly businessEventRecorder: BusinessEventRecorder,
   ) {}
 
   /** 모델이 넘긴 인자를 카드로 만든다. 못 맞춘 칸은 비워 두고 확인 사유(issues)를 붙인다 */
@@ -94,6 +96,8 @@ export class AiActionCardService {
         const notFound = matched.filter((m) => m.id === null).map((m) => m.name.trim());
         if (notFound.length > 0) card.issues.push(ISSUE.attendeesNotFound(notFound));
       }
+      // 기본은 넣는다(회의록 후보와 같다). Notion이 아직 준비되지 않았으면 준비된 뒤 올라가고, 사용자가 카드에서 끌 수 있다
+      card.notionSync = args.notionSync !== false;
       card.startAt = normalizeDateTime(optionalString(args, 'startAt', 25), today);
       if (card.startAt === null) {
         card.issues.push(ISSUE.eventStart);
@@ -145,6 +149,10 @@ export class AiActionCardService {
     });
     // 업무·일정이면 Notion 업무 공간(이슈 #391) 반영을 커밋 뒤에 깨운다
     if (registered.type !== 'action_draft') this.notionWorkspace.kick();
+    if (registered.type === 'schedule_event' && notionSyncOf(card)) {
+      const status = await this.notionWorkspace.scheduleStatus();
+      if (!status.ready) return { kind, registered: { ...registered, note: `${status.reason} 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요` } };
+    }
     return { kind, registered };
   }
 
@@ -162,9 +170,17 @@ export class AiActionCardService {
     if (card.kind === 'EVENT' && card.startAt !== null && card.endAt !== null) {
       const event = await this.repository.createScheduleEvent(
         tx,
-        { scheduleEventTitle: card.title, scheduleEventDescription: card.description, startAt: new Date(card.startAt), endAt: new Date(card.endAt), creatorId: user.employeeId },
+        { scheduleEventTitle: card.title, scheduleEventDescription: card.description, startAt: new Date(card.startAt), endAt: new Date(card.endAt), creatorId: user.employeeId, notionSync: notionSyncOf(card) },
         card.attendeeIds,
       );
+      // 회의록 확정은 MEETING_MINUTES_CONFIRMED에 일정 id를 담는다. 카드로 바로 만든 일정은 따로 남긴다 (이슈 #434)
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.SCHEDULE_EVENT_CREATED,
+        actor: user,
+        target: { table: 'schedule_event', id: event.id },
+        after: { scheduleEventTitle: card.title, startAt: card.startAt, endAt: card.endAt, attendeeIds: card.attendeeIds, notionSync: notionSyncOf(card) },
+        isAiAssisted: true,
+      });
       await this.notifications.notifyEmployees(
         tx,
         card.attendeeIds.filter((employeeId) => employeeId !== user.employeeId),

@@ -70,10 +70,13 @@ export class NotionSyncRepository {
   // ── 일정 ──
 
   private scheduleEventWhere(tx: Tx, since: Date): Prisma.ScheduleEventWhereInput {
-    return { AND: [dirtyScheduleEvent(tx), { OR: [{ notionPageId: { not: null } }, { endAt: { gte: since } }] }] };
+    return { AND: [{ notionSync: true }, dirtyScheduleEvent(tx), { OR: [{ notionPageId: { not: null } }, { endAt: { gte: since } }] }] };
   }
 
-  /** 반영할 일정. 아직 페이지가 없는 일정은 since 뒤에 끝나는 것만 (지난 일정을 모두 옮기지 않는다) */
+  /**
+   * 반영할 일정. Notion에 넣기로 한 일정만(이슈 #434), 아직 페이지가 없는 일정은 since 뒤에 끝나는 것만 (지난 일정을 모두 옮기지 않는다).
+   * 넣지 않기로 바꾼 일정의 Notion 페이지·캘린더 일정은 지우지 않고 더 고치지 않는다
+   */
   findDirtyScheduleEvents(tx: Tx, since: Date, skipIds: number[], take: number) {
     return tx.scheduleEvent.findMany({ where: { AND: [this.scheduleEventWhere(tx, since), { id: { notIn: skipIds } }] }, select: scheduleEventSelect, orderBy: { id: 'asc' }, take });
   }
