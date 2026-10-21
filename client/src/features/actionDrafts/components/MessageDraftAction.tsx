@@ -23,6 +23,7 @@ function MessageDraftAction({ actionType, icon, message, room, closeMenu }: Mess
   const me = useMe();
   const guide = ACTION_TYPE_GUIDE[actionType];
   const typeLabel = guide?.label ?? actionType;
+  const menuName = guide?.menuName ?? `${typeLabel} 초안`;
   const drafts = useRoomActionDrafts(room.id);
   const create = useAction(actionDraftApi.createFromMessage, {
     success: (result) => draftCreatedNotice(result, me.employeeId, typeLabel),
@@ -47,7 +48,7 @@ function MessageDraftAction({ actionType, icon, message, room, closeMenu }: Mess
           router.push(`/action-drafts/${existing.id}`);
         }}
       >
-        {typeLabel} 초안 보기 #{existing.id}
+        {menuName} 보기 #{existing.id}
       </MessageActionItem>
     );
   }
@@ -62,7 +63,7 @@ function MessageDraftAction({ actionType, icon, message, room, closeMenu }: Mess
         create.mutate({ messageId: message.id, actionType: actionType === ACTION_TYPE.PURCHASE_REQUISITION_CREATE ? undefined : actionType });
       }}
     >
-      {create.isPending ? 'AI가 메시지를 읽는 중…' : (guide?.menuLabel ?? `${typeLabel} 초안 만들기`)}
+      {create.isPending ? 'AI가 메시지를 읽는 중…' : `${menuName} 만들기`}
     </MessageActionItem>
   );
 }

@@ -21,8 +21,8 @@ export interface ActionTypeGuide {
   label: string;
   /** 확정 주체가 가져야 할 사용(USE) 권한 (업무 프로세스 12.3) */
   permission: Permission;
-  /** 메시지 메뉴 문구 */
-  menuLabel: string;
+  /** 메시지 메뉴에서 이 유형 초안을 부르는 이름. 만들기·보기 메뉴가 같은 이름을 써야 같은 유형으로 읽힌다 (#519) */
+  menuName: string;
   /** 확정 버튼 문구 */
   confirmLabel: string;
   /** 확정하면 생기는 일 (오른쪽 안내 카드) */
@@ -45,7 +45,7 @@ export const ACTION_TYPE_GUIDE: Partial<Record<ActionType, ActionTypeGuide>> = {
     actionType: ACTION_TYPE.PURCHASE_REQUISITION_CREATE,
     label: ACTION_TYPE_LABEL.PURCHASE_REQUISITION_CREATE,
     permission: PERMISSION.PURCHASE_REQUISITION_CREATE,
-    menuLabel: '구매요청 초안 만들기',
+    menuName: '구매요청 초안',
     confirmLabel: '확정하고 구매요청 만들기',
     confirmGuide: '입력한 값으로 구매요청이 만들어지고 부서장 승인을 기다려요',
     // 요청자는 입력 칸이 아니라 메시지 작성자다 (BP-ACT-01)
@@ -55,7 +55,7 @@ export const ACTION_TYPE_GUIDE: Partial<Record<ActionType, ActionTypeGuide>> = {
     actionType: ACTION_TYPE.SALES_ORDER_CREATE,
     label: ACTION_TYPE_LABEL.SALES_ORDER_CREATE,
     permission: PERMISSION.SALES_ORDER_CREATE,
-    menuLabel: '수주 등록 초안 만들기',
+    menuName: '수주 등록 초안',
     confirmLabel: '확정하고 수주 등록',
     confirmGuide: '수주가 등록되고 합격 재고를 먼저 예약해요. 모자란 매수만 생산계획이 생겨요',
     schemaFieldLabels: ['고객사', '품목(규격·매수·납기)'],
@@ -64,7 +64,7 @@ export const ACTION_TYPE_GUIDE: Partial<Record<ActionType, ActionTypeGuide>> = {
     actionType: ACTION_TYPE.SHIPMENT_REQUEST_CREATE,
     label: ACTION_TYPE_LABEL.SHIPMENT_REQUEST_CREATE,
     permission: PERMISSION.SHIPMENT_REQUEST_MANAGE,
-    menuLabel: '출하요청 초안 만들기',
+    menuName: '출하요청 초안',
     confirmLabel: '확정하고 출하요청 만들기',
     confirmGuide: '배정 대기 출하요청이 생겨요. 같은 고객사의 수주 품목만 묶어요',
     schemaFieldLabels: ['고객사', '출하 예정일(선택)', '품목(수주 품목·매수)'],
@@ -73,7 +73,7 @@ export const ACTION_TYPE_GUIDE: Partial<Record<ActionType, ActionTypeGuide>> = {
     actionType: ACTION_TYPE.ALLOCATION_CONFIRM,
     label: ACTION_TYPE_LABEL.ALLOCATION_CONFIRM,
     permission: PERMISSION.SHIPMENT_REQUEST_MANAGE,
-    menuLabel: '배정 확정 초안 만들기',
+    menuName: '배정 확정 초안',
     confirmLabel: '확정하고 배정',
     confirmGuide: '추천한 LOT이 출하요청 품목에 배정 확정돼요. 배정할 때 LOT을 다시 검사해요',
     schemaFieldLabels: ['출하요청 품목', '배정 LOT(시스템 추천)'],
@@ -82,7 +82,7 @@ export const ACTION_TYPE_GUIDE: Partial<Record<ActionType, ActionTypeGuide>> = {
     actionType: ACTION_TYPE.REPRODUCTION_PLAN_CREATE,
     label: ACTION_TYPE_LABEL.REPRODUCTION_PLAN_CREATE,
     permission: PERMISSION.PRODUCTION_PLAN_CONFIRM,
-    menuLabel: '재생산 계획 초안 만들기',
+    menuName: '재생산 계획 초안',
     confirmLabel: '확정하고 재생산 계획 만들기',
     confirmGuide: '여재를 먼저 예약하고 그래도 모자란 매수만 재생산 계획을 만들어요. 매수는 실행 때 다시 계산해요',
     schemaFieldLabels: ['수주 품목'],
