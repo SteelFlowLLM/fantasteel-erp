@@ -129,12 +129,6 @@ export function safeExternalUrl(value: string | null): string | null {
   }
 }
 
-/** 화면에 보일 연결 대상 이름 */
-export const INTEGRATION_PROVIDER_LABEL: Record<IntegrationProviderKey, string> = {
-  [INTEGRATION_PROVIDER.NOTION]: 'Notion',
-  [INTEGRATION_PROVIDER.GOOGLE_DRIVE]: 'Google Drive',
-};
-
 /** 연결 허용이 끝나고 돌아왔을 때 띄울 안내. 연결 대상 이름에 받침이 달라 조사를 대상마다 적는다 */
 export function integrationCallbackToast(notice: IntegrationCallbackNotice): { tone: 'ok' | 'error'; text: string } {
   if (notice.result === 'connected') {

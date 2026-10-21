@@ -34,7 +34,7 @@ export class ShipmentController {
 
   /** API-227 출하요청 목록 */
   @Get('shipment-requests')
-  list(@CurrentUser() user: AuthUser, @Query() query: ListShipmentRequestsQuery): Promise<PageResult<ShipmentRequestSummary>> {
+  list(@CurrentUser() user: AuthUser, @Query() query: ListShipmentRequestsQuery): Promise<PageResult<ShipmentRequestSummary | ShipmentRequestDetail>> {
     return this.service.list(user, query);
   }
 

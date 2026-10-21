@@ -1,4 +1,5 @@
 import { PERMISSION, ROLE, type AuthUser, type HotRollingDetail, type PastCaseDraftView, type Permission } from '@fantasteel/shared';
+import { isInAiAssistedRun } from '../../common/business-event/ai-assisted.context';
 import { seoulToday } from '../../common/time/seoul-date';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { PastCaseService } from '../past-case/past-case.service';
@@ -27,6 +28,8 @@ const dto = (over: Partial<ExecuteAiActionCardDto>): ExecuteAiActionCardDto => (
 
 function setup(options: { rollable?: boolean; neededQty?: number; recommended?: number; planStatus?: string; heatCount?: number; draftError?: boolean } = {}) {
   const calls: { name: string; args: unknown[] }[] = [];
+  /** 사례 등록을 부를 때 AI 경유 표시가 켜져 있었는지 (작업 로그 is_ai_assisted) */
+  const aiAssistedFlags: boolean[] = [];
   const record = <T>(name: string, result: T) => async (...args: unknown[]): Promise<T> => {
     calls.push({ name, args });
     return result;
@@ -78,11 +81,15 @@ function setup(options: { rollable?: boolean; neededQty?: number; recommended?: 
       if (options.draftError) throw Object.assign(new Error('불합격 판정된 LOT만 사례로 등록할 수 있어요'), { name: 'AppException' });
       return draft;
     },
-    create: record('pastCreate', { id: 6, caseNo: 'CASE-0006' }),
+    create: async (...args: unknown[]) => {
+      calls.push({ name: 'pastCreate', args });
+      aiAssistedFlags.push(isInAiAssistedRun());
+      return { id: 6, caseNo: 'CASE-0006' };
+    },
   } as unknown as PastCaseService;
   const salesOrders = { create: record('salesCreate', { salesOrderId: 41, salesOrderNo: 'SO-261016-001', items: [] }) } as unknown as SalesOrderService;
   const prisma = {} as PrismaService;
-  return { service: new AiOpsCardService(prisma, repository, salesOrders, hotRolling, production, pastCases), calls };
+  return { service: new AiOpsCardService(prisma, repository, salesOrders, hotRolling, production, pastCases), calls, aiAssistedFlags };
 }
 
 describe('수주 등록 카드 제안', () => {
@@ -174,10 +181,12 @@ describe('운영 카드 실행 (같은 API의 권한을 사용자 기준으로 �
   });
 
   it('과거 사례: 사용자가 고친 값으로 등록한다', async () => {
-    const { service, calls } = setup();
+    const { service, calls, aiAssistedFlags } = setup();
     const result = await service.execute(all, dto({ kind: 'PAST_CASE', lotId: 5, caseCategory: 'EQUIPMENT', title: ' 성분 불합격 ', phenomenon: '규소 초과', cause: '용선 규소', occurredDate: '2026-10-10' }));
     expect(result).toEqual({ kind: 'PAST_CASE', registered: { type: 'past_case', id: 6, no: 'CASE-0006' } });
     expect(calls[0].args[1]).toEqual({ caseCategory: 'EQUIPMENT', title: '성분 불합격', phenomenon: '규소 초과', cause: '용선 규소', actionTaken: '', equipmentText: '', occurredDate: '2026-10-10', lotIds: [5] });
     await expect(service.execute(all, dto({ kind: 'PAST_CASE', lotId: 5, title: 'x' }))).rejects.toMatchObject({ code: 'ACT-001' });
+    // 사례 등록 작업 로그(CASE_REGISTERED)가 AI 경유로 남는다 (REQ-AST-010)
+    expect(aiAssistedFlags).toEqual([true]);
   });
 });

@@ -76,6 +76,12 @@ const ton3 = (v: Prisma.Decimal) => v.toFixed(3);
 const label = (p: ProcessType) => PROCESS_TYPE_LABEL[p];
 
 /**
+ * LOT마다 재검증·소진·작업 로그(채번 포함) 쿼리가 돈다. Prisma 기본 제한(5초)은 원격 DB(Supabase 풀러)에서 LOT이 많으면 넘을 수 있어
+ * 수주 등록·취소와 같은 값으로 늘린다 (#478)
+ */
+const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
+
+/**
  * 작업 실적 등록 (REQ-PRD-003, REQ-LOT-001~004, BP-PRD-02, docs/backend/production.md 4장).
  * 작업 시작과 완료를 나눠 기록한다(완료 시각이 비면 작업 중). 완료 때 투입 LOT을 FIFO로 차감하고 산출 LOT·관계를 만든다.
  */
@@ -218,7 +224,7 @@ export class ProductionResultService {
       const started = await this.startInTx(tx, user, { ...dto, startedAt });
       if (completedAt) await this.completeInTx(tx, user, started.id, { ...dto, completedAt });
       return started.id;
-    });
+    }, LONG_TX);
     return this.getResult(id);
   }
 
@@ -226,7 +232,7 @@ export class ProductionResultService {
   async complete(user: AuthUser, resultId: number, dto: CompleteProductionResultDto): Promise<ProductionResultView> {
     await this.prisma.$transaction(async (tx) => {
       await this.completeInTx(tx, user, resultId, { ...dto, completedAt: dto.completedAt ? new Date(dto.completedAt) : new Date() });
-    });
+    }, LONG_TX);
     return this.getResult(resultId);
   }
 
@@ -240,6 +246,8 @@ export class ProductionResultService {
     const ctx = input.productionPlanId === undefined ? null : await this.lockOpenPlan(tx, input.productionPlanId, processType);
     // 계획 잠금 다음(잠금 순서: 계획 → 고로). 같은 고로의 동시 시작이 둘 다 '작업 중 없음'을 보고 두 건을 만들지 않게 한다
     if (ironmaking) await this.repository.lockBlastFurnace(tx, input.blastFurnaceCode ?? '');
+    // 열연은 같은 트랜잭션에서 완료까지 할 수 있다(실적 등록). 슬래브 재고 행을 시작 작업 로그보다 먼저 잠근다 (계획 → 재고 → 작업 로그, #478)
+    if (processType === PROCESS_TYPE.HOT_ROLLING && ctx) await this.inventory.lockInventoriesFirst(tx, [ctx.basis.slabItem.id]);
 
     const open = ironmaking
       ? await this.repository.findOpenResults(tx, { productionPlanId: null, processType, blastFurnaceCode: input.blastFurnaceCode })
@@ -594,7 +602,9 @@ export class ProductionResultService {
     if (!plan) return;
     const status = plan.productionPlanStatus;
     if (status === PRODUCTION_PLAN_STATUS.CANCELLED || status === PRODUCTION_PLAN_STATUS.COMPLETED) return;
-    const [lots, results] = await Promise.all([this.plans.findLotsOfPlans(tx, [productionPlanId]), this.plans.findResultsOfPlan(tx, productionPlanId)]);
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const lots = await this.plans.findLotsOfPlans(tx, [productionPlanId]);
+    const results = await this.plans.findResultsOfPlan(tx, productionPlanId);
     const itemType = plan.item.itemType as ItemType;
     const progress = planProgressOf({ itemId: plan.itemId, itemType, heatCount: plan.heatCount }, lots, results);
     const allHeatsCast = progress.madeHeatQty >= plan.heatCount && progress.castHeatQty >= plan.heatCount;

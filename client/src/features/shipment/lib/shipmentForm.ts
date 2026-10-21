@@ -1,4 +1,5 @@
 // 출하요청 화면 계산 (순수 함수, Vitest). 규칙의 최종 판단은 서버가 다시 한다.
+import { ALLOCATION_REASON_MAX } from '@fantasteel/shared';
 import { ERROR_MESSAGE, PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
 import { calcWeightTon, sumTon } from '@/lib/weight';
 
@@ -84,4 +85,9 @@ export function panelAfterRefresh(panel: AllocationPanel, line: AllocationLineSt
     return line.editable && target?.allocationStatus === 'CONFIRMED' ? panel : { kind: 'closed' };
   }
   return panel;
+}
+
+/** 배정 변경·해제 사유가 서버 상한(shared ALLOCATION_REASON_MAX)을 넘는지. 서버가 앞뒤 공백을 뗀 뒤 길이를 보므로 같게 trim 뒤로 센다 (이슈 #476) */
+export function allocationReasonTooLong(text: string): boolean {
+  return text.trim().length > ALLOCATION_REASON_MAX;
 }

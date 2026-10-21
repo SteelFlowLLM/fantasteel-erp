@@ -5,8 +5,8 @@
 지금 저장소에는 두 가지가 같이 있습니다.
 
 - **새 화면** `client/` — Next.js(App Router) + TypeScript + Tailwind + TanStack Query. 모든 화면이 **실제 서버(`server/`)를 부릅니다**. 화면 재작업 브랜치(`feature/screen-rework`)의 결과물이고, 6개 설계 문서·ERD·공통 코드 정의서를 기준으로 다시 맞췄습니다.
-- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직은 팀원이 채웁니다([docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), [docs/backend/](docs/backend/README.md)).
-- P2(AI)·EX 기능은 화면만 있고 "준비 중"으로 표시됩니다. AI·LLM 호출은 없습니다.
+- **서버** `server/` · **공통코드** `shared/` — NestJS + Prisma 7 + PostgreSQL. 설계 문서와 ERD(`docs/erd/`)를 기준으로 공통 기반·스키마·시드를 세팅했고, 모듈별 업무 로직까지 구현돼 있습니다(실행·규칙은 [docs/SERVER-GUIDE.md](docs/SERVER-GUIDE.md), 모듈별 안내와 정한 값은 [docs/backend/](docs/backend/README.md)).
+- AI 기능(철강맨AI·Message → ERP 초안·AI Factory Agent 상황 설명·회의록 분석·과거 사례 초안)은 관리 > AI 연결에서 정한 LLM 서버(LM Studio 등)를 부릅니다. 연결이 없어도 규칙으로 도는 부분(Agent 감지·알림, 검사 결과 사례 초안 등)은 동작하고, 아직 화면만 있는 영역은 "준비 중"으로 표시됩니다.
 
 ## 화면 실행
 
@@ -48,8 +48,8 @@ npm run build -w @fantasteel/client
 | `components/` | 공용 화면 부품 (Button, Table, Modal, Badge, QueryBoundary, StateView, ComingSoon …) |
 | `api/` | 화면이 데이터를 읽고 쓰는 유일한 길. `<영역>.ts`(화면 모양) → `server/<영역>.ts`(서버 어댑터) → `http.ts`(서버 호출) |
 | `hooks/` | api 함수를 감싼 커스텀 훅 (TanStack Query) |
-| `codes/` | **공통 코드**(공통 코드 정의서의 값·표시명), 업무 프로세스 9.3 오류 코드, 업무 번호·LOT 번호 채번 규칙(`numbering.ts`) |
-| `lib/` | 순수 계산 함수 (이론중량, FIFO, MRP, 검사 판정, 소수 계산 …) |
+| `codes/` | **공통 코드**(공통 코드 정의서의 값·표시명), 업무 프로세스 9.3 오류 코드, 작업 로그 번호·규격 코드 형식(`numbering.ts`). 업무 번호·LOT 번호 채번은 서버가 한다 |
+| `lib/` | 순수 계산·표시 함수 (이론중량, 소수 계산, 히트 편성 미리보기, 적격 판단, 날짜·형식 …). 업무 결정(FIFO·MRP·검사 판정·채번)은 서버가 한다 |
 | `stores/` | Zustand — 로그인 사원·토스트·셸 UI 상태만 |
 | `styles/`, `test/` | 전역 스타일, 테스트 준비 |
 

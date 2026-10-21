@@ -19,7 +19,7 @@ const OPEN_REQUEST_STATUSES: readonly string[] = [SHIPMENT_REQUEST_STATUS.REQUES
 /** 저장된 payload(jsonb)를 배정 확정 초안 값으로 읽는다 */
 export function allocationPayloadOf(raw: unknown): AllocationDraftPayload {
   const p = isRecord(raw) ? raw : {};
-  return { shipmentRequestItemId: idOrNull(p.shipmentRequestItemId), lotIds: idsOf(p.lotIds), ...draftBaseOf(p) };
+  return { shipmentRequestItemId: idOrNull(p.shipmentRequestItemId), lotIds: idsOf(p.lotIds), lotsChosenBy: p.lotsChosenBy === 'PERSON' ? 'PERSON' : 'RECOMMENDATION', ...draftBaseOf(p) };
 }
 
 /** 확정 전에 비어 있거나 배정할 수 없는 칸 (출하요청 품목이 배정 대기·배정 확정 상태여야 하고, 배정할 LOT이 하나 이상) */
@@ -46,7 +46,7 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
   }
 
   empty(sourceText: string | null): AllocationDraftPayload {
-    return { shipmentRequestItemId: null, lotIds: [], sourceText, aiFilledFields: [] };
+    return { shipmentRequestItemId: null, lotIds: [], lotsChosenBy: 'RECOMMENDATION', sourceText, aiFilledFields: [] };
   }
 
   async extractionGuide(tx: Tx): Promise<string> {
@@ -67,7 +67,13 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
   async fromExtraction(tx: Tx, extracted: Record<string, unknown>, sourceText: string | null): Promise<AllocationDraftPayload> {
     const requestItem = await this.requestItemOf(tx, extracted);
     if (!requestItem) return this.empty(sourceText);
-    return { shipmentRequestItemId: requestItem.id, lotIds: await this.inventory.recommendedShipmentLotIds(tx, requestItem.id), sourceText, aiFilledFields: ['shipmentRequestItemId'] };
+    return {
+      shipmentRequestItemId: requestItem.id,
+      lotIds: await this.recommend(tx, requestItem.id, []),
+      lotsChosenBy: 'RECOMMENDATION',
+      sourceText,
+      aiFilledFields: ['shipmentRequestItemId'],
+    };
   }
 
   /** 출하요청 품목을 바꾸면 LOT을 그 품목의 추천으로 다시 채운다. LOT만 보내면 사람이 고른 LOT으로 바꾼다 */
@@ -78,11 +84,13 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
     if (requestItemId !== undefined) {
       if (requestItemId !== null && (await this.repository.findShipmentRequestItems(tx, { id: requestItemId })).length === 0) throw new AppException('COM-003', '출하요청 품목을 찾을 수 없어요');
       next.shipmentRequestItemId = requestItemId;
-      next.lotIds = requestItemId === null ? [] : await this.inventory.recommendedShipmentLotIds(tx, requestItemId);
+      next.lotIds = requestItemId === null ? [] : await this.recommend(tx, requestItemId, current.lotIds);
+      next.lotsChosenBy = 'RECOMMENDATION';
     }
     if (patch.lotIds !== undefined) {
       if (patch.lotIds !== null && (!Array.isArray(patch.lotIds) || idsOf(patch.lotIds).length !== patch.lotIds.length)) throw new AppException('COM-004', '배정할 LOT을 겹치지 않게 골라 주세요');
       next.lotIds = idsOf(patch.lotIds);
+      next.lotsChosenBy = 'PERSON';
     }
     return next;
   }
@@ -92,6 +100,15 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
   }
 
   async assertCanExecute(): Promise<void> {}
+
+  /**
+   * 배정 확정과 같은 규칙으로 LOT을 다시 본다(출고 전 출하요청·미배정 매수·같은 규격·적격·확정 배정 없음).
+   * 다른 초안이 먼저 같은 LOT을 배정했거나 사람이 맞지 않는 LOT을 넣었으면 확정 전에 막아 APPROVED에 갇히지 않게 한다
+   */
+  async assertPayloadExecutable(tx: Tx, payload: AllocationDraftPayload): Promise<void> {
+    if (payload.shipmentRequestItemId === null) return;
+    await this.inventory.assertShipmentAllocatable(tx, payload.shipmentRequestItemId, payload.lotIds);
+  }
 
   async payloadLabels(tx: Tx, payload: AllocationDraftPayload): Promise<Record<string, string>> {
     const labels: Record<string, string> = {};
@@ -104,7 +121,8 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
 
   async confirmReason(tx: Tx, payload: AllocationDraftPayload): Promise<string> {
     const labels = await this.payloadLabels(tx, payload);
-    return `DRAFT_CONFIRMED: 배정 확정 (${labels.shipmentRequestItemId ?? '출하요청 품목'}, LOT ${payload.lotIds.length}개 FIFO 추천)`;
+    const chosen = payload.lotsChosenBy === 'PERSON' ? '사람이 고름' : 'FIFO 추천';
+    return `DRAFT_CONFIRMED: 배정 확정 (${labels.shipmentRequestItemId ?? '출하요청 품목'}, LOT ${payload.lotIds.length}개 ${chosen})`;
   }
 
   async execute(tx: Tx, draft: DraftRow, actor: AuthUser): Promise<ActionDraftResultView> {
@@ -119,6 +137,13 @@ export class AllocationAction implements ActionDefinition<AllocationDraftPayload
 
   resultOf(draft: DraftRow): ActionDraftResultView | null {
     return executedResultOf(draft);
+  }
+
+  /** FIFO 추천. 다른 미처리 메시지 초안이 가진 LOT은 뺀다(이 초안의 지금 LOT은 다시 쓸 수 있다) */
+  private async recommend(tx: Tx, shipmentRequestItemId: number, ownLotIds: readonly number[]): Promise<number[]> {
+    const own = new Set(ownLotIds);
+    const taken = (await this.repository.findOpenDraftPayloads(tx, this.actionType)).flatMap((d) => allocationPayloadOf(d.payload).lotIds).filter((id) => !own.has(id));
+    return this.inventory.recommendedShipmentLotIds(tx, shipmentRequestItemId, taken);
   }
 
   private async findRequestItem(tx: Tx, id: number | null): Promise<ShipmentRequestItemBrief | undefined> {

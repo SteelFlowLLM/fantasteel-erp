@@ -16,6 +16,7 @@ import type { WebSearchClient } from '../ai-assistant/web/web-search.client';
 import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
 import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmFailureKind, type LlmJsonOptions, type LlmJsonSchema, type LlmToolMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { findCompanyKnowledge, ResearchKnowledgeFinder } from './ai-research.knowledge';
 import { AiResearchRunner } from './ai-research.runner';
 import { REVISION_REPORT_RULE, SEED_PLAN_RULE } from './ai-research.prompt';
 import { SEED_SOURCE_SNIPPET } from './ai-research.rules';
@@ -69,6 +70,9 @@ const erpPrompts: string[] = [];
 /** 계획 답의 단계 (null이면 기본 계획). 계획 프롬프트는 planPrompts에 쌓는다 */
 let planSteps: { title: string; query: string }[] | null = null;
 const planPrompts: string[] = [];
+/** 사내 지식 찾기 (이슈 #484). 다른 시험의 질문이 우연히 철강 낱말에 걸려 출처 번호가 바뀌지 않게 기본은 끈다 */
+let knowledgeOn = false;
+const knowledgeFinder = { find: (focus: string) => (knowledgeOn ? findCompanyKnowledge(focus) : []) };
 
 const state = (summary: string, gaps: string[] = []) => ({ summary, gaps, unsupportedClaims: [] });
 
@@ -209,6 +213,8 @@ beforeAll(async () => {
     .useValue(toolbox)
     .overrideProvider(NotionPageService)
     .useValue(notionPageService)
+    .overrideProvider(ResearchKnowledgeFinder)
+    .useValue(knowledgeFinder)
     .compile();
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api/v1');
@@ -262,6 +268,7 @@ beforeEach(async () => {
   erpPrompts.length = 0;
   planSteps = null;
   planPrompts.length = 0;
+  knowledgeOn = false;
 });
 
 describe('심층 조사', () => {
@@ -1539,5 +1546,53 @@ describe('심층 조사 — 우리 ERP 자료 (이슈 #435)', () => {
     } finally {
       await prisma.employee.update({ where: { id: ownerId }, data: { isActive: true } });
     }
+  });
+});
+
+describe('심층 조사 — 사내 지식 (이슈 #484)', () => {
+  it('계획 전에 KS 규격을 사내 지식 출처로 넣어 계획·다음 행동·보고서의 근거 맨 앞에 두고, 보고서 출처에 링크 없이 보인다', async () => {
+    knowledgeOn = true;
+    const run = await planned('SS275와 SM355A 차이');
+    const internal = run.sources.filter((s) => s.url.startsWith('knowledge:'));
+    expect(internal.map((s) => s.url)).toEqual(['knowledge:ks:KS-8', 'knowledge:ks:KS-8-1', 'knowledge:ks:KS-1']);
+    expect(internal[0]).toMatchObject({ id: 1, read: true });
+    expect(run.sourceCount).toBe(0);
+    expect(run.events.map((e) => e.type)).toEqual(['source.added', 'source.added', 'source.added', 'plan.ready']);
+    expect(planPrompts.at(-1)).toContain('[사내 지식]');
+    expect(planPrompts.at(-1)).toContain('| 인장강도 | 270 이상 | 410–550 | 490–630 |');
+
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    // 사내 지식은 이미 읽은 것이라 read로 고를 수 없고, 웹 출처 없이 끝낼 수도 없다
+    turns = [
+      { action: 'read', query: '', sourceId: 1, researchState: state('사내 기준 확인') },
+      { action: 'finish', query: '', sourceId: 0, researchState: state('끝') },
+    ];
+    reportText = '# 비교\nSS275 인장강도는 410–550 N/mm²다 [1]. (사내 기준과 다름: 웹 [4]은 400–510) [4]';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.events.find((e) => e.type === 'step.started')).toMatchObject({ payload: { action: 'search', fallback: true } });
+    expect(turnPrompts[0]).toContain('### 사내 지식 [1] 사내 지식 · KS 규격 8.');
+    expect(turnPrompts[0].indexOf('### 사내 지식 [1]')).toBeLessThan(turnPrompts[0].indexOf('[모은 출처]') === -1 ? Infinity : turnPrompts[0].length);
+    const report = reportCalls.at(-1)?.messages.map((m) => m.content).join('\n') ?? '';
+    expect(report).toContain('### 사내 지식 [1]');
+    expect(report).toContain('사내 기준과 다름');
+    expect(done.report).toContain('- [1] 사내 지식 · KS 규격 8. 강종별 기준값');
+    expect(done.report).not.toContain('](knowledge:');
+  });
+
+  it('계획을 복사한 다시 조사는 시작할 때 사내 지식을 한 번 찾고, 같은 것은 다시 넣지 않는다', async () => {
+    const source = await planned('SM355A 샤르피 충격 시험 기준');
+    await call('POST', `/ai-research/runs/${source.id}/cancel`, ownerCookie);
+    knowledgeOn = true;
+    const rerun = (await call<AiResearchRunView>('POST', `/ai-research/runs/${source.id}/rerun`, ownerCookie)).body.data;
+    expect(rerun.sources).toEqual([]);
+    await call('POST', `/ai-research/runs/${rerun.id}/start`, ownerCookie, { revision: 1 });
+    reportText = '보고서 [1]';
+    await runner.processNext();
+    const done = await getRun(rerun.id);
+    const urls = done.sources.filter((s) => s.url.startsWith('knowledge:')).map((s) => s.url);
+    expect(urls[0]).toBe('knowledge:ks:KS-8-1');
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });

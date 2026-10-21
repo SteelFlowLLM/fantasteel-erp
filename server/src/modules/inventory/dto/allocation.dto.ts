@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayNotEmpty, ArrayUnique, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import { ALLOCATION_PURPOSE, type AllocationPurpose } from '@fantasteel/shared';
+import { ALLOCATION_PURPOSE, ALLOCATION_REASON_MAX, type AllocationPurpose } from '@fantasteel/shared';
 
 // 열연 투입 배정(HOT_ROLLING)은 같은 allocation 테이블을 쓰지만, API를 하나로 쓸지 생산 담당과 정한 뒤 연다 (API 목록 비고).
 const OPEN_PURPOSES = [ALLOCATION_PURPOSE.SHIPMENT];
@@ -35,7 +35,7 @@ export class ReleaseAllocationDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(200, { message: '사유는 200자까지 쓸 수 있어요' })
+  @MaxLength(ALLOCATION_REASON_MAX, { message: `사유는 ${ALLOCATION_REASON_MAX}자까지 쓸 수 있어요` })
   reason?: string;
 }
 

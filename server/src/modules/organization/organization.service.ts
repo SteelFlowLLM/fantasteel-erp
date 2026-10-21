@@ -13,6 +13,7 @@ import {
   type RoleView,
 } from '@fantasteel/shared';
 import { hash } from 'bcryptjs';
+import { AuthSessionEvents } from '../../common/auth/auth-sessions';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
@@ -41,6 +42,7 @@ export class OrganizationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: OrganizationRepository,
+    private readonly sessions: AuthSessionEvents,
   ) {}
 
   async listEmployees(query: ListEmployeesQuery): Promise<PageResult<EmployeeView>> {
@@ -90,6 +92,8 @@ export class OrganizationService {
         email: dto.email,
       });
     });
+    // 퇴사 처리한 사원의 메신저 소켓을 끊는다 (HTTP는 요청마다 사원 상태를 확인한다, 이슈 #488)
+    if (dto.isActive === false) this.sessions.revokeEmployee(id);
     return this.employeeView(id);
   }
 

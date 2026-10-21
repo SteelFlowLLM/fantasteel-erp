@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { AuthSessionEvents } from './auth/auth-sessions';
 import { AuthTokenService } from './auth/auth-token.service';
 import { AuthUserRepository } from './auth/auth-user.repository';
 import { AuthUserService } from './auth/auth-user.service';
@@ -18,7 +19,7 @@ import { StorageService } from './storage/storage.service';
       signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN ?? '12h') as `${number}h` },
     }),
   ],
-  providers: [AuthTokenService, AuthUserRepository, AuthUserService, NumberingRepository, NumberingService, BusinessEventRecorder, StorageService],
-  exports: [AuthTokenService, AuthUserService, NumberingService, BusinessEventRecorder, StorageService],
+  providers: [AuthTokenService, AuthSessionEvents, AuthUserRepository, AuthUserService, NumberingRepository, NumberingService, BusinessEventRecorder, StorageService],
+  exports: [AuthTokenService, AuthSessionEvents, AuthUserService, NumberingService, BusinessEventRecorder, StorageService],
 })
 export class CommonModule {}

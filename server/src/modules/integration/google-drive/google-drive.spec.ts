@@ -34,6 +34,8 @@ interface FakeFile {
   modifiedTime: string;
   content: Buffer;
   trashed?: boolean;
+  /** Drive가 색인한 내용 글: files.list의 fullText contains가 이 글에서 찾는다 (없으면 이름만 맞는다) */
+  fullText?: string;
   /** 메타데이터에 크기를 넣지 않는다 (Google 문서처럼) */
   hideSize?: boolean;
   /** 메타데이터 크기를 이 값으로 보인다 */
@@ -122,9 +124,14 @@ function matchesQuery(file: FakeFile, q: string): boolean {
   const parent = /'([^']+)' in parents/.exec(q)?.[1];
   if (parent && !file.parents.includes(parent)) return false;
   if (q.includes('trashed = false') && file.trashed) return false;
-  // 철강맨AI drive_search (이슈 #398 2단계): 이름 검색어
-  const name = /name contains '((?:\\.|[^'\\])*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1');
-  if (name !== undefined && !file.name.includes(name)) return false;
+  // 철강맨AI drive_search (이슈 #398 2단계, 내용 검색 #473): 낱말마다 (name contains 'x' or fullText contains 'x'), 낱말끼리 and(기본)·or(하나라도)
+  const unquote = (value: string) => value.replace(/\\(.)/g, '$1');
+  const terms = [...q.matchAll(/\(name contains '((?:\\.|[^'\\])*)'(?: or fullText contains '((?:\\.|[^'\\])*)')?\)/g)].map((m) => ({ term: unquote(m[1]), content: m[2] !== undefined }));
+  if (terms.length > 0) {
+    const hit = ({ term, content }: { term: string; content: boolean }) => file.name.includes(term) || (content && (file.fullText ?? '').includes(term));
+    const matched = q.includes(') or (name contains') ? terms.some(hit) : terms.every(hit);
+    if (!matched) return false;
+  }
   const audio = q.includes("mimeType contains 'audio/'") && file.mimeType.startsWith('audio/');
   const equals = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
   if (!q.includes('mimeType')) return true;
@@ -793,7 +800,7 @@ describe('POST meeting-minutes/audio/from-drive', () => {
 });
 
 describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
-  const added = ['aiNotesText001', 'aiSheetCsv0002', 'aiReportPdf003', 'aiPdfTooBig004', 'aiPhoneJpg0005', 'aiPhoneHeic006', 'aiPhoneMoved07', 'aiPhoneEvil008', 'aiPhoneOffH009', 'aiSmallPng0010'];
+  const added: string[] = ['aiNotesText001', 'aiSheetCsv0002', 'aiReportPdf003', 'aiPdfTooBig004', 'aiPhoneJpg0005', 'aiPhoneHeic006', 'aiPhoneMoved07', 'aiPhoneEvil008', 'aiPhoneOffH009', 'aiSmallPng0010'];
   let toolbox: AssistantDriveToolbox;
   const run = (name: string, args: unknown) => toolbox.session(async () => true).run({ id: 'c1', name, arguments: JSON.stringify(args) });
 
@@ -827,6 +834,21 @@ describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
     expect(result.webSources.map((s) => s.title)).toEqual(['라인 점검 메모.txt', '점검 일정표', '설비 점검 보고서.pdf', '점검 원본 스캔.pdf']);
     const all = await run('drive_search', {});
     expect(all.content).not.toContain('다른 폴더');
+  });
+
+  it('찾기(이슈 #473): 이름에 없어도 내용에 든 낱말로 찾고, 낱말이 여럿이면 모두 든 파일을 먼저·없으면 하나라도 든 파일을 찾는다', async () => {
+    addFile({ id: 'aiQualityStd011', name: '품질기준서.pdf', mimeType: 'application/pdf', parents: [FOLDER], modifiedTime: '2026-10-01T09:00:00.000Z', content: Buffer.from('x'), fullText: 'SS275 두께 16mm 초과 40mm 이하 항복강도 255 N/mm2 이상' });
+    added.push('aiQualityStd011');
+    // 이름에는 '항복강도'가 없다
+    expect((await run('drive_search', { query: '항복강도' })).webSources.map((s) => s.title)).toEqual(['품질기준서.pdf']);
+    // 낱말이 여럿: 모두 든 파일
+    expect((await run('drive_search', { query: '항복강도 SS275' })).webSources.map((s) => s.title)).toEqual(['품질기준서.pdf']);
+    // 모두 든 파일이 없으면 하나라도 든 파일 (파일에 없는 '인증서'가 섞여도 찾는다)
+    expect((await run('drive_search', { query: '항복강도 인증서' })).webSources.map((s) => s.title)).toEqual(['품질기준서.pdf']);
+    // 아무 낱말도 안 맞으면 없다
+    expect(JSON.parse((await run('drive_search', { query: '없는낱말 다른낱말' })).content).오류).toBe('찾은 파일이 없어요');
+    // 이름으로 파일을 집을 때는 내용 검색을 하지 않는다: 이름이 정확히 같은 파일만
+    expect((await run('drive_read_file', { file: '항복강도' })).content).toContain('drive_search');
   });
 
   it('읽기: 글 파일은 그대로, Google 스프레드시트는 CSV로 내보내, PDF는 글을 뽑아 감싸서 준다', async () => {
@@ -870,10 +892,17 @@ describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
     expect(fake.thumbnails).toEqual(['https://lh3.googleusercontent.com/thumb-aiPhoneEvil008=s1568']);
   });
 
-  it('찾기만 해도 찾은 파일이 답의 출처가 된다', async () => {
+  it('답의 출처는 읽은 파일만이다: 찾기만 한 파일은 도구 기록(webSources)에만 있고 출처가 아니다 (이슈 #473)', async () => {
     const session = toolbox.session(async () => true);
-    await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '메모' }) });
-    expect(session.sources()).toEqual([{ title: '라인 점검 메모.txt', url: 'https://drive.google.com/file/d/aiNotesText001/view' }]);
+    const found = await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '메모' }) });
+    const source = { title: '라인 점검 메모.txt', url: 'https://drive.google.com/file/d/aiNotesText001/view' };
+    // 찾은 파일은 이 도구 호출의 기록(tool_end)에는 나오지만
+    expect(found.webSources).toEqual([source]);
+    // 답의 출처에는 아직 없다
+    expect(session.sources()).toEqual([]);
+    // 읽으면 출처가 된다
+    await session.run({ id: 'c2', name: 'drive_read_file', arguments: JSON.stringify({ file: 'aiNotesText001' }) });
+    expect(session.sources()).toEqual([source]);
   });
 
   it('@로 붙인 파일도 같은 규칙: 폴더 밖이면 질문을 시작하지 않는다(INT-012)', async () => {

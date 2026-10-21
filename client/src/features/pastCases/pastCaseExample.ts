@@ -2,7 +2,7 @@
 // 사례와 검색은 서버(API-267~270)가 준다: 예시 사례 5건(shared PAST_CASE_EXAMPLES, 실제 사례 아님)과 등록 사례(DB past_case).
 // 사례 번호(case_no) 형식은 ERD에서 TBD라 'CASE-NNNN'을 쓴다 (가정값, docs/rework/areas/soon.md).
 import type { PastCaseView } from '@fantasteel/shared';
-import { BUSINESS_EVENT_TYPE, LOT_TYPE_LABEL, PROPOSED_BUSINESS_EVENT_TYPE, formatEventNo, type ActorType, type LotType } from '@/codes';
+import { BUSINESS_EVENT_TYPE, LOT_TYPE_LABEL, formatEventNo, type ActorType, type LotType } from '@/codes';
 import type { ExampleBusinessEventType } from '@/features/agent/lib/businessEventLabel';
 
 /** 같은 구분의 다른 사례 (고른 사례 제외) */
@@ -51,7 +51,7 @@ export const SELECTED_CASE_HISTORY: readonly CaseHistoryEntry[] = [
     key: 'case',
     time: '09-13 09:00',
     actorType: 'USER',
-    businessEventType: PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED,
+    businessEventType: BUSINESS_EVENT_TYPE.CASE_REGISTERED,
     eventNo: formatEventNo('260913', 2),
     head: 'AI 초안을 품질 담당이 확인·저장',
     detail: 'CASE-0005 · 현상·원인·조치 기록',
@@ -74,7 +74,7 @@ export function exampleHistoryOf(item: PastCaseView): readonly CaseHistoryEntry[
       key: 'case',
       time: `${day} 16:00`,
       actorType: 'USER',
-      businessEventType: PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED,
+      businessEventType: BUSINESS_EVENT_TYPE.CASE_REGISTERED,
       eventNo: formatEventNo(ymd, 5),
       head: 'AI 초안을 품질 담당이 확인·저장',
       detail: `${item.caseNo} · 현상·원인·조치 기록`,

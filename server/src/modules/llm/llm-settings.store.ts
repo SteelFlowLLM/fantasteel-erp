@@ -2,11 +2,22 @@ import { Injectable } from '@nestjs/common';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { LLM_DEFAULT_BASE_URL } from '@fantasteel/shared';
+import type { LlmEndpoint } from './llm.client';
 
 export interface LlmSettings {
   baseUrl: string;
   model: string | null;
   apiKey: string | null;
+  /** 관리자가 정한 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다, 이슈 #465). null이면 모름 */
+  visionSupport: boolean | null;
+  reasoningSupport: boolean | null;
+  /** 관리자가 넣은 문맥 길이(토큰). 모델 정보가 없을 때만 쓴다. null이면 모름 */
+  contextLength: number | null;
+}
+
+/** LLM을 부를 때 넘기는 연결 정보. 관리자가 정한 지원 여부도 함께 간다 */
+export function llmEndpointOf(settings: LlmSettings): LlmEndpoint {
+  return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport, contextLength: settings.contextLength };
 }
 
 /**
@@ -23,6 +34,9 @@ export class LlmSettingsStore {
       baseUrl: process.env.LLM_BASE_URL || LLM_DEFAULT_BASE_URL,
       model: process.env.LLM_MODEL || null,
       apiKey: process.env.LLM_API_KEY || null,
+      visionSupport: null,
+      reasoningSupport: null,
+      contextLength: null,
     };
     const raw = await readFile(this.file, 'utf8').catch(() => null);
     if (raw === null) return defaults;
@@ -31,6 +45,9 @@ export class LlmSettingsStore {
       baseUrl: saved.baseUrl ?? defaults.baseUrl,
       model: saved.model === undefined ? defaults.model : saved.model,
       apiKey: saved.apiKey === undefined ? defaults.apiKey : saved.apiKey,
+      visionSupport: typeof saved.visionSupport === 'boolean' ? saved.visionSupport : null,
+      reasoningSupport: typeof saved.reasoningSupport === 'boolean' ? saved.reasoningSupport : null,
+      contextLength: typeof saved.contextLength === 'number' && Number.isInteger(saved.contextLength) && saved.contextLength > 0 ? saved.contextLength : null,
     };
   }
 

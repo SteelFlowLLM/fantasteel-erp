@@ -153,7 +153,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
     <Card petKey="card:purchaseRequisitions.draftForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 입력하고 확정해 주세요' : '초안 내용'}</h2>
-        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} editable={editable} />
+        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} aiExtraction={payload.aiExtraction} editable={editable} />
         <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
           {DRAFT_STATUS_LABEL[status]}
         </Badge>
@@ -279,7 +279,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
       </div>
       <CardFoot className="flex-wrap">
         {editable || retryable ? (
-          rejecting && editable ? (
+          rejecting ? (
             <>
               <Input
                 aria-label="반려 사유"
@@ -317,6 +317,10 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
             </>
           ) : (
             <>
+              {/* 실행에 실패한 초안은 반려해 끝낼 수 있다 (#471 리뷰) */}
+              <Button variant="ghost" icon="x-circle" disabled={pending} onClick={() => setRejecting(true)}>
+                반려
+              </Button>
               <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
               <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
                 구매요청 만들기 다시 실행

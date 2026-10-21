@@ -155,7 +155,7 @@ confirm(draftId, actor):
 | 실행 실패 기록 | 핸들러가 실패하면(예: 부서장 없음 PUR-001) 실행 트랜잭션은 롤백되고, 별도 트랜잭션으로 `execution_error_code`·`execution_attempt_count`를 남긴다. 상태는 APPROVED 그대로다. 성공하면 오류 코드를 비우고 시도 횟수를 하나 올린다 |
 | 다시 실행 | 명세에 없는 `POST action-drafts/:id/execute`: APPROVED 초안을 같은 핸들러로 다시 실행한다(화면의 '다시 실행') |
 | 중복 실행 | 상태 확인 + 읽은 `updatedAt` 조건 갱신 + `purchase_requisition.action_draft_id` unique로 막는다. 요청 고유키 저장소는 쓰지 않는다 |
-| 반려 | `POST action-drafts/:id/reject { rejectReason }`: 요청자만, 확정 전만, 사유 필수(500자). REJECTED·DRAFT_REJECTED(사유 = 반려 사유) |
+| 반려 | `POST action-drafts/:id/reject { rejectReason }`: 요청자만, 확정 전만(2026-10-21부터 실행에 실패한 APPROVED도, 11.7), 사유 필수(500자). REJECTED·DRAFT_REJECTED(사유 = 반려 사유) |
 | 확정 후 부서장 알림 | 구매요청을 만드는 purchasing이 같은 트랜잭션에서 보낸다(구매요청 승인 요청 알림과 같다) |
 
 ## 10. 확장 유형과 AI 추출 (2026-10-15 결정)
@@ -201,7 +201,7 @@ confirm(draftId, actor):
 | --- | --- | --- | --- | --- | --- | --- |
 | SALES_ORDER_CREATE | `sales-order.action.ts` | `customerId`, `items[]`(`itemId`, `orderedQty`, `dueDate`) | 고객사, 품목, 품목 n 규격·매수·납기 | 없음 | `salesOrders.createInTx` (private → 공개) | `sales_order` |
 | SHIPMENT_REQUEST_CREATE | `shipment-request.action.ts` | `customerId`, `shipDate`(선택), `items[]`(`salesOrderItemId`, `requestQty`) | 고객사, 품목, 품목 n 수주 품목·매수 | 출하 가능 매수 초과면 SHP-002 | `shipments.createInTx` (`create`에서 나눔) | `shipment_request` |
-| ALLOCATION_CONFIRM | `allocation.action.ts` | `shipmentRequestItemId`, `lotIds` | 출하요청 품목, 배정 LOT | 없음 (LOT은 실행 때 inventory가 다시 검사) | `inventory.confirmShipmentAllocationsInTx` (`confirmAllocations`에서 나눔) | `shipment_request` |
+| ALLOCATION_CONFIRM | `allocation.action.ts` | `shipmentRequestItemId`, `lotIds` | 출하요청 품목, 배정 LOT | 배정 확정과 같은 LOT 검사 (11.7) | `inventory.confirmShipmentAllocationsInTx` (`confirmAllocations`에서 나눔) | `shipment_request` |
 | REPRODUCTION_PLAN_CREATE | `reproduction-plan.action.ts` | `salesOrderItemId` | 수주 품목 | 추가 계획이 필요 없으면 COM-001 | `production.createReproductionPlanInTx` (이미 공개) | `production_plan`, 여재 예약만으로 채워지면 `sales_order_item` 🟡 |
 
 - 모든 확장 유형 payload에 `sourceText`·`aiFilledFields`가 있다. 확정 주체 `DRAFT_CREATOR`, 권한은 12.3 표(수주 등록 SALES_ORDER_CREATE, 출하·배정 SHIPMENT_REQUEST_MANAGE, 재생산 PRODUCTION_PLAN_CONFIRM).
@@ -249,4 +249,37 @@ confirm(draftId, actor):
 | DR-… 배정 확정 | 출하요청 품목 채움(합격 LOT이 없어 배정 LOT은 미확정) |
 | SO-… 재생산 계획 | 수주 품목 채움 |
 
-- 위 결과는 확인하는 동안만 추출 제한 시간을 180초로 늘려 얻었다. 한 건에 15~80초 걸렸고, 지금 제한 시간(30초)으로는 대부분 시간이 지나 빈 초안이 된다(초안 만들기는 실패하지 않는다). 모델·제한 시간 조정은 따로 정한다 🟡.
+- 위 결과는 확인하는 동안만 추출 제한 시간을 180초로 늘려 얻었다. 한 건에 15~80초 걸렸고, 그때 제한 시간(30초)으로는 대부분 빈 초안이 됐다. 원인과 조정은 11.6.
+
+### 11.6 추출 속도와 제한 시간 (2026-10-21, 이슈 #472)
+
+**원인**: 초안 추출 프로필(`LLM_PROFILE.MESSAGE_EXTRACT`)은 이미 생각 끔(`reasoning: 'off'`)이다. 그런데 생각 설정(`reasoning_effort`)은 LM Studio가 모델 정보로 '받는다'고 알릴 때만 보낸다. Unsloth Studio는 그 정보가 없어 끔이 전달되지 않았고, 모델이 매번 생각한 뒤 답했다.
+
+같은 샘플 6건(11.5 표, 같은 프롬프트·temperature 0)을 생각 설정만 바꿔 쟀다. 모델 서버에 직접 보냈다.
+
+| 설정 | 한 건 시간 | 결과 |
+| --- | --- | --- |
+| 지금(생각 설정을 보내지 않음, 모델이 생각함) | 9.4~38.0초, 배정 확정 1건은 240초 안에 끝나지 않음 | 끝난 5건은 아래와 같음 |
+| `reasoning_effort: "low"` | 6.5~33.6초 | 6건 모두 아래와 같음 |
+| `reasoning_effort: "none"` | 1.8~4.2초 | 6건 모두 아래와 같음 |
+| `enable_thinking: false` | 0.9~2.1초 | 6건 모두 아래와 같음 |
+
+결과(모든 설정 공통): 'A사 … 6t 20매'는 고객사·규격 미확정에 20매·2026-10-30이다. 나머지 5건은 고객사·규격·매수·납기·수주 품목·출하요청 품목·날짜('모레' = 10-23)를 모두 맞게 채웠다. 생각을 꺼도 정확도는 떨어지지 않았다.
+
+**조정**
+- 생각을 끄는 전송은 PR #468(이슈 #465, Unsloth Studio 지원)이 맡는다. Unsloth `/v1/status`로 생각 지원을 알아내고, 끔이면 `reasoning_effort: "none"`과 `enable_thinking: false`를 보낸다. 같은 `llm.client.ts`를 고치므로 이 이슈에서는 고치지 않는다. 프로필은 이미 '끔'이라 바꾸지 않는다. #468이 머지되기 전에는 위 '지금' 시간이 그대로다.
+- 제한 시간: 기본 90초 🟡(가정값). 생각이 켜진 지금 측정값(9~38초)을 덮고, 끈 뒤(1~4초)에는 넉넉하다. env `MESSAGE_EXTRACT_TIMEOUT_SECONDS`(1~600초, 그 밖이면 기본값)로 바꾼다.
+- 빈 초안이 된 까닭을 payload `aiExtraction`에 남긴다: `FILLED` 칸을 채움, `NOTHING_FOUND` 답은 왔지만 맞는 값이 없음, `NO_MODEL` 모델 미설정, `TIMEOUT` 시간 초과, `NOT_JSON` JSON이 아님, `FAILED` 연결·서버 오류. 글이 없는 메시지와 이 이슈 전 초안은 없다(null). 스키마는 바꾸지 않는다(payload jsonb).
+- 화면: 메시지 메뉴에서 만드는 동안 'AI가 메시지를 읽는 중…'을 보이고, 시작할 때 안내를 띄운다(메뉴를 닫아도 다 만들면 초안을 연다). 초안 카드 머리에 빈 초안이 된 까닭('AI 추출 안 됨' + 이유)을 보인다.
+
+### 11.7 #471 리뷰 반영 (2026-10-21, 이슈 #472와 같은 PR)
+
+| 항목 | 바꾼 것 |
+| --- | --- |
+| 배정 확정 전 LOT 검사 | 확정 전에 `inventory.assertShipmentAllocatable`(배정 확정과 같은 규칙: 출고 전 출하요청, 미배정 매수 이내, LOT마다 같은 규격·재고 상태·적격·확정 배정 없음, 잠그지 않음)로 본다. 막히면 확인 대기 그대로다(INV-001~004·COM-003·COM-004) |
+| 같은 LOT 추천 겹침 | FIFO 추천에서 다른 미처리 메시지 초안(배정 확정)이 가진 LOT을 뺀다. '추천 다시 받기'는 이 초안의 지금 LOT을 다시 쓸 수 있다 |
+| 실행 실패 초안 | 확정했지만 실행에 실패한(`execution_error_code` 있음) APPROVED 초안은 확정 주체가 반려할 수 있다(REJECTED·DRAFT_REJECTED). 실패하지 않은 APPROVED는 COM-004. 화면의 '다시 실행' 옆에 '반려' |
+| 실행 경합과 업무 오류 | 동시 실행 경합은 초안 조건부 갱신 실패(전용 예외)와 결과 행 unique 위반(P2002)만으로 가린다. 핸들러의 업무 오류는 COM-001이라도 실패로 기록한다. AppException이 아닌 오류는 COM-999로 시도 기록을 남기고 서버 로그에 남긴다 |
+| 매수 상한 | 초안 매수는 1~1,000,000매 🟡(가정값, DB int4 안). 넘으면 수정 요청은 COM-004, AI 값은 버린다 |
+| 목록 읽기 | 목록·상세 응답 한 번 안에서 고객사·규격 목록을 한 번만 읽는다(유형 정의의 `unresolvedFields`·`payloadLabels`가 나눠 쓰는 기억) |
+| 배정 사유 | payload `lotsChosenBy`(RECOMMENDATION·PERSON). 사람이 LOT을 고치면 DRAFT_CONFIRMED 사유가 'FIFO 추천'이 아니라 '사람이 고름'. 화면도 LOT 옆에 표시 |

@@ -150,8 +150,10 @@ export class InventoryRepository {
   }
 
   /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
-  decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
-    return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
+  /** 열연 배정 매수를 줄인다. 0 아래로 내려가지 않게 조건부로 바꾸고, 바꿨으면 true (ERD에 음수 CHECK가 없다) */
+  async decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number): Promise<boolean> {
+    const { count } = await tx.inventory.updateMany({ where: { itemId, rollingAllocatedQty: { gte: qty } }, data: { rollingAllocatedQty: { decrement: qty } } });
+    return count === 1;
   }
 
   /** 제품 규격(슬래브·코일)과 재고 행 (재고 행이 없으면 0매) */
@@ -313,6 +315,12 @@ export class InventoryRepository {
 
   findAllocation(tx: Tx, id: number) {
     return tx.allocation.findUnique({ where: { id }, include: allocationInclude });
+  }
+
+  /** 확정(CONFIRMED) 배정만 해제한다. 해제했으면 바꾼 행, 그사이 다른 거래가 해제·소진했으면 null (같은 배정을 두 번 해제하지 않게) */
+  async releaseConfirmedAllocation(tx: Tx, id: number) {
+    const { count } = await tx.allocation.updateMany({ where: { id, allocationStatus: ALLOCATION_STATUS.CONFIRMED }, data: { allocationStatus: ALLOCATION_STATUS.RELEASED } });
+    return count === 1 ? tx.allocation.findUniqueOrThrow({ where: { id }, include: allocationInclude }) : null;
   }
 
   updateAllocationStatus(tx: Tx, id: number, allocationStatus: AllocationStatus) {

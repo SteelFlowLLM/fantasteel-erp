@@ -195,6 +195,19 @@ export class ProductionService {
    * 수주 품목 취소 (BP-SO-02): 시작 전 계획은 취소, 진행중 계획은 수주 연결을 풀어 산출물을 여재로 둔다.
    * 두 경우 모두 그 계획의 확정 열연 배정을 해제한다. 완료 계획은 그대로 둔다(합격 제품은 예약 해제로 이미 가용 재고다).
    */
+  /**
+   * 수주 취소가 바꿀 수 있는 이 수주 품목들의 생산계획을 id 순으로 잠그고 그 id를 돌려준다.
+   * 열연 완료·배정과 같은 잠금 순서(계획 → 재고 → 작업 로그)로, 진행 중인 열연이 끝나기를 기다린 뒤 최신 상태로 취소·연결 해제한다 (#478)
+   */
+  async lockPlansOfSalesOrderItems(tx: Tx, salesOrderItemIds: readonly number[]): Promise<number[]> {
+    const planIds: number[] = [];
+    for (const salesOrderItemId of salesOrderItemIds) planIds.push(...(await this.repository.findPlansOfSalesOrderItem(tx, salesOrderItemId)).map((p) => p.id));
+    const sorted = [...new Set(planIds)].sort((a, b) => a - b);
+    for (const id of sorted) await this.repository.lockPlan(tx, id);
+    return sorted;
+  }
+
+  /** 수주 취소: 시작 전 계획은 취소, 진행 중 계획은 수주 연결을 푼다. lockPlansOfSalesOrderItems로 계획을 잠근 뒤 부른다 */
   async detachOrCancelPlansForSalesOrderItem(tx: Tx, input: { salesOrderId: number; salesOrderNo: string; salesOrderItemId: number; actor: Actor }) {
     const cancelledPlanNos: string[] = [];
     const unlinkedPlanNos: string[] = [];
@@ -202,8 +215,10 @@ export class ProductionService {
     for (const plan of await this.repository.findPlansOfSalesOrderItem(tx, input.salesOrderItemId)) {
       const effect = salesOrderCancelEffectOf(plan.productionPlanStatus);
       if (effect === 'CANCEL') {
+        // 읽은 상태(시작 전) 그대로일 때만 취소한다. 그사이 실적이 붙어 진행 중이 됐으면 덮어쓰지 않고 다시 하게 한다
+        const cancelled = await this.repository.updatePlanIfStatus(tx, plan.id, plan.productionPlanStatus, { productionPlanStatus: PRODUCTION_PLAN_STATUS.CANCELLED });
+        if (!cancelled) throw new AppException('COM-001', `생산계획 ${plan.productionPlanNo}의 상태가 그사이 바뀌었어요. 다시 취소해 주세요`);
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
-        const cancelled = await this.repository.updatePlan(tx, plan.id, { productionPlanStatus: PRODUCTION_PLAN_STATUS.CANCELLED });
         await this.businessEventRecorder.record(tx, {
           type: BUSINESS_EVENT_TYPE.PRODUCTION_PLAN_CANCELLED,
           actor: input.actor,
@@ -215,8 +230,9 @@ export class ProductionService {
         });
         cancelledPlanNos.push(plan.productionPlanNo);
       } else if (effect === 'UNLINK') {
+        const unlinked = await this.repository.updatePlanIfStatus(tx, plan.id, plan.productionPlanStatus, { salesOrderItemId: null });
+        if (!unlinked) throw new AppException('COM-001', `생산계획 ${plan.productionPlanNo}의 상태가 그사이 바뀌었어요. 다시 취소해 주세요`);
         await this.inventory.releaseHotRollingAllocationsOfPlan(tx, { productionPlanId: plan.id, salesOrderId: input.salesOrderId, actor: input.actor, reason: allocationReason });
-        const unlinked = await this.repository.updatePlan(tx, plan.id, { salesOrderItemId: null });
         await this.businessEventRecorder.record(tx, {
           type: BUSINESS_EVENT_TYPE.SURPLUS_CONVERTED,
           actor: input.actor,

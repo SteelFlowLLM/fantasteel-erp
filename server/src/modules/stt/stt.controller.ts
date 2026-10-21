@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Post, Put, UploadedFile, UseIntercepto
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SteelmanWakeSettingsView, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
-import { TestSttConnectionDto, UpdateSteelmanWakeSettingsDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
+import { TestSttConnectionDto, UpdateSteelmanWakeSettingsDto, UpdateSttSettingsDto, WakeClipDto } from './dto/stt-settings.dto';
 import { SttLocalServerService } from './stt-local-server.service';
 import { SttService, type UploadedAudio } from './stt.service';
 
@@ -66,9 +66,10 @@ export class SttController {
    */
   @Post('stt/wake-clip')
   @HttpCode(200)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: STT_WAKE_CLIP_LIMITS.maxBytes, files: 1 } }))
-  transcribeWakeClip(@CurrentUser() user: AuthUser, @UploadedFile() file: UploadedAudio | undefined): Promise<SttWakeClipView> {
-    return this.service.transcribeWakeClip(user, file);
+  // 가장 큰 종류(명령 덩어리)에 맞춰 받고, 종류별 크기·길이는 service가 본다 (이슈 #494)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: STT_WAKE_CLIP_LIMITS.commandMaxBytes, files: 1 } }))
+  transcribeWakeClip(@CurrentUser() user: AuthUser, @UploadedFile() file: UploadedAudio | undefined, @Body() dto: WakeClipDto): Promise<SttWakeClipView> {
+    return this.service.transcribeWakeClip(user, file, dto.mode ?? 'wake');
   }
 
   /** ERP 서버와 같은 Mac의 음성 서버(LaunchAgent) 상태 (이슈 #450). macOS가 아니면 supported: false */

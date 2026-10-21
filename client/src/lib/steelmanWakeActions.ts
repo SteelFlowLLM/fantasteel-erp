@@ -5,7 +5,22 @@ import { errorCodeOf } from '@/api/http';
 import { sttApi } from '@/api/stt';
 import { controlAiAgent, sendAiAgentNote, stopAiAssistant } from '@/hooks/useAiAssistant';
 import { CARD_RESULT, executeInputOf } from '@/lib/aiActionCard';
-import { isLikelyHallucination, matchWakeWord, parseVoiceCommand, pickVoiceApprovalCard, resolveConfirmation, resolveVoiceApproval, VOICE_APPROVAL_MS, WAKE_FOLLOW_UP_MS, WAKE_REPLIES, type VoiceCommand } from '@/lib/steelmanWake';
+import {
+  COMMAND_CONTINUE_MS,
+  compactSpeech,
+  isConversationEnd,
+  isLikelyHallucination,
+  matchWakeWord,
+  parseVoiceCommand,
+  pickVoiceApprovalCard,
+  resolveConfirmation,
+  resolveVoiceApproval,
+  VOICE_APPROVAL_MS,
+  WAKE_FOLLOW_UP_MS,
+  WAKE_REPLIES,
+  type VoiceCommand,
+} from '@/lib/steelmanWake';
+import type { VoiceSegmentMode } from '@/lib/voiceClip';
 import { playWakeChime, WAKE_CHIME_MS } from '@/lib/steelmanVoice';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
@@ -13,6 +28,14 @@ import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelman
 import { errorMessageOf, toast } from '@/stores/useToastStore';
 
 const store = () => useSteelmanWakeStore.getState();
+
+/** 받아쓴 조각의 성격: 부르는 말 조각인지 명령 덩어리인지, 최대 길이에서 잘려 말이 이어지는지 (이슈 #494) */
+export interface HeardClip {
+  mode: VoiceSegmentMode;
+  truncated: boolean;
+}
+
+const WHOLE_WAKE_CLIP: HeardClip = { mode: 'wake', truncated: false };
 
 /** 띠링을 울린 뒤 그 소리를 말로 잡지 않게 이때까지 듣기를 쉰다 */
 let muteUntil = 0;
@@ -36,6 +59,7 @@ function ask(question: string): void {
   useShellStore.getState().showAiPanel();
   const chat = useAiChatStore.getState();
   if (!chat.pendingId) {
+    store().showActivity({ kind: 'asking', question });
     store().requestPanel({ kind: 'ask', question });
     return;
   }
@@ -159,10 +183,30 @@ function runCommand(command: Exclude<VoiceCommand, { kind: 'empty' }>, screenCon
   }
 }
 
-/** 받아쓴 글 하나를 처리한다. 부르는 말도 없고 기다리던 말도 아니면 아무것도 남기지 않고 버린다 */
-export function handleText(text: string, screenControlAvailable: boolean): void {
+/** 부르는 말 없이 받은 명령 글을 처리한다 (잘렸다 이어 붙인 명령) */
+function runText(text: string, screenControlAvailable: boolean): void {
+  const command = parseVoiceCommand(text);
+  if (command.kind === 'empty') return;
+  store().setCalled(null);
+  runCommand(command, screenControlAvailable);
+}
+
+/** 최대 길이에서 잘린 명령의 나머지를 더 기다리지 않고 들은 데까지 묻는다 (조용해졌거나 기다림이 끝남) */
+export function flushCommandPrefix(screenControlAvailable: boolean): void {
+  const prefix = store().commandPrefix;
+  if (!prefix) return;
+  store().setCommandPrefix(null);
+  runText(prefix.text, screenControlAvailable);
+}
+
+/**
+ * 받아쓴 글 하나를 처리한다. 부르는 말도 없고 기다리던 말도 아니면 아무것도 남기지 않고 버린다.
+ * clip(이슈 #494): 최대 길이에서 잘린 조각이면 말이 이어지므로 나머지를 받아 이어 붙여 묻는다
+ */
+export function handleText(text: string, screenControlAvailable: boolean, clip: HeardClip = WHOLE_WAKE_CLIP): void {
   const now = Date.now();
-  const { approval, called, screenConfirm } = store();
+  store().setPartialText(null);
+  const { approval, called, screenConfirm, commandPrefix } = store();
   if (screenConfirm) {
     const outcome = resolveConfirmation(screenConfirm.deadline, text, now);
     if (outcome === 'execute') turnOnScreenControl(true);
@@ -181,10 +225,40 @@ export function handleText(text: string, screenControlAvailable: boolean): void 
     }
     return;
   }
+  // 잘린 명령의 나머지: 앞부분에 이어 붙인다 (부르는 말이 없어도 된다)
+  if (commandPrefix) {
+    const joined = `${commandPrefix.text} ${text}`.trim();
+    if (clip.truncated) {
+      store().setCommandPrefix({ text: joined, until: now + COMMAND_CONTINUE_MS });
+      return;
+    }
+    store().setCommandPrefix(null);
+    runText(joined, screenControlAvailable);
+    return;
+  }
   const wake = matchWakeWord(text);
-  const waiting = called !== null && now <= called.until;
-  if (!wake.called && !(waiting && !isLikelyHallucination(text))) return;
-  const command = parseVoiceCommand(wake.called ? wake.rest : text);
+  // 기다리는 동안 시작한 말(명령 덩어리)은 길어져 마감을 넘겨도 받는다
+  const waiting = called !== null && (now <= called.until || clip.mode === 'command');
+  // 이어 말하기 중 "그만·고마워·됐어"면 대화를 끝낸다
+  if (waiting && called.followUp && isConversationEnd(text)) {
+    store().setCalled(null);
+    store().notify('알겠어요. 필요하면 "철강맨"으로 다시 불러 주세요');
+    return;
+  }
+  if (!wake.called && !(waiting && !isLikelyHallucination(text))) {
+    // 무엇을 들었는지 띠에 몇 초만 보인다 (이슈 #494). 서버·저장소에는 남기지 않는다
+    store().showActivity({ kind: 'heard', text, matched: false });
+    return;
+  }
+  store().showActivity({ kind: 'heard', text, matched: true });
+  const rest = wake.called ? wake.rest : text;
+  // "철강맨, …"이 8초에서 잘렸으면 나머지를 같은 명령으로 이어 받는다 (명령 듣기로 바꿔 끝까지 듣는다)
+  if (clip.truncated && compactSpeech(rest)) {
+    store().setCalled(null);
+    store().setCommandPrefix({ text: rest, until: now + COMMAND_CONTINUE_MS });
+    return;
+  }
+  const command = parseVoiceCommand(rest);
   if (command.kind === 'empty') {
     replyTurn += 1;
     chime();
@@ -196,20 +270,44 @@ export function handleText(text: string, screenControlAvailable: boolean): void 
 }
 
 /** 조각 하나를 받아쓴다. 음성 서버에 닿지 않으면 스위치 옆에 이유를 보인다 */
-export async function transcribe(wav: Blob, stopped: () => boolean, screenControlAvailable: () => boolean): Promise<void> {
+export async function transcribe(wav: Blob, stopped: () => boolean, screenControlAvailable: () => boolean, clip: HeardClip = WHOLE_WAKE_CLIP): Promise<void> {
+  store().setTranscribing(true);
   try {
-    const result = await sttApi.transcribeWakeClip(wav);
+    const result = await sttApi.transcribeWakeClip(wav, clip.mode);
+    store().setTranscribing(false);
     if (stopped()) return;
     if (result.error) {
       store().setProblem(`음성 서버가 꺼져 있어요 · ${result.error}`);
       return;
     }
     if (store().problem) store().setProblem(null);
-    if (result.text) handleText(result.text, screenControlAvailable());
+    if (result.text) handleText(result.text, screenControlAvailable(), clip);
+    // 잘린 명령의 나머지가 말이 아니었으면(빈 글) 들은 데까지 묻는다
+    else if (!clip.truncated && store().commandPrefix) flushCommandPrefix(screenControlAvailable());
   } catch (error) {
+    store().setTranscribing(false);
     if (stopped()) return;
     if (errorCodeOf(error) === 'VOC-011') store().setCompany({ wake: false, voiceApproval: false });
     else if (errorCodeOf(error) === 'VOC-009') store().notify(errorMessageOf(error));
     else store().setProblem(errorMessageOf(error));
+  }
+}
+
+let partialInFlight = false;
+
+/**
+ * 명령을 말하는 동안 지금까지의 덩어리를 받아써 띠에 보인다 (이슈 #494, 보이기만 하고 명령으로 쓰지 않는다).
+ * 한 번에 하나만 보내고, 실패는 조용히 넘긴다(최종 덩어리가 따로 간다)
+ */
+export async function transcribePartial(wav: Blob, stopped: () => boolean): Promise<void> {
+  if (partialInFlight) return;
+  partialInFlight = true;
+  try {
+    const result = await sttApi.transcribeWakeClip(wav, 'partial');
+    if (!stopped() && store().hearing && result.text) store().setPartialText(result.text);
+  } catch {
+    // 한도(VOC-009)·연결 실패: 중간 글만 못 보일 뿐이다
+  } finally {
+    partialInFlight = false;
   }
 }

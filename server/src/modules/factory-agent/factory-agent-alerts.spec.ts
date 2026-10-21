@@ -41,12 +41,28 @@ describe('납기 위험 알림 (REQ-AGT-004)', () => {
 
     const alerts = await prisma.notification.findMany({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } });
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({ notificationType: 'TASK_ASSIGNED', linkPath: `/sales-orders/${salesOrder.id}` });
+    expect(alerts[0]).toMatchObject({ notificationType: 'DUE_RISK', linkPath: `/sales-orders/${salesOrder.id}` });
 
     // 읽으면 다음 감지에서 다시 알린다
     await prisma.notification.update({ where: { id: alerts[0].id }, data: { readAt: new Date() } });
     await agent.scanAll();
     expect(await prisma.notification.count({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } })).toBe(2);
+  });
+
+  it('배포 전에 TASK_ASSIGNED로 보낸 안 읽은 같은 알림이 있으면 새 유형으로 다시 보내지 않는다', async () => {
+    const owner = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2103003' } });
+    const customer = await prisma.customer.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    const slab = await prisma.item.findFirstOrThrow({ where: { itemType: 'SLAB' }, orderBy: { id: 'asc' } });
+    const setting = await prisma.productionSetting.findFirstOrThrow();
+    const salesOrder = await prisma.salesOrder.create({
+      data: { salesOrderNo: 'T-SO-AGT-LEGACY', customerId: customer.id, ownerEmployeeId: owner.id, salesOrderItems: { create: [{ itemId: slab.id, orderedQty: 3, dueDate: new Date(`${addDays(seoulToday(), setting.deliveryRiskDays)}T00:00:00.000Z`) }] } },
+    });
+    const content = `[Agent 납기 위험] 수주 T-SO-AGT-LEGACY 1번 품목 납기 ${addDays(seoulToday(), setting.deliveryRiskDays)}, 출하 0/3매`;
+    await prisma.notification.create({ data: { notificationType: 'TASK_ASSIGNED', recipientId: owner.id, notificationContent: content, linkPath: `/sales-orders/${salesOrder.id}` } });
+
+    await agent.scanAll();
+
+    expect(await prisma.notification.count({ where: { recipientId: owner.id, notificationContent: content } })).toBe(1);
   });
 
   it('출하를 마친 수주 품목은 알리지 않는다', async () => {
@@ -80,5 +96,6 @@ describe('불합격률 상승 알림 (REQ-AGT-004)', () => {
     const alerts = await prisma.notification.findMany({ where: { notificationContent: { contains: '강종 SPHC' }, recipientId: { in: members.map((m) => m.id) } } });
     expect(alerts.length).toBe(members.length);
     expect(alerts[0].notificationContent).toContain('불합격률');
+    expect(alerts.every((a) => a.notificationType === 'QUALITY_RATE_RISE')).toBe(true);
   });
 });

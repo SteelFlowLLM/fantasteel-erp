@@ -14,6 +14,7 @@ import {
   purchaseRequisitionPayloadOf,
   resultHrefOf,
   resultLabelOf,
+  aiExtractionNotice,
 } from '@/features/actionDrafts/lib/typedDrafts';
 
 const base = { sourceText: '원본', aiFilledFields: [] };
@@ -86,5 +87,15 @@ describe('확장 유형 초안 화면 (REQ-ACT-005)', () => {
     expect(resultHrefOf({ table: 'shipment_request', id: 3 })).toBe('/shipment-requests/3');
     expect(resultHrefOf({ table: 'production_plan', id: 4 })).toBe('/production/plans?plan=4');
     expect(resultHrefOf({ table: 'sales_order_item', id: 5 })).toBeNull();
+  });
+
+  it('빈 초안이 된 까닭: 시간 초과·모델 없음·연결 실패·형식 오류·값 없음을 알리고, 칸을 채웠거나 예전 초안이면 알리지 않는다 (이슈 #472)', () => {
+    expect(aiExtractionNotice('TIMEOUT')).toContain('제한 시간');
+    expect(aiExtractionNotice('NO_MODEL')).toContain('AI 연결');
+    expect(aiExtractionNotice('FAILED')).toContain('연결하지 못해');
+    expect(aiExtractionNotice('NOT_JSON')).toContain('읽지 못해');
+    expect(aiExtractionNotice('NOTHING_FOUND')).toContain('찾지 못했어요');
+    expect(aiExtractionNotice('FILLED')).toBeNull();
+    expect(aiExtractionNotice(undefined)).toBeNull();
   });
 });

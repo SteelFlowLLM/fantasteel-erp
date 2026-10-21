@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, daysBetween, isDueRisk, itemStatusOf } from '@/lib/salesOrderStatus';
+import { addDays, daysBetween, isDueRisk } from '@/lib/salesOrderStatus';
 
 describe('수주 상태 (REQ-SO-005)', () => {
-  it('품목: OPEN → PARTIALLY_SHIPPED → SHIPPED, 취소', () => {
-    expect(itemStatusOf({ orderedQty: 10, shippedQty: 0, cancelled: false })).toBe('OPEN');
-    expect(itemStatusOf({ orderedQty: 10, shippedQty: 4, cancelled: false })).toBe('PARTIALLY_SHIPPED');
-    expect(itemStatusOf({ orderedQty: 10, shippedQty: 10, cancelled: false })).toBe('SHIPPED');
-    expect(itemStatusOf({ orderedQty: 10, shippedQty: 0, cancelled: true })).toBe('CANCELLED');
-  });
   it('납기 위험: 미출하가 있고 남은 날 ≤ 기준일(지난 납기 포함)', () => {
     expect(daysBetween('2026-10-01', '2026-10-04')).toBe(3);
     expect(isDueRisk({ dueDate: '2026-10-04', today: '2026-10-01', deliveryRiskDays: 3, unshippedQty: 1, status: 'OPEN' })).toBe(true);

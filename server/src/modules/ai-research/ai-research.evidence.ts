@@ -1,5 +1,5 @@
 import { cutText, wrapUntrusted } from '../ai-assistant/web/web-text';
-import { isErpSource, type StepNote, type StoredSource, type StoredState } from './ai-research.rules';
+import { isErpSource, isInternalSource, isKnowledgeSource, type StepNote, type StoredSource, type StoredState } from './ai-research.rules';
 
 /**
  * 근거 조립 (이슈 #384). 출처 하나하나가 아니라 "단계 기록"(검색어 → 그 결과, 읽은 출처 → 본문)을 근거로 넘긴다:
@@ -30,8 +30,8 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 export function notesFor(state: Pick<StoredState, 'notes'>, sources: readonly StoredSource[]): StepNote[] {
   if (state.notes?.length) return state.notes;
   const notes: StepNote[] = [];
-  // ERP 조회 출처는 단계 기록이 아니라 erpEvidence로 따로 넣는다
-  const web = sources.filter((s) => !isErpSource(s));
+  // ERP 조회·사내 지식 출처는 단계 기록이 아니라 따로 넣는다 (erpEvidence·knowledgeEvidence)
+  const web = sources.filter((s) => !isInternalSource(s));
   const unread = web.filter((s) => s.readText === undefined);
   if (unread.length) notes.push({ step: 0, kind: 'search', query: '(앞서 모은 검색 결과)', engine: null, error: null, results: unread.map((s) => ({ sourceId: s.id, title: s.title, url: s.url, snippet: s.snippet })) });
   for (const s of web) if (s.readText !== undefined) notes.push({ step: 0, kind: 'read', sourceId: s.id, error: null });
@@ -94,30 +94,48 @@ export function evenEvidence(notes: readonly StepNote[], sources: readonly Store
   return chosen.map(({ note, i }) => wrapWithin(noteLabel(note, i), renderNote(note, sources), each)).filter((b): b is string => b !== null);
 }
 
+/** 사내 지식 출처 하나 → 글 (감싸기 전). 회사가 정한 기준이라 웹 자료보다 먼저 쓰라고 밝힌다 (이슈 #484) */
+export function renderKnowledge(source: StoredSource): string {
+  return `### 사내 지식 [${source.id}] ${source.title}\n(우리 회사가 정한 기준 문서예요. 웹 자료보다 먼저 쓰고, 웹 자료의 숫자가 이와 다르면 이 값을 따르되 다르다고 밝혀요)\n${source.readText ?? ''}`;
+}
+
+/** room 안에서 똑같이 나눈다(하나 NOTE_MAX까지). 몫이 NOTE_MIN보다 작으면 앞의 것부터 NOTE_MIN씩 넣을 수 있는 만큼만 */
+function evenBlocks(picked: readonly StoredSource[], room: number, label: string, render: (s: StoredSource) => string): string[] {
+  let list = [...picked];
+  if (!list.length || room <= 0) return [];
+  let share = Math.floor((room - list.length) / list.length);
+  if (share < NOTE_MIN) {
+    list = list.slice(0, Math.max(1, Math.floor(room / (NOTE_MIN + 1))));
+    share = Math.floor((room - list.length) / list.length);
+  }
+  const each = Math.min(share, NOTE_MAX);
+  return list.map((s) => wrapWithin(`research:${label}-${s.id}`, render(s), each)).filter((b): b is string => b !== null);
+}
+
 /**
  * ERP 조회 출처의 근거 (이슈 #435): room 안에서 똑같이 나눈다(하나 NOTE_MAX까지). 웹 단계 기록과 따로 두어, 단계가 많아도 우리 회사 자료가 밀려나지 않는다.
  * 몫이 NOTE_MIN보다 작으면 앞의 것부터 NOTE_MIN씩 넣을 수 있는 만큼만.
  */
 export function erpEvidence(sources: readonly StoredSource[], room: number): string[] {
-  let erp = sources.filter(isErpSource);
-  if (!erp.length || room <= 0) return [];
-  let share = Math.floor((room - erp.length) / erp.length);
-  if (share < NOTE_MIN) {
-    erp = erp.slice(0, Math.max(1, Math.floor(room / (NOTE_MIN + 1))));
-    share = Math.floor((room - erp.length) / erp.length);
-  }
-  const each = Math.min(share, NOTE_MAX);
-  return erp.map((s) => wrapWithin(`research:erp-${s.id}`, renderErp(s), each)).filter((b): b is string => b !== null);
+  return evenBlocks(sources.filter(isErpSource), room, 'erp', renderErp);
 }
 
-/** ERP 근거를 room의 이만큼까지 쓰고, 남은 글자는 웹 단계 기록이 쓴다 */
+/** 사내 지식 출처의 근거 (이슈 #484). ERP와 같은 방식으로 나눈다 */
+export function knowledgeEvidence(sources: readonly StoredSource[], room: number): string[] {
+  return evenBlocks(sources.filter(isKnowledgeSource), room, 'knowledge', renderKnowledge);
+}
+
+/** 🟡 사내 지식·ERP 근거가 room의 이만큼까지 쓰고, 남은 글자는 웹 단계 기록이 쓴다 (사내 지식이 맨 앞) */
+const KNOWLEDGE_ROOM_SHARE = 0.3;
 const ERP_ROOM_SHARE = 0.4;
 
-/** ERP 근거를 앞에 두고 나머지 글자를 웹 단계 기록(rest)에 준다 */
-export function withErpEvidence(sources: readonly StoredSource[], room: number, rest: (room: number) => string[]): string[] {
-  const erp = erpEvidence(sources, Math.floor(room * ERP_ROOM_SHARE));
+/** 사내 지식 → ERP 근거를 앞에 두고 나머지 글자를 웹 단계 기록(rest)에 준다 */
+export function withInternalEvidence(sources: readonly StoredSource[], room: number, rest: (room: number) => string[]): string[] {
+  const knowledge = knowledgeEvidence(sources, Math.floor(room * KNOWLEDGE_ROOM_SHARE));
+  const afterKnowledge = room - knowledge.reduce((sum, block) => sum + block.length + 1, 0);
+  const erp = erpEvidence(sources, Math.floor(afterKnowledge * ERP_ROOM_SHARE));
   const used = erp.reduce((sum, block) => sum + block.length + 1, 0);
-  return [...erp, ...rest(room - used)];
+  return [...knowledge, ...erp, ...rest(afterKnowledge - used)];
 }
 
 /** 다음 행동의 근거: 최근 단계 기록부터 room이 찰 때까지(하나 TURN_NOTE_MAX까지, 남은 몫이 NOTE_MIN보다 작으면 멈춤). 순서는 단계 순서 그대로 */
@@ -140,7 +158,7 @@ export function recentEvidence(notes: readonly StepNote[], sources: readonly Sto
 export function sourceCatalog(sources: readonly StoredSource[], room: number, mode: 'turn' | 'final'): string {
   if (!sources.length) return '[모은 출처] 아직 없음';
   const status = (s: StoredSource) => (s.readText !== undefined ? ' (읽음)' : s.readError !== undefined ? ' (읽기 실패)' : '');
-  const where = (s: StoredSource) => (isErpSource(s) ? '우리 회사 ERP' : mode === 'turn' ? hostOf(s.url) : s.url);
+  const where = (s: StoredSource) => (isKnowledgeSource(s) ? '사내 지식' : isErpSource(s) ? '우리 회사 ERP' : mode === 'turn' ? hostOf(s.url) : s.url);
   const line = (s: StoredSource, snippet: boolean) =>
     mode === 'turn'
       ? `[${s.id}] ${cutText(oneLine(s.title), 80)} — ${where(s)}${status(s)}${snippet && s.snippet ? ` · ${cutText(oneLine(s.snippet), CATALOG_SNIPPET_MAX)}` : ''}`

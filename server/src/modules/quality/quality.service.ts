@@ -214,6 +214,8 @@ export class QualityService {
       );
 
       const codeOf = new Map(applicableItems.map((item) => [item.id, item.inspectionItemCode]));
+      // 판정 뒤 재고를 바꾸므로 재고 행을 작업 로그보다 먼저 잠근다 (재고 → 작업 로그 순서, 교착 방지 #478)
+      await this.inventory.lockInventoriesOfLots(tx, [lot.id]);
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,
         actor: user,
@@ -253,6 +255,8 @@ export class QualityService {
       if (!inspection) throw new AppException('COM-003', '검사를 찾을 수 없어요');
       const { lot, inspectionStandard: standard } = inspection;
 
+      // 출고 확정과 겹쳐도 '밀시트 발행 뒤 수정 차단'이 뚫리지 않게 LOT을 잠근 뒤 발행 여부를 본다 (#487)
+      await this.repository.lockForInspectionUpdate(tx, lockScopeLotIds(lot));
       const millSheetNos = await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(lot));
       if (millSheetNos.length) {
         // [04] 9.3에 전용 코드가 없어 입력 에러로 돌려준다 (2026-10-04 결정)
@@ -296,6 +300,8 @@ export class QualityService {
       await this.repository.deleteQualityInspectionValues(tx, inspection.id, clearedItemIds);
 
       const codeOf = new Map(applicableItems.map((item) => [item.id, item.inspectionItemCode]));
+      // 판정이 바뀌면 재고를 바꾸므로 재고 행을 작업 로그보다 먼저 잠근다 (#478)
+      await this.inventory.lockInventoriesOfLots(tx, [lot.id]);
       await this.businessEventRecorder.record(tx, {
         // 수정 전용 이벤트가 없어 등록 이벤트에 변경 전·후를 남긴다 (REQ-QC-003, 2026-10-04 결정)
         type: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,

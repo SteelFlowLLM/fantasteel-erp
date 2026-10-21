@@ -12,7 +12,11 @@ export interface AiLlmFailureGuide {
 }
 
 export const AI_LLM_FAILURE_GUIDE: Record<AiLlmFailureCode, AiLlmFailureGuide> = {
-  'AST-002': { title: 'AI 모델이 정해지지 않았어요', hint: '관리자가 AI 연결 화면에서 모델을 골라야 철강맨AI가 답할 수 있어요.', needsSettings: true },
+  'AST-002': {
+    title: 'AI 모델이 준비되지 않았어요',
+    hint: '관리자가 AI 연결 화면에서 모델을 고르고, Unsloth Studio를 쓰면 그 모델을 불러 두어야 철강맨AI가 답할 수 있어요.',
+    needsSettings: true,
+  },
   'AST-003': { title: 'AI 서버에 연결하지 못했어요', hint: 'AI 서버(LM Studio 등)가 꺼져 있거나 주소가 바뀌었을 수 있어요. 잠시 뒤 다시 묻고, 계속되면 관리자에게 알려 주세요.', needsSettings: true },
   'AST-004': { title: 'AI 서버가 시간 안에 답하지 않았어요', hint: '질문이 길거나 서버가 바쁠 수 있어요. 질문을 줄이거나 잠시 뒤 다시 물어봐 주세요.', needsSettings: false },
   'AST-005': { title: 'AI 서버가 요청을 처리하지 못했어요', hint: '아래 이유를 확인하고, 모델 설정에 문제가 없는지 관리자에게 알려 주세요.', needsSettings: true },

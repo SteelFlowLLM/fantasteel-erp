@@ -28,6 +28,11 @@ export const messengerKeys = {
   messages: (employeeId: number, chatRoomId: number, limit: number) => ['chat-rooms', 'messages', employeeId, chatRoomId, limit] as const,
   files: (employeeId: number, chatRoomId: number, limit: number) => ['chat-rooms', 'files', employeeId, chatRoomId, limit] as const,
   search: (employeeId: number, chatRoomId: number, keyword: string) => ['chat-rooms', 'search', employeeId, chatRoomId, keyword] as const,
+  /**
+   * 그림 첨부 미리보기. 메신저 조회(`all`) 아래에 두면 소켓 이벤트마다 보이는 그림을 전부 다시 받으므로 따로 둔다 (이슈 #476).
+   * 첨부는 고치지 않는 파일이라 한 번 받으면 된다 (api/queryRefresh.ts의 독립 조회).
+   */
+  image: (employeeId: number, messageId: number, fileId: number) => ['chat-room-images', employeeId, messageId, fileId] as const,
 };
 
 // ── 화면에 내보내는 모양 ─────────────────────────────────

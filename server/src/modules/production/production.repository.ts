@@ -133,6 +133,12 @@ export class ProductionRepository {
     return tx.productionPlan.update({ where: { id }, data });
   }
 
+  /** 읽은 상태 그대로일 때만 바꾼다. 바꿨으면 바꾼 행, 그사이 상태가 바뀌었으면 null */
+  async updatePlanIfStatus(tx: Tx, id: number, expectedStatus: string, data: { productionPlanStatus?: ProductionPlanStatus; salesOrderItemId?: null }) {
+    const { count } = await tx.productionPlan.updateMany({ where: { id, productionPlanStatus: expectedStatus }, data });
+    return count === 1 ? tx.productionPlan.findUniqueOrThrow({ where: { id } }) : null;
+  }
+
   // ── 생산계획 조회 ──────────────────────────────────────
 
   /** 계획 행 잠금. 없으면 null */

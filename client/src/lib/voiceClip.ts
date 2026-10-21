@@ -4,6 +4,16 @@ import { STT_WAKE_CLIP_LIMITS } from '@fantasteel/shared';
 
 export const WAV_SAMPLE_RATE = 16_000;
 
+/**
+ * 조각을 자르는 방식 (이슈 #494). wake: 부르는 말을 찾는 짧은 조각(8초, 0.7초 조용하면 끝) ·
+ * command: "철강맨" 뒤 명령 한 덩어리(30초, 1.2초 조용하면 끝, 배경으로 삼지 않음)
+ */
+export type VoiceSegmentMode = 'wake' | 'command';
+/** 명령 덩어리가 끝났다고 보는 조용함 (가정값). 말하다 잠깐 생각하며 쉬어도 끊기지 않게 부르는 말 조각보다 길다 */
+export const COMMAND_END_SILENCE_MS = 1_200;
+/** 부르는 말 조각을 이만큼 이어서 쉬지 않고 잘랐으면(8초 × 2) 사람 말이 아니라 기계 소리로 보고 배경으로 삼는다 */
+const NOISE_CLIPS = 2;
+
 export interface VoiceSegmenterOptions {
   sampleRate: number;
   /** 한 조각의 최대 길이. 넘으면 거기서 자른다 */
@@ -14,13 +24,16 @@ export interface VoiceSegmenterOptions {
   minSpeechMs?: number;
   /** 말 시작을 알아채기 전의 소리도 조금 붙인다: 첫 글자가 잘리지 않게 */
   preRollMs?: number;
+  /** 말 시작으로 보는 최소 소리 크기 (민감도, 이슈 #494). 없으면 MIN_START_RMS */
+  minStartRms?: number;
 }
 
 /** 시끄러운 공장 사무실에서도 배경 소리를 말로 잡지 않게 배경 크기의 몇 배를 넘어야 말로 본다 (가정값) */
 const START_RATIO = 3;
 const KEEP_RATIO = 2;
-const MIN_START_RMS = 0.015;
-const MIN_KEEP_RMS = 0.008;
+export const MIN_START_RMS = 0.015;
+/** 말이 이어지는 것으로 보는 최소 크기는 시작 기준의 이 배수 (0.015 → 0.008) */
+const KEEP_OF_START = 0.53;
 /** 배경 크기를 따라가는 빠르기. 켠 직후에는 배경을 빨리 배운다 (그동안은 말로 보지 않는다) */
 const FLOOR_ALPHA = 0.05;
 const WARM_UP_ALPHA = 0.2;
@@ -39,11 +52,16 @@ export function rmsOf(frame: Float32Array): number {
 export class VoiceSegmenter {
   private readonly maxSamples: number;
   private readonly endSilenceSamples: number;
+  private readonly commandMaxSamples: number;
+  private readonly commandEndSilenceSamples: number;
   private readonly minSpeechSamples: number;
   private readonly preRollSamples: number;
   private readonly warmUpSamples: number;
   private floor = 0.005;
   private heard = 0;
+  private active = false;
+  /** 쉬지 않고 이어 자른 소리 길이 (8초에서 잘라도 이어 받다가, 너무 길면 기계 소리로 본다) */
+  private continuousSamples = 0;
   private preRoll: Float32Array[] = [];
   private preRollLength = 0;
   private speech: Float32Array[] = [];
@@ -52,6 +70,14 @@ export class VoiceSegmenter {
   private voicedSamples = 0;
   private rmsSum = 0;
   private frames = 0;
+  /** 말 시작으로 보는 최소 소리 크기. 듣는 중에도 바꿀 수 있다(민감도) */
+  minStartRms: number;
+  /** 마지막으로 넣은 소리 조각의 크기 (화면의 소리 크기 막대) */
+  lastRms = 0;
+  /** 지금 자르는 방식. 듣는 중에도 바꿀 수 있고, 하던 말에도 바로 적용된다 */
+  mode: VoiceSegmentMode = 'wake';
+  /** 마지막으로 낸 조각의 방식과, 최대 길이에서 잘려 말이 이어지는지 */
+  lastClip: { mode: VoiceSegmentMode; truncated: boolean } = { mode: 'wake', truncated: false };
 
   constructor(options: VoiceSegmenterOptions) {
     this.maxSamples = Math.round(((options.maxMs ?? STT_WAKE_CLIP_LIMITS.maxSeconds * 1000) * options.sampleRate) / 1000);
@@ -59,18 +85,34 @@ export class VoiceSegmenter {
     this.minSpeechSamples = Math.round(((options.minSpeechMs ?? 300) * options.sampleRate) / 1000);
     this.preRollSamples = Math.round(((options.preRollMs ?? 300) * options.sampleRate) / 1000);
     this.warmUpSamples = Math.round((WARM_UP_MS * options.sampleRate) / 1000);
+    this.minStartRms = options.minStartRms ?? MIN_START_RMS;
+    this.commandMaxSamples = Math.round(STT_WAKE_CLIP_LIMITS.commandMaxSeconds * options.sampleRate);
+    this.commandEndSilenceSamples = Math.round((COMMAND_END_SILENCE_MS * options.sampleRate) / 1000);
+  }
+
+  /** 지금 말 시작으로 보는 소리 크기: 최소 크기와 배경 크기의 배수 중 큰 것 */
+  get startThreshold(): number {
+    return Math.max(this.minStartRms, this.floor * START_RATIO);
   }
 
   get speaking(): boolean {
-    return this.speechLength > 0;
+    return this.active;
+  }
+
+  /** 지금까지 잡은 하던 말 (말하는 동안 중간 글을 받으려고). 말하는 중이 아니면 null */
+  snapshot(): Float32Array | null {
+    return this.active && this.speechLength > 0 ? concat(this.speech, this.speechLength) : null;
   }
 
   feed(frame: Float32Array): Float32Array | null {
     const rms = rmsOf(frame);
+    this.lastRms = rms;
     if (!this.speaking) {
       const warmingUp = this.heard < this.warmUpSamples;
       this.heard += frame.length;
-      if (!warmingUp && rms >= Math.max(MIN_START_RMS, this.floor * START_RATIO)) {
+      if (!warmingUp && rms >= this.startThreshold) {
+        this.active = true;
+        this.continuousSamples = 0;
         this.speech = [...this.preRoll, frame];
         this.speechLength = this.preRollLength + frame.length;
         this.preRoll = [];
@@ -91,21 +133,41 @@ export class VoiceSegmenter {
     this.speechLength += frame.length;
     this.rmsSum += rms;
     this.frames += 1;
-    const quiet = rms < Math.max(MIN_KEEP_RMS, this.floor * KEEP_RATIO);
+    const quiet = rms < Math.max(this.minStartRms * KEEP_OF_START, this.floor * KEEP_RATIO);
     this.silentSamples = quiet ? this.silentSamples + frame.length : 0;
     if (!quiet) this.voicedSamples += frame.length;
-    const full = this.speechLength >= this.maxSamples;
-    if (this.silentSamples < this.endSilenceSamples && !full) return null;
-    // 8초 내내 쉬지 않은 소리는 대개 기계 소리라 그 크기를 배경으로 삼는다: 다음부터는 그보다 커야 말로 본다
-    if (full) this.floor = Math.max(this.floor, this.rmsSum / this.frames);
+    const command = this.mode === 'command';
+    const maxSamples = command ? this.commandMaxSamples : this.maxSamples;
+    const full = this.speechLength >= maxSamples;
+    if (this.silentSamples < (command ? this.commandEndSilenceSamples : this.endSilenceSamples) && !full) return null;
     const voiced = this.voicedSamples;
-    const clip = concat(this.speech, Math.min(this.speechLength, this.maxSamples));
-    this.reset();
+    const clip = concat(this.speech, Math.min(this.speechLength, maxSamples));
+    this.lastClip = { mode: this.mode, truncated: full };
+    if (!full) {
+      this.reset();
+      return voiced >= this.minSpeechSamples ? clip : null;
+    }
+    // 최대 길이에서 잘렸다: 말이 이어지므로 듣기를 멈추지 않고 다음 조각으로 이어 받는다 (긴 말이 8초에서 끊겨 버려지지 않게, 이슈 #494)
+    this.continuousSamples += clip.length;
+    if (!command && this.continuousSamples >= NOISE_CLIPS * this.maxSamples) {
+      // 16초 내내 쉬지 않은 소리는 대개 기계 소리라 그 크기를 배경으로 삼는다: 다음부터는 그보다 커야 말로 본다
+      this.floor = Math.max(this.floor, this.rmsSum / this.frames);
+      this.reset();
+      return null;
+    }
+    this.speech = [];
+    this.speechLength = 0;
+    this.silentSamples = 0;
+    this.voicedSamples = 0;
+    this.rmsSum = 0;
+    this.frames = 0;
     return voiced >= this.minSpeechSamples ? clip : null;
   }
 
   /** 듣기를 멈출 때 하던 말은 버린다 */
   reset(): void {
+    this.active = false;
+    this.continuousSamples = 0;
     this.speech = [];
     this.speechLength = 0;
     this.silentSamples = 0;

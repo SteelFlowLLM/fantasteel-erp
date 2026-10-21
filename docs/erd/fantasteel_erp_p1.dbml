@@ -571,7 +571,7 @@ Table quality_inspection_value {
 Table past_case {
   id int [pk, increment, note: '시퀀스 6부터 (예시 사례 CASE-0001~0005와 겹치지 않게)']
   case_no varchar [unique, not null, note: 'CASE-{id 4자리} (번호 형식 TBD, 가정값)']
-  case_category varchar [not null, note: 'CASE_CATEGORY 🟡: QUALITY·EQUIPMENT']
+  case_category varchar [not null, note: 'CASE_CATEGORY: QUALITY·EQUIPMENT']
   title varchar [not null]
   phenomenon text [not null]
   cause text
@@ -588,6 +588,7 @@ Table past_case {
 
   Note: '''
 EX 과거 사례 (REQ-CASE-001~005, BP-CASE-01, 2026-10-16 추가). 불합격 처리 후 현상·원인·조치를 남긴다.
+CHECK case_category IN ('QUALITY', 'EQUIPMENT') (2026-10-21, CASE_CATEGORY 확정)
 예시 사례 5건은 관련 LOT이 실제 LOT이 아니라 DB에 넣지 않고 코드(shared PAST_CASE_EXAMPLES)에 둔다.
 한국어 ngram 전문검색 인덱스는 구현 시 정한다 (REQ-CASE-003)
 '''
@@ -989,6 +990,10 @@ Table action_draft {
   Note: '''
 부분 unique: (message_id, action_type)
   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지)
+부분 unique: (payload->'agent'->>'targetKey')
+  WHERE message_id IS NULL AND payload->'agent'->>'targetKey' IS NOT NULL
+  AND draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (Agent 대응 후보의 같은 대상 미처리 중복 방지, REQ-AGT-005, 2026-10-21)
+  마이그레이션이 만들기 전에 이미 있는 중복은 가장 진행된 1건(APPROVED > WAITING_APPROVAL > AI_GENERATED, 같으면 id가 작은 것)만 남기고 나머지를 REJECTED('[자동] …')로 닫는다
 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id)
 '''
 }

@@ -98,17 +98,16 @@ function summaryOf(s: ServerShipmentRequestSummary, d: ServerShipmentRequestDeta
 }
 
 async function list(): Promise<ShipmentListRow[]> {
-  const [summaries, millSheets] = await Promise.all([allPages<ServerShipmentRequestSummary>('/shipment-requests'), millSheetsOfAll()]);
-  const details = await Promise.all(summaries.map((s) => serverRequest<ServerShipmentRequestDetail>('GET', `/shipment-requests/${s.id}`)));
-  return summaries.map((s, index) => {
-    const d = details[index];
+  // 줄마다 상세(품목·배정)를 함께 받는다: 건마다 상세를 따로 부르던 N+1을 없앤다 (이슈 #476, 서버 목록 withItems)
+  const [details, millSheets] = await Promise.all([allPages<ServerShipmentRequestDetail>('/shipment-requests', { withItems: 'true' }), millSheetsOfAll()]);
+  return details.map((d) => {
     return {
-      ...summaryOf(s, d),
+      ...summaryOf(d, d),
       itemCodes: [...new Set(d.items.map((i) => i.itemCode))],
       itemTypes: [...new Set(d.items.map((i) => productType(i.itemType)))],
       salesOrderIds: [...new Set(d.items.map((i) => i.salesOrderId))],
       salesOrders: [...new Map(d.items.map((i) => [i.salesOrderId, i.salesOrderNo])).entries()].map(([salesOrderId, salesOrderNo]) => ({ salesOrderId, salesOrderNo })),
-      millSheets: millSheets.filter((m) => m.shipmentRequestId === s.id).map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
+      millSheets: millSheets.filter((m) => m.shipmentRequestId === d.id).map((m) => ({ id: m.id, millSheetNo: m.millSheetNo })),
     };
   });
 }

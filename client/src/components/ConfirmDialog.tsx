@@ -9,12 +9,14 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   tone?: 'primary' | 'danger';
   pending?: boolean;
+  /** 확인을 누를 수 없는 이유가 있을 때 (예: 입력이 상한을 넘음) */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   children: ReactNode;
 }
 
-export function ConfirmDialog({ title, confirmLabel, cancelLabel = '취소', tone = 'primary', pending, onConfirm, onCancel, children }: ConfirmDialogProps) {
+export function ConfirmDialog({ title, confirmLabel, cancelLabel = '취소', tone = 'primary', pending, confirmDisabled, onConfirm, onCancel, children }: ConfirmDialogProps) {
   return (
     <Modal
       title={title}
@@ -26,7 +28,7 @@ export function ConfirmDialog({ title, confirmLabel, cancelLabel = '취소', ton
             {cancelLabel}
           </Button>
           {/* 확인 단추는 되돌리기 어려운 일을 한다: 철강맨AI 화면 조작이 누르지 않는다 (이슈 #479) */}
-          <Button variant={tone} onClick={onConfirm} disabled={pending} data-ai-block="">
+          <Button variant={tone} onClick={onConfirm} disabled={pending || confirmDisabled} data-ai-block="">
             {pending ? '처리하는 중…' : confirmLabel}
           </Button>
         </>

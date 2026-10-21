@@ -1,27 +1,13 @@
-// 기준정보 조회 (REQ-MST-001~009). 다른 화면의 선택 목록(수주 등록·수주 목록·구매요청 등록·재고 강종 필터)이 쓴다.
+// 기준정보 선택 목록 (REQ-MST-001·002·003). 다른 화면의 선택 목록(수주 등록·수주 목록·구매요청 등록·재고 강종 필터)이 쓴다.
 // 서버 기준정보를 읽어 id가 서버 id다 (api/server/lookups.ts). 등록·수정은 기준정보 화면(api/masterData.ts)이 맡는다.
-import type { ItemType, ProcessType, ProductItemType, RawMaterialType, UnitType, YardType } from '@/codes';
+import type { ItemType, ProductItemType, RawMaterialType, UnitType } from '@/codes';
 import type { ItemListQuery, ProductSpecListQuery } from '@/api/queryKeys';
 import { serverLookupApi } from '@/api/server/lookups';
-import { type SpecificConsumptionUnit } from '@/lib/units';
 
 export interface CustomerView {
   id: number;
   customerCode: string;
   customerName: string;
-}
-
-export interface SupplierView {
-  id: number;
-  supplierCode: string;
-  supplierName: string;
-}
-
-export interface YardView {
-  id: number;
-  yardCode: string;
-  yardName: string;
-  yardType: YardType;
 }
 
 export interface SteelGradeView {
@@ -72,53 +58,8 @@ export interface ProductSpecView {
   hotRollingPlannedYieldRate: string | null;
 }
 
-export interface SpecMappingView {
-  id: number;
-  steelGradeCode: string;
-  slabItemId: number;
-  slabItemCode: string;
-  slabTheoreticalWeightTon: string;
-  coilItemId: number;
-  coilItemCode: string;
-  coilTheoreticalWeightTon: string;
-  hotRollingPlannedYieldRate: string;
-}
-
-export interface RoutingView {
-  id: number;
-  itemType: ProductItemType;
-  processType: ProcessType;
-  processSeq: number;
-  /** 열연은 저장하지 않는다 (규격 매핑에서 계산) */
-  plannedYieldRate: string | null;
-}
-
-export interface SpecificConsumptionView {
-  id: number;
-  itemId: number;
-  itemCode: string;
-  itemName: string;
-  rawMaterialType: RawMaterialType;
-  steelGradeId: number | null;
-  steelGradeCode: string | null;
-  consumptionRate: string;
-  /** 합금철 kg/t(용강 1t당), 그 밖 t/t(용선 1t당) */
-  consumptionUnit: SpecificConsumptionUnit;
-}
-
-export interface ProductionSettingView {
-  id: number;
-  heatCapacityTon: string;
-  deliveryRiskDays: number;
-  updatedAt: string;
-}
-
 export const lookupApi = {
   listCustomers: (): Promise<CustomerView[]> => serverLookupApi.listCustomers(),
-
-  listSuppliers: (): Promise<SupplierView[]> => serverLookupApi.listSuppliers(),
-
-  listYards: (): Promise<YardView[]> => serverLookupApi.listYards(),
 
   listSteelGrades: (): Promise<SteelGradeView[]> => serverLookupApi.listSteelGrades(),
 
@@ -126,11 +67,4 @@ export const lookupApi = {
 
   listProductSpecs: (query: ProductSpecListQuery = {}): Promise<ProductSpecView[]> => serverLookupApi.listProductSpecs(query),
 
-  listSpecMappings: (): Promise<SpecMappingView[]> => serverLookupApi.listSpecMappings(),
-
-  listRoutings: (): Promise<RoutingView[]> => serverLookupApi.listRoutings(),
-
-  listSpecificConsumptions: (): Promise<SpecificConsumptionView[]> => serverLookupApi.listSpecificConsumptions(),
-
-  getProductionSetting: (): Promise<ProductionSettingView | null> => serverLookupApi.getProductionSetting(),
 };

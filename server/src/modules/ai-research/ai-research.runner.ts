@@ -9,10 +9,11 @@ import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/as
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { LlmClient, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
 import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
 import { erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
+import { knowledgeSourcesFrom, ResearchKnowledgeFinder } from './ai-research.knowledge';
 import { askResearchJson, withNoThinkHint } from './ai-research.llm';
 import { notifyResearchFinished } from './ai-research.notify';
 import { seoulToday } from '../../common/time/seoul-date';
@@ -38,6 +39,8 @@ import {
   fallbackAudit,
   fallbackPlan,
   isErpSource,
+  isInternalSource,
+  isKnowledgeSource,
   isRecord,
   queryKey,
   readAudit,
@@ -167,6 +170,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     private readonly webTools: AssistantWebToolbox,
     private readonly notifications: NotificationService,
     private readonly erpLookup: ResearchErpLookup,
+    private readonly knowledge: ResearchKnowledgeFinder,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -279,11 +283,12 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const run = await this.repository.findById(this.prisma, ctx.id);
     if (!run) return;
     const endpoint = await this.endpoint();
-    // 우리 ERP 자료가 필요해 보이면 먼저 조회해서, 그 자료를 보고 웹에서 무엇을 찾을지 정한다 (이슈 #435)
+    // 질문에 맞는 사내 지식(KS 규격 등, 이슈 #484)을 먼저 찾고, 우리 ERP 자료가 필요해 보이면 조회해서(이슈 #435) 그것을 보고 웹에서 무엇을 찾을지 정한다
     const sources = storedSources(run.sources);
+    const knowledge = this.gatherKnowledge(run.question, sources);
     const erp = await this.gatherErp(ctx, endpoint, run.employeeId, run.question, sources);
     const partners = erpPartnerNames(sources);
-    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today, storedSeed(run.seed), sources.filter(isErpSource)), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
+    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today, storedSeed(run.seed), sources.filter(isInternalSource)), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
     let plan: AiResearchPlan | null = readPlan(value, run.question, partners)?.plan ?? null;
     const fallback = plan === null;
     plan ??= fallbackPlan(run.question, partners);
@@ -296,11 +301,11 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
         status: AI_RESEARCH_STATUS.AWAITING_APPROVAL,
         plan: plan as unknown as Prisma.InputJsonObject,
         planRevision: revision,
-        researchState: json({ ...EMPTY_STATE, erpChecked: true }),
-        ...(erp.length ? { sources: json(sources) } : {}),
+        researchState: json({ ...EMPTY_STATE, erpChecked: true, knowledgeChecked: true }),
+        ...(erp.length || knowledge.length ? { sources: json(sources) } : {}),
         ...released,
       },
-      [...erp, { type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision, fallback } }],
+      [...knowledge, ...erp, { type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision, fallback } }],
     );
   }
 
@@ -329,6 +334,13 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     }
   }
 
+  /** 사내 지식 찾기 (이슈 #484): 질문(또는 고치기 부탁)에 맞는 KS 규격·용어·매뉴얼·업무를 '사내 지식' 출처로 sources 뒤에 더한다(번호는 이어서, 이미 있으면 빼고). 더한 출처마다 source.added */
+  private gatherKnowledge(focus: string, sources: StoredSource[]): NewResearchEvent[] {
+    const added = knowledgeSourcesFrom(this.knowledge.find(focus), sources, sources.reduce((max, s) => Math.max(max, s.id), 0) + 1);
+    sources.push(...added);
+    return added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } }));
+  }
+
   // ───────────────────────────── 조사 ─────────────────────────────
 
   /**
@@ -346,6 +358,13 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0, partners: [] };
     // 읽기는 이 조사가 모은 출처만 (검색 결과로 받은 주소). 이어서 할 때는 저장된 출처를 다시 알려 준다
     const session = this.webTools.session(run.employeeId, { offerTools: false, maxSearches: Number.MAX_SAFE_INTEGER, maxReads: Number.MAX_SAFE_INTEGER });
+    // 사내 지식(이슈 #484)을 아직 찾지 않았으면(계획을 복사한 다시 조사·이 기능 전 조사) 질문으로, 더 검색하는 고치기면 부탁으로도 찾는다. LLM을 부르지 않는다
+    const knowledgeFocus = [...(!work.state.knowledgeChecked && work.state.revision?.search !== false ? [run.question] : []), ...(work.state.revision?.search === true && work.state.revision.knowledgeChecked !== true ? [work.state.revision.instruction] : [])];
+    if (knowledgeFocus.length) {
+      const events = knowledgeFocus.flatMap((focus) => this.gatherKnowledge(focus, work.sources));
+      work.state = { ...work.state, knowledgeChecked: true, ...(work.state.revision?.search === true ? { revision: { ...work.state.revision, knowledgeChecked: true as const } } : {}) };
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), ...(events.length ? { sources: json(work.sources) } : {}) }, events);
+    }
     // 계획을 복사한 다시 조사처럼 ERP 자료를 아직 살펴보지 않았거나, 더 검색하는 고치기의 부탁이 아직 살펴보지 않은 것이면 한 번 살펴본다 (이슈 #435)
     const askRevision = work.state.revision?.search === true && work.state.revision.erpChecked !== true ? work.state.revision : null;
     // 검색 없는 고치기는 모은 것으로 다시 쓸 뿐이라 조회하지 않는다
@@ -357,7 +376,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     work.partners = erpPartnerNames(work.sources);
     for (const source of work.sources) {
       if (source.erp) session.observeErpResult(source.readText ?? '');
-      else session.rememberVisited(source.url, source.title);
+      else if (!isKnowledgeSource(source)) session.rememberVisited(source.url, source.title);
     }
     // 그만둔 사원의 조사는 이미 모은 ERP 자료도 근거로 쓰지 않는다 (거래처 이름 막기는 위에서 끝났다)
     if (work.sources.some(isErpSource) && !(await this.erpLookup.isActive(run.employeeId))) {
@@ -599,7 +618,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       };
     const known = new Map(sources.map((s) => [urlKey(s.url), s.id]));
     // 출처 수 상한은 웹 출처만 센다 (ERP 조회 출처는 자리를 차지하지 않는다, 이슈 #435)
-    let webCount = sources.filter((s) => !isErpSource(s)).length;
+    let webCount = sources.filter((s) => !isInternalSource(s)).length;
     const added: StoredSource[] = [];
     // 출처로 넣지 못한 결과(이미 있는 주소·꽉 참)도 단계 기록에는 남긴다 (검색어와 그 결과를 함께 근거로 보인다)
     const results: StepNoteResult[] = [];
@@ -664,7 +683,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   private async endpoint(): Promise<Endpoint> {
     const settings = await this.llmSettings.read();
     if (!settings.model) throw new ResearchFailure(RESEARCH_NO_MODEL_REASON);
-    return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model };
+    return { ...llmEndpointOf(settings), model: settings.model };
   }
 
   /** JSON으로 묻는다 (askResearchJson). 끊겼으면(취소·표시 잃음) 결과를 버리고 멈춘다 */

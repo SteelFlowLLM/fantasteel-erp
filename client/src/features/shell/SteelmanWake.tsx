@@ -4,10 +4,10 @@
 // 소리는 우리 음성 서버로만 간다: 브라우저가 소리 크기로 말 조각만 잘라(lib/voiceClip.ts) ERP 서버(stt/wake-clip)로 보내고,
 // 받아쓴 글에서 부르는 말을 찾는다(lib/steelmanWake.ts). 부르는 말이 없는 글은 바로 버린다.
 // 켜 있는 동안 화면 위쪽 띠에 '듣는 중'이 늘 보이고 거기서 바로 끈다. 탭이 숨겨지면 마이크를 닫고, 돌아오면 다시 연다.
+// 띠는 지금 단계(소리 크기·받아쓰는 중·들은 말·물어보는 중·답하는 중)를 보인다 (이슈 #494). 받아쓴 글은 이 화면 메모리에만 몇 초 둔다.
 import type { AiActionCard } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/Button';
-import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { fields, useDirectoryNames } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
@@ -16,15 +16,26 @@ import { useAiCapabilities } from '@/hooks/useAiAssistant';
 import { CARD_KIND_LABEL, isWorkCard } from '@/lib/aiActionCard';
 import { microphoneErrorMessage } from '@/lib/meetingAudio';
 import { speakSteelmanReply } from '@/lib/steelmanVoice';
-import { executeApproved, setWakeAudioContext, transcribe, turnOnScreenControl, wakeMuted } from '@/lib/steelmanWakeActions';
+import { COMMAND_QUIET_MS, CONVERSATION_FOLLOW_UP_MS, FOLLOW_UP_REPLY } from '@/lib/steelmanWake';
+import { executeApproved, flushCommandPrefix, setWakeAudioContext, transcribe, transcribePartial, turnOnScreenControl, wakeMuted, type HeardClip } from '@/lib/steelmanWakeActions';
+import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
+import { setWakeLiveLevel } from '@/lib/wakeOrb';
+import { WakeCalledOrb, WakeLevelMeter, WakeOrb } from '@/features/shell/WakeOrb';
 import { ClipUploadQueue, clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
+import { keepAudioRunning } from '@/lib/wakeAudioUnlock';
 import { useAiChatStore } from '@/stores/useAiChatStore';
+import { useShellStore } from '@/stores/useShellStore';
 import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 
 /** 안내를 띠에 보이는 시간 */
 const NOTICE_MS = 4_000;
 /** 소리 처리 묶음 크기 (48kHz면 약 43ms) */
 const FRAME_SIZE = 2048;
+/**
+ * 명령을 말하는 동안 지금까지의 덩어리를 다시 받아써 중간 글을 보이는 간격 (이슈 #494, 가정값).
+ * 음성 서버가 2~12초 조각을 길이와 거의 상관없이 0.3초 안팎에 받아써(2026-10-22 측정) 30초 말에도 15번이면 된다
+ */
+const PARTIAL_INTERVAL_MS = 2_000;
 
 const store = () => useSteelmanWakeStore.getState();
 
@@ -71,7 +82,9 @@ export function SteelmanWake() {
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     let processor: ScriptProcessorNode | null = null;
-    const uploads = new ClipUploadQueue<Blob>((wav) => transcribe(wav, () => cancelled, () => screenControlRef.current), () => cancelled);
+    // 멈춘 AudioContext 깨우기를 그만두는 함수 (마이크를 연 뒤 정해진다)
+    let stopUnlock: (() => void) | null = null;
+    const uploads = new ClipUploadQueue<{ wav: Blob; clip: HeardClip }>((item) => transcribe(item.wav, () => cancelled, () => screenControlRef.current, item.clip), () => cancelled);
     store().setStatus('starting');
     (async () => {
       try {
@@ -84,45 +97,80 @@ export function SteelmanWake() {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      context = new AudioContext();
-      setWakeAudioContext(context);
-      const source = context.createMediaStreamSource(stream);
+      const audio = new AudioContext();
+      context = audio;
+      setWakeAudioContext(audio);
+      const source = audio.createMediaStreamSource(stream);
       // AudioWorklet은 모듈 파일이 따로 필요해서, 짧은 말 조각에는 충분한 ScriptProcessor를 쓴다
-      processor = context.createScriptProcessor(FRAME_SIZE, 1, 1);
-      const segmenter = new VoiceSegmenter({ sampleRate: context.sampleRate });
-      const rate = context.sampleRate;
+      processor = audio.createScriptProcessor(FRAME_SIZE, 1, 1);
+      const segmenter = new VoiceSegmenter({ sampleRate: audio.sampleRate, minStartRms: WAKE_START_RMS[store().sensitivity] });
+      const rate = audio.sampleRate;
+      let partialAt = 0;
+      let quietSince: number | null = null;
       processor.onaudioprocess = (event) => {
         if (wakeMuted()) {
           segmenter.reset();
           return;
         }
+        const wake = store();
+        // 민감도는 듣는 중에도 바꿀 수 있다 (마이크를 다시 열지 않는다)
+        segmenter.minStartRms = WAKE_START_RMS[wake.sensitivity];
+        // "철강맨"을 들었거나(대답·이어 말하기) 잘린 명령을 이어 듣는 중이면 말이 끝날 때까지 한 덩어리로 듣는다 (이슈 #494)
+        segmenter.mode = wake.called || wake.commandPrefix ? 'command' : 'wake';
         const clip = segmenter.feed(new Float32Array(event.inputBuffer.getChannelData(0)));
-        if (store().hearing !== segmenter.speaking) store().setHearing(segmenter.speaking);
+        if (wake.hearing !== segmenter.speaking) wake.setHearing(segmenter.speaking);
+        // 원·막대는 이 값을 화면 그리기 때마다 읽는다 (스토어를 바꾸지 않아 다시 그리지 않는다)
+        setWakeLiveLevel(segmenter.lastRms, segmenter.startThreshold);
+        const now = performance.now();
+        // 명령을 말하는 동안 2초마다 지금까지의 덩어리를 받아써 띠에 보인다 (1초보다 짧으면 보내지 않는다)
+        if (segmenter.speaking && segmenter.mode === 'command') {
+          if (now - partialAt >= PARTIAL_INTERVAL_MS) {
+            partialAt = now;
+            const soFar = segmenter.snapshot();
+            if (soFar && soFar.length >= rate) void transcribePartial(clipToWav(soFar, rate), () => cancelled);
+          }
+        } else partialAt = now;
+        // 잘린 명령 뒤 말이 더 없으면(조용하고 받아쓸 것도 없음) 들은 데까지 묻는다
+        if (wake.commandPrefix && !segmenter.speaking && !wake.transcribing && uploads.size === 0) {
+          quietSince ??= now;
+          if (now - quietSince >= COMMAND_QUIET_MS) {
+            quietSince = null;
+            flushCommandPrefix(screenControlRef.current);
+          }
+        } else quietSince = null;
         if (!clip) return;
-        uploads.push(clipToWav(clip, rate));
+        uploads.push({ wav: clipToWav(clip, rate), clip: { ...segmenter.lastClip } });
       };
       source.connect(processor);
-      processor.connect(context.destination);
+      processor.connect(audio.destination);
       store().setStatus('listening', null);
+      // 사용자가 누르지 않은 때 만든 AudioContext는 브라우저가 멈춰 두어 '듣는 중'인데 아무것도 듣지 못한다.
+      // 깨워 보고 안 되면 띠에서 화면을 한 번 눌러 달라고 한다 (이슈 #494, lib/wakeAudioUnlock.ts)
+      stopUnlock = keepAudioRunning(audio, (blocked) => store().setAudioBlocked(blocked), window);
     })();
     return () => {
       cancelled = true;
       if (processor) processor.onaudioprocess = null;
       processor?.disconnect();
       stream?.getTracks().forEach((track) => track.stop());
+      stopUnlock?.();
       void context?.close();
       setWakeAudioContext(null);
       store().setHearing(false);
+      store().setAudioBlocked(false);
+      store().setTranscribing(false);
+      setWakeLiveLevel(0, 0);
     };
   }, [active, visible]);
 
   useSpeakVoiceAnswers();
-  useExpireTimers();
+  useExpireTimers(screenControlRef);
 
   if (!active) return null;
   return (
     <>
       <SteelmanWakeBar />
+      <WakeCalledOrb />
       <VoiceApprovalDialog />
       <ScreenControlConfirmDialog />
     </>
@@ -130,11 +178,18 @@ export function SteelmanWake() {
 }
 
 /** "철강맨"만 부른 뒤 기다리기·말로 승인·안내가 제때 사라지게 한다 */
-function useExpireTimers(): void {
+function useExpireTimers(screenControlRef: { readonly current: boolean }): void {
   const called = useSteelmanWakeStore((state) => state.called);
+  const commandPrefix = useSteelmanWakeStore((state) => state.commandPrefix);
   const approval = useSteelmanWakeStore((state) => state.approval);
   const notice = useSteelmanWakeStore((state) => state.notice);
   const screenConfirm = useSteelmanWakeStore((state) => state.screenConfirm);
+  const activity = useSteelmanWakeStore((state) => state.activity);
+  useEffect(() => {
+    if (!activity) return;
+    const timer = window.setTimeout(() => store().clearActivity(activity.id), Math.max(0, activity.until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [activity]);
   useEffect(() => {
     if (!screenConfirm) return;
     const timer = window.setTimeout(() => {
@@ -146,11 +201,24 @@ function useExpireTimers(): void {
   }, [screenConfirm]);
   useEffect(() => {
     if (!called) return;
-    const timer = window.setTimeout(() => {
-      if (store().called === called) store().setCalled(null);
-    }, Math.max(0, called.until - Date.now()));
+    let timer = 0;
+    const expire = () => {
+      if (store().called !== called) return;
+      // 말하는 중이거나 받아쓰는 중이면 그 말이 끝날 때까지 기다린다 (마감 직전에 시작한 질문이 버려지지 않게)
+      if (store().hearing || store().transcribing) {
+        timer = window.setTimeout(expire, 300);
+        return;
+      }
+      store().setCalled(null);
+    };
+    timer = window.setTimeout(expire, Math.max(0, called.until - Date.now()));
     return () => window.clearTimeout(timer);
   }, [called]);
+  useEffect(() => {
+    if (!commandPrefix) return;
+    const timer = window.setTimeout(() => flushCommandPrefix(screenControlRef.current), Math.max(0, commandPrefix.until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [commandPrefix, screenControlRef]);
   useEffect(() => {
     if (!approval) return;
     const timer = window.setTimeout(() => {
@@ -175,6 +243,9 @@ function useSpeakVoiceAnswers(): void {
         const voiceId = store().voiceQuestionId;
         if (!voiceId || previous.pendingId !== voiceId || state.pendingId === voiceId) return;
         store().setVoiceQuestionId(null);
+        store().showActivity({ kind: 'answered' });
+        // 이어 말하기: 답이 끝나면 잠깐 부르는 말 없이 다음 질문을 받는다 ("그만·고마워·됐어"면 끝, 이슈 #494)
+        store().setCalled({ reply: FOLLOW_UP_REPLY, until: Date.now() + CONVERSATION_FOLLOW_UP_MS, followUp: true });
         const last = state.entries.at(-1);
         if (last?.role === 'assistant') speakSteelmanReply(last.content);
       }),
@@ -182,39 +253,88 @@ function useSpeakVoiceAnswers(): void {
   );
 }
 
+/** 띠·패널 머리에 보일 지금 단계 한 줄 (이슈 #494). 남은 초가 줄어들게 기다리는 동안은 자주 다시 그린다 */
+export function useWakeBarLine(): ReturnType<typeof wakeBarLine> {
+  const status = useSteelmanWakeStore((state) => state.status);
+  const audioBlocked = useSteelmanWakeStore((state) => state.audioBlocked);
+  const hearing = useSteelmanWakeStore((state) => state.hearing);
+  const transcribing = useSteelmanWakeStore((state) => state.transcribing);
+  const called = useSteelmanWakeStore((state) => state.called);
+  const activity = useSteelmanWakeStore((state) => state.activity);
+  const voiceQuestionId = useSteelmanWakeStore((state) => state.voiceQuestionId);
+  const partialText = useSteelmanWakeStore((state) => state.partialText);
+  const continuing = useSteelmanWakeStore((state) => state.commandPrefix !== null);
+  const answering = useAiChatStore((state) => voiceQuestionId !== null && state.pendingId === voiceQuestionId);
+  const now = useTicking(called !== null);
+  return wakeBarLine({ status, audioBlocked, hearing, transcribing, called, activity, answering, partialText, continuing, now });
+}
+
+/** ticking이면 0.25초마다 지금 시각을 바꾼다 */
+function useTicking(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    if (!ticking) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [ticking]);
+  return now;
+}
+
+const LINE_TONE_CLASS = { idle: 'text-cap', busy: 'text-cap font-medium', action: 'text-cap font-bold', problem: 'text-cap font-medium text-danger' } as const;
+
 function SteelmanWakeBar() {
   const status = useSteelmanWakeStore((state) => state.status);
   const hearing = useSteelmanWakeStore((state) => state.hearing);
   const problem = useSteelmanWakeStore((state) => state.problem);
   const called = useSteelmanWakeStore((state) => state.called);
   const notice = useSteelmanWakeStore((state) => state.notice);
+  const activity = useSteelmanWakeStore((state) => state.activity);
+  const sensitivity = useSteelmanWakeStore((state) => state.sensitivity);
   const voiceApproval = useSteelmanWakeStore((state) => state.voiceApproval);
   const companyVoiceApproval = useSteelmanWakeStore((state) => state.company.voiceApproval);
-  const label = status === 'starting' ? '마이크를 여는 중…' : status === 'paused' ? '탭이 숨겨져 잠깐 쉬어요' : status === 'error' ? '듣지 못하고 있어요' : hearing ? '듣는 중 · 말소리를 잡았어요' : '듣는 중 · "철강맨, 재고 알려줘"처럼 불러 주세요';
+  const panelOpen = useShellStore((state) => state.aiPanelOpen);
+  const line = useWakeBarLine();
   return (
     <div data-ai-skip="" role="status" aria-live="polite" className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-steelman bg-steelman-soft px-4 py-1.5 text-sm text-steelman-ink">
       <span className={`inline-flex items-center gap-1.5 font-semibold ${hearing ? 'animate-pulse' : ''}`}>
-        <Icon name="mic" size="sm" />
+        <WakeOrb size="sm" />
         철강맨 부르기
       </span>
-      <span className="text-cap">{label}</span>
-      {called ? (
-        <span className="inline-flex items-center gap-1.5">
-          <SteelmanAiStatus size="sm" status="listening" seedKey={called.reply} className="h-7 w-8" />
-          <b className="rounded-[10px] border-2 border-steelman bg-surface px-2 py-0.5 text-sm">{called.reply}</b>
-        </span>
+      {status === 'listening' ? <WakeLevelMeter /> : null}
+      {called ? <SteelmanAiStatus size="sm" status="listening" seedKey={called.reply} className="h-7 w-8" /> : null}
+      <span className={LINE_TONE_CLASS[line.tone]} data-wake-line="">
+        {line.text}
+      </span>
+      {activity?.kind === 'answered' && !panelOpen ? (
+        <Button size="sm" variant="ghost" onClick={() => useShellStore.getState().showAiPanel()}>
+          답 보기
+        </Button>
       ) : null}
       {problem ? <span className="text-cap font-medium text-danger">{problem}</span> : null}
       {notice ? <span className="text-cap font-medium">{notice.text}</span> : null}
       {/* 관리자가 말로 승인을 꺼 두면 칸을 보이지 않는다 (사원의 켜기 설정은 남겨 두어 회사가 다시 켜면 그대로) */}
+      <label className="ml-auto inline-flex items-center gap-1 text-cap" title="높을수록 작은 목소리도 잡아요(주변 소리도 더 잡아요). 소리 크기 막대가 가운데 금을 넘어야 말로 잡아요">
+        민감도
+        <select
+          aria-label="말 시작 민감도"
+          className="rounded-sm border border-steelman bg-surface px-1 py-0.5 text-cap"
+          value={sensitivity}
+          onChange={(event) => store().setSensitivity(event.target.value as WakeSensitivity)}
+        >
+          {WAKE_SENSITIVITIES.map((value) => (
+            <option key={value} value={value}>
+              {WAKE_SENSITIVITY_LABEL[value]}
+            </option>
+          ))}
+        </select>
+      </label>
       {companyVoiceApproval ? (
-        <label className="ml-auto inline-flex items-center gap-1 text-cap" title="켜면 '철강맨, 이거 실행해줘' → '실행'으로 업무·일정·구매요청 초안 카드를 실행해요. 이 브라우저에 내 것만 저장돼요">
+        <label className="inline-flex items-center gap-1 text-cap" title="켜면 '철강맨, 이거 실행해줘' → '실행'으로 업무·일정·구매요청 초안 카드를 실행해요. 이 브라우저에 내 것만 저장돼요">
           <input type="checkbox" checked={voiceApproval} onChange={(event) => store().setVoiceApproval(event.target.checked)} />
           말로 승인 허용
         </label>
-      ) : (
-        <span className="ml-auto" />
-      )}
+      ) : null}
       <Button size="sm" icon="x-circle" onClick={() => store().setEnabled(false)}>
         끄기
       </Button>

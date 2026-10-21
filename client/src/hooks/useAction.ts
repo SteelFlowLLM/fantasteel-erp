@@ -1,7 +1,8 @@
 // 변경 요청 공통 훅: 실패하면 오류를 토스트로 보이고, 성공하면 조회를 무효화하고 안내한다 (옛 hooks/useApi.ts).
 // const save = useAction(salesOrderApi.create, { success: '수주를 등록했어요' });
-// 한 번의 변경이 여러 화면(수주·재고·LOT·알림 배지 …)에 걸치므로, 성공하면 모든 조회를 무효화한다.
+// 한 번의 변경이 여러 화면(수주·재고·LOT·알림 배지 …)에 걸치므로, 성공하면 업무 데이터 조회를 모두 무효화한다 (세션·검색·AI 연결 같은 독립 조회는 제외, api/queryRefresh.ts).
 import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { refreshAfterAction } from '@/api/queryRefresh';
 import { toast } from '@/stores/useToastStore';
 
 export interface ActionOptions<TInput, TOutput> {
@@ -19,8 +20,7 @@ export function useAction<TInput, TOutput>(fn: (input: TInput) => Promise<TOutpu
   return useMutation<TOutput, unknown, TInput>({
     mutationFn: fn,
     onSuccess: async (data, input) => {
-      await Promise.all((options.invalidate ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })));
-      await queryClient.invalidateQueries();
+      await refreshAfterAction(queryClient, options.invalidate);
       if (options.success) toast.ok(typeof options.success === 'function' ? options.success(data) : options.success);
       options.onSuccess?.(data, input);
     },

@@ -30,7 +30,7 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { llmFailureException, noModelException } from '../llm/llm-failure';
 import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmImage, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { BrowserSettingsStore } from '../llm/browser-settings.store';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { assistantProfile } from '../llm/llm-profiles';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { actionCardExamplesFor } from './action-card-examples';
@@ -301,7 +301,7 @@ export class AiAssistantService {
     const wake = await this.wakeSettings.read();
     const steelmanWake = { available: wake.enabled, voiceApproval: wake.voiceApproval };
     if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion, drive, steelmanWake };
-    const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
+    const caps = await this.llm.modelCapabilities(llmEndpointOf(settings), settings.model);
     return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion, drive, steelmanWake };
   }
 
@@ -336,7 +336,7 @@ export class AiAssistantService {
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
     const saving = options.interactive === true && (input.saveThread === true || input.threadId !== undefined);
-    const endpoint: LlmEndpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    const endpoint: LlmEndpoint = llmEndpointOf(settings);
     // 지난 대화는 모델 문맥 길이만큼 (이슈 #412). 넘치는 옛 이야기는 지난 대화 찾기 도구로 읽는다
     const budget = historyBudget(await this.llm.modelContextLength(endpoint, model));
     const history = recentHistory(saving ? (input.threadId === undefined ? [] : await this.chatThreads.historyFor(user, input.threadId, budget.maxTurns)) : (input.history ?? []), budget);

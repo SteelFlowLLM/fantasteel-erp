@@ -29,7 +29,8 @@ export type DriveReadOutcome =
 /** GoogleDriveService 중 읽기에 쓰는 것 (시험은 가짜를 넣는다) */
 export interface DriveSource {
   assertReady(): Promise<string>;
-  searchFiles(query: string | null, kind: DriveFileListKind, limit: number): Promise<DriveFileView[]>;
+  /** content: 이름뿐 아니라 내용으로도 찾는다 (기본 true) */
+  searchFiles(query: string | null, kind: DriveFileListKind, limit: number, content?: boolean): Promise<DriveFileView[]>;
   readForAssistant(fileId: string): Promise<{ file: CheckedDriveFile; plan: DriveReadPlan; buffer: Buffer | null }>;
 }
 
