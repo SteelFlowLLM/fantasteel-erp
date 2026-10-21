@@ -147,6 +147,8 @@ export type ReportInline = { kind: 'text'; text: string } | { kind: 'cite'; id: 
 export type ReportBlock =
   | { kind: 'heading'; level: number; inline: ReportInline[] }
   | { kind: 'paragraph'; inline: ReportInline[] }
+  /** 마크다운 인용(`> `). 서버가 맨 위에 다는 '완전하지 않아요' 알림이 이 모양이다 */
+  | { kind: 'quote'; inline: ReportInline[] }
   | { kind: 'list'; items: ReportInline[][] };
 
 /** `[1]`, `[1, 3]` 같은 인용. 번호가 출처에 있을 때만 연결한다 */
@@ -187,14 +189,17 @@ export function stripSourceSection(report: string): string {
   return report.trimEnd();
 }
 
-/** 마크다운 보고서를 제목·문단·목록으로만 나눈다. 표·코드·HTML은 줄 그대로 글이다 */
+/** 마크다운 보고서를 제목·문단·인용·목록으로만 나눈다. 표·코드·HTML은 줄 그대로 글이다 */
 export function reportBlocks(report: string, sources: readonly Pick<AiResearchSourceView, 'id' | 'title' | 'url'>[]): ReportBlock[] {
   const blocks: ReportBlock[] = [];
   let paragraph: string[] = [];
+  let quote: string[] = [];
   let list: string[] = [];
   const flushParagraph = () => {
     if (paragraph.length) blocks.push({ kind: 'paragraph', inline: inlineOf(paragraph.join('\n'), sources) });
     paragraph = [];
+    if (quote.length) blocks.push({ kind: 'quote', inline: inlineOf(quote.join('\n'), sources) });
+    quote = [];
   };
   const flushList = () => {
     if (list.length) blocks.push({ kind: 'list', items: list.map((item) => inlineOf(item, sources)) });
@@ -204,6 +209,7 @@ export function reportBlocks(report: string, sources: readonly Pick<AiResearchSo
     const line = raw.trim();
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     const item = /^(?:[-*+]|\d{1,3}[.)])\s+(.*)$/.exec(line);
+    const quoted = /^>\s?(.*)$/.exec(line);
     if (!line || /^[-*_]{3,}$/.test(line)) {
       flushParagraph();
       flushList();
@@ -211,11 +217,16 @@ export function reportBlocks(report: string, sources: readonly Pick<AiResearchSo
       flushParagraph();
       flushList();
       blocks.push({ kind: 'heading', level: Math.min(heading[1].length, 4), inline: inlineOf(heading[2], sources) });
+    } else if (quoted) {
+      flushList();
+      if (paragraph.length) flushParagraph();
+      quote.push(quoted[1]);
     } else if (item) {
       flushParagraph();
       list.push(item[1]);
     } else {
       flushList();
+      if (quote.length) flushParagraph();
       paragraph.push(line);
     }
   }

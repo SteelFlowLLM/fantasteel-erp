@@ -119,6 +119,12 @@ describe('보고서 인용 연결', () => {
     expect(blocks[2]).toMatchObject({ kind: 'list' });
     expect((blocks[2] as { items: unknown[] }).items).toHaveLength(2);
   });
+  it('맨 위 알림 같은 인용(>)은 > 없이 인용 덩이로 나눈다 (#519)', () => {
+    const report = ['> **이 보고서는 완전하지 않아요.** AI 응답을 받지 못해 조사를 멈췄어요.', '> 그때까지 모은 출처로 정리했어요.', '본문이에요'].join('\n');
+    const blocks = reportBlocks(report, sources);
+    expect(blocks.map((b) => b.kind)).toEqual(['quote', 'paragraph']);
+    expect(blocks[0]).toEqual({ kind: 'quote', inline: [{ kind: 'text', text: '이 보고서는 완전하지 않아요. AI 응답을 받지 못해 조사를 멈췄어요.\n그때까지 모은 출처로 정리했어요.' }] });
+  });
   it('HTML은 글 그대로 남고, 위험한 주소는 링크가 되지 않는다', () => {
     const rows = sourceRows(sources);
     expect(rows[0].title).toBe('철강 시장 <b>보고</b>');

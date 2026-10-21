@@ -241,7 +241,9 @@ function Body({ run }: { run: AiResearchRunView }) {
   const extend = useAction(() => aiResearchApi.extend(run.id), { success: '더 조사를 시작했어요' });
   const askAboutResearch = useShellStore((state) => state.askAboutResearch);
   const gaps = run.researchState?.gaps ?? [];
-  const incomplete = run.reportTruncated || (run.stepsUsed >= run.budget.maxSteps && gaps.length > 0);
+  // 다 마치지 못하고(LLM 실패·30분 상한) 그때까지 모은 것으로 정리한 보고서 (#519)
+  const stopped = Boolean(run.incompleteReason);
+  const incomplete = stopped || run.reportTruncated || (run.stepsUsed >= run.budget.maxSteps && gaps.length > 0);
 
   return (
     <>
@@ -250,7 +252,7 @@ function Body({ run }: { run: AiResearchRunView }) {
         title={run.title ?? run.question}
         actions={
           <>
-            <AiResearchStatusBadge status={run.status} />
+            <AiResearchStatusBadge status={run.status} incompleteReason={run.incompleteReason} />
             {canRenameRun(run) ? (
               <Button size="sm" icon="edit" onClick={() => setRenaming(true)}>
                 제목 바꾸기
@@ -310,7 +312,8 @@ function Body({ run }: { run: AiResearchRunView }) {
                 ) : undefined
               }
             >
-              <b>{run.reportTruncated ? '보고서가 길이 한도에 걸려 끝까지 쓰지 못했어요' : '정해 둔 단계를 다 써서 아직 다 알아내지 못했어요'}</b>
+              <b>{run.reportTruncated ? '보고서가 길이 한도에 걸려 끝까지 쓰지 못했어요' : stopped ? '조사를 다 마치지 못하고 그때까지 모은 출처로 정리했어요' : '정해 둔 단계를 다 써서 아직 다 알아내지 못했어요'}</b>
+              {stopped ? <div className="mt-0.5 text-cap">{run.incompleteReason} 다시 조사하면 처음부터 다시 찾아요.</div> : null}
               <div className="mt-0.5 text-cap">{progressText(run)}</div>
               {gaps.length ? (
                 <ul className="mt-1 flex list-disc flex-col pl-5 text-cap">
