@@ -142,6 +142,18 @@ describe('LlmClient.chatJson', () => {
     expect(modelsMock).not.toHaveBeenCalled();
   });
 
+  it('모델 목록 요청은 15초까지 기다린다: 로컬 LLM이 바빠도 연결 확인이 5초 만에 끊기지 않는다 (이슈 #510)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const signals: AbortSignal[] = [];
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      signals.push(init.signal as AbortSignal);
+      throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    });
+    const error = await new LlmClient().listModels(endpoint).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'TIMEOUT' });
+    expect((error as LlmRequestError).message).toContain('15초 안에 응답이 없어요');
+  });
+
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {
     expect(parseJsonContent('```\n[1,2]\n```')).toEqual([1, 2]);
   });

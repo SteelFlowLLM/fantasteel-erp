@@ -5,8 +5,11 @@ import { createMetadataGuardedAgent, isBlockedLookupError, netFetch } from '../.
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
-/** 모델 목록은 바로 와야 하고, 첫 대화는 LM Studio가 모델을 메모리에 올리느라 오래 걸릴 수 있다 */
-const MODELS_TIMEOUT_MS = 5_000;
+/**
+ * 모델 목록·서버 종류 확인의 제한 시간. 로컬 LLM이 답을 만드는 중이면 목록 요청도 늦게 와서 5초는 '연결 확인'을 '연결 안 됨'으로 만들었다(이슈 #510).
+ * 첫 대화는 LM Studio가 모델을 메모리에 올리느라 더 오래 걸릴 수 있다
+ */
+const MODELS_TIMEOUT_MS = 15_000;
 const CHAT_TIMEOUT_MS = 120_000;
 /** 모델의 생각 설정 지원 여부는 요청마다 묻지 않는다. 모델을 바꾸거나 새로 받으면 이 시간 안에 반영된다 */
 const MODEL_INFO_TTL_MS = 60_000;
