@@ -48,7 +48,7 @@ function stepsOf(detail: RequisitionDetail): StepItem[] {
   return [
     { key: 'registered', label: '등록', state: 'done' },
     { key: 'approval', label: status === 'REJECTED' ? '부서장 승인 · 반려' : '부서장 승인', state: status === 'WAITING_APPROVAL' || status === 'REJECTED' ? 'run' : 'done' },
-    { key: 'ordered', label: '발주', state: status === 'ORDERED' ? 'done' : status === 'APPROVED' ? 'run' : 'todo' },
+    { key: 'ordered', label: status === 'ORDER_CANCELLED' ? '발주 · 취소' : '발주', state: status === 'ORDERED' || status === 'ORDER_CANCELLED' ? 'done' : status === 'APPROVED' ? 'run' : 'todo' },
   ];
 }
 
@@ -62,6 +62,8 @@ function stageText(detail: RequisitionDetail): string {
       return `${detail.approverName ?? '부서장'} 반려 ${fmtDateTime(detail.rejectedAt)} · 요청자가 고쳐 다시 요청할 수 있어요`;
     case 'ORDERED':
       return `발주 완료 · ${[...new Set(detail.purchaseOrderLines.map((l) => l.purchaseOrderNo))].join(', ')}`;
+    case 'ORDER_CANCELLED':
+      return `발주 취소 · ${[...new Set(detail.purchaseOrderLines.map((l) => l.purchaseOrderNo))].join(', ')} · 같은 원료가 필요하면 새로 구매요청해요`;
   }
 }
 
@@ -377,5 +379,7 @@ function lockText(detail: RequisitionDetail, canCreate: boolean): string {
       return '승인된 구매요청이에요 · 구매 담당 발주 대기';
     case 'ORDERED':
       return '발주까지 끝난 요청이에요';
+    case 'ORDER_CANCELLED':
+      return '발주가 취소된 요청이에요 · 이 요청은 다시 발주하지 않아요';
   }
 }

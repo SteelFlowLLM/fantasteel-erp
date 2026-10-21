@@ -68,9 +68,11 @@ const order = (id: number, purchaseOrderStatus: PurchaseOrderView['purchaseOrder
   totalOrderedTon: '5.000',
   totalReceivedTon: '0.000',
   totalRemainingTon: remainingTon,
+  totalClosedTon: '0.000',
+  statusChange: null,
   createdAt: '2026-10-06T01:00:00.000Z',
   updatedAt: '2026-10-06T01:00:00.000Z',
-  items: [{ purchaseOrderItemId: id * 10, purchaseRequisitionId: 1, purchaseRequisitionNo: 'PR-2610-0001', itemId: 41, itemCode: 'SMN01', itemName: '실리코망가니즈', orderedTon: '5.000', expectedReceiptDate, receivedTon: '0.000', remainingTon }],
+  items: [{ purchaseOrderItemId: id * 10, purchaseRequisitionId: 1, purchaseRequisitionNo: 'PR-2610-0001', itemId: 41, itemCode: 'SMN01', itemName: '실리코망가니즈', orderedTon: '5.000', expectedReceiptDate, receivedTon: '0.000', remainingTon, closedTon: '0.000' }],
 });
 
 /** 서버 로그인 사원. 권한만 테스트마다 다르게 준다 */
@@ -92,7 +94,7 @@ const respondAs = (user: AuthUser) => (c: ServerCall) => (c.path === '/auth/me' 
 function respond(c: ServerCall) {
   if (c.path === '/mrp/requirements') return ok(mrp);
   if (c.path === '/purchase-requisitions') return ok(page([requisition(1, 'WAITING_APPROVAL'), requisition(2, 'WAITING_APPROVAL'), requisition(3, 'ORDERED')]));
-  if (c.path === '/purchase-orders') return ok(page([order(1, 'CONFIRMED', '5.000', '2026-10-15'), order(2, 'RECEIVED', '0.000', '2026-10-01'), order(3, 'PARTIALLY_RECEIVED', '2.500', '2026-10-10')]));
+  if (c.path === '/purchase-orders') return ok(page([order(1, 'CONFIRMED', '5.000', '2026-10-15'), order(2, 'RECEIVED', '0.000', '2026-10-01'), order(3, 'PARTIALLY_RECEIVED', '2.500', '2026-10-10'), order(4, 'CLOSED', '0.000', '2026-10-05'), order(5, 'CANCELLED', '0.000', '2026-10-04')]));
   if (c.path === '/goods-receipts') return ok(page([]));
   return undefined;
 }
@@ -110,7 +112,7 @@ describe('대시보드 구매 위젯 서버 모드', () => {
     expect(data.materials[0]).toMatchObject({ itemCode: 'SMN01', onHandTon: '3.500', scheduledReceiptTon: '4.000', coveredScheduledTon: '1.000', grossTon: '5.000', netTon: '0.500', firstShortageDate: '2026-10-20' });
   });
 
-  it('구매 진행: 구매요청 상태별 건수와 입고가 남은 발주(가장 이른 입고 예정일 순)', async () => {
+  it('구매 진행: 구매요청 상태별 건수와 입고가 남은 발주(가장 이른 입고 예정일 순, 잔량 마감·발주 취소 제외)', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchase, respondAs(PURCHASE_USER));
     const data = await dashboardApi.widget('PURCHASE_PROGRESS');
 

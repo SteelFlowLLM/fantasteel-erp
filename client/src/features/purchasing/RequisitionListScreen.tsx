@@ -24,7 +24,7 @@ import { usePurchaseRequisitionList } from '@/hooks/usePurchaseRequisitions';
 import { fmtMD, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-const STATUS_FILTERS: readonly PurchaseRequisitionStatus[] = ['WAITING_APPROVAL', 'APPROVED', 'REJECTED', 'ORDERED'];
+const STATUS_FILTERS: readonly PurchaseRequisitionStatus[] = ['WAITING_APPROVAL', 'APPROVED', 'REJECTED', 'ORDERED', 'ORDER_CANCELLED'];
 
 function statusLine(purchaseRequisition: RequisitionView): string {
   switch (purchaseRequisition.purchaseRequisitionStatus) {
@@ -36,6 +36,8 @@ function statusLine(purchaseRequisition: RequisitionView): string {
       return `반려 · ${purchaseRequisition.approverName ?? ''} · 고쳐 다시 요청 필요`;
     case 'ORDERED':
       return `승인 ${purchaseRequisition.approverName ?? ''} · 발주 완료`;
+    case 'ORDER_CANCELLED':
+      return `발주 취소 · ${purchaseRequisition.purchaseOrderNo ?? ''} · 필요하면 새로 요청`;
   }
 }
 

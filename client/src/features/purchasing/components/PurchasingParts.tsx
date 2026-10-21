@@ -19,6 +19,8 @@ const PURCHASE_ORDER_TONE: Record<PurchaseOrderStatus, BadgeTone> = {
   CONFIRMED: 'run',
   PARTIALLY_RECEIVED: 'wait',
   RECEIVED: 'ok',
+  CANCELLED: 'neutral',
+  CLOSED: 'neutral',
 };
 
 export function RequisitionStatusBadge({ status }: { status: PurchaseRequisitionStatus }) {
