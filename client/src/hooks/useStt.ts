@@ -11,6 +11,20 @@ export function useSteelmanWakeSettings() {
   return useQuery({ queryKey: sttKeys.wakeSettings(), queryFn: sttApi.getWakeSettings });
 }
 
+/**
+ * 저장된 음성 설정으로 음성 서버에 닿는지 (철강맨 부르기 카드, 이슈 #457). 1초 무음을 실제로 보내 보므로 탭을 열었을 때만 부른다.
+ * 연결 확인은 설정 사용 권한(ORG_MANAGE USE)이 있어야 해서 enabled로 막는다
+ */
+export function useSttSavedConnection(enabled: boolean) {
+  return useQuery({
+    queryKey: sttKeys.savedConnection(),
+    queryFn: async () => sttApi.testConnection({ baseUrl: (await sttApi.getSettings()).baseUrl }),
+    enabled,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useSttConnectionTest() {
   return useMutation({ mutationFn: sttApi.testConnection });
 }

@@ -11,6 +11,7 @@ import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
 import { Input } from '@/components/Input';
 import { QueryBoundary } from '@/components/QueryBoundary';
+import { Segmented } from '@/components/Tabs';
 import { useAction } from '@/hooks/useAction';
 import { useLlmBrowserSettings } from '@/hooks/useLlm';
 import { parseStartSiteInput } from '@/lib/aiBrowser';
@@ -107,11 +108,22 @@ function BrowserSettingsForm({ saved, canEdit }: { saved: LlmBrowserSettingsView
             {problem ? <p role="alert" className="text-cap text-danger">{problem}</p> : null}
           </div>
         </Field>
-        <Field label="모든 사이트 열기" hint="켜면 검색 결과·질문·시작 사이트에 없는 바깥 주소도 열어요. 사내 주소 막기, 주소에 회사 정보 막기, 로그인·결제·폼 제출 막기는 그대로예요">
-          <label className="inline-flex items-center gap-2 text-sm text-ink-2">
-            <input type="checkbox" checked={openAll} disabled={!canEdit} onChange={(e) => setOpenAll(e.target.checked)} />
-            {openAll ? '켜짐 — 어떤 바깥 사이트든 열어요' : '꺼짐 — 목록·검색 결과·질문에 있는 주소만 열어요'}
-          </label>
+        <Field
+          label="모든 사이트 열기"
+          hint={`${openAll ? '어떤 바깥 사이트든 열어요' : '목록·검색 결과·질문에 있는 주소만 열어요'}. 사내 주소 막기, 주소에 회사 정보 막기, 로그인·결제·폼 제출 막기는 그대로예요`}
+        >
+          {/* 같은 탭의 철강맨 부르기 카드처럼 [켜기 | 끄기]를 둘 다 보인다. 권한이 없으면 fieldset이 단추를 막는다 */}
+          <fieldset disabled={!canEdit} className="min-w-0">
+            <Segmented<'on' | 'off'>
+              ariaLabel="모든 사이트 열기"
+              items={[
+                { key: 'on', label: '켜기' },
+                { key: 'off', label: '끄기' },
+              ]}
+              active={openAll ? 'on' : 'off'}
+              onChange={(key) => setOpenAll(key === 'on')}
+            />
+          </fieldset>
         </Field>
         {openAll ? (
           <Banner tone="wait" icon="alert">
@@ -120,6 +132,7 @@ function BrowserSettingsForm({ saved, canEdit }: { saved: LlmBrowserSettingsView
         ) : null}
       </CardBody>
       <CardFoot>
+        {dirty ? <span className="text-cap font-medium text-wait">저장해야 적용돼요</span> : null}
         <Button
           className="ml-auto"
           variant="primary"

@@ -4,7 +4,7 @@
 // 방식은 서버에 저장하지 않는다: 주소로 짐작하고, 바꾸면 주소·모델 기본값만 채운다.
 // AI 연결(LLM) 카드와 같은 권한(ORG_MANAGE)을 쓴다(가정). LLM을 API로 바꿔도 음성은 이 설정을 따로 쓴다.
 // 모델은 연결 확인으로 받은 목록(사이드카의 GET /v1/models, 이슈 #445)이 있으면 고르기 칸, 없으면 직접 입력이다.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { STT_API_BASE_URL, type SttSettingsView } from '@fantasteel/shared';
 import { sttApi, sttKeys } from '@/api/stt';
 import { Badge } from '@/components/Badge';
@@ -18,16 +18,17 @@ import { useAction } from '@/hooks/useAction';
 import { STT_HOST_KIND_LABEL, STT_MODE_LABEL, classifySttHost, sttModeDefaults, sttModeOf, sttModelChoices, sameOriginUrl, type SttMode } from '@/lib/sttHost';
 import { useSttConnectionTest, useSttSettings, useSttTranscribeTest } from '@/hooks/useStt';
 
-export function SttSettingsCard({ canEdit }: { canEdit: boolean }) {
+/** active: 음성 인식 탭이 보이는 중. 처음 보일 때 저장된 설정으로 연결을 확인한다 (AI 모델 탭이 열 때 확인하는 것과 같게) */
+export function SttSettingsCard({ canEdit, active }: { canEdit: boolean; active: boolean }) {
   const settings = useSttSettings();
   return (
     <QueryBoundary query={settings} loadingLabel="음성 인식 설정을 불러오는 중">
-      {(data) => <SttSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
+      {(data) => <SttSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} active={active} />}
     </QueryBoundary>
   );
 }
 
-function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: boolean }) {
+function SttSettingsForm({ saved, canEdit, active }: { saved: SttSettingsView; canEdit: boolean; active: boolean }) {
   const [mode, setMode] = useState<SttMode>(sttModeOf(saved.baseUrl));
   const [baseUrl, setBaseUrl] = useState(saved.baseUrl);
   const [model, setModel] = useState(saved.model ?? '');
@@ -58,6 +59,16 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
     setModel(defaults.model);
   };
   const runConnectionTest = () => connection.mutate({ baseUrl, model: model.trim() || null, apiKey: apiKeyInput() });
+
+  // 탭을 처음 열 때 한 번, 저장된 설정으로 확인한다. 1초 무음을 실제로 보내므로 화면을 열자마자(다른 탭을 보는 중에)는 보내지 않는다.
+  // 저장하면 새 값으로 다시 그려지며(key) 한 번 더 확인한다
+  const autoChecked = useRef(false);
+  const { mutate: checkConnection } = connection;
+  useEffect(() => {
+    if (!active || !canEdit || autoChecked.current) return;
+    autoChecked.current = true;
+    checkConnection({ baseUrl: saved.baseUrl });
+  }, [active, canEdit, checkConnection, saved.baseUrl]);
 
   return (
     <Card petKey="card:sttSettings">
@@ -203,7 +214,7 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
   );
 }
 
-function SttBadge({ result, pending }: { result: { connected: boolean } | undefined; pending: boolean }) {
+export function SttBadge({ result, pending }: { result: { connected: boolean } | undefined; pending: boolean }) {
   if (pending) return <Badge tone="run">확인 중</Badge>;
   if (!result) return <Badge>확인 전</Badge>;
   return result.connected ? <Badge tone="ok">연결됨</Badge> : <Badge tone="danger">연결 안 됨</Badge>;
