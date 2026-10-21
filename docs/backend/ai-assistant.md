@@ -10,7 +10,7 @@
 | REQ | REQ-AST-001·002·003·004·005·006·007·008·009. AST-010(AI 경유 기록)은 업무·일정을 뺀 실행 카드(구매요청 초안, 수주 등록, 열연 배정, 히트 편성; 아래 "실행 카드"). 사내 채팅 @AI(AST-002)의 실행 카드는 다음 단계. 006(사례)은 예시 사례 + 등록 사례(`past_case`)로 (2026-10-16, `past-case.md`) |
 | BP | BP-AST-01 ([04] 7장) |
 | 등급 | P2 |
-| LLM | llm 모듈의 LLM 연결 설정(주소·모델)을 쓴다. 지금은 LM Studio(OpenAI 호환). 데이터 조회는 tool 호출을 지원하는 모델이어야 한다 |
+| LLM | llm 모듈의 LLM 연결 설정(주소·모델)을 쓴다. LM Studio·Unsloth Studio·그 밖의 OpenAI 호환 서버(아래 'LLM 서버 종류'). 데이터 조회는 tool 호출을 지원하는 모델이어야 한다 |
 
 단계 계획: ① 업무 지식(용어 사전) 답변·화면 맥락·추천 질문·패널 ② 데이터 조회 도구(AST-004, 재고·수주·LOT 추적·작업 로그) ②-2 나머지 조회 도구(생산계획·실적, 검사 결과·불합격, 구매요청·발주·입고, 출하요청·밀시트) ③ 실행 카드(AST-005·010, Action Draft 핸들러 재사용) ← **지금**(업무·일정·구매요청 초안 + 수주 등록·열연 배정·히트 편성·과거 사례 등록, 7종) ③-2 웹 검색과 페이지 읽기(이슈 #367, 문서에 없는 기능, 4장 '웹 검색') ③-3 브라우저 사용(이슈 #373, 문서에 없는 기능, 4장 '브라우저 사용') ③-4 ERP 화면 조작(이슈 #382, 문서에 없는 기능·시험 중, 4장 'ERP 화면 조작') ④ 사내 채팅 @AI(AST-002) ← 메신저가 `AiAssistantService.ask`를 부른다(`docs/backend/messenger.md` '@AI 호출'. 이 모듈은 `AiAssistantService`를 export만 한다).
 
@@ -32,7 +32,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | --- | --- | --- | --- | --- |
 | POST | `ai-assistant/messages` | API-262 | 로그인만. 데이터는 도구마다 사용자 권한으로 확인 | `AiAssistantReplyView` `{ answer, sources[], model, latencyMs, toolCalls[], thinking, reasoningApplied }` (`reasoningApplied`는 문서에 없는 기능, 2026-10-16 추가) |
 | POST | `ai-assistant/messages/stream` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만. API-262와 같음 | `application/x-ndjson`, 한 줄에 이벤트 JSON 하나 (아래 '실시간 답 API') |
-| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning, webSearch }`. 지금 모델이 사진·생각 정도를 지원하는지. LM Studio가 아니거나 모르는 모델이면 `null`. `webSearch: { engines: ('naver'\|'kakao'\|'duckduckgo'\|'wikipedia')[], placeSearch: boolean }`는 서버 키 설정으로 쓸 수 있는 검색 엔진(부르는 순서)과 장소 검색 여부(모델이 없어도 채운다, 이슈 #367). `browser: { available, reason?, maxActions?, openAllSites?, windowed? }`는 브라우저 사용을 쓸 수 있는지(`AI_BROWSER_ENABLED=true`이고 Chrome 실행 파일이 있을 때. Chrome을 띄워 보지는 않는다. 띄우기에 실패하면 1분 동안 `false`, 이슈 #373). `windowed`는 서버 컴퓨터에 창이 뜨는지(`BROWSER_HEADLESS=false`, 이슈 #433). `deepResearch: { available }`는 심층 조사를 쓸 수 있는지(모델이 정해져 있으면 `true`, 이슈 #378, [ai-research.md](ai-research.md)) `screenControl: { available }`는 ERP 화면 조작을 쓸 수 있는지(`AI_SCREEN_CONTROL_ENABLED=true`, 이슈 #382). `notion: { available, reason? }`는 Notion을 쓸 수 있는지(Notion이 연결돼 있고 관리자가 상위 페이지를 정했을 때. Notion을 부르지 않고 DB만 본다, 이슈 #398). `drive: { available, reason? }`는 Drive 도구를 쓸 수 있는지(`GoogleDriveService.assertReady`: 서비스 계정(.env) 또는 OAuth 연결 + 폴더. Google을 부르지 않는다, 이슈 #398 2단계) |
+| GET | `ai-assistant/capabilities` | 없음 (문서에 없는 기능, 2026-10-16 추가) | 로그인만 | `AiAssistantCapabilitiesView` `{ model, vision, reasoning, webSearch }`. 지금 모델이 사진·생각 정도를 지원하는지. 모델 정보가 먼저이고(LM Studio 모델 정보, Unsloth Studio 불러온 모델의 `/v1/status`·`check-vision`), LM Studio가 아니면 모를 때 관리자가 AI 연결 화면에서 정한 값(`visionSupport`·`reasoningSupport`), 그것도 없으면 `null`(이슈 #465). `webSearch: { engines: ('naver'\|'kakao'\|'duckduckgo'\|'wikipedia')[], placeSearch: boolean }`는 서버 키 설정으로 쓸 수 있는 검색 엔진(부르는 순서)과 장소 검색 여부(모델이 없어도 채운다, 이슈 #367). `browser: { available, reason?, maxActions?, openAllSites?, windowed? }`는 브라우저 사용을 쓸 수 있는지(`AI_BROWSER_ENABLED=true`이고 Chrome 실행 파일이 있을 때. Chrome을 띄워 보지는 않는다. 띄우기에 실패하면 1분 동안 `false`, 이슈 #373). `windowed`는 서버 컴퓨터에 창이 뜨는지(`BROWSER_HEADLESS=false`, 이슈 #433). `deepResearch: { available }`는 심층 조사를 쓸 수 있는지(모델이 정해져 있으면 `true`, 이슈 #378, [ai-research.md](ai-research.md)) `screenControl: { available }`는 ERP 화면 조작을 쓸 수 있는지(`AI_SCREEN_CONTROL_ENABLED=true`, 이슈 #382). `notion: { available, reason? }`는 Notion을 쓸 수 있는지(Notion이 연결돼 있고 관리자가 상위 페이지를 정했을 때. Notion을 부르지 않고 DB만 본다, 이슈 #398). `drive: { available, reason? }`는 Drive 도구를 쓸 수 있는지(`GoogleDriveService.assertReady`: 서비스 계정(.env) 또는 OAuth 연결 + 폴더. Google을 부르지 않는다, 이슈 #398 2단계) |
 | GET | `ai-assistant/suggested-questions` | API-263 | 로그인만 | `AiAssistantSuggestedQuestionsView` `{ roleCode, roleQuestions[], firstTimeQuestions[] }` |
 | GET | `ai-assistant/threads` | 없음 (문서에 없는 기능, 이슈 #399) | 로그인만. 내 대화만 | `PageResult<AiChatThreadSummaryView>` `{ id, title, createdAt, updatedAt }`. `?page`(1~)·`size`(1~50, 기본 20). 마지막으로 묻고 답한 순서(`updated_at` 내림차순) |
 | GET | `ai-assistant/threads/:id` | 없음 (이슈 #399) | 로그인만. 내 대화만(남의 것·없는 것·int4 밖은 `AST-001` 404) | `AiChatThreadView` = 목록 줄 + `messages[]`(순번 순서). 질문 `{ id, seq, role:'user', content, createdAt, reasoning?, webSearch?, browser?, imageCount?, driveFiles? }`(`driveFiles`: @로 붙인 Drive 파일 이름, 이슈 #398), 답 `{ …, role:'assistant', sources, webSources?, actionCards:[{card, status:'ready'\|'done', result?}], reasoning?, reasoningApplied? }` |
@@ -378,6 +378,25 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - `reasoning_effort`는 LM Studio `/api/v1/models`가 그 모델의 `capabilities.reasoning.allowed_options`를 알려 줄 때만 보낸다. 모델 정보는 60초 동안 기억한다.
   - 고른 단계를 모델이 받으면 그대로 보낸다. 받지 않으면 가장 가까운 단계를 보낸다(같은 거리면 높은 쪽). `off`는 모델이 `off`를 받을 때만 `none`으로 보낸다.
   - 모델 정보가 없거나(외부 LLM·옛 LM Studio) 맞는 단계가 없으면 `reasoning_effort`를 빼고 보낸다. 이때 응답의 `reasoningApplied`는 `false`이고, 화면이 그렇게 안내한다.
+  - Unsloth Studio·외부 LLM은 아래 'LLM 서버 종류'를 따른다.
+
+**LLM 서버 종류 (문서에 없는 기능, 이슈 #465)** — `llm.client.ts`의 `serverInfo`
+- 알아내는 순서: LM Studio 고유 API `GET /api/v1/models`가 답하면 **LM Studio**. 아니면 `GET {주소}/status`(`/v1/status`)에 `supports_reasoning`(boolean)·`reasoning_style`(string)이 있으면 **Unsloth Studio**. 둘 다 아니면 **그 밖의 OpenAI 호환(openai)**. 60초 기억, 연결 확인은 다시 묻는다. 연결 확인 결과에 `serverKind`·`autoSwitch`가 실린다.
+- Unsloth Studio(기본 주소 `http://127.0.0.1:8888/v1`, Bearer API 키 필수):
+  - 불러온 모델: `/v1/models`의 `loaded: true`. 같은 모델이 별칭(`Qwen3.8-Flash-Next-GGUF`)과 전체 이름(`unsloth/…`)으로 함께 올 수 있어 마지막 `/` 뒤 이름이 같으면 한 모델로 본다(가정값).
+  - 불러온 모델이 하나일 때만 `/v1/status`를 그 모델 정보로 쓴다: `supports_reasoning`·`reasoning_effort_levels`·`reasoning_always_on` → 생각 옵션(못 하면 없음, 늘 켜짐이면 `off` 빼기, 단계가 없으면 켜기만), `is_vision` → 사진, `context_length` → 문맥 길이.
+  - 안 불러온 모델의 사진은 `GET /api/models/check-vision/{모델}`(불러오지 않아도 답함). 불러온 모델은 status가 먼저다(check-vision은 불러오지 않은 GGUF를 `false`로 볼 때가 있어 실제로 확인함).
+  - auto-switch: `GET /api/settings/openai-auto-switch`의 `enabled`.
+  - 임베딩 모델: `/v1/models`에 종류가 없어 모델마다 `GET /api/models/check-embedding/{모델}`의 `is_embedding`으로 `type`(`embeddings`·`llm`)을 채운다(화면이 임베딩 모델을 목록에서 뺀다).
+  - 문맥 길이: 불러온 모델의 status `context_length`(불러올 때 정한 Context Length, 예 8192)가 먼저, 없으면 `max_context_length`. 모델 목록(`contextLength`)·대화 기억 몫·심층 조사 예산(`modelContextLength`)에 쓴다.
+  - Unsloth는 요청의 `model`을 보지 않고 **불러온 모델로 답한다**(API 문서 "informational; the active model is used"). 그래서 auto-switch가 꺼져 있고 고른 모델이 불러와 있지 않으면 부르기 전에 막는다(`LlmModelNotLoadedError`, 종류 `NO_MODEL` → AST-002): "고른 모델(…)이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: …). Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요". 기억해 둔 정보가 '없음'이면 한 번 다시 묻는다. 서버가 400 "No model loaded"를 주면 "Unsloth Studio에 불러온 모델이 없어요. …"로 바꾸고 JSON 형식 없이 다시 부르지 않는다. 오류 코드는 AST-002(이슈 #462의 '모델 없음' 흐름 하나로 합침)이고, 고치는 방법이 문구에 있으므로 연결 확인·응답 확인·철강맨AI·심층 조사 모두 이 안내 문구를 그대로 보인다(모델을 안 골랐을 때만 AST-002 코드 문구). 연결 확인·설정 저장 때는 기억해 둔 서버·모델 정보를 버린다(`forgetServerInfo`): Unsloth에서 모델을 바꾼 직후 옛 정보로 부르지 않게.
+- API 키: 연결 확인·저장에서 키 칸을 비우면 저장된 키를 쓰되, 주소의 출처(scheme·호스트·포트)가 바뀌었으면 보내지 않는다(STT 설정과 같은 규칙). 저장하면 키가 지워지고, 연결 확인이 실패하면 '주소가 바뀌어 저장된 API 키를 보내지 않았어요. 새 주소의 API 키를 다시 넣어 주세요'를 덧붙인다.
+  - 요청 필드: `top_k`(100까지)·`min_p`·`repetition_penalty`(LM Studio의 `repeat_penalty` 대신). 생각 정도는 `reasoning_effort`와 `enable_thinking`(끄기면 `false`)을 함께 보낸다. `reasoning_effort` 값 `none·minimal·low·medium·high·max·xhigh`는 Unsloth가 검증을 통과시킨다(틀린 값은 400, 2026-10-21 확인).
+- 그 밖의 OpenAI 호환: `temperature`·`top_p`·`presence_penalty`만 보낸다. 관리자가 생각 정도 지원을 켜면 `reasoning_effort`(끄기는 `none`)를 보낸다(가정: 받지 않는 서버는 관리자가 켜지 않는다).
+- 관리자 문맥 길이(`llm.json`의 `contextLength`, 1024 이상 정수, `null` = 모름): LM Studio가 아니고 모델 정보가 없을 때 `modelContextLength`가 쓴다.
+- 문맥 길이 경고: 고른 모델의 문맥 길이(모델 정보, 없으면 LM Studio가 아닐 때 관리자 값)가 `LLM_MIN_CONTEXT_TOKENS`(16,384토큰, 가정값)보다 작으면 AI 연결 화면이 "…Context Length를 늘려 주세요"를 보인다. 근거(2026-10-21 측정): 조회 도구 28개 설명 13,445자 + 시스템 지시 3,766자이고 웹·브라우저·Notion·Drive를 켜면 더 늘며, 지난 대화·도구 결과·답 자리가 더 필요하다.
+- ERP는 저장한 서버 하나만 부른다. LM Studio와 Unsloth Studio를 함께 켜 두면 모델이 두 번 메모리에 올라갈 수 있어 화면 안내 카드가 안 쓰는 쪽 모델을 내려 두라고 알린다.
+- 관리자 설정(`llm.json`의 `visionSupport`·`reasoningSupport`, `null` = 모름): LM Studio가 아닐 때만 쓰고, 모델 정보가 있으면 모델 정보가 먼저다. `PUT llm/settings`에 보내지 않으면 그대로, `null`이면 모름. 사진 모름은 사진 첨부를 막지 않고, 생각 모름은 `reasoning_effort`를 보내지 않는다.
 
 **출처**(`assistant.answer.ts`)
 - 답 본문의 `[TRM-…]`·`[BP-…]`·`[MAN-…]`(괄호도 가능) 표시를 지우고, **넘긴 참고 자료 안의** 용어·업무만 `sources`로 돌려준다(모델이 지어낸 ID는 버림).
@@ -463,7 +482,7 @@ Notion·일정·업무 고치기 카드 오류 (이슈 #398, 새 코드 없음):
 | 비생각 | 0.7 | 0.8 | 20 | 0 | 1 | 1.5 |
 | 추출 (JSON, 같은 입력에 같은 답) | 0 | 1 | 20 | 0 | 1 | 0 |
 
-\* `top_k`·`min_p`·`repeat_penalty`는 OpenAI 표준에 없어 LM Studio에만 보낸다. 외부 LLM에는 보내지 않는다.
+\* `top_k`·`min_p`·`repeat_penalty`는 OpenAI 표준에 없어 LM Studio에만 보낸다. Unsloth Studio에는 `top_k`(100까지)·`min_p`·`repetition_penalty`로 보낸다(이슈 #465). 외부 LLM에는 보내지 않는다.
 
 ## 7. 테스트
 

@@ -21,7 +21,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { DRAFT_JSON_SCHEMA, buildDraftMessages, parseDraft, ruleDraft, similarQueryOf, type FailedItemFact, type FailureFacts } from './past-case.draft';
 import { PastCaseRepository, type PastCaseRow } from './past-case.repository';
@@ -184,7 +184,7 @@ export class PastCaseService {
     const settings = await this.llmSettings.read();
     if (!settings.model) return { fields: null, reason: 'AI 모델이 아직 정해지지 않았어요.' };
     try {
-      const raw = await this.llm.chatJson({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model, buildDraftMessages(facts, similar), DRAFT_JSON_SCHEMA, {
+      const raw = await this.llm.chatJson(llmEndpointOf(settings), settings.model, buildDraftMessages(facts, similar), DRAFT_JSON_SCHEMA, {
         timeoutMs: DRAFT_TIMEOUT_MS,
         maxTokens: DRAFT_MAX_TOKENS,
         profile: LLM_PROFILE.PAST_CASE_DRAFT,

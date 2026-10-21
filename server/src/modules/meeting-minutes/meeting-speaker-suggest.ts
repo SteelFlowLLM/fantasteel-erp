@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { speakerLabelText, type MeetingSpeakerSuggestion, type MeetingSpeakerSuggestResult, type TranscriptSegment } from '@fantasteel/shared';
 import { LlmClient, LlmRequestError, type LlmJsonSchema } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 
 /** 작성자가 버튼을 누르고 기다리므로 분석(5분)보다 짧게 끊는다 */
@@ -127,7 +127,7 @@ export class MeetingSpeakerSuggester {
     let raw: unknown;
     try {
       raw = await this.llmClient.chatJson(
-        { baseUrl: settings.baseUrl, apiKey: settings.apiKey },
+        llmEndpointOf(settings),
         settings.model,
         [
           { role: 'system', content: SPEAKER_SYSTEM_PROMPT },
