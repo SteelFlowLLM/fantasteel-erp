@@ -23,7 +23,7 @@ let park: AuthUser;
 let kim: AuthUser;
 
 const TAG = 'T-F2';
-const created = { notifications: [] as number[], requisitions: [] as number[], drafts: [] as number[], runs: [] as number[], meetings: [] as number[], tasks: [] as number[], events: [] as number[] };
+const created = { notifications: [] as number[], requisitions: [] as number[], drafts: [] as number[], runs: [] as number[], meetings: [] as number[], tasks: [] as number[], events: [] as number[], salesOrders: [] as number[] };
 let seq = 0;
 const plusDays = (days: number): string => new Date(Date.parse(`${seoulToday()}T00:00:00.000Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
@@ -96,6 +96,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma?.notification.deleteMany({ where: { id: { in: created.notifications } } });
+  await prisma?.salesOrderItem.deleteMany({ where: { salesOrderId: { in: created.salesOrders } } });
+  await prisma?.salesOrder.deleteMany({ where: { id: { in: created.salesOrders } } });
   await prisma?.actionDraft.deleteMany({ where: { id: { in: created.drafts } } });
   await prisma?.purchaseRequisition.deleteMany({ where: { id: { in: created.requisitions } } });
   await prisma?.aiResearchRun.deleteMany({ where: { id: { in: created.runs } } });
@@ -388,6 +390,25 @@ describe('아침 브리핑 (get_my_briefing)', () => {
     // 구매부장도 수주 조회 권한(VIEW)이 있어 납기 묶음이 들어간다
     expect(Object.keys(data)).toContain('납기 위험 수주');
     expect(data).not.toHaveProperty('제외한 묶음');
+  });
+
+  it('납기 위험 수주는 진행 중 수주에서 읽고 수주 조회 권한이 있는 사원에게만 준다 (아주 오래된 위험 수주도 빠지지 않는다)', async () => {
+    const customer = await prisma.customer.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    const slab = await prisma.item.findFirstOrThrow({ where: { itemType: 'SLAB' }, orderBy: { id: 'asc' } });
+    const salesOrderNo = `${TAG}-SO-${Date.now() % 1000000}`;
+    const overdue = await prisma.salesOrder.create({
+      data: { salesOrderNo, customerId: customer.id, ownerEmployeeId: kim.employeeId, salesOrderItems: { create: [{ itemId: slab.id, orderedQty: 2, dueDate: new Date(`${plusDays(-2000)}T00:00:00.000Z`) }] } },
+    });
+    created.salesOrders.push(overdue.id);
+
+    const withView = (await call(kim, 'get_my_briefing')).data;
+    const section = withView['납기 위험 수주'] as { 수주: { 수주번호: string; '납기까지 남은 일수': number }[] };
+    expect(section.수주.map((o) => o.수주번호)).toContain(salesOrderNo);
+    expect(section.수주.find((o) => o.수주번호 === salesOrderNo)?.['납기까지 남은 일수']).toBe(-2000);
+    expect((withView['먼저 할 일 후보(급한 순서, 최대 3)'] as string[]).some((line) => line.includes('납기 위험 수주'))).toBe(true);
+
+    const withoutView = await call(withoutAccess(kim), 'get_my_briefing');
+    expect(withoutView.raw).not.toContain(salesOrderNo);
   });
 
   it('부서장도 수주 조회 권한도 없는 사원에게는 결재·납기 묶음을 빼고 이유를 알린다', async () => {

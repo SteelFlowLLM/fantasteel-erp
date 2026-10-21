@@ -110,6 +110,26 @@ describe('내 알림함 (get_my_notifications)', () => {
     expect(data['생략 줄 수']).toBe(15);
   });
 
+  it('유형을 거를 때 안 읽은 알림만 먼저 읽고, 모자라야 최근 읽은 알림 한 쪽을 더 읽는다 (읽은 알림을 10쪽까지 읽지 않는다)', async () => {
+    // 읽은 알림 1,000건 + 안 읽은 Agent 알림 3건
+    const read = Array.from({ length: 1000 }, (_, i) => notification(i + 1, 'DUE_RISK', true));
+    const unread = [notification(2001, 'DUE_RISK', false), notification(2002, 'AGENT_CANDIDATE', false), notification(2003, 'MENTION', false)];
+    const { service, queries } = fakeNotifications([...read, ...unread]);
+    const found = await collectNotifications(service, user(), { types: [NOTIFICATION_TYPE.DUE_RISK, NOTIFICATION_TYPE.AGENT_CANDIDATE] });
+    expect(queries).toEqual([
+      { unreadOnly: true, page: 1, size: 100 },
+      { unreadOnly: false, page: 1, size: 100 },
+    ]);
+    expect(found.unread).toBe(2);
+    expect(found.rows.slice(0, 2).map((n) => n.id)).toEqual([2002, 2001]);
+    expect(found.rows).toHaveLength(15);
+    // 이미 읽은 안 읽은 알림 목록을 넘기면 다시 읽지 않는다
+    queries.length = 0;
+    const again = await collectNotifications(service, user(), { types: [NOTIFICATION_TYPE.DUE_RISK], unreadOnly: true, unread: { rows: unread, unscanned: 0 } });
+    expect(queries).toEqual([]);
+    expect(again.rows.map((n) => n.id)).toEqual([2001]);
+  });
+
   it('유형을 거를 때 100건이 넘으면 쪽을 넘겨 읽고, 읽지 못한 수를 알린다', async () => {
     const many = Array.from({ length: 1100 }, (_, i) => notification(i + 1, i % 2 === 0 ? 'DUE_RISK' : 'MENTION', false));
     const { service, queries } = fakeNotifications(many);
@@ -144,7 +164,14 @@ const candidate = (id: number, riskType: AgentCandidateView['riskType'], draftSt
 
 describe('공장 Agent 위험 (get_agent_risks)', () => {
   const candidates = [candidate(1, 'RAW_SHORTAGE', 'WAITING_APPROVAL'), candidate(2, 'GOOD_QTY_SHORTAGE', 'EXECUTED'), candidate(3, 'RAW_SHORTAGE', 'REJECTED'), candidate(4, 'GOOD_QTY_SHORTAGE', 'AI_GENERATED')];
-  const agent = { list: async () => candidates } as unknown as FactoryAgentService;
+  const agentOptions: unknown[] = [];
+  // 서비스처럼 openOnly면 처리 전인 후보만 읽는다
+  const agent = {
+    list: async (_u: AuthUser, options?: { openOnly?: boolean }) => {
+      agentOptions.push(options);
+      return options?.openOnly ? candidates.filter((c) => c.draftStatus !== 'EXECUTED' && c.draftStatus !== 'REJECTED') : candidates;
+    },
+  } as unknown as FactoryAgentService;
   const alerts = fakeNotifications([notification(10, 'DUE_RISK', false, '[Agent] 납기 위험: SO-1'), notification(11, 'QUALITY_RATE_RISE', true), notification(12, 'MENTION', false), notification(13, 'AGENT_CANDIDATE', false, '[Agent 대응 후보] 원료 부족: LIM01')]);
   const tool = agentRiskTool(agent, alerts.service);
   const purchaser = user({ PURCHASE_REQUISITION_CREATE: 'VIEW' });
@@ -156,6 +183,13 @@ describe('공장 Agent 위험 (get_agent_risks)', () => {
     const all = (await tool.run({ includeClosed: true }, purchaser)).data as Record<string, unknown>;
     expect(all['대응 후보 수']).toBe(4);
     expect((all['대응 후보'] as { 후보id: number }[]).map((c) => c.후보id)).toEqual([4, 1, 3, 2]);
+  });
+
+  it('끝난 후보는 includeClosed일 때만 service에서 읽는다 (처리 전인 후보만 묻는다)', async () => {
+    agentOptions.length = 0;
+    await tool.run({}, purchaser);
+    await tool.run({ includeClosed: true }, purchaser);
+    expect(agentOptions).toEqual([{ openOnly: true }, { openOnly: false }]);
   });
 
   it('후보 한 줄에는 한글 표시명이 있고 영문 코드가 없다', async () => {
@@ -240,6 +274,12 @@ describe('내 결재함 (get_my_approvals)', () => {
     expect(queries.at(-1)).toMatchObject({ approvable: true });
     expect(data['결재 대기 구매요청 수']).toBe(2);
     expect(data.구매요청[0]).toMatchObject({ 구매요청번호: 'PR-2610-0001', 상태: '승인 대기', 원료: 'LIM01 석회석', '요청 톤': '120.000', 요청자: '정다은(구매부)', 요청일: '2026-10-21' });
+  });
+
+  it('요청일은 서울 날짜다 (UTC로 전날 저녁이어도 서울 새벽이면 그날)', async () => {
+    const late = myApprovalsTool({ listRequisitions: async () => pageOf([{ ...requisition(1), createdAt: '2026-10-21T20:00:00.000Z' }], 1, 15) } as unknown as PurchasingService);
+    const row = ((await late.run({}, user({}, [3]))).data as { 구매요청: { 요청일: string }[] }).구매요청[0];
+    expect(row.요청일).toBe('2026-10-22');
   });
 
   it('부서장이 아니면 service를 부르지 않고 결재함이 없다고 알린다', async () => {
@@ -419,18 +459,15 @@ describe('지난 회의 검색 (search_meeting_minutes)', () => {
       const rows = meetings.filter((m) => (!query.from || m.meetingDate >= query.from) && (!query.to || m.meetingDate <= query.to) && (!query.meetingMinutesStatus || m.meetingMinutesStatus === query.meetingMinutesStatus));
       return pageOf(rows, query.page, query.size);
     },
-    get: async (id: number) => {
+    // 한 회의를 자세히 볼 때도 전사 칸을 뺀 조회(getDigest)만 쓴다. 전사가 든 get은 부르면 안 된다
+    get: async () => {
+      throw new Error('전사 원문이 든 상세 조회를 부르면 안 돼요');
+    },
+    getDigest: async (id: number) => {
       if (id !== 3) throw new AppException('VOC-001');
       return {
-        id: 3,
-        meetingMinutesTitle: '구매 협의',
-        meetingDate: '2026-10-13',
-        meetingMinutesStatus: 'CONFIRMED',
-        summary: '검토한 요약',
-        analysisResult: { summary: 'AI 요약', decisions: [{ text: '석회석 단가 협상은 구매부가 맡는다', evidence: [0] }], candidates: [], model: 'm', analyzedAt: '' },
-        creator: { id: 1, name: '김도윤' },
+        ...digest(3, '2026-10-13', '구매 협의', '검토한 요약', ['석회석 단가 협상은 구매부가 맡는다']),
         attendees: [{ employeeId: 2, employeeName: '박서영', departmentName: '영업부', roleCode: 'SALES' }],
-        transcriptSegments: [],
       };
     },
   } as unknown as MeetingMinutesService;

@@ -1,6 +1,6 @@
-import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL, ROLE_LABEL, type MeetingMinutesStatus, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL, ROLE_LABEL, type MeetingMinutesStatus } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
-import type { MeetingDigest, MeetingMinutesService } from '../../meeting-minutes/meeting-minutes.service';
+import type { MeetingDigest, MeetingDigestDetail, MeetingMinutesService } from '../../meeting-minutes/meeting-minutes.service';
 import { codeLabelList, limitRows, OPEN_ACCESS, optionalDate, optionalEnum, optionalPositiveInt, optionalString, scanFiltered, ToolArgumentError, unscannedField, type AssistantTool } from './assistant-tool';
 
 const STATUSES = Object.values(MEETING_MINUTES_STATUS) as MeetingMinutesStatus[];
@@ -33,9 +33,7 @@ function digestRow(d: MeetingDigest, withDetail: boolean) {
   };
 }
 
-function detailOutput(meeting: MeetingMinutesView) {
-  const analysis = meeting.analysisResult;
-  const summary = meeting.summary ?? analysis?.summary ?? null;
+function detailOutput(meeting: MeetingDigestDetail) {
   return {
     label: `지난 회의 · ${meeting.meetingMinutesTitle}`,
     data: {
@@ -43,10 +41,10 @@ function detailOutput(meeting: MeetingMinutesView) {
       제목: meeting.meetingMinutesTitle,
       회의일: meeting.meetingDate,
       상태: MEETING_MINUTES_STATUS_LABEL[meeting.meetingMinutesStatus],
-      작성자: meeting.creator.name,
+      작성자: meeting.creatorName,
       참석자: meeting.attendees.map((a) => `${a.employeeName}(${a.departmentName}, ${ROLE_LABEL[a.roleCode]})`),
-      요약: summary ? cut(summary, SUMMARY_MAX * 2) : null,
-      결정사항: (analysis?.decisions ?? []).slice(0, DECISION_ROWS * 2).map((d) => cut(d.text, DECISION_MAX)),
+      요약: meeting.summary ? cut(meeting.summary, SUMMARY_MAX * 2) : null,
+      결정사항: meeting.decisions.slice(0, DECISION_ROWS * 2).map((text) => cut(text, DECISION_MAX)),
       안내: '전사 원문은 회의록 화면의 "이 회의에 묻기"에서 읽을 수 있어요',
     },
   };
@@ -55,7 +53,7 @@ function detailOutput(meeting: MeetingMinutesView) {
 /**
  * 지난 회의 검색 (GET meeting-minutes·meeting-minutes/:id, API-259, 문서에 없는 기능 이슈 #506).
  * 회의록은 전 역할이 열람하는 화면이라 권한을 따로 보지 않는다(목록·상세 API와 같다). 제목·요약·AI가 정리한 결정사항에서 낱말을 찾고,
- * 전사 원문은 읽지 않는다. 회의일 최신순이며 100건을 넘으면 쪽을 넘겨 읽는다(scanFiltered).
+ * 전사 원문은 읽지 않는다(한 회의를 자세히 볼 때도 전사 칸을 뺀 조회). 회의일 최신순이며 100건을 넘으면 쪽을 넘겨 읽는다(scanFiltered).
  */
 export function meetingMinutesTool(meetings: MeetingMinutesService): AssistantTool {
   return {
@@ -78,7 +76,7 @@ export function meetingMinutesTool(meetings: MeetingMinutesService): AssistantTo
       const id = optionalPositiveInt(args, 'meetingMinutesId');
       if (id !== undefined) {
         try {
-          return detailOutput(await meetings.get(id));
+          return detailOutput(await meetings.getDigest(id));
         } catch (error) {
           if (error instanceof AppException && error.code === 'VOC-001') throw new ToolArgumentError(`회의록 id ${id}가 없어요`);
           throw error;

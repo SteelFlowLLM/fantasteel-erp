@@ -102,11 +102,20 @@ describe('위젯마다 화면 권한을 따로 본다', () => {
     expect((await run(both, 'shipment_result')).source?.id).toBe('get_dashboard_summary:shipment_result');
   });
 
-  it('위젯을 빠뜨리거나 모르는 위젯이면 권한이 아니라 인자 오류로 돌려준다', async () => {
+  it('위젯을 빠뜨리거나 모르는 위젯이면 권한을 따지지 않고 도구 모음이 바로 인자 오류로 돌려준다 (service·도구를 부르지 않는다)', async () => {
     const nobody = user({});
-    expect(outcome(await run(nobody, undefined))).toContain('widget이 필요해요');
-    expect(outcome(await run(nobody, 'order_fulfillment'))).toContain('widget는 process_flow, shipment_result, process_yield, surplus_age 중 하나예요');
+    const missing = await run(nobody, undefined);
+    expect(outcome(missing)).toBe('widget 값이 필요해요 (process_flow, shipment_result, process_yield, surplus_age)');
+    expect(missing.source).toBeNull();
+    expect(outcome(await run(nobody, 'order_fulfillment'))).toBe('widget 값은 process_flow, shipment_result, process_yield, surplus_age 중 하나예요');
+    // 객체 기본 속성 이름(constructor·toString)도 모르는 값이다
     expect(outcome(await run(nobody, 'constructor'))).toContain('중 하나예요');
+    expect(outcome(await run(nobody, 'toString'))).toContain('중 하나예요');
+    expect(outcome(await run(user({ GOODS_ISSUE_CONFIRM: 'VIEW' }), 'process_yield_x'))).toContain('중 하나예요');
+    // 위젯 값이 문자열이 아니어도 같다
+    const notString = await box.run(nobody, { id: 'c1', name: 'get_dashboard_summary', arguments: '{"widget":7}' });
+    expect(outcome(notString)).toContain('widget 값은');
+    expect(rolesAsked).toEqual([]);
     expect(calls).toEqual([]);
   });
 

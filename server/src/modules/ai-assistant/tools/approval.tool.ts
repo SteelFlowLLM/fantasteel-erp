@@ -1,6 +1,6 @@
 import { PURCHASE_REQUISITION_STATUS, PURCHASE_REQUISITION_STATUS_LABEL, type AuthUser, type PurchaseRequisitionSummary } from '@fantasteel/shared';
 import type { PurchasingService } from '../../purchasing/purchasing.service';
-import { limitRows, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
+import { limitRows, seoulDateTimeText, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
 
 export const NOT_DEPARTMENT_HEAD = '부서장이 아니라 승인할 구매요청이 없어요 (구매요청은 요청자 소속 부서의 부서장이 승인해요)';
 
@@ -26,7 +26,8 @@ export function approvalRow(r: PurchaseRequisitionSummary) {
     '요청 톤': r.requestedTon,
     '희망 입고일': r.desiredReceiptDate,
     요청자: `${r.requesterName}(${r.departmentName})`,
-    '요청일': r.createdAt.slice(0, 10),
+    // 서울 날짜: ISO(UTC)를 그대로 자르면 서울 새벽 9시 전에 만든 요청이 전날로 보인다
+    요청일: seoulDateTimeText(r.createdAt).slice(0, 10),
     ...(r.productionPlanNo ? { 생산계획: r.productionPlanNo } : {}),
   };
 }

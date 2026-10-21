@@ -21,26 +21,46 @@ export interface CollectedNotifications {
   unscanned: number;
 }
 
+/** 안 읽은 알림 전부(최대 1,000건). 유형을 거르는 도구들이 나눠 쓴다 */
+export interface UnreadNotifications {
+  rows: NotificationView[];
+  /** 읽지 못한 안 읽은 알림 수 */
+  unscanned: number;
+}
+
+export async function readUnreadNotifications(notifications: NotificationService, user: AuthUser): Promise<UnreadNotifications> {
+  const scan = await scanFiltered(
+    (page, size) => notifications.list(user, { unreadOnly: true, page, size }),
+    () => true,
+  );
+  return { rows: scan.rows, unscanned: scan.unscanned };
+}
+
 /**
- * 내 알림을 안 읽은 것 먼저 모은다. 유형을 거르지 않으면 안 읽은 알림은 API의 안 읽음 목록으로 정확히 세고,
- * 유형을 거르면 알림 API에 거를 칸이 없어 쪽을 읽어 거른다(scanFiltered, 최대 1,000건).
+ * 내 알림을 안 읽은 것 먼저 모은다. 안 읽은 알림만 먼저 읽고(안 읽은 알림 목록은 읽은 알림을 건너뛰어 읽는 양이 작다),
+ * 모자라면 최근 100건 안의 읽은 알림으로 채운다. 유형을 거르면 알림 API에 거를 칸이 없어 쪽을 읽어 거른다(scanFiltered, 최대 1,000건).
+ * 같은 안 읽은 알림을 이미 읽었으면 unread로 넘겨 다시 읽지 않는다.
  */
 export async function collectNotifications(
   notifications: NotificationService,
   user: AuthUser,
-  options: { types?: readonly NotificationType[]; unreadOnly?: boolean; limit?: number } = {},
+  options: { types?: readonly NotificationType[]; unreadOnly?: boolean; limit?: number; unread?: UnreadNotifications } = {},
 ): Promise<CollectedNotifications> {
   const limit = options.limit ?? TOOL_ROW_LIMIT;
   const unreadOnly = options.unreadOnly ?? false;
-  if (options.types && options.types.length > 0) {
-    const types = options.types;
-    const scan = await scanFiltered(
-      (page, size) => notifications.list(user, { unreadOnly, page, size }),
-      (n) => types.includes(n.notificationType),
-    );
-    const unread = scan.rows.filter((n) => n.readAt === null);
-    const read = scan.rows.filter((n) => n.readAt !== null);
-    return { rows: [...unread, ...read].slice(0, limit), unread: unread.length, total: scan.rows.length, unscanned: scan.unscanned };
+  const types = options.types && options.types.length > 0 ? options.types : null;
+  if (types) {
+    const all = options.unread ?? (await readUnreadNotifications(notifications, user));
+    const unread = all.rows.filter((n) => types.includes(n.notificationType));
+    const rows = unread.slice(0, limit);
+    let total = unread.length;
+    if (!unreadOnly && rows.length < limit) {
+      const recent = await notifications.list(user, { unreadOnly: false, page: 1, size: READ_LOOKBACK });
+      const read = recent.items.filter((n) => n.readAt !== null && types.includes(n.notificationType)).slice(0, limit - rows.length);
+      rows.push(...read);
+      total += read.length;
+    }
+    return { rows, unread: unread.length, total, unscanned: all.unscanned };
   }
   const unreadPage = await notifications.list(user, { unreadOnly: true, page: 1, size: limit });
   const rows = [...unreadPage.items];

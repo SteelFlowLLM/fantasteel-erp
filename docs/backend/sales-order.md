@@ -108,6 +108,7 @@
 | 호출됨 | shipment | 출고 확정 후 `recalcItemStatus(tx, salesOrderItemId)` |
 | 호출됨 | inventory(자동 예약)·production(재생산) | `getUnsecuredQty(tx, salesOrderItemId)`(현재 미확보 매수) |
 | 읽힘 | messenger | 업무방 상단 수주 요약(REQ-MSG-001) |
+| 읽힘 | ai-assistant | 아침 브리핑(이슈 #506)이 `listDueRisk()`로 진행 중 수주 중 납기 위험 수주를 납기 빠른 순으로 읽는다(`openSalesOrderFulfillments`의 `isDueRisk`, 대시보드와 같은 기준) |
 
 트랜잭션은 이 모듈 service가 `this.prisma.$transaction(async (tx) => …)`로 열고 다른 모듈 service 함수에 `tx`를 넘긴다(중첩 트랜잭션 금지). 각 모듈은 service를 `exports`에 넣고, 이 모듈이 `imports`한다. 순환 의존이 생기면(예: inventory ↔ sales-order) 계산 함수를 한쪽에 두거나 `forwardRef`를 쓴다.
 

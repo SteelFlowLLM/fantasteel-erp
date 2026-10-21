@@ -10,6 +10,7 @@ import {
   ROLE_LABEL,
   type AuthUser,
   type MeetingAnalysis,
+  type MeetingAttendeeView,
   type MeetingCandidate,
   type MeetingCandidateRegistered,
   type MeetingRegisterResult,
@@ -44,7 +45,7 @@ import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingSpeakerSuggester } from './meeting-speaker-suggest';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
-import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesDigestRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
+import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesDigestDetailRow, type MeetingMinutesDigestRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -53,6 +54,11 @@ const DEFAULT_PAGE_SIZE = 20;
 export interface MeetingDigest extends MeetingMinutesListItem {
   summary: string | null;
   decisions: string[];
+}
+
+/** 한 회의의 요약·결정사항과 참석자 (전사 글은 담지 않는다) */
+export interface MeetingDigestDetail extends MeetingDigest {
+  attendees: MeetingAttendeeView[];
 }
 
 /** 회의 검색 조건. 날짜는 'YYYY-MM-DD' 양 끝 포함 */
@@ -64,7 +70,7 @@ export interface SearchMeetingDigestsQuery {
   size: number;
 }
 
-function toDigest(row: MeetingMinutesDigestRow): MeetingDigest {
+function toDigest(row: MeetingMinutesDigestRow | MeetingMinutesDigestDetailRow): MeetingDigest {
   const analysis = readAnalysis(row.analysisResult);
   return {
     id: row.id,
@@ -681,6 +687,16 @@ export class MeetingMinutesService {
     };
     const [total, rows] = await Promise.all([this.repository.count(this.prisma, where), this.repository.findDigests(this.prisma, where, { skip: (query.page - 1) * query.size, take: query.size })]);
     return { items: rows.map(toDigest), page: query.page, size: query.size, total };
+  }
+
+  /** 철강맨AI가 한 회의를 자세히 볼 때: 상세(API-259)와 같은 범위지만 전사 글(수 MB)을 읽지 않는다. 없으면 `VOC-001` (이슈 #506) */
+  async getDigest(id: number): Promise<MeetingDigestDetail> {
+    const row = await this.repository.findDigestDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    return {
+      ...toDigest(row),
+      attendees: row.attendees.map((a) => ({ employeeId: a.employeeId, employeeName: a.employee.employeeName, departmentName: a.employee.department.departmentName, roleCode: a.employee.role.roleCode as Role })),
+    };
   }
 
   /** API-259 상세 */

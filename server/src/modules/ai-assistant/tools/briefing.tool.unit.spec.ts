@@ -7,6 +7,7 @@ import type { TaskService } from '../../notification/task.service';
 import type { PurchasingService } from '../../purchasing/purchasing.service';
 import type { SalesOrderService } from '../../sales-order/sales-order.service';
 import type { ScheduleEventService } from '../../schedule-event/schedule-event.service';
+import { isOpenAgentCandidate } from './agent.tool';
 import { BRIEFING_ROWS, myBriefingTool, type BriefingServices } from './briefing.tool';
 
 const TODAY = '2026-10-22';
@@ -46,7 +47,7 @@ const notification = (id: number, type: NotificationView['notificationType'], re
 const candidate = (id: number, draftStatus: AgentCandidateView['draftStatus']): AgentCandidateView =>
   ({ id, actionType: 'PURCHASE_REQUISITION_CREATE', draftStatus, riskType: 'RAW_SHORTAGE', summary: `원료 부족 ${id}`, evidence: {}, payload: {}, confirmerId: null, confirmerName: null, result: null, executionErrorCode: null, executionAttemptCount: 0, rejectReason: null, confirmedAt: null, createdAt: '2026-10-22T01:00:00.000Z', updatedAt: '' }) as AgentCandidateView;
 
-const order = (id: number, dueDate: string, isDueRisk: boolean): SalesOrderSummary =>
+const salesOrder = (id: number, dueDate: string, isDueRisk: boolean): SalesOrderSummary =>
   ({ id, salesOrderNo: `SO-2610-00${id}`, customerName: '가람중공업', ownerEmployeeName: '박서영', earliestDueDate: dueDate, isDueRisk }) as SalesOrderSummary;
 
 interface Fixture {
@@ -55,13 +56,15 @@ interface Fixture {
   requisitions: PurchaseRequisitionSummary[];
   notifications: NotificationView[];
   candidates: AgentCandidateView[];
-  orders: SalesOrderSummary[];
+  salesOrders: SalesOrderSummary[];
 }
 
 const calls: string[] = [];
+const notificationQueries: { unreadOnly?: boolean; page: number; size: number }[] = [];
+const agentOptions: (({ openOnly?: boolean }) | undefined)[] = [];
 
 function services(data: Partial<Fixture>, broken: Partial<Record<keyof Fixture, boolean>> = {}): BriefingServices {
-  const f: Fixture = { events: [], tasks: [], requisitions: [], notifications: [], candidates: [], orders: [], ...data };
+  const f: Fixture = { events: [], tasks: [], requisitions: [], notifications: [], candidates: [], salesOrders: [], ...data };
   const guard = (key: keyof Fixture) => {
     calls.push(key);
     if (broken[key]) throw new Error(`${key} 실패`);
@@ -91,20 +94,24 @@ function services(data: Partial<Fixture>, broken: Partial<Record<keyof Fixture, 
     notifications: {
       list: async (_u: AuthUser, query: { unreadOnly?: boolean; page: number; size: number }) => {
         guard('notifications');
+        notificationQueries.push(query);
         const rows = query.unreadOnly ? f.notifications.filter((n) => n.readAt === null) : f.notifications;
         return { ...pageOf(rows, query.page, query.size), unreadCount: f.notifications.filter((n) => n.readAt === null).length };
       },
     } as unknown as NotificationService,
     agent: {
-      list: async () => {
+      // 서비스처럼 openOnly면 처리 전인 후보만 읽는다
+      list: async (_u: AuthUser, options?: { openOnly?: boolean }) => {
         guard('candidates');
-        return f.candidates;
+        agentOptions.push(options);
+        return options?.openOnly ? f.candidates.filter(isOpenAgentCandidate) : f.candidates;
       },
     } as unknown as FactoryAgentService,
     salesOrders: {
-      list: async (query: { page: number; size: number }) => {
-        guard('orders');
-        return pageOf(f.orders, query.page, query.size);
+      // 진행 중 수주 중 납기 위험인 것을 납기 빠른 순으로 (진행 중 수주만 읽는 service의 listDueRisk)
+      listDueRisk: async () => {
+        guard('salesOrders');
+        return f.salesOrders.filter((o) => o.isDueRisk).sort((a, b) => (a.earliestDueDate ?? '').localeCompare(b.earliestDueDate ?? ''));
       },
     } as unknown as SalesOrderService,
   };
@@ -114,6 +121,8 @@ const brief = async (s: BriefingServices, u: AuthUser) => (await myBriefingTool(
 
 beforeEach(() => {
   calls.length = 0;
+  notificationQueries.length = 0;
+  agentOptions.length = 0;
 });
 
 describe('아침 브리핑 도구 (get_my_briefing)', () => {
@@ -133,7 +142,7 @@ describe('아침 브리핑 도구 (get_my_briefing)', () => {
         requisitions: [requisition(1), requisition(2)],
         notifications: [notification(1, 'TASK_ASSIGNED'), notification(2, 'DUE_RISK'), notification(3, 'MENTION', true)],
         candidates: [candidate(1, 'WAITING_APPROVAL'), candidate(2, 'EXECUTED')],
-        orders: [order(1, '2026-10-24', true), order(2, '2026-10-21', true), order(3, '2026-12-01', false)],
+        salesOrders: [salesOrder(1, '2026-10-24', true), salesOrder(2, '2026-10-21', true), salesOrder(3, '2026-12-01', false)],
       }),
       user({ SALES_ORDER_CREATE: 'VIEW', PURCHASE_REQUISITION_CREATE: 'USE' }, [3]),
     );
@@ -162,7 +171,7 @@ describe('아침 브리핑 도구 (get_my_briefing)', () => {
         requisitions: [requisition(1)],
         notifications: [notification(1, 'TASK_ASSIGNED')],
         candidates: [candidate(1, 'WAITING_APPROVAL')],
-        orders: [order(2, '2026-10-21', true)],
+        salesOrders: [salesOrder(2, '2026-10-21', true)],
       }),
       user({ SALES_ORDER_CREATE: 'VIEW', PURCHASE_REQUISITION_CREATE: 'USE' }, [3]),
     );
@@ -182,7 +191,7 @@ describe('아침 브리핑 도구 (get_my_briefing)', () => {
   });
 
   it('부서장이 아니면 결재 묶음을, 수주 조회 권한이 없으면 납기 묶음을 빼고 이유를 알리며, 그 service는 부르지 않는다', async () => {
-    const data = await brief(services({ requisitions: [requisition(1)], orders: [order(1, '2026-10-24', true)] }), user({}, []));
+    const data = await brief(services({ requisitions: [requisition(1)], salesOrders: [salesOrder(1, '2026-10-24', true)] }), user({}, []));
     expect(data).not.toHaveProperty('내 결재 대기');
     expect(data).not.toHaveProperty('납기 위험 수주');
     expect(data['제외한 묶음']).toEqual([
@@ -190,7 +199,7 @@ describe('아침 브리핑 도구 (get_my_briefing)', () => {
       { 묶음: '납기 위험 수주', 이유: expect.stringContaining('수주 등록 조회 권한이 없어') },
     ]);
     expect(calls).not.toContain('requisitions');
-    expect(calls).not.toContain('orders');
+    expect(calls).not.toContain('salesOrders');
     // 나머지 묶음은 그대로 있다
     expect(Object.keys(data)).toEqual(expect.arrayContaining(['오늘 내 일정', '마감이 지난 내 업무', '안 읽은 알림', '열린 Agent 위험']));
   });
@@ -221,6 +230,38 @@ describe('아침 브리핑 도구 (get_my_briefing)', () => {
     expect(approval['결재 대기 구매요청 수']).toBe(9);
     expect(approval.구매요청).toHaveLength(BRIEFING_ROWS);
     expect(approval['더 있는 수']).toBe(9 - BRIEFING_ROWS);
+  });
+
+  it('오늘 일정도 다른 묶음처럼 5줄까지 주고 더 있는 수를 알린다', async () => {
+    const events = Array.from({ length: 8 }, (_, i) => event(i + 1, `일정 ${i + 1}`, '2026-10-22T01:00:00.000Z', '2026-10-22T02:00:00.000Z'));
+    const schedule = (await brief(services({ events }), user({}, [])))['오늘 내 일정'] as { '일정 수': number; 일정: unknown[]; '더 있는 수': number };
+    expect(schedule['일정 수']).toBe(8);
+    expect(schedule.일정).toHaveLength(BRIEFING_ROWS);
+    expect(schedule['더 있는 수']).toBe(8 - BRIEFING_ROWS);
+  });
+
+  it('안 읽은 알림은 한 번만 읽어 알림 묶음과 Agent 묶음이 나눠 쓴다 (같은 목록을 두 번 읽지 않는다)', async () => {
+    const data = await brief(
+      services({ notifications: [notification(1, 'TASK_ASSIGNED'), notification(2, 'DUE_RISK'), notification(3, 'AGENT_CANDIDATE'), notification(4, 'MENTION', true)] }),
+      user({ PURCHASE_REQUISITION_CREATE: 'USE' }, []),
+    );
+    // 안 읽은 알림 목록 한 쪽만 읽었다 (읽은 알림은 읽지 않는다)
+    expect(notificationQueries).toEqual([{ unreadOnly: true, page: 1, size: 100 }]);
+    expect(data['안 읽은 알림']).toMatchObject({ '안 읽은 알림 수(Agent 알림 제외)': 1, 알림: [{ 알림id: 1 }] });
+    expect(data['열린 Agent 위험']).toMatchObject({ '안 읽은 Agent 알림 수': 2, 'Agent 알림': [{ 알림id: 2 }, { 알림id: 3 }] });
+  });
+
+  it('열린 대응 후보만 service에 묻는다 (끝난 후보까지 읽지 않는다)', async () => {
+    const data = await brief(services({ candidates: [candidate(1, 'EXECUTED'), candidate(2, 'REJECTED'), candidate(3, 'WAITING_APPROVAL')] }), user({ PURCHASE_REQUISITION_CREATE: 'USE' }, []));
+    expect(agentOptions).toEqual([{ openOnly: true }]);
+    expect(data['열린 Agent 위험']).toMatchObject({ '열린 대응 후보 수': 1, '대응 후보': [{ 후보id: 3 }] });
+  });
+
+  it('납기 위험 수주는 진행 중 수주를 읽는 service 조회로 가져온다 (목록 앞쪽 1,000건만 보지 않는다)', async () => {
+    const many = Array.from({ length: 1200 }, (_, i) => salesOrder(i + 1, '2026-12-31', false));
+    const old = salesOrder(9999, '2026-10-20', true);
+    const data = await brief(services({ salesOrders: [...many, old] }), user({ SALES_ORDER_CREATE: 'VIEW' }, []));
+    expect(data['납기 위험 수주']).toMatchObject({ '납기 위험 수주 수': 1, 수주: [{ 수주번호: 'SO-2610-009999', '납기까지 남은 일수': -2 }] });
   });
 
   it('한 묶음이 실패해도 나머지 묶음은 준다', async () => {

@@ -84,7 +84,8 @@ export function agentRiskTool(agent: FactoryAgentService, notifications: Notific
       const includeClosed = optionalBoolean(args, 'includeClosed') ?? false;
       const alertOnly = riskType !== undefined && ALERT_TYPE_OF_RISK[riskType] !== undefined;
       const visible = canViewAgentCandidates(user);
-      const candidates = visible && !alertOnly ? sortAgentCandidates((await agent.list(user)).filter((c) => (riskType === undefined || c.riskType === riskType) && (includeClosed || isOpenAgentCandidate(c)))) : [];
+      // 닫힌 후보는 includeClosed일 때만 읽는다(끝난 후보는 계속 쌓인다)
+      const candidates = visible && !alertOnly ? sortAgentCandidates((await agent.list(user, { openOnly: !includeClosed })).filter((c) => (riskType === undefined || c.riskType === riskType) && (includeClosed || isOpenAgentCandidate(c)))) : [];
       const limited = limitRows(candidates);
       const alertTypes = riskType === undefined ? AGENT_NOTIFICATION_TYPES : [ALERT_TYPE_OF_RISK[riskType] ?? NOTIFICATION_TYPE.AGENT_CANDIDATE];
       const alerts = await collectNotifications(notifications, user, { types: alertTypes });

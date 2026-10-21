@@ -11,7 +11,7 @@ import type { ScheduleEventService } from '../../schedule-event/schedule-event.s
 import { candidateRow, canViewAgentCandidates, isOpenAgentCandidate, sortAgentCandidates } from './agent.tool';
 import { approvalRow, NOT_DEPARTMENT_HEAD, readApprovalInbox } from './approval.tool';
 import { daysUntil, OPEN_ACCESS, scanFiltered, seoulDateTimeText, type AssistantTool } from './assistant-tool';
-import { AGENT_NOTIFICATION_TYPES, collectNotifications, notificationRow } from './notification.tool';
+import { AGENT_NOTIFICATION_TYPES, notificationRow, readUnreadNotifications, type UnreadNotifications } from './notification.tool';
 
 const logger = new Logger('get_my_briefing');
 
@@ -66,7 +66,8 @@ async function todaySchedule(s: BriefingServices, user: AuthUser, today: string)
   return {
     value: {
       '일정 수': events.length,
-      일정: events.slice(0, BRIEFING_ROWS * 2).map((e) => ({ 제목: e.scheduleEventTitle, 시간: `${hhmm(e.startAt)}~${hhmm(e.endAt)}`, 참석자: e.attendees.map((a) => a.employeeName) })),
+      일정: events.slice(0, BRIEFING_ROWS).map((e) => ({ 제목: e.scheduleEventTitle, 시간: `${hhmm(e.startAt)}~${hhmm(e.endAt)}`, 참석자: e.attendees.map((a) => a.employeeName) })),
+      ...(events.length > BRIEFING_ROWS ? { '더 있는 수': events.length - BRIEFING_ROWS } : {}),
     },
     headline: `오늘 일정 ${events.length}건 (첫 일정: ${first.scheduleEventTitle} ${hhmm(first.startAt)})`,
   };
@@ -109,66 +110,59 @@ async function approvals(s: BriefingServices, user: AuthUser): Promise<Section |
 }
 
 /** 안 읽은 알림 중 Agent 알림(대응 후보·납기 위험·불합격률 상승)은 Agent 묶음에 있어서 뺀다: 한 알림을 두 묶음에서 세어 모델이 숫자를 겹쳐 말하지 않게 */
-async function unreadNotifications(s: BriefingServices, user: AuthUser): Promise<Section> {
-  const scan = await scanFiltered(
-    (page, size) => s.notifications.list(user, { unreadOnly: true, page, size }),
-    (n) => !AGENT_NOTIFICATION_TYPES.includes(n.notificationType),
-  );
-  if (scan.rows.length === 0 && scan.unscanned === 0) return empty;
+async function unreadNotifications(unreadRead: Promise<UnreadNotifications>): Promise<Section> {
+  const unread = await unreadRead;
+  const rows = unread.rows.filter((n) => !AGENT_NOTIFICATION_TYPES.includes(n.notificationType));
+  if (rows.length === 0 && unread.unscanned === 0) return empty;
   return {
     value: {
-      '안 읽은 알림 수(Agent 알림 제외)': scan.rows.length,
-      알림: scan.rows.slice(0, BRIEFING_ROWS).map(notificationRow),
-      ...(scan.rows.length > BRIEFING_ROWS ? { '더 있는 수': scan.rows.length - BRIEFING_ROWS } : {}),
-      ...(scan.unscanned > 0 ? { '확인하지 못한 알림 수': scan.unscanned } : {}),
+      '안 읽은 알림 수(Agent 알림 제외)': rows.length,
+      알림: rows.slice(0, BRIEFING_ROWS).map(notificationRow),
+      ...(rows.length > BRIEFING_ROWS ? { '더 있는 수': rows.length - BRIEFING_ROWS } : {}),
+      ...(unread.unscanned > 0 ? { '확인하지 못한 알림 수': unread.unscanned } : {}),
     },
-    headline: scan.rows.length > 0 ? `안 읽은 알림 ${scan.rows.length}건` : null,
+    headline: rows.length > 0 ? `안 읽은 알림 ${rows.length}건` : null,
   };
 }
 
-/** 열린 대응 후보(볼 권한이 있을 때)와 안 읽은 Agent 알림 */
-async function agentRisks(s: BriefingServices, user: AuthUser): Promise<Section> {
+/** 열린 대응 후보(볼 권한이 있을 때, 처리 전인 후보만 읽는다)와 안 읽은 Agent 알림(안 읽은 알림 목록을 알림 묶음과 나눠 쓴다) */
+async function agentRisks(s: BriefingServices, user: AuthUser, unreadRead: Promise<UnreadNotifications>): Promise<Section> {
   const visible = canViewAgentCandidates(user);
-  const candidates = visible ? sortAgentCandidates((await s.agent.list(user)).filter(isOpenAgentCandidate)) : [];
-  const alerts = await collectNotifications(s.notifications, user, { types: AGENT_NOTIFICATION_TYPES, unreadOnly: true, limit: BRIEFING_ROWS });
-  if (candidates.length === 0 && alerts.unread === 0) return empty;
-  const parts = [...(visible ? [`열린 Agent 대응 후보 ${candidates.length}건`] : []), `안 읽은 Agent 알림 ${alerts.unread}건`];
-  const example = candidates[0]?.summary ?? alerts.rows[0]?.notificationContent;
+  const candidates = visible ? sortAgentCandidates((await s.agent.list(user, { openOnly: true })).filter(isOpenAgentCandidate)) : [];
+  const alerts = (await unreadRead).rows.filter((n) => AGENT_NOTIFICATION_TYPES.includes(n.notificationType));
+  if (candidates.length === 0 && alerts.length === 0) return empty;
+  const parts = [...(visible ? [`열린 Agent 대응 후보 ${candidates.length}건`] : []), `안 읽은 Agent 알림 ${alerts.length}건`];
+  const example = candidates[0]?.summary ?? alerts[0]?.notificationContent;
   const exampleText = example && example.length > EXAMPLE_MAX ? `${example.slice(0, EXAMPLE_MAX)}…` : example;
   return {
     value: {
       ...(visible ? { '열린 대응 후보 수': candidates.length, '대응 후보': candidates.slice(0, BRIEFING_ROWS).map(candidateRow) } : {}),
-      '안 읽은 Agent 알림 수': alerts.unread,
-      'Agent 알림': alerts.rows.map(notificationRow),
+      '안 읽은 Agent 알림 수': alerts.length,
+      'Agent 알림': alerts.slice(0, BRIEFING_ROWS).map(notificationRow),
     },
     headline: `열린 Agent 위험: ${parts.join(', ')}${exampleText ? ` (예: ${exampleText})` : ''}`,
   };
 }
 
-/** 납기 위험 수주(납기까지 기준일 이하 + 미출하)를 납기 빠른 순으로. 수주 등록 조회 권한이 있을 때만 */
-async function dueSoonOrders(s: BriefingServices, today: string): Promise<Section> {
-  const scan = await scanFiltered(
-    (page, size) => s.salesOrders.list({ page, size }),
-    (order) => order.isDueRisk,
-  );
-  const sorted = [...scan.rows].sort((a, b) => (a.earliestDueDate ?? '9999-12-31').localeCompare(b.earliestDueDate ?? '9999-12-31'));
-  const first = sorted[0];
+/** 납기 위험 수주(진행 중 수주 중 납기까지 기준일 이하 + 미출하)를 납기 빠른 순으로. 수주 등록 조회 권한이 있을 때만 */
+async function dueRiskSalesOrders(s: BriefingServices, today: string): Promise<Section> {
+  const dueRisk = await s.salesOrders.listDueRisk();
+  const first = dueRisk[0];
   if (!first) return empty;
   const days = first.earliestDueDate ? daysUntil(first.earliestDueDate, today) : null;
   return {
     value: {
-      '납기 위험 수주 수': sorted.length,
-      수주: sorted.slice(0, BRIEFING_ROWS).map((o) => ({
-        수주번호: o.salesOrderNo,
-        고객사: o.customerName,
-        '가장 이른 납기': o.earliestDueDate,
-        '납기까지 남은 일수': o.earliestDueDate ? daysUntil(o.earliestDueDate, today) : null,
-        담당: o.ownerEmployeeName,
+      '납기 위험 수주 수': dueRisk.length,
+      수주: dueRisk.slice(0, BRIEFING_ROWS).map((salesOrder) => ({
+        수주번호: salesOrder.salesOrderNo,
+        고객사: salesOrder.customerName,
+        '가장 이른 납기': salesOrder.earliestDueDate,
+        '납기까지 남은 일수': salesOrder.earliestDueDate ? daysUntil(salesOrder.earliestDueDate, today) : null,
+        담당: salesOrder.ownerEmployeeName,
       })),
-      ...(sorted.length > BRIEFING_ROWS ? { '더 있는 수': sorted.length - BRIEFING_ROWS } : {}),
-      ...(scan.unscanned > 0 ? { '확인하지 못한 수주 수': scan.unscanned } : {}),
+      ...(dueRisk.length > BRIEFING_ROWS ? { '더 있는 수': dueRisk.length - BRIEFING_ROWS } : {}),
     },
-    headline: `납기 위험 수주 ${sorted.length}건 (가장 이른 것: ${first.salesOrderNo} ${first.customerName}, 납기 ${first.earliestDueDate ?? '미정'}${days === null ? '' : days < 0 ? `, ${-days}일 지남` : `, ${days}일 남음`})`,
+    headline: `납기 위험 수주 ${dueRisk.length}건 (가장 이른 것: ${first.salesOrderNo} ${first.customerName}, 납기 ${first.earliestDueDate ?? '미정'}${days === null ? '' : days < 0 ? `, ${-days}일 지남` : `, ${days}일 남음`})`,
   };
 }
 
@@ -192,21 +186,24 @@ export function myBriefingTool(s: BriefingServices, today: () => string = seoulT
     async run(_args, user) {
       const date = today();
       const omitted: Omitted[] = [];
-      const canSeeOrders = hasPermission(user, { permission: PERMISSION.SALES_ORDER_CREATE, level: 'VIEW' });
+      const canViewSalesOrders = hasPermission(user, { permission: PERMISSION.SALES_ORDER_CREATE, level: 'VIEW' });
       const failed = { 오류: '이 묶음은 조회하지 못했어요' };
       const failure: Section = { value: failed, headline: null };
-      const [schedule, tasks, approval, notifications, agent, orders] = await Promise.all([
+      // 안 읽은 알림은 한 번만 읽어 알림 묶음과 Agent 묶음이 나눠 쓴다 (두 묶음이 같은 목록을 1,000건까지 두 번 읽지 않게)
+      const unreadRead = readUnreadNotifications(s.notifications, user);
+      unreadRead.catch(() => undefined);
+      const [schedule, tasks, approval, notifications, agent, salesOrders] = await Promise.all([
         guarded('오늘 내 일정', () => todaySchedule(s, user, date), failure),
         guarded('내 업무', () => myTasks(s, user, date), { overdue: failure, soon: failure, unscanned: 0 }),
         guarded('내 결재 대기', () => approvals(s, user), failure),
-        guarded('안 읽은 알림', () => unreadNotifications(s, user), failure),
-        guarded('열린 Agent 위험', () => agentRisks(s, user), failure),
-        canSeeOrders ? guarded('납기 위험 수주', () => dueSoonOrders(s, date), failure) : Promise.resolve(null),
+        guarded('안 읽은 알림', () => unreadNotifications(unreadRead), failure),
+        guarded('열린 Agent 위험', () => agentRisks(s, user, unreadRead), failure),
+        canViewSalesOrders ? guarded('납기 위험 수주', () => dueRiskSalesOrders(s, date), failure) : Promise.resolve(null),
       ]);
       if (approval === null) omitted.push({ 묶음: '내 결재 대기', 이유: NOT_DEPARTMENT_HEAD });
-      if (orders === null) omitted.push({ 묶음: '납기 위험 수주', 이유: '수주 등록 조회 권한이 없어 볼 수 없어요' });
+      if (salesOrders === null) omitted.push({ 묶음: '납기 위험 수주', 이유: '수주 등록 조회 권한이 없어 볼 수 없어요' });
       // 급한 순서: 지난 업무 → 납기 위험 수주 → Agent 위험 → 결재 → 일정 → 임박 업무 → 알림 (가정값)
-      const ranked = [tasks.overdue, orders, agent, approval, schedule, tasks.soon, notifications].flatMap((section) => (section?.headline ? [section.headline] : []));
+      const ranked = [tasks.overdue, salesOrders, agent, approval, schedule, tasks.soon, notifications].flatMap((section) => (section?.headline ? [section.headline] : []));
       return {
         label: '오늘 브리핑',
         // 키 순서도 같은 우선순위다(작은 모델은 앞에 있는 묶음부터 본다)
@@ -214,7 +211,7 @@ export function myBriefingTool(s: BriefingServices, today: () => string = seoulT
           기준일: date,
           [`먼저 할 일 후보(급한 순서, 최대 ${BRIEFING_TOP})`]: ranked.length === 0 ? NONE : ranked.slice(0, BRIEFING_TOP),
           '마감이 지난 내 업무': tasks.overdue.value,
-          ...(orders === null ? {} : { '납기 위험 수주': orders.value }),
+          ...(salesOrders === null ? {} : { '납기 위험 수주': salesOrders.value }),
           '열린 Agent 위험': agent.value,
           ...(approval === null ? {} : { '내 결재 대기': approval.value }),
           '오늘 내 일정': schedule.value,

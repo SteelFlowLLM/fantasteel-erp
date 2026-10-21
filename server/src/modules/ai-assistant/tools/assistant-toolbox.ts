@@ -215,11 +215,16 @@ export class AssistantToolbox {
     }
     if (typeof args !== 'object' || args === null || Array.isArray(args)) return failure('인자는 객체여야 해요');
 
-    // 범위(위젯)마다 화면 권한이 다른 도구는 그 범위의 권한으로 본다. 모르는 범위는 권한을 따지지 않고 도구가 인자 오류로 돌려준다
+    // 범위(위젯)마다 화면 권한이 다른 도구는 그 범위의 권한으로 본다. 범위 값이 없거나 틀리면 권한을 따질 수 없으니 바로 인자 오류로 돌려준다
+    const scoped = tool.access.scoped;
     const scope = scopeOf(tool, args as Record<string, unknown>);
-    const required = scope === undefined ? tool.access.permissions : (tool.access.scoped?.permissions[scope] ?? []);
-    const unknownScope = tool.access.scoped !== undefined && scope === undefined;
-    if (tool.access.checkedBy === 'TOOLBOX' && !unknownScope && required.length && !required.some((permission) => hasPermission(user, { permission, level: 'VIEW' }))) {
+    if (scoped && scope === undefined) {
+      const given = (args as Record<string, unknown>)[scoped.argument];
+      const values = Object.keys(scoped.permissions).join(', ');
+      return failure(given === undefined || given === null || given === '' ? `${scoped.argument} 값이 필요해요 (${values})` : `${scoped.argument} 값은 ${values} 중 하나예요`);
+    }
+    const required = scoped && scope !== undefined ? scoped.permissions[scope] : tool.access.permissions;
+    if (tool.access.checkedBy === 'TOOLBOX' && required.length && !required.some((permission) => hasPermission(user, { permission, level: 'VIEW' }))) {
       return this.denied(user, tool, required);
     }
 

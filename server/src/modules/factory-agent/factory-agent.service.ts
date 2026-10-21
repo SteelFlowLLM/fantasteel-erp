@@ -398,9 +398,9 @@ export class FactoryAgentService {
 
   // ── 후보 조회 ─────────────────────────────────────────
 
-  /** GET action-drafts?source=agent. 후보가 만드는 업무의 조회 권한이 있는 사원만 본다 */
-  async list(user: AuthUser): Promise<AgentCandidateView[]> {
-    const rows = await this.repository.findAgentDrafts(this.prisma);
+  /** GET action-drafts?source=agent. 후보가 만드는 업무의 조회 권한이 있는 사원만 본다. openOnly면 처리 전인 후보만 읽는다(이슈 #506) */
+  async list(user: AuthUser, options: { openOnly?: boolean } = {}): Promise<AgentCandidateView[]> {
+    const rows = await this.repository.findAgentDrafts(this.prisma, options);
     return rows.filter((row) => this.canView(user, row)).flatMap((row) => this.toView(row) ?? []);
   }
 

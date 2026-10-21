@@ -165,7 +165,7 @@ export type AiReasoningLevel = (typeof AI_REASONING_LEVELS)[number];
 export const AI_REASONING_LABEL: Record<AiReasoningLevel, string> = { off: '끔', low: '낮게', medium: '보통', high: '깊게' };
 export const AI_REASONING_DEFAULT: AiReasoningLevel = 'medium';
 
-/** 아침 브리핑 (이슈 #506): /브리핑 명령과 첫 화면의 '오늘 브리핑' 단추가 보내는 질문. 서버가 이 질문에는 get_my_briefing을 먼저 부르게 한다 */
+/** 아침 브리핑 (이슈 #506): /브리핑 명령과 첫 화면의 '오늘 브리핑' 단추가 보내는 질문. 서버가 따로 알아보지는 않고, 프롬프트 규칙(K1)이 이런 질문에는 get_my_briefing 하나만 부르게 한다 */
 export const AI_BRIEFING_QUESTION = '오늘 브리핑 해 줘';
 
 /** 조회 도구의 한글 제목. 도구를 부르는 순간(결과가 오기 전) 화면에 보인다 */
