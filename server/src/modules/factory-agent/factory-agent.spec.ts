@@ -3,12 +3,14 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { BUSINESS_EVENT_TYPE, DRAFT_STATUS, calcTheoreticalWeightTon, type AuthUser } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { AuthUserService } from '../../common/auth/auth-user.service';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { SalesOrderService } from '../sales-order/sales-order.service';
 import { addDays } from './agent-rules';
+import { FactoryAgentRepository } from './factory-agent.repository';
 import { AGENT_QUIET_DAYS, FactoryAgentService } from './factory-agent.service';
 
 let moduleRef: TestingModule;
@@ -156,6 +158,70 @@ describe('원료 부족 감지 (REQ-AGT-001·002·005)', () => {
     await agent.scanAll();
     const again = (await draftsOf(plan.id)).filter((d) => targetKeyOf(d) === targetKeyOf(draft) && d.id !== draft.id);
     expect(again.map((d) => d.draftStatus)).toEqual([DRAFT_STATUS.WAITING_APPROVAL]);
+  });
+});
+
+describe('위험 감지 작업 로그와 감지 큐 (#509)', () => {
+  it('위험 감지 작업 로그를 남기지 못하면 후보·초안 생성 로그·알림이 모두 롤백된다', async () => {
+    const plan = await shortPlan();
+    const owner = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2103003' } });
+    const setting = await prisma.productionSetting.findFirstOrThrow();
+    const dueSoon = await prisma.salesOrder.create({
+      data: { salesOrderNo: 'T-SO-AGT-LOGFAIL', customerId, ownerEmployeeId: owner.id, salesOrderItems: { create: [{ itemId: slabItemId, orderedQty: 2, dueDate: new Date(`${addDays(seoulToday(), setting.deliveryRiskDays)}T00:00:00.000Z`) }] } },
+    });
+    const recorder = moduleRef.get(BusinessEventRecorder);
+    const record = recorder.record.bind(recorder);
+    const spy = jest
+      .spyOn(recorder, 'record')
+      .mockImplementation((tx, input) => (input.type === BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED ? Promise.reject(new Error('작업 로그 실패')) : record(tx, input)));
+    try {
+      const results = await agent.scanAll();
+      expect(results.find((r) => r.riskType === 'RAW_SHORTAGE')?.error).toContain('작업 로그 실패');
+      expect(results.find((r) => r.riskType === 'DUE_RISK')?.error).toContain('작업 로그 실패');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await draftsOf(plan.id)).toHaveLength(0);
+    expect(await prisma.businessEvent.count({ where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED, reason: { contains: `생산계획 ${plan.productionPlanNo} ` } } })).toBe(0);
+    expect(await prisma.notification.count({ where: { notificationContent: { contains: dueSoon.salesOrderNo } } })).toBe(0);
+
+    // 기록이 되살아나면 다음 감지에서 후보와 알림이 함께 생긴다
+    await agent.scanAll();
+    expect((await draftsOf(plan.id)).length).toBeGreaterThan(0);
+    expect(await prisma.notification.count({ where: { notificationContent: { contains: dueSoon.salesOrderNo } } })).toBe(1);
+  });
+
+  it('idle()은 줄 선 감지가 모두 끝날 때까지 기다린다 (기다리는 사이 들어온 감지까지)', async () => {
+    const repository = moduleRef.get(FactoryAgentRepository);
+    const seen: number[] = [];
+    let release = () => {};
+    const spy = jest
+      .spyOn(repository, 'findSalesOrderItemOfLot')
+      .mockImplementationOnce((_tx, lotId) => {
+        seen.push(lotId);
+        return new Promise((resolve) => {
+          release = () => resolve(null);
+        }) as unknown as ReturnType<FactoryAgentRepository['findSalesOrderItemOfLot']>;
+      })
+      .mockImplementationOnce((_tx, lotId) => {
+        seen.push(lotId);
+        return Promise.resolve(null) as unknown as ReturnType<FactoryAgentRepository['findSalesOrderItemOfLot']>;
+      });
+    try {
+      void agent.onInspectionRegistered(-1);
+      let idled = false;
+      const idle = agent.idle().then(() => {
+        idled = true;
+      });
+      void agent.onInspectionRegistered(-2);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(idled).toBe(false);
+      release();
+      await idle;
+      expect(seen).toEqual([-1, -2]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

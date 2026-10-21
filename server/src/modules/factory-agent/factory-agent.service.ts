@@ -187,6 +187,18 @@ export class FactoryAgentService {
     }
   }
 
+  /**
+   * 감지 큐가 빌 때까지 기다린다. 검사 등록은 감지를 기다리지 않으므로(#496), 시드·시험이 감지 결과를 정해진 시점에 보거나
+   * 앱을 닫기 전에 감지를 끝내려고 부른다. 기다리는 사이 새 감지가 줄을 서면 그것까지 기다린다
+   */
+  async idle(): Promise<void> {
+    let tail: Promise<unknown>;
+    do {
+      tail = this.queue;
+      await tail;
+    } while (tail !== this.queue);
+  }
+
   /** RAW_SHORTAGE (REQ-AGT-002): MRP 순소요가 있는 계획·원료마다 구매요청 후보 */
   private async detectRawShortage(): Promise<AgentScanResult> {
     const today = seoulToday();
