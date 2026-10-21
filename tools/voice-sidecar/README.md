@@ -39,6 +39,7 @@ pyannote 모델은 Hugging Face 토큰이 필요하다. `HF_TOKEN` 환경변수�
 - 화자 수: `max_speakers`(ERP가 참석자 수로 보낸다)를 받으면 그 수로 나눈 뒤 목소리 중심이 아주 비슷한(코사인 0.85 이상) 화자를 합친다. 말하지 않은 참석자가 있어도 한 사람이 둘로 덜 쪼개진다. 옛 ERP의 `num_speakers`(정확한 수)도 받는다. pyannote의 `max_speakers`를 그대로 쓰지 않은 이유와 합성 회의 점수는 [docs/backend/stt.md](../../docs/backend/stt.md) '긴 회의 나눠 전사'.
 - 용어 힌트: 요청의 `prompt`(강종·고객사·참석자 이름 등)를 줄바꿈·제어 문자를 빼고 400자까지 조각마다 whisper initial prompt로 넘긴다.
 - whisper 서버가 잠깐 끊겨 조각 하나가 실패(502)하면 그 조각만 2초 뒤 한 번 더 해 본다.
+- whisper가 한 문장을 되풀이하는 데 빠지면(같은 글 6자 이상이 4번 잇달아) 그 자리부터 새 문맥으로(힌트 없이) 다시 받아써 덜 되풀이한 쪽을 쓴다.
 - 진행: 요청에 `stream=progress`를 주면 `Content-Type: application/x-ndjson`으로 한 줄씩 `{"type":"progress","stage":"diarize","current":1,"total":1}`, `{"type":"progress","stage":"transcribe","current":3,"total":12}` … `{"type":"result","result":{…아래 응답 모양…}}`를 보낸다. 머리글을 보낸 뒤 실패하면 `{"type":"error","status":502,"message":"…"}` 줄로 알린다. 받는 쪽이 연결을 끊으면 남은 조각을 받아쓰지 않는다. `stream`이 없으면 예전처럼 JSON 한 번이다.
 - `GET /health` → `{"status":"ok","transcribing":n}`: 받아쓰는 중인 1분 이상 녹음 수(키 없이 열린다). ERP의 "다시 켜기"·"끄기"는 이 값이 0보다 크면 확인을 받는다.
 
