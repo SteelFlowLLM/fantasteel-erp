@@ -39,7 +39,9 @@ export class ReconciliationService {
     if (user && user.roleCode !== ROLE.ADMIN) throw new AppException('COM-002', '정합성 보정은 관리자만 실행할 수 있어요');
     const rows = await this.prisma.$transaction(async (tx) => {
       // 잠금 순서: inventory(item_id 순) → reservation (inventory.md 4장)
-      const inventories = await this.repository.lockInventories(tx);
+      const locked = await this.repository.lockInventories(tx);
+      // 열연 배정 매수부터 확정 열연 배정 수로 맞춘다(예약 매수 보정의 가용 계산이 이 값을 쓴다, #478)
+      const inventories = await this.reconcileRolling(tx, locked, user);
       const sums = await this.repository.sumActiveReservations(tx);
       const checked = await this.rowsOf(tx, inventories, sums);
       const result: ReservationReconciliationRow[] = [];
@@ -63,6 +65,27 @@ export class ReconciliationService {
       );
     }
     return view(rows, true);
+  }
+
+  /**
+   * rolling_allocated_qty를 확정 열연 배정 수로 맞춘다 (예전 이중 차감 등으로 어긋난 행). 맞춘 값을 반영한 재고 행을 돌려준다.
+   * 작업 로그 유형이 없어 예약 보정처럼 서버 로그에만 남긴다
+   */
+  private async reconcileRolling(tx: Tx, inventories: InventoryQtyRow[], user: AuthUser | null): Promise<InventoryQtyRow[]> {
+    const confirmed = await this.repository.countConfirmedRollingAllocations(tx);
+    const fixed: string[] = [];
+    const result: InventoryQtyRow[] = [];
+    for (const row of inventories) {
+      const target = confirmed.get(row.itemId) ?? 0;
+      if (row.rollingAllocatedQty !== target && (await this.repository.setRollingAllocatedQty(tx, row.itemId, row.rollingAllocatedQty, target))) {
+        fixed.push(`item ${row.itemId} ${row.rollingAllocatedQty}→${target}`);
+        result.push({ ...row, rollingAllocatedQty: target });
+      } else {
+        result.push(row);
+      }
+    }
+    if (fixed.length) this.logger.warn(`열연 배정 매수 보정(${user ? user.employeeNo : '주기 실행'}): ${fixed.join(', ')}`);
+    return result;
   }
 
   private async rowsOf(tx: Tx, inventories: InventoryQtyRow[], sums: Map<number, number>): Promise<ReservationReconciliationRow[]> {

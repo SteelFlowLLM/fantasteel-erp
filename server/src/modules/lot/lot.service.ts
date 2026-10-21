@@ -166,7 +166,9 @@ export class LotService {
     const walked = await this.repository.walkRelations(tx, id, resolved);
     const lotIds = walked.map((w) => w.lotId);
     const depthById = new Map(walked.map((w) => [w.lotId, w.depth]));
-    const [rows, relations] = await Promise.all([this.repository.findLotRows(tx, lotIds), this.repository.findRelationsAmong(tx, lotIds)]);
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const rows = await this.repository.findLotRows(tx, lotIds);
+    const relations = await this.repository.findRelationsAmong(tx, lotIds);
 
     const nodes: TraceLotNode[] = rows
       .map((row) => ({

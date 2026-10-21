@@ -33,6 +33,12 @@ import { buildMillSheetSnapshot } from './mill-sheet-snapshot';
 import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
 import { ShipmentRepository } from './shipment.repository';
 
+/**
+ * LOT마다 재검증·소진·작업 로그(채번 포함) 쿼리가 돈다. Prisma 기본 제한(5초)은 원격 DB(Supabase 풀러)에서 LOT이 많으면 넘을 수 있어
+ * 수주 등록·취소와 같은 값으로 늘린다 (#478)
+ */
+const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
+
 /** 배정 대기·배정 확정. 출하 가능 매수에서 빼는 진행 중 출하요청 */
 const PENDING_STATUSES: ShipmentRequestStatus[] = [SHIPMENT_REQUEST_STATUS.REQUESTED, SHIPMENT_REQUEST_STATUS.ALLOCATED];
 
@@ -243,6 +249,8 @@ export class ShipmentService {
 
       // 재고 행 잠금 순서(규격 id 오름차순)와 맞추려고 규격 순으로 처리한다
       const lines = [...request.shipmentRequestItems].sort((a, b) => a.salesOrderItem.itemId - b.salesOrderItem.itemId || a.id - b.id);
+      // 품목마다 예약 전환 작업 로그를 남기므로, 모든 재고 행을 첫 작업 로그 전에 잠근다 (교착 방지 #478)
+      await this.inventory.lockInventoriesFirst(tx, lines.map((l) => l.salesOrderItem.itemId));
       const reservations = await this.inventory.listReservations(tx, lines.map((l) => l.salesOrderItem.id));
       const reservedQty = (soItemId: number, status: string) =>
         reservations.filter((r) => r.salesOrderItemId === soItemId && r.reservationStatus === status).reduce((sum, r) => sum + r.reservedQty, 0);
@@ -346,7 +354,7 @@ export class ShipmentService {
           after: { millSheetNo, shipmentRequestNo: request.shipmentRequestNo, salesOrderNo: salesOrder.salesOrderNo, heatNos: snapshot.heats.map((h) => h.heatNo), totalQty: snapshot.totalQty },
         });
       }
-    });
+    }, LONG_TX);
     return this.findOne(user, id);
   }
 

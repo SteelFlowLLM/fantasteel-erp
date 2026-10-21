@@ -166,7 +166,9 @@ export class NotionSyncRepository {
   }
 
   async countDirtyMeetings(tx: Tx, staleBefore: Date): Promise<number> {
-    const [create, update] = await Promise.all([tx.meetingMinutes.count({ where: this.meetingCreateWhere(staleBefore) }), tx.meetingMinutes.count({ where: this.meetingUpdateWhere(tx) })]);
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const create = await tx.meetingMinutes.count({ where: this.meetingCreateWhere(staleBefore) });
+    const update = await tx.meetingMinutes.count({ where: this.meetingUpdateWhere(tx) });
     return create + update;
   }
 
