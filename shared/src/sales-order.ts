@@ -10,6 +10,12 @@ export const MAX_ORDERED_QTY = 9_999;
 /** 매수가 상한을 넘었을 때 문구 (SO-002와 함께 보낸다) */
 export const ORDERED_QTY_OVER_MESSAGE = `수량은 품목 한 줄에 ${MAX_ORDERED_QTY.toLocaleString('en-US')}까지 입력할 수 있어요`;
 
+/** 철강맨AI 수주 카드의 매수 확인 사유 (서버 제안과 화면 수정이 같은 문구를 쓴다) */
+export const orderedQtyIssueOf = (lineNo: number): string => `${lineNo}번째 줄의 매수는 1 이상 ${MAX_ORDERED_QTY.toLocaleString('en-US')} 이하의 정수여야 해요`;
+
+/** 수주 한 줄 매수로 받을 수 있는 값인지 (1 이상 상한 이하 정수) */
+export const isOrderableQty = (qty: unknown): qty is number => typeof qty === 'number' && Number.isInteger(qty) && qty >= 1 && qty <= MAX_ORDERED_QTY;
+
 /** 진행률 같은 지표: 값과 분모를 함께 준다 (업무 프로세스 4.5 — 단계를 더해 주문보다 큰 값으로 보이지 않게) */
 export interface ProgressMeasure {
   qty: number;
