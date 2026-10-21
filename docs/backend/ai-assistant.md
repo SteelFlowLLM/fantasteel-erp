@@ -396,7 +396,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 
 **철강맨 부르기·말로 승인 (이슈 #457, 문서에 없는 기능)** — 듣기·부르는 말·명령은 화면(`client/src/features/shell/SteelmanWake.tsx`, `lib/steelmanWake.ts`)이 하고 받아쓰기는 `POST stt/wake-clip`(`docs/backend/stt.md`)이다. 들은 질문은 패널에서 보낸 것과 같은 `messages/stream`이라 서버에는 새 질문 경로가 없다.
 - 말로 승인은 손으로 누를 때와 같은 `POST ai-assistant/action-cards/execute`에 `approvedByVoice: true`를 더해 보낸다. 🟡 `approvedByVoice`는 화면이 "말로 승인했다"고 알린 표시일 뿐 증거가 아니다(서버는 소리를 받지 않고, 같은 사원이 이 칸을 넣어 보낼 수도 있다). 권한은 늘 사원 권한으로 다시 보고, 표시는 로그의 사유로만 남는다. 확인 창의 [실행]을 손으로 누르면 `approvedByVoice` 없이 보낸다.
-- 🟡 말로 승인은 목소리로 사람을 가리지 않는다: 확인 창이 떠 있는 10초 안에 옆 사람이 "실행"이라고 해도 실행된다. 그래서 '말로 승인 허용'은 기본 꺼짐이고 사원마다 따로 켜며, 받는 카드를 되돌리기 쉬운 업무·일정·구매요청 초안(부서장 승인 전)으로 줄였다. 기다리는 사이 허용을 끄면 말로는 실행하지 않는다. 서버는 `AI_VOICE_APPROVABLE_KINDS`(업무·일정·구매요청 초안)가 아니면 실행하지 않고 `VOC-010`(400)으로 거절한다. 나머지는 되돌리기 어렵거나(수주·열연 배정·히트 편성은 재고·생산에 바로 영향, Notion은 회사 밖 문서, 업무·일정 고치기는 있던 기록을 덮어씀) 작업 로그가 없어(과거 사례·심층 조사) 말로 승인한 흔적을 남길 수 없다.
+- 🟡 말로 승인은 목소리로 사람을 가리지 않는다: 확인 창이 떠 있는 10초 안에 옆 사람이 "실행"이라고 해도 실행된다. 그래서 '말로 승인 허용'은 기본 꺼짐이고 사원마다 따로 켜며, 받는 카드를 되돌리기 쉬운 업무·일정·구매요청 초안(부서장 승인 전)으로 줄였다. 기다리는 사이 허용을 끄면 말로는 실행하지 않는다. 서버는 `AI_VOICE_APPROVABLE_KINDS`(업무·일정·구매요청 초안)가 아니면 `VOC-010`(400), 관리자가 AI 연결 화면에서 말로 승인을 꺼 두었으면(회사 설정 `stt/wake-settings`, 기본 꺼짐) `VOC-012`(403)로 거절한다. `capabilities`는 `steelmanWake: { available, voiceApproval }`로 회사 설정을 알린다. 나머지는 되돌리기 어렵거나(수주·열연 배정·히트 편성은 재고·생산에 바로 영향, Notion은 회사 밖 문서, 업무·일정 고치기는 있던 기록을 덮어씀) 작업 로그가 없어(과거 사례·심층 조사) 말로 승인한 흔적을 남길 수 없다.
 - 받는 카드는 `runAsVoiceApproved` 안에서 실행한다. 그 안에서 기록되는 작업 로그는 기록기(`BusinessEventRecorder`)가 사유 끝에 `철강맨 말로 승인`을 붙인다(사유 코드 `CODE: …`는 앞에 그대로). 표시는 본 거래와 같은 트랜잭션의 로그에 남는다: 업무 `TASK_CREATED`, 일정 `SCHEDULE_EVENT_CREATED`, 구매요청 초안 `DRAFT_CREATED`(`MessageActionService.createFromAssistant` → `createAiDraft`가 같은 tx에 기록, `voice-approval.unit.spec.ts`가 실제 service로 확인). 스키마는 바꾸지 않았다.
 
 ## 5. 오류 코드·작업 로그
@@ -407,6 +407,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | COM-999 (HTTP 503) | LLM 모델 미설정, LLM 연결 실패·시간 초과(120초). 메시지는 이유 그대로(`LlmRequestError`) |
 | 🟡 AST-001 (404) | 저장한 대화가 없거나 남의 대화(보기·지우기·이어 묻기). 9.3에 없어 새로 둠(이슈 #399) |
 | 🟡 VOC-010 (400) | 말로 승인할 수 없는 카드를 `approvedByVoice`로 실행하려 함(이슈 #457) |
+| 🟡 VOC-012 (403) | 관리자가 말로 승인을 꺼 두었는데 `approvedByVoice`로 실행하려 함(이슈 #457) |
 
 도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다.
 
@@ -466,7 +467,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
 - `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
-- `voice-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함, 이슈 #457): 말로 승인할 수 있는 카드는 업무·일정·구매요청뿐, 받는 카드는 말로 승인 범위 안에서·눌러 실행하면 범위 밖, 나머지 10종은 실행하지 않고 VOC-010, 구매요청 초안은 `DRAFT_CREATED`에 사유 표시. 기록기의 사유 표시는 `common/business-event/business-event.recorder.unit.spec.ts`·`ai-assisted.context.spec.ts`.
+- `voice-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함, 이슈 #457): 말로 승인할 수 있는 카드는 업무·일정·구매요청뿐, 받는 카드는 말로 승인 범위 안에서·눌러 실행하면 범위 밖, 나머지 10종은 실행하지 않고 VOC-010, 회사 설정이 말로 승인을 끄면 VOC-012(눌러 실행은 그대로), 구매요청 초안은 `DRAFT_CREATED`에 사유 표시. 기록기의 사유 표시는 `common/business-event/business-event.recorder.unit.spec.ts`·`ai-assisted.context.spec.ts`.
 - `ai-action-card.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 카드 제안(이름·원료 맞추기, 지난 날짜·못 찾은 이름 사유, 본인 일정·끝 시각 가정, 구매요청 권한) · 실행(필수 칸·퇴사 담당자·알림 대상·초안 생성·다른 종류 칸 거절). `ai-ops-card.unit.spec.ts`(DB 없음)·`ai-ops-card.spec.ts`(DB): 운영 카드 4종의 제안(이름 맞추기·거절 이유)·실행(권한·필수 칸·기존 service 호출), 수주 등록은 실제 DB로 수주·품목·작업 로그 확인. `ai-action-card.spec.ts`(DB): 업무·일정·구매요청을 실제 DB로(업무·일정·초안 행, 알림, AI 경유 작업 로그, 권한 없는 역할). `ai-assistant.spec.ts`: 카드를 요청한 화면에만 도구·규칙·카드가 가고, 요청하지 않으면 없다.
 
 - `web/web-tools.unit.spec.ts`(네트워크 없음, `npm run test:unit`에 포함): DuckDuckGo HTML 읽기(fixture: 결과·광고·uddg·중복·javascript, anomaly 화면), 위키백과·카카오 응답 읽기, 검색어 개인정보 빼기, 감싸기·이스케이프, 주소 키·답의 링크 거르기, 공용 주소 판단(IPv4·IPv6·mapped·compatible·영역 표시), 주소 확인(scheme·포트·사용자 정보·정수/16진 IPv4·localhost), lookup(배열·주소 하나·재바인딩·mapped), Readability 본문 뽑기·EUC-KR, 검색 클라이언트(POST 모양, 막힘 → 1~2초 쉬고 다시 → 위키백과 한국어 → 영어, 10분 캐시, 1분 한도, 차례로 보내기), 카카오(KakaoAK 헤더, OPEN_MAP_AND_LOCAL 401 안내), 네이버(fixture `naver-webkr.json`·`naver-local.json`: `<b>`·엔티티 지움·중복·빈 link → 지도 검색 주소, 엔진 순서 네이버 → DuckDuckGo, 다음(카카오)(fixture `kakao-web.json`: 태그·엔티티 지움, KakaoAK 헤더·URL, 네이버 실패 → 카카오, 401·429 로그 한 번·키 값 없음), 헤더·display, 401·429 로그 한 번·키 값 없음·다음 엔진으로, 0건이면 다음 엔진, 키 없으면 안 부름), 장소 제공자(카카오 → 네이버 → 꺼짐), capabilities(엔진·장소 검색), 세션(키 없으면 장소 검색 안 알림, 결과에 없던 주소 거절, 한 답 횟수 상한, 출처 고르기).

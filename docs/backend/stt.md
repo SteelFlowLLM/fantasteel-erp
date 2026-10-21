@@ -17,11 +17,14 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 | `GET /stt/local-server` | VIEW | ERP 서버와 같은 Mac의 음성 서버(LaunchAgent `com.fantasteel.voice`) `{ supported, installed, running, healthy, pid, logPath, message }`. macOS가 아니면 `supported: false` (이슈 #450) |
 | `POST /stt/local-server/start` · `/stop` | USE | `launchctl bootstrap`/`kickstart`·`bootout`만 실행한다(화면 값은 명령에 넣지 않는다). 끄기는 지금만이고 다음 로그인 때 다시 켜진다. 등록 전·macOS가 아니면 COM-004 |
 | `POST /stt/transcribe-test` | USE | multipart `file`(오디오, 100MB까지). `{ ok, text, segmentCount, durationSec, latencyMs, error }` |
+| `GET /stt/wake-settings` | VIEW | 철강맨 부르기 회사 설정 `{ enabled, voiceApproval }` (이슈 #457) |
+| `PUT /stt/wake-settings` | USE | 같은 모양으로 저장. `enabled`가 false면 `voiceApproval`도 false로 저장 |
 | `POST /stt/wake-clip` | 로그인만 | 철강맨 부르기(이슈 #457). 아래 절 |
 
 ## 철강맨 부르기 조각 받아쓰기 (이슈 #457, 문서에 없는 기능)
 
 화면(`features/shell/SteelmanWake.tsx`)이 소리 크기로 잘라 낸 말소리 조각 하나(16kHz·모노 WAV, 최대 8초)를 multipart `file`로 보내면 `{ text, error }`를 돌려준다.
+- 회사 설정: 관리자가 AI 연결 화면의 '철강맨 부르기' 카드에서 회사 전체로 끈다(`storage/settings/steelman-wake.json`, `SteelmanWakeSettingsStore`). 파일이 없으면 기본값 **부르기 켬·말로 승인 끔**(가정값). 부르기가 꺼져 있으면 이 API는 한도를 세기 전에 `VOC-011`(403)로 거절하고, 철강맨AI의 `GET ai-assistant/capabilities`가 `steelmanWake: { available, voiceApproval }`로 알려 화면이 스위치를 숨기고 마이크를 끈다. 켜 있어도 사원 각자의 스위치(기본 꺼짐)를 켜야 듣는다.
 - 설정 화면이 아니라 모든 사원이 쓰는 기능이라 권한 코드 없이 **로그인만** 본다(`ORG_MANAGE` 아님). 저장된 주소·키·모델을 그대로 쓴다.
 - 사원당 **1분 30번**(`STT_WAKE_CLIP_LIMITS.perMinute`, 가정값). 넘으면 음성 서버에 보내지 않고 `VOC-009`(429). 한도는 메모리(`SttWakeLimiter`)라 서버를 다시 켜면 비지만 1분 창이라 상관없다. 한도를 넘은 요청은 세지 않는다.
 - 크기 512KB까지(multer가 끊는다). 이름표(MIME)가 아니라 바이트 머리를 읽어(`stt-wake-clip.ts`의 `wakeClipProblem`) RIFF·WAVE·PCM이고 data 길이가 8초(+0.5초 여유) 안인 것만 받는다. 아니면 음성 서버에 보내지 않고 `COM-004`. 소리도 받아쓴 글도 **저장·로그하지 않는다**(부르는 말이 없는 글은 화면이 바로 버린다).
@@ -62,6 +65,8 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
 
 ## 화면
 
+- '철강맨 부르기' 카드(`SteelmanWakeSettingsCard`, 이슈 #457): [철강맨 부르기 쓰기](기본 켬)·[말로 승인 허용](기본 끔, 부르기를 끄면 같이 꺼짐). 저장하면 철강맨AI 기능 정보도 다시 읽는다.
+
 `/admin/llm`(AI 연결)의 "음성 인식 (STT)" 카드와 오른쪽 "음성 연결 안내" 카드:
 - **방식**: 내 음성 서버(whisper.cpp·화자 분리) / OpenAI 방식 음성 API. 서버에는 저장하지 않고 주소로 짐작(인터넷 주소면 API)하며, 바꾸면 주소·모델 기본값만 채운다(API: `https://api.openai.com/v1`·`whisper-1`).
 - 서버 주소(입력칸 아래에 이 서버 컴퓨터·같은 망·Tailscale·인터넷 중 어디인지 안내, 암호화 없는 인터넷 주소·`0.0.0.0`은 경고), 모델, API 키(저장 후 가림), 연결 확인, 파일로 시험.
@@ -71,4 +76,4 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
 ## 테스트
 
 `server/src/modules/stt/stt.spec.ts` — DB 없이 `npm run test:unit -w @fantasteel/server`로 돈다.
-`stt-wake-clip.spec.ts` — WAV 머리(PCM·8초·LIST 덩이·깨진 머리). `stt-wake.spec.ts` — 철강맨 부르기: 사원별 1분 횟수(넘은 요청은 세지 않음·1분 뒤 다시), 짧은 조각 모델, 저장된 설정·20초로 보내기, 음성 서버 실패는 이유로(관리자만 자세히)·모르는 오류는 던짐, 조각 없음·WAV 아님·8초 넘음 COM-004, 한도 초과 VOC-009, 로그인만(공개 아님·`ORG_MANAGE` 아님).
+`steelman-wake-settings.store.spec.ts` — 회사 설정 기본값·깨진 파일·부르기를 끄면 말로 승인도 꺼짐. `stt-wake-clip.spec.ts` — WAV 머리(PCM·8초·LIST 덩이·깨진 머리). `stt-wake.spec.ts` — 철강맨 부르기: 사원별 1분 횟수(넘은 요청은 세지 않음·1분 뒤 다시), 짧은 조각 모델, 저장된 설정·20초로 보내기, 음성 서버 실패는 이유로(관리자만 자세히)·모르는 오류는 던짐, 조각 없음·WAV 아님·8초 넘음 COM-004, 한도 초과 VOC-009, 회사 설정 꺼짐 VOC-011(한도 안 셈), 로그인만(공개 아님·`ORG_MANAGE` 아님), 회사 설정 API는 `ORG_MANAGE` VIEW·USE.
