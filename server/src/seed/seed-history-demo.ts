@@ -93,10 +93,13 @@ async function main() {
   // 부팅 때 도는 예약 정합성 보정·Agent 감지는 끈다 (지우는 중에 겹치면 교착, 감지 알림은 시드 끝에 가상 시각으로 한 번 돌린다)
   process.env.RESERVATION_RECONCILE_INTERVAL_HOURS = '0';
   process.env.AGENT_SCAN_INTERVAL_HOURS = '0';
+  // 심층 조사 일꾼도 끈다. 공용 DB에 대기 중인 조사가 있으면 시드 도중 집어 가서 AI 표를 바꾼다
+  process.env.AI_RESEARCH_WORKER = 'off';
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['log', 'error', 'warn'] });
   const clock = installVirtualClock('2026-10-01 08:30', (m) => logger.warn(m));
   try {
     const prisma = app.get(PrismaService);
+    extendTransactionTimeout(prisma);
     if (WIPE) await wipeTransactions(prisma);
     if ((await prisma.salesOrder.count()) > 0 || (await prisma.lot.count()) > 0 || (await prisma.chatRoom.count()) > 0) {
       logger.warn('이미 수주·LOT·채팅방이 있어 건너뜁니다. 지우고 넣으려면 -- --wipe 를 붙이세요');
@@ -141,6 +144,17 @@ async function main() {
     clock.uninstall();
     await app.close();
   }
+}
+
+/**
+ * 서비스 트랜잭션의 제한시간을 늘린다. Prisma 기본값(5초)은 로컬 DB 기준이라, 공용 DB(풀러)처럼 왕복이 긴 곳에서는
+ * 배정 추천·확정(LOT 수만큼 조회)이 5초를 넘겨 실패한다 (2026-10-21 Supabase 실행에서 5,191ms). 시드에서만 바꾼다
+ */
+function extendTransactionTimeout(prisma: PrismaService) {
+  const original = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+  const patched = (arg: unknown, options?: { maxWait?: number; timeout?: number; isolationLevel?: unknown }) =>
+    typeof arg === 'function' ? original(arg, { maxWait: 15_000, timeout: 120_000, ...options }) : original(arg, options);
+  (prisma as unknown as { $transaction: typeof patched }).$transaction = patched;
 }
 
 /** 거래·협업 표를 비우고 id를 1부터 다시 시작한다 (FK 제약이 없어 순서는 상관없다) */
