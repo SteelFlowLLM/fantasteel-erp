@@ -82,15 +82,24 @@ export interface AiAgentControlState {
 }
 
 export type AiChatEntry =
-  /** images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (저장하지 않는다). 저장한 대화를 열면 imageCount(보낸 사진 수)만 있다 */
-  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; imageCount?: number; webSearch?: boolean; browser?: boolean; notes?: string[] }
+  /**
+   * images는 화면에 보이고 다시 물을 때 쓰려고 이 탭 메모리에만 둔다 (저장하지 않는다). 저장한 대화를 열면 imageCount(보낸 사진 수)만 있다.
+   * context는 함께 붙인 보고서·Drive 파일: 실패해 다시 물을 때 말없이 빠지지 않게 같은 것을 붙인다 (#519)
+   */
+  | { id: string; role: 'user'; content: string; images?: AiAssistantImageInput[]; imageCount?: number; webSearch?: boolean; browser?: boolean; notes?: string[]; context?: AiAskContext }
   /**
    * steps는 접어 두는 '생각 과정', requestedReasoning·reasoningApplied는 생각 정도 안내용 (생각 정도를 보낸 질문만 담는다), cards는 실행 카드.
    * messageId는 서버에 저장한 답의 id (카드를 실행할 때 보낸다), unsaved는 저장하지 못한 답
    */
   | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[]; webSources?: AiWebSource[]; browserFrames?: AiBrowserFrame[]; messageId?: number; unsaved?: boolean }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
-  | { id: string; role: 'failure'; content: string; code?: AiLlmFailureCode; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean };
+  | { id: string; role: 'failure'; content: string; code?: AiLlmFailureCode; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean; context?: AiAskContext };
+
+/** 질문에 붙인 심층 조사 보고서·Drive 파일 */
+export interface AiAskContext {
+  researchRunId?: number;
+  driveFileIds?: string[];
+}
 
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
@@ -233,14 +242,18 @@ export function aiChatEntriesFromThread(thread: AiChatThreadView): AiChatEntry[]
   });
 }
 
+/** 붙인 것이 있을 때만 질문에 담는다 */
+const askContextOf = (context: AiAskContext | undefined): AiAskContext | undefined => (context?.researchRunId !== undefined || context?.driveFileIds?.length ? context : undefined);
+
 /** 실패 줄: 다시 물을 때 같은 생각 정도·사진으로 묻도록 질문 때의 값을 담는다. code는 AI 서버 실패를 나눈 오류 코드(있을 때만) */
 function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: string, question: string, reason: string, code?: AiLlmFailureCode | null): AiChatEntry {
   const asked = state.entries.find((entry) => entry.id === questionId);
   const images = asked?.role === 'user' ? asked.images : undefined;
   const webSearch = asked?.role === 'user' ? asked.webSearch : undefined;
   const browser = asked?.role === 'user' ? asked.browser : undefined;
+  const context = asked?.role === 'user' ? asked.context : undefined;
   const reasoning = state.live?.reasoning;
-  return { id: newAiChatId(), role: 'failure', content: reason, ...(code ? { code } : {}), question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) };
+  return { id: newAiChatId(), role: 'failure', content: reason, ...(code ? { code } : {}), question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}), ...(context ? { context } : {}) };
 }
 
 interface AiChatState {
@@ -255,7 +268,7 @@ interface AiChatState {
   live: AiChatLive | null;
   claim: (employeeId: number) => void;
   /** reasoning: 이 질문에 보내는 생각 정도 (없으면 보내지 않는다), images: 질문과 함께 보내는 사진 */
-  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, controlId?: string) => void;
+  addQuestion: (id: string, question: string, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, controlId?: string, context?: AiAskContext) => void;
   /** 멈추기·한 단계를 눌렀으면 true(다음 동작 앞에서 멈춘다), 계속이면 false. 실제로 멈춘 것은 서버의 agent_paused로 안다 (이슈 #425) */
   setControlRequested: (questionId: string, requested: boolean) => void;
   /** 답하는 중에 보낸 말을 '전하는 중'으로 진행 상황에 더한다 (서버가 user_note로 알리면 전했음으로 바뀐다, 이슈 #430) */
@@ -289,9 +302,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   live: null,
   claim: (employeeId) =>
     set((state) => (state.ownerEmployeeId === employeeId ? state : { ownerEmployeeId: employeeId, threadId: null, entries: [], pendingId: null, live: null })),
-  addQuestion: (id, question, reasoning, images, webSearch, browser, controlId) =>
+  addQuestion: (id, question, reasoning, images, webSearch, browser, controlId, context) =>
     set((state) => ({
-      entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) }],
+      entries: [...state.entries, { id, role: 'user', content: question, ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}), ...(askContextOf(context) ? { context } : {}) }],
       pendingId: id,
       live: emptyAiChatLive(reasoning ?? null, controlId ?? null),
     })),

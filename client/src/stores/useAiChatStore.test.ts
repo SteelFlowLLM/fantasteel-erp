@@ -101,6 +101,16 @@ describe('질문에 붙인 사진', () => {
     expect(store().entries.at(-1)).toMatchObject({ role: 'failure', content: '모델이 사진을 볼 수 없어요', images: [PHOTO] });
   });
 
+  it('실패 줄이 붙여 물은 보고서·Drive 파일을 들고 있어 다시 물을 때 같은 것을 붙인다 (#519)', () => {
+    store().addQuestion('q1', '이 보고서 요약해줘', undefined, undefined, undefined, undefined, undefined, { researchRunId: 4, driveFileIds: ['f1'] });
+    store().addFailure('q1', '이 보고서 요약해줘', '응답이 없어요');
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', context: { researchRunId: 4, driveFileIds: ['f1'] } });
+    store().clear();
+    store().addQuestion('q2', '예약이 뭐야?', undefined, undefined, undefined, undefined, undefined, {});
+    store().addFailure('q2', '예약이 뭐야?', '응답이 없어요');
+    expect(store().entries.at(-1)).not.toHaveProperty('context');
+  });
+
   it('사진 없는 질문의 실패 줄에는 사진 필드가 없다', () => {
     store().addQuestion('q1', '예약이 뭐야?');
     store().addFailure('q1', '예약이 뭐야?', '응답이 없어요');

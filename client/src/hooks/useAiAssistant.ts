@@ -222,7 +222,7 @@ export function useAskAiAssistant() {
     if (!text || chat.pendingId) return;
     const questionId = newAiChatId();
     const controlId = browser || screenControl ? crypto.randomUUID() : undefined;
-    chat.addQuestion(questionId, text, reasoning, images, webSearch, browser, controlId);
+    chat.addQuestion(questionId, text, reasoning, images, webSearch, browser, controlId, { ...(researchRunId !== undefined ? { researchRunId } : {}), ...(extra.driveFileIds?.length ? { driveFileIds: extra.driveFileIds } : {}) });
     void runAiAsk({ questionId, question: text, screen, threadId: chat.threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, controlId, ...extra });
   };
   return Object.assign(ask, { stop: stopAiAssistant });

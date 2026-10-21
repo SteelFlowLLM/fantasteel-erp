@@ -446,7 +446,8 @@ export function AiPanel() {
     }
     removeFailure(failure.id);
     stickRef.current = true;
-    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, undefined, notionOn, { drive: driveOn });
+    // 붙여 물은 보고서·Drive 파일도 같이 다시 보낸다: 빠지면 보고서를 읽지 않은 답이 보고서 답처럼 나온다 (#519)
+    ask(failure.question, screenContext(), sentReasoning(failure.reasoning ?? reasoning), failure.images, Boolean(failure.webSearch) && !webSearchBlocked, Boolean(failure.browser) && browserBlockedReason === null, screenControlOn, failure.context?.researchRunId, notionOn, { drive: driveOn, driveFileIds: failure.context?.driveFileIds ?? [] });
   };
 
   // 사진 파일을 끌어다 놓거나 붙여 넣으면 질문 칸에 붙는다
