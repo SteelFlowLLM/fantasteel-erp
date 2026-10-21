@@ -56,8 +56,10 @@ export interface PurchaseOrderItemView {
   expectedReceiptDate: string | null;
   /** 입고 누계 = 입고 기록 합계 */
   receivedTon: string;
-  /** 미입고량(입고예정) = 발주량 − 입고 누계 */
+  /** 미입고량(입고예정) = 발주량 − 입고 누계. 발주 취소·잔량 마감한 발주는 0 */
   remainingTon: string;
+  /** 발주 취소·잔량 마감으로 닫은 양 (= 발주량 − 입고 누계, 그 상태일 때만. 아니면 0) */
+  closedTon: string;
 }
 
 /** 발주 목록·상세 (API-147·148). 목록도 품목별 미입고량을 보여 주므로 같은 모양을 쓴다 */
@@ -72,12 +74,24 @@ export interface PurchaseOrderView {
   totalOrderedTon: string;
   totalReceivedTon: string;
   totalRemainingTon: string;
+  totalClosedTon: string;
+  /** 발주 취소·잔량 마감한 기록 (그 상태일 때만, 작업 로그 PURCHASE_ORDER_CANCELLED·CLOSED. ERD에 칸이 없다) */
+  statusChange: PurchaseOrderStatusChange | null;
   createdAt: string;
   updatedAt: string;
   items: PurchaseOrderItemView[];
 }
 
-/** 입고 기록 1건과 생성된 원료 LOT (API-150·219). 입고는 등록이 곧 확정이라 상태값이 없다 */
+export interface PurchaseOrderStatusChange {
+  reason: string | null;
+  employeeName: string | null;
+  at: string;
+}
+
+/**
+ * 입고 기록 1건과 생성된 원료 LOT (API-150·219). 입고는 등록이 곧 확정이라 상태값이 없다.
+ * 입고 취소는 원래 입고를 그대로 두고 음수 입고 1행(반대 거래)을 더한다. 취소 행은 LOT이 없다
+ */
 export interface GoodsReceiptView {
   id: number;
   goodsReceiptNo: string;
@@ -94,7 +108,14 @@ export interface GoodsReceiptView {
   lotNo: string | null;
   yardId: number | null;
   yardName: string | null;
-  /** 입고를 확정한 사원 (작업 로그 GOODS_RECEIPT_CONFIRMED, ERD에 칸이 없다) */
+  /** 입고를 확정한 사원 (작업 로그 GOODS_RECEIPT_CONFIRMED, ERD에 칸이 없다). 취소 행이면 취소한 사원(GOODS_RECEIPT_CANCELLED) */
   confirmedEmployeeName: string | null;
+  /** 이 행이 입고 취소면 취소한 원래 입고 (receivedTon은 음수) */
+  reversedGoodsReceiptId: number | null;
+  reversedGoodsReceiptNo: string | null;
+  /** 이 입고를 취소했으면 취소 행의 입고번호 */
+  reversalGoodsReceiptNo: string | null;
+  /** 입고 취소 사유 (원래 입고·취소 행 모두, 작업 로그 GOODS_RECEIPT_CANCELLED) */
+  cancelReason: string | null;
   createdAt: string;
 }
