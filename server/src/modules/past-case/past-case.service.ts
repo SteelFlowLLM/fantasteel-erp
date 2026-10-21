@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  BUSINESS_EVENT_TYPE,
   INSPECTION_RESULT,
   LOT_TYPE,
   PAST_CASE_EXAMPLES,
@@ -12,7 +13,9 @@ import {
   type PastCaseDraftView,
   type PastCaseSearchInput,
   type PastCaseView,
+  type UpdatePastCaseInput,
 } from '@fantasteel/shared';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -32,7 +35,7 @@ type DraftLot = NonNullable<Awaited<ReturnType<PastCaseRepository['findLot']>>>;
 /**
  * 과거 사례 (EX, REQ-CASE-001~005, API-267~270, docs/backend/past-case.md).
  * 예시 사례(shared PAST_CASE_EXAMPLES, 관련 LOT이 실제 LOT이 아니라 DB에 넣지 않음)와 등록 사례(past_case)를 합쳐 쓴다.
- * 작업 로그 CASE_REGISTERED는 공통 코드에 없는 제안 코드(🟡)라 남기지 않는다.
+ * 등록은 같은 트랜잭션에서 작업 로그 CASE_REGISTERED를 남긴다. 수정·삭제는 맞는 작업 로그 유형이 없어 서버 로그에 변경 전 값을 남긴다.
  */
 @Injectable()
 export class PastCaseService {
@@ -41,6 +44,7 @@ export class PastCaseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: PastCaseRepository,
+    private readonly businessEventRecorder: BusinessEventRecorder,
     private readonly llmSettings: LlmSettingsStore,
     private readonly llm: LlmClient,
   ) {}
@@ -86,34 +90,69 @@ export class PastCaseService {
 
   /** API-270 과거 사례 등록. 관련 LOT은 실제 LOT만 받는다 */
   async create(user: AuthUser, input: CreatePastCaseInput): Promise<PastCaseView> {
-    const lotIds = [...new Set(input.lotIds)];
-    const lots = await this.repository.findLotNos(this.prisma, lotIds);
-    if (lots.length !== lotIds.length) throw new AppException('COM-003', '관련 LOT을 찾을 수 없어요');
-    if (input.occurredDate > seoulToday()) throw new AppException('COM-004', '발생일은 오늘보다 뒤일 수 없어요');
+    const lotIds = await this.checkedLotIds(input);
     const id = await this.prisma.$transaction(async (tx) => {
       // 사례 번호(CASE-{id})가 id에서 나와서, 겹치지 않는 임시 번호로 만든 뒤 같은 트랜잭션에서 번호를 채운다
-      const created = await this.repository.createCase(
-        tx,
-        {
-          caseNo: `PENDING-${randomUUID()}`,
-          caseCategory: input.caseCategory,
-          title: input.title,
-          phenomenon: input.phenomenon,
-          cause: input.cause || null,
-          actionTaken: input.actionTaken || null,
-          equipmentText: input.equipmentText || null,
-          occurredDate: new Date(`${input.occurredDate}T00:00:00.000Z`),
-          createdEmployeeId: user.employeeId,
-        },
+      const created = await this.repository.createCase(tx, { caseNo: `PENDING-${randomUUID()}`, ...fieldsOf(input), createdEmployeeId: user.employeeId }, lotIds);
+      const caseNo = formatCaseNo(created.id);
+      await this.repository.updateCaseNo(tx, created.id, caseNo);
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.CASE_REGISTERED,
+        actor: user,
+        target: { table: 'past_case', id: created.id },
         lotIds,
-      );
-      await this.repository.updateCaseNo(tx, created.id, formatCaseNo(created.id));
+        after: { caseNo, ...input, lotIds },
+      });
       return created.id;
     });
     const saved = await this.repository.findCase(this.prisma, id);
     if (!saved) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
     this.logger.log(`과거 사례 등록 ${saved.caseNo} (사원 ${user.employeeId})`);
     return viewOf(saved);
+  }
+
+  /**
+   * 과거 사례 수정. 등록과 같은 항목을 모두 다시 받아 바꾼다(번호·등록자·등록 시각은 그대로). 예시 사례는 DB에 없어 고치지 않는다.
+   * 맞는 작업 로그 유형이 없어(CASE_REGISTERED는 등록만) 변경 전 값을 서버 로그에 남긴다 (docs/backend/past-case.md).
+   */
+  async update(user: AuthUser, id: number, input: UpdatePastCaseInput): Promise<PastCaseView> {
+    this.assertRegisteredCase(id);
+    const lotIds = await this.checkedLotIds(input);
+    const before = await this.prisma.$transaction(async (tx) => {
+      const found = await this.repository.findCase(tx, id);
+      if (!found || !(await this.repository.updateCase(tx, id, fieldsOf(input), lotIds))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      return found;
+    });
+    const saved = await this.repository.findCase(this.prisma, id);
+    if (!saved) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+    this.logger.log(`과거 사례 수정 ${saved.caseNo} (사원 ${user.employeeId}) 변경 전 ${JSON.stringify(viewOf(before))}`);
+    return viewOf(saved);
+  }
+
+  /** 과거 사례 삭제. 관련 LOT 연결도 함께 지운다. 지운 사례를 돌려준다. 작업 로그 대신 서버 로그에 지운 내용을 남긴다 */
+  async remove(user: AuthUser, id: number): Promise<PastCaseView> {
+    this.assertRegisteredCase(id);
+    const removed = await this.prisma.$transaction(async (tx) => {
+      const found = await this.repository.findCase(tx, id);
+      if (!found || !(await this.repository.deleteCase(tx, id))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      return found;
+    });
+    this.logger.log(`과거 사례 삭제 ${removed.caseNo} (사원 ${user.employeeId}) 지운 내용 ${JSON.stringify(viewOf(removed))}`);
+    return viewOf(removed);
+  }
+
+  /** 예시 사례(id 1~5)는 DB에 없는 화면용 사례라 고치거나 지우지 못한다 */
+  private assertRegisteredCase(id: number): void {
+    if (PAST_CASE_EXAMPLES.some((example) => example.id === id)) throw new AppException('COM-004', '예시 사례는 고치거나 지울 수 없어요', 409);
+  }
+
+  /** 관련 LOT은 실제 LOT만, 발생일은 오늘까지. 중복을 뺀 LOT id를 돌려준다 */
+  private async checkedLotIds(input: CreatePastCaseInput): Promise<number[]> {
+    const lotIds = [...new Set(input.lotIds)];
+    const lots = await this.repository.findLotNos(this.prisma, lotIds);
+    if (lots.length !== lotIds.length) throw new AppException('COM-003', '관련 LOT을 찾을 수 없어요');
+    if (input.occurredDate > seoulToday()) throw new AppException('COM-004', '발생일은 오늘보다 뒤일 수 없어요');
+    return lotIds;
   }
 
   /** 자기 검사가 불합격이면 그 값, 아니면 위로 올라가며 성분 불합격인 히트를 찾는다(코일 → 슬래브 → 히트) */
@@ -145,6 +184,19 @@ export class PastCaseService {
       return { fields: null, reason: 'AI에 연결하지 못했거나 답이 늦었어요.' };
     }
   }
+}
+
+/** 입력의 사례 항목 (빈 원인·조치·설비는 NULL로 저장) */
+function fieldsOf(input: CreatePastCaseInput) {
+  return {
+    caseCategory: input.caseCategory,
+    title: input.title,
+    phenomenon: input.phenomenon,
+    cause: input.cause || null,
+    actionTaken: input.actionTaken || null,
+    equipmentText: input.equipmentText || null,
+    occurredDate: new Date(`${input.occurredDate}T00:00:00.000Z`),
+  };
 }
 
 function viewOf(row: PastCaseRow): PastCaseView {

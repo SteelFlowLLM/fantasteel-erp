@@ -10,7 +10,7 @@
 | BP | BP-AGT-01 |
 | 원칙 | 감지와 대응 후보 생성은 **규칙**이 한다. LLM은 상황 설명(API-264)만 한다 |
 
-## 2. 구현 상태 (2026-10-15)
+## 2. 구현 상태 (2026-10-21 갱신)
 
 | 위험 | 트리거 | 대응 | 상태 |
 | --- | --- | --- | --- |
@@ -20,15 +20,16 @@
 | AGED_SURPLUS (REQ-AGT-004) | 스케줄 | 대기 수주 배정 추천(후보) | 완료 — 생산완료 30일 이상 여재 + 같은 규격 대기 수주(미확보 > 0). **추천만** 한다 |
 | QUALITY_RATE_RISE (REQ-AGT-004) | 스케줄 | 품질부(QC) 알림 | 완료 — 강종별 최근 30일 불합격률 5% 초과 (검사 5건 미만 제외) |
 
-- 알림형(DUE_RISK·QUALITY_RATE_RISE)은 후보를 만들지 않는다. 안 읽은 같은 알림이 있으면 다시 보내지 않는다(읽으면 다음 감지에서 다시 알린다). 작업 로그 유형이 없어 알림형은 작업 로그를 남기지 않는다.
+- 알림형(DUE_RISK·QUALITY_RATE_RISE)은 후보를 만들지 않는다. 알림 유형은 위험과 같은 이름이다(NOTIFICATION_TYPE `DUE_RISK`·`QUALITY_RATE_RISE`, 2026-10-21 확정). 안 읽은 같은 알림이 있으면 다시 보내지 않는다(읽으면 다음 감지에서 다시 알린다). 작업 로그 유형(`AGENT_RISK_DETECTED`)은 아직 제안 코드(🟡)라 알림형은 작업 로그를 남기지 않는다.
+- 후보가 생기면 그 후보가 만드는 업무의 확정 권한(구매요청 `PURCHASE_REQUISITION_CREATE`, 재생산 `PRODUCTION_PLAN_CONFIRM`, 배정 추천 `SHIPMENT_REQUEST_MANAGE`의 USE)이 있는 재직 사원 모두에게 `AGENT_CANDIDATE` 알림을 보낸다(내용 `[Agent 대응 후보] 원료 부족: …`, 이동 `/agent`). 후보와 알림은 같은 트랜잭션이고, 알림은 후보 생성 작업 로그(`DRAFT_CREATED`)에 걸려 같은 후보를 같은 사람에게 두 번 보내지 않는다. 반려 뒤 같은 대상의 새 후보가 생겨도 안 읽은 같은 내용의 알림이 있는 사원에게는 다시 보내지 않는다(읽은 사원에게만).
 - 배정 추천(ALLOCATION_CONFIRM 유형)은 실행 핸들러가 없다. 확정은 "추천 확인" 기록이고(EXECUTED, 결과 없음), 실제 예약·배정은 재고·출하요청 화면에서 한다.
 - 화면: `/agent` (`client/src/features/agent/AgentScreen.tsx`)의 대응 후보 목록·상황 설명·확정·반려, 대시보드 Agent 위험 감지 위젯(확정 대기 건수·유형별·최근 후보).
 
 ## 3. 구조
 
-- 후보는 `action_draft`에 저장한다. 스키마는 바꾸지 않았다 (2026-10-15 사용자 결정).
+- 후보는 `action_draft`에 저장한다. 칸은 더하지 않았다 (2026-10-15 사용자 결정). 2026-10-21에 같은 대상 중복을 막는 부분 unique 인덱스만 더했다.
   - `message_id = null`이면 Agent 후보다. `payload.agent`에 `riskType`, `targetKey`, `summary`, `evidence`를 남긴다.
-  - **중복 방지(REQ-AGT-005)**: `payload.agent.targetKey`가 같고 상태가 AI_GENERATED·WAITING_APPROVAL·APPROVED인 초안이 있으면 새로 만들지 않는다. 감지는 서버 안에서 한 번에 하나씩 돌린다(DB unique 없음, 서버 1대 가정).
+  - **중복 방지(REQ-AGT-005)**: `payload.agent.targetKey`가 같고 상태가 AI_GENERATED·WAITING_APPROVAL·APPROVED인 초안이 있으면 새로 만들지 않는다. 서비스가 먼저 확인하고, 그래도 겹치면(서버를 둘 이상 띄웠을 때 등) DB 부분 unique `action_draft_open_agent_target_key`(2026-10-21, ERD action_draft Note)가 막는다. 저장은 `ON CONFLICT DO NOTHING`(`createDraftIfNew`)이라 충돌해도 오류 없이 "만들지 않음"으로 끝난다. 감지는 서버 안에서도 한 번에 하나씩 돌린다.
   - `requester_id`는 만들 때 비어 있고, 확정한 사원이 확정 주체가 된다.
 - 확정 권한은 후보가 만드는 업무의 권한을 따른다: 구매요청 `PURCHASE_REQUISITION_CREATE` USE, 재생산 `PRODUCTION_PLAN_CONFIRM` USE. 구매요청 결과는 확정자 소속 부서장이 최종 승인한다 (`purchasing.createRequisition`).
 - 확정 전 **재검증**: 위험이 해소됐으면 실행하지 않고 후보를 REJECTED(`[자동] …`)로 닫는다.
@@ -60,42 +61,32 @@
 | 스케줄 주기 | 24시간 (`AGENT_SCAN_INTERVAL_HOURS`) |
 | 여재 보유일 | 생산완료 30일 이상 (`AGED_SURPLUS_DAYS`) |
 | 불합격률 | 최근 30일, 5% 초과, 검사 5건 이상 (`agent-alert-rules.ts`) |
-| 알림 유형 | 공통 코드 정의서 NOTIFICATION_TYPE에 맞는 값이 없어 **임시로 TASK_ASSIGNED(업무 지정)** 를 쓴다. 정의서에 유형이 추가되면 `ALERT_NOTIFICATION_TYPE` 한 곳만 바꾼다 |
-| 위험 유형 코드 | `AGENT_RISK_TYPE`을 `shared/src/factory-agent.ts`에 직접 뒀다. 정의서에 올라가면 codes로 옮긴다 |
-| 후보 생성 알림 | 후보가 생겼을 때 담당 부서원에게 알리지 않는다(화면 `/agent`에서 확인). 알림 유형이 정해지면 추가 |
-| 중복 방지 | DB unique가 아니라 서비스 확인 + 한 번에 하나씩 감지(서버 1대 가정) |
+| 알림형 작업 로그 | 공통 코드 정의서 3장의 제안 코드 `AGENT_RISK_DETECTED`(🟡 P2)가 확정되기 전에는 알림형 감지는 작업 로그를 남기지 않는다 |
+| 후보 알림 받는 사람 | 그 업무의 확정 권한(USE)이 있는 재직 사원 전원 (부서로 좁히지 않았다). 부서장·특정 부서만 받게 하려면 정해 주세요 |
+
+**2026-10-21에 정리된 것 (이슈 #464)**
+
+| 항목 | 결과 |
+| --- | --- |
+| 알림 유형 | 정의서 2장 NOTIFICATION_TYPE에 `DUE_RISK`·`QUALITY_RATE_RISE`·`AGENT_CANDIDATE` 확정. 임시 `TASK_ASSIGNED` 사용 끝 |
+| 위험 유형 코드 | 정의서 2장 `AGENT_RISK_TYPE` 5종 확정. `shared/src/factory-agent.ts`의 자체 정의를 지우고 `shared/src/codes`(생성 파일)를 쓴다 |
+| 후보 생성 알림 | `AGENT_CANDIDATE`로 확정 권한자에게 보낸다 (2장 참고) |
+| 중복 방지 | DB 부분 unique 추가. 마이그레이션 `20261021120000_agent_case_gaps` |
+
+**기존 중복 데이터 처리 (마이그레이션)**: 인덱스를 만들기 전에 같은 `targetKey`의 미처리 후보가 둘 이상이면 가장 진행된 1건(APPROVED > WAITING_APPROVAL > AI_GENERATED, 같으면 id가 작은 것)만 남기고 나머지를 `REJECTED`(사유 `[자동] 같은 대상의 미처리 후보가 이미 있어 정리했어요`)로 닫는다. 지우지 않으므로 작업 로그·구매요청 연결은 그대로고, 반려 뒤에는 다음 감지에서 필요하면 새 후보가 다시 생긴다. 중복이 없으면 아무 행도 바꾸지 않는다. 중복이 있는 DB로 일회용 DB에서 시험했다(남기는 후보·닫는 후보·처리된 후보·agent 칸 없는 초안).
 
 ## 7. 테스트
 
-`npm test -w @fantasteel/server -- factory-agent` (묶음 DB `fs_prod`, 묶음 전체가 같이 돈다). 규칙 단위 테스트는 `agent-rules.spec.ts`·`agent-alert-rules.spec.ts`(DB 없음), 알림형 DB 테스트는 `factory-agent-alerts.spec.ts`. 여재 추천의 DB 테스트는 `factory-agent-surplus.spec.ts`.
+`npm test -w @fantasteel/server -- factory-agent` (묶음 DB `fs_prod`, 묶음 전체가 같이 돈다). 규칙 단위 테스트는 `agent-rules.spec.ts`·`agent-alert-rules.spec.ts`(DB 없음), 알림형 DB 테스트는 `factory-agent-alerts.spec.ts`(알림 유형 `DUE_RISK`·`QUALITY_RATE_RISE`). 여재 추천의 DB 테스트는 `factory-agent-surplus.spec.ts`. 후보 알림(`AGENT_CANDIDATE`)과 DB 부분 unique(직접 중복 저장 거부·처리 뒤 재생성·동시 저장 하나만)는 `factory-agent-notice.spec.ts`.
 
-## 8. 공통 코드 정의서 추가 요청안 (2026-10-15)
+## 8. 공통 코드 정의서 반영 (2026-10-21, 이슈 #464)
 
-`docs/notion/06-공통-코드-정의서.md`는 읽기 전용이고 `shared/src/codes/index.ts`는 정의서에서 생성하는 파일이라 이 작업에서 직접 고치지 않았다. 정의서 담당자가 아래를 올리면 코드는 바로 바꿀 수 있다.
+2026-10-15에 올렸던 추가 요청안은 `docs/notion/06-공통-코드-정의서.md` 2장에 확정 값으로 반영했고(저장소 문서만, 노션 원본 페이지는 그대로), `npm run codes -w @fantasteel/shared`로 `shared/src/codes/index.ts`를 다시 만들었다.
 
-**NOTIFICATION_TYPE (알림 유형) — 근거 REQ-AGT-004, REQ-NTF-002**
-
-| 값 | 표시명 | 쓰는 곳 |
-| --- | --- | --- |
-| DUE_RISK | 납기 위험 | 수주 담당 영업에게 보내는 납기 위험 알림 |
-| QUALITY_RATE_RISE | 불합격률 상승 | 품질 부서원에게 보내는 알림 |
-| AGENT_CANDIDATE | 대응 후보 | (선택) 대응 후보가 생겼을 때 담당 부서원에게 보내는 알림. 지금은 보내지 않는다 |
-
-**AGENT_RISK_TYPE (Agent 위험 유형) — 근거 BP-AGT-01 "위험 코드 제안"**
-
-| 값 | 표시명 |
-| --- | --- |
-| RAW_SHORTAGE | 원료 부족 |
-| GOOD_QTY_SHORTAGE | 합격 매수 부족 |
-| DUE_RISK | 납기 위험 |
-| AGED_SURPLUS | 여재 장기 보유 |
-| QUALITY_RATE_RISE | 불합격률 상승 |
-
-정의서 반영 뒤 코드에서 할 일:
-1. `npm run codes -w @fantasteel/shared`로 코드를 다시 만든다.
-2. `shared/src/factory-agent.ts`의 `AGENT_RISK_TYPE`·`AGENT_RISK_TYPE_LABEL`을 지우고 codes 것을 쓴다.
-3. `factory-agent.service.ts`의 `ALERT_NOTIFICATION_TYPE`(지금 `TASK_ASSIGNED`)을 위험별 유형(DUE_RISK·QUALITY_RATE_RISE)으로 바꾼다. 클라이언트 알림 목록의 유형 배지(`NOTIFICATION_TYPE_TONE`)에도 두 값을 더한다.
-4. 알림형 작업 로그가 필요하면 정의서 2장 BUSINESS_EVENT_TYPE로 옮겨 둔 `AGENT_RISK_DETECTED`(Agent 위험 감지, 정의서 3장에 P2로 예약돼 있음)를 쓴다.
+- NOTIFICATION_TYPE: `DUE_RISK`(납기 위험)·`QUALITY_RATE_RISE`(불합격률 상승)·`AGENT_CANDIDATE`(대응 후보)
+- AGENT_RISK_TYPE: `RAW_SHORTAGE`(원료 부족)·`GOOD_QTY_SHORTAGE`(합격 매수 부족)·`DUE_RISK`(납기 위험)·`AGED_SURPLUS`(여재 장기 보유)·`QUALITY_RATE_RISE`(불합격률 상승)
+- 코드에서 한 일: 임시 `ALERT_NOTIFICATION_TYPE`(`TASK_ASSIGNED`) 삭제 → 위험별 유형 사용, `AGENT_RISK_TYPE`·`AGENT_RISK_TYPE_LABEL`은 codes 것을 쓴다(`@fantasteel/shared`로 가져오는 방법은 그대로), 화면 알림 배지(`NOTIFICATION_TYPE_TONE`)·화면 코드(`client/src/codes`)에 세 값을 더했다.
+- 남은 제안 코드: 작업 로그 `AGENT_RISK_DETECTED`(정의서 3장, 🟡 P2). 알림형 작업 로그가 필요해지면 2장으로 옮기고 감지 서비스에서 남긴다.
 
 기준값(원료 부족 조회 기간·스케줄 주기·여재 보유일·불합격률)과 여재 추천(추천만 함)은 6장의 현재 값 그대로 둔다.
 

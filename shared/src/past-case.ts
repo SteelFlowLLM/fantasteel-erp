@@ -2,10 +2,12 @@
 // 서버는 예시 사례(아래 PAST_CASE_EXAMPLES)와 등록 사례(ERD past_case·past_case_lot)를 합쳐 쓴다.
 // 항목 이름은 ERD past_case 열을 따른다. 검색 규칙은 서버(검색 API·AI 도구)와 화면이 함께 쓴다.
 
-/** 🟡 공통 코드 정의서 3장 제안 코드 CASE_CATEGORY (EX). 팀 확정 전이라 codes/에 없다 */
-export const PAST_CASE_CATEGORY = { QUALITY: 'QUALITY', EQUIPMENT: 'EQUIPMENT' } as const;
-export type PastCaseCategory = (typeof PAST_CASE_CATEGORY)[keyof typeof PAST_CASE_CATEGORY];
-export const PAST_CASE_CATEGORY_LABEL: Record<PastCaseCategory, string> = { QUALITY: '품질', EQUIPMENT: '설비' };
+import { CASE_CATEGORY, CASE_CATEGORY_LABEL, type CaseCategory } from './codes';
+
+/** 공통 코드 정의서 2장 CASE_CATEGORY (EX). 과거 사례 쪽 이름으로 다시 내보낸다 */
+export const PAST_CASE_CATEGORY = CASE_CATEGORY;
+export type PastCaseCategory = CaseCategory;
+export const PAST_CASE_CATEGORY_LABEL = CASE_CATEGORY_LABEL;
 
 /** 사례 번호 CASE-NNNN (ERD TBD, 가정값) */
 export function formatCaseNo(seq: number): string {
@@ -188,3 +190,6 @@ export const PAST_CASE_EXAMPLES: readonly PastCaseView[] = [
     occurredDate: '2026-06-30',
   }),
 ];
+
+/** 사례 수정 (등록과 같은 항목 전체를 다시 보낸다. 관련 LOT은 보낸 목록으로 바꾼다) */
+export type UpdatePastCaseInput = CreatePastCaseInput;

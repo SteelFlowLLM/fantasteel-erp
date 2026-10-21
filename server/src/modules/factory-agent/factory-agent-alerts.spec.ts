@@ -41,7 +41,7 @@ describe('납기 위험 알림 (REQ-AGT-004)', () => {
 
     const alerts = await prisma.notification.findMany({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } });
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({ notificationType: 'TASK_ASSIGNED', linkPath: `/sales-orders/${salesOrder.id}` });
+    expect(alerts[0]).toMatchObject({ notificationType: 'DUE_RISK', linkPath: `/sales-orders/${salesOrder.id}` });
 
     // 읽으면 다음 감지에서 다시 알린다
     await prisma.notification.update({ where: { id: alerts[0].id }, data: { readAt: new Date() } });
@@ -80,5 +80,6 @@ describe('불합격률 상승 알림 (REQ-AGT-004)', () => {
     const alerts = await prisma.notification.findMany({ where: { notificationContent: { contains: '강종 SPHC' }, recipientId: { in: members.map((m) => m.id) } } });
     expect(alerts.length).toBe(members.length);
     expect(alerts[0].notificationContent).toContain('불합격률');
+    expect(alerts.every((a) => a.notificationType === 'QUALITY_RATE_RISE')).toBe(true);
   });
 });

@@ -417,7 +417,35 @@ export const MEETING_MINUTES_STATUS_LABEL: Record<MeetingMinutesStatus, string> 
   FAILED: '실패',
 };
 
-/** 알림 유형 (REQ-MSG-005) */
+/** Agent 위험 유형 (REQ-AGT-002~004, BP-AGT-01) */
+export const AGENT_RISK_TYPE = {
+  RAW_SHORTAGE: 'RAW_SHORTAGE',
+  GOOD_QTY_SHORTAGE: 'GOOD_QTY_SHORTAGE',
+  DUE_RISK: 'DUE_RISK',
+  AGED_SURPLUS: 'AGED_SURPLUS',
+  QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
+} as const;
+export type AgentRiskType = (typeof AGENT_RISK_TYPE)[keyof typeof AGENT_RISK_TYPE];
+export const AGENT_RISK_TYPE_LABEL: Record<AgentRiskType, string> = {
+  RAW_SHORTAGE: '원료 부족',
+  GOOD_QTY_SHORTAGE: '합격 매수 부족',
+  DUE_RISK: '납기 위험',
+  AGED_SURPLUS: '여재 장기 보유',
+  QUALITY_RATE_RISE: '불합격률 상승',
+};
+
+/** 과거 사례 구분 (REQ-CASE-001) */
+export const CASE_CATEGORY = {
+  QUALITY: 'QUALITY',
+  EQUIPMENT: 'EQUIPMENT',
+} as const;
+export type CaseCategory = (typeof CASE_CATEGORY)[keyof typeof CASE_CATEGORY];
+export const CASE_CATEGORY_LABEL: Record<CaseCategory, string> = {
+  QUALITY: '품질',
+  EQUIPMENT: '설비',
+};
+
+/** 알림 유형 (REQ-MSG-005, REQ-AGT-004) */
 export const NOTIFICATION_TYPE = {
   MENTION: 'MENTION',
   WORK_ROOM_MESSAGE: 'WORK_ROOM_MESSAGE',
@@ -426,6 +454,9 @@ export const NOTIFICATION_TYPE = {
   APPROVAL_RESULT: 'APPROVAL_RESULT',
   MEETING_MINUTES_SHARED: 'MEETING_MINUTES_SHARED',
   SCHEDULE_EVENT_ASSIGNED: 'SCHEDULE_EVENT_ASSIGNED',
+  DUE_RISK: 'DUE_RISK',
+  QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
+  AGENT_CANDIDATE: 'AGENT_CANDIDATE',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -436,6 +467,9 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   APPROVAL_RESULT: '승인 결과',
   MEETING_MINUTES_SHARED: '회의록 공유',
   SCHEDULE_EVENT_ASSIGNED: '일정 등록',
+  DUE_RISK: '납기 위험',
+  QUALITY_RATE_RISE: '불합격률 상승',
+  AGENT_CANDIDATE: '대응 후보',
 };
 
 /** 작업 로그 이벤트 유형 (REQ-LOG-002) */
@@ -474,6 +508,7 @@ export const BUSINESS_EVENT_TYPE = {
   MEETING_MINUTES_CONFIRMED: 'MEETING_MINUTES_CONFIRMED',
   SCHEDULE_EVENT_CREATED: 'SCHEDULE_EVENT_CREATED',
   TASK_CREATED: 'TASK_CREATED',
+  CASE_REGISTERED: 'CASE_REGISTERED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -511,4 +546,5 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   MEETING_MINUTES_CONFIRMED: '회의록 확정',
   SCHEDULE_EVENT_CREATED: '일정 등록',
   TASK_CREATED: '업무 등록',
+  CASE_REGISTERED: '과거 사례 등록',
 };

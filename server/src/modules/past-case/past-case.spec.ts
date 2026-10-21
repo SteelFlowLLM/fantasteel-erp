@@ -1,6 +1,9 @@
 // 과거 사례 서비스: 등록 사례는 실제 DB(fs_collab)에 저장하고, 초안용 LOT 검사 조회는 고정 값, AI는 가짜 응답으로 확인한다.
 import { LOT_TYPE, PROCESS_TYPE, ROLE, formatCaseNo, type AuthUser } from '@fantasteel/shared';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
+import { NumberingRepository } from '../../common/numbering/numbering.repository';
+import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { LlmClient } from '../llm/llm.client';
@@ -12,6 +15,7 @@ type DraftLot = NonNullable<Awaited<ReturnType<PastCaseRepository['findLot']>>>;
 
 const prisma = new PrismaService();
 const repository = new PastCaseRepository();
+const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
 const decimal = (v: string) => new Prisma.Decimal(v);
 
 // 초안 대상 LOT (검사 조회만 고정 값으로 바꾼다)
@@ -51,6 +55,7 @@ const service = () =>
   new PastCaseService(
     prisma,
     repository,
+    recorder,
     { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model, apiKey: null }) } as unknown as LlmSettingsStore,
     { chatJson: () => llmReply() } as unknown as LlmClient,
   );
@@ -76,6 +81,9 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  const events = await prisma.businessEvent.findMany({ where: { targetType: 'past_case', targetId: { in: createdCaseIds } }, select: { id: true } });
+  await prisma.businessEventLot.deleteMany({ where: { businessEventId: { in: events.map((e) => e.id) } } });
+  await prisma.businessEvent.deleteMany({ where: { id: { in: events.map((e) => e.id) } } });
   await prisma.pastCaseLot.deleteMany({ where: { pastCaseId: { in: createdCaseIds } } });
   await prisma.pastCase.deleteMany({ where: { id: { in: createdCaseIds } } });
   await prisma.lot.deleteMany({ where: { id: { in: heatIds } } });
@@ -159,5 +167,81 @@ describe('사례 등록·검색·상세 (API-267·268·270, DB past_case)', () =
     await expect(service().create(user, { ...input(), lotIds: [999_999] })).rejects.toMatchObject({ code: 'COM-003' });
     await expect(service().create(user, { ...input(), occurredDate: '2999-01-01' })).rejects.toMatchObject({ code: 'COM-004' });
     expect(await prisma.pastCase.count()).toBe(count);
+  });
+});
+
+describe('사례 등록 작업 로그 (CASE_REGISTERED)', () => {
+  const input = () => ({ caseCategory: 'EQUIPMENT' as const, title: '연주기 몰드 막힘', phenomenon: '현상', cause: '원인', actionTaken: '', equipmentText: '1번 연주기', occurredDate: '2026-10-14', lotIds: [heatIds[0]!, heatIds[1]!] });
+
+  it('등록과 같은 트랜잭션에서 작업 로그를 남긴다: 대상 past_case, 등록한 사원, 관련 LOT', async () => {
+    const created = await register(input());
+    const event = await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: 'CASE_REGISTERED', targetType: 'past_case', targetId: created.id }, include: { businessEventLots: true } });
+    expect(event).toMatchObject({ actorType: 'USER', actorEmployeeId: user.employeeId, salesOrderId: null });
+    expect(event.businessEventLots.map((l) => l.lotId).sort()).toEqual([...heatIds].sort());
+    expect(event.afterData).toMatchObject({ caseNo: created.caseNo, caseCategory: 'EQUIPMENT', title: '연주기 몰드 막힘' });
+  });
+
+  it('작업 로그를 남기지 못하면 사례도 등록되지 않는다', async () => {
+    const count = await prisma.pastCase.count();
+    const spy = jest.spyOn(recorder, 'record').mockRejectedValueOnce(new Error('작업 로그 실패'));
+    await expect(service().create(user, input())).rejects.toThrow('작업 로그 실패');
+    spy.mockRestore();
+    expect(await prisma.pastCase.count()).toBe(count);
+    expect(await prisma.pastCase.count({ where: { caseNo: { startsWith: 'PENDING-' } } })).toBe(0);
+  });
+});
+
+describe('사례 수정·삭제 (이슈 #464)', () => {
+  const input = () => ({ caseCategory: 'QUALITY' as const, title: '수정 전 제목', phenomenon: '수정 전 현상', cause: '', actionTaken: '', equipmentText: '', occurredDate: '2026-10-14', lotIds: [heatIds[0]!] });
+
+  it('항목과 관련 LOT을 바꾼다. 번호·등록자·등록 시각은 그대로, 빈 칸은 NULL', async () => {
+    const created = await register(input());
+    const updated = await service().update(user, created.id, { ...input(), caseCategory: 'EQUIPMENT', title: '수정 후 제목', cause: '가열로 막힘', equipmentText: '1번 가열로', lotIds: [heatIds[1]!, heatIds[0]!] });
+    expect(updated).toMatchObject({
+      id: created.id,
+      caseNo: created.caseNo,
+      caseCategory: 'EQUIPMENT',
+      title: '수정 후 제목',
+      phenomenon: '수정 전 현상',
+      cause: '가열로 막힘',
+      actionTaken: '',
+      equipmentText: '1번 가열로',
+      createdEmployeeName: created.createdEmployeeName,
+      createdAt: created.createdAt,
+    });
+    expect(updated.lots.map((l) => l.lotId).sort()).toEqual([...heatIds].sort());
+    expect(await prisma.pastCase.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ actionTaken: null });
+    // 관련 LOT을 줄이면 빠진 LOT 연결만 지운다
+    const reduced = await service().update(user, created.id, { ...input(), lotIds: [heatIds[1]!] });
+    expect(reduced.lots.map((l) => l.lotId)).toEqual([heatIds[1]]);
+    expect((await service().search({ q: '수정 후 제목' }))[0]?.caseNo).toBe(created.caseNo);
+  });
+
+  it('예시 사례·없는 사례·없는 LOT·오늘 뒤 발생일은 고치지 않는다', async () => {
+    const created = await register(input());
+    await expect(service().update(user, 1, input())).rejects.toMatchObject({ code: 'COM-004' });
+    await expect(service().update(user, 999_999, input())).rejects.toMatchObject({ code: 'COM-003' });
+    await expect(service().update(user, created.id, { ...input(), lotIds: [999_999] })).rejects.toMatchObject({ code: 'COM-003' });
+    await expect(service().update(user, created.id, { ...input(), occurredDate: '2999-01-01' })).rejects.toMatchObject({ code: 'COM-004' });
+    expect((await service().detail(created.id)).title).toBe('수정 전 제목');
+  });
+
+  it('삭제하면 사례와 관련 LOT 연결이 사라지고 지운 사례를 돌려준다. 예시·없는 사례는 지우지 않는다', async () => {
+    const created = await register({ ...input(), lotIds: [heatIds[0]!, heatIds[1]!] });
+    expect(await service().remove(user, created.id)).toMatchObject({ id: created.id, caseNo: created.caseNo });
+    expect(await prisma.pastCase.count({ where: { id: created.id } })).toBe(0);
+    expect(await prisma.pastCaseLot.count({ where: { pastCaseId: created.id } })).toBe(0);
+    await expect(service().detail(created.id)).rejects.toMatchObject({ code: 'COM-003' });
+    await expect(service().remove(user, created.id)).rejects.toMatchObject({ code: 'COM-003' });
+    await expect(service().remove(user, 3)).rejects.toMatchObject({ code: 'COM-004' });
+    // 지운 뒤에도 번호는 다시 쓰이지 않는다 (시퀀스)
+    const next = await register(input());
+    expect(next.id).toBeGreaterThan(created.id);
+  });
+
+  it('구분은 DB CHECK로도 막는다 (QUALITY·EQUIPMENT만)', async () => {
+    const created = await register(input());
+    await expect(prisma.pastCase.update({ where: { id: created.id }, data: { caseCategory: 'OTHER' } })).rejects.toThrow();
+    await expect(prisma.pastCase.update({ where: { id: created.id }, data: { caseCategory: 'EQUIPMENT' } })).resolves.toBeDefined();
   });
 });

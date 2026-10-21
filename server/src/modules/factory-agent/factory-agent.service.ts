@@ -72,11 +72,6 @@ const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
   [ACTION_TYPE.ALLOCATION_CONFIRM]: PERMISSION.SHIPMENT_REQUEST_MANAGE,
 };
 
-/**
- * 🟡 알림 유형: 납기 위험·불합격률 상승에 맞는 NOTIFICATION_TYPE이 공통 코드 정의서에 없다.
- * 정의서에 유형이 추가될 때까지 담당자에게 확인할 일을 알리는 "업무 지정"을 쓴다 (docs/backend/factory-agent.md).
- */
-const ALERT_NOTIFICATION_TYPE = NOTIFICATION_TYPE.TASK_ASSIGNED;
 /** 품질 부서 코드 (시드 조직) */
 const QUALITY_DEPARTMENT_CODE = 'QC';
 
@@ -203,8 +198,8 @@ export class FactoryAgentService {
     let created = 0;
     for (const alert of alerts) {
       const sent = await this.prisma.$transaction(async (tx) => {
-        if (await this.repository.hasUnreadSameNotification(tx, alert.ownerEmployeeId, ALERT_NOTIFICATION_TYPE, alert.content)) return 0;
-        return this.notification.notifyEmployees(tx, [alert.ownerEmployeeId], { notificationType: ALERT_NOTIFICATION_TYPE, notificationContent: alert.content, linkPath: `/sales-orders/${alert.salesOrderId}` });
+        if (await this.repository.hasUnreadSameNotification(tx, alert.ownerEmployeeId, NOTIFICATION_TYPE.DUE_RISK, alert.content)) return 0;
+        return this.notification.notifyEmployees(tx, [alert.ownerEmployeeId], { notificationType: NOTIFICATION_TYPE.DUE_RISK, notificationContent: alert.content, linkPath: `/sales-orders/${alert.salesOrderId}` });
       });
       created += sent;
     }
@@ -234,9 +229,9 @@ export class FactoryAgentService {
       created += await this.prisma.$transaction(async (tx) => {
         const members = await this.organization.findActiveMemberIds(tx, department.id);
         const unread = new Set<number>();
-        for (const id of members) if (await this.repository.hasUnreadSameNotification(tx, id, ALERT_NOTIFICATION_TYPE, alert.content)) unread.add(id);
+        for (const id of members) if (await this.repository.hasUnreadSameNotification(tx, id, NOTIFICATION_TYPE.QUALITY_RATE_RISE, alert.content)) unread.add(id);
         const targets = members.filter((id) => !unread.has(id));
-        return this.notification.notifyEmployees(tx, targets, { notificationType: ALERT_NOTIFICATION_TYPE, notificationContent: alert.content });
+        return this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.QUALITY_RATE_RISE, notificationContent: alert.content });
       });
     }
     return { riskType: 'QUALITY_RATE_RISE', detected: alerts.length, created };
@@ -299,13 +294,15 @@ export class FactoryAgentService {
 
   /**
    * 후보를 Action Draft로 저장한다 (REQ-AGT-005). 같은 대상(targetKey)의 미처리 초안이 있으면 새로 만들지 않는다.
-   * 만든 직후 확정 대기(WAITING_APPROVAL)로 넘긴다. 확정 주체는 확정하는 부서원이라 requester는 비워 둔다.
+   * 먼저 확인하고, 그 사이에 다른 서버가 먼저 만들었으면 DB 부분 unique(action_draft_open_agent_target_key)가 막는다.
+   * 만든 직후 확정 대기(WAITING_APPROVAL)로 넘기고 확정 권한이 있는 사원에게 알린다. 확정 주체는 확정하는 부서원이라 requester는 비워 둔다.
    */
   private async createCandidate(tx: Tx, input: { actionType: ActionType; meta: AgentDraftMeta; salesOrderId: number | null; fields: Record<string, Prisma.InputJsonValue | null> }): Promise<boolean> {
     if (await this.repository.findOpenDraftByTarget(tx, input.meta.targetKey)) return false;
     const payload = { ...input.fields, agent: input.meta };
-    const draft = await this.repository.createDraft(tx, { actionType: input.actionType, payload: payload as unknown as Prisma.InputJsonValue });
-    await this.businessEventRecorder.record(tx, {
+    const draft = await this.repository.createDraftIfNew(tx, { actionType: input.actionType, payload: payload as unknown as Prisma.InputJsonValue });
+    if (!draft) return false;
+    const event = await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
       actor: 'SYSTEM',
       target: { table: 'action_draft', id: draft.id },
@@ -315,7 +312,22 @@ export class FactoryAgentService {
       actionDraftId: draft.id,
     });
     await this.repository.update(tx, draft.id, { draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
+    await this.notifyCandidate(tx, input.actionType, input.meta, event.id);
     return true;
+  }
+
+  /**
+   * 후보가 생겼다고 그 업무의 확정 권한(USE)이 있는 재직 사원에게 알린다. 작업 로그(DRAFT_CREATED)로 만든 알림이라
+   * 같은 후보를 같은 사람에게 두 번 보내지 않고(알림 부분 unique), 안 읽은 같은 내용의 알림이 있으면 다시 보내지 않는다.
+   */
+  private async notifyCandidate(tx: Tx, actionType: ActionType, meta: AgentDraftMeta, businessEventId: number): Promise<void> {
+    const permission = CONFIRM_PERMISSION[actionType];
+    if (!permission) return;
+    const content = `[Agent 대응 후보] ${AGENT_RISK_TYPE_LABEL[meta.riskType]}: ${meta.summary}`;
+    const members = await this.repository.findActiveEmployeeIdsWithPermission(tx, permission);
+    const targets: number[] = [];
+    for (const id of members) if (!(await this.repository.hasUnreadSameNotification(tx, id, NOTIFICATION_TYPE.AGENT_CANDIDATE, content))) targets.push(id);
+    await this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.AGENT_CANDIDATE, notificationContent: content, linkPath: '/agent', businessEventId });
   }
 
   // ── 후보 조회 ─────────────────────────────────────────

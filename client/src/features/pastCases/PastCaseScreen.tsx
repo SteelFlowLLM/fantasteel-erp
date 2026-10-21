@@ -3,7 +3,7 @@
 // 과거 사례 검색 (REQ-CASE-003·004, BP-CASE-01, API-267). 서버가 예시 사례 5건(실제 사례 아님)과 등록 사례를 핵심어·구분·기간으로 찾아 준다.
 // AI 요약은 철강맨AI(API-262)의 과거 사례 검색 도구로 받는다. 오래 걸려(수십 초) 누를 때만 부르고, 실패하면 이유만 보인다.
 // 부르는 곳은 REQ-CASE-004(AI 패널·@AI·품질 관리 버튼). 품질 관리의 '비슷한 사례 찾기'는 ?q=검색어로 이 화면을 연다.
-import { type PastCaseCategory, type PastCaseView } from '@fantasteel/shared';
+import { PERMISSION, type PastCaseCategory, type PastCaseView } from '@fantasteel/shared';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -13,6 +13,7 @@ import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Chip } from '@/components/Chip';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
 import { Input } from '@/components/Input';
 import { KvList } from '@/components/KvList';
@@ -25,9 +26,12 @@ import { CASE_CATEGORY_LABEL } from '@/codes';
 import { ActorTag, AiAssistedTag, AiCard, EventName, ExampleNotice } from '@/features/agent/components/SoonExampleParts';
 import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 import { lotTraceHref } from '@/features/businessEvents/lib/eventTargets';
+import { PastCaseEditModal } from '@/features/pastCases/PastCaseEditModal';
 import { CASE_CALL_SITES, CASE_PERIOD_DAYS, CASE_REGISTER_STEPS, exampleHistoryOf, sameCategoryCases, summaryQuestion } from '@/features/pastCases/pastCaseExample';
 import { sourceText } from '@/features/shell/AiPanel';
+import { useAction } from '@/hooks/useAction';
 import { useDebouncedValue } from '@/hooks/useGlobalSearch';
+import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
 import { errorMessageOf } from '@/stores/useToastStore';
@@ -222,6 +226,35 @@ function CaseHistory({ item }: { item: PastCaseView }) {
   );
 }
 
+/** 등록 사례의 수정·삭제 (예시 사례는 DB에 없어 못 고친다). 등록과 같은 권한(불합격 처리 상태 지정)이 있는 사원만 */
+function CaseEditActions({ item }: { item: PastCaseView }) {
+  const canEdit = useCanUse(PERMISSION.DISPOSITION_SET);
+  const [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const remove = useAction(() => pastCaseApi.remove(item.id), {
+    success: (removed) => `${removed.caseNo}를 지웠어요`,
+    invalidate: [pastCaseKeys.all],
+    onSuccess: () => setRemoving(false),
+  });
+  if (item.isExample || !canEdit) return null;
+  return (
+    <>
+      <Button icon="edit" onClick={() => setEditing(true)}>
+        수정
+      </Button>
+      <Button icon="trash" variant="danger-outline" onClick={() => setRemoving(true)}>
+        삭제
+      </Button>
+      {editing ? <PastCaseEditModal item={item} onClose={() => setEditing(false)} /> : null}
+      {removing ? (
+        <ConfirmDialog title={`${item.caseNo}를 지울까요?`} confirmLabel="삭제" tone="danger" pending={remove.isPending} onConfirm={() => remove.mutate(undefined)} onCancel={() => setRemoving(false)}>
+          <p>사례와 관련 LOT 연결이 사라지고 되돌릴 수 없어요. 등록할 때 남은 작업 로그는 그대로 있어요.</p>
+        </ConfirmDialog>
+      ) : null}
+    </>
+  );
+}
+
 function CaseDetail({ item, query, results, onSelect }: { item: PastCaseView; query: string; results: readonly PastCaseView[]; onSelect: (caseNo: string) => void }) {
   const others = sameCategoryCases(item, results);
   const lot = item.lots[0];
@@ -243,15 +276,18 @@ function CaseDetail({ item, query, results, onSelect }: { item: PastCaseView; qu
           </span>
         }
         actions={
-          lot?.lotId ? (
-            <ButtonLink href={lotTraceHref(lot.lotNo, 'forward')} icon="trace">
-              LOT 추적
-            </ButtonLink>
-          ) : (
-            <Button icon="trace" disabled title={EXAMPLE_LOT_HINT}>
-              LOT 추적
-            </Button>
-          )
+          <>
+            <CaseEditActions item={item} />
+            {lot?.lotId ? (
+              <ButtonLink href={lotTraceHref(lot.lotNo, 'forward')} icon="trace">
+                LOT 추적
+              </ButtonLink>
+            ) : (
+              <Button icon="trace" disabled title={EXAMPLE_LOT_HINT}>
+                LOT 추적
+              </Button>
+            )}
+          </>
         }
       />
 

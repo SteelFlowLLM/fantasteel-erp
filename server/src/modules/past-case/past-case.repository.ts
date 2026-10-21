@@ -58,6 +58,22 @@ export class PastCaseRepository {
     return tx.pastCase.create({ data: { ...data, pastCaseLots: { create: lotIds.map((lotId) => ({ lotId })) } }, select: { id: true } });
   }
 
+  /** 항목을 바꾸고 관련 LOT을 보낸 목록으로 맞춘다 (이미 있는 LOT 행은 그대로 둔다). 사례가 없으면 false */
+  async updateCase(tx: Tx, id: number, data: Prisma.PastCaseUncheckedUpdateManyInput, lotIds: readonly number[]): Promise<boolean> {
+    const { count } = await tx.pastCase.updateMany({ where: { id }, data });
+    if (count === 0) return false;
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id, lotId: { notIn: [...lotIds] } } });
+    await tx.pastCaseLot.createMany({ data: lotIds.map((lotId) => ({ pastCaseId: id, lotId })), skipDuplicates: true });
+    return true;
+  }
+
+  /** 관련 LOT과 함께 지운다. 사례가 없으면 false */
+  async deleteCase(tx: Tx, id: number): Promise<boolean> {
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id } });
+    const { count } = await tx.pastCase.deleteMany({ where: { id } });
+    return count === 1;
+  }
+
   updateCaseNo(tx: Tx, id: number, caseNo: string) {
     return tx.pastCase.update({ where: { id }, data: { caseNo }, select: { id: true } });
   }
