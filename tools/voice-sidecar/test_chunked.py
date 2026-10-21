@@ -286,6 +286,39 @@ class ChunkedRunTest(unittest.TestCase):
         self.assertEqual(segments, [])
         self.assertEqual(fake.calls, [])
 
+    def test_같은_말을_되풀이하면_그_자리부터_새_문맥으로_다시_받아쓴다(self) -> None:
+        calls: list[tuple[Optional[str], float]] = []
+
+        def looping(path: str, language: str, prompt: Optional[str] = None) -> dict[str, Any]:
+            duration = server.wav_duration(path)
+            calls.append((prompt, round(duration, 1)))
+            if len(calls) == 1:
+                ok = [{"start": 0.1, "end": 0.9, "text": "앞의 멀쩡한 말이에요", "words": []}]
+                loop = [{"start": 1.0 + i * 0.2, "end": 1.2 + i * 0.2, "text": "철관석의 공유해 주세요."} for i in range(5)]
+                return {"segments": ok + loop}
+            return {"segments": [{"start": 0.1, "end": 0.9, "text": "철광석 재고는 열흘치예요"}]}
+
+        wav = os.path.join(self.tmp.name, "one.wav")
+        write_wav(wav, [(3.0, True)])
+        with mock.patch.object(server, "whisper_transcribe", looping):
+            segments = server.transcribe_chunks(wav, [(0.0, 3.0)], "ko", "원료 철광석 ORE01", False, server.no_progress, self.tmp.name)
+        # 되풀이가 시작된 1.0초부터 끝까지 힌트 없이 다시
+        self.assertEqual(calls, [("원료 철광석 ORE01", 3.0), (None, 2.0)])
+        self.assertEqual([(s["start"], s["text"]) for s in segments], [(0.1, "앞의 멀쩡한 말이에요"), (1.1, "철광석 재고는 열흘치예요")])
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), ["long.wav", "one.wav"])
+
+    def test_다시_해도_더_되풀이하면_처음_것을_쓴다(self) -> None:
+        loop = {"segments": [{"start": i * 0.2, "end": i * 0.2 + 0.2, "text": "같은 말을 또 합니다"} for i in range(6)]}
+        wav = os.path.join(self.tmp.name, "one.wav")
+        write_wav(wav, [(3.0, True)])
+        with mock.patch.object(server, "whisper_transcribe", return_value=loop):
+            segments = server.transcribe_chunks(wav, [(0.0, 3.0)], "ko", None, False, server.no_progress, self.tmp.name)
+        self.assertEqual(len(segments), 6)
+
+    def test_짧은_대답이_이어지는_것은_되풀이로_보지_않는다(self) -> None:
+        self.assertEqual(server.repeated_run([{"text": "네."}] * 6), 0)
+        self.assertEqual(server.repeated_run([{"text": "알겠습니다 바로 할게요"}] * 3 + [{"text": "다른 말이에요 정말로"}]), 3)
+
     def test_whisper_서버가_잠깐_끊기면_그_조각만_한_번_더_해_본다(self) -> None:
         fake = FakeWhisper()
         calls = {"n": 0}

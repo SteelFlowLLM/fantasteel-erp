@@ -735,25 +735,72 @@ def whisper_with_retry(path: str, language: str, prompt: Optional[str], quick: b
     raise SidecarError(502, "whisper 서버 오류")
 
 
+# 같은 글(6자 이상)이 이만큼 잇달아 나오면 whisper가 되풀이에 빠진 것으로 본다 ("네."처럼 짧은 대답은 세지 않는다)
+LOOP_REPEATS = 4
+LOOP_MIN_CHARS = 6
+
+
+def repeated_run(segments: list[dict[str, Any]]) -> int:
+    """같은 글이 잇달아 나온 가장 긴 횟수 (띄어쓰기·문장 부호는 빼고 비교한다)"""
+    longest, run, previous = 0, 0, None
+    for seg in segments:
+        key = re.sub(r"[\s.,?!~·…]", "", seg["text"])
+        run = run + 1 if key == previous and len(key) >= LOOP_MIN_CHARS else 1
+        previous = key
+        if len(key) >= LOOP_MIN_CHARS:
+            longest = max(longest, run)
+    return longest
+
+
+def loop_start(segments: list[dict[str, Any]]) -> Optional[int]:
+    """같은 글이 LOOP_REPEATS번 넘게 잇달아 나오기 시작한 구간 번호. 없으면 None"""
+    run, previous = 0, None
+    for index, seg in enumerate(segments):
+        key = re.sub(r"[\s.,?!~·…]", "", seg["text"])
+        run = run + 1 if key == previous and len(key) >= LOOP_MIN_CHARS else 1
+        previous = key
+        if run >= LOOP_REPEATS:
+            return index - run + 1
+    return None
+
+
+def transcribe_span(
+    wav_path: str, start: float, end: float, whole: bool, language: str, prompt: Optional[str], quick: bool, tmp_dir: str, name: str
+) -> list[dict[str, Any]]:
+    """[start, end)초를 받아써 회의 전체 시각의 구간으로 돌려준다. 조각 파일은 받아쓴 뒤 바로 지운다"""
+    path = wav_path
+    if not whole:
+        path = os.path.join(tmp_dir, f"{name}.wav")
+        write_chunk(wav_path, path, start, end)
+    try:
+        raw = whisper_with_retry(path, language, prompt, quick)
+    finally:
+        if path != wav_path:
+            os.remove(path)
+    segments: list[dict[str, Any]] = []
+    for seg in whisper_segments(raw):
+        words = [{"word": w["word"], "start": w["start"] + start, "end": w["end"] + start} for w in seg["words"]]
+        segments.append({"start": round(seg["start"] + start, 2), "end": round(seg["end"] + start, 2), "text": seg["text"], "words": words})
+    return segments
+
+
 def transcribe_chunks(
     wav_path: str, chunks: list[tuple[float, float]], language: str, prompt: Optional[str], quick: bool, progress: Progress, tmp_dir: str
 ) -> list[dict[str, Any]]:
-    """조각마다 받아써 회의 전체 시각으로 옮겨 잇는다. 조각 파일은 받아쓴 뒤 바로 지운다"""
+    """조각마다 받아써 회의 전체 시각으로 옮겨 잇는다"""
     segments: list[dict[str, Any]] = []
     for index, (start, end) in enumerate(chunks):
         progress("transcribe", index + 1, len(chunks))
-        path = wav_path
-        if len(chunks) > 1:
-            path = os.path.join(tmp_dir, f"chunk-{index}.wav")
-            write_chunk(wav_path, path, start, end)
-        try:
-            raw = whisper_with_retry(path, language, prompt, quick)
-        finally:
-            if path != wav_path:
-                os.remove(path)
-        for seg in whisper_segments(raw):
-            words = [{"word": w["word"], "start": w["start"] + start, "end": w["end"] + start} for w in seg["words"]]
-            segments.append({"start": round(seg["start"] + start, 2), "end": round(seg["end"] + start, 2), "text": seg["text"], "words": words})
+        found = transcribe_span(wav_path, start, end, len(chunks) == 1, language, prompt, quick, tmp_dir, f"chunk-{index}")
+        at = loop_start(found)
+        if at is not None and end - found[at]["start"] >= 1.0:
+            # whisper는 앞 문맥에 끌려 한 문장을 되풀이하는 데 빠질 때가 있다(합성 41분: 100초 동안 한 문장 102번, 용어 힌트가 없어도 37번).
+            # 되풀이가 시작된 곳부터 새 문맥으로(힌트 없이) 다시 받아쓰고, 덜 되풀이한 쪽을 쓴다
+            log.warning("조각 %d/%d에서 whisper가 같은 말을 되풀이해 그 자리부터 다시 받아써요", index + 1, len(chunks))
+            again = transcribe_span(wav_path, found[at]["start"], end, False, language, None, quick, tmp_dir, f"chunk-{index}-again")
+            if repeated_run(again) < repeated_run(found[at:]):
+                found = found[:at] + again
+        segments.extend(found)
     return segments
 
 
