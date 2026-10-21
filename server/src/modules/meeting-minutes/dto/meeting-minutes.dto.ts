@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -140,6 +140,11 @@ export class UpdateMeetingCandidateDto {
   @ArrayMaxSize(100, { message: '참석자는 100명까지 고를 수 있어요' })
   @IsInt({ each: true, message: '참석자 id가 올바르지 않아요' })
   attendeeIds?: number[];
+
+  /** 일정을 Notion 업무 공간에도 넣을지 (이슈 #434) */
+  @IsOptional()
+  @IsBoolean()
+  notionSync?: boolean;
 
   @IsOptional()
   @ValidateNested()

@@ -273,7 +273,7 @@ export interface AiAssistantReplyView {
  */
 export type AiWorkCard = Pick<
   MeetingCandidate,
-  'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'purchase' | 'itemName' | 'issues'
+  'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'notionSync' | 'purchase' | 'itemName' | 'issues'
 >;
 
 /** 수주 등록 카드의 품목 한 줄. 못 맞춘 칸은 null이고 카드의 issues로 알린다 */

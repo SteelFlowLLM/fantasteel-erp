@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Input, Textarea } from '@/components/Input';
 import { Modal } from '@/components/Modal';
+import { NotionSyncToggle } from '@/features/schedule/NotionSyncToggle';
 import { TimeSelect } from '@/features/schedule/TimeSelect';
 import { DESCRIPTION_MAX, TITLE_MAX, emptyForm, endOptions, formOf, formProblem, inputOf, shiftEnd, startOptions, type ScheduleForm } from '@/features/schedule/lib/scheduleForm';
 import { useAction } from '@/hooks/useAction';
@@ -65,9 +66,10 @@ export function ScheduleEventModal({ event, date, onClose }: { event?: ScheduleE
           </Field>
         </div>
         {touched && problem && form.title.trim() ? <span className="text-xs text-danger">{problem}</span> : null}
-        <Field label="메모" hint="나만 보는 일정이에요. 다른 사원에게 알림을 보내지 않아요.">
+        <Field label="메모" hint="다른 사원에게 알림을 보내지 않아요. Notion에 넣으면 회사 Notion에서 함께 볼 수 있어요.">
           <Textarea rows={3} maxLength={DESCRIPTION_MAX} value={form.description} onChange={(e) => set('description', e.target.value)} />
         </Field>
+        <NotionSyncToggle id="schedule-notion-sync" checked={form.notionSync} onChange={(checked) => set('notionSync', checked)} />
       </form>
     </Modal>
   );

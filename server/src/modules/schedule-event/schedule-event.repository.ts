@@ -15,6 +15,8 @@ export interface ScheduleEventFields {
   scheduleEventDescription: string | null;
   startAt: Date;
   endAt: Date;
+  /** 보내지 않으면 등록은 DB 기본값(넣음), 수정은 그대로 둔다 */
+  notionSync?: boolean;
 }
 
 /** DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장) */

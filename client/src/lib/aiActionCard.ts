@@ -3,6 +3,7 @@
 import {
   AI_RESEARCH_LIMITS,
   missingFieldsOf,
+  notionSyncOf,
   type AiActionCard,
   type AiActionCardExecuteInput,
   type AiActionCardExecuteResult,
@@ -37,7 +38,7 @@ type Registered = AiActionCardExecuteResult['registered'];
 /** 실행 결과를 열 수 있는 화면과 안내 문구. external이면 새 탭으로 여는 바깥 주소(Notion) */
 export const CARD_RESULT: Record<Registered['type'], { message: (registered: Registered) => string; href: (registered: Registered) => string; linkLabel: (registered: Registered) => string; external?: boolean }> = {
   task: { message: (r) => (r.updated ? '업무를 고쳤어요' : '업무로 등록됐어요'), href: () => '/tasks', linkLabel: () => '업무 보기' },
-  schedule_event: { message: (r) => (r.updated ? '일정을 고쳤어요' : '일정으로 등록됐어요'), href: () => '/schedule', linkLabel: () => '내 일정 보기' },
+  schedule_event: { message: (r) => `${r.updated ? '일정을 고쳤어요' : '일정으로 등록됐어요'}${r.note ? ` (${r.note})` : ''}`, href: () => '/schedule', linkLabel: () => '내 일정 보기' },
   action_draft: { message: () => '구매요청 초안이 만들어졌어요. 초안을 확정하면 구매요청이 되고 부서장 승인을 기다려요', href: (r) => `/action-drafts/${r.id}`, linkLabel: (r) => `초안 #${r.id} 열기` },
   sales_order: { message: (r) => `수주 ${r.no ?? ''}를 등록했어요`, href: (r) => `/sales-orders/${r.id}`, linkLabel: () => '수주 열기' },
   hot_rolling: { message: (r) => `${r.no ?? '생산계획'}의 열연 배정을 확정했어요`, href: () => '/production/rolling', linkLabel: () => '열연 투입 배정 보기' },
@@ -179,6 +180,7 @@ function workInputOf(card: AiWorkCard): AiActionCardExecuteInput {
     if (card.startAt !== null) input.startAt = card.startAt;
     if (card.endAt !== null) input.endAt = card.endAt;
     input.attendeeIds = card.attendeeIds;
+    input.notionSync = notionSyncOf(card);
   } else if (card.purchase) {
     const purchase: NonNullable<MeetingCandidateUpdateInput['purchase']> = {};
     if (card.purchase.itemId !== null) purchase.itemId = card.purchase.itemId;
@@ -234,6 +236,7 @@ export function applyCardChanges(card: AiWorkCard, input: MeetingCandidateUpdate
     next.attendeeIds = input.attendeeIds;
     solved.push('attendeeIds');
   }
+  if (input.notionSync !== undefined) next.notionSync = input.notionSync;
   if (input.purchase && next.purchase) {
     if (input.purchase.itemId !== undefined) {
       next.purchase.itemId = input.purchase.itemId;

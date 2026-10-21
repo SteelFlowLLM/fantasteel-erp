@@ -81,8 +81,10 @@ describe('허가·제외 계산', () => {
     const list = [task({ title: '견적 정리', decision: 'APPROVED' }), task({ key: 'c2', title: '제외', decision: 'EXCLUDED' }), { ...candidate('EVENT', 'c3'), title: '방문', decision: 'APPROVED' as const }];
     expect(registerPreview(list)).toEqual([
       { label: '할 일 1건', titles: ['견적 정리'] },
-      { label: '일정 1건', titles: ['방문'] },
+      { label: '일정 1건 (Notion 캘린더에도 1건)', titles: ['방문'] },
     ]);
+    const offline = [{ ...candidate('EVENT', 'c3'), title: '방문', decision: 'APPROVED' as const, notionSync: false }];
+    expect(registerPreview(offline)).toEqual([{ label: '일정 1건', titles: ['방문'] }]);
   });
 });
 

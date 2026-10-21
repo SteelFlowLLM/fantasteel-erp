@@ -53,8 +53,8 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
     next.issues = without(next.issues, ISSUE.dueDate, ISSUE.sameDay);
   }
 
-  if (dto.startAt !== undefined || dto.endAt !== undefined || dto.attendeeIds !== undefined) {
-    if (candidate.kind !== 'EVENT') throw WRONG_KIND('일정 시각·참석자', kindLabel);
+  if (dto.startAt !== undefined || dto.endAt !== undefined || dto.attendeeIds !== undefined || dto.notionSync !== undefined) {
+    if (candidate.kind !== 'EVENT') throw WRONG_KIND('일정 시각·참석자·Notion', kindLabel);
   }
   if (dto.startAt !== undefined) {
     const startAt = normalizeDateTime(dto.startAt, meetingDate);
@@ -82,6 +82,7 @@ export function applyCandidateEdit(candidate: MeetingCandidate, dto: UpdateMeeti
     next.attendeeIds = [...new Set(dto.attendeeIds)];
     next.issues = without(next.issues, ISSUE.eventAttendees);
   }
+  if (dto.notionSync !== undefined) next.notionSync = dto.notionSync;
 
   if (dto.purchase !== undefined) {
     if (candidate.kind !== 'PURCHASE' || next.purchase === null) throw WRONG_KIND('구매요청 칸', kindLabel);

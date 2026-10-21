@@ -179,7 +179,7 @@ describe('회의록 확인·등록 (API-261)', () => {
   });
 
   it('확정하고 등록: POST register가 만든 행의 id를 돌려준다', async () => {
-    const result: MeetingRegisterResult = { meetingMinutes: { ...view, meetingMinutesStatus: 'CONFIRMED' }, taskIds: [11], scheduleEventIds: [4], actionDraftIds: [9], excludedKeys: ['c4'] };
+    const result: MeetingRegisterResult = { meetingMinutes: { ...view, meetingMinutesStatus: 'CONFIRMED' }, taskIds: [11], scheduleEventIds: [4], actionDraftIds: [9], excludedKeys: ['c4'], notionNotice: null };
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes/3/register' ? ok(result) : undefined));
     const registered = await meetingMinutesApi.register(3);
     expect(registered).toMatchObject({ taskIds: [11], scheduleEventIds: [4], actionDraftIds: [9], excludedKeys: ['c4'] });

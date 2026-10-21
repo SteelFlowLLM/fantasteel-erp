@@ -66,7 +66,7 @@ describe('실행 요청 만들기', () => {
     expect(executeInputOf(card({ assigneeId: 7 }))).toEqual({ kind: 'TASK', title: '견적서 보내기', assigneeId: 7 });
   });
 
-  it('일정은 참석자까지, 구매요청은 채운 칸만 보낸다', () => {
+  it('일정은 참석자와 Notion에 넣을지까지, 구매요청은 채운 칸만 보낸다', () => {
     expect(executeInputOf(card({ kind: 'EVENT', startAt: 'S', endAt: 'E', attendeeIds: [1, 2], description: '메모' }))).toEqual({
       kind: 'EVENT',
       title: '견적서 보내기',
@@ -74,7 +74,9 @@ describe('실행 요청 만들기', () => {
       startAt: 'S',
       endAt: 'E',
       attendeeIds: [1, 2],
+      notionSync: true,
     });
+    expect(executeInputOf(applyCardChanges(card({ kind: 'EVENT', startAt: 'S', endAt: 'E', attendeeIds: [1] }), { notionSync: false }))).toMatchObject({ notionSync: false });
     expect(executeInputOf(card({ kind: 'PURCHASE', purchase: { itemId: 3, requestedTon: null, desiredReceiptDate: null, requestReason: 'x', sourceText: null } }))).toMatchObject({ purchase: { itemId: 3 } });
   });
 });

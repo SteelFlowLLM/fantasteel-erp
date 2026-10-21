@@ -36,8 +36,13 @@ function EventRow({ event, onEdit }: { event: ScheduleEventView; onEdit: (() => 
       </span>
       {event.scheduleEventDescription ? <span className="max-w-80 truncate text-cap text-ink-2">{event.scheduleEventDescription}</span> : null}
       <span className="text-cap text-ink-3">{event.attendees.map((a) => a.employeeName).join(', ')}</span>
+      {event.notionPageUrl ? (
+        <a href={event.notionPageUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-brand hover:underline">
+          Notion
+        </a>
+      ) : null}
       {event.meetingMinutes ? (
-        <Link href={`/meetings?id=${event.meetingMinutes.id}`} className="ml-auto text-xs text-brand hover:underline">
+        <Link href={`/meetings?id=${event.meetingMinutes.id}`} className={cn('text-xs text-brand hover:underline', !event.notionPageUrl && 'ml-auto')}>
           회의록
         </Link>
       ) : null}

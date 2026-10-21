@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, type MeetingAnalysis, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -65,7 +65,11 @@ export function approvalBlocker(c: MeetingCandidate): string | null {
 
 /** 확정 확인창에 보일 줄: 종류별 허가 건수와 제목, 제외 건수 */
 export function registerPreview(candidates: readonly MeetingCandidate[]): { label: string; titles: string[] }[] {
-  const lines = KIND_ORDER.map((kind) => ({ label: `${CANDIDATE_KIND_LABEL[kind]} ${candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').length}건`, titles: candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED').map((c) => c.title) }));
+  const lines = KIND_ORDER.map((kind) => {
+    const approved = candidates.filter((c) => c.kind === kind && c.decision === 'APPROVED');
+    const notion = kind === 'EVENT' ? approved.filter(notionSyncOf).length : 0;
+    return { label: `${CANDIDATE_KIND_LABEL[kind]} ${approved.length}건${notion > 0 ? ` (Notion 캘린더에도 ${notion}건)` : ''}`, titles: approved.map((c) => c.title) };
+  });
   return lines.filter((line) => line.titles.length > 0);
 }
 

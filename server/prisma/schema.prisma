@@ -874,6 +874,7 @@ model ScheduleEvent {
   notionPageId String? @map("notion_page_id") @db.VarChar /// Notion 일정 데이터베이스 페이지 id (2026-10-19, 이슈 #391)
   notionSyncedAt DateTime? @map("notion_synced_at") @db.Timestamptz(3) /// Notion에 마지막으로 반영한 행의 updated_at
   notionCalendarEventId String? @map("notion_calendar_event_id") @db.VarChar /// Notion 캘린더 일정 id (이슈 #391 2단계)
+  notionSync Boolean @default(true) @map("notion_sync") /// Notion 업무 공간에 반영할지 (이슈 #434). 일정마다 고른다
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

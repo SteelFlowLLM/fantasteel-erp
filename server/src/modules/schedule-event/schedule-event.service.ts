@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { AuthUser, ScheduleEventInput, ScheduleEventView } from '@fantasteel/shared';
+import type { AuthUser, ScheduleEventInput, ScheduleEventView, ScheduleNotionStatus } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
+import { notionPageUrlOf } from '../integration/notion/notion.tools';
 import type { ListScheduleEventsQuery } from './dto/schedule-event.dto';
 import { ScheduleEventRepository, type ScheduleEventFields, type ScheduleEventRow } from './schedule-event.repository';
 
@@ -40,6 +41,8 @@ function toView(row: ScheduleEventRow): ScheduleEventView {
     meetingMinutes: row.meetingMinutes ? { id: row.meetingMinutes.id, title: row.meetingMinutes.meetingMinutesTitle } : null,
     attendees: row.attendees.map((a) => ({ employeeId: a.employeeId, employeeName: a.employee.employeeName })),
     creator: { id: row.creator.id, name: row.creator.employeeName },
+    notionSync: row.notionSync,
+    notionPageUrl: row.notionPageId ? notionPageUrlOf(row.notionPageId) : null,
   };
 }
 
@@ -48,7 +51,7 @@ function fieldsOf(input: ScheduleEventInput): ScheduleEventFields {
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);
   if (endAt.getTime() <= startAt.getTime()) throw new AppException('COM-004', '끝나는 시각은 시작 시각보다 뒤여야 해요');
-  return { scheduleEventTitle: input.scheduleEventTitle, scheduleEventDescription: input.scheduleEventDescription ?? null, startAt, endAt };
+  return { scheduleEventTitle: input.scheduleEventTitle, scheduleEventDescription: input.scheduleEventDescription ?? null, startAt, endAt, notionSync: input.notionSync };
 }
 
 /**
@@ -74,6 +77,10 @@ export class ScheduleEventService {
     if (days + 1 > MAX_RANGE_DAYS) throw new AppException('COM-004', `조회 기간은 ${MAX_RANGE_DAYS}일까지예요`);
     const rows = await this.repository.findMine(this.prisma, user.employeeId, seoulMidnight(from), seoulMidnight(addDays(to, 1)));
     return rows.map(toView);
+  }
+
+  notionStatus(): Promise<ScheduleNotionStatus> {
+    return this.notionWorkspace.scheduleStatus();
   }
 
   /** 내 일정 직접 등록. 나 혼자 보는 일정이라 다른 사원에게 알림을 보내지 않는다 */

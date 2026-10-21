@@ -12,6 +12,8 @@ const event = (over: Partial<ScheduleEventView> = {}): ScheduleEventView => ({
   meetingMinutes: null,
   attendees: [{ employeeId: 3, employeeName: '박서영' }],
   creator: { id: 3, name: '박서영' },
+  notionSync: true,
+  notionPageUrl: null,
   ...over,
 });
 
@@ -22,8 +24,8 @@ describe('내 일정 직접 등록·수정 입력', () => {
   });
 
   it('새 일정은 고른 날 09:00~10:00, 고칠 일정은 서울 날짜·시각으로 채운다', () => {
-    expect(emptyForm('2026-11-03')).toEqual({ title: '', description: '', date: '2026-11-03', start: '09:00', end: '10:00' });
-    expect(formOf(event({ scheduleEventDescription: '메모' }))).toEqual({ title: '거래처 미팅', description: '메모', date: '2026-11-03', start: '14:00', end: '15:30' });
+    expect(emptyForm('2026-11-03')).toEqual({ title: '', description: '', date: '2026-11-03', start: '09:00', end: '10:00', notionSync: true });
+    expect(formOf(event({ scheduleEventDescription: '메모', notionSync: false }))).toEqual({ title: '거래처 미팅', description: '메모', date: '2026-11-03', start: '14:00', end: '15:30', notionSync: false });
   });
 
   it('제목이 비거나 끝이 시작과 같거나 앞이면 저장을 막는다', () => {
@@ -35,11 +37,12 @@ describe('내 일정 직접 등록·수정 입력', () => {
   });
 
   it('보낼 값: 제목은 앞뒤 공백을 지우고 빈 메모는 null', () => {
-    expect(inputOf({ title: ' 회의 ', description: '  ', date: '2026-11-03', start: '14:00', end: '15:30' })).toEqual({
+    expect(inputOf({ title: ' 회의 ', description: '  ', date: '2026-11-03', start: '14:00', end: '15:30', notionSync: false })).toEqual({
       scheduleEventTitle: '회의',
       scheduleEventDescription: null,
       startAt: '2026-11-03T05:00:00.000Z',
       endAt: '2026-11-03T06:30:00.000Z',
+      notionSync: false,
     });
   });
 

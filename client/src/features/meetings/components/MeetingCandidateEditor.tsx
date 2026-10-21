@@ -1,13 +1,14 @@
 'use client';
 
 // 후보 한 건 고치기 (REQ-VOC-004). 사용자가 바꾼 칸만 서버로 보낸다: 서버는 보낸 칸의 AI 확인 사유를 지우므로, 건드리지 않은 칸을 보내면 경고가 사라진다.
-import { ITEM_TYPE, type MeetingCandidate, type MeetingCandidateUpdateInput } from '@fantasteel/shared';
+import { ITEM_TYPE, notionSyncOf, type MeetingCandidate, type MeetingCandidateUpdateInput } from '@fantasteel/shared';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';
 import { Field } from '@/components/Field';
 import { Input, Select, Textarea } from '@/components/Input';
 import { AttendeePicker, groupsOfChart } from '@/features/meetings/components/AttendeePicker';
+import { NotionSyncToggle } from '@/features/schedule/NotionSyncToggle';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 import { useItemList } from '@/hooks/useLookups';
 import { MEETING_TITLE_MAX } from '@/api/meetingMinutes';
@@ -23,13 +24,14 @@ interface Draft {
   startAt: string;
   endAt: string;
   attendeeIds: number[];
+  notionSync: boolean;
   itemId: string;
   requestedTon: string;
   desiredReceiptDate: string;
 }
 
 /** 고칠 수 있는 칸. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
-export type EditableCandidate = Pick<MeetingCandidate, 'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'purchase'>;
+export type EditableCandidate = Pick<MeetingCandidate, 'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'notionSync' | 'purchase'>;
 
 const draftOf = (c: EditableCandidate): Draft => ({
   title: c.title,
@@ -39,6 +41,7 @@ const draftOf = (c: EditableCandidate): Draft => ({
   startAt: toLocalInput(c.startAt),
   endAt: toLocalInput(c.endAt),
   attendeeIds: c.attendeeIds,
+  notionSync: notionSyncOf(c),
   itemId: c.purchase?.itemId == null ? '' : String(c.purchase.itemId),
   requestedTon: c.purchase?.requestedTon ?? '',
   desiredReceiptDate: c.purchase?.desiredReceiptDate ?? '',
@@ -58,6 +61,7 @@ export function changesOf(c: EditableCandidate, next: Draft): MeetingCandidateUp
     if (next.endAt !== '' && next.endAt !== before.endAt) input.endAt = next.endAt;
     const same = next.attendeeIds.length === before.attendeeIds.length && next.attendeeIds.every((id) => before.attendeeIds.includes(id));
     if (!same) input.attendeeIds = next.attendeeIds;
+    if (next.notionSync !== before.notionSync) input.notionSync = next.notionSync;
   } else {
     const purchase: NonNullable<MeetingCandidateUpdateInput['purchase']> = {};
     if (next.itemId !== '' && next.itemId !== before.itemId) purchase.itemId = Number(next.itemId);
@@ -139,6 +143,7 @@ export function CandidateEditor({
           <Field label="참석자" hint="일정이 등록되면 알림이 가요">
             <AttendeePicker selected={draft.attendeeIds} myId={myId} onChange={(ids) => set('attendeeIds', ids)} />
           </Field>
+          <NotionSyncToggle id={`cand-${candidate.key}-notion`} checked={draft.notionSync} onChange={(checked) => set('notionSync', checked)} />
         </>
       ) : null}
       {candidate.kind === 'PURCHASE' ? (

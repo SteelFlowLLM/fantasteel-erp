@@ -2,7 +2,7 @@
 
 // 회의록 AI 분석 카드 (REQ-VOC-003·004, BP-VOC-01). AI가 정리한 내용은 "AI 정리" 표시로 원본 전사와 구분한다.
 // 작성자만 후보마다 고치고 허가·제외하며, 남은 후보가 없을 때 "확정하고 등록"으로 업무·일정·구매요청 초안을 만든다. AI는 스스로 등록하지 않는다.
-import { ITEM_TYPE, MEETING_MINUTES_STATUS, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateDecision, type MeetingCandidateUpdateInput, type MeetingMinutesView } from '@fantasteel/shared';
+import { ITEM_TYPE, MEETING_MINUTES_STATUS, notionSyncOf, type MeetingAnalysis, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateDecision, type MeetingCandidateUpdateInput, type MeetingMinutesView } from '@fantasteel/shared';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { meetingMinutesApi } from '@/api/meetingMinutes';
@@ -21,6 +21,7 @@ import { useItemList } from '@/hooks/useLookups';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
+import { toast } from '@/stores/useToastStore';
 import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 function AiLabel() {
@@ -99,6 +100,7 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
           {c.endAssumed ? <span className="ml-1 text-cap text-ink-3">(끝 시각은 가정)</span> : null}
         </Field>
         <Field label="참석자">{c.attendeeIds.length > 0 ? c.attendeeIds.map(names.employee).join(', ') : <span className="text-ink-3">미정</span>}</Field>
+        <Field label="Notion 캘린더">{notionSyncOf(c) ? '함께 넣음' : <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>}</Field>
       </>
     );
   }
@@ -113,7 +115,7 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
 }
 
 /** 칸을 글로 보일 때 필요한 후보 값. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
-export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'purchase' | 'itemName'>;
+export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'notionSync' | 'purchase' | 'itemName'>;
 
 /** 서버가 DB에서 읽어 만든 ERP 현황. 눈여겨볼 점(warn)은 경고색으로 */
 function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {
@@ -321,7 +323,10 @@ function RegisterBar({ minutes, analysis }: { minutes: MeetingMinutesView; analy
   const preview = registerPreview(analysis.candidates);
   const register = useAction(meetingMinutesApi.register, {
     success: (r) => `확정했어요 · 업무 ${r.taskIds.length}건, 일정 ${r.scheduleEventIds.length}건, 구매요청 초안 ${r.actionDraftIds.length}건`,
-    onSuccess: () => setOpen(false),
+    onSuccess: (r) => {
+      setOpen(false);
+      if (r.notionNotice) toast.info(r.notionNotice);
+    },
     onError: () => setOpen(false),
   });
   return (

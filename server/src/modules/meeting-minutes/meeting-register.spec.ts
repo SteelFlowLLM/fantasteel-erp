@@ -6,6 +6,7 @@ import { AuthUserService } from '../../common/auth/auth-user.service';
 import { AppException } from '../../common/errors/app.exception';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import { MessageActionService } from '../message-action/message-action.service';
 import { ISSUE } from './meeting-analysis.validator';
 import { MeetingMinutesService } from './meeting-minutes.service';
@@ -311,6 +312,32 @@ describe('확정하고 등록 (POST register, API-261)', () => {
     expect(await codeOf(service.updateSummary(author, id, { summary: '바꿈' }))).toBe('VOC-004');
     expect(await codeOf(service.analyze(author, id))).toBe('VOC-004');
     expect(await prisma.task.count({ where: { meetingMinutesId: id } })).toBe(1);
+  });
+
+  it('일정 후보마다 Notion에 넣을지 정하고, Notion을 쓸 수 없으면 ERP에만 넣었다고 알린다 (이슈 #434)', async () => {
+    const id = await reviewMinutes([eventCandidate('c1', { title: 'Notion에 넣을 회의' }), eventCandidate('c2', { title: 'ERP에만 둘 회의' })]);
+    await service.updateCandidate(author, id, 'c2', { notionSync: false });
+    for (const key of ['c1', 'c2']) await decide(id, key, 'APPROVED');
+    const result = await service.register(author, id);
+    const events = await prisma.scheduleEvent.findMany({ where: { id: { in: result.scheduleEventIds } }, orderBy: { id: 'asc' } });
+    expect(events.map((e) => [e.scheduleEventTitle, e.notionSync])).toEqual([
+      ['Notion에 넣을 회의', true],
+      ['ERP에만 둘 회의', false],
+    ]);
+    const status = await moduleRef.get(NotionWorkspaceService).scheduleStatus();
+    if (status.ready) expect(result.notionNotice).toBeNull();
+    else expect(result.notionNotice).toContain('ERP에만 넣었고');
+  });
+
+  it('Notion에 넣는 일정이 없으면 Notion 안내가 없다', async () => {
+    const id = await reviewMinutes([eventCandidate('c1', { title: 'ERP 전용 회의' })]);
+    await service.updateCandidate(author, id, 'c1', { notionSync: false, decision: 'APPROVED' });
+    expect((await service.register(author, id)).notionNotice).toBeNull();
+  });
+
+  it('업무 후보에는 Notion 일정 칸을 고칠 수 없다', async () => {
+    const id = await reviewMinutes([taskCandidate('c1', { assigneeId: outsider.employeeId })]);
+    await expect(service.updateCandidate(author, id, 'c1', { notionSync: false })).rejects.toMatchObject({ response: { code: 'COM-004' } });
   });
 
   it('허가한 후보가 하나도 없어도 회의록은 확정된다 (알림만 공유)', async () => {

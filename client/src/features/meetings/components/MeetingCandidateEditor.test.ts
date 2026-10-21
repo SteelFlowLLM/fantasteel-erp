@@ -10,7 +10,7 @@ const base: MeetingCandidate = {
 };
 
 const same = {
-  title: '방문', description: '', assigneeId: '', dueDate: '', startAt: '2026-10-20T14:00', endAt: '2026-10-20T15:00', attendeeIds: [1, 2], itemId: '', requestedTon: '', desiredReceiptDate: '',
+  title: '방문', description: '', assigneeId: '', dueDate: '', startAt: '2026-10-20T14:00', endAt: '2026-10-20T15:00', attendeeIds: [1, 2], notionSync: true, itemId: '', requestedTon: '', desiredReceiptDate: '',
 };
 
 describe('changesOf', () => {
@@ -22,6 +22,12 @@ describe('changesOf', () => {
     expect(changesOf(base, { ...same, endAt: '2026-10-20T16:30' })).toEqual({ endAt: '2026-10-20T16:30' });
     expect(changesOf(base, { ...same, attendeeIds: [2, 1] })).toEqual({});
     expect(changesOf(base, { ...same, attendeeIds: [1] })).toEqual({ attendeeIds: [1] });
+  });
+
+  it('Notion에 넣을지는 바꿨을 때만 담는다 (칸이 없던 옛 후보는 넣는 것으로 본다)', () => {
+    expect(changesOf(base, { ...same, notionSync: false })).toEqual({ notionSync: false });
+    expect(changesOf({ ...base, notionSync: false }, { ...same, notionSync: false })).toEqual({});
+    expect(changesOf({ ...base, notionSync: false }, same)).toEqual({ notionSync: true });
   });
 
   it('제목은 다듬고, 설명을 지우면 null', () => {

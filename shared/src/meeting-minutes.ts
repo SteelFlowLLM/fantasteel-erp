@@ -179,6 +179,8 @@ export interface MeetingCandidate {
   endAt: string | null;
   endAssumed: boolean;
   attendeeIds: number[];
+  /** EVENT를 Notion 업무 공간(일정 데이터베이스·캘린더)에도 넣을지 (이슈 #434). 이 칸이 없던 옛 후보는 넣는 것으로 읽는다 (notionSyncOf) */
+  notionSync?: boolean;
   /** PURCHASE 구매요청 초안 값 */
   purchase: PurchaseRequisitionDraftPayload | null;
   /** 말한 품목 이름 그대로 */
@@ -268,6 +270,8 @@ export interface MeetingCandidateUpdateInput {
   startAt?: string;
   endAt?: string;
   attendeeIds?: number[];
+  /** EVENT를 Notion에도 넣을지 */
+  notionSync?: boolean;
   purchase?: {
     itemId?: number;
     requestedTon?: string;
@@ -290,6 +294,8 @@ export interface MeetingRegisterResult {
   scheduleEventIds: number[];
   actionDraftIds: number[];
   excludedKeys: string[];
+  /** Notion에 넣기로 한 일정이 있는데 Notion 업무 공간을 지금 쓸 수 없으면 그 이유. 일정은 ERP에만 들어갔다 (이슈 #434) */
+  notionNotice: string | null;
 }
 
 /** 허가하려면 채워져 있어야 하는 칸 중 비어 있는 것 (표시명). 비면 허가할 수 있다. 서버와 화면이 같은 규칙을 쓴다 */
@@ -309,4 +315,9 @@ export function missingFieldsOf(c: Pick<MeetingCandidate, 'kind' | 'title' | 'as
     if (c.purchase?.desiredReceiptDate == null) missing.push('희망 입고일');
   }
   return missing;
+}
+
+/** 일정 후보·카드를 Notion에도 넣을지. 정하지 않았으면 넣는다 (Notion 업무 공간이 준비돼 있을 때의 기본값, 이슈 #434) */
+export function notionSyncOf(c: Pick<MeetingCandidate, 'notionSync'>): boolean {
+  return c.notionSync ?? true;
 }
