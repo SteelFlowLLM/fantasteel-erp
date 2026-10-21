@@ -1,12 +1,19 @@
 // 수주 화면의 순수 계산: 매수 입력 확인(4.1·SO-002), 등록 줄 상태, 수량 단위, 충족 지표 표시(4.5 분모 명시), 목록 거르기.
+import { MAX_ORDERED_QTY, ORDERED_QTY_OVER_MESSAGE } from '@fantasteel/shared';
 import { ERROR_MESSAGE, PRODUCT_QTY_UNIT, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import type { ProgressMeasure } from '@/lib/inventoryMath';
 
-/** 매수: 1 이상 정수만. 소수·0·음수·글자는 거부하고, 글자를 지우거나 반올림하지 않는다 (4.1, SO-002). */
+/** 매수: 1 이상 한 줄 상한 이하 정수만. 소수·0·음수·글자는 거부하고, 글자를 지우거나 반올림하지 않는다 (4.1, SO-002). */
 export function parseOrderedQty(text: string): number | null {
   if (!/^\d+$/.test(text)) return null;
   const qty = Number(text);
-  return Number.isSafeInteger(qty) && qty >= 1 ? qty : null;
+  return Number.isSafeInteger(qty) && qty >= 1 && qty <= MAX_ORDERED_QTY ? qty : null;
+}
+
+/** 매수 칸 오류 문구: 상한만 넘었으면 상한 안내, 그 밖에는 SO-002 문구 그대로 (서버와 같은 기준) */
+function orderedQtyError(text: string): string | undefined {
+  if (parseOrderedQty(text) !== null) return undefined;
+  return /^\d+$/.test(text) && Number(text) > MAX_ORDERED_QTY ? ORDERED_QTY_OVER_MESSAGE : ERROR_MESSAGE['SO-002'];
 }
 
 export interface DraftLine {
@@ -28,7 +35,8 @@ export interface DraftLineErrors {
 export function draftLineErrors(line: DraftLine, submitted: boolean): DraftLineErrors {
   const errors: DraftLineErrors = {};
   if (line.itemId === null && submitted) errors.itemId = '규격을 선택해 주세요';
-  if ((line.qtyText !== '' || submitted) && parseOrderedQty(line.qtyText) === null) errors.qty = ERROR_MESSAGE['SO-002'];
+  const qtyError = line.qtyText !== '' || submitted ? orderedQtyError(line.qtyText) : undefined;
+  if (qtyError) errors.qty = qtyError;
   if (line.dueDate === '' && submitted) errors.dueDate = '납기를 입력해 주세요';
   return errors;
 }

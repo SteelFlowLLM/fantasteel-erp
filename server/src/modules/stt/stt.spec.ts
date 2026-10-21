@@ -7,7 +7,6 @@ import { Agent } from 'undici';
 import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav, sttAgentOptions } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttService } from './stt.service';
-import { isBlockedSttHost, redactUrl } from './stt-url';
 import type { SttSettingsStore } from './stt-settings.store';
 
 /** 아래 describe들이 fetch를 가로채기 전의 실제 fetch (실제 서버로 부르는 시험용) */
@@ -235,6 +234,37 @@ describe('연결 실패 이유', () => {
   });
 });
 
+describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => {
+  it('관리자용 message에는 주소가 있고, 모든 사원이 읽는 publicMessage에는 주소가 없다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+    const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: null }, input))) as SttRequestError;
+    expect(error.message).toContain('100.87.40.116');
+    expect(error.publicMessage).toBe('음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요');
+    // 주소 없는 이유는 둘이 같다
+    const plain = new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
+    expect(plain.publicMessage).toBe(plain.message);
+    fetchMock.mockRestore();
+  });
+
+  it('404의 publicMessage에도 주소가 없다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+    const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: null }, input))) as SttRequestError;
+    expect(error.message).toContain('100.87.40.116');
+    expect(error.publicMessage).not.toMatch(/100\.87|http/);
+    fetchMock.mockRestore();
+  });
+
+  it.each(['http://169.254.169.254/v1', 'http://[fd00:ec2::254]/v1', 'http://metadata.google.internal/v1'])('저장돼 있던 주소 %s 로도 요청을 보내지 않는다', async (baseUrl) => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const client = new SttClient();
+    expect(await failureOf(client.transcribe({ baseUrl, apiKey: 'k' }, input))).toBeInstanceOf(SttRequestError);
+    expect(await failureOf(client.listModels({ baseUrl, apiKey: 'k' }))).toBeInstanceOf(SttRequestError);
+    expect(await failureOf(client.checkConnection({ baseUrl, apiKey: 'k' }, null))).toBeInstanceOf(SttRequestError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRestore();
+  });
+});
+
 describe('모델 목록 (GET /models)', () => {
   const sidecarList = {
     object: 'list',
@@ -383,19 +413,5 @@ describe('음성 서버 주소 검증', () => {
     expect(await check('')).toBe(0);
     expect(await check(null)).toBe(0);
     expect(await check('x'.repeat(101))).toBeGreaterThan(0);
-  });
-});
-
-describe('stt-url', () => {
-  it('링크 로컬·메타데이터만 막고 사설망·Tailscale은 막지 않는다', () => {
-    expect(isBlockedSttHost('http://169.254.169.254/')).toBe(true);
-    expect(isBlockedSttHost('http://192.168.0.20:8000/v1')).toBe(false);
-    expect(isBlockedSttHost('http://100.101.102.103:8001/v1')).toBe(false);
-    expect(isBlockedSttHost('http://127.0.0.1:8000/v1')).toBe(false);
-  });
-
-  it('redactUrl은 아이디·비밀번호를 뺀다', () => {
-    expect(redactUrl('http://user:pw@192.168.0.20:8000/v1')).toBe('http://192.168.0.20:8000/v1');
-    expect(redactUrl('http://192.168.0.20:8000/v1')).toBe('http://192.168.0.20:8000/v1');
   });
 });

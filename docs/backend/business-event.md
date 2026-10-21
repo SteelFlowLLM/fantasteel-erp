@@ -79,6 +79,8 @@ await this.businessEventRecorder.record(tx, {
 | SCHEDULE_EVENT_CREATED (문서 밖, 이슈 #434) | ai-assistant (일정 실행 카드) | `schedule_event` | | |
 | TASK_CREATED (문서 밖, 이슈 #457) | ai-assistant (업무 실행 카드) | `task` | | |
 | CASE_REGISTERED (문서 밖, 이슈 #464) | past-case | `past_case` | | 관련 LOT |
+| CASE_DELETED (이슈 #496) | past-case (하드 삭제, 변경 전에 지운 내용) | `past_case` | | 관련 LOT |
+| AGENT_RISK_DETECTED (이슈 #496) | factory-agent (주체 SYSTEM) | 후보 `action_draft` / 알림형 `sales_order_item`·`steel_grade` | 수주에 연결되면 ● | |
 
 철강맨 부르기로 말로 승인한 실행 카드(이슈 #457)는 기록기가 사유 끝에 `철강맨 말로 승인`을 붙인다(`runAsVoiceApproved`, 같은 트랜잭션). 화면의 작업 로그에는 사유로 보인다.
 

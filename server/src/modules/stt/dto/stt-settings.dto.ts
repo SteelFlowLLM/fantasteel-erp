@@ -1,7 +1,7 @@
 import { Transform } from 'class-transformer';
 import { STT_WAKE_CLIP_MODES, type SttWakeClipMode } from '@fantasteel/shared';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
-import { IsAllowedSttHost } from '../stt-url';
+import { IsAllowedServerHost } from '../../../common/net/server-url';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 /**
@@ -15,7 +15,7 @@ const URL_MESSAGE = 'http:// 또는 https://로 시작하는 주소를 입력해
 export class UpdateSttSettingsDto {
   @Transform(trim)
   @IsUrl(URL_OPTIONS, { message: URL_MESSAGE })
-  @IsAllowedSttHost()
+  @IsAllowedServerHost('음성 서버')
   baseUrl!: string;
 
   /** null이거나 빈 문자열이면 모델 이름을 보내지 않는다(whisper.cpp) */
@@ -36,7 +36,7 @@ export class UpdateSttSettingsDto {
 export class TestSttConnectionDto {
   @Transform(trim)
   @IsUrl(URL_OPTIONS, { message: URL_MESSAGE })
-  @IsAllowedSttHost()
+  @IsAllowedServerHost('음성 서버')
   baseUrl!: string;
 
   /** 보내지 않으면 저장된 모델을 쓰고, 빈 문자열·null이면 모델 이름 없이 확인한다 */

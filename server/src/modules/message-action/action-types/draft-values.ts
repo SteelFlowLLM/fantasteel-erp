@@ -15,8 +15,8 @@ export const idOrNull = (v: unknown): number | null => (typeof v === 'number' &&
  * 한 품목에 넣을 수 있는 현실적인 매수보다 넉넉히 크게 둔다
  */
 export const MAX_DRAFT_QTY = 1_000_000;
-/** 저장된 매수 칸: 1 이상 상한 이하 정수만 */
-export const qtyOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_DRAFT_QTY ? v : null);
+/** 저장된 매수 칸: 1 이상 상한 이하 정수만. 수주 초안은 수주 등록과 같은 상한(MAX_ORDERED_QTY)을 넘긴다 */
+export const qtyOrNull = (v: unknown, max: number = MAX_DRAFT_QTY): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max ? v : null);
 /** 저장된 날짜 칸: 실제 있는 YYYY-MM-DD만 */
 export const dateOrNull = (v: unknown): string | null => (typeof v === 'string' && isValidDate(v.trim()) ? v.trim() : null);
 /** 저장된 id 목록: 양의 정수만, 겹치면 하나로 */
@@ -41,11 +41,11 @@ export function draftBaseOf(raw: Record<string, unknown>): { sourceText: string 
 // ── LLM이 준 값 ─────────────────────────────────────────
 
 /** LLM이 준 매수(숫자나 '20', '20매', '1,200')를 1 이상 정수로. 소수·0 이하·형식 오류면 null (톤을 매수로 바꾸지 않는다) */
-export function extractedQtyOf(value: unknown): number | null {
-  if (typeof value === 'number') return qtyOrNull(value);
+export function extractedQtyOf(value: unknown, max: number = MAX_DRAFT_QTY): number | null {
+  if (typeof value === 'number') return qtyOrNull(value, max);
   if (typeof value !== 'string') return null;
   const text = value.trim().replace(/,/g, '').replace(/매$/, '').trim();
-  return /^\d{1,9}$/.test(text) ? qtyOrNull(Number(text)) : null;
+  return /^\d{1,9}$/.test(text) ? qtyOrNull(Number(text), max) : null;
 }
 
 /** LLM이 준 날짜: 실제 있는 YYYY-MM-DD만 */
@@ -78,9 +78,9 @@ export function idPatch(value: unknown, message: string): number | null | undefi
 }
 
 /** 매수 칸: null·빈 값이면 비움. 1 이상 정수가 아니면 COM-004 (톤을 매수로 바꾸거나 반올림하지 않는다) */
-export function qtyPatch(value: unknown, message: string): number | null {
+export function qtyPatch(value: unknown, message: string, max: number = MAX_DRAFT_QTY): number | null {
   if (value === undefined || value === null || value === '') return null;
-  const qty = qtyOrNull(value);
+  const qty = qtyOrNull(value, max);
   if (qty === null) throw new AppException('COM-004', message);
   return qty;
 }

@@ -2,15 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PERMISSION, STT_WAKE_CLIP_LIMITS, wakeClipLimitOf, type AuthUser, type SttWakeClipMode, type SteelmanWakeSettingsInput, type SteelmanWakeSettingsView, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
-import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
+import { STT_CONNECT_PUBLIC_MESSAGE, SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
 import { wakeClipProblem } from './stt-wake-clip';
 import { SttWakeLimiter } from './stt-wake-limiter';
 import { SteelmanWakeSettingsStore } from './steelman-wake-settings.store';
-import { redactUrl, sameOrigin } from './stt-url';
+import { redactUrl, sameOrigin } from '../../common/net/server-url';
 
 /** 음성 서버 주소·Tailscale 이름·서버가 준 오류는 설정을 맡은 사람에게만 보인다 */
-const WAKE_SERVER_DOWN = '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요';
+const WAKE_SERVER_DOWN = STT_CONNECT_PUBLIC_MESSAGE;
 
 /** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
 const WAKE_CLIP_TIMEOUT_MS = 20_000;

@@ -4,11 +4,12 @@
 // - 유형은 사람이 메뉴에서 고른다. 확장 유형은 확정할 수 있는 유형(그 업무의 사용 권한)만 보인다. AI는 고른 유형의 칸만 채운다.
 // - 구매요청은 확정 주체가 메시지 작성자라 방 멤버면 보이고, 작성자가 확정할 수 없으면 서버가 COM-002로 알린다.
 // - 이 메시지·유형에 미처리 초안이 있으면 '초안 보기'로 그 초안을 연다. 다른 사원이 만든 초안이면 그 이름을 보인다.
+// - 이미 ERP에 반영된 초안이 있으면 같은 업무가 두 번 등록되지 않게 새로 만들지 않고, 이유와 함께 그 초안을 연다 (#496).
 import { useRouter } from 'next/navigation';
 import { ACTION_TYPE, DRAFT_STATUS_LABEL, type ActionType } from '@/codes';
 import { actionDraftApi } from '@/api/actionDrafts';
 import type { IconName } from '@/components/Icon';
-import { ACTION_TYPE_GUIDE, draftCreatedNotice, openDraftOf } from '@/features/actionDrafts/lib/typedDrafts';
+import { ACTION_TYPE_GUIDE, draftCreatedNotice, executedDraftOf, executedDraftReason, openDraftOf } from '@/features/actionDrafts/lib/typedDrafts';
 import { MessageActionItem } from '@/features/messenger/components/MessageActionItem';
 import type { MessageActionEntry, MessageActionProps } from '@/features/messenger/messageActions';
 import { useAction } from '@/hooks/useAction';
@@ -31,14 +32,16 @@ function MessageDraftAction({ actionType, icon, message, room, closeMenu }: Mess
     },
   });
 
-  const existing = openDraftOf(drafts.data ?? [], message.id, actionType);
+  const open = openDraftOf(drafts.data ?? [], message.id, actionType);
+  const executed = open ? undefined : executedDraftOf(drafts.data ?? [], message.id, actionType);
+  const existing = open ?? executed;
   if (existing) {
     const byOther = existing.requesterId !== null && existing.requesterId !== me.employeeId;
     return (
       <MessageActionItem
         icon="file"
-        aside={byOther ? `${existing.requesterName ?? '다른 사원'}님 초안` : DRAFT_STATUS_LABEL[existing.draftStatus]}
-        title={byOther ? `${existing.requesterName ?? '다른 사원'}님이 만든 초안이 이미 있어요` : undefined}
+        aside={byOther && !executed ? `${existing.requesterName ?? '다른 사원'}님 초안` : DRAFT_STATUS_LABEL[existing.draftStatus]}
+        title={executed ? executedDraftReason(typeLabel) : byOther ? `${existing.requesterName ?? '다른 사원'}님이 만든 초안이 이미 있어요` : undefined}
         onClick={() => {
           closeMenu();
           router.push(`/action-drafts/${existing.id}`);

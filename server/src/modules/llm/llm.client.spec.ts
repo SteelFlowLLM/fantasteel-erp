@@ -1,4 +1,5 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
+import { Logger } from '@nestjs/common';
 import { createThinkSplitter, LLM_TRUNCATED_MESSAGE, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, LlmTruncatedError, parseJsonContent, reasoningEffortFor, reasoningMaxTokens, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
@@ -90,6 +91,39 @@ describe('LlmClient.chatJson', () => {
     fetchMock.mockResolvedValueOnce(new Response('x', { status: 401 }));
     await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toMatchObject({ kind: 'SERVER' });
     expect(new LlmRequestError('이유').kind).toBe('SERVER');
+  });
+
+  it('연결 실패 문구에는 내부 LLM 주소가 없고, 주소는 서버 로그에만 남는다 (이슈 #497)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const internal = { baseUrl: 'http://user:pw@100.87.40.116:1234/v1', apiKey: null };
+    fetchMock.mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) }));
+    const error = await new LlmClient().chatJson(internal, 'm', [], format, options).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmRequestError);
+    expect((error as LlmRequestError).message).not.toMatch(/100\.87|1234|http/);
+    expect((error as LlmRequestError).kind).toBe('CONNECT');
+    // 로그에는 어디로 부르다 실패했는지가 남되, 주소 안의 아이디·비밀번호는 없다
+    const logged = String(warn.mock.calls[0][0]);
+    expect(logged).toContain('http://100.87.40.116:1234/v1');
+    expect(logged).toContain('ECONNREFUSED');
+    expect(logged).not.toContain('pw');
+  });
+
+  it('리다이렉트는 따라가지 않는다 (메타데이터 같은 다른 곳에 키·질문이 가지 않게, 이슈 #497)', async () => {
+    fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
+    await new LlmClient().chatJson({ baseUrl: 'http://llm.test/v1', apiKey: 'secret-key' }, 'm', [], format, options);
+    expect(fetchMock.mock.calls[0][1].redirect).toBe('error');
+  });
+
+  it('클라우드 메타데이터 주소(저장돼 있던 것·.env)로는 요청을 보내지 않는다 (이슈 #497)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    for (const baseUrl of ['http://169.254.169.254/v1', 'http://[fd00:ec2::254]/v1', 'http://metadata.google.internal/v1']) {
+      const error = await new LlmClient().chatJson({ baseUrl, apiKey: 'secret-key' }, 'm', [], format, options).catch((e: unknown) => e);
+      expect(error).toMatchObject({ kind: 'CONNECT' });
+      expect((error as LlmRequestError).message).not.toContain('169.254');
+    }
+    expect(await new LlmClient().listModels({ baseUrl: 'http://169.254.169.254/v1', apiKey: null }).catch((e: unknown) => e)).toBeInstanceOf(LlmRequestError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(modelsMock).not.toHaveBeenCalled();
   });
 
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {

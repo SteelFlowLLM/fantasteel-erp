@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Agent } from 'undici';
 import type { SttModelOption } from '@fantasteel/shared';
-import { redactUrl } from './stt-url';
+import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
 const SIDECAR_MODELS = new Set(['whisper-pyannote', 'vibevoice']);
@@ -60,8 +60,26 @@ export function quickModelOf(model: string | null): string | null {
   return model !== null && SIDECAR_MODELS.has(model) ? SIDECAR_QUICK_MODEL : model;
 }
 
-/** 화면에 그대로 보일 연결 실패 이유 */
-export class SttRequestError extends Error {}
+/** 서버 주소(사설망·Tailscale)를 모르는 사원에게도 보여도 되는 연결 실패 문구 */
+export const STT_CONNECT_PUBLIC_MESSAGE = '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요';
+
+/**
+ * 연결 실패 이유. message에는 설정을 맡은 관리자가 고칠 수 있게 주소가 들어 있고(철강맨 부르기·설정 화면),
+ * 회의록처럼 모든 사원이 읽는 곳에는 주소가 없는 publicMessage를 쓴다 (이슈 #497). 주소가 없는 이유는 둘이 같다.
+ */
+export class SttRequestError extends Error {
+  constructor(
+    message: string,
+    readonly publicMessage: string = message,
+  ) {
+    super(message);
+  }
+}
+
+/** 저장할 때 막지만, 그 전에 저장된 주소·.env 주소도 클라우드 메타데이터로는 요청을 보내지 않는다 (이슈 #497) */
+function assertAllowedHost(url: string): void {
+  if (isBlockedServerHost(url)) throw new SttRequestError('음성 서버 주소가 링크 로컬·클라우드 메타데이터라 쓸 수 없어요. 주소를 바꿔 주세요', '음성 서버 설정에 문제가 있어요. 관리자에게 알려 주세요');
+}
 
 /**
  * OpenAI 호환 음성 인식 API 호출 (whisper.cpp whisper-server, 나중에 OpenAI 등).
@@ -71,6 +89,7 @@ export class SttRequestError extends Error {}
 export class SttClient {
   async transcribe(endpoint: SttEndpoint, input: SttTranscribeInput, timeoutMs = TRANSCRIBE_TIMEOUT_MS): Promise<SttTranscript> {
     const url = `${redactUrl(normalizeBaseUrl(endpoint.baseUrl))}/audio/transcriptions`;
+    assertAllowedHost(url);
     const form = new FormData();
     // Buffer를 그대로 넘긴다: new Uint8Array(buffer)는 한 벌 더 복사해 500MB 녹음이면 메모리가 크게 늘어난다 (Blob은 어차피 자기 몫을 복사한다)
     form.append('file', new Blob([input.audio as Uint8Array<ArrayBuffer>], { type: input.mimeType }), input.fileName);
@@ -98,7 +117,7 @@ export class SttClient {
         if (error instanceof Error && error.name === 'TimeoutError') {
           throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. 음성 서버 상태를 확인해 주세요`);
         }
-        throw new SttRequestError(connectFailureMessage(url, error));
+        throw new SttRequestError(connectFailureMessage(url, error), STT_CONNECT_PUBLIC_MESSAGE);
       }
       return await this.readTranscribeResponse(res, url);
     } finally {
@@ -113,6 +132,7 @@ export class SttClient {
       const reason = await errorMessageOf(res);
       throw new SttRequestError(
         `서버는 응답했지만 ${url}을 찾지 못했어요${reason ? ` (${reason})` : ''}. 주소 끝이 …/v1인지, 모델 이름이 맞는지, 이 서버가 OpenAI 호환 음성 인식(/audio/transcriptions)을 여는지 확인해 주세요`,
+        '음성 서버가 받아쓰기 주소를 찾지 못했어요. 관리자에게 알려 주세요',
       );
     }
     if (!res.ok) throw new SttRequestError(`음성 인식 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`);
@@ -131,6 +151,7 @@ export class SttClient {
    */
   async listModels(endpoint: SttEndpoint): Promise<SttModelOption[]> {
     const url = `${redactUrl(normalizeBaseUrl(endpoint.baseUrl))}/models`;
+    assertAllowedHost(url);
     let res: Response;
     try {
       res = await fetch(url, {
@@ -140,7 +161,7 @@ export class SttClient {
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') return [];
-      throw new SttRequestError(connectFailureMessage(url, error));
+      throw new SttRequestError(connectFailureMessage(url, error), STT_CONNECT_PUBLIC_MESSAGE);
     }
     if (res.status === 401 || res.status === 403) {
       throw new SttRequestError(endpoint.apiKey ? 'API 키가 맞지 않거나 권한이 없어요' : '이 음성 서버는 API 키가 필요해요. 음성 서버를 켠 터미널에 보이는 키를 넣어 주세요');
