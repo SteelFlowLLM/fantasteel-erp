@@ -1662,6 +1662,8 @@ describe('AiAssistantService', () => {
       );
       expect(toolNamesOf(calls[0])).toEqual(['get_inventory', 'ui_snapshot', 'ui_navigate', 'ui_click', 'ui_fill', 'ui_select']);
       expect(calls[0].messages[0].content).toContain('[화면 조작 규칙]');
+      // 화면을 열고 골라 달라는 부탁은 실행 카드보다 화면 조작이 먼저다 (#519)
+      expect(calls[0].messages[0].content).toMatch(/S1\..*실행 카드\(propose_ 도구\)를 만들지 말고 ui_/);
       expect(calls[0].messages[0].content).toContain('- 수주 등록: /sales-orders/new');
       const types = events.map((e) => e.type).filter((t) => t !== 'thinking' && t !== 'answer');
       expect(types).toEqual(['tool_start', 'ui_action', 'tool_end']);
