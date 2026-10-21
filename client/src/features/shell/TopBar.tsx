@@ -2,6 +2,7 @@
 
 // B안 상단 바 (52px): 제목과 "{영역} · MM-DD (요일) HH:mm", 통합 검색, 철강맨AI 버튼, 알림·메신저, 사용자 메뉴
 import { usePathname } from 'next/navigation';
+import { loadAiPanel } from '@/features/shell/aiPanelLoader';
 import { MessengerMenu } from '@/features/shell/MessengerMenu';
 import { NotificationMenu } from '@/features/shell/NotificationMenu';
 import { routeTitleOf } from '@/features/shell/routeTitles';
@@ -40,6 +41,8 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
           aria-label="철강맨AI 열기 (준비 중, P2)"
           aria-expanded={aiPanelOpen}
           onClick={toggleAiPanel}
+          onPointerEnter={() => void loadAiPanel()}
+          onFocus={() => void loadAiPanel()}
           className="mr-1 inline-flex h-8 flex-none items-center gap-1.5 rounded-2xl border border-steelman-shadow bg-steelman-soft pr-3 pl-1.5 text-sm font-semibold whitespace-nowrap text-steelman-ink hover:bg-[#f8dcc8]"
         >
           <SteelmanAiMark />

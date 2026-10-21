@@ -1,8 +1,10 @@
 'use client';
 
 // B안 셸 틀: 어두운 아이콘 레일 + 상단 바 + 본문(+ 넓은 AI 패널)
+import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
-import { AiPanel } from '@/features/shell/AiPanel';
+import { AiPanelLoading } from '@/features/shell/AiPanelLoading';
+import { loadAiPanel } from '@/features/shell/aiPanelLoader';
 import { AiScreenControl } from '@/features/shell/AiScreenControl';
 import { PetMount } from '@/features/shell/PetMount';
 import { Rail } from '@/features/shell/Rail';
@@ -12,6 +14,9 @@ import { SteelmanWake } from '@/features/shell/SteelmanWake';
 import { TopBar } from '@/features/shell/TopBar';
 import { useMessengerSocket } from '@/hooks/useMessengerSocket';
 import { useShellStore } from '@/stores/useShellStore';
+
+// 패널은 여는 순간 불러온다(공통 JS에서 뺀다). 철강맨 부르기의 질문 요청은 스토어에 남아 있다가 패널이 뜬 뒤 가져간다
+const AiPanel = dynamic(loadAiPanel, { ssr: false, loading: () => <AiPanelLoading /> });
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const aiPanelOpen = useShellStore((state) => state.aiPanelOpen);

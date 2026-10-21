@@ -19,7 +19,8 @@ import type { AiResearchRun, Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
-import { LlmClient, LlmRequestError } from '../llm/llm.client';
+import { llmFailureException } from '../llm/llm-failure';
+import { LlmClient, LlmJsonParseError, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery, SuggestAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
@@ -148,8 +149,10 @@ export class AiResearchService {
       });
     } catch (error) {
       if (!(error instanceof LlmRequestError)) throw error;
-      this.logger.warn(`조사 ${id} 계획 말로 고치기 LLM 실패: ${error.message.slice(0, 160)}`);
-      throw new AppException('RES-008', `AI 응답을 받지 못했어요(${error.message.slice(0, 160)}). 잠시 뒤 다시 해 주세요`);
+      this.logger.warn(`조사 ${id} 계획 말로 고치기 LLM 실패(${error.kind}): ${error.message.slice(0, 160)}`);
+      // 연결 실패·시간 초과·LLM 서버 오류는 AST-003~005, 답은 왔는데 JSON으로 읽지 못한 것은 계획을 내지 못한 RES-008 (이슈 #462)
+      if (error instanceof LlmJsonParseError) throw new AppException('RES-008');
+      throw llmFailureException(error);
     }
     // 모델이 제목을 비우면 지금 제목을 둔다
     const read = readPlan(value, dto.plan.title.trim() || run.question, erpPartnerNames(sources));
@@ -324,7 +327,10 @@ export class AiResearchService {
   }
 
   private async view(tx: Tx, run: AiResearchRun, afterSeq = 0): Promise<AiResearchRunView> {
-    const [events, lastSeq, versions] = await Promise.all([this.repository.eventsAfter(tx, run.id, afterSeq), this.repository.lastSeq(tx, run.id), this.repository.listVersions(tx, run.id)]);
+    // 한 트랜잭션의 연결 하나에 쿼리를 겹쳐 보내지 않는다 (pg 경고, pg@9에서 오류)
+    const events = await this.repository.eventsAfter(tx, run.id, afterSeq);
+    const lastSeq = await this.repository.lastSeq(tx, run.id);
+    const versions = await this.repository.listVersions(tx, run.id);
     return toRunView(run, events, lastSeq, versions);
   }
 }

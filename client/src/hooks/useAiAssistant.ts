@@ -6,11 +6,12 @@ import type { AiAgentControlCommand, AiAgentInput, AiAssistantImageInput, AiAssi
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
-import { isAbortError } from '@/api/http';
+import { errorCodeOf, isAbortError } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { readAiChatThread, writeAiChatThread } from '@/lib/aiChatThread';
 import { useMe } from '@/hooks/useMe';
 import { hideAiCursor } from '@/lib/aiCursor';
+import { aiLlmFailureCodeOf } from '@/lib/aiLlmFailure';
 import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
 import { AI_CHAT_STOPPED_REASON, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
@@ -201,7 +202,8 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     );
     if (!finished) chat().addFailure(questionId, question, '답이 끝나기 전에 연결이 끊겼어요. 다시 물어봐 주세요');
   } catch (error) {
-    chat().addFailure(questionId, question, controller.signal.aborted || isAbortError(error) ? AI_CHAT_STOPPED_REASON : errorMessageOf(error));
+    const stopped = controller.signal.aborted || isAbortError(error);
+    chat().addFailure(questionId, question, stopped ? AI_CHAT_STOPPED_REASON : errorMessageOf(error), stopped ? null : aiLlmFailureCodeOf(errorCodeOf(error)));
   } finally {
     unsubscribe();
     if (screenControl) {

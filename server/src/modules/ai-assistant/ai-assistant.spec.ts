@@ -1,4 +1,4 @@
-import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AiAgentInput, type AuthUser } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ERROR_CODE, ROLE, type AiAgentControlCommand, type AiAgentInput, type AuthUser } from '@fantasteel/shared';
 import type { SteelmanWakeSettingsStore } from '../stt/steelman-wake-settings.store';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -421,19 +421,30 @@ describe('AiAssistantService', () => {
     expect(calls[0].messages[0].content).toContain('[TRM-060] 배정');
   });
 
-  it('모델을 고르지 않았으면 LLM을 부르지 않고 COM-999(503)', async () => {
+  it('모델을 고르지 않았으면 LLM을 부르지 않고 AST-002(503)', async () => {
     const { service, calls } = setup({ model: null }, async () => answer(''));
-    await expect(service.ask(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'COM-999', status: 503 });
+    await expect(service.ask(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'AST-002', status: 503 });
     expect(calls).toHaveLength(0);
   });
 
-  it('LLM 연결 실패는 그 이유를 COM-999(503)로 돌려주고, 다른 오류는 그대로 던진다', async () => {
-    const failing = setup({}, async () => {
-      throw new LlmRequestError('120초 안에 응답이 없어요');
-    });
-    const error = await failing.service.ask(user, { question: '예약이 뭐야?' }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(AppException);
-    expect((error as AppException).getResponse()).toEqual({ code: 'COM-999', message: '120초 안에 응답이 없어요' });
+  it('LLM 실패는 종류에 따라 AST-003(연결)·AST-004(시간 초과)·AST-005(그 밖)로 돌려주고, 다른 오류는 그대로 던진다', async () => {
+    const failWith = async (error: Error) => {
+      const failing = setup({}, async () => {
+        throw error;
+      });
+      const thrown = await failing.service.ask(user, { question: '예약이 뭐야?' }).catch((e: unknown) => e);
+      expect(thrown).toBeInstanceOf(AppException);
+      return thrown as AppException;
+    };
+    // 연결 실패 문구에는 내부 LLM 주소가 들어 있어 사용자에게는 코드의 안내 문구를 준다
+    const connect = await failWith(new LlmRequestError('http://10.0.0.5:1234/v1에 연결할 수 없어요', undefined, 'CONNECT'));
+    expect(connect.getResponse()).toEqual({ code: 'AST-003', message: ERROR_CODE['AST-003'].message });
+    expect(connect.getStatus()).toBe(503);
+    const timeout = await failWith(new LlmRequestError('120초 안에 응답이 없어요', undefined, 'TIMEOUT'));
+    expect(timeout.getResponse()).toEqual({ code: 'AST-004', message: ERROR_CODE['AST-004'].message });
+    // 그 밖은 LLM 서버가 알려 준 이유를 그대로 둔다
+    const server = await failWith(new LlmRequestError('LLM 서버 오류 (HTTP 400): 문맥 길이를 넘었어요', 400));
+    expect(server.getResponse()).toEqual({ code: 'AST-005', message: 'LLM 서버 오류 (HTTP 400): 문맥 길이를 넘었어요' });
 
     const broken = setup({}, async () => {
       throw new TypeError('버그');
@@ -510,7 +521,7 @@ describe('AiAssistantService', () => {
 
     it('모델이 없거나 지시가 잘못된 질문은 prepare에서 막혀 응답을 시작하기 전에 알린다', async () => {
       const { service, calls } = setup({ model: null }, async () => answer(''));
-      await expect(service.prepare(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'COM-999', status: 503 });
+      await expect(service.prepare(user, { question: '예약이 뭐야?' })).rejects.toMatchObject({ code: 'AST-002', status: 503 });
       expect(calls).toHaveLength(0);
     });
   });
