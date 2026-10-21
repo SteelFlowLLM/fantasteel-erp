@@ -483,7 +483,12 @@ describe('강종 수정·규격 매핑 수정·삭제 (API-280·281·282, 이슈
     const locked = await patch(`/steel-grades/${created.id}`, { ...body, steelGradeCode: 'UPD-03', expectedUpdatedAt: undefined });
     expect(locked.body.error).toMatchObject({ code: 'COM-004', message: expect.stringContaining('쓰는 곳이 있어 강종 코드는 바꿀 수 없어요: 품목') });
     const nameOnly = await patch<SteelGradeView>(`/steel-grades/${created.id}`, { steelGradeCode: 'UPD-02', steelGradeName: '품목 있는 강종', standardNo: 'KS D 0012' });
-    expect(nameOnly.body.data).toMatchObject({ steelGradeCode: 'UPD-02', steelGradeName: '품목 있는 강종' });
+    expect(nameOnly.body.data).toMatchObject({ steelGradeCode: 'UPD-02', steelGradeName: '품목 있는 강종', codeLockedBy: ['품목'] });
+    // 목록도 같은 기준으로 코드를 잠글 이유를 내려 준다 (화면이 이 값으로 코드 칸을 잠근다)
+    const listed = (await get<SteelGradeView[]>('/steel-grades')).body.data;
+    expect(listed.find((g) => g.id === created.id)?.codeLockedBy).toEqual(['품목']);
+    expect(listed.find((g) => g.steelGradeCode === 'SS275')?.codeLockedBy).toEqual(expect.arrayContaining(['품목', '검사 기준']));
+    expect(updated.body.data.codeLockedBy).toEqual([]);
   });
 
   it('규격 매핑 수정·삭제: 짝을 다시 검사하고, 쓰는 곳이 있으면 막는다', async () => {

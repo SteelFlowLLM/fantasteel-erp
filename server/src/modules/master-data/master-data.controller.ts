@@ -10,8 +10,9 @@ import {
   type SteelGradeView,
   type SupplierView,
   type YardView,
+  type AuthUser,
 } from '@fantasteel/shared';
-import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
 import { CreateCustomerDto, CreateSupplierDto, CreateYardDto, UpdateCustomerDto, UpdateSupplierDto, UpdateYardDto } from './dto/partner.dto';
@@ -76,8 +77,8 @@ export class MasterDataController {
   /** API-280 강종 수정 (이름·적용 규격 번호는 언제든, 코드는 쓰는 곳이 없을 때만. 불러온 뒤 바뀌었으면 COM-001) */
   @Patch('steel-grades/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
-  updateSteelGrade(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
-    return this.service.updateSteelGrade(id, dto);
+  updateSteelGrade(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
+    return this.service.updateSteelGrade(user, id, dto);
   }
 
   /** API-276 강종 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */

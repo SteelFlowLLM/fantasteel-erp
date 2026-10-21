@@ -113,7 +113,9 @@ function SteelGradeModal({ onClose, editing }: { onClose: () => void; editing?: 
   const create = useAction(masterDataApi.createSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 추가했어요' });
   const update = useAction(masterDataApi.updateSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 고쳤어요' });
   const pending = create.isPending || update.isPending;
-  const codeLocked = editing !== undefined && editing.specCount > 0;
+  // 서버가 내려 준 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 하나라도 있으면 서버와 같은 기준으로 코드를 잠근다
+  const lockedBy = editing?.codeLockedBy ?? [];
+  const codeLocked = lockedBy.length > 0;
   const submit = () =>
     editing
       ? update.mutate({ id: editing.id, steelGradeCode: code, steelGradeName: name, standardNo, expectedUpdatedAt: editing.updatedAt })
@@ -125,7 +127,7 @@ function SteelGradeModal({ onClose, editing }: { onClose: () => void; editing?: 
       width={460}
       footer={<ModalFooter pending={pending} submitLabel={editing ? '저장' : '추가'} onCancel={onClose} onSubmit={submit} />}
     >
-      <Field label="강종 코드" required hint={codeLocked ? '쓰는 규격이 있어 코드를 바꿀 수 없어요' : '영문 대문자·숫자·하이픈 (예: SM355A)'} error={fieldErrors.errorOf('steelGradeCode')}>
+      <Field label="강종 코드" required hint={codeLocked ? `쓰는 곳이 있어 코드를 바꿀 수 없어요: ${lockedBy.join('·')}` : '영문 대문자·숫자·하이픈 (예: SM355A)'} error={fieldErrors.errorOf('steelGradeCode')}>
         <Input
           value={code}
           disabled={codeLocked}

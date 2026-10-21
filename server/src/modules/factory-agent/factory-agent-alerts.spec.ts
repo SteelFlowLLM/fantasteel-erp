@@ -6,7 +6,8 @@ import { AuthUserService } from '../../common/auth/auth-user.service';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { addDays } from './agent-rules';
-import { FactoryAgentService } from './factory-agent.service';
+import { FactoryAgentRepository } from './factory-agent.repository';
+import { FactoryAgentService, MANUAL_SCAN_MIN_INTERVAL_MS } from './factory-agent.service';
 
 let moduleRef: TestingModule;
 let prisma: PrismaService;
@@ -117,7 +118,24 @@ describe('관리자 지금 감지 (API-283, 이슈 #477)', () => {
     const count = () => prisma.notification.count({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-NOW' } } });
     expect(await count()).toBe(1);
 
+    // 바로 다시 돌리면 거절하고, 간격이 지나면 다시 돌아도 같은 알림을 또 보내지 않는다
+    await expect(agent.scanNow(admin)).rejects.toMatchObject({ code: 'COM-004' });
+    const now = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(now + MANUAL_SCAN_MIN_INTERVAL_MS + 1000);
     await agent.scanNow(admin);
+    jest.restoreAllMocks();
     expect(await count()).toBe(1);
+  });
+
+  it('규칙이 실패하면 응답에는 일반 문구만 싣고 예외 원문은 싣지 않는다', async () => {
+    const admin = await load('1503001');
+    jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * MANUAL_SCAN_MIN_INTERVAL_MS);
+    jest.spyOn(moduleRef.get(FactoryAgentRepository), 'findProductionSetting').mockImplementation(() => { throw new Error('Invalid prisma.productionSetting.findFirst() invocation: secret detail'); });
+    const view = await agent.scanNow(admin);
+    jest.restoreAllMocks();
+    const failed = view.results.find((r) => r.riskType === 'DUE_RISK');
+    expect(failed?.error).toBe('이 규칙을 돌리지 못했어요. 서버 로그를 확인해 주세요');
+    expect(JSON.stringify(view)).not.toContain('secret detail');
+    expect(view.results.filter((r) => r.error === null).length).toBe(3);
   });
 });

@@ -38,8 +38,8 @@ const suppliers: SupplierView[] = [{ id: 31, supplierCode: 'SUP-01', supplierNam
 const brief = (i: ItemView) => ({ id: i.id, itemCode: i.itemCode, thicknessMm: i.thicknessMm ?? '', widthMm: i.widthMm ?? '', lengthMm: i.lengthMm ?? '', theoreticalWeightTon: i.theoreticalWeightTon ?? '' });
 const mappings: SpecMappingView[] = [{ id: 51, steelGradeId: 11, steelGradeCode: 'SS275', slabItem: brief(slab), coilItem: brief(coil), hotRollingYieldRate: '0.9800', updatedAt: '2026-10-21T00:00:00.000Z' }];
 const grades: SteelGradeView[] = [
-  { id: 11, steelGradeCode: 'SS275', steelGradeName: '일반구조용', standardNo: 'KS D 3503', updatedAt: '2026-10-21T00:00:00.000Z' },
-  { id: 12, steelGradeCode: 'SM355C', steelGradeName: '용접구조용 C', standardNo: 'KS D 3515', updatedAt: '2026-10-21T00:00:00.000Z' },
+  { id: 11, steelGradeCode: 'SS275', steelGradeName: '일반구조용', standardNo: 'KS D 3503', updatedAt: '2026-10-21T00:00:00.000Z', codeLockedBy: ['품목'] },
+  { id: 12, steelGradeCode: 'SM355C', steelGradeName: '용접구조용 C', standardNo: 'KS D 3515', updatedAt: '2026-10-21T00:00:00.000Z', codeLockedBy: [] },
 ];
 const standard = (inspectionStandardId: number, versionNo: number, itemCount: number): InspectionStandardListItem => ({
   inspectionStandardId,

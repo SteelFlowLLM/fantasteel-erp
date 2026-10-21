@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   ITEM_TYPE,
   ITEM_TYPE_LABEL,
@@ -8,6 +8,7 @@ import {
   UNIT_TYPE,
   YARD_TYPE_LABEL,
   calcTheoreticalWeightTon,
+  type AuthUser,
   type CustomerView,
   type ItemType,
   type ItemView,
@@ -55,6 +56,8 @@ const YIELD_SCALE = 4;
  */
 @Injectable()
 export class MasterDataService {
+  private readonly logger = new Logger(MasterDataService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: MasterDataRepository,
@@ -214,23 +217,28 @@ export class MasterDataService {
 
   /** API-168 */
   async listSteelGrades(): Promise<SteelGradeView[]> {
-    return (await this.repository.findSteelGrades(this.prisma)).map(toSteelGradeView);
+    const rows = await this.repository.findSteelGrades(this.prisma);
+    const views: SteelGradeView[] = [];
+    // 같은 tx에서 동시에 쿼리하지 않도록 차례로 센다
+    for (const row of rows) views.push(toSteelGradeView(row, await this.repository.steelGradeUsages(this.prisma, row.id)));
+    return views;
   }
 
   /** API-169 */
   async createSteelGrade(dto: CreateSteelGradeDto): Promise<SteelGradeView> {
     return this.prisma.$transaction(async (tx) => {
       if (await this.repository.findSteelGradeByCode(tx, dto.steelGradeCode)) throw new AppException('COM-004', `강종 ${dto.steelGradeCode}이(가) 이미 있어요`);
-      return toSteelGradeView(await this.repository.createSteelGrade(tx, { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo }));
+      return toSteelGradeView(await this.repository.createSteelGrade(tx, { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo }), []);
     });
   }
 
   /**
    * API-280. 등록과 같은 칸을 모두 받아 바꾼다. 이름·적용 규격 번호는 언제든 고치고,
    * 코드는 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 없을 때만 바꾼다(규격 코드가 강종 코드로 만들어지고 이력이 그 코드로 남아서).
-   * 불러온 뒤 다른 사람이 고쳤으면 COM-001.
+   * 불러온 뒤 다른 사람이 고쳤으면 COM-001. 맞는 작업 로그 유형이 없어 서버 로그에 누가 무엇을 바꿨는지 남긴다.
+   * 적용 규격 번호는 검사 기준 상세가 그때그때 읽어 보이므로 이미 검사가 있는 옛 버전에도 새 번호가 보인다(밀시트는 발행 때 스냅샷이라 그대로, docs/backend/master-data.md).
    */
-  async updateSteelGrade(id: number, dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
+  async updateSteelGrade(user: AuthUser, id: number, dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
     return this.prisma.$transaction(async (tx) => {
       const found = await this.repository.findSteelGrade(tx, id);
       if (!found) throw new AppException('COM-003', '강종을 찾을 수 없어요');
@@ -246,7 +254,13 @@ export class MasterDataService {
       if (!(await this.repository.updateSteelGrade(tx, id, found.updatedAt, data))) throw stale();
       const saved = await this.repository.findSteelGrade(tx, id);
       if (!saved) throw new AppException('COM-003', '강종을 찾을 수 없어요');
-      return toSteelGradeView(saved);
+      const changes = [
+        found.steelGradeCode !== saved.steelGradeCode ? `코드 ${found.steelGradeCode} → ${saved.steelGradeCode}` : null,
+        found.steelGradeName !== saved.steelGradeName ? `이름 ${found.steelGradeName} → ${saved.steelGradeName}` : null,
+        found.standardNo !== saved.standardNo ? `적용 규격 번호 ${found.standardNo} → ${saved.standardNo}` : null,
+      ].filter((c): c is string => c !== null);
+      this.logger.log(`강종 수정 ${found.steelGradeCode} (사원 ${user.employeeId}): ${changes.join(', ') || '바뀐 값 없음'}`);
+      return toSteelGradeView(saved, await this.repository.steelGradeUsages(tx, id));
     });
   }
 
@@ -522,7 +536,7 @@ export class MasterDataService {
     return this.prisma.$transaction(async (tx) => {
       if (!(await this.repository.findSteelGrade(tx, id))) throw new AppException('COM-003', '강종을 찾을 수 없어요');
       assertUnused(await this.repository.steelGradeUsages(tx, id));
-      return toSteelGradeView(await this.repository.deleteSteelGrade(tx, id));
+      return toSteelGradeView(await this.repository.deleteSteelGrade(tx, id), []);
     });
   }
 
@@ -543,12 +557,13 @@ function assertMappingUnused(usages: readonly string[], verb: '바꿀' | '지울
   if (usages.length > 0) throw new AppException('COM-004', `쓰는 곳이 있어 매핑을 ${verb} 수 없어요: ${usages.join('·')}`);
 }
 
-const toSteelGradeView = (r: { id: number; steelGradeCode: string; steelGradeName: string; standardNo: string; updatedAt: Date }): SteelGradeView => ({
+const toSteelGradeView = (r: { id: number; steelGradeCode: string; steelGradeName: string; standardNo: string; updatedAt: Date }, codeLockedBy: string[]): SteelGradeView => ({
   id: r.id,
   steelGradeCode: r.steelGradeCode,
   steelGradeName: r.steelGradeName,
   standardNo: r.standardNo,
   updatedAt: r.updatedAt.toISOString(),
+  codeLockedBy,
 });
 
 /** 쓰는 곳이 있으면 지우지 않는다 ([05] 7-2). 어디서 쓰는지 함께 알려 준다 */

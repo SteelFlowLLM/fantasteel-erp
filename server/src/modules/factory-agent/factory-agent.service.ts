@@ -81,6 +81,10 @@ const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
  * 정의서에 유형이 추가될 때까지 담당자에게 확인할 일을 알리는 "업무 지정"을 쓴다 (docs/backend/factory-agent.md).
  */
 const ALERT_NOTIFICATION_TYPE = NOTIFICATION_TYPE.TASK_ASSIGNED;
+/** 🟡 가정값: 관리자가 지금 감지를 다시 돌릴 수 있는 최소 간격 (연타로 감지 쿼리가 몰리지 않게) */
+export const MANUAL_SCAN_MIN_INTERVAL_MS = 60_000;
+/** 규칙 실패 이유는 응답에 일반 문구만 싣고 원문(DB 오류 문구 등)은 서버 로그에만 남긴다 */
+const SCAN_FAILED_TEXT = '이 규칙을 돌리지 못했어요. 서버 로그를 확인해 주세요';
 /** 품질 부서 코드 (시드 조직) */
 const QUALITY_DEPARTMENT_CODE = 'QC';
 
@@ -104,6 +108,8 @@ export class FactoryAgentService {
   private readonly logger = new Logger(FactoryAgentService.name);
   /** 감지(스케줄·이벤트)는 한 번에 하나씩 돌려 같은 대상의 초안이 겹쳐 생기지 않게 한다 */
   private queue: Promise<unknown> = Promise.resolve();
+  /** 관리자가 마지막으로 지금 감지를 받아들인 시각 (서버 한 대 기준) */
+  private lastManualScanAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -150,9 +156,12 @@ export class FactoryAgentService {
    */
   async scanNow(user: AuthUser): Promise<AgentScanView> {
     if (user.roleCode !== ROLE.ADMIN) throw new AppException('COM-002', '관리자만 Agent 위험 감지를 바로 돌릴 수 있어요');
+    const waitMs = this.lastManualScanAt + MANUAL_SCAN_MIN_INTERVAL_MS - Date.now();
+    if (waitMs > 0) throw new AppException('COM-004', `방금 감지를 돌렸어요. ${Math.ceil(waitMs / 1000)}초 뒤에 다시 해 주세요`, 429);
+    this.lastManualScanAt = Date.now();
     const results = await this.scanAll();
     this.logger.log(`Agent 감지를 관리자가 바로 돌렸어요 (사원 ${user.employeeId}): ${results.map((r) => `${r.riskType} ${r.created}/${r.detected}${r.error ? ' 실패' : ''}`).join(', ')}`);
-    return { ranAt: new Date().toISOString(), results: results.map((r) => ({ ...r, error: r.error ?? null })) };
+    return { ranAt: new Date().toISOString(), results: results.map((r) => ({ ...r, error: r.error === undefined ? null : SCAN_FAILED_TEXT })) };
   }
 
   /**

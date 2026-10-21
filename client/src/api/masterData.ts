@@ -84,6 +84,8 @@ export interface MasterSteelGradeView {
   steelmakingStandard: { id: number; inspectionStandardCode: string; version: number; itemCount: number } | null;
   referenceText: string | null;
   updatedAt: string;
+  /** 이 강종을 쓰는 곳 이름. 하나라도 있으면 코드를 바꿀 수 없다 (서버가 내려 준다) */
+  codeLockedBy: string[];
 }
 
 export interface MasterRoutingStepView {
