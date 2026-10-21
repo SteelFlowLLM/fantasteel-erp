@@ -49,7 +49,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
               </Chip>
             ))}
           </div>
-          <p className="text-cap text-ink-3">메시지를 보낸 내가 요청자인 초안이에요. 내가 확정해야 구매요청이 만들어져요.</p>
+          <p className="text-cap text-ink-3">내가 확정할 초안이에요. 구매요청은 메시지를 보낸 사람이, 수주·출하·배정·재생산은 초안을 만든 사람이 확정해요.</p>
         </>
       }
     >
@@ -59,7 +59,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
           if (shown.length === 0) {
             return (
               <EmptyNote className="m-4">
-                {list.length === 0 ? '아직 내가 요청자인 초안이 없어요. 메신저 메시지의 더 보기 메뉴에서 구매요청 초안을 만들 수 있어요.' : '이 상태의 초안이 없어요'}
+                {list.length === 0 ? '아직 내가 확정할 초안이 없어요. 메신저 메시지의 더 보기 메뉴에서 업무 초안을 만들 수 있어요.' : '이 상태의 초안이 없어요'}
               </EmptyNote>
             );
           }
@@ -97,9 +97,9 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
                       <span data-pet-field="생성" className="flex-none">
                         {relTime(draft.createdAt)}
                       </span>
-                      {draft.purchaseRequisitionNo ? (
-                        <span data-pet-field="구매요청" className="ml-auto flex-none font-mono text-ink-2">
-                          {draft.purchaseRequisitionNo}
+                      {draft.resultNo ? (
+                        <span data-pet-field="만든 업무" className="ml-auto flex-none font-mono text-ink-2">
+                          {draft.resultNo}
                         </span>
                       ) : null}
                     </span>

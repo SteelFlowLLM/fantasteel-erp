@@ -1,7 +1,8 @@
 'use client';
 
-// Message → ERP 구매요청 초안 /action-drafts/[id] (REQ-ACT-001~004, BP-ACT-01, 14.1 10단계)
-// 왼쪽 = 내 초안(내가 요청자인 초안), 오른쪽 = 초안 확인·확정. 확정하면 구매요청이 만들어지고 부서장 승인을 따로 거친다.
+// Message → ERP 초안 /action-drafts/[id] (REQ-ACT-001~005, BP-ACT-01·02, 14.1 10단계)
+// 왼쪽 = 내 초안(내가 확정 주체인 초안), 오른쪽 = 초안 확인·확정. 구매요청은 확정하면 구매요청이 만들어지고 부서장 승인을 따로 거친다.
+// 확장 유형(수주 등록·출하요청·배정 확정·재생산 계획)은 만든 사원이 확정하면 그 업무가 바로 실행된다.
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -22,7 +23,9 @@ import { Tag } from '@/components/Tag';
 import { ActionTypeCard, ConfirmGuideCard, OriginMessageCard } from '@/features/actionDrafts/components/DraftAside';
 import { DraftFormCard, type ConfirmFailure } from '@/features/actionDrafts/components/DraftFormCard';
 import { MyDraftList } from '@/features/actionDrafts/components/MyDraftList';
+import { TypedDraftFormCard } from '@/features/actionDrafts/components/TypedDraftFormCard';
 import { getConfirmFailureTitle, DRAFT_STATUS_TONE, buildDraftFlowSteps, getExecutionFailure, getRequisitionStatusDisplay } from '@/features/actionDrafts/lib/draftDisplay';
+import { ACTION_TYPE_GUIDE, isExtendedActionType, purchaseRequisitionPayloadOf, resultHrefOf, resultLabelOf } from '@/features/actionDrafts/lib/typedDrafts';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useActionDraft } from '@/hooks/useActionDrafts';
 import { useCanOpenHref } from '@/hooks/usePermission';
@@ -76,6 +79,12 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
   const purchaseRequisition = draft.purchaseRequisition;
   const purchaseRequisitionStatusView = purchaseRequisition ? getRequisitionStatusDisplay(purchaseRequisition.purchaseRequisitionStatus) : null;
   const name = draft.requester.employeeName;
+  const prPayload = purchaseRequisitionPayloadOf(draft);
+  const extendedType = isExtendedActionType(draft.actionType) ? draft.actionType : null;
+  const typeLabel = ACTION_TYPE_GUIDE[draft.actionType]?.label ?? draft.actionTypeLabel;
+  const result = extendedType ? draft.result : null;
+  const canOpen = useCanOpenHref();
+  const resultHref = result ? resultHrefOf(result) : null;
 
   return (
     <>
@@ -105,9 +114,11 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
         }
         actions={
           <>
-            <ButtonLink href="/purchase-requisitions" icon="cart">
-              구매요청 목록
-            </ButtonLink>
+            {prPayload ? (
+              <ButtonLink href="/purchase-requisitions" icon="cart">
+                구매요청 목록
+              </ButtonLink>
+            ) : null}
             {draft.message ? (
               <ButtonLink href={`/messenger?room=${draft.message.chatRoomId}`} icon="chat">
                 원본 메시지로 이동
@@ -128,13 +139,19 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
             <Avatar name={name} size="sm" />
             {name} 확정
             <Icon name="chevron-right" size="sm" className="text-ink-3" />
-            구매요청 생성
-            <Icon name="chevron-right" size="sm" className="text-ink-3" />
-            <Avatar name="부" size="sm" tone="neutral" />
-            부서장 승인
-            <Icon name="chevron-right" size="sm" className="text-ink-3" />
-            <Avatar name="구" size="sm" tone="neutral" />
-            구매 발주
+            {prPayload ? (
+              <>
+                구매요청 생성
+                <Icon name="chevron-right" size="sm" className="text-ink-3" />
+                <Avatar name="부" size="sm" tone="neutral" />
+                부서장 승인
+                <Icon name="chevron-right" size="sm" className="text-ink-3" />
+                <Avatar name="구" size="sm" tone="neutral" />
+                구매 발주
+              </>
+            ) : (
+              <>{typeLabel} 실행</>
+            )}
           </div>
         </div>
       </Card>
@@ -165,17 +182,35 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
           </div>
         </Banner>
       ) : null}
+      {status === 'EXECUTED' && result ? (
+        <Banner
+          tone="ok"
+          actions={
+            resultHref && canOpen(resultHref.split('?')[0]) ? (
+              <ButtonLink href={resultHref} size="sm">
+                {resultLabelOf(result)} 보기 <Icon name="chevron-right" size="sm" />
+              </ButtonLink>
+            ) : undefined
+          }
+        >
+          <b>
+            {resultLabelOf(result)} <span className="font-mono">{result.no}</span>
+            {withEulReul(result.no).slice(result.no.length)} {result.table === 'sales_order_item' ? '여재 예약으로 채웠어요' : '만들었어요'}
+          </b>
+          <div>{ACTION_TYPE_GUIDE[draft.actionType]?.confirmGuide}</div>
+        </Banner>
+      ) : null}
       {status === 'REJECTED' ? (
         <Banner tone="danger">
           <b>반려된 초안이에요</b> · {draft.rejectReason ?? '사유가 기록되지 않았어요'}
           <div className="text-cap">
-            {name} · {fmtMDHM(draft.rejectedAt)} · 구매요청은 만들어지지 않았어요
+            {name} · {fmtMDHM(draft.rejectedAt)} · {prPayload ? '구매요청은 만들어지지 않았어요' : `${typeLabel}은(는) 실행되지 않았어요`}
           </div>
         </Banner>
       ) : null}
       {failure ? (
         <Banner tone="danger">
-          <b>{getConfirmFailureTitle(failure.errorCode)}</b>
+          <b>{getConfirmFailureTitle(failure.errorCode, extendedType ? typeLabel : undefined)}</b>
           <div>
             {failure.message}
             {failure.errorCode ? ` (${failure.errorCode})` : ''}
@@ -197,7 +232,8 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
       ) : null}
 
       <div className="grid flex-none grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <DraftFormCard draft={draft} failure={failure} onConfirmFailure={setConfirmFailure} />
+        {prPayload ? <DraftFormCard draft={draft} payload={prPayload} failure={failure} onConfirmFailure={setConfirmFailure} /> : null}
+        {extendedType ? <TypedDraftFormCard draft={draft} actionType={extendedType} failure={failure} onConfirmFailure={setConfirmFailure} /> : null}
         <div className="flex min-w-0 flex-col gap-4">
           <OriginMessageCard draft={draft} />
           <ConfirmGuideCard draft={draft} />

@@ -26,7 +26,7 @@ import {
   type SalesOrderSummary,
   type ShipmentRequestStatus,
 } from '@fantasteel/shared';
-import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import { BusinessEventRecorder, type BusinessEventInput } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
@@ -222,7 +222,11 @@ export class SalesOrderService {
     return this.idempotency.run(`${user.employeeId}:sales-order`, idempotencyKey, () => retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createInTx(tx, user, dto), LONG_TX)));
   }
 
-  private async createInTx(tx: Tx, user: AuthUser, dto: CreateSalesOrderDto): Promise<CreateSalesOrderResult> {
+  /**
+   * 수주 등록 본문. Message → ERP 수주 등록 초안이 자기 실행 트랜잭션 안에서 부른다(매수 정수·날짜 검증은 부르는 쪽이 먼저 한다).
+   * origin이 있으면 수주 등록 작업 로그에 원본 초안·메시지를 남긴다
+   */
+  async createInTx(tx: Tx, user: AuthUser, dto: CreateSalesOrderDto, origin: Pick<BusinessEventInput, 'actionDraftId' | 'messageId' | 'isAiAssisted'> = {}): Promise<CreateSalesOrderResult> {
     if (!(await this.repository.findCustomer(tx, dto.customerId))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
     const items = await this.repository.findItems(tx, [...new Set(dto.items.map((i) => i.itemId))]);
     const itemOf = (itemId: number) => {
@@ -249,6 +253,7 @@ export class SalesOrderService {
         ownerEmployeeId: salesOrder.ownerEmployeeId,
         items: salesOrder.salesOrderItems.map((i) => ({ salesOrderItemId: i.id, itemId: i.itemId, orderedQty: i.orderedQty, dueDate: dateOnly(i.dueDate) })),
       },
+      ...origin,
     });
 
     // 재고 행 잠금 순서를 고정하려고 규격 id 오름차순으로 예약한다 (교착 방지, 13.2 "고정 순서")

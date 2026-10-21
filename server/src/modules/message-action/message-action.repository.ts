@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DRAFT_STATUS, ITEM_TYPE } from '@fantasteel/shared';
+import { BUSINESS_EVENT_TYPE, DRAFT_STATUS, ITEM_TYPE } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
@@ -32,9 +32,33 @@ const draftSelect = {
   },
   meetingMinutes: { select: { id: true, meetingMinutesTitle: true } },
   purchaseRequisition: { select: { id: true, purchaseRequisitionNo: true, purchaseRequisitionStatus: true } },
+  // 구매요청 밖의 유형은 만든 업무를 DRAFT_EXECUTED after(결과 테이블·id·번호)로 잇는다 (모듈 문서 10장 결과 연결)
+  businessEvents: { where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_EXECUTED }, orderBy: { id: 'desc' }, take: 1, select: { afterData: true } },
 } satisfies Prisma.ActionDraftSelect;
 
 export type DraftRow = Prisma.ActionDraftGetPayload<{ select: typeof draftSelect }>;
+
+/** 수주 품목 한 줄을 사람이 알아볼 정보 (수주번호·줄 번호·고객사·규격) */
+const salesOrderItemSelect = {
+  id: true,
+  salesOrderItemStatus: true,
+  orderedQty: true,
+  dueDate: true,
+  item: { select: { itemCode: true, itemName: true } },
+  salesOrder: { select: { id: true, salesOrderNo: true, customerId: true, customer: { select: { customerName: true } }, salesOrderItems: { select: { id: true }, orderBy: { id: 'asc' } } } },
+} satisfies Prisma.SalesOrderItemSelect;
+
+export type SalesOrderItemBrief = Prisma.SalesOrderItemGetPayload<{ select: typeof salesOrderItemSelect }>;
+
+/** 출하요청 품목 한 줄을 사람이 알아볼 정보 (출하요청 번호·줄 번호·상태·수주 품목) */
+const shipmentRequestItemSelect = {
+  id: true,
+  requestQty: true,
+  shipmentRequest: { select: { id: true, shipmentRequestNo: true, shipmentRequestStatus: true, customer: { select: { customerName: true } }, shipmentRequestItems: { select: { id: true }, orderBy: { id: 'asc' } } } },
+  salesOrderItem: { select: salesOrderItemSelect },
+} satisfies Prisma.ShipmentRequestItemSelect;
+
+export type ShipmentRequestItemBrief = Prisma.ShipmentRequestItemGetPayload<{ select: typeof shipmentRequestItemSelect }>;
 
 /** DB 접근만 둔다. 첫 인자는 항상 tx (컨벤션 6장) */
 @Injectable()
@@ -51,7 +75,7 @@ export class MessageActionRepository {
   }
 
   findOpenDraft(tx: Tx, messageId: number, actionType: string) {
-    return tx.actionDraft.findFirst({ where: { messageId, actionType, draftStatus: { in: OPEN_DRAFT_STATUSES } }, select: { id: true } });
+    return tx.actionDraft.findFirst({ where: { messageId, actionType, draftStatus: { in: OPEN_DRAFT_STATUSES } }, select: { id: true, requesterId: true, requester: { select: { employeeName: true } } } });
   }
 
   createDraft(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue; messageId?: number; meetingMinutesId?: number; requesterId: number }) {
@@ -84,6 +108,34 @@ export class MessageActionRepository {
   /** AI 추출 후보로 보낼 원료 (코드 순) */
   findRawMaterials(tx: Tx) {
     return tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, select: { id: true, itemCode: true, itemName: true }, orderBy: { itemCode: 'asc' } });
+  }
+
+  /** 고객사 (AI 추출 후보·이름 맞추기, 코드 순) */
+  findCustomers(tx: Tx) {
+    return tx.customer.findMany({ select: { id: true, customerCode: true, customerName: true }, orderBy: { customerCode: 'asc' } });
+  }
+
+  /** 수주할 수 있는 제품 규격: 이론중량이 있는 슬래브·코일 (수주 등록과 같은 조건, 코드 순) */
+  findProductItems(tx: Tx) {
+    return tx.item.findMany({
+      where: { itemType: { in: [ITEM_TYPE.SLAB, ITEM_TYPE.COIL] }, theoreticalWeightTon: { not: null } },
+      select: { id: true, itemCode: true, itemName: true, itemType: true },
+      orderBy: { itemCode: 'asc' },
+    });
+  }
+
+  /** 수주 품목 (최근 것 먼저). take가 없으면 모두 */
+  findSalesOrderItems(tx: Tx, where: Prisma.SalesOrderItemWhereInput, take?: number) {
+    return tx.salesOrderItem.findMany({ where, orderBy: { id: 'desc' }, take, select: salesOrderItemSelect });
+  }
+
+  /** 출하요청 품목 (최근 것 먼저). take가 없으면 모두 */
+  findShipmentRequestItems(tx: Tx, where: Prisma.ShipmentRequestItemWhereInput, take?: number) {
+    return tx.shipmentRequestItem.findMany({ where, orderBy: { id: 'desc' }, take, select: shipmentRequestItemSelect });
+  }
+
+  findLots(tx: Tx, ids: number[]) {
+    return tx.lot.findMany({ where: { id: { in: ids } }, select: { id: true, lotNo: true }, orderBy: { id: 'asc' } });
   }
 
   findItems(tx: Tx, ids: number[]) {

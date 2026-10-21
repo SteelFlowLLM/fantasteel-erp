@@ -17,7 +17,7 @@ import {
   type ShippableSalesOrderItem,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
-import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import { BusinessEventRecorder, type BusinessEventInput } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -58,58 +58,77 @@ export class ShipmentService {
    * 수주 품목을 먼저 잠그고 합계를 읽어서, 같은 품목을 동시에 요청해도 가능 매수를 두 번 쓰지 않는다.
    */
   async create(user: AuthUser, dto: CreateShipmentRequestDto): Promise<ShipmentRequestDetail> {
+    const id = await this.prisma.$transaction(async (tx) => (await this.createInTx(tx, user, dto)).id);
+    return this.findOne(user, id);
+  }
+
+  /**
+   * 출하요청 등록 본문. Message → ERP 출하요청 초안이 자기 실행 트랜잭션 안에서 부른다(권한은 부르는 쪽이 확인한다).
+   * origin이 있으면 출하요청 등록 작업 로그에 원본 초안·메시지를 남긴다. 저장한 출하요청의 id·번호를 돌려준다
+   */
+  async createInTx(
+    tx: Tx,
+    user: AuthUser,
+    dto: CreateShipmentRequestDto,
+    origin: Pick<BusinessEventInput, 'actionDraftId' | 'messageId' | 'isAiAssisted'> = {},
+  ): Promise<{ id: number; shipmentRequestNo: string; shipmentRequestStatus: ShipmentRequestStatus }> {
     const ids = dto.items.map((i) => i.salesOrderItemId);
     if (new Set(ids).size !== ids.length) throw new AppException('COM-004', '같은 수주 품목이 두 번 들어 있어요. 한 줄로 합쳐 주세요');
+    const sortedIds = [...ids].sort((a, b) => a - b);
+    const lockedItems = await this.repository.lockSalesOrderItems(tx, sortedIds);
+    if (lockedItems.length !== ids.length) throw new AppException('COM-003', '없는 수주 품목이 들어 있어요');
 
-    const id = await this.prisma.$transaction(async (tx) => {
-      const sortedIds = [...ids].sort((a, b) => a - b);
-      const lockedItems = await this.repository.lockSalesOrderItems(tx, sortedIds);
-      if (lockedItems.length !== ids.length) throw new AppException('COM-003', '없는 수주 품목이 들어 있어요');
+    if (lockedItems.some((i) => i.customerId !== dto.customerId)) {
+      // 정의서 9.3에 고객사 불일치 코드가 없어 입력 오류로 돌려준다 (shipment.md 8장)
+      throw new AppException('COM-004', '다른 고객사의 수주 품목은 같은 출하요청에 묶을 수 없어요. 별도 출하요청으로 만들어 주세요');
+    }
+    const cancelled = lockedItems.find((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED);
+    if (cancelled) throw new AppException('SHP-002', `취소된 수주 품목(id ${cancelled.id})은 출하요청할 수 없어요`);
 
-      if (lockedItems.some((i) => i.customerId !== dto.customerId)) {
-        // 정의서 9.3에 고객사 불일치 코드가 없어 입력 오류로 돌려준다 (shipment.md 8장)
-        throw new AppException('COM-004', '다른 고객사의 수주 품목은 같은 출하요청에 묶을 수 없어요. 별도 출하요청으로 만들어 주세요');
+    const shippable = await this.repository.findShippableQty(tx, sortedIds, RESERVATION_STATUS.ACTIVE, PENDING_STATUSES);
+    const shippableById = new Map(shippable.map((s) => [s.salesOrderItemId, (s.activeReservedQty ?? 0) - (s.pendingRequestQty ?? 0)]));
+    for (const item of dto.items) {
+      const available = Math.max(0, shippableById.get(item.salesOrderItemId) ?? 0);
+      if (item.requestQty > available) {
+        throw new AppException('SHP-002', `수주 품목(id ${item.salesOrderItemId})의 출하 가능 매수는 ${available}매예요`);
       }
-      const cancelled = lockedItems.find((i) => i.salesOrderItemStatus === SALES_ORDER_ITEM_STATUS.CANCELLED);
-      if (cancelled) throw new AppException('SHP-002', `취소된 수주 품목(id ${cancelled.id})은 출하요청할 수 없어요`);
+    }
 
-      const shippable = await this.repository.findShippableQty(tx, sortedIds, RESERVATION_STATUS.ACTIVE, PENDING_STATUSES);
-      const shippableById = new Map(shippable.map((s) => [s.salesOrderItemId, (s.activeReservedQty ?? 0) - (s.pendingRequestQty ?? 0)]));
-      for (const item of dto.items) {
-        const available = Math.max(0, shippableById.get(item.salesOrderItemId) ?? 0);
-        if (item.requestQty > available) {
-          throw new AppException('SHP-002', `수주 품목(id ${item.salesOrderItemId})의 출하 가능 매수는 ${available}매예요`);
-        }
-      }
-
-      const shipmentRequestNo = await this.numbering.nextDocumentNumber(tx, 'SHIPMENT_REQUEST');
-      const created = await this.repository.create(tx, {
-        shipmentRequestNo,
-        customerId: dto.customerId,
-        shipDate: dto.shipDate ? new Date(`${dto.shipDate}T00:00:00.000Z`) : null,
-        items: dto.items.map((i) => ({ salesOrderItemId: i.salesOrderItemId, requestQty: i.requestQty })),
-      });
-
-      // business_event.sales_order_id가 하나라서 수주마다 한 건씩 남긴다 (수주 타임라인 REQ-LOG-003)
-      const salesOrderIdByItem = new Map(lockedItems.map((i) => [i.id, i.salesOrderId]));
-      const salesOrderIds = [...new Set(lockedItems.map((i) => i.salesOrderId))];
-      for (const salesOrderId of salesOrderIds) {
-        await this.businessEventRecorder.record(tx, {
-          type: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CREATED,
-          actor: user,
-          target: { table: 'shipment_request', id: created.id },
-          salesOrderId,
-          after: {
-            shipmentRequestNo,
-            customerId: dto.customerId,
-            shipDate: dto.shipDate ?? null,
-            items: dto.items.filter((i) => salesOrderIdByItem.get(i.salesOrderItemId) === salesOrderId),
-          },
-        });
-      }
-      return created.id;
+    const shipmentRequestNo = await this.numbering.nextDocumentNumber(tx, 'SHIPMENT_REQUEST');
+    const created = await this.repository.create(tx, {
+      shipmentRequestNo,
+      customerId: dto.customerId,
+      shipDate: dto.shipDate ? new Date(`${dto.shipDate}T00:00:00.000Z`) : null,
+      items: dto.items.map((i) => ({ salesOrderItemId: i.salesOrderItemId, requestQty: i.requestQty })),
     });
-    return this.findOne(user, id);
+
+    // business_event.sales_order_id가 하나라서 수주마다 한 건씩 남긴다 (수주 타임라인 REQ-LOG-003)
+    const salesOrderIdByItem = new Map(lockedItems.map((i) => [i.id, i.salesOrderId]));
+    const salesOrderIds = [...new Set(lockedItems.map((i) => i.salesOrderId))];
+    for (const salesOrderId of salesOrderIds) {
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CREATED,
+        actor: user,
+        target: { table: 'shipment_request', id: created.id },
+        salesOrderId,
+        after: {
+          shipmentRequestNo,
+          customerId: dto.customerId,
+          shipDate: dto.shipDate ?? null,
+          items: dto.items.filter((i) => salesOrderIdByItem.get(i.salesOrderItemId) === salesOrderId),
+        },
+        ...origin,
+      });
+    }
+    // 새 출하요청은 배정 대기로 시작한다 (DB 기본값)
+    return { id: created.id, shipmentRequestNo, shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.REQUESTED };
+  }
+
+  /** 수주 품목별 출하 가능 매수 (ACTIVE 예약 − 진행 중 출하요청). Message → ERP 출하요청 초안이 확정 전에 확인한다 */
+  async shippableQtyInTx(tx: Tx, salesOrderItemIds: number[]): Promise<Map<number, number>> {
+    if (salesOrderItemIds.length === 0) return new Map();
+    const rows = await this.repository.findShippableQty(tx, salesOrderItemIds, RESERVATION_STATUS.ACTIVE, PENDING_STATUSES);
+    return new Map(rows.map((r) => [r.salesOrderItemId, Math.max(0, (r.activeReservedQty ?? 0) - (r.pendingRequestQty ?? 0))]));
   }
 
   async list(user: AuthUser, query: ListShipmentRequestsQuery): Promise<PageResult<ShipmentRequestSummary>> {

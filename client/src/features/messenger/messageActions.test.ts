@@ -19,6 +19,15 @@ describe('메시지 메뉴 등록부 (Message → ERP 확장 자리)', () => {
     expect(messageActionsFor({ ...message, isDeleted: true, content: null }, room, me)).toEqual([]);
   });
 
+  it('업무 초안 만들기: 구매요청은 누구나, 확장 유형은 그 업무를 확정할 수 있는 권한이 있을 때만 보인다 (REQ-ACT-005)', () => {
+    const draftKeys = (user: SessionUser) => messageActionsFor({ ...message, isMine: false }, room, user).map((entry) => entry.key).filter((key) => key.endsWith('-draft'));
+    expect(draftKeys(me)).toEqual(['purchase-requisition-draft']);
+    const sales = { ...me, permissions: { SALES_ORDER_CREATE: 'USE', SHIPMENT_REQUEST_MANAGE: 'USE', PRODUCTION_PLAN_CONFIRM: 'VIEW' } } as SessionUser;
+    expect(draftKeys(sales)).toEqual(['purchase-requisition-draft', 'sales-order-draft', 'shipment-request-draft', 'allocation-draft']);
+    const production = { ...me, permissions: { PRODUCTION_PLAN_CONFIRM: 'USE' } } as SessionUser;
+    expect(draftKeys(production)).toEqual(['purchase-requisition-draft', 'reproduction-plan-draft']);
+  });
+
   it('조건에 맞는 동작만 sortOrder 순으로, 같은 key는 바꾼다', () => {
     registerMessageAction({ key: 'b', sortOrder: 20, Component: Noop });
     registerMessageAction({ key: 'a', sortOrder: 10, Component: Noop });
