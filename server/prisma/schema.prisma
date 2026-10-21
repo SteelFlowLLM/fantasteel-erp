@@ -1079,6 +1079,7 @@ model IntegrationConnection {
   connectedById Int? @map("connected_by_id") /// 마지막으로 연결을 시작한 관리자
   connectedAt DateTime? @map("connected_at") @db.Timestamptz(3) /// 연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다
   lastError String? @map("last_error") @db.VarChar /// 마지막 실패 이유 (비밀값 없음)
+  lastErrorAt DateTime? @map("last_error_at") @db.Timestamptz(3) /// last_error를 남긴 시각. last_error를 지우면 함께 비운다
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -1086,6 +1087,42 @@ model IntegrationConnection {
 
   @@index([connectedById])
   @@map("integration_connection")
+}
+
+/// 외부 연결 장애 (이슈 #518, 문서에 없는 기능). 해결되지 않은 장애마다 (연결 대상, 종류) 한 줄이고, 풀리면 지운다
+model IntegrationFault {
+  id Int @id @default(autoincrement())
+  providerKey String @map("provider_key") @db.VarChar /// 연결 대상 (notion, google-drive)
+  faultKind String @map("fault_kind") @db.VarChar /// RECONNECT_REQUIRED·CREDENTIAL_ERROR·REQUEST_FAILED·SYNC_FAILED (CHECK, 공통 코드 아님)
+  failureCount Int @default(1) @map("failure_count") /// 해결되기 전까지 이어진 실패 횟수
+  lastMessage String @map("last_message") @db.VarChar /// 마지막 실패 이유 (500자, 비밀값 없음)
+  firstFailedAt DateTime @default(now()) @map("first_failed_at") @db.Timestamptz(3)
+  lastFailedAt DateTime @default(now()) @map("last_failed_at") @db.Timestamptz(3)
+  notifiedAt DateTime? @map("notified_at") @db.Timestamptz(3) /// 장애 알림을 마지막으로 보낸 시각. 비었으면 아직 알리지 않았다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([providerKey, faultKind])
+  @@map("integration_fault")
+}
+
+/// Notion 업무 공간 반영 실패 목록 (이슈 #518, 문서에 없는 기능). 반영에 실패한 행마다 한 줄이고, 성공하면 지운다
+model NotionSyncFailure {
+  id Int @id @default(autoincrement())
+  targetType String @map("target_type") @db.VarChar /// 반영에 실패한 행의 테이블명: schedule_event, meeting_minutes, task (CHECK)
+  targetId Int @map("target_id") /// 그 행의 id (FK 없음)
+  failureCount Int @default(1) @map("failure_count") /// 이어서 실패한 횟수
+  lastError String @map("last_error") @db.VarChar /// 마지막 실패 이유 (500자)
+  isResultUnknown Boolean @default(false) @map("is_result_unknown") /// Notion에 만들어졌는지 알 수 없는 실패
+  retryAfter DateTime @map("retry_after") @db.Timestamptz(3) /// 자동 반영이 이 시각 전에는 이 행을 건너뛴다
+  firstFailedAt DateTime @default(now()) @map("first_failed_at") @db.Timestamptz(3)
+  lastFailedAt DateTime @default(now()) @map("last_failed_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([targetType, targetId])
+  @@index([retryAfter])
+  @@map("notion_sync_failure")
 }
 
 // ───────────────────────────── 철강맨AI 심층 조사 (이슈 #378) ─────────────────────────────

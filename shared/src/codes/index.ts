@@ -457,6 +457,8 @@ export const NOTIFICATION_TYPE = {
   DUE_RISK: 'DUE_RISK',
   QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
   AGENT_CANDIDATE: 'AGENT_CANDIDATE',
+  INTEGRATION_FAULT: 'INTEGRATION_FAULT',
+  INTEGRATION_RECOVERED: 'INTEGRATION_RECOVERED',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -470,6 +472,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   DUE_RISK: '납기 위험',
   QUALITY_RATE_RISE: '불합격률 상승',
   AGENT_CANDIDATE: '대응 후보',
+  INTEGRATION_FAULT: '연동 장애',
+  INTEGRATION_RECOVERED: '연동 복구',
 };
 
 /** 작업 로그 이벤트 유형 (REQ-LOG-002) */
