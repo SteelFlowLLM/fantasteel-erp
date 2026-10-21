@@ -111,7 +111,7 @@
 | GOODS_RECEIPT_CONFIRMED | USER | `goods_receipt` | - | 생성된 원료 LOT | after: 입고 번호·발주·원료 코드·입고량·입고일·LOT·야드 id·발주 상태·입고 누계 |
 | PURCHASE_ORDER_CANCELLED | USER | `purchase_order` | - | - | `reason` 필수. after: 발주 상태 CANCELLED, 품목별 연결 구매요청(ORDER_CANCELLED) |
 | PURCHASE_ORDER_CLOSED | USER | `purchase_order` | - | - | `reason` 필수. before: 남은 양, after: 상태 CLOSED·마감량·품목별 발주량·입고 누계·마감량 |
-| GOODS_RECEIPT_CANCELLED | USER | 원래 `goods_receipt` | - | 취소한 원료 LOT | `reason` 필수. before: 발주 상태·입고 누계·LOT 상태·잔량, after: 취소 행 번호·원래 입고 번호·음수 입고량·LOT RECEIPT_CANCELLED·발주 상태·입고 누계 |
+| GOODS_RECEIPT_CANCELLED | USER | 원래 `goods_receipt` | - | 취소한 원료 LOT | `reason` 필수. before: 발주 상태·입고 누계·LOT 상태·잔량, after: 원래 입고 번호(`goodsReceiptNo`, 작업 로그 화면의 대상 번호)·취소 행 번호(`reversalGoodsReceiptNo`)·음수 입고량·LOT RECEIPT_CANCELLED·발주 상태·입고 누계 |
 
 ## 6. 다른 모듈과의 경계
 

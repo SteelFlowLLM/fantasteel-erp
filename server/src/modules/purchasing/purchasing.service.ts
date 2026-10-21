@@ -639,9 +639,10 @@ export class PurchasingService {
       target: { table: 'goods_receipt', id: receipt.id },
       lotIds: [lot.id],
       before: { purchaseOrderStatus: orderStatus, cumulativeReceivedTon: receivedBefore.toFixed(3), lotStatus: lot.lotStatus, remainingTon: lot.remainingTon?.toFixed(3) ?? null },
+      // 대상이 원래 입고라 goodsReceiptNo는 원래 입고 번호(작업 로그 화면의 대상 번호), 취소 행 번호는 따로 둔다
       after: {
-        goodsReceiptNo: reversalNo,
-        reversedGoodsReceiptNo: receipt.goodsReceiptNo,
+        goodsReceiptNo: receipt.goodsReceiptNo,
+        reversalGoodsReceiptNo: reversalNo,
         purchaseOrderId: order.id,
         purchaseOrderNo: order.purchaseOrderNo,
         purchaseOrderItemId: receipt.purchaseOrderItemId,

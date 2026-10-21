@@ -36,6 +36,7 @@ import { isOverdue, ratioPercent, rawMaterialLotNoPattern, receiptRowLabel, trim
 import { useCancelGoodsReceipt, useGoodsReceiptList, useReceiptLines, useReceiveGoods } from '@/hooks/useGoodsReceipts';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
+import { decSum } from '@/lib/decimal';
 import { fmtDate, fmtMD, fmtMDHM, fmtNum, fmtTon, todayStr } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
 import { permissionNeedText } from '@/lib/permissions';
@@ -247,9 +248,11 @@ function ReceiptWork({
   const [cancelling, setCancelling] = useState<GoodsReceiptView | null>(null);
   const cancelReceipt = useCancelGoodsReceipt({
     success: (reversal) => `${reversal.reversedGoodsReceiptNo ?? ''} 입고를 취소했어요. 원료 LOT은 입고 취소가 되고 입고예정이 되돌아와요`,
-    onSuccess: () => {
+    onSuccess: (reversal) => {
       setCancelling(null);
       setDone(null);
+      // 이 품목의 입고를 취소했으면 되돌아온 양만큼 입고 톤 기본값도 늘린다
+      if (reversal.purchaseOrderItemId === line.purchaseOrderItemId) setReceivedTon(trimTonText(decSum([line.remainingTon, reversal.receivedTon.replace(/^-/, '')])));
     },
   });
   // 취소할 수 있어 보이는 입고: 원래 입고이고 아직 취소하지 않았으며 닫힌 발주가 아님 (LOT을 썼는지는 서버가 본다, PUR-006)

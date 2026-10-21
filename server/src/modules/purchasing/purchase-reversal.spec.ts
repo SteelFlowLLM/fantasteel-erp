@@ -200,7 +200,7 @@ describe('입고 취소 (API-286)', () => {
     expect(event).toMatchObject({
       reason: '품목 오입고',
       beforeData: { purchaseOrderStatus: 'RECEIVED', cumulativeReceivedTon: '20.000', lotStatus: 'AVAILABLE', remainingTon: '20.000' },
-      afterData: expect.objectContaining({ goodsReceiptNo: reversal.goodsReceiptNo, reversedGoodsReceiptNo: first.goodsReceiptNo, lotStatus: 'RECEIPT_CANCELLED', purchaseOrderStatus: 'PARTIALLY_RECEIVED', cumulativeReceivedTon: '0.000' }),
+      afterData: expect.objectContaining({ goodsReceiptNo: first.goodsReceiptNo, reversalGoodsReceiptNo: reversal.goodsReceiptNo, lotStatus: 'RECEIPT_CANCELLED', purchaseOrderStatus: 'PARTIALLY_RECEIVED', cumulativeReceivedTon: '0.000' }),
     });
     expect(event.businessEventLots.map((l) => l.lotId)).toEqual([first.lotId]);
 
