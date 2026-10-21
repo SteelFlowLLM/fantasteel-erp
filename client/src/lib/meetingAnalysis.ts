@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView, type MeetingTranscriptionProgress } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -100,6 +100,13 @@ export function analysisProgressText(progress: MeetingAnalysisProgress | null | 
   const chunk = progress.total > 1 ? ` (조각 ${progress.current}/${progress.total})` : '';
   if (progress.phase === 'MERGE') return '조각 결과를 합치는 중';
   return progress.phase === 'ANALYSIS' ? `1차 분석 중${chunk}` : `2차 검토 중${chunk}`;
+}
+
+/** 음성 전사 중 진행 안내 (이슈 #522): "화자를 나누는 중" → "받아쓰는 중 3/7". 음성 서버가 진행을 알려 주지 않으면(whisper.cpp·OpenAI) null */
+export function transcriptionProgressText(progress: MeetingTranscriptionProgress | null | undefined): string | null {
+  if (!progress) return null;
+  if (progress.phase === 'DIARIZE') return '화자를 나누는 중';
+  return progress.total > 1 ? `받아쓰는 중 ${progress.current}/${progress.total}` : '받아쓰는 중';
 }
 
 /** 걸린 시간: 1분이 넘으면 "1분 12초", 아니면 "8.4초" */
