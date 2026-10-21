@@ -7,12 +7,14 @@ import {
   INSPECTION_RESULT,
   NOTIFICATION_TYPE,
   PERMISSION,
+  ROLE,
   type ActionType,
   type AgentCandidateExecutionResult,
   type AgentCandidateView,
   type AgentDraftMeta,
   type AgentExplainView,
   type AgentRiskType,
+  type AgentScanView,
   type AuthUser,
   type DraftStatus,
   type Permission,
@@ -60,6 +62,8 @@ export interface AgentScanResult {
   detected: number;
   /** 새로 만든 초안 수 (같은 대상의 미처리 초안이 있으면 만들지 않는다) */
   created: number;
+  /** 규칙이 실패했을 때만 이유 */
+  error?: string;
 }
 
 /** 확정 전(수정·확정·반려할 수 있는) 상태 */
@@ -131,11 +135,24 @@ export class FactoryAgentService {
         try {
           results.push(await scan());
         } catch (e) {
-          this.logger.warn(`${riskType} 감지에 실패했어요: ${e instanceof Error ? e.message : String(e)}`);
+          const error = e instanceof Error ? e.message : String(e);
+          this.logger.warn(`${riskType} 감지에 실패했어요: ${error}`);
+          results.push({ riskType, detected: 0, created: 0, error });
         }
       }
       return results;
     });
+  }
+
+  /**
+   * 관리자가 감지를 지금 바로 돌린다 (스케줄 24시간을 기다리지 않게, 시연·점검용). 스케줄과 같은 규칙·같은 순서 큐·같은 중복 방지를 쓴다.
+   * 합격 매수 부족(GOOD_QTY_SHORTAGE)은 검사 등록 이벤트로만 감지해서 여기에 없다. 규칙이 실패하면 그 이유를 결과에 담는다.
+   */
+  async scanNow(user: AuthUser): Promise<AgentScanView> {
+    if (user.roleCode !== ROLE.ADMIN) throw new AppException('COM-002', '관리자만 Agent 위험 감지를 바로 돌릴 수 있어요');
+    const results = await this.scanAll();
+    this.logger.log(`Agent 감지를 관리자가 바로 돌렸어요 (사원 ${user.employeeId}): ${results.map((r) => `${r.riskType} ${r.created}/${r.detected}${r.error ? ' 실패' : ''}`).join(', ')}`);
+    return { ranAt: new Date().toISOString(), results: results.map((r) => ({ ...r, error: r.error ?? null })) };
   }
 
   /**

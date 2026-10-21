@@ -1,5 +1,5 @@
 // Agent 대응 후보 화면의 표시 규칙 (순수 함수). 코드 값은 공통 코드 표시명으로만 보인다.
-import type { AgentCandidateView, AgentRiskType } from '@fantasteel/shared';
+import type { AgentCandidateView, AgentRiskType, AgentScanView } from '@fantasteel/shared';
 import { ACTION_TYPE, DRAFT_STATUS, PERMISSION, type ActionType, type DraftStatus, type Permission } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
 
@@ -82,4 +82,16 @@ export function recommendationsOf(payload: Record<string, unknown>): AgedRecomme
       ? [{ salesOrderItemId: o.salesOrderItemId, salesOrderNo: o.salesOrderNo, lineNo: o.lineNo, dueDate: o.dueDate, unsecuredQty: o.unsecuredQty }]
       : [];
   });
+}
+
+/** 알림만 보내는 위험 유형: 결과의 created는 만든 후보가 아니라 보낸 알림 수다 */
+const ALERT_RISKS: readonly AgentRiskType[] = ['DUE_RISK', 'QUALITY_RATE_RISE'];
+
+/** 지금 감지를 돌린 결과 한 줄: "원료 부족 후보 1건 · 납기 위험 알림 0건". 실패한 규칙은 이름과 함께 뒤에 붙인다 */
+export function scanSummary(view: AgentScanView): string {
+  const done = view.results
+    .filter((r) => r.error === null)
+    .map((r) => `${RISK_NAME[r.riskType]} ${ALERT_RISKS.includes(r.riskType) ? '알림' : '후보'} ${r.created}건`);
+  const failed = view.results.filter((r) => r.error !== null).map((r) => RISK_NAME[r.riskType]);
+  return [done.join(' · ') || '돌린 규칙이 없어요', failed.length ? `실패: ${failed.join('·')}` : null].filter(Boolean).join(' · ');
 }

@@ -43,10 +43,17 @@
 | POST | `action-drafts/:id/confirm` · `execute` · `reject` | 후보면 factory-agent가 처리 (API-255 공용) |
 | POST | `action-drafts/:id/explain` | API-264. LLM 설정이 없거나 실패하면 규칙 요약(`generatedByAi: false`) |
 
-`MessageActionController`가 후보 여부(`isCandidate`)로 갈라 넘긴다. 감지는 API가 없다.
+`MessageActionController`가 후보 여부(`isCandidate`)로 갈라 넘긴다. 감지는 스케줄·이벤트로 돌고 API는 아래 하나뿐이다.
+
+| Method | Path | 비고 |
+| --- | --- | --- |
+| POST | `agent/scan` | API-283 (문서 밖 기능, 2026-10-21 이슈 #477). **관리자(ADMIN)만**(아니면 COM-002): 24시간을 기다리지 않고 감지 규칙을 지금 돌린다. 스케줄과 같은 규칙·같은 순서 큐·같은 중복 방지(같은 대상의 처리 전 후보는 새로 만들지 않고, 안 읽은 같은 알림은 다시 보내지 않는다)를 쓴다. 응답 `{ ranAt, results: [{ riskType, detected, created, error }] }` — 알림형(납기 위험·불합격률 상승)의 `created`는 보낸 알림 수, 규칙이 실패하면 그 규칙의 `error`에 이유(다른 규칙은 계속 돈다). 합격 매수 부족은 검사 등록 이벤트로만 감지해 여기 없다 |
+
+화면은 `/agent` 후보 목록 위쪽의 [지금 감지] 버튼(관리자에게만 보임)이고, 결과를 "원료 부족 후보 1건 · 납기 위험 알림 2건"처럼 한 줄로 알려 준다.
 
 ## 5. 감지 트리거
 
+- 관리자 수동 실행: `POST agent/scan`(4장) — 스케줄을 기다리지 않고 같은 `scanAll`을 돌린다. 데모·점검용.
 - 스케줄: `FactoryAgentScheduler` — 서버 시작 직후 한 번, 이후 `AGENT_SCAN_INTERVAL_HOURS`(기본 24, 0이면 끔)마다. 테스트(`NODE_ENV=test`)에서는 돌지 않는다. 새 패키지를 쓰지 않았다.
 - 이벤트: `QualityService.registerQualityInspection` 커밋 뒤 `onInspectionRegistered(lotId)`. 감지가 실패해도 검사 등록은 그대로다.
 
@@ -107,7 +114,7 @@
 npm run dev                                     # DB · 서버 · 화면
 npm run seed:demo -w @fantasteel/server         # 데모 데이터 (이미 넣었으면 생략)
 npm run agent:demo-risk -w @fantasteel/server   # 위험 조건 만들기 (바꾸기 전 값과 되돌리는 SQL을 보여 준다)
-# 서버를 껐다가 다시 켠다: 감지는 서버가 시작될 때와 24시간마다 돈다 (API 없음)
+# 감지는 서버가 시작될 때와 24시간마다 돈다. 기다리지 않으려면 관리자(이현정 1503001)로 /agent의 [지금 감지]를 누른다 (서버를 껐다 켜도 된다)
 ```
 
 `agent:demo-risk`가 하는 일: 필요일이 30일 이내인 열린 생산계획 하나의 히트 수를 400으로 키우고(원료 부족), 진행 중인 수주 품목 하나의 납기를 오늘 + 2일로 당긴다(납기 위험). 공용 DB를 가리키면 실행하지 않는다.

@@ -74,3 +74,21 @@ export interface AgentExplainView {
   /** LLM이 쓴 설명이면 true, LLM 설정이 없거나 실패해 규칙 요약을 그대로 돌려줬으면 false */
   generatedByAi: boolean;
 }
+
+/** 규칙 하나를 돌린 결과 (POST agent/scan) */
+export interface AgentScanRuleResult {
+  riskType: AgentRiskType;
+  /** 규칙이 찾은 후보·알림 수 */
+  detected: number;
+  /** 새로 만든 초안(알림형은 보낸 알림) 수. 같은 대상의 미처리 초안이 있으면 만들지 않는다 */
+  created: number;
+  /** 규칙이 실패했으면 이유 (다른 규칙은 계속 돈다) */
+  error: string | null;
+}
+
+/** POST agent/scan: 관리자가 Agent 위험 감지를 지금 바로 돌린 결과 */
+export interface AgentScanView {
+  /** 돌린 시각 (ISO 8601) */
+  ranAt: string;
+  results: AgentScanRuleResult[];
+}

@@ -6,6 +6,7 @@ import type { Tx } from '../../prisma/prisma.service';
 const CUSTOMER_SELECT = { id: true, customerCode: true, customerName: true } as const;
 const SUPPLIER_SELECT = { id: true, supplierCode: true, supplierName: true } as const;
 const YARD_SELECT = { id: true, yardCode: true, yardName: true, yardType: true } as const;
+const STEEL_GRADE_SELECT = { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true, updatedAt: true } as const;
 const SPEC_SELECT = { id: true, itemCode: true, steelGradeId: true, thicknessMm: true, widthMm: true, lengthMm: true, theoreticalWeightTon: true } as const;
 
 /** 수가 0보다 큰 곳의 이름. 같은 tx에서 동시에 쿼리하지 않도록 차례로 센다 */
@@ -34,7 +35,7 @@ export class MasterDataRepository {
   }
 
   findSteelGrades(tx: Tx) {
-    return tx.steelGrade.findMany({ orderBy: { id: 'asc' }, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
+    return tx.steelGrade.findMany({ orderBy: { id: 'asc' }, select: STEEL_GRADE_SELECT });
   }
 
   findSpecMappings(tx: Tx, id?: number) {
@@ -43,6 +44,7 @@ export class MasterDataRepository {
       orderBy: { id: 'asc' },
       select: {
         id: true,
+        updatedAt: true,
         slabItem: { select: { ...SPEC_SELECT, steelGrade: { select: { steelGradeCode: true } } } },
         coilItem: { select: SPEC_SELECT },
       },
@@ -130,11 +132,29 @@ export class MasterDataRepository {
   }
 
   createSteelGrade(tx: Tx, data: { steelGradeCode: string; steelGradeName: string; standardNo: string }) {
-    return tx.steelGrade.create({ data, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
+    return tx.steelGrade.create({ data, select: STEEL_GRADE_SELECT });
   }
 
   createSpecMapping(tx: Tx, data: { slabItemId: number; coilItemId: number }) {
     return tx.specMapping.create({ data, select: { id: true } });
+  }
+
+  findSpecMapping(tx: Tx, id: number) {
+    return tx.specMapping.findUnique({ where: { id } });
+  }
+
+  /** 읽은 뒤 아무도 고치지 않았을 때(updatedAt이 같을 때)만 바꾼다. 바꿨으면 true */
+  async updateSpecMapping(tx: Tx, id: number, readUpdatedAt: Date, data: { slabItemId: number; coilItemId: number }): Promise<boolean> {
+    return (await tx.specMapping.updateMany({ where: { id, updatedAt: readUpdatedAt }, data })).count === 1;
+  }
+
+  async deleteSpecMapping(tx: Tx, id: number): Promise<boolean> {
+    return (await tx.specMapping.deleteMany({ where: { id } })).count === 1;
+  }
+
+  /** 읽은 뒤 아무도 고치지 않았을 때만 바꾼다. 바꿨으면 true */
+  async updateSteelGrade(tx: Tx, id: number, readUpdatedAt: Date, data: { steelGradeCode: string; steelGradeName: string; standardNo: string }): Promise<boolean> {
+    return (await tx.steelGrade.updateMany({ where: { id, updatedAt: readUpdatedAt }, data })).count === 1;
   }
 
   findRouting(tx: Tx, id: number) {
@@ -245,6 +265,21 @@ export class MasterDataRepository {
     ]);
   }
 
+  /**
+   * 규격 매핑을 바꾸거나 지우면 열연 계획 수율이 달라지므로, 슬래브·코일 규격 중 하나라도 쓰이면 막는다.
+   * 쓰는 곳 기준은 품목 삭제(itemUsages)와 같다 (수주·재고 수량·예약·생산계획·LOT).
+   */
+  specMappingUsages(tx: Tx, slabItemId: number, coilItemId: number) {
+    const itemIds = [slabItemId, coilItemId];
+    return usagesOf([
+      ['수주', () => tx.salesOrderItem.count({ where: { itemId: { in: itemIds } } })],
+      ['재고', () => tx.inventory.count({ where: { itemId: { in: itemIds }, OR: [{ onHandQty: { gt: 0 } }, { reservedQty: { gt: 0 } }, { rollingAllocatedQty: { gt: 0 } }] } })],
+      ['예약', () => tx.reservation.count({ where: { itemId: { in: itemIds } } })],
+      ['생산계획', () => tx.productionPlan.count({ where: { itemId: { in: itemIds } } })],
+      ['LOT', () => tx.lot.count({ where: { itemId: { in: itemIds } } })],
+    ]);
+  }
+
   /** 재고 행은 inventory 모듈이 필요할 때 만들어서 수량이 있을 때만 쓰는 곳으로 본다 (isSpecUsed와 같은 기준) */
   itemUsages(tx: Tx, itemId: number) {
     return usagesOf([
@@ -273,7 +308,7 @@ export class MasterDataRepository {
   }
 
   deleteSteelGrade(tx: Tx, id: number) {
-    return tx.steelGrade.delete({ where: { id }, select: { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true } });
+    return tx.steelGrade.delete({ where: { id }, select: STEEL_GRADE_SELECT });
   }
 
   /** 수량이 모두 0인 재고 행(쓰는 곳 확인을 지난 뒤라 0만 남는다)도 함께 지운다 */

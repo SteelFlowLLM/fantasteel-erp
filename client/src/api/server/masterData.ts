@@ -38,7 +38,9 @@ import type {
   SpecBrief,
   SpecificConsumptionChange,
   SpecMappingInput,
+  SpecMappingUpdateInput,
   SteelGradeInput,
+  SteelGradeUpdateInput,
   SupplierInput,
   SupplierUpdateInput,
   YardInput,
@@ -118,7 +120,9 @@ async function listSpecMappings(): Promise<MasterSpecMappingView[]> {
       slab: specBriefOf(m.slabItem),
       coil: specBriefOf(m.coilItem),
       hotRollingPlannedYieldRate: m.hotRollingYieldRate,
+      // 서버는 쓰는 곳을 주지 않는다. 쓰는 규격의 매핑을 바꾸거나 지우면 서버가 COM-004와 쓰는 곳 이름으로 막는다
       isUsed: false,
+      updatedAt: m.updatedAt,
     }))
     .sort((a, b) => a.steelGradeId - b.steelGradeId || a.slab.id - b.slab.id);
 }
@@ -155,7 +159,7 @@ async function listSteelGrades(): Promise<MasterSteelGradeView[]> {
         ? { id: standard.inspectionStandardId, inspectionStandardCode: standard.inspectionStandardCode, version: standard.versionNo, itemCount: standard.items.length }
         : null,
       referenceText: null,
-      updatedAt: '',
+      updatedAt: grade.updatedAt,
     };
   });
 }
@@ -282,6 +286,23 @@ const createSpecMapping = async (input: SpecMappingInput) =>
     coilItemId: requireChoice(input.coilItemId, 'coilItemId', '코일 규격을 선택해 주세요'),
   });
 
+const updateSpecMapping = async (input: SpecMappingUpdateInput) =>
+  idOf('PATCH', `/spec-mappings/${input.id}`, {
+    slabItemId: requireChoice(input.slabItemId, 'slabItemId', '슬래브 규격을 선택해 주세요'),
+    coilItemId: requireChoice(input.coilItemId, 'coilItemId', '코일 규격을 선택해 주세요'),
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+
+async function updateSteelGrade(input: SteelGradeUpdateInput): Promise<number> {
+  if (!input.standardNo.trim()) throw new InputError('적용 규격 번호를 입력해 주세요', { standardNo: '적용 규격 번호를 입력해 주세요' });
+  return idOf('PATCH', `/steel-grades/${input.id}`, {
+    steelGradeCode: input.steelGradeCode,
+    steelGradeName: input.steelGradeName,
+    standardNo: input.standardNo,
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+}
+
 /** 서버는 적용 규격 번호가 필수다 (ERD not null) */
 async function createSteelGrade(input: SteelGradeInput): Promise<number> {
   if (!input.standardNo.trim()) throw new InputError('적용 규격 번호를 입력해 주세요', { standardNo: '적용 규격 번호를 입력해 주세요' });
@@ -363,7 +384,9 @@ export const serverMasterDataWriteApi = {
   createProductSpec,
   updateProductSpec,
   createSpecMapping,
+  updateSpecMapping,
   createSteelGrade,
+  updateSteelGrade,
   saveRouting,
   saveSpecificConsumptions,
   createRawMaterial,
@@ -377,6 +400,7 @@ export const serverMasterDataWriteApi = {
   saveProductionSetting,
   deleteItem: (id: number) => removeAt(`/items/${id}`),
   deleteSteelGrade: (id: number) => removeAt(`/steel-grades/${id}`),
+  deleteSpecMapping: (id: number) => removeAt(`/spec-mappings/${id}`),
   deleteCustomer: (id: number) => removeAt(`/customers/${id}`),
   deleteSupplier: (id: number) => removeAt(`/suppliers/${id}`),
   deleteYard: (id: number) => removeAt(`/yards/${id}`),

@@ -6,9 +6,10 @@ import { useState, type ReactNode } from 'react';
 import { ACTOR_TYPE_LABEL, LOT_TYPE_LABEL } from '@/codes';
 import type { BusinessEventView } from '@/api/businessEvents';
 import { Button } from '@/components/Button';
-import { ComingSoon } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { Tag } from '@/components/Tag';
+import { AiAssistedTag } from '@/features/agent/components/SoonExampleParts';
+import { AI_VIA_LABEL, aiViaText } from '@/features/businessEvents/lib/eventAi';
 import { diffRows } from '@/features/businessEvents/lib/eventDiff';
 import { lotTraceHref } from '@/features/businessEvents/lib/eventTargets';
 import { EVENT_TONE_DOT, eventTone } from '@/features/businessEvents/lib/eventTone';
@@ -127,6 +128,7 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
           <b data-pet-field="유형" className="flex-none font-semibold">
             {event.businessEventTypeLabel}
           </b>
+          {event.isAiAssisted ? <AiAssistedTag /> : null}
           <span data-pet-field="대상" className="flex max-w-[45%] min-w-0 flex-none items-center gap-1.5 truncate">
             {/* 유형과 대상 이름이 같으면(예: 예약 · 예약) 대상 이름은 한 번만 */}
             {event.targetTypeLabel !== event.businessEventTypeLabel ? <span className="text-xs text-ink-3">{event.targetTypeLabel}</span> : null}
@@ -179,7 +181,7 @@ export function EventRow({ event, open, onToggle, showSalesOrder = true }: { eve
                     ...(showSalesOrder && event.salesOrderId && event.salesOrderNo
                       ? ([['수주', <LinkId key="so" href={`/sales-orders/${event.salesOrderId}`}>{event.salesOrderNo}</LinkId>]] as const)
                       : []),
-                    ['AI 경유', <ComingSoon key="ai" grade="P2" />],
+                    [AI_VIA_LABEL, <span key="ai">{aiViaText(event.isAiAssisted)}</span>],
                   ]}
                 />
               </div>

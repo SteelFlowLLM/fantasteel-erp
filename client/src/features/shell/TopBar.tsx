@@ -38,7 +38,7 @@ export function TopBar({ custom }: { custom: ShellTitle }) {
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"
-          aria-label="철강맨AI 열기 (준비 중, P2)"
+          aria-label="철강맨AI 열기"
           aria-expanded={aiPanelOpen}
           onClick={toggleAiPanel}
           onPointerEnter={() => void loadAiPanel()}

@@ -33,7 +33,7 @@ export class FactoryAgentScheduler implements OnApplicationBootstrap, OnApplicat
   private async run(): Promise<void> {
     try {
       const results = await this.agent.scanAll();
-      this.logger.log(`Agent 감지 완료: ${results.map((r) => `${r.riskType} ${r.created}/${r.detected}`).join(', ') || '없음'}`);
+      this.logger.log(`Agent 감지 완료: ${results.map((r) => `${r.riskType} ${r.created}/${r.detected}${r.error ? ' 실패' : ''}`).join(', ') || '없음'}`);
     } catch (e) {
       this.logger.warn(`Agent 감지에 실패했어요: ${e instanceof Error ? e.message : String(e)}`);
     }

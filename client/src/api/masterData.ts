@@ -70,6 +70,8 @@ export interface MasterSpecMappingView {
   hotRollingPlannedYieldRate: string;
   /** 두 규격 중 하나라도 쓰였으면 매핑을 지울 수 없다 */
   isUsed: boolean;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 */
+  updatedAt: string;
 }
 
 export interface MasterSteelGradeView {
@@ -173,6 +175,11 @@ export interface SpecMappingInput {
   coilItemId: number | null;
 }
 
+export interface SpecMappingUpdateInput extends SpecMappingInput {
+  id: number;
+  expectedUpdatedAt?: string | null;
+}
+
 export interface SteelGradeInput {
   steelGradeCode: string;
   steelGradeName: string;
@@ -181,6 +188,8 @@ export interface SteelGradeInput {
 
 export interface SteelGradeUpdateInput {
   id: number;
+  /** 쓰는 곳이 있는 강종은 코드를 바꿀 수 없다 (서버가 COM-004로 막는다) */
+  steelGradeCode: string;
   steelGradeName: string;
   standardNo: string;
   expectedUpdatedAt?: string | null;
@@ -279,10 +288,17 @@ export const masterDataApi = {
 
   createSpecMapping: (input: SpecMappingInput): Promise<number> => serverMasterDataWriteApi.createSpecMapping(input),
 
+  /** 수주·재고·예약·생산계획·LOT이 쓰는 규격의 매핑은 바꾸거나 지울 수 없다 (서버가 COM-004와 쓰는 곳 이름으로 막는다) */
+  updateSpecMapping: (input: SpecMappingUpdateInput): Promise<number> => serverMasterDataWriteApi.updateSpecMapping(input),
+  deleteSpecMapping: (id: number): Promise<void> => serverMasterDataWriteApi.deleteSpecMapping(id),
+
   // ── 강종 (REQ-MST-002). 성분 규격은 제강 검사 기준에서 관리한다 ──
   listSteelGrades: (): Promise<MasterSteelGradeView[]> => serverMasterDataApi.listSteelGrades(),
 
   createSteelGrade: (input: SteelGradeInput): Promise<number> => serverMasterDataWriteApi.createSteelGrade(input),
+
+  /** 이름·적용 규격 번호는 언제든, 코드는 쓰는 곳이 없을 때만 고친다 */
+  updateSteelGrade: (input: SteelGradeUpdateInput): Promise<number> => serverMasterDataWriteApi.updateSteelGrade(input),
 
   // ── 라우팅 (REQ-MST-005) ──
   listRoutings: (): Promise<MasterRoutingView[]> => serverMasterDataApi.listRoutings(),

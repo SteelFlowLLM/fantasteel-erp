@@ -32,8 +32,8 @@ import type { CreateCustomerDto, CreateSupplierDto, CreateYardDto, UpdateCustome
 import type { UpdateProductionSettingDto } from './dto/production-setting.dto';
 import type { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
 import type { CreateSpecificConsumptionDto, UpdateSpecificConsumptionDto } from './dto/specific-consumption.dto';
-import type { CreateSpecMappingDto } from './dto/spec-mapping.dto';
-import type { CreateSteelGradeDto } from './dto/steel-grade.dto';
+import type { CreateSpecMappingDto, UpdateSpecMappingDto } from './dto/spec-mapping.dto';
+import type { CreateSteelGradeDto, UpdateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataRepository } from './master-data.repository';
 
 type ItemRow = Awaited<ReturnType<MasterDataRepository['findItems']>>[number];
@@ -214,14 +214,39 @@ export class MasterDataService {
 
   /** API-168 */
   async listSteelGrades(): Promise<SteelGradeView[]> {
-    return this.repository.findSteelGrades(this.prisma);
+    return (await this.repository.findSteelGrades(this.prisma)).map(toSteelGradeView);
   }
 
   /** API-169 */
   async createSteelGrade(dto: CreateSteelGradeDto): Promise<SteelGradeView> {
     return this.prisma.$transaction(async (tx) => {
       if (await this.repository.findSteelGradeByCode(tx, dto.steelGradeCode)) throw new AppException('COM-004', `강종 ${dto.steelGradeCode}이(가) 이미 있어요`);
-      return this.repository.createSteelGrade(tx, { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo });
+      return toSteelGradeView(await this.repository.createSteelGrade(tx, { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo }));
+    });
+  }
+
+  /**
+   * API-280. 등록과 같은 칸을 모두 받아 바꾼다. 이름·적용 규격 번호는 언제든 고치고,
+   * 코드는 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 없을 때만 바꾼다(규격 코드가 강종 코드로 만들어지고 이력이 그 코드로 남아서).
+   * 불러온 뒤 다른 사람이 고쳤으면 COM-001.
+   */
+  async updateSteelGrade(id: number, dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
+    return this.prisma.$transaction(async (tx) => {
+      const found = await this.repository.findSteelGrade(tx, id);
+      if (!found) throw new AppException('COM-003', '강종을 찾을 수 없어요');
+      const stale = () => new AppException('COM-001', '그 사이 다른 곳에서 강종을 고쳤어요. 새로 불러와 주세요');
+      if (dto.expectedUpdatedAt && new Date(dto.expectedUpdatedAt).getTime() !== found.updatedAt.getTime()) throw stale();
+      if (dto.steelGradeCode !== found.steelGradeCode) {
+        const same = await this.repository.findSteelGradeByCode(tx, dto.steelGradeCode);
+        if (same && same.id !== id) throw new AppException('COM-004', `강종 ${dto.steelGradeCode}이(가) 이미 있어요`);
+        const usages = await this.repository.steelGradeUsages(tx, id);
+        if (usages.length > 0) throw new AppException('COM-004', `쓰는 곳이 있어 강종 코드는 바꿀 수 없어요: ${usages.join('·')}. 이름·적용 규격 번호만 고칠 수 있어요`);
+      }
+      const data = { steelGradeCode: dto.steelGradeCode, steelGradeName: dto.steelGradeName, standardNo: dto.standardNo };
+      if (!(await this.repository.updateSteelGrade(tx, id, found.updatedAt, data))) throw stale();
+      const saved = await this.repository.findSteelGrade(tx, id);
+      if (!saved) throw new AppException('COM-003', '강종을 찾을 수 없어요');
+      return toSteelGradeView(saved);
     });
   }
 
@@ -238,6 +263,7 @@ export class MasterDataService {
         slabItem: toSpecMappingItemView(r.slabItem),
         coilItem: toSpecMappingItemView(r.coilItem),
         hotRollingYieldRate: slabWeight && coilWeight && slabWeight.gt(0) ? coilWeight.div(slabWeight).toFixed(YIELD_SCALE) : '',
+        updatedAt: r.updatedAt.toISOString(),
       };
     });
   }
@@ -245,21 +271,63 @@ export class MasterDataService {
   /** API-171. 슬래브 규격마다 대응 코일 1개, 같은 강종, 코일 1개 이론중량 ≤ 슬래브 1매 이론중량 (REQ-MST-004) */
   async createSpecMapping(dto: CreateSpecMappingDto): Promise<SpecMappingView> {
     const { id } = await this.prisma.$transaction(async (tx) => {
-      const slab = await this.repository.findItem(tx, dto.slabItemId);
-      if (!slab) throw new AppException('COM-003', '슬래브 규격을 찾을 수 없어요');
-      const coil = await this.repository.findItem(tx, dto.coilItemId);
-      if (!coil) throw new AppException('COM-003', '코일 규격을 찾을 수 없어요');
-      if (slab.itemType !== ITEM_TYPE.SLAB || !slab.theoreticalWeightTon) throw new AppException('COM-004', '슬래브 규격을 골라 주세요');
-      if (coil.itemType !== ITEM_TYPE.COIL || !coil.theoreticalWeightTon) throw new AppException('COM-004', '코일 규격을 골라 주세요');
-      if (slab.steelGradeId !== coil.steelGradeId) throw new AppException('COM-004', '슬래브와 같은 강종의 코일 규격을 골라 주세요');
-      if (await this.repository.findSpecMappingOf(tx, slab.id)) throw new AppException('COM-004', '이미 대응 코일이 있는 슬래브 규격이에요');
-      if (await this.repository.findSpecMappingOf(tx, coil.id)) throw new AppException('COM-004', '다른 슬래브 규격에 이미 매핑된 코일 규격이에요');
-      assertCoilNotHeavier(slab.theoreticalWeightTon, coil.theoreticalWeightTon);
-      return this.repository.createSpecMapping(tx, { slabItemId: slab.id, coilItemId: coil.id });
+      const pair = await this.checkedMappingPair(tx, dto);
+      return this.repository.createSpecMapping(tx, pair);
     });
+    return this.requireSpecMappingView(id);
+  }
+
+  /**
+   * API-281. 매핑의 슬래브·코일 규격을 바꾼다 (등록과 같은 검사, 자기 자신은 중복으로 보지 않는다).
+   * 두 규격 중 하나라도 수주·재고·예약·생산계획·LOT에 쓰이면 열연 계획 수율이 바뀌므로 막는다(COM-004). 불러온 뒤 바뀌었으면 COM-001.
+   */
+  async updateSpecMapping(id: number, dto: UpdateSpecMappingDto): Promise<SpecMappingView> {
+    await this.prisma.$transaction(async (tx) => {
+      const found = await this.repository.findSpecMapping(tx, id);
+      if (!found) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
+      const stale = () => new AppException('COM-001', '그 사이 다른 곳에서 규격 매핑을 고쳤어요. 새로 불러와 주세요');
+      if (dto.expectedUpdatedAt && new Date(dto.expectedUpdatedAt).getTime() !== found.updatedAt.getTime()) throw stale();
+      assertMappingUnused(await this.repository.specMappingUsages(tx, found.slabItemId, found.coilItemId), '바꿀');
+      const pair = await this.checkedMappingPair(tx, dto, id);
+      if (!(await this.repository.updateSpecMapping(tx, id, found.updatedAt, pair))) throw stale();
+    });
+    return this.requireSpecMappingView(id);
+  }
+
+  /** API-282. 쓰는 곳이 없을 때만 지운다 (update와 같은 기준). 지운 매핑을 돌려준다 */
+  async deleteSpecMapping(id: number): Promise<SpecMappingView> {
+    const [view] = await this.listSpecMappings(id);
+    if (!view) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
+    await this.prisma.$transaction(async (tx) => {
+      const found = await this.repository.findSpecMapping(tx, id);
+      if (!found) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
+      assertMappingUnused(await this.repository.specMappingUsages(tx, found.slabItemId, found.coilItemId), '지울');
+      if (!(await this.repository.deleteSpecMapping(tx, id))) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
+    });
+    return view;
+  }
+
+  private async requireSpecMappingView(id: number): Promise<SpecMappingView> {
     const [view] = await this.listSpecMappings(id);
     if (!view) throw new AppException('COM-003', '규격 매핑을 찾을 수 없어요');
     return view;
+  }
+
+  /** 슬래브·코일 규격이 맞는 짝인지: 유형, 같은 강종, 아직 매핑 안 됨(exceptMappingId의 매핑은 제외), 코일 ≤ 슬래브 */
+  private async checkedMappingPair(tx: Tx, dto: CreateSpecMappingDto, exceptMappingId?: number): Promise<{ slabItemId: number; coilItemId: number }> {
+    const slab = await this.repository.findItem(tx, dto.slabItemId);
+    if (!slab) throw new AppException('COM-003', '슬래브 규격을 찾을 수 없어요');
+    const coil = await this.repository.findItem(tx, dto.coilItemId);
+    if (!coil) throw new AppException('COM-003', '코일 규격을 찾을 수 없어요');
+    if (slab.itemType !== ITEM_TYPE.SLAB || !slab.theoreticalWeightTon) throw new AppException('COM-004', '슬래브 규격을 골라 주세요');
+    if (coil.itemType !== ITEM_TYPE.COIL || !coil.theoreticalWeightTon) throw new AppException('COM-004', '코일 규격을 골라 주세요');
+    if (slab.steelGradeId !== coil.steelGradeId) throw new AppException('COM-004', '슬래브와 같은 강종의 코일 규격을 골라 주세요');
+    const slabMapping = await this.repository.findSpecMappingOf(tx, slab.id);
+    if (slabMapping && slabMapping.id !== exceptMappingId) throw new AppException('COM-004', '이미 대응 코일이 있는 슬래브 규격이에요');
+    const coilMapping = await this.repository.findSpecMappingOf(tx, coil.id);
+    if (coilMapping && coilMapping.id !== exceptMappingId) throw new AppException('COM-004', '다른 슬래브 규격에 이미 매핑된 코일 규격이에요');
+    assertCoilNotHeavier(slab.theoreticalWeightTon, coil.theoreticalWeightTon);
+    return { slabItemId: slab.id, coilItemId: coil.id };
   }
 
   /** API-172. 품목 유형별 공정 순서대로 */
@@ -454,7 +522,7 @@ export class MasterDataService {
     return this.prisma.$transaction(async (tx) => {
       if (!(await this.repository.findSteelGrade(tx, id))) throw new AppException('COM-003', '강종을 찾을 수 없어요');
       assertUnused(await this.repository.steelGradeUsages(tx, id));
-      return this.repository.deleteSteelGrade(tx, id);
+      return toSteelGradeView(await this.repository.deleteSteelGrade(tx, id));
     });
   }
 
@@ -469,6 +537,19 @@ export class MasterDataService {
     });
   }
 }
+
+/** 규격 매핑은 쓰는 곳이 있으면 바꾸거나 지우지 않는다 (열연 계획 수율이 달라진다). 어디서 쓰는지 함께 알려 준다 */
+function assertMappingUnused(usages: readonly string[], verb: '바꿀' | '지울'): void {
+  if (usages.length > 0) throw new AppException('COM-004', `쓰는 곳이 있어 매핑을 ${verb} 수 없어요: ${usages.join('·')}`);
+}
+
+const toSteelGradeView = (r: { id: number; steelGradeCode: string; steelGradeName: string; standardNo: string; updatedAt: Date }): SteelGradeView => ({
+  id: r.id,
+  steelGradeCode: r.steelGradeCode,
+  steelGradeName: r.steelGradeName,
+  standardNo: r.standardNo,
+  updatedAt: r.updatedAt.toISOString(),
+});
 
 /** 쓰는 곳이 있으면 지우지 않는다 ([05] 7-2). 어디서 쓰는지 함께 알려 준다 */
 function assertUnused(usages: readonly string[]): void {

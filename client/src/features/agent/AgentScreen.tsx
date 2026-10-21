@@ -5,7 +5,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { AgentCandidateView, AgentExplainView, AgentRiskType } from '@fantasteel/shared';
 import { ACTION_TYPE_LABEL, DRAFT_STATUS_LABEL, ERROR_MESSAGE, isErrorCode, PERMISSION_LABEL } from '@/codes';
-import { agentCandidateApi } from '@/api/agentCandidates';
+import { agentCandidateApi, agentCandidateKeys } from '@/api/agentCandidates';
 import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -28,11 +28,13 @@ import {
   isConfirmable,
   isOpenCandidate,
   recommendationsOf,
+  scanSummary,
   sortCandidates,
 } from '@/features/agent/lib/agentDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useAction } from '@/hooks/useAction';
 import { useAgentCandidates } from '@/hooks/useAgentCandidates';
+import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { fmtMDHM } from '@/lib/format';
 
@@ -82,6 +84,9 @@ function CandidateList({
   onSelect: (id: number) => void;
 }) {
   const openCount = candidates.filter(isOpenCandidate).length;
+  // 관리자만: 24시간 스케줄을 기다리지 않고 지금 감지를 돌린다 (같은 대상의 처리 전 후보는 새로 만들지 않는다)
+  const isAdmin = useMe().roleCode === 'ADMIN';
+  const scan = useAction(agentCandidateApi.scan, { invalidate: [agentCandidateKeys.all], success: scanSummary });
   return (
     <section aria-label="대응 후보 목록" data-pet-target="card:agent.detections" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
@@ -89,6 +94,11 @@ function CandidateList({
           <Icon name="radar" className="text-steelman" />
           <b className="text-base font-semibold">대응 후보 {openCount}건</b>
           <span className="text-cap text-ink-3">확정 대기</span>
+          {isAdmin ? (
+            <Button size="sm" icon="radar" className="ml-auto" disabled={scan.isPending} title="스케줄(24시간)을 기다리지 않고 위험 감지를 지금 돌려요 (관리자만)" onClick={() => scan.mutate()}>
+              {scan.isPending ? '감지하는 중…' : '지금 감지'}
+            </Button>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Chip on={risk === null} onClick={() => onRisk(null)}>
