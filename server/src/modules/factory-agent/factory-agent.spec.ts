@@ -167,7 +167,7 @@ describe('합격 매수 부족 감지 (REQ-AGT-001·003, 이벤트 트리거)', 
 
   it('상황 설명은 LLM 설정이 없으면 규칙 요약을 그대로 돌려준다 (후보는 바뀌지 않는다)', async () => {
     // 개발 PC의 LLM 설정과 관계없이 설정이 없는 경우를 본다
-    jest.spyOn(moduleRef.get(LlmSettingsStore), 'read').mockResolvedValue({ baseUrl: 'http://localhost:1', model: null, apiKey: null, visionSupport: null, reasoningSupport: null });
+    jest.spyOn(moduleRef.get(LlmSettingsStore), 'read').mockResolvedValue({ baseUrl: 'http://localhost:1', model: null, apiKey: null, visionSupport: null, reasoningSupport: null, contextLength: null });
     const [view] = await agent.list(purchaser);
     const explained = await agent.explain(purchaser, view.id);
     expect(explained.draftId).toBe(view.id);

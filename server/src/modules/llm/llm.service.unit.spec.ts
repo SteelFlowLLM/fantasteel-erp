@@ -7,7 +7,7 @@ import { LlmClient, LlmModelNotLoadedError, unslothNotLoadedMessage } from './ll
 import { LlmSettingsStore, type LlmSettings } from './llm-settings.store';
 import { LlmService } from './llm.service';
 
-const saved: LlmSettings = { baseUrl: 'http://127.0.0.1:8888/v1', model: 'a/think', apiKey: 'k', visionSupport: null, reasoningSupport: null };
+const saved: LlmSettings = { baseUrl: 'http://127.0.0.1:8888/v1', model: 'a/think', apiKey: 'k', visionSupport: null, reasoningSupport: null, contextLength: null };
 
 function setup(settings: LlmSettings = saved) {
   const store = { read: jest.fn(async () => settings), write: jest.fn(async () => undefined) };
@@ -20,11 +20,12 @@ describe('LlmService 사진·생각 정도 지원 (이슈 #465)', () => {
   it('보내지 않으면 그대로 두고, 보내면 바꾸고, null이면 모름으로 저장한다', async () => {
     const { store, service } = setup({ ...saved, visionSupport: true, reasoningSupport: false });
     await expect(service.updateSettings({ baseUrl: saved.baseUrl, model: 'a/think' })).resolves.toMatchObject({ visionSupport: true, reasoningSupport: false });
-    await expect(service.updateSettings({ baseUrl: saved.baseUrl, model: 'a/think', visionSupport: null, reasoningSupport: true })).resolves.toMatchObject({
+    await expect(service.updateSettings({ baseUrl: saved.baseUrl, model: 'a/think', visionSupport: null, reasoningSupport: true, contextLength: 32768 })).resolves.toMatchObject({
       visionSupport: null,
       reasoningSupport: true,
+      contextLength: 32768,
     });
-    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'k', visionSupport: null, reasoningSupport: true }));
+    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'k', visionSupport: null, reasoningSupport: true, contextLength: 32768 }));
   });
 
   it('연결 확인 결과에 서버 종류와 auto-switch를 싣고, 실패하면 둘 다 null', async () => {
@@ -45,7 +46,7 @@ describe('LlmService 사진·생각 정도 지원 (이슈 #465)', () => {
     const result = await service.testChat();
     expect(result).toMatchObject({ ok: false, model: 'a/think' });
     expect(result.error).toContain('Settings > API > Model auto-switch');
-    expect(client.chat.mock.calls[0][0]).toEqual({ baseUrl: saved.baseUrl, apiKey: 'k', visionSupport: null, reasoningSupport: true });
+    expect(client.chat.mock.calls[0][0]).toEqual({ baseUrl: saved.baseUrl, apiKey: 'k', visionSupport: null, reasoningSupport: true, contextLength: null });
   });
 });
 
@@ -64,6 +65,6 @@ describe('LlmSettingsStore 옛 파일', () => {
   it('지원 칸이 없는 옛 llm.json은 모름(null)으로 읽는다', async () => {
     await mkdir(join(dir, 'settings'), { recursive: true });
     await writeFile(join(dir, 'settings', 'llm.json'), JSON.stringify({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: null }));
-    await expect(new LlmSettingsStore().read()).resolves.toEqual({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: null, visionSupport: null, reasoningSupport: null });
+    await expect(new LlmSettingsStore().read()).resolves.toEqual({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: null, visionSupport: null, reasoningSupport: null, contextLength: null });
   });
 });

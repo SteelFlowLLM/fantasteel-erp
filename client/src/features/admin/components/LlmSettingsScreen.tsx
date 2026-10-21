@@ -23,7 +23,16 @@ import { Tabs } from '@/components/Tabs';
 import { useAction } from '@/hooks/useAction';
 import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/useLlm';
 import { useCanUse } from '@/hooks/usePermission';
-import { llmModelOptions, showsSupportChoices, supportChoiceOf, supportValueOf, unslothModelWarning, type SupportChoice } from '@/lib/llmSettings';
+import {
+  contextLengthValueOf,
+  contextLengthWarning,
+  llmModelOptions,
+  showsSupportChoices,
+  supportChoiceOf,
+  supportValueOf,
+  unslothModelWarning,
+  type SupportChoice,
+} from '@/lib/llmSettings';
 import { BrowserSettingsCard } from './BrowserSettingsCard';
 import { SttGuideCard } from './SttGuideCard';
 import { SttLocalServerCard } from './SttLocalServerCard';
@@ -63,7 +72,7 @@ export function LlmSettingsScreen() {
         <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
           {(data) => (
             <LlmSettingsForm
-              key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}|${String(data.visionSupport)}|${String(data.reasoningSupport)}`}
+              key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}|${String(data.visionSupport)}|${String(data.reasoningSupport)}|${String(data.contextLength)}`}
               saved={data}
               canEdit={canEdit}
             />
@@ -110,6 +119,8 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   const [clearApiKey, setClearApiKey] = useState(false);
   const [vision, setVision] = useState<SupportChoice>(supportChoiceOf(saved.visionSupport));
   const [reasoning, setReasoning] = useState<SupportChoice>(supportChoiceOf(saved.reasoningSupport));
+  const [contextText, setContextText] = useState(saved.contextLength === null ? '' : String(saved.contextLength));
+  const contextLength = contextLengthValueOf(contextText);
 
   const connection = useLlmConnectionTest();
   const chat = useLlmChatTest();
@@ -126,14 +137,22 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
   }, []);
 
   const result = connection.data;
-  const supportDirty = vision !== supportChoiceOf(saved.visionSupport) || reasoning !== supportChoiceOf(saved.reasoningSupport);
+  const supportDirty = vision !== supportChoiceOf(saved.visionSupport) || reasoning !== supportChoiceOf(saved.reasoningSupport) || contextLength !== saved.contextLength;
   const dirty = baseUrl.trim() !== saved.baseUrl || model !== (saved.model ?? '') || apiKey.trim() !== '' || clearApiKey || supportDirty;
   const onSave = () =>
     save.mutate(
-      { baseUrl, model: model || null, apiKey: apiKeyInput(), visionSupport: supportValueOf(vision), reasoningSupport: supportValueOf(reasoning) },
+      {
+        baseUrl,
+        model: model || null,
+        apiKey: apiKeyInput(),
+        visionSupport: supportValueOf(vision),
+        reasoningSupport: supportValueOf(reasoning),
+        ...(contextLength === undefined ? {} : { contextLength }),
+      },
       { onSuccess: () => chat.reset() },
     );
   const modelWarning = unslothModelWarning(result, model);
+  const contextWarning = contextLengthWarning(result, model, contextLength ?? null);
   const unsloth = result?.connected === true && result.serverKind === 'unsloth';
 
   return (
@@ -216,8 +235,13 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
                 {modelWarning}
               </Banner>
             ) : null}
+            {contextWarning ? (
+              <Banner tone="wait" icon="alert">
+                {contextWarning}
+              </Banner>
+            ) : null}
             {showsSupportChoices(result, saved) ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <Field
                   label={<span data-pet-term="사진 지원">사진 지원</span>}
                   hint={unsloth ? 'Unsloth Studio가 사진 모델인지 알려 주면 그 값을 먼저 써요' : '모델이 사진을 읽을 수 있을 때만 켜요'}
@@ -237,6 +261,19 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
                     <option value="yes">지원</option>
                     <option value="no">지원 안 함 (생각 정도를 끔)</option>
                   </Select>
+                </Field>
+                <Field
+                  label={<span data-pet-term="문맥 길이">문맥 길이 (토큰)</span>}
+                  hint={contextLength === undefined ? '1024 이상의 정수로 넣어 주세요' : unsloth ? '불러온 모델의 Context Length를 먼저 써요. 비우면 모름' : '모델이 받는 문맥 길이. 비우면 모름'}
+                >
+                  <Input
+                    aria-label="문맥 길이"
+                    inputMode="numeric"
+                    value={contextText}
+                    onChange={(e) => setContextText(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="모름"
+                  />
                 </Field>
               </div>
             ) : null}
@@ -272,7 +309,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
             >
               {chat.isPending ? '답 기다리는 중…' : '응답 확인'}
             </Button>
-            <Button variant="primary" onClick={onSave} disabled={!canEdit || !dirty || save.isPending || !baseUrl.trim()}>
+            <Button variant="primary" onClick={onSave} disabled={!canEdit || !dirty || save.isPending || !baseUrl.trim() || contextLength === undefined}>
               저장
             </Button>
           </CardFoot>
@@ -313,6 +350,9 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
               사진·생각 정도 지원을 정하고 <b>저장</b> → <b>응답 확인</b>.
             </li>
           </ol>
+          <p className="text-xs text-ink-3">
+            ERP는 여기 저장한 <b>서버 하나만</b> 불러요. LM Studio와 Unsloth Studio를 함께 켜 두면 모델이 메모리에 두 번 올라갈 수 있으니, 안 쓰는 쪽의 모델은 내려(Eject·Unload) 두세요.
+          </p>
         </CardBody>
       </Card>
     </div>

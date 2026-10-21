@@ -11,11 +11,13 @@ export interface LlmSettings {
   /** 관리자가 정한 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다, 이슈 #465). null이면 모름 */
   visionSupport: boolean | null;
   reasoningSupport: boolean | null;
+  /** 관리자가 넣은 문맥 길이(토큰). 모델 정보가 없을 때만 쓴다. null이면 모름 */
+  contextLength: number | null;
 }
 
 /** LLM을 부를 때 넘기는 연결 정보. 관리자가 정한 지원 여부도 함께 간다 */
 export function llmEndpointOf(settings: LlmSettings): LlmEndpoint {
-  return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport };
+  return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport, contextLength: settings.contextLength };
 }
 
 /**
@@ -34,6 +36,7 @@ export class LlmSettingsStore {
       apiKey: process.env.LLM_API_KEY || null,
       visionSupport: null,
       reasoningSupport: null,
+      contextLength: null,
     };
     const raw = await readFile(this.file, 'utf8').catch(() => null);
     if (raw === null) return defaults;
@@ -44,6 +47,7 @@ export class LlmSettingsStore {
       apiKey: saved.apiKey === undefined ? defaults.apiKey : saved.apiKey,
       visionSupport: typeof saved.visionSupport === 'boolean' ? saved.visionSupport : null,
       reasoningSupport: typeof saved.reasoningSupport === 'boolean' ? saved.reasoningSupport : null,
+      contextLength: typeof saved.contextLength === 'number' && Number.isInteger(saved.contextLength) && saved.contextLength > 0 ? saved.contextLength : null,
     };
   }
 

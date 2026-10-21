@@ -387,9 +387,14 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
   - 불러온 모델이 하나일 때만 `/v1/status`를 그 모델 정보로 쓴다: `supports_reasoning`·`reasoning_effort_levels`·`reasoning_always_on` → 생각 옵션(못 하면 없음, 늘 켜짐이면 `off` 빼기, 단계가 없으면 켜기만), `is_vision` → 사진, `context_length` → 문맥 길이.
   - 안 불러온 모델의 사진은 `GET /api/models/check-vision/{모델}`(불러오지 않아도 답함). 불러온 모델은 status가 먼저다(check-vision은 불러오지 않은 GGUF를 `false`로 볼 때가 있어 실제로 확인함).
   - auto-switch: `GET /api/settings/openai-auto-switch`의 `enabled`.
+  - 임베딩 모델: `/v1/models`에 종류가 없어 모델마다 `GET /api/models/check-embedding/{모델}`의 `is_embedding`으로 `type`(`embeddings`·`llm`)을 채운다(화면이 임베딩 모델을 목록에서 뺀다).
+  - 문맥 길이: 불러온 모델의 status `context_length`(불러올 때 정한 Context Length, 예 8192)가 먼저, 없으면 `max_context_length`. 모델 목록(`contextLength`)·대화 기억 몫·심층 조사 예산(`modelContextLength`)에 쓴다.
   - Unsloth는 요청의 `model`을 보지 않고 **불러온 모델로 답한다**(API 문서 "informational; the active model is used"). 그래서 auto-switch가 꺼져 있고 고른 모델이 불러와 있지 않으면 부르기 전에 막는다(`LlmModelNotLoadedError`): "고른 모델(…)이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: …). Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요". 기억해 둔 정보가 '없음'이면 한 번 다시 묻는다. 서버가 400 "No model loaded"를 주면 "Unsloth Studio에 불러온 모델이 없어요. …"로 바꾸고 JSON 형식 없이 다시 부르지 않는다. 연결 확인·응답 확인·철강맨AI·회의록 분석 등 모든 LLM 호출이 같은 문구를 보인다.
   - 요청 필드: `top_k`(100까지)·`min_p`·`repetition_penalty`(LM Studio의 `repeat_penalty` 대신). 생각 정도는 `reasoning_effort`와 `enable_thinking`(끄기면 `false`)을 함께 보낸다. `reasoning_effort` 값 `none·minimal·low·medium·high·max·xhigh`는 Unsloth가 검증을 통과시킨다(틀린 값은 400, 2026-10-21 확인).
 - 그 밖의 OpenAI 호환: `temperature`·`top_p`·`presence_penalty`만 보낸다. 관리자가 생각 정도 지원을 켜면 `reasoning_effort`(끄기는 `none`)를 보낸다(가정: 받지 않는 서버는 관리자가 켜지 않는다).
+- 관리자 문맥 길이(`llm.json`의 `contextLength`, 1024 이상 정수, `null` = 모름): LM Studio가 아니고 모델 정보가 없을 때 `modelContextLength`가 쓴다.
+- 문맥 길이 경고: 고른 모델의 문맥 길이(모델 정보, 없으면 LM Studio가 아닐 때 관리자 값)가 `LLM_MIN_CONTEXT_TOKENS`(16,384토큰, 가정값)보다 작으면 AI 연결 화면이 "…Context Length를 늘려 주세요"를 보인다. 근거(2026-10-21 측정): 조회 도구 28개 설명 13,445자 + 시스템 지시 3,766자이고 웹·브라우저·Notion·Drive를 켜면 더 늘며, 지난 대화·도구 결과·답 자리가 더 필요하다.
+- ERP는 저장한 서버 하나만 부른다. LM Studio와 Unsloth Studio를 함께 켜 두면 모델이 두 번 메모리에 올라갈 수 있어 화면 안내 카드가 안 쓰는 쪽 모델을 내려 두라고 알린다.
 - 관리자 설정(`llm.json`의 `visionSupport`·`reasoningSupport`, `null` = 모름): LM Studio가 아닐 때만 쓰고, 모델 정보가 있으면 모델 정보가 먼저다. `PUT llm/settings`에 보내지 않으면 그대로, `null`이면 모름. 사진 모름은 사진 첨부를 막지 않고, 생각 모름은 `reasoning_effort`를 보내지 않는다.
 
 **출처**(`assistant.answer.ts`)

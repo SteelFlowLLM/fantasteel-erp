@@ -28,6 +28,7 @@ export class LlmService {
       apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey || null,
       visionSupport: input.visionSupport === undefined ? current.visionSupport : input.visionSupport,
       reasoningSupport: input.reasoningSupport === undefined ? current.reasoningSupport : input.reasoningSupport,
+      contextLength: input.contextLength === undefined ? current.contextLength : input.contextLength,
     };
     await this.store.write(next);
     return toView(next);
@@ -77,7 +78,7 @@ function toBrowserView(settings: { startSites: string[] | null; openAllSites: bo
 }
 
 function toView(settings: LlmSettings): LlmSettingsView {
-  return { baseUrl: settings.baseUrl, model: settings.model, hasApiKey: Boolean(settings.apiKey), visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport };
+  return { baseUrl: settings.baseUrl, model: settings.model, hasApiKey: Boolean(settings.apiKey), visionSupport: settings.visionSupport, reasoningSupport: settings.reasoningSupport, contextLength: settings.contextLength };
 }
 
 function messageOf(error: unknown): string {

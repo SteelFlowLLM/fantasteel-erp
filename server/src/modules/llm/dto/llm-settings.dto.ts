@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { LLM_START_SITE_PATTERN, LLM_START_SITES_MAX } from '@fantasteel/shared';
-import { ArrayMaxSize, IsArray, IsBoolean, Matches, IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, Matches, IsNotEmpty, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 /** 사내망·LM Studio(127.0.0.1)도 써야 해서 최상위 도메인을 요구하지 않는다 */
@@ -34,6 +34,13 @@ export class UpdateLlmSettingsDto {
   @IsOptional()
   @IsBoolean()
   reasoningSupport?: boolean | null;
+
+  /** 문맥 길이(토큰). 모델 정보가 없을 때만 쓴다. 보내지 않으면 그대로, null이면 모름 */
+  @IsOptional()
+  @IsInt({ message: '문맥 길이는 정수(토큰)로 넣어 주세요' })
+  @Min(1024, { message: '문맥 길이는 1024토큰 이상으로 넣어 주세요' })
+  @Max(10_000_000)
+  contextLength?: number | null;
 }
 
 export class TestLlmConnectionDto {

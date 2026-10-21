@@ -8,6 +8,12 @@ export const LLM_DEFAULT_BASE_URL = 'http://127.0.0.1:1234/v1';
 export const LLM_UNSLOTH_BASE_URL = 'http://127.0.0.1:8888/v1';
 
 /**
+ * 철강맨AI 첫 요청(시스템 지시 + 도구 설명)이 들어가려면 필요한 문맥 길이(토큰, 가정값). 이보다 작으면 AI 연결 화면이 경고한다.
+ * 2026-10-21 측정: 조회 도구 28개 설명 13,445자 + 시스템 지시 3,766자(웹·브라우저·Notion·Drive를 켜면 더 는다)에 지난 대화·도구 결과·답 자리를 더했다
+ */
+export const LLM_MIN_CONTEXT_TOKENS = 16_384;
+
+/**
  * 연결한 서버 종류. LM Studio는 고유 API(/api/v1/models), Unsloth Studio는 /v1/status 모양으로 알아낸다.
  * 둘 다 아니면 그 밖의 OpenAI 호환 서버(외부 LLM)
  */
@@ -26,6 +32,8 @@ export interface LlmSettingsView {
   visionSupport: boolean | null;
   /** 관리자가 정한 생각 정도 지원 여부 (LM Studio가 아닐 때만 쓴다). true일 때만 reasoning_effort를 보낸다 */
   reasoningSupport: boolean | null;
+  /** 관리자가 넣은 문맥 길이(토큰, LM Studio가 아닐 때 모델 정보가 없으면 쓴다). null이면 모름: 대화 기억·심층 조사가 기본 몫을 쓴다 */
+  contextLength: number | null;
 }
 
 export interface LlmSettingsInput {
@@ -36,6 +44,7 @@ export interface LlmSettingsInput {
   /** 보내지 않으면 그대로, null이면 모름으로 */
   visionSupport?: boolean | null;
   reasoningSupport?: boolean | null;
+  contextLength?: number | null;
 }
 
 export interface LlmConnectionTestInput {
@@ -56,6 +65,8 @@ export interface LlmModelView {
    * 모르면(외부 LLM·옛 LM Studio·불러오지 않은 Unsloth 모델) null
    */
   reasoning: boolean | null;
+  /** 문맥 길이(토큰). LM Studio는 불러온 인스턴스 값(없으면 최대값), Unsloth Studio는 불러온 모델의 Context Length. 모르면 null */
+  contextLength: number | null;
 }
 
 export interface LlmConnectionView {

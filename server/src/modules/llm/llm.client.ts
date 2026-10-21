@@ -22,6 +22,8 @@ export interface LlmEndpoint {
   /** 관리자가 AI 연결 화면에서 정한 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다). 없거나 null이면 모름 */
   visionSupport?: boolean | null;
   reasoningSupport?: boolean | null;
+  /** 관리자가 넣은 문맥 길이(토큰). LM Studio가 아니고 모델 정보가 없을 때만 쓴다 */
+  contextLength?: number | null;
 }
 
 export interface ChatMessage {
@@ -179,7 +181,9 @@ interface UnslothStatusWire {
   reasoning_effort_levels?: unknown;
   reasoning_always_on?: unknown;
   is_vision?: unknown;
+  /** 불러올 때 정한 Context Length. 모델이 받을 수 있는 최대는 max_context_length·native_context_length */
   context_length?: unknown;
+  max_context_length?: unknown;
 }
 
 /** 모델이 할 수 있는 것. 알 수 없으면 null */
@@ -195,20 +199,32 @@ export interface LlmModelCapabilities {
 @Injectable()
 export class LlmClient {
   private readonly serverInfoCache = new Map<string, { at: number; info: LlmServerInfo }>();
-  /** Unsloth Studio의 모델별 사진 지원 (/api/models/check-vision). 열쇠는 `서버 루트|모델` */
-  private readonly unslothVisionCache = new Map<string, { at: number; vision: boolean | null }>();
+  /** Unsloth Studio의 모델별 사진 지원·임베딩 여부 (/api/models/check-vision·check-embedding). 열쇠는 `경로|서버 루트|모델` */
+  private readonly unslothCheckCache = new Map<string, { at: number; value: boolean | null }>();
 
   async listModels(endpoint: LlmEndpoint): Promise<LlmModelView[]> {
     const body = await this.request<{ data?: { id: string; owned_by?: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
     // 연결 확인은 새로 받은 모델 정보를 보여야 하므로 기억해 둔 값을 쓰지 않는다
     const server = await this.serverInfo(endpoint, { refresh: true });
     const details = server.kind === 'lmstudio' ? await this.lmStudioModelDetails(endpoint) : new Map<string, { type?: string; state?: string }>();
+    // Unsloth는 /v1/models에 종류가 없어 모델마다 임베딩인지 묻는다 (임베딩 모델을 고르지 않게)
+    const unslothTypes = server.unsloth
+      ? new Map(
+          await Promise.all(
+            (body.data ?? []).map(async (m) => {
+              const embedding = await this.unslothCheck(endpoint, 'check-embedding', 'is_embedding', m.id);
+              return [m.id, embedding === null ? null : embedding ? 'embeddings' : 'llm'] as const;
+            }),
+          ),
+        )
+      : null;
     return (body.data ?? []).map((m) => ({
       id: m.id,
       ownedBy: m.owned_by ?? null,
-      type: details.get(m.id)?.type ?? null,
+      type: unslothTypes?.get(m.id) ?? details.get(m.id)?.type ?? null,
       loaded: server.unsloth ? m.loaded === true : details.has(m.id) ? details.get(m.id)?.state === 'loaded' : null,
       reasoning: server.lmStudio ? reasoningSupported(findModelInfo(server.lmStudio, m.id)) : reasoningSupported(unslothActive(server, m.id)),
+      contextLength: (server.lmStudio ? findModelInfo(server.lmStudio, m.id)?.contextLength : unslothActive(server, m.id)?.contextLength) ?? null,
     }));
   }
 
@@ -485,22 +501,22 @@ export class LlmClient {
     const active = unslothActive(server, model);
     return {
       // 불러온 모델은 실제로 불러온 상태(mmproj 포함)를 아는 status가 먼저. check-vision은 불러오지 않은 GGUF를 false로 볼 때가 있다
-      vision: active ? active.vision : ((await this.unslothVision(endpoint, model)) ?? manual.vision),
+      vision: active ? active.vision : ((await this.unslothCheck(endpoint, 'check-vision', 'is_vision', model)) ?? manual.vision),
       reasoning: active ? reasoningSupported(active) : manual.reasoning,
     };
   }
 
-  /** Unsloth Studio가 이 모델을 사진 모델로 보는지 (불러오지 않아도 답한다). 못 읽으면 null */
-  private async unslothVision(endpoint: LlmEndpoint, model: string): Promise<boolean | null> {
+  /** Unsloth Studio가 이 모델을 사진 모델·임베딩 모델로 보는지 (불러오지 않아도 답한다). 못 읽으면 null */
+  private async unslothCheck(endpoint: LlmEndpoint, path: 'check-vision' | 'check-embedding', field: 'is_vision' | 'is_embedding', model: string): Promise<boolean | null> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
-    const key = `${root}|${model}`;
-    const cached = this.unslothVisionCache.get(key);
-    if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.vision;
-    const vision = await this.request<{ is_vision?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/check-vision/${encodeURIComponent(model)}`, undefined, MODELS_TIMEOUT_MS)
-      .then((body) => (typeof body.is_vision === 'boolean' ? body.is_vision : null))
+    const key = `${path}|${root}|${model}`;
+    const cached = this.unslothCheckCache.get(key);
+    if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.value;
+    const value = await this.request<Record<string, unknown>>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/${path}/${encodeURIComponent(model)}`, undefined, MODELS_TIMEOUT_MS)
+      .then((body) => (typeof body[field] === 'boolean' ? (body[field] as boolean) : null))
       .catch(() => null);
-    this.unslothVisionCache.set(key, { at: Date.now(), vision });
-    return vision;
+    this.unslothCheckCache.set(key, { at: Date.now(), value });
+    return value;
   }
 
   /**
@@ -510,7 +526,8 @@ export class LlmClient {
   async modelContextLength(endpoint: LlmEndpoint, model: string): Promise<number | null> {
     const server = await this.serverInfo(endpoint);
     if (server.lmStudio) return findModelInfo(server.lmStudio, model)?.contextLength ?? null;
-    return unslothActive(server, model)?.contextLength ?? null;
+    // Unsloth는 불러온 모델의 Context Length가 먼저, 모르면(외부 LLM 포함) 관리자가 넣은 값
+    return unslothActive(server, model)?.contextLength ?? (positiveInt(endpoint.contextLength) ? endpoint.contextLength : null);
   }
 
   /**
@@ -539,7 +556,7 @@ export class LlmClient {
       .catch(() => null);
     const active =
       loaded.length > 0 && new Set(loaded.map(unslothBaseName)).size === 1
-        ? { ids: loaded, reasoningOptions: unslothReasoningOptions(status), vision: status.is_vision === true, contextLength: positiveInt(status.context_length) ? status.context_length : null }
+        ? { ids: loaded, reasoningOptions: unslothReasoningOptions(status), vision: status.is_vision === true, contextLength: unslothContextLength(status) }
         : null;
     return { loaded, autoSwitch, active };
   }
@@ -799,6 +816,12 @@ function contextLengthOf(m: { max_context_length?: number; loaded_instances?: { 
   const loaded = (m.loaded_instances ?? []).map((i) => i.config?.context_length).filter(positiveInt);
   if (loaded.length) return Math.min(...loaded);
   return positiveInt(m.max_context_length) ? m.max_context_length : null;
+}
+
+/** 불러온 모델에 실제로 쓰이는 문맥 길이: 불러올 때 정한 값이 먼저, 없으면 최대값 */
+function unslothContextLength(status: UnslothStatusWire): number | null {
+  if (positiveInt(status.context_length)) return status.context_length;
+  return positiveInt(status.max_context_length) ? status.max_context_length : null;
 }
 
 function positiveInt(v: unknown): v is number {

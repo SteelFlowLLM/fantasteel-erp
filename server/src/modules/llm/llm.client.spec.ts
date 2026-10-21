@@ -337,11 +337,14 @@ describe('LlmClient Unsloth Studio', () => {
     status = idleStatus as Record<string, unknown>,
     autoSwitch = false as boolean | null,
     vision = {} as Record<string, boolean>,
+    embedding = {} as Record<string, boolean>,
     chat = () => reply('안녕하세요'),
   } = {}) {
     unslothMock.mockImplementation(async (url) => {
       if (url.endsWith('/v1/status')) return Response.json(status);
       if (url.endsWith('/api/settings/openai-auto-switch')) return autoSwitch === null ? new Response('no', { status: 401 }) : Response.json({ enabled: autoSwitch, auto_unload_idle_seconds: 0 });
+      const embeddingName = decodeURIComponent(url.split('/api/models/check-embedding/')[1] ?? '');
+      if (embeddingName) return embeddingName in embedding ? Response.json({ model_name: embeddingName, is_embedding: embedding[embeddingName] }) : new Response('no', { status: 404 });
       const name = decodeURIComponent(url.split('/api/models/check-vision/')[1] ?? '');
       return name in vision ? Response.json({ model_name: name, is_vision: vision[name] }) : new Response('no', { status: 404 });
     });
@@ -461,15 +464,33 @@ describe('LlmClient Unsloth Studio', () => {
     ]);
   });
 
-  it('modelContextLength: 불러온 모델의 status 문맥 길이', async () => {
-    unsloth({ loaded: ['a/think'], status: { ...idleStatus, context_length: 32768 } });
+  it('modelContextLength: 불러온 모델의 Context Length가 먼저(없으면 최대값), 모르면 관리자가 넣은 값', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, context_length: 8192, max_context_length: 262144 } });
     const client = new LlmClient();
-    expect(await client.modelContextLength(unslothEndpoint, 'a/think')).toBe(32768);
+    expect(await client.modelContextLength({ ...unslothEndpoint, contextLength: 4096 }, 'a/think')).toBe(8192);
     expect(await client.modelContextLength(unslothEndpoint, 'b/plain')).toBeNull();
+    expect(await client.modelContextLength({ ...unslothEndpoint, contextLength: 4096 }, 'b/plain')).toBe(4096);
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, context_length: null, max_context_length: 131072 } });
+    expect(await new LlmClient().modelContextLength(unslothEndpoint, 'a/think')).toBe(131072);
+  });
+
+  it('모델 목록: check-embedding으로 임베딩 모델을 알리고, 불러온 모델의 문맥 길이를 싣는다', async () => {
+    unsloth({ loaded: ['a/think'], status: { ...idleStatus, context_length: 8192 }, embedding: { 'a/think': false, 'b/plain': true } });
+    const models = await new LlmClient().listModels(unslothEndpoint);
+    expect(models.map((m) => [m.id, m.type, m.contextLength])).toEqual([
+      ['a/think', 'llm', 8192],
+      ['b/plain', 'embeddings', null],
+    ]);
   });
 });
 
 describe('LlmClient 그 밖의 OpenAI 호환 서버의 관리자 설정 (이슈 #465)', () => {
+  it('modelContextLength: 관리자가 넣은 값을 쓰고, LM Studio면 쓰지 않는다', async () => {
+    await expect(new LlmClient().modelContextLength({ ...endpoint, contextLength: 32768 }, 'm')).resolves.toBe(32768);
+    modelsMock.mockResolvedValue(lmStudioModels([{ key: 'm' }]));
+    await expect(new LlmClient().modelContextLength({ ...endpoint, contextLength: 32768 }, 'm')).resolves.toBeNull();
+  });
+
   it('modelCapabilities는 관리자 설정을 그대로, LM Studio면 관리자 설정을 쓰지 않는다', async () => {
     await expect(new LlmClient().modelCapabilities({ ...endpoint, visionSupport: true, reasoningSupport: false }, 'm')).resolves.toEqual({ vision: true, reasoning: false });
     modelsMock.mockResolvedValue(lmStudioModels([{ key: 'm' }]));
