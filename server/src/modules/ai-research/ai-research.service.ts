@@ -25,7 +25,7 @@ import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
 import { askResearchJson } from './ai-research.llm';
 import { buildPlanReviseMessages, PLAN_JSON_SCHEMA } from './ai-research.prompt';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, extendedBudget, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, erpPartnerNames, extendedBudget, isErpSource, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 import { AiResearchRunner, DEFAULT_RUNNER_CONFIG } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
@@ -43,7 +43,7 @@ const NOTION_EXPORT_STALE_MS = MCP_REQUEST_TIMEOUT_MS * 5;
 /**
  * 심층 조사 API (이슈 #378, 문서에 없는 기능). 로그인한 사원은 누구나 쓰고, 자기 조사만 보고 바꾼다(남의 조사는 없는 것처럼 RES-001).
  * 조사는 일꾼(AiResearchRunner)이 백그라운드로 하고, 화면은 GET runs/:id?afterSeq=로 진행을 받아 간다.
- * ERP 데이터는 쓰지 않는다: 질문과 검색어만 회사 밖(검색 엔진)으로 나가고, 검색어는 웹 검색과 같은 회사 안 정보 막기를 거친다.
+ * ERP 자료(이슈 #435)는 일꾼이 사원의 권한으로 조회해 근거로만 쓴다: 질문과 검색어만 회사 밖(검색 엔진)으로 나가고, 검색어는 웹 검색과 같은 회사 안 정보 막기(조회한 거래처 이름 포함)를 거친다.
  */
 @Injectable()
 export class AiResearchService {
@@ -116,9 +116,10 @@ export class AiResearchService {
 
   /** 계획 고치기: 계획 확인 대기일 때만, 화면이 본 판(revision)이 지금 판과 같을 때만 (다르면 RES-003) */
   async updatePlan(user: AuthUser, id: number, revision: number, dto: AiResearchPlanDto): Promise<AiResearchRunView> {
-    const plan = checkedPlan(dto);
     return this.prisma.$transaction(async (tx) => {
       const run = await this.owned(tx, user, id);
+      // 이 조사가 조회한 ERP 자료의 거래처 이름도 검색어로 내보내지 않는다 (이슈 #435)
+      const plan = checkedPlan(dto, erpPartnerNames(storedSources(run.sources)));
       const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.AWAITING_APPROVAL], planRevision: revision }, {
         plan: plan as unknown as Prisma.InputJsonObject,
         planRevision: { increment: 1 },
@@ -138,7 +139,8 @@ export class AiResearchService {
     if (!settings.model) throw new AppException('RES-005');
     const run = await this.owned(this.prisma, user, id);
     if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) throw new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고칠 수 있어요');
-    const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed) });
+    const sources = storedSources(run.sources);
+    const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed), erp: sources.filter(isErpSource) });
     let value: Record<string, unknown> | null;
     try {
       value = await askResearchJson(this.llmClient, { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model }, messages, PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps), {
@@ -150,7 +152,7 @@ export class AiResearchService {
       throw new AppException('RES-008', `AI 응답을 받지 못했어요(${error.message.slice(0, 160)}). 잠시 뒤 다시 해 주세요`);
     }
     // 모델이 제목을 비우면 지금 제목을 둔다
-    const read = readPlan(value, dto.plan.title.trim() || run.question);
+    const read = readPlan(value, dto.plan.title.trim() || run.question, erpPartnerNames(sources));
     if (!read) throw new AppException('RES-008');
     return { plan: read.plan, dropped: read.dropped };
   }
@@ -327,11 +329,11 @@ export class AiResearchService {
   }
 }
 
-/** 사용자가 고친 계획: 검색어마다 회사 안 정보 막기, 같은 검색어 두 번 금지 */
-function checkedPlan(dto: AiResearchPlanDto): AiResearchPlan {
+/** 사용자가 고친 계획: 검색어마다 회사 안 정보(조회한 ERP 자료의 거래처 이름 포함) 막기, 같은 검색어 두 번 금지 */
+function checkedPlan(dto: AiResearchPlanDto, partnerNames: readonly string[]): AiResearchPlan {
   const seen = new Set<string>();
   const steps = dto.steps.map((step, i) => {
-    const checked = checkResearchQuery(step.query);
+    const checked = checkResearchQuery(step.query, partnerNames);
     if (!checked.ok) throw new AppException('RES-004', `${i + 1}단계: ${checked.reason}. 일반적인 낱말로 바꿔 주세요`);
     if (seen.has(queryKey(checked.query))) throw new AppException('COM-004', `${i + 1}단계 검색어가 앞 단계와 같아요`);
     seen.add(queryKey(checked.query));

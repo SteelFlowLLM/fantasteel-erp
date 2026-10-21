@@ -1,5 +1,5 @@
 import { cutText, wrapUntrusted } from '../ai-assistant/web/web-text';
-import type { StepNote, StoredSource, StoredState } from './ai-research.rules';
+import { isErpSource, type StepNote, type StoredSource, type StoredState } from './ai-research.rules';
 
 /**
  * 근거 조립 (이슈 #384). 출처 하나하나가 아니라 "단계 기록"(검색어 → 그 결과, 읽은 출처 → 본문)을 근거로 넘긴다:
@@ -30,9 +30,11 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 export function notesFor(state: Pick<StoredState, 'notes'>, sources: readonly StoredSource[]): StepNote[] {
   if (state.notes?.length) return state.notes;
   const notes: StepNote[] = [];
-  const unread = sources.filter((s) => s.readText === undefined);
+  // ERP 조회 출처는 단계 기록이 아니라 erpEvidence로 따로 넣는다
+  const web = sources.filter((s) => !isErpSource(s));
+  const unread = web.filter((s) => s.readText === undefined);
   if (unread.length) notes.push({ step: 0, kind: 'search', query: '(앞서 모은 검색 결과)', engine: null, error: null, results: unread.map((s) => ({ sourceId: s.id, title: s.title, url: s.url, snippet: s.snippet })) });
-  for (const s of sources) if (s.readText !== undefined) notes.push({ step: 0, kind: 'read', sourceId: s.id, error: null });
+  for (const s of web) if (s.readText !== undefined) notes.push({ step: 0, kind: 'read', sourceId: s.id, error: null });
   return notes;
 }
 
@@ -50,6 +52,12 @@ export function renderNote(note: StepNote, sources: readonly StoredSource[]): st
   const head = `### ${stepLabel} · 읽기 [${note.sourceId}] ${oneLine(source?.title ?? '')}\n주소: ${source?.url ?? '(모름)'}`;
   if (note.error || source?.readError) return `${head}\n읽지 못함: ${note.error ?? source?.readError}`;
   return `${head}\n본문:\n${source?.readText ?? source?.snippet ?? ''}`;
+}
+
+/** ERP 조회 출처 하나 → 글 (감싸기 전). 우리 회사 자료임을 밝혀 웹 자료와 섞이지 않게 한다 */
+export function renderErp(source: StoredSource): string {
+  const args = oneLine(source.erp?.arguments ?? '');
+  return `### 우리 회사 ERP [${source.id}] ${source.title}\n조회 조건: ${args || '없음'}\n(우리 회사 ERP에서 조회한 결과예요. 웹 자료가 아니에요)\n${source.readText ?? ''}`;
 }
 
 /** 감싼 길이가 max 안이 되도록 글을 줄여 감싼다. 줄일 수 없으면(max가 너무 작으면) null */
@@ -86,6 +94,32 @@ export function evenEvidence(notes: readonly StepNote[], sources: readonly Store
   return chosen.map(({ note, i }) => wrapWithin(noteLabel(note, i), renderNote(note, sources), each)).filter((b): b is string => b !== null);
 }
 
+/**
+ * ERP 조회 출처의 근거 (이슈 #435): room 안에서 똑같이 나눈다(하나 NOTE_MAX까지). 웹 단계 기록과 따로 두어, 단계가 많아도 우리 회사 자료가 밀려나지 않는다.
+ * 몫이 NOTE_MIN보다 작으면 앞의 것부터 NOTE_MIN씩 넣을 수 있는 만큼만.
+ */
+export function erpEvidence(sources: readonly StoredSource[], room: number): string[] {
+  let erp = sources.filter(isErpSource);
+  if (!erp.length || room <= 0) return [];
+  let share = Math.floor((room - erp.length) / erp.length);
+  if (share < NOTE_MIN) {
+    erp = erp.slice(0, Math.max(1, Math.floor(room / (NOTE_MIN + 1))));
+    share = Math.floor((room - erp.length) / erp.length);
+  }
+  const each = Math.min(share, NOTE_MAX);
+  return erp.map((s) => wrapWithin(`research:erp-${s.id}`, renderErp(s), each)).filter((b): b is string => b !== null);
+}
+
+/** ERP 근거를 room의 이만큼까지 쓰고, 남은 글자는 웹 단계 기록이 쓴다 */
+const ERP_ROOM_SHARE = 0.4;
+
+/** ERP 근거를 앞에 두고 나머지 글자를 웹 단계 기록(rest)에 준다 */
+export function withErpEvidence(sources: readonly StoredSource[], room: number, rest: (room: number) => string[]): string[] {
+  const erp = erpEvidence(sources, Math.floor(room * ERP_ROOM_SHARE));
+  const used = erp.reduce((sum, block) => sum + block.length + 1, 0);
+  return [...erp, ...rest(room - used)];
+}
+
 /** 다음 행동의 근거: 최근 단계 기록부터 room이 찰 때까지(하나 TURN_NOTE_MAX까지, 남은 몫이 NOTE_MIN보다 작으면 멈춤). 순서는 단계 순서 그대로 */
 export function recentEvidence(notes: readonly StepNote[], sources: readonly StoredSource[], room: number): string[] {
   const out: string[] = [];
@@ -106,10 +140,11 @@ export function recentEvidence(notes: readonly StepNote[], sources: readonly Sto
 export function sourceCatalog(sources: readonly StoredSource[], room: number, mode: 'turn' | 'final'): string {
   if (!sources.length) return '[모은 출처] 아직 없음';
   const status = (s: StoredSource) => (s.readText !== undefined ? ' (읽음)' : s.readError !== undefined ? ' (읽기 실패)' : '');
+  const where = (s: StoredSource) => (isErpSource(s) ? '우리 회사 ERP' : mode === 'turn' ? hostOf(s.url) : s.url);
   const line = (s: StoredSource, snippet: boolean) =>
     mode === 'turn'
-      ? `[${s.id}] ${cutText(oneLine(s.title), 80)} — ${hostOf(s.url)}${status(s)}${snippet && s.snippet ? ` · ${cutText(oneLine(s.snippet), CATALOG_SNIPPET_MAX)}` : ''}`
-      : `[${s.id}] ${cutText(oneLine(s.title), 100)} — ${s.url}${status(s)}`;
+      ? `[${s.id}] ${cutText(oneLine(s.title), 80)} — ${where(s)}${status(s)}${snippet && s.snippet ? ` · ${cutText(oneLine(s.snippet), CATALOG_SNIPPET_MAX)}` : ''}`
+      : `[${s.id}] ${cutText(oneLine(s.title), 100)} — ${where(s)}${status(s)}`;
   const build = (snippet: boolean, count: number) => {
     const lines = sources.slice(0, count).map((s) => line(s, snippet));
     const dropped = sources.length - count;

@@ -90,7 +90,7 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
     }
     case 'source.added': {
       const p = event.payload;
-      const host = webHostOf(p.url);
+      const host = webHostOf(p.url) ?? (isErpSourceUrl(p.url) ? ERP_SOURCE_HOST : null);
       return { ...base, tone: 'neutral', title: `출처 [${p.sourceId}] ${webSourceTitle(p.title, p.url)}`, detail: host ?? undefined };
     }
     case 'page.read': {
@@ -224,6 +224,10 @@ export function reportBlocks(report: string, sources: readonly Pick<AiResearchSo
   return blocks;
 }
 
+/** 우리 ERP 조회 도구에서 온 출처의 주소(`erp:도구이름`, 이슈 #435). 웹 주소가 아니라 링크로 열지 않는다 */
+const isErpSourceUrl = (url: string): boolean => url.startsWith('erp:');
+const ERP_SOURCE_HOST = '우리 회사 ERP';
+
 export interface SourceRow {
   id: number;
   title: string;
@@ -234,7 +238,7 @@ export interface SourceRow {
 }
 
 export function sourceRows(sources: readonly AiResearchSourceView[]): SourceRow[] {
-  return [...sources].sort((a, b) => a.id - b.id).map((source) => ({ id: source.id, title: webSourceTitle(source.title, source.url), host: webHostOf(source.url), href: safeWebHref(source.url), read: source.read }));
+  return [...sources].sort((a, b) => a.id - b.id).map((source) => ({ id: source.id, title: webSourceTitle(source.title, source.url), host: webHostOf(source.url) ?? (isErpSourceUrl(source.url) ? ERP_SOURCE_HOST : null), href: safeWebHref(source.url), read: source.read }));
 }
 
 // ── 계획 고치기 ──
@@ -412,5 +416,6 @@ export function revisionBlockReason(run: Pick<AiResearchRunView, 'status' | 'can
 
 /** 진행 한 줄: "3/8 단계 · 출처 5/20" */
 export function progressText(run: Pick<AiResearchRunView, 'stepsUsed' | 'budget' | 'sources'>): string {
-  return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.length}/${run.budget.maxSources}`;
+  // 우리 ERP에서 조회한 출처는 웹 출처 자리에 세지 않는다
+  return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.filter((source) => !isErpSourceUrl(source.url)).length}/${run.budget.maxSources}`;
 }

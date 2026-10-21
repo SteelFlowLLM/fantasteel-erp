@@ -1,6 +1,6 @@
 import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
-import { cutText, internalReferenceIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
+import { cutText, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
 
 /** DB의 sources jsonb 한 줄. readText는 읽은 페이지 본문 (6,000자까지) */
@@ -12,6 +12,16 @@ export interface StoredSource {
   readText?: string;
   /** 읽기에 실패한 이유. 있으면 다시 읽지 않는다 */
   readError?: string;
+  /** 웹이 아니라 우리 ERP 조회 도구(이슈 #435)에서 온 출처. url은 `erp:도구이름`이고 readText가 조회 결과다. 웹으로 읽거나 링크로 달지 않는다 */
+  erp?: { tool: string; arguments: string };
+}
+
+/** 웹이 아니라 ERP 조회에서 온 출처 */
+export const isErpSource = (source: Pick<StoredSource, 'erp'>): boolean => source.erp !== undefined;
+
+/** ERP 조회 결과에 나온 거래처 이름 (웹 검색어에 넣지 않는다) */
+export function erpPartnerNames(sources: readonly StoredSource[]): string[] {
+  return [...new Set(sources.flatMap((s) => (s.erp && s.readText ? partnerNamesIn(s.readText) : [])))];
 }
 
 /** DB의 research_state jsonb. searchedQueries는 이어서 할 때 같은 검색을 되풀이하지 않으려고 둔다 */
@@ -29,6 +39,8 @@ export interface StoredState extends AiResearchState {
   searchDownAt?: number;
   /** 아직 판이 나오지 않은 보고서 고치기 (이슈 #418). 고친 보고서를 저장할 때 판을 남기고 지운다 */
   revision?: StoredRevision;
+  /** 우리 ERP 자료가 필요한지 한 번 살펴봤다 (이슈 #435). 없으면 조사를 시작할 때 살펴본다(계획을 복사한 다시 조사) */
+  erpChecked?: true;
 }
 
 /** 보고서 고치기 요청. search가 false면 검색·읽기 없이 모은 것으로 다시 쓴다 */
@@ -38,6 +50,8 @@ export interface StoredRevision {
   search: boolean;
   /** 요청했을 때의 stepsUsed. 더 검색하는 고치기는 여기서 한 단계도 하지 않고는 끝내지 않는다 */
   fromStep?: number;
+  /** 부탁에 맞는 ERP 자료를 살펴봤다 (이슈 #435) */
+  erpChecked?: true;
 }
 
 /** 검색 결과 한 줄. sourceId는 출처 번호(출처가 꽉 차 넣지 못했으면 null — 근거로 보이되 인용할 수 없다) */
@@ -110,15 +124,15 @@ export type QueryCheck = { ok: true; query: string } | { ok: false; reason: stri
 
 /**
  * 회사 밖으로 나가는 검색어 확인 (웹 검색과 같은 규칙): 공백 정리 → 80자로 자름 → 개인정보 빼기 → 업무·LOT 번호가 있으면 막음.
- * 계획의 검색어(모델·사용자)와 모델이 고른 검색어 모두 거친다.
+ * 계획의 검색어(모델·사용자)와 모델이 고른 검색어 모두 거친다. partnerNames는 이 조사의 ERP 조회 결과에 나온 거래처 이름(이슈 #435).
  */
-export function checkResearchQuery(raw: string): QueryCheck {
+export function checkResearchQuery(raw: string, partnerNames: Iterable<string> = []): QueryCheck {
   const tidy = stripInvisible(raw).replace(/\s+/g, ' ').trim();
   if (!tidy) return { ok: false, reason: '검색어가 비었어요' };
   const cut = tidy.length > AI_RESEARCH_LIMITS.queryMax ? cutAtSpace(tidy, AI_RESEARCH_LIMITS.queryMax) : tidy;
   const { query } = redactQuery(cut);
   if (!query) return { ok: false, reason: '개인정보를 빼니 검색어가 비었어요' };
-  const internal = internalReferenceIn(query, []);
+  const internal = internalReferenceIn(query, partnerNames);
   if (internal) return { ok: false, reason: `검색어에 회사 안 정보(${internal})가 있어요` };
   return { ok: true, query };
 }
@@ -139,7 +153,7 @@ export const queryKey = (query: string): string =>
 // ───────────────────────────── 계획 ─────────────────────────────
 
 /** 모델·사용자가 낸 계획을 다듬는다: 검색어 확인을 통과한 단계만, 같은 검색어는 하나, 6단계까지. 단계가 없으면 null */
-export function readPlan(value: unknown, question: string): { plan: AiResearchPlan; dropped: number } | null {
+export function readPlan(value: unknown, question: string, partnerNames: readonly string[] = []): { plan: AiResearchPlan; dropped: number } | null {
   if (!isRecord(value) || !Array.isArray(value.steps)) return null;
   const steps: AiResearchPlan['steps'] = [];
   const seen = new Set<string>();
@@ -149,7 +163,7 @@ export function readPlan(value: unknown, question: string): { plan: AiResearchPl
       dropped += 1;
       continue;
     }
-    const checked = checkResearchQuery(step.query);
+    const checked = checkResearchQuery(step.query, partnerNames);
     if (!checked.ok || seen.has(queryKey(checked.query)) || steps.length >= AI_RESEARCH_LIMITS.maxPlanSteps) {
       dropped += 1;
       continue;
@@ -164,8 +178,8 @@ export function readPlan(value: unknown, question: string): { plan: AiResearchPl
 }
 
 /** 모델이 계획을 내지 못했을 때: 질문을 그대로 검색어로 (검색어 확인을 통과할 때만) */
-export function fallbackPlan(question: string): AiResearchPlan | null {
-  const checked = checkResearchQuery(question);
+export function fallbackPlan(question: string, partnerNames: readonly string[] = []): AiResearchPlan | null {
+  const checked = checkResearchQuery(question, partnerNames);
   if (!checked.ok) return null;
   return { title: cutText(oneLine(question), AI_RESEARCH_LIMITS.planTitleMax), steps: [{ title: '질문 그대로 찾아보기', query: checked.query }] };
 }
@@ -211,12 +225,19 @@ export function storedState(value: unknown): StoredState {
     ...(searchDownAt !== undefined ? { searchDownAt } : {}),
     ...(notes.length ? { notes } : {}),
     ...(revision ? { revision } : {}),
+    ...(value.erpChecked === true ? { erpChecked: true as const } : {}),
   };
 }
 
 function readRevision(value: unknown): StoredRevision | undefined {
   if (!isRecord(value) || typeof value.version !== 'number' || typeof value.instruction !== 'string' || typeof value.search !== 'boolean') return undefined;
-  return { version: value.version, instruction: value.instruction, search: value.search, ...(typeof value.fromStep === 'number' ? { fromStep: value.fromStep } : {}) };
+  return {
+    version: value.version,
+    instruction: value.instruction,
+    search: value.search,
+    ...(typeof value.fromStep === 'number' ? { fromStep: value.fromStep } : {}),
+    ...(value.erpChecked === true ? { erpChecked: true as const } : {}),
+  };
 }
 
 /** 더 검색하는 고치기에서 아직 한 단계도 하지 않았으면 끝내기를 막는다 (모델이 바로 끝내 부탁한 근거를 찾지 않는 것을 막는다) */
@@ -292,6 +313,7 @@ export function storedSources(value: unknown): StoredSource[] {
       snippet: s.snippet,
       ...(typeof s.readText === 'string' ? { readText: s.readText } : {}),
       ...(typeof s.readError === 'string' ? { readError: s.readError } : {}),
+      ...(isRecord(s.erp) && typeof s.erp.tool === 'string' && typeof s.erp.arguments === 'string' ? { erp: { tool: s.erp.tool, arguments: s.erp.arguments } } : {}),
     }));
 }
 
@@ -407,6 +429,8 @@ export interface DecisionContext {
   maxSources: number;
   /** 끝내기를 막는다(더 검색하는 보고서 고치기의 첫 단계, 이슈 #418). 이 글(고치기 부탁)을 마지막 대신 검색어로 쓴다 */
   noFinish?: string;
+  /** 이 조사의 ERP 조회 결과에 나온 거래처 이름. 검색어에 있으면 쓰지 않는다 (이슈 #435) */
+  partnerNames?: readonly string[];
 }
 
 /**
@@ -415,20 +439,22 @@ export interface DecisionContext {
  */
 export function decideAction(turn: ResearchTurn, ctx: DecisionContext): ResearchDecision {
   const searched = new Set(ctx.searchedQueries.map(queryKey));
-  const full = ctx.sources.length >= ctx.maxSources;
+  // ERP 조회 출처는 웹 출처 자리와 '출처 없이 끝내기'에 세지 않는다 (이슈 #435)
+  const webCount = ctx.sources.filter((s) => !isErpSource(s)).length;
+  const full = webCount >= ctx.maxSources;
   if (turn.action === 'search' && !full) {
-    const checked = checkResearchQuery(turn.query);
+    const checked = checkResearchQuery(turn.query, ctx.partnerNames);
     if (checked.ok && !searched.has(queryKey(checked.query))) return { kind: 'search', query: checked.query, fallback: false };
   }
   if (turn.action === 'read' && turn.sourceId !== null) {
     const source = ctx.sources.find((s) => s.id === turn.sourceId);
     if (source && source.readText === undefined && source.readError === undefined) return { kind: 'read', sourceId: source.id, fallback: false };
   }
-  if (turn.action === 'finish' && ctx.sources.length > 0 && ctx.noFinish === undefined) return { kind: 'finish', fallback: false };
+  if (turn.action === 'finish' && webCount > 0 && ctx.noFinish === undefined) return { kind: 'finish', fallback: false };
   if (ctx.noFinish !== undefined && !full) {
     // 끝내기를 막았으면: 모델이 함께 쓴 검색어 → 부탁 글(80자로 자름) → 계획의 남은 검색어 순으로 찾는다
     for (const raw of [turn.query, ctx.noFinish, ...ctx.plan.steps.map((s) => s.query)]) {
-      const checked = checkResearchQuery(raw);
+      const checked = checkResearchQuery(raw, ctx.partnerNames);
       if (checked.ok && !searched.has(queryKey(checked.query))) return { kind: 'search', query: checked.query, fallback: true };
     }
   }
@@ -437,7 +463,7 @@ export function decideAction(turn: ResearchTurn, ctx: DecisionContext): Research
 
 function fallbackAction(ctx: DecisionContext, searched: ReadonlySet<string>, full: boolean): ResearchDecision {
   if (!full) {
-    const next = ctx.plan.steps.find((s) => !searched.has(queryKey(s.query)) && checkResearchQuery(s.query).ok);
+    const next = ctx.plan.steps.find((s) => !searched.has(queryKey(s.query)) && checkResearchQuery(s.query, ctx.partnerNames).ok);
     if (next) return { kind: 'search', query: next.query, fallback: true };
   }
   return { kind: 'finish', fallback: true };

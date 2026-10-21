@@ -17,6 +17,14 @@ import { buildResearchContext, citedResearchSources } from '../ai-assistant/assi
 import { canExtend, checkResearchQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 import { proposeResearchCard } from '../ai-assistant/ai-research-card.service';
 import { ToolArgumentError } from '../ai-assistant/tools/assistant-tool';
+import type { AuthUser } from '@fantasteel/shared';
+import type { AuthUserService } from '../../common/auth/auth-user.service';
+import type { AssistantToolbox, ToolRunResult } from '../ai-assistant/tools/assistant-toolbox';
+import type { LlmToolCall, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
+import { callKey, ERP_LOOKUP_CALLS, ERP_LOOKUP_ROUNDS, erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
+import { erpEvidence, withErpEvidence } from './ai-research.evidence';
+import { ERP_PLAN_RULE } from './ai-research.prompt';
+import { erpPartnerNames, isErpSource, storedSources } from './ai-research.rules';
 
 const plan: AiResearchPlan = {
   title: '전기로 탄소 배출',
@@ -665,5 +673,236 @@ describe('보고서를 말로 고치기: 예산·메모·프롬프트·앞 보�
     const turn = buildTurnMessages({ question: '질문', plan, state: revised, sources: [], stepsUsed: 3, budget: { maxSteps: 7, maxSources: 40 } })[1].content;
     expect(turn).toContain('[보고서 고치기 부탁] (사원이 쓴 글)\n3장 근거 보강');
     expect(buildTurnMessages({ question: '질문', plan, state, sources: [], stepsUsed: 3, budget: { maxSteps: 7, maxSources: 40 } })[1].content).not.toContain('[보고서 고치기 부탁]');
+  });
+});
+
+describe('우리 ERP 자료 (이슈 #435)', () => {
+  const erp = (id: number, tool = 'get_inventory', content = '{"제품":[{"규격":"SS275","합격 재고 매수":120}]}'): StoredSource => erpSourcesFrom([{ tool, arguments: '{"keyword":"SS275"}', content }], id)[0];
+  const user = { employeeId: 7, roleCode: 'PURCHASE', permissions: {} } as unknown as AuthUser;
+  const definitions: LlmToolDefinition[] = ['get_inventory', 'get_sales_orders'].map((name) => ({ name, description: name, parameters: { type: 'object', properties: {} } }));
+  const call = (name: string, args = '{}', id = `c-${name}-${args}`): LlmToolCall => ({ id, name, arguments: args });
+
+  /** 가짜 도구 모음·모델: replies는 차례대로 모델이 하는 말(도구 호출), 다 쓰면 도구 없이 끝낸다 */
+  function setup(replies: LlmToolCall[][], runOf: (c: LlmToolCall) => ToolRunResult = (c) => ({ content: `{"결과":"${c.name}"}`, source: { kind: 'DATA', id: c.name, label: c.name } }), loaded: AuthUser | null = user) {
+    const seen: LlmToolMessage[][] = [];
+    const offeredTools: LlmToolDefinition[][] = [];
+    const llm = {
+      streamWithTools: jest.fn(async (_e: unknown, _m: string, messages: LlmToolMessage[], tools: LlmToolDefinition[]): Promise<LlmToolReply> => {
+        seen.push([...messages]);
+        offeredTools.push(tools);
+        const toolCalls = replies.shift() ?? [];
+        return { content: toolCalls.length ? '' : '조회 끝', toolCalls };
+      }),
+    };
+    const toolbox = { definitions: jest.fn(() => definitions), run: jest.fn(async (_u: AuthUser, c: LlmToolCall) => runOf(c)) };
+    const authUsers = { load: jest.fn(async () => loaded) };
+    const lookup = new ResearchErpLookup(toolbox as unknown as AssistantToolbox, authUsers as unknown as AuthUserService, llm as unknown as LlmClient);
+    const input = { employeeId: 7, question: '우리 재고 정리해줘', endpoint: { baseUrl: 'http://llm.test/v1', apiKey: null, model: 'm' } };
+    return { lookup, input, toolbox, authUsers, llm, seen, offeredTools };
+  }
+
+  describe('ResearchErpLookup', () => {
+    it('모델이 고른 조회 도구를 묻는 사원의 권한(AuthUser)으로 부르고, 성공한 조회만 모은다', async () => {
+      const t = setup([[call('get_inventory', '{"keyword":"SS275"}')], []]);
+      const result = await t.lookup.lookup(t.input);
+      expect(t.authUsers.load).toHaveBeenCalledWith(7);
+      expect(t.toolbox.run).toHaveBeenCalledTimes(1);
+      expect(t.toolbox.run.mock.calls[0][0]).toBe(user);
+      expect(result).toEqual({ findings: [{ tool: 'get_inventory', arguments: '{"keyword":"SS275"}', content: '{"결과":"get_inventory"}' }], calls: 1, failed: 0 });
+      // 모델에는 조사 질문과 도구 결과가 간다
+      expect(JSON.stringify(t.seen[0])).toContain('우리 재고 정리해줘');
+      expect(t.seen[1].at(-1)).toMatchObject({ role: 'tool', content: '{"결과":"get_inventory"}' });
+    });
+
+    it('도구를 부르지 않으면(ERP 자료가 필요 없다고 보면) 아무것도 모으지 않는다', async () => {
+      const t = setup([[]]);
+      expect(await t.lookup.lookup(t.input)).toEqual({ findings: [], calls: 0, failed: 0 });
+      expect(t.toolbox.run).not.toHaveBeenCalled();
+    });
+
+    it('권한 없음·인자 오류 같은 실패는 근거로 모으지 않고 모델에 알린다', async () => {
+      const t = setup([[call('get_sales_orders'), call('get_inventory')], []], (c) =>
+        c.name === 'get_sales_orders' ? { content: JSON.stringify({ 오류: '권한 없음' }), source: null } : { content: '{"제품":[]}', source: { kind: 'DATA', id: c.name, label: '재고' } },
+      );
+      const result = await t.lookup.lookup(t.input);
+      expect(result.findings.map((f) => f.tool)).toEqual(['get_inventory']);
+      expect(result).toMatchObject({ calls: 2, failed: 1 });
+      expect(JSON.stringify(t.seen[1])).toContain('권한 없음');
+    });
+
+    it('알린 도구만 부른다: 실행 카드 같은 목록에 없는 도구는 실행하지 않는다. 같은 조회는 한 번만', async () => {
+      const t = setup([[call('create_task_card', '{"title":"x"}'), call('get_inventory', '{"a":1,"b":2}'), call('get_inventory', '{ "b": 2, "a": 1 }')], []]);
+      const result = await t.lookup.lookup(t.input);
+      expect(t.toolbox.run.mock.calls.map(([, c]) => c.name)).toEqual(['get_inventory']);
+      expect(result.findings).toHaveLength(1);
+      expect(JSON.stringify(t.seen[1])).toContain('없는 도구예요: create_task_card');
+      expect(JSON.stringify(t.seen[1])).toContain('이미 조회한 내용이에요');
+    });
+
+    it('이미 모은 조회(known)는 되풀이하지 않는다', async () => {
+      const t = setup([[call('get_inventory', '{"keyword":"SS275"}')], []]);
+      const result = await t.lookup.lookup({ ...t.input, known: [{ tool: 'get_inventory', arguments: '{"keyword": "SS275"}' }], focus: '원료도' });
+      expect(result.calls).toBe(0);
+      expect(t.seen[0].at(-1)?.content).toContain('[더 알아볼 것] (사원이 쓴 글)\n원료도');
+    });
+
+    it(`조회는 ${ERP_LOOKUP_CALLS}번, 모델 요청은 ${ERP_LOOKUP_ROUNDS}번까지`, async () => {
+      const many = Array.from({ length: ERP_LOOKUP_CALLS + 2 }, (_, i) => call('get_inventory', `{"n":${i}}`));
+      const t = setup([many, [call('get_inventory', '{"z":1}')], [call('get_inventory', '{"z":2}')], [call('get_inventory', '{"z":3}')]]);
+      const result = await t.lookup.lookup(t.input);
+      expect(result.calls).toBe(ERP_LOOKUP_CALLS);
+      expect(t.llm.streamWithTools).toHaveBeenCalledTimes(ERP_LOOKUP_ROUNDS);
+      expect(JSON.stringify(t.seen[1])).toContain(`조회는 ${ERP_LOOKUP_CALLS}번까지만 해요`);
+    });
+
+    it('그만둔 사원(AuthUser 없음)이면 모델도 도구도 부르지 않는다', async () => {
+      const t = setup([[call('get_inventory')]], undefined, null);
+      expect(await t.lookup.lookup(t.input)).toEqual({ findings: [], calls: 0, failed: 0 });
+      expect(t.llm.streamWithTools).not.toHaveBeenCalled();
+    });
+
+    it('AI 응답이 끊기면 그때까지 모은 것으로 끝내고, 취소(abort)나 다른 오류는 던진다', async () => {
+      const t = setup([[call('get_inventory')]]);
+      t.llm.streamWithTools.mockImplementationOnce(async () => ({ content: '', toolCalls: [call('get_inventory')] })).mockImplementationOnce(async () => {
+        throw new LlmRequestError('연결 실패');
+      });
+      const result = await t.lookup.lookup(t.input);
+      expect(result.findings).toHaveLength(1);
+
+      const aborted = new AbortController();
+      const u = setup([]);
+      u.llm.streamWithTools.mockImplementationOnce(async () => {
+        aborted.abort();
+        throw new LlmRequestError('끊김');
+      });
+      await expect(u.lookup.lookup({ ...u.input, signal: aborted.signal })).rejects.toBeInstanceOf(LlmRequestError);
+
+      const v = setup([]);
+      v.llm.streamWithTools.mockImplementationOnce(async () => {
+        throw new TypeError('버그');
+      });
+      await expect(v.lookup.lookup(v.input)).rejects.toBeInstanceOf(TypeError);
+    });
+
+    it('callKey: 키 순서·공백을 무시하고, JSON이 아니면 글 그대로 비교', () => {
+      expect(callKey('t', '{"a":1,"b":2}')).toBe(callKey('t', ' {"b" : 2, "a": 1} '));
+      expect(callKey('t', '{}')).toBe(callKey('t', ''));
+      expect(callKey('t', 'abc')).not.toBe(callKey('t', 'abd'));
+    });
+  });
+
+  describe('출처·거래처 이름', () => {
+    it('조회 결과는 ERP 출처로: 웹 주소가 아닌 erp:도구이름, 번호는 이어서, 읽은 것으로 둔다', () => {
+      const [a, b] = erpSourcesFrom([{ tool: 'get_inventory', arguments: '{}', content: '{"a":1}' }, { tool: 'get_sales_orders', arguments: '{"keyword":"SS275"}', content: '{"b":2}' }], 5);
+      expect(a).toMatchObject({ id: 5, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory', readText: '{"a":1}', erp: { tool: 'get_inventory', arguments: '{}' } });
+      expect(b.id).toBe(6);
+      expect(b.snippet).toContain('{"keyword":"SS275"}');
+      expect(isErpSource(a)).toBe(true);
+      expect(isErpSource(source(1))).toBe(false);
+      // DB에 저장했다 읽어도 ERP 표시가 남는다
+      expect(storedSources(JSON.parse(JSON.stringify([a, source(2)])))[0].erp).toEqual({ tool: 'get_inventory', arguments: '{}' });
+    });
+
+    it('조회 결과에 나온 거래처 이름은 계획·검색어 확인에서 막는다. 웹 출처 자리와 출처 없이 끝내기에는 ERP 출처를 세지 않는다', () => {
+      const orders = erp(1, 'get_sales_orders', '{"수주":[{"고객사":"한빛철강","수량":10}]}');
+      const partners = erpPartnerNames([orders, source(2)]);
+      expect(partners).toEqual(['한빛철강']);
+      expect(checkResearchQuery('한빛철강 신용 등급')).toEqual({ ok: true, query: '한빛철강 신용 등급' });
+      expect(checkResearchQuery('한빛철강 신용 등급', partners).ok).toBe(false);
+      expect(checkResearchQuery('열연 가격 전망', partners).ok).toBe(true);
+      const readable = readPlan({ title: 't', steps: [{ title: 'a', query: '한빛 철강 재무' }, { title: 'b', query: '열연 가격 전망' }] }, 'q', partners);
+      expect(readable?.plan.steps.map((s) => s.query)).toEqual(['열연 가격 전망']);
+      expect(fallbackPlan('한빛철강 신용', partners)).toBeNull();
+      // 모델이 거래처 이름으로 검색하려 하면 계획의 다음 검색어로
+      const ctx = { plan, searchedQueries: [] as string[], sources: [orders], maxSources: 1, partnerNames: partners };
+      expect(decideAction(readTurn({ action: 'search', query: '한빛철강 거래 이력' }), ctx)).toEqual({ kind: 'search', query: '전기로 탄소 배출량', fallback: true });
+      // ERP 출처만 있으면 웹 출처 자리는 비어 있고, 끝내기는 막힌다
+      expect(decideAction(readTurn({ action: 'search', query: '전기로 효율' }), ctx)).toEqual({ kind: 'search', query: '전기로 효율', fallback: false });
+      expect(decideAction(readTurn({ action: 'finish' }), ctx).fallback).toBe(true);
+    });
+  });
+
+  describe('근거와 프롬프트', () => {
+    it('ERP 근거는 우리 회사 자료로 표시해 감싼다. 웹 단계 기록과 따로라서 웹 기록이 많아도 밀려나지 않는다', () => {
+      const sources = [erp(1), source(2, { readText: '웹 본문' })];
+      const blocks = erpEvidence(sources, 5000);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]).toContain('<untrusted_web_content source="research:erp-1">');
+      expect(blocks[0]).toContain('### 우리 회사 ERP [1] ERP 조회(get_inventory)');
+      expect(blocks[0]).toContain('조회 조건: {"keyword":"SS275"}');
+      expect(blocks[0]).toContain('웹 자료가 아니에요');
+      expect(blocks[0]).toContain('합격 재고 매수');
+      expect(erpEvidence([source(2)], 5000)).toEqual([]);
+      const rest = jest.fn((_room: number) => ['웹 블록']);
+      const merged = withErpEvidence(sources, 10_000, rest);
+      expect(merged[0]).toContain('research:erp-1');
+      expect(merged.at(-1)).toBe('웹 블록');
+      // 웹 기록에는 ERP가 쓴 글자를 뺀 나머지가 간다
+      expect(rest.mock.calls[0][0]).toBeLessThan(10_000);
+    });
+
+    it('방 글자가 모자라면 앞의 ERP 출처부터 들어갈 만큼만 넣는다', () => {
+      const many = [1, 2, 3, 4].map((id) => erp(id, `tool_${id}`, 'x'.repeat(2000)));
+      const blocks = erpEvidence(many, 1000);
+      expect(blocks.length).toBeGreaterThan(0);
+      expect(blocks.length).toBeLessThan(4);
+      expect(blocks.join('\n').length).toBeLessThanOrEqual(1000);
+      expect(blocks[0]).toContain('research:erp-1');
+    });
+
+    it('단계 기록이 없는 옛 조사의 대신 기록에는 ERP 출처를 넣지 않는다. 출처 목록은 우리 회사 ERP로 보인다', () => {
+      const sources = [erp(1), source(2, { readText: '본문' }), source(3)];
+      const notes = notesFor({}, sources);
+      expect(JSON.stringify(notes)).not.toContain('erp:');
+      expect(notes.map((n) => n.kind)).toEqual(['search', 'read']);
+      const catalog = sourceCatalog(sources, 5000, 'turn');
+      expect(catalog).toContain('[1] ERP 조회(get_inventory) — 우리 회사 ERP (읽음)');
+      expect(catalog).toContain('[2] 출처 2 — example2.com (읽음)');
+      expect(sourceCatalog(sources, 5000, 'final')).toContain('[1] ERP 조회(get_inventory) — 우리 회사 ERP (읽음)');
+    });
+
+    it('계획 프롬프트: ERP 자료가 있으면 감싸서 넣고 부탁을 붙인다. 없으면 블록이 없다. 말로 고치기에도 넣는다', () => {
+      const withErp = buildPlanMessages('우리 재고 정리', '2026-10-21', null, [erp(1)]);
+      const user = withErp[1].content;
+      expect(user).toContain('[우리 회사 ERP 자료]\n');
+      expect(user).toContain('<untrusted_web_content source="research:erp-1">');
+      expect(user).toContain(ERP_PLAN_RULE);
+      expect(buildPlanMessages('우리 재고 정리', '2026-10-21')[1].content).not.toContain('[우리 회사 ERP 자료]\n');
+      const revise = buildPlanReviseMessages({ question: 'q', plan, instruction: '한 단계 더', erp: [erp(1)] });
+      expect(revise[1].content).toContain('research:erp-1');
+      expect(revise[1].content.indexOf('[우리 회사 ERP 자료]')).toBeLessThan(revise[1].content.indexOf('[고칠 부탁]'));
+    });
+
+    it('다음 행동·점검·보고서 프롬프트에 ERP 근거가 들어가고 글자 상한을 지킨다', () => {
+      const sources = [erp(1, 'get_inventory', 'ERP 줄\n'.repeat(300)), source(2, { readText: '웹 본문' })];
+      const notes = [{ step: 1, kind: 'read' as const, sourceId: 2, error: null }];
+      const st: StoredState = { ...state, notes };
+      const audit = { thesis: '핵심', outline: [], supportedClaims: [], contradictions: [], missingDimensions: [], designInferences: [], unsupportedPrecision: [], ok: true, reportTruncated: false };
+      const limits = { promptChars: 8000, evidenceSources: 6, reportSources: 40 };
+      const turn = buildTurnMessages({ question: 'q', plan, state: st, sources, stepsUsed: 1, budget: { maxSteps: 8, maxSources: 20 }, limits });
+      const report = buildReportMessages({ question: 'q', plan, state: st, sources, audit, limits });
+      const checks = buildAuditMessages({ question: 'q', plan, state: st, sources, limits });
+      for (const messages of [turn, report, checks]) {
+        const all = messages.map((m) => m.content).join('\n');
+        expect(all).toContain('### 우리 회사 ERP [1]');
+        expect(all).toContain('웹 본문');
+        expect(messages.reduce((n, m) => n + m.content.length, 0)).toBeLessThanOrEqual(limits.promptChars);
+      }
+      expect(turn[1].content).toContain('웹 출처 1/20개');
+      expect(report[0].content).toContain("'ERP 조회' 출처");
+    });
+  });
+
+  describe('보고서 출처', () => {
+    it('ERP 출처는 [n]으로 인용할 수 있고 출처 목록에 링크 없이 ERP 조회(도구 이름)로 남는다. 웹 링크 허용에는 들어가지 않는다', () => {
+      const web = source(2, { url: 'https://example2.com/a', title: '웹 제목' });
+      const { report, citedIds } = finalizeReport('# 보고\n우리 재고 120매 [1]. 시황 [2]. 지어낸 [9]. [ERP](erp:get_inventory)', [erp(1), web], false);
+      expect(citedIds).toEqual([1, 2]);
+      expect(report).not.toContain('[9]');
+      expect(report).not.toContain('(erp:get_inventory)');
+      expect(report.endsWith('## 출처\n- [1] ERP 조회(get_inventory)\n- [2] [웹 제목](https://example2.com/a)')).toBe(true);
+      // 인용이 없으면 모은 출처 모두
+      expect(finalizeReport('본문', [erp(1), web], false).report).toContain('- [1] ERP 조회(get_inventory)');
+    });
   });
 });
