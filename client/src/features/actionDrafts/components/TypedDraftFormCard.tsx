@@ -138,7 +138,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     <Card petKey="card:actionDrafts.typedForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 확인하고 확정해 주세요' : '초안 내용'}</h2>
-        <AiFillHint aiFilledFields={draft.payload.aiFilledFields ?? []} editable={editable} />
+        <AiFillHint aiFilledFields={draft.payload.aiFilledFields ?? []} aiExtraction={draft.payload.aiExtraction} editable={editable} />
         <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
           {DRAFT_STATUS_LABEL[status]}
         </Badge>
@@ -153,7 +153,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
         <RequesterRow draft={draft} />
       </div>
       <CardFoot className="flex-wrap">
-        {editable && rejecting ? (
+        {(editable || retryable) && rejecting ? (
           <>
             <Input
               aria-label="반려 사유"
@@ -191,6 +191,10 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
           </>
         ) : retryable ? (
           <>
+            {/* 실행에 실패한 초안은 반려해 끝낼 수 있다 (#471 리뷰) */}
+            <Button variant="ghost" icon="x-circle" disabled={pending} onClick={() => setRejecting(true)}>
+              반려
+            </Button>
             <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
             <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
               {typeLabel} 다시 실행
@@ -497,6 +501,7 @@ function AllocationFields({ ctx, form, onChange, onRecommend, dirty }: { ctx: Fi
   const detail = useShipmentRequestDetail(editable ? shipmentRequestId : null);
   const savedId = (buildTypedForm('ALLOCATION_CONFIRM', draft.payload) as AllocationForm).shipmentRequestItemId;
   const lotIds = 'lotIds' in draft.payload ? draft.payload.lotIds : [];
+  const lotsChosenBy = 'lotIds' in draft.payload ? draft.payload.lotsChosenBy : null;
   const openRequests = (requests.data ?? []).filter((r) => OPEN_SHIPMENT_REQUEST.includes(r.shipmentRequestStatus));
 
   return (
@@ -536,7 +541,7 @@ function AllocationFields({ ctx, form, onChange, onRecommend, dirty }: { ctx: Fi
       </FieldRow>
       <FieldRow label="배정 LOT" required unresolved={isUnresolved('배정 LOT', form.shipmentRequestItemId !== savedId)} hint="AI가 고르지 않아요 · 생산완료일이 오래된 순(FIFO) 추천">
         <div className="flex flex-col gap-1.5">
-          <ReadValue text={lotIds.length > 0 ? `${lotIds.length}개 · ${draft.payloadLabels.lotIds ?? ''}` : null} />
+          <ReadValue text={lotIds.length > 0 ? `${lotIds.length}개${lotsChosenBy === 'PERSON' ? ' (사람이 고름)' : ''} · ${draft.payloadLabels.lotIds ?? ''}` : null} />
           {editable && savedId !== null && !dirty ? (
             <Button size="sm" variant="ghost" icon="refresh" className="self-start" disabled={pending} onClick={() => onRecommend(savedId)}>
               추천 다시 받기

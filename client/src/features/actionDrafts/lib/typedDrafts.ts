@@ -1,6 +1,7 @@
 // 확장 유형 초안(REQ-ACT-005, 업무 프로세스 12.3 유형 표) 화면용 순수 함수: 유형별 안내·권한, 입력 폼 ↔ 저장값, 미확정 칸, 만든 업무 링크.
 // 칸 검증·이름 → id 맞추기·실행은 서버 유형 정의가 한다. 칸 표시명은 서버 미확정 칸 이름과 같다('고객사', '품목 1 매수' 등).
 import { ACTION_TYPE, ACTION_TYPE_LABEL, PERMISSION, type ActionType, type Permission } from '@/codes';
+import type { AiExtractionStatus } from '@fantasteel/shared';
 import type {
   AllocationDraftPayload,
   DraftDetailView,
@@ -229,4 +230,24 @@ export function draftCreatedNotice(result: { id: number; created: boolean; reque
   if (result.created) return `${withEulReul(`${typeLabel} 초안 #${result.id}`)} 만들었어요. 값을 확인하고 확정해 주세요`;
   if (result.requesterId !== null && result.requesterId !== myEmployeeId) return `${result.requesterName ?? '다른 사원'}님이 만든 초안이 이미 있어요. ${withEulReul(`초안 #${result.id}`)} 열어요`;
   return `${withEulReul(`이미 만든 초안 #${result.id}`)} 열어요`;
+}
+
+// ── AI 추출 결과 (이슈 #472) ─────────────────────────
+
+/** 빈 초안이 된 까닭. 칸을 채웠거나(FILLED) 예전 초안(없음)이면 null */
+export function aiExtractionNotice(status: AiExtractionStatus | null | undefined): string | null {
+  switch (status) {
+    case 'TIMEOUT':
+      return 'AI가 제한 시간 안에 답하지 않아 빈 초안으로 만들었어요. 메시지를 보면서 값을 입력해 주세요';
+    case 'NO_MODEL':
+      return 'AI 모델이 정해지지 않아 빈 초안으로 만들었어요(관리 > AI 연결). 값을 입력해 주세요';
+    case 'FAILED':
+      return 'AI 서버에 연결하지 못해 빈 초안으로 만들었어요. 값을 입력해 주세요';
+    case 'NOT_JSON':
+      return 'AI 답을 읽지 못해 빈 초안으로 만들었어요. 값을 입력해 주세요';
+    case 'NOTHING_FOUND':
+      return 'AI가 메시지에서 맞는 값을 찾지 못했어요. 값을 입력해 주세요';
+    default:
+      return null;
+  }
 }

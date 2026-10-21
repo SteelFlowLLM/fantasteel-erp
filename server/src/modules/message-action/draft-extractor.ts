@@ -1,13 +1,28 @@
 // Message → ERP AI 추출 (모듈 문서 10장). LLM은 칸 값을 제안만 하고, 서버가 유형 정의(fromExtraction)로 다시 검증한다.
 // 모델이 없거나 연결·형식이 실패해도 초안 만들기는 실패하지 않고 빈 칸으로 만든다.
 import { Injectable, Logger } from '@nestjs/common';
+import type { AiExtractionStatus } from '@fantasteel/shared';
 import { seoulToday } from '../../common/time/seoul-date';
-import { LlmClient } from '../llm/llm.client';
+import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 
-/** 사용자가 초안 만들기 응답을 기다리므로 기본 대화(120초)보다 짧게 끊는다 */
-const EXTRACT_TIMEOUT_MS = 30_000;
+/**
+ * 사용자가 초안 만들기 응답을 기다리므로 기본 대화(120초)보다 짧게 끊는다. 가정값 90초(이슈 #472): 개발 모델의 측정값 대부분을 덮는다.
+ * MESSAGE_EXTRACT_TIMEOUT_SECONDS로 바꾼다(1~600초, 그 밖이면 기본값)
+ */
+const DEFAULT_EXTRACT_TIMEOUT_SECONDS = 90;
+
+export function extractTimeoutMs(raw: string | undefined = process.env.MESSAGE_EXTRACT_TIMEOUT_SECONDS): number {
+  const seconds = Number(raw);
+  return (raw !== undefined && raw.trim() !== '' && Number.isFinite(seconds) && seconds >= 1 && seconds <= 600 ? seconds : DEFAULT_EXTRACT_TIMEOUT_SECONDS) * 1000;
+}
+
+/** AI 추출 결과: 찾은 칸 값(없으면 null)과 어떻게 끝났는지. 칸을 채웠는지(FILLED·NOTHING_FOUND)는 유형 정의가 검증한 뒤 정한다 */
+export interface ExtractionOutcome {
+  values: Record<string, unknown> | null;
+  status: Exclude<AiExtractionStatus, 'FILLED' | 'NOTHING_FOUND'> | null;
+}
 const WEEKDAY = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', weekday: 'short' });
 
 /** 답에서 JSON 객체 하나를 꺼낸다. 생각 과정(<think>)이나 코드블록으로 감싼 답도 받는다 */
@@ -44,22 +59,22 @@ export class DraftExtractor {
     private readonly llm: LlmClient,
   ) {}
 
-  /** 칸 이름 → LLM이 찾은 값. 모델이 없거나 실패하면 null. guide는 모델이 있을 때만 읽는다 */
-  async extract(guide: () => Promise<string>, content: string, writtenAt: Date): Promise<Record<string, unknown> | null> {
+  /** 칸 이름 → LLM이 찾은 값과 실패 이유. 모델이 없거나 실패하면 values는 null. guide는 모델이 있을 때만 읽는다 */
+  async extract(guide: () => Promise<string>, content: string, writtenAt: Date): Promise<ExtractionOutcome> {
     try {
       const settings = await this.settings.read();
-      if (!settings.model) return null;
+      if (!settings.model) return { values: null, status: 'NO_MODEL' };
       const messages = [
         { role: 'system' as const, content: systemPrompt(await guide(), writtenAt) },
         { role: 'user' as const, content },
       ];
-      const extracted = parseJsonObject(await this.llm.chat(settings, settings.model, messages, LLM_PROFILE.MESSAGE_EXTRACT, undefined, EXTRACT_TIMEOUT_MS));
+      const extracted = parseJsonObject(await this.llm.chat(settings, settings.model, messages, LLM_PROFILE.MESSAGE_EXTRACT, undefined, extractTimeoutMs()));
       if (!extracted) this.logger.warn('AI 추출 답이 JSON 객체가 아니라 빈 초안으로 만듭니다');
-      return extracted;
+      return extracted ? { values: extracted, status: null } : { values: null, status: 'NOT_JSON' };
     } catch (error) {
       // 초안 만들기는 LLM 상태와 상관없이 되어야 한다
       this.logger.warn(`AI 추출에 실패해 빈 초안으로 만듭니다: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      return { values: null, status: error instanceof LlmRequestError && error.kind === 'TIMEOUT' ? 'TIMEOUT' : 'FAILED' };
     }
   }
 }

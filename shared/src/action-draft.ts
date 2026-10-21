@@ -2,6 +2,12 @@
 import type { ActionType, ChatRoomType, DraftStatus } from './codes';
 
 /**
+ * 메시지에서 만들 때 AI 추출이 어떻게 끝났는지 (이슈 #472). 빈 초안이면 화면이 그 이유를 보인다.
+ * FILLED 칸을 채움 / NOTHING_FOUND 답은 왔지만 맞는 값이 없음 / NO_MODEL 모델 미설정 / TIMEOUT 제한 시간 초과 / NOT_JSON 답이 JSON이 아님 / FAILED 연결·서버 오류
+ */
+export type AiExtractionStatus = 'FILLED' | 'NOTHING_FOUND' | 'NO_MODEL' | 'TIMEOUT' | 'NOT_JSON' | 'FAILED';
+
+/**
  * 구매요청 초안 값 (추출 스키마 REQ-ACT-001). 이름은 ERD 구매요청 컬럼을 따른다.
  * 요청자는 payload가 아니라 초안의 requesterId(= 메시지 작성자)다.
  */
@@ -17,6 +23,8 @@ export interface PurchaseRequisitionDraftPayload {
    * 서버 초안 응답에는 늘 있고(없으면 빈 배열), 회의록 후보(MeetingCandidate.purchase)에는 없다
    */
   aiFilledFields?: string[];
+  /** 메시지에서 만들 때 AI 추출 결과 (회의록·AI 어시스턴트 초안·이슈 #472 전 초안에는 없다) */
+  aiExtraction?: AiExtractionStatus | null;
 }
 
 /** 확장 유형 초안 값에 늘 있는 칸 (원본 글·AI가 채운 칸) */
@@ -24,6 +32,8 @@ interface DraftPayloadBase {
   sourceText: string | null;
   /** 만들 때 AI가 채운 칸 이름. 사람이 고쳐도 그대로 두고, 비어 있지 않으면 확정·실행 작업 로그가 AI 경유다 */
   aiFilledFields: string[];
+  /** 메시지에서 만들 때 AI 추출 결과 (이슈 #472 전 초안에는 없다) */
+  aiExtraction?: AiExtractionStatus | null;
 }
 
 /** 수주 등록 초안의 품목 한 줄 (ERD sales_order_item). 매수는 정수, 납기는 'YYYY-MM-DD' */
@@ -56,6 +66,8 @@ export interface ShipmentRequestDraftPayload extends DraftPayloadBase {
 export interface AllocationDraftPayload extends DraftPayloadBase {
   shipmentRequestItemId: number | null;
   lotIds: number[];
+  /** LOT을 누가 골랐는지: 시스템 FIFO 추천 또는 사람이 고침. 확정 작업 로그 사유에 쓴다 (없으면 추천) */
+  lotsChosenBy?: 'RECOMMENDATION' | 'PERSON' | null;
 }
 
 /** 재생산 계획 생성 초안 (REPRODUCTION_PLAN_CREATE). 추가 계획 매수는 실행 때 서버가 다시 계산한다 */

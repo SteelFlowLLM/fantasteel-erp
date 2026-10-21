@@ -6,7 +6,7 @@ import { AppException } from '../../../common/errors/app.exception';
 import type { Tx } from '../../../prisma/prisma.service';
 import { SalesOrderService } from '../../sales-order/sales-order.service';
 import { MessageActionRepository, type DraftRow } from '../message-action.repository';
-import type { ActionDefinition } from './action-definition';
+import { memoized, type ActionDefinition, type LookupMemo } from './action-definition';
 import { executedResultOf, originOf } from './business-refs';
 import {
   dateOrNull,
@@ -20,6 +20,7 @@ import {
   linesOf,
   linesPatch,
   matchOne,
+  MAX_DRAFT_QTY,
   qtyOrNull,
   qtyPatch,
   rejectUnknownFields,
@@ -126,7 +127,7 @@ export class SalesOrderAction implements ActionDefinition<SalesOrderDraftPayload
         if (itemId !== null && !productIds.has(itemId)) throw new AppException('SO-001', `품목 ${n}의 규격을 찾을 수 없어요`);
         return {
           itemId,
-          orderedQty: qtyPatch(line.orderedQty, `품목 ${n}의 매수는 1 이상의 정수로 입력해 주세요`),
+          orderedQty: qtyPatch(line.orderedQty, `품목 ${n}의 매수는 1 이상의 정수(${MAX_DRAFT_QTY.toLocaleString('ko-KR')}매까지)로 입력해 주세요`),
           dueDate: datePatch(line.dueDate, `품목 ${n}의 납기는 YYYY-MM-DD 형식의 날짜로 입력해 주세요`),
         };
       });
@@ -134,19 +135,19 @@ export class SalesOrderAction implements ActionDefinition<SalesOrderDraftPayload
     return next;
   }
 
-  async unresolvedFields(tx: Tx, payload: SalesOrderDraftPayload): Promise<string[]> {
-    const customers = payload.customerId === null ? [] : await this.repository.findCustomers(tx);
-    const productIds = payload.items.length === 0 ? new Set<number>() : new Set((await this.repository.findProductItems(tx)).map((i) => i.id));
+  async unresolvedFields(tx: Tx, payload: SalesOrderDraftPayload, memo?: LookupMemo): Promise<string[]> {
+    const customers = payload.customerId === null ? [] : await memoized(memo, 'customers', () => this.repository.findCustomers(tx));
+    const productIds = payload.items.length === 0 ? new Set<number>() : new Set((await memoized(memo, 'productItems', () => this.repository.findProductItems(tx))).map((i) => i.id));
     return salesOrderUnresolvedFields(payload, customers.some((c) => c.id === payload.customerId), productIds);
   }
 
   /** 수주 등록에는 승인권자가 없다 */
   async assertCanExecute(): Promise<void> {}
 
-  async payloadLabels(tx: Tx, payload: SalesOrderDraftPayload): Promise<Record<string, string>> {
+  async payloadLabels(tx: Tx, payload: SalesOrderDraftPayload, memo?: LookupMemo): Promise<Record<string, string>> {
     const labels: Record<string, string> = {};
     if (payload.customerId !== null) {
-      const customer = (await this.repository.findCustomers(tx)).find((c) => c.id === payload.customerId);
+      const customer = (await memoized(memo, 'customers', () => this.repository.findCustomers(tx))).find((c) => c.id === payload.customerId);
       if (customer) labels.customerId = customer.customerName;
     }
     const itemIds = payload.items.map((l) => l.itemId).filter((id): id is number => id !== null);
