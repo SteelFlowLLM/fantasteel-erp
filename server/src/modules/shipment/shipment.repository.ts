@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ALLOCATION_STATUS, LOT_STATUS, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
+import { ALLOCATION_STATUS, LOT_STATUS, LOT_TYPE, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { getShippableQtyBySalesOrderItem, lockSalesOrderItemsForShipment, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
@@ -38,7 +38,7 @@ const detailSelect = {
       allocations: {
         where: { allocationStatus: { not: ALLOCATION_STATUS.RELEASED } },
         orderBy: { id: 'asc' },
-        select: { id: true, lotId: true, allocationStatus: true, lot: { select: { lotNo: true } } },
+        select: { id: true, lotId: true, allocationStatus: true, lot: { select: { lotNo: true, lotStatus: true, producedDate: true } } },
       },
     },
   },
@@ -138,6 +138,12 @@ export type SnapshotLotRow = Prisma.LotGetPayload<{ select: typeof lotSnapshotSe
   inspection: SnapshotInspectionRow | null;
   parents: (SnapshotHeatRow & { parents: SnapshotHeatRow[] })[] };
 
+/** 배정 LOT의 자기 검사 판정과 상위 히트 (findInspectionAndHeats) */
+export interface AllocatedLotLinks {
+  inspectionResult: string | null;
+  heat: { id: number; lotNo: string; inspectionResult: string | null } | null;
+}
+
 export type ShipmentRequestSummaryRow = Prisma.ShipmentRequestGetPayload<{ select: typeof summarySelect }>;
 export type ShipmentRequestDetailRow = Prisma.ShipmentRequestGetPayload<{ select: typeof detailSelect }>;
 export type MillSheetSummaryRow = Prisma.MillSheetGetPayload<{ select: typeof millSheetSummarySelect }>;
@@ -183,6 +189,32 @@ export class ShipmentRepository {
 
   findDetail(tx: Tx, id: number) {
     return tx.shipmentRequest.findUnique({ where: { id }, select: detailSelect });
+  }
+
+  /**
+   * 배정 LOT의 자기 검사 판정과 상위 히트(조상 가운데 가장 가까운 히트: 슬래브 → 히트, 코일 → 슬래브 → 히트)와 그 히트의 판정.
+   * 출하요청 응답이 LOT 상세를 대신하게 해 화면이 LOT마다 상세를 따로 부르지 않는다(이슈 #519). 중첩 select 대신 단계별로 읽는다.
+   * 가장 가까운 히트가 여럿이면 id가 작은 쪽이다 (LOT 상세와 같은 규칙)
+   */
+  async findInspectionAndHeats(tx: Tx, lotIds: number[]): Promise<Map<number, AllocatedLotLinks>> {
+    if (lotIds.length === 0) return new Map();
+    const parentsOf = (childIds: number[]) => tx.lotRelation.findMany({ where: { childLotId: { in: childIds } }, select: { childLotId: true, parentLotId: true } });
+    const first = await parentsOf(lotIds);
+    const second = await parentsOf([...new Set(first.map((r) => r.parentLotId))]);
+    const parents = await tx.lot.findMany({ where: { id: { in: [...new Set([...first, ...second].map((r) => r.parentLotId))] } }, select: { id: true, lotNo: true, lotType: true } });
+    const heatById = new Map(parents.filter((p) => p.lotType === LOT_TYPE.HEAT).map((p) => [p.id, p]));
+    const inspections = await tx.qualityInspection.findMany({ where: { lotId: { in: [...lotIds, ...heatById.keys()] } }, select: { lotId: true, inspectionResult: true } });
+    const resultOf = new Map(inspections.map((q) => [q.lotId, q.inspectionResult]));
+    const nearestHeat = (lotId: number) => {
+      const directIds = first.filter((r) => r.childLotId === lotId).map((r) => r.parentLotId);
+      const viaIds = second.filter((r) => directIds.includes(r.childLotId)).map((r) => r.parentLotId);
+      for (const ids of [directIds, viaIds]) {
+        const heat = ids.flatMap((id) => heatById.get(id) ?? []).sort((a, b) => a.id - b.id)[0];
+        if (heat) return { id: heat.id, lotNo: heat.lotNo, inspectionResult: resultOf.get(heat.id) ?? null };
+      }
+      return null;
+    };
+    return new Map(lotIds.map((id) => [id, { inspectionResult: resultOf.get(id) ?? null, heat: nearestHeat(id) }]));
   }
 
   /** 상태 갱신용: 품목별 요청 매수와 CONFIRMED 배정 수 */

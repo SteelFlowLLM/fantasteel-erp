@@ -2,7 +2,9 @@ import {
   ALLOCATION_STATUS,
   LOT_TYPE,
   type AllocationStatus,
+  type InspectionResult,
   type ItemType,
+  type LotStatus,
   type MillSheetDetail,
   type MillSheetSnapshot,
   type MillSheetSummary,
@@ -13,6 +15,7 @@ import {
 import { seoulDateOnly } from '../../common/time/seoul-date';
 import type { SnapshotHeatInput, SnapshotInspectionInput, SnapshotLotInput } from './mill-sheet-snapshot';
 import type {
+  AllocatedLotLinks,
   MillSheetDetailRow,
   MillSheetSummaryRow,
   ShipmentRequestDetailRow,
@@ -40,7 +43,8 @@ export function toShipmentRequestSummary(row: ShipmentRequestSummaryRow): Shipme
   };
 }
 
-export function toShipmentRequestDetail(row: ShipmentRequestDetailRow): ShipmentRequestDetail {
+/** 검사 판정·상위 히트는 배정 LOT id로 따로 읽어 넘긴다 (없으면 검사 없음·상위 히트 없음) */
+export function toShipmentRequestDetail(row: ShipmentRequestDetailRow, lotLinks: ReadonlyMap<number, AllocatedLotLinks>): ShipmentRequestDetail {
   return {
     ...toShipmentRequestSummary(row),
     issuedEmployeeId: row.issuedEmployeeId,
@@ -61,12 +65,19 @@ export function toShipmentRequestDetail(row: ShipmentRequestDetailRow): Shipment
         steelGradeCode: i.salesOrderItem.item.steelGrade?.steelGradeCode ?? null,
         requestQty: i.requestQty,
         unallocatedQty: Math.max(0, i.requestQty - confirmed),
-        allocations: i.allocations.map((a) => ({
-          allocationId: a.id,
-          lotId: a.lotId,
-          lotNo: a.lot.lotNo,
-          allocationStatus: a.allocationStatus as AllocationStatus,
-        })),
+        allocations: i.allocations.map((a) => {
+          const links = lotLinks.get(a.lotId);
+          return {
+            allocationId: a.id,
+            lotId: a.lotId,
+            lotNo: a.lot.lotNo,
+            allocationStatus: a.allocationStatus as AllocationStatus,
+            lotStatus: a.lot.lotStatus as LotStatus,
+            producedDate: toDateOnly(a.lot.producedDate),
+            inspectionResult: (links?.inspectionResult ?? null) as InspectionResult | null,
+            heat: links?.heat ? { ...links.heat, inspectionResult: links.heat.inspectionResult as InspectionResult | null } : null,
+          };
+        }),
       };
     }),
   };

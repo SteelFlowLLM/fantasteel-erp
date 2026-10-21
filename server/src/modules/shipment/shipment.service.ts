@@ -31,7 +31,7 @@ import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.que
 import { renderMillSheetPdf } from './mill-sheet-pdf';
 import { buildMillSheetSnapshot } from './mill-sheet-snapshot';
 import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
-import { ShipmentRepository } from './shipment.repository';
+import { ShipmentRepository, type ShipmentRequestDetailRow } from './shipment.repository';
 
 /**
  * LOT마다 재검증·소진·작업 로그(채번 포함) 쿼리가 돈다. Prisma 기본 제한(5초)은 원격 DB(Supabase 풀러)에서 LOT이 많으면 넘을 수 있어
@@ -148,7 +148,8 @@ export class ShipmentService {
     // withItems면 줄마다 상세를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 것(N+1)을 없앤다 (이슈 #476)
     if (query.withItems) {
       const [rows, total] = await Promise.all([this.repository.findManyDetail(this.prisma, where, skip, query.size), this.repository.count(this.prisma, where)]);
-      return { items: rows.map(toShipmentRequestDetail), page: query.page, size: query.size, total };
+      const lotLinks = await this.lotLinksOf(rows);
+      return { items: rows.map((row) => toShipmentRequestDetail(row, lotLinks)), page: query.page, size: query.size, total };
     }
     const [rows, total] = await Promise.all([this.repository.findMany(this.prisma, where, skip, query.size), this.repository.count(this.prisma, where)]);
     return { items: rows.map(toShipmentRequestSummary), page: query.page, size: query.size, total };
@@ -158,7 +159,13 @@ export class ShipmentService {
     this.assertCanView(user);
     const row = await this.repository.findDetail(this.prisma, id);
     if (!row) throw new AppException('COM-003', '출하요청을 찾을 수 없어요');
-    return toShipmentRequestDetail(row);
+    return toShipmentRequestDetail(row, await this.lotLinksOf([row]));
+  }
+
+  /** 응답에 담을 배정 LOT들의 검사 판정·상위 히트를 한 번에 읽는다 (LOT마다 읽지 않는다) */
+  private lotLinksOf(rows: ShipmentRequestDetailRow[]) {
+    const lotIds = [...new Set(rows.flatMap((r) => r.shipmentRequestItems.flatMap((i) => i.allocations.map((a) => a.lotId))))];
+    return this.repository.findInspectionAndHeats(this.prisma, lotIds);
   }
 
   /** 출하 가능 품목 (API 목록 초안 행 GET /shipment-requests/shippable): 진행중·부분출하 수주 품목 중 출하 가능 매수가 남은 것 */
