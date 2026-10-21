@@ -32,7 +32,7 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 - 음성 서버에 닿지 않거나 거절하면 HTTP 오류가 아니라 `{ text: null, error }`라 화면이 스위치 옆에 "음성 서버가 꺼져 있어요"로 보인다. 자세한 이유(음성 서버 주소·Tailscale 이름·서버가 준 오류)는 설정 권한(`ORG_MANAGE` USE)이 있는 사원에게만 돌려주고, 나머지 사원에게는 "음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요"만 준다. 자세한 이유는 서버 기록(`Logger.warn`, 사원 id 포함, 소리·글 없음)에 남는다.
 - 이 Mac 음성 서버(8001, whisper)로 `say -v Yuna`로 만든 1~3초 소리가 0.3~0.9초에 받아써졌다(2026-10-21).
 
-`SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초.
+`SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초. 전역 `fetch`(undici)는 응답 헤더를 5분 안에 못 받으면 끊어서, 변환 요청에만 전용 `undici.Agent`(`headersTimeout`·`bodyTimeout` = 제한 시간 + 10초, `sttAgentOptions`)를 넘겨 5분 넘게 걸리는 긴 회의도 받는다(이슈 #485, Agent는 요청마다 만들어 끝나면 닫는다). 우리 제한이 먼저 걸려 "N초 안에 응답이 없어요"가 나온다. 모델 목록·연결 확인 같은 짧은 요청은 기본 fetch다.
 
 응답 구간에 `speaker`(문자열)가 있으면 `SttSegment.speaker`로 남기고, 없거나 문자열이 아니면 null이다. 일반 whisper.cpp·OpenAI는 주지 않는다.
 
