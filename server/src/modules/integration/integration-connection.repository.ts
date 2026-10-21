@@ -14,6 +14,7 @@ const connectionSelect = {
   settings: true,
   connectedAt: true,
   lastError: true,
+  lastErrorAt: true,
   connectedBy: { select: { id: true, employeeName: true } },
 } satisfies Prisma.IntegrationConnectionSelect;
 
@@ -50,7 +51,7 @@ export class IntegrationConnectionRepository {
 
   /** 호출이 성공하면 지난 실패 이유를 지운다. 이미 비었으면 쓰지 않는다 (호출마다 쓰지 않게) */
   clearLastError(tx: Tx, providerKey: string) {
-    return tx.integrationConnection.updateMany({ where: { providerKey, lastError: { not: null } }, data: { lastError: null } });
+    return tx.integrationConnection.updateMany({ where: { providerKey, lastError: { not: null } }, data: { lastError: null, lastErrorAt: null } });
   }
 
   /** 콜백 확인값을 한 번만 쓰게 지운다. 그 사이 다른 콜백이 먼저 썼으면 0건 */

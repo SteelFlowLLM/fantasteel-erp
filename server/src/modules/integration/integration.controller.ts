@@ -1,10 +1,20 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { PERMISSION, type AuthUser, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult, type NotionCalendarOption } from '@fantasteel/shared';
+import {
+  PERMISSION,
+  type AuthUser,
+  type IntegrationConnectResult,
+  type IntegrationConnectionView,
+  type IntegrationTestResult,
+  type NotionCalendarOption,
+  type NotionSyncFailureView,
+  type NotionSyncRetryResult,
+} from '@fantasteel/shared';
 import { AuthTokenService } from '../../common/auth/auth-token.service';
 import { CurrentUser, Public, RequirePermission } from '../../common/auth/auth.decorators';
 import { UpdateIntegrationSettingsDto, UpdateNotionCalendarDto, type OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationService } from './integration.service';
+import { NotionSyncFailureService } from './notion/notion-sync-failure.service';
 
 /**
  * 외부 서비스 연결 (문서에 없는 기능, 2026-10-16 이슈 #358). 경로는 API 명세서에 없어 새로 정했다.
@@ -15,6 +25,7 @@ import { IntegrationService } from './integration.service';
 export class IntegrationController {
   constructor(
     private readonly service: IntegrationService,
+    private readonly syncFailures: NotionSyncFailureService,
     private readonly tokens: AuthTokenService,
   ) {}
 
@@ -75,6 +86,29 @@ export class IntegrationController {
   @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
   updateNotionCalendar(@Body() dto: UpdateNotionCalendarDto): Promise<IntegrationConnectionView> {
     return this.service.updateNotionCalendar(dto);
+  }
+
+  /** Notion 반영 실패 목록 (이슈 #518). 일정·회의록·할 일 제목이 담겨 조회 권한(VIEW)으로 막는다 */
+  @Get('integrations/notion/sync-failures')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  listNotionSyncFailures(): Promise<NotionSyncFailureView[]> {
+    return this.syncFailures.list();
+  }
+
+  /** 남아 있는 Notion 반영 실패를 모두 다시 시도하고 결과를 기다린다 (이슈 #518). 서버가 Notion으로 요청을 보내므로 사용 권한으로 막는다 */
+  @Post('integrations/notion/sync-failures/retry')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  retryNotionSyncFailures(): Promise<NotionSyncRetryResult> {
+    return this.syncFailures.retry(null);
+  }
+
+  /** Notion 반영 실패 한 건만 다시 시도한다 (이슈 #518) */
+  @Post('integrations/notion/sync-failures/:failureId/retry')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  retryNotionSyncFailure(@Param('failureId', ParseIntPipe) failureId: number): Promise<NotionSyncRetryResult> {
+    return this.syncFailures.retry(failureId);
   }
 
   /** 저장된 연결로 도구 목록을 받아 본다. 서버가 외부로 요청을 보내므로 사용 권한으로 막는다 */

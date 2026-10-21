@@ -1,13 +1,16 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import {
+  INTEGRATION_FAULT_KIND,
   INTEGRATION_PROVIDER,
+  NOTION_SYNC_TARGET,
   NOTION_WORKSPACE_DATABASES,
   type IntegrationSettings,
   type NotionCalendarOption,
   type NotionCalendarSettings,
   type NotionCalendarSettingsInput,
   type NotionDatabaseRef,
+  type NotionSyncTargetType,
   type NotionWorkspaceDatabaseKey,
   type NotionWorkspaceView,
   type ScheduleNotionStatus,
@@ -20,6 +23,8 @@ import { buildMeetingNotionMarkdown, meetingNotionTitle } from '../../meeting-mi
 import { toMeetingMinutesView } from '../../meeting-minutes/meeting-minutes.view';
 import { scheduleWeekLink } from '../../schedule-event/schedule-notice';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
+import { cutMessage } from '../integration-fault.rules';
+import { IntegrationFaultService } from '../integration-fault.service';
 import { readSettings, readyWorkspace, type ReadyNotionWorkspace } from '../integration-settings';
 import { clientBaseUrl } from '../integration-urls';
 import { isAuthFailure, isRejectedBeforeRun, McpClientService, NOTION_EXPORT_STALE_MS, type McpSession, type McpToolInfo } from '../mcp/mcp.client';
@@ -79,15 +84,24 @@ export const NOTION_BACKFILL_DAYS = 30;
 const CREATE_BATCH_SIZE = 20;
 /** 한 번 돌 때 종류마다 읽는 행 수. 남으면 이어서 다시 돈다 (Notion 연결 줄을 오래 붙잡지 않게) */
 const ROWS_PER_RUN = 100;
-/** 실패한 행을 다시 해 보기까지 기다리는 시간: 1분에서 두 배씩, 1시간까지 */
+/** 실패한 행을 다시 해 보기까지 기다리는 시간: 1분에서 두 배씩, 1시간까지 (notion_sync_failure.retry_after에 적는다) */
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 60 * 60_000;
 /** 만들어졌는지 알 수 없는 페이지는 Notion에 생겼는지 사람이 볼 시간을 두고 다시 만든다 */
 const UNCERTAIN_BACKOFF_MS = 30 * 60_000;
+/** notion_sync_failure.last_error 칸 길이 */
+const FAILURE_MESSAGE_MAX = 500;
 const DAY_MS = 86_400_000;
 const REPAIR_RETRY_MS = 60 * 60_000;
 
 type SyncKind = NotionWorkspaceDatabaseKey;
+/** 반영 종류 → 실패 목록에 적는 ERP 표 이름 */
+const TARGET_TYPE: Record<SyncKind, NotionSyncTargetType> = {
+  scheduleEvents: NOTION_SYNC_TARGET.SCHEDULE_EVENT,
+  meetingMinutes: NOTION_SYNC_TARGET.MEETING_MINUTES,
+  tasks: NOTION_SYNC_TARGET.TASK,
+};
+const failureKey = (targetType: string, targetId: number): string => `${targetType}:${targetId}`;
 type ReadyWorkspace = ReadyNotionWorkspace;
 /** 캘린더 도구는 Notion 캘린더를 쓰지 않는 계정에는 없을 수 있어 고른 캘린더가 있을 때만 확인한다 */
 type SyncTools = {
@@ -103,11 +117,6 @@ type ScheduleEventToRemove = { id: number; notionPageId: string | null; notionCa
 
 /** 성공으로 답했지만 만든 페이지를 읽지 못함: 만들어졌을 수 있다 */
 class UncertainCreateError extends Error {}
-
-interface RowFailure {
-  until: number;
-  failures: number;
-}
 
 function messageOf(error: unknown): string {
   if (error instanceof AppException) return (error.getResponse() as { message: string }).message;
@@ -139,7 +148,10 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
   private queuedSweep: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
-  private readonly failures: Record<SyncKind, Map<number, RowFailure>> = { scheduleEvents: new Map(), meetingMinutes: new Map(), tasks: new Map() };
+  /** 이번 반영에서 실패 목록에 줄이 있는 행(처음 읽은 것 + 이번에 실패한 것). 성공한 행의 줄만 지우려고 쓴다 */
+  private failureRows = new Set<string>();
+  /** 이번 반영에서 행이 실패했는지 (장애 알림의 이어진 횟수를 한 번 올릴지) */
+  private rowFailedInSweep = false;
   private lastSyncedAt: Date | null = null;
   private lastSyncError: string | null = null;
   private setupWarning: string | null = null;
@@ -152,6 +164,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     private readonly repository: NotionSyncRepository,
     private readonly mcp: McpClientService,
     private readonly notionPage: NotionPageService,
+    private readonly faults: IntegrationFaultService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -240,7 +253,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
         return ref ? [{ key, title: NOTION_DATABASE_TITLES[key], url: ref.url }] : [];
       }),
       lastSyncedAt: this.lastSyncedAt?.toISOString() ?? null,
-      failedCount: Object.values(this.failures).reduce((sum, map) => sum + map.size, 0),
+      failedCount: await this.repository.countFailures(this.prisma),
       pendingCount: ready ? await this.countPending() : 0,
       lastSyncError: this.lastSyncError,
       setupWarning: this.setupWarning,
@@ -433,7 +446,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
         await this.repository.resetScheduleEventCalendarSync(this.prisma, new Date(Date.now() - NOTION_BACKFILL_DAYS * DAY_MS), moved);
       }
       // 관리자가 캘린더를 다시 저장하면(권한을 고친 뒤 등) 미룬 일정을 바로 다시 해 본다
-      this.failures.scheduleEvents.clear();
+      await this.repository.makeFailuresDueByType(this.prisma, TARGET_TYPE.scheduleEvents, new Date());
     });
     this.kick();
   }
@@ -515,24 +528,44 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
 
   // ── 자동 반영 ──
 
-  private excluded(kind: SyncKind): number[] {
-    const now = Date.now();
-    return [...this.failures[kind]].filter(([, failure]) => failure.until > now).map(([id]) => id);
-  }
-
-  private succeeded(kind: SyncKind, id: number): void {
-    this.failures[kind].delete(id);
-  }
-
-  private failed(kind: SyncKind, ids: number[], error: unknown, uncertain: boolean): void {
-    const message = messageOf(error);
-    for (const id of ids) {
-      const failures = (this.failures[kind].get(id)?.failures ?? 0) + 1;
-      const wait = uncertain ? UNCERTAIN_BACKOFF_MS : Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS);
-      this.failures[kind].set(id, { failures, until: Date.now() + wait });
+  /**
+   * 반영에 성공한 행의 실패 줄을 지운다. 줄이 있는 행(failureRows)만 DB를 부른다: 행마다 성공할 때 지우는 쿼리를 보내지 않으려고.
+   */
+  private async succeeded(kind: SyncKind, ids: number[]): Promise<void> {
+    const type = TARGET_TYPE[kind];
+    const withRow = ids.filter((id) => this.failureRows.has(failureKey(type, id)));
+    if (withRow.length === 0) return;
+    try {
+      await this.repository.deleteFailuresByTarget(this.prisma, type, withRow);
+      for (const id of withRow) this.failureRows.delete(failureKey(type, id));
+    } catch (error) {
+      this.logger.warn(`Notion 반영 실패 목록에서 지우지 못했어요 (${NOTION_DATABASE_TITLES[kind]} id ${withRow.join(', ')}): ${messageOf(error)}`);
     }
+  }
+
+  /** 반영 실패를 DB 목록에 남긴다: 무엇이(종류·id) 몇 번, 왜 실패했는지. 서버를 다시 띄워도 남고 다음 시도 시각까지 미룬다 */
+  private async failed(kind: SyncKind, ids: number[], error: unknown, uncertain: boolean): Promise<void> {
+    const message = messageOf(error);
+    const type = TARGET_TYPE[kind];
+    this.rowFailedInSweep = true;
     this.lastSyncError = message.slice(0, 500);
     this.logger.warn(`Notion ${NOTION_DATABASE_TITLES[kind]} 반영 실패 (id ${ids.join(', ')}): ${message}`);
+    for (const id of ids) {
+      try {
+        await this.repository.recordFailure(this.prisma, {
+          targetType: type,
+          targetId: id,
+          lastError: message.slice(0, FAILURE_MESSAGE_MAX),
+          isResultUnknown: uncertain,
+          baseMs: BACKOFF_BASE_MS,
+          maxMs: BACKOFF_MAX_MS,
+          unknownMs: UNCERTAIN_BACKOFF_MS,
+        });
+        this.failureRows.add(failureKey(type, id));
+      } catch (recordError) {
+        this.logger.warn(`Notion 반영 실패를 목록에 남기지 못했어요 (${NOTION_DATABASE_TITLES[kind]} id ${id}): ${messageOf(recordError)}`);
+      }
+    }
   }
 
   /**
@@ -542,14 +575,52 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
   private async guard(kind: SyncKind, ids: number[], creating: boolean, task: () => Promise<void>, clearOnSuccess = true): Promise<boolean> {
     try {
       await task();
-      if (clearOnSuccess) for (const id of ids) this.succeeded(kind, id);
+      if (clearOnSuccess) await this.succeeded(kind, ids);
       return true;
     } catch (error) {
       if (isAuthFailure(error)) throw error;
       const uncertain = creating && (error instanceof UncertainCreateError || isTransportFailure(error));
-      this.failed(kind, ids, error, uncertain);
+      await this.failed(kind, ids, error, uncertain);
       if (isTransportFailure(error)) throw error;
       return false;
+    }
+  }
+
+  /**
+   * 실패 목록에 남았지만 더는 반영할 것이 없는 행의 줄을 치운다: 행이 지워졌거나, 다른 길로 반영됐거나, 일정을 Notion에 넣지 않기로 바꿨을 때.
+   * 이번 반영이 읽은 행(fetched)에 없는데 미룬 시각이 지난 줄만 본다. 한 번에 다 읽지 못했으면(truncated) 못 읽은 행일 수 있어 두고,
+   * 회의록은 다른 쪽이 만드는 중이라(잡기) 건너뛴 것일 수 있어 그 회의록도 둔다.
+   */
+  private async dropStaleFailures(failures: { id: number; targetType: string; targetId: number; retryAfter: Date }[], now: number, fetched: Record<SyncKind, { ids: number[]; truncated: boolean }>): Promise<void> {
+    const stale: number[] = [];
+    for (const kind of NOTION_WORKSPACE_DATABASES) {
+      if (fetched[kind].truncated) continue;
+      const seen = new Set(fetched[kind].ids);
+      let candidates = failures.filter((f) => f.targetType === TARGET_TYPE[kind] && f.retryAfter.getTime() <= now && !seen.has(f.targetId));
+      if (kind === 'meetingMinutes' && candidates.length > 0) {
+        const claimed = new Set(await this.repository.findClaimedMeetingIds(this.prisma, candidates.map((f) => f.targetId), new Date(now - NOTION_EXPORT_STALE_MS)));
+        candidates = candidates.filter((f) => !claimed.has(f.targetId));
+      }
+      stale.push(...candidates.map((f) => f.id));
+    }
+    if (stale.length === 0) return;
+    await this.repository.deleteFailuresByIds(this.prisma, stale);
+    for (const f of failures) if (stale.includes(f.id)) this.failureRows.delete(failureKey(f.targetType, f.targetId));
+  }
+
+  /**
+   * 반영이 끝난 뒤 장애 상태를 맞춘다 (이슈 #518): 실패 목록이 비었으면 반영 장애를 풀고(알렸다면 복구 알림),
+   * 이번에 행이 실패했으면 장애에 한 번 더한다 (연이어 3번이면 연동 관리 권한자에게 알림). 연결 자체의 실패는 withSession이 따로 센다.
+   */
+  private async updateSyncFault(): Promise<void> {
+    const remaining = await this.repository.countFailures(this.prisma);
+    if (remaining === 0) {
+      await this.faults.resolve(INTEGRATION_PROVIDER.NOTION, [INTEGRATION_FAULT_KIND.SYNC_FAILED]);
+      return;
+    }
+    if (this.rowFailedInSweep) {
+      const reason = this.lastSyncError ? cutMessage(this.lastSyncError, 200) : '이유를 알 수 없어요';
+      await this.faults.report(INTEGRATION_PROVIDER.NOTION, INTEGRATION_FAULT_KIND.SYNC_FAILED, `반영에 실패한 행이 ${remaining}건 있어요. 마지막 이유: ${reason}`);
     }
   }
 
@@ -564,14 +635,25 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     const repair = workspaceNeedsRepair(ws) && (this.lastRepairAt === null || now - this.lastRepairAt > REPAIR_RETRY_MS);
     const since = new Date(now - NOTION_BACKFILL_DAYS * DAY_MS);
     const staleBefore = new Date(now - NOTION_EXPORT_STALE_MS);
-    const skip = { meetingMinutes: this.excluded('meetingMinutes'), scheduleEvents: this.excluded('scheduleEvents'), tasks: this.excluded('tasks') };
+    // 실패한 행은 미룬 시각(retry_after)이 지날 때까지 건너뛴다. 목록은 DB에 있어 서버를 다시 띄워도 남는다 (이슈 #518)
+    const failures = await this.repository.findFailures(this.prisma);
+    this.failureRows = new Set(failures.map((f) => failureKey(f.targetType, f.targetId)));
+    this.rowFailedInSweep = false;
+    const heldIds = (kind: SyncKind): number[] => failures.filter((f) => f.targetType === TARGET_TYPE[kind] && f.retryAfter.getTime() > now).map((f) => f.targetId);
+    const skip = { meetingMinutes: heldIds('meetingMinutes'), scheduleEvents: heldIds('scheduleEvents'), tasks: heldIds('tasks') };
     const meetingIds = (await this.repository.findMeetingIdsToCreate(this.prisma, staleBefore, skip.meetingMinutes, ROWS_PER_RUN)).map((m) => m.id);
     const meetings = (await this.repository.findMeetingIdsToUpdate(this.prisma, skip.meetingMinutes, ROWS_PER_RUN)).map((m) => m.id);
     const events = await this.repository.findDirtyScheduleEvents(this.prisma, since, skip.scheduleEvents, ROWS_PER_RUN);
     const tasks = await this.repository.findDirtyTasks(this.prisma, since, skip.tasks, ROWS_PER_RUN);
     const removals = await this.repository.findScheduleEventsToRemove(this.prisma, skip.scheduleEvents, ROWS_PER_RUN);
+    await this.dropStaleFailures(failures, now, {
+      meetingMinutes: { ids: [...meetingIds, ...meetings], truncated: meetingIds.length >= ROWS_PER_RUN || meetings.length >= ROWS_PER_RUN },
+      scheduleEvents: { ids: [...events.map((e) => e.id), ...removals.map((e) => e.id)], truncated: events.length >= ROWS_PER_RUN || removals.length >= ROWS_PER_RUN },
+      tasks: { ids: tasks.map((t) => t.id), truncated: tasks.length >= ROWS_PER_RUN },
+    });
     if (meetingIds.length + meetings.length + events.length + tasks.length + removals.length === 0 && !repair) {
       this.lastSyncedAt = new Date();
+      await this.updateSyncFault();
       return;
     }
 
@@ -593,12 +675,14 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
         progressed = (await this.syncTasks(session, tools, ws, tasks)) || progressed;
       });
       this.lastSyncedAt = new Date();
-      if (Object.values(this.failures).every((map) => map.size === 0)) this.lastSyncError = null;
+      if ((await this.repository.countFailures(this.prisma)) === 0) this.lastSyncError = null;
     } catch (error) {
+      // 연결 자체의 실패(인증·전송)는 withSession이 연결 장애로 세므로 반영 장애에는 더하지 않는다
       this.lastSyncError = messageOf(error).slice(0, 500);
       this.logger.warn(`Notion 업무 공간 반영을 멈췄어요: ${this.lastSyncError}`);
       return;
     }
+    await this.updateSyncFault();
     // 한 번에 다 읽지 못했으면 이어서 돈다 (실패만 남았으면 다음 주기에)
     const full = [meetingIds, meetings, events, tasks, removals].some((rows) => rows.length >= ROWS_PER_RUN);
     if (full && progressed) this.kick();
@@ -761,7 +845,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     for (const batch of chunks(rows.filter((row) => row.notionPageId === null), CREATE_BATCH_SIZE)) {
       try {
         await create(batch);
-        if (clearOnSuccess) for (const row of batch) this.succeeded(kind, row.id);
+        if (clearOnSuccess) await this.succeeded(kind, batch.map((row) => row.id));
         progressed = true;
       } catch (error) {
         if (batch.length > 1 && error instanceof AppException) {
