@@ -22,7 +22,7 @@ import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
 import { AiFailureNotice } from '@/features/shell/AiFailureNotice';
 import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/aiSourceDisplay';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
-import { SteelmanWakeToggle } from '@/features/shell/SteelmanWake';
+import { SteelmanWakeToggle, useWakeBarLine } from '@/features/shell/SteelmanWake';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
 import { controlAiAgent, sendAiAgentInput, sendAiAgentNote, useAiCapabilities, useOpenBrowserWindow, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
@@ -163,9 +163,12 @@ export function AiPanel() {
     const timer = window.setTimeout(() => setGreeting(false), AFTER_ANSWER_MS);
     return () => window.clearTimeout(timer);
   }, []);
-  // "철강맨"만 불러 다음 말을 기다리는 동안도 듣는 중 (이슈 #457)
+  // "철강맨"만 불러 다음 말을 기다리는 동안도 듣는 중 (이슈 #457). 말소리를 잡거나 받아쓰는 동안도 듣는 중 (이슈 #494)
   const wakeCalled = useSteelmanWakeStore((state) => state.called !== null);
-  const headerStatus: SteelmanStatus | null = pending ? null : wakeCalled ? 'listening' : greeting ? 'greet' : draft.trim() ? 'listening' : null;
+  const wakeListening = useSteelmanWakeStore((state) => state.enabled && state.status === 'listening' && (state.hearing || state.transcribing));
+  const wakeOn = useSteelmanWakeStore((state) => state.enabled && state.company.wake && state.status !== 'off');
+  const wakeLine = useWakeBarLine();
+  const headerStatus: SteelmanStatus | null = pending ? null : wakeCalled || wakeListening ? 'listening' : greeting ? 'greet' : draft.trim() ? 'listening' : null;
   const [afterAnswer, setAfterAnswer] = useState<{ entryId: string } | null>(null);
   const wasPending = useRef(false);
   const afterTimer = useRef<number | undefined>(undefined);
@@ -538,7 +541,10 @@ export function AiPanel() {
         <SteelmanAiStatus size="sm" status={headerStatus} seedKey={greetKey} />
         <div className="ml-1 flex min-w-0 flex-col">
           <b className="text-base leading-tight font-bold">철강맨AI</b>
-          <small className="truncate text-cap text-ink-3">화면 도우미 철강맨이 답해요</small>
+          {/* 철강맨 부르기가 켜 있으면 위쪽 띠와 같은 지금 단계를 보인다 (이슈 #494) */}
+          <small className="truncate text-cap text-ink-3" data-wake-line={wakeOn ? '' : undefined}>
+            {wakeOn ? wakeLine.text : '화면 도우미 철강맨이 답해요'}
+          </small>
         </div>
         <span className="ml-auto" />
         <SteelmanWakeToggle />

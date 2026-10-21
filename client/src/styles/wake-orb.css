@@ -1,0 +1,168 @@
+/* 철강맨 부르기 (이슈 #494)의 원(오브)·소리 크기 막대. 색은 철강맨 모션(#414·#415)과 같은 철강맨 주황 계열.
+   --orb-scale은 features/shell/WakeOrb.tsx가 목소리 크기로 바꾼다. 모양(data-orb-mode)별 움직임은 여기서만 정한다. */
+.wake-orb {
+  --orb-scale: 1;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+}
+.wake-orb--lg {
+  width: 88px;
+  height: 88px;
+}
+.wake-orb__core,
+.wake-orb__ring,
+.wake-orb__wave {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.wake-orb__core {
+  background: radial-gradient(circle at 34% 30%, #fff6ee 0%, var(--color-steelman-shadow) 32%, var(--color-steelman) 70%, var(--color-steelman-ink) 100%);
+  box-shadow: 0 0 calc(4px + 10px * (var(--orb-scale) - 1)) rgba(224, 112, 40, 0.55);
+  transform: scale(var(--orb-scale));
+  transition: filter 0.3s, opacity 0.3s, background 0.3s;
+}
+.wake-orb__ring {
+  border: 2px solid transparent;
+}
+.wake-orb__wave {
+  border: 2px solid var(--color-steelman);
+  opacity: 0;
+}
+
+/* 듣는 중: 조용히 숨 쉬듯 */
+.wake-orb[data-orb-mode='idle'] .wake-orb__core {
+  animation: wake-orb-breathe 3.2s ease-in-out infinite;
+}
+/* 말소리 잡음: 목소리 크기로 커지고(--orb-scale) 물결이 퍼진다 */
+.wake-orb[data-orb-mode='speaking'] .wake-orb__wave {
+  animation: wake-orb-ripple 0.9s ease-out infinite;
+}
+/* 받아쓰는 중: 테가 돈다 */
+.wake-orb[data-orb-mode='transcribing'] .wake-orb__ring {
+  inset: -3px;
+  border-color: var(--color-steelman-shadow);
+  border-top-color: var(--color-steelman-ink);
+  animation: wake-orb-spin 0.8s linear infinite;
+}
+/* "네? 말씀하세요": 밝게 반짝인다 */
+.wake-orb[data-orb-mode='called'] .wake-orb__core {
+  background: radial-gradient(circle at 34% 30%, #ffffff 0%, #ffe3c8 30%, var(--color-steelman) 72%, var(--color-steelman-ink) 100%);
+  animation: wake-orb-sparkle 1.1s ease-in-out infinite;
+}
+.wake-orb[data-orb-mode='called'] .wake-orb__wave {
+  animation: wake-orb-ripple 1.4s ease-out infinite;
+}
+/* 철강맨이 답하는 중: 철강맨 색 띠가 천천히 돈다 */
+.wake-orb[data-orb-mode='answering'] .wake-orb__core {
+  background: conic-gradient(from 0deg, var(--color-steelman-ink), var(--color-steelman), var(--color-steelman-shadow), var(--color-steelman), var(--color-steelman-ink));
+  animation: wake-orb-spin 2.4s linear infinite;
+}
+/* 오류·멈춤·소리 듣기 막힘: 회색으로 가만히 */
+.wake-orb[data-orb-mode='muted'] .wake-orb__core {
+  filter: grayscale(1);
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+/* 남은 시간 테 (큰 원 둘레) */
+.wake-orb-countdown {
+  position: absolute;
+  inset: -14px;
+  width: calc(100% + 28px);
+  height: calc(100% + 28px);
+  transform: rotate(-90deg);
+  animation-name: wake-orb-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.wake-orb-countdown circle {
+  fill: none;
+  stroke: var(--color-steelman);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+  animation: inherit;
+}
+
+/* 소리 크기 막대 */
+.wake-meter {
+  position: relative;
+  display: inline-block;
+  width: 4rem;
+  height: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--color-steelman);
+  border-radius: 9999px;
+  background: var(--color-surface);
+}
+.wake-meter__fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 0;
+  background: color-mix(in srgb, var(--color-steelman) 40%, transparent);
+}
+.wake-meter__fill[data-over='true'] {
+  background: var(--color-steelman);
+}
+.wake-meter__mark {
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--color-steelman-ink);
+}
+
+@keyframes wake-orb-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes wake-orb-ripple {
+  from {
+    opacity: 0.8;
+    transform: scale(var(--orb-scale));
+  }
+  to {
+    opacity: 0;
+    transform: scale(calc(var(--orb-scale) * 1.9));
+  }
+}
+@keyframes wake-orb-spin {
+  to {
+    transform: rotate(360deg) scale(var(--orb-scale));
+  }
+}
+@keyframes wake-orb-sparkle {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.25);
+  }
+}
+@keyframes wake-orb-countdown {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+/* 움직임을 줄이는 설정이면 움직이지 않고 색·크기만 상태에 맞춘다 */
+@media (prefers-reduced-motion: reduce) {
+  .wake-orb *,
+  .wake-orb-countdown,
+  .wake-orb-countdown circle {
+    animation: none !important;
+  }
+}

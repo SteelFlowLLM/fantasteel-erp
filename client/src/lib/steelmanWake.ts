@@ -7,6 +7,15 @@ import type { AiChatCard, AiChatEntry } from '@/stores/useAiChatStore';
 
 /** "철강맨"만 부른 뒤 다음 말을 질문으로 받는 시간 (가정값) */
 export const WAKE_FOLLOW_UP_MS = 8_000;
+/** 말로 물은 답이 끝난 뒤 부르는 말 없이 다음 질문을 받는 시간 (이어 말하기, 이슈 #494, 가정값) */
+export const CONVERSATION_FOLLOW_UP_MS = 10_000;
+/** 이어 말하기의 대답 (띠에 "이어서 말씀하세요 (n초)") */
+export const FOLLOW_UP_REPLY = '이어서';
+/** 8초에서 잘린 명령의 나머지를 기다리는 가장 긴 시간. 보통은 말이 끝나고 조용해지면 바로 묻는다 (가정값) */
+export const COMMAND_CONTINUE_MS = 32_000;
+/** 잘린 명령 뒤 이만큼 아무 말이 없으면 들은 데까지 묻는다 (가정값) */
+export const COMMAND_QUIET_MS = 1_500;
+
 /** 말로 승인에서 카드를 보인 뒤 "실행"을 기다리는 시간 (가정값) */
 export const VOICE_APPROVAL_MS = 10_000;
 /** "철강맨"만 불렀을 때 번갈아 하는 대답 */
@@ -77,6 +86,14 @@ export function confirmationOf(text: string): 'yes' | 'no' {
   const wake = matchWakeWord(text);
   const compact = compactSpeech(wake.called ? wake.rest : text);
   return /^(?:(?:응|네|예|그래|좋아)?(?:실행|시행)(?:해|하|시켜)?|응해|응그래해|네해|예해)$/.test(compact) ? 'yes' : 'no';
+}
+
+const CONVERSATION_END_WORDS = new Set(['그만', '그만해', '고마워', '고맙습니다', '고마워요', '감사합니다', '됐어', '됐다', '괜찮아', '끝', '끝내', '없어', '아니야', '아니', '아니요', '이제됐어', '수고했어']);
+
+/** 이어 말하기 중 대화를 끝내는 말 ("그만", "고마워", "됐어" 등). 부르는 말이 앞에 있어도 된다 */
+export function isConversationEnd(text: string): boolean {
+  const wake = matchWakeWord(text);
+  return CONVERSATION_END_WORDS.has(compactSpeech(wake.called ? wake.rest : text));
 }
 
 // whisper가 조용한 소리·잡음에 지어내는 말 (방송 자막에서 배운 끝인사). "철강맨"만 부른 뒤에는 부르는 말 없이 받으므로 이런 글은 질문으로 받지 않는다

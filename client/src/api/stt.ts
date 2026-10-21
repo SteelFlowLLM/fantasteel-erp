@@ -1,6 +1,6 @@
 // 음성 인식(STT) 연결 설정 (문서에 없는 기능, Voice2ERP 1단계). LLM 연결(api/llm.ts)과 같은 구조:
 // 브라우저가 Whisper 서버를 직접 부르지 않고 ERP 서버를 거친다.
-import type { SteelmanWakeSettingsInput, SteelmanWakeSettingsView, SttConnectionTestInput, SttConnectionView, SttLocalServerView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipView } from '@fantasteel/shared';
+import type { SteelmanWakeSettingsInput, SteelmanWakeSettingsView, SttConnectionTestInput, SttConnectionView, SttLocalServerView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipMode, SttWakeClipView } from '@fantasteel/shared';
 import { serverRequest, serverUpload } from '@/api/http';
 
 export const sttKeys = {
@@ -24,9 +24,11 @@ export const sttApi = {
   getWakeSettings: (): Promise<SteelmanWakeSettingsView> => serverRequest('GET', '/stt/wake-settings'),
   updateWakeSettings: (input: SteelmanWakeSettingsInput): Promise<SteelmanWakeSettingsView> => serverRequest('PUT', '/stt/wake-settings', { body: input }),
   /** 철강맨 부르기 (이슈 #457): 말소리 조각(16kHz WAV) 하나를 글로. 소리는 서버에 남지 않는다 */
-  transcribeWakeClip: (wav: Blob): Promise<SttWakeClipView> => {
+  /** mode(이슈 #494): wake 부르는 말 조각 · command "철강맨" 뒤 명령 덩어리 · partial 말하는 동안 보이기만 할 중간 글 */
+  transcribeWakeClip: (wav: Blob, mode: SttWakeClipMode = 'wake'): Promise<SttWakeClipView> => {
     const form = new FormData();
     form.append('file', wav, 'wake.wav');
+    form.append('mode', mode);
     return serverUpload('/stt/wake-clip', form);
   },
   /** ERP 서버와 같은 Mac의 음성 서버(자동 켜기 등록분) 상태·켜기·끄기 (이슈 #450) */

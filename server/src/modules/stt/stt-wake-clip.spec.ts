@@ -9,6 +9,11 @@ describe('wakeClipProblem', () => {
     expect(wakeClipProblem(silentWav(9))).toBe('말소리 조각은 8초까지 보낼 수 있어요');
   });
 
+  it('명령 덩어리(이슈 #494)는 넘겨준 길이(30초)까지 받는다', () => {
+    expect(wakeClipProblem(silentWav(20), 30)).toBeNull();
+    expect(wakeClipProblem(silentWav(31), 30)).toBe('말소리 조각은 30초까지 보낼 수 있어요');
+  });
+
   it('WAV가 아니거나 PCM이 아니거나 머리가 깨졌으면 거절', () => {
     expect(wakeClipProblem(Buffer.from('ID3'.padEnd(100, '\0')))).toBe('WAV 소리만 보낼 수 있어요');
     const float = silentWav(1);

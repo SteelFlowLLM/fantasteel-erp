@@ -90,6 +90,32 @@ describe('SttService.transcribeWakeClip', () => {
   });
 });
 
+describe('명령 덩어리·중간 글 (이슈 #494)', () => {
+  const ok = () => jest.fn().mockResolvedValue({ text: '재고 알려줘', segments: [], durationSec: null });
+
+  it('command는 30초까지 받고, wake는 그대로 8초까지', async () => {
+    const transcribe = ok();
+    const service = setup(transcribe);
+    await expect(service.transcribeWakeClip(user(1), { ...clip, buffer: silentWav(20) }, 'command')).resolves.toEqual({ text: '재고 알려줘', error: null });
+    await expect(service.transcribeWakeClip(user(1), { ...clip, buffer: silentWav(20) })).rejects.toMatchObject({ code: 'COM-004' });
+    await expect(service.transcribeWakeClip(user(1), { ...clip, buffer: silentWav(31) }, 'command')).rejects.toMatchObject({ code: 'COM-004' });
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('wake 조각은 크기도 512KB까지만 받는다 (multer는 가장 큰 종류에 맞춰 받는다)', async () => {
+    await expect(setup(ok()).transcribeWakeClip(user(1), { ...clip, buffer: Buffer.concat([silentWav(1), Buffer.alloc(600 * 1024)]) })).rejects.toMatchObject({ code: 'COM-004' });
+  });
+
+  it('중간 글(partial)은 따로 세어 명령·부르는 말 횟수를 깎지 않는다', async () => {
+    const limiter = new SttWakeLimiter();
+    limiter.perMinute = 1;
+    const service = setup(ok(), limiter);
+    for (let i = 0; i < 5; i += 1) await service.transcribeWakeClip(user(1), clip, 'partial');
+    await expect(service.transcribeWakeClip(user(1), clip, 'command')).resolves.toMatchObject({ error: null });
+    await expect(service.transcribeWakeClip(user(1), clip)).rejects.toMatchObject({ code: 'VOC-009' });
+  });
+});
+
 describe('철강맨 부르기 회사 설정', () => {
   it('관리자가 끄면 조각을 받지 않고(VOC-011) 한도도 세지 않는다', async () => {
     const transcribe = jest.fn();

@@ -2,6 +2,7 @@
    화면은 Tailwind 유틸리티로만 만든다. 이 파일에는 토큰과 Tailwind로 표현할 수 없는 기본값만 둔다. */
 @import 'tailwindcss';
 @import './icons.css';
+@import './wake-orb.css';
 
 @theme {
   /* 색: B안 토큰만 쓰도록 기본 팔레트를 비운다 */
