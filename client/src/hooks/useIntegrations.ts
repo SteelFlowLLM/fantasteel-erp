@@ -11,6 +11,11 @@ export function useIntegrationTest() {
   return useMutation({ mutationFn: integrationApi.test });
 }
 
+/** Notion 반영 실패 목록 (이슈 #518). 업무 공간이 준비된 Notion 카드만 읽는다: ORG_MANAGE 조회 권한이 없으면 서버가 거절하므로 enabled로 막는다 */
+export function useNotionSyncFailures(enabled: boolean) {
+  return useQuery({ queryKey: integrationKeys.syncFailures(), queryFn: integrationApi.notionSyncFailures, enabled, retry: false });
+}
+
 /** Drive 폴더의 파일을 쪽 단위로 읽는다 (더 보기). 창을 열었을 때만 부르도록 enabled로 막는다 */
 export function useDriveFiles(kind: DriveFileListKind, enabled: boolean) {
   return useInfiniteQuery({

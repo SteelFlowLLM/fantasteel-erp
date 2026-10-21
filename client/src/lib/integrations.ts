@@ -1,9 +1,28 @@
 // 외부 연결 도우미: 상태 문구·색, 콜백 쿼리 읽기, 회의록 Notion 내보내기 버튼 조건 (이슈 #358), Google Drive 카드·녹음 가져오기 조건 (이슈 #361),
-// Notion 업무 공간 만들기 조건·상태 문구, Notion 캘린더 고르기 (이슈 #391).
-import { INTEGRATION_PROVIDER, MEETING_AUDIO_MAX_BYTES, MEETING_MINUTES_STATUS, type DriveFileView, type IntegrationConnectionStatus, type IntegrationConnectionView, type IntegrationProviderKey, type IntegrationSettingsInput, type MeetingMinutesView, type NotionCalendarOption, type NotionCalendarSettings, type NotionCalendarSettingsInput, type NotionWorkspaceView } from '@fantasteel/shared';
+// Notion 업무 공간 만들기 조건·상태 문구, Notion 캘린더 고르기 (이슈 #391), 연결 상태(정상·주의·끊김)·장애·반영 실패 목록 문구 (이슈 #518).
+import {
+  INTEGRATION_PROVIDER,
+  MEETING_AUDIO_MAX_BYTES,
+  MEETING_MINUTES_STATUS,
+  NOTION_SYNC_TARGET_LABEL,
+  type DriveFileView,
+  type IntegrationConnectionStatus,
+  type IntegrationConnectionView,
+  type IntegrationFaultView,
+  type IntegrationHealthLevel,
+  type IntegrationProviderKey,
+  type IntegrationSettingsInput,
+  type MeetingMinutesView,
+  type NotionCalendarOption,
+  type NotionCalendarSettings,
+  type NotionCalendarSettingsInput,
+  type NotionSyncFailureView,
+  type NotionSyncRetryResult,
+  type NotionWorkspaceView,
+} from '@fantasteel/shared';
 import { PERMISSION } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
-import { fmtBytes } from '@/lib/format';
+import { fmtBytes, relTime } from '@/lib/format';
 import { canUse, type PermissionMap } from '@/lib/permissions';
 
 export const INTEGRATION_STATUS_LABEL: Record<IntegrationConnectionStatus, string> = {
@@ -17,6 +36,63 @@ export const INTEGRATION_STATUS_TONE: Record<IntegrationConnectionStatus, BadgeT
   RECONNECT_REQUIRED: 'wait',
   NOT_CONNECTED: 'neutral',
 };
+
+export const INTEGRATION_HEALTH_LABEL: Record<IntegrationHealthLevel, string> = {
+  NORMAL: '정상',
+  WARNING: '주의',
+  DOWN: '끊김',
+};
+
+export const INTEGRATION_HEALTH_TONE: Record<IntegrationHealthLevel, BadgeTone> = {
+  NORMAL: 'ok',
+  WARNING: 'wait',
+  DOWN: 'danger',
+};
+
+/**
+ * 정상·주의·끊김 배지를 보일지. 연결한 적 없고 문제도 없으면 '연결 안 됨' 배지만 보인다 (정상이라고 하면 연결된 것처럼 보인다).
+ * 서버 설정 오류처럼 연결 안 됨인데 끊김인 것은 보인다.
+ */
+export function showIntegrationHealth(connection: Pick<IntegrationConnectionView, 'status' | 'health'>): boolean {
+  return connection.status !== 'NOT_CONNECTED' || connection.health.level !== 'NORMAL';
+}
+
+/** 장애 한 줄(종류 배지 옆에 붙는다): 몇 번 이어서 실패했는지 · 마지막 실패 시각 · 관리자에게 알렸는지 */
+export function integrationFaultLine(fault: IntegrationFaultView, now: Date = new Date()): string {
+  const notified = fault.notifiedAt ? `관리자에게 알렸어요(${relTime(fault.notifiedAt, now)})` : '아직 알리지 않았어요';
+  return `${fault.failureCount}번 이어서 실패 · 마지막 ${relTime(fault.lastFailedAt, now)} · ${notified}`;
+}
+
+/** 반영 실패 목록 설명 */
+export const NOTION_SYNC_FAILURES_NOTE =
+  'Notion에 옮기지 못한 일정·회의록·할 일이에요. 서버가 1분마다 다시 해 보고(실패할수록 간격이 늘어요), 여기서 바로 다시 시도할 수도 있어요. 서버를 다시 띄워도 목록은 남아요.';
+
+/** 실패 행 이름: 일정 · 회의록 · 할 일 */
+export function notionSyncTargetLabel(failure: Pick<NotionSyncFailureView, 'targetType'>): string {
+  return NOTION_SYNC_TARGET_LABEL[failure.targetType];
+}
+
+/** 다음 자동 시도까지. 이미 지났으면 다음 반영(1분 안)에 다시 한다 */
+export function syncFailureNextLabel(failure: Pick<NotionSyncFailureView, 'retryAfter'>, now: Date = new Date()): string {
+  const minutes = Math.ceil((new Date(failure.retryAfter).getTime() - now.getTime()) / 60_000);
+  if (Number.isNaN(minutes) || minutes <= 0) return '다음 반영(1분 안)에 다시 해요';
+  if (minutes >= 60) return `다음 자동 시도: ${Math.round(minutes / 60)}시간 뒤`;
+  return `다음 자동 시도: ${minutes}분 뒤`;
+}
+
+/** 만들어졌는지 알 수 없던 건을 다시 시도하기 전에 보일 확인 문구. 그렇지 않으면 null (바로 시도한다) */
+export function syncRetryConfirmText(failure: Pick<NotionSyncFailureView, 'isResultUnknown' | 'title'>): string | null {
+  if (!failure.isResultUnknown) return null;
+  return `「${failure.title}」는 Notion에 페이지가 만들어졌는지 알 수 없었어요. 이미 만들어졌다면 다시 시도할 때 같은 페이지가 하나 더 생겨요. Notion에서 먼저 확인했나요?`;
+}
+
+/** 다시 시도 결과를 알리는 토스트 */
+export function syncRetryToast(result: NotionSyncRetryResult): { tone: 'ok' | 'error'; text: string } {
+  if (result.requested === 0) return { tone: 'ok', text: '다시 시도할 반영 실패가 없어요' };
+  if (result.failed === 0) return { tone: 'ok', text: `${result.succeeded}건을 Notion에 반영했어요` };
+  if (result.succeeded === 0) return { tone: 'error', text: `${result.failed}건이 또 실패했어요. 이유를 확인해 주세요` };
+  return { tone: 'error', text: `${result.succeeded}건은 반영했고 ${result.failed}건은 또 실패했어요` };
+}
 
 /** OAuth 콜백이 돌려보낸 주소의 쿼리 (?integration=notion&result=connected|error&message=…) */
 export interface IntegrationCallbackNotice {

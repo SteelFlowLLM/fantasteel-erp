@@ -1,8 +1,11 @@
 // 외부 연결 도우미: 상태 문구, 콜백 쿼리 읽기, Notion 내보내기 버튼 조건 (이슈 #358), Notion 업무 공간 (이슈 #391)
-import type { IntegrationConnectionView, MeetingMinutesView, NotionWorkspaceView } from '@fantasteel/shared';
+import type { IntegrationConnectionView, IntegrationFaultView, MeetingMinutesView, NotionSyncFailureView, NotionSyncRetryResult, NotionWorkspaceView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  INTEGRATION_HEALTH_LABEL,
+  INTEGRATION_HEALTH_TONE,
   INTEGRATION_STATUS_LABEL,
+  NOTION_SYNC_FAILURES_NOTE,
   canExportMeetingToNotion,
   canImportAudioFromDrive,
   driveAudioProblem,
@@ -15,17 +18,23 @@ import {
   isDriveServiceAccount,
   integrationCallbackToast,
   integrationCardKind,
+  integrationFaultLine,
   isNotionExportReady,
   notionConnection,
   notionCalendarKey,
   notionCalendarLabel,
   notionCalendarSaveInput,
   notionPageLink,
+  notionSyncTargetLabel,
   notionWorkspaceBlockReason,
   notionWorkspaceStatusLabel,
   notionWorkspaceSyncLabel,
   parseIntegrationCallback,
   safeExternalUrl,
+  showIntegrationHealth,
+  syncFailureNextLabel,
+  syncRetryConfirmText,
+  syncRetryToast,
   withoutCallbackParams,
 } from '@/lib/integrations';
 
@@ -47,6 +56,7 @@ const connection = (overrides: Partial<IntegrationConnectionView> = {}): Integra
   serviceAccountEmail: null,
   driveFolderFromEnv: false,
   notionWorkspace: null,
+  health: { level: 'NORMAL', lastErrorAt: null, faults: [] },
   ...overrides,
 });
 
@@ -333,5 +343,86 @@ describe('Notion 캘린더 고르기 (이슈 #391 2단계)', () => {
     expect(notionCalendarSaveInput(current, '', [], true)).toEqual({ sendInvites: true });
     expect(notionCalendarSaveInput(current, notionCalendarKey(erp), [erp], false)).toBeNull();
     expect(notionCalendarSaveInput(null, '', [], true)).toBeNull();
+  });
+});
+
+describe('연결 상태(정상·주의·끊김)와 장애 (이슈 #518)', () => {
+  const NOW = new Date('2026-10-22T05:00:00.000Z');
+  const fault = (overrides: Partial<IntegrationFaultView> = {}): IntegrationFaultView => ({
+    faultKind: 'RECONNECT_REQUIRED',
+    message: '다시 연결해 주세요',
+    failureCount: 2,
+    firstFailedAt: '2026-10-22T03:00:00.000Z',
+    lastFailedAt: '2026-10-22T04:30:00.000Z',
+    notifiedAt: '2026-10-22T03:00:00.000Z',
+    ...overrides,
+  });
+
+  it('상태 이름과 색', () => {
+    expect(INTEGRATION_HEALTH_LABEL).toEqual({ NORMAL: '정상', WARNING: '주의', DOWN: '끊김' });
+    expect(INTEGRATION_HEALTH_TONE).toEqual({ NORMAL: 'ok', WARNING: 'wait', DOWN: 'danger' });
+  });
+
+  it('연결한 적 없고 문제도 없으면 정상 배지를 보이지 않는다 (연결 안 됨만). 연결됐거나 문제가 있으면 보인다', () => {
+    expect(showIntegrationHealth(connection({ status: 'NOT_CONNECTED' }))).toBe(false);
+    expect(showIntegrationHealth(connection({ status: 'CONNECTED' }))).toBe(true);
+    expect(showIntegrationHealth(connection({ status: 'RECONNECT_REQUIRED', health: { level: 'DOWN', lastErrorAt: null, faults: [] } }))).toBe(true);
+    // 서버 설정 오류: 연결 안 됨이지만 끊김
+    expect(showIntegrationHealth(connection({ status: 'NOT_CONNECTED', health: { level: 'DOWN', lastErrorAt: null, faults: [] } }))).toBe(true);
+  });
+
+  it('장애 한 줄: 이어진 횟수 · 마지막 실패 · 알림 여부', () => {
+    expect(integrationFaultLine(fault(), NOW)).toBe('2번 이어서 실패 · 마지막 30분 전 · 관리자에게 알렸어요(2시간 전)');
+    expect(integrationFaultLine(fault({ faultKind: 'REQUEST_FAILED', notifiedAt: null }), NOW)).toBe('2번 이어서 실패 · 마지막 30분 전 · 아직 알리지 않았어요');
+    expect(integrationFaultLine(fault({ failureCount: 1 }), NOW)).toContain('1번 이어서 실패');
+  });
+});
+
+describe('Notion 반영 실패 목록 (이슈 #518)', () => {
+  const NOW = new Date('2026-10-22T05:00:00.000Z');
+  const failure = (overrides: Partial<NotionSyncFailureView> = {}): NotionSyncFailureView => ({
+    id: 1,
+    targetType: 'task',
+    targetId: 12,
+    title: '원료 입고 확인',
+    failureCount: 2,
+    lastError: 'Notion 페이지를 만들지 못했어요',
+    isResultUnknown: false,
+    retryAfter: '2026-10-22T05:03:00.000Z',
+    firstFailedAt: '2026-10-22T04:55:00.000Z',
+    lastFailedAt: '2026-10-22T04:59:00.000Z',
+    ...overrides,
+  });
+
+  it('실패한 행 종류 이름', () => {
+    expect(notionSyncTargetLabel(failure({ targetType: 'schedule_event' }))).toBe('일정');
+    expect(notionSyncTargetLabel(failure({ targetType: 'meeting_minutes' }))).toBe('회의록');
+    expect(notionSyncTargetLabel(failure({ targetType: 'task' }))).toBe('할 일');
+  });
+
+  it('다음 자동 시도: 분·시간 뒤, 이미 지났으면 다음 반영에 다시', () => {
+    expect(syncFailureNextLabel(failure({ retryAfter: '2026-10-22T05:03:00.000Z' }), NOW)).toBe('다음 자동 시도: 3분 뒤');
+    expect(syncFailureNextLabel(failure({ retryAfter: '2026-10-22T05:00:20.000Z' }), NOW)).toBe('다음 자동 시도: 1분 뒤');
+    expect(syncFailureNextLabel(failure({ retryAfter: '2026-10-22T06:00:00.000Z' }), NOW)).toBe('다음 자동 시도: 1시간 뒤');
+    expect(syncFailureNextLabel(failure({ retryAfter: '2026-10-22T04:00:00.000Z' }), NOW)).toBe('다음 반영(1분 안)에 다시 해요');
+  });
+
+  it('결과를 알 수 없던 건만 다시 시도 전에 Notion을 확인했는지 묻는다', () => {
+    expect(syncRetryConfirmText(failure())).toBeNull();
+    const text = syncRetryConfirmText(failure({ isResultUnknown: true, title: '회의 일정' }));
+    expect(text).toContain('「회의 일정」');
+    expect(text).toContain('같은 페이지가 하나 더 생겨요');
+  });
+
+  it('다시 시도 결과 안내', () => {
+    const result = (requested: number, succeeded: number): NotionSyncRetryResult => ({ requested, succeeded, failed: requested - succeeded, failures: [] });
+    expect(syncRetryToast(result(0, 0))).toEqual({ tone: 'ok', text: '다시 시도할 반영 실패가 없어요' });
+    expect(syncRetryToast(result(3, 3))).toEqual({ tone: 'ok', text: '3건을 Notion에 반영했어요' });
+    expect(syncRetryToast(result(2, 0))).toEqual({ tone: 'error', text: '2건이 또 실패했어요. 이유를 확인해 주세요' });
+    expect(syncRetryToast(result(3, 1))).toEqual({ tone: 'error', text: '1건은 반영했고 2건은 또 실패했어요' });
+  });
+
+  it('설명에 서버를 다시 띄워도 남는다고 적는다', () => {
+    expect(NOTION_SYNC_FAILURES_NOTE).toContain('서버를 다시 띄워도 목록은 남아요');
   });
 });

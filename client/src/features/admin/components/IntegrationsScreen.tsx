@@ -1,6 +1,7 @@
 'use client';
 
 // 외부 연결 /admin/integrations (문서에 없는 기능, 이슈 #358·#361·#391): 회사 Notion 계정 연결과 회의록을 둘 상위 페이지·업무 공간, 회사 Google Drive 연결과 녹음 폴더.
+// 연결마다 상태(정상·주의·끊김)·마지막 오류와 시각·풀리지 않은 장애, Notion 반영 실패 목록과 다시 시도 (이슈 #518).
 // 회사 계정 하나를 모든 사원이 함께 쓴다. 설정 전용 권한 코드가 없어 AI 연결 화면처럼 ORG_MANAGE로 연다(가정). 사용 권한이 없으면 조회만 한다.
 // OAuth 허용이 끝나면 서버가 브라우저를 ?integration=notion|google-drive&result=connected|error&message=… 로 돌려보낸다.
 import { useEffect, useRef, useState } from 'react';
@@ -14,6 +15,8 @@ import { Button } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { GoogleDriveCard } from '@/features/admin/components/GoogleDriveCard';
+import { IntegrationHealthNotes, IntegrationStatusBadges } from '@/features/admin/components/IntegrationHealth';
+import { NotionSyncFailuresSection } from '@/features/admin/components/NotionSyncFailures';
 import { Field } from '@/components/Field';
 import { Input, Select } from '@/components/Input';
 import { KvList } from '@/components/KvList';
@@ -22,10 +25,8 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { useAction } from '@/hooks/useAction';
 import { useIntegrationTest, useIntegrations } from '@/hooks/useIntegrations';
-import { useCanUse } from '@/hooks/usePermission';
+import { useCanUse, useCanView } from '@/hooks/usePermission';
 import {
-  INTEGRATION_STATUS_LABEL,
-  INTEGRATION_STATUS_TONE,
   integrationCallbackToast,
   integrationCardKind,
   NOTION_CALENDAR_EMPTY_HINT,
@@ -128,7 +129,7 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
 
   return (
     <Card petKey={`card:integrations.${providerKey}`}>
-      <CardHead title={connection.displayName} meta={<Badge tone={INTEGRATION_STATUS_TONE[status]}>{INTEGRATION_STATUS_LABEL[status]}</Badge>} />
+      <CardHead title={connection.displayName} meta={<IntegrationStatusBadges connection={connection} />} />
       <CardBody>
         <KvList
           items={[
@@ -141,12 +142,7 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
             <b>연결이 끊겼어요.</b> 허용이 만료되었거나 취소되었어요. 관리자가 다시 연결해 주세요.
           </Banner>
         ) : null}
-        {connection.lastError ? (
-          <Banner tone="danger" icon="alert">
-            <span className="text-cap font-medium">마지막 오류</span>
-            <div className="break-words">{connection.lastError}</div>
-          </Banner>
-        ) : null}
+        <IntegrationHealthNotes connection={connection} />
 
         <Field
           label="회의록을 둘 Notion 상위 페이지"
@@ -228,6 +224,7 @@ function NotionCard({ connection, canEdit }: { connection: IntegrationConnection
 function NotionWorkspaceSection({ connection, canEdit, hasUnsavedChanges }: { connection: IntegrationConnectionView; canEdit: boolean; hasUnsavedChanges: boolean }) {
   const workspace = connection.notionWorkspace;
   const queryClient = useQueryClient();
+  const canViewFailures = useCanView(PERMISSION.ORG_MANAGE);
   const setup = useAction(integrationApi.setupNotionWorkspace, {
     success: 'Notion 업무 공간을 만들었어요. 일정·회의록·할 일을 옮기기 시작해요',
     invalidate: [integrationKeys.all],
@@ -289,6 +286,7 @@ function NotionWorkspaceSection({ connection, canEdit, hasUnsavedChanges }: { co
           <div className="break-words">{workspace.lastSyncError}</div>
         </Banner>
       ) : null}
+      {workspace?.ready ? <NotionSyncFailuresSection canView={canViewFailures} canEdit={canEdit} /> : null}
       {workspace?.ready ? (
         <NotionCalendarSection
           key={workspace.calendar ? `${notionCalendarKey(workspace.calendar)}|${workspace.calendar.sendInvites ? 1 : 0}` : 'none'}
