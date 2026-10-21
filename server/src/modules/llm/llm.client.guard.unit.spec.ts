@@ -1,5 +1,5 @@
-// LlmClient의 연결 Agent (#497): 전역 fetch에 undici Agent(dispatcher)를 넘겨도 localhost·사설망 이름의 LLM 서버를 그대로 부를 수 있고(짧은 요청·스트리밍),
-// 이름이 메타데이터 주소로 풀리는 연결 실패는 알아본다. fetch를 가로채지 않고 127.0.0.1 시험 서버를 실제로 부른다.
+// LlmClient의 연결 Agent (#497·#510): 메타데이터 막는 undici Agent를 같은 undici의 fetch(netFetch.run)로 부르며 localhost 이름의 LLM 서버를 그대로 부를 수 있고(짧은 요청·스트리밍),
+// 리다이렉트는 따라가지 않는다. fetch를 가로채지 않고 127.0.0.1 시험 서버를 실제로 부른다(전역 fetch에 npm undici Agent를 넘기면 Node 22·24에서 실패한다).
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Logger } from '@nestjs/common';

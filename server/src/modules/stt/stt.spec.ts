@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Agent } from 'undici';
+import * as guardedAgent from '../../common/net/guarded-agent';
 import { netFetch } from '../../common/net/guarded-agent';
 import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav, sttAgentOptions } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
@@ -163,23 +164,59 @@ describe('SttClient.transcribe 긴 전사의 대기 시간 (이슈 #485)', () =>
   afterAll(() => fetchMock.mockRestore());
 
   it('전역 fetch의 기본 헤더 대기(300초)에 걸리지 않게 전사 제한 시간에 맞춘 Agent를 이 요청에만 넘긴다', async () => {
+    const created = jest.spyOn(guardedAgent, 'createMetadataGuardedAgent');
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ text: '네' }), { status: 200 }));
     await new SttClient().transcribe({ baseUrl: 'http://stt.test/v1', apiKey: null }, input);
     const init = fetchMock.mock.calls[0][1] as RequestInit & { dispatcher?: unknown };
     expect(init.dispatcher).toBeInstanceOf(Agent);
+    // 일반 Agent가 아니라 메타데이터 막는 Agent를, 전사 제한 시간(60분)에 맞춘 대기 시간으로 이 요청에만 만든다
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(created).toHaveBeenCalledWith(sttAgentOptions(60 * 60_000));
+    expect(init.dispatcher).toBe(created.mock.results[0].value);
+    created.mockRestore();
     // 한 시간 제한이면 헤더·본문 모두 한 시간보다 조금 더 기다린다 (우리 제한이 먼저 걸려 안내 문구가 나온다)
     expect(sttAgentOptions(60 * 60_000)).toEqual({ headersTimeout: 60 * 60_000 + 10_000, bodyTimeout: 60 * 60_000 + 10_000 });
     expect(sttAgentOptions(60 * 60_000).headersTimeout).toBeGreaterThan(300_000);
   });
 
   it('모델 목록 같은 짧은 요청은 전사용이 아닌, 메타데이터 주소로 풀리는 이름만 막는 Agent를 한 번 만들어 같이 쓴다 (이슈 #497)', async () => {
+    const created = jest.spyOn(guardedAgent, 'createMetadataGuardedAgent');
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
     const client = new SttClient();
     await client.listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
     await client.listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
     const [first, second] = fetchMock.mock.calls.map((call) => (call[1] as { dispatcher?: unknown }).dispatcher);
-    expect(first).toBeInstanceOf(Agent);
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(first).toBe(created.mock.results[0].value);
     expect(second).toBe(first);
+    created.mockRestore();
+  });
+
+  it('받아쓰기 본문은 멀티파트(multipart/form-data)로 간다: 전역 FormData를 undici fetch에 넘기면 글 [object FormData]가 간다 (실제 서버, 이슈 #510)', async () => {
+    fetchMock.mockImplementation(realFetch);
+    let received: { contentType: string | undefined; body: string } | null = null;
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        received = { contentType: req.headers['content-type'], body: Buffer.concat(chunks).toString('utf8') };
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ text: '받음' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const transcript = await new SttClient().transcribe({ baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: null }, input, 5_000);
+      expect(transcript.text).toBe('받음');
+      expect(received).not.toBeNull();
+      const { contentType, body } = received as unknown as { contentType: string | undefined; body: string };
+      expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
+      expect(body).toContain('name="file"; filename="');
+      expect(body).toContain('name="model"');
+      expect(body).not.toContain('[object FormData]');
+    } finally {
+      server.close();
+    }
   });
 
   it('응답 헤더가 한참 늦게 와도(실제 서버, 1.2초) Agent가 끊지 않고 받는다', async () => {
@@ -257,9 +294,6 @@ describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => 
     const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://my-stt.example:8001/v1', apiKey: null }, input))) as SttRequestError;
     expect(error.message).toContain('메타데이터 주소로 풀려');
     expect(error.publicMessage).toBe('음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요');
-    // 모델 목록·받아쓰기 모두 막는 Agent로 부른다
-    await failureOf(new SttClient().listModels({ baseUrl: 'http://my-stt.example:8001/v1', apiKey: null }));
-    for (const call of fetchMock.mock.calls) expect((call[1] as { dispatcher?: { constructor: { name: string } } }).dispatcher?.constructor.name).toBe('Agent');
     fetchMock.mockRestore();
   });
 

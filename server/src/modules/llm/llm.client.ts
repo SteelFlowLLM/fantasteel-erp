@@ -6,10 +6,12 @@ import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
 /**
- * 모델 목록·서버 종류 확인의 제한 시간. 로컬 LLM이 답을 만드는 중이면 목록 요청도 늦게 와서 5초는 '연결 확인'을 '연결 안 됨'으로 만들었다(이슈 #510).
+ * 모델 목록(GET /models)의 제한 시간. 로컬 LLM이 답을 만드는 중이면 목록 요청도 늦게 와서 5초로는 AI 연결 화면의 '연결 확인'이 '연결 안 됨'이 되곤 했다(이슈 #510).
  * 첫 대화는 LM Studio가 모델을 메모리에 올리느라 더 오래 걸릴 수 있다
  */
 const MODELS_TIMEOUT_MS = 15_000;
+/** 서버 종류 탐침(LM Studio·Unsloth 고유 경로)과 모델 정보의 제한 시간. 탐침은 차례로 여러 번 부르므로 5초 그대로 둔다(멈춘 서버에서 연결 확인이 1분 넘게 걸리지 않게) */
+const PROBE_TIMEOUT_MS = 5_000;
 const CHAT_TIMEOUT_MS = 120_000;
 /** 모델의 생각 설정 지원 여부는 요청마다 묻지 않는다. 모델을 바꾸거나 새로 받으면 이 시간 안에 반영된다 */
 const MODEL_INFO_TTL_MS = 60_000;
@@ -272,7 +274,7 @@ export class LlmClient {
         'GET',
         '/api/v0/models',
         undefined,
-        MODELS_TIMEOUT_MS,
+        PROBE_TIMEOUT_MS,
       );
       return new Map((body.data ?? []).map((m) => [m.id, { type: m.type, state: m.state }]));
     } catch {
@@ -539,7 +541,7 @@ export class LlmClient {
     const key = `${path}|${root}|${model}`;
     const cached = this.unslothCheckCache.get(key);
     if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.value;
-    const value = await this.request<Record<string, unknown>>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/${path}/${encodeURIComponent(model)}`, undefined, MODELS_TIMEOUT_MS)
+    const value = await this.request<Record<string, unknown>>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/${path}/${encodeURIComponent(model)}`, undefined, PROBE_TIMEOUT_MS)
       .then((body) => (typeof body[field] === 'boolean' ? (body[field] as boolean) : null))
       .catch(() => null);
     this.unslothCheckCache.set(key, { at: Date.now(), value });
@@ -574,11 +576,11 @@ export class LlmClient {
 
   /** Unsloth Studio의 불러온 모델·auto-switch·불러온 모델 정보. /v1/status가 Unsloth 모양이 아니면 null */
   private async unslothInfo(endpoint: LlmEndpoint, root: string): Promise<UnslothInfo | null> {
-    const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, MODELS_TIMEOUT_MS).catch(() => null);
+    const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, PROBE_TIMEOUT_MS).catch(() => null);
     if (!status || typeof status.supports_reasoning !== 'boolean' || typeof status.reasoning_style !== 'string') return null;
-    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS).catch(() => ({ data: [] }));
+    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, PROBE_TIMEOUT_MS).catch(() => ({ data: [] }));
     const loaded = (models.data ?? []).filter((m) => m.loaded === true).map((m) => m.id);
-    const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, MODELS_TIMEOUT_MS)
+    const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, PROBE_TIMEOUT_MS)
       .then((body) => (typeof body.enabled === 'boolean' ? body.enabled : null))
       .catch(() => null);
     const active =
@@ -601,7 +603,7 @@ export class LlmClient {
           capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } };
         }[];
       };
-      const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
+      const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, PROBE_TIMEOUT_MS);
       models = Array.isArray(body.models) ? new Map() : null;
       for (const m of body.models ?? []) {
         const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true, contextLength: contextLengthOf(m) };
