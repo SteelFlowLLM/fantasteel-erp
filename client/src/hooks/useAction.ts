@@ -15,15 +15,21 @@ export interface ActionOptions<TInput, TOutput> {
   toastOnError?: boolean;
 }
 
+/**
+ * 성공한 뒤의 순서. 저장·확정 안내(토스트)는 다시 불러오기를 기다리지 않고 바로 띄운다(느릴 때 안내가 20초 넘게 늦었다).
+ * options.onSuccess는 새 데이터에 기대는 곳이 있어 다시 불러오기가 끝난 뒤에 부른다.
+ */
+export async function afterActionSuccess<TInput, TOutput>(refresh: () => Promise<void>, options: ActionOptions<TInput, TOutput>, data: TOutput, input: TInput): Promise<void> {
+  if (options.success) toast.ok(typeof options.success === 'function' ? options.success(data) : options.success);
+  await refresh();
+  options.onSuccess?.(data, input);
+}
+
 export function useAction<TInput, TOutput>(fn: (input: TInput) => Promise<TOutput>, options: ActionOptions<TInput, TOutput> = {}) {
   const queryClient = useQueryClient();
   return useMutation<TOutput, unknown, TInput>({
     mutationFn: fn,
-    onSuccess: async (data, input) => {
-      await refreshAfterAction(queryClient, options.invalidate);
-      if (options.success) toast.ok(typeof options.success === 'function' ? options.success(data) : options.success);
-      options.onSuccess?.(data, input);
-    },
+    onSuccess: (data, input) => afterActionSuccess(() => refreshAfterAction(queryClient, options.invalidate), options, data, input),
     onError: (error, input) => {
       if (options.toastOnError !== false) toast.apiError(error);
       options.onError?.(error, input);
