@@ -568,7 +568,12 @@ export type AiAssistantStreamEvent =
   | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
   /** thread: 저장을 요청한 질문이면 저장한 대화, 저장에 실패했으면 null (이슈 #399) */
   | { type: 'done'; reply: AiAssistantReplyView; thread?: AiChatThreadRef | null }
-  | { type: 'error'; message: string };
+  /** code: LLM 실패를 나눈 오류 코드(AST-002 모델 없음·AST-003 연결 실패·AST-004 시간 초과·AST-005 그 밖, 이슈 #462). 그 밖의 실패는 없다 */
+  | { type: 'error'; message: string; code?: AiLlmFailureCode };
+
+/** LLM 실패 전용 오류 코드 (정의서 9.3에 없음, 이슈 #462). shared errors.ts의 같은 코드 */
+export type AiLlmFailureCode = 'AST-002' | 'AST-003' | 'AST-004' | 'AST-005';
+export const AI_LLM_FAILURE_CODES: readonly AiLlmFailureCode[] = ['AST-002', 'AST-003', 'AST-004', 'AST-005'];
 
 /** 역할별 추천 질문과 처음 쓰는 사용자용 질문 (REQ-AST-008) */
 export interface AiAssistantSuggestedQuestionsView {

@@ -2,6 +2,7 @@
 // 생각 글과 도구 동작 기록(짧게 줄인 것)은 서버가 답과 함께 저장해 다시 열어도 '생각 과정'이 나온다 (이슈 #433).
 // 도구 결과 글·사진·브라우저 화면 사진·실패 줄은 저장하지 않아 이 탭 메모리에만 있다.
 import type {
+  AiLlmFailureCode,
   AiActionCard,
   AiActionCardExecuteResult,
   AiAssistantImageInput,
@@ -89,7 +90,7 @@ export type AiChatEntry =
    */
   | { id: string; role: 'assistant'; content: string; sources: AiAssistantSource[]; steps?: AiTimelineStep[]; requestedReasoning?: AiReasoningLevel; reasoningApplied?: boolean; cards?: AiChatCard[]; webSources?: AiWebSource[]; browserFrames?: AiBrowserFrame[]; messageId?: number; unsaved?: boolean }
   /** 답을 받지 못한 질문. content는 화면에 보일 실패 이유, reasoning은 다시 물을 때 쓸 생각 정도 */
-  | { id: string; role: 'failure'; content: string; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean };
+  | { id: string; role: 'failure'; content: string; code?: AiLlmFailureCode; question: string; reasoning?: AiReasoningLevel; images?: AiAssistantImageInput[]; webSearch?: boolean; browser?: boolean };
 
 /** 사용자가 멈췄을 때 실패 줄에 보이는 이유 */
 export const AI_CHAT_STOPPED_REASON = '멈췄어요';
@@ -232,14 +233,14 @@ export function aiChatEntriesFromThread(thread: AiChatThreadView): AiChatEntry[]
   });
 }
 
-/** 실패 줄: 다시 물을 때 같은 생각 정도·사진으로 묻도록 질문 때의 값을 담는다 */
-function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: string, question: string, reason: string): AiChatEntry {
+/** 실패 줄: 다시 물을 때 같은 생각 정도·사진으로 묻도록 질문 때의 값을 담는다. code는 AI 서버 실패를 나눈 오류 코드(있을 때만) */
+function failureEntry(state: Pick<AiChatState, 'entries' | 'live'>, questionId: string, question: string, reason: string, code?: AiLlmFailureCode | null): AiChatEntry {
   const asked = state.entries.find((entry) => entry.id === questionId);
   const images = asked?.role === 'user' ? asked.images : undefined;
   const webSearch = asked?.role === 'user' ? asked.webSearch : undefined;
   const browser = asked?.role === 'user' ? asked.browser : undefined;
   const reasoning = state.live?.reasoning;
-  return { id: newAiChatId(), role: 'failure', content: reason, question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) };
+  return { id: newAiChatId(), role: 'failure', content: reason, ...(code ? { code } : {}), question, ...(reasoning ? { reasoning } : {}), ...(images ? { images } : {}), ...(webSearch ? { webSearch } : {}), ...(browser ? { browser } : {}) };
 }
 
 interface AiChatState {
@@ -264,7 +265,7 @@ interface AiChatState {
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
   /** 실행 전이고 실행 중이 아닌 카드면 실행 중으로 표시하고 true. 아니면(이미 실행 중·실행됨·닫음·없음) false */
   claimCardRun: (entryId: string, key: string) => boolean;
-  addFailure: (questionId: string, question: string, reason: string) => void;
+  addFailure: (questionId: string, question: string, reason: string, code?: AiLlmFailureCode | null) => void;
   /** 스트림 이벤트 하나를 반영한다. done은 답 줄을, error는 실패 줄을 더한다 */
   applyStreamEvent: (questionId: string, event: AiAssistantStreamEvent, now?: number) => void;
   /** 실패한 질문과 실패 줄을 지운다 (다시 물을 때) */
@@ -320,11 +321,11 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     get().updateCard(entryId, key, { running: true });
     return true;
   },
-  addFailure: (questionId, question, reason) =>
+  addFailure: (questionId, question, reason, code) =>
     set((state) =>
       state.pendingId === questionId
         ? {
-            entries: [...state.entries, failureEntry(state, questionId, question, reason)],
+            entries: [...state.entries, failureEntry(state, questionId, question, reason, code)],
             pendingId: null,
             live: null,
           }
@@ -346,7 +347,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       }
       if (event.type === 'error') {
         const question = state.entries.find((entry) => entry.id === questionId)?.content ?? '';
-        return { entries: [...state.entries, failureEntry(state, questionId, question, event.message)], pendingId: null, live: null };
+        return { entries: [...state.entries, failureEntry(state, questionId, question, event.message, event.code)], pendingId: null, live: null };
       }
       return { live: reduceAiChatLive(state.live, event, now) };
     }),

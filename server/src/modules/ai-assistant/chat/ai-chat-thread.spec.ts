@@ -3,7 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
-import type { AiAssistantStreamEvent, AiChatThreadSummaryView, AiChatThreadView, PageResult } from '@fantasteel/shared';
+import { ERROR_CODE, type AiAssistantStreamEvent, type AiChatThreadSummaryView, type AiChatThreadView, type PageResult } from '@fantasteel/shared';
 import { AppModule } from '../../../app.module';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { seoulToday } from '../../../common/time/seoul-date';
@@ -39,7 +39,7 @@ const llmClient = {
     if (failNext) {
       failNext = false;
       const { LlmRequestError } = await import('../../llm/llm.client');
-      throw new LlmRequestError('120초 안에 응답이 없어요');
+      throw new LlmRequestError('120초 안에 응답이 없어요', undefined, 'TIMEOUT');
     }
     handlers.onThinking('생각 중');
     handlers.onAnswer(nextAnswer);
@@ -153,7 +153,7 @@ describe('저장한 대화 (이슈 #399)', () => {
   it('LLM이 실패한 질문은 저장하지 않는다', async () => {
     failNext = true;
     const { events } = await askStream(ownerCookie, { question: '실패할 질문', threadId });
-    expect(events.at(-1)).toEqual({ type: 'error', message: '120초 안에 응답이 없어요' });
+    expect(events.at(-1)).toEqual({ type: 'error', code: 'AST-004', message: ERROR_CODE['AST-004'].message });
     expect(await prisma.aiChatMessage.count({ where: { threadId } })).toBe(4);
   });
 

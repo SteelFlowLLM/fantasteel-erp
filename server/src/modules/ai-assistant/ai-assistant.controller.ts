@@ -13,6 +13,7 @@ import type {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
+import { llmFailureOf } from '../llm/llm-failure';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentInputDto, AgentNoteDto, BrowserWindowDto, ScreenActionResultDto, agentInputOf } from './dto/ai-assistant.dto';
@@ -80,7 +81,7 @@ export class AiAssistantController {
       if (error instanceof LlmAbortedError) return;
       if (error instanceof LlmRequestError) {
         this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
-        write({ type: 'error', message: error.message });
+        write({ type: 'error', ...llmFailureOf(error) });
       } else {
         this.logger.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
         write({ type: 'error', message: '답을 만드는 중에 문제가 생겼어요. 잠시 뒤 다시 물어봐 주세요' });
