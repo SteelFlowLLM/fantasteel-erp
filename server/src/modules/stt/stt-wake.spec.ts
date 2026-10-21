@@ -65,6 +65,33 @@ describe('SttService.transcribeWakeClip', () => {
     expect(plain).toEqual({ text: null, error: '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요' });
   });
 
+  it('음성 서버가 바쁘면(503·시간 초과) 꺼짐이 아니라 잠시 뒤 다시 부르라고 VOC-009로 알린다 (#519)', async () => {
+    // 바쁨은 SttClient가 만드는 오류 문구로 가리므로, 실제 SttClient가 만든 오류로 확인한다
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const errorOf = async (): Promise<unknown> =>
+      new SttClient().transcribe(stored, { audio: clip.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: 'whisper' }, 20_000).then(
+        () => null,
+        (error: unknown) => error,
+      );
+    try {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: '지금 다른 녹음을 받아쓰는 중이에요' }), { status: 503 }));
+      const busy = await errorOf();
+      fetchMock.mockRejectedValueOnce(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+      const slow = await errorOf();
+      for (const error of [busy, slow]) {
+        for (const asker of [user(1), user(2, { ORG_MANAGE: 'USE' })]) {
+          await expect(setup(jest.fn().mockRejectedValue(error)).transcribeWakeClip(asker, clip)).rejects.toMatchObject({ code: 'VOC-009', message: expect.stringContaining('잠시 뒤 다시 불러 주세요') });
+        }
+      }
+      // 연결이 안 되는 것은 그대로 꺼짐(연결할 수 없어요)이다
+      fetchMock.mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' }) }));
+      const down = await errorOf();
+      expect(await setup(jest.fn().mockRejectedValue(down)).transcribeWakeClip(user(1), clip)).toEqual({ text: null, error: '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요' });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it('모르는 오류는 그대로 던진다 (500으로 남는다)', async () => {
     await expect(setup(jest.fn().mockRejectedValue(new Error('boom'))).transcribeWakeClip(user(1), clip)).rejects.toThrow('boom');
   });

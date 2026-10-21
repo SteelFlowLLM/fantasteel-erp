@@ -15,6 +15,11 @@ const WAKE_SERVER_DOWN = STT_CONNECT_PUBLIC_MESSAGE;
 /** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
 const WAKE_CLIP_TIMEOUT_MS = 20_000;
 
+/** 음성 서버가 다른 받아쓰기로 바쁠 때(사이드카 503·시간 초과). 꺼진 것이 아니라 잠시 뒤 다시 부르면 된다 (#519) */
+const WAKE_SERVER_BUSY = '음성 서버가 바빠 이번 말은 받아쓰지 못했어요(다른 녹음을 받아쓰는 중일 수 있어요). 잠시 뒤 다시 불러 주세요';
+/** SttClient가 상태 코드를 따로 주지 않아 그 오류 문구로 가린다 (stt-wake.spec이 실제 SttClient 오류로 확인한다) */
+const BUSY_FAILURE = /\(HTTP (?:429|503)\)|초 안에 응답이 없어요/;
+
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedAudio {
   originalname: string;
@@ -96,6 +101,7 @@ export class SttService {
    * 철강맨 부르기 (이슈 #457): 말소리 조각(PCM WAV, 8초까지) 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
    * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
    * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
+   * 음성 서버가 바쁘면(503·시간 초과) 꺼짐으로 남기지 않게 VOC-009(잠시 뒤 다시)로 알린다: 화면은 띠에 문제로 두지 않고 잠깐 안내한다 (#519)
    */
   /**
    * mode(이슈 #494): wake는 부르는 말을 찾는 8초 조각, command는 "철강맨" 뒤 명령 한 덩어리(30초), partial은 명령을 말하는 동안 보이기만 할 중간 글.
@@ -122,6 +128,7 @@ export class SttService {
     } catch (error) {
       const detail = messageOf(error);
       this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
+      if (BUSY_FAILURE.test(detail)) throw new AppException('VOC-009', WAKE_SERVER_BUSY);
       return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
     }
   }
