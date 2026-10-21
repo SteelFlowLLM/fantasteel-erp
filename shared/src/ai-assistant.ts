@@ -208,6 +208,13 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   drive_read_file: 'Drive 파일 읽기',
   get_my_schedule: '내 일정 조회',
   get_my_tasks: '내 업무 조회',
+  get_agent_risks: 'Agent 위험 조회',
+  get_my_notifications: '내 알림 조회',
+  get_my_approvals: '내 결재함 조회',
+  get_my_action_drafts: '내 초안 조회',
+  get_master_data: '기준정보 조회',
+  search_meeting_minutes: '지난 회의 검색',
+  get_my_research: '내 심층 조사 조회',
   search_chat_history: '지난 대화 찾기',
   search_room_messages: '지난 메시지 찾기',
 };

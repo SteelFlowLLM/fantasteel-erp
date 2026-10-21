@@ -44,10 +44,43 @@ import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingSpeakerSuggester } from './meeting-speaker-suggest';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
-import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
+import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesDigestRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 
 const DEFAULT_PAGE_SIZE = 20;
+
+/** 철강맨AI 회의 검색의 한 줄: 목록 칸 + 요약 + AI가 정리한 결정사항 (전사 글은 담지 않는다) */
+export interface MeetingDigest extends MeetingMinutesListItem {
+  summary: string | null;
+  decisions: string[];
+}
+
+/** 회의 검색 조건. 날짜는 'YYYY-MM-DD' 양 끝 포함 */
+export interface SearchMeetingDigestsQuery {
+  meetingMinutesStatus?: string;
+  from?: string;
+  to?: string;
+  page: number;
+  size: number;
+}
+
+function toDigest(row: MeetingMinutesDigestRow): MeetingDigest {
+  const analysis = readAnalysis(row.analysisResult);
+  return {
+    id: row.id,
+    meetingMinutesTitle: row.meetingMinutesTitle,
+    meetingDate: row.meetingDate.toISOString().slice(0, 10),
+    meetingMinutesStatus: row.meetingMinutesStatus as MeetingMinutesStatus,
+    attendeeCount: row._count.attendees,
+    creatorId: row.creatorId,
+    creatorName: row.creator.employeeName,
+    createdAt: row.createdAt.toISOString(),
+    // 검토에서 고친 요약(summary)이 AI가 처음 쓴 요약보다 우선이다
+    summary: row.summary ?? analysis?.summary ?? null,
+    decisions: analysis?.decisions.map((d) => d.text) ?? [],
+  };
+}
+
 /** 화자를 연결·추정할 수 있는 상태: 전사가 끝났고 확정 전 */
 const SPEAKER_OPEN_STATUSES: readonly string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
 /**
@@ -635,6 +668,19 @@ export class MeetingMinutesService {
     };
     const [total, rows] = await Promise.all([this.repository.count(this.prisma, where), this.repository.findList(this.prisma, where, { skip: (page - 1) * size, take: size })]);
     return { items: rows.map(toListItem), page, size, total };
+  }
+
+  /**
+   * 철강맨AI 회의 검색 (문서에 없는 기능, 이슈 #506). 목록(API-259)과 같은 범위(회의록은 전 역할이 열람)에 요약·결정사항을 더해,
+   * 제목에 없고 요약·결정에만 있는 말로도 찾게 한다. 상태·회의일은 DB에서 좁히고 낱말 거르기는 부르는 쪽이 한다.
+   */
+  async searchDigests(query: SearchMeetingDigestsQuery): Promise<{ items: MeetingDigest[]; page: number; size: number; total: number }> {
+    const where: Prisma.MeetingMinutesWhereInput = {
+      meetingMinutesStatus: query.meetingMinutesStatus,
+      ...(query.from || query.to ? { meetingDate: { ...(query.from ? { gte: parseMeetingDate(query.from) } : {}), ...(query.to ? { lte: parseMeetingDate(query.to) } : {}) } } : {}),
+    };
+    const [total, rows] = await Promise.all([this.repository.count(this.prisma, where), this.repository.findDigests(this.prisma, where, { skip: (query.page - 1) * query.size, take: query.size })]);
+    return { items: rows.map(toDigest), page: query.page, size: query.size, total };
   }
 
   /** API-259 상세 */

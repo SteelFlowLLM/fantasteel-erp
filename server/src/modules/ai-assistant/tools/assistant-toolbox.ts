@@ -31,6 +31,9 @@ import { NotificationService } from '../../notification/notification.service';
 import { TaskService } from '../../notification/task.service';
 import { AiAssistantRepository } from '../ai-assistant.repository';
 import { ACTION_CARD_TOOLS, actionCardTools } from './action-card.tool';
+import { myActionDraftsTool } from './action-draft.tool';
+import { agentRiskTool } from './agent.tool';
+import { myApprovalsTool } from './approval.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
 import { businessEventTool } from './business-event.tool';
 import { dashboardTool } from './dashboard.tool';
@@ -38,10 +41,14 @@ import { inventoryTool } from './inventory.tool';
 import { knowledgeTool } from './knowledge.tool';
 import { myScheduleTool, myTasksTool } from './my-work.tool';
 import { lotTraceTool } from './lot-trace.tool';
+import { masterDataTool } from './master-data.tool';
+import { meetingMinutesTool } from './meeting-minutes.tool';
 import { mrpTool } from './mrp.tool';
+import { myNotificationsTool } from './notification.tool';
 import { productionPlanTool, productionResultTool } from './production.tool';
 import { goodsReceiptTool, purchaseOrderTool, purchaseRequisitionTool } from './purchasing.tool';
 import { qualityInspectionTool, qualityRejectRateTool, rejectedLotTool } from './quality.tool';
+import { myResearchTool } from './research.tool';
 import { salesOrderTool } from './sales-order.tool';
 import { pastCaseTool } from './past-case.tool';
 import { millSheetTool, shipmentRequestTool } from './shipment.tool';
@@ -112,6 +119,13 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     knowledgeTool(),
     myScheduleTool(s.scheduleEvents),
     myTasksTool(s.tasks),
+    myNotificationsTool(s.notifications),
+    myApprovalsTool(s.purchasing),
+    myActionDraftsTool(s.messageActions),
+    agentRiskTool(s.agent, s.notifications),
+    myResearchTool(s.research),
+    masterDataTool(s.masterData),
+    meetingMinutesTool(s.meetingMinutes),
     ...actionCardTools(s.actionCards, s.opsCards, s.updateCards),
   ];
 }
