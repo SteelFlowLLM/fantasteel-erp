@@ -35,9 +35,11 @@ tools/voice-sidecar/start.sh --uninstall   # 끄고 자동 켜기를 지운다
 
 - macOS 개인정보 보호 때문에 자동 켜기는 `~/Documents`(저장소)와 다른 앱 폴더(Spokenly)를 읽지 못한다. 그래서 `--install`은 `start.sh`·`server.py`를 `~/Library/Application Support/fantasteel-voice/`에 복사하고, 모델이 Spokenly 폴더에만 있으면 그 파일(약 550MB)도 한 번 복사한다. 화자 분리용 `HF_TOKEN`은 `server/.env`에서 읽어 같은 폴더의 `env`(본인만 읽기)에 둔다.
 - **코드를 새로 받았으면 `--install`을 다시** 하면 새 코드로 바뀐다.
-- 로그: `~/Library/Logs/fantasteel-voice.log`. 자동 켜기는 API 키를 로그에 남기지 않는다. 키는 `cat ~/.config/fantasteel-voice/api-key`로 본다.
+- 로그: `~/Library/Logs/fantasteel-voice.log`(켜질 때 5MB를 넘으면 `.log.1` 하나만 남기고 새로 쓴다). 자동 켜기는 API 키를 로그에 남기지 않는다. 키는 `cat ~/.config/fantasteel-voice/api-key`로 본다.
 - ERP 서버도 이 Mac이면 AI 연결 화면의 **이 Mac의 음성 서버** 카드에서 켜고 끌 수 있다. 끄면 다음 로그인 때 다시 켜진다. ERP 서버가 다른 컴퓨터면 그 컴퓨터가 내 Mac의 프로그램을 켤 길은 없으므로(그런 길은 보안 구멍이다) 이 카드는 보이지 않는다.
 - 다른 PC에 열 필요가 없으면 `--install --local`(이 Mac에서만, 키 없음).
+- 포트를 바꾸려면 `SIDECAR_PORT=8101 tools/voice-sidecar/start.sh --install`. 등록 파일에 적혀 ERP 카드도 같은 포트로 상태를 본다.
+- 복사본(`~/Library/Application Support/fantasteel-voice/start.sh`)으로 다시 설치해도 기존 `HF_TOKEN`을 그대로 쓴다.
 
 ### 터미널에서 직접 켜기
 

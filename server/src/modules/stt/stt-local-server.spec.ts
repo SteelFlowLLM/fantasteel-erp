@@ -2,7 +2,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SttLocalServerService, VOICE_AGENT_LABEL, parseLaunchctlPrint, type RunCommand } from './stt-local-server.service';
+import { SttLocalServerService, VOICE_AGENT_LABEL, parseLaunchctlPrint, sidecarPortOf, tildePath, type RunCommand } from './stt-local-server.service';
 
 const RUNNING = `gui/501/com.fantasteel.voice = {\n\tactive count = 1\n\tstate = running\n\tpid = 4242\n}`;
 const STOPPED = `gui/501/com.fantasteel.voice = {\n\tactive count = 0\n\tstate = not running\n}`;
@@ -22,6 +22,20 @@ describe('parseLaunchctlPrint', () => {
     expect(parseLaunchctlPrint(STOPPED)).toEqual({ running: false, pid: null });
     expect(parseLaunchctlPrint('')).toEqual({ running: false, pid: null });
     expect(parseLaunchctlPrint('\tstate = not running\n\tpid = 4242\n')).toEqual({ running: false, pid: null });
+  });
+});
+
+describe('plist 포트·경로 줄이기', () => {
+  it('start.sh가 적은 SIDECAR_PORT를 읽고, 없거나 이상하면 8001', () => {
+    expect(sidecarPortOf('<dict>\n    <key>SIDECAR_PORT</key><string>8123</string>\n</dict>')).toBe(8123);
+    expect(sidecarPortOf('<plist/>')).toBe(8001);
+    expect(sidecarPortOf('<key>SIDECAR_PORT</key><string>99999</string>')).toBe(8001);
+  });
+
+  it('홈 폴더를 ~로 줄인다', () => {
+    expect(tildePath('/Users/kim/Library/Logs/fantasteel-voice.log', '/Users/kim')).toBe('~/Library/Logs/fantasteel-voice.log');
+    expect(tildePath('/var/log/x.log', '/Users/kim')).toBe('/var/log/x.log');
+    expect(tildePath('/Users/kimberly/x.log', '/Users/kim')).toBe('/Users/kimberly/x.log');
   });
 });
 
@@ -59,10 +73,37 @@ describe('SttLocalServerService', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('켜져 있고 응답하면 켜짐·pid를 보인다', async () => {
-    await writeFile(plist, '<plist/>');
+  it('켜져 있고 응답하면 켜짐·pid를 보이고, plist의 포트로 응답을 본다', async () => {
+    await writeFile(plist, '<key>SIDECAR_PORT</key><string>8123</string>');
     const run: RunCommand = jest.fn().mockResolvedValue({ stdout: RUNNING });
-    expect(await new TestService(run, 'darwin', plist).status()).toMatchObject({ installed: true, running: true, healthy: true, pid: 4242, message: null });
+    const status = await new TestService(run, 'darwin', plist).status();
+    expect(status).toMatchObject({ installed: true, running: true, healthy: true, pid: 4242, message: null });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8123/health');
+    expect(status.logPath?.startsWith('~/')).toBe(true);
+  });
+
+  it('켜기·끄기를 동시에 눌러도 차례로 하나씩 실행한다', async () => {
+    await writeFile(plist, '<plist/>');
+    const log: string[] = [];
+    let running = false;
+    const run: RunCommand = async (_file, args) => {
+      log.push(`${args[0]}:start`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      log.push(`${args[0]}:end`);
+      if (args[0] === 'print') {
+        if (!running) throw new Error('not found');
+        return { stdout: RUNNING };
+      }
+      if (args[0] === 'bootstrap') running = true;
+      if (args[0] === 'bootout') running = false;
+      return { stdout: '' };
+    };
+    const service = new TestService(run, 'darwin', plist);
+    const [started, stopped] = await Promise.all([service.start(), service.stop()]);
+    expect(started.running).toBe(true);
+    expect(stopped.running).toBe(false);
+    // 어느 명령도 다른 명령이 끝나기 전에 시작하지 않는다
+    for (let i = 0; i < log.length; i += 2) expect(log[i + 1]).toBe(log[i].replace(':start', ':end'));
   });
 
   it('켜졌지만 아직 응답이 없으면 켜는 중이라고 한다', async () => {

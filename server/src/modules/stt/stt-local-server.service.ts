@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -10,13 +10,24 @@ import { AppException } from '../../common/errors/app.exception';
 /** tools/voice-sidecar/start.sh --install이 등록하는 LaunchAgent와 같은 이름 */
 export const VOICE_AGENT_LABEL = 'com.fantasteel.voice';
 const LAUNCHCTL = '/bin/launchctl';
-const SIDECAR_HEALTH_URL = 'http://127.0.0.1:8001/health';
+const DEFAULT_SIDECAR_PORT = 8001;
 const COMMAND_TIMEOUT_MS = 10_000;
 
 export type RunCommand = (file: string, args: string[]) => Promise<{ stdout: string }>;
 
 const execFileAsync = promisify(execFile);
 const defaultRun: RunCommand = (file, args) => execFileAsync(file, args, { timeout: COMMAND_TIMEOUT_MS });
+
+/** start.sh --install이 plist의 EnvironmentVariables에 적은 SIDECAR_PORT. 없거나 이상하면 기본 포트 */
+export function sidecarPortOf(plist: string): number {
+  const port = Number(/<key>SIDECAR_PORT<\/key>\s*<string>(\d{1,5})<\/string>/.exec(plist)?.[1]);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_SIDECAR_PORT;
+}
+
+/** 화면에 보일 경로: 홈 폴더를 ~로 줄인다 */
+export function tildePath(path: string, home = homedir()): string {
+  return home && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
 
 /** `launchctl print`의 state·pid 줄 */
 export function parseLaunchctlPrint(output: string): { running: boolean; pid: number | null } {
@@ -38,38 +49,47 @@ export class SttLocalServerService {
   protected run: RunCommand = defaultRun;
   protected platform: NodeJS.Platform = process.platform;
   protected plistPath = join(homedir(), 'Library', 'LaunchAgents', `${VOICE_AGENT_LABEL}.plist`);
+  /** 켜기·끄기를 한 줄로 세운다: 두 번 눌러도 bootstrap과 bootout이 섞이지 않게 */
+  private queue: Promise<unknown> = Promise.resolve();
 
   async status(): Promise<SttLocalServerView> {
-    const base = { logPath: join(homedir(), 'Library', 'Logs', 'fantasteel-voice.log') };
+    const base = { logPath: tildePath(join(homedir(), 'Library', 'Logs', 'fantasteel-voice.log')) };
     if (this.platform !== 'darwin') {
       return { supported: false, installed: false, running: false, healthy: false, pid: null, ...base, message: 'ERP 서버가 macOS가 아니라 이 화면에서 켤 수 없어요. 음성 서버 컴퓨터에서 자동 켜기를 써요' };
     }
-    const installed = await access(this.plistPath).then(
-      () => true,
-      () => false,
-    );
-    if (!installed) {
+    const plist = await readFile(this.plistPath, 'utf8').catch(() => null);
+    if (plist === null) {
       return { supported: true, installed: false, running: false, healthy: false, pid: null, ...base, message: '자동 켜기가 등록되지 않았어요. 터미널에서 tools/voice-sidecar/start.sh --install을 한 번 실행해 주세요' };
     }
     const { running, pid } = await this.print();
-    const healthy = running && (await this.healthy());
+    const healthy = running && (await this.healthy(sidecarPortOf(plist)));
     return { supported: true, installed: true, running, healthy, pid, ...base, message: running && !healthy ? '켜는 중이에요. 모델을 올리는 데 몇 초 걸려요' : null };
   }
 
-  async start(): Promise<SttLocalServerView> {
-    await this.requireInstalled();
-    const { running } = await this.print();
-    // 끈 뒤(bootout)에는 등록이 내려가 있어 다시 올리고, 올라가 있으면 다시 시작만 한다
-    if (running) await this.run(LAUNCHCTL, ['kickstart', '-k', this.target()]);
-    else await this.bootstrap();
-    return this.status();
+  start(): Promise<SttLocalServerView> {
+    return this.serial(async () => {
+      await this.requireInstalled();
+      const { running } = await this.print();
+      // 끈 뒤(bootout)에는 등록이 내려가 있어 다시 올리고, 올라가 있으면 다시 시작만 한다
+      if (running) await this.run(LAUNCHCTL, ['kickstart', '-k', this.target()]);
+      else await this.bootstrap();
+      return this.status();
+    });
   }
 
   /** 지금만 끈다. 등록 파일은 남아 다음 로그인 때 다시 켜진다 */
-  async stop(): Promise<SttLocalServerView> {
-    await this.requireInstalled();
-    await this.run(LAUNCHCTL, ['bootout', this.target()]).catch(() => undefined);
-    return this.status();
+  stop(): Promise<SttLocalServerView> {
+    return this.serial(async () => {
+      await this.requireInstalled();
+      await this.run(LAUNCHCTL, ['bootout', this.target()]).catch(() => undefined);
+      return this.status();
+    });
+  }
+
+  private serial<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(task, task);
+    this.queue = next.catch(() => undefined);
+    return next;
   }
 
   private async requireInstalled(): Promise<void> {
@@ -95,9 +115,9 @@ export class SttLocalServerService {
     }
   }
 
-  private async healthy(): Promise<boolean> {
+  private async healthy(port: number): Promise<boolean> {
     try {
-      const res = await fetch(SIDECAR_HEALTH_URL, { signal: AbortSignal.timeout(2_000) });
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2_000) });
       return res.ok;
     } catch {
       return false;
