@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { PERMISSION, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView } from '@fantasteel/shared';
-import { RequirePermission } from '../../common/auth/auth.decorators';
+import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttLocalServerService } from './stt-local-server.service';
 import { SttService, type UploadedAudio } from './stt.service';
@@ -45,6 +45,17 @@ export class SttController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: AUDIO_TEST_MAX_BYTES, files: 1 } }))
   testTranscribe(@UploadedFile() file: UploadedAudio | undefined): Promise<SttTranscribeTestView> {
     return this.service.testTranscribe(file);
+  }
+
+  /**
+   * 철강맨 부르기 (이슈 #457): 말소리 조각(16kHz WAV, 최대 8초) 하나를 글로. 설정 화면이 아니라 모든 사원이 쓰므로 권한 코드 없이 로그인만 본다.
+   * 사원당 1분 횟수는 service가 막는다
+   */
+  @Post('stt/wake-clip')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: STT_WAKE_CLIP_LIMITS.maxBytes, files: 1 } }))
+  transcribeWakeClip(@CurrentUser() user: AuthUser, @UploadedFile() file: UploadedAudio | undefined): Promise<SttWakeClipView> {
+    return this.service.transcribeWakeClip(user, file);
   }
 
   /** ERP 서버와 같은 Mac의 음성 서버(LaunchAgent) 상태 (이슈 #450). macOS가 아니면 supported: false */

@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import type { SttConnectionTestInput, SttConnectionView, SttSettingsInput, SttSettingsView, SttTranscribeTestView } from '@fantasteel/shared';
+import type { AuthUser, SttConnectionTestInput, SttConnectionView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import { SttClient, SttRequestError, normalizeBaseUrl } from './stt.client';
+import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
+import { SttWakeLimiter } from './stt-wake-limiter';
 import { redactUrl, sameOrigin } from './stt-url';
+
+/** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
+const WAKE_CLIP_TIMEOUT_MS = 20_000;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedAudio {
@@ -17,6 +21,7 @@ export class SttService {
   constructor(
     private readonly store: SttSettingsStore,
     private readonly client: SttClient,
+    private readonly wakeLimiter: SttWakeLimiter = new SttWakeLimiter(),
   ) {}
 
   async getSettings(): Promise<SttSettingsView> {
@@ -65,6 +70,27 @@ export class SttService {
       return { ok: true, text: result.text, segmentCount: result.segments.length, durationSec: result.durationSec, latencyMs: Date.now() - started, error: null };
     } catch (error) {
       return { ok: false, text: null, segmentCount: null, durationSec: null, latencyMs: null, error: messageOf(error) };
+    }
+  }
+
+  /**
+   * 철강맨 부르기 (이슈 #457): 말소리 조각 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
+   * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
+   */
+  async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined): Promise<SttWakeClipView> {
+    if (!this.wakeLimiter.take(user.employeeId)) throw new AppException('VOC-009');
+    if (!file) throw new AppException('COM-004', '말소리 조각이 없어요 (file 필드)');
+    if (!isAudio(file.mimetype)) throw new AppException('COM-004', '오디오만 보낼 수 있어요');
+    const settings = await this.store.read();
+    try {
+      const result = await this.client.transcribe(
+        settings,
+        { audio: file.buffer, fileName: 'wake.wav', mimeType: file.mimetype, model: quickModelOf(settings.model) },
+        WAKE_CLIP_TIMEOUT_MS,
+      );
+      return { text: result.text, error: null };
+    } catch (error) {
+      return { text: null, error: messageOf(error) };
     }
   }
 }

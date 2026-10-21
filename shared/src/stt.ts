@@ -79,3 +79,15 @@ export interface SttLocalServerView {
   /** 화면에 보일 안내 (등록 방법, 켜는 중 등) */
   message: string | null;
 }
+
+/**
+ * 철강맨 부르기 (이슈 #457, 문서에 없는 기능): 브라우저가 소리 크기로 잡은 말소리 조각 하나를 글로 바꾼다.
+ * 조각은 16kHz·모노 WAV라 8초면 약 256KB다. 사원당 1분 횟수는 계속 켜 둔 마이크가 음성 서버를 독차지하지 않게 하는 가정값이다.
+ */
+export const STT_WAKE_CLIP_LIMITS = { maxSeconds: 8, maxBytes: 512 * 1024, perMinute: 30 } as const;
+
+/** POST stt/wake-clip. 소리는 저장하지 않고 글만 돌려준다. 음성 서버에 닿지 않으면 text 없이 이유를 준다 */
+export interface SttWakeClipView {
+  text: string | null;
+  error: string | null;
+}

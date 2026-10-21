@@ -10,6 +10,8 @@ const MAX_MODEL_OPTIONS = 50;
 const TRANSCRIBE_TIMEOUT_MS = 60 * 60_000;
 const CONNECTION_TEST_TIMEOUT_MS = 90_000;
 const DEFAULT_MODEL = 'whisper-1';
+/** 사이드카의 받아쓰기만 하는 엔진. 화자 분리는 몇 초짜리 부르는 말에 필요 없고 느리다 */
+const SIDECAR_QUICK_MODEL = 'whisper';
 
 export interface SttEndpoint {
   baseUrl: string;
@@ -40,6 +42,11 @@ export interface SttTranscript {
   text: string;
   segments: SttSegment[];
   durationSec: number | null;
+}
+
+/** 철강맨 부르기처럼 짧은 조각에 쓸 모델: 사이드카의 화자 분리 엔진이면 받아쓰기만 하는 엔진으로 바꾼다 */
+export function quickModelOf(model: string | null): string | null {
+  return model !== null && SIDECAR_MODELS.has(model) ? SIDECAR_QUICK_MODEL : model;
 }
 
 /** 화면에 그대로 보일 연결 실패 이유 */
