@@ -214,6 +214,24 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
   });
 });
 
+describe('히트 편성 기준 여러 개 읽기 (이슈 #498)', () => {
+  it('규격 여러 개를 한 번에 읽어도 하나씩 읽은 것과 같고, 기준정보가 모자란 규격은 MST-001을 값으로 준다', async () => {
+    const coilBase = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SM355A-4.5x1500x544000' } });
+    // 슬래브 규격 매핑이 없는 코일 규격
+    const bare = await prisma.item.create({
+      data: { itemCode: 'CL-HR-BARE', itemName: '매핑 없는 코일', itemType: 'COIL', unitType: 'QTY', steelGradeId: coilBase.steelGradeId, thicknessMm: '4.5', widthMm: '1500', lengthMm: '544002', theoreticalWeightTon: calcTheoreticalWeightTon('4.5', '1500', '544002'), defaultYardId: coilBase.defaultYardId },
+    });
+    const bases = await production.heatPlanBasesOf(prisma, [coilItemId, slabItemId, bare.id, coilItemId, 999_999]);
+    expect([...bases.keys()].sort((a, b) => a - b)).toEqual([slabItemId, coilItemId, bare.id, 999_999].sort((a, b) => a - b));
+    for (const id of [coilItemId, slabItemId]) expect(bases.get(id)).toEqual(await production.heatPlanBasisOf(prisma, id));
+    expect(bases.get(coilItemId)).toMatchObject({ itemType: 'COIL', slabItem: { id: slabItemId, itemCode: 'SL-HR-TEST' } });
+    expect(bases.get(bare.id)).toMatchObject({ code: 'MST-001', message: '코일 규격에 대응하는 슬래브 규격 매핑이 없어요' });
+    expect(bases.get(999_999)).toMatchObject({ code: 'MST-001' });
+    expect(await codeOf(production.heatPlanBasisOf(prisma, bare.id))).toBe('MST-001');
+    expect((await production.heatPlanBasesOf(prisma, [])).size).toBe(0);
+  });
+});
+
 describe('열연 투입 오류', () => {
   it('슬래브 계획은 열연 투입 화면이 없다 (COM-004), 없는 계획 COM-003', async () => {
     const item = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SS275-250x1200x10000' } });

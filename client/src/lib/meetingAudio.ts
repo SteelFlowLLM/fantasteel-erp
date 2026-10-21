@@ -49,6 +49,14 @@ export function meetingDateOfAudio(lastModified: number | string | null | undefi
   return Number.isNaN(at.getTime()) ? null : toSeoulDateString(at);
 }
 
+/**
+ * 녹음 파일(또는 Drive 녹음)을 골랐을 때의 회의일. 파일 날짜를 알면 그 날짜로 바꾸되, 사용자가 회의일을 직접 고친 뒤이거나
+ * 파일 날짜를 모르면 지금 값을 그대로 둔다 (직접 고른 날짜를 파일 선택이 덮어쓰지 않게)
+ */
+export function meetingDateAfterPick(current: string, edited: boolean, fileDate: string | null): string {
+  return edited || fileDate === null ? current : fileDate;
+}
+
 /** getUserMedia 실패를 한국어 안내로 */
 export function microphoneErrorMessage(error: unknown, secureContext: boolean): string {
   if (!secureContext) return '마이크는 https 또는 localhost에서만 쓸 수 있어요';

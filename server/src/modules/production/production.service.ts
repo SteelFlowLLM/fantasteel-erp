@@ -85,35 +85,66 @@ export class ProductionService {
 
   /** 히트 편성 기준정보 (4.4). 수율·매핑·히트 용량이 없으면 MST-001 (BP-PRD-01 "수율·배합·기준 단위가 없으면 확정하지 않는다") */
   async heatPlanBasisOf(tx: Tx, itemId: number): Promise<HeatPlanBasis> {
-    const item = await this.repository.findItemForPlan(tx, itemId);
-    if (!item?.theoreticalWeightTon) throw new AppException('MST-001', '규격의 이론중량이 없어요');
-    const itemType = item.itemType as ItemType;
-    const routings = await this.repository.findRoutings(tx, itemType);
-    const yieldOf = (processType: string) => routings.find((r) => r.processType === processType)?.plannedYieldRate ?? null;
-    const castingYieldRate = yieldOf(PROCESS_TYPE.CONTINUOUS_CASTING);
-    const steelmakingYieldRate = yieldOf(PROCESS_TYPE.STEELMAKING);
-    if (!castingYieldRate || !steelmakingYieldRate) throw new AppException('MST-001', '제강·연주 계획 수율이 없어요');
-    let hotRollingYieldRate: Prisma.Decimal | null = null;
-    let slabItem = { id: item.id, itemCode: item.itemCode, itemName: item.itemName, theoreticalWeightTon: item.theoreticalWeightTon };
-    if (itemType === ITEM_TYPE.COIL) {
-      const mapped = item.specMappingAsCoilItem?.slabItem;
-      if (!mapped?.theoreticalWeightTon) throw new AppException('MST-001', '코일 규격에 대응하는 슬래브 규격 매핑이 없어요');
-      hotRollingYieldRate = hotRollingYieldRateOf(item.theoreticalWeightTon, mapped.theoreticalWeightTon);
-      slabItem = { id: mapped.id, itemCode: mapped.itemCode, itemName: mapped.itemName, theoreticalWeightTon: mapped.theoreticalWeightTon };
-    }
+    const found = (await this.heatPlanBasesOf(tx, [itemId])).get(itemId);
+    if (found instanceof AppException) throw found;
+    if (!found) throw new AppException('MST-001', '규격의 이론중량이 없어요');
+    return found;
+  }
+
+  /**
+   * 규격 여러 개의 히트 편성 기준정보를 한 번에 읽는다(규격마다 쿼리 4~5개를 반복하지 않고, 라우팅·설정값은 한 번만, 규격은 `in`으로, 이슈 #498).
+   * 기준정보가 모자란 규격은 heatPlanBasisOf가 던졌을 MST-001을 값으로 담는다(던지지 않는다)
+   */
+  async heatPlanBasesOf(tx: Tx, itemIds: readonly number[]): Promise<Map<number, HeatPlanBasis | AppException>> {
+    const ids = [...new Set(itemIds)];
+    const bases = new Map<number, HeatPlanBasis | AppException>();
+    if (ids.length === 0) return bases;
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const items = new Map((await this.repository.findItemsForPlan(tx, ids)).map((i) => [i.id, i]));
+    const routings = await this.repository.findRoutingsOfTypes(tx, [...new Set([...items.values()].map((i) => i.itemType as ItemType))]);
     const setting = await this.repository.findProductionSetting(tx);
-    if (!setting) throw new AppException('MST-001', '히트 용량 설정값이 없어요');
-    return {
-      itemId: item.id,
-      itemType,
-      steelGradeId: item.steelGradeId,
-      theoreticalWeightTon: item.theoreticalWeightTon,
-      castingYieldRate,
-      steelmakingYieldRate,
-      hotRollingYieldRate,
-      heatCapacityTon: setting.heatCapacityTon,
-      slabItem,
-    };
+    for (const id of ids) {
+      const item = items.get(id);
+      if (!item?.theoreticalWeightTon) {
+        bases.set(id, new AppException('MST-001', '규격의 이론중량이 없어요'));
+        continue;
+      }
+      const itemType = item.itemType as ItemType;
+      const yieldOf = (processType: string) => routings.find((r) => r.itemType === itemType && r.processType === processType)?.plannedYieldRate ?? null;
+      const castingYieldRate = yieldOf(PROCESS_TYPE.CONTINUOUS_CASTING);
+      const steelmakingYieldRate = yieldOf(PROCESS_TYPE.STEELMAKING);
+      if (!castingYieldRate || !steelmakingYieldRate) {
+        bases.set(id, new AppException('MST-001', '제강·연주 계획 수율이 없어요'));
+        continue;
+      }
+      let hotRollingYieldRate: Prisma.Decimal | null = null;
+      let slabItem = { id: item.id, itemCode: item.itemCode, itemName: item.itemName, theoreticalWeightTon: item.theoreticalWeightTon };
+      if (itemType === ITEM_TYPE.COIL) {
+        const mapped = item.specMappingAsCoilItem?.slabItem;
+        if (!mapped?.theoreticalWeightTon) {
+          bases.set(id, new AppException('MST-001', '코일 규격에 대응하는 슬래브 규격 매핑이 없어요'));
+          continue;
+        }
+        hotRollingYieldRate = hotRollingYieldRateOf(item.theoreticalWeightTon, mapped.theoreticalWeightTon);
+        slabItem = { id: mapped.id, itemCode: mapped.itemCode, itemName: mapped.itemName, theoreticalWeightTon: mapped.theoreticalWeightTon };
+      }
+      if (!setting) {
+        bases.set(id, new AppException('MST-001', '히트 용량 설정값이 없어요'));
+        continue;
+      }
+      bases.set(id, {
+        itemId: item.id,
+        itemType,
+        steelGradeId: item.steelGradeId,
+        theoreticalWeightTon: item.theoreticalWeightTon,
+        castingYieldRate,
+        steelmakingYieldRate,
+        hotRollingYieldRate,
+        heatCapacityTon: setting.heatCapacityTon,
+        slabItem,
+      });
+    }
+    return bases;
   }
 
   /** 계획 없이 등록하는 제선의 히트 1개 몫 기준: 히트 용량과 슬래브·코일 중 낮은 제강 수율 (몫이 가장 큰 쪽) */
@@ -267,11 +298,11 @@ export class ProductionService {
     // 진행 값은 이 쪽 계획들의 LOT·열연 배정을 한 번에 읽어 계산한다
     const ids = rows.map((r) => r.id);
     const [lots, rolling] = await Promise.all([this.repository.findLotsOfPlans(this.prisma, ids), this.repository.countConfirmedRollingByPlans(this.prisma, ids)]);
-    const basisByItem = new Map<number, HeatPlanBasis | null>();
+    const bases = await this.heatPlanBasesOf(this.prisma, rows.map((r) => r.itemId));
     const items: ProductionPlanSummary[] = [];
     for (const row of rows) {
-      if (!basisByItem.has(row.itemId)) basisByItem.set(row.itemId, await this.heatPlanBasisOf(this.prisma, row.itemId).catch(() => null));
-      const basis = basisByItem.get(row.itemId);
+      const found = bases.get(row.itemId);
+      const basis = found instanceof AppException ? null : found;
       const progress = planProgressOf(
         { ...row, itemType: row.item.itemType as ItemType, productionPlanStatus: row.productionPlanStatus as ProductionPlanStatus },
         lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === row.id),

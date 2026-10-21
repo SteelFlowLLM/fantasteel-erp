@@ -203,7 +203,8 @@ function CodeNameModal({ kind, row, onClose }: { kind: ListKind; row: CodeNameRo
   const [code, setCode] = useState(row?.code ?? '');
   const [name, setName] = useState(row?.name ?? '');
   const [yardType, setYardType] = useState<YardType | ''>(row?.yardType ?? '');
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
+  // 다른 사람이 먼저 고쳐 막히면(COM-001) 조회를 다시 읽고 옛 값으로 열린 창을 닫는다
+  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose };
   const created = `${text.what}를 추가했어요`;
   const saved = `${text.what}를 저장했어요`;
   const createCustomer = useAction(masterDataApi.createCustomer, { ...options, success: created });

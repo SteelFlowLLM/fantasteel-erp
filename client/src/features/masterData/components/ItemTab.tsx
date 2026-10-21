@@ -114,7 +114,8 @@ function RawMaterialModal({ material, onClose }: { material: MasterRawMaterialVi
   const [rawMaterialType, setRawMaterialType] = useState<RawMaterialType | ''>(material?.rawMaterialType ?? '');
   const [supplierId, setSupplierId] = useState(material?.defaultSupplierId ? String(material.defaultSupplierId) : '');
   const [yardId, setYardId] = useState(material ? String(material.defaultYardId) : '');
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
+  // 다른 사람이 먼저 고쳐 막히면(COM-001) 조회를 다시 읽고 옛 값으로 열린 창을 닫는다
+  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose };
   const create = useAction(masterDataApi.createRawMaterial, { ...options, success: '원료를 추가했어요' });
   const update = useAction(masterDataApi.updateRawMaterial, { ...options, success: '원료를 저장했어요' });
   const rawYards = (yards.data ?? []).filter((y) => y.yardType === 'RAW_MATERIAL');

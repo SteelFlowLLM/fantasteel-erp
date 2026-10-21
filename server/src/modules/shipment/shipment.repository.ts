@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_STATUS, LOT_STATUS, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { getShippableQtyBySalesOrderItem, lockSalesOrderItemsForShipment, lockShipmentRequest } from '../../generated/prisma/sql';
+import { getShippableQtyBySalesOrderItem, listMillSheetSummaries, lockSalesOrderItemsForShipment, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 const summarySelect = {
@@ -289,9 +289,9 @@ export class ShipmentRepository {
     return tx.millSheet.create({ data, select: { id: true } });
   }
 
-  findMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput, skip: number, take: number) {
-    // 목록 화면이 쓰는 고객사·매수·히트·규격은 스냅샷에서 뽑는다 (MillSheetListItem)
-    return tx.millSheet.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: millSheetDetailSelect });
+  /** 목록 한 쪽(최신 발행 순). 스냅샷 전체를 읽지 않고 목록이 쓰는 칸만 SQL에서 뽑는다 (MillSheetListItem, 이슈 #498) */
+  findMillSheetList(tx: Tx, filter: { shipmentRequestId?: number; salesOrderId?: number }, skip: number, take: number) {
+    return tx.$queryRawTyped(listMillSheetSummaries(filter.shipmentRequestId ?? null, filter.salesOrderId ?? null, take, skip));
   }
 
   countMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput) {

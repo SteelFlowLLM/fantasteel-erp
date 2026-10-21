@@ -256,14 +256,20 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
       const sheetA = await millSheet(request.id, request.shipmentRequestNo, a.salesOrderId, 1, snapshotA);
       const sheetB = await millSheet(request.id, request.shipmentRequestNo, b.salesOrderId, 2, snapshotOf('나래조선', [{ itemCode: 'CL-TEST-B', itemType: 'COIL' }, { itemCode: 'CL-TEST-B', itemType: 'COIL' }], ['HT-TEST-A', 'HT-TEST-B']));
 
+      // 모양이 다른 옛 스냅샷 한 건이 있어도 목록 전체가 실패하지 않고 그 줄만 빈 칸이다 (이슈 #498)
+      const c = await salesOrderItem(customerB, 5);
+      const legacy = await millSheet(request.id, request.shipmentRequestNo, c.salesOrderId, 3, { customerName: '나래조선', lots: [] });
+
       const byRequest = await service.listMillSheets({ shipmentRequestId: request.id, page: 1, size: 20 });
-      expect(byRequest.total).toBe(2);
-      expect(byRequest.items.map((s) => s.id)).toEqual([sheetB.id, sheetA.id]);
-      expect(byRequest.items[0]).toMatchObject({ shipmentRequestNo: request.shipmentRequestNo, pdfPath: null });
+      expect(byRequest.total).toBe(3);
+      expect(byRequest.items.map((s) => s.id)).toEqual([legacy.id, sheetB.id, sheetA.id]);
+      const [legacyRow, rowB, rowA] = byRequest.items;
+      expect(legacyRow).toMatchObject({ customerName: '', totalQty: 0, totalWeightTon: '0.000', heatNos: [], itemTypes: [], itemCodes: [] });
+      expect(rowB).toMatchObject({ shipmentRequestNo: request.shipmentRequestNo, pdfPath: null });
       // 화면이 밀시트마다 상세를 따로 부르지 않도록 목록이 스냅샷에서 뽑은 값을 함께 준다 (이슈 #498)
-      expect(byRequest.items[0]).toMatchObject({ customerName: '나래조선', totalQty: 2, totalWeightTon: '47.100', heatNos: ['HT-TEST-A', 'HT-TEST-B'], itemTypes: ['COIL'], itemCodes: ['CL-TEST-B'] });
-      expect(byRequest.items[1]).toMatchObject({ totalQty: 1, totalWeightTon: '23.550', heatNos: ['HT-TEST-A'], itemTypes: ['SLAB'], itemCodes: ['SL-TEST-A'] });
-      expect('snapshot' in byRequest.items[0]).toBe(false);
+      expect(rowB).toMatchObject({ customerName: '나래조선', totalQty: 2, totalWeightTon: '47.100', heatNos: ['HT-TEST-A', 'HT-TEST-B'], itemTypes: ['COIL'], itemCodes: ['CL-TEST-B'] });
+      expect(rowA).toMatchObject({ totalQty: 1, totalWeightTon: '23.550', heatNos: ['HT-TEST-A'], itemTypes: ['SLAB'], itemCodes: ['SL-TEST-A'] });
+      expect('snapshot' in rowB).toBe(false);
 
       const bySalesOrder = await service.listMillSheets({ salesOrderId: a.salesOrderId, page: 1, size: 20 });
       expect(bySalesOrder.items.map((s) => s.millSheetNo)).toEqual([sheetA.millSheetNo]);

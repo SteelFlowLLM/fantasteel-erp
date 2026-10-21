@@ -107,6 +107,27 @@ export class ProductionRepository {
     return tx.routing.findMany({ where: { itemType }, orderBy: { sequenceNo: 'asc' } });
   }
 
+  /** 규격 여러 개의 히트 편성 기준(findItemForPlan과 같은 칸). 없는 규격은 빠진다 */
+  findItemsForPlan(tx: Tx, itemIds: number[]) {
+    return tx.item.findMany({
+      where: { id: { in: itemIds } },
+      select: {
+        id: true,
+        itemCode: true,
+        itemType: true,
+        steelGradeId: true,
+        theoreticalWeightTon: true,
+        itemName: true,
+        specMappingAsCoilItem: { select: { slabItem: { select: { id: true, itemCode: true, itemName: true, theoreticalWeightTon: true } } } },
+      },
+    });
+  }
+
+  /** 여러 품목 유형의 라우팅 */
+  findRoutingsOfTypes(tx: Tx, itemTypes: ItemType[]) {
+    return tx.routing.findMany({ where: { itemType: { in: itemTypes } }, orderBy: { sequenceNo: 'asc' } });
+  }
+
   /** 한 공정의 라우팅 (슬래브·코일 유형마다 한 행) */
   findRoutingsOfProcess(tx: Tx, processType: ProcessType) {
     return tx.routing.findMany({ where: { processType }, orderBy: { itemType: 'asc' } });

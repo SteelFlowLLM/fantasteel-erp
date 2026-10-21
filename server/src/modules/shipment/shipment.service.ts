@@ -384,7 +384,7 @@ export class ShipmentService {
       ...(query.salesOrderId ? { salesOrderId: query.salesOrderId } : {}),
     };
     const [rows, total] = await Promise.all([
-      this.repository.findMillSheets(this.prisma, where, (query.page - 1) * query.size, query.size),
+      this.repository.findMillSheetList(this.prisma, { shipmentRequestId: query.shipmentRequestId, salesOrderId: query.salesOrderId }, (query.page - 1) * query.size, query.size),
       this.repository.countMillSheets(this.prisma, where),
     ]);
     return { items: rows.map(toMillSheetListItem), page: query.page, size: query.size, total };

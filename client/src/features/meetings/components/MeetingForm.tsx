@@ -24,7 +24,7 @@ import { useIntegrations } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { fmtBytes, todayStr } from '@/lib/format';
 import { canImportAudioFromDrive, driveFileSizeLabel, googleDriveConnection } from '@/lib/integrations';
-import { MEETING_AUDIO_ACCEPT, audioFileProblem, meetingDateOfAudio } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem, meetingDateAfterPick, meetingDateOfAudio } from '@/lib/meetingAudio';
 
 type InputMode = 'record' | 'file' | 'drive' | 'text';
 const MODE_TABS: readonly { key: InputMode; label: string }[] = [
@@ -191,8 +191,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
                           const problem = picked ? audioFileProblem(picked) : null;
                           setFileProblem(problem);
                           setAudioFile(picked && !problem ? picked : null);
-                          const fileDate = picked && !problem ? meetingDateOfAudio(picked.lastModified) : null;
-                          if (fileDate && !meetingDateEdited) setMeetingDate(fileDate);
+                          setMeetingDate(meetingDateAfterPick(meetingDate, meetingDateEdited, picked && !problem ? meetingDateOfAudio(picked.lastModified) : null));
                         }}
                       />
                       {audioFile ? (
@@ -241,8 +240,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
           selectedId={driveFile?.id ?? null}
           onPick={(file) => {
             setDriveFile(file);
-            const fileDate = meetingDateOfAudio(file.modifiedTime);
-            if (fileDate && !meetingDateEdited) setMeetingDate(fileDate);
+            setMeetingDate(meetingDateAfterPick(meetingDate, meetingDateEdited, meetingDateOfAudio(file.modifiedTime)));
             setPickingDrive(false);
           }}
           onClose={() => setPickingDrive(false)}

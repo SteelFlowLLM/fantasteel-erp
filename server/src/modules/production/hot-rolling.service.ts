@@ -56,17 +56,10 @@ export class HotRollingService {
     // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
     const lots = await this.plans.findLotsOfPlans(this.prisma, ids);
     const confirmedByPlan = await this.plans.countConfirmedRollingByPlans(this.prisma, ids);
-    const slabItemCodeByItem = new Map<number, string | null>();
+    const bases = await this.production.heatPlanBasesOf(this.prisma, rows.map((r) => r.itemId));
     const items: HotRollingPlanListItem[] = [];
     for (const row of rows) {
-      if (!slabItemCodeByItem.has(row.itemId)) {
-        try {
-          slabItemCodeByItem.set(row.itemId, (await this.production.heatPlanBasisOf(this.prisma, row.itemId)).slabItem.itemCode);
-        } catch (e) {
-          if (!(e instanceof AppException)) throw e;
-          slabItemCodeByItem.set(row.itemId, null);
-        }
-      }
+      const basis = bases.get(row.itemId);
       const coils = lots.filter((l) => l.productionResult?.productionPlanId === row.id && l.lotType === LOT_TYPE.COIL).map(toPlanLot);
       const failedCoilQty = coils.filter((c) => c.judgement === 'FAIL').length;
       const usableCoilQty = coils.length - failedCoilQty;
@@ -74,7 +67,7 @@ export class HotRollingService {
       const open = row.productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED || row.productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS;
       items.push({
         plan: toPlanSummary(row),
-        slabItemCode: slabItemCodeByItem.get(row.itemId) ?? null,
+        slabItemCode: basis instanceof AppException || basis === undefined ? null : basis.slabItem.itemCode,
         shortageQty: row.shortageQty,
         usableCoilQty,
         failedCoilQty,
