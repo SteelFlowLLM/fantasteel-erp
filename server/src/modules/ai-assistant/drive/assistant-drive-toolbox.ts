@@ -21,11 +21,11 @@ const KIND_LABEL = { audio: '녹음', image: '사진', document: '문서' } as c
 
 const DRIVE_SEARCH: LlmToolDefinition = {
   name: DRIVE_SEARCH_TOOL,
-  description: '회사 Google Drive 폴더에서 파일을 찾는다. 이름에 검색어가 든 파일(없으면 최근 파일)을 최신 수정순 15개까지, id·이름·종류·크기·수정일과 함께 준다. 내용은 drive_read_file로 읽는다.',
+  description: '회사 Google Drive 폴더에서 파일을 찾는다. 이름이나 내용에 검색어 낱말이 든 파일(검색어를 생략하면 최근 파일)을 최신 수정순 15개까지, id·이름·종류·크기·수정일과 함께 준다. 낱말이 여럿이면 모두 든 파일을 먼저 찾고 없으면 하나라도 든 파일을 찾는다. 찾은 파일의 내용은 drive_read_file로 읽는다.',
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '파일 이름에 든 낱말 (예: 점검표, 10월). 생략하면 최근 파일' },
+      query: { type: 'string', description: '파일 이름이나 내용에 든 핵심 낱말 1~3개를 공백으로 (예: 항복강도 SS275, 점검표, 10월). 질문 문장 통째로 넣지 않는다. 생략하면 최근 파일' },
       kind: { type: 'string', enum: [...DRIVE_FILE_LIST_KINDS], description: 'all(기본)·document(문서)·image(사진)·audio(녹음)' },
     },
   },
@@ -148,11 +148,11 @@ export class DriveToolSession {
     const kind: DriveFileListKind = optionalEnum(args, 'kind', DRIVE_FILE_LIST_KINDS) ?? 'all';
     if (++this.searches > MAX_DRIVE_SEARCHES_PER_ANSWER) return failure(`이번 질문에서는 Drive 찾기를 ${MAX_DRIVE_SEARCHES_PER_ANSWER}번까지만 해요`, { 안내: '지금까지의 결과로 답해요' });
     const files = await this.drive.searchFiles(query, kind, DRIVE_SEARCH_LIMIT);
-    if (files.length === 0) return failure('찾은 파일이 없어요', { 검색어: query, 안내: '이름의 다른 낱말로 한 번 더 찾거나, 없다고 알려요' });
+    if (files.length === 0) return failure('찾은 파일이 없어요', { 검색어: query, 안내: '더 짧은 핵심 낱말 하나나 문서 종류 낱말(기준서·매뉴얼·표준서·단가표·점검표 등)로 한 번 더 찾아요. 그래도 없으면 없다고 알려요' });
     const body = files.map((f, i) => `${i + 1}. ${cutText(stripInvisible(f.name), 200)} (${KIND_LABEL[f.kind]}, ${sizeText(f.size)}, 수정 ${f.modifiedTime?.slice(0, 10) ?? '알 수 없음'})\n   id: ${f.id}`).join('\n');
     const webSources = files.map((f) => ({ title: stripInvisible(f.name), url: driveWebUrl(f.id) }));
-    this.remember(webSources);
-    return { content: [`[Drive 찾기 결과] ${query ? `이름에 "${query}"` : '최근 파일'} · ${files.length}개`, DRIVE_UNTRUSTED_NOTE, wrapUntrusted('drive_search', body)].join('\n'), webSources };
+    // 답의 출처는 읽은 파일만 (내용으로도 찾아 결과가 많아져, 찾기만 하고 읽지 않은 파일이 출처에 줄줄이 붙지 않게, 이슈 #473). 결과 줄의 webSources는 도구 기록용
+    return { content: [`[Drive 찾기 결과] ${query ? `이름이나 내용에 "${query}"` : '최근 파일'} · ${files.length}개`, DRIVE_UNTRUSTED_NOTE, wrapUntrusted('drive_search', body)].join('\n'), webSources };
   }
 
   private async readFile(args: Record<string, unknown>): Promise<DriveToolResult> {
@@ -166,7 +166,8 @@ export class DriveToolSession {
 
   /** 작은 모델이 id 대신 이름을 넘기기도 한다: 이름이 정확히 같은 파일이 하나뿐일 때만 그 파일 */
   private async idByName(name: string): Promise<string> {
-    const files: DriveFileView[] = await this.drive.searchFiles(name, 'all', DRIVE_SEARCH_LIMIT);
+    // 이름으로 집는 것이라 내용 검색은 하지 않는다 (내용에 그 낱말이 든 다른 파일이 15개 안에 밀어내지 않게)
+    const files: DriveFileView[] = await this.drive.searchFiles(name, 'all', DRIVE_SEARCH_LIMIT, false);
     const same = files.filter((f) => f.name.trim().toLowerCase() === name.trim().toLowerCase());
     if (same.length === 1) return same[0].id;
     throw new ToolArgumentError(same.length > 1 ? '이름이 같은 파일이 여럿이에요. drive_search 결과의 id를 넘겨요' : 'file은 drive_search 결과의 파일 id예요. 먼저 drive_search로 찾아요');
