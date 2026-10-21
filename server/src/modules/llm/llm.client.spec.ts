@@ -108,6 +108,21 @@ describe('LlmClient.chatJson', () => {
     expect(logged).not.toContain('pw');
   });
 
+  it('연결은 메타데이터 주소로 풀리는 이름을 막는 Agent(dispatcher)로 하고, 그 때문에 막힌 연결은 주소 없는 문구로 알린다 (이슈 #497)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
+    await new LlmClient().chatJson(endpoint, 'm', [], format, options);
+    expect((fetchMock.mock.calls[0][1] as { dispatcher?: { constructor: { name: string } } }).dispatcher?.constructor.name).toBe('Agent');
+
+    const blocked = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('사내망·내부 주소는 읽을 수 없어요 (169.254.169.254.nip.io)'), { code: 'EBLOCKED' }) });
+    fetchMock.mockRejectedValueOnce(blocked);
+    const error = await new LlmClient().chatJson({ baseUrl: 'http://169.254.169.254.nip.io:1234/v1', apiKey: null }, 'm', [], format, options).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'CONNECT' });
+    expect((error as LlmRequestError).message).toContain('링크 로컬·클라우드 메타데이터');
+    expect((error as LlmRequestError).message).not.toMatch(/nip\.io|1234|http/);
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain('169.254.169.254.nip.io');
+  });
+
   it('리다이렉트는 따라가지 않는다 (메타데이터 같은 다른 곳에 키·질문이 가지 않게, 이슈 #497)', async () => {
     fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
     await new LlmClient().chatJson({ baseUrl: 'http://llm.test/v1', apiKey: 'secret-key' }, 'm', [], format, options);

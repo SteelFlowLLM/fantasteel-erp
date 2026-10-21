@@ -171,10 +171,14 @@ describe('SttClient.transcribe 긴 전사의 대기 시간 (이슈 #485)', () =>
     expect(sttAgentOptions(60 * 60_000).headersTimeout).toBeGreaterThan(300_000);
   });
 
-  it('모델 목록 같은 짧은 요청은 기본 fetch를 그대로 쓴다', async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-    await new SttClient().listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
-    expect((fetchMock.mock.calls[0][1] as { dispatcher?: unknown }).dispatcher).toBeUndefined();
+  it('모델 목록 같은 짧은 요청은 전사용이 아닌, 메타데이터 주소로 풀리는 이름만 막는 Agent를 한 번 만들어 같이 쓴다 (이슈 #497)', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    const client = new SttClient();
+    await client.listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
+    await client.listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
+    const [first, second] = fetchMock.mock.calls.map((call) => (call[1] as { dispatcher?: unknown }).dispatcher);
+    expect(first).toBeInstanceOf(Agent);
+    expect(second).toBe(first);
   });
 
   it('응답 헤더가 한참 늦게 와도(실제 서버, 1.2초) Agent가 끊지 않고 받는다', async () => {
@@ -243,6 +247,18 @@ describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => 
     // 주소 없는 이유는 둘이 같다
     const plain = new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
     expect(plain.publicMessage).toBe(plain.message);
+    fetchMock.mockRestore();
+  });
+
+  it('이름이 메타데이터 주소로 풀려 막힌 연결은 그렇게 알리고 publicMessage에는 주소가 없다 (이슈 #497)', async () => {
+    const blocked = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('사내망·내부 주소는 읽을 수 없어요 (my-stt.example)'), { code: 'EBLOCKED' }) });
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(blocked);
+    const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://my-stt.example:8001/v1', apiKey: null }, input))) as SttRequestError;
+    expect(error.message).toContain('메타데이터 주소로 풀려');
+    expect(error.publicMessage).toBe('음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요');
+    // 모델 목록·받아쓰기 모두 막는 Agent로 부른다
+    await failureOf(new SttClient().listModels({ baseUrl: 'http://my-stt.example:8001/v1', apiKey: null }));
+    for (const call of fetchMock.mock.calls) expect((call[1] as { dispatcher?: { constructor: { name: string } } }).dispatcher?.constructor.name).toBe('Agent');
     fetchMock.mockRestore();
   });
 

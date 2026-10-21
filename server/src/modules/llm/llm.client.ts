@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { Agent } from 'undici';
 import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
+import { createMetadataGuardedAgent, isBlockedLookupError } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
@@ -211,6 +213,8 @@ export interface LlmModelCapabilities {
 @Injectable()
 export class LlmClient {
   private readonly logger = new Logger(LlmClient.name);
+  /** 이름을 푼 주소가 클라우드 메타데이터면 연결하지 않는 연결용 Agent. 처음 부를 때 만들고 계속 쓴다 (대기 시간은 undici 기본 300초로 전역 fetch와 같다) */
+  private guardedAgent: Agent | undefined;
   private readonly serverInfoCache = new Map<string, { at: number; info: LlmServerInfo }>();
   /** Unsloth Studio의 모델별 사진 지원·임베딩 여부 (/api/models/check-vision·check-embedding). 열쇠는 `경로|서버 루트|모델` */
   private readonly unslothCheckCache = new Map<string, { at: number; value: boolean | null }>();
@@ -637,13 +641,19 @@ export class LlmClient {
         body: payload === undefined ? undefined : JSON.stringify(payload),
         // 리다이렉트로 메타데이터 같은 다른 곳에 키·질문이 가지 않게 한다 (음성 서버 호출과 같다)
         redirect: 'error',
+        // 이름이 메타데이터 주소로 풀려도 연결하지 않는다 (이슈 #497)
+        dispatcher: (this.guardedAgent ??= createMetadataGuardedAgent()),
         signal,
-      });
+      } as RequestInit);
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
+      if (isBlockedLookupError(error)) {
+        this.logger.warn(`LLM 주소의 이름이 링크 로컬·클라우드 메타데이터 주소로 풀려 연결하지 않았어요: ${redactUrl(url)}`);
+        throw new LlmRequestError('AI 연결 설정의 주소가 가리키는 곳은 AI 서버로 쓸 수 없는 주소(링크 로컬·클라우드 메타데이터)예요. 주소를 바꿔 주세요', undefined, 'CONNECT');
+      }
       // 내부 LLM 주소(사설망·Tailscale)는 사용자에게 가는 문구에 넣지 않고 서버 로그에만 남긴다 (이슈 #497)
-      this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeCodeOf(error)}`);
+      this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeReasonOf(error)}`);
       throw new LlmRequestError('LLM 서버에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 설정한 주소가 맞는지 확인해 주세요', undefined, 'CONNECT');
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
@@ -671,11 +681,17 @@ function idleTimeout(): DOMException {
   return new DOMException('stream idle', 'TimeoutError');
 }
 
-/** fetch 실패의 원인 코드(error.cause.code, 예: ECONNREFUSED)를 서버 로그에 덧붙일 글로. 없으면 빈 글 */
-function causeCodeOf(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
-  return typeof code === 'string' ? ` (${code})` : '';
+/**
+ * fetch 실패의 원인(error.cause)을 서버 로그에 덧붙일 글로: 원인 코드(예: ECONNREFUSED), 코드가 없으면 원인 글.
+ * 리다이렉트 거절(redirect: 'error')은 코드 없는 Error('unexpected redirect')라 글이 있어야 이유가 남는다. 없으면 빈 글
+ */
+function causeReasonOf(error: unknown): string {
+  // instanceof Error는 쓰지 않는다: 다른 실행 공간(jest 등)에서 온 오류는 Error가 아니라고 나온다
+  const cause = typeof error === 'object' && error !== null ? (error as { cause?: unknown }).cause : undefined;
+  if (typeof cause !== 'object' || cause === null) return '';
+  const { code, message } = cause as { code?: unknown; message?: unknown };
+  if (typeof code === 'string') return ` (${code})`;
+  return typeof message === 'string' && message ? ` (${message})` : '';
 }
 
 /** fetch·읽기 실패를 화면에 보일 이유로 바꾼다. 시간 초과·멈춤이 아니면 원래 오류를 돌려준다 */

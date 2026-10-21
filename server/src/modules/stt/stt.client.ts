@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { Agent } from 'undici';
+import type { Agent } from 'undici';
 import type { SttModelOption } from '@fantasteel/shared';
+import { createMetadataGuardedAgent, isBlockedLookupError } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
@@ -87,6 +88,9 @@ function assertAllowedHost(url: string): void {
  */
 @Injectable()
 export class SttClient {
+  /** 모델 목록처럼 짧은 요청이 같이 쓰는 연결용 Agent(메타데이터 주소로 풀리는 이름은 연결하지 않는다, 대기 시간은 undici 기본). 처음 부를 때 만든다 */
+  private guardedAgent: Agent | undefined;
+
   async transcribe(endpoint: SttEndpoint, input: SttTranscribeInput, timeoutMs = TRANSCRIBE_TIMEOUT_MS): Promise<SttTranscript> {
     const url = `${redactUrl(normalizeBaseUrl(endpoint.baseUrl))}/audio/transcriptions`;
     assertAllowedHost(url);
@@ -100,8 +104,8 @@ export class SttClient {
     if (input.speakerCount && SIDECAR_MODELS.has(input.model ?? '')) form.append('num_speakers', String(input.speakerCount));
 
     let res: Response;
-    // 이 요청 하나만 쓰는 Agent: 응답 본문을 다 읽은 뒤(또는 실패하면 바로) 닫는다
-    const agent = new Agent(sttAgentOptions(timeoutMs));
+    // 이 요청 하나만 쓰는 Agent: 응답 본문을 다 읽은 뒤(또는 실패하면 바로) 닫는다. 이름이 메타데이터 주소로 풀리면 연결하지 않는다 (이슈 #497)
+    const agent = createMetadataGuardedAgent(sttAgentOptions(timeoutMs));
     try {
       try {
         res = await fetch(url, {
@@ -158,7 +162,8 @@ export class SttClient {
         headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
         redirect: 'error',
         signal: AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS),
-      });
+        dispatcher: (this.guardedAgent ??= createMetadataGuardedAgent()),
+      } as RequestInit);
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') return [];
       throw new SttRequestError(connectFailureMessage(url, error), STT_CONNECT_PUBLIC_MESSAGE);
@@ -221,6 +226,7 @@ export function parseModelList(body: unknown): SttModelOption[] {
  */
 export function connectFailureMessage(url: string, error: unknown): string {
   const code = causeCode(error);
+  if (isBlockedLookupError(error)) return `${url}의 이름이 링크 로컬·클라우드 메타데이터 주소로 풀려 연결하지 않았어요. 주소를 바꿔 주세요`;
   switch (code) {
     case 'ECONNREFUSED':
       return `${url}에서 연결을 거절했어요. 그 컴퓨터에서 음성 서버가 켜져 있는지, 포트가 맞는지 확인해 주세요${isLoopback(url) ? '' : '. 다른 PC라면 서버를 127.0.0.1이 아니라 0.0.0.0으로 띄워야 해요'}`;
