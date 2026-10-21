@@ -20,6 +20,9 @@ import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTi
 
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
+/** 답을 오래(분 단위) 기다리는 사이 놀던 DB 연결이 닫혀, 다시 여는 데 기본 maxWait(2초)를 넘기면 만든 답을 저장하지 못한다(#519) */
+const AFTER_AI_TX = { maxWait: 10_000, timeout: 15_000 };
+
 /**
  * 철강맨AI 패널 대화 저장 (이슈 #399, 문서에 없는 기능). 본인 대화만 다루고, 남의 대화는 없는 것처럼 AST-001.
  * 회의록 상세의 회의 질문도 같은 표에 사원·회의록마다 대화 하나로 저장한다(meeting_minutes_id). 패널 대화 목록에는 넣지 않는다.
@@ -124,7 +127,7 @@ export class AiChatThreadService {
         ...(replyMeta ? { meta: asJson(replyMeta) } : {}),
       });
       return { id: thread.id, title: thread.title, assistantMessageId: answer.id };
-    });
+    }, AFTER_AI_TX);
   }
 
   /** 저장한 카드를 실행됨으로 바꾼다. 내 답이 아니거나 그 카드가 없으면 AST-001, 이미 실행됨이면 그대로 둔다 */

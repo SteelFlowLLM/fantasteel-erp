@@ -39,6 +39,12 @@ const toJson = (payload: object) => payload as Prisma.InputJsonValue;
 const EXECUTE_TX = { maxWait: 5_000, timeout: 30_000 };
 
 /**
+ * AI 추출(최대 90초)을 기다린 뒤 여는 저장 트랜잭션: 기다리는 사이 놀던 DB 연결이 닫혀 다시 여는 데 기본 maxWait(2초)를 넘기면
+ * 기다린 추출을 버리고 500이 났다(#519). 연결을 다시 열 시간을 넉넉히 준다
+ */
+const AFTER_AI_TX = { maxWait: 10_000, timeout: 30_000 };
+
+/**
  * 읽은 뒤 다른 요청이 초안을 바꿨다(동시 수정·동시 실행). 업무 핸들러도 상태 오류에 COM-001을 쓰므로,
  * 실행 실패로 남기지 않을 경합은 이 예외로만 가린다 (#471 리뷰)
  */
@@ -114,7 +120,7 @@ export class MessageActionService {
       // AI가 채운 값도 확정 주체가 확인해야 하므로 생성(AI_GENERATED) 직후 확인 대기로 넘긴다 (업무 프로세스 10장 흐름)
       await this.repository.updateDraft(tx, draft.id, { draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
       return { id: draft.id, created: true, requesterId: requester.employeeId, requesterName: requester.employeeName };
-    }));
+    }, AFTER_AI_TX));
   }
 
   /**
