@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   ACTION_TYPE,
   BUSINESS_EVENT_TYPE,
@@ -22,7 +22,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { retryOnNumberConflict } from '../purchasing/purchasing.service';
-import { isAiAssisted, type ActionDefinition } from './action-types/action-definition';
+import { isAiAssisted, type ActionDefinition, type LookupMemo } from './action-types/action-definition';
 import { ActionTypeRegistry } from './action-types/action-type.registry';
 import { filledExtractedFields } from './action-types/purchase-requisition.action';
 import { DraftExtractor } from './draft-extractor';
@@ -36,6 +36,19 @@ const toJson = (payload: object) => payload as Prisma.InputJsonValue;
 
 /** 실행 트랜잭션 제한 시간: 수주 등록은 품목마다 예약·계획·작업 로그가 돌아 기본 5초를 넘을 수 있다 (sales-order와 같은 값) */
 const EXECUTE_TX = { maxWait: 5_000, timeout: 30_000 };
+
+/**
+ * 읽은 뒤 다른 요청이 초안을 바꿨다(동시 수정·동시 실행). 업무 핸들러도 상태 오류에 COM-001을 쓰므로,
+ * 실행 실패로 남기지 않을 경합은 이 예외로만 가린다 (#471 리뷰)
+ */
+class DraftChangedError extends AppException {
+  constructor() {
+    super('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+  }
+}
+
+/** 같은 초안을 동시에 실행해 결과 행의 unique(구매요청 action_draft_id 등)에 걸렸다 */
+const isUniqueConflict = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 
 const openResult = (open: { id: number; requesterId: number | null; requester: { employeeName: string } | null }): ActionDraftCreateResult => ({
   id: open.id,
@@ -54,6 +67,8 @@ const itemIdOf = (payload: object): number | null => ('itemId' in payload && typ
  */
 @Injectable()
 export class MessageActionService {
+  private readonly logger = new Logger(MessageActionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: MessageActionRepository,
@@ -259,19 +274,24 @@ export class MessageActionService {
         }, EXECUTE_TX)),
       );
     } catch (e) {
-      // 같은 초안을 동시에 실행한 경합(COM-001)은 실행 실패가 아니다
-      if (!(e instanceof AppException) || e.code === 'COM-001') throw e;
-      failure = e;
+      // 같은 초안을 동시에 실행한 경합은 실행 실패가 아니다 (먼저 끝난 실행이 결과다)
+      if (e instanceof DraftChangedError) throw e;
+      if (isUniqueConflict(e)) throw new DraftChangedError();
+      // 업무 규칙 오류는 그대로, 예상 못 한 오류(DB 등)는 COM-999로 남겨 시도 기록이 빠지지 않게 한다
+      if (!(e instanceof AppException)) this.logger.error(`초안 ${draft.id} 실행 중 예상 못 한 오류: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
+      failure = e instanceof AppException ? e : new AppException('COM-999', '실행 중 예상하지 못한 오류가 났어요. 잠시 뒤 다시 실행하거나 반려해 주세요');
       // 그 사이 다른 요청이 실행을 끝냈으면 그 결과를 덮어쓰지 않는다
-      await this.repository.updateDraftIfUnchanged(this.prisma, draft.id, draft.updatedAt, { executionErrorCode: e.code, executionAttemptCount: { increment: 1 } });
+      await this.repository.updateDraftIfUnchanged(this.prisma, draft.id, draft.updatedAt, { executionErrorCode: failure.code, executionAttemptCount: { increment: 1 } });
     }
     return { draft: await this.get(user, id), executed: failure === null, errorCode: failure?.code ?? null, errorMessage: failure?.message ?? null };
   }
 
-  /** 확정 주체 반려 (확정 전만, 사유 필수) → REJECTED */
+  /** 확정 주체 반려 (확정 전, 또는 확정했지만 실행에 실패한 초안. 사유 필수) → REJECTED */
   async reject(user: AuthUser, id: number, dto: RejectActionDraftDto): Promise<ActionDraftView> {
     await this.prisma.$transaction(async (tx) => {
-      const { draft } = await this.requesterDraft(tx, user, id, dto.expectedUpdatedAt);
+      const { draft } = await this.requesterDraft(tx, user, id, dto.expectedUpdatedAt, [...EDITABLE_STATUSES, DRAFT_STATUS.APPROVED]);
+      // 확정한 초안은 실행에 실패했을 때만 반려할 수 있다 (실행할 수 없는 초안이 승인(APPROVED)에 갇히지 않게, #471 리뷰)
+      if (draft.draftStatus === DRAFT_STATUS.APPROVED && draft.executionErrorCode === null) throw new AppException('COM-004', '확정한 초안은 실행에 실패했을 때만 반려할 수 있어요');
       const rejectReason = dto.rejectReason.trim();
       if (!rejectReason) throw new AppException('COM-004', '반려 사유를 입력해 주세요');
       await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.REJECTED, rejectReason });
@@ -292,7 +312,7 @@ export class MessageActionService {
 
   /** 읽은 뒤 아무도 고치지 않았을 때만 바꾼다 (동시 요청이 앞 요청을 덮어쓰지 않게) */
   private async changeDraft(tx: Tx, draft: DraftRow, data: Prisma.ActionDraftUpdateManyMutationInput): Promise<void> {
-    if (!(await this.repository.updateDraftIfUnchanged(tx, draft.id, draft.updatedAt, data))) throw new AppException('COM-001', '그 사이 다른 곳에서 초안을 고쳤어요. 새로 불러와 주세요');
+    if (!(await this.repository.updateDraftIfUnchanged(tx, draft.id, draft.updatedAt, data))) throw new DraftChangedError();
   }
 
   /**
@@ -344,9 +364,11 @@ export class MessageActionService {
     // 트랜잭션 안에서 부를 수도 있어 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류)
     const unresolved: string[][] = [];
     const labels: Record<string, string>[] = [];
+    // 고객사·규격 목록은 초안마다 다시 읽지 않고 이 응답 안에서 한 번만 읽는다
+    const memo: LookupMemo = new Map();
     for (const [index, payload] of payloads.entries()) {
-      unresolved.push(await definitions[index].unresolvedFields(tx, payload));
-      labels.push(await definitions[index].payloadLabels(tx, payload));
+      unresolved.push(await definitions[index].unresolvedFields(tx, payload, memo));
+      labels.push(await definitions[index].payloadLabels(tx, payload, memo));
     }
     return rows.map((r, index) => {
       const payload = payloads[index];

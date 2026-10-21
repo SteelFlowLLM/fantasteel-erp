@@ -34,6 +34,10 @@ describe('LLM 값 읽기', () => {
     expect(extractedQtyOf(0)).toBeNull();
     expect(extractedQtyOf('6t')).toBeNull();
     expect(extractedQtyOf(null)).toBeNull();
+    // DB 매수 칸(int4)을 넘지 않게 상한을 둔다 (#471 리뷰)
+    expect(extractedQtyOf(1_000_000)).toBe(1_000_000);
+    expect(extractedQtyOf('3000000000')).toBeNull();
+    expect(codeOf(() => qtyPatch(1_000_001, ''))).toBe('COM-004');
   });
 
   it('이름·코드는 후보 하나와 정확히 맞을 때만 고른다 (대소문자·공백 무시, 여럿이면 null)', () => {

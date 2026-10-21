@@ -279,7 +279,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
       </div>
       <CardFoot className="flex-wrap">
         {editable || retryable ? (
-          rejecting && editable ? (
+          rejecting ? (
             <>
               <Input
                 aria-label="반려 사유"
@@ -317,6 +317,10 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
             </>
           ) : (
             <>
+              {/* 실행에 실패한 초안은 반려해 끝낼 수 있다 (#471 리뷰) */}
+              <Button variant="ghost" icon="x-circle" disabled={pending} onClick={() => setRejecting(true)}>
+                반려
+              </Button>
               <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
               <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
                 구매요청 만들기 다시 실행

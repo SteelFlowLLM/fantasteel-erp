@@ -216,7 +216,7 @@ function DraftDetail({ draft }: { draft: DraftDetailView }) {
             {failure.errorCode ? ` (${failure.errorCode})` : ''}
           </div>
           <div className="text-cap">
-            시도 {failure.attempts}회 · 마지막 {fmtMDHM(draft.updatedAt)} · 원인을 고친 뒤 다시 실행할 수 있어요
+            시도 {failure.attempts}회 · 마지막 {fmtMDHM(draft.updatedAt)} · 원인을 고친 뒤 다시 실행하거나, 실행할 수 없으면 반려해 끝낼 수 있어요
           </div>
         </Banner>
       ) : null}

@@ -66,6 +66,8 @@ export interface ShipmentRequestDraftPayload extends DraftPayloadBase {
 export interface AllocationDraftPayload extends DraftPayloadBase {
   shipmentRequestItemId: number | null;
   lotIds: number[];
+  /** LOT을 누가 골랐는지: 시스템 FIFO 추천 또는 사람이 고침. 확정 작업 로그 사유에 쓴다 (없으면 추천) */
+  lotsChosenBy?: 'RECOMMENDATION' | 'PERSON' | null;
 }
 
 /** 재생산 계획 생성 초안 (REPRODUCTION_PLAN_CREATE). 추가 계획 매수는 실행 때 서버가 다시 계산한다 */
