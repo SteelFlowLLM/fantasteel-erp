@@ -136,16 +136,25 @@ function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {
 }
 
 /** 확정 때 만들어진 결과로 가는 링크. 일정은 아직 화면이 없어 시각을 글로 보인다 */
-function RegisteredNote({ candidate }: { candidate: MeetingCandidate }) {
+function RegisteredNote({ candidate, myId, creatorId, names }: { candidate: MeetingCandidate; myId: number; creatorId: number; names: Names }) {
   const registered = candidate.registered;
   if (!registered) return null;
   const link = 'font-medium text-brand hover:underline';
+  // 업무 화면은 처음에 '내 업무'(내가 담당)만 보여서, 남이 담당인 업무는 링크만으로는 찾을 수 없다 (#519)
+  const mine = candidate.assigneeId === myId;
+  const assignee = candidate.assigneeId !== null ? `담당 ${names.employee(candidate.assigneeId)}님` : null;
   return (
-    <div className="flex items-center gap-1 rounded-xs bg-ok-bg px-2 py-1.5 text-xs text-ok-strong">
+    <div className="flex flex-wrap items-center gap-1 rounded-xs bg-ok-bg px-2 py-1.5 text-xs text-ok-strong">
       <Icon name="check" size="sm" />
       {registered.type === 'task' ? (
         <>
-          업무로 등록됐어요 <Link href="/tasks" className={link}>업무 보기</Link>
+          업무로 등록됐어요
+          {mine || myId === creatorId ? (
+            <Link href={`/tasks?task=${registered.id}`} className={link}>
+              업무 보기
+            </Link>
+          ) : null}
+          {!mine && assignee ? <span className="text-ink-2">· {myId === creatorId ? `${assignee} 업무라 업무 화면의 '내가 만든 업무'에서 보여요` : assignee}</span> : null}
         </>
       ) : registered.type === 'action_draft' ? (
         <>
@@ -240,7 +249,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
           </div>
         ))}
       </div>
-      {confirmed ? <RegisteredNote candidate={candidate} /> : null}
+      {confirmed ? <RegisteredNote candidate={candidate} myId={myId} creatorId={minutes.creator.id} names={names} /> : null}
       {editable && !editing ? (
         <div className="flex flex-wrap justify-end gap-1.5">
           {excluded ? (
