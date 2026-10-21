@@ -43,6 +43,20 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 - 실시간 답(`POST /ai-assistant/messages/stream`)은 응답을 시작한 뒤 실패하면 `{ "type": "error", "message", "code" }` 이벤트로 끝낸다. `code`는 위 표의 AST-002~005일 때만 있다.
 - 심층 조사의 계획 말로 고치기(API `POST /ai-research/runs/:id/plan/suggest`)도 같은 코드를 쓴다. 답은 왔는데 계획으로 읽지 못하면 `RES-008`이다. 심층 조사·회의록 분석처럼 백그라운드로 도는 일의 실패 이유는 코드가 아니라 저장된 문구다.
 
+## 외부 연결 장애 알림과 Notion 반영 실패 목록 (문서 밖 기능, 이슈 #518)
+
+관리 > 외부 연결(Notion·Google Drive)의 장애를 연동 관리 권한자(ORG_MANAGE 사용)에게 알림으로 알리고, Notion 업무 공간 반영에 실패한 일정·회의록·할 일을 DB에 남겨 다시 시도하게 한다. 🟡 팀 확인 후 확정한다. 자세한 규칙은 `docs/backend/integration.md` 13장.
+
+| API | 경로 | 권한 | 설명 |
+| --- | --- | --- | --- |
+| API-284 | `GET /api/v1/integrations/notion/sync-failures` | ORG_MANAGE (VIEW 이상) | 반영에 실패해 남은 행: 종류(`schedule_event`·`meeting_minutes`·`task`)·id·제목·실패 횟수·마지막 이유·결과 모름 여부·다음 자동 시도 시각 |
+| API-285 | `POST /api/v1/integrations/notion/sync-failures/retry` | ORG_MANAGE (USE) | 남은 실패를 모두 다시 시도하고 결과를 기다린다. 응답 `{ requested, succeeded, failed, failures }` |
+| API-286 | `POST /api/v1/integrations/notion/sync-failures/:failureId/retry` | ORG_MANAGE (USE) | 한 건만 다시 시도한다. 없는(이미 처리된) 건은 `COM-003` |
+
+- `GET /api/v1/integrations`(로그인만)의 각 연결에 `health`가 더해졌다: `{ level: NORMAL | WARNING | DOWN(정상·주의·끊김), lastErrorAt, faults[] }`.
+- 알림 유형(공통 코드 정의서 NOTIFICATION_TYPE): `INTEGRATION_FAULT`(연동 장애), `INTEGRATION_RECOVERED`(연동 복구). 같은 연결·같은 종류의 장애는 풀리기 전까지 하루 한 번만 알리고(서버가 여러 대여도 한 번), 풀리면 복구 알림을 한 번 보낸다. 알림을 누르면 `/admin/integrations`로 간다.
+- 새 오류 코드는 없다. 다시 시도: Notion 연결·업무 공간이 없으면 `INT-002`, 권한이 없으면 `COM-002`, 없는 항목은 `COM-003`.
+
 ## 메신저 실시간 이벤트 (WebSocket)
 
 REQ-MSG-002. socket.io namespace `/messenger`. 연결할 때 로그인 쿠키(`access_token`)로 사원을 확인하고, 실패하면 서버가 연결을 끊는다. 보내기·읽음 등 저장은 HTTP API로 하고, 서버는 저장(커밋)이 끝난 뒤 아래 이벤트를 보낸다. 소켓은 사원 채널(`employee:{id}`)에 들어간다. 자세한 규칙은 `docs/backend/messenger.md` (2026-10-07~08 추가, 문서에 없는 기능 포함)

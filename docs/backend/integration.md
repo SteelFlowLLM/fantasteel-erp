@@ -12,6 +12,7 @@
 | 3단계 | 이슈 #391 **Notion 업무 공간**. 상위 페이지 아래 일정·회의록·할 일 데이터베이스를 만들고 ERP → Notion 한 방향으로 자동 반영한다 (12장) |
 | 2단계 | 이슈 #361 **Google Drive 연결과 녹음 가져오기**. 회사 Google 계정 하나를 Drive REST API v3 + 일반 OAuth 2.0으로 연결하고, 관리자가 정한 폴더의 녹음·사진을 목록·내용으로 보여 주며, 녹음으로 회의록을 만든다 (11장, [meeting-minutes.md](meeting-minutes.md) 'Drive 녹음으로 만들기') |
 | 3단계 | 이슈 #395 **Google Drive 서비스 계정**. 서버 `.env`에 서비스 계정 키를 넣으면 관리자 로그인 없이 그 계정으로 Drive를 읽는다(읽기 전용). 서버 재시작·DB 초기화·다른 PC에서도 다시 연결하지 않는다 (11장 '서비스 계정') |
+| 4단계 | 이슈 #518 **연동 장애 알림과 동기화 실패 목록·다시 시도**. 연결 장애(Google Drive 연결 만료·서비스 계정 키 오류, Notion 토큰 갱신 실패, Notion 업무 공간 반영 실패)를 연동 관리 권한자에게 알림으로 알리고(같은 장애는 하루 한 번, 풀리면 복구 알림), 반영 실패를 DB 목록에 남겨 관리 > 외부 연결에서 항목별·전체로 다시 시도한다 (13장) |
 
 - **회사 계정 하나**: 관리자(`ORG_MANAGE` 사용)가 한 번 연결하면 모든 사원이 그 연결을 쓴다. 사원별 연결은 없다.
 - **LLM은 Notion 도구 목록을 보지 않는다.** 서버 코드가 정한 도구(`notion-create-pages`)만 직접 부른다.
@@ -21,6 +22,8 @@
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
 | 쓰기 | `integration_connection` 🟡 | 연결 대상(`provider_key`, unique, 서버 코드 프리셋 키 — 공통 코드 아님)마다 한 행. 처음 설정·연결할 때 만든다 |
+| 쓰기 | `integration_fault` 🟡 | 해결되지 않은 연결 장애: (`provider_key`, `fault_kind`)마다 한 줄, 풀리면 지운다. 알림은 `notified_at`을 조건부 UPDATE로 먼저 적은 서버만 보낸다 (13장) |
+| 쓰기 | `notion_sync_failure` 🟡 | Notion 업무 공간 반영에 실패한 행(`target_type` + `target_id`)마다 한 줄, 성공하면 지운다. 서버를 다시 띄워도 남는다 (13장) |
 | 쓰기 | `meeting_minutes` | `notion_page_url`, `notion_exported_at` (내보내기), `notion_page_id`, `notion_synced_at` (업무 공간, 12장) |
 | 쓰기 | `schedule_event`, `task` | `notion_page_id`, `notion_synced_at` (업무 공간, 12장). `schedule_event.notion_calendar_event_id`, `employee.email`은 2단계(Notion 캘린더)용으로 칸만 있다 |
 
@@ -37,6 +40,7 @@
 | `connected_by_id` | 마지막으로 연결을 시작한 관리자 |
 | `connected_at` | 연결 완료 시각. **토큰이 없는데 값이 있으면 다시 연결해야 한다** |
 | `last_error` | 마지막 실패 이유 (500자, 비밀값 없음) |
+| `last_error_at` | `last_error`를 남긴 시각 (이슈 #518). `last_error`를 지우면 함께 비운다. 관리 화면의 '마지막 오류 · 시각' |
 
 상태(`IntegrationConnectionStatus`)는 저장하지 않고 계산한다: 토큰 있음 → `CONNECTED`, 토큰 없음 + `connected_at` 있음 → `RECONNECT_REQUIRED`, 그 밖 → `NOT_CONNECTED`.
 
@@ -50,12 +54,16 @@
 | GET | `integrations/oauth/callback` | OAuth 콜백 → 화면으로 302 | **공개**(`@Public`), `state`로 확인 |
 | POST | `integrations/:providerKey/disconnect` | 연결 끊기 | `ORG_MANAGE` 사용 |
 | POST | `integrations/notion/workspace` | 🟡 Notion 업무 공간 만들기 (12장). 이미 있으면 만들지 않고 지금 상태를 돌려준다 → `IntegrationConnectionView` | `ORG_MANAGE` 사용 |
+| GET | `integrations/notion/sync-failures` | 🟡 Notion 반영 실패 목록 `NotionSyncFailureView[]` (최근 실패순, 이슈 #518, 13장) | `ORG_MANAGE` 조회 이상 |
+| POST | `integrations/notion/sync-failures/retry` | 🟡 남은 반영 실패를 모두 다시 시도하고 결과를 기다린다 → `NotionSyncRetryResult` | `ORG_MANAGE` 사용 |
+| POST | `integrations/notion/sync-failures/:failureId/retry` | 🟡 반영 실패 한 건만 다시 시도한다 → `NotionSyncRetryResult`. 없는(이미 처리된) 건은 `COM-003` | `ORG_MANAGE` 사용 |
 | POST | `integrations/:providerKey/test` | 연결 확인 (`IntegrationTestResult`, 실패도 결과로). MCP: 도구 목록. Google Drive: 폴더 이름과 녹음·사진 수(`driveFolder`) | `ORG_MANAGE` 사용 |
 | GET | `integrations/google-drive/files?kind=all\|audio\|image\|document&pageToken=` | 🟡 설정한 폴더의 녹음·사진·문서 (`DriveFilePage`, 최신 수정순 50개, 각 파일에 `kind`). 이슈 #392 | 로그인한 전 역할 🟡 |
 | GET | `integrations/google-drive/files/:fileId/content?download=1` | 🟡 파일 내용 그대로 (응답 포맷으로 감싸지 않는다). `download=1`이면 `attachment`, 아니면 `inline`. Google 문서류는 PDF로 내보내 보낸다 | 로그인한 전 역할 🟡 |
 | POST | `meeting-minutes/:id/notion-export` | 회의록 내보내기 ([meeting-minutes.md](meeting-minutes.md)) | 작성자 또는 `ORG_MANAGE` 사용 |
 | POST | `meeting-minutes/audio/from-drive` | Drive 녹음으로 회의록 만들기 ([meeting-minutes.md](meeting-minutes.md)) | 로그인한 전 역할 |
 
+- `IntegrationConnectionView.health`(이슈 #518): `{ level: NORMAL|WARNING|DOWN, lastErrorAt, faults[] }` — 연결 상태 신호등(정상·주의·끊김), 마지막 오류 시각, 해결되지 않은 장애(`faultKind`·`message`·`failureCount`·`firstFailedAt`·`lastFailedAt`·`notifiedAt`). 13장.
 - 🟡 설정 전용 권한 코드가 없어 LLM 연결 설정처럼 `ORG_MANAGE`를 쓴다(가정).
 - 🟡 목록은 로그인만 본다: 회의록 화면이 내보내기 버튼을 보일지(`status === 'CONNECTED'`, `settings.parentPageId` 있음) 정하려고 읽는다. 비밀값은 응답에 없다.
 - 🟡 Drive 파일 목록·내용도 로그인만 본다: 회사가 녹음·사진을 함께 올리는 폴더이고, 읽기만 하며, 설정한 폴더 바로 아래 파일만 연다.
@@ -114,6 +122,7 @@
 | `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` | 없음 | 🟡 Google 서비스 계정 키 JSON 파일 경로(이슈 #395). 상대 경로는 서버를 띄운 폴더(`server/`) 기준(`STORAGE_DIR`과 같다). 예: `secrets/google-service-account.json` |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | 없음 | 🟡 키 JSON 자체 또는 그 base64(한 줄). 파일을 둘 수 없는 배포 환경용. **둘 다 있으면 파일을 쓴다** |
 | `GOOGLE_DRIVE_FOLDER` | 없음 | 🟡 읽을 Drive 폴더 주소·id(선택). 있으면 화면에서 저장한 폴더보다 먼저다(OAuth 연결에도 적용). 읽을 수 없는 값이면 화면 폴더로 넘어가지 않고 `INT-015` |
+| `INTEGRATION_HEALTH_CHECK_MINUTES` | `30` | 🟡 연결 상태를 주기로 확인하는 간격(분, 이슈 #518). `0`이면 확인하지 않는다. 테스트(`NODE_ENV=test`)에서는 돌지 않는다 (13장) |
 | `GOOGLE_API_TEST_ORIGIN` | 없음 | **테스트 전용**. Google 인가·토큰·취소·Drive 주소를 가짜 서버(`{값}/o/oauth2/v2/auth`, `/token`, `/revoke`, `/drive/v3`)로 바꾼다. **`NODE_ENV=test`(Jest)일 때만** 읽고 개발·운영에서는 무시한다(잘못 넣어도 토큰·client secret이 다른 주소로 가지 않게). `.env`에 넣지 않는다 |
 
 서비스 계정 키를 넣지 않으면 Google Drive의 client id·secret·폴더는 관리 > 외부 연결 화면에서 넣는다(DB에 암호화). `.env`를 바꾸면 서버를 다시 띄운다(키 파일 내용은 처음 읽은 것을 기억한다. 읽지 못했으면 다음 호출에 다시 읽는다).
@@ -157,6 +166,11 @@
 - 순수 단위 `google-drive/google-drive.unit.spec.ts`: 폴더 주소·id 읽기(여러 주소 모양, 파일 주소·다른 호스트·내 드라이브 거절), 검색어(녹음·사진 허용 목록, 따옴표 막기), 종류(대소문자·매개변수)·크기 상한, Drive 응답 읽기, Content-Disposition(짝 없는 대리 문자), Range 읽기, `guardStream`(뒷압력 중에는 기다림을 재지 않음·Google이 멈추면 끊음·상한·받는 쪽이 끊으면 Google 요청도 끊음), `readStreamToBuffer`(미리 잡은 메모리·덜/더/모름), client 입력 확인, 토큰 응답 읽기(리프레시 토큰 잇기·expires_in·Bearer 확인)·만료 여유, Drive 권한 확인, 토큰 실패 종류, 허용 화면 주소, PKCE(RFC 7636 예시), client id 모양, 테스트 주소는 `NODE_ENV=test`일 때만.
 - `google-drive/google-drive-service-account.spec.ts` (묶음 `fs_collab`, 이슈 #395): 이 파일 안의 **가짜 Google 서버**의 `/token`이 jwt-bearer assertion을 테스트 공개 키로 서명 확인하고 클레임(`iss`·`scope=drive.readonly`·`aud`=토큰 주소·`exp-iat=3600`·`iat`±60초)을 본다. Drive는 서비스 계정에 공유한 폴더만 보여 준다(그 밖은 404, 한 폴더는 403 `insufficientFilePermissions`). 키 파일만으로 `CONNECTED`·`SERVICE_ACCOUNT`·메일(행을 만들지 않음), 폴더 없으면 `INT-011`, `connect`·`disconnect` `INT-016`(확인값 없음), OAuth 토큰 없이 목록·내용(Range 206)·연결 확인·회의 녹음(`downloadAudio`·`from-drive`), 토큰은 한 번 받아 다시 씀, 저장된 OAuth 토큰이 있어도 서비스 계정이 먼저, Drive 401 → 한 번 새로 받음, `GOOGLE_DRIVE_FOLDER`가 화면 폴더보다 먼저(화면 값은 남음)·잘못된 값 `INT-015`, 공유하지 않은 폴더(404·403) → 서비스 계정 메일에 '뷰어'로 공유하라는 문구, 키 파일 없음 → `NOT_CONNECTED`+`lastError`·`INT-015`, base64 키·파일이 먼저, Google이 키를 거절 → `INT-004`+`lastError`·회복하면 지움, 키를 빼면 `OAUTH`로 돌아감. `.env` 값은 `afterEach`에서 기준값으로, `afterAll`에서 처음 값으로 되돌리고 `google-drive` 연결 행을 지운다(같은 DB의 OAuth 테스트와 섞이지 않게).
 - 순수 단위 `google-drive/google-service-account.unit.spec.ts`: 키 읽기(JSON·base64·글자 `\n` 개인 키, JSON 아님·서비스 계정 아님·OAuth 클라이언트 JSON·`client_email`·`private_key` 없음·깨진 키·RSA 아님), `.env` 읽기(상대·절대 경로, 파일 우선, 없는 파일), `GOOGLE_DRIVE_FOLDER`, JWT(머리·클레임, 생성한 공개 키로 서명 확인, 다른 키·바뀐 내용은 실패), 토큰 응답, 토큰 기억·동시 호출 한 번·만료 1분 전 갱신·거절된 토큰만 새로·키가 바뀌면 버림·실패는 기억하지 않음·키를 못 읽으면 Google에 묻지 않음.
+- 장애 알림·반영 실패 목록 (이슈 #518, 13장):
+  - `integration-fault.rules.unit.spec.ts`(순수): 오류 코드 → 장애 종류, 알림 기준(1·1·3·3번)·하루 한 번, 알림·복구 문구, 연결 상태 신호등(정상·주의·끊김), 주기 확인 간격.
+  - `integration-fault.spec.ts` (묶음 `fs_collab`): 장애 → 연동 관리 권한자에게만 알림 한 번, 같은 장애 되풀이 → 다시 안 감, 24시간 뒤 한 번 더, 요청 실패는 3번째에 처음 알림, 연결 대상·종류가 다르면 따로, 장애로 세지 않는 오류는 기록 없음, 동시에 12번 보고해도 한 번, 풀면 복구 알림 한 번(또 풀어도 안 감)·알리지 않은 장애는 복구 알림도 없음·반영 실패는 연결 장애와 따로 풂·끊기는 알림 없이 지움, **서버 둘(Nest 앱 둘)이 동시에 보고·해결해도 한 번**, 관리 화면 목록의 `health`, 알림함 API에 보임.
+  - `integration.spec.ts`: Notion 토큰 갱신이 3번 이어서 실패하면 알림 한 번 → 회복하면 복구 알림, 토큰이 취소되면(`INT-003`) 알림 한 번(되풀이돼도 그대로)·주기 확인도 같은 장애로 셈·다시 연결하면 복구 알림, 연결 끊기는 알림 없이 장애를 지움. 반영 실패 목록: 실패한 행이 DB에 남고(무엇이·몇 번·왜·미룬 시각 1분→2분, 결과 모름은 30분), 앱을 새로 만들어도 남고, 목록은 연동 관리 권한자만(영업 `COM-002`), 지워진 행의 줄은 치움, 다시 시도(전체·한 건)는 미룬 시각을 기다리지 않고 반영해 줄을 지우고 또 실패하면 횟수를 올림, 권한 없음 `COM-002`·없는 건 `COM-003`·잘못된 id 400·연결 없음 `INT-002`, 반영 실패 3번 → 알림 한 번(4번째는 안 감) → 다시 시도 성공 → 복구 알림, 한두 번 흔들렸다 풀리면 알림도 복구 알림도 없음, 이미 반영된 행의 줄은 다음 반영이 치움.
+  - `google-drive.spec.ts`·`google-drive-service-account.spec.ts`: 리프레시 토큰 거절(7일 만료와 같은 `invalid_grant`) → 알림 한 번·화면은 끊김·다시 연결하면 복구 알림, 주기 확인이 아무도 쓰지 않아도 만료를 찾음, OAuth 클라이언트 거절(`invalid_client`)·서비스 계정 키 파일 없음·Google이 서비스 계정 키를 거절 → 키·설정 오류로 알림 한 번(고치면 복구), 5xx는 3번째에 알림.
 - 실제 Notion·Google은 자동 테스트하지 않는다: 관리자가 브라우저에서 허용해야 한다. 직접 확인하는 법은 아래와 11장.
 
 **실제 Notion으로 확인하기**
@@ -186,7 +200,7 @@
 - **실제 Notion 주소**(2026-10-19 확인): 데이터베이스·페이지 주소는 `https://app.notion.com/p/<32자리>`이고, 마크다운 결과에서는 `{{…}}`로 감싼다(`<database url="{{https://app.notion.com/p/…}}" inline="false">`, `<data-source url="{{collection://…}}">`). 페이지 만들기 JSON의 `url`에는 `?pvs=204`가 붙어 있어 물음표 뒤를 떼고 저장한다. 주소는 `notion.so`·`notion.site`·`notion.com`의 모든 하위 도메인을 받는다(`NOTION_URL_IN_TEXT`).
 - **상위 페이지 404**: Notion이 상위 페이지를 못 찾으면(`object_not_found`·404, 결과의 오류 답이든 JSON-RPC 오류든) `INT-004` "상위 페이지를 찾을 수 없어요. 연결한 Notion 계정이 편집할 수 있는 페이지인지 확인해 주세요"로 알리고 `last_error`에도 남는다(회의록 직접 내보내기도 같다). 관리 카드는 만들기 실패를 토스트·카드 안 안내로 보이고 목록을 다시 읽어 마지막 오류를 보인다.
 
-`settings.notionWorkspace` = `{ scheduleEvents?, meetingMinutes?, tasks?: { databaseId: string|null, dataSourceId: string(UUID), url: string|null, views?: string[] }, createdAt?, calendar?: { accountId, calendarId, name, accountEmail: string|null, sendInvites: boolean } }`. 목록 응답에는 `settings`가 아니라 `notionWorkspace: NotionWorkspaceView | null`(`ready`, `createdAt`, `databases[{ key, title, url }]`, `lastSyncedAt`, `failedCount`, `pendingCount`, `lastSyncError`, `setupWarning`, `calendar`)로 보인다. 마지막 반영 시각·실패 수·이유는 서버 메모리 값이라 다시 띄우면 비어 있다.
+`settings.notionWorkspace` = `{ scheduleEvents?, meetingMinutes?, tasks?: { databaseId: string|null, dataSourceId: string(UUID), url: string|null, views?: string[] }, createdAt?, calendar?: { accountId, calendarId, name, accountEmail: string|null, sendInvites: boolean } }`. 목록 응답에는 `settings`가 아니라 `notionWorkspace: NotionWorkspaceView | null`(`ready`, `createdAt`, `databases[{ key, title, url }]`, `lastSyncedAt`, `failedCount`, `pendingCount`, `lastSyncError`, `setupWarning`, `calendar`)로 보인다. `failedCount`는 DB 실패 목록(`notion_sync_failure`)의 줄 수다(13장). 마지막 반영 시각(`lastSyncedAt`)과 마지막 반영 오류(`lastSyncError`)만 서버 메모리 값이라 다시 띄우면 비어 있다.
 
 **반영** (`notion/notion-workspace.service.ts`):
 - 반영할 행 = `notion_synced_at IS NULL OR updated_at > notion_synced_at`. 일정은 `notion_sync = true`인 것만(이슈 #434, 일정마다 사용자가 고른다). 끈 일정에 페이지·캘린더 일정이 남아 있으면 같은 반영에서 캘린더 일정을 취소하고(`notion-calendar-cancel-events`) 페이지를 휴지통으로 옮긴 뒤(`notion-delete-pages`, `user_confirmed: true`, 이미 없는 페이지는 옮긴 것으로 봄) id를 지운다. 두 도구는 `requiredTools`에 넣지 않고 쓸 때 본다(없으면 그 일정만 `INT-005`로 미룬다). 반영한 뒤 **그 행의 `updated_at`** 을 `notion_synced_at`에 적는다(now()가 아니다: 읽은 뒤 바뀐 것은 다음에 다시 간다). 이 쓰기는 TypedSQL(`prisma/sql/mark*NotionSynced.sql`)이다: Prisma로 쓰면 `@updatedAt`이 바뀌어 방금 반영한 행이 다시 바뀐 것으로 보인다. 조건부 `updateMany`(업무 완료)도 Prisma가 `updated_at`을 바꾼다(테스트로 확인).
@@ -197,7 +211,7 @@
 - 만들기: `notion-create-pages`(`parent: data_source_id`, 20개씩, `allow_async: false`) → 결과의 페이지를 **보낸 순서대로** 읽어 행에 붙인다. 읽은 수가 다르면 어느 행 것인지 몰라 "결과 모름"으로 둔다. 여러 개를 보냈는데 Notion이 오류로 답하면(만들지 않았다) 하나씩 다시 보낸다. 고치기: `notion-update-page` `update_properties`(회의록은 `replace_content`로 본문도).
 - 회의록 만들기는 직접 내보내기와 **같은 잡기**(`notion_exported_at`, 5분 만료)를 쓴다: 둘이 동시에 페이지를 만들지 않는다. 만든 뒤 `notion_page_url`·`notion_page_id`·`notion_exported_at`·`notion_synced_at`을 함께 적는다(TypedSQL `finishMeetingMinutesNotionPage`, 내 잡기일 때만). 그래서 회의록 화면의 "Notion으로 내보내기"는 링크로 바뀐다. **직접 내보낸 회의록**(`notion_page_url`만 있고 `notion_page_id` 없음)은 데이터베이스에 또 만들지 않는다.
 - 업무 공간이 있으면 `POST meeting-minutes/:id/notion-export`도 상위 페이지가 아니라 **회의록 데이터베이스**에 만든다(같은 줄·같은 잡기, 오류 코드는 직접 내보내기와 같다).
-- 실패: 행의 실패(Notion 오류 답·JSON-RPC 오류)는 그 행만 **미룬다**(1분에서 두 배씩 1시간까지, 서버 메모리). 만들기 결과를 알 수 없으면(페이지 id 없는 성공 답·시간 초과·연결 끊김) **30분** 미룬다: Notion에 생겼는지 사람이 볼 시간을 둔다(그 뒤 다시 만들면 중복이 생길 수 있다). 인증 실패·전송 실패는 이번 반영을 멈추고 `last_error`에 남는다(withSession). 행은 반영하지 않은 채로 남아 다음에 다시 간다.
+- 실패: 행의 실패(Notion 오류 답·JSON-RPC 오류)는 그 행만 **미루고 DB 실패 목록에 남긴다**(`notion_sync_failure`, 1분에서 두 배씩 1시간까지가 `retry_after`. 성공하면 지운다, 13장). 만들기 결과를 알 수 없으면(페이지 id 없는 성공 답·시간 초과·연결 끊김) **30분** 미룬다(`is_result_unknown`): Notion에 생겼는지 사람이 볼 시간을 둔다(그 뒤 다시 만들면 중복이 생길 수 있다). 인증 실패·전송 실패는 이번 반영을 멈추고 `last_error`에 남는다(withSession). 행은 반영하지 않은 채로 남아 다음에 다시 간다.
 - 테스트: `integration.spec.ts`의 'Notion 업무 공간' — 만들기 전에는 부르지 않음, 권한, 데이터베이스 3개·보기 7개를 한 번만·두 번째는 그대로, 만들기 전 업무도 반영, 일정 만들기 → 그대로면 안 보냄 → 고치면 같은 페이지 `update_properties`, 업무 완료 → 상태 고치기(`updated_at` 확인), 회의록 → 본문과 함께 만들고 주소·VOC-008 → 바뀌면 속성·본문 고치기, 직접 내보내기가 데이터베이스로 감, Notion 오류 → 행 남김·실패 수·이유·바로 다시 부르지 않음, 결과 모름 → 남김·미룸, 고치기 실패 → 남김. 순수 단위 `notion/notion-workspace.tools.unit.spec.ts`: 정의·DDL, 입력 만들기, 데이터 소스 id·데이터베이스 id 읽기(상위 페이지 주소 건너뛰기), 만든 페이지 순서·개수, 행 → 속성.
 
 ### Notion 캘린더 (이슈 #391 2단계)
@@ -323,3 +337,82 @@ OAuth 연결은 관리자가 브라우저에서 허용해야 하고(외부+테�
 5. `GET /api/v1/integrations/google-drive/files?kind=audio`, `GET /api/v1/integrations/google-drive/files/<id>/content`(브라우저에서 열어 재생).
 6. `POST /api/v1/meeting-minutes/audio/from-drive {"meetingMinutesTitle":"…","meetingDate":"2026-10-16","attendeeIds":[…],"driveFileId":"<id>"}` → 상세가 `TRANSCRIBED`가 되는지(STT 서버 필요).
 7. 외부 + 테스트 앱이면 7일 뒤 호출이 `INT-003`이 되고 목록이 `RECONNECT_REQUIRED`가 되는지 본다.
+
+## 13. 장애 알림과 동기화 실패 목록·다시 시도 (이슈 #518)
+
+> 문서에 없는 기능이다. 연결 호출이 실패해도 지금까지는 관리 > 외부 연결 카드의 '마지막 오류'에서만 보였고, Notion 반영 실패 목록은 프로세스 메모리라 서버를 다시 띄우면 사라졌다. 🟡 = 문서에 없어 정한 값(가정).
+
+### 장애 종류 (`integration_fault.fault_kind`, 공통 코드 아님)
+
+| 종류 | 언제 | 누가 고치나 | 알림 기준 🟡 |
+| --- | --- | --- | --- |
+| `RECONNECT_REQUIRED` 연결 만료 | 허용이 만료·취소돼 토큰을 쓸 수 없다: Google Drive 리프레시 토큰 거절(외부+테스트 앱은 7일마다), Notion 토큰 갱신 거절·갱신한 토큰도 401, 저장된 토큰을 풀 수 없음, Drive 권한 부족, 연결했다가 토큰이 없어짐 (`INT-003`) | 관리자가 다시 연결 | 처음부터 |
+| `CREDENTIAL_ERROR` 키·설정 오류 | 서버 설정·키 문제: 서비스 계정 키 파일 없음·읽을 수 없음(`INT-015`), Google이 서비스 계정 키를 거절, OAuth 클라이언트 거절(`invalid_client`), Drive API가 꺼져 있음, 서버 암호화 키 오류(`INT-008`) | 서버 관리자가 `.env`·Cloud Console을 고침 | 처음부터 |
+| `REQUEST_FAILED` 요청 실패 | 그 밖의 연결 호출 실패: 시간 초과·5xx·429·일시적인 토큰 갱신 실패(`INT-004`), 필요한 도구가 없음(`INT-005`) | 대개 스스로 풀림 | **3번 이어질 때** |
+| `SYNC_FAILED` 반영 실패 | Notion 업무 공간 반영이 행 단위로 계속 실패 (아래 '반영 실패 목록') | 원인에 따라 | **3번 이어질 때** (반영을 한 번 돌 때 실패한 행이 있으면 1번) |
+
+- 오류 코드만으로 가를 수 없는 것은 `IntegrationFaultException`(코드·문구·status는 `AppException` 그대로, 장애 종류만 지정)으로 던진다. `INT-002`(연결 안 함)·`INT-006`(상위 페이지 없음)·`INT-009`·`INT-010~014`·`INT-016` 같은 사용 문제는 장애가 아니다.
+- 연결(토큰·키·요청) 장애 셋은 연결 호출이 **한 번 성공하면** 풀린다. `SYNC_FAILED`는 실패 목록이 비어야(반영에 성공하거나 반영할 것이 없어져야) 풀린다. 연결 자체의 실패로 반영이 멈추면 `withSession`이 연결 장애로 세므로 `SYNC_FAILED`에는 더하지 않는다(알림이 둘 가지 않게).
+
+### 알림 (`NOTIFICATION_TYPE` `INTEGRATION_FAULT`·`INTEGRATION_RECOVERED`)
+
+- 받는 사람: **연동 관리 권한자** = `ORG_MANAGE` 사용 권한이 있는 재직 사원(관리 > 외부 연결 화면을 고칠 수 있는 사람. 시드는 관리자 역할). `link_path` `/admin/integrations`. 내용 한 줄이라 알림함·상단 알림에서 그대로 읽힌다.
+- **하루 한 번** 🟡: 같은 (연결 대상, 종류)의 장애는 풀리기 전까지 마지막 알림 뒤 24시간(`FAULT_REPEAT_MS`)이 지나야 다시 알린다. 풀리지 않아도 하루에 한 번은 다시 떠올려 준다.
+- **복구 알림 한 번**: 알렸던 장애가 풀리면 `INTEGRATION_RECOVERED`를 한 번 보내고 장애 줄을 지운다. 알리지 않은 장애(예: 2번 흔들리다 풀림)는 조용히 지운다. 풀린 뒤 같은 장애가 다시 나면 새 장애로 다시 알린다.
+- 관리자가 **일부러 연결을 끊으면** 장애를 알림 없이 지운다.
+- 서버가 여러 대여도 **알림이 두 번 가지 않는다**: 장애 기록·알림 여부는 DB가 정한다. TypedSQL 셋(`recordIntegrationFault`: `INSERT … ON CONFLICT`로 횟수 올리기, `claimIntegrationFaultAlert`: 알릴 만큼 이어졌고 아직 안 알렸거나 24시간이 지났을 때만 `notified_at`을 지금으로 적는 **조건부 UPDATE … RETURNING**, `lockIntegrationFaults`: 풀기 전에 `FOR UPDATE`로 줄 잠금) 중 알림 시각을 먼저 적은(행을 돌려받은) 서버만 같은 트랜잭션에서 알림을 만든다. 풀 때도 줄을 잠근 서버만 줄을 보고 복구 알림을 보낸다.
+- 알림은 장애 줄을 고치는 트랜잭션과 같은 tx에서 만든다(`NotificationService.notifyEmployees`). 기록이 실패해도 본 호출(내보내기·Drive 읽기)의 결과는 바꾸지 않는다(`IntegrationFaultService`의 어떤 함수도 던지지 않고 Nest `Logger`로 남긴다).
+- 모듈: 연동 모듈이 알림 모듈을, 알림 모듈의 업무(`TaskService`)가 연동 모듈의 `NotionWorkspaceService`를 쓰므로 두 모듈은 `forwardRef`로 서로 가져온다.
+
+### 기록하는 곳
+
+| 어디서 | 하는 일 |
+| --- | --- |
+| `IntegrationTokenStore.recordFailure(providerKey, failure)` | `last_error`·`last_error_at`을 남기고 장애로 센다. MCP(`McpClientService.toAppException`, 토큰이 없는 채 호출)와 Google Drive(`GoogleDriveClient.fail`: `INT-003`·`INT-004`·`INT-015`)가 부른다 |
+| `IntegrationTokenStore.recordSuccess(providerKey)` | 호출이 성공하면 `last_error`를 지우고 연결 장애를 푼다 (MCP `withSession` 성공, Drive 요청 성공) |
+| `IntegrationService.handleCallback` 성공 | 다시 연결했다: 연결 장애를 풀어 복구를 알린다 |
+| `IntegrationService.disconnect` | 장애를 알림 없이 지운다 |
+| `NotionWorkspaceService.updateSyncFault` | 반영이 한 번 끝난 뒤: 실패 목록이 비었으면 `SYNC_FAILED`를 풀고, 이번에 행이 실패했으면 장애에 한 번 더한다 |
+| `IntegrationHealthMonitor` | 아래 '주기 확인' |
+
+### 주기 확인 🟡 (`IntegrationHealthMonitor`)
+
+연결은 쓰이는 때에만 확인되므로, 아무도 쓰지 않는 동안 일어난 장애(Drive 7일 만료, 삭제된 서비스 계정 키, Notion 토큰 갱신 거절)가 누군가 쓰기 전까지 묻혀 있지 않게 **30분마다**(`INTEGRATION_HEALTH_CHECK_MINUTES`, 0이면 끔, 서버를 띄운 30초 뒤 한 번 포함) 확인한다.
+- Notion: 연결한 적이 있으면 `listTools`로 토큰을 갱신·확인한다. 토큰이 없는데 연결했던 기록이 있으면 `INT-003`을 장애로 센다.
+- Google Drive: 서비스 계정 키를 넣었거나 OAuth 토큰이 있으면 `files`가 아니라 가벼운 `about`로 토큰과 Drive API가 켜져 있는지를 본다. 키 파일이 없는 것(`INT-015`)도 이때 찾는다.
+- 연결한 적도 키를 넣은 적도 없는 연결 대상은 건드리지 않는다. 실패는 호출 쪽이 장애로 남기므로 여기서는 던지지 않는다. 서버 여러 대가 각각 확인해도 알림은 위 조건부 UPDATE로 한 번이다.
+
+### 연결 상태 (`IntegrationConnectionView.health`)
+
+| 상태 | 기준 |
+| --- | --- |
+| **끊김** `DOWN` | `status`가 `RECONNECT_REQUIRED`, 서버 설정(`.env`) 오류가 있음, 또는 `RECONNECT_REQUIRED`·`CREDENTIAL_ERROR` 장애가 있음 |
+| **주의** `WARNING` | (끊김이 아니고) `REQUEST_FAILED`·`SYNC_FAILED` 장애가 있음, `last_error`가 있음(한 번 실패한 뒤 다음 성공 전까지), 반영 실패가 남아 있음, 업무 공간 보기 안내(`setupWarning`)가 있음 |
+| **정상** `NORMAL` | 그 밖. 연결한 적 없고 문제도 없으면 화면은 정상 배지를 보이지 않고 '연결 안 됨'만 보인다 |
+
+`health.lastErrorAt`은 화면에 보이는 마지막 오류를 남긴 시각이다(서버 설정 오류처럼 시각이 없는 오류는 null). `health.faults[]`는 해결되지 않은 장애로 급한 것(다시 연결·키)이 먼저다.
+
+### 반영 실패 목록 (`notion_sync_failure`)
+
+- 일정·회의록·할 일 한 행이 Notion 반영에 실패하면 (`target_type` `schedule_event`·`meeting_minutes`·`task`, `target_id`)마다 한 줄을 남긴다: `failure_count`(이어서 실패한 횟수), `last_error`(500자), `is_result_unknown`(Notion에 만들어졌는지 알 수 없는 실패), `retry_after`(이 시각 전에는 자동 반영이 건너뜀), `first_failed_at`·`last_failed_at`. 같은 행이 또 실패하면 같은 줄에 횟수를 올리고(TypedSQL `recordNotionSyncFailure`, `ON CONFLICT`) 미루는 시간을 1분 → 2분 → … 1시간으로 늘린다. 결과를 알 수 없으면 30분(12장과 같은 값).
+- 반영에 성공하면 그 줄을 지운다. 실패 줄이 있는데 더는 반영할 것이 없는 행(행이 지워짐, 다른 길로 반영됨, 일정을 Notion에 넣지 않기로 바꿈)은 다음 반영이 치운다(미룬 시각이 지난 줄만 보고, 한 번에 100행을 다 읽지 못했거나 회의록을 다른 쪽이 만드는 중이면 두고 본다). 목록을 읽을 때 지워진 행의 줄은 치운다.
+- 서버를 다시 띄워도 남고, 서버 여러 대가 같은 목록을 본다. (반영 자체를 두 서버가 함께 하면 같은 행을 둘이 만들 수 있다는 12장의 전제는 그대로다.)
+- **다시 시도**(`POST integrations/notion/sync-failures/retry` 전체, `…/:failureId/retry` 한 건): `ORG_MANAGE` 사용 권한을 확인하고, Notion 업무 공간이 준비돼 있어야 한다(아니면 `INT-002`). 대상 줄의 `retry_after`를 지금으로 당긴 뒤 자동 반영과 같은 길(`NotionWorkspaceService.runNow()`, 같은 줄·같은 규칙)로 반영을 한 번 돌려 끝나기를 기다린다. 응답 `NotionSyncRetryResult { requested, succeeded, failed, failures }`: 다시 시도한 건수, 성공(줄이 사라짐)·실패(줄이 남음) 건수, 지금 남은 목록 전체. 한 번에 종류마다 100행까지 반영하므로 남은 것은 다음 반영(1분 안)이 이어 한다. 없는 건(이미 처리됨)은 `COM-003`.
+- 만들어졌는지 알 수 없었던 건(`is_result_unknown`)도 사람이 시도하는 것이라 막지 않는다. 화면이 'Notion에서 먼저 확인했나요?' 확인 창을 띄운다(이미 만들어졌다면 같은 페이지가 하나 더 생긴다).
+
+### 관리 화면 (관리 > 외부 연결)
+
+- 카드 머리: 연결 상태 배지(연결됨·다시 연결 필요·연결 안 됨) 옆에 **정상·주의·끊김** 배지. '마지막 오류'는 시각과 상대 시각(예: `2026-10-22 13:30 (5분 전)`)을 함께, 그 아래에 해결되지 않은 장애 목록(종류·이어서 실패한 횟수·마지막 실패·관리자에게 알렸는지).
+- Notion 카드 > 업무 공간: **반영 실패 목록** — 종류(일정·회의록·할 일) 배지, 제목, `#id`, 결과 모름 배지, 몇 번 실패·처음/마지막 실패 시각·다음 자동 시도, 실패 이유, 항목별 **[다시 시도]**, 목록 머리의 **[전체 다시 시도]**. 사용 권한이 없으면 버튼이 꺼진다.
+
+### 가정 🟡
+
+| 값 | 정한 값 |
+| --- | --- |
+| 같은 장애를 다시 알리는 간격 | 24시간 (해결될 때까지 하루 한 번) |
+| 알림 기준 | 다시 연결·키 오류는 처음부터, 요청 실패·반영 실패는 3번 이어질 때 |
+| 알림 대상 | `ORG_MANAGE` 사용 권한이 있는 재직 사원 (설정 전용 권한 코드가 없어 외부 연결 화면과 같은 권한을 쓴다) |
+| 주기 확인 간격 | 30분 (`INTEGRATION_HEALTH_CHECK_MINUTES`) |
+| 연결 상태 신호등 기준 | 위 표 |
+| 알림 유형 값 | `INTEGRATION_FAULT`(연동 장애)·`INTEGRATION_RECOVERED`(연동 복구) — [06] 공통 코드 정의서 NOTIFICATION_TYPE에 더했다(문서에 없는 값) |
+| 반영 실패 목록 조회 권한 | `ORG_MANAGE` 조회(VIEW) 이상 (제목이 담겨 로그인만으로는 열지 않는다) |
