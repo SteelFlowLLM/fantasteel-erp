@@ -70,7 +70,7 @@ server/
 | 부서장 확인 | `auth/department-head.ts` | 구매요청 승인·반려: `assertDepartmentHead(user, requester.departmentId)` (권한 코드 아님, REQ-AUTH-004) |
 | 작업 로그 | `business-event/business-event.recorder.ts` | 본 거래와 같은 tx에서 `businessEventRecorder.record(tx, { type, actor: user 또는 'SYSTEM', target: { table, id }, salesOrderId, lotIds, before, after, reason })` |
 | 채번 | `numbering/` | `numbering.nextDocumentNumber(tx, 'SALES_ORDER')` · `nextLotNumber(tx, 'HEAT', 'BOF1')` · `nextMillSheetNumber(tx, id, no)` · 슬래브·코일은 `formatSlabNumber`·`formatCoilNumber` |
-| 날짜 | `time/seoul-date.ts` | `seoulToday()`, `seoulDateOnly()` — "오늘"·채번 날짜는 Asia/Seoul |
+| 날짜 | `time/seoul-date.ts` | `seoulToday()`, `seoulDateOnly()` — "오늘"·채번 날짜는 Asia/Seoul. 사람이 고른 시각 글은 `seoulDateTimeOf()`(시간대가 없으면 서울 시각, `new Date(글)` 금지) |
 | 파일 | `storage/storage.service.ts` | `save(folder, fileName, buffer)` → 경로, `read(path)`. 지금은 로컬 폴더, Supabase Storage로 옮길 때 이 파일만 바꾼다 |
 | 메신저 소켓 인증 | `auth/auth-token.service.ts` | handshake에서 `verifyCookieHeader(socket.handshake.headers.cookie)` |
 

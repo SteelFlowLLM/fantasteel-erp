@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   LOT_TYPE,
@@ -108,6 +108,8 @@ function toStockSync(results: EligibilitySyncResult[], eligibleBefore: ReadonlyS
  */
 @Injectable()
 export class QualityService {
+  private readonly logger = new Logger(QualityService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: QualityRepository,
@@ -165,8 +167,11 @@ export class QualityService {
    */
   async registerQualityInspection(dto: RegisterQualityInspectionDto, user: AuthUser): Promise<QualityInspectionSaveResult> {
     const saved = await this.registerInspectionInTx(dto, user);
-    // 이벤트 트리거 (REQ-AGT-001): 합격 매수 부족을 본다. 커밋 뒤에 부르고, 감지가 실패해도 검사 등록은 그대로다
-    await this.factoryAgent?.onInspectionRegistered(dto.lotId);
+    // 이벤트 트리거 (REQ-AGT-001): 합격 매수 부족을 본다. 커밋 뒤에 부르고, 감지가 실패해도 검사 등록은 그대로다.
+    // Agent 감지는 한 줄 큐라 전체 감지(scanAll)가 돌고 있으면 오래 걸린다. 검사 등록 응답은 그것을 기다리지 않는다 (#496)
+    this.factoryAgent?.onInspectionRegistered(dto.lotId).catch((e: unknown) => {
+      this.logger.warn(`검사 등록 뒤 Agent 감지를 부르지 못했어요 (LOT ${dto.lotId}): ${e instanceof Error ? e.message : String(e)}`);
+    });
     return saved;
   }
 
