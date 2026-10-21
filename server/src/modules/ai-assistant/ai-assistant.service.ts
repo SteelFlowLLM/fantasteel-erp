@@ -367,6 +367,8 @@ export class AiAssistantService {
     const driveOn = options.interactive === true && input.drive === true && (await this.driveTools.availability()).available;
     const attached = options.interactive === true && input.driveFileIds?.length ? await this.readAttachments(input.driveFileIds) : null;
     // 화면이 사진 칸에 붙여 보낸 Drive 사진도 Drive 파일 출처로 보인다 (사진 내용은 이미 질문에 붙어 있다)
+    // Drive 사진 id는 붙인 사진의 일부여야 한다(사진 없이 아무 파일 id를 출처로 달 수 없게)
+    if (options.interactive === true && (input.driveImageIds?.length ?? 0) > (input.images?.length ?? 0)) throw new AppException('COM-004', 'Drive 사진 파일이 붙인 사진보다 많아요');
     const driveImages = options.interactive === true && input.driveImageIds?.length ? await this.driveTools.fileRefs(input.driveImageIds) : [];
     // 모델이 사진을 보는지는 Drive 사진을 읽거나 브라우저 화면 사진을 보낼 때 한 번만 묻는다
     let vision: Promise<boolean | null> | null = null;
@@ -558,7 +560,11 @@ export class AiAssistantService {
                 result = { content: driveResult.content, source: null };
                 webSources = driveResult.webSources;
                 roundImages.push(...(driveResult.images ?? []));
-                for (const source of driveResult.webSources) web?.rememberVisited(source.url, source.title);
+                // 읽은 파일은 읽은 페이지처럼, 찾기 결과는 링크로만 허용한다 (쓰지 않은 찾기 결과가 웹 출처 대체 후보로 붙지 않게)
+                for (const source of driveResult.webSources) {
+                  if (toolCall.name === 'drive_search') web?.allowLink(source.url, source.title);
+                  else web?.rememberVisited(source.url, source.title);
+                }
               } else if (historySearch?.has(toolCall.name)) {
                 result = { content: await historySearch.run(toolCall), source: null };
               } else {

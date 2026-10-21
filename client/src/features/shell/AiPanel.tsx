@@ -332,7 +332,7 @@ export function AiPanel() {
     stickRef.current = true;
     setShowThreads(false);
     const attached: AiAssistantImageInput[] = withImages && !visionOff ? draftImages.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) : [];
-    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn || once.webSearch === true, browserOn || once.browser === true, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [], driveImageIds: withImages && !visionOff ? draftImages.flatMap((image) => (image.driveFileId ? [image.driveFileId] : [])) : [] });
+    ask(question, screenContext(), sentReasoning(reasoning), attached, webSearchOn || once.webSearch === true, browserOn || once.browser === true, screenControlOn, researchRef?.id, notionOn, { drive: driveOn, driveFileIds: withImages ? driveFiles.map((file) => file.id) : [], driveImageIds: withImages && !visionOff ? [...new Set(draftImages.flatMap((image) => (image.driveFileId ? [image.driveFileId] : [])))] : [] });
     setDraft('');
     if (withImages) setDriveFiles([]);
     if (withImages) photos.clear();

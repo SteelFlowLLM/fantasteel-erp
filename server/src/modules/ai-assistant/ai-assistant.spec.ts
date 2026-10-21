@@ -1811,11 +1811,31 @@ describe('AiAssistantService', () => {
       expect((await run(unrelated.service, { question: '메모 찾아줘', drive: true })).webSources).toBeUndefined();
     });
 
+    it('웹 검색·브라우저와 함께 켜도 쓰지 않은 Drive 찾기 결과는 웹 출처 대체 후보로 붙지 않고, 답이 단 Drive 링크는 지워지지 않는다 (이슈 #473)', async () => {
+      const url = 'https://drive.google.com/file/d/docNotes00001/view';
+      const unused = withDrive(async (_call, index) => [driveCall('c1', 'drive_search', { query: '메모' }), answer('관련 자료를 찾지 못했어요.')][index]);
+      expect((await run(unused.service, { question: '메모 찾아줘', drive: true, webSearch: true })).webSources ?? []).toEqual([]);
+      const linked = withDrive(async (_call, index) => [driveCall('c1', 'drive_search', { query: '메모' }), answer(`[점검 메모](${url}) 파일이에요.`)][index]);
+      const reply = await run(linked.service, { question: '메모 찾아줘', drive: true, webSearch: true });
+      expect(reply.answer).toContain(`(${url})`);
+      expect(reply.webSources).toEqual([{ title: '점검 메모.txt', url }]);
+    });
+
+    it('사진 칸의 Drive 사진 id가 붙인 사진보다 많으면 COM-004, 같은 id를 두 번 보내도 DTO가 하나로 합친다', async () => {
+      const { service } = withDrive(async () => answer('네'));
+      const image = { mediaType: 'image/png' as const, dataBase64: Buffer.from('png').toString('base64') };
+      await expect(service.prepare(user, { question: '봐줘', images: [image], driveImageIds: ['imagePhoto0005', 'imagePhoto0006'] }, { interactive: true })).rejects.toMatchObject({ code: 'COM-004' });
+      await expect(service.prepare(user, { question: '봐줘', driveImageIds: ['imagePhoto0005'] }, { interactive: true })).rejects.toMatchObject({ code: 'COM-004' });
+      const dto = plainToInstance(AskAiAssistantDto, { question: '봐줘', images: [image], driveImageIds: ['imagePhoto0005', 'imagePhoto0005'] });
+      expect(await validate(dto)).toEqual([]);
+      expect(dto.driveImageIds).toEqual(['imagePhoto0005']);
+    });
+
     it('사진 칸에 붙인 Drive 사진은 읽지 않고 폴더 안 파일일 때만 Drive 출처로 보인다', async () => {
       const { service, calls } = withDrive(async () => answer('사진을 봤어요.'));
-      const reply = await run(service, { question: '이 사진 설명해줘', images: [{ mediaType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }], driveImageIds: ['imagePhoto0005', 'outsideFile0001'] });
+      const reply = await run(service, { question: '이 사진 설명해줘', images: [{ mediaType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }, { mediaType: 'image/png', dataBase64: Buffer.from('png2').toString('base64') }], driveImageIds: ['imagePhoto0005', 'outsideFile0001'] });
       expect(reply.webSources).toEqual([{ title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' }]);
-      expect(calls[0].messages.at(-1)).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png' }] });
+      expect(calls[0].messages.at(-1)).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png' }, { mediaType: 'image/png' }] });
       // 실시간 답 API가 아니면(사내 채팅 @AI) 쓰지 않는다
       const chat = withDrive(async () => answer('네'));
       expect((await chat.service.ask(user, { question: '봐줘', driveImageIds: ['imagePhoto0005'] })).webSources).toBeUndefined();
