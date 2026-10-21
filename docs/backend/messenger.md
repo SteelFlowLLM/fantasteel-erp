@@ -53,9 +53,9 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 ## 4. 업무 규칙
 
 **채팅방**(REQ-MSG-001)
-- 요청: `{ chatRoomType, memberIds(나 제외), chatRoomName?(그룹), salesOrderId?(업무방) }` → `{ id, reused }`.
+- 요청: `{ chatRoomType, memberIds(나 제외), chatRoomName?(그룹), salesOrderId?(업무방) }` → `{ id, reused }`. `memberIds`(방 만들기·초대)·`mentionedEmployeeIds`는 한 번에 **200명까지**(`CHAT_MEMBER_PICK_MAX`, 가정값, 넘으면 400 COM-004, 이슈 #488).
 - 생성자는 자동으로 멤버. 멤버는 조직 정보에서 고른다 → 화면은 `GET departments`(조직도, 전 사용자)를 쓴다(`GET employees`는 관리자 전용).
-- DIRECT는 두 사람(상대 1명이 아니면 COM-004). **같은 두 사람의 1:1 방이 있으면 새로 만들지 않고 그 방을 돌려준다(`reused: true`)**.
+- DIRECT는 두 사람(상대 1명이 아니면 COM-004). **같은 두 사람의 1:1 방이 있으면 새로 만들지 않고 그 방을 돌려준다(`reused: true`)**. 두 사람이 거의 동시에 열어도 하나만 생기게, 찾기 전에 tx 잠금(`lockChatRoomCreation`: `pg_advisory_xact_lock(hashtext('chat_room_create:direct:{작은 id}:{큰 id}'))`)을 건다. 업무방도 수주마다 같은 잠금(`work:{수주 id}`)을 건다(이슈 #488, 스키마 그대로).
 - GROUP은 나 말고 1명 이상, 이름은 선택(100자).
 - WORK는 `salesOrderId` 필수(빠지면 COM-004, 수주가 없으면 COM-003). **수주당 업무방 1개**: 같은 수주의 방이 있으면 그 방을 돌려주고 새로 고른 멤버만 더한다. 새 멤버는 지금까지의 메시지를 읽은 것으로 시작한다. 방 이름은 `수주번호 고객사명`.
 - 상세의 수주 요약(번호·고객사·담당·품목·납기)은 수주 조회 권한이 있는 멤버에게만 준다(`salesOrderState`: none·ok·missing·denied).
@@ -64,7 +64,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 
 **메시지·실시간**(REQ-MSG-002)
 - 보낸 사람 = 로그인 사원. 저장은 tx 안에서, 소켓 발송은 커밋 뒤에 한다(롤백된 메시지를 보내지 않도록).
-- WebSocket Gateway는 이 모듈에 둔다(`@nestjs/websockets`·`@nestjs/platform-socket.io` 의존성 있음, [05] 6장 [강제]). handshake에서 `client.handshake.headers.cookie`를 `AuthTokenService.verifyCookieHeader`로 검증하고 `AuthUserService.load`로 사원을 읽는다(둘 다 CommonModule export). 인증에 실패하면 연결을 끊는다.
+- WebSocket Gateway는 이 모듈에 둔다(`@nestjs/websockets`·`@nestjs/platform-socket.io` 의존성 있음, [05] 6장 [강제]). handshake에서 `client.handshake.headers.cookie`를 `AuthTokenService.verifyCookieSession`으로 검증하고 `AuthUserService.load`로 사원을 읽는다(둘 다 CommonModule export). 인증에 실패하면 연결을 끊는다.
+- 접속 뒤 다시 끊는 때(이슈 #488): **토큰 만료 시각**(JWT `exp`, 지금 12시간)에 끊는다. **로그아웃**(`POST auth/logout`)하면 그 토큰으로 연결한 소켓만 끊는다(같은 사원의 다른 브라우저는 그대로). **퇴사 처리**(`PATCH employees/:id { isActive: false }`)하면 그 사원의 소켓을 모두 끊는다. 공통 `AuthSessionEvents`(서버 메모리 안 알림)로 전한다. 서버를 여러 대로 늘리면 공유 채널이 필요하다. 로그아웃한 토큰 자체는 HTTP에서 만료까지 유효하다(토큰 무효화 목록 없음, 따로 결정).
 - namespace `/messenger`. 연결된 소켓은 채팅방이 아니라 **사원 채널**(`employee:{사원 id}`)에 join한다. 새로 초대된 방도 다시 join하지 않고 받기 위해서다. 발송은 방 멤버 각자의 사원 채널로 한다.
 - 목록은 최신 메시지부터 `limit`개를 오래된 순으로 주고 `hasMore`를 붙인다. 이전 메시지는 `before`(메시지 id)로 더 불러온다(OFFSET을 쓰지 않는다).
 - 본문은 앞뒤 공백을 지우고 1~4000자. 보낸 사람의 읽음 위치를 그 메시지로 옮긴다.
@@ -89,7 +90,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 파일 수: **10개까지**(`MESSAGE_ATTACHMENT_MAX_COUNT`, 가정값, 넘으면 multer가 400·COM-004). 하나라도 규칙에 걸리면 아무것도 저장하지 않는다.
 - 제한(2026-10-07 결정): **파일마다 10MB까지**(`MESSAGE_ATTACHMENT_MAX_BYTES`, 넘으면 multer가 413·COM-004로 끊는다), **실행 파일 확장자만 거부**(`BLOCKED_ATTACHMENT_EXTENSIONS`: exe·msi·bat·cmd·com·scr·ps1·vbs·js·jar·sh·app·dll, COM-004). 파일 이름 1~255자.
 - multer는 파일 이름을 latin1로 읽어 한글이 깨지므로 UTF-8로 다시 읽는다.
-- 방 멤버인지 먼저 확인하고 저장한다(멤버가 아닌 사람의 파일이 저장소에 남지 않게).
+- 방 멤버·답글 대상(`parentMessageId`)·재전송 여부를 먼저 확인하고 저장한다(실패할 요청의 파일이 저장소에 남지 않게). 저장한 뒤 메시지 저장이 실패하거나, 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일을 지운다(`StorageService.remove`, 이슈 #488).
 - 업로드: multipart(`FilesInterceptor('files')`) → 파일마다 `StorageService.save('messages', 파일명, buffer)` → 메시지 1건과 `message_attachment` 행(올린 순서 = `sort_order`, 크기 저장)을 같은 tx에서 만든다. 응답 `attachments: [{ id, fileName, fileSize }]`.
 - 미리보기(목록·알림·답글·공지): 글이 없으면 `파일 · 이름`, 여러 개면 `파일 · 첫 이름 외 N개`.
 - 다운로드: `:id`는 첨부(`message_attachment`) id. 방 멤버인지 확인 → `StorageService.read(path)` → `StreamableFile`(인터셉터가 감싸지 않음). ERD에 MIME 컬럼이 없어 `application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''…`로 보낸다. 없는 첨부·삭제된 메시지의 첨부는 COM-003.
@@ -103,7 +104,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 **업무방 진행 알림** (2026-10-08, 문서에 없는 추가 기능)
 - 공통 `BusinessEventRecorder.onRecorded`(새로 둔 연결 지점)에 메신저가 등록한다. 수주에 연결된 작업 로그(`salesOrderId`)가 아래 유형이면 **같은 tx에서** 그 수주의 업무방에 시스템 메시지 `[{작업 로그 표시명}] {업무 번호} · {사람}님`을 남긴다. 업무 번호는 작업 로그 변경 후 데이터에서 `…No`로 끝나는 첫 값.
 - 유형: SALES_ORDER_CANCELLED, PRODUCTION_PLAN_CREATED·CANCELLED, REPRODUCTION_PLAN_CREATED, PRODUCTION_STARTED, PRODUCTION_RESULT_REGISTERED, SHIPMENT_REQUEST_CREATED, ALLOCATION_CONFIRMED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED. 예약·배정 추천처럼 자주 바뀌는 내부 단계는 넣지 않는다.
-- 본 거래의 tx는 다른 모듈이 열어 커밋 시점을 모르므로, 소켓은 행이 보일 때까지 100·300·1000·3000ms 간격으로 확인한 뒤 보낸다(끝까지 없으면 롤백으로 보고 보내지 않음). 서버를 여러 대로 늘리면 바꿔야 한다.
+- 본 거래의 tx는 다른 모듈이 열어 커밋 시점을 모르므로, 소켓은 행이 보일 때까지 100·300·1000·3000·10000·30000ms 간격(약 44초. 이슈 #488 전에는 4.4초라 긴 tx면 보내지 못했다)으로 확인한 뒤 보낸다(끝까지 없으면 롤백으로 보고 보내지 않음, 그래도 화면은 다시 읽을 때 보인다). 서버를 여러 대로 늘리면 바꿔야 한다.
 - 이 처리가 실패하면 본 거래도 롤백된다(같은 tx). 조회 1번 + 저장 1번이라 실패할 일은 적다.
 
 **@AI 호출** (REQ-AST-002, BP-AST-01. 스키마 변경 없음)
@@ -143,6 +144,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 
 **이모지 반응** (13번, 스키마 2차 `message_reaction`, 명세에 없는 API)
 - `POST messages/:id/reactions { emoji }` → 메시지(`ChatMessageView`). 없으면 더하고 있으면 뺀다(한 사람이 이모지마다 1번, unique `(message_id, employee_id, emoji)`). 이모지는 `MESSAGE_REACTION_EMOJIS`(👍 ✅ 👀 🙏 ❤️ 😂 + 23번 작은 철강맨 `sm:ok`·`sm:thanks`·`sm:lol`·`sm:love`, 가정값)만, 아니면 COM-004. 철강맨 반응은 문서에 없는 추가 기능이고 값을 그대로 `message_reaction.emoji`(varchar(16))에 저장한다(스키마 그대로). 그림 키는 shared `STEELMAN_REACTIONS`·`reactionEmoticonKey`.
+- 같은 반응을 거의 동시에 두 번 눌러도(더블클릭) unique 오류(500) 없이 처리한다: 더하기는 `createMany(skipDuplicates)`, 빼기는 `deleteMany`(이슈 #488).
 - 방 멤버만(COM-002), 삭제·시스템 메시지는 COM-004. 알림은 보내지 않고 멤버에게 `message:updated`.
 - 응답 `reactions: [{ emoji, count, reactedByMe, employeeNames }]`는 처음 누른 순서, 삭제된 메시지는 빈 배열.
 
@@ -166,7 +168,8 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 **편의** (문서에 없는 기능, ERD 변경 없음)
 - 메시지별 안 읽은 사람 수: 응답의 `unreadMemberCount` = 보낸 사람을 뺀 멤버 중 `last_read_message_id < 메시지 id`인 수. 목록은 멤버 읽음 위치를 한 번 읽어 계산하고, 새 메시지는 (멤버 수 − 1). 누가 읽으면 다른 멤버에게 `member:read { chatRoomId, employeeId, lastReadMessageId }`를 보내 다시 읽게 한다.
 - 접속 상태: 사원별 열린 소켓 수를 서버 메모리(`messenger.presence.ts`)에 센다. 탭·기기가 여러 개면 첫 연결에서 접속, 마지막이 끊길 때 나감. 서버를 여러 대로 늘리면 공유 저장소(Redis 등)가 필요하다. 사내 접속 상태는 방 멤버로 좁히지 않고 모든 사원에게 보인다.
-- 입력 중: 저장하지 않는다. 화면은 방마다 3초(`TYPING_SEND_INTERVAL_MS`, 가정값)에 한 번만 보내고, 받은 쪽은 6초(`TYPING_SHOW_MS`, 가정값) 뒤 또는 그 사람의 메시지가 오면 지운다.
+- 입력 중: 저장하지 않는다. 화면은 방마다 3초(`TYPING_SEND_INTERVAL_MS`, 가정값)에 한 번만 보내고, 받은 쪽은 6초(`TYPING_SHOW_MS`, 가정값) 뒤 또는 그 사람의 메시지가 오면 지운다. 서버도 소켓·방마다 1.5초(그 절반)보다 자주 오면 DB를 읽지 않고 버린다(이슈 #488).
+- 접속 처리 중(토큰·사원 확인, join) 소켓이 끊기면 접속 수에 세지 않는다(세면 끊김 처리가 이미 지나가 온라인으로 남는다). 끊김은 소켓마다 한 번만 센다.
 - 검색은 `content ILIKE`(Prisma `contains`·`insensitive`)라 메시지가 아주 많아지면 인덱스(pg_trgm)가 필요하다.
 
 **읽음**(REQ-MSG-004): `POST chat-rooms/:id/read { lastMessageId }` → `{ chatRoomId, lastReadMessageId, unreadCount }`. `last_read_message_id`를 그 방의 메시지 id로 갱신한다(뒤로 가지 않게 더 큰 값만, 다른 방의 메시지면 COM-003). 갱신 뒤 본인에게 `room:read`를 보낸다. 안 읽은 수 = 그 방에서 `id > last_read_message_id`이고 내가 보내지 않은 메시지 수.

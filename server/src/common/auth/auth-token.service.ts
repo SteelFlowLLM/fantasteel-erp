@@ -52,4 +52,16 @@ export class AuthTokenService {
   verifyCookieHeader(cookieHeader: string | undefined): Promise<number | null> {
     return this.verify(readCookie(cookieHeader, ACCESS_TOKEN_COOKIE));
   }
+
+  /** Cookie 헤더의 토큰을 검증하고 토큰·만료 시각(ms)도 돌려준다 (메신저 소켓이 만료 때 끊으려고, 이슈 #488). 만료가 없으면 expiresAt null */
+  async verifyCookieSession(cookieHeader: string | undefined): Promise<{ employeeId: number; token: string; expiresAt: number | null } | null> {
+    const token = readCookie(cookieHeader, ACCESS_TOKEN_COOKIE);
+    if (!token) return null;
+    try {
+      const payload = await this.jwt.verifyAsync<{ sub: number; exp?: number }>(token);
+      return { employeeId: Number(payload.sub), token, expiresAt: typeof payload.exp === 'number' ? payload.exp * 1000 : null };
+    } catch {
+      return null;
+    }
+  }
 }
