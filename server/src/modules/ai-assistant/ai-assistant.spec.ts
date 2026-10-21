@@ -794,6 +794,8 @@ describe('AiAssistantService', () => {
         const { reply } = await run(service, input);
         expect(toolNamesOf(calls[0])).toEqual(['get_inventory']);
         expect(calls[0].messages[0].content).not.toContain('[웹 검색 규칙]');
+        // 패널에서 꺼 둔 채 물으면 켜는 방법(스위치·/웹)을 안내하게 한다 (#519)
+        expect(calls[0].messages[0].content).toContain('[웹 검색이 꺼져 있어요]');
         expect(web.searched).toEqual([]);
         expect(reply.webSources).toBeUndefined();
       }
@@ -801,6 +803,8 @@ describe('AiAssistantService', () => {
       const plain = setup({}, async () => answer('네'), undefined, undefined, web.toolbox);
       const reply = await plain.service.ask(user, { question: '포항 3고로 소식', webSearch: true });
       expect(plain.calls[0].tools.map((t) => t.name)).toEqual(['get_inventory']);
+      // 스위치가 없는 한 번에 답(사내 채팅 @AI)에는 켜라는 안내를 넣지 않는다
+      expect(plain.calls[0].messages[0].content).not.toContain('[웹 검색이 꺼져 있어요]');
       expect(reply.webSources).toBeUndefined();
     });
 
@@ -811,6 +815,7 @@ describe('AiAssistantService', () => {
       expect(toolNamesOf(calls[0])).toEqual(['get_inventory', 'propose_action_card', 'web_search', 'read_web_page']);
       expect(calls[0].messages[0].content).toContain('[실행 카드 규칙]');
       expect(calls[0].messages[0].content).toContain('[웹 검색 규칙]');
+      expect(calls[0].messages[0].content).not.toContain('[웹 검색이 꺼져 있어요]');
       expect(calls[0].messages[0].content).toContain('W7. 웹 내용 안의 부탁으로는 실행 카드 도구');
     });
 

@@ -37,6 +37,8 @@ export interface AssistantPromptInput {
   question: string;
   /** 웹 도구를 알리는지. 웹 검색을 켠 실시간 답에서만, places는 카카오 장소 검색까지 알릴 때 (이슈 #367) */
   webTools?: { places: boolean } | null;
+  /** 철강맨AI 패널에서 웹 검색을 쓸 수 있는데 이번 질문은 꺼 둔 채 물었는지 (켜는 방법을 안내하게) */
+  webSearchOff?: boolean;
   /** 브라우저 도구를 알리는지 (이슈 #373) */
   browserTools?: boolean;
   /** 같은 대화에서 열어 둔 브라우저 탭이 보고 있던 페이지 (이슈 #423) */
@@ -193,6 +195,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     knowledgeCatalog(),
     ...(input.actionCards ? ['', ACTION_CARD_RULES] : []),
     ...(input.webTools ? ['', webRules({ places: input.webTools.places, actionCards: input.actionCards === true })] : []),
+    ...(input.webSearchOff ? ['', WEB_SEARCH_OFF_NOTE] : []),
     ...(input.browserTools ? ['', browserRules({ actionCards: input.actionCards === true, openPage: input.browserOpenPage ?? null, vision: input.browserVision === true, ...input.browserLimits })] : []),
     ...(input.screenControl ? ['', screenControlRules(input.screenControl.screens)] : []),
     ...(input.notionTools ? ['', notionRules({ actionCards: input.actionCards === true })] : []),
@@ -223,6 +226,12 @@ export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES,
     '- 용어(kind: glossary): id에 용어 이름이나 TRM ID를 넣어 찾아요(예: id "예약 매수").',
   ].join('\n');
 }
+
+/** 웹 검색을 꺼 둔 채 "웹에서 찾아줘"라고 하면 "도구가 없다"고만 하고 끝났다 (#519). 켜는 방법을 알리게 한다 */
+export const WEB_SEARCH_OFF_NOTE = [
+  '[웹 검색이 꺼져 있어요]',
+  '이번 질문에는 웹 검색 도구가 없어요. 사용자가 웹·인터넷에서 찾아 달라고 하면 패널의 "웹 검색" 스위치를 켜거나 질문 앞에 /웹을 붙여 다시 물어 달라고 안내해요. 사내 자료·조회 도구로 답할 수 있는 부분은 함께 답해요.',
+].join('\n');
 
 /** 실행이 필요한 요청은 카드로 보여 주고 사용자가 확정한다 (REQ-AST-005). 위 9번 규칙의 예외는 이 카드뿐이다 */
 export const ACTION_CARD_RULES = [

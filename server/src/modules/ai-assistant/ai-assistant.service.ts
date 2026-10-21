@@ -391,6 +391,7 @@ export class AiAssistantService {
       historySearch: historySource?.kind ?? null,
       question: input.question,
       webTools: webSearch ? { places: this.webTools.placeSearchEnabled } : null,
+      webSearchOff: options.interactive === true && !webSearch && this.webTools.capabilities().engines.length > 0,
       browserTools: browserOn,
       browserOpenPage,
       browserVision,
