@@ -452,6 +452,15 @@ describe('AiAssistantService', () => {
     expect(calls[1].messages.at(-1)).toEqual({ role: 'user', content: EMPTY_ANSWER_NUDGE });
   });
 
+  it('실행 카드를 만들고 답 글을 비우면 다시 시켜도 빈 답일 때 카드를 버리지 않고 정해진 문구로 돌려준다 (#519)', async () => {
+    const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 7, assigneeName: '박서영', dueDate: '2026-10-20', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    const { service, calls } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('')), { content: '{"결과":"실행 카드를 화면에 만들었어요"}', source: null, cards: [card] });
+    const reply = await service.ask(user, { question: '견적서 보내기 업무 등록해줘', actionCards: true });
+    expect(calls).toHaveLength(3);
+    expect(reply.answer).toBe('카드를 만들었어요. 내용을 확인하고 실행해 주세요.');
+    expect(reply.actionCards.map((c) => c.title)).toEqual(['견적서 보내기']);
+  });
+
   it('도구를 쓴 뒤 빈 답이면 도구 없이 한 번 다시 시키고, 그래도 비면 실패로 돌려 대화에 남기지 않는다 (#519)', async () => {
     const { service, calls } = setup({}, async (_call, index) => (index === 0 ? callTool('c1') : answer('')));
     await expect(service.ask(user, { question: 'SS275 재고' })).rejects.toMatchObject({ code: 'AST-005' });
