@@ -21,9 +21,9 @@
 | messenger | [messenger.md](messenger.md) | 채팅방·메시지·첨부·읽음·실시간 | |
 | message-action | [message-action.md](message-action.md) | Message → ERP 업무 초안: 구매요청 + 확장 유형(출하요청·수주 등록·배정 확정·재생산 계획). Agent 후보 요청은 factory-agent로 넘긴다 | 정건희 |
 | factory-agent | [factory-agent.md](factory-agent.md) | AI Factory Agent (P2): 규칙 위험 감지(원료 부족·합격 매수 부족·납기 위험·여재 장기 보유·불합격률 상승) → 대응 후보·알림, 확정·상황 설명 | |
-| ai-assistant | [ai-assistant.md](ai-assistant.md) | AI 어시스턴트 (P2): 용어 사전 답변·화면 맥락·추천 질문 | 현명지 |
-| llm | [ai-assistant.md](ai-assistant.md) | LLM 연결 설정·호출(`modules/llm`): 주소·모델·API 키, 브라우저 시작 사이트. 관리 > AI 연결 화면이 쓴다 (문서에 없는 기능) | |
-| stt | [stt.md](stt.md) | 음성 인식(Whisper) 연결: 회의 녹음·짧은 말 조각 받아쓰기 (Voice2ERP, 문서에 없는 기능) | |
+| ai-assistant | [ai-assistant.md](ai-assistant.md) | 철강맨AI (P2): 용어·업무·매뉴얼 답변, ERP 조회 도구, 실행 카드, 웹 검색·브라우저·화면 조작·Notion·Drive, 대화 기록·회의 질문, 실시간 답 | 현명지 |
+| llm | [ai-assistant.md](ai-assistant.md) | LLM 연결 설정·호출(`modules/llm`): LM Studio·Unsloth Studio·외부 OpenAI 호환 서버의 주소·모델·API 키, 사진·생각 정도·문맥 길이 지원, 연결·응답 확인, 브라우저 시작 사이트, 실패 오류 코드 AST-002~005. 관리 > AI 연결 화면이 쓴다 (문서에 없는 기능) | |
+| stt | [stt.md](stt.md) | 음성 인식(Whisper) 연결: 회의 녹음·철강맨 부르기 말 조각 받아쓰기, 같은 Mac의 음성 서버 켜기·끄기 (Voice2ERP, 문서에 없는 기능) | |
 | meeting-minutes | [meeting-minutes.md](meeting-minutes.md) | Voice2ERP 회의록: 전사·AI 분석·후보 검토·등록(업무·일정·구매요청 초안) | |
 | schedule-event | [schedule-event.md](schedule-event.md) | 내 일정: 회의록 확정이 만든 일정과 사원이 직접 등록하는 일정 (문서에 없는 기능) | |
 | ai-research | [ai-research.md](ai-research.md) | 철강맨AI 심층 조사: 계획 → 웹 검색·읽기 반복 → 점검 → 인용 보고서 (이슈 #378, 문서에 없는 기능) | 김명재 |
