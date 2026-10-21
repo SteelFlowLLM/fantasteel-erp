@@ -3,7 +3,7 @@
 // 완료된 보고서: 마크다운을 제목·문단·목록 글로만 그리고, [n] 인용을 아래 출처 목록으로 잇는다.
 // 보고서·출처 제목은 웹에서 온 글이다. HTML로 넣지 않고(React 글), 눌러 열리는 링크는 모은 출처의 http·https 주소만 새 탭으로 연다.
 import type { AiResearchRunView } from '@fantasteel/shared';
-import { Fragment, useMemo } from 'react';
+import { Fragment, useMemo, type ReactNode } from 'react';
 import { Badge } from '@/components/Badge';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { reportBlocks, sourceRows, type ReportInline } from '@/lib/aiResearch';
@@ -46,7 +46,20 @@ const HEADING = ['text-lg font-semibold', 'text-base font-semibold', 'text-sm fo
  * report를 주면 그 판의 보고서를 그린다 (없으면 지금 보고서). 출처는 판과 상관없이 조사의 출처다 (출처는 늘기만 한다).
  * fallbackLabel은 보고서 LLM이 쓰지 못해 남긴 대체본 표시다 (이슈 #521). 다 쓴 보고서와 헷갈리지 않게 제목 옆에 둔다
  */
-export function AiResearchReport({ run, report = run.report, title = '보고서', fallbackLabel = null }: { run: AiResearchRunView; report?: string | null; title?: string; fallbackLabel?: string | null }) {
+export function AiResearchReport({
+  run,
+  report = run.report,
+  title = '보고서',
+  fallbackLabel = null,
+  actions,
+}: {
+  run: AiResearchRunView;
+  report?: string | null;
+  title?: string;
+  fallbackLabel?: string | null;
+  /** 제목 줄 오른쪽 버튼 (PDF·Notion 내보내기, 이슈 #521) */
+  actions?: ReactNode;
+}) {
   const blocks = useMemo(() => reportBlocks(report ?? '', run.sources), [report, run.sources]);
   const rows = useMemo(() => sourceRows(run.sources), [run.sources]);
   return (
@@ -63,6 +76,7 @@ export function AiResearchReport({ run, report = run.report, title = '보고서'
               title
             )
           }
+          actions={actions}
         />
         <CardBody className="gap-2.5 text-sm leading-relaxed">
           {blocks.length === 0 ? <p className="text-ink-3">보고서 내용이 없어요</p> : null}

@@ -6,8 +6,6 @@
 import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView, type AiResearchSeed } from '@fantasteel/shared';
 import { useState } from 'react';
 import { useShellStore } from '@/stores/useShellStore';
-import { useIntegrations } from '@/hooks/useIntegrations';
-import { isNotionExportReady, notionConnection, safeExternalUrl } from '@/lib/integrations';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -25,6 +23,8 @@ import { AiResearchReport } from '@/features/ai-research/AiResearchReport';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
 import { AiResearchCharts } from '@/features/ai-research/AiResearchCharts';
 import { AiResearchRevisions, AiResearchVersionPicker } from '@/features/ai-research/AiResearchRevisions';
+import { AiResearchReportExports, ResearchNotionLink } from '@/features/ai-research/AiResearchExport';
+import { AiResearchScheduleBanner, AiResearchScheduleModal } from '@/features/ai-research/AiResearchSchedule';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
@@ -73,32 +73,6 @@ function RunTimeline({ run }: { run: AiResearchRunView }) {
         body: line.detail ? <span className="text-cap whitespace-pre-line break-words text-ink-2">{line.detail}</span> : undefined,
       }))}
     />
-  );
-}
-
-/** 완료된 조사의 Notion 내보내기 (회의록과 같이: 연결·상위 페이지가 준비됐을 때만 버튼, 내보냈으면 링크) */
-function ResearchNotionExport({ run }: { run: AiResearchRunView }) {
-  const integrations = useIntegrations();
-  const exportToNotion = useAction(() => aiResearchApi.exportToNotion(run.id), { success: 'Notion으로 내보냈어요' });
-  const link = safeExternalUrl(run.notionPageUrl);
-  if (link) {
-    return (
-      <a
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink no-underline hover:border-[#a9b3be] hover:bg-surface-2"
-      >
-        <Icon name="share" size="sm" />
-        Notion에서 보기
-      </a>
-    );
-  }
-  if (!isNotionExportReady(notionConnection(integrations.data))) return null;
-  return (
-    <Button size="sm" icon="share" onClick={() => exportToNotion.mutate(undefined)} disabled={exportToNotion.isPending} aria-busy={exportToNotion.isPending}>
-      {exportToNotion.isPending ? 'Notion으로 보내는 중…' : 'Notion으로 내보내기'}
-    </Button>
   );
 }
 
@@ -167,7 +141,7 @@ function ReportWithVersions({ run }: { run: AiResearchRunView }) {
       {older !== null ? (
         version.data ? (
           <>
-            <AiResearchReport run={run} report={version.data.report} title={`보고서 · ${version.data.version}판`} />
+            <AiResearchReport run={run} report={version.data.report} title={`보고서 · ${version.data.version}판`} actions={<AiResearchReportExports run={run} version={older} />} />
             <AiResearchCharts run={run} charts={version.data.charts} />
           </>
         ) : version.isError ? (
@@ -177,7 +151,7 @@ function ReportWithVersions({ run }: { run: AiResearchRunView }) {
         )
       ) : (
         <>
-          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} fallbackLabel={reportFallbackLabel(run.reportFallback)} />
+          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} fallbackLabel={reportFallbackLabel(run.reportFallback)} actions={<AiResearchReportExports run={run} version={null} />} />
           <AiResearchCharts run={run} />
         </>
       )}
@@ -233,6 +207,7 @@ function RenameModal({ run, onClose }: { run: AiResearchRunView; onClose: () => 
 function Body({ run }: { run: AiResearchRunView }) {
   const { set } = useUrlParams();
   const [renaming, setRenaming] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const cancel = useAction(() => aiResearchApi.cancel(run.id), { success: '조사를 취소했어요' });
   const rerun = useAction(() => aiResearchApi.rerun(run.id), {
     success: (created) => (created.status === 'PLANNING' ? '같은 질문으로 계획을 다시 세우고 있어요' : '질문·계획을 복사했어요. 고친 뒤 시작해 주세요'),
@@ -262,13 +237,16 @@ function Body({ run }: { run: AiResearchRunView }) {
               </Button>
             ) : null}
             {run.status === 'COMPLETED' && run.report ? (
-              <>
-                <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
-                  이 보고서로 묻기
-                </Button>
-                <ResearchNotionExport run={run} />
-              </>
+              <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
+                이 보고서로 묻기
+              </Button>
             ) : null}
+            {run.status === 'COMPLETED' && run.plan && !run.schedule ? (
+              <Button size="sm" icon="refresh" title="정한 시각마다 같은 질문·계획으로 다시 조사해요" onClick={() => setScheduling(true)}>
+                반복 걸기
+              </Button>
+            ) : null}
+            <ResearchNotionLink run={run} />
             {canCancelRun(run.status) ? (
               <Button size="sm" variant="danger-outline" icon="x-circle" disabled={cancel.isPending} onClick={() => cancel.mutate(undefined)}>
                 취소
@@ -278,6 +256,7 @@ function Body({ run }: { run: AiResearchRunView }) {
         }
       />
       {renaming ? <RenameModal run={run} onClose={() => setRenaming(false)} /> : null}
+      {scheduling ? <AiResearchScheduleModal run={run} onClose={() => setScheduling(false)} /> : null}
       <Card className="flex-none">
         <CardBody>
           <b className="text-cap font-semibold text-ink-2">질문</b>
@@ -285,6 +264,7 @@ function Body({ run }: { run: AiResearchRunView }) {
           {run.seed ? <SeedDetails seed={run.seed} /> : null}
         </CardBody>
       </Card>
+      <AiResearchScheduleBanner run={run} onEdit={() => setScheduling(true)} />
 
       {run.status === 'PLANNING' ? (
         <Banner tone="run" icon="clock">

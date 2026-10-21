@@ -27,6 +27,12 @@ export function useAiResearchVersion(id: number, version: number | null) {
   });
 }
 
+/** 내 반복 목록 (이슈 #521) */
+export function useAiResearchSchedules() {
+  const me = useMe();
+  return useQuery({ queryKey: aiResearchKeys.schedules(me.employeeId), queryFn: aiResearchApi.schedules });
+}
+
 export function useAiResearchRun(id: number | null) {
   const me = useMe();
   const queryClient = useQueryClient();

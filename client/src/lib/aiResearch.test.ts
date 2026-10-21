@@ -1,6 +1,6 @@
 import type { AiResearchEventView, AiResearchPlan, AiResearchRunView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, revisionBlockReason, revisionTurns, versionLabel, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, reportFallbackLabel, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, revisionBlockReason, revisionTurns, versionLabel, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, reportFallbackLabel, nextRunPreview, researchPdfName, scheduleDraftOf, scheduleDraftProblem, scheduleInputOf, toggleWeekday, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
 
 const at = '2026-10-17T01:00:00.000Z';
 const sources = [
@@ -88,6 +88,7 @@ describe('타임라인', () => {
     const payload = { title: '계획', stepCount: 2, revision: 1, fallback: false };
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload: { ...payload, copiedFrom: 7 } }).title).toBe('조사 #7의 계획을 가져왔어요 · 2단계');
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload }).title).toBe('계획을 세웠어요 · 2단계');
+    expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload: { ...payload, copiedFrom: 7, scheduled: true } }).title).toBe('반복 차례라 조사 #7의 계획으로 시작했어요 · 2단계');
   });
   it('보고서 시간 초과 다시 시도와 대체본 보고서는 경고 톤으로 까닭을 보인다 (이슈 #521)', () => {
     const retry = timelineLineOf({ seq: 6, type: 'report.retry', createdAt: at, payload: { timeoutMinutes: 10 } });
@@ -253,5 +254,33 @@ describe('보고서 판·고치기 기록 (이슈 #418)', () => {
 describe('진행 글', () => {
   it('단계와 출처를 분모와 함께 보인다', () => {
     expect(progressText({ stepsUsed: 3, budget: { maxSteps: 8, maxSources: 20 }, sources: [sources[0]] })).toBe('3/8 단계 · 출처 1/20');
+  });
+});
+
+describe('반복 걸기 창 (이슈 #521)', () => {
+  it('처음 값은 지금 반복, 없으면 매일 09:00', () => {
+    expect(scheduleDraftOf(null)).toEqual({ frequency: 'DAILY', weekdays: [], time: '09:00' });
+    const schedule = { id: 1, runId: 3, title: '제목', frequency: 'WEEKLY' as const, weekdays: [1, 3], time: '18:30', enabled: true, nextRunAt: null, lastRunAt: null, lastRunId: null, lastSkipReason: null };
+    expect(scheduleDraftOf(schedule)).toEqual({ frequency: 'WEEKLY', weekdays: [1, 3], time: '18:30' });
+  });
+  it('요일 켜고 끄기·저장할 수 없는 까닭·보낼 값', () => {
+    expect(toggleWeekday([3, 1], 5)).toEqual([1, 3, 5]);
+    expect(toggleWeekday([1, 3], 3)).toEqual([1]);
+    expect(scheduleDraftProblem({ frequency: 'WEEKLY', weekdays: [], time: '09:00' })).toBe('반복할 요일을 하나 이상 골라 주세요');
+    expect(scheduleDraftProblem({ frequency: 'DAILY', weekdays: [], time: '' })).toBe('실행 시각을 골라 주세요');
+    expect(scheduleDraftProblem({ frequency: 'DAILY', weekdays: [2], time: '07:05' })).toBeNull();
+    // 매일로 바꾸면 고른 요일은 보내지 않는다
+    expect(scheduleInputOf({ frequency: 'DAILY', weekdays: [2], time: '07:05' })).toEqual({ frequency: 'DAILY', weekdays: [], time: '07:05' });
+  });
+  it('다음 실행 미리 보기는 서울 시각, 틀린 규칙이면 null', () => {
+    // 2026-10-22(목) 10:00 서울
+    const now = new Date('2026-10-22T01:00:00Z');
+    expect(nextRunPreview({ frequency: 'DAILY', weekdays: [], time: '09:00' }, now)).toBe('10-23 (금) 09:00');
+    expect(nextRunPreview({ frequency: 'WEEKLY', weekdays: [1], time: '08:00' }, now)).toBe('10-26 (월) 08:00');
+    expect(nextRunPreview({ frequency: 'WEEKLY', weekdays: [], time: '08:00' }, now)).toBeNull();
+  });
+  it('PDF 이름', () => {
+    expect(researchPdfName(12, 2)).toBe('심층조사-12-2판.pdf');
+    expect(researchPdfName(12, null)).toBe('심층조사-12.pdf');
   });
 });
