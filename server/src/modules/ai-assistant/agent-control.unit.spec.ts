@@ -212,3 +212,46 @@ describe('AgentControlRegistry (이슈 #425)', () => {
     expect(registry.size).toBe(0);
   });
 });
+
+describe('사람이 직접 조작하는 길 (이슈 #433)', () => {
+  const ID = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+  const typed = { kind: 'type', text: 'x' } as const;
+
+  it('gate.waiting은 동작 앞에서 실제로 기다리는 동안만 true이고, 멈추기만 눌렀을 때는 false다', async () => {
+    const gate = new AgentGate();
+    gate.command('pause');
+    expect(gate.paused).toBe(true);
+    expect(gate.waiting).toBe(false);
+    const state = track(gate.beforeAction(undefined, () => () => undefined));
+    await flush();
+    expect(gate.waiting).toBe(true);
+    gate.command('resume');
+    await flush();
+    expect(state.done).toBe(true);
+    expect(gate.waiting).toBe(false);
+  });
+
+  it('열쇠가 없거나, 브라우저가 없거나, 기다리는 중이 아니면 넣지 않고 이유를 돌려준다', async () => {
+    const registry = new AgentControlRegistry();
+    expect(await registry.humanInput(1, ID, typed)).toBe('none');
+    const control = registry.open(1, ID);
+    expect(await registry.humanInput(1, ID, typed)).toBe('no_browser');
+    const seen: unknown[] = [];
+    control.setHuman(async (input) => {
+      seen.push(input);
+      return 'ok';
+    });
+    expect(await registry.humanInput(1, ID, typed)).toBe('not_paused');
+    registry.command(1, ID, 'pause');
+    expect(await registry.humanInput(1, ID, typed)).toBe('not_paused');
+    const waiting = track(control.gate.beforeAction(undefined, () => () => undefined));
+    await flush();
+    expect(await registry.humanInput(1, ID, typed)).toBe('ok');
+    // 다른 사원은 남의 답에 넣을 수 없다
+    expect(await registry.humanInput(2, ID, typed)).toBe('none');
+    expect(seen).toEqual([typed]);
+    registry.command(1, ID, 'resume');
+    await flush();
+    expect(waiting.done).toBe(true);
+  });
+});

@@ -2,7 +2,7 @@
 import type { AiAssistantStreamEvent } from '@fantasteel/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aiAssistantApi } from '@/api/aiAssistant';
-import { bindBrowserSession, browserSessionIdFor, runAiAsk } from '@/hooks/useAiAssistant';
+import { bindBrowserSession, browserSessionIdFor, browserWindowSessionId, runAiAsk } from '@/hooks/useAiAssistant';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -47,6 +47,25 @@ describe('browserSessionIdFor · bindBrowserSession', () => {
     const created = browserSessionIdFor(123, false);
     expect(created).toMatch(UUID);
     expect(browserSessionIdFor(123, false)).toBe(created);
+  });
+});
+
+describe('browserWindowSessionId (이슈 #433)', () => {
+  it('새 대화에서 창을 먼저 열면 같은 열쇠를 다시 주고, 첫 질문이 새 열쇠로 바꾸지 않고 그 창을 이어 쓴다', () => {
+    const window = browserWindowSessionId(null);
+    expect(window).toMatch(UUID);
+    expect(browserWindowSessionId(null)).toBe(window);
+    expect(browserSessionIdFor(null, true)).toBe(window);
+    bindBrowserSession(61);
+    expect(browserSessionIdFor(61, false)).toBe(window);
+    // 대화가 생긴 뒤에 여는 창은 그 대화의 열쇠, 새 대화는 새 열쇠다
+    expect(browserWindowSessionId(61)).toBe(window);
+    expect(browserSessionIdFor(null, true)).not.toBe(window);
+  });
+
+  it('창을 열지 않았다면 새 대화의 첫 질문은 평소처럼 새 열쇠다', () => {
+    const before = browserSessionIdFor(null, true);
+    expect(browserSessionIdFor(null, true)).not.toBe(before);
   });
 });
 

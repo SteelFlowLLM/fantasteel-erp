@@ -10,6 +10,7 @@ import {
   type AiAssistantStreamEvent,
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
+  type AiBrowserWindowView,
   type AiAssistantToolTrace,
   type AiChatThreadRef,
   type AiWebSource,
@@ -17,6 +18,7 @@ import {
   type AiScreenActionResultInput,
   type AuthUser,
   type AiAgentControlCommand,
+  type AiAgentInput,
   AI_AGENT_PAUSE_MAX_MS,
   AI_AGENT_NOTES_MAX,
 } from '@fantasteel/shared';
@@ -47,7 +49,8 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AgentControlRegistry, type AgentGate } from './agent-control';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
-import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, effectiveStartSites } from './browser/browser-rules';
+import { BrowserUnavailableError } from './browser/browser-pool';
+import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, displayUrl, effectiveStartSites } from './browser/browser-rules';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
 import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
 import { AiNotionCardService } from './notion/ai-notion-card.service';
@@ -156,6 +159,40 @@ export class AiAssistantService {
   /** 답하는 동안 브라우저·화면 조작을 멈추거나 이어 간다 (이슈 #425). 묻는 사원 본인의 답하는 중인 열쇠만 */
   controlAgent(user: AuthUser, controlId: string, command: AiAgentControlCommand): void {
     if (!this.agentControls.command(user.employeeId, controlId, command)) throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+  }
+
+  /**
+   * 멈춘 동안 사람이 실시간 화면에서 서버 Chrome을 직접 조작한다 (이슈 #433). 묻는 사원 본인의 답하는 중인 열쇠만, 동작 앞에서 멈춰 기다리는 중일 때만.
+   * 입력한 글(비밀번호일 수 있다)은 저장하지도 로그에 남기지도 않는다 — 이 함수는 입력을 브라우저에 넘기기만 한다
+   */
+  async humanInput(user: AuthUser, controlId: string, input: AiAgentInput): Promise<void> {
+    const outcome = await this.agentControls.humanInput(user.employeeId, controlId, input);
+    if (outcome === 'none') throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+    if (outcome === 'no_browser') throw new AppException('COM-004', '브라우저를 쓰는 답에서만 직접 조작할 수 있어요');
+    if (outcome === 'not_paused') throw new AppException('COM-004', '멈춰서 기다리는 동안에만 직접 조작할 수 있어요');
+    if (outcome === 'closed') throw new AppException('COM-003', '브라우저 탭이 이미 닫혔어요');
+    if (outcome === 'blocked') throw new AppException('COM-004', '열 수 없는 주소로 이동해서 탭을 비웠어요');
+  }
+
+  /**
+   * 이 대화 열쇠의 빈 브라우저 탭을 미리 연다 (이슈 #433). 열쇠는 사원 번호와 묶는다(남의 탭을 쓰지 않게).
+   * 브라우저를 쓸 수 없으면 COM-004, 그 대화가 답하는 중이거나 서버 탭이 꽉 찼으면 COM-004(바쁨)
+   */
+  async openBrowserWindow(user: AuthUser, browserSessionId: string): Promise<AiBrowserWindowView> {
+    const availability = this.browserTools.capabilities();
+    if (!availability.available) throw new AppException('COM-004', availability.reason ?? '브라우저를 쓸 수 없어요');
+    const saved = await this.browserSettings.read();
+    try {
+      const outcome = await this.browserTools.openWindow(
+        { question: '', web: this.webTools.session(user.employeeId, { offerTools: false }), startSites: effectiveStartSites(saved.startSites), openAllSites: saved.openAllSites === true },
+        `${user.employeeId}:${browserSessionId}`,
+      );
+      if (outcome === 'busy') throw new AppException('COM-004', '지금은 브라우저가 바빠요. 답이 끝난 뒤나 잠시 뒤에 다시 눌러 주세요');
+      return { opened: outcome === 'opened' };
+    } catch (error) {
+      if (error instanceof BrowserUnavailableError) throw new AppException('COM-004', error.message);
+      throw error;
+    }
   }
 
   /** 답하는 중에 사용자가 말을 덧붙인다 (이슈 #430). 묻는 사원 본인의 답하는 중인 열쇠만 */
@@ -352,6 +389,9 @@ export class AiAssistantService {
         const drive: DriveToolSession | null = driveOn && streaming ? this.driveTools.session(visionOf) : null;
         const historySearch = historySource ? new HistorySearchSession(historySource) : null;
         const control = controlId && emit ? this.agentControls.open(user.employeeId, controlId) : null;
+        // 브라우저를 쓰는 답이면 멈춘 동안 사람이 같은 탭을 직접 조작할 수 있다 (이슈 #433)
+        const humanInput = browser?.humanInput?.bind(browser);
+        if (control && humanInput) control.setHuman(humanInput);
         const tools = [
           ...this.toolbox.definitions({ actionCards: input.actionCards }),
           ...(webSearch && web ? this.webTools.definitions() : []),
@@ -457,7 +497,16 @@ export class AiAssistantService {
                 // ERP 조회 결과의 거래처 이름은 이번 답의 웹 검색어로 내보내지 않는다
                 web?.observeErpResult(result.content);
               }
-              const trace = { name: toolCall.name, arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX), resultPreview: cut(result.content, TRACE_RESULT_MAX), durationMs: Date.now() - callStarted };
+              // 저장한 대화의 동작 기록에는 결과 글 대신 조회 대상·본 주소를 남긴다 (이슈 #433)
+              const seenUrl = browser?.has(toolCall.name) ? webSources?.find((source) => source.url)?.url : undefined;
+              const trace = {
+                name: toolCall.name,
+                arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX),
+                resultPreview: cut(result.content, TRACE_RESULT_MAX),
+                durationMs: Date.now() - callStarted,
+                ...(result.source?.label ? { label: result.source.label } : {}),
+                ...(seenUrl && displayUrl(seenUrl) ? { url: displayUrl(seenUrl) } : {}),
+              };
               toolCalls.push(trace);
               emit?.({ type: 'tool_end', id: traceId, label: result.source?.label ?? null, resultPreview: trace.resultPreview, durationMs: trace.durationMs, ...(webSources ? { webSources } : {}) });
               messages.push({ role: 'tool', toolCallId: toolCall.id, content: result.content });

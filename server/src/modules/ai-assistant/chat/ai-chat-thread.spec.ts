@@ -127,8 +127,8 @@ describe('저장한 대화 (이슈 #399)', () => {
       expect.objectContaining({ seq: 1, role: 'user', content: LONG_QUESTION, reasoning: 'high', webSearch: true }),
       expect.objectContaining({ seq: 2, role: 'assistant', id: done.thread!.assistantMessageId, content: done.reply.answer, sources: [{ kind: 'GLOSSARY', id: 'TRM-056', label: '예약' }], actionCards: [], reasoning: 'high', reasoningApplied: true }),
     ]);
-    // 생각 글·도구 기록은 저장하지 않는다
-    expect(JSON.stringify(thread.data)).not.toContain('생각 중');
+    // 생각 글은 답 meta에 함께 저장해 다시 열어도 '생각 과정'이 나온다 (이슈 #433)
+    expect(thread.data.messages[1]).toMatchObject({ thinking: '생각 중' });
   });
 
   it('threadId로 이어 물으면 DB의 지난 대화를 모델에 보내고 다음 순번으로 저장한다', async () => {

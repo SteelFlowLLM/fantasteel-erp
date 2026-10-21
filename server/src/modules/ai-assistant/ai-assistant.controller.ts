@@ -5,6 +5,7 @@ import type {
   AiAssistantReplyView,
   AiAssistantStreamEvent,
   AiAssistantSuggestedQuestionsView,
+  AiBrowserWindowView,
   AiChatThreadSummaryView,
   AiChatThreadView,
   AuthUser,
@@ -14,7 +15,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentNoteDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentInputDto, AgentNoteDto, BrowserWindowDto, ScreenActionResultDto, agentInputOf } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
@@ -112,6 +113,17 @@ export class AiAssistantController {
   }
 
   /**
+   * 멈춘 동안 사람이 실시간 화면을 눌러 서버 Chrome을 직접 조작 (문서에 없는 기능, 이슈 #433). 그 답을 물은 사원만 보낼 수 있고,
+   * 브라우저를 쓰는 답이 동작 앞에서 멈춰 기다리는 중일 때만 받는다. 입력한 글은 저장하지도 로그에 남기지도 않는다
+   */
+  @Post('ai-assistant/agent-control/:controlId/input')
+  @HttpCode(200)
+  async humanInput(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentInputDto): Promise<{ accepted: true }> {
+    await this.service.humanInput(user, controlId, agentInputOf(dto));
+    return { accepted: true };
+  }
+
+  /**
    * 답하는 중에 말 덧붙이기 (문서에 없는 기능, 이슈 #430). 서비스가 다음 모델 호출 앞에서 user 메시지로 넣는다.
    * 그 답을 물은 사원만 보낼 수 있고, 답하는 중인 열쇠가 없으면(이미 끝남) COM-003
    */
@@ -120,6 +132,16 @@ export class AiAssistantController {
   addAgentNote(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentNoteDto): { accepted: true } {
     this.service.addAgentNote(user, controlId, dto.text);
     return { accepted: true };
+  }
+
+  /**
+   * [브라우저 창 열기] (문서에 없는 기능, 이슈 #433). 이 대화 열쇠의 빈 브라우저 탭을 미리 열어 둔다. 서버 컴퓨터에 창이 뜨는 설정(BROWSER_HEADLESS=false)에서
+   * 사람이 창의 주소창에 직접 넣어 옮긴 페이지를 다음 질문의 AI가 '지금 페이지'로 안다. 열쇠는 사원 번호와 묶여 남의 탭은 쓰지 않는다
+   */
+  @Post('ai-assistant/browser/window')
+  @HttpCode(200)
+  openBrowserWindow(@CurrentUser() user: AuthUser, @Body() dto: BrowserWindowDto): Promise<AiBrowserWindowView> {
+    return this.service.openBrowserWindow(user, dto.browserSessionId);
   }
 
   /** 지금 모델이 사진·생각 정도를 지원하는지, 웹 검색 엔진·장소 검색·브라우저 사용을 쓸 수 있는지 (문서에 없는 기능, 2026-10-16 추가, 이슈 #367·#373) */

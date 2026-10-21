@@ -23,7 +23,7 @@ import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
-import { controlAiAgent, sendAiAgentNote, useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
+import { controlAiAgent, sendAiAgentInput, sendAiAgentNote, useAiCapabilities, useOpenBrowserWindow, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
@@ -675,6 +675,7 @@ export function AiPanel() {
             {reasoningOff ? null : <ReasoningPicker level={reasoning} oneShot={oneShot} onLevel={changeReasoning} onOneShot={changeOneShot} />}
             <WebSearchToggle on={webSearchOn} blocked={webSearchBlocked} hint={webSearchBlocked ? (capabilities.isError ? AI_WEB_SEARCH_UNAVAILABLE_HINT : webEngineHint) : webEngineHint} onChange={changeWebSearch} />
             <BrowserToggle on={browserOn} blockedReason={browserBlockedReason} onChange={changeBrowser} />
+            {browserOn && capabilities.data?.browser?.windowed ? <BrowserWindowButton disabled={pending} /> : null}
             {screenControlAvailable ? <ScreenControlToggle on={screenControlOn} onChange={changeScreenControl} /> : null}
             <NotionToggle on={notionOn} blockedReason={notionBlockedReason} onChange={changeNotion} />
             <DriveToggle on={driveOn} blockedReason={driveBlockedReason} onChange={changeDrive} />
@@ -854,6 +855,22 @@ function BrowserToggle({ on, blockedReason, onChange }: { on: boolean; blockedRe
       </button>
       <span id="ai-browser-hint">{blocked ? blockedReason : on ? AI_BROWSER_TITLE : ''}</span>
     </div>
+  );
+}
+
+/** 서버 컴퓨터에 Chrome 창이 뜨는 설정일 때: 이 대화의 빈 탭을 미리 열어 사람이 창의 주소창에 직접 주소를 넣게 한다 (이슈 #433) */
+function BrowserWindowButton({ disabled }: { disabled: boolean }) {
+  const open = useOpenBrowserWindow();
+  return (
+    <button
+      type="button"
+      disabled={disabled || open.isPending}
+      title="서버 컴퓨터에 브라우저 창을 열어요. 창의 주소창에 주소를 넣은 뒤 이어서 물으면 그 화면에서 해요"
+      onClick={() => open.mutate()}
+      className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-line-strong bg-surface px-2 text-cap text-ink-2 enabled:hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-55"
+    >
+      <Icon name="panel" size="sm" />브라우저 창 열기
+    </button>
   );
 }
 
@@ -1098,7 +1115,7 @@ function LiveAnswer({ live, seedKey }: { live: AiChatLive; seedKey: string }) {
     <div className="flex gap-3">
       <SteelmanAiStatus status={status} seedKey={stepKey} />
       <div className={`min-w-0 flex-1 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
-        <AiLiveView live={live} onControl={(command) => void controlAiAgent(command)} maxActions={maxActions} />
+        <AiLiveView live={live} onControl={(command) => void controlAiAgent(command)} onInput={(input) => void sendAiAgentInput(input)} maxActions={maxActions} />
       </div>
     </div>
   );

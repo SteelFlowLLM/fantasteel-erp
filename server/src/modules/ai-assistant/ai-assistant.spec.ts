@@ -1,4 +1,4 @@
-import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AuthUser } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AiAgentInput, type AuthUser } from '@fantasteel/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
@@ -332,7 +332,7 @@ describe('AiAssistantService', () => {
     expect(reply.answer).toBe('SS275 코일 가용재고는 12매예요.');
     expect(reply.sources[0]).toEqual({ kind: 'DATA', id: 'get_inventory', label: '재고 · SS275' });
     // AI 실행 기록: 부른 도구와 입력·결과 앞부분
-    expect(reply.toolCalls).toEqual([{ name: 'get_inventory', arguments: '{"keyword":"SS275"}', resultPreview: '{"제품":[]}', durationMs: expect.any(Number) }]);
+    expect(reply.toolCalls).toEqual([{ name: 'get_inventory', arguments: '{"keyword":"SS275"}', resultPreview: '{"제품":[]}', durationMs: expect.any(Number), label: '재고 · SS275' }]);
     expect(reply.thinking).toBeNull();
   });
 
@@ -775,6 +775,12 @@ describe('AiAssistantService', () => {
       let live: { url: string; imageBase64: string; at: string } | null = null;
       // markedImages를 받은 세션이 동작마다 모델용 사진을 돌려줄지 (이슈 #427)
       let modelImages = false;
+      // 멈춘 동안 사람이 보낸 조작과, 브라우저가 돌려줄 결과 (이슈 #433)
+      const humanInputs: AiAgentInput[] = [];
+      let humanOutcome: 'ok' | 'blocked' | 'closed' = 'ok';
+      // [브라우저 창 열기]가 받은 열쇠와 입력, 돌려줄 결과 (이슈 #433)
+      const windows: Array<{ key: string; input: BrowserSessionInput }> = [];
+      let windowOutcome: 'opened' | 'already' | 'busy' = 'opened';
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
         capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
@@ -807,11 +813,19 @@ describe('AiAssistantService', () => {
                 releases += 1;
               };
             },
+            humanInput: async (input: AiAgentInput) => {
+              humanInputs.push(input);
+              return humanOutcome;
+            },
           };
         },
         openPage: (key: string | null) => {
           openPageKeys.push(key);
           return openPage;
+        },
+        openWindow: async (input: BrowserSessionInput, key: string) => {
+          windows.push({ key, input });
+          return windowOutcome;
         },
         // 실제 모음은 열쇠가 있고 멈추지 않았으면 탭을 열어 두므로, 가짜는 닫지 않고 기록만 한다 (열쇠 없음·멈춤은 닫는다)
         finish: async (session: { close: () => Promise<void> }, key: string | null, aborted: boolean) => {
@@ -829,6 +843,10 @@ describe('AiAssistantService', () => {
         setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page),
         setLive: (frame: { url: string; imageBase64: string; at: string } | null) => void (live = frame),
         setModelImages: (on: boolean) => void (modelImages = on),
+        windows,
+        setWindowOutcome: (outcome: 'opened' | 'already' | 'busy') => void (windowOutcome = outcome),
+        humanInputs,
+        setHumanOutcome: (outcome: 'ok' | 'blocked' | 'closed') => void (humanOutcome = outcome),
         closed: () => closed,
         holds: () => holds,
         releases: () => releases,
@@ -870,6 +888,8 @@ describe('AiAssistantService', () => {
       expect(reply.answer).toBe('다음 쪽에 있어요 [3고로 소식](https://news.example.kr/a) 딴곳');
       expect(reply.webSources).toEqual([{ title: '3고로 소식', url: 'https://news.example.kr/a' }]);
       expect(browser.closed()).toBe(1);
+      // 저장한 대화의 동작 기록에 쓰도록 본 주소(쿼리 없는 호스트 + 경로)를 도구 기록에 담는다 (이슈 #433)
+      expect(reply.toolCalls).toEqual([expect.objectContaining({ name: 'browser_open', url: 'news.example.kr/a' })]);
     });
 
     describe('번호 붙은 화면 사진 (이슈 #427)', () => {
@@ -1028,6 +1048,41 @@ describe('AiAssistantService', () => {
       expect(second.calls[0].messages[0].content).toContain('바깥 웹 주소를 어디든 열 수 있어요');
       expect(second.calls[0].messages[0].content).not.toContain('시작 사이트(네이버·다음·위키백과·정부 go.kr 등)만 열 수 있어요');
       expect((await second.service.capabilities()).browser).toMatchObject({ available: true, maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: true });
+    });
+
+    describe('브라우저 창 열기 (이슈 #433)', () => {
+      const SESSION_ID = '3f2b8c1e-5d4a-4b7e-9a10-2c6d8e0f1a23';
+      const codeOf = async (promise: Promise<unknown>) => {
+        try {
+          await promise;
+          return 'ok';
+        } catch (error) {
+          return ((error as AppException).getResponse() as { code: string }).code;
+        }
+      };
+
+      it('사원 번호와 묶은 열쇠로 빈 탭을 열고, 이미 열려 있으면 새로 열지 않았다고 알린다', async () => {
+        const browser = fakeBrowser();
+        const { service } = setup({}, async () => answer(''), undefined, undefined, undefined, browser.toolbox);
+        expect(await service.openBrowserWindow(user, SESSION_ID)).toEqual({ opened: true });
+        expect(browser.windows.map((w) => w.key)).toEqual([`${user.employeeId}:${SESSION_ID}`]);
+        // 시작 사이트·모든 사이트 열기 설정은 답과 같은 값을 쓴다
+        expect(browser.windows[0].input).toMatchObject({ question: '', openAllSites: false });
+        browser.setWindowOutcome('already');
+        expect(await service.openBrowserWindow(user, SESSION_ID)).toEqual({ opened: false });
+      });
+
+      it('그 대화가 답하는 중이거나 탭이 꽉 찼으면(COM-004) 안내하고, 브라우저를 쓸 수 없어도 COM-004다', async () => {
+        const busy = fakeBrowser();
+        busy.setWindowOutcome('busy');
+        const first = setup({}, async () => answer(''), undefined, undefined, undefined, busy.toolbox);
+        expect(await codeOf(first.service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
+
+        const off = fakeBrowser(false);
+        const second = setup({}, async () => answer(''), undefined, undefined, undefined, off.toolbox);
+        expect(await codeOf(second.service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
+        expect(off.windows).toEqual([]);
+      });
     });
 
     describe('멈춤·한 단계·계속 (이슈 #425)', () => {
@@ -1268,6 +1323,74 @@ describe('AiAssistantService', () => {
           ref.service = service;
           await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
           expect(results).toEqual(['COM-003', ...Array(AI_AGENT_NOTES_MAX).fill('ok'), 'COM-004']);
+        });
+      });
+
+      describe('멈춘 동안 사람이 직접 조작 (이슈 #433)', () => {
+        const typed: AiAgentInput = { kind: 'type', text: 'hunter2' };
+        const codeOf = async (promise: Promise<unknown>) => {
+          try {
+            await promise;
+            return 'ok';
+          } catch (error) {
+            return ((error as AppException).getResponse() as { code: string }).code;
+          }
+        };
+
+        it('동작 앞에서 멈춰 기다리는 동안만 브라우저에 넣고, 계속하면 이어 간다. 입력한 글은 이벤트·답·모델 메시지 어디에도 없다', async () => {
+          const results: string[] = [];
+          const { events, browser, calls, reply } = await run([open, answer('봤어요')], (_nth, _tool, service) => {
+            void (async () => {
+              results.push(await codeOf(service.humanInput(user, CONTROL_ID, { kind: 'click', x: 0.5, y: 0.25 })));
+              results.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              service.controlAgent(user, CONTROL_ID, 'resume');
+            })();
+          });
+          expect(results).toEqual(['ok', 'ok']);
+          expect(browser.humanInputs).toEqual([{ kind: 'click', x: 0.5, y: 0.25 }, typed]);
+          expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'browser_frame', 'tool_end']);
+          for (const text of [JSON.stringify(events), JSON.stringify(reply), JSON.stringify(calls.map((c) => c.messages))]) expect(text).not.toContain('hunter2');
+        });
+
+        it('멈추지 않았거나(하던 동작 중) 답이 끝났거나 남의 답이면 넣지 않는다', async () => {
+          const codes: string[] = [];
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service } = setup(
+            {},
+            async (_call, index) => {
+              if (index === 0) {
+                codes.push(await codeOf(ref.service!.humanInput(user, CONTROL_ID, typed)));
+                codes.push(await codeOf(ref.service!.humanInput({ ...user, employeeId: 2 }, CONTROL_ID, typed)));
+              }
+              return answer('네');
+            },
+            undefined,
+            undefined,
+            undefined,
+            browser.toolbox,
+          );
+          ref.service = service;
+          await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          // 멈추기 전(COM-004), 다른 사원(COM-003)
+          expect(codes).toEqual(['COM-004', 'COM-003']);
+          expect(await codeOf(service.humanInput(user, CONTROL_ID, typed))).toBe('COM-003');
+          expect(browser.humanInputs).toEqual([]);
+        });
+
+        it('탭이 닫혔거나(COM-003) 열 수 없는 주소로 가서 비웠으면(COM-004) 알린다', async () => {
+          const codes: string[] = [];
+          const browser = fakeBrowser();
+          await run([open, answer('봤어요')], (_nth, _tool, service) => {
+            void (async () => {
+              browser.setHumanOutcome('closed');
+              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              browser.setHumanOutcome('blocked');
+              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              service.controlAgent(user, CONTROL_ID, 'resume');
+            })();
+          }, { browser });
+          expect(codes).toEqual(['COM-003', 'COM-004']);
         });
       });
 

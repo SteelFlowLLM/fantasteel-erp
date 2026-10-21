@@ -444,6 +444,31 @@ describe('저장한 대화 (이슈 #399)', () => {
     ]);
   });
 
+  it('저장한 생각 글·도구 동작 기록으로 생각 과정을 되살린다 (이슈 #433)', () => {
+    const entries = aiChatEntriesFromThread({
+      ...THREAD,
+      messages: [
+        THREAD.messages[0],
+        {
+          ...(THREAD.messages[1] as Extract<AiChatThreadView['messages'][number], { role: 'assistant' }>),
+          thinking: '재고를 먼저 본다',
+          trace: [
+            { name: 'get_inventory', arguments: '{"item":"SS275"}', durationMs: 40, label: '재고 · SS275' },
+            { name: 'browser_open', arguments: '{"url":"https://a.example.kr/x"}', durationMs: 900, url: 'a.example.kr/x' },
+            { name: 'browser_click', arguments: '{"ref":"r9"}', durationMs: 5, error: '막았어요' },
+          ],
+        },
+      ],
+    });
+    const answer = entries[1];
+    expect(answer.role === 'assistant' && answer.steps).toEqual([
+      { kind: 'thinking', text: '재고를 먼저 본다', startedAt: 0, endedAt: 0 },
+      { kind: 'tool', id: 'saved-12-0', name: 'get_inventory', arguments: '{"item":"SS275"}', result: { label: '재고 · SS275', resultPreview: '', durationMs: 40 } },
+      { kind: 'tool', id: 'saved-12-1', name: 'browser_open', arguments: '{"url":"https://a.example.kr/x"}', result: { label: 'a.example.kr/x', resultPreview: '', durationMs: 900 } },
+      { kind: 'tool', id: 'saved-12-2', name: 'browser_click', arguments: '{"ref":"r9"}', result: { label: null, resultPreview: '{"오류":"막았어요"}', durationMs: 5 } },
+    ]);
+  });
+
   it('대화를 열면 그 대화로 바꾸고, 답을 기다리는 중이면 열지 않는다', () => {
     store().openThread(THREAD);
     expect(store().threadId).toBe(5);

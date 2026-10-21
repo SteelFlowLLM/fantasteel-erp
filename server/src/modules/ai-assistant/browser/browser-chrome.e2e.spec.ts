@@ -43,6 +43,11 @@ async function serveFixtures(context: BrowserContext) {
         );
       // 누르면 글만 바뀌고 이동하지 않는 버튼: 보이는 마우스가 그 자리에 남아 있어야 한다 (이슈 #425)
       if (url.pathname === '/cursor') return html(`<!doctype html><title>cursor</title><button id="b" onclick="this.textContent = '눌렀어요'">누르기</button>`);
+      // 사람이 직접 조작하는 페이지 (이슈 #433): 칸·로그인 버튼(AI는 못 누른다)·사내 주소로 가는 버튼이 정해진 자리에 있다
+      if (url.pathname === '/human')
+        return html(
+          `<!doctype html><title>human</title><input aria-label="칸" style="position:absolute;left:100px;top:100px;width:300px;height:40px" onkeydown="if (event.key === 'Enter') document.title = 'sent:' + this.value"><button style="position:absolute;left:100px;top:200px;width:200px;height:50px" onclick="location.href='/login'">로그인</button><button style="position:absolute;left:100px;top:300px;width:200px;height:50px" onclick="location.href='/redirect'">사내로</button><div style="height:3000px"></div>`,
+        );
       // PDF·문서 링크가 있는 페이지 (이슈 #427). 노란 표가 잘 보이게 글자만 둔다
       if (url.pathname === '/docs')
         return html(
@@ -129,6 +134,15 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     });
   const until = async (done: () => boolean, ms = 6_000) => {
     for (const start = Date.now(); !done() && Date.now() - start < ms; ) await new Promise((r) => setTimeout(r, 100));
+  };
+
+  /** 비동기로 읽는 값이 want가 될 때까지 잠깐 기다린다 (못 되면 마지막 값으로 실패) */
+  const settles = async <T>(read: () => Promise<T>, want: T, ms = 4_000): Promise<void> => {
+    for (const start = Date.now(); Date.now() - start < ms; ) {
+      if ((await read()) === want) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(await read()).toBe(want);
   };
 
   afterAll(() => pool.shutdown());
@@ -292,15 +306,15 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     expect(pool.activeContexts).toBe(0);
   });
 
-  it('누르기 전에 보이는 마우스를 그리고, 이동 없는 클릭 뒤에도 그 마우스가 화면 사진에 남는다 (이슈 #425)', async () => {
+  it('페이지를 열면 마우스를 그리고, 누르기 전에 요소로 움직이며, 이동 없는 클릭 뒤에도 그 마우스가 화면 사진에 남는다 (이슈 #425, #433)', async () => {
     const session = toolbox().session({ question: 'https://example.test/cursor 눌러줘', web: web() });
     try {
       const opened = await session.run(call('browser_open', { url: 'https://example.test/cursor' }));
-      // 읽기·열기만으로는 마우스를 그리지 않는다
       const page = contexts.at(-1)?.pages()[0];
       if (!page) throw new Error('페이지 없음');
       const cursorCount = () => page.evaluate('document.querySelectorAll(\'[id$="-cursor"]\').length');
-      expect(await cursorCount()).toBe(0);
+      // 새 문서가 뜨면 누르기 전에도 마우스가 있다 (그리는 일은 문서가 뜬 뒤 따로 돈다)
+      await settles(cursorCount as () => Promise<unknown>, 1);
 
       const clicked = await session.run(call('browser_click', { ref: refOf(opened, 'button "누르기"') }));
       expect(clicked.content).toContain('눌렀어요');
@@ -323,7 +337,7 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
       expect((await session.run(call('browser_snapshot'))).content).not.toMatch(/-cursor|f97316/);
 
       // 화면 사진에 주황(#f97316) 마우스가 찍혔다: 브라우저 밖의 빈 탭에서 JPEG를 풀어 주황 픽셀을 센다.
-      // 누르기 전 사진에는 없던 주황이 누른 뒤 사진에 생겼는지 견준다 (화살표가 작아 픽셀 수의 절대값은 타이밍에 따라 달라진다)
+      // 누른 뒤 사진에 주황이 있다 (화살표가 작아 픽셀 수의 절대값은 타이밍에 따라 달라진다)
       const decoder = await (page.context().browser() as NonNullable<ReturnType<BrowserContext['browser']>>).newContext();
       try {
         const blank = await decoder.newPage();
@@ -342,7 +356,6 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
             for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] > 70 && data[i + 1] < 170 && data[i + 2] < 100) count += 1;
             return count;
           })()`)) as number;
-        expect(await orangeIn(opened.frame?.imageBase64 ?? '')).toBe(0);
         expect(await orangeIn(clicked.frame?.imageBase64 ?? '')).toBeGreaterThanOrEqual(5);
       } finally {
         await decoder.close();
@@ -350,6 +363,127 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     } finally {
       await session.close();
     }
+  });
+
+  it('페이지를 옮겨도 마지막 자리에 마우스를 다시 그리고, 클릭 없이 스크롤만 해도 보인다 (이슈 #433)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/cursor 눌러 보고 https://example.test/page/2 로 가줘', web: web() });
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/cursor' }));
+      const page = contexts.at(-1)?.pages()[0];
+      if (!page) throw new Error('페이지 없음');
+      const cursorAt = () =>
+        page.evaluate(`(() => {
+          const host = document.documentElement.querySelector(':scope > [id$="-cursor"]');
+          const arrow = host && host.shadowRoot && host.shadowRoot.querySelector('.c');
+          return arrow ? arrow.style.transform : null;
+        })()`);
+      await session.run(call('browser_click', { ref: refOf(opened, 'button "누르기"') }));
+      const clickedAt = await cursorAt();
+      expect(clickedAt).toMatch(/^translate\(\d+px, ?\d+px\)$/);
+
+      // 새 문서에는 마우스가 없지만, 뜬 뒤에 마지막 자리에 다시 그린다
+      await session.run(call('browser_open', { url: 'https://example.test/page/2' }));
+      await settles(cursorAt as () => Promise<unknown>, clickedAt);
+
+      // 긴 페이지를 클릭 없이 스크롤해도 마우스가 있다 (position: fixed라 스크롤을 따라가지 않는다)
+      await session.run(call('browser_scroll', { direction: 'down' }));
+      expect(await cursorAt()).toBe(clickedAt);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('멈춘 동안 사람이 누르기·글·키·스크롤을 보내면 AI 규칙(로그인 버튼) 없이 하되 사내 주소는 막고, AI에게 직접 조작했다고 알린다 (이슈 #433)', async () => {
+    const box = toolbox();
+    const session = box.session({ question: 'https://example.test/human 열어줘', web: web() }, 'human');
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/human' }));
+      const page = contexts.at(-1)?.pages()[0];
+      if (!page) throw new Error('페이지 없음');
+      // 칸 가운데(250,120)를 눌러 초점을 주고 글과 Enter를 보낸다. 사진의 비율(1280x800 기준)로 보낸다
+      expect(await session.humanInput({ kind: 'click', x: 250 / 1280, y: 120 / 800 })).toBe('ok');
+      expect(await session.humanInput({ kind: 'type', text: '가나 abc' })).toBe('ok');
+      expect(await session.humanInput({ kind: 'key', key: 'Enter' })).toBe('ok');
+      expect(await page.evaluate('document.title')).toBe('sent:가나 abc');
+      expect(await session.humanInput({ kind: 'scroll', deltaY: 600 })).toBe('ok');
+      await settles(() => page.evaluate('Math.round(window.scrollY)') as Promise<number>, 600);
+
+      // AI의 다음 화면 읽기에 안내가 붙고 한 번만 붙는다. 옛 번호로 누르려 하면 먼저 다시 읽으라고 한다
+      const stale = await session.run(call('browser_click', { ref: refOf(opened, 'textbox "칸"') }));
+      expect(errorOf(stale)).toBe('사용자가 직접 조작했어요. 화면이 바뀌었을 수 있어요');
+      expect((await session.run(call('browser_snapshot'))).content).not.toContain('직접 조작했어요');
+      await session.humanInput({ kind: 'scroll', deltaY: -100 });
+      expect((await session.run(call('browser_snapshot'))).content).toContain('(사용자가 직접 조작했어요. 화면이 바뀌었을 수 있어요)');
+      expect((await session.run(call('browser_snapshot'))).content).not.toContain('직접 조작했어요');
+
+      // AI는 못 누르는 로그인 버튼도 사람은 누른다. 사람이 옮긴 페이지는 지금 페이지로 기억해 다음 질문에 알린다
+      await session.run(call('browser_scroll', { direction: 'up' }));
+      expect(await session.humanInput({ kind: 'click', x: 200 / 1280, y: 225 / 800 })).toBe('ok');
+      expect(served).toContain('GET /login');
+      await box.finish(session, 'human', false);
+      expect(box.openPage('human')?.url).toBe('https://example.test/login');
+    } finally {
+      await session.close();
+    }
+
+    // 사내 주소로 가는 버튼은 사람이 눌러도 프록시가 막고, 탭을 비운다
+    const second = toolbox().session({ question: 'https://example.test/human 열어줘', web: web() });
+    try {
+      await second.run(call('browser_open', { url: 'https://example.test/human' }));
+      expect(await second.humanInput({ kind: 'click', x: 200 / 1280, y: 325 / 800 })).toBe('blocked');
+      expect(internalHits.filter((hit) => hit.startsWith('/meta'))).toEqual([]);
+      expect(contexts.at(-1)?.pages()[0]?.url()).toBe('about:blank');
+    } finally {
+      await second.close();
+    }
+    // 닫힌 세션에는 보내지 못한다
+    expect(await second.humanInput({ kind: 'key', key: 'Enter' })).toBe('closed');
+    expect(pool.activeContexts).toBe(0);
+  });
+
+  it('빈 탭을 미리 열어 두면 사람이 주소창에 넣어 옮긴 페이지를 다음 질문이 지금 페이지로 알고 다시 열 수 있다 (이슈 #433)', async () => {
+    const box = toolbox();
+    const link = web();
+    expect(await box.openWindow({ question: '', web: link }, 'win')).toBe('opened');
+    expect(pool.activeContexts).toBe(1);
+    // 아직 아무 페이지도 없다. 이미 열려 있으면 그대로 둔다
+    expect(box.openPage('win')).toBeNull();
+    expect(await box.openWindow({ question: '', web: link }, 'win')).toBe('already');
+    expect(pool.activeContexts).toBe(1);
+
+    // 사람이 창의 주소창에 넣어 옮긴 것을 흉내 낸다 (AI 동작이 아니다)
+    const page = contexts.at(-1)?.pages()[0];
+    if (!page) throw new Error('페이지 없음');
+    await page.goto('https://example.test/page/2?q=secret', { waitUntil: 'domcontentloaded' });
+    await until(() => box.openPage('win') !== null, 3_000);
+    expect(box.openPage('win')).toEqual({ title: '2쪽', url: 'https://example.test/page/2?q=secret' });
+    expect(link.visited).toContain('https://example.test/page/2?q=secret');
+
+    // 다음 질문은 그 탭을 이어 받고, 질문·웹 결과에 없던 그 주소도 browser_open으로 다시 열 수 있다
+    const next = web();
+    const second = box.session({ question: '이 화면에서 해 줘', web: next }, 'win');
+    try {
+      expect(next.visited).toContain('https://example.test/page/2?q=secret');
+      const snapshot = await second.run(call('browser_snapshot'));
+      expect(snapshot.content).toContain('두 번째 쪽이에요');
+      const reopened = await second.run(call('browser_open', { url: 'https://example.test/page/2?q=secret' }));
+      expect(reopened.content).toContain('두 번째 쪽이에요');
+      // 그 열쇠로 답하는 중에는 새 탭을 만들지 않는다
+      expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('busy');
+    } finally {
+      await box.finish(second, 'win', true);
+    }
+    expect(pool.activeContexts).toBe(0);
+
+    // 닫힌 탭은 이미 열려 있는 것으로 보지 않고 새로 연다
+    expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('opened');
+    await contexts.at(-1)?.pages()[0]?.close();
+    await until(() => pool.activeContexts === 0, 3_000);
+    expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('opened');
+    const reopenedPage = contexts.at(-1)?.pages()[0];
+    expect(reopenedPage?.url()).toBe('about:blank');
+    await box.finish(box.session({ question: '닫아줘', web: web() }, 'win'), 'win', true);
+    expect(pool.activeContexts).toBe(0);
   });
 
   it('PDF 링크는 번호로 읽고, 모델용 사진에만 노란 번호 표가 있고 사람에게 보내는 사진·실시간 화면에는 없다 (이슈 #427)', async () => {

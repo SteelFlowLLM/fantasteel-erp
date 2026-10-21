@@ -137,6 +137,13 @@ export interface AiBrowserCapabilities {
   maxActions?: number;
   /** 관리자가 '모든 사이트 열기'를 켰는지 (이슈 #430). 켜면 목록 밖 주소도 연다 */
   openAllSites?: boolean;
+  /** 서버 컴퓨터에 Chrome 창이 뜨는지(BROWSER_HEADLESS=false). 그때만 [브라우저 창 열기]로 사람이 창 주소창에 직접 넣을 수 있다 (이슈 #433) */
+  windowed?: boolean;
+}
+
+/** POST /ai-assistant/browser/window 결과 (이슈 #433). opened: 새로 열었다, 이미 열려 있던 탭이면 false */
+export interface AiBrowserWindowView {
+  opened: boolean;
 }
 
 /** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
@@ -244,6 +251,10 @@ export interface AiAssistantToolTrace {
   /** 도구가 돌려준 결과의 앞부분 */
   resultPreview: string;
   durationMs: number;
+  /** 조회 도구가 데이터를 조회한 대상 이름 (예: 재고 · SS275). 저장한 대화의 동작 기록에 쓴다 (이슈 #433) */
+  label?: string;
+  /** 브라우저 도구가 본 페이지 주소 (호스트 + 경로, 쿼리·#조각 없음, 이슈 #433) */
+  url?: string;
 }
 
 export interface AiAssistantReplyView {
@@ -252,7 +263,7 @@ export interface AiAssistantReplyView {
   /** 답한 모델 id */
   model: string;
   latencyMs: number;
-  /** 부른 조회 도구 (부른 순서). 서버에 저장하지 않고 이 답에만 담는다 */
+  /** 부른 조회 도구 (부른 순서). 저장한 대화에는 짧게 줄여 AiChatMessageView.trace로 남긴다 (이슈 #433) */
   toolCalls: AiAssistantToolTrace[];
   /** 추론 모델이 마지막 답 앞에 쓴 생각 글. 없으면 null */
   thinking: string | null;
@@ -585,7 +596,21 @@ export interface AiChatSavedCard {
   result?: AiActionCardExecuteResult['registered'];
 }
 
-/** 저장한 질문·답 한 줄. 생각 글·도구 기록·사진·브라우저 화면 사진은 저장하지 않는다 */
+/**
+ * 저장한 답에 남기는 도구 동작 한 번 (이슈 #433). 도구 결과 글(페이지 글·조회 데이터)은 저장하지 않고,
+ * 짧은 입력과 조회 대상(label)·본 주소(url)·실패 이유(error)만 남긴다
+ */
+export interface AiChatTraceStep {
+  name: string;
+  /** 모델이 넘긴 입력 JSON의 앞부분 */
+  arguments: string;
+  durationMs: number;
+  label?: string;
+  url?: string;
+  error?: string;
+}
+
+/** 저장한 질문·답 한 줄. 도구 결과 글·사진·브라우저 화면 사진·사람이 직접 넣은 글은 저장하지 않는다 */
 export type AiChatMessageView =
   | {
       id: number;
@@ -615,6 +640,10 @@ export type AiChatMessageView =
       /** 질문에 보낸 생각 정도와 모델에 보냈는지 (질문에 생각 정도를 보냈을 때만) */
       reasoning?: AiReasoningLevel;
       reasoningApplied?: boolean;
+      /** 모델이 쓴 생각 글 (이미 잘린 것, 이슈 #433) */
+      thinking?: string;
+      /** 도구 동작 기록 (부른 순서, 이슈 #433) */
+      trace?: AiChatTraceStep[];
     };
 
 /** 대화 하나 (GET ai-assistant/threads/:id). 메시지는 순번 순서 */
@@ -642,6 +671,25 @@ export type AiAgentControlCommand = (typeof AI_AGENT_CONTROL_COMMANDS)[number];
 export interface AiAgentControlInput {
   command: AiAgentControlCommand;
 }
+
+/**
+ * 멈춘 동안 사람이 패널의 실시간 화면에서 서버 Chrome으로 직접 보내는 조작 (이슈 #433).
+ * click의 x·y는 화면 사진의 가로·세로 비율(0~1)이라 사진이 어떤 크기로 보여도 같다. 입력한 글은 서버에 저장하지도 로그에 남기지도 않는다
+ */
+export const AI_AGENT_INPUT_KINDS = ['click', 'type', 'key', 'scroll'] as const;
+export type AiAgentInputKind = (typeof AI_AGENT_INPUT_KINDS)[number];
+/** 사람이 보낼 수 있는 키 (글자는 type으로) */
+export const AI_AGENT_INPUT_KEYS = ['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'] as const;
+export type AiAgentInputKey = (typeof AI_AGENT_INPUT_KEYS)[number];
+/** 한 번에 넣는 글 길이와 스크롤 거리(화면 픽셀) 상한 (가정값) */
+export const AI_AGENT_INPUT_TEXT_MAX = 500;
+export const AI_AGENT_INPUT_SCROLL_MAX = 1600;
+
+export type AiAgentInput =
+  | { kind: 'click'; x: number; y: number }
+  | { kind: 'type'; text: string }
+  | { kind: 'key'; key: AiAgentInputKey }
+  | { kind: 'scroll'; deltaY: number };
 
 /** 답하는 중에 덧붙이는 말 (이슈 #430). 한 답에 받는 수와 한 번의 길이 상한 (가정값) */
 export const AI_AGENT_NOTES_MAX = 5;

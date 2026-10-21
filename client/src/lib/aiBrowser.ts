@@ -119,6 +119,13 @@ export function browserActionCount(steps: readonly { kind: string; name?: string
   ).length;
 }
 
+/** 화면 사진에서 눌린 자리를 사진의 가로·세로 비율(0~1)로. 사진 크기가 0이면 null (이슈 #433). 서버가 이 비율을 Chrome 화면 좌표로 바꾼다 */
+export function pointFraction(rect: { left: number; top: number; width: number; height: number }, clientX: number, clientY: number): { x: number; y: number } | null {
+  if (!(rect.width > 0) || !(rect.height > 0)) return null;
+  const clamp = (value: number) => Math.min(1, Math.max(0, value));
+  return { x: clamp((clientX - rect.left) / rect.width), y: clamp((clientY - rect.top) / rect.height) };
+}
+
 /** 접힌 보기 제목: "브라우저로 본 화면 3장" */
 export const browserFramesSummary = (count: number): string => `브라우저로 본 화면 ${count}장`;
 

@@ -1,5 +1,5 @@
 import { Logger, type OnModuleDestroy } from '@nestjs/common';
-import { isAiAssistantBrowserTool, type AiAssistantStreamEvent, type AiBrowserCapabilities, type AiWebSource } from '@fantasteel/shared';
+import { isAiAssistantBrowserTool, type AiAgentInput, type AiAssistantStreamEvent, type AiBrowserCapabilities, type AiWebSource } from '@fantasteel/shared';
 import type { Browser, BrowserContext, CDPSession, Locator, Page } from 'playwright-core';
 import { randomBytes } from 'node:crypto';
 import { LlmAbortedError, type LlmImage, type LlmToolCall, type LlmToolDefinition } from '../../llm/llm.client';
@@ -207,6 +207,11 @@ export interface BrowserToolSessionLike {
   close(): Promise<void>;
   /** 사용자가 멈춘 동안 이 답의 시간 제한을 세지 않는다. 돌려준 함수를 부르면 남은 시간부터 다시 센다 (이슈 #425) */
   holdDeadline?(): () => void;
+  /**
+   * 멈춘 동안 사람이 보낸 조작을 이 탭에 넣는다 (이슈 #433). AI의 차단 규칙(로그인·결제 등)은 적용하지 않는다(사람이 직접 하는 일이다).
+   * 사내 주소 차단·프록시는 그대로이고, 열 수 없는 주소로 갔으면 탭을 비우고 'blocked'. 입력한 글은 저장하거나 기록하지 않는다
+   */
+  humanInput?(input: AiAgentInput): Promise<'ok' | 'blocked' | 'closed'>;
 }
 
 /** 브라우저 세션이 웹 세션에서 쓰는 것: 열어도 되는 주소, 본 페이지 기억, 회사 안 정보 막기, 문서 읽기(이슈 #427) */
@@ -252,6 +257,8 @@ export interface BrowserOpenPage {
  */
 export class AssistantBrowserToolbox implements OnModuleDestroy {
   private readonly parked = new Map<string, { session: BrowserToolSession; timer: NodeJS.Timeout }>();
+  /** 답하는 중인 열쇠. 그동안 [브라우저 창 열기]는 같은 열쇠에 새 탭을 만들지 않는다 (이슈 #433) */
+  private readonly inUse = new Set<string>();
 
   constructor(
     private readonly pool: BrowserPool,
@@ -268,6 +275,7 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
 
   /** 열쇠의 열어 둔 탭이 있으면 그 세션을 이어 쓰고, 없으면 새 세션 */
   session(input: BrowserSessionInput, key: string | null = null): BrowserToolSession {
+    if (key) this.inUse.add(key);
     const kept = key ? this.parked.get(key) : undefined;
     if (key && kept) {
       clearTimeout(kept.timer);
@@ -288,6 +296,7 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
    * 쉬는 탭도 서버 전체 탭 수(2개)를 차지하므로, 새 탭이 필요하면 가장 오래 쉰 탭부터 닫는다(closeOldestParked)
    */
   async finish(session: BrowserToolSessionLike, key: string | null, aborted: boolean): Promise<void> {
+    if (key) this.inUse.delete(key);
     if (!key || aborted || !(session instanceof BrowserToolSession) || !session.park()) {
       await session.close();
       return;
@@ -297,12 +306,52 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
       clearTimeout(previous.timer);
       void previous.session.close();
     }
+    this.parked.set(key, { session, timer: this.keepTimer(key, session) });
+    // 쉬는 동안 사람이 창에서 페이지를 옮기면 그 시점부터 다시 센다 (이슈 #433)
+    session.onHumanActivity = () => {
+      const kept = this.parked.get(key);
+      if (kept?.session !== session || session.tooOld()) return;
+      clearTimeout(kept.timer);
+      kept.timer = this.keepTimer(key, session);
+    };
+  }
+
+  private keepTimer(key: string, session: BrowserToolSession): NodeJS.Timeout {
     const timer = setTimeout(() => {
       if (this.parked.get(key)?.session === session) this.parked.delete(key);
       void session.close();
     }, BROWSER_KEEP_MS);
     timer.unref();
-    this.parked.set(key, { session, timer });
+    return timer;
+  }
+
+  /**
+   * 대화 열쇠의 빈 탭을 미리 열어 둔다 (이슈 #433): 사람이 창의 주소창에 직접 넣어 옮긴 페이지를 다음 질문의 AI가 '지금 페이지'로 안다.
+   * 이미 열어 둔 탭이 있으면 그대로 두고 'already', 그 열쇠로 답하는 중이거나 서버 탭이 꽉 찼으면 'busy'. Chrome을 쓸 수 없으면 BrowserUnavailableError
+   */
+  async openWindow(input: BrowserSessionInput, key: string): Promise<'opened' | 'already' | 'busy'> {
+    if (this.inUse.has(key)) return 'busy';
+    const kept = this.parked.get(key);
+    if (kept?.session.isOpen()) {
+      clearTimeout(kept.timer);
+      kept.timer = this.keepTimer(key, kept.session);
+      return 'already';
+    }
+    const session = new BrowserToolSession(this.pool, input, this.options, () => this.closeOldestParked());
+    this.inUse.add(key);
+    try {
+      if (!(await session.openBlank())) {
+        await session.close();
+        return 'busy';
+      }
+      await this.finish(session, key, false);
+      return 'opened';
+    } catch (error) {
+      await session.close();
+      throw error;
+    } finally {
+      this.inUse.delete(key);
+    }
   }
 
   /** 가장 오래 쉰 탭 하나를 닫는다. 닫았으면 true */
@@ -340,6 +389,9 @@ function failure(reason: string, extra: Record<string, unknown> = {}): BrowserTo
   return { content: JSON.stringify({ 오류: reason, ...extra }), frame: null, webSources: [], failed: true };
 }
 
+/** 사람이 멈춘 동안 직접 조작했을 때 AI에게 알리는 말 (이슈 #433) */
+export const HUMAN_TOUCHED = '사용자가 직접 조작했어요. 화면이 바뀌었을 수 있어요';
+
 const blocked = (reason: string) => failure(`막았어요: ${reason}`, { 안내: USER_MUST_DO_IT });
 
 /** 한 답 동안의 브라우저: 컨텍스트 하나(시크릿), 페이지 하나, 요소 번호 장부, 횟수·시간 */
@@ -365,6 +417,13 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private closed: 'time' | 'abort' | 'done' | null = null;
   /** 보이는 마우스의 마지막 자리 (페이지를 옮겨도 이어서 움직인다) */
   private cursor: { x: number; y: number } = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
+  /** AI가 이 탭을 쓰는 동안은 새 문서가 뜰 때마다 마우스를 마지막 자리에 다시 그린다 (이슈 #433) */
+  private cursorActive = false;
+  /** AI가 동작을 하는 중인지. 아닐 때(멈춘 동안·쉬는 탭) 일어난 이동은 사람이 한 것이라 현재 페이지로 기억한다 (이슈 #433) */
+  private acting = 0;
+  /** 사람이 직접 조작한 뒤 AI에게 아직 알리지 못했는지, 사람 조작을 차례로 넣는 줄 */
+  private humanTouched = false;
+  private humanQueue: Promise<unknown> = Promise.resolve();
   /** 실시간 화면을 찍는 중인지 */
   private live = false;
   /** 모델용 번호 표를 그려 둔 동안(과 지운 뒤 잠깐)은 실시간 화면 사진을 버린다 */
@@ -396,6 +455,24 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     return isAiAssistantBrowserTool(name);
   }
 
+  /** 쉬는 탭에서 사람이 페이지를 옮겼을 때 부른다 (열어 두는 시간을 다시 세려고, 이슈 #433) */
+  onHumanActivity: (() => void) | null = null;
+
+  /** 탭이 아직 열려 있는지 */
+  isOpen(): boolean {
+    return this.page !== null && !this.closed && !this.page.isClosed();
+  }
+
+  /** 한 탭을 쓰는 최대 시간을 넘었는지 */
+  tooOld(): boolean {
+    return Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS;
+  }
+
+  /** 빈 탭만 연다. 서버 탭이 꽉 찼으면 false (이슈 #433) */
+  async openBlank(): Promise<boolean> {
+    return (await this.ensurePage()) !== null;
+  }
+
   /** 지금 보고 있는 페이지 (열어 둔 탭을 다음 질문에 알릴 때) */
   currentPage(): BrowserOpenPage | null {
     return this.page && !this.closed ? this.lastPage : null;
@@ -408,6 +485,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   park(): boolean {
     if (!this.page || this.closed || this.page.isClosed() || Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS) return false;
     this.input.signal?.removeEventListener('abort', this.onAbort);
+    this.cursorActive = false;
     void this.stopLive();
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadlineTimer = null;
@@ -419,6 +497,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   attach(input: BrowserSessionInput): boolean {
     if (!this.page || this.closed || this.page.isClosed()) return false;
     this.input = input;
+    this.onHumanActivity = null;
     for (const key of questionUrlKeys(input.question)) this.questionUrls.add(key);
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
     this.actions = 0;
@@ -429,6 +508,44 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     this.notes.push('지난 질문에서 연 페이지를 이어서 써요');
     void this.startLive(this.page);
     return true;
+  }
+
+  humanInput(input: AiAgentInput): Promise<'ok' | 'blocked' | 'closed'> {
+    const task = this.humanQueue.catch(() => undefined).then(() => this.applyHumanInput(input));
+    this.humanQueue = task;
+    return task;
+  }
+
+  private async applyHumanInput(input: AiAgentInput): Promise<'ok' | 'blocked' | 'closed'> {
+    const page = this.page;
+    if (!page || this.closed || page.isClosed()) return 'closed';
+    switch (input.kind) {
+      case 'click': {
+        const to = { x: Math.round(input.x * VIEWPORT.width), y: Math.round(input.y * VIEWPORT.height) };
+        await page.mouse.click(to.x, to.y);
+        // 누른 자리를 화면 사진에서 알아보게 마우스를 그 자리에 둔다
+        this.cursor = to;
+        await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, to, to, true)).catch(() => undefined);
+        break;
+      }
+      case 'type':
+        await page.keyboard.type(input.text);
+        break;
+      case 'key':
+        await page.keyboard.press(input.key);
+        break;
+      case 'scroll':
+        await page.mouse.move(this.cursor.x, this.cursor.y);
+        await page.mouse.wheel(0, input.deltaY);
+        break;
+    }
+    // 사람이 한 일이 새 페이지를 불렀을 수 있으니 잠깐 기다린 뒤, 열 수 없는 주소면 비운다
+    await page.waitForTimeout(SETTLE_MS);
+    this.refs.startDocument();
+    this.humanTouched = true;
+    this.repeats.reset();
+    const unsafe = await this.closeIfUnsafe(page);
+    return unsafe ? 'blocked' : 'ok';
   }
 
   holdDeadline(): () => void {
@@ -472,9 +589,17 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     const counted = call.name !== 'browser_snapshot';
     if (counted && this.actions >= this.maxActions) return failure(`이번 질문에서는 브라우저 동작을 ${this.maxActions}번까지만 해요`, { 안내: '지금까지 본 내용으로 답해요' });
     if (counted) this.actions += 1;
-    const result = await this.dispatch(call, args, signal);
-    if (counted && result.failed) this.actions -= 1;
-    return result;
+    this.cursorActive = true;
+    // 사람이 넣던 조작이 끝난 뒤에 이어 간다
+    await this.humanQueue.catch(() => undefined);
+    this.acting += 1;
+    try {
+      const result = await this.dispatch(call, args, signal);
+      if (counted && result.failed) this.actions -= 1;
+      return result;
+    } finally {
+      this.acting -= 1;
+    }
   }
 
   private timeLimitText(): string {
@@ -483,6 +608,12 @@ export class BrowserToolSession implements BrowserToolSessionLike {
 
   private async dispatch(call: LlmToolCall, args: Record<string, unknown>, signal?: AbortSignal): Promise<BrowserToolResult> {
     try {
+      // 사람이 직접 조작해 화면이 바뀌었으면 옛 번호로 누르지 않고 먼저 다시 읽게 한다
+      const usesRef = call.name === 'browser_click' || call.name === 'browser_type' || (call.name === 'browser_read_file' && args.ref !== undefined && args.ref !== null && args.ref !== '');
+      if (this.humanTouched && usesRef) {
+        this.humanTouched = false;
+        return failure(HUMAN_TOUCHED, { 안내: 'browser_snapshot으로 지금 화면을 다시 읽고 새 번호를 써요' });
+      }
       switch (call.name) {
         case 'browser_open':
           return await this.open(requiredString(args, 'url', 2000));
@@ -499,6 +630,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
         case 'browser_scroll': {
           const direction = optionalEnum(args, 'direction', ['down', 'up'] as const) ?? 'down';
           return await this.withPage(async (page) => {
+            // 클릭 없이 스크롤만 해도 마우스가 보이게
+            await this.drawCursor(page);
             await page.evaluate(`window.scrollBy(0, ${(direction === 'down' ? 1 : -1) * Math.round(VIEWPORT.height * 0.8)})`);
             return this.afterAction(page);
           });
@@ -716,7 +849,14 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     });
     page.on('download', (download) => void download.cancel().catch(() => undefined));
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) this.refs.startDocument();
+      if (frame !== page.mainFrame()) return;
+      this.refs.startDocument();
+      void this.rememberHumanPage(page);
+    });
+    // 새 문서는 마우스가 없으므로 뜬 뒤에 마지막 자리에 다시 그린다
+    page.on('domcontentloaded', () => {
+      if (this.cursorActive && this.page === page) void this.drawCursor(page);
+      void this.rememberHumanPage(page);
     });
     // 탭이 밖에서 닫히면(창을 띄웠을 때 사람이 닫는 등) 그 컨텍스트를 놓고, 다음 열기가 새 탭을 연다
     page.on('close', () => void this.dropPage(page));
@@ -852,6 +992,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     const notes: string[] = [];
     if (this.blockedRequests.length) notes.push(`(브라우저가 이 페이지의 요청 ${this.blockedRequests.length}개를 막았어요: ${[...new Set(this.blockedRequests)].slice(0, 3).join(' / ')})`);
     if (this.fileChooserBlocked) notes.push('(파일 고르기 창은 막았어요. 파일 올리기는 사용자가 직접 해야 해요)');
+    if (this.humanTouched) notes.push(`(${HUMAN_TOUCHED})`);
+    this.humanTouched = false;
     notes.push(...this.notes.map((note) => `(${note})`));
     this.blockedRequests = [];
     this.fileChooserBlocked = false;
@@ -883,6 +1025,32 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, this.cursor, to, true));
       this.cursor = to;
       await page.waitForTimeout(CURSOR_MOVE_MS);
+    } catch (error) {
+      this.logger.debug(`마우스를 그리지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+    }
+  }
+
+  /**
+   * AI가 동작하는 중이 아닐 때 탭이 옮겨 간 페이지는 사람이 연 것이다(창의 주소창·멈춘 동안의 조작) (이슈 #433).
+   * 지금 페이지로 기억하고 열기 허용 목록에 넣어, 다음 질문의 "이 화면에서 해 줘"가 되게 한다. AI가 연 페이지는 동작이 끝난 뒤 따로 기억한다
+   */
+  private async rememberHumanPage(page: Page): Promise<void> {
+    if (this.acting > 0 || this.page !== page || this.closed) return;
+    const url = page.url();
+    if (!/^https?:/i.test(url)) return;
+    const title = cutText(stripInvisible(await page.title().catch(() => '')), TITLE_MAX);
+    if (this.acting > 0 || this.page !== page || this.closed || page.url() !== url) return;
+    const key = urlKey(url);
+    if (key) this.visited.add(key);
+    this.lastPage = { title: title || displayUrl(url), url };
+    this.input.web.rememberVisited(url, this.lastPage.title);
+    this.onHumanActivity?.();
+  }
+
+  /** 움직이지 않고 마지막 자리에 마우스를 그린다. 못 그려도 동작은 그대로 한다 */
+  private async drawCursor(page: Page): Promise<void> {
+    try {
+      await this.evaluateIsolated(page, cursorScript(`${this.attr}-cursor`, this.cursor, this.cursor, false));
     } catch (error) {
       this.logger.debug(`마우스를 그리지 못했어요: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
     }

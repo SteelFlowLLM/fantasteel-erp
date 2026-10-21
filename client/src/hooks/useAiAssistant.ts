@@ -2,7 +2,7 @@
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
 // 대화는 서버가 저장한다(이슈 #399): 질문에 대화 id를 보내면 서버가 지난 대화를 DB에서 읽고, 답이 끝나면 질문과 답을 저장한다.
-import type { AiAgentControlCommand, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiAgentControlCommand, AiAgentInput, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
@@ -10,6 +10,7 @@ import { isAbortError } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { readAiChatThread, writeAiChatThread } from '@/lib/aiChatThread';
 import { useMe } from '@/hooks/useMe';
+import { hideAiCursor } from '@/lib/aiCursor';
 import { currentScreenMap, runUiAction, useAiScreenControlStore } from '@/lib/aiScreenAgent';
 import { AI_CHAT_STOPPED_REASON, newAiChatId, useAiChatStore } from '@/stores/useAiChatStore';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
@@ -84,6 +85,22 @@ export async function controlAiAgent(command: AiAgentControlCommand): Promise<vo
 }
 
 /**
+ * 멈춘 동안 실시간 화면에서 서버 Chrome을 직접 조작한다 (이슈 #433). 보냈으면 true, 아니면 이유를 알리고 false.
+ * 입력한 글은 이 탭 메모리에도 남기지 않는다(비밀번호일 수 있다) — 보내는 즉시 버린다
+ */
+export async function sendAiAgentInput(input: AiAgentInput): Promise<boolean> {
+  const control = useAiChatStore.getState().live?.control;
+  if (!control) return false;
+  try {
+    await aiAssistantApi.sendAgentInput(control.id, input);
+    return true;
+  } catch (error) {
+    toast.error(errorMessageOf(error));
+    return false;
+  }
+}
+
+/**
  * 답하는 중에 말을 덧붙인다 (이슈 #430). 브라우저·화면 조작을 켠 답(열쇠가 있는 답)이 진행 중일 때만 보낼 수 있다.
  * 보냈으면 true, 보낼 수 없거나 실패했으면 false (실패하면 이유를 알린다)
  */
@@ -115,6 +132,8 @@ async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui
  */
 const browserKeys = new Map<number, string>();
 let newConversationKey: string | null = null;
+/** 새 대화의 열쇠를 [브라우저 창 열기]가 먼저 만들었는지. 그 창을 첫 질문이 이어 쓰도록 첫 질문에서 새 열쇠로 바꾸지 않는다 (이슈 #433) */
+let keyFromWindow = false;
 
 export function browserSessionIdFor(threadId: number | null, firstQuestion: boolean): string {
   if (threadId !== null) {
@@ -122,7 +141,16 @@ export function browserSessionIdFor(threadId: number | null, firstQuestion: bool
     browserKeys.set(threadId, known);
     return known;
   }
-  if (firstQuestion || newConversationKey === null) newConversationKey = crypto.randomUUID();
+  if ((firstQuestion && !keyFromWindow) || newConversationKey === null) newConversationKey = crypto.randomUUID();
+  keyFromWindow = false;
+  return newConversationKey;
+}
+
+/** [브라우저 창 열기]가 쓰는 열쇠: 질문이 쓸 열쇠와 같다. 새 대화면 첫 질문이 이 열쇠를 이어 쓴다 (이슈 #433) */
+export function browserWindowSessionId(threadId: number | null): string {
+  if (threadId !== null) return browserSessionIdFor(threadId, false);
+  if (newConversationKey === null) newConversationKey = crypto.randomUUID();
+  keyFromWindow = true;
   return newConversationKey;
 }
 
@@ -131,6 +159,14 @@ export function bindBrowserSession(threadId: number): void {
   if (newConversationKey === null || browserKeys.has(threadId)) return;
   browserKeys.set(threadId, newConversationKey);
   newConversationKey = null;
+  keyFromWindow = false;
+}
+
+/** [브라우저 창 열기]: 이 대화의 빈 탭을 미리 열어 둔다. 서버 컴퓨터에 창이 뜨면 거기 주소창에 주소를 넣은 뒤 이어서 물을 수 있다 (이슈 #433) */
+export function useOpenBrowserWindow() {
+  return useAction(() => aiAssistantApi.openBrowserWindow(browserWindowSessionId(useAiChatStore.getState().threadId)), {
+    success: (view) => (view.opened ? '브라우저 창을 열었어요. 창의 주소창에 주소를 넣은 뒤 "이 화면에서 해 줘"라고 물어보세요' : '브라우저 창이 이미 열려 있어요'),
+  });
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
@@ -168,7 +204,10 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     chat().addFailure(questionId, question, controller.signal.aborted || isAbortError(error) ? AI_CHAT_STOPPED_REASON : errorMessageOf(error));
   } finally {
     unsubscribe();
-    if (screenControl) useAiScreenControlStore.getState().setRunning(false);
+    if (screenControl) {
+      useAiScreenControlStore.getState().setRunning(false);
+      hideAiCursor();
+    }
     if (activeController === controller) activeController = null;
   }
 }

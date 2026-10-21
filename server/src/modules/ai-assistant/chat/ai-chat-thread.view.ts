@@ -12,6 +12,7 @@ import {
   type AiChatMessageView,
   type AiChatSavedCard,
   type AiChatThreadSummaryView,
+  type AiChatTraceStep,
   type AiReasoningLevel,
   type AiWebSource,
 } from '@fantasteel/shared';
@@ -97,9 +98,51 @@ export function questionMeta(input: AiChatQuestionInput): Record<string, string 
   return Object.keys(meta).length ? meta : null;
 }
 
-/** 답의 생각 정도 안내: 질문에 생각 정도를 보냈을 때만 남긴다 (화면의 '생각 정도를 바꾸지 못했어요' 안내용) */
-export function answerMeta(reasoning: AiReasoningLevel | undefined, reply: Pick<AiAssistantReplyView, 'reasoningApplied'>): Record<string, string | boolean> | null {
-  return reasoning ? { reasoning, reasoningApplied: reply.reasoningApplied } : null;
+/** 저장하는 도구 동작 기록의 상한 (이슈 #433). 동작이 많은 브라우저 답도 한 줄이 수십 KB를 넘지 않게 */
+export const TRACE_STEPS_MAX = 60;
+const TRACE_ARGUMENTS_MAX = 200;
+const TRACE_TEXT_MAX = 200;
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/** 도구가 실패했을 때 결과의 {"오류":"…"} 속 이유. 실패가 아니면 null */
+function failureReason(resultPreview: string): string | null {
+  const found = /^\{"오류":"((?:[^"\\]|\\.)*)/.exec(resultPreview);
+  if (!found) return null;
+  try {
+    return String(JSON.parse(`"${found[1]}"`));
+  } catch {
+    return found[1];
+  }
+}
+
+/** 답을 만들며 부른 도구를 저장할 만큼만 줄인다. 결과 글(페이지 글·조회 데이터)은 빼고 조회 대상·본 주소·실패 이유만 남긴다 */
+export function traceStepsOf(toolCalls: AiAssistantReplyView['toolCalls']): AiChatTraceStep[] {
+  return toolCalls.slice(0, TRACE_STEPS_MAX).map((call) => {
+    const error = failureReason(call.resultPreview);
+    return {
+      name: call.name,
+      arguments: clip(call.arguments, TRACE_ARGUMENTS_MAX),
+      durationMs: call.durationMs,
+      ...(call.label ? { label: clip(call.label, TRACE_TEXT_MAX) } : {}),
+      ...(call.url ? { url: clip(call.url, TRACE_TEXT_MAX) } : {}),
+      ...(error ? { error: clip(error, TRACE_TEXT_MAX) } : {}),
+    };
+  });
+}
+
+/**
+ * 답의 meta: 질문에 보낸 생각 정도 안내(화면의 '생각 정도를 바꾸지 못했어요'), 생각 글, 도구 동작 기록 (이슈 #433).
+ * 다시 연 대화에서도 '생각 과정 보기'가 나오게 한다. 이 중 하나도 없으면 null
+ */
+export function answerMeta(reasoning: AiReasoningLevel | undefined, reply: Pick<AiAssistantReplyView, 'reasoningApplied' | 'thinking' | 'toolCalls'>): Record<string, unknown> | null {
+  const trace = traceStepsOf(reply.toolCalls);
+  const meta = {
+    ...(reasoning ? { reasoning, reasoningApplied: reply.reasoningApplied } : {}),
+    ...(reply.thinking ? { thinking: reply.thinking } : {}),
+    ...(trace.length ? { trace } : {}),
+  };
+  return Object.keys(meta).length ? meta : null;
 }
 
 export const readyCards = (cards: readonly AiActionCard[]): AiChatSavedCard[] => cards.map((card) => ({ card, status: 'ready' }));
@@ -131,6 +174,7 @@ export function toChatMessageView(row: MessageRow): AiChatMessageView {
     };
   }
   const webSources = Array.isArray(row.webSources) ? (row.webSources as AiWebSource[]) : null;
+  const trace = savedTraceOf(meta.trace);
   return {
     id: row.id,
     seq: row.seq,
@@ -141,12 +185,33 @@ export function toChatMessageView(row: MessageRow): AiChatMessageView {
     ...(webSources ? { webSources } : {}),
     actionCards: savedCardsOf(row.actionCards),
     ...(reasoning ? { reasoning, reasoningApplied: meta.reasoningApplied === true } : {}),
+    ...(typeof meta.thinking === 'string' && meta.thinking ? { thinking: meta.thinking } : {}),
+    ...(trace.length ? { trace } : {}),
   };
 }
 
 // 이 서버가 저장한 JSON이라 모양을 믿되, 비었거나 배열이 아니면 빈 것으로 본다
 function savedCardsOf(value: unknown): AiChatSavedCard[] {
   return Array.isArray(value) ? (value as AiChatSavedCard[]) : [];
+}
+
+// 이 서버가 저장한 JSON이라 모양을 믿되, 깨진 줄은 건너뛴다
+function savedTraceOf(value: unknown): AiChatTraceStep[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): AiChatTraceStep[] => {
+    const step = objectOf(item);
+    if (typeof step.name !== 'string' || typeof step.arguments !== 'string' || typeof step.durationMs !== 'number') return [];
+    return [
+      {
+        name: step.name,
+        arguments: step.arguments,
+        durationMs: step.durationMs,
+        ...(typeof step.label === 'string' ? { label: step.label } : {}),
+        ...(typeof step.url === 'string' ? { url: step.url } : {}),
+        ...(typeof step.error === 'string' ? { error: step.error } : {}),
+      },
+    ];
+  });
 }
 
 function objectOf(value: unknown): Record<string, unknown> {
