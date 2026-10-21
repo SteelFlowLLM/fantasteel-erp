@@ -126,3 +126,7 @@
 | 히트 미판정 연주 | 진행은 허용, 미합격 하위 제품 사용 차단(16장 제안) | [04] 16장 |
 | ~~`/lots/rejected` 경로~~ ✅ 해결 | 명세 경로 하나로 둔다(2026-10-06 결정). `app.module.ts`에서 QualityModule을 LotModule보다 먼저 등록해 `lots/:id`보다 먼저 잡힌다. `rejected-lot.routes.spec.ts`가 확인 | `app.module.ts`, `rejected-lot.controller.ts` |
 | 측정값 수정 이벤트 | 수정 전용 이벤트 유형이 없다. INSPECTION_REGISTERED에 before/after로 남길지 확인 | [06] BUSINESS_EVENT_TYPE |
+
+## 9. 측정값 수정과 출고 확정이 겹칠 때 (2026-10-21, #487)
+
+- 측정값 수정은 그 LOT(히트면 하위 제품까지)의 출하 배정(확정·소진)이 걸린 출하요청을 id 순으로 잠그고, LOT을 id 순으로 잠근 뒤(`lockLotsForInspectionUpdate.sql`) 발행된 밀시트를 확인한다. 출고 확정(출하요청 → … → LOT 출고·밀시트 발행)과 같은 순서라, 출고 확정이 진행 중이면 끝나기를 기다렸다가 발행된 밀시트를 보고 COM-004로 막는다. 전에는 출고 확정이 커밋되기 전에 확인을 통과해 발행된 밀시트와 다른 측정값이 남을 수 있었다.

@@ -9,7 +9,7 @@ import {
   type LotType,
 } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { findLotEligibility } from '../../generated/prisma/sql';
+import { findLotEligibility, lockLotsForInspectionUpdate, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 export interface QualityInspectionListFilter {
@@ -213,6 +213,20 @@ export class QualityRepository {
         },
       },
     });
+  }
+
+  /**
+   * 측정값 수정 잠금 (#487). 출고 확정과 같은 순서로 잠근다: 이 LOT들의 출하 배정(확정·소진)이 걸린 출하요청(id 순) → LOT(id 순).
+   * 출하요청을 먼저 잡아 출고 확정(출하요청 → … → LOT)과 서로 기다리지 않게 한다
+   */
+  async lockForInspectionUpdate(tx: Tx, lotIds: number[]): Promise<void> {
+    const allocations = await tx.allocation.findMany({
+      where: { lotId: { in: lotIds }, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: { in: [ALLOCATION_STATUS.CONFIRMED, ALLOCATION_STATUS.CONSUMED] } },
+      select: { shipmentRequestItem: { select: { shipmentRequestId: true } } },
+    });
+    const requestIds = [...new Set(allocations.flatMap((a) => (a.shipmentRequestItem ? [a.shipmentRequestItem.shipmentRequestId] : [])))].sort((a, b) => a - b);
+    for (const id of requestIds) await tx.$queryRawTyped(lockShipmentRequest(id));
+    await tx.$queryRawTyped(lockLotsForInspectionUpdate(lotIds));
   }
 
   /**

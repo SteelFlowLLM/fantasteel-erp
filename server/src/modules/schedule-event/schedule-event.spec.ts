@@ -96,6 +96,11 @@ describe('GET /schedule-events', () => {
     expect(titles(body.data)).toEqual(['다음 주 월요일 자정']);
   });
 
+  it('범위 전에 시작해 걸치는 일정(일 23:30~월 00:30)도 다음 주에 보인다 (#487)', async () => {
+    const { body } = await get<ScheduleEventView[]>('/schedule-events?from=2026-11-09&to=2026-11-15', purchaseCookie);
+    expect(titles(body.data)).toEqual(['일요일 밤', '다음 주 월요일 자정']);
+  });
+
   it('from만 주면 7일, 아무것도 없으면 이번 주 (오류 없이 배열)', async () => {
     const week = await get<ScheduleEventView[]>('/schedule-events?from=2026-11-02', salesCookie);
     expect(titles(week.body.data)).toEqual(['월요일 오전', '수요일 아침']);
@@ -143,6 +148,13 @@ describe('내 일정 직접 등록·수정 (POST·PATCH /schedule-events, 2026-1
     expect(new Date(res.body.data.startAt).toISOString()).toBe('2026-11-03T05:00:00.000Z');
     expect(titles((await get<ScheduleEventView[]>('/schedule-events?from=2026-11-02&to=2026-11-08', salesCookie)).body.data)).toContain('거래처 미팅');
     expect(titles((await get<ScheduleEventView[]>('/schedule-events?from=2026-11-02&to=2026-11-08', outsiderCookie)).body.data)).not.toContain('거래처 미팅');
+  });
+
+  it('시간대가 없는 시각은 서울 시각으로 읽는다 (서버 시간대와 상관없이, #487)', async () => {
+    const res = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, input('시간대 없는 일정', '2026-11-03T14:00:00', '2026-11-03T15:00'));
+    expect(res.status).toBe(201);
+    created.push(res.body.data.id);
+    expect(res.body.data).toMatchObject({ startAt: '2026-11-03T05:00:00.000Z', endAt: '2026-11-03T06:00:00.000Z' });
   });
 
   it('빈 메모는 없는 것으로, 끝이 시작과 같거나 앞이면 COM-004, 제목이 비면 COM-004', async () => {

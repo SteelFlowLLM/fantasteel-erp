@@ -253,6 +253,8 @@ export class QualityService {
       if (!inspection) throw new AppException('COM-003', '검사를 찾을 수 없어요');
       const { lot, inspectionStandard: standard } = inspection;
 
+      // 출고 확정과 겹쳐도 '밀시트 발행 뒤 수정 차단'이 뚫리지 않게 LOT을 잠근 뒤 발행 여부를 본다 (#487)
+      await this.repository.lockForInspectionUpdate(tx, lockScopeLotIds(lot));
       const millSheetNos = await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(lot));
       if (millSheetNos.length) {
         // [04] 9.3에 전용 코드가 없어 입력 에러로 돌려준다 (2026-10-04 결정)
