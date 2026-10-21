@@ -51,11 +51,12 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 | --- | --- | --- | --- | --- | --- |
 | API-284 발주 취소 | `POST /purchase-orders/:id/cancel` | PURCHASE_ORDER_CONFIRM (USE) | 입고 누계 0 (CONFIRMED) | 발주 CANCELLED, 연결 구매요청 ORDER_CANCELLED. 발주 상세를 돌려준다 | 입고가 있으면 PUR-004, 이미 취소·마감이면 COM-001 |
 | API-285 발주 잔량 마감 | `POST /purchase-orders/:id/close` | PURCHASE_ORDER_CONFIRM (USE) | 일부 입고 (PARTIALLY_RECEIVED) | 발주 CLOSED, 남은 양은 MRP 입고예정에서 빠진다. 발주 상세를 돌려준다 | 입고가 없거나 전량 입고면 PUR-005 |
-| API-286 입고 취소 | `POST /goods-receipts/:id/cancel` | GOODS_RECEIPT_CONFIRM (USE) | 그 입고의 원료 LOT을 쓰지 않음 (투입·배정 없음, 잔량 = 처음 양) | 음수 입고 1행(`reversedGoodsReceiptId` = 원래 입고)과 원료 LOT RECEIPT_CANCELLED·잔량 0, 발주 상태는 입고 누계로 되돌림. 취소 행을 돌려준다 | LOT을 썼으면 PUR-006, 취소·마감된 발주면 PUR-007, 이미 취소면 COM-001 |
+| API-286 입고 취소 | `POST /goods-receipts/:id/cancel` | GOODS_RECEIPT_CONFIRM (USE) | 그 입고의 원료 LOT을 쓰지 않음 (투입·배정 없음, 잔량 = 처음 양) | 음수 입고 1행(`reversedGoodsReceiptId` = 원래 입고)과 원료 LOT RECEIPT_CANCELLED·잔량 0, 발주 상태는 입고 누계로 되돌림(잔량 마감한 발주는 CLOSED 그대로 입고 누계만 줄임). 취소 행을 돌려준다 | LOT을 썼으면 PUR-006, 이미 취소면 COM-001 |
 
-- 상태는 조건부 UPDATE로 바꾼다. 입고 확정과 겹치면 한쪽만 반영되고, 진 쪽은 COM-001(취소·마감) 또는 PUR-007(입고 확정)이다.
+- 권한: 발주 취소·잔량 마감은 발주 권한, 입고 취소는 입고 확정 권한(입고를 되돌리는 일). 권한이 없으면 403 COM-002, 사유가 없거나 500자를 넘으면 400 COM-004.
+- 상태는 조건부 UPDATE로 바꾼다. 입고 확정과 겹치면 한쪽만 반영되고, 진 쪽은 COM-001(취소·마감) 또는 PUR-007(입고 확정)이다. 입고 취소와 그 원료를 쓰는 제선 실적이 겹치면 한쪽만 반영된다(진 쪽은 PUR-006 또는 원료 부족 INV-001).
 - 취소·마감된 발주에는 입고하지 않는다(입고 확정 PUR-007).
-- 응답: 발주(`PurchaseOrderView`)에 `totalClosedTon`·품목 `closedTon`(닫은 양, 취소·마감한 발주는 미입고량 0)과 `statusChange`(사유·사원·시각), 입고(`GoodsReceiptView`)에 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`(취소 행)·`reversalGoodsReceiptNo`(취소된 원래 입고)·`cancelReason`.
+- 응답: 발주(`PurchaseOrderView`)에 `totalClosedTon`·품목 `closedTon`(닫은 양, 취소·마감한 발주는 미입고량 0)과 `statusChange`(사유·사원·시각), 입고(`GoodsReceiptView`)에 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`(취소 행)·`reversalGoodsReceiptNo`(취소된 원래 입고)·`cancelReason`과 `purchaseOrderStatus`·`lotStatus`·`isCancellable`(지금 입고 취소할 수 있는지, 화면 단추용).
 
 ## 메신저 실시간 이벤트 (WebSocket)
 

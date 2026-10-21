@@ -18,7 +18,7 @@ const requisitionInclude = {
  * 발주 취소(ORDER_CANCELLED)된 요청과 잔량 마감한 발주의 요청은 더 들어올 원료가 없어 막지 않는다 (BP-PUR-02, 이슈 #500)
  */
 const OPEN_REQUISITION_STATUSES: PurchaseRequisitionStatus[] = [PURCHASE_REQUISITION_STATUS.WAITING_APPROVAL, PURCHASE_REQUISITION_STATUS.APPROVED, PURCHASE_REQUISITION_STATUS.ORDERED];
-export const ON_CLOSED_PURCHASE_ORDER: Prisma.PurchaseRequisitionWhereInput = { purchaseOrderItem: { is: { purchaseOrder: { is: { purchaseOrderStatus: PURCHASE_ORDER_STATUS.CLOSED } } } } };
+const ON_CLOSED_PURCHASE_ORDER: Prisma.PurchaseRequisitionWhereInput = { purchaseOrderItem: { is: { purchaseOrder: { is: { purchaseOrderStatus: PURCHASE_ORDER_STATUS.CLOSED } } } } };
 
 export interface RequisitionFilter {
   purchaseRequisitionStatus?: PurchaseRequisitionStatus;
@@ -55,10 +55,23 @@ const purchaseOrderInclude = {
 
 /** 입고 목록 읽기 모양: 발주·원료·생성된 원료 LOT(야드)·입고 취소로 이어진 입고 */
 const goodsReceiptInclude = {
-  lot: { select: { id: true, lotNo: true, yardId: true, yard: { select: { yardName: true } } } },
+  lot: {
+    select: {
+      id: true,
+      lotNo: true,
+      lotStatus: true,
+      initialTon: true,
+      remainingTon: true,
+      yardId: true,
+      yard: { select: { yardName: true } },
+      _count: { select: { lotRelationsAsParentLot: true, allocations: true } },
+    },
+  },
   reversedGoodsReceipt: { select: { goodsReceiptNo: true } },
   reversal: { select: { goodsReceiptNo: true } },
-  purchaseOrderItem: { select: { purchaseOrderId: true, itemId: true, item: { select: { itemCode: true, itemName: true } }, purchaseOrder: { select: { purchaseOrderNo: true } } } },
+  purchaseOrderItem: {
+    select: { purchaseOrderId: true, itemId: true, item: { select: { itemCode: true, itemName: true } }, purchaseOrder: { select: { purchaseOrderNo: true, purchaseOrderStatus: true } } },
+  },
 } as const;
 
 const goodsReceiptWhereOf = (purchaseOrderId?: number): Prisma.GoodsReceiptWhereInput => (purchaseOrderId !== undefined ? { purchaseOrderItem: { purchaseOrderId } } : {});
@@ -247,12 +260,13 @@ export class PurchasingRepository {
 
   /** 입고 1건 = 원료 LOT 1개 */
   findLotOfReceipt(tx: Tx, goodsReceiptId: number) {
-    return tx.lot.findUnique({ where: { goodsReceiptId }, select: { id: true, lotNo: true, lotStatus: true, remainingTon: true } });
+    return tx.lot.findUnique({ where: { goodsReceiptId }, select: { id: true, lotNo: true } });
   }
 
-  /** 쓰지 않은 원료 LOT만 입고 취소로 바꾼다(TypedSQL 조건부 UPDATE). 투입·배정했거나 잔량이 줄었으면 false */
-  async cancelRawMaterialLot(tx: Tx, lotId: number): Promise<boolean> {
-    return (await tx.$queryRawTyped(cancelRawMaterialLotForReceipt(lotId))).length > 0;
+  /** 쓰지 않은 원료 LOT만 입고 취소로 바꾼다(TypedSQL 조건부 UPDATE). 바꾸기 전 잔량을 돌려주고, 투입·배정했거나 잔량이 줄었으면 null */
+  async cancelRawMaterialLot(tx: Tx, lotId: number): Promise<{ remainingTonBefore: string } | null> {
+    const row = (await tx.$queryRawTyped(cancelRawMaterialLotForReceipt(lotId)))[0];
+    return row ? { remainingTonBefore: row.initial_ton?.toFixed(3) ?? '0.000' } : null;
   }
 
   /** 입고 1건 = 원료 LOT 1개. 처음 양·잔량 = 입고량 */

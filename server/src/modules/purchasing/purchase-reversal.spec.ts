@@ -10,6 +10,8 @@ import { Prisma } from '../../generated/prisma/client';
 import { findOpenPurchaseOrderItemsForMrp } from '../../generated/prisma/sql';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MrpService } from '../mrp/mrp.service';
+import { consumptionTon } from '../production/fifo.calculator';
+import { ProductionResultService } from '../production/production-result.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
 import { PurchasingService, receiptStatusOf } from './purchasing.service';
 
@@ -19,6 +21,7 @@ let purchasing: PurchasingService;
 let purchaser: AuthUser;
 let purchaseHead: AuthUser;
 let sales: AuthUser;
+let production: AuthUser;
 let ore: { id: number; defaultSupplierId: number | null };
 
 const RECEIVED = '2026-09-15';
@@ -35,18 +38,20 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
   throw new Error('오류가 나지 않았습니다');
 }
 
-/** 철광석 발주 1건. 톤마다 구매요청 1건 → 승인 → 한 발주로 묶는다 */
-async function orderOre(tons: string[], productionPlanId?: number) {
+/** 원료 발주 1건(기본 공급업체). 톤마다 구매요청 1건 → 승인 → 한 발주로 묶는다 */
+async function orderRaw(material: { id: number; defaultSupplierId: number | null }, tons: string[], productionPlanId?: number) {
   const requisitionIds: number[] = [];
   for (const ton of tons) {
-    const pr = await prisma.$transaction((tx) => purchasing.createRequisition(tx, { itemId: ore.id, requestedTon: ton, desiredReceiptDate: '2026-11-30', productionPlanId }, purchaser));
+    const pr = await prisma.$transaction((tx) => purchasing.createRequisition(tx, { itemId: material.id, requestedTon: ton, desiredReceiptDate: '2026-11-30', productionPlanId }, purchaser));
     requisitionIds.push((await purchasing.approve(purchaseHead, pr.id)).id);
   }
-  const order = await purchasing.createPurchaseOrder(purchaser, { supplierId: ore.defaultSupplierId ?? 0, items: requisitionIds.map((id, n) => ({ purchaseRequisitionId: id, orderedTon: tons[n] })) });
+  const order = await purchasing.createPurchaseOrder(purchaser, { supplierId: material.defaultSupplierId ?? 0, items: requisitionIds.map((id, n) => ({ purchaseRequisitionId: id, orderedTon: tons[n] })) });
   return { orderId: order.id, lineIds: order.items.map((i) => i.purchaseOrderItemId), requisitionIds };
 }
+const orderOre = (tons: string[], productionPlanId?: number) => orderRaw(ore, tons, productionPlanId);
 
-const receive = (purchaseOrderItemId: number, receivedTon: string) => purchasing.confirmGoodsReceipt(purchaser, { purchaseOrderItemId, receivedTon, receivedDate: RECEIVED });
+const receive = (purchaseOrderItemId: number, receivedTon: string, receivedDate = RECEIVED) => purchasing.confirmGoodsReceipt(purchaser, { purchaseOrderItemId, receivedTon, receivedDate });
+const listedReceipt = async (orderId: number, id: number) => (await purchasing.listGoodsReceipts({ purchaseOrderId: orderId })).items.find((r) => r.id === id);
 const detailOf = (orderId: number) => purchasing.purchaseOrderDetail(orderId);
 const requisitionStatusOf = async (id: number) => (await prisma.purchaseRequisition.findUniqueOrThrow({ where: { id } })).purchaseRequisitionStatus;
 /** MRP 입고예정 SQL이 센 이 발주 품목의 입고예정 톤 (안 세면 null) */
@@ -69,6 +74,7 @@ beforeAll(async () => {
   purchaser = await load('2207005');
   purchaseHead = await load('1702004');
   sales = await load('2103003');
+  production = await load('1401006');
   ore = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' }, select: { id: true, defaultSupplierId: true } });
 }, 60_000);
 
@@ -206,8 +212,10 @@ describe('입고 취소 (API-286)', () => {
 
     // 목록: 취소 행은 원래 입고를, 원래 입고는 취소 행을 가리키고 둘 다 사유를 보인다
     const listed = await purchasing.listGoodsReceipts({ purchaseOrderId: orderId });
-    expect(listed.items.find((r) => r.id === first.id)).toMatchObject({ reversalGoodsReceiptNo: reversal.goodsReceiptNo, cancelReason: '품목 오입고', confirmedEmployeeName: purchaser.employeeName });
-    expect(listed.items.find((r) => r.id === reversal.id)).toMatchObject({ reversedGoodsReceiptNo: first.goodsReceiptNo, cancelReason: '품목 오입고' });
+    expect(listed.items.find((r) => r.id === first.id)).toMatchObject({ reversalGoodsReceiptNo: reversal.goodsReceiptNo, cancelReason: '품목 오입고', confirmedEmployeeName: purchaser.employeeName, lotStatus: 'RECEIPT_CANCELLED', isCancellable: false });
+    expect(listed.items.find((r) => r.id === reversal.id)).toMatchObject({ reversedGoodsReceiptNo: first.goodsReceiptNo, cancelReason: '품목 오입고', lotStatus: null, isCancellable: false });
+    // 안 쓴 다른 입고는 취소할 수 있다고 보이고, 발주 상태도 입고 응답에 들어 있다
+    expect(listed.items.find((r) => r.purchaseOrderItemId === lineIds[1])).toMatchObject({ purchaseOrderStatus: 'PARTIALLY_RECEIVED', lotStatus: 'AVAILABLE', isCancellable: true });
 
     // 되돌린 양만큼 다시 입고할 수 있다
     expect((await receive(lineIds[0], '20')).receivedTon).toBe('20.000');
@@ -224,23 +232,39 @@ describe('입고 취소 (API-286)', () => {
     await prisma.lotRelation.create({ data: { parentLotId: input.lotId ?? 0, childLotId: used.lotId ?? 0, lotRelationEvidence: 'PERIOD_BASED', inputTon: new Prisma.Decimal(0) } });
     const receipts = await prisma.goodsReceipt.count();
 
+    // 목록의 취소 가능 여부도 LOT 사용을 반영한다 (화면 단추)
+    const order = (await prisma.goodsReceipt.findUniqueOrThrow({ where: { id: used.id }, select: { purchaseOrderItem: { select: { purchaseOrderId: true } } } })).purchaseOrderItem.purchaseOrderId;
+    expect([(await listedReceipt(order, used.id))?.isCancellable, (await listedReceipt(order, input.id))?.isCancellable]).toEqual([false, false]);
     expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, used.id, { reason: '취소' }))).toBe('PUR-006');
     expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, input.id, { reason: '취소' }))).toBe('PUR-006');
     expect(await prisma.goodsReceipt.count()).toBe(receipts);
     expect((await prisma.lot.findUniqueOrThrow({ where: { id: used.lotId ?? 0 } })).lotStatus).toBe('AVAILABLE');
   });
 
-  it('이미 취소한 입고는 COM-001, 취소 행은 COM-004, 마감한 발주의 입고는 PUR-007', async () => {
-    const { orderId, lineIds } = await orderOre(['10']);
+  it('이미 취소한 입고는 COM-001, 취소 행은 COM-004, 없는 입고는 COM-003', async () => {
+    const { lineIds } = await orderOre(['10']);
     const first = await receive(lineIds[0], '4');
-    const second = await receive(lineIds[0], '3');
     const reversal = await purchasing.cancelGoodsReceipt(purchaser, first.id, { reason: '중복 등록' });
 
     expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, first.id, { reason: '다시' }))).toBe('COM-001');
     expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, reversal.id, { reason: '다시' }))).toBe('COM-004');
     expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, 999_999, { reason: '다시' }))).toBe('COM-003');
+  });
+
+  it('잔량 마감한 발주의 입고도 LOT을 안 썼으면 취소한다: 발주는 잔량 마감 그대로, 입고 누계만 줄고 닫은 양이 는다', async () => {
+    const { orderId, lineIds } = await orderOre(['10']);
+    await receive(lineIds[0], '4');
+    const second = await receive(lineIds[0], '3');
     await purchasing.closePurchaseOrder(purchaser, orderId, { reason: '마감' });
-    expect(await codeOf(purchasing.cancelGoodsReceipt(purchaser, second.id, { reason: '다시' }))).toBe('PUR-007');
+    expect(await listedReceipt(orderId, second.id)).toMatchObject({ purchaseOrderStatus: 'CLOSED', isCancellable: true });
+
+    const reversal = await purchasing.cancelGoodsReceipt(purchaser, second.id, { reason: '마감 뒤 오입고 발견' });
+    expect(reversal).toMatchObject({ receivedTon: '-3.000', purchaseOrderStatus: 'CLOSED' });
+    expect(await detailOf(orderId)).toMatchObject({ purchaseOrderStatus: 'CLOSED', totalReceivedTon: '4.000', totalRemainingTon: '0.000', totalClosedTon: '6.000' });
+    // 잔량 마감한 발주는 MRP 입고예정에 다시 들어가지 않는다
+    expect(await scheduledTonOf(lineIds[0])).toBeNull();
+    const event = await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CANCELLED, targetId: second.id } });
+    expect(event).toMatchObject({ beforeData: expect.objectContaining({ purchaseOrderStatus: 'CLOSED', lotStatus: 'AVAILABLE', remainingTon: '3.000' }), afterData: expect.objectContaining({ purchaseOrderStatus: 'CLOSED' }) });
   });
 });
 
@@ -275,6 +299,68 @@ describe('입고 확정과 겹칠 때 (조건부 UPDATE·발주 행 잠금)', ()
       else expect([detail.purchaseOrderStatus, detail.totalReceivedTon]).toEqual(['RECEIVED', '10.000']);
     }
   });
+
+  it('잔량 마감과 그 발주의 입고 취소가 동시에 와도 입고 누계·상태가 맞다', async () => {
+    for (let round = 0; round < 3; round++) {
+      const { orderId, lineIds } = await orderOre(['10']);
+      const receipt = await receive(lineIds[0], '4');
+      const [close, cancel] = await Promise.allSettled([purchasing.closePurchaseOrder(purchaser, orderId, { reason: '경합' }), purchasing.cancelGoodsReceipt(purchaser, receipt.id, { reason: '경합' })]);
+
+      // 입고 취소는 발주 행을 잠그고 마감한 발주도 되돌리므로 늘 성공한다. 마감이 늦으면 입고 누계가 0이 되어 PUR-005·COM-001
+      expect(cancel.status).toBe('fulfilled');
+      const detail = await detailOf(orderId);
+      expect([detail.totalReceivedTon, await prisma.goodsReceipt.count({ where: { reversedGoodsReceiptId: receipt.id } })]).toEqual(['0.000', 1]);
+      if (close.status === 'fulfilled') expect([detail.purchaseOrderStatus, detail.totalClosedTon]).toEqual(['CLOSED', '10.000']);
+      else {
+        expect(['COM-001', 'PUR-005']).toContain((close.reason as AppException).code);
+        expect([detail.purchaseOrderStatus, detail.totalRemainingTon]).toEqual(['CONFIRMED', '10.000']);
+      }
+    }
+  });
+
+  it('입고 취소와 그 원료 LOT을 쓰는 제선 실적(FIFO 차감)이 동시에 오면 한쪽만 성공하고 원료 재고가 맞다', async () => {
+    // 다른 시험의 원료(2019년 이후 입고)보다 먼저 쓰이도록 2018년에 입고·제선한다. 끝나면 남은 LOT을 정리해 다른 시험의 FIFO에 걸리지 않게 한다
+    const rawItems = await prisma.item.findMany({ where: { itemCode: { in: ['ORE01', 'COL01', 'LIM01'] } }, select: { id: true, itemCode: true, defaultSupplierId: true } });
+    const rates = await prisma.specificConsumption.findMany({ where: { steelGradeId: null, rawMaterialItemId: { in: rawItems.map((i) => i.id) } }, select: { rawMaterialItemId: true, consumptionRate: true } });
+    const HOT_METAL_TON = '10';
+    const results = moduleRef.get(ProductionResultService);
+    for (let round = 0; round < 2; round++) {
+      const day = (offset: number) => `2018-01-${String(2 + round * 2 + offset).padStart(2, '0')}`;
+      // 제선이 쓰는 양만큼만 입고해 제선이 이기면 세 LOT이 모두 소진된다
+      const receipts = new Map<string, { id: number; lotId: number | null }>();
+      for (const material of rawItems) {
+        const rate = rates.find((r) => r.rawMaterialItemId === material.id);
+        if (!rate) throw new Error(`${material.itemCode} 원단위 없음`);
+        const ton = consumptionTon(HOT_METAL_TON, rate.consumptionRate, false).toFixed(3);
+        const { lineIds } = await orderRaw(material, [ton]);
+        receipts.set(material.itemCode, await receive(lineIds[0], ton, day(0)));
+      }
+      const oreReceipt = receipts.get('ORE01');
+      if (!oreReceipt) throw new Error('철광석 입고 없음');
+      const resultsBefore = await prisma.productionResult.count();
+
+      const [cancel, ironmaking] = await Promise.allSettled([
+        purchasing.cancelGoodsReceipt(purchaser, oreReceipt.id, { reason: '제선 경합' }),
+        results.register(production, { processType: 'IRONMAKING', blastFurnaceCode: 'BF1', startedAt: `${day(1)}T00:00:00.000Z`, completedAt: `${day(1)}T01:00:00.000Z`, hotMetalTon: HOT_METAL_TON }),
+      ]);
+      expect([cancel.status, ironmaking.status].sort()).toEqual(['fulfilled', 'rejected']);
+      const oreLot = await prisma.lot.findUniqueOrThrow({ where: { id: oreReceipt.lotId ?? 0 } });
+      if (cancel.status === 'fulfilled') {
+        // 제선은 철광석이 모자라 INV-001로 아무것도 바꾸지 않는다
+        expect(ironmaking.status === 'rejected' && (ironmaking.reason as AppException).code).toBe('INV-001');
+        expect([oreLot.lotStatus, oreLot.remainingTon?.toFixed(3), await prisma.productionResult.count()]).toEqual(['RECEIPT_CANCELLED', '0.000', resultsBefore]);
+        for (const code of ['COL01', 'LIM01']) await purchasing.cancelGoodsReceipt(purchaser, receipts.get(code)?.id ?? 0, { reason: '시험 정리' });
+      } else {
+        expect(cancel.status === 'rejected' && (cancel.reason as AppException).code).toBe('PUR-006');
+        expect([oreLot.lotStatus, oreLot.remainingTon?.toFixed(3), await prisma.goodsReceipt.count({ where: { reversedGoodsReceiptId: oreReceipt.id } })]).toEqual(['CONSUMED', '0.000', 0]);
+        const lots = await prisma.lot.findMany({ where: { id: { in: [...receipts.values()].map((r) => r.lotId ?? 0) } }, select: { lotStatus: true } });
+        expect(lots.map((l) => l.lotStatus)).toEqual(['CONSUMED', 'CONSUMED', 'CONSUMED']);
+        // 만든 용선이 다른 시험의 제강 FIFO에 쓰이지 않게 정리한다
+        const hotMetalIds = ironmaking.status === 'fulfilled' ? ironmaking.value.outputs.map((o) => o.lotId) : [];
+        await prisma.lot.updateMany({ where: { id: { in: hotMetalIds } }, data: { lotStatus: 'CONSUMED', remainingTon: new Prisma.Decimal(0) } });
+      }
+    }
+  }, 120_000);
 
   it('같은 입고를 동시에 두 번 취소해도 취소 행은 하나다', async () => {
     const { orderId, lineIds } = await orderOre(['8']);

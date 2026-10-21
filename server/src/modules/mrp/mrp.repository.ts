@@ -1,8 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ITEM_TYPE, PROCESS_TYPE, PRODUCTION_PLAN_STATUS, PURCHASE_REQUISITION_STATUS } from '@fantasteel/shared';
+import { ITEM_TYPE, PROCESS_TYPE, PRODUCTION_PLAN_STATUS, PURCHASE_ORDER_STATUS, PURCHASE_REQUISITION_STATUS } from '@fantasteel/shared';
+import type { Prisma } from '../../generated/prisma/client';
 import { countHeatLotsByPlan, findOpenPurchaseOrderItemsForMrp, sumRawMaterialRemainingByItem } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
-import { ON_CLOSED_PURCHASE_ORDER } from '../purchasing/purchasing.repository';
+
+/** 더 들어올 원료가 없는 구매요청: 발주 취소됐거나 잔량 마감한 발주의 요청 (purchasing의 같은 계획·원료 중복 확인과 같은 기준, BP-PUR-02) */
+const NO_MORE_SUPPLY: Prisma.PurchaseRequisitionWhereInput[] = [
+  { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED },
+  { purchaseOrderItem: { is: { purchaseOrder: { is: { purchaseOrderStatus: PURCHASE_ORDER_STATUS.CLOSED } } } } },
+];
 
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
@@ -62,7 +68,7 @@ export class MrpRepository {
    */
   findRequisitionsForPlans(tx: Tx, productionPlanIds: number[]) {
     return tx.purchaseRequisition.findMany({
-      where: { productionPlanId: { in: productionPlanIds }, NOT: [{ purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED }, ON_CLOSED_PURCHASE_ORDER] },
+      where: { productionPlanId: { in: productionPlanIds }, NOT: NO_MORE_SUPPLY },
       select: { productionPlanId: true, itemId: true, purchaseRequisitionNo: true },
       orderBy: { id: 'desc' },
     });

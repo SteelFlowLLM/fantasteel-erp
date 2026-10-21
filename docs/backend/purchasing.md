@@ -72,16 +72,18 @@
 **입고 확정**(REQ-PUR-004, BP-PUR-02)
 - 발주 품목 행을 `SELECT … FOR UPDATE`(TypedSQL)로 잠그고 `입고 합계 + 이번 입고 ≤ ordered_ton`이 아니면 `PUR-003`. 입고량 0 이하는 거부.
 - 같은 tx에서: 입고 저장(`nextDocumentNumber(tx,'GOODS_RECEIPT')`) → 원료 LOT 생성(`nextLotNumber(tx,'RAW_MATERIAL', item.itemCode, 날짜)` → `RM-원료코드-YYMMDD-NNN`, 야드 = 품목 기본 야드, `lot_status` AVAILABLE) → 발주 상태 갱신(모든 품목 입고 완료면 RECEIVED, 아니면 PARTIALLY_RECEIVED).
-- 발주가 취소·마감(CANCELLED·CLOSED)이면 발주 행을 잠근 뒤 읽은 상태로 `PUR-007`. 발주 상태는 입고 누계로 정한다(`receiptStatusOf`: 모두 받음 RECEIVED, 일부 PARTIALLY_RECEIVED, 0 CONFIRMED).
+- 발주가 취소·마감(CANCELLED·CLOSED)이면 발주 행을 잠근 뒤 읽은 상태로 `PUR-007`(입고 확정). 발주 상태는 입고 누계로 정한다(`receiptStatusOf`: 모두 받음 RECEIVED, 일부 PARTIALLY_RECEIVED, 0 CONFIRMED).
 - 원료 입고 검사는 없다. 확정 후 수정 API는 없고, 되돌리기는 아래 반대 거래로 한다.
 
 **반대 거래: 발주 취소·잔량 마감·입고 취소**(BP-PUR-02, 2026-10-22 이슈 #500)
 - 셋 다 사유 필수(`reason`, 500자, 공백만이면 COM-004). 작업 로그 `reason`에 남긴다(테이블에 칸이 없다).
+- 권한: 발주 취소·잔량 마감은 발주 권한(`PURCHASE_ORDER_CONFIRM` USE), 입고 취소는 입고 권한(`GOODS_RECEIPT_CONFIRM` USE) — 입고를 되돌리는 일이라 입고 확정과 같은 권한이다(2026-10-22 결정).
 - 발주 취소: 상태 확인(이미 CANCELLED·CLOSED면 COM-001, PARTIALLY_RECEIVED·RECEIVED면 PUR-004) → 조건부 UPDATE CONFIRMED → CANCELLED(0건이면 그사이 입고가 들어온 것 → COM-001) → 연결 구매요청 ORDERED → ORDER_CANCELLED(id 순) → 작업 로그. 같은 요청은 다시 발주하지 않는다(발주 품목 1행 = 구매요청 1건 unique, 발주 등록이 COM-001). 같은 계획·원료로 새 요청은 된다.
 - 잔량 마감: PARTIALLY_RECEIVED만(CONFIRMED·RECEIVED는 PUR-005). 조건부 UPDATE → CLOSED 뒤에 품목·입고를 읽어 마감량(`closedTon` = 발주량 − 입고 누계)을 작업 로그에 남긴다. 구매요청은 ORDERED 그대로 두고, 같은 계획·원료 중복 확인(`findOpenRequisitionForPlan`)과 MRP '이미 요청함'(`findRequisitionsForPlans`)에서 뺀다.
-- 입고 취소: 취소 행은 다시 취소할 수 없다(COM-004) → 발주 행 잠금(`lockPurchaseOrderByItemId`, 입고 확정과 같은 잠금) → 이미 취소된 입고면 COM-001 → 발주가 CANCELLED·CLOSED면 PUR-007 → 원료 LOT 조건부 UPDATE(AVAILABLE·잔량 = 처음 양·`lot_relation` 부모 없음·배정 없음일 때만 RECEIPT_CANCELLED·잔량 0, 아니면 PUR-006) → 음수 입고 저장(`nextDocumentNumber(tx,'GOODS_RECEIPT')`, 입고일 = 오늘) → 발주 상태 다시 계산 → 작업 로그(LOT 포함).
-- 잠금 순서: 발주 → 원료 LOT. 원료 FIFO 투입은 LOT만 잠그고 잔량을 줄이므로, 겹치면 LOT 조건(잔량 = 처음 양)에서 빠져 PUR-006이다.
-- 응답: 취소·마감한 발주는 미입고량 0, 남은 양은 `closedTon`·`totalClosedTon`. 원래 입고는 `reversalGoodsReceiptNo`, 취소 행은 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`로 서로 가리킨다.
+- 입고 취소: 취소 행은 다시 취소할 수 없다(COM-004) → 발주 행 잠금(`lockPurchaseOrderByItemId`, 입고 확정과 같은 잠금) → 이미 취소된 입고면 COM-001 → 발주가 CANCELLED면 PUR-007(입고 누계 0일 때만 취소되므로 실제로는 남은 입고가 없다) → 작업 로그 채번 잠금 → 원료 LOT 조건부 UPDATE(AVAILABLE·잔량 = 처음 양·`lot_relation` 부모 없음·배정 없음일 때만 RECEIPT_CANCELLED·잔량 0, 아니면 PUR-006. `RETURNING`의 처음 양이 작업 로그 변경 전 잔량) → 음수 입고 저장(`nextDocumentNumber(tx,'GOODS_RECEIPT')`, 입고일 = 오늘) → 발주 상태 다시 계산(잔량 마감한 발주는 CLOSED 그대로, 입고 누계만 줄어 닫은 양이 는다) → 작업 로그(LOT 포함).
+- 잠금 순서: 발주 → 작업 로그 채번(EV 앞부분) → 원료 LOT. 제선 실적은 시작 작업 로그(채번 잠금)를 남긴 뒤 원료 LOT을 FIFO로 잠그므로, 입고 취소가 LOT을 먼저 잡으면 교착이 난다(시험으로 확인). 겹치면 먼저 잡은 쪽만 반영되고, 입고 취소가 지면 LOT 조건(잔량 = 처음 양)에서 빠져 PUR-006, 제선이 지면 원료 부족 INV-001이다.
+- 응답: 취소·마감한 발주는 미입고량 0, 남은 양은 `closedTon`·`totalClosedTon`. 원래 입고는 `reversalGoodsReceiptNo`, 취소 행은 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`로 서로 가리킨다. 입고에는 `purchaseOrderStatus`·`lotStatus`·`isCancellable`(LOT 조건부 UPDATE와 같은 조건 + 취소한 발주 아님)을 실어, 발주 조회 권한이 없는 사원의 화면도 단추를 바르게 정한다.
+- 불변식(`npm run check-invariants`): ④ 잔량 0인 원료 LOT은 소진 또는 입고 취소, ⑫ 입고 취소 LOT은 잔량 0·취소 행 있음, ⑬ 취소 행은 원래 입고와 같은 품목·반대 톤이고 발주 품목 입고 누계는 0 ~ 발주량.
 
 **트랜잭션 안 조회**(2026-10-08)
 - 트랜잭션 안에서는 관계를 여러 개 한꺼번에 읽지 않는다. Prisma가 트랜잭션 연결 하나에 쿼리를 겹쳐 보내 pg 경고("client is already executing a query", pg@9에서 제거 예정)가 난다.
@@ -97,7 +99,7 @@
 | PUR-004 | 입고가 있는 발주 취소 |
 | PUR-005 | 일부 입고가 아닌 발주(입고 없음·전량 입고) 잔량 마감 |
 | PUR-006 | 쓴 원료 LOT(투입·배정·잔량 감소)의 입고 취소 |
-| PUR-007 | 취소·마감된 발주에 입고 확정·입고 취소 |
+| PUR-007 | 취소·마감된 발주에 입고 확정(취소한 발주의 입고 취소도) |
 | COM-002 | 부서장이 아닌 사람의 승인·반려, 요청자 아닌 사람의 재요청 |
 | COM-003 | 품목·공급업체·구매요청·발주 품목 없음 |
 | COM-001 | 같은 구매요청 중복 발주(P2002), 발주 취소된 요청 발주, 이미 취소·마감한 발주, 이미 취소한 입고, 그사이 상태가 바뀜(조건부 UPDATE 0건) |
@@ -118,7 +120,7 @@
 | 방향 | 상대 | 내용 |
 | --- | --- | --- |
 | 호출됨 | message-action | `createRequisition(tx, …)` — 초안 확정 tx 안에서 |
-| 읽힘 | mrp | 발주 품목·입고 합계(입고예정, 발주 확정·부분 입고만), 계획별 기존 구매요청(발주 취소·잔량 마감한 요청 제외, `ON_CLOSED_PURCHASE_ORDER`) |
+| 읽힘 | mrp | 발주 품목·입고 합계(입고예정, 발주 확정·부분 입고만), 계획별 기존 구매요청(발주 취소·잔량 마감한 요청 제외 — mrp.repository가 같은 기준을 따로 둔다) |
 | 읽힘 | production | 원료 LOT FIFO(`goods_receipt.received_date`) |
 | 호출 | organization(데이터) | 요청자 부서·부서장 |
 | 호출 | notification | `notifyEmployees(tx, …)` — 등록·재요청 → 부서장에게 APPROVAL_REQUESTED(`/approvals?pr={id}`), 승인·반려 → 요청자에게 APPROVAL_RESULT(`/purchase-requisitions?pr={id}`, 반려는 사유 포함). 작업 로그 id로 중복 방지 (부서장 본인 요청은 등록되지 않으므로 자기 자신에게 가는 알림은 없음) |
@@ -136,7 +138,8 @@
 | 부서장 아닌 사람 승인 | COM-002 (REQ-AUTH-004) |
 | 부서장 없는 부서원 요청 | PUR-001 |
 | 미입고량 초과 입고 | PUR-003 |
-| 발주 취소·잔량 마감·입고 취소와 MRP 입고예정·같은 계획 재요청, 입고 확정과의 경합 | `purchase-reversal.spec.ts` (이슈 #500) |
+| 발주 취소·잔량 마감·입고 취소와 MRP 입고예정·같은 계획 재요청, 입고 확정·잔량 마감·제선 FIFO와의 경합 | `purchase-reversal.spec.ts` (이슈 #500) |
+| 세 API의 사유 길이(400)·권한(403) | `purchase-reversal.routes.spec.ts` |
 | 메시지 초안 확정 | 구매요청 WAITING_APPROVAL + `action_draft_id` 연결 (message-action과 함께) |
 
 실행: `npm test -w @fantasteel/server -- purchasing`(묶음 DB `fs_pur`, message-action과 같은 DB). 시드: 구매 2207005, 구매부장 1702004.

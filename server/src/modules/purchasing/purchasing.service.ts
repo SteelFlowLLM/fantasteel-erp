@@ -10,6 +10,7 @@ import {
   type AuthUser,
   type BusinessEventType,
   type GoodsReceiptView,
+  type LotStatus,
   type PageResult,
   type PurchaseOrderStatus,
   type PurchaseOrderStatusChange,
@@ -610,11 +611,16 @@ export class PurchasingService {
     if (!line) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
     const order = line.purchaseOrder;
     const orderStatus = order.purchaseOrderStatus as PurchaseOrderStatus;
-    if (ENDED_PURCHASE_ORDER[orderStatus]) throw new AppException('PUR-007', `${order.purchaseOrderNo}는 취소·마감된 발주라 입고를 취소할 수 없어요`);
+    // 발주 취소는 입고 누계가 0일 때만 되므로 취소한 발주에 되돌릴 입고는 남지 않는다. 잔량 마감한 발주는 LOT을 안 썼으면 되돌린다
+    if (orderStatus === PURCHASE_ORDER_STATUS.CANCELLED) throw new AppException('PUR-007', `${order.purchaseOrderNo}는 취소된 발주라 입고를 취소할 수 없어요`);
 
     const lot = await this.repository.findLotOfReceipt(tx, receipt.id);
     if (!lot) throw new AppException('COM-003', '이 입고로 만든 원료 LOT을 찾을 수 없어요');
-    if (!(await this.repository.cancelRawMaterialLot(tx, lot.id))) throw new AppException('PUR-006', `원료 LOT ${lot.lotNo} · 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요`);
+    // 잠금 순서: 발주 → 작업 로그 채번 → 원료 LOT. 제선 실적은 시작 작업 로그(EV 채번 잠금)를 남긴 뒤 원료 LOT을 FIFO로 잠그므로
+    // LOT을 먼저 잡고 작업 로그를 남기면 서로 기다린다(교착). 이 번호는 쓰지 않고, 아래 작업 로그가 같은 번호를 다시 받는다
+    await this.numbering.nextDocumentNumber(tx, 'BUSINESS_EVENT');
+    const lotBefore = await this.repository.cancelRawMaterialLot(tx, lot.id);
+    if (!lotBefore) throw new AppException('PUR-006', `원료 LOT ${lot.lotNo} · 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요`);
 
     const item = await this.repository.findReceiptItem(tx, line.itemId);
     const today = seoulToday();
@@ -630,7 +636,11 @@ export class PurchasingService {
     const self = order.purchaseOrderItems.find((l) => l.id === line.id);
     const receivedBefore = self ? receivedOf(self) : new Prisma.Decimal(0);
     const receivedAfter = receivedBefore.minus(receipt.receivedTon);
-    const status = receiptStatusOf(order.purchaseOrderItems.map((l) => ({ orderedTon: l.orderedTon, receivedTon: l.id === line.id ? receivedAfter : receivedOf(l) })));
+    // 잔량 마감한 발주는 닫힌 채로 두고 입고 누계만 줄인다 (MRP 입고예정에서는 이미 빠져 있다)
+    const status =
+      orderStatus === PURCHASE_ORDER_STATUS.CLOSED
+        ? orderStatus
+        : receiptStatusOf(order.purchaseOrderItems.map((l) => ({ orderedTon: l.orderedTon, receivedTon: l.id === line.id ? receivedAfter : receivedOf(l) })));
     if (status !== orderStatus) await this.changePurchaseOrderStatus(tx, order.id, orderStatus, status);
 
     await this.businessEventRecorder.record(tx, {
@@ -638,7 +648,8 @@ export class PurchasingService {
       actor: user,
       target: { table: 'goods_receipt', id: receipt.id },
       lotIds: [lot.id],
-      before: { purchaseOrderStatus: orderStatus, cumulativeReceivedTon: receivedBefore.toFixed(3), lotStatus: lot.lotStatus, remainingTon: lot.remainingTon?.toFixed(3) ?? null },
+      // LOT 변경 전 값은 조건부 UPDATE가 돌려준 값이다 (재고 상태였던 것은 UPDATE 조건)
+      before: { purchaseOrderStatus: orderStatus, cumulativeReceivedTon: receivedBefore.toFixed(3), lotStatus: LOT_STATUS.AVAILABLE, remainingTon: lotBefore.remainingTonBefore },
       // 대상이 원래 입고라 goodsReceiptNo는 원래 입고 번호(작업 로그 화면의 대상 번호), 취소 행 번호는 따로 둔다
       after: {
         goodsReceiptNo: receipt.goodsReceiptNo,
@@ -838,11 +849,16 @@ export class PurchasingService {
   }
 
   private toGoodsReceiptView(row: GoodsReceiptRow, confirmedEmployeeName: string | null, cancelReason: string | null): GoodsReceiptView {
+    const purchaseOrderStatus = row.purchaseOrderItem.purchaseOrder.purchaseOrderStatus as PurchaseOrderStatus;
+    const lot = row.lot;
+    // cancelRawMaterialLotForReceipt.sql과 같은 조건 (화면 단추용. 취소할 때 서버가 잠근 뒤 다시 본다)
+    const lotUnused = lot !== null && lot.lotStatus === LOT_STATUS.AVAILABLE && lot.remainingTon !== null && lot.initialTon !== null && lot.remainingTon.eq(lot.initialTon) && lot._count.lotRelationsAsParentLot === 0 && lot._count.allocations === 0;
     return {
       id: row.id,
       goodsReceiptNo: row.goodsReceiptNo,
       purchaseOrderId: row.purchaseOrderItem.purchaseOrderId,
       purchaseOrderNo: row.purchaseOrderItem.purchaseOrder.purchaseOrderNo,
+      purchaseOrderStatus,
       purchaseOrderItemId: row.purchaseOrderItemId,
       itemId: row.purchaseOrderItem.itemId,
       itemCode: row.purchaseOrderItem.item.itemCode,
@@ -851,6 +867,7 @@ export class PurchasingService {
       receivedDate: dateOnly(row.receivedDate),
       lotId: row.lot?.id ?? null,
       lotNo: row.lot?.lotNo ?? null,
+      lotStatus: (row.lot?.lotStatus ?? null) as LotStatus | null,
       yardId: row.lot?.yardId ?? null,
       yardName: row.lot?.yard?.yardName ?? null,
       confirmedEmployeeName,
@@ -858,6 +875,7 @@ export class PurchasingService {
       reversedGoodsReceiptNo: row.reversedGoodsReceipt?.goodsReceiptNo ?? null,
       reversalGoodsReceiptNo: row.reversal?.goodsReceiptNo ?? null,
       cancelReason,
+      isCancellable: row.reversedGoodsReceiptId === null && row.reversal === null && lotUnused && purchaseOrderStatus !== PURCHASE_ORDER_STATUS.CANCELLED,
       createdAt: row.createdAt.toISOString(),
     };
   }
