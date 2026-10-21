@@ -9,7 +9,7 @@
     "client"
   ],
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.19"
   },
   "scripts": {
     "postinstall": "node scripts/init-claude-md.mjs && npm run build -w shared && npm run generate -w server",

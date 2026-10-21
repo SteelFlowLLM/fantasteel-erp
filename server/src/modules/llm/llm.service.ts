@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { LlmBrowserSettingsInput, LlmBrowserSettingsView, LlmChatTestView, LlmConnectionTestInput, LlmConnectionView, LlmSettingsInput, LlmSettingsView } from '@fantasteel/shared';
 import { effectiveStartSites } from '../ai-assistant/browser/browser-rules';
 import { BrowserSettingsStore } from './browser-settings.store';
-import { sameOrigin } from '../stt/stt-url';
+import { sameOrigin } from '../../common/net/server-url';
 import { LlmClient, LlmRequestError, normalizeBaseUrl } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 import { llmEndpointOf, LlmSettingsStore, type LlmSettings } from './llm-settings.store';

@@ -172,7 +172,7 @@ function decodeFileName(name: string): string {
   return decoded.includes('\uFFFD') ? name : decoded;
 }
 
-/** 메시지를 아직 읽지 않은 멤버 수: 보낸 사람을 빼고 읽음 위치가 이 메시지보다 앞인 멤버 */
+/** 메시지를 아직 읽지 않은 멤버 수: 보낸 사람을 빼고 읽음 위치가 이 메시지보다 앞인 멤버 (reads는 재직 멤버만) */
 function unreadMemberCountOf(message: { id: number; senderId: number | null }, reads: readonly { employeeId: number; lastReadMessageId: number | null }[]): number {
   return reads.filter((r) => r.employeeId !== message.senderId && (r.lastReadMessageId ?? 0) < message.id).length;
 }
@@ -907,7 +907,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
       const duplicate = await this.findDuplicate(me, chatRoomId, data.clientMessageId);
       if (duplicate) return { view: duplicate, saved: false };
     }
-    let saved: { message: MessageWithSender; memberIds: number[] };
+    let saved: { message: MessageWithSender; memberIds: number[]; activeMemberCount: number };
     try {
       saved = await this.saveMessage(user, chatRoomId, data, mentionedEmployeeIds);
       progress.committed = true;
@@ -919,9 +919,9 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
       }
       throw error;
     }
-    const { message, memberIds } = saved;
-    // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다
-    const unreadMemberCount = memberIds.length - 1;
+    const { message, memberIds, activeMemberCount } = saved;
+    // 방금 보낸 메시지는 보낸 사람 말고 아무도 읽지 않았다. 퇴사자(사용 안 함 사원)는 세지 않는다
+    const unreadMemberCount = Math.max(activeMemberCount - 1, 0);
     const erpLinksOf = await this.erpLinkResolver([message.content]);
     this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
     // 재전송 중복은 위에서 먼저 돌려보내므로, 새로 저장한 메시지만 AI를 부른다
@@ -1025,7 +1025,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     chatRoomId: number,
     { attachments, ...data }: NewMessage,
     mentionedEmployeeIds: readonly number[],
-  ): Promise<{ message: MessageWithSender; memberIds: number[] }> {
+  ): Promise<{ message: MessageWithSender; memberIds: number[]; activeMemberCount: number }> {
     const me = user.employeeId;
     return this.prisma.$transaction(async (tx) => {
       const room = await this.requireMember(tx, chatRoomId, me);
@@ -1034,7 +1034,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
       await this.repository.moveLastRead(tx, chatRoomId, me, created.id);
       const members = (await this.repository.findMemberIds(tx, chatRoomId)).map((m) => m.employeeId);
       await this.notifyForMessage(tx, room, created, members, mentionedEmployeeIds);
-      return { message: created, memberIds: members };
+      return { message: created, memberIds: members, activeMemberCount: await this.repository.countActiveMembers(tx, chatRoomId) };
     });
   }
 

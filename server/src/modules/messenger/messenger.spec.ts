@@ -544,6 +544,19 @@ describe('편의: 안 읽은 사람 수 · 파일 모아보기 · 검색', () =>
     ]);
   });
 
+  it('퇴사자(사용 안 함 사원)는 안 읽은 사람 수에 세지 않는다 (#496)', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, purchaseId, logisticsId] });
+    await prisma.employee.update({ where: { id: logisticsId }, data: { isActive: false } });
+    try {
+      const sent = (await send(salesCookie, room.id, '퇴사자 빼고')).body.data;
+      expect(sent.unreadMemberCount).toBe(2);
+      const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+      expect(page.body.data.items.map((m) => m.unreadMemberCount)).toEqual([2]);
+    } finally {
+      await prisma.employee.update({ where: { id: logisticsId }, data: { isActive: true } });
+    }
+  });
+
   it('파일 모아보기는 첨부가 있는 메시지만 최신순, before로 더 보고, 멤버가 아니면 COM-002', async () => {
     const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
     await upload(salesCookie, room.id, 'a.pdf', new Uint8Array([1]));

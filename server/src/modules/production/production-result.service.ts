@@ -26,7 +26,7 @@ import { BusinessEventRecorder } from '../../common/business-event/business-even
 import { AppException } from '../../common/errors/app.exception';
 import { formatCoilNumber, formatSlabNumber } from '../../common/numbering/number-format';
 import { NumberingService } from '../../common/numbering/numbering.service';
-import { seoulDateOnly, seoulToday } from '../../common/time/seoul-date';
+import { seoulDateOnly, seoulDateTimeOf, seoulToday } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -80,6 +80,13 @@ const label = (p: ProcessType) => PROCESS_TYPE_LABEL[p];
  * 수주 등록·취소와 같은 값으로 늘린다 (#478)
  */
 const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
+
+/** 작업 일시 글을 시각으로: 시간대가 없으면 서울 시각(일정과 같음, #496). 읽을 수 없는 글은 DB 오류가 되기 전에 COM-004 */
+function workTimeOf(text: string, fieldLabel: string): Date {
+  const at = seoulDateTimeOf(text);
+  if (Number.isNaN(at.getTime())) throw new AppException('COM-004', `${fieldLabel}는 YYYY-MM-DDTHH:mm 형식으로 입력해 주세요`);
+  return at;
+}
 
 /**
  * 작업 실적 등록 (REQ-PRD-003, REQ-LOT-001~004, BP-PRD-02, docs/backend/production.md 4장).
@@ -218,8 +225,8 @@ export class ProductionResultService {
 
   /** 작업 시작(완료 시각 없음) 또는 시작·완료를 한 번에 */
   async register(user: AuthUser, dto: RegisterProductionResultDto): Promise<ProductionResultView> {
-    const completedAt = dto.completedAt ? new Date(dto.completedAt) : null;
-    const startedAt = dto.startedAt ? new Date(dto.startedAt) : (completedAt ?? new Date());
+    const completedAt = dto.completedAt ? workTimeOf(dto.completedAt, '작업 완료 일시') : null;
+    const startedAt = dto.startedAt ? workTimeOf(dto.startedAt, '작업 시작 일시') : (completedAt ?? new Date());
     const id = await this.prisma.$transaction(async (tx) => {
       const started = await this.startInTx(tx, user, { ...dto, startedAt });
       if (completedAt) await this.completeInTx(tx, user, started.id, { ...dto, completedAt });
@@ -231,7 +238,7 @@ export class ProductionResultService {
   /** 작업 완료·실적 등록 (작업 시작으로 만든 실적) */
   async complete(user: AuthUser, resultId: number, dto: CompleteProductionResultDto): Promise<ProductionResultView> {
     await this.prisma.$transaction(async (tx) => {
-      await this.completeInTx(tx, user, resultId, { ...dto, completedAt: dto.completedAt ? new Date(dto.completedAt) : new Date() });
+      await this.completeInTx(tx, user, resultId, { ...dto, completedAt: dto.completedAt ? workTimeOf(dto.completedAt, '작업 완료 일시') : new Date() });
     }, LONG_TX);
     return this.getResult(resultId);
   }

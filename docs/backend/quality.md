@@ -31,7 +31,7 @@
 | GET | `inspection-standards` | 검사 기준 목록 | `INSPECTION_STANDARD_MANAGE` VIEW | |
 | POST | `inspection-standards` | 검사 기준 등록(새 버전) | `INSPECTION_STANDARD_MANAGE` USE | 수정하지 않고 새 버전으로 추가 |
 | GET | `quality-inspections` | 검사 목록 | `INSPECTION_REGISTER` VIEW | 판정 필터로 불합격 관리 목록에도 사용 |
-| POST | `quality-inspections` | 검사 등록·자동 판정 | `INSPECTION_REGISTER` USE | LOT당 1건, 기준 버전 참조, 필수값 누락은 PENDING |
+| POST | `quality-inspections` | 검사 등록·자동 판정 | `INSPECTION_REGISTER` USE | LOT당 1건, 기준 버전 참조, 필수값 누락은 PENDING. 커밋 뒤 Agent 합격 매수 부족 감지를 부르지만 응답은 기다리지 않는다(감지 큐가 전체 감지로 밀려 있어도 바로 응답, 2026-10-22 이슈 #496) |
 | PATCH | `quality-inspections/:id` | 검사 측정값 수정 | `INSPECTION_REGISTER` USE | |
 | POST | `lots/:id/disposition` | 불합격 처리 상태 지정 | `DISPOSITION_SET` USE | 값은 DISPOSITION_STATUS |
 

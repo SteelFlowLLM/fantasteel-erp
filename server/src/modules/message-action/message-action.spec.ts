@@ -315,6 +315,22 @@ describe('초안 확정·실행·반려 (REQ-ACT-002·003, 업무 프로세스 1
     expect(await prisma.purchaseRequisition.count({ where: { actionDraftId: draft.id } })).toBe(1);
   });
 
+  it('실행된 초안이 있는 메시지·유형에는 새 초안을 만들지 않고 이유를 알린다 (같은 구매요청 두 번 등록 방지, #496)', async () => {
+    const { message, draft } = await draftOf('철광석 40톤', { itemId: oreId, requestedTon: '40.000', desiredReceiptDate: '2026-11-21' });
+    await service.confirm(purchaser, draft.id, {});
+    const requisition = await prisma.purchaseRequisition.findUniqueOrThrow({ where: { actionDraftId: draft.id } });
+    const before = await prisma.actionDraft.count({ where: { messageId: message.id } });
+
+    useLlm(async () => '{}');
+    const error = await service.create(purchaser, message.id).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(AppException);
+    expect((error as AppException).code).toBe('COM-004');
+    expect((error as AppException).message).toContain(`초안(#${draft.id})은 이미 ERP에 반영했어요 (${requisition.purchaseRequisitionNo})`);
+    expect(await prisma.actionDraft.count({ where: { messageId: message.id } })).toBe(before);
+    // AI 추출(LLM)도 부르지 않는다
+    expect(llm.calls).toHaveLength(0);
+  });
+
   it('필수값이 비면 ACT-001이고 확인 대기에 남는다 (구매요청 없음)', async () => {
     const { draft } = await draftOf('철광석 좀', { itemId: oreId });
     expect(await codeOf(service.confirm(purchaser, draft.id, {}))).toBe('ACT-001');
