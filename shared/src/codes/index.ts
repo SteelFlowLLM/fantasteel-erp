@@ -509,6 +509,8 @@ export const BUSINESS_EVENT_TYPE = {
   SCHEDULE_EVENT_CREATED: 'SCHEDULE_EVENT_CREATED',
   TASK_CREATED: 'TASK_CREATED',
   CASE_REGISTERED: 'CASE_REGISTERED',
+  CASE_DELETED: 'CASE_DELETED',
+  AGENT_RISK_DETECTED: 'AGENT_RISK_DETECTED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -547,4 +549,6 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   SCHEDULE_EVENT_CREATED: '일정 등록',
   TASK_CREATED: '업무 등록',
   CASE_REGISTERED: '과거 사례 등록',
+  CASE_DELETED: '과거 사례 삭제',
+  AGENT_RISK_DETECTED: 'Agent 위험 감지',
 };

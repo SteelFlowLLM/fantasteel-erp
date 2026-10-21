@@ -104,7 +104,15 @@ describe('수주 등록 카드 제안', () => {
     const card = await service.proposeSalesOrder(all, { customerName: '한강', lines: [{ itemName: 'SS275', orderedQty: 1.5, dueDate: plusDays(-2) }] });
     expect(card.customerId).toBeNull();
     expect(card.lines[0]).toMatchObject({ itemId: null, orderedQty: null, dueDate: null });
-    expect(card.issues).toEqual(['고객사 "한강"을(를) 찾지 못했어요', '1번째 줄의 규격을 정해 주세요', '1번째 줄의 매수는 1 이상의 정수여야 해요', '1번째 줄의 납기를 확인해 주세요 (오늘부터 1년 안)']);
+    expect(card.issues).toEqual(['고객사 "한강"을(를) 찾지 못했어요', '1번째 줄의 규격을 정해 주세요', '1번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요', '1번째 줄의 납기를 확인해 주세요 (오늘부터 1년 안)']);
+  });
+
+  it('수주 등록 한 줄 상한(9,999매)을 넘는 매수는 비워 두고 사유를 붙인다 (#496)', async () => {
+    const { service } = setup();
+    const card = await service.proposeSalesOrder(all, { lines: [{ orderedQty: 9999 }, { orderedQty: 1_000_000 }] });
+    expect(card.lines.map((l) => l.orderedQty)).toEqual([9999, null]);
+    expect(card.issues).toContain('2번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요');
+    expect(card.issues).not.toContain('1번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요');
   });
 
   it('수주 등록 권한이 없으면 카드를 만들지 않는다', async () => {

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  MAX_ORDERED_QTY,
   PAST_CASE_CATEGORY,
   PERMISSION,
   PERMISSION_LABEL,
@@ -32,7 +33,7 @@ const ISSUE = {
   customer: '고객사를 정해 주세요',
   customerNotFound: (name: string) => `고객사 "${name}"을(를) 찾지 못했어요`,
   item: (n: number) => `${n}번째 줄의 규격을 정해 주세요`,
-  qty: (n: number) => `${n}번째 줄의 매수는 1 이상의 정수여야 해요`,
+  qty: (n: number) => `${n}번째 줄의 매수는 1 이상 ${MAX_ORDERED_QTY.toLocaleString('en-US')} 이하의 정수여야 해요`,
   dueDate: (n: number) => `${n}번째 줄의 납기를 확인해 주세요 (오늘부터 1년 안)`,
   lines: '품목 줄을 하나 이상 넣어 주세요',
 } as const;
@@ -87,7 +88,7 @@ export class AiOpsCardService {
       const itemText = typeof line.itemName === 'string' ? line.itemName.trim().slice(0, 100) : '';
       const itemId = itemText ? matchOne(itemText, products) : null;
       const found = products.find((p) => p.id === itemId);
-      const qty = typeof line.orderedQty === 'number' && Number.isInteger(line.orderedQty) && line.orderedQty >= 1 ? line.orderedQty : null;
+      const qty = typeof line.orderedQty === 'number' && Number.isInteger(line.orderedQty) && line.orderedQty >= 1 && line.orderedQty <= MAX_ORDERED_QTY ? line.orderedQty : null;
       const dueDate = validDate(typeof line.dueDate === 'string' ? line.dueDate.trim() : undefined, today);
       if (itemId === null) issues.push(ISSUE.item(index + 1));
       if (qty === null) issues.push(ISSUE.qty(index + 1));

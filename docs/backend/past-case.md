@@ -61,15 +61,16 @@
 ## 7. 작업 로그와 하지 않은 것
 
 - **등록**: `CASE_REGISTERED`(정의서 2장, 2026-10-21 확정)를 등록 트랜잭션 안에서 `businessEventRecorder.record`로 남긴다. 주체는 등록한 사원, 대상은 `past_case`와 사례 id, 관련 LOT은 이벤트의 LOT(LOT 작업 로그 화면에도 보임), 변경 후 데이터는 사례 번호와 입력 항목·LOT id. 작업 로그를 남기지 못하면 사례도 등록되지 않는다.
-- **수정·삭제**: 정의서에 맞는 작업 로그 유형이 없다(`CASE_REGISTERED`는 등록 사건이다). 새 유형을 임의로 만들지 않고 작업 로그는 남기지 않는다. 대신 **서버 로그(Nest `Logger`)에 누가(사원 id)·어느 사례 번호를·변경 전(수정) 또는 지운(삭제) 내용 전체를 JSON으로** 남긴다. 삭제해도 등록 때의 `CASE_REGISTERED` 작업 로그는 그대로 남는다(대상 `past_case`는 사라진 사례를 가리킨다). 수정·삭제까지 작업 로그로 남기려면 정의서에 `CASE_UPDATED`·`CASE_DELETED` 같은 유형을 더해야 한다 🟡.
+- **삭제**: 하드 삭제라 지우는 트랜잭션에서 작업 로그 `CASE_DELETED`(정의서 2장, 2026-10-22 이슈 #496)를 남긴다. 주체는 지운 사원, 대상은 `past_case`와 지운 사례 id, 관련 LOT은 이벤트의 LOT, **변경 전 데이터에 지운 내용 전체**(사례 화면 값). 작업 로그를 남기지 못하면 사례도 지우지 않는다. 서버 로그(Nest `Logger`)에도 지운 내용을 그대로 남긴다. 등록 때의 `CASE_REGISTERED` 작업 로그는 그대로 남는다(대상 `past_case`는 사라진 사례를 가리킨다).
+- **수정**: 정의서에 맞는 작업 로그 유형이 없다(`CASE_REGISTERED`는 등록 사건이다). 작업 로그는 남기지 않고 **서버 로그에 누가(사원 id)·어느 사례 번호를·변경 전 내용 전체를 JSON으로** 남긴다. 수정까지 작업 로그로 남기려면 정의서에 `CASE_UPDATED` 같은 유형을 더해야 한다 🟡.
 - AI 어시스턴트 실행 카드로 사례를 등록하면 `CASE_REGISTERED`가 AI 경유(`is_ai_assisted`)로 남는다 (`ai-ops-card.service.ts`가 `runAsAiAssisted`로 감싼다, REQ-AST-010).
 - 하지 않은 것: ngram 인덱스, 사례 시드 개수, 수정 이력 보관(마지막 값만 남는다).
-- 확인 필요 🟡: 수정·삭제 작업 로그 유형(`CASE_UPDATED`·`CASE_DELETED` 등)은 공통 코드 정의서에 없다. 지금은 서버 로그로만 남기고, 정의서 확정 때 `businessEventRecorder.record`로 옮긴다.
+- 확인 필요 🟡: 수정 작업 로그 유형(`CASE_UPDATED` 등)은 공통 코드 정의서에 없다. 지금은 서버 로그로만 남기고, 정의서 확정 때 `businessEventRecorder.record`로 옮긴다. 삭제는 `CASE_DELETED`로 정했다(#496).
 
 ## 8. 테스트
 
 - `past-case.unit.spec.ts`(DB 없음): 핵심어·검색 순서·구분·기간, 검사 결과 초안·AI 답 검사·AI에 넘기는 글.
-- `past-case.spec.ts`(DB `fs_collab`, 초안용 LOT 검사 조회는 고정 값): AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호(id 6 이상, CASE-{id})·DB 저장(빈 원인 NULL, 관련 LOT)·검색·상세, 동시 등록 번호와 임시 번호 정리, 없는 LOT·미래 발생일, 등록 작업 로그(`CASE_REGISTERED` 주체·대상·LOT·변경 후 값, 작업 로그 실패 시 등록 롤백), 수정(항목·LOT 교체, 번호·등록자 유지, 예시·없는 사례·없는 LOT·미래 발생일 거부, 본인·부서장·관리자 외 COM-002, `expectedUpdatedAt` 불일치 COM-001)·삭제(LOT 연결 정리, 번호 재사용 없음)·`case_category` DB CHECK.
+- `past-case.spec.ts`(DB `fs_collab`, 초안용 LOT 검사 조회는 고정 값): AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호(id 6 이상, CASE-{id})·DB 저장(빈 원인 NULL, 관련 LOT)·검색·상세, 동시 등록 번호와 임시 번호 정리, 없는 LOT·미래 발생일, 등록 작업 로그(`CASE_REGISTERED` 주체·대상·LOT·변경 후 값, 작업 로그 실패 시 등록 롤백), 수정(항목·LOT 교체, 번호·등록자 유지, 예시·없는 사례·없는 LOT·미래 발생일 거부, 본인·부서장·관리자 외 COM-002, `expectedUpdatedAt` 불일치 COM-001)·삭제(LOT 연결 정리, 번호 재사용 없음, 작업 로그 `CASE_DELETED` 주체·대상·LOT·지운 내용, 작업 로그 실패 시 삭제 롤백)·`case_category` DB CHECK.
 - `past-case.unit.spec.ts`: 수정·삭제 권한 규칙(`canModifyPastCase`). `ai-assistant/ai-ops-card.unit.spec.ts`: 사례 카드 실행이 AI 경유로 부른다.
 - 화면: `client/src/features/pastCases/pastCaseForm.test.ts`(입력값·필수 항목·수정으로 보낼 LOT).
-- `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 도구 14개.
+- `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 조회 도구 목록(18개).

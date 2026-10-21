@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { SalesOrderService } from '../sales-order/sales-order.service';
 import { addDays } from './agent-rules';
-import { FactoryAgentService } from './factory-agent.service';
+import { AGENT_QUIET_DAYS, FactoryAgentService } from './factory-agent.service';
 
 let moduleRef: TestingModule;
 let prisma: PrismaService;
@@ -43,6 +43,8 @@ async function shortPlan() {
   });
   return prisma.productionPlan.create({ data: { productionPlanNo: `T-PP-AGT-${seq}`, salesOrderItemId: salesOrder.salesOrderItems[0].id, itemId: slab.id, shortageQty: 4, heatCount: 400 } });
 }
+
+const targetKeyOf = (draft: { payload: unknown }) => (draft.payload as { agent: { targetKey: string } }).agent.targetKey;
 
 const draftsOf = (planId: number) =>
   prisma.actionDraft.findMany({ where: { messageId: null, payload: { path: ['agent', 'targetKey'], string_starts_with: `RAW_SHORTAGE:plan:${planId}:` } }, orderBy: { id: 'asc' } });
@@ -84,9 +86,15 @@ describe('원료 부족 감지 (REQ-AGT-001·002·005)', () => {
     const first = await draftsOf(plan.id);
     expect(first.length).toBeGreaterThan(0);
     expect(first.every((d) => d.draftStatus === DRAFT_STATUS.WAITING_APPROVAL && d.requesterId === null)).toBe(true);
+    // 후보를 만든 트랜잭션에 위험 감지 작업 로그를 남긴다 (REQ-LOG-002, #496)
+    const detected = await prisma.businessEvent.findMany({ where: { businessEventType: BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED, actionDraftId: { in: first.map((d) => d.id) } } });
+    expect(detected).toHaveLength(first.length);
+    expect(detected[0]).toMatchObject({ actorType: 'SYSTEM', actorEmployeeId: null, targetType: 'action_draft' });
+    expect(detected[0].afterData).toMatchObject({ riskType: 'RAW_SHORTAGE', targetKey: expect.stringContaining(`RAW_SHORTAGE:plan:${plan.id}:`) });
 
     await agent.scanAll();
     expect((await draftsOf(plan.id)).length).toBe(first.length);
+    expect(await prisma.businessEvent.count({ where: { businessEventType: BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED, actionDraftId: { in: first.map((d) => d.id) } } })).toBe(first.length);
   });
 
   it('구매 부서원이 확정하면 구매요청이 부서장 승인 대기로 만들어진다 (확정자가 요청자)', async () => {
@@ -122,9 +130,15 @@ describe('원료 부족 감지 (REQ-AGT-001·002·005)', () => {
     expect(result).toMatchObject({ executed: false, errorCode: 'COM-001' });
     expect(result.draft.draftStatus).toBe(DRAFT_STATUS.REJECTED);
     expect(await prisma.purchaseRequisition.count({ where: { actionDraftId: draft.id } })).toBe(0);
+
+    // 시스템이 닫은 후보는 반려 쉬는 기간에 들지 않는다: 위험이 다시 생기면 바로 새 후보를 만든다
+    await prisma.productionPlan.update({ where: { id: plan.id }, data: { productionPlanStatus: plan.productionPlanStatus } });
+    await agent.scanAll();
+    const again = (await draftsOf(plan.id)).filter((d) => targetKeyOf(d) === targetKeyOf(draft) && d.id !== draft.id);
+    expect(again.map((d) => d.draftStatus)).toEqual([DRAFT_STATUS.WAITING_APPROVAL]);
   });
 
-  it('반려하면 사유가 남고, 같은 대상은 다음 감지에서 새 후보가 생긴다', async () => {
+  it(`사람이 반려하면 사유가 남고, 같은 대상은 ${AGENT_QUIET_DAYS}일 동안 새 후보를 만들지 않는다 (#496)`, async () => {
     const plan = await shortPlan();
     await agent.scanAll();
     const [draft] = await draftsOf(plan.id);
@@ -133,10 +147,15 @@ describe('원료 부족 감지 (REQ-AGT-001·002·005)', () => {
     const rejected = await agent.reject(purchaser, draft.id, '이미 다른 경로로 조달 중');
     expect(rejected).toMatchObject({ draftStatus: DRAFT_STATUS.REJECTED, rejectReason: '이미 다른 경로로 조달 중' });
 
+    // 다음 감지(24시간 뒤·서버 재시작)에도 같은 대상의 후보는 다시 생기지 않는다
     await agent.scanAll();
-    const open = (await draftsOf(plan.id)).filter((d) => d.draftStatus === DRAFT_STATUS.WAITING_APPROVAL);
-    expect(open.some((d) => d.id === draft.id)).toBe(false);
-    expect(open.length).toBeGreaterThan(0);
+    expect((await draftsOf(plan.id)).filter((d) => targetKeyOf(d) === targetKeyOf(draft))).toHaveLength(1);
+
+    // 쉬는 기간이 지나면 위험이 남은 대상은 새 후보가 생긴다
+    await prisma.actionDraft.update({ where: { id: draft.id }, data: { updatedAt: new Date(Date.now() - (AGENT_QUIET_DAYS + 1) * 86_400_000) } });
+    await agent.scanAll();
+    const again = (await draftsOf(plan.id)).filter((d) => targetKeyOf(d) === targetKeyOf(draft) && d.id !== draft.id);
+    expect(again.map((d) => d.draftStatus)).toEqual([DRAFT_STATUS.WAITING_APPROVAL]);
   });
 });
 

@@ -10,6 +10,8 @@ import {
   isSameTypedForm,
   isTypedFieldUnresolved,
   lineFieldLabel,
+  executedDraftOf,
+  executedDraftReason,
   openDraftOf,
   purchaseRequisitionPayloadOf,
   resultHrefOf,
@@ -64,7 +66,7 @@ describe('확장 유형 초안 화면 (REQ-ACT-005)', () => {
     expect(isTypedFieldUnresolved(unresolved, '품목 1 규격', false)).toBe(false);
   });
 
-  it('메시지 메뉴: 같은 메시지·유형의 미처리 초안만 연다 (실행·반려된 초안이면 새로 만든다)', () => {
+  it('메시지 메뉴: 같은 메시지·유형의 미처리 초안만 연다 (반려된 초안이면 새로 만든다)', () => {
     const drafts = [
       { id: 1, messageId: 7, actionType: 'SALES_ORDER_CREATE' as const, draftStatus: 'EXECUTED' },
       { id: 2, messageId: 7, actionType: 'SALES_ORDER_CREATE' as const, draftStatus: 'WAITING_APPROVAL' },
@@ -73,6 +75,16 @@ describe('확장 유형 초안 화면 (REQ-ACT-005)', () => {
     expect(openDraftOf(drafts, 7, 'SALES_ORDER_CREATE')?.id).toBe(2);
     expect(openDraftOf(drafts, 7, 'SHIPMENT_REQUEST_CREATE')).toBeUndefined();
     expect(openDraftOf(drafts, 8, 'SALES_ORDER_CREATE')).toBeUndefined();
+  });
+
+  it('메시지 메뉴: 실행된 초안이 있으면 새로 만들지 않고 그 초안과 이유를 보인다 (#496)', () => {
+    const drafts = [
+      { id: 1, messageId: 7, actionType: 'SALES_ORDER_CREATE' as const, draftStatus: 'EXECUTED' },
+      { id: 3, messageId: 7, actionType: 'SHIPMENT_REQUEST_CREATE' as const, draftStatus: 'REJECTED' },
+    ];
+    expect(executedDraftOf(drafts, 7, 'SALES_ORDER_CREATE')?.id).toBe(1);
+    expect(executedDraftOf(drafts, 7, 'SHIPMENT_REQUEST_CREATE')).toBeUndefined();
+    expect(executedDraftReason('수주 등록')).toBe('이 메시지로 만든 수주 등록 초안은 이미 ERP에 반영했어요. 같은 업무가 두 번 등록되지 않게 새 초안은 만들 수 없어요');
   });
 
   it('만들기 결과 안내: 다른 사원이 만든 초안이면 그 이름을 알린다', () => {
