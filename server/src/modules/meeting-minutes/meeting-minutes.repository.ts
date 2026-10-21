@@ -217,6 +217,28 @@ export class MeetingMinutesRepository {
     });
   }
 
+  /**
+   * 참석자 고치기의 첫 단계: 확정 전이고 내가 읽은 뒤 아무도 고치지 않았을 때만 구간(빠진 참석자의 화자 연결을 푼 것)을 저장한다. 아니면 0건.
+   * 참석자 행은 따로 있어도 이 갱신이 updated_at을 올려 동시에 고친 쪽을 막는다.
+   */
+  saveForAttendeeEdit(tx: Tx, id: number, readUpdatedAt: Date, statuses: readonly string[], transcriptSegments: Prisma.InputJsonArray | undefined) {
+    return tx.meetingMinutes.updateMany({ where: { id, updatedAt: readUpdatedAt, meetingMinutesStatus: { in: [...statuses] } }, data: { transcriptSegments, updatedAt: new Date() } });
+  }
+
+  deleteAttendeesExcept(tx: Tx, meetingMinutesId: number, keepEmployeeIds: number[]) {
+    return tx.meetingAttendee.deleteMany({ where: { meetingMinutesId, employeeId: { notIn: keepEmployeeIds } } });
+  }
+
+  /** 회의록 지우기: 참석자 행부터 지운다 (FK가 Restrict) */
+  deleteAllAttendees(tx: Tx, meetingMinutesId: number) {
+    return tx.meetingAttendee.deleteMany({ where: { meetingMinutesId } });
+  }
+
+  /** 지울 수 있는 상태일 때만 지운다. 그 사이 분석을 시작했거나 확정했으면 0건 */
+  deleteMeetingMinutes(tx: Tx, id: number, statuses: readonly string[]) {
+    return tx.meetingMinutes.deleteMany({ where: { id, meetingMinutesStatus: { in: [...statuses] } } });
+  }
+
   /** REVIEW → CONFIRMED. 두 번 눌러도 한 번만 0건이 아니다 */
   confirm(tx: Tx, id: number, confirmedAt: Date) {
     return tx.meetingMinutes.updateMany({

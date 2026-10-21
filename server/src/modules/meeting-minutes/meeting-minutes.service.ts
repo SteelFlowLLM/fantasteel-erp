@@ -35,7 +35,7 @@ import { scheduleWeekLink, shortSeoulTime } from '../schedule-event/schedule-not
 import { TaskService } from '../notification/task.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
-import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
+import type { CreateMeetingMinutesAudioDto, CreateMeetingMinutesDto, CreateMeetingMinutesFromDriveDto, ListMeetingMinutesQuery, UpdateMeetingAttendeesDto, UpdateMeetingCandidateDto, UpdateMeetingSpeakersDto, UpdateMeetingSummaryDto } from './dto/meeting-minutes.dto';
 import { MeetingCandidateContextService } from './meeting-candidate.context';
 import { applyCandidateEdit, employeeIdsIn } from './meeting-candidate.rules';
 import { MeetingAnalysisRunner } from './meeting-analysis.runner';
@@ -50,6 +50,11 @@ import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 const DEFAULT_PAGE_SIZE = 20;
 /** 화자를 연결·추정할 수 있는 상태: 전사가 끝났고 확정 전 */
 const SPEAKER_OPEN_STATUSES: readonly string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
+/**
+ * 지우기·참석자 고치기를 할 수 있는 상태 (이슈 #449). 확정한 회의록은 업무·일정·구매요청 초안·작업 로그·Notion 페이지가 이어져 있고,
+ * 전사·분석 중에는 백그라운드 작업이 결과를 쓰러 돌아온다
+ */
+const EDIT_OPEN_STATUSES: readonly string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedMeetingAudio {
@@ -77,6 +82,8 @@ function parseAttendeeIds(value: string): number[] {
   }
   return parsed as number[];
 }
+
+const editClosedMessage = (action: string) => `확정했거나 전사·AI 정리 중인 회의록은 ${action} 수 없어요`;
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -221,6 +228,71 @@ export class MeetingMinutesService {
     if (count === 0) throw new AppException('VOC-004');
     void this.analysisRunner.enqueue({ meetingMinutesId: id });
     return this.get(id);
+  }
+
+  /**
+   * 참석자를 보낸 목록으로 바꾼다 (이슈 #449). 새로 넣는 사람만 사용 중 사원인지 본다: 그대로 둔 참석자는 그 사이 퇴사했어도 회의에 있었던 사실을 남긴다.
+   * 빠진 참석자에게 연결한 화자 이름표는 '모름'으로 되돌린다. AI 후보는 그대로 둔다: 후보의 담당자·참석자는 회의 참석자가 아니어도 되고 검토 중에 고친다.
+   * 확정 전이라 보낸 알림이 없고, 확정할 때 그때의 참석자에게 공유 알림이 간다.
+   */
+  async updateAttendees(user: AuthUser, id: number, dto: UpdateMeetingAttendeesDto): Promise<MeetingMinutesView> {
+    const row = await this.loadForEdit(user, id, '참석자를 고칠');
+    const attendeeIds = [...new Set(dto.attendeeIds)];
+    const keep = new Set(attendeeIds);
+    const current = new Set(row.attendees.map((a) => a.employeeId));
+    const added = attendeeIds.filter((employeeId) => !current.has(employeeId));
+
+    let unlinked = false;
+    const segments = readSegments(row.transcriptSegments).map((s) => {
+      if (s.speakerEmployeeId == null || keep.has(s.speakerEmployeeId)) return s;
+      unlinked = true;
+      return { ...s, speakerEmployeeId: null, speakerName: null };
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      if (added.length > 0) {
+        const found = new Set((await this.repository.findActiveEmployeeIds(tx, added)).map((e) => e.id));
+        const missing = added.filter((employeeId) => !found.has(employeeId));
+        if (missing.length > 0) throw new AppException('VOC-002', `참석자로 고른 사원을 찾을 수 없거나 퇴사했어요 (사원 id ${missing.join(', ')})`);
+      }
+      const { count } = await this.repository.saveForAttendeeEdit(tx, id, row.updatedAt, EDIT_OPEN_STATUSES, unlinked ? (segments as unknown as Prisma.InputJsonArray) : undefined);
+      if (count === 0) await this.throwEditConflict(id, '참석자를 고칠');
+      await this.repository.deleteAttendeesExcept(tx, id, attendeeIds);
+      if (added.length > 0) await this.repository.createAttendees(tx, id, added);
+    });
+    return this.get(id);
+  }
+
+  /**
+   * 회의록을 지운다 (이슈 #449). 확정 전에는 업무·일정·구매요청 초안이 가리키지 않고 Notion 페이지도 없으며 원본 음성은 저장하지 않으므로
+   * 참석자 행과 회의록 행만 지운다(표시만 하는 삭제가 아니다). 작업 로그는 남기지 않는다: REQ-LOG-002에 회의록 생성·삭제가 없다.
+   */
+  async remove(user: AuthUser, id: number): Promise<{ id: number }> {
+    await this.loadForEdit(user, id, '지울');
+    await this.prisma.$transaction(async (tx) => {
+      await this.repository.deleteAllAttendees(tx, id);
+      const { count } = await this.repository.deleteMeetingMinutes(tx, id, EDIT_OPEN_STATUSES);
+      if (count === 0) await this.throwEditConflict(id, '지울');
+    });
+    return { id };
+  }
+
+  /** 지우기·참석자 고치기 공통: 작성자나 관리자(ORG_MANAGE 사용)만, 확정 전이고 전사·분석 중이 아닌 회의록만 */
+  private async loadForEdit(user: AuthUser, id: number, action: string): Promise<MeetingMinutesDetailRow> {
+    const row = await this.repository.findDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    const isAdmin = hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' });
+    if (row.creator.id !== user.employeeId && !isAdmin) throw new AppException('VOC-003', `회의록 작성자나 관리자만 ${action} 수 있어요`);
+    if (!EDIT_OPEN_STATUSES.includes(row.meetingMinutesStatus)) throw new AppException('VOC-004', editClosedMessage(action));
+    return row;
+  }
+
+  /** 읽은 뒤 조건부 쓰기가 0건이면: 상태가 바뀌었는지(분석 시작·확정), 같은 회의록을 동시에 고쳤는지 가려서 알려 준다 */
+  private async throwEditConflict(id: number, action: string): Promise<never> {
+    const current = await this.repository.findDetail(this.prisma, id);
+    if (!current) throw new AppException('VOC-001');
+    if (!EDIT_OPEN_STATUSES.includes(current.meetingMinutesStatus)) throw new AppException('VOC-004', editClosedMessage(action));
+    throw new AppException('COM-001', '그 사이 다른 곳에서 회의록을 고쳤어요. 새로 불러와 주세요');
   }
 
   /**

@@ -31,6 +31,11 @@ export interface MeetingSpeakerMappingInput {
   mapping: Record<string, number | null>;
 }
 
+/** PUT meeting-minutes/:id/attendees (이슈 #449). 참석자 전체를 이 목록으로 바꾼다. 확정 전에만 */
+export interface MeetingAttendeesUpdateInput {
+  attendeeIds: number[];
+}
+
 /** AI가 추정한 화자 하나 (이슈 #406). employeeId가 null이면 근거가 없어 '모름'으로 둔 것 */
 export interface MeetingSpeakerSuggestion {
   label: string;

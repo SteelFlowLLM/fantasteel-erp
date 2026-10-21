@@ -72,6 +72,18 @@ export const serverMeetingMinutesApi = {
   /** API-261. 허가한 후보를 한 번에 등록하고 회의록을 확정한다 */
   register: (id: number): Promise<MeetingRegisterResult> => serverRequest<MeetingRegisterResult>('POST', `/meeting-minutes/${id}/register`),
 
+  /** 이슈 #449. 참석자 전체를 바꾼다. 비면 서버를 부르기 전에 입력칸 오류 */
+  updateAttendees: async (id: number, attendeeIds: number[]): Promise<MeetingMinutesView> => {
+    const unique = [...new Set(attendeeIds)];
+    const errors = new FieldErrors();
+    if (unique.length === 0) errors.add('attendeeIds', '참석자를 1명 이상 골라 주세요');
+    errors.throwIfAny();
+    return serverRequest<MeetingMinutesView>('PUT', `/meeting-minutes/${id}/attendees`, { body: { attendeeIds: unique } });
+  },
+
+  /** 이슈 #449. 확정 전 회의록을 지운다 */
+  remove: (id: number): Promise<{ id: number }> => serverRequest<{ id: number }>('DELETE', `/meeting-minutes/${id}`),
+
   /** 이슈 #358. 확정된 회의록을 회사 Notion의 상위 페이지 아래에 새 페이지로 내보낸다 (한 번만) */
   exportToNotion: (id: number): Promise<MeetingNotionExportResult> => serverRequest<MeetingNotionExportResult>('POST', `/meeting-minutes/${id}/notion-export`),
 
