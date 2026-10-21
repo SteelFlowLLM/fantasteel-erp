@@ -160,3 +160,40 @@ describe('AiLiveView 멈춤 줄 (이슈 #425)', () => {
     expect(html).toContain('data:image/jpeg;base64,QUJD');
   });
 });
+
+describe('멈춘 동안 직접 조작 (이슈 #433)', () => {
+  const withFrame = (control: Partial<AiAgentControlState> | null) => ({
+    ...emptyAiChatLive(null, control ? 'id' : null),
+    control: control ? { id: 'id', requested: false, pausedBefore: null, ...control } : null,
+    liveFrame: { url: 'example.kr/a', title: '', imageBase64: 'QUJD', at: '2026-10-20T00:00:00.000Z' },
+  });
+
+  it('서버가 멈춰 기다리는 동안에만 화면이 눌리고 직접 조작 줄이 보인다', () => {
+    const onInput = vi.fn();
+    const paused = renderToStaticMarkup(createElement(AiLiveView, { live: withFrame({ pausedBefore: 'browser_click' }), onControl: () => undefined, onInput }));
+    expect(paused).toContain('aria-label="직접 조작"');
+    expect(paused).toContain('aria-label="브라우저 화면 (눌러서 그 자리를 직접 누르기)"');
+    expect(paused).toContain('aria-label="화면에 넣을 글"');
+    expect(paused).toContain('입력한 글은 저장하지 않아요');
+
+    // 멈추기만 눌러 아직 기다리는 중이 아니거나, 조작 중이거나, onInput이 없으면 보기만 한다
+    for (const html of [
+      renderToStaticMarkup(createElement(AiLiveView, { live: withFrame({ requested: true }), onControl: () => undefined, onInput })),
+      renderToStaticMarkup(createElement(AiLiveView, { live: withFrame({}), onControl: () => undefined, onInput })),
+      renderToStaticMarkup(createElement(AiLiveView, { live: withFrame({ pausedBefore: 'browser_click' }), onControl: () => undefined })),
+    ]) {
+      expect(html).not.toContain('직접 조작');
+      expect(html).not.toContain('눌러서 그 자리를');
+      expect(html).toContain('data:image/jpeg;base64,QUJD');
+    }
+  });
+
+  it('화면을 누르면 사진의 가로·세로 비율로 click을 보낸다', () => {
+    const onInput = vi.fn();
+    const view = createElement(AiLiveView, { live: withFrame({ pausedBefore: 'browser_click' }), onControl: () => undefined, onInput });
+    const screen = flatten(view).find((e) => e.type === 'button' && String(e.props['aria-label']).startsWith('브라우저 화면'));
+    const onClick = screen?.props.onClick as (event: unknown) => void;
+    onClick({ clientX: 300, clientY: 150, currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 50, width: 800, height: 500 }) } });
+    expect(onInput).toHaveBeenCalledWith({ kind: 'click', x: 0.25, y: 0.2 });
+  });
+});

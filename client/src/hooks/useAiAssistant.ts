@@ -2,7 +2,7 @@
 // LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
 // 대화는 서버가 저장한다(이슈 #399): 질문에 대화 id를 보내면 서버가 지난 대화를 DB에서 읽고, 답이 끝나면 질문과 답을 저장한다.
-import type { AiAgentControlCommand, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
+import type { AiAgentControlCommand, AiAgentInput, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { aiAssistantApi, aiAssistantKeys } from '@/api/aiAssistant';
@@ -82,6 +82,22 @@ export async function controlAiAgent(command: AiAgentControlCommand): Promise<vo
   // 한 단계는 하나만 하고 다시 멈추므로 멈추기를 기다리는 상태로 둔다
   chat.setControlRequested(questionId, command !== 'resume');
   await aiAssistantApi.controlAgent(control.id, command).catch(() => useAiChatStore.getState().setControlRequested(questionId, false));
+}
+
+/**
+ * 멈춘 동안 실시간 화면에서 서버 Chrome을 직접 조작한다 (이슈 #433). 보냈으면 true, 아니면 이유를 알리고 false.
+ * 입력한 글은 이 탭 메모리에도 남기지 않는다(비밀번호일 수 있다) — 보내는 즉시 버린다
+ */
+export async function sendAiAgentInput(input: AiAgentInput): Promise<boolean> {
+  const control = useAiChatStore.getState().live?.control;
+  if (!control) return false;
+  try {
+    await aiAssistantApi.sendAgentInput(control.id, input);
+    return true;
+  } catch (error) {
+    toast.error(errorMessageOf(error));
+    return false;
+  }
 }
 
 /**

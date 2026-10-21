@@ -2,6 +2,7 @@
 import type {
   AiAgentControlCommand,
   AiAgentControlInput,
+  AiAgentInput,
   AiAgentNoteInput,
   AiActionCardExecuteRequest,
   AiActionCardExecuteResult,
@@ -71,6 +72,9 @@ export const aiAssistantApi = {
   /** 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 (이슈 #425). 답이 이미 끝났으면 COM-003 */
   controlAgent: (controlId: string, command: AiAgentControlCommand): Promise<{ accepted: true }> =>
     serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}`, { body: { command } satisfies AiAgentControlInput }),
+  /** 멈춘 동안 사람이 실시간 화면을 눌러 서버 Chrome을 직접 조작 (이슈 #433). 멈춰 기다리는 중이 아니면 COM-004, 답이 끝났으면 COM-003 */
+  sendAgentInput: (controlId: string, input: AiAgentInput): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/input`, { body: input }),
   /** 답하는 중에 말 덧붙이기 (이슈 #430). 답이 이미 끝났으면 COM-003 */
   addAgentNote: (controlId: string, text: string): Promise<{ accepted: true }> =>
     serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/notes`, { body: { text } satisfies AiAgentNoteInput }),

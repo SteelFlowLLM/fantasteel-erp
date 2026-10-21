@@ -1,6 +1,6 @@
-import { AI_AGENT_CONTROL_COMMANDS, AI_AGENT_NOTE_MAX_CHARS, AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiAgentControlCommand, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_AGENT_CONTROL_COMMANDS, AI_AGENT_INPUT_KEYS, AI_AGENT_INPUT_KINDS, AI_AGENT_INPUT_SCROLL_MAX, AI_AGENT_INPUT_TEXT_MAX, AI_AGENT_NOTE_MAX_CHARS, AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiAgentControlCommand, type AiAgentInput, type AiAgentInputKey, type AiAgentInputKind, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
 import { AiResearchSeedDto } from '../../ai-research/dto/ai-research.dto';
 
@@ -71,6 +71,57 @@ export class AgentNoteDto {
   @IsNotEmpty({ message: '덧붙일 말을 적어 주세요' })
   @MaxLength(AI_AGENT_NOTE_MAX_CHARS)
   text!: string;
+}
+
+/**
+ * POST ai-assistant/agent-control/:controlId/input (이슈 #433). 멈춘 동안 사람이 실시간 화면에서 보내는 조작.
+ * 종류마다 쓰는 칸이 달라 그 종류의 칸만 검증하고 나머지는 무시한다(agentInputOf). 글(text)은 다듬지 않는다 — 공백도 입력이다
+ */
+export class AgentInputDto {
+  @IsIn(AI_AGENT_INPUT_KINDS, { message: '조작은 click·type·key·scroll 중 하나예요' })
+  kind!: AiAgentInputKind;
+
+  @ValidateIf((o: AgentInputDto) => o.kind === 'click')
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  x?: number;
+
+  @ValidateIf((o: AgentInputDto) => o.kind === 'click')
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  y?: number;
+
+  @ValidateIf((o: AgentInputDto) => o.kind === 'type')
+  @IsString()
+  @IsNotEmpty({ message: '넣을 글을 적어 주세요' })
+  @MaxLength(AI_AGENT_INPUT_TEXT_MAX)
+  text?: string;
+
+  @ValidateIf((o: AgentInputDto) => o.kind === 'key')
+  @IsIn(AI_AGENT_INPUT_KEYS, { message: '보낼 수 없는 키예요' })
+  key?: AiAgentInputKey;
+
+  @ValidateIf((o: AgentInputDto) => o.kind === 'scroll')
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(-AI_AGENT_INPUT_SCROLL_MAX)
+  @Max(AI_AGENT_INPUT_SCROLL_MAX)
+  deltaY?: number;
+}
+
+/** 검증을 통과한 DTO에서 그 종류의 칸만 꺼낸다 */
+export function agentInputOf(dto: AgentInputDto): AiAgentInput {
+  switch (dto.kind) {
+    case 'click':
+      return { kind: 'click', x: dto.x ?? 0, y: dto.y ?? 0 };
+    case 'type':
+      return { kind: 'type', text: dto.text ?? '' };
+    case 'key':
+      return { kind: 'key', key: dto.key ?? 'Enter' };
+    case 'scroll':
+      return { kind: 'scroll', deltaY: dto.deltaY ?? 0 };
+  }
 }
 
 /** POST ai-assistant/ui-actions/:actionId (이슈 #382). 화면이 동작을 한 결과 */

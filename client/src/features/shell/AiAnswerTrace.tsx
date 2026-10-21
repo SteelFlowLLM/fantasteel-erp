@@ -3,10 +3,10 @@
 // 답을 만드는 과정(생각·조회·중간 글) 보기. 전역 AI 패널과 회의 질문 카드가 함께 쓴다.
 // - AiLiveView: 답을 기다리는 동안 보이는 진행 상황 (생각 시간이 흐르고, 조회 중 → 완료로 바뀌고, 답 글이 자란다)
 // - AiStepsDetails: 답이 끝난 뒤 답 아래에 접어 두는 '생각 과정'
-import { AI_ASSISTANT_TOOL_TITLE, type AiAgentControlCommand } from '@fantasteel/shared';
+import { AI_AGENT_INPUT_TEXT_MAX, AI_ASSISTANT_TOOL_TITLE, type AiAgentControlCommand, type AiAgentInput, type AiAgentInputKey } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
-import { AI_BROWSER_MAX_ACTIONS, browserActionCount, browserFrameSrc, browserFramesSummary, browserToolRunningText, type AiBrowserFrame } from '@/lib/aiBrowser';
+import { AI_BROWSER_MAX_ACTIONS, browserActionCount, browserFrameSrc, browserFramesSummary, browserToolRunningText, pointFraction, type AiBrowserFrame } from '@/lib/aiBrowser';
 import { driveToolDoneText, driveToolRunningText } from '@/lib/aiDrive';
 import { notionToolDoneText, notionToolRunningText } from '@/lib/aiNotion';
 import { webToolDoneText, webToolRunningText } from '@/lib/aiWebSearch';
@@ -106,7 +106,18 @@ function LiveUserNote({ step }: { step: Extract<AiTimelineStep, { kind: 'userNot
 }
 
 /** 답을 기다리는 동안의 진행 상황. 아무것도 오지 않았으면 '만들고 있어요'만 보인다 */
-export function AiLiveView({ live, onControl, maxActions = AI_BROWSER_MAX_ACTIONS }: { live: AiChatLive; onControl?: (command: AiAgentControlCommand) => void; maxActions?: number }) {
+export function AiLiveView({
+  live,
+  onControl,
+  onInput,
+  maxActions = AI_BROWSER_MAX_ACTIONS,
+}: {
+  live: AiChatLive;
+  onControl?: (command: AiAgentControlCommand) => void;
+  /** 멈춰 기다리는 동안 사람이 보내는 직접 조작 (이슈 #433). 없으면 화면은 보기만 한다 */
+  onInput?: (input: AiAgentInput) => void;
+  maxActions?: number;
+}) {
   const empty = live.steps.length === 0 && live.answer === '' && live.browserFrames.length === 0 && live.liveFrame === null;
   return (
     <div aria-live="polite" className="flex flex-col gap-1.5 text-sm">
@@ -124,7 +135,7 @@ export function AiLiveView({ live, onControl, maxActions = AI_BROWSER_MAX_ACTION
           <LiveTool key={step.id} step={step} />
         ),
       )}
-      <AiBrowserLiveCard frames={live.browserFrames} liveFrame={live.liveFrame} actions={browserActionCount(live.steps)} max={maxActions} />
+      <AiBrowserLiveCard frames={live.browserFrames} liveFrame={live.liveFrame} actions={browserActionCount(live.steps)} max={maxActions} {...(live.control?.pausedBefore && onInput ? { onInput } : {})} />
       {live.control && onControl ? <AiAgentControlBar control={live.control} onControl={onControl} /> : null}
       {live.answer ? <p className="leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{live.answer}</p> : null}
     </div>
@@ -153,10 +164,24 @@ export function shownBrowserFrame(frames: readonly AiBrowserFrame[], liveFrame: 
 }
 
 /** 답을 기다리는 동안: 철강맨AI가 지금 보는 웹 페이지 화면 (실시간 화면, 없으면 가장 최근 사진 한 장) */
-export function AiBrowserLiveCard({ frames, liveFrame = null, actions, max = AI_BROWSER_MAX_ACTIONS }: { frames: readonly AiBrowserFrame[]; liveFrame?: AiBrowserFrame | null; actions: number; max?: number }) {
+export function AiBrowserLiveCard({
+  frames,
+  liveFrame = null,
+  actions,
+  max = AI_BROWSER_MAX_ACTIONS,
+  onInput,
+}: {
+  frames: readonly AiBrowserFrame[];
+  liveFrame?: AiBrowserFrame | null;
+  actions: number;
+  max?: number;
+  /** 있으면 화면을 눌러 서버 Chrome을 직접 조작할 수 있다 (멈춰 기다리는 동안만, 이슈 #433) */
+  onInput?: (input: AiAgentInput) => void;
+}) {
   const shown = shownBrowserFrame(frames, liveFrame);
   if (!shown) return null;
   const { frame } = shown;
+  const image = <img src={browserFrameSrc(frame)} alt={frame.title ? `브라우저 화면: ${frame.title}` : '브라우저 화면'} className="w-full rounded-xs border border-line bg-surface" />;
   return (
     <section aria-label="브라우저 화면" className="flex flex-col gap-1.5 rounded-sm border border-line bg-surface-2 p-2">
       <div className="flex items-center justify-between text-cap text-ink-3">
@@ -171,9 +196,83 @@ export function AiBrowserLiveCard({ frames, liveFrame = null, actions, max = AI_
         </span>
         {actions > 0 ? <span aria-label={`브라우저 동작 ${actions}번, 최대 ${max}번`}>{Math.min(actions, max)}/{max}</span> : null}
       </div>
-      <img src={browserFrameSrc(frame)} alt={frame.title ? `브라우저 화면: ${frame.title}` : '브라우저 화면'} className="w-full rounded-xs border border-line bg-surface" />
+      {onInput ? (
+        <button
+          type="button"
+          aria-label="브라우저 화면 (눌러서 그 자리를 직접 누르기)"
+          title="눌러서 그 자리를 직접 눌러요"
+          className="block w-full cursor-crosshair p-0"
+          onClick={(event) => {
+            const point = pointFraction(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+            if (point) onInput({ kind: 'click', ...point });
+          }}
+        >
+          {image}
+        </button>
+      ) : (
+        image
+      )}
       <BrowserFrameCaption frame={frame} />
+      {onInput ? <AiBrowserTakeover onInput={onInput} /> : null}
     </section>
+  );
+}
+
+/** 직접 넣는 글, 자주 쓰는 키, 스크롤 한 번의 거리(화면 픽셀, 가정값) */
+const TAKEOVER_KEYS: readonly { key: AiAgentInputKey; label: string }[] = [
+  { key: 'Enter', label: 'Enter' },
+  { key: 'Tab', label: 'Tab' },
+  { key: 'Backspace', label: '지우기' },
+];
+const TAKEOVER_SCROLL = 480;
+
+/**
+ * 멈춰 있는 동안 사람이 서버 Chrome을 직접 조작하는 줄 (이슈 #433). 화면을 누르면 그 자리를 누르고, 여기서 글·키·스크롤을 보낸다.
+ * 입력한 글은 보내자마자 칸에서 지우고 저장하지 않는다. 로그인·결제도 사람이 직접 하면 된다
+ */
+function AiBrowserTakeover({ onInput }: { onInput: (input: AiAgentInput) => void }) {
+  const [text, setText] = useState('');
+  const send = () => {
+    if (!text) return;
+    onInput({ kind: 'type', text });
+    setText('');
+  };
+  return (
+    <div role="group" aria-label="직접 조작" className="flex flex-col gap-1.5 border-t border-line pt-1.5 text-cap text-ink-3">
+      <p>멈춰 있어서 직접 할 수 있어요. 화면을 누르면 그 자리를 누르고, 입력한 글은 저장하지 않아요. [계속]을 누르면 철강맨AI가 화면을 다시 읽고 이어 가요.</p>
+      <form
+        className="flex flex-wrap items-center gap-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          send();
+        }}
+      >
+        <input
+          type="text"
+          value={text}
+          maxLength={AI_AGENT_INPUT_TEXT_MAX}
+          autoComplete="off"
+          placeholder="고른 칸에 넣을 글"
+          aria-label="화면에 넣을 글"
+          onChange={(event) => setText(event.target.value)}
+          className="h-6 min-w-0 flex-1 rounded-sm border border-line-strong bg-surface px-2 text-cap text-ink"
+        />
+        <button type="submit" className={CONTROL_BUTTON} disabled={!text}>
+          넣기
+        </button>
+        {TAKEOVER_KEYS.map(({ key, label }) => (
+          <button key={key} type="button" className={CONTROL_BUTTON} onClick={() => onInput({ kind: 'key', key })}>
+            {label}
+          </button>
+        ))}
+        <button type="button" className={CONTROL_BUTTON} aria-label="위로 스크롤" onClick={() => onInput({ kind: 'scroll', deltaY: -TAKEOVER_SCROLL })}>
+          <Icon name="chevron-up" size="sm" />
+        </button>
+        <button type="button" className={CONTROL_BUTTON} aria-label="아래로 스크롤" onClick={() => onInput({ kind: 'scroll', deltaY: TAKEOVER_SCROLL })}>
+          <Icon name="chevron-down" size="sm" />
+        </button>
+      </form>
+    </div>
   );
 }
 

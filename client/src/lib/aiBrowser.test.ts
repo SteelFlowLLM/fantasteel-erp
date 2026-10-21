@@ -17,6 +17,7 @@ import {
   browserToolRunningText,
   isSafeBrowserImage,
   parseAiBrowserPreference,
+  pointFraction,
   readAiBrowserPreference,
   toBrowserFrame,
   writeAiBrowserPreference,
@@ -153,5 +154,19 @@ describe('시작 사이트 입력 (이슈 #430)', () => {
     expect(parseStartSiteInput('a b.com')).toBeNull();
     expect(parseStartSiteInput('')).toBeNull();
     expect(parseStartSiteInput('http://')).toBeNull();
+  });
+});
+
+describe('pointFraction (이슈 #433)', () => {
+  const rect = { left: 100, top: 50, width: 800, height: 500 };
+
+  it('눌린 자리를 사진의 가로·세로 비율로 바꾸고, 사진 밖은 가장자리로 붙인다', () => {
+    expect(pointFraction(rect, 500, 300)).toEqual({ x: 0.5, y: 0.5 });
+    expect(pointFraction(rect, 100, 50)).toEqual({ x: 0, y: 0 });
+    expect(pointFraction(rect, 5000, -20)).toEqual({ x: 1, y: 0 });
+  });
+
+  it('사진 크기가 0이면 null이다', () => {
+    expect(pointFraction({ left: 0, top: 0, width: 0, height: 100 }, 1, 1)).toBeNull();
   });
 });

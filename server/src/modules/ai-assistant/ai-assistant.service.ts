@@ -17,6 +17,7 @@ import {
   type AiScreenActionResultInput,
   type AuthUser,
   type AiAgentControlCommand,
+  type AiAgentInput,
   AI_AGENT_PAUSE_MAX_MS,
   AI_AGENT_NOTES_MAX,
 } from '@fantasteel/shared';
@@ -156,6 +157,19 @@ export class AiAssistantService {
   /** 답하는 동안 브라우저·화면 조작을 멈추거나 이어 간다 (이슈 #425). 묻는 사원 본인의 답하는 중인 열쇠만 */
   controlAgent(user: AuthUser, controlId: string, command: AiAgentControlCommand): void {
     if (!this.agentControls.command(user.employeeId, controlId, command)) throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+  }
+
+  /**
+   * 멈춘 동안 사람이 실시간 화면에서 서버 Chrome을 직접 조작한다 (이슈 #433). 묻는 사원 본인의 답하는 중인 열쇠만, 동작 앞에서 멈춰 기다리는 중일 때만.
+   * 입력한 글(비밀번호일 수 있다)은 저장하지도 로그에 남기지도 않는다 — 이 함수는 입력을 브라우저에 넘기기만 한다
+   */
+  async humanInput(user: AuthUser, controlId: string, input: AiAgentInput): Promise<void> {
+    const outcome = await this.agentControls.humanInput(user.employeeId, controlId, input);
+    if (outcome === 'none') throw new AppException('COM-003', '답하는 중인 브라우저·화면 조작이 없어요');
+    if (outcome === 'no_browser') throw new AppException('COM-004', '브라우저를 쓰는 답에서만 직접 조작할 수 있어요');
+    if (outcome === 'not_paused') throw new AppException('COM-004', '멈춰서 기다리는 동안에만 직접 조작할 수 있어요');
+    if (outcome === 'closed') throw new AppException('COM-003', '브라우저 탭이 이미 닫혔어요');
+    if (outcome === 'blocked') throw new AppException('COM-004', '열 수 없는 주소로 이동해서 탭을 비웠어요');
   }
 
   /** 답하는 중에 사용자가 말을 덧붙인다 (이슈 #430). 묻는 사원 본인의 답하는 중인 열쇠만 */
@@ -352,6 +366,9 @@ export class AiAssistantService {
         const drive: DriveToolSession | null = driveOn && streaming ? this.driveTools.session(visionOf) : null;
         const historySearch = historySource ? new HistorySearchSession(historySource) : null;
         const control = controlId && emit ? this.agentControls.open(user.employeeId, controlId) : null;
+        // 브라우저를 쓰는 답이면 멈춘 동안 사람이 같은 탭을 직접 조작할 수 있다 (이슈 #433)
+        const humanInput = browser?.humanInput?.bind(browser);
+        if (control && humanInput) control.setHuman(humanInput);
         const tools = [
           ...this.toolbox.definitions({ actionCards: input.actionCards }),
           ...(webSearch && web ? this.webTools.definitions() : []),

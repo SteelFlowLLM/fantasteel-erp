@@ -14,7 +14,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentNoteDto, ScreenActionResultDto } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentInputDto, AgentNoteDto, ScreenActionResultDto, agentInputOf } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
@@ -108,6 +108,17 @@ export class AiAssistantController {
   @HttpCode(200)
   controlAgent(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentControlDto): { accepted: true } {
     this.service.controlAgent(user, controlId, dto.command);
+    return { accepted: true };
+  }
+
+  /**
+   * 멈춘 동안 사람이 실시간 화면을 눌러 서버 Chrome을 직접 조작 (문서에 없는 기능, 이슈 #433). 그 답을 물은 사원만 보낼 수 있고,
+   * 브라우저를 쓰는 답이 동작 앞에서 멈춰 기다리는 중일 때만 받는다. 입력한 글은 저장하지도 로그에 남기지도 않는다
+   */
+  @Post('ai-assistant/agent-control/:controlId/input')
+  @HttpCode(200)
+  async humanInput(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentInputDto): Promise<{ accepted: true }> {
+    await this.service.humanInput(user, controlId, agentInputOf(dto));
     return { accepted: true };
   }
 

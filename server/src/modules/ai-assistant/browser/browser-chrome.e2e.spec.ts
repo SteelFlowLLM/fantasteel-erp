@@ -43,6 +43,11 @@ async function serveFixtures(context: BrowserContext) {
         );
       // 누르면 글만 바뀌고 이동하지 않는 버튼: 보이는 마우스가 그 자리에 남아 있어야 한다 (이슈 #425)
       if (url.pathname === '/cursor') return html(`<!doctype html><title>cursor</title><button id="b" onclick="this.textContent = '눌렀어요'">누르기</button>`);
+      // 사람이 직접 조작하는 페이지 (이슈 #433): 칸·로그인 버튼(AI는 못 누른다)·사내 주소로 가는 버튼이 정해진 자리에 있다
+      if (url.pathname === '/human')
+        return html(
+          `<!doctype html><title>human</title><input aria-label="칸" style="position:absolute;left:100px;top:100px;width:300px;height:40px" onkeydown="if (event.key === 'Enter') document.title = 'sent:' + this.value"><button style="position:absolute;left:100px;top:200px;width:200px;height:50px" onclick="location.href='/login'">로그인</button><button style="position:absolute;left:100px;top:300px;width:200px;height:50px" onclick="location.href='/redirect'">사내로</button><div style="height:3000px"></div>`,
+        );
       // PDF·문서 링크가 있는 페이지 (이슈 #427). 노란 표가 잘 보이게 글자만 둔다
       if (url.pathname === '/docs')
         return html(
@@ -386,6 +391,54 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     } finally {
       await session.close();
     }
+  });
+
+  it('멈춘 동안 사람이 누르기·글·키·스크롤을 보내면 AI 규칙(로그인 버튼) 없이 하되 사내 주소는 막고, AI에게 직접 조작했다고 알린다 (이슈 #433)', async () => {
+    const box = toolbox();
+    const session = box.session({ question: 'https://example.test/human 열어줘', web: web() }, 'human');
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/human' }));
+      const page = contexts.at(-1)?.pages()[0];
+      if (!page) throw new Error('페이지 없음');
+      // 칸 가운데(250,120)를 눌러 초점을 주고 글과 Enter를 보낸다. 사진의 비율(1280x800 기준)로 보낸다
+      expect(await session.humanInput({ kind: 'click', x: 250 / 1280, y: 120 / 800 })).toBe('ok');
+      expect(await session.humanInput({ kind: 'type', text: '가나 abc' })).toBe('ok');
+      expect(await session.humanInput({ kind: 'key', key: 'Enter' })).toBe('ok');
+      expect(await page.evaluate('document.title')).toBe('sent:가나 abc');
+      expect(await session.humanInput({ kind: 'scroll', deltaY: 600 })).toBe('ok');
+      await settles(() => page.evaluate('Math.round(window.scrollY)') as Promise<number>, 600);
+
+      // AI의 다음 화면 읽기에 안내가 붙고 한 번만 붙는다. 옛 번호로 누르려 하면 먼저 다시 읽으라고 한다
+      const stale = await session.run(call('browser_click', { ref: refOf(opened, 'textbox "칸"') }));
+      expect(errorOf(stale)).toBe('사용자가 직접 조작했어요. 화면이 바뀌었을 수 있어요');
+      expect((await session.run(call('browser_snapshot'))).content).not.toContain('직접 조작했어요');
+      await session.humanInput({ kind: 'scroll', deltaY: -100 });
+      expect((await session.run(call('browser_snapshot'))).content).toContain('(사용자가 직접 조작했어요. 화면이 바뀌었을 수 있어요)');
+      expect((await session.run(call('browser_snapshot'))).content).not.toContain('직접 조작했어요');
+
+      // AI는 못 누르는 로그인 버튼도 사람은 누른다. 사람이 옮긴 페이지는 지금 페이지로 기억해 다음 질문에 알린다
+      await session.run(call('browser_scroll', { direction: 'up' }));
+      expect(await session.humanInput({ kind: 'click', x: 200 / 1280, y: 225 / 800 })).toBe('ok');
+      expect(served).toContain('GET /login');
+      await box.finish(session, 'human', false);
+      expect(box.openPage('human')?.url).toBe('https://example.test/login');
+    } finally {
+      await session.close();
+    }
+
+    // 사내 주소로 가는 버튼은 사람이 눌러도 프록시가 막고, 탭을 비운다
+    const second = toolbox().session({ question: 'https://example.test/human 열어줘', web: web() });
+    try {
+      await second.run(call('browser_open', { url: 'https://example.test/human' }));
+      expect(await second.humanInput({ kind: 'click', x: 200 / 1280, y: 325 / 800 })).toBe('blocked');
+      expect(internalHits.filter((hit) => hit.startsWith('/meta'))).toEqual([]);
+      expect(contexts.at(-1)?.pages()[0]?.url()).toBe('about:blank');
+    } finally {
+      await second.close();
+    }
+    // 닫힌 세션에는 보내지 못한다
+    expect(await second.humanInput({ kind: 'key', key: 'Enter' })).toBe('closed');
+    expect(pool.activeContexts).toBe(0);
   });
 
   it('PDF 링크는 번호로 읽고, 모델용 사진에만 노란 번호 표가 있고 사람에게 보내는 사진·실시간 화면에는 없다 (이슈 #427)', async () => {

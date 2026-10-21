@@ -665,6 +665,25 @@ export interface AiAgentControlInput {
   command: AiAgentControlCommand;
 }
 
+/**
+ * 멈춘 동안 사람이 패널의 실시간 화면에서 서버 Chrome으로 직접 보내는 조작 (이슈 #433).
+ * click의 x·y는 화면 사진의 가로·세로 비율(0~1)이라 사진이 어떤 크기로 보여도 같다. 입력한 글은 서버에 저장하지도 로그에 남기지도 않는다
+ */
+export const AI_AGENT_INPUT_KINDS = ['click', 'type', 'key', 'scroll'] as const;
+export type AiAgentInputKind = (typeof AI_AGENT_INPUT_KINDS)[number];
+/** 사람이 보낼 수 있는 키 (글자는 type으로) */
+export const AI_AGENT_INPUT_KEYS = ['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'] as const;
+export type AiAgentInputKey = (typeof AI_AGENT_INPUT_KEYS)[number];
+/** 한 번에 넣는 글 길이와 스크롤 거리(화면 픽셀) 상한 (가정값) */
+export const AI_AGENT_INPUT_TEXT_MAX = 500;
+export const AI_AGENT_INPUT_SCROLL_MAX = 1600;
+
+export type AiAgentInput =
+  | { kind: 'click'; x: number; y: number }
+  | { kind: 'type'; text: string }
+  | { kind: 'key'; key: AiAgentInputKey }
+  | { kind: 'scroll'; deltaY: number };
+
 /** 답하는 중에 덧붙이는 말 (이슈 #430). 한 답에 받는 수와 한 번의 길이 상한 (가정값) */
 export const AI_AGENT_NOTES_MAX = 5;
 export const AI_AGENT_NOTE_MAX_CHARS = 500;

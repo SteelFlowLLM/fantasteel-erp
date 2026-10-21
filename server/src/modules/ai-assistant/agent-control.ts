@@ -1,4 +1,4 @@
-import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, type AiAgentControlCommand } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, type AiAgentControlCommand, type AiAgentInput } from '@fantasteel/shared';
 import { LlmAbortedError } from '../llm/llm.client';
 
 /** 멈춘 동작 앞에서 기다린 결과: go = 해도 된다, timeout = 너무 오래 멈춰 이 답은 브라우저·화면 조작을 그만둔다 */
@@ -11,11 +11,17 @@ export type AgentGateResult = 'go' | 'timeout';
 export class AgentGate {
   private state: 'running' | 'paused' | 'stepping' | 'stopped' = 'running';
   private wake: (() => void) | null = null;
+  private isWaiting = false;
 
   constructor(private readonly maxPauseMs = AI_AGENT_PAUSE_MAX_MS) {}
 
   get paused(): boolean {
     return this.state === 'paused';
+  }
+
+  /** 동작 앞에서 실제로 기다리는 중인지. 사람이 직접 조작할 수 있는 때다 (이슈 #433). 멈추기만 눌렀고 하던 동작이 아직 끝나지 않았으면 false */
+  get waiting(): boolean {
+    return this.isWaiting;
   }
 
   /** 한 단계면 이번 동작 하나만 지나가고 다음 동작 앞에서 다시 멈춘다 */
@@ -43,6 +49,7 @@ export class AgentGate {
     }
     if (signal?.aborted) throw new LlmAbortedError();
     let resumed: () => void = () => undefined;
+    this.isWaiting = true;
     try {
       const woke = await new Promise<boolean>((resolve, reject) => {
         const timer = setTimeout(() => done(false), this.maxPauseMs);
@@ -70,6 +77,7 @@ export class AgentGate {
       this.closeAfterStep();
       return 'go';
     } finally {
+      this.isWaiting = false;
       resumed();
     }
   }
@@ -103,10 +111,15 @@ export class AgentNotes {
   }
 }
 
-/** 한 답의 문과 덧붙인 말 */
+/** 사람이 보낸 조작을 서버 Chrome에 넣은 결과: blocked = 열 수 없는 주소로 가서 탭을 비웠다, closed = 탭이 이미 닫혔다 (이슈 #433) */
+export type HumanInputOutcome = 'ok' | 'blocked' | 'closed';
+export type HumanInputHandler = (input: AiAgentInput) => Promise<HumanInputOutcome>;
+
+/** 한 답의 문과 덧붙인 말, 사람이 직접 조작하는 길(브라우저를 쓰는 답만) */
 export interface AgentControl {
   gate: AgentGate;
   notes: AgentNotes;
+  human: HumanInputHandler | null;
 }
 
 /** 답하는 동안의 문 모음 (서버 메모리). 열쇠는 사원 번호 + 화면이 답마다 만든 열쇠라 남의 답은 멈출 수 없다 */
@@ -114,12 +127,16 @@ export class AgentControlRegistry {
   private readonly controls = new Map<string, AgentControl>();
 
   /** 답을 시작할 때 문을 만든다. 끝나면 돌려준 함수로 지운다 */
-  open(owner: number, controlId: string, gate = new AgentGate()): AgentControl & { close: () => void } {
+  open(owner: number, controlId: string, gate = new AgentGate()): Omit<AgentControl, 'human'> & { close: () => void; setHuman: (handler: HumanInputHandler | null) => void } {
     const key = `${owner}:${controlId}`;
-    const control: AgentControl = { gate, notes: new AgentNotes() };
+    const control: AgentControl = { gate, notes: new AgentNotes(), human: null };
     this.controls.set(key, control);
     return {
-      ...control,
+      gate: control.gate,
+      notes: control.notes,
+      setHuman: (handler) => {
+        control.human = handler;
+      },
       close: () => {
         if (this.controls.get(key) === control) this.controls.delete(key);
       },
@@ -139,6 +156,19 @@ export class AgentControlRegistry {
     const control = this.controls.get(`${owner}:${controlId}`);
     if (!control) return 'none';
     return control.notes.add(text) ? 'ok' : 'full';
+  }
+
+  /**
+   * 멈춰 기다리는 동안 사람이 보낸 조작을 브라우저에 넣는다 (이슈 #433). 답하는 중인 열쇠가 없으면 'none',
+   * 브라우저를 쓰는 답이 아니면 'no_browser', 동작 앞에서 멈춰 기다리는 중이 아니면 'not_paused'.
+   * 입력한 글은 이 함수도, 부르는 쪽도 저장하거나 기록하지 않는다
+   */
+  async humanInput(owner: number, controlId: string, input: AiAgentInput): Promise<'none' | 'no_browser' | 'not_paused' | HumanInputOutcome> {
+    const control = this.controls.get(`${owner}:${controlId}`);
+    if (!control) return 'none';
+    if (!control.human) return 'no_browser';
+    if (!control.gate.waiting) return 'not_paused';
+    return control.human(input);
   }
 
   get size(): number {

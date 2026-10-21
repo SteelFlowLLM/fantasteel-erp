@@ -1,4 +1,4 @@
-import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AuthUser } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AiAgentInput, type AuthUser } from '@fantasteel/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
@@ -775,6 +775,9 @@ describe('AiAssistantService', () => {
       let live: { url: string; imageBase64: string; at: string } | null = null;
       // markedImages를 받은 세션이 동작마다 모델용 사진을 돌려줄지 (이슈 #427)
       let modelImages = false;
+      // 멈춘 동안 사람이 보낸 조작과, 브라우저가 돌려줄 결과 (이슈 #433)
+      const humanInputs: AiAgentInput[] = [];
+      let humanOutcome: 'ok' | 'blocked' | 'closed' = 'ok';
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
         capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
@@ -807,6 +810,10 @@ describe('AiAssistantService', () => {
                 releases += 1;
               };
             },
+            humanInput: async (input: AiAgentInput) => {
+              humanInputs.push(input);
+              return humanOutcome;
+            },
           };
         },
         openPage: (key: string | null) => {
@@ -829,6 +836,8 @@ describe('AiAssistantService', () => {
         setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page),
         setLive: (frame: { url: string; imageBase64: string; at: string } | null) => void (live = frame),
         setModelImages: (on: boolean) => void (modelImages = on),
+        humanInputs,
+        setHumanOutcome: (outcome: 'ok' | 'blocked' | 'closed') => void (humanOutcome = outcome),
         closed: () => closed,
         holds: () => holds,
         releases: () => releases,
@@ -1270,6 +1279,74 @@ describe('AiAssistantService', () => {
           ref.service = service;
           await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
           expect(results).toEqual(['COM-003', ...Array(AI_AGENT_NOTES_MAX).fill('ok'), 'COM-004']);
+        });
+      });
+
+      describe('멈춘 동안 사람이 직접 조작 (이슈 #433)', () => {
+        const typed: AiAgentInput = { kind: 'type', text: 'hunter2' };
+        const codeOf = async (promise: Promise<unknown>) => {
+          try {
+            await promise;
+            return 'ok';
+          } catch (error) {
+            return ((error as AppException).getResponse() as { code: string }).code;
+          }
+        };
+
+        it('동작 앞에서 멈춰 기다리는 동안만 브라우저에 넣고, 계속하면 이어 간다. 입력한 글은 이벤트·답·모델 메시지 어디에도 없다', async () => {
+          const results: string[] = [];
+          const { events, browser, calls, reply } = await run([open, answer('봤어요')], (_nth, _tool, service) => {
+            void (async () => {
+              results.push(await codeOf(service.humanInput(user, CONTROL_ID, { kind: 'click', x: 0.5, y: 0.25 })));
+              results.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              service.controlAgent(user, CONTROL_ID, 'resume');
+            })();
+          });
+          expect(results).toEqual(['ok', 'ok']);
+          expect(browser.humanInputs).toEqual([{ kind: 'click', x: 0.5, y: 0.25 }, typed]);
+          expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'browser_frame', 'tool_end']);
+          for (const text of [JSON.stringify(events), JSON.stringify(reply), JSON.stringify(calls.map((c) => c.messages))]) expect(text).not.toContain('hunter2');
+        });
+
+        it('멈추지 않았거나(하던 동작 중) 답이 끝났거나 남의 답이면 넣지 않는다', async () => {
+          const codes: string[] = [];
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service } = setup(
+            {},
+            async (_call, index) => {
+              if (index === 0) {
+                codes.push(await codeOf(ref.service!.humanInput(user, CONTROL_ID, typed)));
+                codes.push(await codeOf(ref.service!.humanInput({ ...user, employeeId: 2 }, CONTROL_ID, typed)));
+              }
+              return answer('네');
+            },
+            undefined,
+            undefined,
+            undefined,
+            browser.toolbox,
+          );
+          ref.service = service;
+          await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          // 멈추기 전(COM-004), 다른 사원(COM-003)
+          expect(codes).toEqual(['COM-004', 'COM-003']);
+          expect(await codeOf(service.humanInput(user, CONTROL_ID, typed))).toBe('COM-003');
+          expect(browser.humanInputs).toEqual([]);
+        });
+
+        it('탭이 닫혔거나(COM-003) 열 수 없는 주소로 가서 비웠으면(COM-004) 알린다', async () => {
+          const codes: string[] = [];
+          const browser = fakeBrowser();
+          await run([open, answer('봤어요')], (_nth, _tool, service) => {
+            void (async () => {
+              browser.setHumanOutcome('closed');
+              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              browser.setHumanOutcome('blocked');
+              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              service.controlAgent(user, CONTROL_ID, 'resume');
+            })();
+          }, { browser });
+          expect(codes).toEqual(['COM-003', 'COM-004']);
         });
       });
 
