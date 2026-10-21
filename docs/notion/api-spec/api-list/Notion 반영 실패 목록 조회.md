@@ -1,6 +1,6 @@
 # Notion 반영 실패 목록 조회
 
-API ID: API-284
+API ID: API-287
 Method: GET
 Path: /api/v1/integrations/notion/sync-failures
 관련 BP: 

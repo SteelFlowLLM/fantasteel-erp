@@ -49,9 +49,9 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 
 | API | 경로 | 권한 | 설명 |
 | --- | --- | --- | --- |
-| API-284 | `GET /api/v1/integrations/notion/sync-failures` | ORG_MANAGE (VIEW 이상) | 반영에 실패해 남은 행: 종류(`schedule_event`·`meeting_minutes`·`task`)·id·제목·실패 횟수·마지막 이유·결과 모름 여부·다음 자동 시도 시각 |
-| API-285 | `POST /api/v1/integrations/notion/sync-failures/retry` | ORG_MANAGE (USE) | 남은 실패를 모두 다시 시도하고 결과를 기다린다. 응답 `{ requested, succeeded, failed, failures }` |
-| API-286 | `POST /api/v1/integrations/notion/sync-failures/:failureId/retry` | ORG_MANAGE (USE) | 한 건만 다시 시도한다. 없는(이미 처리된) 건은 `COM-003` |
+| API-287 | `GET /api/v1/integrations/notion/sync-failures` | ORG_MANAGE (VIEW 이상) | 반영에 실패해 남은 행: 종류(`schedule_event`·`meeting_minutes`·`task`)·id·제목·실패 횟수·마지막 이유·결과 모름 여부·다음 자동 시도 시각 |
+| API-288 | `POST /api/v1/integrations/notion/sync-failures/retry` | ORG_MANAGE (USE) | 남은 실패를 모두 다시 시도하고 결과를 기다린다. 만들어졌는지 알 수 없던 '결과 모름' 건은 중복 페이지를 막으려고 빼고 건너뛴 수를 알린다. 응답 `{ requested, succeeded, failed, skipped, failures }` |
+| API-289 | `POST /api/v1/integrations/notion/sync-failures/:failureId/retry` | ORG_MANAGE (USE) | 한 건만 다시 시도한다. 없는(이미 처리된) 건은 `COM-003` |
 
 - `GET /api/v1/integrations`(로그인만)의 각 연결에 `health`가 더해졌다: `{ level: NORMAL | WARNING | DOWN(정상·주의·끊김), lastErrorAt, faults[] }`.
 - 알림 유형(공통 코드 정의서 NOTIFICATION_TYPE): `INTEGRATION_FAULT`(연동 장애), `INTEGRATION_RECOVERED`(연동 복구). 같은 연결·같은 종류의 장애는 풀리기 전까지 하루 한 번만 알리고(서버가 여러 대여도 한 번), 풀리면 복구 알림을 한 번 보낸다. 알림을 누르면 `/admin/integrations`로 간다.

@@ -1,6 +1,6 @@
 # Notion 반영 실패 한 건 다시 시도
 
-API ID: API-286
+API ID: API-289
 Method: POST
 Path: /api/v1/integrations/notion/sync-failures/:failureId/retry
 관련 BP: 
