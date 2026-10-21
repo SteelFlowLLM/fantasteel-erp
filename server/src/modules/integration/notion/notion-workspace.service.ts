@@ -184,7 +184,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
   /** 일정을 Notion에 넣을 수 있는지 (일정 등록 화면·카드가 본다, 이슈 #434). 연결을 부르지 않고 저장된 설정만 읽는다 */
   async scheduleStatus(): Promise<ScheduleNotionStatus> {
     const row = await this.connections.findByProviderKey(this.prisma, INTEGRATION_PROVIDER.NOTION);
-    if (!row?.oauthTokens) return { ready: false, reason: 'Notion이 연결되지 않았어요. 관리자가 연결하면 넣을 수 있어요', calendarName: null };
+    if (!row?.oauthTokens) return { ready: false, reason: 'Notion이 연결되지 않았어요', calendarName: null };
     const ws = readyWorkspace(readSettings(row.settings));
     if (!ws) return { ready: false, reason: '관리자가 아직 Notion 업무 공간을 만들지 않았어요', calendarName: null };
     return { ready: true, reason: null, calendarName: ws.calendar?.name ?? null };

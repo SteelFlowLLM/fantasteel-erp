@@ -151,7 +151,7 @@ export class AiActionCardService {
     if (registered.type !== 'action_draft') this.notionWorkspace.kick();
     if (registered.type === 'schedule_event' && notionSyncOf(card)) {
       const status = await this.notionWorkspace.scheduleStatus();
-      if (!status.ready) return { kind, registered: { ...registered, note: `${status.reason} 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요` } };
+      if (!status.ready) return { kind, registered: { ...registered, note: `${status.reason}. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요` } };
     }
     return { kind, registered };
   }

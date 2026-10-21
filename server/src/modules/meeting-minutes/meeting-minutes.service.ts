@@ -450,7 +450,7 @@ export class MeetingMinutesService {
   /** Notion에 넣기로 한 일정을 지금 넣을 수 없는 이유 (이슈 #434). 일정은 넣기 표시를 남겨 Notion이 준비되면 그때 올라간다 */
   private async notionNoticeOf(): Promise<string | null> {
     const status = await this.notionWorkspace.scheduleStatus();
-    return status.ready ? null : `${status.reason} 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요`;
+    return status.ready ? null : `${status.reason}. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요`;
   }
 
   /**

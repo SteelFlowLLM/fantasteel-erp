@@ -28,7 +28,7 @@
 
 `GET /schedule-events/notion-status` — 일정을 Notion에 넣을 수 있는지 (이슈 #434, 로그인만)
 
-- `ScheduleNotionStatus { ready, reason, calendarName }`. Notion 연결(토큰)이 없으면 `ready: false` + "Notion이 연결되지 않았어요…", 업무 공간(일정·회의록·할 일 데이터베이스)이 없으면 "관리자가 아직 Notion 업무 공간을 만들지 않았어요". 저장된 설정만 읽고 Notion을 부르지 않는다.
+- `ScheduleNotionStatus { ready, reason, calendarName }`. Notion 연결(토큰)이 없으면 `ready: false` + "Notion이 연결되지 않았어요", 업무 공간(일정·회의록·할 일 데이터베이스)이 없으면 "관리자가 아직 Notion 업무 공간을 만들지 않았어요". 저장된 설정만 읽고 Notion을 부르지 않는다.
 - 화면(내 일정 등록 창, 회의록 일정 후보, 철강맨AI 일정 카드)이 "Notion 캘린더에도 넣기" 옆에 보일 안내로 쓴다.
 
 직접 등록한 나만의 일정은 작업 로그를 남기지 않는다. 삭제는 요청 범위 밖이라 만들지 않았다.

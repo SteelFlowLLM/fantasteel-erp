@@ -10,7 +10,7 @@ export function NotionSyncToggle({ id, checked, disabled = false, onChange }: { 
     ? null
     : status.data.ready
       ? `Notion 일정 데이터베이스${status.data.calendarName ? `와 캘린더 "${status.data.calendarName}"` : ''}에 올라가요`
-      : `지금은 넣을 수 없어요: ${status.data.reason ?? 'Notion을 쓸 수 없어요'} 켜 두면 준비된 뒤 올라가요`;
+      : `지금은 넣을 수 없어요 (${status.data.reason ?? 'Notion을 쓸 수 없어요'}). 켜 두면 준비된 뒤 올라가요`;
   return (
     <div className="flex flex-col gap-0.5">
       <label htmlFor={id} className="inline-flex items-center gap-1.5 text-sm">
