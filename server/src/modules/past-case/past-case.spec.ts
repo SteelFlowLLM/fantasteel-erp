@@ -239,9 +239,25 @@ describe('사례 수정·삭제 (이슈 #464)', () => {
     expect(next.id).toBeGreaterThan(created.id);
   });
 
+  it('삭제는 같은 트랜잭션에서 작업 로그 CASE_DELETED에 지운 내용을 남기고, 로그를 못 남기면 지우지 않는다 (#496)', async () => {
+    const created = await register({ ...input(), lotIds: [heatIds[0]!, heatIds[1]!] });
+    const spy = jest.spyOn(recorder, 'record').mockRejectedValueOnce(new Error('작업 로그 실패'));
+    await expect(service().remove(user, created.id)).rejects.toThrow('작업 로그 실패');
+    spy.mockRestore();
+    expect(await prisma.pastCase.count({ where: { id: created.id } })).toBe(1);
+
+    await service().remove(user, created.id);
+    const event = await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: 'CASE_DELETED', targetType: 'past_case', targetId: created.id }, include: { businessEventLots: true } });
+    expect(event).toMatchObject({ actorType: 'USER', actorEmployeeId: user.employeeId, afterData: null });
+    expect(event.beforeData).toMatchObject({ caseNo: created.caseNo, title: '수정 전 제목', phenomenon: '수정 전 현상' });
+    expect(event.businessEventLots.map((l) => l.lotId).sort()).toEqual([...heatIds].sort());
+  });
+
   it('등록한 사원 본인·그 부서의 부서장·관리자만 고치고 지운다 (다른 사원은 COM-002)', async () => {
     const created = await register(input());
-    const other: AuthUser = { ...user, employeeId: user.employeeId + 1000, roleCode: ROLE.QUALITY, headDepartmentIds: [] };
+    // 삭제가 작업 로그 주체로 남으므로 실제 있는 다른 사원으로 한다
+    const otherEmployee = await prisma.employee.findFirstOrThrow({ where: { id: { not: user.employeeId } }, orderBy: { id: 'asc' } });
+    const other: AuthUser = { ...user, employeeId: otherEmployee.id, roleCode: ROLE.QUALITY, headDepartmentIds: [] };
     const head: AuthUser = { ...other, headDepartmentIds: [user.departmentId] };
     const otherHead: AuthUser = { ...other, headDepartmentIds: [user.departmentId + 1000] };
     const admin: AuthUser = { ...other, roleCode: ROLE.ADMIN };

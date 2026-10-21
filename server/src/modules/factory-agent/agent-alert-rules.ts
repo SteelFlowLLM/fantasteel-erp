@@ -28,6 +28,7 @@ export interface DueItemInput {
 
 export interface DueRiskAlert {
   meta: AgentDraftMeta;
+  salesOrderItemId: number;
   salesOrderId: number;
   ownerEmployeeId: number;
   /** 날짜가 바뀌어도 같은 위험이면 같은 문장이라, 안 읽은 같은 알림이 있으면 다시 보내지 않는 기준이 된다 */
@@ -52,6 +53,7 @@ export function dueRiskAlerts(items: readonly DueItemInput[], today: string, ris
           summary,
           evidence: { salesOrderNo: i.salesOrderNo, lineNo: i.lineNo, dueDate: i.dueDate, daysLeft: left, orderedQty: i.orderedQty, shippedQty: i.shippedQty },
         },
+        salesOrderItemId: i.salesOrderItemId,
         salesOrderId: i.salesOrderId,
         ownerEmployeeId: i.ownerEmployeeId,
         content: `[Agent 납기 위험] 수주 ${i.salesOrderNo} ${i.lineNo}번 품목 납기 ${i.dueDate}, 출하 ${i.shippedQty}/${i.orderedQty}매`,
@@ -67,6 +69,7 @@ export interface GradeInspectionCount {
 
 export interface QualityRateAlert {
   meta: AgentDraftMeta;
+  steelGradeCode: string;
   content: string;
 }
 
@@ -86,6 +89,7 @@ export function qualityRateAlerts(counts: readonly GradeInspectionCount[], today
           summary,
           evidence: { steelGradeCode: c.steelGradeCode, failCount: c.failCount, totalCount: total, failRatePercent: rate, windowDays: QUALITY_RATE_WINDOW_DAYS },
         },
+        steelGradeCode: c.steelGradeCode,
         content: `[Agent 불합격률 상승] 강종 ${c.steelGradeCode} 최근 ${QUALITY_RATE_WINDOW_DAYS}일 불합격률 ${rate}% (${c.failCount}/${total}건)`,
       };
     });

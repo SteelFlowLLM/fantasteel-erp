@@ -8,7 +8,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { addDays } from './agent-rules';
 import { FactoryAgentRepository } from './factory-agent.repository';
-import { FactoryAgentService } from './factory-agent.service';
+import { AGENT_QUIET_DAYS, FactoryAgentService } from './factory-agent.service';
 
 let moduleRef: TestingModule;
 let prisma: PrismaService;
@@ -80,7 +80,7 @@ describe('대응 후보 알림 (AGENT_CANDIDATE)', () => {
     expect(await noticesOf(draft)).toHaveLength(first.length);
   });
 
-  it('후보를 반려해 새 후보가 생겨도 안 읽은 같은 알림이 있는 사원에게는 다시 보내지 않고, 읽은 사원에게만 보낸다', async () => {
+  it('반려한 후보는 쉬는 기간 동안 다시 알리지 않고, 기간이 지나 새 후보가 생기면 안 읽은 같은 알림이 없는 사원에게만 보낸다', async () => {
     const plan = await shortPlan();
     await agent.scanAll();
     const [draft] = await draftsOf(plan.id);
@@ -90,6 +90,11 @@ describe('대응 후보 알림 (AGENT_CANDIDATE)', () => {
     await prisma.notification.update({ where: { id: mine.id }, data: { readAt: new Date() } });
 
     await agent.reject(purchaser, draft.id, '이미 조달 중');
+    await agent.scanAll();
+    // 반려 뒤 다음 감지(24시간 뒤·재시작)에는 같은 대상의 후보도 알림도 다시 생기지 않는다 (#496)
+    expect(await noticesOf(draft)).toHaveLength(before.length);
+
+    await prisma.actionDraft.update({ where: { id: draft.id }, data: { updatedAt: new Date(Date.now() - (AGENT_QUIET_DAYS + 1) * 86_400_000) } });
     await agent.scanAll();
 
     const after = await noticesOf(draft);

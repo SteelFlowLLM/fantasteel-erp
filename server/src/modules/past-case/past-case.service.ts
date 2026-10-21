@@ -36,7 +36,7 @@ type DraftLot = NonNullable<Awaited<ReturnType<PastCaseRepository['findLot']>>>;
 /**
  * 과거 사례 (EX, REQ-CASE-001~005, API-267~270, docs/backend/past-case.md).
  * 예시 사례(shared PAST_CASE_EXAMPLES, 관련 LOT이 실제 LOT이 아니라 DB에 넣지 않음)와 등록 사례(past_case)를 합쳐 쓴다.
- * 등록은 같은 트랜잭션에서 작업 로그 CASE_REGISTERED를 남긴다. 수정·삭제는 맞는 작업 로그 유형이 없어 서버 로그에 변경 전 값을 남긴다.
+ * 등록·삭제는 같은 트랜잭션에서 작업 로그 CASE_REGISTERED·CASE_DELETED를 남긴다. 수정은 맞는 작업 로그 유형이 없어 서버 로그에 변경 전 값을 남긴다.
  */
 @Injectable()
 export class PastCaseService {
@@ -134,7 +134,10 @@ export class PastCaseService {
     return viewOf(saved);
   }
 
-  /** 과거 사례 삭제. 관련 LOT 연결도 함께 지운다. 지운 사례를 돌려준다. 작업 로그 대신 서버 로그에 지운 내용을 남긴다 */
+  /**
+   * 과거 사례 삭제. 관련 LOT 연결도 함께 지운다. 지운 사례를 돌려준다.
+   * 하드 삭제라 지운 내용을 작업 로그 CASE_DELETED의 변경 전 데이터로 같은 트랜잭션에 남긴다(#496). 작업 로그를 못 남기면 지우지 않는다
+   */
   async remove(user: AuthUser, id: number): Promise<PastCaseView> {
     this.assertRegisteredCase(id);
     const removed = await this.prisma.$transaction(async (tx) => {
@@ -142,6 +145,13 @@ export class PastCaseService {
       if (!found) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
       this.assertCanModify(user, found);
       if (!(await this.repository.deleteCase(tx, id))) throw new AppException('COM-003', '과거 사례를 찾을 수 없어요');
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.CASE_DELETED,
+        actor: user,
+        target: { table: 'past_case', id },
+        lotIds: found.pastCaseLots.map((l) => l.lot.id),
+        before: viewOf(found),
+      });
       return found;
     });
     this.logger.log(`과거 사례 삭제 ${removed.caseNo} (사원 ${user.employeeId}) 지운 내용 ${JSON.stringify(viewOf(removed))}`);
