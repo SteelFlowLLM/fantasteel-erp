@@ -27,7 +27,9 @@ export function inventoryTool(inventory: InventoryService): AssistantTool {
       const match = (texts: (string | null)[]) => !keyword || looseIncludes(texts, keyword);
       const want = (c: (typeof CATEGORIES)[number]) => !category || category === c;
 
-      const products = limitRows(overview.products.filter((r) => match([r.itemCode, r.itemName, r.steelGradeCode])));
+      // 재고 0인 품목이 앞에 섞여 있으면 줄 수 상한에 걸려 재고 있는 품목이 잘린다 (이슈 #455)
+      const matched = overview.products.filter((r) => match([r.itemCode, r.itemName, r.steelGradeCode]));
+      const products = limitRows([...matched.filter((r) => r.onHandQty > 0), ...matched.filter((r) => r.onHandQty <= 0)]);
       const rawMaterials = limitRows(overview.rawMaterials.filter((r) => match([r.itemCode, r.itemName])));
       const surplus = limitRows(overview.surplus.filter((r) => r.surplusQty > 0 && match([r.itemCode, r.itemName, r.steelGradeCode])));
 
