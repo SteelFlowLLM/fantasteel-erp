@@ -86,16 +86,22 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(rooms[1]).toMatchObject({ lastMessage: null, lastMessagePreview: null });
   });
 
-  it('배지·최근 방·방 목록이 한꺼번에 불러도 GET /chat-rooms는 한 번이고, 끝난 뒤의 다시 읽기는 새로 부른다 (이슈 #476)', async () => {
+  it('배지·최근 방·방 목록이 같은 순간에 불러도 GET /chat-rooms는 한 번이고, 그 뒤의 다시 읽기는 새로 부른다 (이슈 #476)', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms' ? ok([listItem(2, 3), listItem(1, 1)]) : undefined));
     const [unread, recent, rooms] = await Promise.all([messengerApi.countUnread(0), messengerApi.listRecentRooms(0, 5), messengerApi.listRooms()]);
     expect(unread).toBe(4);
     expect(recent.map((r) => r.id)).toEqual([2, 1]);
     expect(rooms.map((r) => r.id)).toEqual([2, 1]);
     expect(calls.filter((c) => c.path === '/chat-rooms')).toHaveLength(1);
-    // 응답이 끝난 뒤(예: 읽음 처리 뒤)의 다시 읽기는 변경 전 응답을 받지 않도록 새로 부른다
+    // 다음 작업 턴의 다시 읽기(예: 읽음 처리 직후의 무효화)는 변경 전에 시작한 요청의 응답을 받지 않도록 새로 부른다
     await messengerApi.countUnread(0);
     expect(calls.filter((c) => c.path === '/chat-rooms')).toHaveLength(2);
+    // 응답을 기다리는 중이어도 다음 턴에 시작한 요청은 따로 부른다
+    const first = messengerApi.countUnread(0);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = messengerApi.countUnread(0);
+    await Promise.all([first, second]);
+    expect(calls.filter((c) => c.path === '/chat-rooms').length).toBeGreaterThanOrEqual(3);
   });
 
   it('알림을 끈 방은 배지 합계에서 빠지고, 방 설정은 PATCH /chat-rooms/:id/settings로 보낸다', async () => {

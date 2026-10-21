@@ -12,3 +12,19 @@ describe('배정 사유 길이', () => {
     expect(source).not.toMatch(/REASON_MAX\s*=\s*500/);
   });
 });
+
+describe('배정 사유 길이 확인 (변경·해제 같은 기준)', () => {
+  it('앞뒤 공백을 뗀 뒤 200자를 넘을 때만 막는다', async () => {
+    const { allocationReasonTooLong } = await import('@/features/shipment/lib/shipmentForm');
+    expect(allocationReasonTooLong('가'.repeat(200))).toBe(false);
+    expect(allocationReasonTooLong(`  ${'가'.repeat(200)}  `)).toBe(false);
+    expect(allocationReasonTooLong('가'.repeat(201))).toBe(true);
+    expect(allocationReasonTooLong('')).toBe(false);
+  });
+
+  it('해제 창도 같은 확인으로 [배정 해제]를 막는다', () => {
+    const source = readFileSync(fileURLToPath(new URL('./AllocationLineCard.tsx', import.meta.url)), 'utf8');
+    expect(source).toContain('confirmDisabled={allocationReasonTooLong(releaseReason)}');
+    expect(source).not.toContain('releaseReason.length > REASON_MAX');
+  });
+});

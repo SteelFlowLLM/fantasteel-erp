@@ -72,22 +72,32 @@ export function AudioRecorder({ disabled, file, onChange }: { disabled: boolean;
     }
     release();
     streamRef.current = stream;
-    const mimeType = pickRecorderMimeType((type) => MediaRecorder.isTypeSupported(type));
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => {
-      const type = recorder.mimeType || mimeType || 'audio/webm';
+    try {
+      const mimeType = pickRecorderMimeType((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        const type = recorder.mimeType || mimeType || 'audio/webm';
+        release();
+        guard.end();
+        const blob = new Blob(chunks, { type });
+        onChange(new File([blob], recordingFileName(type), { type }));
+        setPhase('done');
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+    } catch (error) {
+      // 녹음기를 만들거나 시작하지 못해도 마이크를 열어 둔 채 '허용을 기다리는 중'에 갇히지 않게 되돌린다
+      recorderRef.current = null;
       release();
       guard.end();
-      const blob = new Blob(chunks, { type });
-      onChange(new File([blob], recordingFileName(type), { type }));
-      setPhase('done');
-    };
-    recorderRef.current = recorder;
-    recorder.start();
+      setPhase('idle');
+      setProblem(microphoneErrorMessage(error, true));
+      return;
+    }
     startedAtRef.current = Date.now();
     setElapsed(0);
     setPhase('recording');

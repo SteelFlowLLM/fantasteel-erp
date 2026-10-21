@@ -11,15 +11,16 @@ async function fetchCount(queryClient: QueryClient, queryKey: readonly unknown[]
 }
 
 describe('변경 뒤 조회 다시 부르기 (이슈 #476)', () => {
-  it('세션·검색·AI 연결·음성·연동·메신저 그림은 독립 조회라 자동으로 다시 부르지 않는다', () => {
-    expect(isIndependentQuery(queryKeys.session(1))).toBe(true);
-    expect(isIndependentQuery(queryKeys.search('SO'))).toBe(true);
+  it('AI 연결·음성·연동·메신저 그림은 독립 조회라 자동으로 다시 부르지 않는다', () => {
     expect(isIndependentQuery(messengerKeys.image(1, 2, 3))).toBe(true);
     for (const root of INDEPENDENT_QUERY_ROOTS) expect(isIndependentQuery([root, 'x'])).toBe(true);
   });
 
   it('업무 데이터 조회와 메신저 목록·메시지는 독립 조회가 아니다', () => {
     expect(isIndependentQuery(['sales-orders', 'list'])).toBe(false);
+    // 세션(내 권한·역할·부서장)과 검색은 변경 뒤 낡으면 메뉴 잠금·배지·검색 결과가 틀린다
+    expect(isIndependentQuery(queryKeys.session(1))).toBe(false);
+    expect(isIndependentQuery(queryKeys.search('SO'))).toBe(false);
     expect(isIndependentQuery(queryKeys.unreadNotificationCount(1))).toBe(false);
     expect(isIndependentQuery(messengerKeys.rooms(1))).toBe(false);
     expect(isIndependentQuery(messengerKeys.messages(1, 2, 30))).toBe(false);
@@ -37,12 +38,14 @@ describe('변경 뒤 조회 다시 부르기 (이슈 #476)', () => {
     const orders = await fetchCount(queryClient, ['sales-orders', 'list']);
     const image = await fetchCount(queryClient, messengerKeys.image(1, 2, 3));
     const session = await fetchCount(queryClient, queryKeys.session(1));
-    expect(orders.n + image.n + session.n).toBe(3);
+    const llm = await fetchCount(queryClient, ['llm', 'settings']);
+    expect(orders.n + image.n + session.n + llm.n).toBe(4);
     await refreshAfterAction(queryClient);
     const state = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
     expect(state(['sales-orders', 'list'])).toBe(true);
     expect(state(messengerKeys.image(1, 2, 3))).toBe(false);
-    expect(state(queryKeys.session(1))).toBe(false);
+    expect(state(queryKeys.session(1))).toBe(true);
+    expect(state(['llm', 'settings'])).toBe(false);
   });
 
   it('호출한 쪽이 지정한 키는 독립 조회여도 무효화한다 (설정 저장 화면)', async () => {
