@@ -187,3 +187,20 @@ describe('회의록 확인·등록 (API-261)', () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe('회의록 지우기·참석자 고치기 (이슈 #449)', () => {
+  it('참석자 고치기: 중복을 없애 PUT attendees로 보내고, 비면 서버를 부르기 전에 입력칸 오류', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'PUT' && c.path === '/meeting-minutes/3/attendees' ? ok(view) : undefined));
+    await meetingMinutesApi.updateAttendees({ id: 3, attendeeIds: [5, 6, 5] });
+    expect(calls[0].body).toEqual({ attendeeIds: [5, 6] });
+    const error = await meetingMinutesApi.updateAttendees({ id: 3, attendeeIds: [] }).catch((e: unknown) => e);
+    expect((error as InputError).fieldErrors).toEqual({ attendeeIds: '참석자를 1명 이상 골라 주세요' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('지우기: DELETE로 부르고 지운 id를 돌려준다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'DELETE' && c.path === '/meeting-minutes/3' ? ok({ id: 3 }) : undefined));
+    expect(await meetingMinutesApi.remove(3)).toEqual({ id: 3 });
+    expect(calls).toHaveLength(1);
+  });
+});

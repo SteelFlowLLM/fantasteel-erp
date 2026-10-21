@@ -32,6 +32,7 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 | `npm run db:deploy -w @fantasteel/server` | 공용 DB에 마이그레이션 반영 (DB 담당자만, 최신 develop에서만, 8장). 처음 한 번은 `-- --seed`로 빈 DB에 시드까지 |
 | `npm test` | 서버 테스트. 묶음마다 테스트 전용 DB(`fs_*`)를 새로 만들어 돌린다. DB가 떠 있어야 한다. `npx jest <파일>`로 바로 돌리면 DB 시험은 `fs_*`가 아닌 DB에 붙지 못해 실패한다(`jest.db-guard.cjs`, 이슈 #447: 시험의 `deleteMany`가 개발 DB의 Notion 연결·데이터를 지웠다). 한 파일만 돌릴 때도 `npm test -- <경로 일부>` |
 | `npm run test:unit -w @fantasteel/server` | DB 없이 공통 단위 테스트만 |
+| `npm run test:voice` | 음성 서버(`tools/voice-sidecar`) API 키 시험. 파이썬 3만 있으면 된다 |
 | `npm run typecheck` | shared·server·client 타입 검사 |
 | `npm run check-orphans -w @fantasteel/server` | 고아 데이터 점검 (시드 후·PR 전, 컨벤션 7-2) |
 | `npm run check-invariants -w @fantasteel/server` | 업무 불변식 점검: 재고 수량·원료/용선 잔량·실적 순서·설비 겹침·예약 (읽기만, 위반 있으면 종료 코드 1, `-- --all`로 위반 행 모두) |
