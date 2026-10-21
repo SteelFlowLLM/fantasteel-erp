@@ -1,4 +1,6 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
+import { PERMISSION } from '@/codes';
+import { canUse, permissionNeedText, type WithPermissions } from '@/lib/permissions';
 import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
@@ -61,6 +63,23 @@ export function decisionCounts(candidates: readonly MeetingCandidate[]): Decisio
 export function approvalBlocker(c: MeetingCandidate): string | null {
   const missing = missingFieldsOf(c);
   return missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 허가할 수 있어요` : null;
+}
+
+/** 구매요청 후보를 허가할 작성자 (구매요청 초안의 요청자가 된다) */
+export interface PurchaseApprover extends WithPermissions {
+  departmentId: number;
+  headDepartmentIds: readonly number[];
+}
+
+/**
+ * 구매요청 후보를 이 작성자가 허가할 수 없는 이유 (서버 assertCanRequestFromMeeting과 같은 규칙). 칸을 채워도 풀리지 않아 따로 보인다.
+ * 누른 뒤에야 서버가 거절(COM-002·PUR-001)하지 않게 미리 막는다 (#519)
+ */
+export function purchaseApprovalBlocker(c: MeetingCandidate, approver: PurchaseApprover): string | null {
+  if (c.kind !== 'PURCHASE') return null;
+  if (!canUse(approver, PERMISSION.PURCHASE_REQUISITION_CREATE)) return `${permissionNeedText([PERMISSION.PURCHASE_REQUISITION_CREATE])}. 구매요청 후보는 제외하거나 구매 담당자가 확정해 주세요`;
+  if (approver.headDepartmentIds.includes(approver.departmentId)) return '부서장 본인 요청은 승인할 사람이 없어 허가할 수 없어요. 구매요청 후보는 제외하거나 부서원이 확정해 주세요';
+  return null;
 }
 
 /** 확정 확인창에 보일 줄: 종류별 허가 건수와 제목, 제외 건수 */

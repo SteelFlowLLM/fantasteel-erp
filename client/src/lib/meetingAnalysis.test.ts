@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -77,6 +77,16 @@ describe('허가·제외 계산', () => {
     expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T14:00:00+09:00', attendeeIds: [1] })).toContain('끝 시각');
     expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00' })).toContain('참석자');
     expect(approvalBlocker(candidate('PURCHASE', 'c1'))).toBe('원료 품목, 수량(톤), 희망 입고일을(를) 채워야 허가할 수 있어요');
+  });
+
+  it('구매요청 후보는 구매요청 등록 사용 권한이 없거나 자기 부서의 부서장이면 허가를 막는다 (서버 COM-002·PUR-001과 같다, #519)', () => {
+    const purchase = candidate('PURCHASE', 'c1');
+    const staff = { permissions: { PURCHASE_REQUISITION_CREATE: 'USE' as const }, departmentId: 3, headDepartmentIds: [] };
+    expect(purchaseApprovalBlocker(purchase, staff)).toBeNull();
+    expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [5] })).toBeNull();
+    expect(purchaseApprovalBlocker(purchase, { ...staff, permissions: { PURCHASE_REQUISITION_CREATE: 'VIEW' } })).toContain('구매 담당자가 확정해 주세요');
+    expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [3] })).toContain('부서장 본인');
+    expect(purchaseApprovalBlocker(task(), { ...staff, permissions: {} })).toBeNull();
   });
 
   it('확정 확인창에는 허가한 후보만 종류별로 보인다', () => {

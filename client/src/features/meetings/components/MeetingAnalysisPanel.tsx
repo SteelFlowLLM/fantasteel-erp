@@ -22,7 +22,7 @@ import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
-import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 function AiLabel() {
   return (
@@ -183,7 +183,11 @@ interface CardProps {
 function CandidateCard({ candidate, minutes, names, editable, editing, pending, myId, onJump, onEdit, onDecide, onSave }: CardProps) {
   const confirmed = minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.CONFIRMED;
   const excluded = candidate.decision === 'EXCLUDED';
-  const blocker = approvalBlocker(candidate);
+  const me = useMe();
+  // 권한·부서장이라 못 하는 것은 칸을 채워도 풀리지 않아 먼저 보인다
+  const roleBlocker = purchaseApprovalBlocker(candidate, me);
+  const fieldBlocker = approvalBlocker(candidate);
+  const blocker = roleBlocker ?? fieldBlocker;
   return (
     <li className={cn('flex flex-col gap-2 rounded-sm border bg-surface-2 p-3', candidate.decision === 'APPROVED' ? 'border-ok' : 'border-line', excluded && 'opacity-60')}>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -264,7 +268,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
           )}
         </div>
       ) : null}
-      {editable && !editing && !excluded && candidate.decision !== 'APPROVED' && blocker ? <p className="text-right text-cap text-ink-3">{blocker}. 수정에서 채워 주세요</p> : null}
+      {editable && !editing && !excluded && candidate.decision !== 'APPROVED' && blocker ? <p className="text-right text-cap text-ink-3">{roleBlocker ?? `${fieldBlocker}. 수정에서 채워 주세요`}</p> : null}
     </li>
   );
 }
