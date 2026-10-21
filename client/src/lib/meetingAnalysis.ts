@@ -1,5 +1,5 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -17,7 +17,7 @@ export type AnalyzeAvailability = { ok: true } | { ok: false; reason: string | n
 export function analyzeAvailability(minutes: MeetingMinutesView, employeeId: number): AnalyzeAvailability {
   if (minutes.creator.id !== employeeId) return { ok: false, reason: null };
   if (!ANALYZABLE.includes(minutes.meetingMinutesStatus) || !minutes.transcript?.trim()) return { ok: false, reason: null };
-  if (minutes.transcript.length > MEETING_ANALYSIS_MAX_CHARS) return { ok: false, reason: '회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하)' };
+  if (minutes.transcript.length > MEETING_ANALYSIS_MAX_CHARS) return { ok: false, reason: '회의 기록이 너무 길어 분석할 수 없어요 (20만 자 이하)' };
   return { ok: true };
 }
 
@@ -82,10 +82,25 @@ export function contextLinesOf(c: MeetingCandidate): MeetingCandidateContextLine
 /** AI 요약 머리말 밑 한 줄. 2차 검토를 하지 않은 옛 분석 결과는 null(안 보인다) */
 export function reviewSummaryText(review: MeetingAnalysis['review']): string | null {
   if (!review) return null;
-  return review.ok ? `2차 검토: 빠진 후보 ${review.missedCount}건 · 지적 ${review.concernCount}건` : '2차 검토 실패 — 1차 결과만 보여요';
+  if (!review.ok) return '2차 검토 실패 — 1차 결과만 보여요';
+  const failed = review.failedChunks ? ` (조각 ${review.failedChunks}개는 검토 실패)` : '';
+  return `2차 검토: 빠진 후보 ${review.missedCount}건 · 지적 ${review.concernCount}건${failed}`;
 }
 
-export const TRACE_STAGE_LABEL: Record<MeetingTraceStage, string> = { ANALYSIS: '1차 분석', REVIEW: '2차 검토' };
+export const TRACE_STAGE_LABEL: Record<MeetingTraceStage, string> = { ANALYSIS: '1차 분석', MERGE: '조각 합치기', REVIEW: '2차 검토' };
+
+/** 실행 기록 단계 이름 옆 조각 표시: "조각 2/5 · 발언 #210~#432". 나누지 않은 분석은 null */
+export function traceChunkText(chunk: MeetingTraceStep['chunk']): string | null {
+  return chunk ? `조각 ${chunk.index}/${chunk.total} · 발언 #${chunk.firstSegment}~#${chunk.lastSegment}` : null;
+}
+
+/** AI 정리 중 진행 안내. 긴 전사는 몇 번째 조각인지 보인다. 진행 칸이 없으면(옛 서버) null */
+export function analysisProgressText(progress: MeetingAnalysisProgress | null | undefined): string | null {
+  if (!progress) return null;
+  const chunk = progress.total > 1 ? ` (조각 ${progress.current}/${progress.total})` : '';
+  if (progress.phase === 'MERGE') return '조각 결과를 합치는 중';
+  return progress.phase === 'ANALYSIS' ? `1차 분석 중${chunk}` : `2차 검토 중${chunk}`;
+}
 
 /** 걸린 시간: 1분이 넘으면 "1분 12초", 아니면 "8.4초" */
 export function formatDuration(ms: number): string {

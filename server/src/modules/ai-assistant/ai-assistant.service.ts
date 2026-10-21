@@ -336,10 +336,14 @@ export class AiAssistantService {
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
     const saving = options.interactive === true && (input.saveThread === true || input.threadId !== undefined);
+    // 회의 질문은 사원·회의록마다 대화 하나에 이어 쌓는다. 다른 대화 id를 함께 보내면 섞지 않고 AST-001
+    const meetingThreadId = saving && input.meetingMinutesId !== undefined ? await this.chatThreads.meetingThreadId(user, input.meetingMinutesId) : undefined;
+    if (saving && input.meetingMinutesId !== undefined && input.threadId !== undefined && input.threadId !== meetingThreadId) throw new AppException('AST-001');
+    const threadId = input.meetingMinutesId !== undefined && saving ? meetingThreadId : input.threadId;
     const endpoint: LlmEndpoint = llmEndpointOf(settings);
     // 지난 대화는 모델 문맥 길이만큼 (이슈 #412). 넘치는 옛 이야기는 지난 대화 찾기 도구로 읽는다
     const budget = historyBudget(await this.llm.modelContextLength(endpoint, model));
-    const history = recentHistory(saving ? (input.threadId === undefined ? [] : await this.chatThreads.historyFor(user, input.threadId, budget.maxTurns)) : (input.history ?? []), budget);
+    const history = recentHistory(saving ? (threadId === undefined ? [] : await this.chatThreads.historyFor(user, threadId, budget.maxTurns)) : (input.history ?? []), budget);
     const historySource = options.historySearch ?? (options.interactive === true ? this.chatThreads.searchSource(user) : null);
     const references = this.referencesFor(input.question, history);
     const processSteps = findProcessSteps(input.question);
@@ -411,10 +415,11 @@ export class AiAssistantService {
       try {
         return await this.chatThreads.saveTurn(
           user,
-          input.threadId,
+          threadId,
           // @로 붙인 Drive 파일은 글이 아니라 이름만 남긴다 (이어 묻는 질문의 맥락용, 이슈 #398)
           { question: input.question, reasoning: input.reasoning, webSearch: input.webSearch, browser: input.browser, imageCount: input.images?.length, driveFiles: attached?.names, ...(userNotes.length ? { notes: [...userNotes] } : {}) },
           reply,
+          saving ? input.meetingMinutesId : undefined,
         );
       } catch (error) {
         this.logger.warn(`대화를 저장하지 못함: ${error instanceof Error ? error.message : String(error)}`);

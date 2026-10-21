@@ -265,12 +265,13 @@ export class MeetingMinutesService {
 
   /**
    * 회의록을 지운다 (이슈 #449). 확정 전에는 업무·일정·구매요청 초안이 가리키지 않고 Notion 페이지도 없으며 원본 음성은 저장하지 않으므로
-   * 참석자 행과 회의록 행만 지운다(표시만 하는 삭제가 아니다). 작업 로그는 남기지 않는다: REQ-LOG-002에 회의록 생성·삭제가 없다.
+   * 참석자 행·이 회의에 물은 대화·회의록 행을 지운다(표시만 하는 삭제가 아니다). 작업 로그는 남기지 않는다: REQ-LOG-002에 회의록 생성·삭제가 없다.
    */
   async remove(user: AuthUser, id: number): Promise<{ id: number }> {
     await this.loadForEdit(user, id, '지울');
     await this.prisma.$transaction(async (tx) => {
       await this.repository.deleteAllAttendees(tx, id);
+      await this.repository.deleteChatThreads(tx, id);
       const { count } = await this.repository.deleteMeetingMinutes(tx, id, EDIT_OPEN_STATUSES);
       if (count === 0) await this.throwEditConflict(tx, id, '지울');
     });

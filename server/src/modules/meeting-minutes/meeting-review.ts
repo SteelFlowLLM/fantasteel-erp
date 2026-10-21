@@ -19,7 +19,7 @@ export const REVIEW_DROP = {
   concernReason: '지적에 이유가 없어요',
   notAProblem: '모델이 스스로 문제가 아니라고 적은 지적이에요',
   duplicate: '1차 후보와 종류·제목이 같아요',
-  noRoom: `후보가 ${LIST_MAX}개를 넘어 더 넣지 않았어요`,
+  noRoom: (limit: number = LIST_MAX) => `후보가 ${limit}개를 넘어 더 넣지 않았어요`,
 } as const;
 
 export interface ReviewMerge {
@@ -41,12 +41,20 @@ export function reviewItemsOf(raw: unknown): { items: unknown[] } {
 
 const sameCandidate = (a: Pick<MeetingCandidate, 'kind' | 'title'>, b: Pick<MeetingCandidate, 'kind' | 'title'>) => a.kind === b.kind && squash(a.title) === squash(b.title);
 
+export interface ReviewMergeOptions {
+  /** 모델에 보여 준 후보 키. 긴 전사를 조각마다 검토할 때 그 조각 후보만 보여 주므로, 보여 주지 않은 후보에 대한 지적은 버린다 */
+  shownKeys?: ReadonlySet<string>;
+  /** 전체 후보 상한 (긴 전사는 조각 수에 맞춰 늘린다) */
+  limit?: number;
+}
+
 /**
  * 1차 후보(키 c1…)에 2차 결과를 합친다.
  * - missed: 같은 검증을 통과한 것만, 키는 c{n+1}부터. 1차와 종류·제목이 같으면 중복이라 버린다.
- * - concerns: 없는 키·빈 이유는 버리고, 있는 후보에는 확인 사유로 덧붙인다.
+ * - concerns: 없는 키(보여 주지 않은 키 포함)·빈 이유는 버리고, 있는 후보에는 확인 사유로 덧붙인다.
  */
-export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: AnalysisContext): ReviewMerge {
+export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: AnalysisContext, options: ReviewMergeOptions = {}): ReviewMerge {
+  const limit = options.limit ?? LIST_MAX;
   if (!isReadableReview(raw)) return { candidates: first, review: { ok: false, error: REVIEW_BAD_SHAPE }, changes: [] };
 
   const changes: MeetingTraceChange[] = [];
@@ -56,7 +64,7 @@ export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: Analys
     if (!isObject(c)) continue;
     const key = text(c.key, 20);
     const reason = text(c.reason, CONCERN_MAX);
-    const target = key === null ? undefined : first.find((f) => f.key === key);
+    const target = key === null || (options.shownKeys && !options.shownKeys.has(key)) ? undefined : first.find((f) => f.key === key);
     const drop = (why: string) => changes.push({ action: 'DROPPED', title: target?.title ?? reason, reason: why });
     if (key === null || target === undefined) {
       drop(REVIEW_DROP.concernKey(key));
@@ -71,12 +79,12 @@ export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: Analys
   }
 
   const merged = first.map((c) => ({ ...c, issues: [...c.issues, ...(concerns.get(c.key) ?? [])] }));
-  const room = Math.max(0, LIST_MAX - merged.length);
+  const room = Math.max(0, limit - merged.length);
   let missedCount = 0;
   for (const item of (Array.isArray(raw.missed) ? raw.missed : []).slice(0, LIST_MAX)) {
     if (!isObject(item)) continue;
     const candidate = toCandidate(item, ctx);
-    const dropped = candidate === null ? dropReasonOf(item, ctx) : merged.some((m) => sameCandidate(m, candidate)) ? REVIEW_DROP.duplicate : missedCount >= room ? REVIEW_DROP.noRoom : null;
+    const dropped = candidate === null ? dropReasonOf(item, ctx) : merged.some((m) => sameCandidate(m, candidate)) ? REVIEW_DROP.duplicate : missedCount >= room ? REVIEW_DROP.noRoom(limit) : null;
     if (candidate === null || dropped !== null) {
       changes.push({ action: 'DROPPED', title: titleOf(item), reason: dropped ?? dropReasonOf(item, ctx) });
       continue;

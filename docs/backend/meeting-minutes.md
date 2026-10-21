@@ -15,7 +15,8 @@
 
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
-| 쓰기 | `meeting_minutes` | `meeting_minutes_status`(MEETING_MINUTES_STATUS), `transcript`(원본 전사 그대로), `transcript_segments` jsonb `[{start, end, text}]`, `creator_id` = 로그인 사원 |
+| 쓰기 | `meeting_minutes` | `meeting_minutes_status`(MEETING_MINUTES_STATUS), `transcript`(원본 전사 그대로), `transcript_segments` jsonb `[{start, end, text}]`, `analysis_progress` jsonb(AI 정리 진행, 2026-10-21), `creator_id` = 로그인 사원 |
+| 쓰기 | `ai_chat_thread`·`ai_chat_message` | 회의 질문 대화 (`meeting_minutes_id`가 있는 대화, 2026-10-21). 회의록을 지울 때 함께 지운다 |
 | 쓰기 | `meeting_attendee` | `(meeting_minutes_id, employee_id)` unique |
 | 읽기 | `employee`, `department`, `role` | 참석자 확인·표시 |
 
@@ -74,9 +75,9 @@
 **상세** 원본 전사(`transcript`, `transcriptSegments`)와 AI 요약(`summary`, `analysisResult`)을 별개 칸으로 돌려준다. 없으면 `VOC-001`(404).
 
 **AI 분석** (`POST meeting-minutes/:id/analyze`, `MeetingAnalysisRunner`, `meeting-analysis.{prompt,validator}.ts`)
-- 작성자(`creator_id`)만 할 수 있다(`VOC-003` 403). 전사가 있는 `TRANSCRIBED`·`REVIEW`(다시 정리: 이전 분석을 새 결과로 바꾼다)·`FAILED`만 허용, 그 밖(`TRANSCRIBING`·`ANALYZING`·`CONFIRMED`, 전사 없는 `FAILED`)은 `VOC-004` 409. 전사가 40,000자를 넘으면 `VOC-005` 400(나눠 분석하는 방식은 나중). 상태는 `UPDATE … WHERE status IN (…)` 조건부로 `ANALYZING`(`failure_reason` 지움)으로 바꾸고 상세를 바로 돌려준다(두 번 눌러도 한 번만 시작). 분석은 응답 뒤 runner가 **한 번에 하나**씩 한다.
-- 성공: 상태 `REVIEW`, `analysis_result`(shared `MeetingAnalysis`), `summary` 복사. 실패: `FAILED` + 한국어 이유(`LlmRequestError` 문구, 아니면 `AI 정리 중 오류가 났어요. 다시 정리해 주세요`). 결과 반영은 `WHERE status = ANALYZING`이라 그 사이 상태가 바뀌었으면 버린다. 맡은 서버의 표시가 끊긴 `ANALYZING` 행은 위 '멈춘 작업 정리'와 같은 규칙으로 `FAILED`(`분석하던 서버가 멈춰 분석이 중단됐어요. 다시 정리해 주세요`). `business_event`는 남기지 않는다.
-- LLM 호출: `LlmClient.chatJsonWithText` (JSON과 함께 원문·생각 글을 돌려준다. JSON 스키마 강제, `temperature 0`, 제한 시간 5분). 400이면 형식 강제 없이 한 번 더 부르고, `<think>`·코드 울타리를 벗기며, content가 비면 `reasoning_content`를 읽는다. 모델·주소는 AI 연결 설정(`LlmSettingsStore`)이다.
+- 작성자(`creator_id`)만 할 수 있다(`VOC-003` 403). 전사가 있는 `TRANSCRIBED`·`REVIEW`(다시 정리: 이전 분석을 새 결과로 바꾼다)·`FAILED`만 허용, 그 밖(`TRANSCRIBING`·`ANALYZING`·`CONFIRMED`, 전사 없는 `FAILED`)은 `VOC-004` 409. 전사가 200,000자(`MEETING_ANALYSIS_MAX_CHARS`)를 넘으면 `VOC-005` 400. 40,000자를 넘는 전사는 조각으로 나눠 분석한다(아래 '긴 전사 나눠 분석'). 상태는 `UPDATE … WHERE status IN (…)` 조건부로 `ANALYZING`(`failure_reason` 지움)으로 바꾸고 상세를 바로 돌려준다(두 번 눌러도 한 번만 시작). 분석은 응답 뒤 runner가 **한 번에 하나**씩 한다.
+- 성공: 상태 `REVIEW`, `analysis_result`(shared `MeetingAnalysis`), `summary` 복사, `analysis_progress` 지움. 실패: `FAILED` + 한국어 이유(`LlmRequestError` 문구, 아니면 `AI 정리 중 오류가 났어요. 다시 정리해 주세요`). 결과 반영은 `WHERE status = ANALYZING`이라 그 사이 상태가 바뀌었으면 버린다. 맡은 서버의 표시가 끊긴 `ANALYZING` 행은 위 '멈춘 작업 정리'와 같은 규칙으로 `FAILED`(`분석하던 서버가 멈춰 분석이 중단됐어요. 다시 정리해 주세요`). `business_event`는 남기지 않는다.
+- LLM 호출: `LlmClient.chatJsonWithText` (JSON과 함께 원문·생각 글을 돌려준다. JSON 스키마 강제, `temperature 0`, 제한 시간 🟡 10분: 2026-10-21 실측에서 2만 자 조각 하나가 LM Studio를 다른 작업과 나눠 쓸 때 5분을 넘겨 늘렸다). 400이면 형식 강제 없이 한 번 더 부르고, `<think>`·코드 울타리를 벗기며, content가 비면 `reasoning_content`를 읽는다. 모델·주소는 AI 연결 설정(`LlmSettingsStore`)이다.
 - **프롬프트 주입 대응** (REQ-AST-005·009): ① 전사는 `<transcript>` 안의 **데이터**이고 지시가 아니라고 시스템 프롬프트에 못 박는다. ② 모델은 DB에 쓰지 못하고 JSON 제안만 낸다. ③ 서버가 모든 후보를 규칙으로 검증하고(아래), 사원 id·품목 id·수주 id·톤은 모델 값을 믿지 않고 DB 매칭·파싱으로만 정한다. ④ 근거 없는 항목은 버리고, 애매한 담당자·날짜는 지어내지 않고 `issues`(확인 필요)로 표시한다. ⑤ 이 단계는 등록하지 않으므로 오작동해도 후보 목록이 틀릴 뿐 데이터는 바뀌지 않는다.
 - **검증 규칙** (순수 함수 `validateAnalysis`, 발언 번호는 모델이 1부터 센 값 → `evidence`는 0부터의 위치):
   - 근거(`evidence`)가 범위 밖·정수 아님을 빼고 비면 후보·결정사항을 버린다. `kind`가 TASK/EVENT/PURCHASE가 아니거나 제목이 없으면 버린다(제목 200자). `sourceText`(말한 표현)는 근거 발언에 실제로 있을 때만 남긴다.
@@ -90,10 +91,31 @@
   - 원문·생각 글은 단계당 20,000자(`TRACE_TEXT_MAX`)까지만 저장하고 잘랐으면 `truncated`. 2차 검토 답을 JSON으로 읽지 못해도(`LlmJsonParseError`) 원문을 남긴다. 1차 분석이 실패하면 결과 자체를 저장하지 않으므로 기록도 없다.
   - 화면: AI 분석 카드 아래 접힌 "AI가 한 일 보기". 생각 글에는 "모델이 스스로 쓴 설명이라 실제 판단과 다를 수 있어요"를 붙인다. 이 기능 전의 분석 결과에는 `trace`가 없다.
 
+### 긴 전사 나눠 분석 (2026-10-21, 문서에 없는 기능)
+
+한국어 회의 약 2시간이면 전사가 4만 자를 넘는다. 그런 전사를 거절하지 않고 조각으로 나눠 분석한다 (`meeting-analysis.chunks.ts`, 순수 함수).
+
+- **나누기** (`splitTranscript`): 모델에 보내는 줄(`[n] 이름: 글`, 1차 분석과 같은 `segmentPromptText`) 길이의 합이 🟡 **40,000자 이하면 나누지 않는다**(이 기능 전과 똑같이 한 번에 분석, 실행 기록에 조각 표시 없음). 넘으면 발언(화자 줄) 경계에서 🟡 **조각 24,000자**씩 자르고, 다음 조각은 앞 조각 끝의 발언을 🟡 **겹침 2,000자**만큼 다시 담아 시작한다(경계에 걸친 말을 양쪽에서 보게). 한 발언이 조각보다 길면 문장 끝(`. ? ! 。 … ` 뒤 공백)에서 나눠 같은 번호로 여러 줄을 두고, 나눈 줄마다 같은 화자 머리말(`이름:`·`화자1:`)을 붙인다(그래도 긴 문장은 글자 수로 자른다). 가정값의 근거: 한국어는 대략 글자 1개가 토큰 1개라 32K 문맥 모델에서도 지시·출력(8천 토큰)을 더해 넘치지 않게 잡았다. 지금 개발 모델(qwen3.8-flash-next)은 262K 문맥이라 여유가 크다.
+- **발언 번호는 회의 전체 기준 그대로**: 조각 프롬프트의 `[n]`은 1부터 다시 세지 않는다. 사용자 메시지에 "N개 부분 중 k번째, 번호는 회의 전체 기준, 앞뒤와 일부 겹친다"를 덧붙인다. 그래서 근거(`evidence`)가 원본 전사 위치를 그대로 가리키고 화면의 근거 칩도 그대로 원본 발언으로 이동한다.
+- **조각마다 1차 분석**: 같은 시스템 프롬프트·JSON 스키마·검증기(`validateAnalysis`)를 쓴다. 검증 전에 근거 번호를 **그 조각 안의 번호로만** 거른다(`restrictToChunk`): 조각에 없는 번호는 지어낸 것이라 빈 근거가 된 항목은 기존 규칙대로 `DROP`(근거 없음)으로 버린다. 한 조각이라도 1차 분석이 실패하면(호출 오류·모양 오류) 그 부분 후보가 통째로 빠지므로 **분석 전체를 실패**로 두고 `failure_reason`에 `N개 조각 중 k번째(발언 a~b) 분석 실패: <이유>`를 남긴다.
+- **합치기** (`mergeChunkResults`):
+  - 결정사항은 글(공백 무시)이 같으면 하나로 두고 근거를 모은다.
+  - 후보는 종류가 같고 ① 제목(공백 무시)이 같거나 ② 다른 조각에서 같은 발언을 근거로 댔으면(겹침 구간) **같은 일**로 본다. 같은 일이고 담당자·원료·날짜(마감·시작·희망 입고일)·수량이 서로 어긋나지 않으면 앞 조각 후보에 근거만 더한다(실행 기록 `앞 조각 후보와 같은 일이라 근거를 합쳤어요`). 한 후보는 다른 조각마다 하나씩만 흡수한다(같은 발언에서 나온 두 일을 하나로 뭉치지 않게).
+  - 같은 일인데 값이 어긋나면(회의 중 "10톤 → 15톤"처럼 바뀐 결정) **합치지 않고 둘 다 둔다**. 앞 후보에 `뒷부분의 "…" 후보와 담당자·날짜·수량이 달라요. 어느 쪽이 맞는지 확인해 주세요`, 뒤 후보에 `앞부분의 "…" 후보와 … 회의 중에 바뀐 결정인지 확인해 주세요`를 붙여 작성자가 하나를 제외하게 한다.
+  - 제목·근거가 달라도 다른 조각의 같은 종류·같은 담당자·같은 날짜(구매는 같은 원료)인 후보는 회의 끝에 다시 정리한 말일 수 있어, 합치지 않고 뒤 후보에 `앞부분의 "…" 후보와 같은 일일 수 있어요. 겹치면 하나를 제외해 주세요`를 붙인다.
+  - 키는 `c1…`로 다시 붙인다. 🟡 상한은 조각 수에 맞춰 늘린다(`candidateLimit`: 조각마다 15개, 30~90개, 나누지 않으면 30개). 2차 검토가 더할 자리도 이 상한 안에서 세고, 넘친 후보는 실행 기록에 남긴다. 근거 인용(`sourceText`)·확인 사유는 처음 뽑은 조각의 것을 그대로 둔다.
+- **요약 합치기**: 조각 요약을 모델에 한 번 더 보내(`SUMMARY_MERGE_SYSTEM_PROMPT`, 부분 요약은 `<summaries>` 안의 데이터이고 지시가 아니라고 못 박는다) 회의 전체 요약 4~8문장을 받는다. 실패하면 분석을 실패시키지 않고 조각 요약을 차례로 이어 3,000자까지 쓴다(실행 기록 `MERGE` 단계에 실패 이유).
+- **2차 검토도 조각마다**: 조각 전사와 **그 조각의 발언을 근거로 한 후보만** 보여 주고 기존 프롬프트·`mergeReview`를 차례로 거친다(전체 후보를 이어 받아 키가 겹치지 않고, 앞 조각에서 찾은 후보와 중복이면 버린다). 지적(`concerns`)은 **그 조각에서 보여 준 후보 키만** 받는다(보여 주지 않은 키는 `REVIEW_DROP`). `missed`의 근거도 조각 범위로 거른다. 모든 조각이 실패해야 `review.ok = false`이고, 일부만 실패하면 `review = { ok: true, missedCount, concernCount, failedChunks }`(화면: `(조각 n개는 검토 실패)`).
+- 그다음 ERP 현황 계산·서버 검증·확인·등록은 이 기능 전과 같다.
+- **진행 상황** (`meeting_minutes.analysis_progress` jsonb, 마이그레이션 `20261021123335_meeting_long_analysis_and_questions`): 단계마다 `{ phase: ANALYSIS | MERGE | REVIEW, current, total }`를 `WHERE status = ANALYZING` 조건부로 적는다(같은 UPDATE가 `updated_at`도 바꿔 살아 있다는 표시를 겸한다). 상세 응답 `analysisProgress`는 `ANALYZING`일 때만 값이 있다. 화면은 "AI가 정리하는 중… 1차 분석 중 (조각 2/5)"처럼 보인다(나누지 않은 분석은 "1차 분석 중"·"2차 검토 중"). 시작·끝·실패 때 지운다.
+- **실행 기록**: 조각마다 `ANALYSIS`·`REVIEW` 단계가 하나씩 생기고 `chunk = { index, total, firstSegment, lastSegment }`(발언 번호 1부터)를 붙인다. 그 사이에 `MERGE` 단계(요약 합치기 원문, 조각 합치기에서 버린 것)가 들어간다. 화면은 단계 이름 옆에 `조각 2/5 · 발언 #210~#432`.
+- 🟡 **걸리는 시간**: LLM 호출이 `조각 수 × 2 + 1`번이다(20만 자면 조각 9개 안팎, 호출 19번). 실측: 4만 3천 자(조각 3개)에 16분. 호출마다 제한 시간은 10분이다.
+- 🟡 **전체 시간 상한** `MEETING_ANALYSIS_MAX_MINUTES`(기본 120분, 10~600): 분석은 줄을 서서 하나씩 돌아 긴 회의가 다른 회의 분석을 몇 시간씩 막지 않게 한다. 호출 한 번의 제한 시간도 남은 시간으로 줄인다(최소 1분). 1차 분석 중에 넘으면 `AI 정리가 N분을 넘어 N개 조각 중 k번째(…) 분석 전에 멈췄어요. 다시 정리해 주세요`로 실패, 요약 합치기 전에 넘으면 조각 요약을 이어 붙이고, 2차 검토 중에 넘으면 남은 조각 검토를 건너뛰고(실행 기록에 이유, `failedChunks`에 셈) 그때까지 결과로 마친다. 작업 표시(2분마다)가 이어지므로 오래 걸려도 멈춘 작업 정리에 걸리지 않는다.
+
 ### 분석 강화 (Voice2ERP 묶음 2, 문서에 없는 기능)
 
 **2차 AI 검토** (`MeetingAnalysisRunner`, `meeting-review.ts`)
-- 1차 분석·검증 직후 같은 모델을 한 번 더 부른다(`chatJson`, 제한 시간 5분). 입력은 1차와 같은 번호 붙은 전사(화자 이름 포함)와 1차 후보 목록(key·종류·제목·담당자·날짜·근거 번호). 답은 `{ missed: [1차와 같은 항목 모양], concerns: [{ key, reason }] }`.
+- 1차 분석·검증 직후 같은 모델을 한 번 더 부른다(`chatJson`, 제한 시간 10분). 입력은 1차와 같은 번호 붙은 전사(화자 이름 포함)와 1차 후보 목록(key·종류·제목·담당자·날짜·근거 번호). 답은 `{ missed: [1차와 같은 항목 모양], concerns: [{ key, reason }] }`.
 - 답에는 점검용 `scan`(요청·약속·필요 표현 발언을 모두 훑어 1차 후보 `coveredBy` 또는 null로 적은 목록)이 먼저 온다. 서버는 읽지 않지만, 작은 모델이 `scan` 없이는 `missed`를 거의 비워 두어 강제로 열거시킨다.
 - `missed` = 1차에 없는 할 일·일정·구매. **담당자나 기한이 불분명한 것, 회사 품목에 없는 원료도 null 칸으로 포함**하게 시킨다(지어내지 않는다). 1차 프롬프트에도 같은 규칙을 넣었다: 꼭 해야 하는데 담당자·날짜가 불분명하면 빼지 말고 null로 포함.
 - `concerns` = 담당자·날짜가 틀렸거나, 중복이거나, 사실은 할 일이 아닌 후보에 대한 지적.
@@ -141,8 +163,12 @@
 
 ### 회의 질문하기 (Voice2ERP 묶음 3, 문서에 없는 기능)
 - 회의록 상세의 "이 회의에 대해 묻기" 카드가 `POST ai-assistant/messages`에 `meetingMinutesId`를 담아 보낸다. 서버는 [ai-assistant.md](ai-assistant.md) '회의 질문'대로 이 모듈의 `MeetingMinutesService.get`(읽기 전용, 모듈이 export)으로 회의를 읽어 시스템 지시에 넣는다. 이 모듈에 새 API·테이블은 없다.
-- 로그인한 누구나(전 역할이 상세를 열 수 있으므로) 묻는다. 회의 내용 블록은 30,000자까지이고 넘으면 전사만 앞에서부터 자른다. 대화는 서버에 저장하지 않는다(요구사항 21장 미결정).
-- 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
+- 로그인한 누구나(전 역할이 상세를 열 수 있으므로) 묻는다. 회의 내용 블록은 30,000자까지이고 넘으면 전사만 앞에서부터 자른다.
+- **대화 저장** (2026-10-21): 철강맨AI 대화 표(`ai_chat_thread`·`ai_chat_message`, 이슈 #399)를 다시 쓴다. `ai_chat_thread.meeting_minutes_id`(nullable)를 더해 **사원·회의록마다 대화 하나**(`(employee_id, meeting_minutes_id)` unique)에 질문과 답을 쌓는다. 화면은 `saveThread: true`와 `meetingMinutesId`를 보내고 `history`·`threadId`는 보내지 않는다: 서버가 그 사원의 이 회의 대화를 찾아 지난 대화를 DB에서 읽고(패널 대화와 같은 문맥 길이 예산), 답이 끝나면 찾거나 만든 대화에 저장한다(두 답이 함께 끝나도 대화가 둘이 되지 않게 upsert 뒤 잠근다). 다른 대화 id를 함께 보내면 `AST-001`. 답을 기다리는 사이 회의록을 지웠으면 저장하지 않는다.
+- 저장 범위는 철강맨AI 패널 대화와 **같은 코드**(`AiChatThreadService.saveTurn`)라 같다([ai-assistant.md](ai-assistant.md) '대화 저장'): 질문·답 글, 출처, 답의 생각 글(8,000자)과 도구 동작 기록(줄인 것)은 저장하고, 도구 결과 글·사진·실패·멈춘 질문은 저장하지 않는다. 대화 제목은 첫 질문 앞 40자. 보관 기간 없음.
+- `GET ai-assistant/meeting-threads/:meetingMinutesId` → 내 대화(`AiChatThreadView`, 메시지 포함) 또는 아직 묻지 않았으면 `null`. 본인 대화만 보인다(다른 사원의 대화는 없다). 지우기는 패널과 같은 `DELETE ai-assistant/threads/:id`(메시지까지 완전히 지움). 회의 질문 대화는 철강맨AI 패널의 대화 목록에 나오지 않지만, 지난 대화 찾기(`search_chat_history`)에는 내 대화로 함께 잡힌다.
+- 회의록을 지우면(`DELETE meeting-minutes/:id`) 모든 사원이 그 회의에 물은 대화도 같은 트랜잭션에서 지운다. 확정한 회의록은 지울 수 없으므로 대화가 남는다.
+- 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 열 때 저장한 대화를 불러와 이어 보이고, "대화 지우기"(확인 창)로 내 대화를 지운다. 불러오기에 실패하면 이유와 "다시 불러오기"를 보이고, 다시 불러올 때까지 질문을 막는다(서버는 새 질문을 지난 대화에 이어 쌓으므로 빈 화면에서 묻지 않게). 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
 
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.
@@ -160,7 +186,7 @@
 - 둘 다 작성자나 `ORG_MANAGE` 사용 권한자만(아니면 `VOC-003`), **확정 전이고 전사·AI 정리 중이 아닐 때**(`TRANSCRIBED`·`REVIEW`·`FAILED`, 아니면 `VOC-004`)만 된다. 확정한 회의록은 업무·일정·구매요청 초안·작업 로그·알림·Notion 페이지가 이어져 있어 막고, 전사·분석 중에는 백그라운드 작업이 결과를 쓰러 돌아오므로 막는다.
 - `PUT meeting-minutes/:id/attendees` `{ attendeeIds }` → 상세. 보낸 목록으로 참석자 전체를 바꾼다(1~100명, 중복은 하나로). **새로 넣는 사람만** 사용 중 사원인지 본다(`VOC-002`): 그대로 둔 참석자는 그 사이 퇴사했어도 남긴다. 빠진 참석자에게 연결한 화자 이름표는 '모름'(`speakerEmployeeId`·`speakerName` = null)으로 되돌린다. AI 요약·후보는 그대로 둔다(후보의 담당자·참석자는 회의 참석자가 아니어도 되고 검토 중에 고친다). 확정 전이라 보낸 알림이 없고, 확정할 때 그때의 참석자에게 공유 알림이 간다.
 - 읽은 `updated_at`을 조건으로 회의록 행을 먼저 갱신하고(`saveForAttendeeEdit`), 0건이면 상태가 바뀌었는지(`VOC-004`)·동시에 고쳤는지(`COM-001`) 가려 알린다. 참석자 행 바꾸기와 같은 트랜잭션이다.
-- `DELETE meeting-minutes/:id` → `{ id }`. **행을 지운다**(표시만 하는 삭제가 아니다): 확정 전에는 `task`·`schedule_event`·`action_draft`의 `meeting_minutes_id`가 가리키지 않고, Notion 페이지는 확정 뒤에만 생기며, 원본 음성은 저장하지 않는다. 참석자 행과 회의록 행을 한 트랜잭션에서 지우고, 회의록 삭제에 상태 조건을 걸어 그 사이 분석을 시작했으면 롤백한다.
+- `DELETE meeting-minutes/:id` → `{ id }`. **행을 지운다**(표시만 하는 삭제가 아니다): 확정 전에는 `task`·`schedule_event`·`action_draft`의 `meeting_minutes_id`가 가리키지 않고, Notion 페이지는 확정 뒤에만 생기며, 원본 음성은 저장하지 않는다. 참석자 행·이 회의에 물은 대화(모든 사원)·회의록 행을 한 트랜잭션에서 지우고, 회의록 삭제에 상태 조건을 걸어 그 사이 분석을 시작했으면 롤백한다.
 - 작업 로그는 남기지 않는다: REQ-LOG-002에 회의록 생성·삭제 이벤트가 없다(만들기도 남기지 않는다).
 - 화면: 상세 머리에 "참석자 고치기"(조직도 체크 창, 풀리는 화자 연결 수 안내)와 "삭제"(확인 창) 버튼. 조건은 `client/src/lib/meetingEdit.ts`가 서버와 같게 본다.
 
@@ -174,7 +200,7 @@
 | VOC-002 | 참석자로 고른 사원을 찾을 수 없습니다 | 404 |
 | VOC-003 | 회의록 작성자만 AI 정리를 할 수 있어요 | 403 |
 | VOC-004 | 지금 상태에서는 AI 정리를 할 수 없어요 | 409 |
-| VOC-005 | 회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하) | 400 |
+| VOC-005 | 회의 기록이 너무 길어 분석할 수 없어요 (20만 자 이하) | 400 |
 | VOC-006 | 이 후보는 아직 허가할 수 없어요 (모자란 칸은 문구에 담는다) | 400 |
 | VOC-007 | 허가 또는 제외하지 않은 후보가 남아 있어요 | 409 |
 | VOC-008 | 이미 Notion으로 내보낸 회의록이에요 (다른 곳에서 내보내는 중일 때도 문구를 바꿔 쓴다) | 409 |
@@ -189,9 +215,9 @@ Drive 녹음으로 만들기는 `INT-002`·`INT-003`(연결 없음·다시 연�
 
 `meeting-minutes.spec.ts` (묶음 `fs_collab`): 만들기(줄 나누기·참석자·중복), 빈 기록·없는 참석자·없는 날짜 거절, 목록 순서·필터·쪽, 상세·404. 음성: `SttClient`·`SttSettingsStore`를 가짜로 바꿔 즉시 TRANSCRIBING 응답 → TRANSCRIBED 구간 저장, 구간 없을 때 전체 글, STT 실패 → FAILED 이유, 이미 상태가 바뀐 행 덮어쓰지 않음, 한 번에 하나 실행, 시작 복구, 잘못된 입력 거절.
 
-`meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 4만 자 초과 400, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `llm/llm.client.spec.ts`.
+`meeting-analyze.spec.ts` (묶음 `fs_collab`): `LlmClient`·`LlmSettingsStore`를 가짜로 바꿔 즉시 ANALYZING 응답 → REVIEW 후보 저장, 작성자 아님 403, 없는 회의록 404, 상태 막기 409, 20만 자 초과 400, 6만 자 전사를 조각 3개로 나눠 분석(조각별 진행 상황·실행 기록, 조각 밖 근거 버림, 같은 일 합치기, 요약 합치기, 조각 하나 2차 검토 실패 시 `failedChunks`), 조각 1차 분석 실패 → 조각 번호를 담은 FAILED, 전체 시간 상한(시계를 당겨 2차 검토 중이면 남은 조각 건너뛰기·1차 분석 중이면 실패)과 환경 변수 범위, LLM 실패 → FAILED·재시도, 다시 정리, 늦은 결과 무시, 시작 복구. 순수 단위(DB 없음): `meeting-analysis.validator.spec.ts`(규칙별 + 프롬프트 주입 줄), `meeting-analysis.chunks.unit.spec.ts`(나누기·겹침·긴 발언 문장 나누기와 화자 머리말·근거 범위 거르기·합치기·바뀐 결정은 둘 다 두고 확인 사유·비슷한 일 중복 경고·조각 수에 맞춘 상한), `meeting-review.unit.spec.ts`(보여 주지 않은 키의 지적 버림·넘겨받은 상한), `llm/llm.client.spec.ts`.
 
-`ai-assistant/meeting-ask.spec.ts` (묶음 `fs_collab`)와 `assistant-meeting.context.unit.spec.ts`(DB 없음): 회의 질문 맥락(번호·화자·잘림·전사 속 지시 문장은 데이터), 시스템 지시에 회의 내용이 들어가는지, 없는 회의록 `VOC-001`.
+`ai-assistant/meeting-ask.spec.ts` (묶음 `fs_collab`)와 `assistant-meeting.context.unit.spec.ts`(DB 없음): 회의 질문 맥락(번호·화자·잘림·전사 속 지시 문장은 데이터), 시스템 지시에 회의 내용이 들어가는지, 없는 회의록 `VOC-001`. 대화 저장: 사원·회의록마다 대화 하나에 쌓기, 다음 질문은 화면 `history` 대신 DB의 지난 대화, 패널 목록에 없음, 다른 사원에게 안 보임, 지우기, `saveThread` 없으면 저장 안 함, 다른 대화 id를 섞으면 `AST-001`, 회의록을 지우면 대화도 지움.
 
 `meeting-register.spec.ts` (묶음 `fs_collab`): 회의록을 `REVIEW`로 직접 넣고 서비스를 불러 확인한다. 후보 고치기 권한·상태, 값 검증, 확인 사유 지우기, 끝 시각 따라가기, 허가 조건(VOC-006)·경고 허용·제외/되살리기, 요약; 등록: 남은 후보(VOC-007)·작성자 아님, 업무·일정·참석자·초안(WAITING_APPROVAL)·작업 로그·알림 받는 사람·`registered` 기록, 확정 뒤 모든 변경 VOC-004, 허가 0건 확정, 구매요청 초안을 못 만드는 작성자면 전체 롤백, 회의록 초안을 기존 `confirm`으로 구매요청까지 실행.
 

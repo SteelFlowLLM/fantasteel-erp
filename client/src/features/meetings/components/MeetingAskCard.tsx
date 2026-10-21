@@ -1,20 +1,21 @@
 'use client';
 
 // 이 회의에 대해 묻기 (Voice2ERP 묶음 3). 서버의 AI 어시스턴트에 회의록 id를 함께 보내 이 회의 내용으로 답하게 한다.
-// 전역 AI 패널과 대화가 섞이지 않게 대화는 이 카드 안(메모리)에만 둔다. 서버에도 저장하지 않는다 (요구사항 21장 미결정).
+// 대화는 서버가 사원·회의록마다 하나로 저장하고(철강맨AI 대화와 같은 기준), 다시 열면 이어 보인다. 전역 AI 패널 대화와는 섞이지 않는다.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { AiAssistantTurn } from '@fantasteel/shared';
 import type { MeetingMinutesView } from '@/api/meetingMinutes';
 import { aiAssistantApi } from '@/api/aiAssistant';
 import { isAbortError } from '@/api/http';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { AiMark } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
 import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/aiSourceDisplay';
 import { MEETING_SUGGESTED_QUESTIONS, meetingScreenContext, splitCitations } from '@/lib/meetingAsk';
-import { AI_CHAT_STOPPED_REASON, aiAnswerEntryFromReply, aiChatHistory, emptyAiChatLive, newAiChatId, reduceAiChatLive, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
+import { useDeleteAiChatThread } from '@/hooks/useAiAssistant';
+import { AI_CHAT_STOPPED_REASON, aiAnswerEntryFromReply, aiChatEntriesFromThread, emptyAiChatLive, newAiChatId, reduceAiChatLive, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
 /** 서버 DTO와 같은 상한 (가정값) */
@@ -45,6 +46,14 @@ function Answer({ content, segmentCount, onJump }: { content: string; segmentCou
 export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesView; onJump: (index: number) => void }) {
   const [entries, setEntries] = useState<AiChatEntry[]>([]);
   const [draft, setDraft] = useState('');
+  /** 저장한 대화 id. 아직 묻지 않았거나 지웠으면 null */
+  const [threadId, setThreadId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  /** 지난 대화를 못 읽었으면 그 이유. 서버는 새 질문을 지난 대화에 이어 쌓으므로 읽기 전에는 묻지 못하게 한다 */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadTry, setLoadTry] = useState(0);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const removeThread = useDeleteAiChatThread();
   const bottomRef = useRef<HTMLDivElement>(null);
   const segmentCount = minutes.transcriptSegments.length;
 
@@ -63,11 +72,35 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
   // 카드를 떠나면 서버에서 하던 일도 멈춘다
   useEffect(() => () => controllerRef.current?.abort(), []);
 
+  // 이 회의에 물었던 대화를 되살린다. 못 읽으면 안내와 다시 불러오기를 보인다
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    aiAssistantApi.getMeetingThread(minutes.id).then(
+      (thread) => {
+        if (cancelled) return;
+        setEntries(thread ? aiChatEntriesFromThread(thread) : []);
+        setThreadId(thread?.id ?? null);
+        setLoading(false);
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        setLoadError(errorMessageOf(error));
+        setLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [minutes.id, loadTry]);
+
   useEffect(() => {
     if (entries.length || live) bottomRef.current?.scrollIntoView({ block: 'nearest' });
   }, [entries.length, live]);
 
-  const run = async (question: string, history: AiAssistantTurn[]) => {
+  // 지난 대화는 서버가 저장한 것을 쓰므로 화면은 보내지 않는다
+  const run = async (question: string) => {
     const controller = new AbortController();
     controllerRef.current = controller;
     updateLive(emptyAiChatLive());
@@ -75,13 +108,14 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
     const fail = (reason: string) => appendEntry({ id: newAiChatId(), role: 'failure', content: reason, question });
     try {
       await aiAssistantApi.askStream(
-        { question, history, meetingMinutesId: minutes.id, screen: meetingScreenContext(minutes) },
+        { question, meetingMinutesId: minutes.id, saveThread: true, screen: meetingScreenContext(minutes) },
         (event) => {
           const current = liveRef.current;
           if (!current || finished) return;
           if (event.type === 'done') {
             finished = true;
             appendEntry(aiAnswerEntryFromReply(current, event.reply, Date.now(), newAiChatId()));
+            if (event.thread) setThreadId(event.thread.id);
           } else if (event.type === 'error') {
             finished = true;
             fail(event.message);
@@ -102,10 +136,10 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
 
   const ask = (question: string, base: AiChatEntry[] = entries) => {
     const text = question.trim();
-    if (!text || pending) return;
+    if (!text || pending || loading || loadError !== null) return;
     setEntries([...base, { id: newAiChatId(), role: 'user', content: text }]);
     setDraft('');
-    void run(text, aiChatHistory(base));
+    void run(text);
   };
 
   // 실패한 질문과 실패 줄을 지우고 같은 질문을 다시 보낸다
@@ -131,14 +165,27 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
         meta="AI 답은 틀릴 수 있어요 · 근거 번호를 눌러 확인해요"
         actions={
           entries.length ? (
-            <Button size="sm" icon="refresh" disabled={pending} onClick={() => setEntries([])}>
-              새 대화
+            <Button size="sm" icon="trash" disabled={pending || removeThread.isPending} onClick={() => (threadId === null ? setEntries([]) : setConfirmingDelete(true))}>
+              대화 지우기
             </Button>
           ) : undefined
         }
       />
       <CardBody className="gap-3">
-        {entries.length === 0 ? (
+        {loading ? (
+          <p className="text-cap text-ink-3">지난 질문을 불러오는 중…</p>
+        ) : loadError !== null ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg px-3 py-2.5 text-sm">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-danger">
+              <Icon name="alert" size="sm" />
+              지난 질문을 불러오지 못했어요
+            </span>
+            <p className="leading-normal text-ink-2">{loadError} 새 질문은 지난 대화에 이어 저장되므로, 다시 불러온 뒤에 물어봐 주세요.</p>
+            <Button size="sm" icon="refresh" className="self-start" onClick={() => setLoadTry((n) => n + 1)}>
+              다시 불러오기
+            </Button>
+          </div>
+        ) : entries.length === 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {MEETING_SUGGESTED_QUESTIONS.map((question) => (
               <button key={question} type="button" disabled={pending} className={QUESTION_CHIP} onClick={() => ask(question)}>
@@ -219,11 +266,31 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
                 멈추기
               </Button>
             ) : (
-              <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim()} aria-label="보내기" onClick={() => ask(draft)} />
+              <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || loading || loadError !== null} aria-label="보내기" onClick={() => ask(draft)} />
             )}
           </div>
         </div>
       </CardBody>
+      {confirmingDelete && threadId !== null ? (
+        <ConfirmDialog
+          title="이 회의에 물은 대화를 지울까요?"
+          confirmLabel="지우기"
+          tone="danger"
+          pending={removeThread.isPending}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() =>
+            removeThread.mutate(threadId, {
+              onSuccess: () => {
+                setEntries([]);
+                setThreadId(null);
+                setConfirmingDelete(false);
+              },
+            })
+          }
+        >
+          내가 이 회의에 물은 질문과 답이 모두 지워지고 되살릴 수 없어요. 다른 사람의 대화는 그대로예요.
+        </ConfirmDialog>
+      ) : null}
     </Card>
   );
 }

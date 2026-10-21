@@ -4,7 +4,7 @@
 // 후보가 왜 빠졌는지, 어떤 모델이 얼마나 걸렸는지 사람이 직접 따라가 보게 하려는 것이라 기본은 접혀 있다.
 import type { MeetingAnalysisTrace, MeetingTraceStep } from '@fantasteel/shared';
 import { Badge } from '@/components/Badge';
-import { formatDuration, TRACE_STAGE_LABEL, traceSummaryText } from '@/lib/meetingAnalysis';
+import { formatDuration, TRACE_STAGE_LABEL, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
 
 const SUMMARY = 'cursor-pointer select-none text-xs font-medium text-ink-2 hover:text-ai-strong';
 const PRE = 'max-h-64 overflow-auto rounded-xs bg-surface-2 px-2 py-1.5 font-mono text-cap whitespace-pre-wrap break-words text-ink-2';
@@ -14,6 +14,7 @@ function Step({ step }: { step: MeetingTraceStep }) {
     <li className="flex flex-col gap-1.5 rounded-xs border border-line bg-surface px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <b className="text-sm">{TRACE_STAGE_LABEL[step.stage]}</b>
+        {step.chunk ? <span className="text-ink-2">{traceChunkText(step.chunk)}</span> : null}
         <span className="font-mono text-ink-3">{step.model}</span>
         <span className="text-ink-3">{formatDuration(step.durationMs)}</span>
         {step.ok ? null : <Badge tone="danger">실패</Badge>}

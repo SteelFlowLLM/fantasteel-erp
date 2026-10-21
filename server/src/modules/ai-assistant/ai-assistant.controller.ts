@@ -168,6 +168,12 @@ export class AiAssistantController {
     return this.chatThreads.get(user, id);
   }
 
+  /** 이 회의에 물은 내 대화 (문서에 없는 기능, 2026-10-21). 아직 묻지 않았으면 null. 지우기는 대화 지우기(DELETE threads/:id)를 쓴다 */
+  @Get('ai-assistant/meeting-threads/:meetingMinutesId')
+  getMeetingThread(@CurrentUser() user: AuthUser, @Param('meetingMinutesId', ChatThreadIdPipe) meetingMinutesId: number): Promise<AiChatThreadView | null> {
+    return this.chatThreads.meetingThread(user, meetingMinutesId);
+  }
+
   /** 대화와 메시지를 모두 지운다. 지운 대화의 목록 줄을 돌려준다 */
   @Delete('ai-assistant/threads/:id')
   deleteThread(@CurrentUser() user: AuthUser, @Param('id', ChatThreadIdPipe) id: number): Promise<AiChatThreadSummaryView> {

@@ -29,7 +29,7 @@ export const ERROR_CODE = {
   'VOC-004': { message: '지금 상태에서는 AI 정리를 할 수 없어요', status: 409 },
   'VOC-006': { message: '이 후보는 아직 허가할 수 없어요', status: 400 },
   'VOC-007': { message: '허가 또는 제외하지 않은 후보가 남아 있어요', status: 409 },
-  'VOC-005': { message: '회의 기록이 너무 길어 지금은 분석할 수 없어요 (4만 자 이하)', status: 400 },
+  'VOC-005': { message: '회의 기록이 너무 길어 분석할 수 없어요 (20만 자 이하)', status: 400 },
   'VOC-008': { message: '이미 Notion으로 내보낸 회의록이에요', status: 409 },
   'VOC-009': { message: '말을 너무 자주 보냈어요. 잠시 뒤에 다시 불러 주세요', status: 429 },
   'VOC-010': { message: '이 카드는 말로 승인할 수 없어요. 화면에서 눌러 실행해 주세요', status: 400 },

@@ -4,7 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import { ERROR_CODE } from '@fantasteel/shared';
-import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, MeetingMinutesView } from '@fantasteel/shared';
+import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, AiChatThreadSummaryView, AiChatThreadView, MeetingMinutesView, PageResult } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient, LlmRequestError, type LlmModelCapabilities, type LlmStreamHandlers, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
@@ -17,6 +17,8 @@ let prisma: PrismaService;
 let cookie: string;
 let employeeId: number;
 let startId = 0;
+/** 이 파일이 저장한 대화 (끝에 지운다) */
+const createdThreadIds: number[] = [];
 const llmClient = {
   chatWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile]>(),
   streamWithTools: jest.fn<Promise<LlmToolReply>, [unknown, string, LlmToolMessage[], unknown[], LlmProfile, LlmStreamHandlers, AbortSignal | undefined]>(),
@@ -26,10 +28,10 @@ const llmClient = {
 };
 const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; model: string | null; apiKey: null }> => ({ baseUrl: 'http://llm.test/v1', model: 'test-model', apiKey: null })) };
 
-async function call<T>(method: 'GET' | 'POST', path: string, payload?: unknown) {
+async function call<T>(method: 'GET' | 'POST' | 'DELETE', path: string, payload?: unknown, as: string = cookie) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { cookie, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
+    headers: { cookie: as, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
   return { status: res.status, body: (await res.json()) as { data: T; error?: { code: string; message: string } } };
@@ -50,6 +52,8 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  await prisma?.aiChatMessage.deleteMany({ where: { threadId: { in: createdThreadIds } } });
+  await prisma?.aiChatThread.deleteMany({ where: { id: { in: createdThreadIds } } });
   await prisma?.meetingAttendee.deleteMany({ where: { meetingMinutesId: { gt: startId } } });
   await prisma?.meetingMinutes.deleteMany({ where: { id: { gt: startId } } });
   await app?.close();
@@ -377,5 +381,87 @@ describe('ai-assistant 질문의 사진 (images)', () => {
     expect(llmClient.chatWithTools).not.toHaveBeenCalled();
     expect(llmClient.streamWithTools).not.toHaveBeenCalled();
     expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
+  });
+});
+
+describe('회의 질문 저장 (2026-10-21)', () => {
+  const doneOf = (events: AiAssistantStreamEvent[]) => {
+    const done = events.at(-1);
+    if (done?.type !== 'done') throw new Error('마지막 이벤트가 done이 아니에요');
+    return done;
+  };
+  const newMeeting = async () =>
+    (
+      await call<MeetingMinutesView>('POST', '/meeting-minutes', {
+        meetingMinutesTitle: '저장 시험 회의',
+        meetingDate: '2026-10-14',
+        attendeeIds: [employeeId],
+        transcript: '정다은: 견적서는 제가 금요일까지 보낼게요',
+      })
+    ).body.data.id;
+
+  it('사원·회의록마다 대화 하나에 질문과 답을 쌓고, 다음 질문은 DB의 지난 대화를 보낸다. 패널 대화 목록에는 없다', async () => {
+    const meetingId = await newMeeting();
+    llmClient.streamWithTools.mockResolvedValue({ content: '정다은 님이 보내요 #1', toolCalls: [], reasoningApplied: true });
+
+    expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`)).body.data).toBeNull();
+    const first = doneOf((await stream({ question: '누가 견적서를 보내?', meetingMinutesId: meetingId, saveThread: true })).events);
+    const threadId = first.thread!.id;
+    createdThreadIds.push(threadId);
+    expect(first.thread?.title).toBe('누가 견적서를 보내?');
+
+    // 화면이 보낸 history는 쓰지 않고 저장한 대화를 보낸다
+    llmClient.streamWithTools.mockClear();
+    const second = doneOf((await stream({ question: '언제까지야?', meetingMinutesId: meetingId, saveThread: true, history: [{ role: 'user', content: '꾸며 낸 지난 질문' }] })).events);
+    expect(second.thread?.id).toBe(threadId);
+    const sent = llmClient.streamWithTools.mock.calls[0][2].map((m) => m.content);
+    expect(sent).toContain('누가 견적서를 보내?');
+    expect(sent).toContain('정다은 님이 보내요 #1');
+    expect(sent).not.toContain('꾸며 낸 지난 질문');
+
+    const saved = (await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`)).body.data;
+    expect(saved?.id).toBe(threadId);
+    expect(saved?.messages.map((m) => [m.role, m.content])).toEqual([
+      ['user', '누가 견적서를 보내?'],
+      ['assistant', '정다은 님이 보내요 #1'],
+      ['user', '언제까지야?'],
+      ['assistant', '정다은 님이 보내요 #1'],
+    ]);
+    const panel = (await call<PageResult<AiChatThreadSummaryView>>('GET', '/ai-assistant/threads?page=1&size=50')).body.data;
+    expect(panel.items.some((t) => t.id === threadId)).toBe(false);
+
+    // 다른 사원에게는 이 대화가 보이지 않는다
+    const login = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo: '1702004', password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
+    const other = (login.headers.get('set-cookie') ?? '').split(';')[0];
+    expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`, undefined, other)).body.data).toBeNull();
+    expect((await call('GET', `/ai-assistant/threads/${threadId}`, undefined, other)).body.error?.code).toBe('AST-001');
+
+    // 지우면 다음 질문은 새 대화로 시작한다
+    expect((await call('DELETE', `/ai-assistant/threads/${threadId}`)).status).toBe(200);
+    expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`)).body.data).toBeNull();
+  });
+
+  it('saveThread 없이 물으면 저장하지 않고, 다른 대화 id를 함께 보내면 AST-001', async () => {
+    const meetingId = await newMeeting();
+    llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
+    await stream({ question: '요약해 줘', meetingMinutesId: meetingId });
+    expect(await prisma.aiChatThread.count({ where: { meetingMinutesId: meetingId } })).toBe(0);
+
+    const panelThread = doneOf((await stream({ question: '패널 질문', saveThread: true })).events).thread!.id;
+    createdThreadIds.push(panelThread);
+    const mixed = await stream({ question: '요약해 줘', meetingMinutesId: meetingId, threadId: panelThread });
+    expect(JSON.parse(mixed.text)).toMatchObject({ error: { code: 'AST-001' } });
+    expect(await prisma.aiChatMessage.count({ where: { threadId: panelThread } })).toBe(2);
+  });
+
+  it('회의록을 지우면 그 회의에 물은 대화도 함께 지운다', async () => {
+    const meetingId = await newMeeting();
+    llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });
+    const threadId = doneOf((await stream({ question: '요약해 줘', meetingMinutesId: meetingId, saveThread: true })).events).thread!.id;
+    createdThreadIds.push(threadId);
+
+    expect((await call('DELETE', `/meeting-minutes/${meetingId}`)).status).toBe(200);
+    expect(await prisma.aiChatThread.count({ where: { id: threadId } })).toBe(0);
+    expect(await prisma.aiChatMessage.count({ where: { threadId } })).toBe(0);
   });
 });

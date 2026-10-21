@@ -1,4 +1,4 @@
-import type { MeetingAnalysis, MeetingAnalysisTrace, MeetingCandidate, MeetingCandidateContextLine, MeetingReviewResult, MeetingSpeakerSummary, MeetingTraceChange, MeetingTraceStep, TranscriptSegment } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingAnalysisProgress, MeetingAnalysisTrace, MeetingCandidate, MeetingCandidateContextLine, MeetingReviewResult, MeetingSpeakerSummary, MeetingTraceChange, MeetingTraceStep, TranscriptSegment } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -57,7 +57,9 @@ function readContext(value: unknown): MeetingCandidateContextLine[] {
 
 function readReview(value: unknown): MeetingReviewResult | undefined {
   if (!isObject(value)) return undefined;
-  if (value.ok === true && typeof value.missedCount === 'number' && typeof value.concernCount === 'number') return { ok: true, missedCount: value.missedCount, concernCount: value.concernCount };
+  if (value.ok === true && typeof value.missedCount === 'number' && typeof value.concernCount === 'number') {
+    return { ok: true, missedCount: value.missedCount, concernCount: value.concernCount, ...(typeof value.failedChunks === 'number' && value.failedChunks > 0 ? { failedChunks: value.failedChunks } : {}) };
+  }
   if (value.ok === false) return { ok: false, error: typeof value.error === 'string' ? value.error : '' };
   return undefined;
 }
@@ -69,11 +71,23 @@ function readChange(v: unknown): MeetingTraceChange[] {
   return [{ action: v.action, title: stringOrNull(v.title), reason: v.reason }];
 }
 
+const PHASES = ['ANALYSIS', 'MERGE', 'REVIEW'] as const;
+const phaseOf = (v: unknown) => PHASES.find((p) => p === v);
+
+/** 조각 표시. 나누지 않은 분석과 옛 결과에는 없다 */
+function readChunk(v: unknown): MeetingTraceStep['chunk'] {
+  if (!isObject(v) || ![v.index, v.total, v.firstSegment, v.lastSegment].every((n) => typeof n === 'number')) return undefined;
+  return { index: v.index as number, total: v.total as number, firstSegment: v.firstSegment as number, lastSegment: v.lastSegment as number };
+}
+
 function readStep(v: unknown): MeetingTraceStep[] {
-  if (!isObject(v) || (v.stage !== 'ANALYSIS' && v.stage !== 'REVIEW') || typeof v.durationMs !== 'number' || typeof v.ok !== 'boolean') return [];
+  const stage = isObject(v) ? phaseOf(v.stage) : undefined;
+  if (!isObject(v) || stage === undefined || typeof v.durationMs !== 'number' || typeof v.ok !== 'boolean') return [];
+  const chunk = readChunk(v.chunk);
   return [
     {
-      stage: v.stage,
+      stage,
+      ...(chunk ? { chunk } : {}),
       model: typeof v.model === 'string' ? v.model : '',
       durationMs: v.durationMs,
       ok: v.ok,
@@ -106,4 +120,12 @@ export function readAnalysis(value: Prisma.JsonValue | null): MeetingAnalysis | 
     model: typeof value.model === 'string' ? value.model : '',
     analyzedAt: typeof value.analyzedAt === 'string' ? value.analyzedAt : '',
   };
+}
+
+/** 분석 진행 칸. 모양이 다르면 null */
+export function readProgress(value: Prisma.JsonValue | null): MeetingAnalysisProgress | null {
+  if (!isObject(value)) return null;
+  const phase = phaseOf(value.phase);
+  if (phase === undefined || typeof value.current !== 'number' || typeof value.total !== 'number') return null;
+  return { phase, current: value.current, total: value.total };
 }

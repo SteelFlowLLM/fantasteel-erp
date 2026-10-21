@@ -22,6 +22,7 @@ const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
 /**
  * 철강맨AI 패널 대화 저장 (이슈 #399, 문서에 없는 기능). 본인 대화만 다루고, 남의 대화는 없는 것처럼 AST-001.
+ * 회의록 상세의 회의 질문도 같은 표에 사원·회의록마다 대화 하나로 저장한다(meeting_minutes_id). 패널 대화 목록에는 넣지 않는다.
  * 답이 끝났을 때 질문과 답을 한 트랜잭션으로 저장한다. 생각 글과 도구 동작 기록(짧게 줄인 것)은 답의 meta에 함께 저장하고, 도구 결과 글·사진·브라우저 화면 사진·사람이 직접 넣은 글은 저장하지 않는다(이슈 #433, docs/backend/ai-assistant.md).
  * AI 대화라 업무 데이터가 아니므로 작업 로그를 남기지 않는다(REQ-LOG-002 대상 아님).
  */
@@ -55,6 +56,19 @@ export class AiChatThreadService {
     });
   }
 
+  /** 이 회의에 물은 내 대화 (회의 질문 저장, 2026-10-21). 아직 묻지 않았으면 null */
+  async meetingThread(user: AuthUser, meetingMinutesId: number): Promise<AiChatThreadView | null> {
+    const thread = await this.repository.findMeetingThread(this.prisma, user.employeeId, meetingMinutesId);
+    if (!thread) return null;
+    const messages = await this.repository.findMessages(this.prisma, thread.id);
+    return { ...toChatThreadSummary(thread), messages: messages.map(toChatMessageView) };
+  }
+
+  /** 회의 질문을 이어 물을 대화 id. 아직 없으면 undefined (첫 답을 저장할 때 만든다) */
+  async meetingThreadId(user: AuthUser, meetingMinutesId: number): Promise<number | undefined> {
+    return (await this.repository.findMeetingThread(this.prisma, user.employeeId, meetingMinutesId))?.id;
+  }
+
   /** 이어 묻는 대화의 지난 대화 (최근 take줄, 오래된 것부터). 화면이 보낸 history 대신 쓴다. take는 모델 문맥 길이로 정한다(이슈 #412) */
   async historyFor(user: AuthUser, threadId: number, take: number = MAX_HISTORY_TURNS): Promise<AiAssistantTurn[]> {
     const thread = await this.owned(this.prisma, user, threadId);
@@ -73,12 +87,21 @@ export class AiChatThreadService {
     };
   }
 
-  /** 질문과 답 한 쌍을 저장한다. threadId가 없으면 첫 질문으로 제목을 지어 새 대화를 만든다 */
-  saveTurn(user: AuthUser, threadId: number | undefined, input: AiChatQuestionInput, reply: AiAssistantReplyView): Promise<AiChatThreadRef> {
+  /**
+   * 질문과 답 한 쌍을 저장한다. threadId가 없으면 첫 질문으로 제목을 지어 새 대화를 만든다.
+   * 회의 질문(meetingMinutesId)은 사원·회의록마다 대화 하나에 이어 쌓는다: 두 질문의 답이 함께 끝나도 대화가 둘이 되지 않게 찾거나 만든 뒤 잠근다
+   */
+  saveTurn(user: AuthUser, threadId: number | undefined, input: AiChatQuestionInput, reply: AiAssistantReplyView, meetingMinutesId?: number): Promise<AiChatThreadRef> {
     return this.prisma.$transaction(async (tx) => {
       let thread: { id: number; title: string };
       let lastSeq = 0;
-      if (threadId === undefined) {
+      if (meetingMinutesId !== undefined) {
+        // 답을 기다리는 사이에 회의록을 지웠으면 저장하지 않는다 (지운 회의록을 가리키는 대화가 남지 않게)
+        if (!(await this.repository.meetingExists(tx, meetingMinutesId))) throw new AppException('VOC-001');
+        thread = await this.repository.upsertMeetingThread(tx, user.employeeId, meetingMinutesId, chatThreadTitle(input.question));
+        await this.repository.lock(tx, thread.id);
+        lastSeq = await this.repository.lastSeq(tx, thread.id);
+      } else if (threadId === undefined) {
         thread = await this.repository.createThread(tx, user.employeeId, chatThreadTitle(input.question));
       } else {
         await this.repository.lock(tx, threadId);
