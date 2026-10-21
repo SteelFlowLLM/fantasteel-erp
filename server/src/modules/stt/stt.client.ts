@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import type { Agent } from 'undici';
+import { FormData, type Agent } from 'undici';
 import type { SttModelOption } from '@fantasteel/shared';
-import { createMetadataGuardedAgent, isBlockedLookupError } from '../../common/net/guarded-agent';
+import { createMetadataGuardedAgent, isBlockedLookupError, netFetch } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
@@ -108,7 +108,7 @@ export class SttClient {
     const agent = createMetadataGuardedAgent(sttAgentOptions(timeoutMs));
     try {
       try {
-        res = await fetch(url, {
+        res = await netFetch.run(url, {
           method: 'POST',
           headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
           body: form,
@@ -116,7 +116,7 @@ export class SttClient {
           redirect: 'error',
           signal: AbortSignal.timeout(timeoutMs),
           dispatcher: agent,
-        } as RequestInit);
+        });
       } catch (error) {
         if (error instanceof Error && error.name === 'TimeoutError') {
           throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. 음성 서버 상태를 확인해 주세요`);
@@ -158,12 +158,12 @@ export class SttClient {
     assertAllowedHost(url);
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await netFetch.run(url, {
         headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
         redirect: 'error',
         signal: AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS),
         dispatcher: (this.guardedAgent ??= createMetadataGuardedAgent()),
-      } as RequestInit);
+      });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') return [];
       throw new SttRequestError(connectFailureMessage(url, error), STT_CONNECT_PUBLIC_MESSAGE);

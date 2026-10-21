@@ -1,4 +1,4 @@
-import { Agent } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { BLOCKED_LOOKUP_CODE, guardedLookup, type FetchPolicy, type LookupFunction } from '../../modules/ai-assistant/web/ssrf-guard';
 import { isBlockedServerAddress } from './server-url';
 
@@ -26,3 +26,15 @@ export function isBlockedLookupError(error: unknown, depth = 0): boolean {
   if (Array.isArray(inner) && inner.some((entry) => isBlockedLookupError(entry, depth + 1))) return true;
   return isBlockedLookupError((error as { cause?: unknown }).cause, depth + 1);
 }
+
+type UndiciInit = NonNullable<Parameters<typeof undiciFetch>[1]>;
+
+/**
+ * LLM·음성 서버를 부르는 fetch. 이 파일의 Agent는 npm undici 8의 것이라 **같은 undici의 fetch로만** 쓸 수 있다:
+ * Node에 들어 있는 전역 fetch에 넘기면 Node 22·24에서 UND_ERR_INVALID_ARG로 모든 요청이 실패한다(Node 26만 된다).
+ * 본문의 FormData도 undici의 것이어야 한다(전역 FormData를 넘기면 글 "[object FormData]"로 간다).
+ * 시험은 `jest.spyOn(netFetch, 'run')`으로 가로챈다.
+ */
+export const netFetch = {
+  run: (url: string, init: UndiciInit): Promise<Response> => undiciFetch(url, init) as unknown as Promise<Response>,
+};

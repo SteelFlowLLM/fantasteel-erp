@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Agent } from 'undici';
 import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
-import { createMetadataGuardedAgent, isBlockedLookupError } from '../../common/net/guarded-agent';
+import { createMetadataGuardedAgent, isBlockedLookupError, netFetch } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
@@ -632,7 +632,7 @@ export class LlmClient {
     }
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await netFetch.run(url, {
         method,
         headers: {
           ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
@@ -644,7 +644,7 @@ export class LlmClient {
         // 이름이 메타데이터 주소로 풀려도 연결하지 않는다 (이슈 #497)
         dispatcher: (this.guardedAgent ??= createMetadataGuardedAgent()),
         signal,
-      } as RequestInit);
+      });
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
@@ -653,7 +653,7 @@ export class LlmClient {
         throw new LlmRequestError('AI 연결 설정의 주소가 가리키는 곳은 AI 서버로 쓸 수 없는 주소(링크 로컬·클라우드 메타데이터)예요. 주소를 바꿔 주세요', undefined, 'CONNECT');
       }
       // 내부 LLM 주소(사설망·Tailscale)는 사용자에게 가는 문구에 넣지 않고 서버 로그에만 남긴다 (이슈 #497)
-      this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeReasonOf(error)}`);
+      this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeCodeOf(error)}`);
       throw new LlmRequestError('LLM 서버에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 설정한 주소가 맞는지 확인해 주세요', undefined, 'CONNECT');
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
@@ -685,7 +685,7 @@ function idleTimeout(): DOMException {
  * fetch 실패의 원인(error.cause)을 서버 로그에 덧붙일 글로: 원인 코드(예: ECONNREFUSED), 코드가 없으면 원인 글.
  * 리다이렉트 거절(redirect: 'error')은 코드 없는 Error('unexpected redirect')라 글이 있어야 이유가 남는다. 없으면 빈 글
  */
-function causeReasonOf(error: unknown): string {
+function causeCodeOf(error: unknown): string {
   // instanceof Error는 쓰지 않는다: 다른 실행 공간(jest 등)에서 온 오류는 Error가 아니라고 나온다
   const cause = typeof error === 'object' && error !== null ? (error as { cause?: unknown }).cause : undefined;
   if (typeof cause !== 'object' || cause === null) return '';

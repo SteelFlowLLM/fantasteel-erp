@@ -4,13 +4,14 @@ import type { AddressInfo } from 'node:net';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Agent } from 'undici';
+import { netFetch } from '../../common/net/guarded-agent';
 import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav, sttAgentOptions } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttService } from './stt.service';
 import type { SttSettingsStore } from './stt-settings.store';
 
 /** 아래 describe들이 fetch를 가로채기 전의 실제 fetch (실제 서버로 부르는 시험용) */
-const realFetch = globalThis.fetch;
+const realFetch = netFetch.run;
 const endpoint = { baseUrl: 'http://127.0.0.1:8000/v1/', apiKey: null };
 const input = { audio: Buffer.from('abc'), fileName: '회의.webm', mimeType: 'audio/webm', model: null };
 
@@ -87,7 +88,7 @@ describe('silentWav', () => {
 });
 
 describe('SttClient.transcribe', () => {
-  const fetchMock = jest.spyOn(globalThis, 'fetch');
+  const fetchMock = jest.spyOn(netFetch, 'run');
   afterEach(() => fetchMock.mockReset());
   afterAll(() => fetchMock.mockRestore());
 
@@ -156,7 +157,7 @@ describe('SttClient.transcribe 긴 전사의 대기 시간 (이슈 #485)', () =>
   // 앞 describe의 afterAll(mockRestore)가 먼저 가로채기를 풀어서 이 describe는 실행 직전에 새로 가로챈다
   let fetchMock: jest.SpyInstance;
   beforeAll(() => {
-    fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock = jest.spyOn(netFetch, 'run');
   });
   afterEach(() => fetchMock.mockReset());
   afterAll(() => fetchMock.mockRestore());
@@ -213,7 +214,7 @@ describe('연결 실패 이유', () => {
   });
 
   it('404는 주소 끝 /v1 확인을 안내하고, 서버가 준 이유(모델 없음 포함)를 함께 보인다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     const noModels = () => new Response('', { status: 404 });
     fetchMock.mockResolvedValueOnce(noModels());
     fetchMock.mockResolvedValueOnce(new Response('<html>not found</html>', { status: 404, statusText: 'Not Found' }));
@@ -229,7 +230,7 @@ describe('연결 실패 이유', () => {
   });
 
   it('리다이렉트는 따라가지 않고, 오류 문구에는 주소의 아이디·비밀번호가 없다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+    const fetchMock = jest.spyOn(netFetch, 'run').mockRejectedValue(new TypeError('fetch failed'));
     const error = await failureOf(new SttClient().transcribe({ baseUrl: 'http://user:secret@192.168.0.20:8000/v1', apiKey: null }, input));
     expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe('error');
     expect(error.message).toContain('192.168.0.20');
@@ -240,7 +241,7 @@ describe('연결 실패 이유', () => {
 
 describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => {
   it('관리자용 message에는 주소가 있고, 모든 사원이 읽는 publicMessage에는 주소가 없다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+    const fetchMock = jest.spyOn(netFetch, 'run').mockRejectedValue(new TypeError('fetch failed'));
     const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: null }, input))) as SttRequestError;
     expect(error.message).toContain('100.87.40.116');
     expect(error.publicMessage).toBe('음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요');
@@ -252,7 +253,7 @@ describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => 
 
   it('이름이 메타데이터 주소로 풀려 막힌 연결은 그렇게 알리고 publicMessage에는 주소가 없다 (이슈 #497)', async () => {
     const blocked = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('사내망·내부 주소는 읽을 수 없어요 (my-stt.example)'), { code: 'EBLOCKED' }) });
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(blocked);
+    const fetchMock = jest.spyOn(netFetch, 'run').mockRejectedValue(blocked);
     const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://my-stt.example:8001/v1', apiKey: null }, input))) as SttRequestError;
     expect(error.message).toContain('메타데이터 주소로 풀려');
     expect(error.publicMessage).toBe('음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요');
@@ -263,7 +264,7 @@ describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => 
   });
 
   it('404의 publicMessage에도 주소가 없다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+    const fetchMock = jest.spyOn(netFetch, 'run').mockResolvedValue(new Response('', { status: 404 }));
     const error = (await failureOf(new SttClient().transcribe({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: null }, input))) as SttRequestError;
     expect(error.message).toContain('100.87.40.116');
     expect(error.publicMessage).not.toMatch(/100\.87|http/);
@@ -271,7 +272,7 @@ describe('연결 실패의 공개 문구와 주소 막기 (이슈 #497)', () => 
   });
 
   it.each(['http://169.254.169.254/v1', 'http://[fd00:ec2::254]/v1', 'http://metadata.google.internal/v1'])('저장돼 있던 주소 %s 로도 요청을 보내지 않는다', async (baseUrl) => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     const client = new SttClient();
     expect(await failureOf(client.transcribe({ baseUrl, apiKey: 'k' }, input))).toBeInstanceOf(SttRequestError);
     expect(await failureOf(client.listModels({ baseUrl, apiKey: 'k' }))).toBeInstanceOf(SttRequestError);
@@ -301,7 +302,7 @@ describe('모델 목록 (GET /models)', () => {
   });
 
   it('연결 확인은 목록을 먼저 받고(키 포함) 무음을 보낸 뒤 목록을 돌려준다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(sidecarList), { status: 200 }));
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ text: '' }), { status: 200 }));
     const models = await new SttClient().checkConnection({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: 'fsv-key' }, 'whisper-pyannote');
@@ -315,7 +316,7 @@ describe('모델 목록 (GET /models)', () => {
   });
 
   it('whisper.cpp 단독처럼 /models가 없으면 빈 목록으로 무음 확인만 한다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ text: '' }), { status: 200 }));
     expect(await new SttClient().checkConnection(endpoint, null)).toEqual([]);
@@ -324,7 +325,7 @@ describe('모델 목록 (GET /models)', () => {
   });
 
   it('키가 필요한데 없거나 틀리면 무음을 보내지 않고 바로 알린다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'API 키가 맞지 않아요' } }), { status: 401 }));
     expect((await failureOf(new SttClient().checkConnection(endpoint, null))).message).toContain('API 키가 필요해요');
     fetchMock.mockResolvedValueOnce(new Response('', { status: 401 }));
@@ -334,7 +335,7 @@ describe('모델 목록 (GET /models)', () => {
   });
 
   it('닿지 않으면 목록 단계에서 바로 이유를 준다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const fetchMock = jest.spyOn(netFetch, 'run');
     fetchMock.mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
     expect((await failureOf(new SttClient().checkConnection(endpoint, null))).message).toContain('연결을 거절했어요');
     expect(fetchMock).toHaveBeenCalledTimes(1);

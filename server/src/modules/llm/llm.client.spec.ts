@@ -1,5 +1,6 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
 import { Logger } from '@nestjs/common';
+import { netFetch } from '../../common/net/guarded-agent';
 import { createThinkSplitter, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
@@ -25,12 +26,12 @@ beforeEach(() => {
   fetchMock.mockReset();
   modelsMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
   unslothMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
-  jest.spyOn(globalThis, 'fetch').mockImplementation(((url: string, init: RequestInit) =>
+  jest.spyOn(netFetch, 'run').mockImplementation(((url: string, init: RequestInit) =>
     url.endsWith('/api/v1/models')
       ? modelsMock(url)
       : url.endsWith('/v1/status') || url.includes('/api/settings/') || url.includes('/api/models/')
         ? unslothMock(url)
-        : fetchMock(url, init)) as unknown as typeof fetch);
+        : fetchMock(url, init)) as unknown as typeof netFetch.run);
 });
 afterEach(() => jest.restoreAllMocks());
 
