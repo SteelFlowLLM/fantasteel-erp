@@ -14,10 +14,18 @@ export interface StoredSource {
   readError?: string;
   /** 웹이 아니라 우리 ERP 조회 도구(이슈 #435)에서 온 출처. url은 `erp:도구이름`이고 readText가 조회 결과다. 웹으로 읽거나 링크로 달지 않는다 */
   erp?: { tool: string; arguments: string };
+  /** 웹이 아니라 사내 지식(KS 규격·용어 사전·업무 매뉴얼·업무 프로세스, 이슈 #484)에서 온 출처. url은 `knowledge:종류:id`이고 readText가 문서 본문이다 */
+  knowledge?: { kind: 'ks' | 'glossary' | 'manual' | 'process'; id: string };
 }
 
 /** 웹이 아니라 ERP 조회에서 온 출처 */
 export const isErpSource = (source: Pick<StoredSource, 'erp'>): boolean => source.erp !== undefined;
+
+/** 웹이 아니라 사내 지식에서 온 출처 (이슈 #484) */
+export const isKnowledgeSource = (source: Pick<StoredSource, 'knowledge'>): boolean => source.knowledge !== undefined;
+
+/** 웹 출처가 아닌 것(ERP 조회·사내 지식): 읽거나 검색하지 않고, 링크로 달지 않고, 웹 출처 자리에 세지 않는다 */
+export const isInternalSource = (source: Pick<StoredSource, 'erp' | 'knowledge'>): boolean => isErpSource(source) || isKnowledgeSource(source);
 
 /** ERP 조회 결과에 나온 거래처 이름 (웹 검색어에 넣지 않는다) */
 export function erpPartnerNames(sources: readonly StoredSource[]): string[] {
@@ -41,6 +49,8 @@ export interface StoredState extends AiResearchState {
   revision?: StoredRevision;
   /** 우리 ERP 자료가 필요한지 한 번 살펴봤다 (이슈 #435). 없으면 조사를 시작할 때 살펴본다(계획을 복사한 다시 조사) */
   erpChecked?: true;
+  /** 질문에 맞는 사내 지식을 한 번 찾아봤다 (이슈 #484). 없으면 조사를 시작할 때 찾는다(계획을 복사한 다시 조사·이 기능 전 조사) */
+  knowledgeChecked?: true;
 }
 
 /** 보고서 고치기 요청. search가 false면 검색·읽기 없이 모은 것으로 다시 쓴다 */
@@ -52,6 +62,8 @@ export interface StoredRevision {
   fromStep?: number;
   /** 부탁에 맞는 ERP 자료를 살펴봤다 (이슈 #435) */
   erpChecked?: true;
+  /** 부탁으로 사내 지식을 찾아봤다 (이슈 #484) */
+  knowledgeChecked?: true;
 }
 
 /** 검색 결과 한 줄. sourceId는 출처 번호(출처가 꽉 차 넣지 못했으면 null — 근거로 보이되 인용할 수 없다) */
@@ -129,6 +141,8 @@ export type QueryCheck = { ok: true; query: string } | { ok: false; reason: stri
 export function checkResearchQuery(raw: string, partnerNames: Iterable<string> = []): QueryCheck {
   const tidy = stripInvisible(raw).replace(/\s+/g, ' ').trim();
   if (!tidy) return { ok: false, reason: '검색어가 비었어요' };
+  // 모델이 자리 표시('...')만 낸 경우: 글자·숫자가 하나도 없으면 검색어가 아니다
+  if (!/[\p{L}\p{N}]/u.test(tidy)) return { ok: false, reason: '검색어에 글자가 없어요' };
   const cut = tidy.length > AI_RESEARCH_LIMITS.queryMax ? cutAtSpace(tidy, AI_RESEARCH_LIMITS.queryMax) : tidy;
   const { query } = redactQuery(cut);
   if (!query) return { ok: false, reason: '개인정보를 빼니 검색어가 비었어요' };
@@ -245,6 +259,7 @@ export function storedState(value: unknown): StoredState {
     ...(notes.length ? { notes } : {}),
     ...(revision ? { revision } : {}),
     ...(value.erpChecked === true ? { erpChecked: true as const } : {}),
+    ...(value.knowledgeChecked === true ? { knowledgeChecked: true as const } : {}),
   };
 }
 
@@ -256,6 +271,7 @@ function readRevision(value: unknown): StoredRevision | undefined {
     search: value.search,
     ...(typeof value.fromStep === 'number' ? { fromStep: value.fromStep } : {}),
     ...(value.erpChecked === true ? { erpChecked: true as const } : {}),
+    ...(value.knowledgeChecked === true ? { knowledgeChecked: true as const } : {}),
   };
 }
 
@@ -333,8 +349,13 @@ export function storedSources(value: unknown): StoredSource[] {
       ...(typeof s.readText === 'string' ? { readText: s.readText } : {}),
       ...(typeof s.readError === 'string' ? { readError: s.readError } : {}),
       ...(isRecord(s.erp) && typeof s.erp.tool === 'string' && typeof s.erp.arguments === 'string' ? { erp: { tool: s.erp.tool, arguments: s.erp.arguments } } : {}),
+      ...(isRecord(s.knowledge) && KNOWLEDGE_KINDS.some((kind) => kind === (s.knowledge as Record<string, unknown>).kind) && typeof s.knowledge.id === 'string'
+        ? { knowledge: { kind: s.knowledge.kind as NonNullable<StoredSource['knowledge']>['kind'], id: s.knowledge.id } }
+        : {}),
     }));
 }
+
+const KNOWLEDGE_KINDS = ['ks', 'glossary', 'manual', 'process'] as const;
 
 /** 먼저 알아본 출처를 조사 출처 목록에 넣을 때의 요약 (검색 결과 요약이 없어서 어디서 왔는지만 적는다) */
 export const SEED_SOURCE_SNIPPET = '철강맨AI 간단 답에서 쓴 출처 (아직 읽지 않음)';
@@ -458,8 +479,8 @@ export interface DecisionContext {
  */
 export function decideAction(turn: ResearchTurn, ctx: DecisionContext): ResearchDecision {
   const searched = new Set(ctx.searchedQueries.map(queryKey));
-  // ERP 조회 출처는 웹 출처 자리와 '출처 없이 끝내기'에 세지 않는다 (이슈 #435)
-  const webCount = ctx.sources.filter((s) => !isErpSource(s)).length;
+  // ERP 조회·사내 지식 출처는 웹 출처 자리와 '출처 없이 끝내기'에 세지 않는다 (이슈 #435·#484)
+  const webCount = ctx.sources.filter((s) => !isInternalSource(s)).length;
   const full = webCount >= ctx.maxSources;
   if (turn.action === 'search' && !full) {
     const checked = checkResearchQuery(turn.query, ctx.partnerNames);

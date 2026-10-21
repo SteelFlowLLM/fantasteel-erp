@@ -67,6 +67,19 @@ describe('타임라인', () => {
     const budget = { maxSteps: 8, maxSources: 20 };
     expect(progressText({ stepsUsed: 2, budget, sources: [erp, { ...erp, id: 4, url: 'https://www.example.com/a' }] })).toBe('2/8 단계 · 출처 1/20');
   });
+  it('사내 지식 출처는 링크 없이 사내 지식으로 보이고 웹 출처 자리에 세지 않는다 (이슈 #484)', () => {
+    const line = timelineLineOf({ seq: 2, type: 'source.added', createdAt: at, payload: { sourceId: 1, title: '사내 지식 · KS 규격 8. 강종별 기준값', url: 'knowledge:ks:KS-8' } });
+    expect(line.detail).toBe('사내 지식');
+    const knowledge = { id: 1, title: '사내 지식 · KS 규격 8. 강종별 기준값', url: 'knowledge:ks:KS-8', snippet: '', read: true };
+    const erp = { id: 2, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory', snippet: '', read: true };
+    const web = { id: 3, title: '웹 글', url: 'https://www.example.com/a', snippet: '', read: false };
+    expect(sourceRows([web, erp, knowledge]).map((row) => [row.id, row.kind, row.host, row.href])).toEqual([
+      [1, 'knowledge', '사내 지식', null],
+      [2, 'erp', '우리 회사 ERP', null],
+      [3, 'web', 'example.com', 'https://www.example.com/a'],
+    ]);
+    expect(progressText({ stepsUsed: 1, budget: { maxSteps: 8, maxSources: 20 }, sources: [knowledge, erp, web] })).toBe('1/8 단계 · 출처 1/20');
+  });
   it('실패한 읽기·검색은 경고 톤', () => {
     expect(timelineLineOf({ seq: 3, type: 'page.read', createdAt: at, payload: { sourceId: 1, title: '', chars: 0, error: '시간 초과' } }).tone).toBe('wait');
     expect(timelineLineOf({ seq: 4, type: 'failed', createdAt: at, payload: { reason: '이유' } }).tone).toBe('danger');

@@ -90,7 +90,7 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
     }
     case 'source.added': {
       const p = event.payload;
-      const host = webHostOf(p.url) ?? (isErpSourceUrl(p.url) ? ERP_SOURCE_HOST : null);
+      const host = webHostOf(p.url) ?? internalHostOf(p.url);
       return { ...base, tone: 'neutral', title: `출처 [${p.sourceId}] ${webSourceTitle(p.title, p.url)}`, detail: host ?? undefined };
     }
     case 'page.read': {
@@ -227,10 +227,19 @@ export function reportBlocks(report: string, sources: readonly Pick<AiResearchSo
 /** 우리 ERP 조회 도구에서 온 출처의 주소(`erp:도구이름`, 이슈 #435). 웹 주소가 아니라 링크로 열지 않는다 */
 const isErpSourceUrl = (url: string): boolean => url.startsWith('erp:');
 const ERP_SOURCE_HOST = '우리 회사 ERP';
+/** 사내 지식(KS 규격·용어 사전·업무 매뉴얼·업무 프로세스, 이슈 #484)에서 온 출처의 주소(`knowledge:종류:id`). 링크로 열지 않는다 */
+const isKnowledgeSourceUrl = (url: string): boolean => url.startsWith('knowledge:');
+const KNOWLEDGE_SOURCE_HOST = '사내 지식';
+
+/** 출처 종류: 웹·우리 회사 ERP 조회·사내 지식 */
+export type SourceKind = 'web' | 'erp' | 'knowledge';
+export const sourceKindOf = (url: string): SourceKind => (isKnowledgeSourceUrl(url) ? 'knowledge' : isErpSourceUrl(url) ? 'erp' : 'web');
+const internalHostOf = (url: string): string | null => (isKnowledgeSourceUrl(url) ? KNOWLEDGE_SOURCE_HOST : isErpSourceUrl(url) ? ERP_SOURCE_HOST : null);
 
 export interface SourceRow {
   id: number;
   title: string;
+  kind: SourceKind;
   host: string | null;
   /** http·https만. 아니면 null(글로만 보인다) */
   href: string | null;
@@ -238,7 +247,9 @@ export interface SourceRow {
 }
 
 export function sourceRows(sources: readonly AiResearchSourceView[]): SourceRow[] {
-  return [...sources].sort((a, b) => a.id - b.id).map((source) => ({ id: source.id, title: webSourceTitle(source.title, source.url), host: webHostOf(source.url) ?? (isErpSourceUrl(source.url) ? ERP_SOURCE_HOST : null), href: safeWebHref(source.url), read: source.read }));
+  return [...sources]
+    .sort((a, b) => a.id - b.id)
+    .map((source) => ({ id: source.id, title: webSourceTitle(source.title, source.url), kind: sourceKindOf(source.url), host: webHostOf(source.url) ?? internalHostOf(source.url), href: safeWebHref(source.url), read: source.read }));
 }
 
 // ── 계획 고치기 ──
@@ -416,6 +427,6 @@ export function revisionBlockReason(run: Pick<AiResearchRunView, 'status' | 'can
 
 /** 진행 한 줄: "3/8 단계 · 출처 5/20" */
 export function progressText(run: Pick<AiResearchRunView, 'stepsUsed' | 'budget' | 'sources'>): string {
-  // 우리 ERP에서 조회한 출처는 웹 출처 자리에 세지 않는다
-  return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.filter((source) => !isErpSourceUrl(source.url)).length}/${run.budget.maxSources}`;
+  // 우리 ERP에서 조회한 출처·사내 지식은 웹 출처 자리에 세지 않는다
+  return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.filter((source) => sourceKindOf(source.url) === 'web').length}/${run.budget.maxSources}`;
 }

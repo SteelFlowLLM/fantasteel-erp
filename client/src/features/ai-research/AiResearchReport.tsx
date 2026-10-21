@@ -4,6 +4,7 @@
 // 보고서·출처 제목은 웹에서 온 글이다. HTML로 넣지 않고(React 글), 눌러 열리는 링크는 모은 출처의 http·https 주소만 새 탭으로 연다.
 import type { AiResearchRunView } from '@fantasteel/shared';
 import { Fragment, useMemo } from 'react';
+import { Badge } from '@/components/Badge';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { reportBlocks, sourceRows, type ReportInline } from '@/lib/aiResearch';
 
@@ -94,7 +95,14 @@ export function AiResearchReport({ run, report = run.report, title = '보고서'
                   ) : (
                     row.title
                   )}
-                  {row.host ? <span className="ml-2 text-cap text-ink-3">{row.host}</span> : null}
+                  {row.kind === 'web' ? (
+                    row.host ? <span className="ml-2 text-cap text-ink-3">{row.host}</span> : null
+                  ) : (
+                    // 사내 지식·ERP는 웹 출처와 다른 배지로 구별한다 (이슈 #484)
+                    <Badge tone={row.kind === 'knowledge' ? 'ok' : 'outline'} className="ml-2 align-middle">
+                      {row.host}
+                    </Badge>
+                  )}
                 </span>
                 {row.read ? <span className="flex-none text-cap text-ink-3">읽음</span> : null}
               </li>
