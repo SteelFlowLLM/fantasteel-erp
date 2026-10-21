@@ -192,3 +192,8 @@ GET,과거 사례 검색,/api/v1/past-cases,과거 사례,EX,초안,도출: 용�
 GET,과거 사례 상세 조회,/api/v1/past-cases/:id,과거 사례,EX,초안,도출: 컨벤션 5장
 POST,사례 초안 생성,/api/v1/lots/:id/past-case-drafts,과거 사례,EX,초안,도출. 🟡 경로 제안. 사례 등록 전용 권한 코드 없음(품질 담당 = DISPOSITION_SET 제안)
 POST,과거 사례 등록,/api/v1/past-cases,과거 사례,EX,초안,도출. 구분은 공통코드 CASE_CATEGORY(🟡). 설비 마스터 없이 텍스트
+GET,심층 조사 반복 목록 조회,/api/v1/ai-research/schedules,AI·Agent,EX,초안,"문서 밖 기능(2026-10-22, 이슈 #521). 켜진 반복 먼저, 다음 차례가 빠른 것부터. 꺼 둔 반복도 보인다"
+PUT,심층 조사 반복 설정,/api/v1/ai-research/runs/:id/schedule,AI·Agent,EX,초안,"문서 밖 기능(2026-10-22, 이슈 #521). 완료한 조사만(RES-002). frequency DAILY·WEEKLY, weekdays 1(월)~7(일), time HH:MM(Asia/Seoul). 켜진 반복은 사원당 5개까지(RES-009, 가정값). 반복이 만든 조사에서 부르면 원래 조사의 반복을 바꾼다"
+DELETE,심층 조사 반복 끄기,/api/v1/ai-research/runs/:id/schedule,AI·Agent,EX,초안,"문서 밖 기능(2026-10-22, 이슈 #521). 지우지 않고 끈다(다시 켜면 같은 반복). 반복이 없으면 RES-001"
+GET,심층 조사 보고서 PDF 내려받기,/api/v1/ai-research/runs/:id/pdf,AI·Agent,EX,초안,"문서 밖 기능(2026-10-22, 이슈 #521). ?version=n이면 그 판, 없으면 지금 보고서. 응답은 application/pdf 파일(공통 응답 포맷 아님). 남의 조사·없는 판 RES-001(404), 보고서 없음 RES-002, PDF 실패 RES-010. 한글 글꼴은 밀시트 PDF와 같은 Noto Sans KR"
+POST,심층 조사 Notion 내보내기,/api/v1/ai-research/runs/:id/notion-export,AI·Agent,EX,초안,"문서 밖 기능(2026-10-17 이슈 #384, 다시 내보내기 2026-10-22 이슈 #521). 완료한 조사만(RES-002). 본문 {version?} 없으면 지금 판. 다시 내보내면 새 페이지를 만들고 조사에는 마지막 페이지 주소·판을 남긴다. 내보내는 중이면 RES-007. 연결 오류는 INT-00x 그대로"

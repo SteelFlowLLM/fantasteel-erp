@@ -1,6 +1,6 @@
 # ai-research — 철강맨AI 심층 조사
 
-> 이슈 #378, #400(계획 저장·제목 바꾸기·다시 조사), #408(철강맨AI 웹 검색 답·대화 카드에서 이어 가기), #416(계획을 말로 고치기), #418(보고서를 말로 고치기·판), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
+> 이슈 #378, #521(반복 실행·보고서 PDF·Notion 다시 내보내기·보고서 시간 제한 10분), #400(계획 저장·제목 바꾸기·다시 조사), #408(철강맨AI 웹 검색 답·대화 카드에서 이어 가기), #416(계획을 말로 고치기), #418(보고서를 말로 고치기·판), #384(예산 설정·PDF·차트·완료 알림·Notion 내보내기·보고서에 대해 묻기, 2차: Unsloth 수준 근거 조립·보고서 기준·이어 쓰기·문맥 길이 예산·오늘 날짜). Unsloth 동작은 행동만 참고했고 코드·프롬프트 글은 가져오지 않았다. **문서에 없는 기능**(설계 문서 01~09에 없음, 2026-10-17 추가). 값은 모두 이 기능을 만들며 정한 가정값이다.
 > Unsloth Studio의 deep research 흐름(계획 → 검색·읽기 반복 → 점검 → 인용 보고서)을 참고해 새로 썼다(코드는 가져오지 않음).
 
 ## 1. 담당 범위
@@ -8,18 +8,20 @@
 - 사원이 질문하면 AI가 **조사 계획**을 세우고, 사원이 계획을 보고 고친 뒤 **시작**하면 서버가 백그라운드로 웹을 **검색·읽기**를 반복하며 근거를 모으고, **점검**을 거쳐 출처 번호 `[n]`을 단 **마크다운 보고서**를 쓴다.
 - 묻는 사원의 권한으로 읽는 ERP 자료(이슈 #435, 아래 'ERP 자료')는 근거로만 쓰고 회사 밖으로 보내지 않는다. 회사 밖으로 나가는 것은 검색어뿐이고, 검색어는 웹 검색(`docs/backend/ai-assistant.md` 4장 '웹 검색')과 같은 회사 안 정보 막기를 거친다.
 - 웹 검색·페이지 읽기는 ai-assistant 모듈의 웹 도구(`AssistantWebToolbox` — 같은 검색 캐시·1분 한도·SSRF 막기·worker 글 뽑기·동시 4개)를 그대로 쓴다. 이 모듈은 `AiAssistantModule`이 export한 `AssistantWebToolbox`를 받는다.
-- 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · rules(순수 규칙) · prompt · llm(JSON 묻기) · report · view), 공유 타입 `shared/src/ai-research.ts`.
+- 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · scheduler(반복 차례, 이슈 #521) · rules(순수 규칙) · prompt · llm(JSON 묻기) · report · pdf(보고서 PDF) · view), 공유 타입 `shared/src/ai-research.ts`.
 
-## 2. 테이블 (ERD `ai_research_run`·`ai_research_event`·`ai_research_report_version`, 마이그레이션 `20261017142607_ai_research`·`20261018090000_ai_research_plus`·`20261019082940_ai_research_seed`·`20261020031802_ai_research_revisions`)
+## 2. 테이블 (ERD `ai_research_run`·`ai_research_event`·`ai_research_report_version`·`ai_research_schedule`, 마이그레이션 `20261017142607_ai_research`·`20261018090000_ai_research_plus`·`20261019082940_ai_research_seed`·`20261020031802_ai_research_revisions`·`20261021203538_ai_research_schedule_export`)
 
 | 테이블 | 내용 |
 | --- | --- |
-| `ai_research_run` | 조사 하나. `employee_id`(만든 사원), `question`, `seed`(철강맨AI에서 먼저 알아본 것 `{answer, sources:[{title, url}]}`, 이슈 #408), `status`(CHECK), `plan` `{title, steps:[{title, query}]}`, `plan_revision`, `budget` `{maxSteps, maxSources}`, `steps_used`, `research_state` `{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?, revision?}`(`revision` = 아직 판이 나오지 않은 보고서 고치기 `{version, instruction, search}`, 이슈 #418), `sources` `[{id, title, url, snippet, readText?, readError?}]`, `audit`, `report`, `charts`(차트 2개까지), `notion_page_url`·`notion_exported_at`(Notion 내보내기), `failure_reason`, `lease_owner`·`lease_expires_at`(맡은 서버 표시), `finished_at` |
+| `ai_research_run` | 조사 하나. `employee_id`(만든 사원), `question`, `seed`(철강맨AI에서 먼저 알아본 것 `{answer, sources:[{title, url}]}`, 이슈 #408), `status`(CHECK), `plan` `{title, steps:[{title, query}]}`, `plan_revision`, `budget` `{maxSteps, maxSources}`, `steps_used`, `research_state` `{summary, gaps[], unsupportedClaims[], searchedQueries[], pending?, exhaustedAt?, auditedAt?, revision?}`(`revision` = 아직 판이 나오지 않은 보고서 고치기 `{version, instruction, search}`, 이슈 #418), `sources` `[{id, title, url, snippet, readText?, readError?}]`, `audit`, `report`, `charts`(차트 2개까지), `notion_page_url`·`notion_exported_at`·`notion_exported_version`(마지막으로 내보낸 Notion 페이지·시각·판, 이슈 #521에서 다시 내보내기가 생겼다)·`notion_export_claimed_at`(내보내는 중 표시), `schedule_id`(반복이 만든 조사면 그 반복, 이슈 #521), `failure_reason`, `lease_owner`·`lease_expires_at`(맡은 서버 표시), `finished_at` |
 | `ai_research_event` | 진행 기록(타임라인). `run_id`, `seq`(조사 안 순번, `(run_id, seq)` unique), `type`(CHECK), `payload`(짧은 jsonb) |
+| `ai_research_schedule` | 반복 실행(이슈 #521). `run_id`(반복을 건 조사, unique), `employee_id`, `frequency`(DAILY·WEEKLY, CHECK), `weekdays`(int[], WEEKLY의 1=월 … 7=일, DAILY는 빈 배열, CHECK), `run_time`(HH:MM 서울, CHECK), `enabled`, `next_run_at`(켜져 있을 때만, CHECK), `last_run_at`·`last_run_id`(마지막 차례·만든 조사), `last_skip_reason`. 끄면 지우지 않고 `enabled = false` |
 | `ai_research_report_version` | 보고서의 판(이슈 #418). `run_id`, `version`(1부터, `(run_id, version)` unique, CHECK ≥ 1), `instruction`(고치기 부탁, 1판·더 조사하기 판은 null), `search`(더 검색했는지), `report`, `charts`, `created_at`. 지우거나 고치지 않는다 |
 
 - 상태·이벤트 종류는 공통 코드가 아니다(이 기능 안의 값, CHECK로 막음). 작업 로그(business_event)는 남기지 않는다(REQ-LOG-002 이벤트가 아니고 ERP 데이터를 바꾸지 않는다).
-- 🟡 끝난 조사의 알림(`notification`)은 맞는 `NOTIFICATION_TYPE`이 정의서에 없어 factory-agent처럼 `TASK_ASSIGNED`(업무 지정)를 쓴다(`ai-research.notify.ts`). 정의서에 유형이 생기면 바꾼다.
+- 🟡 끝난 조사의 알림(`notification`)은 맞는 `NOTIFICATION_TYPE`이 정의서에 없어 factory-agent처럼 `TASK_ASSIGNED`(업무 지정)를 쓴다(`ai-research.notify.ts`). 정의서에 유형이 생기면 바꾼다. 반복 차례를 건너뛴 알림(이슈 #521)도 같다.
+- `ai_research_schedule.run_id`는 ERD에서는 `ai_research_run`을 가리키지만 Prisma 관계로는 잇지 않았다: `relationMode = "prisma"`에서 1:1 관계(unique 칸)가 있으면 Prisma 7이 조사 여러 행을 한 번에 바꾸거나 지울 때 "Expected zero or one element"로 실패했다(2026-10-22 확인). 제목은 저장소가 따로 읽는다(`withTitles`). `last_run_id`·`ai_research_run.schedule_id`는 1:n 관계라 그대로 둔다.
 
 ## 3. API
 
@@ -39,10 +41,14 @@
 | POST | `ai-research/runs/:id/extend` | | 200. `canExtend`일 때만 `maxSteps + 4`(모두 min(30, 기본 단계×2)까지, 기본 24) → QUEUED. 아니면 409 `RES-002` |
 | POST | `ai-research/runs/:id/revisions` | `{ instruction, search? }` (부탁 1~500자, 앞뒤 공백 뗌. `search` 없으면 true) | 200 `AiResearchRunView`(QUEUED). 보고서를 말로 고치기(이슈 #418, 아래 '보고서를 말로 고치기'). 내 COMPLETED이고 보고서가 있을 때만(아니면 409 `RES-002`), 판이 이미 10개면 409 `RES-002`, 모델 없음 `RES-005`, 진행 중 3개면 `RES-006` |
 | GET | `ai-research/runs/:id/versions/:version` | | 200 `AiResearchReportVersionView` `{ version, instruction, search, createdAt, report, charts }`. 내 조사의 판만, 없는 판은 404 `RES-001` |
-| POST | `ai-research/runs/:id/notion-export` | | 200 `{ notionPageUrl, run }`. 내 COMPLETED 조사만(아니면 409 `RES-002`), 한 번만(409 `RES-007`). 연결·상위 페이지 오류는 integration의 `INT-002`·`INT-003`·`INT-004`·`INT-005`·`INT-006`·`INT-009` 그대로 |
+| POST | `ai-research/runs/:id/notion-export` | `{ version? }` (1~int4, 없으면 지금 판) | 200 `{ notionPageUrl, run }`. 내 COMPLETED 조사만(아니면 409 `RES-002`), 없는 판 404 `RES-001`. **다시 내보낼 수 있다**(이슈 #521): 내보낼 때마다 새 페이지를 만들고 `notionPageUrl`·`notionExportedVersion`은 마지막 것. 다른 곳에서 내보내는 중(5분 안)이면 409 `RES-007`. 연결·상위 페이지 오류는 integration의 `INT-002`·`INT-003`·`INT-004`·`INT-005`·`INT-006`·`INT-009` 그대로 |
+| GET | `ai-research/runs/:id/pdf` | `?version=` (1~int4, 없으면 지금 보고서) | 200 PDF 파일(`application/pdf`, `Content-Disposition: attachment; filename*=UTF-8''심층조사-<id>-<제목>[-n판].pdf`, 공통 응답 포맷 아님). 내 조사만(남의 조사 404 `RES-001`), 없는 판 404 `RES-001`, 보고서가 없으면 409 `RES-002`, PDF를 그리지 못하면(글꼴) 500 `RES-010` (이슈 #521) |
+| GET | `ai-research/schedules` | | 200 `AiResearchScheduleView[]` 내 반복(켜진 것 먼저, 다음 차례가 빠른 것부터, 꺼 둔 것 포함) (이슈 #521) |
+| PUT | `ai-research/runs/:id/schedule` | `{ frequency: DAILY\|WEEKLY, weekdays?: number[] (1~7, 7개까지, 같은 요일 두 번 400), time: "HH:MM" }` | 200 `AiResearchScheduleView`. 반복 걸기·바꾸기·다시 켜기(아래 '반복 실행'). 내 COMPLETED이고 계획이 있는 조사만(아니면 409 `RES-002`), 반복이 만든 조사의 id면 원래 조사의 반복을 바꾼다. 매주인데 요일이 없으면 400 `COM-004`. 새로 켜면 켜진 반복이 5개일 때 409 `RES-009` |
+| DELETE | `ai-research/runs/:id/schedule` | | 200 `AiResearchScheduleView`(`enabled: false`, `nextRunAt: null`). 지우지 않고 끈다. 반복이 없으면 404 `RES-001`. 반복이 만든 조사의 id도 받는다 |
 | POST | `ai-research/runs/:id/cancel` | | 200. 끝나지 않은 조사만 CANCELLED(+ `cancelled` 이벤트). 이미 끝났으면 409 `RES-002` |
 
-`AiResearchRunView` 주요 칸: `status`, `plan`, `planRevision`, `budget`, `stepsUsed`, `researchState`, `searchedQueries`, `sources: { id, title, url, snippet, read }[]`(읽은 본문은 보내지 않는다), `audit`, `report`, `reportTruncated`, `incompleteReason`, `failureReason`, `canExtend`, `charts`, `notionPageUrl`, `versions`(판 `{version, instruction, search, createdAt}` 오래된 것부터, 본문 없음), `pendingRevision`(대기·조사 중인 고치기 `{version, instruction, search}`, 아니면 null), `canRevise`, `events`, `lastSeq`.
+`AiResearchRunView` 주요 칸 (이슈 #521: `reportFallback`·`schedule`·`notionExportedVersion`·`repeating`·`fromSchedule` 더함): `status`, `plan`, `planRevision`, `budget`, `stepsUsed`, `researchState`, `searchedQueries`, `sources: { id, title, url, snippet, read }[]`(읽은 본문은 보내지 않는다), `audit`, `report`, `reportTruncated`, `incompleteReason`, `failureReason`, `canExtend`, `charts`, `notionPageUrl`, `versions`(판 `{version, instruction, search, createdAt}` 오래된 것부터, 본문 없음), `pendingRevision`(대기·조사 중인 고치기 `{version, instruction, search}`, 아니면 null), `canRevise`, `reportFallback`(지금 보고서가 대체본이면 `{reason: TIMEOUT|ERROR|EMPTY|LLM_DOWN, previous}`, 아니면 null), `schedule`(이 조사의 반복: 반복을 건 조사면 그 반복, 반복이 만든 조사면 만든 반복. `runId`가 반복을 건 조사), `notionExportedVersion`, `repeating`(켜진 반복이 걸려 있음)·`fromSchedule`(반복이 만든 조사, 목록 줄에도 있다), `events`, `lastSeq`.
 
 **보고서에 대해 묻기**: `POST ai-assistant/messages`(·`messages/stream`)에 `researchRunId`를 넣으면 그 조사의 보고서·출처 목록을 참고 자료로 넣는다(아래 4장 '보고서에 대해 묻기'). 남의 조사 404 `RES-001`, 보고서가 없으면 409 `RES-002`.
 
@@ -95,13 +101,37 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
   - 보고서 LLM이 실패하거나 빈 답이면 조사 메모 대신 **앞 판 내용을 그대로** 두고 맨 위에 "…앞 판 내용을 그대로 두었어요" 알림(COMPLETED).
   - COMPLETED로 저장하는 같은 트랜잭션에서 다음 판(`instruction`·`search`·`report`·`charts`)을 넣고 `revision.ready {version, chars}`를 남기고, 메모의 `revision`을 지운다. 끝 알림은 지금과 같이 또 보낸다.
 - **판이 생긴 뒤의 더 조사하기**도 다시 쓴 보고서를 부탁 없는 판으로 남긴다(판이 10개면 더 조사하기도 막는다). 고친 적이 없는 조사의 더 조사하기는 판을 만들지 않는다.
-- `run.report`·`charts`는 늘 마지막 판과 같다. '이 보고서로 묻기'·Notion 내보내기는 마지막 판을 쓴다. 출처는 판과 상관없이 조사의 것(늘기만 해 옛 판의 `[n]`도 맞다).
+- `run.report`·`charts`는 늘 마지막 판과 같다. '이 보고서로 묻기'는 마지막 판을 쓴다. Notion 내보내기·PDF는 고른 판, 고르지 않으면 마지막 판(이슈 #521). 출처는 판과 상관없이 조사의 것(늘기만 해 옛 판의 `[n]`도 맞다).
 - 이 기능 전 코드의 서버가 같은 DB에서 일꾼을 돌리면 그 서버가 고치기를 맡을 수 있다. 옛 서버는 `revision`을 모르고 버려 판을 남기지 않고 조사 메모로 다시 쓴다. 고치기를 쓰기 전에 같은 DB를 쓰는 서버를 모두 이 코드로 올린다.
 - 고치는 중에 취소하면 CANCELLED로 끝나고 앞 보고서와 이미 남은 판은 그대로다(남은 부탁은 보이지 않는다). 더 고치려면 다시 조사.
 - 화면(`AiResearchRevisions`·`AiResearchDetail`):
   - 보고서 위 판 고르기(1판·2판…·최신). 최신이 아닌 판을 고르면 `GET versions/:version`으로 그 판의 보고서·차트를 보이고 "앞 판을 보고 있어요" 띠와 [최신 판 보기]를 둔다.
   - 보고서 아래 "보고서 고치기" 카드: 대화처럼 부탁(오른쪽 말풍선, 더 검색 여부·시각) → 그 판(배지 + [이 판 보기]), 고치는 중이면 "N판을 쓰는 중…". 부탁 칸(500자, Enter 보내기)·[필요하면 더 검색]·[고치기], 못 고치면 까닭.
   - 고치는 중(대기·조사 중)에도 진행 카드 아래에 지금 보고서와 기록을 보인다. '이 보고서로 묻기'는 그대로다.
+
+### 반복 실행 (이슈 #521, 문서에 없는 기능)
+
+- **무엇**: 완료한 조사를 **매일** 또는 **매주 고른 요일**(여럿 가능)의 정한 시각(**Asia/Seoul**, 분 단위)에 같은 질문·**승인된 계획**·예산·먼저 알아본 것으로 다시 조사한다. 시장 시황처럼 주기적으로 다시 볼 조사를 사람이 매번 다시 조사하지 않게 한다.
+- **새 판이 아니라 새 조사**: 차례마다 `ai_research_run`을 하나 새로 만든다(`schedule_id` = 이 반복). 판(이슈 #418)은 한 조사의 같은 출처를 바탕으로 보고서를 고친 것이고 10개 상한이 있어 매일 반복이 열흘이면 막힌다. 새 조사는 '다시 조사'(`rerun`)처럼 질문·계획·예산·seed를 복사하되 **계획 확인 없이 바로 QUEUED**(이미 승인한 계획, `planRevision` 1)이고, 일꾼이 평소처럼 사내 지식·ERP를 다시 모으고 조사한다. 원래 조사는 그대로다. 계획 제목을 바꾸면 다음 차례부터 그 제목을 쓴다.
+- **걸기·바꾸기·끄기**: 화면 상세 머리 [반복 걸기] → 창(매일/매주 고른 요일·요일 칩·시각, "다음 실행: 10-23 (금) 09:00" 미리 보기). 걸면 다음 차례는 지금 뒤 첫 시각(`nextAiResearchRunAt`, shared). 질문 아래 띠에 규칙·다음 실행·마지막 차례·마지막으로 만든 조사·건너뛴 이유와 [바꾸기]·[끄기]·[다시 켜기]. 반복이 만든 조사에서도 같은 띠가 보이고 원래 조사의 반복을 바꾼다(서버도 `scheduleSource`로 원래 조사를 찾는다). 끄면 지우지 않는다(`enabled = false`, `next_run_at = null`, 마지막 실행 기록은 남음).
+- **상한**: 켜진 반복은 사원당 **5개**(가정값, `RES-009`). 바꾸기는 상한에 걸리지 않고, 꺼 둔 반복을 다시 켤 때는 센다. 걸기·끄기는 사원별 잠금(`lockAiResearchEmployee`) 안에서 센다.
+- **차례 (`ai-research.scheduler.ts`)**: factory-agent 스케줄러처럼 패키지 없이 타이머로 **1분마다**(가정값) 켤 때 한 번 바로, `findDueAiResearchSchedules`(켜져 있고 `next_run_at <= DB now()`, 오래된 차례부터 20개)를 찾아 하나씩 **한 트랜잭션**에서:
+  1. 사원별 잠금(반복 걸기·바꾸기와 같은 순서: 사원 → 반복 행, 서로 기다리다 막히지 않게).
+  2. **차지**: `claimAiResearchSchedule`(TypedSQL 조건부 UPDATE) — 켜져 있고 `next_run_at`이 읽은 값 그대로이며 지났을 때만 `next_run_at`을 다음 차례로, `last_run_at = now()`. 서버 두 대가 같은 차례를 집으면 먼저 바꾼 쪽만 행을 돌려받고 뒤 UPDATE는 바뀐 값을 보고 0건이다(그 서버는 아무것도 하지 않는다). 다음 차례는 max(지금, 이번 차례) 뒤 첫 시각이라 서버가 꺼져 있어 여러 차례를 놓쳤어도 **한 번만** 하고 미래로 넘긴다.
+  3. 확인: 반복을 건 조사·계획이 없거나 사원이 퇴사했으면 반복을 끈다(`last_skip_reason`). 모델이 없거나, **앞 반복 조사(`last_run_id`)가 아직 진행 중**이거나, 진행 중 조사가 이미 3개면 이번 차례를 **건너뛰고**(`last_skip_reason`) 사원에게 "반복 심층 조사 건너뜀 · 제목 (이유)" 알림(이동 경로는 반복을 건 조사).
+  4. 새 조사(QUEUED) + `plan.ready {copiedFrom, scheduled: true}` + `last_run_id`. 하나라도 만들면 일꾼을 깨운다. 트랜잭션이 실패하면 차지도 되돌려져 다음 확인 때 다시 한다.
+- **끝 알림**: 반복이 만든 조사가 완료·실패하면 일꾼이 평소처럼 알리고 글이 "반복 심층 조사 완료 · 제목"이다.
+- `AI_RESEARCH_WORKER=off`면 반복 타이머도 돌지 않는다(시험은 `scheduler.fireDue()`를 직접 부른다). 서버가 여러 대면 대마다 타이머가 돌지만 2번 조건부 UPDATE로 차례당 한 번만 만든다.
+
+### 보고서 PDF (이슈 #521)
+
+- `GET runs/:id/pdf?version=` (`ai-research.pdf.ts`, pdfkit). 한글 글꼴은 밀시트 PDF와 같은 `server/assets/fonts/NotoSansKR-VF.ttf`(`MILL_SHEET_FONT`로 바꿈, `millSheetFontPath`를 그대로 쓴다). A4.
+- 내용: 제목(계획 제목, 없으면 질문) · "작성 YYYY-MM-DD HH:mm (서울) · n판 · 심층 조사 #id"(작성 시각은 판이면 그 판을 만든 때, 아니면 끝난 때) · 대체본이면 그 표시 · 질문 · 본문 · 차트 · 출처 · 쪽 아래 "FantaSteel ERP 심층 조사 #id · 1/3".
+- 본문(`pdfBlocks`): 보고서 마크다운의 제목(#~####)·문단·글머리/번호 목록·인용(왼쪽 줄)·**표**(`|` 줄, 구분 줄은 뺌, 칸 너비는 칸마다 가장 긴 글에 맞춰 나눔, 칸 글은 줄을 바꾸고 쪽이 넘어가면 머리줄을 다시 그림)만 그린다. 굵게·기울임 표시·코드 표시·그림·HTML 태그는 떼고 링크는 글만 남긴다. 끝의 서버 출처 목록(`## 출처`)은 떼고 아래 출처 절을 따로 그린다.
+- 🟡 차트는 그림 대신 **숫자 표**(가로축 한 줄, 계열마다 한 칸, `값 [출처 번호]`)로 넣는다(가정).
+- 출처: `[n] 제목` + 웹 출처만 주소(누르면 열리는 링크). ERP 조회·사내 지식은 주소 없이 제목만.
+- 권한: 그 조사를 볼 수 있는 사람(만든 사원)만. 남의 조사는 다른 API와 같이 없는 것처럼 404 `RES-001`.
+- 화면: 보고서 카드 오른쪽 위 [PDF] — 보고 있는 판(앞 판을 고르면 그 판)을 받는다.
 
 ### 예산 (`ai-research.config.ts` · 환경 변수, 이슈 #384)
 
@@ -114,6 +144,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | `AI_RESEARCH_PROMPT_CHARS` | LLM 요청 한 번(시스템 지시 + 사용자 글)의 글자 수. 모델 문맥 길이를 알면 그것으로 정한 값의 **상한**으로만 쓴다(아래) | 24,000 | 400,000 (바닥 8,000) |
 | `AI_RESEARCH_EVIDENCE_SOURCES` | 다음 행동을 고를 때 보이는 최근 **단계 기록** 수 | 6 | 30 |
 | `AI_RESEARCH_REPORT_SOURCES` | 점검·보고서·차트에 보이는 **단계 기록** 수 (최근 것부터) | 모두(100) | 100 |
+| `AI_RESEARCH_REPORT_TIMEOUT_MINUTES` | 보고서 LLM 한 번의 시간 제한(분). 이슈 #521 | 10 | 60 (바닥 1) |
 
 - 조사별 `budget`(POST runs)은 위 상한 안에서 그 조사만 바꾼다. 만들 때 정한 값이 `budget` jsonb에 남는다(환경 변수를 바꿔도 이미 만든 조사는 그대로).
 - 더 조사하기: 한 번에 +4단계, 모두 **min(30, `AI_RESEARCH_MAX_STEPS` × 2)**단계까지(기본 24).
@@ -150,7 +181,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
    - `researchState`를 읽을 수 있으면 메모를 바꾼다(요약 1,500자, 목록 8개×200자).
 3. 단계를 다 썼으면 `budget.exhausted`.
 4. **점검**: JSON `{thesis, outline[], supportedClaims[{claim, sourceIds[]}], designInferences[], unsupportedPrecision[], contradictions[], missingDimensions[]}`(이슈 #384: 설계 추론·근거 없는 정밀 수치, 목차는 단계 나열이 아니라 측면을 잇는 흐름). 모르는 출처 번호는 빼고 번호가 하나도 없는 주장은 버린다. 못 읽으면 조사 메모로 대신한다(`audit.ready.ok = false`).
-5. **보고서**: 마크다운 글로 받는다(`LlmClient.chatText`, **16,384토큰**(문맥이 작으면 줄임), 5분). 길이 한도(`finish_reason = length`)에 걸리면 **한 번 이어 쓰기**: 앞 요청 + 끊긴 답(assistant) + "끊긴 자리부터 되풀이 없이 이어서"를 보내고, 이어 쓴 글이 앞 글 끝(8~400자)을 되풀이하며 시작하면 겹친 만큼 떼고 붙인다(`mergeContinuation`). 붙인 글이 더 길면 쓰고 끊김 여부는 이어 쓴 답의 것, 이어 쓰기 LLM이 실패하면 끊긴 보고서로 둔다. 다듬기(`finalizeReport`):
+5. **보고서**: 마크다운 글로 받는다(`LlmClient.chatText`, **16,384토큰**(문맥이 작으면 줄임), **10분**(`AI_RESEARCH_REPORT_TIMEOUT_MINUTES`, 이슈 #521: 5분이면 로컬 LLM이 자주 넘었다 — #493 실측 2번 모두 초과)). **시간 초과면 한 번만** 같은 요청으로 다시 부탁한다(`report.retry {timeoutMinutes}`, 보고서 단계 전체에서 한 번 — 빈 답 다시 묻기·이어 쓰기가 시간 초과여도 다시 하지 않는다). 길이 한도(`finish_reason = length`)에 걸리면 **한 번 이어 쓰기**: 앞 요청 + 끊긴 답(assistant) + "끊긴 자리부터 되풀이 없이 이어서"를 보내고, 이어 쓴 글이 앞 글 끝(8~400자)을 되풀이하며 시작하면 겹친 만큼 떼고 붙인다(`mergeContinuation`). 붙인 글이 더 길면 쓰고 끊김 여부는 이어 쓴 답의 것, 이어 쓰기 LLM이 실패하면 끊긴 보고서로 둔다. 다듬기(`finalizeReport`):
    - 모델이 쓴 출처 목록(`## 출처`·`참고 문헌`·`References` 등)은 **마지막 제목일 때만** 그 제목부터 끝까지 뗀다(가운데의 `## 참고` 절은 남긴다).
    - 웹 검색 답과 같은 링크 거르기(`filterAnswerLinks`): 모은 출처에 없는 링크는 글만, 사진·HTML 태그는 지운다.
    - `[n]`·`[n, m]` 중 모르는 번호를 지운다(남은 것은 `[1][3]`).
@@ -159,6 +190,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 6. **차트** (이슈 #384, 코드 실행 없음): 보고서 뒤 JSON 한 번(`research_charts`, `RESEARCH_JSON` 프로필)으로 차트 2개까지 `{title, type: line|bar, unit, xLabel, series: [{name, points: [{x, y, sourceId}]}]}`를 받는다(계열 4개·점 24개까지). 서버가 **점마다** `sourceId`가 모은 출처이고 `y`가 그 출처의 제목·요약·읽은 본문에 실제로 있는 숫자인지 본다(`ai-research.charts.ts`): 쉼표(1,234)·소수·%는 숫자만, 만·천·억·조·백만·천만이 붙으면 그 배수를 곱한 값도 맞는 것으로 본다(1.2만 → 1.2 또는 12000). 부호는 보지 않는다("3.5% 감소" → -3.5 허용). 맞지 않는 점은 빼고, 점이 2개 미만인 차트는 버린다. `charts`에 저장하고 `charts.ready {count, droppedPoints}`. LLM이 끊겼거나(반복 중 LLM 실패) 차트 LLM이 실패·못 읽으면 차트 없이(`charts = []`, 이벤트 없음) 끝낸다.
 7. COMPLETED(`finished_at`, 표시 지움). 더 조사하기면 저장된 메모·출처에서 이어서 하고 점검·보고서를 다시 쓴다(새 보고서가 나올 때까지 앞 보고서가 보인다).
 
+- **대체본 표시** (이슈 #521): 보고서 LLM이 쓰지 못해 조사 메모(또는 고치기면 앞 판)로 대신 쓴 보고서는 `audit.reportFallback {reason, previous}`·`report.ready.fallback`으로 남기고 화면이 보고서 제목 옆 배지와 띠로 "**대체본(보고서 생성 시간 초과)**"·"대체본(보고서 생성 실패)"·"대체본(AI가 빈 보고서를 냄)"·"대체본(AI 응답 끊김)", 앞 판이면 "앞 판 그대로(…)"를 보인다(shared `aiResearchFallbackText`, PDF에도 같은 글). 시간 초과 문구는 "AI가 보고서를 10분 안에 쓰지 못해(한 번 더 부탁해도) 조사 메모로 대신 정리했어요." 다 쓴 보고서처럼 COMPLETED로만 끝나 대체본인지 몰랐던 것을 고쳤다. 앞 판을 보면 표시가 없다(판에는 남기지 않았다).
 - **모은 것을 버리지 않는다**: 반복 중 30분 상한·LLM 연결 실패·시간 초과(`LlmRequestError`)가 나면 반복을 멈추고 그때까지 모은 출처로 점검·보고서를 쓴다(LLM이 끊긴 경우는 점검·보고서 LLM을 부르지 않고 조사 메모로 대신). 점검 LLM이 실패하면 조사 메모로 대신하고, 보고서 LLM이 실패하거나 빈 답이면 점검 결과로 대신 쓴다(`fallbackReportBody`). 모두 **COMPLETED**이고 보고서 맨 위에 "**이 보고서는 완전하지 않아요.** (이유) 그때까지 모은 출처로 정리했어요." 알림, 화면에는 `incompleteReason`, `report.ready.incomplete = true`.
 - **끝 알림** (이슈 #384): COMPLETED·FAILED로 저장하는 같은 트랜잭션에서 만든 사원에게 알림(`notifyEmployees`) "심층 조사 완료 · (계획 제목)" / "심층 조사 실패 · (제목)", 이동 경로 `/ai-research?id=<id>`. 더 조사하기 뒤 다시 끝나면 또 알린다. 취소는 본인이 한 일이라 알리지 않는다.
 - FAILED는 계획 단계의 실패(LLM 실패·검색어를 만들지 못함)·모델 없음·예상하지 못한 오류뿐이다. 이유는 "새 조사로 다시 물어봐 주세요"처럼 이어서 하기를 약속하지 않는다. 로그에 질문·웹 내용은 남기지 않는다.
@@ -167,7 +199,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 
 | type | payload |
 | --- | --- |
-| `plan.ready` | `title, stepCount, revision, fallback`, 다시 조사로 가져온 계획이면 `copiedFrom`(원래 조사 id) |
+| `plan.ready` | `title, stepCount, revision, fallback`, 다시 조사로 가져온 계획이면 `copiedFrom`(원래 조사 id), 반복 차례에 가져왔으면 `scheduled: true`(이슈 #521) |
 | `step.started` | `step, action(search·read), query, sourceId, fallback` |
 | `search.done` | `query, engine, resultCount, added, error` |
 | `source.added` | `sourceId, title, url` |
@@ -175,7 +207,8 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | `state.updated` | `summary`(300자), `gapCount, unsupportedCount` |
 | `budget.exhausted` | `stepsUsed, maxSteps, gapCount`, 검색이 연달아 3번 빈손이라 멈췄을 때만 `reason` |
 | `audit.ready` | `claimCount, contradictionCount, missingCount, ok` |
-| `report.ready` | `chars, truncated, citedCount, incomplete` |
+| `report.ready` | `chars, truncated, citedCount, incomplete`, 대체본이면 `fallback`(TIMEOUT·ERROR·EMPTY·LLM_DOWN, 이슈 #521) |
+| `report.retry` | `timeoutMinutes` — 보고서 LLM이 시간 안에 답하지 않아 한 번 더 부탁했다 (이슈 #521) |
 | `failed` | `reason` |
 | `cancelled` | `{}` |
 | `charts.ready` | `count, droppedPoints` (차트 LLM이 실패하면 남기지 않는다) |
@@ -248,12 +281,13 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - 글 뽑기는 HTML과 같은 worker(3초, 메모리 256MB·스택 4MB)에서 `unpdf`(pdf.js 묶음, MIT, 네이티브 모듈 없음)로 **앞 20쪽**(`PDF_MAX_PAGES`)만, 글꼴은 불러오지 않는다. 제목은 PDF 정보의 Title, 없으면 호스트. 글은 512K자에서 자르고, 모델에는 HTML과 같은 6,000자(`PAGE_TEXT_MAX`). 깨진 PDF·시간 초과는 "페이지가 너무 복잡해 못 읽었어요".
 - 스캔한(글 없는) PDF는 "페이지에 읽을 글이 없어요"가 된다(OCR 하지 않음).
 
-### Notion 내보내기 (이슈 #384)
+### Notion 내보내기 (이슈 #384, 다시 내보내기 이슈 #521)
 
-- integration의 `NotionPageService.createPage`(회의록 내보내기와 같은 상위 페이지·같은 도구 하나)로 페이지를 만든다. 제목 = 계획 제목(없으면 질문, 200자).
+- integration의 `NotionPageService.createPage`(회의록 내보내기와 같은 상위 페이지·같은 도구 하나)로 페이지를 만든다. 제목 = 계획 제목(없으면 질문, 200자), 판이 있으면 뒤에 " · n판".
+- **다시 내보내기** (이슈 #521): 처음에는 첫 판만 한 번 내보낼 수 있었다. 이제 고른 판(`version`, 없으면 지금 판)을 언제든 다시 내보내고, 그때마다 **새 페이지**를 만든다(기존 연동이 페이지 만들기 도구 하나만 쓰고, 이미 있는 페이지를 덮어쓰면 사람이 Notion에서 고친 내용이 사라진다). 조사에는 마지막 페이지 주소·시각·판(`notion_exported_version`)만 남고, 앞 페이지는 Notion에 그대로 있다. 화면은 보고서 카드의 [Notion으로 다시 내보내기]에서 "새 페이지를 하나 더 만들어요"를 한 번 더 묻고, 머리의 [Notion에서 보기]는 마지막 페이지다. 본문 끝 줄은 "심층 조사 #id의 n판 보고서에서 내보냈어요." 
 - 본문(`ai-research.notion.ts`): `**질문**` → 보고서 → `## 차트`(차트마다 `### 제목` + Notion `<table header-row="true">` 표, 칸은 `값 [출처 번호]`) → `## 출처`(`- \[n\] [제목](주소)`, http·https만, 제목의 링크 글자는 뺌) → 내보낸 곳.
 - 보고서는 웹 내용을 보고 모델이 쓴 글이라 **제목(###까지)·목록·번호 목록·인용**만 살리고, 줄 안의 태그·링크 글자(`< > [ ] \`)는 회의록 내보내기의 `escapeNotionText`와 같이 백슬래시로 막는다(`<page>`·`<mention-user>`·`[..](..)`가 글로 보인다). 표·코드·구분선 같은 다른 블록 표시도 글로 보인다. 보고서 끝의 서버 출처 목록은 떼고 위 목록을 다시 만든다.
-- 중복 막기는 회의록과 같다: 도구를 부르기 바로 전에 `notion_exported_at`을 잡고(완료한 내 조사·주소 없음·안 잡혔거나 5분 지남), 성공하면 주소를 저장, 만들지 않은 실패면 잡기를 푼다. 결과를 알 수 없으면(`INT-009`) 잡기를 남겨 바로 다시 눌러 같은 페이지가 또 생기지 않게 한다(5분 뒤 다시 할 수 있다).
+- 겹친 요청 막기는 회의록과 같다: 도구를 부르기 바로 전에 `notion_export_claimed_at`을 잡고(완료한 내 조사·안 잡혔거나 5분 지남, 아니면 `RES-007`), 성공하면 주소·시각·판을 저장하고 잡기를 지운다. 만들지 않은 실패면 잡기를 푼다. 결과를 알 수 없으면(`INT-009`) 잡기를 남겨 바로 다시 눌러 같은 페이지가 또 생기지 않게 한다(5분 뒤 다시 할 수 있다). 이슈 #521 전에는 `notion_exported_at`을 잡기로 썼고, 마이그레이션이 주소 없이 잡힌 행을 새 칸으로 옮겼다.
 
 ### 보고서에 대해 묻기 (이슈 #384)
 
@@ -273,8 +307,10 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | RES-004 | 400 | 검색어에 회사 안 정보가 있어요 |
 | RES-005 | 409 | 사용할 AI 모델이 정해지지 않았어요 |
 | RES-006 | 409 | 진행 중인 조사가 너무 많아요 (3개) |
-| RES-007 | 409 | 이미 Notion으로 내보낸 조사예요 |
+| RES-007 | 409 | 지금 이 조사를 Notion으로 내보내는 중이거나 직전 내보내기 결과를 확인하지 못했어요 (이슈 #521 전에는 '이미 내보낸 조사') |
 | RES-008 | 502 | AI가 고친 계획을 내지 못했어요 (계획 말로 고치기: 쓸 단계 없음·답을 계획으로 읽지 못함, 이슈 #416) |
+| RES-009 | 409 | 반복 조사는 5개까지 켤 수 있어요 (이슈 #521) |
+| RES-010 | 500 | 보고서 PDF를 만들지 못했어요 (서버 글꼴, 이슈 #521) |
 
 계획 말로 고치기에서 LLM을 부르지 못했을 때는 `docs/backend/ai-assistant.md` 5장의 LLM 실패 코드를 쓴다(이슈 #462): 연결 실패 `AST-003`, 시간 초과 `AST-004`, LLM 서버 오류 `AST-005`(모두 503). 모델이 없으면 이 기능 전용 `RES-005`(409)다. 일꾼이 하는 일의 실패(조사 FAILED 이유·불완전 보고서 알림)는 코드가 아니라 저장된 문구다.
 
@@ -285,7 +321,8 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | ai-assistant | `AssistantWebToolbox.session(employeeId, { offerTools: false, maxSearches, maxReads })`의 `searchWeb`·`readKnownPage`·`rememberVisited`(이 기능을 위해 `WebToolSession`에 구조화된 결과를 돌려주는 두 함수를 더하고, 웹 도구는 그것을 감싸 쓰도록 바꿈. 한 답 상한 3번·3개는 그대로) · `web-text.ts`(`wrapUntrusted`·`filterAnswerLinks`·`redactQuery`·`internalReferenceIn`) |
 | ai-assistant (ERP 조회) | `AssistantToolbox`(`definitions()`·`run(user, call)`, 모듈이 export) — 철강맨AI와 같은 조회 도구·권한 확인 · `common`의 `AuthUserService.load`(사원 → `AuthUser`) |
 | llm | `LlmClient.chatJsonWithText`, 새 `LlmClient.chatText`(글 답 + 끊김 여부), 프로필 `RESEARCH_JSON`·`RESEARCH_REPORT`, `LlmSettingsStore` |
-| notification | `NotificationService.notifyEmployees` (끝 알림, 같은 트랜잭션) |
+| notification | `NotificationService.notifyEmployees` (끝 알림·반복 건너뜀 알림, 같은 트랜잭션) |
+| shipment | `mill-sheet-pdf.ts`의 `millSheetFontPath`(보고서 PDF 한글 글꼴, 이슈 #521) |
 | integration | `NotionPageService.assertReady`·`createPage`, `MCP_REQUEST_TIMEOUT_MS`(잡기 만료 5분) · meeting-minutes의 `escapeNotionText` |
 | ai-assistant (거꾸로) | `AskAiAssistantDto.researchRunId` → `assistant-research.context.ts`가 `ai-research.rules`의 `storedSources`·`storedPlan`을 쓴다 |
 
@@ -295,13 +332,21 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - `ai-research.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 너그러운 JSON(울타리·think·마지막 객체·따옴표 안 중괄호·생각 글), 행동 확인·대신하기(모르는 행동·막힌 검색어·이미 한 검색·모르는/읽은/실패한 출처·출처 없는 끝내기·꽉 찬 출처), 예산·더 조사하기 계산, 검색어 막기·자르기·계획 다듬기, 프롬프트 24,000자 상한·출처 6개·태그 이스케이프, 보고서 인용·링크·출처 목록(http·https만)·제목 이스케이프·끊김 알림, 점검 출처 번호 거르기.
 - 이슈 #384 단위: 환경 변수 예산·상한·조사별 예산, 더 조사하기 min(30, 기본×2), 글자 상한 바꾸기, 차트 숫자 읽기(쉼표·만·%)·없는 숫자/모르는 출처 빼기·점 2개 미만 버리기, Notion 마크다운(태그·링크 막기·표·http만), 보고서 묻기 맥락(감싸기·글자 상한·[n] 출처). `web/pdf-extract.unit.spec.ts`: pdfkit으로 만든 작은 PDF(5KB 안)를 worker에서 읽기·20쪽만·깨진 PDF·시간 초과·`SafeWebPageReader`. `safe-fetch.unit.spec.ts`: PDF 받기·`.pdf` octet-stream·5MB 상한(알린 크기·받는 중).
 - 이슈 #384 2차 단위: 오늘 날짜 첫 줄·글자 상한, 점검·보고서의 계획 전체·모든 단계 기록(넘친 결과 포함)·출처 목록 형식·점검 새 칸, 똑같이 나누기(12,000자 상한·400자 바닥이면 최근만), 다음 행동의 출처 목록 전체·최근 기록 수, 목록 넘침(요약 빼기→뒤 줄 빼기), 옛 조사 기록 만들기, `modelBudget`(모름·32k·131k·8k·상한·환경 변수), 이어 쓰기 메시지·겹침 떼기, 같은 검색(순서·문장부호·되풀이), 점검 스키마, 계획·행동 지시 문구. `llm.client.spec.ts`: `modelContextLength`(불러온 것 먼저·최대값·외부 LLM null).
-- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404. / (이슈 #408) seed 저장·다듬기(같은 주소·http 아닌 주소 뺌)·출처 미리 넣기·계획 프롬프트의 감싼 블록과 부탁·미리 넣은 출처 읽기 → COMPLETED, seed 없으면 null·블록 없음, 출처 11개·답 4,001자·모양 틀림 400, 다시 조사가 seed·출처를 옮김, 심층 조사 카드 실행(다듬은 질문·seed·남의 것 404·짧은 질문 ACT-001·진행 중 3개 RES-006). `ai-research.unit.spec.ts`: `normalizeSeed`·`seedSources`·`storedSeed`, 계획 프롬프트 seed 블록, `proposeResearchCard`.
+- `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공, 다시 내보내기는 이슈 #521 줄), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404. / (이슈 #408) seed 저장·다듬기(같은 주소·http 아닌 주소 뺌)·출처 미리 넣기·계획 프롬프트의 감싼 블록과 부탁·미리 넣은 출처 읽기 → COMPLETED, seed 없으면 null·블록 없음, 출처 11개·답 4,001자·모양 틀림 400, 다시 조사가 seed·출처를 옮김, 심층 조사 카드 실행(다듬은 질문·seed·남의 것 404·짧은 질문 ACT-001·진행 중 3개 RES-006). `ai-research.unit.spec.ts`: `normalizeSeed`·`seedSources`·`storedSeed`, 계획 프롬프트 seed 블록, `proposeResearchCard`.
 - (이슈 #418) `ai-research.unit.spec.ts`: `revisionStart`(+4단계·30단계 상한·새 출처 자리 +10·100개 상한·부탁을 모르는 것 맨 앞·8개·검색 안 함은 그대로·저장 뒤 읽기), `revisionNeedsStep`·끝내기 막기(모델 검색어 → 부탁 글 → 계획, 읽기는 허용), `reportBodyForRevision`(알림·서버 출처 목록 떼기), 보고서 프롬프트(감싼 앞 보고서·부탁·규칙·40%·고치기가 아니면 없음), 다음 행동의 부탁 블록. `ai-research.spec.ts`(가짜 LLM): 더 검색해 고치기(1판 남김·QUEUED·예산·모르는 것·`revision.requested`, 고치는 중 또 고치기·더 조사하기 409, 부탁 겨냥 검색·다시 점검·앞 보고서·규칙이 든 보고서 프롬프트, 2판·`revision.ready`·판 본문·메모의 부탁 지움), 바로 끝내려 하면 부탁 글로 한 번 찾기, 검색 없이 고치기(반복·점검 없음, 3판, 옛 판 그대로), 보고서 LLM 실패 → 앞 판 그대로·판 남김, 완료 전 409·남의 것 404·입력 400·`RES-005`·`RES-006`(막힌 요청은 판 없음), 판 10개면 고치기·더 조사하기 막힘, 고치는 중 취소. 화면: `versionLabel`·`revisionTurns`·`revisionBlockReason`·타임라인 두 이벤트, `revise`·`getVersion` 요청.
 - (이슈 #416) `ai-research.unit.spec.ts`: 말로 고치기 프롬프트(빈 칸·다듬은 부탁·오늘 날짜·감싼 seed·500자), 고친 계획 다듬기(막힌·같은 검색어·6단계·빈 제목), `askResearchJson`(형식대로·깨진 답의 마지막 객체·빈 답이면 생각 없이 한 번 더·연결 실패는 던짐). `ai-research.spec.ts`(가짜 LLM): 고친 계획·`dropped`, 모델에 간 지금 계획·부탁, 저장하지 않음(판·계획·이벤트 그대로)·여러 번·받은 계획 저장, 빈 제목, 쓸 단계 없음 `RES-008`·LLM 실패 `AST-003`~`AST-005`·깨진 JSON 읽기, 부탁 0·501자·7단계·81자 검색어·계획 없음 400, `RES-005`, 계획 중·시작 뒤 `RES-002`, 남의 조사 `RES-001`. 화면: `planSuggestionDiff`·`planSuggestionSummary`(`lib/aiResearch.test.ts`), `suggestPlan` 요청 본문(`api/server/aiResearch.test.ts`).
 - (이슈 #484) `ai-research.knowledge.unit.spec.ts`(DB 없음): KS 생성 파일(표 그대로·그림·aside 없음), `searchKs`(SS275·SM355A → 8·8-1절 먼저·메모 절 없음, KS 번호·낱말, 상관없는 질문은 빈 목록), 네 종류 찾기·사내 지식 출처 만들기·같은 것 다시 넣지 않기·저장/읽기, 근거 순서(사내 지식이 맨 앞·안내 글)·출처 목록 표시, 계획 프롬프트의 `[사내 지식]`·부탁, 점검·보고서 지시의 "사내 기준과 다름", 읽기·끝내기에서 세지 않음, 보고서 인용·링크 없는 출처 목록. `ai-research.spec.ts`(가짜 LLM, 사내 지식 찾기는 기본으로 끄고 이 시험만 켬): 계획 앞 KS 출처 3개·`source.added`·계획 프롬프트, 사내 지식 read 거절·다음 행동·보고서 프롬프트의 근거·보고서 출처 목록, 다시 조사의 시작 때 찾기. 화면: `lib/aiResearch.test.ts`(사내 지식의 타임라인·출처 종류·진행 줄).
 - (이슈 #435) `ai-research.unit.spec.ts`: `ResearchErpLookup`(고른 도구를 사원 권한으로 부르고 성공한 조회만 모음·도구를 안 부르면 결과 없음·권한 없음/오류는 근거 아님·목록에 없는 도구(실행 카드)와 같은 조회는 안 부름·모은 조회(known) 되풀이 안 함·조회 5번/모델 3번 상한·그만둔 사원은 모델도 안 부름·AI 끊김은 모은 것으로, 취소·버그는 던짐), `callKey`, ERP 출처 만들기·저장/읽기, 거래처 이름이 계획 다듬기·검색어 확인·행동 대신하기에서 막힘, ERP 출처가 웹 출처 자리·끝내기에 안 세짐, ERP 근거(감싸기·웹 기록과 따로·글자 모자랄 때)·출처 목록 표시·옛 조사 대신 기록에서 빠짐, 계획·말로 고치기·다음 행동·점검·보고서 프롬프트의 ERP 블록과 글자 상한, 보고서 출처 목록(링크 없는 ERP 조회). `ai-research.spec.ts`(진짜 `AssistantToolbox`·DB, 가짜 LLM): 계획 앞 조회 → 출처·`source.added`·계획 프롬프트(구매 담당 역할에서 검사 조회 권한을 잠깐 빼 권한 없는 조회가 빠지는 것 확인), 시작 → 다음 행동·보고서 프롬프트의 ERP 근거·ERP 출처 읽기 거절·보고서 출처 목록·다시 조회 안 함, 거래처 이름(조회 결과를 가짜로 바꿔)이 계획 단계·모델 검색어·고친 계획·말로 고치기 어디서도 검색어로 안 나감, 도구를 안 부르면 출처·이벤트 없음·AI 끊겨도 계획은 세움, 실행 카드 도구 거절·같은 조회 한 번, 더 검색하는 고치기의 추가 조회(검색 없는 고치기는 조회 없음), 다시 조사의 시작 때 조회·퇴사한 사원은 조회 안 함. 화면: `lib/aiResearch.test.ts`(ERP 출처의 타임라인·출처 칸·진행 줄).
 
+- (이슈 #521) `ai-research.schedule.unit.spec.ts`(DB 없음): 다음 차례(서울 날짜·같은 시각은 넘김·UTC 전날 새벽·연말, 매주 가장 가까운 요일·같은 요일 지남·평일), 틀린 규칙 null, 요일 정리·사람이 읽는 글. `ai-research.pdf.unit.spec.ts`: 마크다운 블록(인용·제목·문단·표·목록, 줄 안 표시 지우기, 출처 목록 떼기), 차트 숫자 표·파일 이름·서울 시각, 만든 PDF를 PDF 글 뽑기(unpdf worker)로 다시 읽어 한글 제목·질문·작성일·본문·표 칸·차트·출처 주소·쪽 번호 확인, 80줄 표의 쪽 넘김·머리줄 다시 그리기·대체본 표시, 글꼴 없으면 실패. `ai-research.unit.spec.ts`: 보고서 시간 제한 환경 변수(기본 10분·1~60·틀린 값), 저장된 대체본 표시 읽기. `ai-research.schedule.spec.ts`(DB, 가짜 LLM·검색): 매일·매주 걸기·바꾸기(다음 차례·요일 정리), 목록·상세·반복 목록, 끝나지 않은 조사 409·남의 조사 404·틀린 규칙 400·요일 없는 매주 COM-004, 켜진 반복 5개 RES-009·바꾸기는 통과·끄면 다시 걸 수 있음, 차례 → QUEUED 새 조사(계획·`plan.ready.scheduled`)·다음 차례·같은 차례 되풀이 없음·일꾼이 끝내면 "반복 심층 조사 완료" 알림, **두 서버가 동시에 집어도 한 번만**, 앞 반복 진행 중·진행 중 3개·모델 없음 건너뛰기와 알림·다음 차례, 반복이 만든 조사에서 바꾸기·끄기·끈 반복은 차례 없음·없는 반복 404, 퇴사한 사원의 반복 끄기. `ai-research.spec.ts`: 보고서 시간 초과 한 번 → 다시 부탁한 보고서·`report.retry`·기본 10분, 두 번 → 대체본(`reportFallback` TIMEOUT·알림 문구·환경 변수 15분), 다른 실패는 다시 하지 않고 ERROR, 고치기 실패는 앞 판 그대로(previous), Notion 다시 내보내기(새 페이지·마지막 주소·내보내는 중 RES-007·5분 지난 잡기·없는 판 RES-001), 고른 판 Notion 내보내기(제목 " · 1판"·본문·`notionExportedVersion`), 보고서 PDF(내 조사·파일 이름·다시 읽은 글·남의 조사 404·없는 판 404·version=0 400·보고서 없음 409), 고른 판 PDF. 화면: `lib/aiResearch.test.ts`(대체본 타임라인·표시, 반복 창 처음 값·요일·까닭·보낼 값·다음 실행 미리 보기, PDF 이름, 반복 차례 계획 줄), `api/server/aiResearch.test.ts`(반복 PUT·DELETE·GET, Notion 판 본문, PDF 판 쿼리).
+
 ## 8. 확인 필요 🟡
+
+- 반복 실행(이슈 #521)의 사원당 5개·1분 간격·놓친 차례는 한 번만·앞 반복이 진행 중이면 건너뜀은 가정값이다. 반복이 만든 조사는 사람이 계획을 다시 보지 않고 시작한다(처음 걸 때의 조사에서 승인한 계획). 반복은 웹 검색 한도(사원별 1분 5번)를 사원의 다른 검색과 함께 쓴다.
+- 반복 차례는 서버 안 타이머라 서버가 모두 꺼져 있으면 돌지 않는다(켜질 때 지난 차례를 한 번 한다). 로컬 LLM 하나를 여러 반복이 같은 시각에 쓰면 일꾼이 차례로 하므로 늦게 끝날 수 있다.
+- 보고서 PDF의 차트는 숫자 표로 대신했다(그림 아님). 굵게·링크는 글만 남는다. 글꼴은 가변 글꼴(Noto Sans KR VF)의 기본 굵기 하나다.
+- Notion 다시 내보내기는 새 페이지를 만든다(같은 페이지 갱신 아님). 앞 페이지는 사람이 Notion에서 지운다.
+- 보고서 시간 제한 10분은 #470 회의 분석과 맞춘 가정값이다. 다시 부탁까지 하면 보고서 단계가 최대 약 20분 걸린다.
 
 - ERP 자료 모으기(이슈 #435)의 모델 요청 3번·조회 5번·계획 프롬프트 12,000자·근거 40%는 가정값이다. 모델이 도구를 고르므로 작은 모델은 필요한 조회를 빠뜨리거나 불필요하게 부를 수 있다(필요 없으면 부르지 않게 지시했다).
 - 조사 중간에 ERP 자료가 바뀌어도 모은 시점의 자료다(보고서에 "조회한 자료"라고 쓰게 했다). 다시 조사하면 새로 조회한다. 계획 말로 고치기·조사 도중 모델이 새로 ERP를 조회하는 행동은 없다.
