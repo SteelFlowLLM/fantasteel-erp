@@ -69,11 +69,14 @@ export function parseVoiceCommand(rest: string): VoiceCommand {
   return { kind: 'ask', question };
 }
 
-/** 말로 승인 기다리는 중에 들은 말: 실행 / 취소 / 상관없는 말(= 취소) */
+/**
+ * 말로 승인 기다리는 중에 들은 말: 실행 / 취소 / 상관없는 말(= 취소).
+ * whisper는 "실행" 한 낱말을 "시행"으로 자주 받아써서 함께 받는다 (10초 창 안에서만 듣는 말이라 잘못 실행될 일이 적다)
+ */
 export function confirmationOf(text: string): 'yes' | 'no' {
   const wake = matchWakeWord(text);
   const compact = compactSpeech(wake.called ? wake.rest : text);
-  return /^(?:(?:응|네|예|그래|좋아)?실행(?:해|하|시켜)?|응해|응그래해|네해|예해)$/.test(compact) ? 'yes' : 'no';
+  return /^(?:(?:응|네|예|그래|좋아)?(?:실행|시행)(?:해|하|시켜)?|응해|응그래해|네해|예해)$/.test(compact) ? 'yes' : 'no';
 }
 
 // whisper가 조용한 소리·잡음에 지어내는 말 (방송 자막에서 배운 끝인사). "철강맨"만 부른 뒤에는 부르는 말 없이 받으므로 이런 글은 질문으로 받지 않는다
