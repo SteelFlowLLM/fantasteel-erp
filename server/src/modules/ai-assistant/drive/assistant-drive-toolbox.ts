@@ -16,6 +16,10 @@ export const DRIVE_SEARCH_LIMIT = 15;
 export const MAX_DRIVE_SEARCHES_PER_ANSWER = 4;
 export const MAX_DRIVE_READS_PER_ANSWER = 4;
 const QUERY_MAX = 100;
+/** 사진 칸에 붙인 Drive 사진의 출처 확인 제한 (가정값). 답을 늦추지 않게 짧게 둔다 */
+const FILE_REF_TIMEOUT_MS = 3_000;
+/** 이름 일부(확장자 뺀 이름)만 답에 나왔을 때 같은 파일로 보는 최소 글자 수. 짧은 낱말('보고서')이 다른 문장에 우연히 들어 있는 것을 막는다 */
+const STEM_MATCH_MIN = 4;
 
 const KIND_LABEL = { audio: '녹음', image: '사진', document: '문서' } as const;
 
@@ -92,19 +96,25 @@ export class AssistantDriveToolbox {
 
   /**
    * 화면이 사진 칸에 붙여 보낸 Drive 사진의 출처. 사진 내용은 이미 질문에 붙어 있어 다시 읽지 않고, 폴더 안 파일인지와 이름만 확인한다.
-   * 폴더 밖·없는 파일은 출처에서 뺀다(이름을 화면이 정하게 두지 않는다)
+   * 폴더 밖·없는 파일·시간 초과(FILE_REF_TIMEOUT_MS)는 출처에서 조용히 뺀다(이름을 화면이 정하게 두지 않고, 출처 때문에 답이 늦어지거나 Drive 연결 문제로 기록되지 않게)
    */
   async fileRefs(fileIds: readonly string[]): Promise<AiWebSource[]> {
-    const refs: AiWebSource[] = [];
-    for (const id of fileIds) {
-      try {
-        const file = await this.drive.checkFile(id);
-        refs.push({ title: stripInvisible(file.name), url: driveWebUrl(file.id) });
-      } catch (error) {
-        if (!(error instanceof AppException)) throw error;
-      }
-    }
-    return refs;
+    const refs = await Promise.all(
+      fileIds.map(async (id): Promise<AiWebSource[]> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new DOMException('Drive 파일 확인 시간이 지났어요', 'AbortError')), FILE_REF_TIMEOUT_MS);
+        try {
+          const file = await this.drive.fileName(id, controller.signal);
+          return [{ title: stripInvisible(file.name), url: driveWebUrl(file.id) }];
+        } catch (error) {
+          if (error instanceof AppException || controller.signal.aborted) return [];
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
+    return refs.flat();
   }
 
   /** vision: 지금 모델이 사진을 보는지 (모르면 null) */
@@ -138,8 +148,12 @@ export class DriveToolSession {
    */
   sources(answer = ''): AiWebSource[] {
     const text = answer.normalize('NFC').toLowerCase();
-    const stemOf = (title: string) => title.normalize('NFC').toLowerCase().replace(/\.[a-z0-9]{1,5}$/, '');
-    const mentioned = this.found.filter((f) => text.includes(f.url.toLowerCase()) || text.includes(f.id.toLowerCase()) || (stemOf(f.title).length >= 2 && text.includes(stemOf(f.title))));
+    const nameOf = (title: string) => title.normalize('NFC').toLowerCase();
+    const stemOf = (title: string) => nameOf(title).replace(/\.[a-z0-9]{1,5}$/, '');
+    // 주소·id·확장자까지 쓴 이름은 그대로 맞는 것이고, 확장자를 뺀 이름은 STEM_MATCH_MIN자 이상일 때만 맞는 것으로 본다
+    const mentioned = this.found.filter(
+      (f) => text.includes(f.url.toLowerCase()) || text.includes(f.id.toLowerCase()) || text.includes(nameOf(f.title)) || (stemOf(f.title).length >= STEM_MATCH_MIN && text.includes(stemOf(f.title))),
+    );
     const sources = [...this.seen, ...mentioned.map(({ title, url }) => ({ title, url }))];
     return sources.filter((s, i) => sources.findIndex((o) => o.url === s.url) === i);
   }

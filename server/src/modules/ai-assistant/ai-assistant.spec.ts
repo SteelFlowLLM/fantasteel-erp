@@ -45,7 +45,7 @@ const OFF_DRIVE: DriveSource = {
   assertReady: () => Promise.reject(new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요')),
   searchFiles: () => Promise.reject(new Error('찾지 않음')),
   readForAssistant: () => Promise.reject(new Error('읽지 않음')),
-  checkFile: () => Promise.reject(new Error('확인하지 않음')),
+  fileName: () => Promise.reject(new Error('확인하지 않음')),
 };
 
 const OFF_NOTION: NotionReader = {
@@ -1778,7 +1778,7 @@ describe('AiAssistantService', () => {
         id === 'imagePhoto0005'
           ? { file: { ...meta, id, name: '현장.png', mimeType: 'image/png', kind: 'image', contentType: 'image/png', contentName: '현장.png' }, plan: { mode: 'image', maxBytes: 2_000_000, mediaType: 'image/png' }, buffer: Buffer.from('png') }
           : { file: { ...meta, id, name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', contentType: 'text/plain', contentName: '점검 메모.txt' }, plan: { mode: 'text', maxBytes: 1_000, exportMimeType: null }, buffer: Buffer.from('라인 점검 10/24 완료') },
-      checkFile: async (id) => {
+      fileName: async (id) => {
         if (id === 'imagePhoto0005') return { id, name: '현장.png' };
         throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
       },

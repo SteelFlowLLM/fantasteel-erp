@@ -321,9 +321,9 @@ export class GoogleDriveClient {
 
   // ───────── Drive API ─────────
 
-  /** 파일·폴더 메타데이터. 없거나 볼 수 없으면 INT-012 */
-  async getFile(fileId: string, fields: string): Promise<DriveFileMeta> {
-    const res = await this.driveGet(`/files/${encodeURIComponent(fileId)}`, { fields, supportsAllDrives: 'true' }, AbortSignal.timeout(HTTP_TIMEOUT_MS));
+  /** 파일·폴더 메타데이터. 없거나 볼 수 없으면 INT-012. signal을 주면(호출한 쪽이 끊는 짧은 제한) 시간 초과가 연결 문제로 기록되지 않는다 */
+  async getFile(fileId: string, fields: string, signal: AbortSignal = AbortSignal.timeout(HTTP_TIMEOUT_MS)): Promise<DriveFileMeta> {
+    const res = await this.driveGet(`/files/${encodeURIComponent(fileId)}`, { fields, supportsAllDrives: 'true' }, signal);
     const meta = readDriveFile(await this.readJson(res));
     if (!meta) throw await this.fail(new AppException('INT-004', 'Google Drive 응답을 읽을 수 없어요'));
     return meta;

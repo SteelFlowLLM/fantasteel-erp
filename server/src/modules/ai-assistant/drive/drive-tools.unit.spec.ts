@@ -41,7 +41,7 @@ function source(files: Record<string, { file: CheckedDriveFile; buffer: Buffer |
       searches.push({ query, kind, limit, content });
       return list;
     },
-    checkFile: async (id) => {
+    fileName: async (id) => {
       const entry = files[id];
       if (!entry) throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
       return { id, name: entry.file.name };
@@ -211,7 +211,9 @@ describe('Drive 도구', () => {
     expect(session.sources('검사성적서_밀시트_예시를 찾았어요')).toEqual([{ title: photoName.normalize('NFD'), url: url('imagePhoto0005') }]);
     expect(session.sources(`[보고서](${url('docReportPdf07')})`)).toEqual([{ title: '보고서.pdf', url: url('docReportPdf07') }]);
     expect(session.sources('[보고서](drive:docReportPdf07)')).toEqual([{ title: '보고서.pdf', url: url('docReportPdf07') }]);
-    expect(session.sources('보고서와 다른 문서')).toEqual([
+    // 확장자까지 쓴 이름은 그대로, 확장자를 뺀 이름은 4자 이상일 때만 맞는다 ('보고서' 세 글자는 다른 문장에 우연히 들어 있을 수 있다)
+    expect(session.sources('보고서와 다른 문서')).toEqual([{ title: '다른 문서.pdf', url: url('docOther000001') }]);
+    expect(session.sources('보고서.pdf와 다른 문서')).toEqual([
       { title: '보고서.pdf', url: url('docReportPdf07') },
       { title: '다른 문서.pdf', url: url('docOther000001') },
     ]);
@@ -256,6 +258,29 @@ describe('Drive 도구', () => {
     const result = await session.run({ id: 'c1', name: 'drive_read_file', arguments: JSON.stringify({ file: '품질기준서_FS-QA-001.pdf'.normalize('NFC') }) });
     expect(result.content).toContain('[Drive 파일]');
     expect(result.webSources).toHaveLength(1);
+  });
+
+  it('사진 칸의 Drive 사진 확인은 한꺼번에 하고, 3초 안에 끝나지 않은 것은 조용히 뺀다 (끊을 때 쓴 signal은 호출한 쪽이 끊은 것으로 전달)', async () => {
+    jest.useFakeTimers();
+    try {
+      const seen: AbortSignal[] = [];
+      const drive = source({});
+      drive.fileName = (id, signal) => {
+        seen.push(signal);
+        if (id === 'slowPhoto0001') return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+        return Promise.resolve({ id, name: `${id}.png` });
+      };
+      const pending = new AssistantDriveToolbox(drive).fileRefs(['slowPhoto0001', 'fastPhoto0001']);
+      await jest.advanceTimersByTimeAsync(3_000);
+      expect(await pending).toEqual([{ title: 'fastPhoto0001.png', url: 'https://drive.google.com/file/d/fastPhoto0001/view' }]);
+      // 두 확인이 동시에 시작됐다 (차례로 기다리지 않는다)
+      expect(seen).toHaveLength(2);
+      expect(seen[0].aborted).toBe(true);
+      expect(seen[0].reason).toMatchObject({ name: 'AbortError' });
+      expect(seen[1].aborted).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('사진 칸의 Drive 사진: 이름만 확인해 출처로 만들고, 폴더 밖·없는 파일은 뺀다', async () => {

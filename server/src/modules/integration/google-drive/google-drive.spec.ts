@@ -64,6 +64,8 @@ const fake = {
   mediaFails: false,
   /** 내용 응답 머리를 이만큼 늦춘다 (브라우저가 떠나는 시험) */
   mediaDelayMs: 0,
+  /** 파일 메타데이터 응답을 이만큼 늦춘다 (사진 출처 확인의 짧은 제한 시험) */
+  metaDelayMs: 0,
   /** 허용한 Google 계정 (about.user.permissionId) */
   accountId: 'acct-1',
   /** 토큰마다 발급할 때의 계정 */
@@ -164,7 +166,10 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
     res.writeHead(200, { 'content-type': url.searchParams.get('mimeType') ?? 'application/pdf' }).end(file.content);
     return;
   }
-  if (url.searchParams.get('alt') !== 'media') return json(res, 200, metaOf(file));
+  if (url.searchParams.get('alt') !== 'media') {
+    if (fake.metaDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fake.metaDelayMs));
+    return json(res, 200, metaOf(file));
+  }
   if (fake.mediaFails) return json(res, 500, { error: { code: 500, message: 'Backend Error' } });
   if (fake.mediaDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fake.mediaDelayMs));
   const range = typeof req.headers.range === 'string' ? req.headers.range : '';
@@ -849,6 +854,28 @@ describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
     expect(JSON.parse((await run('drive_search', { query: '없는낱말 다른낱말' })).content).오류).toBe('찾은 파일이 없어요');
     // 이름으로 파일을 집을 때는 내용 검색을 하지 않는다: 이름이 정확히 같은 파일만
     expect((await run('drive_read_file', { file: '항복강도' })).content).toContain('drive_search');
+  });
+
+  it('사진 출처 확인(이슈 #519): 폴더 안 파일의 이름만 확인하고, 폴더 밖·없는 파일은 조용히 뺀다. 내용은 받지 않는다', async () => {
+    const before = fake.ranges.length;
+    const refs = await toolbox.fileRefs(['aiSmallPng0010', 'docPdfOutside20', 'noSuchFile0001']);
+    expect(refs).toEqual([{ title: '작은 사진.png', url: 'https://drive.google.com/file/d/aiSmallPng0010/view' }]);
+    expect(fake.ranges.length).toBe(before);
+    expect((await driveView()).lastError).toBeNull();
+  });
+
+  it('사진 출처 확인이 느리면 3초에 포기하고 출처에서 빼며, Drive 연결 오류(last_error)로 남기지 않는다', async () => {
+    fake.metaDelayMs = 6_000;
+    try {
+      const started = Date.now();
+      expect(await toolbox.fileRefs(['aiSmallPng0010'])).toEqual([]);
+      expect(Date.now() - started).toBeLessThan(5_500);
+    } finally {
+      fake.metaDelayMs = 0;
+    }
+    const view = await driveView();
+    expect(view.lastError).toBeNull();
+    expect(view.status).toBe('CONNECTED');
   });
 
   it('읽기: 글 파일은 그대로, Google 스프레드시트는 CSV로 내보내, PDF는 글을 뽑아 감싸서 준다', async () => {
