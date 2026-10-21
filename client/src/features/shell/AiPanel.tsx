@@ -595,6 +595,7 @@ export function AiPanel() {
                   entry={entry}
                   disabled={pending}
                   onRetry={retry}
+                  askedWithPhotos={askedWithPhotosAt(entries, index)}
                   steelman={afterAnswer?.entryId === entry.id ? finishedSteelmanStatus(entry) : null}
                   research={
                     deepResearchOn && entry.role === 'assistant'
@@ -1017,12 +1018,15 @@ function ChatEntry({
   entry,
   disabled,
   onRetry,
+  askedWithPhotos,
   research,
   steelman,
 }: {
   entry: AiChatEntry;
   disabled: boolean;
   onRetry: (failure: FailureEntry) => void;
+  /** 이 답의 질문에 사진을 붙였는지 (사진만 보고 답했으면 출처가 그 사진이다) */
+  askedWithPhotos: boolean;
   research: ChatEntryResearch | null;
   /** 답이 막 끝났을 때의 철강맨 모습 (이슈 #414). 없으면 가만히 있는 얼굴 */
   steelman: SteelmanStatus | null;
@@ -1096,16 +1100,20 @@ function ChatEntry({
         {entry.sources.length || !entry.webSources?.length ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-cap">
             <span className="font-semibold text-ink-2">출처</span>
-            {entry.sources.length ? (
-              entry.sources.map((source) => (
-                <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
-                  <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
-                  {sourceText(source)}
-                </span>
-              ))
-            ) : (
-              <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>
-            )}
+            {entry.sources.map((source) => (
+              <span key={`${source.kind}-${source.id}`} className="inline-flex items-center gap-1 text-ink-2">
+                <Icon name={SOURCE_ICON[source.kind]} size="sm" className="text-ink-3" />
+                {sourceText(source)}
+              </span>
+            ))}
+            {/* 사진을 읽고 맞게 답했는데 '출처 없음'으로 보이면 근거 없는 답처럼 읽힌다 (#519) */}
+            {askedWithPhotos ? (
+              <span className="inline-flex items-center gap-1 text-ink-2">
+                <Icon name="file" size="sm" className="text-ink-3" />
+                첨부한 사진
+              </span>
+            ) : null}
+            {entry.sources.length || askedWithPhotos ? null : <span className="text-ink-3">없음 · 자료에서 찾은 내용이 아니에요</span>}
           </div>
         ) : null}
         <AiBrowserFramesDetails frames={entry.browserFrames} />
@@ -1117,6 +1125,12 @@ function ChatEntry({
       </div>
     </div>
   );
+}
+
+/** 바로 앞 질문에 사진을 붙였는지. 저장한 대화를 다시 열면 사진은 없고 장수만 있다 */
+function askedWithPhotosAt(entries: readonly AiChatEntry[], index: number): boolean {
+  const asked = entries[index - 1];
+  return entries[index]?.role === 'assistant' && asked?.role === 'user' && Boolean(asked.images?.length || asked.imageCount);
 }
 
 /** 답을 기다리는 동안 철강맨이 단계에 맞춰 바뀐다 (이슈 #414). 도구의 시작·끝 시각은 이 화면이 받은 때로 센다 */
