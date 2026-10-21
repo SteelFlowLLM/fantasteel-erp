@@ -97,6 +97,8 @@
 | quality | 제품 두께(검사 항목 두께 구간), 강종 |
 | inventory | 제품 품목 목록(재고 행) |
 
+- 철강맨AI 기준정보 조회 도구 `get_master_data`(이슈 #506)가 고객사·공급업체·강종·규격 매핑 목록(`listCustomers`·`listSuppliers`·`listSteelGrades`·`listSpecMappings`)을 쓴다. 이때 `MasterDataModule`이 `MasterDataService`를 실제로 export했다(그 전에는 export하지 않았다). 권한은 기준정보 화면과 같은 기준정보 관리 VIEW를 도구 모음이 먼저 확인하고, 목록 API에 쪽이 없어 전체를 읽은 뒤 서버에서 거른다([ai-assistant.md](ai-assistant.md) 도구 표).
+
 `inventory` 행: 시드가 재고 행을 만들지 않는다(거래 데이터 없음). 제품 품목을 등록할 때 같은 트랜잭션에서 `inventory`(0, 0, 0) 행을 만들지, inventory 모듈이 필요할 때 upsert할지 정해야 한다 🟡(inventory.md 8장).
 
 ## 7. 테스트

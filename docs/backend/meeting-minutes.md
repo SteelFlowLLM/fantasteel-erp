@@ -170,6 +170,9 @@
 - 회의록을 지우면(`DELETE meeting-minutes/:id`) 모든 사원이 그 회의에 물은 대화도 같은 트랜잭션에서 지운다. 확정한 회의록은 지울 수 없으므로 대화가 남는다.
 - 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 열 때 저장한 대화를 불러와 이어 보이고, "대화 지우기"(확인 창)로 내 대화를 지운다. 불러오기에 실패하면 이유와 "다시 불러오기"를 보이고, 다시 불러올 때까지 질문을 막는다(서버는 새 질문을 지난 대화에 이어 쌓으므로 빈 화면에서 묻지 않게). 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
 
+### 철강맨AI 지난 회의 검색 (이슈 #506, 문서에 없는 기능)
+- 철강맨AI 도구 `search_meeting_minutes`가 `MeetingMinutesService.searchDigests({ meetingMinutesStatus?, from?, to?, page, size })`를 부른다. 목록(API-259)과 같은 범위(회의록은 전 역할이 열람)에 **요약**(`summary`, 없으면 AI 요약)과 **AI가 정리한 결정사항**(`analysis_result.decisions[].text`)을 더해 돌려준다. 전사 글(`transcript`·`transcript_segments`)은 읽지 않는다. 상태·회의일(양 끝 포함)은 DB에서 좁히고, 낱말로 거르기(제목·요약·결정사항, 공백으로 나눈 낱말이 모두 있어야 함)는 부르는 도구가 100건씩 쪽을 넘기며 한다(최대 1,000건, 다 못 읽으면 알림). API는 늘지 않았다.
+
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.
 - 🟡 **Notion 업무 공간**(이슈 #391, [integration.md](integration.md) 12장)이 있으면 상위 페이지가 아니라 **회의록 데이터베이스**에 만든다. 확정한 회의록은 자동 반영이 먼저 만들 수 있고, 그러면 `notion_page_url`이 채워져 이 버튼은 링크로 바뀐다(두 번째는 `VOC-008`).
