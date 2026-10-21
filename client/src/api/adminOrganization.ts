@@ -103,7 +103,7 @@ export const jobGradeAdminApi = {
 export const roleAdminApi = {
   /**
    * 역할의 권한을 통째로 바꾼다 (REQ-AUTH-003). 보내지 않은 권한은 행을 지운다(= 없음).
-   * 저장하면 그 역할 사원의 메뉴·버튼이 바로 바뀐다 (이 탭은 조회 무효화, 다른 탭은 BroadcastChannel).
+   * 저장하면 서버 권한이 바로 바뀌고, 이 탭은 조회를 무효화해 새로 읽는다. 다른 사원·다른 탭은 화면이 다시 읽을 때(새로고침) 바뀐다.
    */
   replacePermissions: (input: RolePermissionsInput): Promise<SavedRef> => serverOrganizationApi.replaceRolePermissions(input),
 };

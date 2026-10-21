@@ -1,7 +1,7 @@
 'use client';
 
 // 권한 탭 (REQ-AUTH-003): 역할 6개 × 권한 17개 행렬. 칸 = 사용(USE) / 조회(VIEW) / 없음(행 없음).
-// 역할마다 따로 저장하고, 저장하면 그 역할 사원의 메뉴·버튼이 바로 바뀐다 (이 탭은 조회 무효화, 다른 탭은 BroadcastChannel).
+// 역할마다 따로 저장하고, 저장하면 서버 권한이 바로 바뀌고, 이 탭은 조회를 무효화해 새로 읽는다. 다른 사원·다른 탭의 메뉴·버튼은 그 화면이 다시 읽을 때(새로고침) 바뀐다.
 import { Fragment } from 'react';
 import { PERMISSION, PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL, ROLE_LABEL, type Permission, type PermissionLevel, type RoleCode } from '@/codes';
 import { roleAdminApi } from '@/api/adminOrganization';

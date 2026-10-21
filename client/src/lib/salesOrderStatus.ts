@@ -1,13 +1,6 @@
-// 수주 품목·헤더 상태 (REQ-SO-005, BP-SO-02, 업무 프로세스 10장).
-// 품목: OPEN 진행중 → PARTIALLY_SHIPPED 부분출하 → SHIPPED 출하완료, 취소는 CANCELLED.
-// 헤더 상태는 저장하지 않고 서버가 품목 상태에서 계산해 준다 (ERD sales_order note, sales-order fulfillment.calculator).
+// 수주 날짜 계산·납기 위험 표시 (REQ-SO-005, BP-SO-02, 업무 프로세스 10장).
+// 품목·헤더 상태는 서버가 계산해 준다 (ERD sales_order note, sales-order fulfillment.calculator).
 import type { SalesOrderItemStatus } from '@/codes';
-
-export function itemStatusOf(input: { orderedQty: number; shippedQty: number; cancelled: boolean }): SalesOrderItemStatus {
-  if (input.cancelled) return 'CANCELLED';
-  if (input.shippedQty <= 0) return 'OPEN';
-  return input.shippedQty >= input.orderedQty ? 'SHIPPED' : 'PARTIALLY_SHIPPED';
-}
 
 /** 날짜 차이(일): b − a. 'YYYY-MM-DD' */
 export function daysBetween(a: string, b: string): number {

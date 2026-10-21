@@ -101,10 +101,8 @@ export function decCmp(a: DecimalInput, b: DecimalInput): -1 | 0 | 1 {
   return left === right ? 0 : left < right ? -1 : 1;
 }
 
-export const decMax = (a: DecimalInput, b: DecimalInput, scale: number = TON_DIGITS): string => decRound(decCmp(a, b) >= 0 ? a : b, scale);
 export const decMin = (a: DecimalInput, b: DecimalInput, scale: number = TON_DIGITS): string => decRound(decCmp(a, b) <= 0 ? a : b, scale);
 export const decIsPositive = (value: DecimalInput): boolean => decCmp(value, 0) > 0;
-export const decIsZero = (value: DecimalInput): boolean => decCmp(value, 0) === 0;
 
 /** ceil(a ÷ b). 히트 수 = ceil(필요 용강 ÷ 히트 용량) (업무 프로세스 4.4). b > 0. */
 export function decCeilDiv(a: DecimalInput, b: DecimalInput): number {
