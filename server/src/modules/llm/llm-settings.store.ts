@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { LLM_DEFAULT_BASE_URL } from '@fantasteel/shared';
+import { writeFileAtomic } from '../../common/storage/write-file-atomic';
 import type { LlmEndpoint } from './llm.client';
 
 export interface LlmSettings {
@@ -51,8 +52,8 @@ export class LlmSettingsStore {
     };
   }
 
+  /** 쓰는 도중 읽는 요청이 반쪽 JSON을 읽지 않게 통째로 바꿔 쓴다. API 키가 들어 있어 0600이다 (#497) */
   async write(settings: LlmSettings): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(settings, null, 2), 'utf8');
+    await writeFileAtomic(this.file, JSON.stringify(settings, null, 2));
   }
 }

@@ -101,7 +101,7 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
       this.logger.error(`회의록 ${job.meetingMinutesId} ${loading ? '녹음 받기' : '전사'} 실패: ${detail}`);
       const reason =
         error instanceof SttRequestError
-          ? error.message
+          ? error.publicMessage
           : loading
             ? `${AUDIO_LOAD_ERROR_REASON}: ${error instanceof AppException ? (error.getResponse() as { message: string }).message : '알 수 없는 오류'}`.slice(0, 500)
             : TRANSCRIPTION_ERROR_REASON;

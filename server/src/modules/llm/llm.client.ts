@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
+import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
 /** 모델 목록은 바로 와야 하고, 첫 대화는 LM Studio가 모델을 메모리에 올리느라 오래 걸릴 수 있다 */
@@ -95,7 +96,7 @@ interface WireToolCall {
  */
 export type LlmFailureKind = 'NO_MODEL' | 'CONNECT' | 'TIMEOUT' | 'SERVER';
 
-/** 화면에 그대로 보일 연결 실패 이유 */
+/** 화면에 그대로 보일 연결 실패 이유. 내부 LLM 주소(사설망·Tailscale)는 문구에 넣지 않는다(서버 로그에만 남긴다) */
 export class LlmRequestError extends Error {
   constructor(
     message: string,
@@ -209,6 +210,7 @@ export interface LlmModelCapabilities {
  */
 @Injectable()
 export class LlmClient {
+  private readonly logger = new Logger(LlmClient.name);
   private readonly serverInfoCache = new Map<string, { at: number; info: LlmServerInfo }>();
   /** Unsloth Studio의 모델별 사진 지원·임베딩 여부 (/api/models/check-vision·check-embedding). 열쇠는 `경로|서버 루트|모델` */
   private readonly unslothCheckCache = new Map<string, { at: number; value: boolean | null }>();
@@ -619,6 +621,11 @@ export class LlmClient {
   /** 요청을 보내고 상태 코드까지 확인한다. 본문은 부르는 쪽이 JSON이나 스트림으로 읽는다 */
   private async send(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, signal: AbortSignal, timeoutMs: number): Promise<Response> {
     const url = `${normalizeBaseUrl(endpoint.baseUrl)}${path}`;
+    // 저장할 때 막지만, 이 검사 전에 저장된 주소·.env 주소도 클라우드 메타데이터로는 요청을 보내지 않는다 (이슈 #497)
+    if (isBlockedServerHost(url)) {
+      this.logger.warn(`LLM 주소가 링크 로컬·클라우드 메타데이터라 요청하지 않았어요: ${redactUrl(url)}`);
+      throw new LlmRequestError('AI 연결 설정의 주소는 AI 서버로 쓸 수 없는 주소(링크 로컬·클라우드 메타데이터)예요. 주소를 바꿔 주세요', undefined, 'CONNECT');
+    }
     let res: Response;
     try {
       res = await fetch(url, {
@@ -628,12 +635,16 @@ export class LlmClient {
           ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}),
         },
         body: payload === undefined ? undefined : JSON.stringify(payload),
+        // 리다이렉트로 메타데이터 같은 다른 곳에 키·질문이 가지 않게 한다 (음성 서버 호출과 같다)
+        redirect: 'error',
         signal,
       });
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
-      throw new LlmRequestError(`${url}에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 주소가 맞는지 확인해 주세요`, undefined, 'CONNECT');
+      // 내부 LLM 주소(사설망·Tailscale)는 사용자에게 가는 문구에 넣지 않고 서버 로그에만 남긴다 (이슈 #497)
+      this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeCodeOf(error)}`);
+      throw new LlmRequestError('LLM 서버에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 설정한 주소가 맞는지 확인해 주세요', undefined, 'CONNECT');
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (!res.ok) {
@@ -658,6 +669,13 @@ function toolFields(tools: LlmToolDefinition[]): Record<string, unknown> {
 
 function idleTimeout(): DOMException {
   return new DOMException('stream idle', 'TimeoutError');
+}
+
+/** fetch 실패의 원인 코드(error.cause.code, 예: ECONNREFUSED)를 서버 로그에 덧붙일 글로. 없으면 빈 글 */
+function causeCodeOf(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+  return typeof code === 'string' ? ` (${code})` : '';
 }
 
 /** fetch·읽기 실패를 화면에 보일 이유로 바꾼다. 시간 초과·멈춤이 아니면 원래 오류를 돌려준다 */
