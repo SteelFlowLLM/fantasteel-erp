@@ -187,6 +187,12 @@ describe('파일 종류·크기', () => {
     expect(readDriveFile(null)).toBeNull();
   });
 
+  it('macOS에서 올린 자모 풀린(NFD) 한글 이름은 합친(NFC) 글자로 읽는다', () => {
+    const nfd = '검사성적서_밀시트_예시.png'.normalize('NFD');
+    expect(nfd).not.toBe(nfd.normalize('NFC'));
+    expect(readDriveFile({ id: 'f4', name: nfd, mimeType: 'image/png' })?.name).toBe('검사성적서_밀시트_예시.png'.normalize('NFC'));
+  });
+
   it('Content-Disposition: 내려받기는 attachment, 기본은 inline', () => {
     expect(contentDisposition('보고서.pdf')).toMatch(/^inline; /);
     expect(contentDisposition('보고서.pdf', 'attachment')).toBe(`attachment; filename="___.pdf"; filename*=UTF-8''${encodeURIComponent('보고서.pdf')}`);

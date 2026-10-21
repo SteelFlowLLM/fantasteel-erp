@@ -65,6 +65,13 @@ describe('입력칸 @', () => {
     expect(filterMentionFiles(Array.from({ length: 30 }, (_, i) => file(`f${i}aaaaaaaaaa`, `문서 ${i}`)), '')).toHaveLength(DRIVE_MENTION_LIST_MAX);
   });
 
+  it('창의 파일: 자모로 풀린(NFD) 이름도 친 글자(NFC)로 찾고, 풀린 검색어로도 합친 이름을 찾는다', () => {
+    const files = [file('a1aaaaaaaaaa', '품질기준서_FS-QA-001.pdf'.normalize('NFD')), file('a2aaaaaaaaaa', '강종별_기준값_요약표.png'.normalize('NFD'), 'image'), file('a3aaaaaaaaaa', '점검 메모.txt')];
+    expect(filterMentionFiles(files, '품질기준서'.normalize('NFC')).map((f) => f.id)).toEqual(['a1aaaaaaaaaa']);
+    expect(filterMentionFiles(files, '강종별').map((f) => f.id)).toEqual(['a2aaaaaaaaaa']);
+    expect(filterMentionFiles(files, '점검'.normalize('NFD')).map((f) => f.id)).toEqual(['a3aaaaaaaaaa']);
+  });
+
   it('↑↓는 끝에서 처음으로 돈다', () => {
     expect(moveMentionIndex(0, -1, 3)).toBe(2);
     expect(moveMentionIndex(2, 1, 3)).toBe(0);

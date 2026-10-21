@@ -226,6 +226,15 @@ describe('Drive 도구', () => {
     expect(JSON.parse(outside.content).오류).toBe('설정한 Drive 폴더에 그 파일이 없어요');
   });
 
+  it('이름으로 집을 때 모델이 넘긴 합친(NFC) 이름과 자모 풀린(NFD) Drive 이름도 같은 이름으로 본다', async () => {
+    const nfdName = '품질기준서_FS-QA-001.pdf'.normalize('NFD');
+    const drive = source({ docQaStd000001: text('docQaStd000001', nfdName, '기준 내용') }, [view({ id: 'docQaStd000001', name: nfdName })]);
+    const session = new AssistantDriveToolbox(drive).session(async () => true);
+    const result = await session.run({ id: 'c1', name: 'drive_read_file', arguments: JSON.stringify({ file: '품질기준서_FS-QA-001.pdf'.normalize('NFC') }) });
+    expect(result.content).toContain('[Drive 파일]');
+    expect(result.webSources).toHaveLength(1);
+  });
+
   it(`사진은 볼 수 있는 모델에만 다음 메시지로 붙이고, 한 답에 ${MAX_DRIVE_READS_PER_ANSWER}개까지만 읽는다`, async () => {
     const files = { imagePhoto0005: { file: checked({ id: 'imagePhoto0005', name: '현장.png', mimeType: 'image/png', kind: 'image' }), buffer: Buffer.from('png') } };
     const seeing = new AssistantDriveToolbox(source(files)).session(async () => true);

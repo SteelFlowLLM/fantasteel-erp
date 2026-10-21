@@ -168,7 +168,9 @@ export class DriveToolSession {
   private async idByName(name: string): Promise<string> {
     // 이름으로 집는 것이라 내용 검색은 하지 않는다 (내용에 그 낱말이 든 다른 파일이 15개 안에 밀어내지 않게)
     const files: DriveFileView[] = await this.drive.searchFiles(name, 'all', DRIVE_SEARCH_LIMIT, false);
-    const same = files.filter((f) => f.name.trim().toLowerCase() === name.trim().toLowerCase());
+    // 모델이 넘기는 이름은 합친 글자(NFC)인데 Drive 이름은 자모로 풀린 글자(NFD)일 수 있어 양쪽을 합쳐서 견준다
+    const keyOf = (value: string) => value.normalize('NFC').trim().toLowerCase();
+    const same = files.filter((f) => keyOf(f.name) === keyOf(name));
     if (same.length === 1) return same[0].id;
     throw new ToolArgumentError(same.length > 1 ? '이름이 같은 파일이 여럿이에요. drive_search 결과의 id를 넘겨요' : 'file은 drive_search 결과의 파일 id예요. 먼저 drive_search로 찾아요');
   }

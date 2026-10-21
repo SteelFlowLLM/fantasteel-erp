@@ -78,10 +78,12 @@ export function removeMentionTrigger(value: string, index: number): string {
   return value[index] === '@' ? value.slice(0, index) + value.slice(index + 1) : value;
 }
 
-/** @ 창의 파일: 녹음은 읽지 못해 빼고, 이름에 검색어가 든 것(띄어쓰기·대소문자 무시)을 최신순 그대로 */
+/** @ 창의 파일: 녹음은 읽지 못해 빼고, 이름에 검색어가 든 것(띄어쓰기·대소문자·자모 풀림 무시)을 최신순 그대로 */
 export function filterMentionFiles(files: readonly DriveFileView[], query: string): DriveFileView[] {
-  const q = query.toLowerCase().replace(/\s+/g, '');
-  return files.filter((f) => f.kind !== 'audio' && (!q || f.name.toLowerCase().replace(/\s+/g, '').includes(q))).slice(0, DRIVE_MENTION_LIST_MAX);
+  // 이름이 자모로 풀린 글자(NFD)로 와도 친 글자(NFC)와 맞게 양쪽을 합쳐서 견준다
+  const keyOf = (value: string) => value.normalize('NFC').toLowerCase().replace(/\s+/g, '');
+  const q = keyOf(query);
+  return files.filter((f) => f.kind !== 'audio' && (!q || keyOf(f.name).includes(q))).slice(0, DRIVE_MENTION_LIST_MAX);
 }
 
 /** 위·아래 화살표로 고른 줄을 옮긴다 (끝에서 처음으로 돈다) */
