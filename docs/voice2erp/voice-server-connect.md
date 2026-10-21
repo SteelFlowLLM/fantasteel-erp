@@ -55,5 +55,6 @@ SIDECAR_HOST=0.0.0.0 ~/voice-env/bin/python tools/voice-sidecar/server.py
 ## 보안
 
 - 음성 서버(whisper.cpp·화자 분리)에는 로그인이 없다. 회의 내용이 오가므로 같은 망·Tailscale 같은 믿는 망에서만 연다. 공유기 포트 포워딩 등으로 인터넷에 직접 열지 않는다.
+- 링크 로컬(`169.254.x.x`)·클라우드 메타데이터 주소와 주소 안의 아이디·비밀번호는 받지 않는다. 저장된 API 키는 주소의 출처가 같을 때만 쓰므로, 주소를 바꾸면 키를 다시 입력해야 한다.
 - API 키는 서버 파일(`storage/settings/stt.json`)에만 저장하고 화면에는 다시 보내지 않는다(`hasApiKey`만 알린다).
 - OpenAI 방식 음성 API를 쓰면 회의 음성이 그 회사 서버로 나간다. 사내 방침을 먼저 정한다.

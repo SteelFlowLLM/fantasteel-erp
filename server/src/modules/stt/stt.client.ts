@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { redactUrl } from './stt-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
 const SIDECAR_MODELS = new Set(['whisper-pyannote', 'vibevoice']);
@@ -47,7 +48,7 @@ export class SttRequestError extends Error {}
 @Injectable()
 export class SttClient {
   async transcribe(endpoint: SttEndpoint, input: SttTranscribeInput, timeoutMs = TRANSCRIBE_TIMEOUT_MS): Promise<SttTranscript> {
-    const url = `${normalizeBaseUrl(endpoint.baseUrl)}/audio/transcriptions`;
+    const url = `${redactUrl(normalizeBaseUrl(endpoint.baseUrl))}/audio/transcriptions`;
     const form = new FormData();
     // Buffer를 그대로 넘긴다: new Uint8Array(buffer)는 한 벌 더 복사해 500MB 녹음이면 메모리가 크게 늘어난다 (Blob은 어차피 자기 몫을 복사한다)
     form.append('file', new Blob([input.audio as Uint8Array<ArrayBuffer>], { type: input.mimeType }), input.fileName);
@@ -63,17 +64,23 @@ export class SttClient {
         method: 'POST',
         headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
         body: form,
+        // 리다이렉트로 메타데이터 같은 다른 곳에 키·음성이 가지 않게 한다
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') {
-        throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. Whisper 서버 상태를 확인해 주세요`);
+        throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. 음성 서버 상태를 확인해 주세요`);
       }
       throw new SttRequestError(connectFailureMessage(url, error));
     }
     if (res.status === 401 || res.status === 403) throw new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (res.status === 404) {
-      throw new SttRequestError(`서버는 응답했지만 ${url} 경로가 없어요. 주소 끝이 …/v1인지, 이 서버가 OpenAI 호환 음성 인식(/audio/transcriptions)을 여는지 확인해 주세요`);
+      // OpenAI는 모델 이름이 틀려도 404(model_not_found)를 주므로 서버가 준 이유를 함께 보인다
+      const reason = await errorMessageOf(res);
+      throw new SttRequestError(
+        `서버는 응답했지만 ${url}을 찾지 못했어요${reason ? ` (${reason})` : ''}. 주소 끝이 …/v1인지, 모델 이름이 맞는지, 이 서버가 OpenAI 호환 음성 인식(/audio/transcriptions)을 여는지 확인해 주세요`,
+      );
     }
     if (!res.ok) throw new SttRequestError(`음성 인식 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`);
     let body: unknown;
@@ -192,14 +199,15 @@ export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
 }
 
+/** JSON 오류 메시지({ error: '…' } 또는 { error: { message } })만 보인다. 그 밖의 본문(HTML·내부 응답)은 화면에 내보내지 않는다 */
 async function errorMessageOf(res: Response): Promise<string> {
   const text = await res.text().catch(() => '');
   try {
     const json = JSON.parse(text) as { error?: string | { message?: string } };
-    if (typeof json.error === 'string') return json.error;
-    if (json.error?.message) return json.error.message;
+    const message = typeof json.error === 'string' ? json.error : json.error?.message;
+    if (typeof message === 'string' && message) return message.slice(0, 200);
   } catch {
-    // JSON이 아니면 본문 앞부분을 그대로 보인다
+    // JSON이 아니면 상태 문구만 보인다
   }
-  return text.slice(0, 200) || res.statusText;
+  return res.statusText;
 }

@@ -4,6 +4,7 @@ import { validate } from 'class-validator';
 import { SttClient, SttRequestError, connectFailureMessage, parseTranscript, silentWav } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttService } from './stt.service';
+import { isBlockedSttHost, redactUrl } from './stt-url';
 import type { SttSettingsStore } from './stt-settings.store';
 
 const endpoint = { baseUrl: 'http://127.0.0.1:8000/v1/', apiKey: null };
@@ -138,6 +139,15 @@ describe('SttClient.transcribe', () => {
   });
 });
 
+/** 실패해야 하는 호출의 오류를 돌려준다 */
+const failureOf = (promise: Promise<unknown>): Promise<Error> =>
+  promise.then(
+    () => {
+      throw new Error('실패해야 하는 호출이 성공했어요');
+    },
+    (error: Error) => error,
+  );
+
 describe('연결 실패 이유', () => {
   const url = 'http://192.168.0.20:8000/v1/audio/transcriptions';
   const failure = (code: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(code), { code }) });
@@ -152,9 +162,25 @@ describe('연결 실패 이유', () => {
     expect(connectFailureMessage(url, new TypeError('fetch failed'))).toContain('주소가 맞는지');
   });
 
-  it('404는 주소 끝 /v1 확인을 안내한다', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not found', { status: 404 }));
-    await expect(new SttClient().transcribe(endpoint, input)).rejects.toThrow('…/v1');
+  it('404는 주소 끝 /v1 확인을 안내하고, 서버가 준 이유(모델 없음 포함)를 함께 보인다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock.mockResolvedValueOnce(new Response('<html>not found</html>', { status: 404, statusText: 'Not Found' }));
+    const plain = await failureOf(new SttClient().checkConnection(endpoint, null));
+    expect(plain.message).toContain('…/v1');
+    expect(plain.message).not.toContain('<html>');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "The model 'whisper-9' does not exist", code: 'model_not_found' } }), { status: 404 }));
+    const missing = await failureOf(new SttClient().checkConnection(endpoint, 'whisper-9'));
+    expect(missing.message).toContain("The model 'whisper-9' does not exist");
+    expect(missing.message).toContain('모델 이름이 맞는지');
+    fetchMock.mockRestore();
+  });
+
+  it('리다이렉트는 따라가지 않고, 오류 문구에는 주소의 아이디·비밀번호가 없다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+    const error = await failureOf(new SttClient().transcribe({ baseUrl: 'http://user:secret@192.168.0.20:8000/v1', apiKey: null }, input));
+    expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe('error');
+    expect(error.message).toContain('192.168.0.20');
+    expect(error.message).not.toContain('secret');
     fetchMock.mockRestore();
   });
 });
@@ -171,10 +197,34 @@ describe('SttService.testConnection', () => {
     const service = setup(check);
     await service.testConnection({ baseUrl: 'http://100.101.102.103:8001/v1/', model: 'whisper-pyannote', apiKey: 'typed' });
     expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://100.101.102.103:8001/v1', apiKey: 'typed' }, 'whisper-pyannote');
+    await service.testConnection({ baseUrl: 'http://127.0.0.1:8000/v1' });
+    expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://127.0.0.1:8000/v1', apiKey: 'saved-key' }, 'saved-model');
+    await service.testConnection({ baseUrl: 'http://127.0.0.1:8000/v1', model: null });
+    expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://127.0.0.1:8000/v1', apiKey: 'saved-key' }, null);
+  });
+
+  it('저장된 키는 저장된 주소와 같은 출처로만 보낸다', async () => {
+    const check = jest.fn().mockResolvedValue(undefined);
+    const service = setup(check);
+    await service.testConnection({ baseUrl: 'http://127.0.0.1:8000/v1/' });
+    expect(check).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'saved-key' }), 'saved-model');
     await service.testConnection({ baseUrl: 'http://100.101.102.103:8001/v1' });
-    expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://100.101.102.103:8001/v1', apiKey: 'saved-key' }, 'saved-model');
-    await service.testConnection({ baseUrl: 'http://100.101.102.103:8001/v1', model: null });
-    expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://100.101.102.103:8001/v1', apiKey: 'saved-key' }, null);
+    expect(check).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: null }), 'saved-model');
+    await service.testConnection({ baseUrl: 'http://100.101.102.103:8001/v1', apiKey: 'typed' });
+    expect(check).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'typed' }), 'saved-model');
+  });
+
+  it('저장도 같다: 다른 출처로 바꾸며 키를 비워 두면 저장된 키를 버린다', async () => {
+    const write = jest.fn().mockResolvedValue(undefined);
+    const store = { read: jest.fn().mockResolvedValue(stored), write } as unknown as SttSettingsStore;
+    const service = new SttService(store, {} as unknown as SttClient);
+    await service.updateSettings({ baseUrl: 'http://127.0.0.1:8000/v1', model: null });
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'saved-key' }));
+    await service.updateSettings({ baseUrl: 'http://192.168.0.20:8000/v1', model: null });
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: null }));
+    const view = await service.updateSettings({ baseUrl: 'http://192.168.0.20:8000/v1', model: null, apiKey: 'new' });
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'new' }));
+    expect(view.hasApiKey).toBe(true);
   });
 
   it('실패는 오류가 아니라 이유가 담긴 결과로 돌려준다', async () => {
@@ -200,7 +250,19 @@ describe('음성 서버 주소 검증', () => {
     expect(await addressErrors(url)).toEqual([]);
   });
 
-  it.each(['192.168.0.20:8000/v1', 'ftp://192.168.0.20/v1', 'file:///etc/passwd', ''])('%s 은 받지 않는다', async (url) => {
+  it.each([
+    '192.168.0.20:8000/v1',
+    'ftp://192.168.0.20/v1',
+    'file:///etc/passwd',
+    '',
+    'http://user:pw@192.168.0.20:8000/v1',
+    'http://169.254.169.254/latest/meta-data',
+    'http://169.254.0.5:8000/v1',
+    'http://2852039166/v1',
+    'http://[::ffff:169.254.169.254]/v1',
+    'http://[fe80::1]:8000/v1',
+    'http://metadata.google.internal/v1',
+  ])('%s 은 받지 않는다', async (url) => {
     expect(await addressErrors(url)).not.toEqual([]);
   });
 
@@ -210,5 +272,19 @@ describe('음성 서버 주소 검증', () => {
     expect(await check('')).toBe(0);
     expect(await check(null)).toBe(0);
     expect(await check('x'.repeat(101))).toBeGreaterThan(0);
+  });
+});
+
+describe('stt-url', () => {
+  it('링크 로컬·메타데이터만 막고 사설망·Tailscale은 막지 않는다', () => {
+    expect(isBlockedSttHost('http://169.254.169.254/')).toBe(true);
+    expect(isBlockedSttHost('http://192.168.0.20:8000/v1')).toBe(false);
+    expect(isBlockedSttHost('http://100.101.102.103:8001/v1')).toBe(false);
+    expect(isBlockedSttHost('http://127.0.0.1:8000/v1')).toBe(false);
+  });
+
+  it('redactUrl은 아이디·비밀번호를 뺀다', () => {
+    expect(redactUrl('http://user:pw@192.168.0.20:8000/v1')).toBe('http://192.168.0.20:8000/v1');
+    expect(redactUrl('http://192.168.0.20:8000/v1')).toBe('http://192.168.0.20:8000/v1');
   });
 });

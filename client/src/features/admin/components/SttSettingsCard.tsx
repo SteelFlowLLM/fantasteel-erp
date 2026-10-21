@@ -14,7 +14,7 @@ import { Field } from '@/components/Field';
 import { Input, Select } from '@/components/Input';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { useAction } from '@/hooks/useAction';
-import { STT_HOST_KIND_LABEL, STT_MODE_LABEL, classifySttHost, sttModeDefaults, sttModeOf, type SttMode } from '@/lib/sttHost';
+import { STT_HOST_KIND_LABEL, STT_MODE_LABEL, classifySttHost, sttModeDefaults, sttModeOf, sameOriginUrl, type SttMode } from '@/lib/sttHost';
 import { useSttConnectionTest, useSttSettings, useSttTranscribeTest } from '@/hooks/useStt';
 
 export function SttSettingsCard({ canEdit }: { canEdit: boolean }) {
@@ -38,8 +38,11 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
   const transcribe = useSttTranscribeTest();
   const save = useAction(sttApi.updateSettings, { success: '음성 인식 설정을 저장했어요', invalidate: [sttKeys.settings()] });
 
-  /** 입력한 키가 있으면 그 키, 지우기를 눌렀으면 빈 값, 아니면 저장된 키(undefined) */
-  const apiKeyInput = (): string | undefined => (apiKey.trim() ? apiKey.trim() : clearApiKey ? '' : undefined);
+  /** 주소 출처가 저장된 것과 같을 때만 저장된 키를 이어 쓴다 (서버도 같은 규칙: 다른 주소로 키가 새지 않게) */
+  const keyCarriesOver = sameOriginUrl(baseUrl, saved.baseUrl);
+  const savedKeyDropped = saved.hasApiKey && !keyCarriesOver && !clearApiKey;
+  /** 입력한 키가 있으면 그 키, 지우기를 눌렀거나 주소가 다른 곳으로 바뀌었으면 빈 값, 아니면 저장된 키(undefined) */
+  const apiKeyInput = (): string | undefined => (apiKey.trim() ? apiKey.trim() : clearApiKey || savedKeyDropped ? '' : undefined);
   const dirty = baseUrl.trim() !== saved.baseUrl || model.trim() !== (saved.model ?? '') || apiKey.trim() !== '' || clearApiKey;
   const result = connection.data;
   const test = transcribe.data;
@@ -47,6 +50,7 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
   const changeMode = (next: SttMode) => {
     const defaults = sttModeDefaults(next);
     setMode(next);
+    setApiKey('');
     connection.reset();
     setBaseUrl(defaults.baseUrl);
     setModel(defaults.model);
@@ -97,7 +101,7 @@ function SttSettingsForm({ saved, canEdit }: { saved: SttSettingsView; canEdit: 
         </Field>
         <Field
           label="API 키"
-          hint={saved.hasApiKey && !clearApiKey ? '저장된 키가 있어요. 바꿀 때만 입력해요' : '내 음성 서버는 비워 둬요. 키가 필요한 API일 때만 입력해요'}
+          hint={savedKeyDropped ? '주소가 바뀌어 저장된 키는 새 주소로 보내지 않아요. 저장하면 지워져요' : saved.hasApiKey && !clearApiKey ? '저장된 키가 있어요. 바꿀 때만 입력해요' : '내 음성 서버는 비워 둬요. 키가 필요한 API일 때만 입력해요'}
         >
           <div className="flex gap-2">
             <Input

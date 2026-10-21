@@ -3,6 +3,7 @@ import type { SttConnectionTestInput, SttConnectionView, SttSettingsInput, SttSe
 import { AppException } from '../../common/errors/app.exception';
 import { SttClient, SttRequestError, normalizeBaseUrl } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
+import { redactUrl, sameOrigin } from './stt-url';
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedAudio {
@@ -27,7 +28,7 @@ export class SttService {
     const next: SttSettings = {
       baseUrl: normalizeBaseUrl(input.baseUrl),
       model: input.model,
-      apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey || null,
+      apiKey: resolveApiKey(input.apiKey, current, input.baseUrl),
     };
     await this.store.write(next);
     return toView(next);
@@ -37,14 +38,14 @@ export class SttService {
   async testConnection(input: SttConnectionTestInput): Promise<SttConnectionView> {
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const current = await this.store.read();
-    const apiKey = input.apiKey === undefined ? current.apiKey : input.apiKey || null;
+    const apiKey = resolveApiKey(input.apiKey, current, baseUrl);
     const model = input.model === undefined ? current.model : input.model;
     const started = Date.now();
     try {
       await this.client.checkConnection({ baseUrl, apiKey }, model);
-      return { connected: true, baseUrl, latencyMs: Date.now() - started, error: null };
+      return { connected: true, baseUrl: redactUrl(baseUrl), latencyMs: Date.now() - started, error: null };
     } catch (error) {
-      return { connected: false, baseUrl, latencyMs: null, error: messageOf(error) };
+      return { connected: false, baseUrl: redactUrl(baseUrl), latencyMs: null, error: messageOf(error) };
     }
   }
 
@@ -76,6 +77,15 @@ function isAudio(mimeType: string): boolean {
 /** multer는 파일 이름을 latin1로 읽어서 한글이 깨진다 */
 function decodeFileName(name: string): string {
   return Buffer.from(name, 'latin1').toString('utf8') || 'audio';
+}
+
+/**
+ * 보내지 않은 키(undefined)는 저장된 키를 쓰되 저장된 주소와 출처가 같을 때만이다.
+ * 주소를 다른 곳(OpenAI 키를 LAN·Tailscale 주소로 등)으로 바꾸면서 키를 비워 두면 저장된 키가 새 주소로 새어 나간다.
+ */
+function resolveApiKey(inputKey: string | undefined, current: SttSettings, baseUrl: string): string | null {
+  if (inputKey !== undefined) return inputKey || null;
+  return sameOrigin(normalizeBaseUrl(baseUrl), current.baseUrl) ? current.apiKey : null;
 }
 
 function toView(settings: SttSettings): SttSettingsView {
