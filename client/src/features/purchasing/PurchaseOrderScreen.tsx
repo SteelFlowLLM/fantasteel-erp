@@ -369,7 +369,8 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
   const receipts = po.items.flatMap((line) => line.goodsReceipts.map((receipt) => ({ ...receipt, itemName: line.itemName, purchaseRequisitionNo: line.purchaseRequisitionNo })));
   const [acting, setActing] = useState<EndAction | null>(null);
   const done = { onSuccess: () => setActing(null) };
-  const cancel = useCancelPurchaseOrder({ success: (result) => `${result.purchaseOrderNo} 발주를 취소했어요. 연결 구매요청은 발주 취소가 됐어요`, ...done });
+  const cancel = useCancelPurchaseOrder({ success: (result) => `${result.purchaseOrderNo} 발주를 취소했어요. 같은 원료가 필요하면 MRP에서 다시 요청할 수 있어요`, ...done });
+  const canSeeMrp = useCanView(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const close = useClosePurchaseOrder({ success: (result) => `${result.purchaseOrderNo} 남은 양을 잔량 마감했어요. 입고예정에서 빠져요`, ...done });
   const action = acting === 'cancel' ? cancel : close;
   // 입고가 없으면 발주 취소, 일부만 들어왔으면 잔량 마감 (서버 PUR-004·005와 같은 조건)
@@ -414,7 +415,14 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
         <Banner tone="wait">
           <b>{po.purchaseOrderStatus === 'CANCELLED' ? '발주 취소' : '잔량 마감'}</b>
           {po.statusChange ? ` · ${po.statusChange.employeeName ?? '-'} ${fmtDateTime(po.statusChange.at)}` : ''} · 사유 {po.statusChange?.reason ?? '-'} ·{' '}
-          {po.purchaseOrderStatus === 'CANCELLED' ? '연결 구매요청은 발주 취소가 됐고, 같은 원료가 필요하면 새로 요청해요' : `남은 ${fmtTon(closed)}은 입고예정에서 빠졌어요`}
+          {po.purchaseOrderStatus === 'CANCELLED' ? '연결 구매요청은 발주 취소가 됐어요. 같은 원료가 필요하면 ' : `남은 ${fmtTon(closed)}은 입고예정에서 빠졌어요. 부족하면 `}
+          {canSeeMrp ? (
+            <Link className="font-semibold text-run hover:underline" href="/mrp">
+              MRP에서 다시 요청할 수 있어요
+            </Link>
+          ) : (
+            '새로 구매요청해 주세요'
+          )}
         </Banner>
       ) : null}
       <StatBar petKey="card:purchaseOrders.summary">
@@ -569,8 +577,8 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
           />
           <p className="text-cap text-ink-3">
             {acting === 'cancel'
-              ? '취소하면 되돌릴 수 없어요. 연결 구매요청은 발주 취소가 되고, 같은 원료가 필요하면 새로 구매요청해요.'
-              : '마감하면 되돌릴 수 없어요. 남은 양은 입고예정(MRP)에서 빠지고 이 발주로는 더 입고하지 않아요.'}
+              ? '취소하면 되돌릴 수 없어요. 연결 구매요청은 발주 취소가 되고, 같은 원료가 필요하면 MRP에서 다시 요청해요(새 요청은 다시 부서장 승인).'
+              : '마감하면 되돌릴 수 없어요. 남은 양은 입고예정(MRP)에서 빠지고 이 발주로는 더 입고하지 않아요. 부족하면 MRP에서 다시 요청해요.'}
           </p>
         </ReasonDialog>
       ) : null}

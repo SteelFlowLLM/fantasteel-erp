@@ -42,6 +42,7 @@ const receipt: GoodsReceiptView = {
   goodsReceiptNo: 'GR-2610-0001',
   purchaseOrderId: 31,
   purchaseOrderNo: 'PO-2610-0001',
+  purchaseOrderStatus: 'PARTIALLY_RECEIVED',
   purchaseOrderItemId: 61,
   itemId: 41,
   itemCode: 'SMN01',
@@ -50,6 +51,7 @@ const receipt: GoodsReceiptView = {
   receivedDate: '2026-10-06',
   lotId: 501,
   lotNo: 'RM-SMN01-261006-001',
+  lotStatus: 'AVAILABLE',
   yardId: 2,
   yardName: '원료 야드',
   confirmedEmployeeName: '정다은',
@@ -57,6 +59,7 @@ const receipt: GoodsReceiptView = {
   reversedGoodsReceiptNo: null,
   reversalGoodsReceiptNo: null,
   cancelReason: null,
+  isCancellable: true,
   createdAt: '2026-10-06T02:00:00.000Z',
 };
 const approved: PurchaseRequisitionSummary = {
@@ -175,8 +178,8 @@ describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () =>
   });
 
   it('입고 취소: 사유를 보내고 취소 행(음수 입고)을 돌려준다. 발주 품목 입고 내역에는 서로 가리키는 번호가 붙는다', async () => {
-    const reversal: GoodsReceiptView = { ...receipt, id: 72, goodsReceiptNo: 'GR-2610-0002', receivedTon: '-1.500', lotId: null, lotNo: null, reversedGoodsReceiptId: 71, reversedGoodsReceiptNo: 'GR-2610-0001', cancelReason: '오입고' };
-    const cancelled: GoodsReceiptView = { ...receipt, reversalGoodsReceiptNo: 'GR-2610-0002', cancelReason: '오입고' };
+    const reversal: GoodsReceiptView = { ...receipt, id: 72, goodsReceiptNo: 'GR-2610-0002', receivedTon: '-1.500', lotId: null, lotNo: null, lotStatus: null, reversedGoodsReceiptId: 71, reversedGoodsReceiptNo: 'GR-2610-0001', cancelReason: '오입고', isCancellable: false };
+    const cancelled: GoodsReceiptView = { ...receipt, lotStatus: 'RECEIPT_CANCELLED', reversalGoodsReceiptNo: 'GR-2610-0002', cancelReason: '오입고', isCancellable: false };
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
       if (c.path === '/goods-receipts/71/cancel') return ok(reversal);
       if (c.path === '/goods-receipts' && c.method === 'GET') return ok(page([reversal, cancelled]));

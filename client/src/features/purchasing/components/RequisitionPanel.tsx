@@ -149,6 +149,20 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         </CardBody>
       </Card>
 
+      {status === 'ORDER_CANCELLED' ? (
+        <Banner tone="wait">
+          <b>발주 취소</b> · 이 요청은 다시 발주하지 않아요. 같은 원료가 필요하면{' '}
+          {canSeeMrp && detail.productionPlanId !== null ? (
+            <Link className="font-semibold text-run hover:underline" href="/mrp">
+              MRP에서 다시 요청할 수 있어요
+            </Link>
+          ) : (
+            '새로 구매요청해 주세요'
+          )}
+          {canSeeMrp && detail.productionPlanId !== null ? ' (새 요청은 다시 부서장 승인을 받아요)' : ''}
+        </Banner>
+      ) : null}
+
       {status === 'REJECTED' ? (
         <Banner tone="danger">
           <b data-pet-term="반려 사유">반려 사유</b> · {detail.rejectReason ?? '사유가 기록되지 않았어요'}

@@ -3,7 +3,7 @@
 // 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN) 1개를 만든다. 규칙·작업 로그는 서버가 한다.
 // 입고 취소는 원료 LOT을 쓰기 전에만 되고, 원래 입고는 두고 음수 입고 1행(반대 거래)을 더한다.
 // 두 데이터 모드 모두 실제 서버를 부른다 (api/server/purchaseOrders.ts).
-import type { PurchaseOrderStatus } from '@/codes';
+import type { LotStatus, PurchaseOrderStatus } from '@/codes';
 import type { PurchaseOrderView } from '@/api/purchasing';
 import { serverMasterDataApi } from '@/api/server/masterData';
 import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
@@ -21,6 +21,8 @@ export interface GoodsReceiptView {
   goodsReceiptNo: string;
   purchaseOrderId: number;
   purchaseOrderNo: string;
+  /** 발주 상태 (발주 조회 권한이 없어도 입고 응답에 들어 있다) */
+  purchaseOrderStatus: PurchaseOrderStatus;
   purchaseOrderItemId: number;
   itemId: number;
   itemCode: string;
@@ -29,6 +31,8 @@ export interface GoodsReceiptView {
   receivedDate: string;
   lotId: number | null;
   lotNo: string | null;
+  /** 원료 LOT의 지금 상태 (취소 행은 null) */
+  lotStatus: LotStatus | null;
   yardId: number | null;
   yardName: string | null;
   createdAt: string;
@@ -42,6 +46,8 @@ export interface GoodsReceiptView {
   reversalGoodsReceiptNo: string | null;
   /** 입고 취소 사유 (원래 입고·취소 행 모두) */
   cancelReason: string | null;
+  /** 지금 입고 취소할 수 있는지 (서버가 LOT 상태·잔량·투입·배정과 발주 상태로 정한다) */
+  isCancellable: boolean;
 }
 
 /** 입고할 발주 품목 (미입고량 = 발주량 − 입고 누계, 저장하지 않고 계산) */

@@ -194,7 +194,6 @@ export function GoodsReceiptScreen() {
             key={active.purchaseOrderItemId}
             line={active}
             receipts={receipts.data ?? []}
-            endedPurchaseOrderIds={new Set(allLines.filter((l) => l.isClosed).map((l) => l.purchaseOrderId))}
             canReceive={canReceive}
             canSeeOrders={canSeeOrders}
             onPin={() => url.set({ item: active.purchaseOrderItemId, po: null })}
@@ -224,15 +223,12 @@ export function GoodsReceiptScreen() {
 function ReceiptWork({
   line,
   receipts,
-  endedPurchaseOrderIds,
   canReceive,
   canSeeOrders,
   onPin,
 }: {
   line: ReceiptLine;
   receipts: GoodsReceiptView[];
-  /** 발주 취소·잔량 마감한 발주 (그 발주의 입고는 취소하지 않는다, PUR-007) */
-  endedPurchaseOrderIds: ReadonlySet<number>;
   canReceive: boolean;
   canSeeOrders: boolean;
   /** 확정할 때 이 줄을 주소에 고정한다 (모두 들어와 입고예정 목록에서 빠져도 결과를 계속 보이게) */
@@ -255,8 +251,6 @@ function ReceiptWork({
       if (reversal.purchaseOrderItemId === line.purchaseOrderItemId) setReceivedTon(trimTonText(decSum([line.remainingTon, reversal.receivedTon.replace(/^-/, '')])));
     },
   });
-  // 취소할 수 있어 보이는 입고: 원래 입고이고 아직 취소하지 않았으며 닫힌 발주가 아님 (LOT을 썼는지는 서버가 본다, PUR-006)
-  const cancellable = (receipt: GoodsReceiptView) => receipt.reversedGoodsReceiptId === null && receipt.reversalGoodsReceiptNo === null && receipt.lotNo !== null && !endedPurchaseOrderIds.has(receipt.purchaseOrderId);
 
   const receive = useReceiveGoods({
     success: (result) => `입고를 확정했어요. 원료 LOT ${withIGa(result.lotNo)} 만들어졌어요`,
@@ -466,7 +460,7 @@ function ReceiptWork({
                         <span title={receipt.cancelReason ?? undefined} className="text-cap text-ink-3">
                           취소됨 · {receipt.reversalGoodsReceiptNo}
                         </span>
-                      ) : cancellable(receipt) ? (
+                      ) : receipt.isCancellable ? (
                         <Button
                           size="sm"
                           variant="danger-ghost"
@@ -476,6 +470,10 @@ function ReceiptWork({
                         >
                           입고 취소
                         </Button>
+                      ) : receipt.lotNo ? (
+                        <span className="text-cap text-ink-3" title="원료 LOT을 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요">
+                          LOT 사용함
+                        </span>
                       ) : null}
                     </Td>
                   </tr>

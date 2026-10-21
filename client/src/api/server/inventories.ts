@@ -142,12 +142,13 @@ async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
   return rows.sort(byProducedDesc);
 }
 
-/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
+/** 입고예정 = 입고를 기다리는 발주(발주 확정·부분 입고)의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
 async function scheduledReceiptTonByItem(): Promise<Map<number, string[]>> {
   const purchaseOrders = await orEmpty(() => allPages<PurchaseOrderView>('/purchase-orders'), []);
   const byItem = new Map<number, string[]>();
   for (const po of purchaseOrders) {
-    if (po.purchaseOrderStatus === 'RECEIVED') continue;
+    // 발주 취소·잔량 마감한 발주는 더 들어올 양이 없다 (대시보드 구매 진행·MRP 입고예정과 같은 기준)
+    if (po.purchaseOrderStatus !== 'CONFIRMED' && po.purchaseOrderStatus !== 'PARTIALLY_RECEIVED') continue;
     for (const line of po.items) byItem.set(line.itemId, [...(byItem.get(line.itemId) ?? []), line.remainingTon]);
   }
   return byItem;
