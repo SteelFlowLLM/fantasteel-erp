@@ -51,7 +51,17 @@ export class MessengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly repository: MessengerRepository,
   ) {}
 
+  /** Nest는 이 promise를 기다리지 않고 버린다. 여기서 던지면 처리 안 된 rejection이 되어 서버 프로세스가 끝나므로 오류는 모두 여기서 받는다 */
   async handleConnection(client: Socket): Promise<void> {
+    try {
+      await this.connect(client);
+    } catch (error) {
+      this.logger.warn(`소켓 연결 처리 실패: ${String(error)}`);
+      client.disconnect(true);
+    }
+  }
+
+  private async connect(client: Socket): Promise<void> {
     const employeeId = await this.tokens.verifyCookieHeader(client.handshake.headers.cookie);
     const user = employeeId === null ? null : await this.users.load(employeeId);
     if (!user) {

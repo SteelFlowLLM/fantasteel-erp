@@ -615,6 +615,21 @@ describe('접속 상태 · 입력 중 (소켓)', () => {
     expect(anonymous.socket.disconnected).toBe(true);
   });
 
+  it('연결 처리 중 오류(깨진 쿠키·join 실패)는 던지지 않고 끊는다 — Nest가 이 promise를 버려 던지면 서버가 끝난다', async () => {
+    const gateway = app.get(MessengerGateway);
+    (gateway as unknown as GatewayInternals).broadcast = () => undefined;
+    const broken = fakeSocket('access_token=%');
+    await expect(gateway.handleConnection(broken.asSocket)).resolves.toBeUndefined();
+    expect(broken.socket.disconnected).toBe(true);
+
+    const failing = fakeSocket(qualityCookie);
+    failing.socket.join = async () => {
+      throw new Error('adapter down');
+    };
+    await expect(gateway.handleConnection(failing.asSocket)).resolves.toBeUndefined();
+    expect(failing.socket.disconnected).toBe(true);
+  });
+
   it('입력 중은 방 멤버일 때만 나를 뺀 멤버에게 보내고, 멤버가 아니거나 형식이 틀리면 무시한다', async () => {
     const gateway = app.get(MessengerGateway);
     const sent: { employeeId: number; event: string; payload: unknown }[] = [];
