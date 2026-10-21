@@ -78,6 +78,22 @@ export interface SttLocalServerView {
   logPath: string | null;
   /** 화면에 보일 안내 (등록 방법, 켜는 중 등) */
   message: string | null;
+  /** 음성 서버가 받아쓰는 중인 긴 녹음 수 (/health, 이슈 #522). 꺼졌거나 옛 음성 서버라 모르면 null */
+  transcribing: number | null;
+}
+
+/** POST stt/local-server/start·stop 본문 (이슈 #522). 받아쓰는 중이어도 다시 켜기·끄기를 하려면 true */
+export interface SttLocalServerActionInput {
+  confirmBusy?: boolean;
+}
+
+/**
+ * POST stt/local-server/start·stop 결과 (이슈 #522). 음성 서버가 회의 녹음을 받아쓰는 중인데 confirmBusy가 없으면
+ * 아무것도 하지 않고 needsConfirm: true와 warning을 돌려준다 (다시 켜거나 끄면 그 전사는 실패한다)
+ */
+export interface SttLocalServerActionView extends SttLocalServerView {
+  needsConfirm: boolean;
+  warning: string | null;
 }
 
 /**
