@@ -23,6 +23,9 @@ import { ProductionRepository } from './production.repository';
 
 const dateOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
+/** 배정 확정·해제는 슬래브마다 쿼리 여러 개라 DB가 느리면 기본 5초 제한을 넘어 COM-999가 났다. 다른 쓰기 서비스와 같은 제한을 쓴다 */
+const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
+
 /**
  * 열연 투입 배정 (REQ-PRD-004, REQ-INV-006·009, BP-INV-01).
  * 코일 계획에 필요한 매수만큼 합격 슬래브를 FIFO로 추천받아 확정한다. 배정·재고 변경은 inventory 서비스가 같은 tx에서 한다.
@@ -158,7 +161,7 @@ export class HotRollingService {
     await this.prisma.$transaction(async (tx) => {
       if (!(await this.plans.lockPlan(tx, productionPlanId))) throw new AppException('COM-003', '생산계획을 찾을 수 없어요');
       await this.confirmInTx(tx, user, productionPlanId, dto.lotIds);
-    });
+    }, LONG_TX);
     return this.detail(productionPlanId);
   }
 
@@ -187,7 +190,7 @@ export class HotRollingService {
         reason: dto.reason,
         actor: user,
       });
-    });
+    }, LONG_TX);
     return this.detail(productionPlanId);
   }
 }
