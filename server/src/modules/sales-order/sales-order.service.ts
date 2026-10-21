@@ -2,6 +2,8 @@ import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
+  MAX_ORDERED_QTY,
+  ORDERED_QTY_OVER_MESSAGE,
   RESERVATION_STATUS,
   SALES_ORDER_ITEM_STATUS,
   SHIPMENT_REQUEST_STATUS,
@@ -56,6 +58,15 @@ const OPEN_SHIPMENT_STATUSES: readonly string[] = [SHIPMENT_REQUEST_STATUS.REQUE
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 const isValidDate = (s: string) => !Number.isNaN(Date.parse(`${s}T00:00:00.000Z`)) && dateOnly(new Date(`${s}T00:00:00.000Z`)) === s;
+
+/** 수주 품목 줄 검증: 매수는 1 이상 상한 이하 정수(SO-002), 납기는 실제 있는 날짜 */
+function assertSalesOrderLines(items: CreateSalesOrderDto['items']): void {
+  for (const line of items) {
+    if (typeof line.orderedQty !== 'number' || !Number.isInteger(line.orderedQty) || line.orderedQty < 1) throw new AppException('SO-002');
+    if (line.orderedQty > MAX_ORDERED_QTY) throw new AppException('SO-002', ORDERED_QTY_OVER_MESSAGE);
+    if (!isValidDate(line.dueDate)) throw new AppException('COM-004', `납기 ${line.dueDate}는 없는 날짜예요`);
+  }
+}
 
 /** 읽기 계산에 필요한 값: 계획별 합격 제품 매수, 납기 위험 기준일, 오늘(서울) */
 interface ReadContext {
@@ -215,18 +226,16 @@ export class SalesOrderService {
    * 예약은 저장하는 순간 서버가 가용을 다시 읽어 정한다 (화면 미리보기 값은 쓰지 않는다).
    */
   async create(user: AuthUser, dto: CreateSalesOrderDto, idempotencyKey?: string): Promise<CreateSalesOrderResult> {
-    for (const line of dto.items) {
-      if (typeof line.orderedQty !== 'number' || !Number.isInteger(line.orderedQty) || line.orderedQty < 1) throw new AppException('SO-002');
-      if (!isValidDate(line.dueDate)) throw new AppException('COM-004', `납기 ${line.dueDate}는 없는 날짜예요`);
-    }
+    assertSalesOrderLines(dto.items);
     return this.idempotency.run(`${user.employeeId}:sales-order`, idempotencyKey, () => retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.createInTx(tx, user, dto), LONG_TX)));
   }
 
   /**
-   * 수주 등록 본문. Message → ERP 수주 등록 초안이 자기 실행 트랜잭션 안에서 부른다(매수 정수·날짜 검증은 부르는 쪽이 먼저 한다).
-   * origin이 있으면 수주 등록 작업 로그에 원본 초안·메시지를 남긴다
+   * 수주 등록 본문. Message → ERP 수주 등록 초안이 자기 실행 트랜잭션 안에서 부른다.
+   * 초안 실행도 화면 등록과 같은 매수·납기 검증을 지나도록 여기서 한 번 더 본다. origin이 있으면 수주 등록 작업 로그에 원본 초안·메시지를 남긴다
    */
   async createInTx(tx: Tx, user: AuthUser, dto: CreateSalesOrderDto, origin: Pick<BusinessEventInput, 'actionDraftId' | 'messageId' | 'isAiAssisted'> = {}): Promise<CreateSalesOrderResult> {
+    assertSalesOrderLines(dto.items);
     if (!(await this.repository.findCustomer(tx, dto.customerId))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
     const items = await this.repository.findItems(tx, [...new Set(dto.items.map((i) => i.itemId))]);
     const itemOf = (itemId: number) => {

@@ -1,6 +1,15 @@
 // 수주 API 응답 타입 (docs/backend/sales-order.md). 톤은 소수 3자리 문자열, 매수는 정수.
 import type { ItemType, ProductionPlanStatus, PurchaseOrderStatus, PurchaseRequisitionStatus, ReservationStatus, SalesOrderItemStatus, ShipmentRequestStatus } from './codes';
 
+/**
+ * 수주 품목 한 줄의 최대 매수 (가정값, #496). 문서에 상한이 없는데, 21억을 넘으면 DB 정수 범위 밖 오류가 나고
+ * 100만 매 같은 오타는 거대한 생산계획을 만든다. 서버 수주 등록·화면 수주 폼·철강맨AI 수주 카드·메시지 수주 초안이 같은 값을 쓴다
+ */
+export const MAX_ORDERED_QTY = 9_999;
+
+/** 매수가 상한을 넘었을 때 문구 (SO-002와 함께 보낸다) */
+export const ORDERED_QTY_OVER_MESSAGE = `수량은 품목 한 줄에 ${MAX_ORDERED_QTY.toLocaleString('en-US')}까지 입력할 수 있어요`;
+
 /** 진행률 같은 지표: 값과 분모를 함께 준다 (업무 프로세스 4.5 — 단계를 더해 주문보다 큰 값으로 보이지 않게) */
 export interface ProgressMeasure {
   qty: number;

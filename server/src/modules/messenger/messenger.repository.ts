@@ -236,8 +236,13 @@ export class MessengerRepository {
     };
   }
 
+  /** 안 읽은 사람 수를 셀 멤버의 읽음 위치. 퇴사자(사용 안 함 사원)는 읽을 수 없어 뺀다 (#496) */
   findMemberReads(tx: Tx, chatRoomId: number) {
-    return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true, lastReadMessageId: true } });
+    return tx.chatRoomMember.findMany({ where: { chatRoomId, employee: { isActive: true } }, select: { employeeId: true, lastReadMessageId: true } });
+  }
+
+  countActiveMembers(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.count({ where: { chatRoomId, employee: { isActive: true } } });
   }
 
   /** 시스템 메시지(보낸 사원 없음): 입장·초대·이름 변경 안내, 수주 업무 진행 알림 */
