@@ -281,6 +281,6 @@ confirm(draftId, actor):
 | 같은 LOT 추천 겹침 | FIFO 추천에서 다른 미처리 메시지 초안(배정 확정)이 가진 LOT을 뺀다. '추천 다시 받기'는 이 초안의 지금 LOT을 다시 쓸 수 있다 |
 | 실행 실패 초안 | 확정했지만 실행에 실패한(`execution_error_code` 있음) APPROVED 초안은 확정 주체가 반려할 수 있다(REJECTED·DRAFT_REJECTED). 실패하지 않은 APPROVED는 COM-004. 화면의 '다시 실행' 옆에 '반려' |
 | 실행 경합과 업무 오류 | 동시 실행 경합은 초안 조건부 갱신 실패(전용 예외)와 결과 행 unique 위반(P2002)만으로 가린다. 핸들러의 업무 오류는 COM-001이라도 실패로 기록한다. AppException이 아닌 오류는 COM-999로 시도 기록을 남기고 서버 로그에 남긴다 |
-| 매수 상한 | 초안 매수는 1~1,000,000매 🟡(가정값, DB int4 안). 넘으면 수정 요청은 COM-004, AI 값은 버린다 |
+| 매수 상한 | 수주 등록 초안은 수주 등록과 같은 1~9,999매(`MAX_ORDERED_QTY`, #496): 넘으면 수정 요청은 수주 등록과 같은 SO-002·"수량은 품목 한 줄에 9,999까지 입력할 수 있어요"(#509), AI 값은 버린다. 출하요청 생성 초안은 1~1,000,000매 🟡(가정값, DB int4 안): 넘으면 수정 요청은 COM-004, AI 값은 버린다 |
 | 목록 읽기 | 목록·상세 응답 한 번 안에서 고객사·규격 목록을 한 번만 읽는다(유형 정의의 `unresolvedFields`·`payloadLabels`가 나눠 쓰는 기억) |
 | 배정 사유 | payload `lotsChosenBy`(RECOMMENDATION·PERSON). 사람이 LOT을 고치면 DRAFT_CONFIRMED 사유가 'FIFO 추천'이 아니라 '사람이 고름'. 화면도 LOT 옆에 표시 |
