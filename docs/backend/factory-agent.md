@@ -10,7 +10,7 @@
 | BP | BP-AGT-01 |
 | 원칙 | 감지와 대응 후보 생성은 **규칙**이 한다. LLM은 상황 설명(API-264)만 한다 |
 
-## 2. 구현 상태 (2026-10-21 갱신)
+## 2. 구현 상태 (2026-10-22 갱신)
 
 | 위험 | 트리거 | 대응 | 상태 |
 | --- | --- | --- | --- |
@@ -20,8 +20,9 @@
 | AGED_SURPLUS (REQ-AGT-004) | 스케줄 | 대기 수주 배정 추천(후보) | 완료 — 생산완료 30일 이상 여재 + 같은 규격 대기 수주(미확보 > 0). **추천만** 한다 |
 | QUALITY_RATE_RISE (REQ-AGT-004) | 스케줄 | 품질부(QC) 알림 | 완료 — 강종별 최근 30일 불합격률 5% 초과 (검사 5건 미만 제외) |
 
-- 알림형(DUE_RISK·QUALITY_RATE_RISE)은 후보를 만들지 않는다. 알림 유형은 위험과 같은 이름이다(NOTIFICATION_TYPE `DUE_RISK`·`QUALITY_RATE_RISE`, 2026-10-21 확정). 안 읽은 같은 알림이 있으면 다시 보내지 않는다(읽으면 다음 감지에서 다시 알린다). 작업 로그 유형(`AGENT_RISK_DETECTED`)은 아직 제안 코드(🟡)라 알림형은 작업 로그를 남기지 않는다.
-- 후보가 생기면 그 후보가 만드는 업무의 확정 권한(구매요청 `PURCHASE_REQUISITION_CREATE`, 재생산 `PRODUCTION_PLAN_CONFIRM`, 배정 추천 `SHIPMENT_REQUEST_MANAGE`의 USE)이 있는 재직 사원 모두에게 `AGENT_CANDIDATE` 알림을 보낸다(내용 `[Agent 대응 후보] 원료 부족: …`, 이동 `/agent`). 후보와 알림은 같은 트랜잭션이고, 알림은 후보 생성 작업 로그(`DRAFT_CREATED`)에 걸려 같은 후보를 같은 사람에게 두 번 보내지 않는다. 반려 뒤 같은 대상의 새 후보가 생겨도 안 읽은 같은 내용의 알림이 있는 사원에게는 다시 보내지 않는다(읽은 사원에게만).
+- 알림형(DUE_RISK·QUALITY_RATE_RISE)은 후보를 만들지 않는다. 알림 유형은 위험과 같은 이름이다(NOTIFICATION_TYPE `DUE_RISK`·`QUALITY_RATE_RISE`, 2026-10-21 확정). **한 번 알린 위험은 7일(🟡 가정 `AGENT_QUIET_DAYS`) 동안 다시 알리지 않는다**(2026-10-22, 이슈 #496: 그 전에는 읽으면 24시간 감지·서버 재시작마다 같은 알림이 다시 갔다). 알림을 보낼 때 위험 대상(납기 위험은 `sales_order_item`, 불합격률 상승은 `steel_grade`)을 대상으로 작업 로그 `AGENT_RISK_DETECTED`(변경 후 데이터에 `riskType`·`targetKey`·요약·근거)를 같은 트랜잭션에 남기고 알림이 그 로그를 가리킨다. 다시 알릴지는 같은 대상·같은 `targetKey`의 이 로그가 7일 안에 있는지로 본다. 안 읽은 같은 알림이 있는 사원에게 보내지 않는 확인도 그대로 둔다(배포 전 알림 대비).
+- 후보가 생기면 그 후보가 만드는 업무의 확정 권한(구매요청 `PURCHASE_REQUISITION_CREATE`, 재생산 `PRODUCTION_PLAN_CONFIRM`, 배정 추천 `SHIPMENT_REQUEST_MANAGE`의 USE)이 있는 재직 사원 모두에게 `AGENT_CANDIDATE` 알림을 보낸다(내용 `[Agent 대응 후보] 원료 부족: …`, 이동 `/agent`). 후보와 알림은 같은 트랜잭션이고, 알림은 후보 생성 작업 로그(`DRAFT_CREATED`)에 걸려 같은 후보를 같은 사람에게 두 번 보내지 않는다. 같은 대상의 열린 후보가 있으면 후보도 알림도 새로 만들지 않는다. 사람이 반려한 대상은 7일 동안 새 후보를 만들지 않고, 그 뒤 새 후보가 생겨도 안 읽은 같은 내용의 알림이 있는 사원에게는 다시 보내지 않는다(읽은 사원에게만).
+- 후보를 새로 만들 때 같은 트랜잭션에서 작업 로그 `AGENT_RISK_DETECTED`(대상 그 후보 `action_draft`, 주체 SYSTEM)와 `DRAFT_CREATED`를 차례로 남긴다(REQ-LOG-002, 2026-10-22 이슈 #496).
 - 배정 추천(ALLOCATION_CONFIRM 유형)은 실행 핸들러가 없다. 확정은 "추천 확인" 기록이고(EXECUTED, 결과 없음), 실제 예약·배정은 재고·출하요청 화면에서 한다.
 - 화면: `/agent` (`client/src/features/agent/AgentScreen.tsx`)의 대응 후보 목록·상황 설명·확정·반려, 대시보드 Agent 위험 감지 위젯(확정 대기 건수·유형별·최근 후보).
 
@@ -29,7 +30,7 @@
 
 - 후보는 `action_draft`에 저장한다. 칸은 더하지 않았다 (2026-10-15 사용자 결정). 2026-10-21에 같은 대상 중복을 막는 부분 unique 인덱스만 더했다.
   - `message_id = null`이면 Agent 후보다. `payload.agent`에 `riskType`, `targetKey`, `summary`, `evidence`를 남긴다.
-  - **중복 방지(REQ-AGT-005)**: `payload.agent.targetKey`가 같고 상태가 AI_GENERATED·WAITING_APPROVAL·APPROVED인 초안이 있으면 새로 만들지 않는다. 서비스가 먼저 확인하고, 그래도 겹치면(서버를 둘 이상 띄웠을 때 등) DB 부분 unique `action_draft_open_agent_target_key`(2026-10-21, ERD action_draft Note)가 막는다. 저장은 `ON CONFLICT DO NOTHING`(`createDraftIfNew`)이라 충돌해도 오류 없이 "만들지 않음"으로 끝난다. 감지는 서버 안에서도 한 번에 하나씩 돌린다.
+  - **중복 방지(REQ-AGT-005)**: `payload.agent.targetKey`가 같고 상태가 AI_GENERATED·WAITING_APPROVAL·APPROVED인 초안이 있으면 새로 만들지 않는다. 사람이 반려한(REJECTED, 사유가 `[자동]`으로 시작하지 않는) 같은 대상의 후보가 최근 7일(반려 시각 = 초안 `updated_at`) 안에 있어도 만들지 않는다(🟡 가정, 이슈 #496). 위험이 해소돼 시스템이 닫은 후보(`[자동] …`)는 세지 않아, 위험이 다시 생기면 바로 새 후보를 만든다. 서비스가 먼저 확인하고, 그래도 겹치면(서버를 둘 이상 띄웠을 때 등) DB 부분 unique `action_draft_open_agent_target_key`(2026-10-21, ERD action_draft Note)가 막는다. 저장은 `ON CONFLICT DO NOTHING`(`createDraftIfNew`)이라 충돌해도 오류 없이 "만들지 않음"으로 끝난다. 감지는 서버 안에서도 한 번에 하나씩 돌린다.
   - `requester_id`는 만들 때 비어 있고, 확정한 사원이 확정 주체가 된다.
 - 확정 권한은 후보가 만드는 업무의 권한을 따른다: 구매요청 `PURCHASE_REQUISITION_CREATE` USE, 재생산 `PRODUCTION_PLAN_CONFIRM` USE. 구매요청 결과는 확정자 소속 부서장이 최종 승인한다 (`purchasing.createRequisition`).
 - 확정 전 **재검증**: 위험이 해소됐으면 실행하지 않고 후보를 REJECTED(`[자동] …`)로 닫는다.
@@ -56,7 +57,7 @@
 
 - 관리자 수동 실행: `POST agent/scan`(4장) — 스케줄을 기다리지 않고 같은 `scanAll`을 돌린다. 데모·점검용.
 - 스케줄: `FactoryAgentScheduler` — 서버 시작 직후 한 번, 이후 `AGENT_SCAN_INTERVAL_HOURS`(기본 24, 0이면 끔)마다. 테스트(`NODE_ENV=test`)에서는 돌지 않는다. 새 패키지를 쓰지 않았다.
-- 이벤트: `QualityService.registerQualityInspection` 커밋 뒤 `onInspectionRegistered(lotId)`. 감지가 실패해도 검사 등록은 그대로다.
+- 이벤트: `QualityService.registerQualityInspection` 커밋 뒤 `onInspectionRegistered(lotId)`. 감지가 실패해도 검사 등록은 그대로다. 감지는 한 줄 큐라 전체 감지(`scanAll`)가 돌고 있으면 오래 기다리므로, 검사 등록 응답은 감지를 기다리지 않는다(2026-10-22, 이슈 #496). 부르지 못한 실패는 품질 서비스가 Nest `Logger`로 남긴다.
 
 ## 6. 확인 필요 🟡
 
@@ -68,7 +69,7 @@
 | 스케줄 주기 | 24시간 (`AGENT_SCAN_INTERVAL_HOURS`) |
 | 여재 보유일 | 생산완료 30일 이상 (`AGED_SURPLUS_DAYS`) |
 | 불합격률 | 최근 30일, 5% 초과, 검사 5건 이상 (`agent-alert-rules.ts`) |
-| 알림형 작업 로그 | 공통 코드 정의서 3장의 제안 코드 `AGENT_RISK_DETECTED`(🟡 P2)가 확정되기 전에는 알림형 감지는 작업 로그를 남기지 않는다 |
+| 같은 대상을 다시 꺼내지 않는 기간 | 7일 (`AGENT_QUIET_DAYS`, 2026-10-22 이슈 #496 가정값): 사람이 반려한 후보는 7일 동안 다시 만들지 않고, 알림형 위험은 한 번 알린 뒤 7일 동안 다시 알리지 않는다 |
 | 후보 알림 받는 사람 | 그 업무의 확정 권한(USE)이 있는 재직 사원 전원 (부서로 좁히지 않았다). 부서장·특정 부서만 받게 하려면 정해 주세요 |
 
 **2026-10-21에 정리된 것 (이슈 #464)**
@@ -94,7 +95,7 @@
 - NOTIFICATION_TYPE: `DUE_RISK`(납기 위험)·`QUALITY_RATE_RISE`(불합격률 상승)·`AGENT_CANDIDATE`(대응 후보)
 - AGENT_RISK_TYPE: `RAW_SHORTAGE`(원료 부족)·`GOOD_QTY_SHORTAGE`(합격 매수 부족)·`DUE_RISK`(납기 위험)·`AGED_SURPLUS`(여재 장기 보유)·`QUALITY_RATE_RISE`(불합격률 상승)
 - 코드에서 한 일: 임시 `ALERT_NOTIFICATION_TYPE`(`TASK_ASSIGNED`) 삭제 → 위험별 유형 사용, `AGENT_RISK_TYPE`·`AGENT_RISK_TYPE_LABEL`은 codes 것을 쓴다(`@fantasteel/shared`로 가져오는 방법은 그대로), 화면 알림 배지(`NOTIFICATION_TYPE_TONE`)·화면 코드(`client/src/codes`)에 세 값을 더했다.
-- 남은 제안 코드: 작업 로그 `AGENT_RISK_DETECTED`(정의서 3장, 🟡 P2). 알림형 작업 로그가 필요해지면 2장으로 옮기고 감지 서비스에서 남긴다.
+- 작업 로그 `AGENT_RISK_DETECTED`: 2026-10-22(이슈 #496)에 정의서 3장 제안 코드에서 2장 확정 값으로 옮겼다. 후보를 새로 만들 때와 알림형 알림을 보낼 때 남긴다(2장).
 
 기준값(원료 부족 조회 기간·스케줄 주기·여재 보유일·불합격률)과 여재 추천(추천만 함)은 6장의 현재 값 그대로 둔다.
 
@@ -121,7 +122,8 @@ npm run agent:demo-risk -w @fantasteel/server   # 위험 조건 만들기 (바�
 확인 포인트
 - 상황 설명 버튼: LLM이 연결돼 있으면 "AI가 작성", 없으면 "규칙 요약". 설명이 근거 값 안의 숫자만 쓰고 무엇을 하라는 권고를 하지 않는지 본다.
 - 후보를 연 채로 위험을 없애고(예: 그 생산계획을 취소) 확정하면 실행하지 않고 후보가 닫힌다.
-- 서버를 다시 시작해도 같은 대상의 후보가 늘어나지 않는다. 반려한 대상은 다음 감지에서 새 후보가 생긴다.
+- 서버를 다시 시작해도 같은 대상의 후보와 알림이 늘어나지 않는다. 반려한 대상은 7일(🟡 가정) 동안 새 후보가 생기지 않고, 그 뒤 감지에서 위험이 남아 있으면 다시 생긴다. 납기 위험·불합격률 알림도 읽은 뒤 7일 동안은 다시 오지 않는다.
+- 작업 로그 화면에서 유형 `Agent 위험 감지`로 거르면 후보마다·보낸 알림마다 한 줄씩 보인다.
 - 확정하거나 반려하면 대시보드 위젯의 확정 대기 건수가 줄어든다.
 
 자동 테스트: `npm test -w @fantasteel/server -- factory-agent`, `npm run test -w @fantasteel/client`.

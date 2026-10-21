@@ -7,7 +7,7 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { addDays } from './agent-rules';
 import { FactoryAgentRepository } from './factory-agent.repository';
-import { FactoryAgentService, MANUAL_SCAN_MIN_INTERVAL_MS } from './factory-agent.service';
+import { AGENT_QUIET_DAYS, FactoryAgentService, MANUAL_SCAN_MIN_INTERVAL_MS } from './factory-agent.service';
 
 let moduleRef: TestingModule;
 let prisma: PrismaService;
@@ -47,11 +47,23 @@ describe('납기 위험 알림 (REQ-AGT-004)', () => {
     const alerts = await prisma.notification.findMany({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } });
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ notificationType: 'DUE_RISK', linkPath: `/sales-orders/${salesOrder.id}` });
+    // 알린 위험은 수주 품목을 대상으로 위험 감지 작업 로그를 남기고 알림이 그 로그를 가리킨다 (REQ-LOG-002, #496)
+    const item = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId: salesOrder.id } });
+    const detected = await prisma.businessEvent.findMany({ where: { businessEventType: 'AGENT_RISK_DETECTED', targetType: 'sales_order_item', targetId: item.id } });
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toMatchObject({ actorType: 'SYSTEM', salesOrderId: salesOrder.id, afterData: expect.objectContaining({ riskType: 'DUE_RISK', targetKey: `DUE_RISK:soItem:${item.id}` }) });
+    expect(alerts[0].businessEventId).toBe(detected[0].id);
 
-    // 읽으면 다음 감지에서 다시 알린다
+    // 읽어도 쉬는 기간(24시간 감지·재시작 포함) 동안은 같은 위험을 다시 알리지 않는다 (#496)
+    const count = () => prisma.notification.count({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } });
     await prisma.notification.update({ where: { id: alerts[0].id }, data: { readAt: new Date() } });
     await agent.scanAll();
-    expect(await prisma.notification.count({ where: { recipientId: owner.id, notificationContent: { contains: 'T-SO-AGT-DUE' } } })).toBe(2);
+    expect(await count()).toBe(1);
+
+    // 기간이 지나면 위험이 남은 대상은 다시 알린다
+    await prisma.businessEvent.update({ where: { id: detected[0].id }, data: { createdAt: new Date(Date.now() - (AGENT_QUIET_DAYS + 1) * 86_400_000) } });
+    await agent.scanAll();
+    expect(await count()).toBe(2);
   });
 
   it('배포 전에 TASK_ASSIGNED로 보낸 안 읽은 같은 알림이 있으면 새 유형으로 다시 보내지 않는다', async () => {
@@ -102,6 +114,17 @@ describe('불합격률 상승 알림 (REQ-AGT-004)', () => {
     expect(alerts.length).toBe(members.length);
     expect(alerts[0].notificationContent).toContain('불합격률');
     expect(alerts.every((a) => a.notificationType === 'QUALITY_RATE_RISE')).toBe(true);
+    const detected = await prisma.businessEvent.findMany({ where: { businessEventType: 'AGENT_RISK_DETECTED', targetType: 'steel_grade', targetId: grade.id } });
+    expect(detected).toHaveLength(1);
+    expect(detected[0].afterData).toMatchObject({ riskType: 'QUALITY_RATE_RISE', targetKey: 'QUALITY_RATE_RISE:grade:SPHC' });
+
+    // 모두 읽은 뒤 불합격이 더 생겨 문장이 바뀌어도 쉬는 기간에는 다시 알리지 않는다 (#496)
+    await prisma.notification.updateMany({ where: { id: { in: alerts.map((a) => a.id) } }, data: { readAt: new Date() } });
+    const result = await prisma.productionResult.create({ data: { processType: 'STEELMAKING', converterCode: 'BOF5', startedAt: now, completedAt: now } });
+    const lot = await prisma.lot.create({ data: { lotNo: 'T-HT-AGT-QR-6', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: result.id, initialTon: '250' } });
+    await prisma.qualityInspection.create({ data: { lotId: lot.id, inspectionStandardId: standard.id, inspectorEmployeeId: inspector.id, inspectedAt: now, inspectionResult: 'FAIL' } });
+    await agent.scanAll();
+    expect(await prisma.notification.count({ where: { notificationContent: { contains: '강종 SPHC' }, recipientId: { in: members.map((m) => m.id) } } })).toBe(members.length);
   });
 });
 

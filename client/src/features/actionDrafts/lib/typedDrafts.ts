@@ -223,6 +223,13 @@ const OPEN_DRAFT_STATUSES: readonly string[] = ['AI_GENERATED', 'WAITING_APPROVA
 export const openDraftOf = <T extends { messageId: number; actionType: ActionType; draftStatus: string }>(drafts: readonly T[], messageId: number, actionType: ActionType): T | undefined =>
   drafts.find((d) => d.messageId === messageId && d.actionType === actionType && OPEN_DRAFT_STATUSES.includes(d.draftStatus));
 
+/** 이 메시지·유형에서 이미 ERP에 반영된 초안. 있으면 같은 업무가 두 번 등록되지 않게 서버가 새 초안을 막으므로 메뉴는 그 초안을 연다 (#496) */
+export const executedDraftOf = <T extends { messageId: number; actionType: ActionType; draftStatus: string }>(drafts: readonly T[], messageId: number, actionType: ActionType): T | undefined =>
+  drafts.find((d) => d.messageId === messageId && d.actionType === actionType && d.draftStatus === 'EXECUTED');
+
+/** 실행된 초안 때문에 새 초안을 만들 수 없는 이유 (메뉴 안내) */
+export const executedDraftReason = (typeLabel: string): string => `이 메시지로 만든 ${typeLabel} 초안은 이미 ERP에 반영했어요. 같은 업무가 두 번 등록되지 않게 새 초안은 만들 수 없어요`;
+
 /**
  * 초안 만들기 결과 안내. 다른 사원이 만든 미처리 초안이 이미 있으면 "○○님이 만든 초안이 이미 있어요" (모듈 문서 10장 같은 메시지·유형)
  */

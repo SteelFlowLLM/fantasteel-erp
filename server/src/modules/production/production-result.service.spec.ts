@@ -313,3 +313,18 @@ describe('동시 요청: 같은 실적을 두 번 완료하거나 같은 고로�
     expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF5' } })).toBe(1);
   });
 });
+
+describe('작업 일시: 시간대 없는 글은 서울 시각으로 읽는다 (일정과 같음, #496)', () => {
+  it('시간대 없는 시작 일시는 +09:00으로, 읽을 수 없는 일시는 COM-004', async () => {
+    // 고로 BF96과 2017-03은 이 묶음만 쓴다. 서버가 UTC든 서울이든 같은 시각이어야 한다
+    const started = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF96', startedAt: '2017-03-02T09:00' });
+    try {
+      expect(started.startedAt).toBe('2017-03-02T00:00:00.000Z');
+      expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF97', startedAt: '2017-W10' }))).toBe('COM-004');
+      expect(await codeOf(results.complete(producer, started.id, { completedAt: '2017-W10', hotMetalTon: '1' }))).toBe('COM-004');
+      expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF97' } })).toBe(0);
+    } finally {
+      await prisma.productionResult.delete({ where: { id: started.id } });
+    }
+  });
+});

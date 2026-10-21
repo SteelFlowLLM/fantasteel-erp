@@ -78,6 +78,11 @@ export class MessageActionRepository {
     return tx.actionDraft.findFirst({ where: { messageId, actionType, draftStatus: { in: OPEN_DRAFT_STATUSES } }, select: { id: true, requesterId: true, requester: { select: { employeeName: true } } } });
   }
 
+  /** 같은 메시지·유형에서 이미 ERP에 반영된 초안 (있으면 새 초안을 만들지 않는다, #496) */
+  findExecutedDraft(tx: Tx, messageId: number, actionType: string) {
+    return tx.actionDraft.findFirst({ where: { messageId, actionType, draftStatus: DRAFT_STATUS.EXECUTED }, orderBy: { id: 'desc' }, select: draftSelect });
+  }
+
   createDraft(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue; messageId?: number; meetingMinutesId?: number; requesterId: number }) {
     return tx.actionDraft.create({ data, select: draftSelect });
   }

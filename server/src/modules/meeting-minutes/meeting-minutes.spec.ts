@@ -231,6 +231,14 @@ describe('POST /meeting-minutes/audio (음성 → 전사)', () => {
     ]);
   });
 
+  it('음성 서버 연결 실패 이유에는 서버 주소가 없다: 회의록은 모든 사원이 본다 (이슈 #497)', async () => {
+    sttClient.transcribe.mockRejectedValueOnce(new SttRequestError('http://100.87.40.116:8001/v1/audio/transcriptions에 연결할 수 없어요', '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요'));
+    const { body } = await uploadAudio();
+    await runner.drain();
+    const row = await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: body.data.id } });
+    expect([row.meetingMinutesStatus, row.failureReason]).toEqual(['FAILED', '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요']);
+  });
+
   it('더 이상 TRANSCRIBING이 아닌 행은 덮어쓰지 않는다', async () => {
     let release: (value: SttTranscript) => void = () => undefined;
     sttClient.transcribe.mockImplementation(() => new Promise<SttTranscript>((resolve) => (release = resolve)));

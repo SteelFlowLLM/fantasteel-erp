@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { DRAFT_STATUS, INSPECTION_RESULT, PERMISSION_LEVEL, SALES_ORDER_ITEM_STATUS, type Permission } from '@fantasteel/shared';
+import { BUSINESS_EVENT_TYPE, DRAFT_STATUS, INSPECTION_RESULT, PERMISSION_LEVEL, SALES_ORDER_ITEM_STATUS, type Permission } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 아직 처리되지 않은 초안 상태 (ERD 부분 unique action_draft_open_agent_target_key와 같은 목록). 같은 대상의 미처리 초안은 하나만 둔다 (REQ-AGT-005) */
 export const OPEN_DRAFT_STATUSES = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL, DRAFT_STATUS.APPROVED];
+/** 위험이 해소돼 시스템이 닫은 후보의 반려 사유 머리. 사람이 반려한 것과 나눈다 */
+export const AUTO_CLOSED_PREFIX = '[자동]';
 
 const draftSelect = {
   id: true,
@@ -33,6 +35,34 @@ export class FactoryAgentRepository {
       where: { messageId: null, draftStatus: { in: OPEN_DRAFT_STATUSES }, payload: { path: ['agent', 'targetKey'], equals: targetKey } },
       select: { id: true },
     });
+  }
+
+  /** payload.agent.targetKey가 같고 since 뒤에 사람이 반려한 후보 (위험이 해소돼 자동으로 닫은 후보는 빼서, 위험이 다시 생기면 새 후보를 만든다) */
+  findRejectedDraftByTargetSince(tx: Tx, targetKey: string, since: Date) {
+    return tx.actionDraft.findFirst({
+      where: {
+        messageId: null,
+        draftStatus: DRAFT_STATUS.REJECTED,
+        updatedAt: { gte: since },
+        payload: { path: ['agent', 'targetKey'], equals: targetKey },
+        NOT: { rejectReason: { startsWith: AUTO_CLOSED_PREFIX } },
+      },
+      select: { id: true },
+    });
+  }
+
+  /** 같은 대상(targetKey)을 since 뒤에 감지해 작업 로그(AGENT_RISK_DETECTED)를 남겼는지. 대상 행 색인으로 찾는다 */
+  async hasRiskDetectedSince(tx: Tx, target: { table: string; id: number }, targetKey: string, since: Date): Promise<boolean> {
+    const count = await tx.businessEvent.count({
+      where: {
+        targetType: target.table,
+        targetId: target.id,
+        businessEventType: BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED,
+        createdAt: { gte: since },
+        afterData: { path: ['targetKey'], equals: targetKey },
+      },
+    });
+    return count > 0;
   }
 
   /**
@@ -102,7 +132,7 @@ export class FactoryAgentRepository {
   findJudgedInspectionsSince(tx: Tx, since: Date) {
     return tx.qualityInspection.findMany({
       where: { inspectedAt: { gte: since }, inspectionResult: { in: [INSPECTION_RESULT.PASS, INSPECTION_RESULT.FAIL] } },
-      select: { inspectionResult: true, lot: { select: { steelGrade: { select: { steelGradeCode: true } }, item: { select: { steelGrade: { select: { steelGradeCode: true } } } } } } },
+      select: { inspectionResult: true, lot: { select: { steelGrade: { select: { id: true, steelGradeCode: true } }, item: { select: { steelGrade: { select: { id: true, steelGradeCode: true } } } } } } },
     });
   }
 

@@ -102,6 +102,21 @@ describe('로그인 (POST /auth/login)', () => {
     }
   });
 
+  it('동시에 보낸 틀린 요청도 한도를 넘지 못한다: 한도 밖은 비밀번호 확인 없이 AUTH-003 (이슈 #497)', async () => {
+    const limiter = app.get(LoginAttemptLimiter);
+    limiter.reset();
+    try {
+      const total = LOGIN_FAIL_LIMIT_PER_EMPLOYEE + 7;
+      const results = await Promise.all(Array.from({ length: total }, () => login(PURCHASE, `${PASSWORD}-wrong`)));
+      const codes = results.map((r) => r.body.error?.code);
+      expect(codes.filter((code) => code === 'AUTH-001')).toHaveLength(LOGIN_FAIL_LIMIT_PER_EMPLOYEE);
+      expect(codes.filter((code) => code === 'AUTH-003')).toHaveLength(7);
+      expect((await login(PURCHASE, PASSWORD)).status).toBe(429);
+    } finally {
+      limiter.reset();
+    }
+  });
+
   it('성공하면 그 사원번호의 실패 횟수가 지워진다', async () => {
     const limiter = app.get(LoginAttemptLimiter);
     limiter.reset();

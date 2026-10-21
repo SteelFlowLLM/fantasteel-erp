@@ -54,7 +54,7 @@ import {
   type RawShortageCandidate,
 } from './agent-rules';
 import { buildExplainMessages } from './agent-explain';
-import { FactoryAgentRepository, type AgentDraftRow } from './factory-agent.repository';
+import { AUTO_CLOSED_PREFIX, FactoryAgentRepository, type AgentDraftRow } from './factory-agent.repository';
 
 export interface AgentScanResult {
   riskType: AgentRiskType;
@@ -84,11 +84,17 @@ const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
 const LEGACY_ALERT_NOTIFICATION_TYPE = NOTIFICATION_TYPE.TASK_ASSIGNED;
 /** 🟡 가정값: 관리자가 지금 감지를 다시 돌릴 수 있는 최소 간격 (연타로 감지 쿼리가 몰리지 않게) */
 export const MANUAL_SCAN_MIN_INTERVAL_MS = 60_000;
+/**
+ * 🟡 가정값 (#496): 같은 대상(targetKey)을 다시 꺼내지 않는 기간(일). 사람이 반려한 후보는 이 기간 동안 다시 만들지 않고,
+ * 알림형 위험(납기 위험·불합격률 상승)은 한 번 알린 뒤 이 기간 동안 다시 알리지 않는다. 감지는 24시간마다·서버 시작 때 돌기 때문이다
+ */
+export const AGENT_QUIET_DAYS = 7;
 /** 규칙 실패 이유는 응답에 일반 문구만 싣고 원문(DB 오류 문구 등)은 서버 로그에만 남긴다 */
 const SCAN_FAILED_TEXT = '이 규칙을 돌리지 못했어요. 서버 로그를 확인해 주세요';
 /** 품질 부서 코드 (시드 조직) */
 const QUALITY_DEPARTMENT_CODE = 'QC';
 
+const quietSince = () => new Date(Date.now() - AGENT_QUIET_DAYS * 86_400_000);
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const numberOrNull = (v: unknown) => (typeof v === 'number' ? v : null);
 const textOrNull = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : null);
@@ -230,8 +236,11 @@ export class FactoryAgentService {
     let created = 0;
     for (const alert of alerts) {
       const sent = await this.prisma.$transaction(async (tx) => {
+        const target = { table: 'sales_order_item', id: alert.salesOrderItemId };
+        if (await this.repository.hasRiskDetectedSince(tx, target, alert.meta.targetKey, quietSince())) return 0;
         if (await this.repository.hasUnreadSameNotification(tx, alert.ownerEmployeeId, [NOTIFICATION_TYPE.DUE_RISK, LEGACY_ALERT_NOTIFICATION_TYPE], alert.content)) return 0;
-        return this.notification.notifyEmployees(tx, [alert.ownerEmployeeId], { notificationType: NOTIFICATION_TYPE.DUE_RISK, notificationContent: alert.content, linkPath: `/sales-orders/${alert.salesOrderId}` });
+        const event = await this.recordRiskDetected(tx, alert.meta, target, alert.salesOrderId);
+        return this.notification.notifyEmployees(tx, [alert.ownerEmployeeId], { notificationType: NOTIFICATION_TYPE.DUE_RISK, notificationContent: alert.content, linkPath: `/sales-orders/${alert.salesOrderId}`, businessEventId: event.id });
       });
       created += sent;
     }
@@ -244,9 +253,12 @@ export class FactoryAgentService {
     const since = new Date(Date.now() - QUALITY_RATE_WINDOW_DAYS * 86_400_000);
     const inspections = await this.repository.findJudgedInspectionsSince(this.prisma, since);
     const byGrade = new Map<string, GradeInspectionCount>();
+    const gradeIdOf = new Map<string, number>();
     for (const inspection of inspections) {
-      const code = inspection.lot.steelGrade?.steelGradeCode ?? inspection.lot.item?.steelGrade?.steelGradeCode;
-      if (!code) continue;
+      const grade = inspection.lot.steelGrade ?? inspection.lot.item?.steelGrade;
+      if (!grade) continue;
+      const code = grade.steelGradeCode;
+      gradeIdOf.set(code, grade.id);
       const count = byGrade.get(code) ?? { steelGradeCode: code, passCount: 0, failCount: 0 };
       if (inspection.inspectionResult === INSPECTION_RESULT.FAIL) count.failCount++;
       else count.passCount++;
@@ -258,12 +270,18 @@ export class FactoryAgentService {
     if (!department) throw new AppException('COM-003', '품질 부서를 찾을 수 없어요');
     let created = 0;
     for (const alert of alerts) {
+      const steelGradeId = gradeIdOf.get(alert.steelGradeCode);
+      if (steelGradeId === undefined) continue;
       created += await this.prisma.$transaction(async (tx) => {
+        const target = { table: 'steel_grade', id: steelGradeId };
+        if (await this.repository.hasRiskDetectedSince(tx, target, alert.meta.targetKey, quietSince())) return 0;
         const members = await this.organization.findActiveMemberIds(tx, department.id);
         const unread = new Set<number>();
         for (const id of members) if (await this.repository.hasUnreadSameNotification(tx, id, [NOTIFICATION_TYPE.QUALITY_RATE_RISE, LEGACY_ALERT_NOTIFICATION_TYPE], alert.content)) unread.add(id);
         const targets = members.filter((id) => !unread.has(id));
-        return this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.QUALITY_RATE_RISE, notificationContent: alert.content });
+        if (targets.length === 0) return 0;
+        const event = await this.recordRiskDetected(tx, alert.meta, target, null);
+        return this.notification.notifyEmployees(tx, targets, { notificationType: NOTIFICATION_TYPE.QUALITY_RATE_RISE, notificationContent: alert.content, businessEventId: event.id });
       });
     }
     return { riskType: 'QUALITY_RATE_RISE', detected: alerts.length, created };
@@ -325,15 +343,18 @@ export class FactoryAgentService {
   }
 
   /**
-   * 후보를 Action Draft로 저장한다 (REQ-AGT-005). 같은 대상(targetKey)의 미처리 초안이 있으면 새로 만들지 않는다.
+   * 후보를 Action Draft로 저장한다 (REQ-AGT-005). 같은 대상(targetKey)의 미처리 초안이 있거나, 사람이 최근(AGENT_QUIET_DAYS) 반려한 후보가 있으면 새로 만들지 않는다.
    * 먼저 확인하고, 그 사이에 다른 서버가 먼저 만들었으면 DB 부분 unique(action_draft_open_agent_target_key)가 막는다.
+   * 위험 감지(AGENT_RISK_DETECTED)·초안 생성 작업 로그를 같은 트랜잭션에 남기고(REQ-LOG-002),
    * 만든 직후 확정 대기(WAITING_APPROVAL)로 넘기고 확정 권한이 있는 사원에게 알린다. 확정 주체는 확정하는 부서원이라 requester는 비워 둔다.
    */
   private async createCandidate(tx: Tx, input: { actionType: ActionType; meta: AgentDraftMeta; salesOrderId: number | null; fields: Record<string, Prisma.InputJsonValue | null> }): Promise<boolean> {
     if (await this.repository.findOpenDraftByTarget(tx, input.meta.targetKey)) return false;
+    if (await this.repository.findRejectedDraftByTargetSince(tx, input.meta.targetKey, quietSince())) return false;
     const payload = { ...input.fields, agent: input.meta };
     const draft = await this.repository.createDraftIfNew(tx, { actionType: input.actionType, payload: payload as unknown as Prisma.InputJsonValue });
     if (!draft) return false;
+    await this.recordRiskDetected(tx, input.meta, { table: 'action_draft', id: draft.id }, input.salesOrderId, draft.id);
     const event = await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
       actor: 'SYSTEM',
@@ -346,6 +367,19 @@ export class FactoryAgentService {
     await this.repository.update(tx, draft.id, { draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
     await this.notifyCandidate(tx, input.actionType, input.meta, event.id);
     return true;
+  }
+
+  /** Agent 위험 감지 작업 로그 (REQ-LOG-002). 후보는 그 후보, 알림형은 위험 대상(수주 품목·강종)을 대상으로 남겨 다시 알릴지 판단하는 기준으로도 쓴다 */
+  private recordRiskDetected(tx: Tx, meta: AgentDraftMeta, target: { table: string; id: number }, salesOrderId: number | null, actionDraftId: number | null = null) {
+    return this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED,
+      actor: 'SYSTEM',
+      target,
+      salesOrderId,
+      after: { riskType: meta.riskType, targetKey: meta.targetKey, detectedOn: meta.detectedOn, summary: meta.summary, evidence: meta.evidence },
+      reason: `AGENT_${meta.riskType}: ${meta.summary}`,
+      actionDraftId,
+    });
   }
 
   /**
@@ -454,7 +488,7 @@ export class FactoryAgentService {
     return { draft: await this.requireView(user, id), executed: failure === null, errorCode: failure?.code ?? null, errorMessage: failure?.message ?? null };
   }
 
-  /** 후보 반려 (확정 전만, 사유 필수) → REJECTED. 반려한 뒤에는 같은 대상의 새 후보를 만들 수 있다 */
+  /** 후보 반려 (확정 전만, 사유 필수) → REJECTED. 같은 대상의 새 후보는 AGENT_QUIET_DAYS가 지난 뒤 감지에서 다시 만들 수 있다 */
   async reject(user: AuthUser, id: number, rejectReasonText: string, expectedUpdatedAt?: string | null): Promise<AgentCandidateView> {
     await this.prisma.$transaction(async (tx) => {
       const draft = await this.confirmableDraft(tx, user, id, expectedUpdatedAt);
@@ -552,7 +586,7 @@ export class FactoryAgentService {
 
   private async closeAsStale(user: AuthUser, draft: AgentDraftRow, reason: string): Promise<AgentCandidateExecutionResult> {
     await this.prisma.$transaction(async (tx) => {
-      await this.change(tx, draft, { draftStatus: DRAFT_STATUS.REJECTED, rejectReason: `[자동] ${reason}` });
+      await this.change(tx, draft, { draftStatus: DRAFT_STATUS.REJECTED, rejectReason: `${AUTO_CLOSED_PREFIX} ${reason}` });
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.DRAFT_REJECTED,
         actor: user,
@@ -560,7 +594,7 @@ export class FactoryAgentService {
         salesOrderId: salesOrderIdOf(draft.payload),
         before: { draftStatus: draft.draftStatus },
         after: { draftStatus: DRAFT_STATUS.REJECTED },
-        reason: `[자동] ${reason}`,
+        reason: `${AUTO_CLOSED_PREFIX} ${reason}`,
         actionDraftId: draft.id,
       });
     });
