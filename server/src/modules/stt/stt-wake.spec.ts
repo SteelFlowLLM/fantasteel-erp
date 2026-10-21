@@ -125,6 +125,13 @@ describe('SttService.transcribeWakeClip', () => {
       }
     });
 
+    it('429(외부 서버 할당량 소진일 수 있음)는 바쁨이 아니라 다시 보내지 않고 이유로 돌려준다', async () => {
+      const quota = jest.fn().mockRejectedValue(new SttRequestError('음성 인식 서버 오류 (HTTP 429): You exceeded your current quota'));
+      expect(await setup(quota).transcribeWakeClip(user(1), clip, 'command')).toEqual({ text: null, error: '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요' });
+      expect(quota).toHaveBeenCalledTimes(1);
+      expect(await setup(quota).transcribeWakeClip(user(2, { ORG_MANAGE: 'USE' }), clip, 'command')).toEqual({ text: null, error: expect.stringContaining('HTTP 429') });
+    });
+
     it('부르는 말 조각·중간 글은 다시 보내지 않고 빈 글로 조용히 넘긴다 (회의 전사 중 주변 말마다 안내가 되풀이되지 않게)', async () => {
       for (const mode of ['wake', 'partial'] as const) {
         const transcribe = jest.fn().mockRejectedValue(busy);
