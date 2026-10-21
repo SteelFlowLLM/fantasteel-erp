@@ -327,7 +327,10 @@ export class AiResearchService {
   }
 
   private async view(tx: Tx, run: AiResearchRun, afterSeq = 0): Promise<AiResearchRunView> {
-    const [events, lastSeq, versions] = await Promise.all([this.repository.eventsAfter(tx, run.id, afterSeq), this.repository.lastSeq(tx, run.id), this.repository.listVersions(tx, run.id)]);
+    // 한 트랜잭션의 연결 하나에 쿼리를 겹쳐 보내지 않는다 (pg 경고, pg@9에서 오류)
+    const events = await this.repository.eventsAfter(tx, run.id, afterSeq);
+    const lastSeq = await this.repository.lastSeq(tx, run.id);
+    const versions = await this.repository.listVersions(tx, run.id);
     return toRunView(run, events, lastSeq, versions);
   }
 }
