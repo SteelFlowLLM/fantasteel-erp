@@ -97,7 +97,8 @@ interface DomDocument {
   createTreeWalker(root: DomElement, whatToShow: number, filter: { acceptNode(node: DomElement): number }): { currentNode: DomElement; nextNode(): DomElement | null };
 }
 
-export type PageScriptArg = { op: 'describe' } | { op: 'snapshot'; attr: string; docStart: number; next: number; maxNodes: number; maxItems: number };
+/** humanAttr: 사람이 직접 글을 넣은 칸에 붙인 속성 이름. 그 칸의 값은 '(사람이 입력함)'으로 가리고 AI에게 주지 않는다 (이슈 #433) */
+export type PageScriptArg = { op: 'describe'; humanAttr?: string } | { op: 'snapshot'; attr: string; docStart: number; next: number; maxNodes: number; maxItems: number; humanAttr?: string };
 
 export function pageScript(root: DomElement, arg: PageScriptArg): ElementInfo | PageSnapshot {
   const doc = root.ownerDocument;
@@ -172,7 +173,8 @@ export function pageScript(root: DomElement, arg: PageScriptArg): ElementInfo | 
     const isSubmitter = (tag === 'button' && (el.type || 'submit') === 'submit') || type === 'submit' || type === 'image';
     const editable = tag === 'textarea' || (tag === 'input' && !NOT_TEXT.includes(type)) || el.isContentEditable === true;
     const rawValue = tag === 'input' || tag === 'textarea' ? (el.value ?? '') : '';
-    const value = type === 'password' ? '' : tag === 'select' ? (el.selectedOptions?.[0]?.textContent ?? '') : rawValue;
+    const humanTyped = arg.humanAttr !== undefined && rawValue.length > 0 && el.hasAttribute(arg.humanAttr);
+    const value = type === 'password' ? '' : humanTyped ? '(사람이 입력함)' : tag === 'select' ? (el.selectedOptions?.[0]?.textContent ?? '') : rawValue;
     const hints = [el.getAttribute('name'), el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label'), labelText(el)].filter((h) => h).join(' ');
     return {
       tag,

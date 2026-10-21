@@ -760,7 +760,7 @@ describe('AiAssistantService', () => {
 
   describe('브라우저 사용 (이슈 #373)', () => {
     /** Chrome 없이: 세션이 부른 도구와 넘긴 질문·웹 연결을 기록하는 가짜 브라우저 도구 모음 */
-    const fakeBrowser = (available = true) => {
+    const fakeBrowser = (available = true, windowed = true) => {
       const runs: string[] = [];
       const inputs: BrowserSessionInput[] = [];
       const sessionKeys: Array<string | null> = [];
@@ -777,13 +777,13 @@ describe('AiAssistantService', () => {
       let modelImages = false;
       // 멈춘 동안 사람이 보낸 조작과, 브라우저가 돌려줄 결과 (이슈 #433)
       const humanInputs: AiAgentInput[] = [];
-      let humanOutcome: 'ok' | 'blocked' | 'closed' = 'ok';
+      let humanOutcome: 'ok' | 'blocked' | 'reverted' | 'busy' | 'closed' = 'ok';
       // [브라우저 창 열기]가 받은 열쇠와 입력, 돌려줄 결과 (이슈 #433)
       const windows: Array<{ key: string; input: BrowserSessionInput }> = [];
       let windowOutcome: 'opened' | 'already' | 'busy' = 'opened';
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
-        capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
+        capabilities: () => (available ? { available: true, windowed } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
         definitions: () => [
           { name: 'browser_open', description: '', parameters: {} },
           { name: 'browser_click', description: '', parameters: {} },
@@ -813,7 +813,7 @@ describe('AiAssistantService', () => {
                 releases += 1;
               };
             },
-            humanInput: async (input: AiAgentInput) => {
+            humanInput: async (input: AiAgentInput): Promise<'ok' | 'blocked' | 'reverted' | 'busy' | 'closed'> => {
               humanInputs.push(input);
               return humanOutcome;
             },
@@ -846,7 +846,7 @@ describe('AiAssistantService', () => {
         windows,
         setWindowOutcome: (outcome: 'opened' | 'already' | 'busy') => void (windowOutcome = outcome),
         humanInputs,
-        setHumanOutcome: (outcome: 'ok' | 'blocked' | 'closed') => void (humanOutcome = outcome),
+        setHumanOutcome: (outcome: 'ok' | 'blocked' | 'reverted' | 'busy' | 'closed') => void (humanOutcome = outcome),
         closed: () => closed,
         holds: () => holds,
         releases: () => releases,
@@ -890,6 +890,23 @@ describe('AiAssistantService', () => {
       expect(browser.closed()).toBe(1);
       // 저장한 대화의 동작 기록에 쓰도록 본 주소(쿼리 없는 호스트 + 경로)를 도구 기록에 담는다 (이슈 #433)
       expect(reply.toolCalls).toEqual([expect.objectContaining({ name: 'browser_open', url: 'news.example.kr/a' })]);
+    });
+
+    it('도구 기록(저장한 대화에도 가는)에는 브라우저 주소의 쿼리와 browser_type의 글을 남기지 않는다 (이슈 #433)', async () => {
+      const browser = fakeBrowser();
+      const { service } = setup(
+        {},
+        async (_call, index) => [call('c1', 'browser_open', { url: 'https://news.example.kr/a?token=SECRET#x' }), call('c2', 'browser_type', { ref: 'r1', text: 'hunter2 검색어', submit: true }), answer('봤어요')][index],
+        undefined,
+        undefined,
+        undefined,
+        browser.toolbox,
+      );
+      const { events, reply } = await stream(service, { question: 'https://news.example.kr/a 열어서 검색해줘', browser: true });
+      expect(reply.toolCalls.map((c) => c.arguments)).toEqual(['{"url":"news.example.kr/a"}', '{"ref":"r1","submit":true}']);
+      expect(JSON.stringify(reply.toolCalls)).not.toMatch(/SECRET|hunter2/);
+      // 화면에 실시간으로 보이는 tool_start는 원래 입력 그대로다
+      expect(JSON.stringify(events)).toContain('hunter2');
     });
 
     describe('번호 붙은 화면 사진 (이슈 #427)', () => {
@@ -1082,6 +1099,13 @@ describe('AiAssistantService', () => {
         const second = setup({}, async () => answer(''), undefined, undefined, undefined, off.toolbox);
         expect(await codeOf(second.service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
         expect(off.windows).toEqual([]);
+      });
+
+      it('서버에 창이 뜨지 않는 설정(headless)이면 열지 않고 COM-004다', async () => {
+        const headless = fakeBrowser(true, false);
+        const { service } = setup({}, async () => answer(''), undefined, undefined, undefined, headless.toolbox);
+        expect(await codeOf(service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
+        expect(headless.windows).toEqual([]);
       });
     });
 
@@ -1378,19 +1402,19 @@ describe('AiAssistantService', () => {
           expect(browser.humanInputs).toEqual([]);
         });
 
-        it('탭이 닫혔거나(COM-003) 열 수 없는 주소로 가서 비웠으면(COM-004) 알린다', async () => {
+        it('탭이 닫혔거나(COM-003) 열 수 없는 주소로 가서 비웠거나·이전 페이지로 돌아왔거나·조작이 밀렸으면(COM-004) 알린다', async () => {
           const codes: string[] = [];
           const browser = fakeBrowser();
           await run([open, answer('봤어요')], (_nth, _tool, service) => {
             void (async () => {
-              browser.setHumanOutcome('closed');
-              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
-              browser.setHumanOutcome('blocked');
-              codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              for (const outcome of ['closed', 'blocked', 'reverted', 'busy'] as const) {
+                browser.setHumanOutcome(outcome);
+                codes.push(await codeOf(service.humanInput(user, CONTROL_ID, typed)));
+              }
               service.controlAgent(user, CONTROL_ID, 'resume');
             })();
           }, { browser });
-          expect(codes).toEqual(['COM-003', 'COM-004']);
+          expect(codes).toEqual(['COM-003', 'COM-004', 'COM-004', 'COM-004']);
         });
       });
 

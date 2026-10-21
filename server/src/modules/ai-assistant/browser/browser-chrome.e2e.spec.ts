@@ -10,7 +10,7 @@ import { extractPdfIsolated } from '../web/page-extract';
 import type { LookupFunction } from '../web/ssrf-guard';
 import { tinyPdf } from '../web/fixtures/tiny-pdf';
 import { internalReferenceIn } from '../web/web-text';
-import { AssistantBrowserToolbox, type BrowserLiveFrame, type BrowserToolResult, type BrowserWebLink } from './assistant-browser-toolbox';
+import { AssistantBrowserToolbox, HUMAN_QUEUE_MAX, type BrowserLiveFrame, type BrowserToolResult, type BrowserWebLink } from './assistant-browser-toolbox';
 import { BrowserPool } from './browser-pool';
 
 const e2e = process.env.BROWSER_E2E === '1' ? describe : describe.skip;
@@ -48,6 +48,12 @@ async function serveFixtures(context: BrowserContext) {
         return html(
           `<!doctype html><title>human</title><input aria-label="칸" style="position:absolute;left:100px;top:100px;width:300px;height:40px" onkeydown="if (event.key === 'Enter') document.title = 'sent:' + this.value"><button style="position:absolute;left:100px;top:200px;width:200px;height:50px" onclick="location.href='/login'">로그인</button><button style="position:absolute;left:100px;top:300px;width:200px;height:50px" onclick="location.href='/redirect'">사내로</button><div style="height:3000px"></div>`,
         );
+      // 사람이 폼에 글을 넣고 제출하는 페이지(POST)와, 스스로 다른 페이지로 옮기는 페이지 (이슈 #433)
+      if (url.pathname === '/form')
+        return html(
+          `<!doctype html><title>form</title><form method="post" action="/submit"><input aria-label="이름" style="position:absolute;left:100px;top:100px;width:300px;height:40px"><input type="password" aria-label="암호" style="position:absolute;left:100px;top:160px;width:300px;height:40px"><button type="submit" style="position:absolute;left:100px;top:300px;width:200px;height:50px">제출</button></form>`,
+        );
+      if (url.pathname === '/jsredirect') return html(`<!doctype html><title>js</title><p>곧 옮겨 가요</p><script>setTimeout(() => { location.href = '/page/2'; }, 1500);</script>`);
       // PDF·문서 링크가 있는 페이지 (이슈 #427). 노란 표가 잘 보이게 글자만 둔다
       if (url.pathname === '/docs')
         return html(
@@ -430,9 +436,13 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     const second = toolbox().session({ question: 'https://example.test/human 열어줘', web: web() });
     try {
       await second.run(call('browser_open', { url: 'https://example.test/human' }));
-      expect(await second.humanInput({ kind: 'click', x: 200 / 1280, y: 325 / 800 })).toBe('blocked');
+      expect(await second.humanInput({ kind: 'click', x: 200 / 1280, y: 325 / 800 })).toBe('reverted');
       expect(internalHits.filter((hit) => hit.startsWith('/meta'))).toEqual([]);
-      expect(contexts.at(-1)?.pages()[0]?.url()).toBe('about:blank');
+      // 막힌 요청 하나로 탭을 비우지 않고 이전 페이지로 돌아오며, 그 이유를 AI의 다음 화면 읽기에 남긴다
+      expect(contexts.at(-1)?.pages()[0]?.url()).toBe('https://example.test/human');
+      const after = (await second.run(call('browser_snapshot'))).content;
+      expect(after).toContain('사용자가 한 이동을 막아서');
+      expect(after).toContain('사용자가 직접 조작했어요');
     } finally {
       await second.close();
     }
@@ -483,6 +493,80 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     const reopenedPage = contexts.at(-1)?.pages()[0];
     expect(reopenedPage?.url()).toBe('about:blank');
     await box.finish(box.session({ question: '닫아줘', web: web() }, 'win'), 'win', true);
+    expect(pool.activeContexts).toBe(0);
+  });
+
+  it('사람이 폼에 넣어 제출하는 것(POST)은 되고, 사람이 넣은 칸의 값은 AI의 화면 글에서 가리며, 가장자리 좌표도 받는다 (이슈 #433)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/form 열어줘', web: web() });
+    try {
+      const opened = await session.run(call('browser_open', { url: 'https://example.test/form' }));
+      // 사람이 이름 칸과 암호 칸에 글을 넣는다
+      await session.humanInput({ kind: 'click', x: 250 / 1280, y: 120 / 800 });
+      await session.humanInput({ kind: 'type', text: 'hongGildong' });
+      await session.humanInput({ kind: 'click', x: 250 / 1280, y: 180 / 800 });
+      await session.humanInput({ kind: 'type', text: 'pw-secret' });
+      const read = (await session.run(call('browser_snapshot'))).content;
+      expect(read).toMatch(/\[r\d+\] textbox "이름" value="\(사람이 입력함\)"/);
+      expect(read).not.toContain('hongGildong');
+      expect(read).not.toContain('pw-secret');
+      expect(read).toMatch(/password "암호" \(채워짐\)/);
+
+      // AI는 POST 폼을 제출하지 못하지만 사람은 한다
+      expect(errorOf(await session.run(call('browser_click', { ref: refOf({ ...opened, content: read }, 'button "제출"') })))).toContain('POST');
+      expect(served).not.toContain('POST /submit');
+      expect(await session.humanInput({ kind: 'click', x: 200 / 1280, y: 325 / 800 })).toBe('ok');
+      expect(served).toContain('POST /submit');
+      expect((await session.run(call('browser_snapshot'))).content).toContain('도착: /submit');
+      // 화면 가장자리(1, 1)를 눌러도 범위 안으로 맞춘다
+      expect(await session.humanInput({ kind: 'click', x: 1, y: 1 })).toBe('ok');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('사람 조작 대기열은 HUMAN_QUEUE_MAX개까지만 받고 넘치면 busy다 (이슈 #433)', async () => {
+    const session = toolbox().session({ question: 'https://example.test/human 열어줘', web: web() });
+    try {
+      await session.run(call('browser_open', { url: 'https://example.test/human' }));
+      const results = await Promise.all(Array.from({ length: HUMAN_QUEUE_MAX + 5 }, () => session.humanInput({ kind: 'scroll', deltaY: 10 })));
+      expect(results.filter((r) => r === 'busy')).toHaveLength(5);
+      expect(results.filter((r) => r === 'ok')).toHaveLength(HUMAN_QUEUE_MAX);
+      // 다 비운 뒤에는 다시 받는다
+      expect(await session.humanInput({ kind: 'scroll', deltaY: 10 })).toBe('ok');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('답이 이 탭을 쓰는 중에 페이지가 스스로 옮긴 곳은 지금 페이지로만 알고 열기 허용 목록에는 넣지 않는다 (이슈 #433)', async () => {
+    const link = web();
+    const session = toolbox().session({ question: 'https://example.test/jsredirect 열어줘', web: link });
+    try {
+      await session.run(call('browser_open', { url: 'https://example.test/jsredirect' }));
+      await until(() => session.currentPage()?.url === 'https://example.test/page/2', 5_000);
+      expect(session.currentPage()?.url).toBe('https://example.test/page/2');
+      expect(link.visited).not.toContain('https://example.test/page/2');
+      expect(errorOf(await session.run(call('browser_open', { url: 'https://example.test/page/2' })))).toContain('없는 주소');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('사원마다 미리 연 탭은 하나이고(새로 열면 이전 것을 닫음), 자리가 모자라도 남의 쉬는 탭을 밀어내지 않는다 (이슈 #433)', async () => {
+    const box = toolbox();
+    const open = (key: string) => box.openWindow({ question: '', web: web() }, key);
+    expect(await open('1:a')).toBe('opened');
+    expect(await open('1:b')).toBe('opened');
+    // 같은 사원의 이전 탭은 닫혔다
+    await until(() => pool.activeContexts === 1, 3_000);
+    expect(pool.activeContexts).toBe(1);
+    expect(box.openPage('1:a')).toBeNull();
+    expect(await open('2:c')).toBe('opened');
+    expect(pool.activeContexts).toBe(2);
+    // 꽉 찼다: 다른 사원(3)의 창 열기는 남의 쉬는 탭(1:b·2:c)을 닫지 않고 busy
+    expect(await open('3:d')).toBe('busy');
+    expect(pool.activeContexts).toBe(2);
+    for (const key of ['1:b', '2:c']) await box.finish(box.session({ question: '닫아줘', web: web() }, key), key, true);
     expect(pool.activeContexts).toBe(0);
   });
 

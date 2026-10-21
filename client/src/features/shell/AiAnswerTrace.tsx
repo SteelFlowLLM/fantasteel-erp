@@ -239,7 +239,7 @@ function AiBrowserTakeover({ onInput }: { onInput: (input: AiAgentInput) => void
   };
   return (
     <div role="group" aria-label="직접 조작" className="flex flex-col gap-1.5 border-t border-line pt-1.5 text-cap text-ink-3">
-      <p>멈춰 있어서 직접 할 수 있어요. 화면을 누르면 그 자리를 누르고, 입력한 글은 저장하지 않아요. [계속]을 누르면 철강맨AI가 화면을 다시 읽고 이어 가요.</p>
+      <p>멈춰 있어서 직접 할 수 있어요. 화면을 누르면 그 자리를 누르고, 입력한 글은 저장하지 않아요. 다만 화면에 보이는 내용은 철강맨AI가 읽을 수 있어요(사람이 넣은 칸의 값은 글로는 가려요). [계속]을 누르면 철강맨AI가 화면을 다시 읽고 이어 가요.</p>
       <form
         className="flex flex-wrap items-center gap-1.5"
         onSubmit={(event) => {

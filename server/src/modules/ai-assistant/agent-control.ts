@@ -111,8 +111,11 @@ export class AgentNotes {
   }
 }
 
-/** 사람이 보낸 조작을 서버 Chrome에 넣은 결과: blocked = 열 수 없는 주소로 가서 탭을 비웠다, closed = 탭이 이미 닫혔다 (이슈 #433) */
-export type HumanInputOutcome = 'ok' | 'blocked' | 'closed';
+/**
+ * 사람이 보낸 조작을 서버 Chrome에 넣은 결과 (이슈 #433): blocked = 열 수 없는 주소로 가서 탭을 비웠다,
+ * reverted = 막은 이동이라 이전 페이지로 돌아왔다, busy = 아직 넣지 못한 조작이 너무 많다, closed = 탭이 이미 닫혔다
+ */
+export type HumanInputOutcome = 'ok' | 'blocked' | 'reverted' | 'busy' | 'closed';
 export type HumanInputHandler = (input: AiAgentInput) => Promise<HumanInputOutcome>;
 
 /** 한 답의 문과 덧붙인 말, 사람이 직접 조작하는 길(브라우저를 쓰는 답만) */

@@ -231,6 +231,14 @@ describe('브라우저 요청 확인', () => {
     expect(await decide('https://news.example.kr/api', { method: 'POST', isNavigation: false })).toEqual({ allow: true });
   });
 
+  it('사람이 직접 한 이동(allowPost)이면 POST 폼도 보내지만 사내 주소·막을 호스트는 그대로 막는다 (이슈 #433)', async () => {
+    const human = (url: string, allowPost: () => boolean) => decideBrowserRequest({ url, method: 'POST', isNavigation: true }, { policy, resolve: resolver({ 'news.example.kr': ['93.184.215.14'] }), allowPost });
+    expect(await human('https://news.example.kr/login', () => true)).toEqual({ allow: true });
+    expect(await human('https://news.example.kr/login', () => false)).toMatchObject({ allow: false, reason: expect.stringContaining('POST') });
+    expect(await human('http://169.254.169.254/latest', () => true)).toMatchObject({ allow: false, reason: expect.stringContaining('내부 주소') });
+    expect(await human('https://news.example.kr:8443/x', () => true)).toMatchObject({ allow: false });
+  });
+
   it('한 컨텍스트 안에서는 같은 호스트를 한 번만 푼다', async () => {
     const calls: string[] = [];
     const cache = new Map<string, Promise<string | null>>();
@@ -376,13 +384,27 @@ describe('브라우저 모음 (Chrome 없이)', () => {
       const context = await pool.openContext(async () => fakeContext() as unknown as BrowserContext);
       // 페이지는 닫혔는지만 묻는 가짜다: 탭이 밖에서 닫혔는지 확인하는 attach·park가 쓴다 (이슈 #425)
       const fakePage = { closed: false, isClosed: () => fakePage.closed };
-      Object.assign(session as unknown as Record<string, unknown>, { context, page: fakePage, lastPage: page });
+      Object.assign(session as unknown as Record<string, unknown>, { context, page: fakePage, lastPage: page, lastPageTrusted: true });
       return { session, context: context as BrowserContext, page: fakePage };
     };
     const setup = () => {
       const pool = new BrowserPool({ env: on, platform: 'darwin', exists: chrome, launch: async () => fakeBrowser() as unknown as Browser });
       return { pool, toolbox: new AssistantBrowserToolbox(pool) };
     };
+
+    it('페이지가 스스로 옮겨 간 곳(믿을 수 없는 지금 페이지)은 다음 질문의 링크 허용 목록에 넣지 않는다 (이슈 #433)', async () => {
+      const { pool, toolbox } = setup();
+      const { session } = await openedSession(toolbox, pool, 'k1');
+      Object.assign(session as unknown as Record<string, unknown>, { lastPageTrusted: false });
+      await toolbox.finish(session, 'k1', false);
+      // 지금 페이지로는 알린다(프롬프트)
+      expect(toolbox.openPage('k1')).toEqual({ title: '요로 - 위키백과', url: 'https://ko.wikipedia.org/wiki/요로' });
+      const link = web();
+      expect(toolbox.session({ question: '다음 페이지 보여줘', web: link }, 'k1')).toBe(session);
+      expect(link.visited).toEqual([]);
+      await session.close();
+      await pool.shutdown();
+    });
 
     it('열쇠가 있고 멈추지 않았으면 탭을 열어 두고, 같은 열쇠의 다음 질문은 같은 세션을 이어 받는다', async () => {
       const { pool, toolbox } = setup();

@@ -16,6 +16,7 @@ import {
   type AiReasoningLevel,
   type AiWebSource,
 } from '@fantasteel/shared';
+import { savedTraceArguments } from '../tools/trace-arguments';
 
 /** ai_chat_message.role (CHECK ai_chat_message_role_check). 공통 코드가 아니다 */
 export const AI_CHAT_ROLE = { USER: 'USER', ASSISTANT: 'ASSISTANT' } as const;
@@ -122,7 +123,7 @@ export function traceStepsOf(toolCalls: AiAssistantReplyView['toolCalls']): AiCh
     const error = failureReason(call.resultPreview);
     return {
       name: call.name,
-      arguments: clip(call.arguments, TRACE_ARGUMENTS_MAX),
+      arguments: savedTraceArguments(call.arguments, TRACE_ARGUMENTS_MAX),
       durationMs: call.durationMs,
       ...(call.label ? { label: clip(call.label, TRACE_TEXT_MAX) } : {}),
       ...(call.url ? { url: clip(call.url, TRACE_TEXT_MAX) } : {}),
