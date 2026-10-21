@@ -65,7 +65,7 @@ export function wakeBarLine(input: WakeBarInput): { text: string; tone: WakeBarT
   if (input.status === 'paused') return { text: '탭이 숨겨져 잠깐 쉬어요', tone: 'idle' };
   if (input.status === 'error') return { text: '듣지 못하고 있어요', tone: 'problem' };
   if (input.audioBlocked) return { text: '화면을 한 번 눌러 주세요 · 브라우저가 소리 듣기를 멈춰 두었어요', tone: 'action' };
-  if (input.speaking) return { text: '철강맨이 읽어 주는 중… 듣기는 잠깐 쉬어요', tone: 'busy' };
+  if (input.speaking) return { text: '철강맨이 읽어 주는 중… 듣기는 잠깐 쉬어요 · 멈추려면 [읽기 멈춤]', tone: 'busy' };
   if (input.answering) return { text: '철강맨이 답하는 중…', tone: 'busy' };
   if (input.hearing && input.partialText) return { text: `듣는 중: '${shorten(input.partialText)}'`, tone: 'busy' };
   if (input.continuing) return { text: '계속 듣는 중… 말이 끝나면 물어봐요', tone: 'busy' };

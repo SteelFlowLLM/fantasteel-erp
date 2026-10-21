@@ -23,7 +23,8 @@ import {
   WAKE_REPLIES,
   type VoiceCommand,
 } from '@/lib/steelmanWake';
-import type { VoiceSegmentMode } from '@/lib/voiceClip';
+import { setWakeLiveLevel } from '@/lib/wakeOrb';
+import type { VoiceSegmenter, VoiceSegmentMode } from '@/lib/voiceClip';
 import { playWakeChime, speakSteelmanReply, WAKE_CHIME_MS, type SteelmanSpeakRequest } from '@/lib/steelmanVoice';
 import { speak, speechMuted, speechSupport, SPEECH_SAMPLE_KEY, stopSpeaking, useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
 import { speechTextOf } from '@/lib/steelmanSpeechText';
@@ -54,6 +55,18 @@ export function setWakeAudioContext(context: AudioContext | null): void {
 
 /** 띠링을 울린 직후이거나, 철강맨이 답을 읽는 중(막 끝나 울림이 남은 때 포함)이면 마이크가 소리를 말로 잡지 않는다 (이슈 #507) */
 export const wakeMuted = (now = Date.now()): boolean => now < muteUntil || speechMuted(now);
+
+/**
+ * 마이크 소리 묶음 하나를 받기 전에 부른다. 쉬는 중(띠링·읽는 중)이면 true: 하던 말과 미리 담아 둔 소리(preRoll)를 버리고
+ * 말소리 잡는 표시·소리 크기를 끈다. 그래서 쉬는 동안 조각이 나오지 않고, 풀린 뒤에는 쉬기 전의 소리가 앞에 붙지 않는다 (이슈 #507)
+ */
+export function restMicIfMuted(segmenter: VoiceSegmenter, now = Date.now()): boolean {
+  if (!wakeMuted(now)) return false;
+  segmenter.reset();
+  if (store().hearing) store().setHearing(false);
+  setWakeLiveLevel(0, segmenter.startThreshold);
+  return true;
+}
 
 function chime(): void {
   muteUntil = Date.now() + WAKE_CHIME_MS + 150;
@@ -152,7 +165,7 @@ function runCommand(command: Exclude<VoiceCommand, { kind: 'empty' }>, screenCon
       ask(command.question);
       return;
     case 'stop':
-      // 읽는 중이면 읽기를 멈춘다 (읽는 동안 마이크는 쉬므로, 읽기 직전에 시작한 말이나 소리 없이 쓸 수 있는 환경에서 온다)
+      // 읽는 중이면 읽기를 멈춘다. 읽는 동안 마이크는 쉬므로 이 말이 오는 것은 읽기 직전에 한 말이 읽기 시작 뒤에 받아써져 도착한 때뿐이다
       if (stopSpeaking('stopped')) store().notify('읽기를 멈췄어요');
       else if (!chat.pendingId) store().notify('멈출 답이 없어요');
       else {

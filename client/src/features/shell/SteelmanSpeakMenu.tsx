@@ -9,7 +9,7 @@ import { IconButton } from '@/components/IconButton';
 import { PopHead, PopPanel } from '@/features/shell/PopPanel';
 import { usePopover } from '@/hooks/usePopover';
 import { useSpeechVoices } from '@/hooks/useSpeechVoices';
-import { SPEECH_RATES, SPEECH_SAMPLE_KEY, useSteelmanSpeechStore, type SpeechSupport } from '@/lib/steelmanSpeech';
+import { pickVoice, SPEECH_RATES, SPEECH_SAMPLE_KEY, useSteelmanSpeechStore, type SpeechSupport } from '@/lib/steelmanSpeech';
 import { toggleSpeechSample } from '@/lib/steelmanWakeActions';
 import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 
@@ -18,7 +18,8 @@ const nearestRate = (rate: number): number => SPEECH_RATES.reduce((best, item) =
 
 export interface SpeakSettingsViewProps {
   support: SpeechSupport;
-  voices: ReadonlyArray<{ voiceURI: string; name: string; lang: string }>;
+  /** localService가 false인 목소리는 온라인(원격)이다: 목록에 (온라인)을 붙이고, 읽을 글이 밖으로 나간다고 알린다 */
+  voices: ReadonlyArray<{ voiceURI: string; name: string; lang: string; default: boolean; localService: boolean }>;
   speak: boolean;
   voiceUri: string | null;
   speechRate: number;
@@ -34,6 +35,8 @@ export interface SpeakSettingsViewProps {
 export function SpeakSettingsView({ support, voices, speak, voiceUri, speechRate, sampling, onSpeak, onVoice, onRate, onSample }: SpeakSettingsViewProps) {
   const ready = support === 'ready';
   const chosenVoice = voices.some((voice) => voice.voiceURI === voiceUri) ? voiceUri : null;
+  // 지금 읽을 목소리가 온라인이면(직접 골랐거나, 이 기기 안 목소리가 없어서) 글이 밖으로 나간다고 알린다
+  const online = ready && pickVoice(voices, voiceUri)?.localService === false;
   return (
     <div className="flex flex-col gap-3 overflow-auto px-3.5 py-3 text-sm text-ink">
       <label className="flex items-start gap-2">
@@ -65,10 +68,11 @@ export function SpeakSettingsView({ support, voices, speak, voiceUri, speechRate
           <option value="">브라우저 기본 한국어 목소리</option>
           {voices.map((voice) => (
             <option key={voice.voiceURI} value={voice.voiceURI}>
-              {voice.name} ({voice.lang})
+              {voice.name} ({voice.lang}){voice.localService ? '' : ' (온라인)'}
             </option>
           ))}
         </select>
+        {online ? <small className="text-cap text-ink-3">온라인 목소리라 읽을 글이 그 목소리를 제공하는 서비스(예: Google)로 보내져요. 이 기기 안 목소리를 고르면 밖으로 나가지 않아요.</small> : null}
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-cap text-ink-3">빠르기</span>

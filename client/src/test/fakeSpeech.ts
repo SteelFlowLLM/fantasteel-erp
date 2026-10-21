@@ -13,8 +13,9 @@ export class FakeUtterance {
   constructor(readonly text: string) {}
 }
 
-export const voice = (name: string, lang: string, extra: { default?: boolean } = {}): SpeechSynthesisVoice =>
-  ({ name, lang, voiceURI: name, default: extra.default ?? false, localService: true }) as SpeechSynthesisVoice;
+/** local: 이 기기 안에서 읽는 목소리(기본). false면 Chrome의 'Google 한국어'처럼 온라인 목소리 */
+export const voice = (name: string, lang: string, extra: { default?: boolean; local?: boolean } = {}): SpeechSynthesisVoice =>
+  ({ name, lang, voiceURI: name, default: extra.default ?? false, localService: extra.local ?? true }) as SpeechSynthesisVoice;
 
 export class FakeSpeech {
   /** 지금까지 읽으라고 맡긴 문장 전부 */

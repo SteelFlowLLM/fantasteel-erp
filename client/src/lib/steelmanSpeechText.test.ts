@@ -90,7 +90,51 @@ describe('숫자·단위가 읽기 좋게', () => {
   it('톤: 소수 셋째 자리 0을 떼고, 천 단위 쉼표를 없앤다', () => {
     expect(speakableNumbers('재고는 12.500톤이고 1,200.000톤까지 늘어요')).toBe('재고는 12.5톤이고 1200톤까지 늘어요');
     expect(speakableNumbers('0.250톤')).toBe('0.25톤');
-    expect(speakableNumbers('10.0톤')).toBe('10톤');
+    expect(speakableNumbers('10.000톤')).toBe('10톤');
+  });
+
+  it('소수 0 떼기는 정확히 소수 셋째 자리(톤)일 때만: 3.10·KS 조항 6.10·1.0%는 그대로', () => {
+    expect(speakableNumbers('3.10')).toBe('3.10');
+    expect(speakableNumbers('KS D 3503 6.10항')).toBe('KS D 3503 6.10항');
+    expect(speakableNumbers('불량률 1.0%')).toBe('불량률 1.0 퍼센트');
+    expect(speakableNumbers('12.5000톤')).toBe('12.5000톤');
+  });
+
+  it('천 단위 쉼표는 첫 묶음이 0으로 시작하지 않을 때만: 001,002,003 같은 번호는 그대로', () => {
+    expect(speakableNumbers('1,200,000원')).toBe('1200000원');
+    expect(speakableNumbers('번호 001,002,003')).toBe('번호 001,002,003');
+    expect(speakableNumbers('코드 12,3456')).toBe('코드 12,3456');
+    expect(speakableNumbers('1,234,56')).toBe('1,234,56');
+  });
+
+  it('음수는 부호를 읽는다 (재고 부족에서 -가 빠지면 뜻이 뒤집힌다)', () => {
+    expect(speakableNumbers('재고가 -1200톤이에요')).toBe('재고가 마이너스 1200톤이에요');
+    expect(speakableNumbers('재고가 -1,200.500톤')).toBe('재고가 마이너스 1200.5톤');
+    expect(speakableNumbers('(-5℃)')).toBe('(마이너스 5도)');
+    expect(speakableNumbers('−3 밀리미터')).toBe('마이너스 3 밀리미터');
+  });
+
+  it('채번·날짜·번호의 하이픈은 부호로 읽지 않는다', () => {
+    expect(speakableNumbers('수주 SO-2610-0001, HR-01, 02-123-4567')).toBe('수주 SO-2610-0001, HR-01, 02-123-4567');
+    expect(speakableNumbers('납기 2026-10-22')).toBe('납기 2026년 10월 22일');
+    expect(speakableNumbers('10-20톤')).toBe('10-20톤');
+  });
+
+  it('범위(~)는 "에서"로 읽는다: 숫자·톤·%·℃·T·mm·월·일·날짜 뒤에서도', () => {
+    expect(speakableNumbers('1,200톤~1,500톤')).toBe('1200톤에서 1500톤');
+    expect(speakableNumbers('5%~10%')).toBe('5 퍼센트에서 10 퍼센트');
+    expect(speakableNumbers('3.2T~6.0T')).toBe('3.2T에서 6.0T');
+    expect(speakableNumbers('2mm ~ 5mm')).toBe('2 밀리미터에서 5 밀리미터');
+    expect(speakableNumbers('1200℃~1300℃')).toBe('1200도에서 1300도');
+    expect(speakableNumbers('10월 22일~30일')).toBe('10월 22일에서 30일');
+    expect(speakableNumbers('2026-10-22~2026-10-30')).toBe('2026년 10월 22일에서 2026년 10월 30일');
+    expect(speakableNumbers('-5℃~-1℃')).toBe('마이너스 5도에서 마이너스 1도');
+    expect(speakableNumbers('10~20톤')).toBe('10에서 20톤');
+  });
+
+  it('범위가 아닌 ~(숫자가 뒤에 없음)는 그냥 뺀다', () => {
+    expect(speakableNumbers('약 10톤~ 정도예요')).toBe('약 10톤 정도예요');
+    expect(speakableNumbers('좋아요~')).toBe('좋아요 ');
   });
 
   it('mm·cm·kg·m·%·℃·ton을 한글 단위로', () => {
@@ -110,7 +154,6 @@ describe('숫자·단위가 읽기 좋게', () => {
   it('날짜·범위·치수를 읽는 대로', () => {
     expect(speakableNumbers('납기는 2026-10-22예요')).toBe('납기는 2026년 10월 22일예요');
     expect(speakableNumbers('2026.01.05')).toBe('2026년 1월 5일');
-    expect(speakableNumbers('10~20톤')).toBe('10에서 20톤');
     expect(speakableNumbers('1219×2438')).toBe('1219 곱하기 2438');
     expect(speakableNumbers('열연 → 냉연')).toBe('열연, 냉연');
   });
@@ -121,7 +164,7 @@ describe('숫자·단위가 읽기 좋게', () => {
   });
 
   it('전체 흐름: 목록 항목의 단위까지 한 번에', () => {
-    expect(speechTextOf('- 열연 코일 HR-01: 12.500톤\n- 두께 3.2mm, 불량률 1.0%').text).toBe('열연 코일 HR-01: 12.5톤.\n두께 3.2 밀리미터, 불량률 1 퍼센트.');
+    expect(speechTextOf('- 열연 코일 HR-01: 12.500톤\n- 두께 3.2mm, 불량률 1.0%').text).toBe('열연 코일 HR-01: 12.5톤.\n두께 3.2 밀리미터, 불량률 1.0 퍼센트.');
   });
 });
 

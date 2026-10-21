@@ -5,8 +5,9 @@ import { CONVERSATION_FOLLOW_UP_MS } from '@/lib/steelmanWake';
 import { SPEECH_TAIL_MS, stopSpeaking, useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
 import { setSteelmanSpeaker } from '@/lib/steelmanVoice';
 import { SPEAK_MORE_ON_SCREEN } from '@/lib/steelmanSpeechText';
-import { afterVoiceAnswer, handleText, resetSpeechNoticeForTest, speakVoiceReply, toggleReadAloud, toggleSpeechSample, wakeMuted, watchSteelmanSpeech } from '@/lib/steelmanWakeActions';
+import { afterVoiceAnswer, handleText, resetSpeechNoticeForTest, restMicIfMuted, speakVoiceReply, toggleReadAloud, toggleSpeechSample, wakeMuted, watchSteelmanSpeech } from '@/lib/steelmanWakeActions';
 import { steelmanWakeKeyOf } from '@/lib/steelmanWakePreference';
+import { VoiceSegmenter } from '@/lib/voiceClip';
 import { useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
 import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 import { FakeSpeech, voice } from '@/test/fakeSpeech';
@@ -136,7 +137,7 @@ describe('읽는 중 멈추기', () => {
     expect(wake().called?.until).toBe(Date.now() + CONVERSATION_FOLLOW_UP_MS);
   });
 
-  it('"철강맨, 멈춰"는 읽기를 멈춘다 (답을 멈추는 명령은 부르지 않는다)', () => {
+  it('읽기 직전에 말한 "멈춰"가 읽기 시작 뒤 도착해도 읽기를 멈춘다 (답을 멈추는 명령은 부르지 않는다)', () => {
     afterVoiceAnswer(answer);
     handleText('철강맨, 멈춰', false);
     expect(fake.cancelCount).toBe(1);
@@ -169,6 +170,84 @@ describe('읽는 중 멈추기', () => {
   it('부르기를 꺼도 읽기 단추로 읽던 것은 계속 읽는다', () => {
     toggleReadAloud('e1', '읽는 글이에요.');
     useSteelmanWakeStore.setState({ enabled: false });
+    expect(fake.cancelCount).toBe(0);
+    expect(useSteelmanSpeechStore.getState().speaking?.key).toBe('e1');
+  });
+});
+
+describe('마이크 소리 묶음 쉬기', () => {
+  const RATE = 16_000;
+  const frame = (level: number) => new Float32Array(2048).fill(level);
+  const newSegmenter = () => {
+    const segmenter = new VoiceSegmenter({ sampleRate: RATE, minStartRms: 0.015 });
+    // 켠 뒤 배경을 배우는 시간(0.5초)을 지나고, 조용한 소리가 앞에 미리 담겨(preRoll) 있게 한다
+    for (let i = 0; i < 6; i += 1) segmenter.feed(frame(0.001));
+    return segmenter;
+  };
+
+  it('읽는 동안은 큰 소리를 넣어도 조각이 나오지 않고 말소리 표시도 꺼진다', () => {
+    const segmenter = newSegmenter();
+    afterVoiceAnswer(answer);
+    useSteelmanWakeStore.setState({ hearing: true });
+    let clip: Float32Array | null = null;
+    let rested = 0;
+    // 말소리(0.3) 40묶음 + 조용함 40묶음: 쉬지 않았다면 조각 하나가 나온다
+    for (const level of [...Array<number>(40).fill(0.3), ...Array<number>(40).fill(0.001)]) {
+      if (restMicIfMuted(segmenter)) rested += 1;
+      else clip = segmenter.feed(frame(level)) ?? clip;
+    }
+    expect(rested).toBe(80);
+    expect(clip).toBeNull();
+    expect(segmenter.speaking).toBe(false);
+    expect(wake().hearing).toBe(false);
+  });
+
+  it('쉬지 않을 때는 같은 소리에서 조각이 나온다 (위 시험의 대조)', () => {
+    const segmenter = newSegmenter();
+    let clip: Float32Array | null = null;
+    for (const level of [...Array<number>(40).fill(0.3), ...Array<number>(40).fill(0.001)]) {
+      expect(restMicIfMuted(segmenter)).toBe(false);
+      clip = segmenter.feed(frame(level)) ?? clip;
+    }
+    expect(clip).not.toBeNull();
+  });
+
+  it('다 읽고 울림이 가라앉아 풀린 뒤에는 쉬기 전에 담아 둔 소리(preRoll)가 말 앞에 붙지 않는다', () => {
+    const segmenter = newSegmenter();
+    afterVoiceAnswer(answer);
+    expect(restMicIfMuted(segmenter)).toBe(true);
+    fake.finishAll();
+    expect(restMicIfMuted(segmenter)).toBe(true);
+    vi.advanceTimersByTime(SPEECH_TAIL_MS + 1);
+    expect(restMicIfMuted(segmenter)).toBe(false);
+    segmenter.feed(frame(0.3));
+    expect(segmenter.speaking).toBe(true);
+    // preRoll이 비어 있어 하던 말은 이 묶음 하나뿐이다
+    expect(segmenter.snapshot()?.length).toBe(2048);
+
+    // 대조: 쉬지 않았다면 미리 담아 둔 조용한 소리가 앞에 붙는다
+    const control = newSegmenter();
+    control.feed(frame(0.3));
+    expect(control.snapshot()?.length).toBeGreaterThan(2048);
+  });
+});
+
+describe('읽기 지켜보기 정리', () => {
+  it('지켜보기를 그만두면 읽던 것을 끊고 이어 말하기는 열지 않으며, 울림이 가라앉으면 마이크가 풀린다', () => {
+    afterVoiceAnswer(answer);
+    expect(wakeMuted()).toBe(true);
+    unwatch();
+    expect(useSteelmanSpeechStore.getState().speaking).toBeNull();
+    expect(fake.cancelCount).toBe(1);
+    expect(wake().called).toBeNull();
+    vi.advanceTimersByTime(SPEECH_TAIL_MS + 1);
+    expect(wakeMuted()).toBe(false);
+  });
+
+  it('그만둔 뒤에는 새 질문이 시작돼도 읽던 것을 끊지 않는다', () => {
+    unwatch();
+    toggleReadAloud('e1', '글이에요.');
+    useAiChatStore.getState().addQuestion('q2', '다른 질문');
     expect(fake.cancelCount).toBe(0);
     expect(useSteelmanSpeechStore.getState().speaking?.key).toBe('e1');
   });

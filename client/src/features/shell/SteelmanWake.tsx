@@ -19,7 +19,7 @@ import { microphoneErrorMessage } from '@/lib/meetingAudio';
 import { setSteelmanSpeaker } from '@/lib/steelmanVoice';
 import { koreanVoices, stopSpeaking, useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
 import { COMMAND_QUIET_MS } from '@/lib/steelmanWake';
-import { afterVoiceAnswer, executeApproved, flushCommandPrefix, setWakeAudioContext, speakVoiceReply, transcribe, transcribePartial, turnOnScreenControl, wakeMuted, watchSteelmanSpeech, type HeardClip } from '@/lib/steelmanWakeActions';
+import { afterVoiceAnswer, executeApproved, flushCommandPrefix, setWakeAudioContext, speakVoiceReply, transcribe, restMicIfMuted, transcribePartial, turnOnScreenControl, watchSteelmanSpeech, type HeardClip } from '@/lib/steelmanWakeActions';
 import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
 import { setWakeLiveLevel } from '@/lib/wakeOrb';
 import { WakeCalledOrb, WakeLevelMeter, WakeOrb } from '@/features/shell/WakeOrb';
@@ -111,13 +111,8 @@ export function SteelmanWake() {
       let partialAt = 0;
       let quietSince: number | null = null;
       processor.onaudioprocess = (event) => {
-        if (wakeMuted()) {
-          // 띠링이나 철강맨이 읽는 소리 동안은 듣지 않는다. 읽는 동안은 길어서 말소리 잡는 표시와 소리 크기 막대도 쉬게 한다 (이슈 #507)
-          segmenter.reset();
-          if (store().hearing) store().setHearing(false);
-          setWakeLiveLevel(0, segmenter.startThreshold);
-          return;
-        }
+        // 띠링이나 철강맨이 읽는 소리 동안은 듣지 않는다 (이슈 #507)
+        if (restMicIfMuted(segmenter)) return;
         const wake = store();
         // 민감도는 듣는 중에도 바꿀 수 있다 (마이크를 다시 열지 않는다)
         segmenter.minStartRms = WAKE_START_RMS[wake.sensitivity];

@@ -41,8 +41,8 @@ const settings = (patch: Partial<SpeakSettingsViewProps> = {}) =>
     createElement(SpeakSettingsView, {
       support: 'ready',
       voices: [
-        { voiceURI: 'Yuna', name: 'Yuna', lang: 'ko-KR' },
-        { voiceURI: 'Google 한국어', name: 'Google 한국어', lang: 'ko_KR' },
+        { voiceURI: 'Yuna', name: 'Yuna', lang: 'ko-KR', default: true, localService: true },
+        { voiceURI: 'Google 한국어', name: 'Google 한국어', lang: 'ko_KR', default: false, localService: true },
       ],
       speak: true,
       voiceUri: null,
@@ -67,6 +67,20 @@ describe('읽어 주기 설정 창', () => {
     for (const label of ['느리게', '보통', '빠르게', '아주 빠르게']) expect(html).toContain(label);
     expect(html).toContain('들어 보기');
     expect(html).not.toContain('한국어 목소리가 없어서');
+  });
+
+  it('온라인 목소리에는 (온라인)이 붙고, 지금 읽을 목소리가 온라인이면 글이 밖으로 나간다고 알린다', () => {
+    const online = { voiceURI: 'Google 한국어', name: 'Google 한국어', lang: 'ko_KR', default: true, localService: false };
+    const local = { voiceURI: 'Heami', name: 'Heami', lang: 'ko-KR', default: false, localService: true };
+    const both = settings({ voices: [online, local] });
+    expect(both).toContain('Google 한국어 (ko_KR) (온라인)');
+    expect(both).toContain('Heami (ko-KR)<');
+    // 이 기기 안 목소리가 있으면 자동 선택이 그쪽이라 알림이 없다
+    expect(both).not.toContain('밖으로 나가지 않아요');
+    // 직접 고르면 알린다
+    expect(settings({ voices: [online, local], voiceUri: 'Google 한국어' })).toContain('읽을 글이 그 목소리를 제공하는 서비스');
+    // 이 기기 안 목소리가 없어 온라인뿐이어도 알린다
+    expect(settings({ voices: [online] })).toContain('읽을 글이 그 목소리를 제공하는 서비스');
   });
 
   it('저장한 목소리와 빠르기가 고른 값으로 보이고, 이 브라우저에 없는 목소리는 기본으로 보인다', () => {

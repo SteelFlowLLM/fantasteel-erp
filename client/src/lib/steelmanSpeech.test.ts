@@ -33,13 +33,30 @@ describe('목소리 고르기', () => {
     expect(speechSupport()).toBe('unsupported');
   });
 
-  it('저장한 목소리가 있으면 그것, 없으면 기본 한국어 목소리, 그것도 없으면 첫 목소리', () => {
+  it('저장한 목소리가 있으면 그것, 없으면 이 기기 안 기본 한국어 목소리, 그것도 없으면 첫 한국어 목소리', () => {
     const voices = koreanVoices();
     expect(pickVoice(voices, 'Google 한국어')?.name).toBe('Google 한국어');
     expect(pickVoice(voices, '다른 기기의 목소리')?.name).toBe('Yuna');
     expect(pickVoice(voices, null)?.name).toBe('Yuna');
     expect(pickVoice([voices[1]], null)?.name).toBe('Google 한국어');
     expect(pickVoice([], null)).toBeNull();
+  });
+
+  it('온라인 목소리(Google 한국어)는 이 기기 안 목소리가 없을 때만 저절로 고른다: 기본 표시가 온라인에 붙어 있어도 안 쓴다', () => {
+    const online = voice('Google 한국어', 'ko_KR', { default: true, local: false });
+    const local = voice('Heami', 'ko-KR');
+    expect(pickVoice([online, local], null)?.name).toBe('Heami');
+    expect(pickVoice([online, local], '다른 기기의 목소리')?.name).toBe('Heami');
+    expect(pickVoice([local, voice('Yuna', 'ko-KR', { default: true })], null)?.name).toBe('Yuna');
+    expect(pickVoice([online], null)?.name).toBe('Google 한국어');
+    // 사용자가 직접 고른 온라인 목소리는 그대로 쓴다
+    expect(pickVoice([online, local], 'Google 한국어')?.name).toBe('Google 한국어');
+  });
+
+  it('읽기도 같은 규칙으로 이 기기 안 목소리를 쓴다', () => {
+    fake.voices = [voice('Google 한국어', 'ko_KR', { default: true, local: false }), voice('Yuna', 'ko-KR')];
+    speak(request('글이에요.'));
+    expect(fake.spoken[0].voice?.name).toBe('Yuna');
   });
 
   it('빠르기는 브라우저가 받는 범위(0.5~2)로 맞춘다', () => {
@@ -154,11 +171,14 @@ describe('브라우저가 읽지 못할 때', () => {
     expect(speechMuted()).toBe(false);
   });
 
-  it('읽다가 끝 신호가 오지 않으면 한계 시간 뒤 끝낸다', () => {
+  it('읽다가 끝 신호가 오지 않으면 한계 시간(10초 + 글자당 0.2초 ÷ 빠르기) 뒤 끝내 마이크를 풀어 준다', () => {
+    const text = '가'.repeat(100);
     const done = vi.fn();
-    speak(request('글이에요.', done));
+    speak({ ...request(text, done), rate: 2 });
     fake.startCurrent();
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(10_000 + 100 * 100 - 1);
+    expect(done).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
     expect(done).toHaveBeenCalledWith('ended');
     expect(fake.cancelCount).toBe(1);
     expect(useSteelmanSpeechStore.getState().speaking).toBeNull();

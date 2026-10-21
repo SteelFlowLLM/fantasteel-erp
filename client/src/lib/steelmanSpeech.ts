@@ -9,8 +9,8 @@ import { splitForSpeech } from '@/lib/steelmanSpeechText';
 export const SPEECH_TAIL_MS = 500;
 /** 읽기 시작 신호(start)가 이 시간 안에 안 오면 브라우저가 막은 것으로 보고 그만둔다 (가정값) */
 const START_TIMEOUT_MS = 8_000;
-/** 문장 하나가 끝나지 않을 때 기다리는 한계: 기본 20초 + 글자당 0.3초를 빠르기로 나눈 시간 (가정값) */
-const chunkLimitMs = (chars: number, rate: number): number => 20_000 + (chars * 300) / rate;
+/** 문장 하나가 끝나지 않을 때 기다리는 한계: 기본 10초 + 글자당 0.2초를 빠르기로 나눈 시간 (가정값, 140자면 38초). 끝 신호가 안 오면 그동안 마이크가 쉬므로 길게 잡지 않는다 */
+const chunkLimitMs = (chars: number, rate: number): number => 10_000 + (chars * 200) / rate;
 
 export const SPEECH_RATES = [
   { value: 0.8, label: '느리게' },
@@ -51,9 +51,22 @@ export function speechSupport(): SpeechSupport {
   return koreanVoices().length ? 'ready' : 'no-korean';
 }
 
-/** 저장한 목소리가 이 브라우저에 있으면 그것, 없으면(다른 기기에서 고른 값) 브라우저 기본 한국어 목소리, 그것도 없으면 첫 한국어 목소리 */
-export function pickVoice(voices: readonly SpeechSynthesisVoice[], voiceUri: string | null): SpeechSynthesisVoice | null {
-  return (voiceUri ? voices.find((voice) => voice.voiceURI === voiceUri) : undefined) ?? voices.find((voice) => voice.default) ?? voices[0] ?? null;
+export interface PickableVoice {
+  voiceURI: string;
+  default: boolean;
+  /** false면 온라인(원격) 목소리: 읽을 글이 그 목소리를 제공하는 서비스로 간다 (Chrome의 'Google 한국어' 등) */
+  localService: boolean;
+}
+
+/**
+ * 저장한 목소리가 이 브라우저에 있으면 그것(사용자가 고른 것). 없으면(다른 기기에서 고른 값·고른 적 없음) 이 기기 안에서 읽는 목소리(localService)를 먼저
+ * — 기본 표시된 것, 아니면 첫 번째 — 고르고, 그런 목소리가 하나도 없을 때만 온라인 목소리를 쓴다. 답 글이 밖으로 나가는 목소리를 저절로 고르지 않으려는 것이다
+ */
+export function pickVoice<T extends PickableVoice>(voices: readonly T[], voiceUri: string | null): T | null {
+  const saved = voiceUri ? voices.find((voice) => voice.voiceURI === voiceUri) : undefined;
+  if (saved) return saved;
+  const local = voices.filter((voice) => voice.localService);
+  return local.find((voice) => voice.default) ?? local[0] ?? voices.find((voice) => voice.default) ?? voices[0] ?? null;
 }
 
 export const clampSpeechRate = (rate: number): number => (Number.isFinite(rate) ? Math.min(2, Math.max(0.5, rate)) : DEFAULT_SPEECH_RATE);
