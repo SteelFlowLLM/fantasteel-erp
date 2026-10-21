@@ -228,6 +228,7 @@ describe('작업 로그 도구 (get_business_events)', () => {
     reason: null,
     isAiAssisted: false,
     actionDraftId: null,
+    isAgentCandidate: false,
     messageId: null,
     chatRoomId: null,
     occurredAt: '2026-10-01T00:30:00.000Z',

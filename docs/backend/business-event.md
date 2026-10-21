@@ -40,7 +40,7 @@
 
 - 조건: `salesOrderId`(수주 타임라인), `lotId`(LOT 타임라인, `business_event_lot`), `businessEventType`, `actorType`(USER·SYSTEM), `targetType`(ERD 테이블명), `from`·`to`(`YYYY-MM-DD`, 서울 날짜로 시작·끝 포함), `sort`(`asc` 기본 = 이력 재현, `desc` = 최신순, 작업 로그 전체·대시보드 최근 로그용), `page`·`size`(기본 20, 최대 100). `actorType`·`targetType`·`sort`는 작업 로그 화면 필터·최신순 목록을 위해 더했다(문서 권장 조건 밖, 2026-10-07 확인).
 - 정렬: 발생 시각 → 이벤트 id(같은 방향). 없는 날짜(2월 30일)·시작일 > 종료일은 COM-004.
-- 응답: 번호, 유형·표시명(`BUSINESS_EVENT_TYPE_LABEL`), 주체 구분·사원 id·사원번호·이름(SYSTEM이면 null), 대상 테이블·id, 수주 id·번호, 변경 전·후(jsonb 그대로), 사유(코드와 문장을 합친 원문), AI 경유, 초안·메시지 id, 원본 메시지의 채팅방 id(`chatRoomId`, 화면이 메신저의 그 메시지로 이동할 때 쓴다. BP-LOG-01 원본 메시지 연결, 2026-10-14), 발생 시각, LOT(id·번호·유형). 대상 번호(예: 대상 수주의 번호)는 테이블마다 따로 읽어야 해서 넣지 않았다(화면이 변경 전·후로 보여 준다).
+- 응답: 번호, 유형·표시명(`BUSINESS_EVENT_TYPE_LABEL`), 주체 구분·사원 id·사원번호·이름(SYSTEM이면 null), 대상 테이블·id, 수주 id·번호, 변경 전·후(jsonb 그대로), 사유(코드와 문장을 합친 원문), AI 경유, 초안·메시지 id, 초안이 Agent 대응 후보인지(`isAgentCandidate`, 메시지 없는 초안의 payload에 `agent`가 있으면 true. 화면은 메시지 초안 상세 대신 `/agent`로 잇는다, #509), 원본 메시지의 채팅방 id(`chatRoomId`, 화면이 메신저의 그 메시지로 이동할 때 쓴다. BP-LOG-01 원본 메시지 연결, 2026-10-14), 발생 시각, LOT(id·번호·유형). 대상 번호(예: 대상 수주의 번호)는 테이블마다 따로 읽어야 해서 넣지 않았다(화면이 변경 전·후로 보여 준다).
 - 조인이 `business_event_lot` 하나라 TypedSQL 없이 Prisma로 이벤트 페이지를 읽고, 사원·수주·메시지(채팅방 id)·LOT은 id로 따로 읽는다.
 
 **기록 규칙(모든 모듈)**
