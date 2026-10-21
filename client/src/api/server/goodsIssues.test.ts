@@ -41,7 +41,7 @@ const request = (over: Partial<ShipmentRequestDetail> = {}): ShipmentRequestDeta
       itemCode: 'CL-SS275-8x1500',
       itemName: '열연코일 SS275 8x1500',
       itemType: 'COIL',
-      theoreticalWeightTon: '20.000',
+      theoreticalWeightTon: '18.840',
       steelGradeCode: 'SS275',
       requestQty: 2,
       unallocatedQty: 0,
@@ -107,8 +107,8 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
       return respond(c);
     });
     const view = await goodsIssueApi.detail(70);
-    expect(view.totalWeightTon).toBe('40.000');
-    expect(view.lines[0]).toMatchObject({ itemType: 'COIL', theoreticalWeightTon: '20.000', orderedQty: 0, shippedQty: 0, salesOrderLineNo: 0 });
+    expect(view.totalWeightTon).toBe('37.680');
+    expect(view.lines[0]).toMatchObject({ itemType: 'COIL', theoreticalWeightTon: '18.840', orderedQty: 0, shippedQty: 0, salesOrderLineNo: 0 });
     expect(view.problems.map((p) => p.code)).toEqual(['INV-002']);
     expect(calls.filter((c) => c.path === '/items')).toHaveLength(0);
   });
@@ -134,7 +134,7 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
       [72, 'REQUESTED', false],
       [71, 'ISSUED', false],
     ]);
-    expect(rows[2]).toMatchObject({ issuedEmployeeName: '신현우', totalAllocatedQty: 1, totalWeightTon: '40.000', problems: [] });
+    expect(rows[2]).toMatchObject({ issuedEmployeeName: '신현우', totalAllocatedQty: 1, totalWeightTon: '37.680', problems: [] });
     expect(rows[1].problems.map((p) => p.code)).toEqual(['INV-001']);
     expect(calls.some((c) => c.path.startsWith('/lots') || c.path === '/shipment-requests/73')).toBe(false);
     // 목록은 상세를 함께 받고, 건마다 상세를 따로 부르지 않는다 (N+1 없음, 이슈 #476)
@@ -149,7 +149,7 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.logisticsHead, (c) => (c.path === '/shipment-requests' ? ok(page([issued])) : respond(c)));
     const rows = await goodsIssueApi.queue();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ shipmentRequestId: 71, totalWeightTon: '40.000', problems: [] });
+    expect(rows[0]).toMatchObject({ shipmentRequestId: 71, totalWeightTon: '37.680', problems: [] });
     expect(calls.map((c) => c.path)).toEqual(['/shipment-requests']);
   });
 
