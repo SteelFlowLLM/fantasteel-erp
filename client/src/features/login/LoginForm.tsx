@@ -37,7 +37,8 @@ export function LoginForm() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (ready) login.mutate({ employeeNo: employeeNo.trim(), password });
+    // 응답을 기다리는 중의 두 번째 제출은 보내지 않는다: 서버는 확인 중인 시도도 실패 횟수에 세므로(이슈 #497), 앞서 4번 틀린 사원이 맞는 비밀번호를 동시에 두 번 보내면 둘째가 한도(5번) 밖이라 잠긴 것처럼 보인다
+    if (ready && !login.isPending) login.mutate({ employeeNo: employeeNo.trim(), password });
   };
 
   return (
