@@ -86,6 +86,18 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(rooms[1]).toMatchObject({ lastMessage: null, lastMessagePreview: null });
   });
 
+  it('배지·최근 방·방 목록이 한꺼번에 불러도 GET /chat-rooms는 한 번이고, 끝난 뒤의 다시 읽기는 새로 부른다 (이슈 #476)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => (c.path === '/chat-rooms' ? ok([listItem(2, 3), listItem(1, 1)]) : undefined));
+    const [unread, recent, rooms] = await Promise.all([messengerApi.countUnread(0), messengerApi.listRecentRooms(0, 5), messengerApi.listRooms()]);
+    expect(unread).toBe(4);
+    expect(recent.map((r) => r.id)).toEqual([2, 1]);
+    expect(rooms.map((r) => r.id)).toEqual([2, 1]);
+    expect(calls.filter((c) => c.path === '/chat-rooms')).toHaveLength(1);
+    // 응답이 끝난 뒤(예: 읽음 처리 뒤)의 다시 읽기는 변경 전 응답을 받지 않도록 새로 부른다
+    await messengerApi.countUnread(0);
+    expect(calls.filter((c) => c.path === '/chat-rooms')).toHaveLength(2);
+  });
+
   it('알림을 끈 방은 배지 합계에서 빠지고, 방 설정은 PATCH /chat-rooms/:id/settings로 보낸다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
       if (c.path === '/chat-rooms') return ok([listItem(2, 3, { muted: true }), listItem(1, 1, { pinnedAt: AT })]);

@@ -100,3 +100,6 @@ export interface ReservationReconciliationView {
   /** 일치하지 않은 규격만 (규격 코드 순) */
   rows: ReservationReconciliationRow[];
 }
+
+/** 배정 변경·해제 사유의 최대 글자 수. 서버 DTO(ReleaseAllocationDto)와 화면 입력칸이 같은 값을 쓴다 (이슈 #476, 전에는 화면 500자·서버 200자라 201~500자는 400이었다) */
+export const ALLOCATION_REASON_MAX = 200;

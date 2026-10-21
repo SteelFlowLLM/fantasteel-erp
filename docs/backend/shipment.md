@@ -28,7 +28,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
+| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색). `withItems=true`(이슈 #476)면 줄마다 상세(`GET :id`와 같은 값: 품목·배정·출고 확정자)를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 N+1을 없앤다 |
 | POST | `shipment-requests` | 출하요청 등록 | `SHIPMENT_REQUEST_MANAGE` USE | 출하 가능 매수 초과 시 SHP-002 |
 | GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |

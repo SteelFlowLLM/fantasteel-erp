@@ -4,6 +4,7 @@
 // - 변경 = 기존 해제 + 새 배정 한 번에, 사유 필수(ALLOCATION_CHANGE). 해제는 사유 선택.
 // - 다시 불러온 데이터가 바뀌면(일괄 확정·다른 탭) 펼친 패널·고른 LOT을 새 상태에 맞춘다(panelAfterRefresh).
 // - 생산완료일은 날짜로 보인다(C-5-12). 추천은 저장하지 않고, 확정할 때 작업 로그(ALLOCATION_RECOMMENDED)에 남는다.
+import { ALLOCATION_REASON_MAX } from '@fantasteel/shared';
 import { useState } from 'react';
 import { PERMISSION, PRODUCT_QTY_UNIT } from '@/codes';
 import type { ShipmentLineDetail, ShipmentLotOption } from '@/api/shipmentRequests';
@@ -23,7 +24,8 @@ import { useChangeShipmentAllocation, useConfirmShipmentAllocations, useReleaseS
 import { fmtActorAt, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-const REASON_MAX = 500;
+// 서버 DTO와 같은 값 (shared). 전에는 500자라 201~500자를 쓰면 서버가 400으로 거절했다
+const REASON_MAX = ALLOCATION_REASON_MAX;
 
 export interface AllocationLineCardProps {
   shipmentRequestId: number;

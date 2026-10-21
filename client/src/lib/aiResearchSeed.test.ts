@@ -33,6 +33,15 @@ describe('웹 검색 답에서 심층 조사로', () => {
     expect(start?.seed.answer).toHaveLength(4000);
     expect(start?.seed.sources).toHaveLength(10);
   });
+
+  it('주소가 서버 상한(2000자)을 넘는 출처는 잘라 넘기지 않고 뺀다 (서버가 400으로 조사를 못 만들지 않게, 이슈 #476)', () => {
+    const long = { title: '긴 주소', url: `https://example.com/${'a'.repeat(2000)}` };
+    const exact = { title: '딱 상한', url: `https://example.com/${'b'.repeat(2000 - 'https://example.com/'.length)}` };
+    const start = webResearchStartAt([user('긴 질문', true), answer('답', [long, exact, { title: '짧은 주소', url: 'https://example.com/ok' }])], 1);
+    expect(start?.seed.sources.map((s) => s.title)).toEqual(['딱 상한', '짧은 주소']);
+    // 쓸 출처가 모두 빠지면 심층 조사로 넘기지 않는다
+    expect(webResearchStartAt([user('긴 질문', true), answer('답', [long])], 1)).toBeNull();
+  });
 });
 
 describe('심층 조사 카드가 넘길 웹 검색 결과', () => {

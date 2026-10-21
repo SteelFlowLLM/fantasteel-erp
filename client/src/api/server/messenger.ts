@@ -34,7 +34,25 @@ import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import { imageMimeOf } from '@/features/messenger/lib/attachment';
 import { findMentions } from '@/features/messenger/lib/messageText';
 
-const listRaw = () => serverRequest<ServerRoomListItem[]>('GET', '/chat-rooms');
+/**
+ * 채팅방 목록. 안 읽은 수 배지·최근 방 드롭다운·방 목록 세 조회가 같은 `/chat-rooms`를 한꺼번에 불러서(소켓 이벤트마다 셋이 같이 다시 읽는다)
+ * 막 시작해 아직 오는 중인 요청이 있으면 그 응답을 함께 쓴다 (이슈 #476). 변경 직후의 다시 읽기가 변경 전 응답을 받지 않게
+ * 요청을 시작한 지 SHARE_WINDOW_MS가 지났거나 이미 끝났으면 새로 부른다.
+ */
+const LIST_SHARE_WINDOW_MS = 100;
+let listInFlight: { promise: Promise<ServerRoomListItem[]>; startedAt: number } | null = null;
+const listRaw = (): Promise<ServerRoomListItem[]> => {
+  const now = Date.now();
+  if (listInFlight && now - listInFlight.startedAt <= LIST_SHARE_WINDOW_MS) return listInFlight.promise;
+  const promise = serverRequest<ServerRoomListItem[]>('GET', '/chat-rooms');
+  const entry = { promise, startedAt: now };
+  listInFlight = entry;
+  const clear = () => {
+    if (listInFlight === entry) listInFlight = null;
+  };
+  promise.then(clear, clear);
+  return promise;
+};
 const roomRaw = (chatRoomId: number) => serverRequest<ServerRoomDetail>('GET', `/chat-rooms/${chatRoomId}`);
 
 const previewOf = (room: ServerRoomListItem): ChatRoomPreview => ({
