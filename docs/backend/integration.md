@@ -162,7 +162,7 @@
 **실제 Notion으로 확인하기**
 1. `server/.env`에 `INTEGRATION_SECRET_KEY`를 넣고 서버를 띄운다(`npm run dev`, 서버 8787·화면 5173).
 2. 관리자(1503001)로 로그인한 쿠키로 `PUT /api/v1/integrations/notion/settings {"parentPage":"<Notion 페이지 링크>"}`.
-3. `POST /api/v1/integrations/notion/connect` → 응답 `authorizationUrl`을 **같은 PC의 브라우저**에서 열어 Notion 계정으로 허용한다. 콜백 뒤 `http://localhost:5173/admin/integrations?integration=notion&result=connected`로 돌아온다(화면이 아직 없으면 주소창의 쿼리만 확인).
+3. `POST /api/v1/integrations/notion/connect` → 응답 `authorizationUrl`을 **같은 PC의 브라우저**에서 열어 Notion 계정으로 허용한다. 다른 PC가 IP로 화면을 쓰더라도 연결(허용)은 서버 PC에서 한다: 콜백 주소가 `SERVER_PUBLIC_URL`(기본 `http://localhost:8787/api/v1`)이라 다른 PC에서 허용하면 그 PC의 localhost로 돌아가 실패한다. 연결한 뒤에는 모든 PC가 같은 연결을 쓴다. 콜백 뒤 `http://localhost:5173/admin/integrations?integration=notion&result=connected`로 돌아온다(화면이 아직 없으면 주소창의 쿼리만 확인).
 4. `POST /api/v1/integrations/notion/test` → `ok: true`, `missingTools: []`.
 5. 확정한 회의록으로 `POST /api/v1/meeting-minutes/:id/notion-export` → 응답의 `notionPageUrl`을 열어 페이지를 확인한다.
 

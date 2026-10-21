@@ -103,4 +103,12 @@ describe('서버 호출 계층 (api/http.ts)', () => {
     await expect(serverRequest('GET', '/x')).rejects.toMatchObject({ code: 'COM-002' });
     expect(calls).toHaveLength(0);
   });
+
+  it('화면과 같은 주소의 /api/v1로 부르고, 서버가 꺼져 화면 서버가 JSON 아닌 5xx로 답하면 연결할 수 없다고 보인다 (이슈 #440)', async () => {
+    resetServerSessionForTest(SEED_EMPLOYEE_NO.sales);
+    actAs(SEED_EMPLOYEE_NO.sales);
+    useServer(() => new Response('Internal Server Error', { status: 500, headers: { 'content-type': 'text/plain' } }));
+    await expect(serverRequest('GET', '/x')).rejects.toThrow('서버에 연결할 수 없어요. 서버가 켜져 있는지 확인해 주세요');
+    expect(calls[0].url).toBe('/api/v1/x');
+  });
 });

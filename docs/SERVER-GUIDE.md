@@ -22,6 +22,7 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 - 서버만: `npm run dev:server` (DB가 떠 있어야 한다).
 - 테스트 계정: 시드 사원 15명, 비밀번호 모두 `fantasteel`. 사원번호는 [backend/seed.md](backend/seed.md).
 - 로그인: `POST /api/v1/auth/login {"employeeNo":"2103003","password":"fantasteel"}` → `access_token` httpOnly 쿠키. 이후 요청은 쿠키를 함께 보낸다(curl은 `-c`/`-b`).
+- 다른 PC에서 쓰기: 화면이 같은 주소의 `/api/v1`로 부르고 화면 서버(Next)가 이 서버로 넘기므로(이슈 #440) 다른 PC는 `http://<이 PC IP>:5173`만 열면 된다. http로 들어오면 브라우저가 Secure 쿠키를 저장하지 않으니 `server/.env`에 `COOKIE_SECURE=false`를 넣는다(운영 https에서는 넣지 않는다).
 
 | 명령 | 하는 일 |
 |---|---|
