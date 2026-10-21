@@ -1,7 +1,7 @@
 // DB 없이 도는 STT 단위 테스트: 응답 해석, WAV 머리글, 요청 형식, 오류 문구, 연결 확인, 주소 검증.
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { SttClient, SttRequestError, connectFailureMessage, parseTranscript, silentWav } from './stt.client';
+import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttService } from './stt.service';
 import { isBlockedSttHost, redactUrl } from './stt-url';
@@ -164,10 +164,13 @@ describe('연결 실패 이유', () => {
 
   it('404는 주소 끝 /v1 확인을 안내하고, 서버가 준 이유(모델 없음 포함)를 함께 보인다', async () => {
     const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const noModels = () => new Response('', { status: 404 });
+    fetchMock.mockResolvedValueOnce(noModels());
     fetchMock.mockResolvedValueOnce(new Response('<html>not found</html>', { status: 404, statusText: 'Not Found' }));
     const plain = await failureOf(new SttClient().checkConnection(endpoint, null));
     expect(plain.message).toContain('…/v1');
     expect(plain.message).not.toContain('<html>');
+    fetchMock.mockResolvedValueOnce(noModels());
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "The model 'whisper-9' does not exist", code: 'model_not_found' } }), { status: 404 }));
     const missing = await failureOf(new SttClient().checkConnection(endpoint, 'whisper-9'));
     expect(missing.message).toContain("The model 'whisper-9' does not exist");
@@ -185,6 +188,67 @@ describe('연결 실패 이유', () => {
   });
 });
 
+describe('모델 목록 (GET /models)', () => {
+  const sidecarList = {
+    object: 'list',
+    data: [
+      { id: 'whisper-pyannote', object: 'model', label: '받아쓰기 + 화자 분리 (whisper + pyannote)', diarization: true, available: true, note: null },
+      { id: 'vibevoice', object: 'model', label: 'VibeVoice', diarization: true, available: false, note: '모델 폴더가 없어요' },
+    ],
+  };
+
+  it('사이드카의 이름·화자 분리·준비 상태를 읽고, OpenAI 목록은 음성 모델만 남긴다', () => {
+    expect(parseModelList(sidecarList)).toEqual([
+      { id: 'whisper-pyannote', label: '받아쓰기 + 화자 분리 (whisper + pyannote)', diarization: true, available: true, note: null },
+      { id: 'vibevoice', label: 'VibeVoice', diarization: true, available: false, note: '모델 폴더가 없어요' },
+    ]);
+    const openai = { data: [{ id: 'gpt-4.1' }, { id: 'whisper-1' }, { id: 'gpt-4o-transcribe' }, { id: 'tts-1' }, { nope: 1 }] };
+    expect(parseModelList(openai).map((m) => m.id)).toEqual(['whisper-1', 'gpt-4o-transcribe']);
+    expect(parseModelList({ error: 'x' })).toEqual([]);
+  });
+
+  it('연결 확인은 목록을 먼저 받고(키 포함) 무음을 보낸 뒤 목록을 돌려준다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(sidecarList), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ text: '' }), { status: 200 }));
+    const models = await new SttClient().checkConnection({ baseUrl: 'http://100.87.40.116:8001/v1', apiKey: 'fsv-key' }, 'whisper-pyannote');
+    expect(models.map((m) => m.id)).toEqual(['whisper-pyannote', 'vibevoice']);
+    const [listUrl, listInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(listUrl).toBe('http://100.87.40.116:8001/v1/models');
+    expect(listInit.headers).toEqual({ authorization: 'Bearer fsv-key' });
+    expect(listInit.redirect).toBe('error');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://100.87.40.116:8001/v1/audio/transcriptions');
+    fetchMock.mockRestore();
+  });
+
+  it('whisper.cpp 단독처럼 /models가 없으면 빈 목록으로 무음 확인만 한다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ text: '' }), { status: 200 }));
+    expect(await new SttClient().checkConnection(endpoint, null)).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockRestore();
+  });
+
+  it('키가 필요한데 없거나 틀리면 무음을 보내지 않고 바로 알린다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'API 키가 맞지 않아요' } }), { status: 401 }));
+    expect((await failureOf(new SttClient().checkConnection(endpoint, null))).message).toContain('API 키가 필요해요');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 401 }));
+    expect((await failureOf(new SttClient().checkConnection({ ...endpoint, apiKey: 'wrong' }, null))).message).toContain('API 키가 맞지 않거나');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockRestore();
+  });
+
+  it('닿지 않으면 목록 단계에서 바로 이유를 준다', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    fetchMock.mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
+    expect((await failureOf(new SttClient().checkConnection(endpoint, null))).message).toContain('연결을 거절했어요');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockRestore();
+  });
+});
+
 describe('SttService.testConnection', () => {
   const stored = { baseUrl: 'http://127.0.0.1:8000/v1', model: 'saved-model', apiKey: 'saved-key' };
   const setup = (check: jest.Mock) => {
@@ -193,7 +257,7 @@ describe('SttService.testConnection', () => {
   };
 
   it('화면에서 입력한 모델·키로 확인하고, 없으면 저장된 값을 쓴다', async () => {
-    const check = jest.fn().mockResolvedValue(undefined);
+    const check = jest.fn().mockResolvedValue([]);
     const service = setup(check);
     await service.testConnection({ baseUrl: 'http://100.101.102.103:8001/v1/', model: 'whisper-pyannote', apiKey: 'typed' });
     expect(check).toHaveBeenLastCalledWith({ baseUrl: 'http://100.101.102.103:8001/v1', apiKey: 'typed' }, 'whisper-pyannote');
@@ -204,7 +268,7 @@ describe('SttService.testConnection', () => {
   });
 
   it('저장된 키는 저장된 주소와 같은 출처로만 보낸다', async () => {
-    const check = jest.fn().mockResolvedValue(undefined);
+    const check = jest.fn().mockResolvedValue([]);
     const service = setup(check);
     await service.testConnection({ baseUrl: 'http://127.0.0.1:8000/v1/' });
     expect(check).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'saved-key' }), 'saved-model');
@@ -229,7 +293,7 @@ describe('SttService.testConnection', () => {
 
   it('실패는 오류가 아니라 이유가 담긴 결과로 돌려준다', async () => {
     const result = await setup(jest.fn().mockRejectedValue(new SttRequestError('꺼져 있어요'))).testConnection({ baseUrl: 'http://127.0.0.1:8000/v1' });
-    expect(result).toMatchObject({ connected: false, latencyMs: null, error: '꺼져 있어요' });
+    expect(result).toMatchObject({ connected: false, latencyMs: null, error: '꺼져 있어요', models: [] });
   });
 });
 

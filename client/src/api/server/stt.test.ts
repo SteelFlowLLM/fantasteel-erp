@@ -11,7 +11,7 @@ const settings: SttSettingsView = { baseUrl: 'http://127.0.0.1:8000/v1', model: 
 
 describe('음성 인식 연결 설정 (api/stt.ts)', () => {
   it('설정 조회·저장·연결 확인은 /stt 경로로 보낸다', async () => {
-    const connection: SttConnectionView = { connected: true, baseUrl: settings.baseUrl, latencyMs: 120, error: null };
+    const connection: SttConnectionView = { connected: true, baseUrl: settings.baseUrl, latencyMs: 120, error: null, models: [] };
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => {
       if (c.path === '/stt/settings') return ok(settings);
       if (c.path === '/stt/connection-test') return ok(connection);

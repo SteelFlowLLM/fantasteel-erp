@@ -1,5 +1,5 @@
-// 음성 인식 연결 안내 (문서에 없는 기능, 이슈 #432): LLM을 API로 바꿔도 음성 설정은 따로라는 것, 다른 PC의 음성 서버에 붙는 법.
-// 실행 명령은 docs/voice2erp/voice-server-connect.md와 같다.
+// 음성 인식 연결 안내 (문서에 없는 기능, 이슈 #432·#445): LLM을 API로 바꿔도 음성 설정은 따로라는 것, 내 Mac의 음성 서버를 켜고 다른 PC에서 붙는 법.
+// 실행 명령은 docs/voice2erp/voice-server-connect.md·tools/voice-sidecar/start.sh와 같다.
 import { Card, CardBody, CardHead } from '@/components/Card';
 
 export function SttGuideCard() {
@@ -14,24 +14,23 @@ export function SttGuideCard() {
           주소는 ERP 서버가 부르므로 127.0.0.1은 <b>ERP 서버를 돌리는 컴퓨터</b>예요. 사용자 PC에는 음성 서버가 없어도 돼요.
         </p>
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-ink-2">다른 PC의 음성 서버에 붙으려면</span>
+          <span className="text-xs font-medium text-ink-2">내 Mac에서 음성 서버 켜기</span>
           <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-xs">
             <li>
-              그 PC에서 서버를 <b>0.0.0.0</b>으로 띄워요 (whisper-server는 <code>--host 0.0.0.0</code>, 화자 분리 서버는 <code>SIDECAR_HOST=0.0.0.0</code>).
-            </li>
-            <li>그 PC 방화벽에서 포트(8000·8001)를 열어요. 같은 망에서만 열고 인터넷에는 열지 않아요.</li>
-            <li>
-              같은 망이면 <b>192.168.x.x</b>(또는 10.x) 주소를 써요.
+              Mac의 <b>터미널</b>을 열고 저장소 폴더에서 <code>tools/voice-sidecar/start.sh</code>를 실행해요. 창은 켜 둬요 (끄기: Ctrl+C).
             </li>
             <li>
-              집·출장처럼 다른 망이면 두 컴퓨터에 <b>Tailscale</b>을 깔고 <b>100.x.x.x</b> 또는 <b>이름.ts.net</b> 주소를 써요. 방화벽을 열 필요가 없어서 더 안전해요.
+              터미널에 나온 <b>주소</b>와 <b>ERP에 넣을 API 키</b>를 위 카드에 넣어요. 같은 망이면 192.168.x.x, 다른 망이면 Tailscale(100.x.x.x) 주소예요.
             </li>
             <li>
-              위 카드에서 <b>연결 확인</b> → <b>저장</b> → <b>파일로 시험</b>.
+              <b>연결 확인</b> → 모델 고르기(화자 분리가 필요하면 &lsquo;받아쓰기 + 화자 분리&rsquo;) → <b>저장</b> → <b>파일로 시험</b>.
             </li>
           </ol>
         </div>
-        <p className="text-xs text-ink-3">음성 서버에는 로그인이 없어요. 회의 내용이 오가니 믿는 망(같은 망·Tailscale)에서만 열어요.</p>
+        <p className="text-xs text-ink-3">
+          ERP 서버도 이 Mac이면 <code>start.sh --local</code>로 켜고 주소 <code>http://127.0.0.1:8001/v1</code>, 키는 비워 둬요. 다른 망에서는 두 컴퓨터 모두 Tailscale에
+          로그인해야 해요. 회의 음성이 오가니 Tailscale Funnel·공유기 포트 열기로 인터넷에 내놓지 않아요.
+        </p>
       </CardBody>
     </Card>
   );

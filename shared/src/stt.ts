@@ -1,5 +1,5 @@
 // 음성 인식(STT) 연결 설정 (문서에 없는 기능, Voice2ERP 1단계). LLM 연결과 같은 구조:
-// 지금은 whisper.cpp 로컬 서버, 나중에 API 키를 쓰는 OpenAI 호환 서버. 둘 다 /v1/audio/transcriptions를 쓴다.
+// whisper.cpp 로컬 서버, API 키로 여는 내 Mac의 화자 분리 사이드카(이슈 #445), OpenAI 호환 음성 API. 모두 /v1/audio/transcriptions를 쓴다.
 
 /** whisper.cpp whisper-server 기본 주소 (README의 실행 예시와 같은 포트) */
 export const STT_DEFAULT_BASE_URL = 'http://127.0.0.1:8000/v1';
@@ -31,6 +31,19 @@ export interface SttConnectionTestInput {
   apiKey?: string;
 }
 
+/** 음성 서버가 GET /models로 알려 준 모델. 사이드카는 화면용 이름·화자 분리 여부·준비 상태를 함께 준다 */
+export interface SttModelOption {
+  id: string;
+  /** 화면에 보일 이름 (예: '받아쓰기 + 화자 분리 (whisper + pyannote)'). 서버가 주지 않으면 null */
+  label: string | null;
+  /** 화자를 나누는 모델인가. 모르면 null */
+  diarization: boolean | null;
+  /** 지금 바로 쓸 수 있는가 (엔진이 꺼졌거나 모델 파일이 없으면 false). 모르면 null */
+  available: boolean | null;
+  /** 쓸 수 없는 이유 등 */
+  note: string | null;
+}
+
 export interface SttConnectionView {
   connected: boolean;
   baseUrl: string;
@@ -38,6 +51,8 @@ export interface SttConnectionView {
   latencyMs: number | null;
   /** 연결 실패 이유 (화면에 그대로 보인다) */
   error: string | null;
+  /** 음성 서버가 알려 준 모델 목록. /models가 없는 서버(whisper.cpp 단독)나 실패면 빈 배열 */
+  models: SttModelOption[];
 }
 
 export interface SttTranscribeTestView {

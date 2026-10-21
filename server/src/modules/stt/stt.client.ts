@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import type { SttModelOption } from '@fantasteel/shared';
 import { redactUrl } from './stt-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
 const SIDECAR_MODELS = new Set(['whisper-pyannote', 'vibevoice']);
+/** 모델 목록은 바로 와야 한다. 무음 확인은 whisper가 모델을 처음 올리는 동안 오래 걸릴 수 있다 */
+const MODEL_LIST_TIMEOUT_MS = 10_000;
+const MAX_MODEL_OPTIONS = 50;
 const TRANSCRIBE_TIMEOUT_MS = 60 * 60_000;
-const CONNECTION_TEST_TIMEOUT_MS = 30_000;
+const CONNECTION_TEST_TIMEOUT_MS = 90_000;
 const DEFAULT_MODEL = 'whisper-1';
 
 export interface SttEndpoint {
@@ -93,16 +97,72 @@ export class SttClient {
   }
 
   /**
-   * /models 같은 확인용 경로가 없는 서버가 많아서, 1초짜리 무음 WAV를 실제로 보내 본다.
+   * GET {baseUrl}/models. 화자 분리 사이드카·OpenAI는 주고 whisper.cpp 단독은 없다(404 → 빈 목록).
+   * 닿지 않거나 키가 틀리면 바로 실패로 끝내 무음 확인까지 한 번 더 기다리지 않게 한다.
+   */
+  async listModels(endpoint: SttEndpoint): Promise<SttModelOption[]> {
+    const url = `${redactUrl(normalizeBaseUrl(endpoint.baseUrl))}/models`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
+        redirect: 'error',
+        signal: AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') return [];
+      throw new SttRequestError(connectFailureMessage(url, error));
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new SttRequestError(endpoint.apiKey ? 'API 키가 맞지 않거나 권한이 없어요' : '이 음성 서버는 API 키가 필요해요. 음성 서버를 켠 터미널에 보이는 키를 넣어 주세요');
+    }
+    if (!res.ok) return [];
+    try {
+      return parseModelList(await res.json());
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 모델 목록을 받아 본 뒤 1초짜리 무음 WAV를 실제로 보내 본다 (목록만으로는 받아쓰기 엔진이 켜졌는지 모른다).
    * HTTP 성공이면 연결된 것이고 인식된 글이 비어도 괜찮다.
    */
-  async checkConnection(endpoint: SttEndpoint, model: string | null): Promise<void> {
+  async checkConnection(endpoint: SttEndpoint, model: string | null): Promise<SttModelOption[]> {
+    const models = await this.listModels(endpoint);
     await this.transcribe(
       endpoint,
       { audio: silentWav(), fileName: 'silence.wav', mimeType: 'audio/wav', model },
       CONNECTION_TEST_TIMEOUT_MS,
     );
+    return models;
   }
+}
+
+/**
+ * OpenAI 형식 { data: [{ id, … }] }. 사이드카는 label·diarization·available·note를 더 준다.
+ * OpenAI처럼 음성과 상관없는 모델까지 주는 곳은 이름에 whisper·transcribe·asr·stt가 든 것만 남긴다.
+ */
+export function parseModelList(body: unknown): SttModelOption[] {
+  const root = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  const rows = Array.isArray(root.data) ? root.data : [];
+  const options: SttModelOption[] = [];
+  for (const raw of rows) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    if (typeof row.id !== 'string' || !row.id.trim()) continue;
+    const label = typeof row.label === 'string' && row.label.trim() ? row.label.trim().slice(0, 100) : null;
+    if (label === null && !/whisper|transcribe|asr|stt/i.test(row.id)) continue;
+    options.push({
+      id: row.id.trim().slice(0, 100),
+      label,
+      diarization: typeof row.diarization === 'boolean' ? row.diarization : null,
+      available: typeof row.available === 'boolean' ? row.available : null,
+      note: typeof row.note === 'string' && row.note.trim() ? row.note.trim().slice(0, 200) : null,
+    });
+    if (options.length >= MAX_MODEL_OPTIONS) break;
+  }
+  return options;
 }
 
 /**
