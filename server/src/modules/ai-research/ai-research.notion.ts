@@ -17,10 +17,12 @@ const QUOTE = /^>[ \t]?(.*)$/;
 /** 서버가 붙인 출처 목록 제목 (Notion에는 다시 만들어 넣는다) */
 const SOURCE_HEADING = /^##[ \t]*출처[ \t]*$/m;
 
-/** 내보낼 페이지 제목: 계획 제목, 없으면 질문 */
-export function researchNotionTitle(view: AiResearchRunView): string {
+/** 내보낼 페이지 제목: 계획 제목, 없으면 질문. 판이 있으면 뒤에 ' · 2판' (다시 내보낸 페이지를 구별한다, 이슈 #521) */
+export function researchNotionTitle(view: Pick<AiResearchRunView, 'id' | 'title' | 'question'>, versionLabel: string | null = null): string {
+  const suffix = versionLabel ? ` · ${versionLabel}` : '';
   const title = oneLine(view.title ?? '') || oneLine(view.question) || `심층 조사 #${view.id}`;
-  return title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
+  const max = TITLE_MAX - suffix.length;
+  return `${title.length > max ? `${title.slice(0, max - 1)}…` : title}${suffix}`;
 }
 
 /**
@@ -77,12 +79,12 @@ const linkUrl = (url: string): string => url.replace(/[()\s<>]/g, (c) => encodeU
  * 완료한 조사를 Notion 마크다운으로: 보고서(줄 안 태그·링크 막음) → 차트 표 → 출처 목록(http·https만, 서버가 모은 주소만 링크) → 내보낸 곳.
  * 제목은 페이지 속성으로 따로 넣으므로 본문에 쓰지 않는다.
  */
-export function buildResearchNotionMarkdown(view: AiResearchRunView): string {
+export function buildResearchNotionMarkdown(view: Pick<AiResearchRunView, 'id' | 'question' | 'report' | 'charts' | 'sources'>, versionLabel: string | null = null): string {
   const lines: string[] = [`**질문** ${inline(view.question)}`, '', reportToNotion(view.report ?? '') || '보고서가 없어요.'];
   if (view.charts.length) lines.push('', '## 차트', ...view.charts.flatMap((c) => ['', chartToNotionTable(c)]));
   // 우리 ERP 조회·사내 지식 출처는 주소가 없어 링크 없는 글로 넣는다. 본문의 [n]이 가리킬 곳이 있어야 한다
   const sources = view.sources.filter((s) => isErpSourceUrl(s.url) || urlKey(s.url) !== null);
   if (sources.length) lines.push('', '## 출처', ...sources.map((s) => (isErpSourceUrl(s.url) ? `- \\[${s.id}\\] ${inline(s.title)}` : `- \\[${s.id}\\] [${linkLabel(s.title)}](${linkUrl(s.url)})`)));
-  lines.push('', '---', `FantaSteel ERP 심층 조사 #${view.id}에서 내보냈어요.`);
+  lines.push('', '---', `FantaSteel ERP 심층 조사 #${view.id}${versionLabel ? `의 ${versionLabel} 보고서` : ''}에서 내보냈어요.`);
   return lines.join('\n');
 }

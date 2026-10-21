@@ -1122,7 +1122,6 @@ model AiResearchRun {
   schedule AiResearchSchedule? @relation("AiResearchRunSchedule", fields: [scheduleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   events AiResearchEvent[] @relation("AiResearchEventRun")
   reportVersions AiResearchReportVersion[] @relation("AiResearchReportVersionRun")
-  repeatSchedule AiResearchSchedule? @relation("AiResearchScheduleRun")
   lastRunOfSchedules AiResearchSchedule[] @relation("AiResearchScheduleLastRun")
 
   @@index([employeeId, createdAt])
@@ -1164,7 +1163,8 @@ model AiResearchReportVersion {
 /// 심층 조사 반복 실행 (이슈 #521, 문서에 없는 기능). 완료한 조사를 매일·매주 고른 요일의 정한 시각(Asia/Seoul)에 같은 질문·계획으로 새 조사로 다시 한다
 model AiResearchSchedule {
   id Int @id @default(autoincrement())
-  runId Int @unique @map("run_id") /// 반복을 건 조사 (질문·계획·예산·먼저 알아본 것을 복사한다)
+  /// 반복을 건 조사 (질문·계획·예산·먼저 알아본 것을 복사한다). Prisma 관계(1:1)로 두지 않는다: relationMode=prisma에서 1:1 관계가 있으면 조사 여러 행을 한 번에 바꿀 때 Prisma 7이 실패한다(Expected zero or one element)
+  runId Int @unique @map("run_id")
   employeeId Int @map("employee_id") /// 반복을 건 사원. 켜진 반복은 사원당 5개까지
   frequency String @db.VarChar /// DAILY·WEEKLY (CHECK, 공통 코드 아님)
   weekdays Int[] @default([]) /// WEEKLY의 요일 1=월 … 7=일. DAILY는 빈 배열
@@ -1177,7 +1177,6 @@ model AiResearchSchedule {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  run AiResearchRun @relation("AiResearchScheduleRun", fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   employee Employee @relation("AiResearchScheduleEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   lastRun AiResearchRun? @relation("AiResearchScheduleLastRun", fields: [lastRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   runs AiResearchRun[] @relation("AiResearchRunSchedule")

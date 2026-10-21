@@ -1,8 +1,8 @@
-import { Body, Controller, Get, HttpCode, Injectable, Param, Patch, Post, Put, Query, type PipeTransform } from '@nestjs/common';
-import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchReportVersionView, AiResearchRunSummaryView, AiResearchRunView, AuthUser, PageResult } from '@fantasteel/shared';
+import { Body, Controller, Delete, Get, HttpCode, Injectable, Param, Patch, Post, Put, Query, StreamableFile, type PipeTransform } from '@nestjs/common';
+import type { AiResearchCapabilities, AiResearchNotionExportResult, AiResearchPlanSuggestion, AiResearchReportVersionView, AiResearchRunSummaryView, AiResearchRunView, AiResearchScheduleView, AuthUser, PageResult } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { INT4_MAX, CreateAiResearchRunDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, CreateAiResearchRevisionDto, RenameAiResearchRunDto, StartAiResearchRunDto, SuggestAiResearchPlanDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
+import { INT4_MAX, AiResearchPdfQuery, CreateAiResearchRunDto, ExportAiResearchNotionDto, GetAiResearchRunQuery, ListAiResearchRunsQuery, CreateAiResearchRevisionDto, RenameAiResearchRunDto, SetAiResearchScheduleDto, StartAiResearchRunDto, SuggestAiResearchPlanDto, UpdateAiResearchPlanDto } from './dto/ai-research.dto';
 import { AiResearchService } from './ai-research.service';
 
 /**
@@ -90,10 +90,41 @@ export class AiResearchController {
     return this.service.getVersion(user, id, version);
   }
 
+  /** 보고서 PDF (이슈 #521). ?version=이 없으면 지금 보고서. 응답 포맷으로 감싸지 않고 파일 그대로 보낸다 */
+  @Get('ai-research/runs/:id/pdf')
+  async reportPdf(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Query() query: AiResearchPdfQuery): Promise<StreamableFile> {
+    const { fileName, content } = await this.service.reportPdf(user, id, query.version);
+    return new StreamableFile(content, {
+      type: 'application/pdf',
+      // 한글 이름은 filename*로, 옛 브라우저용 이름은 영문으로
+      disposition: `attachment; filename="research-${id}.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      length: content.length,
+    });
+  }
+
+  /** Notion 내보내기. version을 주면 그 판, 없으면 지금 판. 다시 내보내면 새 페이지를 만든다 (이슈 #521) */
   @Post('ai-research/runs/:id/notion-export')
   @HttpCode(200)
-  exportToNotion(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchNotionExportResult> {
-    return this.service.exportToNotion(user, id);
+  exportToNotion(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: ExportAiResearchNotionDto): Promise<AiResearchNotionExportResult> {
+    return this.service.exportToNotion(user, id, dto.version);
+  }
+
+  /** 내 반복 목록 (이슈 #521) */
+  @Get('ai-research/schedules')
+  listSchedules(@CurrentUser() user: AuthUser): Promise<AiResearchScheduleView[]> {
+    return this.service.listSchedules(user);
+  }
+
+  /** 반복 걸기·바꾸기 (이슈 #521). 반복이 만든 조사면 그 반복을 바꾼다 */
+  @Put('ai-research/runs/:id/schedule')
+  setSchedule(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number, @Body() dto: SetAiResearchScheduleDto): Promise<AiResearchScheduleView> {
+    return this.service.setSchedule(user, id, dto);
+  }
+
+  /** 반복 끄기 (지우지 않고 꺼 둔다) */
+  @Delete('ai-research/runs/:id/schedule')
+  disableSchedule(@CurrentUser() user: AuthUser, @Param('id', ResearchRunIdPipe) id: number): Promise<AiResearchScheduleView> {
+    return this.service.disableSchedule(user, id);
   }
 
   @Post('ai-research/runs/:id/cancel')

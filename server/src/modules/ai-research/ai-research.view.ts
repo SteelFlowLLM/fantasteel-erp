@@ -1,7 +1,19 @@
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchEventView, type AiResearchReportVersionSummary, type AiResearchReportVersionView, type AiResearchRunSummaryView, type AiResearchRunView, type AiResearchStatus } from '@fantasteel/shared';
+import {
+  AI_RESEARCH_LIMITS,
+  AI_RESEARCH_SCHEDULE_FREQUENCY,
+  AI_RESEARCH_STATUS,
+  type AiResearchEventView,
+  type AiResearchReportVersionSummary,
+  type AiResearchReportVersionView,
+  type AiResearchRunSummaryView,
+  type AiResearchRunView,
+  type AiResearchScheduleView,
+  type AiResearchStatus,
+} from '@fantasteel/shared';
 import type { AiResearchEvent, AiResearchReportVersion, AiResearchRun } from '../../generated/prisma/client';
 import type { listAiResearchRuns } from '../../generated/prisma/sql';
 import { storedCharts } from './ai-research.charts';
+import type { ScheduleWithRun } from './ai-research.repository';
 import { canExtend, isInternalSource, readBudget, storedAudit, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 
 export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSummaryView {
@@ -16,6 +28,25 @@ export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSumma
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     finishedAt: row.finished_at?.toISOString() ?? null,
+    repeating: row.repeating ?? false,
+    fromSchedule: row.from_schedule ?? false,
+  };
+}
+
+/** 반복 하나 (이슈 #521). 제목은 반복을 건 조사의 계획 제목, 없으면 질문 */
+export function toScheduleView(row: ScheduleWithRun): AiResearchScheduleView {
+  return {
+    id: row.id,
+    runId: row.runId,
+    title: row.title,
+    frequency: row.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.WEEKLY ? AI_RESEARCH_SCHEDULE_FREQUENCY.WEEKLY : AI_RESEARCH_SCHEDULE_FREQUENCY.DAILY,
+    weekdays: row.weekdays,
+    time: row.runTime,
+    enabled: row.enabled,
+    nextRunAt: row.nextRunAt?.toISOString() ?? null,
+    lastRunAt: row.lastRunAt?.toISOString() ?? null,
+    lastRunId: row.lastRunId,
+    lastSkipReason: row.lastSkipReason,
   };
 }
 
@@ -30,8 +61,8 @@ export function toVersionView(row: AiResearchReportVersion): AiResearchReportVer
 /** 판이 상한 아래인지 (보고서 고치기·판이 생긴 뒤의 더 조사하기는 판을 하나 더 남긴다) */
 export const hasVersionRoom = (versionCount: number): boolean => versionCount < AI_RESEARCH_LIMITS.maxReportVersions;
 
-/** 출처 본문(readText)은 크고 웹에서 온 글이라 보내지 않고 읽었는지만 알린다. versions는 보고서 판(본문 없이) */
-export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq: number, versions: VersionRow[] = []): AiResearchRunView {
+/** 출처 본문(readText)은 크고 웹에서 온 글이라 보내지 않고 읽었는지만 알린다. versions는 보고서 판(본문 없이), schedule은 이 조사의 반복(이슈 #521) */
+export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq: number, versions: VersionRow[] = [], schedule: ScheduleWithRun | null = null): AiResearchRunView {
   const status = row.status as AiResearchStatus;
   const plan = storedPlan(row.plan);
   const budget = readBudget(row.budget);
@@ -50,6 +81,8 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    repeating: schedule !== null && schedule.runId === row.id && schedule.enabled,
+    fromSchedule: row.scheduleId !== null,
     seed: storedSeed(row.seed),
     plan,
     planRevision: row.planRevision,
@@ -66,6 +99,8 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     canExtend: canExtend({ status, stepsUsed: row.stepsUsed, budget, state }) && (versions.length === 0 || hasVersionRoom(versions.length)),
     charts: storedCharts(row.charts),
     notionPageUrl: row.notionPageUrl,
+    notionExportedVersion: row.notionExportedVersion,
+    schedule: schedule ? toScheduleView(schedule) : null,
     versions: versions.map(toVersionSummary),
     // 일꾼이 고치는 중일 때만 (취소·실패로 끝났으면 남은 부탁을 보이지 않는다)
     pendingRevision: state?.revision && (status === AI_RESEARCH_STATUS.QUEUED || status === AI_RESEARCH_STATUS.RUNNING) ? { version: state.revision.version, instruction: state.revision.instruction, search: state.revision.search } : null,

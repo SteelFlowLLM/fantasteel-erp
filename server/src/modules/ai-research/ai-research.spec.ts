@@ -20,6 +20,7 @@ import { findCompanyKnowledge, ResearchKnowledgeFinder } from './ai-research.kno
 import { AiResearchRunner } from './ai-research.runner';
 import { REVISION_REPORT_RULE, SEED_PLAN_RULE } from './ai-research.prompt';
 import { SEED_SOURCE_SNIPPET } from './ai-research.rules';
+import { extractPdfIsolated } from '../ai-assistant/web/page-extract';
 
 /** parseError: JSON이 깨진 답, error: LLM 연결 실패, hang: 끊길(abort) 때까지 기다림 */
 type Turn = Record<string, unknown> | { parseError: string } | { error: string; kind?: LlmFailureKind } | { hang: true };
@@ -733,7 +734,7 @@ describe('심층 조사 — 차트·알림·Notion·보고서에 대해 묻기 (
     expect(custom.body.data.budget).toEqual({ maxSteps: 30, maxSources: 100 });
   });
 
-  it('Notion 내보내기: 완료한 내 조사만, 한 번만, 연결 오류는 INT-00x 그대로', async () => {
+  it('Notion 내보내기: 완료한 내 조사만, 다시 내보내면 새 페이지(이슈 #521), 내보내는 중이면 RES-007, 연결 오류는 INT-00x 그대로', async () => {
     const waiting = await planned('아직 계획');
     expect((await call('POST', `/ai-research/runs/${waiting.id}/notion-export`, ownerCookie)).body.error?.code).toBe('RES-002');
     const done = await completed('내보낼 조사');
@@ -752,10 +753,50 @@ describe('심층 조사 — 차트·알림·Notion·보고서에 대해 묻기 (
     expect(notionPages[0].title).toBe(done.title);
     expect(notionPages[0].content).toContain('전기로가 적다 \\[1\\].');
     expect(notionPages[0].content).toContain(`## 출처\n- \\[1\\] [전기로 배출 통계 개요](${done.sources[0].url})`);
-    const again = await call('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie);
-    expect(again.status).toBe(409);
-    expect(again.body.error?.code).toBe('RES-007');
-    expect(notionPages).toHaveLength(1);
+    expect(exported.body.data.run.notionExportedVersion).toBeNull();
+
+    // 다시 내보내면 새 페이지를 만들고 마지막 주소를 남긴다 (이슈 #521)
+    const again = await call<AiResearchNotionExportResult>('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie, {});
+    expect(again.status).toBe(200);
+    expect(again.body.data.notionPageUrl).toBe('https://www.notion.so/research-2');
+    expect((await getRun(done.id)).notionPageUrl).toBe('https://www.notion.so/research-2');
+    expect(notionPages).toHaveLength(2);
+
+    // 다른 곳에서 내보내는 중(잡은 지 5분 안)이면 RES-007, 오래된 잡기는 다시 잡는다
+    await prisma.aiResearchRun.update({ where: { id: done.id }, data: { notionExportClaimedAt: new Date() } });
+    const busy = await call('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie);
+    expect(busy.status).toBe(409);
+    expect(busy.body.error?.code).toBe('RES-007');
+    expect(notionPages).toHaveLength(2);
+    await prisma.aiResearchRun.update({ where: { id: done.id }, data: { notionExportClaimedAt: new Date(Date.now() - 6 * 60_000) } });
+    expect((await call('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie)).status).toBe(200);
+    expect((await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: done.id } })).notionExportClaimedAt).toBeNull();
+    // 없는 판은 RES-001
+    expect((await call('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie, { version: 3 })).body.error?.code).toBe('RES-001');
+  });
+
+  it('보고서 PDF: 내 조사만 내려받고(남의 조사 404), 보고서가 없으면 RES-002, 없는 판은 RES-001 (이슈 #521)', async () => {
+    const done = await completed('PDF로 받을 조사');
+    const res = await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf`, { headers: { cookie: ownerCookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/pdf');
+    expect(res.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent(`심층조사-${done.id}-`)}`);
+    const pdf = Buffer.from(await res.arrayBuffer());
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    const text = (await extractPdfIsolated(pdf, 'https://erp.local/a.pdf', 30_000)).text;
+    expect(text).toContain('PDF로 받을 조사');
+    expect(text).toContain('전기로가 적다 [1].');
+    expect(text).toContain(done.sources[0].url);
+
+    const other = await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf`, { headers: { cookie: otherCookie } });
+    expect(other.status).toBe(404);
+    expect(((await other.json()) as { error: { code: string } }).error.code).toBe('RES-001');
+    expect((await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf?version=2`, { headers: { cookie: ownerCookie } })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf?version=0`, { headers: { cookie: ownerCookie } })).status).toBe(400);
+    const waiting = await planned('아직 보고서 없음');
+    const none = await fetch(`${baseUrl}/ai-research/runs/${waiting.id}/pdf`, { headers: { cookie: ownerCookie } });
+    expect(none.status).toBe(409);
+    expect(((await none.json()) as { error: { code: string } }).error.code).toBe('RES-002');
   });
 
   it('철강맨AI에 researchRunId로 보고서에 대해 묻는다: 내 완료한 조사만, 보고서·출처를 참고 자료로, 답의 [n]은 출처로', async () => {
@@ -1283,6 +1324,33 @@ describe('심층 조사 — 보고서를 말로 고치기 (판, 이슈 #418)', (
     // 막힌 요청은 판을 남기지 않았다
     expect((await getRun(done.id)).versions).toEqual([]);
     expect((await version(done.id, 1)).status).toBe(404);
+  });
+
+  it('고른 판을 PDF로 내려받고 Notion으로 내보낸다. 판을 주지 않으면 지금 판 (이슈 #521)', async () => {
+    const done = await completed('판 PDF와 Notion', '첫 판 내용 [1]');
+    await revise(done.id, { instruction: '전망 절 더해 줘', search: false });
+    reportText = '# 둘째 판\n\n둘째 판 내용 [1].';
+    await runner.processNext();
+    expect((await getRun(done.id)).versions.map((v) => v.version)).toEqual([1, 2]);
+
+    const first = await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf?version=1`, { headers: { cookie: ownerCookie } });
+    expect(first.status).toBe(200);
+    expect(first.headers.get('content-disposition')).toContain(encodeURIComponent('-1판.pdf'));
+    const firstText = (await extractPdfIsolated(Buffer.from(await first.arrayBuffer()), 'https://erp.local/v1.pdf', 30_000)).text;
+    expect(firstText).toContain('첫 판 내용 [1]');
+    expect(firstText).not.toContain('둘째 판 내용');
+    const latest = await fetch(`${baseUrl}/ai-research/runs/${done.id}/pdf`, { headers: { cookie: ownerCookie } });
+    expect(latest.headers.get('content-disposition')).toContain(encodeURIComponent('-2판.pdf'));
+
+    const exported = await call<AiResearchNotionExportResult>('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie, { version: 1 });
+    expect(exported.status).toBe(200);
+    expect(notionPages.at(-1)?.title).toBe(`${done.title} · 1판`);
+    expect(notionPages.at(-1)?.content).toContain('첫 판 내용');
+    expect(notionPages.at(-1)?.content).toContain('1판 보고서에서 내보냈어요');
+    expect(exported.body.data.run.notionExportedVersion).toBe(1);
+    expect((await call('POST', `/ai-research/runs/${done.id}/notion-export`, ownerCookie)).status).toBe(200);
+    expect(notionPages.at(-1)?.content).toContain('둘째 판 내용');
+    expect((await getRun(done.id)).notionExportedVersion).toBe(2);
   });
 
   it('판은 10개까지: 꽉 차면 고치기·더 조사하기 모두 RES-002, canRevise false', async () => {
