@@ -27,8 +27,6 @@ interface SteelmanWakeState {
   transcribing: boolean;
   /** 띠에 잠깐 보이는 일(들은 말·물어보는 중·답했어요). until이 지나면 지운다. 받아쓴 글은 이 화면 메모리에만 둔다 */
   activity: (WakeActivity & { id: number; until: number }) | null;
-  /** 마이크 소리 크기와 지금 말 시작 기준 (띠의 막대). 초당 몇 번만 바꾼다 */
-  level: { rms: number; threshold: number };
   /** 말 시작 민감도 (사원별 저장) */
   sensitivity: WakeSensitivity;
   /** 마이크·음성 서버 문제. 스위치 옆에 보인다 */
@@ -53,7 +51,6 @@ interface SteelmanWakeState {
   setTranscribing: (transcribing: boolean) => void;
   showActivity: (activity: WakeActivity, ms?: number) => void;
   clearActivity: (id: number) => void;
-  setLevel: (level: { rms: number; threshold: number }) => void;
   setSensitivity: (sensitivity: WakeSensitivity) => void;
   setProblem: (problem: string | null) => void;
   setCalled: (called: SteelmanWakeState['called']) => void;
@@ -68,9 +65,8 @@ interface SteelmanWakeState {
 
 let nextId = 1;
 
-const QUIET = { rms: 0, threshold: 0 };
-/** 끄거나 다른 사원으로 바뀌면 지우는 듣기 상태 */
-const IDLE = { hearing: false, audioBlocked: false, transcribing: false, activity: null, level: QUIET } as const;
+/** 끄거나 다른 사원으로 바뀌면 지우는 듣기 상태 (소리 크기는 스토어가 아니라 lib/wakeOrb.ts의 wakeLiveLevel) */
+const IDLE = { hearing: false, audioBlocked: false, transcribing: false, activity: null } as const;
 
 export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   employeeId: null,
@@ -82,7 +78,6 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   audioBlocked: false,
   transcribing: false,
   activity: null,
-  level: QUIET,
   sensitivity: 'normal',
   problem: null,
   called: null,
@@ -117,7 +112,6 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   setTranscribing: (transcribing) => set((state) => (state.transcribing === transcribing ? {} : { transcribing })),
   showActivity: (activity, ms = WAKE_ACTIVITY_MS) => set({ activity: { ...activity, id: nextId++, until: Date.now() + ms } }),
   clearActivity: (id) => set((state) => (state.activity?.id === id ? { activity: null } : {})),
-  setLevel: (level) => set({ level }),
   setSensitivity: (sensitivity) => {
     const { employeeId, enabled, voiceApproval } = get();
     if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: enabled, voiceApproval, sensitivity });

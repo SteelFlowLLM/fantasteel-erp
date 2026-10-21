@@ -8,7 +8,6 @@
 import type { AiActionCard } from '@fantasteel/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/Button';
-import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { fields, useDirectoryNames } from '@/features/meetings/components/MeetingAnalysisPanel';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
@@ -18,7 +17,9 @@ import { CARD_KIND_LABEL, isWorkCard } from '@/lib/aiActionCard';
 import { microphoneErrorMessage } from '@/lib/meetingAudio';
 import { speakSteelmanReply } from '@/lib/steelmanVoice';
 import { executeApproved, setWakeAudioContext, transcribe, turnOnScreenControl, wakeMuted } from '@/lib/steelmanWakeActions';
-import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, wakeLevelPercent, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
+import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
+import { setWakeLiveLevel } from '@/lib/wakeOrb';
+import { WakeCalledOrb, WakeLevelMeter, WakeOrb } from '@/features/shell/WakeOrb';
 import { ClipUploadQueue, clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
 import { keepAudioRunning } from '@/lib/wakeAudioUnlock';
 import { useAiChatStore } from '@/stores/useAiChatStore';
@@ -29,8 +30,6 @@ import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelman
 const NOTICE_MS = 4_000;
 /** 소리 처리 묶음 크기 (48kHz면 약 43ms) */
 const FRAME_SIZE = 2048;
-/** 소리 크기 막대를 바꾸는 간격. 소리 묶음마다 바꾸면 화면이 너무 자주 다시 그려진다 */
-const LEVEL_INTERVAL_MS = 120;
 
 const store = () => useSteelmanWakeStore.getState();
 
@@ -100,7 +99,6 @@ export function SteelmanWake() {
       processor = audio.createScriptProcessor(FRAME_SIZE, 1, 1);
       const segmenter = new VoiceSegmenter({ sampleRate: audio.sampleRate, minStartRms: WAKE_START_RMS[store().sensitivity] });
       const rate = audio.sampleRate;
-      let levelAt = 0;
       processor.onaudioprocess = (event) => {
         if (wakeMuted()) {
           segmenter.reset();
@@ -110,11 +108,8 @@ export function SteelmanWake() {
         segmenter.minStartRms = WAKE_START_RMS[store().sensitivity];
         const clip = segmenter.feed(new Float32Array(event.inputBuffer.getChannelData(0)));
         if (store().hearing !== segmenter.speaking) store().setHearing(segmenter.speaking);
-        const now = performance.now();
-        if (now - levelAt >= LEVEL_INTERVAL_MS) {
-          levelAt = now;
-          store().setLevel({ rms: segmenter.lastRms, threshold: segmenter.startThreshold });
-        }
+        // 원·막대는 이 값을 화면 그리기 때마다 읽는다 (스토어를 바꾸지 않아 다시 그리지 않는다)
+        setWakeLiveLevel(segmenter.lastRms, segmenter.startThreshold);
         if (!clip) return;
         uploads.push(clipToWav(clip, rate));
       };
@@ -136,7 +131,7 @@ export function SteelmanWake() {
       store().setHearing(false);
       store().setAudioBlocked(false);
       store().setTranscribing(false);
-      store().setLevel({ rms: 0, threshold: 0 });
+      setWakeLiveLevel(0, 0);
     };
   }, [active, visible]);
 
@@ -147,6 +142,7 @@ export function SteelmanWake() {
   return (
     <>
       <SteelmanWakeBar />
+      <WakeCalledOrb />
       <VoiceApprovalDialog />
       <ScreenControlConfirmDialog />
     </>
@@ -241,28 +237,6 @@ function useTicking(ticking: boolean): number {
 
 const LINE_TONE_CLASS = { idle: 'text-cap', busy: 'text-cap font-medium', action: 'text-cap font-bold', problem: 'text-cap font-medium text-danger' } as const;
 
-/** 마이크 소리 크기 막대. 가운데 금이 말 시작 기준이고, 넘으면 진하게 칠한다 */
-function WakeLevelMeter() {
-  const level = useSteelmanWakeStore((state) => state.level);
-  const percent = wakeLevelPercent(level.rms, level.threshold);
-  const over = percent >= 50;
-  return (
-    <span
-      className="relative inline-block h-2 w-16 overflow-hidden rounded-full border border-steelman bg-surface"
-      role="meter"
-      aria-label="마이크 소리 크기"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={percent}
-      aria-valuetext={over ? '말로 잡을 만큼 커요' : '말 시작 기준보다 작아요'}
-      title="가운데 금을 넘으면 말소리로 잡아요. 넘지 않으면 민감도를 높여 보세요"
-    >
-      <span className={`absolute inset-y-0 left-0 ${over ? 'bg-steelman' : 'bg-steelman/40'}`} style={{ width: `${percent}%` }} />
-      <span className="absolute inset-y-0 left-1/2 w-px bg-steelman-ink" />
-    </span>
-  );
-}
-
 function SteelmanWakeBar() {
   const status = useSteelmanWakeStore((state) => state.status);
   const hearing = useSteelmanWakeStore((state) => state.hearing);
@@ -278,7 +252,7 @@ function SteelmanWakeBar() {
   return (
     <div data-ai-skip="" role="status" aria-live="polite" className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-steelman bg-steelman-soft px-4 py-1.5 text-sm text-steelman-ink">
       <span className={`inline-flex items-center gap-1.5 font-semibold ${hearing ? 'animate-pulse' : ''}`}>
-        <Icon name="mic" size="sm" />
+        <WakeOrb size="sm" />
         철강맨 부르기
       </span>
       {status === 'listening' ? <WakeLevelMeter /> : null}
