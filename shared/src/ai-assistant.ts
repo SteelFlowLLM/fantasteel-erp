@@ -461,8 +461,11 @@ export interface AiResearchCard {
   issues: string[];
 }
 
-/** 실행 카드 한 장 (REQ-AST-005). 종류는 kind로 가른다 */
-export type AiActionCard = AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard | AiNotionCard | AiScheduleEventUpdateCard | AiTaskUpdateCard | AiResearchCard;
+/**
+ * 실행 카드 한 장 (REQ-AST-005). 종류는 kind로 가른다.
+ * cardId는 서버가 답을 만들 때 카드마다 붙인 번호(UUID)로, 실행 요청에 그대로 보내면 서버가 같은 카드를 한 번만 실행한다 (이슈 #479). 이 기능 전에 저장한 카드에는 없다
+ */
+export type AiActionCard = (AiWorkCard | AiSalesOrderCard | AiHotRollingCard | AiHeatPlanCard | AiPastCaseCard | AiNotionCard | AiScheduleEventUpdateCard | AiTaskUpdateCard | AiResearchCard) & { cardId?: string };
 export type AiActionCardKind = AiActionCard['kind'];
 
 /** POST ai-assistant/action-cards/execute. 카드에서 사용자가 확인·수정한 값을 그대로 보낸다 (서버가 다시 검증한다) */
@@ -480,10 +483,11 @@ export type AiActionCardExecuteInput =
   | { kind: 'RESEARCH'; question: string; seed?: AiResearchSeed };
 
 /**
- * 실행 요청 본문: 카드 값 + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399).
+ * 실행 요청 본문: 카드 값 + 카드 번호(cardId, 같은 카드는 한 번만 실행, 이슈 #479) + 저장한 대화의 카드 자리 (있으면 실행 뒤 그 카드를 done으로, 이슈 #399).
+ * 같은 카드를 다시 보내면 서버는 처음 실행 결과를 그대로 돌려준다.
  * approvedByVoice: 철강맨 부르기로 말로 승인한 실행 (이슈 #457). 작업 로그 사유에 표시가 남는다
  */
-export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { chat?: AiChatCardRef; approvedByVoice?: true };
+export type AiActionCardExecuteRequest = AiActionCardExecuteInput & { cardId?: string; chat?: AiChatCardRef; approvedByVoice?: true };
 
 /**
  * 말로 승인할 수 있는 카드 (이슈 #457). 실행하면 같은 트랜잭션에 작업 로그가 남는 업무·일정·구매요청 초안만이다.

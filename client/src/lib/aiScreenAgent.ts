@@ -1,7 +1,7 @@
 // 철강맨AI ERP 화면 조작 (이슈 #382, 문서에 없는 기능·시험 중). 서버가 보낸 ui_action을 지금 화면(DOM)에서 실행하고 결과 글을 만든다.
 // 데이터를 바꾸는 버튼(저장·등록·확정…·submit·data-ai-block)은 누르지 않고, 비밀번호 칸에는 넣지 않는다. 서버도 같은 낱말로 한 번 더 막는다.
 // 화면 글은 [data-ai-capture] 안에서 [data-ai-skip](철강맨AI 패널·조작 배너)을 빼고 만든다.
-import { aiScreenBlockedWord, aiScreenPathAllowed, type AiAssistantStreamEvent, type AiScreenActionResultInput, type AiScreenMapEntry } from '@fantasteel/shared';
+import { aiScreenBlockedWord, aiScreenPathAllowed, isAiScreenDismissLabel, type AiAssistantStreamEvent, type AiScreenActionResultInput, type AiScreenMapEntry } from '@fantasteel/shared';
 import { create } from 'zustand';
 import { moveAiCursorTo } from '@/lib/aiCursor';
 
@@ -111,8 +111,22 @@ export function clickRefusal(node: AgentNode, name: string): string | null {
     return false;
   })();
   if ((tag === 'INPUT' && type === 'submit') || (tag === 'BUTTON' && (type === 'submit' || (type === '' && insideForm)))) return `막았어요: '${name}'은(는) 제출 버튼이에요. 사용자가 직접 눌러야 해요`;
-  const word = aiScreenBlockedWord(`${name} ${clean(attr(node, 'aria-label'))} ${clean(node.textContent)}`);
+  // 이름이 "취소" 하나뿐이면 창 닫기일 때만 누른다: 목록 줄의 "취소"는 출하요청 취소처럼 데이터를 바꾼다 (이슈 #479)
+  const labels = [name, clean(attr(node, 'aria-label')), clean(node.textContent)].filter((label) => label !== '');
+  if (labels.length > 0 && labels.every(isAiScreenDismissLabel)) {
+    return insideDialog(node) ? null : `막았어요: '${name}'은(는) 대화상자 밖의 취소 버튼이라 데이터를 바꿀 수 있어요. 사용자가 직접 눌러야 해요`;
+  }
+  const word = aiScreenBlockedWord(`${name} ${clean(attr(node, 'aria-label'))} ${clean(node.textContent)}`, roleOf(node));
   return word ? `막았어요: '${name}' 버튼은 데이터를 바꿔요(${word}). 사용자가 직접 눌러야 해요` : null;
+}
+
+/** 대화상자(창) 안의 요소인지: dialog 태그, role=dialog·alertdialog, aria-modal */
+function insideDialog(node: AgentNode): boolean {
+  for (let at: AgentNode | null | undefined = node; at; at = at.parentNode) {
+    const role = attr(at, 'role');
+    if (tagOf(at) === 'DIALOG' || role === 'dialog' || role === 'alertdialog' || attr(at, 'aria-modal') === 'true') return true;
+  }
+  return false;
 }
 
 /** 값을 넣으면 안 되는 이유. 괜찮으면 null */

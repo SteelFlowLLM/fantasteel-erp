@@ -113,7 +113,7 @@ export async function executeApproved(byVoice: boolean): Promise<void> {
   const card = (entry?.role === 'assistant' ? entry.cards?.find((item) => item.card.key === key)?.card : undefined) ?? approval.item.card;
   if (!chat.claimCardRun(approval.entryId, key)) return;
   try {
-    const result = await aiAssistantApi.executeActionCard({ ...executeInputOf(card), ...(byVoice ? { approvedByVoice: true as const } : {}), ...(approval.messageId ? { chat: { messageId: approval.messageId, cardKey: key } } : {}) });
+    const result = await aiAssistantApi.executeActionCard({ ...executeInputOf(card), ...(card.cardId ? { cardId: card.cardId } : {}), ...(byVoice ? { approvedByVoice: true as const } : {}), ...(approval.messageId ? { chat: { messageId: approval.messageId, cardKey: key } } : {}) });
     useAiChatStore.getState().updateCard(approval.entryId, key, { status: 'done', result: result.registered, running: false });
     toast.ok(CARD_RESULT[result.registered.type].message(result.registered));
   } catch (error) {

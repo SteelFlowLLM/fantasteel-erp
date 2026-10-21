@@ -116,6 +116,11 @@ export class ProductionRepository {
     return tx.productionSetting.findFirst({ orderBy: { id: 'asc' } });
   }
 
+  /** 생산계획 번호(unique)로 id만 */
+  findPlanIdByNo(tx: Tx, productionPlanNo: string) {
+    return tx.productionPlan.findUnique({ where: { productionPlanNo }, select: { id: true } });
+  }
+
   createPlan(tx: Tx, data: { productionPlanNo: string; salesOrderItemId: number; itemId: number; shortageQty: number; heatCount: number; productionPlanStatus: ProductionPlanStatus; isReproduction?: boolean }) {
     return tx.productionPlan.create({ data });
   }

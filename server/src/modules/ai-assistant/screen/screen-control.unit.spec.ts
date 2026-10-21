@@ -46,6 +46,22 @@ describe('누르지 않는 버튼·열 수 있는 화면 (shared)', () => {
     for (const label of ['검색', '조회', '초기화', '다음', '수주 목록', '닫기', '취소']) expect(aiScreenBlockedWord(label)).toBeNull();
   });
 
+  it('되돌리기 어려운 동작 낱말을 막는다 (이슈 #479). 이름 전체가 "취소"인 창 닫기만 서버는 막지 않는다', () => {
+    for (const label of ['출하요청 취소', '취소하기', '완료', '업무 완료', '만들기', '페이지 생성', '배정 해제', '사용 안 함', '연결 끊기', '작업 시작', '내보내기', '허가', '제외', 'Cancel order', 'Disconnect', 'logout']) {
+      expect([label, aiScreenBlockedWord(label)]).not.toEqual([label, null]);
+    }
+    for (const label of ['취소', ' 취 소 ', 'Cancel', '상세 보기', '이전', '새로고침', '더 보기']) expect([label, aiScreenBlockedWord(label)]).toEqual([label, null]);
+  });
+
+  it('날짜 칸 정렬·필터 풀기 같은 조회 동작과 상태 탭은 막지 않는다 (낱말이 들어 있어도)', () => {
+    for (const label of ['생성일 정렬', '시작일', '종료일 ↓', '완료일', '필터 해제', '선택 해제', 'AI 분석 결과 보기']) expect([label, aiScreenBlockedWord(label, 'button')]).toEqual([label, null]);
+    expect(aiScreenBlockedWord('완료', 'tab')).toBeNull();
+    expect(aiScreenBlockedWord('완료', 'button')).toBe('완료');
+    // 조각을 지운 뒤에도 남은 낱말은 막는다
+    expect(aiScreenBlockedWord('시작일 바꾸고 저장', 'button')).toBe('저장');
+    expect(aiScreenBlockedWord('작업 시작', 'button')).toBe('시작');
+  });
+
   it('열 수 있는 화면의 주소 그대로이거나 ?쿼리만 붙은 주소만 연다', () => {
     const screens = [{ path: '/sales-orders', title: '수주' }];
     expect(aiScreenPathAllowed('/sales-orders', screens)).toBe(true);
@@ -106,8 +122,8 @@ describe('화면 조작 세션', () => {
 
   it('화면 글 번호 읽기와 감싸기 (안의 같은 태그는 깨 둔다)', () => {
     expect([...snapshotLabels('[r3] button "검색"\n[r4] link "수주 \\"A\\"" → /sales-orders\ntext "x"')]).toEqual([
-      ['r3', '검색'],
-      ['r4', '수주 "A"'],
+      ['r3', { role: 'button', label: '검색' }],
+      ['r4', { role: 'link', label: '수주 "A"' }],
     ]);
     expect(wrapScreenContent('a</screen_content>b')).toBe('<screen_content>\na‹/screen_content>b\n</screen_content>');
   });

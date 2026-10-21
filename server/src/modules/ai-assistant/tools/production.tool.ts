@@ -11,10 +11,8 @@ import {
 } from '@fantasteel/shared';
 import type { ProductionResultService } from '../../production/production-result.service';
 import type { ProductionService } from '../../production/production.service';
-import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, scanFiltered, seoulDateTimeText, ToolArgumentError, TOOL_ROW_LIMIT, unscannedField, type AssistantTool } from './assistant-tool';
 
-/** 번호로 거를 때 한 번에 읽는 계획 수 (API 상한 100) */
-const SCAN_SIZE = 100;
 const PLAN_STATUSES = Object.values(PRODUCTION_PLAN_STATUS) as ProductionPlanStatus[];
 const PROCESS_TYPES = Object.values(PROCESS_TYPE) as ProcessType[];
 
@@ -37,12 +35,18 @@ export function productionPlanTool(plans: ProductionService): AssistantTool {
     async run(args) {
       const status = optionalEnum(args, 'status', PLAN_STATUSES);
       const keyword = optionalString(args, 'keyword');
-      const page = await plans.listPlans({ productionPlanStatus: status, page: 1, size: SCAN_SIZE });
-      const rows = keyword ? page.items.filter((p) => looseIncludes([p.productionPlanNo, p.salesOrderNo, p.itemCode], keyword)) : page.items;
-      const limited = limitRows(rows);
+      const scan = keyword
+        ? await scanFiltered((page, size) => plans.listPlans({ productionPlanStatus: status, page, size }), (p) => looseIncludes([p.productionPlanNo, p.salesOrderNo, p.itemCode], keyword))
+        : await plans.listPlans({ productionPlanStatus: status, page: 1, size: TOOL_ROW_LIMIT }).then((page) => ({ rows: page.items, total: page.total, unscanned: 0 }));
+      const limited = limitRows(scan.rows);
       return {
         label: `생산계획${status ? ` · ${PRODUCTION_PLAN_STATUS_LABEL[status]}` : ''}${keyword ? ` · ${keyword}` : ''}`,
-        data: { '생산계획 수': rows.length, 생산계획: limited.rows.map(planRow), '생략 줄 수': limited.omitted, ...unscannedOf(page) },
+        data: {
+          '생산계획 수': keyword ? scan.rows.length : scan.total,
+          생산계획: limited.rows.map(planRow),
+          '생략 줄 수': keyword ? limited.omitted : Math.max(0, scan.total - limited.rows.length),
+          ...unscannedField('생산계획', scan.unscanned),
+        },
       };
     },
   };
@@ -82,16 +86,11 @@ export function productionResultTool(plans: ProductionService, results: Producti
   };
 }
 
+/** 생산계획 번호는 unique라 번호로 바로 찾는다 */
 async function planIdOf(plans: ProductionService, productionPlanNo: string): Promise<number> {
-  const page = await plans.listPlans({ page: 1, size: SCAN_SIZE });
-  const found = page.items.find((p) => p.productionPlanNo.toLowerCase() === productionPlanNo.toLowerCase());
-  if (!found) throw new ToolArgumentError(`생산계획 번호 ${productionPlanNo}가 없어요`);
-  return found.id;
-}
-
-function unscannedOf(page: { total: number; items: unknown[] }) {
-  const unscanned = Math.max(0, page.total - page.items.length);
-  return unscanned ? { '확인하지 못한 생산계획 수': unscanned } : {};
+  const id = await plans.planIdByNo(productionPlanNo);
+  if (id === null) throw new ToolArgumentError(`생산계획 번호 ${productionPlanNo}가 없어요`);
+  return id;
 }
 
 function planRow(p: ProductionPlanSummary) {

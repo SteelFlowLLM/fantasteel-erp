@@ -3,7 +3,7 @@
 // 페이지 나무(상위 페이지 · 그 아래 · 밖 · ERP가 채우는 데이터베이스와 행)를 들고 있다. OAuth는 integration.spec.ts가 보므로 여기서는 토큰을 바로 넣는다.
 // 실제 Notion·LLM은 부르지 않는다.
 import { Test, type TestingModule } from '@nestjs/testing';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
@@ -357,7 +357,8 @@ describe('Notion 쓰기 카드', () => {
     expect(created?.body).toContain('## 요약\n- 설비 점검 완료');
     expect(created?.body).toContain('*철강맨AI · 정다은 요청 · ');
     expect(result.registered.url).toBe(url(created?.id ?? ''));
-    expect(await codeOf(assistant.executeActionCard(author, executeInput(card)))).toBe('COM-001');
+    // 같은 카드를 다시 보내면 다시 만들지 않고 처음 결과를 그대로 돌려준다 (이슈 #479)
+    expect(await assistant.executeActionCard(author, executeInput(card))).toEqual(result);
     expect(writes()).toHaveLength(1);
   });
 
@@ -441,14 +442,14 @@ describe('일정·업무 고치기 카드', () => {
     const { card } = await toolCard('propose_schedule_event_update', { scheduleEventId: event.id, startAt: `${day}T16:00` }, author);
     if (card?.kind !== 'SCHEDULE_EVENT_UPDATE') throw new Error('일정 카드가 없어요');
     expect(card).toMatchObject({ startAt: `${day}T16:00:00+09:00`, endAt: `${day}T17:00:00+09:00` });
-    const result = await assistant.executeActionCard(author, { kind: card.kind, scheduleEventId: card.scheduleEventId, title: card.scheduleEventTitle, description: card.scheduleEventDescription, startAt: card.startAt, endAt: card.endAt } as ExecuteAiActionCardDto);
+    const result = await assistant.executeActionCard(author, { cardId: randomUUID(), kind: card.kind, scheduleEventId: card.scheduleEventId, title: card.scheduleEventTitle, description: card.scheduleEventDescription, startAt: card.startAt, endAt: card.endAt } as ExecuteAiActionCardDto);
     expect(result.registered).toEqual({ type: 'schedule_event', id: event.id, updated: true });
     const after = await prisma.scheduleEvent.findUniqueOrThrow({ where: { id: event.id } });
     expect(after.startAt.toISOString()).toBe(new Date(`${day}T16:00:00+09:00`).toISOString());
     expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
     expect(after.updatedAt.getTime()).toBeGreaterThan(after.notionSyncedAt?.getTime() ?? Infinity);
     // 남이 실행으로 밀어 넣어도 일정 service가 막는다
-    expect(await codeOf(assistant.executeActionCard(sales, { kind: 'SCHEDULE_EVENT_UPDATE', scheduleEventId: event.id, title: '바꿈', startAt: `${day}T18:00`, endAt: `${day}T19:00` } as ExecuteAiActionCardDto))).toBe('COM-002');
+    expect(await codeOf(assistant.executeActionCard(sales, { cardId: randomUUID(), kind: 'SCHEDULE_EVENT_UPDATE', scheduleEventId: event.id, title: '바꿈', startAt: `${day}T18:00`, endAt: `${day}T19:00` } as ExecuteAiActionCardDto))).toBe('COM-002');
   });
 
   it('내 업무 조회 → 마감일 바꾸기(등록자) → 완료(담당자만). 완료한 업무는 더 고칠 수 없다', async () => {
@@ -458,16 +459,16 @@ describe('일정·업무 고치기 카드', () => {
 
     const edit = await toolCard('propose_task_update', { taskId: task.id, dueDate: plusDays(8) }, author);
     if (edit.card?.kind !== 'TASK_UPDATE') throw new Error('업무 카드가 없어요');
-    await assistant.executeActionCard(author, { kind: 'TASK_UPDATE', taskId: task.id, dueDate: edit.card.dueDate } as ExecuteAiActionCardDto);
+    await assistant.executeActionCard(author, { cardId: randomUUID(), kind: 'TASK_UPDATE', taskId: task.id, dueDate: edit.card.dueDate } as ExecuteAiActionCardDto);
     const edited = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
     expect(edited.dueDate.toISOString().slice(0, 10)).toBe(plusDays(8));
     expect(edited.updatedAt.getTime()).toBeGreaterThan(task.updatedAt.getTime());
 
     expect((await toolCard('propose_task_update', { taskId: task.id, complete: true }, author)).content).toContain('담당자만 완료');
-    expect(await codeOf(assistant.executeActionCard(author, { kind: 'TASK_UPDATE', taskId: task.id, complete: true } as ExecuteAiActionCardDto))).toBe('COM-002');
+    expect(await codeOf(assistant.executeActionCard(author, { cardId: randomUUID(), kind: 'TASK_UPDATE', taskId: task.id, complete: true } as ExecuteAiActionCardDto))).toBe('COM-002');
     const done = await toolCard('propose_task_update', { taskId: task.id, complete: true }, sales);
     expect(done.card).toMatchObject({ kind: 'TASK_UPDATE', complete: true });
-    await assistant.executeActionCard(sales, { kind: 'TASK_UPDATE', taskId: task.id, complete: true } as ExecuteAiActionCardDto);
+    await assistant.executeActionCard(sales, { cardId: randomUUID(), kind: 'TASK_UPDATE', taskId: task.id, complete: true } as ExecuteAiActionCardDto);
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).taskStatus).toBe(TASK_STATUS.DONE);
     expect((await toolCard('propose_task_update', { taskId: task.id, title: '다시' }, author)).content).toContain('되돌릴 수 없어요');
   });

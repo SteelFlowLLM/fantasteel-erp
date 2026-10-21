@@ -5,6 +5,7 @@ import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
 import type { AiAssistantReplyView, AiAssistantStreamEvent, AiAssistantTurn } from '@fantasteel/shared';
 import type { AiChatThreadService } from './chat/ai-chat-thread.service';
+import type { AiActionCardRunLedger } from './action-card-run';
 import type { AiResearchCardService } from './ai-research-card.service';
 import type { AiChatQuestionInput } from './chat/ai-chat-thread.view';
 import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
@@ -309,7 +310,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService, browserSettings, { read: async () => ({ enabled: true, voiceApproval: false }) } as unknown as SteelmanWakeSettingsStore), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService, browserSettings, { read: async () => ({ enabled: true, voiceApproval: false }) } as unknown as SteelmanWakeSettingsStore, {} as AiActionCardRunLedger), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -375,6 +376,30 @@ describe('AiAssistantService', () => {
     expect(calls[1].messages.at(-1)?.content).toContain('propose_ 도구');
     expect(reply.actionCards.map((c) => c.key)).toEqual(['a1']);
     expect(reply.answer).toContain('카드를 만들었어요');
+  });
+
+  it('카드에는 서버가 카드 번호(UUID)를 붙인다 (이슈 #479)', async () => {
+    const card = { kind: 'TASK' as const, title: '견적서 보내기', description: null, assigneeId: 1, assigneeName: '나', dueDate: '2026-10-23', startAt: null, endAt: null, endAssumed: false, attendeeIds: [], purchase: null, itemName: null, issues: [] };
+    const { service } = setup(
+      {},
+      async (_call, index) => (index === 0 ? { content: '', toolCalls: [{ id: 'c1', name: 'propose_action_card', arguments: '{}' }, { id: 'c2', name: 'propose_action_card', arguments: '{"x":1}' }] } : answer('카드를 만들었어요.')),
+      { content: '{}', source: null, cards: [card] },
+    );
+    const reply = await service.ask(user, { question: '업무 두 개 등록해줘', actionCards: true });
+    const ids = reply.actionCards.map((c) => c.cardId);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('이번 답에 알리지 않은 도구 이름은 실행하지 않는다 (카드를 받지 않는 질문의 카드 도구, 이슈 #479)', async () => {
+    const { service, runs } = setup({}, async (_call, index) =>
+      index === 0 ? { content: '', toolCalls: [{ id: 'c1', name: 'propose_action_card', arguments: '{}' }, { id: 'c2', name: 'drop_database', arguments: '{}' }] } : answer('직접 할 수 없어요.'),
+    );
+    const reply = await service.ask(user, { question: '업무 등록해줘' });
+    expect(runs).toEqual([]);
+    expect(reply.actionCards).toEqual([]);
+    expect(reply.toolCalls.map((c) => c.resultPreview)).toEqual([expect.stringContaining('없는 도구예요: propose_action_card'), expect.stringContaining('없는 도구예요: drop_database')]);
   });
 
   it('다시 시켜도 카드가 없는데 만들었다고 하면 만들지 못했다고 바로잡는다', async () => {
