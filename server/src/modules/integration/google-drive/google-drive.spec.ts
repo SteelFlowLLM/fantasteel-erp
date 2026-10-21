@@ -892,10 +892,17 @@ describe('철강맨AI Drive 읽기 (이슈 #398 2단계)', () => {
     expect(fake.thumbnails).toEqual(['https://lh3.googleusercontent.com/thumb-aiPhoneEvil008=s1568']);
   });
 
-  it('찾기만 해도 찾은 파일이 답의 출처가 된다', async () => {
+  it('답의 출처는 읽은 파일만이다: 찾기만 한 파일은 도구 기록(webSources)에만 있고 출처가 아니다 (이슈 #473)', async () => {
     const session = toolbox.session(async () => true);
-    await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '메모' }) });
-    expect(session.sources()).toEqual([{ title: '라인 점검 메모.txt', url: 'https://drive.google.com/file/d/aiNotesText001/view' }]);
+    const found = await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '메모' }) });
+    const source = { title: '라인 점검 메모.txt', url: 'https://drive.google.com/file/d/aiNotesText001/view' };
+    // 찾은 파일은 이 도구 호출의 기록(tool_end)에는 나오지만
+    expect(found.webSources).toEqual([source]);
+    // 답의 출처에는 아직 없다
+    expect(session.sources()).toEqual([]);
+    // 읽으면 출처가 된다
+    await session.run({ id: 'c2', name: 'drive_read_file', arguments: JSON.stringify({ file: 'aiNotesText001' }) });
+    expect(session.sources()).toEqual([source]);
   });
 
   it('@로 붙인 파일도 같은 규칙: 폴더 밖이면 질문을 시작하지 않는다(INT-012)', async () => {
