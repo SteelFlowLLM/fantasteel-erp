@@ -1,9 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import type { SttConnectionTestInput, SttConnectionView, SttSettingsInput, SttSettingsView, SttTranscribeTestView } from '@fantasteel/shared';
+import { Injectable, Logger } from '@nestjs/common';
+import { PERMISSION, type AuthUser, type SteelmanWakeSettingsInput, type SteelmanWakeSettingsView, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
-import { SttClient, SttRequestError, normalizeBaseUrl } from './stt.client';
+import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
+import { wakeClipProblem } from './stt-wake-clip';
+import { SttWakeLimiter } from './stt-wake-limiter';
+import { SteelmanWakeSettingsStore } from './steelman-wake-settings.store';
 import { redactUrl, sameOrigin } from './stt-url';
+
+/** 음성 서버 주소·Tailscale 이름·서버가 준 오류는 설정을 맡은 사람에게만 보인다 */
+const WAKE_SERVER_DOWN = '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요';
+
+/** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
+const WAKE_CLIP_TIMEOUT_MS = 20_000;
 
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedAudio {
@@ -14,10 +24,22 @@ export interface UploadedAudio {
 
 @Injectable()
 export class SttService {
+  private readonly logger = new Logger(SttService.name);
+
   constructor(
     private readonly store: SttSettingsStore,
     private readonly client: SttClient,
+    private readonly wakeLimiter: SttWakeLimiter = new SttWakeLimiter(),
+    private readonly wakeSettings: SteelmanWakeSettingsStore = new SteelmanWakeSettingsStore(),
   ) {}
+
+  getWakeSettings(): Promise<SteelmanWakeSettingsView> {
+    return this.wakeSettings.read();
+  }
+
+  updateWakeSettings(input: SteelmanWakeSettingsInput): Promise<SteelmanWakeSettingsView> {
+    return this.wakeSettings.write(input);
+  }
 
   async getSettings(): Promise<SttSettingsView> {
     return toView(await this.store.read());
@@ -65,6 +87,33 @@ export class SttService {
       return { ok: true, text: result.text, segmentCount: result.segments.length, durationSec: result.durationSec, latencyMs: Date.now() - started, error: null };
     } catch (error) {
       return { ok: false, text: null, segmentCount: null, durationSec: null, latencyMs: null, error: messageOf(error) };
+    }
+  }
+
+  /**
+   * 철강맨 부르기 (이슈 #457): 말소리 조각(PCM WAV, 8초까지) 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
+   * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
+   * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
+   */
+  async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined): Promise<SttWakeClipView> {
+    // 관리자가 회사 전체로 끈 뒤에도 켜 둔 화면이 보내는 조각은 세지도 받아쓰지도 않는다
+    if (!(await this.wakeSettings.read()).enabled) throw new AppException('VOC-011');
+    if (!this.wakeLimiter.take(user.employeeId)) throw new AppException('VOC-009');
+    if (!file) throw new AppException('COM-004', '말소리 조각이 없어요 (file 필드)');
+    const problem = wakeClipProblem(file.buffer);
+    if (problem) throw new AppException('COM-004', problem);
+    const settings = await this.store.read();
+    try {
+      const result = await this.client.transcribe(
+        settings,
+        { audio: file.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: quickModelOf(settings.model) },
+        WAKE_CLIP_TIMEOUT_MS,
+      );
+      return { text: result.text, error: null };
+    } catch (error) {
+      const detail = messageOf(error);
+      this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
+      return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
     }
   }
 }

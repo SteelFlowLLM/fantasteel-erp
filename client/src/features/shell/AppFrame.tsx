@@ -8,6 +8,7 @@ import { PetMount } from '@/features/shell/PetMount';
 import { Rail } from '@/features/shell/Rail';
 import { RouteGuard } from '@/features/shell/RouteGuard';
 import { ShellTitleContext, type ShellTitle } from '@/features/shell/ShellTitleContext';
+import { SteelmanWake } from '@/features/shell/SteelmanWake';
 import { TopBar } from '@/features/shell/TopBar';
 import { useMessengerSocket } from '@/hooks/useMessengerSocket';
 import { useShellStore } from '@/stores/useShellStore';
@@ -23,6 +24,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
       <Rail />
       {/* 철강맨AI의 화면 캡처 영역 (lib/aiCapture.ts): 레일을 뺀 상단 바와 본문 */}
       <div data-ai-capture="" className="flex min-w-0 flex-1 flex-col">
+        <SteelmanWake />
         <AiScreenControl />
         <TopBar custom={custom} />
         <div className="relative flex min-h-0 flex-1">

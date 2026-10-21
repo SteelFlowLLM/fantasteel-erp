@@ -26,6 +26,8 @@ interface ShellState {
   toggleAiPanel: () => void;
   openAiPanel: (context: AiContext) => void;
   closeAiPanel: () => void;
+  /** 보던 맥락은 그대로 두고 패널만 연다 (철강맨 부르기, 이슈 #457) */
+  showAiPanel: () => void;
   /** 글자 크기. 서버 렌더링 중에는 'normal', 브라우저에서 hydrateFontSize로 읽는다. */
   fontSize: FontSize;
   hydrateFontSize: () => void;
@@ -43,6 +45,7 @@ export const useShellStore = create<ShellState>((set) => ({
   toggleAiPanel: () => set((state) => ({ aiPanelOpen: !state.aiPanelOpen, aiContext: null, aiPanelExpanded: false })),
   openAiPanel: (context) => set({ aiPanelOpen: true, aiContext: context }),
   closeAiPanel: () => set({ aiPanelOpen: false, aiContext: null, aiPanelExpanded: false }),
+  showAiPanel: () => set({ aiPanelOpen: true }),
   fontSize: 'normal',
   hydrateFontSize: () => set({ fontSize: readFontSize() }),
   setFontSize: (fontSize) => {

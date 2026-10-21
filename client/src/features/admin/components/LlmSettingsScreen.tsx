@@ -25,6 +25,7 @@ import { BrowserSettingsCard } from './BrowserSettingsCard';
 import { SttGuideCard } from './SttGuideCard';
 import { SttLocalServerCard } from './SttLocalServerCard';
 import { SttSettingsCard } from './SttSettingsCard';
+import { SteelmanWakeSettingsCard } from './SteelmanWakeSettingsCard';
 
 export function LlmSettingsScreen() {
   const canEdit = useCanUse(PERMISSION.ORG_MANAGE);
@@ -49,6 +50,7 @@ export function LlmSettingsScreen() {
         <SttSettingsCard canEdit={canEdit} />
         <div className="flex min-w-0 flex-col gap-4">
           <SttLocalServerCard canEdit={canEdit} />
+          <SteelmanWakeSettingsCard canEdit={canEdit} />
           <SttGuideCard />
         </div>
       </div>

@@ -347,7 +347,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - 서버가 값을 맞춘다(모델의 id·숫자는 쓰지 않음): 이름 → 사용 중인 사원 id("나"는 사용자 본인, 같은 이름이 둘이면 못 찾은 것으로), 원료 이름·코드 → 원료 품목 id(회의록 분석과 같은 `matchItem`), 톤은 소수 3자리, 날짜·시각은 **오늘(Asia/Seoul)부터 1년 안**만. 못 맞춘 칸은 비워 두고 카드의 `issues`(확인 필요)로 알린다. 일정은 참석자를 말하지 않으면 본인 일정(남을 말하며 "…도"라고 하면 모델이 "나"를 함께 넘기도록 도구 설명에 적었다), 끝 시각이 없으면 시작 + 1시간(`endAssumed`). `notionSync`는 모델이 false로 넘길 때만 끄고 기본은 켠다(이슈 #434). 실행 때 켜져 있는데 Notion 업무 공간을 쓸 수 없으면 ERP에만 넣고 `registered.note`로 이유를 알린다. 구매요청은 구매요청 등록 권한이 없으면 카드를 만들지 않고 이유를 모델에 돌려준다.
 - 카드는 화면이 값을 들고 있다. 철강맨AI 패널 답의 카드는 대화 기록에 처음 값과 실행 여부만 저장한다(이슈 #399, 고친 값은 저장하지 않음). 요청에 `chat: { messageId, cardKey }`(저장한 답 id·카드 key)를 함께 보내면 실행에 성공한 뒤 그 카드를 `done`과 만든 것(`result`)으로 바꾼다. 내 답이 아니거나 카드가 없으면 실행은 그대로 성공하고 표시만 남기지 않는다(로그). 화면이 사용자가 칸을 고친 뒤 **[실행]**을 누르면 `POST ai-assistant/action-cards/execute`로 그 값을 보낸다. 서버는 회의록 후보 고치기와 같은 규칙(`applyCandidateEdit`, 기준일만 회의일 대신 오늘)으로 다시 검증하고, 필수 칸(`missingFieldsOf`: 업무 담당자·마감일 / 일정 시작·끝·참석자 / 구매요청 원료·수량·희망 입고일)이 비면 `ACT-001`, 담당자·참석자·원료가 그 사이 사라졌으면 `COM-003`/`COM-004`로 거절한다.
 - 실행은 한 트랜잭션이다: 업무 → `TaskService.createInTx`(등록자 = 사용자, 담당자 알림, 링크 `/tasks`), 일정 → `schedule_event`+참석자(등록자 = 사용자, `notion_sync` = 카드 값, 본인을 뺀 참석자에게 `SCHEDULE_EVENT_ASSIGNED`, 같은 트랜잭션에서 `SCHEDULE_EVENT_CREATED`를 AI 경유로 남긴다, 이슈 #434), 구매요청 → `MessageActionService.createFromAssistant`: 메시지·회의록 없는 `action_draft`(요청자 = 사용자)를 `WAITING_APPROVAL`로 만들고 `DRAFT_CREATED`를 **AI 경유**(`is_ai_assisted`)로 남긴다. 이후는 기존 초안 흐름(확정 → 구매요청 → 부서장 승인)이라 **구매요청은 카드에서 바로 만들어지지 않는다**(REQ-AST-010).
-- 🟡 업무는 작업 로그 이벤트 코드가 공통 코드 정의서에 없어 `business_event`를 남기지 않는다(`task.service.ts`와 같음). 일정은 2026-10-21부터 `SCHEDULE_EVENT_CREATED`(문서 밖 값)를 남긴다. "AI 실행 카드 확정" 이벤트(REQ-LOG-002)가 정의서에 생기면 더한다. 같은 카드를 두 번 보내는 것은 서버가 막지 않는다: 화면이 실행한 카드는 "실행됨"으로 잠그고, 저장한 대화를 다시 열어도 `done`으로 잠긴다.
+- 🟡 업무 화면에서 만든 업무는 작업 로그 이벤트 코드가 공통 코드 정의서에 없어 `business_event`를 남기지 않는다(`task.service.ts`와 같음). 실행 카드로 만든 업무는 2026-10-21부터 같은 트랜잭션에 `TASK_CREATED`(문서 밖 값, AI 경유)를 남긴다(이슈 #457: 말로 승인한 실행도 로그에 흔적이 남게). 일정은 2026-10-21부터 `SCHEDULE_EVENT_CREATED`(문서 밖 값)를 남긴다. "AI 실행 카드 확정" 이벤트(REQ-LOG-002)가 정의서에 생기면 더한다. 같은 카드를 두 번 보내는 것은 서버가 막지 않는다: 화면이 실행한 카드는 "실행됨"으로 잠그고, 저장한 대화를 다시 열어도 `done`으로 잠긴다.
 **운영 카드 4종 (2026-10-16)** — `ai-ops-card.service.ts`. 위 업무·일정·구매요청과 달리 새 규칙을 만들지 않고 각 모듈의 확정 기능을 그대로 부른다. 도구는 종류마다 따로 둔다(`propose_sales_order`, `propose_hot_rolling_allocation`, `propose_heat_plan_confirmation`, `propose_past_case`). 제안은 조회만 하고, 실행 권한은 같은 API의 `@RequirePermission(…, 'USE')`를 서비스에서 같은 기준으로 확인한다(제안할 때는 모델에 이유를 돌려주고, 실행할 때는 `COM-002`).
 
 | 카드 | 제안(조회) | 실행(기존 기능) | 권한 USE |
@@ -394,6 +394,11 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 - 카드 실행 표시: 저장한 답을 잠그고 다시 읽은 뒤 그 카드만 `done`으로 바꾼다(같은 답의 다른 카드를 함께 실행해도 덮어쓰지 않는다). 이미 `done`이면 그대로 둔다.
 - Notion·Drive (이슈 #398): 질문은 사용자가 쓴 글만 저장한다(@로 붙인 Drive 파일 글·감싼 외부 글은 저장하지 않는다). @로 붙인 파일은 질문의 `meta.driveFiles`에 이름만(3개·200자) 남기고(대화 보기의 질문에 `driveFiles?`), 지난 대화로 모델에 보낼 때 그 질문 뒤에 `(이 질문에 붙인 Drive 파일: 이름…)` 한 줄만 붙인다. 이어 묻는 질문이 "그 파일"을 알아듣되 파일 글을 차례마다 다시 싣지 않는다(다시 보려면 Drive 도구로 읽는다). 답은 답 글·출처만 저장하므로 Notion·Drive 도구 결과(감싼 글)는 지난 대화에 들어가지 않는다. 읽은 Notion 페이지·Drive 파일은 답의 `webSources`로 저장돼 다시 열어도 보인다. Notion·일정·업무 고치기 카드도 다른 카드처럼 저장되고 `done`으로 표시된다(Notion 카드의 `nonce`도 함께 저장돼 다시 연 카드를 실행해도 같은 카드를 두 번 쓰지 않는다. 그 기억은 서버 메모리라 서버를 다시 띄운 뒤에는 `done` 표시가 막는다).
 
+**철강맨 부르기·말로 승인 (이슈 #457, 문서에 없는 기능)** — 듣기·부르는 말·명령은 화면(`client/src/features/shell/SteelmanWake.tsx`, `lib/steelmanWake.ts`)이 하고 받아쓰기는 `POST stt/wake-clip`(`docs/backend/stt.md`)이다. 들은 질문은 패널에서 보낸 것과 같은 `messages/stream`이라 서버에는 새 질문 경로가 없다.
+- 말로 승인은 손으로 누를 때와 같은 `POST ai-assistant/action-cards/execute`에 `approvedByVoice: true`를 더해 보낸다. 🟡 `approvedByVoice`는 화면이 "말로 승인했다"고 알린 표시일 뿐 증거가 아니다(서버는 소리를 받지 않고, 같은 사원이 이 칸을 넣어 보낼 수도 있다). 권한은 늘 사원 권한으로 다시 보고, 표시는 로그의 사유로만 남는다. 확인 창의 [실행]을 손으로 누르면 `approvedByVoice` 없이 보낸다.
+- 🟡 말로 승인은 목소리로 사람을 가리지 않는다: 확인 창이 떠 있는 10초 안에 옆 사람이 "실행"이라고 해도 실행된다. 그래서 '말로 승인 허용'은 기본 꺼짐이고 사원마다 따로 켜며, 받는 카드를 되돌리기 쉬운 업무·일정·구매요청 초안(부서장 승인 전)으로 줄였다. 기다리는 사이 허용을 끄면 말로는 실행하지 않는다. 서버는 `AI_VOICE_APPROVABLE_KINDS`(업무·일정·구매요청 초안)가 아니면 `VOC-010`(400), 관리자가 AI 연결 화면에서 말로 승인을 꺼 두었으면(회사 설정 `stt/wake-settings`, 기본 꺼짐) `VOC-012`(403)로 거절한다. `capabilities`는 `steelmanWake: { available, voiceApproval }`로 회사 설정을 알린다. 나머지는 되돌리기 어렵거나(수주·열연 배정·히트 편성은 재고·생산에 바로 영향, Notion은 회사 밖 문서, 업무·일정 고치기는 있던 기록을 덮어씀) 작업 로그가 없어(과거 사례·심층 조사) 말로 승인한 흔적을 남길 수 없다.
+- 받는 카드는 `runAsVoiceApproved` 안에서 실행한다. 그 안에서 기록되는 작업 로그는 기록기(`BusinessEventRecorder`)가 사유 끝에 `철강맨 말로 승인`을 붙인다(사유 코드 `CODE: …`는 앞에 그대로). 표시는 본 거래와 같은 트랜잭션의 로그에 남는다: 업무 `TASK_CREATED`, 일정 `SCHEDULE_EVENT_CREATED`, 구매요청 초안 `DRAFT_CREATED`(`MessageActionService.createFromAssistant` → `createAiDraft`가 같은 tx에 기록, `voice-approval.unit.spec.ts`가 실제 service로 확인). 스키마는 바꾸지 않았다.
+
 ## 5. 오류 코드·작업 로그
 
 | 코드 | 언제 |
@@ -401,6 +406,8 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | COM-004 | 질문 비었음·길이 초과·`history` 형식 오류 (ValidationPipe) |
 | COM-999 (HTTP 503) | LLM 모델 미설정, LLM 연결 실패·시간 초과(120초). 메시지는 이유 그대로(`LlmRequestError`) |
 | 🟡 AST-001 (404) | 저장한 대화가 없거나 남의 대화(보기·지우기·이어 묻기). 9.3에 없어 새로 둠(이슈 #399) |
+| 🟡 VOC-010 (400) | 말로 승인할 수 없는 카드를 `approvedByVoice`로 실행하려 함(이슈 #457) |
+| 🟡 VOC-012 (403) | 관리자가 말로 승인을 꺼 두었는데 `approvedByVoice`로 실행하려 함(이슈 #457) |
 
 도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다.
 
@@ -460,6 +467,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 - `tools/more-tools.spec.ts`: 생산계획·작업 실적(계획 번호 → id, 금지어 없음), 검사 결과·불합격 LOT(사용자 전달, 벗어난 항목만), 구매요청(사용자 전달·원료로 거르기)·발주(입고예정)·입고·출하요청·밀시트, 도구 모음의 SERVICE 권한(미리 막지 않음, COM-002 → 권한 없음 + 안내 문구, TOOLBOX 권한은 service를 부르지 않음).
 - `tools/assistant-tools.spec.ts`: 도구별 거르기·한글 결과·인자 오류, 수주 정확 일치 → 충족 현황(고객사·담당 포함), LOT 후보, 작업 로그 번호 → id·서울 시각·원본 데이터 제외, 도구 모음(권한 밖이면 조회하지 않고 역할 안내, 없는 도구·JSON 오류·업무 오류·예상 못 한 오류 숨김, 결과 길이 상한).
 
+- `voice-approval.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함, 이슈 #457): 말로 승인할 수 있는 카드는 업무·일정·구매요청뿐, 받는 카드는 말로 승인 범위 안에서·눌러 실행하면 범위 밖, 나머지 10종은 실행하지 않고 VOC-010, 회사 설정이 말로 승인을 끄면 VOC-012(눌러 실행은 그대로), 구매요청 초안은 `DRAFT_CREATED`에 사유 표시. 기록기의 사유 표시는 `common/business-event/business-event.recorder.unit.spec.ts`·`ai-assisted.context.spec.ts`.
 - `ai-action-card.unit.spec.ts`(DB 없음, `npm run test:unit`에 포함): 카드 제안(이름·원료 맞추기, 지난 날짜·못 찾은 이름 사유, 본인 일정·끝 시각 가정, 구매요청 권한) · 실행(필수 칸·퇴사 담당자·알림 대상·초안 생성·다른 종류 칸 거절). `ai-ops-card.unit.spec.ts`(DB 없음)·`ai-ops-card.spec.ts`(DB): 운영 카드 4종의 제안(이름 맞추기·거절 이유)·실행(권한·필수 칸·기존 service 호출), 수주 등록은 실제 DB로 수주·품목·작업 로그 확인. `ai-action-card.spec.ts`(DB): 업무·일정·구매요청을 실제 DB로(업무·일정·초안 행, 알림, AI 경유 작업 로그, 권한 없는 역할). `ai-assistant.spec.ts`: 카드를 요청한 화면에만 도구·규칙·카드가 가고, 요청하지 않으면 없다.
 
 - `web/web-tools.unit.spec.ts`(네트워크 없음, `npm run test:unit`에 포함): DuckDuckGo HTML 읽기(fixture: 결과·광고·uddg·중복·javascript, anomaly 화면), 위키백과·카카오 응답 읽기, 검색어 개인정보 빼기, 감싸기·이스케이프, 주소 키·답의 링크 거르기, 공용 주소 판단(IPv4·IPv6·mapped·compatible·영역 표시), 주소 확인(scheme·포트·사용자 정보·정수/16진 IPv4·localhost), lookup(배열·주소 하나·재바인딩·mapped), Readability 본문 뽑기·EUC-KR, 검색 클라이언트(POST 모양, 막힘 → 1~2초 쉬고 다시 → 위키백과 한국어 → 영어, 10분 캐시, 1분 한도, 차례로 보내기), 카카오(KakaoAK 헤더, OPEN_MAP_AND_LOCAL 401 안내), 네이버(fixture `naver-webkr.json`·`naver-local.json`: `<b>`·엔티티 지움·중복·빈 link → 지도 검색 주소, 엔진 순서 네이버 → DuckDuckGo, 다음(카카오)(fixture `kakao-web.json`: 태그·엔티티 지움, KakaoAK 헤더·URL, 네이버 실패 → 카카오, 401·429 로그 한 번·키 값 없음), 헤더·display, 401·429 로그 한 번·키 값 없음·다음 엔진으로, 0건이면 다음 엔진, 키 없으면 안 부름), 장소 제공자(카카오 → 네이버 → 꺼짐), capabilities(엔진·장소 검색), 세션(키 없으면 장소 검색 안 알림, 결과에 없던 주소 거절, 한 답 횟수 상한, 출처 고르기).

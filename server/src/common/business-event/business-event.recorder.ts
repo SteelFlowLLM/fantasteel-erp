@@ -3,7 +3,7 @@ import { ACTOR_TYPE, type AuthUser, type BusinessEventType } from '@fantasteel/s
 import { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 import { NumberingService } from '../numbering/numbering.service';
-import { isInAiAssistedRun } from './ai-assisted.context';
+import { isInAiAssistedRun, withVoiceApprovedReason } from './ai-assisted.context';
 
 export interface BusinessEventInput {
   type: BusinessEventType;
@@ -20,7 +20,7 @@ export interface BusinessEventInput {
   after?: unknown;
   /** 사유. 정의서 9.3 사유 코드(STOCK_FIRST 등)와 사람이 읽을 문장 */
   reason?: string | null;
-  /** 명시하지 않으면 runAsAiAssisted 안에서는 true, 밖에서는 false */
+  /** 명시하지 않으면 runAsAiAssisted 안에서는 true, 밖에서는 false. runAsVoiceApproved 안이면 사유 끝에 '말로 승인'이 붙는다 */
   isAiAssisted?: boolean;
   actionDraftId?: number | null;
   messageId?: number | null;
@@ -76,7 +76,7 @@ export class BusinessEventRecorder {
         salesOrderId: input.salesOrderId ?? null,
         beforeData: toJson(input.before),
         afterData: toJson(input.after),
-        reason: input.reason ?? null,
+        reason: withVoiceApprovedReason(input.reason ?? null),
         isAiAssisted: input.isAiAssisted ?? isInAiAssistedRun(),
         actionDraftId: input.actionDraftId ?? null,
         messageId: input.messageId ?? null,

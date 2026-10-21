@@ -313,6 +313,11 @@ export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @Type(() => AiChatCardRefDto)
   chat?: AiChatCardRefDto;
 
+  /** 철강맨 부르기로 말로 승인했으면 true (이슈 #457). 작업 로그 사유에 표시가 남는다 */
+  @IsOptional()
+  @IsBoolean()
+  approvedByVoice?: boolean;
+
   // 수주 등록
   @IsOptional()
   @IsInt({ message: '고객사가 올바르지 않아요' })

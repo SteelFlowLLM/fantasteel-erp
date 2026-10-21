@@ -29,6 +29,8 @@ export interface AiChatCard {
   card: AiActionCard;
   status: 'ready' | 'dismissed' | 'done';
   result?: AiActionCardExecuteResult['registered'];
+  /** 실행 요청을 보낸 뒤 답을 기다리는 중 (이 화면에만). [실행]과 말로 승인이 같은 카드를 두 번 실행하지 않게 한다 (이슈 #457) */
+  running?: boolean;
 }
 
 const readyCards = (cards: readonly AiActionCard[]): { cards?: AiChatCard[] } =>
@@ -260,6 +262,8 @@ interface AiChatState {
   addAnswer: (questionId: string, answer: string, sources: AiAssistantSource[], cards?: AiActionCard[]) => void;
   /** 카드 한 장을 바꾼다 (고치기·닫기·실행 결과). 답이 사라졌으면 아무 일도 하지 않는다 */
   updateCard: (entryId: string, key: string, patch: Partial<AiChatCard>) => void;
+  /** 실행 전이고 실행 중이 아닌 카드면 실행 중으로 표시하고 true. 아니면(이미 실행 중·실행됨·닫음·없음) false */
+  claimCardRun: (entryId: string, key: string) => boolean;
   addFailure: (questionId: string, question: string, reason: string) => void;
   /** 스트림 이벤트 하나를 반영한다. done은 답 줄을, error는 실패 줄을 더한다 */
   applyStreamEvent: (questionId: string, event: AiAssistantStreamEvent, now?: number) => void;
@@ -276,7 +280,7 @@ interface AiChatState {
 let sequence = 0;
 export const newAiChatId = (): string => `ai-${Date.now()}-${(sequence += 1)}`;
 
-export const useAiChatStore = create<AiChatState>((set) => ({
+export const useAiChatStore = create<AiChatState>((set, get) => ({
   ownerEmployeeId: null,
   threadId: null,
   entries: [],
@@ -309,6 +313,13 @@ export const useAiChatStore = create<AiChatState>((set) => ({
           : entry,
       ),
     })),
+  claimCardRun: (entryId, key) => {
+    const entry = get().entries.find((item) => item.id === entryId);
+    const card = entry?.role === 'assistant' ? entry.cards?.find((item) => item.card.key === key) : undefined;
+    if (!card || card.status !== 'ready' || card.running) return false;
+    get().updateCard(entryId, key, { running: true });
+    return true;
+  },
   addFailure: (questionId, question, reason) =>
     set((state) =>
       state.pendingId === questionId

@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
 import { IsAllowedSttHost } from '../stt-url';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -52,4 +52,13 @@ export class TestSttConnectionDto {
   @IsString()
   @MaxLength(500)
   apiKey?: string;
+}
+
+/** 철강맨 부르기 회사 설정 (이슈 #457) */
+export class UpdateSteelmanWakeSettingsDto {
+  @IsBoolean({ message: '철강맨 부르기 쓰기는 켜기·끄기 중 하나예요' })
+  enabled!: boolean;
+
+  @IsBoolean({ message: '말로 승인 허용은 켜기·끄기 중 하나예요' })
+  voiceApproval!: boolean;
 }

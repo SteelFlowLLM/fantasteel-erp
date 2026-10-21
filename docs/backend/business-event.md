@@ -77,6 +77,9 @@ await this.businessEventRecorder.record(tx, {
 | DRAFT_CREATED·CONFIRMED·REJECTED·EXECUTED | message-action | `action_draft` | | |
 | MEETING_MINUTES_CONFIRMED (문서 밖) | meeting-minutes | `meeting_minutes` | | |
 | SCHEDULE_EVENT_CREATED (문서 밖, 이슈 #434) | ai-assistant (일정 실행 카드) | `schedule_event` | | |
+| TASK_CREATED (문서 밖, 이슈 #457) | ai-assistant (업무 실행 카드) | `task` | | |
+
+철강맨 부르기로 말로 승인한 실행 카드(이슈 #457)는 기록기가 사유 끝에 `철강맨 말로 승인`을 붙인다(`runAsVoiceApproved`, 같은 트랜잭션). 화면의 작업 로그에는 사유로 보인다.
 
 자동 예약은 RESERVATION_CREATED + SYSTEM, 불합격 판정은 INSPECTION_REGISTERED의 판정 결과로 구분한다([06]).
 

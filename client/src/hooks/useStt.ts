@@ -6,6 +6,11 @@ export function useSttSettings() {
   return useQuery({ queryKey: sttKeys.settings(), queryFn: sttApi.getSettings });
 }
 
+/** 철강맨 부르기 회사 설정 (이슈 #457) */
+export function useSteelmanWakeSettings() {
+  return useQuery({ queryKey: sttKeys.wakeSettings(), queryFn: sttApi.getWakeSettings });
+}
+
 export function useSttConnectionTest() {
   return useMutation({ mutationFn: sttApi.testConnection });
 }

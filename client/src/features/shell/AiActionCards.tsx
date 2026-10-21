@@ -78,6 +78,7 @@ function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: strin
   const me = useMe();
   const names = useDirectoryNames();
   const updateCard = useAiChatStore((state) => state.updateCard);
+  const claimCardRun = useAiChatStore((state) => state.claimCardRun);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const missing = missingOfCard(card);
@@ -85,10 +86,15 @@ function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: strin
     success: (result) => CARD_RESULT[result.registered.type].message(result.registered),
     onSuccess: (result) => {
       setConfirming(false);
-      updateCard(entryId, card.key, { status: 'done', result: result.registered });
+      updateCard(entryId, card.key, { status: 'done', result: result.registered, running: false });
     },
-    onError: () => setConfirming(false),
+    onError: () => {
+      setConfirming(false);
+      updateCard(entryId, card.key, { running: false });
+    },
   });
+  // 말로 승인(철강맨 부르기, 이슈 #457)으로 실행 중인 카드도 같이 막는다
+  const busy = execute.isPending || item.running === true;
   const dismissed = status === 'dismissed';
   const done = status === 'done';
   const locked = done || dismissed;
@@ -105,7 +111,10 @@ function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: strin
     setEditing(false);
   };
   const seed = card.kind === 'RESEARCH' && includeSeed && researchSeed ? { seed: researchSeed } : {};
-  const executeCard = () => execute.mutate({ ...executeInputOf(card), ...seed, ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
+  const executeCard = () => {
+    if (!claimCardRun(entryId, card.key)) return;
+    execute.mutate({ ...executeInputOf(card), ...seed, ...(messageId ? { chat: { messageId, cardKey: card.key } } : {}) });
+  };
   const run = () => (needsConfirmation(card) ? setConfirming(true) : executeCard());
 
   return (
@@ -195,27 +204,27 @@ function ActionCard({ entryId, item, messageId, researchSeed }: { entryId: strin
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {missing.length > 0 ? <p className="mr-auto text-cap text-ink-3">{missing.join(', ')}을(를) 채우면 실행할 수 있어요</p> : null}
           {editable ? (
-            <Button size="sm" disabled={execute.isPending} onClick={() => setEditing(true)}>
+            <Button size="sm" disabled={busy} onClick={() => setEditing(true)}>
               수정
             </Button>
           ) : null}
-          <Button size="sm" disabled={execute.isPending} onClick={() => updateCard(entryId, card.key, { status: 'dismissed' })}>
+          <Button size="sm" disabled={busy} onClick={() => updateCard(entryId, card.key, { status: 'dismissed' })}>
             닫기
           </Button>
           <Button
             size="sm"
             variant="primary"
-            disabled={execute.isPending || missing.length > 0}
+            disabled={busy || missing.length > 0}
             title={missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 실행할 수 있어요` : isNotionCard(card) ? '회사 Notion에 반영해요 (한 번만 실행돼요)' : card.kind === 'RESEARCH' ? '심층 조사를 만들고 계획을 세워요' : '내 권한으로 업무에 반영해요'}
             onClick={run}
           >
-            {execute.isPending ? '실행하는 중…' : '실행'}
+            {busy ? '실행하는 중…' : '실행'}
           </Button>
         </div>
       ) : null}
 
       {confirming ? (
-        <ConfirmDialog title={`${CARD_KIND_LABEL[card.kind]}을(를) 실행할까요?`} confirmLabel="실행" pending={execute.isPending} onConfirm={executeCard} onCancel={() => setConfirming(false)}>
+        <ConfirmDialog title={`${CARD_KIND_LABEL[card.kind]}을(를) 실행할까요?`} confirmLabel="실행" pending={busy} onConfirm={executeCard} onCancel={() => setConfirming(false)}>
           <ConfirmText card={card} />
         </ConfirmDialog>
       ) : null}

@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_VOICE_APPROVABLE_KINDS,
   AI_RESEARCH_STATUS,
   ROLE_LABEL,
   type AiActionCard,
@@ -22,6 +23,7 @@ import {
   AI_AGENT_PAUSE_MAX_MS,
   AI_AGENT_NOTES_MAX,
 } from '@fantasteel/shared';
+import { runAsVoiceApproved } from '../../common/business-event/ai-assisted.context';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmImage, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
@@ -59,6 +61,7 @@ import { AiUpdateCardService } from './ai-update-card.service';
 import { AssistantDriveToolbox, type DriveToolSession } from './drive/assistant-drive-toolbox';
 import { DRIVE_UNTRUSTED_NOTE, driveTextBlock, type DriveReadOutcome } from './drive/drive-file-reader';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
+import { SteelmanWakeSettingsStore } from '../stt/steelman-wake-settings.store';
 import { historyBudget, HistorySearchSession, type HistorySearchSource } from './history/chat-memory';
 import { AiResearchCardService } from './ai-research-card.service';
 
@@ -150,6 +153,7 @@ export class AiAssistantService {
     private readonly chatThreads: AiChatThreadService,
     private readonly researchCards: AiResearchCardService,
     private readonly browserSettings: BrowserSettingsStore,
+    private readonly wakeSettings: SteelmanWakeSettingsStore,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -209,6 +213,15 @@ export class AiAssistantService {
 
   /** 사용자가 실행 카드의 [실행]을 눌렀을 때 (REQ-AST-005). 값은 카드에서 사용자가 확인·수정한 것이고 서버가 다시 검증한다 */
   async executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+    if (dto.approvedByVoice) {
+      if (!AI_VOICE_APPROVABLE_KINDS.includes(dto.kind)) throw new AppException('VOC-010');
+      if (!(await this.wakeSettings.read()).voiceApproval) throw new AppException('VOC-012');
+      return runAsVoiceApproved(() => this.runActionCard(user, dto));
+    }
+    return this.runActionCard(user, dto);
+  }
+
+  private async runActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 심층 조사는 조사 화면과 같은 service, 나머지는 각 모듈의 확정 기능을 그대로 부른다
     const result = WORK_KINDS.includes(dto.kind)
       ? await this.cards.execute(user, dto)
@@ -246,9 +259,11 @@ export class AiAssistantService {
     const screenControl = this.screenTools.capabilities();
     const notion = await this.notionTools.availability();
     const drive = await this.driveTools.availability();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion, drive };
+    const wake = await this.wakeSettings.read();
+    const steelmanWake = { available: wake.enabled, voiceApproval: wake.voiceApproval };
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion, drive, steelmanWake };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion, drive };
+    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion, drive, steelmanWake };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */

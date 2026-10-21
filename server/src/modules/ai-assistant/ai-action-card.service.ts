@@ -165,6 +165,14 @@ export class AiActionCardService {
         dueDate: new Date(`${card.dueDate}T00:00:00.000Z`),
         linkPath: '/tasks',
       });
+      // 업무 화면에서 만든 업무는 남기지 않는다. 카드로 만든 업무만 남겨 말로 승인한 실행도 로그에 표시가 남게 한다 (이슈 #457)
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.TASK_CREATED,
+        actor: user,
+        target: { table: 'task', id },
+        after: { taskTitle: card.title, assigneeId: card.assigneeId, dueDate: card.dueDate },
+        isAiAssisted: true,
+      });
       return { type: 'task', id };
     }
     if (card.kind === 'EVENT' && card.startAt !== null && card.endAt !== null) {
