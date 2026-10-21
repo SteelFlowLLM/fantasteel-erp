@@ -35,4 +35,13 @@ describe('음성 인식 연결 설정 (api/stt.ts)', () => {
     expect(file.name).toBe('회의.m4a');
     expect(file.size).toBe(3);
   });
+
+  it('같은 Mac의 음성 서버 상태·켜기·끄기는 /stt/local-server 경로로 보낸다', async () => {
+    const view = { supported: true, installed: true, running: true, healthy: true, pid: 1, logPath: null, message: null };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path.startsWith('/stt/local-server') ? ok(view) : undefined));
+    await sttApi.getLocalServer();
+    await sttApi.startLocalServer();
+    await sttApi.stopLocalServer();
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /stt/local-server', 'POST /stt/local-server/start', 'POST /stt/local-server/stop']);
+  });
 });

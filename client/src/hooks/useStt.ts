@@ -13,3 +13,12 @@ export function useSttConnectionTest() {
 export function useSttTranscribeTest() {
   return useMutation({ mutationFn: sttApi.testTranscribe });
 }
+
+/** 켜는 중(켜졌지만 아직 응답 없음)일 때만 2초마다 다시 본다 */
+export function useSttLocalServer() {
+  return useQuery({
+    queryKey: sttKeys.localServer(),
+    queryFn: sttApi.getLocalServer,
+    refetchInterval: (query) => (query.state.data?.running && !query.state.data.healthy ? 2_000 : false),
+  });
+}

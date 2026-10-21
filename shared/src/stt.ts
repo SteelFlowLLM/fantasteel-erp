@@ -64,3 +64,18 @@ export interface SttTranscribeTestView {
   latencyMs: number | null;
   error: string | null;
 }
+
+/** ERP 서버와 같은 Mac에 등록된 음성 서버(LaunchAgent, tools/voice-sidecar/start.sh --install)의 상태 (이슈 #450) */
+export interface SttLocalServerView {
+  /** ERP 서버가 macOS라 화면에서 켜고 끌 수 있는가 */
+  supported: boolean;
+  /** 자동 켜기가 등록되어 있는가 */
+  installed: boolean;
+  running: boolean;
+  /** 127.0.0.1:8001/health가 답하는가 (켜졌어도 모델을 올리는 동안은 false) */
+  healthy: boolean;
+  pid: number | null;
+  logPath: string | null;
+  /** 화면에 보일 안내 (등록 방법, 켜는 중 등) */
+  message: string | null;
+}

@@ -7,6 +7,8 @@
 ```bash
 tools/voice-sidecar/start.sh            # whisper.cpp(127.0.0.1:8000) + 사이드카(0.0.0.0:8001, API 키) 한 번에. 주소·키를 터미널에 보인다
 tools/voice-sidecar/start.sh --local    # 이 컴퓨터에서만 (키 없음)
+tools/voice-sidecar/start.sh --install  # 로그인 때 저절로 켜기 (LaunchAgent, --uninstall·--status)
+sh tools/voice-sidecar/start.test.sh    # start.sh 시험 (launchctl은 부르지 않는다)
 ~/voice-env/bin/python tools/voice-sidecar/server.py     # 사이드카만 http://127.0.0.1:8001
 curl http://127.0.0.1:8001/health
 ```

@@ -23,6 +23,7 @@ import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/us
 import { useCanUse } from '@/hooks/usePermission';
 import { BrowserSettingsCard } from './BrowserSettingsCard';
 import { SttGuideCard } from './SttGuideCard';
+import { SttLocalServerCard } from './SttLocalServerCard';
 import { SttSettingsCard } from './SttSettingsCard';
 
 export function LlmSettingsScreen() {
@@ -46,7 +47,10 @@ export function LlmSettingsScreen() {
       </div>
       <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
         <SttSettingsCard canEdit={canEdit} />
-        <SttGuideCard />
+        <div className="flex min-w-0 flex-col gap-4">
+          <SttLocalServerCard canEdit={canEdit} />
+          <SttGuideCard />
+        </div>
       </div>
     </PageMain>
   );

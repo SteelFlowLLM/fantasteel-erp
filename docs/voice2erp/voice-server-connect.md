@@ -1,6 +1,6 @@
 # 음성 서버 켜기·연결하기
 
-ERP의 음성 인식(회의록 음성 등록)은 OpenAI 호환 `POST /v1/audio/transcriptions`를 여는 서버에 붙는다. 문서에 없는 기능(이슈 #432·#445)이고, 관리 › **AI 연결 › 음성 인식 (STT)** 카드에서 설정한다.
+ERP의 음성 인식(회의록 음성 등록)은 OpenAI 호환 `POST /v1/audio/transcriptions`를 여는 서버에 붙는다. 문서에 없는 기능(이슈 #432·#445·#450)이고, 관리 › **AI 연결 › 음성 인식 (STT)** 카드에서 설정한다.
 
 **LLM(LM Studio 등)을 API로 바꿔도 음성은 이 설정을 따로 쓴다.** 두 설정은 저장도 따로다(`storage/settings/llm.json`·`stt.json`).
 
@@ -20,13 +20,32 @@ ERP 카드에서 **연결 확인**을 누르면 아래 목록이 모델 고르�
 | `whisper` | 받아쓰기만 (whisper, 빠름) | 화자 없이 글만 |
 | `vibevoice` | 받아쓰기 + 화자 분리 (VibeVoice, 느림) | 한 모델로 둘 다. 느리고 한국어는 whisper보다 낮을 수 있다 |
 
-## 내 Mac에서 켜기 (터미널)
+## 내 Mac에서 켜기
 
-Mac의 **터미널**을 열고 저장소 폴더에서 실행한다. 창은 켜 둔다(끄기: `Ctrl+C`, whisper.cpp도 같이 꺼진다).
+### 자동 켜기 (추천, 한 번만)
+
+Mac의 **터미널**을 열고 저장소 폴더에서 한 번 실행한다. 그 뒤로는 로그인하면 저절로 켜지고, 멈추면 다시 켜진다(macOS LaunchAgent `com.fantasteel.voice`).
 
 ```bash
 cd ~/Documents/GitHub/fantasteel-erp
-tools/voice-sidecar/start.sh
+tools/voice-sidecar/start.sh --install     # 다른 PC(같은 망·Tailscale)에서도 붙게 (API 키)
+tools/voice-sidecar/start.sh --status      # 켜졌는지, ERP에 넣을 주소·키 파일 위치
+tools/voice-sidecar/start.sh --uninstall   # 끄고 자동 켜기를 지운다
+```
+
+- macOS 개인정보 보호 때문에 자동 켜기는 `~/Documents`(저장소)와 다른 앱 폴더(Spokenly)를 읽지 못한다. 그래서 `--install`은 `start.sh`·`server.py`를 `~/Library/Application Support/fantasteel-voice/`에 복사하고, 모델이 Spokenly 폴더에만 있으면 그 파일(약 550MB)도 한 번 복사한다. 화자 분리용 `HF_TOKEN`은 `server/.env`에서 읽어 같은 폴더의 `env`(본인만 읽기)에 둔다.
+- **코드를 새로 받았으면 `--install`을 다시** 하면 새 코드로 바뀐다.
+- 로그: `~/Library/Logs/fantasteel-voice.log`(켜질 때 5MB를 넘으면 `.log.1` 하나만 남기고 새로 쓴다). 자동 켜기는 API 키를 로그에 남기지 않는다. 키는 `cat ~/.config/fantasteel-voice/api-key`로 본다.
+- ERP 서버도 이 Mac이면 AI 연결 화면의 **이 Mac의 음성 서버** 카드에서 켜고 끌 수 있다. 끄면 다음 로그인 때 다시 켜진다. ERP 서버가 다른 컴퓨터면 그 컴퓨터가 내 Mac의 프로그램을 켤 길은 없으므로(그런 길은 보안 구멍이다) 이 카드는 보이지 않는다.
+- 다른 PC에 열 필요가 없으면 `--install --local`(이 Mac에서만, 키 없음).
+- 포트를 바꾸려면 `SIDECAR_PORT=8101 tools/voice-sidecar/start.sh --install`. 등록 파일에 적혀 ERP 카드도 같은 포트로 상태를 본다.
+- 복사본(`~/Library/Application Support/fantasteel-voice/start.sh`)으로 다시 설치해도 기존 `HF_TOKEN`을 그대로 쓴다.
+
+### 터미널에서 직접 켜기
+
+```bash
+tools/voice-sidecar/start.sh            # 창을 켜 둔다. 끄기: Ctrl+C (whisper.cpp도 같이 꺼진다)
+tools/voice-sidecar/start.sh --local    # 이 Mac에서만 (키 없음)
 ```
 
 터미널에 이렇게 나온다. 이 주소와 키를 ERP 카드에 넣는다.
@@ -41,9 +60,9 @@ ERP에 넣을 API 키: fsv-…
 (저장 위치: ~/.config/fantasteel-voice/api-key)
 ```
 
-- 키는 처음 켤 때 만들어 `~/.config/fantasteel-voice/api-key`(본인만 읽기)에 두고, 다음부터 같은 키를 쓴다. 바꾸려면 그 파일을 지우고 다시 켠다. `SIDECAR_API_KEY=…`로 직접 정해도 된다.
+- 키는 처음 켤 때 만들어 `~/.config/fantasteel-voice/api-key`(본인만 읽기)에 두고, 다음부터 같은 키를 쓴다(자동 켜기도 같은 키). 바꾸려면 그 파일을 지우고 다시 켠다. `SIDECAR_API_KEY=…`로 직접 정해도 된다.
 - **ERP 서버도 이 Mac이면** `tools/voice-sidecar/start.sh --local`로 켜고 주소 `http://127.0.0.1:8001/v1`, 키는 비워 둔다(이 Mac 밖에는 열지 않는다). 전에 다른 PC용으로 켜서 키 파일이 남아 있어도 `--local`은 키를 요구하지 않는다.
-- 모델 파일은 `WHISPER_MODEL=경로` → `~/models/ggml-large-v3-turbo*.bin` → `~/models/ggml-*.bin` → Spokenly가 받아 둔 파일 순서로 찾는다. `~/models/ggml-silero-*.bin`이 있으면 VAD(소리 없는 구간 건너뛰기)를 켠다.
+- 모델 파일은 `WHISPER_MODEL=경로` → `~/models/ggml-large-v3-turbo*.bin` → `~/models/ggml-*.bin` → 자동 켜기가 복사해 둔 파일 → Spokenly가 받아 둔 파일 순서로 찾는다. `~/models/ggml-silero-*.bin`이 있으면 VAD(소리 없는 구간 건너뛰기)를 켠다.
 - 필요한 것: `brew install whisper-cpp ffmpeg`, 파이썬 환경 `~/voice-env`([tools/voice-sidecar/README.md](../../tools/voice-sidecar/README.md)), 화자 분리용 `HF_TOKEN`(`server/.env`).
 
 ## ERP에 연결
