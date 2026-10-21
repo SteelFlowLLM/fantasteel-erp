@@ -1,9 +1,11 @@
+import { Logger } from '@nestjs/common';
 import type { AuthUser } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { NumberingRepository } from '../../common/numbering/numbering.repository';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { lockShipmentRequest } from '../../generated/prisma/sql';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { FactoryAgentService } from '../factory-agent/factory-agent.service';
 import type { EligibilitySyncResult, InventoryService } from '../inventory/inventory.service';
 import { QualityRepository } from './quality.repository';
 import { QualityService } from './quality.service';
@@ -396,6 +398,8 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
       coilFail: await coil('QR-C-FAIL', coilItem9.id),
       coilThin: await coil('QR-C-THIN', coilItem45.id),
       coilStock: await coil('QR-C-STOCK', coilItem9.id),
+      coilAgent: await coil('QR-C-AGENT', coilItem9.id),
+      coilAgentFail: await coil('QR-C-AGENT-FAIL', coilItem9.id),
       heat: await prisma.lot.create({ data: { lotNo: 'QR-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } }),
       heatNoStandard: await prisma.lot.create({
         data: { lotNo: 'QR-H-NOSTD', lotType: 'HEAT', steelGradeId: tempGrade.id, productionResultId: steelmaking },
@@ -455,6 +459,34 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     const detail = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: passValues9mm() }, user);
     expect(calls).toEqual([[lots.coilStock]]);
     expect(detail.stockSync).toEqual({ eligibleAddedQty: 1, autoReservedQty: 1, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
+  });
+
+  it('검사 등록 응답은 Agent 감지(한 줄 큐)를 기다리지 않고, 감지를 부르지 못하면 로그만 남긴다 (#496)', async () => {
+    let release = () => {};
+    const calls: number[] = [];
+    // 전체 감지가 오래 돌아 큐가 막힌 상황: 감지가 끝나지 않아도 등록은 돌아와야 한다
+    const busyAgent = {
+      onInspectionRegistered: (lotId: number) => {
+        calls.push(lotId);
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    } as unknown as FactoryAgentService;
+    const detail = await new QualityService(prisma, new QualityRepository(), recorder, inventory, busyAgent).registerQualityInspection({ lotId: lots.coilAgent, values: passValues9mm() }, user);
+    expect(detail.inspectionResult).toBe('PASS');
+    expect(calls).toEqual([lots.coilAgent]);
+    release();
+
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const failingAgent = { onInspectionRegistered: () => Promise.reject(new Error('감지 큐 오류')) } as unknown as FactoryAgentService;
+      await new QualityService(prisma, new QualityRepository(), recorder, inventory, failingAgent).registerQualityInspection({ lotId: lots.coilAgentFail, values: passValues9mm() }, user);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('감지 큐 오류'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('작업 로그 INSPECTION_REGISTERED를 남기고 LOT 타임라인에 연결한다 (REQ-LOG-002)', async () => {

@@ -33,6 +33,15 @@ describe('매수 입력 (4.1, SO-002)', () => {
     for (const text of ['10.5', '0', '-1', '', ' 3', '3매', '1e3', '１０']) expect(parseOrderedQty(text)).toBeNull();
   });
 
+  it('한 줄 상한(9,999)을 넘으면 받지 않고 상한 문구를 보인다 (#496)', () => {
+    expect(parseOrderedQty('9999')).toBe(9999);
+    expect(parseOrderedQty('10000')).toBeNull();
+    expect(parseOrderedQty('3000000000')).toBeNull();
+    expect(draftLineErrors(line({ qtyText: '1000000' }), false)).toEqual({ qty: '수량은 품목 한 줄에 9,999까지 입력할 수 있어요' });
+    expect(draftLineErrors(line({ qtyText: '9999' }), true)).toEqual({});
+    expect(previewLinesOf([line({ qtyText: '10000' })])).toEqual([]);
+  });
+
   it('줄 오류: 저장 전에는 입력한 칸만, 저장을 누른 뒤에는 빈칸도. 매수 문구는 SO-002 그대로', () => {
     expect(draftLineErrors(line({ itemId: null, qtyText: '', dueDate: '' }), false)).toEqual({});
     expect(draftLineErrors(line({ qtyText: '3매' }), false)).toEqual({ qty: ERROR_MESSAGE['SO-002'] });

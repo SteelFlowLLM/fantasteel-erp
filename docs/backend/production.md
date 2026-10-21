@@ -165,7 +165,7 @@
 | POST | `production-plans/:id/cancel` | PLAN USE | PLANNED만, `{ reason? }` |
 | GET ➕ | `production-plans/:id/work-context` | RESULT VIEW | 실적 입력 기준값(수율·히트 용량·용선/원료 잔량·연주 전 히트·작업 중 실적) |
 | GET | `production-results`, `production-results/:id` | RESULT VIEW | 작업 실적(투입·산출 LOT, 작업자) |
-| POST | `production-results` | RESULT USE | `completedAt`이 없으면 작업 시작만, 있으면 시작·완료를 한 번에 |
+| POST | `production-results` | RESULT USE | `completedAt`이 없으면 작업 시작만, 있으면 시작·완료를 한 번에. `startedAt`·`completedAt`에 시간대(`Z`·`±hh:mm`)가 없으면 서울 시각으로 읽는다(일정과 같은 `seoulDateTimeOf`, 2026-10-22 이슈 #496). 전에는 서버 로컬 시간으로 읽어 서버가 UTC면 9시간 밀렸다. 읽을 수 없는 시각은 COM-004 |
 | POST ➕ | `production-results/:id/complete` | RESULT USE | 작업 시작한 실적 완료(초안 행 API-101) |
 | POST | `production-plans/:id/simulate-results` | RESULT USE | 실적 시뮬레이션 `{ randomSeed? }` |
 | GET ➕ | `production-plans/:id/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 화면(필요 매수·슬래브 재고·FIFO 후보·배정·코일) |

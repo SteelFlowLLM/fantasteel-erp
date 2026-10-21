@@ -364,7 +364,7 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 
 | 카드 | 제안(조회) | 실행(기존 기능) | 권한 USE |
 | --- | --- | --- | --- |
-| `SALES_ORDER` 수주 등록 | 고객사·규격 이름을 id로 맞춤(정확히 같은 것 → 부분 일치가 하나뿐인 것), 매수는 정수, 납기는 오늘부터 1년 안 | `SalesOrderService.create`: 예약·부족분 생산계획·`SALES_ORDER_CREATED`까지 수주 등록과 같음(매수 `SO-002`) | 수주 등록 |
+| `SALES_ORDER` 수주 등록 | 고객사·규격 이름을 id로 맞춤(정확히 같은 것 → 부분 일치가 하나뿐인 것), 매수는 1~9,999 정수(수주 등록 상한, #496), 납기는 오늘부터 1년 안 | `SalesOrderService.create`: 예약·부족분 생산계획·`SALES_ORDER_CREATED`까지 수주 등록과 같음(매수 `SO-002`) | 수주 등록 |
 | `HOT_ROLLING` 열연 배정 | 생산계획 번호 → `HotRollingService.detail`의 FIFO 추천 슬래브(`recommend`는 작업 로그를 남기므로 부르지 않음). 열연 불가·더 배정할 것 없음·가용 재고 없음이면 카드 없음 | `HotRollingService.confirm`(추천 슬래브 그대로) | 열연 투입 배정 |
 | `HEAT_PLAN` 히트 편성 확정 | `getPlanDetail`+`previewHeatPlan`: 현재 히트 수 → 다시 계산한 히트 수. 작업을 시작한 계획이면 카드 없음 | `ProductionService.confirmHeatPlan`(`HEAT_PLAN_CONFIRMED`) | 생산계획 확정 |
 | `PAST_CASE` 과거 사례 | LOT 번호 → `PastCaseService.createDraft`(불합격 LOT만, AI 실패해도 검사 결과로 채움) | `PastCaseService.create`(사용자가 고친 값, 원인·조치는 비어도 됨) | 불합격 처리(DISPOSITION_SET) |
