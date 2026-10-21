@@ -2,14 +2,14 @@
 import type { AuthUser } from '@fantasteel/shared';
 import { IS_PUBLIC, REQUIRED_PERMISSION } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { SttClient, SttRequestError, quickModelOf } from './stt.client';
+import { SttClient, SttRequestError, quickModelOf, silentWav } from './stt.client';
 import { SttController } from './stt.controller';
 import { SttService, type UploadedAudio } from './stt.service';
 import type { SttSettingsStore } from './stt-settings.store';
 import { SttWakeLimiter } from './stt-wake-limiter';
 
-const user = (employeeId: number) => ({ employeeId }) as AuthUser;
-const clip: UploadedAudio = { originalname: 'wake.wav', mimetype: 'audio/wav', buffer: Buffer.from('RIFF') };
+const user = (employeeId: number, permissions: AuthUser['permissions'] = {}) => ({ employeeId, permissions }) as AuthUser;
+const clip: UploadedAudio = { originalname: 'wake.wav', mimetype: 'audio/wav', buffer: silentWav(2) };
 const stored = { baseUrl: 'http://127.0.0.1:8001/v1', model: 'whisper-pyannote', apiKey: 'key' };
 
 const setup = (transcribe: jest.Mock, limiter = new SttWakeLimiter()) => {
@@ -55,19 +55,25 @@ describe('SttService.transcribeWakeClip', () => {
     expect(transcribe).toHaveBeenCalledWith(stored, { audio: clip.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: 'whisper' }, 20_000);
   });
 
-  it('음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려준다', async () => {
-    const result = await setup(jest.fn().mockRejectedValue(new SttRequestError('연결할 수 없어요'))).transcribeWakeClip(user(1), clip);
-    expect(result).toEqual({ text: null, error: '연결할 수 없어요' });
+  it('음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려준다: 주소가 든 자세한 이유는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만', async () => {
+    const failing = () => setup(jest.fn().mockRejectedValue(new SttRequestError('http://100.87.40.116:8001/v1/audio/transcriptions에 연결할 수 없어요')));
+    expect(await failing().transcribeWakeClip(user(1, { ORG_MANAGE: 'USE' }), clip)).toEqual({ text: null, error: 'http://100.87.40.116:8001/v1/audio/transcriptions에 연결할 수 없어요' });
+    const plain = await failing().transcribeWakeClip(user(2, { ORG_MANAGE: 'VIEW' }), clip);
+    expect(plain).toEqual({ text: null, error: '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요' });
   });
 
   it('모르는 오류는 그대로 던진다 (500으로 남는다)', async () => {
     await expect(setup(jest.fn().mockRejectedValue(new Error('boom'))).transcribeWakeClip(user(1), clip)).rejects.toThrow('boom');
   });
 
-  it('조각이 없거나 오디오가 아니면 COM-004', async () => {
-    const service = setup(jest.fn());
+  it('조각이 없거나 PCM WAV가 아니거나 8초를 넘으면 음성 서버에 보내지 않고 COM-004', async () => {
+    const transcribe = jest.fn();
+    const service = setup(transcribe);
     await expect(service.transcribeWakeClip(user(1), undefined)).rejects.toMatchObject({ code: 'COM-004' });
-    await expect(service.transcribeWakeClip(user(1), { ...clip, mimetype: 'text/plain' })).rejects.toBeInstanceOf(AppException);
+    // 이름표는 audio/wav여도 바이트가 WAV가 아니면 거절한다
+    await expect(service.transcribeWakeClip(user(1), { ...clip, buffer: Buffer.from('OggS'.padEnd(64, 'x')) })).rejects.toBeInstanceOf(AppException);
+    await expect(service.transcribeWakeClip(user(1), { ...clip, buffer: silentWav(9) })).rejects.toMatchObject({ code: 'COM-004' });
+    expect(transcribe).not.toHaveBeenCalled();
   });
 
   it('한도를 넘으면 음성 서버에 보내지 않고 VOC-009(429)', async () => {

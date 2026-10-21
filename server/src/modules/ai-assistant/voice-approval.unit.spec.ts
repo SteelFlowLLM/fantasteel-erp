@@ -1,6 +1,15 @@
 // DB 없이 말로 승인한 카드 실행의 문을 본다 (이슈 #457): 되돌리기 어려운 카드는 거절하고, 받는 카드는 말로 승인 범위 안에서 실행한다.
+// 구매요청 초안은 실제 MessageActionService로 작업 로그·사유 표시까지 본다.
 import { AI_VOICE_APPROVABLE_KINDS, type AuthUser } from '@fantasteel/shared';
-import { isInVoiceApprovedRun } from '../../common/business-event/ai-assisted.context';
+import type { AuthUserService } from '../../common/auth/auth-user.service';
+import { isInVoiceApprovedRun, runAsVoiceApproved } from '../../common/business-event/ai-assisted.context';
+import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import type { NumberingService } from '../../common/numbering/numbering.service';
+import type { PrismaService, Tx } from '../../prisma/prisma.service';
+import type { ActionTypeRegistry } from '../message-action/action-types/action-type.registry';
+import type { DraftExtractor } from '../message-action/draft-extractor';
+import type { MessageActionRepository } from '../message-action/message-action.repository';
+import { MessageActionService } from '../message-action/message-action.service';
 import { AiAssistantService } from './ai-assistant.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 
@@ -43,5 +52,27 @@ describe('말로 승인한 카드 실행', () => {
     const { service, seen } = setup();
     await expect(service.executeActionCard(user, dto(kind, true))).rejects.toMatchObject({ code: 'VOC-010' });
     expect(seen).toEqual([]);
+  });
+});
+
+describe('말로 승인한 구매요청 초안의 작업 로그', () => {
+  it('createFromAssistant는 같은 트랜잭션에 DRAFT_CREATED를 AI 경유로 남기고, 말로 승인 범위면 사유에 표시가 붙는다', async () => {
+    const created: { businessEventType: string; reason: string | null; isAiAssisted: boolean }[] = [];
+    const tx = {
+      businessEvent: {
+        create: async ({ data }: { data: (typeof created)[number] }) => {
+          created.push(data);
+          return { id: 1, businessEventNo: 'EV-1' };
+        },
+      },
+    } as unknown as Tx;
+    const recorder = new BusinessEventRecorder({ nextDocumentNumber: async () => 'EV-1' } as unknown as NumberingService);
+    const registry = { get: () => ({ permission: 'PURCHASE_REQUISITION', assertCanExecute: async () => undefined }) } as unknown as ActionTypeRegistry;
+    const repository = { createDraft: async () => ({ id: 5, draftStatus: 'AI_GENERATED' }), updateDraft: async () => undefined } as unknown as MessageActionRepository;
+    const service = new MessageActionService({} as PrismaService, repository, {} as AuthUserService, recorder, registry, {} as DraftExtractor);
+    const requester = { employeeId: 1, permissions: { PURCHASE_REQUISITION: 'USE' } } as unknown as AuthUser;
+    const payload = { itemId: 3, requestedTon: '10', desiredReceiptDate: '2026-11-01', requestReason: '원료 보충', sourceText: null };
+    await runAsVoiceApproved(() => service.createFromAssistant(tx, requester, payload));
+    expect(created).toEqual([expect.objectContaining({ businessEventType: 'DRAFT_CREATED', reason: '철강맨 말로 승인', isAiAssisted: true })]);
   });
 });

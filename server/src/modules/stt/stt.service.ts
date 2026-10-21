@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import type { AuthUser, SttConnectionTestInput, SttConnectionView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipView } from '@fantasteel/shared';
+import { Injectable, Logger } from '@nestjs/common';
+import { PERMISSION, type AuthUser, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
 import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
+import { wakeClipProblem } from './stt-wake-clip';
 import { SttWakeLimiter } from './stt-wake-limiter';
 import { redactUrl, sameOrigin } from './stt-url';
+
+/** 음성 서버 주소·Tailscale 이름·서버가 준 오류는 설정을 맡은 사람에게만 보인다 */
+const WAKE_SERVER_DOWN = '음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요';
 
 /** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
 const WAKE_CLIP_TIMEOUT_MS = 20_000;
@@ -18,6 +23,8 @@ export interface UploadedAudio {
 
 @Injectable()
 export class SttService {
+  private readonly logger = new Logger(SttService.name);
+
   constructor(
     private readonly store: SttSettingsStore,
     private readonly client: SttClient,
@@ -74,23 +81,27 @@ export class SttService {
   }
 
   /**
-   * 철강맨 부르기 (이슈 #457): 말소리 조각 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
+   * 철강맨 부르기 (이슈 #457): 말소리 조각(PCM WAV, 8초까지) 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
    * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
+   * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
    */
   async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined): Promise<SttWakeClipView> {
     if (!this.wakeLimiter.take(user.employeeId)) throw new AppException('VOC-009');
     if (!file) throw new AppException('COM-004', '말소리 조각이 없어요 (file 필드)');
-    if (!isAudio(file.mimetype)) throw new AppException('COM-004', '오디오만 보낼 수 있어요');
+    const problem = wakeClipProblem(file.buffer);
+    if (problem) throw new AppException('COM-004', problem);
     const settings = await this.store.read();
     try {
       const result = await this.client.transcribe(
         settings,
-        { audio: file.buffer, fileName: 'wake.wav', mimeType: file.mimetype, model: quickModelOf(settings.model) },
+        { audio: file.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: quickModelOf(settings.model) },
         WAKE_CLIP_TIMEOUT_MS,
       );
       return { text: result.text, error: null };
     } catch (error) {
-      return { text: null, error: messageOf(error) };
+      const detail = messageOf(error);
+      this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
+      return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
     }
   }
 }
