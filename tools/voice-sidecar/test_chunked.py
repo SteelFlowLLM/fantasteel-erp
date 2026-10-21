@@ -269,6 +269,14 @@ class ChunkedRunTest(unittest.TestCase):
         self.assertEqual(segments, [])
         self.assertEqual(fake.calls, [])
 
+    def test_1분_안쪽_짧은_녹음도_화자_분리가_말소리를_못_찾으면_받아쓰지_않는다(self) -> None:
+        short = os.path.join(self.tmp.name, "short.wav")
+        write_wav(short, [(1.5, False)])
+        fake = FakeWhisper()
+        with mock.patch.object(server, "whisper_transcribe", fake), mock.patch.object(server, "diarize", return_value=[]):
+            segments, _ = server.run_whisper_engine(short, "ko", diarization=True, tmp_dir=self.tmp.name)
+        self.assertEqual((segments, fake.calls), ([], []))
+
     def test_받아쓰기만_할_때도_무음뿐이면_받아쓰지_않는다(self) -> None:
         silent = os.path.join(self.tmp.name, "silent.wav")
         write_wav(silent, [(4.0, False)])

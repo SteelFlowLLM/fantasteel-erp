@@ -778,30 +778,28 @@ def run_whisper_engine(
         return segments, duration
 
     quick = duration < QUICK_AUDIO_SEC
-    turns: Optional[list[tuple[float, float, str]]] = None
+    turns: list[tuple[float, float, str]] = []
     gaps: list[tuple[float, float]] = []
-    if not quick:
-        if diarization:
-            # 회의 전체를 한 번에 나눠야 조각이 달라도 같은 사람이 같은 화자로 이어진다. whisper.cpp 차례는 쥐지 않아 그동안 부르기 조각이 지나간다
-            progress("diarize", 1, 1)
-            with diarize_lock:
-                turns = diarize(wav_path, speakers)
-            if not turns:
-                return [], duration
-            gaps = gaps_between(turns, duration)
-        else:
-            gaps, speech_sec = quiet_gaps(frame_levels(wav_path))
-            if speech_sec < MIN_SPEECH_SEC:
-                return [], duration
+    if diarization:
+        # 회의 전체를 한 번에 나눠야 조각이 달라도 같은 사람이 같은 화자로 이어진다. whisper.cpp 차례는 쥐지 않아 그동안 부르기 조각이 지나간다.
+        # 말소리 구간이 없으면 받아쓰지 않는다 (짧은 녹음도 같다)
+        progress("diarize", 1, 1)
+        with diarize_lock:
+            turns = diarize(wav_path, speakers)
+        if not turns:
+            return [], duration
+        gaps = gaps_between(turns, duration)
+    elif not quick:
+        # 부르기 조각(1분 미만)은 소리 크기로 거르지 않는다: 몇 초짜리라 바닥 소음을 잴 수 없어 말소리를 놓칠 수 있다
+        gaps, speech_sec = quiet_gaps(frame_levels(wav_path))
+        if speech_sec < MIN_SPEECH_SEC:
+            return [], duration
 
     segments = transcribe_chunks(wav_path, plan_chunks(duration, gaps), language, prompt, quick, progress, work_dir)
     if not diarization:
         for seg in segments:
             seg["speaker"] = None
         return segments, duration
-    if turns is None:
-        with diarize_lock:
-            turns = diarize(wav_path, speakers) if segments else []
     segments = split_by_speaker(segments, turns)
     labels = renumber([seg.get("speaker") or assigned for seg, assigned in zip(segments, assign_speakers(segments, turns))]) if segments else []
     for seg, label in zip(segments, labels):
