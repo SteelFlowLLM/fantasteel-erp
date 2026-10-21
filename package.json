@@ -23,7 +23,8 @@
     "seed": "npm run seed -w server",
     "db:reset": "cd server && node scripts/reset-db.mjs fantasteel",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
-    "test": "npm run test -w server"
+    "test": "npm run test -w server",
+    "test:voice": "python3 -m unittest discover -s tools/voice-sidecar"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

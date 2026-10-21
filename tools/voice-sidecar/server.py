@@ -8,7 +8,7 @@ ERP 서버가 부르는 OpenAI 호환 `POST /v1/audio/transcriptions`를 흉내 
 `GET /v1/models`는 위 셋을 화면에 보일 이름과 함께 알려 준다.
 
 API 키(`Authorization: Bearer …`): 키가 있으면 모든 /v1 요청에 요구한다. 다른 PC에 열 때(SIDECAR_HOST가 127.0.0.1이 아닐 때)는
-키가 꼭 있어야 하고, 없으면 만들어 KEY_FILE에 둔다. whisper.cpp에는 키 기능이 없어 그쪽은 127.0.0.1에만 열고 밖에는 이 서버만 연다.
+키가 꼭 있어야 하고, 없으면 만들어 KEY_FILE에 둔다. 127.0.0.1로만 열면 SIDECAR_API_KEY를 직접 줄 때만 키를 요구한다. whisper.cpp에는 키 기능이 없어 그쪽은 127.0.0.1에만 열고 밖에는 이 서버만 연다.
 
 음성은 임시 파일로만 다루고 요청이 끝나면(성공이든 실패든) 모두 지운다 (BP-VOC-01).
 실행: ~/voice-env/bin/python tools/voice-sidecar/server.py
@@ -187,21 +187,40 @@ def has_hf_token() -> bool:
 # ── API 키 ─────────────────────────────────────────────────────────────────────────────────
 
 
+def _read_key_file() -> tuple[bool, Optional[str]]:
+    """(파일이 있는가, 저장된 키). 링크는 따라가지 않고, 있는 파일은 읽기 전에 600으로 바로잡는다."""
+    try:
+        fd = os.open(KEY_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False, None
+    except OSError as e:
+        raise SystemExit(f"키 파일을 열 수 없어요 ({KEY_FILE}): {e.strerror}. 링크이면 지우고 다시 켜 주세요") from e
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        try:
+            os.fchmod(f.fileno(), 0o600)
+        except PermissionError as e:
+            raise SystemExit(f"키 파일이 다른 사용자 것이라 권한을 바로잡지 못해요 ({KEY_FILE}). 지우고 다시 켜거나 SIDECAR_API_KEY로 키를 주세요") from e
+        return True, f.read().strip() or None
+
+
 def resolve_api_key(host: str) -> Optional[str]:
-    """SIDECAR_API_KEY → KEY_FILE 순서. 다른 PC에 열면서 둘 다 없으면 새로 만들어 KEY_FILE에 둔다(본인만 읽기)."""
+    """SIDECAR_API_KEY가 있으면 그 키. 127.0.0.1로만 열면 그 밖에는 키 없이 연다(이전에 다른 PC용으로 만든 KEY_FILE이 남아 있어도).
+    다른 PC에 열면 KEY_FILE 키를 쓰고, 없으면 새로 만든다."""
     key = os.environ.get("SIDECAR_API_KEY", "").strip()
     if key:
         return key
-    if KEY_FILE.exists():
-        saved = KEY_FILE.read_text(encoding="utf-8").strip()
-        if saved:
-            return saved
     if host in LOOPBACK_HOSTS:
         return None
-    KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    exists, saved = _read_key_file()
+    if saved:
+        return saved
+    KEY_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     key = "fsv-" + secrets.token_urlsafe(32)
-    KEY_FILE.write_text(key + "\n", encoding="utf-8")
-    KEY_FILE.chmod(0o600)
+    # 만들 때부터 본인만 읽게 한다(write_text 뒤 chmod하면 그 사이에 다른 사용자가 읽을 수 있다). 링크는 따라가지 않고, 새로 만들 때는 이미 있으면 실패한다
+    flags = os.O_WRONLY | os.O_NOFOLLOW | (os.O_TRUNC if exists else os.O_CREAT | os.O_EXCL)
+    fd = os.open(KEY_FILE, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(key + "\n")
     return key
 
 
@@ -510,17 +529,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": {"message": f"사이드카 오류: {type(e).__name__}"}})
 
 
+def announce_key(key: Optional[str]) -> None:
+    """키는 이 컴퓨터의 터미널에만 보인다. 파일·로그로 가는 실행(자동 시작 등)에는 키를 쓰지 않고 키 파일 위치만 남긴다."""
+    if key is None:
+        log.info("API 키 없이 열었어요 (이 컴퓨터에서만 쓸 수 있어요)")
+        return
+    where = "SIDECAR_API_KEY" if os.environ.get("SIDECAR_API_KEY") else str(KEY_FILE)
+    if sys.stderr.isatty():
+        print(f"\nERP에 넣을 API 키: {key}\n(저장 위치: {where})\n", file=sys.stderr, flush=True)
+    else:
+        log.info("API 키로 열었어요. 키는 %s 에서 확인해요 (로그에는 남기지 않아요)", where)
+
+
 def main() -> None:
     global API_KEY
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
     API_KEY = resolve_api_key(HOST)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     log.info("voice-sidecar가 http://%s:%d 에서 기다려요 (엔진: %s)", HOST, PORT, ", ".join(ENGINE_IDS))
-    if API_KEY is None:
-        log.info("API 키 없이 열었어요 (이 컴퓨터에서만 쓸 수 있어요)")
-    else:
-        # 이 컴퓨터의 터미널에만 보인다. ERP의 음성 인식 카드 API 키 칸에 넣는다
-        print(f"\nERP에 넣을 API 키: {API_KEY}\n(저장 위치: {KEY_FILE if not os.environ.get('SIDECAR_API_KEY') else 'SIDECAR_API_KEY'})\n", file=sys.stderr, flush=True)
+    announce_key(API_KEY)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
