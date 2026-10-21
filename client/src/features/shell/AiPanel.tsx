@@ -23,7 +23,7 @@ import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
-import { controlAiAgent, useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
+import { controlAiAgent, sendAiAgentNote, useAiCapabilities, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
 import { useAiImageDraft } from '@/hooks/useAiImageDraft';
 import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
@@ -32,7 +32,7 @@ import { driveAiImageProblem } from '@/lib/driveFiles';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
 import { researchCardSeedAt, webResearchStartAt, type AiWebResearchStart } from '@/lib/aiResearchSeed';
-import { AI_BROWSER_TITLE, browserDisabledReason, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
+import { AI_BROWSER_TITLE, browserDisabledReason, browserMaxActionsOf, readAiBrowserPreference, writeAiBrowserPreference } from '@/lib/aiBrowser';
 import { AiDriveMention } from '@/features/shell/AiDriveMention';
 import { AI_SLASH_MENU_ID, AiSlashCommandMenu, aiSlashOptionId } from '@/features/shell/AiSlashCommandMenu';
 import { AI_DRIVE_TITLE, attachDriveFile, driveDisabledReason, mentionStillOpen, mentionTriggerAt, moveMentionIndex, readAiDrivePreference, removeMentionTrigger, writeAiDrivePreference } from '@/lib/aiDrive';
@@ -394,7 +394,22 @@ export function AiPanel() {
     inputRef.current?.focus();
   };
 
+  // 브라우저·화면 조작을 켠 답이 진행 중이면 보내는 글은 새 질문이 아니라 작업 중 덧붙임이다 (이슈 #430)
+  const canAddNote = pending && live?.control != null;
+  const sendNote = () => {
+    const text = draft.trim();
+    if (!text) return;
+    stickRef.current = true;
+    void sendAiAgentNote(text).then((sent) => {
+      if (sent) setDraft('');
+    });
+  };
+
   const submit = () => {
+    if (canAddNote) {
+      sendNote();
+      return;
+    }
     if (slashDraft.kind === 'command') runSlashCommand(slashDraft.command, slashDraft.question);
     else send(slashDraft.text);
   };
@@ -598,7 +613,7 @@ export function AiPanel() {
             onChange={(event) => changeDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            placeholder={drive.ready ? '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령, @로 Drive 파일 붙이기)' : '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령)'}
+            placeholder={canAddNote ? '작업 중인 철강맨AI에게 말 덧붙이기 — 예: 부산 말고 서울 기준으로 (Enter로 보내기)' : drive.ready ? '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령, @로 Drive 파일 붙이기)' : '철강맨AI에게 묻기 — 예: 여재가 뭐야? (/로 명령)'}
             aria-label="철강맨AI에게 질문"
             aria-controls={slashOpen ? AI_SLASH_MENU_ID : undefined}
             aria-activedescendant={slashOpen ? aiSlashOptionId(slashCommands[slashCurrent].key) : undefined}
@@ -677,9 +692,12 @@ export function AiPanel() {
             ) : null}
             <span className="text-cap text-ink-3">Enter 보내기 · Shift+Enter 줄바꿈 · / 명령</span>
             {pending ? (
-              <Button size="sm" icon="x-circle" className="ml-auto" aria-label="멈추기" onClick={() => ask.stop()}>
-                멈추기
-              </Button>
+              <>
+                {canAddNote ? <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim()} aria-label="덧붙이기" title="작업 중인 AI에게 말을 덧붙여요" onClick={sendNote} /> : null}
+                <Button size="sm" icon="x-circle" className={canAddNote ? '' : 'ml-auto'} aria-label="멈추기" onClick={() => ask.stop()}>
+                  멈추기
+                </Button>
+              </>
             ) : (
               <Button variant="primary" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || photos.busy} aria-label="보내기" onClick={submit} />
             )}
@@ -982,6 +1000,11 @@ function ChatEntry({
           </span>
         ) : null}
         <div className="rounded-lg rounded-br-xs bg-brand-tint px-3 py-2 text-sm break-keep whitespace-pre-wrap wrap-anywhere text-brand">{entry.content}</div>
+        {entry.notes?.map((note, index) => (
+          <div key={index} className="rounded-lg rounded-br-xs border border-brand/30 bg-surface px-3 py-1.5 text-xs break-keep whitespace-pre-wrap wrap-anywhere text-brand">
+            <b className="font-semibold">덧붙임</b> · {note}
+          </div>
+        ))}
       </div>
     );
   }
@@ -1053,6 +1076,7 @@ function ChatEntry({
 
 /** 답을 기다리는 동안 철강맨이 단계에 맞춰 바뀐다 (이슈 #414). 도구의 시작·끝 시각은 이 화면이 받은 때로 센다 */
 function LiveAnswer({ live, seedKey }: { live: AiChatLive; seedKey: string }) {
+  const maxActions = browserMaxActionsOf(useAiCapabilities().data);
   const times = useRef(new Map<string, ToolTimes>());
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1074,7 +1098,7 @@ function LiveAnswer({ live, seedKey }: { live: AiChatLive; seedKey: string }) {
     <div className="flex gap-3">
       <SteelmanAiStatus status={status} seedKey={stepKey} />
       <div className={`min-w-0 flex-1 px-3 py-2.5 ${ANSWER_BUBBLE}`}>
-        <AiLiveView live={live} onControl={(command) => void controlAiAgent(command)} />
+        <AiLiveView live={live} onControl={(command) => void controlAiAgent(command)} maxActions={maxActions} />
       </div>
     </div>
   );

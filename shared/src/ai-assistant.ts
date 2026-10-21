@@ -133,6 +133,10 @@ export interface AiBrowserCapabilities {
   available: boolean;
   /** 쓸 수 없을 때 화면에 보일 이유 (예: 서버에서 꺼 두었어요) */
   reason?: string;
+  /** 한 답에서 세는 브라우저 동작 수 상한 (이슈 #430). 화면 읽기·실패한 동작은 세지 않는다. 화면의 'n/상한'에 쓴다 */
+  maxActions?: number;
+  /** 관리자가 '모든 사이트 열기'를 켰는지 (이슈 #430). 켜면 목록 밖 주소도 연다 */
+  openAllSites?: boolean;
 }
 
 /** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */
@@ -498,6 +502,7 @@ export interface AiActionCardExecuteResult {
  * - browser_frame: 브라우저 도구(열기·누르기·입력·스크롤·뒤로) 뒤의 화면 사진 (이슈 #373). 모델에는 보내지 않고 화면에만 보인다
  * - browser_live: 답하는 동안 브라우저 화면을 초당 2장쯤 계속 보낸다 (이슈 #425). browser_frame과 달리 답에 남기지 않는다
  * - agent_paused·agent_resumed: 사용자가 멈춘 답이 다음 브라우저·화면 동작(tool) 앞에서 기다리기 시작했을 때·다시 갈 때 (이슈 #425)
+ * - user_note: 사용자가 작업 중에 덧붙인 말을 모델에 넘겼을 때 (이슈 #430)
  * - ui_action: 화면 조작 (이슈 #382). 사용자의 브라우저가 지금 화면에서 실행하고 POST /ai-assistant/ui-actions/:actionId로 결과를 돌려준다.
  *   같은 도구의 tool_start 뒤, tool_end 앞에 온다
  * - 마지막은 done 또는 error 하나
@@ -536,6 +541,7 @@ export type AiAssistantStreamEvent =
     }
   | { type: 'agent_paused'; tool: string }
   | { type: 'agent_resumed' }
+  | { type: 'user_note'; text: string }
   | { type: 'ui_action'; actionId: string; tool: AiScreenTool; args: Record<string, string> }
   /** thread: 저장을 요청한 질문이면 저장한 대화, 저장에 실패했으면 null (이슈 #399) */
   | { type: 'done'; reply: AiAssistantReplyView; thread?: AiChatThreadRef | null }
@@ -594,6 +600,8 @@ export type AiChatMessageView =
       imageCount?: number;
       /** 입력칸 @로 붙인 Drive 파일 이름 (이슈 #398. 파일 글은 저장하지 않는다) */
       driveFiles?: string[];
+      /** 답하는 중에 덧붙인 말 (이슈 #430) */
+      notes?: string[];
     }
   | {
       id: number;
@@ -633,6 +641,14 @@ export type AiAgentControlCommand = (typeof AI_AGENT_CONTROL_COMMANDS)[number];
 
 export interface AiAgentControlInput {
   command: AiAgentControlCommand;
+}
+
+/** 답하는 중에 덧붙이는 말 (이슈 #430). 한 답에 받는 수와 한 번의 길이 상한 (가정값) */
+export const AI_AGENT_NOTES_MAX = 5;
+export const AI_AGENT_NOTE_MAX_CHARS = 500;
+
+export interface AiAgentNoteInput {
+  text: string;
 }
 
 /** 멈춰 둘 수 있는 시간. 넘으면 그 답은 브라우저·화면 조작을 그만두고 지금까지 본 것으로 답한다 (가정값, 이슈 #425) */

@@ -7,7 +7,10 @@ import {
   AI_BROWSER_OFF_REASON,
   AI_BROWSER_UNAVAILABLE_HINT,
   appendBrowserFrame,
+  AI_BROWSER_MAX_ACTIONS,
   browserActionCount,
+  browserMaxActionsOf,
+  parseStartSiteInput,
   browserDisabledReason,
   browserFrameSrc,
   browserFramesSummary,
@@ -123,5 +126,32 @@ describe('도구 줄', () => {
     const steps = [{ kind: 'thinking' }, { kind: 'tool', name: 'browser_open' }, { kind: 'tool', name: 'web_search' }, { kind: 'tool', name: 'browser_click' }];
     expect(browserActionCount(steps)).toBe(2);
     expect(browserFramesSummary(3)).toBe('브라우저로 본 화면 3장');
+  });
+
+  it('화면 읽기와 실패한 동작은 세지 않는다 (서버와 같은 규칙, 이슈 #430)', () => {
+    const steps = [
+      { kind: 'tool', name: 'browser_open', result: { resultPreview: '[브라우저 화면] news' } },
+      { kind: 'tool', name: 'browser_snapshot', result: { resultPreview: '[브라우저 화면] news' } },
+      { kind: 'tool', name: 'browser_click', result: { resultPreview: '{"오류":"막았어요: 결제"}' } },
+      { kind: 'tool', name: 'browser_click', result: null },
+    ];
+    expect(browserActionCount(steps)).toBe(2);
+  });
+
+  it('서버가 알려 준 동작 수 상한을 쓰고, 모르면 기본값이다', () => {
+    expect(browserMaxActionsOf({ browser: { available: true, maxActions: 60 } })).toBe(60);
+    expect(browserMaxActionsOf({ browser: { available: true } })).toBe(AI_BROWSER_MAX_ACTIONS);
+    expect(browserMaxActionsOf(undefined)).toBe(AI_BROWSER_MAX_ACTIONS);
+  });
+});
+
+describe('시작 사이트 입력 (이슈 #430)', () => {
+  it('주소를 붙여 넣어도 호스트만 소문자로 남기고, 도메인이 아니면 null이다', () => {
+    expect(parseStartSiteInput(' KOSIS.kr ')).toBe('kosis.kr');
+    expect(parseStartSiteInput('https://www.Kita.net/path?q=1')).toBe('www.kita.net');
+    expect(parseStartSiteInput('localhost')).toBeNull();
+    expect(parseStartSiteInput('a b.com')).toBeNull();
+    expect(parseStartSiteInput('')).toBeNull();
+    expect(parseStartSiteInput('http://')).toBeNull();
   });
 });

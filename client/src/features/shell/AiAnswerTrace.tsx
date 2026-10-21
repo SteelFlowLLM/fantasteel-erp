@@ -92,8 +92,21 @@ function LiveTool({ step }: { step: Extract<AiTimelineStep, { kind: 'tool' }> })
   );
 }
 
+/** 사용자가 작업 중에 덧붙인 말 (이슈 #430). 서버가 모델에 넘기기 전에는 '전하는 중' */
+function LiveUserNote({ step }: { step: Extract<AiTimelineStep, { kind: 'userNote' }> }) {
+  return (
+    <p className="flex items-start gap-1.5 rounded-xs bg-brand-tint px-2 py-1 text-xs text-brand">
+      <Icon name="chat" size="sm" className="mt-0.5 flex-none" />
+      <span className="min-w-0 break-words whitespace-pre-wrap">
+        <b className="font-semibold">덧붙임</b> · {step.text}
+        <span className="text-ink-3">{step.applied ? ' · AI에게 전했어요' : ' · 다음 차례에 전해요'}</span>
+      </span>
+    </p>
+  );
+}
+
 /** 답을 기다리는 동안의 진행 상황. 아무것도 오지 않았으면 '만들고 있어요'만 보인다 */
-export function AiLiveView({ live, onControl }: { live: AiChatLive; onControl?: (command: AiAgentControlCommand) => void }) {
+export function AiLiveView({ live, onControl, maxActions = AI_BROWSER_MAX_ACTIONS }: { live: AiChatLive; onControl?: (command: AiAgentControlCommand) => void; maxActions?: number }) {
   const empty = live.steps.length === 0 && live.answer === '' && live.browserFrames.length === 0 && live.liveFrame === null;
   return (
     <div aria-live="polite" className="flex flex-col gap-1.5 text-sm">
@@ -101,6 +114,8 @@ export function AiLiveView({ live, onControl }: { live: AiChatLive; onControl?: 
       {live.steps.map((step, index) =>
         step.kind === 'thinking' ? (
           <LiveThinking key={index} step={step} />
+        ) : step.kind === 'userNote' ? (
+          <LiveUserNote key={index} step={step} />
         ) : step.kind === 'note' ? (
           <p key={index} className="text-cap leading-snug break-words whitespace-pre-wrap text-ink-3">
             {step.text}
@@ -109,7 +124,7 @@ export function AiLiveView({ live, onControl }: { live: AiChatLive; onControl?: 
           <LiveTool key={step.id} step={step} />
         ),
       )}
-      <AiBrowserLiveCard frames={live.browserFrames} liveFrame={live.liveFrame} actions={browserActionCount(live.steps)} />
+      <AiBrowserLiveCard frames={live.browserFrames} liveFrame={live.liveFrame} actions={browserActionCount(live.steps)} max={maxActions} />
       {live.control && onControl ? <AiAgentControlBar control={live.control} onControl={onControl} /> : null}
       {live.answer ? <p className="leading-normal break-keep whitespace-pre-wrap wrap-anywhere">{live.answer}</p> : null}
     </div>
@@ -138,7 +153,7 @@ export function shownBrowserFrame(frames: readonly AiBrowserFrame[], liveFrame: 
 }
 
 /** 답을 기다리는 동안: 철강맨AI가 지금 보는 웹 페이지 화면 (실시간 화면, 없으면 가장 최근 사진 한 장) */
-export function AiBrowserLiveCard({ frames, liveFrame = null, actions }: { frames: readonly AiBrowserFrame[]; liveFrame?: AiBrowserFrame | null; actions: number }) {
+export function AiBrowserLiveCard({ frames, liveFrame = null, actions, max = AI_BROWSER_MAX_ACTIONS }: { frames: readonly AiBrowserFrame[]; liveFrame?: AiBrowserFrame | null; actions: number; max?: number }) {
   const shown = shownBrowserFrame(frames, liveFrame);
   if (!shown) return null;
   const { frame } = shown;
@@ -154,7 +169,7 @@ export function AiBrowserLiveCard({ frames, liveFrame = null, actions }: { frame
             </span>
           ) : null}
         </span>
-        {actions > 0 ? <span aria-label={`브라우저 동작 ${actions}번, 최대 ${AI_BROWSER_MAX_ACTIONS}번`}>{Math.min(actions, AI_BROWSER_MAX_ACTIONS)}/{AI_BROWSER_MAX_ACTIONS}</span> : null}
+        {actions > 0 ? <span aria-label={`브라우저 동작 ${actions}번, 최대 ${max}번`}>{Math.min(actions, max)}/{max}</span> : null}
       </div>
       <img src={browserFrameSrc(frame)} alt={frame.title ? `브라우저 화면: ${frame.title}` : '브라우저 화면'} className="w-full rounded-xs border border-line bg-surface" />
       <BrowserFrameCaption frame={frame} />
@@ -228,6 +243,14 @@ function DetailStep({ step }: { step: AiTimelineStep }) {
           <span className="text-cap text-ink-3"> · 모델이 스스로 쓴 설명이라 실제 판단과 다를 수 있어요</span>
         </span>
         <pre className={PRE}>{step.text}</pre>
+      </li>
+    );
+  }
+  if (step.kind === 'userNote') {
+    return (
+      <li className="flex flex-col gap-1 text-xs">
+        <b className="font-semibold text-ink-2">덧붙임</b>
+        <span className="break-words whitespace-pre-wrap text-ink-3">{step.text}</span>
       </li>
     );
   }

@@ -1,4 +1,4 @@
-import { AI_AGENT_CONTROL_COMMANDS, AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiAgentControlCommand, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
+import { AI_AGENT_CONTROL_COMMANDS, AI_AGENT_NOTE_MAX_CHARS, AI_DRIVE_ATTACH_MAX, AI_RESEARCH_LIMITS, AI_NOTION_CONTENT_MAX, AI_NOTION_EDIT_MAX, AI_NOTION_EDIT_TEXT_MAX, AI_NOTION_TITLE_MAX, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_COUNT, AI_IMAGE_MEDIA_TYPES, AI_REASONING_LEVELS, AI_SCREEN_ERROR_MAX, AI_SCREEN_MAP_MAX, AI_SCREEN_RESULT_MAX, type AiAgentControlCommand, type AiImageMediaType, type AiReasoningLevel } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBase64, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { UpdateMeetingCandidateDto } from '../../meeting-minutes/dto/meeting-minutes.dto';
@@ -62,6 +62,15 @@ export class AiScreenMapEntryDto {
 export class AgentControlDto {
   @IsIn(AI_AGENT_CONTROL_COMMANDS, { message: '명령은 pause·step·resume 중 하나예요' })
   command!: AiAgentControlCommand;
+}
+
+/** POST ai-assistant/agent-control/:controlId/notes (이슈 #430). 답하는 중에 덧붙이는 말 */
+export class AgentNoteDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty({ message: '덧붙일 말을 적어 주세요' })
+  @MaxLength(AI_AGENT_NOTE_MAX_CHARS)
+  text!: string;
 }
 
 /** POST ai-assistant/ui-actions/:actionId (이슈 #382). 화면이 동작을 한 결과 */

@@ -1,4 +1,4 @@
-import { AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AuthUser } from '@fantasteel/shared';
+import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AuthUser } from '@fantasteel/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
@@ -9,12 +9,14 @@ import type { AiChatQuestionInput } from './chat/ai-chat-thread.view';
 import type { LlmClient, LlmEndpoint, LlmModelCapabilities, LlmStreamHandlers, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { LLM_PROFILE, type LlmProfile } from '../llm/llm-profiles';
+import type { BrowserSettings, BrowserSettingsStore } from '../llm/browser-settings.store';
 import type { LlmSettings, LlmSettingsStore } from '../llm/llm-settings.store';
+import { DEFAULT_BROWSER_MAX_ACTIONS } from './browser/browser-rules';
 import type { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import type { AiActionCardService } from './ai-action-card.service';
 import type { AiOpsCardService } from './ai-ops-card.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import { AGENT_PAUSE_TIMEOUT, AiAssistantService, BROWSER_IMAGE_DROPPED, BROWSER_IMAGE_NOTE, MAX_BROWSER_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
+import { AGENT_PAUSE_TIMEOUT, AiAssistantService, BROWSER_IMAGE_DROPPED, BROWSER_IMAGE_NOTE, BROWSER_EXTRA_TOOL_ROUNDS, MAX_DRIVE_TOOL_ROUNDS, MAX_NOTION_TOOL_ROUNDS, MAX_SCREEN_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MAX_WEB_TOOL_ROUNDS } from './ai-assistant.service';
 import { AssistantBrowserToolbox, type BrowserSessionInput, type BrowserToolResult } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
@@ -242,6 +244,11 @@ describe('AiAssistantService', () => {
     },
   };
 
+  let browserSettingsState: BrowserSettings = { startSites: null, openAllSites: false };
+  beforeEach(() => {
+    browserSettingsState = { startSites: null, openAllSites: false };
+  });
+
   function setup(
     settings: Partial<LlmSettings>,
     replies: (call: LlmCall, index: number) => Promise<LlmToolReply>,
@@ -257,6 +264,8 @@ describe('AiAssistantService', () => {
     // 기본은 연결하지 않은 Drive (이슈 #398 2단계)
     driveTools: AssistantDriveToolbox = new AssistantDriveToolbox(OFF_DRIVE),
   ) {
+    // 관리자가 저장한 브라우저 주소 범위 (이슈 #430). 시험이 browserSettings를 바꿔 쓴다
+    const browserSettings = { read: async () => browserSettingsState } as unknown as BrowserSettingsStore;
     const store = { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'test-model', apiKey: null, ...settings }) } as unknown as LlmSettingsStore;
     const calls: LlmCall[] = [];
     // 모델 정보를 몇 번 물었는지 (사진 없는 질문은 묻지 않아야 한다)
@@ -299,7 +308,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService, browserSettings), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -908,11 +917,11 @@ describe('AiAssistantService', () => {
       });
     });
 
-    it(`브라우저를 켜면 도구 호출 상한이 ${MAX_BROWSER_TOOL_ROUNDS}번이고, 답이 실패해도 브라우저를 닫는다`, async () => {
+    it(`브라우저를 켜면 도구 호출 상한이 동작 수 상한 + ${BROWSER_EXTRA_TOOL_ROUNDS}번이고, 답이 실패해도 브라우저를 닫는다`, async () => {
       const browser = fakeBrowser();
       const { service, calls } = setup({}, async (_call, index) => call(`c${index}`, 'browser_click', { ref: 'r1' }), undefined, undefined, undefined, browser.toolbox);
       await stream(service, { question: '계속 눌러줘', browser: true, webSearch: true });
-      expect(calls).toHaveLength(MAX_BROWSER_TOOL_ROUNDS + 1);
+      expect(calls).toHaveLength(DEFAULT_BROWSER_MAX_ACTIONS + BROWSER_EXTRA_TOOL_ROUNDS + 1);
       expect(toolNamesOf(calls[0])).toEqual(['get_inventory', 'web_search', 'read_web_page', 'browser_open', 'browser_click']);
       expect(browser.closed()).toBe(1);
 
@@ -999,6 +1008,26 @@ describe('AiAssistantService', () => {
         expect(browser.finishes).toEqual([{ key: `${user.employeeId}:${SESSION_ID}`, aborted: true }]);
         expect(browser.closed()).toBe(1);
       });
+    });
+
+    it('관리자가 저장한 시작 사이트·모든 사이트 열기를 브라우저 세션과 프롬프트에 반영하고, capabilities로 알린다 (이슈 #430)', async () => {
+      const off = fakeBrowser();
+      const first = setup({}, async () => answer('네'), undefined, undefined, undefined, off.toolbox);
+      await stream(first.service, { question: '봐줘', browser: true });
+      expect(off.inputs[0].openAllSites).toBe(false);
+      expect(off.inputs[0].startSites).toContain('naver.com');
+      expect(first.calls[0].messages[0].content).toContain('시작 사이트(네이버·다음·위키백과·정부 go.kr 등)만 열 수 있어요');
+      expect(first.calls[0].messages[0].content).toContain(`브라우저 동작은 ${DEFAULT_BROWSER_MAX_ACTIONS}번, 10분까지`);
+
+      browserSettingsState = { startSites: ['kosis.kr'], openAllSites: true };
+      const on = fakeBrowser();
+      const second = setup({}, async () => answer('네'), undefined, undefined, undefined, on.toolbox);
+      await stream(second.service, { question: '봐줘', browser: true });
+      expect(on.inputs[0].openAllSites).toBe(true);
+      expect(on.inputs[0].startSites).toEqual(['kosis.kr']);
+      expect(second.calls[0].messages[0].content).toContain('바깥 웹 주소를 어디든 열 수 있어요');
+      expect(second.calls[0].messages[0].content).not.toContain('시작 사이트(네이버·다음·위키백과·정부 go.kr 등)만 열 수 있어요');
+      expect((await second.service.capabilities()).browser).toMatchObject({ available: true, maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: true });
     });
 
     describe('멈춤·한 단계·계속 (이슈 #425)', () => {
@@ -1168,6 +1197,78 @@ describe('AiAssistantService', () => {
         expect(events.some((e) => e.type === 'agent_resumed')).toBe(false);
         expect(browser.runs).toEqual([]);
         expect(browser.finishes).toEqual([{ key: null, aborted: true }]);
+      });
+
+      describe('작업 중 말 덧붙이기 (이슈 #430)', () => {
+        const note = '부산 말고 서울 기준으로 봐줘';
+        const noteMessages = (messages: LlmToolMessage[]) => messages.filter((m) => m.role === 'user' && typeof m.content === 'string' && m.content.startsWith('[사용자가 작업 중에 덧붙인 말]'));
+
+        it('도구를 실행하는 동안 덧붙인 말은 다음 모델 호출 앞에 user 메시지로 들어가고 user_note로 알린다', async () => {
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service, calls } = setup({}, async (_call, index) => (index === 0 ? (ref.service?.addAgentNote(user, CONTROL_ID, note), open) : answer('서울 기준이에요')), undefined, undefined, undefined, browser.toolbox);
+          ref.service = service;
+          const events: AiAssistantStreamEvent[] = [];
+          const reply = await (await service.prepare(user, base, { interactive: true })).run((event) => events.push(event));
+          expect(reply.answer).toBe('서울 기준이에요');
+          expect(noteMessages(calls[1].messages).map((m) => m.content)).toEqual([`[사용자가 작업 중에 덧붙인 말] ${note}`]);
+          expect(noteMessages(calls[0].messages)).toHaveLength(0);
+          expect(events.filter((e) => e.type === 'user_note')).toEqual([{ type: 'user_note', text: note }]);
+        });
+
+        it('멈춘 동안 덧붙이고 계속을 누르면, 하려던 동작은 건너뛰고 덧붙인 말부터 반영해 이어 간다', async () => {
+          const { events, browser, calls } = await run([open, answer('서울로 다시 볼게요')], (_nth, _tool, service) => {
+            service.addAgentNote(user, CONTROL_ID, note);
+            service.controlAgent(user, CONTROL_ID, 'resume');
+          });
+          expect(browser.runs).toEqual([]);
+          expect(kinds(events)).toEqual(['agent_paused', 'agent_resumed', 'tool_start', 'tool_end', 'user_note']);
+          const skipped = calls[1].messages.find((m) => m.role === 'tool');
+          expect(skipped?.content).toContain('이 동작은 하지 않았어요');
+          expect(noteMessages(calls[1].messages)).toHaveLength(1);
+        });
+
+        it('도구 없이 답하는 중에 덧붙였으면 그 말을 반영해 한 번 더 답한다', async () => {
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service, calls } = setup({}, async (_call, index) => (index === 0 ? (ref.service?.addAgentNote(user, CONTROL_ID, note), answer('부산 기준이에요')) : answer('서울 기준으로 다시 말해요')), undefined, undefined, undefined, browser.toolbox);
+          ref.service = service;
+          const reply = await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          expect(calls).toHaveLength(2);
+          expect(reply.answer).toBe('서울 기준으로 다시 말해요');
+        });
+
+        it(`답하는 중이 아니면 COM-003, 남의 답이면 COM-003, 한 답에 ${AI_AGENT_NOTES_MAX}번을 넘으면 COM-004다`, async () => {
+          const codeOf = (fn: () => void) => {
+            try {
+              fn();
+              return 'ok';
+            } catch (error) {
+              return ((error as AppException).getResponse() as { code: string }).code;
+            }
+          };
+          const idle = setup({}, async () => answer('')).service;
+          expect(codeOf(() => idle.addAgentNote(user, CONTROL_ID, '말'))).toBe('COM-003');
+          const results: string[] = [];
+          const browser = fakeBrowser();
+          const ref: { service: AiAssistantService | null } = { service: null };
+          const { service } = setup(
+            {},
+            async (_call, index) => {
+              if (index > 0) return answer('네');
+              results.push(codeOf(() => ref.service?.addAgentNote({ ...user, employeeId: 2 }, CONTROL_ID, '말')));
+              for (let i = 0; i <= AI_AGENT_NOTES_MAX; i += 1) results.push(codeOf(() => ref.service?.addAgentNote(user, CONTROL_ID, `말${i}`)));
+              return answer('네');
+            },
+            undefined,
+            undefined,
+            undefined,
+            browser.toolbox,
+          );
+          ref.service = service;
+          await (await service.prepare(user, base, { interactive: true })).run(() => undefined);
+          expect(results).toEqual(['COM-003', ...Array(AI_AGENT_NOTES_MAX).fill('ok'), 'COM-004']);
+        });
       });
 
       describe('controlAgent', () => {
@@ -1668,13 +1769,13 @@ describe('AiAssistantService', () => {
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

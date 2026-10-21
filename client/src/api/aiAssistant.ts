@@ -2,6 +2,7 @@
 import type {
   AiAgentControlCommand,
   AiAgentControlInput,
+  AiAgentNoteInput,
   AiActionCardExecuteRequest,
   AiActionCardExecuteResult,
   AiAssistantCapabilitiesView,
@@ -26,7 +27,7 @@ export const aiAssistantKeys = {
 /** 대화 목록 한 번에 읽는 수 */
 export const AI_CHAT_THREAD_PAGE_SIZE = 20;
 
-const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'browser_live', 'agent_paused', 'agent_resumed', 'ui_action', 'done', 'error'];
+const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'browser_live', 'agent_paused', 'agent_resumed', 'user_note', 'ui_action', 'done', 'error'];
 
 /**
  * 스트림 한 줄을 이벤트로 읽는다. JSON이 아니면 오류, 모르는 종류의 이벤트는 null(서버가 새 종류를 더해도 화면이 멈추지 않게 건너뛴다).
@@ -70,6 +71,9 @@ export const aiAssistantApi = {
   /** 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 (이슈 #425). 답이 이미 끝났으면 COM-003 */
   controlAgent: (controlId: string, command: AiAgentControlCommand): Promise<{ accepted: true }> =>
     serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}`, { body: { command } satisfies AiAgentControlInput }),
+  /** 답하는 중에 말 덧붙이기 (이슈 #430). 답이 이미 끝났으면 COM-003 */
+  addAgentNote: (controlId: string, text: string): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/notes`, { body: { text } satisfies AiAgentNoteInput }),
   /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
   getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
   getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),

@@ -6,6 +6,10 @@ export function useLlmSettings() {
   return useQuery({ queryKey: llmKeys.settings(), queryFn: llmApi.getSettings });
 }
 
+export function useLlmBrowserSettings() {
+  return useQuery({ queryKey: llmKeys.browserSettings(), queryFn: llmApi.getBrowserSettings });
+}
+
 export function useLlmConnectionTest() {
   return useMutation({ mutationFn: llmApi.testConnection });
 }

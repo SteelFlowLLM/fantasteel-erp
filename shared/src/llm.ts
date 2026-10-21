@@ -53,3 +53,25 @@ export interface LlmChatTestView {
   latencyMs: number | null;
   error: string | null;
 }
+
+/** 철강맨AI 브라우저의 열 수 있는 주소 설정 (문서에 없는 기능, 이슈 #430). AI 연결 설정과 같은 권한 */
+export interface LlmBrowserSettingsView {
+  /** 관리자가 저장한 시작 사이트. 저장한 적이 없으면 null (서버 기본값·BROWSER_START_SITES를 쓴다) */
+  startSites: string[] | null;
+  /** 지금 실제로 쓰는 시작 사이트 */
+  effectiveStartSites: string[];
+  /** 저장한 목록이 없을 때 쓰는 서버 기본 목록(BROWSER_START_SITES 또는 기본 목록) */
+  defaultStartSites: string[];
+  /** 켜면 검색 결과·질문·시작 사이트에 없는 주소도 연다. 사내 주소·로그인·결제 막기는 그대로 */
+  openAllSites: boolean;
+}
+
+export interface LlmBrowserSettingsInput {
+  /** null이면 저장한 목록을 지우고 서버 기본값으로 돌아간다 */
+  startSites: string[] | null;
+  openAllSites: boolean;
+}
+
+/** 시작 사이트 목록에 넣을 수 있는 호스트 모양: 소문자 도메인, 점 하나 이상 */
+export const LLM_START_SITE_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+export const LLM_START_SITES_MAX = 50;

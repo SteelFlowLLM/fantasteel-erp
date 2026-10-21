@@ -117,7 +117,7 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
   afterAll(() => new Promise<void>((resolve) => internal.close(() => resolve())));
   /** 세션이 연 컨텍스트들 (밖에서 페이지 DOM을 보거나 탭을 닫으려고 모은다) */
   const contexts: BrowserContext[] = [];
-  const toolbox = (timeLimitMs?: number) =>
+  const toolbox = (timeLimitMs?: number, maxActions?: number) =>
     new AssistantBrowserToolbox(pool, {
       guard: { resolve },
       prepareContext: async (context) => {
@@ -125,12 +125,28 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
         await serveFixtures(context);
       },
       timeLimitMs,
+      maxActions,
     });
   const until = async (done: () => boolean, ms = 6_000) => {
     for (const start = Date.now(); !done() && Date.now() - start < ms; ) await new Promise((r) => setTimeout(r, 100));
   };
 
   afterAll(() => pool.shutdown());
+
+  it('화면 읽기와 실패한 동작은 동작 수에 세지 않고, 상한을 넘는 동작은 막는다 (이슈 #430)', async () => {
+    const session = toolbox(undefined, 2).session({ question: 'https://example.test/ 봐줘', web: web() });
+    try {
+      expect((await session.run(call('browser_open', { url: 'https://example.test/' }))).content).toContain('(브라우저 동작 1번 남음)');
+      expect((await session.run(call('browser_snapshot'))).content).toContain('(브라우저 동작 1번 남음)');
+      // 없는 번호를 눌러 실패해도 세지 않는다
+      expect(JSON.parse((await session.run(call('browser_click', { ref: 'r99999' }))).content).오류).toContain('없는 번호');
+      expect((await session.run(call('browser_snapshot'))).content).toContain('(브라우저 동작 1번 남음)');
+      expect((await session.run(call('browser_scroll', { direction: 'down' }))).content).toContain('[브라우저 화면]');
+      expect(JSON.parse((await session.run(call('browser_scroll', { direction: 'up' }))).content).오류).toContain('2번까지만');
+    } finally {
+      await session.close();
+    }
+  });
 
   it('열기·화면 읽기, 막을 것(로그인·파일·비밀번호·POST 폼·회사 안 정보·사내망 요청·새 창)은 막는다', async () => {
     const link = web();

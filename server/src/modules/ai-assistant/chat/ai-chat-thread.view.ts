@@ -1,5 +1,7 @@
 // 저장한 대화(이슈 #399)의 제목·응답 모양·카드 상태. DB 없이 시험한다
 import {
+  AI_AGENT_NOTE_MAX_CHARS,
+  AI_AGENT_NOTES_MAX,
   AI_CHAT_TITLE_MAX,
   AI_REASONING_LEVELS,
   type AiActionCard,
@@ -26,6 +28,8 @@ export interface AiChatQuestionInput {
   imageCount?: number;
   /** 입력칸 @로 붙인 Drive 파일 이름 (이슈 #398). 파일 글은 저장하지 않고 이름만 남긴다 */
   driveFiles?: string[];
+  /** 답하는 중에 덧붙인 말 (이슈 #430). 질문 줄의 meta에 남긴다 */
+  notes?: string[];
 }
 
 interface ThreadRow {
@@ -67,17 +71,24 @@ export const toChatThreadSummary = (row: ThreadRow): AiChatThreadSummaryView => 
 export const chatHistoryTurns = (rows: readonly (Pick<MessageRow, 'role' | 'content'> & { meta?: unknown })[]): AiAssistantTurn[] =>
   rows.map((row) => {
     if (row.role === AI_CHAT_ROLE.ASSISTANT) return { role: 'assistant', content: row.content };
-    const files = driveFilesOf(objectOf(row.meta).driveFiles);
-    return { role: 'user', content: files.length ? `${row.content}\n(이 질문에 붙인 Drive 파일: ${files.join(', ')})` : row.content };
+    const meta = objectOf(row.meta);
+    const files = stringListOf(meta.driveFiles);
+    const notes = stringListOf(meta.notes);
+    return {
+      role: 'user',
+      content: [row.content, files.length ? `(이 질문에 붙인 Drive 파일: ${files.join(', ')})` : null, notes.length ? `(답하는 중에 덧붙인 말: ${notes.join(' / ')})` : null].filter(Boolean).join('\n'),
+    };
   });
 
-function driveFilesOf(value: unknown): string[] {
+/** meta의 글 목록 (Drive 파일 이름·덧붙인 말) */
+function stringListOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((name): name is string => typeof name === 'string') : [];
 }
 
 export function questionMeta(input: AiChatQuestionInput): Record<string, string | number | boolean | string[]> | null {
   const meta = {
     ...(input.driveFiles?.length ? { driveFiles: input.driveFiles.slice(0, 3).map((name) => name.slice(0, 200)) } : {}),
+    ...(input.notes?.length ? { notes: input.notes.slice(0, AI_AGENT_NOTES_MAX).map((note) => note.slice(0, AI_AGENT_NOTE_MAX_CHARS)) } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     ...(input.webSearch ? { webSearch: true } : {}),
     ...(input.browser ? { browser: true } : {}),
@@ -115,7 +126,8 @@ export function toChatMessageView(row: MessageRow): AiChatMessageView {
       ...(meta.webSearch === true ? { webSearch: true } : {}),
       ...(meta.browser === true ? { browser: true } : {}),
       ...(typeof meta.imageCount === 'number' && meta.imageCount > 0 ? { imageCount: meta.imageCount } : {}),
-      ...(driveFilesOf(meta.driveFiles).length ? { driveFiles: driveFilesOf(meta.driveFiles) } : {}),
+      ...(stringListOf(meta.driveFiles).length ? { driveFiles: stringListOf(meta.driveFiles) } : {}),
+      ...(stringListOf(meta.notes).length ? { notes: stringListOf(meta.notes) } : {}),
     };
   }
   const webSources = Array.isArray(row.webSources) ? (row.webSources as AiWebSource[]) : null;

@@ -12,16 +12,17 @@ import { decideBrowserRequest, installRequestGuard, type HostDecisionCache, type
 import { BrowserPool, BrowserUnavailableError } from './browser-pool';
 import {
   ACTION_SNAPSHOT_MAX_CHARS,
-  BROWSER_TIME_PER_ANSWER_MS,
   BROWSER_TYPE_MAX,
+  browserMaxActions,
+  browserTimeLimitMs,
   browserStartSites,
   clickBlockReason,
   isStartSiteUrl,
   displayUrl,
   formatSnapshot,
   isPostFormSubmission,
-  MAX_BROWSER_ACTIONS_PER_ANSWER,
   RefBook,
+  RepeatGuard,
   SNAPSHOT_MAX_CHARS,
   SNAPSHOT_MAX_NODES,
   typeBlockReason,
@@ -138,7 +139,7 @@ const NO_UDP_SCRIPT = `(() => {
 const OPEN: LlmToolDefinition = {
   name: 'browser_open',
   description:
-    '브라우저로 페이지를 연다. 이번 답의 web_search·search_places 결과에 있던 주소, 사용자가 질문에 적은 주소, 시작 사이트(네이버·다음·위키백과·정부 go.kr 등)의 주소만 열 수 있다. 페이지 안에서 검색하거나 다음 쪽으로 넘기는 등 read_web_page로 모자랄 때만 쓴다. 결과는 화면 글(요소마다 [r번호])이다.',
+    '브라우저로 페이지를 연다. 이번 답의 web_search·search_places 결과에 있던 주소, 사용자가 질문에 적은 주소, 시작 사이트(네이버·다음·위키백과·정부 go.kr 등)의 주소를 열 수 있다(관리자가 모든 사이트 열기를 켰으면 그 밖의 바깥 주소도). 페이지 안에서 검색하거나 다음 쪽으로 넘기는 등 read_web_page로 모자랄 때만 쓴다. 결과는 화면 글(요소마다 [r번호])이다.',
   parameters: { type: 'object', properties: { url: { type: 'string', description: '검색 결과나 질문에 있던 주소 그대로' } }, required: ['url'] },
 };
 const SNAPSHOT: LlmToolDefinition = {
@@ -191,6 +192,8 @@ export interface BrowserToolResult {
   content: string;
   /** 화면 사진 (열기·누르기·입력·스크롤·뒤로 뒤). 스트림 browser_frame으로만 보낸다 */
   frame: BrowserFrame | null;
+  /** 실패한 동작이면 true. 동작 수에 세지 않는다 (이슈 #430) */
+  failed?: true;
   /** 지금 페이지 (tool_end.webSources) */
   webSources: AiWebSource[];
   /** 모델에 보내는 번호 표 붙은 화면 사진 (이슈 #427). 화면 이벤트로 보내거나 저장하지 않는다 */
@@ -222,6 +225,9 @@ export interface BrowserSessionInput {
   onLive?: (frame: BrowserLiveFrame) => void;
   /** 동작 뒤 번호 표 붙은 화면 사진을 찍어 모델에 보낼지 (사진을 보는 모델이고 BROWSER_VISION이 켜졌을 때, 이슈 #427) */
   markedImages?: boolean;
+  /** 열 수 있는 시작 사이트 (관리자가 저장한 목록, 없으면 env·기본 목록)와 '모든 사이트 열기' (이슈 #430) */
+  startSites?: readonly string[];
+  openAllSites?: boolean;
 }
 
 export interface BrowserToolboxOptions {
@@ -229,6 +235,8 @@ export interface BrowserToolboxOptions {
   guard?: RequestGuardOptions;
   prepareContext?: (context: BrowserContext) => Promise<void>;
   timeLimitMs?: number;
+  /** 시험: 한 답에서 세는 동작 수 상한 (기본은 env) */
+  maxActions?: number;
 }
 
 /** 열어 둔 탭에서 지금 보고 있던 페이지 (다음 질문의 프롬프트에 알린다) */
@@ -329,7 +337,7 @@ function questionUrlKeys(question: string): Set<string> {
 }
 
 function failure(reason: string, extra: Record<string, unknown> = {}): BrowserToolResult {
-  return { content: JSON.stringify({ 오류: reason, ...extra }), frame: null, webSources: [] };
+  return { content: JSON.stringify({ 오류: reason, ...extra }), frame: null, webSources: [], failed: true };
 }
 
 const blocked = (reason: string) => failure(`막았어요: ${reason}`, { 안내: USER_MUST_DO_IT });
@@ -349,6 +357,9 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
   private actions = 0;
+  private readonly maxActions: number;
+  private readonly timeLimitMs: number;
+  private readonly repeats = new RepeatGuard();
   private deadline: number | null = null;
   private deadlineTimer: NodeJS.Timeout | null = null;
   private closed: 'time' | 'abort' | 'done' | null = null;
@@ -376,6 +387,8 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     private readonly makeRoom?: () => Promise<boolean>,
   ) {
     this.questionUrls = questionUrlKeys(input.question);
+    this.maxActions = options.maxActions ?? browserMaxActions();
+    this.timeLimitMs = options.timeLimitMs ?? browserTimeLimitMs();
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
   }
 
@@ -409,6 +422,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     for (const key of questionUrlKeys(input.question)) this.questionUrls.add(key);
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
     this.actions = 0;
+    this.repeats.reset();
     this.startDeadline();
     // 지난 답에서 본 페이지들은 이번 답의 링크·주소 허용 목록에도 넣는다
     if (this.lastPage) input.web.rememberVisited(this.lastPage.url, this.lastPage.title);
@@ -432,7 +446,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   }
 
   private startDeadline() {
-    const limit = this.options.timeLimitMs ?? BROWSER_TIME_PER_ANSWER_MS;
+    const limit = this.timeLimitMs;
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadline = Date.now() + limit;
     this.deadlineTimer = setTimeout(() => void this.close('time'), limit);
@@ -450,10 +464,24 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     }
     if (this.closed === 'time' || (this.deadline !== null && Date.now() >= this.deadline)) {
       await this.close('time');
-      return failure(`브라우저는 한 답에 ${BROWSER_TIME_PER_ANSWER_MS / 60_000}분까지만 써요`, { 안내: '지금까지 본 내용으로 답해요' });
+      return failure(this.timeLimitText(), { 안내: '지금까지 본 내용으로 답해요' });
     }
     if (this.closed) return failure('브라우저를 닫았어요');
-    if (++this.actions > MAX_BROWSER_ACTIONS_PER_ANSWER) return failure(`이번 질문에서는 브라우저 동작을 ${MAX_BROWSER_ACTIONS_PER_ANSWER}번까지만 해요`, { 안내: '지금까지 본 내용으로 답해요' });
+    // 화면 읽기와 실패한 동작은 세지 않는다. 대신 같은 동작을 되풀이하면 막는다 (이슈 #430)
+    if (this.repeats.hit(call.name, args)) return failure('같은 동작을 되풀이해요', { 안내: '다른 방법을 쓰거나, 지금까지 본 내용으로 답해요' });
+    const counted = call.name !== 'browser_snapshot';
+    if (counted && this.actions >= this.maxActions) return failure(`이번 질문에서는 브라우저 동작을 ${this.maxActions}번까지만 해요`, { 안내: '지금까지 본 내용으로 답해요' });
+    if (counted) this.actions += 1;
+    const result = await this.dispatch(call, args, signal);
+    if (counted && result.failed) this.actions -= 1;
+    return result;
+  }
+
+  private timeLimitText(): string {
+    return `브라우저는 한 답에 ${Math.round(this.timeLimitMs / 60_000)}분까지만 써요`;
+  }
+
+  private async dispatch(call: LlmToolCall, args: Record<string, unknown>, signal?: AbortSignal): Promise<BrowserToolResult> {
     try {
       switch (call.name) {
         case 'browser_open':
@@ -491,7 +519,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
       if (error instanceof ToolArgumentError) return failure(error.message);
       if (error instanceof BrowserUnavailableError) return failure(error.message, { 안내: '브라우저를 쓰지 못했다고 알리고 검색 결과로 답해요' });
       if (signal?.aborted || this.closed === 'abort') throw new LlmAbortedError();
-      if (this.closed === 'time') return failure(`브라우저는 한 답에 ${BROWSER_TIME_PER_ANSWER_MS / 60_000}분까지만 써요`, { 안내: '지금까지 본 내용으로 답해요' });
+      if (this.closed === 'time') return failure(this.timeLimitText(), { 안내: '지금까지 본 내용으로 답해요' });
       this.logger.warn(`브라우저 도구 실패 (${call.name}): ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
       return failure('브라우저에서 이 동작을 하지 못했어요', { 안내: 'browser_snapshot으로 지금 화면을 다시 보거나, 지금까지 본 내용으로 답해요' });
     }
@@ -513,13 +541,18 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   /** browser_open으로 열 수 있는 주소: 이번 답의 웹 결과, 질문에 적힌 주소, 이 탭에서 연 페이지, 시작 사이트 */
   private mayOpen(url: string): boolean {
     const key = urlKey(url);
-    return key !== null && (this.input.web.knows(url) || this.questionUrls.has(key) || this.visited.has(key) || isStartSiteUrl(url, browserStartSites()));
+    // '모든 사이트 열기'를 켜도 사내 주소·회사 안 정보 막기는 열기 전에 따로 거친다
+    return key !== null && (this.input.openAllSites === true || this.input.web.knows(url) || this.questionUrls.has(key) || this.visited.has(key) || isStartSiteUrl(url, this.startSites()));
+  }
+
+  private startSites(): readonly string[] {
+    return this.input.startSites ?? browserStartSites();
   }
 
   private async open(url: string): Promise<BrowserToolResult> {
     if (!this.mayOpen(url))
       return failure('이번 답의 검색 결과·질문·시작 사이트에 없는 주소라 열지 않았어요', {
-        안내: `web_search 결과의 주소, 사용자가 적은 주소, 시작 사이트(${browserStartSites().join(', ')})만 열어요. 페이지 안의 링크는 browser_click으로 눌러요`,
+        안내: `web_search 결과의 주소, 사용자가 적은 주소, 시작 사이트(${this.startSites().join(', ')})만 열어요. 페이지 안의 링크는 browser_click으로 눌러요`,
       });
     const internal = this.input.web.internalReference(url);
     if (internal) return blocked(`주소에 회사 안 정보(${internal})가 있어요`);
@@ -578,7 +611,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     const outcome = await this.input.web.readKnownPage(url, signal);
     if (!outcome.ok) return failure(outcome.reason, { ...(outcome.url ? { 주소: outcome.url } : {}), 안내: outcome.hint });
     const host = hostOf(outcome.url);
-    const remaining = Math.max(0, MAX_BROWSER_ACTIONS_PER_ANSWER - this.actions);
+    const remaining = Math.max(0, this.maxActions - this.actions);
     const content = [
       // 최종 주소는 사이트가 정한 값(이동)이라 감싼 안에 두고, 밖에는 호스트만
       `[웹 문서] ${host}`,
@@ -823,7 +856,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     this.blockedRequests = [];
     this.fileChooserBlocked = false;
     this.notes = [];
-    const remaining = Math.max(0, MAX_BROWSER_ACTIONS_PER_ANSWER - this.actions);
+    const remaining = Math.max(0, this.maxActions - this.actions);
     return [formatSnapshot(snapshot, maxChars), ...notes, `(브라우저 동작 ${remaining}번 남음)`].join('\n');
   }
 
