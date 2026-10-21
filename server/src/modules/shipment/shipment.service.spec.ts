@@ -244,14 +244,26 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
           { salesOrderItemId: b.salesOrderItemId, requestQty: 2 },
         ],
       });
-      const snapshotA = { customerName: '나래조선', lots: [{ lotNo: 'SL-TEST-A', values: { thicknessMm: '250.00' } }] };
+      // 목록이 스냅샷에서 뽑는 값(고객사·매수·히트·규격)만 담은 스냅샷
+      const snapshotOf = (customerName: string, items: { itemCode: string; itemType: string }[], heatNos: string[]) => ({
+        customer: { customerId: customerB, customerCode: 'C-TEST', customerName },
+        items,
+        heats: heatNos.map((heatNo) => ({ heatNo })),
+        totalQty: items.length,
+        totalWeightTon: `${(items.length * 23.55).toFixed(3)}`,
+      });
+      const snapshotA = snapshotOf('나래조선', [{ itemCode: 'SL-TEST-A', itemType: 'SLAB' }], ['HT-TEST-A']);
       const sheetA = await millSheet(request.id, request.shipmentRequestNo, a.salesOrderId, 1, snapshotA);
-      const sheetB = await millSheet(request.id, request.shipmentRequestNo, b.salesOrderId, 2, { customerName: '나래조선', lots: [] });
+      const sheetB = await millSheet(request.id, request.shipmentRequestNo, b.salesOrderId, 2, snapshotOf('나래조선', [{ itemCode: 'CL-TEST-B', itemType: 'COIL' }, { itemCode: 'CL-TEST-B', itemType: 'COIL' }], ['HT-TEST-A', 'HT-TEST-B']));
 
       const byRequest = await service.listMillSheets({ shipmentRequestId: request.id, page: 1, size: 20 });
       expect(byRequest.total).toBe(2);
       expect(byRequest.items.map((s) => s.id)).toEqual([sheetB.id, sheetA.id]);
       expect(byRequest.items[0]).toMatchObject({ shipmentRequestNo: request.shipmentRequestNo, pdfPath: null });
+      // 화면이 밀시트마다 상세를 따로 부르지 않도록 목록이 스냅샷에서 뽑은 값을 함께 준다 (이슈 #498)
+      expect(byRequest.items[0]).toMatchObject({ customerName: '나래조선', totalQty: 2, totalWeightTon: '47.100', heatNos: ['HT-TEST-A', 'HT-TEST-B'], itemTypes: ['COIL'], itemCodes: ['CL-TEST-B'] });
+      expect(byRequest.items[1]).toMatchObject({ totalQty: 1, totalWeightTon: '23.550', heatNos: ['HT-TEST-A'], itemTypes: ['SLAB'], itemCodes: ['SL-TEST-A'] });
+      expect('snapshot' in byRequest.items[0]).toBe(false);
 
       const bySalesOrder = await service.listMillSheets({ salesOrderId: a.salesOrderId, page: 1, size: 20 });
       expect(bySalesOrder.items.map((s) => s.millSheetNo)).toEqual([sheetA.millSheetNo]);

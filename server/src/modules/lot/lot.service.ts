@@ -12,6 +12,7 @@ import {
   type LotAllocationInfo,
   type LotDetail,
   type LotInspectionDetail,
+  type LotListItem,
   type LotRelationEvidence,
   type LotRelationView,
   type LotShipmentInfo,
@@ -88,8 +89,11 @@ export class LotService {
     private readonly repository: LotRepository,
   ) {}
 
-  /** LOT 목록 (API-235): 번호 앞부분·유형·상태·규격으로 거른다. 생산완료일 최근 순 */
-  async list(query: ListLotsQuery): Promise<PageResult<LotSummary>> {
+  /**
+   * LOT 목록 (API-235): 번호 앞부분·유형·상태·규격으로 거른다. 생산완료일 최근 순.
+   * withLinks면 줄마다 상위 히트·불합격 처리·현재 배정도 함께 준다: 화면이 줄마다 LOT 상세를 따로 부르던 N+1을 없앤다 (이슈 #498)
+   */
+  async list(query: ListLotsQuery): Promise<PageResult<LotSummary | LotListItem>> {
     const where: Prisma.LotWhereInput = {
       ...(query.lotType ? { lotType: query.lotType } : {}),
       ...(query.lotStatus ? { lotStatus: query.lotStatus } : {}),
@@ -101,7 +105,30 @@ export class LotService {
       this.repository.countLots(this.prisma, where),
     ]);
     const rows = await this.repository.findLotRows(this.prisma, ids.map((l) => l.id));
-    return { items: rows.map(toSummary), page: query.page, size: query.size, total };
+    const items = query.withLinks ? await this.toListItems(this.prisma, rows) : rows.map(toSummary);
+    return { items, page: query.page, size: query.size, total };
+  }
+
+  /** 목록 줄마다 상세와 같은 규칙으로 구한 상위 히트·현재 배정을 붙인다. 슬래브·코일만 히트와 배정을 본다 */
+  private async toListItems(tx: Tx, rows: LotRow[]): Promise<LotListItem[]> {
+    const isProduct = (row: LotRow) => row.lotType === LOT_TYPE.SLAB || row.lotType === LOT_TYPE.COIL;
+    const productIds = rows.filter(isProduct).map((r) => r.id);
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const heats = await this.repository.findNearestHeats(tx, productIds);
+    const allocations = productIds.length === 0 ? [] : await this.repository.findLiveAllocations(tx, productIds);
+    // 해제되지 않은 마지막 배정(id가 가장 큰 것). findLiveAllocations가 id 오름차순이라 뒤의 것이 덮어쓴다
+    const allocationByLot = new Map(allocations.map((a) => [a.lotId, a]));
+    return rows.map((row): LotListItem => {
+      const heat = heats.get(row.id);
+      const allocation = allocationByLot.get(row.id);
+      return {
+        ...toSummary(row),
+        rawMaterialType: (row.item?.rawMaterialType ?? null) as RawMaterialType | null,
+        heat: heat ? { id: heat.id, lotNo: heat.lotNo, inspectionResult: heat.inspectionResult as InspectionResult | null } : null,
+        disposition: row.dispositionStatus ? { dispositionStatus: row.dispositionStatus as DispositionStatus, dispositionReason: row.dispositionReason } : null,
+        allocation: allocation ? { id: allocation.id, allocationPurpose: allocation.allocationPurpose as AllocationPurpose, allocationStatus: allocation.allocationStatus as AllocationStatus } : null,
+      };
+    });
   }
 
   /** LOT 상세 (API-236): 기본값 + 검사 판정·기준 버전 + 적격 여부 + 불합격 처리 + 배정 + 바로 위·아래 LOT + 출하 */

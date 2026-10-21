@@ -167,6 +167,10 @@ export class ProductionRepository {
     return tx.productionPlan.findUnique({ where: { id }, select: planSummarySelect });
   }
 
+  findPlansByIds(tx: Tx, ids: number[]) {
+    return tx.productionPlan.findMany({ where: { id: { in: ids } }, select: planSummarySelect, orderBy: { id: 'asc' } });
+  }
+
   /** 계획들이 만든 LOT (계획 id → 실적 → LOT) */
   findLotsOfPlans(tx: Tx, productionPlanIds: number[]) {
     return tx.lot.findMany({ where: { productionResult: { productionPlanId: { in: productionPlanIds } } }, select: planLotSelect, orderBy: { id: 'asc' } });
@@ -181,10 +185,10 @@ export class ProductionRepository {
     return (await tx.$queryRawTyped(lockSalesOrderItemForReproduction(salesOrderItemId)))[0] ?? null;
   }
 
-  /** 재생산 판단: 수주 품목의 주문·상태·예약과 연결 계획 */
-  findSalesOrderItemForReproduction(tx: Tx, salesOrderItemId: number) {
-    return tx.salesOrderItem.findUnique({
-      where: { id: salesOrderItemId },
+  /** 재생산 판단: 수주 품목들의 주문·상태·예약과 연결 계획 */
+  findSalesOrderItemsForReproduction(tx: Tx, salesOrderItemIds: number[]) {
+    return tx.salesOrderItem.findMany({
+      where: { id: { in: salesOrderItemIds } },
       select: {
         id: true,
         salesOrderId: true,
@@ -240,5 +244,10 @@ export class ProductionRepository {
 
   findInventory(tx: Tx, itemId: number) {
     return tx.inventory.findUnique({ where: { itemId }, select: { onHandQty: true, reservedQty: true, rollingAllocatedQty: true } });
+  }
+
+  /** 규격들의 재고 (재고 행이 없는 규격은 빠진다) */
+  findInventories(tx: Tx, itemIds: number[]) {
+    return tx.inventory.findMany({ where: { itemId: { in: itemIds } }, select: { itemId: true, onHandQty: true, reservedQty: true, rollingAllocatedQty: true } });
   }
 }

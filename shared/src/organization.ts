@@ -79,3 +79,6 @@ export interface RoleView {
   createdAt: string;
   updatedAt: string;
 }
+
+/** 사원 목록 검색어(이름·사원번호 일부) 최대 글자 수. 서버 DTO와 화면이 같은 값을 쓴다 (이슈 #498) */
+export const EMPLOYEE_KEYWORD_MAX = 50;

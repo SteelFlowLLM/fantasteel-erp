@@ -58,6 +58,24 @@ async function pass(lotIds: number[]) {
   await prisma.$transaction((tx) => inventory.onLotsEligibilityChanged(tx, lotIds, 'SYSTEM'));
 }
 
+/** 열연 투입 목록(이슈 #498)의 한 줄은 같은 계획의 상세와 요약 값이 같아야 한다 */
+async function expectListMatchesDetail(planId: number) {
+  const listed = await hotRolling.list({ page: 1, size: 100 });
+  const row = listed.items.find((r) => r.plan.id === planId);
+  const detail = await hotRolling.detail(planId);
+  expect(row).toEqual({
+    plan: detail.plan,
+    slabItemCode: detail.slabItemCode,
+    shortageQty: detail.shortageQty,
+    usableCoilQty: detail.usableCoilQty,
+    failedCoilQty: detail.failedCoilQty,
+    confirmedAllocationQty: detail.confirmedAllocationQty,
+    neededQty: detail.neededQty,
+    isRollable: detail.isRollable,
+  });
+  return row;
+}
+
 const at = (day: string, hhmm: string) => `2020-02-${day}T${hhmm}:00.000Z`;
 const stock = () => prisma.inventory.findUniqueOrThrow({ where: { itemId: slabItemId } });
 
@@ -119,6 +137,7 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
     const detail = await hotRolling.detail(planId);
     expect(detail).toMatchObject({ shortageQty: 3, usableCoilQty: 0, neededQty: 3, recommendableQty: 0, isRollable: true, candidates: [] });
     expect(detail.slabItemId).toBe(slabItemId);
+    expect(await expectListMatchesDetail(planId)).toMatchObject({ slabItemCode: 'SL-HR-TEST', neededQty: 3, isRollable: true });
   });
 
   it('합격 8매 중 판매 예약 6매 → 가용 2매만 추천, 3매 확정은 INV-001(아무것도 저장 안 함)', async () => {
@@ -144,6 +163,7 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
     const confirmed = await hotRolling.confirm(producer, planId, { lotIds: slabIds.slice(0, 2) });
     expect(confirmed).toMatchObject({ confirmedAllocationQty: 2, neededQty: 1, slabPool: { rollingAllocatedQty: 2, availableQty: 0 } });
     expect(await codeOf(hotRolling.confirm(producer, planId, { lotIds: [slabIds[0]] }))).toBe('INV-003');
+    expect(await expectListMatchesDetail(planId)).toMatchObject({ confirmedAllocationQty: 2, neededQty: 1 });
   });
 
   it('변경: 기존 해제 + 새 슬래브 확정을 한 번에 (ALLOCATION_CHANGED), 해제하면 rolling −1', async () => {
@@ -187,6 +207,8 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
     expect(plan.progress).toMatchObject({ coilQty: 3, pendingQty: 3 });
     const after = await hotRolling.detail(planId);
     expect(after).toMatchObject({ isRollable: false, neededQty: 0 });
+    // 완료된 계획도 목록에 있고 열연할 수 없다고 나온다 (화면이 완료·취소를 따로 묶어 보인다)
+    expect(await expectListMatchesDetail(planId)).toMatchObject({ plan: { productionPlanStatus: 'COMPLETED' }, usableCoilQty: 3, isRollable: false });
     // 남은 합격 슬래브 5매는 여재로 재고에 남는다 (REQ-PRD-004)
     expect(await stock()).toMatchObject({ onHandQty: 5, reservedQty: 0, rollingAllocatedQty: 0 });
   });
@@ -199,6 +221,8 @@ describe('열연 투입 오류', () => {
     const plan = await prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: order.items[0].productionPlanNo ?? '' } });
     expect(await codeOf(hotRolling.detail(plan.id))).toBe('COM-004');
     expect(await codeOf(hotRolling.detail(999_999))).toBe('COM-003');
+    // 열연 투입 목록은 코일 계획만 준다
+    expect((await hotRolling.list({ page: 1, size: 100 })).items.some((r) => r.plan.id === plan.id)).toBe(false);
   });
 
   it('수주 연결이 끊긴 코일 계획은 열연하지 않는다', async () => {
@@ -208,6 +232,7 @@ describe('열연 투입 오류', () => {
     const detail = await hotRolling.detail(plan.id);
     expect(detail).toMatchObject({ isRollable: false, recommendableQty: 0 });
     expect(detail.notRollableReason).toContain('여재');
+    expect(await expectListMatchesDetail(plan.id)).toMatchObject({ isRollable: false });
     expect(await codeOf(hotRolling.confirm(producer, plan.id, { lotIds: [1] }))).toBe('COM-001');
   });
 });

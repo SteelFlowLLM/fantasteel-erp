@@ -290,7 +290,8 @@ export class ShipmentRepository {
   }
 
   findMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput, skip: number, take: number) {
-    return tx.millSheet.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: millSheetSummarySelect });
+    // 목록 화면이 쓰는 고객사·매수·히트·규격은 스냅샷에서 뽑는다 (MillSheetListItem)
+    return tx.millSheet.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: millSheetDetailSelect });
   }
 
   countMillSheets(tx: Tx, where: Prisma.MillSheetWhereInput) {

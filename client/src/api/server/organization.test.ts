@@ -70,6 +70,12 @@ describe('조직 서버 어댑터 (api/server/organization.ts)', () => {
     expect(result[0].lastLoginAt).toBeNull();
   });
 
+  it('사원 검색어는 서버 상한(50자)까지만 보낸다 (넘으면 서버가 400이라 목록이 통째로 비었다, 이슈 #498)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/employees' ? ok(page([employee(11, '강부장')])) : undefined));
+    await directoryApi.listManagedEmployees({ keyword: '가'.repeat(80) });
+    expect(calls[0].query.keyword).toBe('가'.repeat(50));
+  });
+
   it('부서 트리를 목록(깊이·상위 이름·인원 수)과 조직도(전체 인원·부서장 직급)로 바꾼다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/departments' ? ok(tree) : undefined));
     const list = await directoryApi.listDepartments();

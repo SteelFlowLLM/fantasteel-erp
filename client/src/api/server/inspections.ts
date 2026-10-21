@@ -1,6 +1,6 @@
 // 검사 입력 화면 ↔ 서버 API (server/src/modules/quality). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // LOT id는 서버 id 그대로 쓴다 (화면 주소 ?lot=도 서버 LOT id).
-// 연결 수주·부족은 LOT의 생산계획 상세(GET /production-plans/:id, 품질은 조회 권한 있음)에서 읽는다.
+// 연결 수주·부족은 LOT의 생산계획 상세(GET /production-plans/:id, 품질은 조회 권한 있음)에서 읽고, 목록은 계획 여러 개를 한 번에(GET /production-plans/reproduction-checks) 읽는다.
 // 판정 뒤 자동 예약·여재 매수는 서버 응답의 재고 반영 결과(stockSync)로 채우고, 서버에 없는 여재 LOT 번호만 빈 목록이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
 import type {
   InspectedLotSummary,
@@ -8,6 +8,7 @@ import type {
   InspectionStandardItemView,
   InspectionStandardListItem,
   PageResult,
+  PlanReproductionCheck,
   ProductionPlanDetail,
   QualityInspectionDetail,
   QualityInspectionSaveResult,
@@ -54,20 +55,10 @@ export interface LinkedOfPlan {
 
 const NO_LINK: LinkedOfPlan = { salesOrderItem: null, plans: [] };
 
-/**
- * LOT을 만든 생산계획의 연결 수주 품목과 부족·재생산 필요 (업무 프로세스 4.5, REQ-PRD-006).
- * 계획 상세의 재생산 판단(reproduction)은 수주 품목이 연결된 계획에만 있다.
- * 곁들이는 정보라 계획을 못 읽으면(조회 권한 없음 COM-002, 없음 COM-003) 화면 전체를 실패시키지 않고 비워 둔다
- */
-export async function linkedOfPlan(productionPlanId: number | null): Promise<LinkedOfPlan> {
-  if (productionPlanId === null) return NO_LINK;
-  let plan: ProductionPlanDetail;
-  try {
-    plan = await serverRequest<ProductionPlanDetail>('GET', `/production-plans/${productionPlanId}`);
-  } catch (e) {
-    if (e instanceof ApiError && (e.code === 'COM-002' || e.code === 'COM-003')) return NO_LINK;
-    throw e;
-  }
+/** 계획 상세·재생산 판단 조회가 함께 가진 값: 연결 수주 품목 표시값과 재생산 판단 */
+type PlanReproduction = Pick<ProductionPlanDetail, 'customerName' | 'itemCode' | 'itemType' | 'dueDate' | 'reproduction'>;
+
+function linkedFromPlan(plan: PlanReproduction): LinkedOfPlan {
   const r = plan.reproduction;
   if (!r) return NO_LINK;
   return {
@@ -101,6 +92,43 @@ export async function linkedOfPlan(productionPlanId: number | null): Promise<Lin
       shortageQty: p.shortageQty,
     })),
   };
+}
+
+/**
+ * LOT을 만든 생산계획의 연결 수주 품목과 부족·재생산 필요 (업무 프로세스 4.5, REQ-PRD-006).
+ * 계획 상세의 재생산 판단(reproduction)은 수주 품목이 연결된 계획에만 있다.
+ * 곁들이는 정보라 계획을 못 읽으면(조회 권한 없음 COM-002, 없음 COM-003) 화면 전체를 실패시키지 않고 비워 둔다
+ */
+export async function linkedOfPlan(productionPlanId: number | null): Promise<LinkedOfPlan> {
+  if (productionPlanId === null) return NO_LINK;
+  try {
+    return linkedFromPlan(await serverRequest<ProductionPlanDetail>('GET', `/production-plans/${productionPlanId}`));
+  } catch (e) {
+    if (e instanceof ApiError && (e.code === 'COM-002' || e.code === 'COM-003')) return NO_LINK;
+    throw e;
+  }
+}
+
+/** 한 번에 보낼 수 있는 계획 id 수 (서버 상한) */
+const PLAN_CHECK_CHUNK = 100;
+
+/**
+ * 계획 여러 개의 linkedOfPlan을 서버 한 조회로 받는다(계획마다 상세를 따로 부르던 N+1을 없앤다, 이슈 #498).
+ * 조회 권한이 없으면(COM-002) 모두 비워 둔다. 서버에 없는 계획은 결과에 없으니 호출하는 쪽이 NO_LINK로 본다.
+ */
+export async function linkedOfPlans(productionPlanIds: readonly number[]): Promise<Map<number, LinkedOfPlan>> {
+  const linked = new Map<number, LinkedOfPlan>();
+  const ids = [...new Set(productionPlanIds)];
+  try {
+    for (let from = 0; from < ids.length; from += PLAN_CHECK_CHUNK) {
+      const checks = await serverRequest<PlanReproductionCheck[]>('GET', '/production-plans/reproduction-checks', { query: { productionPlanIds: ids.slice(from, from + PLAN_CHECK_CHUNK).join(',') } });
+      for (const check of checks) linked.set(check.productionPlanId, linkedFromPlan(check));
+    }
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 'COM-002') return new Map();
+    throw e;
+  }
+  return linked;
 }
 
 /** 목록 행과 상세가 같이 쓰는 LOT 정보 + 검사 행 요약 */

@@ -5,6 +5,8 @@ export interface CustomerView {
   id: number;
   customerCode: string;
   customerName: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }
 
 export interface ItemView {
@@ -26,6 +28,8 @@ export interface ItemView {
   defaultYardId: number;
   /** 원료만. 품목별 기본 공급업체 1곳 */
   defaultSupplierId: number | null;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }
 
 /** API-168. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리한다 */
@@ -69,6 +73,8 @@ export interface RoutingView {
   processType: ProcessType;
   sequenceNo: number;
   plannedYieldRate: string | null;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }
 
 /** API-175. 강종 null = 용선 1t당 t(공통), 강종 있음 = 용강 1t당 합금철 kg */
@@ -86,6 +92,8 @@ export interface SupplierView {
   id: number;
   supplierCode: string;
   supplierName: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }
 
 export interface YardView {
@@ -93,6 +101,8 @@ export interface YardView {
   yardCode: string;
   yardName: string;
   yardType: YardType;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }
 
 /** API-187. 1행만 둔다 */
@@ -100,4 +110,6 @@ export interface ProductionSettingView {
   id: number;
   heatCapacityTon: string;
   deliveryRiskDays: number;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
 }

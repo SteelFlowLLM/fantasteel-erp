@@ -1,8 +1,8 @@
 // 밀시트 화면 ↔ 서버 API (server/src/modules/shipment). 화면은 서버가 출고 확정 때 저장한 스냅샷만으로 그린다.
-// 서버 목록에는 고객사·매수·히트·규격이 없어서 밀시트마다 상세(스냅샷)를 읽어 채운다.
+// 서버 목록이 스냅샷에서 뽑은 고객사·매수·히트·규격을 함께 주므로 밀시트마다 상세(스냅샷)를 따로 부르지 않는다(이슈 #498).
 // 스냅샷에 수주 줄 번호가 없어(ERD sales_order_item에도 없음) 수주 상세의 품목 순서로 매긴다. 다른 서버 어댑터와 같은 기준이다.
 // 수주 조회 권한이 없으면(품질) 밀시트 안의 품목 순서로 매긴다.
-import type { MillSheetDetail, MillSheetSummary as ServerMillSheetSummary, SalesOrderDetail } from '@fantasteel/shared';
+import type { MillSheetDetail, MillSheetListItem, SalesOrderDetail } from '@fantasteel/shared';
 import { serverRequest } from '@/api/http';
 import type { MillSheetDetailView, MillSheetListRow, MillSheetSnapshot } from '@/api/millSheets';
 import { allPages, orEmpty } from '@/api/server/inspections';
@@ -33,28 +33,26 @@ function toSnapshot(s: MillSheetDetail['snapshot'], lineNoOf: (salesOrderItemId:
 const readDetail = (id: number) => serverRequest<MillSheetDetail>('GET', `/mill-sheets/${id}`);
 
 async function list(): Promise<MillSheetListRow[]> {
-  const summaries = await allPages<ServerMillSheetSummary>('/mill-sheets');
-  const details = await Promise.all(summaries.map((m) => readDetail(m.id)));
-  return details
-    .map((d): MillSheetListRow => {
-      const s = d.snapshot;
-      return {
-        id: d.id,
-        millSheetNo: d.millSheetNo,
-        shipmentRequestId: d.shipmentRequestId,
-        shipmentRequestNo: d.shipmentRequestNo,
-        salesOrderId: d.salesOrderId,
-        salesOrderNo: d.salesOrderNo,
-        customerName: s.customer.customerName,
-        issuedAt: d.issuedAt,
-        totalQty: s.totalQty,
-        totalWeightTon: s.totalWeightTon,
-        heatNos: s.heats.map((h) => h.heatNo),
-        pdfPath: d.pdfPath,
-        itemTypes: [...new Set(s.items.map((i) => i.itemType).filter(isProductType))],
-        itemCodes: [...new Set(s.items.map((i) => i.itemCode))],
-      };
-    })
+  const rows = await allPages<MillSheetListItem>('/mill-sheets');
+  return rows
+    .map(
+      (m): MillSheetListRow => ({
+        id: m.id,
+        millSheetNo: m.millSheetNo,
+        shipmentRequestId: m.shipmentRequestId,
+        shipmentRequestNo: m.shipmentRequestNo,
+        salesOrderId: m.salesOrderId,
+        salesOrderNo: m.salesOrderNo,
+        customerName: m.customerName,
+        issuedAt: m.issuedAt,
+        totalQty: m.totalQty,
+        totalWeightTon: m.totalWeightTon,
+        heatNos: m.heatNos,
+        pdfPath: m.pdfPath,
+        itemTypes: m.itemTypes.filter(isProductType),
+        itemCodes: m.itemCodes,
+      }),
+    )
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt) || b.id - a.id);
 }
 

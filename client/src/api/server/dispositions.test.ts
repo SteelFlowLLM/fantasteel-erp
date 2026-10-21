@@ -13,7 +13,7 @@ const lotBase = {
   producedDate: null,
   productionPlanId: null,
   productionPlanNo: null,
-  steelGradeId: 3, steelGradeCode: 'SS275', heatInspectionResult: 'FAIL' as const, dispositionStatus: null, dispositionReason: null };
+  steelGradeId: 3, steelGradeCode: 'SS275', heatInspectionResult: 'FAIL' as const, dispositionStatus: null, dispositionReason: null, dispositionAt: null };
 
 type RowBase = Omit<RejectedLotListItem, 'evidence'>;
 
@@ -66,6 +66,7 @@ const failedCoilBase: RowBase = {
   inspectionResult: 'FAIL',
   dispositionStatus: 'HOLD',
   dispositionReason: '재검 대기',
+  dispositionAt: '2026-10-05T03:00:00.000Z',
   updatedAt: '2026-10-05T02:00:00.000Z',
 };
 
@@ -138,8 +139,12 @@ const plan300 = {
   },
 };
 
+/** 계획 여러 개의 연결 수주·재생산 판단 (GET /production-plans/reproduction-checks): 계획 상세에서 이 값들만 뽑은 것 */
+const checkOf = (plan: typeof plan300) => ({ productionPlanId: plan.id, customerName: plan.customerName, itemCode: plan.itemCode, itemType: 'COIL', dueDate: plan.dueDate, reproduction: plan.reproduction });
+
 function respond(c: ServerCall) {
   if (c.path === '/production-plans/300') return ok(plan300);
+  if (c.path === '/production-plans/reproduction-checks') return ok((c.query.productionPlanIds ?? '').split(',').includes('300') ? [checkOf(plan300)] : []);
   if (c.path === '/lots/rejected') return ok(page([failedCoil, childSlab, heat].filter((r) => c.query.lotId === undefined || String(r.lotId) === c.query.lotId)));
   if (c.path === '/quality-inspections/77') return ok(heatInspection);
   if (c.path === '/quality-inspections/88') return ok(coilInspection);
@@ -166,12 +171,15 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
       ['SL-CC1-261005-001', 'HEAT_FAILED', 'P', heatInspection.inspectedAt],
       ['HT-BOF1-261005-001', 'FAILED', 'P', heatInspection.inspectedAt],
     ]);
-    expect(rows[0]).toMatchObject({ heatNo: 'HT-BOF1-261005-001', dispositionStatus: 'HOLD', dispositionReason: '재검 대기', updatedAt: failedCoil.updatedAt });
+    expect(rows[0]).toMatchObject({ heatNo: 'HT-BOF1-261005-001', dispositionStatus: 'HOLD', dispositionReason: '재검 대기', dispositionAt: '2026-10-05T03:00:00.000Z', updatedAt: failedCoil.updatedAt });
+    // 지정한 적 없으면 지정 시각도 없다
+    expect(rows[1]).toMatchObject({ dispositionStatus: null, dispositionAt: null });
     expect(rows[0]).toMatchObject({ lotStatus: 'SHIPPED', itemCode: 'CL-SS275-8x1500', itemName: '열연코일 SS275 8x1500', producedDate: '2026-10-05', productionPlanId: 300, productionPlanNo: 'PP-2610-0001' });
     // 히트는 규격·생산완료일이 없다
     expect(rows[2]).toMatchObject({ itemCode: null, producedDate: '', productionPlanNo: null });
-    // 근거 검사는 목록 응답에 있고, 연결 수주는 생산계획마다 한 번만 읽는다
-    expect(calls.map((c) => c.path).sort()).toEqual(['/lots/rejected', '/production-plans/300']);
+    // 근거 검사·지정 시각은 목록 응답에 있고, 연결 수주는 계획 id를 모아 한 번에 읽는다 (계획마다 상세를 따로 부르지 않는다, 이슈 #498)
+    expect(calls.map((c) => c.path).sort()).toEqual(['/lots/rejected', '/production-plans/reproduction-checks']);
+    expect(calls.find((c) => c.path === '/production-plans/reproduction-checks')?.query).toEqual({ productionPlanIds: '300' });
     expect(rows[0].salesOrderItem).toMatchObject({ salesOrderNo: 'SO-2610-001', lineNo: 1, customerName: '한빛건설', orderedQty: 5, shortage: { unsecuredQty: 2, reproductionNeedQty: 2 } });
     // 계획이 없는 LOT(히트)은 연결 수주 없음
     expect(rows[2].salesOrderItem).toBeNull();
@@ -226,6 +234,15 @@ describe('불합격 관리 서버 어댑터 (api/server/dispositions.ts)', () =>
     const detail = await dispositionApi.detail(501);
     expect(detail?.row.salesOrderItem).toMatchObject({ salesOrderItemId: 41, dueDate: '2026-10-30', shortage: { activeReservedQty: 3, openPlanRemainingQty: 0, reproductionNeedQty: 2 } });
     expect(detail?.plans).toEqual([{ productionPlanId: 300, productionPlanNo: 'PP-2610-0001', productionPlanStatus: 'COMPLETED', isReproduction: false, shortageQty: 5 }]);
+  });
+
+  it('목록: 생산계획을 읽을 권한이 없으면(COM-002) 연결 수주만 비우고 목록은 보인다', async () => {
+    fakeServer(SEED_EMPLOYEE_NO.quality, (c) =>
+      c.path.startsWith('/production-plans') ? new Response(JSON.stringify({ success: false, error: { code: 'COM-002', message: '권한이 없어요' } }), { status: 403 }) : respond(c),
+    );
+    const rows = await dispositionApi.list();
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.salesOrderItem === null)).toBe(true);
   });
 
   it('상세: 생산계획을 읽을 권한이 없으면 연결 수주만 비우고 나머지는 보인다', async () => {

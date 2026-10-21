@@ -33,7 +33,7 @@
 | --- | --- | --- | --- | --- |
 | GET | `items` | 품목·규격 목록 | `MASTER_MANAGE` VIEW | 수주 등록 규격 선택에도 사용. 톤은 문자열 |
 | POST | `items` | 품목·규격 등록 | `MASTER_MANAGE` USE | 조합 중복 금지, 참조 없으면 COM-003 |
-| PATCH | `items/:id` | 품목·규격 수정 | `MASTER_MANAGE` USE | 사용된 규격 치수·이론중량 수정 시 MST-002 |
+| PATCH | `items/:id` | 품목·규격 수정 | `MASTER_MANAGE` USE | 사용된 규격 치수·이론중량 수정 시 MST-002. `expectedUpdatedAt`이 다르면 COM-001(이슈 #498, 아래 "동시 수정 방지") |
 | GET | `steel-grades` | 강종 목록 | `MASTER_MANAGE` VIEW | |
 | POST | `steel-grades` | 강종 등록 | `MASTER_MANAGE` USE | 성분 min/max는 제강 검사 기준에서 관리 |
 | PATCH | `steel-grades/:id` | 강종 수정 | `MASTER_MANAGE` USE | API-280(2026-10-21 추가, 이슈 #477). 등록과 같은 칸을 모두 받는다. 이름·적용 규격 번호는 언제든, **코드는 쓰는 곳이 없을 때만**(COM-004). `expectedUpdatedAt`이 다르면 COM-001 |
@@ -43,14 +43,14 @@
 | DELETE | `spec-mappings/:id` | 규격 매핑 삭제 | `MASTER_MANAGE` USE | API-282(2026-10-21 추가). 쓰는 곳이 없을 때만. 지운 매핑을 돌려준다 |
 | GET | `routings` | 라우팅 조회 | `MASTER_MANAGE` VIEW | |
 | POST | `routings` | 라우팅 등록 | `MASTER_MANAGE` USE | 수율 0 이하·1 초과 차단 |
-| PATCH | `routings/:id` | 라우팅 수정 | `MASTER_MANAGE` USE | |
+| PATCH | `routings/:id` | 라우팅 수정 | `MASTER_MANAGE` USE | `expectedUpdatedAt`이 다르면 COM-001 |
 | GET·POST | `specific-consumptions` | 배합 원단위 조회·등록 | VIEW / USE | |
 | PATCH | `specific-consumptions/:id` | 배합 원단위 수정 | `MASTER_MANAGE` USE | |
-| GET·POST | `customers` · PATCH `customers/:id` | 고객사 | VIEW / USE | |
-| GET·POST | `suppliers` · PATCH `suppliers/:id` | 공급업체 | VIEW / USE | 품목별 기본 공급업체는 품목 수정에서 지정 |
-| GET·POST | `yards` · PATCH `yards/:id` | 야드 | VIEW / USE | YARD_TYPE |
+| GET·POST | `customers` · PATCH `customers/:id` | 고객사 | VIEW / USE | PATCH는 `expectedUpdatedAt`이 다르면 COM-001 |
+| GET·POST | `suppliers` · PATCH `suppliers/:id` | 공급업체 | VIEW / USE | 품목별 기본 공급업체는 품목 수정에서 지정. PATCH는 `expectedUpdatedAt`이 다르면 COM-001 |
+| GET·POST | `yards` · PATCH `yards/:id` | 야드 | VIEW / USE | YARD_TYPE. PATCH는 `expectedUpdatedAt`이 다르면 COM-001 |
 | GET | `production-settings` | 생산 설정값 조회 | `MASTER_MANAGE` VIEW | 단건 리소스라 `:id` 없음 |
-| PATCH | `production-settings` | 생산 설정값 변경 | `MASTER_MANAGE` USE | |
+| PATCH | `production-settings` | 생산 설정값 변경 | `MASTER_MANAGE` USE | `expectedUpdatedAt`이 다르면 COM-001 |
 | DELETE | `customers/:id` · `suppliers/:id` · `yards/:id` · `steel-grades/:id` · `items/:id` | 기준정보 삭제 | `MASTER_MANAGE` USE | API-275~279(2026-10-14 명세서에 추가). SPEC 5장 결정 4·[05] 7-2 "참조가 없을 때만 삭제". 아래 4장 |
 
 [권한표]: 관리자 USE, 나머지 역할은 모두 VIEW(2026-10-15 업무 조회는 모든 역할, 그 전에는 물류에 권한이 없었다). 관리자가 기준정보 조회 권한을 뺀 사원도 품목명을 보도록 출하 화면에 필요한 품목 값은 shipment 모듈 응답에 넣어 준다.
@@ -66,6 +66,7 @@
 - **배합 원단위**(REQ-MST-006): 철광석·석탄·석회석 = 용선 1t당 t(강종 null), 합금철 = 용강 1t당 kg(강종별). `steel_grade_id`는 `raw_material_type = FERROALLOY`일 때만.
 - **기본 야드·공급업체**(REQ-MST-007·008): LOT 생성 시 `default_yard_id`를 자동 지정한다(production·purchasing이 읽음). 원료는 기본 공급업체 1곳.
 - **생산 설정값**(REQ-MST-009): 1행만 두고 PATCH로 바꾼다. `heat_capacity_ton > 0`.
+- **동시 수정 방지**(이슈 #498): 강종·규격 매핑(API-280·281)과 같은 방식으로 품목·라우팅·고객사·공급업체·야드·생산 설정값의 조회 응답에도 `updatedAt`(ISO 8601)을 주고, 수정 요청이 `expectedUpdatedAt`(선택)을 보내면 그 시각 그대로일 때만 바꾼다(`updateMany`의 `where updatedAt`, 한 문장이라 그 사이 다른 저장과 겹치지 않는다). 다르면 `COM-001`이고 아무것도 바꾸지 않는다. 보내지 않으면 비교하지 않는다(마지막 저장이 이긴다). 배합 원단위는 화면이 가진 시각이 없어 이번에 하지 않았다.
 - 0 이하 중량, 0 이하·1 초과 수율, 대응 코일 중복, 기본 공급업체 누락, 검사 기준 누락을 표시한다(BP-MST-01 구현 제안 → "기준정보 준비 상태"로 응답 가능).
 - **삭제**([05] 7-2, SPEC 5장 결정 4 "사용 안 함 토글 대신 삭제만, 참조가 있으면 거부"): 쓰는 곳이 하나라도 있으면 `COM-004` "쓰는 곳이 있어 삭제할 수 없어요: 수주·출하요청"처럼 쓰는 곳 이름을 붙여 거부한다(조직의 부서·직급 삭제와 같은 방식). 쓰는 곳은 고객사 = 수주·출하요청, 공급업체 = 원료 기본 공급업체·발주, 야드 = 품목 기본 야드·LOT, 강종 = 품목·배합 원단위·검사 기준·LOT, 품목 = 규격 매핑·배합 원단위·수주·재고(수량 > 0)·예약·생산계획·LOT·구매요청·발주. 수량이 모두 0인 재고 행은 품목과 함께 지운다. 지운 행을 응답으로 돌려준다. 라우팅·배합 원단위 삭제는 아직 없다(진행 중 계획 기준을 정한 뒤).
 - **강종 수정**(API-280, REQ-MST-002): 이름·적용 규격 번호는 언제든 고친다. 코드는 규격 코드(`SL-코드-…`)와 품목명에 쓰이고 검사 기준·LOT·배합 원단위가 가리키므로, 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 하나라도 있으면 바꿀 수 없다 — `COM-004` "쓰는 곳이 있어 강종 코드는 바꿀 수 없어요: 품목·…". 쓰는 곳이 없으면 코드도 바꾸되 다른 강종의 코드와 겹치면 COM-004. 읽은 뒤 아무도 고치지 않았을 때(`updated_at`이 같을 때)만 바꾸고 아니면 COM-001. 강종 응답의 `codeLockedBy`(쓰는 곳 이름 목록)로 화면도 같은 기준으로 코드 칸을 잠근다. 수정하면 서버 로그에 바꾼 값을 남긴다(8장).

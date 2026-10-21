@@ -9,6 +9,7 @@ import {
   type HeatFormation,
   type ItemType,
   type PageResult,
+  type PlanReproductionCheck,
   type ProductionPlanDetail,
   type ProductionPlanStatus,
   type ProductionPlanSummary,
@@ -458,43 +459,82 @@ export class ProductionService {
 
   /** 수주 품목의 재생산 판단값. 연결 계획마다 합격·판정 대기 매수를 세어 진행 계획 잔여 목표를 구한다 */
   async reproductionCheck(tx: Tx, salesOrderItemId: number): Promise<ReproductionCheck | null> {
-    const soItem = await this.repository.findSalesOrderItemForReproduction(tx, salesOrderItemId);
-    if (!soItem) return null;
-    const lots = soItem.productionPlans.length > 0 ? await this.repository.findLotsOfPlans(tx, soItem.productionPlans.map((p) => p.id)) : [];
-    const plans = soItem.productionPlans.map((p) => {
-      const progress = planProgressOf(
-        { itemId: p.itemId, itemType: p.item.itemType as ItemType, heatCount: 0, shortageQty: p.shortageQty, productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, salesOrderItemId },
-        lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === p.id),
-        [],
-      );
-      return { plan: p, input: { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty }, remainingTargetQty: progress.remainingTargetQty };
+    return (await this.reproductionChecks(tx, [salesOrderItemId])).get(salesOrderItemId) ?? null;
+  }
+
+  /** 수주 품목 여러 개의 재생산 판단값을 한 번에 구한다 (없는 품목은 빠진다). 품목마다 따로 읽던 연결 계획·LOT·재고를 모아 읽는다 */
+  async reproductionChecks(tx: Tx, salesOrderItemIds: number[]): Promise<Map<number, ReproductionCheck>> {
+    const ids = [...new Set(salesOrderItemIds)];
+    if (ids.length === 0) return new Map();
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const soItems = await this.repository.findSalesOrderItemsForReproduction(tx, ids);
+    const planIds = soItems.flatMap((i) => i.productionPlans.map((p) => p.id));
+    const lots = planIds.length > 0 ? await this.repository.findLotsOfPlans(tx, planIds) : [];
+    const inventories = await this.repository.findInventories(tx, [...new Set(soItems.map((i) => i.itemId))]);
+    const inventoryByItem = new Map(inventories.map((i) => [i.itemId, i]));
+    return new Map(
+      soItems.map((soItem): [number, ReproductionCheck] => {
+        const plans = soItem.productionPlans.map((p) => {
+          const progress = planProgressOf(
+            { itemId: p.itemId, itemType: p.item.itemType as ItemType, heatCount: 0, shortageQty: p.shortageQty, productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, salesOrderItemId: soItem.id },
+            lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === p.id),
+            [],
+          );
+          return { plan: p, input: { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty }, remainingTargetQty: progress.remainingTargetQty };
+        });
+        const inventory = inventoryByItem.get(soItem.itemId);
+        const check = reproductionCheckOf({
+          salesOrderItemId: soItem.id,
+          orderedQty: soItem.orderedQty,
+          salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
+          reservations: soItem.reservations,
+          plans: plans.map((p) => p.input),
+          reservationAvailableQty: inventory ? inventory.onHandQty - inventory.reservedQty - inventory.rollingAllocatedQty : 0,
+        });
+        return [
+          soItem.id,
+          {
+            ...check,
+            salesOrderId: soItem.salesOrderId,
+            salesOrderNo: soItem.salesOrder.salesOrderNo,
+            lineNo: soItem.salesOrder.salesOrderItems.findIndex((i) => i.id === soItem.id) + 1,
+            salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
+            unshippedQty: Math.max(0, check.orderedQty - check.shippedQty),
+            openPlans: plans
+              .filter((p) => p.plan.productionPlanStatus !== PRODUCTION_PLAN_STATUS.CANCELLED)
+              .map((p) => ({
+                id: p.plan.id,
+                productionPlanNo: p.plan.productionPlanNo,
+                productionPlanStatus: p.plan.productionPlanStatus as ProductionPlanStatus,
+                isReproduction: p.plan.isReproduction,
+                shortageQty: p.plan.shortageQty,
+                remainingTargetQty: p.remainingTargetQty,
+              })),
+          },
+        ];
+      }),
+    );
+  }
+
+  /**
+   * 생산계획 여러 개의 연결 수주 품목 정보와 재생산 판단 (이슈 #498). 계획 상세(GET :id)의 같은 값을 계획마다 따로 읽던 것을 모은다.
+   * 없는 계획은 빠지고, 수주 연결이 없는 계획은 reproduction이 null이다.
+   */
+  async reproductionChecksOfPlans(productionPlanIds: number[], tx: Tx = this.prisma): Promise<PlanReproductionCheck[]> {
+    const ids = [...new Set(productionPlanIds)];
+    if (ids.length === 0) return [];
+    const plans = await this.repository.findPlansByIds(tx, ids);
+    const checks = await this.reproductionChecks(tx, plans.flatMap((p) => (p.salesOrderItemId === null ? [] : [p.salesOrderItemId])));
+    return plans.map((plan) => {
+      const summary = toPlanSummary(plan);
+      return {
+        productionPlanId: plan.id,
+        customerName: summary.customerName,
+        itemCode: summary.itemCode,
+        itemType: summary.itemType,
+        dueDate: summary.dueDate,
+        reproduction: plan.salesOrderItemId === null ? null : (checks.get(plan.salesOrderItemId) ?? null),
+      };
     });
-    const inventory = await this.repository.findInventory(tx, soItem.itemId);
-    const check = reproductionCheckOf({
-      salesOrderItemId: soItem.id,
-      orderedQty: soItem.orderedQty,
-      salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
-      reservations: soItem.reservations,
-      plans: plans.map((p) => p.input),
-      reservationAvailableQty: inventory ? inventory.onHandQty - inventory.reservedQty - inventory.rollingAllocatedQty : 0,
-    });
-    return {
-      ...check,
-      salesOrderId: soItem.salesOrderId,
-      salesOrderNo: soItem.salesOrder.salesOrderNo,
-      lineNo: soItem.salesOrder.salesOrderItems.findIndex((i) => i.id === soItem.id) + 1,
-      salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
-      unshippedQty: Math.max(0, check.orderedQty - check.shippedQty),
-      openPlans: plans
-        .filter((p) => p.plan.productionPlanStatus !== PRODUCTION_PLAN_STATUS.CANCELLED)
-        .map((p) => ({
-          id: p.plan.id,
-          productionPlanNo: p.plan.productionPlanNo,
-          productionPlanStatus: p.plan.productionPlanStatus as ProductionPlanStatus,
-          isReproduction: p.plan.isReproduction,
-          shortageQty: p.plan.shortageQty,
-          remainingTargetQty: p.remainingTargetQty,
-        })),
-    };
   }
 }

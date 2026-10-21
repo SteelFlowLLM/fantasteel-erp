@@ -3,6 +3,7 @@
 // LOT 추적·검사 입력도 서버를 쓰므로 생산 화면의 LOT 링크는 같은 서버 LOT을 연다.
 import type {
   HotRollingDetail as ServerHotRollingDetail,
+  HotRollingPlanListItem,
   PageResult,
   PlanLot,
   ProductionPlanDetail as ServerPlanDetail,
@@ -14,6 +15,7 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
+import { allPages } from '@/api/server/inspections';
 import type { CancelPlanInput, ConfirmHeatPlanInput, LotQuality, PlanLotRow, ProductionPlanDetail, ProductionPlanListRow, ProductionPlanView, ProductionResultView, ReproductionCheck, ReproductionResult } from '@/api/production';
 import type {
   CastingResultInput,
@@ -471,30 +473,29 @@ async function planIdOfAllocation(allocationId: number): Promise<number> {
 }
 
 export const serverRollingApi = {
-  /** 코일 계획 목록: 계획마다 열연 투입 화면 값을 읽는다 (기준정보가 모자란 계획은 빠진다) */
+  /** 코일 계획 목록: 서버 열연 투입 목록(계획마다 상세와 같은 요약 값)을 한 번에 읽는다. 기준정보가 모자란 계획은 빠진다 */
   plans: async (): Promise<RollingPlanListRow[]> => {
-    const plans = await listAllPlans({ itemType: 'COIL' });
-    const details = await Promise.all(plans.map((p) => hotRolling(p.id).catch(() => null)));
-    return details.flatMap((d) =>
-      d
-        ? [
+    const rows = await allPages<HotRollingPlanListItem>('/production-plans/hot-rolling');
+    return rows.flatMap((r) =>
+      r.slabItemCode === null
+        ? []
+        : [
             {
-              productionPlanId: d.plan.id,
-              productionPlanNo: d.plan.productionPlanNo,
-              productionPlanStatus: d.plan.productionPlanStatus,
-              salesOrderNo: d.plan.salesOrderNo,
-              dueDate: d.plan.dueDate,
-              coilItemCode: d.coilItem.itemCode,
-              slabItemCode: d.slabItem.itemCode,
-              shortageQty: d.shortageQty,
-              rolledQty: d.usableCoilQty,
-              failedCoilQty: d.failedCoilQty,
-              allocatedQty: d.confirmedAllocationQty,
-              neededQty: d.neededQty,
-              rollable: d.isRollable,
+              productionPlanId: r.plan.id,
+              productionPlanNo: r.plan.productionPlanNo,
+              productionPlanStatus: r.plan.productionPlanStatus,
+              salesOrderNo: r.plan.salesOrderNo,
+              dueDate: r.plan.dueDate,
+              coilItemCode: r.plan.itemCode,
+              slabItemCode: r.slabItemCode,
+              shortageQty: r.shortageQty,
+              rolledQty: r.usableCoilQty,
+              failedCoilQty: r.failedCoilQty,
+              allocatedQty: r.confirmedAllocationQty,
+              neededQty: r.neededQty,
+              rollable: r.isRollable,
             },
-          ]
-        : [],
+          ],
     );
   },
 

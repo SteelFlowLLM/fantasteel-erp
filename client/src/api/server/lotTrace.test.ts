@@ -78,6 +78,15 @@ describe('LOT 추적 서버 어댑터 (api/server/lotTrace.ts)', () => {
     expect(calls[1].query).toEqual({ lotType: 'COIL', page: '1', size: '100' });
   });
 
+  it('LOT 검색·번호 추적: 번호 조건 상한(60자)을 넘는 글은 서버를 묻지 않는다 (서버 400 방지, 이슈 #498)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.steelmaking, (c) => (c.path === '/lots' ? ok(page([slab1])) : undefined));
+    expect(await lotTraceApi.searchLots({ keyword: 'X'.repeat(61), limit: 20 })).toEqual({ items: [], total: 0 });
+    await expect(lotTraceApi.trace({ lotNo: 'X'.repeat(61) })).rejects.toMatchObject({ code: 'COM-003' });
+    expect(calls).toEqual([]);
+    await lotTraceApi.searchLots({ keyword: 'X'.repeat(60), limit: 20 });
+    expect(calls).toHaveLength(1);
+  });
+
   it('번호로 추적: 정확히 같은 번호의 id로 trace를 부르고 출하는 출하요청 한 줄에 수주를 모은다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.steelmaking, (c) => {
       if (c.path === '/lots') return lotsByPrefix(c, [slab1, slab2, heat]);

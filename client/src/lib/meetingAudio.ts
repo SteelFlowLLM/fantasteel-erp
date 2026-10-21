@@ -1,6 +1,7 @@
 // 회의 음성 입력 도우미: 녹음 형식 고르기, 시간 표시, 올릴 파일 확인.
 import { hasMeetingAudioExtension, MEETING_AUDIO_EXTENSIONS, MEETING_AUDIO_MAX_BYTES } from '@fantasteel/shared';
 import { fmtBytes } from '@/lib/format';
+import { toSeoulDateString } from '@/lib/seoulDate';
 
 /** 앞에 있을수록 먼저 쓴다. Safari는 webm을 못 녹음해 mp4로 내려간다 */
 const RECORDER_MIME_ORDER = ['audio/webm;codecs=opus', 'audio/mp4'] as const;
@@ -36,6 +37,16 @@ export function audioFileProblem(file: { type: string; size: number; name?: stri
   if (file.size === 0) return '음성이 비어 있어요';
   if (file.size > MEETING_AUDIO_MAX_BYTES) return `음성 파일은 ${fmtBytes(MEETING_AUDIO_MAX_BYTES)}까지 올릴 수 있어요 (지금 ${fmtBytes(file.size)})`;
   return null;
+}
+
+/**
+ * 고른 녹음 파일의 회의일 기본값: 파일이 마지막으로 바뀐 날짜(서울 기준, YYYY-MM-DD).
+ * 지난 녹음을 올릴 때 회의일이 오늘이면 녹음 속 '내일' 같은 말이 엉뚱한 날짜가 된다. 시각을 알 수 없으면(0·잘못된 값) null
+ */
+export function meetingDateOfAudio(lastModified: number | string | null | undefined): string | null {
+  if (lastModified === null || lastModified === undefined || lastModified === 0 || lastModified === '') return null;
+  const at = new Date(lastModified);
+  return Number.isNaN(at.getTime()) ? null : toSeoulDateString(at);
 }
 
 /** getUserMedia 실패를 한국어 안내로 */

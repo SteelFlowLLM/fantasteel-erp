@@ -4,6 +4,7 @@ import {
   type AllocationStatus,
   type ItemType,
   type MillSheetDetail,
+  type MillSheetListItem,
   type MillSheetSnapshot,
   type MillSheetSummary,
   type ShipmentRequestDetail,
@@ -82,6 +83,20 @@ export function toMillSheetSummary(row: MillSheetSummaryRow): MillSheetSummary {
     salesOrderNo: row.salesOrder.salesOrderNo,
     issuedAt: row.issuedAt.toISOString(),
     pdfPath: row.pdfPath,
+  };
+}
+
+/** 목록 한 줄: 요약 + 스냅샷에서 뽑은 고객사·매수·히트·규격 */
+export function toMillSheetListItem(row: MillSheetDetailRow): MillSheetListItem {
+  const snapshot = row.snapshot as unknown as MillSheetSnapshot;
+  return {
+    ...toMillSheetSummary(row),
+    customerName: snapshot.customer.customerName,
+    totalQty: snapshot.totalQty,
+    totalWeightTon: snapshot.totalWeightTon,
+    heatNos: snapshot.heats.map((h) => h.heatNo),
+    itemTypes: [...new Set(snapshot.items.map((i) => i.itemType))],
+    itemCodes: [...new Set(snapshot.items.map((i) => i.itemCode))],
   };
 }
 

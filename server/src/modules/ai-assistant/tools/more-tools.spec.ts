@@ -175,6 +175,7 @@ describe('검사 결과·불합격 LOT 도구', () => {
       inspectionResult: 'FAIL',
       dispositionStatus: 'HOLD',
       dispositionReason: '재검 대기',
+      dispositionAt: '2026-10-13T06:00:00.000Z',
       updatedAt: '2026-10-13T05:00:00.000Z',
       evidence: { qualityInspectionId: 3, lotId: 5, inspectedAt: '2026-10-13T05:00:00.000Z', failedItems: [failed, { ...failed, inspectionItemName: 'Mn', isPassed: true }] },
     };

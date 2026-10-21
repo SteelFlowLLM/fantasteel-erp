@@ -1,12 +1,13 @@
 // 조직 관리 화면 ↔ 서버 API (server/src/modules/organization). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 사원·부서·직급·역할 id는 서버 id를 그대로 쓴다. ERD에 없는 칸(직급 코드·부서 정렬 순서·최근 접속)은 빈 값으로 둔다.
-import type {
-  DepartmentNode,
-  PageResult,
-  DepartmentView as ServerDepartmentView,
-  EmployeeView as ServerEmployeeView,
-  JobGradeView as ServerJobGradeView,
-  RoleView as ServerRoleView,
+import {
+  EMPLOYEE_KEYWORD_MAX,
+  type DepartmentNode,
+  type PageResult,
+  type DepartmentView as ServerDepartmentView,
+  type EmployeeView as ServerEmployeeView,
+  type JobGradeView as ServerJobGradeView,
+  type RoleView as ServerRoleView,
 } from '@fantasteel/shared';
 import type { EmployeeCreateInput, EmployeeSaved, EmployeeUpdateInput } from '@/api/adminEmployees';
 import type { DeleteInput, DepartmentCreateInput, DepartmentUpdateInput, JobGradeCreateInput, JobGradeUpdateInput, OrgChartDepartmentView, RolePermissionsInput, SavedRef } from '@/api/adminOrganization';
@@ -27,7 +28,8 @@ async function listEmployees(query: EmployeeListQuery): Promise<EmployeeView[]> 
         departmentId: query.departmentId,
         roleCode: query.roleCode,
         isActive: query.isActive === undefined ? undefined : String(query.isActive),
-        keyword: query.keyword?.trim() || undefined,
+        // 서버 상한을 넘으면 400이라 목록이 통째로 비었다: 상한까지만 보낸다 (이슈 #498)
+        keyword: query.keyword?.trim().slice(0, EMPLOYEE_KEYWORD_MAX) || undefined,
         page,
         size: PAGE_SIZE,
       },
