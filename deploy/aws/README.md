@@ -38,7 +38,7 @@ Nest ──Tailscale──▶ Mac LLM 서버·음성 서버(8001)
 5. **`client/.env.local`**: `deploy/aws/client.env.example`을 복사한다(빌드할 때 들어가는 값).
 6. **`npm install`** (저장소 맨 위): shared 빌드와 Prisma Client 생성까지 자동으로 한다.
 7. **`npm run generate:sql -w @fantasteel/server`**: TypedSQL 타입을 만든다. **DB에 접속하므로 `DIRECT_URL`이 맞아야 하고, Supabase 스키마가 먼저 최신이어야 한다**(개발 PC에서 최신 develop/main을 받아 DB 담당자가 `npm run db:deploy -w @fantasteel/server`로 반영한 뒤, `docs/SERVER-GUIDE.md` 8장). 이 단계가 없으면 `npm run build`가 타입 오류 약 150개로 실패한다.
-8. **`npm run build`** (shared → server → client). 처음 빌드는 몇 분 걸리고, 화면 빌드가 Google Fonts를 받다가 시간 초과로 한 번 실패할 수 있다(다시 하면 된다).
+8. **`npm run build`** (shared → server → client). 처음 빌드는 몇 분 걸린다. 글꼴(IBM Plex)은 저장소의 파일(`client/src/styles/fonts.css`·`fonts/`)을 쓰므로 빌드가 Google Fonts에 접속하지 않는다(인터넷이 막혀도 된다). 4GB 서버에서 메모리가 모자라 죽으면 `NODE_OPTIONS=--max-old-space-size=3072 npm run build`로 하고 스왑을 확인한다.
 9. **Caddy**: `sudo cp deploy/aws/Caddyfile /etc/caddy/Caddyfile`, 도메인을 바꾸고 `sudo systemctl reload caddy`.
 10. **pm2**: `pm2 start deploy/aws/ecosystem.config.cjs && pm2 save && pm2 startup`(출력된 `sudo …` 명령을 한 번 실행). 서버를 재부팅해도 자동으로 뜬다.
 

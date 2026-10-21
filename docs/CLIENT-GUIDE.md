@@ -142,3 +142,7 @@ test/            Vitest 준비 (setup.ts, actors.ts 테스트 사원번호, sess
 1. `npm run typecheck -w @fantasteel/client` 오류 0, `npm run test -w @fantasteel/client` 전부 통과, `npm run build -w @fantasteel/client` 성공.
 2. 새로 정한 값이 있으면 `docs/rework/seed-assumptions.md`와 해당 영역 노트(`docs/rework/areas/<영역>.md`)에 가정값으로 적는다.
 3. 금지어와 코드 표시명을 다시 훑는다(용어 사전, 공통 코드 정의서).
+
+## 8. 글꼴
+
+화면 글꼴(B안)은 IBM Plex Sans KR(400·500·600·700)과 IBM Plex Mono(400·500·600)다(SIL OFL 1.1, 라이선스 `client/src/styles/fonts/OFL.txt`). 빌드가 Google Fonts에 접속하지 않도록(`next/font/google`은 한글 조각 100여 개를 빌드 때 받다가 연결 시간 초과로 자주 실패했다, 이슈 #485) 글꼴 조각(woff2, 391개, 3.9MB)을 `client/src/styles/fonts/`에 두고 `client/src/styles/fonts.css`의 `@font-face`(`unicode-range`)로 불러온다. `next/font/local`은 `unicode-range`로 나눈 조각을 받지 못하고 통짜 파일(굵기마다 2MB쯤)이 필요해서 쓰지 않았다. 브라우저는 화면에 나온 글자가 든 조각만 같은 주소에서 내려받는다. CSS 변수 `--font-plex-sans`·`--font-plex-mono`와 대체 글꼴(Fallback)은 `fonts.css`의 `:root`에 있고 `styles/globals.css`가 읽는다. 굵기를 더하거나 글꼴을 바꾸려면 조각 파일과 `fonts.css`를 함께 고친다. 밀시트 PDF용 `public/fonts/NotoSansKR-VF.ttf`(10MB)는 서버 `server/assets/fonts/`와 같은 파일이지만 브라우저(미리보기 PDF)와 서버(저장 PDF)가 각자 읽어 두 벌을 둔다.
