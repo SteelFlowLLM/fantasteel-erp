@@ -24,15 +24,6 @@ export function stockFirstSplit(orderedQty: number, availableQty: number): { res
   return { reserveQty, shortageQty: orderedQty - reserveQty };
 }
 
-export interface ShortageInput {
-  orderedQty: number;
-  /** 누적 출고 확정 매수 (sales_order_item.shipped_qty) */
-  shippedQty: number;
-  activeReservedQty: number;
-  /** 같은 수주 품목의 진행 계획(시작 전·진행중) 잔여 목표 매수 */
-  openPlanRemainingQty: number;
-}
-
 export interface Shortage {
   /** 미출하 매수 = 수주 매수 − 누적 출고 확정 매수 */
   unshippedQty: number;
@@ -50,14 +41,6 @@ export interface ItemShortage extends Shortage {
   reservationAvailableQty: number;
   /** 재생산 필요 매수 = max(0, 추가 계획 필요 − 예약 가용) (14.1-6) */
   reproductionNeedQty: number;
-}
-
-/** 수주 부족 (업무 프로세스 4.5). 단계를 더해 수주보다 큰 "충족 매수"를 만들지 않는다. */
-export function shortageOf(input: ShortageInput): Shortage {
-  const unshippedQty = Math.max(0, input.orderedQty - input.shippedQty);
-  const unsecuredQty = Math.max(0, unshippedQty - input.activeReservedQty);
-  const additionalPlanQty = Math.max(0, unsecuredQty - Math.max(0, input.openPlanRemainingQty));
-  return { unshippedQty, unsecuredQty, additionalPlanQty };
 }
 
 /**

@@ -4,7 +4,7 @@
 import type { INestApplication } from '@nestjs/common';
 import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import {
   AI_TYPING_EMPLOYEE_ID,
   TYPING_SEND_INTERVAL_MS,
   type TypingEvent,
+  CHAT_MEMBER_PICK_MAX,
   MESSAGE_ATTACHMENT_MAX_BYTES,
   MESSAGE_ATTACHMENT_MAX_COUNT,
   MESSAGE_TYPE,
@@ -29,7 +30,9 @@ import {
   type CreateChatRoomResult,
 } from '@fantasteel/shared';
 import type { AuthUser } from '@fantasteel/shared';
+import { JwtService } from '@nestjs/jwt';
 import { AppModule } from '../../app.module';
+import { AuthSessionEvents, type AuthRevocation } from '../../common/auth/auth-sessions';
 import { AppException } from '../../common/errors/app.exception';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -37,6 +40,7 @@ import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
 import type { HistorySearchSource } from '../ai-assistant/history/chat-memory';
 import type { Socket } from 'socket.io';
 import { MessengerGateway } from './messenger.gateway';
+import { MessengerService } from './messenger.service';
 
 interface SocketRecord {
   event: 'message:new' | 'message:updated' | 'room:read' | 'room:updated' | 'member:read';
@@ -575,10 +579,12 @@ describe('접속 상태 · 입력 중 (소켓)', () => {
     const socket = {
       handshake: { headers: { cookie } },
       data: {},
+      connected: true,
       disconnected: false,
-      join: async () => undefined,
+      join: async (): Promise<void> => undefined,
       emit: (event: string, payload: unknown) => void emitted.push({ event, payload }),
       disconnect: () => {
+        socket.connected = false;
         socket.disconnected = true;
       },
     };
@@ -651,6 +657,194 @@ describe('접속 상태 · 입력 중 (소켓)', () => {
     expect(sent).toEqual([]);
     gateway.handleDisconnect(sales.asSocket);
     gateway.handleDisconnect(outsider.asSocket);
+  });
+
+  it('입력 중 신호가 방마다 정한 간격보다 자주 오면 DB를 읽지 않고 버린다 (이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    const sent: number[] = [];
+    (gateway as unknown as GatewayInternals).emit = (employeeId) => void sent.push(employeeId);
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const other = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const sales = fakeSocket(salesCookie);
+    await gateway.handleConnection(sales.asSocket);
+    await gateway.handleTyping(sales.asSocket, { chatRoomId: room.id });
+    await gateway.handleTyping(sales.asSocket, { chatRoomId: room.id });
+    await gateway.handleTyping(sales.asSocket, { chatRoomId: other.id });
+    expect(sent).toEqual([qualityId, qualityId]);
+    gateway.handleDisconnect(sales.asSocket);
+  });
+
+  it('확인하는 사이 끊긴 소켓은 접속 상태에 세지 않는다 (온라인으로 남지 않음, 이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    const broadcasts: unknown[] = [];
+    (gateway as unknown as GatewayInternals).broadcast = (_event, payload) => void broadcasts.push(payload);
+    const tab = fakeSocket(await login('2304015'));
+    tab.socket.join = async () => {
+      // 접속을 확인하는 사이 브라우저가 끊고 handleDisconnect가 먼저 지나간다
+      tab.socket.disconnect();
+      gateway.handleDisconnect(tab.asSocket);
+    };
+    await gateway.handleConnection(tab.asSocket);
+    expect(broadcasts).toEqual([]);
+    const later = fakeSocket(await login('2304015'));
+    await gateway.handleConnection(later.asSocket);
+    // 남은 수가 없으므로 이번이 첫 연결이다
+    expect(broadcasts).toEqual([{ employeeId: logisticsId, online: true }]);
+    gateway.handleDisconnect(later.asSocket);
+    gateway.handleDisconnect(later.asSocket);
+    expect(broadcasts.at(-1)).toEqual({ employeeId: logisticsId, online: false });
+    expect(broadcasts).toHaveLength(2);
+  });
+
+  it('토큰 만료 시각이 되면 끊고, 이미 만료된 토큰은 받지 않는다 (이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    (gateway as unknown as GatewayInternals).broadcast = () => undefined;
+    const jwt = app.get(JwtService);
+    const short = fakeSocket(`access_token=${await jwt.signAsync({ sub: qualityId }, { expiresIn: 1 })}`);
+    await gateway.handleConnection(short.asSocket);
+    expect(short.socket.disconnected).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(short.socket.disconnected).toBe(true);
+    gateway.handleDisconnect(short.asSocket);
+
+    // 만료된 토큰으로 접속해 끊겨도, 같은 사원의 다른 기기 접속 수를 빼지 않는다
+    const online = fakeSocket(qualityCookie);
+    await gateway.handleConnection(online.asSocket);
+    const expired = fakeSocket(`access_token=${await jwt.signAsync({ sub: qualityId }, { expiresIn: -10 })}`);
+    await gateway.handleConnection(expired.asSocket);
+    gateway.handleDisconnect(expired.asSocket);
+    expect(expired.socket.disconnected).toBe(true);
+    const presence = (gateway as unknown as { presence: { onlineEmployeeIds(): number[] } }).presence;
+    expect(presence.onlineEmployeeIds()).toContain(qualityId);
+    gateway.handleDisconnect(online.asSocket);
+    expect(presence.onlineEmployeeIds()).not.toContain(qualityId);
+  });
+
+  it('사원을 읽는 사이 퇴사 처리되면 채널에 든 뒤 다시 확인해 끊고, 접속에 세지 않는다 (이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    const broadcasts: unknown[] = [];
+    (gateway as unknown as GatewayInternals).broadcast = (_event, payload) => void broadcasts.push(payload);
+    const users = (gateway as unknown as { users: { load: (id: number) => Promise<unknown> } }).users;
+    const original = users.load.bind(users);
+    let calls = 0;
+    users.load = async (id: number) => (++calls === 1 ? original(id) : null);
+    try {
+      const tab = fakeSocket(qualityCookie);
+      await gateway.handleConnection(tab.asSocket);
+      expect(tab.socket.disconnected).toBe(true);
+      gateway.handleDisconnect(tab.asSocket);
+      expect(broadcasts).toEqual([]);
+    } finally {
+      users.load = original;
+    }
+  });
+
+  it('로그아웃하면 그 토큰의 소켓만, 퇴사 처리하면 그 사원의 소켓을 모두 끊는다 (이슈 #488)', async () => {
+    const gateway = app.get(MessengerGateway);
+    const revocations: AuthRevocation[] = [];
+    const stop = app.get(AuthSessionEvents).on((r) => void revocations.push(r));
+    // 같은 1초에 두 기기에서 로그인해도 토큰이 다르다(jti): 한쪽 로그아웃이 다른 쪽을 끊지 않는다
+    const [first, second] = await Promise.all([login('2304015'), login('2304015')]);
+    expect(first).not.toBe(second);
+    const token = first.split('=')[1];
+    const logout = await fetch(`${baseUrl}/auth/logout`, { method: 'POST', headers: { cookie: `access_token=${token}` } });
+    expect(logout.status).toBe(200);
+    expect(revocations).toEqual([{ token }]);
+
+    const admin = await login('1503001');
+    const res = await call('PATCH', `/employees/${logisticsId}`, admin, { isActive: false });
+    expect(res.status).toBe(200);
+    expect(revocations.at(-1)).toEqual({ employeeId: logisticsId });
+    await prisma.employee.update({ where: { id: logisticsId }, data: { isActive: true } });
+    stop();
+
+    // 게이트웨이가 알림을 받아 맞는 소켓을 끊는지는 서버 객체를 바꿔 본다
+    const kept = { data: { user: { token: 'other' } }, disconnect: jest.fn() };
+    const mine = { data: { user: { token } }, disconnect: jest.fn() };
+    const channels: string[] = [];
+    const internals = gateway as unknown as { server: unknown };
+    const original = internals.server;
+    internals.server = { fetchSockets: async () => [kept, mine], in: (channel: string) => ({ disconnectSockets: () => void channels.push(channel) }) };
+    app.get(AuthSessionEvents).revokeToken(token);
+    app.get(AuthSessionEvents).revokeEmployee(logisticsId);
+    await new Promise((resolve) => setImmediate(resolve));
+    internals.server = original;
+    expect(mine.disconnect).toHaveBeenCalledWith(true);
+    expect(kept.disconnect).not.toHaveBeenCalled();
+    expect(channels).toEqual([`employee:${logisticsId}`]);
+  });
+});
+
+describe('메신저 보강 (이슈 #488)', () => {
+  const storedFiles = async () => (await readdir(join(storageDir, 'messages')).catch(() => [] as string[])).length;
+
+  it('답글 대상이 틀린 첨부는 파일을 저장하지 않고 COM-003, 저장한 뒤 실패해도 파일을 지운다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const before = await storedFiles();
+    const form = new FormData();
+    form.append('files', new Blob([new Uint8Array([1, 2])]), 'reply.txt');
+    form.append('parentMessageId', '99999999');
+    const res = await fetch(`${baseUrl}/chat-rooms/${room.id}/attachments`, { method: 'POST', headers: { cookie: salesCookie }, body: form });
+    expect(res.status).toBe(404);
+    expect(await storedFiles()).toBe(before);
+
+    // 검사를 지난 뒤 저장(tx)에서 실패하는 경우: 메시지 만들기를 한 번 실패시킨다
+    const service = app.get(MessengerService) as unknown as { saveMessage: (...args: unknown[]) => Promise<unknown> };
+    const original = service.saveMessage;
+    service.saveMessage = async () => {
+      throw new AppException('COM-999', '저장 실패');
+    };
+    try {
+      const failed = await upload(salesCookie, room.id, 'fail.txt', new Uint8Array([3]));
+      expect(failed.status).toBe(500);
+    } finally {
+      service.saveMessage = original;
+    }
+    expect(await storedFiles()).toBe(before);
+
+    // 커밋된 뒤 실패(ERP 링크 조회)하면 파일은 메시지가 쓰므로 지우지 않는다
+    const linked = app.get(MessengerService) as unknown as { erpLinkResolver: (...args: unknown[]) => Promise<unknown> };
+    const originalLinks = linked.erpLinkResolver;
+    linked.erpLinkResolver = async () => {
+      throw new Error('링크 조회 실패');
+    };
+    try {
+      const failedAfterCommit = await upload(salesCookie, room.id, 'kept.txt', new Uint8Array([4, 5]));
+      expect(failedAfterCommit.status).toBe(500);
+    } finally {
+      linked.erpLinkResolver = originalLinks;
+    }
+    expect(await storedFiles()).toBe(before + 1);
+    const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+    const keptId = page.body.data.items.at(-1)?.attachments[0]?.id;
+    const kept = await fetch(`${baseUrl}/attachments/${keptId}`, { headers: { cookie: salesCookie } });
+    expect(new Uint8Array(await kept.arrayBuffer())).toEqual(new Uint8Array([4, 5]));
+  });
+
+  it('반응을 거의 동시에 두 번 눌러도 500 없이 처리된다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const message = (await send(salesCookie, room.id, '반응 시험')).body.data;
+    const results = await Promise.all([1, 2, 3].map(() => call('POST', `/messages/${message.id}/reactions`, qualityCookie, { emoji: '👍' })));
+    expect(results.map((r) => r.status).every((status) => status === 201 || status === 200)).toBe(true);
+    expect(await prisma.messageReaction.count({ where: { messageId: message.id } })).toBeLessThanOrEqual(1);
+  });
+
+  it('두 사람이 서로에게 동시에 1:1을 열어도 방은 하나다', async () => {
+    const productionCookie = await login('1906009');
+    const [a, b] = await Promise.all([
+      call<CreateChatRoomResult>('POST', '/chat-rooms', productionCookie, { chatRoomType: 'DIRECT', memberIds: [logisticsId] }),
+      call<CreateChatRoomResult>('POST', '/chat-rooms', await login('2304015'), { chatRoomType: 'DIRECT', memberIds: [productionId] }),
+    ]);
+    expect(a.body.data.id).toBe(b.body.data.id);
+  });
+
+  it('memberIds·mentionedEmployeeIds는 한 번에 정한 수까지만 받는다', async () => {
+    const tooMany = Array.from({ length: CHAT_MEMBER_PICK_MAX + 1 }, (_, i) => i + 1);
+    const created = await call('POST', '/chat-rooms', salesCookie, { chatRoomType: 'GROUP', memberIds: tooMany });
+    expect([created.status, created.body.error?.code]).toEqual([400, 'COM-004']);
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const mention = await call('POST', `/chat-rooms/${room.id}/messages`, salesCookie, { content: 'x', mentionedEmployeeIds: tooMany });
+    expect(mention.status).toBe(400);
   });
 });
 

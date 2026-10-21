@@ -10,7 +10,6 @@ import type {
   SalesOrderDetail,
   SalesOrderItemFulfillment,
   ShipmentRequestDetail,
-  ShipmentRequestSummary,
 } from '@fantasteel/shared';
 import type { GoodsIssueLineView, GoodsIssueLotRow, GoodsIssueProblem, GoodsIssueQueueRow, GoodsIssueView } from '@/api/goodsIssues';
 import { serverRequest } from '@/api/http';
@@ -206,10 +205,10 @@ const QUEUE_RANK: Record<string, number> = { ALLOCATED: 0, REQUESTED: 1 };
 /** 목록 순서: 배정 확정 → 배정 대기 → 출고 완료, 그 안에서 출하 요청일 → 최근 등록 */
 async function queue(): Promise<GoodsIssueQueueRow[]> {
   const reader = new Reader();
-  const summaries = (await allPages<ShipmentRequestSummary>('/shipment-requests')).filter((s) => s.shipmentRequestStatus !== 'CANCELLED');
+  // 줄마다 상세(품목·배정)를 함께 받는다: 건마다 상세를 따로 부르던 N+1을 없앤다 (이슈 #476, 서버 목록 withItems)
+  const details = (await allPages<ShipmentRequestDetail>('/shipment-requests', { withItems: 'true' })).filter((s) => s.shipmentRequestStatus !== 'CANCELLED');
   const rows = await Promise.all(
-    summaries.map(async (s): Promise<GoodsIssueQueueRow> => {
-      const d = await serverRequest<ShipmentRequestDetail>('GET', `/shipment-requests/${s.id}`);
+    details.map(async (d): Promise<GoodsIssueQueueRow> => {
       // 출고 완료 줄은 재검증하지 않으므로 LOT을 읽지 않는다
       const [items, lots] = await Promise.all([reader.itemFacts(d), d.shipmentRequestStatus === 'ISSUED' ? new Map<number, LotFacts>() : reader.lotFacts(d)]);
       const check = checkOf(d, items, lots);

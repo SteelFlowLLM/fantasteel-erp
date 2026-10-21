@@ -1,25 +1,5 @@
 // factory-agent 모듈 응답 타입 (docs/backend/factory-agent.md). 톤은 소수 3자리 문자열, 날짜는 'YYYY-MM-DD', 시각은 ISO 8601.
-import type { ActionType, DraftStatus } from './codes';
-
-/**
- * Agent 위험 유형 (BP-AGT-01 "위험 코드 제안"). 공통 코드 정의서에 아직 없어 shared에 직접 둔다.
- * 정의서에 올라가면 codes로 옮긴다.
- */
-export const AGENT_RISK_TYPE = {
-  RAW_SHORTAGE: 'RAW_SHORTAGE',
-  GOOD_QTY_SHORTAGE: 'GOOD_QTY_SHORTAGE',
-  DUE_RISK: 'DUE_RISK',
-  AGED_SURPLUS: 'AGED_SURPLUS',
-  QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
-} as const;
-export type AgentRiskType = (typeof AGENT_RISK_TYPE)[keyof typeof AGENT_RISK_TYPE];
-export const AGENT_RISK_TYPE_LABEL: Record<AgentRiskType, string> = {
-  RAW_SHORTAGE: '원료 부족',
-  GOOD_QTY_SHORTAGE: '합격 매수 부족',
-  DUE_RISK: '납기 위험',
-  AGED_SURPLUS: '여재 장기 보유',
-  QUALITY_RATE_RISE: '불합격률 상승',
-};
+import type { ActionType, AgentRiskType, DraftStatus } from './codes';
 
 /** 규칙이 초안 payload의 `agent` 칸에 남기는 감지 근거. 같은 대상(targetKey)의 미처리 초안은 하나만 둔다 (REQ-AGT-005) */
 export interface AgentDraftMeta {

@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
+import { STT_WAKE_CLIP_MODES, type SttWakeClipMode } from '@fantasteel/shared';
+import { IsBoolean, IsIn, IsOptional, IsString, IsUrl, MaxLength, ValidateIf } from 'class-validator';
 import { IsAllowedSttHost } from '../stt-url';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -61,4 +62,11 @@ export class UpdateSteelmanWakeSettingsDto {
 
   @IsBoolean({ message: '말로 승인 허용은 켜기·끄기 중 하나예요' })
   voiceApproval!: boolean;
+}
+
+/** POST stt/wake-clip의 multipart 글 칸 (이슈 #494). 보내지 않으면 부르는 말 조각(wake) */
+export class WakeClipDto {
+  @IsOptional()
+  @IsIn(STT_WAKE_CLIP_MODES, { message: 'mode는 wake·command·partial 중 하나예요' })
+  mode?: SttWakeClipMode;
 }

@@ -4,6 +4,7 @@
 // - 변경 = 기존 해제 + 새 배정 한 번에, 사유 필수(ALLOCATION_CHANGE). 해제는 사유 선택.
 // - 다시 불러온 데이터가 바뀌면(일괄 확정·다른 탭) 펼친 패널·고른 LOT을 새 상태에 맞춘다(panelAfterRefresh).
 // - 생산완료일은 날짜로 보인다(C-5-12). 추천은 저장하지 않고, 확정할 때 작업 로그(ALLOCATION_RECOMMENDED)에 남는다.
+import { ALLOCATION_REASON_MAX } from '@fantasteel/shared';
 import { useState } from 'react';
 import { PERMISSION, PRODUCT_QTY_UNIT } from '@/codes';
 import type { ShipmentLineDetail, ShipmentLotOption } from '@/api/shipmentRequests';
@@ -18,12 +19,13 @@ import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
 import { AllocationStatusBadge, ItemTypeTag, SalesOrderItemStatusBadge, SalesOrderLink, TraceLink } from '@/features/shipment/components/ShipmentBadges';
-import { allocationLineSyncKey, isSameAsRecommendation, panelAfterRefresh, toggleLot, type AllocationPanel } from '@/features/shipment/lib/shipmentForm';
+import { allocationLineSyncKey, allocationReasonTooLong, isSameAsRecommendation, panelAfterRefresh, toggleLot, type AllocationPanel } from '@/features/shipment/lib/shipmentForm';
 import { useChangeShipmentAllocation, useConfirmShipmentAllocations, useReleaseShipmentAllocation } from '@/hooks/useShipmentRequests';
 import { fmtActorAt, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-const REASON_MAX = 500;
+// 서버 DTO와 같은 값 (shared). 전에는 500자라 201~500자를 쓰면 서버가 400으로 거절했다
+const REASON_MAX = ALLOCATION_REASON_MAX;
 
 export interface AllocationLineCardProps {
   shipmentRequestId: number;
@@ -79,7 +81,7 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
     setSelected(recommendedIds);
     setMode({ kind: 'recommend' });
   };
-  const reasonError = mode.kind === 'change' && reason.trim().length > REASON_MAX ? `${REASON_MAX}자 이하로 입력해 주세요` : null;
+  const reasonError = mode.kind === 'change' && allocationReasonTooLong(reason) ? `${REASON_MAX}자 이하로 입력해 주세요` : null;
   const shortage = Math.max(0, waiting - line.candidateLots.length);
 
   // flex-none: 품목 카드가 여럿이거나 글자를 키워도 카드가 화면 높이로 눌려 표가 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤)
@@ -309,13 +311,14 @@ export function AllocationLineCard({ shipmentRequestId, line, editable, canEdit 
           confirmLabel="배정 해제"
           tone="danger"
           pending={release.isPending}
+          confirmDisabled={allocationReasonTooLong(releaseReason)}
           onCancel={() => setReleaseTarget(null)}
           onConfirm={() => release.mutate({ allocationId: releaseTarget.allocationId, reasonText: releaseReason.trim() || null })}
         >
           <p className="text-sm">
             <b className="font-mono">{releaseTarget.lotNo}</b> 배정을 해제할까요? 품목은 배정 대기로 돌아가고, 예약은 그대로 남아요.
           </p>
-          <Field label="사유 (선택)" htmlFor="release-reason" className="mt-3" error={releaseReason.length > REASON_MAX ? `${REASON_MAX}자 이하로 입력해 주세요` : null}>
+          <Field label="사유 (선택)" htmlFor="release-reason" className="mt-3" error={allocationReasonTooLong(releaseReason) ? `${REASON_MAX}자 이하로 입력해 주세요` : null}>
             <Textarea id="release-reason" rows={2} value={releaseReason} onChange={(e) => setReleaseReason(e.target.value)} placeholder="작업 로그에 남아요" />
           </Field>
         </ConfirmDialog>

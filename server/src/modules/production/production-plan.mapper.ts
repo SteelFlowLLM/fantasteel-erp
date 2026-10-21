@@ -16,6 +16,7 @@ import {
   type ProductionPlanStatus,
   type ProductionPlanSummary,
 } from '@fantasteel/shared';
+import { seoulToday } from '../../common/time/seoul-date';
 import type { PlanLotRow, PlanSummaryRow } from './production.repository';
 import { planOpenRemainingQty, productJudgement } from './plan-progress.calculator';
 
@@ -150,7 +151,8 @@ export function planHeatsOf(heatCount: number, lots: readonly PlanLotRow[]): Pla
       heatLotId: heat?.id ?? null,
       heatNo: heat?.lotNo ?? null,
       converterCode: heat?.productionResult?.converterCode ?? null,
-      producedDate: dateOnly(heat?.productionResult?.completedAt ?? null),
+      // 제강 실적 완료 시각(timestamptz)이라 서울 날짜로 (UTC로 자르면 한국 0~9시 완료분이 전날)
+      producedDate: heat?.productionResult?.completedAt ? seoulToday(heat.productionResult.completedAt) : null,
       heatTon: heat?.initialTon?.toFixed(3) ?? null,
       inspectionResult: heat ? (resultOf(heat.qualityInspection) ?? INSPECTION_RESULT.PENDING) : null,
       castDone: heat ? heat._count.lotRelationsAsParentLot > 0 : false,

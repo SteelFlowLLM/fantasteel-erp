@@ -1,4 +1,5 @@
 // 유형 정의가 같이 쓰는 값 읽기·검증: 저장된 payload(jsonb), LLM이 준 값, 수정 요청. 업무 규칙(어떤 칸이 필수인지 등)은 각 유형 정의에 둔다.
+import type { AiExtractionStatus } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { isValidDate } from '../../purchasing/purchasing.service';
 
@@ -9,8 +10,13 @@ export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v =
 export const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
 /** 저장된 id 칸: 양의 정수만 */
 export const idOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
-/** 저장된 매수 칸: 1 이상 정수만 */
-export const qtyOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 ? v : null);
+/**
+ * 초안 매수 상한 (가정값, #471 리뷰). DB 매수 칸은 int4(약 21억)라 넘으면 실행 때 DB 오류가 난다.
+ * 한 품목에 넣을 수 있는 현실적인 매수보다 넉넉히 크게 둔다
+ */
+export const MAX_DRAFT_QTY = 1_000_000;
+/** 저장된 매수 칸: 1 이상 상한 이하 정수만 */
+export const qtyOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_DRAFT_QTY ? v : null);
 /** 저장된 날짜 칸: 실제 있는 YYYY-MM-DD만 */
 export const dateOrNull = (v: unknown): string | null => (typeof v === 'string' && isValidDate(v.trim()) ? v.trim() : null);
 /** 저장된 id 목록: 양의 정수만, 겹치면 하나로 */
@@ -18,11 +24,17 @@ export const idsOf = (v: unknown): number[] => (Array.isArray(v) ? [...new Set(v
 /** 저장된 품목 줄 목록 (객체만, 상한까지) */
 export const linesOf = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord).slice(0, MAX_DRAFT_LINES) : []);
 
-/** 모든 확장 유형 payload에 있는 원본 글·AI가 채운 칸 */
-export function draftBaseOf(raw: Record<string, unknown>): { sourceText: string | null; aiFilledFields: string[] } {
+const AI_EXTRACTION_STATUSES: readonly AiExtractionStatus[] = ['FILLED', 'NOTHING_FOUND', 'NO_MODEL', 'TIMEOUT', 'NOT_JSON', 'FAILED'];
+
+/** 저장된 AI 추출 결과 (없거나 모르는 값이면 null) */
+export const aiExtractionOf = (v: unknown): AiExtractionStatus | null => (AI_EXTRACTION_STATUSES.includes(v as AiExtractionStatus) ? (v as AiExtractionStatus) : null);
+
+/** 모든 확장 유형 payload에 있는 원본 글·AI가 채운 칸·AI 추출 결과 */
+export function draftBaseOf(raw: Record<string, unknown>): { sourceText: string | null; aiFilledFields: string[]; aiExtraction: AiExtractionStatus | null } {
   return {
     sourceText: textOrNull(raw.sourceText),
     aiFilledFields: Array.isArray(raw.aiFilledFields) ? raw.aiFilledFields.filter((f): f is string => typeof f === 'string') : [],
+    aiExtraction: aiExtractionOf(raw.aiExtraction),
   };
 }
 

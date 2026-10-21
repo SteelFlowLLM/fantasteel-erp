@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cumulativeYieldRate, planHeats, maxSlabQtyFromHeat } from '@/lib/heatPlanning';
+import { cumulativeYieldRate, planHeats } from '@/lib/heatPlanning';
 
 describe('히트 편성 (업무 프로세스 4.4)', () => {
   it('14.1: 부족 4매 × 23.550t ÷ 연주 0.98 → 필요 용강 96.122t, 히트 1개(250t), 슬래브 10매·예상 여재 6매', () => {
@@ -27,7 +27,6 @@ describe('히트 편성 (업무 프로세스 4.4)', () => {
   });
   it('히트 수는 올림, 경계에서 정확히', () => {
     expect(planHeats({ productType: 'SLAB', shortageQty: 12, theoreticalWeightTon: '29.438', castingYieldRate: '0.98', hotRollingYieldRate: null, heatCapacityTon: '250', slabTheoreticalWeightTon: '29.438' })).toMatchObject({ requiredSteelTon: '360.465', heatCount: 2, heatTon: '500.000', plannedSlabQty: 16 });
-    expect(maxSlabQtyFromHeat('250.000', '0.98', '22.969')).toBe(10);
     expect(() => planHeats({ productType: 'SLAB', shortageQty: 0, theoreticalWeightTon: '1', castingYieldRate: '1', hotRollingYieldRate: null, heatCapacityTon: '1', slabTheoreticalWeightTon: '1' })).toThrow();
   });
 });

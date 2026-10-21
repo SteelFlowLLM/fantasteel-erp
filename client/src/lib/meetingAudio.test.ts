@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MEETING_AUDIO_ACCEPT, audioFileProblem, fmtClock, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem, createRecordStartGuard, fmtClock, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
 
 describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
   it('녹음 형식: webm/opus 먼저, 없으면 mp4, 둘 다 없으면 기본값', () => {
@@ -43,5 +43,36 @@ describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
     expect(microphoneErrorMessage(new DOMException('', 'NotAllowedError'), true)).toContain('허용');
     expect(microphoneErrorMessage(new DOMException('', 'NotFoundError'), true)).toContain('찾지 못했어요');
     expect(microphoneErrorMessage(new Error('x'), true)).toBe('마이크를 켜지 못했어요');
+  });
+});
+
+describe('녹음 시작 표 (이슈 #476)', () => {
+  it('시작 중이거나 녹음 중이면 또 시작할 수 없고, 끝나면 다시 시작할 수 있다', () => {
+    const guard = createRecordStartGuard();
+    const first = guard.begin();
+    expect(first).not.toBeNull();
+    expect(guard.begin()).toBeNull();
+    guard.end();
+    const second = guard.begin();
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+  });
+
+  it('권한 창이 떠 있는 사이 화면을 떠나면(cancel) 그 시작은 무효가 되고 더는 시작할 수 없다', () => {
+    const guard = createRecordStartGuard();
+    const token = guard.begin();
+    expect(token !== null && guard.isCurrent(token)).toBe(true);
+    guard.cancel();
+    expect(token !== null && guard.isCurrent(token)).toBe(false);
+    expect(guard.begin()).toBeNull();
+  });
+
+  it('시작에 실패해(end) 다시 누르면 새 시작이 유효하고 앞 시작은 무효다', () => {
+    const guard = createRecordStartGuard();
+    const failed = guard.begin() ?? -1;
+    guard.end();
+    const retry = guard.begin() ?? -1;
+    expect(guard.isCurrent(failed)).toBe(false);
+    expect(guard.isCurrent(retry)).toBe(true);
   });
 });

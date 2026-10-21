@@ -24,7 +24,6 @@ let sales: AuthUser;
 /** 권예진 (물류) — 회의 참석자가 아닌 담당자 */
 let outsider: AuthUser;
 let oreId: number;
-let startMinutesId = 0;
 let startNotificationId = 0;
 const createdMinutes: number[] = [];
 
@@ -122,7 +121,6 @@ beforeAll(async () => {
   sales = await load('2103003');
   outsider = await load('2304015');
   oreId = (await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } })).id;
-  startMinutesId = (await prisma.meetingMinutes.aggregate({ _max: { id: true } }))._max.id ?? 0;
   startNotificationId = (await prisma.notification.aggregate({ _max: { id: true } }))._max.id ?? 0;
 }, 60_000);
 

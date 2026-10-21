@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { STT_DEFAULT_BASE_URL } from '@fantasteel/shared';
+import { writeFileAtomic } from '../../common/storage/write-file-atomic';
 
 export interface SttSettings {
   baseUrl: string;
@@ -33,8 +34,8 @@ export class SttSettingsStore {
     };
   }
 
+  /** 쓰는 도중 읽는 요청이 반쪽 JSON을 읽지 않게 통째로 바꿔 쓴다 (#487) */
   async write(settings: SttSettings): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(settings, null, 2), 'utf8');
+    await writeFileAtomic(this.file, JSON.stringify(settings, null, 2));
   }
 }

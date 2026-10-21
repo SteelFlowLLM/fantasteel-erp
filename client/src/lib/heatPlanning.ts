@@ -17,7 +17,7 @@ export function cumulativeYieldRate(productType: ProductItemType, castingYieldRa
 }
 
 /** 히트 하나(용강 heatTon)에서 연주할 수 있는 슬래브 최대 매수 = floor(히트 톤 × 연주 수율 ÷ 슬래브 1매 이론중량) */
-export function maxSlabQtyFromHeat(heatTon: string, castingYieldRate: string, slabTheoreticalWeightTon: string): number {
+function maxSlabQtyFromHeat(heatTon: string, castingYieldRate: string, slabTheoreticalWeightTon: string): number {
   return decFloorDiv(decMul(heatTon, castingYieldRate, 6), slabTheoreticalWeightTon);
 }
 

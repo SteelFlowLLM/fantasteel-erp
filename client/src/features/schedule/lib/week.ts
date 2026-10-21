@@ -32,3 +32,16 @@ export function weekFromParam(param: string | null, today: string): string {
 
 /** ISO 시각이 서울 기준으로 어느 날인지 */
 export const seoulDayOf = (iso: string): string => toSeoulDateString(new Date(iso));
+
+/** 서울 그날 0시의 시각(ms) */
+const seoulMidnightMs = (day: string): number => Date.parse(`${day}T00:00:00+09:00`);
+
+/**
+ * 일정이 그날(서울 0~24시)과 겹치는지. 날을 넘기는 일정(일 23:30~월 00:30)은 두 날에 모두 보이고,
+ * 지난주에 시작해 이번 주에 걸친 일정도 이번 주 첫날에 보인다 (#487)
+ */
+export function overlapsDay(event: { startAt: string; endAt: string }, day: string): boolean {
+  const start = Date.parse(event.startAt);
+  const end = Date.parse(event.endAt);
+  return start < seoulMidnightMs(addDays(day, 1)) && end > seoulMidnightMs(day);
+}

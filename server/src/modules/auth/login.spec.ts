@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { AuthUser } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LOGIN_FAIL_LIMIT_PER_EMPLOYEE, LoginAttemptLimiter } from './login-attempt.limiter';
 
 let app: INestApplication;
 let baseUrl: string;
@@ -80,6 +81,63 @@ describe('로그인 (POST /auth/login)', () => {
     }
     // 어느 쪽이 틀렸는지 알려 주지 않는다 (사원번호 존재 여부가 드러나지 않게)
     expect(wrongPassword.body.error?.message).toBe(unknownEmployee.body.error?.message);
+  });
+
+  it('실패 횟수 제한: 같은 사원번호로 5번 틀리면 맞는 비밀번호도 AUTH-003(429)이고, 다른 사원은 영향이 없다 (이슈 #485)', async () => {
+    const limiter = app.get(LoginAttemptLimiter);
+    limiter.reset();
+    try {
+      for (let i = 0; i < LOGIN_FAIL_LIMIT_PER_EMPLOYEE; i++) expect((await login(PURCHASE, `${PASSWORD}-wrong`)).body.error?.code).toBe('AUTH-001');
+      const blocked = await login(PURCHASE, PASSWORD);
+      expect(blocked.status).toBe(429);
+      expect(blocked.body.error?.code).toBe('AUTH-003');
+      expect(blocked.setCookie).toBeNull();
+      // 다른 사원은 로그인된다
+      expect((await login(LOGISTICS, PASSWORD)).status).toBe(200);
+      // 막힌 뒤 창이 지나면(여기서는 기록 비우기) 다시 된다
+      limiter.reset();
+      expect((await login(PURCHASE, PASSWORD)).status).toBe(200);
+    } finally {
+      limiter.reset();
+    }
+  });
+
+  it('성공하면 그 사원번호의 실패 횟수가 지워진다', async () => {
+    const limiter = app.get(LoginAttemptLimiter);
+    limiter.reset();
+    try {
+      for (let i = 0; i < LOGIN_FAIL_LIMIT_PER_EMPLOYEE - 1; i++) await login(PURCHASE, `${PASSWORD}-wrong`);
+      expect((await login(PURCHASE, PASSWORD)).status).toBe(200);
+      for (let i = 0; i < LOGIN_FAIL_LIMIT_PER_EMPLOYEE - 1; i++) expect((await login(PURCHASE, `${PASSWORD}-wrong`)).body.error?.code).toBe('AUTH-001');
+      expect((await login(PURCHASE, PASSWORD)).status).toBe(200);
+    } finally {
+      limiter.reset();
+    }
+  });
+
+  it('없는 사원번호도 비밀번호 비교(bcrypt)를 해서 응답 시간으로 사원번호가 있는지 알 수 없다', async () => {
+    const limiter = app.get(LoginAttemptLimiter);
+    limiter.reset();
+    const timeOf = async (employeeNo: string) => {
+      const started = process.hrtime.bigint();
+      await login(employeeNo, `${PASSWORD}-wrong`);
+      return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+    try {
+      await timeOf(PURCHASE); // 첫 요청의 연결·준비 시간은 뺀다
+      const known: number[] = [];
+      const unknown: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        known.push(await timeOf(PURCHASE));
+        unknown.push(await timeOf(`9${i}99999`));
+        limiter.reset();
+      }
+      const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+      // bcrypt(비용 10)은 수십 ms라 건너뛰면 몇 ms로 끝난다. 없는 사원도 있는 사원의 절반 이상은 걸려야 한다
+      expect(mean(unknown)).toBeGreaterThan(mean(known) * 0.5);
+    } finally {
+      limiter.reset();
+    }
   });
 
   it('퇴사 계정: 비밀번호가 맞아도 AUTH-001, 퇴사 전에 받은 쿠키도 더는 통하지 않는다(AUTH-002)', async () => {

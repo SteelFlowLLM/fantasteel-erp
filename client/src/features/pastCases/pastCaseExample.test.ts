@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PAST_CASE_EXAMPLES, caseKeywords, searchPastCases, type PastCaseView } from '@fantasteel/shared';
-import { ACTOR_TYPE, CASE_CATEGORY, CASE_CATEGORY_LABEL, PROPOSED_BUSINESS_EVENT_TYPE } from '@/codes';
+import { ACTOR_TYPE, CASE_CATEGORY, CASE_CATEGORY_LABEL, BUSINESS_EVENT_TYPE } from '@/codes';
 import { collectTexts, findForbiddenWords, findMalformedNumbers } from '@/features/agent/lib/exampleTextCheck';
 import {
   CASE_CALL_SITES,
@@ -37,7 +37,7 @@ describe('과거 사례 예시 (shared PAST_CASE_EXAMPLES, BP-CASE-01)', () => {
 
   it('예시 작업 로그: 주체는 사용자뿐(AI 주체 없음), 등록은 AI 경유. CASE-0005는 자세한 예시, 나머지도 세 단계', () => {
     for (const entry of SELECTED_CASE_HISTORY) expect(entry.actorType).toBe(ACTOR_TYPE.USER);
-    expect(SELECTED_CASE_HISTORY.find((entry) => entry.businessEventType === PROPOSED_BUSINESS_EVENT_TYPE.CASE_REGISTERED)?.isAiAssisted).toBe(true);
+    expect(SELECTED_CASE_HISTORY.find((entry) => entry.businessEventType === BUSINESS_EVENT_TYPE.CASE_REGISTERED)?.isAiAssisted).toBe(true);
     expect(exampleHistoryOf(caseOf('CASE-0005'))).toBe(SELECTED_CASE_HISTORY);
     const other = exampleHistoryOf(caseOf('CASE-0002'));
     expect(other.map((entry) => entry.businessEventType)).toEqual(['INSPECTION_REGISTERED', 'DISPOSITION_SET', 'CASE_REGISTERED']);

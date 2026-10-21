@@ -5,6 +5,7 @@ import { LlmModule } from '../llm/llm.module';
 import { NotificationModule } from '../notification/notification.module';
 import { AiResearchController } from './ai-research.controller';
 import { ResearchErpLookup } from './ai-research.erp';
+import { ResearchKnowledgeFinder } from './ai-research.knowledge';
 import { AiResearchRepository } from './ai-research.repository';
 import { AiResearchRunner } from './ai-research.runner';
 import { AiResearchService } from './ai-research.service';
@@ -13,7 +14,7 @@ import { AiResearchService } from './ai-research.service';
 @Module({
   imports: [LlmModule, forwardRef(() => AiAssistantModule), NotificationModule, IntegrationModule],
   controllers: [AiResearchController],
-  providers: [AiResearchService, AiResearchRepository, AiResearchRunner, ResearchErpLookup],
+  providers: [AiResearchService, AiResearchRepository, AiResearchRunner, ResearchErpLookup, ResearchKnowledgeFinder],
   // 철강맨AI의 심층 조사 카드(이슈 #408)가 조사를 만든다
   exports: [AiResearchService],
 })

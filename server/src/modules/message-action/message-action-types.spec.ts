@@ -8,6 +8,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient, type ChatMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { ActionTypeRegistry } from './action-types/action-type.registry';
 import { MessageActionService } from './message-action.service';
 
 let moduleRef: TestingModule;
@@ -272,23 +273,87 @@ describe('배정 확정 초안 (ALLOCATION_CONFIRM)', () => {
     expect((await service.get(sales, again.id)).unresolvedFields).toEqual(['배정 LOT']);
   });
 
-  it('실행 때 배정할 수 없는 LOT이면 실패를 남기고 APPROVED로 둔다 (다시 실행할 수 있다)', async () => {
-    const so = await salesOrderWithReservation(SLAB_SM355A, 1, 1);
-    const requestDraft = await createDraft(sales, '출하요청 1매', 'SHIPMENT_REQUEST_CREATE');
-    await service.update(sales, requestDraft.id, { payload: { customerId, items: [{ salesOrderItemId: so.salesOrderItemId, requestQty: 1 }] } });
+  /** 출하요청 1건(같은 규격 품목 한 줄, requestQty매)과 그 품목 id */
+  async function openRequestItem(requestQty: number) {
+    const so = await salesOrderWithReservation(SLAB_SM355A, requestQty, requestQty);
+    const requestDraft = await createDraft(sales, `출하요청 ${requestQty}매`, 'SHIPMENT_REQUEST_CREATE');
+    await service.update(sales, requestDraft.id, { payload: { customerId, items: [{ salesOrderItemId: so.salesOrderItemId, requestQty }] } });
     const request = await prisma.shipmentRequest.findUniqueOrThrow({ where: { id: (await service.confirm(sales, requestDraft.id, {})).draft.result?.id }, include: { shipmentRequestItems: true } });
-    // 검사 불합격으로 바뀐 LOT은 배정할 수 없다
-    const notInspected = await passedSlabLot(SLAB_SM355A, '2026-10-05');
-    await prisma.qualityInspection.update({ where: { lotId: notInspected.id }, data: { inspectionResult: INSPECTION_RESULT.FAIL } });
+    return request.shipmentRequestItems[0].id;
+  }
+
+  it('배정할 수 없는 LOT(불합격·없는 LOT·미배정 매수 초과)은 확정 전에 막고 확인 대기로 둔다 (#471 리뷰)', async () => {
+    const requestItemId = await openRequestItem(1);
+    const failed = await passedSlabLot(SLAB_SM355A, '2026-10-05');
+    await prisma.qualityInspection.update({ where: { lotId: failed.id }, data: { inspectionResult: INSPECTION_RESULT.FAIL } });
+    const ok = await passedSlabLot(SLAB_SM355A, '2026-10-06');
 
     const { id } = await createDraft(sales, '배정', 'ALLOCATION_CONFIRM');
-    await service.update(sales, id, { payload: { shipmentRequestItemId: request.shipmentRequestItems[0].id } });
-    await service.update(sales, id, { payload: { lotIds: [notInspected.id] } });
-    const result = await service.confirm(sales, id, {});
-    expect(result.executed).toBe(false);
-    expect(result.draft).toMatchObject({ draftStatus: DRAFT_STATUS.APPROVED, executionAttemptCount: 1 });
-    expect(result.draft.executionErrorCode).not.toBeNull();
-    expect(await prisma.allocation.count({ where: { lotId: notInspected.id } })).toBe(0);
+    await service.update(sales, id, { payload: { shipmentRequestItemId: requestItemId } });
+    for (const [lotIds, code] of [[[failed.id], 'INV-002'], [[2_000_000_000], 'COM-003'], [[ok.id, failed.id], 'INV-001']] as const) {
+      await service.update(sales, id, { payload: { lotIds: [...lotIds] } });
+      expect(await codeOf(service.confirm(sales, id, {}))).toBe(code);
+    }
+    expect(await prisma.actionDraft.findUniqueOrThrow({ where: { id } })).toMatchObject({ draftStatus: DRAFT_STATUS.WAITING_APPROVAL, executionAttemptCount: 0 });
+    expect(await prisma.allocation.count({ where: { lotId: failed.id } })).toBe(0);
+
+    // 사람이 고친 LOT으로 확정하면 사유가 'FIFO 추천'이 아니다
+    await service.update(sales, id, { payload: { lotIds: [ok.id] } });
+    expect((await service.confirm(sales, id, {})).executed).toBe(true);
+    const confirmed = await prisma.businessEvent.findFirstOrThrow({ where: { actionDraftId: id, businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED } });
+    expect(confirmed.reason).toContain('사람이 고름');
+  });
+
+  it('같은 규격 출하요청 품목 두 개로 초안 두 장을 만들면 서로 다른 LOT을 추천한다 (#471 리뷰)', async () => {
+    const first = await openRequestItem(1);
+    const second = await openRequestItem(1);
+    await passedSlabLot(SLAB_SM355A, '2026-09-01');
+    await passedSlabLot(SLAB_SM355A, '2026-09-02');
+    const a = await createDraft(sales, '배정 1', 'ALLOCATION_CONFIRM');
+    await service.update(sales, a.id, { payload: { shipmentRequestItemId: first } });
+    const b = await createDraft(sales, '배정 2', 'ALLOCATION_CONFIRM');
+    await service.update(sales, b.id, { payload: { shipmentRequestItemId: second } });
+    const lotsA = (await service.get(sales, a.id)).payload;
+    const lotsB = (await service.get(sales, b.id)).payload;
+    if (!('lotIds' in lotsA) || !('lotIds' in lotsB)) throw new Error('배정 확정 초안이 아니다');
+    expect(lotsA.lotIds).toHaveLength(1);
+    expect(lotsB.lotIds).toHaveLength(1);
+    expect(lotsB.lotIds[0]).not.toBe(lotsA.lotIds[0]);
+    // 추천 다시 받기(같은 품목)는 자기 LOT을 다시 쓸 수 있다
+    await service.update(sales, a.id, { payload: { shipmentRequestItemId: first } });
+    expect((await service.get(sales, a.id)).payload).toMatchObject({ lotIds: lotsA.lotIds, lotsChosenBy: 'RECOMMENDATION' });
+    expect((await service.confirm(sales, a.id, {})).executed).toBe(true);
+    expect((await service.confirm(sales, b.id, {})).executed).toBe(true);
+  });
+});
+
+describe('실행 실패 (#471 리뷰)', () => {
+  it('핸들러의 업무 오류(COM-001 포함)와 예상 못 한 오류(COM-999)는 실패로 남기고, 실행에 실패한 초안은 반려할 수 있다', async () => {
+    const definition = moduleRef.get(ActionTypeRegistry).get('REPRODUCTION_PLAN_CREATE');
+    const so = await salesOrderWithReservation(SLAB_SS275, 3, 0);
+    const { id } = await createDraft(productionHead, '재생산', 'REPRODUCTION_PLAN_CREATE');
+    await service.update(productionHead, id, { payload: { salesOrderItemId: so.salesOrderItemId } });
+
+    const spy = jest.spyOn(definition, 'execute').mockRejectedValueOnce(new AppException('COM-001', '취소·출하완료된 수주 품목은 재생산하지 않아요'));
+    const businessError = await service.confirm(productionHead, id, {});
+    expect(businessError).toMatchObject({ executed: false, errorCode: 'COM-001', draft: { draftStatus: DRAFT_STATUS.APPROVED, executionErrorCode: 'COM-001', executionAttemptCount: 1 } });
+
+    spy.mockRejectedValueOnce(new Error('connection reset'));
+    const unexpected = await service.execute(productionHead, id);
+    expect(unexpected).toMatchObject({ executed: false, errorCode: 'COM-999', draft: { executionErrorCode: 'COM-999', executionAttemptCount: 2 } });
+    spy.mockRestore();
+
+    const rejected = await service.reject(productionHead, id, { rejectReason: '이미 다른 계획으로 채웠어요' });
+    expect(rejected).toMatchObject({ draftStatus: DRAFT_STATUS.REJECTED, rejectReason: '이미 다른 계획으로 채웠어요' });
+    expect(await prisma.productionPlan.count({ where: { salesOrderItemId: so.salesOrderItemId } })).toBe(0);
+  });
+
+  it('실행에 실패하지 않은 승인 초안은 반려할 수 없다', async () => {
+    const so = await salesOrderWithReservation(SLAB_SS275, 2, 0);
+    const { id } = await createDraft(productionHead, '재생산 승인만', 'REPRODUCTION_PLAN_CREATE');
+    await service.update(productionHead, id, { payload: { salesOrderItemId: so.salesOrderItemId } });
+    await prisma.actionDraft.update({ where: { id }, data: { draftStatus: DRAFT_STATUS.APPROVED } });
+    expect(await codeOf(service.reject(productionHead, id, { rejectReason: '취소' }))).toBe('COM-004');
   });
 });
 

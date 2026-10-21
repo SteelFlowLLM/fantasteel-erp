@@ -19,6 +19,10 @@ function assertProductionEnv(): void {
 async function bootstrap() {
   assertProductionEnv();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 같은 서버의 Caddy·Next 화면 서버(루프백)가 넘겨 준 X-Forwarded-For만 믿어 req.ip를 사용자 IP로 읽는다 (로그인 실패 횟수 제한, 이슈 #485)
+  app.set('trust proxy', 'loopback');
+  // 종료 신호(SIGTERM·SIGINT, pm2 restart·stop)에 모듈의 onModuleDestroy·종료 훅이 돌아 일꾼·소켓·DB 연결을 정리하게 한다
+  app.enableShutdownHooks();
   // AI 어시스턴트 질문에 사진(최대 4장 × 2MB, base64)이 실린다. 기본 100kb로는 받지 못한다
   app.useBodyParser('json', { limit: '12mb' });
   app.setGlobalPrefix('api/v1');

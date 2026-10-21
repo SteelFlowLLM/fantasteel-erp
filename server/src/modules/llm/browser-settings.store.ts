@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { LLM_START_SITE_PATTERN } from '@fantasteel/shared';
+import { writeFileAtomic } from '../../common/storage/write-file-atomic';
 
 export interface BrowserSettings {
   /** 관리자가 저장한 시작 사이트. 없으면 null (env·기본 목록) */
@@ -31,7 +32,7 @@ export class BrowserSettingsStore {
   }
 
   async write(settings: BrowserSettings): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(settings, null, 2), 'utf8');
+    // 쓰는 도중 읽는 요청이 반쪽 JSON을 읽지 않게 통째로 바꿔 쓴다 (#487)
+    await writeFileAtomic(this.file, JSON.stringify(settings, null, 2));
   }
 }

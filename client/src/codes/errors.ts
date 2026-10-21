@@ -25,5 +25,4 @@ export const ERROR_MESSAGE = {
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_MESSAGE;
-export const ERROR_CODES = Object.keys(ERROR_MESSAGE) as ErrorCode[];
 export const isErrorCode = (value: string): value is ErrorCode => value in ERROR_MESSAGE;

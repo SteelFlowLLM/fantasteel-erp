@@ -21,14 +21,6 @@ export const STEEL_GRADE = {
   SPHC: 'SPHC',
 } as const;
 export type SteelGradeCode = (typeof STEEL_GRADE)[keyof typeof STEEL_GRADE];
-export const STEEL_GRADE_LABEL: Record<SteelGradeCode, string> = {
-  SS275: 'SS275',
-  SM355A: 'SM355A',
-  SM355B: 'SM355B',
-  SM355C: 'SM355C',
-  SM355D: 'SM355D',
-  SPHC: 'SPHC',
-};
 
 export const ITEM_TYPE = {
   RAW_MATERIAL: 'RAW_MATERIAL',
@@ -40,12 +32,6 @@ export const ITEM_TYPE_LABEL: Record<ItemType, string> = {
   RAW_MATERIAL: '원료',
   SLAB: '슬래브',
   COIL: '코일',
-};
-/** 품목 유형별 단위 유형 (공통 코드 정의서 ITEM_TYPE 표의 '단위 유형' 열) */
-export const ITEM_TYPE_UNIT_TYPE: Record<ItemType, UnitType> = {
-  RAW_MATERIAL: 'TON',
-  SLAB: 'QTY',
-  COIL: 'QTY',
 };
 
 export type ProductItemType = Exclude<ItemType, 'RAW_MATERIAL'>;

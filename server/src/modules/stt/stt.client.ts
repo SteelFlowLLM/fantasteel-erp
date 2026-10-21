@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Agent } from 'undici';
 import type { SttModelOption } from '@fantasteel/shared';
 import { redactUrl } from './stt-url';
 
@@ -10,6 +11,16 @@ const MAX_MODEL_OPTIONS = 50;
 const TRANSCRIBE_TIMEOUT_MS = 60 * 60_000;
 const CONNECTION_TEST_TIMEOUT_MS = 90_000;
 const DEFAULT_MODEL = 'whisper-1';
+/**
+ * 전역 fetch(undici)는 응답 헤더를 5분(300초) 안에 못 받으면 끊는다. 긴 회의는 서버가 다 받아쓴 뒤에야 응답을 시작해 5분이 넘기 쉽다.
+ * 그래서 받아쓰기 요청에만 전용 Agent로 헤더·본문 대기를 전사 제한 시간에 맞춘다 (이슈 #485).
+ * 우리 쪽 제한(AbortSignal)이 먼저 걸려 "N초 안에 응답이 없어요"가 나오도록 여유를 조금 더한다.
+ */
+const AGENT_TIMEOUT_MARGIN_MS = 10_000;
+export function sttAgentOptions(timeoutMs: number): { headersTimeout: number; bodyTimeout: number } {
+  const wait = timeoutMs + AGENT_TIMEOUT_MARGIN_MS;
+  return { headersTimeout: wait, bodyTimeout: wait };
+}
 /** 사이드카의 받아쓰기만 하는 엔진. 화자 분리는 몇 초짜리 부르는 말에 필요 없고 느리다 */
 const SIDECAR_QUICK_MODEL = 'whisper';
 
@@ -70,21 +81,32 @@ export class SttClient {
     if (input.speakerCount && SIDECAR_MODELS.has(input.model ?? '')) form.append('num_speakers', String(input.speakerCount));
 
     let res: Response;
+    // 이 요청 하나만 쓰는 Agent: 응답 본문을 다 읽은 뒤(또는 실패하면 바로) 닫는다
+    const agent = new Agent(sttAgentOptions(timeoutMs));
     try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
-        body: form,
-        // 리다이렉트로 메타데이터 같은 다른 곳에 키·음성이 가지 않게 한다
-        redirect: 'error',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') {
-        throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. 음성 서버 상태를 확인해 주세요`);
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {},
+          body: form,
+          // 리다이렉트로 메타데이터 같은 다른 곳에 키·음성이 가지 않게 한다
+          redirect: 'error',
+          signal: AbortSignal.timeout(timeoutMs),
+          dispatcher: agent,
+        } as RequestInit);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'TimeoutError') {
+          throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. 음성 서버 상태를 확인해 주세요`);
+        }
+        throw new SttRequestError(connectFailureMessage(url, error));
       }
-      throw new SttRequestError(connectFailureMessage(url, error));
+      return await this.readTranscribeResponse(res, url);
+    } finally {
+      void agent.close().catch(() => undefined);
     }
+  }
+
+  private async readTranscribeResponse(res: Response, url: string): Promise<SttTranscript> {
     if (res.status === 401 || res.status === 403) throw new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (res.status === 404) {
       // OpenAI는 모델 이름이 틀려도 404(model_not_found)를 주므로 서버가 준 이유를 함께 보인다

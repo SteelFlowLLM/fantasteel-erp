@@ -18,7 +18,8 @@ export function webResearchStartAt(entries: readonly AiChatEntry[], index: numbe
   const answer = entries[index];
   const asked = entries[index - 1];
   if (answer?.role !== 'assistant' || asked?.role !== 'user' || asked.webSearch !== true) return null;
-  const sources = (answer.webSources ?? []).filter((s) => isWebUrl(s.url)).slice(0, AI_RESEARCH_LIMITS.seedSourcesMax);
+  // 주소가 서버 상한(seedUrlMax)을 넘으면 자르면 못 여는 주소가 되므로 그 출처는 뺀다 (넘기면 서버가 400으로 조사를 못 만든다, 이슈 #476)
+  const sources = (answer.webSources ?? []).filter((s) => isWebUrl(s.url) && s.url.length <= AI_RESEARCH_LIMITS.seedUrlMax).slice(0, AI_RESEARCH_LIMITS.seedSourcesMax);
   const question = asked.content.trim().slice(0, AI_RESEARCH_LIMITS.questionMax);
   if (sources.length === 0 || question.length < AI_RESEARCH_LIMITS.questionMin) return null;
   return {

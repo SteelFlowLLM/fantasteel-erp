@@ -97,10 +97,41 @@ export function buildDriveListQuery(folderId: string, kind: DriveFileListKind): 
   return `${base} and ${mime}`;
 }
 
-/** 이름에 name이 든 파일만 (철강맨AI drive_search, 이슈 #398). Drive의 name contains는 낱말 앞부분으로 맞춘다 */
-export function buildDriveSearchQuery(folderId: string, kind: DriveFileListKind, name: string | null): string {
-  const query = buildDriveListQuery(folderId, kind);
-  return name ? `${query} and name contains ${quote(name)}` : query;
+/** drive_search 검색어를 나누는 낱말 수·한 낱말 길이 상한 (가정값, 이슈 #473) */
+export const DRIVE_SEARCH_TERMS_MAX = 6;
+export const DRIVE_SEARCH_TERM_MAX = 40;
+
+/**
+ * 검색어를 낱말로 나눈다 (공백·쉼표·세미콜론 기준). Drive의 name contains·fullText contains는 낱말 단위로 맞춰서
+ * 문장 통째로 넣으면 이름에 그 문장 전체가 든 파일만 찾는다. 같은 낱말(대소문자 무시)은 한 번만, 6개·한 낱말 40자까지.
+ */
+export function driveSearchTerms(query: string | null): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const raw of (query ?? '').split(/[\s,;]+/)) {
+    const term = raw.trim().slice(0, DRIVE_SEARCH_TERM_MAX);
+    if (!term || seen.has(term.toLowerCase())) continue;
+    seen.add(term.toLowerCase());
+    terms.push(term);
+    if (terms.length >= DRIVE_SEARCH_TERMS_MAX) break;
+  }
+  return terms;
+}
+
+/** all: 낱말이 모두 든 파일, any: 하나라도 든 파일 */
+export type DriveSearchMatch = 'all' | 'any';
+
+/**
+ * 철강맨AI drive_search의 files.list 검색어 (이슈 #398, 내용 검색 #473). 목록과 같은 폴더·휴지통·종류 조건에 낱말 조건을 더한다.
+ * 낱말마다 `name contains`(이름, 낱말 앞부분)와 `fullText contains`(이름·설명·내용: Google 문서·스프레드시트·PDF·Office·글 파일)를 or로 묶고,
+ * 낱말끼리는 match에 따라 and/or로 잇는다. content를 false로 하면 이름만 본다(이름으로 파일을 집을 때).
+ */
+export function buildDriveSearchQuery(folderId: string, kind: DriveFileListKind, query: string | null, match: DriveSearchMatch = 'all', content = true): string {
+  const base = buildDriveListQuery(folderId, kind);
+  const terms = driveSearchTerms(query);
+  if (terms.length === 0) return base;
+  const conditions = terms.map((term) => (content ? `(name contains ${quote(term)} or fullText contains ${quote(term)})` : `name contains ${quote(term)}`));
+  return `${base} and (${conditions.join(match === 'all' ? ' and ' : ' or ')})`;
 }
 
 /** 연결 확인에서 폴더의 파일 종류를 셀 때 */

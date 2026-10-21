@@ -147,7 +147,7 @@ describe('초안 생성 (REQ-ACT-001, API-251)', () => {
     expect(await service.get(purchaseHead, first.id)).toMatchObject({
       draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
       requesterId: purchaser.employeeId,
-      payload: { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content, aiFilledFields: [] },
+      payload: { itemId: null, requestedTon: null, desiredReceiptDate: null, requestReason: null, sourceText: message.content, aiFilledFields: [], aiExtraction: 'NO_MODEL' },
       unresolvedFields: ['원료 품목', '수량(톤)', '희망 입고일'],
     });
     // LLM 모델이 없으면 부르지 않고 빈 초안으로 만든다
@@ -186,7 +186,7 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     const { id } = await service.create(purchaseHead, message.id);
     expect(await service.get(purchaser, id)).toMatchObject({
       draftStatus: DRAFT_STATUS.WAITING_APPROVAL,
-      payload: { itemId: oreId, requestedTon: '120.500', desiredReceiptDate: '2026-11-20', sourceText: message.content, aiFilledFields: ['itemId', 'requestedTon', 'desiredReceiptDate'] },
+      payload: { itemId: oreId, requestedTon: '120.500', desiredReceiptDate: '2026-11-20', sourceText: message.content, aiFilledFields: ['itemId', 'requestedTon', 'desiredReceiptDate'], aiExtraction: 'FILLED' },
       unresolvedFields: [],
     });
     const [system, prompt] = llm.calls[0];
@@ -212,6 +212,14 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     const failed = await service.create(purchaser, (await send(purchaser, '철광석 10톤')).id);
     useLlm(async () => '네, 철광석 10톤이네요');
     const notJson = await service.create(purchaser, (await send(purchaser, '철광석 10톤 다시')).id);
+    // 빈 초안이 된 까닭을 남긴다 (이슈 #472)
+    expect((await service.get(purchaser, failed.id)).payload.aiExtraction).toBe('FAILED');
+    expect((await service.get(purchaser, notJson.id)).payload.aiExtraction).toBe('NOT_JSON');
+    useLlm(async () => {
+      throw new LlmRequestError('90초 안에 응답이 없어요', undefined, 'TIMEOUT');
+    });
+    const timedOut = await service.create(purchaser, (await send(purchaser, '철광석 10톤 또')).id);
+    expect((await service.get(purchaser, timedOut.id)).payload).toMatchObject({ itemId: null, aiExtraction: 'TIMEOUT' });
     for (const { id, created } of [failed, notJson]) {
       expect(created).toBe(true);
       expect(await service.get(purchaser, id)).toMatchObject({

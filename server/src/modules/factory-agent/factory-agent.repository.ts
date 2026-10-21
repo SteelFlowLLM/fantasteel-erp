@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { DRAFT_STATUS, INSPECTION_RESULT, SALES_ORDER_ITEM_STATUS } from '@fantasteel/shared';
+import { DRAFT_STATUS, INSPECTION_RESULT, PERMISSION_LEVEL, SALES_ORDER_ITEM_STATUS, type Permission } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
-/** 아직 처리되지 않은 초안 상태 (ERD 부분 unique와 같은 목록). 같은 대상의 미처리 초안은 하나만 둔다 (REQ-AGT-005) */
+/** 아직 처리되지 않은 초안 상태 (ERD 부분 unique action_draft_open_agent_target_key와 같은 목록). 같은 대상의 미처리 초안은 하나만 둔다 (REQ-AGT-005) */
 export const OPEN_DRAFT_STATUSES = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL, DRAFT_STATUS.APPROVED];
 
 const draftSelect = {
@@ -35,8 +35,14 @@ export class FactoryAgentRepository {
     });
   }
 
-  createDraft(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue }) {
-    return tx.actionDraft.create({ data, select: draftSelect });
+  /**
+   * 같은 대상의 미처리 후보가 DB 부분 unique에 걸리면 만들지 않고 null을 돌려준다 (ON CONFLICT DO NOTHING).
+   * 충돌에서 오류를 내면 Postgres가 트랜잭션을 중단시켜 같은 tx의 나머지 일을 할 수 없어서 이렇게 한다.
+   */
+  async createDraftIfNew(tx: Tx, data: { actionType: string; payload: Prisma.InputJsonValue }): Promise<AgentDraftRow | null> {
+    // createManyAndReturn은 관계 칸을 고를 수 없어 id만 받아 다시 읽는다
+    const [created] = await tx.actionDraft.createManyAndReturn({ data: [data], skipDuplicates: true, select: { id: true } });
+    return created ? this.findDraft(tx, created.id) : null;
   }
 
   findDraft(tx: Tx, id: number) {
@@ -100,12 +106,22 @@ export class FactoryAgentRepository {
     });
   }
 
+  /** 그 기능의 사용(USE) 권한이 있는 재직 사원 (후보 확정 권한자, REQ-AGT-006) */
+  async findActiveEmployeeIdsWithPermission(tx: Tx, permission: Permission): Promise<number[]> {
+    const rows = await tx.employee.findMany({
+      where: { isActive: true, role: { rolePermissions: { some: { permission, permissionLevel: PERMISSION_LEVEL.USE } } } },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((row) => row.id);
+  }
+
   findDepartmentIdByCode(tx: Tx, departmentCode: string) {
     return tx.department.findUnique({ where: { departmentCode }, select: { id: true } });
   }
 
-  /** 받는 사람이 아직 읽지 않은 같은 알림이 있는지 (같은 위험을 매 주기마다 다시 보내지 않는다) */
-  async hasUnreadSameNotification(tx: Tx, recipientId: number, notificationType: string, notificationContent: string): Promise<boolean> {
-    return (await tx.notification.count({ where: { recipientId, notificationType, notificationContent, readAt: null } })) > 0;
+  /** 받는 사람이 아직 읽지 않은 같은 알림이 있는지 (같은 위험을 매 주기마다 다시 보내지 않는다). 유형은 여러 개를 함께 본다 */
+  async hasUnreadSameNotification(tx: Tx, recipientId: number, notificationTypes: readonly string[], notificationContent: string): Promise<boolean> {
+    return (await tx.notification.count({ where: { recipientId, notificationType: { in: [...notificationTypes] }, notificationContent, readAt: null } })) > 0;
   }
 }

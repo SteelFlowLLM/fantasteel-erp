@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type SteelmanWakeSettingsInput, type SteelmanWakeSettingsView, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { PERMISSION, STT_WAKE_CLIP_LIMITS, wakeClipLimitOf, type AuthUser, type SttWakeClipMode, type SteelmanWakeSettingsInput, type SteelmanWakeSettingsView, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
 import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
@@ -25,6 +25,8 @@ export interface UploadedAudio {
 @Injectable()
 export class SttService {
   private readonly logger = new Logger(SttService.name);
+  /** 중간 글(partial) 횟수. 명령 덩어리·부르는 말 조각과 따로 센다 (이슈 #494) */
+  private readonly partialLimiter = Object.assign(new SttWakeLimiter(), { perMinute: STT_WAKE_CLIP_LIMITS.partialPerMinute });
 
   constructor(
     private readonly store: SttSettingsStore,
@@ -95,12 +97,19 @@ export class SttService {
    * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
    * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
    */
-  async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined): Promise<SttWakeClipView> {
+  /**
+   * mode(이슈 #494): wake는 부르는 말을 찾는 8초 조각, command는 "철강맨" 뒤 명령 한 덩어리(30초), partial은 명령을 말하는 동안 보이기만 할 중간 글.
+   * partial은 따로 세어(1분 40번) 명령 덩어리의 횟수를 깎지 않는다. 어느 쪽도 소리·글을 저장하지 않는다
+   */
+  async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined, mode: SttWakeClipMode = 'wake'): Promise<SttWakeClipView> {
     // 관리자가 회사 전체로 끈 뒤에도 켜 둔 화면이 보내는 조각은 세지도 받아쓰지도 않는다
     if (!(await this.wakeSettings.read()).enabled) throw new AppException('VOC-011');
-    if (!this.wakeLimiter.take(user.employeeId)) throw new AppException('VOC-009');
+    const limiter = mode === 'partial' ? this.partialLimiter : this.wakeLimiter;
+    if (!limiter.take(user.employeeId)) throw new AppException('VOC-009');
     if (!file) throw new AppException('COM-004', '말소리 조각이 없어요 (file 필드)');
-    const problem = wakeClipProblem(file.buffer);
+    const limit = wakeClipLimitOf(mode);
+    if (file.buffer.length > limit.maxBytes) throw new AppException('COM-004', `말소리 조각이 너무 커요 (${Math.round(limit.maxBytes / 1024)}KB까지)`);
+    const problem = wakeClipProblem(file.buffer, limit.maxSeconds);
     if (problem) throw new AppException('COM-004', problem);
     const settings = await this.store.read();
     try {

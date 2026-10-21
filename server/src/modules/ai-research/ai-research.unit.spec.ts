@@ -22,7 +22,7 @@ import type { AuthUserService } from '../../common/auth/auth-user.service';
 import type { AssistantToolbox, ToolRunResult } from '../ai-assistant/tools/assistant-toolbox';
 import type { LlmToolCall, LlmToolDefinition, LlmToolMessage, LlmToolReply } from '../llm/llm.client';
 import { callKey, ERP_LOOKUP_CALLS, ERP_LOOKUP_ROUNDS, erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
-import { erpEvidence, withErpEvidence } from './ai-research.evidence';
+import { erpEvidence, withInternalEvidence } from './ai-research.evidence';
 import { ERP_PLAN_RULE } from './ai-research.prompt';
 import { erpPartnerNames, isErpSource, storedSources } from './ai-research.rules';
 
@@ -859,7 +859,7 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       expect(blocks[0]).toContain('합격 재고 매수');
       expect(erpEvidence([source(2)], 5000)).toEqual([]);
       const rest = jest.fn((_room: number) => ['웹 블록']);
-      const merged = withErpEvidence(sources, 10_000, rest);
+      const merged = withInternalEvidence(sources, 10_000, rest);
       expect(merged[0]).toContain('research:erp-1');
       expect(merged.at(-1)).toBe('웹 블록');
       // 웹 기록에는 ERP가 쓴 글자를 뺀 나머지가 간다

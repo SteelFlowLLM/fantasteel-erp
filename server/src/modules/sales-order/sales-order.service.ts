@@ -235,6 +235,8 @@ export class SalesOrderService {
       return item;
     };
     dto.items.forEach((line) => itemOf(line.itemId));
+    // 재고 행을 첫 채번·작업 로그보다 먼저 잠근다 (출고·수주 취소와 같은 잠금 순서, 교착 방지 #478)
+    await this.inventory.lockInventoriesFirst(tx, dto.items.map((line) => line.itemId));
 
     const salesOrder = await this.repository.createSalesOrder(tx, {
       salesOrderNo: await this.numbering.nextDocumentNumber(tx, 'SALES_ORDER'),
@@ -305,6 +307,10 @@ export class SalesOrderService {
       const cancelledPlanNos: string[] = [];
       const unlinkedPlanNos: string[] = [];
       const live = cancellableItemsOf(row);
+      // 잠금 순서: 수주 품목 → 생산계획 → 재고 행 → 작업 로그 (열연 완료·출고와 같은 순서, #478).
+      // 계획을 잠가 진행 중인 열연 완료가 끝난 뒤의 상태를 보고, 재고 행은 첫 작업 로그 전에 모두 잠근다
+      const planIds = await this.production.lockPlansOfSalesOrderItems(tx, live.map((i) => i.id));
+      await this.inventory.lockInventoriesFirst(tx, [...live.map((i) => i.itemId), ...(await this.inventory.hotRollingItemIdsOfPlans(tx, planIds))]);
       for (const soItem of [...live].sort((a, b) => a.itemId - b.itemId || a.id - b.id)) {
         const releasedQty = await this.inventory.releaseForSalesOrderItem(tx, { salesOrderId: row.id, salesOrderItemId: soItem.id, itemId: soItem.itemId, actor: user, reason });
         releasedReservations.push({ salesOrderItemId: soItem.id, releasedQty });

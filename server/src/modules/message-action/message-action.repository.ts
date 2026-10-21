@@ -134,6 +134,11 @@ export class MessageActionRepository {
     return tx.shipmentRequestItem.findMany({ where, orderBy: { id: 'desc' }, take, select: shipmentRequestItemSelect });
   }
 
+  /** 메시지에서 만든 미처리 초안의 payload (한 유형). 배정 확정 추천이 다른 초안의 LOT을 뺄 때 쓴다 */
+  findOpenDraftPayloads(tx: Tx, actionType: string) {
+    return tx.actionDraft.findMany({ where: { actionType, messageId: { not: null }, draftStatus: { in: OPEN_DRAFT_STATUSES } }, select: { id: true, payload: true } });
+  }
+
   findLots(tx: Tx, ids: number[]) {
     return tx.lot.findMany({ where: { id: { in: ids } }, select: { id: true, lotNo: true }, orderBy: { id: 'asc' } });
   }

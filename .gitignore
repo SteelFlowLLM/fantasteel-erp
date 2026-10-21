@@ -14,6 +14,9 @@ CLAUDE.md
 .env
 .env.*
 !.env.example
+# 배포 폴더의 실제 환경 파일 (deploy/aws/server.env.example 같은 예시 파일은 올린다)
+deploy/**/*.env
+deploy/**/*.env.local
 # Google 서비스 계정 키 등 비밀 파일 (server/.env.example의 GOOGLE_SERVICE_ACCOUNT_KEY_FILE)
 server/secrets/
 

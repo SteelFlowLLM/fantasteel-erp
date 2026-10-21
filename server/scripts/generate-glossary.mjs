@@ -1,7 +1,8 @@
 // 용어 사전(docs/notion/03-용어-사전.md) 표와 업무 프로세스 정의서(04) 6.0 '한눈에 보기' 표를 읽어 AI 어시스턴트 업무 지식(REQ-AST-003)으로 쓸 파일을 만든다.
 // 서버가 실행 중에 docs/를 읽지 않게(배포 폴더에는 docs/가 없다) 공통 코드처럼 미리 만들어 커밋한다.
 // 업무 매뉴얼 초안(docs/manual/업무-매뉴얼-초안.md)도 읽어 화면 절차 답변(REQ-AST-003)의 근거 파일을 만든다.
-// 세 문서 중 하나가 바뀌면 다시 실행한다: npm run glossary -w @fantasteel/server
+// KS 규격 정리(docs/notion/07-KS-규격-정리.md)는 절마다 읽어 심층 조사의 사내 지식 출처로 쓴다.
+// 네 문서 중 하나가 바뀌면 다시 실행한다: npm run glossary -w @fantasteel/server
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -146,6 +147,47 @@ writeFileSync(
   'utf8',
 );
 process.stdout.write(`업무 매뉴얼 ${manualGuides.length}개 → ${manualOutPath}\n`);
+
+// KS 규격 정리(07)를 '## ' 절마다 하나씩 읽어 심층 조사의 사내 지식 출처로 쓴다 (이슈 #484). 그림(mermaid)·문서 사이 링크·aside 태그는 뗀다
+const ksDocPath = join(root, '..', 'docs', 'notion', '07-KS-규격-정리.md');
+const ksOutPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'ks.generated.ts');
+const ksDoc = readFileSync(ksDocPath, 'utf8').replace(/\r\n/g, '\n');
+const ksSections = [];
+let ksCurrent = null;
+let inFence = false;
+for (const line of ksDoc.split('\n')) {
+  if (line.startsWith('```')) {
+    inFence = !inFence;
+    continue;
+  }
+  if (inFence) continue;
+  const heading = line.match(/^## ([\d-]+)\. (.+)$/);
+  if (heading) {
+    ksCurrent = { id: `KS-${heading[1]}`, title: heading[2].trim(), lines: [] };
+    ksSections.push(ksCurrent);
+    continue;
+  }
+  if (!ksCurrent || /^<\/?aside>$/.test(line.trim()) || /^[📌⚠️ℹ️]+$/u.test(line.trim())) continue;
+  // 다른 Notion 문서로 가는 링크는 글만 남긴다
+  ksCurrent.lines.push(line.replace(/\[([^\]]+)\]\((?!https?:)[^)]*\)/g, '$1'));
+}
+const ksEntries = ksSections
+  .map((section) => ({ id: section.id, title: section.title, text: section.lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() }))
+  .filter((section) => section.text !== '');
+if (ksEntries.length < 5) throw new Error(`KS 규격 절이 너무 적음 (${ksEntries.length}개)`);
+writeFileSync(
+  ksOutPath,
+  [
+    '// 이 파일은 scripts/generate-glossary.mjs가 KS 규격 정리(docs/notion/07-KS-규격-정리.md)에서 만든다. 손으로 고치지 않는다.',
+    '// 바꾸는 순서: KS 문서 수정 → npm run glossary -w @fantasteel/server',
+    "import type { KsSection } from './ks.types';",
+    '',
+    `export const KS_SECTIONS: readonly KsSection[] = ${JSON.stringify(ksEntries, null, 2)};`,
+    '',
+  ].join('\n'),
+  'utf8',
+);
+process.stdout.write(`KS 규격 ${ksEntries.length}절 → ${ksOutPath}\n`);
 
 /** 매뉴얼 한 업무의 본문을 모델에 넘길 글로: 표는 한 줄씩, 근거 파일·검수 메모(> 줄)·마크다운 꾸밈은 뗀다 */
 function manualText(lines) {

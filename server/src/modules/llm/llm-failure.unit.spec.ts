@@ -1,7 +1,7 @@
 // LLM 실패 → 오류 코드(AST-002~005) 변환 (이슈 #462). DB·네트워크 없음
 import { ERROR_CODE } from '@fantasteel/shared';
 import { llmFailureException, llmFailureOf, noModelException, LLM_FAILURE_CODE } from './llm-failure';
-import { LlmAbortedError, LlmJsonParseError, LlmRequestError, type LlmFailureKind } from './llm.client';
+import { LlmAbortedError, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, unslothNotLoadedMessage, type LlmFailureKind } from './llm.client';
 
 describe('LLM 실패 오류 코드', () => {
   it('실패 종류마다 겹치지 않는 코드를 쓰고 모두 503이다', () => {
@@ -9,6 +9,11 @@ describe('LLM 실패 오류 코드', () => {
     expect(new Set(codes).size).toBe(codes.length);
     for (const code of codes) expect(ERROR_CODE[code].status).toBe(503);
     expect(LLM_FAILURE_CODE).toEqual({ NO_MODEL: 'AST-002', CONNECT: 'AST-003', TIMEOUT: 'AST-004', SERVER: 'AST-005' });
+  });
+
+  it('Unsloth 모델 미적재는 AST-002이고 불러오기·auto-switch 안내 문구를 그대로 쓴다 (이슈 #465)', () => {
+    const message = unslothNotLoadedMessage('a/think', ['b/plain']);
+    expect(llmFailureOf(new LlmModelNotLoadedError(message))).toEqual({ code: 'AST-002', message });
   });
 
   it('새 코드는 이미 있는 코드(AST-001·RES-·VOC-)와 번호가 겹치지 않는다', () => {

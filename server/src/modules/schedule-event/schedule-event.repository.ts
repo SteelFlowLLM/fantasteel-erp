@@ -22,10 +22,13 @@ export interface ScheduleEventFields {
 /** DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장) */
 @Injectable()
 export class ScheduleEventRepository {
-  /** 시작 시각이 [from, to) 안인 일정 중 내가 참석자이거나 등록자인 것 */
+  /**
+   * [from, to)와 겹치는 일정 중 내가 참석자이거나 등록자인 것. 범위 전에 시작해 걸치는 일정(일 23시~월 02시)도 다음 주에 보이게
+   * 시작이 범위 끝보다 앞이고 끝이 범위 시작보다 뒤인 것을 고른다 (#487)
+   */
   findMine(tx: Tx, employeeId: number, from: Date, to: Date): Promise<ScheduleEventRow[]> {
     return tx.scheduleEvent.findMany({
-      where: { startAt: { gte: from, lt: to }, OR: [{ creatorId: employeeId }, { attendees: { some: { employeeId } } }] },
+      where: { startAt: { lt: to }, endAt: { gt: from }, OR: [{ creatorId: employeeId }, { attendees: { some: { employeeId } } }] },
       include,
       orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
     });

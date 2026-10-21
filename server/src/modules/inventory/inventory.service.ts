@@ -330,11 +330,11 @@ export class InventoryService {
       const allocations = await this.repository.findConfirmedAllocationsOfLots(tx, ineligible.map((l) => l.id));
       let rollingReleased = 0;
       for (const allocation of allocations) {
-        await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${allocation.lot.lotNo}이 불합격(또는 상위 히트 불합격)이라 배정 해제`);
+        if (!(await this.releaseRow(tx, allocation, 'SYSTEM', `QUALITY_FAILURE: ${allocation.lot.lotNo}이 불합격(또는 상위 히트 불합격)이라 배정 해제`))) continue;
         if (allocation.allocationPurpose === ALLOCATION_PURPOSE.HOT_ROLLING) rollingReleased += 1;
         if (allocation.shipmentRequestItem) refreshRequestIds.add(allocation.shipmentRequestItem.shipmentRequestId);
       }
-      if (rollingReleased > 0) await this.repository.decrementRollingAllocatedQty(tx, itemId, rollingReleased);
+      if (rollingReleased > 0) await this.decrementRolling(tx, itemId, rollingReleased);
 
       // 2. 가용을 넘는 예약을 먼저 줄이고 on_hand를 맞춘다 (CHECK: on_hand − reserved − rolling ≥ 0)
       const onHandQty = await this.repository.countEligibleAvailableLots(tx, itemId);
@@ -424,7 +424,9 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
       const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
-      const [lots, yardNames] = await Promise.all([this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId), this.yardNames(tx)]);
+      // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+      const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
+      const yardNames = await this.yardNames(tx);
       if (unallocatedQty > 0 && lots.length === 0) throw new AppException('INV-001', '배정할 수 있는 합격 LOT이 없어요');
       const candidates: AllocationCandidate[] = lots.map((lot, index) => ({
         lotId: lot.id,
@@ -457,7 +459,8 @@ export class InventoryService {
   async listShipmentCandidates(user: AuthUser, shipmentRequestId: number): Promise<ShipmentAllocationCandidates[]> {
     this.assertPurposePermission(user, ALLOCATION_PURPOSE.SHIPMENT, 'VIEW');
     const tx = this.prisma;
-    const [items, yardNames] = await Promise.all([this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId), this.yardNames(tx)]);
+    const items = await this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId);
+    const yardNames = await this.yardNames(tx);
     const lotsByItem = new Map<number, Awaited<ReturnType<InventoryRepository['findAllocatableLots']>>>();
     const taken = new Set<number>();
     const result: ShipmentAllocationCandidates[] = [];
@@ -526,13 +529,29 @@ export class InventoryService {
    * 출하요청 품목의 FIFO 추천 LOT id (조회만, 작업 로그 없음). 미배정 매수만큼 앞에서부터.
    * Message → ERP 배정 확정 초안은 LOT을 AI가 아니라 이 추천으로 채운다 (message-action.md 10장)
    */
-  async recommendedShipmentLotIds(tx: Tx, shipmentRequestItemId: number): Promise<number[]> {
+  async recommendedShipmentLotIds(tx: Tx, shipmentRequestItemId: number, excludeLotIds: readonly number[] = []): Promise<number[]> {
     const requestItem = await this.repository.findShipmentRequestItem(tx, shipmentRequestItemId);
     if (!requestItem) return [];
     const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
     if (unallocatedQty <= 0) return [];
+    // 다른 미처리 초안이 이미 추천받은 LOT은 빼고 추천한다 (같은 LOT을 두 초안이 가져가 뒤 초안이 INV-003으로 막히지 않게)
+    const excluded = new Set(excludeLotIds);
     const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
-    return lots.slice(0, unallocatedQty).map((l) => l.id);
+    return lots.filter((l) => !excluded.has(l.id)).slice(0, unallocatedQty).map((l) => l.id);
+  }
+
+  /**
+   * 출하 배정을 확정할 수 있는지만 본다 (잠그지 않고, 아무것도 바꾸지 않는다). 배정 확정과 같은 규칙:
+   * 출고 전 출하요청, 미배정 매수 이내, LOT마다 같은 규격·재고 상태·적격·확정 배정 없음.
+   * Message → ERP 배정 확정 초안이 확정 전에 불러, 실행이 늘 실패해 승인(APPROVED)에 갇히는 초안을 막는다
+   */
+  async assertShipmentAllocatable(tx: Tx, shipmentRequestItemId: number, lotIds: readonly number[]): Promise<void> {
+    const requestItem = await this.repository.findShipmentRequestItem(tx, shipmentRequestItemId);
+    if (!requestItem) throw new AppException('COM-003', '출하요청 품목을 찾을 수 없어요');
+    this.assertOpenShipmentRequest(requestItem.shipmentRequest.shipmentRequestStatus);
+    const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
+    if (lotIds.length > unallocatedQty) throw new AppException('INV-001', `미배정 매수는 ${Math.max(0, unallocatedQty)}매예요`);
+    for (const lotId of lotIds) await this.assertAllocatableLot(tx, lotId, requestItem.salesOrderItem.itemId);
   }
 
   /** 배정 해제(newLotId 없음) 또는 변경(기존 해제 + 새 LOT 확정을 한 트랜잭션에서). 소진된 배정은 바꿀 수 없다 (INV-004) */
@@ -664,8 +683,9 @@ export class InventoryService {
     }
     for (const [itemId, rows] of [...byItem.entries()].sort(([a], [b]) => a - b)) {
       await this.repository.lockInventory(tx, itemId);
-      for (const allocation of rows) await this.releaseRow(tx, allocation, input.actor, input.reason, input.salesOrderId);
-      await this.repository.decrementRollingAllocatedQty(tx, itemId, rows.length);
+      let releasedQty = 0;
+      for (const allocation of rows) if (await this.releaseRow(tx, allocation, input.actor, input.reason, input.salesOrderId)) releasedQty += 1;
+      if (releasedQty > 0) await this.decrementRolling(tx, itemId, releasedQty);
     }
     return confirmed.map((a) => a.lotId);
   }
@@ -713,7 +733,7 @@ export class InventoryService {
     if (input.newLotId === allocation.lotId) throw new AppException('COM-004', '지금 배정된 LOT과 같은 LOT이에요');
 
     const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
-    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, 1);
+    await this.decrementRolling(tx, input.slabItemId, 1);
     if (input.newLotId === undefined) {
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED,
@@ -754,7 +774,7 @@ export class InventoryService {
     if (!(await this.repository.consumeConfirmedAllocations(tx, input.allocationIds))) {
       throw new Error(`소진할 열연 배정 일부가 CONFIRMED가 아닙니다 (배정 ${input.allocationIds.join(',')})`);
     }
-    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, input.allocationIds.length);
+    await this.decrementRolling(tx, input.slabItemId, input.allocationIds.length);
     await this.repository.setOnHandQty(tx, input.slabItemId, await this.repository.countEligibleAvailableLots(tx, input.slabItemId));
   }
 
@@ -764,10 +784,62 @@ export class InventoryService {
     return rows.map(toAllocationView);
   }
 
+  /**
+   * 이 트랜잭션에서 바꿀 규격 재고 행을 규격 id 오름차순으로 미리 잠근다 (교착 방지, 13.2 "고정 순서").
+   * 작업 로그 채번(EV- 앞부분 잠금)은 트랜잭션이 끝날 때까지 잡히므로, 재고 행은 첫 작업 로그보다 먼저 모두 잠가야
+   * "작업 로그 → 재고" 순서 거래와 "재고 → 작업 로그" 순서 거래가 서로 기다리지 않는다 (#478). 같은 행을 뒤에 또 잠가도 된다
+   */
+  async lockInventoriesFirst(tx: Tx, itemIds: readonly number[]): Promise<void> {
+    for (const itemId of [...new Set(itemIds)].sort((a, b) => a - b)) {
+      await this.repository.ensureInventory(tx, itemId);
+      await this.repository.lockInventory(tx, itemId);
+    }
+  }
+
+  /**
+   * 검사 판정이 바뀔 LOT들이 건드릴 행을 품질 검사가 작업 로그를 남기기 전에 잠근다.
+   * 출고 확정과 같은 순서(출하요청 → 재고 → 작업 로그): 불합격으로 출하 배정을 풀면 그 출하요청 상태를 다시 계산하므로
+   * 출하요청을 먼저 잠그고(id 순) 재고 행을 잠근다 (#478 리뷰)
+   */
+  async lockInventoriesOfLots(tx: Tx, lotIds: readonly number[]): Promise<void> {
+    const productLotIds = await this.repository.findAffectedProductLotIds(tx, [...lotIds]);
+    if (productLotIds.length === 0) return;
+    const allocations = await this.repository.findConfirmedAllocationsOfLots(tx, productLotIds);
+    const requestIds = [...new Set(allocations.flatMap((a) => (a.shipmentRequestItem ? [a.shipmentRequestItem.shipmentRequestId] : [])))].sort((a, b) => a - b);
+    for (const id of requestIds) await this.repository.lockShipmentRequest(tx, id);
+    const lots = await this.repository.findProductLots(tx, productLotIds);
+    await this.lockInventoriesFirst(tx, lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])));
+  }
+
+  /** 이 계획들의 확정 열연 배정 슬래브 규격 (수주 취소가 재고 행을 미리 잠글 때) */
+  async hotRollingItemIdsOfPlans(tx: Tx, productionPlanIds: readonly number[]): Promise<number[]> {
+    const itemIds: number[] = [];
+    for (const productionPlanId of productionPlanIds) {
+      const rows = await this.repository.findAllocations(tx, { allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, productionPlanId, allocationStatus: [ALLOCATION_STATUS.CONFIRMED] });
+      itemIds.push(...rows.flatMap((a) => (a.lot.itemId === null ? [] : [a.lot.itemId])));
+    }
+    return [...new Set(itemIds)];
+  }
+
   // ── 내부 ──────────────────────────────────────────────
 
-  private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)) {
-    const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
+  /**
+   * rolling_allocated_qty가 해제·소진할 확정 열연 배정 수보다 작으면 예전에 같은 배정을 두 번 뺀 행이다(#478 전 버그).
+   * 0 아래로 내리지 않고 거래 전체를 되돌린다. 관리자가 재고 정합 보정(REQ-INV-010)을 실행하면 확정 배정 수로 맞춰진다
+   */
+  private async decrementRolling(tx: Tx, itemId: number, qty: number): Promise<void> {
+    if (!(await this.repository.decrementRollingAllocatedQty(tx, itemId, qty))) {
+      throw new AppException('COM-001', '열연 배정 매수 기록이 실제 확정 배정과 어긋나요. 관리자가 재고 정합 보정을 실행한 뒤 다시 해 주세요');
+    }
+  }
+
+  /**
+   * 확정 배정 하나를 해제하고 작업 로그를 남긴다. 읽은 뒤 다른 거래(생산계획 취소 ↔ 불합격 판정 등)가 먼저 해제·소진했으면
+   * 아무것도 하지 않고 false: 부르는 쪽은 true인 것만 세어 열연 배정 매수를 줄인다 (#478 리뷰)
+   */
+  private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)): Promise<boolean> {
+    const released = await this.repository.releaseConfirmedAllocation(tx, allocation.id);
+    if (!released) return false;
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED,
       actor,
@@ -778,6 +850,7 @@ export class InventoryService {
       after: allocationSnapshot(released),
       reason,
     });
+    return true;
   }
 
   /** 출하요청 품목을 찾고 그 출하요청을 잠근다 */

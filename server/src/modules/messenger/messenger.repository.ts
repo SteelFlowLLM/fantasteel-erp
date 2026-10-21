@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CHAT_ROOM_TYPE, MESSAGE_TYPE } from '@fantasteel/shared';
-import { getChatRoomListStats } from '../../generated/prisma/sql';
+import { getChatRoomListStats, lockChatRoomCreation } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 채팅방별 안 읽은 수와 마지막 메시지. 메시지가 없는 방은 last* 가 null이다 */
@@ -258,13 +258,19 @@ export class MessengerRepository {
     return tx.messageReaction.findUnique({ where: { messageId_employeeId_emoji: { messageId, employeeId, emoji } } });
   }
 
+  /** 더블클릭으로 같은 반응이 거의 동시에 두 번 와도 unique 오류(500) 없이 하나만 남긴다 (이슈 #488) */
   createReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
-    return tx.messageReaction.create({ data: { messageId, employeeId, emoji } });
+    return tx.messageReaction.createMany({ data: [{ messageId, employeeId, emoji }], skipDuplicates: true });
   }
 
-  /** 반응 취소는 행을 지운다 (업무 거래가 아니라 표시용) */
+  /** 반응 취소는 행을 지운다 (업무 거래가 아니라 표시용). 이미 지워졌어도 오류 없이 넘어간다 */
   deleteReaction(tx: Tx, id: number) {
-    return tx.messageReaction.delete({ where: { id } });
+    return tx.messageReaction.deleteMany({ where: { id } });
+  }
+
+  /** 같은 1:1 방·업무방 만들기를 tx가 끝날 때까지 한 줄로 세운다 (이슈 #488) */
+  async lockRoomCreation(tx: Tx, key: string): Promise<void> {
+    await tx.$queryRawTyped(lockChatRoomCreation(key));
   }
 
   /** 본문 고치기: 고친 시각을 남긴다 */

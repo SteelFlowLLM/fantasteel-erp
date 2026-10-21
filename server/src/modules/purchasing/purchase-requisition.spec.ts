@@ -188,6 +188,15 @@ describe('구매요청 등록 (REQ-PUR-001, BP-PUR-01)', () => {
     await expect(createAs(purchaser, { productionPlanId: planId })).resolves.toEqual(expect.objectContaining({ purchaseRequisitionStatus: 'WAITING_APPROVAL' }));
   });
 
+  it('같은 계획·원료로 동시에 두 번 요청해도(MRP 더블클릭) 한 건만 만든다 (#478)', async () => {
+    const { planId } = await createPlan();
+    const settled = await Promise.allSettled([createAs(purchaser, { productionPlanId: planId }), createAs(purchaser, { productionPlanId: planId })]);
+    expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+    const rejected = settled.find((s) => s.status === 'rejected');
+    expect(rejected?.status === 'rejected' && rejected.reason instanceof AppException && rejected.reason.code).toBe('COM-004');
+    expect(await prisma.purchaseRequisition.count({ where: { productionPlanId: planId } })).toBe(1);
+  });
+
   it('Message → ERP 초안에서 만들면 초안·메시지를 구매요청과 작업 로그에 연결한다', async () => {
     const draft = await prisma.actionDraft.create({ data: { actionType: 'PURCHASE_REQUISITION_CREATE', payload: {}, requesterId: purchaser.employeeId } });
     const created = await prisma.$transaction((tx) => purchasing.createRequisition(tx, input(), purchaser, { actionDraftId: draft.id, messageId: null }));
