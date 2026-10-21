@@ -50,6 +50,13 @@ function systemPrompt(guide: string, writtenAt: Date): string {
   ].join('\n');
 }
 
+/** 모델이 AI 서버에 불러와 있지 않은 것(Unsloth Studio 등)은 연결 실패가 아니라 모델 문제로 알린다 (#519) */
+function failureStatusOf(error: unknown): ExtractionOutcome['status'] {
+  if (!(error instanceof LlmRequestError)) return 'FAILED';
+  if (error.kind === 'TIMEOUT') return 'TIMEOUT';
+  return error.kind === 'NO_MODEL' ? 'NO_MODEL' : 'FAILED';
+}
+
 @Injectable()
 export class DraftExtractor {
   private readonly logger = new Logger(DraftExtractor.name);
@@ -74,7 +81,7 @@ export class DraftExtractor {
     } catch (error) {
       // 초안 만들기는 LLM 상태와 상관없이 되어야 한다
       this.logger.warn(`AI 추출에 실패해 빈 초안으로 만듭니다: ${error instanceof Error ? error.message : String(error)}`);
-      return { values: null, status: error instanceof LlmRequestError && error.kind === 'TIMEOUT' ? 'TIMEOUT' : 'FAILED' };
+      return { values: null, status: failureStatusOf(error) };
     }
   }
 }

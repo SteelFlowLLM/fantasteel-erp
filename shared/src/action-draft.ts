@@ -3,7 +3,7 @@ import type { ActionType, ChatRoomType, DraftStatus } from './codes';
 
 /**
  * 메시지에서 만들 때 AI 추출이 어떻게 끝났는지 (이슈 #472). 빈 초안이면 화면이 그 이유를 보인다.
- * FILLED 칸을 채움 / NOTHING_FOUND 답은 왔지만 맞는 값이 없음 / NO_MODEL 모델 미설정 / TIMEOUT 제한 시간 초과 / NOT_JSON 답이 JSON이 아님 / FAILED 연결·서버 오류
+ * FILLED 칸을 채움 / NOTHING_FOUND 답은 왔지만 맞는 값이 없음 / NO_MODEL 모델 미설정·AI 서버에 모델이 불러와 있지 않음 / TIMEOUT 제한 시간 초과 / NOT_JSON 답이 JSON이 아님 / FAILED 연결·서버 오류
  */
 export type AiExtractionStatus = 'FILLED' | 'NOTHING_FOUND' | 'NO_MODEL' | 'TIMEOUT' | 'NOT_JSON' | 'FAILED';
 

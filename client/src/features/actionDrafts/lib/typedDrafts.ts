@@ -247,7 +247,7 @@ export function aiExtractionNotice(status: AiExtractionStatus | null | undefined
     case 'TIMEOUT':
       return 'AI가 제한 시간 안에 답하지 않아 빈 초안으로 만들었어요. 메시지를 보면서 값을 입력해 주세요';
     case 'NO_MODEL':
-      return 'AI 모델이 정해지지 않아 빈 초안으로 만들었어요(관리 > AI 연결). 값을 입력해 주세요';
+      return 'AI 모델이 정해지지 않았거나 AI 서버에 불러와 있지 않아 빈 초안으로 만들었어요(관리 > AI 연결). 값을 입력해 주세요';
     case 'FAILED':
       return 'AI 서버에 연결하지 못해 빈 초안으로 만들었어요. 값을 입력해 주세요';
     case 'NOT_JSON':

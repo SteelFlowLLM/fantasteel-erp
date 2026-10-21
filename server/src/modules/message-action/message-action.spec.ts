@@ -6,7 +6,7 @@ import { AuthUserService } from '../../common/auth/auth-user.service';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LlmClient, LlmRequestError, type ChatMessage } from '../llm/llm.client';
+import { LlmClient, LlmModelNotLoadedError, LlmRequestError, type ChatMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { MessageActionService } from './message-action.service';
 
@@ -220,6 +220,12 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     });
     const timedOut = await service.create(purchaser, (await send(purchaser, '철광석 10톤 또')).id);
     expect((await service.get(purchaser, timedOut.id)).payload).toMatchObject({ itemId: null, aiExtraction: 'TIMEOUT' });
+    // AI 서버에 모델이 불러와 있지 않으면 연결 실패가 아니라 모델 문제로 남긴다 (#519)
+    useLlm(async () => {
+      throw new LlmModelNotLoadedError('Unsloth Studio에 불러온 모델이 없어요');
+    });
+    const notLoaded = await service.create(purchaser, (await send(purchaser, '철광석 10톤 한 번 더')).id);
+    expect((await service.get(purchaser, notLoaded.id)).payload).toMatchObject({ itemId: null, aiExtraction: 'NO_MODEL' });
     for (const { id, created } of [failed, notJson]) {
       expect(created).toBe(true);
       expect(await service.get(purchaser, id)).toMatchObject({
